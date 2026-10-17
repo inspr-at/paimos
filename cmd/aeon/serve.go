@@ -57,6 +57,7 @@ import (
 	"github.com/inspr-at/paimos/internal/events"
 	"github.com/inspr-at/paimos/internal/features"
 	"github.com/inspr-at/paimos/internal/fromclassic"
+	"github.com/inspr-at/paimos/internal/goals"
 	"github.com/inspr-at/paimos/internal/greetings"
 	"github.com/inspr-at/paimos/internal/harness"
 	"github.com/inspr-at/paimos/internal/httpapi"
@@ -444,6 +445,8 @@ func serveWithPool(ctx context.Context, cfg config.Config, ln net.Listener, pool
 	if err != nil {
 		return err
 	}
+	goalAPI := goals.New(pool)
+	startWorker(func() { goalAPI.Run(workerCtx) })
 	api := &httpapi.Server{
 		Pool:                    pool,
 		Brand:                   &productBrand,
@@ -511,6 +514,7 @@ func serveWithPool(ctx context.Context, cfg config.Config, ln net.Listener, pool
 			journey.New(pool),
 			requirements.New(pool),
 			releases.New(pool),
+			goalAPI,
 			statusAuto,
 			recurringWork,
 			routineActions,

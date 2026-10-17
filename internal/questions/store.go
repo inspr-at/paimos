@@ -161,6 +161,15 @@ func (m *Module) AskTx(ctx context.Context, tx pgx.Tx, p tenant.Principal, proje
 		if !errors.Is(err, pgx.ErrNoRows) {
 			return err
 		}
+		if in.GoalID != "" {
+			var scope string
+			if err := tx.QueryRow(ctx, `SELECT coalesce(n.project_id::text,'') FROM nodes n JOIN node_kinds k ON k.tenant_id=n.tenant_id AND k.id=n.kind_id WHERE n.id=$1 AND n.deleted_at IS NULL AND k.slug IN ('goal','release')`, in.GoalID).Scan(&scope); err != nil {
+				return err
+			}
+			if err := permit(ctx, tx, p, scope, "nodes.read"); err != nil {
+				return err
+			}
+		}
 		if in.SourceHandoverID != "" {
 			return fail(422, "source_unavailable", "handover questions require the verified handover adapter")
 		}
@@ -224,7 +233,7 @@ func (m *Module) AskTx(ctx context.Context, tx pgx.Tx, p tenant.Principal, proje
 			return err
 		}
 		stamp, why := suggestion(in)
-		if _, err = tx.Exec(ctx, `INSERT INTO desk_questions(tenant_id,project_id,node_id,input,suggested_outcome,suggestion_reason) VALUES($1,$2,$3,$4,$5,$6)`, p.TenantID, project, id, body, stamp, why); err != nil {
+		if _, err = tx.Exec(ctx, `INSERT INTO desk_questions(tenant_id,project_id,node_id,input,suggested_outcome,suggestion_reason) VALUES($1,$2,$3,$4::jsonb-'goal_id',$5,$6)`, p.TenantID, project, id, body, stamp, why); err != nil {
 			return err
 		}
 		_, err = addAsker(ctx, tx, p, project, id, in, hash, body, questionMatch{})
@@ -254,7 +263,7 @@ func (m *Module) read(ctx context.Context, tx pgx.Tx, p tenant.Principal, id str
 }
 func (m *Module) readWithCheck(ctx context.Context, tx pgx.Tx, p tenant.Principal, id string, check authz.ProjectCheck) (Question, error) {
 	q := Question{Askers: []Asker{}, Pending: []Pending{}}
-	err := tx.QueryRow(ctx, `SELECT q.node_id::text,q.project_id::text,q.revision,q.state,q.input,q.suggested_outcome,q.suggestion_reason,q.created_at,q.updated_at
+	err := tx.QueryRow(ctx, `SELECT q.node_id::text,q.project_id::text,q.revision,q.state,CASE WHEN q.input ? 'goal_id' AND NOT EXISTS(SELECT 1 FROM nodes visible_goal WHERE visible_goal.id::text=q.input->>'goal_id' AND visible_goal.deleted_at IS NULL) THEN q.input-'goal_id' ELSE q.input END,q.suggested_outcome,q.suggestion_reason,q.created_at,q.updated_at
  FROM desk_questions q JOIN nodes n ON n.tenant_id=q.tenant_id AND n.id=q.node_id
  JOIN nodes project ON project.tenant_id=q.tenant_id AND project.id=q.project_id
  WHERE q.tenant_id=$1 AND q.node_id=$2 AND n.deleted_at IS NULL AND project.deleted_at IS NULL FOR SHARE OF q`, p.TenantID, id).Scan(&q.ID, &q.ProjectID, &q.Revision, &q.State, &q.Input, &q.SuggestedOutcome, &q.SuggestionReason, &q.CreatedAt, &q.UpdatedAt)
@@ -264,7 +273,7 @@ func (m *Module) readWithCheck(ctx context.Context, tx pgx.Tx, p tenant.Principa
 	if !check("questions.read", q.ProjectID) {
 		return q, missing()
 	}
-	rows, err := tx.Query(ctx, `SELECT id::text,principal_id::text,request_id::text,coalesce(session_id::text,''),reply_root_id::text,comment_node_id::text,created_at,input,coalesce(reused_decision_id::text,''),coalesce(reused_revision,0) FROM desk_askers
+	rows, err := tx.Query(ctx, `SELECT id::text,principal_id::text,request_id::text,coalesce(session_id::text,''),reply_root_id::text,comment_node_id::text,created_at,CASE WHEN input ? 'goal_id' AND NOT EXISTS(SELECT 1 FROM nodes visible_goal WHERE visible_goal.id::text=desk_askers.input->>'goal_id' AND visible_goal.deleted_at IS NULL) THEN input-'goal_id' ELSE input END,coalesce(reused_decision_id::text,''),coalesce(reused_revision,0) FROM desk_askers
  WHERE tenant_id=$1 AND question_id=$2 AND ($3 OR principal_id=$4) ORDER BY created_at,id`, p.TenantID, id, p.Kind == tenant.Person, p.ID)
 	if err != nil {
 		return q, err
@@ -288,6 +297,9 @@ func (m *Module) readWithCheck(ctx context.Context, tx pgx.Tx, p tenant.Principa
 	}
 	if len(q.Askers) == 0 {
 		return q, missing()
+	}
+	if err := filterGoalInputs(ctx, tx, &q, check); err != nil {
+		return q, err
 	}
 	if p.Kind == tenant.Agent {
 		q.Input = q.Askers[0].Input
@@ -648,4 +660,46 @@ func retireDecisions(ctx context.Context, tx pgx.Tx, p tenant.Principal, project
 		return nil, err
 	}
 	return []events.Change{{NodeID: &id, Type: "knowledge.updated", Before: before, After: after, Metadata: json.RawMessage(`{"reason":"Decision Desk supersession"}`)}}, nil
+}
+
+// Goal associations are per ask, but question read authority alone does not
+// grant nodes.read on an associated goal. Filter again on every replay/read.
+func filterGoalInputs(ctx context.Context, tx pgx.Tx, q *Question, check authz.ProjectCheck) error {
+	ids := []string{}
+	if q.Input.GoalID != "" {
+		ids = append(ids, q.Input.GoalID)
+	}
+	for _, a := range q.Askers {
+		if a.Input.GoalID != "" {
+			ids = append(ids, a.Input.GoalID)
+		}
+	}
+	if len(ids) == 0 {
+		return nil
+	}
+	rows, err := tx.Query(ctx, `SELECT id::text,coalesce(project_id::text,'') FROM nodes WHERE id=ANY($1::uuid[]) AND deleted_at IS NULL`, ids)
+	if err != nil {
+		return err
+	}
+	defer rows.Close()
+	allowed := map[string]bool{}
+	for rows.Next() {
+		var id, project string
+		if err := rows.Scan(&id, &project); err != nil {
+			return err
+		}
+		allowed[id] = check("nodes.read", project)
+	}
+	if err := rows.Err(); err != nil {
+		return err
+	}
+	if !allowed[q.Input.GoalID] {
+		q.Input.GoalID = ""
+	}
+	for i := range q.Askers {
+		if !allowed[q.Askers[i].Input.GoalID] {
+			q.Askers[i].Input.GoalID = ""
+		}
+	}
+	return nil
 }

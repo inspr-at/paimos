@@ -5,13 +5,18 @@ package events
 // This allowlist is fail-closed for new event families. Adding a type requires
 // naming the existing resource read permission; event snapshots are never read.
 var subscriptionTopics = map[string]bool{
-	"plan": true, "settings": true, "preferences": true, "policies": true,
+	"goals": true, "plan": true, "settings": true, "preferences": true, "policies": true,
 	"approvals": true, "decisions": true, "delivery": true,
 }
 
 type subscriptionPolicy struct{ topic, permission string }
 
 var subscriptionTypes = map[string]subscriptionPolicy{
+	"goal.created":                      {"goals", "nodes.read"},
+	"goal.updated":                      {"goals", "nodes.read"},
+	"goal.items_changed":                {"goals", "nodes.read"},
+	"goal.eta_changed":                  {"goals", "nodes.read"},
+	"goal.passed_changed":               {"goals", "nodes.read"},
 	"model.preferences_changed":         {"preferences", "models.resolve"},
 	"review_policy.changed":             {"policies", "reviewpolicy.read"},
 	"approval.proposed":                 {"approvals", "approvals.read"},

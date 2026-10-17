@@ -18,7 +18,7 @@ import (
 )
 
 func (rt *runtime) cmdAsk() *Command {
-	var project, ticket, contextFile string
+	var project, ticket, contextFile, goal string
 	var options []string
 	in := questions.Input{Meanwhile: "carries_on"}
 	return &Command{Name: "ask", Short: "Leave a durable question for a person", Use: `ask --project KEY [--ticket KEY] QUESTION --option '["Title","Description","Answer"]'`, minArgs: 1, maxArgs: 1,
@@ -33,6 +33,7 @@ func (rt *runtime) cmdAsk() *Command {
 		addFlags: func(fs *flagSet) {
 			fs.string(&project, "project", 0, "project key or UUID (required)")
 			fs.string(&ticket, "ticket", 0, "optional ticket key or UUID")
+			fs.string(&goal, "goal", 0, "optional goal key or UUID")
 			fs.string(&contextFile, "context-file", 0, "UTF-8 context file (at most 16000 bytes; - reads stdin)")
 			fs.strings(&options, "option", "JSON [title,description,answer] or {id,title,description,answer}; repeat up to 9 times")
 			fs.string(&in.RequestID, "request-id", 0, "stable request UUID for retries (generated and printed if omitted)")
@@ -86,6 +87,17 @@ func (rt *runtime) cmdAsk() *Command {
 			}
 			// Print before the request so even a lost response can be retried exactly.
 			fmt.Fprintln(rt.stderr, "request_id:", in.RequestID)
+			if goal != "" {
+				if validUUID(goal) {
+					in.GoalID = goal
+				} else {
+					var node apiNode
+					if err := rt.do(http.MethodGet, "/api/node-keys/"+url.PathEscape(goal), nil, &node); err != nil {
+						return err
+					}
+					in.GoalID = node.ID
+				}
+			}
 			q, err := rt.sendQuestion(context.Background(), project, ticket, in)
 			if err != nil {
 				return err

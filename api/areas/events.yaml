@@ -75,7 +75,7 @@ paths:
       parameters:
         - {name: Last-Event-ID, in: header, description: 'Exclusive resume cursor; takes precedence over after.', schema: {type: string, pattern: '^[0-9]{1,19}$', maxLength: 19}}
         - {name: after, in: query, description: 'latest or an exclusive numeric resume cursor. No automatic backlog skip.', schema: {type: string, default: latest, pattern: '^(latest|[0-9]{1,19})$', maxLength: 19}}
-        - {name: topics, in: query, description: 'Comma-separated distinct topics; omitted means all. Unknown or repeated topics are rejected.', schema: {type: string, maxLength: 128, example: 'plan,policies,delivery'}}
+        - {name: topics, in: query, description: 'Comma-separated distinct topics, including goals; omitted means all. Unknown or repeated topics are rejected.', schema: {type: string, maxLength: 128, example: 'plan,policies,delivery'}}
       responses:
         '200':
           description: 'SSE change hints and cursor checkpoints. Topics are plan, settings, preferences, policies, approvals, decisions and delivery.'

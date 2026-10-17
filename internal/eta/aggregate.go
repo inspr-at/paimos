@@ -9,8 +9,16 @@ package eta
 // on archived/cancelled roots whose facts must not contribute to parent totals.
 // Published SQL functions remain available to older binaries.
 func AggregateSQL(roots string) string {
-	return `WITH scope AS MATERIALIZED (SELECT * FROM aeon_work_scope(` + roots + `)),
- leaf_nodes AS MATERIALIZED (
+	return `WITH scope AS MATERIALIZED (SELECT * FROM aeon_work_scope(` + roots + `)), ` + aggregateFactsSQL
+}
+
+// AggregateScopeSQL reuses an already materialized invoker scope. The scope
+// expression is trusted source text, never request input.
+func AggregateScopeSQL(scope string) string {
+	return `WITH scope AS MATERIALIZED (SELECT * FROM ` + scope + `), ` + aggregateFactsSQL
+}
+
+const aggregateFactsSQL = `leaf_nodes AS MATERIALIZED (
   SELECT DISTINCT id,fields,bucket,project_id FROM scope
   WHERE is_leaf AND (bucket NOT IN ('archived','cancelled') OR root=id)
  ), eta_interval AS MATERIALIZED (SELECT aeon_eta_interval() AS duration),
@@ -102,4 +110,3 @@ func AggregateSQL(roots string) string {
  LEFT JOIN ranked l ON l.root=t.root AND l.lr=1
  LEFT JOIN leaf own_leaf ON own_leaf.id=t.root
  LEFT JOIN leaf_facts d ON d.id=t.root`
-}
