@@ -72,6 +72,7 @@ const emit = defineEmits<{
   collapseAll: []
   expandGroups: []
   collapseGroups: []
+  groupOrder: [desc: boolean]
   columns: [order: ColumnId[], visible: ColumnId[]]
   columnsReset: []
   attentionFilter: [field: keyof AttentionFilters, value: string]
@@ -376,7 +377,7 @@ defineExpose({ focusSearch, openFilterMenu, openDisplay, input, closeOverlays })
           @group="value => emit('group', value)" @sort="keys => emit('sort', keys)" @density="value => emit('density', value)"
           @columns="(order, visible) => emit('columns', order, visible)" @columns-reset="emit('columnsReset')"
           @expand-all="emit('expandAll'); closeDisplay(detachedDisplay)" @collapse-all="emit('collapseAll'); closeDisplay(detachedDisplay)"
-          @expand-groups="emit('expandGroups')" @collapse-groups="emit('collapseGroups')"
+          @expand-groups="emit('expandGroups')" @collapse-groups="emit('collapseGroups')" @group-order="desc => emit('groupOrder', desc)"
         />
         <HeaderRoomyChoice v-else />
       </DisplayMenu>

@@ -97,6 +97,8 @@ it('a phone selection hold suppresses only its own row and pointer click', () =>
       // AEON-1358 column header figures: no figure tip open in this harness.
       '../../lib/figureTip': { figureTip: { anchor: null, owner: '' }, cancelFigureTip() {}, closeFigureTip() {}, focusOpensTip: () => false, hoverFigureTip() {}, openFigureTip() {} },
       '../../lib/workFigures': { figureColumn: () => null },
+      // AEON-1388 group summaries: this list is not grouped.
+      '../../lib/groupFigures': { GROUP_COLUMN: {} },
       // The Model popup's names follow the person's model display choice.
       '../../lib/prefs': { useModelDisplay: () => ({ modelDisplay: { value: {} } }) },
     })

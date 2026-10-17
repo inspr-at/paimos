@@ -145,6 +145,7 @@ it('saved views reject a save response after the person changes', async () => {
   const { state, data } = fixture(), pending = Promise.withResolvers<unknown>(), toast = vi.fn()
   const create = owner('useProjectViews', { viewsOf: () => ({ items: [], loaded: true }), PINNED: [],
     useViewFigures: () => ({ figures: ref(null), whole: ref(null), busy: ref(false), failed: ref(false), narrowed: ref(false), retry: vi.fn() }),
+    useGroupFigures: () => ({ groupFigures: ref(new Map()) }),
     saveViewState: () => pending.promise, hasFilters, scopeOwner: () => '', toast,
   })
   const columns = { listPrefs: ref({}), listPref: ref(null), toolbarColumns: ref({ order: [], visible: [] }) }
@@ -282,6 +283,7 @@ function opening() {
   const create = owner('useProjectViews', {
     viewsOf: () => ({ items: [], loaded: true }), PINNED: [], bareProjectEntry, loadViews, apiParams: () => ({}),
     useViewFigures: () => ({ figures: ref(null), whole: ref(null), busy: ref(false), failed: ref(false), narrowed: ref(false), retry: vi.fn() }),
+    useGroupFigures: () => ({ groupFigures: ref(new Map()) }),
     hasFilters, scopeOwner: () => '', toast: vi.fn(),
   })
   const columns = { listPrefs: ref({}), listPref: ref(null), toolbarColumns: ref({ order: [], visible: [] }) }
