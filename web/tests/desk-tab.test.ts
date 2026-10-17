@@ -78,11 +78,23 @@ test('a rise in a visible tab pops the dot once in six frames, then stops', () =
   assert.equal(clock.pending(), 0, 'nothing loops')
 })
 
+test('the background notice is the words New decision and carries no icon glyph', () => {
+  // AEON-1473 decision 3 names "● New decision". A tab title cannot hold an SVG,
+  // and the glyph guard rejects the bullet, so the notice is the words alone.
+  // This fails on 4db142c9, where NEW_DECISION still begins with the bullet.
+  assert.equal(NEW_DECISION, 'New decision')
+  assert.equal([...NEW_DECISION].every(ch => (ch.codePointAt(0) ?? 0) < 128), true)
+  const { state, read } = harness({ hidden: true })
+  read(1)
+  read(2)
+  assert.equal(state.notice, 'New decision')
+})
+
 test('a rise in a background tab says New decision for two seconds, then settles on the count', () => {
   const { state, read, clock } = harness({ hidden: true })
   read(1); state.paints.length = 0
   read(2)
-  assert.equal(state.notice, NEW_DECISION)
+  assert.equal(state.notice, 'New decision')
   assert.deepEqual(state.paints, [[2, 1]], 'the dot changes once, without frames')
   clock.advance(NOTICE_MS - 1)
   assert.equal(state.notice, NEW_DECISION)

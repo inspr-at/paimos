@@ -27,8 +27,10 @@ Nothing loops or blinks. When the count rises:
 
 - In the visible tab, the dot pops once: it grows to 1.2 times its size and back
   in six frames, about 600 ms.
-- In a background tab the title reads **● New decision** for two seconds, then
-  settles on the count. Bringing the tab forward settles it at once.
+- In a background tab the title reads **New decision** for two seconds, then
+  settles on the count. Bringing the tab forward settles it at once. Tick's
+  decision 3 wrote a leading bullet; a tab title cannot hold an SVG icon, and
+  the glyph guard rejects that bullet, so the notice is the words alone.
 
 A first count, a falling count or the same count read again moves nothing. With
 reduced motion only the number changes: no pop and no notice. The tab never

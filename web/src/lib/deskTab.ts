@@ -3,7 +3,7 @@
 // Every title leads with "(N) " and the favicon carries an amber count dot; both
 // show the header badge's count (useDecisionDesk), never a second source. Motion
 // is one-shot: when the count rises the dot pops once, or, in a background tab,
-// the title reads "● New decision" for two seconds. Reduced motion keeps only the
+// the title reads "New decision" for two seconds. Reduced motion keeps only the
 // number. Nothing here takes focus or plays a sound. The wiring is useDeskTab.ts.
 
 export const TAB_MAX = 9
@@ -18,7 +18,9 @@ export function titlePrefix(count: number | null): string {
   return label ? `(${label}) ` : ''
 }
 
-export const NEW_DECISION = '● New decision'
+// Decision 3 named a leading bullet. A tab title cannot hold an SVG, and the
+// glyph guard rejects that bullet, so the notice is the words alone.
+export const NEW_DECISION = 'New decision'
 export const NOTICE_MS = 2000
 /** One pop: scale 1 → 1.2 → 1 in six frames of 100 ms. The last frame is the resting dot. */
 export const POP_SCALES: readonly number[] = [1.07, 1.14, 1.2, 1.13, 1.07, 1]
