@@ -1273,12 +1273,11 @@ func listFilterSQL(q listQuery, sortFields bool) (string, []any) {
 	kindJoin := ` JOIN node_kinds k ON k.id=n.kind_id AND k.tenant_id=n.tenant_id `
 	kindCTE := ""
 	scopeRoot := `coalesce($7::uuid, CASE WHEN $8::bool AND $10::bool THEN $9::uuid ELSE NULL::uuid END)`
-	scopeSeed := ""
 	if q.Within != nil || (q.ParentSet && q.Descendants) {
 		if q.Within != nil {
-			scopeSeed = ` AND id=$7::uuid`
+			scopeRoot = `$7::uuid`
 		} else {
-			scopeSeed = ` AND id=$9::uuid`
+			scopeRoot = `$9::uuid`
 		}
 		// Drive scoped lists from the tree. A membership subquery can rescan
 		// every scope ID for every candidate when the bulk-import statistics
@@ -1327,18 +1326,21 @@ func listFilterSQL(q listQuery, sortFields bool) (string, []any) {
 	// estimate that every node has the same parent. Only the last row of a full
 	// page continues its siblings; every scoped node also starts its own children.
 	// The root has no paging parent, so siblings outside the scope stay excluded.
-	return `WITH RECURSIVE scope(id,parent_id,position,next_page) AS (
-        SELECT id,NULL::uuid,0::numeric,false FROM nodes WHERE tenant_id=current_setting('aeon.tenant_id')::uuid AND deleted_at IS NULL AND id=` + scopeRoot + scopeSeed + `
+	return `WITH RECURSIVE scope(id,parent_id,next_page) AS (
+        SELECT n.id,NULL::uuid,false FROM unnest(ARRAY[` + scopeRoot + `]) seed(id) CROSS JOIN LATERAL (
+            SELECT id FROM nodes WHERE tenant_id=current_setting('aeon.tenant_id')::uuid
+                AND id=seed.id AND deleted_at IS NULL OFFSET 0
+        ) n
         UNION ALL SELECT c.* FROM scope s CROSS JOIN LATERAL (
-            (SELECT c.*,row_number() OVER (ORDER BY position,id)=128 FROM (
-                SELECT id,parent_id,position FROM nodes WHERE tenant_id=current_setting('aeon.tenant_id')::uuid
-                    AND parent_id=s.id AND deleted_at IS NULL ORDER BY position,id LIMIT 128
+            (SELECT c.*,row_number() OVER (ORDER BY id)=128 FROM (
+                SELECT id,parent_id FROM nodes WHERE tenant_id=current_setting('aeon.tenant_id')::uuid
+                    AND parent_id=s.id AND deleted_at IS NULL ORDER BY id LIMIT 128
             ) c)
             UNION ALL
-            (SELECT c.*,row_number() OVER (ORDER BY position,id)=128 FROM (
-                SELECT id,parent_id,position FROM nodes WHERE tenant_id=current_setting('aeon.tenant_id')::uuid
+            (SELECT c.*,row_number() OVER (ORDER BY id)=128 FROM (
+                SELECT id,parent_id FROM nodes WHERE tenant_id=current_setting('aeon.tenant_id')::uuid
                     AND s.next_page AND parent_id=s.parent_id AND deleted_at IS NULL
-                    AND (position,id)>(s.position,s.id) ORDER BY position,id LIMIT 128
+                    AND id>s.id ORDER BY id LIMIT 128
             ) c)
         ) c
     )` + kindCTE + epicCTE + configuredCTE + `, filtered AS MATERIALIZED (

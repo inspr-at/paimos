@@ -89,6 +89,9 @@ $$;
 -- Direct node snapshots also use plain identity/time index conditions.
 CREATE INDEX events_goal_node_at_idx ON events(tenant_id,node_id,at,id)
     WHERE node_id IS NOT NULL;
+-- UUID keysets remain indexable through RLS; numeric position comparisons in
+-- row keysets are not leakproof and would rescan earlier siblings per page.
+CREATE INDEX nodes_goal_scope_children_idx ON nodes(tenant_id,parent_id,id) WHERE deleted_at IS NULL;
 
 -- A reference probe either returns its complete bounded candidate set or
 -- raises the history budget error. Never truncate before inspecting snapshots.
@@ -275,22 +278,23 @@ BEGIN
  -- LIMIT consumes at most budget+1 recursive pairs, before facts/session reads
  -- or the overlapping-root cross product can materialize unbounded work.
  -- UNION still detects cycles; there is no arbitrary depth cutoff.
- WITH RECURSIVE walk(root,id,parent_id,position,next_page) AS (
-  SELECT n.id,n.id,NULL::uuid,0::numeric,false FROM nodes n
-  WHERE n.tenant_id=current_setting('aeon.tenant_id')::uuid
-   AND n.id=ANY(roots) AND n.deleted_at IS NULL
+ WITH RECURSIVE walk(root,id,parent_id,next_page) AS (
+  SELECT n.id,n.id,NULL::uuid,false FROM (SELECT DISTINCT r.id FROM unnest(roots) r(id)) seed
+  CROSS JOIN LATERAL (SELECT n.id FROM nodes n
+   WHERE n.tenant_id=current_setting('aeon.tenant_id')::uuid
+    AND n.id=seed.id AND n.deleted_at IS NULL OFFSET 0) n
   UNION
   SELECT w.root,c.* FROM walk w CROSS JOIN LATERAL (
-   (SELECT c.*,row_number() OVER (ORDER BY c.position,c.id)=128 FROM (
-    SELECT n.id,n.parent_id,n.position FROM nodes n WHERE n.tenant_id=current_setting('aeon.tenant_id')::uuid
+   (SELECT c.*,row_number() OVER (ORDER BY c.id)=128 FROM (
+    SELECT n.id,n.parent_id FROM nodes n WHERE n.tenant_id=current_setting('aeon.tenant_id')::uuid
      AND n.parent_id=w.id AND n.deleted_at IS NULL AND n.id<>w.root
-     ORDER BY n.position,n.id LIMIT 128
+     ORDER BY n.id LIMIT 128
    ) c)
    UNION ALL
-   (SELECT c.*,row_number() OVER (ORDER BY c.position,c.id)=128 FROM (
-    SELECT n.id,n.parent_id,n.position FROM nodes n WHERE n.tenant_id=current_setting('aeon.tenant_id')::uuid
+   (SELECT c.*,row_number() OVER (ORDER BY c.id)=128 FROM (
+    SELECT n.id,n.parent_id FROM nodes n WHERE n.tenant_id=current_setting('aeon.tenant_id')::uuid
      AND w.next_page AND n.parent_id=w.parent_id AND n.deleted_at IS NULL AND n.id<>w.root
-     AND (n.position,n.id)>(w.position,w.id) ORDER BY n.position,n.id LIMIT 128
+     AND n.id>w.id ORDER BY n.id LIMIT 128
    ) c)
   ) c
  ), bounded AS MATERIALIZED (SELECT w.root,w.id FROM walk w LIMIT 50001)

@@ -211,7 +211,7 @@ func TestScopedReadsIgnoreLargeSiblingTree(t *testing.T) {
 		if !ok {
 			return fmt.Errorf("installed traversal budget boundary missing")
 		}
-		traversal = "WITH RECURSIVE" + strings.ReplaceAll(traversal, "ANY(roots)", "ANY($1::uuid[])") + "SELECT count(*) FROM bounded"
+		traversal = "WITH RECURSIVE" + strings.NewReplacer("ANY(roots)", "ANY($1::uuid[])", "unnest(roots)", "unnest($1::uuid[])").Replace(traversal) + "SELECT count(*) FROM bounded"
 		for _, query := range []struct {
 			name, sql string
 			args      []any
