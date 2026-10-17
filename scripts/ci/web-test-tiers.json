@@ -12390,6 +12390,14 @@
     ,
     {"kind":"browser","file":"tests/release-header.spec.ts","name":"an outdated page says so in the status line, under the codename the server runs","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
     ,
+    {"kind":"browser","file":"tests/release-header.spec.ts","name":"at 1181px Close and Help stay in the first header row; the switches, search and Compare share one row","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    ,
+    {"kind":"browser","file":"tests/release-header.spec.ts","name":"at 1280px Close and Help stay in the first header row; the switches, search and Compare share one row","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    ,
+    {"kind":"browser","file":"tests/release-header.spec.ts","name":"at 1321px Close and Help stay in the first header row; the switches, search and Compare share one row","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    ,
+    {"kind":"browser","file":"tests/release-header.spec.ts","name":"at 1440px Close and Help stay in the first header row; the switches, search and Compare share one row","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    ,
     {"kind":"browser","file":"tests/release-header.spec.ts","name":"at 761×360 the stacked cards scroll and release rows stay reachable","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
     ,
     {"kind":"browser","file":"tests/release-header.spec.ts","name":"at 800×360 the stacked cards scroll and release rows stay reachable","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}

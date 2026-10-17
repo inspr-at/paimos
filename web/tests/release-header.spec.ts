@@ -4,7 +4,7 @@
 // focus pauses it, an arrow stops it for good, a button pauses and resumes it,
 // reduced motion never starts it); the cadence chart steps through ranges it
 // remembers, and its bars are one keyboard stop.
-import { expect, test, type Page } from '@playwright/test'
+import { expect, test, type Locator, type Page } from '@playwright/test'
 import { fixtures, mockWork } from './work-fixtures'
 import { mockReleases, releaseHistory } from './releases-fixtures'
 import { expectStableControls } from './helpers/stable'
@@ -133,6 +133,10 @@ for (const width of [761, 800, 900]) {
     await open(page, { viewport: { width, height: 360 } })
     await expect(sheet(page).locator('.head .stats')).toHaveCount(0)
     await expect(sheet(page).locator('.list-pane .stats')).toHaveCount(1)
+    // The search shares the switches' row (AEON-1453: their pin slots made it wrap onto its own at 761).
+    const switches = await sheet(page).locator('.switches').boundingBox()
+    const search = await sheet(page).locator('.search').boundingBox()
+    expect(Math.abs(search!.y - switches!.y)).toBeLessThanOrEqual(1)
     const pane = sheet(page).locator('.list-pane')
     const bounds = await pane.boundingBox()
     expect(bounds!.height).toBeGreaterThan(80)
@@ -141,6 +145,21 @@ for (const width of [761, 800, 900]) {
     await expect(row).toBeInViewport()
     const statBounds = await card(page).boundingBox()
     expect(statBounds!.y + statBounds!.height).toBeLessThanOrEqual(bounds!.y)
+  })
+}
+
+// AEON-1453: the switches' reserved pin slots widened the toolbar, so between 1181 and about 1300 px
+// Help and Close wrapped alone onto a second row. Two rows hold until one fits.
+for (const width of [1181, 1280, 1321, 1440]) {
+  test(`at ${width}px Close and Help stay in the first header row; the switches, search and Compare share one row`, async ({ page }) => {
+    await open(page, { viewport: { width, height: 900 } })
+    const top = async (locator: Locator) => (await locator.boundingBox())!.y
+    const first = await top(sheet(page).locator('.title-row'))
+    expect(await top(sheet(page).getByRole('button', { name: 'Close release history' }))).toBeLessThanOrEqual(first + 1)
+    expect(await top(sheet(page).getByRole('button', { name: 'Keyboard shortcuts' }))).toBeLessThanOrEqual(first + 1)
+    const switches = await top(sheet(page).locator('.switches'))
+    expect(Math.abs(await top(sheet(page).locator('.search')) - switches)).toBeLessThanOrEqual(1)
+    expect(Math.abs(await top(sheet(page).getByRole('button', { name: 'Compare', exact: true })) - switches)).toBeLessThanOrEqual(1)
   })
 }
 
