@@ -14,7 +14,7 @@
 import { shallowRef } from 'vue'
 import { releaseChordOpen, SEQUENCE_MS } from './places'
 
-export type ShortcutScope = 'app' | 'app without list search' | 'agents page' | 'agents page, when a split fits' | 'session list' | 'a lead row' | 'a session row' | 'the divider, when focused' | 'project settings'
+export type ShortcutScope = 'app' | 'app without list search' | 'agents page' | 'agents page, when a split fits' | 'session list' | 'a lead row' | 'a session row' | 'the divider, when focused' | 'project settings' | 'goals view'
 export interface ShortcutEntry { id: string; keys: readonly string[]; scope: ShortcutScope; label: string; labelParts?: readonly string[]; when?: string }
 // Approved transition labels draw an SVG arrow between parts. Plain-text
 // consumers retain the same named states, with the direction spoken as "to".
@@ -51,6 +51,16 @@ export const SHORTCUT_ENTRIES = [
   { id: 'agents.groups.toggle_all', keys: [], scope: 'session list', label: 'Collapse all / Expand all' },
   { id: 'project.settings.submit', keys: ['Mod+Enter'], scope: 'project settings', label: 'Save the field or confirm the open project action' },
   { id: 'project.settings.dismiss', keys: ['Escape'], scope: 'project settings', label: 'Leave the field, then close the project overlay' },
+  // Projects › Goals (AEON-1457): the state chips, Hide done, Expand all, and moving through goals and items.
+  { id: 'goals.state.all', keys: ['1'], scope: 'goals view', label: 'Show all items' },
+  { id: 'goals.state.moving', keys: ['2'], scope: 'goals view', label: 'Show moving items' },
+  { id: 'goals.state.queued', keys: ['3'], scope: 'goals view', label: 'Show queued items' },
+  { id: 'goals.state.paused', keys: ['4'], scope: 'goals view', label: 'Show paused items' },
+  { id: 'goals.state.done', keys: ['5'], scope: 'goals view', label: 'Show done items' },
+  { id: 'goals.hide_done', keys: ['h'], scope: 'goals view', label: 'Hide done goals / show them' },
+  { id: 'goals.toggle_all', keys: ['e'], scope: 'goals view', label: 'Expand all / Collapse all' },
+  { id: 'goals.next', keys: ['j', 'ArrowDown'], scope: 'goals view', label: 'Next / previous goal or item' },
+  { id: 'goals.prev', keys: ['k', 'ArrowUp'], scope: 'goals view', label: 'Next / previous goal or item' },
 ] as const satisfies readonly ShortcutEntry[]
 export type ShortcutAction = typeof SHORTCUT_ENTRIES[number]['id']
 type Handler = (event: KeyboardEvent) => void | false
@@ -77,6 +87,7 @@ function matches(binding: string, event: KeyboardEvent): boolean {
 function scopesOverlap(a: ShortcutScope, b: ShortcutScope): boolean {
   if (a === b || a === 'app' || b === 'app') return true
   if (a === 'project settings' || b === 'project settings') return false
+  if (a === 'goals view' || b === 'goals view') return false
   if (a === 'app without list search' || b === 'app without list search') return false
   if (a.startsWith('agents page') || b.startsWith('agents page')) return true
   if (a === 'the divider, when focused' || b === 'the divider, when focused') return false
