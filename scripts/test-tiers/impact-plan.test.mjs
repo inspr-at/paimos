@@ -327,7 +327,8 @@ test('AEON-1333 workflow publishes shadow evidence from immutable base with Acti
   assert.match(tier, /git archive "\$PR_BASE_SHA"/); assert.match(tier, /AEON_IMPACT_CHECKOUT="\$GITHUB_WORKSPACE" node "\$snapshot\/scripts\/test-tiers\/impact-plan.mjs"/)
   assert.match(tier, /name: impact-ci-shadow-plan/); assert.match(tier, /if-no-files-found: error/)
   assert.equal((workflow.match(/impact-plan\.json/g) ?? []).length, 2, 'only producer/fallback and upload reference the plan')
-  assert.ok(!workflow.includes('outputs.browser_scope'))
+  assert.ok(!workflow.includes('steps.shadow.outputs'), 'S4 execution outputs belong to the trusted tier planner, never the S1 shadow artifact')
+  assert.match(tier, /browser_scope: \$\{\{ steps.tiers.outputs.browser_scope \}\}/)
   const nightly = readFileSync(new URL('../../.github/workflows/nightly-full.yml', import.meta.url), 'utf8')
   assert.match(nightly, /CI_IMPACT: \$\{\{ vars.CI_IMPACT \}\}/); assert.match(nightly, /run web --all --shard/)
   assert.deepEqual(plan({ execution: { mode: 'essential', layout: 'full', lane: 'full' } }).execution, { mode: 'essential', layout: 'full', lane: 'full' })
@@ -406,6 +407,7 @@ test('AEON-1333 depth-1 merge checkout publishes complete would-have-skipped evi
   git(full, ['config', 'user.name', 'Fixture']); git(full, ['config', 'user.email', 'fixture@example.invalid'])
   git(full, ['config', 'uploadpack.allowReachableSHA1InWant', 'true'])
   for (const file of ['scripts/test-tiers/impact-plan.mjs', 'scripts/test-tiers/browser-impact.mjs', 'scripts/test-tiers/inputs.mjs',
+    'scripts/test-tiers/browser-areas.mjs', 'scripts/test-tiers/browser-plan.mjs', 'scripts/test-tiers/browser-ownership.mjs',
     'scripts/test-tiers/core.mjs', 'scripts/test-tiers/drift-obligations.json', 'scripts/test-tiers/migration.mjs', 'scripts/playwright-safe.mjs', 'scripts/playwright-global-setup.mjs',
     'scripts/playwright-lock.mjs', 'scripts/playwright-processes.mjs', 'scripts/ci-pr-plan.mjs', 'web/scripts/ci-web-shard.mjs', 'web/scripts/ci-web-shard-source.mjs'])
     write(file, readFileSync(resolve(repository, file)))
