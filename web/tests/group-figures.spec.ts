@@ -178,6 +178,7 @@ test('AEON-1388 sorting by key stays reachable: KEY at rest shows its arrow, and
   await expect(keyHead(page).locator('.key-rest .sort-mark svg')).toHaveCount(1)
   expect(await visibility(keyHead(page).locator('.key-rest'))).toBe('visible')
   // … and on hover the slot control continues the same cycle: descending, then off.
+  await keyHead(page).hover()
   await keyHead(page).locator('.key-icon').click()
   await expect(head(page, 'key')).toHaveAttribute('aria-sort', 'descending')
   await expect(keyHead(page).locator('.key-icon')).toHaveClass(/on/)
@@ -197,6 +198,7 @@ test('AEON-1388 an ungrouped list keeps the checkbox above the row checkboxes an
   expect(await visibility(keyHead(page).locator('.key-icon'))).toBe('visible')
   same(rest, await boxes({ check: keyHead(page).locator('.key-check'), sort: keyHead(page).locator('.key-icon') }))
   await keyHead(page).locator('.key-icon').click()
+  await page.mouse.move(700, 600)
   await expect(head(page, 'key')).toHaveAttribute('aria-sort', 'ascending')
 })
 

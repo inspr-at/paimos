@@ -953,7 +953,7 @@ defineExpose({
                 <template v-if="groupFacts.get(entry.group.key)">
                   <!-- Stale after the name (AEON-1388 §1); a phone has one muted line of at most three facts instead (§2). -->
                   <span v-if="!phone && groupFacts.get(entry.group.key)!.stale" class="group-stale mono" data-tip="In progress, but nobody is working on it">· {{ groupFacts.get(entry.group.key)!.stale }} <span class="attn">stale</span></span>
-                  <span v-if="phone && groupFacts.get(entry.group.key)!.phone.length" class="group-facts mono"><template v-for="[value, word] in groupFacts.get(entry.group.key)!.phone" :key="word || value"> · {{ value }}<template v-if="word"> <span :class="{ attn: word === 'stale' }">{{ word }}</span></template></template></span>
+                  <span v-if="phone && groupFacts.get(entry.group.key)!.phone.length" class="group-facts mono"><template v-for="[value, word] in groupFacts.get(entry.group.key)!.phone" :key="word || value">{{ ` · ${value}${word ? ' ' : ''}` }}<span v-if="word" :class="{ attn: word === 'stale' }">{{ word }}</span></template></span>
                 </template>
                 <span class="group-spacer" />
                 <span v-if="$slots['group-end']" class="group-end"><slot name="group-end" :group="entry.group" /></span>
@@ -1278,7 +1278,7 @@ thead th {
   -webkit-backdrop-filter: blur(14px) saturate(1.15); backdrop-filter: blur(14px) saturate(1.15);
 }
 thead th:first-child { padding-left: 18px; }
-.th-sort, .th-label { display: inline-flex; align-items: center; gap: 6px; height: 26px; margin: 0 -6px; padding: 0 6px; border: 0; border-radius: 6px; background: transparent; font: 500 10.5px/1 var(--mono); letter-spacing: .14em; text-transform: uppercase; color: var(--ink-3); font-variant-ligatures: none; }
+.th-sort, .th-label { display: inline-flex; align-items: center; gap: 6px; height: 26px; margin: 0 -6px; vertical-align: middle; padding: 0 6px; border: 0; border-radius: 6px; background: transparent; font: 500 10.5px/1 var(--mono); letter-spacing: .14em; text-transform: uppercase; color: var(--ink-3); font-variant-ligatures: none; }
 .th-sort:hover { color: var(--ink); background: var(--row-hover); }
 .th-sort:active { background: var(--row-selected); }
 .th-sort.on { color: var(--teal-ink); }
