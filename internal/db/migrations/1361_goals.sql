@@ -93,6 +93,39 @@ CREATE INDEX events_goal_node_at_idx ON events(tenant_id,node_id,at,id)
 -- row keysets are not leakproof and would rescan earlier siblings per page.
 CREATE INDEX nodes_goal_scope_children_idx ON nodes(tenant_id,parent_id,id) WHERE deleted_at IS NULL;
 
+-- Historical discovery also needs current edges. Use the same UUID child
+-- ranges as the live scope so unrelated sibling trees cannot be rescanned.
+-- Deleted edges come from recorded before/after snapshots in the next helper.
+CREATE FUNCTION aeon_goal_current_children(p_parent uuid) RETURNS TABLE(id uuid)
+LANGUAGE plpgsql STABLE AS $$
+DECLARE
+    page_ids uuid[];
+    last_id uuid;
+    total integer := 0;
+BEGIN
+    SELECT array_agg(c.id ORDER BY c.id) INTO page_ids FROM (
+        SELECT n.id FROM nodes n WHERE n.tenant_id=current_setting('aeon.tenant_id')::uuid
+            AND n.parent_id=p_parent AND n.deleted_at IS NULL
+            AND (n.parent_id,n.id)>=(p_parent,'00000000-0000-0000-0000-000000000000'::uuid)
+            ORDER BY n.id LIMIT 128
+    ) c;
+    WHILE coalesce(cardinality(page_ids),0)>0 LOOP
+        total := total+cardinality(page_ids);
+        IF total>50000 THEN
+            RAISE EXCEPTION 'series child scope budget exceeded' USING ERRCODE='54000';
+        END IF;
+        RETURN QUERY SELECT unnest(page_ids);
+        EXIT WHEN cardinality(page_ids)<128;
+        last_id := page_ids[cardinality(page_ids)];
+        SELECT array_agg(c.id ORDER BY c.id) INTO page_ids FROM (
+            SELECT n.id FROM nodes n WHERE n.tenant_id=current_setting('aeon.tenant_id')::uuid
+                AND n.parent_id=p_parent AND n.deleted_at IS NULL
+                AND (n.parent_id,n.id)>(p_parent,last_id) ORDER BY n.id LIMIT 128
+        ) c;
+    END LOOP;
+END;
+$$;
+
 -- A reference probe either returns its complete bounded candidate set or
 -- raises the history budget error. Never truncate before inspecting snapshots.
 CREATE FUNCTION aeon_goal_history_refs(p_node uuid,p_type text,p_from timestamptz,p_until timestamptz)

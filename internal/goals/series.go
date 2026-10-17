@@ -316,7 +316,7 @@ func loadReconstruction(ctx context.Context, tx pgx.Tx, goal string, now time.Ti
 		// bounded candidate graph. Current state, estimates and outcome membership
 		// are never sampled. Event snapshots choose the actual tree at each instant.
 		rows, err = tx.Query(ctx, `WITH RECURSIVE walk(root,id) AS (SELECT n.id,n.id FROM nodes n WHERE n.id=ANY($1::uuid[]) UNION SELECT w.root,e.id FROM walk w CROSS JOIN LATERAL (
- (SELECT n.id FROM nodes n WHERE n.tenant_id=current_setting('aeon.tenant_id')::uuid AND n.parent_id=w.id OFFSET 0)
+ SELECT n.id FROM aeon_goal_current_children(w.id) n
  UNION SELECT h.id FROM aeon_goal_history_children(w.id,$3,$2) h
  ) e),
  bounded AS MATERIALIZED (SELECT root,id FROM walk LIMIT 50001)

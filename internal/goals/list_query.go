@@ -86,7 +86,7 @@ func listPageQuery() string {
  SELECT n.id,n.id FROM nodes n WHERE n.id IN (SELECT root FROM history_roots)
  AND (SELECT count(DISTINCT root) FROM history_roots)<=4096
  UNION SELECT w.root,e.id FROM walk w CROSS JOIN LATERAL (
- (SELECT n.id FROM nodes n WHERE n.tenant_id=current_setting('aeon.tenant_id')::uuid AND n.parent_id=w.id OFFSET 0)
+ SELECT n.id FROM aeon_goal_current_children(w.id) n
  UNION SELECT h.id FROM aeon_goal_history_children(w.id,$5,$2) h
  ) e
  ), history_scope AS MATERIALIZED (SELECT root,id FROM walk LIMIT 50001),

@@ -6456,6 +6456,8 @@
     ,
     {"kind":"go","package":"internal/goals","name":"TestGoalClockBoundariesAndWatermarks","tier":"ESSENTIAL"}
     ,
+    {"kind":"go","package":"internal/goals","name":"TestGoalEventReferenceUpgradePreservesHistory","tier":"ESSENTIAL"}
+    ,
     {"kind":"go","package":"internal/goals","name":"TestGoalFilteredReadCoverageETAAndWorkerState","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/goals","name":"TestGoalHandedOverReadAndConflict","tier":"ESSENTIAL"}

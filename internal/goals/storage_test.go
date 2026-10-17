@@ -228,6 +228,106 @@ func TestGoalStorageVisibility(t *testing.T) {
 	}
 }
 
+// Risk: an upgrade misses older event references under FORCE RLS, changes
+// authoritative snapshots, crosses tenants, or fails to index previous writers.
+func TestGoalEventReferenceUpgradePreservesHistory(t *testing.T) {
+	d, err := dbtest.NewUnmigrated(t.Context())
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		if err := d.Close(); err != nil {
+			t.Error(err)
+		}
+	})
+	type oldHistory struct {
+		p               tenant.Principal
+		project, ticket string
+		event           int64
+		snapshot        string
+	}
+	fixtures := []oldHistory{}
+	seed := dbtest.Seed(t.Context())
+	// The production migrator has neither a principal nor service visibility.
+	err = db.MigrateWithHook(t.Context(), d.App, func(name string) error {
+		if name != "1361_goals.sql" {
+			return nil
+		}
+		for i := range 2 {
+			f := oldHistory{}
+			if err := d.App.QueryRow(seed, `INSERT INTO tenants(slug,name) VALUES($1,'Old goal history') RETURNING id::text`, fmt.Sprintf("goal-history-upgrade-%d", i)).Scan(&f.p.TenantID); err != nil {
+				return err
+			}
+			if err := db.InTenant(seed, d.App, f.p.TenantID, func(tx pgx.Tx) error {
+				if err := tx.QueryRow(seed, `INSERT INTO principals(tenant_id,kind,name) VALUES($1,'person','Old event writer') RETURNING id::text`, f.p.TenantID).Scan(&f.p.ID); err != nil {
+					return err
+				}
+				f.p.Kind = tenant.Person
+				f.project = fixtureNode(t, tx, f.p.TenantID, "project", "OLDPRJ-1", "", nil)
+				f.ticket = fixtureNode(t, tx, f.p.TenantID, "work", "OLDTKT-1", f.project, nil)
+				e, err := events.Append(seed, tx, f.p, events.Change{NodeID: &f.ticket, Type: "node.created", After: map[string]any{"id": f.ticket, "key": "OLDTKT-1", "parent_id": f.project, "state": "open"}})
+				if err != nil {
+					return err
+				}
+				f.event = e.ID
+				return tx.QueryRow(seed, `SELECT after::text FROM events WHERE id=$1`, f.event).Scan(&f.snapshot)
+			}); err != nil {
+				return err
+			}
+			fixtures = append(fixtures, f)
+		}
+		return nil
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(fixtures) != 2 {
+		t.Fatal("older-schema fixtures were not created")
+	}
+	for i, f := range fixtures {
+		err := db.InTenant(seed, d.App, f.p.TenantID, func(tx pgx.Tx) error {
+			var refs []string
+			if err := tx.QueryRow(seed, `SELECT ARRAY(SELECT node_id::text FROM goal_event_refs WHERE event_id=$1 ORDER BY node_id)`, f.event).Scan(&refs); err != nil {
+				return err
+			}
+			want := []string{f.project, f.ticket}
+			slices.Sort(want)
+			if !reflect.DeepEqual(refs, want) {
+				return fmt.Errorf("older references missing or crossed tenants: %v want %v", refs, want)
+			}
+			var snapshot string
+			if err := tx.QueryRow(seed, `SELECT after::text FROM events WHERE id=$1`, f.event).Scan(&snapshot); err != nil {
+				return err
+			}
+			if snapshot != f.snapshot {
+				return errors.New("reference backfill rewrote the authoritative event")
+			}
+			var other int
+			if err := tx.QueryRow(seed, `SELECT count(*) FROM goal_event_refs WHERE tenant_id=$1`, fixtures[1-i].p.TenantID).Scan(&other); err != nil {
+				return err
+			}
+			if other != 0 {
+				return errors.New("reference projection crossed tenant RLS")
+			}
+			// The same Append used before the migration feeds the new index.
+			e, err := events.Append(seed, tx, f.p, events.Change{NodeID: &f.ticket, Type: "node.updated", After: map[string]any{"id": f.ticket, "state": "done"}})
+			if err != nil {
+				return err
+			}
+			if err := tx.QueryRow(seed, `SELECT ARRAY(SELECT node_id::text FROM goal_event_refs WHERE event_id=$1 ORDER BY node_id)`, e.ID).Scan(&refs); err != nil {
+				return err
+			}
+			if !reflect.DeepEqual(refs, []string{f.ticket}) {
+				return errors.New("previous event writer did not feed the reference projection")
+			}
+			return nil
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+	}
+}
+
 // Risk: schema-only constraints release a deleted ref, permit two handovers,
 // or make a new receipt visible in another tenant.
 func TestGoalStorageIdentityAndReceipts(t *testing.T) {
