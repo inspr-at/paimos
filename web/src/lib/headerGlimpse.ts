@@ -42,24 +42,15 @@ export function headerGlimpseAllowed(input: { enabled: boolean; reduced: boolean
   return input.enabled && input.wide && !input.reduced && input.tickets >= GLIMPSE_MIN_TICKETS
 }
 
-// A viewport override can drop the MediaQueryList change, and the list created
-// at mount can keep matches true after the layout shrinks. Stay wide only when
-// the live query and the layout width both clear the same threshold.
-export function headerGlimpseViewportWide(mediaMatches: boolean, innerWidth: number): boolean {
-  return mediaMatches === true && Number.isFinite(innerWidth) && innerWidth >= GLIMPSE_MIN_WIDTH
-}
-
 export function headerGlimpseWide(layoutWidth: number): boolean {
   return Number.isFinite(layoutWidth) && layoutWidth >= GLIMPSE_MIN_WIDTH
 }
 
-// Chromium drops the MediaQueryList change when Playwright shrinks the viewport
-// (setViewportSize 1280 → 390). A missing event must follow the layout width,
-// which still moved. A delivered change stays authoritative so a stale width
-// sample during that event cannot undo it.
-export function nextHeaderGlimpseWide(signal: { mediaMatches: boolean | null; layoutWidth: number }): boolean {
-  if (signal.mediaMatches === null) return headerGlimpseWide(signal.layoutWidth)
-  return signal.mediaMatches
+// A viewport override can drop the MediaQueryList change, and the list created
+// at mount can keep matches true after the layout shrinks. Stay wide only when
+// the live query and the layout width both clear the same threshold.
+export function headerGlimpseViewportWide(mediaMatches: boolean, innerWidth: number): boolean {
+  return mediaMatches === true && headerGlimpseWide(innerWidth)
 }
 
 export function headerGlimpseGraphReady(nodes: number, links: number): boolean {
