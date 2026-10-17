@@ -32,10 +32,20 @@ type Process struct {
 // Observe requires a non-root working directory for incoming hook processes.
 func Observe(pid int) (Process, error) { return observe(pid, true) }
 
+// ObserveDaemon reads a process the way a daemon pin is published. A
+// login-service working directory of "/" is valid. Incoming hooks still use
+// Observe, which rejects that directory.
+func ObserveDaemon(pid int) (Process, error) { return observe(pid, false) }
+
 // ObserveDaemonSelf reads only this process for daemon pin publication. Login
 // services may start at "/"; the pin contains no cwd. All kernel identity and
 // loaded-image checks remain required, and incoming hooks still use Observe.
 func ObserveDaemonSelf() (Process, error) { return observe(os.Getpid(), false) }
+
+// ProcessStarted is the kernel start time for pid. It stays readable when a
+// full observation cannot, including another user's process. An error is
+// missing evidence, not proof the pid was reused.
+func ProcessStarted(pid int) (string, error) { return processStarted(pid) }
 
 // Snapshot requires a project cwd for incoming hooks.
 func Snapshot(c net.Conn) (Process, error) { return snapshot(c, true) }

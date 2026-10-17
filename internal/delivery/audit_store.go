@@ -41,10 +41,12 @@ func scanAudit(row pgx.Row) (MergeAudit, error) {
 	return a, err
 }
 
+// Only a clean audit is settled. Flagged rows can be repaired by late facts,
+// including rows that an older binary already notified.
 func (m *Module) auditExists(ctx context.Context, tid, sha string) (bool, error) {
 	var present bool
 	err := db.InTenant(db.AllProjects(ctx, "merge audit deduplication"), m.pool, tid, func(tx pgx.Tx) error {
-		return tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM delivery_merge_audit WHERE repository=$1 AND merge_sha=$2)`, m.config.Repository, sha).Scan(&present)
+		return tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM delivery_merge_audit WHERE repository=$1 AND merge_sha=$2 AND cardinality(flags)=0)`, m.config.Repository, sha).Scan(&present)
 	})
 	return present, err
 }
@@ -129,30 +131,45 @@ func auditLink(ctx context.Context, tx pgx.Tx, repo string, f MergeFact) (Observ
 	return o, nil
 }
 
-func auditReview(ctx context.Context, tx pgx.Tx, o Observation) (bool, error) {
+type auditReviewBinding struct{ Order, Base, Head string }
+
+func auditReviewCandidate(ctx context.Context, tx pgx.Tx, o Observation) (auditReviewBinding, error) {
+	var b auditReviewBinding
 	if o.Ticket == nil || o.PR == nil {
-		return false, nil
+		return b, nil
 	}
-	var order, head string
 	var pr *int64
-	err := tx.QueryRow(ctx, `SELECT work_order_id::text,head_sha,pull_request FROM work_order_reviews WHERE ticket_node_id=$1 AND repository=$2 ORDER BY created_at DESC,work_order_id DESC LIMIT 1`, o.Ticket, o.Repository).Scan(&order, &head, &pr)
+	err := tx.QueryRow(ctx, `SELECT work_order_id::text,base_sha,head_sha,pull_request FROM work_order_reviews WHERE ticket_node_id=$1 AND repository=$2 ORDER BY created_at DESC,work_order_id DESC LIMIT 1`, o.Ticket, o.Repository).Scan(&b.Order, &b.Base, &b.Head, &pr)
 	if errors.Is(err, pgx.ErrNoRows) {
-		return false, nil
+		return auditReviewBinding{}, nil
 	}
 	if err != nil {
+		return b, err
+	}
+	if pr != nil && *pr != *o.PR {
+		return auditReviewBinding{}, nil
+	}
+	return b, nil
+}
+
+func auditReview(ctx context.Context, tx pgx.Tx, o Observation, carried auditReviewBinding) (bool, error) {
+	b, err := auditReviewCandidate(ctx, tx, o)
+	if err != nil || b.Order == "" {
 		return false, err
 	}
-	// Review binds the exact source head introduced by this PR merge, not the
-	// distinct synthetic queue/squash commit and never a later ticket head.
-	if head != o.Head || pr != nil && *pr != *o.PR {
+	// The external proof binds this precise review range and merge head. A
+	// newer review or build must still pass VerifiedLatestTx under the fence.
+	if b.Head != o.Head && b != carried {
 		return false, nil
 	}
-	return reviewgate.VerifiedLatestTx(ctx, tx, order, *o.Ticket)
+	return reviewgate.VerifiedLatestTx(ctx, tx, b.Order, *o.Ticket)
 }
 
 func auditQueued(ctx context.Context, tx pgx.Tx, repo, sha string) (bool, error) {
 	var group bool
-	err := tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM delivery_github_events WHERE repository=$1 AND event='merge_group' AND action='checks_requested' AND head_sha=$2)`, repo, sha).Scan(&group)
+	err := tx.QueryRow(ctx, `SELECT EXISTS(
+ SELECT 1 FROM delivery_github_events WHERE repository=$1 AND event='merge_group' AND action='checks_requested' AND head_sha=$2
+ UNION ALL SELECT 1 FROM delivery_merge_audit WHERE repository=$1 AND merge_sha=$2 AND via_queue)`, repo, sha).Scan(&group)
 	return group, err
 }
 
@@ -288,8 +305,29 @@ func auditRecipientTx(ctx context.Context, tx pgx.Tx, tid string, a MergeAudit) 
 
 func auditAlert(ctx context.Context, tx pgx.Tx, actor tenant.Principal, a MergeAudit, to *auditRecipient) error {
 	key := digest([]byte(actor.TenantID + "|" + a.Repository + "|" + a.SHA))
-	body := fmt.Sprintf("Merge audit: %s %s bypassed delivery safeguards (%s).", a.Repository, a.SHA, strings.Join(a.Flags, ", "))
+	body := auditAlertBody(a)
 	return deliveryNoticeTx(ctx, tx, actor, a.Project, to, key, body)
+}
+
+const auditProvenanceGrace = 10 * time.Minute
+
+func auditAlertReady(a MergeAudit, now time.Time) bool {
+	return len(a.Flags) > 0 && (a.PR == nil || a.ViaQueue || !now.Before(a.At.Add(auditProvenanceGrace)))
+}
+
+func auditAlertBody(a MergeAudit) string {
+	classification := "bypassed delivery safeguards"
+	if a.PR != nil {
+		switch {
+		case !a.ViaQueue && !a.ReviewOK:
+			classification = "provenance pending; review not in reviewgate"
+		case !a.ViaQueue:
+			classification = "provenance pending"
+		case !a.ReviewOK:
+			classification = "review not in reviewgate"
+		}
+	}
+	return fmt.Sprintf("Merge audit: %s %s %s (%s).", a.Repository, a.SHA, classification, strings.Join(a.Flags, ", "))
 }
 
 func deliveryNoticeTx(ctx context.Context, tx pgx.Tx, actor tenant.Principal, project *string, to *auditRecipient, key, body string) error {
@@ -309,6 +347,8 @@ func deliveryNoticeTx(ctx context.Context, tx pgx.Tx, actor tenant.Principal, pr
 }
 
 func (m *Module) auditMerge(ctx context.Context, tid string, f MergeFact, reader AuditGitHub) error {
+	ctx, cancel := context.WithTimeout(ctx, 45*time.Second)
+	defer cancel()
 	if tid != m.config.TenantID || reader == nil {
 		return errNotConfigured
 	}
@@ -325,10 +365,24 @@ func (m *Module) auditMerge(ctx context.Context, tid string, f MergeFact, reader
 	var cs []Check
 	complete := false
 	proof := ""
+	var candidate, carried auditReviewBinding
 	err = db.InTenant(db.AllProjects(ctx, "merge audit stored checks"), m.pool, tid, func(tx pgx.Tx) error {
 		o, err := auditLink(ctx, tx, m.config.Repository, f)
 		if err != nil {
 			return err
+		}
+		candidate, err = auditReviewCandidate(ctx, tx, o)
+		if err != nil {
+			return err
+		}
+		if candidate.Order != "" && candidate.Head != f.Head {
+			verified, err := reviewgate.VerifiedLatestTx(ctx, tx, candidate.Order, *o.Ticket)
+			if err != nil {
+				return err
+			}
+			if !verified {
+				candidate = auditReviewBinding{}
+			}
 		}
 		s, err := settingsTx(ctx, tx, o.Project)
 		if err != nil {
@@ -355,6 +409,17 @@ func (m *Module) auditMerge(ctx context.Context, tid string, f MergeFact, reader
 	if len(cs) > 4000 {
 		return errRead
 	}
+	if candidate.Order != "" && candidate.Head != f.Head {
+		if g, ok := reader.(auditReviewGitHub); ok {
+			clean, err := g.AuditReviewCarry(ctx, candidate.Base, candidate.Head, f.Base, f.Head)
+			if err != nil {
+				return err
+			}
+			if clean {
+				carried = candidate
+			}
+		}
+	}
 	actor, err := m.auditActor(ctx, tid)
 	if err != nil {
 		return err
@@ -363,9 +428,18 @@ func (m *Module) auditMerge(ctx context.Context, tid string, f MergeFact, reader
 		if err := db.LockTree(ctx, tx, tid); err != nil {
 			return err
 		}
-		present := false
-		if err := tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM delivery_merge_audit WHERE repository=$1 AND merge_sha=$2)`, m.config.Repository, f.SHA).Scan(&present); err != nil || present {
+		previous, err := scanAudit(tx.QueryRow(ctx, `SELECT `+auditColumns+` FROM delivery_merge_audit WHERE repository=$1 AND merge_sha=$2 FOR NO KEY UPDATE`, m.config.Repository, f.SHA))
+		exists := err == nil
+		if err != nil && !errors.Is(err, pgx.ErrNoRows) {
 			return err
+		}
+		if exists && len(previous.Flags) == 0 {
+			return nil
+		}
+		if exists && previous.PR != nil && (f.PR == nil || *previous.PR != *f.PR) {
+			// A partial association read must not turn a known PR merge into
+			// an immediate direct-push accusation while provenance is pending.
+			return errRead
 		}
 		o, err := auditLink(ctx, tx, m.config.Repository, f)
 		if err != nil {
@@ -375,12 +449,15 @@ func (m *Module) auditMerge(ctx context.Context, tid string, f MergeFact, reader
 		if err != nil {
 			return err
 		}
-		a := MergeAudit{Repository: m.config.Repository, SHA: f.SHA, PR: f.PR, Ticket: o.Ticket, Project: o.Project, MergedBy: f.MergedBy, At: f.At}
+		a := MergeAudit{Repository: m.config.Repository, SHA: f.SHA, PR: f.PR, Ticket: o.Ticket, Project: o.Project, MergedBy: f.MergedBy, At: f.At, AlertedAt: previous.AlertedAt}
+		if exists && a.MergedBy == "" {
+			a.MergedBy = previous.MergedBy
+		}
 		queued, err := auditQueued(ctx, tx, a.Repository, a.SHA)
 		if err != nil {
 			return err
 		}
-		a.ViaQueue = auditViaQueue(queued, f.MergedBy)
+		a.ViaQueue = auditViaQueue(queued, a.MergedBy)
 		want := auditProofSHA(queued, f)
 		switch {
 		case want != proof:
@@ -403,14 +480,17 @@ func (m *Module) auditMerge(ctx context.Context, tid string, f MergeFact, reader
 			return err
 		}
 		a.ChecksPassed = allSuccess(Observation{Settings: s, Checks: cs})
-		a.ReviewOK, err = auditReview(ctx, tx, o)
+		a.ReviewOK, err = auditReview(ctx, tx, o, carried)
 		if err != nil {
 			return err
 		}
+		// A later ticket review must not erase evidence already verified for
+		// this historical merge while late queue provenance is being repaired.
+		a.ReviewOK = a.ReviewOK || previous.ReviewOK
 		a.Flags = auditFlags(a)
 		// Resolve/authorize all FK parents and the current lead before events.
 		var to *auditRecipient
-		if len(a.Flags) > 0 {
+		if a.AlertedAt == nil && auditAlertReady(a, m.now()) {
 			to, err = auditRecipientTx(ctx, tx, tid, a)
 			if err != nil {
 				return err
@@ -420,15 +500,18 @@ func (m *Module) auditMerge(ctx context.Context, tid string, f MergeFact, reader
 				a.AlertedAt = &at
 			}
 		}
-		_, err = tx.Exec(ctx, `INSERT INTO delivery_merge_audit(tenant_id,repository,merge_sha,pull_request,ticket_node_id,project_id,merged_by,via_queue,checks_passed,review_ok,flags,at,alerted_at) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13)`, tid, a.Repository, a.SHA, a.PR, a.Ticket, a.Project, a.MergedBy, a.ViaQueue, a.ChecksPassed, a.ReviewOK, a.Flags, a.At, a.AlertedAt)
+		_, err = tx.Exec(ctx, `INSERT INTO delivery_merge_audit(tenant_id,repository,merge_sha,pull_request,ticket_node_id,project_id,merged_by,via_queue,checks_passed,review_ok,flags,at,alerted_at) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13)
+ ON CONFLICT(tenant_id,repository,merge_sha) DO UPDATE SET pull_request=EXCLUDED.pull_request,ticket_node_id=EXCLUDED.ticket_node_id,project_id=EXCLUDED.project_id,merged_by=EXCLUDED.merged_by,via_queue=EXCLUDED.via_queue,checks_passed=EXCLUDED.checks_passed,review_ok=EXCLUDED.review_ok,flags=EXCLUDED.flags,at=EXCLUDED.at,alerted_at=EXCLUDED.alerted_at`, tid, a.Repository, a.SHA, a.PR, a.Ticket, a.Project, a.MergedBy, a.ViaQueue, a.ChecksPassed, a.ReviewOK, a.Flags, a.At, a.AlertedAt)
 		if err != nil {
 			return err
 		}
 		if len(a.Flags) == 0 {
 			return nil
 		}
-		if _, err = events.Append(ctx, tx, actor, events.Change{Type: "delivery.bypass_merge", NodeID: a.Ticket, After: a, At: &a.At}); err != nil {
-			return err
+		if !exists {
+			if _, err = events.Append(ctx, tx, actor, events.Change{Type: "delivery.bypass_merge", NodeID: a.Ticket, After: a, At: &a.At}); err != nil {
+				return err
+			}
 		}
 		return auditAlert(ctx, tx, actor, a, to)
 	})

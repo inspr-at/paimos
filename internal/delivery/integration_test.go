@@ -181,6 +181,11 @@ func (f *fixture) build(t *testing.T) {
 	})
 }
 func (f *fixture) review(t *testing.T) {
+	f.reviewRange(t, strings.Repeat("a", 40), strings.Repeat("b", 40), nil)
+}
+
+func (f *fixture) reviewRange(t *testing.T, base, head string, pr *int64) {
+	t.Helper()
 	f.tx(t, func(tx pgx.Tx) error {
 		var order, run, profile, evidence string
 		if err := tx.QueryRow(t.Context(), `INSERT INTO nodes(tenant_id,parent_id,key,kind_id,title) SELECT $1,$2,'AEON-850',id,'Review order' FROM node_kinds WHERE slug='work_order' RETURNING id::text`, f.person.TenantID, f.ticket).Scan(&order); err != nil {
@@ -198,7 +203,7 @@ func (f *fixture) review(t *testing.T) {
 		if err := tx.QueryRow(t.Context(), `INSERT INTO work_evidence(tenant_id,work_order_id,run_id,submitted_by_principal_id,kind,reference) VALUES($1,$2,$3,$4,'text','VERDICT: ok') RETURNING id::text`, f.person.TenantID, order, run, f.person.ID).Scan(&evidence); err != nil {
 			return err
 		}
-		_, err := tx.Exec(t.Context(), `INSERT INTO work_order_reviews(tenant_id,work_order_id,ticket_node_id,request_id,request,ticket_snapshot,repository,base_sha,head_sha,author_run_id,author_family,reviewer_profile_id,reviewer_family,run_id,evidence_id,result) VALUES($1,$2,$3,gen_random_uuid(),'{}','delivery fixture',$4,$5,$6,$7,'openai',$8,'anthropic',$9,$10,'{"verdict":"ok","findings":[],"reason":""}')`, f.person.TenantID, order, f.ticket, f.m.config.Repository, strings.Repeat("a", 40), strings.Repeat("b", 40), f.authorRun, profile, run, evidence)
+		_, err := tx.Exec(t.Context(), `INSERT INTO work_order_reviews(tenant_id,work_order_id,ticket_node_id,request_id,request,ticket_snapshot,repository,base_sha,head_sha,author_run_id,author_family,reviewer_profile_id,reviewer_family,run_id,evidence_id,result,pull_request) VALUES($1,$2,$3,gen_random_uuid(),'{}','delivery fixture',$4,$5,$6,$7,'openai',$8,'anthropic',$9,$10,'{"verdict":"ok","findings":[],"reason":""}',$11)`, f.person.TenantID, order, f.ticket, f.m.config.Repository, base, head, f.authorRun, profile, run, evidence, pr)
 		return err
 	})
 }

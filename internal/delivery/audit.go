@@ -122,6 +122,20 @@ func (m *Module) retryAuditAlerts(ctx context.Context, tid string) error {
 		}
 		for _, a := range page {
 			cursor = a.SHA
+			// Pending rows can have fallen out of the latest 100 commits. Read
+			// fresh provenance/check/review evidence before notifying their lead.
+			if reader, ok := m.github.(AuditGitHub); ok {
+				f, err := reader.AuditCommit(ctx, a.SHA)
+				if err != nil {
+					return err
+				}
+				if f == nil || f.SHA != a.SHA {
+					continue // missing evidence cannot justify an alert
+				}
+				if err := m.auditMerge(ctx, tid, *f, reader); err != nil {
+					return err
+				}
+			}
 			err = db.InTenant(db.AllProjects(ctx, "merge audit lead alert retry"), m.pool, tid, func(tx pgx.Tx) error {
 				if err := db.LockTree(ctx, tx, tid); err != nil {
 					return err
@@ -132,6 +146,9 @@ func (m *Module) retryAuditAlerts(ctx context.Context, tid string) error {
 				}
 				if err != nil {
 					return err
+				}
+				if !auditAlertReady(a, m.now()) {
+					return nil
 				}
 				to, err := auditRecipientTx(ctx, tx, tid, a)
 				if err != nil || to == nil {
