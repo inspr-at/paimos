@@ -204,7 +204,7 @@ func TestGoalSeriesChangedKeysWithoutPercentageChange(t *testing.T) {
 	starts, _, _ := planSeries(now, "24h")
 	outcome := storedNode{ID: "outcome", Key: "OUT-1", Parent: "goal", Fields: map[string]any{"state_set": "done"}}
 	h := reconstruction{goal: "goal", created: starts[0].Add(-time.Hour), metadata: map[string]historicalNode{}, events: []sourceEvent{
-		{ID: 1, At: starts[0].Add(-time.Minute), Node: outcome.ID, Family: "outcome", After: sourceJSON(t, outcome)},
+		{ID: 1, At: starts[0], Node: outcome.ID, Family: "outcome", After: sourceJSON(t, outcome)},
 	}}
 	outcome.Fields["state_set"] = "queued"
 	h.events = append(h.events, sourceEvent{ID: 2, At: starts[0].Add(time.Minute), Node: outcome.ID, Family: "outcome", After: sourceJSON(t, outcome)})

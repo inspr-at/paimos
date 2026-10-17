@@ -597,7 +597,7 @@ func (h reconstruction) project(ctx context.Context, now time.Time, span string)
 		previous, previousStates = pct, states
 		return nil
 	}
-	for index < len(h.events) && h.events[index].At.Before(starts[0]) {
+	for index < len(h.events) && !h.events[index].At.After(starts[0]) {
 		if err := advance(h.events[index], nil); err != nil {
 			return nil, since, err
 		}
