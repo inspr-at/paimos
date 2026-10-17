@@ -26,7 +26,14 @@ import (
 // leaving its registered generation invisible, stuck or falsely completed.
 func TestHarnessRunInteractiveTTY(t *testing.T) {
 	if os.Getenv("AEON_TEST_INTERACTIVE_RUN") == "1" {
-		if os.Args[len(os.Args)-1] == "interactive-child" {
+		var args []string
+		for i, arg := range os.Args {
+			if arg == "--" {
+				args = os.Args[i+1:]
+				break
+			}
+		}
+		if len(args) == 1 && args[0] == "interactive-child" {
 			for _, f := range []*os.File{os.Stdin, os.Stdout, os.Stderr} {
 				if !term.IsTerminal(int(f.Fd())) {
 					os.Exit(21)
@@ -48,13 +55,6 @@ func TestHarnessRunInteractiveTTY(t *testing.T) {
 			fmt.Fprintln(os.Stderr, "AEON1410_STDERR")
 			// Deliberately leave raw mode enabled to prove wrapper restoration.
 			os.Exit(0)
-		}
-		var args []string
-		for i, arg := range os.Args {
-			if arg == "--" {
-				args = os.Args[i+1:]
-				break
-			}
 		}
 		before, beforeErr := term.GetState(0)
 		code := Run(args, os.Stdin, os.Stdout, os.Stderr)
