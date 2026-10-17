@@ -140,6 +140,7 @@ export function waitCopy(reason: string): { status: string; now: string; action:
     case 'automatic_launch_disabled': return { status: 'Requested · waiting for a runtime', now: `Waiting for a runtime to start the lead. ${LEAD_LAUNCH_OFF} Queued work stays queued.`, action: 'none' }
     case 'runtime_pickup_timeout': return { status: 'Nothing picked this up', now: 'No runtime claimed this start within 5 minutes. Queued work stays queued. Cancel this start to request another.', action: 'none' }
     case 'start_checks_unavailable': case 'admission_unavailable': return { status: 'Waiting · the admission adapter can’t be read', now: 'The admission adapter is unavailable, so nothing new starts. No individual check failure could be identified.', action: 'none' }
+    case 'admission_not_configured': return { status: 'Waiting · admission is not configured', now: 'Start checks are not configured for this workspace, so nothing new starts.', action: 'none' }
     case 'generation_unavailable': return { status: 'Waiting · its session stopped reporting', now: 'Its session hasn’t reported for a while. Nothing new starts until it reports again or stops.', action: 'none' }
     case 'project_turn_wait': return { status: 'Waiting for its turn', now: 'Other projects have waited longer. It gets the next turn within the dial; nothing is lost.', action: 'none' }
     case 'work_not_eligible': return { status: 'Waiting · no queued work is ready', now: 'Queued work needs an estimate, acceptance criteria or a free blocker before it can start.', action: 'none' }
@@ -155,6 +156,7 @@ function pausedCopy(lead: ProjectLead, w: LeadWords): { status: string; now: str
     ? { status: 'Pausing · the handover request can’t be delivered', now: `No new work starts. The ${w.l} keeps its slot until its session confirms it stopped.` }
     : { status: 'Pausing · handing over', now: `No new work starts. The ${w.l} finishes its step, writes a handover and keeps its slot until it stops.` }
   if (lead.reason === 'idle_yield') return { status: 'Paused · nothing to do', now: 'It checkpointed while the queue was empty. Resume restarts it through the usual start checks.' }
+  if (lead.reason === 'admission_not_configured') return { status: 'Paused · admission is not configured', now: 'Its session has stopped. Start checks are not configured, so nothing new starts.' }
   return { status: 'Paused · handover saved', now: 'Queued work stays queued; nothing new starts. Resume continues from the saved handover.' }
 }
 export function leadBand(lead: ProjectLead | null, projectKey: string, queued: number | null, w: LeadWords = LEAD_WORDS): LeadBandModel {

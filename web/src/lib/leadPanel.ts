@@ -91,6 +91,7 @@ const OTHER_REASONS: Record<string, AdmissionReason> = {
   capacity_unavailable: { kind: 'account_room', state: 'unreadable', text: 'account room could not be read' },
   forecast_unavailable: { kind: 'account_room', state: 'unreadable', text: 'account room could not be read' },
   admission_unavailable: { state: 'unreadable', text: 'the start checks could not be read' },
+  admission_not_configured: { state: 'unknown', text: 'admission is not configured' },
   start_checks_unavailable: { state: 'unreadable', text: 'the start checks could not be read' },
 }
 function admissionReason(code: string): AdmissionReason | undefined {

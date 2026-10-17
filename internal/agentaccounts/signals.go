@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/inspr-at/paimos/internal/agentpairing"
+	"github.com/inspr-at/paimos/internal/authz"
 	"github.com/inspr-at/paimos/internal/httpapi"
 	"github.com/inspr-at/paimos/internal/tenant"
 	"github.com/jackc/pgx/v5"
@@ -142,6 +143,9 @@ func (m *Module) statusline(w http.ResponseWriter, r *http.Request) {
 	var enabled bool
 	plan := ""
 	err := m.in(r.Context(), p.TenantID, func(tx pgx.Tx) error {
+		if r.Method == http.MethodPut && authz.RequireTx(r.Context(), tx, p, "account.manage", authz.Scope{}) != nil {
+			return fail(http.StatusForbidden, "permission denied")
+		}
 		var a Account
 		var err error
 		if r.Method == http.MethodGet {

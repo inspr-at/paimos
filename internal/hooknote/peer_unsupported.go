@@ -10,3 +10,5 @@ import "net"
 func snapshot(net.Conn, bool) (Process, error) { return Process{}, ErrPeer }
 
 func observe(int, bool) (Process, error) { return Process{}, ErrPeer }
+
+func processStarted(int) (string, error) { return "", ErrPeer }

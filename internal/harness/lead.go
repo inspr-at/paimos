@@ -370,6 +370,26 @@ func projectLead(ctx context.Context, tx pgx.Tx, p tenant.Principal, l Lead, rea
 	}
 	return projectLeadWait(l, now), nil
 }
+
+// projectAdmissionAbsence is a read projection. An absent adapter is not a
+// failed read, and a bound session that has confirmed exit is not waiting on
+// one. The stored claim row is left unchanged.
+func projectAdmissionAbsence(l Lead, adapterConfigured bool) Lead {
+	if l.Reason != "admission_unavailable" && l.Reason != "admission_not_configured" {
+		return l
+	}
+	if !adapterConfigured {
+		l.Reason = "admission_not_configured"
+	}
+	if l.State != "waiting_for_room" || l.SessionID == nil || l.ProcessActive {
+		return l
+	}
+	l.State = "paused"
+	if adapterConfigured && l.Reason == "admission_unavailable" {
+		l.Reason = "process_stopped"
+	}
+	return l
+}
 func (m *Module) readLead(r *http.Request, tx pgx.Tx, p tenant.Principal) (any, error) {
 	if !workorders.UUID(r.PathValue("projectId")) {
 		return nil, workorders.Fail(400, "invalid project id")
@@ -508,7 +528,9 @@ func (m *Module) checkLeadAdmission(ctx context.Context, tx pgx.Tx, p tenant.Pri
 		return reason, err
 	}
 	if m.leadAdmission == nil {
-		return "admission_unavailable", nil
+		// Absent is not a failed read. A configured adapter that errors still
+		// returns admission_unavailable through leadAdmissionFailure.
+		return "admission_not_configured", nil
 	}
 	attempt, err := tx.Begin(ctx)
 	if err != nil {

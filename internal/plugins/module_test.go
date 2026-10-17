@@ -416,3 +416,59 @@ func installsVisible(t *testing.T, pool *pgxpool.Pool, tenantID string) int {
 	}
 	return n
 }
+
+// Risk: Configure authorizes in an earlier transaction; a revoked person must
+// not install a plugin or append either audit row with stale session roles.
+func TestPersonWriteRechecksRevokedPermission(t *testing.T) {
+	database := dbtest.Open(t)
+	tenantID := insertTenant(t, database, "write-revocation")
+	person := insertPrincipal(t, database, tenantID, tenant.Person, "Admin", []string{"admin"})
+	reg, err := Builtin(testStagePlugin("pharos"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	plug, _ := reg.Lookup("pharos")
+	var beforeAudit int
+	if err := database.Admin.QueryRow(t.Context(), `SELECT count(*) FROM events WHERE tenant_id=$1`, tenantID).Scan(&beforeAudit); err != nil {
+		t.Fatal(err)
+	}
+	pool, barrier, ctx := dbtest.BarrierPool(t, database.App, func(sql string) bool { return sql == "commit" })
+	mux := http.NewServeMux()
+	NewWithRegistry(pool, reg).Mount(mux)
+	req := httptest.NewRequest(http.MethodPut, "/api/plugins/pharos/installation", strings.NewReader(`{"manifest_digest_sha256":"`+plug.Manifest.DigestSHA256+`","enabled":true,"permissions":[]}`))
+	req = req.WithContext(tenant.WithPrincipal(ctx, person))
+	done := make(chan *httptest.ResponseRecorder, 1)
+	go func() {
+		rec := httptest.NewRecorder()
+		mux.ServeHTTP(rec, req)
+		done <- rec
+	}()
+	barrier.Wait(t, ctx) // The successful permission precheck has committed.
+	revoke, err := database.Admin.Begin(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer revoke.Rollback(ctx)
+	if err := db.LockTenant(ctx, revoke, person.TenantID); err != nil {
+		t.Fatal(err)
+	}
+	tag, err := revoke.Exec(ctx, `UPDATE role_bindings b SET role_id=r.id FROM roles r WHERE b.tenant_id=$1 AND b.principal_id=$2 AND b.scope_type='workspace' AND r.tenant_id=b.tenant_id AND r.key='member'`, person.TenantID, person.ID)
+	if err != nil || tag.RowsAffected() != 1 {
+		t.Fatalf("demote person binding: %v (%d rows)", err, tag.RowsAffected())
+	}
+	if err := revoke.Commit(ctx); err != nil {
+		t.Fatal(err)
+	}
+	barrier.Release()
+	rec := dbtest.Await(t, ctx, done)
+	if rec.Code != http.StatusForbidden || !strings.Contains(rec.Body.String(), `"message":"permission denied"`) {
+		t.Fatalf("revoked write: %d %s", rec.Code, rec.Body.String())
+	}
+	var audit int
+	if err := database.Admin.QueryRow(ctx, `SELECT count(*) FROM events WHERE tenant_id=$1`, tenantID).Scan(&audit); err != nil {
+		t.Fatal(err)
+	}
+	if countInstalls(t, database, tenantID) != 0 || audit != beforeAudit || countLinks(t, database, tenantID) != 0 {
+		t.Fatal("revoked write left an installation or audit rows")
+	}
+}

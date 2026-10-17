@@ -449,7 +449,7 @@
     {"kind":"go","package":"internal/nodes","name":"TestTagMutationRollsBackAfterEventFailure","tier":"ESSENTIAL","active":true},
     {"kind":"go","package":"internal/nodes","name":"TestBulkUndoNeedsTheEditPermission","tier":"ESSENTIAL","active":true},
     {"kind":"go","package":"internal/nodes","name":"TestMoveOutOfAnUnseenParentIsRefused","tier":"GATED-FULL","active":true},
-    {"kind":"go","package":"internal/nodes","name":"TestList6000WithProjectVisibility","tier":"GATED-FULL","active":true},
+    {"kind":"go","package":"internal/nodes","name":"TestList6000WithProjectVisibility","lane":"timing","tier":"GATED-FULL","active":true},
     {"kind":"go","package":"internal/nodes","name":"TestWorkName","tier":"GATED-FULL","active":true},
     {"kind":"go","package":"internal/nodes","name":"TestWorkShapeFilterBounds","tier":"GATED-FULL","active":true},
     {"kind":"go","package":"internal/nodes","name":"TestWorkVocabularyLeadNamesSurviveLeadlessWrites","tier":"GATED-FULL","active":true},

@@ -5,6 +5,7 @@ package authz
 // Route and scope declarations for releases.
 func init() {
 	registerRoutes("releases", map[string]string{
+		"POST /api/projects/{projectId}/deploys":                            "releases.deploy",
 		"GET /api/projects/{projectId}/release-memberships":                 "releases.read",
 		"GET /api/projects/{projectId}/releases":                            "releases.read",
 		"GET /api/projects/{projectId}/releases/{releaseId}/note-snapshot":  "releases.read",

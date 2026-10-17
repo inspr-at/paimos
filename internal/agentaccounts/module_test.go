@@ -705,3 +705,53 @@ func grantClaim(t *testing.T, person, agent tenant.Principal, runID string) {
 		t.Fatalf("grant: %v", err)
 	}
 }
+
+// Risk: a person request passes its precheck, then loses its management permission
+// before the final write. Stale session roles must not authorize rows or audit.
+func TestPersonWriteRechecksRevokedPermission(t *testing.T) {
+	reset(t)
+	person := makePrincipal(t, "write-revocation", "person", "Admin", []string{"admin"})
+	var beforeAudit int
+	if err := adminPool.QueryRow(t.Context(), `SELECT count(*) FROM events WHERE tenant_id=$1`, person.TenantID).Scan(&beforeAudit); err != nil {
+		t.Fatal(err)
+	}
+	pool, barrier, ctx := dbtest.BarrierPool(t, appPool, func(sql string) bool { return sql == "commit" })
+	mux := http.NewServeMux()
+	New(pool).Mount(mux)
+	req := httptest.NewRequest(http.MethodPost, "/api/agent-accounts/groups", strings.NewReader(`{"harness":"codex","name":"Revoked","exclusive":false}`))
+	req = req.WithContext(tenant.WithPrincipal(ctx, person))
+	done := make(chan *httptest.ResponseRecorder, 1)
+	go func() {
+		rec := httptest.NewRecorder()
+		mux.ServeHTTP(rec, req)
+		done <- rec
+	}()
+	barrier.Wait(t, ctx) // The successful permission precheck has committed.
+	revoke, err := adminPool.Begin(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer revoke.Rollback(ctx)
+	if err := db.LockTenant(ctx, revoke, person.TenantID); err != nil {
+		t.Fatal(err)
+	}
+	tag, err := revoke.Exec(ctx, `UPDATE role_bindings b SET role_id=r.id FROM roles r WHERE b.tenant_id=$1 AND b.principal_id=$2 AND b.scope_type='workspace' AND r.tenant_id=b.tenant_id AND r.key='member'`, person.TenantID, person.ID)
+	if err != nil || tag.RowsAffected() != 1 {
+		t.Fatalf("demote person binding: %v (%d rows)", err, tag.RowsAffected())
+	}
+	if err := revoke.Commit(ctx); err != nil {
+		t.Fatal(err)
+	}
+	barrier.Release()
+	rec := dbtest.Await(t, ctx, done)
+	if rec.Code != http.StatusForbidden || !strings.Contains(rec.Body.String(), `"error":"permission denied"`) {
+		t.Fatalf("revoked write: %d %s", rec.Code, rec.Body.String())
+	}
+	var groups, audit int
+	if err := adminPool.QueryRow(ctx, `SELECT (SELECT count(*) FROM account_groups WHERE tenant_id=$1), (SELECT count(*) FROM events WHERE tenant_id=$1)`, person.TenantID).Scan(&groups, &audit); err != nil {
+		t.Fatal(err)
+	}
+	if groups != 0 || audit != beforeAudit {
+		t.Fatalf("revoked write left %d groups and %d events", groups, audit)
+	}
+}
