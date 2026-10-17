@@ -42,26 +42,44 @@ func logListPlan(t *testing.T, f storageFixture) {
 	defer cancel()
 	err := db.InTenant(ctx, f.db.App, f.reader.TenantID, func(tx pgx.Tx) error {
 		var ids []string
-		if err := tx.QueryRow(ctx, `SELECT ARRAY(SELECT n.id::text FROM nodes n JOIN node_kinds k ON k.tenant_id=n.tenant_id AND k.id=n.kind_id WHERE k.slug IN ('goal','release') AND n.deleted_at IS NULL ORDER BY n.id LIMIT 100)`).Scan(&ids); err != nil { return err }
+		if err := tx.QueryRow(ctx, `SELECT ARRAY(SELECT n.id::text FROM nodes n JOIN node_kinds k ON k.tenant_id=n.tenant_id AND k.id=n.kind_id WHERE n.kind_id IN (SELECT id FROM node_kinds WHERE slug IN ('goal','release')) AND k.slug IN ('goal','release') AND n.deleted_at IS NULL ORDER BY n.id LIMIT 100)`).Scan(&ids); err != nil {
+			return fmt.Errorf("candidate IDs: %w",err)
+		}
 		var raw []byte
-		if err := tx.QueryRow(ctx, "EXPLAIN (FORMAT JSON) "+listPageQuery(), ids, apiClock, f.reader.Kind==tenant.Person, f.reader.ID).Scan(&raw); err != nil { return err }
+		if err := tx.QueryRow(ctx, "EXPLAIN (FORMAT JSON) "+listPageQuery(), ids, apiClock, f.reader.Kind == tenant.Person, f.reader.ID).Scan(&raw); err != nil {
+			return fmt.Errorf("page EXPLAIN: %w",err)
+		}
 		var plan any
-		if err := json.Unmarshal(raw,&plan);err!=nil{return err}
+		if err := json.Unmarshal(raw, &plan); err != nil {
+			return err
+		}
 		var walk func(any)
-		count:=0
-		walk=func(value any){
-			if count>=50{return}
-			switch v:=value.(type){
-			case []any:for _,x:=range v{walk(x)}
+		count := 0
+		walk = func(value any) {
+			if count >= 50 {
+				return
+			}
+			switch v := value.(type) {
+			case []any:
+				for _, x := range v {
+					walk(x)
+				}
 			case map[string]any:
-				if cost,ok:=v["Total Cost"].(float64);ok&&cost>10000{t.Logf("plan %v relation=%v rows=%v cost=%v",v["Node Type"],v["Relation Name"],v["Plan Rows"],cost);count++}
-				for _,x:=range v{walk(x)}
+				if cost, ok := v["Total Cost"].(float64); ok && cost > 10000 {
+					t.Logf("plan %v relation=%v rows=%v cost=%v", v["Node Type"], v["Relation Name"], v["Plan Rows"], cost)
+					count++
+				}
+				for _, x := range v {
+					walk(x)
+				}
 			}
 		}
 		walk(plan)
 		return nil
 	})
-	if err!=nil{t.Logf("list plan unavailable: %v",err)}
+	if err != nil {
+		t.Logf("list plan unavailable: %v", err)
+	}
 }
 
 // Risk: the page's computed sorts use a different ETA, filters omit workspace
@@ -204,7 +222,7 @@ func TestGoalListViewFiltersAndOrdering(t *testing.T) {
 	}
 }
 
-type listQueryCounter struct{ count atomic.Int32 }
+type listQueryCounter struct{ count atomic.Int32; t *testing.T }
 
 func (c *listQueryCounter) TraceQueryStart(ctx context.Context, _ *pgx.Conn, data pgx.TraceQueryStartData) context.Context {
 	if strings.HasPrefix(data.SQL, "WITH RECURSIVE\n page AS MATERIALIZED") {
@@ -239,7 +257,7 @@ func TestGoalListPageWideProjection(t *testing.T) {
 		t.Fatal(err)
 	}
 	config := f.db.App.Config()
-	counter := &listQueryCounter{}
+	counter := &listQueryCounter{t:t}
 	config.ConnConfig.Tracer = counter
 	pool, err := pgxpool.NewWithConfig(t.Context(), config)
 	if err != nil {

@@ -52,7 +52,7 @@ func listPageQuery() string {
  SELECT n.id,coalesce(nullif(n.fields->>'project_key',''),n.key) AS key,n.title AS name,
  ARRAY(SELECT group_id::text FROM project_group_members WHERE project_id=n.id ORDER BY group_id) AS group_ids
  FROM nodes n JOIN node_kinds k ON k.tenant_id=n.tenant_id AND k.id=n.kind_id
- WHERE k.slug='project' AND n.deleted_at IS NULL AND (n.id IN (SELECT project_id FROM page) OR n.id IN (SELECT project_id FROM serves))
+ WHERE n.kind_id IN (SELECT id FROM node_kinds WHERE slug='project') AND k.slug='project' AND n.deleted_at IS NULL AND (n.id IN (SELECT project_id FROM page) OR n.id IN (SELECT project_id FROM serves))
  ), waits AS MATERIALIZED (
  SELECT DISTINCT g.id AS goal,q.node_id AS question FROM page g
  JOIN desk_askers a ON ($3::boolean OR a.principal_id=$4::uuid)
