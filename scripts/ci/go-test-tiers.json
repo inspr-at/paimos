@@ -8502,7 +8502,7 @@
     ,
     {"kind":"go","package":"internal/nodes","name":"TestList6000PerformanceWithStaleKindStatistics","lane":"timing","tier":"GATED-FULL"}
     ,
-    {"kind":"go","package":"internal/nodes","name":"TestList6000WithProjectVisibility","tier":"GATED-FULL"}
+    {"kind":"go","package":"internal/nodes","name":"TestList6000WithProjectVisibility","lane":"timing","tier":"GATED-FULL"}
     ,
     {"kind":"go","package":"internal/nodes","name":"TestListAssignedLeadUsesTheSameStatement","tier":"GATED-FULL"}
     ,

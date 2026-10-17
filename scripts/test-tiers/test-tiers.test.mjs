@@ -2322,6 +2322,24 @@ test('committed allowlists preserve classifications, helpers and reviewed AEON-5
   assert.ok([...go.tests,...web.tests].filter(row=>row.tags?.includes('delete-candidate')).every(row=>row.tier==='GATED-FULL'||row.tier==='NIGHTLY'))
 })
 
+// The 6000-node visibility list compares wall-clock time with a fixed budget.
+// Parallel shard load made the fastest of three requests 1.46s against the
+// 600ms CI limit. It belongs with the other list budgets, on the timing lane.
+test('AEON-1405 visibility list budget runs on the timing lane and keeps its CI limit',()=>{
+  const manifest=JSON.parse(readFileSync(new URL('../ci/go-test-tiers.json',import.meta.url)))
+  const name='TestList6000WithProjectVisibility'
+  const row=manifest.tests.find(row=>row.package==='internal/nodes'&&row.name===name)
+  assert.equal(row?.tier,'GATED-FULL')
+  assert.equal(row?.lane,'timing')
+  const parallel=manifest.tests.filter(row=>row.kind==='go'&&row.lane!=='timing')
+  const timing=manifest.tests.filter(row=>row.kind==='go'&&row.lane==='timing')
+  assert.equal(parallel.some(row=>row.package==='internal/nodes'&&row.name===name),false)
+  assert.equal(timing.filter(row=>row.package==='internal/nodes'&&row.name===name).length,1)
+  const source=readFileSync(new URL('../../internal/nodes/visibility_perf_test.go',import.meta.url),'utf8')
+  assert.match(source,/limit = 600 \* time\.Millisecond/)
+  assert.match(source,/if fastest >= limit \{/)
+})
+
 // These exact registrations were missing in the AEON-706 static report.
 // Keep AEON-707's reviewed work-order promotion and main's new nightly guards.
 for(const [label,pkg,tier,names] of [
