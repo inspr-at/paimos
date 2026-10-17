@@ -52,12 +52,21 @@ func newAuditGitFixture(t *testing.T, variant string) *auditGitFixture {
 		}
 	}
 	write()
+	if err := os.WriteFile(filepath.Join(f.dir, "removed.txt"), []byte("obsolete\n"), 0600); err != nil {
+		t.Fatal(err)
+	}
 	f.git("add", ".")
 	f.git("commit", "-m", "base")
 	f.base = f.git("rev-parse", "HEAD")
 	f.git("checkout", "-b", "ticket")
 	lines[1] = "reviewed"
 	write()
+	if err := os.Remove(filepath.Join(f.dir, "removed.txt")); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(f.dir, "added.sh"), []byte("#!/bin/sh\necho reviewed\n"), 0700); err != nil {
+		t.Fatal(err)
+	}
 	f.git("add", ".")
 	f.git("commit", "-m", "reviewed delta")
 	f.reviewed = f.git("rev-parse", "HEAD")
@@ -177,7 +186,7 @@ func TestMergeAuditReviewCarryGitProof(t *testing.T) {
 				if err := f.get("/compare/"+binding[0]+"..."+binding[1], &c); err != nil {
 					t.Fatal(err)
 				}
-				id, _, ok := auditPatchID(c.Files, map[string]string{"shared.txt": "100644"}, map[string]string{"shared.txt": "100644"})
+				id, _, ok := auditPatchID(c.Files, map[string]string{"shared.txt": "100644", "removed.txt": "100644"}, map[string]string{"shared.txt": "100644", "added.sh": "100755"})
 				if !ok || hex.EncodeToString(id[:]) != f.patchID(binding[0], binding[1]) {
 					t.Fatalf("stable patch ID disagrees with Git: %x, valid=%v", id, ok)
 				}
