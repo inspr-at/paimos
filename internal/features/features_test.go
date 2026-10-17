@@ -350,6 +350,10 @@ func TestPersonWriteRechecksRevokedPermission(t *testing.T) {
 		}
 		t.Run(name, func(t *testing.T) {
 			f := setup(t)
+			var beforeAudit int
+			if err := f.d.Admin.QueryRow(t.Context(), `SELECT count(*) FROM events WHERE tenant_id=$1`, f.admin.TenantID).Scan(&beforeAudit); err != nil {
+				t.Fatal(err)
+			}
 			pool, barrier, ctx := dbtest.BarrierPool(t, f.d.App, func(sql string) bool { return sql == "commit" })
 			mux := http.NewServeMux()
 			New(pool).Mount(mux)
@@ -378,9 +382,9 @@ func TestPersonWriteRechecksRevokedPermission(t *testing.T) {
 			if err := db.LockTenant(ctx, revoke, f.admin.TenantID); err != nil {
 				t.Fatal(err)
 			}
-			tag, err := revoke.Exec(ctx, `DELETE FROM role_bindings WHERE tenant_id=$1 AND principal_id=$2`, f.admin.TenantID, f.admin.ID)
+			tag, err := revoke.Exec(ctx, `UPDATE role_bindings b SET role_id=r.id FROM roles r WHERE b.tenant_id=$1 AND b.principal_id=$2 AND b.scope_type='workspace' AND r.tenant_id=b.tenant_id AND r.key='member'`, f.admin.TenantID, f.admin.ID)
 			if err != nil || tag.RowsAffected() != 1 {
-				t.Fatalf("revoke person binding: %v (%d rows)", err, tag.RowsAffected())
+				t.Fatalf("demote person binding: %v (%d rows)", err, tag.RowsAffected())
 			}
 			if holdRevocation {
 				barrier.Release()
@@ -401,7 +405,7 @@ func TestPersonWriteRechecksRevokedPermission(t *testing.T) {
 			if err := f.d.Admin.QueryRow(ctx, `SELECT (SELECT count(*) FROM features WHERE tenant_id=$1), (SELECT count(*) FROM events WHERE tenant_id=$1)`, f.admin.TenantID).Scan(&flags, &audit); err != nil {
 				t.Fatal(err)
 			}
-			if flags != 0 || audit != 0 {
+			if flags != 0 || audit != beforeAudit {
 				t.Fatalf("revoked write left %d features and %d events", flags, audit)
 			}
 		})

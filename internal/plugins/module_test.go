@@ -428,6 +428,10 @@ func TestPersonWriteRechecksRevokedPermission(t *testing.T) {
 		t.Fatal(err)
 	}
 	plug, _ := reg.Lookup("pharos")
+	var beforeAudit int
+	if err := database.Admin.QueryRow(t.Context(), `SELECT count(*) FROM events WHERE tenant_id=$1`, tenantID).Scan(&beforeAudit); err != nil {
+		t.Fatal(err)
+	}
 	pool, barrier, ctx := dbtest.BarrierPool(t, database.App, func(sql string) bool { return sql == "commit" })
 	mux := http.NewServeMux()
 	NewWithRegistry(pool, reg).Mount(mux)
@@ -448,23 +452,23 @@ func TestPersonWriteRechecksRevokedPermission(t *testing.T) {
 	if err := db.LockTenant(ctx, revoke, person.TenantID); err != nil {
 		t.Fatal(err)
 	}
-	tag, err := revoke.Exec(ctx, `DELETE FROM role_bindings WHERE tenant_id=$1 AND principal_id=$2`, person.TenantID, person.ID)
+	tag, err := revoke.Exec(ctx, `UPDATE role_bindings b SET role_id=r.id FROM roles r WHERE b.tenant_id=$1 AND b.principal_id=$2 AND b.scope_type='workspace' AND r.tenant_id=b.tenant_id AND r.key='member'`, person.TenantID, person.ID)
 	if err != nil || tag.RowsAffected() != 1 {
-		t.Fatalf("revoke person binding: %v (%d rows)", err, tag.RowsAffected())
+		t.Fatalf("demote person binding: %v (%d rows)", err, tag.RowsAffected())
 	}
 	if err := revoke.Commit(ctx); err != nil {
 		t.Fatal(err)
 	}
 	barrier.Release()
 	rec := dbtest.Await(t, ctx, done)
-	if rec.Code != http.StatusForbidden || !strings.Contains(rec.Body.String(), `"error":"permission denied"`) {
+	if rec.Code != http.StatusForbidden || !strings.Contains(rec.Body.String(), `"message":"permission denied"`) {
 		t.Fatalf("revoked write: %d %s", rec.Code, rec.Body.String())
 	}
 	var audit int
 	if err := database.Admin.QueryRow(ctx, `SELECT count(*) FROM events WHERE tenant_id=$1`, tenantID).Scan(&audit); err != nil {
 		t.Fatal(err)
 	}
-	if countInstalls(t, database, tenantID) != 0 || audit != 0 || countLinks(t, database, tenantID) != 0 {
+	if countInstalls(t, database, tenantID) != 0 || audit != beforeAudit || countLinks(t, database, tenantID) != 0 {
 		t.Fatal("revoked write left an installation or audit rows")
 	}
 }

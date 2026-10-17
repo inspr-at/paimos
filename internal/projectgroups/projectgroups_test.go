@@ -333,6 +333,10 @@ func TestDeletedProjectsLeaveSharedGroups(t *testing.T) {
 // check. The final transaction must refuse before touching groups or events.
 func TestPersonWriteRechecksRevokedPermission(t *testing.T) {
 	w := setup(t)
+	var beforeAudit int
+	if err := w.db.Admin.QueryRow(t.Context(), `SELECT count(*) FROM events WHERE tenant_id=$1`, w.admin.TenantID).Scan(&beforeAudit); err != nil {
+		t.Fatal(err)
+	}
 	pool, barrier, ctx := dbtest.BarrierPool(t, w.db.App, func(sql string) bool { return sql == "commit" })
 	mux := http.NewServeMux()
 	New(pool).Mount(mux)
@@ -353,9 +357,9 @@ func TestPersonWriteRechecksRevokedPermission(t *testing.T) {
 	if err := db.LockTenant(ctx, revoke, w.admin.TenantID); err != nil {
 		t.Fatal(err)
 	}
-	tag, err := revoke.Exec(ctx, `DELETE FROM role_bindings WHERE tenant_id=$1 AND principal_id=$2`, w.admin.TenantID, w.admin.ID)
+	tag, err := revoke.Exec(ctx, `UPDATE role_bindings b SET role_id=r.id FROM roles r WHERE b.tenant_id=$1 AND b.principal_id=$2 AND b.scope_type='workspace' AND r.tenant_id=b.tenant_id AND r.key='member'`, w.admin.TenantID, w.admin.ID)
 	if err != nil || tag.RowsAffected() != 1 {
-		t.Fatalf("revoke person binding: %v (%d rows)", err, tag.RowsAffected())
+		t.Fatalf("demote person binding: %v (%d rows)", err, tag.RowsAffected())
 	}
 	if err := revoke.Commit(ctx); err != nil {
 		t.Fatal(err)
@@ -369,7 +373,7 @@ func TestPersonWriteRechecksRevokedPermission(t *testing.T) {
 	if err := w.db.Admin.QueryRow(ctx, `SELECT (SELECT count(*) FROM project_groups WHERE tenant_id=$1), (SELECT count(*) FROM events WHERE tenant_id=$1)`, w.admin.TenantID).Scan(&groups, &audit); err != nil {
 		t.Fatal(err)
 	}
-	if groups != 0 || audit != 0 {
+	if groups != 0 || audit != beforeAudit {
 		t.Fatalf("revoked write left %d groups and %d events", groups, audit)
 	}
 }
