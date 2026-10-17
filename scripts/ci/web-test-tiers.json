@@ -16180,6 +16180,8 @@
     ,
     {"kind":"node","file":"tests/lead.test.ts","name":"AEON-1038: unclaimed starts and launch-off policy never invent admission failures","tier":"GATED-FULL"}
     ,
+    {"kind":"node","file":"tests/lead.test.ts","name":"AEON-1426: a stopped lead whose admission adapter is absent is not an unreadable check","tier":"ESSENTIAL"}
+    ,
     {"kind":"node","file":"tests/lead.test.ts","name":"AEON-791: the saved agent names reach every screen that reads LEAD_WORDS, and clearing restores Lead","tier":"ESSENTIAL"}
     ,
     {"kind":"node","file":"tests/lead.test.ts","name":"Resume is only a restart after a confirmed stop; Pause needs an existing intent","tier":"ESSENTIAL"}

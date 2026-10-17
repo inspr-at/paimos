@@ -149,10 +149,30 @@ async function noUnreadBadge(badge: Locator) {
   await expect(badge).toHaveCount(0)
   await expect(messagesTab(badge.page())).toHaveAccessibleName('Chat')
 }
+// AEON-1466: AEON-1453 stores the tab used last on view:session-panel; agents:session-panel is read and never written.
 async function rememberTab(page: Page, name: 'Chat' | 'Details') {
-  const saved = page.waitForResponse(response => response.request().method() === 'PUT' && decodeURIComponent(new URL(response.url()).pathname).endsWith('/preferences/agents:session-panel'))
+  const last = name === 'Chat' ? 'chat' : 'overview'
+  const saved = page.waitForResponse(response => {
+    if (response.request().method() !== 'PUT') return false
+    let path = ''
+    try { path = decodeURIComponent(new URL(response.url()).pathname) } catch { return false }
+    if (!path.endsWith('/preferences/view:session-panel')) return false
+    let body: { value?: { last?: string } } | null = null
+    try { body = response.request().postDataJSON() } catch { return false }
+    return body?.value?.last === last
+  })
   await panelOf(page).getByRole('tab', { name: new RegExp(`^${name}`) }).click()
   await saved
+}
+function legacyTabWrites(page: Page) {
+  const writes: string[] = []
+  page.on('request', request => {
+    if (request.method() !== 'PUT') return
+    let path = ''
+    try { path = decodeURIComponent(new URL(request.url()).pathname) } catch { return }
+    if (path.endsWith('/preferences/agents:session-panel')) writes.push(request.postData() ?? '')
+  })
+  return writes
 }
 
 const scroller = (page: Page) => panelOf(page).locator('.thread-scroll')
@@ -189,6 +209,7 @@ for (const width of [375, 390, 430]) {
 
 test('Messages is its own tab with an unread badge; seeing the posts clears it and the tab is remembered', async ({ page }) => {
   const { worker } = await setup(page, { count: 5, storage: readUpTo(worker0, 201) })
+  const legacy = legacyTabWrites(page)
   await page.setViewportSize({ width: 1600, height: 1000 })
   await page.goto(`/agents/${worker.id}`)
   const panel = panelOf(page)
@@ -196,7 +217,7 @@ test('Messages is its own tab with an unread badge; seeing the posts clears it a
   await expect(messagesTab(page).locator('.count')).toHaveText('2')
   await expect(panel.locator('#session-panel-messages')).toBeHidden()
   await shot(page, 'overview-1600')
-  await messagesTab(page).click()
+  await rememberTab(page, 'Chat')
   await expect(messagesTab(page)).toHaveAttribute('aria-selected', 'true')
   await expect(panel.getByRole('separator', { name: '2 new' })).toBeVisible()
   await expect(panel.locator('.msg').nth(2)).toHaveClass(/mine/) // Own post after the watermark, above the divider.
@@ -213,12 +234,14 @@ test('Messages is its own tab with an unread badge; seeing the posts clears it a
   await page.reload()
   await expect(panel.getByRole('tab', { name: 'Details' })).toHaveAttribute('aria-selected', 'true')
   await noUnreadBadge(messagesTab(page).locator('.count'))
+  expect(legacy, 'the older session-panel store is never rewritten').toEqual([])
 })
 
 for (const width of [1600, 390]) {
   test(`the unread badge follows the server read marker at ${width}`, async ({ page }) => {
     const seen = '3e000000-0000-4000-8000-000000000101'
     const { worker, calls } = await setup(page, { count: 5, readMark: { event: 201, id: seen } })
+    const legacy = legacyTabWrites(page)
     await page.setViewportSize({ width, height: width === 390 ? 844 : 1000 })
     await page.goto(`/agents/${worker.id}`)
     const panel = panelOf(page)
@@ -249,6 +272,7 @@ for (const width of [1600, 390]) {
     await expect(overview).toHaveAttribute('aria-selected', 'true')
     await expect(panel.locator('.msg')).toHaveCount(5)
     await noUnreadBadge(badge)
+    expect(legacy, 'the older session-panel store is never rewritten').toEqual([])
     await shot(page, `server-read-${width}`)
   })
 }

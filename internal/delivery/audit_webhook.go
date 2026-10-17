@@ -38,7 +38,10 @@ type auditEnvelope struct {
 	SHA     string `json:"sha"`
 	State   string `json:"state"`
 	Context string `json:"context"`
-	Sender  struct {
+	Group   struct {
+		Head string `json:"head_sha"`
+	} `json:"merge_group"`
+	Sender struct {
 		Login string `json:"login"`
 	} `json:"sender"`
 	Repository struct {
@@ -91,6 +94,22 @@ func (m *Module) mergeAuditWebhook(ctx context.Context, name string, raw []byte)
 	var f *MergeFact
 	var err error
 	switch name {
+	case "merge_group":
+		if e.Action == "checks_requested" {
+			// The projection step has stored the authenticated group fact.
+			// Repair an existing row even if it was already alerted, without
+			// manufacturing an audit for an unmerged queue candidate.
+			var exists bool
+			err = db.InTenant(db.AllProjects(ctx, "late merge audit queue provenance"), m.pool, m.config.TenantID, func(tx pgx.Tx) error {
+				return tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM delivery_merge_audit WHERE repository=$1 AND merge_sha=$2)`, m.config.Repository, e.Group.Head).Scan(&exists)
+			})
+			if err == nil && exists {
+				f, err = reader.AuditCommit(ctx, e.Group.Head)
+				if err == nil && (f == nil || f.SHA != e.Group.Head) {
+					return webhookFailed, errRead
+				}
+			}
+		}
 	case "pull_request":
 		if e.Action == "closed" && e.Pull.Merged && e.Repository.Default != "" {
 			f, err = auditPullFact(e.Pull, m.config.Repository, e.Repository.Default)

@@ -39,6 +39,34 @@ func TestProjectLeadWaitProjection(t *testing.T) {
 	}
 }
 
+func TestProjectAdmissionAbsence(t *testing.T) {
+	session := "session"
+	base := Lead{State: "waiting_for_room", Reason: "admission_unavailable", Revision: 4, Generation: 1, SessionID: &session, AutomaticLaunchEnabled: false}
+	stopped := base
+	live := base
+	live.ProcessActive = true
+	for _, tc := range []struct {
+		name, state, reason string
+		lead                Lead
+		configured          bool
+	}{
+		{"absent stopped session", "paused", "admission_not_configured", stopped, false},
+		{"absent live session", "waiting_for_room", "admission_not_configured", live, false},
+		{"absent unbound intent", "waiting_for_room", "admission_not_configured", Lead{State: "waiting_for_room", Reason: "admission_unavailable", Revision: 2}, false},
+		{"configured live failure", "waiting_for_room", "admission_unavailable", live, true},
+		{"configured stopped failure", "paused", "process_stopped", stopped, true},
+		{"legacy check failure", "waiting_for_room", "start_checks_unavailable", Lead{State: "waiting_for_room", Reason: "start_checks_unavailable", Revision: 2, Generation: 1, SessionID: &session}, false},
+		{"unclaimed start", "waiting_for_room", "awaiting_generation", Lead{State: "waiting_for_room", Reason: "awaiting_generation", Revision: 1}, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			got := projectAdmissionAbsence(tc.lead, tc.configured)
+			if got.State != tc.state || got.Reason != tc.reason || got.Revision != tc.lead.Revision || got.Generation != tc.lead.Generation || got.SessionID != tc.lead.SessionID || got.ProcessActive != tc.lead.ProcessActive || got.AutomaticLaunchEnabled != tc.lead.AutomaticLaunchEnabled {
+				t.Fatalf("projection=%+v, want state %s reason %s", got, tc.state, tc.reason)
+			}
+		})
+	}
+}
+
 func TestLeadAdmissionFailureRedactsAndNamesCheck(t *testing.T) {
 	for _, gate := range []string{"dial", "harness", "account", "host", "private account identifier"} {
 		err := fmt.Errorf("wrapped: %w", &LeadAdmissionError{Gate: gate, Err: errors.New("private diagnostic")})

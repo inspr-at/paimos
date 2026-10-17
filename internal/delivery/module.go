@@ -53,6 +53,7 @@ func (m *Module) Mount(mux *http.ServeMux) {
 	// Every authenticated delivery is durable before projection/audit/flow work.
 	mux.HandleFunc("POST /api/github/webhook", m.mergeWebhook)
 	mux.HandleFunc("POST /api/projects/{projectId}/delivery/merge-backfill", m.mergeBackfill)
+	mux.HandleFunc("POST /api/projects/{projectId}/deploys", m.recordDeploy)
 	mux.HandleFunc("GET /api/delivery/audit", m.auditList)
 	mux.HandleFunc("GET /api/delivery", m.list)
 	mux.HandleFunc("GET /api/delivery/alerts", m.listAlerts)

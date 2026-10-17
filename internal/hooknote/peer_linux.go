@@ -84,6 +84,34 @@ func observe(pid int, requireProjectCWD bool) (Process, error) {
 	return Process{PID: pid, UID: int(dir.Uid), Parent: parent, Started: started, Executable: exe, Dev: dev, Ino: ino, CWD: cwd}, nil
 }
 
+// processStarted reads field 22 of /proc/<pid>/stat. That file is world-readable,
+// including for a zombie or another user's process, after image inspection fails.
+func processStarted(pid int) (string, error) {
+	if pid < 1 {
+		return "", ErrPeer
+	}
+	raw, err := os.ReadFile(fmt.Sprintf("/proc/%d/stat", pid))
+	if err != nil {
+		return "", ErrPeer
+	}
+	return linuxStart(raw)
+}
+
+func linuxStart(raw []byte) (string, error) {
+	end := strings.LastIndexByte(string(raw), ')')
+	if end < 0 {
+		return "", ErrPeer
+	}
+	fields := strings.Fields(string(raw[end+1:]))
+	if len(fields) < 20 {
+		return "", ErrPeer
+	}
+	if _, err := strconv.ParseUint(fields[19], 10, 64); err != nil || fields[19] == "" {
+		return "", ErrPeer
+	}
+	return fields[19], nil
+}
+
 func statProcExe(path string) (uint64, uint64, error) {
 	var st unix.Stat_t
 	if err := unix.Stat(path, &st); err != nil {
@@ -108,8 +136,8 @@ func linuxIdentity(raw []byte) (started string, parent int, err error) {
 	if err != nil || parent < 1 {
 		return "", 0, errors.New("invalid parent")
 	}
-	if _, err = strconv.ParseUint(fields[19], 10, 64); err != nil || fields[19] == "" {
+	if started, err = linuxStart(raw); err != nil {
 		return "", 0, errors.New("invalid start")
 	}
-	return fields[19], parent, nil
+	return started, parent, nil
 }

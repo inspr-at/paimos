@@ -106,12 +106,25 @@ function followViewport() {
   }
   viewportFrame = requestAnimationFrame(tick)
 }
-function onWide(event: MediaQueryListEvent) {
-  // A delivered media change is authoritative while innerWidth catches up.
-  // Missing changes still use fresh query/layout samples over the next frames.
-  const next = nextHeaderGlimpseWide({ mediaMatches: event.matches, layoutWidth: window.innerWidth })
-  wide.value = next
+function applyDeliveredWide(mediaMatches: boolean) {
+  const next = nextHeaderGlimpseWide({ mediaMatches, layoutWidth: window.innerWidth })
+  if (wide.value !== next) wide.value = next
   if (next) scheduleMeasure()
+}
+function onWide(event: MediaQueryListEvent) {
+  // A delivered media change is authoritative while innerWidth catches up by
+  // one pixel. A queued matches:true must not turn the glimpse back on after
+  // the layout has already left 1280. The next frames re-read the live query
+  // and can only clear a wide that the layout no longer supports.
+  applyDeliveredWide(event.matches)
+  if (viewportFrame) return
+  let left = 2
+  const tick = () => {
+    const next = nextHeaderGlimpseWide({ mediaMatches: window.matchMedia(wideMedia).matches, layoutWidth: window.innerWidth })
+    if (!next && wide.value) wide.value = false
+    viewportFrame = --left > 0 ? requestAnimationFrame(tick) : 0
+  }
+  viewportFrame = requestAnimationFrame(tick)
 }
 // #main's scroll and the observer can disagree. A delivery may carry the
 // pre-scroll sample first, or the scroll may never be delivered. The box on

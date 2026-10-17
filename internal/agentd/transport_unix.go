@@ -51,16 +51,32 @@ func ServeLocal(s *Supervisor, socket string, attachments ...*AttachManager) (_ 
 	if err != nil {
 		return nil, err
 	}
-	lock, err := dir.LockSocket(filepath.Base(socket))
+	// The short socket fallback can live outside daemon state. Retain a
+	// separate descriptor so hook cleanup also survives Supervisor.Close.
+	peer := dir
+	if s.state != nil && s.state.Path() != dir.Path() {
+		peer, err = agentsetup.OpenStore(s.state.Path(), false)
+		if err != nil {
+			dir.Close()
+			return nil, err
+		}
+	}
+	closeDirectories := func() {
+		if peer != dir {
+			_ = peer.Close()
+		}
+		_ = dir.Close()
+	}
+	lock, err := dir.LockSocket(filepath.Base(socket), peer)
 	if err != nil {
-		dir.Close()
+		closeDirectories()
 		return nil, err
 	}
 	complete := false
 	var info, tokenInfo os.FileInfo
 	var listener net.Listener
 	cleanup := func() error {
-		return dir.CleanupSocket(filepath.Base(socket), lock, info, tokenInfo)
+		return dir.CleanupSocket(filepath.Base(socket), lock, info, tokenInfo, peer)
 	}
 	defer func() {
 		if !complete {
@@ -69,7 +85,7 @@ func ServeLocal(s *Supervisor, socket string, attachments ...*AttachManager) (_ 
 			}
 			_ = cleanup()
 			lock.Close()
-			dir.Close()
+			closeDirectories()
 		}
 	}()
 	if _, err := os.Lstat(socket); err == nil {
@@ -390,7 +406,7 @@ func ServeLocal(s *Supervisor, socket string, attachments ...*AttachManager) (_ 
 	local := &LocalServer{Server: server, Listener: listener, Socket: socket, TokenFile: tokenFile, cleanup: cleanup, hooks: hooks}
 	local.release = func() {
 		_ = lock.Close()
-		_ = dir.Close()
+		closeDirectories()
 	}
 	go func() { _ = server.Serve(listener) }()
 	complete = true

@@ -129,6 +129,19 @@ func observe(pid int, requireProjectCWD bool) (Process, error) {
 	return Process{PID: pid, UID: int(first.Eproc.Ucred.Uid), Parent: int(first.Eproc.Ppid), Started: started, Executable: executable, Dev: dev, Ino: ino, CWD: cwd, PIDVersion: version}, nil
 }
 
+// processStarted reads kern.proc.pid. The start time is available for processes
+// whose executable or working directory this user cannot inspect.
+func processStarted(pid int) (string, error) {
+	if pid < 1 {
+		return "", ErrPeer
+	}
+	info, err := unix.SysctlKinfoProc("kern.proc.pid", pid)
+	if err != nil || info.Proc.P_pid != int32(pid) {
+		return "", ErrPeer
+	}
+	return fmt.Sprintf("%d:%d", info.Proc.P_starttime.Sec, info.Proc.P_starttime.Usec), nil
+}
+
 // PROC_PIDUNIQIDENTIFIERINFO is flavor 17. p_idversion sits at byte 32 of the
 // 56-byte proc_uniqidentifierinfo and matches audit_token_t.val[7]. A short
 // read or a zero version fails closed. The public SDK omits this flavor.
