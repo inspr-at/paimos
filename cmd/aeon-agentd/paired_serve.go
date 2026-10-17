@@ -152,7 +152,6 @@ func publishHookPeer(store *agentsetup.Store) error {
 func servePaired(root string, capacityInterval time.Duration) error {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
-	exitAfterSignal(ctx)
 	return servePairedContext(ctx, root, capacityInterval)
 }
 
@@ -274,17 +273,16 @@ func servePairedContext(ctx context.Context, root string, capacityInterval time.
 	diagnostics := pairedDiagnostics{sync: lifecycle.sync}
 	for {
 		if stopping || ctx.Err() != nil {
-			signaled := ctx.Err() != nil
 			stopping = true
 			stopClean()
 			stopCapture()
 			<-captureDone
-			op, cancel := context.WithTimeout(context.Background(), cleanStopDrain)
+			op, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 			err = s.Close(op)
 			cancel()
-			// A signal has already removed the socket and our hook pin. Do not
-			// retry drain until launchd's exit timeout turns into SIGKILL.
-			if err == nil || signaled {
+			// Runtime files are already gone. A signal does not finish the
+			// drain: busy turns stay owned until Close observes them exit.
+			if err == nil {
 				return nil
 			}
 			awaitDrainRetry()

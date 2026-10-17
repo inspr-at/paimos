@@ -292,7 +292,6 @@ func serve(args []string) (resultErr error) {
 	}
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
-	exitAfterSignal(ctx)
 	s, err := agentd.NewSupervisor(ctx, agentd.Config{API: agentd.NewRemote(base, key), StateRoot: state, DaemonID: daemonID,
 		Workspace: workspace, Adapters: adapters, EstimatedUnits: estimates, Accounts: accounts, CapacityInterval: capacityInterval})
 	if err != nil {
@@ -319,18 +318,16 @@ func serve(args []string) (resultErr error) {
 	stopping := false
 	for {
 		if stopping || ctx.Err() != nil {
-			signaled := ctx.Err() != nil
 			stopping = true
 			stopClean()
 			stopCapture()
 			<-captureDone
-			closeCtx, cancel := context.WithTimeout(context.Background(), cleanStopDrain)
+			closeCtx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 			closeErr := s.Close(closeCtx)
 			cancel()
-			// Exit 0 after a signal even when drain is unfinished, so launchd
-			// does not treat the stop as a crash and restart the job. The
-			// socket and our hook pin are already gone.
-			if closeErr == nil || signaled {
+			// Runtime files are already gone. A signal does not finish the
+			// drain: busy turns stay owned until Close observes them exit.
+			if closeErr == nil {
 				return nil
 			}
 			// The serve context already cancelled a clean Codex idle wait.
@@ -353,31 +350,18 @@ func serve(args []string) (resultErr error) {
 	}
 }
 
-// cleanStopDrain is the one drain attempt after a signal has already removed
-// the runtime files. The paired plist sets no ExitTimeOut, so launchd uses
-// its system default: 5s on the qualified Mac (`launchctl print` exit timeout
-// for cm.aeon.agentd). The strict qualification script also starts the
-// previous daemon about 2s after launchctl remove. File cleanup itself does
-// not use this budget. A stuck drain must not hold the state lock past it.
-// SIGKILL after the exit timeout cannot run cleanup.
-const cleanStopDrain = time.Second
-
-// exitAfterSignal ends the process if shutdown is still stuck one budget
-// after SIGTERM or SIGINT. Exit 0 keeps KeepAlive from treating the stop as
-// a crash. Call it only from the signal entry, not from a test context.
-func exitAfterSignal(ctx context.Context) {
-	go func() {
-		<-ctx.Done()
-		time.Sleep(cleanStopDrain)
-		os.Exit(0)
-	}()
-}
-
-// awaitDrainRetry is the pause between Close attempts when an in-process stop
-// still has busy turns. A signal does not take this path. Idle Codex waits are not.
+// awaitDrainRetry is the pause between Close attempts after SIGTERM or an
+// in-process stop. Busy turns are left to finish. Idle Codex waits are not.
 func awaitDrainRetry() {
+	if drainRetryObserver != nil {
+		drainRetryObserver()
+	}
 	time.Sleep(200 * time.Millisecond)
 }
+
+// drainRetryObserver is nil outside tests. It runs when a Close that did not
+// finish is about to be retried, so a test can see that retry without sleeping.
+var drainRetryObserver func()
 
 func control(args []string, out io.Writer) error {
 	f := flag.NewFlagSet("control", flag.ContinueOnError)

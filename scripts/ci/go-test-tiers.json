@@ -520,6 +520,8 @@
     ,
     {"kind":"go","package":"cmd/aeon-agentd","name":"TestPairedServeFromRootWorkingDirectory","tier":"ESSENTIAL"}
     ,
+    {"kind":"go","package":"cmd/aeon-agentd","name":"TestPairedServeKeepsDrainingBusyRun","tier":"ESSENTIAL"}
+    ,
     {"kind":"go","package":"cmd/aeon-agentd","name":"TestPairedServeRestartsWithUnconfirmedLedgerIntent","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"cmd/aeon-agentd","name":"TestPairedSyncTombstoneProbesAndFailureDiagnostics","tier":"GATED-FULL"}
