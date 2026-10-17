@@ -50,10 +50,7 @@ func logListPlan(t *testing.T, f storageFixture, candidates ...string) {
 			}
 		}
 		stage = "page EXPLAIN"
-		explain := "EXPLAIN (FORMAT JSON) "
-		if len(candidates) > 0 {
-			explain = "EXPLAIN (ANALYZE, BUFFERS, FORMAT JSON) "
-		}
+		explain := "EXPLAIN (ANALYZE, BUFFERS, FORMAT JSON) "
 		var raw []byte
 		starts, _, err := planSeries(apiClock, "24h")
 		if err != nil {
