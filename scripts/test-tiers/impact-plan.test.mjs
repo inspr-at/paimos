@@ -11,7 +11,7 @@ import { EventEmitter } from 'node:events'
 import { shadowPlan, registryImpact, ownershipGraph, main as planMain } from './impact-plan.mjs'
 import { buildBrowserMap, browserIdentity, dependencyFingerprint, nightlyBrowserMap } from './browser-impact.mjs'
 import { captureBrowser } from './browser-coverage.mjs'
-import { graphIncomplete, select } from './core.mjs'
+import { graphIncomplete, select, fullWebShardCount } from './core.mjs'
 import { schedulingDecision, effectiveLane } from './diff.mjs'
 import { runnerSelection } from './cli.mjs'
 import { classifyPR, requireResults } from '../ci-pr-plan.mjs'
@@ -436,6 +436,6 @@ test('AEON-1333 depth-1 merge checkout publishes complete would-have-skipped evi
   assert.equal(result.complete, true, JSON.stringify(result.fallback_reasons))
   assert.equal(result.mode, 'shadow'); assert.equal(result.browser_scope, 'none')
   assert.equal(result.would_have_skipped.count, 4); assert.equal(result.fallback_reasons.length, 0)
-  assert.equal(result.shards.length, 16); assert.deepEqual(result.shards.flatMap(shard => shard.cases), [])
+  assert.equal(result.shards.length, fullWebShardCount); assert.deepEqual(result.shards.flatMap(shard => shard.cases), [])
   assert.equal(result.identity.base_sha, base); assert.equal(result.identity.head_sha, head); assert.equal(result.identity.checkout_sha, merge)
 })
