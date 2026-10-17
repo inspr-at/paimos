@@ -36,9 +36,17 @@ export async function loadTicketGraphContext(projectId: string, filters: ListFil
 }
 export const GLIMPSE_MIN_TICKETS = 8
 export const GLIMPSE_MIN_LINKS = 1
+export const GLIMPSE_MIN_WIDTH = 1280
 
 export function headerGlimpseAllowed(input: { enabled: boolean; reduced: boolean; wide: boolean; tickets: number }): boolean {
   return input.enabled && input.wide && !input.reduced && input.tickets >= GLIMPSE_MIN_TICKETS
+}
+
+// A viewport override can drop the MediaQueryList change, and the list created
+// at mount can keep matches true after the layout shrinks. Stay wide only when
+// the live query and the layout width both clear the same threshold.
+export function headerGlimpseViewportWide(mediaMatches: boolean, innerWidth: number): boolean {
+  return mediaMatches === true && Number.isFinite(innerWidth) && innerWidth >= GLIMPSE_MIN_WIDTH
 }
 
 export function headerGlimpseGraphReady(nodes: number, links: number): boolean {

@@ -5,7 +5,7 @@ import { useRoute, useRouter } from 'vue-router'
 import GraphCanvas from '../graph/GraphCanvas.vue'
 import AppIcon from '../AppIcon.vue'
 import { projectSection } from './projectNavigation'
-import { GLIMPSE_CLEAR_SELECTOR, glimpsePlaceControls, glimpseTextMask, loadTicketGraphContext, headerGlimpseAllowed, headerGlimpseGraphReady } from '../../lib/headerGlimpse'
+import { GLIMPSE_CLEAR_SELECTOR, GLIMPSE_MIN_WIDTH, glimpsePlaceControls, glimpseTextMask, loadTicketGraphContext, headerGlimpseAllowed, headerGlimpseGraphReady, headerGlimpseViewportWide } from '../../lib/headerGlimpse'
 import { filtersFromQuery, filtersToQuery, type ListFilters } from '../../lib/ticketList'
 import { ticketGraphData } from '../../lib/ticketGraphRenderer'
 import type { GraphData, GraphFPS } from '../../lib/graphRenderer'
@@ -17,9 +17,10 @@ const props = withDefaults(defineProps<{ projectId: string; projectKey: string; 
 const emit = defineEmits<{ active: [value: boolean] }>()
 const router = useRouter(), route = useRoute()
 const filters = computed(() => props.filters ?? filtersFromQuery(projectSection(route) === 'tickets' ? route.query : {}))
-const wideQuery = window.matchMedia('(min-width: 1280px)')
+const wideMedia = `(min-width: ${GLIMPSE_MIN_WIDTH}px)`
+const wideQuery = window.matchMedia(wideMedia)
 const reducedQuery = window.matchMedia('(prefers-reduced-motion: reduce)')
-const wide = ref(wideQuery.matches), reduced = ref(reducedQuery.matches), idle = ref(false)
+const wide = ref(headerGlimpseViewportWide(wideQuery.matches, window.innerWidth)), reduced = ref(reducedQuery.matches), idle = ref(false)
 const paint = ref(false), userPaused = ref(false), occluded = ref(false)
 const data = shallowRef<GraphData>({ nodes: [], links: [] })
 const column = ref<HTMLElement>()
@@ -85,6 +86,31 @@ function scheduleMeasure() {
 }
 
 function applyMotion() { canvas.value?.setPaused(userPaused.value || occluded.value || document.hidden) }
+// Re-read a fresh query. The list from setup can miss `change` while the
+// canvas is painting, and its matches flag can stay true after a shrink.
+function readWide() {
+  return headerGlimpseViewportWide(window.matchMedia(wideMedia).matches, window.innerWidth)
+}
+function syncWide() {
+  const next = readWide()
+  if (wide.value !== next) wide.value = next
+}
+let viewportWatch: ResizeObserver | undefined, viewportFrame = 0
+function followViewport() {
+  syncWide()
+  if (viewportFrame) return
+  let left = 2
+  const tick = () => {
+    syncWide()
+    viewportFrame = --left > 0 ? requestAnimationFrame(tick) : 0
+  }
+  viewportFrame = requestAnimationFrame(tick)
+}
+function onWide(event: MediaQueryListEvent) {
+  const next = headerGlimpseViewportWide(event.matches, window.innerWidth)
+  if (wide.value !== next) wide.value = next
+  else followViewport()
+}
 // #main's scroll and the observer can disagree. A delivery may carry the
 // pre-scroll sample first, or the scroll may never be delivered. The box on
 // screen is the pause decision. Collapsing the header or opening a full-page
@@ -105,9 +131,9 @@ function syncOcclusion() { occluded.value = backdropOutOfView(); applyMotion() }
 function detachScroll() { scrollRoot?.removeEventListener('scroll', syncOcclusion); scrollRoot = undefined }
 function openGraph() { void router.push({ path: `/p/${encodeURIComponent(props.projectKey)}/tickets`, query: { ...filtersToQuery(filters.value), view: 'graph' } }) }
 function togglePause() { userPaused.value = !userPaused.value; applyMotion() }
-function onWide() { wide.value = wideQuery.matches }
 function onReduced() { reduced.value = reducedQuery.matches }
 function onVisibility() { applyMotion() }
+function onResize() { followViewport(); scheduleMeasure() }
 function attachSizing() {
   const header = column.value?.closest('header'), page = header?.closest('.project-page')
   if (!sizing || !header || !page) return
@@ -161,7 +187,10 @@ onMounted(() => {
   wideQuery.addEventListener('change', onWide)
   reducedQuery.addEventListener('change', onReduced)
   document.addEventListener('visibilitychange', onVisibility)
-  window.addEventListener('resize', scheduleMeasure)
+  window.addEventListener('resize', onResize)
+  viewportWatch = new ResizeObserver(followViewport)
+  viewportWatch.observe(document.documentElement)
+  syncWide()
   const start = () => { if (mounted) idle.value = true }
   if (typeof window.requestIdleCallback === 'function') idleId = window.requestIdleCallback(start, { timeout: 1500 })
   else requestAnimationFrame(() => requestAnimationFrame(start))
@@ -175,7 +204,9 @@ onBeforeUnmount(() => {
   sizing?.disconnect()
   changes?.disconnect()
   cancelAnimationFrame(measureFrame)
-  window.removeEventListener('resize', scheduleMeasure)
+  cancelAnimationFrame(viewportFrame)
+  viewportWatch?.disconnect()
+  window.removeEventListener('resize', onResize)
   wideQuery.removeEventListener('change', onWide)
   reducedQuery.removeEventListener('change', onReduced)
   document.removeEventListener('visibilitychange', onVisibility)
