@@ -621,3 +621,51 @@ func amountText(t *testing.T, database *dbtest.DB, rateID string) string {
 	}
 	return internal + " " + bill
 }
+
+// Risk: a plugin pin stays valid while a person loses cost_units.manage after
+// the precheck. Pin checks alone must not let a rate or audit event commit.
+func TestPersonWriteRechecksRevokedPermission(t *testing.T) {
+	database := dbtest.Open(t)
+	tenantID := insertTenant(t, database, "write-revocation")
+	person := insertPrincipal(t, database, tenantID, tenant.Person, "Admin", []string{"admin"})
+	mux, _, plug := mount(t, database.App)
+	nodeID := insertCostUnit(t, database, tenantID, "CU-1", "Rate target", `{}`)
+	if code, body := putInstall(mux, person, plug.Manifest.DigestSHA256, true, []string{fence.PermNodesContribute, fence.PermViewsProvide, fence.PermStepsApply}); code != http.StatusOK {
+		t.Fatalf("install: %d %s", code, body)
+	}
+	before := countEvents(t, database, tenantID, eventCreated)
+	pool, barrier, ctx := dbtest.BarrierPool(t, database.App, func(sql string) bool { return sql == "commit" })
+	mux, _, _ = mount(t, pool)
+	req := httptest.NewRequest(http.MethodPost, ratesPath(nodeID), strings.NewReader(rateBody("hour", "EUR", "10", "12", "2026-01-01", "")))
+	req = req.WithContext(tenant.WithPrincipal(ctx, person))
+	done := make(chan *httptest.ResponseRecorder, 1)
+	go func() {
+		rec := httptest.NewRecorder()
+		mux.ServeHTTP(rec, req)
+		done <- rec
+	}()
+	barrier.Wait(t, ctx) // The successful permission precheck has committed.
+	revoke, err := database.Admin.Begin(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer revoke.Rollback(ctx)
+	if err := db.LockTenant(ctx, revoke, person.TenantID); err != nil {
+		t.Fatal(err)
+	}
+	tag, err := revoke.Exec(ctx, `DELETE FROM role_bindings WHERE tenant_id=$1 AND principal_id=$2`, person.TenantID, person.ID)
+	if err != nil || tag.RowsAffected() != 1 {
+		t.Fatalf("revoke person binding: %v (%d rows)", err, tag.RowsAffected())
+	}
+	if err := revoke.Commit(ctx); err != nil {
+		t.Fatal(err)
+	}
+	barrier.Release()
+	rec := dbtest.Await(t, ctx, done)
+	if rec.Code != http.StatusForbidden || !strings.Contains(rec.Body.String(), `"error":"permission denied"`) {
+		t.Fatalf("revoked write: %d %s", rec.Code, rec.Body.String())
+	}
+	if countRates(t, database, tenantID) != 0 || countEvents(t, database, tenantID, eventCreated) != before || countEvents(t, database, tenantID, eventClosed) != 0 {
+		t.Fatal("revoked write left a rate or audit event")
+	}
+}

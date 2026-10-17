@@ -223,6 +223,9 @@ func (s *Service) Save(ctx context.Context, p tenant.Principal, key, projectID s
 	}
 	ctx = tenant.WithPrincipal(ctx, p)
 	err := db.InTenant(ctx, s.pool, p.TenantID, func(tx pgx.Tx) error {
+		if err := db.LockTenant(ctx, tx, p.TenantID); err != nil {
+			return err
+		}
 		if err := authorize(ctx, tx, p, projectID, true); err != nil {
 			return err
 		}

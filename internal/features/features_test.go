@@ -339,3 +339,71 @@ func TestValidationConcurrencyAndAtomicAudit(t *testing.T) {
 		t.Fatal("audit failure committed the override")
 	}
 }
+
+// Risk: feature Save already checks permissions in its transaction, but without
+// the tenant fence it can read a grant while a revocation is still uncommitted.
+func TestPersonWriteRechecksRevokedPermission(t *testing.T) {
+	for _, holdRevocation := range []bool{false, true} {
+		name := "committed before resume"
+		if holdRevocation {
+			name = "waits for access fence before recheck"
+		}
+		t.Run(name, func(t *testing.T) {
+			f := setup(t)
+			pool, barrier, ctx := dbtest.BarrierPool(t, f.d.App, func(sql string) bool { return sql == "commit" })
+			mux := http.NewServeMux()
+			New(pool).Mount(mux)
+			done := make(chan struct{})
+			result := make(chan *httptest.ResponseRecorder, 1)
+			go func() {
+				defer close(done)
+				// Settings is the ordinary person's initial permission check.
+				precheck := httptest.NewRecorder()
+				mux.ServeHTTP(precheck, httptest.NewRequest(http.MethodGet, "/api/settings/features", nil).WithContext(tenant.WithPrincipal(ctx, f.admin)))
+				if precheck.Code != http.StatusOK {
+					result <- precheck
+					return
+				}
+				rec := httptest.NewRecorder()
+				req := httptest.NewRequest(http.MethodPut, "/api/settings/features/"+WorkspaceSummary, strings.NewReader(`{"enabled":true,"expected_revision":0}`))
+				mux.ServeHTTP(rec, req.WithContext(tenant.WithPrincipal(ctx, f.admin)))
+				result <- rec
+			}()
+			barrier.Wait(t, ctx) // The successful permission precheck has committed.
+			revoke, err := f.d.Admin.Begin(ctx)
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer revoke.Rollback(ctx)
+			if err := db.LockTenant(ctx, revoke, f.admin.TenantID); err != nil {
+				t.Fatal(err)
+			}
+			tag, err := revoke.Exec(ctx, `DELETE FROM role_bindings WHERE tenant_id=$1 AND principal_id=$2`, f.admin.TenantID, f.admin.ID)
+			if err != nil || tag.RowsAffected() != 1 {
+				t.Fatalf("revoke person binding: %v (%d rows)", err, tag.RowsAffected())
+			}
+			if holdRevocation {
+				barrier.Release()
+				if lock := dbtest.BlockedOrDone(t, ctx, f.d.Admin, revoke.Conn().PgConn().PID(), done); lock != "transactionid" {
+					t.Fatalf("feature writer did not wait for access fence: %q", lock)
+				}
+			}
+			if err := revoke.Commit(ctx); err != nil {
+				t.Fatal(err)
+			}
+			barrier.Release()
+			rec := dbtest.Await(t, ctx, result)
+			status(t, rec, http.StatusForbidden)
+			if !strings.Contains(rec.Body.String(), `"reason_code":"missing_role_permission"`) {
+				t.Fatalf("wrong rejection: %s", rec.Body.String())
+			}
+			var flags, audit int
+			if err := f.d.Admin.QueryRow(ctx, `SELECT (SELECT count(*) FROM features WHERE tenant_id=$1), (SELECT count(*) FROM events WHERE tenant_id=$1)`, f.admin.TenantID).Scan(&flags, &audit); err != nil {
+				t.Fatal(err)
+			}
+			if flags != 0 || audit != 0 {
+				t.Fatalf("revoked write left %d features and %d events", flags, audit)
+			}
+		})
+	}
+}

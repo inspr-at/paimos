@@ -900,6 +900,8 @@
     ,
     {"kind":"go","package":"internal/agentaccounts","name":"TestPercentLimitSurvivesVendorResetAndRefresh","tier":"GATED-FULL"}
     ,
+    {"kind":"go","package":"internal/agentaccounts","name":"TestPersonWriteRechecksRevokedPermission","tier":"ESSENTIAL"}
+    ,
     {"kind":"go","package":"internal/agentaccounts","name":"TestPiAccountModelPermissionCatalogAndImmutablePins","tier":"GATED-FULL"}
     ,
     {"kind":"go","package":"internal/agentaccounts","name":"TestPiModelUnderDenyRequiresAccountUseManage","tier":"ESSENTIAL"}
@@ -2648,6 +2650,8 @@
     ,
     {"kind":"go","package":"internal/agentpairing","name":"TestPathProofCommandsRunInShells","tier":"GATED-FULL"}
     ,
+    {"kind":"go","package":"internal/agentpairing","name":"TestPersonMutationsRecheckPermissions","tier":"ESSENTIAL"}
+    ,
     {"kind":"go","package":"internal/agentpairing","name":"TestPiPairingConnectOnly","tier":"GATED-FULL"}
     ,
     {"kind":"go","package":"internal/agentpairing","name":"TestPiPairingSelectsOnlyTheConfiguredProvider","tier":"GATED-FULL"}
@@ -4069,6 +4073,8 @@
     {"kind":"go","package":"internal/business/costunits","name":"TestFieldSchemaAcceptsClassicCostUnit","tier":"GATED-FULL"}
     ,
     {"kind":"go","package":"internal/business/costunits","name":"TestInstallationGates","tier":"GATED-FULL"}
+    ,
+    {"kind":"go","package":"internal/business/costunits","name":"TestPersonWriteRechecksRevokedPermission","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/business/costunits","name":"TestPluginRegistersBusinessCosts","tags":["delete-candidate"],"tier":"GATED-FULL"}
     ,
@@ -6443,6 +6449,8 @@
     {"kind":"go","package":"internal/features","name":"TestDarkReleaseOverridesRevisionsAndAudit","tier":"NIGHTLY"}
     ,
     {"kind":"go","package":"internal/features","name":"TestEvaluationPrecedence","tier":"NIGHTLY"}
+    ,
+    {"kind":"go","package":"internal/features","name":"TestPersonWriteRechecksRevokedPermission","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/features","name":"TestValidationConcurrencyAndAtomicAudit","tier":"NIGHTLY"}
     ,
@@ -8970,6 +8978,8 @@
     ,
     {"kind":"go","package":"internal/plugins","name":"TestLeaseIsTenantScoped","tier":"GATED-FULL"}
     ,
+    {"kind":"go","package":"internal/plugins","name":"TestPersonWriteRechecksRevokedPermission","tier":"ESSENTIAL"}
+    ,
     {"kind":"go","package":"internal/plugins","name":"TestRegisterRejectsClosedFailures","tier":"GATED-FULL"}
     ,
     {"kind":"go","package":"internal/plugins/fence","name":"TestSealIsOrderIndependent","tier":"GATED-FULL"}
@@ -9131,6 +9141,8 @@
     {"kind":"go","package":"internal/projectdraft","name":"TestParsePayloadV1","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/projectgroups","name":"TestDeletedProjectsLeaveSharedGroups","tier":"GATED-FULL"}
+    ,
+    {"kind":"go","package":"internal/projectgroups","name":"TestPersonWriteRechecksRevokedPermission","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/projectgroups","name":"TestSharedGroupsAreAdminWritesAndTenantScoped","tier":"ESSENTIAL"}
     ,

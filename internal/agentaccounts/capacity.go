@@ -840,7 +840,7 @@ func (m *Module) approveCapacity(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, err)
 		return
 	}
-	err := m.in(r.Context(), p.TenantID, func(tx pgx.Tx) error {
+	err := m.write(r.Context(), p, "account.manage", func(tx pgx.Tx) error {
 		id := r.PathValue("accountId")
 		if !uuidRE.MatchString(id) {
 			return fail(404, "account not found")

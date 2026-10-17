@@ -263,6 +263,12 @@ func (m *Module) create(w http.ResponseWriter, r *http.Request) {
 	var out result
 	err = m.inTenant(r.Context(), p, func(tx pgx.Tx) error {
 		ctx := r.Context()
+		if err := db.LockTenant(ctx, tx, p.TenantID); err != nil {
+			return err
+		}
+		if authz.RequireTx(ctx, tx, p, "project_groups.write", authz.Scope{}) != nil {
+			return errNotAdmin
+		}
 		if err := lockGroups(ctx, tx); err != nil {
 			return err
 		}
@@ -356,6 +362,12 @@ func (m *Module) patch(w http.ResponseWriter, r *http.Request) {
 	var out result
 	err := m.inTenant(r.Context(), p, func(tx pgx.Tx) error {
 		ctx := r.Context()
+		if err := db.LockTenant(ctx, tx, p.TenantID); err != nil {
+			return err
+		}
+		if authz.RequireTx(ctx, tx, p, "project_groups.write", authz.Scope{}) != nil {
+			return errNotAdmin
+		}
 		if err := lockGroups(ctx, tx); err != nil {
 			return err
 		}
@@ -415,6 +427,12 @@ func (m *Module) remove(w http.ResponseWriter, r *http.Request) {
 	var out result
 	err := m.inTenant(r.Context(), p, func(tx pgx.Tx) error {
 		ctx := r.Context()
+		if err := db.LockTenant(ctx, tx, p.TenantID); err != nil {
+			return err
+		}
+		if authz.RequireTx(ctx, tx, p, "project_groups.write", authz.Scope{}) != nil {
+			return errNotAdmin
+		}
 		if err := lockGroups(ctx, tx); err != nil {
 			return err
 		}
@@ -470,6 +488,12 @@ func (m *Module) assign(w http.ResponseWriter, r *http.Request) {
 	out := result{Assignments: []Assignment{}}
 	err = m.inTenant(r.Context(), p, func(tx pgx.Tx) error {
 		ctx := r.Context()
+		if err := db.LockTenant(ctx, tx, p.TenantID); err != nil {
+			return err
+		}
+		if authz.RequireTx(ctx, tx, p, "project_groups.write", authz.Scope{}) != nil {
+			return errNotAdmin
+		}
 		if err := lockGroups(ctx, tx); err != nil {
 			return err
 		}

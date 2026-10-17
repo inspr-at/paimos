@@ -416,3 +416,51 @@ func installsVisible(t *testing.T, pool *pgxpool.Pool, tenantID string) int {
 	}
 	return n
 }
+
+// Risk: Configure authorizes in an earlier transaction; a revoked person must
+// not install a plugin or append either audit row with stale session roles.
+func TestPersonWriteRechecksRevokedPermission(t *testing.T) {
+	database := dbtest.Open(t)
+	tenantID := insertTenant(t, database, "write-revocation")
+	person := insertPrincipal(t, database, tenantID, tenant.Person, "Admin", []string{"admin"})
+	reg, err := Builtin(testStagePlugin("pharos"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	plug, _ := reg.Lookup("pharos")
+	pool, barrier, ctx := dbtest.BarrierPool(t, database.App, func(sql string) bool { return sql == "commit" })
+	mux := http.NewServeMux()
+	NewWithRegistry(pool, reg).Mount(mux)
+	req := httptest.NewRequest(http.MethodPut, "/api/plugins/pharos/installation", strings.NewReader(`{"manifest_digest_sha256":"`+plug.Manifest.DigestSHA256+`","enabled":true,"permissions":[]}`))
+	req = req.WithContext(tenant.WithPrincipal(ctx, person))
+	done := make(chan *httptest.ResponseRecorder, 1)
+	go func() {
+		rec := httptest.NewRecorder()
+		mux.ServeHTTP(rec, req)
+		done <- rec
+	}()
+	barrier.Wait(t, ctx) // The successful permission precheck has committed.
+	revoke, err := database.Admin.Begin(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer revoke.Rollback(ctx)
+	if err := db.LockTenant(ctx, revoke, person.TenantID); err != nil {
+		t.Fatal(err)
+	}
+	tag, err := revoke.Exec(ctx, `DELETE FROM role_bindings WHERE tenant_id=$1 AND principal_id=$2`, person.TenantID, person.ID)
+	if err != nil || tag.RowsAffected() != 1 {
+		t.Fatalf("revoke person binding: %v (%d rows)", err, tag.RowsAffected())
+	}
+	if err := revoke.Commit(ctx); err != nil {
+		t.Fatal(err)
+	}
+	barrier.Release()
+	rec := dbtest.Await(t, ctx, done)
+	if rec.Code != http.StatusForbidden || !strings.Contains(rec.Body.String(), `"error":"permission denied"`) {
+		t.Fatalf("revoked write: %d %s", rec.Code, rec.Body.String())
+	}
+	if countInstalls(t, database, tenantID) != 0 || countEvents(t, database, tenantID, eventInstallation) != 0 || countLinks(t, database, tenantID) != 0 {
+		t.Fatal("revoked write left an installation or audit rows")
+	}
+}

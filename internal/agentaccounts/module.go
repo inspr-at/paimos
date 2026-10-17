@@ -119,6 +119,17 @@ func (m *Module) in(ctx context.Context, tenantID string, fn func(pgx.Tx) error)
 	})
 }
 
+// write rechecks person authority under the tenant/tree fences held by in,
+// before the callback acquires resource rows or appends events.
+func (m *Module) write(ctx context.Context, p tenant.Principal, permission string, fn func(pgx.Tx) error) error {
+	return m.in(ctx, p.TenantID, func(tx pgx.Tx) error {
+		if p.Kind != tenant.Person || authz.RequireTx(ctx, tx, p, permission, authz.Scope{}) != nil {
+			return fail(http.StatusForbidden, "permission denied")
+		}
+		return fn(tx)
+	})
+}
+
 func (m *Module) list(w http.ResponseWriter, r *http.Request) {
 	p, ok := principal(w, r)
 	if !ok {
@@ -228,7 +239,7 @@ func (m *Module) createWindow(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var out Window
-	err := m.in(r.Context(), p.TenantID, func(tx pgx.Tx) error {
+	err := m.write(r.Context(), p, "account.manage", func(tx pgx.Tx) error {
 		var err error
 		out, err = createWindow(r.Context(), tx, p, r.PathValue("accountId"), in)
 		return err
@@ -255,7 +266,7 @@ func (m *Module) patch(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var out Account
-	err := m.in(r.Context(), p.TenantID, func(tx pgx.Tx) error {
+	err := m.write(r.Context(), p, "account.manage", func(tx pgx.Tx) error {
 		var err error
 		out, err = updateState(r.Context(), tx, p, r.PathValue("accountId"), in.State)
 		return err
@@ -278,7 +289,7 @@ func (m *Module) archive(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var out Account
-	err := m.in(r.Context(), p.TenantID, func(tx pgx.Tx) error {
+	err := m.write(r.Context(), p, "account.manage", func(tx pgx.Tx) error {
 		var err error
 		out, err = archiveAccount(r.Context(), tx, p, r.PathValue("accountId"))
 		return err
