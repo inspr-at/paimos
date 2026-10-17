@@ -42,7 +42,7 @@ func logListStages(t *testing.T, f storageFixture) {
 		t.Log("page stage boundaries unavailable")
 		return
 	}
-	for _, stage := range []string{"outcomes", "relations", "serves", "page_scope", "facts", "root_eta", "history_nodes", "bounded_events"} {
+	for _, stage := range []string{"outcomes", "relations", "serves", "page_scope", "facts", "root_eta", "subjects", "outcome_events", "history_roots", "history_nodes", "bounded_events"} {
 		ctx, cancel := context.WithTimeout(tenant.WithPrincipal(t.Context(), f.reader), 7*time.Second)
 		start := time.Now()
 		var count int

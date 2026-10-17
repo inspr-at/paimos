@@ -69,8 +69,10 @@ func listPageQuery() string {
  CROSS JOIN LATERAL (SELECT e.node_id,e.before,e.after FROM events e
  WHERE e.tenant_id=current_setting('aeon.tenant_id')::uuid AND e.id=ref.event_id
  AND (e.before->>'goal_node_id'=g.id::text OR e.after->>'goal_node_id'=g.id::text) OFFSET 0) e
- JOIN nodes n ON n.id=e.node_id AND e.node_id::text=coalesce(e.after->>'outcome_node_id',e.before->>'outcome_node_id')
+ CROSS JOIN LATERAL (SELECT n.id,n.tenant_id,n.kind_id FROM nodes n
+ WHERE n.tenant_id=current_setting('aeon.tenant_id')::uuid AND n.id=e.node_id OFFSET 0) n
  JOIN node_kinds k ON k.tenant_id=n.tenant_id AND k.id=n.kind_id AND k.slug='outcome'
+ WHERE e.node_id::text=coalesce(e.after->>'outcome_node_id',e.before->>'outcome_node_id')
  LIMIT 4097
  ), outcome_events AS MATERIALIZED (
  SELECT s.goal,e.id,e.at,e.node_id,e.after,'outcome'::text AS family,NULL::text AS bucket
