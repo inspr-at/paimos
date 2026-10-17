@@ -148,9 +148,9 @@ for (const width of [761, 800, 900]) {
   })
 }
 
-// AEON-1453: the switches' reserved pin slots widened the toolbar, so between 1181 and about 1300 px
+// AEON-1453: the switches' reserved pin slots widened the toolbar, so between 1181 and about 1350 px
 // Help and Close wrapped alone onto a second row. Two rows hold until one fits.
-for (const width of [1181, 1280, 1321, 1440]) {
+for (const width of [1181, 1280, 1380, 1440]) {
   test(`at ${width}px Close and Help stay in the first header row; the switches, search and Compare share one row`, async ({ page }) => {
     await open(page, { viewport: { width, height: 900 } })
     const top = async (locator: Locator) => (await locator.boundingBox())!.y

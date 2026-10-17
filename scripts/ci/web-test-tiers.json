@@ -12394,7 +12394,7 @@
     ,
     {"kind":"browser","file":"tests/release-header.spec.ts","name":"at 1280px Close and Help stay in the first header row; the switches, search and Compare share one row","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
     ,
-    {"kind":"browser","file":"tests/release-header.spec.ts","name":"at 1321px Close and Help stay in the first header row; the switches, search and Compare share one row","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    {"kind":"browser","file":"tests/release-header.spec.ts","name":"at 1380px Close and Help stay in the first header row; the switches, search and Compare share one row","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
     ,
     {"kind":"browser","file":"tests/release-header.spec.ts","name":"at 1440px Close and Help stay in the first header row; the switches, search and Compare share one row","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
     ,

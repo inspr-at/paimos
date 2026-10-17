@@ -864,11 +864,11 @@ button.sheet-sum { cursor: pointer; }
 .sr { position:absolute; width:1px; height:1px; overflow:hidden; clip-path:inset(50%); white-space:nowrap; }
 .toggle:focus-visible,.to-current:focus-visible,.next-up:focus-visible,.evidence-control:focus-visible { outline:none; box-shadow:var(--focus-ring); }
 @media(hover:hover) { .row:hover:not([aria-selected="true"]) { background:var(--row-hover); border-radius:10px; } .toggle:hover { background:var(--btn-bg-hover); } }
-/* Two rows until one fits: the switches' reserved pin slots (AEON-1453) need about 1320 px, below that Help
-   and Close would wrap alone. The switches, search and Compare share the second row; the search starts at
-   its minimum and takes what is left, so it never wraps onto a row of its own and short windows keep room
-   for the list. */
-@media(max-width:1320px) and (min-width:761px) { .title-row { flex-wrap:wrap; } .titles { flex-basis:calc(100% - 164px); } .switches { order:4; } .search { order:5; flex-basis:140px; } .compare-btn { order:6; } .help-btn { margin-left:auto; } .close-btn { order:1; } .body { grid-template-columns:minmax(300px,380px) minmax(0,1fr); gap:20px; } }
+/* Two rows until one fits: with the switches' reserved pin slots (AEON-1453) one row needs about 1310 px,
+   about 1350 px with wider system fonts; below that Help and Close would wrap alone. The switches, search and
+   Compare share the second row; the search starts at its minimum and takes what is left, so it never wraps
+   onto a row of its own and short windows keep room for the list. */
+@media(max-width:1380px) and (min-width:761px) { .title-row { flex-wrap:wrap; } .titles { flex-basis:calc(100% - 164px); } .switches { order:4; } .search { order:5; flex-basis:140px; } .compare-btn { order:6; } .help-btn { margin-left:auto; } .close-btn { order:1; } .body { grid-template-columns:minmax(300px,380px) minmax(0,1fr); gap:20px; } }
 @media(max-width:760px) {
  .shell { padding:0 16px; grid-template-rows:auto minmax(0,1fr) auto; }
  .head { gap:10px; padding:12px 0 10px; }
