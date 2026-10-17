@@ -130,8 +130,7 @@ func (m *Module) mountMetrics(mux *http.ServeMux) {
 }
 
 func decodeBounded(w http.ResponseWriter, r *http.Request, limit int64, out any) error {
-	r.Body = http.MaxBytesReader(w, r.Body, limit)
-	dec := json.NewDecoder(r.Body)
+	dec := httpapi.NewRequestDecoder(w, r, limit)
 	dec.DisallowUnknownFields()
 	if err := dec.Decode(out); err != nil {
 		return fail(400, "invalid delivery metrics JSON")

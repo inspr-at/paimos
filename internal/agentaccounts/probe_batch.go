@@ -35,7 +35,7 @@ func (m *Module) probes(w http.ResponseWriter, r *http.Request) {
 	ctx, cancel := context.WithTimeout(r.Context(), 20*time.Second)
 	defer cancel()
 	r = r.WithContext(ctx)
-	r.Body = http.MaxBytesReader(w, r.Body, 64<<10)
+	r.Body = httpapi.RequestBodyReader(w, r, 64<<10)
 	if err := workorders.BufferBody(w, r); err != nil {
 		workorders.WriteError(w, err)
 		return

@@ -3,10 +3,7 @@
 package approvals
 
 import (
-	"bytes"
-	"encoding/json"
 	"errors"
-	"io"
 	"net/http"
 	"strconv"
 	"strings"
@@ -15,6 +12,7 @@ import (
 
 	"github.com/inspr-at/paimos/internal/authz"
 	"github.com/inspr-at/paimos/internal/deploytarget"
+	"github.com/inspr-at/paimos/internal/httpapi"
 	"github.com/inspr-at/paimos/internal/tenant"
 	"github.com/jackc/pgx/v5"
 )
@@ -266,18 +264,7 @@ func validateDecision(in decisionWrite) (string, error) {
 }
 
 func decodeJSON(w http.ResponseWriter, r *http.Request, dst any) error {
-	r.Body = http.MaxBytesReader(w, r.Body, 64<<10)
-	body, err := io.ReadAll(r.Body)
-	if err != nil || len(bytes.TrimSpace(body)) == 0 {
-		return fail(http.StatusBadRequest, "bad request")
-	}
-	dec := json.NewDecoder(bytes.NewReader(body))
-	dec.DisallowUnknownFields()
-	if err := dec.Decode(dst); err != nil {
-		return fail(http.StatusBadRequest, "bad request")
-	}
-	var extra any
-	if err := dec.Decode(&extra); !errors.Is(err, io.EOF) {
+	if err := httpapi.DecodeJSON(w, r, 64<<10, dst); err != nil {
 		return fail(http.StatusBadRequest, "bad request")
 	}
 	return nil

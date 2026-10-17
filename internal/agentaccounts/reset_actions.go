@@ -35,7 +35,7 @@ func (m *Module) useReset(w http.ResponseWriter, r *http.Request) {
 		Binding   *int64 `json:"binding_revision"`
 		Confirmed bool   `json:"confirmed"`
 	}
-	r.Body = http.MaxBytesReader(w, r.Body, 4096)
+	r.Body = httpapi.RequestBodyReader(w, r, 4096)
 	if err := decodeJSON(w, r, &in); err != nil {
 		writeErr(w, err)
 		return
@@ -303,7 +303,7 @@ func (m *Module) undoReset(w http.ResponseWriter, r *http.Request) {
 	var in struct {
 		Binding *int64 `json:"binding_revision"`
 	}
-	r.Body = http.MaxBytesReader(w, r.Body, 4096)
+	r.Body = httpapi.RequestBodyReader(w, r, 4096)
 	if err := decodeJSON(w, r, &in); err != nil {
 		writeErr(w, err)
 		return

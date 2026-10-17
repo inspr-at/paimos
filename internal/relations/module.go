@@ -147,7 +147,7 @@ func (m *module) create(w http.ResponseWriter, r *http.Request) {
 		Target string `json:"target_node_id"`
 		Type   string `json:"type"`
 	}
-	decoder := json.NewDecoder(http.MaxBytesReader(w, r.Body, 64<<10))
+	decoder := httpapi.NewRequestDecoder(w, r, 64<<10)
 	if decoder.Decode(&input) != nil {
 		writeError(w, 400, "invalid_request", "invalid relation body")
 		return

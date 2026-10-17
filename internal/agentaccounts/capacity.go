@@ -43,7 +43,7 @@ func (m *Module) ingestReadings(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, err)
 		return
 	}
-	r.Body = http.MaxBytesReader(w, r.Body, 128<<10)
+	r.Body = httpapi.RequestBodyReader(w, r, 128<<10)
 	var in usageReadingsWrite
 	if err := decodeJSON(w, r, &in); err != nil {
 		writeErr(w, err)

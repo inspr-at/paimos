@@ -49,8 +49,7 @@ func principal(w http.ResponseWriter, r *http.Request) (tenant.Principal, bool) 
 	return p, ok
 }
 func decode(w http.ResponseWriter, r *http.Request, out any) error {
-	r.Body = http.MaxBytesReader(w, r.Body, 16<<10)
-	dec := json.NewDecoder(r.Body)
+	dec := httpapi.NewRequestDecoder(w, r, 16<<10)
 	dec.DisallowUnknownFields()
 	if err := dec.Decode(out); err != nil {
 		return fail(400, "invalid delivery JSON")

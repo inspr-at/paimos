@@ -358,8 +358,7 @@ func (m *Module) writeLeadSettings(w http.ResponseWriter, r *http.Request) {
 	if r.Method == http.MethodDelete {
 		revision, err = requestedRevision(r)
 	} else {
-		r.Body = http.MaxBytesReader(w, r.Body, 16<<10)
-		dec := json.NewDecoder(r.Body)
+		dec := httpapi.NewRequestDecoder(w, r, 16<<10)
 		dec.DisallowUnknownFields()
 		err = dec.Decode(&in)
 		if err != nil {

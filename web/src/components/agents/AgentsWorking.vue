@@ -29,7 +29,13 @@ const agents = useAgents(), capacity = useCapacity(), session = useSession(), se
 const viewer = () => session.identity ? `${session.identity.tenant.id}:${session.identity.principal.id}` : ''
 const control = useAgentPlan(viewer, key => agents.models.find(m => m.id === key)?.harness)
 const { snapshot, plan, saving, waiting, interrupts, save, saveDaily, hold } = control
-const folded = computed(() => !sections.open.dial)
+// AEON-1286: a page opened on a compact screen shows the sessions first. There the dial's body
+// opens per visit from its toggle; the saved choice (shared across devices) belongs to wider
+// screens. Decided on opening, so a resize never folds what a person has open.
+const compact = window.matchMedia('(max-width: 720px), (max-height: 480px)').matches
+const compactOpen = ref(false)
+const folded = computed(() => compact ? !compactOpen.value : !sections.open.dial)
+function toggleSection() { if (compact) compactOpen.value = !compactOpen.value; else sections.toggle('dial') }
 const error = computed(() => control.error.value || sections.error || dialPrefs.error)
 // A failure while the units are shown is said once, where people look for news; it stays on the dot.
 watch(error, (now, before) => { if (now && now !== before && plan.value && snapshot.value) toast(now, { tone: 'error', key: 'dial-error' }) })
@@ -38,7 +44,7 @@ const infoId = `dial-info-${uid}`
 const bodyId = `dial-body-${uid}`
 // A remembered numeric ceiling is a convenience, not a minimum or reservation.
 const memo = reactive<Record<string, number>>({})
-watch(viewer, () => { for (const key of Object.keys(memo)) delete memo[key] })
+watch(viewer, () => { compactOpen.value = false; for (const key of Object.keys(memo)) delete memo[key] })
 const ownAccounts = computed(() => new Set(agents.accounts.filter(a => a.owner_person_id
   ? a.owner_person_id === snapshot.value?.principal_id || a.owner_person_id === session.identity?.principal.id
   : a.registered_by_principal_id === snapshot.value?.principal_id || a.registered_by_principal_id === session.identity?.principal.id).map(a => a.id)))
@@ -75,13 +81,13 @@ const tipOf = (row: typeof rows.value[number]) => chipTip(views.value[row.key]!,
 const flagIcon = (key: string) => views.value[key]!.kind === 'at_limit' ? 'pause' : 'alert'
 function toggleInfo() {
   // From the folded dial the toggle opens the dial with the area open; open, it shows or hides the area.
-  if (folded.value) { dialPrefs.setInfo(true); sections.toggle('dial') } else dialPrefs.setInfo(!dialPrefs.prefs.info_open)
+  if (folded.value) { dialPrefs.setInfo(true); toggleSection() } else dialPrefs.setInfo(!dialPrefs.prefs.info_open)
 }
 function pick(key: string) { dialPrefs.select(key) }
 function toggleDial() {
   const key = folded.value ? selected.value : ''
   if (key) pick(key)
-  sections.toggle('dial')
+  toggleSection()
   if (key) void nextTick(() => document.getElementById(bodyId)?.querySelector<HTMLElement>(`[data-sel="${key}"]`)?.focus({ preventScroll: true }))
 }
 // Touch: a tap on a unit's face opens it on its plate (a tight row); an outside tap or four

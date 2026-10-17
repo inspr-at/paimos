@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/inspr-at/paimos/internal/authz"
+	"github.com/inspr-at/paimos/internal/httpapi"
 	"github.com/inspr-at/paimos/internal/tenant"
 	"github.com/inspr-at/paimos/internal/workorders"
 	"github.com/jackc/pgx/v5"
@@ -130,7 +131,7 @@ func (m *Module) createComparison(r *http.Request, tx pgx.Tx, p tenant.Principal
 	if len(r.URL.Query()) != 0 {
 		return nil, fail(400, "invalid_request", "comparison rejected")
 	}
-	raw, err := io.ReadAll(r.Body)
+	raw, err := httpapi.ReadRequestBody(nil, r, 1<<20, httpapi.DefaultBodyReadTimeout)
 	if err != nil {
 		return nil, fail(400, "invalid_request", "comparison rejected")
 	}

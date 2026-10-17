@@ -249,6 +249,13 @@ func (m *Module) upload(w http.ResponseWriter, r *http.Request) {
 		httpapi.WriteError(w, 400, "invalid node id")
 		return
 	}
+	// Stream uploads to disk under the shared size cap and two-minute deadline.
+	finishBody, err := httpapi.BeginRequestBodyStream(w, r, m.Store.limit()*20+(1<<20), httpapi.UploadBodyReadTimeout)
+	if err != nil {
+		apierr(w, uploadError(err))
+		return
+	}
+	defer finishBody(false)
 	var files []pending
 	defer func() {
 		for _, f := range files {
@@ -258,7 +265,6 @@ func (m *Module) upload(w http.ResponseWriter, r *http.Request) {
 	caption := ""
 	ct, _, _ := mime.ParseMediaType(r.Header.Get("Content-Type"))
 	if ct == "multipart/form-data" {
-		r.Body = http.MaxBytesReader(w, r.Body, m.Store.limit()*20+(1<<20))
 		mr, err := r.MultipartReader()
 		if err != nil {
 			httpapi.WriteError(w, 400, "invalid multipart body")
@@ -322,8 +328,12 @@ func (m *Module) upload(w http.ResponseWriter, r *http.Request) {
 		apierr(w, bad(400, "caption too long"))
 		return
 	}
+	if err := finishBody(true); err != nil {
+		apierr(w, uploadError(err))
+		return
+	}
 	out := make([]Attachment, 0, len(files))
-	err := db.InTenant(r.Context(), m.Pool, p.TenantID, func(tx pgx.Tx) error {
+	err = db.InTenant(r.Context(), m.Pool, p.TenantID, func(tx pgx.Tx) error {
 		if err := authz.LockProjectWrite(r.Context(), tx, p.TenantID); err != nil {
 			return err
 		}
@@ -410,7 +420,7 @@ func (m *Module) patch(w http.ResponseWriter, r *http.Request) {
 		apierr(w, err)
 		return
 	}
-	b, err := io.ReadAll(http.MaxBytesReader(w, r.Body, 8192))
+	b, err := httpapi.ReadRequestBody(w, r, 8192, httpapi.DefaultBodyReadTimeout)
 	if err != nil {
 		apierr(w, bad(400, "invalid body"))
 		return

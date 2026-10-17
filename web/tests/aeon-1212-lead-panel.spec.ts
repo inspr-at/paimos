@@ -399,7 +399,10 @@ for (const width of [1440, 1024, 1000, 400, 390]) for (const look of ['light','d
         await stable.more.click()
         for (const name of [/^Interrupt/, /^Pause…/, /^Stop…/]) await expect(sessionMenu(page).getByRole('menuitem', { name })).toBeVisible()
         await expect(panel(page).locator('.pane-bar').getByRole('button', { name: /^(Interrupt|Pause|Stop)/ })).toHaveCount(0)
-        await stable.more.click()
+        // AEON-1286: on a phone ⋯ opens a sheet over a scrim; Escape (or the scrim) closes it.
+        if (width <= 720) await page.keyboard.press('Escape')
+        else await stable.more.click()
+        await expect(sessionMenu(page)).toHaveCount(0)
       } },
       { name: 'Lead', run: async () => { await tab(page, 'Lead').click(); await expect(panel(page).locator('#lp-checks')).toHaveText('Before every start'); await expect(panel(page).locator('.admission-caption')).toContainText('All passed at the last start'); await expect(panel(page).locator('[data-check]')).toHaveCount(4); await checkPanel(page, width <= 400); await page.screenshot({ path: info.outputPath(`AEON-1212/lead-sheet-${width}-${look}.png`) }) } },
       { name: 'Details', run: async () => {
@@ -553,17 +556,24 @@ test('AEON-1212: pinned and last-used tabs belong to the person; queue links for
   await expectOpening(page, 'Details', 'your default')
   await expect(panel(page).getByRole('button', { name: 'Remove your default tab', exact: true })).toHaveCount(0)
   const more = panel(page).getByRole('button', { name: 'More session actions', exact: true })
+  // AEON-1286: the default is a menu choice for the tab on screen, ticked for the current default.
   await more.click()
-  const defaultLead = sessionMenu(page).getByRole('menuitemcheckbox', { name: 'Open on Lead by default', exact: true })
+  await expect(sessionMenu(page).getByRole('menuitemcheckbox', { name: /^Open on Details by default/ })).toHaveAttribute('aria-checked', 'true')
+  await page.keyboard.press('Escape')
+  await tab(page, 'Lead').click()
+  await more.click()
+  const defaultLead = sessionMenu(page).getByRole('menuitemcheckbox', { name: /^Open on Lead by default/ })
   await expect(defaultLead).toHaveAttribute('aria-checked', 'false')
   await defaultLead.click()
-  await expect.poll(() => world.data.preferences['agents:lead-panel']).toMatchObject({ pinned: 'lead', last: 'chat' })
+  await expect.poll(() => world.data.preferences['agents:lead-panel']).toMatchObject({ pinned: 'lead', last: 'lead' })
   await page.reload()
   await expect(tab(page, 'Lead')).toHaveAttribute('aria-selected', 'true')
   await expectOpening(page, 'Lead', 'your default')
   await more.click()
   await expect(defaultLead).toHaveAttribute('aria-checked', 'true')
   await defaultLead.click()
+  await expect(defaultLead).toHaveAttribute('aria-checked', 'false')
+  await page.keyboard.press('Escape')
   await tab(page, 'Chat').click()
   await expect.poll(() => world.data.preferences['agents:lead-panel']).toMatchObject({ pinned: null, last: 'chat' })
   await page.reload()

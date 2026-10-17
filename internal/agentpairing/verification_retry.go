@@ -9,6 +9,7 @@ import (
 
 	"github.com/inspr-at/paimos/internal/authz"
 	"github.com/inspr-at/paimos/internal/db"
+	"github.com/inspr-at/paimos/internal/httpapi"
 	"github.com/inspr-at/paimos/internal/tenant"
 	"github.com/jackc/pgx/v5"
 )
@@ -32,7 +33,7 @@ func (m *Module) verifyAgain(w http.ResponseWriter, r *http.Request, p tenant.Pr
 		Revision *int64          `json:"expected_revision"`
 		RunID    json.RawMessage `json:"expected_verification_run_id"`
 	}
-	r.Body = http.MaxBytesReader(w, r.Body, 4096)
+	r.Body = httpapi.RequestBodyReader(w, r, 4096)
 	if err := decode(w, r, &in); err != nil {
 		WriteError(w, err)
 		return

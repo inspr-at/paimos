@@ -16,6 +16,7 @@ import (
 
 	"github.com/inspr-at/paimos/internal/authz"
 	"github.com/inspr-at/paimos/internal/events"
+	"github.com/inspr-at/paimos/internal/httpapi"
 	"github.com/inspr-at/paimos/internal/tenant"
 )
 
@@ -57,8 +58,7 @@ func (m *Module) handleAgentKeyScopes(w http.ResponseWriter, r *http.Request) {
 	var delta *keyScopeDelta
 	if r.Method == http.MethodPatch {
 		delta = &keyScopeDelta{}
-		r.Body = http.MaxBytesReader(w, r.Body, 64<<10)
-		dec := json.NewDecoder(r.Body)
+		dec := httpapi.NewRequestDecoder(w, r, 64<<10)
 		dec.DisallowUnknownFields()
 		if err := dec.Decode(delta); err != nil {
 			writeBadRequest(w, "invalid JSON")

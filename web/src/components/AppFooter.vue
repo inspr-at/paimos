@@ -251,5 +251,7 @@ button.sum:active { background: var(--row-selected); }
   .footer-codename { max-width: 104px; font-size: 12px; }
   .pill-version { font-size: 11.5px; }
 }
+/* Short landscape phones: the bar lies over the page and folds away while reading, as on portrait phones (AEON-1286). */
+@media (max-height: 480px) { .app-footer { transition: transform .22s ease; } .app-footer.hidden { transform: translateY(100%); } }
 @media (prefers-reduced-motion: reduce) { .app-footer, .pill-face { transition: none; } }
 </style>
