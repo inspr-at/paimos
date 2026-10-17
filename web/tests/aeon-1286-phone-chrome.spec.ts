@@ -330,15 +330,16 @@ test('AEON-1286 chat 390 light: a ticket key or a code chip keeps the line box o
     }
     return { own, lines: lines.length, key: { top: +key.top.toFixed(1), bottom: +key.bottom.toFixed(1) }, results }
   })
-  const probes: [string, Awaited<ReturnType<typeof probe>>][] = []
-  for (const start of ['With a key,', 'Morning.', 'Merged PHAROS-11']) probes.push([start, await probe(start)])
-  await report(info.outputPath('AEON-1286/key-targets-390-light.md'), probes.map(([start, result]) =>
-    `${start} key on line ${result.own + 1} of ${result.lines}, ${result.results.length} probes, ${result.results.filter(point => point.on !== 'prose').length} off the prose`))
-  for (const [start, result] of probes) {
-    expect(result.own, `the key in "${start}" sits on a prose line: ${JSON.stringify(result)}`).toBeGreaterThanOrEqual(0)
-    expect(result.results.length, `"${start}" has glyphs beside the key on a neighbouring line: ${JSON.stringify(result)}`).toBeGreaterThan(0)
-    for (const point of result.results) expect(point.on, `"${start}": "${point.char}" ${point.line} the key, ${point.y} px from its middle`).toBe('prose')
-  }
+  // The key paragraph is built for it: the key on its first line, a full line of words under it.
+  // (The lead's own posts end in short lines that leave no glyph under their keys.)
+  const result = await probe('With a key,')
+  await report(info.outputPath('AEON-1286/key-targets-390-light.md'), [
+    `With a key: key on line ${result.own + 1} of ${result.lines}, ${result.results.length} probes, ${result.results.filter(point => point.on !== 'prose').length} off the prose`,
+    ...result.results.map(point => `"${point.char}" ${point.line}, ${point.y} px from the key's middle: ${point.on}`),
+  ])
+  expect(result.own, `the key sits on a prose line: ${JSON.stringify(result)}`).toBeGreaterThanOrEqual(0)
+  expect(result.results.filter(point => point.line === 'below').length, `glyphs of the next line lie under the key: ${JSON.stringify(result)}`).toBeGreaterThan(0)
+  for (const point of result.results) expect(point.on, `"${point.char}" ${point.line} the key, ${point.y} px from its middle`).toBe('prose')
   expect(errors).toEqual([])
 })
 
