@@ -13,7 +13,8 @@ import { browserAreaEvidence, loadBrowserAreas, browserAreaDecision } from './br
 import { browserPlanSelection, makeBrowserPlan } from './browser-plan.mjs'
 import { ownershipGraph } from './browser-ownership.mjs'
 import { browserIdentity, buildBrowserMap } from './browser-impact.mjs'
-import { select, fullGateTests, graphIncomplete } from './core.mjs'
+import { select, fullGateTests, graphIncomplete, tierWeights, shard, webShardPlan, assertWebShardBudget } from './core.mjs'
+import { loadManifest as loadWebPolicy } from '../../web/scripts/ci-web-shard.mjs'
 import { schedulingDecision, sizeWebDecision, main as plannerMain } from './diff.mjs'
 import { runnerSelection, plan, load } from './cli.mjs'
 import { checkFull } from './check-full.mjs'
@@ -59,6 +60,28 @@ test('AEON-1336 bounded G7 read-state cases retain all viewport and theme covera
     { event: 'pull_request', paths: [], impact: 'off' }, { event: 'merge_group' }]) {
     const selected = select(catalogue, options).tests
     for (const name of expected) assert.ok(selected.some(row => row.file === cases[0].file && row.name === name), name)
+  }
+})
+
+test('AEON-1336 completed hosted slices keep the full browser pack within its existing budget', () => {
+  // PR #750 run 39070138619, shard 6: both chunks passed every selected case.
+  // Their old averages underestimated these expensive subsets. Failed G7 and
+  // interrupted ticket-panel samples are deliberately absent from calibration.
+  const observed = [
+    { file: 'tests/aeon-635.spec.ts', seconds: 182.250, selectedTests: 6 },
+    { file: 'tests/delivery-flow-modes.spec.ts', seconds: 172.878, selectedTests: 19 },
+  ]
+  const rows = fullGateTests(load('web').tests).filter(row => row.kind === 'browser')
+  const policy = loadWebPolicy(), weights = tierWeights(policy, rows)
+  const replayWeights = { ...weights }
+  for (const { file, seconds, selectedTests } of observed)
+    replayWeights[file] = seconds * rows.filter(row => row.file === file).length / selectedTests
+  const plan = assertWebShardBudget(webShardPlan(rows, policy, { mode: 'full' }))
+  const assignments = plan.shards.map(index => shard(rows, index, plan.shards.length, weights))
+  assert.deepEqual(assignments.flat().map(browserIdentity).sort(), rows.map(browserIdentity).sort(), 'every case still executes exactly once')
+  for (const assigned of assignments) {
+    const seconds = plan.overheadSeconds + [...new Set(assigned.map(row => row.file))].reduce((sum, file) => sum + replayWeights[file], 0)
+    assert.ok(seconds <= plan.budgetSeconds, `completed hosted slices predict ${seconds.toFixed(1)}s, over the ${plan.budgetSeconds}s budget`)
   }
 })
 
