@@ -3,10 +3,35 @@
 import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
 import { PANEL_HEAD_TITLE_MIN, PANEL_TAB_LABEL, panelTabs, type PanelTab } from '../../lib/leadPanel'
 import { shortcutHint } from '../../lib/shortcuts'
+import { useViewMenuTrigger } from '../../lib/viewMenuTrigger'
 import AppIcon from '../AppIcon.vue'
-const props = defineProps<{ selected: PanelTab; unread: number; lead?: boolean; terminal?: boolean; watch?: boolean }>()
-const emit = defineEmits<{ select: [tab: PanelTab] }>()
+import ViewDefaultMenu from '../ViewDefaultMenu.vue'
+// The session panel's view switch (AEON-1453). The tabs keep their own look; the default
+// works as on every ViewSwitch: right-click, a long press or Shift+F10 on a tab that can be
+// the default opens its small menu, and the default carries the small pin in a slot every
+// such tab reserves, so marking one never moves a tab. useViewSwitch remembers (SessionPanel).
+const props = defineProps<{ selected: PanelTab; unread: number; lead?: boolean; terminal?: boolean; watch?: boolean; defaults?: readonly PanelTab[]; defaultId?: PanelTab | null }>()
+const emit = defineEmits<{ select: [tab: PanelTab]; setDefault: [tab: PanelTab | null] }>()
 const tabs = computed(() => panelTabs(!!props.lead, !!props.terminal, !!props.watch))
+const defaultable = (tab: PanelTab) => !!props.defaults?.includes(tab)
+const tip = (tab: PanelTab, index: number) => [PANEL_TAB_LABEL[tab], tab === props.defaultId ? 'default' : '', shortcutHint(`agents.panel.tab.${(index + 1) as 1 | 2 | 3 | 4 | 5}`)].filter(Boolean).join(' · ')
+const open = ref<{ tab: PanelTab; anchor: HTMLElement } | null>(null)
+const trigger = useViewMenuTrigger((tab, anchor) => { if (defaultable(tab as PanelTab)) open.value = { tab: tab as PanelTab, anchor } })
+function close(restore: boolean) {
+  const anchor = open.value?.anchor
+  open.value = null
+  if (restore && anchor?.isConnected) anchor.focus({ preventScroll: true })
+}
+function set(makeDefault: boolean) {
+  const at = open.value
+  if (!at) return
+  emit('setDefault', makeDefault ? at.tab : null)
+  close(true)
+}
+function click(event: MouseEvent, tab: PanelTab) {
+  if (trigger.heldClick(event)) return
+  emit('select', tab)
+}
 const panelId = (tab: PanelTab) => tab === 'chat' ? 'messages' : tab === 'session' ? 'overview' : tab
 const icon = (tab: PanelTab) => tab === 'lead' ? 'tree' : tab === 'chat' ? 'message' : tab === 'events' ? 'list' : tab === 'terminal' ? 'terminal' : 'info'
 const menu = ref<HTMLElement>()
@@ -58,6 +83,8 @@ onMounted(() => {
 })
 onBeforeUnmount(() => resize?.disconnect())
 function move(event: KeyboardEvent) {
+  const focused = (event.target as HTMLElement).closest<HTMLElement>('[data-tab]')?.dataset.tab as PanelTab | undefined
+  if (focused && defaultable(focused) && trigger.keydown(event, focused, event.target as HTMLElement)) return
   if (event.altKey || event.ctrlKey || event.metaKey || !['ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(event.key)) return
   event.preventDefault(); event.stopPropagation()
   const index = tabs.value.indexOf(props.selected)
@@ -69,10 +96,13 @@ function move(event: KeyboardEvent) {
 
 <template>
   <div ref="menu" class="session-tabs" role="tablist" :aria-label="lead ? 'Lead panel' : 'Session'" @keydown="move">
-    <button v-for="(tab, index) in tabs" :id="`session-tab-${panelId(tab)}`" :key="tab" type="button" role="tab" :data-tab="tab" :aria-label="PANEL_TAB_LABEL[tab]" :data-tip="[PANEL_TAB_LABEL[tab], shortcutHint(`agents.panel.tab.${(index + 1) as 1 | 2 | 3 | 4 | 5}`)].filter(Boolean).join(' · ')" :aria-selected="selected === tab" :aria-controls="`session-panel-${panelId(tab)}`" :tabindex="selected === tab ? 0 : -1" @click="emit('select', tab)">
-      <AppIcon :name="icon(tab)" :size="15" /><span class="tab-label"><span class="label-width" aria-hidden="true">{{ PANEL_TAB_LABEL[tab] }}</span><span>{{ PANEL_TAB_LABEL[tab] }}</span></span>
+    <button v-for="(tab, index) in tabs" :id="`session-tab-${panelId(tab)}`" :key="tab" type="button" role="tab" :data-tab="tab" :aria-label="PANEL_TAB_LABEL[tab]" :data-tip="tip(tab, index)" :aria-description="tab === defaultId ? 'Opens here by default' : undefined" :aria-selected="selected === tab" :aria-controls="`session-panel-${panelId(tab)}`" :tabindex="selected === tab ? 0 : -1"
+      @click="click($event, tab)" @contextmenu="defaultable(tab) && trigger.contextmenu($event, tab)"
+      @pointerdown="defaultable(tab) && trigger.pointerdown($event, tab)" @pointermove="trigger.pointermove" @pointerup="trigger.pointerend" @pointercancel="trigger.pointerend">
+      <AppIcon :name="icon(tab)" :size="15" /><span class="tab-text"><span class="tab-label"><span class="label-width" aria-hidden="true">{{ PANEL_TAB_LABEL[tab] }}</span><span>{{ PANEL_TAB_LABEL[tab] }}</span></span><span v-if="defaultable(tab)" class="pin-slot" aria-hidden="true"><span v-if="tab === defaultId" class="view-pin"><AppIcon name="pin" :size="12" /></span></span></span>
       <span v-if="tab === 'chat' && unread" class="count" :aria-label="`${unread} unread`">{{ unread > 99 ? '99+' : unread }}</span>
     </button>
+    <ViewDefaultMenu v-if="open" :anchor="open.anchor" :label="PANEL_TAB_LABEL[open.tab]" :is-default="open.tab === defaultId" @set="set" @close="close" />
   </div>
 </template>
 
@@ -82,11 +112,23 @@ button { position: relative; display: inline-flex; align-items: center; justify-
 button:hover { color: var(--ink); background: var(--row-hover); }
 button[aria-selected="true"] { color: var(--teal-ink); background: var(--seg-on); font-weight: 700; box-shadow: 0 1px 2px color-mix(in srgb, var(--shadow-black) 12%, transparent); }
 button:focus-visible { outline: 2px solid var(--teal); outline-offset: -2px; }
+.tab-text { display: inline-flex; align-items: center; gap: 4px; min-width: 0; }
 .tab-label { display: inline-grid; }
 .tab-label > span { grid-area: 1 / 1; }
 .label-width { font-weight: 700; visibility: hidden; }
 .count { position: absolute; right: 1px; top: -2px; display: grid; place-items: center; min-width: 14px; height: 14px; padding: 0 3px; border-radius: 999px; background: var(--primary); color: var(--primary-on); font: 700 9px var(--font); }
+/* The pin's slot is there on every tab that can be the default, so marking one never moves a
+   tab (AEON-1453). Beside the label it is inline; on an icon-only tab it is a small badge in
+   the bottom corner, as the unread count is in the top one. */
+button { -webkit-touch-callout: none; }
+.pin-slot { display: inline-grid; place-items: center; flex: none; width: 12px; height: 12px; color: var(--ink-3); line-height: 0; pointer-events: none; }
+.view-pin { display: grid; }
 .icons .tab-label { display: none; }
+/* Icon-only, the label's wrapper takes no room, so the tab keeps the width it had without a pin. */
+.icons .tab-text { display: contents; }
+.icons .pin-slot { position: absolute; right: 1px; bottom: -2px; width: 14px; height: 14px; }
+.icons .view-pin { place-items: center; width: 14px; height: 14px; border-radius: 999px; background: var(--surface); box-shadow: 0 0 0 1px var(--line); color: var(--ink-2); }
+.icons .view-pin :deep(svg) { width: 9px; height: 9px; }
 .icons button { padding-inline: 5px; }
 /* AEON-1286 phones: the flat menu's own row, 44 px items in a 48 px track. */
 @media (max-width: 720px) {

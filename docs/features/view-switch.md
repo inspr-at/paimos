@@ -15,7 +15,7 @@ Every place with views opens the way the person left it (AEON-1453). One generic
   centred on it, or as a badge inside an icon-only segment (it never moves a
   segment); its tooltip reads "<Label> · default". Setting a default never switches the
   view on screen; it is for the next visit.
-- **A link wins once.** `?view=`, a tab address or `?mode=` opens that view without
+- **A link wins once.** `?view=`, `?tab=`, a tab address or `?mode=` opens that view without
   changing the default or the view used last.
 
 | Switch | Key | Notes |
@@ -29,5 +29,10 @@ Every place with views opens the way the person left it (AEON-1453). One generic
 | Settings › Access tabs | `view:access` | The tabs keep their own look; `/settings/access/<tab>` is the link. |
 | Standalone session Events · Terminal | `view:session-expert` | |
 | Quote editor, docked side panel | `view:quote.pane` | Details or Format, or closed; `quote-editor.pane` counts until replaced. |
+| Session panel tabs, lead | `view:lead-panel` | The tabs keep their own look. Lead, Details and Chat can be the default; Events and Terminal are only remembered as used last. A question, a held start, an ended session or a worker problem still opens where it needs the person. `agents:lead-panel` (its `pinned` tab and its last tab) counts until replaced. |
+| Session panel tabs, worker | `view:session-panel` | The tab used last (Chat or Details on opening); no explicit default. `agents:session-panel` counts until replaced. |
 
-The session panel tabs and their "Open on Lead by default" pin follow in a second package.
+**One default for the session panel.** On a phone, the panel's ⋯ also offers
+**Open on <tab> by default** for the tab on screen: a labelled shortcut that sets
+and clears the same `view:lead-panel` default as the tab's own menu, so the pin
+on the tab and the tick in ⋯ always agree. Wider screens have only the tab's menu.

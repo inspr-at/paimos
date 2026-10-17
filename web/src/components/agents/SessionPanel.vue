@@ -41,7 +41,7 @@ import { useRoute, useRouter } from 'vue-router'
 import SessionChat from './SessionChat.vue'
 import SessionRequests from './SessionRequests.vue'
 import SessionTabs from './SessionTabs.vue'
-import { createPanelOpening, leadTab, openingTab, panelModelLine, panelQueryTab, PANEL_TAB_LABEL, panelTabs, type LeadTab, type PanelLayout, type PanelTab } from '../../lib/leadPanel'
+import { createPanelOpening, LEAD_DEFAULTS, LEAD_PANEL_TABS, leadPanelLegacy, leadTab, openingTab, panelModelLine, panelQueryTab, PANEL_TAB_LABEL, panelTabs, WORKER_PANEL_TABS, workerPanelLegacy, type LeadTab, type PanelLayout, type PanelTab } from '../../lib/leadPanel'
 import AgentStateLabel from './AgentStateLabel.vue'
 import HarnessMark from './HarnessMark.vue'
 import { modelProvider } from './sessionRow'
@@ -49,6 +49,7 @@ import { TIER_NAME } from '../../lib/serviceTier'
 import { leadActionAvailable, leadActionReason } from '../../lib/lead'
 import { openLeadPause } from '../../lib/leadOverlay'
 import { usePreference } from '../../lib/preferences'
+import { useViewSwitch, viewKey } from '../../lib/viewSwitch'
 import { useAgentProjection } from '../../stores/agentProjection'
 import { useProjectLeads } from '../../stores/projectLeads'
 import { useAgentPause } from '../../stores/agentPause'
@@ -167,7 +168,11 @@ const showRemove = computed(() => {
 // off the tab they are reading. Both preferences belong to the signed-in person.
 const route = useRoute(), router = useRouter()
 const projection = useAgentProjection(), leads = useProjectLeads(), pause = useAgentPause(), projects = useProjects()
-const leadPreference = usePreference<{ pinned?: unknown; last?: unknown }>('agents:lead-panel'), workerPreference = usePreference<{ last?: unknown }>('agents:session-panel')
+// AEON-1453: the tabs are this panel's view switch. useViewSwitch keeps, per person on the
+// server, the tab used last and the lead panel's explicit default; the old agents:lead-panel
+// pin and both panels' last tab count until the person chooses here, and are never rewritten.
+const leadSwitch = useViewSwitch({ key: viewKey('lead-panel'), options: LEAD_PANEL_TABS, fallback: 'lead', legacy: { key: 'agents:lead-panel', read: leadPanelLegacy } })
+const workerSwitch = useViewSwitch({ key: viewKey('session-panel'), options: WORKER_PANEL_TABS, fallback: 'overview', legacy: { key: 'agents:session-panel', read: workerPanelLegacy } })
 const tab = ref<PanelTab>('overview'), unread = ref(0), why = ref(''), openedTab = ref<PanelTab>('overview')
 const questionFocus = ref('')
 const managed = ref<InstanceType<typeof ManagedSessionControls>>()
@@ -176,7 +181,7 @@ const owner = computed(() => auth.identity ? `${auth.identity.tenant.id}:${auth.
 const lead = computed(() => s.value?.project_id ? leads.views[s.value.project_id]?.lead ?? null : null)
 const isLead = computed(() => !!s.value && lead.value?.session_id === s.value.id)
 const project = computed(() => s.value ? projects.byId(s.value.project_id) : null)
-const pinned = computed(() => leadTab(leadPreference.value.value?.pinned))
+const pinned = computed(() => leadTab(leadSwitch.defaultId.value))
 const questionReadable = computed(() => !!s.value && can('questions.read', s.value.project_id) && projection.questions.state !== 'forbidden')
 const questions = computed(() => s.value && questionReadable.value ? projection.asksOf(s.value.id).filter(q => q.project_id === s.value!.project_id) : [])
 const hasQuestion = computed(() => questions.value.length > 0 && auth.identity?.principal.kind === 'person' && can('questions.decide', s.value?.project_id))
@@ -233,27 +238,31 @@ function selectTab(next: PanelTab) {
   opening++ // A person's choice cancels any automatic selection still awaiting reads.
   tab.value = next
   if (next === 'terminal' && window.innerHeight <= 480 && panelLayout.value !== 'full') void requestLayout('full', true)
-  if (isLead.value) leadPreference.save({ ...leadPreference.value.value, last: next }, 0)
-  else workerPreference.save({ last: next }, 0)
+  void (isLead.value ? leadSwitch : workerSwitch).remember(next)
   if (route.query.tab !== undefined || route.hash === '#next-up') { const query = { ...route.query }; delete query.tab; void router.replace({ query, hash: '' }) }
 }
-// AEON-1286: the default tab is a menu choice for the tab on screen ("Open on Chat by default"),
-// never a pin beside the tabs. Events and Terminal cannot be a default; there the item names the
-// current default, so it can still be cleared. Questions and problems still open where they need you.
-// The item is fixed for one opening of ⋯: clearing the default there keeps its row, its focus and
-// everything below it until the menu closes, so it can be ticked again in place.
+// AEON-1453: one default. The lead panel's default tab is its view switch's default, set with
+// right-click, a long press or Shift+F10 on the tab. Questions and problems still open where they need you.
+function setPanelDefault(next: PanelTab | null) {
+  if (isLead.value && (next === null || leadTab(next))) leadSwitch.setDefault(next)
+}
+// AEON-1286: on a phone, ⋯ also offers it as a labelled choice for the tab on screen ("Open on Chat
+// by default"), a shortcut to the same default (the full-screen phone panel has no tabs to hold).
+// Events and Terminal cannot be a default; there the item names the current default, so it can
+// still be cleared. The item is fixed for one opening of ⋯: clearing the default there keeps its
+// row, its focus and everything below it until the menu closes, so it can be ticked again in place.
 const heldPin = ref<{ owner: string; tab: LeadTab } | null>(null)
 watch(actionsAnchor, anchor => {
-  const choice = isLead.value ? leadTab(tab.value) ?? pinned.value : null
+  const choice = isLead.value && phoneHead.value ? leadTab(tab.value) ?? pinned.value : null
   heldPin.value = anchor && choice ? { owner: owner.value, tab: choice } : null
 }, { flush: 'sync' })
-const pinChoice = computed<LeadTab | null>(() => !isLead.value ? null
+const pinChoice = computed<LeadTab | null>(() => !isLead.value || !phoneHead.value ? null
   : leadTab(tab.value) ?? pinned.value ?? (actionsAnchor.value && heldPin.value?.owner === owner.value ? heldPin.value.tab : null))
 const pinNote = computed(() => !pinChoice.value ? '' : pinned.value === pinChoice.value ? 'Unless something needs you'
   : pinned.value ? `Now ${PANEL_TAB_LABEL[pinned.value]} is your default` : 'Now it opens on the last tab used')
 function pinTab() {
   const choice = pinChoice.value
-  if (isLead.value && choice) leadPreference.save({ ...leadPreference.value.value, pinned: pinned.value === choice ? null : choice }, 0)
+  if (choice) setPanelDefault(pinned.value === choice ? null : choice)
 }
 function closeActions(restore: boolean) {
   const anchor = actionsAnchor.value
@@ -276,7 +285,7 @@ watch([() => s.value?.id, owner], async () => {
   try {
     // nativeReady owns the opening lead read too. A second loadLead here can
     // discard that read before the fixed opening menu captures its Lead item.
-    await Promise.all([leadPreference.ready, workerPreference.ready, menuSettled(), ensurePermissions(selected.project_id), projection.refresh()])
+    await Promise.all([leadSwitch.ready(), workerSwitch.ready(), menuSettled(), ensurePermissions(selected.project_id), projection.refresh()])
     if (mine !== opening) return
     // Missing while the reads returned (another person or session would have begun its own opening): open on the next sight.
     if (selected.id !== s.value?.id || who !== owner.value) { openings.abandon(key); return }
@@ -285,7 +294,7 @@ watch([() => s.value?.id, owner], async () => {
     const choice = openingTab({ lead: isLead.value, forced: panelQueryTab(route.query.tab, isLead.value), asksYou: hasQuestion.value,
       held: lead.value?.state === 'waiting_for_room', ended: selected.phase === 'stopped' || !!selected.stopped_at,
       workerLost: workers.some(v => v.status.state === 'unresponsive'), workerProblem: workers.some(v => v.status.state === 'problem'),
-      pinned: pinned.value, last: (isLead.value ? leadPreference.value.value?.last : workerPreference.value.value?.last) as PanelTab | undefined })
+      pinned: pinned.value, last: (isLead.value ? leadSwitch : workerSwitch).lastId.value as PanelTab | null })
     tab.value = availableTabs.value.includes(choice.tab) ? choice.tab : isLead.value ? 'lead' : 'overview'; openedTab.value = tab.value; why.value = route.hash === '#next-up' || props.section === 'next-up' ? 'Next up, from the queue count' : choice.why
     if ((route.hash === '#next-up' || props.section === 'next-up') && isLead.value) tab.value = openedTab.value = 'lead'
   } finally { scope() }
@@ -667,7 +676,8 @@ defineExpose({ focus: () => root.value?.focus({ preventScroll: true }) })
           </div>
         </div>
         <div v-else class="pane-identity" role="status">{{ loading ? 'Reading session…' : 'Session unavailable' }}</div>
-        <SessionTabs v-if="view && !loading && menuReady" :selected="tab" :lead="leadAtOpen" :terminal="terminalAtOpen" :watch="!!reported?.watch" :unread="tab === 'chat' ? 0 : Math.max(unread, hasQuestion ? questions.length : 0)" @select="selectTab" />
+        <SessionTabs v-if="view && !loading && menuReady" :selected="tab" :lead="leadAtOpen" :terminal="terminalAtOpen" :watch="!!reported?.watch" :unread="tab === 'chat' ? 0 : Math.max(unread, hasQuestion ? questions.length : 0)"
+          :defaults="leadAtOpen ? LEAD_DEFAULTS : undefined" :default-id="leadAtOpen ? pinned : null" @select="selectTab" @set-default="setPanelDefault" />
         <div class="pane-buttons" role="group" aria-label="Panel actions">
           <button v-if="sidebarAvailable" type="button" class="pane-icon pane-layout" aria-label="Sessions list" :aria-pressed="panelLayout === 'side'" :data-tip="panelLayout === 'side' ? 'Hide the sessions list' : 'Show the sessions list'" @click="requestLayout(panelLayout === 'side' ? 'wide' : 'side')"><AppIcon :name="panelLayout === 'side' ? 'layout-focus' : 'layout-list'" :size="18" /></button>
           <button type="button" class="pane-icon pane-layout" aria-label="Full screen" :aria-pressed="panelLayout === 'full'" :data-tip="fullScreenTip" :aria-keyshortcuts="shortcutKeys('agents.panel.fullscreen').join(' ') || undefined" @click="requestLayout(panelLayout === 'full' ? 'side' : 'full')"><AppIcon :name="panelLayout === 'full' ? 'collapse' : 'expand'" :size="18" /></button>

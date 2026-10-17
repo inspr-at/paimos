@@ -3,13 +3,15 @@
 // server; right-click or Shift+F10 makes one the default, marked by the pin without moving
 // a segment, and a link wins once. A project's ticket list opens on its default (a mode or
 // a saved view, read from the older list:<id>.defaultView until replaced) or the mode used
-// last. The Releases sheet's language moves from this browser to the server once.
+// last. The Releases sheet's language moves from this browser to the server once. The session
+// panel's tabs keep one default, set on the tab or, on a phone, from ⋯ (package B).
 import { test, expect, type Locator, type Page } from '@playwright/test'
 import { controlStability } from './control-stability'
 import { fixtures, me, mockView, mockWork, watchErrors, type Fixtures } from './work-fixtures'
 import { groupsWorld, mockProjectGroups } from './project-groups-fixtures'
 import { mockReleases } from './releases-fixtures'
 import { historicHistory } from './releases-historic-fixtures'
+import { mockLeadFlow, LEAD_SESSION } from './lead-flow-fixtures'
 
 test.beforeEach(async ({ page }) => { await page.clock.setSystemTime(new Date('2026-09-23T12:00:00Z')) })
 
@@ -267,4 +269,159 @@ test('AEON-1453 the Releases sheet language leaves this browser for the server o
   // The default is for the next visit: Details stays on screen until then.
   await expect(radio('Details')).toHaveAttribute('aria-checked', 'true')
   await expect(sheet).toBeVisible()
+})
+
+// AEON-1453 package B: the session panel's tabs are its view switch, with one default. Risks: the
+// old ⋯ pin (agents:lead-panel) is lost, or comes back after the person stopped it; the phone ⋯
+// choice and the tab's own menu keep two defaults that disagree; marking a tab moves the tabs; a
+// hold also switches the tab; a ?tab= link rewrites what is remembered.
+const panelOf = (page: Page) => page.getByRole('complementary', { name: 'Session details', exact: true })
+const panelTab = (page: Page, name: string) => panelOf(page).getByRole('tab', { name: new RegExp(`^${name}`) })
+const panelMenu = (page: Page) => page.getByRole('menu', { name: 'More session actions' })
+const openedOn = (page: Page) => panelOf(page).locator('p.sr-only').filter({ hasText: /^Opened on / })
+async function leadPanel(page: Page, preferences: Record<string, Record<string, unknown>> = {}) {
+  const world = await mockLeadFlow(page, { lead: 'working' })
+  Object.assign(world.data.preferences, preferences)
+  await page.route('**/api/**', route => {
+    const path = new URL(route.request().url()).pathname
+    if (['/api/models', '/api/approvals', '/api/agent-accounts', '/api/agent-accounts/capacity', '/api/agent-accounts/capacity/schedule'].includes(path)) return route.fulfill({ json: [] })
+    return route.fallback()
+  })
+  return world
+}
+const pinOn = async (page: Page) => (await panelOf(page).getByRole('tab').evaluateAll(tabs => tabs.filter(tab => tab.querySelector('.view-pin')).map(tab => tab.getAttribute('aria-label'))))
+
+test('AEON-1453 session panel: the old pin becomes the tab switch default once; right-click sets and stops it in place, and ⋯ keeps no default item on wide screens', async ({ page }) => {
+  await page.setViewportSize({ width: 1440, height: 900 })
+  const errors = watchErrors(page)
+  // The ⋯ pin and the last tab as AEON-1212 kept them, before the switch had its own key.
+  const world = await leadPanel(page, { 'agents:lead-panel': { pinned: 'chat', last: 'session' } })
+  await page.goto(`/agents/${LEAD_SESSION}`)
+  const lead = panelTab(page, 'Lead'), details = panelTab(page, 'Details'), chat = panelTab(page, 'Chat'), events = panelTab(page, 'Events')
+  await expect(chat).toHaveAttribute('aria-selected', 'true')
+  await expect(openedOn(page)).toHaveText('Opened on Chat: your default')
+  expect(await pinOn(page)).toEqual(['Chat'])
+  await expect(chat).toHaveAttribute('data-tip', /^Chat · default/)
+  await expect(chat).toHaveAttribute('aria-description', 'Opens here by default')
+  await expect(lead.locator('.tab-label')).toBeVisible()
+
+  // Wide screens set the default on the tab only: ⋯ has no default item.
+  await panelOf(page).getByRole('button', { name: 'More session actions', exact: true }).click()
+  await expect(panelMenu(page).getByRole('menuitem', { name: 'Interrupt' })).toBeVisible()
+  await expect(panelMenu(page).getByRole('menuitemcheckbox', { name: /by default/ })).toHaveCount(0)
+  await page.keyboard.press('Escape')
+
+  // Right-click Lead: the pin moves to Lead in its reserved slot; no tab moves, Chat stays on screen.
+  const guard = await controlStability(page, { lead, details, chat, events })
+  await guard.check(async () => {
+    await lead.click({ button: 'right' })
+    const put = saved(page, 'view:lead-panel')
+    await menuItem(page, 'Open here by default').click()
+    await put
+    expect(await pinOn(page)).toEqual(['Lead'])
+  })
+  await expect(lead).toBeFocused()
+  await expect(chat).toHaveAttribute('aria-selected', 'true')
+  expect(world.data.preferences['view:lead-panel']).toEqual({ default: 'lead' })
+  await page.reload()
+  await expect(lead).toHaveAttribute('aria-selected', 'true')
+  await expect(openedOn(page)).toHaveText('Opened on Lead: your default')
+
+  // Shift+F10 on the focused tab stops it; the old pin never comes back, the old last tab still counts.
+  await guard.check(async () => {
+    await lead.focus()
+    await page.keyboard.press('Shift+F10')
+    const put = saved(page, 'view:lead-panel')
+    await menuItem(page, 'Stop opening here by default').click()
+    await put
+    expect(await pinOn(page)).toEqual([])
+  })
+  guard.done()
+  expect(world.data.preferences['view:lead-panel']).toEqual({ default: null })
+  await page.reload()
+  await expect(details).toHaveAttribute('aria-selected', 'true')
+  await expect(openedOn(page)).toHaveText('Opened on Details: last used · no default set')
+  expect(await pinOn(page)).toEqual([])
+  // Events cannot be a default: no menu opens on it.
+  await events.click({ button: 'right' })
+  await expect(page.getByRole('menu', { name: 'Events view' })).toHaveCount(0)
+  await page.keyboard.press('Escape')
+  // The older store is read, never rewritten.
+  expect(world.data.preferences['agents:lead-panel']).toEqual({ pinned: 'chat', last: 'session' })
+  expect(errors).toEqual([])
+})
+
+test('AEON-1453 phone session panel: the ⋯ choice and a long press on the tab set one default, shown on both', async ({ page }) => {
+  await page.setViewportSize({ width: 390, height: 844 })
+  const errors = watchErrors(page)
+  const world = await leadPanel(page)
+  await page.goto(`/agents/${LEAD_SESSION}`)
+  const lead = panelTab(page, 'Lead'), details = panelTab(page, 'Details'), chat = panelTab(page, 'Chat'), events = panelTab(page, 'Events')
+  await expect(lead).toHaveAttribute('aria-selected', 'true')
+  const last = saved(page, 'view:lead-panel')
+  await chat.click()
+  await last
+  await expect(chat).toHaveAttribute('aria-selected', 'true')
+  const more = panelOf(page).getByRole('button', { name: 'More session actions', exact: true })
+  const choice = panelMenu(page).getByRole('menuitemcheckbox', { name: /^Open on Chat by default/ })
+  const tabs = await controlStability(page, { lead, details, chat, events })
+
+  // ⋯ "Open on Chat by default" writes the switch's default: the pin shows on the Chat tab.
+  await tabs.check(async () => {
+    await more.click()
+    await expect(choice).toHaveAttribute('aria-checked', 'false')
+    const put = saved(page, 'view:lead-panel')
+    await choice.click()
+    await put
+    await expect(choice).toHaveAttribute('aria-checked', 'true')
+    await page.keyboard.press('Escape')
+    await expect(panelMenu(page)).toHaveCount(0)
+    expect(await pinOn(page)).toEqual(['Chat'])
+  })
+  expect(world.data.preferences['view:lead-panel']).toEqual({ last: 'chat', default: 'chat' })
+
+  // A long press on Lead opens its menu without switching to it; its default shows in ⋯ too.
+  await tabs.check(async () => {
+    const touch = { pointerType: 'touch', pointerId: 7, isPrimary: true, button: 0, bubbles: true }
+    await lead.dispatchEvent('pointerdown', touch)
+    await expect(menuItem(page, 'Open here by default')).toBeVisible()
+    await lead.dispatchEvent('pointerup', touch)
+    await lead.dispatchEvent('click', { detail: 1, bubbles: true })
+    await expect(chat).toHaveAttribute('aria-selected', 'true')
+    const put = saved(page, 'view:lead-panel')
+    await menuItem(page, 'Open here by default').click()
+    await put
+    expect(await pinOn(page)).toEqual(['Lead'])
+  })
+  tabs.done()
+  expect(world.data.preferences['view:lead-panel']).toEqual({ last: 'chat', default: 'lead' })
+  await more.click()
+  await expect(choice).toHaveAttribute('aria-checked', 'false')
+  await expect(choice).toContainText('Now Lead is your default')
+  await page.keyboard.press('Escape')
+  await page.reload()
+  await expect(lead).toHaveAttribute('aria-selected', 'true')
+  await expect(openedOn(page)).toHaveText('Opened on Lead: your default')
+  expect(await pinOn(page)).toEqual(['Lead'])
+  expect(errors).toEqual([])
+})
+
+test('AEON-1453 session panel: a ?tab= link wins once and changes neither the default nor the tab used last', async ({ page }) => {
+  await page.setViewportSize({ width: 1440, height: 900 })
+  const errors = watchErrors(page)
+  const world = await leadPanel(page, { 'view:lead-panel': { last: 'chat', default: 'session' } })
+  const writes: string[] = []
+  page.on('request', request => { if (preferencePut('view:lead-panel')(request)) writes.push(request.postData() ?? '') })
+  await page.goto(`/agents/${LEAD_SESSION}?tab=events`)
+  const details = panelTab(page, 'Details'), events = panelTab(page, 'Events')
+  await expect(events).toHaveAttribute('aria-selected', 'true')
+  await expect(openedOn(page)).toHaveText('Opened on Events: from this link')
+  expect(await pinOn(page)).toEqual(['Details'])
+  // Without the link, the panel opens on its default again; nothing was written.
+  await page.goto(`/agents/${LEAD_SESSION}`)
+  await expect(details).toHaveAttribute('aria-selected', 'true')
+  await expect(openedOn(page)).toHaveText('Opened on Details: your default')
+  expect(writes).toEqual([])
+  expect(world.data.preferences['view:lead-panel']).toEqual({ last: 'chat', default: 'session' })
+  expect(errors).toEqual([])
 })
