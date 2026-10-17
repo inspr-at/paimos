@@ -353,6 +353,41 @@ test('a shrink that delivers neither resize nor the wide-media change still hide
   await expect(page.locator('[data-header-glimpse="off"]')).toBeAttached()
 })
 
+// Risk: the root observer fires while both window/media hints still describe
+// the earlier wide viewport. Hold those hints and drop their events so only
+// real layout can end painting; no sleep or renderer timing decides the test.
+test('AEON-1471: a narrow root clears the glimpse while window and media hints stay wide', async ({ page }) => {
+  await page.addInitScript(() => {
+    const holding = () => (window as unknown as { __aeonHoldWideHints?: boolean }).__aeonHoldWideHints === true
+    window.addEventListener('resize', event => { if (holding()) event.stopImmediatePropagation() }, { capture: true })
+    const original = window.matchMedia.bind(window)
+    window.matchMedia = (query: string) => {
+      const list = original(query)
+      if (query === '(min-width: 1280px)') {
+        Object.defineProperty(list, 'matches', { configurable: true, get: () => holding() || original(query).matches })
+        list.addEventListener('change', event => { if (holding()) event.stopImmediatePropagation() }, { capture: true })
+      }
+      return list
+    }
+  })
+  await page.setViewportSize({ width: 1280, height: 900 })
+  await mockHeaderGraph(page, sized(8, true))
+  await page.goto('/p/PHAROS/tickets')
+  await ready(page)
+  await page.evaluate(() => {
+    (window as unknown as { __aeonHoldWideHints?: boolean }).__aeonHoldWideHints = true
+    Object.defineProperty(window, 'innerWidth', { configurable: true, value: 1280 })
+  })
+  await page.setViewportSize({ width: 390, height: 844 })
+  await expect.poll(() => page.evaluate(() => ({
+    window: window.innerWidth,
+    media: window.matchMedia('(min-width: 1280px)').matches,
+    layout: document.documentElement.getBoundingClientRect().width,
+  }))).toEqual({ window: 1280, media: true, layout: 390 })
+  await expect(page.locator('[data-header-glimpse="on"]')).toHaveCount(0)
+  await expect(page.locator('[data-header-glimpse="off"]')).toBeAttached()
+})
+
 test.describe('reduced motion', () => {
   test.use({ reducedMotion: 'reduce' })
   test('shows nothing', async ({ page }) => {

@@ -257,6 +257,10 @@ func servePairedContext(ctx context.Context, root string, capacityInterval time.
 	if err != nil {
 		return err
 	}
+	// Armed only after the hook pin is published. An earlier Close would be
+	// idempotent and would leave a pin written afterwards.
+	stopClean := agentd.ArmCleanStop(ctx, local)
+	defer stopClean()
 	captureCtx, stopCapture := context.WithCancel(ctx)
 	captureDone := make(chan struct{})
 	go func() { defer close(captureDone); s.RunCapacityCaptures(captureCtx) }()
@@ -270,11 +274,14 @@ func servePairedContext(ctx context.Context, root string, capacityInterval time.
 	for {
 		if stopping || ctx.Err() != nil {
 			stopping = true
+			stopClean()
 			stopCapture()
 			<-captureDone
 			op, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 			err = s.Close(op)
 			cancel()
+			// Runtime files are already gone. A signal does not finish the
+			// drain: busy turns stay owned until Close observes them exit.
 			if err == nil {
 				return nil
 			}

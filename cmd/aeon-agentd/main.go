@@ -303,6 +303,10 @@ func serve(args []string) (resultErr error) {
 		return err
 	}
 	defer local.Close()
+	// SIGTERM and SIGINT unlink runtime files before drain. launchctl stop,
+	// bootout, remove and brew services stop all arrive as one of those.
+	stopClean := agentd.ArmCleanStop(ctx, local)
+	defer stopClean()
 	captureCtx, stopCapture := context.WithCancel(ctx)
 	captureDone := make(chan struct{})
 	go func() { defer close(captureDone); s.RunCapacityCaptures(captureCtx) }()
@@ -315,11 +319,14 @@ func serve(args []string) (resultErr error) {
 	for {
 		if stopping || ctx.Err() != nil {
 			stopping = true
+			stopClean()
 			stopCapture()
 			<-captureDone
 			closeCtx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 			closeErr := s.Close(closeCtx)
 			cancel()
+			// Runtime files are already gone. A signal does not finish the
+			// drain: busy turns stay owned until Close observes them exit.
 			if closeErr == nil {
 				return nil
 			}
@@ -343,11 +350,18 @@ func serve(args []string) (resultErr error) {
 	}
 }
 
-// awaitDrainRetry is the pause between Close attempts after SIGTERM.
-// Busy turns are left to finish. Idle Codex waits are not.
+// awaitDrainRetry is the pause between Close attempts after SIGTERM or an
+// in-process stop. Busy turns are left to finish. Idle Codex waits are not.
 func awaitDrainRetry() {
+	if drainRetryObserver != nil {
+		drainRetryObserver()
+	}
 	time.Sleep(200 * time.Millisecond)
 }
+
+// drainRetryObserver is nil outside tests. It runs when a Close that did not
+// finish is about to be retried, so a test can see that retry without sleeping.
+var drainRetryObserver func()
 
 func control(args []string, out io.Writer) error {
 	f := flag.NewFlagSet("control", flag.ContinueOnError)

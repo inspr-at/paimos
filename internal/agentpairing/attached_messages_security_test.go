@@ -521,7 +521,7 @@ func TestAttachedDaemonAuthorityRecheckedInEveryTransaction(t *testing.T) {
 					t.Fatal(err)
 				}
 				defer tx.Rollback(context.Background())
-				if err = authz.LockKeyScopeUseTx(ctx, tx, f.tenantID, keyID); err != nil {
+				if err = authz.LockKeyScopeChangeTx(ctx, tx, f.tenantID, keyID); err != nil {
 					t.Fatal(err)
 				}
 				if _, err = tx.Exec(ctx, `SELECT id FROM tenants WHERE id=$1 FOR NO KEY UPDATE`, f.tenantID); err != nil {

@@ -1271,18 +1271,37 @@ test('AEON-1451 the full web layout and the essential gate stay inside the shard
 })
 
 test('AEON-1453 the merged full web catalogue needs seventeen shards to stay inside the budget',()=>{
-  // Merge-queue head 688f05b6a packed the full gate into sixteen shards and
-  // left shard 14 at 900.2s. Whole files are larger than the leftover gaps, so
-  // the same catalogue needs one more shard. Sixteen must stay over budget.
-  // AEON-1457's Goals cases, AEON-1388's group-figures cases, AEON-1473's
-  // seven browser cases and AEON-1477's painted-glimpse and Desk tab-row cases
-  // together leave the largest overflow at shard 11 with 907.3s.
+  // Risk: new catalogue cases change whole-file packing, so a historical
+  // shard number and duration cannot describe the live catalogue (AEON-1471).
+  // Keep the original exact 900.2s overflow proof on fixed whole-file inputs:
+  // thirteen heavier files fill shards 1–13; the last file doubles shard 14.
+  const fixedGate=Array.from({length:17},(_,i)=>({kind:'browser',file:`tests/fixed-${String(i).padStart(2,'0')}.spec.ts`,name:'case'}))
+  const fixedPolicy={groups:[{specs:fixedGate.map((row,i)=>({file:row.file,
+    tierTiming:{seconds:i<13?390.2:390.1,selectedTests:1}}))}]}
+  const fixedSixteen=webShardPlan(fixedGate,fixedPolicy,{mode:'full',maximum:16})
+  assert.equal(fixedSixteen.shards.length,16)
+  assert.equal(fixedSixteen.fitsBudget,false)
+  assert.equal(fixedSixteen.projectedMaxSeconds,900.2)
+  assert.throws(()=>assertWebShardBudget(fixedSixteen),/Web shard 14 predicts 900\.2s, over the 900s budget/)
+  const fixedFull=webShardPlan(fixedGate,fixedPolicy,{mode:'full'})
+  assert.deepEqual(fixedFull.shards,fullWebShards)
+  assert.equal(fixedFull.projectedMaxSeconds,510.2)
+  assertWebShardBudget(fixedFull)
+  assert.equal(fixedFull.projections.reduce((sum,bin)=>sum+bin.cases,0),fixedGate.length)
+
+  // The current catalogue must still overflow at sixteen, report its exact
+  // worst projection, and retain every case within budget at seventeen,
+  // including main's Goals, group-figures and seven desk-tab browser cases
+  // and AEON-1477's painted-glimpse and Desk tab-row cases.
   const policy=loadWebPolicy()
   const gate=fullGateTests(replayRows).filter(row=>row.kind==='browser')
   const sixteen=webShardPlan(gate,policy,{mode:'full',maximum:16})
   assert.equal(sixteen.shards.length,16)
   assert.equal(sixteen.fitsBudget,false)
-  assert.throws(()=>assertWebShardBudget(sixteen),/Web shard 11 predicts 907\.3s, over the 900s budget/)
+  const worst=[...sixteen.projections].sort((a,b)=>b.seconds-a.seconds)[0]
+  assert.ok(worst.seconds>sixteen.budgetSeconds)
+  assert.throws(()=>assertWebShardBudget(sixteen),{name:'Error',
+    message:`Web shard ${worst.shard} predicts ${worst.seconds.toFixed(1)}s, over the ${sixteen.budgetSeconds}s budget`})
   const full=webShardPlan(gate,policy,{mode:'full'})
   assert.equal(fullWebShardCount,17)
   assert.deepEqual(full.shards,fullWebShards)

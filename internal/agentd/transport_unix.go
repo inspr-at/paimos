@@ -458,12 +458,19 @@ func (l *LocalServer) Close() error {
 		if l.release != nil {
 			defer l.release()
 		}
-		l.closeErr = l.Server.Close()
-		// Serve runs in a goroutine and may not have registered the listener
-		// with http.Server yet when startup is immediately followed by Close.
-		_ = l.Listener.Close()
+		// Unlink the socket, token and our own hook pin before the listener
+		// closes. A SIGKILL during drain then cannot leave them behind.
+		// Server.Close closes the listener, so cleanup has to come first.
 		if l.cleanup != nil {
-			l.closeErr = errors.Join(l.closeErr, l.cleanup())
+			l.closeErr = l.cleanup()
+		}
+		if l.Server != nil {
+			l.closeErr = errors.Join(l.closeErr, l.Server.Close())
+		}
+		// Serve may not have registered the listener with http.Server yet
+		// when startup is immediately followed by Close.
+		if l.Listener != nil {
+			_ = l.Listener.Close()
 		}
 	})
 	return l.closeErr
