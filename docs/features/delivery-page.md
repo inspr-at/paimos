@@ -6,10 +6,12 @@ against the Project Arion targets. The section is absent, not disabled, for peop
 without `delivery.read` on the project; such an address opens the project's tickets.
 
 The page head carries **Numbers | Flow** (`?view=flow`), the window
-**7 · 30 · 90 · 180 · 365 days** and **Simple | Expert**. Window and level are the
-person's own: they are saved server-side as the preference `delivery:numbers`
-(`{ "level": "simple" | "expert", "window": 7 | 30 | 90 | 180 | 365 }`) and default
-to Simple and 7 days. Switching never moves a control: the controls sit in the
+**7 · 30 · 90 · 180 · 365 days** and **Simple | Expert**, all three view switches
+(see [View switches](view-switch.md)): the view used last opens the next visit, a
+right-click or hold sets a default. Window and level are the person's own: they are
+saved server-side as the preference `delivery:numbers`
+(`{ "level": "simple" | "expert", "window": 7 | 30 | 90 | 180 | 365, "defaults"?: { "level"?, "window"? } }`)
+and default to Simple and 7 days. Switching never moves a control: the controls sit in the
 top-anchored head, the window switch keeps its slot (hidden) on Flow, and content
 below grows downward.
 

@@ -229,7 +229,7 @@ for (const lang of ['en', 'de'] as const) {
       vue: Vue,
       'vue-router': { useRoute: () => Vue.reactive({ query: {}, path: '/p/AEON/delivery', hash: '' }), useRouter: () => ({ replace: () => {} }) },
       '../AppIcon.vue': sfc({ props: ['name', 'size'], render: () => Vue.h('svg') }),
-      '../work/ProjectTabs.vue': stub, './ExpertTile.vue': stub, './LevelSwitch.vue': stub,
+      '../ViewSwitch.vue': stub, './ExpertTile.vue': stub, './LevelSwitch.vue': stub,
       './SimpleNumbers.vue': stub, './TrendChart.vue': stub, './WindowSwitch.vue': stub, './FlowView.vue': stub, './TicketsSection.vue': stub,
       // AEON-1359: Delivery › Tickets reads on its own; answered (with no figures), so the source chips stand.
       '../../lib/deliveryTickets': ticketsLib, '../../lib/statusTiming': statusTiming, '../../lib/workFigures': workFigures,
@@ -238,9 +238,11 @@ for (const lang of ['en', 'de'] as const) {
       '../../lib/authz': { can: () => true }, '../../lib/projectSettings': projectSettings, '../../lib/projectDeliverySettings': projectDeliverySettings,
       '../../lib/deliveryFlow': flowLib, '../../lib/deliveryFlowModes': flowModes, '../../lib/deliveryFlowText': flowTextLib, '../../lib/useDeliveryFlow': useFlow,
       '../../lib/deliveryNumbers': { ...numbers, readDeliveryMetrics: () => read() },
-      '../../lib/preferences': { onPreferenceFailure: (listener: (key: string) => void) => { failures.add(listener); return () => { failures.delete(listener) } }, preferenceSaves, usePreference: () => pref },
+      '../../lib/preferences': { onPreferenceFailure: (listener: (key: string) => void) => { failures.add(listener); return () => { failures.delete(listener) } }, preferenceSaves, preferenceOwner: Vue.ref('me'), preferenceGeneration: () => 0, usePreference: () => pref },
       '../../lib/usePolledData': { usePoller: (load: () => Promise<void>) => { reload = load; return { start: () => { void load() }, stop() {}, restart() {} } } },
       '../../directives/clipTip': { vClipTip: {} },
+      // AEON-1453: Numbers | Flow remembers itself; this case stays on Numbers.
+      '../../lib/viewSwitch': { viewKey: (name: string) => `view:${name}`, useViewSwitch: () => ({ current: Vue.ref('numbers'), defaultId: Vue.ref(null), choose() {}, setDefault() {} }) },
       '../../stores/profile': { useProfile: () => ({ profile: { locale: lang === 'de' ? 'de-AT' : 'en' }, load: async () => {} }) },
     })
     const app = renderer.createApp(DeliveryView, { project: { id: 'p1', routeKey: 'AEON', title: 'Aeon' } })

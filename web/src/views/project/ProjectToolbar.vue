@@ -8,7 +8,7 @@ import type { Project } from '../../stores/projects'
 import { bindProjectRef, useProjectPageContext } from './context'
 const props = defineProps<{ project: Project }>()
 const { project } = toRefs(props)
-const { startCreate, toolbarColumns, saveColumns, resetColumns, list, outline, sequence, total, options, chipLabel, facetLoading, needOptions, update, setHideStates, manualShowClosed, setSection, setView, toggleValue, excludeValue, clearFilters, setDate, setSort, setGroup, setAllGroups, selectable, selected, phonePicking, picking, clearSelection, selectedDeleted, projectSections, section, headerDensity, ticketsHeader, filters, density, setDensity, knowledgeView, viewMode, settingsActive, deliveryActive, graphActive, graphState, toolbarWrap, stickMark, toolbar, filterSheet, stuck, me, views, activeView, viewDirty, canSaveView, defaultViewId, hrefFor, openView, viewBar, startSave } = useProjectPageContext()
+const { startCreate, toolbarColumns, saveColumns, resetColumns, list, outline, sequence, total, options, chipLabel, facetLoading, needOptions, update, setHideStates, manualShowClosed, setSection, setView, toggleValue, excludeValue, clearFilters, setDate, setSort, setGroup, setAllGroups, selectable, selected, phonePicking, picking, clearSelection, selectedDeleted, projectSections, section, headerDensity, ticketsHeader, filters, density, setDensity, knowledgeView, ticketSwitch, knowledgeSwitch, viewMode, settingsActive, deliveryActive, graphActive, graphState, toolbarWrap, stickMark, toolbar, filterSheet, stuck, me, views, activeView, viewDirty, canSaveView, defaultViewId, hrefFor, openView, viewBar, startSave } = useProjectPageContext()
 const bindStickMark = bindProjectRef(stickMark)
 const bindToolbar = bindProjectRef(toolbar)
 const bindToolbarWrap = bindProjectRef(toolbarWrap)
@@ -23,7 +23,8 @@ const bindToolbarWrap = bindProjectRef(toolbarWrap)
       @search="q => update({ q })" @toggle="toggleValue" @exclude="excludeValue" @clear="dimension => update({ [dimension]: [] })" @clear-all="clearFilters"
       @show-closed="manualShowClosed" @hide-states="setHideStates" @group="setGroup" @sort="setSort" @density="setDensity" @date="setDate"
       @open-sheet="filterSheet?.open()" @need-options="needOptions" @create="startCreate()"
-      :view="viewMode === 'settings' || viewMode === 'delivery' ? 'list' : viewMode" :knowledge-view="knowledgeView" @view="setView" @expand-all="outline.expandAll()" @collapse-all="outline.collapseAll()"
+      :view="viewMode === 'settings' || viewMode === 'delivery' ? 'list' : viewMode" :knowledge-view="knowledgeView" @view="setView"
+      :default-view="viewMode === 'knowledge' ? knowledgeSwitch.defaultId.value : ticketSwitch.defaultId.value" @set-default="value => (viewMode === 'knowledge' ? knowledgeSwitch : ticketSwitch).setDefault(value)" @expand-all="outline.expandAll()" @collapse-all="outline.collapseAll()"
       @expand-groups="setAllGroups(true)" @collapse-groups="setAllGroups(false)"
       :columns="toolbarColumns" @columns="saveColumns" @columns-reset="resetColumns"
     >

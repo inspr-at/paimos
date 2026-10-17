@@ -4,10 +4,14 @@ import { computed, nextTick, ref, watch } from 'vue'
 import type { SavedView } from '../../lib/api'
 import AppIcon from '../AppIcon.vue'
 import FloatingPanel from './FloatingPanel.vue'
+import { defaultTip } from '../../lib/viewSwitch'
+import { useViewMenuTrigger } from '../../lib/viewMenuTrigger'
 
 // The project's saved views as one row of links: the plain list first, then the
 // person's own and the shared views in the order they were made. The open view
-// carries its menu; a dot says the list has changed since the view was saved.
+// carries its menu; a dot says the list has changed since the view was saved. Right-click,
+// a long press or Shift+F10 opens any view's menu, where it becomes the view the project
+// opens with: the ticket list switch's default, marked with the small pin (AEON-1453).
 const props = defineProps<{
   views: SavedView[]
   activeId: string | null
@@ -48,6 +52,12 @@ watch(() => props.activeId, async () => {
 }, { immediate: true })
 watch(() => props.views.length, () => void nextTick(measure))
 function openMenu(view: SavedView, anchor: HTMLElement) { menu.value = menu.value?.view.id === view.id ? null : { view, anchor } }
+const trigger = useViewMenuTrigger((id, anchor) => {
+  const view = props.views.find(item => item.id === id)
+  if (view) menu.value = { view, anchor }
+})
+const tip = (view: SavedView) => view.id === props.defaultId ? defaultTip(view.name)
+  : view.shared && !mine(view) ? 'Shared with the project' : view.shared ? 'Yours, shared with the project' : undefined
 function closeMenu(restore: boolean) {
   const anchor = menu.value?.anchor
   menu.value = null
@@ -61,6 +71,7 @@ function act(run: (open: { view: SavedView; anchor: HTMLElement }) => void) {
   void nextTick(() => { if (document.activeElement === document.body && open.anchor.isConnected) open.anchor.focus() })
 }
 function click(event: MouseEvent, id: string | null) {
+  if (trigger.heldClick(event)) return
   if (event.metaKey || event.ctrlKey || event.shiftKey || event.button === 1) return
   event.preventDefault()
   emit('open', id)
@@ -86,10 +97,11 @@ defineExpose({ openMenuFor: (anchor: HTMLElement) => { if (active.value) openMen
       <span v-for="view in views" :key="view.id" class="tab" :class="{ active: view.id === activeId }">
         <a
           class="view-tab" :href="hrefFor(view.id)" :aria-current="view.id === activeId ? 'page' : undefined"
-          :data-tip="view.shared && !mine(view) ? 'Shared with the project' : view.shared ? 'Yours, shared with the project' : undefined"
-          @click="click($event, view.id)" @contextmenu.prevent="openMenu(view, $event.currentTarget as HTMLElement)"
+          :data-tip="tip(view)" :aria-description="view.id === defaultId ? 'Opens here by default' : undefined"
+          @click="click($event, view.id)" @contextmenu="trigger.contextmenu($event, view.id)" @keydown="trigger.keydown($event, view.id)"
+          @pointerdown="trigger.pointerdown($event, view.id)" @pointermove="trigger.pointermove" @pointerup="trigger.pointerend" @pointercancel="trigger.pointerend"
         >
-          <AppIcon v-if="view.id === defaultId" name="star" :size="12" class="lead star" />
+          <span v-if="view.id === defaultId" class="view-pin" aria-hidden="true"><AppIcon name="pin" :size="10" /></span>
           <span v-clip-tip class="name">{{ view.name }}</span>
           <AppIcon v-if="view.shared" name="users" :size="12" class="shared" />
           <span :style="{ visibility: view.id === activeId && dirty ? 'visible' : 'hidden' }" class="dirty" role="img" aria-label="changed since saved" />
@@ -119,8 +131,8 @@ defineExpose({ openMenuFor: (anchor: HTMLElement) => { if (active.value) openMen
         </template>
         <button v-if="mine(menu.view)" type="button" role="menuitem" class="menu-item" :data-autofocus="dirty ? undefined : ''" @click="act(m => emit('rename', m.view, m.anchor))"><AppIcon name="edit" :size="14" />Rename</button>
         <button type="button" role="menuitem" class="menu-item" @click="act(m => emit('duplicate', m.view))"><AppIcon name="copy" :size="14" />{{ mine(menu.view) ? 'Duplicate' : 'Copy to my views' }}</button>
-        <button v-if="menu.view.id !== defaultId" type="button" role="menuitem" class="menu-item" @click="act(m => emit('setDefault', m.view))"><AppIcon name="star" :size="14" />Open the project with it</button>
-        <button v-else type="button" role="menuitem" class="menu-item" @click="act(() => emit('setDefault', null))"><AppIcon name="star" :size="14" />Stop opening with it</button>
+        <button v-if="menu.view.id !== defaultId" type="button" role="menuitem" class="menu-item" @click="act(m => emit('setDefault', m.view))"><AppIcon name="pin" :size="14" />Open here by default</button>
+        <button v-else type="button" role="menuitem" class="menu-item" @click="act(() => emit('setDefault', null))"><AppIcon name="pin" :size="14" />Stop opening here by default</button>
         <button v-if="mine(menu.view)" type="button" role="menuitem" class="menu-item" @click="act(m => emit('share', m.view, !m.view.shared))"><AppIcon name="users" :size="14" />{{ menu.view.shared ? 'Make it private' : 'Share with the project' }}</button>
         <button type="button" role="menuitem" class="menu-item" @click="act(m => emit('copyLink', m.view))"><AppIcon name="link" :size="14" />Copy link</button>
         <template v-if="mine(menu.view)">
@@ -141,7 +153,7 @@ defineExpose({ openMenuFor: (anchor: HTMLElement) => { if (active.value) openMen
 .strip.fade-start { -webkit-mask-image: linear-gradient(to right, transparent, #000 28px); mask-image: linear-gradient(to right, transparent, #000 28px); }
 .strip.fade-start.fade-end { -webkit-mask-image: linear-gradient(to right, transparent, #000 28px, #000 calc(100% - 28px), transparent); mask-image: linear-gradient(to right, transparent, #000 28px, #000 calc(100% - 28px), transparent); }
 .tab { display: inline-flex; align-items: center; flex-shrink: 0; border-radius: 999px; }
-.view-tab { display: inline-flex; align-items: center; gap: 6px; flex-shrink: 0; max-width: 260px; height: 28px; padding: 0 4px 0 12px; border-radius: 999px; color: var(--ink-2); font-size: 13px; font-weight: 600; text-decoration: none; white-space: nowrap; }
+.view-tab { position: relative; -webkit-touch-callout: none; display: inline-flex; align-items: center; gap: 6px; flex-shrink: 0; max-width: 260px; height: 28px; padding: 0 4px 0 12px; border-radius: 999px; color: var(--ink-2); font-size: 13px; font-weight: 600; text-decoration: none; white-space: nowrap; }
 .view-tab .name { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
 /* Saved views end in their own options button; the plain list has none, so its pill keeps the same 12 px as on the left. */
 .view-tab.plain { padding-right: 12px; }
@@ -155,8 +167,9 @@ defineExpose({ openMenuFor: (anchor: HTMLElement) => { if (active.value) openMen
 .tab-menu:hover, .tab-menu[aria-expanded="true"] { background: color-mix(in srgb, var(--primary-line) 12%, transparent); }
 .lead { flex-shrink: 0; color: var(--ink-3); }
 .view-tab[aria-current="page"] .lead { color: var(--teal-ink); }
-.star { color: var(--secondary-line); }
-.view-tab[aria-current="page"] .star { color: var(--secondary-line); }
+/* The default's pin sits in the tab's leading corner, where the star was, clear of the
+   changed dot at its end: marking a view never widens its tab. */
+.view-pin { position: absolute; left: 2px; bottom: 1px; display: inline-grid; color: var(--ink-3); pointer-events: none; }
 .shared { flex-shrink: 0; color: var(--ink-3); }
 .dirty { flex-shrink: 0; width: 7px; height: 7px; border-radius: 50%; background: var(--teal); box-shadow: 0 0 0 2px var(--chip-teal-bg); }
 .changes { display: flex; align-items: center; gap: 4px; flex-shrink: 0; }

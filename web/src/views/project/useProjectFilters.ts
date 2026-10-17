@@ -15,7 +15,7 @@ import type { ProjectState } from './types'
 import type { useProjectData } from './useProjectData'
 
 export function useProjectFilters(state: ProjectState, data: ReturnType<typeof useProjectData>, resetPanelOrigin: () => void) {
-  const { route, router, session, projectKey, ticketKey, project, projectId, vocabulary, queueSnapshot, section, sectionPath, ticketSectionQuery, filters, activeTicketView, knowledgeActive, deliveryActive, graphActive, graphState, collapsed, creating, fullView, ticketPath } = state
+  const { route, router, session, projectKey, ticketKey, project, projectId, vocabulary, queueSnapshot, section, sectionPath, ticketSectionQuery, filters, activeTicketView, knowledgeActive, deliveryActive, graphActive, graphState, collapsed, creating, fullView, ticketPath, sectionSwitch, ticketSwitch, knowledgeSwitch, ticketOpeningQuery } = state
   const { list, groups } = data
   function options(dimension: Dimension) {
     if (graphActive.value) {
@@ -119,13 +119,17 @@ export function useProjectFilters(state: ProjectState, data: ReturnType<typeof u
     if (!target || target === section.value) return
     const { section: _section, panel: _panel, entry: _entry, ...query } = route.query
     sectionQueries[section.value] = query
-    const saved = sectionQueries[target] ?? {}
+    sectionSwitch.remember(target)
+    // A first visit to the tickets opens them as the person prefers (AEON-1453).
+    const saved = sectionQueries[target] ?? (target === 'tickets' && !ticketKey.value ? ticketOpeningQuery() : {})
     void router.push({ path: ticketKey.value ? ticketPath(ticketKey.value) : sectionPath(target),
       query: { ...saved, ...(ticketKey.value ? ticketSectionQuery(target) : {}) } })
   }
   let viewIntent = 0
   async function setView(view: string) {
     const intent = ++viewIntent, within = projectKey.value, sectionAtClick = section.value
+    // The view used last, per project (AEON-1453); a link or a saved view never counts as chosen.
+    if (knowledgeActive.value) knowledgeSwitch.remember(view); else if (section.value === 'tickets') ticketSwitch.remember(view)
     // Filter writes can overlap the session guard. Retry a cancelled navigation
     // against the settled query, retaining both the new filter and latest view.
     while (intent === viewIntent && within === projectKey.value && sectionAtClick === section.value) {
