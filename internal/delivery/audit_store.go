@@ -436,6 +436,11 @@ func (m *Module) auditMerge(ctx context.Context, tid string, f MergeFact, reader
 		if exists && len(previous.Flags) == 0 {
 			return nil
 		}
+		if exists && previous.PR != nil && (f.PR == nil || *previous.PR != *f.PR) {
+			// A partial association read must not turn a known PR merge into
+			// an immediate direct-push accusation while provenance is pending.
+			return errRead
+		}
 		o, err := auditLink(ctx, tx, m.config.Repository, f)
 		if err != nil {
 			return err
@@ -496,7 +501,7 @@ func (m *Module) auditMerge(ctx context.Context, tid string, f MergeFact, reader
 			}
 		}
 		_, err = tx.Exec(ctx, `INSERT INTO delivery_merge_audit(tenant_id,repository,merge_sha,pull_request,ticket_node_id,project_id,merged_by,via_queue,checks_passed,review_ok,flags,at,alerted_at) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13)
- ON CONFLICT(tenant_id,repository,merge_sha) DO UPDATE SET pull_request=EXCLUDED.pull_request,ticket_node_id=EXCLUDED.ticket_node_id,project_id=EXCLUDED.project_id,merged_by=EXCLUDED.merged_by,via_queue=EXCLUDED.via_queue,checks_passed=EXCLUDED.checks_passed,review_ok=EXCLUDED.review_ok,flags=EXCLUDED.flags,alerted_at=EXCLUDED.alerted_at`, tid, a.Repository, a.SHA, a.PR, a.Ticket, a.Project, a.MergedBy, a.ViaQueue, a.ChecksPassed, a.ReviewOK, a.Flags, a.At, a.AlertedAt)
+ ON CONFLICT(tenant_id,repository,merge_sha) DO UPDATE SET pull_request=EXCLUDED.pull_request,ticket_node_id=EXCLUDED.ticket_node_id,project_id=EXCLUDED.project_id,merged_by=EXCLUDED.merged_by,via_queue=EXCLUDED.via_queue,checks_passed=EXCLUDED.checks_passed,review_ok=EXCLUDED.review_ok,flags=EXCLUDED.flags,at=EXCLUDED.at,alerted_at=EXCLUDED.alerted_at`, tid, a.Repository, a.SHA, a.PR, a.Ticket, a.Project, a.MergedBy, a.ViaQueue, a.ChecksPassed, a.ReviewOK, a.Flags, a.At, a.AlertedAt)
 		if err != nil {
 			return err
 		}

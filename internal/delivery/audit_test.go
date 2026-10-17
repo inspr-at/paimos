@@ -511,6 +511,14 @@ func TestMergeAuditFalseAlarmRepairAndClassification(t *testing.T) {
 	if a := auditRead(t, f, fact.SHA); !reflect.DeepEqual(a.Flags, []string{"no_queue"}) || a.AlertedAt != nil {
 		t.Fatalf("initial provenance should wait: %+v", a)
 	}
+	partial := fact
+	partial.PR = nil
+	if err := f.m.auditMerge(t.Context(), f.person.TenantID, partial, g); !errors.Is(err, errRead) {
+		t.Fatalf("partial association should not replace a known PR: %v", err)
+	}
+	if a := auditRead(t, f, fact.SHA); a.PR == nil || a.AlertedAt != nil {
+		t.Fatalf("partial association became a direct push: %+v", a)
+	}
 	f.at = fact.At.Add(auditProvenanceGrace - time.Second)
 	if err := f.m.ReconcileAudit(t.Context(), f.person.TenantID); err != nil {
 		t.Fatal(err)
