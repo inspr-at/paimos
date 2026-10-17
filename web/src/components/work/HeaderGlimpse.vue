@@ -31,6 +31,7 @@ const shown = ref(0), truncated = ref(false)
 const canvas = ref<{ setPaused: (value: boolean) => void } | null>(null)
 const allowed = computed(() => headerGlimpseAllowed({ enabled: props.enabled, reduced: reduced.value, wide: wide.value, tickets: props.ticketCount }))
 let request: AbortController | undefined, idleId = 0, seeing: IntersectionObserver | undefined, sizing: ResizeObserver | undefined, mounted = false, changes: MutationObserver | undefined, measureFrame = 0, sizingPaused = false
+let scrollRoot: HTMLElement | undefined
 
 function controlBox(compactMode: boolean) {
   const el = controls.value
@@ -70,6 +71,8 @@ function measureRegion() {
   } finally {
     sizingPaused = false
   }
+  // The new height is in the DOM on the next flush. Read it then, not from the observer's queue.
+  void nextTick(() => { if (mounted) syncOcclusion() })
 }
 function scheduleMeasure() {
   // Trial widths change the bar while a measurement is already reading it.
@@ -82,6 +85,21 @@ function scheduleMeasure() {
 }
 
 function applyMotion() { canvas.value?.setPaused(userPaused.value || occluded.value || document.hidden) }
+// #main's scroll and the observer can disagree. A delivery may carry the
+// pre-scroll sample first, or the scroll may never be delivered. The box on
+// screen is the pause decision; an unmeasured column has nothing to hide.
+function backdropOutOfView() {
+  const el = column.value
+  const root = document.getElementById('main')
+  if (!el || !(root instanceof HTMLElement)) return false
+  const box = el.getBoundingClientRect(), view = root.getBoundingClientRect()
+  if (box.width <= 0 || box.height <= 0) return false
+  const overlapW = Math.min(box.right, view.right) - Math.max(box.left, view.left)
+  const overlapH = Math.min(box.bottom, view.bottom) - Math.max(box.top, view.top)
+  return overlapW <= 0 || overlapH <= 0
+}
+function syncOcclusion() { occluded.value = backdropOutOfView(); applyMotion() }
+function detachScroll() { scrollRoot?.removeEventListener('scroll', syncOcclusion); scrollRoot = undefined }
 function openGraph() { void router.push({ path: `/p/${encodeURIComponent(props.projectKey)}/tickets`, query: { ...filtersToQuery(filters.value), view: 'graph' } }) }
 function togglePause() { userPaused.value = !userPaused.value; applyMotion() }
 function onWide() { wide.value = wideQuery.matches }
@@ -96,12 +114,13 @@ function attachSizing() {
   }
 }
 function watchHeader() {
-  seeing?.disconnect(); sizing?.disconnect(); changes?.disconnect()
+  seeing?.disconnect(); sizing?.disconnect(); changes?.disconnect(); detachScroll()
   const header = column.value?.closest('header'), page = header?.closest('.project-page')
   if (!header || !page) return
   const root = document.getElementById('main')
-  seeing = new IntersectionObserver(([entry]) => { occluded.value = !entry.isIntersecting; applyMotion() }, { root: root instanceof HTMLElement ? root : null, threshold: 0 })
+  seeing = new IntersectionObserver(() => { syncOcclusion() }, { root: root instanceof HTMLElement ? root : null, threshold: 0 })
   seeing.observe(column.value!)
+  if (root instanceof HTMLElement) { scrollRoot = root; root.addEventListener('scroll', syncOcclusion, { passive: true }) }
   sizing = new ResizeObserver(scheduleMeasure)
   attachSizing()
   changes = new MutationObserver(records => {
@@ -112,6 +131,7 @@ function watchHeader() {
   })
   changes.observe(page, { subtree: true, childList: true, characterData: true })
   measureRegion()
+  syncOcclusion()
 }
 
 async function load() {
@@ -148,6 +168,7 @@ onBeforeUnmount(() => {
   request?.abort()
   if (idleId) window.cancelIdleCallback?.(idleId)
   seeing?.disconnect()
+  detachScroll()
   sizing?.disconnect()
   changes?.disconnect()
   cancelAnimationFrame(measureFrame)
