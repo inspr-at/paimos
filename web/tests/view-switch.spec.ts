@@ -351,7 +351,7 @@ test('AEON-1453 session panel: the old pin becomes the tab switch default once; 
   expect(errors).toEqual([])
 })
 
-test('AEON-1453 phone session panel: the ⋯ choice and a long press on the tab set one default, shown on both', async ({ page }) => {
+test('AEON-1453 phone session panel: the ⋯ choice and a long press on the tab set one default, shown on both', async ({ page }, info) => {
   await page.setViewportSize({ width: 390, height: 844 })
   const errors = watchErrors(page)
   const world = await leadPanel(page)
@@ -403,6 +403,35 @@ test('AEON-1453 phone session panel: the ⋯ choice and a long press on the tab 
   await expect(lead).toHaveAttribute('aria-selected', 'true')
   await expect(openedOn(page)).toHaveText('Opened on Lead: your default')
   expect(await pinOn(page)).toEqual(['Lead'])
+
+  // Every form of the tabs: the pin stays inside its tab, after the label where one shows and as a
+  // badge on an icon-only tab, where stopping and setting it again moves no tab either.
+  const tablist = panelOf(page).getByRole('tablist')
+  for (const width of [390, 320, 1440, 1100, 900]) for (const look of ['light', 'dark'] as const) {
+    await page.setViewportSize({ width, height: width < 600 ? 700 : 900 })
+    await page.emulateMedia({ colorScheme: look })
+    await expect(lead.locator('.view-pin')).toBeVisible()
+    const placed = await lead.evaluate(tab => {
+      const pin = tab.querySelector('.view-pin')!.getBoundingClientRect(), box = tab.getBoundingClientRect(), label = tab.querySelector('.tab-label')!
+      const labelled = label.checkVisibility()
+      return { labelled, pin: { x: pin.x, right: pin.right }, tab: { x: box.x, right: box.right }, labelRight: labelled ? label.getBoundingClientRect().right : null }
+    })
+    expect(placed.pin.x, `${width}: pin inside its tab`).toBeGreaterThanOrEqual(placed.tab.x - .5)
+    expect(placed.pin.right, `${width}: pin inside its tab`).toBeLessThanOrEqual(placed.tab.right + .5)
+    if (placed.labelRight !== null) expect(Math.abs(placed.pin.x - placed.labelRight - 4), `${width}: four pixels after the label`).toBeLessThanOrEqual(1)
+    await tablist.screenshot({ path: info.outputPath(`AEON-1453/session-tabs-${width}-${look}-${placed.labelled ? 'labels' : 'icons'}.png`) })
+    if (placed.labelled || look === 'dark') continue
+    const badge = await controlStability(page, { lead, details, chat, events })
+    for (const action of ['Stop opening here by default', 'Open here by default']) await badge.check(async () => {
+      await lead.focus()
+      await page.keyboard.press('Shift+F10')
+      const put = saved(page, 'view:lead-panel')
+      await menuItem(page, action).click()
+      await put
+      expect(await pinOn(page)).toEqual(action === 'Open here by default' ? ['Lead'] : [])
+    })
+    badge.done()
+  }
   expect(errors).toEqual([])
 })
 
