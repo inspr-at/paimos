@@ -13,6 +13,10 @@ import QuotaChart from './QuotaChart.vue'
 const props = defineProps<{
   view: UsageView; state: 'loading' | 'ready' | 'error'
   generatedAt?: string; anchorHour?: string; tz?: string
+  /** A refresh failed after a good read: keep the snapshot, and offer another try on its muted line. */
+  failed?: boolean
+  /** Client clock. Ages the snapshot from its timestamps; the server's counters stay frozen. */
+  now?: number
   /** Only this block's height is wanted: no chart, no ids, nothing focusable. */
   ghost?: boolean
 }>()
@@ -25,8 +29,13 @@ const none = computed(() => kind.value === 'none')
 const pending = computed(() => kind.value === 'pending')
 const shown = computed<'loading' | 'ready' | 'error'>(() => pending.value ? (props.state === 'ready' ? 'loading' : props.state) : 'ready')
 const reading = computed(() => !pending.value && !quiet.value && !none.value)
-const model = computed(() => reading.value && group.value?.pool && props.generatedAt && props.anchorHour ? chartModel(group.value, props.generatedAt, props.anchorHour) : null)
-const rows = computed(() => accountRows(group.value, props.tz, props.view.known))
+// A null pool still has a chart when a curve or a known hour survived (an expired reading keeps its history).
+const model = computed(() => {
+  const g = group.value
+  const drawable = !!g && (!!g.pool || !!g.current || !!g.safe || g.history.some(h => h.known))
+  return reading.value && drawable && props.generatedAt && props.anchorHour ? chartModel(g, props.generatedAt, props.anchorHour) : null
+})
+const rows = computed(() => accountRows(group.value, props.tz, props.view.known, props.now))
 const id = (part: string) => props.ghost ? undefined : `ub-${props.view.harness}-${part}`
 const tab = computed(() => props.ghost ? -1 : undefined)
 
@@ -66,7 +75,7 @@ const accountsWord = computed(() => `${rows.value.length} ${rows.value.length ==
     <div v-else-if="shown === 'error'" class="ub-sum"><div class="ub-hd"><p class="err" :role="ghost ? undefined : 'alert'"><AppIcon name="alert" :size="15" /><span>Usage couldn’t be read</span><span class="ub-of">·</span><button type="button" class="link-btn" :tabindex="tab" @click="emit('retry')">Try again</button></p></div><p class="ub-l2" /><div class="ub-v" /></div>
     <div v-else class="ub-sum">
       <p class="ub-hd">{{ view.head }}</p>
-      <p class="ub-l2" :class="{ stale: view.stale }"><span>{{ view.muted }}</span></p>
+      <p class="ub-l2" :class="{ stale: view.stale || failed }"><span>{{ view.muted }}</span><button v-if="failed" type="button" class="link-btn ub-retry" :tabindex="tab" @click="emit('retry')">Try again</button></p>
       <p class="ub-v"><AppIcon :class="verdictTone" :name="verdictIcon" :size="15" /><span class="vt"><b :class="verdictTone">{{ view.verdict }}</b><template v-if="view.paceLine"> · {{ view.paceLine }}</template></span></p>
     </div>
 
@@ -160,6 +169,7 @@ p { margin: 0; }
 .ub-hd .err > svg { color: var(--danger); }
 .ub-l2 { display: flex; align-items: center; min-width: 0; overflow: hidden; color: var(--ink-3); font-size: 13px; line-height: 20px; white-space: nowrap; font-variant-numeric: tabular-nums; }
 .ub-l2 > span { overflow: hidden; text-overflow: ellipsis; }
+.ub-retry { flex: none; margin-left: 8px; }
 .ub-l2 .skeleton { width: 54%; height: 10px; }
 .ub-v { display: flex; align-items: center; gap: 7px; min-width: 0; font-size: 13px; line-height: 20px; font-variant-numeric: tabular-nums; }
 .ub-v > svg { flex: none; }

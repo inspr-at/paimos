@@ -39,6 +39,14 @@ describe('the answer in words', () => {
     const learning = structuredClone(group('fast', 'claude'))
     Object.assign(learning, { verdict: 'unknown', current: null }); learning.pace.per_hour_24h = null; learning.headline = { ...learning.headline, kind: 'unknown', focus_at: null }
     expect(usageView('claude', learning, outlooks.fast.anchor_hour, 'UTC')).toMatchObject({ kind: 'unknown', verdict: 'Pace not measured yet', focus: null })
+    // An expired reading has no pool. The words keep the last measurement and do not claim headroom.
+    const expired = structuredClone(group('fast', 'claude'))
+    expired.pool = null
+    expired.accounts[0]!.freshness = 'expired'
+    expired.accounts[0]!.used_percent = 80
+    const words = usageView('claude', expired, outlooks.fast.anchor_hour, 'UTC')
+    expect(words.head + words.short + words.muted + words.tip).not.toMatch(/100 %/)
+    expect(words.muted.toLowerCase()).toContain('unknown')
   })
   it('before the outlook is read, the plan’s accounts decide: pending rows, or no quota for a harness that never reports it', () => {
     const known = [{ account_id: 'a', label: 'one@' }, { account_id: 'b', label: 'two@' }]

@@ -71,6 +71,13 @@ export function ago(seconds: number): string {
 }
 /** A reading this old reads as its age, in muted ink. */
 export const STALE_SECONDS = 2 * 3600
+/** Age from a timestamp when the caller has a clock; otherwise the server's frozen counter. */
+function elapsedSeconds(iso: string | null | undefined, nowMs: number | undefined, frozen: number): number {
+  if (nowMs === undefined || !iso) return frozen
+  const parsed = Date.parse(iso)
+  if (!Number.isFinite(parsed)) return frozen
+  return Math.max(0, Math.round((nowMs - parsed) / 1000))
+}
 export const f1 = (n: number) => (Math.round(n * 10) / 10).toFixed(1)
 function span(ms: number): string {
   const minutes = Math.round(ms / 60_000)
@@ -111,7 +118,7 @@ export const VERDICT_ICON: Record<UsageKind, string> = { fast: 'alert', slow: 'h
  * One harness's usage in words. Without its group the plan's accounts (known) decide: none means
  * no account; a harness that never reports quota says so at once; otherwise the read is pending.
  */
-export function usageView(harness: string, group: OutlookGroup | undefined, anchorHour: string | undefined, tz?: string, known: KnownAccount[] = [], read: 'loading' | 'ready' | 'error' = 'ready', truncated = false): UsageView {
+export function usageView(harness: string, group: OutlookGroup | undefined, anchorHour: string | undefined, tz?: string, known: KnownAccount[] = [], read: 'loading' | 'ready' | 'error' = 'ready', truncated = false, nowMs?: number): UsageView {
   const name = HARNESS_NAME[harness] ?? harness
   const base: UsageView = { harness, name, kind: 'none', group: group ?? null, known, head: 'No accounts yet', short: 'No accounts yet', tip: '', muted: '', stale: false, verdict: '', paceLine: '', focus: null }
   if (!group || !group.accounts.length) {
@@ -124,22 +131,26 @@ export function usageView(harness: string, group: OutlookGroup | undefined, anch
   if (group.state === 'not_reported') return { ...base, kind: 'not_reported', head: 'Quota not reported', short: `Quota not reported · ${accounts}`, muted: accounts }
   if (group.state === 'held') return { ...base, kind: 'held', head: n === 1 ? 'The account is held.' : 'Every account is held.', short: 'all accounts held', tip: `${name}: every account is held`, muted: accounts }
   const label = (id: string) => group.accounts.find(a => a.account_id === id)?.label ?? 'an account'
-  const pool = group.pool!
-  const pooled = `${pool.accounts} ${pool.accounts === 1 ? 'account' : 'accounts'}`
+  const pool = group.pool
+  const sampledAge = pool ? elapsedSeconds(pool.sampled_at, nowMs, pool.sampled_age_seconds) : 0
+  const stale = !!pool && sampledAge >= STALE_SECONDS
   const missing = group.accounts.filter(a => a.state === 'not_reported').length
-  const stale = pool.sampled_age_seconds >= STALE_SECONDS
+  const pooled = pool ? `${pool.accounts} ${pool.accounts === 1 ? 'account' : 'accounts'}` : accounts
   // More accounts than the outlook reads are said, never hidden (AEON-574 rule 5).
-  const muted = `${Math.round(pool.used_percent)} % of the pool used · ${pooled}${missing ? ` · ${missing} not reported` : ''}${truncated ? ' · not every account read' : ''} · sampled ${stale ? ago(pool.sampled_age_seconds) : hm(at(pool.sampled_at), tz)}`
-  const sus = group.pace.safe_per_hour, now = group.pace.per_hour_24h
-  const paceLine = sus === null ? '' : `Sustainable: up to ${f1(sus)} %/h${now === null ? '' : ` (now ${f1(now)} %/h)`}`
+  // No pool: the last reading expired, so there is no current headroom to claim.
+  const muted = pool
+    ? `${Math.round(pool.used_percent)} % of the pool used · ${pooled}${missing ? ` · ${missing} not reported` : ''}${truncated ? ' · not every account read' : ''} · sampled ${stale ? ago(sampledAge) : hm(at(pool.sampled_at), tz)}`
+    : 'Current headroom is unknown; the last reading expired.'
+  const sus = group.pace.safe_per_hour, paceNow = group.pace.per_hour_24h
+  const paceLine = sus === null ? '' : `Sustainable: up to ${f1(sus)} %/h${paceNow === null ? '' : ` (now ${f1(paceNow)} %/h)`}`
   const focus = group.headline.focus_at && anchorHour ? (at(group.headline.focus_at) - at(anchorHour)) / HOUR_MS : null
   const view = { ...base, muted, stale, paceLine, focus }
   const h = group.headline
+  const clockNow = nowMs ?? (pool ? at(pool.sampled_at) + pool.sampled_age_seconds * 1000 : Number.NaN)
   if (group.verdict === 'too_fast' && h.kind === 'runs_dry' && h.at) {
     const from = round10(at(h.at)), until = h.until ? at(h.until) : NaN
     const refill = Number.isFinite(until) ? (sameDay(from, until, tz) ? hm(until, tz) : dayHm(until, tz)) : ''
-    const nowMs = at(pool.sampled_at) + pool.sampled_age_seconds * 1000
-    const emptyNow = at(h.at) <= nowMs + 60_000
+    const emptyNow = at(h.at) <= clockNow + 60_000
     let head: string, short: string
     if (emptyNow) {
       head = refill ? `${name} is out of quota until ${label(h.account_id)} refills at ${dayHm(until, tz)}.` : `${name} is out of quota, and nothing refills within 7 days.`
@@ -158,6 +169,7 @@ export function usageView(harness: string, group: OutlookGroup | undefined, anch
     const next = h.at ? dayHm(at(h.at), tz) : ''
     return { ...view, kind: 'pace', head: next ? `Enough until the next refill (${next}).` : 'Enough for the next 7 days.', short: 'enough until refill', tip: next ? `${name} has enough until the refill ${next}` : `${name} has enough for the next 7 days`, verdict: VERDICT_WORD.pace }
   }
+  if (!pool) return { ...view, kind: 'unknown', head: 'Current headroom is unknown. The last reading expired.', short: 'last reading expired', tip: `${name}: the last reading expired`, verdict: VERDICT_WORD.unknown, focus: null }
   return { ...view, kind: 'unknown', head: `${Math.round(pool.left_percent)} % of the pool left. The pace appears after an hour of readings.`, short: `${Math.round(pool.left_percent)} % left · pace not measured yet`, tip: `${name}: ${Math.round(pool.left_percent)} % left`, verdict: VERDICT_WORD.unknown, focus: null }
 }
 
@@ -177,7 +189,7 @@ export interface AccountRow {
   /** The state column: active or held with an icon, a stale reading's age, or nothing. */
   stateWord: string; stateIcon: string
 }
-export function accountRows(group: OutlookGroup | null, tz?: string, known: KnownAccount[] = []): AccountRow[] {
+export function accountRows(group: OutlookGroup | null, tz?: string, known: KnownAccount[] = [], nowMs?: number): AccountRow[] {
   if (!group) return known.map((a, i) => ({ id: a.account_id, name: a.label, shade: shadeOf(known.length, i), state: 'not_reported', left: null, refills: '', forecast: '', tone: '', stateWord: '', stateIcon: '' }))
   const n = group.accounts.length
   return group.accounts.map((a, i) => {
@@ -193,7 +205,10 @@ export function accountRows(group: OutlookGroup | null, tz?: string, known: Know
     else if (f?.kind === 'enough') { row.forecast = 'enough'; row.tone = 't-pace' }
     if (a.state === 'active') { row.stateWord = 'active'; row.stateIcon = 'pulse' }
     else if (a.state === 'held') { row.stateWord = 'held'; row.stateIcon = 'lock' }
-    else if ((a.reading_age_seconds ?? 0) >= STALE_SECONDS) row.stateWord = ago(a.reading_age_seconds!)
+    else {
+      const age = elapsedSeconds(a.read_at, nowMs, a.reading_age_seconds ?? 0)
+      if (age >= STALE_SECONDS) row.stateWord = ago(age)
+    }
     return row
   })
 }

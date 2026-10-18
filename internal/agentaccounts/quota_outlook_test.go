@@ -2,12 +2,15 @@
 package agentaccounts
 
 import (
+	"bytes"
 	"encoding/json"
 	"math"
 	"net/http"
+	"strings"
 	"testing"
 	"time"
 
+	"github.com/inspr-at/paimos/internal/accountprivacy"
 	"github.com/inspr-at/paimos/internal/capacity"
 )
 
@@ -250,5 +253,183 @@ func TestQuotaOutlookScopeAndTenant(t *testing.T) {
 	}
 	if out := read(http.StatusOK); out.Groups[0].State != "not_reported" || out.Groups[0].Accounts[0].UsedPercent != nil {
 		t.Fatalf("previous binding's quota survived relink: %+v", out.Groups[0])
+	}
+}
+
+// Risk: two computers on one confirmed subscription are counted as two tanks,
+// so the pool lasts longer than the subscription does and the pace doubles.
+func TestQuotaOutlookSharedSubscriptionCountsOnce(t *testing.T) {
+	now := time.Date(2026, 10, 18, 11, 10, 0, 0, time.UTC)
+	anchor := now.Truncate(time.Hour)
+	fp := strings.Repeat("ab", 32)
+	soon := func(int) time.Time { return now.Add(8 * time.Hour) }
+	far := func(int) time.Time { return now.Add(100 * time.Hour) }
+	shared := append(
+		series(now, -30, -10, func(k int) float64 { return 4 * float64(k+30) }, func(int) time.Time { return now.Add(-9 * time.Hour) }),
+		series(now, -9, 0, func(k int) float64 { return 4 * float64(k+24) }, soon)...,
+	)
+	independent := series(now, -30, 0, func(int) float64 { return 10 }, far)
+	g := buildGroup("claude", []outlookInput{
+		{ID: "a", Label: "a@", Harness: "claude", Limit: 100, PoolFingerprint: fp, Samples: shared},
+		{ID: "b", Label: "b@", Harness: "claude", Limit: 100, PoolFingerprint: fp, Samples: shared},
+		{ID: "c", Label: "c@", Harness: "claude", Limit: 100, Samples: independent},
+	}, now, anchor)
+	one := buildGroup("claude", []outlookInput{
+		{ID: "a", Label: "a@", Harness: "claude", Limit: 100, Samples: shared},
+		{ID: "c", Label: "c@", Harness: "claude", Limit: 100, Samples: independent},
+	}, now, anchor)
+	if g.Pool == nil || g.Pool.Accounts != 2 || one.Pool == nil || g.Pool.UsedPercent != one.Pool.UsedPercent {
+		t.Fatalf("shared subscription counted apart: %+v one %+v", g.Pool, one.Pool)
+	}
+	if g.Pace.PerHour24h == nil || one.Pace.PerHour24h == nil || *g.Pace.PerHour24h != *one.Pace.PerHour24h {
+		t.Fatalf("pace doubled: %+v vs %+v", g.Pace.PerHour24h, one.Pace.PerHour24h)
+	}
+	if len(g.Accounts) != 3 || !outlookAccountByID(g, "a").Pooled || outlookAccountByID(g, "b").Pooled || outlookAccountByID(g, "b").Forecast != nil {
+		t.Fatalf("enrollment rows: %+v %+v", outlookAccountByID(g, "a"), outlookAccountByID(g, "b"))
+	}
+	canonBurn, aliasBurn := false, false
+	for _, h := range append(append([]outlookHour{}, g.History...), g.Projected...) {
+		if len(h.Burn) > 0 && h.Burn[0] != 0 {
+			canonBurn = true
+		}
+		if len(h.Burn) > 1 && h.Burn[1] != 0 {
+			aliasBurn = true
+		}
+	}
+	if !canonBurn || aliasBurn {
+		t.Fatalf("burn stacked onto the alias: canon %v alias %v", canonBurn, aliasBurn)
+	}
+	if g.Verdict != one.Verdict || g.Headline.Kind != one.Headline.Kind {
+		t.Fatalf("verdict %s/%s vs %s/%s", g.Verdict, g.Headline.Kind, one.Verdict, one.Headline.Kind)
+	}
+	if len(g.PastRefills) != 1 || g.PastRefills[0].AccountID != "a" || len(one.PastRefills) != 1 {
+		t.Fatalf("refill doubled: %+v one %+v", g.PastRefills, one.PastRefills)
+	}
+}
+
+// Risk: a weekly window that ended without a new reading is reported as
+// refilled and full, so the pool looks empty of use.
+func TestQuotaOutlookExpiredReadingDoesNotInventHeadroom(t *testing.T) {
+	now := time.Date(2026, 10, 18, 11, 10, 0, 0, time.UTC)
+	anchor := now.Truncate(time.Hour)
+	reset := now.Add(-2 * time.Hour)
+	samples := []weeklySample{
+		{ReadAt: now.Add(-29 * time.Hour), Used: 20, ResetAt: reset},
+		{ReadAt: now.Add(-5 * time.Hour), Used: 80, ResetAt: reset},
+	}
+	followed := append(append([]weeklySample{}, samples...), weeklySample{ReadAt: now.Add(-time.Hour), Used: 4, ResetAt: now.Add(20 * time.Hour)})
+	if used, ok := usedAt(followed, reset); used != 0 || !ok {
+		t.Fatalf("a later reading still refills the measured line: %v %v", used, ok)
+	}
+	g := buildGroup("claude", []outlookInput{{ID: "a", Label: "a@", Harness: "claude", Limit: 100, Samples: samples}}, now, anchor)
+	a := g.Accounts[0]
+	if a.UsedPercent == nil || *a.UsedPercent != 80 || a.Freshness != "expired" || a.Pooled || a.State == "full" || g.Pool != nil || g.State != "measured" {
+		t.Fatalf("expired reading invented headroom: %+v pool %+v state %s", a, g.Pool, g.State)
+	}
+	if g.Current == nil || len(g.Current.Points) == 0 || g.Current.Points[0].LeftPercent != 100 {
+		t.Fatalf("projection did not assume the weekly refill: %+v", g.Current)
+	}
+	for _, p := range g.PastLine {
+		if !p.At.Before(reset) && p.LeftPercent > 50 {
+			t.Fatalf("measured line jumped after the reset: %+v", p)
+		}
+	}
+	fresh := series(now, -29, 0, func(int) float64 { return 10 }, func(int) time.Time { return now.Add(40 * time.Hour) })
+	mixed := buildGroup("claude", []outlookInput{
+		{ID: "a", Label: "a@", Harness: "claude", Limit: 100, Samples: samples},
+		{ID: "b", Label: "b@", Harness: "claude", Limit: 100, Samples: fresh},
+	}, now, anchor)
+	if mixed.Pool == nil || mixed.Pool.Accounts != 1 || mixed.Pool.UsedPercent != 10 {
+		t.Fatalf("expired account joined the average: %+v", mixed.Pool)
+	}
+}
+
+func outlookBody(t *testing.T, now time.Time, g outlookGroup) []byte {
+	t.Helper()
+	raw, err := json.Marshal(quotaOutlook{
+		GeneratedAt: now, AnchorHour: now.Truncate(time.Hour),
+		HistoryHours: int(outlookWindow / time.Hour), HorizonHours: int(outlookHorizon / time.Hour),
+		Groups: []outlookGroup{g},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	return raw
+}
+
+func risingPair(now time.Time) outlookGroup {
+	anchor := now.Truncate(time.Hour)
+	reset := func(int) time.Time { return now.Add(80 * time.Hour) }
+	return buildGroup("claude", []outlookInput{
+		{ID: "11111111-1111-4111-8111-111111111111", Label: "a@", Harness: "claude", Limit: 100, Samples: series(now, -24, 0, func(k int) float64 { return 10 + float64(k+24) }, reset)},
+		{ID: "22222222-2222-4222-8222-222222222222", Label: "b@", Harness: "claude", Limit: 100, Samples: series(now, -24, 0, func(k int) float64 { return 2 * float64(k+24) }, reset)},
+	}, now, anchor)
+}
+
+// Risk: sharing revoked after the outlook was built still leaves the private
+// account's quota in the pool, the burn and the projection.
+func TestQuotaOutlookRedactionWithholdsRevokedAggregates(t *testing.T) {
+	now := time.Date(2026, 10, 18, 11, 10, 0, 0, time.UTC)
+	const idA = "11111111-1111-4111-8111-111111111111"
+	const idB = "22222222-2222-4222-8222-222222222222"
+	g := risingPair(now)
+	if g.Pool == nil || g.Pool.UsedPercent != 41 || g.Accounts[0].UsedPercent == nil || *g.Accounts[0].UsedPercent != 34 || *g.Accounts[1].UsedPercent != 48 {
+		t.Fatalf("fixture pool: %+v %+v %+v", g.Pool, g.Accounts[0].UsedPercent, g.Accounts[1].UsedPercent)
+	}
+	body := outlookBody(t, now, g)
+	allow := accountprivacy.Policy{idA: true, idB: true}
+	if got, err := redactOutlook(body, allow); err != nil || !bytes.Equal(got, body) {
+		t.Fatalf("allow-all changed the body: %v equal %v", err, err == nil && bytes.Equal(got, body))
+	}
+	raw, err := redactOutlook(body, accountprivacy.Policy{idA: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var out quotaOutlook
+	if err := json.Unmarshal(raw, &out); err != nil {
+		t.Fatal(err)
+	}
+	got := out.Groups[0]
+	a, b := outlookAccountByID(got, idA), outlookAccountByID(got, idB)
+	if b.State != "private" || b.UsedPercent != nil || b.Forecast != nil || b.Pooled {
+		t.Fatalf("revoked row: %+v", b)
+	}
+	if a.UsedPercent == nil || *a.UsedPercent != 34 || a.Forecast != nil {
+		t.Fatalf("remaining row: %+v forecast %v", a, a.Forecast)
+	}
+	if got.Pool == nil || got.Pool.Accounts != 1 || got.Pool.UsedPercent != 34 {
+		t.Fatalf("pool kept the revoked account: %+v", got.Pool)
+	}
+	if got.Current != nil || got.Safe != nil || len(got.Projected) != 0 || got.Verdict != "unknown" || got.Headline.Kind != "unknown" {
+		t.Fatalf("joint projection survived: verdict %s headline %s current %v projected %d", got.Verdict, got.Headline.Kind, got.Current != nil, len(got.Projected))
+	}
+	if got.Pace.PerHour24h != nil || got.Pace.PerHour6h != nil || got.Pace.SafePerHour != nil || got.Pace.MeasuredHours != 0 {
+		t.Fatalf("pace survived: %+v", got.Pace)
+	}
+	aBurn, bBurn := false, false
+	for _, h := range got.History {
+		if len(h.Burn) > 0 && h.Burn[0] != 0 {
+			aBurn = true
+		}
+		if len(h.Burn) > 1 && h.Burn[1] != 0 {
+			bBurn = true
+		}
+	}
+	if !aBurn || bBurn {
+		t.Fatalf("history burn: A %v B %v", aBurn, bBurn)
+	}
+	if bytes.Contains(raw, []byte(`"projected":null`)) || bytes.Contains(raw, []byte(`"past_line":null`)) {
+		t.Fatal("withheld curves marshaled as null")
+	}
+	raw, err = redactOutlook(body, accountprivacy.Policy{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := json.Unmarshal(raw, &out); err != nil {
+		t.Fatal(err)
+	}
+	gone := out.Groups[0]
+	if gone.Accounts[0].UsedPercent != nil || gone.Accounts[1].UsedPercent != nil || gone.Pool != nil || gone.Current != nil {
+		t.Fatalf("fully revoked outlook still disclosed quota: pool %+v", gone.Pool)
 	}
 }

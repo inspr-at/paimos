@@ -24,9 +24,13 @@ before every pooled account has a reading are `known: false`.
 
 ## The policy replay
 
-- **Pool:** the mean percentage left of the group's pooled accounts. Held
-  accounts (not available to routing, or on a schedule hold) and accounts
-  without readings stay out of the pool.
+- **Pool:** the mean percentage left of the group's pooled accounts. One
+  confirmed subscription (a shared quota-pool fingerprint) is one supply: it
+  counts once in the pool, the pace, the replay and the burn. Each enrollment
+  still has its own row. Held accounts and accounts without readings stay out
+  of the pool. An expired reading keeps its last used percent and is not
+  pooled, so the dial does not claim current headroom; the projection may
+  still assume the weekly refill.
 - **Pace:** the measured burn over the last 24 h (or the measured span when it
   is shorter, at least 1 h) and over 6 h, in percentage points of one
   account's weekly quota per hour.
@@ -56,9 +60,12 @@ the refilling account); the dial words them in the person's time zone.
   Past/Ahead steppers (1–7 back, 0–7 ahead) sit behind ⋯ on phones.
 - Quota not reported (Cursor, or accounts without readings): a quiet chart
   sentence and dashed rings, no curve. No accounts yet: a link to add one.
-- Loading keeps skeletons at the reserved heights; a failed read says
-  "Usage couldn't be read · Try again". A pool sampled 2 h ago or more says
-  its age; an inactive account shows its last reading with its age.
+- Loading keeps skeletons at the reserved heights. A failed first read says
+  "Usage couldn't be read · Try again". A failed refresh after a good read
+  keeps the snapshot, shows Try again on the muted line, and ages the
+  snapshot from its sampled time and each reading from its read time. A pool
+  whose shown age is 2 h or more says its age; an inactive account shows its
+  last reading with its age.
 - The folded lines show only at 1100 px and wider and only for harnesses with
   a measured pool; they sit over the existing gap after the count, so the
   control and its units keep their positions. Amber marks a line that runs
@@ -69,7 +76,13 @@ the refilling account); the dial words them in the person's time zone.
 `TestQuotaOutlookReplayVerdicts` (fast, slow, on pace, refill order, held,
 missing, floors) and `TestQuotaOutlookScopeAndTenant` (person only, own
 accounts, tenant isolation, relinked binding) in `internal/agentaccounts`.
-`TestQuotaOutlookWebFixtureIsCurrent` pins `web/tests/fixtures/quota-outlook.json`,
+`TestQuotaOutlookSharedSubscriptionCountsOnce` counts one confirmed
+subscription once beside an independent one. `TestQuotaOutlookExpiredReadingDoesNotInventHeadroom`
+keeps an expired measurement out of current headroom.
+`TestQuotaOutlookRedactionWithholdsRevokedAggregates` and
+`TestQuotaOutlookRevocationBoundary` drop a revoked account's pool, forecast
+and burn. `TestQuotaOutlookWebFixtureIsCurrent` pins `web/tests/fixtures/quota-outlook.json`,
 which the web unit tests (`quota-outlook.unit.test.ts`) and the browser spec
 (`agents-dial-usage.spec.ts`, 1440/1024/390) read, so the UI is tested
-against the server's own projection.
+against the server's own projection. `quota-outlook-refresh.unit.test.ts`
+keeps a snapshot after a failed refresh and ages it from its timestamps.

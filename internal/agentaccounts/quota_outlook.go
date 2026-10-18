@@ -122,10 +122,13 @@ type weeklySample struct {
 // outlookInput is one owned account with what the projection needs.
 type outlookInput struct {
 	ID, Label, Harness string
-	Private, Held      bool
-	Limit              float64
-	Samples            []weeklySample // ascending, the newest last
-	Freshness          string
+	// PoolFingerprint is the confirmed subscription. Empty means this
+	// enrollment is its own supply. It is not part of the JSON response.
+	PoolFingerprint string
+	Private, Held   bool
+	Limit           float64
+	Samples         []weeklySample // ascending, the newest last
+	Freshness       string
 }
 
 func (m *Module) quotaOutlook(w http.ResponseWriter, r *http.Request) {
@@ -284,7 +287,7 @@ func loadOutlookInputs(ctx context.Context, tx pgx.Tx, p tenant.Principal, now t
 	}
 	out := make([]outlookInput, 0, len(accounts))
 	for _, a := range accounts {
-		in := outlookInput{ID: a.ID, Label: a.Label, Harness: a.Harness, Private: !privacy[a.ID], Limit: 100, Freshness: "unknown"}
+		in := outlookInput{ID: a.ID, Label: a.Label, Harness: a.Harness, PoolFingerprint: a.QuotaPoolFingerprint, Private: !privacy[a.ID], Limit: 100, Freshness: "unknown"}
 		if in.Private {
 			out = append(out, in)
 			continue
@@ -353,14 +356,20 @@ func weeklySeries(latest []quotaSample, hours [][]quotaSample, now time.Time) []
 	return out
 }
 
-// usedAt is the measured weekly use at t: the last reading at or before t,
-// zero once that reading's reset has passed. ok is false before any reading.
+// usedAt is the measured weekly use at t: the last reading at or before t.
+// ok is false before any reading, and false when that latest reading's window
+// has ended. The measurement is kept, but current headroom is unknown until a
+// later reading. A reset that a later reading follows still counts as a
+// completed refill (used 0), so the measured line keeps that step.
 func usedAt(samples []weeklySample, t time.Time) (float64, bool) {
 	i := sort.Search(len(samples), func(i int) bool { return samples[i].ReadAt.After(t) }) - 1
 	if i < 0 {
 		return 0, false
 	}
 	if !samples[i].ResetAt.After(t) {
+		if i == len(samples)-1 {
+			return samples[i].Used, false
+		}
 		return 0, true
 	}
 	return samples[i].Used, true
@@ -415,75 +424,218 @@ func buildOutlook(inputs []outlookInput, now time.Time) quotaOutlook {
 	return out
 }
 
+// outlookSupply is one quota resource. Enrollments of one confirmed
+// subscription share it; an account with no fingerprint is its own supply.
+type outlookSupply struct {
+	canonical int
+	samples   []weeklySample
+	limit     float64
+	held      bool
+	known     bool
+	used      float64
+	reset     time.Time
+	readAt    time.Time
+}
+
+func supplyKey(in outlookInput) string {
+	if in.PoolFingerprint != "" {
+		return "fp:" + in.PoolFingerprint
+	}
+	return "id:" + in.ID
+}
+
+// supplyPrefer is true when candidate should carry the supply: a free door
+// over a held one, then the freshest reading, then the lowest id.
+func supplyPrefer(inputs []outlookInput, candidate, current int) bool {
+	if inputs[candidate].Held != inputs[current].Held {
+		return !inputs[candidate].Held
+	}
+	cr := inputs[candidate].Samples[len(inputs[candidate].Samples)-1].ReadAt
+	rr := inputs[current].Samples[len(inputs[current].Samples)-1].ReadAt
+	if !cr.Equal(rr) {
+		return cr.After(rr)
+	}
+	return inputs[candidate].ID < inputs[current].ID
+}
+
+func mergeWeeklySamples(a, b []weeklySample) []weeklySample {
+	out := append([]weeklySample(nil), a...)
+	for _, s := range b {
+		found := -1
+		for i := range out {
+			if out[i].ReadAt.Equal(s.ReadAt) {
+				found = i
+				break
+			}
+		}
+		if found < 0 {
+			out = append(out, s)
+			continue
+		}
+		prev := out[found]
+		if s.ResetAt.After(prev.ResetAt) || (!s.ResetAt.After(prev.ResetAt) && s.Used > prev.Used) {
+			out[found] = s
+		}
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].ReadAt.Before(out[j].ReadAt) })
+	return out
+}
+
+func outlookSupplies(inputs []outlookInput, now time.Time) []outlookSupply {
+	order := []string{}
+	groups := map[string][]int{}
+	for i, in := range inputs {
+		if in.Private || len(in.Samples) == 0 {
+			continue
+		}
+		key := supplyKey(in)
+		if _, ok := groups[key]; !ok {
+			order = append(order, key)
+		}
+		groups[key] = append(groups[key], i)
+	}
+	out := make([]outlookSupply, 0, len(order))
+	for _, key := range order {
+		members := groups[key]
+		canonical := members[0]
+		for _, i := range members[1:] {
+			if supplyPrefer(inputs, i, canonical) {
+				canonical = i
+			}
+		}
+		samples := append([]weeklySample(nil), inputs[members[0]].Samples...)
+		for _, i := range members[1:] {
+			samples = mergeWeeklySamples(samples, inputs[i].Samples)
+		}
+		held := true
+		for _, i := range members {
+			if !inputs[i].Held {
+				held = false
+				break
+			}
+		}
+		used, known := usedAt(samples, now)
+		if held {
+			known = false
+		}
+		last := samples[len(samples)-1]
+		reset := last.ResetAt
+		for !reset.After(now) {
+			reset = reset.Add(outlookWindow)
+		}
+		out = append(out, outlookSupply{
+			canonical: canonical,
+			samples:   samples,
+			limit:     inputs[canonical].Limit,
+			held:      held,
+			known:     known,
+			used:      used,
+			reset:     reset,
+			readAt:    last.ReadAt,
+		})
+	}
+	return out
+}
+
 func buildGroup(harness string, inputs []outlookInput, now, anchor time.Time) outlookGroup {
 	g := outlookGroup{Harness: harness, State: "not_reported", Accounts: []outlookAccount{}, Verdict: "unknown", Headline: outlookHeadline{Kind: "not_reported"},
 		History: []outlookHour{}, PastLine: []outlookPoint{}, PastRefills: []outlookPastRefill{}, Projected: []outlookHour{}}
-	pooled, held := []int{}, 0
-	for i, in := range inputs {
+	for _, in := range inputs {
 		a := outlookAccount{AccountID: in.ID, Label: in.Label, State: "not_reported", Freshness: in.Freshness}
 		switch {
 		case in.Private:
 			a.State, a.Freshness = "private", "unknown"
 		case len(in.Samples) > 0:
 			last := in.Samples[len(in.Samples)-1]
-			used, _ := usedAt(in.Samples, now)
+			used, known := usedAt(in.Samples, now)
 			reset := last.ResetAt
 			for !reset.After(now) {
 				reset = reset.Add(outlookWindow)
 			}
 			age := int64(now.Sub(last.ReadAt) / time.Second)
 			a.UsedPercent, a.LimitPercent, a.ResetsAt, a.ReadAt, a.ReadingAgeSeconds = ptrF(round1(used)), ptrF(in.Limit), ptrT(reset), ptrT(last.ReadAt), &age
-			if in.Held {
+			if !known {
+				a.Freshness = "expired"
+			}
+			switch {
+			case in.Held:
 				a.State = "held"
-				held++
-			} else {
-				a.State, a.Pooled = "ready", true
-				if used >= in.Limit-1e-9 {
-					a.State = "full"
-				}
-				pooled = append(pooled, i)
+			case known && used >= in.Limit-1e-9:
+				a.State = "full"
+			default:
+				a.State = "ready"
 			}
 		}
 		g.Accounts = append(g.Accounts, a)
 	}
-	if len(pooled) == 0 {
-		if held > 0 {
+	supplies := outlookSupplies(inputs, now)
+	runnable, heldSupplies := []outlookSupply{}, 0
+	for _, s := range supplies {
+		if s.held {
+			heldSupplies++
+			continue
+		}
+		runnable = append(runnable, s)
+	}
+	// No free supply: held accounts stay held, and accounts without readings
+	// stay unreported. An expired reading is still a supply, so it is not
+	// dropped here.
+	if len(runnable) == 0 {
+		if heldSupplies > 0 {
 			g.State, g.Headline.Kind = "held", "held"
 		}
 		return g
 	}
 	g.State = "measured"
 	n := len(inputs)
-	// The pool now, and when it was sampled.
-	left, sampled := 0.0, time.Time{}
-	for _, i := range pooled {
-		left += 100 - *g.Accounts[i].UsedPercent
-		if r := *g.Accounts[i].ReadAt; r.After(sampled) {
-			sampled = r
+	knownSupplies := []outlookSupply{}
+	for _, s := range runnable {
+		if s.known {
+			knownSupplies = append(knownSupplies, s)
+			g.Accounts[s.canonical].Pooled = true
 		}
 	}
-	left /= float64(len(pooled))
-	g.Pool = &outlookPool{Accounts: len(pooled), UsedPercent: round1(100 - left), LeftPercent: round1(left), SampledAt: sampled, SampledAgeSec: int64(now.Sub(sampled) / time.Second)}
+	// The pool is the mean of supplies whose headroom is known now. An expired
+	// reading stays out of it. Assumed replenishment belongs to the projection.
+	if len(knownSupplies) > 0 {
+		left, sampled := 0.0, time.Time{}
+		for _, s := range knownSupplies {
+			left += 100 - round1(s.used)
+			if s.readAt.After(sampled) {
+				sampled = s.readAt
+			}
+		}
+		left /= float64(len(knownSupplies))
+		age := int64(now.Sub(sampled) / time.Second)
+		if age < 0 {
+			age = 0
+		}
+		g.Pool = &outlookPool{Accounts: len(knownSupplies), UsedPercent: round1(100 - left), LeftPercent: round1(left), SampledAt: sampled, SampledAgeSec: age}
+	}
 
-	// History: per UTC hour slot, measured burn per account, and the pooled line.
+	// History: per UTC hour slot, measured burn of each supply on its canonical
+	// row. An alias keeps a zero so the same subscription is not drawn twice.
 	start := anchor.Add(-outlookWindow)
 	knownFrom := start
-	for _, i := range pooled {
-		first := inputs[i].Samples[0].ReadAt
-		if _, ok := usedAt(inputs[i].Samples, start); !ok && first.After(knownFrom) {
+	for _, s := range runnable {
+		first := s.samples[0].ReadAt
+		if _, ok := usedAt(s.samples, start); !ok && first.After(knownFrom) {
 			knownFrom = first
 		}
 	}
 	pool := func(t time.Time) (float64, bool) {
+		if len(runnable) == 0 {
+			return 0, false
+		}
 		sum := 0.0
-		for _, i := range pooled {
-			v, ok := usedAt(inputs[i].Samples, t)
+		for _, s := range runnable {
+			v, ok := usedAt(s.samples, t)
 			if !ok {
 				return 0, false
 			}
 			sum += 100 - v
 		}
-		return round1(sum / float64(len(pooled))), true
+		return round1(sum / float64(len(runnable))), true
 	}
 	for slot := -int(outlookWindow / time.Hour); slot <= 0; slot++ {
 		from, to := anchor.Add(time.Duration(slot)*time.Hour), anchor.Add(time.Duration(slot+1)*time.Hour)
@@ -494,10 +646,10 @@ func buildGroup(harness string, inputs []outlookInput, now, anchor time.Time) ou
 		hour.Known = !from.Before(knownFrom)
 		if hour.Known {
 			empty := true
-			for _, i := range pooled {
-				v, _ := consumed(inputs[i].Samples, from, to)
-				hour.Burn[i] = math.Round(v*100) / 100
-				if u, _ := usedAt(inputs[i].Samples, to); u < inputs[i].Limit-1e-9 {
+			for _, s := range runnable {
+				v, _ := consumed(s.samples, from, to)
+				hour.Burn[s.canonical] = math.Round(v*100) / 100
+				if u, ok := usedAt(s.samples, to); !ok || u < s.limit-1e-9 {
 					empty = false
 				}
 			}
@@ -511,21 +663,22 @@ func buildGroup(harness string, inputs []outlookInput, now, anchor time.Time) ou
 		times = append(times, anchor.Add(time.Duration(slot+1)*time.Hour))
 	}
 	refills := map[string][]time.Time{}
-	for _, i := range pooled {
-		for _, s := range inputs[i].Samples {
-			r := s.ResetAt
+	for _, s := range runnable {
+		id := inputs[s.canonical].ID
+		for _, sample := range s.samples {
+			r := sample.ResetAt
 			if r.Before(start) || r.After(now) {
 				continue
 			}
 			dup := false
-			for _, seen := range refills[inputs[i].ID] {
+			for _, seen := range refills[id] {
 				if math.Abs(r.Sub(seen).Minutes()) < 30 {
 					dup = true
 				}
 			}
 			if !dup {
-				refills[inputs[i].ID] = append(refills[inputs[i].ID], r)
-				g.PastRefills = append(g.PastRefills, outlookPastRefill{r, inputs[i].ID})
+				refills[id] = append(refills[id], r)
+				g.PastRefills = append(g.PastRefills, outlookPastRefill{r, id})
 				times = append(times, r.Add(-time.Second), r)
 			}
 		}
@@ -554,8 +707,8 @@ func buildGroup(harness string, inputs []outlookInput, now, anchor time.Time) ou
 			return nil, span
 		}
 		sum := 0.0
-		for _, i := range pooled {
-			v, _ := consumed(inputs[i].Samples, from, now)
+		for _, s := range runnable {
+			v, _ := consumed(s.samples, from, now)
 			sum += v
 		}
 		return ptrF(round1(sum / span)), span
@@ -564,17 +717,18 @@ func buildGroup(harness string, inputs []outlookInput, now, anchor time.Time) ou
 	g.Pace.PerHour24h, span = paceOver(24)
 	g.Pace.PerHour6h, _ = paceOver(6)
 	g.Pace.MeasuredHours = math.Round(span*10) / 10
-	accounts := make([]replayAccount, len(pooled))
-	for k, i := range pooled {
-		accounts[k] = replayAccount{ID: inputs[i].ID, Used: *g.Accounts[i].UsedPercent, Limit: inputs[i].Limit, ResetAt: *g.Accounts[i].ResetsAt}
-	}
-	// The account the policy runs now.
-	if running := runningAccount(accounts); running >= 0 {
-		for _, i := range pooled {
-			if inputs[i].ID == accounts[running].ID {
-				g.Accounts[i].State = "active"
-			}
+	accounts := make([]replayAccount, len(runnable))
+	for k, s := range runnable {
+		used := 0.0
+		if s.known {
+			used = round1(s.used)
 		}
+		accounts[k] = replayAccount{ID: inputs[s.canonical].ID, Used: used, Limit: s.limit, ResetAt: s.reset}
+	}
+	// The account the policy runs now. Unknown headroom is not called active:
+	// the projection may assume a refill, the row still shows the last reading.
+	if running := runningAccount(accounts); running >= 0 && runnable[running].known {
+		g.Accounts[runnable[running].canonical].State = "active"
 	}
 	end := now.Add(outlookHorizon)
 	safe := safeRate(accounts, now, end, anchor)
@@ -598,14 +752,15 @@ func buildGroup(harness string, inputs []outlookInput, now, anchor time.Time) ou
 		}
 		g.Projected = append(g.Projected, hour)
 	}
-	// Per-account forecasts until each first refill.
+	// Forecasts follow the replay, on the canonical row only.
 	var poolEmpty *time.Time
 	if len(cur.Line.Empty) > 0 {
 		poolEmpty = &cur.Line.Empty[0].From
 	}
 	unusedTotal, best := 0.0, -1
-	for _, i := range pooled {
-		f := cur.Forecast[inputs[i].ID]
+	for _, s := range runnable {
+		id := inputs[s.canonical].ID
+		f := cur.Forecast[id]
 		fc := &outlookForecast{Kind: "enough", RefillAt: f.RefillAt}
 		switch {
 		case f.FullAt != nil && !f.FullAt.After(now):
@@ -621,10 +776,10 @@ func buildGroup(harness string, inputs []outlookInput, now, anchor time.Time) ou
 		if f.Unused != nil {
 			unusedTotal += *f.Unused
 			if fc.Kind == "unused" && (best < 0 || *f.Unused > *g.Accounts[best].Forecast.UnusedPercent) {
-				best = i
+				best = s.canonical
 			}
 		}
-		g.Accounts[i].Forecast = fc
+		g.Accounts[s.canonical].Forecast = fc
 	}
 	switch {
 	case len(cur.Line.Empty) > 0:
@@ -640,7 +795,7 @@ func buildGroup(harness string, inputs []outlookInput, now, anchor time.Time) ou
 				}
 			}
 		}
-	case unusedTotal/float64(len(pooled)) >= outlookSlowPoolPct && best >= 0:
+	case unusedTotal/float64(len(runnable)) >= outlookSlowPoolPct && best >= 0:
 		fc := g.Accounts[best].Forecast
 		g.Verdict = "too_slow"
 		g.Headline = outlookHeadline{Kind: "unused", At: fc.RefillAt, AccountID: g.Accounts[best].AccountID, UnusedPercent: ptrF(math.Round(*fc.UnusedPercent)), FocusAt: fc.RefillAt}
