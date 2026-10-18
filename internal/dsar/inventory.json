@@ -832,15 +832,36 @@
       "table": "inbox_compat_messages"
     },
     {
+      "classification": "metadata",
+      "columns": {
+        "chat_pickup_stall_seconds": "metadata"
+      },
+      "locator": {
+        "tenant_column": "tenant_id"
+      },
+      "table": "inbox_delivery_settings"
+    },
+    {
       "classification": "personal",
       "columns": {
-        "cancelled_at": "metadata"
+        "cancelled_at": "metadata",
+        "pickup_lease_until": "metadata"
       },
       "locator": {
         "person_column": "sender_principal_id",
         "tenant_column": "tenant_id"
       },
       "table": "inbox_messages"
+    },
+    {
+      "classification": "personal",
+      "columns": {
+        "pickup_stalled_at": "metadata"
+      },
+      "locator": {
+        "tenant_column": "tenant_id"
+      },
+      "table": "inbox_receipts"
     },
     {
       "table": "method_learning_legacy_cleanup",

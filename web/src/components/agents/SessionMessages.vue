@@ -7,7 +7,7 @@ import type { Question } from '../../lib/decisionDeskApi'
 import { useSession } from '../../stores/session'
 import { absoluteTime } from '../../lib/work'
 import { collapseMessages, historicalSender, type MessageGroup } from './sessionMessages'
-import { chatWords, statusTip } from './sessionChat'
+import { chatWords, pickupNotice, statusTip } from './sessionChat'
 import { clockTime, messageChip, receiptTarget, threadRows, type ThreadRow } from './chatThread'
 import AppIcon from '../AppIcon.vue'
 import Avatar from '../Avatar.vue'
@@ -26,7 +26,7 @@ const identity = useSession()
 const language = computed(() => displayLanguage())
 const german = computed(() => language.value === 'de')
 const words = computed(() => chatWords[language.value])
-const label = (status: MessageStatus) => ({ sent: words.value.sending, delivered: words.value.delivered, read: words.value.read, not_delivered: words.value.failed })[status.status]
+const label = (status: MessageStatus) => status.waiting_for_pickup && status.status === 'sent' ? words.value.waitingPickupLabel : ({ sent: words.value.sending, delivered: words.value.delivered, read: words.value.read, not_delivered: words.value.failed })[status.status]
 const me = computed(() => identity.identity?.principal.id ?? '')
 const items = computed(() => collapseMessages(props.messages))
 // Day labels follow the clock, so "Today" turns into "Yesterday" overnight. The
@@ -44,7 +44,7 @@ const statusOf = (m: ProjectMessage): MessageStatus | undefined => {
   if (m.send_failed) return { message_id: m.id, status: 'not_delivered', delivered_at: null, read_at: null, deliver_by: null }
   return props.statuses?.[m.id] ?? { message_id: m.id, status: 'sent', delivered_at: null, read_at: null, deliver_by: null }
 }
-const tip = (m: ProjectMessage) => { const status = statusOf(m)!; return german.value ? `${label(status)} · ${absoluteTime(status.read_at || status.delivered_at || m.created_at || '')}` : statusTip(status, absoluteTime) }
+const tip = (m: ProjectMessage) => { const status = statusOf(m)!; return pickupNotice(status, language.value) || (german.value ? `${label(status)} · ${absoluteTime(status.read_at || status.delivered_at || m.created_at || '')}` : statusTip(status, absoluteTime)) }
 const failed = (m: MessageGroup) => !m.answered && statusOf(m)?.status === 'not_delivered'
 
 async function copy(message: ProjectMessage) {
