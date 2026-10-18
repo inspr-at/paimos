@@ -69,15 +69,15 @@ const label = (tile: BuildingTileView) => fill(t.value.open, { n: tile.simple.na
     <div v-if="level === 'simple'" class="s-sec-head">
       <h3 :id="`${uid}-head`">{{ t.title }}</h3>
       <span v-if="view.head.kind === 'error'" class="cnt bd-cnt err" role="alert" data-testid="delivery-building-head">{{ view.head.text }}<button type="button" class="retry" @click="emit('retry')">{{ t.retry }}</button></span>
-      <span v-else v-clip-tip class="cnt bd-cnt" :class="{ quiet: view.head.kind === 'nodata' }" :role="view.head.kind === 'nodata' ? 'status' : undefined" :aria-hidden="view.head.kind === 'loading' || undefined" data-testid="delivery-building-head">{{ view.head.text }}</span>
+      <span v-else v-clip-tip class="cnt bd-cnt" :class="{ quiet: view.head.kind === 'nodata' }" :aria-hidden="view.head.kind === 'loading' || undefined" data-testid="delivery-building-head">{{ view.head.text }}</span>
       <p>{{ t.sub }}</p>
     </div>
     <div v-else class="tk-cap-row">
-      <p :id="`${uid}-head`" v-clip-tip class="tiles-cap">{{ fill(t.cap, { w: window }) }}</p>
+      <p :id="`${uid}-head`" class="tiles-cap">{{ fill(t.cap, { w: window }) }}</p>
       <span v-if="view.head.kind === 'error'" class="bd-cnt err" role="alert" data-testid="delivery-building-head">{{ view.head.text }}<button type="button" class="retry" @click="emit('retry')">{{ t.retry }}</button></span>
-      <span v-else class="bd-cnt" :class="{ quiet: view.head.kind === 'nodata' }" :role="view.head.kind === 'nodata' ? 'status' : undefined" :aria-hidden="view.head.kind === 'loading' || undefined" data-testid="delivery-building-head">{{ view.head.text }}</span>
+      <span v-else class="bd-cnt" :class="{ quiet: view.head.kind === 'nodata' }" :aria-hidden="view.head.kind === 'loading' || undefined" data-testid="delivery-building-head">{{ view.head.text }}</span>
     </div>
-    <div class="s-grid" :class="{ busy }" role="list">
+    <div class="bd-grid" :class="{ busy }" role="list">
       <SimpleTile v-for="tile in view.tiles" :key="tile.key" class="bd-tile" :tile="tile.simple" :state="state" :text="words" :data-building="tile.key">
         <template #trigger>
           <button type="button" class="bd-open" :aria-label="label(tile)" aria-haspopup="dialog" :aria-expanded="open?.key === tile.key" :disabled="!canOpen" data-testid="delivery-building-open" @click="toggle(tile, $event)" />
@@ -92,9 +92,9 @@ const label = (tile: BuildingTileView) => fill(t.value.open, { n: tile.simple.na
 
   <section v-else class="bd-x" :aria-labelledby="`${uid}-cap`" data-testid="delivery-building">
     <div class="tk-cap-row">
-      <p :id="`${uid}-cap`" v-clip-tip class="tiles-cap">{{ fill(t.cap, { w: window }) }}</p>
+      <p :id="`${uid}-cap`" class="tiles-cap">{{ fill(t.cap, { w: window }) }}</p>
       <span v-if="view.head.kind === 'error'" class="bd-cnt err" role="alert" data-testid="delivery-building-head">{{ view.head.text }}<button type="button" class="retry" @click="emit('retry')">{{ t.retry }}</button></span>
-      <span v-else class="bd-cnt" :class="{ quiet: view.head.kind === 'nodata' }" :role="view.head.kind === 'nodata' ? 'status' : undefined" :aria-hidden="view.head.kind === 'loading' || undefined" data-testid="delivery-building-head">{{ view.head.text }}</span>
+      <span v-else class="bd-cnt" :class="{ quiet: view.head.kind === 'nodata' }" :aria-hidden="view.head.kind === 'loading' || undefined" data-testid="delivery-building-head">{{ view.head.text }}</span>
     </div>
     <div class="tiles bd" :class="{ busy }" role="list">
       <ExpertTile v-for="tile in view.tiles" :key="tile.key" class="bd-tile" :tile="tile.expert" :state="state" :text="page" :info-open="openTile === tile.expert.def.key" :data-building="tile.key"
@@ -131,11 +131,12 @@ const label = (tile: BuildingTileView) => fill(t.value.open, { n: tile.simple.na
 .retry { position: relative; display: inline; height: auto; margin: 0; padding: 0; border: 0; background: none; color: var(--teal-ink); font: inherit; font-weight: 600; cursor: pointer; text-decoration: underline; text-underline-offset: 2px; }
 .retry:focus-visible { outline: 2px solid var(--primary-line); outline-offset: 2px; border-radius: 3px; }
 @media (pointer: coarse) { .retry::before { content: ''; position: absolute; top: 50%; left: 50%; width: max(100%, 44px); height: 44px; transform: translate(-50%, -50%); } }
-.s-grid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 12px; margin-top: 10px; }
+.bd-grid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 12px; margin-top: 10px; }
 .bd-x { margin-top: 22px; }
 .tk-cap-row { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; min-width: 0; }
 .tk-cap-row .bd-cnt { flex: none; font-size: 12px; }
-.tiles-cap { min-width: 0; margin: 0; font: 500 10.5px/1.5 var(--mono); letter-spacing: .12em; text-transform: uppercase; color: var(--ink-3); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+/* The caption wraps on a narrow screen rather than clipping: nothing on it is ever hidden. */
+.tiles-cap { min-width: 0; margin: 0; font: 500 10.5px/1.5 var(--mono); letter-spacing: .12em; text-transform: uppercase; color: var(--ink-3); }
 .tiles.bd { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 12px; margin-top: 8px; }
 .busy { opacity: .5; }
 /* The whole tile opens the worst items; Learn, info, the chart and Retry stay above it with their own actions. */
@@ -164,9 +165,9 @@ const label = (tile: BuildingTileView) => fill(t.value.open, { n: tile.simple.na
   .sk { background: linear-gradient(90deg, var(--skeleton) 0%, var(--skeleton-hi) 50%, var(--skeleton) 100%) 0 0 / 200% 100%; animation: dl-sk 1.4s ease-in-out infinite; }
 }
 @keyframes dl-sk { to { background-position: -200% 0; } }
-@container delivery (max-width: 1100px) { .s-grid, .tiles.bd { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+@container delivery (max-width: 1100px) { .bd-grid, .tiles.bd { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
 @container delivery (max-width: 640px) {
-  .s-grid { grid-template-columns: minmax(0, 1fr); gap: 8px; }
+  .bd-grid { grid-template-columns: minmax(0, 1fr); gap: 8px; }
   .tk-cap-row { flex-wrap: wrap; gap: 2px 12px; }
   /* Building it on a phone: the essentials only — value, verdict and one sentence; the chart and the trend stay on wide screens. */
   .bd-tile :deep(.s-spark), .bd-tile :deep(.s-trend) { display: none; }

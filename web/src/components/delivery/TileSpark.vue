@@ -79,7 +79,8 @@ const note = computed(() => fill(props.text.nightsNote[props.model.unit], { n: s
 .sp-tl { font: 600 10.5px var(--font); fill: var(--ok); paint-order: stroke; stroke: var(--surface-raised); stroke-width: 3px; stroke-linejoin: round; }
 .sp-axis { fill: none; stroke: var(--ink-3); stroke-width: 1.3; stroke-linecap: round; stroke-linejoin: round; }
 .sp-better { font: 600 10px var(--font); fill: var(--ink-2); paint-order: stroke; stroke: var(--surface-raised); stroke-width: 3px; stroke-linejoin: round; }
-.sp-note { font: 500 10.5px var(--font); fill: var(--ink-3); }
+/* --ink-2: the note sits on the target zone's tint or the hatch and still reaches 4.5:1. */
+.sp-note { font: 500 10.5px var(--font); fill: var(--ink-2); }
 .g-nodata { fill: url(#dl-hatch); }
 .g-line { fill: none; stroke: var(--teal); stroke-width: 2; stroke-linejoin: round; stroke-linecap: round; }
 .g-line.part { stroke-dasharray: 2 3.5; }
