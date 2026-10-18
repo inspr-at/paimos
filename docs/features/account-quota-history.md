@@ -51,3 +51,17 @@ No vendor responses, account identities, paths, plans or credential material
 are stored in the new quota snapshots. Migration 1363 is expand-only, adds a
 nullable account snapshot and a FORCE RLS hourly table, and classifies both in
 the DSAR inventory. Existing history is neither backfilled nor deleted.
+
+Verification on 2026-10-18 used the approved mbp2606 runner. Full account,
+daemon, pairing and privacy suites passed on `8efda1236`; auth, reporter
+contract and DSAR suites passed on `b95bcc261` with their implementation
+unchanged afterward. The strict authorization policy fixture was updated for
+the one added route and `TestDomainPolicyComposition` passed on `88c67ec4c`.
+The negative control on a separate scratch branch disabled quota storage and
+failed `TestIdleQuotaProbeHourlyRoundTrip` at the expected zero-hourly-rows
+assertion. This is data-path and synthetic capability evidence; it does not
+qualify either live vendor binary.
+The final guarded `ci-static --merge-main` run on `88c67ec4c` exited 0:
+44 checks passed with no optional skips, including migration, ownership,
+manifest and generated-contract checks. No origin push, deployment or model
+review gate was performed. Production idle qualification remains open.
