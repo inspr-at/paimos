@@ -130,7 +130,7 @@ onMounted(() => { releaseOutlook = outlook.use() })
 onBeforeUnmount(() => releaseOutlook?.())
 const tz = computed(() => snapshot.value?.daily_timezone)
 const usageState = computed(() => outlook.state)
-const usage = computed<Record<string, UsageView>>(() => Object.fromEntries(rows.value.map(r => [r.key, usageView(r.key, outlook.groups.get(r.key), outlook.data?.anchor_hour, tz.value, views.value[r.key]!.accounts, usageState.value, !!outlook.data?.truncated, outlook.now)])))
+const usage = computed<Record<string, UsageView>>(() => Object.fromEntries(rows.value.map(r => [r.key, usageView(r.key, outlook.groups.get(r.key), outlook.data?.anchor_hour, tz.value, views.value[r.key]!.accounts, usageState.value, !!outlook.data?.truncated, outlook.since)])))
 /** The words a quota-reporting harness adds to its folded unit; nothing while loading or failed. */
 const usageTip = (key: string) => usageState.value === 'ready' && ['fast', 'slow', 'pace', 'unknown'].includes(usage.value[key]!.kind) ? usage.value[key]!.tip : ''
 const usageIcon = (key: string) => (VERDICT_ICON[usage.value[key]!.kind] || 'ring-dashed') as IconName
@@ -304,8 +304,8 @@ function modeKeys(event: KeyboardEvent, key: string) {
           <div v-if="selectedRow" id="dial-detail" class="f-detail" role="region" :aria-label="`${selectedRow.label}: daily usage`">
             <!-- Every harness's detail, folds closed, is laid in the same cell unseen: the cell keeps the height of the tallest one; folds open downward only. -->
             <div class="f-stack">
-              <DialDetail v-for="row in rows" :key="`ghost-${row.key}`" ghost :view="views[row.key]!" :usage="usage[row.key]!" :usage-state="usageState" :usage-failed="outlook.failed" :usage-now="outlook.now" :total="total" :default-points="defaultPoints" :tz="snapshot.daily_timezone" :until="snapshot.daily_until" :pace-open="false" :boost-open="false" :may-manage="mayManage" />
-              <DialDetail :key="selectedRow.key" :view="views[selectedRow.key]!" :usage="usage[selectedRow.key]!" :usage-state="usageState" :usage-failed="outlook.failed" :usage-now="outlook.now" :generated-at="outlook.data?.generated_at" :anchor-hour="outlook.data?.anchor_hour" :total="total" :default-points="defaultPoints" :tz="snapshot.daily_timezone" :until="snapshot.daily_until"
+              <DialDetail v-for="row in rows" :key="`ghost-${row.key}`" ghost :view="views[row.key]!" :usage="usage[row.key]!" :usage-state="usageState" :usage-failed="outlook.failed" :usage-since="outlook.since" :total="total" :default-points="defaultPoints" :tz="snapshot.daily_timezone" :until="snapshot.daily_until" :pace-open="false" :boost-open="false" :may-manage="mayManage" />
+              <DialDetail :key="selectedRow.key" :view="views[selectedRow.key]!" :usage="usage[selectedRow.key]!" :usage-state="usageState" :usage-failed="outlook.failed" :usage-since="outlook.since" :generated-at="outlook.data?.generated_at" :anchor-hour="outlook.data?.anchor_hour" :total="total" :default-points="defaultPoints" :tz="snapshot.daily_timezone" :until="snapshot.daily_until"
                 :pace-open="dialPrefs.foldOpen(selectedRow.key, 'pace')" :boost-open="dialPrefs.foldOpen(selectedRow.key, 'boost')" :may-manage="mayManage"
                 @change="saveDaily" @fold="dialPrefs.toggleFold(selectedRow.key, $event)" @retry="outlook.refresh" />
             </div>

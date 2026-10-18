@@ -15,8 +15,8 @@ const props = defineProps<{
   generatedAt?: string; anchorHour?: string; tz?: string
   /** A refresh failed after a good read: keep the snapshot, and offer another try on its muted line. */
   failed?: boolean
-  /** Client clock. Ages the snapshot from its timestamps; the server's counters stay frozen. */
-  now?: number
+  /** Client milliseconds since the snapshot arrived: added to the server's frozen ages. */
+  since?: number
   /** Only this block's height is wanted: no chart, no ids, nothing focusable. */
   ghost?: boolean
 }>()
@@ -35,7 +35,7 @@ const model = computed(() => {
   const drawable = !!g && (!!g.pool || !!g.current || !!g.safe || g.history.some(h => h.known))
   return reading.value && drawable && props.generatedAt && props.anchorHour ? chartModel(g, props.generatedAt, props.anchorHour) : null
 })
-const rows = computed(() => accountRows(group.value, props.tz, props.view.known, props.now))
+const rows = computed(() => accountRows(group.value, props.tz, props.view.known, props.since))
 const id = (part: string) => props.ghost ? undefined : `ub-${props.view.harness}-${part}`
 const tab = computed(() => props.ghost ? -1 : undefined)
 

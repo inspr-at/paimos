@@ -71,12 +71,16 @@ export function ago(seconds: number): string {
 }
 /** A reading this old reads as its age, in muted ink. */
 export const STALE_SECONDS = 2 * 3600
-/** Age from a timestamp when the caller has a clock; otherwise the server's frozen counter. */
-function elapsedSeconds(iso: string | null | undefined, nowMs: number | undefined, frozen: number): number {
-  if (nowMs === undefined || !iso) return frozen
-  const parsed = Date.parse(iso)
-  if (!Number.isFinite(parsed)) return frozen
-  return Math.max(0, Math.round((nowMs - parsed) / 1000))
+/**
+ * The server's frozen age plus the client's time since the snapshot arrived. Only a duration is
+ * added, so a client clock that differs from the server's never changes what the page says.
+ */
+const aged = (frozen: number, sinceMs = 0) => frozen + Math.max(0, Math.round(sinceMs / 1000))
+/** The server's clock at the response, from the group's own timestamps and ages. */
+function snapshotAt(group: OutlookGroup): number {
+  if (group.pool) return at(group.pool.sampled_at) + group.pool.sampled_age_seconds * 1000
+  const read = group.accounts.find(a => a.read_at && a.reading_age_seconds !== null)
+  return read ? at(read.read_at) + read.reading_age_seconds! * 1000 : Number.NaN
 }
 export const f1 = (n: number) => (Math.round(n * 10) / 10).toFixed(1)
 function span(ms: number): string {
@@ -117,8 +121,9 @@ export const VERDICT_ICON: Record<UsageKind, string> = { fast: 'alert', slow: 'h
 /**
  * One harness's usage in words. Without its group the plan's accounts (known) decide: none means
  * no account; a harness that never reports quota says so at once; otherwise the read is pending.
+ * sinceMs: the client's milliseconds since the snapshot arrived; it ages a kept snapshot.
  */
-export function usageView(harness: string, group: OutlookGroup | undefined, anchorHour: string | undefined, tz?: string, known: KnownAccount[] = [], read: 'loading' | 'ready' | 'error' = 'ready', truncated = false, nowMs?: number): UsageView {
+export function usageView(harness: string, group: OutlookGroup | undefined, anchorHour: string | undefined, tz?: string, known: KnownAccount[] = [], read: 'loading' | 'ready' | 'error' = 'ready', truncated = false, sinceMs?: number): UsageView {
   const name = HARNESS_NAME[harness] ?? harness
   const base: UsageView = { harness, name, kind: 'none', group: group ?? null, known, head: 'No accounts yet', short: 'No accounts yet', tip: '', muted: '', stale: false, verdict: '', paceLine: '', focus: null }
   if (!group || !group.accounts.length) {
@@ -132,7 +137,7 @@ export function usageView(harness: string, group: OutlookGroup | undefined, anch
   if (group.state === 'held') return { ...base, kind: 'held', head: n === 1 ? 'The account is held.' : 'Every account is held.', short: 'all accounts held', tip: `${name}: every account is held`, muted: accounts }
   const label = (id: string) => group.accounts.find(a => a.account_id === id)?.label ?? 'an account'
   const pool = group.pool
-  const sampledAge = pool ? elapsedSeconds(pool.sampled_at, nowMs, pool.sampled_age_seconds) : 0
+  const sampledAge = pool ? aged(pool.sampled_age_seconds, sinceMs) : 0
   const stale = !!pool && sampledAge >= STALE_SECONDS
   const missing = group.accounts.filter(a => a.state === 'not_reported').length
   const pooled = pool ? `${pool.accounts} ${pool.accounts === 1 ? 'account' : 'accounts'}` : accounts
@@ -146,7 +151,7 @@ export function usageView(harness: string, group: OutlookGroup | undefined, anch
   const focus = group.headline.focus_at && anchorHour ? (at(group.headline.focus_at) - at(anchorHour)) / HOUR_MS : null
   const view = { ...base, muted, stale, paceLine, focus }
   const h = group.headline
-  const clockNow = nowMs ?? (pool ? at(pool.sampled_at) + pool.sampled_age_seconds * 1000 : Number.NaN)
+  const clockNow = snapshotAt(group) + Math.max(0, sinceMs ?? 0)
   if (group.verdict === 'too_fast' && h.kind === 'runs_dry' && h.at) {
     const from = round10(at(h.at)), until = h.until ? at(h.until) : NaN
     const refill = Number.isFinite(until) ? (sameDay(from, until, tz) ? hm(until, tz) : dayHm(until, tz)) : ''
@@ -189,7 +194,7 @@ export interface AccountRow {
   /** The state column: active or held with an icon, a stale reading's age, or nothing. */
   stateWord: string; stateIcon: string
 }
-export function accountRows(group: OutlookGroup | null, tz?: string, known: KnownAccount[] = [], nowMs?: number): AccountRow[] {
+export function accountRows(group: OutlookGroup | null, tz?: string, known: KnownAccount[] = [], sinceMs?: number): AccountRow[] {
   if (!group) return known.map((a, i) => ({ id: a.account_id, name: a.label, shade: shadeOf(known.length, i), state: 'not_reported', left: null, refills: '', forecast: '', tone: '', stateWord: '', stateIcon: '' }))
   const n = group.accounts.length
   return group.accounts.map((a, i) => {
@@ -205,8 +210,8 @@ export function accountRows(group: OutlookGroup | null, tz?: string, known: Know
     else if (f?.kind === 'enough') { row.forecast = 'enough'; row.tone = 't-pace' }
     if (a.state === 'active') { row.stateWord = 'active'; row.stateIcon = 'pulse' }
     else if (a.state === 'held') { row.stateWord = 'held'; row.stateIcon = 'lock' }
-    else {
-      const age = elapsedSeconds(a.read_at, nowMs, a.reading_age_seconds ?? 0)
+    else if (a.reading_age_seconds !== null) {
+      const age = aged(a.reading_age_seconds, sinceMs)
       if (age >= STALE_SECONDS) row.stateWord = ago(age)
     }
     return row

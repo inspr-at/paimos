@@ -58,7 +58,7 @@ func TestQuotaOutlookRevocationBoundary(t *testing.T) {
 		f := readinessWorld(t, "outlook-revoke-sibling", now)
 		_, peerAccount := peerEnrollment(t, f, now)
 		fp := strings.Repeat("ab", 32)
-		if _, err := adminPool.Exec(t.Context(), `UPDATE agent_accounts SET quota_pool_fingerprint=$2 WHERE id=$1 OR id=$3`, f.account.ID, fp, peerAccount.ID); err != nil {
+		if _, err := adminPool.Exec(t.Context(), `UPDATE agent_accounts SET quota_fingerprint=$2,quota_pool_fingerprint=$2 WHERE id=$1 OR id=$3`, f.account.ID, fp, peerAccount.ID); err != nil {
 			t.Fatal(err)
 		}
 		g := buildGroup("codex", []outlookInput{

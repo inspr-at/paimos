@@ -15,9 +15,12 @@ export const OUTLOOK_POLL_MS = 120_000
 const OUTLOOK_CLOCK_MS = 30_000
 
 export const useQuotaOutlook = defineStore('quotaOutlook', () => {
-  const read = usePolledData<QuotaOutlook | null>(getQuotaOutlook, null)
-  // The server's age counters freeze at the response. This clock ages them from sampled_at and read_at.
+  // The server's age counters freeze at the response. The client adds only the time since the
+  // snapshot arrived, so its own clock never has to agree with the server's.
   const now = ref(Date.now())
+  const arrived = ref(now.value)
+  const read = usePolledData<QuotaOutlook | null>(getQuotaOutlook, null, () => { now.value = arrived.value = Date.now() })
+  const since = computed(() => read.data.value ? Math.max(0, now.value - arrived.value) : 0)
   // A click passes its event; the poller passes nothing. Both only mean "read again".
   async function refresh(..._extra: unknown[]) {
     const outcome = await read.refresh()
@@ -54,5 +57,5 @@ export const useQuotaOutlook = defineStore('quotaOutlook', () => {
   onScopeDispose(onReset(reset))
   onScopeDispose(onAccessRevalidate({ reset, refresh: () => { void refresh() } }))
   onScopeDispose(() => { if (clock) clearInterval(clock) })
-  return { data: read.data, groups, state, failed, now, refresh, use, reset }
+  return { data: read.data, groups, state, failed, since, refresh, use, reset }
 })

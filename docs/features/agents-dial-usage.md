@@ -63,7 +63,9 @@ the refilling account); the dial words them in the person's time zone.
 - Loading keeps skeletons at the reserved heights. A failed first read says
   "Usage couldn't be read · Try again". A failed refresh after a good read
   keeps the snapshot, shows Try again on the muted line, and ages the
-  snapshot from its sampled time and each reading from its read time. A pool
+  snapshot and each reading: the server's own ages plus the time since the
+  response arrived, so a client clock that differs from the server's changes
+  nothing. A pool
   whose shown age is 2 h or more says its age; an inactive account shows its
   last reading with its age.
 - The folded lines show only at 1100 px and wider and only for harnesses with
@@ -85,4 +87,5 @@ and burn. `TestQuotaOutlookWebFixtureIsCurrent` pins `web/tests/fixtures/quota-o
 which the web unit tests (`quota-outlook.unit.test.ts`) and the browser spec
 (`agents-dial-usage.spec.ts`, 1440/1024/390) read, so the UI is tested
 against the server's own projection. `quota-outlook-refresh.unit.test.ts`
-keeps a snapshot after a failed refresh and ages it from its timestamps.
+keeps a snapshot after a failed refresh and ages it by the time since it
+arrived, also when the client clock runs hours away from the server's.

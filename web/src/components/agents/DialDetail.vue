@@ -21,8 +21,8 @@ const props = defineProps<{
   view: DailyView; total: number; defaultPoints: number; tz?: string
   /** AEON-1497: the group's quota outlook in words, its read state and its clock. */
   usage: UsageView; usageState: 'loading' | 'ready' | 'error'; generatedAt?: string; anchorHour?: string
-  /** A failed refresh after a good read, and the clock that ages the snapshot. Both copies get them, so the reserved height matches. */
-  usageFailed?: boolean; usageNow?: number
+  /** A failed refresh after a good read, and the time since the snapshot arrived, which ages it. Both copies get them, so the reserved height matches. */
+  usageFailed?: boolean; usageSince?: number
   /** The person's next local midnight: the end of a Boost today. */
   until?: string
   paceOpen: boolean; boostOpen: boolean
@@ -112,7 +112,7 @@ const paceHome = computed(() => `/settings/capacity#pace-${harness.value}`)
   <div class="cd" :class="{ ghost }" :aria-hidden="ghost || undefined" :inert="ghost || undefined" :data-detail="ghost ? undefined : harness">
     <h3 class="cd-h"><HarnessMark :harness="harness" :size="16" /><span>{{ view.kind === 'none' ? `${name} · no account yet` : detailHeadline(view) }}</span></h3>
 
-    <QuotaUsage :view="usage" :state="usageState" :generated-at="generatedAt" :anchor-hour="anchorHour" :tz="tz" :failed="usageFailed" :now="usageNow" :ghost="ghost" @retry="emit('retry')" />
+    <QuotaUsage :view="usage" :state="usageState" :generated-at="generatedAt" :anchor-hour="anchorHour" :tz="tz" :failed="usageFailed" :since="usageSince" :ghost="ghost" @retry="emit('retry')" />
     <template v-if="view.kind === 'no_limit'">
       <dl class="cd-dl">
         <dt><span class="eyebrow">At the limit</span></dt><dd class="cd-quiet">Nothing to reach; the {{ total }} at once and the account still cap it.</dd>

@@ -1,7 +1,8 @@
 // SPDX-License-Identifier: AGPL-3.0-only
-// AEON-1497: a refresh that fails after a good read keeps the snapshot. The age moves with the
-// client clock from sampled_at and read_at; the server's counters stay frozen. Try again stays
-// on the muted line, so the chart and its steppers do not move.
+// AEON-1497: a refresh that fails after a good read keeps the snapshot. Its age is the server's
+// frozen counter plus the client's time since the snapshot arrived, so a client clock that differs
+// from the server's changes nothing. Try again stays on the muted line, so the chart and its
+// steppers do not move.
 import { afterEach, beforeEach, expect, it, vi } from 'vitest'
 import * as Vue from 'vue'
 import { renderToString } from '@vue/server-renderer'
@@ -21,7 +22,7 @@ const SAMPLED = '2026-10-18T10:10:00.000Z'
 
 function payload(): QuotaOutlook {
   return {
-    generated_at: SAMPLED, anchor_hour: '2026-10-18T00:00:00.000Z', history_hours: 169, horizon_hours: 168, truncated: false,
+    generated_at: '2026-10-18T11:10:00.000Z', anchor_hour: '2026-10-18T00:00:00.000Z', history_hours: 169, horizon_hours: 168, truncated: false,
     groups: [{
       harness: 'claude', state: 'measured',
       accounts: [{
@@ -49,7 +50,7 @@ it('a failed refresh keeps the snapshot and ages it from the reading', async () 
   const store = useQuotaOutlook()
   vi.mocked(getQuotaOutlook).mockResolvedValue(payload())
   await store.refresh()
-  const fresh = usageView('claude', store.groups.get('claude'), store.data!.anchor_hour, 'UTC', [], 'ready', false, store.now)
+  const fresh = usageView('claude', store.groups.get('claude'), store.data!.anchor_hour, 'UTC', [], 'ready', false, store.since)
   expect(fresh.muted).toContain('sampled 10:10')
   expect(fresh.muted).not.toContain('ago')
   expect(store.failed).toBe(false)
@@ -60,15 +61,39 @@ it('a failed refresh keeps the snapshot and ages it from the reading', async () 
   expect(store.failed).toBe(true)
   expect(store.data).not.toBeNull()
   expect(store.data!.groups[0]!.pool!.sampled_age_seconds).toBe(3600)
-  const aged = usageView('claude', store.groups.get('claude'), store.data!.anchor_hour, 'UTC', [], 'ready', false, store.now)
+  const aged = usageView('claude', store.groups.get('claude'), store.data!.anchor_hour, 'UTC', [], 'ready', false, store.since)
   expect(aged.muted).toContain('3 h ago')
   expect(aged.muted).not.toContain('10:10')
   expect(aged.stale).toBe(true)
-  expect(accountRows(store.groups.get('claude')!, 'UTC', [], store.now)[0]!.stateWord).toBe('3 h ago')
+  expect(accountRows(store.groups.get('claude')!, 'UTC', [], store.since)[0]!.stateWord).toBe('3 h ago')
 
   const app = Vue.createSSRApp({
-    render: () => Vue.h(QuotaUsage, { view: aged, state: 'ready', failed: true, now: store.now, tz: 'UTC' }),
+    render: () => Vue.h(QuotaUsage, { view: aged, state: 'ready', failed: true, since: store.since, tz: 'UTC' }),
   })
   app.component('RouterLink', { props: ['to'], setup: (_, { slots }) => () => slots.default?.() })
   expect(await renderToString(app)).toContain('Try again')
+})
+
+// Risk: the age was the client clock minus the server's sampled_at, so a browser whose clock runs
+// hours away from the server's called a fresh snapshot hours old (CI ran 7 h after the fixture).
+it('a client clock hours ahead of the server still reads the server’s age, and only elapsed time ages it', async () => {
+  vi.setSystemTime(T + 7 * 3_600_000)
+  const store = useQuotaOutlook()
+  vi.mocked(getQuotaOutlook).mockResolvedValue(payload())
+  await store.refresh()
+  expect(store.since).toBe(0)
+  const fresh = usageView('claude', store.groups.get('claude'), store.data!.anchor_hour, 'UTC', [], 'ready', false, store.since)
+  expect(fresh.muted).toContain('sampled 10:10')
+  expect(fresh.stale).toBe(false)
+  expect(accountRows(store.groups.get('claude')!, 'UTC', [], store.since)[0]!.stateWord).toBe('')
+
+  // One more hour on the client, and the refresh fails: 1 h old at the response + 1 h = 2 h.
+  vi.mocked(getQuotaOutlook).mockRejectedValue(new APIError(503, 'unavailable', {}))
+  vi.setSystemTime(T + 8 * 3_600_000)
+  await store.refresh()
+  expect(store.since).toBe(3_600_000)
+  const aged = usageView('claude', store.groups.get('claude'), store.data!.anchor_hour, 'UTC', [], 'ready', false, store.since)
+  expect(aged.muted).toContain('2 h ago')
+  expect(aged.stale).toBe(true)
+  expect(accountRows(store.groups.get('claude')!, 'UTC', [], store.since)[0]!.stateWord).toBe('2 h ago')
 })
