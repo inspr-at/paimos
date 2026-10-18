@@ -310,7 +310,7 @@ func quotaSamplesFromFacts(facts []ReadinessFactWrite, local string) []quotaSamp
 	var out []quotaSample
 	for _, f := range facts {
 		kind, bucket, _ := strings.Cut(f.WindowKey, ":")
-		if f.ResourceID == local && quotaMinutes(kind) != 0 && f.UsedPercent != nil && f.ReadingAt != nil && f.ResetsAt != nil && (f.Source == "agentd" || f.Source == "harness") {
+		if f.ResourceID == local && quotaMinutes(kind) != 0 && len(bucket) <= 64 && f.UsedPercent != nil && f.ReadingAt != nil && f.ResetsAt != nil && f.ResetsAt.After(*f.ReadingAt) && (f.Source == "agentd" || f.Source == "harness") {
 			out = append(out, quotaSample{kind, bucket, *f.UsedPercent, *f.ReadingAt, *f.ResetsAt, f.Source})
 		}
 	}
