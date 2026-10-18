@@ -80,9 +80,15 @@ function span(ms: number): string {
 }
 
 // ---------- The answer in words ----------
-export type UsageKind = 'fast' | 'slow' | 'pace' | 'unknown' | 'held' | 'not_reported' | 'none'
+/** pending: the outlook is not read yet (or failed); the plan's accounts reserve the rows meanwhile. */
+export type UsageKind = 'fast' | 'slow' | 'pace' | 'unknown' | 'held' | 'not_reported' | 'none' | 'pending'
+/** The harnesses whose quota readings the server keeps (AEON-1499); others never report. */
+export const QUOTA_HARNESSES = new Set(['claude', 'codex'])
+export interface KnownAccount { account_id: string; label: string }
 export interface UsageView {
   harness: string; name: string; kind: UsageKind; group: OutlookGroup | null
+  /** The plan's accounts of this harness: rows to reserve while the outlook is read. */
+  known: KnownAccount[]
   /** The headline sentence of the detail. */
   head: string
   /** The harness row's sub line. */
@@ -98,13 +104,22 @@ export interface UsageView {
   /** Hours after the anchor hour of the moment the headline names. */
   focus: number | null
 }
-export const VERDICT_WORD: Record<UsageKind, string> = { fast: 'Too fast', slow: 'Too slow', pace: 'On pace', unknown: 'Pace not measured yet', held: 'Held', not_reported: '', none: '' }
-export const VERDICT_ICON: Record<UsageKind, string> = { fast: 'alert', slow: 'hourglass', pace: 'check', unknown: 'ring-dashed', held: 'lock', not_reported: 'ring-dashed', none: '' }
+export const VERDICT_WORD: Record<UsageKind, string> = { fast: 'Too fast', slow: 'Too slow', pace: 'On pace', unknown: 'Pace not measured yet', held: 'Held', not_reported: '', none: '', pending: '' }
+export const VERDICT_ICON: Record<UsageKind, string> = { fast: 'alert', slow: 'hourglass', pace: 'check', unknown: 'ring-dashed', held: 'lock', not_reported: 'ring-dashed', none: '', pending: '' }
 
-export function usageView(harness: string, group: OutlookGroup | undefined, anchorHour: string | undefined, tz?: string): UsageView {
+/**
+ * One harness's usage in words. Without its group the plan's accounts (known) decide: none means
+ * no account; a harness that never reports quota says so at once; otherwise the read is pending.
+ */
+export function usageView(harness: string, group: OutlookGroup | undefined, anchorHour: string | undefined, tz?: string, known: KnownAccount[] = [], read: 'loading' | 'ready' | 'error' = 'ready'): UsageView {
   const name = HARNESS_NAME[harness] ?? harness
-  const base: UsageView = { harness, name, kind: 'none', group: group ?? null, head: 'No accounts yet', short: 'No accounts yet', tip: '', muted: '', stale: false, verdict: '', paceLine: '', focus: null }
-  if (!group || !group.accounts.length) return base
+  const base: UsageView = { harness, name, kind: 'none', group: group ?? null, known, head: 'No accounts yet', short: 'No accounts yet', tip: '', muted: '', stale: false, verdict: '', paceLine: '', focus: null }
+  if (!group || !group.accounts.length) {
+    if (!known.length) return base
+    const accounts = `${known.length} ${known.length === 1 ? 'account' : 'accounts'}`
+    if (read === 'ready' || !QUOTA_HARNESSES.has(harness)) return { ...base, kind: 'not_reported', head: 'Quota not reported', short: `Quota not reported · ${accounts}`, muted: accounts }
+    return { ...base, kind: 'pending', head: '', short: '' }
+  }
   const n = group.accounts.length, accounts = `${n} ${n === 1 ? 'account' : 'accounts'}`
   if (group.state === 'not_reported') return { ...base, kind: 'not_reported', head: 'Quota not reported', short: `Quota not reported · ${accounts}`, muted: accounts }
   if (group.state === 'held') return { ...base, kind: 'held', head: n === 1 ? 'The account is held.' : 'Every account is held.', short: 'all accounts held', tip: `${name}: every account is held`, muted: accounts }
@@ -161,8 +176,8 @@ export interface AccountRow {
   /** The state column: active or held with an icon, a stale reading's age, or nothing. */
   stateWord: string; stateIcon: string
 }
-export function accountRows(group: OutlookGroup | null, tz?: string): AccountRow[] {
-  if (!group) return []
+export function accountRows(group: OutlookGroup | null, tz?: string, known: KnownAccount[] = []): AccountRow[] {
+  if (!group) return known.map((a, i) => ({ id: a.account_id, name: a.label, shade: shadeOf(known.length, i), state: 'not_reported', left: null, refills: '', forecast: '', tone: '', stateWord: '', stateIcon: '' }))
   const n = group.accounts.length
   return group.accounts.map((a, i) => {
     const row: AccountRow = { id: a.account_id, name: a.label, shade: shadeOf(n, i), state: a.state, left: null, refills: '', forecast: '', tone: '', stateWord: '', stateIcon: '' }

@@ -129,8 +129,8 @@ let releaseOutlook: (() => void) | undefined
 onMounted(() => { releaseOutlook = outlook.use() })
 onBeforeUnmount(() => releaseOutlook?.())
 const tz = computed(() => snapshot.value?.daily_timezone)
-const usage = computed<Record<string, UsageView>>(() => Object.fromEntries(rows.value.map(r => [r.key, usageView(r.key, outlook.groups.get(r.key), outlook.data?.anchor_hour, tz.value)])))
 const usageState = computed(() => outlook.state)
+const usage = computed<Record<string, UsageView>>(() => Object.fromEntries(rows.value.map(r => [r.key, usageView(r.key, outlook.groups.get(r.key), outlook.data?.anchor_hour, tz.value, views.value[r.key]!.accounts, usageState.value)])))
 /** The words a quota-reporting harness adds to its folded unit; nothing while loading or failed. */
 const usageTip = (key: string) => usageState.value === 'ready' && ['fast', 'slow', 'pace', 'unknown'].includes(usage.value[key]!.kind) ? usage.value[key]!.tip : ''
 const usageIcon = (key: string) => (VERDICT_ICON[usage.value[key]!.kind] || 'ring-dashed') as IconName
@@ -147,7 +147,8 @@ const minis = ref<Record<string, { left: number; geo: MiniGeometry }>>({})
 function placeMinis() {
   const out: Record<string, { left: number; geo: MiniGeometry }> = {}
   const data = outlook.data, root = dialEl.value
-  if (root && data && wide.value && usageState.value === 'ready') {
+  // Only the folded dial (the addendum): open, the detail below says it all.
+  if (root && data && wide.value && folded.value && usageState.value === 'ready') {
     for (const cell of root.querySelectorAll<HTMLElement>('.du-cell[data-cell]')) {
       const key = cell.dataset.cell!, group = outlook.groups.get(key)
       if (!usageTip(key) || !group?.pool) continue
@@ -280,8 +281,8 @@ function modeKeys(event: KeyboardEvent, key: string) {
                   <span class="sub" :class="`u-${usage[row.key]!.kind}`">
                     <template v-if="usage[row.key]!.kind === 'none'"><span class="quiet">No accounts yet</span></template>
                     <template v-else-if="usage[row.key]!.kind === 'not_reported'"><span class="vw t-none"><AppIcon name="ring-dashed" :size="12" /></span><span>{{ usage[row.key]!.short }}</span></template>
-                    <template v-else-if="usageState === 'loading'"><span class="skeleton" aria-hidden="true" /><span class="sr-only">Reading usage…</span></template>
-                    <template v-else-if="usageState === 'error'"><span class="quiet">Usage not read</span></template>
+                    <template v-else-if="usage[row.key]!.kind === 'pending' && usageState !== 'error'"><span class="skeleton" aria-hidden="true" /><span class="sr-only">Reading usage…</span></template>
+                    <template v-else-if="usage[row.key]!.kind === 'pending'"><span class="quiet">Usage not read</span></template>
                     <template v-else><span class="vw" :class="usageTone(row.key)" role="img" :aria-label="usage[row.key]!.verdict"><AppIcon :name="usageIcon(row.key)" :size="12" /></span><span>{{ usage[row.key]!.short }}</span></template>
                   </span>
                   <span v-if="attention(row.key)" class="cap-stl" :class="`st-${views[row.key]!.kind}`"><AppIcon v-if="views[row.key]!.kind === 'over_pace'" name="alert" :size="12" /><AppIcon v-else name="pause" :size="12" /><span>{{ rowWords(row.key) }}</span></span>

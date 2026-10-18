@@ -21,9 +21,12 @@ const group = computed<OutlookGroup | null>(() => props.view.group)
 const kind = computed(() => props.view.kind)
 const quiet = computed(() => kind.value === 'not_reported')
 const none = computed(() => kind.value === 'none')
-const reading = computed(() => props.state === 'ready' && !quiet.value && !none.value)
+// Pending: the outlook is being read (or failed); the plan's accounts keep their rows meanwhile.
+const pending = computed(() => kind.value === 'pending')
+const shown = computed<'loading' | 'ready' | 'error'>(() => pending.value ? (props.state === 'ready' ? 'loading' : props.state) : 'ready')
+const reading = computed(() => !pending.value && !quiet.value && !none.value)
 const model = computed(() => reading.value && group.value?.pool && props.generatedAt && props.anchorHour ? chartModel(group.value, props.generatedAt, props.anchorHour) : null)
-const rows = computed(() => accountRows(group.value, props.tz))
+const rows = computed(() => accountRows(group.value, props.tz, props.view.known))
 const id = (part: string) => props.ghost ? undefined : `ub-${props.view.harness}-${part}`
 const tab = computed(() => props.ghost ? -1 : undefined)
 
@@ -55,12 +58,12 @@ const accountsWord = computed(() => `${rows.value.length} ${rows.value.length ==
 </script>
 
 <template>
-  <div class="ub" :data-load="state">
+  <div class="ub" :data-load="shown">
     <!-- The answer first: one sentence (two lines kept), the pool in muted ink, the pace verdict. -->
     <div v-if="none" class="ub-sum short"><p class="ub-hd one">No accounts yet<span class="ub-of">·</span><RouterLink class="link-btn ln-ic" to="/settings/accounts#add-account" :tabindex="tab">Add an account<AppIcon name="arrow" :size="12" /></RouterLink></p></div>
     <div v-else-if="quiet" class="ub-sum short"><p class="ub-hd one">Quota not reported<span class="ub-of">· {{ accountsWord }}</span></p></div>
-    <div v-else-if="state === 'loading'" class="ub-sum" aria-busy="true"><div class="ub-hd"><span class="sk2"><span class="skeleton" /><span class="skeleton" /></span><span class="sr-only">Reading usage…</span></div><p class="ub-l2"><span class="skeleton" /></p><div class="ub-v"><span class="skeleton" /></div></div>
-    <div v-else-if="state === 'error'" class="ub-sum"><div class="ub-hd"><p class="err" :role="ghost ? undefined : 'alert'"><AppIcon name="alert" :size="15" /><span>Usage couldn’t be read</span><span class="ub-of">·</span><button type="button" class="link-btn" :tabindex="tab" @click="emit('retry')">Try again</button></p></div><p class="ub-l2" /><div class="ub-v" /></div>
+    <div v-else-if="shown === 'loading'" class="ub-sum" aria-busy="true"><div class="ub-hd"><span class="sk2"><span class="skeleton" /><span class="skeleton" /></span><span class="sr-only">Reading usage…</span></div><p class="ub-l2"><span class="skeleton" /></p><div class="ub-v"><span class="skeleton" /></div></div>
+    <div v-else-if="shown === 'error'" class="ub-sum"><div class="ub-hd"><p class="err" :role="ghost ? undefined : 'alert'"><AppIcon name="alert" :size="15" /><span>Usage couldn’t be read</span><span class="ub-of">·</span><button type="button" class="link-btn" :tabindex="tab" @click="emit('retry')">Try again</button></p></div><p class="ub-l2" /><div class="ub-v" /></div>
     <div v-else class="ub-sum">
       <p class="ub-hd">{{ view.head }}</p>
       <p class="ub-l2" :class="{ stale: view.stale }"><span>{{ view.muted }}</span></p>
@@ -84,11 +87,11 @@ const accountsWord = computed(() => `${rows.value.length} ${rows.value.length ==
       </div>
       <QuotaChart v-if="model && !ghost" :model="model" :name="view.name" :past="past" :ahead="ahead" :tz="tz" :info-id="id('info')!" />
       <template v-else>
-        <div class="ub-plot" :aria-busy="state === 'loading' || undefined">
+        <div class="ub-plot" :aria-busy="shown === 'loading' || undefined">
           <template v-if="!ghost">
             <p v-if="quiet" class="ub-empty"><span class="ub-rule" aria-hidden="true" />{{ view.name }} doesn’t report quota. Burn appears once it does.</p>
-            <template v-else-if="state === 'loading'"><span class="skeleton sk-line" /><span class="skeleton sk-strip" /></template>
-            <p v-else-if="state === 'error'" class="ub-empty">No readings to draw.</p>
+            <template v-else-if="shown === 'loading'"><span class="skeleton sk-line" /><span class="skeleton sk-strip" /></template>
+            <p v-else-if="shown === 'error'" class="ub-empty">No readings to draw.</p>
           </template>
         </div>
         <p class="ub-info" />
@@ -110,10 +113,11 @@ const accountsWord = computed(() => `${rows.value.length} ${rows.value.length ==
       <button type="button" class="ub-acc-t" :aria-expanded="!ghost && listOpen" :aria-controls="id('list')" :tabindex="tab" @click="listOpen = !listOpen"><span><b>{{ accountsWord }}</b> · {{ listOpen && !ghost ? 'hide' : 'show' }}</span><AppIcon class="ic" name="chevron" :size="14" /></button>
       <ul :id="id('list')" class="ub-list" :class="{ folded: !listOpen || ghost }" aria-label="Subscriptions">
         <li v-for="r in rows" :key="r.id" class="ub-acc" :data-account="r.id">
-          <span class="ub-dot" :style="quiet || r.state === 'not_reported' ? undefined : { background: r.shade }" />
+          <span class="ub-dot" :style="quiet || (r.state === 'not_reported' && !pending) ? undefined : { background: r.shade }" />
           <span class="ub-an">{{ r.name }}</span>
-          <span v-if="r.state === 'not_reported' || r.state === 'private'" class="ub-nr"><AppIcon name="ring-dashed" :size="12" />{{ r.state === 'private' ? 'Usage private' : 'Quota not reported' }}</span>
-          <template v-else-if="state === 'loading'"><span class="ub-meta"><span class="skeleton" /><span class="skeleton" /><span class="skeleton" /></span><span class="skeleton" /></template>
+          <template v-if="pending && shown === 'loading'"><span class="ub-meta"><span class="skeleton" /><span class="skeleton" /><span class="skeleton" /></span><span class="skeleton" /></template>
+          <span v-else-if="pending" class="ub-nr"><AppIcon name="ring-dashed" :size="12" />not read</span>
+          <span v-else-if="r.state === 'not_reported' || r.state === 'private'" class="ub-nr"><AppIcon name="ring-dashed" :size="12" />{{ r.state === 'private' ? 'Usage private' : 'Quota not reported' }}</span>
           <template v-else>
             <span class="ub-meta">
               <span class="ub-bat"><span class="bat" role="img" :aria-label="`${r.left} % left`"><i :style="{ width: `${r.left}%`, background: r.shade }" /></span><span><b>{{ r.left }} %</b> <span class="bl">left</span></span></span>

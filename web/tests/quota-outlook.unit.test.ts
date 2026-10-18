@@ -38,6 +38,16 @@ describe('the answer in words', () => {
     Object.assign(learning, { verdict: 'unknown', current: null }); learning.pace.per_hour_24h = null; learning.headline = { ...learning.headline, kind: 'unknown', focus_at: null }
     expect(usageView('claude', learning, outlooks.fast.anchor_hour, 'UTC')).toMatchObject({ kind: 'unknown', verdict: 'Pace not measured yet', focus: null })
   })
+  it('before the outlook is read, the plan’s accounts decide: pending rows, or no quota for a harness that never reports it', () => {
+    const known = [{ account_id: 'a', label: 'one@' }, { account_id: 'b', label: 'two@' }]
+    expect(usageView('claude', undefined, undefined, 'UTC', known, 'loading')).toMatchObject({ kind: 'pending', known })
+    expect(usageView('claude', undefined, undefined, 'UTC', known, 'error')).toMatchObject({ kind: 'pending' })
+    expect(usageView('cursor', undefined, undefined, 'UTC', known, 'loading')).toMatchObject({ kind: 'not_reported', short: 'Quota not reported · 2 accounts' })
+    // Read, and still no group: the accounts have no readings, which is not "no accounts".
+    expect(usageView('codex', undefined, undefined, 'UTC', known, 'ready')).toMatchObject({ kind: 'not_reported' })
+    expect(usageView('codex', undefined, undefined, 'UTC', [], 'loading')).toMatchObject({ kind: 'none' })
+    expect(accountRows(null, 'UTC', known).map(r => [r.name, r.state, r.left])).toEqual([['one@', 'not_reported', null], ['two@', 'not_reported', null]])
+  })
   it('the default range always reaches the moment the headline names', () => {
     expect(defaultRange(view('fast', 'claude'), false)).toEqual({ past: 3, ahead: 2 })
     // The wasteful refill is Wed 18:59, 80 h after the anchor: four days ahead.
