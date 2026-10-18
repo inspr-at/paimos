@@ -8,9 +8,11 @@
 // ("· AEON-LEAD 18:52"); the whole note is a tip when clipped.
 // AEON-1494 addendum (Markus's feedback, Tick's decisions A–C): the item nests under
 // its goal, its icon at the step icons' x, then the key, then the label. Wide, the
-// row is one line and the live line sits in the Moving → Progress span; otherwise
-// the label runs from the key to the ETA (two lines at most) and the live line and
-// the badge's faces share one meta line under it.
+// row is one line: with nothing beside it the label runs on to the ETA column; with
+// a live line or an agent it keeps the goal and agent columns (the badge at the agent
+// column's end) and the live line takes Moving up to the ETA column (Tick, 10-18).
+// Otherwise the label runs from the key to the ETA (two lines at most) and the live
+// line and the badge's faces share one meta line under it.
 import { computed } from 'vue'
 import { RouterLink } from 'vue-router'
 import AppIcon from '../AppIcon.vue'
@@ -27,17 +29,19 @@ const note = computed(() => props.item.note.trim())
 const byline = computed(() => noteByline(props.item, props.now))
 const noteTip = computed(() => `${note.value} ${byline.value}`.trim())
 const badge = computed(() => props.agents.length > 0 && !done.value)
+// Wide rows only: something sits beside the label, so it stops at the agent column.
+const side = computed(() => !!props.wide && !props.item.handed_over && (!!note.value || badge.value))
 </script>
 
 <template>
-  <li class="item" :class="{ 'is-done': done, handed: item.handed_over, wide }" tabindex="-1" data-nav>
+  <li class="item" :class="{ 'is-done': done, handed: item.handed_over, wide, 'has-side': side }" tabindex="-1" data-nav>
     <div v-if="item.handed_over" class="i-head">
       <span class="i-state" data-tip="Handed over"><AppIcon name="person-check" :size="15" /><span class="sr-only">Handed over</span></span>
       <span class="i-keys" />
       <div class="i-main"><span class="i-label">Handed over: {{ item.label }}</span><span v-if="detail" class="i-detail">{{ detail }}</span></div>
     </div>
     <template v-else>
-      <div class="i-head">
+      <div class="i-head" :class="{ 'has-badge': wide && badge }">
         <span class="i-state" :data-tip="STATE_LABEL[item.state]"><GoalStateIcon :state="item.state" /><span class="sr-only">{{ STATE_LABEL[item.state] }}</span></span>
         <span class="i-keys mono">
           <RouterLink v-if="item.keys[0]" :to="ticketHref(item.keys[0])">{{ item.keys[0] }}</RouterLink>
@@ -52,11 +56,11 @@ const badge = computed(() => props.agents.length > 0 && !done.value)
             <div v-if="badge" class="i-badge"><LiveAgents :agents="agents" :project="project" variant="row" /></div>
           </div>
         </div>
+        <div v-if="wide && badge" class="i-badge"><LiveAgents :agents="agents" :project="project" variant="row" /></div>
       </div>
       <span v-if="wide && note" class="i-live is-note">
         <AppIcon name="note" :size="12" /><span class="t"><span v-clip-tip="noteTip" class="tx">{{ note }}</span> <span v-if="byline" class="by">{{ byline }}</span></span>
       </span>
-      <div v-if="wide && badge" class="i-badge"><LiveAgents :agents="agents" :project="project" variant="row" /></div>
       <!-- Phones hide the key column. These links stay, so an item with no agent still opens its work. -->
       <nav v-if="item.keys.length" class="phone-tickets" :aria-label="`Tickets for ${item.label}`">
         <RouterLink v-for="key in item.keys" :key="key" :to="ticketHref(key)">{{ key }}</RouterLink>
@@ -106,15 +110,18 @@ const badge = computed(() => props.agents.length > 0 && !done.value)
 /* A flex cell: the chip is no inline box, so it adds no line height of its own. */
 .i-badge { display: flex; align-items: center; min-width: 0; max-width: 100%; }
 .i-badge :deep(.row-name) { max-width: 14ch; }
-/* B · Wide: one line per item. The label keeps the goal column, the badge the agent column,
-   and the live line takes the Moving → Progress span. */
-.wide > .i-head { grid-column: 3; }
+/* B · Wide: one line per item. With nothing beside it the label runs on to the ETA column.
+   With a live line or an agent it keeps the goal and agent columns, the badge at the agent
+   column's end (so the label gets 320 px from 1440 on), and the live line takes Moving up
+   to the ETA column. */
 .wide .i-keys { flex-direction: row; align-items: baseline; }
-.wide.handed > .i-head { grid-column: 3 / -3; }
+.wide.has-side > .i-head { grid-column: 3 / 5; }
+.wide .i-head.has-badge { grid-template-columns: 20px max-content minmax(0, 1fr) minmax(0, max-content); }
 .wide .i-label { display: block; -webkit-line-clamp: none; white-space: nowrap; text-overflow: ellipsis; }
-.wide > .i-live { grid-column: 5 / 9; grid-row: 1; line-height: 20px; }
+.wide > .i-live { grid-column: 5 / -3; grid-row: 1; line-height: 20px; }
 /* The 28 px chip overhangs the 20 px line into the row's padding, so a row with an agent stays one line high. */
-.wide > .i-badge { grid-column: 4; grid-row: 1; justify-self: start; align-self: center; margin-block: -4px; }
+.wide .i-head > .i-badge { justify-self: end; align-self: center; margin: -4px 0 -4px 6px; }
+@media (min-width: 1400px) { .wide .i-head.has-badge { grid-template-columns: 20px max-content minmax(320px, 1fr) minmax(0, max-content); } }
 @media (max-width: 1399px) {
   .i-badge :deep(.row-name), .i-badge :deep(.chip-state) { display: none; }
   .i-badge :deep(.live-chip) { grid-template-columns: auto; padding-right: 6px; }

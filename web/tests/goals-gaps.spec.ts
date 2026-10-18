@@ -9,7 +9,8 @@
 // feedback, Tick's decisions A–D): items that hug the left edge instead of nesting
 // under their goal, an empty Moving → Progress span on wide screens, titles squeezed
 // into a narrow column at 1024, goal names cut to one line, and any of it moving a
-// control when a goal opens or a live update lands. Screenshots go to each test's
+// control when a goal opens or a live update lands. Tick's 10-18 check: wide titles
+// cut short while the span to their right stays empty. Screenshots go to each test's
 // output directory.
 import { test, expect, type Page, type Locator, type TestInfo } from '@playwright/test'
 import { fixtures, liveAgent, mockWork, watchErrors } from './work-fixtures'
@@ -273,7 +274,8 @@ for (const size of VIEWPORTS) {
 
 // ---------- Addendum: item rows nest under the goal and use the wide span (Tick's decisions A–D) ----------
 const LONG_GOAL = 'Release 136 · steady and complete, with the gatekeeper live and every review run authenticated'
-const LONG_ITEM = 'People see in one place what every session is doing, what it waits for and when it lands, without asking anyone for a status update first'
+// Longer than the whole span to the ETA at 1440, so the wide row still cuts it.
+const LONG_ITEM = 'People see in one place what every session is doing, what it waits for and when it lands, without asking anyone for a status update first or opening a single ticket'
 const STEPS = [{ id: 'cut', text: 'Open: 135 tagged and nightly green', state: 'done' }, { id: 'chat', text: 'Chat fixes after their designs', state: 'now' }, { id: 'ci', text: 'CI targets met (S3–S5)', state: 'later' }]
 const NOTED = 'Agent reviews become authenticated'
 const NOTE = 'Hand-check of 5 review runs, then the gate goes live for every merge in the queue'
@@ -354,30 +356,50 @@ for (const size of [{ width: 1440, height: 900 }, { width: 1024, height: 800 }, 
       await expect(long.locator('.i-keys .more')).toHaveAttribute('data-tip', 'AEON-1409')
 
       if (wide) {
-        // B: one line per item; the label keeps the goal column; the live line sits in Moving → Progress
-        // with its icon, its author and time readable, and the whole note in its tip.
-        for (let i = 0; i < 3; i++) {
-          const label = items.nth(i).locator('.i-label')
-          expect(await lines(label), `item ${i} one line`).toBe(1)
-          const b = await box(label)
-          expect(b.x + b.width).toBeLessThanOrEqual(cols[2]![1] + .5)
+        // B (Tick 10-18): one line per item. With nothing beside it, the label runs on to the ETA column
+        // and is cut only when it does not fit there.
+        for (let i = 0; i < 3; i++) expect(await lines(items.nth(i).locator('.i-label')), `item ${i} one line`).toBe(1)
+        const chat = release.locator('.item', { hasText: 'Chat thread and composer' })
+        for (const [name, bare] of [['chat', chat], ['long', long]] as const) {
+          const b = await box(bare.locator('.i-label'))
+          expect(Math.abs(b.x + b.width - cols[8]![1]), `${name} label reaches the ETA column`).toBeLessThanOrEqual(.5)
         }
+        expect(await cut(chat.locator('.i-label')), 'a label that fits before the ETA column is whole').toBe(false)
+        expect(await chat.locator('.i-label').getAttribute('data-tip')).toBeNull()
+        expect(await cut(long.locator('.i-label'))).toBe(true)
         await expect(long.locator('.i-label')).toHaveAttribute('data-tip', LONG_ITEM)
+        // With a live line, the label keeps the goal and agent columns, at least 320 px, and stops before
+        // the badge, which sits at the agent column's end (the goal's own badge at its start).
         const live = noted.locator(':scope > .i-live'), labelBox = await box(noted.locator('.i-label')), liveBox = await box(live)
+        const goalBadge = await box(release.locator('.goal-row .agents .live-chip')), itemBadge = await box(noted.locator('.i-head > .i-badge .live-chip'))
+        expect(labelBox.width, 'a label beside a live line').toBeGreaterThanOrEqual(320)
+        expect(labelBox.x + labelBox.width).toBeLessThanOrEqual(itemBadge.x)
+        expect(Math.abs(goalBadge.x - cols[3]![0])).toBeLessThanOrEqual(.5)
+        expect(itemBadge.x).toBeGreaterThanOrEqual(cols[3]![0] - .5)
+        expect(Math.abs(itemBadge.x + itemBadge.width - cols[3]![1]), 'item badge at the agent column end').toBeLessThanOrEqual(.5)
+        // The live line takes Moving up to the ETA column: its icon, its author and time readable,
+        // the note cut with "…" and shown whole on hover and on keyboard focus.
         await expect(live).toHaveText(NOTE_LINE)
         await expect(live.locator('svg')).toBeVisible()
-        expect(liveBox.x).toBeGreaterThanOrEqual(cols[4]![0] - .5)
-        expect(liveBox.x + liveBox.width).toBeLessThanOrEqual(cols[7]![1] + .5)
+        expect(Math.abs(liveBox.x - cols[4]![0])).toBeLessThanOrEqual(.5)
+        expect(Math.abs(liveBox.x + liveBox.width - cols[8]![1])).toBeLessThanOrEqual(.5)
         expect(liveBox.height).toBeLessThanOrEqual(20.5)
         expect(Math.abs(liveBox.y + liveBox.height / 2 - (labelBox.y + labelBox.height / 2))).toBeLessThanOrEqual(1.5)
         const by = await box(live.locator('.by'))
         expect(by.width).toBeGreaterThan(0)
-        expect(by.x + by.width).toBeLessThanOrEqual(cols[7]![1] + .5)
-        await expect(live.locator('.tx')).toHaveAttribute('data-tip', NOTE_LINE)
-        // The badge stays in the agent column, under the goal's own badge.
-        const goalBadge = await box(release.locator('.goal-row .agents .live-chip')), itemBadge = await box(noted.locator(':scope > .i-badge .live-chip'))
-        expect(Math.abs(goalBadge.x - itemBadge.x)).toBeLessThanOrEqual(.5)
-        expect(itemBadge.x).toBeGreaterThanOrEqual(cols[3]![0] - .5)
+        expect(by.x + by.width).toBeLessThanOrEqual(cols[8]![1] + .5)
+        const tx = live.locator('.tx')
+        expect(await cut(tx)).toBe(true)
+        await expect(tx).toHaveAttribute('data-tip', NOTE_LINE)
+        await tx.hover()
+        await expect(page.locator('.tooltip')).toHaveText(NOTE_LINE)
+        await page.keyboard.press('Tab')
+        await tx.focus()
+        await expect(tx).toBeFocused()
+        await expect(page.locator('.tooltip')).toHaveText(NOTE_LINE)
+        await tx.blur()
+        await page.mouse.move(1, 1)
+        await expect(page.locator('.tooltip')).toHaveCount(0)
         for (let i = 0; i < 3; i++) expect((await box(items.nth(i))).height, `item ${i} row`).toBeLessThanOrEqual(32.5)
       } else {
         // C: the label runs from the key to the ETA, at least 280 px wide and at most two lines.

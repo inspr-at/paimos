@@ -283,10 +283,17 @@ test('an opened goal lists what’s missing, then Moving, Queued (five, then a f
   await expect(more).toHaveAttribute('aria-expanded', 'true')
   await done.click()
   await expect(labels).toHaveCount(13)
-  // One agent-badge column: the goal's badge and its item's badge start at the same x.
+  // One agent-badge column: the goal's badge starts it; an item's badge ends it, beside the item's live line (AEON-1494).
   const goalBadge = release.locator('.goal-row .agents .live-chip'), itemBadge = body.locator('.i-badge .live-chip').first()
   await expect(goalBadge).toBeVisible(); await expect(itemBadge).toBeVisible()
-  expect(Math.abs((await box(goalBadge)).x - (await box(itemBadge)).x)).toBeLessThanOrEqual(.5)
+  const agentColumn = await page.locator('.goal-grid').evaluate(el => {
+    const style = getComputedStyle(el), widths = style.gridTemplateColumns.split(' ').map(parseFloat), gap = parseFloat(style.columnGap)
+    const left = el.getBoundingClientRect().left + parseFloat(style.paddingLeft) + widths.slice(0, 3).reduce((sum, width) => sum + width + gap, 0)
+    return { left, right: left + widths[3]! }
+  })
+  expect(Math.abs((await box(goalBadge)).x - agentColumn.left)).toBeLessThanOrEqual(.5)
+  const item = await box(itemBadge)
+  expect(Math.abs(item.x + item.width - agentColumn.right)).toBeLessThanOrEqual(.5)
   await expect(body.locator('.item').first().locator('.i-live')).toHaveText('PR #707 · checks running')
   // The handed-over line closes the agents' part.
   const joed = goalRow(page, 'g-joed')

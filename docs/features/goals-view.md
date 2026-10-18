@@ -59,11 +59,15 @@ default, and `?view=goals` once.
   the project-key column belongs to goal rows, and the fold lines line up the same
   way. An item's live line is its agent's note: a speech icon, one line closed by the
   author and time ("· AEON-LEAD 18:52"), which stay readable; a clipped note or label
-  shows in full as a tip. When the counts show and the goal column gives the key and
-  label at least 280 px, each item is one line: the label in the goal column, its
-  agent's badge in the agent column and the live line in the Moving → Progress span.
-  Otherwise the label runs from the key to the ETA in at most two lines, and the live
-  line and the agent's face share one line under it. The choice is made when the
+  shows in full as a tip (on hover and on keyboard focus). When the counts show and
+  the goal column gives the key and label at least 280 px, each item is one line. An
+  item with no live line and no agent runs its label on to the ETA column, so it is
+  cut only when it does not fit there. With a live line or an agent, the label keeps
+  the goal and agent columns (at least 320 px from 1440 px), the agent's badge sits at
+  the end of the agent column, and the live line takes the span from Moving to the ETA
+  column. When the counts are hidden or that space is under 280 px, the label runs
+  from the key to the ETA in at most two lines, and the live line and the agent's
+  face share one line under it. The choice is made when the
   goals arrive or the window resizes, never while someone works in the list. A search
   that finds only items opens their goal and shows just those.
 - **The ETA popover** (hover or keyboard focus) says who set the ETA and when, and
