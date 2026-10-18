@@ -277,7 +277,7 @@ func adapterQuery(d Domain, domains map[string]Domain, erase bool) string {
 	if d.Table == "aeon_required_capabilities" {
 		// The exact global capability-floor table is deployment metadata. It
 		// has no tenant or person rows and never contributes a review record.
-		where = "false"
+		where = "false AND $1::uuid IS NOT NULL"
 	}
 	data := "'{}'::jsonb"
 	if !erase {
