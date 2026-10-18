@@ -514,6 +514,11 @@ func TestGuard(t *testing.T) {
 	if err := l.Guard([]Named{{Sequence: 13}}); err == nil {
 		t.Fatal("an unrecorded release at the new version's first sequence passed")
 	}
+	// Abandoned attempts neither own names nor constrain a later word-list
+	// version. The same sequence can then be stamped by the next attempt.
+	if err := l.Guard([]Named{{Sequence: 13, Reusable: true}, {Sequence: 40, Name: "Old Attempt", Reusable: true}}); err != nil {
+		t.Fatal("abandoned attempts constrain names", err)
+	}
 }
 
 // A later version never hides an earlier one that started too low: with
