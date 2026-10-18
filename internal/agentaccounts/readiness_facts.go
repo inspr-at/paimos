@@ -344,6 +344,9 @@ func completeReadinessReport(ctx context.Context, tx pgx.Tx, a Account, generati
 	if err != nil {
 		return err
 	}
+	if err := storeQuotaSamples(ctx, tx, aTenant(ctx), a, quotaSamplesFromFacts(in.Facts, local), now); err != nil {
+		return err
+	}
 	// Capture failures belong to this account's local resource, never a shared
 	// balance or another account's local resource that B has pooled with it.
 	for _, resource := range resources {

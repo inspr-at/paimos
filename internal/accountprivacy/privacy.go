@@ -271,10 +271,13 @@ func RedactWithControls(raw json.RawMessage, policy, controls, hostDiagnostics P
 func mask(obj map[string]any) {
 	delete(obj, "host_reason")
 	// Strip detailed collections at their boundary before visiting children.
-	for _, key := range []string{"windows", "readings", "readiness_resources", "facts"} {
+	for _, key := range []string{"windows", "readings", "readiness_resources", "facts", "latest_readings", "hourly_readings"} {
 		if _, ok := obj[key]; ok {
 			obj[key] = []any{}
 		}
+	}
+	if _, ok := obj["latest_readings"]; ok {
+		obj["next_cursor"] = ""
 	}
 	for _, key := range []string{"plan", "quota_fingerprint", "quota_pool_fingerprint"} {
 		if _, ok := obj[key]; ok {

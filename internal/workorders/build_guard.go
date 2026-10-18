@@ -320,12 +320,18 @@ func BuildTicketTx(ctx context.Context, tx pgx.Tx, ticket, order, run *string) (
 
 // The same resolution serves the existence probe and public metadata query.
 // Also retain a legacy row's explicit ticket as a blocker if its bindings differ.
+// Pre-enforcement scouts with delivery bindings remain blockers until stopped.
+// A registered read-only scout does not occupy the slot. An attached
+// observation is stored as that same clean scout, but its attach binding
+// still occupies the slot until the session stops: consent is not parallel work.
 const activeBuildersSQL = `WITH builders AS (
  SELECT s.*,b.node_id AS binding_node,` + buildTicketIDSQL + ` AS build_ticket FROM harness_sessions s
  LEFT JOIN agent_runs r ON r.tenant_id=s.tenant_id AND r.id=s.run_id
  CROSS JOIN LATERAL (SELECT coalesce(r.work_order_id,s.work_order_id,s.ticket_node_id) AS node_id,r.queue_node_id AS queue_ticket,s.ticket_node_id AS direct_ticket) b
  ` + buildTicketJoinsSQL + `
- WHERE s.role='worker' AND s.stopped_at IS NULL AND s.id::text<>$2
+ WHERE s.role='worker' AND (s.work_shape<>'scout' OR s.branch IS NOT NULL OR s.work_order_id IS NOT NULL OR s.run_id IS NOT NULL OR jsonb_array_length(s.commits)>0
+ OR EXISTS(SELECT 1 FROM harness_attach_requests a WHERE a.tenant_id=s.tenant_id AND a.session_id=s.id))
+ AND s.stopped_at IS NULL AND s.id::text<>$2
 ) `
 
 // RequireBuildAdmissionTx is the single builder/queue admission predicate.

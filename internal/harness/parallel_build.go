@@ -42,3 +42,22 @@ func recordBuildContinuation(ctx context.Context, tx pgx.Tx, p tenant.Principal,
 	}
 	return admission.Record(ctx, tx, p, session, "")
 }
+
+// The persisted scout shape is a restriction, never a review capability. Review
+// runs continue to use AEON-1391's independent, dispatcher-created identity.
+// Callers validate under their existing tenant/tree and session write fences.
+func readOnlyDeliveryBinding(shape string, branch, order, run *string, commits []Commit) error {
+	if shape == "scout" && (branch != nil || order != nil || run != nil || len(commits) != 0) {
+		return workorders.Fail(409, "read-only session cannot bind a branch, work order or agent run, or record delivery commits")
+	}
+	return nil
+}
+
+func recordReadOnlyAdmission(ctx context.Context, tx pgx.Tx, p tenant.Principal, s Session) error {
+	if s.WorkShape != "scout" || s.TicketNodeID == nil {
+		return nil
+	}
+	return workorders.Record(ctx, tx, p, *s.TicketNodeID, "harness.read_only_admitted", nil, map[string]any{
+		"session_id": s.ID, "work_shape": s.WorkShape, "started_by_principal_id": p.ID, "authority_granted": false,
+	})
+}

@@ -364,6 +364,8 @@
   "tests": [
     {"kind":"go","package":"cmd/aeon","name":"TestAgentProjectRoleFlags","tags":["delete-candidate"],"tier":"GATED-FULL"}
     ,
+    {"kind":"go","package":"cmd/aeon","name":"TestDSARRejectsDestructiveOrUnscopedCommands","tier":"ESSENTIAL"}
+    ,
     {"kind":"go","package":"cmd/aeon","name":"TestDefaultServerHasNoOutboundNetwork","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"cmd/aeon","name":"TestDemoCommandDispatchAndGuards","tier":"GATED-FULL"}
@@ -857,6 +859,10 @@
     {"kind":"go","package":"internal/agentaccounts","name":"TestGroupScheduleSitsBetweenAccountAndPool","tier":"GATED-FULL"}
     ,
     {"kind":"go","package":"internal/agentaccounts","name":"TestHardLimitWaitPrecedesSchedule","tier":"GATED-FULL"}
+    ,
+    {"kind":"go","package":"internal/agentaccounts","name":"TestIdleQuotaProbeHourlyRoundTrip","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/agentaccounts","name":"TestIdleQuotaRedactionAndReadBounds","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/agentaccounts","name":"TestIntegratedGroupAndLimitDeleteRoutes","tier":"GATED-FULL"}
     ,
@@ -1439,6 +1445,8 @@
     {"kind":"go","package":"internal/agentd","name":"TestClaudeEnvironmentDoesNotInheritDaemonSettings","tier":"GATED-FULL"}
     ,
     {"kind":"go","package":"internal/agentd","name":"TestClaudeIdleCapabilityExactBinary","tier":"GATED-FULL"}
+    ,
+    {"kind":"go","package":"internal/agentd","name":"TestClaudeIdleQualificationRefusesUnknownDigestAndBoundaries","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/agentd","name":"TestClaudeInboxPropagatesPolicy","tier":"GATED-FULL"}
     ,
@@ -6410,6 +6418,18 @@
     ,
     {"kind":"go","package":"internal/deploytarget","name":"TestNormalizeRequiresDestinationAndChange","tier":"GATED-FULL"}
     ,
+    {"kind":"go","package":"internal/dsar","name":"TestExecuteFailureEmitsNothing","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/dsar","name":"TestInventoryAndAdapters","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/dsar","name":"TestInventoryRejectsPersonalMetadata","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/dsar","name":"TestManualKitIsolationAliasesHoldsAndCommands","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/dsar","name":"TestMigratedInventoryGuard","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/dsar","name":"TestParseCommands","tier":"GATED-FULL"}
+    ,
     {"kind":"go","package":"internal/dsar","name":"TestQuarantineInventoryParsesWithWorkflowColumn","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/embedding","name":"TestContentHashAndVector","tags":["delete-candidate"],"tier":"GATED-FULL"}
@@ -6977,6 +6997,10 @@
     {"kind":"go","package":"internal/harness","name":"TestQueuedAgentDiagnosisUsesOnlyItsRunAccountAndFreshPairedHost","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/harness","name":"TestQuickPauseWaitsForUninterruptibleCommand","tier":"GATED-FULL"}
+    ,
+    {"kind":"go","package":"internal/harness","name":"TestReadOnlySessionLifecycleCannotBecomeBuilder","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/harness","name":"TestReadOnlyTicketAdmissionAndReviewerIdentity","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/harness","name":"TestRebindClearsEstimate","tier":"GATED-FULL"}
     ,
@@ -9787,6 +9811,8 @@
     {"kind":"go","package":"internal/releases","name":"TestWorkParentWalkerKeepsScreenLinksBoundToEachLeaf","tier":"GATED-FULL"}
     ,
     {"kind":"go","package":"internal/reportercontract","name":"TestAccountLimitRequestAndResponseSchemas","tier":"GATED-FULL"}
+    ,
+    {"kind":"go","package":"internal/reportercontract","name":"TestAccountQuotaSeriesReadContract","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/reportercontract","name":"TestAccountRetirementResponseSchemas","tier":"ESSENTIAL"}
     ,

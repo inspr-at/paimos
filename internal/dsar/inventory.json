@@ -6,6 +6,20 @@
       "columns": {
         "account_id": "metadata",
         "binding_revision": "metadata",
+        "hour_at": "personal",
+        "samples": "personal",
+        "tenant_id": "metadata"
+      },
+      "locator": {
+        "tenant_column": "tenant_id"
+      },
+      "table": "account_quota_hourly"
+    },
+    {
+      "classification": "personal",
+      "columns": {
+        "account_id": "metadata",
+        "binding_revision": "metadata",
         "id": "metadata",
         "person_id": "personal",
         "read_at": "personal",
@@ -116,6 +130,7 @@
         "boost_person_id": "personal",
         "boost_until": "personal",
         "daily_reset_policy": "personal",
+        "quota_latest": "personal",
         "reset_policy_link_revision": "metadata",
         "reset_policy_person_id": "personal",
         "reset_report": "personal",

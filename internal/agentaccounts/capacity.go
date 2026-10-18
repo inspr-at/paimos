@@ -267,6 +267,15 @@ func ingestLockedReadings(ctx context.Context, tx pgx.Tx, tenantID string, a Acc
 			return err
 		}
 	}
+	var quota []quotaSample
+	for _, v := range readings {
+		if quotaMinutes(v.WindowKind) != 0 && v.Source != "estimate" {
+			quota = append(quota, quotaSample{v.WindowKind, v.Bucket, v.UsedPercent, v.ReadAt, v.ResetsAt, v.Source})
+		}
+	}
+	if err := storeQuotaSamples(ctx, tx, tenantID, a, quota, now); err != nil {
+		return err
+	}
 	if !fullSnapshot {
 		return nil
 	}
