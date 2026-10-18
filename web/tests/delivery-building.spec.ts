@@ -36,6 +36,12 @@ async function settled(page: Page) {
   await expect(page.getByTestId('delivery-summary')).toContainText('Last 7 days vs. the 7 before', { timeout: 15_000 })
   await expect(page.getByTestId('delivery-tickets').locator('[aria-busy="true"]')).toHaveCount(0)
 }
+/** Expert: the sources, Tickets and the numbers below have their answers, so nothing above or below Building it still moves. */
+async function settledExpert(page: Page) {
+  await expect(page.getByTestId('delivery-tiles').getByRole('listitem').first()).toBeVisible({ timeout: 15_000 })
+  await expect(page.locator('main [aria-busy="true"]')).toHaveCount(0, { timeout: 15_000 })
+  await expect(page.locator('.dl-status .sk')).toHaveCount(0)
+}
 const learnBelow = (page: Page) => page.getByTestId('delivery-simple').getByRole('button', { name: 'Learn: How long the PR checks take' })
 // Tick's 1440 check: the Expert "Today" line of Lead time ended in "… · 2 …" with no way to read the rest. It is
 // clipped text like on every other tile: the full text on hover and on keyboard focus, nothing moves, and a click on
@@ -242,7 +248,7 @@ test('Building it at 1440, 1024 and 768: the worst five never cover the app head
   await setup(page, { level: 'expert' })
   await page.goto('/p/AEON/delivery')
   await expect(section(page).getByTestId('delivery-building-head')).toHaveText('0 of 3 on target', { timeout: 15_000 })
-  await settled(page)
+  await settledExpert(page)
   const lead = trigger(page, 'Lead time per item'), panel = page.getByTestId('delivery-worst')
   // The tile's top padding: clipped text and the chart answer the pointer themselves.
   const open = async () => { await lead.click({ position: { x: 24, y: 6 } }); await expect(panel).toBeVisible(); await expect(panel.getByRole('link')).toHaveCount(5) }
