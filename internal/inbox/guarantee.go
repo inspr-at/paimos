@@ -301,8 +301,8 @@ func failMessage(ctx context.Context, tx pgx.Tx, messageID, reason string, respe
 	// failures keep their existing terminal semantics.
 	if reason == ReasonNoListener || reason == ReasonDeadline {
 		var waits bool
-		if err := tx.QueryRow(ctx, `SELECT (`+personSessionChatSQL+`) OR EXISTS(SELECT 1 FROM inbox_compat_messages c
- WHERE c.inbox_message_id=m.id AND c.key_digest='desk/'||c.id::text) FROM inbox_messages m WHERE m.id=$1::uuid`, messageID).Scan(&waits); err != nil || waits {
+		if err := tx.QueryRow(ctx, `SELECT ((`+personSessionChatSQL+`) AND ($2='no_listener' OR m.expires_at IS NULL OR m.expires_at>clock_timestamp())) OR EXISTS(SELECT 1 FROM inbox_compat_messages c
+ WHERE c.inbox_message_id=m.id AND c.key_digest='desk/'||c.id::text) FROM inbox_messages m WHERE m.id=$1::uuid`, messageID, reason).Scan(&waits); err != nil || waits {
 			return false, err
 		}
 	}

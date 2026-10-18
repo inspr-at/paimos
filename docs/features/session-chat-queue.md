@@ -3,7 +3,7 @@
 A person's durable chat to an exact harness session stays queued when no hook
 or listener is running. Missing listeners and elapsed delivery deadlines do
 not turn it into a failed message. Session end and actual handoff failures keep
-their existing failure behavior; attached volatile messages use their own
+their existing failure behavior, including an explicit sender expiry; attached volatile messages use their own
 protocol. Previously failed messages are not resent automatically.
 
 Chat shows “Waiting for the session to pick it up”. After ten minutes without

@@ -97,6 +97,25 @@ func TestSessionChatQueuedPickupAndStall(t *testing.T) {
 			}
 		})
 	}
+	t.Run("explicit sender expiry stays terminal", func(t *testing.T) {
+		w, m, project, _ := messagingWorld(t)
+		session := messageTestSession(t, w, project, w.agent, "Expiring chat")
+		expires := time.Now().Add(time.Hour)
+		msg, err := m.base.send(t.Context(), w.sender, sendInput{Recipient: w.agent.ID, RecipientSessionID: &session, Body: "Expires by request", Key: "explicit-expiry", Expires: &expires})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err := w.db.Admin.Exec(t.Context(), `UPDATE inbox_messages SET expires_at=clock_timestamp()-interval '1 second' WHERE id=$1::uuid`, msg.ID); err != nil {
+			t.Fatal(err)
+		}
+		expireDeadline(t, w, msg.ID)
+		if n := sweepNow(t, w, w.sender.TenantID); n != 1 {
+			t.Fatalf("explicit expiry failed %d messages", n)
+		}
+		if state, reason := receiptState(t, w, msg.ID); state != "failed" || reason != ReasonDeadline {
+			t.Fatalf("explicit expiry receipt=%s %s", state, reason)
+		}
+	})
 	t.Run("concurrent hooks", func(t *testing.T) {
 		w, m, project, _ := messagingWorld(t)
 		session := messageTestSession(t, w, project, w.agent, "Concurrent chat")
