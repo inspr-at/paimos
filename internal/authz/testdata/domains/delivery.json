@@ -2,12 +2,14 @@
   "_license": "SPDX-License-Identifier: AGPL-3.0-only",
   "builtin_agent_exclusions": [
     "delivery.manage",
+    "delivery.rollout.write",
     "delivery.route"
   ],
   "builtin_roles": {
     "admin": [
       "delivery.manage",
       "delivery.read",
+      "delivery.rollout.write",
       "delivery.route"
     ],
     "guest": [
@@ -20,6 +22,7 @@
     "owner": [
       "delivery.manage",
       "delivery.read",
+      "delivery.rollout.write",
       "delivery.route"
     ],
     "viewer": [
@@ -60,6 +63,18 @@
       "key": "delivery.read",
       "owner_workstation_grantable": true,
       "risk": "low"
+    },
+    {
+      "agent_grantable": true,
+      "description": "Report validated rollout timing facts",
+      "grantable_at": [
+        "workspace",
+        "project"
+      ],
+      "group": "Delivery",
+      "key": "delivery.rollout.write",
+      "owner_workstation_grantable": true,
+      "risk": "medium"
     },
     {
       "agent_grantable": true,
@@ -111,7 +126,7 @@
     "POST /api/projects/{projectId}/delivery-reviews/{reviewId}/claim": "delivery_reviews.claim",
     "POST /api/projects/{projectId}/delivery-reviews/{reviewId}/verdict": "delivery_reviews.report",
     "POST /api/projects/{projectId}/delivery-shipping/claim": "delivery_ship.claim",
-    "POST /api/projects/{projectId}/delivery/flow/rollout": "delivery.manage",
+    "POST /api/projects/{projectId}/delivery/flow/rollout": "delivery.manage|delivery.rollout.write",
     "POST /api/projects/{projectId}/delivery/metrics/backfill": "delivery.manage",
     "POST /api/projects/{projectId}/delivery/metrics/check-again": "delivery.manage",
     "POST /api/projects/{projectId}/delivery/metrics/facts": "delivery.manage",
@@ -131,7 +146,8 @@
       "delivery": "delivery status"
     },
     "special": {
-      "delivery.route": "Record and read shadow delivery routes"
+      "delivery.route": "Record and read shadow delivery routes",
+      "delivery.rollout.write": "Report validated rollout timing facts"
     }
   }
 }

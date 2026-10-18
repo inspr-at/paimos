@@ -334,9 +334,9 @@ func (m *Module) capacityHistory(w http.ResponseWriter, r *http.Request) {
 		if !uuidRE.MatchString(id) {
 			return fail(404, "account not found")
 		}
-		account, err := getAccount(r.Context(), tx, id)
+		account, err := loadAccount(r.Context(), tx, id)
 		if err != nil {
-			return fail(404, "account not found")
+			return accountNotFound(err)
 		}
 		if p.Kind == tenant.Agent {
 			if err := requireScope(r.Context(), tx, r, p, "account.probe"); err != nil {
@@ -693,9 +693,9 @@ func (m *Module) capacitySchedule(w http.ResponseWriter, r *http.Request) {
 			}
 			key = strings.ToLower(in.AccountID)
 			var err error
-			targetAccount, err = getAccount(r.Context(), tx, key)
+			targetAccount, err = loadAccount(r.Context(), tx, key)
 			if err != nil {
-				return fail(404, "account not found")
+				return accountNotFound(err)
 			}
 			account = key
 		case "group":

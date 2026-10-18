@@ -494,7 +494,9 @@ func (m *Module) reportRollout(w http.ResponseWriter, r *http.Request) {
 		}
 		// Authorized inside the write, under the tenant fence.
 		if err := requireMetrics(ctx, tx, p, "delivery.manage", project); err != nil {
-			return err
+			if err := requireMetrics(ctx, tx, p, "delivery.rollout.write", project); err != nil {
+				return err
+			}
 		}
 		if err := knownPrincipalsTx(ctx, tx, batch); err != nil {
 			return err

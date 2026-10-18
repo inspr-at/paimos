@@ -20,6 +20,7 @@ const filters = computed(() => props.filters ?? filtersFromQuery(projectSection(
 const wideMedia = `(min-width: ${GLIMPSE_MIN_WIDTH}px)`
 const wideQuery = window.matchMedia(wideMedia)
 const reducedQuery = window.matchMedia('(prefers-reduced-motion: reduce)')
+const visualViewport = window.visualViewport
 const wide = ref(headerGlimpseViewportWide(wideQuery.matches, viewportWidth())), reduced = ref(reducedQuery.matches), idle = ref(false)
 const paint = ref(false), userPaused = ref(false), occluded = ref(false)
 const data = shallowRef<GraphData>({ nodes: [], links: [] })
@@ -159,7 +160,7 @@ function onResize() { followViewport(); scheduleMeasure() }
 // Keep reading until the paint ends, and only clear.
 function samplePaintedViewport() {
   if (!mounted || !paint.value) { paintSample = 0; return }
-  const signal = { mediaMatches: window.matchMedia(wideMedia).matches, layoutWidth: window.innerWidth }
+  const signal = { mediaMatches: window.matchMedia(wideMedia).matches, layoutWidth: viewportWidth() }
   if (headerGlimpsePaintClears(wide.value, signal)) wide.value = false
   if (!mounted || !paint.value) { paintSample = 0; return }
   paintSample = requestAnimationFrame(samplePaintedViewport)
@@ -214,7 +215,12 @@ async function load() {
     applyMotion()
   } catch { /* A missing graph leaves the header as it was. */ }
 }
-watch(paint, value => { emit('active', value); if (value) startPaintSample() })
+watch(paint, value => {
+  emit('active', value)
+  cancelAnimationFrame(paintSample)
+  paintSample = 0
+  if (value) startPaintSample()
+})
 watch([allowed, idle, () => props.projectId, () => props.projectKey, () => JSON.stringify(filtersToQuery(filters.value))], () => { void load() })
 onMounted(() => {
   mounted = true
@@ -222,6 +228,9 @@ onMounted(() => {
   reducedQuery.addEventListener('change', onReduced)
   document.addEventListener('visibilitychange', onVisibility)
   window.addEventListener('resize', onResize)
+  // Software GL can delay animation frames along with the layout viewport's
+  // notifications. This independent delivery checks the same width gate now.
+  visualViewport?.addEventListener('resize', onResize)
   viewportWatch = new ResizeObserver(followViewport)
   viewportWatch.observe(document.documentElement)
   syncWide()
@@ -242,6 +251,7 @@ onBeforeUnmount(() => {
   cancelAnimationFrame(paintSample)
   viewportWatch?.disconnect()
   window.removeEventListener('resize', onResize)
+  visualViewport?.removeEventListener('resize', onResize)
   wideQuery.removeEventListener('change', onWide)
   reducedQuery.removeEventListener('change', onReduced)
   document.removeEventListener('visibilitychange', onVisibility)

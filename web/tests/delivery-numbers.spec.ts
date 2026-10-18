@@ -85,7 +85,8 @@ test('window, level and view switches keep every control still and are the perso
   await flowGuard.check(() => views.getByRole('tab', { name: 'Flow' }).click())
   await expect(page).toHaveURL(/view=flow/)
   await expect(windows).toBeHidden()
-  await expect(page.getByTestId('flow-empty')).toHaveText('No recorded runs yet. Runs appear here once work goes through the PAIMOS work queue.')
+  // AEON-1472: the view switch reaches the same empty state naming all three feeds.
+  await expect(page.getByTestId('flow-empty')).toHaveText('No recorded runs yet. No linked GitHub App workflow runs or derived check suites, PAIMOS harness deliveries or work-queue rounds, or OPS rollout records have been recorded for this project.')
   await flowGuard.check(() => views.getByRole('tab', { name: 'Numbers' }).click())
   await expect(windows).toBeVisible()
   flowGuard.done()

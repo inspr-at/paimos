@@ -9402,7 +9402,11 @@
     ,
     {"kind":"browser","file":"tests/header-glimpse-context.spec.ts","name":"scrolling the entire backdrop out of view pauses it and returning resumes it","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
+    {"kind":"browser","file":"tests/header-glimpse.spec.ts","name":"AEON-1337: a visual viewport resize clears the glimpse before the next animation frame","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
     {"kind":"browser","file":"tests/header-glimpse.spec.ts","name":"AEON-1471: a narrow root clears the glimpse while window and media hints stay wide","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/header-glimpse.spec.ts","name":"AEON-1472: an active glimpse stops after all viewport notifications are dropped","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
     {"kind":"browser","file":"tests/header-glimpse.spec.ts","name":"AEON-1477 a painted glimpse hides below 1280 when resize, media and the document observer stay silent","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
@@ -20207,6 +20211,8 @@
     {"kind":"vitest","file":"tests/shortcuts.unit.test.ts","name":"rejects shared keys in overlapping scopes and permits disjoint row/divider bindings","tier":"ESSENTIAL"}
     ,
     {"kind":"vitest","file":"tests/shortcuts.unit.test.ts","name":"shortcut help preserves approved transition labels with SVG arrows and accessible words","tier":"ESSENTIAL"}
+    ,
+    {"kind":"vitest","file":"tests/signout-stale-lists.unit.test.ts","name":"AEON-1424: a reset drops an in-flight customers or quotes list and the next load sends a new request","tier":"ESSENTIAL"}
     ,
     {"kind":"vitest","file":"tests/start-agent.unit.test.ts","name":"Start Agent leaf selection > queries canonical leaves on every page and excludes parents and unknown shapes from mixed results","tier":"ESSENTIAL"}
     ,

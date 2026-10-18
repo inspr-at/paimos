@@ -441,5 +441,7 @@ func cloneStrings(in []string) []string {
 	if in == nil {
 		return []string{}
 	}
-	return append([]string(nil), in...)
+	out := make([]string, len(in))
+	copy(out, in)
+	return out
 }

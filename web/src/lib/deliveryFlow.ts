@@ -20,7 +20,7 @@ export interface StepFacts {
   id?: string; round?: number; outcome?: StepOutcome | null; waitReason?: WaitReason | null
   /** Who or what a wait is for, already in words (a run tag, a person's role). */
   waitsFor?: string | null
-  source?: 'github_app' | 'paimos' | 'ops_rollout' | 'arion'; norm?: StepNorm | null; model?: string | null
+  source?: 'github_app' | 'check_suite' | 'paimos' | 'ops_rollout' | 'arion'; norm?: StepNorm | null; model?: string | null
   /** Still running: the end is the expected one. */
   open?: boolean
 }

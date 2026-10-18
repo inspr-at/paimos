@@ -130,13 +130,14 @@ export function recordedRuns(answer: { now: string; from?: string; items: ApiIte
         end = Math.max(end, now + 1, expected ?? -Infinity)
       }
       const lane = laneOf(s.actor, s.step_key)
+      const derived = s.source === 'github_app' && s.actor.label === 'Checks (derived from check suite)'
       const waitsFor = s.wait_reason === 'human_gate' ? gate : s.waits_for ? refs.get(s.waits_for) ?? null : null
-      const words = stepWords({ key: s.step_key, kind: s.kind, round: s.round, outcome: s.outcome, waitReason: s.wait_reason, waitsFor, model: s.actor.model, open, person: lane === 'you' })
+      const words = stepWords({ key: s.step_key, kind: s.kind, round: s.round, outcome: s.outcome, waitReason: s.wait_reason, waitsFor, model: s.actor.model, open, person: lane === 'you', derived })
       return {
         start, end, lane, kind: s.kind === 'recovery' ? 'work' : s.kind, ...words, stepKey: s.step_key,
         side: s.side || undefined, incident: s.kind === 'recovery' || recovery.has(s.id) || s.outcome === 'degraded' || undefined,
         after: ended != null && start >= ended - 1e-6 && (s.kind === 'wait' || lane === 'you') || undefined,
-        facts: { id: s.id, round: s.round, outcome: s.outcome, waitReason: s.wait_reason, waitsFor, source: s.source, model: s.actor.model, open, norm: { p50: s.norm.p50_min, p90: s.norm.p90_min, arion: s.norm.arion_min } },
+        facts: { id: s.id, round: derived ? undefined : s.round, outcome: s.outcome, waitReason: s.wait_reason, waitsFor, source: derived ? 'check_suite' : s.source, model: s.actor.model, open, norm: { p50: s.norm.p50_min, p90: s.norm.p90_min, arion: s.norm.arion_min } },
       } satisfies FlowStep
     }).sort((a, b) => a.start - b.start)
     let incident: FlowIncident | undefined
