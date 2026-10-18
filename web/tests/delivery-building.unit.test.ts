@@ -11,6 +11,7 @@ import { buildingText } from '../src/lib/deliveryBuildingText'
 import { simpleNumbersOf } from '../src/lib/deliverySimple'
 import { simpleText } from '../src/lib/deliverySimpleText'
 import { deliveryText } from '../src/lib/deliveryNumbersText'
+import type { DeliveryMetrics } from '../src/lib/deliveryNumbers'
 import { NO_FILTERS } from '../src/lib/statusTiming'
 import { buildingAnswer } from './delivery-building-fixtures'
 import { deliveryMetrics } from './delivery-numbers-fixtures'
@@ -116,7 +117,7 @@ it('AEON-1493: the worst rows keep every round mark, say them in words and link 
 })
 
 it('AEON-1493: the summary card counts the Building it targets and names their gaps', () => {
-  const metrics = deliveryMetrics()
+  const metrics = deliveryMetrics() as unknown as DeliveryMetrics
   const without = simpleNumbersOf(metrics, 7, 'ready', false, 'en').summary
   const view = buildingView(answer(), 7, 'ready', 'en')
   const withBuilding = simpleNumbersOf(metrics, 7, 'ready', false, 'en', view.summary).summary
