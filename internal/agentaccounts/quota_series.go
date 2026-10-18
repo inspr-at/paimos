@@ -184,6 +184,10 @@ func (m *Module) quotaSeries(w http.ResponseWriter, r *http.Request) {
 	ctx, cancel := context.WithTimeout(r.Context(), 5*time.Second)
 	defer cancel()
 	r = r.WithContext(ctx)
+	if len(r.URL.RawQuery) > 1024 {
+		writeErr(w, fail(400, "quota query exceeds bound"))
+		return
+	}
 	id := r.PathValue("accountId")
 	if !uuidRE.MatchString(id) {
 		writeErr(w, fail(404, "account not found"))

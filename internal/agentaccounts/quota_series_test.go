@@ -83,6 +83,17 @@ func TestIdleQuotaProbeHourlyRoundTrip(t *testing.T) {
 			t.Fatalf("inactive account lost its original reading: %+v", v)
 		}
 	}
+	// Sparse responses retain other windows. A same-time agentd observation
+	// cannot displace the harness's higher-authority reading.
+	tie := report(now.Add(5*time.Minute), 15, 26)
+	tie.Readiness.Facts = tie.Readiness.Facts[1:]
+	tie.Readiness.Facts[0].Source = "harness"
+	post(tie, now.Add(10*time.Minute))
+	post(report(now.Add(5*time.Minute), 15, 80), now.Add(11*time.Minute))
+	out = read(f.admin, "", "", now.Add(12*time.Minute))
+	if len(out.LatestReadings) != 2 || out.LatestReadings[0].UsedPercent != 15 || out.LatestReadings[1].UsedPercent != 26 || out.LatestReadings[1].Source != "harness" {
+		t.Fatal("sparse response or source tie regressed latest quota")
+	}
 	post(report(now.Add(time.Hour), 30, 40), now.Add(time.Hour))
 	post(report(now.Add(2*time.Hour), 35, 45), now.Add(2*time.Hour))
 	page := read(f.runner, f.token, "&window_kind=weekly&limit=1", now.Add(2*time.Hour))
@@ -131,7 +142,7 @@ func TestIdleQuotaRedactionAndReadBounds(t *testing.T) {
 	f := readinessWorld(t, "idle-quota-redaction", now)
 	path := "/api/agent-accounts/" + f.account.ID
 	query := "?from=2026-10-18T12:00:00Z&to=2026-10-19T12:00:00Z"
-	for _, q := range []string{"", "?from=bad&to=bad", "?from=2026-10-18T12:01:00Z&to=2026-10-19T12:00:00Z", "?from=2026-10-18T12:00:00Z&to=2026-12-19T12:00:00Z", query + "&limit=0", query + "&limit=169", query + "&limit=bad", query + "&window_kind=monthly", query + "&cursor=2026-10-17T12:00:00Z"} {
+	for _, q := range []string{"", "?from=bad&to=bad", "?from=2026-10-18T12:01:00Z&to=2026-10-19T12:00:00Z", "?from=2026-10-18T12:00:00Z&to=2026-12-19T12:00:00Z", query + "&limit=0", query + "&limit=169", query + "&limit=bad", query + "&window_kind=monthly", query + "&cursor=2026-10-17T12:00:00Z", query + "&cursor=" + strings.Repeat("x", 1024)} {
 		callStatus(t, f.mod, &f.admin, "", "GET", path+"/quota-series"+q, "", 400, nil)
 	}
 	callStatus(t, f.mod, nil, "", "GET", path+"/quota-series"+query, "", 401, nil)
