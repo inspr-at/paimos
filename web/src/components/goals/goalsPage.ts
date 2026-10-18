@@ -22,7 +22,8 @@ const SEARCH_SETTLE_MS = 250
 // A series is read again once the goal's progress changed, or after this long.
 const SERIES_FRESH_MS = 5 * 60_000
 const SERIES_PARALLEL = 3
-// Changes arrive in bursts (one write appends several events): one read per burst.
+// Changes arrive in bursts (one write appends several events): at most one read per
+// window, and never more than one in flight, so a busy stream cannot starve the list.
 const LIVE_SETTLE_MS = 400
 
 type GoalsPrefs = { range?: string; hideDone?: boolean; noteFolded?: boolean }
@@ -113,12 +114,19 @@ export function useGoalsPage(options: { term: Ref<string>; active: () => boolean
   const live = ref<GoalsLiveState>('off')
   let stream: { close(): void } | undefined
   let liveSettle: ReturnType<typeof setTimeout> | undefined
-  function stopLive() { clearTimeout(liveSettle); stream?.close(); stream = undefined; live.value = 'off' }
+  let liveReading = false, liveAgain = false
+  async function liveRead() {
+    if (liveReading) { liveAgain = true; return }
+    liveReading = true
+    try { await read() } finally { liveReading = false }
+    if (liveAgain && stream) { liveAgain = false; void liveRead() }
+  }
+  function stopLive() { clearTimeout(liveSettle); liveSettle = undefined; liveAgain = false; stream?.close(); stream = undefined; live.value = 'off' }
   function startLive() {
     stopLive()
     stream = openGoalsLive({
       state: value => { live.value = value },
-      changed: () => { clearTimeout(liveSettle); liveSettle = setTimeout(() => { void read() }, LIVE_SETTLE_MS) },
+      changed: () => { if (liveSettle === undefined) liveSettle = setTimeout(() => { liveSettle = undefined; void liveRead() }, LIVE_SETTLE_MS) },
     })
   }
   // The stream belongs to the person on screen: another person starts a new one.

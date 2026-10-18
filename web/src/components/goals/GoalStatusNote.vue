@@ -41,9 +41,10 @@ async function fit() {
   const limit = LINES * LINE + 1, height = () => body.value?.offsetHeight ?? 0
   if (height() <= limit) return
   more.value = true
-  const words = text.split(' ')
-  const cut = (n: number) => `${words.slice(0, n).join(' ').replace(/[\s,;:.–—-]+$/, '')}…`
-  let lo = 1, hi = words.length - 1
+  // Words, or characters for a note without spaces (a long link, say).
+  const spaced = text.includes(' '), parts = spaced ? text.split(' ') : Array.from(text)
+  const cut = (n: number) => `${parts.slice(0, n).join(spaced ? ' ' : '').replace(/[\s,;:.–—-]+$/, '')}…`
+  let lo = 1, hi = parts.length - 1
   while (lo < hi) {
     const mid = Math.ceil((lo + hi) / 2)
     shown.value = cut(mid)

@@ -201,6 +201,31 @@ describe('the page reads again when goals change', () => {
     await nextTick()
     expect(stream.closed).toBe(true)
   })
+
+  it('a busy stream never starves the list: changes during a read cause one more read after it, not an abort', async () => {
+    useSession().identity = person('person-a')
+    const scope = effectScope()
+    scopes.push(scope)
+    scope.run(() => useGoalsPage({ term: ref(''), active: () => true }))
+    await vi.advanceTimersByTimeAsync(0)
+    const stream = streams.at(-1)!
+    stream.emit('stream.ready', { after: 3, resumed: false })
+    let finish!: (value: GoalList) => void
+    const signals: (AbortSignal | undefined)[] = []
+    mocks.listGoals.mockImplementation((_query: unknown, signal?: AbortSignal) => { signals.push(signal); return new Promise<GoalList>(resolve => { finish = resolve }) })
+    stream.emit('goal.items_changed', {}, '4')
+    await vi.advanceTimersByTimeAsync(400)
+    expect(mocks.listGoals).toHaveBeenCalledTimes(2)
+    for (let id = 5; id < 9; id++) { stream.emit('goal.eta_changed', {}, String(id)); await vi.advanceTimersByTimeAsync(400) }
+    expect(mocks.listGoals).toHaveBeenCalledTimes(2) // still the one read in flight
+    expect(signals[0]?.aborted).toBe(false)
+    finish(listed([goal('g1')]))
+    await vi.advanceTimersByTimeAsync(0)
+    expect(mocks.listGoals).toHaveBeenCalledTimes(3) // exactly one follow-up for everything that arrived meanwhile
+    finish(listed([goal('g1')]))
+    await vi.advanceTimersByTimeAsync(1_000)
+    expect(mocks.listGoals).toHaveBeenCalledTimes(3)
+  })
 })
 
 describe('what the rows and the footer show', () => {

@@ -18320,6 +18320,8 @@
     ,
     {"kind":"vitest","file":"tests/goals-gaps.unit.test.ts","name":"the live line > says Live once ready, re-reads on a goal change, says Reconnecting on a drop and re-reads after a gap only","tier":"ESSENTIAL"}
     ,
+    {"kind":"vitest","file":"tests/goals-gaps.unit.test.ts","name":"the page reads again when goals change > a busy stream never starves the list: changes during a read cause one more read after it, not an abort","tier":"ESSENTIAL"}
+    ,
     {"kind":"vitest","file":"tests/goals-gaps.unit.test.ts","name":"the page reads again when goals change > a goal event reads the list at once (one read per burst), and a drop shows Reconnecting","tier":"ESSENTIAL"}
     ,
     {"kind":"vitest","file":"tests/goals-gaps.unit.test.ts","name":"the words for hours left, today and notes > \"today\" is the viewer’s day: a merge at 23:10 UTC is today in Vienna, yesterday in UTC","tier":"ESSENTIAL"}
