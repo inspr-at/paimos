@@ -858,6 +858,10 @@
     ,
     {"kind":"go","package":"internal/agentaccounts","name":"TestHardLimitWaitPrecedesSchedule","tier":"GATED-FULL"}
     ,
+    {"kind":"go","package":"internal/agentaccounts","name":"TestIdleQuotaProbeHourlyRoundTrip","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/agentaccounts","name":"TestIdleQuotaRedactionAndReadBounds","tier":"ESSENTIAL"}
+    ,
     {"kind":"go","package":"internal/agentaccounts","name":"TestIntegratedGroupAndLimitDeleteRoutes","tier":"GATED-FULL"}
     ,
     {"kind":"go","package":"internal/agentaccounts","name":"TestKeepForYouScopesAwayAndPreview","tier":"GATED-FULL"}
@@ -1439,6 +1443,8 @@
     {"kind":"go","package":"internal/agentd","name":"TestClaudeEnvironmentDoesNotInheritDaemonSettings","tier":"GATED-FULL"}
     ,
     {"kind":"go","package":"internal/agentd","name":"TestClaudeIdleCapabilityExactBinary","tier":"GATED-FULL"}
+    ,
+    {"kind":"go","package":"internal/agentd","name":"TestClaudeIdleQualificationRefusesUnknownDigestAndBoundaries","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/agentd","name":"TestClaudeInboxPropagatesPolicy","tier":"GATED-FULL"}
     ,
@@ -9773,6 +9779,8 @@
     {"kind":"go","package":"internal/releases","name":"TestWorkParentWalkerKeepsScreenLinksBoundToEachLeaf","tier":"GATED-FULL"}
     ,
     {"kind":"go","package":"internal/reportercontract","name":"TestAccountLimitRequestAndResponseSchemas","tier":"GATED-FULL"}
+    ,
+    {"kind":"go","package":"internal/reportercontract","name":"TestAccountQuotaSeriesReadContract","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/reportercontract","name":"TestAccountRetirementResponseSchemas","tier":"ESSENTIAL"}
     ,
