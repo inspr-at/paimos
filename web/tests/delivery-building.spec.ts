@@ -227,7 +227,12 @@ async function watchHeader(page: Page) {
     requestAnimationFrame(frame)
   })
 }
-const stopWatch = (page: Page) => page.evaluate(() => { const shot = (window as unknown as { shot: Shot & { on: boolean } }).shot; shot.on = false; return shot as Shot })
+// Two more frames first, so the placed panel is measured at least once before the watch ends.
+const stopWatch = (page: Page) => page.evaluate(() => new Promise<Shot>(resolve => requestAnimationFrame(() => requestAnimationFrame(() => {
+  const shot = (window as unknown as { shot: Shot & { on: boolean } }).shot
+  shot.on = false
+  resolve({ hits: shot.hits, frames: shot.frames, scrolls: shot.scrolls })
+}))))
 /** Scrolls the page so the tile's top sits at `top` in the viewport, and proves it got there. */
 async function placeTile(page: Page, tile: Locator, top: number) {
   await tile.evaluate((el, at) => { const main = document.querySelector('main')!; main.scrollTop += el.getBoundingClientRect().top - at }, top)
