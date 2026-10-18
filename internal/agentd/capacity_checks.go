@@ -35,6 +35,7 @@ type CapacityResource struct {
 	BindingRevision int64  `json:"binding_revision"`
 }
 type CapacityCheckAccount struct {
+	UsageProbeEnabled  bool                  `json:"usage_probe_enabled"`
 	ID                 string                `json:"id"`
 	AccountKey         string                `json:"account_key"`
 	Harness            string                `json:"harness"`
@@ -167,6 +168,7 @@ func (r *Remote) capacityCheckJSON(ctx context.Context, method, path string, bod
 // Retry state and every pending completion survive restarts. No vendor
 // payload, credential, owner identity or execution permit is stored here.
 type capacityCheckState struct {
+	UsageNextAttempt   time.Time                `json:"usage_next_attempt,omitempty"`
 	Revision           int64                    `json:"binding_revision"`
 	Failures           int                      `json:"failures"`
 	NextAttempt        time.Time                `json:"next_attempt_at"`
@@ -301,6 +303,7 @@ func (s *Supervisor) captureCapacityChecks(ctx context.Context, now time.Time) {
 	locals := append([]EnrolledAccount(nil), s.accounts...)
 	s.mu.Unlock()
 	sort.Slice(locals, func(i, j int) bool { return locals[i].ID < locals[j].ID })
+	s.captureUsageProbes(ctx, now, byID, locals)
 	for _, local := range locals {
 		if ctx.Err() != nil {
 			return
@@ -355,7 +358,7 @@ func (s *Supervisor) captureCapacityCheck(ctx context.Context, now time.Time, lo
 	s.mu.Lock()
 	saved, known := s.capacityChecks[local.ID]
 	if !known || saved.Revision != account.LinkRevision {
-		saved = capacityCheckState{Revision: account.LinkRevision}
+		saved = capacityCheckState{Revision: account.LinkRevision, UsageNextAttempt: saved.UsageNextAttempt}
 	}
 	manual := checkRequestCurrent(account.PendingCheck, account, s.generation, now) && saved.HandledCheck != account.PendingCheck.ID
 	refresh := s.capacityCheckRefresh[local.ID]

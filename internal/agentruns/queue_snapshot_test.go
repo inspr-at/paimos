@@ -3,16 +3,19 @@ package agentruns_test
 
 import (
 	"context"
+	"errors"
 	"github.com/inspr-at/paimos/internal/agentpairing"
 	"github.com/inspr-at/paimos/internal/agentruns"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
 
+	"github.com/inspr-at/paimos/internal/db"
 	"github.com/inspr-at/paimos/internal/dbtest"
 	"github.com/inspr-at/paimos/internal/nodes"
 	"github.com/inspr-at/paimos/internal/tenant"
@@ -135,6 +138,12 @@ func TestParentQueueSnapshotDuplicatesEligibilityAndCancellation(t *testing.T) {
 }
 func TestParentQueueSnapshotBounds(t *testing.T) {
 	f := setup(t)
+	// This test proves membership/traversal bounds, not host throughput. Keep
+	// the five-second budget on a controlled clock; rollback on expiry is
+	// exercised at a partial-write barrier by the deadline test below.
+	clock := &snapshotClock{}
+	f.mux = http.NewServeMux()
+	agentruns.NewWithQueueClock(f.d.App, clock.withTimeout).Mount(f.mux)
 	nodes.New(f.d.App, nil).Mount(f.mux)
 	parent := f.apiQueueTicket(t, nil)
 	// Retain all 101 real leaves in the fixture; a traversal limit must not be
@@ -150,6 +159,33 @@ func TestParentQueueSnapshotBounds(t *testing.T) {
 	if !out.Partial || !out.Truncated || f.queuePage(t).Count != 100 {
 		t.Fatalf("bounded apply %+v", out)
 	}
+	// R18: reading a bounded receipt must not repeat ticket and permission
+	// queries for every leaf. Count database operations, never elapsed time.
+	queries := &snapshotQueryCount{}
+	cfg := f.d.App.Config()
+	cfg.ConnConfig.Tracer = queries
+	pool, err := pgxpool.NewWithConfig(t.Context(), cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer pool.Close()
+	f.mux = http.NewServeMux()
+	agentruns.NewWithQueueClock(pool, clock.withTimeout).Mount(f.mux)
+	var read parentSnapshot
+	f.call(t, f.person, "GET", "/api/queue-snapshots/"+s.ID, nil, 200, &read)
+	if len(read.Items) != 100 || read.State != "applied" || !read.Truncated || !read.Partial {
+		t.Fatalf("bounded receipt %+v", read)
+	}
+	for _, item := range read.Items {
+		if item.Outcome != "queued" || item.RunID == "" {
+			t.Fatalf("receipt lost queued identity: %+v", item)
+		}
+	}
+	n := queries.total.Load()
+	t.Logf("snapshot receipt query count: %d", n)
+	if n > 24 {
+		t.Fatalf("bounded receipt needed %d queries for one project's 100 leaves; want at most 24", n)
+	}
 	// A timeout before transaction entry must not create any snapshot or queue
 	// write. This is cancellation evidence, with no elapsed-time assertion.
 	r := httprequestCancelled(f.person, "/api/queue-snapshots/"+s.ID+"/apply")
@@ -157,6 +193,68 @@ func TestParentQueueSnapshotBounds(t *testing.T) {
 	if w.Code == 200 {
 		t.Fatal("cancelled request reported success")
 	}
+}
+
+type snapshotQueryCount struct{ total atomic.Int64 }
+
+func (q *snapshotQueryCount) TraceQueryStart(ctx context.Context, _ *pgx.Conn, _ pgx.TraceQueryStartData) context.Context {
+	q.total.Add(1)
+	return ctx
+}
+func (*snapshotQueryCount) TraceQueryEnd(context.Context, *pgx.Conn, pgx.TraceQueryEndData) {}
+
+// A manual timer source keeps server deadlines independent of runner load.
+// Parent/client cancellation still propagates through context.WithCancel.
+type snapshotClock struct {
+	sync.Mutex
+	now    time.Duration
+	timers map[*snapshotDeadline]snapshotTimer
+}
+type snapshotTimer struct {
+	at     time.Duration
+	cancel context.CancelCauseFunc
+}
+type snapshotDeadline struct {
+	context.Context
+}
+
+func (d *snapshotDeadline) Err() error {
+	if errors.Is(context.Cause(d.Context), context.DeadlineExceeded) {
+		return context.DeadlineExceeded
+	}
+	return d.Context.Err()
+}
+func (c *snapshotClock) withTimeout(parent context.Context, duration time.Duration) (context.Context, context.CancelFunc) {
+	ctx, cancel := context.WithCancelCause(parent)
+	d := &snapshotDeadline{Context: ctx}
+	c.Lock()
+	if c.timers == nil {
+		c.timers = make(map[*snapshotDeadline]snapshotTimer)
+	}
+	c.timers[d] = snapshotTimer{at: c.now + duration, cancel: cancel}
+	c.Unlock()
+	return d, func() {
+		c.Lock()
+		delete(c.timers, d)
+		c.Unlock()
+		cancel(context.Canceled)
+	}
+}
+func (c *snapshotClock) advance(duration time.Duration) int {
+	c.Lock()
+	c.now += duration
+	timers := make(map[*snapshotDeadline]snapshotTimer)
+	for d, timer := range c.timers {
+		if timer.at <= c.now {
+			timers[d] = timer
+			delete(c.timers, d)
+		}
+	}
+	c.Unlock()
+	for _, timer := range timers {
+		timer.cancel(context.DeadlineExceeded)
+	}
+	return len(timers)
 }
 func TestParentQueueSnapshotOwnerPermissionRevocationAndVisibility(t *testing.T) {
 	f := setup(t)
@@ -267,7 +365,7 @@ type snapshotFencePause struct {
 }
 
 func (p *snapshotFencePause) TraceQueryStart(ctx context.Context, _ *pgx.Conn, q pgx.TraceQueryStartData) context.Context {
-	if strings.HasPrefix(q.SQL, "SELECT id FROM tenants WHERE id=current_setting('aeon.tenant_id')") && p.first.CompareAndSwap(false, true) {
+	if q.SQL == db.TenantFenceSQL && p.first.CompareAndSwap(false, true) {
 		close(p.entered)
 		select {
 		case <-p.resume:
@@ -311,6 +409,8 @@ func TestParentQueueSnapshotRevocationWhileApplyWaits(t *testing.T) {
 	}()
 	select {
 	case <-pause.entered:
+	case w := <-done:
+		t.Fatalf("apply returned before the access fence: %d %s", w.Code, w.Body.String())
 	case <-ctx.Done():
 		t.Fatal("apply did not reach access fence")
 	}
@@ -347,6 +447,7 @@ type snapshotWritePause struct {
 	first   atomic.Bool
 	written chan struct{}
 	resume  chan struct{}
+	ctx     context.Context
 }
 type snapshotWritePauseKey struct{}
 
@@ -358,6 +459,7 @@ func (p *snapshotWritePause) TraceQueryStart(ctx context.Context, _ *pgx.Conn, q
 }
 func (p *snapshotWritePause) TraceQueryEnd(ctx context.Context, _ *pgx.Conn, q pgx.TraceQueryEndData) {
 	if ctx.Value(snapshotWritePauseKey{}) == true && q.Err == nil {
+		p.ctx = ctx
 		close(p.written)
 		select {
 		case <-p.resume:
@@ -366,6 +468,13 @@ func (p *snapshotWritePause) TraceQueryEnd(ctx context.Context, _ *pgx.Conn, q p
 	}
 }
 func TestParentQueueSnapshotCancelledWriteRollsBack(t *testing.T) {
+	parentQueueSnapshotInterruptedWrite(t, false)
+}
+func TestParentQueueSnapshotDeadlineWriteRollsBack(t *testing.T) {
+	parentQueueSnapshotInterruptedWrite(t, true)
+}
+func parentQueueSnapshotInterruptedWrite(t *testing.T, deadline bool) {
+	t.Helper()
 	f := setup(t)
 	nodes.New(f.d.App, nil).Mount(f.mux)
 	parent := f.apiQueueTicket(t, nil)
@@ -380,7 +489,8 @@ func TestParentQueueSnapshotCancelledWriteRollsBack(t *testing.T) {
 	}
 	defer pool.Close()
 	mux := http.NewServeMux()
-	agentruns.New(pool).Mount(mux)
+	clock := &snapshotClock{}
+	agentruns.NewWithQueueClock(pool, clock.withTimeout).Mount(mux)
 	guard, stop := context.WithTimeout(t.Context(), 8*time.Second)
 	defer stop()
 	ctx, cancel := context.WithCancel(guard)
@@ -400,7 +510,27 @@ func TestParentQueueSnapshotCancelledWriteRollsBack(t *testing.T) {
 	case <-guard.Done():
 		t.Fatal("apply did not prepare first leaf write")
 	}
-	cancel()
+	if deadline {
+		if n := clock.advance(5*time.Second - time.Nanosecond); n != 0 {
+			t.Fatalf("snapshot expired before its five-second budget: %d timers", n)
+		}
+		select {
+		case <-done:
+			t.Fatal("partial write returned before deadline expiry or barrier release")
+		default:
+		}
+		if n := clock.advance(time.Nanosecond); n != 1 {
+			t.Fatalf("want exactly the five-second snapshot deadline to expire, got %d timers", n)
+		}
+		if !errors.Is(pause.ctx.Err(), context.DeadlineExceeded) || !errors.Is(context.Cause(pause.ctx), context.DeadlineExceeded) {
+			t.Fatalf("partial write cancelled for the wrong reason: err=%v cause=%v", pause.ctx.Err(), context.Cause(pause.ctx))
+		}
+		if ctx.Err() != nil {
+			t.Fatal("server deadline cancelled the caller's context")
+		}
+	} else {
+		cancel()
+	}
 	close(pause.resume)
 	select {
 	case w := <-done:
@@ -545,6 +675,12 @@ func (f *fixture) continueParent(t *testing.T, parent string, previous parentSna
 
 func TestParentQueueSnapshotLeafContinuation(t *testing.T) {
 	f := setup(t)
+	// Risk: a full page must preserve membership across continuation and replay.
+	// Runner load must not consume the server's five-second budget while this
+	// behaviour is asserted; the deadline test expires it at a write barrier.
+	clock := &snapshotClock{}
+	f.mux = http.NewServeMux()
+	agentruns.NewWithQueueClock(f.d.App, clock.withTimeout).Mount(f.mux)
 	nodes.New(f.d.App, nil).Mount(f.mux)
 	parent := f.apiQueueTicket(t, nil)
 	leaves := make(map[string]bool)
@@ -555,7 +691,15 @@ func TestParentQueueSnapshotLeafContinuation(t *testing.T) {
 	if len(first.Items) != 100 || !first.Truncated || !first.ContinuationAvailable {
 		t.Fatalf("first page: %+v", first)
 	}
-	f.applyParent(t, first)
+	firstApplied := f.applyParent(t, first)
+	if firstApplied.State != "applied" || len(firstApplied.Items) != 100 || !firstApplied.Truncated || !firstApplied.Partial || f.queuePage(t).Count != 100 {
+		t.Fatalf("first apply: %+v", firstApplied)
+	}
+	for _, item := range firstApplied.Items {
+		if item.Outcome != "queued" || item.RunID == "" || !leaves[item.NodeID] {
+			t.Fatalf("first page lost captured membership: %+v", item)
+		}
+	}
 	second := f.continueParent(t, parent, first)
 	if len(second.Items) != 1 || second.Truncated || second.Partial || second.ContinuationAvailable {
 		t.Fatalf("remaining page: %+v", second)
@@ -566,16 +710,34 @@ func TestParentQueueSnapshotLeafContinuation(t *testing.T) {
 	if !leaves[second.Items[0].NodeID] {
 		t.Fatal("continuation repeated a visited leaf")
 	}
-	// Work arriving after this page was captured stays outside its membership.
+	// Work arriving after this page was captured stays outside its membership,
+	// although it is appended inside the page's traversal range.
 	arrival := f.apiQueueTicket(t, &parent)
 	out := f.applyParent(t, second)
-	if snapshotOutcomes(out)[second.Items[0].NodeID] != "queued" || snapshotOutcomes(out)[arrival] != "" || f.queuePage(t).Count != 101 {
+	if out.State != "applied" || out.Partial || out.Truncated || snapshotOutcomes(out)[second.Items[0].NodeID] != "queued" || snapshotOutcomes(out)[arrival] != "" || f.queuePage(t).Count != 101 {
 		t.Fatalf("continued apply: %+v", out)
 	}
+	// A replay is a fresh capture from the same server-held cursor: it never
+	// revisits the first page, replays the remaining leaf onto its existing run
+	// and admits only the work appended beyond the cursor since.
 	replay := f.continueParent(t, parent, first)
-	if snapshotOutcomes(f.applyParent(t, replay))[second.Items[0].NodeID] != "already_queued" {
-		t.Fatal("replayed continuation lost identical membership")
+	if len(replay.Items) != 2 || snapshotOutcomes(replay)[second.Items[0].NodeID] != "pending" || snapshotOutcomes(replay)[arrival] != "pending" {
+		t.Fatalf("replayed continuation membership: %+v", replay)
 	}
+	replayed := f.applyParent(t, replay)
+	run := snapshotRun(out, second.Items[0].NodeID)
+	if run == "" || snapshotOutcomes(replayed)[second.Items[0].NodeID] != "already_queued" || snapshotRun(replayed, second.Items[0].NodeID) != run || snapshotOutcomes(replayed)[arrival] != "queued" || f.queuePage(t).Count != 102 {
+		t.Fatalf("replayed continuation lost identical membership: %+v", replayed)
+	}
+}
+
+func snapshotRun(s parentSnapshot, node string) string {
+	for _, item := range s.Items {
+		if item.NodeID == node {
+			return item.RunID
+		}
+	}
+	return ""
 }
 
 func TestParentQueueSnapshotNodeContinuation(t *testing.T) {

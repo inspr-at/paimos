@@ -5,6 +5,28 @@
 // /api/runs, /api/runs/* and /api/work-orders/{workOrderId}/runs. Mount alongside
 // workorders.New(pool) behind auth.Middleware; only the coordinator edits cmd.
 //
+// AEON-735 extends lead-routed runs with worker_assignment in the existing
+// trace. Routing freezes the project lead generation, ticket updated_at, order
+// revision and a bounded content digest. Claim requires an exact handoff pickup
+// with an opaque host-local worktree digest, and commits launch_unknown before
+// a child may start, after all pickup and reservation checks pass. Committed
+// obsolete-route cleanup never accepts a writer. The checkout digest binds
+// host and physical path independently of the daemon. A shared durable local
+// checkout fence survives daemon loss and clears only on clean, confirmed
+// shutdown. The daemon persists this pickup before its network claim
+// and reuses its existing launch journal/outbox on response loss. A started
+// report records launch; finished needs not_attempted, exited or unconfirmed
+// local process evidence. Unconfirmed ownership never releases the writer or
+// worktree; a later same-daemon exited report can reconcile ownership_lost.
+// Live harness sessions also block replacement until their existing exit fence
+// proves stopped. Lead succession retains the original assignment identity.
+// Direct run creation and legacy vendor retry cannot bypass a configured
+// project's queue. Production admission stays absent pending AEON-603 proof.
+// GET /runs/{id}/handoff and `lead handoff <run-UUID>` expose only the redacted
+// assignment contract to current project members with run.read. `queue next`
+// accepts explicit lead session/generation and private lease file flags, using
+// headers and redirect refusal; no execution grant is minted by these flags.
+//
 // B7 history: GET /api/runs accepts session, agent and work_order UUID filters
 // (intersection), limit 1..200 and an opaque cursor. It returns items and
 // next_cursor, newest first by (created_at,id). Cursors bind tenant, principal
@@ -75,9 +97,12 @@
 // Account integration: pass the account module's UsageRecorder to New for
 // production allowance settlement. The callback receives updated cumulative
 // totals and the accepted report in the same db.InTenant transaction, once per
-// new sequence. It must append events for its own changed projections and must
+// new sequence. It contributes snapshots to the caller-owned event batch and must
 // not nest transactions. It can release reservations on terminal transitions.
 // Nil performs no allowance settlement: the account worker owns its projections,
 // while work-order budget accounting is always enforced here. Lock order is
-// work_order, run, account, then windows/reservations ordered by window UUID.
+// tenant, tree, pairing, target, work_order, run, account, then windows/reservations
+// ordered by window UUID, with events last. Review-bearing reports use independent
+// authorized catalog preparation before this transaction; identical replay skips
+// setup and repeats current authority checks.
 package agentruns

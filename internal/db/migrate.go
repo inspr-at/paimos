@@ -55,11 +55,20 @@ func migrateWithHooks(ctx context.Context, pool *pgxpool.Pool, before, beforePha
 	}
 	defer conn.Release()
 
+	restore, err := migrationTimeouts(ctx, conn, MigrationStatementTimeout)
+	if err != nil {
+		return fmt.Errorf("migration budgets: %w", err)
+	}
+	defer restore()
 	if _, err := conn.Exec(ctx, `SELECT pg_advisory_lock($1)`, migrationLock); err != nil {
 		return fmt.Errorf("migration lock: %w", err)
 	}
 	defer func() {
-		_, _ = conn.Exec(context.Background(), `SELECT pg_advisory_unlock($1)`, migrationLock)
+		cleanup, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		if _, err := conn.Exec(cleanup, `SELECT pg_advisory_unlock($1)`, migrationLock); err != nil {
+			_ = conn.Conn().Close(cleanup)
+		}
 	}()
 
 	// pgvector is created by the deployment as superuser. Migrations only
@@ -259,9 +268,44 @@ func applyFile(ctx context.Context, conn *pgxpool.Conn, name string, before func
 	}
 	defer func() { _ = tx.Rollback(ctx) }()
 
+	// Replaying the released attention migration must retain the later Goals
+	// event policy. Capture the current definition under the DDL fence and
+	// restore it in this transaction, without replaying already-recorded files.
+	// Future policy extensions are preserved as well as the Goals predicates.
+	var eventPolicy string
+	if name == "1241_autopilot_attention_events.sql" {
+		var goalsApplied bool
+		if err := tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM schema_migrations WHERE version='1361_goals.sql')`).Scan(&goalsApplied); err != nil {
+			return fmt.Errorf("check later event policy: %w", err)
+		}
+		if goalsApplied {
+			if _, err := tx.Exec(ctx, `LOCK TABLE events IN SHARE ROW EXCLUSIVE MODE`); err != nil {
+				return fmt.Errorf("fence later event policy: %w", err)
+			}
+			if err := tx.QueryRow(ctx, `SELECT pg_get_expr(polqual,polrelid) FROM pg_policy WHERE polrelid='events'::regclass AND polname='events_project_visibility'`).Scan(&eventPolicy); err != nil {
+				return fmt.Errorf("capture later event policy: %w", err)
+			}
+			if eventPolicy == "" || len(eventPolicy) > 64<<10 {
+				return fmt.Errorf("later event policy exceeds definition bounds")
+			}
+		}
+	}
 	for _, stmt := range stmts {
 		if _, err := tx.Exec(ctx, stmt); err != nil {
 			return fmt.Errorf("migrate %s: %w", name, err)
+		}
+	}
+	if eventPolicy != "" {
+		// pg_get_expr is trusted server-authored SQL, never request input.
+		if _, err := tx.Exec(ctx, `ALTER POLICY events_project_visibility ON events USING (`+eventPolicy+`)`); err != nil {
+			return fmt.Errorf("restore later event policy: %w", err)
+		}
+	}
+	if name == "1292_agent_key_full_access.sql" {
+		// FORCE RLS applies to migration owners too. Repeat the additive
+		// backfill under each tenant, atomically with the column expansion.
+		if err := backfillFullAccessKeys(ctx, tx, stmts[len(stmts)-1]); err != nil {
+			return fmt.Errorf("backfill %s: %w", name, err)
 		}
 	}
 	if name == "1063_work_classification_model_identity.sql" {
@@ -284,6 +328,16 @@ func applyFile(ctx context.Context, conn *pgxpool.Conn, name string, before func
 			return fmt.Errorf("backfill %s: %w", name, err)
 		}
 	}
+	if name == "1296_account_model_successors.sql" {
+		if err := backfillAccountModelSuccessors(ctx, tx); err != nil {
+			return fmt.Errorf("backfill %s: %w", name, err)
+		}
+	}
+	if name == "1309_account_use_matrix.sql" {
+		if err := backfillAccountUse(ctx, tx); err != nil {
+			return fmt.Errorf("backfill %s: %w", name, err)
+		}
+	}
 	if name == "1215_one_work_kind.sql" {
 		if err := migrateWorkNodes(ctx, tx); err != nil {
 			return fmt.Errorf("reconcile %s: %w", name, err)
@@ -296,6 +350,34 @@ func applyFile(ctx context.Context, conn *pgxpool.Conn, name string, before func
 		return fmt.Errorf("commit %s: %w", name, err)
 	}
 	return nil
+}
+
+func backfillFullAccessKeys(ctx context.Context, tx pgx.Tx, statement string) error {
+	rows, err := tx.Query(ctx, `SELECT id::text FROM tenants ORDER BY id`)
+	if err != nil {
+		return err
+	}
+	ids, err := pgx.CollectRows(rows, pgx.RowTo[string])
+	if err != nil {
+		return err
+	}
+	var prior string
+	if err := tx.QueryRow(ctx, `SELECT coalesce(current_setting('aeon.tenant_id',true),'')`).Scan(&prior); err != nil {
+		return err
+	}
+	for _, id := range ids {
+		if _, err := tx.Exec(ctx, `SELECT set_config('aeon.tenant_id',$1,true)`, id); err != nil {
+			return err
+		}
+		if _, err := tx.Exec(ctx, `SELECT id FROM tenants WHERE id=$1::uuid FOR NO KEY UPDATE`, id); err != nil {
+			return err
+		}
+		if _, err := tx.Exec(ctx, statement); err != nil {
+			return err
+		}
+	}
+	_, err = tx.Exec(ctx, `SELECT set_config('aeon.tenant_id',$1,true)`, prior)
+	return err
 }
 
 // Existing accounts need canonical resource IDs before a new daemon probes.
@@ -528,6 +610,44 @@ func backfillModelProfileDisplay(ctx context.Context, tx pgx.Tx) error {
 	return nil
 }
 
+// Successor policy expands effective grants, retaining immutable paired pins
+// for old-release rollback. Fence all tenants before appending any audit event
+// so no account/tenant lock follows an event counter in this transaction.
+func backfillAccountModelSuccessors(ctx context.Context, tx pgx.Tx) error {
+	rows, err := tx.Query(ctx, `SELECT id::text FROM tenants ORDER BY id FOR NO KEY UPDATE`)
+	if err != nil {
+		return err
+	}
+	var ids []string
+	for rows.Next() {
+		var id string
+		if err := rows.Scan(&id); err != nil {
+			rows.Close()
+			return err
+		}
+		ids = append(ids, id)
+	}
+	rows.Close()
+	if err := rows.Err(); err != nil {
+		return err
+	}
+	// Production migrates with a plain context (no principal, no service
+	// visibility). The audit insert and its retry check touch workspace events
+	// (node_id NULL), which the events SELECT policy shows only to system code,
+	// so the backfill runs as system code over workspace rows (release 127
+	// incident: RLS 42501 on prod-1, AEON P0).
+	sys := NoProjects(ctx, "migration 1296: account successor audit")
+	for _, id := range ids {
+		if err := enterTenant(sys, tx, id); err != nil {
+			return err
+		}
+		if _, err := tx.Exec(ctx, `SELECT aeon_backfill_account_model_successors()`); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
 // The first-line opt-out is deliberately narrow: exactly one CREATE [UNIQUE] INDEX
 // CONCURRENTLY with unqualified, lowercase identifiers. It is not a general
 // escape hatch for arbitrary nontransactional migration batches.
@@ -547,22 +667,12 @@ func concurrentIndex(body string, stmts []string) (string, string, error) {
 
 func applyConcurrentIndex(ctx context.Context, conn *pgxpool.Conn, name, stmt, index, table string) error {
 	// SET LOCAL cannot cover nontransactional DDL. Bound lock acquisition on
-	// this connection, then restore its previous setting even after cancellation.
-	var lockTimeout string
-	if err := conn.QueryRow(ctx, `SHOW lock_timeout`).Scan(&lockTimeout); err != nil {
-		return fmt.Errorf("read lock timeout for %s: %w", name, err)
+	// this connection and the entire build, including invalid-index cleanup.
+	restore, err := migrationTimeouts(ctx, conn, IndexBuildStatementTimeout)
+	if err != nil {
+		return fmt.Errorf("index budgets for %s: %w", name, err)
 	}
-	defer func() {
-		cleanup, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-		defer cancel()
-		if _, err := conn.Exec(cleanup, `SELECT set_config('lock_timeout', $1, false)`, lockTimeout); err != nil {
-			// Never return a connection with a changed setting to the pool.
-			_ = conn.Conn().Close(cleanup)
-		}
-	}()
-	if _, err := conn.Exec(ctx, `SET lock_timeout = '5s'`); err != nil {
-		return fmt.Errorf("set lock timeout for %s: %w", name, err)
-	}
+	defer restore()
 	// The migration advisory lock remains held on this connection. A crash can
 	// leave either a valid index before recording, or an invalid partial build.
 	// Reuse only a valid index on the expected table; rebuild an invalid one.
@@ -570,7 +680,7 @@ func applyConcurrentIndex(ctx context.Context, conn *pgxpool.Conn, name, stmt, i
 	var unique bool
 	requiresUnique := strings.HasPrefix(stmt, "CREATE UNIQUE INDEX ")
 	var existingTable string
-	err := conn.QueryRow(ctx, `SELECT i.indisvalid, i.indisunique, t.relname
+	err = conn.QueryRow(ctx, `SELECT i.indisvalid, i.indisunique, t.relname
 		FROM pg_index i JOIN pg_class c ON c.oid=i.indexrelid
 		JOIN pg_namespace n ON n.oid=c.relnamespace
 		JOIN pg_class t ON t.oid=i.indrelid

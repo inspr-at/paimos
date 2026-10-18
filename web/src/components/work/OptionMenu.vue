@@ -39,7 +39,8 @@ function move(event: KeyboardEvent) {
     <div @keydown="move">
       <p class="menu-title eyebrow">{{ title }}</p>
       <input v-if="searchable" v-model="term" class="field menu-search" :placeholder="`Find ${title.toLowerCase()}…`" :aria-label="`Find ${title.toLowerCase()}`" data-autofocus />
-      <div ref="list" class="menu" role="menu" :aria-label="`${title} of ${subject}`">
+      <div class="menu" :style="{ gridTemplateRows: `repeat(${Math.max(1, shown.length)}, auto)` }">
+        <div ref="list" class="option-list" role="menu" :aria-label="`${title} of ${subject}`">
         <div v-for="(option, index) in shown" :key="option.value" class="option-row" role="presentation">
           <button
             type="button" role="menuitemradio" class="menu-item" :aria-checked="option.value === current"
@@ -53,8 +54,9 @@ function move(event: KeyboardEvent) {
             <AppIcon v-if="option.value === current" name="check" :size="14" class="tick" />
             <span v-else-if="!searchable && index < 9" class="digit keycap" aria-hidden="true">{{ index + 1 }}</span>
           </button>
-          <ReadName :text="option.label" />
         </div>
+        </div>
+        <ReadName v-for="(option, index) in shown" :key="option.value" :text="option.label" :style="{ gridColumn: 2, gridRow: index + 1 }" />
         <p v-if="!shown.length" class="none">Nobody matches.</p>
       </div>
     </div>
@@ -64,8 +66,9 @@ function move(event: KeyboardEvent) {
 <style scoped>
 .menu-title { padding: 6px 10px 4px; }
 .menu-search { height: 30px; margin: 0 0 6px; font-size: 13px; }
-.menu { display: grid; grid-template-columns: minmax(0, 1fr); gap: 1px; }
-.option-row { display: grid; grid-template-columns: minmax(0, 1fr) auto; }
+.menu { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 1px 0; }
+.option-list { display: grid; grid-column: 1; grid-row: 1 / -1; grid-template-rows: subgrid; min-width: 0; }
+.option-row { display: grid; grid-template-columns: minmax(0, 1fr); }
 .menu-item { display: flex; align-items: center; min-width: 0; gap: 10px; height: 32px; padding: 0 10px; border: 0; border-radius: 8px; background: transparent; color: var(--ink); font-size: 13.5px; text-align: left; }
 @media (hover: hover) { .menu-item:hover { background: var(--row-hover); } }
 .menu-item:focus-visible { background: var(--row-selected); box-shadow: inset 0 0 0 1px var(--glass-rim); }
@@ -77,7 +80,7 @@ function move(event: KeyboardEvent) {
 .menu-item:hover .digit, .menu-item:focus-visible .digit { opacity: 1; }
 .none-mark { width: 14px; height: 2px; border-radius: 2px; background: var(--line-2); }
 .faint-icon, .kind-icon { color: var(--ink-3); }
-.kind-icon.epic { color: var(--gold); }
+.kind-icon.epic { color: var(--kind-parent); }
 .none { padding: 8px 10px; font-size: 13px; color: var(--ink-3); }
 @media (pointer: coarse) { .menu-item { height: 44px; } }
 

@@ -1,0 +1,80 @@
+{
+  "_license": "SPDX-License-Identifier: AGPL-3.0-only",
+  "builtin_roles": {
+    "admin": [
+      "relations.delete",
+      "relations.read",
+      "relations.write"
+    ],
+    "guest": [
+      "relations.read"
+    ],
+    "member": [
+      "relations.delete",
+      "relations.read",
+      "relations.write"
+    ],
+    "owner": [
+      "relations.delete",
+      "relations.read",
+      "relations.write"
+    ],
+    "viewer": [
+      "relations.read"
+    ]
+  },
+  "project_decided": {
+    "POST /api/relations": true
+  },
+  "project_filtered": {
+    "GET /api/relations": true
+  },
+  "registry": [
+    {
+      "agent_grantable": true,
+      "description": "Delete relations",
+      "grantable_at": [
+        "workspace",
+        "project"
+      ],
+      "group": "Relations",
+      "key": "relations.delete",
+      "owner_workstation_grantable": true,
+      "risk": "high"
+    },
+    {
+      "agent_grantable": true,
+      "description": "Read relations",
+      "grantable_at": [
+        "workspace",
+        "project"
+      ],
+      "group": "Relations",
+      "key": "relations.read",
+      "owner_workstation_grantable": true,
+      "risk": "low"
+    },
+    {
+      "agent_grantable": true,
+      "description": "Write relations",
+      "grantable_at": [
+        "workspace",
+        "project"
+      ],
+      "group": "Relations",
+      "key": "relations.write",
+      "owner_workstation_grantable": true,
+      "risk": "medium"
+    }
+  ],
+  "routes": {
+    "DELETE /api/relations/{relationId}": "relations.delete",
+    "GET /api/relations": "relations.read",
+    "POST /api/relations": "relations.write"
+  },
+  "words": {
+    "resources": {
+      "relations": "links between tickets"
+    }
+  }
+}

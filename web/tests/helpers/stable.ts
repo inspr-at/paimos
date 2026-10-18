@@ -10,7 +10,7 @@ export interface StableOptions {
 
 // Scroll-container coordinates distinguish intentional scrolling from layout
 // movement. Fixed overlays do not inherit the page's scrolling coordinates.
-async function box(locator: Locator) {
+async function box(locator: Locator, name = 'control') {
   await expect(locator).toHaveCount(1)
   await expect(locator).toBeVisible()
   const sample = await locator.evaluate(async element => {
@@ -27,8 +27,8 @@ async function box(locator: Locator) {
     }
     return { x, y, width: rect.width, height: rect.height }
   })
-  expect(sample.width, 'sampled control width must be positive').toBeGreaterThan(0)
-  expect(sample.height, 'sampled control height must be positive').toBeGreaterThan(0)
+  expect(sample.width, `sampled control width must be positive (${name})`).toBeGreaterThan(0)
+  expect(sample.height, `sampled control height must be positive (${name})`).toBeGreaterThan(0)
   return sample
 }
 
@@ -49,12 +49,12 @@ export async function expectStableControls({ controls, interactions, scrollAreas
     }
   }
   const baseline = new Map<string, Awaited<ReturnType<typeof box>>>()
-  for (const [name, locator] of Object.entries(controls)) baseline.set(name, await box(locator))
+  for (const [name, locator] of Object.entries(controls)) baseline.set(name, await box(locator, name))
   await overflow('initial')
   for (const interaction of interactions) {
     await interaction.run()
     for (const [name, locator] of Object.entries(controls)) {
-      const current = await box(locator), before = baseline.get(name)!
+      const current = await box(locator, name), before = baseline.get(name)!
       for (const axis of ['x', 'y', 'width', 'height'] as const) {
         expect(Math.abs(current[axis] - before[axis]), `${interaction.name}: ${name}.${axis} (${before[axis]} → ${current[axis]})`).toBeLessThanOrEqual(0.5)
       }

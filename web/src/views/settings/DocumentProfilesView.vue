@@ -562,7 +562,7 @@ watch(() => props.profileId, () => { void nextTick(() => form.value?.scrollTo({ 
 .head-titles h1 { height: 2lh; overflow: hidden; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; white-space: normal; overflow-wrap: anywhere; font: 600 17px/1.3 var(--font); letter-spacing: 0; color: var(--ink); }
 @media (pointer: coarse) { .head-titles h1 { min-height: 44px; } }
 .head-right { flex: none; display: flex; align-items: center; justify-content: flex-end; gap: 8px; }
-.head-titles .dirty { color: var(--gold-ink); font-weight: 700; }
+.head-titles .dirty { color: var(--warn-ink); font-weight: 700; }
 .head-actions { display: flex; align-items: center; gap: 8px; }
 .pane-switch { display: none; }
 .profiles-body { flex: 1; min-height: 0; display: grid; grid-template-columns: 256px minmax(380px, 456px) minmax(0, 1fr); }

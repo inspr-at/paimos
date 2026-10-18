@@ -8,6 +8,7 @@ import (
 
 	"github.com/inspr-at/paimos/internal/agentaccounts"
 	"github.com/inspr-at/paimos/internal/agentruns"
+	"github.com/inspr-at/paimos/internal/events"
 	"github.com/inspr-at/paimos/internal/tenant"
 	"github.com/inspr-at/paimos/internal/workorders"
 	"github.com/jackc/pgx/v5"
@@ -20,8 +21,8 @@ func measuredClaimQueue(t *testing.T, age string) (*fixture, []agentruns.Run, []
 	f := setup(t)
 	f.mux = http.NewServeMux()
 	workorders.New(f.d.App).Mount(f.mux)
-	agentruns.New(f.d.App, func(ctx context.Context, tx pgx.Tx, p tenant.Principal, run agentruns.Run, _ agentruns.Telemetry) error {
-		return agentaccounts.Settle(ctx, tx, p, run.ID)
+	agentruns.New(f.d.App, func(ctx context.Context, tx pgx.Tx, p tenant.Principal, run agentruns.Run, _ agentruns.Telemetry, pending *[]events.Change) error {
+		return agentaccounts.SettleDeferred(ctx, tx, p, run.ID, pending)
 	}).Mount(f.mux)
 	runs := []agentruns.Run{f.run(t, f.order(t, nil)), f.run(t, f.order(t, nil))}
 	ids := append(f.reserve(t, runs[0]), uuid())

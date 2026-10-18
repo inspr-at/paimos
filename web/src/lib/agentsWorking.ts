@@ -3,13 +3,14 @@
 // owner snapshot; limits are independent ceilings, never reservations.
 import { buildPools, HARNESS_NAME, hidesCapacityLimit, POOL_ORDER, type AccountRow } from './capacity.ts'
 import type { CapacityWait } from './capacityWait.ts'
+import { cloneDaily, type DailyMap, type DailyPlanFields } from './dailyLimits.ts'
 
 export const CAP_MAX = 30
-export const DEFAULT_TOTAL = 15
 export type HarnessLimit = 'no_limit' | 'off' | number
 export type LimitMode = 'none' | 'max' | 'off'
-export interface WorkingPreference { total: number; limits: Record<string, HarnessLimit> }
-export interface PlanSnapshot extends WorkingPreference {
+/** `daily` rides along only on a write that changes a daily setting; older dial writes omit it and the server keeps it. */
+export interface WorkingPreference { total: number; limits: Record<string, HarnessLimit>; daily?: DailyMap }
+export interface PlanSnapshot extends WorkingPreference, DailyPlanFields {
   principal_id: string; running: Record<string, number>; running_total: number
   source: 'default' | 'legacy' | 'plan'; updated_at: string | null
 }
@@ -27,6 +28,7 @@ const accountBlockers: Record<CapacityWait['code'], string> = {
   vendor: 'the vendor has stopped new starts', offline: 'the computer or account check is unavailable', sign_in: 'sign-in is required',
   hold: 'on hold', approval: 'ongoing agent use needs approval', capacity: 'all start slots are occupied', allowance: 'the account allowance is exhausted',
   models: 'no model is granted for this account', state: 'agent use is paused', residency: 'no account within the allowed providers',
+  context: 'no account is allowed for this project’s context',
 }
 /** Start advice and usage measurements are different facts. Only the server
  * decides eligibility; neither Ready nor a missing reading invents slots. */
@@ -65,7 +67,7 @@ export function workingAccountRoom(accounts: AccountRow[], now: number, current:
     reasons[harness] = [...new Set(notes)].join('; ')
   }
   const slots = Object.values(room).reduce<number>((n, value) => n + (value ?? 0), 0)
-  return { room, reasons, total: incomplete && slots === 0 ? null : slots, incomplete,
+  return { room, reasons, total: (incomplete || accounts.length === 0) && slots === 0 ? null : slots, incomplete,
     full: current && accounts.length > 0 && accounts.every(a => a.routing?.wait?.code === 'capacity'),
     noAccounts: current && accounts.length === 0 }
 }
@@ -75,17 +77,20 @@ export function accountRoomCopy(accounts: WorkingAccountRoom): string {
   if (accounts.total > 0) return `Room for ${accounts.incomplete ? 'at least ' : ''}${accounts.total} more right now.`
   return accounts.full ? 'Full right now: all start slots are occupied.' : 'No account starts are available right now.'
 }
-export function accountRoomDetail(accounts: WorkingAccountRoom, harness: string): string {
+/** What one harness's accounts say about room, without the harness name. */
+export function accountRoomWords(accounts: WorkingAccountRoom, harness: string): string {
   const slots = accounts.room[harness], reason = accounts.reasons[harness]
   let value = ''
   if (slots === null || slots === undefined) value = reason?.startsWith('not measured yet') ? '' : 'not measured yet'
   else if (slots > 0) value = `room for ${slots} more`
   else if (!reason) value = 'no start slots available'
-  return `${HARNESS_NAME[harness] ?? harness} ${[value, reason].filter(Boolean).join(' — ')}`
+  return [value, reason].filter(Boolean).join(' — ')
 }
 export const limitMode = (limit: HarnessLimit | undefined): LimitMode => limit === 'off' ? 'off' : typeof limit === 'number' ? 'max' : 'none'
 const clamp = (n: number) => Math.max(0, Math.min(CAP_MAX, n))
-export const planValue = (snapshot: WorkingPreference): WorkingPreference => ({ total: snapshot.total, limits: { ...snapshot.limits } })
+export const planValue = (snapshot: WorkingPreference): WorkingPreference => ({ total: snapshot.total, limits: { ...snapshot.limits }, ...(snapshot.daily ? { daily: cloneDaily(snapshot.daily) } : {}) })
+/** The total and the limits only: a read never turns the server's effective daily map into the next write. */
+export const basePlan = (snapshot: WorkingPreference): WorkingPreference => ({ total: snapshot.total, limits: { ...snapshot.limits } })
 export function stepTotal(plan: WorkingPreference, delta: number): WorkingPreference {
   return { ...planValue(plan), total: clamp(plan.total + delta) }
 }

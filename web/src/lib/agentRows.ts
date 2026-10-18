@@ -33,6 +33,9 @@ export interface Paged<T> { items: T[]; next_cursor: string | null }
 // HarnessSession in lib/agents.ts for the type the page works with.
 export interface CurrentAgentActivity { text: string; source: 'agent' | 'auto'; at: string }
 export interface HarnessSessionRow {
+  inbox_binding_error?: string | null
+  agent_recovery?: { session_id: string; observed_revision: string; cause: string; detail: string; action: '' | 'restart' | 'reconnect' }
+
   supported_pause_levels?: readonly import('./agentPause').PauseLevel[]
   pause_can_interrupt?: boolean
   pause_progress?: import('./agentPause').PauseProgress
@@ -206,6 +209,8 @@ export const cancelRun = async (id: string) => {
 const post = (body: unknown): RequestInit => ({ method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) })
 export const readControlResponse = (project: string, session: string, control: string) => api(sessionResource(project, session, `controls/${enc(control)}`))
 export const readManagedSettings = (project: string, session: string) => api(sessionResource(project, session, 'managed-settings'))
+// C0's native-context projection is viewer metadata, never a harness session row.
+export const readSessionNativeContext = (project: string, session: string, signal: AbortSignal) => api(sessionResource(project, session, 'native-context'), { signal }, 3000)
 // AEON-436 protected subresource; these answers contain tier state, not raw session rows.
 export const readTierResponse = (project: string, session: string) => api(sessionResource(project, session, 'tier'))
 export const decideTierResponse = (project: string, session: string, request: string, body: unknown) => api(sessionResource(project, session, `tier/requests/${enc(request)}/decision`), post(body))
@@ -216,6 +221,15 @@ export const readSessionControl = async (project: string, session: string, contr
   (await call<SessionControl>(sessionResource(project, session, `controls/${enc(control)}`))).body
 export const requestManagedSessionControl = async (session: { project_id: string; id: string; process_ownership?: Readonly<ProcessOwnership> }, kind: 'interrupt' | 'stop'): Promise<SessionControl> =>
   (await call<SessionControl>(sessionResource(session.project_id, session.id, 'managed-controls'), 'POST', { request_id: crypto.randomUUID(), kind, expected_ownership: { ...session.process_ownership } })).body
+// AEON-731: a recovery receipt is the answer to a control, never a session row.
+export interface AgentRecoveryReceipt {
+  id: string; session_id: string; action: 'restart' | 'reconnect'; state: 'pending' | 'claimed' | 'completed' | 'expired'
+  outcome: 'reconnected' | 'continuation_queued' | 'rejected' | 'unconfirmed' | null; next_run_id: string | null
+}
+export const requestAgentRecovery = async (project: string, session: string, body: { request_id: string; expected_revision: string; action: 'restart' | 'reconnect' }): Promise<AgentRecoveryReceipt> =>
+  (await call<AgentRecoveryReceipt>(sessionResource(project, session, 'recover-agent'), 'POST', body)).body
+export const readAgentRecovery = async (project: string, session: string, id: string): Promise<AgentRecoveryReceipt> =>
+  (await call<AgentRecoveryReceipt>(sessionResource(project, session, `recover-agent/${enc(id)}`))).body
 export const sendSessionRequest = (project: string, session: string, body: unknown, signal?: AbortSignal) => api(sessionResource(project, session, 'requests'), { ...post(body), signal })
 export const readSessionRecovery = (project: string, session: string) => api(sessionResource(project, session, 'recovery'))
 export const archiveSession = (project: string, session: string, body: unknown) => api(sessionResource(project, session, 'archive'), post(body))

@@ -1,0 +1,130 @@
+# SPDX-License-Identifier: AGPL-3.0-only
+# aeon:owner internal/themes
+paths:
+  /themes:
+    get:
+      operationId: listThemes
+      summary: List workspace themes and the caller's personal themes
+      description: >-
+        AEON-641. Requires profile.read (or profile.portal_read), including a project
+        self-service grant. Personal themes are visible only to their canonical owner,
+        including in events and SSE. Deleted themes are omitted. UUID keyset pagination.
+      security: [{session: []}, {agentKey: []}]
+      parameters:
+        - {name: after, in: query, schema: {type: string, format: uuid}}
+        - {name: limit, in: query, schema: {type: integer, minimum: 1, maximum: 100, default: 50}}
+      responses:
+        '200': {description: Visible themes, content: {application/json: {schema: {$ref: '#/components/schemas/ThemePage'}}}}
+        '400': {$ref: '#/components/responses/Error'}
+        '403': {$ref: '#/components/responses/Error'}
+    post:
+      operationId: createTheme
+      description: >-
+        Creates a personal or workspace theme. A person with profile.write (or
+        profile.portal_write) creates personal themes; workspace themes require a
+        person with settings.manage. Agents cannot exercise person-only workspace
+        settings authority. Omitted values use Porcelain. Appends theme.created.
+      security: [{session: []}, {agentKey: []}]
+      requestBody: {required: true, content: {application/json: {schema: {$ref: '#/components/schemas/ThemeCreate'}}}}
+      responses:
+        '201': {description: Created theme, content: {application/json: {schema: {$ref: '#/components/schemas/Theme'}}}}
+        '400': {$ref: '#/components/responses/Error'}
+        '403': {$ref: '#/components/responses/Error'}
+        '408': {description: Request body was not read within 10 seconds}
+        '413': {description: Request exceeds 8 KiB}
+  /themes/{themeId}:
+    parameters:
+      - {name: themeId, in: path, required: true, schema: {type: string, format: uuid}}
+    get:
+      operationId: getTheme
+      description: Read one visible, non-deleted theme. Requires profile.read or profile.portal_read. A foreign personal or tenant theme returns 404.
+      security: [{session: []}, {agentKey: []}]
+      responses:
+        '200': {description: Theme, content: {application/json: {schema: {$ref: '#/components/schemas/Theme'}}}}
+        '404': {$ref: '#/components/responses/Error'}
+    patch:
+      operationId: updateTheme
+      description: >-
+        Rename or replace values under revision/CAS. Scope and ownership are immutable.
+        Personal writes require the owning person and profile.write or profile.portal_write;
+        workspace/default writes require a person with settings.manage. Rechecks authority
+        under the write fence. Identical values leave revision and events unchanged.
+        Colour contrast is advisory and never rejected. Appends theme.updated.
+      security: [{session: []}, {agentKey: []}]
+      requestBody: {required: true, content: {application/json: {schema: {$ref: '#/components/schemas/ThemeUpdate'}}}}
+      responses:
+        '200': {description: Saved theme, content: {application/json: {schema: {$ref: '#/components/schemas/Theme'}}}}
+        '400': {$ref: '#/components/responses/Error'}
+        '403': {$ref: '#/components/responses/Error'}
+        '404': {$ref: '#/components/responses/Error'}
+        '409': {description: Revision changed}
+        '408': {description: Request body was not read within 10 seconds}
+        '413': {description: Request exceeds 8 KiB}
+    delete:
+      operationId: deleteTheme
+      description: >-
+        Requires the current revision and the same write authority as PATCH. The
+        workspace default cannot be deleted (409). Appends theme.deleted. Deletion
+        retains the record for undo; selected users resolve to the workspace default
+        and receive a fallback_notice on GET /me/theme until choosing again. Undo
+        restores availability without overriding choices made since deletion.
+      security: [{session: []}, {agentKey: []}]
+      parameters:
+        - {name: revision, in: query, required: true, schema: {type: integer, minimum: 1}}
+      responses:
+        '204': {description: Deleted and fallback is effective}
+        '400': {$ref: '#/components/responses/Error'}
+        '403': {$ref: '#/components/responses/Error'}
+        '404': {$ref: '#/components/responses/Error'}
+        '409': {description: Default theme or revision changed}
+  /themes/{themeId}/duplicate:
+    parameters:
+      - {name: themeId, in: path, required: true, schema: {type: string, format: uuid}}
+    post:
+      operationId: duplicateTheme
+      description: >-
+        Copies a visible source's exact values at the supplied revision, with a new
+        name and personal/workspace scope. Destination authority is the same as
+        POST /themes; read authority is also required. Appends theme.created.
+      security: [{session: []}, {agentKey: []}]
+      requestBody: {required: true, content: {application/json: {schema: {$ref: '#/components/schemas/ThemeDuplicate'}}}}
+      responses:
+        '201': {description: Duplicated theme, content: {application/json: {schema: {$ref: '#/components/schemas/Theme'}}}}
+        '400': {$ref: '#/components/responses/Error'}
+        '403': {$ref: '#/components/responses/Error'}
+        '404': {$ref: '#/components/responses/Error'}
+        '409': {description: Source revision changed}
+        '408': {description: Request body was not read within 10 seconds}
+        '413': {description: Request exceeds 8 KiB}
+components:
+  schemas:
+    ThemeCreate:
+      type: object
+      additionalProperties: false
+      required: [name, scope]
+      properties:
+        name: {type: string, minLength: 1, maxLength: 80, description: Trimmed name without control characters}
+        scope: {type: string, enum: [workspace, personal]}
+        values: {$ref: '#/components/schemas/ThemeValues', description: 'If omitted, use Porcelain'}
+    ThemeDuplicate:
+      type: object
+      additionalProperties: false
+      required: [name, scope, revision]
+      properties:
+        name: {type: string, minLength: 1, maxLength: 80}
+        scope: {type: string, enum: [workspace, personal]}
+        revision: {type: integer, minimum: 1}
+    ThemePage:
+      type: object
+      required: [items, next_cursor]
+      properties:
+        items: {type: array, maxItems: 100, items: {$ref: '#/components/schemas/Theme'}}
+        next_cursor: {type: [string, 'null'], format: uuid}
+    ThemeUpdate:
+      type: object
+      additionalProperties: false
+      required: [revision]
+      properties:
+        revision: {type: integer, minimum: 1}
+        name: {type: string, minLength: 1, maxLength: 80}
+        values: {$ref: '#/components/schemas/ThemeValues'}

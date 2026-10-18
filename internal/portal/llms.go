@@ -11,10 +11,6 @@ import (
 
 const llmsTextLimit = 200 * 1024
 
-func renderLlms(slug string, doc portalDocument, releases []publicRelease) string {
-	return renderLlmsForProduct(slug, "", doc, releases)
-}
-
 func renderLlmsForProduct(slug, productSlug string, doc portalDocument, releases []publicRelease) string {
 	if !doc.ReleaseHistory {
 		releases = nil

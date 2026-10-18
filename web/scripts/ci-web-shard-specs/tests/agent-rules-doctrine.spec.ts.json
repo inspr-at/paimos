@@ -1,0 +1,22 @@
+{
+  "group": "remaining-ui",
+  "nightlyTiming": {
+    "seconds": 21.709,
+    "selectedTests": 11
+  },
+  "spec": {
+    "file": "tests/agent-rules-doctrine.spec.ts",
+    "listedTests": 11,
+    "tierTiming": {
+      "caseSeconds": {
+        "max": 9.252,
+        "median": 1.209,
+        "min": 0.035
+      },
+      "seconds": 21.709,
+      "selectedTests": 11
+    },
+    "weightSeconds": 24.414634,
+    "weightSource": "unmeasured-test-rate"
+  }
+}

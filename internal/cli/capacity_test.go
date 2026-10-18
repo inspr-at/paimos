@@ -13,12 +13,21 @@ import (
 
 func TestCapacityNextAdviceAndNoRemoteEnvironment(t *testing.T) {
 	isolate(t)
+	var hostWait string
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path != "/api/agent-accounts/capacity/next" || r.URL.Query().Get("harness") != "codex" {
 			t.Error("wrong advice request")
 		}
 		if strings.Contains(r.URL.RawQuery, "home") || strings.Contains(r.URL.RawQuery, "socket") {
 			t.Error("local path crossed the network")
+		}
+		if hostWait != "" {
+			wait := map[string]any{"code": "capacity", "run_now_allowed": false}
+			if hostWait != "redacted" {
+				wait["host_reason"] = hostWait
+			}
+			_ = json.NewEncoder(w).Encode(map[string]any{"harness": "codex", "parallel_runs": 0, "accounts": []any{}, "wait": wait})
+			return
 		}
 		_ = json.NewEncoder(w).Encode(map[string]any{"harness": "codex", "parallel_runs": 2, "accounts": []map[string]any{{"account_id": "foreign", "account_label": "Spare", "daemon_id": "elsewhere", "harness": "codex", "rank": 1, "available_slots": 1}}})
 	}))
@@ -36,6 +45,17 @@ func TestCapacityNextAdviceAndNoRemoteEnvironment(t *testing.T) {
 	code, out, _ = runCLI([]string{"aeon", "capacity", "next", "codex", "--json"}, "")
 	if code != 0 || !strings.Contains(out, `"account_label":"Spare"`) {
 		t.Fatal("JSON advice failed")
+	}
+	for _, tc := range []struct{ cause, text string }{
+		{"maximum_agents", "Waiting: Codex computer has reached its managed agent limit"},
+		{"managed_exit_unconfirmed", "Waiting: Codex account is waiting for an unconfirmed managed process to exit"},
+		{"redacted", "Waiting: capacity"},
+	} {
+		hostWait = tc.cause
+		code, out, errOut = runCLI([]string{"aeon", "capacity", "next", "codex"}, "")
+		if code != 0 || strings.TrimSpace(out) != tc.text || errOut != "" {
+			t.Fatalf("host cause %s: code=%d out=%q err=%q", tc.cause, code, out, errOut)
+		}
 	}
 }
 func TestCapacityExportQuotesAndAllowlist(t *testing.T) {

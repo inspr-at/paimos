@@ -1,15 +1,18 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import { readFileSync } from 'node:fs'
-import { parse } from '@vue/compiler-sfc'
 import ts from 'typescript'
 import { expect, it, vi } from 'vitest'
 
 // Execute the view's actual navigation handlers with controlled network and
 // history dependencies, without maintaining a duplicate implementation.
-const { descriptor } = parse(readFileSync(new URL('../src/views/ProjectView.vue', import.meta.url), 'utf8'))
-const source = ts.createSourceFile('ProjectView.ts', descriptor.scriptSetup!.content, ts.ScriptTarget.Latest, true, ts.ScriptKind.TS)
+function ownerSource(name: string) {
+  const source = ts.createSourceFile(`${name}.ts`, readFileSync(new URL(`../src/views/project/${name}.ts`, import.meta.url), 'utf8'), ts.ScriptTarget.Latest, true, ts.ScriptKind.TS)
+  const owner = source.statements.find(ts.isFunctionDeclaration)!
+  return { source, statements: owner.body!.statements }
+}
+const { source, statements } = ownerSource('useProjectPanel')
 const names = ['openRelated', 'follow', 'trailBack']
-const functions = source.statements.filter(statement => ts.isFunctionDeclaration(statement) && names.includes(statement.name?.text ?? ''))
+const functions = statements.filter(statement => ts.isFunctionDeclaration(statement) && names.includes(statement.name?.text ?? ''))
 expect(functions).toHaveLength(names.length)
 const printer = ts.createPrinter()
 const { outputText } = ts.transpileModule(functions.map(fn => printer.printNode(ts.EmitHint.Unspecified, fn, source)).join('\n'), {
@@ -63,3 +66,50 @@ it.each(['route', 'person'])('a pending related lookup cannot navigate after the
   expect(context.router.push).not.toHaveBeenCalled()
   expect(context.openKey).not.toHaveBeenCalled()
 })
+
+// Keep the real menu handlers and their generation state together so deferred
+// responses exercise the view's cancellation, rather than a copy of it.
+const bulkFunctions = ['openBulk', 'closeBulk', 'openRelease']
+const { source: bulkSource, statements: selectionStatements } = ownerSource('useProjectSelection')
+const bulkStatements = selectionStatements.filter(statement =>
+  (ts.isFunctionDeclaration(statement) && bulkFunctions.includes(statement.name?.text ?? '')) ||
+  (ts.isVariableStatement(statement) && statement.declarationList.declarations.some(declaration =>
+    ts.isIdentifier(declaration.name) && declaration.name.text === 'bulkMenuGeneration')),
+)
+const bulkCode = ts.transpileModule(bulkStatements.map(statement => printer.printNode(ts.EmitHint.Unspecified, statement, bulkSource)).join('\n'), {
+  compilerOptions: { target: ts.ScriptTarget.ES2022 },
+}).outputText
+
+it.each(['status', 'priority', 'labels', 'move', 'release', 'direct release', 'close'])(
+  'a deferred bulk assignee opening cannot replace a later %s action', async action => {
+    let resolvePeople!: () => void
+    const pendingPeople = new Promise<void>(resolve => { resolvePeople = resolve })
+    const anchor = { isConnected: true, focus: vi.fn() }
+    const context = {
+      bulkMenu: { value: null as { kind: string; anchor: typeof anchor } | null },
+      getPeopleGeneration: () => 0, selectedRows: { value: [{ id: 'ticket-1', updated_at: 'revision-1' }] },
+      loadProjectPeople: vi.fn(() => pendingPeople),
+      list: { requestFacet: vi.fn(), loadEpics: vi.fn() },
+      project: { value: { id: 'project-1' } }, releaseIds: { value: [] as string[] },
+      liveSelection: () => ['ticket-1'], can: () => true,
+    }
+    const handlers = new Function('context', `const { ${Object.keys(context).join(', ')} } = context; ${bulkCode}; return { openBulk, closeBulk, openRelease }`)(context)
+    const opening = handlers.openBulk('assignee', anchor)
+    expect(context.loadProjectPeople).toHaveBeenCalledExactlyOnceWith()
+    expect(context.bulkMenu.value).toBeNull()
+
+    if (action === 'close') handlers.closeBulk(false)
+    else if (action === 'direct release') handlers.openRelease(anchor, ['ticket-1'])
+    else await handlers.openBulk(action, anchor)
+    const expected = action === 'close' ? null : { kind: action === 'direct release' ? 'release' : action, anchor }
+    expect(context.bulkMenu.value).toEqual(expected)
+
+    resolvePeople()
+    await opening
+    expect(context.bulkMenu.value).toEqual(expected)
+
+    // Cancellation must still allow a fresh, intentional assignee opening.
+    await handlers.openBulk('assignee', anchor)
+    expect(context.bulkMenu.value).toEqual({ kind: 'assignee', anchor })
+  },
+)

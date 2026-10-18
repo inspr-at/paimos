@@ -9,6 +9,9 @@ const full = reason => ({ lane: 'full', specs: [], nixVendor: true, reason });
 const nixVendorPaths = new Set(['go.mod', 'go.sum', 'flake.nix', 'flake.lock',
   '.github/workflows/ci.yml', 'scripts/ci-pr-plan.mjs', 'scripts/check-nix-vendor-hash.sh']);
 // The documentation allowlist lives here, including root licence notices.
+// AEON-766: web/tests/no-shift-rules.test.ts pins AGENTS.md via the rules
+// rollout manifest. Instruction files (including CLAUDE.md) need full CI.
+const instructionPattern = /(?:^|\/)(?:AGENTS|CLAUDE)\.md$/i;
 export const docsPaths = [/^[^/]+\.md$/i, /^docs\//, /^(?:LICENSE|LICENCE|COPYING|NOTICE)(?:\.(?:txt|md|rst))?$/i];
 
 export function validatePath(file) {
@@ -23,6 +26,8 @@ export function classifyPaths(files, deleted = []) {
   files.forEach(validatePath);
   deleted.forEach(validatePath);
   const nixVendor = [...files, ...deleted].some(file => nixVendorPaths.has(file));
+  const instruction = [...files, ...deleted].find(file => instructionPattern.test(file));
+  if (instruction) return { ...full(`test-pinned instruction input: ${instruction}`), nixVendor };
   if (files.every(file => !file.split('/').includes('testdata') && docsPaths.some(pattern => pattern.test(file)))) {
     return { lane: 'docs-only', specs: [], nixVendor, reason: 'documentation allowlist' };
   }
@@ -34,7 +39,8 @@ export function classifyPaths(files, deleted = []) {
 }
 
 export function classifyPR(eventName, event, { git = args => execFileSync('git', args,
-  { encoding: 'utf8', timeout: 15000, maxBuffer: limit }), checkout } = {}) {
+  { encoding: 'utf8', timeout: 15000, maxBuffer: limit }), checkout, impact } = {}) {
+  if (impact === 'off') return full('CI_IMPACT=off');
   if (eventName !== 'pull_request') return full('main, merge queue and manual runs retain full coverage');
   const base = event?.pull_request?.base?.sha, head = event?.pull_request?.head?.sha;
   if (![base, head].every(sha => /^[a-f0-9]{40}$/.test(sha ?? ''))) throw new Error('Invalid PR commit binding');
@@ -55,7 +61,8 @@ export function classifyPR(eventName, event, { git = args => execFileSync('git',
     paths(['diff', '--name-only', '--no-renames', '--diff-filter=D', '-z', range]));
 }
 
-export function requireResults(lane, classifier, results) {
+export function requireResults(lane, classifier, results, impact) {
+  if (impact === 'off' && lane !== 'full') throw new Error('CI_IMPACT=off requires full execution');
   if (classifier !== 'success' || !['full', 'docs-only', 'spec-only'].includes(lane)) throw new Error('CI classification failed');
   const expected = lane === 'full' ? 'success' : 'skipped';
   for (const result of results) if (result !== expected) throw new Error(`Expected ${expected} CI dependency, got ${result}`);
@@ -65,7 +72,7 @@ export function requireResults(lane, classifier, results) {
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
   try {
     if (process.argv[2] === 'gate') {
-      const note = requireResults(...process.argv.slice(3, 5), process.argv.slice(5));
+      const note = requireResults(...process.argv.slice(3, 5), process.argv.slice(5), process.env.CI_IMPACT);
       console.log(note);
       if (process.env.GITHUB_STEP_SUMMARY) appendFileSync(process.env.GITHUB_STEP_SUMMARY, `${note}\n`);
     } else if (process.argv.length === 2) {
@@ -77,7 +84,7 @@ if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) 
           if (statSync(process.env.GITHUB_EVENT_PATH).size > limit) throw new Error('PR event too large');
           event = JSON.parse(readFileSync(process.env.GITHUB_EVENT_PATH, 'utf8'));
         }
-        plan = classifyPR(name, event, { checkout: process.env.GITHUB_SHA });
+        plan = classifyPR(name, event, { checkout: process.env.GITHUB_SHA, impact: process.env.CI_IMPACT });
       } catch { plan = full('classification unavailable; full validation required'); }
       console.log(JSON.stringify(plan));
       if (process.env.GITHUB_OUTPUT) appendFileSync(process.env.GITHUB_OUTPUT, `lane=${plan.lane}\nspecs=${JSON.stringify(plan.specs)}\nnix_vendor=${plan.nixVendor}\n`);

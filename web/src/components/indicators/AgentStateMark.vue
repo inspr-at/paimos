@@ -6,7 +6,7 @@ withDefaults(defineProps<{ state: AgentState; size?: number }>(), { size: 14 })
 </script>
 
 <template>
-  <svg class="agent-state-mark" :class="{ clock: state === 'waiting' || state === 'awaiting' }" :data-mark="state" :width="size" :height="size" viewBox="0 0 14 14" aria-hidden="true" focusable="false">
+  <svg class="agent-state-mark" :style="{ fill: 'var(--agent-state-color, var(--signal))' }" :class="{ clock: state === 'waiting' || state === 'awaiting' }" :data-mark="state" :width="size" :height="size" viewBox="0 0 14 14" aria-hidden="true" focusable="false">
     <template v-if="state === 'paused'"><rect x="2" y="2" width="10" height="10" rx="2" /><path d="M5 4.5v5m4-5v5" /></template>
     <template v-else-if="state === 'pausing'"><circle cx="7" cy="7" r="5.5" /><path d="M5 4.5v5m4-5v5" /></template>
     <template v-else-if="state === 'problem'"><path d="M7 1.5 13 12H1Z" /><path d="M7 5v3m0 2v.2" /></template>
@@ -23,6 +23,7 @@ withDefaults(defineProps<{ state: AgentState; size?: number }>(), { size: 14 })
 </template>
 
 <style scoped>
-.agent-state-mark { flex: none; overflow: visible; color: var(--agent-state-color); stroke: currentColor; fill: var(--surface-raised); stroke-width: 1.3; stroke-linecap: round; stroke-linejoin: round; }
-.agent-state-mark path + path, .agent-state-mark circle + path, .agent-state-mark rect + path { fill: none; }
+.agent-state-mark { flex: none; overflow: visible; color: var(--agent-state-color); stroke: currentColor; fill: var(--agent-state-color, var(--signal)); stroke-width: 1.3; stroke-linecap: round; stroke-linejoin: round; }
+.agent-state-mark path + path, .agent-state-mark circle + path, .agent-state-mark rect + path { fill: none; stroke: var(--agent-state-ink); }
+.agent-state-mark[data-mark="working"] path { fill: var(--agent-state-ink); }
 </style>

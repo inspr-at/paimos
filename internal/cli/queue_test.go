@@ -23,6 +23,7 @@ func TestQueueCLIContract(t *testing.T) {
 		{[]string{"queue", "list"}, "GET", "/api/queue", nil},
 		{[]string{"queue", "add", id}, "POST", "/api/queue", map[string]any{"node_id": id}},
 		{[]string{"queue", "add", id, "--agent", agent, "--profile", profile}, "POST", "/api/queue", map[string]any{"node_id": id, "agent_principal_id": agent, "model_profile_id": profile}},
+		{[]string{"queue", "add", id, "--repository", "owner/linked", "--branch", "work/que-1-fix"}, "POST", "/api/queue", map[string]any{"node_id": id, "build_delivery": map[string]any{"repository": "owner/linked", "branch": "work/que-1-fix"}}},
 		{[]string{"queue", "remove", id}, "DELETE", "/api/queue/" + id, nil},
 		{[]string{"queue", "move", id, "3"}, "POST", "/api/queue/" + id + "/move", map[string]any{"position": float64(3)}},
 		{[]string{"queue", "reset"}, "POST", "/api/queue/reset", map[string]any{}},
@@ -33,6 +34,7 @@ func TestQueueCLIContract(t *testing.T) {
 		{[]string{"queue", "snapshot", "capture", id, "--revision", "2026-10-05T21:00:00Z", "--after", agent}, "POST", "/api/queue/" + id + "/snapshots", map[string]any{"expected_revision": "2026-10-05T21:00:00Z", "continuation_of": agent}},
 		{[]string{"queue", "snapshot", "show", id}, "GET", "/api/queue-snapshots/" + id, nil},
 		{[]string{"queue", "snapshot", "apply", id}, "POST", "/api/queue-snapshots/" + id + "/apply", nil},
+		{[]string{"queue", "snapshot", "apply", id, "--repository", "owner/linked", "--branch", "work/que-1-fix"}, "POST", "/api/queue-snapshots/" + id + "/apply", map[string]any{"build_delivery": map[string]any{"repository": "owner/linked", "branch": "work/que-1-fix"}}},
 		{[]string{"queue", "snapshot", "cancel", id}, "DELETE", "/api/queue-snapshots/" + id, nil},
 	} {
 		t.Run(strings.Join(tc.args, " "), func(t *testing.T) {
@@ -76,7 +78,7 @@ func TestQueueCLIContract(t *testing.T) {
 }
 func TestQueueCLILocalValidationAndIssueProjection(t *testing.T) {
 	isolate(t)
-	for _, args := range [][]string{{"queue", "snapshot", "capture", "QUE-1", "--revision", "2026-10-05T21:00:00Z", "--after", "bad"}, {"queue", "snapshot", "capture", "QUE-1"}, {"queue", "snapshot", "apply", "bad"}, {"queue", "move", "QUE-1", "0"}, {"queue", "add", "QUE-1", "--agent", "bad"}, {"queue", "next", "--agent", "11111111-1111-1111-1111-111111111111"}} {
+	for _, args := range [][]string{{"queue", "snapshot", "capture", "QUE-1", "--revision", "2026-10-05T21:00:00Z", "--after", "bad"}, {"queue", "snapshot", "capture", "QUE-1"}, {"queue", "snapshot", "apply", "bad"}, {"queue", "snapshot", "apply", "11111111-1111-1111-1111-111111111111", "--repository", "owner/linked"}, {"queue", "move", "QUE-1", "0"}, {"queue", "add", "QUE-1", "--agent", "bad"}, {"queue", "add", "QUE-1", "--branch", "work/que-1-fix"}, {"queue", "next", "--agent", "11111111-1111-1111-1111-111111111111"}} {
 		code, _, _ := runCLI(append([]string{"aeon"}, args...), "")
 		if code != 2 {
 			t.Fatalf("validation returned %d for %v", code, args)

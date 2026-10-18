@@ -1,7 +1,8 @@
 # SPDX-License-Identifier: AGPL-3.0-only
 # Compilation happens on the host in scripts/build-image-inputs.mjs.
 # aeon-runtime is a digest-bound OCI named context, prepared separately using
-# scripts/Dockerfile.runtime (chromium=152.0.7977.82-r0, tini=0.19.0-r3).
+# scripts/Dockerfile.runtime (chromium allow-list, newest first, and exact tini).
+# Closure evidence records the installed chromium APK.
 # No network access or compilation is needed to assemble this image.
 FROM aeon-runtime
 # No instruction reads VERSION: the version is linked into the binary on the

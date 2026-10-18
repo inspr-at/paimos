@@ -5,7 +5,6 @@ package nodes
 import (
 	"encoding/base64"
 	"encoding/json"
-	"time"
 )
 
 type cursorEnv struct {
@@ -56,21 +55,6 @@ func openCursor(s string) (cursorEnv, error) {
 		return cursorEnv{}, badRequest("invalid cursor")
 	}
 	return env, nil
-}
-
-func cursorValue(n nodeJSON, sort string) string {
-	switch sort {
-	case "updated_at":
-		return n.UpdatedAt.UTC().Format(time.RFC3339Nano)
-	case "created_at":
-		return n.CreatedAt.UTC().Format(time.RFC3339Nano)
-	case "key":
-		return n.Key
-	case "title":
-		return n.Title
-	default:
-		return n.Position
-	}
 }
 
 func sameString(a, b *string) bool {

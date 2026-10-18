@@ -16,20 +16,25 @@ export const useCustomers = defineStore('customers', () => {
   const cursor = ref<string | null>(null)
   const proposals = ref(new Map<string, NoteProposal>())
   let request: Promise<void> | null = null
+  // reset() retires this generation so a read already in flight cannot refill the list.
+  let generation = 0
 
   function load(force = false): Promise<void> {
     if (request) return request
     if (items.value && !force) return Promise.resolve()
     loading.value = true
+    const run = generation
     request = (async () => {
       try {
         const [list, contacts] = await Promise.all([listCustomers(), contactDirectory().catch(() => null)])
+        if (run !== generation) return
         items.value = list
         if (contacts) directory.value = contacts
         error.value = ''
       } catch (e) {
+        if (run !== generation) return
         error.value = e instanceof Error ? e.message : 'Customers could not be loaded.'
-      } finally { loading.value = false; request = null }
+      } finally { if (run === generation) { loading.value = false; request = null } }
     })()
     return request
   }
@@ -51,6 +56,9 @@ export const useCustomers = defineStore('customers', () => {
     if (draft) next.set(orgId, draft); else next.delete(orgId)
     proposals.value = next
   }
-  function reset() { items.value = null; error.value = ''; directory.value = new Map(); filter.value = { ...NO_FILTER }; cursor.value = null; proposals.value = new Map() }
+  function reset() {
+    generation++; request = null; loading.value = false
+    items.value = null; error.value = ''; directory.value = new Map(); filter.value = { ...NO_FILTER }; cursor.value = null; proposals.value = new Map()
+  }
   return { items, error, loading, directory, filter, cursor, proposals, load, upsert, remove, setContact, primaryOf, setProposal, reset }
 })

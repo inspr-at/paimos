@@ -25,8 +25,9 @@ func TestRunKindsRegisterBeatAndAggregate(t *testing.T) {
 		{"codex", "model", "gpt-fixture", 20}, {"media", "generator", "higgsfield/kling3_0", 40}, {"terminal", "command", "ffmpeg", 90},
 	} {
 		lease := "child-lease-" + uid()
-		body := map[string]any{"agent_principal_id": f.agent.ID, "harness": tc.harness, "host": "mbp2606", "role": "worker", "management_mode": "unmanaged", "parent_harness_session_id": lead, "ticket_node_id": f.ticket, "work_shape": "ship", "harness_session_ref": "child-ref-" + uid(), "worker_lease": lease, tc.field: tc.label}
-		w := f.call(f.agent, "POST", base, body, "")
+		body := map[string]any{"agent_principal_id": f.agent.ID, "harness": tc.harness, "host": "build-6", "role": "worker", "management_mode": "unmanaged", "parent_harness_session_id": lead, "ticket_node_id": f.ticket, "work_shape": "ship", "harness_session_ref": "child-ref-" + uid(), "worker_lease": lease, tc.field: tc.label}
+		body["parallel_reason"] = "Compare simultaneous execution kinds in coordinator aggregation"
+		w := f.call(f.person, "POST", base, body, "")
 		expect(t, w, 201)
 		child := decode(t, w)
 		id := child["id"].(string)
@@ -94,7 +95,7 @@ func TestProcessRunValidation(t *testing.T) {
 		{"generator": ""}, {"generator": strings.Repeat("x", 121)}, {"generator": "veo\n3"}, {"generator": "veo<script>"},
 		{"parent_harness_session_id": nil}, {"ticket_node_id": nil}, {"role": "coordinator"}, {"model": "claude"}, {"command": "ffmpeg"},
 	} {
-		body := map[string]any{"agent_principal_id": f.agent.ID, "harness": "media", "generator": "higgsfield/kling3_0", "host": "mbp2606", "role": "worker", "management_mode": "unmanaged", "parent_harness_session_id": lead, "ticket_node_id": f.ticket, "work_shape": "ship", "harness_session_ref": "invalid-ref-" + uid(), "worker_lease": "invalid-lease-" + uid()}
+		body := map[string]any{"agent_principal_id": f.agent.ID, "harness": "media", "generator": "higgsfield/kling3_0", "host": "build-6", "role": "worker", "management_mode": "unmanaged", "parent_harness_session_id": lead, "ticket_node_id": f.ticket, "work_shape": "ship", "harness_session_ref": "invalid-ref-" + uid(), "worker_lease": "invalid-lease-" + uid()}
 		for k, v := range change {
 			body[k] = v
 		}
@@ -113,7 +114,7 @@ func TestCoordinatorProgressCountsMissingAndFinishedWorkers(t *testing.T) {
 		{60, false, false}, {nil, false, false}, {100, true, false}, {90, true, false}, {100, false, true},
 	} {
 		lease := "worker-lease-" + uid()
-		child := f.registerSession(t, f.agent.ID, "worker", f.ticket, "worker-ref-"+uid(), lease)
+		child := f.registerSession(t, f.agent.ID, "worker", f.ticket, "worker-ref-"+uid(), lease, "Compare simultaneous worker progress and completion")
 		f.tx(t, f.person, func(tx pgx.Tx) error {
 			_, err := tx.Exec(t.Context(), `UPDATE harness_sessions SET parent_id=$2,progress_pct=$3 WHERE id=$1`, child, lead, tc.progress)
 			return err

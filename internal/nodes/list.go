@@ -51,7 +51,13 @@ type listEpic struct {
 	Key   string `json:"key"`
 	Title string `json:"title"`
 }
+type waitingPersonStep struct {
+	CheckID string                `json:"check_id"`
+	Label   string                `json:"label"`
+	Owner   workqueue.EntryPerson `json:"owner"`
+}
 type listItem struct {
+	PersonWaiting []waitingPersonStep `json:"person_waiting,omitempty"`
 	nodeJSON
 	KindSlug      string       `json:"kind_slug"`
 	KindLabel     string       `json:"kind_label"`
@@ -127,14 +133,16 @@ type listQuery struct {
 	PrioritiesNot []string `json:"priorities_not,omitempty"`
 	AssigneesNot  []string `json:"assignees_not,omitempty"`
 	// Tags, cost units and releases match by name or label, case-insensitively.
-	Tags           []string `json:"tags,omitempty"`
-	TagsNot        []string `json:"tags_not,omitempty"`
-	CostUnits      []string `json:"cost_units,omitempty"`
-	CostUnitsNot   []string `json:"cost_units_not,omitempty"`
-	Releases       []string `json:"releases,omitempty"`
-	ReleasesNot    []string `json:"releases_not,omitempty"`
-	HumanChecks    []string `json:"human_checks,omitempty"`
-	HumanChecksNot []string `json:"human_checks_not,omitempty"`
+	Tags             []string `json:"tags,omitempty"`
+	TagsNot          []string `json:"tags_not,omitempty"`
+	CostUnits        []string `json:"cost_units,omitempty"`
+	CostUnitsNot     []string `json:"cost_units_not,omitempty"`
+	Releases         []string `json:"releases,omitempty"`
+	ReleasesNot      []string `json:"releases_not,omitempty"`
+	HumanChecks      []string `json:"human_checks,omitempty"`
+	HumanChecksNot   []string `json:"human_checks_not,omitempty"`
+	PersonWaiting    []string `json:"person_waiting,omitempty"`
+	PersonWaitingNot []string `json:"person_waiting_not,omitempty"`
 	// Epics match everything below a named Work or legacy Epic ancestor;
 	// "none" excludes rows with any such ancestor in the selected scope.
 	Epics    []string `json:"epics,omitempty"`
@@ -148,6 +156,10 @@ type listQuery struct {
 	// Only these nodes, with every other filter still applied: a live list
 	// refetches the rows that changed through its own query (AEON-326).
 	IDs []string `json:"ids,omitempty"`
+	// Levels name a work row by its shape: "leaf", else the parent's depth
+	// ("1", "2", …), the rule the workspace vocabulary names (AEON-974).
+	Levels    []string `json:"levels,omitempty"`
+	LevelsNot []string `json:"levels_not,omitempty"`
 	// seen and the lead thresholds are filled by listNodes. They are not
 	// request input and stay out of the cursor fingerprint (unexported).
 	seen        assigneeSeen
@@ -156,7 +168,19 @@ type listQuery struct {
 	modelNames  json.RawMessage
 	planRates   json.RawMessage
 	planPlanner *planner
+	// Internal opt-in stays out of the cursor fingerprint: results are equal.
+	boundedAggregates bool
 }
+
+type boundedListAggregatesKey struct{}
+
+// WithBoundedListAggregates enables the estimate-only sort projection after
+// the caller has checked the routine project execution flag. Nothing in the
+// ordinary HTTP wiring opts in; ETA/progress and page coverage stay unchanged.
+func WithBoundedListAggregates(ctx context.Context) context.Context {
+	return context.WithValue(ctx, boundedListAggregatesKey{}, true)
+}
+
 type listCursor struct {
 	Hash string `json:"hash"`
 	ID   string `json:"id"`
@@ -173,7 +197,10 @@ type treeQuery struct {
 const maxListIDs = 200
 
 var validSort = map[string]bool{"key": true, "title": true, "state": true, "priority": true, "kind": true, "updated_at": true, "created_at": true, "position": true, "assignee": true, "eta_ready": true, "progress": true, "estimate": true, "model": true, "tokens": true, "list_cost": true, "paid": true}
-var validFacet = map[string]bool{"shape": true, "depth": true, "state": true, "kind": true, "priority": true, "assignee": true, "tag": true, "cost_unit": true, "release": true, "human_check": true}
+var validFacet = map[string]bool{"shape": true, "depth": true, "level": true, "state": true, "kind": true, "priority": true, "assignee": true, "tag": true, "cost_unit": true, "release": true, "human_check": true, "person_waiting": true}
+
+// levelSQL is a work row's level from its shape s: "leaf", else the depth.
+const levelSQL = `CASE WHEN s.is_leaf THEN 'leaf' ELSE s.depth::text END`
 
 // dateFieldKeys maps date_field to the fields key of dates kept in node fields.
 var dateFieldKeys = map[string]string{"start": "start_date", "end": "end_date", "accepted": "accepted_at"}
@@ -276,6 +303,18 @@ func parseListQuery(r *http.Request) (listQuery, error) {
 	if len(out.Depths)+len(out.DepthsNot) > 32 {
 		return out, badRequest("too many depths")
 	}
+	if out.Levels, out.LevelsNot, err = negatedList(r, "level", func(v string) (string, bool) {
+		if v == "leaf" {
+			return v, true
+		}
+		n, e := strconv.Atoi(v)
+		return strconv.Itoa(n), e == nil && n >= 1 && n <= 50000
+	}); err != nil {
+		return out, err
+	}
+	if len(out.Levels)+len(out.LevelsNot) > 33 {
+		return out, badRequest("too many levels")
+	}
 	if out.Kinds, out.KindsNot, err = negatedList(r, "kind", nil); err != nil {
 		return out, err
 	}
@@ -354,6 +393,11 @@ func parseListQuery(r *http.Request) (listQuery, error) {
 		return out, err
 	}
 	if err = parseDateFilter(r, &out); err != nil {
+		return out, err
+	}
+	if out.PersonWaiting, out.PersonWaitingNot, err = negatedList(r, "person_waiting", func(value string) (string, bool) {
+		return value, value == "pending" || value == "mine" || value == "none"
+	}); err != nil {
 		return out, err
 	}
 	if out.FacetNames, err = queryList(r, "facets"); err != nil {
@@ -522,6 +566,7 @@ func listFingerprint(q listQuery) string {
 	return hex.EncodeToString(sum[:])
 }
 func (m *Module) listNodes(ctx context.Context, tenantID string, q listQuery) (nodePage, error) {
+	q.boundedAggregates, _ = ctx.Value(boundedListAggregatesKey{}).(bool)
 	ctx, cancel := context.WithTimeout(ctx, eta.AggregateReadTimeout)
 	defer cancel()
 	var mark *listCursor
@@ -668,6 +713,9 @@ func (m *Module) listNodes(ctx context.Context, tenantID string, q listQuery) (n
 				return err
 			}
 			page.NextCursor = &cursor
+		}
+		if err := loadPersonWaiting(ctx, tx, page.Items); err != nil {
+			return err
 		}
 		if len(q.FacetNames) > 0 {
 			page.Facets = map[string]map[string]int{}
@@ -1098,6 +1146,23 @@ func listFilterSQL(q listQuery, sortFields bool) (string, []any) {
 	}
 	add(q.HumanChecks, checkMatch)
 	add(q.HumanChecksNot, not(checkMatch))
+	personMatch := func(values []string) string {
+		terms := []string{}
+		for _, v := range values {
+			exists := `EXISTS(SELECT 1 FROM jsonb_array_elements(aeon_person_steps(n.id)) step WHERE step->>'active'='true'`
+			if v == "mine" {
+				exists += ` AND step->'owner'->>'id'=ANY(SELECT x::text FROM unnest(aeon_current_principals()) x)`
+			}
+			exists += `)`
+			if v == "none" {
+				exists = `NOT ` + exists
+			}
+			terms = append(terms, exists)
+		}
+		return "(" + strings.Join(terms, " OR ") + ")"
+	}
+	add(q.PersonWaiting, personMatch)
+	add(q.PersonWaitingNot, not(personMatch))
 	// Named parents retain their subtree membership. Parent absence needs only
 	// a set of descendant IDs, not one overlapping subtree per Work ancestor.
 	epicCTE := ""
@@ -1188,13 +1253,14 @@ func listFilterSQL(q listQuery, sortFields bool) (string, []any) {
 		p := arg(q.KindsNot)
 		conditions += " AND NOT (k.slug=ANY(" + p + "::text[]) OR (k.slug='work' AND " + p + "::text[] && ARRAY['epic','ticket','task']) OR n.kind_id::text=ANY(" + p + "::text[]))"
 	}
-	if len(q.Shapes)+len(q.ShapesNot)+len(q.Depths)+len(q.DepthsNot) > 0 {
+	if len(q.Shapes)+len(q.ShapesNot)+len(q.Depths)+len(q.DepthsNot)+len(q.Levels)+len(q.LevelsNot) > 0 {
 		shape := `(SELECT CASE WHEN s.is_leaf THEN 'leaf' ELSE 'parent' END FROM aeon_work_shape(n.id) s)`
 		depth := `(SELECT s.depth::text FROM aeon_work_shape(n.id) s)`
+		level := `(SELECT ` + levelSQL + ` FROM aeon_work_shape(n.id) s)`
 		for _, f := range []struct {
 			expr    string
 			in, out []string
-		}{{shape, q.Shapes, q.ShapesNot}, {depth, q.Depths, q.DepthsNot}} {
+		}{{shape, q.Shapes, q.ShapesNot}, {depth, q.Depths, q.DepthsNot}, {level, q.Levels, q.LevelsNot}} {
 			if len(f.in) > 0 {
 				conditions += " AND " + f.expr + "=ANY(" + arg(f.in) + "::text[])"
 			}
@@ -1207,13 +1273,7 @@ func listFilterSQL(q listQuery, sortFields bool) (string, []any) {
 	kindJoin := ` JOIN node_kinds k ON k.id=n.kind_id AND k.tenant_id=n.tenant_id `
 	kindCTE := ""
 	scopeRoot := `coalesce($7::uuid, CASE WHEN $8::bool AND $10::bool THEN $9::uuid ELSE NULL::uuid END)`
-	scopeSeed := ""
 	if q.Within != nil || (q.ParentSet && q.Descendants) {
-		if q.Within != nil {
-			scopeSeed = ` AND id=$7::uuid`
-		} else {
-			scopeSeed = ` AND id=$9::uuid`
-		}
 		// Drive scoped lists from the tree. A membership subquery can rescan
 		// every scope ID for every candidate when the bulk-import statistics
 		// change, while a lateral ID lookup stays bounded per tree row.
@@ -1257,11 +1317,28 @@ func listFilterSQL(q listQuery, sortFields bool) (string, []any) {
 			closedPred = workHideStateSQL("n.state", "cfg") + " <> ALL(" + arg(q.HideStates) + "::text[])"
 		}
 	}
-	return `WITH RECURSIVE scope(id) AS (
-        SELECT id FROM nodes WHERE tenant_id=current_setting('aeon.tenant_id')::uuid AND deleted_at IS NULL AND id=` + scopeRoot + scopeSeed + `
-        UNION ALL SELECT c.id FROM scope s CROSS JOIN LATERAL (
-            SELECT id FROM nodes WHERE tenant_id=current_setting('aeon.tenant_id')::uuid AND parent_id=s.id AND deleted_at IS NULL
-            ORDER BY updated_at DESC OFFSET 0
+	// Child pages keep the sibling-index probe cheap even when stale statistics
+	// estimate that every node has the same parent. Only the last row of a full
+	// page continues its siblings; every scoped node also starts its own children.
+	// The root has no paging parent, so siblings outside the scope stay excluded.
+	return `WITH RECURSIVE scope(id,parent_id,next_page) AS (
+        SELECT n.id,NULL::uuid,false FROM unnest(ARRAY[` + scopeRoot + `]) seed(id) CROSS JOIN LATERAL (
+            SELECT id,deleted_at FROM nodes WHERE tenant_id=current_setting('aeon.tenant_id')::uuid
+                AND id=seed.id ORDER BY id LIMIT 1
+        ) n WHERE n.deleted_at IS NULL
+        UNION ALL SELECT c.* FROM scope s CROSS JOIN LATERAL (
+            (SELECT c.*,row_number() OVER (ORDER BY id)=128 FROM (
+                SELECT id,parent_id FROM nodes WHERE tenant_id=current_setting('aeon.tenant_id')::uuid
+                    AND parent_id=s.id AND deleted_at IS NULL
+                    AND (parent_id,id)>=(s.id,'00000000-0000-0000-0000-000000000000'::uuid)
+                    ORDER BY id LIMIT 128
+            ) c)
+            UNION ALL
+            (SELECT c.*,row_number() OVER (ORDER BY id)=128 FROM (
+                SELECT id,parent_id FROM nodes WHERE tenant_id=current_setting('aeon.tenant_id')::uuid
+                    AND s.next_page AND parent_id=s.parent_id AND deleted_at IS NULL
+                    AND (parent_id,id)>(s.parent_id,s.id) ORDER BY id LIMIT 128
+            ) c)
         ) c
     )` + kindCTE + epicCTE + configuredCTE + `, filtered AS MATERIALIZED (
 		SELECT n.id,n.project_id,` + projection + `
@@ -1402,7 +1479,10 @@ func listSQL(q listQuery, anchor any) (string, []any) {
 	}
 	aggregateCTE := ""
 	if etaJoin != "" || estimateJoin != "" {
-		aggregateCTE = `, work_values AS MATERIALIZED (SELECT * FROM aeon_work_aggregates(ARRAY(SELECT id FROM filtered)))`
+		aggregateCTE = `, work_values AS MATERIALIZED (` + eta.AggregateSQL("ARRAY(SELECT id FROM filtered)") + `)`
+		if q.boundedAggregates && etaJoin == "" {
+			aggregateCTE = listEstimateSortSQL()
+		}
 	}
 	sql := prefix + aggregateCTE + planningCTE + `, ordered AS (SELECT f.id,row_number() OVER (ORDER BY ` + listOrder(q) + `) AS rn` + orderedLead + ` FROM filtered f` + people + etaJoin + estimateJoin + planningJoin + `),
     cursor_guard AS (SELECT (` + anchorArg + `::uuid IS NULL OR EXISTS(SELECT 1 FROM ordered WHERE id=` + anchorArg + `::uuid)) AS valid),
@@ -1444,6 +1524,26 @@ func listSQL(q listQuery, anchor any) (string, []any) {
     ) SELECT page_rows.*,cursor_guard.valid FROM cursor_guard LEFT JOIN page_rows ON true ORDER BY page_rows.rn`
 	return sql, args
 }
+
+// Estimate sorting needs every filtered root's complete leaf sum, but no
+// session ETA/completion evidence. Reuse the published scope function so RLS,
+// cycles, historical shapes and the 4096-root/50000-pair limits remain exact.
+// Closed leaves retain their own estimate, including cancelled/archived ones;
+// only the rolled-up leaf sums exclude those two buckets (as in 1230).
+func listEstimateSortSQL() string {
+	return `, estimate_scope AS MATERIALIZED (
+        SELECT * FROM aeon_work_scope(ARRAY(SELECT id FROM filtered))
+    ), estimate_totals AS (
+        SELECT root, sum(` + estimateHoursSQL("fields") + `) FILTER (
+            WHERE is_leaf AND bucket NOT IN ('archived','cancelled')) AS hours
+        FROM estimate_scope GROUP BY root
+    ), work_values AS MATERIALIZED (
+        SELECT own.root AS id, CASE WHEN own.is_leaf THEN ` + estimateHoursSQL("own.fields") + `
+            ELSE totals.hours END AS hours
+        FROM estimate_scope own JOIN estimate_totals totals ON totals.root=own.root
+        WHERE own.id=own.root
+    )`
+}
 func facetSQL(q listQuery) (string, []any) {
 	prefix, args := listFilterSQL(q, false)
 	args = append(args, q.FacetNames)
@@ -1465,9 +1565,16 @@ func facetSQL(q listQuery) (string, []any) {
 	if want("depth") {
 		extra += ` UNION ALL SELECT 'depth',s.depth::text FROM filtered f CROSS JOIN LATERAL aeon_work_shape(f.id) s`
 	}
+	if want("level") {
+		extra += ` UNION ALL SELECT 'level',` + levelSQL + ` FROM filtered f CROSS JOIN LATERAL aeon_work_shape(f.id) s`
+	}
 	if want("human_check") {
 		extra += `
     UNION ALL SELECT 'human_check',CASE WHEN ` + pendingHumanCheckSQL + ` THEN 'pending' ELSE 'none' END FROM filtered f JOIN nodes n ON n.id=f.id`
+	}
+	if want("person_waiting") {
+		extra += ` UNION ALL SELECT 'person_waiting',CASE WHEN EXISTS(SELECT 1 FROM jsonb_array_elements(aeon_person_steps(f.id)) step WHERE step->>'active'='true') THEN 'pending' ELSE 'none' END FROM filtered f
+        UNION ALL SELECT 'person_waiting','mine' FROM filtered f WHERE EXISTS(SELECT 1 FROM jsonb_array_elements(aeon_person_steps(f.id)) step WHERE step->>'active'='true' AND step->'owner'->>'id'=ANY(SELECT x::text FROM unnest(aeon_current_principals()) x))`
 	}
 	if want("tag") {
 		extra += `
@@ -1786,6 +1893,7 @@ func (m *Module) handleListProjects(w http.ResponseWriter, r *http.Request) {
                 SELECT s.project_id,coalesce(a.linked_to,a.id) AS person,max(r.at) AS at
                 FROM recent r JOIN subtree s ON s.node_id=r.node_id
                 JOIN principals a ON a.tenant_id=current_setting('aeon.tenant_id')::uuid AND a.id=r.actor_principal_id
+                WHERE NOT (a.kind='agent' AND a.roles && `+servicePrincipalRoles+`)
                 GROUP BY s.project_id,coalesce(a.linked_to,a.id)
             ), ranked AS (
                 SELECT project_id,person,at,row_number() OVER (PARTITION BY project_id ORDER BY at DESC,person) AS n FROM actors
@@ -1826,4 +1934,36 @@ func (m *Module) handleListProjects(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, page)
+}
+
+func loadPersonWaiting(ctx context.Context, tx pgx.Tx, items []listItem) error {
+	if len(items) == 0 {
+		return nil
+	}
+	ids := make([]string, len(items))
+	byID := map[string]int{}
+	for i := range items {
+		ids[i] = items[i].ID
+		byID[ids[i]] = i
+	}
+	rows, err := tx.Query(ctx, `SELECT n.id::text,coalesce((SELECT jsonb_agg(jsonb_build_object('check_id',step->>'check_id','label',step->>'label','owner',step->'owner')) FROM jsonb_array_elements(aeon_person_steps(n.id)) step WHERE step->>'active'='true'),'[]'::jsonb) FROM nodes n WHERE n.id=ANY($1::uuid[])`, ids)
+	if err != nil {
+		return err
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var id string
+		var raw []byte
+		if err = rows.Scan(&id, &raw); err != nil {
+			return err
+		}
+		if len(raw) > 65536 {
+			return badRequest("person-step list coverage exceeded")
+		}
+		i := byID[id]
+		if err = json.Unmarshal(raw, &items[i].PersonWaiting); err != nil {
+			return err
+		}
+	}
+	return rows.Err()
 }

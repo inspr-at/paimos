@@ -1,0 +1,31 @@
+# SPDX-License-Identifier: AGPL-3.0-only
+# aeon:owner internal/fromclassic
+paths:
+  /from-classic:
+    get:
+      operationId: resolveFromClassic
+      summary: Resolve a classic Paimos browser link within the caller's visibility
+      description: Resolves only known classic paths. Missing, ambiguous and invisible targets all return the same home destination and notice. Query parameters on the classic path are accepted but are not forwarded to Aeon.
+      security: *auth
+      parameters:
+        - name: path
+          in: query
+          required: true
+          description: Original absolute classic browser path, with optional query string.
+          schema: {type: string, maxLength: 2048, example: '/issues/42?tab=activity'}
+      responses:
+        '200':
+          description: A safe, relative Aeon route and an optional notice for fallback destinations.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [path]
+                properties:
+                  path: {type: string, pattern: '^/', example: '/p/PAI/PAI-42'}
+                  notice: {type: string, description: Present only when the original link cannot be resolved.}
+        '400':
+          $ref: '#/components/responses/Error'
+        '401':
+          $ref: '#/components/responses/Error'
+components:

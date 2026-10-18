@@ -7,18 +7,22 @@ import (
 	"encoding/json"
 	"errors"
 	"net/http"
-	"slices"
 	"sort"
 	"strings"
 	"time"
 
-	"github.com/jackc/pgx/v5"
-
+	"github.com/inspr-at/paimos/internal/accountuse"
 	"github.com/inspr-at/paimos/internal/agentpairing"
+	"github.com/inspr-at/paimos/internal/authz"
+	"github.com/inspr-at/paimos/internal/events"
 	"github.com/inspr-at/paimos/internal/tenant"
+	"github.com/inspr-at/paimos/internal/workorders"
+	"github.com/jackc/pgx/v5"
 )
 
 type runRow struct {
+	RoutineLaunchID       *string
+	Trace                 json.RawMessage
 	Residency             string
 	LimitEstimates        map[string]int64
 	CapacityOverride      string
@@ -35,6 +39,29 @@ type runRow struct {
 	Generation            *string
 }
 
+// Routine holds survive terminal labels and lost heartbeats. Only the exact
+// assigned daemon's accepted process evidence permits settlement or release.
+func routineExitObservedTx(ctx context.Context, tx pgx.Tx, run runRow) (bool, error) {
+	if run.RoutineLaunchID == nil {
+		return true, nil
+	}
+	// A personal routine's intent is hidden from its daemon's projection; this
+	// internal read returns only whether the exact launch exit was observed.
+	var visibility, system string
+	if err := tx.QueryRow(ctx, `SELECT coalesce(current_setting('aeon.visible_projects',true),''),coalesce(current_setting('aeon.system',true),'')`).Scan(&visibility, &system); err != nil {
+		return false, err
+	}
+	if _, err := tx.Exec(ctx, `SELECT set_config('aeon.visible_projects','*',true),set_config('aeon.system','on',true)`); err != nil {
+		return false, err
+	}
+	var observed bool
+	if err := tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM routine_launch_intents WHERE id=$1 AND agent_run_id=$2 AND state='exit_observed' AND exit_observed_at IS NOT NULL)`, *run.RoutineLaunchID, run.ID).Scan(&observed); err != nil {
+		return false, err // caller rolls back, including visibility
+	}
+	_, err := tx.Exec(ctx, `SELECT set_config('aeon.visible_projects',$1,true),set_config('aeon.system',$2,true)`, visibility, system)
+	return observed, err
+}
+
 func lockRun(ctx context.Context, tx pgx.Tx, id string) (runRow, error) {
 	if !uuidRE.MatchString(id) {
 		return runRow{}, fail(http.StatusNotFound, "run not found")
@@ -43,11 +70,11 @@ func lockRun(ctx context.Context, tx pgx.Tx, id string) (runRow, error) {
 	err := tx.QueryRow(ctx, `
 		SELECT r.id::text, r.agent_principal_id::text, r.model_profile_id::text, r.account_id::text,
          r.status, r.daemon_id, r.daemon_generation, COALESCE(r.requested_account_id,r.retry_account_id)::text,
-         r.purpose, e.account_id::text, e.verification_expires_at, r.capacity_override, r.account_limit_estimates
+         r.purpose, e.account_id::text, e.verification_expires_at, r.capacity_override, r.account_limit_estimates,r.routine_launch_id::text,r.trace
   FROM agent_runs r LEFT JOIN agent_pairing_enrollments e
    ON e.tenant_id=r.tenant_id AND e.verification_run_id=r.id
   WHERE r.id = $1::uuid FOR UPDATE OF r`, id).
-		Scan(&run.ID, &run.AgentID, &run.ProfileID, &run.AccountID, &run.Status, &run.DaemonID, &run.Generation, &run.RequestedAccountID, &run.Purpose, &run.VerificationAccountID, &run.VerificationExpiresAt, &run.CapacityOverride, &run.LimitEstimates)
+		Scan(&run.ID, &run.AgentID, &run.ProfileID, &run.AccountID, &run.Status, &run.DaemonID, &run.Generation, &run.RequestedAccountID, &run.Purpose, &run.VerificationAccountID, &run.VerificationExpiresAt, &run.CapacityOverride, &run.LimitEstimates, &run.RoutineLaunchID, &run.Trace)
 	if isNoRows(err) {
 		return runRow{}, fail(http.StatusNotFound, "run not found")
 	}
@@ -56,6 +83,9 @@ func lockRun(ctx context.Context, tx pgx.Tx, id string) (runRow, error) {
 
 func reserve(ctx context.Context, tx pgx.Tx, r *http.Request, p tenant.Principal, runID, daemonID string, accountIDs []string, estimates map[string]int64) (RouteResult, error) {
 	if err := agentpairing.Lock(ctx, tx); err != nil {
+		return RouteResult{}, err
+	}
+	if err := accountuse.LockShared(ctx, tx); err != nil {
 		return RouteResult{}, err
 	}
 	if err := validateEstimates(estimates); err != nil {
@@ -84,11 +114,23 @@ func reserve(ctx context.Context, tx pgx.Tx, r *http.Request, p tenant.Principal
 	if err := authorizeRoute(ctx, tx, r, p, run.AgentID, run.ID); err != nil {
 		return RouteResult{}, err
 	}
+	if err := agentpairing.RequireRoutineRouteTx(ctx, tx, p, run.ID, daemonID, run.RoutineLaunchID, run.Trace, r.Header.Get(agentpairing.RoutinePickupHeader), r.Header.Get(agentpairing.LedgerGenerationHeader)); err != nil {
+		return RouteResult{}, err
+	}
+	if _, err := workorders.GuardRoutineRunTx(ctx, tx, runID); err != nil {
+		return RouteResult{}, err
+	}
+	if err := agentpairing.RequireLedgerWork(ctx, tx, p, r.Header.Get(agentpairing.LedgerGenerationHeader)); err != nil {
+		return RouteResult{}, err
+	}
 	// A person's account choice narrows the daemon's enrolled set; it never
 	// bypasses ownership, probe, capacity or allowance checks. No fallback.
 	if run.RequestedAccountID != nil {
 		if !enrolled[*run.RequestedAccountID] {
 			return RouteResult{}, fail(http.StatusConflict, "requested account is not enrolled by this daemon")
+		}
+		if err := accountuse.RequireRun(ctx, tx, *run.RequestedAccountID, run.ID); err != nil {
+			return RouteResult{}, err
 		}
 		accountIDs = []string{*run.RequestedAccountID}
 		enrolled = map[string]bool{*run.RequestedAccountID: true}
@@ -139,6 +181,105 @@ func reserve(ctx context.Context, tx pgx.Tx, r *http.Request, p tenant.Principal
 	if limitEstimates == nil {
 		limitEstimates = map[string]int64{}
 	}
+	result, err := persistReservation(ctx, tx, p, run, account, windows, limitEstimates, estimates, now)
+	if err != nil {
+		return RouteResult{}, err
+	}
+	if err := writeEvent(ctx, tx, p, evReserved, nil, result); err != nil {
+		return RouteResult{}, err
+	}
+	return result, nil
+}
+
+// ReserveRoutineAccountTx shares the router's exact account selection and
+// reservation write, without a network/daemon call or event append. The server
+// must hold tenant/tree/pairing and revalidate consent before entering. An
+// ordinary run cannot use this seam; current owned native enrollment is required.
+func ReserveRoutineAccountTx(ctx context.Context, tx pgx.Tx, p tenant.Principal, routine, runID, accountID string, actorRole ...string) (result RouteResult, change events.Change, err error) {
+	defer func() {
+		var refusal *httpError
+		if errors.As(err, &refusal) && refusal.status == http.StatusConflict {
+			reason := refusal.code
+			if reason == "" {
+				reason = "routine_account_unavailable"
+			}
+			err = workorders.Fail(409, reason)
+		}
+	}()
+	if p.Kind != tenant.Agent || !workorders.UUID(routine) || !workorders.UUID(runID) || !workorders.UUID(accountID) {
+		return RouteResult{}, events.Change{}, workorders.Fail(400, "invalid_routine_account_binding")
+	}
+	var bound bool
+	var project string
+	role := "build"
+	if len(actorRole) == 1 {
+		role = actorRole[0]
+	}
+	if len(actorRole) > 1 || role != "build" && role != "review" && role != "fix" {
+		return RouteResult{}, events.Change{}, workorders.Fail(400, "invalid_routine_actor")
+	}
+	if err := tx.QueryRow(ctx, `SELECT r.output_project_id::text,r.execute_consent AND r.consent_revision=r.definition_revision AND ar.agent_principal_id=$3 AND
+ ((r.agent_run_id=ar.id AND r.state IN ('created','pending') AND $4='build') OR
+ (r.state IN ('dispatched','starting','running') AND $4 IN ('review','fix') AND EXISTS(SELECT 1 FROM routine_attempts a JOIN routine_budget_orders b ON b.run_id=a.run_id AND b.work_order_id=ar.work_order_id WHERE a.run_id=r.id AND a.agent_run_id=ar.id AND a.role=$4 AND a.assignment_digest=r.assignment_digest)))
+ FROM routine_runs r JOIN agent_runs ar ON ar.tenant_id=r.tenant_id AND ar.id=$2 WHERE r.id=$1`, routine, runID, p.ID, role).Scan(&project, &bound); err != nil {
+		return RouteResult{}, events.Change{}, err
+	}
+	if !bound {
+		return RouteResult{}, events.Change{}, workorders.Fail(409, "routine_intent_required")
+	}
+	if err := authz.RequireTx(ctx, tx, p, "run.claim", authz.Scope{ProjectID: project}); err != nil {
+		return RouteResult{}, events.Change{}, err
+	}
+	if err := accountuse.LockShared(ctx, tx); err != nil {
+		return RouteResult{}, events.Change{}, err
+	}
+	run, err := lockRun(ctx, tx, runID)
+	if err != nil {
+		return RouteResult{}, events.Change{}, err
+	}
+	if run.Status != "queued" || run.AccountID != nil || run.ProfileID == nil {
+		return RouteResult{}, events.Change{}, workorders.Fail(409, "routine_account_unbound")
+	}
+	if err := accountuse.RequireRun(ctx, tx, accountID, runID); err != nil {
+		return RouteResult{}, events.Change{}, err
+	}
+	var daemon, harness string
+	err = tx.QueryRow(ctx, `SELECT a.daemon_id,m.harness FROM agent_accounts a JOIN model_profiles m ON m.tenant_id=a.tenant_id AND m.id=$2 WHERE a.id=$1 AND a.registered_by_principal_id=$3 AND m.enabled`, accountID, *run.ProfileID, p.ID).Scan(&daemon, &harness)
+	if err != nil {
+		return RouteResult{}, events.Change{}, err
+	}
+	now, err := dbNow(ctx, tx)
+	if err != nil {
+		return RouteResult{}, events.Change{}, err
+	}
+	// No daemon request supplies estimates here. Hold the account's learned
+	// per-unit usage, which its limit rules already project, so hand-set
+	// windows admit and hold the routine like any other run.
+	learned, err := learnedLimitEstimates(ctx, tx, accountID, nil)
+	if err != nil {
+		return RouteResult{}, events.Change{}, err
+	}
+	estimates := map[string]int64{}
+	for unit, n := range learned {
+		if validUnit(unit) {
+			estimates[unit] = n
+		}
+	}
+	account, windows, limits, err := selectAccount(ctx, tx, run, p.ID, harness, *run.ProfileID, daemon, []string{accountID}, estimates, now)
+	if err != nil {
+		return RouteResult{}, events.Change{}, err
+	}
+	if err = agentpairing.RunFence(ctx, tx, account.ID, run.ID, false); err != nil {
+		return RouteResult{}, events.Change{}, err
+	}
+	result, err = persistReservation(ctx, tx, p, run, account, windows, limits, estimates, now)
+	return result, events.Change{Type: evReserved, After: result}, err
+}
+
+func persistReservation(ctx context.Context, tx pgx.Tx, p tenant.Principal, run runRow, account Account, windows []Window, limitEstimates, estimates map[string]int64, now time.Time) (RouteResult, error) {
+	if limitEstimates == nil {
+		limitEstimates = map[string]int64{}
+	}
 	rawEstimates, err := json.Marshal(limitEstimates)
 	if err != nil {
 		return RouteResult{}, err
@@ -183,9 +324,6 @@ func reserve(ctx context.Context, tx pgx.Tx, r *http.Request, p tenant.Principal
 		}
 		result.Reservations = append(result.Reservations, Reservation{ReservationID: id, WindowID: window.ID, Unit: window.Unit})
 	}
-	if err := writeEvent(ctx, tx, p, evReserved, nil, result); err != nil {
-		return RouteResult{}, err
-	}
 	return result, nil
 }
 
@@ -193,13 +331,29 @@ func reserve(ctx context.Context, tx pgx.Tx, r *http.Request, p tenant.Principal
 // The caller must authenticate ownership and acquire agentpairing.Lock before
 // any run/account row locks. Re-entering the transaction lock here is safe only
 // in that order; it serializes quota signals, pooling, routing and launch.
-func ValidateReservedCapacity(ctx context.Context, tx pgx.Tx, runID, accountID string) error {
+// RoutineStartCheck is installed by the qualified final-claim integration.
+// No adapter means routine claims wait; ordinary claims remain compatible.
+type RoutineStartCheck func(context.Context, pgx.Tx, string, string) error
+
+func ValidateReservedCapacity(ctx context.Context, tx pgx.Tx, runID, accountID string, routineChecks ...RoutineStartCheck) error {
 	if err := agentpairing.Lock(ctx, tx); err != nil {
 		return err
 	}
 	run, err := lockRun(ctx, tx, runID)
 	if err != nil {
 		return err
+	}
+	routine, err := workorders.GuardRoutineRunTx(ctx, tx, runID)
+	if err != nil {
+		return err
+	}
+	if routine {
+		if len(routineChecks) != 1 || routineChecks[0] == nil {
+			return workorders.Fail(409, "routine_start_check_unavailable")
+		}
+		if err := routineChecks[0](ctx, tx, runID, accountID); err != nil {
+			return err
+		}
 	}
 	return validateReservedAccount(ctx, tx, run, accountID)
 }
@@ -250,6 +404,13 @@ func rerouteMovedAccount(ctx context.Context, tx pgx.Tx, r *http.Request, p tena
 }
 
 func validateReservedAccount(ctx context.Context, tx pgx.Tx, run runRow, accountID string) error {
+	if err := accountuse.RequireRun(ctx, tx, accountID, run.ID); err != nil {
+		var denied *accountuse.Error
+		if errors.As(err, &denied) && denied.Message == accountuse.NotAllowed {
+			return &httpError{status: 409, code: accountuse.NotAllowed, msg: accountuse.NotAllowed}
+		}
+		return err
+	}
 	a, err := lockAccount(ctx, tx, accountID)
 	if err != nil {
 		return err
@@ -261,8 +422,14 @@ func validateReservedAccount(ctx context.Context, tx pgx.Tx, run runRow, account
 	if err != nil {
 		return err
 	}
-	if run.ProfileID == nil || a.State != "available" || !probeFresh(a, now) ||
-		(a.AllowedProfileIDs != nil && !slices.Contains(a.AllowedProfileIDs, *run.ProfileID)) {
+	if run.ProfileID == nil || a.State != "available" || !probeFresh(a, now) {
+		return fail(http.StatusConflict, "reserved account is not eligible")
+	}
+	allowed, err := AccountAllowsProfile(ctx, tx, a, *run.ProfileID)
+	if err != nil {
+		return err
+	}
+	if !allowed {
 		return fail(http.StatusConflict, "reserved account is not eligible")
 	}
 	eligible, _, err := narrowCandidates(ctx, tx, run, a.Harness, []Account{a})
@@ -307,6 +474,9 @@ func validateReservedAccount(ctx context.Context, tx pgx.Tx, run runRow, account
 			return err
 		}
 		if wait != nil {
+			if wait.Code == "daily_limit" || wait.Code == "daily_limit_unknown" {
+				return &httpError{status: http.StatusConflict, code: wait.Code, msg: wait.Code}
+			}
 			return fail(http.StatusConflict, "reserved capacity is not eligible: "+wait.Code)
 		}
 		for _, w := range windows {
@@ -372,6 +542,10 @@ func authorizeRoute(ctx context.Context, tx pgx.Tx, r *http.Request, p tenant.Pr
 }
 
 func activeRoute(ctx context.Context, tx pgx.Tx, run runRow, principalID, daemonID string, enrolled map[string]bool) (RouteResult, bool, error) {
+	bound, err := computerAccountIDs(ctx, tx, principalID)
+	if err != nil {
+		return RouteResult{}, false, err
+	}
 	rows, err := tx.Query(ctx, `
 		SELECT r.id::text, r.window_id::text, w.unit, a.id::text, a.account_key, a.daemon_id,
 		       a.registered_by_principal_id::text, a.label, a.billing_mode, a.plan, w.pairing_verification, w.ends_at, w.allowance
@@ -393,7 +567,7 @@ func activeRoute(ctx context.Context, tx pgx.Tx, run runRow, principalID, daemon
 		if err := rows.Scan(&item.ReservationID, &item.WindowID, &item.Unit, &accountID, &key, &ownerDaemonID, &ownerID, &label, &billing, &plan, &window.pairingVerification, &window.EndsAt, &window.Allowance); err != nil {
 			return RouteResult{}, false, err
 		}
-		if ownerDaemonID != daemonID || ownerID != principalID || !enrolled[accountID] {
+		if ownerDaemonID != daemonID || ownerID != principalID && !bound[accountID] || !enrolled[accountID] {
 			return RouteResult{}, false, fail(http.StatusConflict, "run is routed outside daemon enrollment")
 		}
 		window.AccountID, window.Unit = accountID, item.Unit
@@ -433,6 +607,9 @@ type ranked struct {
 	reset          *time.Time
 	slots          int
 	presence       bool
+	soonest        *time.Time
+	posture        string
+	projected      float64
 }
 
 func selectAccount(ctx context.Context, tx pgx.Tx, run runRow, principalID, harness, profileID, daemonID string, accountIDs []string, estimates map[string]int64, now time.Time) (Account, []Window, map[string]int64, error) {
@@ -441,11 +618,16 @@ func selectAccount(ctx context.Context, tx pgx.Tx, run runRow, principalID, harn
 		       registered_by_principal_id::text, state, last_probe_at, last_probe_ok,
 		       last_daemon_generation, created_at, plan, host_label, allowed_model_profile_ids::text[], reading_support, quota_fingerprint, statusline_enabled, provider, model, model_status, model_data_note, openrouter_credits, COALESCE(group_id::text,''), quota_pool_fingerprint, billing_mode
 		FROM agent_accounts
-		WHERE harness = $1 AND daemon_id = $2 AND registered_by_principal_id = $3::uuid
+		WHERE harness = $1 AND daemon_id = $2 AND (registered_by_principal_id = $3::uuid OR EXISTS (
+          SELECT 1 FROM agent_pairing_enrollments e JOIN agent_pairing_computers c
+          ON c.tenant_id=e.tenant_id AND c.id=e.computer_id
+          WHERE e.tenant_id=agent_accounts.tenant_id AND e.account_id=agent_accounts.id
+            AND c.principal_id=$3::uuid AND c.daemon_id=$2 AND c.state='connected' AND e.state='connected'))
 		  AND id::text = ANY($4::text[]) AND state = 'available'
-          AND (allowed_model_profile_ids IS NULL OR $5::uuid = ANY(allowed_model_profile_ids))
+          AND aeon_account_allows_profile(harness,allowed_model_profile_ids,$5::uuid)
+          AND aeon_account_use_allowed(id,$6::uuid)
 		ORDER BY id
-		FOR UPDATE`, harness, daemonID, principalID, accountIDs, profileID)
+		FOR UPDATE`, harness, daemonID, principalID, accountIDs, profileID, run.ID)
 	if err != nil {
 		return Account{}, nil, nil, err
 	}
@@ -491,6 +673,7 @@ func selectAccount(ctx context.Context, tx pgx.Tx, run runRow, principalID, harn
 		return Account{}, nil, nil, err
 	}
 	var picks []ranked
+	dailyReason := ""
 	for _, account := range accounts {
 		slots := slotCount(account, usedSlots, quotaSlots)
 		if !probeFresh(account, now) || slots >= account.MaxParallel {
@@ -522,6 +705,9 @@ func selectAccount(ctx context.Context, tx pgx.Tx, run runRow, principalID, harn
 				return Account{}, nil, nil, err
 			}
 			if wait != nil {
+				if wait.Code == "daily_limit_unknown" || wait.Code == "daily_limit" && dailyReason == "" {
+					dailyReason = wait.Code
+				}
 				continue
 			}
 		}
@@ -554,6 +740,9 @@ func selectAccount(ctx context.Context, tx pgx.Tx, run runRow, principalID, harn
 		picks = append(picks, pick)
 	}
 	if len(picks) == 0 {
+		if dailyReason != "" {
+			return Account{}, nil, nil, &httpError{status: http.StatusConflict, code: dailyReason, msg: dailyReason}
+		}
 		return Account{}, nil, nil, fail(http.StatusConflict, "no eligible account")
 	}
 	orderPicks(picks)
@@ -602,22 +791,36 @@ func lockAccountWindows(ctx context.Context, tx pgx.Tx, accountIDs []string) (ma
 }
 
 func readAccountWindows(ctx context.Context, tx pgx.Tx, accountIDs []string, lock bool) (map[string][]Window, error) {
+	return readAccountWindowsLimit(ctx, tx, accountIDs, lock, 0)
+}
+
+func readAccountWindowsLimit(ctx context.Context, tx pgx.Tx, accountIDs []string, lock bool, bound int) (map[string][]Window, error) {
 	query := `
 		SELECT id::text, account_id::text, starts_at, ends_at, unit, allowance, used, reserved,
 		       pace_model, burst_ratio::float8, pairing_verification, capacity_read_at, capacity_allowed, COALESCE(capacity_kind,''), capacity_bucket, capacity_retired, capacity_refresh_run::text, COALESCE(capacity_source,'')
 		FROM account_allowance_windows
 		WHERE account_id::text = ANY($1::text[]) AND (removed_at IS NULL OR EXISTS (SELECT 1 FROM account_limit_rules l WHERE l.from_window_id=account_allowance_windows.id AND l.removed_at IS NULL))
 		ORDER BY id`
+	args := []any{accountIDs}
+	if bound > 0 {
+		query += ` LIMIT $2`
+		args = append(args, bound+1)
+	}
 	if lock {
 		query += " FOR UPDATE"
 	}
-	rows, err := tx.Query(ctx, query, accountIDs)
+	rows, err := tx.Query(ctx, query, args...)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
 	out := map[string][]Window{}
+	count := 0
 	for rows.Next() {
+		if bound > 0 && count == bound {
+			return nil, queueSnapshotOverflow("quota window")
+		}
+		count++
 		var w Window
 		if err := rows.Scan(&w.ID, &w.AccountID, &w.StartsAt, &w.EndsAt, &w.Unit, &w.Allowance, &w.Used, &w.Reserved, &w.PaceModel, &w.BurstRatio, &w.pairingVerification, &w.capacityReadAt, &w.capacityAllowed, &w.capacityKind, &w.capacityBucket, &w.capacityRetired, &w.capacityRefreshRun, &w.capacitySource); err != nil {
 			return nil, err
@@ -649,33 +852,4 @@ func windowEstimate(w Window, estimates map[string]int64) int64 {
 		return max(1, w.capacityHold)
 	}
 	return estimates[w.Unit]
-}
-
-// When all measured windows have reset, Claude needs one small run to emit its
-// next snapshot. This is a provisional 1% estimate, never a renewed vendor limit.
-// The account row is locked; one durable grant per last observation prevents
-// retries, releases or its five-minute expiry from minting more refresh jobs.
-func expiredCapacityRefresh(a Account, windows []Window, now time.Time) *Window {
-	var latest time.Time
-	for _, w := range windows {
-		if w.capacityReadAt == nil || synthetic(w) {
-			continue
-		}
-		if !w.capacityRetired && (w.EndsAt.After(now) || !w.capacityAllowed && now.Sub(*w.capacityReadAt) <= 10*time.Minute) {
-			return nil
-		}
-		if w.capacityReadAt.After(latest) {
-			latest = *w.capacityReadAt
-		}
-	}
-	if latest.IsZero() {
-		return nil
-	}
-	for _, w := range windows {
-		if w.capacityKind == "refresh" && w.capacityReadAt != nil && !w.capacityReadAt.Before(latest) {
-			return nil
-		}
-	}
-	w := Window{AccountID: a.ID, StartsAt: now, EndsAt: now.Add(5 * time.Minute), Unit: "percent", Allowance: 1, PaceModel: "unrestricted", capacityReadAt: &latest, capacityAllowed: true, capacityKind: "refresh", Provisional: true}
-	return &w
 }

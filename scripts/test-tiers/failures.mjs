@@ -6,13 +6,24 @@ export function outputTail(text,{lines=40,characters=16_384}={}) {
   return String(text ?? '').trimEnd().split('\n').slice(-lines).join('\n').slice(-characters)
 }
 
+export function printFlakeWarnings(ledger,{log=console.log}={}) {
+  const escape=text=>String(text).replaceAll('%','%25').replaceAll('\r','%0D').replaceAll('\n','%0A')
+  for(const entry of ledger) {
+    const message=entry.status==='quarantined'
+      ? `Quarantined failure ${entry.key}; owner ${entry.owner}; test attempt ${entry.testAttempt}`
+      : `Flaky test ${entry.key}; passed on retry (test attempt ${entry.testAttempt})`
+    log(`::warning title=Test tier flake::${escape(message)}; run ${escape(entry.runId??'local')}, SHA ${escape(entry.sha??'unknown')}, attempt ${escape(entry.attempt??'1')}`)
+  }
+}
+
 export function goFailures(text) {
   const output=new Map(),failed=new Map()
   for(const line of text.split('\n').filter(line=>line.trim())) {
-    const event=JSON.parse(line),owner=event.Package?.replace(/^github\.com\/inspr-at\/paimos\//,'')
+    const event=JSON.parse(line),owner=(event.Package??event.ImportPath)?.replace(/^github\.com\/inspr-at\/paimos\//,'')
+    const action=event.Action?.replace(/^build-/,'')
     if(!owner)continue
     const id=name=>JSON.stringify([owner,name??''])
-    if(event.Action==='output') {
+    if(action==='output') {
       // A parent's tail includes failing subtests, but never another test's output.
       const names=['']
       if(event.Test) {
@@ -21,7 +32,7 @@ export function goFailures(text) {
       }
       for(const name of names)output.set(id(name),outputTail((output.get(id(name))??'')+(event.Output??''))+'\n')
     }
-    if(event.Action==='fail')failed.set(id(event.Test),{kind:'go',owner,name:event.Test??'(package)'})
+    if(action==='fail')failed.set(id(event.Test),{kind:'go',owner,name:event.Test??'(package)'})
   }
   const failedTests=new Set([...failed.values()].filter(row=>row.name!=='(package)').map(row=>row.owner))
   return [...failed].filter(([,failure])=>failure.name!=='(package)'||!failedTests.has(failure.owner))

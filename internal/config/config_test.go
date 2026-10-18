@@ -81,6 +81,7 @@ func TestDoctrineBinaryAllowlist(t *testing.T) {
 }
 
 func TestFromEnvDefaults(t *testing.T) {
+	t.Setenv("AEON_CHAT_ENABLED", "")
 	t.Setenv("AEON_STATUS_AUTOPILOT", "")
 	t.Setenv("AEON_DATABASE_URL", "postgres://example")
 	t.Setenv("AEON_DOCTRINE_GUARD_KEY_FILE", "")
@@ -102,6 +103,9 @@ func TestFromEnvDefaults(t *testing.T) {
 	if cfg.StatusAutopilot != "on" {
 		t.Fatal("status autopilot must default on")
 	}
+	if cfg.ChatEnabled {
+		t.Fatal("chat must default off")
+	}
 	if len(cfg.AithemaOperatorLocalServices) != 0 {
 		t.Fatal("operator-local service exceptions must default off")
 	}
@@ -110,6 +114,47 @@ func TestFromEnvDefaults(t *testing.T) {
 	}
 	if cfg.DatabaseURL != "postgres://example" || cfg.PublicURL != "" || cfg.WebDir != "" {
 		t.Fatalf("unexpected cfg %+v", cfg)
+	}
+}
+
+// Risk: an absent or mistyped deployment switch silently enables private chat.
+func TestChatEnabledFromEnv(t *testing.T) {
+	t.Setenv("AEON_DATABASE_URL", "postgres://example")
+	t.Setenv("AEON_ENV", "prod")
+	for _, name := range []string{"AEON_MESSAGING_KEY_FILE", "AEON_LINK_KEY_FILE", "AEON_DOCTRINE_GUARD_KEY_FILE", "AEON_REVIEW_WEBHOOK_SECRET_FILE", "AEON_DATABASE_PASSWORD_FILE", "AEON_PHONE_PUSH_VAPID_FILE"} {
+		t.Setenv(name, "")
+	}
+	for _, tc := range []struct {
+		name, raw               string
+		unset, enabled, invalid bool
+	}{
+		{name: "unset", unset: true},
+		{name: "empty"},
+		{name: "true", raw: "true", enabled: true},
+		{name: "false", raw: "false"},
+		{name: "invalid", raw: "yes", invalid: true},
+		{name: "numeric", raw: "1", invalid: true},
+		{name: "uppercase", raw: "TRUE", invalid: true},
+		{name: "whitespace", raw: " true ", invalid: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Setenv("AEON_CHAT_ENABLED", tc.raw)
+			if tc.unset {
+				if err := os.Unsetenv("AEON_CHAT_ENABLED"); err != nil {
+					t.Fatal(err)
+				}
+			}
+			cfg, err := FromEnv()
+			if tc.invalid {
+				if err == nil || err.Error() != "AEON_CHAT_ENABLED must be true or false" {
+					t.Fatalf("invalid chat switch: %v", err)
+				}
+				return
+			}
+			if err != nil || cfg.ChatEnabled != tc.enabled {
+				t.Fatalf("chat enabled = %v, want %v; error = %v", cfg.ChatEnabled, tc.enabled, err)
+			}
+		})
 	}
 }
 
@@ -131,6 +176,42 @@ func TestStatusAutopilotServerMode(t *testing.T) {
 		if _, err := FromEnv(); err == nil {
 			t.Fatal("invalid server mode started")
 		}
+	}
+}
+
+func TestDeliveryAdmissionQueueDefaultsOff(t *testing.T) {
+	// Risk: a mistyped or empty queue switch starts enqueue and asks for
+	// pull_requests:write before the App grant exists.
+	t.Setenv("AEON_DATABASE_URL", "postgres://example")
+	t.Setenv("AEON_ENV", "dev")
+	t.Setenv("AEON_DOCTRINE_GUARD_KEY_FILE", "")
+	t.Setenv("AEON_DELIVERY_ADMISSION_ENABLED", "")
+	t.Setenv("AEON_DELIVERY_ADMISSION_QUEUE", "")
+	cfg, err := FromEnv()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.DeliveryAdmissionEnabled || cfg.DeliveryAdmissionQueue {
+		t.Fatal("admission switches must default off")
+	}
+	t.Setenv("AEON_DELIVERY_ADMISSION_ENABLED", "true")
+	for _, raw := range []string{"false", "TRUE", "1", "yes"} {
+		t.Setenv("AEON_DELIVERY_ADMISSION_QUEUE", raw)
+		cfg, err = FromEnv()
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !cfg.DeliveryAdmissionEnabled || cfg.DeliveryAdmissionQueue {
+			t.Fatalf("queue switch %q enabled the lane", raw)
+		}
+	}
+	t.Setenv("AEON_DELIVERY_ADMISSION_QUEUE", "true")
+	cfg, err = FromEnv()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !cfg.DeliveryAdmissionEnabled || !cfg.DeliveryAdmissionQueue {
+		t.Fatal("exact true did not enable the queue lane")
 	}
 }
 
@@ -301,6 +382,61 @@ func TestMissingDoctrineGuardFileDoesNotPreventStartup(t *testing.T) {
 			}
 			if cfg.DatabaseURL != "postgres://example" {
 				t.Fatal("unrelated configuration changed")
+			}
+		})
+	}
+}
+
+// R11/R14: bad host policy must not start or silently restore public writes.
+func TestDoctrineRepositoriesFromEnv(t *testing.T) {
+	t.Setenv("AEON_DATABASE_URL", "postgres://example")
+	t.Setenv("AEON_ENV", "prod")
+	t.Setenv("AEON_DOCTRINE_APP_TENANT_ID", "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa")
+	t.Setenv("AEON_DOCTRINE_MIRROR_DIR", "/host/mirrors")
+	for _, name := range []string{"AEON_DOCTRINE_GUARD_KEY_FILE", "AEON_MESSAGING_KEY_FILE", "AEON_LINK_KEY_FILE", "AEON_REVIEW_WEBHOOK_SECRET_FILE", "AEON_PHONE_PUSH_VAPID_FILE", "AEON_DATABASE_PASSWORD_FILE"} {
+		t.Setenv(name, "")
+	}
+	for _, tc := range []struct {
+		name, public, private, wantPublic, wantPrivate, refusal string
+		unset                                                   bool
+	}{
+		{name: "unchanged defaults", unset: true, wantPublic: "inspr-at/inspr-modules", wantPrivate: "inspr-at/inspr-doctrine-private"},
+		{name: "custom pair", public: "team/shared-doctrine", private: "team/private-doctrine", wantPublic: "team/shared-doctrine", wantPrivate: "team/private-doctrine"},
+		{name: "private only", private: "example-business-team/agm-doctrine", wantPrivate: "example-business-team/agm-doctrine"},
+		{name: "canonical case preserved", public: "TEAM/Shared", private: "TEAM/Private", wantPublic: "TEAM/Shared", wantPrivate: "TEAM/Private"},
+		{name: "same repository", public: "team/doctrine", private: "TEAM/Doctrine", refusal: "must be different"},
+		{name: "no private guard", public: "team/shared", refusal: "PRIVATE_REPOSITORY"},
+		{name: "both disabled", refusal: "PRIVATE_REPOSITORY"},
+		{name: "URL", public: "https://github.com/team/shared", private: "team/private", refusal: "PUBLIC_REPOSITORY"},
+		{name: "path escape", public: "team/..", private: "team/private", refusal: "PUBLIC_REPOSITORY"},
+		{name: "whitespace", private: " team/private", refusal: "PRIVATE_REPOSITORY"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Setenv("AEON_DOCTRINE_PUBLIC_REPOSITORY", tc.public)
+			t.Setenv("AEON_DOCTRINE_PRIVATE_REPOSITORY", tc.private)
+			if tc.unset {
+				if err := os.Unsetenv("AEON_DOCTRINE_PUBLIC_REPOSITORY"); err != nil {
+					t.Fatal(err)
+				}
+				if err := os.Unsetenv("AEON_DOCTRINE_PRIVATE_REPOSITORY"); err != nil {
+					t.Fatal(err)
+				}
+			}
+			cfg, err := FromEnv()
+			if tc.refusal != "" {
+				if err == nil || !strings.Contains(err.Error(), tc.refusal) {
+					t.Fatal("bad repository policy did not fail startup for the expected reason")
+				}
+				return
+			}
+			if err != nil {
+				t.Fatal(err)
+			}
+			if cfg.DoctrineRepositories == nil || cfg.DoctrineRepositories.Public() != tc.wantPublic || cfg.DoctrineRepositories.Private() != tc.wantPrivate {
+				t.Fatal("deployment proposal repositories not loaded")
+			}
+			if cfg.DoctrineDefaultSource != !tc.unset || cfg.DoctrineMirrorDir != "/host/mirrors" {
+				t.Fatal("host default requires an explicit private repository and preserves mirror policy")
 			}
 		})
 	}

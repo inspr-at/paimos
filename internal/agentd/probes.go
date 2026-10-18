@@ -44,6 +44,10 @@ func (c *probeCapture) Write(p []byte) (int, error) {
 // bounded output, so a clear "signed out" answer can be told apart from a probe
 // that could not run (missing binary, timeout, oversized or ambiguous output).
 func probeRun(ctx context.Context, path string, env []string, args ...string) ([]byte, int, error) {
+	return probeRunWith(ctx, path, env, args, ownedprocess.Run)
+}
+
+func probeRunWith(ctx context.Context, path string, env, args []string, run func(context.Context, *exec.Cmd) error) ([]byte, int, error) {
 	path, err := pinnedExecutable(path)
 	if err != nil {
 		return nil, 0, err
@@ -58,7 +62,7 @@ func probeRun(ctx context.Context, path string, env []string, args ...string) ([
 	cmd.Stdout = stdout
 	cmd.Stderr = stderr
 	code := 0
-	err = ownedprocess.Run(op, cmd)
+	err = run(op, cmd)
 	// Oversized output is unavailable whatever the exit: its kept prefix is not
 	// the whole answer and must never be parsed.
 	if stdout.overflow || stderr.overflow {
@@ -69,7 +73,9 @@ func probeRun(ctx context.Context, path string, env []string, args ...string) ([
 		if errors.Is(err, ownedprocess.ErrCleanupUnconfirmed) || !errors.As(err, &exit) || op.Err() != nil || exit.ExitCode() < 0 {
 			// AEON-341: a launcher that cannot run or never answers failed to
 			// start; callers without start semantics still read it as unavailable.
-			return nil, 0, errors.Join(harnesslaunch.ErrStart, op.Err())
+			// The vendor command's own deadline is an account failure. Only
+			// cancellation of the caller may cancel polling for sibling harnesses.
+			return nil, 0, errors.Join(harnesslaunch.ErrStart, ctx.Err())
 		}
 		code = exit.ExitCode()
 		if code == 126 || code == 127 {
@@ -498,6 +504,10 @@ func (a *ClaudeAdapter) ProbeAccountStatus(ctx context.Context, key string) (Pro
 }
 
 func (a *ClaudeAdapter) probeResolved(ctx context.Context, key string) ProbeStatus {
+	return a.probeClaudeProfile(ctx, key, false)
+}
+
+func (a *ClaudeAdapter) probeClaudeProfile(ctx context.Context, key string, native bool) ProbeStatus {
 	unavailable := func(detail string) ProbeStatus { return ProbeStatus{Failure: ProbeUnavailable, ReasonDetail: detail} }
 	home, err := localHome(a.Homes, key)
 	if err != nil {
@@ -513,7 +523,14 @@ func (a *ClaudeAdapter) probeResolved(ctx context.Context, key string) ProbeStat
 		}
 		return unavailable(detail)
 	}
-	raw, code, err := probeRun(ctx, a.ClaudePath, claudeEnvironment(home, a.NodePath, a.ClaudePath), "auth", "status", "--json")
+	environment := claudeEnvironment(home, a.NodePath, a.ClaudePath)
+	if native {
+		environment, err = nativeClaudeEnvironment(home, a.NodePath, a.ClaudePath)
+		if err != nil {
+			return unavailable(agentsetup.ProbeCommandFailed)
+		}
+	}
+	raw, code, err := probeRun(ctx, a.ClaudePath, environment, "auth", "status", "--json")
 	if err != nil {
 		return unavailable(agentsetup.ProbeCommandFailed)
 	}
@@ -529,6 +546,12 @@ func (a *ClaudeAdapter) probeResolved(ctx context.Context, key string) ProbeStat
 	if !*status.LoggedIn {
 		return ProbeStatus{Failure: ProbeAuthFailed, ReasonDetail: agentsetup.ProbeSignedOut}
 	}
+	// Local status may identify a subscription login, but never carry arbitrary
+	// vendor output, terminal controls, or API-key identity into diagnostics.
+	active := ""
+	if status.AuthMethod == "claude.ai" && agentsetup.ValidLoginLabel(status.Email) {
+		active = strings.TrimSpace(status.Email)
+	}
 	if a.Emails != nil {
 		if a.Emails[key] == "" {
 			return unavailable(agentsetup.ProbeIdentityMissing)
@@ -542,7 +565,7 @@ func (a *ClaudeAdapter) probeResolved(ctx context.Context, key string) ProbeStat
 			return unavailable(agentsetup.ProbeEmailMissing)
 		}
 		if !strings.EqualFold(status.Email, a.Emails[key]) {
-			return ProbeStatus{Failure: ProbeAuthFailed, ReasonDetail: agentsetup.ProbeDifferentIdentity}
+			return ProbeStatus{Failure: ProbeAuthFailed, ReasonDetail: agentsetup.ProbeDifferentIdentity, ActiveIdentity: active}
 		}
 	}
 	if code != 0 {
@@ -553,7 +576,7 @@ func (a *ClaudeAdapter) probeResolved(ctx context.Context, key string) ProbeStat
 	}
 	switch status.AuthMethod {
 	case "claude.ai":
-		return ProbeStatus{OK: true, BillingMode: "subscription"}
+		return ProbeStatus{OK: true, BillingMode: "subscription", ActiveIdentity: active}
 	case "api_key":
 		// Only an unfenced adapter reaches this case. Email-fenced API-key
 		// logins fail authentication above and never establish billing.

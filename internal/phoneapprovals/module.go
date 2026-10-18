@@ -45,6 +45,9 @@ type Module struct {
 	vault   cipher.AEAD
 	vapid   *webpush.Options
 	send    func(context.Context, []byte, *webpush.Subscription, *webpush.Options) (*http.Response, error)
+	// Native step-up owns target authorization. The adapter is wired at startup
+	// without a package cycle; decisions remain on its protected native routes.
+	StepUpReviewTx func(context.Context, pgx.Tx, tenant.Principal, string) (Review, error)
 }
 
 // New accepts only deployment-owned origin and file-provisioned VAPID keys.
@@ -110,7 +113,7 @@ func respond(w http.ResponseWriter, v any, err error) {
 	httpapi.WriteJSON(w, 200, v)
 }
 func decode(w http.ResponseWriter, r *http.Request, v any) error {
-	d := json.NewDecoder(http.MaxBytesReader(w, r.Body, 64<<10))
+	d := httpapi.NewRequestDecoder(w, r, 64<<10)
 	d.DisallowUnknownFields()
 	if d.Decode(v) != nil {
 		return fail(400, "invalid request")
@@ -175,6 +178,10 @@ func (u user) WebAuthnName() string                       { return u.p.ID }
 func (u user) WebAuthnDisplayName() string                { return "Aeon approver" }
 func (u user) WebAuthnCredentials() []webauthn.Credential { return u.creds }
 func loadUser(ctx context.Context, tx pgx.Tx, p tenant.Principal) (user, error) {
+	return loadUserCredentials(ctx, tx, p, true)
+}
+
+func loadUserCredentials(ctx context.Context, tx pgx.Tx, p tenant.Principal, lock bool) (user, error) {
 	u := user{p: p}
 	var kind string
 	if err := tx.QueryRow(ctx, `SELECT kind FROM principals WHERE id=$1`, p.ID).Scan(&kind); err != nil {
@@ -183,7 +190,11 @@ func loadUser(ctx context.Context, tx pgx.Tx, p tenant.Principal) (user, error) 
 	if kind != "person" {
 		return u, fail(403, "person required")
 	}
-	rows, err := tx.Query(ctx, `SELECT credential FROM phone_passkeys WHERE person_id=$1 AND revoked_at IS NULL ORDER BY id FOR UPDATE`, p.ID)
+	query := `SELECT credential FROM phone_passkeys WHERE person_id=$1 AND revoked_at IS NULL ORDER BY id`
+	if lock {
+		query += " FOR UPDATE"
+	}
+	rows, err := tx.Query(ctx, query, p.ID)
 	if err != nil {
 		return u, err
 	}
@@ -289,6 +300,7 @@ type Review struct {
 	Pending  bool                `json:"pending"`
 	Approval *approvals.Approval `json:"approval,omitempty"`
 	Attach   *attachwatch.View   `json:"attach,omitempty"`
+	StepUp   json.RawMessage     `json:"stepup,omitempty"`
 }
 
 func approvalReview(a approvals.Approval) Review {
@@ -324,6 +336,22 @@ func loadReview(ctx context.Context, tx pgx.Tx, p tenant.Principal, kind, id str
 	}
 	return Review{}, fail(404, "request unavailable")
 }
+func (m *Module) loadReview(ctx context.Context, tx pgx.Tx, p tenant.Principal, kind, id string) (Review, error) {
+	if kind != "stepup" {
+		return loadReview(ctx, tx, p, kind, id)
+	}
+	if !validID(id) || m.StepUpReviewTx == nil {
+		return Review{}, fail(404, "request unavailable")
+	}
+	if p.Kind != tenant.Person || p.KeyCreatorID != "" {
+		return Review{}, fail(403, "person required")
+	}
+	v, err := m.StepUpReviewTx(ctx, tx, p, id)
+	if err != nil {
+		return Review{}, fail(403, "step-up unavailable")
+	}
+	return v, nil
+}
 func (m *Module) review(w http.ResponseWriter, r *http.Request) {
 	p, ok := m.person(w, r, false)
 	if !ok {
@@ -332,7 +360,7 @@ func (m *Module) review(w http.ResponseWriter, r *http.Request) {
 	var out Review
 	err := db.InTenant(r.Context(), m.pool, p.TenantID, func(tx pgx.Tx) error {
 		var err error
-		out, err = loadReview(r.Context(), tx, p, r.PathValue("kind"), r.PathValue("requestId"))
+		out, err = m.loadReview(r.Context(), tx, p, r.PathValue("kind"), r.PathValue("requestId"))
 		return err
 	})
 	respond(w, out, err)

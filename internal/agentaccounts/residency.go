@@ -5,7 +5,6 @@ import (
 	"context"
 	"github.com/inspr-at/paimos/internal/modelprefs"
 	"github.com/jackc/pgx/v5"
-	"slices"
 	"time"
 )
 
@@ -81,10 +80,20 @@ func QualifyingAccountIDs(ctx context.Context, tx pgx.Tx, profileID, harness, pr
 	if err != nil {
 		return nil, err
 	}
-	accounts = applyFence(accounts, fences, projectID)
+	accounts, err = applyUse(ctx, tx, applyFence(accounts, fences, projectID), projectID)
+	if err != nil {
+		return nil, err
+	}
 	kept := []Account{}
 	for _, a := range accounts {
-		if a.Harness == harness && (a.AllowedProfileIDs == nil || slices.Contains(a.AllowedProfileIDs, profileID)) {
+		if a.Harness != harness {
+			continue
+		}
+		allowed, err := AccountAllowsProfile(ctx, tx, a, profileID)
+		if err != nil {
+			return nil, err
+		}
+		if allowed {
 			kept = append(kept, a)
 		}
 	}
@@ -122,11 +131,21 @@ func ResidencyProfileRouteCounts(ctx context.Context, tx pgx.Tx, profiles map[st
 			if err != nil {
 				return nil, err
 			}
-			candidates = applyFence(accounts, fs, projectID)
+			candidates, err = applyUse(ctx, tx, applyFence(accounts, fs, projectID), projectID)
+			if err != nil {
+				return nil, err
+			}
 			byHarness[harness] = candidates
 		}
 		for _, a := range candidates {
-			if a.Harness != harness || a.AllowedProfileIDs != nil && !slices.Contains(a.AllowedProfileIDs, profileID) {
+			if a.Harness != harness {
+				continue
+			}
+			allowed, err := AccountAllowsProfile(ctx, tx, a, profileID)
+			if err != nil {
+				return nil, err
+			}
+			if !allowed {
 				continue
 			}
 			class, err := ResidencyClass(ctx, tx, a, profileID, now)

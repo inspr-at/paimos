@@ -18,17 +18,19 @@ import (
 	"github.com/inspr-at/paimos/internal/authz"
 	"github.com/inspr-at/paimos/internal/db"
 	"github.com/inspr-at/paimos/internal/events"
+	"github.com/inspr-at/paimos/internal/httpapi"
 	"github.com/inspr-at/paimos/internal/tenant"
 	"github.com/jackc/pgx/v5"
 )
 
 var (
-	errTrimInvalid = errors.New("invalid key trim input")
-	errTrimChanged = errors.New("the key scopes changed; prepare a new proposal")
-	errTrimRecent  = errors.New("a dropped scope was used in the last 24 hours")
-	errTrimExpired = errors.New("the proposal expired")
-	errTrimReplay  = errors.New("the request conflicts with an earlier decision")
-	errTrimRestore = errors.New("the 30-day restore window is closed")
+	errTrimFullAccess = errors.New("full-access keys have a dynamic ceiling; choose scoped mode before trimming")
+	errTrimInvalid    = errors.New("invalid key trim input")
+	errTrimChanged    = errors.New("the key scopes changed; prepare a new proposal")
+	errTrimRecent     = errors.New("a dropped scope was used in the last 24 hours")
+	errTrimExpired    = errors.New("the proposal expired")
+	errTrimReplay     = errors.New("the request conflicts with an earlier decision")
+	errTrimRestore    = errors.New("the 30-day restore window is closed")
 )
 
 type trimRisk struct {
@@ -156,8 +158,7 @@ func validateTrimInput(in *trimInput) error {
 	return nil
 }
 func decodeTrim(w http.ResponseWriter, r *http.Request, v any) bool {
-	r.Body = http.MaxBytesReader(w, r.Body, 64<<10)
-	dec := json.NewDecoder(r.Body)
+	dec := httpapi.NewRequestDecoder(w, r, 64<<10)
 	dec.DisallowUnknownFields()
 	if err := dec.Decode(v); err != nil {
 		writeBadRequest(w, "invalid key trim JSON")
@@ -176,7 +177,7 @@ func (m *Module) trimClock() time.Time {
 	}
 	return time.Now().UTC()
 }
-func (m *Module) trimReply(w http.ResponseWriter, status int, value any, err error) {
+func (m *Module) trimReply(w http.ResponseWriter, r *http.Request, status int, value any, err error) {
 	switch {
 	case errors.Is(err, authz.ErrForbidden):
 		writeForbidden(w)
@@ -184,10 +185,10 @@ func (m *Module) trimReply(w http.ResponseWriter, status int, value any, err err
 		writeJSON(w, 404, errorJSON{Error: "key trim resource not found"})
 	case errors.Is(err, errTrimInvalid):
 		writeBadRequest(w, errTrimInvalid.Error())
-	case errors.Is(err, errTrimChanged), errors.Is(err, errTrimRecent), errors.Is(err, errTrimExpired), errors.Is(err, errTrimReplay), errors.Is(err, errTrimRestore), errors.Is(err, errKeyInactive):
+	case errors.Is(err, errTrimFullAccess), errors.Is(err, errTrimChanged), errors.Is(err, errTrimRecent), errors.Is(err, errTrimExpired), errors.Is(err, errTrimReplay), errors.Is(err, errTrimRestore), errors.Is(err, errKeyInactive):
 		writeJSON(w, 409, errorJSON{Error: err.Error()})
 	case err != nil:
-		writeInternal(w)
+		internalFailure(w, r, "key_trim", err)
 	default:
 		writeJSON(w, status, value)
 	}
@@ -208,11 +209,11 @@ func (m *Module) handleProposeKeyTrim(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if err := validateTrimInput(&in); err != nil {
-		m.trimReply(w, 0, nil, err)
+		m.trimReply(w, r, 0, nil, err)
 		return
 	}
 	out, err := m.proposeKeyTrim(r.Context(), p, id, in)
-	m.trimReply(w, 201, out, err)
+	m.trimReply(w, r, 201, out, err)
 }
 func trimPerson(w http.ResponseWriter, r *http.Request) (tenant.Principal, bool) {
 	p, ok := tenant.PrincipalFrom(r.Context())
@@ -246,7 +247,7 @@ func (m *Module) handleDecideKeyTrim(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	out, err := m.decideKeyTrim(r.Context(), p, id, in, restore)
-	m.trimReply(w, 200, out, err)
+	m.trimReply(w, r, 200, out, err)
 }
 func (m *Module) handleListKeyTrims(w http.ResponseWriter, r *http.Request) {
 	ctx, cancel := context.WithTimeout(r.Context(), 15*time.Second)
@@ -316,14 +317,14 @@ func (m *Module) handleListKeyTrims(w http.ResponseWriter, r *http.Request) {
 		return nil
 	})
 	if err != nil {
-		m.trimReply(w, 0, nil, err)
+		m.trimReply(w, r, 0, nil, err)
 		return
 	}
 	out := map[string]any{"items": items, "has_more": hasMore}
 	if hasMore {
 		out["next_cursor"] = items[len(items)-1].ID
 	}
-	m.trimReply(w, 200, out, err)
+	m.trimReply(w, r, 200, out, err)
 }
 
 // This metadata reader deliberately does not use keyRecord/keyJSON/keySnapshot,
@@ -334,17 +335,18 @@ type trimKey struct {
 	CreatorID                        *string
 	ExpiresAt, RevokedAt             *time.Time
 	Active                           bool
+	FullAccess                       bool
 }
 
 func readTrimKeyTx(ctx context.Context, tx pgx.Tx, tenantID, id string, lock bool) (trimKey, error) {
 	key := trimKey{}
-	query := `SELECT k.id::text,k.principal_id::text,k.name,p.name,k.scopes,k.created_by_principal_id::text,k.expires_at,k.revoked_at,p.status='active'
+	query := `SELECT k.id::text,k.principal_id::text,k.name,p.name,k.scopes,k.created_by_principal_id::text,k.expires_at,k.revoked_at,p.status='active',coalesce(k.full_access,false)
   FROM agent_keys k JOIN principals p ON p.tenant_id=k.tenant_id AND p.id=k.principal_id
   WHERE k.tenant_id=$1::uuid AND k.id=$2::uuid`
 	if lock {
 		query += ` FOR NO KEY UPDATE OF k`
 	}
-	err := tx.QueryRow(ctx, query, tenantID, id).Scan(&key.ID, &key.PrincipalID, &key.Name, &key.OwnerName, &key.Scopes, &key.CreatorID, &key.ExpiresAt, &key.RevokedAt, &key.Active)
+	err := tx.QueryRow(ctx, query, tenantID, id).Scan(&key.ID, &key.PrincipalID, &key.Name, &key.OwnerName, &key.Scopes, &key.CreatorID, &key.ExpiresAt, &key.RevokedAt, &key.Active, &key.FullAccess)
 	return key, err
 }
 func readTrimTx(ctx context.Context, tx pgx.Tx, tenantID, id string, lock bool) (trimProposal, error) {
@@ -376,6 +378,9 @@ func trimFence(ctx context.Context, tx pgx.Tx, p tenant.Principal, permission st
 	return authz.RequireTx(ctx, tx, p, permission, authz.Scope{})
 }
 func activeTrimKey(key trimKey, now time.Time) error {
+	if key.FullAccess {
+		return errTrimFullAccess
+	}
 	if !key.Active || key.RevokedAt != nil || key.ExpiresAt != nil && !key.ExpiresAt.After(now) {
 		return errKeyInactive
 	}
@@ -447,7 +452,7 @@ func (m *Module) decorateTrimTx(ctx context.Context, tx pgx.Tx, p tenant.Princip
 		}
 		switch {
 		case activeTrimKey(key, now) != nil:
-			out.BlockedReason = errKeyInactive.Error()
+			out.BlockedReason = activeTrimKey(key, now).Error()
 		case trimScopeDigest(scopes) != out.SnapshotDigest:
 			out.BlockedReason = errTrimChanged.Error()
 		default:
@@ -565,7 +570,7 @@ func (m *Module) decideKeyTrim(ctx context.Context, p tenant.Principal, id strin
 		if err := tx.QueryRow(ctx, `SELECT key_id::text FROM key_trim_proposals WHERE tenant_id=$1::uuid AND id=$2::uuid`, p.TenantID, id).Scan(&keyID); err != nil {
 			return err
 		}
-		if err := authz.LockKeyScopeUseTx(ctx, tx, p.TenantID, keyID); err != nil {
+		if err := authz.LockKeyScopeChangeTx(ctx, tx, p.TenantID, keyID); err != nil {
 			return err
 		}
 		if err := trimFence(ctx, tx, p, "keys.manage"); err != nil {

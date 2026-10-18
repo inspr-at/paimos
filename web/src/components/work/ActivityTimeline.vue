@@ -4,7 +4,7 @@ import { computed, nextTick, ref, watch } from 'vue'
 import { commentEditable, describeChange, parseWorkerMarker, shortRole, type TimelineEntry } from '../../lib/activity'
 import { brand } from '../../lib/brand'
 import { confirmAction } from '../../lib/confirm'
-import { absoluteTime, relativeTime } from '../../lib/work'
+import { absoluteTime, relativeTime, statusMeta } from '../../lib/work'
 import AppIcon from '../AppIcon.vue'
 import AutomaticChangeRow from './AutomaticChangeRow.vue'
 import MarkdownBody from '../MarkdownBody.vue'
@@ -158,7 +158,11 @@ defineExpose({ isDirty, discard })
           <span v-else class="node dot" :class="{ 'created-dot': entry.kind === 'created' }" aria-hidden="true" />
           <p class="change-line">
             <strong :data-tip="actorTip(entry)">{{ actorLabel(entry) }}</strong>
-            <template v-if="entry.kind === 'changes'">
+            <template v-if="entry.kind === 'entry'">
+              <template v-if="entry.change.type === 'refused'"> couldn’t move it to {{ statusMeta(entry.change.to_status).label }}: {{ entry.change.failed.join(', ') }}<span v-if="entry.change.count > 1"> · {{ entry.change.count }} attempts</span></template>
+              <template v-else> moved it to {{ statusMeta(entry.change.to_status).label }} anyway: “{{ entry.change.reason }}” · {{ entry.change.failed.join(', ') }} {{ entry.change.failed.length === 1 ? 'was' : 'were' }} missing</template>
+            </template>
+            <template v-else-if="entry.kind === 'changes'">
               <template v-for="(change, index) in changesOf(entry)" :key="change.field">
                 <span v-if="index > 0" class="sep">,</span>
                 {{ ' ' }}{{ describeChange(change).label }}

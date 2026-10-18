@@ -62,6 +62,7 @@ var fixedPatterns = []spanPattern{
 	// Authorization values.
 	{bearerValue, 1, []string{"bearer"}},
 	{basicValue, 1, []string{"basic"}},
+	{aeonWorkerValue, 1, []string{"aeon-worker"}},
 }
 
 // Publication matches shapes without case sensitivity, but keeps the text's
@@ -83,11 +84,12 @@ func publicationPattern(pattern string) *regexp.Regexp {
 }
 
 var (
-	bearerValue = regexp.MustCompile(`(?i)(?:^|[^A-Za-z0-9])bearer\s+([A-Za-z0-9._~+/-]{16,}=*)`)
-	basicValue  = regexp.MustCompile(`(?i)(?:^|[^A-Za-z0-9])basic\s+([A-Za-z0-9+/]{4,}={0,2})(?:[^A-Za-z0-9+/=]|$)`)
+	bearerValue     = regexp.MustCompile(`(?i)(?:^|[^A-Za-z0-9])bearer\s+([A-Za-z0-9._~+/-]{16,}=*)`)
+	aeonWorkerValue = regexp.MustCompile(`(?i)(?:^|[^A-Za-z0-9])aeon-worker[ \t]+([A-Za-z0-9._~+/-]{8,}[ \t]+[A-Za-z0-9._~+/-]{16,}=*)`)
+	basicValue      = regexp.MustCompile(`(?i)(?:^|[^A-Za-z0-9])basic\s+([A-Za-z0-9+/]{4,}={0,2})(?:[^A-Za-z0-9+/=]|$)`)
 	// A credential label, optionally in Markdown or quotes, and its
 	// separator: password=, **Password:**, `password`:, "api_key": .
-	credentialLabel = regexp.MustCompile("(?i)(?:^|[^A-Za-z0-9])[*_`\"']{0,3}(passw(?:or)?d|pwd|passphrase|client[_-]?secret|secret[_-]?key|secret|access[_-]?token|refresh[_-]?token|auth[_-]?token|token|api[_-]?key|apikey|access[_-]?key|private[_-]?key)[*_`\"']{0,3}[ \\t]*([:=])[*_`]{0,3}[ \\t]*")
+	credentialLabel = regexp.MustCompile("(?i)(?:^|[^A-Za-z0-9])[*_`\"']{0,3}(x-aeon-worker-lease|worker[_-]?lease|passw(?:or)?d|pwd|passphrase|client[_-]?secret|secret[_-]?key|secret|access[_-]?token|refresh[_-]?token|auth[_-]?token|token|api[_-]?key|apikey|access[_-]?key|private[_-]?key)[*_`\"']{0,3}[ \\t]*([:=])[*_`]{0,3}[ \\t]*")
 
 	ticketKey  = regexp.MustCompile(`^[A-Z][A-Z0-9]*-[0-9]+$`)
 	versionish = regexp.MustCompile(`^[vV]?[0-9]+([.:/-][0-9]+)+$`)
@@ -446,6 +448,12 @@ func basicCredential(value string) bool {
 // labelledValue reads the value after a credential label ending at i and
 // reports its byte range when it has a credential's shape.
 func labelledValue(text string, i int, label string, sep byte) (int, int, bool) {
+	if (label == "x-aeon-worker-lease" || label == "worker_lease" || label == "worker-lease") && i < len(text) && text[i] == '[' {
+		i++
+		for i < len(text) && (text[i] == ' ' || text[i] == '\t') {
+			i++
+		}
+	}
 	password := strings.HasPrefix(label, "pass") || label == "pwd"
 	minLen := 8
 	if password {

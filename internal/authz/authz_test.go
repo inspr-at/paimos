@@ -4,7 +4,9 @@ package authz
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
+	"io"
 	"io/fs"
 	"os"
 	"path/filepath"
@@ -67,9 +69,44 @@ func TestRegistryAndBuiltins(t *testing.T) {
 	}
 }
 
+func TestViewerReadsStoredReviewPolicy(t *testing.T) {
+	// Risk: Policies is open to viewers, and an unread rule looks like the stored default.
+	viewer, ok := BuiltinPermissions("viewer")
+	if !ok || !contains(viewer, "reviewpolicy.read") || contains(viewer, "reviewpolicy.manage") {
+		t.Fatal("viewers load the stored review rule and cannot manage it")
+	}
+	guest, ok := BuiltinPermissions("guest")
+	if !ok || contains(guest, "reviewpolicy.read") || contains(guest, "reviewpolicy.manage") {
+		t.Fatal("guests do not receive the review rule")
+	}
+}
+
 func TestBuiltinAgentExclusionsDefinition(t *testing.T) {
-	if !slices.Equal(builtinAgentExclusions, []string{"recurrences.manage"}) {
-		t.Fatal("built-in agent exclusions drifted from the explicit recurrence policy")
+	// Keep the independently reviewed expected policy in data, while retaining
+	// exact equality and the live person/agent grant assertions below.
+	raw, err := os.ReadFile("testdata/builtin_agent_exclusions.json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var expected struct {
+		License     string   `json:"_license"`
+		Permissions []string `json:"permissions"`
+	}
+	decoder := json.NewDecoder(strings.NewReader(string(raw)))
+	decoder.DisallowUnknownFields()
+	if err := decoder.Decode(&expected); err != nil {
+		t.Fatal(err)
+	}
+	if decoder.Decode(&struct{}{}) != io.EOF || expected.License != "SPDX-License-Identifier: AGPL-3.0-only" || len(expected.Permissions) == 0 || !slices.IsSorted(expected.Permissions) {
+		t.Fatal("expected exclusion policy must be a nonempty canonical JSON fixture")
+	}
+	for i := 1; i < len(expected.Permissions); i++ {
+		if expected.Permissions[i-1] == expected.Permissions[i] {
+			t.Fatal("expected exclusion policy has a duplicate permission")
+		}
+	}
+	if !slices.Equal(builtinAgentExclusions, expected.Permissions) {
+		t.Fatal("built-in agent exclusions drifted from the explicit recurrence, delivery, queue, review, overview, engine and subscription policies")
 	}
 	for _, key := range builtinAgentExclusions {
 		permission, ok := Lookup(key)
@@ -77,6 +114,12 @@ func TestBuiltinAgentExclusionsDefinition(t *testing.T) {
 			t.Fatal("an explicit custom-role permission must remain agent-grantable")
 		}
 		for _, role := range []string{"owner", "admin", "member"} {
+			if (key == "delivery.manage" || key == "delivery.rollout.write" || key == "delivery_queue.manage" || key == "delivery_queue.claim" || key == "reviewpolicy.manage" || key == "engine.manage" || strings.HasPrefix(key, "delivery_reviews.") || strings.HasPrefix(key, "delivery_ship.")) && role == "member" {
+				if contains(builtinPermissions(role), key) {
+					t.Fatal("delivery and review-policy management should require an explicit member grant")
+				}
+				continue
+			}
 			if !contains(builtinPermissions(role), key) {
 				t.Fatalf("agent exclusions must leave person %s grants intact", role)
 			}
@@ -184,6 +227,41 @@ func TestStatusHelpAgentReadRequiresAuthentication(t *testing.T) {
 	}
 }
 
+func TestUsageProbeRouteRequiresAccountManage(t *testing.T) {
+	const route = "PUT /api/agent-accounts/{accountId}/usage-probe"
+	if got, ok := PermissionForPattern(route); !ok || got != "account.manage" {
+		t.Fatalf("usage probe route permission %q, declared=%v; want account.manage", got, ok)
+	}
+}
+
+// Simple preferences, line removal preview and line replacement are mounted
+// routes. An undeclared pattern fails closed for every caller, including a
+// person who holds the permission the handler rechecks. Reads stay models.read;
+// replacement stays models.manage.
+func TestModelLineAndSimplePreferenceRoutes(t *testing.T) {
+	person := tenant.WithPrincipal(t.Context(), tenant.Principal{ID: "caller", TenantID: "tenant", Kind: tenant.Person})
+	for _, tc := range []struct{ route, want string }{
+		{"GET /api/model-preferences/simple", "models.read"},
+		{"GET /api/models/lines/{harness}/{model}/usage", "models.read"},
+		{"PUT /api/models/lines/{harness}/{model}", "models.manage"},
+		{"PUT /api/models/lines/{harness}/{model}/pause", "models.manage"},
+		{"DELETE /api/models/lines/{harness}/{model}/pause", "models.manage"},
+		{"PUT /api/model-preferences/orders/{column}/first/never/{line}", "model_prefs.manage"},
+		{"DELETE /api/model-preferences/orders/{column}/first/never/{line}", "model_prefs.manage"},
+	} {
+		got, ok := PermissionForPattern(tc.route)
+		if !ok || got != tc.want {
+			t.Errorf("%s permission %q declared=%v, want %s", tc.route, got, ok, tc.want)
+		}
+		if err := RequirePattern(person, tc.route, Scope{}); !errors.Is(err, ErrNoStore) {
+			t.Errorf("%s person: %v, want store lookup", tc.route, err)
+		}
+		if err := RequirePattern(t.Context(), tc.route, Scope{}); !errors.Is(err, ErrForbidden) {
+			t.Errorf("%s anonymous: %v", tc.route, err)
+		}
+	}
+}
+
 // Every current module declares literal ServeMux patterns. This source walk
 // catches a new route even when its module is mounted only in production.
 func TestRouteSourceCoverage(t *testing.T) {
@@ -192,7 +270,7 @@ func TestRouteSourceCoverage(t *testing.T) {
 		if walkErr != nil {
 			return walkErr
 		}
-		if entry.IsDir() || !strings.HasSuffix(path, ".go") || strings.HasSuffix(path, "_test.go") || filepath.Base(path) == "route_map.go" {
+		if entry.IsDir() || !strings.HasSuffix(path, ".go") || strings.HasSuffix(path, "_test.go") || (filepath.Base(path) == "route_map.go" || filepath.Dir(path) == filepath.Join("..", "authz") && strings.HasPrefix(filepath.Base(path), "routes_")) {
 			return nil
 		}
 		body, err := os.ReadFile(path)
@@ -347,7 +425,7 @@ func TestLinkedAliasAndLegacyAgentMigration(t *testing.T) {
 		if err := tx.QueryRow(ctx, `INSERT INTO principals(tenant_id,kind,name) VALUES($1::uuid,'agent','aeon-coordinator') RETURNING id::text`, tid).Scan(&agentID); err != nil {
 			return err
 		}
-		if _, err := tx.Exec(ctx, `INSERT INTO agent_keys(tenant_id,principal_id,name,prefix,hash,scopes) VALUES($1::uuid,$2::uuid,'legacy','az1-migration','unused',$3)`, tid, agentID, scopes); err != nil {
+		if _, err := tx.Exec(ctx, `INSERT INTO agent_keys(tenant_id,principal_id,name,prefix,hash,scopes,created_by_principal_id) VALUES($1::uuid,$2::uuid,'legacy','az1-migration','unused',$3,(SELECT id FROM principals WHERE tenant_id=$1::uuid AND kind='person' ORDER BY created_at,id LIMIT 1))`, tid, agentID, scopes); err != nil {
 			return err
 		}
 		if _, err := tx.Exec(ctx, `SELECT aeon_bind_legacy_principal($1::uuid,$2::uuid)`, tid, aliasID); err != nil {

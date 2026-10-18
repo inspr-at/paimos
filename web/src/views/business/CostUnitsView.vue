@@ -228,7 +228,7 @@ onMounted(async () => { await business.loadPlugins(); if (business.open.costs) v
 .valid { color: var(--ink-2); white-space: nowrap; }
 tr.ended td:not(:last-child) { color: var(--ink-3); }
 .status-chip { display: inline-flex; align-items: center; height: 20px; padding: 0 8px; border-radius: 999px; font: 600 10px/1 var(--mono); letter-spacing: .06em; text-transform: uppercase; font-variant-ligatures: none; background: var(--chip-bg); box-shadow: inset 0 0 0 1px var(--chip-line); color: var(--ink-2); }
-.status-chip.current { background: rgba(47, 122, 90, .1); box-shadow: inset 0 0 0 1px rgba(47, 122, 90, .3); color: var(--ok); }
+.status-chip.current { background: var(--ok-bg); box-shadow: inset 0 0 0 1px var(--ok-line); color: var(--ok); }
 .status-chip.scheduled { background: var(--chip-teal-bg); box-shadow: inset 0 0 0 1px var(--chip-teal-line); color: var(--teal-ink); }
 .form-row td { height: auto; padding: 10px 0; background: var(--surface-sunken); }
 .rate-form { display: grid; grid-template-columns: 1fr 90px 1fr 1fr 1.1fr 1.1fr; gap: 10px; padding: 0 10px; }
@@ -240,7 +240,7 @@ tr.ended td:not(:last-child) { color: var(--ink-3); }
 .select-chev { position: absolute; right: 10px; bottom: 10px; color: var(--ink-3); pointer-events: none; }
 .form-actions { grid-column: 1 / -1; display: flex; align-items: center; gap: 8px; }
 .form-note { flex: 1; font-size: 12px; color: var(--ink-3); }
-.form-note.warn { color: var(--gold-ink); }
+.form-note.warn { color: var(--warn-ink); }
 .no-rates { padding: 2px 18px 6px 56px; font-size: 12.5px; color: var(--ink-3); }
 .state { display: grid; justify-items: center; gap: 8px; padding: 48px 24px 56px; text-align: center; }
 .state h2 { font-size: 17px; }

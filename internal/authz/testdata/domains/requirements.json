@@ -1,0 +1,74 @@
+{
+  "_license": "SPDX-License-Identifier: AGPL-3.0-only",
+  "builtin_roles": {
+    "admin": [
+      "requirements.agree",
+      "requirements.read",
+      "requirements.write"
+    ],
+    "guest": [
+      "requirements.read"
+    ],
+    "member": [
+      "requirements.agree",
+      "requirements.read",
+      "requirements.write"
+    ],
+    "owner": [
+      "requirements.agree",
+      "requirements.read",
+      "requirements.write"
+    ],
+    "viewer": [
+      "requirements.read"
+    ]
+  },
+  "registry": [
+    {
+      "agent_grantable": true,
+      "description": "Agree requirements",
+      "grantable_at": [
+        "workspace",
+        "project"
+      ],
+      "group": "Requirements",
+      "key": "requirements.agree",
+      "owner_workstation_grantable": true,
+      "risk": "medium"
+    },
+    {
+      "agent_grantable": true,
+      "description": "Read requirements",
+      "grantable_at": [
+        "workspace",
+        "project"
+      ],
+      "group": "Requirements",
+      "key": "requirements.read",
+      "owner_workstation_grantable": true,
+      "risk": "low"
+    },
+    {
+      "agent_grantable": true,
+      "description": "Write requirements",
+      "grantable_at": [
+        "workspace",
+        "project"
+      ],
+      "group": "Requirements",
+      "key": "requirements.write",
+      "owner_workstation_grantable": true,
+      "risk": "medium"
+    }
+  ],
+  "routes": {
+    "GET /api/projects/{projectId}/requirements": "requirements.read",
+    "POST /api/projects/{projectId}/requirements": "requirements.write",
+    "POST /api/projects/{projectId}/requirements/agree": "requirements.agree"
+  },
+  "words": {
+    "resources": {
+      "requirements": "requirements"
+    }
+  }
+}

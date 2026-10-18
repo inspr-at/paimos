@@ -214,7 +214,7 @@ watch([projectId, role, harness, agentId], load)
 .tools { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; }
 .harness { display: inline-flex; align-items: center; gap: 2px; padding: 3px; border-radius: 10px; background: var(--surface-2); }
 .seg { display: inline-flex; align-items: center; justify-content: center; height: 28px; min-height: 0; margin: 0; padding: 0 12px; border: 0; border-radius: 7px; background: none; color: var(--ink-2); font: inherit; font-size: 13px; font-weight: 600; line-height: 1; cursor: pointer; }
-.seg[aria-checked="true"] { background: var(--surface); color: var(--ink); box-shadow: 0 0 0 1px var(--line), 0 1px 2px rgb(0 0 0 / .06); }
+.seg[aria-checked="true"] { background: var(--surface); color: var(--ink); box-shadow: 0 0 0 1px var(--line), 0 1px 2px color-mix(in srgb, var(--shadow-black) 6%, transparent); }
 .seg:focus-visible { outline: none; box-shadow: var(--focus-ring); }
 @media (hover: hover) { .seg[aria-checked="false"]:hover { color: var(--ink); } }
 .search { flex: 1 1 220px; display: flex; align-items: center; gap: 6px; min-width: 0; height: 34px; padding: 0 10px; border-radius: 10px; background: var(--surface); box-shadow: inset 0 0 0 1px var(--line-2); color: var(--ink-3); }

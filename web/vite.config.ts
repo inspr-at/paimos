@@ -1,12 +1,12 @@
 // SPDX-License-Identifier: AGPL-3.0-only
-import { defineConfig } from 'vite'
+import { defineConfig, type Plugin } from 'vite'
 import vue from '@vitejs/plugin-vue'
 import { resolve } from 'node:path'
 
-export default defineConfig({
+export default defineConfig(({ mode }) => ({
   // The static pre-filter shares dependencies read-only with a disposable tree.
   cacheDir: process.env.VITE_CACHE_DIR,
-  plugins: [vue()],
+  plugins: [vue(), testModeModuleConnections(mode)],
   // Never inline assets as data: URLs; the server CSP (default-src 'self') blocks them.
   build: { assetsInlineLimit: 0, rollupOptions: { input: { index: resolve(import.meta.dirname, 'index.html'), 'quote-print': resolve(import.meta.dirname, 'quote-print.html') } } },
   // AEON_API_URL points the dev proxy at another local backend (a branch build on its own port).
@@ -28,4 +28,25 @@ export default defineConfig({
       },
     },
   },
-})
+}))
+
+// Playwright's page.route installs Fetch interception for every URL. Chromium
+// then reads only six HTTP/1.1 bodies at a time, and Node's default
+// Keep-Alive: timeout=5 holds those sockets until the idle timer. The rest of
+// a module burst finishes about 5s later, which is past the panel wait in
+// access.spec. Test mode (the Playwright dev server) closes each response so
+// the socket is free as soon as the body is written. The HMR upgrade is left
+// alone. Dev mode keeps keep-alive.
+function testModeModuleConnections(mode: string): Plugin {
+  return {
+    name: 'aeon-test-mode-module-connections',
+    apply: 'serve',
+    configureServer(server) {
+      if (mode !== 'test') return
+      server.middlewares.use((req, res, next) => {
+        if (!req.headers.upgrade) res.setHeader('Connection', 'close')
+        next()
+      })
+    },
+  }
+}

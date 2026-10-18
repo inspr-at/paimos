@@ -3,15 +3,16 @@ import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { businessAreas } from '../src/components/business/areas.ts'
 import {
-  availability, disablePermissions, installationWrite, parseCatalog, pinAction, pluginGate, statusLabel,
+  availability, disablePermissions, installationWrite, parseCatalog, pluginGate, statusLabel,
   type BusinessPlugin,
 } from '../src/components/business/catalog.ts'
-import { formatDuration } from '../src/components/business/duration.ts'
-import { addDecimal, formatDecimal, formatMinor, multiplyDecimal, parseJSONExact } from '../src/components/business/money.ts'
+import { parseJSONExact } from '../src/components/business/money.ts'
+import { formatAmount, parseAmountInput, sumAmounts, toUnits } from '../src/components/business/money.ts'
+import { formatClock, formatSpan, parseDurationInput } from '../src/components/business/duration.ts'
+import { addDays, dayKey, isoWeek, parseDayKey, parseTimeInput, periodLabel, rangeLabel, startOfWeek, weekDays } from '../src/lib/week.ts'
 
 const build = 'a'.repeat(64)
 const pinned = 'b'.repeat(64)
-const space = '\u202f'
 
 function plugin(id: string, patch: Partial<BusinessPlugin> = {}, installation: Partial<BusinessPlugin['installation']> = {}): BusinessPlugin {
   return {
@@ -35,22 +36,6 @@ function plugin(id: string, patch: Partial<BusinessPlugin> = {}, installation: P
   }
 }
 
-test('formats exact decimals and minor units without binary floats', () => {
-  assert.equal(formatDecimal('1250.50', 'EUR'), `1${space}250.50 EUR`)
-  assert.equal(formatDecimal('0.10', 'USD'), '0.10 USD')
-  assert.equal(addDecimal('0.10', '0.20'), '0.30')
-  assert.equal(addDecimal('1.5', '2.25'), '3.75')
-  assert.equal(multiplyDecimal('1.25', '8'), '10.00')
-  assert.equal(formatMinor('100', 'USD'), '1.00 USD')
-  assert.equal(formatMinor('1250', 'JPY'), `1${space}250 JPY`)
-  assert.equal(formatMinor('10', 'BHD'), '0.010 BHD')
-  assert.throws(() => formatDecimal('1e2', 'EUR'), /exact decimal/)
-  assert.throws(() => formatDecimal('-1.00', 'EUR'), /exact decimal/)
-  assert.throws(() => formatMinor('1.0', 'USD'), /integer string/)
-  assert.throws(() => formatMinor('10', 'XXX'), /Unknown currency scale/)
-  assert.throws(() => formatDecimal(1.5 as unknown as string, 'EUR'), /exact decimal/)
-})
-
 test('parseJSONExact keeps number spellings and rejects exponents', () => {
   assert.deepEqual(parseJSONExact('{"amount":12.50,"ok":true,"n":0,"label":"12"}'), {
     amount: '12.50', ok: true, n: '0', label: '12',
@@ -58,13 +43,6 @@ test('parseJSONExact keeps number spellings and rejects exponents', () => {
   assert.deepEqual(parseJSONExact('{"note":"1e2","rows":[1.50,2]}'), { note: '1e2', rows: ['1.50', '2'] })
   assert.throws(() => parseJSONExact('{"n":1e2}'), /Exponent/)
   assert.throws(() => parseJSONExact('{"n":01}'), /not usable/)
-})
-
-test('duration uses whole seconds', () => {
-  assert.equal(formatDuration(0), '0s')
-  assert.equal(formatDuration(3661), '1h 1m 1s')
-  assert.equal(formatDuration(3600), '1h')
-  assert.throws(() => formatDuration(1.5), /whole number/)
 })
 
 test('plugin gates fail closed and quotes wait on both dependencies', () => {
@@ -87,7 +65,7 @@ test('plugin gates fail closed and quotes wait on both dependencies', () => {
   assert.equal(quoteState.open, false)
   assert.equal(quoteState.reason, 'Waiting on Customers.')
   assert.equal(statusLabel(quoteState), 'Waiting')
-  assert.equal(pinAction(quoteState), 'disable')
+
   const hourState = availability(hourArea, [plugin('business_costs', {}, { enabled: false }), plugin('business_hours')])
   assert.equal(hourState.open, false)
   assert.match(hourState.reason, /Waiting on Cost units/)
@@ -119,9 +97,6 @@ test('parseCatalog rejects a malformed plugin list', () => {
 })
 
 // ---------- U9: exact amounts, durations and weeks ----------
-import { compareAmounts, diffAmounts, formatAmount, lineNet, lineTax, parseAmountInput, parsePercentInput, parseQuantityInput, ratePercent, sumAmounts, toUnits } from '../src/components/business/money.ts'
-import { formatClock, formatSpan, parseDurationInput } from '../src/components/business/duration.ts'
-import { addDays, dayKey, isoWeek, parseDayKey, parseTimeInput, periodLabel, rangeLabel, startOfWeek, weekDays } from '../src/lib/week.ts'
 
 test('amounts display exactly with en-GB grouping and the currency scale', () => {
   assert.equal(formatAmount('1200.0000', 'EUR'), '1,200.00')
@@ -134,28 +109,13 @@ test('amounts display exactly with en-GB grouping and the currency scale', () =>
   assert.throws(() => formatAmount('1e3', 'EUR'), /exact decimal/)
 })
 
-test('line and tax amounts round half up at four places like the server', () => {
-  assert.equal(lineNet('19.99', '3'), '59.9700')
-  assert.equal(lineNet('1.9999', '0.3333'), '0.6666')
-  assert.equal(lineTax('59.9700', '0.20000'), '11.9940')
-  assert.equal(lineTax('0.0001', '0.50000'), '0.0001')
+test('sums exact amounts and rejects excess precision', () => {
   assert.equal(sumAmounts(['0.1', '0.2']), '0.3000')
-  assert.equal(diffAmounts('28772', '33084'), '-4312.0000')
-  assert.equal(compareAmounts('10.5', '10.50'), 0)
-  assert.equal(compareAmounts('9.99', '10'), -1)
+
   assert.throws(() => toUnits('1.00001', 4), /too many decimal places/)
 })
 
-test('typed quantities, tax percentages and rates stay exact', () => {
-  assert.equal(parseQuantityInput('1,5'), '1.5')
-  assert.equal(parseQuantityInput('36.5000'), '36.5')
-  assert.equal(parseQuantityInput('0'), null)
-  assert.equal(parseQuantityInput('1.23456'), null)
-  assert.equal(parsePercentInput('20'), '0.20000')
-  assert.equal(parsePercentInput('7.7 %'), '0.07700')
-  assert.equal(parsePercentInput('101'), null)
-  assert.equal(ratePercent('0.20000'), '20')
-  assert.equal(ratePercent('0.07700'), '7.7')
+test('typed amounts accept decimal separators and reject negative values', () => {
   assert.equal(parseAmountInput('1,200.50'), '1200.5000')
   assert.equal(parseAmountInput('58,5'), '58.5000')
   assert.equal(parseAmountInput('-3'), null)

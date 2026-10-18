@@ -7,6 +7,7 @@ import (
 	"crypto/hmac"
 	"crypto/sha256"
 	"encoding/hex"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"net/http"
@@ -18,12 +19,15 @@ import (
 	"time"
 
 	"github.com/inspr-at/paimos/internal/agentactivity"
+	"github.com/inspr-at/paimos/internal/agentsetup"
 	"github.com/inspr-at/paimos/internal/client"
 	"github.com/inspr-at/paimos/internal/deploytarget"
 	"github.com/inspr-at/paimos/internal/modelreport"
+	"github.com/inspr-at/paimos/internal/ownedprocess"
 	"github.com/inspr-at/paimos/internal/reviewgate"
 	"github.com/inspr-at/paimos/internal/rules"
 	"github.com/inspr-at/paimos/internal/version"
+	"github.com/inspr-at/paimos/internal/workerlease"
 )
 
 // Remote uses a scoped agent key through AEON's public HTTP contract.
@@ -34,6 +38,16 @@ type Remote struct {
 	mu                   sync.RWMutex
 	daemonID, generation string
 	accountLinkProof     string
+	ledgerGeneration     string
+	ledgerPeerTelemetry  bool
+	catalogRetryAt       time.Time // Negative capability cache; never discovery authority.
+	probeBatchRetryAt    time.Time // Negative capability cache only; never dispatch authority.
+	// Host capacity is negotiated from the server's own computer view; see
+	// hostCapacitySupported. now is injectable for tests.
+	hostCapacitySupport   int8
+	hostUnattendedSupport bool
+	hostCapacityCheckedAt time.Time
+	now                   func() time.Time
 }
 
 func NewRemote(baseURL, token string) *Remote {
@@ -66,7 +80,7 @@ type RunToolAPI interface {
 	CheckCriterion(context.Context, string, string, bool) error
 	Evidence(context.Context, string, string, string, string) error
 	RequestApproval(context.Context, string, ApprovalRequest) error
-	ReplyInbox(context.Context, string, string, string, string) error
+	ReplyInbox(context.Context, string, InboxReplyTarget, string, string) error
 }
 
 func (r *Remote) Comment(ctx context.Context, nodeID, body string) error {
@@ -130,9 +144,27 @@ func (r *Remote) RequestApproval(ctx context.Context, runID string, in ApprovalR
 	return r.Client.Do(ctx, "POST", "/api/approvals", body, nil)
 }
 
-func (r *Remote) ReplyInbox(ctx context.Context, messageID, recipientID, body, key string) error {
+func (r *Remote) ReplyInbox(ctx context.Context, messageID string, target InboxReplyTarget, body, key string) error {
+	if target.ProjectID != "" {
+		if !uuidPattern.MatchString(target.ProjectID) || !uuidPattern.MatchString(target.SenderSessionID) {
+			return errors.New("inbox reply session binding unavailable")
+		}
+		parent := messageID
+		if target.ReplyToID != "" {
+			parent = target.ReplyToID
+		}
+		request := map[string]any{
+			"to": target.PrincipalID, "body": body, "idempotency_key": key,
+			"reply_to": parent, "sender_session_id": target.SenderSessionID,
+			"delivery_level": "simple",
+		}
+		if target.RecipientSessionID != nil {
+			request["recipient_session_id"] = *target.RecipientSessionID
+		}
+		return r.Client.Do(ctx, "POST", "/api/projects/"+url.PathEscape(target.ProjectID)+"/messages", request, nil)
+	}
 	return r.Client.Do(ctx, "POST", "/api/inbox/messages", map[string]string{
-		"recipient_principal_id": recipientID, "body": body,
+		"recipient_principal_id": target.PrincipalID, "body": body,
 		"idempotency_key": key, "reply_to_id": messageID,
 	}, nil)
 }
@@ -150,7 +182,7 @@ func (r *Remote) Identity(ctx context.Context) (string, string, error) {
 
 func (r *Remote) Queued(ctx context.Context) ([]Run, error) {
 	var runs []Run
-	err := r.Client.DoWithHeaders(ctx, "GET", "/api/runs/queued?limit=100", nil, &runs, map[string]string{reviewgate.PolicyHeader: reviewgate.Policy})
+	err := r.Client.DoWithHeaders(ctx, "GET", "/api/runs/queued?limit=100", nil, &runs, r.ledgerHeaders(map[string]string{reviewgate.PolicyHeader: reviewgate.Policy}))
 	return runs, err
 }
 
@@ -194,6 +226,37 @@ func harnessPath(s HarnessSession) string {
 	return "/api/projects/" + url.PathEscape(s.ProjectID) + "/harness-sessions/" + url.PathEscape(s.ID)
 }
 
+// RegisterNativeCoordinator uses the existing managed root registration
+// contract. It supplies no leaf run, hook binding or daemon key to the child.
+// The start-intent owner must pin the returned generation in its actor grant
+// before launch; registration alone never grants native execution authority.
+func (r *Remote) RegisterNativeCoordinator(ctx context.Context, plan NativeLeadPlan) (HarnessSession, error) {
+	if err := plan.Spec.checkAuthority(ctx); err != nil {
+		return HarnessSession{}, err
+	}
+	s := plan.Session
+	if s.AttachedHook || s.ProjectID != plan.Spec.Grant.ProjectID || s.Harness != Claude || len(s.Lease) < 16 {
+		return HarnessSession{}, ErrScope
+	}
+	body := map[string]any{
+		"agent_principal_id": plan.Spec.Grant.PrincipalID,
+		"harness":            Claude, "host": plan.Host, "management_mode": "managed", "role": "coordinator", "work_shape": "ship",
+		"advertised_capabilities": []string{"inbox", "interrupt", "stop", "chat"},
+		"harness_session_ref":     s.ID, "worker_lease": s.Lease,
+		"model": plan.Spec.Model, "reasoning_effort": plan.Spec.Effort,
+		"max_session_file_bytes": rules.SessionFileLimit(Claude), "rules_client_version": version.Version,
+	}
+	var result HarnessSession
+	if err := r.Client.Do(ctx, "POST", "/api/projects/"+url.PathEscape(s.ProjectID)+"/harness-sessions", body, &result); err != nil {
+		return HarnessSession{}, err
+	}
+	if !uuidPattern.MatchString(result.ID) || result.ProjectID != s.ProjectID {
+		return HarnessSession{}, ErrScope
+	}
+	result.Lease, result.Harness = s.Lease, Claude
+	return result, nil
+}
+
 func (r *Remote) RegisterHarness(ctx context.Context, s HarnessSession, agentID, runID, orderID, harness, host string, caps []string) (HarnessSession, error) {
 	var result HarnessSession
 	body := map[string]any{
@@ -203,6 +266,9 @@ func (r *Remote) RegisterHarness(ctx context.Context, s HarnessSession, agentID,
 		"management_mode": "managed", "role": "worker", "work_shape": "ship",
 		"account_label":           s.AccountLabel,
 		"advertised_capabilities": caps, "harness_session_ref": s.ID, "worker_lease": s.Lease,
+	}
+	if s.DisplayLabel != nil {
+		body["display_label"] = *s.DisplayLabel
 	}
 	if s.Model != "" {
 		body["model"] = s.Model
@@ -226,8 +292,11 @@ func (r *Remote) RegisterHarness(ctx context.Context, s HarnessSession, agentID,
 }
 
 func (r *Remote) harnessWorker(ctx context.Context, s HarnessSession, suffix string, body, dest any) error {
-	err := r.Client.DoWithHeaders(ctx, "POST", harnessPath(s)+suffix, body, dest,
-		map[string]string{"X-Aeon-Worker-Lease": s.Lease, rules.ClientMaximumHeader: strconv.Itoa(rules.SessionFileLimit(s.Harness))})
+	headers := map[string]string{rules.ClientMaximumHeader: strconv.Itoa(rules.SessionFileLimit(s.Harness))}
+	if s.Lease != "" && r.Client.Token != "" {
+		headers["Authorization"] = workerlease.Value(r.Client.Token, s.Lease)
+	}
+	err := r.Client.DoWithHeaders(ctx, "POST", harnessPath(s)+suffix, body, dest, headers)
 	var status *client.StatusError
 	if errors.As(err, &status) && status.Status == 410 && status.Message == "harness generation archived" {
 		return ErrHarnessArchived
@@ -255,6 +324,9 @@ func (r *Remote) HeartbeatHarnessPause(ctx context.Context, s HarnessSession, ph
 	body := map[string]any{
 		"max_session_file_bytes": rules.SessionFileLimit(s.Harness), "rules_client_version": version.Version,
 		"phase": phase, "activity": activity, "activity_sequence": sequence, "process_ownership": s.Ownership,
+	}
+	if s.AttachedHook {
+		body["attached_hook"] = true
 	}
 	if s.Model != "" {
 		body["model"] = s.Model
@@ -312,8 +384,12 @@ func (r *Remote) YieldHarness(ctx context.Context, s HarnessSession) ([]HarnessC
 }
 
 func (r *Remote) DrainHarness(ctx context.Context, s HarnessSession) ([]HarnessDelivery, error) {
+	return r.DrainHarnessInput(ctx, s, "")
+}
+
+func (r *Remote) DrainHarnessInput(ctx context.Context, s HarnessSession, level string) ([]HarnessDelivery, error) {
 	var result []HarnessDelivery
-	err := r.harnessWorker(ctx, s, "/drain", struct{}{}, &result)
+	err := r.harnessWorker(ctx, s, "/drain", map[string]string{"delivery_level": level}, &result)
 	return result, err
 }
 
@@ -340,7 +416,11 @@ func terminalControlCompletion(message string) bool {
 }
 
 func (r *Remote) CompleteHarnessDelivery(ctx context.Context, s HarnessSession, d HarnessDelivery) error {
-	body := map[string]any{"delivery_id": d.ID, "cursor": d.Cursor, "effective_level": "simple"}
+	level := d.Level
+	if level == "" {
+		level = "simple"
+	}
+	body := map[string]any{"delivery_id": d.ID, "cursor": d.Cursor, "effective_level": level}
 	if d.Outcome != "" {
 		body["outcome"] = d.Outcome
 	}
@@ -361,28 +441,61 @@ func (r *Remote) WorkOrder(ctx context.Context, id string) (WorkOrder, error) {
 }
 
 func (r *Remote) Route(ctx context.Context, runID, daemonID string, accountIDs []string, estimates map[string]int64) (Route, error) {
+	return r.route(ctx, runID, daemonID, accountIDs, estimates, nil)
+}
+
+func (r *Remote) RouteRoutine(ctx context.Context, runID, daemonID string, accountIDs []string, estimates map[string]int64, pickup agentsetup.RoutinePickup) (Route, error) {
+	raw, err := json.Marshal(pickup)
+	if err != nil {
+		return Route{}, err
+	}
+	return r.route(ctx, runID, daemonID, accountIDs, estimates, map[string]string{agentsetup.RoutinePickupHeader: string(raw)})
+}
+
+func (r *Remote) route(ctx context.Context, runID, daemonID string, accountIDs []string, estimates map[string]int64, headers map[string]string) (Route, error) {
 	var route Route
-	err := r.Client.Do(ctx, "POST", "/api/agent-accounts/route", map[string]any{
+	err := r.Client.DoWithHeaders(ctx, "POST", "/api/agent-accounts/route", map[string]any{
 		"run_id": runID, "daemon_id": daemonID, "account_ids": accountIDs, "estimated_units": estimates,
-	}, &route)
+	}, &route, r.ledgerHeaders(headers))
 	return route, err
 }
 
 func (r *Remote) Claim(ctx context.Context, runID, daemonID, generation string, reservations []string) error {
+	return r.claim(ctx, runID, daemonID, generation, reservations, nil, nil)
+}
+
+func (r *Remote) ClaimHandoff(ctx context.Context, runID, daemonID, generation string, reservations []string, pickup WorkerPickup) error {
+	return r.claim(ctx, runID, daemonID, generation, reservations, &pickup, nil)
+}
+
+func (r *Remote) ClaimRoutine(ctx context.Context, runID, daemonID, generation string, reservations []string, pickup *WorkerPickup, routine agentsetup.RoutinePickup) error {
+	return r.claim(ctx, runID, daemonID, generation, reservations, pickup, &routine)
+}
+
+func (r *Remote) claim(ctx context.Context, runID, daemonID, generation string, reservations []string, pickup *WorkerPickup, routine *agentsetup.RoutinePickup) error {
 	// Retain the attempted binding even if the HTTP response is lost. It is
 	// only a header hint; the server remains the authority for claim ownership.
 	r.mu.Lock()
 	r.daemonID, r.generation = daemonID, generation
 	r.mu.Unlock()
-	err := r.Client.DoWithHeaders(ctx, "POST", "/api/runs/"+url.PathEscape(runID)+"/claim", map[string]any{
-		"daemon_id": daemonID, "daemon_generation": generation, "reservation_ids": reservations,
-	}, nil, map[string]string{reviewgate.PolicyHeader: reviewgate.Policy})
+	body := map[string]any{"daemon_id": daemonID, "daemon_generation": generation, "reservation_ids": reservations}
+	if pickup != nil {
+		body["handoff"] = pickup
+	}
+	if routine != nil {
+		body["routine"] = routine
+	}
+	err := r.Client.DoWithHeaders(ctx, "POST", "/api/runs/"+url.PathEscape(runID)+"/claim", body, nil, r.ledgerHeaders(map[string]string{reviewgate.PolicyHeader: reviewgate.Policy}))
 	return err
 }
 
 // ErrTelemetryProtocol means the server rejected the telemetry itself. It does
 // not include authentication, enrollment fences, or uncertain delivery errors.
 var ErrTelemetryProtocol = errors.New("telemetry protocol violation")
+
+// ErrTelemetryAuthority fences dispatch without stopping a live owned child.
+// After proven exit, retrying the same claim cannot repair this refusal.
+var ErrTelemetryAuthority = errors.New("telemetry authority rejected")
 
 func (r *Remote) Report(ctx context.Context, runID string, t Telemetry) error {
 	r.mu.RLock()
@@ -406,13 +519,17 @@ func (r *Remote) ReportForClaim(ctx context.Context, runID, daemon, generation s
 			// Other conflicts include generation changes and enrollment drain.
 			// Only the telemetry endpoint's explicit protocol errors are fatal.
 			switch status.Message {
-			case "divergent telemetry replay", "telemetry sequence is not monotonic", "run cannot return to starting":
+			case "divergent telemetry replay", "telemetry sequence is not monotonic", "run cannot return to starting", "run is not live":
 				protocol = true
 			}
 		}
 		if protocol {
 			// Do not propagate arbitrary server response text as diagnostics.
 			return fmt.Errorf("%w (HTTP %d)", ErrTelemetryProtocol, status.Status)
+		}
+		if status.Status == http.StatusUnauthorized || status.Status == http.StatusForbidden || status.Status == http.StatusNotFound || status.Status == http.StatusGone ||
+			status.Status == http.StatusConflict && status.Message == "daemon generation conflict" {
+			return fmt.Errorf("%w (HTTP %d)", ErrTelemetryAuthority, status.Status)
 		}
 	}
 	return err
@@ -517,4 +634,26 @@ func (r *Remote) SessionActivityMode(id string) string {
 		return mode
 	}
 	return agentactivity.Off
+}
+
+// LeadDemand is bounded to one owner-approved project mapping. Missing routes
+// on older servers are unavailable, never a fallback to ordinary queue pickup.
+func (r *Remote) LeadDemand(ctx context.Context, project string) (*agentsetup.LeadDemand, error) {
+	var out struct {
+		Demand *agentsetup.LeadDemand `json:"demand"`
+		State  string                 `json:"state"`
+		Reason string                 `json:"reason"`
+	}
+	err := r.Client.Do(ctx, "GET", "/api/projects/"+url.PathEscape(project)+"/lead-runtime", nil, &out)
+	return out.Demand, err
+}
+func (r *Remote) ClaimLead(ctx context.Context, in agentsetup.LeadPickup) (agentsetup.LeadLaunch, error) {
+	var out agentsetup.LeadLaunch
+	err := r.Client.Do(ctx, "POST", "/api/projects/"+url.PathEscape(in.Demand.ProjectID)+"/lead-runtime/claim", in, &out)
+	return out, err
+}
+func (r *Remote) ReportLead(ctx context.Context, in agentsetup.LeadPickup, kind string, ownership *ownedprocess.Identity) (agentsetup.LeadLaunch, error) {
+	var out agentsetup.LeadLaunch
+	err := r.Client.Do(ctx, "POST", "/api/projects/"+url.PathEscape(in.Demand.ProjectID)+"/lead-runtime/report", map[string]any{"pickup": in, "kind": kind, "ownership": ownership}, &out)
+	return out, err
 }

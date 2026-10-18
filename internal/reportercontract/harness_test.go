@@ -11,6 +11,43 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
+// Risk: a lead response addition changes an existing field or is not pinned,
+// leaving strict consumers unaware of an incompatible response contract.
+func TestProjectLeadReadContractAdditionIsMinor(t *testing.T) {
+	raw, err := os.ReadFile("../../api/openapi.yaml")
+	if err != nil {
+		t.Fatal(err)
+	}
+	current, err := Current(raw)
+	if err != nil {
+		t.Fatal(err)
+	}
+	now, ok := current["project-lead"]
+	if !ok || now.Version != ProjectLead {
+		t.Fatal("lead read is missing its declared contract pin")
+	}
+	var shape map[string]any
+	if err = json.Unmarshal(now.Shape, &shape); err != nil {
+		t.Fatal(err)
+	}
+	body := shape["GET /projects/{projectId}/lead 200"].(map[string]any)
+	props := body["properties"].(map[string]any)
+	for _, field := range []string{"actions", "automatic_launch_enabled"} {
+		if _, exists := props[field]; !exists || isRequired(body["required"], field) {
+			t.Fatalf("lead %s must remain an optional response addition", field)
+		}
+		delete(props, field)
+	}
+	before, err := json.Marshal(shape)
+	if err != nil {
+		t.Fatal(err)
+	}
+	bump, err := RequiredBump(Pin{Version: "project-lead/1.0", SHA256: "before-lead-actions", Shape: before}, now)
+	if err != nil || bump != "minor" {
+		t.Fatalf("lead actions: got %q, %v; want minor", bump, err)
+	}
+}
+
 // Status and heartbeat share HarnessSession. Callers that never send an estimate
 // must keep the attention-reason enum and the required payload unchanged; ETA
 // fields stay optional and eta_stale is not an attention kind.
@@ -77,6 +114,15 @@ func TestHarnessStatusAndHeartbeatContract(t *testing.T) {
 			if isRequired(required, field) {
 				t.Fatalf("%s requires %s", op, field)
 			}
+		}
+		// R10: a committed isolated receipt must remain decodable by strict
+		// reporters, including its explicit unknown-projection warning.
+		warnings, _ := props["warnings"].(map[string]any)
+		warning, _ := warnings["items"].(map[string]any)
+		warningProps, _ := warning["properties"].(map[string]any)
+		code, _ := warningProps["code"].(map[string]any)
+		if !reflect.DeepEqual(code["enum"], []any{"missing_progress", "missing_eta", "ticket_without_estimate", "projection_unavailable"}) {
+			t.Fatalf("%s warning enum rejects isolated receipts: %#v", op, code["enum"])
 		}
 	}
 }

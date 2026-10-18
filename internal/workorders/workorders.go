@@ -4,7 +4,9 @@ package workorders
 
 import (
 	"context"
+	"crypto/sha256"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/url"
 	"strings"
@@ -27,27 +29,31 @@ type Criterion struct {
 	CheckedBy   *string    `json:"checked_by_principal_id"`
 }
 type Order struct {
-	Kind        string              `json:"kind"`
-	Review      *reviewgate.Binding `json:"review,omitempty"`
-	NodeID      string              `json:"node_id"`
-	Status      string              `json:"status"`
-	Revision    int64               `json:"revision"`
-	RequestedBy string              `json:"requested_by_principal_id"`
-	Assignee    *string             `json:"assignee_principal_id"`
-	MaxCost     *int64              `json:"max_cost_micros"`
-	MaxDuration *int64              `json:"max_duration_seconds"`
-	Criteria    []Criterion         `json:"criteria"`
-	CreatedAt   time.Time           `json:"created_at"`
-	UpdatedAt   time.Time           `json:"updated_at"`
+	BuildDelivery *BuildCandidate     `json:"build_delivery,omitempty"`
+	Kind          string              `json:"kind"`
+	Review        *reviewgate.Binding `json:"review,omitempty"`
+	NodeID        string              `json:"node_id"`
+	Status        string              `json:"status"`
+	Revision      int64               `json:"revision"`
+	RequestedBy   string              `json:"requested_by_principal_id"`
+	Assignee      *string             `json:"assignee_principal_id"`
+	MaxCost       *int64              `json:"max_cost_micros"`
+	MaxDuration   *int64              `json:"max_duration_seconds"`
+	Criteria      []Criterion         `json:"criteria"`
+	CreatedAt     time.Time           `json:"created_at"`
+	UpdatedAt     time.Time           `json:"updated_at"`
 }
 type CreateInput struct {
-	Title       string   `json:"title"`
-	Body        string   `json:"body"`
-	Parent      *string  `json:"parent_id"`
-	Assignee    *string  `json:"assignee_principal_id"`
-	MaxCost     *int64   `json:"max_cost_micros"`
-	MaxDuration *int64   `json:"max_duration_seconds"`
-	Criteria    []string `json:"criteria"`
+	BuildDelivery *BuildCandidate `json:"build_delivery,omitempty"`
+	// RoutineRunID is an internal broker binding, never accepted by HTTP JSON.
+	RoutineRunID string   `json:"-"`
+	Title        string   `json:"title"`
+	Body         string   `json:"body"`
+	Parent       *string  `json:"parent_id"`
+	Assignee     *string  `json:"assignee_principal_id"`
+	MaxCost      *int64   `json:"max_cost_micros"`
+	MaxDuration  *int64   `json:"max_duration_seconds"`
+	Criteria     []string `json:"criteria"`
 }
 type patch struct {
 	Revision    int64           `json:"expected_revision"`
@@ -92,16 +98,22 @@ func (m *module) Mount(mux *http.ServeMux) {
 // request a row lock; all run mutations lock the order before locking a run.
 func Load(ctx context.Context, tx pgx.Tx, id string, lock bool) (Order, error) {
 	q := `SELECT w.kind,w.node_id::text,w.status,w.revision,w.requested_by_principal_id::text,w.assignee_principal_id::text,
-	 w.max_cost_micros,w.max_duration_seconds,w.created_at,w.updated_at FROM work_orders w
+	 w.max_cost_micros,w.max_duration_seconds,w.created_at,w.updated_at,n.fields->'build_delivery' FROM work_orders w
 	 JOIN nodes n ON n.tenant_id=w.tenant_id AND n.id=w.node_id WHERE w.node_id=$1 AND n.deleted_at IS NULL`
 	if lock {
 		q += ` FOR UPDATE OF w`
 	}
 	var o Order
-	err := tx.QueryRow(ctx, q, id).Scan(&o.Kind, &o.NodeID, &o.Status, &o.Revision, &o.RequestedBy, &o.Assignee, &o.MaxCost, &o.MaxDuration, &o.CreatedAt, &o.UpdatedAt)
+	var delivery json.RawMessage
+	err := tx.QueryRow(ctx, q, id).Scan(&o.Kind, &o.NodeID, &o.Status, &o.Revision, &o.RequestedBy, &o.Assignee, &o.MaxCost, &o.MaxDuration, &o.CreatedAt, &o.UpdatedAt, &delivery)
 	if err != nil {
 		return o, err
 	}
+	admission, err := decodeBuildAdmission(delivery)
+	if err != nil {
+		return o, err
+	}
+	o.BuildDelivery = admission.Candidate
 	if o.Kind == "review" {
 		o.Review, err = reviewgate.Load(ctx, tx, id)
 		if err != nil {
@@ -152,6 +164,20 @@ func Record(ctx context.Context, tx pgx.Tx, p tenant.Principal, id, kind string,
 // BlockBudget prevents new dispatch without discarding usage that already
 // happened. The caller holds the order lock and commits this with run telemetry.
 func BlockBudget(ctx context.Context, tx pgx.Tx, p tenant.Principal, o Order) error {
+	var pending []events.Change
+	if err := BlockBudgetDeferred(ctx, tx, p, o, &pending); err != nil {
+		return err
+	}
+	for _, change := range pending {
+		if _, err := events.Append(ctx, tx, p, change); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// BlockBudgetDeferred captures the transition now; its outer owner flushes last.
+func BlockBudgetDeferred(ctx context.Context, tx pgx.Tx, p tenant.Principal, o Order, pending *[]events.Change) error {
 	full, err := Exhausted(ctx, tx, o)
 	if err != nil || !full || o.Status == "blocked" || o.Status == "done" || o.Status == "cancelled" {
 		return err
@@ -163,7 +189,8 @@ func BlockBudget(ctx context.Context, tx pgx.Tx, p tenant.Principal, o Order) er
 	if err != nil {
 		return err
 	}
-	return Record(ctx, tx, p, o.NodeID, "work_order.budget_exhausted", o, after)
+	*pending = append(*pending, events.Change{NodeID: &o.NodeID, Type: "work_order.budget_exhausted", Before: o, After: after})
+	return nil
 }
 
 func (m *module) get(r *http.Request, tx pgx.Tx, p tenant.Principal) (any, error) {
@@ -250,6 +277,9 @@ func Create(ctx context.Context, tx pgx.Tx, p tenant.Principal, in CreateInput) 
 // all node, queue and run locks have been acquired. The caller owns the tenant
 // transaction, authorization and tree lock; rollback discards the entire unit.
 func CreateDeferred(ctx context.Context, tx pgx.Tx, p tenant.Principal, in CreateInput) (Order, []events.Change, error) {
+	if err := ValidateBuildCandidate(in.BuildDelivery); err != nil {
+		return Order{}, nil, err
+	}
 	if strings.TrimSpace(in.Title) == "" || len(in.Criteria) == 0 || !validBudget(in.MaxCost, in.MaxDuration) || !validID(in.Parent) || !validID(in.Assignee) {
 		return Order{}, nil, Fail(400, "title, criteria, valid budget and IDs required")
 	}
@@ -261,6 +291,9 @@ func CreateDeferred(ctx context.Context, tx pgx.Tx, p tenant.Principal, in Creat
 	if _, err := tx.Exec(ctx, `SELECT pg_advisory_xact_lock(hashtextextended(current_setting('aeon.tenant_id',true),0))`); err != nil {
 		return Order{}, nil, err
 	}
+	if err := requireRoutineChild(ctx, tx, p, in); err != nil {
+		return Order{}, nil, err
+	}
 	var id string
 	err := tx.QueryRow(ctx, `INSERT INTO nodes(tenant_id,key,kind_id,title,body,parent_id,position)
 	 SELECT $1,aeon_next_node_key($1,k.short_prefix),k.id,$2,$3,$4,
@@ -269,8 +302,22 @@ func CreateDeferred(ctx context.Context, tx pgx.Tx, p tenant.Principal, in Creat
 	if err != nil {
 		return Order{}, nil, err
 	}
+	if in.BuildDelivery != nil {
+		raw, err := json.Marshal(in.BuildDelivery)
+		if err != nil {
+			return Order{}, nil, err
+		}
+		if _, err = tx.Exec(ctx, `UPDATE nodes SET fields=jsonb_set(fields,'{build_delivery}',$2::jsonb) WHERE id=$1`, id, raw); err != nil {
+			return Order{}, nil, err
+		}
+	}
 	if _, err = tx.Exec(ctx, `INSERT INTO work_orders(tenant_id,node_id,requested_by_principal_id,assignee_principal_id,max_cost_micros,max_duration_seconds) VALUES($1,$2,$3,$4,$5,$6)`, p.TenantID, id, p.ID, in.Assignee, in.MaxCost, in.MaxDuration); err != nil {
 		return Order{}, nil, err
+	}
+	if in.RoutineRunID != "" {
+		if _, err = tx.Exec(ctx, `INSERT INTO routine_budget_orders(tenant_id,run_id,work_order_id) VALUES($1,$2,$3)`, p.TenantID, in.RoutineRunID, id); err != nil {
+			return Order{}, nil, err
+		}
 	}
 	for i, c := range in.Criteria {
 		if _, err = tx.Exec(ctx, `INSERT INTO work_criteria(tenant_id,work_order_id,position,description) VALUES($1,$2,$3,$4)`, p.TenantID, id, i, c); err != nil {
@@ -481,4 +528,29 @@ func (m *module) evidence(r *http.Request, tx pgx.Tx, p tenant.Principal) (any, 
 		return nil, err
 	}
 	return e, Record(ctx, tx, p, o.NodeID, "work_order.evidence_added", nil, e)
+}
+
+// BriefDigest binds the content used for launch, without persisting the prompt.
+// Callers pass ordered criterion descriptions from the same order revision.
+func BriefDigest(title, body string, criteria []string) (string, error) {
+	size := len(title) + len(body)
+	if len(criteria) > 200 {
+		return "", Fail(400, "work brief exceeds bound")
+	}
+	for _, c := range criteria {
+		size += len(c)
+	}
+	if size > 256<<10 {
+		return "", Fail(400, "work brief exceeds bound")
+	}
+	raw, err := json.Marshal(struct {
+		Title    string   `json:"title"`
+		Body     string   `json:"body"`
+		Criteria []string `json:"criteria"`
+	}{title, body, criteria})
+	if err != nil {
+		return "", err
+	}
+	sum := sha256.Sum256(append([]byte("aeon.worker.brief.v1\x00"), raw...))
+	return fmt.Sprintf("%x", sum), nil
 }

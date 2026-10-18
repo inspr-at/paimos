@@ -214,11 +214,11 @@ func TestPortalBodyReadPrecedesTenantAndTreeLocks(t *testing.T) {
 			}
 			select {
 			case at := <-writer.deadlines:
-				if !at.IsZero() {
-					t.Error("read deadline was not cleared")
-				}
+				t.Errorf("failed body read replaced its drain deadline: %s", at)
 			default:
-				t.Error("read deadline not reset after decoding")
+			}
+			if writer.Header().Get("Connection") != "close" {
+				t.Error("failed body read left the connection reusable")
 			}
 		})
 	}

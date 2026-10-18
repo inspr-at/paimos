@@ -1,0 +1,114 @@
+# SPDX-License-Identifier: AGPL-3.0-only
+# aeon:owner internal/relations
+paths:
+  /relations:
+    get:
+      operationId: listRelations
+      security: *auth
+      parameters:
+        - {name: node_id, in: query, required: true, schema: {type: string, format: uuid}}
+        - {$ref: '#/components/parameters/Limit'}
+        - {$ref: '#/components/parameters/Cursor'}
+      responses:
+        '200':
+          $ref: '#/components/responses/Relations'
+        '400':
+          $ref: '#/components/responses/Error'
+    post:
+      operationId: createRelation
+      description: >-
+        Relations are directed except relates, which is symmetric and stored with the smaller UUID as source.
+        A 409 message reads as words and names items by key, so clients can show it as it stands: an identical
+        link that already exists, or a blocks, implements or duplicates link that would close a loop through
+        live items (the message spells out the chain). A link from an item to itself is a 400.
+        A relation touching a portal_product, portal_feature or portal_wish requires a person with settings.manage. Agents are refused.
+      security: *auth
+      requestBody:
+        $ref: '#/components/requestBodies/RelationCreate'
+      responses:
+        '201':
+          $ref: '#/components/responses/Relation'
+        '400':
+          $ref: '#/components/responses/Error'
+        '403':
+          $ref: '#/components/responses/Error'
+        '404':
+          $ref: '#/components/responses/Error'
+        '409':
+          $ref: '#/components/responses/Error'
+  /relations/{relationId}:
+    parameters: [{$ref: '#/components/parameters/RelationId'}]
+    delete:
+      operationId: deleteRelation
+      description: A relation touching a portal_product, portal_feature or portal_wish requires a person with settings.manage. Agents are refused.
+      security: *auth
+      responses:
+        '204':
+          description: Deleted
+        '403':
+          $ref: '#/components/responses/Error'
+        '404':
+          $ref: '#/components/responses/Error'
+components:
+  schemas:
+    Relation:
+      allOf:
+        - {$ref: '#/components/schemas/RelationCreate'}
+        - type: object
+          required: [id, created_at]
+          properties:
+            id: {type: string, format: uuid}
+            created_at: {type: string, format: date-time}
+    RelationCreate:
+      type: object
+      required: [source_node_id, target_node_id, type]
+      properties:
+        source_node_id:
+          type: string
+          format: uuid
+        target_node_id:
+          type: string
+          format: uuid
+        type:
+          $ref: '#/components/schemas/RelationType'
+    RelationPage:
+      type: object
+      required: [items, next_cursor]
+      properties:
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/Relation'
+        next_cursor:
+          type: [string, 'null']
+    RelationType:
+      type: string
+      enum: [blocks, relates, implements, cites, duplicates, customer_of, contact_for]
+  parameters:
+    RelationId:
+      name: relationId
+      in: path
+      required: true
+      schema:
+        type: string
+        format: uuid
+  requestBodies:
+    RelationCreate:
+      required: true
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/RelationCreate'
+  responses:
+    Relation:
+      description: Relation
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Relation'
+    Relations:
+      description: Relation page
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/RelationPage'

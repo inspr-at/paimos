@@ -1,0 +1,5138 @@
+{
+  "ticket": "AEON-1382",
+  "version": 1,
+  "method": {
+    "runner": "approved mbp2606 remote-test.sh lane",
+    "database": "private disposable dbtest schema; NOSUPERUSER NOBYPASSRLS owner; FORCE RLS",
+    "fixture": "one tenant, one project, 80 work leaves, scoped agent and person session; empty inbox pull",
+    "per_variant": "3 runs; 3 fresh backends/run; 30 mixed warm-up iterations/backend; 100 measured iterations/backend on each of 5 endpoints (900 samples/endpoint/variant)",
+    "extra_warmup_routes": [
+      "GET /api/kinds",
+      "GET /api/projects",
+      "GET /api/nodes/tree",
+      "GET /api/nodes/{id}/activity",
+      "GET /api/projects/{id}/figures (person session)",
+      "PATCH /api/nodes/{id}"
+    ],
+    "session": "JIT off, as db.Open in production; only one unretained pool slot so every request uses the sampled backend; 3 total app backends, independent fresh pool per run",
+    "memory": "allocated PostgreSQL memory contexts (not RSS or cgroup anonymous memory); snapshot from the app backend itself using a database-local SECURITY DEFINER helper; one MATERIALIZED snapshot; classify plan subtrees first, CacheMemoryContext subtree excluding plans second, then other; omit SQL text and payloads",
+    "latency": "HTTP client wall time through reading and closing the complete body; nearest-rank p50/p95; pooled 900 samples/endpoint and per-run 300-sample quantiles retained; mixed warm-up excluded",
+    "guard": "every endpoint pooled p95 <= baseline*1.10; median of the three run p95 values also checked; no aggregate across endpoints",
+    "limitations": [
+      "Representative CLI/API hot workflows; production traffic rank was not available and the production database was never accessed.",
+      "The 80-leaf fixture does not reproduce the production ~85 MiB/backend or production data volume.",
+      "Shared guarded laptop runner: three runs, order rotation, all raw samples retained; results are workload evidence, not a universal latency guarantee.",
+      "OPS must verify production steady-state database memory below 70% of its limit after coordinator deployment."
+    ]
+  },
+  "references": [
+    "https://www.postgresql.org/docs/18/view-pg-backend-memory-contexts.html",
+    "https://pkg.go.dev/github.com/jackc/pgx/v5#QueryExecMode"
+  ],
+  "stages": [
+    {
+      "stage": "primary",
+      "source_commit": "7614b6dcb5",
+      "summary": {
+        "cache_statement_512": {
+          "backends": 9,
+          "memory": {
+            "total_bytes": {
+              "mean_bytes": 29273700.444444444,
+              "min_bytes": 29255560,
+              "max_bytes": 29337480
+            },
+            "used_bytes": {
+              "mean_bytes": 19379520.888888888,
+              "min_bytes": 19363640,
+              "max_bytes": 19425456
+            },
+            "plan_bytes": {
+              "mean_bytes": 20095425.777777776,
+              "min_bytes": 20078656,
+              "max_bytes": 20160576
+            },
+            "catalog_bytes": {
+              "mean_bytes": 6370026.666666667,
+              "min_bytes": 6368656,
+              "max_bytes": 6380992
+            },
+            "cache_memory_context_bytes": {
+              "mean_bytes": 4318144,
+              "min_bytes": 4318144,
+              "max_bytes": 4318144
+            }
+          },
+          "named_plan_contexts_mean_bytes": {
+            "CachedPlan": 11106447.111111112,
+            "CachedPlanSource": 2402969.777777778,
+            "CachedPlanQuery": 6586008.888888889
+          },
+          "prepared_statements": [
+            65,
+            66
+          ],
+          "latencies": [
+            {
+              "endpoint": "GET /api/me",
+              "samples": 900,
+              "p50_ms": 2.432917,
+              "p95_ms": 4.8295,
+              "runs": [
+                {
+                  "run": 1,
+                  "samples": 300,
+                  "p50_ms": 2.57375,
+                  "p95_ms": 4.58925
+                },
+                {
+                  "run": 2,
+                  "samples": 300,
+                  "p50_ms": 2.158875,
+                  "p95_ms": 4.634791
+                },
+                {
+                  "run": 3,
+                  "samples": 300,
+                  "p50_ms": 2.563167,
+                  "p95_ms": 5.039875
+                }
+              ],
+              "median_run_p95_ms": 4.634791,
+              "p95_change_pct": 0.0,
+              "median_run_p95_change_pct": 0.0
+            },
+            {
+              "endpoint": "GET /api/nodes?within={project}&limit=50",
+              "samples": 900,
+              "p50_ms": 48.538125,
+              "p95_ms": 99.263875,
+              "runs": [
+                {
+                  "run": 1,
+                  "samples": 300,
+                  "p50_ms": 53.372291,
+                  "p95_ms": 109.27475
+                },
+                {
+                  "run": 2,
+                  "samples": 300,
+                  "p50_ms": 43.935333,
+                  "p95_ms": 86.026125
+                },
+                {
+                  "run": 3,
+                  "samples": 300,
+                  "p50_ms": 52.117291,
+                  "p95_ms": 104.711958
+                }
+              ],
+              "median_run_p95_ms": 104.711958,
+              "p95_change_pct": 0.0,
+              "median_run_p95_change_pct": 0.0
+            },
+            {
+              "endpoint": "GET /api/nodes/{id}",
+              "samples": 900,
+              "p50_ms": 5.90825,
+              "p95_ms": 11.631584,
+              "runs": [
+                {
+                  "run": 1,
+                  "samples": 300,
+                  "p50_ms": 6.405791,
+                  "p95_ms": 12.702417
+                },
+                {
+                  "run": 2,
+                  "samples": 300,
+                  "p50_ms": 5.305,
+                  "p95_ms": 10.434791
+                },
+                {
+                  "run": 3,
+                  "samples": 300,
+                  "p50_ms": 6.154666,
+                  "p95_ms": 11.590292
+                }
+              ],
+              "median_run_p95_ms": 11.590292,
+              "p95_change_pct": 0.0,
+              "median_run_p95_change_pct": 0.0
+            },
+            {
+              "endpoint": "GET /api/search?q=Memory&limit=50",
+              "samples": 900,
+              "p50_ms": 4.812833,
+              "p95_ms": 8.889084,
+              "runs": [
+                {
+                  "run": 1,
+                  "samples": 300,
+                  "p50_ms": 5.097959,
+                  "p95_ms": 9.185958
+                },
+                {
+                  "run": 2,
+                  "samples": 300,
+                  "p50_ms": 4.155833,
+                  "p95_ms": 7.935167
+                },
+                {
+                  "run": 3,
+                  "samples": 300,
+                  "p50_ms": 5.017291,
+                  "p95_ms": 9.070292
+                }
+              ],
+              "median_run_p95_ms": 9.070292,
+              "p95_change_pct": 0.0,
+              "median_run_p95_change_pct": 0.0
+            },
+            {
+              "endpoint": "GET /api/inbox/messages?wait_ms=0",
+              "samples": 900,
+              "p50_ms": 3.717625,
+              "p95_ms": 7.447667,
+              "runs": [
+                {
+                  "run": 1,
+                  "samples": 300,
+                  "p50_ms": 4.032916,
+                  "p95_ms": 7.447667
+                },
+                {
+                  "run": 2,
+                  "samples": 300,
+                  "p50_ms": 3.183625,
+                  "p95_ms": 6.793167
+                },
+                {
+                  "run": 3,
+                  "samples": 300,
+                  "p50_ms": 3.769292,
+                  "p95_ms": 7.690875
+                }
+              ],
+              "median_run_p95_ms": 7.447667,
+              "p95_change_pct": 0.0,
+              "median_run_p95_change_pct": 0.0
+            }
+          ],
+          "memory_reduction_pct": 0.0,
+          "within_p95_budget": true,
+          "within_median_run_p95_budget": true
+        },
+        "cache_describe": {
+          "backends": 9,
+          "memory": {
+            "total_bytes": {
+              "mean_bytes": 11491352,
+              "min_bytes": 11491352,
+              "max_bytes": 11491352
+            },
+            "used_bytes": {
+              "mean_bytes": 7624860.444444444,
+              "min_bytes": 7613904,
+              "max_bytes": 7689872
+            },
+            "plan_bytes": {
+              "mean_bytes": 2615504,
+              "min_bytes": 2615504,
+              "max_bytes": 2615504
+            },
+            "catalog_bytes": {
+              "mean_bytes": 6362512,
+              "min_bytes": 6362512,
+              "max_bytes": 6362512
+            },
+            "cache_memory_context_bytes": {
+              "mean_bytes": 4318144,
+              "min_bytes": 4318144,
+              "max_bytes": 4318144
+            }
+          },
+          "named_plan_contexts_mean_bytes": {
+            "CachedPlan": 1157328,
+            "CachedPlanSource": 628736,
+            "CachedPlanQuery": 829440
+          },
+          "prepared_statements": [
+            0
+          ],
+          "latencies": [
+            {
+              "endpoint": "GET /api/me",
+              "samples": 900,
+              "p50_ms": 2.908625,
+              "p95_ms": 5.727167,
+              "runs": [
+                {
+                  "run": 1,
+                  "samples": 300,
+                  "p50_ms": 2.72875,
+                  "p95_ms": 3.808167
+                },
+                {
+                  "run": 2,
+                  "samples": 300,
+                  "p50_ms": 2.817833,
+                  "p95_ms": 4.388625
+                },
+                {
+                  "run": 3,
+                  "samples": 300,
+                  "p50_ms": 3.392625,
+                  "p95_ms": 7.324083
+                }
+              ],
+              "median_run_p95_ms": 4.388625,
+              "p95_change_pct": 18.58716223211512,
+              "median_run_p95_change_pct": -5.311264305121844
+            },
+            {
+              "endpoint": "GET /api/nodes?within={project}&limit=50",
+              "samples": 900,
+              "p50_ms": 50.214333,
+              "p95_ms": 98.705708,
+              "runs": [
+                {
+                  "run": 1,
+                  "samples": 300,
+                  "p50_ms": 47.436292,
+                  "p95_ms": 61.119166
+                },
+                {
+                  "run": 2,
+                  "samples": 300,
+                  "p50_ms": 48.5375,
+                  "p95_ms": 68.031792
+                },
+                {
+                  "run": 3,
+                  "samples": 300,
+                  "p50_ms": 62.712792,
+                  "p95_ms": 120.741291
+                }
+              ],
+              "median_run_p95_ms": 68.031792,
+              "p95_change_pct": -0.5623062770821696,
+              "median_run_p95_change_pct": -35.029586592201824
+            },
+            {
+              "endpoint": "GET /api/nodes/{id}",
+              "samples": 900,
+              "p50_ms": 10.797125,
+              "p95_ms": 20.984709,
+              "runs": [
+                {
+                  "run": 1,
+                  "samples": 300,
+                  "p50_ms": 10.2755,
+                  "p95_ms": 13.624708
+                },
+                {
+                  "run": 2,
+                  "samples": 300,
+                  "p50_ms": 10.46375,
+                  "p95_ms": 14.860625
+                },
+                {
+                  "run": 3,
+                  "samples": 300,
+                  "p50_ms": 12.563041,
+                  "p95_ms": 27.0495
+                }
+              ],
+              "median_run_p95_ms": 14.860625,
+              "p95_change_pct": 80.41144697059315,
+              "median_run_p95_change_pct": 28.21613985221425
+            },
+            {
+              "endpoint": "GET /api/search?q=Memory&limit=50",
+              "samples": 900,
+              "p50_ms": 6.519334,
+              "p95_ms": 12.10125,
+              "runs": [
+                {
+                  "run": 1,
+                  "samples": 300,
+                  "p50_ms": 6.246542,
+                  "p95_ms": 8.510417
+                },
+                {
+                  "run": 2,
+                  "samples": 300,
+                  "p50_ms": 6.397666,
+                  "p95_ms": 8.821167
+                },
+                {
+                  "run": 3,
+                  "samples": 300,
+                  "p50_ms": 7.475041,
+                  "p95_ms": 15.373917
+                }
+              ],
+              "median_run_p95_ms": 8.821167,
+              "p95_change_pct": 36.136074313168834,
+              "median_run_p95_change_pct": -2.746603968207406
+            },
+            {
+              "endpoint": "GET /api/inbox/messages?wait_ms=0",
+              "samples": 900,
+              "p50_ms": 4.541208,
+              "p95_ms": 9.247292,
+              "runs": [
+                {
+                  "run": 1,
+                  "samples": 300,
+                  "p50_ms": 4.198834,
+                  "p95_ms": 6.108417
+                },
+                {
+                  "run": 2,
+                  "samples": 300,
+                  "p50_ms": 4.332583,
+                  "p95_ms": 6.338917
+                },
+                {
+                  "run": 3,
+                  "samples": 300,
+                  "p50_ms": 5.298083,
+                  "p95_ms": 11.353208
+                }
+              ],
+              "median_run_p95_ms": 6.338917,
+              "p95_change_pct": 24.16360720746511,
+              "median_run_p95_change_pct": -14.887212331056155
+            }
+          ],
+          "memory_reduction_pct": 60.74513359932661,
+          "within_p95_budget": false,
+          "within_median_run_p95_budget": false
+        },
+        "cache_statement_32": {
+          "backends": 9,
+          "memory": {
+            "total_bytes": {
+              "mean_bytes": 14548527.111111112,
+              "min_bytes": 14542856,
+              "max_bytes": 14560088
+            },
+            "used_bytes": {
+              "mean_bytes": 9507400.888888888,
+              "min_bytes": 9488776,
+              "max_bytes": 9513752
+            },
+            "plan_bytes": {
+              "mean_bytes": 5347095.111111111,
+              "min_bytes": 5341424,
+              "max_bytes": 5358656
+            },
+            "catalog_bytes": {
+              "mean_bytes": 6362512,
+              "min_bytes": 6362512,
+              "max_bytes": 6362512
+            },
+            "cache_memory_context_bytes": {
+              "mean_bytes": 4318144,
+              "min_bytes": 4318144,
+              "max_bytes": 4318144
+            }
+          },
+          "named_plan_contexts_mean_bytes": {
+            "CachedPlan": 1381584,
+            "CachedPlanSource": 1262151.111111111,
+            "CachedPlanQuery": 2703360
+          },
+          "prepared_statements": [
+            32
+          ],
+          "latencies": [
+            {
+              "endpoint": "GET /api/me",
+              "samples": 900,
+              "p50_ms": 3.115375,
+              "p95_ms": 5.451542,
+              "runs": [
+                {
+                  "run": 1,
+                  "samples": 300,
+                  "p50_ms": 3.238291,
+                  "p95_ms": 5.722667
+                },
+                {
+                  "run": 2,
+                  "samples": 300,
+                  "p50_ms": 3.14225,
+                  "p95_ms": 5.464708
+                },
+                {
+                  "run": 3,
+                  "samples": 300,
+                  "p50_ms": 3.009375,
+                  "p95_ms": 4.476583
+                }
+              ],
+              "median_run_p95_ms": 5.464708,
+              "p95_change_pct": 12.88004969458536,
+              "median_run_p95_change_pct": 17.906244316086738
+            },
+            {
+              "endpoint": "GET /api/nodes?within={project}&limit=50",
+              "samples": 900,
+              "p50_ms": 51.874792,
+              "p95_ms": 86.330042,
+              "runs": [
+                {
+                  "run": 1,
+                  "samples": 300,
+                  "p50_ms": 53.646791,
+                  "p95_ms": 98.837916
+                },
+                {
+                  "run": 2,
+                  "samples": 300,
+                  "p50_ms": 51.668458,
+                  "p95_ms": 82.917042
+                },
+                {
+                  "run": 3,
+                  "samples": 300,
+                  "p50_ms": 51.254583,
+                  "p95_ms": 74.285625
+                }
+              ],
+              "median_run_p95_ms": 82.917042,
+              "p95_change_pct": -13.02974823418892,
+              "median_run_p95_change_pct": -20.814161454224745
+            },
+            {
+              "endpoint": "GET /api/nodes/{id}",
+              "samples": 900,
+              "p50_ms": 9.256042,
+              "p95_ms": 15.620333,
+              "runs": [
+                {
+                  "run": 1,
+                  "samples": 300,
+                  "p50_ms": 9.754417,
+                  "p95_ms": 17.064125
+                },
+                {
+                  "run": 2,
+                  "samples": 300,
+                  "p50_ms": 9.363333,
+                  "p95_ms": 17.000417
+                },
+                {
+                  "run": 3,
+                  "samples": 300,
+                  "p50_ms": 8.741125,
+                  "p95_ms": 11.364083
+                }
+              ],
+              "median_run_p95_ms": 17.000417,
+              "p95_change_pct": 34.292397320949576,
+              "median_run_p95_change_pct": 46.67807333930845
+            },
+            {
+              "endpoint": "GET /api/search?q=Memory&limit=50",
+              "samples": 900,
+              "p50_ms": 5.638,
+              "p95_ms": 9.411,
+              "runs": [
+                {
+                  "run": 1,
+                  "samples": 300,
+                  "p50_ms": 6.0315,
+                  "p95_ms": 10.291375
+                },
+                {
+                  "run": 2,
+                  "samples": 300,
+                  "p50_ms": 5.758417,
+                  "p95_ms": 9.411
+                },
+                {
+                  "run": 3,
+                  "samples": 300,
+                  "p50_ms": 5.352458,
+                  "p95_ms": 7.781291
+                }
+              ],
+              "median_run_p95_ms": 9.411,
+              "p95_change_pct": 5.871426122196599,
+              "median_run_p95_change_pct": 3.7563068531861976
+            },
+            {
+              "endpoint": "GET /api/inbox/messages?wait_ms=0",
+              "samples": 900,
+              "p50_ms": 3.593875,
+              "p95_ms": 6.680416,
+              "runs": [
+                {
+                  "run": 1,
+                  "samples": 300,
+                  "p50_ms": 3.849958,
+                  "p95_ms": 7.765625
+                },
+                {
+                  "run": 2,
+                  "samples": 300,
+                  "p50_ms": 3.635959,
+                  "p95_ms": 6.081792
+                },
+                {
+                  "run": 3,
+                  "samples": 300,
+                  "p50_ms": 3.424875,
+                  "p95_ms": 4.991958
+                }
+              ],
+              "median_run_p95_ms": 6.081792,
+              "p95_change_pct": -10.30189722499677,
+              "median_run_p95_change_pct": -18.33963575439127
+            }
+          ],
+          "memory_reduction_pct": 50.30171488322335,
+          "within_p95_budget": false,
+          "within_median_run_p95_budget": false
+        }
+      },
+      "backend_samples": [
+        {
+          "backend": 1,
+          "exec_mode": "cache statement",
+          "migration": "1354_delivery_webhook_permission_pause.sql",
+          "pid": 40599,
+          "policies": 485,
+          "postgres": "PostgreSQL 18.6 on aarch64-apple-darwin25.6.0, compiled by clang version 21.1.8, 64-bit",
+          "run": 1,
+          "statement_cache_capacity": 512,
+          "variant": "cache_statement_512",
+          "cold": {
+            "plan_bytes": 165072,
+            "used_bytes": 1940000,
+            "total_bytes": 2810824,
+            "catalog_bytes": 754576,
+            "prepared_statements": 0,
+            "cache_memory_context_bytes": 524288
+          },
+          "warm": {
+            "plan_bytes": 20095040,
+            "used_bytes": 19363640,
+            "total_bytes": 29284280,
+            "catalog_bytes": 6380992,
+            "prepared_statements": 65,
+            "cache_memory_context_bytes": 4318144
+          },
+          "latencies": [
+            {
+              "endpoint": "GET /api/me",
+              "p50_ms": 2.457584,
+              "p95_ms": 3.530041,
+              "samples": 100
+            },
+            {
+              "endpoint": "GET /api/nodes?within={project}&limit=50",
+              "p50_ms": 46.193541,
+              "p95_ms": 63.075042,
+              "samples": 100
+            },
+            {
+              "endpoint": "GET /api/nodes/{id}",
+              "p50_ms": 5.967125,
+              "p95_ms": 8.864084,
+              "samples": 100
+            },
+            {
+              "endpoint": "GET /api/search?q=Memory&limit=50",
+              "p50_ms": 4.952542,
+              "p95_ms": 7.274625,
+              "samples": 100
+            },
+            {
+              "endpoint": "GET /api/inbox/messages?wait_ms=0",
+              "p50_ms": 3.8535,
+              "p95_ms": 5.434709,
+              "samples": 100
+            }
+          ]
+        },
+        {
+          "backend": 2,
+          "exec_mode": "cache statement",
+          "migration": "1354_delivery_webhook_permission_pause.sql",
+          "pid": 40600,
+          "policies": 485,
+          "postgres": "PostgreSQL 18.6 on aarch64-apple-darwin25.6.0, compiled by clang version 21.1.8, 64-bit",
+          "run": 1,
+          "statement_cache_capacity": 512,
+          "variant": "cache_statement_512",
+          "cold": {
+            "plan_bytes": 165072,
+            "used_bytes": 1940000,
+            "total_bytes": 2802632,
+            "catalog_bytes": 754576,
+            "prepared_statements": 0,
+            "cache_memory_context_bytes": 524288
+          },
+          "warm": {
+            "plan_bytes": 20080392,
+            "used_bytes": 19366608,
+            "total_bytes": 29257296,
+            "catalog_bytes": 6368656,
+            "prepared_statements": 65,
+            "cache_memory_context_bytes": 4318144
+          },
+          "latencies": [
+            {
+              "endpoint": "GET /api/me",
+              "p50_ms": 2.399542,
+              "p95_ms": 3.884666,
+              "samples": 100
+            },
+            {
+              "endpoint": "GET /api/nodes?within={project}&limit=50",
+              "p50_ms": 46.6815,
+              "p95_ms": 80.832334,
+              "samples": 100
+            },
+            {
+              "endpoint": "GET /api/nodes/{id}",
+              "p50_ms": 5.75075,
+              "p95_ms": 9.166292,
+              "samples": 100
+            },
+            {
+              "endpoint": "GET /api/search?q=Memory&limit=50",
+              "p50_ms": 4.784917,
+              "p95_ms": 7.008125,
+              "samples": 100
+            },
+            {
+              "endpoint": "GET /api/inbox/messages?wait_ms=0",
+              "p50_ms": 3.8085,
+              "p95_ms": 5.564334,
+              "samples": 100
+            }
+          ]
+        },
+        {
+          "backend": 3,
+          "exec_mode": "cache statement",
+          "migration": "1354_delivery_webhook_permission_pause.sql",
+          "pid": 40601,
+          "policies": 485,
+          "postgres": "PostgreSQL 18.6 on aarch64-apple-darwin25.6.0, compiled by clang version 21.1.8, 64-bit",
+          "run": 1,
+          "statement_cache_capacity": 512,
+          "variant": "cache_statement_512",
+          "cold": {
+            "plan_bytes": 165072,
+            "used_bytes": 1940000,
+            "total_bytes": 2802632,
+            "catalog_bytes": 754576,
+            "prepared_statements": 0,
+            "cache_memory_context_bytes": 524288
+          },
+          "warm": {
+            "plan_bytes": 20080392,
+            "used_bytes": 19366608,
+            "total_bytes": 29257296,
+            "catalog_bytes": 6368656,
+            "prepared_statements": 65,
+            "cache_memory_context_bytes": 4318144
+          },
+          "latencies": [
+            {
+              "endpoint": "GET /api/me",
+              "p50_ms": 3.094583,
+              "p95_ms": 8.057,
+              "samples": 100
+            },
+            {
+              "endpoint": "GET /api/nodes?within={project}&limit=50",
+              "p50_ms": 67.149542,
+              "p95_ms": 191.944125,
+              "samples": 100
+            },
+            {
+              "endpoint": "GET /api/nodes/{id}",
+              "p50_ms": 8.104958,
+              "p95_ms": 22.865417,
+              "samples": 100
+            },
+            {
+              "endpoint": "GET /api/search?q=Memory&limit=50",
+              "p50_ms": 6.560208,
+              "p95_ms": 15.354083,
+              "samples": 100
+            },
+            {
+              "endpoint": "GET /api/inbox/messages?wait_ms=0",
+              "p50_ms": 4.904792,
+              "p95_ms": 11.765792,
+              "samples": 100
+            }
+          ]
+        },
+        {
+          "backend": 1,
+          "exec_mode": "cache describe",
+          "migration": "1354_delivery_webhook_permission_pause.sql",
+          "pid": 54477,
+          "policies": 485,
+          "postgres": "PostgreSQL 18.6 on aarch64-apple-darwin25.6.0, compiled by clang version 21.1.8, 64-bit",
+          "run": 1,
+          "statement_cache_capacity": 512,
+          "variant": "cache_describe",
+          "cold": {
+            "plan_bytes": 165072,
+            "used_bytes": 2036064,
+            "total_bytes": 3326920,
+            "catalog_bytes": 1278864,
+            "prepared_statements": 0,
+            "cache_memory_context_bytes": 1048576
+          },
+          "warm": {
+            "plan_bytes": 2615504,
+            "used_bytes": 7689872,
+            "total_bytes": 11491352,
+            "catalog_bytes": 6362512,
+            "prepared_statements": 0,
+            "cache_memory_context_bytes": 4318144
+          },
+          "latencies": [
+            {
+              "endpoint": "GET /api/me",
+              "p50_ms": 3.093084,
+              "p95_ms": 4.55525,
+              "samples": 100
+            },
+            {
+              "endpoint": "GET /api/nodes?within={project}&limit=50",
+              "p50_ms": 52.667666,
+              "p95_ms": 66.334,
+              "samples": 100
+            },
+            {
+              "endpoint": "GET /api/nodes/{id}",
+              "p50_ms": 11.152542,
+              "p95_ms": 16.366792,
+              "samples": 100
+            },
+            {
+              "endpoint": "GET /api/search?q=Memory&limit=50",
+              "p50_ms": 6.736625,
+              "p95_ms": 9.33175,
+              "samples": 100
+            },
+            {
+              "endpoint": "GET /api/inbox/messages?wait_ms=0",
+              "p50_ms": 4.821375,
+              "p95_ms": 8.4305,
+              "samples": 100
+            }
+          ]
+        },
+        {
+          "backend": 2,
+          "exec_mode": "cache describe",
+          "migration": "1354_delivery_webhook_permission_pause.sql",
+          "pid": 54487,
+          "policies": 485,
+          "postgres": "PostgreSQL 18.6 on aarch64-apple-darwin25.6.0, compiled by clang version 21.1.8, 64-bit",
+          "run": 1,
+          "statement_cache_capacity": 512,
+          "variant": "cache_describe",
+          "cold": {
+            "plan_bytes": 165072,
+            "used_bytes": 1940000,
+            "total_bytes": 2802632,
+            "catalog_bytes": 754576,
+            "prepared_statements": 0,
+            "cache_memory_context_bytes": 524288
+          },
+          "warm": {
+            "plan_bytes": 2615504,
+            "used_bytes": 7619992,
+            "total_bytes": 11491352,
+            "catalog_bytes": 6362512,
+            "prepared_statements": 0,
+            "cache_memory_context_bytes": 4318144
+          },
+          "latencies": [
+            {
+              "endpoint": "GET /api/me",
+              "p50_ms": 2.707458,
+              "p95_ms": 3.196333,
+              "samples": 100
+            },
+            {
+              "endpoint": "GET /api/nodes?within={project}&limit=50",
+              "p50_ms": 46.916958,
+              "p95_ms": 52.941958,
+              "samples": 100
+            },
+            {
+              "endpoint": "GET /api/nodes/{id}",
+              "p50_ms": 10.221083,
+              "p95_ms": 11.91025,
+              "samples": 100
+            },
+            {
+              "endpoint": "GET /api/search?q=Memory&limit=50",
+              "p50_ms": 6.156833,
+              "p95_ms": 6.986125,
+              "samples": 100
+            },
+            {
+              "endpoint": "GET /api/inbox/messages?wait_ms=0",
+              "p50_ms": 4.069042,
+              "p95_ms": 5.016208,
+              "samples": 100
+            }
+          ]
+        },
+        {
+          "backend": 3,
+          "exec_mode": "cache describe",
+          "migration": "1354_delivery_webhook_permission_pause.sql",
+          "pid": 54488,
+          "policies": 485,
+          "postgres": "PostgreSQL 18.6 on aarch64-apple-darwin25.6.0, compiled by clang version 21.1.8, 64-bit",
+          "run": 1,
+          "statement_cache_capacity": 512,
+          "variant": "cache_describe",
+          "cold": {
+            "plan_bytes": 165072,
+            "used_bytes": 1940000,
+            "total_bytes": 2802632,
+            "catalog_bytes": 754576,
+            "prepared_statements": 0,
+            "cache_memory_context_bytes": 524288
+          },
+          "warm": {
+            "plan_bytes": 2615504,
+            "used_bytes": 7613936,
+            "total_bytes": 11491352,
+            "catalog_bytes": 6362512,
+            "prepared_statements": 0,
+            "cache_memory_context_bytes": 4318144
+          },
+          "latencies": [
+            {
+              "endpoint": "GET /api/me",
+              "p50_ms": 2.558292,
+              "p95_ms": 3.03175,
+              "samples": 100
+            },
+            {
+              "endpoint": "GET /api/nodes?within={project}&limit=50",
+              "p50_ms": 45.337958,
+              "p95_ms": 49.498542,
+              "samples": 100
+            },
+            {
+              "endpoint": "GET /api/nodes/{id}",
+              "p50_ms": 9.700625,
+              "p95_ms": 10.876292,
+              "samples": 100
+            },
+            {
+              "endpoint": "GET /api/search?q=Memory&limit=50",
+              "p50_ms": 5.810791,
+              "p95_ms": 7.271958,
+              "samples": 100
+            },
+            {
+              "endpoint": "GET /api/inbox/messages?wait_ms=0",
+              "p50_ms": 3.902125,
+              "p95_ms": 4.980625,
+              "samples": 100
+            }
+          ]
+        },
+        {
+          "backend": 1,
+          "exec_mode": "cache statement",
+          "migration": "1354_delivery_webhook_permission_pause.sql",
+          "pid": 71240,
+          "policies": 485,
+          "postgres": "PostgreSQL 18.6 on aarch64-apple-darwin25.6.0, compiled by clang version 21.1.8, 64-bit",
+          "run": 1,
+          "statement_cache_capacity": 32,
+          "variant": "cache_statement_32",
+          "cold": {
+            "plan_bytes": 165072,
+            "used_bytes": 1940000,
+            "total_bytes": 2802632,
+            "catalog_bytes": 754576,
+            "prepared_statements": 0,
+            "cache_memory_context_bytes": 524288
+          },
+          "warm": {
+            "plan_bytes": 5345288,
+            "used_bytes": 9508328,
+            "total_bytes": 14546720,
+            "catalog_bytes": 6362512,
+            "prepared_statements": 32,
+            "cache_memory_context_bytes": 4318144
+          },
+          "latencies": [
+            {
+              "endpoint": "GET /api/me",
+              "p50_ms": 2.849584,
+              "p95_ms": 4.041208,
+              "samples": 100
+            },
+            {
+              "endpoint": "GET /api/nodes?within={project}&limit=50",
+              "p50_ms": 47.987166,
+              "p95_ms": 63.345208,
+              "samples": 100
+            },
+            {
+              "endpoint": "GET /api/nodes/{id}",
+              "p50_ms": 8.537375,
+              "p95_ms": 10.587833,
+              "samples": 100
+            },
+            {
+              "endpoint": "GET /api/search?q=Memory&limit=50",
+              "p50_ms": 5.137208,
+              "p95_ms": 6.862333,
+              "samples": 100
+            },
+            {
+              "endpoint": "GET /api/inbox/messages?wait_ms=0",
+              "p50_ms": 3.365958,
+              "p95_ms": 4.834084,
+              "samples": 100
+            }
+          ]
+        },
+        {
+          "backend": 2,
+          "exec_mode": "cache statement",
+          "migration": "1354_delivery_webhook_permission_pause.sql",
+          "pid": 71241,
+          "policies": 485,
+          "postgres": "PostgreSQL 18.6 on aarch64-apple-darwin25.6.0, compiled by clang version 21.1.8, 64-bit",
+          "run": 1,
+          "statement_cache_capacity": 32,
+          "variant": "cache_statement_32",
+          "cold": {
+            "plan_bytes": 165072,
+            "used_bytes": 1940000,
+            "total_bytes": 2802632,
+            "catalog_bytes": 754576,
+            "prepared_statements": 0,
+            "cache_memory_context_bytes": 524288
+          },
+          "warm": {
+            "plan_bytes": 5341424,
+            "used_bytes": 9513752,
+            "total_bytes": 14542856,
+            "catalog_bytes": 6362512,
+            "prepared_statements": 32,
+            "cache_memory_context_bytes": 4318144
+          },
+          "latencies": [
+            {
+              "endpoint": "GET /api/me",
+              "p50_ms": 4.168166,
+              "p95_ms": 7.325667,
+              "samples": 100
+            },
+            {
+              "endpoint": "GET /api/nodes?within={project}&limit=50",
+              "p50_ms": 74.716375,
+              "p95_ms": 110.894833,
+              "samples": 100
+            },
+            {
+              "endpoint": "GET /api/nodes/{id}",
+              "p50_ms": 12.779042,
+              "p95_ms": 26.570042,
+              "samples": 100
+            },
+            {
+              "endpoint": "GET /api/search?q=Memory&limit=50",
+              "p50_ms": 7.913208,
+              "p95_ms": 12.964209,
+              "samples": 100
+            },
+            {
+              "endpoint": "GET /api/inbox/messages?wait_ms=0",
+              "p50_ms": 5.369875,
+              "p95_ms": 12.049042,
+              "samples": 100
+            }
+          ]
+        },
+        {
+          "backend": 3,
+          "exec_mode": "cache statement",
+          "migration": "1354_delivery_webhook_permission_pause.sql",
+          "pid": 71242,
+          "policies": 485,
+          "postgres": "PostgreSQL 18.6 on aarch64-apple-darwin25.6.0, compiled by clang version 21.1.8, 64-bit",
+          "run": 1,
+          "statement_cache_capacity": 32,
+          "variant": "cache_statement_32",
+          "cold": {
+            "plan_bytes": 165072,
+            "used_bytes": 1940000,
+            "total_bytes": 2802632,
+            "catalog_bytes": 754576,
+            "prepared_statements": 0,
+            "cache_memory_context_bytes": 524288
+          },
+          "warm": {
+            "plan_bytes": 5352048,
+            "used_bytes": 9510904,
+            "total_bytes": 14553480,
+            "catalog_bytes": 6362512,
+            "prepared_statements": 32,
+            "cache_memory_context_bytes": 4318144
+          },
+          "latencies": [
+            {
+              "endpoint": "GET /api/me",
+              "p50_ms": 3.262958,
+              "p95_ms": 4.491292,
+              "samples": 100
+            },
+            {
+              "endpoint": "GET /api/nodes?within={project}&limit=50",
+              "p50_ms": 53.154958,
+              "p95_ms": 69.354459,
+              "samples": 100
+            },
+            {
+              "endpoint": "GET /api/nodes/{id}",
+              "p50_ms": 9.673208,
+              "p95_ms": 12.883125,
+              "samples": 100
+            },
+            {
+              "endpoint": "GET /api/search?q=Memory&limit=50",
+              "p50_ms": 6.112334,
+              "p95_ms": 8.072084,
+              "samples": 100
+            },
+            {
+              "endpoint": "GET /api/inbox/messages?wait_ms=0",
+              "p50_ms": 3.785459,
+              "p95_ms": 4.99325,
+              "samples": 100
+            }
+          ]
+        },
+        {
+          "backend": 1,
+          "exec_mode": "cache describe",
+          "migration": "1354_delivery_webhook_permission_pause.sql",
+          "pid": 99719,
+          "policies": 485,
+          "postgres": "PostgreSQL 18.6 on aarch64-apple-darwin25.6.0, compiled by clang version 21.1.8, 64-bit",
+          "run": 2,
+          "statement_cache_capacity": 512,
+          "variant": "cache_describe",
+          "cold": {
+            "plan_bytes": 165072,
+            "used_bytes": 1940000,
+            "total_bytes": 2802632,
+            "catalog_bytes": 754576,
+            "prepared_statements": 0,
+            "cache_memory_context_bytes": 524288
+          },
+          "warm": {
+            "plan_bytes": 2615504,
+            "used_bytes": 7613920,
+            "total_bytes": 11491352,
+            "catalog_bytes": 6362512,
+            "prepared_statements": 0,
+            "cache_memory_context_bytes": 4318144
+          },
+          "latencies": [
+            {
+              "endpoint": "GET /api/me",
+              "p50_ms": 2.653708,
+              "p95_ms": 3.406917,
+              "samples": 100
+            },
+            {
+              "endpoint": "GET /api/nodes?within={project}&limit=50",
+              "p50_ms": 46.552083,
+              "p95_ms": 52.204,
+              "samples": 100
+            },
+            {
+              "endpoint": "GET /api/nodes/{id}",
+              "p50_ms": 10.220375,
+              "p95_ms": 11.243667,
+              "samples": 100
+            },
+            {
+              "endpoint": "GET /api/search?q=Memory&limit=50",
+              "p50_ms": 6.162167,
+              "p95_ms": 7.115041,
+              "samples": 100
+            },
+            {
+              "endpoint": "GET /api/inbox/messages?wait_ms=0",
+              "p50_ms": 4.102541,
+              "p95_ms": 5.089125,
+              "samples": 100
+            }
+          ]
+        },
+        {
+          "backend": 2,
+          "exec_mode": "cache describe",
+          "migration": "1354_delivery_webhook_permission_pause.sql",
+          "pid": 99720,
+          "policies": 485,
+          "postgres": "PostgreSQL 18.6 on aarch64-apple-darwin25.6.0, compiled by clang version 21.1.8, 64-bit",
+          "run": 2,
+          "statement_cache_capacity": 512,
+          "variant": "cache_describe",
+          "cold": {
+            "plan_bytes": 165072,
+            "used_bytes": 1940000,
+            "total_bytes": 2802632,
+            "catalog_bytes": 754576,
+            "prepared_statements": 0,
+            "cache_memory_context_bytes": 524288
+          },
+          "warm": {
+            "plan_bytes": 2615504,
+            "used_bytes": 7613904,
+            "total_bytes": 11491352,
+            "catalog_bytes": 6362512,
+            "prepared_statements": 0,
+            "cache_memory_context_bytes": 4318144
+          },
+          "latencies": [
+            {
+              "endpoint": "GET /api/me",
+              "p50_ms": 2.876334,
+              "p95_ms": 4.06625,
+              "samples": 100
+            },
+            {
+              "endpoint": "GET /api/nodes?within={project}&limit=50",
+              "p50_ms": 49.052917,
+              "p95_ms": 66.158792,
+              "samples": 100
+            },
+            {
+              "endpoint": "GET /api/nodes/{id}",
+              "p50_ms": 10.667041,
+              "p95_ms": 14.131792,
+              "samples": 100
+            },
+            {
+              "endpoint": "GET /api/search?q=Memory&limit=50",
+              "p50_ms": 6.505625,
+              "p95_ms": 8.439542,
+              "samples": 100
+            },
+            {
+              "endpoint": "GET /api/inbox/messages?wait_ms=0",
+              "p50_ms": 4.37375,
+              "p95_ms": 6.037667,
+              "samples": 100
+            }
+          ]
+        },
+        {
+          "backend": 3,
+          "exec_mode": "cache describe",
+          "migration": "1354_delivery_webhook_permission_pause.sql",
+          "pid": 99721,
+          "policies": 485,
+          "postgres": "PostgreSQL 18.6 on aarch64-apple-darwin25.6.0, compiled by clang version 21.1.8, 64-bit",
+          "run": 2,
+          "statement_cache_capacity": 512,
+          "variant": "cache_describe",
+          "cold": {
+            "plan_bytes": 165072,
+            "used_bytes": 1940000,
+            "total_bytes": 2802632,
+            "catalog_bytes": 754576,
+            "prepared_statements": 0,
+            "cache_memory_context_bytes": 524288
+          },
+          "warm": {
+            "plan_bytes": 2615504,
+            "used_bytes": 7619104,
+            "total_bytes": 11491352,
+            "catalog_bytes": 6362512,
+            "prepared_statements": 0,
+            "cache_memory_context_bytes": 4318144
+          },
+          "latencies": [
+            {
+              "endpoint": "GET /api/me",
+              "p50_ms": 2.900917,
+              "p95_ms": 4.471666,
+              "samples": 100
+            },
+            {
+              "endpoint": "GET /api/nodes?within={project}&limit=50",
+              "p50_ms": 50.083458,
+              "p95_ms": 71.894292,
+              "samples": 100
+            },
+            {
+              "endpoint": "GET /api/nodes/{id}",
+              "p50_ms": 10.90775,
+              "p95_ms": 17.391125,
+              "samples": 100
+            },
+            {
+              "endpoint": "GET /api/search?q=Memory&limit=50",
+              "p50_ms": 6.489583,
+              "p95_ms": 9.573458,
+              "samples": 100
+            },
+            {
+              "endpoint": "GET /api/inbox/messages?wait_ms=0",
+              "p50_ms": 4.511917,
+              "p95_ms": 7.207125,
+              "samples": 100
+            }
+          ]
+        },
+        {
+          "backend": 1,
+          "exec_mode": "cache statement",
+          "migration": "1354_delivery_webhook_permission_pause.sql",
+          "pid": 2159,
+          "policies": 485,
+          "postgres": "PostgreSQL 18.6 on aarch64-apple-darwin25.6.0, compiled by clang version 21.1.8, 64-bit",
+          "run": 2,
+          "statement_cache_capacity": 32,
+          "variant": "cache_statement_32",
+          "cold": {
+            "plan_bytes": 165072,
+            "used_bytes": 1940000,
+            "total_bytes": 2802632,
+            "catalog_bytes": 754576,
+            "prepared_statements": 0,
+            "cache_memory_context_bytes": 524288
+          },
+          "warm": {
+            "plan_bytes": 5358656,
+            "used_bytes": 9511400,
+            "total_bytes": 14560088,
+            "catalog_bytes": 6362512,
+            "prepared_statements": 32,
+            "cache_memory_context_bytes": 4318144
+          },
+          "latencies": [
+            {
+              "endpoint": "GET /api/me",
+              "p50_ms": 3.232417,
+              "p95_ms": 4.428166,
+              "samples": 100
+            },
+            {
+              "endpoint": "GET /api/nodes?within={project}&limit=50",
+              "p50_ms": 51.05125,
+              "p95_ms": 72.251833,
+              "samples": 100
+            },
+            {
+              "endpoint": "GET /api/nodes/{id}",
+              "p50_ms": 9.46225,
+              "p95_ms": 14.039,
+              "samples": 100
+            },
+            {
+              "endpoint": "GET /api/search?q=Memory&limit=50",
+              "p50_ms": 5.878708,
+              "p95_ms": 7.786875,
+              "samples": 100
+            },
+            {
+              "endpoint": "GET /api/inbox/messages?wait_ms=0",
+              "p50_ms": 3.657791,
+              "p95_ms": 5.079,
+              "samples": 100
+            }
+          ]
+        },
+        {
+          "backend": 2,
+          "exec_mode": "cache statement",
+          "migration": "1354_delivery_webhook_permission_pause.sql",
+          "pid": 2160,
+          "policies": 485,
+          "postgres": "PostgreSQL 18.6 on aarch64-apple-darwin25.6.0, compiled by clang version 21.1.8, 64-bit",
+          "run": 2,
+          "statement_cache_capacity": 32,
+          "variant": "cache_statement_32",
+          "cold": {
+            "plan_bytes": 165072,
+            "used_bytes": 1940000,
+            "total_bytes": 2802632,
+            "catalog_bytes": 754576,
+            "prepared_statements": 0,
+            "cache_memory_context_bytes": 524288
+          },
+          "warm": {
+            "plan_bytes": 5345288,
+            "used_bytes": 9508312,
+            "total_bytes": 14546720,
+            "catalog_bytes": 6362512,
+            "prepared_statements": 32,
+            "cache_memory_context_bytes": 4318144
+          },
+          "latencies": [
+            {
+              "endpoint": "GET /api/me",
+              "p50_ms": 3.03825,
+              "p95_ms": 6.027292,
+              "samples": 100
+            },
+            {
+              "endpoint": "GET /api/nodes?within={project}&limit=50",
+              "p50_ms": 53.668291,
+              "p95_ms": 94.448708,
+              "samples": 100
+            },
+            {
+              "endpoint": "GET /api/nodes/{id}",
+              "p50_ms": 9.302333,
+              "p95_ms": 17.794625,
+              "samples": 100
+            },
+            {
+              "endpoint": "GET /api/search?q=Memory&limit=50",
+              "p50_ms": 5.549375,
+              "p95_ms": 10.971708,
+              "samples": 100
+            },
+            {
+              "endpoint": "GET /api/inbox/messages?wait_ms=0",
+              "p50_ms": 3.688667,
+              "p95_ms": 7.151375,
+              "samples": 100
+            }
+          ]
+        },
+        {
+          "backend": 3,
+          "exec_mode": "cache statement",
+          "migration": "1354_delivery_webhook_permission_pause.sql",
+          "pid": 2161,
+          "policies": 485,
+          "postgres": "PostgreSQL 18.6 on aarch64-apple-darwin25.6.0, compiled by clang version 21.1.8, 64-bit",
+          "run": 2,
+          "statement_cache_capacity": 32,
+          "variant": "cache_statement_32",
+          "cold": {
+            "plan_bytes": 165072,
+            "used_bytes": 1940000,
+            "total_bytes": 2802632,
+            "catalog_bytes": 754576,
+            "prepared_statements": 0,
+            "cache_memory_context_bytes": 524288
+          },
+          "warm": {
+            "plan_bytes": 5345288,
+            "used_bytes": 9508328,
+            "total_bytes": 14546720,
+            "catalog_bytes": 6362512,
+            "prepared_statements": 32,
+            "cache_memory_context_bytes": 4318144
+          },
+          "latencies": [
+            {
+              "endpoint": "GET /api/me",
+              "p50_ms": 3.073875,
+              "p95_ms": 5.464708,
+              "samples": 100
+            },
+            {
+              "endpoint": "GET /api/nodes?within={project}&limit=50",
+              "p50_ms": 51.22875,
+              "p95_ms": 83.359375,
+              "samples": 100
+            },
+            {
+              "endpoint": "GET /api/nodes/{id}",
+              "p50_ms": 9.189,
+              "p95_ms": 20.320208,
+              "samples": 100
+            },
+            {
+              "endpoint": "GET /api/search?q=Memory&limit=50",
+              "p50_ms": 5.645291,
+              "p95_ms": 10.009,
+              "samples": 100
+            },
+            {
+              "endpoint": "GET /api/inbox/messages?wait_ms=0",
+              "p50_ms": 3.569833,
+              "p95_ms": 6.142125,
+              "samples": 100
+            }
+          ]
+        },
+        {
+          "backend": 1,
+          "exec_mode": "cache statement",
+          "migration": "1354_delivery_webhook_permission_pause.sql",
+          "pid": 4161,
+          "policies": 485,
+          "postgres": "PostgreSQL 18.6 on aarch64-apple-darwin25.6.0, compiled by clang version 21.1.8, 64-bit",
+          "run": 2,
+          "statement_cache_capacity": 512,
+          "variant": "cache_statement_512",
+          "cold": {
+            "plan_bytes": 165072,
+            "used_bytes": 1940000,
+            "total_bytes": 2802632,
+            "catalog_bytes": 754576,
+            "prepared_statements": 0,
+            "cache_memory_context_bytes": 524288
+          },
+          "warm": {
+            "plan_bytes": 20160576,
+            "used_bytes": 19425456,
+            "total_bytes": 29337480,
+            "catalog_bytes": 6368656,
+            "prepared_statements": 66,
+            "cache_memory_context_bytes": 4318144
+          },
+          "latencies": [
+            {
+              "endpoint": "GET /api/me",
+              "p50_ms": 2.687375,
+              "p95_ms": 5.500458,
+              "samples": 100
+            },
+            {
+              "endpoint": "GET /api/nodes?within={project}&limit=50",
+              "p50_ms": 56.593833,
+              "p95_ms": 96.744792,
+              "samples": 100
+            },
+            {
+              "endpoint": "GET /api/nodes/{id}",
+              "p50_ms": 6.565125,
+              "p95_ms": 12.448042,
+              "samples": 100
+            },
+            {
+              "endpoint": "GET /api/search?q=Memory&limit=50",
+              "p50_ms": 5.232166,
+              "p95_ms": 10.39275,
+              "samples": 100
+            },
+            {
+              "endpoint": "GET /api/inbox/messages?wait_ms=0",
+              "p50_ms": 4.068959,
+              "p95_ms": 8.007042,
+              "samples": 100
+            }
+          ]
+        },
+        {
+          "backend": 2,
+          "exec_mode": "cache statement",
+          "migration": "1354_delivery_webhook_permission_pause.sql",
+          "pid": 4162,
+          "policies": 485,
+          "postgres": "PostgreSQL 18.6 on aarch64-apple-darwin25.6.0, compiled by clang version 21.1.8, 64-bit",
+          "run": 2,
+          "statement_cache_capacity": 512,
+          "variant": "cache_statement_512",
+          "cold": {
+            "plan_bytes": 165072,
+            "used_bytes": 1940000,
+            "total_bytes": 2802632,
+            "catalog_bytes": 754576,
+            "prepared_statements": 0,
+            "cache_memory_context_bytes": 524288
+          },
+          "warm": {
+            "plan_bytes": 20103232,
+            "used_bytes": 19395904,
+            "total_bytes": 29280136,
+            "catalog_bytes": 6368656,
+            "prepared_statements": 66,
+            "cache_memory_context_bytes": 4318144
+          },
+          "latencies": [
+            {
+              "endpoint": "GET /api/me",
+              "p50_ms": 2.14025,
+              "p95_ms": 3.317083,
+              "samples": 100
+            },
+            {
+              "endpoint": "GET /api/nodes?within={project}&limit=50",
+              "p50_ms": 43.299208,
+              "p95_ms": 63.081833,
+              "samples": 100
+            },
+            {
+              "endpoint": "GET /api/nodes/{id}",
+              "p50_ms": 5.199916,
+              "p95_ms": 7.046875,
+              "samples": 100
+            },
+            {
+              "endpoint": "GET /api/search?q=Memory&limit=50",
+              "p50_ms": 4.051625,
+              "p95_ms": 5.808667,
+              "samples": 100
+            },
+            {
+              "endpoint": "GET /api/inbox/messages?wait_ms=0",
+              "p50_ms": 3.124167,
+              "p95_ms": 4.220625,
+              "samples": 100
+            }
+          ]
+        },
+        {
+          "backend": 3,
+          "exec_mode": "cache statement",
+          "migration": "1354_delivery_webhook_permission_pause.sql",
+          "pid": 4163,
+          "policies": 485,
+          "postgres": "PostgreSQL 18.6 on aarch64-apple-darwin25.6.0, compiled by clang version 21.1.8, 64-bit",
+          "run": 2,
+          "statement_cache_capacity": 512,
+          "variant": "cache_statement_512",
+          "cold": {
+            "plan_bytes": 165072,
+            "used_bytes": 1940000,
+            "total_bytes": 2802632,
+            "catalog_bytes": 754576,
+            "prepared_statements": 0,
+            "cache_memory_context_bytes": 524288
+          },
+          "warm": {
+            "plan_bytes": 20078656,
+            "used_bytes": 19367216,
+            "total_bytes": 29255560,
+            "catalog_bytes": 6368656,
+            "prepared_statements": 65,
+            "cache_memory_context_bytes": 4318144
+          },
+          "latencies": [
+            {
+              "endpoint": "GET /api/me",
+              "p50_ms": 2.0655,
+              "p95_ms": 3.266375,
+              "samples": 100
+            },
+            {
+              "endpoint": "GET /api/nodes?within={project}&limit=50",
+              "p50_ms": 41.491917,
+              "p95_ms": 48.538125,
+              "samples": 100
+            },
+            {
+              "endpoint": "GET /api/nodes/{id}",
+              "p50_ms": 5.014834,
+              "p95_ms": 6.640292,
+              "samples": 100
+            },
+            {
+              "endpoint": "GET /api/search?q=Memory&limit=50",
+              "p50_ms": 4.024042,
+              "p95_ms": 5.064541,
+              "samples": 100
+            },
+            {
+              "endpoint": "GET /api/inbox/messages?wait_ms=0",
+              "p50_ms": 3.037791,
+              "p95_ms": 4.076,
+              "samples": 100
+            }
+          ]
+        },
+        {
+          "backend": 1,
+          "exec_mode": "cache statement",
+          "migration": "1354_delivery_webhook_permission_pause.sql",
+          "pid": 6138,
+          "policies": 485,
+          "postgres": "PostgreSQL 18.6 on aarch64-apple-darwin25.6.0, compiled by clang version 21.1.8, 64-bit",
+          "run": 3,
+          "statement_cache_capacity": 32,
+          "variant": "cache_statement_32",
+          "cold": {
+            "plan_bytes": 165072,
+            "used_bytes": 1940000,
+            "total_bytes": 2802632,
+            "catalog_bytes": 754576,
+            "prepared_statements": 0,
+            "cache_memory_context_bytes": 524288
+          },
+          "warm": {
+            "plan_bytes": 5345288,
+            "used_bytes": 9503296,
+            "total_bytes": 14546720,
+            "catalog_bytes": 6362512,
+            "prepared_statements": 32,
+            "cache_memory_context_bytes": 4318144
+          },
+          "latencies": [
+            {
+              "endpoint": "GET /api/me",
+              "p50_ms": 3.020375,
+              "p95_ms": 4.6625,
+              "samples": 100
+            },
+            {
+              "endpoint": "GET /api/nodes?within={project}&limit=50",
+              "p50_ms": 53.692541,
+              "p95_ms": 82.2425,
+              "samples": 100
+            },
+            {
+              "endpoint": "GET /api/nodes/{id}",
+              "p50_ms": 8.939083,
+              "p95_ms": 13.547834,
+              "samples": 100
+            },
+            {
+              "endpoint": "GET /api/search?q=Memory&limit=50",
+              "p50_ms": 5.248,
+              "p95_ms": 7.865166,
+              "samples": 100
+            },
+            {
+              "endpoint": "GET /api/inbox/messages?wait_ms=0",
+              "p50_ms": 3.3695,
+              "p95_ms": 5.374667,
+              "samples": 100
+            }
+          ]
+        },
+        {
+          "backend": 2,
+          "exec_mode": "cache statement",
+          "migration": "1354_delivery_webhook_permission_pause.sql",
+          "pid": 6139,
+          "policies": 485,
+          "postgres": "PostgreSQL 18.6 on aarch64-apple-darwin25.6.0, compiled by clang version 21.1.8, 64-bit",
+          "run": 3,
+          "statement_cache_capacity": 32,
+          "variant": "cache_statement_32",
+          "cold": {
+            "plan_bytes": 165072,
+            "used_bytes": 1940000,
+            "total_bytes": 2802632,
+            "catalog_bytes": 754576,
+            "prepared_statements": 0,
+            "cache_memory_context_bytes": 524288
+          },
+          "warm": {
+            "plan_bytes": 5345288,
+            "used_bytes": 9488776,
+            "total_bytes": 14546720,
+            "catalog_bytes": 6362512,
+            "prepared_statements": 32,
+            "cache_memory_context_bytes": 4318144
+          },
+          "latencies": [
+            {
+              "endpoint": "GET /api/me",
+              "p50_ms": 3.099792,
+              "p95_ms": 4.259834,
+              "samples": 100
+            },
+            {
+              "endpoint": "GET /api/nodes?within={project}&limit=50",
+              "p50_ms": 50.839042,
+              "p95_ms": 69.303333,
+              "samples": 100
+            },
+            {
+              "endpoint": "GET /api/nodes/{id}",
+              "p50_ms": 8.764917,
+              "p95_ms": 11.579917,
+              "samples": 100
+            },
+            {
+              "endpoint": "GET /api/search?q=Memory&limit=50",
+              "p50_ms": 5.463708,
+              "p95_ms": 8.36675,
+              "samples": 100
+            },
+            {
+              "endpoint": "GET /api/inbox/messages?wait_ms=0",
+              "p50_ms": 3.503791,
+              "p95_ms": 5.288083,
+              "samples": 100
+            }
+          ]
+        },
+        {
+          "backend": 3,
+          "exec_mode": "cache statement",
+          "migration": "1354_delivery_webhook_permission_pause.sql",
+          "pid": 6140,
+          "policies": 485,
+          "postgres": "PostgreSQL 18.6 on aarch64-apple-darwin25.6.0, compiled by clang version 21.1.8, 64-bit",
+          "run": 3,
+          "statement_cache_capacity": 32,
+          "variant": "cache_statement_32",
+          "cold": {
+            "plan_bytes": 165072,
+            "used_bytes": 1940000,
+            "total_bytes": 2802632,
+            "catalog_bytes": 754576,
+            "prepared_statements": 0,
+            "cache_memory_context_bytes": 524288
+          },
+          "warm": {
+            "plan_bytes": 5345288,
+            "used_bytes": 9513512,
+            "total_bytes": 14546720,
+            "catalog_bytes": 6362512,
+            "prepared_statements": 32,
+            "cache_memory_context_bytes": 4318144
+          },
+          "latencies": [
+            {
+              "endpoint": "GET /api/me",
+              "p50_ms": 2.961792,
+              "p95_ms": 3.859709,
+              "samples": 100
+            },
+            {
+              "endpoint": "GET /api/nodes?within={project}&limit=50",
+              "p50_ms": 50.234958,
+              "p95_ms": 66.958083,
+              "samples": 100
+            },
+            {
+              "endpoint": "GET /api/nodes/{id}",
+              "p50_ms": 8.502375,
+              "p95_ms": 10.516042,
+              "samples": 100
+            },
+            {
+              "endpoint": "GET /api/search?q=Memory&limit=50",
+              "p50_ms": 5.308125,
+              "p95_ms": 6.73825,
+              "samples": 100
+            },
+            {
+              "endpoint": "GET /api/inbox/messages?wait_ms=0",
+              "p50_ms": 3.399458,
+              "p95_ms": 4.435375,
+              "samples": 100
+            }
+          ]
+        },
+        {
+          "backend": 1,
+          "exec_mode": "cache statement",
+          "migration": "1354_delivery_webhook_permission_pause.sql",
+          "pid": 7926,
+          "policies": 485,
+          "postgres": "PostgreSQL 18.6 on aarch64-apple-darwin25.6.0, compiled by clang version 21.1.8, 64-bit",
+          "run": 3,
+          "statement_cache_capacity": 512,
+          "variant": "cache_statement_512",
+          "cold": {
+            "plan_bytes": 165072,
+            "used_bytes": 1940000,
+            "total_bytes": 2802632,
+            "catalog_bytes": 754576,
+            "prepared_statements": 0,
+            "cache_memory_context_bytes": 524288
+          },
+          "warm": {
+            "plan_bytes": 20103232,
+            "used_bytes": 19395872,
+            "total_bytes": 29280136,
+            "catalog_bytes": 6368656,
+            "prepared_statements": 66,
+            "cache_memory_context_bytes": 4318144
+          },
+          "latencies": [
+            {
+              "endpoint": "GET /api/me",
+              "p50_ms": 2.220666,
+              "p95_ms": 3.866417,
+              "samples": 100
+            },
+            {
+              "endpoint": "GET /api/nodes?within={project}&limit=50",
+              "p50_ms": 42.798458,
+              "p95_ms": 76.072291,
+              "samples": 100
+            },
+            {
+              "endpoint": "GET /api/nodes/{id}",
+              "p50_ms": 5.252042,
+              "p95_ms": 8.582125,
+              "samples": 100
+            },
+            {
+              "endpoint": "GET /api/search?q=Memory&limit=50",
+              "p50_ms": 4.222209,
+              "p95_ms": 6.846167,
+              "samples": 100
+            },
+            {
+              "endpoint": "GET /api/inbox/messages?wait_ms=0",
+              "p50_ms": 3.223125,
+              "p95_ms": 5.760458,
+              "samples": 100
+            }
+          ]
+        },
+        {
+          "backend": 2,
+          "exec_mode": "cache statement",
+          "migration": "1354_delivery_webhook_permission_pause.sql",
+          "pid": 7927,
+          "policies": 485,
+          "postgres": "PostgreSQL 18.6 on aarch64-apple-darwin25.6.0, compiled by clang version 21.1.8, 64-bit",
+          "run": 3,
+          "statement_cache_capacity": 512,
+          "variant": "cache_statement_512",
+          "cold": {
+            "plan_bytes": 165072,
+            "used_bytes": 1940000,
+            "total_bytes": 2802632,
+            "catalog_bytes": 754576,
+            "prepared_statements": 0,
+            "cache_memory_context_bytes": 524288
+          },
+          "warm": {
+            "plan_bytes": 20078656,
+            "used_bytes": 19367200,
+            "total_bytes": 29255560,
+            "catalog_bytes": 6368656,
+            "prepared_statements": 65,
+            "cache_memory_context_bytes": 4318144
+          },
+          "latencies": [
+            {
+              "endpoint": "GET /api/me",
+              "p50_ms": 2.43125,
+              "p95_ms": 4.155417,
+              "samples": 100
+            },
+            {
+              "endpoint": "GET /api/nodes?within={project}&limit=50",
+              "p50_ms": 49.61525,
+              "p95_ms": 77.522125,
+              "samples": 100
+            },
+            {
+              "endpoint": "GET /api/nodes/{id}",
+              "p50_ms": 5.853833,
+              "p95_ms": 8.660375,
+              "samples": 100
+            },
+            {
+              "endpoint": "GET /api/search?q=Memory&limit=50",
+              "p50_ms": 4.809083,
+              "p95_ms": 7.075167,
+              "samples": 100
+            },
+            {
+              "endpoint": "GET /api/inbox/messages?wait_ms=0",
+              "p50_ms": 3.591625,
+              "p95_ms": 5.393875,
+              "samples": 100
+            }
+          ]
+        },
+        {
+          "backend": 3,
+          "exec_mode": "cache statement",
+          "migration": "1354_delivery_webhook_permission_pause.sql",
+          "pid": 7928,
+          "policies": 485,
+          "postgres": "PostgreSQL 18.6 on aarch64-apple-darwin25.6.0, compiled by clang version 21.1.8, 64-bit",
+          "run": 3,
+          "statement_cache_capacity": 512,
+          "variant": "cache_statement_512",
+          "cold": {
+            "plan_bytes": 165072,
+            "used_bytes": 1940000,
+            "total_bytes": 2802632,
+            "catalog_bytes": 754576,
+            "prepared_statements": 0,
+            "cache_memory_context_bytes": 524288
+          },
+          "warm": {
+            "plan_bytes": 20078656,
+            "used_bytes": 19367184,
+            "total_bytes": 29255560,
+            "catalog_bytes": 6368656,
+            "prepared_statements": 65,
+            "cache_memory_context_bytes": 4318144
+          },
+          "latencies": [
+            {
+              "endpoint": "GET /api/me",
+              "p50_ms": 3.390167,
+              "p95_ms": 6.122667,
+              "samples": 100
+            },
+            {
+              "endpoint": "GET /api/nodes?within={project}&limit=50",
+              "p50_ms": 78.41025,
+              "p95_ms": 117.135125,
+              "samples": 100
+            },
+            {
+              "endpoint": "GET /api/nodes/{id}",
+              "p50_ms": 7.990166,
+              "p95_ms": 13.182958,
+              "samples": 100
+            },
+            {
+              "endpoint": "GET /api/search?q=Memory&limit=50",
+              "p50_ms": 6.413625,
+              "p95_ms": 10.273584,
+              "samples": 100
+            },
+            {
+              "endpoint": "GET /api/inbox/messages?wait_ms=0",
+              "p50_ms": 4.791041,
+              "p95_ms": 9.159541,
+              "samples": 100
+            }
+          ]
+        },
+        {
+          "backend": 1,
+          "exec_mode": "cache describe",
+          "migration": "1354_delivery_webhook_permission_pause.sql",
+          "pid": 9990,
+          "policies": 485,
+          "postgres": "PostgreSQL 18.6 on aarch64-apple-darwin25.6.0, compiled by clang version 21.1.8, 64-bit",
+          "run": 3,
+          "statement_cache_capacity": 512,
+          "variant": "cache_describe",
+          "cold": {
+            "plan_bytes": 165072,
+            "used_bytes": 1940000,
+            "total_bytes": 2802632,
+            "catalog_bytes": 754576,
+            "prepared_statements": 0,
+            "cache_memory_context_bytes": 524288
+          },
+          "warm": {
+            "plan_bytes": 2615504,
+            "used_bytes": 7619104,
+            "total_bytes": 11491352,
+            "catalog_bytes": 6362512,
+            "prepared_statements": 0,
+            "cache_memory_context_bytes": 4318144
+          },
+          "latencies": [
+            {
+              "endpoint": "GET /api/me",
+              "p50_ms": 3.32125,
+              "p95_ms": 6.079917,
+              "samples": 100
+            },
+            {
+              "endpoint": "GET /api/nodes?within={project}&limit=50",
+              "p50_ms": 58.877709,
+              "p95_ms": 123.174875,
+              "samples": 100
+            },
+            {
+              "endpoint": "GET /api/nodes/{id}",
+              "p50_ms": 11.688125,
+              "p95_ms": 24.31025,
+              "samples": 100
+            },
+            {
+              "endpoint": "GET /api/search?q=Memory&limit=50",
+              "p50_ms": 7.281084,
+              "p95_ms": 12.378834,
+              "samples": 100
+            },
+            {
+              "endpoint": "GET /api/inbox/messages?wait_ms=0",
+              "p50_ms": 5.04,
+              "p95_ms": 9.669291,
+              "samples": 100
+            }
+          ]
+        },
+        {
+          "backend": 2,
+          "exec_mode": "cache describe",
+          "migration": "1354_delivery_webhook_permission_pause.sql",
+          "pid": 9991,
+          "policies": 485,
+          "postgres": "PostgreSQL 18.6 on aarch64-apple-darwin25.6.0, compiled by clang version 21.1.8, 64-bit",
+          "run": 3,
+          "statement_cache_capacity": 512,
+          "variant": "cache_describe",
+          "cold": {
+            "plan_bytes": 165072,
+            "used_bytes": 1940000,
+            "total_bytes": 2802632,
+            "catalog_bytes": 754576,
+            "prepared_statements": 0,
+            "cache_memory_context_bytes": 524288
+          },
+          "warm": {
+            "plan_bytes": 2615504,
+            "used_bytes": 7619992,
+            "total_bytes": 11491352,
+            "catalog_bytes": 6362512,
+            "prepared_statements": 0,
+            "cache_memory_context_bytes": 4318144
+          },
+          "latencies": [
+            {
+              "endpoint": "GET /api/me",
+              "p50_ms": 3.79075,
+              "p95_ms": 7.73975,
+              "samples": 100
+            },
+            {
+              "endpoint": "GET /api/nodes?within={project}&limit=50",
+              "p50_ms": 70.000125,
+              "p95_ms": 121.1835,
+              "samples": 100
+            },
+            {
+              "endpoint": "GET /api/nodes/{id}",
+              "p50_ms": 14.06225,
+              "p95_ms": 28.965583,
+              "samples": 100
+            },
+            {
+              "endpoint": "GET /api/search?q=Memory&limit=50",
+              "p50_ms": 8.029959,
+              "p95_ms": 16.586291,
+              "samples": 100
+            },
+            {
+              "endpoint": "GET /api/inbox/messages?wait_ms=0",
+              "p50_ms": 6.013375,
+              "p95_ms": 12.061791,
+              "samples": 100
+            }
+          ]
+        },
+        {
+          "backend": 3,
+          "exec_mode": "cache describe",
+          "migration": "1354_delivery_webhook_permission_pause.sql",
+          "pid": 9992,
+          "policies": 485,
+          "postgres": "PostgreSQL 18.6 on aarch64-apple-darwin25.6.0, compiled by clang version 21.1.8, 64-bit",
+          "run": 3,
+          "statement_cache_capacity": 512,
+          "variant": "cache_describe",
+          "cold": {
+            "plan_bytes": 165072,
+            "used_bytes": 1940000,
+            "total_bytes": 2802632,
+            "catalog_bytes": 754576,
+            "prepared_statements": 0,
+            "cache_memory_context_bytes": 524288
+          },
+          "warm": {
+            "plan_bytes": 2615504,
+            "used_bytes": 7613920,
+            "total_bytes": 11491352,
+            "catalog_bytes": 6362512,
+            "prepared_statements": 0,
+            "cache_memory_context_bytes": 4318144
+          },
+          "latencies": [
+            {
+              "endpoint": "GET /api/me",
+              "p50_ms": 3.30625,
+              "p95_ms": 5.929417,
+              "samples": 100
+            },
+            {
+              "endpoint": "GET /api/nodes?within={project}&limit=50",
+              "p50_ms": 58.292,
+              "p95_ms": 102.708209,
+              "samples": 100
+            },
+            {
+              "endpoint": "GET /api/nodes/{id}",
+              "p50_ms": 12.385708,
+              "p95_ms": 27.570042,
+              "samples": 100
+            },
+            {
+              "endpoint": "GET /api/search?q=Memory&limit=50",
+              "p50_ms": 7.152167,
+              "p95_ms": 15.040833,
+              "samples": 100
+            },
+            {
+              "endpoint": "GET /api/inbox/messages?wait_ms=0",
+              "p50_ms": 4.99225,
+              "p95_ms": 10.747708,
+              "samples": 100
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "stage": "confirmation_48",
+      "source_commit": "270389da8",
+      "summary": {
+        "cache_statement_512": {
+          "backends": 9,
+          "memory": {
+            "total_bytes": {
+              "mean_bytes": 29273718.222222224,
+              "min_bytes": 29262368,
+              "max_bytes": 29345680
+            },
+            "used_bytes": {
+              "mean_bytes": 19436322.666666668,
+              "min_bytes": 19412920,
+              "max_bytes": 19502816
+            },
+            "plan_bytes": {
+              "mean_bytes": 20091717.333333332,
+              "min_bytes": 20080240,
+              "max_bytes": 20165704
+            },
+            "catalog_bytes": {
+              "mean_bytes": 6373752.888888889,
+              "min_bytes": 6371728,
+              "max_bytes": 6385760
+            },
+            "cache_memory_context_bytes": {
+              "mean_bytes": 4318144,
+              "min_bytes": 4318144,
+              "max_bytes": 4318144
+            }
+          },
+          "named_plan_contexts_mean_bytes": {
+            "CachedPlan": 11104528.888888888,
+            "CachedPlanSource": 2404820.4444444445,
+            "CachedPlanQuery": 6582368
+          },
+          "prepared_statements": [
+            65,
+            66
+          ],
+          "latencies": [
+            {
+              "endpoint": "GET /api/me",
+              "samples": 900,
+              "p50_ms": 1.99325,
+              "p95_ms": 2.51125,
+              "runs": [
+                {
+                  "run": 1,
+                  "samples": 300,
+                  "p50_ms": 2.088375,
+                  "p95_ms": 3.09475
+                },
+                {
+                  "run": 2,
+                  "samples": 300,
+                  "p50_ms": 1.994417,
+                  "p95_ms": 2.134334
+                },
+                {
+                  "run": 3,
+                  "samples": 300,
+                  "p50_ms": 1.963583,
+                  "p95_ms": 2.050167
+                }
+              ],
+              "median_run_p95_ms": 2.134334,
+              "p95_change_pct": 0.0,
+              "median_run_p95_change_pct": 0.0
+            },
+            {
+              "endpoint": "GET /api/nodes?within={project}&limit=50",
+              "samples": 900,
+              "p50_ms": 20.0525,
+              "p95_ms": 24.032292,
+              "runs": [
+                {
+                  "run": 1,
+                  "samples": 300,
+                  "p50_ms": 21.350125,
+                  "p95_ms": 30.35075
+                },
+                {
+                  "run": 2,
+                  "samples": 300,
+                  "p50_ms": 19.981375,
+                  "p95_ms": 20.97975
+                },
+                {
+                  "run": 3,
+                  "samples": 300,
+                  "p50_ms": 19.705083,
+                  "p95_ms": 20.171625
+                }
+              ],
+              "median_run_p95_ms": 20.97975,
+              "p95_change_pct": 0.0,
+              "median_run_p95_change_pct": 0.0
+            },
+            {
+              "endpoint": "GET /api/nodes/{id}",
+              "samples": 900,
+              "p50_ms": 4.185583,
+              "p95_ms": 5.095875,
+              "runs": [
+                {
+                  "run": 1,
+                  "samples": 300,
+                  "p50_ms": 4.482291,
+                  "p95_ms": 6.1745
+                },
+                {
+                  "run": 2,
+                  "samples": 300,
+                  "p50_ms": 4.179542,
+                  "p95_ms": 4.621166
+                },
+                {
+                  "run": 3,
+                  "samples": 300,
+                  "p50_ms": 4.008542,
+                  "p95_ms": 4.325584
+                }
+              ],
+              "median_run_p95_ms": 4.621166,
+              "p95_change_pct": 0.0,
+              "median_run_p95_change_pct": 0.0
+            },
+            {
+              "endpoint": "GET /api/search?q=Memory&limit=50",
+              "samples": 900,
+              "p50_ms": 4.2245,
+              "p95_ms": 4.791792,
+              "runs": [
+                {
+                  "run": 1,
+                  "samples": 300,
+                  "p50_ms": 3.955833,
+                  "p95_ms": 5.454459
+                },
+                {
+                  "run": 2,
+                  "samples": 300,
+                  "p50_ms": 4.380542,
+                  "p95_ms": 4.793208
+                },
+                {
+                  "run": 3,
+                  "samples": 300,
+                  "p50_ms": 4.201083,
+                  "p95_ms": 4.494
+                }
+              ],
+              "median_run_p95_ms": 4.793208,
+              "p95_change_pct": 0.0,
+              "median_run_p95_change_pct": 0.0
+            },
+            {
+              "endpoint": "GET /api/inbox/messages?wait_ms=0",
+              "samples": 900,
+              "p50_ms": 2.917,
+              "p95_ms": 3.679542,
+              "runs": [
+                {
+                  "run": 1,
+                  "samples": 300,
+                  "p50_ms": 3.066334,
+                  "p95_ms": 4.406667
+                },
+                {
+                  "run": 2,
+                  "samples": 300,
+                  "p50_ms": 2.9165,
+                  "p95_ms": 3.278167
+                },
+                {
+                  "run": 3,
+                  "samples": 300,
+                  "p50_ms": 2.85275,
+                  "p95_ms": 3.070875
+                }
+              ],
+              "median_run_p95_ms": 3.278167,
+              "p95_change_pct": 0.0,
+              "median_run_p95_change_pct": 0.0
+            }
+          ],
+          "memory_reduction_pct": 0.0,
+          "within_p95_budget": true,
+          "within_median_run_p95_budget": true
+        },
+        "cache_statement_48": {
+          "backends": 9,
+          "memory": {
+            "total_bytes": {
+              "mean_bytes": 19292255.111111112,
+              "min_bytes": 19282544,
+              "max_bytes": 19302144
+            },
+            "used_bytes": {
+              "mean_bytes": 12907491.555555556,
+              "min_bytes": 12905544,
+              "max_bytes": 12919184
+            },
+            "plan_bytes": {
+              "mean_bytes": 10111813.333333334,
+              "min_bytes": 10102568,
+              "max_bytes": 10120072
+            },
+            "catalog_bytes": {
+              "mean_bytes": 6372193.777777778,
+              "min_bytes": 6371728,
+              "max_bytes": 6373824
+            },
+            "cache_memory_context_bytes": {
+              "mean_bytes": 4318144,
+              "min_bytes": 4318144,
+              "max_bytes": 4318144
+            }
+          },
+          "named_plan_contexts_mean_bytes": {
+            "CachedPlan": 4489460.444444444,
+            "CachedPlanSource": 1663472.888888889,
+            "CachedPlanQuery": 3958880
+          },
+          "prepared_statements": [
+            48
+          ],
+          "latencies": [
+            {
+              "endpoint": "GET /api/me",
+              "samples": 900,
+              "p50_ms": 2.036,
+              "p95_ms": 2.829667,
+              "runs": [
+                {
+                  "run": 1,
+                  "samples": 300,
+                  "p50_ms": 2.067958,
+                  "p95_ms": 2.829667
+                },
+                {
+                  "run": 2,
+                  "samples": 300,
+                  "p50_ms": 2.076125,
+                  "p95_ms": 3.116583
+                },
+                {
+                  "run": 3,
+                  "samples": 300,
+                  "p50_ms": 1.968833,
+                  "p95_ms": 2.292208
+                }
+              ],
+              "median_run_p95_ms": 2.829667,
+              "p95_change_pct": 12.679621702339471,
+              "median_run_p95_change_pct": 32.578453044368885
+            },
+            {
+              "endpoint": "GET /api/nodes?within={project}&limit=50",
+              "samples": 900,
+              "p50_ms": 20.502291,
+              "p95_ms": 25.458542,
+              "runs": [
+                {
+                  "run": 1,
+                  "samples": 300,
+                  "p50_ms": 20.965584,
+                  "p95_ms": 25.458542
+                },
+                {
+                  "run": 2,
+                  "samples": 300,
+                  "p50_ms": 20.687125,
+                  "p95_ms": 29.6375
+                },
+                {
+                  "run": 3,
+                  "samples": 300,
+                  "p50_ms": 19.781666,
+                  "p95_ms": 21.948875
+                }
+              ],
+              "median_run_p95_ms": 25.458542,
+              "p95_change_pct": 5.9347231633170905,
+              "median_run_p95_change_pct": 21.34816668454105
+            },
+            {
+              "endpoint": "GET /api/nodes/{id}",
+              "samples": 900,
+              "p50_ms": 4.327083,
+              "p95_ms": 5.8945,
+              "runs": [
+                {
+                  "run": 1,
+                  "samples": 300,
+                  "p50_ms": 4.444666,
+                  "p95_ms": 5.570625
+                },
+                {
+                  "run": 2,
+                  "samples": 300,
+                  "p50_ms": 4.413291,
+                  "p95_ms": 6.73525
+                },
+                {
+                  "run": 3,
+                  "samples": 300,
+                  "p50_ms": 4.028333,
+                  "p95_ms": 4.748541
+                }
+              ],
+              "median_run_p95_ms": 5.570625,
+              "p95_change_pct": 15.671989599430901,
+              "median_run_p95_change_pct": 20.54587521850546
+            },
+            {
+              "endpoint": "GET /api/search?q=Memory&limit=50",
+              "samples": 900,
+              "p50_ms": 4.493542,
+              "p95_ms": 5.726333,
+              "runs": [
+                {
+                  "run": 1,
+                  "samples": 300,
+                  "p50_ms": 4.558417,
+                  "p95_ms": 5.811541
+                },
+                {
+                  "run": 2,
+                  "samples": 300,
+                  "p50_ms": 4.679125,
+                  "p95_ms": 6.424417
+                },
+                {
+                  "run": 3,
+                  "samples": 300,
+                  "p50_ms": 4.259625,
+                  "p95_ms": 5.059
+                }
+              ],
+              "median_run_p95_ms": 5.811541,
+              "p95_change_pct": 19.502954218380108,
+              "median_run_p95_change_pct": 21.24533297949933
+            },
+            {
+              "endpoint": "GET /api/inbox/messages?wait_ms=0",
+              "samples": 900,
+              "p50_ms": 2.994875,
+              "p95_ms": 3.700209,
+              "runs": [
+                {
+                  "run": 1,
+                  "samples": 300,
+                  "p50_ms": 3.032708,
+                  "p95_ms": 3.854166
+                },
+                {
+                  "run": 2,
+                  "samples": 300,
+                  "p50_ms": 3.078042,
+                  "p95_ms": 4.127583
+                },
+                {
+                  "run": 3,
+                  "samples": 300,
+                  "p50_ms": 2.861375,
+                  "p95_ms": 3.302958
+                }
+              ],
+              "median_run_p95_ms": 3.854166,
+              "p95_change_pct": 0.5616731647580142,
+              "median_run_p95_change_pct": 17.570764393638292
+            }
+          ],
+          "memory_reduction_pct": 34.09701164484803,
+          "within_p95_budget": false,
+          "within_median_run_p95_budget": false
+        }
+      },
+      "backend_samples": [
+        {
+          "backend": 1,
+          "exec_mode": "cache statement",
+          "migration": "1354_delivery_webhook_permission_pause.sql",
+          "pid": 14647,
+          "policies": 485,
+          "postgres": "PostgreSQL 18.6 on aarch64-apple-darwin25.6.0, compiled by clang version 21.1.8, 64-bit",
+          "run": 1,
+          "statement_cache_capacity": 512,
+          "variant": "cache_statement_512",
+          "cold": {
+            "plan_bytes": 165072,
+            "used_bytes": 2036064,
+            "total_bytes": 3335112,
+            "catalog_bytes": 1278864,
+            "prepared_statements": 0,
+            "cache_memory_context_bytes": 1048576
+          },
+          "warm": {
+            "plan_bytes": 20080240,
+            "used_bytes": 19502816,
+            "total_bytes": 29274248,
+            "catalog_bytes": 6385760,
+            "prepared_statements": 65,
+            "cache_memory_context_bytes": 4318144
+          },
+          "latencies": [
+            {
+              "endpoint": "GET /api/me",
+              "p50_ms": 2.080084,
+              "p95_ms": 3.09475,
+              "samples": 100
+            },
+            {
+              "endpoint": "GET /api/nodes?within={project}&limit=50",
+              "p50_ms": 21.598583,
+              "p95_ms": 27.737917,
+              "samples": 100
+            },
+            {
+              "endpoint": "GET /api/nodes/{id}",
+              "p50_ms": 4.632167,
+              "p95_ms": 6.32225,
+              "samples": 100
+            },
+            {
+              "endpoint": "GET /api/search?q=Memory&limit=50",
+              "p50_ms": 3.97475,
+              "p95_ms": 5.693208,
+              "samples": 100
+            },
+            {
+              "endpoint": "GET /api/inbox/messages?wait_ms=0",
+              "p50_ms": 3.070875,
+              "p95_ms": 4.42525,
+              "samples": 100
+            }
+          ]
+        },
+        {
+          "backend": 2,
+          "exec_mode": "cache statement",
+          "migration": "1354_delivery_webhook_permission_pause.sql",
+          "pid": 14648,
+          "policies": 485,
+          "postgres": "PostgreSQL 18.6 on aarch64-apple-darwin25.6.0, compiled by clang version 21.1.8, 64-bit",
+          "run": 1,
+          "statement_cache_capacity": 512,
+          "variant": "cache_statement_512",
+          "cold": {
+            "plan_bytes": 165072,
+            "used_bytes": 1940000,
+            "total_bytes": 2802632,
+            "catalog_bytes": 754576,
+            "prepared_statements": 0,
+            "cache_memory_context_bytes": 524288
+          },
+          "warm": {
+            "plan_bytes": 20080296,
+            "used_bytes": 19412936,
+            "total_bytes": 29262368,
+            "catalog_bytes": 6373824,
+            "prepared_statements": 65,
+            "cache_memory_context_bytes": 4318144
+          },
+          "latencies": [
+            {
+              "endpoint": "GET /api/me",
+              "p50_ms": 2.107375,
+              "p95_ms": 3.277875,
+              "samples": 100
+            },
+            {
+              "endpoint": "GET /api/nodes?within={project}&limit=50",
+              "p50_ms": 21.350125,
+              "p95_ms": 37.548416,
+              "samples": 100
+            },
+            {
+              "endpoint": "GET /api/nodes/{id}",
+              "p50_ms": 4.485041,
+              "p95_ms": 6.3445,
+              "samples": 100
+            },
+            {
+              "endpoint": "GET /api/search?q=Memory&limit=50",
+              "p50_ms": 3.934916,
+              "p95_ms": 6.338333,
+              "samples": 100
+            },
+            {
+              "endpoint": "GET /api/inbox/messages?wait_ms=0",
+              "p50_ms": 3.079833,
+              "p95_ms": 4.510625,
+              "samples": 100
+            }
+          ]
+        },
+        {
+          "backend": 3,
+          "exec_mode": "cache statement",
+          "migration": "1354_delivery_webhook_permission_pause.sql",
+          "pid": 14649,
+          "policies": 485,
+          "postgres": "PostgreSQL 18.6 on aarch64-apple-darwin25.6.0, compiled by clang version 21.1.8, 64-bit",
+          "run": 1,
+          "statement_cache_capacity": 512,
+          "variant": "cache_statement_512",
+          "cold": {
+            "plan_bytes": 165072,
+            "used_bytes": 1940000,
+            "total_bytes": 2802632,
+            "catalog_bytes": 754576,
+            "prepared_statements": 0,
+            "cache_memory_context_bytes": 524288
+          },
+          "warm": {
+            "plan_bytes": 20080296,
+            "used_bytes": 19412920,
+            "total_bytes": 29262368,
+            "catalog_bytes": 6373824,
+            "prepared_statements": 65,
+            "cache_memory_context_bytes": 4318144
+          },
+          "latencies": [
+            {
+              "endpoint": "GET /api/me",
+              "p50_ms": 2.076417,
+              "p95_ms": 2.706833,
+              "samples": 100
+            },
+            {
+              "endpoint": "GET /api/nodes?within={project}&limit=50",
+              "p50_ms": 21.194875,
+              "p95_ms": 27.314,
+              "samples": 100
+            },
+            {
+              "endpoint": "GET /api/nodes/{id}",
+              "p50_ms": 4.406542,
+              "p95_ms": 5.301417,
+              "samples": 100
+            },
+            {
+              "endpoint": "GET /api/search?q=Memory&limit=50",
+              "p50_ms": 3.955833,
+              "p95_ms": 4.799,
+              "samples": 100
+            },
+            {
+              "endpoint": "GET /api/inbox/messages?wait_ms=0",
+              "p50_ms": 3.046833,
+              "p95_ms": 3.822583,
+              "samples": 100
+            }
+          ]
+        },
+        {
+          "backend": 1,
+          "exec_mode": "cache statement",
+          "migration": "1354_delivery_webhook_permission_pause.sql",
+          "pid": 15652,
+          "policies": 485,
+          "postgres": "PostgreSQL 18.6 on aarch64-apple-darwin25.6.0, compiled by clang version 21.1.8, 64-bit",
+          "run": 1,
+          "statement_cache_capacity": 48,
+          "variant": "cache_statement_48",
+          "cold": {
+            "plan_bytes": 165072,
+            "used_bytes": 1940000,
+            "total_bytes": 2802632,
+            "catalog_bytes": 754576,
+            "prepared_statements": 0,
+            "cache_memory_context_bytes": 524288
+          },
+          "warm": {
+            "plan_bytes": 10120072,
+            "used_bytes": 12905640,
+            "total_bytes": 19302144,
+            "catalog_bytes": 6373824,
+            "prepared_statements": 48,
+            "cache_memory_context_bytes": 4318144
+          },
+          "latencies": [
+            {
+              "endpoint": "GET /api/me",
+              "p50_ms": 2.030042,
+              "p95_ms": 2.693792,
+              "samples": 100
+            },
+            {
+              "endpoint": "GET /api/nodes?within={project}&limit=50",
+              "p50_ms": 20.961416,
+              "p95_ms": 24.472125,
+              "samples": 100
+            },
+            {
+              "endpoint": "GET /api/nodes/{id}",
+              "p50_ms": 4.307417,
+              "p95_ms": 5.570625,
+              "samples": 100
+            },
+            {
+              "endpoint": "GET /api/search?q=Memory&limit=50",
+              "p50_ms": 3.897417,
+              "p95_ms": 4.933083,
+              "samples": 100
+            },
+            {
+              "endpoint": "GET /api/inbox/messages?wait_ms=0",
+              "p50_ms": 3.014208,
+              "p95_ms": 3.5265,
+              "samples": 100
+            }
+          ]
+        },
+        {
+          "backend": 2,
+          "exec_mode": "cache statement",
+          "migration": "1354_delivery_webhook_permission_pause.sql",
+          "pid": 15653,
+          "policies": 485,
+          "postgres": "PostgreSQL 18.6 on aarch64-apple-darwin25.6.0, compiled by clang version 21.1.8, 64-bit",
+          "run": 1,
+          "statement_cache_capacity": 48,
+          "variant": "cache_statement_48",
+          "cold": {
+            "plan_bytes": 165072,
+            "used_bytes": 1940000,
+            "total_bytes": 2802632,
+            "catalog_bytes": 754576,
+            "prepared_statements": 0,
+            "cache_memory_context_bytes": 524288
+          },
+          "warm": {
+            "plan_bytes": 10114848,
+            "used_bytes": 12909288,
+            "total_bytes": 19296920,
+            "catalog_bytes": 6373824,
+            "prepared_statements": 48,
+            "cache_memory_context_bytes": 4318144
+          },
+          "latencies": [
+            {
+              "endpoint": "GET /api/me",
+              "p50_ms": 2.094709,
+              "p95_ms": 2.961417,
+              "samples": 100
+            },
+            {
+              "endpoint": "GET /api/nodes?within={project}&limit=50",
+              "p50_ms": 21.026708,
+              "p95_ms": 25.220334,
+              "samples": 100
+            },
+            {
+              "endpoint": "GET /api/nodes/{id}",
+              "p50_ms": 4.507583,
+              "p95_ms": 6.043334,
+              "samples": 100
+            },
+            {
+              "endpoint": "GET /api/search?q=Memory&limit=50",
+              "p50_ms": 4.731459,
+              "p95_ms": 5.874875,
+              "samples": 100
+            },
+            {
+              "endpoint": "GET /api/inbox/messages?wait_ms=0",
+              "p50_ms": 3.049375,
+              "p95_ms": 3.862458,
+              "samples": 100
+            }
+          ]
+        },
+        {
+          "backend": 3,
+          "exec_mode": "cache statement",
+          "migration": "1354_delivery_webhook_permission_pause.sql",
+          "pid": 15654,
+          "policies": 485,
+          "postgres": "PostgreSQL 18.6 on aarch64-apple-darwin25.6.0, compiled by clang version 21.1.8, 64-bit",
+          "run": 1,
+          "statement_cache_capacity": 48,
+          "variant": "cache_statement_48",
+          "cold": {
+            "plan_bytes": 165072,
+            "used_bytes": 1940000,
+            "total_bytes": 2802632,
+            "catalog_bytes": 754576,
+            "prepared_statements": 0,
+            "cache_memory_context_bytes": 524288
+          },
+          "warm": {
+            "plan_bytes": 10111472,
+            "used_bytes": 12905560,
+            "total_bytes": 19291448,
+            "catalog_bytes": 6371728,
+            "prepared_statements": 48,
+            "cache_memory_context_bytes": 4318144
+          },
+          "latencies": [
+            {
+              "endpoint": "GET /api/me",
+              "p50_ms": 2.064667,
+              "p95_ms": 2.786625,
+              "samples": 100
+            },
+            {
+              "endpoint": "GET /api/nodes?within={project}&limit=50",
+              "p50_ms": 20.859834,
+              "p95_ms": 26.32625,
+              "samples": 100
+            },
+            {
+              "endpoint": "GET /api/nodes/{id}",
+              "p50_ms": 4.453542,
+              "p95_ms": 5.22925,
+              "samples": 100
+            },
+            {
+              "endpoint": "GET /api/search?q=Memory&limit=50",
+              "p50_ms": 4.609833,
+              "p95_ms": 6.019375,
+              "samples": 100
+            },
+            {
+              "endpoint": "GET /api/inbox/messages?wait_ms=0",
+              "p50_ms": 3.088083,
+              "p95_ms": 3.994125,
+              "samples": 100
+            }
+          ]
+        },
+        {
+          "backend": 1,
+          "exec_mode": "cache statement",
+          "migration": "1354_delivery_webhook_permission_pause.sql",
+          "pid": 16636,
+          "policies": 485,
+          "postgres": "PostgreSQL 18.6 on aarch64-apple-darwin25.6.0, compiled by clang version 21.1.8, 64-bit",
+          "run": 2,
+          "statement_cache_capacity": 48,
+          "variant": "cache_statement_48",
+          "cold": {
+            "plan_bytes": 165072,
+            "used_bytes": 1940000,
+            "total_bytes": 2802632,
+            "catalog_bytes": 754576,
+            "prepared_statements": 0,
+            "cache_memory_context_bytes": 524288
+          },
+          "warm": {
+            "plan_bytes": 10111472,
+            "used_bytes": 12905560,
+            "total_bytes": 19291448,
+            "catalog_bytes": 6371728,
+            "prepared_statements": 48,
+            "cache_memory_context_bytes": 4318144
+          },
+          "latencies": [
+            {
+              "endpoint": "GET /api/me",
+              "p50_ms": 2.072042,
+              "p95_ms": 3.224042,
+              "samples": 100
+            },
+            {
+              "endpoint": "GET /api/nodes?within={project}&limit=50",
+              "p50_ms": 20.778334,
+              "p95_ms": 31.716834,
+              "samples": 100
+            },
+            {
+              "endpoint": "GET /api/nodes/{id}",
+              "p50_ms": 4.48425,
+              "p95_ms": 7.303958,
+              "samples": 100
+            },
+            {
+              "endpoint": "GET /api/search?q=Memory&limit=50",
+              "p50_ms": 4.717959,
+              "p95_ms": 7.228625,
+              "samples": 100
+            },
+            {
+              "endpoint": "GET /api/inbox/messages?wait_ms=0",
+              "p50_ms": 3.089333,
+              "p95_ms": 4.718792,
+              "samples": 100
+            }
+          ]
+        },
+        {
+          "backend": 2,
+          "exec_mode": "cache statement",
+          "migration": "1354_delivery_webhook_permission_pause.sql",
+          "pid": 16637,
+          "policies": 485,
+          "postgres": "PostgreSQL 18.6 on aarch64-apple-darwin25.6.0, compiled by clang version 21.1.8, 64-bit",
+          "run": 2,
+          "statement_cache_capacity": 48,
+          "variant": "cache_statement_48",
+          "cold": {
+            "plan_bytes": 165072,
+            "used_bytes": 1940000,
+            "total_bytes": 2802632,
+            "catalog_bytes": 754576,
+            "prepared_statements": 0,
+            "cache_memory_context_bytes": 524288
+          },
+          "warm": {
+            "plan_bytes": 10111472,
+            "used_bytes": 12905560,
+            "total_bytes": 19291448,
+            "catalog_bytes": 6371728,
+            "prepared_statements": 48,
+            "cache_memory_context_bytes": 4318144
+          },
+          "latencies": [
+            {
+              "endpoint": "GET /api/me",
+              "p50_ms": 2.082916,
+              "p95_ms": 2.766792,
+              "samples": 100
+            },
+            {
+              "endpoint": "GET /api/nodes?within={project}&limit=50",
+              "p50_ms": 20.599625,
+              "p95_ms": 24.582292,
+              "samples": 100
+            },
+            {
+              "endpoint": "GET /api/nodes/{id}",
+              "p50_ms": 4.400333,
+              "p95_ms": 5.549625,
+              "samples": 100
+            },
+            {
+              "endpoint": "GET /api/search?q=Memory&limit=50",
+              "p50_ms": 4.720292,
+              "p95_ms": 5.994,
+              "samples": 100
+            },
+            {
+              "endpoint": "GET /api/inbox/messages?wait_ms=0",
+              "p50_ms": 3.052167,
+              "p95_ms": 3.711666,
+              "samples": 100
+            }
+          ]
+        },
+        {
+          "backend": 3,
+          "exec_mode": "cache statement",
+          "migration": "1354_delivery_webhook_permission_pause.sql",
+          "pid": 16638,
+          "policies": 485,
+          "postgres": "PostgreSQL 18.6 on aarch64-apple-darwin25.6.0, compiled by clang version 21.1.8, 64-bit",
+          "run": 2,
+          "statement_cache_capacity": 48,
+          "variant": "cache_statement_48",
+          "cold": {
+            "plan_bytes": 165072,
+            "used_bytes": 1940000,
+            "total_bytes": 2802632,
+            "catalog_bytes": 754576,
+            "prepared_statements": 0,
+            "cache_memory_context_bytes": 524288
+          },
+          "warm": {
+            "plan_bytes": 10102568,
+            "used_bytes": 12919184,
+            "total_bytes": 19282544,
+            "catalog_bytes": 6371728,
+            "prepared_statements": 48,
+            "cache_memory_context_bytes": 4318144
+          },
+          "latencies": [
+            {
+              "endpoint": "GET /api/me",
+              "p50_ms": 2.077542,
+              "p95_ms": 3.411958,
+              "samples": 100
+            },
+            {
+              "endpoint": "GET /api/nodes?within={project}&limit=50",
+              "p50_ms": 20.681333,
+              "p95_ms": 28.091584,
+              "samples": 100
+            },
+            {
+              "endpoint": "GET /api/nodes/{id}",
+              "p50_ms": 4.3885,
+              "p95_ms": 6.594917,
+              "samples": 100
+            },
+            {
+              "endpoint": "GET /api/search?q=Memory&limit=50",
+              "p50_ms": 4.61775,
+              "p95_ms": 6.424417,
+              "samples": 100
+            },
+            {
+              "endpoint": "GET /api/inbox/messages?wait_ms=0",
+              "p50_ms": 3.071416,
+              "p95_ms": 4.379458,
+              "samples": 100
+            }
+          ]
+        },
+        {
+          "backend": 1,
+          "exec_mode": "cache statement",
+          "migration": "1354_delivery_webhook_permission_pause.sql",
+          "pid": 17487,
+          "policies": 485,
+          "postgres": "PostgreSQL 18.6 on aarch64-apple-darwin25.6.0, compiled by clang version 21.1.8, 64-bit",
+          "run": 2,
+          "statement_cache_capacity": 512,
+          "variant": "cache_statement_512",
+          "cold": {
+            "plan_bytes": 165072,
+            "used_bytes": 1940000,
+            "total_bytes": 2802632,
+            "catalog_bytes": 754576,
+            "prepared_statements": 0,
+            "cache_memory_context_bytes": 524288
+          },
+          "warm": {
+            "plan_bytes": 20083784,
+            "used_bytes": 19423192,
+            "total_bytes": 29263760,
+            "catalog_bytes": 6371728,
+            "prepared_statements": 65,
+            "cache_memory_context_bytes": 4318144
+          },
+          "latencies": [
+            {
+              "endpoint": "GET /api/me",
+              "p50_ms": 2.015833,
+              "p95_ms": 2.160041,
+              "samples": 100
+            },
+            {
+              "endpoint": "GET /api/nodes?within={project}&limit=50",
+              "p50_ms": 20.118916,
+              "p95_ms": 21.351833,
+              "samples": 100
+            },
+            {
+              "endpoint": "GET /api/nodes/{id}",
+              "p50_ms": 4.289959,
+              "p95_ms": 4.720167,
+              "samples": 100
+            },
+            {
+              "endpoint": "GET /api/search?q=Memory&limit=50",
+              "p50_ms": 4.4575,
+              "p95_ms": 4.81825,
+              "samples": 100
+            },
+            {
+              "endpoint": "GET /api/inbox/messages?wait_ms=0",
+              "p50_ms": 2.949542,
+              "p95_ms": 3.368541,
+              "samples": 100
+            }
+          ]
+        },
+        {
+          "backend": 2,
+          "exec_mode": "cache statement",
+          "migration": "1354_delivery_webhook_permission_pause.sql",
+          "pid": 17492,
+          "policies": 485,
+          "postgres": "PostgreSQL 18.6 on aarch64-apple-darwin25.6.0, compiled by clang version 21.1.8, 64-bit",
+          "run": 2,
+          "statement_cache_capacity": 512,
+          "variant": "cache_statement_512",
+          "cold": {
+            "plan_bytes": 165072,
+            "used_bytes": 1940000,
+            "total_bytes": 2802632,
+            "catalog_bytes": 754576,
+            "prepared_statements": 0,
+            "cache_memory_context_bytes": 524288
+          },
+          "warm": {
+            "plan_bytes": 20083784,
+            "used_bytes": 19423176,
+            "total_bytes": 29263760,
+            "catalog_bytes": 6371728,
+            "prepared_statements": 65,
+            "cache_memory_context_bytes": 4318144
+          },
+          "latencies": [
+            {
+              "endpoint": "GET /api/me",
+              "p50_ms": 2.021166,
+              "p95_ms": 2.149,
+              "samples": 100
+            },
+            {
+              "endpoint": "GET /api/nodes?within={project}&limit=50",
+              "p50_ms": 20.037041,
+              "p95_ms": 21.3745,
+              "samples": 100
+            },
+            {
+              "endpoint": "GET /api/nodes/{id}",
+              "p50_ms": 4.233583,
+              "p95_ms": 4.627208,
+              "samples": 100
+            },
+            {
+              "endpoint": "GET /api/search?q=Memory&limit=50",
+              "p50_ms": 4.415042,
+              "p95_ms": 4.936875,
+              "samples": 100
+            },
+            {
+              "endpoint": "GET /api/inbox/messages?wait_ms=0",
+              "p50_ms": 2.950875,
+              "p95_ms": 3.453459,
+              "samples": 100
+            }
+          ]
+        },
+        {
+          "backend": 3,
+          "exec_mode": "cache statement",
+          "migration": "1354_delivery_webhook_permission_pause.sql",
+          "pid": 17493,
+          "policies": 485,
+          "postgres": "PostgreSQL 18.6 on aarch64-apple-darwin25.6.0, compiled by clang version 21.1.8, 64-bit",
+          "run": 2,
+          "statement_cache_capacity": 512,
+          "variant": "cache_statement_512",
+          "cold": {
+            "plan_bytes": 165072,
+            "used_bytes": 1940000,
+            "total_bytes": 2802632,
+            "catalog_bytes": 754576,
+            "prepared_statements": 0,
+            "cache_memory_context_bytes": 524288
+          },
+          "warm": {
+            "plan_bytes": 20083784,
+            "used_bytes": 19423440,
+            "total_bytes": 29263760,
+            "catalog_bytes": 6371728,
+            "prepared_statements": 65,
+            "cache_memory_context_bytes": 4318144
+          },
+          "latencies": [
+            {
+              "endpoint": "GET /api/me",
+              "p50_ms": 1.948666,
+              "p95_ms": 2.04725,
+              "samples": 100
+            },
+            {
+              "endpoint": "GET /api/nodes?within={project}&limit=50",
+              "p50_ms": 19.676084,
+              "p95_ms": 20.260583,
+              "samples": 100
+            },
+            {
+              "endpoint": "GET /api/nodes/{id}",
+              "p50_ms": 4.012292,
+              "p95_ms": 4.247417,
+              "samples": 100
+            },
+            {
+              "endpoint": "GET /api/search?q=Memory&limit=50",
+              "p50_ms": 4.252292,
+              "p95_ms": 4.535959,
+              "samples": 100
+            },
+            {
+              "endpoint": "GET /api/inbox/messages?wait_ms=0",
+              "p50_ms": 2.838458,
+              "p95_ms": 3.023,
+              "samples": 100
+            }
+          ]
+        },
+        {
+          "backend": 1,
+          "exec_mode": "cache statement",
+          "migration": "1354_delivery_webhook_permission_pause.sql",
+          "pid": 18157,
+          "policies": 485,
+          "postgres": "PostgreSQL 18.6 on aarch64-apple-darwin25.6.0, compiled by clang version 21.1.8, 64-bit",
+          "run": 3,
+          "statement_cache_capacity": 48,
+          "variant": "cache_statement_48",
+          "cold": {
+            "plan_bytes": 165072,
+            "used_bytes": 1940000,
+            "total_bytes": 2802632,
+            "catalog_bytes": 754576,
+            "prepared_statements": 0,
+            "cache_memory_context_bytes": 524288
+          },
+          "warm": {
+            "plan_bytes": 10111472,
+            "used_bytes": 12905544,
+            "total_bytes": 19291448,
+            "catalog_bytes": 6371728,
+            "prepared_statements": 48,
+            "cache_memory_context_bytes": 4318144
+          },
+          "latencies": [
+            {
+              "endpoint": "GET /api/me",
+              "p50_ms": 1.959334,
+              "p95_ms": 2.111584,
+              "samples": 100
+            },
+            {
+              "endpoint": "GET /api/nodes?within={project}&limit=50",
+              "p50_ms": 19.734791,
+              "p95_ms": 20.278834,
+              "samples": 100
+            },
+            {
+              "endpoint": "GET /api/nodes/{id}",
+              "p50_ms": 4.009583,
+              "p95_ms": 4.389541,
+              "samples": 100
+            },
+            {
+              "endpoint": "GET /api/search?q=Memory&limit=50",
+              "p50_ms": 4.24125,
+              "p95_ms": 4.60275,
+              "samples": 100
+            },
+            {
+              "endpoint": "GET /api/inbox/messages?wait_ms=0",
+              "p50_ms": 2.845542,
+              "p95_ms": 3.102375,
+              "samples": 100
+            }
+          ]
+        },
+        {
+          "backend": 2,
+          "exec_mode": "cache statement",
+          "migration": "1354_delivery_webhook_permission_pause.sql",
+          "pid": 18158,
+          "policies": 485,
+          "postgres": "PostgreSQL 18.6 on aarch64-apple-darwin25.6.0, compiled by clang version 21.1.8, 64-bit",
+          "run": 3,
+          "statement_cache_capacity": 48,
+          "variant": "cache_statement_48",
+          "cold": {
+            "plan_bytes": 165072,
+            "used_bytes": 1940000,
+            "total_bytes": 2802632,
+            "catalog_bytes": 754576,
+            "prepared_statements": 0,
+            "cache_memory_context_bytes": 524288
+          },
+          "warm": {
+            "plan_bytes": 10111472,
+            "used_bytes": 12905544,
+            "total_bytes": 19291448,
+            "catalog_bytes": 6371728,
+            "prepared_statements": 48,
+            "cache_memory_context_bytes": 4318144
+          },
+          "latencies": [
+            {
+              "endpoint": "GET /api/me",
+              "p50_ms": 1.966292,
+              "p95_ms": 2.814666,
+              "samples": 100
+            },
+            {
+              "endpoint": "GET /api/nodes?within={project}&limit=50",
+              "p50_ms": 19.863292,
+              "p95_ms": 24.324292,
+              "samples": 100
+            },
+            {
+              "endpoint": "GET /api/nodes/{id}",
+              "p50_ms": 4.005791,
+              "p95_ms": 5.543458,
+              "samples": 100
+            },
+            {
+              "endpoint": "GET /api/search?q=Memory&limit=50",
+              "p50_ms": 4.276208,
+              "p95_ms": 5.70925,
+              "samples": 100
+            },
+            {
+              "endpoint": "GET /api/inbox/messages?wait_ms=0",
+              "p50_ms": 2.861875,
+              "p95_ms": 3.513583,
+              "samples": 100
+            }
+          ]
+        },
+        {
+          "backend": 3,
+          "exec_mode": "cache statement",
+          "migration": "1354_delivery_webhook_permission_pause.sql",
+          "pid": 18159,
+          "policies": 485,
+          "postgres": "PostgreSQL 18.6 on aarch64-apple-darwin25.6.0, compiled by clang version 21.1.8, 64-bit",
+          "run": 3,
+          "statement_cache_capacity": 48,
+          "variant": "cache_statement_48",
+          "cold": {
+            "plan_bytes": 165072,
+            "used_bytes": 1940000,
+            "total_bytes": 2802632,
+            "catalog_bytes": 754576,
+            "prepared_statements": 0,
+            "cache_memory_context_bytes": 524288
+          },
+          "warm": {
+            "plan_bytes": 10111472,
+            "used_bytes": 12905544,
+            "total_bytes": 19291448,
+            "catalog_bytes": 6371728,
+            "prepared_statements": 48,
+            "cache_memory_context_bytes": 4318144
+          },
+          "latencies": [
+            {
+              "endpoint": "GET /api/me",
+              "p50_ms": 1.976459,
+              "p95_ms": 2.184958,
+              "samples": 100
+            },
+            {
+              "endpoint": "GET /api/nodes?within={project}&limit=50",
+              "p50_ms": 19.761166,
+              "p95_ms": 20.532709,
+              "samples": 100
+            },
+            {
+              "endpoint": "GET /api/nodes/{id}",
+              "p50_ms": 4.066416,
+              "p95_ms": 4.496042,
+              "samples": 100
+            },
+            {
+              "endpoint": "GET /api/search?q=Memory&limit=50",
+              "p50_ms": 4.265417,
+              "p95_ms": 4.702458,
+              "samples": 100
+            },
+            {
+              "endpoint": "GET /api/inbox/messages?wait_ms=0",
+              "p50_ms": 2.87275,
+              "p95_ms": 3.161792,
+              "samples": 100
+            }
+          ]
+        },
+        {
+          "backend": 1,
+          "exec_mode": "cache statement",
+          "migration": "1354_delivery_webhook_permission_pause.sql",
+          "pid": 19081,
+          "policies": 485,
+          "postgres": "PostgreSQL 18.6 on aarch64-apple-darwin25.6.0, compiled by clang version 21.1.8, 64-bit",
+          "run": 3,
+          "statement_cache_capacity": 512,
+          "variant": "cache_statement_512",
+          "cold": {
+            "plan_bytes": 165072,
+            "used_bytes": 1940000,
+            "total_bytes": 2802632,
+            "catalog_bytes": 754576,
+            "prepared_statements": 0,
+            "cache_memory_context_bytes": 524288
+          },
+          "warm": {
+            "plan_bytes": 20083784,
+            "used_bytes": 19423472,
+            "total_bytes": 29263760,
+            "catalog_bytes": 6371728,
+            "prepared_statements": 65,
+            "cache_memory_context_bytes": 4318144
+          },
+          "latencies": [
+            {
+              "endpoint": "GET /api/me",
+              "p50_ms": 1.9545,
+              "p95_ms": 2.079917,
+              "samples": 100
+            },
+            {
+              "endpoint": "GET /api/nodes?within={project}&limit=50",
+              "p50_ms": 19.708209,
+              "p95_ms": 20.119958,
+              "samples": 100
+            },
+            {
+              "endpoint": "GET /api/nodes/{id}",
+              "p50_ms": 4.014958,
+              "p95_ms": 4.356709,
+              "samples": 100
+            },
+            {
+              "endpoint": "GET /api/search?q=Memory&limit=50",
+              "p50_ms": 4.259167,
+              "p95_ms": 4.505083,
+              "samples": 100
+            },
+            {
+              "endpoint": "GET /api/inbox/messages?wait_ms=0",
+              "p50_ms": 2.852458,
+              "p95_ms": 3.093083,
+              "samples": 100
+            }
+          ]
+        },
+        {
+          "backend": 2,
+          "exec_mode": "cache statement",
+          "migration": "1354_delivery_webhook_permission_pause.sql",
+          "pid": 19082,
+          "policies": 485,
+          "postgres": "PostgreSQL 18.6 on aarch64-apple-darwin25.6.0, compiled by clang version 21.1.8, 64-bit",
+          "run": 3,
+          "statement_cache_capacity": 512,
+          "variant": "cache_statement_512",
+          "cold": {
+            "plan_bytes": 165072,
+            "used_bytes": 1940000,
+            "total_bytes": 2802632,
+            "catalog_bytes": 754576,
+            "prepared_statements": 0,
+            "cache_memory_context_bytes": 524288
+          },
+          "warm": {
+            "plan_bytes": 20083784,
+            "used_bytes": 19423488,
+            "total_bytes": 29263760,
+            "catalog_bytes": 6371728,
+            "prepared_statements": 65,
+            "cache_memory_context_bytes": 4318144
+          },
+          "latencies": [
+            {
+              "endpoint": "GET /api/me",
+              "p50_ms": 1.968917,
+              "p95_ms": 2.055,
+              "samples": 100
+            },
+            {
+              "endpoint": "GET /api/nodes?within={project}&limit=50",
+              "p50_ms": 19.706459,
+              "p95_ms": 20.171625,
+              "samples": 100
+            },
+            {
+              "endpoint": "GET /api/nodes/{id}",
+              "p50_ms": 4.012416,
+              "p95_ms": 4.23325,
+              "samples": 100
+            },
+            {
+              "endpoint": "GET /api/search?q=Memory&limit=50",
+              "p50_ms": 4.242791,
+              "p95_ms": 4.539208,
+              "samples": 100
+            },
+            {
+              "endpoint": "GET /api/inbox/messages?wait_ms=0",
+              "p50_ms": 2.871916,
+              "p95_ms": 3.059667,
+              "samples": 100
+            }
+          ]
+        },
+        {
+          "backend": 3,
+          "exec_mode": "cache statement",
+          "migration": "1354_delivery_webhook_permission_pause.sql",
+          "pid": 19083,
+          "policies": 485,
+          "postgres": "PostgreSQL 18.6 on aarch64-apple-darwin25.6.0, compiled by clang version 21.1.8, 64-bit",
+          "run": 3,
+          "statement_cache_capacity": 512,
+          "variant": "cache_statement_512",
+          "cold": {
+            "plan_bytes": 165072,
+            "used_bytes": 1940000,
+            "total_bytes": 2802632,
+            "catalog_bytes": 754576,
+            "prepared_statements": 0,
+            "cache_memory_context_bytes": 524288
+          },
+          "warm": {
+            "plan_bytes": 20165704,
+            "used_bytes": 19481464,
+            "total_bytes": 29345680,
+            "catalog_bytes": 6371728,
+            "prepared_statements": 66,
+            "cache_memory_context_bytes": 4318144
+          },
+          "latencies": [
+            {
+              "endpoint": "GET /api/me",
+              "p50_ms": 1.971417,
+              "p95_ms": 2.032333,
+              "samples": 100
+            },
+            {
+              "endpoint": "GET /api/nodes?within={project}&limit=50",
+              "p50_ms": 19.676,
+              "p95_ms": 20.168208,
+              "samples": 100
+            },
+            {
+              "endpoint": "GET /api/nodes/{id}",
+              "p50_ms": 3.996083,
+              "p95_ms": 4.248709,
+              "samples": 100
+            },
+            {
+              "endpoint": "GET /api/search?q=Memory&limit=50",
+              "p50_ms": 3.63425,
+              "p95_ms": 3.793959,
+              "samples": 100
+            },
+            {
+              "endpoint": "GET /api/inbox/messages?wait_ms=0",
+              "p50_ms": 2.837542,
+              "p95_ms": 3.048916,
+              "samples": 100
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "stage": "confirmation_56",
+      "source_commit": "ddb3e5c60",
+      "summary": {
+        "cache_statement_512": {
+          "backends": 9,
+          "memory": {
+            "total_bytes": {
+              "mean_bytes": 29273700.444444444,
+              "min_bytes": 29255560,
+              "max_bytes": 29362056
+            },
+            "used_bytes": {
+              "mean_bytes": 19377440.888888888,
+              "min_bytes": 19366608,
+              "max_bytes": 19452848
+            },
+            "plan_bytes": {
+              "mean_bytes": 20095425.777777776,
+              "min_bytes": 20078656,
+              "max_bytes": 20185152
+            },
+            "catalog_bytes": {
+              "mean_bytes": 6370026.666666667,
+              "min_bytes": 6368656,
+              "max_bytes": 6380992
+            },
+            "cache_memory_context_bytes": {
+              "mean_bytes": 4318144,
+              "min_bytes": 4318144,
+              "max_bytes": 4318144
+            }
+          },
+          "named_plan_contexts_mean_bytes": {
+            "CachedPlan": 11106447.111111112,
+            "CachedPlanSource": 2402969.777777778,
+            "CachedPlanQuery": 6586008.888888889
+          },
+          "prepared_statements": [
+            65,
+            66,
+            67
+          ],
+          "latencies": [
+            {
+              "endpoint": "GET /api/me",
+              "samples": 900,
+              "p50_ms": 1.951333,
+              "p95_ms": 2.647583,
+              "runs": [
+                {
+                  "run": 1,
+                  "samples": 300,
+                  "p50_ms": 1.993958,
+                  "p95_ms": 2.766917
+                },
+                {
+                  "run": 2,
+                  "samples": 300,
+                  "p50_ms": 2.171458,
+                  "p95_ms": 3.07275
+                },
+                {
+                  "run": 3,
+                  "samples": 300,
+                  "p50_ms": 1.838834,
+                  "p95_ms": 1.980584
+                }
+              ],
+              "median_run_p95_ms": 2.766917,
+              "p95_change_pct": 0.0,
+              "median_run_p95_change_pct": 0.0
+            },
+            {
+              "endpoint": "GET /api/nodes?within={project}&limit=50",
+              "samples": 900,
+              "p50_ms": 39.814,
+              "p95_ms": 50.270042,
+              "runs": [
+                {
+                  "run": 1,
+                  "samples": 300,
+                  "p50_ms": 40.520917,
+                  "p95_ms": 50.270042
+                },
+                {
+                  "run": 2,
+                  "samples": 300,
+                  "p50_ms": 40.217,
+                  "p95_ms": 64.995375
+                },
+                {
+                  "run": 3,
+                  "samples": 300,
+                  "p50_ms": 37.724333,
+                  "p95_ms": 38.3705
+                }
+              ],
+              "median_run_p95_ms": 50.270042,
+              "p95_change_pct": 0.0,
+              "median_run_p95_change_pct": 0.0
+            },
+            {
+              "endpoint": "GET /api/nodes/{id}",
+              "samples": 900,
+              "p50_ms": 4.380125,
+              "p95_ms": 6.162875,
+              "runs": [
+                {
+                  "run": 1,
+                  "samples": 300,
+                  "p50_ms": 4.475458,
+                  "p95_ms": 6.190333
+                },
+                {
+                  "run": 2,
+                  "samples": 300,
+                  "p50_ms": 4.982041,
+                  "p95_ms": 7.09075
+                },
+                {
+                  "run": 3,
+                  "samples": 300,
+                  "p50_ms": 4.029291,
+                  "p95_ms": 4.383958
+                }
+              ],
+              "median_run_p95_ms": 6.190333,
+              "p95_change_pct": 0.0,
+              "median_run_p95_change_pct": 0.0
+            },
+            {
+              "endpoint": "GET /api/search?q=Memory&limit=50",
+              "samples": 900,
+              "p50_ms": 3.658375,
+              "p95_ms": 5.184958,
+              "runs": [
+                {
+                  "run": 1,
+                  "samples": 300,
+                  "p50_ms": 3.76275,
+                  "p95_ms": 5.30775
+                },
+                {
+                  "run": 2,
+                  "samples": 300,
+                  "p50_ms": 4.099,
+                  "p95_ms": 6.071875
+                },
+                {
+                  "run": 3,
+                  "samples": 300,
+                  "p50_ms": 3.43125,
+                  "p95_ms": 3.667875
+                }
+              ],
+              "median_run_p95_ms": 5.30775,
+              "p95_change_pct": 0.0,
+              "median_run_p95_change_pct": 0.0
+            },
+            {
+              "endpoint": "GET /api/inbox/messages?wait_ms=0",
+              "samples": 900,
+              "p50_ms": 2.84875,
+              "p95_ms": 4.12375,
+              "runs": [
+                {
+                  "run": 1,
+                  "samples": 300,
+                  "p50_ms": 2.913541,
+                  "p95_ms": 4.292916
+                },
+                {
+                  "run": 2,
+                  "samples": 300,
+                  "p50_ms": 3.18525,
+                  "p95_ms": 4.6065
+                },
+                {
+                  "run": 3,
+                  "samples": 300,
+                  "p50_ms": 2.697416,
+                  "p95_ms": 2.967958
+                }
+              ],
+              "median_run_p95_ms": 4.292916,
+              "p95_change_pct": 0.0,
+              "median_run_p95_change_pct": 0.0
+            }
+          ],
+          "memory_reduction_pct": 0.0,
+          "within_p95_budget": true,
+          "within_median_run_p95_budget": true
+        },
+        "cache_statement_56": {
+          "backends": 9,
+          "memory": {
+            "total_bytes": {
+              "mean_bytes": 20863795.555555556,
+              "min_bytes": 20856464,
+              "max_bytes": 20913808
+            },
+            "used_bytes": {
+              "mean_bytes": 13970454.222222222,
+              "min_bytes": 13965264,
+              "max_bytes": 14001192
+            },
+            "plan_bytes": {
+              "mean_bytes": 11686891.555555556,
+              "min_bytes": 11679560,
+              "max_bytes": 11736904
+            },
+            "catalog_bytes": {
+              "mean_bytes": 6368656,
+              "min_bytes": 6368656,
+              "max_bytes": 6368656
+            },
+            "cache_memory_context_bytes": {
+              "mean_bytes": 4318144,
+              "min_bytes": 4318144,
+              "max_bytes": 4318144
+            }
+          },
+          "named_plan_contexts_mean_bytes": {
+            "CachedPlan": 4514693.333333333,
+            "CachedPlanSource": 2129773.3333333335,
+            "CachedPlanQuery": 5042424.888888889
+          },
+          "prepared_statements": [
+            56
+          ],
+          "latencies": [
+            {
+              "endpoint": "GET /api/me",
+              "samples": 900,
+              "p50_ms": 2.078958,
+              "p95_ms": 4.063041,
+              "runs": [
+                {
+                  "run": 1,
+                  "samples": 300,
+                  "p50_ms": 2.164584,
+                  "p95_ms": 3.666791
+                },
+                {
+                  "run": 2,
+                  "samples": 300,
+                  "p50_ms": 2.427042,
+                  "p95_ms": 4.690583
+                },
+                {
+                  "run": 3,
+                  "samples": 300,
+                  "p50_ms": 1.877084,
+                  "p95_ms": 2.431
+                }
+              ],
+              "median_run_p95_ms": 3.666791,
+              "p95_change_pct": 53.46227106005743,
+              "median_run_p95_change_pct": 32.52262355538673
+            },
+            {
+              "endpoint": "GET /api/nodes?within={project}&limit=50",
+              "samples": 900,
+              "p50_ms": 40.446791,
+              "p95_ms": 80.560792,
+              "runs": [
+                {
+                  "run": 1,
+                  "samples": 300,
+                  "p50_ms": 41.325875,
+                  "p95_ms": 73.051834
+                },
+                {
+                  "run": 2,
+                  "samples": 300,
+                  "p50_ms": 45.038583,
+                  "p95_ms": 84.890834
+                },
+                {
+                  "run": 3,
+                  "samples": 300,
+                  "p50_ms": 38.141334,
+                  "p95_ms": 41.588875
+                }
+              ],
+              "median_run_p95_ms": 73.051834,
+              "p95_change_pct": 60.25606662512837,
+              "median_run_p95_change_pct": 45.31882428106984
+            },
+            {
+              "endpoint": "GET /api/nodes/{id}",
+              "samples": 900,
+              "p50_ms": 4.904,
+              "p95_ms": 9.522417,
+              "runs": [
+                {
+                  "run": 1,
+                  "samples": 300,
+                  "p50_ms": 5.20225,
+                  "p95_ms": 9.086125
+                },
+                {
+                  "run": 2,
+                  "samples": 300,
+                  "p50_ms": 5.726625,
+                  "p95_ms": 10.228042
+                },
+                {
+                  "run": 3,
+                  "samples": 300,
+                  "p50_ms": 4.136875,
+                  "p95_ms": 5.931917
+                }
+              ],
+              "median_run_p95_ms": 9.086125,
+              "p95_change_pct": 54.512577327951675,
+              "median_run_p95_change_pct": 46.77926050181791
+            },
+            {
+              "endpoint": "GET /api/search?q=Memory&limit=50",
+              "samples": 900,
+              "p50_ms": 4.011708,
+              "p95_ms": 7.576542,
+              "runs": [
+                {
+                  "run": 1,
+                  "samples": 300,
+                  "p50_ms": 4.250542,
+                  "p95_ms": 7.029375
+                },
+                {
+                  "run": 2,
+                  "samples": 300,
+                  "p50_ms": 4.678542,
+                  "p95_ms": 8.369541
+                },
+                {
+                  "run": 3,
+                  "samples": 300,
+                  "p50_ms": 3.495,
+                  "p95_ms": 4.906542
+                }
+              ],
+              "median_run_p95_ms": 7.029375,
+              "p95_change_pct": 46.125426666908396,
+              "median_run_p95_change_pct": 32.436060477603505
+            },
+            {
+              "endpoint": "GET /api/inbox/messages?wait_ms=0",
+              "samples": 900,
+              "p50_ms": 3.040041,
+              "p95_ms": 6.13125,
+              "runs": [
+                {
+                  "run": 1,
+                  "samples": 300,
+                  "p50_ms": 3.219375,
+                  "p95_ms": 5.060375
+                },
+                {
+                  "run": 2,
+                  "samples": 300,
+                  "p50_ms": 3.648042,
+                  "p95_ms": 6.822916
+                },
+                {
+                  "run": 3,
+                  "samples": 300,
+                  "p50_ms": 2.724542,
+                  "p95_ms": 3.853625
+                }
+              ],
+              "median_run_p95_ms": 5.060375,
+              "p95_change_pct": 48.6814186117005,
+              "median_run_p95_change_pct": 17.87733559193796
+            }
+          ],
+          "memory_reduction_pct": 28.728533670859903,
+          "within_p95_budget": false,
+          "within_median_run_p95_budget": false
+        }
+      },
+      "backend_samples": [
+        {
+          "backend": 1,
+          "exec_mode": "cache statement",
+          "migration": "1354_delivery_webhook_permission_pause.sql",
+          "pid": 21077,
+          "policies": 485,
+          "postgres": "PostgreSQL 18.6 on aarch64-apple-darwin25.6.0, compiled by clang version 21.1.8, 64-bit",
+          "run": 1,
+          "statement_cache_capacity": 512,
+          "variant": "cache_statement_512",
+          "cold": {
+            "plan_bytes": 165072,
+            "used_bytes": 1940000,
+            "total_bytes": 2810824,
+            "catalog_bytes": 754576,
+            "prepared_statements": 0,
+            "cache_memory_context_bytes": 524288
+          },
+          "warm": {
+            "plan_bytes": 20095040,
+            "used_bytes": 19367864,
+            "total_bytes": 29284280,
+            "catalog_bytes": 6380992,
+            "prepared_statements": 65,
+            "cache_memory_context_bytes": 4318144
+          },
+          "latencies": [
+            {
+              "endpoint": "GET /api/me",
+              "p50_ms": 1.962666,
+              "p95_ms": 2.067,
+              "samples": 100
+            },
+            {
+              "endpoint": "GET /api/nodes?within={project}&limit=50",
+              "p50_ms": 40.465125,
+              "p95_ms": 41.01525,
+              "samples": 100
+            },
+            {
+              "endpoint": "GET /api/nodes/{id}",
+              "p50_ms": 4.24475,
+              "p95_ms": 4.534541,
+              "samples": 100
+            },
+            {
+              "endpoint": "GET /api/search?q=Memory&limit=50",
+              "p50_ms": 3.623208,
+              "p95_ms": 3.925958,
+              "samples": 100
+            },
+            {
+              "endpoint": "GET /api/inbox/messages?wait_ms=0",
+              "p50_ms": 2.832084,
+              "p95_ms": 3.107125,
+              "samples": 100
+            }
+          ]
+        },
+        {
+          "backend": 2,
+          "exec_mode": "cache statement",
+          "migration": "1354_delivery_webhook_permission_pause.sql",
+          "pid": 21078,
+          "policies": 485,
+          "postgres": "PostgreSQL 18.6 on aarch64-apple-darwin25.6.0, compiled by clang version 21.1.8, 64-bit",
+          "run": 1,
+          "statement_cache_capacity": 512,
+          "variant": "cache_statement_512",
+          "cold": {
+            "plan_bytes": 165072,
+            "used_bytes": 1940000,
+            "total_bytes": 2802632,
+            "catalog_bytes": 754576,
+            "prepared_statements": 0,
+            "cache_memory_context_bytes": 524288
+          },
+          "warm": {
+            "plan_bytes": 20080392,
+            "used_bytes": 19366608,
+            "total_bytes": 29257296,
+            "catalog_bytes": 6368656,
+            "prepared_statements": 65,
+            "cache_memory_context_bytes": 4318144
+          },
+          "latencies": [
+            {
+              "endpoint": "GET /api/me",
+              "p50_ms": 2.023791,
+              "p95_ms": 3.689583,
+              "samples": 100
+            },
+            {
+              "endpoint": "GET /api/nodes?within={project}&limit=50",
+              "p50_ms": 40.760708,
+              "p95_ms": 77.96575,
+              "samples": 100
+            },
+            {
+              "endpoint": "GET /api/nodes/{id}",
+              "p50_ms": 4.768583,
+              "p95_ms": 9.251709,
+              "samples": 100
+            },
+            {
+              "endpoint": "GET /api/search?q=Memory&limit=50",
+              "p50_ms": 3.928417,
+              "p95_ms": 7.579292,
+              "samples": 100
+            },
+            {
+              "endpoint": "GET /api/inbox/messages?wait_ms=0",
+              "p50_ms": 3.025958,
+              "p95_ms": 4.645792,
+              "samples": 100
+            }
+          ]
+        },
+        {
+          "backend": 3,
+          "exec_mode": "cache statement",
+          "migration": "1354_delivery_webhook_permission_pause.sql",
+          "pid": 21079,
+          "policies": 485,
+          "postgres": "PostgreSQL 18.6 on aarch64-apple-darwin25.6.0, compiled by clang version 21.1.8, 64-bit",
+          "run": 1,
+          "statement_cache_capacity": 512,
+          "variant": "cache_statement_512",
+          "cold": {
+            "plan_bytes": 165072,
+            "used_bytes": 1940000,
+            "total_bytes": 2802632,
+            "catalog_bytes": 754576,
+            "prepared_statements": 0,
+            "cache_memory_context_bytes": 524288
+          },
+          "warm": {
+            "plan_bytes": 20080392,
+            "used_bytes": 19366608,
+            "total_bytes": 29257296,
+            "catalog_bytes": 6368656,
+            "prepared_statements": 65,
+            "cache_memory_context_bytes": 4318144
+          },
+          "latencies": [
+            {
+              "endpoint": "GET /api/me",
+              "p50_ms": 2.065375,
+              "p95_ms": 2.747542,
+              "samples": 100
+            },
+            {
+              "endpoint": "GET /api/nodes?within={project}&limit=50",
+              "p50_ms": 40.501084,
+              "p95_ms": 49.466458,
+              "samples": 100
+            },
+            {
+              "endpoint": "GET /api/nodes/{id}",
+              "p50_ms": 4.849084,
+              "p95_ms": 5.986625,
+              "samples": 100
+            },
+            {
+              "endpoint": "GET /api/search?q=Memory&limit=50",
+              "p50_ms": 4.003708,
+              "p95_ms": 5.345458,
+              "samples": 100
+            },
+            {
+              "endpoint": "GET /api/inbox/messages?wait_ms=0",
+              "p50_ms": 3.010291,
+              "p95_ms": 4.116334,
+              "samples": 100
+            }
+          ]
+        },
+        {
+          "backend": 1,
+          "exec_mode": "cache statement",
+          "migration": "1354_delivery_webhook_permission_pause.sql",
+          "pid": 22292,
+          "policies": 485,
+          "postgres": "PostgreSQL 18.6 on aarch64-apple-darwin25.6.0, compiled by clang version 21.1.8, 64-bit",
+          "run": 1,
+          "statement_cache_capacity": 56,
+          "variant": "cache_statement_56",
+          "cold": {
+            "plan_bytes": 165072,
+            "used_bytes": 1940000,
+            "total_bytes": 2802632,
+            "catalog_bytes": 754576,
+            "prepared_statements": 0,
+            "cache_memory_context_bytes": 524288
+          },
+          "warm": {
+            "plan_bytes": 11679560,
+            "used_bytes": 13965264,
+            "total_bytes": 20856464,
+            "catalog_bytes": 6368656,
+            "prepared_statements": 56,
+            "cache_memory_context_bytes": 4318144
+          },
+          "latencies": [
+            {
+              "endpoint": "GET /api/me",
+              "p50_ms": 2.165208,
+              "p95_ms": 4.138291,
+              "samples": 100
+            },
+            {
+              "endpoint": "GET /api/nodes?within={project}&limit=50",
+              "p50_ms": 41.821375,
+              "p95_ms": 83.058458,
+              "samples": 100
+            },
+            {
+              "endpoint": "GET /api/nodes/{id}",
+              "p50_ms": 5.0975,
+              "p95_ms": 9.765833,
+              "samples": 100
+            },
+            {
+              "endpoint": "GET /api/search?q=Memory&limit=50",
+              "p50_ms": 4.188667,
+              "p95_ms": 8.066917,
+              "samples": 100
+            },
+            {
+              "endpoint": "GET /api/inbox/messages?wait_ms=0",
+              "p50_ms": 3.156917,
+              "p95_ms": 6.403084,
+              "samples": 100
+            }
+          ]
+        },
+        {
+          "backend": 2,
+          "exec_mode": "cache statement",
+          "migration": "1354_delivery_webhook_permission_pause.sql",
+          "pid": 22293,
+          "policies": 485,
+          "postgres": "PostgreSQL 18.6 on aarch64-apple-darwin25.6.0, compiled by clang version 21.1.8, 64-bit",
+          "run": 1,
+          "statement_cache_capacity": 56,
+          "variant": "cache_statement_56",
+          "cold": {
+            "plan_bytes": 165072,
+            "used_bytes": 1940000,
+            "total_bytes": 2802632,
+            "catalog_bytes": 754576,
+            "prepared_statements": 0,
+            "cache_memory_context_bytes": 524288
+          },
+          "warm": {
+            "plan_bytes": 11679560,
+            "used_bytes": 13965280,
+            "total_bytes": 20856464,
+            "catalog_bytes": 6368656,
+            "prepared_statements": 56,
+            "cache_memory_context_bytes": 4318144
+          },
+          "latencies": [
+            {
+              "endpoint": "GET /api/me",
+              "p50_ms": 2.185709,
+              "p95_ms": 2.986709,
+              "samples": 100
+            },
+            {
+              "endpoint": "GET /api/nodes?within={project}&limit=50",
+              "p50_ms": 40.682042,
+              "p95_ms": 65.366542,
+              "samples": 100
+            },
+            {
+              "endpoint": "GET /api/nodes/{id}",
+              "p50_ms": 5.216292,
+              "p95_ms": 9.447125,
+              "samples": 100
+            },
+            {
+              "endpoint": "GET /api/search?q=Memory&limit=50",
+              "p50_ms": 4.250542,
+              "p95_ms": 5.922709,
+              "samples": 100
+            },
+            {
+              "endpoint": "GET /api/inbox/messages?wait_ms=0",
+              "p50_ms": 3.252625,
+              "p95_ms": 4.642625,
+              "samples": 100
+            }
+          ]
+        },
+        {
+          "backend": 3,
+          "exec_mode": "cache statement",
+          "migration": "1354_delivery_webhook_permission_pause.sql",
+          "pid": 22294,
+          "policies": 485,
+          "postgres": "PostgreSQL 18.6 on aarch64-apple-darwin25.6.0, compiled by clang version 21.1.8, 64-bit",
+          "run": 1,
+          "statement_cache_capacity": 56,
+          "variant": "cache_statement_56",
+          "cold": {
+            "plan_bytes": 165072,
+            "used_bytes": 1940000,
+            "total_bytes": 2802632,
+            "catalog_bytes": 754576,
+            "prepared_statements": 0,
+            "cache_memory_context_bytes": 524288
+          },
+          "warm": {
+            "plan_bytes": 11688200,
+            "used_bytes": 13975984,
+            "total_bytes": 20865104,
+            "catalog_bytes": 6368656,
+            "prepared_statements": 56,
+            "cache_memory_context_bytes": 4318144
+          },
+          "latencies": [
+            {
+              "endpoint": "GET /api/me",
+              "p50_ms": 2.141041,
+              "p95_ms": 3.237166,
+              "samples": 100
+            },
+            {
+              "endpoint": "GET /api/nodes?within={project}&limit=50",
+              "p50_ms": 42.310833,
+              "p95_ms": 63.221916,
+              "samples": 100
+            },
+            {
+              "endpoint": "GET /api/nodes/{id}",
+              "p50_ms": 5.220292,
+              "p95_ms": 7.759292,
+              "samples": 100
+            },
+            {
+              "endpoint": "GET /api/search?q=Memory&limit=50",
+              "p50_ms": 4.274084,
+              "p95_ms": 5.960833,
+              "samples": 100
+            },
+            {
+              "endpoint": "GET /api/inbox/messages?wait_ms=0",
+              "p50_ms": 3.2385,
+              "p95_ms": 4.509875,
+              "samples": 100
+            }
+          ]
+        },
+        {
+          "backend": 1,
+          "exec_mode": "cache statement",
+          "migration": "1354_delivery_webhook_permission_pause.sql",
+          "pid": 23841,
+          "policies": 485,
+          "postgres": "PostgreSQL 18.6 on aarch64-apple-darwin25.6.0, compiled by clang version 21.1.8, 64-bit",
+          "run": 2,
+          "statement_cache_capacity": 56,
+          "variant": "cache_statement_56",
+          "cold": {
+            "plan_bytes": 165072,
+            "used_bytes": 1940000,
+            "total_bytes": 2802632,
+            "catalog_bytes": 754576,
+            "prepared_statements": 0,
+            "cache_memory_context_bytes": 524288
+          },
+          "warm": {
+            "plan_bytes": 11679560,
+            "used_bytes": 13965280,
+            "total_bytes": 20856464,
+            "catalog_bytes": 6368656,
+            "prepared_statements": 56,
+            "cache_memory_context_bytes": 4318144
+          },
+          "latencies": [
+            {
+              "endpoint": "GET /api/me",
+              "p50_ms": 3.521291,
+              "p95_ms": 4.915583,
+              "samples": 100
+            },
+            {
+              "endpoint": "GET /api/nodes?within={project}&limit=50",
+              "p50_ms": 75.330375,
+              "p95_ms": 88.054583,
+              "samples": 100
+            },
+            {
+              "endpoint": "GET /api/nodes/{id}",
+              "p50_ms": 8.416958,
+              "p95_ms": 10.825083,
+              "samples": 100
+            },
+            {
+              "endpoint": "GET /api/search?q=Memory&limit=50",
+              "p50_ms": 6.684083,
+              "p95_ms": 8.869625,
+              "samples": 100
+            },
+            {
+              "endpoint": "GET /api/inbox/messages?wait_ms=0",
+              "p50_ms": 5.009959,
+              "p95_ms": 7.071209,
+              "samples": 100
+            }
+          ]
+        },
+        {
+          "backend": 2,
+          "exec_mode": "cache statement",
+          "migration": "1354_delivery_webhook_permission_pause.sql",
+          "pid": 23842,
+          "policies": 485,
+          "postgres": "PostgreSQL 18.6 on aarch64-apple-darwin25.6.0, compiled by clang version 21.1.8, 64-bit",
+          "run": 2,
+          "statement_cache_capacity": 56,
+          "variant": "cache_statement_56",
+          "cold": {
+            "plan_bytes": 165072,
+            "used_bytes": 1940000,
+            "total_bytes": 2802632,
+            "catalog_bytes": 754576,
+            "prepared_statements": 0,
+            "cache_memory_context_bytes": 524288
+          },
+          "warm": {
+            "plan_bytes": 11679560,
+            "used_bytes": 13965280,
+            "total_bytes": 20856464,
+            "catalog_bytes": 6368656,
+            "prepared_statements": 56,
+            "cache_memory_context_bytes": 4318144
+          },
+          "latencies": [
+            {
+              "endpoint": "GET /api/me",
+              "p50_ms": 2.124042,
+              "p95_ms": 3.399875,
+              "samples": 100
+            },
+            {
+              "endpoint": "GET /api/nodes?within={project}&limit=50",
+              "p50_ms": 43.589042,
+              "p95_ms": 74.99,
+              "samples": 100
+            },
+            {
+              "endpoint": "GET /api/nodes/{id}",
+              "p50_ms": 5.094875,
+              "p95_ms": 8.541125,
+              "samples": 100
+            },
+            {
+              "endpoint": "GET /api/search?q=Memory&limit=50",
+              "p50_ms": 4.092417,
+              "p95_ms": 6.914333,
+              "samples": 100
+            },
+            {
+              "endpoint": "GET /api/inbox/messages?wait_ms=0",
+              "p50_ms": 3.0875,
+              "p95_ms": 5.036417,
+              "samples": 100
+            }
+          ]
+        },
+        {
+          "backend": 3,
+          "exec_mode": "cache statement",
+          "migration": "1354_delivery_webhook_permission_pause.sql",
+          "pid": 23843,
+          "policies": 485,
+          "postgres": "PostgreSQL 18.6 on aarch64-apple-darwin25.6.0, compiled by clang version 21.1.8, 64-bit",
+          "run": 2,
+          "statement_cache_capacity": 56,
+          "variant": "cache_statement_56",
+          "cold": {
+            "plan_bytes": 165072,
+            "used_bytes": 1940000,
+            "total_bytes": 2802632,
+            "catalog_bytes": 754576,
+            "prepared_statements": 0,
+            "cache_memory_context_bytes": 524288
+          },
+          "warm": {
+            "plan_bytes": 11679560,
+            "used_bytes": 13965280,
+            "total_bytes": 20856464,
+            "catalog_bytes": 6368656,
+            "prepared_statements": 56,
+            "cache_memory_context_bytes": 4318144
+          },
+          "latencies": [
+            {
+              "endpoint": "GET /api/me",
+              "p50_ms": 2.219958,
+              "p95_ms": 2.81975,
+              "samples": 100
+            },
+            {
+              "endpoint": "GET /api/nodes?within={project}&limit=50",
+              "p50_ms": 40.022125,
+              "p95_ms": 46.902708,
+              "samples": 100
+            },
+            {
+              "endpoint": "GET /api/nodes/{id}",
+              "p50_ms": 5.095042,
+              "p95_ms": 6.421625,
+              "samples": 100
+            },
+            {
+              "endpoint": "GET /api/search?q=Memory&limit=50",
+              "p50_ms": 4.199,
+              "p95_ms": 5.493416,
+              "samples": 100
+            },
+            {
+              "endpoint": "GET /api/inbox/messages?wait_ms=0",
+              "p50_ms": 3.316666,
+              "p95_ms": 4.191584,
+              "samples": 100
+            }
+          ]
+        },
+        {
+          "backend": 1,
+          "exec_mode": "cache statement",
+          "migration": "1354_delivery_webhook_permission_pause.sql",
+          "pid": 25865,
+          "policies": 485,
+          "postgres": "PostgreSQL 18.6 on aarch64-apple-darwin25.6.0, compiled by clang version 21.1.8, 64-bit",
+          "run": 2,
+          "statement_cache_capacity": 512,
+          "variant": "cache_statement_512",
+          "cold": {
+            "plan_bytes": 165072,
+            "used_bytes": 1940000,
+            "total_bytes": 2802632,
+            "catalog_bytes": 754576,
+            "prepared_statements": 0,
+            "cache_memory_context_bytes": 524288
+          },
+          "warm": {
+            "plan_bytes": 20185152,
+            "used_bytes": 19452848,
+            "total_bytes": 29362056,
+            "catalog_bytes": 6368656,
+            "prepared_statements": 67,
+            "cache_memory_context_bytes": 4318144
+          },
+          "latencies": [
+            {
+              "endpoint": "GET /api/me",
+              "p50_ms": 2.130666,
+              "p95_ms": 2.85025,
+              "samples": 100
+            },
+            {
+              "endpoint": "GET /api/nodes?within={project}&limit=50",
+              "p50_ms": 39.965875,
+              "p95_ms": 42.041583,
+              "samples": 100
+            },
+            {
+              "endpoint": "GET /api/nodes/{id}",
+              "p50_ms": 4.933416,
+              "p95_ms": 6.135459,
+              "samples": 100
+            },
+            {
+              "endpoint": "GET /api/search?q=Memory&limit=50",
+              "p50_ms": 4.034625,
+              "p95_ms": 5.1375,
+              "samples": 100
+            },
+            {
+              "endpoint": "GET /api/inbox/messages?wait_ms=0",
+              "p50_ms": 3.143875,
+              "p95_ms": 4.119958,
+              "samples": 100
+            }
+          ]
+        },
+        {
+          "backend": 2,
+          "exec_mode": "cache statement",
+          "migration": "1354_delivery_webhook_permission_pause.sql",
+          "pid": 25866,
+          "policies": 485,
+          "postgres": "PostgreSQL 18.6 on aarch64-apple-darwin25.6.0, compiled by clang version 21.1.8, 64-bit",
+          "run": 2,
+          "statement_cache_capacity": 512,
+          "variant": "cache_statement_512",
+          "cold": {
+            "plan_bytes": 165072,
+            "used_bytes": 1940000,
+            "total_bytes": 2802632,
+            "catalog_bytes": 754576,
+            "prepared_statements": 0,
+            "cache_memory_context_bytes": 524288
+          },
+          "warm": {
+            "plan_bytes": 20078656,
+            "used_bytes": 19367184,
+            "total_bytes": 29255560,
+            "catalog_bytes": 6368656,
+            "prepared_statements": 65,
+            "cache_memory_context_bytes": 4318144
+          },
+          "latencies": [
+            {
+              "endpoint": "GET /api/me",
+              "p50_ms": 2.210125,
+              "p95_ms": 2.597375,
+              "samples": 100
+            },
+            {
+              "endpoint": "GET /api/nodes?within={project}&limit=50",
+              "p50_ms": 39.69225,
+              "p95_ms": 40.674625,
+              "samples": 100
+            },
+            {
+              "endpoint": "GET /api/nodes/{id}",
+              "p50_ms": 4.95325,
+              "p95_ms": 5.875125,
+              "samples": 100
+            },
+            {
+              "endpoint": "GET /api/search?q=Memory&limit=50",
+              "p50_ms": 4.089833,
+              "p95_ms": 4.981291,
+              "samples": 100
+            },
+            {
+              "endpoint": "GET /api/inbox/messages?wait_ms=0",
+              "p50_ms": 3.145125,
+              "p95_ms": 4.04175,
+              "samples": 100
+            }
+          ]
+        },
+        {
+          "backend": 3,
+          "exec_mode": "cache statement",
+          "migration": "1354_delivery_webhook_permission_pause.sql",
+          "pid": 25867,
+          "policies": 485,
+          "postgres": "PostgreSQL 18.6 on aarch64-apple-darwin25.6.0, compiled by clang version 21.1.8, 64-bit",
+          "run": 2,
+          "statement_cache_capacity": 512,
+          "variant": "cache_statement_512",
+          "cold": {
+            "plan_bytes": 165072,
+            "used_bytes": 1940000,
+            "total_bytes": 2802632,
+            "catalog_bytes": 754576,
+            "prepared_statements": 0,
+            "cache_memory_context_bytes": 524288
+          },
+          "warm": {
+            "plan_bytes": 20078656,
+            "used_bytes": 19367184,
+            "total_bytes": 29255560,
+            "catalog_bytes": 6368656,
+            "prepared_statements": 65,
+            "cache_memory_context_bytes": 4318144
+          },
+          "latencies": [
+            {
+              "endpoint": "GET /api/me",
+              "p50_ms": 2.158334,
+              "p95_ms": 4.233542,
+              "samples": 100
+            },
+            {
+              "endpoint": "GET /api/nodes?within={project}&limit=50",
+              "p50_ms": 43.280667,
+              "p95_ms": 95.807208,
+              "samples": 100
+            },
+            {
+              "endpoint": "GET /api/nodes/{id}",
+              "p50_ms": 5.018958,
+              "p95_ms": 10.56375,
+              "samples": 100
+            },
+            {
+              "endpoint": "GET /api/search?q=Memory&limit=50",
+              "p50_ms": 4.164334,
+              "p95_ms": 7.945459,
+              "samples": 100
+            },
+            {
+              "endpoint": "GET /api/inbox/messages?wait_ms=0",
+              "p50_ms": 3.210625,
+              "p95_ms": 6.530459,
+              "samples": 100
+            }
+          ]
+        },
+        {
+          "backend": 1,
+          "exec_mode": "cache statement",
+          "migration": "1354_delivery_webhook_permission_pause.sql",
+          "pid": 27485,
+          "policies": 485,
+          "postgres": "PostgreSQL 18.6 on aarch64-apple-darwin25.6.0, compiled by clang version 21.1.8, 64-bit",
+          "run": 3,
+          "statement_cache_capacity": 56,
+          "variant": "cache_statement_56",
+          "cold": {
+            "plan_bytes": 165072,
+            "used_bytes": 1940000,
+            "total_bytes": 2802632,
+            "catalog_bytes": 754576,
+            "prepared_statements": 0,
+            "cache_memory_context_bytes": 524288
+          },
+          "warm": {
+            "plan_bytes": 11679560,
+            "used_bytes": 13965264,
+            "total_bytes": 20856464,
+            "catalog_bytes": 6368656,
+            "prepared_statements": 56,
+            "cache_memory_context_bytes": 4318144
+          },
+          "latencies": [
+            {
+              "endpoint": "GET /api/me",
+              "p50_ms": 2.062208,
+              "p95_ms": 2.713875,
+              "samples": 100
+            },
+            {
+              "endpoint": "GET /api/nodes?within={project}&limit=50",
+              "p50_ms": 39.766083,
+              "p95_ms": 48.299959,
+              "samples": 100
+            },
+            {
+              "endpoint": "GET /api/nodes/{id}",
+              "p50_ms": 4.787667,
+              "p95_ms": 6.83425,
+              "samples": 100
+            },
+            {
+              "endpoint": "GET /api/search?q=Memory&limit=50",
+              "p50_ms": 3.985083,
+              "p95_ms": 5.224791,
+              "samples": 100
+            },
+            {
+              "endpoint": "GET /api/inbox/messages?wait_ms=0",
+              "p50_ms": 3.006416,
+              "p95_ms": 4.241334,
+              "samples": 100
+            }
+          ]
+        },
+        {
+          "backend": 2,
+          "exec_mode": "cache statement",
+          "migration": "1354_delivery_webhook_permission_pause.sql",
+          "pid": 27486,
+          "policies": 485,
+          "postgres": "PostgreSQL 18.6 on aarch64-apple-darwin25.6.0, compiled by clang version 21.1.8, 64-bit",
+          "run": 3,
+          "statement_cache_capacity": 56,
+          "variant": "cache_statement_56",
+          "cold": {
+            "plan_bytes": 165072,
+            "used_bytes": 1940000,
+            "total_bytes": 2802632,
+            "catalog_bytes": 754576,
+            "prepared_statements": 0,
+            "cache_memory_context_bytes": 524288
+          },
+          "warm": {
+            "plan_bytes": 11679560,
+            "used_bytes": 13965264,
+            "total_bytes": 20856464,
+            "catalog_bytes": 6368656,
+            "prepared_statements": 56,
+            "cache_memory_context_bytes": 4318144
+          },
+          "latencies": [
+            {
+              "endpoint": "GET /api/me",
+              "p50_ms": 1.847375,
+              "p95_ms": 2.065375,
+              "samples": 100
+            },
+            {
+              "endpoint": "GET /api/nodes?within={project}&limit=50",
+              "p50_ms": 38.080083,
+              "p95_ms": 39.336667,
+              "samples": 100
+            },
+            {
+              "endpoint": "GET /api/nodes/{id}",
+              "p50_ms": 4.085667,
+              "p95_ms": 4.515333,
+              "samples": 100
+            },
+            {
+              "endpoint": "GET /api/search?q=Memory&limit=50",
+              "p50_ms": 3.429791,
+              "p95_ms": 4.141666,
+              "samples": 100
+            },
+            {
+              "endpoint": "GET /api/inbox/messages?wait_ms=0",
+              "p50_ms": 2.69675,
+              "p95_ms": 2.930667,
+              "samples": 100
+            }
+          ]
+        },
+        {
+          "backend": 3,
+          "exec_mode": "cache statement",
+          "migration": "1354_delivery_webhook_permission_pause.sql",
+          "pid": 27487,
+          "policies": 485,
+          "postgres": "PostgreSQL 18.6 on aarch64-apple-darwin25.6.0, compiled by clang version 21.1.8, 64-bit",
+          "run": 3,
+          "statement_cache_capacity": 56,
+          "variant": "cache_statement_56",
+          "cold": {
+            "plan_bytes": 165072,
+            "used_bytes": 1940000,
+            "total_bytes": 2802632,
+            "catalog_bytes": 754576,
+            "prepared_statements": 0,
+            "cache_memory_context_bytes": 524288
+          },
+          "warm": {
+            "plan_bytes": 11736904,
+            "used_bytes": 14001192,
+            "total_bytes": 20913808,
+            "catalog_bytes": 6368656,
+            "prepared_statements": 56,
+            "cache_memory_context_bytes": 4318144
+          },
+          "latencies": [
+            {
+              "endpoint": "GET /api/me",
+              "p50_ms": 1.853958,
+              "p95_ms": 1.967291,
+              "samples": 100
+            },
+            {
+              "endpoint": "GET /api/nodes?within={project}&limit=50",
+              "p50_ms": 37.930792,
+              "p95_ms": 39.130709,
+              "samples": 100
+            },
+            {
+              "endpoint": "GET /api/nodes/{id}",
+              "p50_ms": 4.072958,
+              "p95_ms": 4.411834,
+              "samples": 100
+            },
+            {
+              "endpoint": "GET /api/search?q=Memory&limit=50",
+              "p50_ms": 3.444625,
+              "p95_ms": 4.093417,
+              "samples": 100
+            },
+            {
+              "endpoint": "GET /api/inbox/messages?wait_ms=0",
+              "p50_ms": 2.696209,
+              "p95_ms": 3.046167,
+              "samples": 100
+            }
+          ]
+        },
+        {
+          "backend": 1,
+          "exec_mode": "cache statement",
+          "migration": "1354_delivery_webhook_permission_pause.sql",
+          "pid": 28863,
+          "policies": 485,
+          "postgres": "PostgreSQL 18.6 on aarch64-apple-darwin25.6.0, compiled by clang version 21.1.8, 64-bit",
+          "run": 3,
+          "statement_cache_capacity": 512,
+          "variant": "cache_statement_512",
+          "cold": {
+            "plan_bytes": 165072,
+            "used_bytes": 1940000,
+            "total_bytes": 2802632,
+            "catalog_bytes": 754576,
+            "prepared_statements": 0,
+            "cache_memory_context_bytes": 524288
+          },
+          "warm": {
+            "plan_bytes": 20103232,
+            "used_bytes": 19374240,
+            "total_bytes": 29280136,
+            "catalog_bytes": 6368656,
+            "prepared_statements": 66,
+            "cache_memory_context_bytes": 4318144
+          },
+          "latencies": [
+            {
+              "endpoint": "GET /api/me",
+              "p50_ms": 1.8415,
+              "p95_ms": 1.951333,
+              "samples": 100
+            },
+            {
+              "endpoint": "GET /api/nodes?within={project}&limit=50",
+              "p50_ms": 37.790958,
+              "p95_ms": 38.397584,
+              "samples": 100
+            },
+            {
+              "endpoint": "GET /api/nodes/{id}",
+              "p50_ms": 4.038625,
+              "p95_ms": 4.315167,
+              "samples": 100
+            },
+            {
+              "endpoint": "GET /api/search?q=Memory&limit=50",
+              "p50_ms": 3.440083,
+              "p95_ms": 3.667875,
+              "samples": 100
+            },
+            {
+              "endpoint": "GET /api/inbox/messages?wait_ms=0",
+              "p50_ms": 2.694667,
+              "p95_ms": 2.967958,
+              "samples": 100
+            }
+          ]
+        },
+        {
+          "backend": 2,
+          "exec_mode": "cache statement",
+          "migration": "1354_delivery_webhook_permission_pause.sql",
+          "pid": 28864,
+          "policies": 485,
+          "postgres": "PostgreSQL 18.6 on aarch64-apple-darwin25.6.0, compiled by clang version 21.1.8, 64-bit",
+          "run": 3,
+          "statement_cache_capacity": 512,
+          "variant": "cache_statement_512",
+          "cold": {
+            "plan_bytes": 165072,
+            "used_bytes": 1940000,
+            "total_bytes": 2802632,
+            "catalog_bytes": 754576,
+            "prepared_statements": 0,
+            "cache_memory_context_bytes": 524288
+          },
+          "warm": {
+            "plan_bytes": 20078656,
+            "used_bytes": 19367216,
+            "total_bytes": 29255560,
+            "catalog_bytes": 6368656,
+            "prepared_statements": 65,
+            "cache_memory_context_bytes": 4318144
+          },
+          "latencies": [
+            {
+              "endpoint": "GET /api/me",
+              "p50_ms": 1.853291,
+              "p95_ms": 1.993083,
+              "samples": 100
+            },
+            {
+              "endpoint": "GET /api/nodes?within={project}&limit=50",
+              "p50_ms": 37.729667,
+              "p95_ms": 38.4005,
+              "samples": 100
+            },
+            {
+              "endpoint": "GET /api/nodes/{id}",
+              "p50_ms": 4.068,
+              "p95_ms": 4.444584,
+              "samples": 100
+            },
+            {
+              "endpoint": "GET /api/search?q=Memory&limit=50",
+              "p50_ms": 3.448333,
+              "p95_ms": 3.681708,
+              "samples": 100
+            },
+            {
+              "endpoint": "GET /api/inbox/messages?wait_ms=0",
+              "p50_ms": 2.710875,
+              "p95_ms": 2.913625,
+              "samples": 100
+            }
+          ]
+        },
+        {
+          "backend": 3,
+          "exec_mode": "cache statement",
+          "migration": "1354_delivery_webhook_permission_pause.sql",
+          "pid": 28865,
+          "policies": 485,
+          "postgres": "PostgreSQL 18.6 on aarch64-apple-darwin25.6.0, compiled by clang version 21.1.8, 64-bit",
+          "run": 3,
+          "statement_cache_capacity": 512,
+          "variant": "cache_statement_512",
+          "cold": {
+            "plan_bytes": 165072,
+            "used_bytes": 1940000,
+            "total_bytes": 2802632,
+            "catalog_bytes": 754576,
+            "prepared_statements": 0,
+            "cache_memory_context_bytes": 524288
+          },
+          "warm": {
+            "plan_bytes": 20078656,
+            "used_bytes": 19367216,
+            "total_bytes": 29255560,
+            "catalog_bytes": 6368656,
+            "prepared_statements": 65,
+            "cache_memory_context_bytes": 4318144
+          },
+          "latencies": [
+            {
+              "endpoint": "GET /api/me",
+              "p50_ms": 1.827708,
+              "p95_ms": 1.930125,
+              "samples": 100
+            },
+            {
+              "endpoint": "GET /api/nodes?within={project}&limit=50",
+              "p50_ms": 37.6055,
+              "p95_ms": 38.044708,
+              "samples": 100
+            },
+            {
+              "endpoint": "GET /api/nodes/{id}",
+              "p50_ms": 3.994667,
+              "p95_ms": 4.37775,
+              "samples": 100
+            },
+            {
+              "endpoint": "GET /api/search?q=Memory&limit=50",
+              "p50_ms": 3.418084,
+              "p95_ms": 3.603625,
+              "samples": 100
+            },
+            {
+              "endpoint": "GET /api/inbox/messages?wait_ms=0",
+              "p50_ms": 2.687791,
+              "p95_ms": 2.981167,
+              "samples": 100
+            }
+          ]
+        }
+      ]
+    }
+  ],
+  "decision": {
+    "mode": "cache_statement",
+    "statement_cache_capacity": 512,
+    "production_code_change": false,
+    "reason": "Every measured lower-memory alternative breaches the +10% pooled p95 limit on at least one endpoint versus its contemporaneous baseline. Retain the lowest-memory admissible tested configuration: today's default. Native pgx URL/keyword/service configuration remains available and is covered by a real-connection behavior test.",
+    "eligible_variants": {
+      "primary": [
+        "cache_statement_512"
+      ],
+      "confirmation_48": [
+        "cache_statement_512"
+      ],
+      "confirmation_56": [
+        "cache_statement_512"
+      ]
+    },
+    "scope": "Measurement and config coverage are complete. Production memory remediation is not delivered; coordinator/LEAD chooses any broader design or changed latency tradeoff. No claim of the OPS <70% production check."
+  },
+  "validation": {
+    "primary_benchmark": "PASS, 416.243s; 27 backend samples; outer runner exit 0. Original template exit-watcher race was corrected for the experiment; all owned residue subsequently removed.",
+    "confirmation_48_benchmark": "PASS, 125.038s; 18 backend samples; runner exit 0; persistent test-cluster maintenance fixes the experiment watcher cleanup race.",
+    "confirmation_56_benchmark": "PASS, 214.158s; 18 backend samples; runner exit 0.",
+    "configuration_test": "PASS: TestPoolQueryExecutionConfigurationApplied, internal/db 0.618s, approved mbp2606 lane, 98dc20289b. Checks default and explicit modes/capacities on real restricted connections; URL, keyword and service precedence; retained server statements.",
+    "static": "UNPROVEN: ci-static-remote.sh refused twice with exit 3 on source 200fedba3: remote static check paused at night (night protocol; mbp2606 is shared with the CI pool). No heavy local fallback. Coordinator PR CI must complete the static check.",
+    "review_gate": "not run; coordinator-owned",
+    "origin_push": "not performed",
+    "deploy": "not performed",
+    "owned_rehearsal_cleanup": "PASS: all three exact sealed templates and their restricted roles removed through the approved guarded lane, internal/cli 0.640s. One-off cleanup benchmark removed from final source. Confirmation experiments use the persistent maintenance database on the same local test cluster and clean up successfully."
+  },
+  "raw_evidence": {
+    "path": "scripts/aeon-1382-backend-memory.raw.json.gz",
+    "compression": "gzip",
+    "sha256": "cf97c34caacbdc2abd09738c513447565c4f5b28076e6a1624965c4ed9bdaeec",
+    "uncompressed_sha256": "421c26d6ffd3eb8d90f93f6b934a9aef26a0aa747e04c8bc8f9767b920ed080c",
+    "backend_samples": 63,
+    "timing_samples": 31500,
+    "contents": "All per-backend cold/warm context-name/category breakdowns and complete sorted HTTP timing vectors. No SQL idents, token values, payloads, DSNs, or operator credentials."
+  },
+  "reproduction": [
+    "/Users/markus/.aeon/lead/aeon/remote-test.sh <worktree> ./internal/cli -run '^$' -bench '^BenchmarkBackendMemory$' -benchtime=1x -count=1",
+    "/Users/markus/.aeon/lead/aeon/remote-test.sh <worktree> ./internal/db -run TestPoolQueryExecutionConfigurationApplied -count=1",
+    "/Users/markus/.aeon/lead/aeon/ci-static-remote.sh"
+  ]
+}

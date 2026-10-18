@@ -14,6 +14,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -23,15 +24,25 @@ import (
 	"github.com/inspr-at/paimos/internal/agentactivity"
 	"github.com/inspr-at/paimos/internal/agentsetup"
 	"github.com/inspr-at/paimos/internal/capacity"
+	"github.com/inspr-at/paimos/internal/hostcapacity"
 	"github.com/inspr-at/paimos/internal/localjournal"
 	"github.com/inspr-at/paimos/internal/openrouter"
 	"github.com/inspr-at/paimos/internal/ownedprocess"
 	"github.com/inspr-at/paimos/internal/piprobe"
 	"github.com/inspr-at/paimos/internal/servicetier"
 	"github.com/inspr-at/paimos/internal/sessionusage"
+	"github.com/inspr-at/paimos/internal/usageprobe"
 )
 
 type Config struct {
+	NativeSessions    *NativeSessionConfig
+	RoutineWorkspaces *RoutineWorkspaceConfig
+	LeadRuntime       *LeadRuntimeConfig
+	// Internal executor wiring only. Nil yields an explicit capture WAIT;
+	// coding adapters submit jobs rather than starting a browser themselves.
+	BrowserCaptures   func(agentsetup.RoutineGrant) BrowserCaptureRequester
+	Power             Power
+	UsageProbes       usageprobe.Probe
 	StepUps           *StepUpManager
 	MaxTokens         int64
 	MaxTurns          int64
@@ -50,6 +61,8 @@ type Config struct {
 	// PollDiagnostic receives bounded cause codes on changes and 15-minute
 	// reminders only, never raw errors or bindings.
 	PollDiagnostic func(string)
+	// VerificationDiagnostic contains IDs and bounded lifecycle codes only.
+	VerificationDiagnostic func(run, account, stage, reason string)
 }
 
 type replay struct {
@@ -60,12 +73,20 @@ type replay struct {
 }
 
 // Record contains only local process provenance and bounded control digests.
-// The journal is AEON v2; classic journals are never opened implicitly.
+// RecordSchemaVersion pins its persisted schema; classic is never opened implicitly.
 type Record struct {
-	AutomaticReview       bool   `json:"automatic_review,omitempty"`
-	VerificationReason    string `json:"verification_reason,omitempty"`
-	BudgetStopReason      string `json:"budget_stop_reason,omitempty"`
-	BudgetStopUnconfirmed bool   `json:"budget_stop_unconfirmed,omitempty"`
+	RoutineWorkspace      *RoutineWorkspace            `json:"routine_workspace,omitempty"`
+	LedgerGroup           string                       `json:"ledger_group,omitempty"`
+	LedgerGeneration      string                       `json:"ledger_generation,omitempty"`
+	RouteCandidates       []agentsetup.LedgerCandidate `json:"route_candidates,omitempty"`
+	ProcessGroupID        int                          `json:"process_group_id,omitempty"`
+	ProcessStartedAt      time.Time                    `json:"process_started_at,omitzero"`
+	WorkerPickup          *WorkerPickup                `json:"worker_pickup,omitempty"`
+	RecoveryReports       []RecoveryReport             `json:"recovery_reports,omitempty"`
+	AutomaticReview       bool                         `json:"automatic_review,omitempty"`
+	VerificationReason    string                       `json:"verification_reason,omitempty"`
+	BudgetStopReason      string                       `json:"budget_stop_reason,omitempty"`
+	BudgetStopUnconfirmed bool                         `json:"budget_stop_unconfirmed,omitempty"`
 	// Only launchPrepared proves that adapter.Start has never been called.
 	// Empty is a legacy record, never evidence that no child was forked.
 	LaunchState   string `json:"launch_state,omitempty"`
@@ -76,10 +97,15 @@ type Record struct {
 	ExitObserved  bool   `json:"exit_observed,omitempty"`
 	// LaunchRev and LaunchDefaultRev are the workspace HEAD and the default
 	// branch's commit at launch, the base of the run's commit evidence.
-	LaunchBranch     string            `json:"launch_branch,omitempty"`
-	LaunchRev        string            `json:"launch_rev,omitempty"`
-	LaunchDefaultRev string            `json:"launch_default_rev,omitempty"`
-	Pending          []Telemetry       `json:"pending,omitempty"`
+	LaunchBranch     string      `json:"launch_branch,omitempty"`
+	LaunchRev        string      `json:"launch_rev,omitempty"`
+	LaunchDefaultRev string      `json:"launch_default_rev,omitempty"`
+	Pending          []Telemetry `json:"pending,omitempty"`
+	// Rejected reports remain durable evidence, separate from the retry outbox.
+	DeadLetters      []Telemetry       `json:"dead_letters,omitempty"`
+	ReportRejections int               `json:"report_rejections,omitempty"`
+	TerminalRecovery bool              `json:"terminal_recovery,omitempty"`
+	ReportParked     bool              `json:"report_parked,omitempty"`
 	SettlementGap    bool              `json:"settlement_gap,omitempty"`
 	TenantID         string            `json:"tenant_id"`
 	PrincipalID      string            `json:"principal_id"`
@@ -94,6 +120,8 @@ type Record struct {
 }
 
 type owned struct {
+	chat                                           *sessionChat // ephemeral; excluded from Record and checkpoints
+	relay                                          *ChatRelay   // ephemeral server relay of chat; never journaled
 	budgetMu                                       sync.Mutex
 	budgetProcess                                  Process
 	budgetTools                                    *managedToolServer
@@ -103,32 +131,35 @@ type owned struct {
 	budgetReason                                   string
 	budgetStopStarted, budgetStopUnconfirmed       bool
 
-	deadlineExpired atomic.Bool
-	mu              sync.Mutex
-	harnessMu       sync.Mutex
-	record          Record
-	harness         HarnessSession
-	heartbeatSeq    int64
-	pauseWakeAt     time.Time
-	metadataSeq     uint64
-	metadataPending []harnessMetadata
-	usage           *sessionUsageReporter
-	modelReports    map[string]bool // successful content-free evidence IDs, bounded per run
-	capacityPending map[string]capacity.Reading
-	vendorLimit     *capacity.LimitHit
-	inboxCapable    bool
-	pending         []HarnessControl
-	process         Process
-	tools           *managedToolServer
-	replies         map[string]string // delivered message ID -> sender principal
-	replyOrder      []string
-	doneRequested   bool
-	monitorDone     chan struct{}
-	stopRequested   bool
-	forceRequested  bool
-	harnessArchived bool
-	protocolFailed  bool
-	protocolStopped bool
+	deadlineExpired  atomic.Bool
+	mu               sync.Mutex
+	harnessMu        sync.Mutex
+	record           Record
+	harness          HarnessSession
+	heartbeatSeq     int64
+	pauseWakeAt      time.Time
+	metadataSeq      uint64
+	metadataPending  []harnessMetadata
+	usage            *sessionUsageReporter
+	modelReports     map[string]bool // successful content-free evidence IDs, bounded per run
+	capacityPending  map[string]capacity.Reading
+	vendorLimit      *capacity.LimitHit
+	inboxCapable     bool
+	queueInput       bool // Owned ACP transport; input is applied only after turn end.
+	pending          []HarnessControl
+	process          Process
+	tools            *managedToolServer
+	replies          map[string]InboxReplyTarget // delivered message ID -> authenticated reply target
+	replyOrder       []string
+	doneRequested    bool
+	monitorDone      chan struct{}
+	harnessWake      chan struct{}
+	harnessConnected bool // Advisory only; claims still check current generation/lease.
+	stopRequested    bool
+	forceRequested   bool
+	harnessArchived  bool
+	protocolFailed   bool
+	protocolStopped  bool
 }
 
 type harnessMetadata struct {
@@ -137,6 +168,30 @@ type harnessMetadata struct {
 }
 
 type Supervisor struct {
+	native                 *nativeSessions
+	setup                  func(context.Context, agentsetup.SetupRequest) (agentsetup.Progress, error)
+	accountLogins          map[string]agentsetup.AccountLogin // Local status only; never in probe reports.
+	leads                  *leadRuntime
+	routineConfig          *RoutineWorkspaceConfig
+	browserCaptures        func(agentsetup.RoutineGrant) BrowserCaptureRequester
+	routineCheckouts       map[string]*agentsetup.Store
+	routineResources       map[string]RoutineResourceLease
+	power                  Power
+	queuePollMu            sync.Mutex
+	queueNext              time.Time
+	catalogCursor          string // Protected by mu; rotate bounded account pages fairly.
+	queueDirty             atomic.Bool
+	queueWake              chan struct{}
+	chatGate               chatRelayGate
+	ledger                 *agentsetup.SharedLedger
+	ledgerBinding          ledgerBinding
+	ledgerRequired         bool
+	ledgerExitProof        func(Record) bool // fixture injection; defaults to read-only kernel absence
+	ledgerBarrier          func(string)      // deterministic fixture barriers; never server input
+	usageProbes            usageprobe.Probe
+	recoveryMu             sync.Mutex
+	attachedHooks          map[string]*attachedHookBinding
+	attachedHookVerifier   *AttachManager
 	stepUps                *StepUpManager
 	capacityNow            func() time.Time
 	capacityWake           chan struct{}
@@ -162,6 +217,7 @@ type Supervisor struct {
 	profilePermissions     map[string]bool
 	harnessFailed          map[string]bool
 	dispatchMu             contextMutex
+	checkout               *agentsetup.Store
 	state                  *agentsetup.Store
 	closing                bool
 	blockedAccounts        map[string]bool
@@ -169,8 +225,11 @@ type Supervisor struct {
 	accountBilling         map[string]string
 	probePendingSince      map[string]time.Time // Protected by mu; reset only for a new probe lifecycle.
 	pollDiagnostic         func(string)
+	verificationDiagnostic func(string, string, string, string)
 	pollDiagnosticMu       sync.Mutex
 	pollDiagnosticLast     map[string]time.Time // Previous reason set and last emission, protected by pollDiagnosticMu.
+	ledgerRouteUnconfirmed bool                 // Protected by mu; unresolved attempts retain their own holds.
+	ledgerReplayAfter      string               // Protected by dispatchMu; rotate bounded replay fairly.
 	loginRequired          map[string]bool
 	signInUnverified       map[string]bool
 	probeFailureReasons    map[string]string // Bounded local causes, protected by mu.
@@ -221,6 +280,25 @@ func NewSupervisor(ctx context.Context, c Config) (*Supervisor, error) {
 	}
 	if !info.IsDir() {
 		return nil, fmt.Errorf("workspace %s is not a directory", physical)
+	}
+	// Git directories below one checkout share files and Git state. Require
+	// its root so pickup digests, durable fences and recovery all use the
+	// same physical directory. A linked worktree's .git file is also a root;
+	// standalone non-Git workspaces retain their directory-scoped identity.
+	for directory := physical; ; directory = filepath.Dir(directory) {
+		_, err := os.Lstat(filepath.Join(directory, ".git"))
+		if err == nil {
+			if directory != physical {
+				return nil, errors.New("workspace must be the Git checkout root")
+			}
+			break
+		}
+		if !errors.Is(err, os.ErrNotExist) {
+			return nil, fmt.Errorf("inspect workspace checkout root: %w", err)
+		}
+		if directory == filepath.Dir(directory) {
+			break
+		}
 	}
 	tenantID, principalID, err := c.API.Identity(ctx)
 	if err != nil {
@@ -324,13 +402,16 @@ func NewSupervisor(ctx context.Context, c Config) (*Supervisor, error) {
 			_ = lock.Close()
 		}
 	}()
+	if err := checkRetainedLeads(state); err != nil {
+		return nil, err
+	}
 	for _, suffix := range []string{".journal", ".checkpoint.json"} {
 		if _, e := state.Read("aeon-agentd-"+c.DaemonID+suffix, 4<<20); e != nil && !errors.Is(e, os.ErrNotExist) {
 			return nil, e
 		}
 	}
 	j, err := localjournal.Open(localjournal.Config[Record]{
-		Directory: c.StateRoot, Prefix: "aeon-agentd-" + c.DaemonID, Version: 2,
+		Directory: c.StateRoot, Prefix: "aeon-agentd-" + c.DaemonID, Version: RecordSchemaVersion, Migrations: recordMigrations(),
 		MaxBytes: 4 << 20, MaxRecords: 4096,
 		Key: func(r Record) (string, error) {
 			if r.RunID == "" {
@@ -351,10 +432,45 @@ func NewSupervisor(ctx context.Context, c Config) (*Supervisor, error) {
 	if err != nil {
 		return nil, err
 	}
-	s := &Supervisor{stepUps: c.StepUps, startedAt: time.Now(), capacityInterval: c.CapacityInterval, capacityLast: map[string]time.Time{}, capacityAttempt: map[string]time.Time{}, maxTokens: c.MaxTokens, maxTurns: c.MaxTurns, state: state, blockedAccounts: map[string]bool{}, probedAccounts: map[string]bool{}, loginRequired: map[string]bool{}, api: c.API, journal: j, lock: lock, adapters: adapters, runs: map[string]*owned{}, tenantID: tenantID,
+	if c.UsageProbes == nil {
+		c.UsageProbes = usageprobe.Client{}
+	}
+	if c.Power == nil {
+		c.Power = systemPower{}
+	}
+	s := &Supervisor{native: &nativeSessions{entries: map[string]*nativeLeadEntry{}}, leads: &leadRuntime{config: c.LeadRuntime, leads: map[string]*localLead{}}, queueWake: make(chan struct{}, 1), usageProbes: c.UsageProbes, stepUps: c.StepUps, startedAt: time.Now(), capacityInterval: c.CapacityInterval, capacityLast: map[string]time.Time{}, capacityAttempt: map[string]time.Time{}, maxTokens: c.MaxTokens, maxTurns: c.MaxTurns, state: state, blockedAccounts: map[string]bool{}, probedAccounts: map[string]bool{}, loginRequired: map[string]bool{}, api: c.API, journal: j, lock: lock, adapters: adapters, runs: map[string]*owned{}, tenantID: tenantID,
 		principalID: principalID, daemonID: c.DaemonID, generation: gen, workspace: physical, estimates: c.EstimatedUnits, accounts: c.Accounts,
-		heartbeatInterval: heartbeat, maxRunDuration: maxRun, prepareScratch: verificationScratch, newHarnessID: randomID, lifetime: ctx, pollDiagnostic: c.PollDiagnostic}
+		power:             c.Power,
+		heartbeatInterval: heartbeat, maxRunDuration: maxRun, prepareScratch: verificationScratch, newHarnessID: randomID, lifetime: ctx, pollDiagnostic: c.PollDiagnostic, verificationDiagnostic: c.VerificationDiagnostic}
+	if _, err := state.Read("ledger-member.json", 8192); err == nil {
+		s.ledgerRequired = true
+	} else if !errors.Is(err, os.ErrNotExist) {
+		return nil, err
+	}
+	if c.LeadRuntime != nil {
+		if len(c.LeadRuntime.Repositories) > 32 {
+			return nil, ErrRoutineUnavailable
+		}
+		copy := *c.LeadRuntime
+		copy.Repositories = append([]RoutineRepository(nil), c.LeadRuntime.Repositories...)
+		s.leads.config = &copy
+	}
 	s.capacityNow = c.Now
+	if c.NativeSessions != nil {
+		copy := *c.NativeSessions
+		s.native.config = &copy
+	}
+	if c.RoutineWorkspaces != nil {
+		if len(c.RoutineWorkspaces.Repositories) > 64 {
+			return nil, ErrRoutineUnavailable
+		}
+		config := *c.RoutineWorkspaces
+		config.Repositories = append([]RoutineRepository(nil), config.Repositories...)
+		s.routineConfig = &config
+	}
+	s.browserCaptures = c.BrowserCaptures
+	s.routineCheckouts = map[string]*agentsetup.Store{}
+	s.routineResources = map[string]RoutineResourceLease{}
 	s.capacityWake = make(chan struct{}, 1)
 	if err := s.loadCapacityChecks(); err != nil {
 		return nil, err
@@ -472,6 +588,10 @@ func pollContextError(ctx context.Context, causes ...error) error {
 }
 
 func (s *Supervisor) pollOnce(ctx context.Context, dispatch bool) (resultErr error) {
+	return s.poll(ctx, dispatch, dispatch, nil)
+}
+
+func (s *Supervisor) poll(ctx context.Context, dispatch, scanQueue bool, nonempty *bool) (resultErr error) {
 	diagnostic := ""
 	defer func() {
 		if pollContextError(ctx, resultErr) == nil {
@@ -486,28 +606,55 @@ func (s *Supervisor) pollOnce(ctx context.Context, dispatch bool) (resultErr err
 	if dispatch {
 		// Recover no-launch claims before a fresh probe changes generation.
 		recoveryErr = s.recoverUnlaunched(ctx)
-		s.settlePending(ctx)
 	}
-	if err := pollContextError(ctx, recoveryErr); err != nil {
+	// Probe-only polls run during retryable pairing outages too. Their probes
+	// must not rotate authority while a prior generation still needs to settle.
+	// Dispatch polls then reclaim agent recoveries after that settlement, so a
+	// fresh probe cannot change generation first.
+	settlementErr := s.settlePending(ctx)
+	if dispatch {
+		recoveryErr = errors.Join(recoveryErr, s.recoverAgents(ctx))
+	}
+	if err := pollContextError(ctx, recoveryErr, settlementErr); err != nil {
 		return err
 	}
 	if !s.probeAllowed() || dispatch && !s.dispatchAllowed("") {
 		diagnostic = "dispatch_not_allowed"
 		return nil
 	}
-	if dispatch {
+	if reporter, ok := s.api.(interface {
+		HostCapacity(context.Context) (hostcapacity.View, error)
+	}); ok {
+		if _, err := reporter.HostCapacity(ctx); err != nil && !errors.Is(err, ErrHostCapacityUnsupported) {
+			return err
+		}
+	}
+	if scanQueue {
 		var err error
 		runs, err = s.api.Queued(ctx)
 		if err != nil {
 			diagnostic = "queue_unavailable"
 			return err
 		}
+		if nonempty != nil {
+			*nonempty = len(runs) > 0
+		}
 	}
-	failures := []error{recoveryErr}
+	failures := []error{recoveryErr, settlementErr}
+	var probeFailures []error
 	s.mu.Lock()
 	accounts := append([]EnrolledAccount(nil), s.accounts...)
 	adapters := map[string]Adapter{}
 	pendingProbes := make(map[string]time.Time, len(accounts))
+	type observation struct {
+		account                 EnrolledAccount
+		status                  ProbeStatus
+		pendingSince            time.Time
+		hold                    string
+		dependencyErr, probeErr error
+		observedAt              time.Time
+	}
+	observations := make([]observation, 0, len(accounts))
 	for _, account := range accounts {
 		pendingProbes[account.ID] = s.probePendingSince[account.ID]
 	}
@@ -520,7 +667,7 @@ func (s *Supervisor) pollOnce(ctx context.Context, dispatch bool) (resultErr err
 			return err
 		}
 		if s.hasUnresolvedOldClaim(account.ID) {
-			s.freezeOnError(account.ID)
+			s.freezePreviousRun(account.ID)
 			continue
 		}
 		fenced, fenceErr := s.readFence(account.ID)
@@ -529,12 +676,7 @@ func (s *Supervisor) pollOnce(ctx context.Context, dispatch bool) (resultErr err
 			continue
 		}
 		if account.DependencyBlocked {
-			if err := s.api.Probe(ctx, account.ID, s.daemonID, s.generation, false); err != nil {
-				if cancelled := pollContextError(ctx, err); cancelled != nil {
-					return cancelled
-				}
-				failures = append(failures, errors.New("account probe unavailable"))
-			}
+			observations = append(observations, observation{account: account, status: probeUnavailable, pendingSince: pendingProbes[account.ID], observedAt: s.capacityNow()})
 			continue
 		}
 		// Account health is independent of optional verification. Refusing a
@@ -599,18 +741,43 @@ func (s *Supervisor) pollOnce(ctx context.Context, dispatch bool) (resultErr err
 			}
 			pi.probeMu.Unlock()
 		}
-		available := status.OK
 		s.mu.Lock()
 		current = s.probePendingSince[account.ID].Equal(pendingSince)
 		s.mu.Unlock()
 		if !current {
 			continue
 		}
-		var err error
-		if reporter, ok := s.api.(ProbeStatusReporter); ok {
-			err = reporter.ProbeStatus(ctx, account.ID, s.daemonID, s.generation, status)
-		} else {
-			err = s.api.Probe(ctx, account.ID, s.daemonID, s.generation, available)
+		observations = append(observations, observation{account, status, pendingSince, hold, dependencyErr, probeErr, s.capacityNow()})
+	}
+	probes := make([]AccountProbeObservation, 0, len(observations))
+	currentObservations := observations[:0]
+	for _, o := range observations {
+		// A sibling's slow local probe leaves time for a repin or tombstone.
+		// Do not publish the earlier observation after its lifecycle changed.
+		s.mu.Lock()
+		current := s.probePendingSince[o.account.ID].Equal(o.pendingSince)
+		s.mu.Unlock()
+		fenced, err := s.readFence(o.account.ID)
+		if !current || fenced || err != nil {
+			continue
+		}
+		currentObservations = append(currentObservations, o)
+		probes = append(probes, AccountProbeObservation{AccountID: o.account.ID, Status: o.status, ObservedAt: o.observedAt})
+	}
+	observations = currentObservations
+	results := s.reportAccountProbes(ctx, probes)
+	for i, o := range observations {
+		account, status, pendingSince, hold := o.account, o.status, o.pendingSince, o.hold
+		dependencyErr, probeErr, err := o.dependencyErr, o.probeErr, results[i]
+		available := status.OK
+		if cancelled := pollContextError(ctx, err); cancelled != nil {
+			return cancelled
+		}
+		if account.DependencyBlocked {
+			if err != nil {
+				failures = append(failures, errors.New("account probe unavailable"))
+			}
+			continue
 		}
 		s.mu.Lock()
 		if cancelled := pollContextError(ctx, err); cancelled != nil {
@@ -670,6 +837,13 @@ func (s *Supervisor) pollOnce(ctx context.Context, dispatch bool) (resultErr err
 			s.probeReasonDetails = map[string]string{}
 		}
 		delete(s.probeReasonDetails, account.ID)
+		if s.accountLogins == nil {
+			s.accountLogins = map[string]agentsetup.AccountLogin{}
+		}
+		delete(s.accountLogins, account.ID)
+		if status.ActiveIdentity != "" && hold == "" && dependencyErr == nil && probeErr == nil {
+			s.accountLogins[account.ID] = agentsetup.AccountLogin{ActiveIdentity: status.ActiveIdentity, Approved: strings.EqualFold(status.ActiveIdentity, account.VerifiedIdentity)}
+		}
 		if !status.OK && hold == "" && dependencyErr == nil && probeErr == nil {
 			reason := "probe_failed"
 			if status.Failure == ProbeAuthFailed {
@@ -700,13 +874,16 @@ func (s *Supervisor) pollOnce(ctx context.Context, dispatch bool) (resultErr err
 		s.mu.Unlock()
 		s.capacityProbeConnection(account.ID, err == nil && available)
 		if probeErr != nil {
-			failures = append(failures, errors.New("harness failed to start"))
+			probeFailures = append(probeFailures, errors.New("harness failed to start"))
 		}
 		// A harness that fails to start is a per-harness hold reported through
-		// Lifecycle, not a poll failure: siblings keep polling and dispatching.
+		// Lifecycle. It cannot fail a poll that can dispatch a ready sibling.
 		if err != nil {
 			failures = append(failures, errors.New("account probe unavailable"))
 		}
+	}
+	if !s.Lifecycle("").Ready {
+		failures = append(failures, probeFailures...)
 	}
 	for _, run := range runs {
 		if err := ctx.Err(); err != nil {
@@ -716,8 +893,10 @@ func (s *Supervisor) pollOnce(ctx context.Context, dispatch bool) (resultErr err
 			failures = append(failures, ErrScope)
 			continue
 		}
-		if err := s.StartRun(ctx, run); err != nil && !errors.Is(err, ErrDraining) {
-			failures = append(failures, err)
+		if err := s.StartRun(ctx, run); err != nil && !errors.Is(err, ErrDraining) && !errors.Is(err, ErrHostCapacity) {
+			if !errors.Is(err, errAccountUnavailable) || !s.Lifecycle("").Ready {
+				failures = append(failures, err)
+			}
 		}
 	}
 	return errors.Join(failures...)
@@ -735,17 +914,28 @@ func (s *Supervisor) reportPollDiagnosticAt(reason string, now time.Time) {
 	if reason != "" {
 		reasons = append(reasons, reason)
 	}
+	s.mu.Lock()
+	ledgerRouteUnconfirmed := s.ledgerRouteUnconfirmed
+	s.mu.Unlock()
+	if ledgerRouteUnconfirmed {
+		reasons = append(reasons, "ledger_route_unconfirmed")
+	}
 	// Multiple accounts produce at most one line per readiness cause per poll.
-	failed, timedOut := false, false
-	for _, detail := range s.lifecycleAt("", now).AccountStatuses {
-		failed = failed || detail.Reason == "probe_failed"
-		timedOut = timedOut || detail.Reason == "probe_timeout"
+	failed, timedOut, unsettled := false, false, false
+	lifecycle := s.lifecycleAt("", now)
+	for _, detail := range lifecycle.AccountStatuses {
+		failed = failed || !lifecycle.Ready && detail.Reason == "probe_failed"
+		timedOut = timedOut || !lifecycle.Ready && detail.Reason == "probe_timeout"
+		unsettled = unsettled || detail.Reason == agentsetup.UnsettledPreviousRun
 	}
 	if failed {
 		reasons = append(reasons, "probe_failed")
 	}
 	if timedOut {
 		reasons = append(reasons, "probe_timeout")
+	}
+	if unsettled {
+		reasons = append(reasons, agentsetup.UnsettledPreviousRun)
 	}
 	s.pollDiagnosticMu.Lock()
 	changed := len(reasons) != len(s.pollDiagnosticLast)
@@ -772,11 +962,25 @@ func (s *Supervisor) reportPollDiagnosticAt(reason string, now time.Time) {
 	}
 }
 
+var errAccountUnavailable = errors.New("no local account enrollment for harness")
+
 func (s *Supervisor) StartRun(ctx context.Context, run Run) (resultErr error) {
+	if run.RoutineBudget != nil {
+		budget := *run.RoutineBudget
+		run.RoutineBudget = &budget
+	}
 	if err := s.dispatchMu.LockContext(ctx); err != nil {
 		return err
 	}
 	defer s.dispatchMu.Unlock()
+	if s.ledgerRequired && s.ledger == nil {
+		return agentsetup.ErrLedgerUnavailable
+	}
+	if s.ledger != nil {
+		if err := s.reconcileLedgerLocked(ctx); err != nil {
+			return err
+		}
+	}
 	s.mu.Lock()
 	capturing := s.capacityCapturing
 	s.mu.Unlock()
@@ -789,12 +993,24 @@ func (s *Supervisor) StartRun(ctx context.Context, run Run) (resultErr error) {
 	if run.ID == "" || run.WorkOrderID == "" || run.AgentPrincipalID != s.principalID || run.Status != "queued" {
 		return ErrScope
 	}
+	grant, err := routineGrant(run)
+	if err != nil {
+		return err
+	}
 	s.mu.Lock()
 	entry := s.runs[run.ID]
 	s.mu.Unlock()
 	if entry != nil {
 		entry.mu.Lock()
-		retry := entry.record.LaunchState == launchPrepared && entry.record.State == "claim_pending" && entry.record.Generation == s.generation
+		if grant != nil && entry.record.LaunchState == launchRoutePending && entry.record.State == "route_pending" {
+			entry.mu.Unlock()
+			return ErrProcessesUnconfirmed
+		}
+		if grant != nil && entry.record.State == "ownership_lost" && !noLocalProcess(entry.record) {
+			entry.mu.Unlock()
+			return ErrProcessesUnconfirmed
+		}
+		retry := entry.record.LaunchState == launchPrepared && entry.record.State == "claim_pending" && (entry.record.Generation == s.generation || s.ledger != nil)
 		entry.mu.Unlock()
 		if !retry {
 			entry.mu.Lock()
@@ -818,6 +1034,9 @@ func (s *Supervisor) StartRun(ctx context.Context, run Run) (resultErr error) {
 		if routeReleased {
 			run.AccountID = ""
 		}
+	}
+	if err := s.checkHostCapacity(ctx); err != nil {
+		return err
 	}
 	profiles, err := s.api.Profiles(ctx)
 	if err != nil {
@@ -873,6 +1092,23 @@ func (s *Supervisor) StartRun(ctx context.Context, run Run) (resultErr error) {
 	if err := validQueuedExecutionMode(run, adapter); err != nil {
 		return err
 	}
+	// Defer only this run before allocating routine resources or acquiring a
+	// checkout. The route and final claim still recheck their current authority.
+	accountIDs := make([]string, 0, len(s.accounts))
+	for _, account := range s.accounts {
+		if account.Harness == profile.Harness && s.accountAvailable(account.ID) && (run.AccountID == "" || run.AccountID == account.ID) && (run.RequestedAccountID == "" || run.RequestedAccountID == account.ID) {
+			accountIDs = append(accountIDs, account.ID)
+		}
+	}
+	if len(accountIDs) == 0 {
+		return errAccountUnavailable
+	}
+	budgetBroker, _ := s.api.(RoutineBudgetBroker)
+	routineBudget, err := newRoutineCallBudget(StartRequest{Run: run, Profile: profile,
+		TenantID: s.tenantID, PrincipalID: s.principalID, Generation: s.generation}, adapter, budgetBroker, s.capacityNow)
+	if err != nil {
+		return err
+	}
 	verification := run.Purpose == VerificationPurpose
 	managedAdapter, managedOK := adapter.(ManagedControlAdapter)
 	review := run.ReadOnlyReview
@@ -891,6 +1127,19 @@ func (s *Supervisor) StartRun(ctx context.Context, run Run) (resultErr error) {
 			if busy {
 				return ErrDraining
 			}
+		}
+	}
+	var approvedRepository RoutineRepository
+	if grant != nil {
+		if s.ledger == nil || verification || review && (grant.Lineage == nil || grant.Lineage.Role != "review") {
+			return ErrRoutineUnavailable
+		}
+		if grant.Lineage != nil && run.RoutineBudget == nil {
+			return ErrBudgetEnforcementUnavailable
+		}
+		approvedRepository, err = s.routineRepository(run, *grant, adapter)
+		if err != nil {
+			return err
 		}
 	}
 	node, err := s.api.Node(ctx, run.WorkOrderID)
@@ -912,6 +1161,41 @@ func (s *Supervisor) StartRun(ctx context.Context, run Run) (resultErr error) {
 	}
 	if review != (order.Kind == "review") {
 		return errors.New("review execution mode does not match its work order")
+	}
+	runWorkspace := s.workspace
+	pickup, err := s.workerPickup(run, node, order)
+	if err != nil {
+		return err
+	}
+	var routineWorkspace *RoutineWorkspace
+	var resourceEnvironment []string
+	if grant != nil {
+		routineWorkspace, err = s.prepareRoutineWorkspace(ctx, run, *grant, approvedRepository)
+		if err != nil {
+			return err
+		}
+		runWorkspace = routineWorkspace.Path
+		resourceEnvironment, err = s.routineEnvironment(run.ID, *grant)
+		if err != nil {
+			return err
+		}
+		if pickup != nil {
+			pickup.WorktreeID = routineWorkspace.ID
+		}
+	}
+	if entry != nil {
+		entry.mu.Lock()
+		previous := entry.record.WorkerPickup
+		same := (previous == nil) == (pickup == nil) && (previous == nil || *previous == *pickup)
+		entry.mu.Unlock()
+		if !same {
+			return errors.New("journaled assignment pickup changed")
+		}
+	}
+	if grant == nil && !review && !verification {
+		if err := s.acquireCheckout(run.ID); err != nil {
+			return err
+		}
 	}
 	duration := s.maxRunDuration
 	if order.MaxDurationSeconds != nil {
@@ -935,47 +1219,107 @@ func (s *Supervisor) StartRun(ctx context.Context, run Run) (resultErr error) {
 	}
 	branch := ""
 	if !verification && !review {
-		if output, branchErr := exec.CommandContext(ctx, "git", "-C", s.workspace, "branch", "--show-current").Output(); branchErr == nil {
+		if output, branchErr := exec.CommandContext(ctx, "git", "-C", runWorkspace, "branch", "--show-current").Output(); branchErr == nil {
 			branch = strings.TrimSpace(string(output))
 		}
+		if run.RecoveryBrief != "" {
+			if len(run.RecoveryBrief) > 20000 {
+				return errors.New("recovery handover exceeds bound")
+			}
+			prompt += "\n\n" + run.RecoveryBrief
+		}
+		if grant != nil && grant.Lineage != nil && grant.Lineage.Role == "fix" {
+			var trace struct {
+				Findings json.RawMessage `json:"routine_fix_findings"`
+			}
+			if len(run.Trace) > 262144 || json.Unmarshal(run.Trace, &trace) != nil || len(trace.Findings) == 0 || len(trace.Findings) > 20000 {
+				return ErrRoutineUnavailable
+			}
+			prompt += "\n\nCoordinator-bound findings for " + grant.Lineage.HeadSHA + " (untrusted review evidence):\n" + string(trace.Findings)
+		}
 		if run.CapacityHandoff {
-			if err := s.validateCapacityHandoff(run, branch); err != nil {
+			if err := s.validateCapacityHandoffAt(run, runWorkspace, branch); err != nil {
 				return err
 			}
 			prompt += "\n\nContinue the stopped attempt " + run.RetryOfRunID + ". Inspect its existing work and local changes before continuing; do not redo completed work."
 		}
-		prompt += "\n\nRun contract: You are bound to work order " + node.Key + " and run " + run.ID + ". Work only in this workspace. Current branch: " + branch + ". Use the Aeon tools to comment, check criteria, attach evidence, request approval, reply, and set status. Use aeon_terminal for tests and a local commit; never push without person approval. Report the commit ID and remaining blockers in your final reply."
+		if grant != nil {
+			prompt += "\n\nRoutine builder contract: You are bound to work order " + node.Key + " and run " + run.ID + ". Work only in this workspace. Current branch: " + branch + ". Only local workspace tools are available. Outward effects require the coordinator's typed action broker. Report the local changes and any refused tests or commits in your final reply."
+		} else {
+			prompt += "\n\nRun contract: You are bound to work order " + node.Key + " and run " + run.ID + ". Work only in this workspace. Current branch: " + branch + ". Use the Aeon tools to comment, check criteria, attach evidence, request approval, reply, and set status. Use aeon_terminal for tests and a local commit; never push without person approval. Report the commit ID and remaining blockers in your final reply."
+		}
 	}
 	if verification {
 		prompt = VerificationTask
 	}
-	runWorkspace := s.workspace
 	if len(prompt) > 256<<10 {
 		return errors.New("work order prompt exceeds local bound")
 	}
 	if len(s.estimates) == 0 {
 		return errors.New("allowance estimates required")
 	}
-	accountIDs := make([]string, 0, len(s.accounts))
-	for _, account := range s.accounts {
-		if account.Harness == profile.Harness && s.accountAvailable(account.ID) && (run.AccountID == "" || run.AccountID == account.ID) && (run.RequestedAccountID == "" || run.RequestedAccountID == account.ID) {
-			accountIDs = append(accountIDs, account.ID)
-		}
-	}
-	if len(accountIDs) == 0 {
-		return errors.New("no local account enrollment for harness")
-	}
 	var route Route
 	if entry != nil {
 		entry.mu.Lock()
 		if !entry.record.RouteReleased {
-			route = *entry.record.ClaimRoute
+			if entry.record.ClaimRoute != nil {
+				route = *entry.record.ClaimRoute
+			}
 		}
 		entry.mu.Unlock()
 	}
+	var attempt *Record
+	if s.ledger != nil {
+		if entry != nil {
+			entry.mu.Lock()
+			saved := entry.record
+			entry.mu.Unlock()
+			if saved.LedgerGroup != "" && !saved.RouteReleased {
+				attempt = &saved
+			}
+		}
+		if attempt == nil {
+			if route.AccountID != "" {
+				accountIDs = []string{route.AccountID}
+			}
+			gid, e := agentsetup.LedgerID()
+			if e != nil {
+				return e
+			}
+			subset, e := s.ledger.Acquire(s.ledgerBinding.Member.ID, s.ledgerBinding.Generation, gid, s.ledgerCandidates(accountIDs, s.ledgerBinding.Generation))
+			if e != nil {
+				return e
+			}
+			if s.ledgerBarrier != nil {
+				s.ledgerBarrier("group")
+			}
+			rec := Record{RoutineWorkspace: routineWorkspace, WorkerPickup: pickup, LaunchState: launchRoutePending, RouteCandidates: subset, LedgerGroup: gid, LedgerGeneration: s.ledgerBinding.Generation, ExecutionMode: run.Purpose, TenantID: s.tenantID, PrincipalID: s.principalID, RunID: run.ID, WorkOrderID: run.WorkOrderID, Generation: s.generation, Workspace: runWorkspace, State: "route_pending", Controls: map[string]replay{}}
+			if e = s.journal.Put(rec); e != nil {
+				return e
+			}
+			if entry == nil {
+				entry = &owned{record: rec, replies: map[string]InboxReplyTarget{}}
+				s.mu.Lock()
+				s.runs[run.ID] = entry
+				s.mu.Unlock()
+			} else {
+				s.setLedgerRecord(rec)
+			}
+			attempt = &rec
+			if s.ledgerBarrier != nil {
+				s.ledgerBarrier("intent")
+			}
+		}
+		accountIDs = candidateIDs(attempt.RouteCandidates)
+	}
 	if route.AccountID == "" {
-		route, err = s.api.Route(ctx, run.ID, s.daemonID, accountIDs, s.estimates)
+		route, err = s.routeWorkspace(ctx, run.ID, accountIDs, routineWorkspace)
 		if err != nil {
+			return err
+		}
+	}
+	if attempt != nil {
+		if err = s.confirmLedgerRoute(attempt, route); err != nil {
 			return err
 		}
 	}
@@ -1008,19 +1352,27 @@ func (s *Supervisor) StartRun(ctx context.Context, run Run) (resultErr error) {
 	if err := validExecutionMode(run, adapter); err != nil {
 		return err
 	}
+	if routineBudget != nil && (route.AccountID != routineBudget.binding.Grant.AccountID || route.BillingMode != routineBudget.binding.Grant.BillingMode) {
+		return ErrRoutineBudgetBinding
+	}
 	if entry == nil {
-		rec := Record{LaunchState: launchPrepared, ClaimRoute: &route, AccountID: route.AccountID, ExecutionMode: run.Purpose, TenantID: s.tenantID, PrincipalID: s.principalID, RunID: run.ID, WorkOrderID: run.WorkOrderID, Generation: s.generation, Workspace: s.workspace, State: "claim_pending", Controls: map[string]replay{}}
+		rec := Record{RoutineWorkspace: routineWorkspace, WorkerPickup: pickup, LaunchState: launchPrepared, ClaimRoute: &route, AccountID: route.AccountID, ExecutionMode: run.Purpose, TenantID: s.tenantID, PrincipalID: s.principalID, RunID: run.ID, WorkOrderID: run.WorkOrderID, Generation: s.generation, Workspace: runWorkspace, State: "claim_pending", Controls: map[string]replay{}}
 		if err := s.journal.Put(rec); err != nil {
 			return err
 		}
-		entry = &owned{record: rec, replies: map[string]string{}}
+		entry = &owned{record: rec, replies: map[string]InboxReplyTarget{}}
 		s.mu.Lock()
 		s.runs[run.ID] = entry
 		s.mu.Unlock()
 	} else {
 		entry.mu.Lock()
 		next := entry.record
+		next.RoutineWorkspace = routineWorkspace
 		next.ClaimRoute, next.AccountID, next.RouteReleased = &route, route.AccountID, false
+		next.LaunchState, next.State = launchPrepared, "claim_pending"
+		if s.ledger != nil {
+			next.Generation = s.generation
+		}
 		if err := s.journal.Put(next); err != nil {
 			entry.mu.Unlock()
 			return err
@@ -1028,7 +1380,13 @@ func (s *Supervisor) StartRun(ctx context.Context, run Run) (resultErr error) {
 		entry.record = next
 		entry.mu.Unlock()
 	}
-	if err := s.api.Claim(ctx, run.ID, s.daemonID, s.generation, ids); err != nil {
+	claim := func() error {
+		if routineWorkspace != nil {
+			return s.claimRoutine(ctx, run, ids, pickup, routineWorkspace)
+		}
+		return s.claimWorker(ctx, run, ids, pickup)
+	}
+	if err := claim(); err != nil {
 		return errors.Join(err, s.reconcileUnlaunched(ctx, entry))
 	}
 	// Every error before launch intent must settle this claimed, never-launched
@@ -1044,12 +1402,16 @@ func (s *Supervisor) StartRun(ctx context.Context, run Run) (resultErr error) {
 		}
 	}()
 	if review {
-		prompt, err = reviewPrompt(ctx, s.workspace, order, profile)
+		repository := s.workspace
+		if grant != nil {
+			repository = approvedRepository.Repository
+		}
+		prompt, err = reviewPrompt(ctx, repository, order, profile)
 		if err != nil {
 			return err
 		}
 	}
-	if verification || review {
+	if verification || review && routineWorkspace == nil {
 		runWorkspace, err = s.prepareScratch(s.workspace)
 		if err != nil {
 			return err
@@ -1081,12 +1443,13 @@ func (s *Supervisor) StartRun(ctx context.Context, run Run) (resultErr error) {
 	}
 	caps := []string{"status", "stop"}
 	if managedPolicy {
-		caps = append(caps, managedControlCapability, "steer", "rename", "model", "effort")
+		caps = append(caps, recoveryCapability, managedControlCapability, "steer", "rename", "model", "effort")
 	}
 	if profile.Harness != Grok && !review {
 		caps = append(caps, "interrupt")
 	}
-	entry.inboxCapable = !verification && !review && (profile.Harness == Claude || profile.Harness == Codex || profile.Harness == Pi || profile.Harness == Gemini || profile.Harness == OpenCode)
+	entry.queueInput = queuedChatHarness(profile.Harness)
+	entry.inboxCapable = !verification && !review && (profile.Harness == Claude || profile.Harness == Codex || profile.Harness == Pi || entry.queueInput)
 	if entry.inboxCapable {
 		caps = append(caps, "inbox")
 		if !managedPolicy {
@@ -1096,24 +1459,54 @@ func (s *Supervisor) StartRun(ctx context.Context, run Run) (resultErr error) {
 	if (profile.Harness == Claude || profile.Harness == Codex) && !verification && !review {
 		caps = append(caps, servicetier.Capability)
 	}
-	registration := HarnessSession{ID: s.generation + "/" + ref, ProjectID: projectID, Lease: leaseA + leaseB, AccountLabel: route.AccountLabel}
+	relayAPI, relayable := s.api.(ChatRelayAPI)
+	// Advertise chat only for an S1-streaming harness the server's chat
+	// registration admits and whose turns name the input they consume; person
+	// input additionally needs inbox delivery.
+	if relayable && !verification && !review && relayChatHarness(profile.Harness) && sessionChatCapabilities(profile.Harness, caps).Deltas && s.chatGate.enabled() {
+		caps = append(caps, chatCapability)
+	}
+	registration := HarnessSession{ID: s.generation + "/" + ref, ProjectID: projectID, Lease: leaseA + leaseB, AccountLabel: route.AccountLabel, DisplayLabel: run.RecoveryLabel}
 	if profile.Harness != Codex {
 		registration.Model, registration.ReasoningEffort = profile.Model, profile.Effort
 	}
 	entry.harness, err = s.api.RegisterHarness(ctx, registration,
 		s.principalID, run.ID, run.WorkOrderID, profile.Harness, host, caps)
+	if err != nil && slices.Contains(caps, chatCapability) && chatCapabilityRefused(err) {
+		// An older server rejects the capability before writing anything. The
+		// run registers without live chat; only the relay is switched off.
+		s.chatGate.disable("capability_refused")
+		caps = slices.DeleteFunc(caps, func(c string) bool { return c == chatCapability })
+		entry.harness, err = s.api.RegisterHarness(ctx, registration,
+			s.principalID, run.ID, run.WorkOrderID, profile.Harness, host, caps)
+	}
 	if err != nil {
 		return err
 	}
 	if api, ok := s.api.(serviceTierAPI); ok {
 		report := servicetier.Advertised(profile.Harness, profile.Model, "unknown")
 		if reporter, ok := adapter.(serviceTierAdapter); ok {
-			observed, e := reporter.ServiceTiers(ctx, StartRequest{Profile: profile, AccountKey: route.AccountKey, Workspace: s.workspace})
+			observed, e := reporter.ServiceTiers(ctx, StartRequest{Profile: profile, AccountKey: route.AccountKey, Workspace: runWorkspace})
 			if e == nil {
 				report = observed
 			}
 		}
 		active := "default"
+		if run.RecoveryTier != "" {
+			if !servicetier.Valid(run.RecoveryTier) {
+				return errors.New("invalid recovery service tier")
+			}
+			offered := false
+			for _, tier := range report.Tiers {
+				if tier.Tier == run.RecoveryTier && tier.Offered {
+					offered = true
+				}
+			}
+			if !offered {
+				return errors.New("recovery service tier no longer offered")
+			}
+			active = run.RecoveryTier
+		}
 		if err = api.ReportServiceTiers(ctx, entry.harness, servicetier.Reports(report.Harness, report.Model, report.HarnessVersion), &active); err != nil {
 			return err
 		}
@@ -1133,6 +1526,7 @@ func (s *Supervisor) StartRun(ctx context.Context, run Run) (resultErr error) {
 		}, func() {
 			entry.mu.Lock()
 			entry.harnessArchived = true
+			entry.chat.close()
 			entry.mu.Unlock()
 		})
 		entry.usage.billing = sessionusage.BillingMode(billing)
@@ -1155,7 +1549,7 @@ func (s *Supervisor) StartRun(ctx context.Context, run Run) (resultErr error) {
 				defer entry.mu.Unlock()
 				return entry.budgetStopReason() == "" && entry.record.Generation == s.generation && (entry.record.State == "starting" || entry.record.State == "running")
 			}
-			replySender := func(messageID string) (string, bool) {
+			replySender := func(messageID string) (InboxReplyTarget, bool) {
 				entry.mu.Lock()
 				defer entry.mu.Unlock()
 				sender, ok := entry.replies[messageID]
@@ -1180,8 +1574,12 @@ func (s *Supervisor) StartRun(ctx context.Context, run Run) (resultErr error) {
 				s.observe(entry, AdapterEvent{Doing: doing})
 				return mode, true
 			}
+			var browser BrowserCaptureRequester
+			if grant != nil && s.browserCaptures != nil {
+				browser = s.browserCaptures(*grant)
+			}
 			entry.tools, err = startManagedTools(signer.runCredential(s.tenantID, s.principalID, run.ID, s.generation),
-				toolBinding{api: toolAPI, workOrderID: run.WorkOrderID, runID: run.ID, workspace: s.workspace, branch: branch, active: active, replySender: replySender, requestDone: requestDone, reportActivity: reportActivity})
+				toolBinding{routine: grant, browser: browser, resourceEnvironment: resourceEnvironment, api: toolAPI, workOrderID: run.WorkOrderID, runID: run.ID, workspace: runWorkspace, branch: branch, active: active, replySender: replySender, requestDone: requestDone, reportActivity: reportActivity})
 			if err != nil {
 				closeHarness("process_failed")
 				return err
@@ -1203,12 +1601,69 @@ func (s *Supervisor) StartRun(ctx context.Context, run Run) (resultErr error) {
 		}
 	}
 	observe := func(ev AdapterEvent) { s.observe(entry, ev) }
+	if !verification && !review {
+		entry.mu.Lock()
+		entry.chat = newSessionChat(ChatBinding{TenantID: s.tenantID, PrincipalID: s.principalID, RunID: run.ID, Generation: s.generation, SessionID: entry.harness.ID}, sessionChatCapabilities(profile.Harness, caps))
+		if relayable && slices.Contains(caps, chatCapability) {
+			entry.relay = s.newChatRelay(relayAPI, entry, run.ID)
+			entry.chat.attachRelay(entry.relay)
+			go entry.relay.Run(s.lifetime)
+		}
+		entry.mu.Unlock()
+		defer func() {
+			// Every launch failure before an owned process exists ends the stream
+			// and its relay; after launch the monitor owns that.
+			entry.mu.Lock()
+			chat, launched := entry.chat, entry.process != nil
+			entry.mu.Unlock()
+			if !launched {
+				chat.close()
+			}
+		}()
+	}
+	if routineWorkspace != nil {
+		if err := validateRoutineCheckout(ctx, approvedRepository, *routineWorkspace); err != nil {
+			return err
+		}
+		if run.CapacityHandoff || routineWorkspace.Grant.Lineage != nil && routineWorkspace.Grant.Lineage.Role == "fix" {
+			retained, err := s.routineContinuation(ctx, run, routineWorkspace.Grant, approvedRepository)
+			if err != nil {
+				return err
+			}
+			if retained.ID != routineWorkspace.ID || retained.Path != runWorkspace || retained.Branch != branch || retained.CheckoutLaunchID != routineWorkspace.CheckoutLaunchID {
+				return ErrProcessesUnconfirmed
+			}
+			if run.CapacityHandoff {
+				if err := s.validateCapacityHandoffAt(run, runWorkspace, branch); err != nil {
+					return err
+				}
+			}
+		}
+		if err := claim(); err != nil {
+			return err
+		}
+		resourceEnvironment, err = s.routineEnvironment(run.ID, routineWorkspace.Grant)
+		if err != nil {
+			return err
+		}
+	}
 	// Commit the possible-fork boundary before handing control to an adapter.
 	// On a journal failure Start is never invoked; after success a crash is
 	// unconfirmed, even if no PID was subsequently persisted.
 	var launchRev, launchDefault string
 	if !verification && !review {
-		launchRev, launchDefault = workspaceHEAD(ctx, s.workspace), launchDefaultRev(ctx, s.workspace)
+		launchRev, launchDefault = workspaceHEAD(ctx, runWorkspace), launchDefaultRev(ctx, runWorkspace)
+	}
+	if s.ledger != nil {
+		entry.mu.Lock()
+		r := entry.record
+		entry.mu.Unlock()
+		if err = s.ledger.Launching(s.ledgerBinding.Member.ID, r.LedgerGeneration, r.LedgerGroup); err != nil {
+			return err
+		}
+		if s.ledgerBarrier != nil {
+			s.ledgerBarrier("launching")
+		}
 	}
 	entry.mu.Lock()
 	intent := entry.record
@@ -1226,15 +1681,26 @@ func (s *Supervisor) StartRun(ctx context.Context, run Run) (resultErr error) {
 		closeHarness("process_failed")
 		return err
 	}
+	if s.ledgerBarrier != nil {
+		s.ledgerBarrier("attempted")
+	}
+	if routineWorkspace != nil {
+		s.routineResources[run.ID].HandoffPorts()
+	}
 	launchedAt := time.Now()
+	s.verificationDiagnosticFor(run.ID, run.AccountID, run.Purpose, "starting", "")
 	// The accepted duration includes startup, before the monitor exists.
 	runCtx, cancelRun := context.WithTimeout(s.lifetime, duration)
 	startCtx, cancelStart := context.WithDeadline(ctx, launchedAt.Add(duration))
-	proc, err := adapter.Start(startCtx, StartRequest{Lifetime: runCtx, TenantID: s.tenantID, PrincipalID: s.principalID, Run: run, Profile: profile,
-		AccountKey: route.AccountKey, Workspace: runWorkspace, StateRoot: filepath.Dir(s.journal.JournalPath()), Prompt: prompt, Generation: s.generation, InboxEnabled: entry.inboxCapable, ManagedPolicy: managedPolicy, Capabilities: caps, Tools: runTools, Rules: ephemeralRules, MaxTurns: entry.turnBudget, MaxTokens: entry.tokenBudget}, observe)
+	releasePower := s.holdRunPower()
+	proc, err := startRoutineBudgetAdapter(startCtx, adapter, StartRequest{ResourceEnvironment: resourceEnvironment, Lifetime: runCtx, TenantID: s.tenantID, PrincipalID: s.principalID, Run: run, Profile: profile,
+		AccountKey: route.AccountKey, Workspace: runWorkspace, StateRoot: filepath.Dir(s.journal.JournalPath()), Prompt: prompt, Generation: s.generation, InboxEnabled: entry.inboxCapable, ManagedPolicy: managedPolicy, Capabilities: caps, ServiceTier: entry.harness.ServiceTier, Tools: runTools, Rules: ephemeralRules, MaxTurns: entry.turnBudget, MaxTokens: entry.tokenBudget}, routineBudget, observe)
 	cancelStart()
 	if err != nil {
+		releasePower()
 		cancelRun()
+		entry.chat.close()
+		s.verificationDiagnosticFor(run.ID, run.AccountID, run.Purpose, "ownership_lost", "start_unconfirmed")
 		if errors.Is(err, errModelInvalid) {
 			s.reportModelState(entry, "invalid", profile.Model, profile.Effort)
 		}
@@ -1250,9 +1716,23 @@ func (s *Supervisor) StartRun(ctx context.Context, run Run) (resultErr error) {
 	entry.mu.Lock()
 	entry.process = proc
 	entry.record.PID = proc.PID()
+	entry.record.ProcessStartedAt = launchedAt
+	if recovery, ok := proc.(RecoveryProcess); ok {
+		if identity, e := recovery.Ownership(); e == nil && identity.RootPID == proc.PID() && identity.GroupID == proc.PID() {
+			entry.record.ProcessGroupID = identity.GroupID
+			entry.record.ProcessStartedAt = identity.StartedAt
+		}
+	}
 	entry.record.State = "running"
 	saveErr := s.journal.Put(entry.record)
+	if routineWorkspace != nil {
+		saveErr = errors.Join(saveErr, s.routineResources[run.ID].Running(proc.PID()))
+	}
+	runningRecord := entry.record
 	entry.mu.Unlock()
+	if s.ledger != nil {
+		saveErr = errors.Join(saveErr, s.ledger.Running(s.ledgerBinding.Member.ID, runningRecord.LedgerGeneration, runningRecord.LedgerGroup, proc.PID(), runningRecord.ProcessStartedAt))
+	}
 	entry.mu.Lock()
 	entry.monitorDone = make(chan struct{})
 	done := entry.monitorDone
@@ -1274,6 +1754,7 @@ func (s *Supervisor) StartRun(ctx context.Context, run Run) (resultErr error) {
 	if errors.Is(heartbeatErr, ErrHarnessArchived) {
 		entry.mu.Lock()
 		entry.harnessArchived = true
+		entry.chat.close()
 		entry.mu.Unlock()
 		heartbeatErr = nil
 	}
@@ -1289,59 +1770,117 @@ func (s *Supervisor) StartRun(ctx context.Context, run Run) (resultErr error) {
 	if binder, ok := proc.(interface{ bindLifetime(context.Context) }); ok {
 		binder.bindLifetime(s.lifetime)
 	}
-	go s.monitor(entry)
+	go s.monitor(entry, releasePower)
+	entry.mu.Lock()
+	entry.harnessWake = make(chan struct{}, 1)
+	entry.mu.Unlock()
 	go s.heartbeat(entry)
+	go s.watchHarness(entry)
 	return startErr
 }
 
 func (s *Supervisor) heartbeat(entry *owned) {
-	entry.mu.Lock()
-	done, inbox := entry.monitorDone, entry.inboxCapable
-	entry.mu.Unlock()
 	ticker := time.NewTicker(s.heartbeatInterval)
 	defer ticker.Stop()
-	wakeTimer := time.NewTimer(time.Hour)
-	if !wakeTimer.Stop() {
-		<-wakeTimer.C
+	s.heartbeatLoopScheduled(entry, ticker.C, nil, time.Now, newHarnessTimer)
+}
+
+type harnessTimer interface {
+	Ticks() <-chan time.Time
+	Reset(time.Duration)
+	Stop()
+}
+
+type realHarnessTimer struct{ timer *time.Timer }
+
+func newHarnessTimer() harnessTimer {
+	timer := time.NewTimer(time.Hour)
+	timer.Stop()
+	return &realHarnessTimer{timer: timer}
+}
+func (t *realHarnessTimer) Ticks() <-chan time.Time { return t.timer.C }
+func (t *realHarnessTimer) Stop() {
+	if !t.timer.Stop() {
+		select {
+		case <-t.timer.C:
+		default:
+		}
 	}
+}
+func (t *realHarnessTimer) Reset(delay time.Duration) { t.Stop(); t.timer.Reset(delay) }
+
+// Tick channels are injected so tests prove hint processing without elapsed
+// time assertions or accidentally passing via the fallback poll.
+func (s *Supervisor) heartbeatLoop(entry *owned, heartbeatTicks, inboxTicks <-chan time.Time) {
+	s.heartbeatLoopScheduled(entry, heartbeatTicks, inboxTicks, time.Now, nil)
+}
+
+func (s *Supervisor) heartbeatLoopScheduled(entry *owned, heartbeatTicks, inboxTicks <-chan time.Time, now func() time.Time, newTimer func() harnessTimer) {
+	entry.mu.Lock()
+	done, hints, inbox := entry.monitorDone, entry.harnessWake, entry.inboxCapable
+	entry.mu.Unlock()
+	var pollTimer harnessTimer
+	if inbox && newTimer != nil {
+		pollTimer = newTimer()
+		defer pollTimer.Stop()
+	}
+	if newTimer == nil {
+		newTimer = newHarnessTimer
+	}
+	wakeTimer := newTimer()
 	defer wakeTimer.Stop()
-	var inboxTicks <-chan time.Time
-	if inbox {
-		inboxTicker := time.NewTicker(2 * time.Second)
-		defer inboxTicker.Stop()
-		inboxTicks = inboxTicker.C
-	}
+	var pollAt time.Time
+	var pollInterval time.Duration
+	retry := false
 	for {
 		entry.mu.Lock()
-		wake := entry.pauseWakeAt
+		wake, connected := entry.pauseWakeAt, entry.harnessConnected
 		entry.mu.Unlock()
-		var wakeTicks <-chan time.Time
-		if !wakeTimer.Stop() {
-			select {
-			case <-wakeTimer.C:
-			default:
+		entry.harnessMu.Lock()
+		pending := len(entry.pending) != 0
+		entry.harnessMu.Unlock()
+		if pollTimer != nil {
+			interval := harnessFallbackPoll
+			if connected && !retry && !pending {
+				interval = harnessSafetyPoll
 			}
+			if interval != pollInterval || pollAt.IsZero() {
+				pollInterval, pollAt = interval, now().Add(interval)
+			}
+			pollTimer.Reset(max(time.Millisecond, pollAt.Sub(now())))
+			inboxTicks = pollTimer.Ticks()
 		}
+		var wakeTicks <-chan time.Time
+		wakeTimer.Stop()
 		if !wake.IsZero() {
-			delay := time.Until(wake)
+			delay := wake.Sub(now())
 			if delay < time.Millisecond {
 				delay = time.Millisecond
 			}
 			wakeTimer.Reset(delay)
-			wakeTicks = wakeTimer.C
+			wakeTicks = wakeTimer.Ticks()
 		}
 		beat := false
+		claimControls := false
 		select {
 		case <-done:
 			return
-		case <-ticker.C:
+		case <-heartbeatTicks:
 			beat = true
+			entry.mu.Lock()
+			claimControls = !inbox || !entry.harnessConnected || retry || pending
+			entry.mu.Unlock()
 		case <-inboxTicks:
+			pollAt = time.Time{}
+			claimControls = true // slow safety poll while connected; fast after failure
+		case <-hints:
+			claimControls = true
 		case <-wakeTicks:
 			entry.mu.Lock()
 			entry.pauseWakeAt = time.Time{}
 			entry.mu.Unlock()
 			beat = true
+			claimControls = true // durable deadlines never wait for the safety poll
 		}
 		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 		var err error
@@ -1349,8 +1888,11 @@ func (s *Supervisor) heartbeat(entry *owned) {
 			s.flushCapacity(ctx, entry)
 			err = s.update(ctx, entry, Telemetry{Kind: "heartbeat"})
 		}
-		serviceErr := s.serviceHarnessCycle(ctx, entry, beat)
+		serviceErr := s.serviceHarnessWake(ctx, entry, beat, claimControls)
 		cancel()
+		if claimControls {
+			retry = serviceErr != nil
+		}
 		if !errors.Is(serviceErr, ErrControlUnconfirmed) {
 			err = errors.Join(err, serviceErr)
 		}
@@ -1377,6 +1919,17 @@ func (s *Supervisor) runDeadline(entry *owned, proc Process, done <-chan struct{
 }
 
 func (s *Supervisor) observe(entry *owned, ev AdapterEvent) {
+	if ev.Chat != nil {
+		entry.mu.Lock()
+		chat := entry.chat
+		live := entry.record.Generation == s.generation && !entry.harnessArchived && (entry.record.State == "starting" || entry.record.State == "running")
+		entry.mu.Unlock()
+		if live && chat != nil {
+			chat.publish(*ev.Chat)
+		}
+		// This event can carry content: never let it fall through to telemetry.
+		return
+	}
 	if len(ev.ModelReports) > 0 {
 		s.reportModels(entry, ev.ModelReports)
 	}
@@ -1410,6 +1963,9 @@ func (s *Supervisor) observe(entry *owned, ev AdapterEvent) {
 		entry.mu.Lock()
 		entry.harness.Activity = ev.Activity
 		entry.mu.Unlock()
+		if ev.Activity == "idle" {
+			entry.wakeHarness()
+		}
 	}
 	if len(ev.Capacity) > 0 {
 		s.observeCapacity(entry, ev.Capacity)
@@ -1489,7 +2045,8 @@ func validHarnessValue(value string, limit int) bool {
 		!strings.ContainsFunc(value, unicode.IsControl)
 }
 
-func (s *Supervisor) monitor(entry *owned) {
+func (s *Supervisor) monitor(entry *owned, releasePower func()) {
+	defer releasePower()
 	entry.mu.Lock()
 	proc := entry.process
 	done := entry.monitorDone
@@ -1502,6 +2059,14 @@ func (s *Supervisor) monitor(entry *owned) {
 	}
 	defer entry.tools.Close()
 	err := proc.Wait()
+	// Release at child exit, before any potentially slow report settlement.
+	releasePower()
+	entry.chat.close()
+	entry.mu.Lock()
+	relay := entry.relay
+	entry.mu.Unlock()
+	// Let the last explicit final reach the server before the session stops.
+	relay.Wait(chatRelayFlush + time.Second)
 	entry.mu.Lock()
 	entry.record.BudgetStopReason = entry.budgetStopReason()
 	entry.record.ExitObserved = err == nil
@@ -1531,6 +2096,7 @@ func (s *Supervisor) monitor(entry *owned) {
 		if errors.Is(flushErr, ErrHarnessArchived) {
 			entry.mu.Lock()
 			entry.harnessArchived = true
+			entry.chat.close()
 			entry.mu.Unlock()
 		} else if flushErr != nil {
 			slog.Warn("managed session metadata settlement incomplete")
@@ -1566,23 +2132,32 @@ func (s *Supervisor) monitor(entry *owned) {
 		status, code = "cancelled", ""
 	}
 	if protocolFailed {
-		status, code = "failed", "app_server_protocol"
+		status, code = "failed", "reporter_unavailable"
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 	entry.mu.Lock()
 	launchRev, launchDefault := entry.record.LaunchRev, entry.record.LaunchDefaultRev
+	workspace := entry.record.Workspace
 	automaticReview := entry.record.AutomaticReview
 	entry.mu.Unlock()
 	s.flushCapacity(ctx, entry)
-	final := Telemetry{Kind: "finished", Status: status, ErrorCode: code, GitCommits: runCommits(ctx, s.workspace, launchRev, launchDefault)}
+	final := Telemetry{Kind: "finished", Status: status, ErrorCode: code, GitCommits: runCommits(ctx, workspace, launchRev, launchDefault)}
 	if automaticReview && status == "completed" && len(final.GitCommits) > 0 && launchRev != "" {
-		final.ReviewRange = completedReviewRange(ctx, s.workspace, launchRev)
+		final.ReviewRange = completedReviewRange(ctx, workspace, launchRev)
 	}
 	if code == "vendor_limit" {
 		final.LimitWindow, final.LimitResetsAt = limit.Window, limit.ResetsAt
 	}
 	reportErr := s.update(ctx, entry, final)
+	stage := status
+	if reportErr != nil {
+		stage = "settlement_pending"
+	}
+	entry.mu.Lock()
+	diagnosticRecord := entry.record
+	entry.mu.Unlock()
+	s.verificationDiagnosticFor(diagnosticRecord.RunID, diagnosticRecord.AccountID, diagnosticRecord.ExecutionMode, stage, code)
 	entry.mu.Lock()
 	doneRequested := entry.doneRequested
 	entry.mu.Unlock()
@@ -1644,12 +2219,17 @@ func (s *Supervisor) serviceHarness(ctx context.Context, entry *owned) error {
 }
 
 func (s *Supervisor) serviceHarnessCycle(ctx context.Context, entry *owned, heartbeat bool) (result error) {
+	return s.serviceHarnessWake(ctx, entry, heartbeat, heartbeat)
+}
+
+func (s *Supervisor) serviceHarnessWake(ctx context.Context, entry *owned, heartbeat, claimControls bool) (result error) {
 	entry.harnessMu.Lock()
 	defer entry.harnessMu.Unlock()
 	defer func() {
 		if errors.Is(result, ErrHarnessArchived) {
 			entry.mu.Lock()
 			entry.harnessArchived = true
+			entry.chat.close()
 			entry.mu.Unlock()
 			entry.pending = nil
 			result = nil
@@ -1674,14 +2254,35 @@ func (s *Supervisor) serviceHarnessCycle(ctx context.Context, entry *owned, hear
 			}
 		}()
 	}
-	if heartbeat {
+	if claimControls {
 		controls, err := s.api.YieldHarness(ctx, entry.harness)
 		if err != nil {
 			return err
 		}
-		entry.pending = append(entry.pending, controls...)
-		for len(entry.pending) > 0 {
-			control := entry.pending[0]
+		for _, control := range controls {
+			if !slices.ContainsFunc(entry.pending, func(pending HarnessControl) bool { return pending.ID == control.ID }) {
+				entry.pending = append(entry.pending, control)
+			}
+		}
+		for index := 0; index < len(entry.pending); {
+			control := entry.pending[index]
+			if entry.record.RoutineWorkspace != nil && control.ExpectedGeneration != "" && control.ExpectedGeneration != entry.harness.ID {
+				return ErrGeneration
+			}
+			entry.mu.Lock()
+			queued := entry.queueInput && control.Kind == "steer"
+			busy := entry.harness.Activity == "busy"
+			_, attempted := entry.record.Controls[control.ID]
+			entry.mu.Unlock()
+			expired := !control.deadline.IsZero() && time.Until(control.deadline) <= 0
+			if queued && busy && !expired && !attempted {
+				// Keep the original authorization and let interrupt/stop controls
+				// pass waiting input. An idle wake revisits this same control.
+				// An attempted write can settle from its replay receipt while busy
+				// without touching the child or waiting for that new turn to end.
+				index++
+				continue
+			}
 			outcome, reason := "applied", "agentd_applied"
 			stopNow := control.Kind == "stop" && control.RequestPayload != nil && control.RequestPayload.StopNow
 			operation := control.Kind
@@ -1701,7 +2302,8 @@ func (s *Supervisor) serviceHarnessCycle(ctx context.Context, entry *owned, hear
 			}
 			_, err := s.control(ctx, ControlRequest{TenantID: s.tenantID, PrincipalID: s.principalID,
 				RunID: entry.record.RunID, Generation: s.generation, CorrelationID: control.ID, Operation: operation, Text: control.Text, Value: control.Value, ExpectedOwnership: control.ExpectedOwnership, ExpiresAt: control.ExpiresAt, deadline: control.deadline}, true)
-			if (entry.managedPolicy || control.Kind == "tier") && operation != "force_stop" {
+			routineStop := entry.record.RoutineWorkspace != nil && control.Kind == "stop"
+			if (entry.managedPolicy || control.Kind == "tier" || queued || routineStop) && operation != "force_stop" {
 				switch {
 				case errors.Is(err, ErrControlExpired):
 					outcome, reason, err = "rejected", "authorization_expired", nil
@@ -1730,6 +2332,12 @@ func (s *Supervisor) serviceHarnessCycle(ctx context.Context, entry *owned, hear
 			if errors.Is(err, ErrUnsupported) || errors.Is(err, ErrNotOwned) || errors.Is(err, ErrGeneration) {
 				outcome, reason, err = "rejected", "child_unavailable", nil
 			}
+			if errors.Is(err, ErrControlExpired) {
+				outcome, reason, err = "rejected", "authorization_expired", nil
+			}
+			if queued && outcome == "applied" {
+				reason = "queued_next_turn"
+			}
 			if errors.Is(err, ErrGracefulTimeout) {
 				outcome, reason, err = "rejected", "graceful_stop_timeout", nil
 			}
@@ -1754,7 +2362,7 @@ func (s *Supervisor) serviceHarnessCycle(ctx context.Context, entry *owned, hear
 			// different outcome. Retrying the same completion forever leaves
 			// every later control for this run stuck behind it.
 			if err := s.api.CompleteHarnessControl(ctx, entry.harness, control.ID, outcome, reason); err != nil && !errors.Is(err, ErrControlTerminal) {
-				if !errors.Is(err, ErrHarnessArchived) && (entry.managedPolicy || control.Kind == "force_stop" || control.Kind == "stop") {
+				if !errors.Is(err, ErrHarnessArchived) && (entry.managedPolicy || queued || control.Kind == "force_stop" || control.Kind == "stop") {
 					return ErrControlUnconfirmed
 				}
 				return err
@@ -1762,16 +2370,43 @@ func (s *Supervisor) serviceHarnessCycle(ctx context.Context, entry *owned, hear
 			if err := s.forgetSettledControl(entry, control.ID); err != nil {
 				return err
 			}
-			entry.pending = entry.pending[1:]
+			entry.pending = append(entry.pending[:index], entry.pending[index+1:]...)
 		}
 	}
-	if entry.inboxCapable {
+	if entry.inboxCapable && (claimControls || !heartbeat) {
 		// A drain returns at most one leased message and replays it until completed.
-		items, err := s.api.DrainHarness(ctx, entry.harness)
+		entry.mu.Lock()
+		busy := entry.harness.Activity == "busy"
+		queueInput := entry.queueInput
+		entry.mu.Unlock()
+		if busy && queueInput {
+			return nil // No lease is consumed and no busy prompt is replaced.
+		}
+		var items []HarnessDelivery
+		var err error
+		if api, ok := s.api.(interface {
+			DrainHarnessInput(context.Context, HarnessSession, string) ([]HarnessDelivery, error)
+		}); ok {
+			level := ""
+			if busy {
+				level = "steer"
+			}
+			items, err = api.DrainHarnessInput(ctx, entry.harness, level)
+		} else if !busy {
+			items, err = s.api.DrainHarness(ctx, entry.harness)
+		}
 		if err != nil {
 			return err
 		}
 		for _, item := range items {
+			entry.mu.Lock()
+			busy = entry.harness.Activity == "busy"
+			entry.mu.Unlock()
+			// Keep the lease replayable until the active turn ends. Controls are
+			// serviced on every wake; waiting input never blocks that loop.
+			if busy && (item.Level != "steer" || queueInput) {
+				continue
+			}
 			messageText := inboxMessageText(item)
 			req := ControlRequest{TenantID: s.tenantID, PrincipalID: s.principalID,
 				RunID: entry.record.RunID, Generation: s.generation, CorrelationID: item.ID,
@@ -1791,7 +2426,7 @@ func (s *Supervisor) serviceHarnessCycle(ctx context.Context, entry *owned, hear
 					}
 					entry.replyOrder = append(entry.replyOrder, item.MessageID)
 				}
-				entry.replies[item.MessageID] = item.SenderPrincipalID
+				entry.replies[item.MessageID] = InboxReplyTarget{PrincipalID: item.SenderPrincipalID, ProjectID: item.ProjectID, ReplyToID: item.ReplyToID, SenderSessionID: entry.harness.ID, RecipientSessionID: item.SenderSessionID}
 				entry.mu.Unlock()
 			}
 			if _, err := s.controlInbox(ctx, req, false, true); err != nil {
@@ -1809,6 +2444,9 @@ func (s *Supervisor) serviceHarnessCycle(ctx context.Context, entry *owned, hear
 			if err := s.forgetSettledControl(entry, item.ID); err != nil {
 				return err
 			}
+			// A wake can cover several sends. Drain the next FIFO item immediately,
+			// yielding between cycles so controls always get their chance first.
+			entry.wakeHarness()
 		}
 	}
 	return nil
@@ -1849,9 +2487,20 @@ func inboxMessageText(item HarnessDelivery) string {
 func (s *Supervisor) update(ctx context.Context, entry *owned, t Telemetry) error {
 	entry.mu.Lock()
 	defer entry.mu.Unlock()
+	if (entry.record.WorkerPickup != nil || entry.record.RoutineWorkspace != nil) && t.Kind == "finished" {
+		t.ProcessState = "unconfirmed"
+		if entry.record.ExitObserved {
+			t.ProcessState = "exited"
+		} else if entry.record.LaunchState == launchPrepared {
+			t.ProcessState = "not_attempted"
+		}
+	}
 	t.ServiceTier = entry.harness.ServiceTier
 	if entry.record.Generation != s.generation && entry.record.LaunchState != launchPrepared {
 		return ErrGeneration
+	}
+	if entry.record.TerminalRecovery {
+		return s.flushReports(ctx, entry)
 	}
 	if t.Kind == "heartbeat" && (entry.record.State == "completed" || entry.record.State == "failed" || entry.record.State == "cancelled" || entry.record.State == "ownership_lost") {
 		return nil
@@ -1903,7 +2552,7 @@ func (s *Supervisor) controlInbox(ctx context.Context, req ControlRequest, fromR
 	if (isSetting(req.Operation) && !validSettingValue(req.Operation, req.Value)) || (!isSetting(req.Operation) && req.Value != "") {
 		return Receipt{}, ErrUnsupported
 	}
-	if len(req.Text) > 64<<10 || (req.Operation != "steer" && !inbox && req.Text != "") {
+	if len(req.Text) > 64<<10 && !(inbox && len(req.Text) <= inboxTextLimit) || (req.Operation != "steer" && !inbox && req.Text != "") {
 		return Receipt{}, errors.New("invalid control body")
 	}
 	s.mu.Lock()
@@ -1951,6 +2600,17 @@ func (s *Supervisor) controlInbox(ctx context.Context, req ControlRequest, fromR
 	if inbox && (!entry.inboxCapable || entry.stopRequested || entry.protocolFailed || entry.budgetStopReason() != "") {
 		return Receipt{}, ErrNotOwned
 	}
+	if entry.queueInput && req.Operation == "steer" {
+		if entry.stopRequested || entry.protocolFailed || entry.budgetStopReason() != "" {
+			return Receipt{}, ErrNotOwned
+		}
+		if fromRecoveryQueue && !req.deadline.IsZero() && time.Until(req.deadline) <= 0 {
+			return Receipt{}, ErrControlExpired
+		}
+		if entry.harness.Activity == "busy" {
+			return Receipt{}, fmt.Errorf("%w: this harness accepts input after the current turn; use queued delivery", ErrUnsupported)
+		}
+	}
 	// Ordinary input cannot consume emergency control headroom. Recovery
 	// stop/interrupt remain available when ordinary replay slots are full.
 	emergency := req.Operation == "stop" || req.Operation == "interrupt" || req.Operation == "force_stop"
@@ -1958,10 +2618,10 @@ func (s *Supervisor) controlInbox(ctx context.Context, req ControlRequest, fromR
 		return Receipt{}, errors.New("control replay capacity reached")
 	}
 	if req.Operation != "force_stop" && fromRecoveryQueue && (entry.managedPolicy || req.ExpectedOwnership != nil) {
-		if !entry.managedPolicy && req.Operation != "tier" {
+		if !entry.managedPolicy && req.Operation != "tier" && !(req.Operation == "stop" && entry.record.RoutineWorkspace != nil) {
 			return Receipt{}, ErrUnsupported
 		}
-		if entry.budgetStopReason() != "" {
+		if entry.budgetStopReason() != "" && !(req.Operation == "stop" && entry.record.RoutineWorkspace != nil) {
 			return Receipt{}, ErrBudgetExhausted
 		}
 		if req.ExpectedOwnership == nil || req.ExpiresAt == nil {
@@ -1982,6 +2642,9 @@ func (s *Supervisor) controlInbox(ctx context.Context, req ControlRequest, fromR
 		if e != nil || current.ProcessID != expected.ProcessID || current.RootPID != expected.RootPID || current.GroupID != expected.GroupID || !current.StartedAt.Equal(expected.StartedAt) {
 			return Receipt{}, ErrNotOwned
 		}
+		if req.Operation == "stop" && entry.record.RoutineWorkspace != nil && (current.DaemonID != expected.DaemonID || current.Generation != expected.Generation) {
+			return Receipt{}, ErrNotOwned
+		}
 	}
 	if fromRecoveryQueue && (entry.managedPolicy || req.Operation == "force_stop" || req.ExpectedOwnership != nil) {
 		// Recheck after ownership lookup and lock contention, then propagate the
@@ -1996,7 +2659,8 @@ func (s *Supervisor) controlInbox(ctx context.Context, req ControlRequest, fromR
 		ctx, cancel = context.WithDeadline(ctx, req.deadline)
 		defer cancel()
 	}
-	if inbox {
+	queuedInput := inbox || entry.queueInput && req.Operation == "steer"
+	if queuedInput {
 		// Persist uncertainty before touching the child. A crash or lost vendor
 		// response must never authorize reinjection of the same lease.
 		entry.record.Controls[req.CorrelationID] = replay{Digest: key, Rejected: true}
@@ -2035,6 +2699,14 @@ func (s *Supervisor) controlInbox(ctx context.Context, req ControlRequest, fromR
 		if !ok {
 			return Receipt{}, ErrUnsupported
 		}
+		if entry.record.RoutineWorkspace != nil {
+			// Persist uncertainty before touching this exact child. A lost
+			// cooperative-stop reply cannot signal the process a second time.
+			entry.record.Controls[req.CorrelationID] = replay{Digest: key, Rejected: true}
+			if err := s.journal.Put(entry.record); err != nil {
+				return Receipt{}, err
+			}
+		}
 		entry.stopRequested = true
 		entry.mu.Unlock()
 		err = graceful.GracefulStop(ctx)
@@ -2053,15 +2725,18 @@ func (s *Supervisor) controlInbox(ctx context.Context, req ControlRequest, fromR
 	} else {
 		proc := entry.process
 		entry.mu.Unlock()
+		if req.writing != nil {
+			req.writing()
+		}
 		err = proc.Control(ctx, req.Operation, req.Text)
 		entry.mu.Lock()
 	}
 	if err != nil {
-		if inbox || ((entry.managedPolicy || req.Operation == "tier") && fromRecoveryQueue) {
+		if queuedInput || ((entry.managedPolicy || req.Operation == "tier") && fromRecoveryQueue) {
 			entry.record.Controls[req.CorrelationID] = replay{Digest: key, Rejected: true, SettingRejected: errors.Is(err, ErrSettingRejected)}
 			_ = s.journal.Put(entry.record)
 		}
-		if inbox {
+		if queuedInput {
 			return Receipt{}, ErrControlUnconfirmed
 		}
 		return Receipt{}, err
@@ -2079,12 +2754,30 @@ func (s *Supervisor) controlInbox(ctx context.Context, req ControlRequest, fromR
 func (s *Supervisor) Close(ctx context.Context) error {
 	s.dispatchMu.Lock()
 	defer s.dispatchMu.Unlock()
+	if s.leads != nil {
+		s.leads.mu.Lock()
+		defer s.leads.mu.Unlock()
+	}
 	s.mu.Lock()
 	s.closing = true
 	capturing := s.capacityCapturing
 	s.mu.Unlock()
 	if capturing {
 		return ErrDraining
+	}
+	if s.leads != nil {
+		if s.leads.config != nil {
+			api, ok := s.api.(leadRuntimeAPI)
+			if !ok || s.ledger == nil {
+				return ErrProcessesUnconfirmed
+			}
+			if err := s.reconcileLeadReceiptsLocked(ctx, api, false, false); err != nil {
+				return err
+			}
+		}
+		if err := checkRetainedLeads(s.state); err != nil {
+			return err
+		}
 	}
 	status := s.Lifecycle("")
 	if len(status.ActiveRunIDs) > 0 {
@@ -2110,6 +2803,17 @@ func (s *Supervisor) Close(ctx context.Context) error {
 				return ctx.Err()
 			}
 		}
+	}
+	if s.ledger != nil {
+		if err := s.reconcileLedgerLocked(ctx); err != nil {
+			return err
+		}
+	}
+	if err := s.releaseRoutineCheckouts(); err != nil {
+		return err
+	}
+	if err := s.releaseCheckout(); err != nil {
+		return err
 	}
 	if s.lock != nil {
 		if err := s.lock.Close(); err != nil {
@@ -2159,6 +2863,7 @@ func (s *Supervisor) heartbeatHarnessPhase(ctx context.Context, entry *owned, ph
 				if identity, err := recovery.Ownership(); err == nil {
 					identity.DaemonID, identity.Generation = s.daemonID, s.generation
 					session.Ownership = &identity
+					entry.harness.Ownership = &identity
 				}
 			}
 		}

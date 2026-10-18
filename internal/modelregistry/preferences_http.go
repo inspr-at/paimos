@@ -9,9 +9,11 @@ import (
 	"time"
 
 	"github.com/inspr-at/paimos/internal/authz"
+	"github.com/inspr-at/paimos/internal/db"
 	"github.com/inspr-at/paimos/internal/httpapi"
 	"github.com/inspr-at/paimos/internal/modelprefs"
 	"github.com/inspr-at/paimos/internal/tenant"
+	"github.com/inspr-at/paimos/internal/workorders"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
 )
@@ -56,25 +58,12 @@ func writePreferenceError(w http.ResponseWriter, err error) {
 	writeErr(w, err)
 }
 
-// The same tenant row serializes role changes, links and editor mutations.
-// A no-key-update fence avoids blocking child-table FK share locks.
 func boundedPreferenceHandler(handler http.HandlerFunc) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		ctx, cancel := context.WithTimeout(r.Context(), 30*time.Second)
 		defer cancel()
 		handler(w, r.WithContext(ctx))
 	}
-}
-func preferenceFence(ctx context.Context, tx pgx.Tx, p tenant.Principal) error {
-	if _, err := tx.Exec(ctx, `SET LOCAL lock_timeout='5s'`); err != nil {
-		return err
-	}
-	var id string
-	if err := tx.QueryRow(ctx, `SELECT id::text FROM tenants WHERE id=$1::uuid FOR NO KEY UPDATE`, p.TenantID).Scan(&id); err != nil {
-		return err
-	}
-	_, err := tx.Exec(ctx, `SELECT pg_advisory_xact_lock(hashtextextended('aeon-model-prefs:'||current_setting('aeon.tenant_id'),0))`)
-	return err
 }
 func projectInput(r *http.Request) (string, error) {
 	project := r.URL.Query().Get("project_id")
@@ -116,17 +105,6 @@ func authorizePreference(ctx context.Context, tx pgx.Tx, p tenant.Principal, lev
 	default:
 		return prefFail(400, "invalid_level")
 	}
-}
-func levelIndex(level string) int {
-	switch level {
-	case "default":
-		return 0
-	case "person":
-		return 1
-	case "project":
-		return 2
-	}
-	return -1
 }
 
 type preferenceRow struct {
@@ -193,14 +171,6 @@ func optionalUUID(id string) any {
 	}
 	return id
 }
-func requestedRevision(r *http.Request) (int64, error) {
-	v, err := strconv.ParseInt(r.URL.Query().Get("revision"), 10, 64)
-	if err != nil || v < 0 {
-		return 0, prefFail(400, "revision_required")
-	}
-	return v, nil
-}
-
 func (m *Module) preferences(w http.ResponseWriter, r *http.Request) {
 	p, ok := principal(w, r)
 	if !ok {
@@ -212,18 +182,28 @@ func (m *Module) preferences(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var out preferenceDocument
-	err = m.in(r.Context(), p.TenantID, func(tx pgx.Tx) error {
-		if err := authz.RequireTx(r.Context(), tx, p, "models.read", authz.Scope{}); err != nil {
+	if err := PrepareCatalog(r.Context(), m.pool, p, CatalogPreparation{Operation: CatalogRead, Request: r, Authorize: func(ctx context.Context, tx pgx.Tx, current tenant.Principal) (bool, error) {
+		if err := readableProject(ctx, tx, current, project); err != nil {
+			return false, err
+		}
+		_, err := currentPreferencePerson(ctx, tx, current)
+		return err == nil, err
+	}}); err != nil {
+		writePreferenceError(w, err)
+		return
+	}
+	err = m.readSnapshot(r.Context(), p.TenantID, func(tx pgx.Tx) error {
+		current, err := currentModelReader(r, tx, p)
+		if err != nil {
 			return err
 		}
-		if err := readableProject(r.Context(), tx, p, project); err != nil {
+		if err := readableProject(r.Context(), tx, current, project); err != nil {
 			return err
 		}
-		if err := ensureCatalog(r.Context(), tx, p); err != nil {
+		if err := requireCatalog(r.Context(), tx); err != nil {
 			return err
 		}
-		var err error
-		out, err = m.preferenceDocument(r.Context(), tx, p, project)
+		out, err = m.preferenceDocument(r.Context(), tx, current, project)
 		return err
 	})
 	if err != nil {
@@ -231,4 +211,67 @@ func (m *Module) preferences(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	httpapi.WriteJSON(w, 200, out)
+}
+
+func currentPreferencePerson(ctx context.Context, tx pgx.Tx, p tenant.Principal) (*string, error) {
+	id := p.ID
+	if p.Kind == tenant.Agent {
+		id = p.KeyCreatorID
+	}
+	if id == "" {
+		return nil, nil
+	}
+	return modelprefs.CanonicalPerson(ctx, tx, id)
+}
+
+func currentModelReader(r *http.Request, tx pgx.Tx, p tenant.Principal) (tenant.Principal, error) {
+	current, err := workorders.CurrentKeyPrincipal(r, tx, p, "models.read")
+	if err != nil {
+		return current, err
+	}
+	if err := workorders.RefreshPrincipal(r.Context(), tx, current); err != nil {
+		return current, err
+	}
+	return current, authz.RequireTx(r.Context(), tx, current, "models.read", authz.Scope{})
+}
+
+func (m *Module) readSnapshot(ctx context.Context, tenantID string, fn func(pgx.Tx) error) error {
+	return db.InTenantReadSnapshot(ctx, m.pool, tenantID, func(tx pgx.Tx) error {
+		if _, err := tx.Exec(ctx, `SELECT set_config('lock_timeout','5s',true),set_config('statement_timeout','5s',true)`); err != nil {
+			return err
+		}
+		return fn(tx)
+	})
+}
+
+// preferenceFence also serializes canonical-person links and kind retirement.
+func preferenceFence(ctx context.Context, tx pgx.Tx, p tenant.Principal) error {
+	if err := db.LockTenant(ctx, tx, p.TenantID); err != nil {
+		return err
+	}
+	_, err := tx.Exec(ctx, `SELECT pg_advisory_xact_lock(hashtextextended('aeon-model-prefs:'||current_setting('aeon.tenant_id'),0))`)
+	return err
+}
+func requestedRevision(r *http.Request) (int64, error) {
+	values := r.URL.Query()["revision"]
+	if len(values) != 1 || len(values[0]) > 19 {
+		return 0, prefFail(400, "revision_required")
+	}
+	n, err := strconv.ParseInt(values[0], 10, 64)
+	if err != nil || n < 0 {
+		return 0, prefFail(400, "revision_required")
+	}
+	return n, nil
+}
+
+func levelIndex(level string) int {
+	switch level {
+	case "default":
+		return 0
+	case "person":
+		return 1
+	case "project":
+		return 2
+	}
+	return -1
 }

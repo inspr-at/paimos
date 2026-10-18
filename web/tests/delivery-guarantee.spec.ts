@@ -66,7 +66,7 @@ async function setup(page: Page, theme: 'light' | 'dark' = 'light') {
     } as typeof template
   })
   data.messages.splice(0, data.messages.length, ...messages)
-  await page.addInitScript(() => localStorage.setItem('aeon.session-tab', 'messages'))
+  // AEON-1212 / #592 remembers tabs per person; receipt tests explicitly open Chat.
   await mockAgents(page, data)
   const asked: string[][] = []
   await page.route('**/api/inbox/message-status?*', route => {
@@ -86,19 +86,25 @@ async function setup(page: Page, theme: 'light' | 'dark' = 'light') {
 
 for (const theme of ['light', 'dark'] as const) {
   for (const width of [1600, 390]) {
-    test(`${theme} ${width}: listening status in the list and the panel`, async ({ page }) => {
+    test(`${theme} ${width}: listening status in words in the panel, never as a row icon`, async ({ page }) => {
       const { worker, quiet, never } = await setup(page, theme)
       await page.setViewportSize({ width, height: width > 600 ? 1000 : 844 })
       await page.goto('/agents')
-      await expect(row(page, worker.id).locator('[data-listening="yes"]:visible')).toContainText('Listening')
-      await expect(row(page, quiet.id).locator('[data-listening="no"]:visible')).toContainText('Not listening')
-      await expect(row(page, quiet.id).locator('[data-listening="no"]:visible')).toHaveAttribute('data-tip', /^Last pulled its inbox 12m ago through a turn hook\./)
-      await expect(row(page, never.id).locator('[data-listening="no"]:visible')).toHaveAttribute('data-tip', /Has not pulled its inbox yet/)
+      // AEON-1211 (design AEON-1196): rows carry no listening cue; the details say it in words.
+      await expect(row(page, worker.id)).toBeVisible()
+      await expect(page.locator('.sessions .row [data-listening]')).toHaveCount(0)
       expect(await page.evaluate(() => document.scrollingElement!.scrollWidth <= document.scrollingElement!.clientWidth)).toBe(true)
       await shot(page, `list-${width}-${theme}`)
-      await page.goto(`/agents/${quiet.id}`)
-      await panelOf(page).getByRole('tab', { name: 'Overview' }).click()
+      for (const [session, words, tip] of [[worker, 'Listening', /^Pulled its inbox/], [never, 'Not listening · never pulled', /Has not pulled its inbox yet/]] as const) {
+        await page.goto(`/agents/${session.id}?tab=messages`)
+        await panelOf(page).getByRole('tab', { name: 'Details' }).click()
+        await expect(panelOf(page).locator('.now-listen')).toContainText(words)
+        await expect(panelOf(page).locator('.now-listen .listening')).toHaveAttribute('data-tip', tip)
+      }
+      await page.goto(`/agents/${quiet.id}?tab=messages`)
+      await panelOf(page).getByRole('tab', { name: 'Details' }).click()
       await expect(panelOf(page).locator('.now-listen')).toContainText('Not listening · last pulled 12m ago')
+      await expect(panelOf(page).locator('.now-listen .listening')).toHaveAttribute('data-tip', /^Last pulled its inbox 12m ago through a turn hook\./)
       // No coloured edge accent marks the state (AGENTS.md rule 11).
       const edges = await panelOf(page).locator('.now-listen .listening').evaluate(el => { const s = getComputedStyle(el); return [s.borderLeftWidth, s.borderTopWidth] })
       expect(edges).toEqual(['0px', '0px'])
@@ -108,16 +114,28 @@ for (const theme of ['light', 'dark'] as const) {
     test(`${theme} ${width}: own posts read Sent, Delivered, Read or Not delivered, live`, async ({ page }) => {
       const { worker, statuses, messages, asked } = await setup(page, theme)
       await page.setViewportSize({ width, height: width > 600 ? 1000 : 844 })
-      await page.goto(`/agents/${worker.id}`)
+      await page.goto(`/agents/${worker.id}?tab=messages`)
       const panel = panelOf(page)
       const mine = panel.locator('.msg.mine')
-      await expect(mine).toHaveCount(4)
-      await expect(mine.nth(0).locator('.delivery')).toHaveText('Read')
-      await expect(mine.nth(0).locator('.delivery')).toHaveAttribute('data-tip', /^Read by the session · /)
-      await expect(mine.nth(1).locator('.delivery')).toHaveText('Delivered')
-      await expect(mine.nth(2).locator('.undelivered')).toHaveText('Not delivered · the session ended')
+      const queued = panel.locator('.queue-item')
+      await expect(mine).toHaveCount(3)
+      await expect(queued).toHaveCount(1)
+      await expect(queued).toContainText(messages.at(-1)!.body)
+      // AEON-1438: every own post keeps its receipt state; only the latest shows the word.
+      // This latest thread post is the failure, so earlier Read and Delivered stay on the row and Not delivered stays loud.
+      const words = panel.locator('.session-messages .delivery')
+      await expect(mine.nth(0)).toHaveAttribute('data-receipt', 'read')
+      await expect(mine.nth(0).locator('.delivery')).toHaveCount(0)
+      await expect(mine.nth(1)).toHaveAttribute('data-receipt', 'delivered')
+      await expect(mine.nth(1).locator('.delivery')).toHaveCount(0)
+      await expect(words).toHaveCount(0)
+      // Main's compact receipt names the terminal state; its explanation and Retry stay explicit.
+      await expect(mine.nth(2).locator('.undelivered > span')).toHaveText('Not delivered')
+      await expect(mine.nth(2).locator('.undelivered')).toHaveAttribute('data-status', 'not_delivered')
+      await expect(mine.nth(2).locator('.undelivered')).toHaveAttribute('data-tip', 'It will not arrive later. Send it again once the session is listening.')
+      await expect(mine.nth(2).getByRole('button', { name: 'Retry', exact: true })).toBeVisible()
       await expect(mine.nth(2).locator('.delivery')).toHaveCount(0)
-      await expect(mine.nth(3).locator('.delivery')).toHaveText('Sent')
+      await expect(queued).toHaveAttribute('data-status', 'sent')
       // Only the viewer's own posts are asked for.
       const own = new Set(messages.filter(m => m.sender_principal_id === me.id).map(m => m.id))
       expect(asked.flat().every(id => own.has(id))).toBe(true)
@@ -127,13 +145,20 @@ for (const theme of ['light', 'dark'] as const) {
       statuses[last] = 'delivered'
       const before = asked.length
       await signal(page, 'inbox.message_fetched')
+      await expect(queued).toHaveCount(0)
+      await expect(mine).toHaveCount(4)
       await expect(mine.nth(3).locator('.delivery')).toHaveText('Delivered')
+      await expect(mine.nth(3).locator('.delivery')).toHaveAttribute('data-tip', /^Delivered to the session · /)
+      await expect(words).toHaveCount(1)
+      await expect(mine.nth(0).locator('.delivery')).toHaveCount(0)
       const reread = asked.slice(before).flat()
       expect(reread).toContain(last)
       expect(reread).not.toContain(messages[0]!.id) // Read is final.
       statuses[last] = 'read'
       await signal(page, 'inbox.receipt_handed_off')
       await expect(mine.nth(3).locator('.delivery.read')).toHaveText('Read')
+      await expect(mine.nth(3).locator('.delivery.read')).toHaveAttribute('data-tip', /^Read by the session · /)
+      await expect(words).toHaveCount(1)
       expect(await page.evaluate(() => document.scrollingElement!.scrollWidth <= document.scrollingElement!.clientWidth)).toBe(true)
     })
   }

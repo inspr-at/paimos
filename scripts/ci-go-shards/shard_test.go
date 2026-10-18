@@ -260,6 +260,7 @@ func TestWorkflowShardLayouts(t *testing.T) {
 			} `yaml:"strategy"`
 			Steps []struct {
 				Name string
+				If   string            `yaml:"if"`
 				Uses string            `yaml:"uses"`
 				Run  string            `yaml:"run"`
 				With map[string]any    `yaml:"with"`
@@ -288,8 +289,13 @@ func TestWorkflowShardLayouts(t *testing.T) {
 	if job.Env["AEON_GO_SHARD_COUNT"] != "${{ strategy.job-total }}" || job.Env["GOFLAGS"] != "${{ strategy.job-total == 4 && '-count=1' || '' }}" {
 		t.Fatal("shard commands must use the selected count and bypass persistent Mac test results")
 	}
-	if job.Steps[0].With["persist-credentials"] != false || job.Steps[1].With["cache"] != true || job.Steps[1].With["cache-dependency-path"] != "go.sum" {
-		t.Fatal("routed checkout must remain credential-free and Go caching must use go.sum")
+	if job.Steps[0].With["persist-credentials"] != false {
+		t.Fatal("routed checkout must remain credential-free")
+	}
+	// Pool runners retain their Go caches on disk; only hosted runners should
+	// transfer dependency and build caches through GitHub.
+	if job.Steps[1].With["cache"] != "${{ runner.environment == 'github-hosted' }}" || job.Steps[1].With["cache-dependency-path"] != "go.sum" {
+		t.Fatal("Go setup caching must be hosted-only and use go.sum")
 	}
 	foundCache := false
 	foundFreshTests := false
@@ -303,6 +309,9 @@ func TestWorkflowShardLayouts(t *testing.T) {
 		}
 		if strings.HasPrefix(step.Uses, "actions/cache@") {
 			foundCache = true
+			if step.If != "runner.environment == 'github-hosted'" {
+				t.Fatal("Go build cache restore and save must run only on GitHub-hosted runners")
+			}
 			if step.With["path"] != "${{ steps.go-cache-path.outputs.path }}" {
 				t.Fatal("cache must persist the actual GOCACHE path")
 			}
@@ -948,7 +957,7 @@ func TestTimingStepUsesHostedAndIsRequiredForFullValidation(t *testing.T) {
 	timing := workflow.Jobs["go-timing"]
 	// OPS-257 L4: the static layout (PR-only affected lane) is the only skip
 	// beyond the classified exemption; full validation always runs timing hosted.
-	if timing.RunsOn != "ubuntu-latest" || timing.If != "always() && needs.ci-plan.result == 'success' && needs.tier-plan.result == 'success' && (needs.tier-plan.outputs.lane == 'full' && needs.tier-plan.outputs.layout != 'static') && needs.tree-reuse.outputs.reuse != 'merge_group'" || !reflect.DeepEqual(timing.Needs, []any{"ci-plan", "tree-reuse", "tier-plan"}) {
+	if timing.RunsOn != "ubuntu-latest" || timing.If != "always() && needs.ci-plan.result == 'success' && (needs.ci-plan.outputs.lane == 'full' && (github.event_name != 'pull_request' || needs.ci-plan.outputs.layout != 'static')) && needs.tree-reuse.outputs.reuse != 'merge_group'" || !reflect.DeepEqual(timing.Needs, []any{"ci-plan", "tree-reuse"}) {
 		t.Fatal("timing job must run hosted for full validation")
 	}
 	count := 0

@@ -8,19 +8,20 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"errors"
-	"io"
 	"net/http"
 	"regexp"
 	"slices"
 	"strconv"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"github.com/inspr-at/paimos/internal/authz"
 	"github.com/inspr-at/paimos/internal/db"
 	"github.com/inspr-at/paimos/internal/harness"
 	"github.com/inspr-at/paimos/internal/httpapi"
 	"github.com/inspr-at/paimos/internal/tenant"
+	"github.com/inspr-at/paimos/internal/workerlease"
 	"github.com/inspr-at/paimos/internal/workorders"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -28,14 +29,21 @@ import (
 
 type Options struct{ Enabled bool }
 type Module struct {
-	pool    *pgxpool.Pool
-	enabled bool
+	pool       *pgxpool.Pool
+	enabled    bool
+	live       liveRelay
+	liveChecks chan struct{}
 }
 
-// New ships disabled. Enabling R1 supplies identity only, never native wake,
-// delivery or implicit permission to launch/resume an agent.
+// New ships disabled. Enabling supplies identity, participant history and
+// authenticated live/final outbox routes. It never wakes or launches an agent.
 func New(pool *pgxpool.Pool, options ...Options) *Module {
 	m := &Module{pool: pool}
+	checks := 4
+	if pool != nil {
+		checks = max(1, min(checks, int(pool.Config().MaxConns-db.ForegroundReserve)))
+	}
+	m.liveChecks = make(chan struct{}, checks)
 	if len(options) > 0 {
 		m.enabled = options[0].Enabled
 	}
@@ -46,8 +54,20 @@ func (m *Module) Mount(mux *http.ServeMux) {
 	mux.HandleFunc("POST /api/projects/{projectId}/chat-roles", handle(m, m.createRole))
 	mux.HandleFunc("POST /api/projects/{projectId}/chat-threads/resolve", handle(m, m.resolveThread))
 	mux.HandleFunc("GET /api/chat-threads/{id}", handle(m, m.getThread))
+	mux.HandleFunc("GET /api/chat-sessions/{sessionId}/thread", handle(m, m.sessionThread))
+	mux.HandleFunc("GET /api/chat-threads/{id}/messages", handle(m, m.listMessages))
+	mux.HandleFunc("GET /api/chat-threads/{id}/read-marker", handle(m, m.getSeen))
+	mux.HandleFunc("PUT /api/chat-threads/{id}/read-marker", handle(m, m.unionSeen))
 	mux.HandleFunc("POST /api/chat-threads/{id}/binding", handle(m, m.bindThread))
 	mux.HandleFunc("POST /api/chat-deliveries/binding/resolve", handle(m, m.resolveWorker))
+	mux.HandleFunc("POST /api/chat-deliveries/binding/current", handle(m, m.currentWorker))
+	mux.HandleFunc("GET /api/chat-threads/{id}/live", m.streamLive)
+	mux.HandleFunc("POST /api/chat-deliveries/live", handle(m, m.publishLive))
+	mux.HandleFunc("GET /api/chat-threads/{id}/outbox", handle(m, m.listOutbox))
+	mux.HandleFunc("POST /api/chat-threads/{id}/outbox", handle(m, m.sendOutbox))
+	mux.HandleFunc("POST /api/chat-deliveries/outbox", handle(m, m.workerOutbox))
+	mux.HandleFunc("POST /api/chat-deliveries/final", handle(m, m.finalMessage))
+	mux.HandleFunc("POST /api/chat-deliveries/outbox/receipt", handle(m, m.workerReceipt))
 }
 
 func unavailable() error { return workorders.Fail(404, "chat binding unavailable") }
@@ -76,7 +96,11 @@ func handle[Input any](m *Module, op func(*http.Request, pgx.Tx, tenant.Principa
 				workorders.WriteError(w, err)
 				return
 			}
-			r.Body = io.NopCloser(bytes.NewReader(raw))
+			if !utf8.Valid(raw) {
+				httpapi.WriteError(w, 400, "invalid UTF-8 request body")
+				return
+			}
+			httpapi.SetRequestBody(r, raw)
 			if err := workorders.Decode(r, &in); err != nil {
 				workorders.WriteError(w, err)
 				return
@@ -95,48 +119,33 @@ func handle[Input any](m *Module, op func(*http.Request, pgx.Tx, tenant.Principa
 			workorders.WriteError(w, err)
 			return
 		}
+		if committed, ok := out.(interface{ afterCommit(*Module) }); ok {
+			committed.afterCommit(m)
+		}
 		httpapi.WriteJSON(w, 200, out)
 	}
 }
 
 func readBody(ctx context.Context, w http.ResponseWriter, r *http.Request) ([]byte, error) {
-	controller := http.NewResponseController(w)
-	if deadline, ok := ctx.Deadline(); ok {
-		if err := controller.SetReadDeadline(deadline); err != nil && !errors.Is(err, http.ErrNotSupported) {
-			return nil, workorders.Fail(http.StatusRequestTimeout, "request body deadline unavailable")
-		}
+	limit := int64(8192)
+	if strings.HasSuffix(r.URL.Path, "/outbox") || strings.HasSuffix(r.URL.Path, "/final") {
+		limit = 512 << 10
 	}
-	body := http.MaxBytesReader(w, r.Body, 8192)
-	type result struct {
-		raw []byte
-		err error
+	if strings.HasSuffix(r.URL.Path, "/live") {
+		limit = 128 << 10
 	}
-	done := make(chan result, 1)
-	go func() {
-		raw, err := io.ReadAll(body)
-		done <- result{raw, err}
-	}()
-	select {
-	case got := <-done:
-		// Clear the connection deadline only after a complete body. An
-		// incomplete/timed-out request must not resume keep-alive reads.
-		if got.err == nil && ctx.Err() == nil {
-			_ = controller.SetReadDeadline(time.Time{})
-			return got.raw, nil
-		}
-		var tooLarge *http.MaxBytesError
-		if errors.As(got.err, &tooLarge) {
-			return nil, workorders.Fail(http.StatusBadRequest, "request body too large")
-		}
-		return nil, workorders.Fail(http.StatusRequestTimeout, "request body did not arrive in time")
-	case <-ctx.Done():
-		// An explicit socket deadline also interrupts a read when the
-		// caller cancels before the three-second deadline. Closing releases
-		// cancellable bodies used by middleware and isolated transports.
-		_ = controller.SetReadDeadline(time.Now())
-		_ = body.Close()
-		return nil, workorders.Fail(http.StatusRequestTimeout, "request body did not arrive in time")
+	if r.Method == http.MethodPut {
+		limit = 16384
 	}
+	raw, err := httpapi.ReadRequestBody(w, r.WithContext(ctx), limit, 3*time.Second)
+	if err == nil {
+		return raw, nil
+	}
+	var tooLarge *http.MaxBytesError
+	if errors.As(err, &tooLarge) {
+		return nil, workorders.Fail(http.StatusBadRequest, "request body too large")
+	}
+	return nil, workorders.Fail(http.StatusRequestTimeout, "request body did not arrive in time")
 }
 
 // Chat identity writes do not move the tree. Take only the tenant access
@@ -239,7 +248,7 @@ func loadThread(ctx context.Context, tx pgx.Tx, id string) (Thread, error) {
 	var live bool
 	err = tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM chat_session_bindings b JOIN harness_sessions s ON s.tenant_id=b.tenant_id AND s.id=b.session_id
  WHERE b.role_id=$1 AND b.valid_to IS NULL AND s.stopped_at IS NULL AND s.archived_at IS NULL AND s.phase NOT IN ('stopping','stopped')
- AND s.management='unmanaged' AND s.owner_principal_id=b.owner_person_id AND s.agent_principal_id=b.agent_principal_id
+ AND (s.management='unmanaged' OR s.management='managed' AND s.capabilities @> ARRAY['chat']::text[]) AND s.owner_principal_id=b.owner_person_id AND s.agent_principal_id=b.agent_principal_id
  AND coalesce(s.heartbeat_at,s.created_at)>clock_timestamp()-interval '2 minutes')`, out.Role.ID).Scan(&live)
 	if live {
 		out.Readiness.State = "unavailable"
@@ -264,6 +273,33 @@ func (m *Module) getThread(r *http.Request, tx pgx.Tx, p tenant.Principal, _ str
 	}
 	var project string
 	if err = tx.QueryRow(r.Context(), `SELECT project_id::text FROM chat_threads WHERE id=$1 AND person_id=$2 AND archived_at IS NULL`, id, person).Scan(&project); err != nil {
+		return nil, err
+	}
+	if err = require(r.Context(), tx, p, "chat.read", project); err != nil {
+		return nil, err
+	}
+	return loadThread(r.Context(), tx, id)
+}
+
+// sessionThread finds the caller's own conversation whose current binding is
+// this session, so the session panel can open the live stream (AEON-1071). It
+// reveals nothing about other people's threads or past bindings.
+func (m *Module) sessionThread(r *http.Request, tx pgx.Tx, p tenant.Principal, _ struct{}) (any, error) {
+	session := r.PathValue("sessionId")
+	if !workorders.UUID(session) {
+		return nil, unavailable()
+	}
+	if err := accessFence(r.Context(), tx, p); err != nil {
+		return nil, err
+	}
+	person, err := personID(r.Context(), tx, p)
+	if err != nil {
+		return nil, err
+	}
+	var id, project string
+	if err = tx.QueryRow(r.Context(), `SELECT t.id::text,t.project_id::text FROM chat_session_bindings b
+ JOIN chat_threads t ON t.tenant_id=b.tenant_id AND t.role_id=b.role_id AND t.person_id=b.owner_person_id
+ WHERE b.session_id=$1 AND b.valid_to IS NULL AND b.owner_person_id=$2 AND t.archived_at IS NULL`, session, person).Scan(&id, &project); err != nil {
 		return nil, err
 	}
 	if err = require(r.Context(), tx, p, "chat.read", project); err != nil {
@@ -321,7 +357,7 @@ func (m *Module) bindThread(r *http.Request, tx pgx.Tx, p tenant.Principal, in B
 	if _, err = tx.Exec(r.Context(), `SELECT 1 FROM chat_threads WHERE id=$1 FOR NO KEY UPDATE`, id); err != nil {
 		return nil, err
 	}
-	s, err := harness.ExternalRegistrationTx(r.Context(), tx, in.SessionID, true)
+	s, err := harness.ChatRegistrationTx(r.Context(), tx, in.SessionID, true)
 	if err != nil {
 		return nil, err
 	}
@@ -387,6 +423,48 @@ func (m *Module) resolveWorker(r *http.Request, tx pgx.Tx, p tenant.Principal, i
 	return loadThread(r.Context(), tx, in.ConversationID)
 }
 
+// currentWorker lets the owning worker discover only its own session's current
+// binding. Candidate rows are then re-verified through AuthorizeWorkerTx, so
+// the lookup has exactly the relay routes' lease, epoch and native checks.
+func (m *Module) currentWorker(r *http.Request, tx pgx.Tx, p tenant.Principal, in CurrentBindingRequest) (any, error) {
+	if !workorders.UUID(in.SessionID) {
+		return nil, unavailable()
+	}
+	if err := accessFence(r.Context(), tx, p); err != nil {
+		return nil, err
+	}
+	s, err := harness.VerifyChatLeaseTx(r.Context(), tx, r, p, in.SessionID, false)
+	if err != nil {
+		return nil, err
+	}
+	if err = require(r.Context(), tx, p, "chat.receive", s.ProjectID); err != nil {
+		return nil, err
+	}
+	if err = workerKeyTx(r.Context(), tx, r, p); err != nil {
+		return nil, err
+	}
+	if _, err = tx.Exec(r.Context(), `SELECT set_config('aeon.chat_session_id',$1,true)`, s.ID); err != nil {
+		return nil, err
+	}
+	var role string
+	var epoch int64
+	if err = tx.QueryRow(r.Context(), `SELECT role_id::text,binding_epoch FROM chat_session_bindings WHERE session_id=$1 AND agent_principal_id=$2 AND owner_person_id=$3 AND valid_to IS NULL`, s.ID, p.ID, s.OwnerPersonID).Scan(&role, &epoch); err != nil {
+		return nil, err
+	}
+	if _, err = tx.Exec(r.Context(), `SELECT set_config('aeon.chat_role_id',$1,true)`, role); err != nil {
+		return nil, err
+	}
+	var thread string
+	if err = tx.QueryRow(r.Context(), `SELECT id::text FROM chat_threads WHERE role_id=$1 AND person_id=$2 AND archived_at IS NULL`, role, s.OwnerPersonID).Scan(&thread); err != nil {
+		return nil, err
+	}
+	out := CurrentBinding{Contract: "chat-live-v1", ConversationID: thread, BindingEpoch: strconv.FormatInt(epoch, 10)}
+	if _, err = AuthorizeWorkerTx(r.Context(), tx, r, p, WorkerBindingRequest{out.ConversationID, s.ID, out.BindingEpoch}); err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 // AuthorizeWorkerTx is the common boundary for subsequent history/claim
 // packages. The caller must first hold the tenant access fence. All context
 // derives from verified server rows, never headers naming a role/person.
@@ -398,7 +476,7 @@ func AuthorizeWorkerTx(ctx context.Context, tx pgx.Tx, r *http.Request, p tenant
 	if err != nil {
 		return harness.ExternalRegistration{}, err
 	}
-	s, err := harness.VerifyExternalLeaseTx(ctx, tx, r, p, in.SessionID, false)
+	s, err := harness.VerifyChatLeaseTx(ctx, tx, r, p, in.SessionID, false)
 	if err != nil {
 		return s, err
 	}
@@ -432,7 +510,7 @@ func AuthorizeWorkerTx(ctx context.Context, tx pgx.Tx, r *http.Request, p tenant
 		return s, err
 	}
 	// Recheck the exact lease and liveness after acquiring the ordered locks.
-	s, err = harness.VerifyExternalLeaseTx(ctx, tx, r, p, in.SessionID, true)
+	s, err = harness.VerifyChatLeaseTx(ctx, tx, r, p, in.SessionID, true)
 	if err != nil {
 		return s, err
 	}
@@ -492,21 +570,25 @@ func verifyNativeContext(ctx context.Context, tx pgx.Tx, s harness.ExternalRegis
 }
 
 func workerKeyTx(ctx context.Context, tx pgx.Tx, r *http.Request, p tenant.Principal) error {
-	scheme, token, ok := strings.Cut(strings.TrimSpace(r.Header.Get("Authorization")), " ")
-	if !ok || !strings.EqualFold(scheme, "Bearer") {
+	return workerKeyPermissionTx(ctx, tx, r, p, "chat.receive")
+}
+
+func workerKeyPermissionTx(ctx context.Context, tx pgx.Tx, r *http.Request, p tenant.Principal, permission string) error {
+	token, malformed := workerlease.AgentToken(strings.TrimSpace(r.Header.Get("Authorization")))
+	if malformed || token == "" || len(token) > 8192 {
 		return unavailable()
 	}
-	rest, ok := strings.CutPrefix(strings.TrimSpace(token), "aeon_")
+	rest, ok := strings.CutPrefix(token, "aeon_")
 	if !ok {
 		return unavailable()
 	}
 	prefix, secret, ok := strings.Cut(rest, "_")
-	if !ok || len(token) > 8192 {
+	if !ok {
 		return unavailable()
 	}
 	sum := sha256.Sum256([]byte(secret))
 	var allowed bool
-	err := tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM agent_keys WHERE principal_id=$1 AND prefix=$2 AND hash=$3 AND revoked_at IS NULL AND (expires_at IS NULL OR expires_at>clock_timestamp()) AND 'chat.receive'=ANY(scopes))`, p.ID, prefix, hex.EncodeToString(sum[:])).Scan(&allowed)
+	err := tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM agent_keys WHERE principal_id=$1 AND prefix=$2 AND hash=$3 AND revoked_at IS NULL AND (expires_at IS NULL OR expires_at>clock_timestamp()) AND ((coalesce(full_access,false) AND $4::boolean) OR $5=ANY(scopes)))`, p.ID, prefix, hex.EncodeToString(sum[:]), authz.KeyGrantable(permission, false), permission).Scan(&allowed)
 	if err != nil {
 		return err
 	}

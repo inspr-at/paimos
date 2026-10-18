@@ -1,0 +1,51 @@
+{
+  "installation": {
+    "id": 456
+  },
+  "repository": {
+    "id": 1,
+    "name": "delivery",
+    "full_name": "example/delivery",
+    "default_branch": "main",
+    "private": true
+  },
+  "sender": {
+    "login": "github-merge-queue[bot]",
+    "type": "Bot"
+  },
+  "action": "closed",
+  "number": 7,
+  "pull_request": {
+    "number": 7,
+    "title": "AEON-848: merge status",
+    "state": "closed",
+    "merged": true,
+    "merge_commit_sha": "cccccccccccccccccccccccccccccccccccccccc",
+    "merged_at": "2026-10-07T00:00:00Z",
+    "merged_by": {
+      "login": "github-merge-queue[bot]"
+    },
+    "head": {
+      "sha": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+      "ref": "work/aeon-848-merge",
+      "repo": {
+        "id": 1,
+        "name": "delivery",
+        "full_name": "example/delivery",
+        "default_branch": "main",
+        "private": true
+      }
+    },
+    "base": {
+      "sha": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "ref": "main",
+      "repo": {
+        "id": 1,
+        "name": "delivery",
+        "full_name": "example/delivery",
+        "default_branch": "main",
+        "private": true
+      }
+    }
+  }
+}

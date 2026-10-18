@@ -16,8 +16,10 @@ async function settled(page: Page) { await page.evaluate(async () => { await doc
 async function screenshot(page: Page, name: string) { for (const close of await page.locator('.toast-close').all()) await close.click(); await expect(page.locator('.toast')).toHaveCount(0); await settled(page); mkdirSync(shots, { recursive: true }); await page.screenshot({ path: `${shots}/${name}.png` }) }
 async function roomy(page: Page, width: number) {
   if (width > 600) { await density(page, 'Comfortable').click(); return }
+  // AEON-1188: the Filters sheet links to the one Display menu.
   await page.getByRole('button', { name: 'Filters', exact: true }).click()
-  const sheet = page.getByRole('dialog', { name: 'Filters', exact: true })
+  await page.getByRole('dialog', { name: 'Filters', exact: true }).getByRole('button', { name: 'Display settings…', exact: true }).click()
+  const sheet = page.getByRole('dialog', { name: 'Display options', exact: true })
   await sheet.getByRole('radiogroup', { name: 'Project header density' }).getByRole('radio', { name: 'Comfortable', exact: true }).click()
   await sheet.locator('footer button').click()
 }
@@ -63,16 +65,16 @@ for (const width of [390, 1024, 1440]) for (const theme of ['light', 'dark']) {
       await expect(page.locator('.header-activity')).toBeHidden()
       const layout = await page.locator('.head-flex').evaluate(element => {
         const title = element.querySelector('.title-line')!.getBoundingClientRect()
-        const progress = element.querySelector('.progress-line')!.getBoundingClientRect()
+        const work = element.querySelector('.head-work')!.getBoundingClientRect()
         const description = element.querySelector('.description')!.getBoundingClientRect()
         const frame = element.getBoundingClientRect()
         return { columns: getComputedStyle(element).gridTemplateColumns.split(' ').length,
-          titleWidth: title.width, availableTitleWidth: progress.left - frame.left - 10,
-          descriptionWidth: description.width, frameWidth: frame.width }
+          titleWidth: title.width, workWidth: work.width, descriptionWidth: description.width, frameWidth: frame.width }
       })
-      expect(layout.columns, 'only the title and progress tracks exist').toBe(2)
-      expect(layout.titleWidth).toBeCloseTo(layout.availableTitleWidth, 0)
-      expect(layout.titleWidth).toBeGreaterThan(240)
+      // AEON-1358: phones stack the title, the counts, the work bar and the description in one full-width track.
+      expect(layout.columns, 'one full-width track').toBe(1)
+      expect(layout.titleWidth).toBeCloseTo(layout.frameWidth, 0)
+      expect(layout.workWidth).toBeCloseTo(layout.frameWidth, 0)
       expect(layout.descriptionWidth).toBeCloseTo(layout.frameWidth, 0)
     } else {
       await expect(countRoot(page).locator('.status-count')).toHaveCount(11)

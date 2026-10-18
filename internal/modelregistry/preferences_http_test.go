@@ -180,16 +180,17 @@ func TestWorkKindLifecyclePaginationAndTenantIsolation(t *testing.T) {
 	if eventCount(t, admin, "work_kind.restored") != 1 {
 		t.Fatal("restore did not record its own event")
 	}
-	for _, method := range []string{"DELETE", "PATCH", "POST"} {
+	for _, method := range []string{"DELETE", "POST"} {
 		path := "/api/work-kinds/" + kindID(t, doc, "security")
 		body := ""
-		if method == "PATCH" {
-			body = `{"label":"Renamed"}`
-		}
 		if method == "POST" {
 			path += "/restore"
 		}
 		expectPrefError(t, admin, method, path, body, 422, "system_kind")
+	}
+	renamed := decode[workKind](t, &admin, "PATCH", "/api/work-kinds/"+kindID(t, doc, "security"), `{"label":"Security checks"}`, 200)
+	if renamed.Slug != "security" || renamed.System == nil || renamed.Label != "Security checks" {
+		t.Fatal("system identity changed", renamed)
 	}
 	expectPrefError(t, other, "PATCH", "/api/work-kinds/"+first.ID, `{"hint":"foreign"}`, 404, "not found")
 	page := decode[workKindPage](t, &admin, "GET", "/api/work-kinds?limit=1", "", 200)
@@ -211,6 +212,11 @@ func TestWorkKindLifecyclePaginationAndTenantIsolation(t *testing.T) {
 		t.Fatal("kind audit mismatch")
 	}
 }
+
+// Risk: a retired route still runs or retirement is not audited and
+// reversible, another person's or an operator key's call gains a person's row,
+// or a person's kind row changes calls that name no kind. Models v2: GET
+// /models/resolve without a kind is the Default walk for the key's person.
 func TestRetirementAndResolveCompatibilityGolden(t *testing.T) {
 	reset(t)
 	admin := makePrincipal(t, "resolve-prefs", "person", "Admin", []string{"admin"})
@@ -219,37 +225,19 @@ func TestRetirementAndResolveCompatibilityGolden(t *testing.T) {
 	agent.KeyCreatorID = admin.ID
 	agent.Scopes = []string{"models.read", "nodes.read"}
 	dbtest.BindRole(t, testDB, admin.TenantID, agent.ID, "admin")
-	doc := prefDoc(t, admin)
+	prefDoc(t, admin)
 	profiles := decode[[]Profile](t, &admin, "GET", "/api/models", "", 200)
-	// Exact existing shape, including part A's additive trace, is the golden.
-	var golden []byte
-	if err := db.InTenant(dbtest.Seed(t.Context()), appPool, admin.TenantID, func(tx pgx.Tx) error {
-		now, err := dbNow(t.Context(), tx)
-		if err != nil {
-			return err
-		}
-		resolution, err := resolveRole(t.Context(), tx, resolveQuery{Role: "build"}, now)
-		if err != nil {
-			return err
-		}
-		_, trace, _, err := placementTrace(t.Context(), tx, WorkQuery{Role: "build", PersonID: &admin.ID})
-		if err != nil {
-			return err
-		}
-		golden, err = json.Marshal(struct {
-			Resolution
-			Trace PreferenceTrace `json:"trace"`
-		}{resolution, trace})
-		return err
-	}); err != nil {
-		t.Fatal(err)
+	opus := profileBySlug(profiles, "claude-opus-xhigh")
+	inRegistry(t, admin, func(tx pgx.Tx) error {
+		enrollHarnesses(t, tx, admin, "codex", "claude")
+		// The person's own backend row (a pinned matrix cell before Models v2).
+		return dbtest.PersonModelsOrder(t.Context(), tx, admin.TenantID, admin.ID, "backend", "first", "wait", opus.ID)
+	})
+	status, golden := call(t, &admin, "GET", "/api/models/resolve?role=build", "")
+	var defaultRoute WorkResolution
+	if err := json.Unmarshal(golden, &defaultRoute); status != 200 || err != nil || defaultRoute.Profile == nil || defaultRoute.Trace.Column != "other" {
+		t.Fatalf("Default route: %d %v %s", status, err, golden)
 	}
-	status, raw := call(t, &admin, "GET", "/api/models/resolve?role=build", "")
-	if status != 200 || !bytes.Equal(bytes.TrimSpace(raw), golden) {
-		t.Fatalf("legacy golden changed: %d\n%s\n%s", status, raw, golden)
-	}
-	chosen := profileBySlug(profiles, "codex-sol-high")
-	decode[preferenceWriteResult](t, &admin, "PUT", "/api/model-preferences/levels/person/rows/"+kindID(t, doc, "backend"), prefRowBody(0, modelprefs.Cell{Mode: "pinned", ProfileID: chosen.ID}, modelprefs.Cell{Mode: "pinned", ProfileID: chosen.ID}, false), 200)
 	for _, p := range []tenant.Principal{admin, agent} {
 		expectPrefError(t, p, "GET", "/api/models/resolve?role=build&area=backend&person_id="+other.ID, "", 403, "person_not_caller")
 	}
@@ -260,37 +248,58 @@ func TestRetirementAndResolveCompatibilityGolden(t *testing.T) {
 		WorkResolution
 		Preference PreferenceDecision `json:"preference"`
 	}](t, &operator, "GET", "/api/models/resolve?role=build&area=backend", "", 200)
-	if resolved.Preference.PersonID != nil {
+	if resolved.Preference.PersonID != nil || resolved.Trace.SetBy == "person" {
 		t.Fatal("operator got You level")
 	}
+	own := decode[WorkResolution](t, &admin, "GET", "/api/models/resolve?role=build&area=backend", "", 200)
+	if own.Profile == nil || own.Trace.SetBy != "person" {
+		t.Fatal("the person's own row did not run", own)
+	}
+	if line, _ := modelsLine(*own.Profile); line != "anthropic:opus" {
+		t.Fatal("the person's own row ran another line", own)
+	}
+	chosen := *own.Profile
 	decode[map[string]any](t, &admin, "POST", "/api/models/"+chosen.ID+"/retire", `{"reason":"Superseded"}`, 200)
 	retired := decode[WorkResolution](t, &admin, "GET", "/api/models/resolve?role=build&area=backend", "", 200)
-	if retired.Profile != nil && retired.Profile.ID == chosen.ID || !strings.Contains(retired.Trace.Fallback, "retired") {
+	if retired.Profile != nil && retired.Profile.ID == chosen.ID {
 		t.Fatal("retired pin selected", retired)
 	}
+	for _, c := range retired.Ladder {
+		if c.ProfileID == chosen.ID && c.Selected {
+			t.Fatal("retired pin selected", retired)
+		}
+	}
 	decode[map[string]any](t, &admin, "DELETE", "/api/models/"+chosen.ID+"/retire", "", 200)
+	restored := decode[WorkResolution](t, &admin, "GET", "/api/models/resolve?role=build&area=backend", "", 200)
+	if restored.Profile == nil || restored.Profile.ID != chosen.ID {
+		t.Fatal("restored pin did not run again", restored)
+	}
 	if eventCount(t, admin, "model.profile_retired") != 1 || eventCount(t, admin, "model.profile_restored") != 1 {
 		t.Fatal("retirement audit")
 	}
-	// Calls with no new parameters stay on the same advisory ladder afterwards.
-	_, raw = call(t, &admin, "GET", "/api/models/resolve?role=build", "")
-	if !bytes.Equal(bytes.TrimSpace(raw), golden) {
+	// Calls with no new parameters stay on the same Default walk afterwards.
+	_, raw := call(t, &admin, "GET", "/api/models/resolve?role=build", "")
+	if !bytes.Equal(bytes.TrimSpace(raw), bytes.TrimSpace(golden)) {
 		t.Fatal("preferences changed legacy response", string(raw))
 	}
 	expectPrefError(t, admin, "GET", "/api/models/resolve?role=review-gate&area=backend", "", 400, "author_family")
 }
 
+// Risk: query parameters override the ticket's stored placement, the
+// person's own row or the ticket's residency is lost, or a review ignores the
+// qualified gate. Models v2: the person's own backend row (a pinned matrix
+// cell before) owns the route; reviews follow the ticket's kind.
 func TestPreferenceTicketResolutionUsesStoredPlacement(t *testing.T) {
 	reset(t)
 	admin := makePrincipal(t, "prefs-ticket", "person", "Admin", []string{"admin"})
 	other := makePrincipal(t, "prefs-ticket-other", "person", "Other", []string{"admin"})
-	doc := prefDoc(t, admin)
+	prefDoc(t, admin)
 	profiles := decode[[]Profile](t, &admin, "GET", "/api/models", "", 200)
-	normal := modelprefs.Cell{Mode: "pinned", ProfileID: profileBySlug(profiles, "codex-sol-high").ID}
-	complex := modelprefs.Cell{Mode: "pinned", ProfileID: profileBySlug(profiles, "codex-sol-xhigh").ID}
-	decode[preferenceWriteResult](t, &admin, "PUT", "/api/model-preferences/levels/person/rows/"+kindID(t, doc, "backend"), prefRowBody(0, normal, complex, false), 200)
 	var project, ticket string
 	if err := db.InTenant(dbtest.Seed(t.Context()), appPool, admin.TenantID, func(tx pgx.Tx) error {
+		if err := dbtest.PersonModelsOrder(t.Context(), tx, admin.TenantID, admin.ID, "backend", "first", "default", profileBySlug(profiles, "codex-sol-xhigh").ID); err != nil {
+			return err
+		}
 		if err := tx.QueryRow(t.Context(), `INSERT INTO nodes(tenant_id,kind_id,key,title) SELECT $1,id,'TKT-1','Project' FROM node_kinds WHERE slug='project' RETURNING id::text`, admin.TenantID).Scan(&project); err != nil {
 			return err
 		}
@@ -304,7 +313,7 @@ func TestPreferenceTicketResolutionUsesStoredPlacement(t *testing.T) {
 			Preference PreferenceDecision `json:"preference"`
 		}](t, &admin, "GET", "/api/models/resolve?ticket="+key+"&area=other&complexity=S", "", 200)
 		trace := result.Preference
-		if result.Role != "build-hard" || trace.Kind.Slug != "backend" || trace.Complexity.Bucket != "complex" || trace.Complexity.Source != "manual" || trace.Cell.SetBy != "person" || trace.Cell.Selector != complex || trace.PersonID == nil || *trace.PersonID != admin.ID || trace.ProjectID == nil || *trace.ProjectID != project || trace.Residency.TicketRequirement != "eu" || result.Residency != "eu" {
+		if result.Role != "build-hard" || trace.Kind.Slug != "backend" || trace.Complexity.Bucket != "complex" || trace.Complexity.Source != "manual" || trace.Cell.SetBy != "person" || result.Trace.Situation != "stuck" || trace.PersonID == nil || *trace.PersonID != admin.ID || trace.ProjectID == nil || *trace.ProjectID != project || trace.Residency.TicketRequirement != "eu" || result.Residency != "eu" {
 			t.Fatalf("ticket placement did not win: %+v", result)
 		}
 	}
@@ -314,7 +323,7 @@ func TestPreferenceTicketResolutionUsesStoredPlacement(t *testing.T) {
 		WorkResolution
 		Preference PreferenceDecision `json:"preference"`
 	}](t, &admin, "GET", "/api/models/resolve?role=review-gate&author_family=openai&ticket="+ticket, "", 200)
-	if review.Profile != nil && review.Profile.Family == "openai" || review.Preference.Kind.Slug != "review" || len(review.Preference.HardRules) < 3 {
+	if review.Profile != nil && review.Profile.Family == "openai" || review.Preference.Kind.Slug != "backend" || review.Preference.Role != "review-gate" || len(review.Preference.HardRules) < 3 {
 		t.Fatal("preference route bypassed the qualified review gate", review)
 	}
 }
@@ -339,7 +348,7 @@ func TestPreferenceMutationRechecksRevokedGrant(t *testing.T) {
 	recorder := httptest.NewRecorder()
 	done := make(chan struct{})
 	mux := http.NewServeMux()
-	New(appPool).Mount(mux)
+	(&Module{pool: appPool}).mount(mux, (&Module{pool: appPool}).writePreferences)
 	go func() {
 		defer close(done)
 		if err := authz.Require(authz.BindPool(request.Context(), appPool), "model_prefs.manage", authz.Scope{}); err != nil {
@@ -399,9 +408,12 @@ func TestPreferencePickerEvidence(t *testing.T) {
 	admin := makePrincipal(t, "prefs-picker", "person", "Admin", []string{"admin"})
 	runner := addPrincipal(t, admin.TenantID, "agent", "Picker runner", []string{"admin"})
 	prefDoc(t, admin) // seed the registry before binding the allowed model
+	// Use the newest line version for this exact-grant/retirement fixture;
+	// predecessor grants now also qualify their registered successors.
+	const allowedSlug = "codex-6-1-sol-high"
 	var allowedID string
 	if err := db.InTenant(dbtest.Seed(t.Context()), appPool, admin.TenantID, func(tx pgx.Tx) error {
-		if err := tx.QueryRow(t.Context(), `SELECT id::text FROM model_profiles WHERE slug='codex-sol-high'`).Scan(&allowedID); err != nil {
+		if err := tx.QueryRow(t.Context(), `SELECT id::text FROM model_profiles WHERE slug=$1`, allowedSlug).Scan(&allowedID); err != nil {
 			return err
 		}
 		_, err := tx.Exec(t.Context(), `INSERT INTO agent_accounts(tenant_id,account_key,harness,daemon_id,registered_by_principal_id,label,allowed_model_profile_ids)
@@ -420,7 +432,7 @@ func TestPreferencePickerEvidence(t *testing.T) {
 	foundUnqualified := false
 	for _, choice := range view.Choices {
 		total += choice.ResidencyRoutes
-		if choice.Profile.Slug == "codex-sol-high" {
+		if choice.Profile.Slug == allowedSlug {
 			profileID = choice.Profile.ID
 			if choice.Line != "sol" || choice.ModelVersion == "" {
 				t.Fatal("picker used catalog revision instead of model version", choice)

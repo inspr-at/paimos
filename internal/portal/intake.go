@@ -18,6 +18,7 @@ import (
 
 	"github.com/inspr-at/paimos/internal/db"
 	"github.com/inspr-at/paimos/internal/events"
+	"github.com/inspr-at/paimos/internal/httpapi"
 )
 
 const wishIntakeLimit = 5
@@ -114,7 +115,7 @@ func decodeWish(r *http.Request) (wishIntake, error) {
 	if !strings.HasPrefix(r.Header.Get("Content-Type"), "application/json") {
 		return in, errors.New("invalid wish")
 	}
-	buf, err := io.ReadAll(io.LimitReader(r.Body, 24*1024+1))
+	buf, err := httpapi.ReadRequestBody(nil, r, 24*1024+1, httpapi.DefaultBodyReadTimeout)
 	if err != nil || len(buf) > 24*1024 {
 		return in, errors.New("invalid wish")
 	}

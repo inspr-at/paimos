@@ -52,7 +52,8 @@ func RequireQueueDispatcherTx(ctx context.Context, tx pgx.Tx, tenantID, agentID,
 	}
 	var scopes []string
 	var creator string
-	err := tx.QueryRow(ctx, `SELECT k.scopes,coalesce(k.created_by_principal_id::text,'')
+	var fullAccess bool
+	err := tx.QueryRow(ctx, `SELECT k.scopes,coalesce(k.created_by_principal_id::text,''),coalesce(k.full_access,false)
 	 FROM agent_keys k
 	 WHERE k.tenant_id=$1::uuid AND k.id=$2::uuid AND k.principal_id=$3::uuid AND k.revoked_at IS NULL
 	 AND (k.expires_at IS NULL OR k.expires_at>now())
@@ -60,17 +61,18 @@ func RequireQueueDispatcherTx(ctx context.Context, tx pgx.Tx, tenantID, agentID,
 	  WHERE c.tenant_id=k.tenant_id AND c.principal_id=k.principal_id AND (c.state='revoked' OR q.state<>'redeemed'))
 	 AND EXISTS(SELECT 1 FROM principals p WHERE p.tenant_id=k.tenant_id AND p.id=k.principal_id AND p.kind='agent' AND p.status='active'
 	  AND NOT (p.roles && ARRAY['system','importer','operator','embedding','quote_public_service','quote_confirmation_service','portal_public_service']::text[]))`,
-		tenantID, keyID, agentID).Scan(&scopes, &creator)
+		tenantID, keyID, agentID).Scan(&scopes, &creator, &fullAccess)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return ErrForbidden
 	}
 	if err != nil {
 		return err
 	}
+	scopes = ResolveKeyScopes(scopes, fullAccess)
 	if !IsCoordinatorKey(scopes) {
 		return ErrForbidden
 	}
-	p := tenant.Principal{ID: agentID, TenantID: tenantID, Kind: tenant.Agent, Scopes: scopes, KeyCreatorID: creator, KeyID: keyID, AuthKeyID: keyID}
+	p := tenant.Principal{ID: agentID, TenantID: tenantID, Kind: tenant.Agent, Scopes: scopes, FullAccess: fullAccess, KeyCreatorID: creator, KeyID: keyID, AuthKeyID: keyID}
 	return RequireQueueCoordinatorTx(ctx, tx, p, projectID)
 }
 
@@ -197,4 +199,32 @@ func coordinatorAllows(p tenant.Principal, own grants, creator *grants, permissi
 	default:
 		return false
 	}
+}
+
+// RequireIndependentReviewerTx excludes a live coordinator principal even when
+// it presents a narrowed key. Only the designated reviewer run can use its
+// capability; dispatchers cannot also be approval producers.
+func RequireIndependentReviewerTx(ctx context.Context, tx pgx.Tx, p tenant.Principal, project string) error {
+	var independent bool
+	if err := tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM principals p WHERE p.id=$1 AND p.kind='agent' AND p.status='active'
+    AND NOT coalesce(p.messaging_only,false)
+    AND NOT (p.roles && ARRAY['system','importer','operator','embedding','quote_public_service','quote_confirmation_service','portal_public_service']::text[])
+    AND NOT EXISTS(SELECT 1 FROM agent_pairing_computers c WHERE c.tenant_id=p.tenant_id AND c.principal_id=p.id))`, p.ID).Scan(&independent); err != nil {
+		return err
+	}
+	if !independent {
+		return ErrForbidden
+	}
+	g, err := readGrants(ctx, tx, p)
+	if err != nil {
+		return err
+	}
+	coordinator := g.workspaceRole != nil
+	for _, permission := range CoordinatorBaseScopes {
+		coordinator = coordinator && (g.allows(permission, "") || permission == "nodes.read" && contains(g.anyProject, permission))
+	}
+	if coordinator || IsCoordinatorKey(p.Scopes) {
+		return ErrForbidden
+	}
+	return RequireTx(ctx, tx, p, "nodes.read", Scope{ProjectID: project})
 }

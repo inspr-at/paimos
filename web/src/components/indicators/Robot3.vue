@@ -64,21 +64,21 @@ watch(() => props.state, state => { if (state !== 'working') glint.value = 0 })
 
   display: inline-block; flex: none; width: var(--size); height: var(--size); vertical-align: middle; overflow: visible;
 }
-.disk { fill: var(--surface-raised, #fffefa); }
+.disk { fill: var(--surface-raised); }
 .rim { fill: none; stroke: var(--signal); stroke-width: 1.25; opacity: .38; }
-.linework { fill: none; stroke: var(--ink, #203c3d); stroke-width: calc(1.35px * var(--art-stroke, 1)); stroke-linecap: round; stroke-linejoin: round; }
-.head { fill: color-mix(in srgb, var(--signal) 5%, var(--surface-raised, #fffefa)); }
-.eyes { fill: var(--ink, #203c3d); }
-.smile { fill: none; stroke: var(--ink, #203c3d); stroke-width: calc(1.2px * var(--art-stroke, 1)); stroke-linecap: round; }
+.linework { fill: none; stroke: var(--ink); stroke-width: calc(1.35px * var(--art-stroke, 1)); stroke-linecap: round; stroke-linejoin: round; }
+.head { fill: color-mix(in srgb, var(--signal) 5%, var(--surface-raised)); }
+.eyes { fill: var(--ink); }
+.smile { fill: none; stroke: var(--ink); stroke-width: calc(1.2px * var(--art-stroke, 1)); stroke-linecap: round; }
 .antenna, .antenna-halo { fill: var(--signal); }
 .antenna-halo { opacity: .12; }
 .waiting .linework, .waiting .smile, .stale .linework, .stale .smile { stroke: var(--signal); }
 .waiting .eyes, .stale .eyes { fill: var(--signal); }
 .stale .antenna-halo { opacity: 0; }
 .stale .rim { stroke-dasharray: .6 3.2; stroke-linecap: round; opacity: .6; }
-.clock { fill: var(--surface-raised, #fffefa); stroke: var(--signal); stroke-width: 1.4; stroke-linecap: round; stroke-linejoin: round; }
+.clock { fill: var(--surface-raised); stroke: var(--signal); stroke-width: 1.4; stroke-linecap: round; stroke-linejoin: round; }
 .clock path { fill: none; }
-.glint { fill: #c9a24a; stroke: var(--surface-raised, #fffefa); stroke-width: .6; opacity: 0; animation: event-opacity .6s ease-out both; }
+.glint { fill: var(--secondary-line); stroke: var(--surface-raised); stroke-width: .6; opacity: 0; animation: event-opacity .6s ease-out both; }
 @media (prefers-reduced-motion: no-preference) {
   .working .antenna { animation: antenna-work 2.8s ease-in-out infinite; animation-delay: var(--phase); }
   .working:not(.lead) .antenna { animation-duration: 5.6s; }

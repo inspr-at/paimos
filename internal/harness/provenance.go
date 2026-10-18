@@ -16,11 +16,10 @@ import (
 	"unicode"
 	"unicode/utf8"
 
-	"github.com/jackc/pgx/v5"
-
 	"github.com/inspr-at/paimos/internal/rules"
 	"github.com/inspr-at/paimos/internal/tenant"
 	"github.com/inspr-at/paimos/internal/workorders"
+	"github.com/jackc/pgx/v5"
 )
 
 // Instruction provenance is append-only on the session. A worker may still post
@@ -339,10 +338,6 @@ func normalizeProvenance(in []ProvenanceItem, limit int, serverKinds bool) ([]Pr
 		seen[item.LogicalName] = true
 	}
 	return items, nil
-}
-
-func validProvenanceItem(item *ProvenanceItem) bool {
-	return validProvenanceShape(item, false)
 }
 
 func validProvenanceShape(item *ProvenanceItem, serverKinds bool) bool {

@@ -414,8 +414,7 @@ func resolveTicket(ctx context.Context, tx pgx.Tx, ref string) (ticketRef, error
 }
 
 func readRecord(w http.ResponseWriter, r *http.Request) (recordBody, error) {
-	r.Body = http.MaxBytesReader(w, r.Body, 8192)
-	dec := json.NewDecoder(r.Body)
+	dec := httpapi.NewRequestDecoder(w, r, 8192)
 	dec.DisallowUnknownFields()
 	var body recordBody
 	if err := dec.Decode(&body); err != nil {

@@ -12,6 +12,9 @@ import (
 func TestCoordinatorHandover(t *testing.T) {
 	for _, mode := range []string{"stopped", "lost", "explicit", "healthy", "different-principal", "cycle", "concurrent"} {
 		t.Run(mode, func(t *testing.T) {
+			// Fixture state and cleanup belong to this case, including the
+			// competing registrations inside the concurrent-replay case.
+			t.Parallel()
 			f := fixture(t)
 			base := "/api/projects/" + f.project + "/harness-sessions"
 			body := map[string]any{"agent_principal_id": f.agent.ID, "harness": "codex", "host": "local", "management_mode": "unmanaged", "role": "coordinator", "harness_session_ref": "native-ref-" + uid(), "worker_lease": "old-lease-" + uid()}

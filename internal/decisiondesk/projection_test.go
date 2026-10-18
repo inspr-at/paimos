@@ -3,6 +3,7 @@ package decisiondesk
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -14,7 +15,9 @@ import (
 	"github.com/inspr-at/paimos/internal/db"
 	"github.com/inspr-at/paimos/internal/dbtest"
 	"github.com/inspr-at/paimos/internal/inbox"
+	"github.com/inspr-at/paimos/internal/knowledge"
 	"github.com/inspr-at/paimos/internal/questions"
+	"github.com/inspr-at/paimos/internal/stepup/server"
 	"github.com/inspr-at/paimos/internal/tenant"
 	"github.com/jackc/pgx/v5"
 )
@@ -25,6 +28,154 @@ type fixture struct {
 	person, reader, agent         tenant.Principal
 	project, otherProject, ticket string
 	mux                           *http.ServeMux
+}
+
+type stepupVisibilityTx struct {
+	pgx.Tx
+	visibility []byte
+}
+
+func (tx *stepupVisibilityTx) QueryRow(ctx context.Context, sql string, args ...any) pgx.Row {
+	if sql == visibleSQL && len(args) == 28 {
+		tx.visibility, _ = args[21].([]byte)
+	}
+	return tx.Tx.QueryRow(ctx, sql, args...)
+}
+
+// Risk: unrelated permissions multiply the desk's step-up query input at the
+// project limit, or bounding that input hides authorized project requests.
+func TestStepupProjectionBoundsTargetPermissionsAtProjectLimit(t *testing.T) {
+	f := setup(t)
+	err := db.InTenant(dbtest.Seed(t.Context()), f.d.App, f.person.TenantID, func(tx pgx.Tx) error {
+		_, err := tx.Exec(t.Context(), `INSERT INTO nodes(tenant_id,kind_id,key,title) SELECT $1,k.id,aeon_next_node_key($1,k.short_prefix),'Project' FROM node_kinds k CROSS JOIN generate_series(1,998) WHERE k.tenant_id=$1 AND k.slug='project'`, f.person.TenantID)
+		return err
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var role string
+	if err := f.d.Admin.QueryRow(t.Context(), `INSERT INTO roles(tenant_id,key,name) VALUES($1,'feature_approver','Feature approver') RETURNING id::text`, f.person.TenantID).Scan(&role); err != nil {
+		t.Fatal(err)
+	}
+	f.exec(t, `INSERT INTO role_permissions(tenant_id,role_id,permission) VALUES($1,$2,'settings.manage')`, f.person.TenantID, role)
+	f.exec(t, `UPDATE role_bindings SET role_id=$3 WHERE tenant_id=$1 AND principal_id=$2 AND scope_type='project' AND scope_id=$4`, f.person.TenantID, f.reader.ID, role, f.project)
+	approver := tenant.Principal{TenantID: f.person.TenantID, Kind: tenant.Person}
+	if err := f.d.Admin.QueryRow(t.Context(), `INSERT INTO principals(tenant_id,kind,name) VALUES($1,'person','Feature approver') RETURNING id::text`, f.person.TenantID).Scan(&approver.ID); err != nil {
+		t.Fatal(err)
+	}
+	dbtest.BindRole(t, f.d, f.person.TenantID, approver.ID, "feature_approver")
+	agent := f.agent
+	agent.Scopes = append(agent.Scopes, "approvals.request", "nodes.read")
+	mod := stepup.New(f.d.App, nil, "")
+	mod.RecordResultsTx = inbox.RecordResults
+	requests := map[string]string{}
+	for _, project := range []string{"", f.project, f.otherProject} {
+		var projectValue any
+		if project != "" {
+			projectValue = project
+		}
+		projectJSON, err := json.Marshal(projectValue)
+		if err != nil {
+			t.Fatal(err)
+		}
+		before := json.RawMessage(fmt.Sprintf(`{"key":"workspace-summary","project_id":%s,"override":null,"revision":0}`, projectJSON))
+		payload := json.RawMessage(fmt.Sprintf(`{"kind":"feature","key":"workspace-summary","project_id":%s,"enabled":true,"expected_revision":0}`, projectJSON))
+		request, err := mod.Create(t.Context(), agent, stepup.Create{Payload: payload, BeforeHash: stepup.Hash(before)})
+		if err != nil {
+			t.Fatal(err)
+		}
+		requests[project] = request.ID
+	}
+	for _, tc := range []struct {
+		name      string
+		person    tenant.Principal
+		wantItems map[string]bool
+		wantScope int
+	}{
+		{"workspace owner", f.person, map[string]bool{requests[""]: true, requests[f.project]: true, requests[f.otherProject]: true}, 1001},
+		{"minimal workspace approver", approver, map[string]bool{requests[""]: true, requests[f.project]: true, requests[f.otherProject]: true}, 1001},
+		// settings.manage is workspace-only; a project binding cannot grant it.
+		{"project-bound reader", f.reader, map[string]bool{}, 0},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			var page Page
+			var visibility []byte
+			err := db.InTenant(db.AllProjects(t.Context(), "step-up projection input regression"), f.d.App, tc.person.TenantID, func(tx pgx.Tx) error {
+				capture := &stepupVisibilityTx{Tx: tx}
+				var err error
+				page, err = ReadTx(t.Context(), capture, tc.person, 100, nil)
+				visibility = capture.visibility
+				return err
+			})
+			if err != nil {
+				t.Fatal(err)
+			}
+			var permissions map[string][]string
+			if err := json.Unmarshal(visibility, &permissions); err != nil {
+				t.Fatal(err)
+			}
+			if len(permissions) != 1 || len(permissions["settings.manage"]) != tc.wantScope || len(visibility) > 64<<10 {
+				t.Fatalf("step-up input includes unrelated permissions or wrong coverage: permissions=%d scopes=%d bytes=%d", len(permissions), len(permissions["settings.manage"]), len(visibility))
+			}
+			if len(page.Items) != len(tc.wantItems) || page.Counts.Open != len(tc.wantItems) || page.Counts.Held != len(tc.wantItems) {
+				t.Fatalf("wrong authorized request count: %+v", page)
+			}
+			for _, item := range page.Items {
+				if !tc.wantItems[item.ID] || item.Kind != "stepup" || !item.Held {
+					t.Fatalf("wrong authorized request: %+v", item)
+				}
+			}
+		})
+	}
+}
+
+// Risk: a step-up is hidden from eligible people, disclosed to other readers,
+// or sorted outside the held approval expiry bucket.
+func TestStepupProjectionUsesNativePermissionAndHeldExpiry(t *testing.T) {
+	f := setup(t)
+	agent := f.agent
+	agent.Scopes = append(agent.Scopes, "approvals.request", "nodes.read")
+	mod := stepup.New(f.d.App, nil, "")
+	mod.RecordResultsTx = inbox.RecordResults
+	before := json.RawMessage(`{"key":"workspace-summary","project_id":null,"override":null,"revision":0}`)
+	request, err := mod.Create(t.Context(), agent, stepup.Create{Payload: json.RawMessage(`{"kind":"feature","key":"workspace-summary","enabled":true,"expected_revision":0}`), BeforeHash: stepup.Hash(before)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	page, err := f.m.Read(t.Context(), f.person, 100, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var found *Item
+	for i := range page.Items {
+		if page.Items[i].ID == request.ID {
+			found = &page.Items[i]
+		}
+	}
+	if found == nil || found.Kind != "stepup" || !found.Held || found.Bucket != 0 || found.Source != "/api/stepup-requests" || found.Href != "/decision-desk?needs=s:"+request.ID || !found.OrderAt.Equal(request.ExpiresAt) {
+		t.Fatalf("step-up projection %+v", found)
+	}
+	page, err = f.m.Read(t.Context(), f.reader, 100, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, item := range page.Items {
+		if item.ID == request.ID {
+			t.Fatal("reader saw protected request")
+		}
+	}
+	if _, err = mod.Decide(t.Context(), f.person, request.ID, stepup.Decide{Digest: request.Digest, Revision: request.Revision}, "decline", nil); err != nil {
+		t.Fatal(err)
+	}
+	page, err = f.m.Read(t.Context(), f.person, 100, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, item := range page.Items {
+		if item.ID == request.ID {
+			t.Fatal("decided request stayed in queue")
+		}
+	}
 }
 
 func setup(t *testing.T) *fixture {
@@ -317,7 +468,7 @@ func TestKeyTrimProjectionRequiresManageRightsAndKeepsNativeSource(t *testing.T)
 	var id string
 	if err := db.InTenant(ctx, f.d.App, f.person.TenantID, func(tx pgx.Tx) error {
 		var key string
-		if err := tx.QueryRow(ctx, `INSERT INTO agent_keys(tenant_id,principal_id,name,prefix,hash,scopes) VALUES($1,$2,'Desk worker','desk-trim-fixture',decode(repeat('00',32),'hex'),ARRAY['nodes.read','nodes.write']) RETURNING id::text`, f.person.TenantID, f.agent.ID).Scan(&key); err != nil {
+		if err := tx.QueryRow(ctx, `INSERT INTO agent_keys(tenant_id,principal_id,name,prefix,hash,scopes,created_by_principal_id) VALUES($1,$2,'Desk worker','desk-trim-fixture',decode(repeat('00',32),'hex'),ARRAY['nodes.read','nodes.write'],(SELECT id FROM principals WHERE tenant_id=$1::uuid AND kind='person' ORDER BY created_at,id LIMIT 1)) RETURNING id::text`, f.person.TenantID, f.agent.ID).Scan(&key); err != nil {
 			return err
 		}
 		return tx.QueryRow(ctx, `INSERT INTO key_trim_proposals(tenant_id,key_id,created_by,request_id,request_digest,previous_scopes,snapshot_digest,candidate_scopes,candidate_digest,evidence,usage,created_at,expires_at)
@@ -347,5 +498,83 @@ func TestKeyTrimProjectionRequiresManageRightsAndKeepsNativeSource(t *testing.T)
 		if item.Kind == "key_trim" {
 			t.Fatal("desk disclosed key trim to a non-manager")
 		}
+	}
+}
+
+// Risk: raw nominations, stale sources or inaccessible projects leak into the
+// person Desk; pagination or a decision leaves the lesson count dishonest.
+func TestPreparedLessonProjectionVisibilityAndDecision(t *testing.T) {
+	f := setup(t)
+	knowledge.New(f.d.App).Mount(f.mux)
+	call := func(method, path string, body any) *httptest.ResponseRecorder {
+		t.Helper()
+		raw, _ := json.Marshal(body)
+		r := httptest.NewRequest(method, path, bytes.NewReader(raw)).WithContext(tenant.WithPrincipal(t.Context(), f.person))
+		w := httptest.NewRecorder()
+		f.mux.ServeHTTP(w, r)
+		if w.Code != 200 && w.Code != 201 {
+			t.Fatalf("%s %s: %d %s", method, path, w.Code, w.Body.String())
+		}
+		return w
+	}
+	f.exec(t, `UPDATE nodes SET fields=jsonb_build_object('tags',jsonb_build_array('process-learning')) WHERE tenant_id=$1 AND id=$2`, f.person.TenantID, f.ticket)
+	if page := f.page(t, f.person, 1, nil); page.Counts.Open != 0 {
+		t.Fatalf("raw candidate reached Desk: %+v", page)
+	}
+	w := call("POST", "/api/knowledge", map[string]any{"project_id": f.project, "type": "runbook", "slug": "recovery", "title": "Recovery", "body": "Notes"})
+	var entry knowledge.Entry
+	if err := json.Unmarshal(w.Body.Bytes(), &entry); err != nil {
+		t.Fatal(err)
+	}
+	source := "n-" + f.ticket
+	w = call("PUT", "/api/knowledge/learnings/"+source+"/recommendation", map[string]any{"decision": "accept", "knowledge_id": entry.ID, "lesson": "Rehearse recovery before release.", "source_summary": "A recovery incident exposed a missing check."})
+	var rec knowledge.Recommendation
+	if err := json.Unmarshal(w.Body.Bytes(), &rec); err != nil {
+		t.Fatal(err)
+	}
+	page := f.page(t, f.person, 1, nil)
+	if len(page.Items) != 1 || page.Counts.Open != 1 || page.Counts.Held != 0 || page.Counts.Lessons[f.project] != 1 {
+		t.Fatalf("wrong lesson counts: %+v", page)
+	}
+	item := page.Items[0]
+	if item.Kind != "lesson" || item.Title != rec.Lesson || item.Revision != rec.EventID || item.Source != "/api/knowledge/learnings/"+source || item.Href != "/decision-desk?item=l:"+item.ID || !item.CanDecide || item.PushEligible(page.AsOf) {
+		t.Fatalf("wrong lesson pointer: %+v", item)
+	}
+	var outsider tenant.Principal
+	outsider.TenantID = f.person.TenantID
+	outsider.Kind = tenant.Person
+	if err := f.d.Admin.QueryRow(t.Context(), `INSERT INTO principals(tenant_id,kind,name) VALUES($1,'person','No project access') RETURNING id::text`, f.person.TenantID).Scan(&outsider.ID); err != nil {
+		t.Fatal(err)
+	}
+	if hidden := f.page(t, outsider, 1, nil); hidden.Counts.Open != 0 || len(hidden.Items) != 0 {
+		t.Fatalf("inaccessible lesson leaked: %+v", hidden)
+	}
+
+	f.exec(t, `UPDATE nodes SET title='Changed source' WHERE tenant_id=$1 AND id=$2`, f.person.TenantID, f.ticket)
+	if stale := f.page(t, f.person, 1, nil); stale.Counts.Open != 0 {
+		t.Fatalf("stale source reached Desk: %+v", stale)
+	}
+	f.exec(t, `UPDATE nodes SET title='Work' WHERE tenant_id=$1 AND id=$2`, f.person.TenantID, f.ticket)
+	if restored := f.page(t, f.person, 1, nil); len(restored.Items) != 1 || restored.Items[0].ID != item.ID {
+		t.Fatalf("lesson identity moved: %+v", restored)
+	}
+	held := f.ask(t, f.project, "parked", []string{f.ticket})
+	firstPage := f.page(t, f.person, 1, nil)
+	if !firstPage.HasMore || firstPage.Items[0].ID != held.ID || firstPage.Counts.Open != 2 || firstPage.Counts.Lessons[f.project] != 1 {
+		t.Fatalf("lesson total depends on loaded page: %+v", firstPage)
+	}
+	after, err := decodeCursor(firstPage.NextCursor)
+	if err != nil {
+		t.Fatal(err)
+	}
+	nextPage := f.page(t, f.person, 1, after)
+	if len(nextPage.Items) != 1 || nextPage.Items[0].ID != item.ID || nextPage.Counts.Lessons[f.project] != 1 {
+		t.Fatalf("lesson lost on continuation: %+v", nextPage)
+	}
+	f.decide(t, held, "Continue.")
+
+	call("POST", "/api/knowledge/learnings/"+source+"/dismiss", map[string]any{})
+	if settled := f.page(t, f.person, 1, nil); settled.Counts.Open != 0 {
+		t.Fatalf("dismissed lesson stayed open: %+v", settled)
 	}
 }

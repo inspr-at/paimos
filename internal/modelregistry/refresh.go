@@ -6,11 +6,16 @@ import (
 	"crypto/hmac"
 	"crypto/sha256"
 	"encoding/json"
+	"errors"
+	"fmt"
 	"log/slog"
+	"math"
 	"net/http"
+	"slices"
 	"strings"
 	"time"
 
+	"github.com/inspr-at/paimos/internal/accountuse"
 	"github.com/inspr-at/paimos/internal/authz"
 	"github.com/inspr-at/paimos/internal/db"
 	"github.com/inspr-at/paimos/internal/httpapi"
@@ -32,15 +37,20 @@ type DiscoverySource struct {
 }
 type SourceResult struct {
 	DiscoverySource
-	State string `json:"state"`
-	Seen  int    `json:"seen"`
+	State   string `json:"state"`
+	Seen    int    `json:"seen"`
+	Skipped int    `json:"skipped"`
 }
 type RefreshResult struct {
-	At            time.Time      `json:"at"`
-	Added         int            `json:"added"`
-	Proposed      int            `json:"proposed"`
-	Sources       []SourceResult `json:"sources"`
-	LadderChanged bool           `json:"ladder_changed"`
+	At                     time.Time      `json:"at"`
+	NewLines               []string       `json:"new_lines"`
+	Added                  int            `json:"added"`
+	AcceptedModels         []string       `json:"accepted_models,omitempty"`
+	Proposed               int            `json:"proposed"`
+	Sources                []SourceResult `json:"sources"`
+	HarnessProbesQueued    int            `json:"harness_probes_queued"`
+	HarnessProbesTruncated bool           `json:"harness_probes_truncated"`
+	LadderChanged          bool           `json:"ladder_changed"`
 }
 
 // NewWithVault uses an independent derivation of the existing server key.
@@ -122,6 +132,12 @@ func (m *Module) refresh(w http.ResponseWriter, r *http.Request) {
 	}
 	out, err := m.runRefresh(r.Context(), p, false)
 	if err != nil {
+		var cooldown *refreshCooldown
+		if errors.As(err, &cooldown) {
+			w.Header().Set("Retry-After", fmt.Sprint(cooldown.RetryAfter))
+			httpapi.WriteJSON(w, 429, map[string]any{"error": "model refresh cooldown", "retry_after": cooldown.RetryAfter})
+			return
+		}
 		writeErr(w, err)
 		return
 	}
@@ -129,6 +145,7 @@ func (m *Module) refresh(w http.ResponseWriter, r *http.Request) {
 }
 
 const maxRefreshObservations = 200
+const discoveryCredentialsSQL = `SELECT tenant_id,account_id,vendor,ciphertext FROM model_discovery_credentials UNION ALL SELECT tenant_id,account_id,vendor,ciphertext FROM model_catalog_credentials`
 
 type discoveryInput struct {
 	DiscoverySource
@@ -136,26 +153,45 @@ type discoveryInput struct {
 }
 
 type discoveredSource struct {
-	input discoveryInput
-	ids   []string
-	fresh bool
+	input   discoveryInput
+	catalog ProviderCatalog
+	fresh   bool
 }
 
 // Reserve before making network calls. Only short catalog transactions hold
 // the tenant lock; both workers and the scheduler obey the same interval.
 func (m *Module) runRefresh(ctx context.Context, p tenant.Principal, scheduled bool) (RefreshResult, error) {
-	out := RefreshResult{Sources: []SourceResult{}}
+	return m.runRefreshMode(ctx, p, scheduled, true)
+}
+
+// fetchNeverRun is false only for the server sweep. A tenant that has never
+// refreshed anchors last_run_at and still applies local catalog maintenance,
+// and does not open a socket. The next due sweep fetches keyless catalogs
+// whether or not credential discovery is enabled. Explicit refresh keeps
+// fetchNeverRun true, so a person refresh still looks immediately.
+func (m *Module) runRefreshMode(ctx context.Context, p tenant.Principal, scheduled, fetchNeverRun bool) (RefreshResult, error) {
+	out := RefreshResult{Sources: []SourceResult{}, NewLines: []string{}}
 	inputs := []discoveryInput{}
 	reserved := false
-	err := m.in(ctx, p.TenantID, func(tx pgx.Tx) error {
+	var anchorOnly bool
+	err := m.in(ctx, p.TenantID, func(tx pgx.Tx) (err error) {
+		if err := preferenceFence(ctx, tx, p); err != nil {
+			return err
+		}
 		if !scheduled {
 			if err := authz.RequireTx(ctx, tx, p, "models.refresh", authz.Scope{}); err != nil {
 				return fail(403, "permission denied")
 			}
 		}
-		if err := ensureCatalog(ctx, tx, p); err != nil {
+		pending, err := prepareCatalogDeferred(ctx, tx, p)
+		if err != nil {
 			return err
 		}
+		defer func() {
+			if err == nil {
+				err = flushCatalogChanges(ctx, tx, p, pending)
+			}
+		}()
 		if err := catalogLock(ctx, tx); err != nil {
 			return err
 		}
@@ -163,21 +199,38 @@ func (m *Module) runRefresh(ctx context.Context, p tenant.Principal, scheduled b
 		if err != nil {
 			return err
 		}
-		if out.At, err = dbNow(ctx, tx); err != nil {
+		clock := m.validationClock
+		if clock == nil {
+			clock = validationNow
+		}
+		if out.At, err = clock(ctx, tx); err != nil {
 			return err
 		}
-		var last *time.Time
-		if err := tx.QueryRow(ctx, `SELECT last_run_at FROM model_refresh_settings FOR UPDATE`).Scan(&last); err != nil {
+		due, err := applyScheduledRetirements(ctx, tx, out.At)
+		if err != nil {
 			return err
 		}
-		if last != nil && out.At.Sub(*last) < time.Duration(cfg.IntervalMinutes)*time.Minute {
+		pending = append(pending, due...)
+		var last, manual *time.Time
+		if err := tx.QueryRow(ctx, `SELECT last_run_at,last_manual_run_at FROM model_refresh_settings FOR NO KEY UPDATE`).Scan(&last, &manual); err != nil {
+			return err
+		}
+		if !scheduled && p.Kind == tenant.Person && manual != nil && out.At.Sub(*manual) < 5*time.Minute {
+			return &refreshCooldown{RetryAfter: max(1, int(math.Ceil((5*time.Minute - out.At.Sub(*manual)).Seconds())))}
+		}
+		if (scheduled || p.Kind != tenant.Person) && last != nil && out.At.Sub(*last) < time.Duration(cfg.IntervalMinutes)*time.Minute {
 			if scheduled {
 				return nil
 			}
 			return fail(429, "model refresh interval has not elapsed")
 		}
-		if cfg.APIEnabled {
-			rows, err := tx.Query(ctx, `SELECT DISTINCT ON (c.vendor) c.account_id::text,c.vendor,c.ciphertext FROM model_discovery_credentials c JOIN agent_accounts a ON a.tenant_id=c.tenant_id AND a.id=c.account_id WHERE a.state='available' ORDER BY c.vendor,c.account_id`)
+		// Never-run is not overdue. Opening the three public catalogs here
+		// created Internet sockets during process start, and network denial
+		// killed the server. A due run (last_run_at already set) still fetches
+		// those keyless catalogs below.
+		skipNet := scheduled && last == nil && !fetchNeverRun
+		if !skipNet && cfg.APIEnabled {
+			rows, err := tx.Query(ctx, `SELECT DISTINCT ON (c.vendor) c.account_id::text,c.vendor,c.ciphertext FROM (`+discoveryCredentialsSQL+`) c JOIN agent_accounts a ON a.tenant_id=c.tenant_id AND a.id=c.account_id WHERE a.state='available' ORDER BY c.vendor,c.account_id`)
 			if err != nil {
 				return err
 			}
@@ -193,11 +246,30 @@ func (m *Module) runRefresh(ctx context.Context, p tenant.Principal, scheduled b
 				return err
 			}
 		}
-		_, err = tx.Exec(ctx, `UPDATE model_refresh_settings SET last_run_at=$1`, out.At)
-		reserved = err == nil
-		return err
+		// Public catalogs send no credentials or tenant data. Discovery opt-in
+		// governs only the credentialed requests above, including scheduled runs.
+		if !skipNet {
+			for _, source := range publicCatalogSources {
+				inputs = append(inputs, discoveryInput{DiscoverySource: DiscoverySource{Vendor: source}})
+			}
+		}
+
+		if cfg.AgentReportsEnabled {
+			out.HarnessProbesQueued, out.HarnessProbesTruncated, err = queueHarnessProbes(ctx, tx, p.TenantID, out.At)
+			if err != nil {
+				return err
+			}
+		}
+		_, err = tx.Exec(ctx, `UPDATE model_refresh_settings SET last_run_at=$1,last_manual_run_at=CASE WHEN $2 THEN $1 ELSE last_manual_run_at END`, out.At, !scheduled && p.Kind == tenant.Person)
+		if err != nil {
+			return err
+		}
+		reserved = true
+		// Anchoring is not a catalog refresh: do not publish an empty result.
+		anchorOnly = skipNet
+		return nil
 	})
-	if err != nil || !reserved {
+	if err != nil || !reserved || anchorOnly {
 		return out, err
 	}
 
@@ -214,20 +286,29 @@ func (m *Module) runRefresh(ctx context.Context, p tenant.Principal, scheduled b
 		var allowed bool
 		// A person may disable discovery or revoke a key while a preceding
 		// vendor is responding. Recheck before starting the next vendor.
-		err := m.in(fetchCtx, p.TenantID, func(tx pgx.Tx) error {
-			return tx.QueryRow(fetchCtx, `SELECT api_enabled AND EXISTS(SELECT 1 FROM model_discovery_credentials c JOIN agent_accounts a ON a.tenant_id=c.tenant_id AND a.id=c.account_id WHERE c.account_id=$1 AND c.vendor=$2 AND c.ciphertext=$3 AND a.state='available') FROM model_refresh_settings`, input.AccountID, input.Vendor, input.cipher).Scan(&allowed)
-		})
-		if err == nil && allowed && fetchCtx.Err() == nil {
-			key, err := linkvault.Decrypt(m.vaultKey, p.TenantID, "models/"+input.AccountID+"/"+input.Vendor, input.cipher)
-			if err == nil {
-				result.ids, err = listVendorModels(fetchCtx, client, input.Vendor, key)
-				result.fresh = err == nil
+		var err error
+		key := ""
+		if input.AccountID == "" {
+			allowed = true
+		} else {
+			err = m.in(fetchCtx, p.TenantID, func(tx pgx.Tx) error {
+				return tx.QueryRow(fetchCtx, `SELECT api_enabled AND EXISTS(SELECT 1 FROM (`+discoveryCredentialsSQL+`) c JOIN agent_accounts a ON a.tenant_id=c.tenant_id AND a.id=c.account_id WHERE c.account_id=$1 AND c.vendor=$2 AND c.ciphertext=$3 AND a.state='available') FROM model_refresh_settings`, input.AccountID, input.Vendor, input.cipher).Scan(&allowed)
+			})
+			if err == nil && allowed {
+				key, err = linkvault.Decrypt(m.vaultKey, p.TenantID, "models/"+input.AccountID+"/"+input.Vendor, input.cipher)
 			}
+		}
+		if err == nil && allowed && fetchCtx.Err() == nil {
+			result.catalog, err = fetchProviderCatalog(fetchCtx, client, input.Vendor, key, out.At)
+			result.fresh = err == nil
 		}
 		fetched = append(fetched, result)
 	}
 
 	err = m.in(ctx, p.TenantID, func(tx pgx.Tx) error {
+		if err := preferenceFence(ctx, tx, p); err != nil {
+			return err
+		}
 		if err := catalogLock(ctx, tx); err != nil {
 			return err
 		}
@@ -252,13 +333,39 @@ func (m *Module) runRefresh(ctx context.Context, p tenant.Principal, scheduled b
 			input := fetched.input
 			result := SourceResult{DiscoverySource: input.DiscoverySource, State: "stale"}
 			// Do not publish results from a revoked key/account or disabled job.
-			var valid bool
-			if err := tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM model_discovery_credentials c JOIN agent_accounts a ON a.tenant_id=c.tenant_id AND a.id=c.account_id WHERE c.account_id=$1 AND c.vendor=$2 AND c.ciphertext=$3 AND a.state='available')`, input.AccountID, input.Vendor, input.cipher).Scan(&valid); err != nil {
-				return err
+			valid := input.AccountID == ""
+			if input.AccountID != "" {
+				if err := tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM (`+discoveryCredentialsSQL+`) c JOIN agent_accounts a ON a.tenant_id=c.tenant_id AND a.id=c.account_id WHERE c.account_id=$1 AND c.vendor=$2 AND c.ciphertext=$3 AND a.state='available')`, input.AccountID, input.Vendor, input.cipher).Scan(&valid); err != nil {
+					return err
+				}
 			}
-			if cfg.APIEnabled && valid && fetched.fresh {
-				observations := discoveryObservations(input.Vendor, out.At.UTC().Format(time.RFC3339Nano)+"/"+input.AccountID, fetched.ids)
-				result.State, result.Seen = "fresh", len(fetched.ids)
+			if (input.AccountID == "" || cfg.APIEnabled) && valid && fetched.fresh {
+				if err := RecordCatalogFacts(ctx, tx, p.TenantID, fetched.catalog.Facts); err != nil {
+					return err
+				}
+				if err := recordCatalogPresence(ctx, tx, p.TenantID, input.Vendor, out.At, fetched.catalog); err != nil {
+					return err
+				}
+				observations := catalogObservations(fetched.catalog, out.At.UTC().Format(time.RFC3339Nano)+"/"+input.Vendor+"/"+input.AccountID)
+				models := map[string]bool{}
+				for _, f := range fetched.catalog.Facts {
+					if f.Fact == "model_id" {
+						models[f.Provider+"/"+f.ModelID+"/"+f.Route] = true
+					}
+				}
+				result.State, result.Seen = "fresh", len(models)
+				result.Skipped = fetched.catalog.Skipped
+				if cfg.AutoAddProfiles {
+					var limited bool
+					var err error
+					observations, limited, err = successorObservations(ctx, tx, observations, remaining)
+					if err != nil {
+						return err
+					}
+					if limited {
+						result.State = "limited"
+					}
+				}
 				if len(observations) > remaining {
 					result.State = "limited"
 					observations = observations[:remaining]
@@ -271,6 +378,24 @@ func (m *Module) runRefresh(ctx context.Context, p tenant.Principal, scheduled b
 					if KnownInvalid(o.Model) {
 						continue
 					}
+					pin, mapped := observedPin(o)
+					pin.Source = "provider"
+					if cfg.AutoAddProfiles && mapped {
+						accepted, err := acceptUsedSuccessor(ctx, tx, p, pin)
+						if err != nil {
+							return err
+						}
+						if accepted {
+							out.Added++
+							// added counts profiles, one per effort. Acceptance is the
+							// distinct model, so four efforts of one successor are one version.
+							id := boardLineID(Profile{Family: pin.Family, Harness: pin.Harness, Model: pin.Model})
+							if !slices.Contains(out.AcceptedModels, id) {
+								out.AcceptedModels = append(out.AcceptedModels, id)
+							}
+							continue
+						}
+					}
 					var exists bool
 					if err := tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM model_profiles WHERE harness=$1 AND model=$2 AND effort=$3)`, o.Harness, o.Model, o.Effort).Scan(&exists); err != nil {
 						return err
@@ -278,10 +403,20 @@ func (m *Module) runRefresh(ctx context.Context, p tenant.Principal, scheduled b
 					if exists {
 						continue
 					}
-					pin, mapped := observedPin(o)
+					pin, mapped = observedPin(o)
+					pin.Source = "provider"
 					if cfg.AutoAddProfiles && mapped {
+						family, line, _ := ProfileLine(Profile{Family: pin.Family, Harness: pin.Harness, Model: pin.Model})
+						id := family + ":" + line
+						var knownLine bool
+						if err := tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM model_profiles WHERE aeon_model_board_line(family,harness,model)=$1)`, id).Scan(&knownLine); err != nil {
+							return err
+						}
 						if _, err := insertObservedProfile(ctx, tx, p.TenantID, pin); err != nil {
 							return err
+						}
+						if !knownLine {
+							out.NewLines = append(out.NewLines, id)
 						}
 						out.Added++
 					} else {
@@ -313,7 +448,10 @@ func (m *Module) putSettings(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, err)
 		return
 	}
-	var in *RefreshSettings
+	var in *struct {
+		RefreshSettings
+		AccountUseRevision *int64 `json:"account_use_revision,omitempty"`
+	}
 	if err := decodeJSON(w, r, &in); err != nil {
 		writeErr(w, err)
 		return
@@ -322,37 +460,94 @@ func (m *Module) putSettings(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, fail(400, "interval_minutes must be from 60 to 43200"))
 		return
 	}
-	if in.APIEnabled && len(m.vaultKey) == 0 {
-		writeErr(w, fail(503, "model discovery vault unavailable"))
-		return
-	}
-	err := m.in(r.Context(), p.TenantID, func(tx pgx.Tx) error {
-		if err := ensureCatalog(r.Context(), tx, p); err != nil {
+
+	err := m.in(r.Context(), p.TenantID, func(tx pgx.Tx) (err error) {
+		if err := db.LockTree(r.Context(), tx, p.TenantID); err != nil {
 			return err
 		}
 		if err := catalogLock(r.Context(), tx); err != nil {
 			return err
 		}
+		if err := accountuse.LockExclusive(r.Context(), tx); err != nil {
+			return err
+		}
 		if err := authz.RequireTx(r.Context(), tx, p, "models.manage", authz.Scope{}); err != nil {
 			return fail(403, "permission denied")
 		}
+		currentRules, err := accountuse.ReadRules(r.Context(), tx)
+		if err != nil {
+			return err
+		}
+		if in.AutoAddProfiles != (currentRules.NewModels == "allow") {
+			// Catalog preparation can write profile/settings rows. Complete
+			// the person and revision checks before that work, under matrix.
+			var revision int64
+			if in.AccountUseRevision != nil {
+				revision = *in.AccountUseRevision
+			}
+			if _, err := accountuse.FenceWrite(r.Context(), tx, p, revision); err != nil {
+				var conflict *accountuse.Error
+				if errors.As(err, &conflict) {
+					return fail(conflict.Status, conflict.Message)
+				}
+				return err
+			}
+		}
+		pending, err := prepareCatalogDeferred(r.Context(), tx, p)
+		if err != nil {
+			return err
+		}
+		defer func() {
+			if err == nil {
+				err = flushCatalogChanges(r.Context(), tx, p, pending)
+			}
+		}()
 		before, err := settings(r.Context(), tx)
 		if err != nil {
 			return err
 		}
-		if before == *in {
+		if before == in.RefreshSettings {
 			return nil
 		}
-		if _, err := tx.Exec(r.Context(), `UPDATE model_refresh_settings SET agent_reports_enabled=$1,auto_add_profiles=$2,api_enabled=$3,interval_minutes=$4`, in.AgentReportsEnabled, in.AutoAddProfiles, in.APIEnabled, in.IntervalMinutes); err != nil {
+		if before.AutoAddProfiles != in.AutoAddProfiles {
+			if p.Kind != tenant.Person || authz.RequireTx(r.Context(), tx, p, accountuse.Permission, authz.Scope{}) != nil {
+				return authz.ErrForbidden
+			}
+			if in.AccountUseRevision == nil {
+				return fail(409, "account_use_revision_conflict")
+			}
+			rules, err := accountuse.ReadRules(r.Context(), tx)
+			if err != nil {
+				return err
+			}
+			if in.AutoAddProfiles {
+				rules.NewModels = "allow"
+			} else {
+				rules.NewModels = "deny"
+			}
+			if _, err := accountuse.WriteRules(r.Context(), tx, p, *in.AccountUseRevision, rules.RuleValues); err != nil {
+				var conflict *accountuse.Error
+				if errors.As(err, &conflict) {
+					return fail(conflict.Status, conflict.Message)
+				}
+				return err
+			}
+		}
+		if _, err := tx.Exec(r.Context(), `UPDATE model_refresh_settings SET agent_reports_enabled=$1,api_enabled=$2,interval_minutes=$3`, in.AgentReportsEnabled, in.APIEnabled, in.IntervalMinutes); err != nil {
 			return err
 		}
-		return writeEvent(r.Context(), tx, p, "model.refresh_settings_changed", before, in)
+		stored, err := settings(r.Context(), tx)
+		if err != nil {
+			return err
+		}
+		in.RefreshSettings = stored
+		return writeEvent(r.Context(), tx, p, "model.refresh_settings_changed", before, stored)
 	})
 	if err != nil {
 		writeErr(w, err)
 		return
 	}
-	httpapi.WriteJSON(w, 200, in)
+	httpapi.WriteJSON(w, 200, in.RefreshSettings)
 }
 
 func (m *Module) putCredential(w http.ResponseWriter, r *http.Request) {
@@ -377,11 +572,14 @@ func (m *Module) putCredential(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	id := r.PathValue("accountId")
-	if !uuidRE.MatchString(id) || vendorURLs[in.Vendor] == "" || len(in.Key) > 4096 || strings.ContainsAny(in.Key, "\r\n\x00") {
+	if !uuidRE.MatchString(id) || !slices.Contains([]string{"openai", "xai", "anthropic", "openrouter", "google"}, in.Vendor) || len(in.Key) > 4096 || strings.ContainsAny(in.Key, "\r\n\x00") {
 		writeErr(w, fail(400, "invalid discovery credential"))
 		return
 	}
 	err := m.in(r.Context(), p.TenantID, func(tx pgx.Tx) error {
+		if err := preferenceFence(r.Context(), tx, p); err != nil {
+			return err
+		}
 		if err := catalogLock(r.Context(), tx); err != nil {
 			return err
 		}
@@ -395,12 +593,16 @@ func (m *Module) putCredential(w http.ResponseWriter, r *http.Request) {
 			}
 			return err
 		}
-		expected := map[string]string{"openai": "codex", "xai": "grok", "anthropic": "claude", "openrouter": "pi"}[in.Vendor]
+		expected := map[string]string{"openai": "codex", "xai": "grok", "anthropic": "claude", "openrouter": "pi", "google": "gemini"}[in.Vendor]
 		if harness != expected {
 			return fail(400, "vendor must match account harness")
 		}
+		table := "model_discovery_credentials"
+		if in.Vendor == "google" {
+			table = "model_catalog_credentials"
+		}
 		if in.Key == "" {
-			if _, err := tx.Exec(r.Context(), `DELETE FROM model_discovery_credentials WHERE account_id=$1`, id); err != nil {
+			if _, err := tx.Exec(r.Context(), `DELETE FROM `+table+` WHERE account_id=$1`, id); err != nil {
 				return err
 			}
 		} else {
@@ -408,7 +610,7 @@ func (m *Module) putCredential(w http.ResponseWriter, r *http.Request) {
 			if err != nil {
 				return err
 			}
-			if _, err := tx.Exec(r.Context(), `INSERT INTO model_discovery_credentials(tenant_id,account_id,vendor,ciphertext) VALUES($1,$2,$3,$4) ON CONFLICT(tenant_id,account_id) DO UPDATE SET vendor=EXCLUDED.vendor,ciphertext=EXCLUDED.ciphertext`, p.TenantID, id, in.Vendor, cipher); err != nil {
+			if _, err := tx.Exec(r.Context(), `INSERT INTO `+table+`(tenant_id,account_id,vendor,ciphertext) VALUES($1,$2,$3,$4) ON CONFLICT(tenant_id,account_id) DO UPDATE SET vendor=EXCLUDED.vendor,ciphertext=EXCLUDED.ciphertext`, p.TenantID, id, in.Vendor, cipher); err != nil {
 				return err
 			}
 		}
@@ -431,15 +633,26 @@ func (m *Module) refreshStatus(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	out := map[string]any{"sources": []DiscoverySource{}, "observations": []json.RawMessage{}}
-	err := m.in(r.Context(), p.TenantID, func(tx pgx.Tx) error {
-		if err := ensureCatalog(r.Context(), tx, p); err != nil {
+	err := m.in(r.Context(), p.TenantID, func(tx pgx.Tx) (err error) {
+		pending, err := prepareCatalogDeferred(r.Context(), tx, p)
+		if err != nil {
 			return err
 		}
+		defer func() {
+			if err == nil {
+				err = flushCatalogChanges(r.Context(), tx, p, pending)
+			}
+		}()
 		cfg, err := settings(r.Context(), tx)
 		if err != nil {
 			return err
 		}
 		out["settings"] = cfg
+		harnessSources, limited, err := harnessProbeStatus(r.Context(), tx)
+		if err != nil {
+			return err
+		}
+		out["harness_sources"], out["harness_sources_truncated"] = harnessSources, limited
 		var at *time.Time
 		var raw json.RawMessage
 		if err := tx.QueryRow(r.Context(), `SELECT last_run_at,last_result FROM model_refresh_settings`).Scan(&at, &raw); err != nil {
@@ -447,7 +660,7 @@ func (m *Module) refreshStatus(w http.ResponseWriter, r *http.Request) {
 		}
 		out["last_run_at"] = at
 		out["last_result"] = raw
-		rows, err := tx.Query(r.Context(), `SELECT account_id::text,vendor FROM model_discovery_credentials ORDER BY vendor,account_id`)
+		rows, err := tx.Query(r.Context(), `SELECT account_id::text,vendor FROM (`+discoveryCredentialsSQL+`) credentials ORDER BY vendor,account_id`)
 		if err != nil {
 			return err
 		}
@@ -466,6 +679,7 @@ func (m *Module) refreshStatus(w http.ResponseWriter, r *http.Request) {
 			return err
 		}
 		out["sources"] = sources
+		out["public_sources"] = publicCatalogSources
 		rows, err = tx.Query(r.Context(), `SELECT jsonb_build_object('harness',o.harness,'model',o.model,'effort',o.effort,'last_seen_at',o.last_seen_at,'last_working_at',o.last_working_at,'last_failing_at',o.last_failing_at,'failures',o.failures,'suppressed_until',o.suppressed_until,'source',o.source,'pending',NOT EXISTS(SELECT 1 FROM model_profiles p WHERE p.harness=o.harness AND p.model=o.model AND p.effort=o.effort AND p.enabled)) FROM model_observations o ORDER BY o.last_seen_at DESC,o.harness,o.model,o.effort LIMIT 500`)
 		if err != nil {
 			return err
@@ -526,7 +740,7 @@ func (m *Module) sweep(ctx context.Context) {
 		})
 		if err == nil {
 			p := tenant.Principal{TenantID: id, ID: actor, Kind: tenant.Agent}
-			_, err = m.runRefresh(db.NoProjects(work, "model catalog scheduler"), p, true)
+			_, err = m.runRefreshMode(db.NoProjects(work, "model catalog scheduler"), p, true, false)
 		}
 		cancel()
 		if err != nil && ctx.Err() == nil {

@@ -22,12 +22,21 @@ import (
 	"github.com/inspr-at/paimos/internal/authz"
 	"github.com/inspr-at/paimos/internal/db"
 	"github.com/inspr-at/paimos/internal/httpapi"
+	"github.com/inspr-at/paimos/internal/nativesessions"
 	"github.com/inspr-at/paimos/internal/reportercontract"
+	"github.com/inspr-at/paimos/internal/stepup/server"
 	"github.com/inspr-at/paimos/internal/tenant"
+	"github.com/inspr-at/paimos/internal/workerlease"
 )
 
 // Module serves /api/auth, /api/me and /api/agent-keys, and resolves the caller.
 type Module struct {
+	// AssistantNoticeTx uses the existing receipt-free System inbox notice path.
+	// Missing wiring fails provisioning closed.
+	AssistantNoticeTx func(context.Context, pgx.Tx, string, string, string, string) error
+	assistantNow      func() time.Time
+
+	StepUp   *stepup.Module   // native requests, using the existing OIDC callback
 	trimNow  func() time.Time // injected only by deterministic key-trim tests
 	cfg      Config
 	pool     *pgxpool.Pool
@@ -108,8 +117,12 @@ func (m *Module) Mount(mux *http.ServeMux) {
 	mux.HandleFunc("POST /api/auth/logout", m.handleLogout)
 	mux.HandleFunc("POST /api/auth/dev-login", m.handleDevLogin)
 	mux.HandleFunc("GET /api/me", reportercontract.WithHeader(reportercontract.Me, m.handleMe))
+	mux.HandleFunc("POST /api/agents/assistants", m.handleMessagingAssistant)
+	mux.HandleFunc("POST /api/agents/assistants/{principalId}/rotate", m.handleMessagingAssistant)
+	mux.HandleFunc("DELETE /api/agents/assistants/{principalId}", m.handleMessagingAssistant)
 	mux.HandleFunc("POST /api/agent-keys", m.handleCreateAgentKey)
 	mux.HandleFunc("GET /api/agent-keys", m.handleListAgentKeys)
+	mux.HandleFunc("POST /api/agent-keys/{id}/adopt", m.handleAdoptAgentKey)
 	mux.HandleFunc("DELETE /api/agent-keys/{id}", m.handleRevokeAgentKey)
 	mux.HandleFunc("GET /api/agent-keys/{id}/scopes", m.handleAgentKeyScopes)
 	mux.HandleFunc("PATCH /api/agent-keys/{id}/scopes", m.handleAgentKeyScopes)
@@ -125,13 +138,18 @@ func (m *Module) Mount(mux *http.ServeMux) {
 // request context. Unauthenticated /api requests get 401 JSON unless the
 // matched pattern is a public declaration (authz.PatternIsPublic).
 func (m *Module) Middleware(next http.Handler) http.Handler {
+	return nativesessions.AuthenticationMiddleware(m.authenticateAndAuthorize)(next)
+}
+
+func (m *Module) authenticateAndAuthorize(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if m.Delegated != nil && m.Delegated(w, r, next) {
 			return
 		}
 		p, kind, err := m.authenticate(r)
 		if err != nil && !publicRequest(r) {
-			writeInternal(w)
+			httpapi.MarkAuthentication(r)
+			internalFailure(w, r, "authenticate", err)
 			return
 		}
 		if err != nil {
@@ -145,6 +163,8 @@ func (m *Module) Middleware(next http.Handler) http.Handler {
 				m.clearSessionCookie(w)
 			}
 		case credSession:
+			httpapi.MarkAuthentication(r)
+			p.BrowserSession = true
 			if !publicRequest(r) {
 				if c, cErr := r.Cookie(sessionCookieName); cErr == nil {
 					m.setSessionCookie(w, c.Value)
@@ -152,6 +172,7 @@ func (m *Module) Middleware(next http.Handler) http.Handler {
 			}
 			r = r.WithContext(tenant.WithPrincipal(r.Context(), p))
 		case credAgent:
+			httpapi.MarkAuthentication(r)
 			r = r.WithContext(tenant.WithPrincipal(r.Context(), p))
 		}
 		if kind != credSession && kind != credAgent && protectedRequest(r) {
@@ -162,11 +183,15 @@ func (m *Module) Middleware(next http.Handler) http.Handler {
 			}
 			return
 		}
+		if kind == credAgent && p.MessagingOnly && !authz.MessagingAssistantInboxRoute(r.Pattern) {
+			writeForbidden(w)
+			return
+		}
 		if kind == credAgent {
 			if err := m.pairingBoundary(r, p); err != nil {
 				if authz.OwnerWorkstation(p) && workstationGovernance(r) {
 					if err := m.auditWorkstation(r, p, false, "pairing_denied"); err != nil {
-						writeInternal(w)
+						internalFailure(w, r, "audit_pairing_denied", err)
 						return
 					}
 				}
@@ -177,14 +202,34 @@ func (m *Module) Middleware(next http.Handler) http.Handler {
 				agentpairing.WriteError(w, err)
 				return
 			}
+			if r.Pattern == "GET /api/agents/plan" {
+				if !hasScope(p.Scopes, "agents.plan.read") {
+					httpapi.WriteError(w, http.StatusForbidden, "agents.plan.read scope missing")
+					return
+				}
+				if p.KeyCreatorID == "" {
+					httpapi.WriteError(w, http.StatusForbidden, "key has no person owner — adopt it in Settings › Keys")
+					return
+				}
+			}
 			scope, controlled := coreAgentScope(r)
+			// Preference reads are a coordinator exception to the outer route
+			// ceiling. RequirePattern below still checks live grants and creator
+			// authority; a models.read-only key retains its placement ceiling.
+			if authz.IsCoordinatorKey(p.Scopes) {
+				switch r.Pattern {
+				case "GET /api/model-preferences", "GET /api/model-preferences/board", "GET /api/model-preferences/coverage",
+					"GET /api/model-preferences/evidence", "GET /api/model-preferences/simple", "GET /api/model-preferences/situations":
+					scope, controlled = "models.read", true
+				}
+			}
 			if authz.OwnerWorkstation(p) && workstationGovernance(r) && !strings.HasSuffix(r.Pattern, "/owner-workstation") {
 				scope, controlled = authz.RoutePermissions[r.Pattern], true
 			}
 			if !controlled || scope == "" {
 				if authz.OwnerWorkstation(p) && workstationGovernance(r) {
 					if err := m.auditWorkstation(r, p, false, "route_denied"); err != nil {
-						writeInternal(w)
+						internalFailure(w, r, "audit_route_denied", err)
 						return
 					}
 				}
@@ -228,7 +273,7 @@ func (m *Module) Middleware(next http.Handler) http.Handler {
 			if err := permissionErr; err != nil {
 				if authz.OwnerWorkstation(p) && workstationGovernance(r) {
 					if err := m.auditWorkstation(r, p, false, "permission_denied"); err != nil {
-						writeInternal(w)
+						internalFailure(w, r, "audit_permission_denied", err)
 						return
 					}
 				}
@@ -239,7 +284,7 @@ func (m *Module) Middleware(next http.Handler) http.Handler {
 						authz.WriteForbidden(w, err)
 					}
 				} else {
-					writeInternal(w)
+					internalFailure(w, r, "permission", err)
 				}
 				return
 			}
@@ -316,6 +361,43 @@ func customerRouteAllowed(r *http.Request, p tenant.Principal) bool {
 // The key is an outer ceiling for every agent route. Modules retain their own
 // resource, grant and actor checks. Unlisted paths have no agent authority.
 func coreAgentScope(r *http.Request) (string, bool) {
+	// Native routes use an exact matched allowlist. Existing role/key scopes
+	// are only the outer ceiling; future handlers must also fence actor grants.
+	switch r.Pattern {
+	case "POST /api/nodes/{nodeId}/review-runs", "POST /api/review-runs/{runId}/credential":
+		return "nodes.read", true
+	case "GET /api/nodes/{nodeId}/review-evidence":
+		return "nodes.read", true
+	case "POST /api/review-runs/{runId}/verdict":
+		return "", false
+	case "POST /api/agents/assistants", "POST /api/agents/assistants/{principalId}/rotate", "DELETE /api/agents/assistants/{principalId}":
+		return "agents.create", true
+	case "POST /api/agentd/native-sessions/claim", "POST /api/agentd/native-sessions/receipts",
+		"POST /api/agentd/native-sessions/events", "POST /api/agentd/native-sessions/finals",
+		"GET /api/agentd/native-sessions/commands":
+		return "harness.worker", true
+	case "GET /api/projects/{projectId}/native-sessions/{ownedSessionId}",
+		"GET /api/projects/{projectId}/harness-sessions/{sessionId}/native-context",
+		"GET /api/projects/{projectId}/native-sessions/{ownedSessionId}/stream",
+		"GET /api/projects/{projectId}/native-sessions/{ownedSessionId}/receipts",
+		"GET /api/projects/{projectId}/native-sessions/{ownedSessionId}/events":
+		return "harness.read", true
+	case "POST /api/projects/{projectId}/native-sessions",
+		"POST /api/projects/{projectId}/native-sessions/{ownedSessionId}/resume",
+		"POST /api/projects/{projectId}/native-sessions/{ownedSessionId}/interrupt",
+		"POST /api/projects/{projectId}/native-sessions/{ownedSessionId}/stop":
+		return "harness.control", true
+	case "POST /api/projects/{projectId}/native-sessions/{ownedSessionId}/input":
+		return "chat.send|inbox.send", true
+	case "POST /api/projects/{projectId}/native-sessions/{ownedSessionId}/attach",
+		"POST /api/projects/{projectId}/native-sessions/{ownedSessionId}/attach/renew",
+		"POST /api/projects/{projectId}/native-sessions/{ownedSessionId}/detach",
+		"POST /api/projects/{projectId}/native-sessions/{ownedSessionId}/take",
+		"POST /api/projects/{projectId}/native-sessions/{ownedSessionId}/return",
+		"POST /api/projects/{projectId}/native-sessions/{ownedSessionId}/approvals/{approvalId}/decision",
+		"POST /api/sessions/{id}/control/end":
+		return "", false
+	}
 	parts := strings.Split(strings.TrimPrefix(r.URL.Path, "/api/"), "/")
 	if !strings.HasPrefix(r.URL.Path, "/api/") || len(parts) == 0 {
 		return "", false
@@ -328,6 +410,10 @@ func coreAgentScope(r *http.Request) (string, bool) {
 		return resource + ".write", true
 	}
 	switch parts[0] {
+	case "stepup-requests":
+		if len(parts) == 1 && (read || r.Method == http.MethodPost) || len(parts) == 2 && validRouteUUID(parts[1]) && read || len(parts) == 3 && validRouteUUID(parts[1]) && parts[2] == "withdraw" && r.Method == http.MethodPost {
+			return "approvals.request", true
+		}
 	case "status":
 		// Definitions and live limits are read-only tenant metadata. Project
 		// overrides remain confined by the handler's project visibility.
@@ -337,6 +423,12 @@ func coreAgentScope(r *http.Request) (string, bool) {
 	case "recurrences":
 		// This is an explicit agent allowlist. Every recurrence handler also
 		// checks the custom role and recurrences.manage key scope in its tenant.
+		if len(parts) >= 2 && parts[1] == "templates" {
+			if len(parts) == 2 && read || len(parts) == 5 && parts[2] != "" && parts[3] != "" && r.Method == http.MethodPost && (parts[4] == "preview" || parts[4] == "apply") {
+				return "recurrences.manage", true
+			}
+			return "", false
+		}
 		if len(parts) == 1 && (read || r.Method == http.MethodPost) {
 			return "recurrences.manage", true
 		}
@@ -347,7 +439,7 @@ func coreAgentScope(r *http.Request) (string, bool) {
 			return "recurrences.manage", true
 		}
 		if len(parts) == 3 && parts[1] != "" {
-			if read && (parts[2] == "preview" || parts[2] == "history" || parts[2] == "releases") || r.Method == http.MethodPost && (parts[2] == "pause" || parts[2] == "resume" || parts[2] == "run-now") {
+			if read && (parts[2] == "preview" || parts[2] == "history" || parts[2] == "releases" || parts[2] == "guardrails") || r.Method == http.MethodPost && (parts[2] == "pause" || parts[2] == "resume" || parts[2] == "run-now") {
 				return "recurrences.manage", true
 			}
 		}
@@ -358,6 +450,10 @@ func coreAgentScope(r *http.Request) (string, bool) {
 	case "agents":
 		if len(parts) == 2 && parts[1] == "plan" && read {
 			return "agents.plan.read", true
+		}
+	case "status-autopilot":
+		if read && (len(parts) == 2 && (parts[1] == "attention" || parts[1] == "changes" || parts[1] == "projects" || parts[1] == "proposals") || len(parts) == 3 && parts[1] == "attention" && parts[2] == "groups") {
+			return "nodes.read", true
 		}
 	case "decision-desk":
 		if len(parts) == 1 && read {
@@ -400,13 +496,25 @@ func coreAgentScope(r *http.Request) (string, bool) {
 			return "harness.read", true
 		}
 	case "projects":
-		if len(parts) == 1 && read {
+		if read && (len(parts) == 1 || len(parts) == 2 && parts[1] == "lookup") {
 			return "nodes.read", true
 		}
 		if len(parts) < 3 {
 			break
 		}
 		switch parts[2] {
+		case "status-autopilot":
+			if len(parts) == 3 && validRouteUUID(parts[1]) && read {
+				return "nodes.read", true
+			}
+		case "lead-settings":
+			if len(parts) == 3 && validRouteUUID(parts[1]) && read {
+				return "nodes.read", true
+			}
+		case "lead-runtime":
+			if validRouteUUID(parts[1]) && (len(parts) == 3 && read || len(parts) == 4 && r.Method == http.MethodPost && (parts[3] == "claim" || parts[3] == "report")) {
+				return "harness.worker", true
+			}
 		case "lead":
 			if len(parts) == 4 && parts[3] == "usage" && read {
 				return "harness.read", true
@@ -432,6 +540,17 @@ func coreAgentScope(r *http.Request) (string, bool) {
 		case "release-memberships":
 			if len(parts) == 3 && read {
 				return "releases.read", true
+			}
+		case "review-policy":
+			// Explicit agent allowlist. Built-in roles still exclude
+			// reviewpolicy.manage; a custom role and key scope may grant it.
+			if len(parts) == 3 && validRouteUUID(parts[1]) {
+				if read {
+					return "reviewpolicy.read", true
+				}
+				if r.Method == http.MethodPut || r.Method == http.MethodDelete {
+					return "reviewpolicy.manage", true
+				}
 			}
 		case "messages", "message-targets", "message-deliveries":
 			if read {
@@ -513,6 +632,12 @@ func coreAgentScope(r *http.Request) (string, bool) {
 	case "relations":
 		return scope("relations")
 	case "events":
+		if len(parts) >= 2 && parts[1] == "subscribe" {
+			if len(parts) == 2 && read {
+				return "events.subscribe", true
+			}
+			return "", false
+		}
 		if read {
 			return "events.read", true
 		}
@@ -521,12 +646,25 @@ func coreAgentScope(r *http.Request) (string, bool) {
 		if read {
 			return "search.read", true
 		}
+	case "settings":
+		if len(parts) == 2 && parts[1] == "status-autopilot" && read {
+			return "nodes.read", true
+		}
+		if len(parts) == 2 && parts[1] == "review-policy" {
+			if read {
+				return "reviewpolicy.read", true
+			}
+			if r.Method == http.MethodPut {
+				return "reviewpolicy.manage", true
+			}
+		}
 	case "views", "preferences", "project-groups":
 		return scope("views")
 	case "knowledge":
 		// Listing candidates is ordinary knowledge read. Accept and dismiss stay
 		// with a person: an agent key has no authority on those two routes, and
-		// the handler refuses every agent again.
+		// the handler refuses every agent again. A recommendation (PUT
+		// .../recommendation) is ordinary knowledge.write: it decides nothing.
 		if r.Method == http.MethodPost && len(parts) == 4 && parts[1] == "learnings" && (parts[3] == "accept" || parts[3] == "dismiss" || parts[3] == "draft") {
 			return "", false
 		}
@@ -550,6 +688,9 @@ func coreAgentScope(r *http.Request) (string, bool) {
 		}
 		return "inbox.send", true
 	case "models":
+		if r.Method == http.MethodPost && len(parts) == 3 && parts[1] == "harness-probes" && (parts[2] == "claim" || validRouteUUID(parts[2])) {
+			return "models.report", true
+		}
 		if r.Method == http.MethodPost && len(parts) == 2 {
 			if parts[1] == "refresh" {
 				return "models.refresh", true
@@ -595,6 +736,10 @@ func coreAgentScope(r *http.Request) (string, bool) {
 			return "", false
 		}
 		return harnessScope(parts[1:], read), true
+	case "harness-recoveries":
+		if r.Method == http.MethodPost && (len(parts) == 2 && parts[1] == "claim" || len(parts) == 3 && validRouteUUID(parts[1]) && parts[2] == "complete") {
+			return "harness.worker", true
+		}
 	case "agentd":
 		if r.Pattern == "GET /api/agentd/step-ups/{challenge_id}" {
 			return "harness.worker", true
@@ -606,7 +751,7 @@ func coreAgentScope(r *http.Request) (string, bool) {
 		if r.Method == "POST" && r.URL.Path == "/api/agent-pairing/attach" {
 			return "harness.worker", true
 		}
-		if r.Method == "GET" && r.URL.Path == "/api/agent-pairing/self" || r.Method == "POST" && r.URL.Path == "/api/agent-pairing/self/disconnect" {
+		if r.Method == "GET" && r.URL.Path == "/api/agent-pairing/self" || r.Method == "POST" && (r.URL.Path == "/api/agent-pairing/self/disconnect" || r.URL.Path == "/api/agent-pairing/self/capacity" || r.URL.Path == "/api/agent-pairing/self/ledger") {
 			return "run.claim", true
 		}
 	case "agent-accounts":
@@ -765,11 +910,10 @@ func (m *Module) authenticate(r *http.Request) (tenant.Principal, credKind, erro
 }
 
 func parseBearer(h string) (prefix, secret string, ok bool) {
-	scheme, token, found := strings.Cut(h, " ")
-	if !found || !strings.EqualFold(scheme, "Bearer") {
+	token, malformed := workerlease.AgentToken(h)
+	if malformed || token == "" {
 		return "", "", false
 	}
-	token = strings.TrimSpace(token)
 	rest, ok := strings.CutPrefix(token, "aeon_")
 	if !ok {
 		return "", "", false

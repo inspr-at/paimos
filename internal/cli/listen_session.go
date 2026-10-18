@@ -39,8 +39,12 @@ func (rt *runtime) listenSessionDelivery(projectID, project, session, adapter, r
 		return err
 	}
 	var status struct {
-		ID      string `json:"id"`
-		Harness string `json:"harness"`
+		ID         string     `json:"id"`
+		Harness    string     `json:"harness"`
+		Management string     `json:"management_mode"`
+		Phase      string     `json:"phase"`
+		StoppedAt  *time.Time `json:"stopped_at"`
+		ArchivedAt *time.Time `json:"archived_at"`
 	}
 	if err := rt.doMessagingPoll(ctx, http.MethodGet, harnessPath(projectID, session), &status, follow, interval); err != nil {
 		if ctx.Err() != nil {
@@ -51,6 +55,12 @@ func (rt *runtime) listenSessionDelivery(projectID, project, session, adapter, r
 	harness := strings.TrimSuffix(adapter, "_resume")
 	if !strings.EqualFold(status.ID, session) || status.Harness != harness {
 		return usagef("adapter does not match the selected harness session")
+	}
+	if status.Management == "managed" {
+		return usagef("managed sessions use agentd drain; the idle companion is for unmanaged sessions")
+	}
+	if status.Phase == "stopped" || status.StoppedAt != nil || status.ArchivedAt != nil {
+		return usagef("the selected session has ended")
 	}
 	deliver := rt.messagingDeliverer
 	if deliver == nil {

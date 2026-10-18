@@ -17,6 +17,7 @@ import (
 	"github.com/inspr-at/paimos/internal/aithema/journal"
 	"github.com/inspr-at/paimos/internal/aithema/tokens"
 	"github.com/inspr-at/paimos/internal/db"
+	"github.com/inspr-at/paimos/internal/httpapi"
 	"github.com/jackc/pgx/v5"
 )
 
@@ -73,7 +74,7 @@ func (m *Module) proxy(w http.ResponseWriter, r *http.Request) {
 	}
 	target, _ := url.Parse(s.ServiceURL)
 	if operation != "inline" {
-		raw, err := io.ReadAll(http.MaxBytesReader(w, r.Body, 1<<20))
+		raw, err := httpapi.ReadRequestBody(w, r, 1<<20, httpapi.DefaultBodyReadTimeout)
 		if err != nil {
 			writeError(w, fail(413, "too_large"))
 			return
@@ -82,7 +83,7 @@ func (m *Module) proxy(w http.ResponseWriter, r *http.Request) {
 			writeError(w, fail(400, "invalid_request"))
 			return
 		}
-		r.Body = io.NopCloser(bytes.NewReader(raw))
+		httpapi.SetRequestBody(r, raw)
 		r.ContentLength = int64(len(raw))
 	}
 	proxy := &httputil.ReverseProxy{Transport: serviceTransport(s, m.servicePolicy), ErrorLog: log.New(io.Discard, "", 0), Rewrite: func(pr *httputil.ProxyRequest) {

@@ -2,6 +2,8 @@
 package dsar
 
 import (
+	"encoding/json"
+	"os"
 	"strings"
 	"testing"
 
@@ -22,6 +24,30 @@ func TestInventoryAndAdapters(t *testing.T) {
 	for _, d := range domains {
 		byTable[d.Table] = d
 	}
+	// Keep main's classification registry and the command's stricter adapter
+	// policy together: every classified column needs an explicit adapter
+	// decision, and credential exclusions must survive the merge.
+	raw, err := os.ReadFile("inventory.json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var classified struct {
+		Tables []struct {
+			Table   string            `json:"table"`
+			Columns map[string]string `json:"columns"`
+		} `json:"tables"`
+	}
+	if err := json.Unmarshal(raw, &classified); err != nil {
+		t.Fatal(err)
+	}
+	for _, table := range classified.Tables {
+		d := byTable[table.Table]
+		for column, class := range table.Columns {
+			if !contains(d.columns(), column) || class == "secret" && !contains(d.Secret, column) {
+				t.Fatalf("classified column missing adapter policy: %s.%s (%s)", table.Table, column, class)
+			}
+		}
+	}
 	for _, d := range domains {
 		for _, erase := range []bool{false, true} {
 			q := adapterQuery(d, byTable, erase)
@@ -33,7 +59,11 @@ func TestInventoryAndAdapters(t *testing.T) {
 					t.Fatalf("credential column queried: %s.%s", d.Table, c)
 				}
 			}
-			if d.Table != "identities" && d.Table != "tenants" && !strings.Contains(q, "t.tenant_id=$1::uuid") {
+			if d.Table == "aeon_required_capabilities" {
+				if strings.TrimSpace(d.Metadata) != "capability since" || strings.TrimSpace(d.Export+d.Review+d.Secret+d.Subjects+d.Locator) != "" || !strings.Contains(q, "WHERE false AND") {
+					t.Fatal("global capability floor must stay metadata with no subject adapter")
+				}
+			} else if d.Table != "identities" && d.Table != "tenants" && !strings.Contains(q, "t.tenant_id=$1::uuid") {
 				t.Fatalf("unscoped adapter %s", d.Table)
 			}
 		}

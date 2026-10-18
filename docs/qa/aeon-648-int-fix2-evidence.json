@@ -88,7 +88,7 @@
     "assertions": "No assertion loosened or skipped. Existing ETA concurrency expectation now checks the required tenant fence and is strengthened with the exact tenant-lock query and zero early advisory locks. Existing legacy fixture constructors stop before 1215 instead of attempting retired kind inserts into a fully migrated fresh tenant."
   },
   "validation": {
-    "remote_transport": "Coordinator-approved remote-test.sh to mbp2606. HEAD committed before each run; runner-owned parallelism; temporary non-production test refs only; no origin push.",
+    "remote_transport": "Coordinator-approved remote-test.sh to build-6. HEAD committed before each run; runner-owned parallelism; temporary non-production test refs only; no origin push.",
     "go_packages": {
       "result": "pass",
       "command": "remote-test.sh <assigned-worktree> <affected-packages> -count=1",

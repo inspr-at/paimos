@@ -1,123 +1,41 @@
 <!-- SPDX-License-Identifier: AGPL-3.0-only -->
 <script setup lang="ts">
-import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
-import { useRoute, useRouter } from 'vue-router'
-import { machinesForAdd, type AddMachine } from '../../lib/addAccount'
-import { listPairingComputers, type PairingView } from '../../lib/agentPairing'
-import { accountName } from '../../lib/accountCascade'
-import { approveAccountCapacity, type AgentAccount } from '../../lib/agents'
-import { can } from '../../lib/authz'
-import { brand } from '../../lib/brand'
-import { confirmAction } from '../../lib/confirm'
-import { usePoller } from '../../lib/usePolledData'
-import { useCapacity } from '../../stores/capacity'
-import { useAgents } from '../../stores/agents'
-import { useSession } from '../../stores/session'
+// Settings › Accounts (AEON-1171, design AEON-1149): which logins agents use. The
+// account list with Add an account and the low-quota warnings, then where accounts
+// may work. Each row carries a small quota bar and one caption, with the legend
+// once above the list (AEON-1172). Needs you lists only this part's items and is absent when nothing needs
+// you. Without a paired computer the head offers Connect a computer instead of
+// Add an account. Data, the docked panel and deep links are shared with Computers
+// and Capacity.
+import { computed, onBeforeUnmount, onMounted, ref, toRefs } from 'vue'
+import { useAccountsSettings } from '../../lib/useAccountsSettings'
 import AppIcon from '../AppIcon.vue'
-import AccountsCard from '../agents/AccountsCard.vue'
-import LinkedAccounts from '../agents/LinkedAccounts.vue'
+import HarnessMark from '../agents/HarnessMark.vue'
+import AccountUseMatrix from './AccountUseMatrix.vue'
+import AccountsPanel from './AccountsPanel.vue'
 import AddAccountPanel from './AddAccountPanel.vue'
-import SettingsCard from './SettingsCard.vue'
+import NeedsYouList from './NeedsYouList.vue'
+import QuotaBar from './QuotaBar.vue'
+import QuotaLegend from './QuotaLegend.vue'
 import QuotaWarningCard from './QuotaWarningCard.vue'
 
-// Settings → Accounts: the place behind "Manage accounts" on the Agents desk.
-// Pausing an account and limits set by hand live here; sign-ins happen on the
-// computer itself, and credentials never reach Aeon.
-const agents = useAgents()
-const capacity = useCapacity()
-const session = useSession()
-const route = useRoute()
-const router = useRouter()
-const mayManage = computed(() => session.identity?.principal.kind === 'person' && can('account.manage'))
-const open = ref(false)
-const views = ref<PairingView[]>([])
-const computersState = ref<'idle' | 'ready' | 'error'>('idle')
-let computersTurn = 0
-
-const machines = computed<AddMachine[]>(() => machinesForAdd(views.value))
-const showHint = computed(() => !mayManage.value && agents.accountsState === 'ready')
-
-async function loadComputers() {
-  const turn = ++computersTurn
-  try {
-    const rows = await listPairingComputers()
-    if (turn !== computersTurn) return
-    views.value = rows
-    computersState.value = 'ready'
-  } catch {
-    if (turn !== computersTurn) return
-    if (computersState.value !== 'ready') computersState.value = 'error'
-  }
-}
-async function refresh() {
-  // A refresh already in flight may have started before this window existed.
-  await agents.refreshAccounts()
-  const jobs: Promise<unknown>[] = [agents.refreshAccounts()]
-  if (mayManage.value) jobs.push(loadComputers())
-  await Promise.all(jobs)
-}
-function onFocus() { void refresh() }
-const poller = usePoller(() => refresh(), 20_000)
-
-onMounted(() => {
-  void capacity.load()
-  poller.start(true)
-  window.addEventListener('focus', onFocus)
-})
-onBeforeUnmount(() => {
-  computersTurn++
-  poller.stop()
-  window.removeEventListener('focus', onFocus)
-})
-
-watch(mayManage, allowed => {
-  if (!allowed) { open.value = false; return }
-  void loadComputers()
-}, { immediate: true })
-// #add-account opens the panel once. Drop the hash with replace (no new history
-// entry) before the next machine refresh, or that refresh would open it again.
-let addAccountArmed = true
-watch([() => route.hash, mayManage, machines], () => {
-  if (route.hash !== '#add-account') { addAccountArmed = true; return }
-  if (!addAccountArmed || !mayManage.value || !machines.value.length) return
-  addAccountArmed = false
-  open.value = true
-  void router.replace({ path: route.path, query: { ...route.query }, hash: '' })
-}, { immediate: true })
-
-async function setAccount(account: AgentAccount, state: AgentAccount['state']) {
-  if (state === 'draining') {
-    const ok = await confirmAction({ title: `Drain ${accountName(account)}?`, body: 'Running work finishes; no new runs start on this account until you resume it.', confirmLabel: 'Drain account' })
-    if (!ok) return
-  }
-  if (state === 'available') await approveAccountCapacity(account.id)
-  await agents.setAccount(account, state)
-}
+const ctx = useAccountsSettings('accounts')
+const { capacity, accounts, machines, manage, add, open, account, thresholds, needs, allReady, show, actAttention, quota } = toRefs(ctx)
+// The legend names Keep for you whenever the person keeps something (the same in the panel).
+const keeps = computed(() => capacity.value.schedule.reserve !== 'off')
+// "Choose where" for a new account opens its row in the matrix (AEON-1173).
+const where = ref<InstanceType<typeof AccountUseMatrix> | null>(null)
+onMounted(() => { ctx.bindWhere(id => where.value?.choose(id)) })
+onBeforeUnmount(() => { ctx.bindWhere(null) })
 </script>
 
 <template>
-  <div id="add-account" class="add-account">
-    <QuotaWarningCard v-if="can('settings.manage')" />
-    <p v-if="session.identity?.principal.kind === 'person' && can('profile.write')" class="add-hint"><RouterLink class="btn sm" to="/link"><AppIcon name="link" :size="14" />Link an account</RouterLink>Enter the code from your agent window.</p>
-    <SettingsCard title="Accounts" icon="gauge" anchor="agent-accounts">
-      <template #lead>The vendor accounts agents run on. Sign in on the computer itself; the password never leaves it.</template>
-      <template v-if="mayManage && computersState === 'ready'" #aside>
-        <RouterLink v-if="!machines.length" class="btn sm" to="/agents/register-agent"><AppIcon name="monitor" :size="14" />Connect your machine</RouterLink>
-        <button v-else type="button" class="btn sm" :aria-expanded="open" aria-controls="add-account-panel" @click="open = !open"><AppIcon name="plus" :size="14" />Add an account</button>
-      </template>
-      <p v-if="mayManage && computersState === 'error'" class="add-hint" role="alert">Paired machines could not be loaded. <button type="button" class="btn sm" @click="loadComputers">Try again</button></p>
-      <p v-else-if="showHint" class="add-hint">Sign-in happens on the machine; the password never reaches {{ brand.short_name }}.</p>
-      <AddAccountPanel v-if="open && machines.length" :machines="machines" />
-      <AccountsCard
-        :accounts="agents.accounts" :state="agents.accountsUpdatedAt !== null ? 'ready' : agents.accountsState" :now="agents.now" :admin="agents.accountsState === 'ready'"
-        :set="setAccount"
-      />
-    </SettingsCard>
-    <LinkedAccounts />
-  </div>
+  <AccountsPanel :ctx="ctx">
+    <template #head><header class="page-head"><h2>Which logins agents use</h2><p>Quota belongs to the account: every computer signed in with it draws from the same quota.</p></header></template>
+    <NeedsYouList :items="needs.accounts" hide-when-calm :aside="allReady ? 'Everything else is working.' : 'Based on the last available reports.'" @action="actAttention" />
+    <section class="zone acc-zone" aria-labelledby="accounts-list-title"><div class="zone-head"><h3 id="accounts-list-title">Accounts <span class="count">{{ accounts.length }}</span></h3><p>Quota belongs to the account and is shared by its computers</p><button v-if="manage && machines.length" type="button" class="btn sm" :aria-expanded="add" @click="add = !add"><AppIcon name="plus" />Add an account</button><RouterLink v-else-if="manage && capacity.computersLoaded && capacity.computersState !== 'error'" class="btn sm" to="/agents/register-agent"><AppIcon name="monitor" />Connect a computer</RouterLink></div><AddAccountPanel v-if="add && machines.length" :machines="machines" /><div v-if="accounts.length" class="acc-lh" aria-hidden="true"><span class="eh">Account</span><QuotaLegend short :keep="keeps" /></div><ul class="list acc-list"><li v-for="a in accounts" :key="a.id"><button class="list-row acc" type="button" :data-account="a.records[0]?.id" :data-accounts="a.records.map(r => r.id).join(' ')" :aria-expanded="open && account?.id === a.id" :aria-current="open && account?.id === a.id" @click="show('account', a.id, $event)"><HarnessMark :harness="a.harness" /><span class="lr-who"><b>{{ a.vendor }}</b><small>{{ a.identity }}</small></span><span class="ar-q"><QuotaBar :bar="quota(a).bar" :label="quota(a).label" /><small class="cap" :class="quota(a).caption.tone" data-quota-caption><AppIcon v-if="quota(a).caption.icon" :name="quota(a).caption.icon || 'alert'" :size="12" />{{ quota(a).caption.text }}</small></span><AppIcon name="chevron-right" /></button></li></ul><p v-if="!accounts.length && capacity.loaded" class="empty">No vendor accounts are connected yet.</p><QuotaWarningCard @changed="thresholds = $event" /></section>
+    <AccountUseMatrix ref="where" />
+  </AccountsPanel>
 </template>
 
-<style scoped>
-.add-account { scroll-margin-top: 20px; }
-.add-hint { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; margin: 0 0 12px; color: var(--ink-2); font-size: 13px; line-height: 1.45; }
-</style>
+<style scoped src="../../styles/accountsSettings.css"></style>

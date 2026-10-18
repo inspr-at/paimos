@@ -58,7 +58,7 @@ func NoProjects(ctx context.Context, reason string) context.Context {
 // in ctx (computed once, in the database, from its bindings), else none.
 func enterTenant(ctx context.Context, tx pgx.Tx, tenantID string) error {
 	// Never inherit verified chat authority into a nested legacy/service query.
-	if _, err := tx.Exec(ctx, `SELECT set_config('aeon.chat_session_id','',true),set_config('aeon.chat_role_id','',true),set_config('aeon.chat_conversation_id','',true)`); err != nil {
+	if _, err := tx.Exec(ctx, `SELECT set_config('aeon.account_use_capable','on',true),set_config('aeon.chat_session_id','',true),set_config('aeon.chat_role_id','',true),set_config('aeon.chat_conversation_id','',true)`); err != nil {
 		return err
 	}
 	if v, ok := ctx.Value(visibilityKey{}).(visibility); ok {

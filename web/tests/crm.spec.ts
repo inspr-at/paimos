@@ -130,6 +130,10 @@ test('at 1440 names get the room: the role drops out whole, and cut values show 
   await expect.poll(() => cut('.role')).toBe(true)
   expect(await cut('.person')).toBe(false)
   expect(await cell.locator('.role').evaluate(el => el.scrollWidth <= el.clientWidth + 1)).toBe(true)
+  // Keyboard disclosure owns its hint until Escape. Exit it before testing
+  // the separate pointer disclosure; retain both full-text expectations.
+  await edge.press('Escape')
+  await expect(page.locator('.tooltip')).toHaveCount(0)
   await cell.hover()
   await expect(page.locator('.tooltip')).toHaveText('Jana Hofer · Managing director')
   // A value that fits carries no tooltip.
@@ -631,8 +635,10 @@ test('at 390 the meta line wraps without a separator at the start or end of a li
   await page.goto(`/business/customers/${HOFER}`)
   const line = page.locator('.summary .dot-list')
   await expect(line.locator('> *')).toHaveCount(3)
-  // The website wraps to a second line, which starts at the clipped edge: no dot leads it.
-  expect(await line.evaluate(list => new Set([...list.children].map(el => Math.round(el.getBoundingClientRect().top))).size)).toBe(2)
+  // Typography and scrollbar widths may put the three items on two or three
+  // lines. The contract is wrapping without clipped text or leading dots.
+  expect(await line.evaluate(list => new Set([...list.children].map(el => Math.round(el.getBoundingClientRect().top))).size)).toBeGreaterThanOrEqual(2)
+  await noClipping(page, '.summary')
   await expect(page.getByRole('region', { name: 'Projects, quotes and hours' }).getByText('Framework agreement')).toBeVisible()
   await dotsNeverLead(page)
   await expect(page.getByRole('region', { name: 'About' })).not.toContainText('ORG-1')

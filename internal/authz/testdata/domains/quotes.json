@@ -1,0 +1,141 @@
+{
+  "_license": "SPDX-License-Identifier: AGPL-3.0-only",
+  "builtin_roles": {
+    "admin": [
+      "quotes.accept",
+      "quotes.delete",
+      "quotes.issue",
+      "quotes.manage",
+      "quotes.portal_accept",
+      "quotes.portal_read",
+      "quotes.read",
+      "quotes.write"
+    ],
+    "customer": [
+      "quotes.portal_accept",
+      "quotes.portal_read"
+    ],
+    "member": [
+      "quotes.portal_read",
+      "quotes.read",
+      "quotes.write"
+    ],
+    "owner": [
+      "quotes.accept",
+      "quotes.delete",
+      "quotes.issue",
+      "quotes.manage",
+      "quotes.portal_accept",
+      "quotes.portal_read",
+      "quotes.read",
+      "quotes.write"
+    ],
+    "viewer": [
+      "quotes.portal_read",
+      "quotes.read"
+    ]
+  },
+  "registry": [
+    {
+      "agent_grantable": true,
+      "description": "Accept quotes",
+      "grantable_at": [
+        "workspace",
+        "project"
+      ],
+      "group": "Quotes",
+      "key": "quotes.accept",
+      "owner_workstation_grantable": true,
+      "risk": "medium"
+    },
+    {
+      "agent_grantable": true,
+      "description": "Delete quotes",
+      "grantable_at": [
+        "workspace",
+        "project"
+      ],
+      "group": "Quotes",
+      "key": "quotes.delete",
+      "owner_workstation_grantable": true,
+      "risk": "high"
+    },
+    {
+      "agent_grantable": true,
+      "description": "Issue quotes",
+      "grantable_at": [
+        "workspace",
+        "project"
+      ],
+      "group": "Quotes",
+      "key": "quotes.issue",
+      "owner_workstation_grantable": true,
+      "risk": "high"
+    },
+    {
+      "agent_grantable": true,
+      "description": "Manage quotes",
+      "grantable_at": [
+        "workspace",
+        "project"
+      ],
+      "group": "Quotes",
+      "key": "quotes.manage",
+      "owner_workstation_grantable": true,
+      "risk": "high"
+    },
+    {
+      "agent_grantable": false,
+      "description": "Portal Accept quotes",
+      "grantable_at": [
+        "workspace",
+        "project"
+      ],
+      "group": "Quotes",
+      "key": "quotes.portal_accept",
+      "owner_workstation_grantable": false,
+      "risk": "medium"
+    },
+    {
+      "agent_grantable": false,
+      "description": "Portal Read quotes",
+      "grantable_at": [
+        "workspace",
+        "project"
+      ],
+      "group": "Quotes",
+      "key": "quotes.portal_read",
+      "owner_workstation_grantable": false,
+      "risk": "low"
+    },
+    {
+      "agent_grantable": true,
+      "description": "Read quotes",
+      "grantable_at": [
+        "workspace",
+        "project"
+      ],
+      "group": "Quotes",
+      "key": "quotes.read",
+      "owner_workstation_grantable": true,
+      "risk": "low"
+    },
+    {
+      "agent_grantable": true,
+      "description": "Write quotes",
+      "grantable_at": [
+        "workspace",
+        "project"
+      ],
+      "group": "Quotes",
+      "key": "quotes.write",
+      "owner_workstation_grantable": true,
+      "risk": "medium"
+    }
+  ],
+  "words": {
+    "resources": {
+      "quotes": "quotes"
+    }
+  }
+}

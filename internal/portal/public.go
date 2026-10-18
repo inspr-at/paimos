@@ -18,11 +18,11 @@ import (
 	"strings"
 	"unicode"
 
-	"github.com/jackc/pgx/v5"
-
 	"github.com/inspr-at/paimos/internal/db"
 	"github.com/inspr-at/paimos/internal/events"
+	"github.com/inspr-at/paimos/internal/httpapi"
 	"github.com/inspr-at/paimos/internal/tenant"
+	"github.com/jackc/pgx/v5"
 )
 
 var liveSincePattern = regexp.MustCompile(`^[0-9A-Za-z][0-9A-Za-z._-]{0,63}$`)
@@ -471,20 +471,8 @@ func (m *Module) vote(w http.ResponseWriter, r *http.Request) {
 	write(w, status, voteResult{Votes: int(votes)})
 }
 
-func portalOpen(ctx context.Context, tx pgx.Tx) (bool, error) {
-	var enabled bool
-	err := tx.QueryRow(ctx, `SELECT enabled FROM portal_settings`).Scan(&enabled)
-	if errors.Is(err, pgx.ErrNoRows) {
-		return false, nil
-	}
-	if err != nil {
-		return false, err
-	}
-	return enabled, nil
-}
-
 func decodeVote(r *http.Request) error {
-	buf, err := io.ReadAll(io.LimitReader(r.Body, 1025))
+	buf, err := httpapi.ReadRequestBody(nil, r, 1025, httpapi.DefaultBodyReadTimeout)
 	if err != nil || len(buf) > 1024 {
 		return errors.New("invalid vote")
 	}

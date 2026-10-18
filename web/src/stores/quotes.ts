@@ -15,17 +15,24 @@ export const useQuotes = defineStore('quotes', () => {
   const cursor = ref<string | null>(null)
   const scroll = ref(0)
   let request: Promise<void> | null = null
+  // reset() retires this generation so a read already in flight cannot refill the list.
+  let generation = 0
 
   function load(force = false): Promise<void> {
     if (request) return request
     if (items.value && !force) return Promise.resolve()
     loading.value = true
+    const run = generation
     request = (async () => {
-      try { items.value = await fetchQuotes(); error.value = ''; status.value = 0 }
-      catch (e) {
+      try {
+        const list = await fetchQuotes()
+        if (run !== generation) return
+        items.value = list; error.value = ''; status.value = 0
+      } catch (e) {
+        if (run !== generation) return
         error.value = e instanceof Error ? e.message : 'Quotes could not be loaded.'
         status.value = typeof (e as { status?: unknown }).status === 'number' ? (e as { status: number }).status : 0
-      } finally { loading.value = false; request = null }
+      } finally { if (run === generation) { loading.value = false; request = null } }
     })()
     return request
   }
@@ -33,6 +40,9 @@ export const useQuotes = defineStore('quotes', () => {
   function patch(id: string, change: Partial<QuoteRow>) {
     if (items.value) items.value = items.value.map(row => row.quote_node_id === id ? { ...row, ...change } : row)
   }
-  function reset() { items.value = null; error.value = ''; status.value = 0; filter.value = blankFilter(); cursor.value = null; scroll.value = 0 }
+  function reset() {
+    generation++; request = null; loading.value = false
+    items.value = null; error.value = ''; status.value = 0; filter.value = blankFilter(); cursor.value = null; scroll.value = 0
+  }
   return { items, error, status, loading, filter, cursor, scroll, load, patch, reset }
 })

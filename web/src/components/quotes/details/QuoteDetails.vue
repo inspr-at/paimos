@@ -27,6 +27,7 @@ const emit = defineEmits<{ issue: []; revise: []; view: [version: number | null]
 const versions = ref<QuoteVersion[] | null>(null)
 const notices = ref<AcceptanceNotice[]>([])
 const error = ref('')
+let generation = 0
 const status = computed(() => props.projection ? statusOf(props.projection) : 'draft')
 const current = computed(() => props.projection?.current_version ?? 0)
 const revising = computed(() => props.projection?.state === 'draft' && current.value > 0)
@@ -42,13 +43,20 @@ const linkLoading = ref(false)
 const settled = computed(() => versions.value !== null && !linkLoading.value)
 
 async function load() {
+  const quoteId = props.quoteId, current = ++generation
+  const still = () => current === generation && props.quoteId === quoteId
   error.value = ''
   try {
-    const [list, recent] = await Promise.all([listVersions(props.quoteId), acceptanceNotices().catch(() => [] as AcceptanceNotice[])])
+    const [list, recent] = await Promise.all([listVersions(quoteId), acceptanceNotices().catch(() => [] as AcceptanceNotice[])])
+    if (!still()) return
     versions.value = [...list].sort((a, b) => b.version - a.version); notices.value = recent
-  } catch (e) { versions.value = []; error.value = lifecycleError(e, 'The versions could not be loaded.') }
+  } catch (e) { if (!still()) return; versions.value = []; error.value = lifecycleError(e, 'The versions could not be loaded.') }
 }
-watch(() => [props.quoteId, props.projection?.revision], () => { void load() }, { immediate: true })
+watch(() => [props.quoteId, props.projection?.revision] as const, ([quoteId], previous) => {
+  // The previous quote's versions stay out of the next quote while its own read is in flight.
+  if (!previous || previous[0] !== quoteId) { versions.value = null; notices.value = []; error.value = '' }
+  void load()
+}, { immediate: true })
 
 async function copy(value: string) {
   try { await navigator.clipboard.writeText(value); toast('Fingerprint copied.') } catch { toast('Copying did not work here.', { tone: 'error' }) }

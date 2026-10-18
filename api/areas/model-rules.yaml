@@ -1,0 +1,68 @@
+# SPDX-License-Identifier: AGPL-3.0-only
+# aeon:owner internal/modelregistry
+paths:
+  /model-rules:
+    get:
+      operationId: getModelRules
+      security: *auth
+      description: "Workspace and project locks, with who, when and why. Projects only add rules."
+      parameters:
+        - {name: project_id, in: query, schema: {type: string, format: uuid}}
+      responses:
+        '200': {description: 'Result', content: {application/json: {schema: {$ref: '#/components/schemas/ModelRules'}}}}
+        '400': {$ref: '#/components/responses/Error'}
+        '403': {$ref: '#/components/responses/Error'}
+        '404': {$ref: '#/components/responses/Error'}
+        '409': {$ref: '#/components/responses/Error'}
+        '413': {$ref: '#/components/responses/Error'}
+        '422': {$ref: '#/components/responses/Error'}
+        '428': {$ref: '#/components/responses/Error'}
+  /model-rules/{scope}/{column}:
+    put:
+      operationId: putModelRules
+      security: *auth
+      description: "Replace rules in the addressed scope only. Project pins go before workspace pins. Attempts to loosen or omit a workspace rule return 422 looser_than_workspace. Every new rule requires a reason."
+      parameters:
+        - {name: project_id, in: query, schema: {type: string, format: uuid}}
+        - {name: column, in: path, required: true, schema: {type: string, maxLength: 64}}
+        - {name: scope, in: path, required: true, schema: {type: string, enum: [workspace, project]}}
+      requestBody: {required: true, content: {application/json: {schema: {$ref: '#/components/schemas/ModelRulesWrite'}}}}
+      responses:
+        '200': {description: 'Result', content: {application/json: {schema: {$ref: '#/components/schemas/ModelRules'}}}}
+        '400': {$ref: '#/components/responses/Error'}
+        '403': {$ref: '#/components/responses/Error'}
+        '404': {$ref: '#/components/responses/Error'}
+        '409': {$ref: '#/components/responses/Error'}
+        '413': {$ref: '#/components/responses/Error'}
+        '422': {$ref: '#/components/responses/Error'}
+        '428': {$ref: '#/components/responses/Error'}
+components:
+  schemas:
+    ModelRule:
+      type: object
+      required: [scope, project_id, column, line, lock, position, why, set_by, set_at]
+      properties:
+        scope: {type: string, enum: [workspace, project]}
+        project_id: {type: [string, 'null'], format: uuid}
+        column: {type: string}
+        line: {type: string}
+        lock: {type: string, enum: [top, bottom, not]}
+        position: {type: integer}
+        why: {type: string, maxLength: 1000}
+        set_by: {type: [string, 'null'], format: uuid}
+        set_at: {type: string, format: date-time}
+    ModelRules:
+      type: object
+      required: [rules, revision]
+      properties:
+        revision: {type: integer, format: int64}
+        rules: {type: array, maxItems: 4096, items: {$ref: '#/components/schemas/ModelRule'}}
+    ModelRulesWrite:
+      type: object
+      additionalProperties: false
+      required: [top, bottom, not, revision]
+      properties:
+        top: {type: array, maxItems: 512, items: {type: object, required: [line, why], additionalProperties: false, properties: {line: {type: string, maxLength: 128}, why: {type: string, minLength: 1, maxLength: 1000}}}}
+        bottom: {type: array, maxItems: 512, items: {type: object, required: [line, why], additionalProperties: false, properties: {line: {type: string, maxLength: 128}, why: {type: string, minLength: 1, maxLength: 1000}}}}
+        not: {type: object, maxProperties: 512, additionalProperties: {type: string, minLength: 1, maxLength: 1000}}
+        revision: {type: integer, format: int64, minimum: 0}

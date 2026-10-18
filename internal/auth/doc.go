@@ -3,9 +3,18 @@
 // Package auth authenticates people and agent keys. The middleware applies an
 // outer, deny-by-default key-scope ceiling before any module handler runs.
 // Module handlers still check principal kind, resource ownership and live grants.
-// GET /api/me emits Aeon-Contract: me/1.3 without changing the strict JSON
+// GET /api/me emits Aeon-Contract: me/1.4 without changing the strict JSON
 // body. Additive optional response fields require a minor bump; breaking
 // changes require a major bump. internal/reportercontract pins its schema.
+// AEON-991: agent_keys.full_access is a nullable boolean (NULL means false).
+// Full-access keys resolve the live agent-grantable catalog in memory, and
+// retain live role/creator/project ceilings. New full-access keys store no
+// scope list. Migration 1292 marks every non-revoked key named exactly
+// workstation-agents on an active ordinary agent, across all tenants; no preset
+// marker exists. It preserves historical scopes for old-release rollback and
+// never changes owner-workstation designation. A 403 caused by a missing key
+// scope on a full-access agent-grantable route is a product bug to file on the
+// tracker; agents must not ask the person to extend or replace the key.
 // Scope management rechecks keys.manage under the tenant/key lock. A confirmed
 // role_extension additionally requires roles.manage, the current custom agent
 // workspace role and permissions held by editor and original creator. Role and

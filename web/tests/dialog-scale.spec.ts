@@ -49,7 +49,13 @@ async function openAccess(page: Page) {
   const world = accessWorld()
   world.agents.find(agent => agent.principal_id === COORDINATOR)!.name = 'ops-agm'
   await mockAccess(page, world)
+  // The view is lazy-loaded after the document load event. Wait for all three
+  // reads that useAccess.load joins before asserting its rendered agent list.
+  const accessRead = Promise.all(['/api/authz/permissions', '/api/roles', '/api/members'].map(path =>
+    page.waitForResponse(response => new URL(response.url()).pathname === path && response.request().method() === 'GET'),
+  ))
   await page.goto('/settings/access/agents')
+  for (const response of await accessRead) expect(response.status()).toBe(200)
   await expect(page.getByRole('list', { name: 'Agents' })).toBeVisible()
   return world
 }
@@ -147,7 +153,7 @@ for (const width of WIDTHS) for (const theme of ['light', 'dark'] as const) {
     // Start agent: L; on phones a near-full card whose footer ends the form.
     await mockStartAgent(page)
     await page.goto('/agents')
-    await page.getByRole('button', { name: 'New: start an agent, attach a session or connect a machine', exact: true }).click()
+    await page.getByRole('button', { name: 'New: start a lead, attach a session or connect a machine', exact: true }).click()
     await page.getByRole('menuitem', { name: /^Start agent/ }).click()
     const start = dialog(page, 'Start agent')
     await check({ name: 'start-agent', frame: start, actions: start.locator('footer'), size: 'l', phoneSheet: false })
@@ -205,17 +211,37 @@ for (const width of WIDTHS) for (const theme of ['light', 'dark'] as const) {
     await check({ name: 'convert-kind', frame: convert, actions: convert.locator('.actions'), size: 'm', body: convert.locator('.convert-scroll'), changes: [pickKind('Incident'), pickKind('Task'), pickKind('Epic')] })
     // Switching the kind relabels the primary action; neither action nor any
     // kind row moves or resizes (AEON-541), on desktop as on phones.
-    await expectStableControls({
-      controls: {
+    const convertControls = {
         cancel: convert.getByRole('button', { name: 'Cancel', exact: true }),
         convert: convert.locator('.actions .btn').nth(1),
         'kind selector': convert.getByRole('radiogroup', { name: 'New kind' }),
         'Epic row': kindChoice('Epic'),
         'Task row': kindChoice('Task'),
         'Incident row': kindChoice('Incident'),
-      },
-      interactions: [pickKind('Incident'), pickKind('Task'), pickKind('Epic'), pickKind('Incident')],
+    }
+    await expectStableControls({ controls: convertControls, interactions: [pickKind('Incident'), pickKind('Task'), pickKind('Epic'), pickKind('Incident')] })
+    if (width === 2560) {
+      for (const evidenceWidth of [1024, 1440]) {
+        await page.setViewportSize({ width: evidenceWidth, height: 1000 })
+        await expectStableControls({ controls: convertControls, interactions: [pickKind('Task'), pickKind('Incident')] })
+        await page.screenshot({ path: info.outputPath(`convert-kind-${evidenceWidth}-${theme}.png`) })
+      }
+      await page.setViewportSize({ width, height: 1000 })
+    }
+    const conversionDetails = convert.getByRole('region', { name: 'Conversion details' })
+    await expectStableControls({
+      controls: convertControls,
+      scrollAreas: { details: conversionDetails },
+      interactions: [{ name: 'read long conversion details by keyboard', run: async () => {
+        await conversionDetails.locator('.lead').evaluate(element => { element.textContent = Array(30).fill('Die vollständige Änderung und sämtliche zugehörigen Datensätze bleiben in der mandantenbezogenen Historie nachvollziehbar.').join(' ') })
+        await conversionDetails.focus(); await expect(conversionDetails).toBeFocused()
+        await conversionDetails.press('End')
+        await expect.poll(() => conversionDetails.evaluate(element => element.scrollTop)).toBeGreaterThan(0)
+        const frame = (await convert.boundingBox())!
+        expect(frame.y + frame.height).toBeLessThanOrEqual((width === 390 ? 844 : 1000) + .5)
+      } }],
     })
+    await page.screenshot({ path: info.outputPath(`convert-kind-long-${width}-${theme}.png`) })
     await expect(convert.getByRole('button', { name: 'Convert to incident', exact: true })).toBeVisible()
     await convert.getByRole('button', { name: 'Cancel' }).click()
     await details.getByRole('button', { name: /Status: / }).click()

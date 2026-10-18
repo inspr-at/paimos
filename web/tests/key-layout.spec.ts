@@ -72,42 +72,45 @@ async function tooltips(dialog: Locator) {
 }
 
 for (const width of [360, 768, 1280]) for (const theme of ['light', 'dark'] as const) {
-  test(`new, edit and rotate scopes stay in their columns at ${width}px in ${theme}`, async ({ page }, testInfo) => {
+  // Separate fixture lifetimes keep the edit GET's pruning out of the rotation
+  // case, and remove the reload and three-dialog cumulative deadline race.
+  for (const kind of ['new', 'edit', 'rotate'] as const) test(`${kind} scopes stay in their columns at ${width}px in ${theme}`, async ({ page }, testInfo) => {
     await page.setViewportSize({ width, height: 900 })
     await page.emulateMedia({ colorScheme: theme })
     const errors = watchErrors(page)
     const world = await open(page, false, theme)
-    await agent(page).getByRole('button', { name: 'New key', exact: true }).click()
-    const fresh = page.getByRole('dialog', { name: 'New key for pharos-deployer', exact: true })
-    await expect(fresh.getByRole('checkbox', { name: /nodes\.write/ })).toBeDisabled()
-    await expect(fresh.locator('.scope-text > .unavailable').filter({ hasText: LONG_ROLE }).first()).toBeVisible()
-    await fits(fresh, true)
-    await tooltips(fresh)
-    await fresh.locator('.scope-group').filter({ hasText: 'Imports' }).scrollIntoViewIfNeeded()
-    await page.screenshot({ path: testInfo.outputPath(`new-key-${width}-${theme}.png`) })
-    await fresh.getByRole('button', { name: 'Cancel', exact: true }).click()
-
-    await agent(page).getByRole('button', { name: /^Edit scopes/ }).click()
-    const edit = page.getByRole('dialog', { name: 'Edit scopes for pharos-deployer', exact: true })
-    await edit.getByRole('button', { name: 'Show unavailable scopes', exact: true }).click()
-    await expect(edit.getByRole('checkbox', { name: /nodes\.write/ })).toBeDisabled()
-    await expect(edit).toContainText(LONG_ROLE)
-    await fits(edit, true)
-    await tooltips(edit)
-    await edit.getByRole('button', { name: 'Cancel', exact: true }).click()
-
-    // Restore the long stored scope pruned by the standard fixture's edit GET.
-    world.keys.find(k => k.id === 'k2')!.scopes.push(LONG_SCOPE)
-    await page.reload()
-    await agent(page).getByRole('button', { name: /active keys?/ }).click()
-    await agent(page).locator('tbody tr').filter({ hasText: 'aeon_ph4r_' }).getByRole('button', { name: /^Rotate key/ }).click()
-    const rotate = page.getByRole('dialog', { name: 'Rotate key for pharos-deployer', exact: true })
-    await expect(rotate.locator('.rotation-scopes')).toContainText(LONG_SCOPE)
-    await expect(rotate.locator('.rotation-scopes .scope-id').filter({ hasText: LONG_SCOPE })).toHaveAttribute('title', LONG_SCOPE)
-    await fits(rotate, true)
-    await tooltips(rotate)
-    // Check the rendered long id, rather than only the dialog's clipped bounds.
-    expect(await rotate.locator('.rotation-scopes').evaluate(el => el.scrollWidth <= el.clientWidth + 1)).toBe(true)
+    if (kind === 'new') {
+      await agent(page).getByRole('button', { name: 'New key', exact: true }).click()
+      const fresh = page.getByRole('dialog', { name: 'New key for pharos-deployer', exact: true })
+      await expect(fresh.getByRole('checkbox', { name: /nodes\.write/ })).toBeDisabled()
+      await expect(fresh.locator('.scope-text > .unavailable').filter({ hasText: LONG_ROLE }).first()).toBeVisible()
+      await fits(fresh, true)
+      await tooltips(fresh)
+      await fresh.locator('.scope-group').filter({ hasText: 'Imports' }).scrollIntoViewIfNeeded()
+      await page.screenshot({ path: testInfo.outputPath(`new-key-${width}-${theme}.png`) })
+      await fresh.getByRole('button', { name: 'Cancel', exact: true }).click()
+      await expect(fresh).toHaveCount(0)
+    } else if (kind === 'edit') {
+      await agent(page).getByRole('button', { name: /^Edit scopes/ }).click()
+      const edit = page.getByRole('dialog', { name: 'Edit scopes for pharos-deployer', exact: true })
+      await edit.getByRole('button', { name: 'Show unavailable scopes', exact: true }).click()
+      await expect(edit.getByRole('checkbox', { name: /nodes\.write/ })).toBeDisabled()
+      await expect(edit).toContainText(LONG_ROLE)
+      await fits(edit, true)
+      await tooltips(edit)
+      await edit.getByRole('button', { name: 'Cancel', exact: true }).click()
+      await expect(edit).toHaveCount(0)
+    } else {
+      // This fresh fixture still holds the stored long scope; no edit GET pruned it.
+      await agent(page).locator('tbody tr').filter({ hasText: 'aeon_ph4r_' }).getByRole('button', { name: /^Rotate key/ }).click()
+      const rotate = page.getByRole('dialog', { name: 'Rotate key for pharos-deployer', exact: true })
+      await expect(rotate.locator('.rotation-scopes')).toContainText(LONG_SCOPE)
+      await expect(rotate.locator('.rotation-scopes .scope-id').filter({ hasText: LONG_SCOPE })).toHaveAttribute('title', LONG_SCOPE)
+      await fits(rotate, true)
+      await tooltips(rotate)
+      // Check the rendered long id, rather than only the dialog's clipped bounds.
+      expect(await rotate.locator('.rotation-scopes').evaluate(el => el.scrollWidth <= el.clientWidth + 1)).toBe(true)
+    }
     expect(errors).toEqual([])
     expect(world.calls.some(c => c.method === 'POST' && c.path === '/api/agent-keys')).toBe(false)
   })

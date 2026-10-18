@@ -23,6 +23,8 @@ export async function mockStartAgent(page: Page, options: { wait?: CapacityWait;
     node.kind_slug = 'work'
   }
   if (options.theme) work.preferences.theme = { choice: options.theme }
+  // AEON-741: manual Start agent is an expert opt-in; these specs exercise it.
+  work.preferences['developer-ui'] = { show_expert_start: true }
   await mockWork(page, work, { admin: true })
   const profile: ModelProfile = { id: profileId, slug: 'Build · deliberate', harness: 'codex', family: 'openai', model: 'workspace-build', effort: 'high', tier: 'standard', enabled: true }
   if (options.catalog === 'pi-openrouter') Object.assign(profile, { harness: 'pi', family: 'unknown', model: 'openrouter/stealth/space-bunny-alpha', effort: 'off' })

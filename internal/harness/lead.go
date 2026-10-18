@@ -8,11 +8,13 @@ import (
 	"errors"
 	"net/http"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/inspr-at/paimos/internal/authz"
 	"github.com/inspr-at/paimos/internal/db"
 	"github.com/inspr-at/paimos/internal/httpapi"
+	"github.com/inspr-at/paimos/internal/modelregistry"
 	"github.com/inspr-at/paimos/internal/tenant"
 	"github.com/inspr-at/paimos/internal/workorders"
 	"github.com/jackc/pgx/v5"
@@ -22,17 +24,142 @@ import (
 // Lead is a redacted project projection. Generation changes only on an explicit
 // claim; revision changes on every intent/control write. Neither grants roles.
 type Lead struct {
-	ProjectID     string  `json:"project_id"`
-	SessionID     *string `json:"session_id"`
-	Generation    int64   `json:"generation"`
-	Revision      int64   `json:"revision"`
-	State         string  `json:"state"`
-	Reason        string  `json:"reason"`
-	ProcessActive bool    `json:"process_active"`
-	owner         string
+	ProjectID              string       `json:"project_id"`
+	SessionID              *string      `json:"session_id"`
+	Generation             int64        `json:"generation"`
+	Revision               int64        `json:"revision"`
+	State                  string       `json:"state"`
+	Reason                 string       `json:"reason"`
+	ProcessActive          bool         `json:"process_active"`
+	AutomaticLaunchEnabled bool         `json:"automatic_launch_enabled"`
+	Actions                *LeadActions `json:"actions,omitempty"`
+	updatedAt              time.Time
+	owner                  string
 	// dispatchKey is the agent key row bound at claim or last proven pickup.
 	// Fair turns qualify exactly this credential; it is never projected.
 	dispatchKey string
+}
+
+// LeadActions is a read-only, caller-specific GET projection. It belongs to the
+// surrounding revision/generation/session snapshot, never to audit events or
+// worker lease authority. Every mutation retains its own fenced authorization.
+type LeadActions struct {
+	Start          LeadAction `json:"start"`
+	Resume         LeadAction `json:"resume"`
+	Pause          LeadAction `json:"pause"`
+	Adopt          LeadAction `json:"adopt"`
+	CancelAdoption LeadAction `json:"cancel_adoption"`
+	Remove         LeadAction `json:"remove"`
+}
+
+type LeadAction struct {
+	Available     bool   `json:"available"`
+	BlockedReason string `json:"blocked_reason"`
+}
+
+func leadAction(reason string) LeadAction {
+	return LeadAction{Available: reason == "", BlockedReason: reason}
+}
+
+func blockedLeadActions(reason string) LeadActions {
+	a := leadAction(reason)
+	return LeadActions{a, a, a, a, a, a}
+}
+
+func projectLeadActions(ctx context.Context, tx pgx.Tx, p tenant.Principal, stored, view Lead) (LeadActions, error) {
+	if p.Kind != tenant.Person {
+		return blockedLeadActions("person_required"), nil
+	}
+	scope := authz.Scope{ProjectID: stored.ProjectID}
+	if err := authz.RequireTx(ctx, tx, p, "harness.control", scope); errors.Is(err, authz.ErrForbidden) {
+		return blockedLeadActions("harness_control_required"), nil
+	} else if err != nil {
+		return LeadActions{}, err
+	}
+	var canonical string
+	err := tx.QueryRow(ctx, `SELECT c.id::text FROM principals p JOIN principals c ON c.tenant_id=p.tenant_id AND c.id=coalesce(p.linked_to,p.id) WHERE p.id=$1 AND p.kind='person' AND p.status='active' AND c.kind='person' AND c.status='active'`, p.ID).Scan(&canonical)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return blockedLeadActions("person_required"), nil
+	} else if err != nil {
+		return LeadActions{}, err
+	}
+	ownerReason := ""
+	if stored.Revision > 0 && canonical != stored.owner {
+		ownerReason = "lead_owner_required"
+	}
+	actions := blockedLeadActions(ownerReason)
+	// Removal deliberately follows its existing permission rule: a person with
+	// harness.control may remove a never-started intent, even another owner's.
+	actions.Remove = leadAction("lead_not_removable")
+	if stored.Revision > 0 && stored.Generation == 0 && stored.SessionID == nil {
+		var history bool
+		if err = tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM project_lead_generations WHERE project_id=$1)`, stored.ProjectID).Scan(&history); err != nil {
+			return actions, err
+		}
+		if !history {
+			actions.Remove = leadAction("")
+		}
+	}
+	if ownerReason != "" {
+		return actions, nil
+	}
+	switch {
+	case stored.Revision == 0:
+		actions.Pause = leadAction("lead_required")
+	case stored.Reason == adoptionPending:
+		actions.Pause = leadAction("adoption_pending")
+	case stored.State == "paused":
+		actions.Pause = leadAction("already_paused")
+	default:
+		actions.Pause = leadAction("")
+	}
+	// Pause and removal need no run.create grant; start and adoption do.
+	if err = authz.RequireTx(ctx, tx, p, "run.create", scope); errors.Is(err, authz.ErrForbidden) {
+		actions.Start, actions.Resume, actions.Adopt, actions.CancelAdoption = leadAction("run_create_required"), leadAction("run_create_required"), leadAction("run_create_required"), leadAction("run_create_required")
+		return actions, nil
+	} else if err != nil {
+		return actions, err
+	}
+	actions.CancelAdoption = leadAction("unclaimed_adoption_required")
+	if stored.Reason == adoptionPending && stored.Generation == 0 && stored.SessionID != nil {
+		actions.CancelAdoption = leadAction("")
+	}
+	lifecycle, err := leadProject(ctx, tx, stored.ProjectID)
+	if err != nil {
+		return actions, err
+	}
+	startReason := ""
+	switch {
+	case lifecycle != "":
+		startReason = lifecycle
+	case view.ProcessActive:
+		startReason = "process_exit_unconfirmed"
+	case !view.AutomaticLaunchEnabled:
+		startReason = "automatic_launch_disabled"
+	}
+	actions.Start = leadAction(startReason)
+	actions.Resume = actions.Start
+	if view.State != "paused" {
+		actions.Resume = leadAction("lead_not_paused")
+	}
+	switch {
+	case lifecycle != "":
+		actions.Adopt = leadAction(lifecycle)
+	case stored.SessionID != nil:
+		actions.Adopt = leadAction("ordinary_succession_required")
+	case stored.State == "paused":
+		actions.Adopt = leadAction("start_required")
+	default:
+		var eligible bool
+		if err = tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM harness_sessions WHERE project_id=$1 AND owner_principal_id=$2 AND `+adoptEligibleSQL+`)`, stored.ProjectID, canonical).Scan(&eligible); err != nil {
+			return actions, err
+		}
+		actions.Adopt = leadAction("no_eligible_session")
+		if eligible {
+			actions.Adopt = leadAction("")
+		}
+	}
+	return actions, nil
 }
 
 // LeadGate is supplied by the existing admission owners, never by an API body.
@@ -42,6 +169,28 @@ type LeadGate struct {
 	CheckedAt time.Time
 }
 type LeadChecks struct{ Dial, Harness, Account, Host LeadGate }
+
+// LeadAdmissionError identifies a failed check without projecting its private
+// error text. Gate must be dial, harness, account or host; other errors identify
+// only the admission adapter, never an invented failing gate.
+type LeadAdmissionError struct {
+	Gate string
+	Err  error
+}
+
+func (e *LeadAdmissionError) Error() string { return "lead admission check failed" }
+func (e *LeadAdmissionError) Unwrap() error { return e.Err }
+
+func leadAdmissionFailure(err error) string {
+	var failure *LeadAdmissionError
+	if errors.As(err, &failure) && failure != nil {
+		switch failure.Gate {
+		case "dial", "harness", "account", "host":
+			return failure.Gate + "_unavailable"
+		}
+	}
+	return "admission_unavailable"
+}
 
 // LeadAdmission must re-read the existing person agentplan, harness allowance,
 // account reservation and host-load policy inside tx at every claim/dispatch.
@@ -90,11 +239,11 @@ func leadWait(checks LeadChecks, now time.Time) string {
 // for claim, projection, dispatch and assigned-worker eligibility.
 const leadReportingFreshSQL = `coalesce(heartbeat_at,created_at) BETWEEN clock_timestamp()-interval '2 minutes' AND clock_timestamp()`
 
-const leadColumns = `project_id::text,session_id::text,generation,revision,state,reason,owner_principal_id::text,coalesce(dispatch_key_id::text,'')`
+const leadColumns = `project_id::text,session_id::text,generation,revision,state,reason,owner_principal_id::text,coalesce(dispatch_key_id::text,''),updated_at`
 
 func scanLead(row pgx.Row) (Lead, error) {
 	var l Lead
-	err := row.Scan(&l.ProjectID, &l.SessionID, &l.Generation, &l.Revision, &l.State, &l.Reason, &l.owner, &l.dispatchKey)
+	err := row.Scan(&l.ProjectID, &l.SessionID, &l.Generation, &l.Revision, &l.State, &l.Reason, &l.owner, &l.dispatchKey, &l.updatedAt)
 	return l, err
 }
 func loadLead(ctx context.Context, tx pgx.Tx, projectID string, lock bool) (Lead, error) {
@@ -117,12 +266,10 @@ func leadFence(ctx context.Context, tx pgx.Tx, projectID string) error {
 	}
 	return lockHierarchy(ctx, tx, projectID)
 }
-func leadProject(ctx context.Context, tx pgx.Tx, projectID string) (bool, error) {
-	var state string
-	var deleted *time.Time
-	err := tx.QueryRow(ctx, `SELECT n.state,n.deleted_at FROM nodes n JOIN node_kinds k ON k.tenant_id=n.tenant_id AND k.id=n.kind_id WHERE n.id=$1 AND k.slug='project'`, projectID).Scan(&state, &deleted)
-	return state != "archived" && deleted == nil, err
+func leadProject(ctx context.Context, tx pgx.Tx, projectID string) (string, error) {
+	return authz.ProjectStartReasonTx(ctx, tx, projectID)
 }
+
 func leadOwner(ctx context.Context, tx pgx.Tx, p tenant.Principal, projectID, owner string) error {
 	var canonical string
 	err := tx.QueryRow(ctx, `SELECT c.id::text FROM principals p JOIN principals c ON c.tenant_id=p.tenant_id AND c.id=coalesce(p.linked_to,p.id) WHERE p.id=$1 AND p.kind='person' AND p.status='active' AND c.kind='person' AND c.status='active'`, owner).Scan(&canonical)
@@ -140,8 +287,41 @@ func leadOwner(ctx context.Context, tx pgx.Tx, p tenant.Principal, projectID, ow
 	}
 	return nil
 }
-func projectLead(ctx context.Context, tx pgx.Tx, p tenant.Principal, l Lead) (Lead, error) {
-	active, err := leadProject(ctx, tx, l.ProjectID)
+
+const leadPickupWait = 5 * time.Minute
+
+// Correct the old first-insert reason on reads without rewriting audit history.
+// Revision one with no generation/session cannot have run a claim: every claim
+// result increments revision. Actual failed claims keep their admission reason.
+func projectLeadWait(l Lead, now time.Time) Lead {
+	if l.State != "waiting_for_room" || l.ProcessActive {
+		return l
+	}
+	if l.Reason == "start_checks_unavailable" && l.Revision == 1 && l.Generation == 0 && l.SessionID == nil {
+		l.Reason = "awaiting_generation"
+	}
+	if l.Reason != "awaiting_generation" {
+		return l
+	}
+	if !l.AutomaticLaunchEnabled {
+		l.Reason = "automatic_launch_disabled"
+	} else if !l.updatedAt.IsZero() && !l.updatedAt.After(now) && now.Sub(l.updatedAt) >= leadPickupWait {
+		l.Reason = "runtime_pickup_timeout"
+	}
+	return l
+}
+
+func projectLead(ctx context.Context, tx pgx.Tx, p tenant.Principal, l Lead, readers ...modelregistry.ExecutionRuntimeReader) (Lead, error) {
+	var reader modelregistry.ExecutionRuntimeReader
+	if len(readers) > 0 {
+		reader = readers[0]
+	}
+	policy, err := modelregistry.ProjectExecutionTx(ctx, tx, p.TenantID, l.ProjectID, reader)
+	if err != nil {
+		return l, err
+	}
+	l.AutomaticLaunchEnabled = policy.AutomaticLaunchEnabled
+	lifecycle, err := leadProject(ctx, tx, l.ProjectID)
 	if err != nil {
 		return l, err
 	}
@@ -153,8 +333,8 @@ func projectLead(ctx context.Context, tx pgx.Tx, p tenant.Principal, l Lead) (Le
 	if l.State == "none" {
 		return l, nil
 	}
-	if !active {
-		l.State, l.Reason = "cannot_start", "project_archived"
+	if lifecycle != "" {
+		l.State, l.Reason = "cannot_start", lifecycle
 		return l, nil
 	}
 	if err = leadOwner(ctx, tx, p, l.ProjectID, l.owner); errors.Is(err, authz.ErrForbidden) {
@@ -182,7 +362,33 @@ func projectLead(ctx context.Context, tx pgx.Tx, p tenant.Principal, l Lead) (Le
 			l.State = "starting"
 		}
 	}
-	return l, nil
+	var now time.Time
+	if l.State == "waiting_for_room" {
+		if err = tx.QueryRow(ctx, `SELECT clock_timestamp()`).Scan(&now); err != nil {
+			return l, err
+		}
+	}
+	return projectLeadWait(l, now), nil
+}
+
+// projectAdmissionAbsence is a read projection. An absent adapter is not a
+// failed read, and a bound session that has confirmed exit is not waiting on
+// one. The stored claim row is left unchanged.
+func projectAdmissionAbsence(l Lead, adapterConfigured bool) Lead {
+	if l.Reason != "admission_unavailable" && l.Reason != "admission_not_configured" {
+		return l
+	}
+	if !adapterConfigured {
+		l.Reason = "admission_not_configured"
+	}
+	if l.State != "waiting_for_room" || l.SessionID == nil || l.ProcessActive {
+		return l
+	}
+	l.State = "paused"
+	if adapterConfigured && l.Reason == "admission_unavailable" {
+		l.Reason = "process_stopped"
+	}
+	return l
 }
 func (m *Module) readLead(r *http.Request, tx pgx.Tx, p tenant.Principal) (any, error) {
 	if !workorders.UUID(r.PathValue("projectId")) {
@@ -195,7 +401,16 @@ func (m *Module) readLead(r *http.Request, tx pgx.Tx, p tenant.Principal) (any, 
 	if err != nil {
 		return nil, err
 	}
-	return projectLead(r.Context(), tx, p, l)
+	view, err := m.projectLead(r.Context(), tx, p, l)
+	if err != nil {
+		return nil, err
+	}
+	actions, err := projectLeadActions(r.Context(), tx, p, l, view)
+	if err != nil {
+		return nil, err
+	}
+	view.Actions = &actions
+	return view, nil
 }
 func (m *Module) startLead(r *http.Request, tx pgx.Tx, p tenant.Principal) (any, error) {
 	var in struct {
@@ -217,12 +432,12 @@ func (m *Module) startLead(r *http.Request, tx pgx.Tx, p tenant.Principal) (any,
 	if err := leadOwner(ctx, tx, p, id, p.ID); err != nil {
 		return nil, err
 	}
-	active, err := leadProject(ctx, tx, id)
+	lifecycle, err := leadProject(ctx, tx, id)
 	if err != nil {
 		return nil, err
 	}
-	if !active {
-		return nil, workorders.Fail(409, "project archived")
+	if lifecycle != "" {
+		return nil, workorders.Fail(409, lifecycle)
 	}
 	l, err := loadLead(ctx, tx, id, true)
 	if err != nil {
@@ -248,18 +463,74 @@ func (m *Module) startLead(r *http.Request, tx pgx.Tx, p tenant.Principal) (any,
 			return nil, workorders.Fail(409, "lead process exit is unconfirmed")
 		}
 	}
-	l, err = scanLead(tx.QueryRow(ctx, `INSERT INTO project_leads(tenant_id,project_id,owner_principal_id,state,reason) VALUES($1,$2,$3,'waiting_for_room','start_checks_unavailable') ON CONFLICT(tenant_id,project_id) DO UPDATE SET owner_principal_id=excluded.owner_principal_id,state='waiting_for_room',reason='awaiting_generation',revision=project_leads.revision+1,updated_at=clock_timestamp() RETURNING `+leadColumns, p.TenantID, id, owner))
+	// An intent created after removal must not reuse a revision that an older
+	// confirmation could still carry. The append-only removal audit retains it.
+	l, err = scanLead(tx.QueryRow(ctx, `INSERT INTO project_leads(tenant_id,project_id,owner_principal_id,state,reason,revision) VALUES($1,$2,$3,'waiting_for_room','awaiting_generation',coalesce((SELECT ("before"->>'revision')::bigint FROM events WHERE tenant_id=$1 AND node_id=$2 AND type='lead.removed' ORDER BY id DESC LIMIT 1),0)+1) ON CONFLICT(tenant_id,project_id) DO UPDATE SET owner_principal_id=excluded.owner_principal_id,state='waiting_for_room',reason='awaiting_generation',revision=project_leads.revision+1,updated_at=clock_timestamp() RETURNING `+leadColumns, p.TenantID, id, owner))
 	if err != nil {
 		return nil, err
 	}
 	if err = workorders.Record(ctx, tx, p, id, "lead.start_requested", before, l); err != nil {
 		return nil, err
 	}
-	return projectLead(ctx, tx, p, l)
+	return m.projectLead(ctx, tx, p, l)
 }
+
+// Removing an intent never erases a generation's immutable history. The same
+// project fence as start/claim also serializes permission changes.
+func (m *Module) removeLead(r *http.Request, tx pgx.Tx, p tenant.Principal) (any, error) {
+	var in struct {
+		Revision int64 `json:"expected_revision"`
+	}
+	if err := workorders.Decode(r, &in); err != nil {
+		return nil, err
+	}
+	if in.Revision < 1 {
+		return nil, workorders.Fail(400, "valid revision required")
+	}
+	if p.Kind != tenant.Person {
+		return nil, workorders.Fail(403, "person required to remove lead")
+	}
+	ctx, id := r.Context(), r.PathValue("projectId")
+	if err := leadFence(ctx, tx, id); err != nil {
+		return nil, err
+	}
+	if err := authz.RequireTx(ctx, tx, p, "harness.control", authz.Scope{ProjectID: id}); err != nil {
+		return nil, err
+	}
+	l, err := loadLead(ctx, tx, id, true)
+	if err != nil {
+		return nil, err
+	}
+	if l.Revision != in.Revision {
+		return nil, workorders.Fail(409, "lead revision conflict")
+	}
+	var history bool
+	if err = tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM project_lead_generations WHERE project_id=$1)`, id).Scan(&history); err != nil {
+		return nil, err
+	}
+	if l.Generation != 0 || l.SessionID != nil || history {
+		return nil, workorders.Fail(409, "only a never-started lead can be removed")
+	}
+	if _, err = tx.Exec(ctx, `DELETE FROM project_leads WHERE project_id=$1`, id); err != nil {
+		return nil, err
+	}
+	next := Lead{ProjectID: id, State: "none"}
+	// No locks or writes after the event counter: removal and its audit commit
+	// together, and the public response is the ordinary empty lead projection.
+	if err = workorders.Record(ctx, tx, p, id, "lead.removed", l, next); err != nil {
+		return nil, err
+	}
+	return next, nil
+}
+
 func (m *Module) checkLeadAdmission(ctx context.Context, tx pgx.Tx, p tenant.Principal, owner string, s Session) (string, error) {
+	if reason, err := authz.ProjectStartReasonTx(ctx, tx, s.ProjectID); err != nil || reason != "" {
+		return reason, err
+	}
 	if m.leadAdmission == nil {
-		return "start_checks_unavailable", nil
+		// Absent is not a failed read. A configured adapter that errors still
+		// returns admission_unavailable through leadAdmissionFailure.
+		return "admission_not_configured", nil
 	}
 	attempt, err := tx.Begin(ctx)
 	if err != nil {
@@ -270,7 +541,7 @@ func (m *Module) checkLeadAdmission(ctx context.Context, tx pgx.Tx, p tenant.Pri
 		if rollbackErr := attempt.Rollback(ctx); rollbackErr != nil {
 			return "", rollbackErr
 		}
-		return "start_checks_unavailable", nil
+		return leadAdmissionFailure(err), nil
 	}
 	if err = attempt.Commit(ctx); err != nil {
 		return "", err
@@ -283,13 +554,14 @@ func (m *Module) checkLeadAdmission(ctx context.Context, tx pgx.Tx, p tenant.Pri
 }
 func (m *Module) claimLead(r *http.Request, tx pgx.Tx, p tenant.Principal) (any, error) {
 	var in struct {
-		Revision  int64  `json:"expected_revision"`
-		SessionID string `json:"session_id"`
+		Revision   int64  `json:"expected_revision"`
+		SessionID  string `json:"session_id"`
+		SessionRef string `json:"harness_session_ref"`
 	}
 	if err := workorders.Decode(r, &in); err != nil {
 		return nil, err
 	}
-	if in.Revision < 1 || !workorders.UUID(in.SessionID) {
+	if in.Revision < 1 || (in.SessionID == "") == (in.SessionRef == "") || in.SessionID != "" && !workorders.UUID(in.SessionID) || in.SessionRef != "" && (len(in.SessionRef) < 16 || len(in.SessionRef) > 4096 || strings.ContainsAny(in.SessionRef, "\r\n")) {
 		return nil, workorders.Fail(400, "valid revision and session required")
 	}
 	ctx, id := r.Context(), r.PathValue("projectId")
@@ -306,15 +578,24 @@ func (m *Module) claimLead(r *http.Request, tx pgx.Tx, p tenant.Principal) (any,
 	if l.Revision != in.Revision {
 		return nil, workorders.Fail(409, "lead revision conflict")
 	}
-	active, err := leadProject(ctx, tx, id)
+	lifecycle, err := leadProject(ctx, tx, id)
 	if err != nil {
 		return nil, err
 	}
-	if !active {
-		return nil, workorders.Fail(409, "project archived")
+	if lifecycle != "" {
+		return nil, workorders.Fail(409, lifecycle)
 	}
 	if err = leadOwner(ctx, tx, p, id, l.owner); err != nil {
 		return nil, err
+	}
+	if in.SessionRef != "" {
+		err = tx.QueryRow(ctx, `SELECT id::text FROM harness_sessions WHERE project_id=$1 AND agent_principal_id=$2 AND ref_digest=$3 AND stopped_at IS NULL AND archived_at IS NULL`, id, p.ID, digest("ref", in.SessionRef)).Scan(&in.SessionID)
+		if errors.Is(err, pgx.ErrNoRows) {
+			return nil, workorders.Fail(403, "harness worker proof rejected")
+		}
+		if err != nil {
+			return nil, err
+		}
 	}
 	r.SetPathValue("sessionId", in.SessionID)
 	s, err := worker(ctx, tx, r, p)
@@ -330,6 +611,22 @@ func (m *Module) claimLead(r *http.Request, tx pgx.Tx, p tenant.Principal) (any,
 	}
 	if !fresh {
 		return nil, workorders.Fail(409, "fresh reporting generation required")
+	}
+	adopting := l.Reason == adoptionPending
+	if adopting {
+		if l.SessionID == nil || *l.SessionID != s.ID {
+			return nil, workorders.Fail(409, "person-confirmed session required")
+		}
+		var eligible bool
+		if err = tx.QueryRow(ctx, `SELECT `+adoptEligibleSQL+` FROM harness_sessions WHERE id=$1`, s.ID).Scan(&eligible); err != nil {
+			return nil, err
+		}
+		if !eligible {
+			return nil, workorders.Fail(409, "eligible owned reporting root coordinator required")
+		}
+	}
+	if l.Reason == selectionCleared {
+		return nil, workorders.Fail(409, "explicit start request required after cancelled adoption")
 	}
 	before := l
 	var predecessor *Session
@@ -356,9 +653,12 @@ func (m *Module) claimLead(r *http.Request, tx pgx.Tx, p tenant.Principal) (any,
 	if l.State == "paused" {
 		return nil, workorders.Fail(409, "explicit start request required after pause")
 	}
-	reason, err := m.checkLeadAdmission(ctx, tx, p, l.owner, s)
-	if err != nil {
-		return nil, err
+	reason := ""
+	if !adopting {
+		reason, err = m.checkLeadAdmission(ctx, tx, p, l.owner, s)
+		if err != nil {
+			return nil, err
+		}
 	}
 	if reason == "" && (l.SessionID == nil || *l.SessionID != s.ID) {
 		reason, err = m.leadScheduleWait(ctx, tx, p, l, true)
@@ -372,12 +672,12 @@ func (m *Module) claimLead(r *http.Request, tx pgx.Tx, p tenant.Principal) (any,
 		// The claiming key becomes the generation's dispatch credential. Fair
 		// turns qualify this exact key; a claim through a weaker key cannot
 		// borrow a stronger key the same principal happens to hold.
-		l, err = scanLead(tx.QueryRow(ctx, `UPDATE project_leads SET generation=generation+CASE WHEN session_id IS DISTINCT FROM $2::uuid THEN 1 ELSE 0 END,session_id=$2,dispatch_key_id=nullif($3,'')::uuid,state='working',reason='',revision=revision+1,updated_at=clock_timestamp() WHERE project_id=$1 RETURNING `+leadColumns, id, s.ID, p.AuthKeyID))
+		l, err = scanLead(tx.QueryRow(ctx, `UPDATE project_leads SET generation=generation+CASE WHEN session_id IS DISTINCT FROM $2::uuid OR $4 THEN 1 ELSE 0 END,session_id=$2,dispatch_key_id=nullif($3,'')::uuid,state='working',reason='',revision=revision+1,updated_at=clock_timestamp() WHERE project_id=$1 RETURNING `+leadColumns, id, s.ID, p.AuthKeyID, adopting))
 	}
 	if err != nil {
 		return nil, err
 	}
-	if reason == "" && (before.SessionID == nil || *before.SessionID != s.ID) {
+	if reason == "" && (adopting || before.SessionID == nil || *before.SessionID != s.ID) {
 		if _, err = tx.Exec(ctx, `INSERT INTO project_lead_generations(tenant_id,project_id,generation,session_id) VALUES($1,$2,$3,$4)`, p.TenantID, id, l.Generation, s.ID); err != nil {
 			return nil, err
 		}
@@ -400,7 +700,7 @@ func (m *Module) claimLead(r *http.Request, tx pgx.Tx, p tenant.Principal) (any,
 	if err = workorders.Record(ctx, tx, p, id, "lead.claim_checked", before, l); err != nil {
 		return nil, err
 	}
-	return projectLead(ctx, tx, p, l)
+	return m.projectLead(ctx, tx, p, l)
 }
 
 func (m *Module) pauseLead(r *http.Request, tx pgx.Tx, p tenant.Principal) (result any, err error) {
@@ -449,9 +749,14 @@ func (m *Module) pauseLead(r *http.Request, tx pgx.Tx, p tenant.Principal) (resu
 		if err = authz.RequireTx(ctx, tx, p, "harness.worker", authz.Scope{ProjectID: id}); err != nil {
 			return nil, err
 		}
-		if !leaseProof(s, r, p) {
+		if proof(s, r, p) != nil {
 			return nil, workorders.Fail(403, "current lead worker proof required")
 		}
+	}
+	// An unclaimed adoption has no generation to checkpoint. Reject before
+	// cooperative pause or the lead-state write, so the live process is untouched.
+	if l.Reason == adoptionPending {
+		return nil, workorders.Fail(409, "unclaimed adoption cannot be paused")
 	}
 	before := l
 	reason := "handover_pending"
@@ -473,7 +778,7 @@ func (m *Module) pauseLead(r *http.Request, tx pgx.Tx, p tenant.Principal) (resu
 	if err = record(ctx, tx, p, Session{ProjectID: id}, "lead_paused", before, l); err != nil {
 		return nil, err
 	}
-	return projectLead(ctx, tx, p, l)
+	return m.projectLead(ctx, tx, p, l)
 }
 
 // RequireCurrentLeadTx is the shared fence for accepted assignments (AEON-735)
@@ -502,6 +807,9 @@ func RequireCurrentLeadTx(ctx context.Context, tx pgx.Tx, p tenant.Principal, pr
 		return err
 	}
 	if l.State != "working" {
+		if l.Reason == "project_frozen" || l.Reason == "project_archived" {
+			return workorders.Fail(409, l.Reason)
+		}
 		return workorders.Fail(409, "lead generation unavailable")
 	}
 	var agent string
@@ -512,6 +820,52 @@ func RequireCurrentLeadTx(ctx context.Context, tx pgx.Tx, p tenant.Principal, pr
 		return authz.ErrForbidden
 	}
 	return nil
+}
+
+// RequireRoutineLeadDispatchTx is the server-owned counterpart to the leased
+// HTTP pickup. It is restricted to a persisted consenting routine, the owner's
+// existing live generation and its exact bound dispatch key. It cannot adopt a
+// session, rebind a credential or grant authority from a queue entry.
+func RequireRoutineLeadDispatchTx(ctx context.Context, tx pgx.Tx, tenantID, routine, project, owner, session string, generation int64, admission LeadAdmission) (tenant.Principal, error) {
+	p := tenant.Principal{TenantID: tenantID, Kind: tenant.Agent}
+	var bound bool
+	if err := tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM routine_runs WHERE id=$1 AND output_project_id=$2 AND owner_principal_id=$3 AND execute_consent AND consent_revision=definition_revision)`, routine, project, owner).Scan(&bound); err != nil {
+		return p, err
+	}
+	if !bound {
+		return p, workorders.Fail(409, "routine_intent_required")
+	}
+	l, err := loadLead(ctx, tx, project, true)
+	if err != nil {
+		return p, err
+	}
+	if l.owner != owner || l.SessionID == nil || *l.SessionID != session || l.Generation != generation {
+		return p, workorders.Fail(409, "stale_lead_generation")
+	}
+	if err = tx.QueryRow(ctx, `SELECT agent_principal_id::text FROM harness_sessions WHERE id=$1`, session).Scan(&p.ID); err != nil {
+		return p, err
+	}
+	if err = authz.RequireQueueDispatcherTx(ctx, tx, tenantID, p.ID, l.dispatchKey, project); err != nil {
+		return p, err
+	}
+	if err = tx.QueryRow(ctx, `SELECT scopes,coalesce(created_by_principal_id::text,''),full_access FROM agent_keys WHERE id=$1`, l.dispatchKey).Scan(&p.Scopes, &p.KeyCreatorID, &p.FullAccess); err != nil {
+		return p, err
+	}
+	p.Scopes = authz.ResolveKeyScopes(p.Scopes, p.FullAccess)
+	p.KeyID, p.AuthKeyID = l.dispatchKey, l.dispatchKey
+	if err = RequireCurrentLeadTx(ctx, tx, p, project, session, generation); err != nil {
+		return p, err
+	}
+	s, err := load(ctx, tx, project, session, false)
+	if err != nil {
+		return p, err
+	}
+	m := Module{leadAdmission: admission}
+	reason, err := m.checkLeadAdmission(ctx, tx, p, owner, s)
+	if err == nil && reason != "" {
+		err = workorders.Fail(409, "lead admission wait: "+reason)
+	}
+	return p, err
 }
 
 // Existing general coordinator registrations are observational. Once explicitly

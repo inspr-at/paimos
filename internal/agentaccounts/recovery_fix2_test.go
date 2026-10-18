@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/inspr-at/paimos/internal/capacity"
+	"github.com/inspr-at/paimos/internal/db"
 	"github.com/inspr-at/paimos/internal/dbtest"
 	"github.com/jackc/pgx/v5"
 )
@@ -149,7 +150,7 @@ func TestBConcurrentQueuedClaimsPromoteOneRecovery(t *testing.T) {
 	now := base.Add(time.Hour)
 	bAt(t, &f, now, "g2")
 	pool, barrier, ctx := dbtest.BarrierPool(t, appPool, func(sql string) bool {
-		return sql == `SELECT id FROM tenants WHERE id=current_setting('aeon.tenant_id')::uuid FOR NO KEY UPDATE`
+		return sql == db.TenantFenceSQL
 	})
 	mod := fixedClockModule{Module: New(pool), at: now}
 	statuses := make(chan int, 2)
@@ -210,7 +211,7 @@ func TestBPromotionWaitsForStartedWorkAndPreservesFailedClaims(t *testing.T) {
 	bFinish(t, f, started, now, "completed", 1)
 	// A real manual cap still blocks promotion after started work has left.
 	limitPath := "/api/agent-accounts/" + f.account.ID + "/limit"
-	callStatus(t, f.mod, &f.admin, "", "PUT", limitPath, `{"amount":1,"unit":"runs","period":"day"}`, 200, nil)
+	seedExistingLimit(t, f, 1, "runs", "day", nil)
 	code, response = call(t, f.mod, &f.runner, f.token, "POST", path, body)
 	if code != 409 || !strings.Contains(string(response), "reserved capacity is not eligible: allowance") {
 		t.Fatalf("manual cap did not fence promotion: %d %s", code, response)

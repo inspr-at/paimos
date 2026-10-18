@@ -14,7 +14,10 @@ import (
 
 	"github.com/inspr-at/paimos/internal/db"
 	"github.com/inspr-at/paimos/internal/httpapi"
+	"github.com/inspr-at/paimos/internal/knowledge"
+	"github.com/inspr-at/paimos/internal/recurrences"
 	"github.com/inspr-at/paimos/internal/tenant"
+	"github.com/inspr-at/paimos/internal/workorders"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -24,21 +27,25 @@ import (
 // 30-second scan. Scheduler integration must retain quiet hours and escalation.
 const NearExpiry = 15 * time.Minute
 
+var ErrPersonStepCoverage = errors.New("desk person-step coverage exceeds 1000 candidate tickets")
+
 var ErrCoverage = errors.New("desk project coverage exceeds 1000 projects")
 
 type Item struct {
-	ID        string     `json:"id"`
-	Kind      string     `json:"kind"`
-	ProjectID string     `json:"project_id,omitempty"`
-	Revision  int64      `json:"revision"`
-	Title     string     `json:"title"`
-	CreatedAt time.Time  `json:"created_at"`
-	ExpiresAt *time.Time `json:"expires_at,omitempty"`
-	Held      bool       `json:"held"`
-	Href      string     `json:"href"`
-	Source    string     `json:"source"`
-	Bucket    int        `json:"-"`
-	OrderAt   time.Time  `json:"-"`
+	PersonStep *workorders.PersonStep `json:"person_step,omitempty"`
+	ID         string                 `json:"id"`
+	Kind       string                 `json:"kind"`
+	ProjectID  string                 `json:"project_id,omitempty"`
+	Revision   int64                  `json:"revision"`
+	Title      string                 `json:"title"`
+	CreatedAt  time.Time              `json:"created_at"`
+	ExpiresAt  *time.Time             `json:"expires_at,omitempty"`
+	Held       bool                   `json:"held"`
+	CanDecide  bool                   `json:"can_decide"`
+	Href       string                 `json:"href"`
+	Source     string                 `json:"source"`
+	Bucket     int                    `json:"-"`
+	OrderAt    time.Time              `json:"-"`
 }
 
 // PushEligible is evaluated again just before dispatch. Answered questions,
@@ -59,9 +66,10 @@ func (i Item) PushEligible(now time.Time) bool {
 }
 
 type Counts struct {
-	Open   int `json:"open"`
-	Held   int `json:"held"`
-	Chores int `json:"chores"`
+	Open    int            `json:"open"`
+	Held    int            `json:"held"`
+	Chores  int            `json:"chores"`
+	Lessons map[string]int `json:"lessons,omitempty"`
 }
 
 type Page struct {
@@ -79,9 +87,17 @@ type cursor struct {
 	Kind   string    `json:"kind"`
 }
 
-type Module struct{ pool *pgxpool.Pool }
+type Module struct {
+	pool           *pgxpool.Pool
+	routineRuntime recurrences.ExecutionRuntimeReader
+}
 
 func New(pool *pgxpool.Pool) *Module { return &Module{pool: pool} }
+
+func (m *Module) WithRoutineExecutionRuntime(reader recurrences.ExecutionRuntimeReader) *Module {
+	m.routineRuntime = reader
+	return m
+}
 
 func (m *Module) Mount(mux *http.ServeMux) {
 	mux.HandleFunc("GET /api/decision-desk/projection", m.projection)
@@ -113,12 +129,12 @@ func (m *Module) projection(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	page, err := m.Read(r.Context(), p, limit, after)
-	if errors.Is(err, ErrCoverage) {
-		httpapi.WriteError(w, 422, "decision desk coverage exceeds 1000 projects")
+	if errors.Is(err, ErrCoverage) || errors.Is(err, ErrPersonStepCoverage) || errors.Is(err, recurrences.ErrConsentCoverage) || errors.Is(err, knowledge.ErrDeskLessonCoverage) {
+		httpapi.WriteError(w, 422, err.Error())
 		return
 	}
 	if err != nil {
-		httpapi.WriteError(w, 500, "decision desk could not be read")
+		httpapi.WriteInternalError(w, r, "decision_desk", err, "decision desk could not be read")
 		return
 	}
 	httpapi.WriteJSON(w, 200, page)
@@ -148,19 +164,24 @@ func validID(id string) bool {
 }
 
 func validKind(kind string) bool {
-	return kind == "question" || kind == "approval" || kind == "action_request" || kind == "doctrine" || kind == "key_trim"
+	return kind == "question" || kind == "approval" || kind == "action_request" || kind == "doctrine" || kind == "key_trim" || kind == "stepup" || kind == "tier_request" || kind == "account_matrix" || kind == "routine_consent" || kind == "lesson"
 }
 
 func (m *Module) Read(ctx context.Context, p tenant.Principal, limit int, after *cursor) (Page, error) {
+	ctx, cancel := context.WithTimeout(ctx, 8*time.Second)
+	defer cancel()
 	page := Page{Items: []Item{}}
 	if p.Kind != tenant.Person || p.KeyCreatorID != "" || limit < 1 || limit > 100 {
 		return page, errors.New("invalid desk reader")
 	}
 	// Source-specific permissions below are authoritative, including callers
 	// whose questions.read does not include generic nodes.read.
-	err := db.InTenant(db.AllProjects(ctx, "decision desk: every source filtered by current recipient permissions"), m.pool, p.TenantID, func(tx pgx.Tx) error {
+	err := db.InTenantReadSnapshot(db.AllProjects(ctx, "decision desk: every source filtered by current recipient permissions"), m.pool, p.TenantID, func(tx pgx.Tx) error {
+		if err := db.SetLocalStatementTimeout(ctx, tx, 5*time.Second); err != nil {
+			return err
+		}
 		var err error
-		page, err = ReadTx(ctx, tx, p, limit, after)
+		page, err = ReadTx(ctx, tx, p, limit, after, m.routineRuntime)
 		return err
 	})
 	return page, err

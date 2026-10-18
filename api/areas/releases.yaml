@@ -1,0 +1,222 @@
+# SPDX-License-Identifier: AGPL-3.0-only
+# aeon:owner internal/releasehistory
+paths:
+  /releases:
+    get:
+      operationId: listReleases
+      summary: The release history embedded in this build (inspr.release-history.v1)
+      description: Agent keys need the releases.read scope; people need only a session. Frozen snapshots for the caller tenant and visible AEON project win over embedded public product notes. Other tenants receive the same embedded product notes without reading live ticket fields. Releases without either retain the historical headline. Backfilled notes are explicitly marked written_after_release.
+      responses:
+        '200':
+          description: History, newest first
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ReleaseHistory'}
+        '401': {description: Authentication required}
+        '403': {description: Agent key requires the releases.read scope}
+        '500': {description: Stored release notes could not be read}
+  /releases/pending:
+    get:
+      operationId: listPendingReleaseChanges
+      summary: Changes on main since the running release
+      description: "AEON-635. Same authentication as the release history: people need a session and agent keys need releases.read. Compares the running published release's exact source commit with a pinned GitHub main head, never ticket status or timestamps. Merge and release/version-bump commits are excluded, as in displayed release groups. The public GitHub lookup is bounded to 250 commits, 4 MiB and six seconds, and cached for two minutes. Ticket classification reads at most 1000 keys from the caller's tenant per page; live ticket benefit text is never returned. A truncated comparison or incomplete classification reports partial, total null and known_total as a lower bound. Missing source evidence or a failed upstream lookup reports unavailable with total null, never zero. Pagination uses the last commit key within a pinned snapshot; a changed snapshot answers 409 and callers restart without a cursor."
+      parameters:
+        - {name: limit, in: query, schema: {type: integer, minimum: 1, maximum: 100, default: 50}}
+        - {name: cursor, in: query, schema: {type: string, maxLength: 256}, description: Opaque continuation returned by the previous page}
+      responses:
+        '200':
+          description: Exact, partial or explicitly unavailable pending changes
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/PendingReleaseChanges'}
+        '400': {description: Invalid page limit or cursor}
+        '401': {description: Authentication required}
+        '403': {description: Agent key requires the releases.read scope}
+        '409': {description: The pinned main snapshot changed; restart pagination}
+  /releases/{version}:
+    get:
+      operationId: getRelease
+      summary: One release of the embedded history
+      description: Agent keys need the releases.read scope; people need only a session. Uses the same tenant snapshot and embedded public product note precedence as the list endpoint.
+      parameters:
+        - {name: version, in: path, required: true, schema: {type: string}, description: 'The calendar version, with or without the leading v'}
+      responses:
+        '200':
+          description: The release
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Release'}
+        '400': {description: Not a calendar version (inspr-calver-3 or inspr-calendar-v2 coordinate)}
+        '401': {description: Authentication required}
+        '403': {description: Agent key requires the releases.read scope}
+        '500': {description: Stored release notes could not be read}
+        '404': {description: No such release in this build's history}
+  /releases/{version}/presentation:
+    parameters:
+      - {name: version, in: path, required: true, schema: {type: string}, description: 'The calendar version, with or without the leading v. It need not be in this build yet, so the release agent can write it before deploying.'}
+    put:
+      operationId: putReleasePresentation
+      summary: Set how a release introduces itself (theme, headline, intro)
+      description: "AEON-305. Stores the theme (kicker), headline and intro in English and German for the served product project, keyed by version. Requires an active person with releases.deploy on that project; agents are denied (403) whatever their role or key scopes. English theme and headline are required; German fields may be empty and readers fall back to English. Theme and headline are one line. Writing identical text changes nothing. Every change records one release.presentation_set event with before and after. The offline equivalent is aeon release-notes present."
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/ReleasePresentationInput'}
+      responses:
+        '200':
+          description: The change (changed is false when the text was already stored)
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ReleasePresentationChange'}
+        '400': {$ref: '#/components/responses/Error'}
+        '401': {$ref: '#/components/responses/Error'}
+        '403': {$ref: '#/components/responses/Error'}
+        '404': {$ref: '#/components/responses/Error'}
+        '409': {$ref: '#/components/responses/Error'}
+        '422': {$ref: '#/components/responses/Error'}
+        '503': {$ref: '#/components/responses/Error'}
+    delete:
+      operationId: deleteReleasePresentation
+      summary: Remove a release's presentation
+      description: Requires an active person with releases.deploy on the served product project; agents are denied (403). Records one release.presentation_cleared event; removing nothing records nothing.
+      responses:
+        '200':
+          description: The change
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ReleasePresentationChange'}
+        '400': {$ref: '#/components/responses/Error'}
+        '401': {$ref: '#/components/responses/Error'}
+        '403': {$ref: '#/components/responses/Error'}
+        '404': {$ref: '#/components/responses/Error'}
+        '503': {$ref: '#/components/responses/Error'}
+components:
+  schemas:
+    PendingReleaseChanges:
+      type: object
+      required: [live_version, base_commit, head_commit, checked_at, source, status, total, known_total, changes, next_cursor, unavailable]
+      properties:
+        live_version: {type: string, description: The running build version used as the baseline}
+        base_commit: {type: string, description: "The running published release's exact source commit, empty when unavailable"}
+        head_commit: {type: string, description: "The pinned GitHub main head, empty when unavailable"}
+        checked_at: {type: string, format: date-time, description: When the cached main comparison was checked}
+        source: {type: string, enum: [github-main]}
+        status: {type: string, enum: [available, partial, unavailable]}
+        total: {type: [integer, 'null'], minimum: 0, description: "Exact non-merge, non-release change count; null for partial or unavailable evidence"}
+        known_total: {type: integer, minimum: 0, description: "Number of confirmed changes in the bounded snapshot, independent of the page limit; a lower bound when partial"}
+        changes: {type: array, maxItems: 100, items: {$ref: '#/components/schemas/Release/properties/changes/items'}}
+        next_cursor: {type: [string, 'null'], description: "Continuation for the next page of this snapshot, null at the end of the bounded list"}
+        unavailable: {type: array, items: {type: string}, description: Plain-language evidence gaps or reasons for a partial or unavailable result}
+    Release:
+      type: object
+      required: [version, tag, release_channel, release_sequence, state, reserved_at, tagged_at, published_at, headline, tickets, changes, changes_omitted, evidence]
+      properties:
+        version: {type: string}
+        tag: {type: string}
+        release_channel: {type: string}
+        release_sequence: {type: integer}
+        codename: {type: string, description: "AEON-430. Alliterative sci-fi name derived from release_sequence by the frozen, append-only codename lists (for example Cool Chip); presentation only, the version stays the identity. Absent without a sequence, and on a reservation whose sequence a published release took."}
+        state: {type: string, enum: [published, reserved, candidate]}
+        reserved_at: {type: [string, 'null'], format: date-time}
+        tagged_at: {type: [string, 'null'], format: date-time}
+        published_at: {type: [string, 'null'], format: date-time}
+        headline: {type: string, description: Original Git headline; source evidence when notes is present}
+        notes: {$ref: "#/components/schemas/ReleaseNotes"}
+        presentation: {$ref: "#/components/schemas/ReleasePresentation"}
+        tickets: {type: array, items: {type: string}, description: Legacy Git references; captured visible release members are in notes.items}
+        changes:
+          type: array
+          items:
+            type: object
+            required: [commit, subject, type, scope, tickets, at]
+            properties:
+              commit: {type: string}
+              subject: {type: string}
+              type: {type: string, enum: [feat, fix, test, docs, release, refactor, chore, other]}
+              scope: {type: string}
+              tickets: {type: array, items: {type: string}}
+              at: {type: string, format: date-time}
+              group: {type: string, enum: [features, fixes, other], description: "Additive display group, computed when the history is served. Conventional feat and fix prefixes win, and test, docs, refactor and chore stay other. Otherwise a linked ticket with a bug tag, type or kind is fixes, a ticket with a release-note pill or benefit that is not hidden is features, and anything else is other. Several tickets take the strongest group, fixes then features then other, and the commit is listed once. A capture that already records a group keeps it. A commit ticket that capture does not name still takes features or fixes from the live bug or visible-benefit fact alone; Aeon attaches no live pill or benefit for that ticket. Omitted on the version bump and on older manifests, which derive the group from type."}
+              linked_tickets:
+                type: array
+                description: "Additive. For Aeon, the frozen pill and benefit of each linked ticket from the selected snapshot; later ticket edits never rewrite history. Other products may opt into a live ticket source. Hidden-from-release-notes tickets are omitted, as are tickets with no pill and no benefit. Each carries its own group. Attached only on features and fixes changes. Omitted when lookup is off or failed. Older clients ignore it."
+                items:
+                  type: object
+                  required: [key, pill_en, pill_de, benefit_en, benefit_de]
+                  properties:
+                    key: {type: string}
+                    pill_en: {type: string}
+                    pill_de: {type: string}
+                    benefit_en: {type: string}
+                    benefit_de: {type: string}
+                    group: {type: string, enum: [features, fixes], description: "Additive. This ticket's own group: the frozen capture when it has one, otherwise fixes for a live bug tag, type or kind and features for a visible benefit. Aeon never uses the live pill or benefit. A commit naming several tickets takes the strongest group, so clients read this to place each ticket. Omitted by older servers."}
+        changes_omitted: {type: integer, minimum: 0}
+        evidence:
+          type: object
+          required: [source_commit, source_url, image, ci, release_run, release_url, unavailable]
+          properties:
+            source_commit: {type: string}
+            source_url: {type: string}
+            image:
+              type: [object, 'null']
+              properties: {reference: {type: string}, digest: {type: string}}
+            ci: {$ref: '#/components/schemas/ReleaseRun'}
+            release_run: {$ref: '#/components/schemas/ReleaseRun'}
+            release_url: {type: string}
+            pending:
+              type: array
+              description: 'Candidate evidence not yet established. Corresponding fields stay empty or null until a later tagged build records them.'
+              items: {type: string, enum: [tag_message, tagged_at, published_at, image, ci, release_run, release_url]}
+            unavailable: {type: array, items: {type: string}, description: 'What could not be established, in plain words'}
+    ReleaseHistory:
+      description: inspr.release-history.v1 (see internal/releasehistory), newest release first, plus the running version.
+      type: object
+      required: [schema, product, repository, version_scheme, generated_at, source, releases, current, live_since]
+      properties:
+        schema: {type: string, enum: [inspr.release-history.v1]}
+        product: {type: string}
+        repository: {type: string}
+        version_scheme: {type: string}
+        generated_at: {type: string, format: date-time}
+        source: {type: string, enum: [git+github, git, none]}
+        current: {type: string, description: The running build's version or dev}
+        live_since: {type: string, format: date-time, description: When this server started running the current version}
+        releases: {type: array, items: {$ref: '#/components/schemas/Release'}}
+    ReleasePresentation:
+      type: object
+      description: "Additive (AEON-305). How a release introduces itself, read per request for the caller's tenant and visible product project. Absent when none was written; the release is then shown by version and date only. German fields may be empty; show English then."
+      required: [theme_en, theme_de, headline_en, headline_de, intro_en, intro_de, revision, updated_at]
+      properties:
+        theme_en: {type: string, maxLength: 80, description: Short name shown as the kicker}
+        theme_de: {type: string, maxLength: 80}
+        headline_en: {type: string, maxLength: 200, description: One sentence}
+        headline_de: {type: string, maxLength: 200}
+        intro_en: {type: string, maxLength: 600, description: Two or three sentences}
+        intro_de: {type: string, maxLength: 600}
+        revision: {type: integer, minimum: 1}
+        updated_at: {type: string, format: date-time}
+    ReleasePresentationChange:
+      type: object
+      required: [version, project_node_id, changed, before, after]
+      properties:
+        version: {type: string}
+        project_node_id: {type: string, format: uuid}
+        changed: {type: boolean}
+        before: {oneOf: [{$ref: '#/components/schemas/ReleasePresentation'}, {type: 'null'}]}
+        after: {oneOf: [{$ref: '#/components/schemas/ReleasePresentation'}, {type: 'null'}]}
+    ReleasePresentationInput:
+      type: object
+      additionalProperties: false
+      required: [theme_en, headline_en]
+      properties:
+        theme_en: {type: string, minLength: 1, maxLength: 80}
+        theme_de: {type: string, maxLength: 80}
+        headline_en: {type: string, minLength: 1, maxLength: 200}
+        headline_de: {type: string, maxLength: 200}
+        intro_en: {type: string, maxLength: 600}
+        intro_de: {type: string, maxLength: 600}
+        expected_revision: {type: integer, minimum: 0, description: Optional guard; 0 means no presentation exists yet. A mismatch answers 409.}
+    ReleaseRun:
+      type: [object, 'null']
+      properties: {name: {type: string}, url: {type: string}, status: {type: string}, conclusion: {type: string}}

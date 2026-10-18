@@ -17,8 +17,10 @@ import (
 	"github.com/inspr-at/paimos/internal/db"
 	"github.com/inspr-at/paimos/internal/dbtest"
 	"github.com/inspr-at/paimos/internal/events"
+	"github.com/inspr-at/paimos/internal/nodes"
 	"github.com/inspr-at/paimos/internal/tenant"
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgconn"
 )
 
 type fixture struct {
@@ -197,6 +199,133 @@ func TestManualReceiptsOverlapProvenanceAndQueue(t *testing.T) {
 	f.call(f.p, "PUT", "/api/recurrences/"+r.ID, body, 200)
 	if replay := f.manual(r.ID, "first"); *replay.NodeID != *first.NodeID {
 		t.Fatal("template edit invalidated key")
+	}
+}
+
+// Risk: recurring work loses release copy or silently bypasses the Done gate.
+func TestRecurrenceReleaseCopySurvivesEditsAndDoneGate(t *testing.T) {
+	for _, tc := range []struct {
+		name               string
+		hidden             *bool
+		legacy, incomplete bool
+	}{
+		{name: "legacy", legacy: true},
+		{name: "legacy visible", hidden: new(false), legacy: true},
+		{name: "hidden by default"},
+		{name: "explicit hidden", hidden: new(true)},
+		{name: "explicit visible", hidden: new(false)},
+		{name: "incomplete hidden", hidden: new(true), incomplete: true},
+		{name: "incomplete visible", hidden: new(false), incomplete: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			f := setup(t)
+			mux := http.NewServeMux()
+			f.m.Mount(mux)
+			nodes.New(f.d.App, nil).Mount(mux)
+			f.handler = mux
+			// Q1 (AEON-1248): release copy is a configured entry check,
+			// with a deliberate exemption for hidden recurring work.
+			f.call(f.p, "PUT", "/api/settings/definitions", map[string]any{"expected_revision": nil, "checks": map[string]any{"done": []map[string]string{{"id": "release_copy_set"}}}}, 200)
+			in := f.input()
+			in.OverlapPolicy = "create"
+			in.Template.HideFromReleaseNotes = tc.hidden
+			if !tc.legacy {
+				in.Template.PillEN, in.Template.PillDE = "Clear release notes", "Verständliche Release Notes"
+				in.Template.BenefitEN, in.Template.BenefitDE = "Tickets explain the benefit.", "Tickets erklären den Nutzen."
+				if tc.incomplete {
+					in.Template.BenefitDE = ""
+				}
+			}
+			r := f.create(in)
+			checkTemplate := func(got Template, want Template) {
+				t.Helper()
+				if got.PillEN != want.PillEN || got.PillDE != want.PillDE || got.BenefitEN != want.BenefitEN || got.BenefitDE != want.BenefitDE || got.HideFromReleaseNotes == nil || *got.HideFromReleaseNotes != (want.HideFromReleaseNotes == nil || *want.HideFromReleaseNotes) {
+					t.Fatalf("release copy changed: got %+v, want %+v", got, want)
+				}
+			}
+			checkTemplate(r.Template, in.Template)
+			checkTemplate(f.get(r.ID).Template, in.Template)
+			runAndComplete := func(key string, want Template) {
+				t.Helper()
+				o := f.manual(r.ID, key)
+				if o.Outcome != "created" || o.NodeID == nil {
+					t.Fatalf("occurrence %+v", o)
+				}
+				var before struct {
+					State  string
+					Fields map[string]any
+				}
+				if err := json.Unmarshal(f.call(f.p, "GET", "/api/nodes/"+*o.NodeID, nil, 200), &before); err != nil {
+					t.Fatal(err)
+				}
+				if before.Fields["hide_from_release_notes"] != (want.HideFromReleaseNotes == nil || *want.HideFromReleaseNotes) {
+					t.Fatalf("visibility changed: %v", before.Fields)
+				}
+				for field, value := range map[string]string{"pill_en": want.PillEN, "pill_de": want.PillDE, "benefit_en": want.BenefitEN, "benefit_de": want.BenefitDE} {
+					if got, present := before.Fields[field]; value != "" && got != render(value, o.Number, o.ScheduledAt, r.Trigger, "", "") || value == "" && present {
+						t.Fatalf("%s changed: %v", field, before.Fields)
+					}
+				}
+				status := http.StatusOK
+				if (tc.legacy || tc.incomplete) && before.Fields["hide_from_release_notes"] != true {
+					status = http.StatusConflict
+				}
+				raw := f.call(f.p, "PATCH", "/api/nodes/"+*o.NodeID, map[string]string{"state": "done"}, status)
+				if status == http.StatusConflict {
+					if !strings.Contains(string(raw), `"code":"entry_checks_failed"`) || !strings.Contains(string(raw), `"id":"release_copy_set"`) || !strings.Contains(string(raw), "benefit_de") {
+						t.Fatalf("wrong Done rejection: %s", raw)
+					}
+					var after struct{ State string }
+					if err := json.Unmarshal(f.call(f.p, "GET", "/api/nodes/"+*o.NodeID, nil, 200), &after); err != nil || after.State != before.State {
+						t.Fatalf("rejected Done changed state: %+v, %v", after, err)
+					}
+				} else {
+					var after struct {
+						State  string
+						Fields map[string]any
+					}
+					if err := json.Unmarshal(raw, &after); err != nil || after.State != "done" || after.Fields["hide_from_release_notes"] != before.Fields["hide_from_release_notes"] {
+						t.Fatalf("Done did not retain visibility: %s, %v", raw, err)
+					}
+				}
+			}
+			if tc.legacy && tc.hidden == nil {
+				// Old persisted JSON has neither copy fields nor the new flag.
+				f.tx(func(tx pgx.Tx) error {
+					_, err := tx.Exec(t.Context(), `UPDATE recurrences SET template=template-'hide_from_release_notes' WHERE id=$1`, r.ID)
+					return err
+				})
+			}
+			runAndComplete("before edit", in.Template)
+			current := f.get(r.ID)
+			edited := current.Input
+			if !tc.legacy {
+				edited.Template.BenefitEN = "Occurrence {{occurrence}} keeps the benefit on {{date}}."
+			}
+			if tc.name == "explicit visible" {
+				edited.Template.HideFromReleaseNotes = new(true)
+			} else if tc.name == "explicit hidden" {
+				edited.Template.HideFromReleaseNotes = new(false)
+			}
+			body := struct {
+				Input
+				ExpectedRevision int64 `json:"expected_revision"`
+			}{edited, current.Revision}
+			f.call(f.p, "PUT", "/api/recurrences/"+r.ID, body, 200)
+			checkTemplate(f.get(r.ID).Template, edited.Template)
+			runAndComplete("after edit", edited.Template)
+			if tc.name == "hidden by default" {
+				// Expansion must not write release copy beyond the advertised bound.
+				current = f.get(r.ID)
+				edited = current.Input
+				edited.Template.BenefitEN = strings.Repeat("a", 4096-len("{{date}}")) + "{{date}}"
+				body.Input, body.ExpectedRevision = edited, current.Revision
+				f.call(f.p, "PUT", "/api/recurrences/"+r.ID, body, 200)
+				if o := f.manual(r.ID, "oversized rendering"); o.Outcome != "skipped" || o.NodeID != nil || o.Reason != "rendered_template_invalid" {
+					t.Fatalf("oversized copy was not refused: %+v", o)
+				}
+			}
+		})
 	}
 }
 func TestCatchUpReplicaRaceRestartAndPause(t *testing.T) {
@@ -637,14 +766,26 @@ func TestDefinitionEditsPreserveDueCursorAndPausedManualRun(t *testing.T) {
 	}
 }
 
-func TestRecurrenceTenantBeforeTree(t *testing.T) {
-	f := setup(t)
-	dbtest.TenantBeforeTree(t, f.d, f.p.TenantID, func(ctx context.Context) error {
-		return db.InTenant(dbtest.Seed(ctx), f.d.App, f.p.TenantID, func(tx pgx.Tx) error {
-			_, err := lock(ctx, tx, f.p.TenantID, false)
-			return err
-		})
-	})
+// Signal at the first shared fence: membership writers hold tenant then tree;
+// tree-only node inserts remain compatible through the tenant FK KEY SHARE.
+type treeBarrierTx struct {
+	pgx.Tx
+	attempted chan struct{}
+	once      sync.Once
+}
+
+func (tx *treeBarrierTx) signal(sql string) {
+	if strings.Contains(sql, "FROM tenants") {
+		tx.once.Do(func() { close(tx.attempted) })
+	}
+}
+func (tx *treeBarrierTx) Exec(ctx context.Context, sql string, args ...any) (pgconn.CommandTag, error) {
+	tx.signal(sql)
+	return tx.Tx.Exec(ctx, sql, args...)
+}
+func (tx *treeBarrierTx) QueryRow(ctx context.Context, sql string, args ...any) pgx.Row {
+	tx.signal(sql)
+	return tx.Tx.QueryRow(ctx, sql, args...)
 }
 
 func TestRecurrenceWriteLockOrderWithTreeWriters(t *testing.T) {
@@ -700,8 +841,11 @@ func TestRecurrenceWriteLockOrderWithTreeWriters(t *testing.T) {
 				_, err = other.Exec(ctx, `INSERT INTO nodes(tenant_id,kind_id,key,title,parent_id,position)
  SELECT $1,k.id,aeon_next_node_key($1,k.short_prefix),'Concurrent node',$2,4096 FROM node_kinds k WHERE slug='work'`, f.p.TenantID, f.parent)
 			} else {
-				// The tenant fence was taken before the tree, as by access writers.
-				_, err = other.Exec(ctx, `UPDATE role_bindings SET role_id=(SELECT id FROM roles WHERE key='viewer') WHERE principal_id=$1 AND scope_type='workspace'`, caller.ID)
+				// Tenant was fenced before tree, matching LockProjectMutation.
+				_, err = other.Exec(ctx, `SELECT id FROM tenants WHERE id=$1 FOR NO KEY UPDATE`, f.p.TenantID)
+				if err == nil {
+					_, err = other.Exec(ctx, `UPDATE role_bindings SET role_id=(SELECT id FROM roles WHERE key='viewer') WHERE principal_id=$1 AND scope_type='workspace'`, caller.ID)
+				}
 			}
 			if err == nil {
 				err = other.Commit(ctx)
@@ -831,5 +975,38 @@ func TestRecurrenceFenceAllowsTenantKeyShare(t *testing.T) {
 		return err
 	}); err != nil {
 		t.Fatalf("recurrence fence blocks tenant FK key-share: %v", err)
+	}
+}
+
+func TestRecurrenceTenantBeforeTree(t *testing.T) {
+	f := setup(t)
+	dbtest.TenantBeforeTree(t, f.d, f.p.TenantID, func(ctx context.Context) error {
+		return db.InTenant(dbtest.Seed(ctx), f.d.App, f.p.TenantID, func(tx pgx.Tx) error {
+			_, err := lock(ctx, tx, f.p.TenantID, false)
+			return err
+		})
+	})
+}
+
+func TestRoutineProjectLifecyclePreventsNewOccurrences(t *testing.T) {
+	// Risk: a frozen or archived routine creates a ticket and queues execution.
+	f := setup(t)
+	r := f.create(f.input())
+	for _, state := range []string{"frozen", "archived"} {
+		f.tx(func(tx pgx.Tx) error {
+			_, err := tx.Exec(t.Context(), `UPDATE nodes SET state=$2 WHERE id=$1`, f.project, state)
+			return err
+		})
+		o := f.manual(r.ID, state)
+		if o.Outcome != "skipped" || o.Reason != "project_"+state || o.NodeID != nil {
+			t.Fatalf("lifecycle occurrence: %+v", o)
+		}
+	}
+	f.tx(func(tx pgx.Tx) error {
+		_, err := tx.Exec(t.Context(), `UPDATE nodes SET state='open' WHERE id=$1`, f.project)
+		return err
+	})
+	if o := f.manual(r.ID, "restored"); o.Outcome != "created" || o.NodeID == nil {
+		t.Fatalf("restore did not admit: %+v", o)
 	}
 }

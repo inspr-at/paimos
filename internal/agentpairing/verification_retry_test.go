@@ -2,12 +2,17 @@
 package agentpairing_test
 
 import (
+	"bytes"
 	"encoding/json"
+	"log/slog"
 	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 
+	"github.com/inspr-at/paimos/internal/agentd"
 	"github.com/inspr-at/paimos/internal/agentpairing"
+	"github.com/inspr-at/paimos/internal/agentruns"
 	"github.com/inspr-at/paimos/internal/db"
 	"github.com/inspr-at/paimos/internal/dbtest"
 	"github.com/inspr-at/paimos/internal/tenant"
@@ -310,5 +315,306 @@ func TestVerifyAgainConnectOnlyPreservesOrdinaryAllowanceAndTenantBoundary(t *te
 	}
 	if runs != 0 {
 		t.Fatal("cross-tenant retry created a run")
+	}
+}
+
+// The daemon's actual DTO and wire order reproduce the release-123 failure.
+func TestVerificationTelemetryPrestartBatchAndRetry(t *testing.T) {
+	// AEON-1041: the Fable model-only status must also reach a successful
+	// terminal check, without manufacturing an app_server_protocol failure.
+	for _, name := range []string{"exact_four_event_batch", "rejected_batch_terminal_recovery", "successful_fable_batch"} {
+		recovery := name == "rejected_batch_terminal_recovery"
+		t.Run(name, func(t *testing.T) {
+			f := newFixture(t)
+			p := f.propose("claude")
+			f.approve(p, "one_per_harness")
+			v := f.redeem(p)
+			e := v.Enrollments[0]
+			key := "aeon_" + v.RuntimePrefix + "_" + p.runtime
+			readSettlement := func(want bool) {
+				t.Helper()
+				var read agentruns.Run
+				decodeResult(t, f.call("GET", "/api/runs/"+*e.VerificationRunID, nil, false, key, 200), &read)
+				if read.ReservationsSettled == nil || *read.ReservationsSettled != want {
+					t.Fatalf("wrong reservation proof: %+v, want %t", read.ReservationsSettled, want)
+				}
+			}
+			readSettlement(false) // No reservations is not a settled reservation.
+			f.probe(v, e, key, 200)
+			f.claim(v, e, key, f.reserve(v, e, key, 200), 200)
+			readSettlement(false) // Active reservations remain unconfirmed.
+			batch := []agentd.Telemetry{
+				{Sequence: 1, Kind: "status", EffectiveModel: "claude-fable-5-1", ModelEvidence: "vendor_reported"},
+				{Sequence: 2, Kind: "turn", TurnCountDelta: 1},
+				{Sequence: 3, Kind: "started", Status: "running"},
+				{Sequence: 4, Kind: "finished", Status: "failed", ErrorCode: "app_server_protocol"},
+			}
+			post := func(report agentd.Telemetry, code int) agentruns.Run {
+				t.Helper()
+				r := f.request("POST", "/api/runs/"+*e.VerificationRunID+"/telemetry", report, false, key)
+				r.Header.Set(agentruns.DaemonHeader, *v.DaemonID)
+				r.Header.Set(agentruns.GenerationHeader, "test-generation")
+				w := httptest.NewRecorder()
+				f.h.ServeHTTP(w, r)
+				if w.Code != code {
+					t.Fatalf("sequence %d: HTTP %d, want %d: %s", report.Sequence, w.Code, code, w.Body.String())
+				}
+				var run agentruns.Run
+				if code == 200 {
+					decodeResult(t, w, &run)
+				}
+				return run
+			}
+			count, turns, errorCode := 4, 1, "app_server_protocol"
+			terminalStatus := "failed"
+			if name == "successful_fable_batch" {
+				terminalStatus, errorCode = "completed", ""
+				batch[3].Status, batch[3].ErrorCode = terminalStatus, errorCode
+			}
+			if recovery {
+				var logs bytes.Buffer
+				old := slog.Default()
+				slog.SetDefault(slog.New(slog.NewJSONHandler(&logs, nil)))
+				defer slog.SetDefault(old)
+				bad := batch[0]
+				bad.EffectiveModel = "PRIVATE-FIXTURE model\nvalue"
+				for i := 0; i < 3; i++ {
+					post(bad, 400)
+				}
+				if !strings.Contains(logs.String(), "effective_model must be a bounded model identifier") || strings.Contains(logs.String(), "PRIVATE-FIXTURE") || strings.Contains(logs.String(), key) {
+					t.Fatal("rejection log lost the field-level reason or leaked request values")
+				}
+				// Fresh sequence, no disputed usage/model/tier and no replay rewrite.
+				batch = []agentd.Telemetry{{Sequence: 5, Kind: "finished", Status: "failed", ErrorCode: "reporter_unavailable"}}
+				count, turns, errorCode = 1, 0, "reporter_unavailable"
+			}
+			for i, report := range batch {
+				run := post(report, 200)
+				if !recovery && i < 2 && run.Status != "starting" {
+					t.Fatal("model/turn event invented completed startup")
+				}
+				if !recovery && (run.EffectiveModel == nil || *run.EffectiveModel != "claude-fable-5-1" || run.ModelEvidence != "vendor_reported") {
+					t.Fatal("vendor model evidence lost")
+				}
+			}
+			// Lost HTTP receipts can replay the original reports after termination.
+			for _, report := range batch {
+				post(report, 200)
+			}
+			var n, gotTurns, held int
+			var status, code string
+			if err := f.db.Admin.QueryRow(t.Context(), `SELECT r.status,
+    (SELECT count(*) FROM run_telemetry WHERE run_id=r.id),
+    (SELECT coalesce(sum(turn_count_delta),0) FROM run_telemetry WHERE run_id=r.id),
+    (SELECT coalesce(error_code,'') FROM run_telemetry WHERE run_id=r.id ORDER BY sequence DESC LIMIT 1),
+    (SELECT count(*) FROM account_reservations WHERE run_id=r.id AND state='active')
+    FROM agent_runs r WHERE r.id=$1`, *e.VerificationRunID).Scan(&status, &n, &gotTurns, &code, &held); err != nil {
+				t.Fatal(err)
+			}
+			if status != terminalStatus || n != count || gotTurns != turns || code != errorCode || held != 0 {
+				t.Fatalf("wrong settlement: %s rows=%d turns=%d code=%s holds=%d", status, n, gotTurns, code, held)
+			}
+			readSettlement(true)
+			// A second unsettled reservation must defeat a settled first row.
+			var extraReservation string
+			if err := f.db.Admin.QueryRow(t.Context(), `WITH extra_window AS (
+ INSERT INTO account_allowance_windows(tenant_id,account_id,starts_at,ends_at,unit,allowance)
+ SELECT tenant_id,account_id,clock_timestamp(),clock_timestamp()+interval '1 hour','requests',1
+ FROM account_allowance_windows WHERE id=(SELECT window_id FROM account_reservations WHERE run_id=$1 LIMIT 1)
+ RETURNING tenant_id,id
+ ) INSERT INTO account_reservations(tenant_id,run_id,window_id,reserved_units)
+ SELECT tenant_id,$1,id,1 FROM extra_window RETURNING id::text`, *e.VerificationRunID).Scan(&extraReservation); err != nil {
+				t.Fatal(err)
+			}
+			readSettlement(false)
+			if _, err := f.db.Admin.Exec(t.Context(), `UPDATE account_reservations SET state='settled',actual_units=0,settled_at=clock_timestamp() WHERE id=$1`, extraReservation); err != nil {
+				t.Fatal(err)
+			}
+			readSettlement(true)
+			// Retain the fixture row and independently vary reservation state:
+			// terminal status and released capacity must not count as settlement.
+			for _, reservationState := range []string{"active", "released", "settled"} {
+				if _, err := f.db.Admin.Exec(t.Context(), `UPDATE account_reservations SET state=$2,
+ settled_at=CASE WHEN $2='active' THEN NULL ELSE clock_timestamp() END,
+ actual_units=CASE WHEN $2='settled' THEN 0 ELSE NULL END WHERE run_id=$1`, *e.VerificationRunID, reservationState); err != nil {
+					t.Fatal(err)
+				}
+				readSettlement(reservationState == "settled")
+			}
+			var current agentpairing.View
+			decodeResult(t, f.call("GET", "/api/agent-pairing/computers/"+*v.ComputerID, nil, true, "", 200), &current)
+			result := current.Enrollments[0]
+			if result.VerificationState != terminalStatus || result.VerificationError != errorCode || result.VerificationStalled || !result.CanVerify {
+				t.Fatal("failed verification missing from owner projection")
+			}
+			var retried struct {
+				RunID string `json:"run_id"`
+			}
+			decodeResult(t, f.call("POST", retryPath(current, e.AccountID), retryBody(current, result), true, "", 200), &retried)
+			if retried.RunID == "" || retried.RunID == *e.VerificationRunID {
+				t.Fatal("settled failure cannot be retried")
+			}
+		})
+	}
+}
+
+func TestStalledVerificationPreservesOwnership(t *testing.T) {
+	f := newFixture(t)
+	p := f.propose("claude")
+	f.approve(p, "one_per_harness")
+	v := f.redeem(p)
+	e := v.Enrollments[0]
+	key := "aeon_" + v.RuntimePrefix + "_" + p.runtime
+	f.probe(v, e, key, 200)
+	f.claim(v, e, key, f.reserve(v, e, key, 200), 200)
+	for _, tc := range []struct {
+		age     string
+		stalled bool
+	}{{"30 seconds", false}, {"121 seconds", true}} {
+		if _, err := f.db.Admin.Exec(t.Context(), `UPDATE agent_pairing_enrollments SET verification_claimed_at=clock_timestamp()-$2::interval WHERE account_id=$1`, e.AccountID, tc.age); err != nil {
+			t.Fatal(err)
+		}
+		var current agentpairing.View
+		decodeResult(t, f.call("GET", "/api/agent-pairing/computers/"+*v.ComputerID, nil, true, "", 200), &current)
+		got := current.Enrollments[0]
+		if got.VerificationStalled != tc.stalled || got.VerificationState != "starting" || got.AccountingState != "unconfirmed" || len(got.ActiveRunIDs) != 1 {
+			t.Fatal("timeout concealed active ownership or missed the bounded wait")
+		}
+		if tc.stalled && got.VerificationError != "verification_timeout" {
+			t.Fatal("stalled check lacks its reason")
+		}
+		retryErrorCode(t, f.call("POST", retryPath(current, e.AccountID), retryBody(current, got), true, "", 409), "verification_active")
+	}
+	var status string
+	var held int
+	if err := f.db.Admin.QueryRow(t.Context(), `SELECT r.status,(SELECT count(*) FROM account_reservations WHERE run_id=r.id AND state='active') FROM agent_runs r WHERE r.id=$1`, *e.VerificationRunID).Scan(&status, &held); err != nil {
+		t.Fatal(err)
+	}
+	if status != "starting" || held != 1 {
+		t.Fatal("elapsed time granted process-exit or accounting authority")
+	}
+}
+
+func TestVerificationErrorOnlyStatusKeepsCauseAndClaimState(t *testing.T) {
+	f := newFixture(t)
+	p := f.propose("claude")
+	f.approve(p, "one_per_harness")
+	v := f.redeem(p)
+	e := v.Enrollments[0]
+	key := "aeon_" + v.RuntimePrefix + "_" + p.runtime
+	f.probe(v, e, key, 200)
+	f.claim(v, e, key, f.reserve(v, e, key, 200), 200)
+	path := "/api/runs/" + *e.VerificationRunID + "/telemetry"
+	post := func(report agentd.Telemetry, want int) agentruns.Run {
+		t.Helper()
+		r := f.request("POST", path, report, false, key)
+		r.Header.Set(agentruns.DaemonHeader, *v.DaemonID)
+		r.Header.Set(agentruns.GenerationHeader, "test-generation")
+		w := httptest.NewRecorder()
+		f.h.ServeHTTP(w, r)
+		if w.Code != want {
+			t.Fatalf("sequence %d: HTTP %d, want %d: %s", report.Sequence, w.Code, want, w.Body.String())
+		}
+		var run agentruns.Run
+		if want == 200 {
+			decodeResult(t, w, &run)
+		} else if want == 400 {
+			reason := "status report requires status, effective_model or error_code"
+			if report.ErrorCode != "" {
+				reason = "invalid error code"
+			}
+			var rejected struct {
+				Error string `json:"error"`
+			}
+			decodeResult(t, w, &rejected)
+			if rejected.Error != reason {
+				t.Fatalf("rejected for wrong reason: %s", rejected.Error)
+			}
+		}
+		return run
+	}
+	// Exact status event from protocol.go when the bounded scanner fails.
+	report := agentd.Telemetry{Sequence: 1, Kind: "status", ErrorCode: "event_stream_bound"}
+	for i := 0; i < 2; i++ {
+		run := post(report, 200)
+		if run.Status != "starting" || run.EffectiveModel != nil || run.InputTokens != 0 || run.EndedAt != nil {
+			t.Fatal("error evidence invented startup, model or usage")
+		}
+	}
+	var cause string
+	var count int
+	if err := f.db.Admin.QueryRow(t.Context(), `SELECT count(*),min(error_code) FROM run_telemetry WHERE run_id=$1`, *e.VerificationRunID).Scan(&count, &cause); err != nil || count != 1 || cause != "event_stream_bound" {
+		t.Fatalf("error cause or replay lost: %d %s %v", count, cause, err)
+	}
+	post(agentd.Telemetry{Sequence: 2, Kind: "status"}, 400)
+	post(agentd.Telemetry{Sequence: 2, Kind: "status", ErrorCode: "private-unknown-error"}, 400)
+	run := post(agentd.Telemetry{Sequence: 2, Kind: "finished", Status: "failed", ErrorCode: "event_stream_bound"}, 200)
+	if run.Status != "failed" || run.EndedAt == nil {
+		t.Fatal("stream error did not settle truthfully")
+	}
+	var listed agentpairing.View
+	decodeResult(t, f.call("GET", "/api/agent-pairing/computers/"+*v.ComputerID, nil, true, "", 200), &listed)
+	if listed.Enrollments[0].VerificationError != "event_stream_bound" {
+		t.Fatal("verification lost original failure cause")
+	}
+}
+
+func TestVerificationRejectionLogsRunAndProtocolConflicts(t *testing.T) {
+	f := newFixture(t)
+	p := f.propose("claude")
+	f.approve(p, "one_per_harness")
+	v := f.redeem(p)
+	e := v.Enrollments[0]
+	key := "aeon_" + v.RuntimePrefix + "_" + p.runtime
+	f.probe(v, e, key, 200)
+	f.claim(v, e, key, f.reserve(v, e, key, 200), 200)
+	post := func(report agentd.Telemetry, want int) {
+		t.Helper()
+		r := f.request("POST", "/api/runs/"+*e.VerificationRunID+"/telemetry", report, false, key)
+		r.Header.Set(agentruns.DaemonHeader, *v.DaemonID)
+		r.Header.Set(agentruns.GenerationHeader, "test-generation")
+		w := httptest.NewRecorder()
+		f.h.ServeHTTP(w, r)
+		if w.Code != want {
+			t.Fatalf("HTTP %d, want %d: %s", w.Code, want, w.Body.String())
+		}
+	}
+	post(agentd.Telemetry{Sequence: 2, Kind: "started"}, 200)
+	var logs bytes.Buffer
+	old := slog.Default()
+	slog.SetDefault(slog.New(slog.NewJSONHandler(&logs, &slog.HandlerOptions{Level: slog.LevelWarn})))
+	defer slog.SetDefault(old)
+	for _, tc := range []struct {
+		report agentd.Telemetry
+		status int
+		reason string
+	}{
+		{agentd.Telemetry{Sequence: 2, Kind: "started", Status: "running"}, 409, "divergent telemetry replay"},
+		{agentd.Telemetry{Sequence: 1, Kind: "heartbeat"}, 409, "telemetry sequence is not monotonic"},
+		{agentd.Telemetry{Sequence: 3, Kind: "status", Status: "starting"}, 409, "run cannot return to starting"},
+		{agentd.Telemetry{Sequence: 3, Kind: "status", EffectiveModel: "PRIVATE-FIXTURE model"}, 400, "effective_model must be a bounded model identifier"},
+		{agentd.Telemetry{Sequence: 3, Kind: "PRIVATE-FIXTURE kind"}, 400, "invalid telemetry kind"},
+	} {
+		logs.Reset()
+		post(tc.report, tc.status)
+		var line struct {
+			RunID    string `json:"run_id"`
+			Kind     string `json:"kind"`
+			Sequence int64  `json:"sequence"`
+			Reason   string `json:"reason"`
+		}
+		if err := json.Unmarshal(logs.Bytes(), &line); err != nil || line.RunID != *e.VerificationRunID || line.Reason != tc.reason {
+			t.Fatalf("missing run or fixed rejection reason: %v", err)
+		}
+		wantKind := tc.report.Kind
+		if tc.reason == "invalid telemetry kind" {
+			wantKind = ""
+		}
+		if line.Kind != wantKind || line.Sequence != tc.report.Sequence {
+			t.Fatal("missing bounded kind or sequence")
+		}
+		if strings.Contains(logs.String(), "PRIVATE-FIXTURE") || strings.Contains(logs.String(), key) {
+			t.Fatal("diagnostics leaked request values")
+		}
 	}
 }

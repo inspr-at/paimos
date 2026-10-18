@@ -1,9 +1,9 @@
 // SPDX-License-Identifier: AGPL-3.0-only
-// AEON-402, on the computer-first panel of AEON-499: /agents cleanup. Revoked
-// computers fold into "Revoked computers · N" and a person removes them; every
-// account row menu has Remove; a queued run has Cancel; accounts and computers
-// fold into one remembered line. AEON402_SHOTS=<dir> writes screenshots at 1600
-// and 390 in light and dark.
+// AEON-402: /agents cleanup. A queued run has Cancel and Queued folds per
+// person; Accounts and computers folds into one remembered line (AEON-782).
+// Removing computers and accounts moved to Settings with AEON-686 and AEON-786
+// (settings-account-pacing.spec.ts, settings-host-capacity.spec.ts).
+// AEON402_SHOTS=<dir> writes screenshots at 1600 and 390 in light and dark.
 import { mkdirSync } from 'node:fs'
 import { join } from 'node:path'
 import { test, expect, type Page } from '@playwright/test'
@@ -35,17 +35,17 @@ function computers() {
   })
   // Three revoked pairings of the same computer from one morning.
   const revoked = [1, 2, 3].map(n => pairingView({
-    request_id: id(n), state: 'revoked', computer_id: id(10 + n), computer_state: 'revoked', computer_name: 'mbp2607', revision: 3,
+    request_id: id(n), state: 'revoked', computer_id: id(10 + n), computer_state: 'revoked', computer_name: 'build-7', revision: 3,
     setup_state: 'connected', last_seen_at: new Date(NOW - n * 3_600_000).toISOString(),
-    enrollments: [{ ...pairingEnrollment(id(20 + n), `claude-${n}`, 'claude', 'admin@augmentoring.com'), state: 'revoked' }],
+    enrollments: [{ ...pairingEnrollment(id(20 + n), `claude-${n}`, 'claude', 'admin@example.com'), state: 'revoked' }],
   }))
   return [live, ...revoked]
 }
 
-async function setup(page: Page, options: { folded?: boolean; manage?: boolean } = {}) {
+async function setup(page: Page, options: { unfolded?: boolean; manage?: boolean } = {}) {
   await page.clock.setSystemTime(NOW)
   const work = fixtures()
-  if (options.folded) work.preferences['agents-page'] = { setupFolded: true }
+  if (options.unfolded) work.preferences['ui.agents.sections'] = { dial: true, accounts: true, sessions: true, queued: true }
   await mockWork(page, work, { admin: true })
   const data = agentData(world)
   const capacity = capacityWorld()
@@ -122,14 +122,6 @@ async function open(page: Page) {
   await page.goto('/agents')
   await expect(page.getByRole('heading', { name: 'Agents', level: 1 })).toBeVisible()
 }
-const panel = (page: Page) => page.getByRole('region', { name: 'Accounts and computers' })
-const setupToggle = (page: Page) => page.getByRole('button', { name: 'Accounts and computers', exact: true })
-const computersRegion = (page: Page) => page.getByRole('region', { name: 'Revoked computers' })
-const cards = (page: Page) => panel(page).getByRole('region', { name: /^Computer / })
-async function removeAccount(page: Page, account: string) {
-  await page.locator(`[data-account="${account}"]`).getByRole('button', { name: /^More for / }).click()
-  await page.getByRole('menu').getByRole('menuitem', { name: /Remove account/ }).click()
-}
 const noScroll = (page: Page) => page.evaluate(() => document.documentElement.scrollWidth <= innerWidth + 1)
 async function shots(page: Page, state: string) {
   const dir = process.env.AEON402_SHOTS
@@ -143,130 +135,6 @@ async function shots(page: Page, state: string) {
   }
   await page.setViewportSize({ width: 1600, height: 1000 })
 }
-
-test('revoked computers fold into one disclosure and a person removes them', async ({ page }) => {
-  const errors = watchErrors(page)
-  const { posts } = await setup(page)
-  await open(page)
-  const region = computersRegion(page)
-  await expect(cards(page).filter({ has: page.getByRole('button', { name: 'More for studio' }) })).toHaveCount(1)
-  const toggle = region.getByRole('button', { name: 'Revoked computers · 3' })
-  await expect(toggle).toHaveAttribute('aria-expanded', 'false')
-  await expect(panel(page)).not.toContainText('0 harnesses')
-  await toggle.click()
-  await expect(toggle).toHaveAttribute('aria-expanded', 'true')
-  await expect(region.locator('.revoked-list li')).toHaveCount(3)
-  await shots(page, 'revoked-open')
-  await region.getByRole('button', { name: 'Remove mbp2607' }).first().click()
-  const dialog = page.getByRole('dialog')
-  await expect(dialog).toContainText('Remove mbp2607?')
-  await expect(dialog).toContainText('Its history stays in the audit log.')
-  await expect(dialog).toContainText('Its account binding leaves Accounts too.')
-  await shots(page, 'computer-remove-confirm')
-  await dialog.getByRole('button', { name: 'Remove', exact: true }).click()
-  await expect(region.locator('.revoked-list li')).toHaveCount(2)
-  await expect(region.getByRole('button', { name: 'Revoked computers · 2' })).toBeVisible()
-  await expect(region.getByRole('button', { name: 'Remove mbp2607' }).first()).toBeFocused()
-  await shots(page, 'computer-removed')
-  expect(posts.map(p => p.path)).toEqual([`/api/agent-pairing/computers/${id(11)}/remove`])
-  // A connected computer that reported is disconnected, never removed: its menu says so.
-  await panel(page).getByRole('button', { name: 'More for studio' }).click()
-  const menu = page.getByRole('menu')
-  await expect(menu.getByRole('menuitem', { name: /Disconnect/ })).toBeVisible()
-  await expect(menu.getByRole('menuitem', { name: /^Remove/ })).toHaveCount(0)
-  expect(errors).toEqual([])
-})
-
-test('a list read that started before Remove does not bring the computer back', async ({ page }) => {
-  const { hold } = await setup(page)
-  await open(page)
-  const region = computersRegion(page)
-  await region.getByRole('button', { name: 'Revoked computers · 3' }).click()
-  let answer: (() => void) | undefined
-  hold.next = release => { answer = release }
-  // The page's poll reads the list again; that read is held.
-  await page.evaluate(() => window.dispatchEvent(new Event('online')))
-  await expect.poll(() => answer !== undefined).toBe(true)
-  await region.getByRole('button', { name: 'Remove mbp2607' }).first().click()
-  await page.getByRole('dialog').getByRole('button', { name: 'Remove', exact: true }).click()
-  await expect(region.locator('.revoked-list li')).toHaveCount(2)
-  answer!()
-  await page.waitForTimeout(300)
-  await expect(region.locator('.revoked-list li')).toHaveCount(2)
-})
-
-// The page's poll holds the shared list reads across a write; the fresh read after
-// the write must win and the old answers, released late, must change nothing.
-async function pollHeldAcross(page: Page, holdGets: Set<string>, heldGets: (() => void)[], paths: string[]) {
-  for (const path of paths) holdGets.add(path)
-  await page.evaluate(() => window.dispatchEvent(new Event('online')))
-  await expect.poll(() => heldGets.length).toBe(paths.length)
-}
-
-test('a runs read that started before account Remove does not bring its cancelled run back', async ({ page }) => {
-  const { holdGets, heldGets } = await setup(page)
-  await open(page)
-  const item = page.getByRole('region', { name: 'Runs awaiting a session' }).locator('li').filter({ hasText: 'Add an Oracle Cloud connector' })
-  await expect(item).toHaveCount(1)
-  await pollHeldAcross(page, holdGets, heldGets, ['/api/runs', '/api/agent-accounts', '/api/agent-accounts/capacity'])
-  const row = page.locator(`.acct[data-account="${ACCOUNTS.claude}"]`)
-  await removeAccount(page, ACCOUNTS.claude)
-  await page.getByRole('dialog').getByRole('button', { name: 'Remove account' }).click()
-  await expect(row).toHaveCount(0)
-  // The fresh read after Remove shows the queued run cancelled.
-  await expect(item).toHaveCount(0)
-  for (const release of heldGets.splice(0)) release()
-  await page.waitForTimeout(300)
-  await expect(item).toHaveCount(0)
-  await expect(row).toHaveCount(0)
-})
-
-test('account and capacity reads that started before computer Remove do not bring its account back', async ({ page }) => {
-  const { list, holdGets, heldGets } = await setup(page)
-  // The first revoked mbp2607 still carries the Spare binding in this case.
-  list[1]!.enrollments[0]!.account_id = ACCOUNTS.spare
-  await open(page)
-  const row = page.locator(`.acct[data-account="${ACCOUNTS.spare}"]`)
-  await expect(row).toHaveCount(1)
-  const region = computersRegion(page)
-  await region.getByRole('button', { name: 'Revoked computers · 3' }).click()
-  await pollHeldAcross(page, holdGets, heldGets, ['/api/agent-accounts', '/api/agent-accounts/capacity'])
-  await region.getByRole('button', { name: 'Remove mbp2607' }).first().click()
-  await page.getByRole('dialog').getByRole('button', { name: 'Remove', exact: true }).click()
-  await expect(region.locator('.revoked-list li')).toHaveCount(2)
-  await expect(row).toHaveCount(0)
-  for (const release of heldGets.splice(0)) release()
-  await page.waitForTimeout(300)
-  await expect(row).toHaveCount(0)
-  await expect(region.locator('.revoked-list li')).toHaveCount(2)
-})
-
-test('every account row menu has a person-only Remove that names what goes away', async ({ page }) => {
-  const { posts } = await setup(page)
-  await open(page)
-  const row = page.locator(`[data-account="${ACCOUNTS.claude}"]`)
-  await removeAccount(page, ACCOUNTS.claude)
-  const dialog = page.getByRole('dialog')
-  await expect(dialog).toContainText('Its runs and history stay.')
-  await expect(dialog).toContainText('One queued run for it is cancelled.')
-  await shots(page, 'account-remove-confirm')
-  await dialog.getByRole('button', { name: 'Remove account' }).click()
-  await expect(row).toHaveCount(0)
-  // Focus moves to the next row's menu, which is enabled again.
-  await expect(page.locator('.acct .row-more button:focus')).toHaveCount(1)
-  await expect(page.locator('.acct .row-more button:focus')).toBeEnabled()
-  await shots(page, 'account-removed')
-  expect(posts.map(p => p.path)).toEqual([`/api/agent-accounts/${ACCOUNTS.claude}/archive`])
-  // No trash icon on a row: removal lives in the row menu.
-  await expect(panel(page).getByRole('button', { name: /^Remove/ })).toHaveCount(0)
-})
-
-test('without account management, account rows have no menu', async ({ page }) => {
-  await setup(page, { manage: false })
-  await open(page)
-  await expect(page.locator('.acct').first()).toBeVisible()
-  await expect(page.locator('.acct').getByRole('button', { name: /^More for / })).toHaveCount(0)
-})
 
 test('a queued run can be cancelled from /agents', async ({ page }) => {
   const { posts } = await setup(page)
@@ -286,28 +154,133 @@ test('a queued run can be cancelled from /agents', async ({ page }) => {
   })).toBe(true)
 })
 
-test('accounts and computers fold into one calm line, remembered per person', async ({ page }) => {
+// AEON-784 risk: a folded Queued section hides a run a link points at, or its
+// folded head misstates what waits. A ?run= link opens it for this visit only.
+test('Queued folds per person, says what waits, and a run link opens it without changing the preference', async ({ page }) => {
   const { work } = await setup(page)
-  await open(page)
-  await expect(cards(page).first()).toBeVisible()
-  await shots(page, 'expanded')
-  await setupToggle(page).click()
-  await expect(setupToggle(page)).toHaveAttribute('aria-expanded', 'false')
-  await expect(panel(page)).toContainText(/\d+ of \d+ ready/)
-  await expect(cards(page)).toHaveCount(0)
-  await expect(computersRegion(page)).toHaveCount(0)
-  await expect.poll(() => work.preferences['agents-page']).toEqual({ setupFolded: true })
-  await shots(page, 'folded')
-  await page.reload()
-  await expect(setupToggle(page)).toHaveAttribute('aria-expanded', 'false')
-  await setupToggle(page).click()
-  await expect(cards(page).first()).toBeVisible()
-  await expect.poll(() => work.preferences['agents-page']).toEqual({ setupFolded: false })
+  work.preferences['ui.agents.sections'] = { dial: true, accounts: false, sessions: true, queued: false }
+  await page.goto('/agents')
+  const queue = page.getByRole('region', { name: 'Runs awaiting a session' })
+  const toggle = queue.locator('.fs-head > .fs-tog')
+  await expect(toggle).toHaveAttribute('aria-expanded', 'false')
+  // One run says its own state; it waits for a daemon, not for room on an account.
+  await expect(queue.locator('.fs-sum')).toHaveText('Queued')
+  await page.goto(`/agents?run=${QUEUED}`)
+  const item = page.locator(`#run-${QUEUED}`)
+  await expect(item).toBeFocused()
+  await expect(toggle).toHaveAttribute('aria-expanded', 'true')
+  expect(work.preferences['ui.agents.sections']).toMatchObject({ queued: false })
+  // Folding it again needs no write: the person's preference already says folded.
+  await toggle.click()
+  await expect(toggle).toHaveAttribute('aria-expanded', 'false')
+  await toggle.click()
+  await expect.poll(() => (work.preferences['ui.agents.sections'] as { queued?: boolean } | undefined)?.queued).toBe(true)
 })
 
-test('a stored folded choice opens folded, without a flash of the cards', async ({ page }) => {
-  await setup(page, { folded: true })
+// AEON-784 risk (fix round 2): the section preference lands after a ?run= link
+// has shown its run and folds Queued again, hiding the run the link pointed at.
+test('a section preference that lands after a run link keeps Queued open until the person folds it', async ({ page }) => {
+  const { work } = await setup(page)
+  work.preferences['ui.agents.sections'] = { dial: true, accounts: false, sessions: false, queued: false }
+  // Barrier: the section read is answered only after the link has shown its run.
+  let release!: () => void
+  const released = new Promise<void>(resolve => { release = resolve })
+  await page.route('**/api/preferences/ui.agents.sections', async route => {
+    if (route.request().method() === 'GET') await released
+    return route.fallback()
+  })
+  const puts: string[] = []
+  page.on('request', request => { if (request.method() === 'PUT' && request.url().includes('/api/preferences/ui.agents.sections')) puts.push(request.url()) })
+  await page.goto(`/agents?run=${QUEUED}`)
+  const queue = page.getByRole('region', { name: 'Runs awaiting a session' })
+  const toggle = queue.locator('.fs-head > .fs-tog')
+  const item = page.locator(`#run-${QUEUED}`)
+  await expect(item).toBeFocused()
+  await expect(page).not.toHaveURL(/[?&]run=/)
+  const read = page.waitForResponse(r => r.request().method() === 'GET' && new URL(r.url()).pathname === '/api/preferences/ui.agents.sections')
+  release()
+  await read
+  // The late read did land (the Sessions card no longer folds, AEON-1209); Queued stays open for the link.
+  await expect(page.getByRole('region', { name: 'Sessions' }).locator('.fs-tog')).toHaveCount(0)
+  await expect(toggle).toHaveAttribute('aria-expanded', 'true')
+  await expect(item).toBeVisible()
+  // Folding ends the visit's reveal and writes nothing: the preference already says folded.
+  await toggle.click()
+  await expect(toggle).toHaveAttribute('aria-expanded', 'false')
+  expect(puts).toEqual([])
+  expect(work.preferences['ui.agents.sections']).toMatchObject({ queued: false })
+})
+
+// AEON-1282 risk: since the AEON-1213 split the list pane stacks in normal flow, and Queued sat flush
+// against the Sessions card instead of keeping the page's section gap; a fold or the last cancel must
+// not move the card above it. Screenshots go to the test's output directory.
+test('Queued keeps the page section gap below Sessions; folding and emptying move nothing above it', async ({ page }, testInfo) => {
+  await setup(page, { unfolded: true })
   await open(page)
-  await expect(setupToggle(page)).toHaveAttribute('aria-expanded', 'false')
-  await expect(page.locator('.ac .computer')).toHaveCount(0)
+  const queue = page.getByRole('region', { name: 'Runs awaiting a session' })
+  const toggle = queue.locator('.fs-head > .fs-tog')
+  // Both cards mount once the agents store has loaded; measure only after that.
+  await expect(page.getByRole('region', { name: 'Sessions' })).toBeVisible()
+  await expect(queue).toBeVisible()
+  // Offsets inside the list pane, so page scrolling cannot change them; the expected gap is the
+  // page's own section gap, read from the capacity column.
+  const geometry = () => page.evaluate(() => {
+    const pane = document.querySelector('.agents-list-pane')!.getBoundingClientRect()
+    const sessions = document.querySelector('section.sessions')!.getBoundingClientRect()
+    const queued = document.querySelector('.run-queue')?.getBoundingClientRect()
+    return {
+      sectionGap: parseFloat(getComputedStyle(document.querySelector('.main-col')!).rowGap),
+      sessionsTop: sessions.top - pane.top, sessionsBottom: sessions.bottom - pane.top,
+      queueTop: queued ? queued.top - pane.top : null,
+    }
+  })
+  const gap = async () => { const g = await geometry(); return g.queueTop === null ? null : g.queueTop - g.sessionsBottom }
+  const sectionGap = (await geometry()).sectionGap
+  expect(sectionGap).toBeGreaterThan(0)
+  for (const width of [1440, 390]) for (const theme of ['light', 'dark'] as const) {
+    await page.setViewportSize({ width, height: width === 390 ? 844 : 1000 })
+    await page.emulateMedia({ colorScheme: theme, reducedMotion: 'reduce' })
+    await expect(toggle).toHaveAttribute('aria-expanded', 'true')
+    await expect.poll(gap).toBeCloseTo(sectionGap, 0)
+    await queue.scrollIntoViewIfNeeded()
+    await page.screenshot({ path: testInfo.outputPath(`queued-gap-open-${width}-${theme}.png`), fullPage: true, animations: 'disabled' })
+    const shown = await geometry()
+    await toggle.click()
+    await expect(toggle).toHaveAttribute('aria-expanded', 'false')
+    const folded = await geometry()
+    expect(folded.sessionsTop).toBeCloseTo(shown.sessionsTop, 0)
+    expect(folded.sessionsBottom).toBeCloseTo(shown.sessionsBottom, 0)
+    expect(folded.queueTop).toBeCloseTo(shown.queueTop!, 0)
+    await page.screenshot({ path: testInfo.outputPath(`queued-gap-folded-${width}-${theme}.png`), fullPage: true, animations: 'disabled' })
+    await toggle.click()
+    await expect(toggle).toHaveAttribute('aria-expanded', 'true')
+  }
+  // The last cancel closes Queued: its gap leaves with it and the Sessions card stays put.
+  await page.setViewportSize({ width: 1440, height: 1000 })
+  await page.emulateMedia({ colorScheme: 'light', reducedMotion: 'reduce' })
+  await expect.poll(gap).toBeCloseTo(sectionGap, 0)
+  const before = await geometry()
+  await queue.locator('li').filter({ hasText: 'Add an Oracle Cloud connector' }).getByRole('button', { name: /^Cancel/ }).click()
+  await page.getByRole('dialog').getByRole('button', { name: 'Cancel run' }).click()
+  await expect(queue).toHaveCount(0)
+  const after = await geometry()
+  expect(after.queueTop).toBeNull()
+  expect(after.sessionsTop).toBeCloseTo(before.sessionsTop, 0)
+  expect(after.sessionsBottom).toBeCloseTo(before.sessionsBottom, 0)
+})
+
+// AEON-1209: Accounts and computers is the accounts chip in the capacity row; a fold stored for
+// the old card changes nothing, and the popover holds the line and the three tiles.
+test('accounts and computers is one chip whose popover states the state; a stored fold changes nothing', async ({ page }) => {
+  await setup(page, { unfolded: true })
+  await open(page)
+  const chip = page.locator('.cap-row .acc-chip')
+  await expect(chip).toHaveAttribute('aria-expanded', 'false')
+  await expect(page.getByRole('table')).toHaveCount(0)
+  await shots(page, 'folded')
+  await chip.click()
+  const pop = page.getByRole('dialog', { name: 'Accounts and computers' })
+  await expect(pop.locator('.acc-state')).toContainText(/\d+ of \d+ ready|All \d+ ready/)
+  await expect(pop.locator('.tile')).toHaveCount(3)
+  await shots(page, 'expanded')
 })

@@ -234,7 +234,7 @@ textarea.field { height: auto; min-height: 72px; padding-top: 8px; padding-botto
     border-top: 1px solid var(--glass-edge);
     border-radius: 20px 20px 0 0;
     background: var(--surface-raised);
-    box-shadow: 0 -18px 40px -18px rgba(0, 0, 0, .35);
+    box-shadow: 0 -18px 40px -18px color-mix(in srgb, var(--shadow-black) 35%, transparent);
   }
   .grabber { display: block; align-self: center; width: 40px; height: 4px; margin: 8px auto 0; border-radius: 999px; background: var(--line-2); }
   .head { padding: 12px 16px 0; }

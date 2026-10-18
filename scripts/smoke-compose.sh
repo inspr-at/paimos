@@ -141,7 +141,10 @@ try:
     raise AssertionError('readiness succeeded while Postgres was stopped')
 except urllib.error.HTTPError as response:
     assert response.code == 503
-    assert json.load(response) == {'status': 'unavailable'}
+    body = json.load(response)
+    assert body.get('status') == 'unavailable'
+    assert body.get('reason') in {'database_unavailable', 'not_accepting'}
+    assert set(body) <= {'status', 'reason', 'pool', 'detail'}
 PY
 "${compose[@]}" start postgres
 assert_health postgres healthy

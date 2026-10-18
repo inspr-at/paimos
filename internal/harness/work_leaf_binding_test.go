@@ -123,17 +123,17 @@ func TestWorkLeafRegistrationBindingAndGracefulDeadline(t *testing.T) {
 	if original != f.ticket {
 		t.Fatal("historical session identity changed")
 	}
-	// A pre-guard lost-contact history may already sit on a parent. Allowing
-	// same-generation recovery must still preserve leaf-only admission.
+	// Historical proof is revoked before any attempt to reopen a parent.
 	f.tx(t, f.person, func(tx pgx.Tx) error {
 		_, err := tx.Exec(t.Context(), `UPDATE harness_sessions SET stop_reason='heartbeat_lost' WHERE id=$1`, session)
 		return err
 	})
 	reply = f.call(f.agent, "POST", base+"/"+session+"/heartbeat", map[string]any{"phase": "working", "activity": "busy", "activity_sequence": 2}, "work-leaf-lease-00000000000000000001")
-	expect(t, reply, 409)
-	if decode(t, reply)["code"] != "work_leaf_required" {
-		t.Fatal("historical parent revival failed for wrong reason")
+	expect(t, reply, 403)
+	if decode(t, reply)["error"] != "harness worker proof rejected" {
+		t.Fatal("revoked proof failed for wrong reason")
 	}
+
 }
 
 // Wait for the database's actual blocker graph; the timeout only guards hangs.
@@ -237,6 +237,9 @@ func TestWorkLeafRecoveryFencesBeforeResourceLocks(t *testing.T) {
 			select {
 			case w := <-done:
 				expected := 200
+				if admission == "revive" {
+					expected = 403
+				}
 				if admission == "restore" {
 					expected = 201
 				}
@@ -285,10 +288,10 @@ func TestWorkLeafResumeDefersEventsUntilSuccessorLocks(t *testing.T) {
 	}
 }
 
-func TestWorkLeafPendingLostContactCanReviveAndStop(t *testing.T) {
+func TestWorkLeafPendingLostContactRejectsRevivalAndConfirmsStop(t *testing.T) {
 	f := fixtureWithKind(t, nil, "work")
 	reg := pauseRegistration(f)
-	path, lease, control := pauseSession(t, f, reg)
+	path, lease, _ := pauseSession(t, f, reg)
 	sid := strings.TrimPrefix(path, "/api/projects/"+f.project+"/harness-sessions/")
 	action := uid()
 	f.tx(t, f.person, func(tx pgx.Tx) error {
@@ -300,11 +303,9 @@ func TestWorkLeafPendingLostContactCanReviveAndStop(t *testing.T) {
 		t.Fatalf("sweep=%d", n)
 	}
 	w := f.call(f.agent, "POST", path+"/heartbeat", map[string]any{"phase": "working", "activity": "busy", "activity_sequence": 1}, lease)
-	expect(t, w, 200)
-	if got := decode(t, w); got["stopped_at"] != nil {
-		t.Fatal("same generation did not revive")
-	}
-	// Existing same-binding progress remains admissible; a new generation is fenced.
+	expect(t, w, 403)
+
+	// A pending handover continues to fence admission of a fresh generation.
 	reg["harness_session_ref"] = fmt.Sprint("new-ref-", uid())
 	reg["worker_lease"] = fmt.Sprint("new-lease-", uid())
 	w = f.call(f.person, "POST", "/api/projects/"+f.project+"/harness-sessions", reg, "")
@@ -312,5 +313,5 @@ func TestWorkLeafPendingLostContactCanReviveAndStop(t *testing.T) {
 	if decode(t, w)["code"] != "work_handover_pending" {
 		t.Fatal("admission failed for wrong reason")
 	}
-	finishPaused(t, f, path, lease, control)
+	expect(t, f.call(f.agent, "POST", path+"/stop", map[string]any{"reason": "process_exited"}, lease), 200)
 }

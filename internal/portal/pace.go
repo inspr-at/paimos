@@ -15,6 +15,7 @@ import (
 	"github.com/jackc/pgx/v5"
 
 	"github.com/inspr-at/paimos/internal/events"
+	"github.com/inspr-at/paimos/internal/httpapi"
 	"github.com/inspr-at/paimos/internal/tenant"
 )
 
@@ -528,7 +529,7 @@ func decodePaceWrite(r *http.Request) (paceWrite, error) {
 	if !strings.HasPrefix(r.Header.Get("Content-Type"), "application/json") {
 		return paceWrite{}, errors.New("invalid JSON")
 	}
-	buf, err := io.ReadAll(io.LimitReader(r.Body, portalEditLimit+1))
+	buf, err := httpapi.ReadRequestBody(nil, r, portalEditLimit+1, httpapi.DefaultBodyReadTimeout)
 	if err != nil || len(buf) == 0 || len(buf) > portalEditLimit {
 		return paceWrite{}, errors.New("invalid JSON")
 	}
@@ -580,7 +581,7 @@ func decodeOptionalID(r *http.Request, key string) (id string, clear bool, err e
 	if !strings.HasPrefix(r.Header.Get("Content-Type"), "application/json") {
 		return "", false, errors.New("invalid JSON")
 	}
-	buf, err := io.ReadAll(io.LimitReader(r.Body, portalEditLimit+1))
+	buf, err := httpapi.ReadRequestBody(nil, r, portalEditLimit+1, httpapi.DefaultBodyReadTimeout)
 	if err != nil || len(buf) == 0 || len(buf) > portalEditLimit {
 		return "", false, errors.New("invalid JSON")
 	}

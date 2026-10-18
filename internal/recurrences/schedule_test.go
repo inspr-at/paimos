@@ -166,6 +166,30 @@ func TestTemplateVariablesAndBounds(t *testing.T) {
 	if in.Trigger.StartDate != "2026-10-02" || in.OverlapPolicy != "skip" || in.CatchUpPolicy != "one" {
 		t.Fatalf("defaults %+v", in)
 	}
+	if in.Template.HideFromReleaseNotes == nil || !*in.Template.HideFromReleaseNotes {
+		t.Fatal("recurring routines must default to hidden")
+	}
+	for _, tc := range []struct {
+		field string
+		limit int
+	}{{"pill_en", 512}, {"pill_de", 512}, {"benefit_en", 4096}, {"benefit_de", 4096}} {
+		for _, invalid := range []string{strings.Repeat("a", tc.limit+1), "{{unknown}}"} {
+			draft := in
+			switch tc.field {
+			case "pill_en":
+				draft.Template.PillEN = invalid
+			case "pill_de":
+				draft.Template.PillDE = invalid
+			case "benefit_en":
+				draft.Template.BenefitEN = invalid
+			case "benefit_de":
+				draft.Template.BenefitDE = invalid
+			}
+			if err := draft.normalize(time.Now()); err == nil {
+				t.Fatalf("accepted invalid %s", tc.field)
+			}
+		}
+	}
 	in.QueueEach = true
 	if in.normalize(time.Now()) == nil {
 		t.Fatal("queue without readiness")

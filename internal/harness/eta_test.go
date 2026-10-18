@@ -43,7 +43,7 @@ func (f *harnessFixture) addAgent(t *testing.T, id, name string) {
 	})
 }
 
-func (f *harnessFixture) registerSession(t *testing.T, agentID, role, ticket, ref, lease string) string {
+func (f *harnessFixture) registerSession(t *testing.T, agentID, role, ticket, ref, lease string, parallelReason ...string) string {
 	t.Helper()
 	body := map[string]any{
 		"agent_principal_id": agentID, "harness": "codex", "host": "build-host",
@@ -53,6 +53,11 @@ func (f *harnessFixture) registerSession(t *testing.T, agentID, role, ticket, re
 	if ticket != "" {
 		body["ticket_node_id"] = ticket
 		body["work_shape"] = "ship"
+	}
+	// Only fixtures that deliberately compare simultaneous workers opt in.
+	// Ordinary registration tests keep the default one-builder admission.
+	if len(parallelReason) > 0 {
+		body["parallel_reason"] = parallelReason[0]
 	}
 	w := f.call(f.person, "POST", "/api/projects/"+f.project+"/harness-sessions", body, "")
 	expect(t, w, 201)

@@ -81,7 +81,7 @@ onBeforeUnmount(() => {
   max-width: min(320px, calc(100vw - 16px)); max-height: calc(100dvh - 32px); padding: 5px 10px; border-radius: 8px;
   overflow: auto; overscroll-behavior: contain; overflow-wrap: anywhere; white-space: pre-line;
   background: var(--tip-bg); color: var(--tip-ink); font-size: 12.5px; line-height: 1.4;
-  box-shadow: 0 0 0 1px var(--glass-rim), 0 10px 24px -10px rgba(0, 0, 0, .5);
+  box-shadow: 0 0 0 1px var(--glass-rim), 0 10px 24px -10px color-mix(in srgb, var(--shadow-black) 50%, transparent);
 }
 .read-name-detail:focus-visible { outline: 2px solid var(--ink-2); outline-offset: -2px; }
 @position-try --read-name-fit { top: 8px; bottom: 8px; }

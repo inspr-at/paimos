@@ -149,12 +149,18 @@ func normalizeWrite(body rateWrite) (rateInput, error) {
 }
 
 // insertRate writes one rate, closing a single overlapping open interval when
-// that close makes the ranges adjacent. Lock order is installation, then the
+// that close makes the ranges adjacent. Lock order is tenant, installation,
 // cost-unit node, then the rate rows. The installation is rechecked after the
 // node lock, in the same transaction as the events.
 func (m *Module) insertRate(ctx context.Context, p tenant.Principal, nodeID string, in rateInput) (Rate, error) {
 	var out Rate
 	err := db.InTenant(ctx, m.pool, p.TenantID, func(tx pgx.Tx) error {
+		if err := db.LockTenant(ctx, tx, p.TenantID); err != nil {
+			return err
+		}
+		if p.Kind != tenant.Person || authz.RequireTx(ctx, tx, p, "cost_units.manage", authz.Scope{}) != nil {
+			return forbidden("permission denied")
+		}
 		if err := m.authorize(ctx, tx, p.TenantID, fence.PermStepsApply, true); err != nil {
 			return err
 		}

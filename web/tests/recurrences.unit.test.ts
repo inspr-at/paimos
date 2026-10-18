@@ -38,3 +38,30 @@ it('new recurrence templates use canonical work for migrated leaves and parents'
   }
   expect(templateFrom().type).toBe('work')
 })
+
+it('preserves bilingual release copy and explicit visibility through source copying and edits', () => {
+  const copy = { pill_en: 'Clear release notes', pill_de: 'Verständliche Release Notes', benefit_en: 'Tickets explain the benefit.', benefit_de: 'Tickets erklären den Nutzen.' }
+  for (const hide_from_release_notes of [true, false]) {
+    const source = { kind_slug: 'work', title: 'Sweep', fields: { ...copy, hide_from_release_notes }, body: '', priority: 'high' } as ListItem
+    const draft = input()
+    draft.template = templateFrom(source)
+    expect(draft.template).toMatchObject({ ...copy, hide_from_release_notes })
+    const edited = copyRecurrenceInput(draft)
+    edited.template.title = 'Edited sweep'
+    expect(edited.template).toMatchObject({ ...copy, hide_from_release_notes })
+    expect(templateProblems(edited, '')).toEqual([])
+  }
+  expect(templateFrom().hide_from_release_notes).toBe(true)
+  expect(templateFrom({ title: 'Legacy', fields: {} } as ListItem).hide_from_release_notes).toBe(true)
+  for (const field of ['pill_en', 'pill_de', 'benefit_en', 'benefit_de'] as const) {
+    const draft = input()
+    draft.template[field] = 'é'.repeat((field.startsWith('pill_') ? 512 : 4096) / 2 + 1)
+    expect(templateProblems(draft, '')).toContain('The release copy exceeds its size limits.')
+    draft.template[field] = '{{unknown}}'
+    expect(templateProblems(draft, '')).toContain('Use Number, Date or Release for template variables.')
+  }
+  // Incomplete drafts remain editable; only the generated ticket's Done gate requires copy.
+  const draft = input()
+  draft.template.pill_en = 'Incomplete draft'
+  expect(templateProblems(draft, '')).toEqual([])
+})

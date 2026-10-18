@@ -64,6 +64,8 @@ export async function mockSettings(page: Page, data: SettingsData, options: Sett
       return route.fulfill({ json: autopilot })
     }
     if (path === '/api/status-autopilot/changes' || path === '/api/status-autopilot/proposals') return route.fulfill({ json: { items: [] } })
+    if (path === '/api/status-autopilot/attention') return route.fulfill({ json: { items: [], total: 0, counts: {}, next_cursor: null, facets: { projects: [], assignees: [] }, facets_truncated: false } })
+    if (path === '/api/status-autopilot/projects') return route.fulfill({ json: { items: [], inherited_count: 3, next_cursor: null } })
     const autopilotProject = /^\/api\/projects\/([^/]+)\/status-autopilot$/.exec(path)
     if (autopilotProject) {
       const override = autopilotProjects[autopilotProject[1]!] ??= { mode: 'inherit', effective_enabled: true, revision: 0 }

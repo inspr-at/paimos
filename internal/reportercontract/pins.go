@@ -34,6 +34,8 @@ type surface struct {
 }
 
 var surfaces = map[string]surface{
+	"goals":          {Goals, "GoalsContract", []operation{{"/goals", "post", "200"}, {"/goals/{goalId}", "patch", "200"}, {"/goals", "get", "200"}, {"/goals/{goalId}", "get", "200"}, {"/goals/{goalId}/history", "get", "200"}, {"/goals/{goalId}/series", "get", "200"}}},
+	"review-run":     {ReviewRun, "ReviewRunContract", []operation{{"/nodes/{nodeId}/review-runs", "post", "201"}, {"/review-runs/{runId}/credential", "post", "200"}, {"/review-runs/{runId}/verdict", "post", "200"}, {"/nodes/{nodeId}/review-evidence", "get", "200"}}},
 	"stage-handoffs": {StageHandoffs, "StageHandoffsContract", []operation{{"/stage-handoffs", "post", "201"}, {"/stage-handoffs/{handoffId}", "get", "200"}}},
 	"stage-evidence": {StageEvidence, "StageEvidenceContract", []operation{{"/stage-handoffs/{handoffId}/evidence", "post", "201"}}},
 	"stage-result":   {StageResult, "StageResultContract", []operation{{"/stage-handoffs/{handoffId}/result", "post", "200"}}},
@@ -49,6 +51,7 @@ var surfaces = map[string]surface{
 		{"/projects/{projectId}/harness-sessions/{sessionId}", "get", "200"},
 		{"/projects/{projectId}/harness-sessions/{sessionId}/heartbeat", "post", "200"},
 	}},
+	"project-lead": {ProjectLead, "ProjectLeadContract", []operation{{"/projects/{projectId}/lead", "get", "200"}}},
 }
 
 // Current derives each pin from the OpenAPI response schema, recursively
@@ -126,6 +129,11 @@ func Current(openAPI []byte) (map[string]Pin, error) {
 		sort.Strings(pin.RequestPaths)
 		out[name] = pin
 	}
+	native, err := NativeSessionPin(openAPI)
+	if err != nil {
+		return nil, fmt.Errorf("native-session: %w", err)
+	}
+	out["native-session"] = native
 	return out, nil
 }
 

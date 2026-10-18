@@ -118,6 +118,11 @@ func TestTierChangeConfirmUndoAndSafePoint(t *testing.T) {
 func TestTierAskApproveDeclineCancelAndAuthorization(t *testing.T) {
 	f := fixture(t)
 	path, lease, identity := tierSession(t, f)
+	emptyTier := f.call(f.person, "GET", path+"/tier", nil, "")
+	expect(t, emptyTier, 200)
+	if raw := emptyTier.Body.String(); !strings.Contains(raw, `"requests":[]`) || strings.Contains(raw, `"requests":null`) {
+		t.Fatalf("empty tier requests %s", raw)
+	}
 	seedSyntheticTierPrice(t, f, path)
 	ask := map[string]any{"request_id": uid(), "tier": "fast", "reason": "QA waits for this turn"}
 	expect(t, f.call(f.person, "POST", path+"/tier/ask", ask, ""), 403)

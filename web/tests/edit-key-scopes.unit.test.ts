@@ -70,3 +70,72 @@ it('retains the other unavailable reasons and their precedence', async () => {
   expect(await sheetReason({ projectRole: true, projectPermissions: ['nodes.read'] })).toBe("Not in this agent's role (Admin)")
   expect(await sheetReason({ role: false, projectRole: true, projectPermissions: ['nodes.read'] })).toBe("Not in this agent's project roles")
 })
+
+async function adoptionTab() {
+  const session = Vue.reactive({ identity: { tenant: { id: 'tenant-a' }, principal: { id: 'person-a', kind: 'person' } } })
+  const key = { id: 'legacy', principal_id: 'agent', name: 'Legacy', created_by_principal_id: null, prefix: 'test', scopes: [], expires_at: null, revoked_at: null, created_at: '', last_used_at: null }
+  const calls: string[] = [], toasts: string[] = []
+  let confirm!: (ok: boolean) => void, respond!: (result: unknown) => void, unmount!: () => void
+  // The Agents tab reads the shared key cache of the access store, so the store stands in with the same shape.
+  const store = Vue.reactive({
+    agents: [], keys: [{ ...key }] as Array<typeof key> | null, load: async () => {}, loadKeys: async () => {},
+    noteKey: (next: typeof key) => { store.keys = store.keys?.map(k => k.id === next.id ? next : k) ?? null },
+  })
+  const modules: Record<string, unknown> = {
+    vue: { ...Vue, onMounted: () => {}, onUnmounted: (callback: () => void) => { unmount = callback } },
+    'vue-router': { useRoute: () => ({ query: {} }), useRouter: () => ({ replace: async () => {} }) },
+    '../../stores/session': { useSession: () => session },
+    '../../stores/access': { useAccess: () => store },
+    '../../lib/access': { ...Access, adoptAgentKey: (id: string) => { calls.push(id); return new Promise(resolve => { respond = resolve }) } },
+    '../../lib/settings': { keyState: () => 'active' },
+    '../../lib/confirm': { confirmAction: () => new Promise(resolve => { confirm = resolve }) },
+    '../../lib/toast': { toast: (message: string) => toasts.push(message) },
+    '../../lib/authz': { can: () => true, myPermissions: () => new Set() },
+    '../../lib/brand': { brand: {} }, '../../lib/work': { relativeTime: () => '' },
+    './accessText': { problem: () => 'failed', undoing: () => {} },
+  }
+  const { descriptor } = parse(readFileSync(new URL('../src/components/access/AgentsTab.vue', import.meta.url), 'utf8'))
+  const { content } = compileScript(descriptor, { id: 'adoption-test' })
+  const { outputText } = ts.transpileModule(content, { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 } })
+  const exports: { default?: { setup: (props: unknown, context: unknown) => { adopt: (target: typeof key) => Promise<void>; keys: Vue.Ref<Array<typeof key> | null> } } } = {}
+  new Function('require', 'exports', outputText)((id: string) => {
+    if (id.endsWith('.vue')) return { default: {} }
+    if (!(id in modules)) throw new Error(`Unexpected adoption dependency: ${id}`)
+    return modules[id]
+  }, exports)
+  const scope = Vue.effectScope()
+  const state = scope.run(() => exports.default!.setup({}, { expose: () => {} }))!
+  return { session, key, state, store, calls, toasts, confirm: (ok: boolean) => confirm(ok), respond: () => respond({ ...key, created_by_principal_id: 'person-a' }), unmount: () => unmount(), stop: () => scope.stop() }
+}
+
+it('adoption confirmation is bound to the acting person and key', async () => {
+  for (const changed of ['person', 'key'] as const) {
+    const tab = await adoptionTab()
+    const pending = tab.state.adopt(tab.key)
+    if (changed === 'person') { tab.session.identity.principal.id = 'person-b'; await Vue.nextTick() }
+    else tab.store.keys = []
+    tab.confirm(true)
+    await pending
+    expect(tab.calls).toEqual([])
+    expect(tab.toasts).toEqual([])
+    tab.stop()
+  }
+})
+
+it('late adoption results cannot restore another person or a departed key', async () => {
+  for (const changed of ['person', 'key', 'unmount'] as const) {
+    const tab = await adoptionTab()
+    const pending = tab.state.adopt(tab.key)
+    tab.confirm(true)
+    await Vue.nextTick()
+    expect(tab.calls).toEqual(['legacy'])
+    if (changed === 'person') { tab.session.identity.principal.id = 'person-b'; await Vue.nextTick() }
+    else if (changed === 'key') tab.store.keys = []
+    else tab.unmount()
+    tab.respond()
+    await pending
+    expect(tab.toasts).toEqual([])
+    expect(tab.store.keys?.every(k => k.created_by_principal_id === null) ?? true).toBe(true)
+    tab.stop()
+  }
+})

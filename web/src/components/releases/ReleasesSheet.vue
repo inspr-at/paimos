@@ -1,12 +1,12 @@
 <!-- SPDX-License-Identifier: AGPL-3.0-only -->
 <script setup lang="ts">
-import { computed, nextTick, onBeforeUnmount, onMounted, provide, reactive, ref, watch } from 'vue'
+import { computed, nextTick, onBeforeUnmount, onMounted, provide, reactive, ref, useId, watch } from 'vue'
 import { useRoute } from 'vue-router'
 import mark from '../../assets/brand/aeon-mark.svg'
 import { brand, setOverlayTitle } from '../../lib/brand'
 import { codenameOf } from '../../lib/codenames'
 import { useDeveloperSettings } from '../../lib/developerSettings'
-import { groupByDay, isCalendarVersion, liveServer, matches, presentRelease, railLine, releaseCopy, releasedAt, releaseLang, releaseLangKey, releaseNotice, releaseView, span, ticketsOf, visibleReleases, type Release, type ReleaseLang, type ReleaseView } from '../../lib/releases'
+import { groupByDay, isCalendarVersion, liveServer, matches, presentRelease, railLine, releaseCopy, releasedAt, releaseLang, releaseLangKey, releaseNotice, span, ticketsOf, visibleReleases, type Release, type ReleaseLang, type ReleaseView } from '../../lib/releases'
 import { clockSince } from '../../lib/releaseStats'
 import { useProfile } from '../../stores/profile'
 import { useSession } from '../../stores/session'
@@ -15,6 +15,8 @@ import { absoluteTime, relativeTime } from '../../lib/work'
 import { useReleases } from '../../stores/releases'
 import { useVersion } from '../../stores/version'
 import AppIcon from '../AppIcon.vue'
+import ViewSwitch from '../ViewSwitch.vue'
+import { useViewSwitch, viewKey } from '../../lib/viewSwitch'
 import CalendarVersion from '../CalendarVersion.vue'
 import ReleaseName from '../ReleaseName.vue'
 import LangBadge from './LangBadge.vue'
@@ -25,10 +27,12 @@ import ReleaseStats from './ReleaseStats.vue'
 import ReleaseTicketPanel from './ReleaseTicketPanel.vue'
 import ReleaseVersionCopy from './ReleaseVersionCopy.vue'
 import TicketLink from './TicketLink.vue'
-import { onAccessChange, permissionsRevoked } from '../../lib/authz'
+import { onAccessRevalidate, permissionsRevoked } from '../../lib/authz'
 import { appendPendingChanges, getPendingChanges, pendingLine, type PendingChanges } from '../../lib/releasePending'
 import { plainSubject, shortCommit } from '../../lib/releases'
 import { TICKET_PEEK } from '../../lib/ticketPeek'
+import { atRisk, planned, releasesFooter } from '../../lib/footerProviders'
+import { useFooterSummary } from '../../lib/footerSummary'
 
 // The release history: a full-screen sheet over the page. Releases by day on the
 // left, the selected one (or a comparison of two) on the right; on phones the
@@ -43,24 +47,44 @@ const version = useVersion()
 const profile = useProfile()
 const session = useSession()
 const route = useRoute()
-// EN | DE and Highlights | Details (AEON-323). Both live in the address under
-// their own keys, since the page behind the sheet may use ?view= itself, so a
-// link, a reload and a version change keep them. The language is also this
-// person's remembered choice on this device, else the profile's. The labels
-// read the same in both languages.
-const langKey = computed(() => session.identity ? releaseLangKey(session.identity.principal.id) : '')
-const remembered = ref<string | null>(null)
-watch(langKey, key => { try { remembered.value = key ? localStorage.getItem(key) : null } catch { remembered.value = null } }, { immediate: true })
+// EN | DE and Highlights | Details (AEON-323), two ViewSwitches (AEON-1453). Both live in
+// the address under their own keys, since the page behind the sheet may use ?view= itself,
+// so a link, a reload and a version change keep them; an address wins once. Without one,
+// the person's default or the choice used last, kept on the server for every device; the
+// language else follows the profile. The labels read the same in both languages.
+const LANGS = ['en', 'de'] as const
+const VIEWS = ['highlights', 'details'] as const
+const LANG_OPTIONS = [{ id: 'en', label: 'EN' }, { id: 'de', label: 'DE' }]
+const VIEW_OPTIONS = [{ id: 'highlights', label: 'Highlights' }, { id: 'details', label: 'Details' }]
 // A choice waits here until the address has it, so two quick clicks both land.
 type SwitchKey = 'release_lang' | 'release_view'
 const pending = reactive<Partial<Record<SwitchKey, string>>>({})
 watch(() => route.query, query => { for (const key of ['release_lang', 'release_view'] as const) if (query[key] === pending[key]) delete pending[key] })
-const lang = computed(() => releaseLang(pending.release_lang ?? route.query.release_lang, profile.profile?.locale, remembered.value))
-const view = computed(() => releaseView(pending.release_view ?? route.query.release_view))
+const asked = (key: SwitchKey) => { const value = pending[key] ?? route.query[key]; return Array.isArray(value) ? value[0] : value }
+// The language was kept in this browser before. It counts until the server has one:
+// move it once, and drop the browser copy only after that write is confirmed.
+const langKey = computed(() => session.identity ? releaseLangKey(session.identity.principal.id) : '')
+const local = ref<string | null>(null)
+watch(langKey, key => { try { local.value = key ? localStorage.getItem(key) : null } catch { local.value = null } }, { immediate: true })
+const langSwitch = useViewSwitch({ key: viewKey('releases.lang'), options: LANGS, fallback: () => releaseLang(null, profile.profile?.locale, local.value), link: () => asked('release_lang') })
+const viewSwitch = useViewSwitch({ key: viewKey('releases'), options: VIEWS, fallback: 'highlights', link: () => asked('release_view') })
+let langTicket = 0
+watch([langKey, langSwitch.loaded, local], ([key, loaded, value]) => {
+  if (!key || !loaded || (value !== 'en' && value !== 'de')) return
+  const ticket = ++langTicket
+  const choice = value
+  void (async () => {
+    const migrate = !langSwitch.lastId.value || (langSwitch.lastId.value === choice && langSwitch.failed.value)
+    const ok = migrate ? await langSwitch.remember(choice) : await langSwitch.confirmed()
+    if (ticket !== langTicket || !ok) return
+    try { localStorage.removeItem(key) } catch { /* the server has the choice; a blocked browser keeps its copy */ }
+    if (ticket === langTicket) local.value = null
+  })()
+}, { immediate: true })
+const lang = computed(() => langSwitch.current.value as ReleaseLang)
+const view = computed(() => viewSwitch.current.value as ReleaseView)
 const locale = lang
 const copyText = computed(() => releaseCopy(lang.value))
-const LANGS = ['en', 'de'] as const
-const VIEWS = ['highlights', 'details'] as const
 // The address changes where the release does: in the app, so a choice and a
 // selection it causes (a filter hiding the selected release) land together.
 function putQuery(key: SwitchKey, value: string) {
@@ -68,26 +92,8 @@ function putQuery(key: SwitchKey, value: string) {
   pending[key] = value
   emit('query', key, value)
 }
-function chooseLang(next: ReleaseLang) {
-  remembered.value = next
-  try { if (langKey.value) localStorage.setItem(langKey.value, next) } catch { /* private window: the address keeps it */ }
-  putQuery('release_lang', next)
-}
-function chooseView(next: ReleaseView) { putQuery('release_view', next) }
-// The W3C radio group: Right and Down choose the next option, Left and Up the
-// one before, wrapping; Home and End the first and last. Focus follows.
-const SWITCH_STEP: Record<string, number> = { ArrowRight: 1, ArrowDown: 1, ArrowLeft: -1, ArrowUp: -1 }
-function switchKeys(event: KeyboardEvent, current: string, options: readonly string[], choose: (value: string) => void) {
-  const key = event.key
-  if (!(key in SWITCH_STEP) && key !== 'Home' && key !== 'End') return
-  event.preventDefault()
-  event.stopPropagation()
-  const index = Math.max(0, options.indexOf(current))
-  const next = key === 'Home' ? 0 : key === 'End' ? options.length - 1 : (index + SWITCH_STEP[key]! + options.length) % options.length
-  choose(options[next]!)
-  const group = event.currentTarget as HTMLElement
-  void nextTick(() => group.querySelectorAll<HTMLButtonElement>('[role="radio"]')[next]?.focus())
-}
+function chooseLang(next: string) { langSwitch.choose(next); putQuery('release_lang', next) }
+function chooseView(next: string) { viewSwitch.choose(next); putQuery('release_view', next) }
 
 const dialog = ref<HTMLDialogElement>()
 const listbox = ref<HTMLElement>()
@@ -147,6 +153,12 @@ const releases = computed(() => [...(history.value?.releases ?? [])].sort((a, b)
 const eligible = computed(() => visibleReleases(releases.value, showReservedVersions.value))
 // Result counts and statistics describe the full history, even when rows are hidden.
 const matching = computed(() => releases.value.filter(r => matches(r, filter, locale.value, view.value)))
+const resultId = useId()
+const historySummary = computed(() => {
+  const count = (state: Release['state']) => releases.value.filter(release => release.state === state).length
+  const candidates = count('candidate')
+  return `${count('published')} published · ${count('reserved')} reserved${candidates ? ` · ${candidates} candidate${candidates === 1 ? '' : 's'}` : ''}`
+})
 const visible = computed(() => visibleReleases(matching.value, showReservedVersions.value))
 const days = computed(() => groupByDay(visible.value, now.value))
 const order = computed(() => days.value.flatMap(d => d.releases))
@@ -190,6 +202,21 @@ const behindLine = computed(() => {
   return `${Math.max(0, behind)} ${behind === 1 ? 'release' : 'releases'} behind live · back to ${liveName}`
 })
 const optionId = (v: string) => `release-${v.replace(/\./g, '-')}`
+
+// While the sheet is open it speaks in the footer: releases on their way (reserved or
+// tagged, not yet published) and the one whose checks failed. Hidden reservations stay uncounted (AEON-785).
+// The page footer sits under this full-screen dialog, so the same summary is pinned inside the sheet.
+const releaseSummary = computed(() => {
+  if (!history.value && store.error) return null
+  const coming = eligible.value.filter(planned)
+  return releasesFooter({
+    loaded: !!history.value, planned: coming.length, atRisk: coming.filter(atRisk).length,
+    // Choose the row. Publishing the address alone is treated as an echo and leaves the cursor where it was.
+    act: { risk: () => { const version = eligible.value.filter(planned).filter(atRisk)[0]?.version; if (version) choose(version) } },
+  })
+})
+useFooterSummary(() => releaseSummary.value)
+function openRisk() { releaseSummary.value?.action?.() }
 
 // ---------- Selection ----------
 // `releases=all` (the header) stays on the list with nothing selected. `releases=current`
@@ -367,10 +394,7 @@ function resetWaiting(keepOpen = false) {
   if (current.value && session.identity) void loadWaiting()
 }
 watch(() => [current.value, session.identity?.tenant.id, session.identity?.principal.id], () => resetWaiting(), { immediate: true })
-const stopWaitingAccess = onAccessChange(change => {
-  resetWaiting(change === 'refresh')
-  if (change === 'reset') peekKey.value = null
-})
+const stopWaitingAccess = onAccessRevalidate({ reset: () => { resetWaiting(); peekKey.value = null }, refresh: () => { void loadWaiting() } })
 
 // ---------- A ticket beside the history ----------
 const peekKey = ref<string | null>(null)
@@ -493,7 +517,7 @@ const KINDS = [
 </script>
 
 <template>
-  <dialog ref="dialog" class="releases" :aria-label="`${brand.wordmark} releases`" tabindex="-1" @cancel.prevent @keydown="keydown">
+  <dialog ref="dialog" class="releases" :aria-label="`${brand.wordmark} releases`" :aria-describedby="resultId" tabindex="-1" @cancel.prevent @keydown="keydown">
     <div class="shell" :class="{ 'show-detail': showDetail, compare: mode === 'compare', peeking: !!peekKey }">
       <header class="head" :inert="covered">
         <div class="title-row">
@@ -519,14 +543,8 @@ const KINDS = [
           </div>
           <span class="spacer" />
           <div class="switches">
-            <div class="seg" role="radiogroup" aria-label="Language" @keydown="switchKeys($event, lang, LANGS, value => chooseLang(value as ReleaseLang))">
-              <button type="button" role="radio" :aria-checked="lang === 'en'" :tabindex="lang === 'en' ? 0 : -1" @click="chooseLang('en')">EN</button>
-              <button type="button" role="radio" :aria-checked="lang === 'de'" :tabindex="lang === 'de' ? 0 : -1" @click="chooseLang('de')">DE</button>
-            </div>
-            <div class="seg" role="radiogroup" aria-label="View" @keydown="switchKeys($event, view, VIEWS, value => chooseView(value as ReleaseView))">
-              <button type="button" role="radio" :aria-checked="view === 'highlights'" :tabindex="view === 'highlights' ? 0 : -1" @click="chooseView('highlights')">Highlights</button>
-              <button type="button" role="radio" :aria-checked="view === 'details'" :tabindex="view === 'details' ? 0 : -1" @click="chooseView('details')">Details</button>
-            </div>
+            <ViewSwitch look="seg" label="Language" :options="LANG_OPTIONS" :selected="lang" :default-id="langSwitch.defaultId.value" @select="chooseLang" @set-default="langSwitch.setDefault" />
+            <ViewSwitch look="seg" label="View" :options="VIEW_OPTIONS" :selected="view" :default-id="viewSwitch.defaultId.value" @select="chooseView" @set-default="viewSwitch.setDefault" />
           </div>
           <label class="search-field search">
             <AppIcon name="search" :size="14" />
@@ -559,7 +577,7 @@ const KINDS = [
               <button type="button" class="toggle" :aria-pressed="filter.fixes" @click="filter.fixes = !filter.fixes"><AppIcon name="bug" :size="13" />Fixes</button>
               <button type="button" class="toggle" :aria-pressed="filter.other" @click="filter.other = !filter.other"><AppIcon name="gear" :size="12" />Other</button>
             </div>
-            <p class="sr" aria-live="polite"><template v-if="filtering">{{ visible.length }} matching releases</template></p>
+            <p :id="resultId" class="sr result-count" aria-live="polite"><template v-if="filtering">{{ matching.length }} of {{ releases.length }}</template><template v-else>{{ historySummary }}</template></p>
           </div>
 
           <p v-if="mode === 'compare'" class="compare-hint" role="status">
@@ -677,9 +695,19 @@ const KINDS = [
         </section>
       </div>
 
-      <footer v-if="phone" class="mobile-footer" :inert="covered">
-        <button type="button" :aria-pressed="!showDetail" @click="showDetail = false"><AppIcon name="chevron-left" :size="13" />All releases</button>
-        <button type="button" :aria-pressed="showDetail" :disabled="!selected" @click="showDetail = true">Release notes<AppIcon name="chevron-right" :size="13" /></button>
+      <footer class="sheet-foot" :inert="covered">
+        <p v-if="!releaseSummary" class="sheet-sum" aria-hidden="true"></p>
+        <p v-else-if="releaseSummary.loading" class="sheet-sum" role="status" aria-label="Loading"><span class="sum-dot" aria-hidden="true" /><span class="sum-skel skeleton" aria-hidden="true" /></p>
+        <button v-else-if="releaseSummary.action" type="button" class="sheet-sum" :data-tone="releaseSummary.tone" :aria-label="releaseSummary.aria" @click="openRisk">
+          <span class="sum-dot" aria-hidden="true" /><span><template v-for="(part, index) in releaseSummary.full" :key="index"><b v-if="part.as === 'count'">{{ part.text }}</b><span v-else-if="part.as === 'exception'" class="x">{{ part.text }}</span><template v-else>{{ part.text }}</template></template></span>
+        </button>
+        <p v-else class="sheet-sum" role="status" :data-tone="releaseSummary.tone" :aria-label="releaseSummary.aria">
+          <span class="sum-dot" aria-hidden="true" /><span><template v-for="(part, index) in releaseSummary.full" :key="index"><b v-if="part.as === 'count'">{{ part.text }}</b><span v-else-if="part.as === 'exception'" class="x">{{ part.text }}</span><template v-else>{{ part.text }}</template></template></span>
+        </p>
+        <div v-if="phone" class="mobile-footer">
+          <button type="button" :aria-pressed="!showDetail" @click="showDetail = false"><AppIcon name="chevron-left" :size="13" />All releases</button>
+          <button type="button" :aria-pressed="showDetail" :disabled="!selected" @click="showDetail = true">Release notes<AppIcon name="chevron-right" :size="13" /></button>
+        </div>
       </footer>
 
       <div v-if="help" class="help-scrim" @click.self="help = false">
@@ -701,13 +729,26 @@ const KINDS = [
 </template>
 
 <style scoped>
-.releases { width: 100vw; height: 100dvh; max-width: none; max-height: none; margin: 0; padding: 0; border: 0; color: var(--ink); outline: none; overflow: hidden; background-color: var(--canvas); --aurora-1: rgba(127,216,207,.55); --aurora-2: rgba(14,111,108,.22); --aurora-3: rgba(232,192,122,.32); background-image: radial-gradient(ellipse 520px 230px at 25% 0%,var(--aurora-1),transparent),radial-gradient(ellipse 420px 190px at 45% 0%,var(--aurora-2),transparent),radial-gradient(ellipse 350px 200px at 60% 0%,var(--aurora-3),transparent); }
+.releases { width: 100vw; height: 100dvh; max-width: none; max-height: none; margin: 0; padding: 0; border: 0; color: var(--ink); outline: none; overflow: hidden; background-color: var(--canvas); --aurora-1: color-mix(in srgb, var(--primary-tint) 55%, transparent); --aurora-2: color-mix(in srgb, var(--primary-line) 22%, transparent); --aurora-3: color-mix(in srgb, var(--secondary-tint) 32%, transparent); background-image: radial-gradient(ellipse 520px 230px at 25% 0%,var(--aurora-1),transparent),radial-gradient(ellipse 420px 190px at 45% 0%,var(--aurora-2),transparent),radial-gradient(ellipse 350px 200px at 60% 0%,var(--aurora-3),transparent); }
 .releases[open] { display: block; }
 .releases::backdrop { background: var(--scrim); }
-:root[data-theme="dark"] .releases { --aurora-1: rgba(127,216,207,.2); --aurora-2: rgba(164,229,223,.08); --aurora-3: rgba(232,192,122,.12); }
-@media(prefers-color-scheme:dark) { :root:not([data-theme="light"]) .releases { --aurora-1: rgba(127,216,207,.2); --aurora-2: rgba(164,229,223,.08); --aurora-3: rgba(232,192,122,.12); } }
+:root[data-theme="dark"] .releases { --aurora-1: color-mix(in srgb, var(--primary-tint) 20%, transparent); --aurora-2: color-mix(in srgb, var(--primary-tint) 8%, transparent); --aurora-3: color-mix(in srgb, var(--secondary-tint) 12%, transparent); }
+@media(prefers-color-scheme:dark) { :root:not([data-theme="light"]) .releases { --aurora-1: color-mix(in srgb, var(--primary-tint) 20%, transparent); --aurora-2: color-mix(in srgb, var(--primary-tint) 8%, transparent); --aurora-3: color-mix(in srgb, var(--secondary-tint) 12%, transparent); } }
 /* Toolbar labels may wrap; their intrinsic width must never enlarge the sheet. */
-.shell { position:relative; display:grid; grid-template-columns:minmax(0,1fr); grid-template-rows:auto minmax(0,1fr); height:100%; max-width:1640px; margin:0 auto; padding:0 var(--gutter); }
+.shell { position:relative; display:grid; grid-template-columns:minmax(0,1fr); grid-template-rows:auto minmax(0,1fr) auto; height:100%; max-width:1640px; margin:0 auto; padding:0 var(--gutter); }
+.sheet-foot { background: var(--canvas); }
+.sheet-sum { display: flex; align-items: center; gap: 8px; box-sizing: border-box; width: 100%; min-height: 44px; margin: 0; padding: 0 2px; border: 0; border-top: 1px solid var(--line); background: transparent; color: var(--ink-2); font: 400 13px/1.3 var(--font); font-variant-numeric: tabular-nums; text-align: left; --tone: var(--ok); }
+button.sheet-sum { cursor: pointer; }
+.sheet-sum b { color: var(--ink); font-weight: 650; }
+.sheet-sum .x { color: var(--tone-ink, var(--ink)); font-weight: 650; }
+.sheet-sum[data-tone="problem"] { --tone: var(--agent-problem); --tone-ink: var(--agent-problem); }
+.sheet-sum[data-tone="attention"] { --tone: var(--gold); --tone-ink: var(--warn-ink); }
+.sheet-sum[data-tone="deliberate"] { --tone: var(--teal); --tone-ink: var(--teal-ink); }
+.sheet-sum[data-tone="idle"] { --tone: var(--st-backlog); }
+.sheet-sum .sum-dot { flex: none; width: 7px; height: 7px; border-radius: 50%; background: var(--tone); }
+.sheet-sum .sum-skel { display: inline-block; width: 150px; height: 8px; border-radius: 4px; }
+.sheet-sum:focus-visible { outline: none; box-shadow: var(--focus-ring); }
+@media (hover: hover) { button.sheet-sum:hover { color: var(--ink); } }
 .head { display:grid; min-width:0; gap:18px; padding:18px 0 20px; }
 .title-row { display:flex; flex-wrap:wrap; align-items:flex-start; gap:12px; min-width:0; }
 .mark-backing { display:grid; place-items:center; flex:none; width:52px; height:52px; border-radius:15px; background:var(--glass); box-shadow:0 0 0 1px var(--glass-rim),0 6px 16px -10px var(--line-2); }
@@ -725,7 +766,8 @@ const KINDS = [
 .reload { display:inline-flex; align-items:center; gap:6px; min-height:30px; padding:0 12px; border-radius:999px; color:var(--teal-ink); background:var(--surface); }
 .spacer { display:none; }
 .switches { display:flex; flex-wrap:wrap; flex:none; align-items:center; gap:8px; min-width:0; }
-.switches .seg button { height:36px; padding:0 12px; }
+.switches .seg { padding:0; }
+.switches .seg :deep(button) { height:36px; padding:0 12px; }
 .search { flex:1 1 220px; min-width:140px; }
 .search .field { height:36px; border-radius:999px; padding-right:34px; font-size:12px; }
 .search .field::-webkit-search-cancel-button { display:none; }
@@ -751,7 +793,7 @@ const KINDS = [
 .day-count { letter-spacing:0; font-weight:500; }
 .row { position:relative; display:grid; grid-template-columns:60px minmax(0,1fr) 12px; align-items:start; gap:10px; padding:12px 10px 13px; border-top:1px solid var(--line); cursor:pointer; outline-offset:-1px; }
 .day-h + .row { border-top:0; }
-.row.fresh { background:var(--gold-wash); }
+.row.fresh { background:var(--secondary-tint-3); }
 .row[aria-selected="true"],.row.from { background:var(--row-selected); box-shadow:inset 0 0 0 1px color-mix(in srgb,var(--teal) 55%,transparent); border-radius:10px; border-top-color:transparent; }
 .row[aria-selected="true"] + .row { border-top-color:transparent; }
 .row.reserved .clock,.row.reserved .row-name { color:var(--ink-2); }
@@ -761,7 +803,7 @@ const KINDS = [
 .time-badge.rollback-tag { color:var(--ink); }
 .time-badge { display:block; margin-top:6px; padding:4px 0; width:100%; text-align:center; font:650 10px/1.2 var(--mono); letter-spacing:.07em; text-transform:uppercase; color:var(--ink-2); background:var(--surface-2); border-radius:7px; }
 .current-tag { color:var(--teal-ink); background:var(--row-selected); box-shadow:inset 0 0 0 1px var(--chip-teal-line); }
-.new-tag { color:color-mix(in oklab,var(--gold-ink),var(--ink) 35%); background:var(--gold-wash); }
+.new-tag { color:color-mix(in oklab,var(--secondary-ink),var(--ink) 35%); background:var(--secondary-tint-3); }
 .main { display:grid; gap:3px; min-width:0; }
 .line1 { display:grid; grid-template-columns:minmax(0,1fr) max-content; align-items:start; gap:10px; min-width:0; }
 .row-name { font-size:14.5px; line-height:20px; font-weight:600; color:var(--ink); }
@@ -822,7 +864,11 @@ const KINDS = [
 .sr { position:absolute; width:1px; height:1px; overflow:hidden; clip-path:inset(50%); white-space:nowrap; }
 .toggle:focus-visible,.to-current:focus-visible,.next-up:focus-visible,.evidence-control:focus-visible { outline:none; box-shadow:var(--focus-ring); }
 @media(hover:hover) { .row:hover:not([aria-selected="true"]) { background:var(--row-hover); border-radius:10px; } .toggle:hover { background:var(--btn-bg-hover); } }
-@media(max-width:1180px) and (min-width:761px) { .title-row { flex-wrap:wrap; } .titles { flex-basis:calc(100% - 164px); } .switches { order:4; } .search { order:5; } .compare-btn { order:6; } .help-btn { margin-left:auto; } .close-btn { order:1; } .body { grid-template-columns:minmax(300px,380px) minmax(0,1fr); gap:20px; } }
+/* Two rows until one fits: with the switches' reserved pin slots (AEON-1453) one row needs about 1310 px,
+   about 1350 px with wider system fonts; below that Help and Close would wrap alone. The switches, search and
+   Compare share the second row; the search starts at its minimum and takes what is left, so it never wraps
+   onto a row of its own and short windows keep room for the list. */
+@media(max-width:1380px) and (min-width:761px) { .title-row { flex-wrap:wrap; } .titles { flex-basis:calc(100% - 164px); } .switches { order:4; } .search { order:5; flex-basis:140px; } .compare-btn { order:6; } .help-btn { margin-left:auto; } .close-btn { order:1; } .body { grid-template-columns:minmax(300px,380px) minmax(0,1fr); gap:20px; } }
 @media(max-width:760px) {
  .shell { padding:0 16px; grid-template-rows:auto minmax(0,1fr) auto; }
  .head { gap:10px; padding:12px 0 10px; }
@@ -839,7 +885,7 @@ const KINDS = [
  .compare-btn { order:3; width:44px; height:44px; padding:0; }
  .compare-btn .btn-text,.compare-btn .keycap,.slash { display:none; }
  .switches { order:4; flex:1 1 auto; gap:6px; }
- .switches .seg button { height:44px; padding:0 12px; }
+ .switches .seg :deep(button) { height:44px; padding:0 12px; }
  .help-btn { display:flex; order:5; width:44px; height:44px; }
  .body { display:block; min-height:0; }
  .list-pane { height:100%; padding:2px 1px; }

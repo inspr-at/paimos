@@ -52,11 +52,11 @@ async function setup(page: Page, readOnly = false, canonical = false) {
   })
   return { errors, calls, items }
 }
-const editor = (page: Page) => page.getByRole('dialog', { name: /Repeat|Edit recurring work/ })
+const editor = (page: Page) => page.getByRole('dialog', { name: /Repeat|New routine|Edit routine|Let agents run it/ })
 const row = (page: Page, name = 'Weekly tool sweep') => page.getByRole('row', { name, exact: true })
-async function settings(page: Page) { await page.goto('/p/PHAROS/settings'); await expect(row(page)).toBeVisible() }
+async function settings(page: Page) { await page.goto('/p/PHAROS/settings/routines'); await expect(page).toHaveURL('/p/PHAROS/settings/routines'); await expect(row(page)).toBeVisible() }
 async function newEditor(page: Page) {
-  await page.getByRole('button', { name: 'New…', exact: true }).click()
+  await page.getByRole('button', { name: 'New routine…', exact: true }).click()
   await editor(page).getByRole('textbox', { name: 'Name', exact: true }).fill('Weekly inspection')
   await editor(page).getByRole('textbox', { name: 'Title', exact: true }).fill('Inspect ')
   await editor(page).getByRole('button', { name: 'Date', exact: true }).click()
@@ -141,7 +141,7 @@ test('Run now confirms the open ticket, uses the codename picker and sends a bou
 })
 test('read-only people can see history and provenance, but cannot repeat or mutate', async ({ page }) => {
   const { calls } = await setup(page, true); await settings(page)
-  await expect(page.getByRole('button', { name: 'New…', exact: true })).toBeDisabled()
+  await expect(page.getByRole('button', { name: 'New routine…', exact: true })).toBeDisabled()
   await expect(row(page).getByRole('button', { name: 'Pause', exact: true })).toBeDisabled()
   await expect(page.getByRole('region', { name: 'Recurrence history' })).toContainText('PHAROS-11')
   await row(page).getByRole('button', { name: /^More/ }).click()
@@ -181,8 +181,10 @@ test('a delayed Run now read is discarded when the project changes', async ({ pa
   await row(page).getByRole('button', { name: 'Run now', exact: true }).click(); await arrived
   await page.getByRole('navigation', { name: 'Places' }).getByRole('link', { name: 'Projects', exact: true }).click()
   await page.locator('a[href="/p/AEON"]').first().click(); await page.getByRole('tab', { name: 'Settings', exact: true }).click()
+  await page.getByRole('navigation', { name: 'Project settings sections' }).getByRole('link', { name: /^Routines/ }).click()
+  await expect(page).toHaveURL('/p/AEON/settings/routines')
   release()
-  await expect(page.getByText('No recurring work yet. Use New…, or Repeat… on a ticket.', { exact: true })).toBeVisible()
+  await expect(page.getByText('No routines yet. Use New routine…, or Repeat… on a ticket.', { exact: true })).toBeVisible()
   await expect(page.getByRole('dialog', { name: 'Run recurring work now' })).toHaveCount(0)
   expect(calls.filter(call => call.path.endsWith('/run-now'))).toHaveLength(0)
 })
@@ -267,3 +269,37 @@ for (const parent of [false, true]) {
     expect(errors).toEqual([])
   })
 }
+
+
+// Risk: API-configured triggers lose their selectors during edits, or a release
+// picker blocks manual work. Actions and start choices must remain under the pointer.
+test('non-release event edits preserve configuration and stable manual controls', async ({ page }) => {
+  const { calls, items, errors } = await setup(page)
+  for (const event of ['node.done', 'knowledge.changed', 'external.tag', 'external.deploy'] as const) {
+    const trigger: RecurrenceInput['trigger'] = { kind: 'event', event, event_start: 'now', event_timezone: 'UTC', ...(event.startsWith('external.') ? { external: { principal_id: 'sender', public_key: 'public' } } : { filter: { project_ids: ['p-pharos'], ...(event === 'knowledge.changed' ? { tag: 'website' } : { has_release_copy: true }) } }) }
+    items[0].trigger = trigger
+    await settings(page)
+    await expect(row(page)).not.toContainText('every release')
+    await row(page).getByRole('button', { name: /^More/ }).click()
+    await page.getByRole('menuitem', { name: 'Edit…', exact: true }).click()
+    const frame = editor(page), save = frame.getByRole('button', { name: /^Save/ })
+    const starts = ['Right away', '1 hour later', 'Next morning']
+    await expectStableControls({
+      controls: { save, cancel: frame.getByRole('button', { name: /^Cancel/ }), start: frame.getByRole('radiogroup', { name: 'Start', exact: true }), ...Object.fromEntries(starts.map(name => [name, frame.getByRole('radio', { name, exact: true })])) },
+      scrollAreas: { body: frame.locator('.editor-body') },
+      interactions: ['Next morning', 'Right away', '1 hour later'].map(name => ({ name, run: async () => { await frame.getByRole('radio', { name, exact: true }).click(); await expect(save).toBeEnabled() } })),
+    })
+    await save.click(); await expect(frame).toHaveCount(0)
+    const updated = calls.filter(call => call.method === 'PUT' && call.path.endsWith(id)).at(-1)!.body as unknown as RecurrenceInput
+    expect(updated.trigger).toEqual({ ...trigger, event_start: 'hour' })
+    await row(page).getByRole('button', { name: 'Run now', exact: true }).click()
+    const run = page.getByRole('dialog', { name: 'Run recurring work now' })
+    await expect(run.getByRole('radiogroup', { name: 'Published release' })).toHaveCount(0)
+    const create = run.getByRole('button', { name: /^Create/ })
+    await expectStableControls({ controls: { create, cancel: run.getByRole('button', { name: 'Cancel', exact: true }) }, interactions: [{ name: 'confirm manual occurrence', run: async () => { await expect(create).toBeEnabled(); await create.focus() } }] })
+    await create.click(); await expect(run).toHaveCount(0)
+    expect(calls.filter(call => call.path.endsWith('/run-now')).at(-1)!.body).not.toHaveProperty('release_key')
+    expect(calls.filter(call => call.path.endsWith('/releases'))).toHaveLength(0)
+  }
+  expect(errors).toEqual([])
+})

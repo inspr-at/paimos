@@ -4,18 +4,15 @@ package authz
 
 import (
 	"context"
-	_ "embed"
-	"encoding/json"
 	"errors"
 	"net/http"
 	"sort"
 	"strings"
 
-	"github.com/jackc/pgx/v5"
-	"github.com/jackc/pgx/v5/pgxpool"
-
 	"github.com/inspr-at/paimos/internal/db"
 	"github.com/inspr-at/paimos/internal/tenant"
+	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgxpool"
 )
 
 var ErrForbidden = errors.New("permission denied")
@@ -71,9 +68,13 @@ func Require(ctx context.Context, permission string, scope Scope) error {
 	if !ok || pool == nil {
 		return ErrNoStore
 	}
-	return db.InTenant(ctx, pool, p.TenantID, func(tx pgx.Tx) error {
+	err := db.InTenant(ctx, pool, p.TenantID, func(tx pgx.Tx) error {
 		return requireTx(ctx, tx, p, permission, scope)
 	})
+	if errors.Is(err, db.ErrKeyAuthorityChanged) {
+		return ErrForbidden
+	}
+	return err
 }
 
 func requireTx(ctx context.Context, tx pgx.Tx, p tenant.Principal, permission string, scope Scope) error {
@@ -133,7 +134,7 @@ func permitEffective(p tenant.Principal, permission string, effective Effective,
 		}
 		return &denial{reason: "missing_role_permission"}
 	}
-	if p.Kind == tenant.Agent && !containsScope(p.Scopes, permission) && !CoordinatorCeiling(p.Scopes, permission) {
+	if p.Kind == tenant.Agent && !KeyAllows(p, permission) {
 		return &denial{reason: "missing_key_scope", scope: permission}
 	}
 	return nil
@@ -177,6 +178,9 @@ func Load(ctx context.Context, pool *pgxpool.Pool, p tenant.Principal, projectID
 // self-service permissions (own profile, own access) of a project role count
 // too, so a project-only Guest can load their own profile.
 func loadTx(ctx context.Context, tx pgx.Tx, p tenant.Principal, projectID string) (Effective, error) {
+	if err := validateKeyCreatorTx(ctx, tx, p); err != nil {
+		return Effective{}, err
+	}
 	g, err := readGrants(ctx, tx, p)
 	if err != nil {
 		return Effective{}, err
@@ -235,14 +239,22 @@ func readGrants(ctx context.Context, tx pgx.Tx, p tenant.Principal) (grants, err
 	// Linked people have no binding of their own. Their session retains its
 	// principal ID, but permissions come from the signed-in canonical person.
 	var status, kind, bindingID, canonicalStatus string
-	if err := tx.QueryRow(ctx, `SELECT p.status,p.kind,canonical.id::text,canonical.status
+	var messagingOnly bool
+	if err := tx.QueryRow(ctx, `SELECT p.status,p.kind,canonical.id::text,canonical.status,coalesce(p.messaging_only,false)
 		FROM principals p JOIN principals canonical
 		  ON canonical.tenant_id=p.tenant_id AND canonical.id=coalesce(p.linked_to,p.id)
-		WHERE p.tenant_id=$1::uuid AND p.id=$2::uuid`, p.TenantID, p.ID).Scan(&status, &kind, &bindingID, &canonicalStatus); err != nil {
+		WHERE p.tenant_id=$1::uuid AND p.id=$2::uuid`, p.TenantID, p.ID).Scan(&status, &kind, &bindingID, &canonicalStatus, &messagingOnly); err != nil {
 		return g, err
 	}
 	if status != "active" || canonicalStatus != "active" || kind != string(p.Kind) {
 		return g, ErrForbidden
+	}
+	if messagingOnly {
+		if p.Kind != tenant.Agent {
+			return g, ErrForbidden
+		}
+		g.workspace = MessagingAssistantScopes()
+		return g, nil
 	}
 	rows, err := tx.Query(ctx, `SELECT b.scope_type,coalesce(b.scope_id::text,''),r.id::text,r.key,r.name,r.builtin,rp.permission
           FROM role_bindings b JOIN roles r ON r.tenant_id=b.tenant_id AND r.id=b.role_id
@@ -319,7 +331,9 @@ type ProjectCheck func(permission, projectID string) bool
 
 // GrantedProjectIDsTx resolves a bounded set from the caller's bindings,
 // including linked identities and key ceilings, rather than from resource logs.
-// Callers handle workspace authority before requesting this project-only set.
+// A workspace-bound agent also offers projects its key creator can grant;
+// ProjectsTx keeps only that intersection. Callers still apply an effective
+// workspace grant before treating this set as the whole tenant.
 func GrantedProjectIDsTx(ctx context.Context, tx pgx.Tx, p tenant.Principal, permission string) ([]string, error) {
 	own, err := readGrants(ctx, tx, p)
 	if errors.Is(err, ErrForbidden) {
@@ -332,9 +346,24 @@ func GrantedProjectIDsTx(ctx context.Context, tx pgx.Tx, p tenant.Principal, per
 	if err != nil {
 		return nil, err
 	}
-	ids := []string{}
+	candidates := map[string]struct{}{}
 	for id := range own.projects {
-		if check(permission, id) {
+		candidates[id] = struct{}{}
+	}
+	if p.Kind == tenant.Agent && p.KeyCreatorID != "" && own.allows(permission, "") {
+		creator, err := readGrants(ctx, tx, tenant.Principal{ID: p.KeyCreatorID, TenantID: p.TenantID, Kind: tenant.Person})
+		if err != nil && !errors.Is(err, ErrForbidden) {
+			return nil, err
+		}
+		if err == nil {
+			for id := range creator.projects {
+				candidates[id] = struct{}{}
+			}
+		}
+	}
+	ids := make([]string, 0, len(candidates))
+	for id := range candidates {
+		if id != "" && check(permission, id) {
 			ids = append(ids, id)
 		}
 	}
@@ -347,6 +376,12 @@ func GrantedProjectIDsTx(ctx context.Context, tx pgx.Tx, p tenant.Principal, per
 // many projects at once. An inactive caller or creator is denied everything.
 func ProjectsTx(ctx context.Context, tx pgx.Tx, p tenant.Principal) (ProjectCheck, error) {
 	deny := func(string, string) bool { return false }
+	if err := validateKeyCreatorTx(ctx, tx, p); err != nil {
+		if errors.Is(err, ErrForbidden) {
+			return deny, nil
+		}
+		return nil, err
+	}
 	own, err := readGrants(ctx, tx, p)
 	if errors.Is(err, ErrForbidden) {
 		return deny, nil
@@ -375,7 +410,7 @@ func ProjectsTx(ctx context.Context, tx pgx.Tx, p tenant.Principal) (ProjectChec
 		if creator != nil && !creator.allows(permission, projectID) {
 			return false
 		}
-		return p.Kind != tenant.Agent || containsScope(p.Scopes, permission) || CoordinatorCeiling(p.Scopes, permission)
+		return p.Kind != tenant.Agent || KeyGrantable(permission, OwnerWorkstation(p)) && KeyAllows(p, permission)
 	}, nil
 }
 
@@ -396,38 +431,12 @@ func ProjectGrantable(key string) bool {
 
 // Built-in agent exclusions are shared with the key dialogs and browser mocks.
 // Custom roles may explicitly grant these permissions; person grants stay intact.
-//
-//go:embed builtin_agent_exclusions.json
-var builtinAgentExclusionsJSON []byte
-
-var builtinAgentExclusions = func() []string {
-	var definition struct {
-		Permissions []string `json:"permissions"`
-	}
-	if err := json.Unmarshal(builtinAgentExclusionsJSON, &definition); err != nil {
-		panic("invalid embedded built-in agent exclusions")
-	}
-	return definition.Permissions
-}()
+var builtinAgentExclusions = assembledPermissionData.BuiltinAgentExclusions
 
 // Project self-service permissions are the workspace-only permissions a role
-// needs to use its projects: the caller's own profile and effective access,
-// and reading node kinds (tenant configuration every node view renders).
-// The key dialogs import the same definition; agent-grantability still comes
-// from the registry, so customer-portal permissions remain person-only.
-//
-//go:embed project_self_permissions.json
-var projectSelfPermissionsJSON []byte
-
-var projectSelfPermissions = func() []string {
-	var definition struct {
-		Permissions []string `json:"permissions"`
-	}
-	if err := json.Unmarshal(projectSelfPermissionsJSON, &definition); err != nil {
-		panic("invalid embedded project self-service permissions")
-	}
-	return definition.Permissions
-}()
+// needs to use its projects. The key dialogs assemble the same domain inputs;
+// customer-portal permissions remain person-only through the registry.
+var projectSelfPermissions = assembledPermissionData.ProjectSelfPermissions
 
 func selfPermission(key string) bool {
 	return contains(projectSelfPermissions, key)
@@ -449,12 +458,6 @@ func EffectiveTx(ctx context.Context, tx pgx.Tx, p tenant.Principal, projectID s
 	return loadTx(ctx, tx, p, projectID)
 }
 
-func nullUUID(s string) any {
-	if s == "" {
-		return nil
-	}
-	return s
-}
 func unique(in []string) []string {
 	sort.Strings(in)
 	out := in[:0]
@@ -486,4 +489,46 @@ func Handle(mux *http.ServeMux, pool *pgxpool.Pool, pattern, permission string, 
 		}
 		handler(w, r.WithContext(ctx))
 	})
+}
+
+// ProjectStartReasonTx reads the current lifecycle under the caller's mutation
+// fence. Frozen/archived projects remain editable, but automation starts close.
+func ProjectStartReasonTx(ctx context.Context, tx pgx.Tx, project string) (string, error) {
+	var state string
+	var deleted bool
+	if err := tx.QueryRow(ctx, `SELECT n.state,n.deleted_at IS NOT NULL FROM nodes n JOIN node_kinds k ON k.tenant_id=n.tenant_id AND k.id=n.kind_id WHERE n.id=$1 AND k.slug='project'`, project).Scan(&state, &deleted); err != nil {
+		return "", err
+	}
+	if deleted || state == "archived" {
+		return "project_archived", nil
+	}
+	if state == "frozen" {
+		return "project_frozen", nil
+	}
+	return "", nil
+}
+
+// RequireProjectAdminTx supplements nodes.write for project deletion. Grants
+// are live; a project Admin or workspace Owner/Admin supplies the admin role.
+func RequireProjectAdminTx(ctx context.Context, tx pgx.Tx, p tenant.Principal, project string) error {
+	if p.Kind == tenant.Agent && p.KeyCreatorID != "" {
+		creator := tenant.Principal{ID: p.KeyCreatorID, TenantID: p.TenantID, Kind: tenant.Person}
+		if err := RequireProjectAdminTx(ctx, tx, creator, project); err != nil {
+			return err
+		}
+	}
+	if err := RequireTx(ctx, tx, p, "nodes.write", Scope{ProjectID: project}); err != nil {
+		return err
+	}
+	grants, err := loadTx(ctx, tx, p, project)
+	if err != nil {
+		return err
+	}
+	if role := grants.Workspace.Role; role != nil && (role.Key == "owner" || role.Key == "admin") {
+		return nil
+	}
+	if grants.Project != nil && grants.Project.Role != nil && grants.Project.Role.Key == "admin" {
+		return nil
+	}
+	return ErrForbidden
 }

@@ -46,7 +46,8 @@ func validPiQueue(q piHeldQueue) bool {
 	}
 	bytes := 0
 	for _, part := range append(append([]string{}, q.Steering...), q.FollowUp...) {
-		if part == "" || len(part) > 64<<10 || !utf8.ValidString(part) {
+		// Held parts include inbox input, which may use the full inbox bound.
+		if part == "" || len(part) > inboxTextLimit || !utf8.ValidString(part) {
 			return false
 		}
 		bytes += len(part)

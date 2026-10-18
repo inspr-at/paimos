@@ -166,10 +166,12 @@ func TestDoneDoesNotWaitAndSummarisesLeaves(t *testing.T) {
 }
 func TestFailureVisibleRetryAndLeafGate(t *testing.T) {
 	f := setup(t)
-	// Migrated work leaves keep the historical bilingual completion requirement.
+	// Q1 (AEON-1248): configure the bilingual entry check; parents remain
+	// derived and missing copy still refuses a leaf's completion without a reason.
+	f.call(t, f.p, "PUT", "/api/settings/definitions", map[string]any{"expected_revision": nil, "checks": map[string]any{"done": []map[string]string{{"id": "release_copy_set"}}}}, 200)
 	f.call(t, f.p, "PATCH", "/api/nodes/"+f.leaf, map[string]any{"fields": map[string]any{}}, 200)
-	raw := f.call(t, f.p, "PATCH", "/api/nodes/"+f.leaf, map[string]any{"state": "done"}, 422)
-	if !bytes.Contains(raw, []byte(`"code":"benefit_required"`)) {
+	raw := f.call(t, f.p, "PATCH", "/api/nodes/"+f.leaf, map[string]any{"state": "done"}, 409)
+	if !bytes.Contains(raw, []byte(`"code":"entry_checks_failed"`)) || !bytes.Contains(raw, []byte(`"id":"release_copy_set"`)) || !bytes.Contains(raw, []byte("benefit_de is required")) {
 		t.Fatalf("wrong rejection: %s", raw)
 	}
 	f.call(t, f.p, "PATCH", "/api/nodes/"+f.leaf, map[string]any{"fields": sample}, 200)

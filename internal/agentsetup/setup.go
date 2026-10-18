@@ -18,6 +18,7 @@ import (
 	"github.com/inspr-at/paimos/internal/attachwatch"
 	"github.com/inspr-at/paimos/internal/grokprobe"
 	"github.com/inspr-at/paimos/internal/harnesslaunch"
+	"github.com/inspr-at/paimos/internal/hookcap"
 	"github.com/inspr-at/paimos/internal/piprobe"
 )
 
@@ -87,6 +88,8 @@ type RuntimeConfig struct {
 }
 
 type snapshot struct {
+	HookHome           string                `json:"hook_home,omitempty"`
+	HookCapabilities   []hookcap.Capability  `json:"hook_capabilities,omitempty"`
 	LocalAuthKeyID     string                `json:"local_auth_key_id,omitempty"`
 	BoundComputer      string                `json:"bound_computer_id,omitempty"`
 	BoundDaemon        string                `json:"bound_daemon_id,omitempty"`
@@ -113,11 +116,18 @@ type snapshot struct {
 	Cleaned            []string              `json:"cleaned"`
 	ComputerCleaned    bool                  `json:"computer_cleaned"`
 	NextPoll           time.Time             `json:"next_poll"`
+	// Local approval and renewal metadata are never part of pairing telemetry.
+	CodexPins struct {
+		LauncherHashes map[string]string             `json:"launcher_hashes,omitempty"`
+		Renewals       map[string]harnesslaunch.Node `json:"renewals,omitempty"`
+	} `json:"codex_pins,omitzero"`
 }
 
 // Only Progress is printable. The snapshot and HTTP request bodies contain
 // private capabilities and must never be returned as status or diagnostics.
 type Progress struct {
+	AccountLogins         map[string]AccountLogin  `json:"account_logins,omitempty"`
+	HookCapabilities      []hookcap.Capability     `json:"hook_capabilities,omitempty"`
 	TouchIDConfirmation   string                   `json:"touch_id_confirmation,omitempty"`
 	TouchIDUpgradeCommand string                   `json:"touch_id_upgrade_command,omitempty"`
 	BlockedAccounts       []BlockedAccount         `json:"blocked_accounts,omitempty"`
@@ -139,6 +149,7 @@ type Progress struct {
 	RetryAfterSeconds     int                      `json:"retry_after_seconds,omitempty"`
 }
 type LocalStatus struct {
+	AccountLogins                          map[string]AccountLogin
 	VerificationReasons                    map[string]string
 	AccountStatuses                        map[string]HarnessDetail
 	ProfilePermissions                     bool
@@ -183,6 +194,12 @@ type LocalDaemon interface {
 	Status(context.Context, string) (LocalStatus, error)
 }
 type Engine struct {
+	// RunningService advances existing enrollment only; its service owner is
+	// never called by enrollment happening inside the daemon.
+	RunningService     bool
+	PrepareLedger      func(context.Context, RuntimeConfig) error
+	LeaveLedger        func(context.Context) error
+	Hooks              *HookInstaller
 	Enclave            agentsecurity.Signer
 	Store              *Store
 	API                PairingAPI
@@ -191,6 +208,10 @@ type Engine struct {
 	ClaudeDependencies ClaudeDependencies
 	Now                func() time.Time
 	GrokProbe          func(context.Context, grokprobe.Binding) (grokprobe.Identity, error)
+	// InstallMethod is the detected add-harness entry point (see InstallMethod).
+	InstallMethod string
+	// PinDiscovery substitutes only local discovery in hermetic renewal tests.
+	PinDiscovery *Discovery
 }
 type Options struct {
 	Origin, TenantID, TenantSlug, ComputerName, Workspace string
@@ -245,7 +266,8 @@ func (e *Engine) save(s *snapshot, first bool) error {
 	return e.Store.Write(snapshotName, raw, first)
 }
 func (e *Engine) progress(s *snapshot) Progress {
-	p := Progress{Schema: "aeon.agent-setup.v1", Stage: s.Phase, RequestID: s.Request.RequestID, ComputerID: s.View.ComputerID, Accounts: s.View.Enrollments, LocalProcesses: "unconfirmed"}
+	refreshHookCapabilities(s)
+	p := Progress{HookCapabilities: s.HookCapabilities, Schema: "aeon.agent-setup.v1", Stage: s.Phase, RequestID: s.Request.RequestID, ComputerID: s.View.ComputerID, Accounts: s.View.Enrollments, LocalProcesses: "unconfirmed"}
 	if s.View.ComputerID != "" {
 		p.TouchIDConfirmation = "needs pairing upgrade"
 		if s.Request.Platform != "darwin" {
@@ -442,7 +464,7 @@ func (e *Engine) Begin(ctx context.Context, o Options) (Progress, error) {
 	if publicKey != "" {
 		s.LocalAuthKeyID = Hash([]byte(e.Store.Path())) + "/" + id
 	}
-	s.Request = DeviceRequest{RequestID: id, TenantID: o.TenantID, TenantSlug: o.TenantSlug, DeviceHash: Hash([]byte(device)), RuntimeHash: Hash([]byte(runtimeSecret)), LifecycleHash: Hash([]byte(life)), Details: Details{LocalAuthPublicKey: publicKey, ComputerName: o.ComputerName, Platform: o.Platform.OS, Arch: o.Platform.Arch, Workspace: o.Workspace, Capabilities: []string{"managed_runs"}}}
+	s.Request = DeviceRequest{RequestID: id, TenantID: o.TenantID, TenantSlug: o.TenantSlug, DeviceHash: Hash([]byte(device)), RuntimeHash: Hash([]byte(runtimeSecret)), LifecycleHash: Hash([]byte(life)), Details: Details{LocalAuthPublicKey: publicKey, ComputerName: o.ComputerName, Platform: o.Platform.OS, Arch: o.Platform.Arch, Workspace: o.Workspace, Capabilities: []string{"managed_runs", LedgerCapability}}}
 	for _, c := range o.Candidates {
 		key, err := uuid()
 		if err != nil {
@@ -451,6 +473,7 @@ func (e *Engine) Begin(ctx context.Context, o Options) (Progress, error) {
 		c.Key = key
 		s.Request.Accounts = append(s.Request.Accounts, c)
 		s.Candidates = append(s.Candidates, LocalCandidate{c, c.Path, c.Home, c.Identity, c.Version})
+		recordCodexLauncher(s, c)
 	}
 	if err = e.save(s, true); err != nil {
 		return Progress{}, err
@@ -645,11 +668,11 @@ func (e *Engine) provision(ctx context.Context, s *snapshot) (result Progress, r
 			code = "private_storage_failed"
 		}
 		proof := e.proof(s)
-		proof.Progress = reportRelease(s.View, &SetupProgress{State: state, ErrorCode: code})
+		proof.Progress = e.reportInstall(s.View, reportRelease(s.View, &SetupProgress{State: state, ErrorCode: code}))
 		_, _ = e.API.Reconcile(ctx, proof)
 	}()
 	proof := e.proof(s)
-	proof.Progress = reportRelease(s.View, &SetupProgress{State: "provisioning"})
+	proof.Progress = e.reportInstall(s.View, reportRelease(s.View, &SetupProgress{State: "provisioning"}))
 	observed, err := e.API.Reconcile(ctx, proof)
 	if err != nil {
 		return e.progress(s), err
@@ -718,7 +741,12 @@ func (e *Engine) provision(ctx context.Context, s *snapshot) (result Progress, r
 	if err := e.Store.Write(RuntimeName, raw, false); err != nil {
 		return e.progress(s), err
 	}
-	if s.StartService {
+	if e.PrepareLedger != nil {
+		if err := e.PrepareLedger(ctx, config); err != nil {
+			return e.progress(s), err
+		}
+	}
+	if s.StartService && !e.RunningService {
 		if e.Services == nil {
 			return e.progress(s), errors.New("service manager unavailable")
 		}
@@ -730,6 +758,12 @@ func (e *Engine) provision(ctx context.Context, s *snapshot) (result Progress, r
 		if err != nil {
 			return e.progress(s), err
 		}
+	}
+	if err := e.setupHooks(ctx, s, false); err != nil {
+		return e.progress(s), err
+	}
+	if _, err := e.API.Reconcile(ctx, e.proof(s)); err != nil {
+		return e.progress(s), err
 	}
 	s.Phase = "connected"
 	if s.View.Verification.Mode == "one_per_harness" {

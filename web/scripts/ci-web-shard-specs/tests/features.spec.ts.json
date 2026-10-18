@@ -1,0 +1,22 @@
+{
+  "group": "status-autopilot",
+  "nightlyTiming": {
+    "seconds": 15.009,
+    "selectedTests": 7
+  },
+  "spec": {
+    "file": "tests/features.spec.ts",
+    "listedTests": 7,
+    "tierTiming": {
+      "caseSeconds": {
+        "max": 3.056,
+        "median": 1.981,
+        "min": 1.222
+      },
+      "seconds": 15.009,
+      "selectedTests": 7
+    },
+    "weightSeconds": 15.536585,
+    "weightSource": "unmeasured-test-rate"
+  }
+}

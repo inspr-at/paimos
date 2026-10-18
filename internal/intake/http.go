@@ -6,7 +6,6 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
-	"encoding/json"
 	"errors"
 	"io"
 	"log/slog"
@@ -21,9 +20,11 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/inspr-at/paimos/internal/aithema/tokens"
+	"github.com/inspr-at/paimos/internal/authz"
 	"github.com/inspr-at/paimos/internal/db"
 	"github.com/inspr-at/paimos/internal/httpapi"
 	"github.com/inspr-at/paimos/internal/tenant"
+	"github.com/inspr-at/paimos/internal/workerlease"
 )
 
 // Module serves the intake routes.
@@ -108,8 +109,7 @@ func pathUUID(w http.ResponseWriter, raw string) (string, bool) {
 }
 
 func decode(w http.ResponseWriter, r *http.Request, dst any) bool {
-	r.Body = http.MaxBytesReader(w, r.Body, 1<<20)
-	dec := json.NewDecoder(r.Body)
+	dec := httpapi.NewRequestDecoder(w, r, 1<<20)
 	dec.DisallowUnknownFields()
 	dec.UseNumber()
 	if err := dec.Decode(dst); err != nil {
@@ -217,27 +217,28 @@ func keyScopes(ctx context.Context, r *http.Request, tx pgx.Tx, p tenant.Princip
 	}
 	sum := sha256.Sum256([]byte(secret))
 	var scopes pgtype.FlatArray[string]
+	var fullAccess bool
 	err := tx.QueryRow(ctx, `
-		SELECT scopes FROM agent_keys
+		SELECT scopes,coalesce(full_access,false) FROM agent_keys
 		WHERE tenant_id = $1::uuid AND principal_id = $2::uuid AND prefix = $3 AND hash = $4
 		  AND revoked_at IS NULL
 		  AND (expires_at IS NULL OR expires_at > now())`,
-		p.TenantID, p.ID, prefix, hex.EncodeToString(sum[:])).Scan(&scopes)
+		p.TenantID, p.ID, prefix, hex.EncodeToString(sum[:])).Scan(&scopes, &fullAccess)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return nil, fail(http.StatusForbidden, "scoped agent key required")
 	}
 	if err != nil {
 		return nil, err
 	}
-	return []string(scopes), nil
+	return authz.ResolveKeyScopes([]string(scopes), fullAccess), nil
 }
 
 func splitBearer(header string) (prefix, secret string, ok bool) {
-	scheme, token, found := strings.Cut(strings.TrimSpace(header), " ")
-	if !found || !strings.EqualFold(scheme, "Bearer") {
+	token, malformed := workerlease.AgentToken(strings.TrimSpace(header))
+	if malformed || token == "" {
 		return "", "", false
 	}
-	rest, ok := strings.CutPrefix(strings.TrimSpace(token), "aeon_")
+	rest, ok := strings.CutPrefix(token, "aeon_")
 	if !ok {
 		return "", "", false
 	}

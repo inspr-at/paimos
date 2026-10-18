@@ -35,6 +35,9 @@ func (m *Module) RunTenant(ctx context.Context, tenantID string, now time.Time) 
 	}); err != nil {
 		return err
 	}
+	if err := m.publishGit(ctx, actor, now); err != nil {
+		return err
+	}
 	for {
 		count := 0
 		err := db.InTenant(ctx, m.pool, tenantID, func(tx pgx.Tx) error {

@@ -22,11 +22,24 @@ func TestCompletionRequirements(t *testing.T) {
 		}
 		valid[key] = old
 	}
-	for _, pill := range []string{"Word", "One two three four five"} {
-		valid["pill_en"] = pill
-		if len(check(valid)) != 1 {
-			t.Fatal(check(valid))
+	for _, key := range []string{"pill_en", "pill_de"} {
+		original := valid[key]
+		for _, pill := range []string{"Word", "One two three four five"} {
+			valid[key] = pill
+			if len(check(valid)) != 1 {
+				t.Fatal(check(valid))
+			}
+			raw, _ := json.Marshal(valid)
+			for _, before := range []string{"open", "done"} {
+				for _, after := range []string{"open", "in_progress", "done", "accepted", "delivered"} {
+					got := Transition("work", before, after, raw)
+					if len(got) != 1 || got[0] != key+" must contain 2–4 words" {
+						t.Fatalf("%s -> %s: %v", before, after, got)
+					}
+				}
+			}
 		}
+		valid[key] = original
 	}
 	valid["pill_en"] = "One\u00a0two"
 	if len(check(valid)) != 0 {

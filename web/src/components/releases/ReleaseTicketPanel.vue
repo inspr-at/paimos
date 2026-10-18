@@ -2,7 +2,7 @@
 <script setup lang="ts">
 import { computed, nextTick, onBeforeUnmount, ref, watch } from 'vue'
 import { listNodes, type ListItem } from '../../lib/api'
-import { can, onAccessChange } from '../../lib/authz'
+import { can, onAccessRevalidate } from '../../lib/authz'
 import { confirmAction } from '../../lib/confirm'
 import { EMPTY_FILTERS, WORK_KINDS } from '../../lib/ticketList'
 import { normalKey, resolveTicketKeys, ticketRef } from '../../lib/ticketLinks'
@@ -68,9 +68,10 @@ async function resolve() {
 watch(current, resolve, { immediate: true })
 // Another person, workspace or an ended session: whatever is shown or on its way
 // goes, and the ticket is resolved again as the new caller. The same person's
-// access asked again only restarts a resolution still on its way; a shown ticket
-// stays until the keys asked again say otherwise (below).
-const stopAccess = onAccessChange(change => { if (change === 'reset' || resolving.value) void resolve() })
+// refresh keeps the visible ticket until revalidated keys say otherwise (below).
+// A lookup still in flight was fenced by ticketLinks' earlier refresh listener,
+// so restart that resolution under the new access epoch.
+const stopAccess = onAccessRevalidate({ reset: () => { void resolve() }, refresh: () => { if (resolving.value) void resolve() } })
 onBeforeUnmount(stopAccess)
 // The key asked again answers differently (a lost project, a moved ticket).
 // Its own first answer (unknown to known) and a reset (handled above) do not count.
@@ -171,7 +172,7 @@ defineExpose({
       @close="requestClose" @expand="expand" @new-tab="newTab" @open-key="openKey" @trail-back="trailBack" @retry="resolve"
       @open-in-project="goToProject" @status="anchor => { statusAnchor = anchor }" @removed="emit('close')"
     />
-    <StatusMenu :project-id="projectId ?? undefined" v-if="statusAnchor && item" :anchor="statusAnchor" :derived="item.status_derived" :children-count="item.work_children_count" :current="item.state" :known-states="knownStates" :ticket-key="item.key" @choose="chooseStatus" @close="closeStatus" />
+    <StatusMenu :project-id="projectId ?? undefined" v-if="statusAnchor && item" :anchor="statusAnchor" :derived="item.status_derived" :children-count="item.work_children_count" :node-id="item.id" :revision="item.updated_at" :current="item.state" :known-states="knownStates" :ticket-key="item.key" @choose="chooseStatus" @close="closeStatus" />
   </div>
 </template>
 

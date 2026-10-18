@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import { test, expect } from '@playwright/test'
 import { fixtures, mockWork, watchErrors } from './work-fixtures'
+import { controlStability } from './control-stability'
 
 test('ticket benefits edit together with a precondition and preserve unrelated fields', async ({ page }) => {
   const errors = watchErrors(page)
@@ -12,19 +13,48 @@ test('ticket benefits edit together with a precondition and preserve unrelated f
   const ws = page.getByRole('complementary', { name: 'Ticket details' })
   await expect(ws.getByRole('region', { name: 'User benefit' })).toContainText('Before Done')
   await ws.getByRole('button', { name: 'Edit', exact: true }).click()
+  // Risk: an open draft saves an invalid pill that later prevents completion.
+  const pillControls = await controlStability(page, {
+    english: ws.getByLabel('Pill · English'), german: ws.getByLabel('Pill · Deutsch'),
+    save: ws.getByRole('button', { name: 'Save', exact: true }),
+  })
+  const writesBefore = calls.filter(c => c.method === 'PATCH').length
+  for (const label of ['Pill · English', 'Pill · Deutsch']) {
+    const field = ws.getByLabel(label)
+    for (const value of ['Word', 'One two three four five']) {
+      await pillControls.check(() => field.fill(value))
+      await expect(field).toHaveAttribute('aria-invalid', 'true')
+      await pillControls.check(() => ws.getByRole('button', { name: 'Save', exact: true }).click())
+      await expect(field).toBeFocused()
+      expect(calls.filter(c => c.method === 'PATCH')).toHaveLength(writesBefore)
+    }
+    await pillControls.check(() => field.fill('One two'))
+    await expect(field).not.toHaveAttribute('aria-invalid', 'true')
+  }
+  pillControls.done()
   await ws.getByLabel('Pill · English').fill('Clear release notes')
   await ws.getByLabel('Pill · Deutsch').fill('Verständliche Release Notes')
   await ws.getByLabel('Benefit · English').fill('Tickets explain what you gain.')
   await ws.getByLabel('Benefit · Deutsch').fill('Tickets erklären den Nutzen.')
-  await ws.getByLabel('Hide from release notes').check()
+  const releaseControls = await controlStability(page, {
+    noRelease: ws.getByLabel('No release needed', { exact: true }),
+    hidden: ws.getByLabel('Hide from release notes', { exact: true }),
+    group: ws.locator('.release-controls'),
+    save: ws.getByRole('button', { name: 'Save', exact: true }),
+  })
+  await releaseControls.check(() => ws.getByLabel('No release needed', { exact: true }).check())
+  await releaseControls.check(() => ws.getByLabel('No release needed', { exact: true }).uncheck())
+  await releaseControls.check(() => ws.getByLabel('No release needed', { exact: true }).check())
+  await releaseControls.check(() => ws.getByLabel('Hide from release notes').check())
+  releaseControls.done()
   await ws.getByRole('button', { name: 'Save', exact: true }).click()
   const benefits = ws.getByRole('region', { name: 'User benefit' })
   await expect(benefits).toContainText('Tickets erklären den Nutzen.')
-  await expect(benefits).toContainText('Hidden from release notes')
+  await expect(benefits).toContainText('No release needed')
   await expect(benefits).not.toContainText('Before Done')
   const write = calls.find(c => c.method === 'PATCH' && c.path === `/api/nodes/${target.id}`)!
   expect(write.headers['if-unmodified-since']).toBeTruthy()
-  expect(write.body).toEqual({ fields: { ...prior, pill_en: 'Clear release notes', pill_de: 'Verständliche Release Notes', benefit_en: 'Tickets explain what you gain.', benefit_de: 'Tickets erklären den Nutzen.', hide_from_release_notes: true } })
+  expect(write.body).toEqual({ fields: { ...prior, pill_en: 'Clear release notes', pill_de: 'Verständliche Release Notes', benefit_en: 'Tickets explain what you gain.', benefit_de: 'Tickets erklären den Nutzen.', hide_from_release_notes: true, no_release_needed: true } })
   expect(errors).toEqual([])
 })
 
@@ -48,7 +78,8 @@ for (const state of ['done', 'accepted', 'delivered']) {
     await expect(benefits).toContainText('This completed ticket has incomplete benefit fields.')
     await expect(benefits).not.toContainText('Before Done')
     await ws.getByRole('button', { name: 'Edit', exact: true }).click()
-    await expect(benefits).toContainText('This completed ticket has incomplete benefit fields.')
+    await expect(benefits).toContainText('Each non-empty pill needs 2–4 words to save.')
+    await expect(benefits).toContainText('The project’s entry checks determine what is needed before Done.')
     await expect(benefits).not.toContainText('Before Done')
   })
 }
@@ -64,31 +95,43 @@ for (const regenerated of [false, true]) {
         Object.assign(release, { notes: { source: 'unavailable', snapshot_sha256: '', captured_at: null, release_revision: 0, hidden: 0, items: [], gaps: [gap] } })
       }
     }
-    await mockWork(page, fixtures())
+    const work = fixtures()
+    // The current workspace can resolve this Git-mentioned ticket; it remains
+    // absent from any captured historical membership/benefit snapshot.
+    work.nodes.push({ ...work.nodes.find(node => node.id === 'n-a1')!, id: 'n-a75', key: 'AEON-75', title: 'Edit time entries in Hours', state: 'done' })
+    await mockWork(page, work)
     await mockReleases(page, history)
     await page.goto(`/releases/${current.version}`)
     const detail = page.locator('article.detail')
     const options = page.getByRole('grid', { name: 'Releases, newest first' }).getByRole('row')
     // AEON-305: the tag message is evidence, never a labelled title.
     await expect(options.first()).not.toContainText('Time entry editing')
-    await expect(options.first()).toContainText('AEON-75')
+    await expect(options.first().locator('.row-name .rn-name')).toHaveText(current.codename!)
     await expect(detail.locator('.headline')).toHaveCount(0)
     await expect(page.getByText('Historical tag headline')).toHaveCount(0)
     await expect(detail.getByText('Notes written after release')).toHaveCount(0)
-    await expect(detail.locator('.tickets')).toContainText('AEON-75')
+    // AEON-635 / #237 renders ticket links in classified release change blocks.
+    await expect(detail.getByRole('region', { name: 'Release notes' }).getByRole('link', { name: /^AEON-75:/ }).first()).toBeVisible()
     await expect(detail.locator('.notes')).toContainText('Correct and delete time entries in the Hours view')
     await expect(detail.locator('#release-evidence')).toHaveCount(0)
     // No capture: no header and no note lines, only the changes.
     await expect(detail.locator('.summary')).toHaveCount(0)
     await expect(detail.getByText('Internal changes only.')).toHaveCount(0)
     await expect(detail.getByText(gap, { exact: true })).toHaveCount(0)
-    await page.getByRole('group', { name: 'Show only releases with' }).getByRole('button', { name: 'Tickets', exact: true }).click()
-    await expect(options).toHaveCount(5)
+    await page.getByRole('group', { name: 'Show only releases with' }).getByRole('button', { name: 'Other', exact: true }).click()
+    // #237 filters classified changes. All six v1 releases have unclassified
+    // Git changes (Other), including the release without a ticket mention.
+    await expect(options).toHaveCount(6)
+    await expect(options.first().getByRole('img', { name: '3 other changes', exact: true })).toBeVisible()
+    await expect(options.last().getByRole('img', { name: '1 other change', exact: true })).toBeVisible()
     await page.getByRole('searchbox', { name: 'Search releases' }).fill('AEON-75')
     await expect(options).toHaveCount(1)
-    await expect(options.first()).toContainText('AEON-75')
+    // #237 keeps list rows to names/counts; the ticket mention still selects
+    // this exact release and remains readable in its inline detail links.
+    await expect(options.first()).toHaveAttribute('id', `release-${current.version.replaceAll('.', '-')}`)
+    await expect(detail.getByRole('region', { name: 'Release notes' }).getByRole('link', { name: /^AEON-75:/ }).first()).toHaveText('AEON-75')
     await page.getByRole('searchbox', { name: 'Search releases' }).fill('')
-    await page.getByRole('group', { name: 'Show only releases with' }).getByRole('button', { name: 'Tickets', exact: true }).click()
+    await page.getByRole('group', { name: 'Show only releases with' }).getByRole('button', { name: 'Other', exact: true }).click()
     await options.last().click()
     await expect(detail.locator('.headline')).toHaveCount(0)
     await expect(detail.locator('.notes')).toContainText('Projects, tickets and sign-in')
@@ -189,7 +232,20 @@ for (const width of [1600, 390]) {
     const detail = page.locator('article.detail')
     const hint = detail.getByRole('region', { name: 'Release notes' }).getByText('Notes written after release', { exact: true })
     await expect(hint).toBeVisible()
+    // Bind font/layout and the actual scroll container before testing full visibility.
+    await page.evaluate(() => document.fonts.ready)
+    await hint.evaluate(async element => {
+      element.scrollIntoView({ block: 'center', inline: 'nearest', behavior: 'instant' })
+      await new Promise<void>(resolve => requestAnimationFrame(() => requestAnimationFrame(() => resolve())))
+    })
     await expect(hint).toBeInViewport({ ratio: 1 })
+    const painted = await hint.evaluate(element => {
+      const range = document.createRange(); range.selectNodeContents(element)
+      const glyphs = range.getBoundingClientRect()
+      const area = element.closest('.detail-scroll')!.getBoundingClientRect()
+      return { top: glyphs.top - area.top, bottom: area.bottom - glyphs.bottom, left: glyphs.left - area.left, right: area.right - glyphs.right }
+    })
+    for (const [edge, distance] of Object.entries(painted)) expect(distance, `painted note fits ${edge}`).toBeGreaterThanOrEqual(-0.5)
     await expect(detail.getByText('Historical tag headline')).toHaveCount(0)
     const detailStyle = await hint.evaluate(el => {
       const s = getComputedStyle(el)
@@ -234,7 +290,7 @@ for (const width of [1600, 390]) {
           await page.screenshot({ path: `${process.env.SHOTS}/internal-list-${width}-${theme}.png` })
         }
       }
-      if (width === 390) await row.click()
+      if (width === 390) await row.locator('.row-name').click()
       for (const theme of ['light', 'dark']) {
         await page.evaluate(theme => { document.documentElement.dataset.theme = theme }, theme)
         await expect(notes.getByText('Internal changes only.', { exact: true })).toBeVisible()

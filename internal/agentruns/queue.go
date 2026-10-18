@@ -9,6 +9,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/inspr-at/paimos/internal/accountuse"
 	"github.com/inspr-at/paimos/internal/agentaccounts"
 	"github.com/inspr-at/paimos/internal/agentpairing"
 	"github.com/inspr-at/paimos/internal/authz"
@@ -73,11 +74,17 @@ func (e *queueError) Error() string     { return e.Message }
 func (e *queueError) HTTPStatus() int   { return e.Status }
 func (e *queueError) ErrorCode() string { return e.Code }
 
-// Same tree lock as nodes, work orders and status autopilot, after pairing and
+// Same tree lock as nodes, work orders and status autopilot, after the shared tenant/tree/pairing entry and
 // before order/run/account rows and the tenant event counter. Claim and queue edits
 // serialize; an entry cannot be removed while pickup commits.
 func queueLock(ctx context.Context, tx pgx.Tx) error {
 	return db.LockWorkTreeTx(ctx, tx)
+}
+func (m *module) queueDeadline(ctx context.Context, duration time.Duration) (context.Context, context.CancelFunc) {
+	if m.queueTimeout != nil {
+		return m.queueTimeout(ctx, duration)
+	}
+	return context.WithTimeout(ctx, duration)
 }
 func (m *module) mountQueue(mux *http.ServeMux) {
 	for _, route := range []struct {
@@ -102,7 +109,7 @@ func (m *module) mountQueue(mux *http.ServeMux) {
 		mux.HandleFunc(route.pattern, func(w http.ResponseWriter, r *http.Request) {
 			w.Header().Set("Cache-Control", "no-store")
 			if strings.Contains(route.pattern, "snapshot") {
-				ctx, cancel := context.WithTimeout(r.Context(), 5*time.Second)
+				ctx, cancel := m.queueDeadline(r.Context(), 5*time.Second)
 				defer cancel()
 				r = r.WithContext(ctx)
 				if id := r.PathValue("snapshotId"); id != "" && !workorders.UUID(id) {
@@ -119,8 +126,13 @@ func (m *module) mountQueue(mux *http.ServeMux) {
 				httpapi.WriteError(w, 400, "invalid node id")
 				return
 			}
-			if err := httpapi.BufferRequestBody(w, r, 1<<20); err != nil {
-				workorders.WriteError(w, workorders.Fail(400, "request body could not be read within limits"))
+			ctx, cancel := m.queueDeadline(r.Context(), 30*time.Second)
+			defer cancel()
+			r = r.WithContext(ctx)
+			// Decode only buffered memory inside the write, never transport
+			// input while retaining tenant/tree/pairing fences.
+			if err := workorders.BufferEndpointBody(w, r); err != nil {
+				workorders.WriteError(w, err)
 				return
 			}
 			var out any
@@ -135,6 +147,11 @@ func (m *module) mountQueue(mux *http.ServeMux) {
 				}
 				if route.write {
 					if err := agentpairing.LockMutation(r.Context(), tx); err != nil {
+						return err
+					}
+				}
+				if route.write {
+					if err := accountuse.LockShared(r.Context(), tx); err != nil {
 						return err
 					}
 				}
@@ -205,6 +222,9 @@ func queueLoadTicket(ctx context.Context, tx pgx.Tx, id string, lock bool) (queu
 	}
 	return t, err
 }
+func entryReadiness(ctx context.Context, tx pgx.Tx, p tenant.Principal, t queueTicket) (workqueue.Readiness, error) {
+	return workqueue.DefinitionReadinessTx(ctx, tx, p, workqueue.EntryTicket{ID: t.ID, Kind: t.Kind, State: t.State, Title: t.Title, Body: t.Body, ProjectID: t.ProjectID, Fields: t.Fields, NamedBlocker: t.NamedBlocker}, readiness(t))
+}
 func readiness(t queueTicket) workqueue.Readiness {
 	return workqueue.Check(t.Kind, t.State, t.Title, t.Body, t.Fields, t.NamedBlocker, t.Stale)
 }
@@ -216,7 +236,7 @@ func (m *module) queueReadiness(r *http.Request, tx pgx.Tx, p tenant.Principal) 
 	if err = queuePermission(r.Context(), tx, p, t.ProjectID, false); err != nil {
 		return nil, err
 	}
-	return readiness(t), nil
+	return entryReadiness(r.Context(), tx, p, t)
 }
 func (m *module) queueEstimate(r *http.Request, tx pgx.Tx, p tenant.Principal) (any, error) {
 	var in struct {
@@ -239,17 +259,23 @@ func (m *module) queueEstimate(r *http.Request, tx pgx.Tx, p tenant.Principal) (
 		return nil, workorders.Fail(400, "estimate_hours must be greater than 0 and at most 200")
 	}
 	if workqueue.Hours(t.Fields) > 0 {
-		return readiness(t), nil
+		return entryReadiness(r.Context(), tx, p, t)
 	}
 	t.Fields["estimate_hours"] = in.Hours
 	t.Fields["estimate_source"] = string(p.Kind)
 	t.Fields["estimate_by"] = p.ID
 	t.Fields["estimate_at"] = time.Now().UTC().Format(time.RFC3339Nano)
 	t.Fields["estimate_confirmed"] = p.Kind == tenant.Person
-	if err = queueUpdateTicket(r.Context(), tx, p, t, "queue.estimate_applied"); err != nil {
+	change, _, err := queueUpdateTicketDeferred(r.Context(), tx, t, "queue.estimate_applied")
+	if err != nil {
 		return nil, err
 	}
-	return readiness(t), nil
+	ready, err := entryReadiness(r.Context(), tx, p, t)
+	if err != nil {
+		return nil, err
+	}
+	_, err = events.Append(r.Context(), tx, p, change)
+	return ready, err
 }
 func queueUpdateTicket(ctx context.Context, tx pgx.Tx, p tenant.Principal, t queueTicket, event string, runID ...string) error {
 	change, _, err := queueUpdateTicketDeferred(ctx, tx, t, event, runID...)
@@ -280,7 +306,8 @@ func queueUpdateTicketDeferred(ctx context.Context, tx pgx.Tx, t queueTicket, ev
 
 func (m *module) queueAdd(r *http.Request, tx pgx.Tx, p tenant.Principal) (any, error) {
 	var in struct {
-		NodeID string `json:"node_id"`
+		NodeID        string                     `json:"node_id"`
+		BuildDelivery *workorders.BuildCandidate `json:"build_delivery,omitempty"`
 		queueTarget
 	}
 	if err := workorders.Decode(r, &in); err != nil {
@@ -292,6 +319,9 @@ func (m *module) queueAdd(r *http.Request, tx pgx.Tx, p tenant.Principal) (any, 
 	if err := validateQueueTarget(in.queueTarget, false); err != nil {
 		return nil, err
 	}
+	if err := workorders.ValidateBuildCandidate(in.BuildDelivery); err != nil {
+		return nil, err
+	}
 	ctx := r.Context()
 	t, err := queueLoadTicket(ctx, tx, in.NodeID, true)
 	if err != nil {
@@ -300,7 +330,7 @@ func (m *module) queueAdd(r *http.Request, tx pgx.Tx, p tenant.Principal) (any, 
 	if err = queuePermission(ctx, tx, p, t.ProjectID, true); err != nil {
 		return nil, err
 	}
-	prepared, err := m.queuePrepare(ctx, tx, p, t, in.queueTarget)
+	prepared, err := m.queuePrepare(ctx, tx, p, t, in.queueTarget, in.BuildDelivery)
 	if err != nil {
 		return nil, err
 	}
@@ -322,10 +352,23 @@ type queuePrepared struct {
 
 // queuePrepare shares single-leaf eligibility and creation with parent snapshots.
 // It does not acquire the event counter; composite callers flush audit last.
-func (m *module) queuePrepare(ctx context.Context, tx pgx.Tx, p tenant.Principal, t queueTicket, in queueTarget) (queuePrepared, error) {
+// candidate is the optional fix-round binding. Nil keeps the ordinary refusal
+// when a delivery is still pending. Only a leaf whose own pending delivery it
+// continues stores it; a leaf with nothing pending is queued unbound. Replay
+// compares that stored binding. Continuation audit stays with route, claim
+// and registration; enqueue only admits and stores the binding.
+func (m *module) queuePrepare(ctx context.Context, tx pgx.Tx, p tenant.Principal, t queueTicket, in queueTarget, candidate *workorders.BuildCandidate) (queuePrepared, error) {
 	if err := queuePermission(ctx, tx, p, t.ProjectID, true); err != nil {
 		return queuePrepared{}, err
 	}
+	if err := workorders.ValidateBuildCandidate(candidate); err != nil {
+		return queuePrepared{}, err
+	}
+	admission := &workorders.BuildAdmission{Candidate: candidate}
+	if err := workqueue.RequireBuildAdmissionTx(ctx, tx, p, t.ID, "", nil, admission); err != nil {
+		return queuePrepared{}, err
+	}
+	binding := admission.ContinuedBinding()
 	if err := escalation.CheckLaunchTx(ctx, tx, t.ID, "", "", nil); err != nil {
 		return queuePrepared{}, err
 	}
@@ -337,14 +380,34 @@ func (m *module) queuePrepare(ctx context.Context, tx pgx.Tx, p tenant.Principal
 		if !sameTarget(existing, in) {
 			return queuePrepared{}, workorders.Fail(409, "ticket already queued with another target; remove it first")
 		}
+		if err = queuedDeliveryMatches(ctx, tx, existing.OrderID, binding); err != nil {
+			return queuePrepared{}, err
+		}
 		return queuePrepared{Run: existing}, nil
 	}
 	if !errors.Is(err, pgx.ErrNoRows) {
 		return queuePrepared{}, err
 	}
-	ready := readiness(t)
+	// Preserve the existing readiness refusal before writer exclusion. Both
+	// checks remain under the tenant/tree fence and precede every queue write.
+	ready, err := entryReadiness(ctx, tx, p, t)
+	if err != nil {
+		return queuePrepared{}, err
+	}
 	if !ready.Ready {
 		return queuePrepared{}, &queueError{Status: 422, Message: "Not ready to queue: " + strings.Join(ready.Missing, ", "), Code: "queue_not_ready", Readiness: &ready}
+	}
+	if err = requireWriterFree(ctx, tx, t.ID, "", binding); err != nil {
+		return queuePrepared{}, err
+	}
+	if in.Account != nil {
+		projectID := ""
+		if t.ProjectID != nil {
+			projectID = *t.ProjectID
+		}
+		if err := accountuse.RequireProject(ctx, tx, *in.Account, projectID); err != nil {
+			return queuePrepared{}, err
+		}
 	}
 	if in.Agent != "" {
 		if err = queueValidateTarget(ctx, tx, in); err != nil {
@@ -369,7 +432,7 @@ func (m *module) queuePrepare(ctx context.Context, tx pgx.Tx, p tenant.Principal
 			return queuePrepared{}, workorders.Fail(409, "queue holder identity conflicts")
 		}
 	}
-	o, changes, err := workorders.CreateDeferred(ctx, tx, p, workorders.CreateInput{Title: t.Title, Body: t.Body, Parent: &t.ID, Criteria: workqueue.Criteria(t.Fields)})
+	o, changes, err := workorders.CreateDeferred(ctx, tx, p, workorders.CreateInput{Title: t.Title, Body: t.Body, Parent: &t.ID, Criteria: workqueue.Criteria(t.Fields), BuildDelivery: binding})
 	if err != nil {
 		return queuePrepared{}, err
 	}
@@ -433,6 +496,17 @@ func (m *module) queuePrepare(ctx context.Context, tx pgx.Tx, p tenant.Principal
 	return prepared, nil
 }
 
+func queuedDeliveryMatches(ctx context.Context, tx pgx.Tx, order string, candidate *workorders.BuildCandidate) error {
+	stored, err := workorders.OrderBuildAdmissionTx(ctx, tx, order)
+	if err != nil {
+		return err
+	}
+	if !sameBuildDelivery(stored.Candidate, candidate) {
+		return workorders.Fail(409, "ticket already queued with another delivery binding; remove it first")
+	}
+	return nil
+}
+
 func sameTarget(v Run, in queueTarget) bool {
 	agent := ""
 	if v.QueueTargetAgentID != nil {
@@ -472,7 +546,7 @@ func queueValidateTarget(ctx context.Context, tx pgx.Tx, in queueTarget) error {
 	err := tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM principals p JOIN model_profiles m ON m.tenant_id=p.tenant_id
  WHERE p.id=$1 AND p.kind='agent' AND m.id=$2 AND m.enabled AND EXISTS(SELECT 1 FROM agent_accounts a
  WHERE a.registered_by_principal_id=p.id AND a.harness=m.harness AND ($3::uuid IS NULL OR a.id=$3)
- AND (a.allowed_model_profile_ids IS NULL OR m.id=ANY(a.allowed_model_profile_ids))))`, in.Agent, in.Profile, in.Account).Scan(&ok)
+ AND aeon_account_allows_profile(a.harness,a.allowed_model_profile_ids,m.id)))`, in.Agent, in.Profile, in.Account).Scan(&ok)
 	if err != nil {
 		return err
 	}

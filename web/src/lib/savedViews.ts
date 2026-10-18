@@ -61,7 +61,7 @@ export async function duplicateView(projectId: string, view: SavedView, name: st
   const copy = await createView({
     name, project_id: projectId, shared: false,
     filters: Object.fromEntries(Object.entries(view.filters).filter((entry): entry is [string, string] => typeof entry[1] === 'string')),
-    sort_keys: view.sort_keys, group_by: view.group_by, columns: view.columns,
+    sort_keys: view.sort_keys, group_by: view.group_by, columns: view.columns, mode: view.mode,
   })
   replace(projectId, copy)
   return copy

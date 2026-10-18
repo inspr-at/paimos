@@ -29,14 +29,22 @@ type Marker struct {
 	Source string  `json:"source"`
 	Custom *string `json:"custom"`
 }
+type AgentStates struct {
+	Working   Accent `json:"working"`
+	Waiting   Accent `json:"waiting"`
+	Throttled Accent `json:"throttled"`
+	Problem   Accent `json:"problem"`
+	Idle      Accent `json:"idle"`
+}
 type Agents struct {
-	Avatar          string  `json:"avatar"`
-	Ring            *string `json:"ring"`
-	Hover           bool    `json:"hover"`
-	Size            *int    `json:"size"`
-	Palette         string  `json:"palette"`
-	DimInactive     *bool   `json:"dim_inactive,omitempty"`
-	InactiveOpacity *int    `json:"inactive_opacity,omitempty"`
+	Avatar          string       `json:"avatar"`
+	Ring            *string      `json:"ring"`
+	Hover           bool         `json:"hover"`
+	Size            *int         `json:"size"`
+	Palette         string       `json:"palette"`
+	CustomStates    *AgentStates `json:"custom_states"`
+	DimInactive     *bool        `json:"dim_inactive,omitempty"`
+	InactiveOpacity *int         `json:"inactive_opacity,omitempty"`
 }
 type Values struct {
 	Primary         Accent `json:"primary"`
@@ -150,8 +158,18 @@ func (v Values) validate() error {
 	if !oneOf(a.Avatar, "pulse", "robot-1", "robot-2", "robot-3", "robot-4", "robot-5", "orbit", "quill", "sprite") ||
 		(a.Ring != nil && !oneOf(*a.Ring, "moving", "still", "off")) ||
 		(a.Size != nil && (*a.Size < 30 || *a.Size > 100)) ||
-		!oneOf(a.Palette, "standard", "protan", "deutan", "tritan", "monochrome") {
+		!oneOf(a.Palette, "standard", "protan", "deutan", "tritan", "monochrome", "focus", "errors", "custom") {
 		return ErrInvalid
+	}
+	if a.Palette == "custom" && a.CustomStates == nil {
+		return ErrInvalid
+	}
+	if c := a.CustomStates; c != nil {
+		for _, state := range []Accent{c.Working, c.Waiting, c.Throttled, c.Problem, c.Idle} {
+			if !colourRE.MatchString(state.Light) || (state.Dark != nil && !colourRE.MatchString(*state.Dark)) {
+				return ErrInvalid
+			}
+		}
 	}
 	if a.InactiveOpacity != nil && (*a.InactiveOpacity < 40 || *a.InactiveOpacity > 80) {
 		return ErrInvalid

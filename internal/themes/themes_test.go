@@ -138,7 +138,10 @@ func TestLifecycleCASAuditFallbackAndUndo(t *testing.T) {
 	custom := "#bf3d6d"
 	v.RecurringMarker = Marker{Source: "custom", Custom: &custom}
 	size, ring := 30, "off"
-	v.Agents = Agents{Avatar: "quill", Ring: &ring, Size: &size, Hover: true, Palette: "deutan"}
+	v.Agents = Agents{Avatar: "quill", Ring: &ring, Size: &size, Hover: true, Palette: "custom", CustomStates: &AgentStates{
+		Working: Accent{Light: "#00870e"}, Waiting: Accent{Light: "#c47a08"}, Throttled: Accent{Light: "#7039c6"},
+		Problem: Accent{Light: "#b92229", Dark: &custom}, Idle: Accent{Light: "#6a7378"},
+	}}
 	personal, err = f.s.Update(ctx, f.member, personal.ID, UpdateInput{Revision: 1, Values: &v})
 	if err != nil || personal.Revision != 2 || !same(personal.Values, v) {
 		t.Fatalf("values: %+v %v", personal, err)

@@ -6,11 +6,11 @@ import { brand } from './brand.ts'
 import type { AgentRun, Approval, HarnessSession, ProjectMessage } from './agents.ts'
 import type { HarnessSessionRow } from './agentRows.ts'
 import type { DeepReadonly } from './ledger.ts'
-
-import { DEFAULT_AGENT_STATE, assessAgentState, type StateReason, type AgentState, type AgentStatePreference } from './agentSignals.ts'
+import { DEFAULT_AGENT_STATE, STATE_LABEL, assessAgentState, stopReasonLabel, type StateReason, type AgentState, type AgentStatePreference } from './agentSignals.ts'
 
 export const HEARTBEAT_STALE_MS = 3 * 60_000
-export const HARNESS_LABEL: Record<string, string> = { codex: 'Codex', claude: 'Claude', pi: 'Pi', cursor: 'Cursor', grok: 'Grok', gemini: 'Gemini CLI', opencode: 'OpenCode' }
+// The harness by its product name: Claude Code runs Claude models (Tick, AEON-1160); accounts keep the vendor's name.
+export const HARNESS_LABEL: Record<string, string> = { codex: 'Codex', claude: 'Claude Code', pi: 'Pi', cursor: 'Cursor', grok: 'Grok', gemini: 'Gemini CLI', opencode: 'OpenCode' }
 export const harnessLabel = (harness: string) => HARNESS_LABEL[harness] ?? harness.charAt(0).toUpperCase() + harness.slice(1)
 
 export type SessionGroup = 'pausing' | 'paused' | 'needs' | 'awaiting' | 'working' | 'throttled' | 'problem' | 'unresponsive' | 'idle' | 'stopped'
@@ -23,9 +23,6 @@ export const GROUPS: { id: SessionGroup; label: string }[] = [
 ]
 const STATE_GROUP: Record<AgentState, SessionGroup> = { pausing: 'pausing', paused: 'paused', working: 'working', awaiting: 'awaiting', unresponsive: 'unresponsive', waiting: 'needs', throttled: 'throttled', problem: 'problem', idle: 'idle', stale: 'idle', done: 'stopped', stopped: 'stopped' }
 const STATE_TONE: Record<AgentState, LiveTone> = { pausing: 'busy', paused: 'stopped', working: 'busy', awaiting: 'attention', unresponsive: 'attention', waiting: 'attention', throttled: 'throttled', problem: 'problem', idle: 'idle', stale: 'quiet', done: 'done', stopped: 'stopped' }
-export function heartbeatStale(session: HarnessSession, now: number, preferences = DEFAULT_AGENT_STATE) {
-  return !session.heartbeat_at || now - Date.parse(session.heartbeat_at) >= preferences.yellowMinutes * 60_000
-}
 export function sessionStatus(session: HarnessSession, now: number, needsYou = false, preferences: AgentStatePreference = DEFAULT_AGENT_STATE, run?: AgentRun): SessionStatus {
   // The session projection is fresh and authoritative, including explicit false
   // and null. Optional run/approval reads can finish later or retain old data.
@@ -70,10 +67,45 @@ export function mergeSessionEvidence(previous: DeepReadonly<HarnessSessionRow> |
   }
 }
 
-export function stopReasonLabel(reason: string | null | undefined) {
-  if (!reason) return ''
-  if (reason === 'heartbeat_lost') return 'Lost contact'
-  return reason.replace(/[_-]+/g, ' ').replace(/^./, c => c.toUpperCase())
+// How a session ended, in words (AEON-1285): never the reported code itself.
+export { stopReasonLabel,stopReasonSentence } from './agentSignals.ts'
+
+// ---------- Retried attempts (AEON-1285) ----------
+// A run family: one ticket, one owner, one role and one label but for its trailing round
+// ("…-gate-r2" and "…-gate-r3", "-fix4" and "-fix5", "-2" and "-3"). A failed attempt with a
+// newer attempt in its family was retried: it ends in favour of the next one. Read from the
+// sessions on hand, so attempts that failed before this rule fold too; nothing is written.
+export const runFamily = (label: string | null | undefined) => (label ?? '').trim().replace(/[-_](?:r|fix|round)?\d+$/i, '').toLowerCase()
+const familyKey = (s: HarnessSession) => {
+  const family = runFamily(s.display_label)
+  return family && s.ticket_node_id ? [s.project_id, s.ticket_node_id, s.owner_principal_id || s.agent_principal_id, s.role, family].join('\u0000') : ''
+}
+/** Each failed attempt that was retried, by id, with the attempt that followed it. */
+export function retriedBy<T extends { session: HarnessSession; status: SessionStatus }>(views: readonly T[]): Map<string, T> {
+  const families = new Map<string, T[]>(), seen = new Set<string>()
+  for (const view of views) {
+    const key = familyKey(view.session)
+    if (!key || seen.has(view.session.id)) continue
+    seen.add(view.session.id)
+    const family = families.get(key)
+    if (family) family.push(view)
+    else families.set(key, [view])
+  }
+  const out = new Map<string, T>()
+  for (const family of families.values()) {
+    if (family.length < 2) continue
+    family.sort((a, b) => byStart(a.session, b.session))
+    family.forEach((view, index) => {
+      const next = family[index + 1]
+      if (next && view.status.state === 'problem' && view.session.stopped_at) out.set(view.session.id, next)
+    })
+  }
+  return out
+}
+/** A retried attempt reads Ended and names its retry; why it failed stays in its words. */
+export function retriedStatus(session: Pick<HarnessSession, 'stop_reason'>, retry: string): SessionStatus {
+  const detail = [`Retried as ${retry}`, stopReasonLabel(session.stop_reason)].filter(Boolean).join(' · ')
+  return { state: 'stopped', group: 'stopped', tone: 'stopped', label: STATE_LABEL.stopped, reasons: [{ code: 'retried', detail, next: 'This attempt failed and was retried; the retry carries the work on.' }] }
 }
 
 // Prefer the session's public label; otherwise the name part of its message address ("claude:camy" is camy),
@@ -95,10 +127,18 @@ export interface SessionBranch<T> {
   view: T; children: SessionBranch<T>[]; group: SessionGroup; liveCount: number; workingCount: number; count: number
 }
 
+/** A live session doing work right now: it counts as working in its family and leads its siblings. */
+export function sessionWorking(view: { session: HarnessSession; status: SessionStatus }) {
+  const s = view.session
+  return !s.stopped_at && !['idle', 'throttled'].includes(s.activity) && ['working', 'starting', 'stopping'].includes(s.phase) && !['problem', 'unresponsive', 'awaiting', 'idle'].includes(view.status.state)
+}
+
 // Parent UUIDs, never shared principals or names, establish the tree. A missing
 // or invalid parent leaves a visible root; even malformed cycles lose no rows.
 // Group by the most urgent member so a stopped lead cannot hide working children.
-export function sessionForest<T extends { session: HarnessSession; status: SessionStatus }>(views: T[], _now: number): SessionBranch<T>[] {
+// An ended session that keeps its place (AEON-1211) sorts among its siblings as it did
+// while it ran: `kept` names that rank (0 working, 1 live); the list remembers it.
+export function sessionForest<T extends { session: HarnessSession; status: SessionStatus }>(views: T[], _now: number, kept?: (view: T) => 0 | 1 | undefined): SessionBranch<T>[] {
   const branches = new Map(views.map(view => [view.session.id, { view, children: [], group: view.status.group, liveCount: 0, workingCount: 0, count: 0 } as SessionBranch<T>]))
   const roots: SessionBranch<T>[] = []
   for (const branch of branches.values()) {
@@ -116,11 +156,11 @@ export function sessionForest<T extends { session: HarnessSession; status: Sessi
     else roots.push(branch)
   }
   const rank = (group: SessionGroup) => GROUPS.findIndex(g => g.id === group)
-  const activityRank = (branch: SessionBranch<T>) => branch.workingCount ? 0 : branch.liveCount ? 1 : 2
+  const activityRank = (branch: SessionBranch<T>) => Math.min(branch.workingCount ? 0 : branch.liveCount ? 1 : 2, kept?.(branch.view) ?? 2)
   const summarize = (branch: SessionBranch<T>) => {
     const s = branch.view.session
     branch.liveCount = s.phase === 'stopped' || s.stopped_at ? 0 : 1
-    branch.workingCount = branch.liveCount && !['idle', 'throttled'].includes(s.activity) && ['working', 'starting', 'stopping'].includes(s.phase) && !['problem', 'unresponsive', 'awaiting', 'idle'].includes(branch.view.status.state) ? 1 : 0
+    branch.workingCount = branch.liveCount && sessionWorking(branch.view) ? 1 : 0
     branch.count = 1
     for (const child of branch.children) {
       summarize(child)
@@ -146,17 +186,6 @@ export function approvalRun(approval: Approval) {
 export function needsYou(session: HarnessSession, pending: Approval[], _held: (ProjectMessage & { projectId?: string })[]) {
   if (session.phase === 'stopped' || session.stopped_at || !session.run_id) return false
   return pending.some(a => a.agent_principal_id === session.agent_principal_id && approvalRun(a) === session.run_id)
-}
-
-export function groupSessions(sessions: HarnessSession[], now: number, needs: (session: HarnessSession) => boolean) {
-  const buckets: Record<SessionGroup, { session: HarnessSession; status: SessionStatus }[]> = { pausing: [], paused: [], problem: [], unresponsive: [], needs: [], awaiting: [], throttled: [], working: [], idle: [], stopped: [] }
-  for (const session of sessions) {
-    const status = sessionStatus(session, now, needs(session))
-    buckets[status.group].push({ session, status })
-  }
-  for (const group of ['problem', 'unresponsive', 'needs', 'awaiting', 'throttled', 'working', 'idle'] as const) buckets[group].sort((a, b) => byStart(a.session, b.session))
-  buckets.stopped.sort((a, b) => byStopped(a.session, b.session))
-  return buckets
 }
 
 export function duration(ms: number) {
@@ -248,7 +277,6 @@ export function expiresIn(approval: Approval, now: number) {
   const left = Date.parse(approval.expires_at) - now
   return left <= 0 ? 'Expired' : `Expires in ${duration(left)}`
 }
-export const expiresSoon = (approval: Approval, now: number) => Date.parse(approval.expires_at) - now < 10 * 60_000
 
 // ---------- Held action requests ----------
 export const heldRequests = (messages: ProjectMessage[]) => messages.filter(m => m.is_action_request && !m.human_resolution_outcome)

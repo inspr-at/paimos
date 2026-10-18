@@ -15,6 +15,7 @@ import (
 
 	"github.com/inspr-at/paimos/internal/agentpairing"
 	"github.com/inspr-at/paimos/internal/authz"
+	"github.com/inspr-at/paimos/internal/db"
 	"github.com/inspr-at/paimos/internal/eta"
 	"github.com/inspr-at/paimos/internal/tenant"
 	"github.com/inspr-at/paimos/internal/ticketbenefits"
@@ -233,20 +234,39 @@ func loadQueueProjection(ctx context.Context, tx pgx.Tx, node *nodeJSON) error {
 }
 
 func (m *Module) createNode(ctx context.Context, p tenant.Principal, in nodeCreate) (nodeJSON, error) {
+	if _, err := prepareNodeCreate(in); err != nil {
+		return nodeJSON{}, err
+	}
+	var out nodeJSON
+	err := m.tx(ctx, p.TenantID, func(ctx context.Context, tx pgx.Tx) error {
+		var err error
+		out, err = m.createNodeTx(ctx, tx, p, in)
+		return err
+	})
+	return out, err
+}
+
+type preparedNodeCreate struct {
+	humanCheck                            *string
+	kindID, explicit, prefix, body, state string
+	parentID, beforeID                    *string
+}
+
+func prepareNodeCreate(in nodeCreate) (preparedNodeCreate, error) {
 	humanCheck, err := parseHumanCheck(in.HumanCheck)
 	if err != nil {
-		return nodeJSON{}, err
+		return preparedNodeCreate{}, err
 	}
 	kindID, ok := parseUUID(in.KindID)
 	if !ok {
-		return nodeJSON{}, badRequest("invalid kind_id")
+		return preparedNodeCreate{}, badRequest("invalid kind_id")
 	}
 	if !nonBlank(in.Title) {
-		return nodeJSON{}, badRequest("title is required")
+		return preparedNodeCreate{}, badRequest("title is required")
 	}
 	explicit, prefix, err := createKeyChoice(in.Key, in.KeyPrefix)
 	if err != nil {
-		return nodeJSON{}, err
+		return preparedNodeCreate{}, err
 	}
 	body := ""
 	if in.Body != nil {
@@ -255,20 +275,29 @@ func (m *Module) createNode(ctx context.Context, p tenant.Principal, in nodeCrea
 	state := "open"
 	if in.State != nil {
 		if !nonBlank(*in.State) {
-			return nodeJSON{}, badRequest("invalid state")
+			return preparedNodeCreate{}, badRequest("invalid state")
 		}
 		state = *in.State
 	}
 	parentID, err := optionalUUID(in.ParentID, "invalid parent_id")
 	if err != nil {
-		return nodeJSON{}, err
+		return preparedNodeCreate{}, err
 	}
 	beforeID, err := optionalUUID(in.BeforeID, "invalid before_id")
 	if err != nil {
+		return preparedNodeCreate{}, err
+	}
+	return preparedNodeCreate{humanCheck, kindID, explicit, prefix, body, state, parentID, beforeID}, nil
+}
+
+func (m *Module) createNodeTx(ctx context.Context, tx pgx.Tx, p tenant.Principal, in nodeCreate) (nodeJSON, error) {
+	v, err := prepareNodeCreate(in)
+	if err != nil {
 		return nodeJSON{}, err
 	}
+	humanCheck, kindID, explicit, prefix, body, state, parentID, beforeID := v.humanCheck, v.kindID, v.explicit, v.prefix, v.body, v.state, v.parentID, v.beforeID
 	var node nodeJSON
-	err = m.tx(ctx, p.TenantID, func(ctx context.Context, tx pgx.Tx) error {
+	err = func(ctx context.Context, tx pgx.Tx) error {
 		if err := armPortalModeration(ctx, tx, p); err != nil {
 			return err
 		}
@@ -307,7 +336,7 @@ func (m *Module) createNode(ctx context.Context, p tenant.Principal, in nodeCrea
 		if err != nil {
 			return err
 		}
-		issues, err := benefitTransition(ctx, tx, kindID, kind.Slug, "", state, fields)
+		issues, err := benefitTransition(ctx, tx, kindID, kind.Slug, "", state, nil, fields)
 		if err != nil {
 			return err
 		}
@@ -334,6 +363,11 @@ func (m *Module) createNode(ctx context.Context, p tenant.Principal, in nodeCrea
 				return dbErr("allocate node key", err)
 			}
 		}
+		if kind.Slug == "project" {
+			if err := requireUniqueProjectKey(ctx, tx, fields); err != nil {
+				return err
+			}
+		}
 		siblings, err := loadSiblings(ctx, tx, parentID)
 		if err != nil {
 			return err
@@ -357,7 +391,19 @@ func (m *Module) createNode(ctx context.Context, p tenant.Principal, in nodeCrea
 		if scanErr != nil {
 			return dbErr("insert node", scanErr)
 		}
-		if err := m.record(ctx, tx, p.ID, &loaded.ID, evNodeCreated, nil, loaded); err != nil {
+		t, err := workqueue.EntryTicketTx(ctx, tx, loaded.ID)
+		if err != nil {
+			return err
+		}
+		to, err := workqueue.EntryStatusTx(ctx, tx, kindID, state)
+		if err != nil {
+			return err
+		}
+		entry, err := workqueue.RequireEntryTx(ctx, tx, p, t, to, nil)
+		if err != nil {
+			return err
+		}
+		if err := m.recordNodeEntry(ctx, tx, p, evNodeCreated, nil, loaded, entry); err != nil {
 			return err
 		}
 		node = loaded
@@ -380,27 +426,72 @@ func (m *Module) createNode(ctx context.Context, p tenant.Principal, in nodeCrea
 			return err
 		}
 		return enrichNodes(ctx, tx, []*nodeJSON{&node})
-	})
+	}(ctx, tx)
 	return node, err
 }
 
 func (m *Module) updateNode(ctx context.Context, p tenant.Principal, id string, raw map[string]json.RawMessage, expected *time.Time) (nodeJSON, error) {
+	if err := validateNodePatch(raw); err != nil {
+		return nodeJSON{}, err
+	}
+	var out nodeJSON
+	var denied error
+	err := m.tx(ctx, p.TenantID, func(ctx context.Context, tx pgx.Tx) error {
+		if err := lockTree(ctx, tx); err != nil {
+			return err
+		}
+		step, err := tx.Begin(ctx)
+		if err != nil {
+			return err
+		}
+		defer step.Rollback(ctx)
+		out, err = m.updateNodeTx(ctx, step, p, id, raw, expected)
+		var failure *workqueue.EntryFailure
+		if errors.As(err, &failure) {
+			if rollback := step.Rollback(ctx); rollback != nil {
+				return rollback
+			}
+			if audit := m.recordRefusal(ctx, tx, p, id, failure); audit != nil {
+				return audit
+			}
+			denied = failure
+			return nil
+		}
+		if err != nil {
+			return err
+		}
+		return step.Commit(ctx)
+	})
+	if err == nil && denied != nil {
+		err = denied
+	}
+	return out, dbErr("update node", err)
+}
+
+func validateNodePatch(raw map[string]json.RawMessage) error {
 	if len(raw) == 0 {
-		return nodeJSON{}, badRequest("patch is empty")
+		return badRequest("patch is empty")
 	}
 	for key := range raw {
 		switch key {
-		case "title", "body", "fields", "estimate_hours", "state", "human_check", "kind_id", "type", "kind":
+		case "title", "body", "fields", "estimate_hours", "state", "override_reason", "human_check", "kind_id", "type", "kind":
 		case "key":
-			return nodeJSON{}, badRequest("key is immutable")
+			return badRequest("key is immutable")
 		case "parent_id":
-			return nodeJSON{}, badRequest("parent is immutable; use move")
+			return badRequest("parent is immutable; use move")
 		default:
-			return nodeJSON{}, badRequest("unknown field")
+			return badRequest("unknown field")
 		}
 	}
+	return nil
+}
+
+func (m *Module) updateNodeTx(ctx context.Context, tx pgx.Tx, p tenant.Principal, id string, raw map[string]json.RawMessage, expected *time.Time) (nodeJSON, error) {
+	if err := validateNodePatch(raw); err != nil {
+		return nodeJSON{}, err
+	}
 	var node nodeJSON
-	err := m.tx(ctx, p.TenantID, func(ctx context.Context, tx pgx.Tx) error {
+	err := func(ctx context.Context, tx pgx.Tx) error {
 		if value, ok := raw["state"]; ok {
 			state, _ := parsePatchString(value)
 			if workqueue.Terminal(state) {
@@ -410,7 +501,7 @@ func (m *Module) updateNode(ctx context.Context, p tenant.Principal, id string, 
 			}
 		}
 		// Match queue writes and delete: tree before any node row lock. Terminal
-		// edits additionally take pairing first to serialize cancellation and claim.
+		// edits additionally enter pairing to serialize cancellation and claim.
 		if err := lockTree(ctx, tx); err != nil {
 			return err
 		}
@@ -475,7 +566,7 @@ func (m *Module) updateNode(ctx context.Context, p tenant.Principal, id string, 
 			// Use the normal schema, attribution, event and revision paths.
 			raw["fields"] = merged
 		}
-		nextState, nextFields := current.State, current.Fields
+		nextState, nextFields, nextBody := current.State, current.Fields, current.Body
 		sets := []string{"updated_at = greatest(clock_timestamp(), updated_at + interval '1 microsecond')"}
 		args := []any{}
 		add := func(v any) string {
@@ -494,6 +585,7 @@ func (m *Module) updateNode(ctx context.Context, p tenant.Principal, id string, 
 			if err != nil {
 				return err
 			}
+			nextBody = s
 			sets = append(sets, "body = "+add(s))
 		}
 		if v, ok := raw["state"]; ok {
@@ -551,6 +643,11 @@ func (m *Module) updateNode(ctx context.Context, p tenant.Principal, id string, 
 			sets = append(sets, "human_check = "+add(nextCheck))
 		}
 		if kind.Slug == "work" || kind.Slug == "ticket" || kind.Slug == "task" {
+			if checkChanged {
+				if err = requireHumanTickTx(ctx, tx, p, current, nextCheck); err != nil {
+					return err
+				}
+			}
 			nextFields, err = humanCheckFields(p, nextFields, current.Fields, current.HumanCheck, nextCheck, checkChanged)
 			if err != nil {
 				return err
@@ -558,13 +655,54 @@ func (m *Module) updateNode(ctx context.Context, p tenant.Principal, id string, 
 		}
 		if _, fieldsChanged := raw["fields"]; fieldsChanged || checkChanged {
 			sets = append(sets, "fields = "+add(string(nextFields))+"::jsonb")
+			if noReleaseNeeded(nextFields) {
+				sets = append(sets, "status_autopilot = status_autopilot - 'missed_release'")
+			}
 		}
-		issues, err := benefitTransition(ctx, tx, current.KindID, kind.Slug, current.State, nextState, nextFields)
+		issues, err := benefitTransition(ctx, tx, current.KindID, kind.Slug, current.State, nextState, current.Fields, nextFields)
 		if err != nil {
 			return err
 		}
 		if len(issues) > 0 {
 			return unprocessableCoded("before done: "+strings.Join(issues, "; "), ticketbenefits.RequiredCode)
+		}
+		var entry *workqueue.EntryRecord
+		if _, hasState := raw["state"]; hasState && current.State != nextState {
+			// Field patches stay on the route check. Repeating nodes.write here
+			// rejected agents whose key scopes are enforced only at the route.
+			t, err := workqueue.EntryTicketTx(ctx, tx, id)
+			if err != nil {
+				return err
+			}
+			if err = authz.RequireTx(ctx, tx, p, "nodes.write", entryScope(t.ProjectID)); err != nil {
+				return err
+			}
+			to, err := workqueue.EntryStatusTx(ctx, tx, current.KindID, nextState)
+			if err != nil {
+				return err
+			}
+			priorCategory, err := workqueue.EntryStatusTx(ctx, tx, current.KindID, current.State)
+			if err != nil {
+				return err
+			}
+			var reason *string
+			if value, ok := raw["override_reason"]; ok {
+				var text string
+				if json.Unmarshal(value, &text) != nil {
+					return badRequest("override_reason must be text")
+				}
+				reason = &text
+			}
+			t.Fields = workqueue.Fields(nextFields)
+			t.Body = nextBody
+			if to != priorCategory {
+				entry, err = workqueue.RequireEntryTx(ctx, tx, p, t, to, reason)
+			}
+			if err != nil {
+				return err
+			}
+		} else if _, ok := raw["override_reason"]; ok {
+			return badRequest("override_reason requires a status change")
 		}
 		if _, hasState := raw["state"]; hasState && workqueue.Terminal(nextState) {
 			if _, err := workqueue.RemoveQueued(ctx, tx, p, id); err != nil {
@@ -581,7 +719,7 @@ func (m *Module) updateNode(ctx context.Context, p tenant.Principal, id string, 
 		if scanErr != nil {
 			return dbErr("update node", scanErr)
 		}
-		if err := m.record(ctx, tx, p.ID, &loaded.ID, evNodeUpdated, current, loaded); err != nil {
+		if err := m.recordNodeEntry(ctx, tx, p, evNodeUpdated, current, loaded, entry); err != nil {
 			return err
 		}
 		node = loaded
@@ -594,8 +732,8 @@ func (m *Module) updateNode(ctx context.Context, p tenant.Principal, id string, 
 			return err
 		}
 		return enrichNodes(ctx, tx, []*nodeJSON{&node})
-	})
-	return node, dbErr("update node", err)
+	}(ctx, tx)
+	return node, err
 }
 
 func (m *Module) deleteNode(ctx context.Context, p tenant.Principal, id string) (time.Time, error) {
@@ -620,6 +758,11 @@ func (m *Module) deleteNode(ctx context.Context, p tenant.Principal, id string) 
 		}
 		if kind.Slug == "tag" {
 			return badRequest("delete tags through /api/tags/{tagId}")
+		}
+		if kind.Slug == "project" {
+			if err := authz.RequireProjectAdminTx(ctx, tx, p, id); err != nil {
+				return err
+			}
 		}
 		if _, err := workqueue.RemoveQueued(ctx, tx, p, id); err != nil {
 			return err
@@ -868,12 +1011,14 @@ func loadNode(ctx context.Context, tx pgx.Tx, id string, forUpdate bool) (nodeJS
 	return node, nil
 }
 
+// A bare ORDER BY position would sort the text output column ("10" < "9"),
+// so every child after the tenth would append at rank 10. Qualify the inputs.
 func loadSiblings(ctx context.Context, tx pgx.Tx, parentID *string) ([]sibling, error) {
 	rows, err := tx.Query(ctx, `
 		SELECT id::text, position::text
 		FROM nodes
 		WHERE deleted_at IS NULL AND parent_id IS NOT DISTINCT FROM $1::uuid
-		ORDER BY position, id
+		ORDER BY nodes.position, nodes.id
 		FOR UPDATE`, parentID)
 	if err != nil {
 		return nil, err
@@ -1013,4 +1158,48 @@ func requireCreateTarget(ctx context.Context, tx pgx.Tx, p tenant.Principal, kin
 		return &httpError{status: http.StatusForbidden, msg: "permission denied"}
 	}
 	return nil
+}
+
+// The tree/tenant fence serializes project creates. This narrow constraint
+// lookup includes hidden and deleted projects to keep their keys reserved;
+// the holder's title is read only after restoring caller visibility.
+func requireUniqueProjectKey(ctx context.Context, tx pgx.Tx, fields []byte) error {
+	var values struct {
+		Key string `json:"project_key"`
+	}
+	if err := json.Unmarshal(fields, &values); err != nil {
+		return err
+	}
+	candidate := values.Key
+	if candidate == "" {
+		return nil
+	}
+	var visible string
+	if err := tx.QueryRow(ctx, `SELECT current_setting($1)`, db.VisibleProjectsSetting).Scan(&visible); err != nil {
+		return err
+	}
+	if _, err := tx.Exec(ctx, `SELECT set_config($1,'*',true)`, db.VisibleProjectsSetting); err != nil {
+		return err
+	}
+	var holder string
+	err := tx.QueryRow(ctx, `SELECT n.id::text FROM nodes n JOIN node_kinds k ON k.tenant_id=n.tenant_id AND k.id=n.kind_id
+	 WHERE k.slug='project' AND (upper(n.fields->>'project_key')=upper($1) OR upper(n.fields->'classic'->>'key')=upper($1) OR upper(n.key)=upper($1) OR upper(split_part(n.key,'-',1))=upper($1)) ORDER BY n.id LIMIT 1`, candidate).Scan(&holder)
+	if _, restoreErr := tx.Exec(ctx, `SELECT set_config($1,$2,true)`, db.VisibleProjectsSetting, visible); restoreErr != nil {
+		return restoreErr
+	}
+	if errors.Is(err, pgx.ErrNoRows) {
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	var title string
+	err = tx.QueryRow(ctx, `SELECT title FROM nodes WHERE id=$1`, holder).Scan(&title)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return &httpError{status: 409, msg: "project key is already reserved"}
+	}
+	if err != nil {
+		return err
+	}
+	return &httpError{status: 409, msg: fmt.Sprintf("project key %q is already held by project %q", candidate, title)}
 }

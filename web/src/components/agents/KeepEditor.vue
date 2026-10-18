@@ -50,7 +50,7 @@ const personLabel = computed(() => reserveLabel(mode.value === 'fixed' ? { reser
 const BLIND = new Set(['grok', 'cursor', 'pi'])
 const vendorRows = computed(() => props.pools.filter(p => !p.id.startsWith('group:')).map(p => {
   const measured = p.rows.some(r => r.primary)
-  const note = measured ? '' : BLIND.has(p.mark || p.id) ? `${p.name} doesn't show its limit · one run at a time by day` : 'No reading yet'
+  const note = measured ? '' : BLIND.has(p.mark || p.id) ? 'Usage unknown · reserve not enforceable' : 'No reading yet'
   const learned = p.rows.some(r => r.learning?.windows.some(w => w.auto_reserve_percent))
   return { id: p.id, mark: p.mark || p.id, name: p.name, measured, note, auto: learned ? 'Auto · learned per account' : `Auto · ~${AUTO_RESERVE}%` }
 }))
@@ -255,7 +255,7 @@ const zoneNote = computed(() => { try { return Intl.DateTimeFormat().resolvedOpt
 .opt.on { background: var(--row-selected); box-shadow: inset 0 0 0 1px var(--chip-teal-line); }
 .opt:has(input:focus-visible) { box-shadow: inset 0 0 0 1px var(--chip-teal-line), var(--focus-ring); }
 .opt label { flex: 1; display: grid; grid-template-columns: auto minmax(0, 1fr); column-gap: 10px; align-items: center; min-width: 0; padding: 10px 0 10px 13px; cursor: pointer; }
-.opt input { grid-row: span 2; width: 16px; height: 16px; margin: 0; accent-color: #0e6f6c; }
+.opt input { grid-row: span 2; width: 16px; height: 16px; margin: 0; accent-color: var(--primary); }
 .opt input:focus-visible { outline: none; box-shadow: none; }
 .opt .t { color: var(--ink); font-size: 13.5px; font-weight: 650; }
 .opt .d { color: var(--ink-3); font-size: 12px; line-height: 1.35; }

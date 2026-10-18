@@ -1,15 +1,17 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import { ref } from 'vue'
-import type { ActiveTheme } from './themes.ts'
+import type { ThemeAccent } from './themes.ts'
 import type { AgentIndicatorStyle, IndicatorRing } from './indicatorVariants.ts'
-import type { AgentPalette } from './agentPalettes.ts'
+import type { AgentColourState, AgentPalette } from './agentPalettes.ts'
+import { resetTheme } from './themeRuntime.ts'
 
 export interface AgentThemeAppearance {
   avatar: AgentIndicatorStyle; ring: IndicatorRing | null; hover: boolean; size: number | null; palette: AgentPalette
+  custom_states?: Record<AgentColourState, ThemeAccent> | null
   dim_inactive?: boolean; inactive_opacity?: number
 }
 export const defaultAgentTheme: Readonly<AgentThemeAppearance> = {
-  avatar: 'robot-1', ring: null, hover: false, size: null, palette: 'standard',
+  avatar: 'robot-1', ring: null, hover: false, size: null, palette: 'standard', custom_states: null,
 }
 export const agentTheme = ref<AgentThemeAppearance | null>(null)
 // Legacy preference consumers remain compatible in isolated previews. Once a
@@ -23,18 +25,10 @@ export function registerAgentThemeRestoration(restore: (identity: string) => Pro
 }
 export function resetAgentTheme(identity = '') {
   epoch++; person = identity; agentTheme.value = null; agentThemeBound.value = true
+  resetTheme(identity)
 }
 export function installAgentTheme(value: AgentThemeAppearance) {
   agentTheme.value = { ...value }
-}
-// The theme editor (stores/themeEditor) is the one writer after sign-in: it
-// publishes every server-confirmed active theme for the identity it loaded it
-// for. An answer for another person, or for a session that has since been
-// reset, never reaches the runtime.
-export function publishAgentTheme(identity: string, active: ActiveTheme) {
-  if (!identity || identity !== person) return false
-  installAgentTheme(active.theme.values.agents)
-  return true
 }
 export async function restoreAgentTheme(identity: string) {
   if (person !== identity) resetAgentTheme(identity)

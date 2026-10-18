@@ -408,7 +408,7 @@ watch([id, viewer], ([value]) => { generation++; editing.value = false; saving.v
 @media (max-width: 600px) { .back, .site { min-height: 44px; } }
 .site:hover { text-decoration: underline; }
 .summary-skeleton { display: inline-block; width: 240px; }
-.unsaved { font-size: 12px; font-weight: 600; color: var(--gold-ink); }
+.unsaved { font-size: 12px; font-weight: 600; color: var(--warn-ink); }
 .state { display: grid; justify-items: center; gap: 8px; max-width: 580px; margin: 12px auto 0; padding: 44px 28px; text-align: center; }
 .state h2 { font-size: 17px; }
 .state p { max-width: 46ch; font-size: 13.5px; color: var(--ink-2); }

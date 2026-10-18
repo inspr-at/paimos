@@ -1,11 +1,13 @@
 // SPDX-License-Identifier: AGPL-3.0-only
-import { mkdir } from 'node:fs/promises'
 import { expect, test, type Locator, type Page } from '@playwright/test'
 import { fixtures, me, mockWork } from './work-fixtures'
 import { agentData, mockAgents } from './agents-fixtures'
 import { expectStableControls } from './helpers/stable'
 import { mockEffectivePermissions } from './authz-fixtures'
 import type { TierReport } from '../src/lib/serviceTier'
+import type { EntryChecks } from '../src/lib/entryChecks'
+
+test.use({ screenshot: 'only-on-failure' })
 
 const sessionId = '5e000000-0000-4000-8000-000000000001'
 const longName = 'Berechtigungsprüfung für die österreichische Unternehmensverwaltung und Wiederherstellungskoordination'
@@ -20,6 +22,7 @@ const report: TierReport = {
 }
 async function setup(page: Page, theme: 'light' | 'dark', density: 'comfortable' | 'compact') {
   const readinessCalls: string[] = []
+  const checklistCalls: string[] = []
   await page.addInitScript(() => {
     const openedTabs: string[] = []
     Object.assign(window, { openedTabs })
@@ -34,6 +37,23 @@ async function setup(page: Page, theme: 'light' | 'dark', density: 'comfortable'
   // spec checks hit areas, rather than the automatic-column policy.
   data.preferences['list:p-pharos'] = { visible: ['status', 'priority', 'assignee', 'updated'] }
   await mockWork(page, data, { admin: true })
+  // AEON-1315 replaces the missing-fields card with the project's Ready
+  // checklist. Keep both failures real in that read, as in the readiness reply.
+  await page.route('**/api/nodes/*/entry-checks', route => {
+    const id = new URL(route.request().url()).pathname.split('/')[3]!
+    checklistCalls.push(id)
+    if (id !== 'n-2') return route.fallback()
+    const node = data.nodes.find(node => node.id === id)!
+    const checks: EntryChecks = {
+      node_id: id, revision: node.updated_at,
+      definition: { id: 'definition', revision: node.created_at, source: 'project', checks: { in_progress: [{ id: 'estimate_set' }, { id: 'acceptance_present' }] } },
+      blocks: [{ to_status: 'in_progress', passed: 0, total: 2, checks: [
+        { id: 'estimate_set', label: 'Estimate set', applicable: true, passed: false, reason: 'Add an estimate.', can_tick: false },
+        { id: 'acceptance_present', label: 'Acceptance criteria written', applicable: true, passed: false, reason: 'Write acceptance criteria.', can_tick: false },
+      ] }], entries: [], latest_refusal: null,
+    }
+    return route.fulfill({ json: checks })
+  })
   const agents = agentData({ me: me.id, projects: { pharos: 'p-pharos', aeon: 'p-aeon', pai: 'p-frozen' },
     tickets: { fleet: 'n-1', restore: 'n-2', web: 'n-a1', release: 'n-5', approvals: 'n-6' } })
   agents.sessions.splice(1); agents.approvals.splice(0); agents.messages.splice(0)
@@ -63,7 +83,7 @@ async function setup(page: Page, theme: 'light' | 'dark', density: 'comfortable'
     }
     return route.fallback()
   })
-  return { readinessCalls }
+  return { readinessCalls, checklistCalls }
 }
 
 // Chromium excludes the right/bottom boundary of a box. Sample -22 exactly,
@@ -115,11 +135,10 @@ async function edgeClick(page: Page, control: Locator, expanded: boolean, phone:
   await page.mouse.click(x, y)
 }
 async function capture(page: Page, label: string) {
-  const directory = 'test-results/aeon-630-tap-targets'
-  await mkdir(directory, { recursive: true })
   // Capture the relevant list, including the control, rather than the page's
   // independently scrolling main area (a full-page shot can show its tail).
-  await page.locator(label.startsWith('tickets-') ? '.table-card' : '.sessions').screenshot({ path: `${directory}/${label}.png`, animations: 'disabled' })
+  const area = label.startsWith('tickets-') ? page.locator('.table-card') : page.getByRole('complementary', { name: 'Session details' })
+  await area.screenshot({ path: test.info().outputPath(`${label}.png`), animations: 'disabled' })
 }
 
 for (const { width, coarse } of [
@@ -131,7 +150,7 @@ for (const { width, coarse } of [
     test('ticket and tier controls keep their visuals, reach and position', async ({ page }) => {
       const expanded = width <= 720 || coarse
       const phone = width <= 720
-      const { readinessCalls } = await setup(page, theme, density)
+      const { readinessCalls, checklistCalls } = await setup(page, theme, density)
       await page.goto('/p/PHAROS/tickets?view=outline&closed=1')
       await expect(page.locator('html')).toHaveAttribute('data-theme', theme)
       expect(await page.evaluate(() => matchMedia('(pointer: coarse)').matches)).toBe(coarse)
@@ -218,28 +237,35 @@ for (const { width, coarse } of [
           expect(b.x + b.width / 2 + 22, 'Open target stays inside its row').toBeLessThanOrEqual(rowBox.x + rowBox.width)
         } else expect(centres).toBe(density === 'compact' ? 24 : 26)
         const edges = coarse ? [[-21, 0], [21, 0], [0, -21], [0, 21]] as const : [[0, 0]] as const
-        const missing = page.getByRole('dialog', { name: 'PHAROS-12: what is missing to queue it', exact: true })
+        const missing = page.getByRole('dialog', { name: 'PHAROS-12: Ready checks', exact: true })
         let openedCount = 0
         const openedTabs = () => page.evaluate(() => (window as Window & { openedTabs: string[] }).openedTabs)
         await expectStableControls({ controls: { row: second, actions: second.locator('.row-actions'), queue, open, title: second.locator('.title-link') }, interactions: edges.flatMap(([dx, dy]) => [
           { name: `Queue edge ${dx},${dy}`, run: async () => {
-            const rect = (await queue.boundingBox())!, before = readinessCalls.length
+            const rect = (await queue.boundingBox())!, before = readinessCalls.length, checksBefore = checklistCalls.length
             await page.mouse.click(rect.x + rect.width / 2 + dx, rect.y + rect.height / 2 + dy)
             await expect(missing).toBeVisible()
-            await expect(missing.getByRole('status')).toContainText('Still missing: estimate, acceptance criteria.')
+            await expect(missing.getByRole('heading', { name: 'Ready 0 of 2' })).toBeVisible()
+            await expect(missing.locator('.nr-item.missing')).toHaveCount(2)
+            await expect(missing.getByText('Estimate set', { exact: true })).toBeVisible()
+            await expect(missing.getByText('Acceptance criteria written', { exact: true })).toBeVisible()
+            await expect(missing.getByRole('button', { name: 'Queue', exact: true })).toBeDisabled()
             expect(readinessCalls.length).toBeGreaterThan(before)
             expect(readinessCalls.every(id => id === 'n-2')).toBe(true)
+            expect(checklistCalls.length).toBeGreaterThan(checksBefore)
+            expect(checklistCalls.slice(checksBefore).every(id => id === 'n-2')).toBe(true)
             expect(await openedTabs()).toHaveLength(openedCount)
             await page.keyboard.press('Escape'); await expect(missing).toHaveCount(0)
           } },
           { name: `Open edge ${dx},${dy}`, run: async () => {
-            const rect = (await open.boundingBox())!, before = readinessCalls.length
+            const rect = (await open.boundingBox())!, before = readinessCalls.length, checksBefore = checklistCalls.length
             await page.mouse.click(rect.x + rect.width / 2 + dx, rect.y + rect.height / 2 + dy)
             openedCount++
             const opened = await openedTabs()
             expect(opened).toHaveLength(openedCount)
             expect(new URL(opened.at(-1)!, page.url()).pathname).toBe('/p/PHAROS/PHAROS-12')
             expect(readinessCalls).toHaveLength(before)
+            expect(checklistCalls).toHaveLength(checksBefore)
             await expect(missing).toHaveCount(0)
           } },
         ]) })
@@ -250,19 +276,36 @@ for (const { width, coarse } of [
 
       await page.goto('/agents')
       const session = page.locator(`[data-row="s:${sessionId}"]`)
-      const tier = session.locator('.tier-mark:visible')
+      await expect(session).toBeVisible()
+      await expect(session.locator('.tier-mark')).toHaveCount(0)
+      if (width < 560) {
+        // A phone's list shows compact rows (AEON-1211, design AEON-1196): no Tier cell; the row menu leads to it.
+        await expect(session).toBeVisible()
+        const more = session.locator('.more')
+        const box = (await more.boundingBox())!
+        expect(Math.min(box.width, box.height)).toBeGreaterThanOrEqual(44)
+        await more.click()
+        await expect(page.getByRole('menu', { name: /Actions for/ })).toBeVisible()
+        await page.keyboard.press('Escape')
+      }
+      // AEON-1213 / #591 moves tier changes into a 44px details trigger in every form;
+      // AEON-1309 / #678 named the Overview tab Details.
+      await session.locator('.agent-link').click()
+      const panel = page.getByRole('complementary', { name: 'Session details' })
+      await panel.getByRole('tab', { name: 'Details' }).click()
+      const tier = panel.locator('.service-tier .tier-mark:visible')
       await expect(tier).toBeVisible()
       // The initial report can replace a read-only span with the live button.
       // Wait for the actionable control before measuring its settled visual.
       await expect(tier).toHaveAttribute('aria-haspopup', 'dialog')
-      await expect.poll(async () => (await tier.boundingBox())?.height).toBe(26)
+      await expect.poll(async () => (await tier.boundingBox())?.height).toBe(expanded ? 44 : 26)
       await expectReach(tier, expanded)
       await capture(page, `agents-${width}-${coarse ? 'coarse' : 'fine'}-${theme}-${density}`)
       // Element screenshots can scroll the enclosing list. Restore the control
       // to the viewport before the guard records its coordinate-click baseline.
       await tier.scrollIntoViewIfNeeded()
       const picker = page.getByRole('dialog', { name: 'Change tier', exact: true })
-      await expectStableControls({ controls: { tier, session, title: session.locator('.result') }, interactions: [
+      await expectStableControls({ controls: { tier, panel, session, title: panel.getByRole('heading', { level: 2 }) }, interactions: [
         { name: 'tier picker at hit-area edge', run: async () => { await edgeClick(page, tier, expanded, phone); await expect(picker).toBeVisible() } },
         { name: 'dismiss tier picker', run: async () => { await picker.getByRole('button', { name: /Cancel/ }).click(); await expect(picker).toHaveCount(0) } },
       ] })

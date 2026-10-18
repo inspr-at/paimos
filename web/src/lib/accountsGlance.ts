@@ -1,0 +1,299 @@
+// SPDX-License-Identifier: AGPL-3.0-only
+// What the Agents page says about Accounts and computers (AEON-782): the state
+// in one status line, and the few things that block agents. The lists, panels
+// and editors live in Settings (AEON-686); this derives no new facts. It reads
+// the same sign-in statuses and the account readiness projection, so both pages agree.
+import { agentUpdateAdvice, describeComputerStatus, describeEnrollmentStatus, type PairingView } from './agentPairing.ts'
+import type { OverviewAccount, SignInReference } from './accountsOverview.ts'
+import { readiness } from './computerAccounts.ts'
+import { ago, when, type AccountRow, type CapacityWindow } from './capacity.ts'
+import { hostCapacityReason } from './hostCapacity.ts'
+import type { QuotaWarningSettings } from './quotaWarnings.ts'
+import type { RefreshStatus } from './usePolledData.ts'
+
+export const DEFAULT_QUOTA_THRESHOLDS: Readonly<QuotaWarningSettings> = Object.freeze({ early_percent: 10, urgent_percent: 3 })
+
+/** The sign-in's words in Settings, e.g. "Ready"; empty when the account is not on that computer. */
+export function signinStatus(computer: PairingView, accountId: string, row?: AccountRow, now = Date.now()): string {
+  const enrollment = computer.enrollments.find(e => e.account_id === accountId)
+  if (!enrollment) return ''
+  if (computer.computer_state === 'revoked' || enrollment.state === 'revoked') return 'Blocked'
+  if (computer.computer_state === 'draining' || enrollment.state === 'draining') return 'Draining'
+  const label = describeEnrollmentStatus(computer, enrollment)
+  if (!label) return 'Not reported'
+  return row ? readiness(row, computer, now).text : label
+}
+
+export const verificationExpired = (s: SignInReference) => s.enrollment.verification_state === 'expired' && !s.enrollment.verification_expired_ready
+
+// Words of a sign-in that cannot start agents until someone acts. Transient ones (checking, starting,
+// waiting for a repin, verification queued) are not here: they settle on their own.
+// "need repair" is singular on purpose: "Profile permissions need repair" is a blocker.
+const BLOCKING = /failed|sign in|unavailable|stalled|needs? (attention|repair)|pin (missing|incomplete|changed|invalid|unsafe)|not set up|timed out/i
+// Canonical reasons that settle on their own. Every other reported reason blocks, including a code this build does not name yet.
+const TRANSIENT_REASONS = new Set(['repin_pending', 'starting', 'probe_pending', 'capacity_capture'])
+
+/** The reason the computer reported for this sign-in, when that report is about this account. */
+function enrollmentReason(s: SignInReference): string | undefined {
+  const detail = s.computer.harness_details?.[s.enrollment.harness]
+  const reported = s.computer.harness_statuses?.[s.enrollment.harness]
+  if (!detail || (reported && detail.state !== reported)) return undefined
+  const listed = detail.attention_accounts ?? []
+  if (listed.length) {
+    const hit = listed.find(item => item.account_id === s.enrollment.account_id)
+    if (hit) return hit.reason
+    const complete = detail.state === 'ready' && detail.attention_truncated !== true && (detail.attention_count ?? listed.length) === listed.length
+    if (complete) return undefined
+    return detail.reason || 'needs_attention'
+  }
+  if (detail.state === 'blocked' || detail.state === 'login_required') return detail.reason || 'needs_attention'
+  return undefined
+}
+
+/** A connected sign-in whose verification ran out or whose reported status says agents cannot start with it. */
+export function isProblemSignin(s: SignInReference): boolean {
+  if (s.computer.computer_state !== 'connected' || s.enrollment.state !== 'connected') return false
+  // A computer that stopped reporting shows its last report, not a fresh fault: its own column says offline.
+  if (verificationExpired(s) || s.computer.connectivity !== 'online') return verificationExpired(s)
+  const reason = enrollmentReason(s)
+  return (!!reason && !TRANSIENT_REASONS.has(reason)) || BLOCKING.test(signinStatus(s.computer, s.enrollment.account_id))
+}
+
+export function windowLabel(w: CapacityWindow): string {
+  const kind = w.reading.window_kind
+  return kind === '5h' ? '5-hour window' : kind === 'weekly' ? 'Weekly' : kind === 'monthly' ? 'Monthly allowance' : w.reading.bucket || 'Quota window'
+}
+/** "this week", "in the 5-hour window": the sentence form of a quota window. */
+function windowWords(w: CapacityWindow): string {
+  const kind = w.reading.window_kind
+  return kind === '5h' ? 'in the 5-hour window' : kind === 'weekly' ? 'this week' : kind === 'monthly' ? 'this month' : `in ${windowLabel(w).toLowerCase()}`
+}
+
+export type GlanceKind = 'verify' | 'attention' | 'cleanup' | 'quota'
+export interface GlanceItem {
+  id: string; kind: GlanceKind; name: string; detail: string
+  /** Where Settings opens for this row: the sign-in's computer (and the sign-in), or the account. */
+  computerId?: string; signinId?: string; accountId?: string
+  /** The sign-in a person with the right may verify again, in place. */
+  signin?: SignInReference
+}
+
+/**
+ * Everything that blocks or soon blocks agents, most urgent first: sign-ins to
+ * verify, computers to update, removed computers whose cleanup is pending, then low quota (an
+ * account already waiting on a verification is not listed twice).
+ */
+export function glanceItems(accounts: OverviewAccount[], computers: PairingView[], thresholds: QuotaWarningSettings, now: number, requested = ''): GlanceItem[] {
+  const items: GlanceItem[] = []
+  const blocked = new Set<string>()
+  for (const account of accounts) for (const s of account.signins) {
+    const problem = isProblemSignin(s)
+    // An approval link (?verify_account=…) asks for a fresh check even where nothing is wrong yet.
+    if (!problem && !(requested && s.enrollment.account_id === requested && s.computer.computer_state === 'connected')) continue
+    if (problem) blocked.add(account.id)
+    const status = signinStatus(s.computer, s.enrollment.account_id)
+    // The cause names the row: a check that ran out is verified again; a sign-in or a repair is done on the computer.
+    const cause: GlanceKind = !problem || verificationExpired(s) || /^verif/i.test(status) ? 'verify' : 'attention'
+    const need = !problem ? `Verify ${account.vendor} on` : cause === 'verify' ? `${account.vendor} needs verifying on` : /sign in/i.test(status) ? `${account.vendor} needs signing in on` : `${account.vendor} needs attention on`
+    items.push({
+      id: `${cause}:${s.enrollment.account_id}:${s.computer.computer_id}`, kind: cause, name: `${need} ${s.computer.computer_name}`,
+      detail: !problem ? 'An approval link asked for a fresh check.' : verificationExpired(s) ? 'Verification expired. New agents wait until the sign-in passes again.' : status,
+      computerId: s.computer.computer_id ?? undefined, signinId: s.enrollment.account_id, signin: s,
+    })
+  }
+  // A computer whose helper is too old for this workspace says what to update.
+  for (const c of computers.filter(c => c.computer_state === 'connected' && agentUpdateAdvice(c))) {
+    items.push({ id: `update:${c.computer_id}`, kind: 'attention', name: `${c.computer_name} needs an update`, detail: agentUpdateAdvice(c), computerId: c.computer_id ?? undefined })
+  }
+  for (const c of computers.filter(c => c.computer_state === 'revoked' && c.local_cleanup === 'pending')) {
+    items.push({ id: `cleanup:${c.computer_id}`, kind: 'cleanup', name: `${c.computer_name} removed · cleanup pending`, detail: 'New work is blocked. Local sign-ins are deleted when the computer comes back online.', computerId: c.computer_id ?? undefined })
+  }
+  const low: { item: GlanceItem; left: number }[] = []
+  for (const account of accounts) {
+    if (blocked.has(account.id)) continue
+    const window = account.windows.filter(w => quotaWindowWarns(w, thresholds, now)).sort((a, b) => a.remaining_percent - b.remaining_percent)[0]
+    if (!window) continue
+    const left = Math.round(window.remaining_percent), urgent = window.remaining_percent <= thresholds.urgent_percent
+    const resets = window.reading.resets_at ? ` Resets ${when(window.reading.resets_at, now)}.` : ''
+    low.push({ left: window.remaining_percent, item: { id: `quota:${account.id}`, kind: 'quota', name: `${account.vendor} is low: ${left}% left ${windowWords(window)}`, detail: `${urgent ? 'Urgent' : 'Early'} warning, below ${urgent ? thresholds.urgent_percent : thresholds.early_percent}%.${resets}`, accountId: account.records[0]?.id ?? account.id } })
+  }
+  return [...items, ...low.sort((a, b) => a.left - b.left).map(l => l.item)]
+}
+
+export const onlineComputers = (computers: PairingView[]) => computers.filter(c => c.computer_state === 'connected' && c.connectivity === 'online').length
+
+// The server's quota warning: a measured reading, at most ten minutes old, whose reset is still ahead.
+// The snapshot's freshness label is not rechecked against the clock, so it is not the authority here.
+const QUOTA_READING_MAX_AGE_MS = 10 * 60 * 1000
+export function quotaWindowWarns(w: CapacityWindow, thresholds: QuotaWarningSettings, now: number): boolean {
+  if (w.reading.source === 'estimate') return false
+  const read = Date.parse(w.reading.read_at)
+  if (!Number.isFinite(read) || read > now || now - read > QUOTA_READING_MAX_AGE_MS) return false
+  const reset = Date.parse(w.reading.resets_at)
+  if (!Number.isFinite(reset) || reset <= now) return false
+  return w.remaining_percent <= thresholds.early_percent
+}
+
+/** A sign-in with no account row yet: the readiness projection still has something to judge. */
+function bareRow(s: SignInReference): AccountRow {
+  return {
+    id: s.enrollment.account_id, name: s.enrollment.label, host: s.computer.computer_name, harness: s.enrollment.harness, state: 'unread',
+    primary: null, five: null, schedule: null, plan: '', limitingReset: '', awaitingReading: false, fingerprint: '', groupId: '', groupName: '',
+    hosts: [s.computer.computer_name], sameQuotaAs: '', ...(s.enrollment.state === 'draining' ? { disconnecting: true } : {}),
+  }
+}
+/**
+ * One aggregated account (a shared login is one). Ready when no sign-in needs a person and
+ * at least one door is a connected enrollment whose sign-in says Ready and whose readiness
+ * projection can start agents. The projection is not consulted for a missing report or a
+ * revoked snapshot: those words are not Ready. A draining account or a Hold is not ready,
+ * even while its sign-in still says Ready.
+ */
+function accountReady(account: OverviewAccount, now: number): boolean {
+  if (!account.signins.length || account.signins.some(isProblemSignin)) return false
+  const rows = new Map(account.rows.map(row => [row.id, row]))
+  return account.signins.some(signin => {
+    if (signin.computer.computer_state !== 'connected' || signin.enrollment.state !== 'connected') return false
+    const row = rows.get(signin.enrollment.account_id)
+    return signinStatus(signin.computer, signin.enrollment.account_id, row ? { ...bareRow(signin), ...row } : bareRow(signin), now) === 'Ready'
+  })
+}
+
+export interface GlanceSummary { tone: 'ok' | 'warn'; text: string; ready: number; total: number; more: number }
+/**
+ * The status line: "All 3 ready · 2 computers online", or "2 of 3 ready ·
+ * Claude needs verifying on build-7 · +1" naming the first thing and counting
+ * the rest. The count is connected Ready sign-ins that the readiness projection still allows.
+ */
+export function glanceSummary(accounts: OverviewAccount[], computers: PairingView[], items: GlanceItem[], now: number): GlanceSummary {
+  const total = accounts.length
+  const ready = accounts.filter(account => accountReady(account, now)).length
+  const online = onlineComputers(computers)
+  const head = ready === total ? `All ${total} ready` : `${ready} of ${total} ready`
+  if (items.length) return { tone: 'warn', ready, total, more: items.length - 1, text: `${head} · ${items[0].name}${items.length > 1 ? ` · +${items.length - 1}` : ''}` }
+  if (ready < total) return { tone: 'warn', ready, total, more: 0, text: `${head} · ${total - ready} not ready` }
+  return { tone: 'ok', ready, total, more: 0, text: `${head} · ${online} ${online === 1 ? 'computer' : 'computers'} online` }
+}
+
+// ---------- The accounts chip on the Agents page (AEON-1209, AEON-1176 P6) ----------
+// The chip in the capacity row names what there is; its popover holds three tiles that
+// open the three parts of Settings, each with its own state words.
+export type GlancePart = 'accounts' | 'computers' | 'capacity'
+export interface GlanceAvailability {
+  state: 'loading' | 'ready' | 'empty' | 'error' | 'forbidden' | 'stale'
+  updatedAt: number | null
+  reason: string
+}
+/** A claim is readable only when every source it needs is readable. Failures keep
+ * last-good values with their oldest timestamp; forbidden reads never show them. */
+export function glanceAvailability(sources: readonly RefreshStatus[], empty = false, now = Date.now()): GlanceAvailability {
+  const denied = sources.find(source => source.state === 'forbidden')
+  if (denied) return { state: 'forbidden', updatedAt: null, reason: denied.error }
+  const unreadable = sources.find(source => source.updatedAt === null && source.state === 'error')
+  if (unreadable) return { state: 'error', updatedAt: null, reason: unreadable.error }
+  if (!sources.length || sources.some(source => source.updatedAt === null)) return { state: 'loading', updatedAt: null, reason: '' }
+  const updatedAt = Math.min(...sources.map(source => source.updatedAt!))
+  const failed = sources.filter(source => source.failures > 0 || source.state === 'error')
+  if (failed.length || now - updatedAt > 45_000) return { state: 'stale', updatedAt, reason: failed.map(source => source.error).filter(Boolean).join(' · ') }
+  return { state: empty ? 'empty' : 'ready', updatedAt, reason: '' }
+}
+export interface GlanceTile { part: GlancePart; title: string; line: string; detail: string; warn: boolean; to: string }
+const counted = (n: number, one: string, many = `${one}s`) => `${n} ${n === 1 ? one : many}`
+
+/** "5 accounts · 3 computers"; computers only when accounts are not shown to this person. */
+export function glanceChipText(accounts: number, computers: number, showAccounts: boolean): string {
+  if (!accounts && !computers) return showAccounts ? 'No accounts yet' : 'No computers yet'
+  return showAccounts ? `${counted(accounts, 'account')} · ${counted(computers, 'computer')}` : counted(computers, 'computer')
+}
+
+/** The chip's one flag: sign-ins first (they stop an account), then anything else that needs a person. */
+export function glanceFlag(signins: number, items: GlanceItem[]): string {
+  if (signins) return counted(signins, 'sign-in')
+  return items.length ? `${items.length} ${items.length === 1 ? 'needs' : 'need'} you` : ''
+}
+
+export interface GlanceTilesInput {
+  accounts: OverviewAccount[]; computers: PairingView[]; items: GlanceItem[]; summary: GlanceSummary
+  /** When supplied, the connectivity tile uses only computer-owned evidence. */
+  computerItems?: GlanceItem[]
+  /** Accounts waiting for a new sign-in on their computer. */
+  signins: number
+  /** The plan in words ("5 days · keep auto · no nights"); empty while unread. */
+  pacing: string
+  /** "until 18:00" while the person is away; empty otherwise. */
+  away: string
+  showAccounts: boolean
+}
+/** Accounts, Computers, Capacity. Quota warnings belong to Accounts; sign-in problems and cleanups to Computers. */
+export function glanceTiles(input: GlanceTilesInput): GlanceTile[] {
+  const { accounts, computers, items, summary, signins } = input
+  const quota = items.filter(i => i.kind === 'quota'), fix = (input.computerItems ?? items).filter(i => i.kind !== 'quota')
+  const online = onlineComputers(computers)
+  const vendors = [...new Set(accounts.map(a => a.vendor))]
+  const names = computers.map(c => c.computer_name)
+  const accountsLine = !accounts.length ? 'No accounts yet'
+    : `${summary.ready === summary.total ? `All ${summary.total} ready` : `${summary.ready} of ${summary.total} ready`}${signins ? ` · ${signins} ${signins === 1 ? 'needs' : 'need'} a sign-in` : ''}`
+  const tiles: GlanceTile[] = []
+  if (input.showAccounts) tiles.push({
+    part: 'accounts', title: 'Accounts', line: accountsLine,
+    detail: quota[0]?.name ?? (accounts.length ? vendors.join(', ') : 'Sign in to a harness on a connected computer.'),
+    warn: !!signins || !!quota.length || summary.ready < summary.total, to: '/settings/accounts',
+  })
+  tiles.push({
+    part: 'computers', title: 'Computers',
+    line: fix[0]?.name ?? (computers.length ? `${online} of ${computers.length} online` : 'No computers yet'),
+    detail: computers.length ? `${names.slice(0, 4).join(' · ')}${names.length > 4 ? ` · +${names.length - 4}` : ''}` : 'Connect a computer so agents can run.',
+    warn: !!fix.length, to: '/settings/computers',
+  })
+  if (input.showAccounts) tiles.push({
+    part: 'capacity', title: 'Capacity',
+    line: input.away ? `Away ${input.away}` : input.pacing || 'Your plan',
+    detail: 'Work days, nights, pace and what is kept for you', warn: false, to: '/settings/capacity',
+  })
+  return tiles
+}
+
+// ---------- Settings › Computers: one table, a row per computer, a column per account (AEON-1174, design AEON-1149) ----------
+/** A column's short label: an address up to its @; a name stays whole. The full address goes in the tooltip. */
+export function shortIdentity(identity: string): string {
+  const at = identity.indexOf('@')
+  return at > 0 ? identity.slice(0, at) : identity
+}
+
+export type SigninWord = 'Ready' | 'Expired' | 'Offline' | 'Draining' | 'Blocked' | 'Checking' | 'Not reported'
+export interface SigninCell { word: SigninWord; tone: 'ok' | 'warn' | 'off' | 'wait' | 'blocked'; tip: string }
+/**
+ * One cell: the sign-in in one word, and in its tip the words the panel shows when they
+ * say more. A removed computer or a signed-out sign-in is Blocked, as is a sign-in that
+ * cannot start agents until someone acts; an expired verification says Expired, even while
+ * its computer is offline (it still needs verifying). A check under way or a sign-in with no
+ * report yet is never called Ready.
+ */
+export function signinCell(s: SignInReference, row?: AccountRow, now = Date.now()): SigninCell {
+  const { computer: c, enrollment: e } = s
+  if (c.computer_state === 'revoked') return { word: 'Blocked', tone: 'blocked', tip: `${c.computer_name} was removed. Its sign-ins are blocked.` }
+  if (e.state === 'revoked') return { word: 'Blocked', tone: 'blocked', tip: `Signed out on ${c.computer_name}. New agents do not start with it.` }
+  if (c.computer_state === 'draining' || e.state === 'draining') return { word: 'Draining', tone: 'wait', tip: 'New starts are blocked; running agents finish.' }
+  if (verificationExpired(s)) return { word: 'Expired', tone: 'warn', tip: 'Verification expired. New agents wait until it passes again.' }
+  if (c.computer_state !== 'connected' || c.connectivity !== 'online') return { word: 'Offline', tone: 'off', tip: c.last_seen_at ? `${c.computer_name} last reported ${ago(c.last_seen_at, now)}. New agents wait until it reports again.` : `${c.computer_name} has not reported yet.` }
+  const full = signinStatus(c, e.account_id, row, now)
+  if (isProblemSignin(s)) return { word: 'Blocked', tone: 'warn', tip: `${full.replace(/\.$/, '')}. New agents wait until someone acts.` }
+  const label = describeEnrollmentStatus(c, e)
+  if (!label) return { word: 'Not reported', tone: 'off', tip: `${c.computer_name} has not reported this sign-in yet.` }
+  if (label !== 'Ready') return { word: 'Checking', tone: 'wait', tip: `${label.replace(/\.$/, '')}. This settles on its own.` }
+  return { word: 'Ready', tone: 'ok', tip: full && full !== 'Ready' ? full : '' }
+}
+
+export interface ComputerLine { text: string; tone: 'ok' | 'wait' | 'off' | 'blocked' }
+/** The computer cell's second line: agents running and why new starts wait, or why nothing starts there. */
+export function computerLine(c: PairingView, now = Date.now()): ComputerLine {
+  if (c.computer_state === 'revoked') return { text: c.local_cleanup === 'pending' ? 'Removed · cleanup pending' : 'Removed', tone: 'blocked' }
+  if (c.computer_state === 'draining') return { text: 'Draining · running agents finish', tone: 'wait' }
+  if (c.computer_state !== 'connected') return { text: describeComputerStatus(c).stateLabel, tone: 'wait' }
+  if (c.connectivity !== 'online') return { text: c.last_seen_at ? `Offline · seen ${ago(c.last_seen_at, now)}` : 'Offline · not seen yet', tone: 'off' }
+  const host = c.host_capacity
+  if (!host) return { text: 'Online · no load report yet', tone: 'ok' }
+  const max = host.policy.maximum_agents
+  const count = max ? `${host.running} of ${max} agents running` : host.running ? `${host.running} ${host.running === 1 ? 'agent' : 'agents'} running` : 'No agents running'
+  return host.reason ? { text: `${count} · waiting: ${hostCapacityReason(host.reason)}`, tone: 'wait' } : { text: count, tone: 'ok' }
+}

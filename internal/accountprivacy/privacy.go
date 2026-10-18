@@ -70,6 +70,38 @@ func LoadControls(ctx context.Context, tx pgx.Tx, p tenant.Principal, ids []stri
 	return out, rows.Err()
 }
 
+// LoadHostDiagnostics is independent of usage sharing and check controls.
+// Only the person who approved the connected computer may see its diagnostics;
+// unpaired accounts fall back to their person owner, as routing advice does.
+func LoadHostDiagnostics(ctx context.Context, tx pgx.Tx, p tenant.Principal, ids []string) (Policy, error) {
+	if len(ids) > 1024 {
+		return nil, errors.New("too many host diagnostic targets")
+	}
+	if p.Kind != tenant.Person || p.ID == "" {
+		return Policy{}, nil
+	}
+	rows, err := tx.Query(ctx, `SELECT a.id::text,COALESCE(COALESCE(q.approved_by,a.owner_person_id)=$2::uuid,false)
+ FROM agent_accounts a
+ LEFT JOIN agent_pairing_enrollments e ON e.tenant_id=a.tenant_id AND e.account_id=a.id
+ LEFT JOIN agent_pairing_computers c ON c.tenant_id=e.tenant_id AND c.id=e.computer_id AND c.state='connected'
+ LEFT JOIN agent_pairing_requests q ON q.tenant_id=c.tenant_id AND q.id=c.request_id
+ WHERE a.id=ANY($1::uuid[])`, ids, p.ID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := Policy{}
+	for rows.Next() {
+		var id string
+		var allowed bool
+		if err := rows.Scan(&id, &allowed); err != nil {
+			return nil, err
+		}
+		out[id] = allowed
+	}
+	return out, rows.Err()
+}
+
 func IDs(raw json.RawMessage, fallback string) ([]string, error) {
 	var v any
 	if err := json.Unmarshal(raw, &v); err != nil {
@@ -120,12 +152,18 @@ func accountID(obj map[string]any) string {
 	if id, ok := obj["account_id"].(string); ok && uuid(id) {
 		return id
 	}
-	if _, ok := obj["registered_by_principal_id"]; ok {
+	if _, ok := obj["registered_by_principal_id"]; ok || guardProjection(obj) {
 		if id, ok := obj["id"].(string); ok && uuid(id) {
 			return id
 		}
 	}
 	return ""
+}
+
+func guardProjection(obj map[string]any) bool {
+	_, posture := obj["posture"]
+	_, keep := obj["keep_for_you_percent"]
+	return posture && keep
 }
 func uuid(s string) bool {
 	if len(s) != 36 {
@@ -148,10 +186,10 @@ func uuid(s string) bool {
 // availability projections carry details_redacted. History becomes an empty
 // array. The registering daemon's own scoped reports remain unaffected.
 func Redact(raw json.RawMessage, policy Policy, fallback string, history bool) (json.RawMessage, error) {
-	return RedactWithControls(raw, policy, nil, fallback, history)
+	return RedactWithControls(raw, policy, nil, nil, fallback, history)
 }
 
-func RedactWithControls(raw json.RawMessage, policy, controls Policy, fallback string, history bool) (json.RawMessage, error) {
+func RedactWithControls(raw json.RawMessage, policy, controls, hostDiagnostics Policy, fallback string, history bool) (json.RawMessage, error) {
 	if history && !policy[fallback] {
 		return json.RawMessage(`[]`), nil
 	}
@@ -166,16 +204,30 @@ func RedactWithControls(raw json.RawMessage, policy, controls Policy, fallback s
 		}
 		switch obj := v.(type) {
 		case []any:
-			for i, child := range obj {
+			out := make([]any, 0, len(obj))
+			for _, child := range obj {
+				// A guard's required fields cannot be replaced with invented
+				// posture/reserve values. Remove the row if sharing was revoked
+				// after the handler's snapshot and before response delivery.
+				if row, ok := child.(map[string]any); ok && guardProjection(row) && !policy[accountID(row)] {
+					continue
+				}
 				next, err := walk(child, id, depth+1)
 				if err != nil {
 					return nil, err
 				}
-				obj[i] = next
+				out = append(out, next)
 			}
+			return out, nil
 		case map[string]any:
 			if own := accountID(obj); own != "" {
 				id = own
+			}
+			// Sharing usage and registering an account never grant host details.
+			// Aggregate waits have no account ID; their handlers authorize host
+			// diagnostics before folding away the account (capacity/next).
+			if id != "" && !hostDiagnostics[id] {
+				delete(obj, "host_reason")
 			}
 			saved := map[string]any{}
 			if id != "" && !policy[id] {
@@ -217,6 +269,7 @@ func RedactWithControls(raw json.RawMessage, policy, controls Policy, fallback s
 }
 
 func mask(obj map[string]any) {
+	delete(obj, "host_reason")
 	// Strip detailed collections at their boundary before visiting children.
 	for _, key := range []string{"windows", "readings", "readiness_resources", "facts"} {
 		if _, ok := obj[key]; ok {
@@ -228,8 +281,16 @@ func mask(obj map[string]any) {
 			obj[key] = ""
 		}
 	}
-	for _, key := range []string{"openrouter_credits", "probe_failure", "limiting_reset", "limit", "spend_month_usd", "learning", "same_quota_as", "resets_at", "until", "read_at", "next_attempt_at", "reading_error", "check_result", "reading_age_seconds", "credit_state", "remaining", "used_percent", "remaining_percent", "threshold_percent", "window_key", "severity", "denial_reason", "stop_kind", "backoff_step", "wait_id", "early_recovery_used", "pending_check", "result", "cap_percent", "reserve_percent", "reserve_effective_percent", "reserve_until", "awaiting_reading"} {
+	for _, key := range []string{"usage_policy", "usage_budget", "expired_at", "undo_until", "raised_pace_points", "raised_pace_until", "reset_revision", "reset_undo_supported", "undo_supported", "ordinary_usage_allowed", "budget", "openrouter_credits", "probe_failure", "limiting_reset", "limit", "spend_month_usd", "learning", "same_quota_as", "resets_at", "until", "read_at", "next_attempt_at", "reading_error", "check_result", "reading_age_seconds", "credit_state", "remaining", "used_percent", "remaining_percent", "threshold_percent", "window_key", "severity", "denial_reason", "stop_kind", "backoff_step", "wait_id", "early_recovery_used", "pending_check", "result", "cap_percent", "reserve_percent", "reserve_effective_percent", "reserve_until", "awaiting_reading"} {
 		delete(obj, key)
+	}
+	for _, key := range []string{"resets", "reset_plan"} {
+		if _, ok := obj[key]; ok {
+			obj[key] = nil
+		}
+	}
+	if _, ok := obj["reset_policy"]; ok {
+		obj["reset_policy"] = "suggest"
 	}
 	// Old account timestamps are nullable in the published contract.
 	if _, ok := obj["remaining_fraction"]; ok {
@@ -279,6 +340,15 @@ func mask(obj map[string]any) {
 	}
 	if _, ok := obj["cost_limit_supported"]; ok {
 		obj["cost_limit_supported"] = false
+	}
+	// routable is quota headroom. A visible overview can reach this boundary
+	// after sharing is revoked. Normalize that row to the constant redacted
+	// shape: never routable, a state wait, and no routing advice.
+	if _, ok := obj["routable"]; ok {
+		obj["routable"] = false
+		obj["wait"] = map[string]any{"code": "state", "run_now_allowed": false}
+		delete(obj, "routing")
+		obj["details_redacted"] = true
 	}
 	// CapacitySchedule has required timezone/week. Keep a valid neutral
 	// placeholder and mark the containing projection, never expose its owner

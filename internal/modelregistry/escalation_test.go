@@ -3,6 +3,7 @@ package modelregistry
 
 import (
 	"encoding/json"
+	"strings"
 	"testing"
 	"time"
 
@@ -29,6 +30,44 @@ func TestEscalationAreaPolicy(t *testing.T) {
 		t.Fatal("backend stronger routes missing")
 	}
 }
+
+// Risk: a stronger Models route that only lacks admission sends work to the
+// Decision Desk, while a policy-excluded route incorrectly waits for capacity.
+func TestModelsV2EscalationAdmissionWait(t *testing.T) {
+	prefsFixture(t, func(tx pgx.Tx, p tenant.Principal) error {
+		ctx := t.Context()
+		var profile, opus string
+		if err := tx.QueryRow(ctx, `INSERT INTO model_pref_profiles(tenant_id,scope,revision) VALUES($1,'workspace',1) RETURNING id::text`, p.TenantID).Scan(&profile); err != nil {
+			return err
+		}
+		if _, err := tx.Exec(ctx, `INSERT INTO model_pref_orders(tenant_id,profile_id,column_key,situation,rank,effort,effort_level) VALUES($1,$2,'other','first',ARRAY['anthropic:opus'],'xhigh',4)`, p.TenantID, profile); err != nil {
+			return err
+		}
+		if err := tx.QueryRow(ctx, `SELECT id::text FROM model_profiles WHERE slug='claude-opus-xhigh'`).Scan(&opus); err != nil {
+			return err
+		}
+		now, err := dbNow(ctx, tx)
+		if err != nil {
+			return err
+		}
+		got, err := ResolveEscalation(ctx, tx, p, WorkQuery{Role: "build", Area: "frontend", Column: "other"}, nil, now)
+		if err != nil {
+			return err
+		}
+		if got.Profile != nil || got.Trace.Blocked != "admission_wait" || got.OwnerRequired || len(got.Ladder) != 2 || got.Ladder[0].ProfileID != opus || len(got.Ladder[0].SkipReasons) != 1 || got.Ladder[0].SkipReasons[0] != "no qualified account with available capacity" || len(got.Ladder[1].SkipReasons) != 1 || got.Ladder[1].SkipReasons[0] != "not a stronger route for this work area" {
+			t.Fatalf("capacity-only escalation did not wait: %+v", got)
+		}
+		got, err = ResolveEscalation(ctx, tx, p, WorkQuery{Role: "build", Area: "frontend", Column: "other"}, []string{opus}, now)
+		if err != nil {
+			return err
+		}
+		if got.Profile != nil || got.Trace.Blocked == "admission_wait" || !got.OwnerRequired || len(got.Ladder) != 2 || got.Ladder[0].ProfileID != opus || !strings.Contains(strings.Join(got.Ladder[0].SkipReasons, ";"), "already attempted") || len(got.Ladder[1].SkipReasons) != 1 || got.Ladder[1].SkipReasons[0] != "not a stronger route for this work area" {
+			t.Fatalf("attempted route became an admission wait: %+v", got)
+		}
+		return nil
+	})
+}
+
 func TestEscalationUnknownAdmissionWaits(t *testing.T) {
 	prefsFixture(t, func(tx pgx.Tx, p tenant.Principal) error {
 		got, err := ResolveEscalation(t.Context(), tx, p, WorkQuery{Role: "build", Area: "backend"}, nil, time.Now())

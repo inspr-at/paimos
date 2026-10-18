@@ -10,11 +10,23 @@ import (
 
 	"github.com/inspr-at/paimos/internal/agentaccounts"
 	"github.com/inspr-at/paimos/internal/modelprefs"
+	"github.com/inspr-at/paimos/internal/reviewgate"
 	"github.com/inspr-at/paimos/internal/tenant"
 	"github.com/jackc/pgx/v5"
 )
 
 type WorkQuery struct {
+	// routineEval applies the mandatory family floor to board routing
+	// only for the internal routine resolver; ordinary routes retain their API.
+	routineEval bool
+	// printedReviewCommand admits Codex only on the resolution path that
+	// returns its exact isolated command, never the managed no-tools adapter.
+	printedReviewCommand bool
+	// preview shares an editor preview's bounded catalog with every Models
+	// walk of that preview; nil reads the live catalog for each walk.
+	preview          *preferencePreviewCatalog
+	Escalation       bool
+	ReviewPolicies   []reviewgate.FamilyPolicy
 	TicketID         string
 	Role             string
 	TicketRole       string
@@ -26,8 +38,29 @@ type WorkQuery struct {
 	AuthorFamily     string
 	Harness          string
 	TicketResidency  string
+	Situation        string
+	Labels           []string
+	EstimateHours    float64
+	FixRound         int
+	PreviousFamily   string
+	Concept          bool
+	Queued           bool
+	// Column and OffHarnesses are supplied by shadow round routing only.
+	Column       string
+	OffHarnesses []string
+	// ExplicitBoard is retained for placement callers during the S2 transition;
+	// initialized boards can be previewed before saved ladders migrate in S2.
+	WorkspaceOnly bool
+	ExplicitBoard bool
 }
 type PreferenceTrace struct {
+	PreferenceOf         *preferenceOwner           `json:"preference_of,omitempty"`
+	Column               string                     `json:"column,omitempty"`
+	Situation            string                     `json:"situation,omitempty"`
+	CardIndex            int                        `json:"card_index,omitempty"`
+	Lock                 *modelprefs.BoardLock      `json:"lock,omitempty"`
+	Held                 []modelprefs.HeldLine      `json:"held,omitempty"`
+	OrderMode            string                     `json:"order_mode,omitempty"`
 	Selector             *modelprefs.Cell           `json:"selector,omitempty"`
 	Role                 string                     `json:"role,omitempty"`
 	ProjectID            string                     `json:"project_id,omitempty"`
@@ -125,9 +158,25 @@ func expandPreference(cell modelprefs.Cell, profiles []Profile) []Profile {
 	return out
 }
 
-// ResolveWork preserves resolveRole byte-for-byte with an empty matrix and an
-// any requirement. Placement chooses a cell; it never changes the role ladder.
+// ResolveWork routes every role through Models and the same live account policy.
 func ResolveWork(ctx context.Context, tx pgx.Tx, p tenant.Principal, q WorkQuery, now time.Time) (WorkResolution, error) {
+	return resolveDailyWork(ctx, tx, p, q, now)
+}
+
+func resolveWorkWithCatalog(ctx context.Context, tx pgx.Tx, p tenant.Principal, q WorkQuery, now time.Time, catalog *preferencePreviewCatalog) (WorkResolution, error) {
+	q.printedReviewCommand = true
+	if catalog != nil {
+		// Editor previews retain their smaller, honest truncation boundary,
+		// and every cell's Models walk reuses that one bounded read.
+		if _, err := catalog.profiles(ctx, tx); err != nil {
+			return WorkResolution{}, err
+		}
+		ctx = context.WithValue(ctx, previewBoardKey{}, catalog)
+		if q.PersonID == nil {
+			q.WorkspaceOnly = true
+		}
+		q.preview = catalog
+	}
 	if q.TicketID != "" {
 		var fields []byte
 		var project *string
@@ -136,6 +185,11 @@ func ResolveWork(ctx context.Context, tx pgx.Tx, p tenant.Principal, q WorkQuery
 			return WorkResolution{}, err
 		}
 		placement := modelprefs.PlacementFields(fields)
+		parsed, parseErr := boardTicketFields(ctx, tx, q, fields)
+		if parseErr != nil {
+			return WorkResolution{}, parseErr
+		}
+		q = parsed
 		q.Area = placement.Area
 		q.Complexity = placement.Complexity
 		q.ComplexitySource = placement.ComplexitySource
@@ -149,14 +203,33 @@ func ResolveWork(ctx context.Context, tx pgx.Tx, p tenant.Principal, q WorkQuery
 		}
 	}
 	q.Role = strings.TrimSpace(q.Role)
-	if q.PersonID == nil {
+	if q.PersonID == nil && !q.WorkspaceOnly {
 		q.PersonID = modelprefs.PrefsPerson(ctx, tx, p)
+	}
+	if q.Role != "review-gate" && q.Role != "review-gate-security" {
+		if escalated, err := escalationForWork(ctx, tx, p, q, now); err != nil {
+			return WorkResolution{}, err
+		} else if escalated != nil {
+			return *escalated, nil
+		}
+	}
+	if strings.HasPrefix(q.Role, "review-gate") {
+		var err error
+		q.AuthorFamily, err = NormalizeAuthorFamily(q.AuthorFamily)
+		if err != nil || q.AuthorFamily == "" {
+			return WorkResolution{}, fail(400, "review-gate requires a known author_family")
+		}
+	}
+	if board, err := resolveBoardWork(ctx, tx, p, q, now, nil); err != nil {
+		return WorkResolution{}, err
+	} else if board != nil {
+		return *board, nil
 	}
 	if q.Role == "review-gate" || q.Role == "review-gate-security" {
 		if q.AuthorFamily == "" {
 			return WorkResolution{}, fail(400, "review-gate requires author_family")
 		}
-		route, err := ResolveReviewFor(ctx, tx, p, q, now)
+		route, err := resolveReviewWithCatalog(ctx, tx, p, q, now, catalog)
 		if err != nil {
 			return WorkResolution{}, err
 		}
@@ -200,7 +273,7 @@ func ResolveWork(ctx context.Context, tx pgx.Tx, p tenant.Principal, q WorkQuery
 		result := modelprefs.ResolveCell(chain, kind.Slug, out.Trace.Bucket)
 		traceCell(&out.Trace, result)
 		if result.Cell != nil && result.Cell.Mode != "auto" {
-			profiles, err := listProfiles(ctx, tx)
+			profiles, err := catalog.profiles(ctx, tx)
 			if err != nil {
 				return out, err
 			}
@@ -208,7 +281,7 @@ func ResolveWork(ctx context.Context, tx pgx.Tx, p tenant.Principal, q WorkQuery
 			if len(profiles) == 0 {
 				out.Trace.Fallback = "preferred profile unavailable"
 			}
-			health, err := agentaccounts.HarnessHealthAt(ctx, tx, now)
+			health, err := agentaccounts.HarnessHealthAt(ctx, tx, now, q.ProjectID)
 			if err != nil {
 				return out, err
 			}
@@ -217,7 +290,7 @@ func ResolveWork(ctx context.Context, tx pgx.Tx, p tenant.Principal, q WorkQuery
 				if err != nil {
 					return out, err
 				}
-				reasons := skipReasons(step, role, resolveQuery{Role: q.Role, Harness: q.Harness}, now, health)
+				reasons := skipReasons(step, role, resolveQuery{Role: q.Role, Harness: q.Harness, OffHarnesses: q.OffHarnesses}, now, health)
 				ids, err := agentaccounts.QualifyingAccountIDs(ctx, tx, profile.ID, profile.Harness, q.ProjectID, requirement, now)
 				if err != nil {
 					return out, err
@@ -251,7 +324,7 @@ func ResolveWork(ctx context.Context, tx pgx.Tx, p tenant.Principal, q WorkQuery
 			}
 		}
 	}
-	out.Resolution, err = resolveRole(ctx, tx, resolveQuery{Role: q.Role, Harness: q.Harness}, now)
+	out.Resolution, err = resolveRoleWithCatalog(ctx, tx, resolveQuery{Role: q.Role, Harness: q.Harness, ProjectID: q.ProjectID, OffHarnesses: q.OffHarnesses}, now, catalog)
 	if err != nil {
 		return out, err
 	}
@@ -259,7 +332,7 @@ func ResolveWork(ctx context.Context, tx pgx.Tx, p tenant.Principal, q WorkQuery
 	if requirement == "any" {
 		return out, nil
 	}
-	steps, err := loadLadder(ctx, tx, q.Role)
+	steps, err := catalog.ladder(ctx, tx, q.Role)
 	if err != nil {
 		return out, err
 	}
@@ -292,14 +365,16 @@ func ResolveWork(ctx context.Context, tx pgx.Tx, p tenant.Principal, q WorkQuery
 	}
 	return out, nil
 }
+
 func preferenceStep(ctx context.Context, tx pgx.Tx, profile Profile, role string) (ladderStep, error) {
 	step := ladderStep{Profile: profile, Route: Route{Role: role, ProfileID: profile.ID, State: "available"}}
 	err := tx.QueryRow(ctx, `SELECT coalesce(r.state,'available'),coalesce(r.reason,''),r.valid_until,
-  EXISTS(SELECT 1 FROM model_profile_retirements x WHERE x.tenant_id=p.tenant_id AND x.profile_id=p.id),
+  EXISTS(SELECT 1 FROM model_profile_retirements x WHERE x.tenant_id=p.tenant_id AND x.profile_id=p.id AND x.retire_at IS NULL),
+ (SELECT x.retire_at FROM model_profile_retirements x WHERE x.tenant_id=p.tenant_id AND x.profile_id=p.id),
   o.suppressed_until
-  FROM model_profiles p LEFT JOIN model_role_routes r ON r.tenant_id=p.tenant_id AND r.profile_id=p.id AND r.role=$2
+  FROM model_profiles p LEFT JOIN (`+agentaccounts.ModelPausesSQL+`) r ON r.tenant_id=p.tenant_id AND r.profile_id=p.id
   LEFT JOIN model_observations o ON o.tenant_id=p.tenant_id AND o.harness=p.harness AND o.model=p.model AND o.effort=p.effort
-  WHERE p.id=$1::uuid`, profile.ID, role).Scan(&step.State, &step.Reason, &step.ValidUntil, &step.Retired, &step.SuppressedUntil)
+  WHERE p.id=$1::uuid`, profile.ID).Scan(&step.State, &step.Reason, &step.ValidUntil, &step.Retired, &step.RetireAt, &step.SuppressedUntil)
 	if err != nil {
 		return step, fmt.Errorf("preference policy: %w", err)
 	}

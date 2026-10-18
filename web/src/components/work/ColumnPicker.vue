@@ -15,6 +15,7 @@ const props = withDefaults(defineProps<{
   labels?: Partial<Record<string, string>>; pinned?: T[]; resetLabel?: string; resetTip?: string; note?: string | null
 }>(), { labels: undefined, pinned: undefined, resetLabel: 'Automatic', resetTip: 'Columns follow the width again', note: 'Drag a header edge to resize a column; double-click it to fit.' })
 const emit = defineEmits<{ change: [order: T[], visible: T[]]; reset: [] }>()
+const root = ref<HTMLElement>()
 const pins = computed<T[]>(() => props.pinned ?? (PINNED as unknown as T[]))
 const label = (id: T) => props.labels?.[id] ?? COLUMN_BY_ID.get(id as unknown as ColumnId)?.label ?? id
 const free = computed(() => props.order.filter(id => !pins.value.includes(id)))
@@ -35,7 +36,7 @@ function step(id: T, delta: -1 | 1) {
   ;[list[index], list[to]] = [list[to]!, list[index]!]
   emit('change', [...pins.value, ...list], props.visible.filter(x => !pins.value.includes(x)))
   // Moving the row in the DOM drops focus; put it back as soon as the list re-renders.
-  void nextTick(() => document.querySelector<HTMLElement>(`[data-column-row="${id}"]`)?.focus())
+  void nextTick(() => root.value?.querySelector<HTMLElement>(`[data-column-row="${id}"]`)?.focus())
 }
 function keydown(event: KeyboardEvent, id: T) {
   if (event.altKey && (event.key === 'ArrowUp' || event.key === 'ArrowDown')) { event.preventDefault(); step(id, event.key === 'ArrowUp' ? -1 : 1) }
@@ -51,7 +52,7 @@ function drop(target: T) {
 </script>
 
 <template>
-  <div class="columns">
+  <div ref="root" class="columns">
     <div class="head">
       <p class="eyebrow">Columns</p>
       <button v-if="customised" type="button" class="reset" :data-tip="resetTip" @click="emit('reset')">{{ resetLabel }}</button>

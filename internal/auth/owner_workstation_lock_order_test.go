@@ -105,8 +105,8 @@ func testWorkstationPairingInterleaving(t *testing.T, action, first string, revo
 			return strings.Contains(query, "pg_advisory_xact_lock") && strings.Contains(query, "aeon-pairing:")
 		}
 		// Key-usage admission also takes an advisory lock before pairing.
-		// Pause at the actual tree fence, after pairing is already held.
-		return strings.Contains(query, "pg_advisory_xact_lock(hashtextextended(current_setting('aeon.tenant_id'),0))")
+		// Pause at the actual shared tree fence, before pairing is acquired.
+		return strings.Contains(query, "pg_advisory_xact_lock(hashtextextended($1::text, 0))")
 	})
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()

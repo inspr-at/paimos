@@ -6,6 +6,11 @@ export function claimSettingsPopover(close: () => void): () => void {
   current = close
   return () => { if (current === close) current = undefined }
 }
+// A modal dialog (shared confirmation, Keep separate) sits in the top layer
+// above any docked pane, wherever it is in the DOM, and owns its keyboard.
+export function modalDialogOpen(): boolean {
+  return [...document.querySelectorAll('dialog[open]')].some(dialog => dialog.matches(':modal'))
+}
 export function isSettingsField(target: EventTarget | null): target is HTMLElement {
   return target instanceof HTMLElement && !!target.closest('input, textarea, select, [contenteditable="true"], [contenteditable=""]')
 }

@@ -24,7 +24,7 @@ func (m *Module) resolveSessionBinding(w http.ResponseWriter, r *http.Request) {
 		httpapi.WriteError(w, http.StatusUnauthorized, "unauthorized")
 		return
 	}
-	r.Body = http.MaxBytesReader(w, r.Body, 8192)
+	r.Body = httpapi.RequestBodyReader(w, r, 8192)
 	var in struct {
 		Ref string `json:"harness_session_ref"`
 	}

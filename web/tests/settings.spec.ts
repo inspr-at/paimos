@@ -8,7 +8,6 @@ import { agentData, mockAgents } from './agents-fixtures'
 import { mockSettings, settingsData, type SettingsMockOptions } from './settings-fixtures'
 import { accessWorld, mockAccess } from './access-fixtures'
 import { controlStability } from './control-stability'
-import { mkdir } from 'node:fs/promises'
 
 const sections = (page: Page) => page.getByRole('navigation', { name: 'Settings sections' })
 async function setup(page: Page, options: SettingsMockOptions & { role?: 'admin' | 'member' } = {}) {
@@ -31,7 +30,7 @@ test('the account menu opens Settings on Personal: theme, greeting and keys', as
   await page.getByRole('menuitem', { name: 'Personal settings' }).click()
   await expect(page).toHaveURL('/settings/personal')
   await expect(page).toHaveTitle(/^Settings · /)
-  await expect(sections(page).getByRole('link')).toHaveText([/^Personal/, /^Theme/, /^Developer/, /^Workspace/, /^Vocabulary/, /^Access/, /^Agents/, /^Autopilot/, /^Business/, /^Product portal/])
+  await expect(sections(page).getByRole('link')).toHaveText([/^Personal/, /^Theme/, /^Developer/, /^Workspace/, /^Vocabulary/, /^Kinds of work/, /^Access/, /^Policies/, /^Models/, /^Routines/, /^Agents/, /^Autopilot/, /^Business/, /^Product portal/])
   await expect(sections(page).getByRole('link', { name: /^Personal/ })).toHaveAttribute('aria-current', 'page')
 
   await page.getByRole('radio', { name: 'Dark' }).click()
@@ -60,12 +59,12 @@ test('a greeting that cannot be saved goes back to how it was', async ({ page })
   await expect(page.getByRole('checkbox', { name: 'Greeting On' })).toBeChecked()
 })
 
-test('members see Personal and Developer; an admin section explains itself', async ({ page }) => {
+test('members see Personal, Developer and Policies; an admin section explains itself', async ({ page }) => {
   await setup(page, { role: 'member' })
   await page.goto('/settings')
   await expect(page).toHaveURL('/settings/personal')
-  // Members get both per-person settings sections.
-  await expect(sections(page).getByRole('link')).toHaveText([/^Personal/, /^Theme/, /^Developer/, /^Vocabulary/])
+  // Members get per-person settings, vocabulary, read-only Policies and the workspace's Routines.
+  await expect(sections(page).getByRole('link')).toHaveText([/^Personal/, /^Theme/, /^Developer/, /^Vocabulary/, /^Policies/, /^Routines/])
   await expect(page.getByRole('heading', { name: 'Greeting' })).toBeVisible()
   await page.goto('/settings/workspace')
   await expect(page.getByRole('heading', { name: 'Workspace settings are for workspace admins' })).toBeVisible()
@@ -81,7 +80,17 @@ test('grouped navigation stays put across section changes and places policy card
   await mockAccess(page, accessWorld(), { also: ['account.read', 'rules.read', 'models.read'] })
   await page.goto('/settings/workspace')
   const nav = sections(page)
-  await expect(nav.getByRole('link')).toHaveCount(12)
+  // Kinds of work sits with Workspace once models.read is granted, beside Models,
+  // Agent rules and the three account parts (AEON-1171: Accounts, Computers, Capacity).
+  // The count is the whole granted list, in section order.
+  await expect(nav.getByRole('link')).toHaveText([/^Personal/, /^Theme/, /^Developer/, /^Workspace/, /^Vocabulary/, /^Kinds of work/, /^Access/, /^Policies/, /^Models/, /^Routines/, /^Agents/, /^Agent rules/, /^Accounts/, /^Computers/, /^Capacity/, /^Autopilot/, /^Business/, /^Product portal/])
+  await expect(nav.getByRole('link')).toHaveCount(18)
+  await expect(nav.getByRole('link', { name: /^Kinds of work/ })).toBeVisible()
+  await expect(nav.getByRole('link', { name: /^Models/ })).toBeVisible()
+  await expect(nav.getByRole('link', { name: /^Agent rules/ })).toBeVisible()
+  await expect(nav.getByRole('link', { name: /^Accounts/ })).toBeVisible()
+  await expect(nav.getByRole('link', { name: /^Computers/ })).toBeVisible()
+  await expect(nav.getByRole('link', { name: /^Capacity/ })).toBeVisible()
   await expect(nav.locator('.nav-group')).toHaveText(['You', 'Workspace', 'Agents and automation', 'Business'])
   await expect(page.locator('.body > .who')).toHaveText('Admins only see and change this section.')
   await expect(page.locator('#work-vocabulary, #model-refresh, #status-autopilot, #members, #estimates')).toHaveCount(0)
@@ -213,8 +222,9 @@ for (const width of [390, 1024, 1440]) for (const theme of ['light', 'dark']) {
     await page.goto('/settings/vocabulary')
     await page.evaluate(value => document.documentElement.setAttribute('data-theme', value), theme)
     const card = page.locator('#work-vocabulary')
-    await expect(card.locator('.read-only-levels dd')).toHaveText(names)
-    await expect(card.locator('input, select, .actions')).toHaveCount(0)
+    // Top-down: the two levels first, the leaf last.
+    await expect(card.locator('.read-only-levels dd')).toHaveText([names[1], names[2], names[0]])
+    await expect(card.locator('input, select, button, .actions')).toHaveCount(0)
     await expect(card.locator('.preview')).toHaveText(`${names[1]} / ${names[2]} / ${names[0]}`)
 
     const bounds = await card.evaluate(el => {
@@ -248,8 +258,8 @@ for (const width of [390, 1024, 1440]) for (const theme of ['light', 'dark']) {
       await guard.check(() => navigation.getByRole('link', { name: /^Vocabulary/ }).hover())
     }
     guard.done()
-    await mkdir('test-results/aeon-694-fix3', { recursive: true })
-    await page.screenshot({ path: `test-results/aeon-694-fix3/vocabulary-member-${width}-${theme}.png`, fullPage: true })
+    await page.screenshot({ path: test.info().outputPath(`vocabulary-member-${width}-${theme}.png`), fullPage: true })
+    await card.screenshot({ path: test.info().outputPath(`readonly-${width}-${theme}.png`) })
   })
 }
 
@@ -266,57 +276,58 @@ test('old workspace policy bookmarks open the moved card', async ({ page }) => {
 test('old workspace bookmarks redirect during section and hash changes inside Settings', async ({ page }) => {
   await setup(page)
   await page.goto('/settings/personal')
-  // Bookmark arrival deliberately scrolls to its card. Compare sticky controls
-  // at the same scroll position, preserving the guard's full geometry checks.
-  async function resetScroll() {
+  // Bookmark arrival deliberately scrolls to its card and rings it. The card
+  // renders only once its data is in, and the arrival watcher polls for it, so
+  // the scroll trails the card by up to one poll. The ring is the barrier: only
+  // after it shows has the scroll happened, and resetting afterwards compares
+  // the sticky controls at the same scroll position (a reset before the scroll
+  // let the scroll land between reset and measurement; CI saw navigation.y
+  // off by 192 px, AEON-724 PR #299).
+  async function arrivedThenReset(id: string) {
+    await expect(page.locator(`#${id}`)).toBeVisible()
+    await expect(page.locator(`#${id}.arrived`)).toBeVisible()
     await page.locator('main').evaluate(el => el.scrollTo(0, 0))
     await expect.poll(() => page.locator('main').evaluate(el => el.scrollTop)).toBe(0)
   }
-  // The card renders once its data has loaded; the deep link then scrolls to it
-  // and marks it arrived. Resetting before that mark races the arrival scroll,
-  // which then wins and leaves the body scrolled (CI, PR #310).
-  async function arrivedAt(id: string) {
-    const card = page.locator(`#${id}`)
-    await expect(card).toBeVisible()
-    await expect(card).toHaveClass(/\barrived\b/)
-    await resetScroll()
-  }
   const guard = await controlStability(page, { navigation: sections(page), personal: sections(page).getByRole('link', { name: /^Personal/ }) })
-  await guard.check(async () => {
-    await page.evaluate(() => import('/src/router.ts').then(({ router }) => router.push('/settings/workspace?source=bookmark#estimates')))
-    await expect(page).toHaveURL('/settings/agents?source=bookmark#estimates')
-    await arrivedAt('estimates')
-  })
+  for (const anchor of ['estimates', 'agent-activity', 'silent-sessions']) {
+    await guard.check(async () => {
+      await page.evaluate(id => import('/src/router.ts').then(({ router }) => router.push(`/settings/workspace?source=bookmark#${id}`)), anchor)
+      await expect(page).toHaveURL(`/settings/agents?source=bookmark#${anchor}`)
+      await arrivedThenReset(anchor)
+    })
+  }
   await guard.check(async () => {
     await sections(page).getByRole('link', { name: /^Workspace/ }).click()
     await expect(page).toHaveURL('/settings/workspace')
     await page.evaluate(() => import('/src/router.ts').then(({ router }) => router.push({ hash: '#status-autopilot' })))
     await expect(page).toHaveURL('/settings/autopilot#status-autopilot')
-    await arrivedAt('status-autopilot')
+    await arrivedThenReset('status-autopilot')
   })
   await guard.check(async () => {
     await page.evaluate(() => import('/src/router.ts').then(({ router }) => router.push('/settings/workspace#work-vocabulary')))
     await expect(page).toHaveURL('/settings/vocabulary#work-vocabulary')
-    await arrivedAt('work-vocabulary')
+    await arrivedThenReset('work-vocabulary')
   })
   guard.done()
 })
 
-test('settings layout evidence in light and dark at phone, tablet and desktop sizes', async ({ page }) => {
-  await setup(page)
-  await mockAccess(page, accessWorld(), { also: ['account.read', 'rules.read', 'models.read'] })
-  await mkdir('test-results/aeon-694-shots', { recursive: true })
-  for (const width of [390, 1024, 1440]) {
+// Each viewport/theme owns its fixture state and timeout; all 90 states remain.
+for (const width of [390, 1024, 1440]) for (const theme of ['light', 'dark']) {
+  test(`settings layout evidence in light and dark at phone, tablet and desktop sizes: ${width}px ${theme}`, async ({ page }) => {
+    test.setTimeout(120_000)
+    await setup(page)
+    await mockAccess(page, accessWorld(), { also: ['account.read', 'rules.read', 'models.read'] })
     await page.setViewportSize({ width, height: 900 })
-    for (const theme of ['light', 'dark']) {
-      await page.addInitScript(value => localStorage.setItem('aeon-theme', value), theme)
-      for (const section of ['personal', 'theme', 'developer', 'workspace', 'vocabulary', 'access', 'agents', 'agent-rules', 'accounts', 'autopilot', 'business', 'portal']) {
-        await page.goto(`/settings/${section}`)
-        await expect(page.locator('.body > .who')).toBeVisible()
-        await page.evaluate(value => document.documentElement.setAttribute('data-theme', value), theme)
-        await page.screenshot({ path: `test-results/aeon-694-shots/${section}-${width}-${theme}.png` })
-        expect(await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth), `${section} at ${width}`).toBeLessThanOrEqual(1)
-      }
+    await page.addInitScript(value => localStorage.setItem('aeon-theme', value), theme)
+    for (const section of ['personal', 'theme', 'developer', 'workspace', 'vocabulary', 'kinds', 'access', 'agents', 'agent-rules', 'accounts', 'computers', 'capacity', 'autopilot', 'business', 'portal']) {
+      await page.goto(`/settings/${section}`)
+      const audience = section === 'kinds' ? page.locator('.kinds-section > .who') : page.locator('.body > .who')
+      await expect(audience).toBeVisible()
+      if (section === 'kinds') await expect(audience).toContainText('Admins define the kinds; you can read them.')
+      await page.evaluate(value => document.documentElement.setAttribute('data-theme', value), theme)
+      await page.screenshot({ path: test.info().outputPath(`${section}-${width}-${theme}.png`) })
+      expect(await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth), `${section} at ${width}`).toBeLessThanOrEqual(1)
     }
-  }
-})
+  })
+}

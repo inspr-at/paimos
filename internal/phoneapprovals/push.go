@@ -4,6 +4,7 @@ package phoneapprovals
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"io"
 	"net/http"
 	"time"
@@ -35,12 +36,98 @@ func (m *Module) Run(ctx context.Context) {
 	}
 	ticker := time.NewTicker(30 * time.Second)
 	defer ticker.Stop()
+	m.run(ctx, ticker.C, nil)
+}
+
+// The listener joins the shared aeon_events connection. A bounded
+// queue drops excess hints; startup, reconnect and ticker scans recover them.
+func (m *Module) run(ctx context.Context, ticks <-chan time.Time, scanned func()) {
+	wakes := make(chan string, 64)
+	listenCtx, cancel := context.WithCancel(ctx)
+	defer cancel()
+	done := make(chan struct{})
+	go func() { defer close(done); m.listenPush(listenCtx, wakes) }()
+	defer func() { cancel(); <-done }()
+	_ = m.dispatch(ctx)
 	for {
-		_ = m.dispatch(ctx)
 		select {
 		case <-ctx.Done():
 			return
-		case <-ticker.C:
+		case <-ticks:
+			_ = m.dispatch(ctx)
+		case id := <-wakes:
+			if id == "" {
+				_ = m.dispatch(ctx)
+			} else {
+				_ = m.dispatchTenant(db.AllProjects(ctx, "phone notification event; recipients reauthorized"), id)
+			}
+		}
+		if scanned != nil {
+			scanned()
+		}
+	}
+}
+
+func (m *Module) listenPush(ctx context.Context, wakes chan<- string) {
+	for ctx.Err() == nil {
+		_ = m.listenPushConnection(ctx, wakes)
+		retry := time.NewTimer(time.Second)
+		select {
+		case <-ctx.Done():
+			retry.Stop()
+			return
+		case <-retry.C:
+		}
+	}
+}
+
+func (m *Module) listenPushConnection(ctx context.Context, wakes chan<- string) error {
+	// Expiry follows the existing reconnect path, whose initial scan recovers
+	// durable requests committed while the dedicated backend was disconnected.
+	ctx, stop := context.WithTimeout(ctx, db.ListenerMaxLifetime)
+	defer stop()
+	conn, err := db.SubscribeNotifications(ctx, m.pool, "aeon_events", "")
+	if err != nil {
+		return err
+	}
+	defer func() { _ = conn.Close(context.Background()) }()
+	wake := func(id string) {
+		select {
+		case wakes <- id:
+		default:
+		}
+	}
+	// Subscribe before scanning to cover requests committed during connection setup.
+	wake("")
+	for {
+		n, err := conn.WaitForNotification(ctx)
+		if err != nil {
+			return err
+		}
+		if db.IsResync(n) {
+			wake("")
+			continue
+		}
+		var hint struct {
+			Tenant string `json:"tenant_id"`
+			ID     int64  `json:"id"`
+		}
+		if len(n.Payload) > 1024 || json.Unmarshal([]byte(n.Payload), &hint) != nil || !validID(hint.Tenant) || hint.ID < 1 {
+			continue
+		}
+		// Notifications contain only an ID. Read the committed type under RLS;
+		// unrelated events (including notification audits) never trigger a scan.
+		readCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
+		var typ string
+		err = db.InTenantReadSnapshot(db.AllProjects(readCtx, "phone notification event type"), m.pool, hint.Tenant, func(tx pgx.Tx) error {
+			return tx.QueryRow(readCtx, `SELECT type FROM events WHERE tenant_id=$1 AND id=$2`, hint.Tenant, hint.ID).Scan(&typ)
+		})
+		cancel()
+		if err != nil && !errors.Is(err, pgx.ErrNoRows) {
+			return err
+		}
+		if typ == "approval.proposed" || typ == "harness.attach_requested" || typ == "stepup.pending" {
+			wake(hint.Tenant)
 		}
 	}
 }
@@ -94,7 +181,7 @@ func (m *Module) dispatchTenant(ctx context.Context, tenantID string) error {
 		if err != nil {
 			return err
 		}
-		rows, err = tx.Query(ctx, `SELECT 'approval',r.id::text,'',r.proposed_at FROM approval_requests r WHERE r.expires_at>now() AND NOT EXISTS(SELECT 1 FROM approval_decisions d WHERE d.request_id=r.id) UNION ALL SELECT 'attach',id::text,owner_id::text,created_at FROM harness_attach_requests WHERE state='pending' AND expires_at>now() ORDER BY 4 LIMIT 100`)
+		rows, err = tx.Query(ctx, `SELECT 'approval',r.id::text,'',r.proposed_at FROM approval_requests r WHERE r.expires_at>now() AND NOT EXISTS(SELECT 1 FROM approval_decisions d WHERE d.request_id=r.id) UNION ALL SELECT 'attach',id::text,owner_id::text,created_at FROM harness_attach_requests WHERE state='pending' AND expires_at>now() UNION ALL SELECT 'stepup',id::text,'',created_at FROM stepup_requests WHERE state='pending' AND expires_at>now() ORDER BY 4 LIMIT 100`)
 		if err != nil {
 			return err
 		}
@@ -120,12 +207,12 @@ func (m *Module) dispatchTenant(ctx context.Context, tenantID string) error {
 				if n.owner != "" && n.owner != r.p.ID {
 					continue
 				}
-				if _, err = loadReview(ctx, tx, r.p, n.kind, n.id); err != nil {
+				if _, err = m.loadReview(ctx, tx, r.p, n.kind, n.id); err != nil {
 					continue
 				}
 				// Escalation starts with the request, so an unavailable or quiet first
 				// recipient cannot hold every later authorized person indefinitely.
-				eligible := rank == 0 || now.Sub(n.created) >= time.Duration(rank*r.prefs.Escalation)*time.Minute
+				eligible := n.kind == "stepup" || rank == 0 || now.Sub(n.created) >= time.Duration(rank*r.prefs.Escalation)*time.Minute
 				rank++
 				if !eligible || quiet(r.prefs, now) || counts[r.p.ID] >= 10 {
 					continue
@@ -211,7 +298,7 @@ func (m *Module) deliver(ctx context.Context, d delivery) error {
 		if !prefs.Enabled || quiet(prefs, time.Now()) {
 			return nil
 		}
-		v, err := loadReview(ctx, tx, p, d.kind, d.request)
+		v, err := m.loadReview(ctx, tx, p, d.kind, d.request)
 		valid = err == nil && v.Pending
 		return nil
 	})

@@ -24,8 +24,9 @@ export function mountView(path: string, modules: Record<string, unknown>, props:
   const exports: { default?: Vue.Component } = {}
   const stub = { __esModule: true, default: { setup: (_props: unknown, { slots }: Vue.SetupContext) => () => Vue.h('section', {}, slots.default?.()) } }
   const model = { created: (el: RenderNode, binding: Vue.DirectiveBinding) => { el.props.value = binding.value }, beforeUpdate: (el: RenderNode, binding: Vue.DirectiveBinding) => { el.props.value = binding.value } }
+  const radio = { created: (el: RenderNode, binding: Vue.DirectiveBinding) => { el.props.checked = el.props.value === binding.value }, beforeUpdate: (el: RenderNode, binding: Vue.DirectiveBinding) => { el.props.checked = el.props.value === binding.value } }
   new Function('require', 'exports', outputText)((id: string) => {
-    if (id === 'vue') return { ...Vue, vModelText: model, vModelSelect: model, vModelCheckbox: model }
+    if (id === 'vue') return { ...Vue, vModelText: model, vModelSelect: model, vModelCheckbox: model, vModelRadio: radio }
     if (id in modules) return modules[id]
     if (id.endsWith('.vue')) return stub
     throw new Error(`Unmocked dependency ${id}`)

@@ -4,7 +4,6 @@ package authz
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -100,7 +99,7 @@ func internalFail(w http.ResponseWriter, err error) {
 	}
 }
 func decode(r *http.Request, v any) error {
-	d := json.NewDecoder(io.LimitReader(r.Body, 1<<20))
+	d := httpapi.NewRequestDecoder(nil, r, 1<<20)
 	d.DisallowUnknownFields()
 	if err := d.Decode(v); err != nil {
 		return err
@@ -262,7 +261,7 @@ func canGrantTx(ctx context.Context, tx pgx.Tx, p tenant.Principal, perms []stri
 // Workspace owners may explicitly opt a custom role into conversation viewing.
 // This delegation exception grants no implicit viewing access to the owner.
 func canGrantExplicitWatch(p tenant.Principal, own Effective, key string) bool {
-	return key == "harness.watch" && p.Kind == tenant.Person && own.Workspace.Role != nil && own.Workspace.Role.Key == "owner"
+	return (key == "harness.watch" || key == "reviews.visual_approve") && p.Kind == tenant.Person && own.Workspace.Role != nil && own.Workspace.Role.Key == "owner"
 }
 
 // Serialize access-management changes per tenant, then recheck the actor's

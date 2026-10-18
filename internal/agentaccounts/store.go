@@ -7,8 +7,10 @@ import (
 	"errors"
 	"math"
 	"net/http"
+	"strconv"
 	"time"
 
+	"github.com/inspr-at/paimos/internal/accountuse"
 	"github.com/jackc/pgx/v5"
 
 	"github.com/inspr-at/paimos/internal/agentpairing"
@@ -60,19 +62,52 @@ func listAccounts(ctx context.Context, tx pgx.Tx) ([]Account, error) {
 // queryAccounts with retired lists every account, for a daemon reconciling
 // its own registrations.
 func queryAccounts(ctx context.Context, tx pgx.Tx, retired bool) ([]Account, error) {
-	rows, err := tx.Query(ctx, `
+	return queryAccountsLimit(ctx, tx, retired, 0)
+}
+
+func queryAccountsLimit(ctx context.Context, tx pgx.Tx, retired bool, bound int) ([]Account, error) {
+	return queryAccountsInputs(ctx, tx, retired, bound, accountuse.ContextLabels, nil)
+}
+
+func queryCapacityAccounts(ctx context.Context, tx pgx.Tx, retired bool, related ...[]string) ([]Account, error) {
+	var ids []string
+	if len(related) > 0 {
+		ids = related[0]
+	}
+	return queryAccountsInputs(ctx, tx, retired, maxWaitAccounts, capacityContextLabels, ids)
+}
+
+func queryAccountsInputs(ctx context.Context, tx pgx.Tx, retired bool, bound int, labels func(context.Context, pgx.Tx, []string) (map[string][]accountuse.ContextLabel, error), related []string) ([]Account, error) {
+	predicate := `$1 OR NOT ` + retiredSQL
+	if related != nil {
+		predicate = `(` + predicate + `)`
+	}
+	query := `
 		SELECT id::text, account_key, harness, daemon_id, label, max_parallel_runs,
 		       registered_by_principal_id::text, state, last_probe_at, last_probe_ok,
 		       last_daemon_generation, created_at, plan, host_label, allowed_model_profile_ids::text[], reading_support, quota_fingerprint, statusline_enabled, provider, model, model_status, model_data_note, openrouter_credits, COALESCE(group_id::text,''), quota_pool_fingerprint, billing_mode
 		FROM agent_accounts
-		WHERE $1 OR NOT `+retiredSQL+`
-		ORDER BY created_at, id`, retired)
+		WHERE ` + predicate
+	args := []any{retired}
+	if related != nil {
+		query += ` AND (id=ANY($2::uuid[]) OR EXISTS(SELECT 1 FROM agent_accounts own WHERE own.id=ANY($2::uuid[]) AND own.quota_pool_fingerprint<>'' AND own.harness=agent_accounts.harness AND own.quota_pool_fingerprint=agent_accounts.quota_pool_fingerprint))`
+		args = append(args, related)
+	}
+	query += ` ORDER BY created_at, id`
+	if bound > 0 {
+		query += ` LIMIT $` + strconv.Itoa(len(args)+1)
+		args = append(args, bound+1)
+	}
+	rows, err := tx.Query(ctx, query, args...)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
 	out := []Account{}
 	for rows.Next() {
+		if bound > 0 && len(out) == bound {
+			return nil, queueSnapshotOverflow("account")
+		}
 		account, err := scanAccount(rows)
 		if err != nil {
 			return nil, err
@@ -82,8 +117,25 @@ func queryAccounts(ctx context.Context, tx pgx.Tx, retired bool) ([]Account, err
 	if err := rows.Err(); err != nil {
 		return nil, err
 	}
+	ids := make([]string, len(out))
+	for i, a := range out {
+		ids[i] = a.ID
+	}
+	contexts, err := labels(ctx, tx, ids)
+	if err != nil {
+		return nil, err
+	}
+	for i := range out {
+		out[i].Contexts = contexts[out[i].ID]
+	}
+	if bound > 0 {
+		return attachWindowsLimit(ctx, tx, out, maxWaitWindows)
+	}
 	return attachWindows(ctx, tx, out)
 }
+
+// loadAccount reads one account. Tests replace it to inject lookup failures.
+var loadAccount = getAccount
 
 func getAccount(ctx context.Context, tx pgx.Tx, id string) (Account, error) {
 	row := tx.QueryRow(ctx, `
@@ -114,6 +166,10 @@ func scanAccount(row scanner) (Account, error) {
 }
 
 func attachWindows(ctx context.Context, tx pgx.Tx, accounts []Account) ([]Account, error) {
+	return attachWindowsLimit(ctx, tx, accounts, 0)
+}
+
+func attachWindowsLimit(ctx context.Context, tx pgx.Tx, accounts []Account, bound int) ([]Account, error) {
 	if len(accounts) == 0 {
 		return accounts, nil
 	}
@@ -121,7 +177,7 @@ func attachWindows(ctx context.Context, tx pgx.Tx, accounts []Account) ([]Accoun
 	for _, a := range accounts {
 		ids = append(ids, a.ID)
 	}
-	rows, err := tx.Query(ctx, `
+	query := `
 		SELECT w.id::text, w.account_id::text, w.starts_at, w.ends_at, w.unit,
 		       w.allowance, w.used, w.reserved, w.pace_model, w.burst_ratio::float8,
 		       NOT EXISTS (
@@ -134,13 +190,24 @@ func attachWindows(ctx context.Context, tx pgx.Tx, accounts []Account) ([]Accoun
 		       ) AS provisional, w.capacity_read_at, w.capacity_allowed, COALESCE(w.capacity_kind,''), w.capacity_bucket, w.capacity_retired, w.capacity_refresh_run::text, COALESCE(w.capacity_source,'')
 		FROM account_allowance_windows w
 		WHERE w.account_id=ANY($1::uuid[]) AND NOT w.pairing_verification AND NOT w.capacity_retired AND w.removed_at IS NULL
-		ORDER BY w.account_id, w.starts_at, w.id`, ids)
+		ORDER BY w.account_id, w.starts_at, w.id`
+	args := []any{ids}
+	if bound > 0 {
+		query += ` LIMIT $2`
+		args = append(args, bound+1)
+	}
+	rows, err := tx.Query(ctx, query, args...)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
 	byAccount := map[string][]Window{}
+	count := 0
 	for rows.Next() {
+		if bound > 0 && count == bound {
+			return nil, queueSnapshotOverflow("window")
+		}
+		count++
 		var w Window
 		if err := rows.Scan(&w.ID, &w.AccountID, &w.StartsAt, &w.EndsAt, &w.Unit, &w.Allowance, &w.Used, &w.Reserved, &w.PaceModel, &w.BurstRatio, &w.Provisional, &w.capacityReadAt, &w.capacityAllowed, &w.capacityKind, &w.capacityBucket, &w.capacityRetired, &w.capacityRefreshRun, &w.capacitySource); err != nil {
 			return nil, err
@@ -155,12 +222,48 @@ func attachWindows(ctx context.Context, tx pgx.Tx, accounts []Account) ([]Accoun
 	if err := rows.Err(); err != nil {
 		return nil, err
 	}
-	for i := range accounts {
-		if err := tx.QueryRow(ctx, `SELECT NOT EXISTS(SELECT 1 FROM agent_pairing_enrollments WHERE account_id=$1 AND (ongoing_approved_at IS NULL OR state<>'connected')),a.owner_person_id::text,COALESCE(p.name,''),a.linked_at,a.link_revision,a.share_usage,
+	metadata, err := tx.Query(ctx, `SELECT a.id::text, NOT EXISTS(SELECT 1 FROM agent_pairing_enrollments WHERE account_id=a.id AND (ongoing_approved_at IS NULL OR state<>'connected')),a.owner_person_id::text,COALESCE(p.name,''),a.linked_at,a.link_revision,a.share_usage,COALESCE(a.usage_probe_enabled AND a.usage_probe_revision=a.link_revision AND a.owner_person_id IS NOT NULL,false),a.usage_budget,
  (SELECT e.evidence FROM agent_account_residency_evidence e WHERE e.tenant_id=a.tenant_id AND e.account_id=a.id AND e.binding=`+residencyBindingSQL+`)
- FROM agent_accounts a LEFT JOIN principals p ON p.tenant_id=a.tenant_id AND p.id=a.owner_person_id WHERE a.id=$1`, accounts[i].ID).Scan(&accounts[i].OngoingUseApproved, &accounts[i].OwnerPersonID, &accounts[i].OwnerPersonName, &accounts[i].LinkedAt, &accounts[i].LinkRevision, &accounts[i].ShareUsage, &accounts[i].residencyEvidence); err != nil {
+ FROM agent_accounts a LEFT JOIN principals p ON p.tenant_id=a.tenant_id AND p.id=a.owner_person_id WHERE a.id=ANY($1::uuid[])`, ids)
+	if err != nil {
+		return nil, err
+	}
+	byID := make(map[string]int, len(accounts))
+	for i := range accounts {
+		byID[accounts[i].ID] = i
+	}
+	for metadata.Next() {
+		var id string
+		var a Account
+		if err := metadata.Scan(&id, &a.OngoingUseApproved, &a.OwnerPersonID, &a.OwnerPersonName, &a.LinkedAt, &a.LinkRevision, &a.ShareUsage, &a.UsageProbeEnabled, &a.UsageBudget, &a.residencyEvidence); err != nil {
+			metadata.Close()
 			return nil, err
 		}
+		i, ok := byID[id]
+		if !ok {
+			metadata.Close()
+			return nil, pgx.ErrNoRows
+		}
+		accounts[i].OngoingUseApproved = a.OngoingUseApproved
+		accounts[i].OwnerPersonID = a.OwnerPersonID
+		accounts[i].OwnerPersonName = a.OwnerPersonName
+		accounts[i].LinkedAt = a.LinkedAt
+		accounts[i].LinkRevision = a.LinkRevision
+		accounts[i].ShareUsage = a.ShareUsage
+		accounts[i].UsageProbeEnabled = a.UsageProbeEnabled
+		accounts[i].UsageBudget = a.UsageBudget
+		accounts[i].residencyEvidence = a.residencyEvidence
+		delete(byID, id)
+	}
+	metadata.Close()
+	if err := metadata.Err(); err != nil {
+		return nil, err
+	}
+	if len(byID) != 0 {
+		return nil, pgx.ErrNoRows
+	}
+	for i := range accounts {
+
 		if ws := byAccount[accounts[i].ID]; ws != nil {
 			accounts[i].Windows = ws
 		} else {
@@ -174,12 +277,29 @@ func attachWindows(ctx context.Context, tx pgx.Tx, accounts []Account) ([]Accoun
 }
 
 func occupancy(ctx context.Context, tx pgx.Tx) (map[string]int, error) {
+	return occupancyExcept(ctx, tx, "")
+}
+
+func occupancyExcept(ctx context.Context, tx pgx.Tx, runID string) (map[string]int, error) {
+	return occupancyExceptNative(ctx, tx, runID, "")
+}
+
+// Native roots hold capacity until verified release, including idle writers and
+// obsolete daemon generations. The two exclusions are separate identities:
+// a worker retry excludes its run; a root claim retry excludes only its root.
+func occupancyExceptNative(ctx context.Context, tx pgx.Tx, runID, ownedSessionID string) (map[string]int, error) {
+	// A lifecycle release clears the ticket hold, not the process's slot.
+	// Only authenticated exit telemetry clears exit_unconfirmed.
 	rows, err := tx.Query(ctx, `
-		SELECT account_id::text, count(*)
-		FROM agent_runs
-		WHERE account_id IS NOT NULL
-		  AND status IN ('queued', 'starting', 'running', 'waiting')
-		GROUP BY account_id`)
+		SELECT account_id::text, count(*) FROM (
+		  SELECT account_id FROM agent_runs
+		  WHERE account_id IS NOT NULL AND id::text<>$1
+		    AND (status IN ('queued', 'starting', 'running', 'waiting')
+		      OR trace->'work_lifecycle_release'->>'exit_unconfirmed'='true')
+		  UNION ALL
+		  SELECT account_id FROM native_session_roots
+		  WHERE run_id IS NULL AND released_at IS NULL AND owned_session_id::text<>$2
+		) holds GROUP BY account_id`, runID, ownedSessionID)
 	if err != nil {
 		return nil, err
 	}
@@ -287,7 +407,17 @@ func isNoRows(err error) bool {
 	return errors.Is(err, pgx.ErrNoRows)
 }
 
+// accountNotFound maps a missing account to 404. Any other lookup error,
+// including a database outage, stays a server error.
+func accountNotFound(err error) error {
+	if isNoRows(err) {
+		return fail(404, "account not found")
+	}
+	return err
+}
+
 type probeWrite struct {
+	observedAt        *time.Time          // Batch-only health timestamp; never decode authority from HTTP.
 	MeasurementOnly   bool                `json:"measurement_only,omitempty"`
 	Readiness         *ReadinessReport    `json:"readiness,omitempty"`
 	OpenRouterCredits *openrouter.Credits `json:"openrouter_credits"`
@@ -348,6 +478,16 @@ func reportProbe(ctx context.Context, tx pgx.Tx, p tenant.Principal, accountID s
 	now, err := dbNow(ctx, tx)
 	if err != nil {
 		return Account{}, err
+	}
+	observedAt := now
+	if in.observedAt != nil {
+		observedAt = *in.observedAt
+		if observedAt.Before(now.Add(-ProbeFreshness)) || observedAt.After(now.Add(time.Minute)) || before.LastProbeAt != nil && observedAt.Before(*before.LastProbeAt) {
+			return Account{}, fail(http.StatusConflict, "stale account probe observation")
+		}
+		if observedAt.After(now) {
+			observedAt = now
+		}
 	}
 	if in.OpenRouterCredits != nil && (before.Provider != "openrouter" || !in.OpenRouterCredits.Valid() || in.OpenRouterCredits.ObservedAt.After(now.Add(time.Minute))) {
 		return Account{}, fail(400, "invalid OpenRouter credits")
@@ -448,7 +588,7 @@ func reportProbe(ctx context.Context, tx pgx.Tx, p tenant.Principal, accountID s
 		UPDATE agent_accounts
 		SET last_probe_at = $7, last_probe_ok = $2, last_daemon_generation = $3, host_label = CASE WHEN host_label = '' THEN COALESCE($4, '') ELSE host_label END,
 		    last_probe_failure = $5, openrouter_credits=$6
-		WHERE id = $1::uuid`, accountID, in.Available, generation, in.HostLabel, failure, in.OpenRouterCredits, now); err != nil {
+		WHERE id = $1::uuid`, accountID, in.Available, generation, in.HostLabel, failure, in.OpenRouterCredits, observedAt); err != nil {
 		return Account{}, err
 	}
 	after, err := getAccount(ctx, tx, accountID)
@@ -622,13 +762,23 @@ func archiveAccount(ctx context.Context, tx pgx.Tx, p tenant.Principal, accountI
 	if archived {
 		return before, nil
 	}
+	// Check before DisconnectAccount can revoke enrollment or final-report
+	// authority. A native root is an owned writer even when no worker run exists.
+	roots, err := NativeRootCountTx(ctx, tx, accountID, "", "")
+	if err != nil {
+		return Account{}, err
+	}
+	if roots > 0 {
+		return Account{}, &httpError{status: http.StatusConflict, msg: "a native session is still using this account", code: "account_busy"}
+	}
 	if err := agentpairing.DisconnectAccount(ctx, tx, p, accountID); errors.Is(err, agentpairing.ErrActiveRuns) {
 		return Account{}, &httpError{status: http.StatusConflict, msg: "a run is still working on this account", code: "account_busy"}
 	} else if err != nil {
 		return Account{}, err
 	}
 	var active bool
-	if err := tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM agent_runs WHERE account_id = $1::uuid AND status IN ('starting','running','waiting'))`, accountID).Scan(&active); err != nil {
+	if err := tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM agent_runs WHERE account_id = $1::uuid AND (status IN ('starting','running','waiting')
+  OR trace->'work_lifecycle_release'->>'exit_unconfirmed'='true'))`, accountID).Scan(&active); err != nil {
 		return Account{}, err
 	}
 	if active {

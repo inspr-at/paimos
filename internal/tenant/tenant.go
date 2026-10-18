@@ -18,12 +18,15 @@ const (
 
 // Principal is who acts, always inside exactly one tenant.
 type Principal struct {
+	MessagingOnly         bool   // persistent principal restriction, independent of key/role grants
+	BrowserSession        bool   // authenticated interactive cookie only
 	ID                    string // principals.id (uuid)
 	TenantID              string // tenants.id (uuid)
 	Kind                  PrincipalKind
 	Name                  string
 	Roles                 []string // e.g. "admin", "member"
 	Scopes                []string // authenticated agent key's outer permission ceiling
+	FullAccess            bool     // dynamic agent-grantable key ceiling, independent of workstation designation
 	KeyCreatorID          string   // creator's live binding further narrows an agent key
 	KeyID                 string   `json:"-"` // authenticating key metadata ID; never a prefix or credential
 	OwnerWorkstation      bool     // explicit designation; authz rechecks live binding

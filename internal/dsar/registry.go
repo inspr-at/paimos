@@ -19,13 +19,15 @@ import (
 	"github.com/jackc/pgx/v5"
 )
 
-// inventoryJSON is deliberately static. Adding a schema column requires a
+// inventoryJSON is deliberately static. The adapter policy is separate from
+// inventory.json's classification registry so its existing schema and merge
+// driver remain compatible. Adding a schema column requires a
 // privacy decision here, even when its name evades personal-data heuristics.
 // Export is a positive allowlist; Metadata is the explicit non-personal
 // allowlist. Review covers free text, JSON, files and subject references.
 // Secret covers credentials and authentication material and is never read.
 //
-//go:embed inventory.json
+//go:embed adapter_inventory.json
 var inventoryJSON string
 
 // Known direct and pseudonymous identifiers cannot enter the non-personal
@@ -271,6 +273,11 @@ func adapterQuery(d Domain, domains map[string]Domain, erase bool) string {
 	if d.Table == "identities" {
 		// Global identity directory: the ownership join is the tenant boundary.
 		where = "true"
+	}
+	if d.Table == "aeon_required_capabilities" {
+		// The exact global capability-floor table is deployment metadata. It
+		// has no tenant or person rows and never contributes a review record.
+		where = "false"
 	}
 	data := "'{}'::jsonb"
 	if !erase {

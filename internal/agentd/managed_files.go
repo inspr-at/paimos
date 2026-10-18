@@ -68,6 +68,11 @@ func addManagedFileTools(s *mcp.Server, b toolBinding) {
 			if !b.active() {
 				return nil, "", ErrNotOwned
 			}
+			if b.routine != nil {
+				if err := routineWritablePath(b.workspace, in.Path); err != nil {
+					return nil, "", err
+				}
+			}
 			err := writeManagedFile(b.workspace, in.Path, in.Content, nil)
 			return nil, "file written", err
 		})
@@ -75,6 +80,11 @@ func addManagedFileTools(s *mcp.Server, b toolBinding) {
 		func(ctx context.Context, _ *mcp.CallToolRequest, in fileEditArgs) (*mcp.CallToolResult, string, error) {
 			if !b.active() {
 				return nil, "", ErrNotOwned
+			}
+			if b.routine != nil {
+				if err := routineWritablePath(b.workspace, in.Path); err != nil {
+					return nil, "", err
+				}
 			}
 			err := writeManagedFile(b.workspace, in.Path, "", &in)
 			return nil, "file edited", err

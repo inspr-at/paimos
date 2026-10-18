@@ -64,15 +64,16 @@ prepare_go() {
 require_buildinfo() {
   local bin="$1" os="$2" arch="$3" cgo="$4" info
   info="$(go version -m "$bin")"
-  if ! printf '%s\n' "$info" | grep -F -q "CGO_ENABLED=${cgo}"; then
+  # An early grep exit must not give a pipe writer SIGPIPE under pipefail.
+  if ! grep -F -q "CGO_ENABLED=${cgo}" <<< "$info"; then
     echo "$bin missing CGO_ENABLED=${cgo}" >&2
     exit 1
   fi
-  if ! printf '%s\n' "$info" | grep -F -q "GOOS=${os}"; then
+  if ! grep -F -q "GOOS=${os}" <<< "$info"; then
     echo "$bin missing GOOS=${os}" >&2
     exit 1
   fi
-  if ! printf '%s\n' "$info" | grep -F -q "GOARCH=${arch}"; then
+  if ! grep -F -q "GOARCH=${arch}" <<< "$info"; then
     echo "$bin missing GOARCH=${arch}" >&2
     exit 1
   fi
@@ -130,7 +131,7 @@ linux_agentd() {
 
 cli_bins() {
   local pair os arch out
-  for pair in darwin/arm64 darwin/amd64 linux/amd64 linux/arm64; do
+  for pair in ${1:-darwin/arm64 darwin/amd64 linux/amd64 linux/arm64}; do
     os="${pair%/*}"
     arch="${pair#*/}"
     out="dist/aeon-cli-${os}-${arch}"
@@ -156,6 +157,8 @@ case "$mode" in
   darwin-agentd) prepare_go; darwin_agentd ;;
   linux-agentd) prepare_go; linux_agentd ;;
   cli) prepare_go; cli_bins ;;
+  cli-linux) prepare_go; cli_bins "linux/amd64 linux/arm64" ;;
+  cli-darwin) prepare_go; cli_bins "darwin/${AEON_DARWIN_ARCH:?set AEON_DARWIN_ARCH}" ;;
   verify-darwin) verify_darwin ;;
   host)
     prepare_go

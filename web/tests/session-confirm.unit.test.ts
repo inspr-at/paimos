@@ -10,7 +10,7 @@ import { deferred, setupSource } from './record-source'
 import * as WorkVocabulary from '../src/lib/workVocabulary'
 
 vi.mock('../src/lib/api', () => ({ api: vi.fn(), getSession: vi.fn(), sessionEnded: { blocked: false, handler: null } }))
-vi.mock('../src/lib/theme', () => ({ restoreTheme: async () => {} }))
+vi.mock('../src/lib/theme', () => ({ restoreTheme: async () => {}, resetTheme: () => {} }))
 const person = (id: string, tenant = 'tenant'): Identity => ({ principal: { id, name: id, kind: 'person' }, tenant: { id: tenant, name: 'Workspace' } })
 const stopped: (() => void)[] = []
 
@@ -45,9 +45,10 @@ function deletingTicket() {
     '../../lib/work': { kindLabel: () => 'Ticket' }, '../../lib/useAttachments': { useAttachments: () => ({}) }, '../../lib/doneGate': {},
     '../../lib/workVocabulary': WorkVocabulary,
     '../../stores/workVocabulary': { useWorkVocabulary: () => ({ value: { revision: 0, leaf: { name: '', icon: '' }, levels: [] } }) },
+    '../../lib/developerSettings': { useDeveloperSettings: () => ({ showExpertStart: ref(false) }) },
     '../../lib/recurrences': {}, '../../lib/useIdentityScope': { useIdentityScope: () => ({ owner: ref(''), reset() {} }) },
     '../../lib/ticketBenefits': { benefitDraft: () => ({}) }, '../../lib/authz': { can: () => false }, '../../lib/releaseAssign': {}, '../../lib/releaseMembership': {},
-    '../../stores/journey': { useJourney: () => ({}) }, '../../stores/workQueue': { useWorkQueue: () => ({ load: async () => {} }) },
+    '../../stores/workQueue': { useWorkQueue: () => ({ load: async () => {} }) },
     '../../lib/usePolledData': { usePoller: () => ({ start() {}, stop() {} }) }, '../../stores/session': { useSession },
   })
   stopped.push(workspace.stop)

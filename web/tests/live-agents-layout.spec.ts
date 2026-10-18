@@ -3,8 +3,8 @@ import { mkdirSync } from 'node:fs'
 import { resolve } from 'node:path'
 import { expect, test, type Locator } from '@playwright/test'
 import { fixtures, liveAgent, mockWork } from './work-fixtures'
+import { mockAgentTheme } from './agent-theme-fixtures'
 
-const shots = resolve('../.agent-shots')
 const longName = 'Alexandria-the-project-coordinator-with-a-long-name'
 const longKey = 'AEON-LONG-PROJECT-202'
 
@@ -38,8 +38,9 @@ async function contained(chip: Locator, labels = true) {
 }
 
 for (const theme of ['light', 'dark'] as const) {
-  for (const style of ['robot-1', 'robot-5']) {
-    test(`chip content at 260–420px and list widths: ${theme}, ${style}`, async ({ page }) => {
+  for (const style of ['robot-1', 'robot-5'] as const) {
+    test(`chip content at 260–420px and list widths: ${theme}, ${style}`, async ({ page }, testInfo) => {
+      const shots = testInfo.outputPath('shots')
       mkdirSync(shots, { recursive: true })
       await page.clock.setSystemTime(new Date('2026-09-23T12:00:00Z'))
       await page.emulateMedia({ colorScheme: theme })
@@ -50,8 +51,10 @@ for (const theme of ['light', 'dark'] as const) {
       data.projects = [1, 2, 4].map(count => ({ ...data.projects[0]!, id: `p-layout-${count}`, key: `PRJ-${count}`, classic: `LIVE${count}`, title: `${count} agents · long labels`, last: '2026-09-23T11:57:00Z' }))
       data.live = [1, 2, 4].flatMap(count => Array.from({ length: count }, (_, i) => liveAgent({ project_id: `p-layout-${count}`, session_id: `session-${count}-${i}`, principal_id: `44444444-4444-4444-8444-44444444444${i}`, name: `${longName}-${i}`, ticket: { id: `ticket-${i}`, key: longKey, title: 'Layout regression', project_id: `p-layout-${count}` } }, 10)))
       await mockWork(page, data)
+      await mockAgentTheme(page, { avatar: style })
       await page.goto('/')
       await expect(page.locator('.card .live-chip')).toHaveCount(3)
+      await expect(page.locator('.card .live-bot').first()).toHaveAttribute('data-style', style)
       await page.addStyleTag({ content: '.card-grid { grid-template-columns: repeat(3, var(--test-card-width)) !important; } .card { width: var(--test-card-width) !important; }' })
       for (const width of [260, 280, 300, 320, 340, 360, 380, 400, 420]) {
         await page.evaluate(width => document.documentElement.style.setProperty('--test-card-width', `${width}px`), width)

@@ -50,6 +50,10 @@ type Change struct {
 // Writer can be injected behind an interface with the Append method below.
 type Writer struct{}
 
+// QueueHintChannel carries only committed queue-change event positions. Older
+// writers and missed hints are covered by the daemon's bounded safety scan.
+const QueueHintChannel = "aeon_run_queue"
+
 func (Writer) Append(ctx context.Context, tx pgx.Tx, p tenant.Principal, c Change) (Event, error) {
 	return Append(ctx, tx, p, c)
 }
@@ -97,11 +101,21 @@ func Append(ctx context.Context, tx pgx.Tx, p tenant.Principal, c Change) (Event
 	if err != nil {
 		return Event{}, err
 	}
-	return scanEvent(tx.QueryRow(ctx, `INSERT INTO events
+	event, err := scanEvent(tx.QueryRow(ctx, `INSERT INTO events
 	  (tenant_id, actor_principal_id, node_id, type, before, after, at, undo_of, metadata)
 	  VALUES ($1,$2,$3,$4,$5,$6,coalesce($7::timestamptz,clock_timestamp()),$8,$9::jsonb)
 	  RETURNING id, actor_principal_id::text, node_id::text, type, before, after, at, undo_of`,
 		p.TenantID, p.ID, c.NodeID, c.Type, before, after, c.At, c.UndoOf, meta))
+	if err != nil {
+		return Event{}, err
+	}
+	switch c.Type {
+	case "run.created", "run.capacity_override", "queue.routed", "agent_pairing.verification_created":
+		// NOTIFY is delivered only on commit and acquires no later resource
+		// fence. No snapshot, account data or process authority enters its payload.
+		_, err = tx.Exec(ctx, `SELECT pg_notify($1,json_build_object('tenant_id',$2::text,'id',$3::bigint)::text)`, QueueHintChannel, p.TenantID, event.ID)
+	}
+	return event, err
 }
 
 // objectMetadata accepts only a JSON object. An empty value stores NULL.

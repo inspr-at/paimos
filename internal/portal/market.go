@@ -24,6 +24,7 @@ import (
 	"github.com/inspr-at/paimos/internal/authz"
 	"github.com/inspr-at/paimos/internal/db"
 	"github.com/inspr-at/paimos/internal/events"
+	"github.com/inspr-at/paimos/internal/httpapi"
 	"github.com/inspr-at/paimos/internal/tenant"
 )
 
@@ -1134,7 +1135,7 @@ func decodeCorrection(r *http.Request) (correctionIntake, error) {
 	if !strings.HasPrefix(r.Header.Get("Content-Type"), "application/json") {
 		return in, errors.New("invalid correction")
 	}
-	buf, err := io.ReadAll(io.LimitReader(r.Body, 8*1024+1))
+	buf, err := httpapi.ReadRequestBody(nil, r, 8*1024+1, httpapi.DefaultBodyReadTimeout)
 	if err != nil || len(buf) == 0 || len(buf) > 8*1024 {
 		return in, errors.New("invalid correction")
 	}

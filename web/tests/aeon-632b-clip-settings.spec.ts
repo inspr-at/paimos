@@ -32,8 +32,13 @@ for (const width of [390, 1024, 1440]) for (const theme of ['light', 'dark']) {
     const change = { event_id: 632, node_id: 'n-1', key: 'PHAROS-11', title: NAME, actor: 'Status autopilot', rule: 'new', reason: 'Synthetischer Grund.', from: 'new', to: 'triage_list', at: '2026-10-03T10:00:00Z', undone: false, undoable: false, changed_since: false, applicable: true }
     await page.route('**/api/status-autopilot/changes**', route => route.fulfill({ json: { items: [change] } }))
     await page.route('**/api/status-autopilot/proposals', route => route.fulfill({ json: { items: [change] } }))
+    // The page lists only projects that set their own mode. A long name is an override row.
+    await page.route('**/api/status-autopilot/projects**', route => {
+      if (new URL(route.request().url()).searchParams.get('mode') !== 'overrides') return route.fallback()
+      return route.fulfill({ json: { items: [{ id: 'p-pharos', key: 'PRJ-17', title: NAME, override: { mode: 'off', effective_enabled: false, revision: 1 } }], next_cursor: null, inherited_count: 2 } })
+    })
     await page.goto('/settings/autopilot')
-    await disclosure(page, page.locator('.proj-name > span:last-child').first(), { modes: page.locator('.proj-ctl .seg').first() })
+    await disclosure(page, page.locator('.proj-name > span:last-child').first(), { modes: page.locator('.proj .seg').first() })
     await capture(page, 'autopilot-projects', width, theme)
     for (const name of await page.locator('.change-title').all()) await disclosure(page, name)
     await capture(page, 'autopilot', width, theme)

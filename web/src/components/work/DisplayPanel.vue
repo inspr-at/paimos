@@ -1,6 +1,6 @@
 <!-- SPDX-License-Identifier: AGPL-3.0-only -->
 <script setup lang="ts">
-import { GROUPS, type GroupBy, type ListFilters } from '../../lib/ticketList'
+import { GROUPS, groupOrderTip, type GroupBy, type ListFilters } from '../../lib/ticketList'
 import type { ColumnId } from '../../lib/columns'
 import type { SortKey } from '../../lib/work'
 import { useModelDisplay } from '../../lib/prefs'
@@ -8,33 +8,48 @@ import AppIcon from '../AppIcon.vue'
 import ColumnPicker from './ColumnPicker.vue'
 import SortEditor from './SortEditor.vue'
 import HeaderRoomyChoice from './HeaderRoomyChoice.vue'
+import type { AttentionGrouping } from '../../lib/attention'
 
 // The Display menu: grouping, sort, row height and columns of this list. In a
 // saved view these are part of the view; otherwise columns are the person's own.
 defineProps<{
   filters: ListFilters
-  view: 'list' | 'outline' | 'journey'
+  view: 'list' | 'outline'
   density: 'comfortable' | 'compact'
   columns?: { order: ColumnId[]; visible: ColumnId[]; customised: boolean; notes?: Partial<Record<string, string>> } | null
   grouped?: boolean
-  headerGraph?: boolean
   sheet?: boolean
   projectHeader?: boolean
+  attentionGroup?: AttentionGrouping
+  locale?: string
+  // Collapsed header: the add action stays above the key list, on the desktop as in the sheet.
+  stableSort?: boolean
 }>()
-// The header graph is on until a person turns it off. Callers that omit the
-// prop keep that default so the switch does not flash off.
 const { modelDisplay, set: setModelDisplay } = useModelDisplay()
 const emit = defineEmits<{
   group: [value: GroupBy]; sort: [keys: SortKey[]]; density: [value: 'comfortable' | 'compact']
   columns: [order: ColumnId[], visible: ColumnId[]]; columnsReset: []
   expandAll: []; collapseAll: []; expandGroups: []; collapseGroups: []
-  headerGraph: [value: boolean]
+  // The groups' order (AEON-1390): natural or reversed. The grouped-by column's header flips the same setting.
+  groupOrder: [desc: boolean]
+  attentionGroup: [value: AttentionGrouping]
 }>()
 </script>
 
 <template>
   <div class="display-panel" :class="{ sheet }">
-    <template v-if="view === 'list'">
+    <template v-if="attentionGroup !== undefined">
+      <p class="eyebrow">{{ locale === 'de' ? 'Gruppieren nach' : 'Group by' }}</p>
+      <div class="group-grid attention-groups" role="radiogroup" :aria-label="locale === 'de' ? 'Gruppieren nach' : 'Group by'">
+        <button v-for="option in ([{ value: 'project', en: 'Project', de: 'Projekt' }, { value: 'kind', en: 'Kind', de: 'Art' }, { value: 'none', en: 'None', de: 'Keine' }] as const)" :key="option.value" type="button" role="radio" class="group-option" :aria-checked="attentionGroup === option.value" :data-autofocus="attentionGroup === option.value ? '' : undefined" @click="emit('attentionGroup', option.value)">{{ locale === 'de' ? option.de : option.en }}</button>
+      </div>
+      <div class="pair">
+        <button type="button" class="btn sm" :disabled="attentionGroup === 'none'" @click="emit('expandGroups')"><AppIcon name="expand-all" :size="13" />{{ locale === 'de' ? 'Alle aufklappen' : 'Expand all' }}</button>
+        <button type="button" class="btn sm" :disabled="attentionGroup === 'none'" @click="emit('collapseGroups')"><AppIcon name="collapse-all" :size="13" />{{ locale === 'de' ? 'Alle zuklappen' : 'Collapse all' }}</button>
+      </div>
+    </template>
+    <template v-else>
+    <div v-if="view === 'list'" class="block">
       <p class="eyebrow">Group by</p>
       <div class="group-grid" role="radiogroup" aria-label="Group by">
         <button
@@ -42,19 +57,28 @@ const emit = defineEmits<{
           :data-autofocus="filters.group === option.value ? '' : undefined" @click="emit('group', option.value)"
         >{{ option.label }}</button>
       </div>
-      <div class="pair">
-        <button type="button" class="btn sm" :disabled="!grouped" @click="emit('expandGroups')"><AppIcon name="expand-all" :size="13" />Expand groups</button>
-        <button type="button" class="btn sm" :disabled="!grouped" @click="emit('collapseGroups')"><AppIcon name="collapse-all" :size="13" />Collapse groups</button>
+      <div class="group-order" :class="{ off: !grouped }">
+        <span id="display-group-order">Groups</span>
+        <div class="seg" role="radiogroup" aria-labelledby="display-group-order">
+          <button
+            v-for="desc in [false, true]" :key="String(desc)" type="button" role="radio" :aria-checked="grouped && !!filters.groupDesc === desc" :disabled="!grouped"
+            :data-tip="grouped ? groupOrderTip(filters.group, desc) : undefined" @click="emit('groupOrder', desc)"
+          ><AppIcon :name="desc ? 'arrow-down' : 'arrow-up'" :size="12" />{{ desc ? 'Reversed' : 'Natural order' }}</button>
+        </div>
       </div>
-    </template>
-    <template v-else>
+      <div class="pair">
+        <button type="button" class="btn sm" :disabled="!grouped" @click="emit('expandGroups')"><AppIcon name="expand-all" :size="13" />Expand all</button>
+        <button type="button" class="btn sm" :disabled="!grouped" @click="emit('collapseGroups')"><AppIcon name="collapse-all" :size="13" />Collapse all</button>
+      </div>
+    </div>
+    <div v-else class="block">
       <p class="eyebrow">Outline</p>
       <div class="pair">
         <button type="button" class="btn sm" data-autofocus @click="emit('expandAll')"><AppIcon name="expand-all" :size="13" />Expand all</button>
         <button type="button" class="btn sm" @click="emit('collapseAll')"><AppIcon name="collapse-all" :size="13" />Collapse all</button>
       </div>
-    </template>
-    <SortEditor class="section" :sort="filters.sort" :stable="sheet" @change="keys => emit('sort', keys)" />
+    </div>
+    <SortEditor class="section" :sort="filters.sort" :stable="sheet || stableSort" @change="keys => emit('sort', keys)" />
     <div class="section">
       <p class="eyebrow">Row height</p>
       <div class="seg wide" role="radiogroup" aria-label="Row height">
@@ -75,12 +99,7 @@ const emit = defineEmits<{
         <button v-for="version in ['show', 'hide'] as const" :key="version" type="button" role="radio" :aria-checked="modelDisplay.modelVersion === version" @click="setModelDisplay('modelVersion', version)">{{ version === 'show' ? 'Show' : 'Hide' }}</button>
       </div></div>
     </div>
-    <div class="section">
-      <label class="switch">
-        <input type="checkbox" :checked="headerGraph !== false" @change="emit('headerGraph', ($event.target as HTMLInputElement).checked)" />
-        <span>Graph in project header</span>
-      </label>
-    </div>
+    </template>
   </div>
 </template>
 
@@ -89,12 +108,21 @@ const emit = defineEmits<{
 .model-choice { display: flex; align-items: center; justify-content: space-between; gap: 12px; color: var(--ink-2); font-size: 12.5px; }
 .model-choice .seg { display: grid; grid-template-columns: repeat(2, 1fr); min-width: 116px; }
 .display-panel { display: grid; gap: 8px; padding: 6px 8px 8px; }
+/* One block, so the collapsed header's multi-column menu never cuts it in two. */
+.block { display: grid; gap: 8px; }
 .group-grid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 4px; padding: 3px; border-radius: 12px; background: var(--seg-bg); }
+.attention-groups { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+.attention-groups .group-option { height: 36px; }
+@media (pointer: coarse), (max-width: 720px) { .attention-groups .group-option, .attention-groups + .pair .btn { min-height: 44px; } }
 .group-option { height: 28px; padding: 0 4px; border: 0; border-radius: 9px; background: transparent; color: var(--ink-2); font-size: 12.5px; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .group-option:hover { color: var(--ink); }
 .group-option[aria-checked="true"] { background: var(--seg-on); color: var(--ink); font-weight: 600; box-shadow: var(--shadow-btn); }
 .group-option:focus-visible { box-shadow: var(--focus-ring); }
 .pair { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 6px; }
+.group-order { display: flex; align-items: center; justify-content: space-between; gap: 12px; color: var(--ink-2); font-size: 12.5px; }
+.group-order.off { color: var(--ink-3); }
+.group-order .seg { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); min-width: 0; flex: 0 1 auto; }
+.group-order .seg button { gap: 5px; min-width: 0; padding-inline: 8px; white-space: nowrap; }
 .pair .btn { min-width: 0; padding-inline: 4px; gap: 4px; font-size: 12px; }
 .section { margin-top: 6px; padding-top: 10px; border-top: 1px solid var(--line); }
 .seg.wide { display: grid; grid-auto-flow: column; grid-auto-columns: 1fr; }
@@ -103,6 +131,7 @@ const emit = defineEmits<{
 .sheet .sort-editor { order: 1; }
 .sheet .group-grid { grid-template-columns: repeat(3, minmax(0, 1fr)); }
 .sheet .group-option, .sheet .pair .btn, .sheet .seg button { height: 44px; }
+.sheet .group-order { flex-wrap: wrap; }
 .sheet :deep(.head) { min-height: 44px; }
 .sheet :deep(.reset), .sheet :deep(.add), .sheet :deep(.sort-field), .sheet :deep(.icon-btn) { height: 44px; }
 .sheet :deep(.sort-editor .icon-btn) { width: 44px; flex: none; }

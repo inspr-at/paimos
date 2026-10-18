@@ -4,6 +4,7 @@ package agentaccounts
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -11,10 +12,12 @@ import (
 	"time"
 
 	"github.com/inspr-at/paimos/internal/agentpairing"
+	"github.com/inspr-at/paimos/internal/db"
 	"github.com/inspr-at/paimos/internal/dbtest"
 	"github.com/inspr-at/paimos/internal/httpapi"
 	"github.com/inspr-at/paimos/internal/tenant"
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgconn"
 )
 
 func evidenceHTTP(mod httpapi.Module, ctx context.Context, p tenant.Principal, token, method, path, body string, now time.Time) *httptest.ResponseRecorder {
@@ -138,16 +141,46 @@ func evidenceBlockedOrDone(t *testing.T, ctx context.Context, blockerPID int, do
 			return w, ""
 		default:
 		}
-		var query string
-		err := adminPool.QueryRow(ctx, `SELECT query FROM pg_stat_activity
- WHERE datname=current_database() AND $1=ANY(pg_blocking_pids(pid)) LIMIT 1`, blockerPID).Scan(&query)
-		if err == nil {
-			return nil, query
-		}
-		if err != pgx.ErrNoRows {
+		query, err := blockedStatement(ctx, adminPool, blockerPID)
+		if err != nil {
 			t.Fatal(err)
 		}
+		if query != "" {
+			return nil, query
+		}
 	}
+}
+
+type activityReader interface {
+	Exec(context.Context, string, ...any) (pgconn.CommandTag, error)
+	QueryRow(context.Context, string, ...any) pgx.Row
+}
+
+// blockedStatement names the statement a backend blocked by blockerPID waits
+// in, or "" when none is blocked. pg_stat_activity text comes from a snapshot
+// held for the observer's transaction while pg_blocking_pids is live, so one
+// read can pair a waiter's previous statement with its new lock wait. A
+// blocked waiter cannot advance, so its text is re-read from a fresh snapshot.
+func blockedStatement(ctx context.Context, q activityReader, blockerPID int) (string, error) {
+	var waiter int
+	err := q.QueryRow(ctx, `SELECT pid FROM pg_stat_activity
+ WHERE datname=current_database() AND $1=ANY(pg_blocking_pids(pid)) LIMIT 1`, blockerPID).Scan(&waiter)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return "", nil
+	}
+	if err != nil {
+		return "", err
+	}
+	if _, err := q.Exec(ctx, `SELECT pg_stat_clear_snapshot()`); err != nil {
+		return "", err
+	}
+	var query string
+	err = q.QueryRow(ctx, `SELECT query FROM pg_stat_activity
+ WHERE pid=$1 AND $2=ANY(pg_blocking_pids(pid))`, waiter, blockerPID).Scan(&query)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return "", nil
+	}
+	return query, err
 }
 
 func startEvidenceRequest(t *testing.T, ctx context.Context, mod httpapi.Module, p tenant.Principal, token, method, id string, e ResidencyEvidence) <-chan *httptest.ResponseRecorder {
@@ -174,7 +207,67 @@ func evidenceBlocker(t *testing.T, ctx context.Context) (pgx.Tx, int) {
 	return tx, pid
 }
 
-func TestResidencyEvidenceTenantPrecedesPairingAndTreeLock(t *testing.T) {
+// Risk: a lock-order proof pairs a waiter's previous statement with its live
+// lock wait and judges the wrong statement (AEON-1148 CI: the tenant
+// visibility read before the fence). A frozen activity snapshot makes the
+// read skew deterministic, without sleeps.
+func TestResidencyEvidenceBlockedStatementReadsFreshActivity(t *testing.T) {
+	useDB(t)
+	ctx, cancel := context.WithTimeout(t.Context(), 15*time.Second)
+	defer cancel()
+	const (
+		previous = `SELECT 'aeon-previous-statement'`
+		waiting  = `SELECT pg_advisory_xact_lock(hashtextextended($1,0))`
+	)
+	key := "aeon-stale-activity:" + t.Name()
+	blocker, blockerPID := evidenceBlocker(t, ctx)
+	if _, err := blocker.Exec(ctx, waiting, key); err != nil {
+		t.Fatal(err)
+	}
+	waiter, waiterPID := evidenceBlocker(t, ctx)
+	if _, err := waiter.Exec(ctx, previous); err != nil {
+		t.Fatal(err)
+	}
+	observer, _ := evidenceBlocker(t, ctx)
+	var query string
+	if err := observer.QueryRow(ctx, `SELECT query FROM pg_stat_activity WHERE pid=$1`, waiterPID).Scan(&query); err != nil {
+		t.Fatal(err)
+	}
+	if query != previous {
+		t.Fatalf("snapshot did not capture the previous statement: %s", query)
+	}
+	waited := make(chan error, 1)
+	go func() {
+		_, err := waiter.Exec(ctx, waiting, key)
+		waited <- err
+	}()
+	if err := dbtest.WaitForBlocked(ctx, adminPool, waiterPID, blockerPID, waiting); err != nil {
+		t.Fatal(err)
+	}
+	// One read in the frozen snapshot pairs the previous text with the wait.
+	if err := observer.QueryRow(ctx, `SELECT query FROM pg_stat_activity
+ WHERE pid=$1 AND $2=ANY(pg_blocking_pids(pid))`, waiterPID, blockerPID).Scan(&query); err != nil {
+		t.Fatal(err)
+	}
+	if query != previous {
+		t.Fatalf("stale observer did not reproduce read skew: %s", query)
+	}
+	query, err := blockedStatement(ctx, observer, blockerPID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if query != waiting {
+		t.Fatalf("observer named %q, want the waiting statement", query)
+	}
+	if err := blocker.Commit(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if err := dbtest.Await(t, ctx, waited); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestResidencyEvidenceTenantFencePrecedesPairingLock(t *testing.T) {
 	reset(t)
 	owner, host, profile, token, mod := groupFixture(t)
 	a := groupAccount(t, mod, owner, host, token, "lock-order", "daemon", "Order", "test")
@@ -187,8 +280,13 @@ func TestResidencyEvidenceTenantPrecedesPairingAndTreeLock(t *testing.T) {
 	}
 	done := startEvidenceRequest(t, ctx, mod, owner, "", "PUT", a.ID, evidenceAt(profile, time.Now()))
 	w, query := evidenceBlockedOrDone(t, ctx, pid, done)
-	if w != nil || !strings.Contains(query, "FROM tenants") {
+	if w != nil || !strings.Contains(query, "FROM tenants WHERE") || !strings.Contains(query, "FOR NO KEY UPDATE") {
 		t.Fatalf("write did not stop at tenant fence: response=%v query=%s", w, query)
+	}
+	// The blocker already holds tenant/tree/pairing. The waiting write has
+	// not reached pairing, so re-entering those fences cannot deadlock.
+	if _, err := blocker.Exec(ctx, `SELECT id FROM tenants WHERE id=$1 FOR NO KEY UPDATE NOWAIT`, owner.TenantID); err != nil {
+		t.Fatalf("holder could not re-enter its tenant fence: %v", err)
 	}
 	// A tenant waiter must leave the later fences free. Raw try-locks isolate
 	// this assertion from the production helper.
@@ -235,48 +333,48 @@ func TestResidencyEvidenceSerializesWithReadinessAndLifecycle(t *testing.T) {
 			ctx, cancel := context.WithTimeout(t.Context(), 15*time.Second)
 			defer cancel()
 			blocker, blockerPID := evidenceBlocker(t, ctx)
-			// Hold tree: evidence owns tenant and pairing while queued here;
+			// Hold tree: evidence owns tenant while queued here;
 			// the next writer must queue behind its tenant fence.
 			if _, err := blocker.Exec(ctx, `SELECT pg_advisory_xact_lock(hashtextextended($1,0))`, owner.TenantID); err != nil {
 				t.Fatal(err)
 			}
-			// Capture the evidence backend after it owns tenant and pairing.
+			// Capture the evidence backend after it owns tenant, before tree/pairing.
 			// pg_stat_activity is a snapshot whereas pg_blocking_pids is live:
-			// a new tree wait can otherwise be paired with the previous pairing
+			// a new tree wait can otherwise be paired with the previous tenant
 			// statement, causing a false lock-order failure.
-			evidencePool, pairingBarrier, evidenceCtx := dbtest.BarrierPool(t, appPool, func(sql string) bool {
-				return strings.Contains(sql, "pg_advisory_xact_lock") && strings.Contains(sql, "aeon-pairing:")
+			evidencePool, tenantBarrier, evidenceCtx := dbtest.BarrierPool(t, appPool, func(sql string) bool {
+				return strings.Contains(sql, "FROM tenants") && strings.Contains(sql, "FOR NO KEY UPDATE")
 			})
 			now := time.Now()
 			evidence := startEvidenceRequest(t, evidenceCtx, New(evidencePool), owner, "", "PUT", a.ID, evidenceAt(profile, now))
-			evidencePID := int(pairingBarrier.Wait(t, ctx))
+			evidencePID := int(tenantBarrier.Wait(t, ctx))
 			var staleObserver pgx.Tx
 			if operation == "check" {
-				// Freeze the activity snapshot before releasing pairing to make
+				// Freeze the activity snapshot before releasing tenant to make
 				// the old observer's read skew deterministic, without sleeps.
 				staleObserver, _ = evidenceBlocker(t, ctx)
 				var query string
 				if err := staleObserver.QueryRow(ctx, `SELECT query FROM pg_stat_activity WHERE pid=$1`, evidencePID).Scan(&query); err != nil {
 					t.Fatal(err)
 				}
-				if !strings.Contains(query, "aeon-pairing:") {
-					t.Fatalf("snapshot did not capture pairing barrier: %s", query)
+				if !strings.Contains(query, "FROM tenants") {
+					t.Fatalf("snapshot did not capture tenant barrier: %s", query)
 				}
 			}
-			pairingBarrier.Release()
+			tenantBarrier.Release()
 			if err := dbtest.WaitForBlocked(ctx, adminPool, evidencePID, blockerPID,
-				`SELECT pg_advisory_xact_lock(hashtextextended(current_setting('aeon.tenant_id'),0))`); err != nil {
+				`SELECT pg_advisory_xact_lock(hashtextextended($1::text, 0))`); err != nil {
 				t.Fatal(err)
 			}
 			if staleObserver != nil {
 				var query string
 				// This is the old observer: live blocking selects a row whose
-				// SQL text still describes pairing, not the current tree wait.
+				// SQL text still describes tenant, not the current tree wait.
 				if err := staleObserver.QueryRow(ctx, `SELECT query FROM pg_stat_activity
  WHERE pid=$1 AND $2=ANY(pg_blocking_pids(pid))`, evidencePID, blockerPID).Scan(&query); err != nil {
 					t.Fatal(err)
 				}
-				if !strings.Contains(query, "aeon-pairing:") {
+				if !strings.Contains(query, "FROM tenants") {
 					t.Fatalf("stale observer did not reproduce read skew: %s", query)
 				}
 				if err := staleObserver.Rollback(ctx); err != nil {
@@ -287,8 +385,8 @@ func TestResidencyEvidenceSerializesWithReadinessAndLifecycle(t *testing.T) {
 			if err := blocker.QueryRow(ctx, `SELECT pg_try_advisory_xact_lock(hashtextextended('aeon-pairing:'||$1,0))`, owner.TenantID).Scan(&pairingFree); err != nil {
 				t.Fatal(err)
 			}
-			if pairingFree {
-				t.Fatal("evidence reached tree without holding pairing")
+			if !pairingFree {
+				t.Fatal("evidence acquired pairing before the held tree fence")
 			}
 			// Give the competing request its own backend identity before it
 			// enters any fences; fixture traffic uses the original pool.
@@ -317,7 +415,7 @@ func TestResidencyEvidenceSerializesWithReadinessAndLifecycle(t *testing.T) {
 			// inverted pairing/tree fence or a completed request cannot satisfy
 			// a tenant statement blocked by the evidence transaction.
 			if err := dbtest.WaitForBlocked(ctx, adminPool, writerPID, evidencePID,
-				`SELECT id FROM tenants WHERE id=current_setting('aeon.tenant_id')::uuid FOR NO KEY UPDATE`); err != nil {
+				db.TenantFenceSQL); err != nil {
 				t.Fatalf("%s did not queue at the evidence tenant fence: %v", operation, err)
 			}
 			if err := blocker.Commit(ctx); err != nil {

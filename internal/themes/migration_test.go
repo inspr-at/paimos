@@ -86,6 +86,13 @@ func TestExistingTenantsAndBootstrapGetAuditedPorcelain(t *testing.T) {
 			if err := json.Unmarshal(raw, &audited); err != nil {
 				return err
 			}
+			// Postgres JSON timestamps use the server's zone; pgx can return UTC.
+			// Compare the instants first, then the full snapshots in one zone.
+			if !theme.CreatedAt.Equal(audited.CreatedAt) || !theme.UpdatedAt.Equal(audited.UpdatedAt) {
+				t.Fatalf("seed audit timestamps mismatch: %+v / %+v", theme, audited)
+			}
+			theme.CreatedAt, theme.UpdatedAt = theme.CreatedAt.UTC(), theme.UpdatedAt.UTC()
+			audited.CreatedAt, audited.UpdatedAt = audited.CreatedAt.UTC(), audited.UpdatedAt.UTC()
 			if !same(theme, audited) {
 				t.Fatalf("seed audit mismatch: %+v / %+v", theme, audited)
 			}

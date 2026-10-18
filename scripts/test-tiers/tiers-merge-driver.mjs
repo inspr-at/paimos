@@ -155,7 +155,7 @@ function renderManifest(normalized, file, markers = new Map()) {
       return `[\n${rows.length ? rows.join(`\n${child},\n`) + '\n' : ''}${indent}]`
     }
     if (object(value)) {
-      const compact = path.join('.') === 'timingWeights.owners'
+      const compact = path.join('.') === 'timingWeights.owners' || path.join('.') === 'nightlyTiming.files'
       const rows = Object.entries(value).map(([k, v]) => {
         const valuePath = [...path, k]
         const marked = conflicts ? marker(valuePath, depth + 1, compact) : undefined

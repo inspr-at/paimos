@@ -37,7 +37,7 @@ const display = (page: Page) => page.getByRole('button', { name: 'Display: Displ
 
 test.beforeEach(async ({ page }) => { await page.clock.setSystemTime(new Date('2026-10-01T12:00:00Z')) })
 
-test('real capped planner response displays legacy estimates and the truncation basis', async ({ page }) => {
+test('real capped registry response displays independent estimates and the registry gap', async ({ page }) => {
   const data = fixtures()
   const item = JSON.parse(truncatedListBody).items[0]
   data.projects[0] = { ...data.projects[0]!, ...item.project }
@@ -49,7 +49,8 @@ test('real capped planner response displays legacy estimates and the truncation 
   })
   await page.setViewportSize({ width: 1600, height: 900 })
   await page.goto(`/p/${item.project.key}?sort=key&closed=1`)
-  const basis = 'median of finished tickets on route codex gpt-6-astra xhigh (n=5); history truncated'
+  const basis = 'median of finished tickets on any route (n=5)'
+  await expect(row(page, 'TRUNCATED-1').locator('.plan-model.empty')).toHaveAttribute('data-tip', 'No agent session yet\nBuild hard · backend\nThe model registry has no available route for this role · Why this model?')
   for (const [column, figure, tip] of [
     ['c-tokens', '~8M', `Estimated ~8M tokens · no agent session yet\n${basis}`],
     ['c-list-cost', '~$80', `Estimated ~$80 at API list prices ($40.00/h)\nBilling shows once a session reports\n${basis}`],
@@ -383,7 +384,8 @@ test('planning fragment implementation in light and dark; phones retain the card
     for (const mode of ['saved', 'automatic']) {
       if (mode === 'automatic') {
         await page.getByRole('button', { name: 'Filters', exact: true }).click()
-        const sheet = page.getByRole('dialog', { name: 'Filters', exact: true })
+        await page.getByRole('dialog', { name: 'Filters', exact: true }).getByRole('button', { name: 'Display settings…', exact: true }).click()
+        const sheet = page.getByRole('dialog', { name: 'Display options', exact: true })
         await sheet.getByRole('button', { name: 'Automatic', exact: true }).click()
         await expect.poll(() => data.preferences['list:p-pharos']?.visible).toBeUndefined()
         await sheet.locator('footer button').click()

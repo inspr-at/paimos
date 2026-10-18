@@ -1,0 +1,31 @@
+{
+  "group": "clipped-names-and-preferences",
+  "nightlyTiming": {
+    "seconds": 12.089,
+    "selectedTests": 3
+  },
+  "spec": {
+    "file": "tests/model-prefs.spec.ts",
+    "listedTests": 3,
+    "tierTiming": {
+      "caseSeconds": {
+        "max": 5.737,
+        "median": 3.564,
+        "min": 2.607
+      },
+      "seconds": 12.089,
+      "selectedTests": 3
+    },
+    "weightEvidence": {
+      "attempt": 1,
+      "collectionPlanningSeconds": 0.231546,
+      "launchOverheadSeconds": 0.112131,
+      "marginFactor": 1.2,
+      "nativeSeconds": 5.222,
+      "runId": "37948687065",
+      "sha": "63841419452e1bfb206e6505b8051b8083527654"
+    },
+    "weightSeconds": 7,
+    "weightSource": "hosted-CI-37948687065-with-20-percent-margin"
+  }
+}

@@ -108,7 +108,21 @@ func Import(ctx context.Context, pool *pgxpool.Pool, tenantID, actorID, instance
 	if pool == nil || !uuidRE.MatchString(tenantID) || !uuidRE.MatchString(actorID) {
 		return r, errors.New("apply requires pool, tenant ID and actor principal ID")
 	}
+	batch := &importEvents{}
+	ctx = context.WithValue(ctx, importEventsKey{}, batch)
 	err := db.InTenant(db.AllProjects(ctx, "classic offers importer"), pool, tenantID, func(tx pgx.Tx) error {
+		var locked string
+		if err := tx.QueryRow(ctx, `SELECT id::text FROM tenants WHERE id=$1::uuid FOR NO KEY UPDATE`, tenantID).Scan(&locked); err != nil {
+			return err
+		}
+		if _, err := tx.Exec(ctx, `SELECT pg_advisory_xact_lock(hashtextextended(current_setting('aeon.tenant_id',true),0))`); err != nil {
+			return err
+		}
+		// Lock all existing mapped resources in native order before any event append.
+		if err := lockMappedRecords(ctx, tx, tenantID, instance); err != nil {
+			return err
+		}
+
 		if _, err := tx.Exec(ctx, `SELECT pg_advisory_xact_lock(hashtextextended($1,0))`, tenantID+":paimos-offers:"+instance); err != nil {
 			return err
 		}
@@ -118,19 +132,26 @@ func Import(ctx context.Context, pool *pgxpool.Pool, tenantID, actorID, instance
 		}
 		var profile *ProfileSnapshot
 		var selected ProfileSnapshot
+		var profileRaw []byte
 		profileErr := tx.QueryRow(ctx, `
 			SELECT p.id::text,r.revision,r.definition
 			FROM quote_settings s
 			JOIN quote_document_profiles p ON p.tenant_id=s.tenant_id AND p.id=s.default_profile_id
 			JOIN quote_document_profile_revisions r ON r.tenant_id=p.tenant_id AND r.profile_id=p.id AND r.revision=p.current_revision
-			WHERE s.tenant_id=$1::uuid AND p.archived_at IS NULL`, tenantID).Scan(&selected.ID, &selected.Revision, &selected.Definition)
+			WHERE s.tenant_id=$1::uuid AND p.archived_at IS NULL`, tenantID).Scan(&selected.ID, &selected.Revision, &profileRaw)
 		if profileErr != nil && !errors.Is(profileErr, pgx.ErrNoRows) {
 			return profileErr
 		}
 		if profileErr == nil {
+			if err := json.Unmarshal(profileRaw, &selected.Definition); err != nil {
+				return err
+			}
+			selected.Definition = selected.Definition.Normalized()
 			profile = &selected
 		}
 		orgIDs := map[int64]string{}
+		changedContacts := map[int64]bool{}
+		relatedOrgs := map[string]bool{}
 		contactIDs := map[int64]string{}
 		for _, c := range b.Customers {
 			rc, err := customerRecord(c)
@@ -168,9 +189,6 @@ func Import(ctx context.Context, pool *pgxpool.Pool, tenantID, actorID, instance
 						}
 					}
 				}
-				if err = appendImport(ctx, tx, actor, id, "customer", action, rc); err != nil {
-					return err
-				}
 			}
 			r.Mappings = append(r.Mappings, Mapping{SourceKind: "customer", SourceID: rc.id, SourceNumber: rc.number, SourceRevision: rc.revision, NodeID: id, Action: action})
 		}
@@ -184,6 +202,7 @@ func Import(ctx context.Context, pool *pgxpool.Pool, tenantID, actorID, instance
 				return err
 			}
 			contactIDs[c.ID] = id
+			changedContacts[c.ID] = action != "skip"
 			if action != "skip" {
 				if _, err = tx.Exec(ctx, `INSERT INTO crm_contact_profiles(tenant_id,contact_node_id,organisation_node_id) VALUES($1::uuid,$2::uuid,$3::uuid) ON CONFLICT (tenant_id,contact_node_id) DO UPDATE SET revision=crm_contact_profiles.revision+1`, tenantID, id, orgIDs[c.CustomerID]); err != nil {
 					return err
@@ -191,14 +210,11 @@ func Import(ctx context.Context, pool *pgxpool.Pool, tenantID, actorID, instance
 				if _, err = tx.Exec(ctx, `INSERT INTO node_relations(tenant_id,source_node_id,target_node_id,type) VALUES($1::uuid,$2::uuid,$3::uuid,'contact_for') ON CONFLICT DO NOTHING`, tenantID, id, orgIDs[c.CustomerID]); err != nil {
 					return err
 				}
-				if err = appendImport(ctx, tx, actor, id, "contact", action, rc); err != nil {
-					return err
-				}
 			}
 			r.Mappings = append(r.Mappings, Mapping{SourceKind: "contact", SourceID: rc.id, SourceRevision: rc.revision, NodeID: id, Action: action})
 		}
 		for _, c := range b.Contacts {
-			if !c.IsPrimary {
+			if !c.IsPrimary || !changedContacts[c.ID] {
 				continue
 			}
 			id := contactIDs[c.ID]
@@ -211,6 +227,14 @@ func Import(ctx context.Context, pool *pgxpool.Pool, tenantID, actorID, instance
 				return err
 			}
 			if old != id {
+				// The customer may have an unchanged source revision while a newer
+				// contact tries to replace a primary contact chosen in Aeon.
+				if customerSkipped(r.Mappings, orgIDs[c.CustomerID]) && !relatedOrgs[orgIDs[c.CustomerID]] {
+					if err := checkNativeBaseline(ctx, tx, actor, orgIDs[c.CustomerID], "customer"); err != nil {
+						return err
+					}
+				}
+				relatedOrgs[orgIDs[c.CustomerID]] = true
 				if _, err = tx.Exec(ctx, `UPDATE crm_organisation_profiles SET primary_contact_node_id=$1::uuid,revision=revision+1 WHERE organisation_node_id=$2::uuid`, id, orgIDs[c.CustomerID]); err != nil {
 					return err
 				}
@@ -257,9 +281,6 @@ func Import(ctx context.Context, pool *pgxpool.Pool, tenantID, actorID, instance
 				if err = writeOffer(ctx, tx, actor, id, orgIDs[o.CustomerID], o, doc, action); err != nil {
 					return err
 				}
-				if err = appendImport(ctx, tx, actor, id, "offer", action, rc); err != nil {
-					return err
-				}
 			}
 			m := Mapping{SourceKind: "offer", SourceID: rc.id, SourceNumber: rc.number, SourceRevision: rc.revision, NodeID: id, Action: action}
 			if o.Status == "accepted" {
@@ -267,7 +288,17 @@ func Import(ctx context.Context, pool *pgxpool.Pool, tenantID, actorID, instance
 			}
 			r.Mappings = append(r.Mappings, m)
 		}
-		return nil
+		// Persist a complete final native baseline, including primary-contact
+		// changes, only after every related write in this atomic bundle succeeds.
+		for _, mapping := range r.Mappings {
+			if mapping.Action == "skip" && !relatedOrgs[mapping.NodeID] {
+				continue
+			}
+			if err := appendImport(ctx, tx, actor, mapping.NodeID, mapping.SourceKind, mapping.Action, record{id: mapping.SourceID, number: mapping.SourceNumber, revision: mapping.SourceRevision}); err != nil {
+				return err
+			}
+		}
+		return batch.flush()
 	})
 	if err != nil {
 		return Report{}, err
@@ -349,6 +380,11 @@ func upsertNode(ctx context.Context, tx pgx.Tx, p tenant.Principal, instance str
 			return id, "skip", nil
 		}
 	}
+	if id != "" {
+		if err := checkNativeBaseline(ctx, tx, p, id, r.kind); err != nil {
+			return "", "", err
+		}
+	}
 	provenance := map[string]any{"source_system": "paimos", "source_instance": instance, "source_kind": r.kind, "source_id": r.id, "source_number": r.number, "source_revision": r.revision, "imported_at": time.Now().UTC().Format(time.RFC3339Nano)}
 	fields := map[string]any{}
 	for key, value := range r.fields {
@@ -380,9 +416,15 @@ func upsertNode(ctx context.Context, tx pgx.Tx, p tenant.Principal, instance str
 	return id, action, err
 }
 func appendImport(ctx context.Context, tx pgx.Tx, p tenant.Principal, id, kind, action string, r record) error {
-	return event(ctx, tx, p, id, "import."+kind, nil, map[string]any{"action": action, "source_system": "paimos", "source_id": r.id, "source_number": r.number, "source_revision": r.revision, "node_id": id})
+	baseline, err := nativeSnapshot(ctx, tx, id, kind)
+	if err != nil {
+		return err
+	}
+	return event(ctx, tx, p, id, "import."+kind, nil, map[string]any{"action": action, "source_system": "paimos", "source_id": r.id, "source_number": r.number, "source_revision": r.revision, "node_id": id, "native_baseline": json.RawMessage(baseline)})
 }
 func event(ctx context.Context, tx pgx.Tx, p tenant.Principal, id, typ string, before, after any) error {
-	_, err := events.Append(ctx, tx, p, events.Change{NodeID: &id, Type: typ, Before: before, After: after})
-	return err
+	return queueImportEvent(ctx, func() error {
+		_, err := events.Append(ctx, tx, p, events.Change{NodeID: &id, Type: typ, Before: before, After: after})
+		return err
+	})
 }

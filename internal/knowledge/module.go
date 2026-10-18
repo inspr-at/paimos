@@ -7,7 +7,6 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	"io"
 	"log/slog"
 	"net/http"
 	"strconv"
@@ -48,6 +47,7 @@ func (m *module) Mount(mux *http.ServeMux) {
 	mux.HandleFunc("POST /api/knowledge/learnings/{learningId}/accept", m.handleAcceptLearning)
 	mux.HandleFunc("POST /api/knowledge/learnings/{learningId}/dismiss", m.handleDismissLearning)
 	mux.HandleFunc("POST /api/knowledge/learnings/{learningId}/draft", m.handleDraftLearning)
+	mux.HandleFunc("PUT /api/knowledge/learnings/{learningId}/recommendation", m.handleRecommendLearning)
 	mux.HandleFunc("GET /api/knowledge/{id}", m.handleGet)
 	mux.HandleFunc("PATCH /api/knowledge/{id}", m.handleUpdate)
 	mux.HandleFunc("DELETE /api/knowledge/{id}", m.handleDelete)
@@ -117,8 +117,7 @@ func canWrite(ctx context.Context, tx pgx.Tx, p tenant.Principal, permission str
 }
 
 func readObject(w http.ResponseWriter, r *http.Request) (map[string]json.RawMessage, error) {
-	r.Body = http.MaxBytesReader(w, r.Body, 2<<20)
-	b, err := io.ReadAll(r.Body)
+	b, err := httpapi.ReadRequestBody(w, r, 2<<20, httpapi.DefaultBodyReadTimeout)
 	if err != nil || len(bytes.TrimSpace(b)) == 0 {
 		return nil, fail(http.StatusBadRequest, "invalid_request", "a JSON object is required")
 	}
@@ -422,6 +421,10 @@ func parseCreate(raw map[string]json.RawMessage) (createInput, error) {
 }
 
 func create(ctx context.Context, tx pgx.Tx, p tenant.Principal, in createInput) (Entry, error) {
+	return createTx(ctx, tx, p, in, nil)
+}
+
+func createTx(ctx context.Context, tx pgx.Tx, p tenant.Principal, in createInput, pending *[]events.Change) (Entry, error) {
 	if err := lockKnowledgeTree(ctx, tx); err != nil {
 		return Entry{}, err
 	}
@@ -476,11 +479,11 @@ func create(ctx context.Context, tx pgx.Tx, p tenant.Principal, in createInput) 
 		return Entry{}, err
 	}
 	if kindEvent != nil {
-		if _, err := events.Append(ctx, tx, p, *kindEvent); err != nil {
+		if _, err := appendKnowledgeChange(ctx, tx, p, *kindEvent, pending); err != nil {
 			return Entry{}, err
 		}
 	}
-	ev, err := events.Append(ctx, tx, p, events.Change{NodeID: &node.ID, Type: evCreated, After: node})
+	ev, err := appendKnowledgeChange(ctx, tx, p, events.Change{NodeID: &node.ID, Type: evCreated, After: node}, pending)
 	if err != nil {
 		return Entry{}, err
 	}
@@ -643,8 +646,21 @@ func (m *module) stale(ctx context.Context, p tenant.Principal, id string) error
 var errStale = errors.New("stale")
 
 func (m *module) update(ctx context.Context, p tenant.Principal, id string, in patchInput, expected *time.Time) (Entry, error) {
-	var entry Entry
+	var out Entry
 	err := db.InTenant(ctx, m.pool, p.TenantID, func(tx pgx.Tx) error {
+		var err error
+		out, err = updateTx(ctx, tx, p, id, in, expected, nil)
+		return err
+	})
+	if errors.Is(err, errStale) {
+		return Entry{}, m.stale(ctx, p, id)
+	}
+	return out, err
+}
+
+func updateTx(ctx context.Context, tx pgx.Tx, p tenant.Principal, id string, in patchInput, expected *time.Time, pending *[]events.Change) (Entry, error) {
+	var entry Entry
+	err := func(tx pgx.Tx) error {
 		if err := lockKnowledgeTree(ctx, tx); err != nil {
 			return err
 		}
@@ -711,7 +727,7 @@ func (m *module) update(ctx context.Context, p tenant.Principal, id string, in p
 		if err != nil {
 			return err
 		}
-		ev, err := events.Append(ctx, tx, p, events.Change{NodeID: &updated.ID, Type: evUpdated, Before: current, After: updated})
+		ev, err := appendKnowledgeChange(ctx, tx, p, events.Change{NodeID: &updated.ID, Type: evUpdated, Before: current, After: updated}, pending)
 		if err != nil {
 			return err
 		}
@@ -720,10 +736,7 @@ func (m *module) update(ctx context.Context, p tenant.Principal, id string, in p
 		}
 		entry.EventID = &ev.ID
 		return nil
-	})
-	if errors.Is(err, errStale) {
-		return Entry{}, m.stale(ctx, p, id)
-	}
+	}(tx)
 	return entry, err
 }
 

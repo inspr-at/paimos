@@ -55,6 +55,7 @@ it('detail progress counts ten completed descendant leaves and one open leaf', a
   expect(ticket.childProgress()).toMatchObject({ done: 10, total: 11, percent: 91 })
   expect(api.listNodes).toHaveBeenCalledWith(expect.objectContaining({ within: 'parent', shape: ['leaf'], facets: ['state'], limit: 1 }))
 })
+// Paging 5 000 rows exceeds the 5s default when the unit suite shares a runner.
 it('stops at the lazy item budget while retaining an honest incomplete result', async () => {
   const reached = new Promise<void>(resolve => api.listNodes.mockImplementation(async q => {
     const offset = Number(q.cursor ?? 0)
@@ -72,7 +73,8 @@ it('stops at the lazy item budget while retaining an honest incomplete result', 
   expect(api.listNodes).toHaveBeenCalledTimes(reads)
   expect(o.error.value).toMatch(/incomplete.*5000/i)
   expect(o.hasMoreRoot.value).toBe(true)
-})
+}, 20_000)
+// Building 4 800 reactive rows exceeds the 5s default when the unit suite shares a runner.
 it.each(['insert', 'child expansion'])('preserves the root cursor page size after %s consumes retention capacity', async action => {
   api.listNodes.mockImplementation(async q => {
     if (q.ids || q.facets) return { items: [], next_cursor: null }
@@ -95,7 +97,7 @@ it.each(['insert', 'child expansion'])('preserves the root cursor page size afte
   expect(o.error.value).toMatch(/incomplete.*5000/i)
   expect(o.error.value).not.toContain('cursor does not match')
   expect(o.hasMoreRoot.value).toBe(true)
-})
+}, 20_000)
 it('keeps a project-root drop destination through nesting and unnesting in the unified Outline', async () => {
   const data = new Map([row('parent', 'project', { children_count: 1 }), row('moving')].map(r => [r.id, r]))
   api.listNodes.mockImplementation(async q => ({ items: q.facets ? [] : [...data.values()].filter(r => q.ids ? q.ids.includes(r.id) : r.parent_id === q.parent_id), next_cursor: null }))

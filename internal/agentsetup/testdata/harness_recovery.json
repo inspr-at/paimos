@@ -28,6 +28,8 @@
     "capacity_capture",
     "capacity_timeout",
     "pairing_sync_failed",
+    "unsettled_previous_run",
+    "interpreter_pin_renewed",
     "future_reason"
   ],
   "fixes": {

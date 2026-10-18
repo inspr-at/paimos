@@ -12,7 +12,7 @@ import (
 )
 
 func (rt *runtime) cmdModelRefresh() *Command {
-	return &Command{Name: "refresh", Short: "Refresh model sightings with workspace settings", Use: "model refresh", maxArgs: 0, run: func([]string) error {
+	return &Command{Name: "refresh", Short: "Refresh public catalogs; API-key discovery requires opt-in", Use: "model refresh", maxArgs: 0, run: func([]string) error {
 		var out modelregistry.RefreshResult
 		if err := rt.do(http.MethodPost, "/api/models/refresh", nil, &out); err != nil {
 			return err
@@ -22,7 +22,7 @@ func (rt *runtime) cmdModelRefresh() *Command {
 		}
 		fmt.Fprintf(rt.stdout, "Model refresh: %d profiles added, %d proposed; ladders preserved\n", out.Added, out.Proposed)
 		for _, source := range out.Sources {
-			fmt.Fprintf(rt.stdout, "%s: %s (%d models)\n", source.Vendor, source.State, source.Seen)
+			fmt.Fprintf(rt.stdout, "%s: %s (%d models, %d unsupported identifiers skipped)\n", source.Vendor, source.State, source.Seen, source.Skipped)
 		}
 		return nil
 	}}

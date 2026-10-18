@@ -142,8 +142,7 @@ func TestPlanningSortUsesDisplayedNumbersAndCursor(t *testing.T) {
 	w := planningSetup(t)
 	// Both routes are calibrated; hidden defaults are tested separately.
 	err := db.InTenant(dbtest.Seed(t.Context()), appPool, w.admin.TenantID, func(tx pgx.Tx) error {
-		_, err := tx.Exec(t.Context(), `UPDATE model_role_routes SET profile_id=(SELECT id FROM model_profiles WHERE slug='codex-sol-xhigh') WHERE role='build'`)
-		return err
+		return planningModelsOrder(t, tx, w.admin.TenantID, "first", "wait", "codex-sol-xhigh")
 	})
 	if err != nil {
 		t.Fatal(err)

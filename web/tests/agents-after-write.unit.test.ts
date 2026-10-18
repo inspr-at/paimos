@@ -233,13 +233,14 @@ it('AEON-623: a computer read failure retains the snapshot and immediately marks
   expect(capacity.computersState).toBe('ready')
 })
 
-it('AEON-623: only explicit optional pairing access denial becomes an empty successful read', async () => {
+// AEON-1209 G7 supersedes the optional-empty policy: denied access is unreadable.
+it('AEON-623: explicit pairing access denial remains forbidden', async () => {
   const capacity = useCapacity()
   computerError = new PairingError(403, 'forbidden')
   await capacity.load()
   expect(capacity.computers).toEqual([])
-  expect(capacity.computersLoaded).toBe(true)
-  expect(capacity.computersState).toBe('ready')
+  expect(capacity.computersLoaded).toBe(false)
+  expect(capacity.computersState).toBe('forbidden')
   expect(capacity.computersStale).toBe(false)
 })
 

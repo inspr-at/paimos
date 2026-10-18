@@ -2,7 +2,10 @@
 
 package cli
 
-import "fmt"
+import (
+	"encoding/json"
+	"fmt"
+)
 
 // exitError carries a process status. 2 is usage. 3 means the command stopped
 // without writing: the action is not available yet, or a person has to finish
@@ -10,7 +13,8 @@ import "fmt"
 type exitError struct {
 	code      int
 	msg       string
-	apiStatus int // Preserve HTTP classification without retaining unredacted errors.
+	apiStatus int             // Preserve HTTP classification without retaining unredacted errors.
+	apiBody   json.RawMessage // Bounded, credential-redacted entry refusal only.
 }
 
 func (e *exitError) Error() string { return e.msg }

@@ -26,8 +26,9 @@ type Preferences struct {
 	Escalation int    `json:"escalation_minutes"`
 }
 type item struct {
-	ID      string    `json:"id"`
-	Created time.Time `json:"created_at"`
+	ID           string    `json:"id"`
+	Created      time.Time `json:"created_at"`
+	EndpointHash string    `json:"endpoint_hash,omitempty"`
 }
 
 func preference(ctx context.Context, tx pgx.Tx, person string) (Preferences, error) {
@@ -54,14 +55,14 @@ func (m *Module) settings(w http.ResponseWriter, r *http.Request) {
 		for _, entry := range []struct {
 			query string
 			dst   *[]item
-		}{{`SELECT id::text,created_at FROM phone_passkeys WHERE person_id=$1 AND revoked_at IS NULL ORDER BY created_at`, &keys}, {`SELECT id::text,created_at FROM phone_push_subscriptions WHERE person_id=$1 AND revoked_at IS NULL ORDER BY created_at`, &subs}} {
+		}{{`SELECT id::text,created_at,'' FROM phone_passkeys WHERE person_id=$1 AND revoked_at IS NULL ORDER BY created_at LIMIT 8`, &keys}, {`SELECT id::text,created_at,endpoint_hash FROM phone_push_subscriptions WHERE person_id=$1 AND revoked_at IS NULL ORDER BY created_at LIMIT 8`, &subs}} {
 			rows, err := tx.Query(r.Context(), entry.query, p.ID)
 			if err != nil {
 				return err
 			}
 			for rows.Next() {
 				var it item
-				if err = rows.Scan(&it.ID, &it.Created); err != nil {
+				if err = rows.Scan(&it.ID, &it.Created, &it.EndpointHash); err != nil {
 					rows.Close()
 					return err
 				}
@@ -130,7 +131,10 @@ func (m *Module) registerOptions(w http.ResponseWriter, r *http.Request) {
 	}
 	var out any
 	err := db.InTenant(r.Context(), m.pool, p.TenantID, func(tx pgx.Tx) error {
-		u, err := loadUser(r.Context(), tx, p)
+		// Preparing options grants no authority and need not wait for a live
+		// assertion's credential row locks. Registration still locks and checks
+		// the current credentials when the verified proof is submitted.
+		u, err := loadUserCredentials(r.Context(), tx, p, false)
 		if err != nil {
 			return err
 		}

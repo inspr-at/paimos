@@ -103,15 +103,35 @@ func confirmQuotaPool(ctx context.Context, tx pgx.Tx, p tenant.Principal, in quo
 // settlement, so a sibling cannot concurrently spend the same remaining quota.
 // Reservations keep their original window IDs for replay, release and settlement.
 func sharedQuotaWindows(ctx context.Context, tx pgx.Tx, a Account, own []Window, now time.Time) ([]Window, error) {
+	return sharedQuotaWindowsLimit(ctx, tx, a, own, now, 0, 0)
+}
+
+func sharedQuotaWindowsLimit(ctx context.Context, tx pgx.Tx, a Account, own []Window, now time.Time, accountBound, windowBound int) ([]Window, error) {
+	if s := projectionInputs(tx); s != nil {
+		if a.QuotaPoolFingerprint == "" {
+			return own, nil
+		}
+		return s.shared[a.Harness+":"+a.QuotaPoolFingerprint], nil
+	}
 	if a.QuotaPoolFingerprint == "" {
 		return own, nil
 	}
-	rows, err := tx.Query(ctx, quotaAccounts, a.ID)
+	query := quotaAccounts
+	args := []any{a.ID}
+	if accountBound > 0 {
+		query += ` LIMIT $2`
+		args = append(args, accountBound+1)
+	}
+	rows, err := tx.Query(ctx, query, args...)
 	if err != nil {
 		return nil, err
 	}
 	var ids []string
 	for rows.Next() {
+		if accountBound > 0 && len(ids) == accountBound {
+			rows.Close()
+			return nil, queueSnapshotOverflow("quota")
+		}
 		var id string
 		if err := rows.Scan(&id); err != nil {
 			rows.Close()
@@ -124,10 +144,14 @@ func sharedQuotaWindows(ctx context.Context, tx pgx.Tx, a Account, own []Window,
 	if err != nil {
 		return nil, err
 	}
-	all, err := readAccountWindows(ctx, tx, ids, false)
+	all, err := readAccountWindowsLimit(ctx, tx, ids, false, windowBound)
 	if err != nil {
 		return nil, err
 	}
+	return projectQuotaWindows(ids, all, now), nil
+}
+
+func projectQuotaWindows(ids []string, all map[string][]Window, now time.Time) []Window {
 	var history, out []Window
 	latest := map[string]Window{}
 	for _, id := range ids {
@@ -171,5 +195,5 @@ func sharedQuotaWindows(ctx context.Context, tx pgx.Tx, a Account, own []Window,
 		out = append(out, w)
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].ID < out[j].ID })
-	return out, nil
+	return out
 }

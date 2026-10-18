@@ -1,15 +1,16 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { spawnSync } from 'node:child_process'
+import { spawn, spawnSync } from 'node:child_process'
+import { once } from 'node:events'
 import { select, validate, key } from '../../scripts/test-tiers/core.mjs'
-import { flattenBrowser } from '../../scripts/test-tiers/collect.mjs'
+import { command, flattenBrowser, root } from '../../scripts/test-tiers/collect.mjs'
 import { readFileSync, writeFileSync, mkdtempSync, mkdirSync, readdirSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { resolve } from 'node:path'
 import {
-  balanceShards, checkCoverage, checkSpecInventory, discoverSpecs, loadManifest, main, parseArgs,
-  parseShard, planCommands, planFlakeRetry, reconcileManifest, retryCount, selectChangedSpecs, validateManifest, mergeReports, webRoot,
+  balanceShards, checkCoverage, checkSpecInventory, discoverSpecs, loadManifest, main, nightlyWeights, parseArgs,
+  parseShard, planCommands, planFlakeRetry, reconcileManifest, retryCount, selectChangedSpecs, tierWeights, validateManifest, mergeReports, webRoot,
 } from './ci-web-shard.mjs'
 
 const group = (id, weights) => ({ id, config: 'playwright.ui.config.ts', project: null,
@@ -20,6 +21,68 @@ const fixture = () => ({ version: 1, groups: [group('a', [9, 8, 7]), group('b', 
 const files = manifest => manifest.groups.flatMap(g => g.specs.map(s => s.file))
 // The real manifest plus any specs that landed on main since it was written (what every shard job runs).
 const effective = () => reconcileManifest(loadManifest(), discoverSpecs()).manifest
+
+test('AEON-697 screenshots use per-test output paths for hosted Linux artifacts', () => {
+  const source = readFileSync(new URL('../tests/needs-attention.spec.ts', import.meta.url), 'utf8')
+  const screenshots = [...source.matchAll(/await page\.screenshot\(\{ path: (.+), fullPage: true \}\)/g)]
+  assert.equal(screenshots.length, 14, 'Check every attention screenshot site')
+  for (const [, path] of screenshots) {
+    assert.match(path, /^testInfo\.outputPath\(`attention-[^/`]+\.png`\)$/, 'Screenshots must stay in each test output directory')
+  }
+  assert.doesNotMatch(source, /\/private\/tmp|\bmkdir\b/, 'Hosted runs must not create workstation screenshot directories')
+})
+
+test('AEON-697 attention spec gates exactly once with its native case count and safe launch policy', () => {
+  const manifest = loadManifest(), file = 'tests/needs-attention.spec.ts'
+  const owners = manifest.groups.filter(group => group.specs.some(spec => spec.file === file))
+  assert.equal(owners.length, 1, 'Needs attention must have exactly one source manifest owner')
+  const [owner] = owners
+  assert.notEqual(owner.gate, false, 'Needs attention regressions must gate CI')
+  assert.equal(owner.hostedOnly, true)
+  assert.equal(owner.config, 'playwright.ui.config.ts')
+  assert.deepEqual(owner.flags, ['--workers=1', '--trace=retain-on-failure'])
+  const report = JSON.parse(command(process.execPath, ['node_modules/@playwright/test/cli.js', 'test',
+    '-c', owner.config, file, '--list', '--reporter=json'], { cwd: webRoot }))
+  const collected = flattenBrowser(report, owner.config)
+  assert.ok(collected.length > 0, 'Native collection must find attention cases')
+  assert.equal(owner.specs.find(spec => spec.file === file).listedTests, collected.length)
+  for (const count of [1, 12, 256]) {
+    const shards = balanceShards(manifest, count)
+    const assigned = shards.flatMap(shard => shard.specs).filter(spec => spec.file === file)
+    assert.equal(assigned.length, 1, `${count} shards must run Needs attention once`)
+    const shard = shards.find(shard => shard.specs.some(spec => spec.file === file))
+    assert.equal(planCommands(manifest, shard, {}).filter(command => command.files.includes(file)).length, 1)
+  }
+})
+
+test('AEON-697 native attention cases are explicitly classified and retained in PR and full execution', () => {
+  const manifest = JSON.parse(readFileSync(new URL('../../scripts/ci/web-test-tiers.json', import.meta.url)))
+  const files = new Set(['tests/attention.unit.test.ts', 'tests/needs-attention.spec.ts'])
+  const unit = JSON.parse(command(process.execPath, ['node_modules/vitest/vitest.mjs', 'list',
+    'tests/attention.unit.test.ts', '--json', '--no-staticParse', '--maxWorkers=1', '--no-fileParallelism'], { cwd: webRoot }))
+    .map(row => ({ kind: 'vitest', file: 'tests/attention.unit.test.ts', name: row.name }))
+  const browser = flattenBrowser(JSON.parse(command(process.execPath, ['node_modules/@playwright/test/cli.js', 'test',
+    '-c', 'playwright.ui.config.ts', 'tests/needs-attention.spec.ts', '--list', '--reporter=json'], { cwd: webRoot })), 'playwright.ui.config.ts')
+  assert.ok(unit.length > 0 && browser.length > 0, 'Both native collectors must find attention cases')
+  const warnings = [], stored = { ...manifest, deleteCandidateGroups: [], tests: manifest.tests.filter(row => files.has(row.file)) }
+  assert.deepEqual(stored.tests.map(key).sort(), [...unit, ...browser].map(key).sort(), 'Every native attention case needs an explicit tier entry')
+  const rows = validate(stored, [...unit, ...browser], undefined, { strict: true, warn: warning => warnings.push(warning) })
+  assert.deepEqual(warnings, [])
+  assert.ok(rows.every(row => row.tier === 'ESSENTIAL' || row.tier === 'GATED-FULL'))
+  assert.ok(rows.filter(row => row.kind === 'vitest').every(row => row.tier === 'ESSENTIAL'), 'Resource revision guards must run on every PR')
+  for (const event of ['pull_request', 'merge_group']) {
+    const core = select(rows, { event, paths: ['README.md'] }).tests
+    for (const name of ['a delayed action cannot resolve a different filtered record or offer stale Undo',
+      'person switch clears previous facets while the replacement read waits and fails',
+      'workspace switch clears previous facets while the replacement read waits and fails',
+      'bulk Apply reports a partial result, retains every row, and Undo all reverses only confirmed writes',
+      'read-only rows and unavailable release targets explain their permissions before acting',
+      'release receipts refresh the retained row and siblings for subsequent Apply and Undo']) {
+      assert.ok(core.some(row => row.name === name), `${event} must retain ${name}`)
+    }
+    assert.deepEqual(select(rows, { event, forceFull: true }).tests.map(key).sort(), rows.map(key).sort())
+  }
+})
 
 test('source manifest accounts for every spec, including nested files, before reconciliation', () => {
   const manifest = loadManifest(), discovered = discoverSpecs(webRoot, manifest.specDirectories)
@@ -62,6 +125,46 @@ test('LPT balancing distributes a known fixture optimally and covers it exactly 
   const manifest = fixture(), shards = balanceShards(manifest, 3)
   assert.deepEqual(shards.map(s => s.weightSeconds), [13, 13, 13])
   assert.deepEqual(checkCoverage(manifest, shards, files(manifest)), { specs: 6, shards: 3 })
+  // Greedy placement alone gives 17/13. Swapping the 8- and 6-second specs
+  // reaches 15/15 without dropping coverage or understating a timing weight.
+  const uneven = { version: 1, groups: [group('a', [8, 7]), group('b', [6, 5, 4])] }
+  const before = structuredClone(uneven), balanced = balanceShards(uneven, 2)
+  assert.deepEqual(balanced.map(s => s.weightSeconds), [15, 15])
+  assert.deepEqual(checkCoverage(uneven, balanced, files(uneven)), { specs: 5, shards: 2 })
+  assert.deepEqual(uneven, before, 'Balancing must retain source weights and policies')
+  for (const shard of balanced) assert.equal(shard.weightSeconds, shard.specs.reduce((sum, spec) => sum + spec.weightSeconds, 0))
+  uneven.groups.reverse().forEach(g => g.specs.reverse())
+  assert.deepEqual(balanceShards(uneven, 2), balanced, 'Swap selection must not depend on source order')
+})
+
+test('indivisible specs rebalance after LPT without changing weights, coverage or launch policy', () => {
+  // LPT alone assigns [8, 5, 4] and [7, 6]: 17/13 despite a 15/15 fit.
+  const manifest = { version: 1, groups: [group('a', [8, 7, 6]), group('b', [5, 4])] }
+  const before = structuredClone(manifest), shards = balanceShards(manifest, 2)
+  assert.deepEqual(shards.map(shard => shard.weightSeconds), [15, 15])
+  assert.deepEqual(checkCoverage(manifest, shards, files(manifest)), { specs: 5, shards: 2 })
+  for (const shard of shards) {
+    assert.equal(shard.weightSeconds, shard.specs.reduce((total, spec) => total + spec.weightSeconds, 0))
+    for (const spec of shard.specs) {
+      const owner = manifest.groups.find(group => group.id === spec.groupId)
+      assert.deepEqual(spec, { ...owner.specs.find(row => row.file === spec.file), groupId: owner.id })
+    }
+  }
+  assert.deepEqual(manifest, before)
+  const reordered = structuredClone(manifest)
+  reordered.groups.reverse().forEach(group => group.specs.reverse())
+  assert.deepEqual(balanceShards(reordered, 2), shards)
+})
+
+test('multi-spec exchanges lower a peak that pairwise swaps leave in place', () => {
+  // LPT plus one-for-one swaps stops at 51/47/46 for these weights. A three-spec
+  // exchange reaches the even 48/48/48 split, which is what merged gate weights need.
+  const manifest = { version: 1, groups: [group('peak', [40, 21, 20, 19, 18, 8, 7, 6, 5])] }
+  const shards = balanceShards(manifest, 3)
+  assert.deepEqual(shards.map(shard => shard.weightSeconds), [48, 48, 48])
+  assert.deepEqual(checkCoverage(manifest, shards, files(manifest)), { specs: 9, shards: 3 })
+  manifest.groups[0].specs.reverse()
+  assert.deepEqual(balanceShards(manifest, 3).map(shard => shard.weightSeconds), [48, 48, 48])
 })
 
 test('one-worker tier weights convert measured parallel steps but retain serial and unmeasured estimates', async () => {
@@ -96,6 +199,28 @@ test('hosted tier timings override historical worker conversion and scale only t
     spec.tierTiming = timing
     assert.throws(() => tierWeights(manifest), /Invalid tier timing/)
   }
+})
+
+test('nightly timings schedule the catalogue and leave PR tier weights untouched', () => {
+  const manifest = fixture(), spec = manifest.groups[0].specs[0]
+  spec.listedTests = 4
+  spec.tierTiming = { seconds: 40, selectedTests: 4 }
+  manifest.nightlyTiming = { run: '38488051180', files: { [spec.file]: { seconds: 80, selectedTests: 4 } } }
+  assert.equal(validateManifest(manifest), manifest)
+  assert.equal(tierWeights(manifest)[spec.file], 40)
+  assert.equal(nightlyWeights(manifest)[spec.file], 80)
+  assert.equal(nightlyWeights(manifest, [{ file: spec.file }, { file: spec.file }])[spec.file], 40)
+  assert.equal(nightlyWeights(manifest)[manifest.groups[0].specs[1].file], tierWeights(manifest)[manifest.groups[0].specs[1].file])
+  assert.deepEqual(nightlyWeights(fixture()), tierWeights(fixture()))
+  for (const files of [null, { [spec.file]: { seconds: 0, selectedTests: 4 } }, { [spec.file]: { seconds: 80, selectedTests: 0 } }]) {
+    const broken = structuredClone(manifest)
+    broken.nightlyTiming = { files }
+    assert.throws(() => validateManifest(broken), /Invalid nightly timing/)
+  }
+  const unknown = structuredClone(manifest)
+  unknown.nightlyTiming = { files: { 'tests/missing.spec.ts': { seconds: 1, selectedTests: 1 } } }
+  assert.equal(validateManifest(unknown), unknown)
+  assert.throws(() => nightlyWeights(unknown), /Invalid nightly timing/)
 })
 
 test('assignment is deterministic despite manifest group/spec order and breaks ties by path', () => {
@@ -179,11 +304,11 @@ test('commands retain config/project/workers/traces/evidence and honor PW_RETRIE
   for (const value of ['-1', '1.5', 'NaN', '9007199254740992']) assert.throws(() => retryCount({ PW_RETRIES: value }), /PW_RETRIES/)
 })
 
-test('real manifest covers every non-excluded UI spec once for 1, 12 and 256 shards, including nested specs', () => {
+test('real manifest covers every non-excluded UI spec once for 1, 12, 24 and 256 shards, including nested specs', () => {
   const expected = discoverSpecs(), manifest = reconcileManifest(loadManifest(), expected).manifest
   assert.ok(expected.includes('tests/quotes/print-receipt.spec.ts'))
   assert.ok(!expected.includes('e2e/smoke.spec.ts'))
-  for (const count of [1, 12, 256]) {
+  for (const count of [1, 12, 24, 256]) {
     assert.deepEqual(checkCoverage(manifest, balanceShards(manifest, count, { all: true }), expected, { all: true }), {
       specs: expected.length - manifest.exclusions.length, shards: count,
       ...(manifest.exclusions.length ? { excluded: manifest.exclusions.length } : {}),
@@ -315,9 +440,10 @@ test('report merger retains errors, failures, suites and timing from every group
   assert.equal(report.stats.duration, 30)
 })
 
-test('wrapper JSON output aggregates every group and cannot reuse a stale green report', async () => {
+test('wrapper JSON output aggregates every group and cannot reuse a stale green report', {timeout:20_000}, async t => {
   const reportDirectory = resolve(webRoot, 'test-results', 'ci-web-unit-reports')
-  const env = { CI: '1', RUNNER_ENVIRONMENT: 'github-hosted', PLAYWRIGHT_JSON_OUTPUT_FILE: 'test-results/ci-web-unit-reports/test-aggregate.json' }
+  const env = { CI: '1', RUNNER_ENVIRONMENT: 'github-hosted', PLAYWRIGHT_JSON_OUTPUT_FILE: 'test-results/ci-web-unit-reports/test-aggregate.json',
+    GITHUB_RUN_ID: '1313', GITHUB_RUN_ATTEMPT: '2', GITHUB_SHA: 'a'.repeat(40) }
   const manifest = effective()
   const shard = balanceShards(manifest, 12).find(candidate => planCommands(manifest, candidate, env).length > 1)
   assert.ok(shard, 'fixture must span several groups')
@@ -351,7 +477,49 @@ test('wrapper JSON output aggregates every group and cannot reuse a stale green 
   assert.match(missing.errors[0].message, /Missing or invalid/)
   writeFileSync(path, JSON.stringify(report))
   assert.equal(await main([selection], { env, run: async () => ({ code: 143 }), reportDirectory, out: () => {} }), 143)
-  assert.equal(readFileSync(path, 'utf8'), '', 'interruption retained an old green aggregate')
+  const interrupted = JSON.parse(readFileSync(path, 'utf8'))
+  assert.equal(interrupted.suites.length, 0, 'interruption retained an old aggregate')
+  assert.equal(interrupted.execution.status, 'interrupted')
+  assert.match(interrupted.execution.reason, /SIGTERM/)
+  assert.deepEqual(interrupted.notRunGroups.map(group => group.group), expectedCommands.slice(1).map(command => command.group))
+
+  // A readiness barrier in the later synthetic child proves the completed
+  // failure was checkpointed before termination. No browser is launched.
+  let calls = 0, child
+  t.signal.addEventListener('abort', () => child?.kill('SIGKILL'), { once: true })
+  try {
+    assert.equal(await main([selection], { env, reportDirectory, out: () => {}, run: async (args, options) => {
+      calls++
+      if (calls === 1) {
+        writeFileSync(options.env.PLAYWRIGHT_JSON_OUTPUT_FILE, JSON.stringify({ suites: [{ file: 'completed-failure.spec.ts' }],
+          errors: [{ message: 'completed failure' }], stats: { unexpected: 1, expected: 0 } }))
+        return { code: 1 }
+      }
+      child = spawn(process.execPath, ['-e', "process.on('message',()=>{});process.send('ready')"], { stdio: ['ignore', 'ignore', 'ignore', 'ipc'] })
+      const exited = once(child, 'exit')
+      const ready = await Promise.race([once(child, 'message'), exited.then(result => assert.fail(`Child exited before barrier: ${result}`))])
+      assert.equal(ready[0], 'ready')
+      const checkpoint = JSON.parse(readFileSync(path, 'utf8'))
+      assert.equal(checkpoint.execution.status, 'running')
+      assert.equal(checkpoint.execution.completedGroups, 1)
+      assert.equal(checkpoint.stats.unexpected, 1)
+      assert.equal(checkpoint.suites[0].file, 'completed-failure.spec.ts')
+      child.kill('SIGTERM')
+      assert.equal((await exited)[1], 'SIGTERM')
+      return { code: 143, metrics: { signal: 'SIGTERM' } }
+    } }), 143)
+    assert.equal(calls, 2, 'an interrupted group must stop later groups')
+    const saved = JSON.parse(readFileSync(path, 'utf8'))
+    assert.equal(saved.suites[0].file, 'completed-failure.spec.ts')
+    assert.equal(saved.stats.unexpected, 1)
+    assert.equal(saved.execution.status, 'interrupted')
+    assert.deepEqual([saved.runId, saved.attempt, saved.sha], ['1313', '2', env.GITHUB_SHA])
+    assert.ok(saved.errors.some(error => error.message === 'completed failure'))
+    assert.ok(saved.errors.some(error => /interrupted by SIGTERM/.test(error.message)))
+    assert.deepEqual(saved.notRunGroups.map(group => group.group), expectedCommands.slice(2).map(command => command.group))
+  } finally {
+    if (child && child.exitCode === null && child.signalCode === null) { const exited = once(child, 'exit'); child.kill('SIGKILL'); await exited }
+  }
 })
 
 test('a flake retry selects exactly one test in its original group and fails closed otherwise', async () => {
@@ -415,7 +583,117 @@ test('ungated groups stay declared and checked but only run with --all', () => {
   const gated = balanceShards(real, 12).flatMap(s => s.specs)
   assert.ok(gated.some(spec => spec.file === 'tests/knowledge.spec.ts'), 'Decision Knowledge regressions must gate CI')
   assert.equal(gated.length, files(real).length - real.groups.find(g => g.id === 'remaining-ui').specs.length)
-  assert.ok(Math.max(...balanceShards(real, 12).map(s => s.weightSeconds)) < 300, 'gate shard exceeds five minutes of test time')
+  // Preserve main's five-minute estimate for every gated group except
+  // AEON-697's attention spec. That spec is one file, so the balancer cannot
+  // spread it; the expanded gate may grow by its whole weight and no more.
+  // AEON-696 grew status-autopilot.spec.ts from 7 to 11 cases (weight 22.794872
+  // on main); the prior gate keeps main's weight and may also grow by that delta.
+  // These weights are scheduling estimates, not a hosted-runtime promise.
+  const attention = real.groups.find(group => group.id === 'needs-attention')
+  assert.ok(attention, 'Attention regressions must remain in the gate')
+  const autopilotOnMain = 22.794872
+  const autopilot = real.groups.flatMap(group => group.specs).find(spec => spec.file === 'tests/status-autopilot.spec.ts')
+  assert.ok(autopilot && autopilot.weightSeconds >= autopilotOnMain, 'Autopilot regressions must remain in the gate')
+  const autopilotGrowth = autopilot.weightSeconds - autopilotOnMain
+  // AEON-569 adds two regression files and twelve no-shift cases; AEON-1057
+  // adds the project spec. Compare the unchanged prior gate separately, then
+  // charge their explicit weights.
+  const deskFiles = new Set(['tests/decision-desk-fix2.spec.ts', 'tests/decision-desk-fix3.spec.ts', 'tests/decision-desk-project.spec.ts'])
+  const deskAdded = real.groups.flatMap(group => group.specs).filter(spec => deskFiles.has(spec.file))
+  assert.equal(deskAdded.length, 3, 'The cutover regression files and the project spec must remain in the gate')
+  const noShift = real.groups.flatMap(group => group.specs).find(spec => spec.file === 'tests/no-shift.spec.ts')
+  const noShiftOnMain = 10.171603
+  assert.ok(noShift && noShift.weightSeconds >= noShiftOnMain, 'No-shift regressions must remain in the gate')
+  const deskGrowth = deskAdded.reduce((sum, spec) => sum + spec.weightSeconds, 0) + noShift.weightSeconds - noShiftOnMain
+  // AEON-644 adds its ten application regressions to the gate. Preserve the
+  // unchanged prior budget, then charge this separately measured spec's weight.
+  const themeApply = real.groups.flatMap(group => group.specs).find(spec => spec.file === 'tests/theme-apply.spec.ts')
+  assert.ok(themeApply && themeApply.listedTests === 10, 'Theme application regressions must remain in the gate')
+  assert.ok(gated.some(spec => spec.file === themeApply.file), 'Theme application must remain gated')
+  // AEON-1163 runs the approved design's check against the built Model registry in its own spec (with the
+  // screenshots moved out of models-registry.spec.ts); charge its weight like the specs above.
+  const registryShots = real.groups.flatMap(group => group.specs).find(spec => spec.file === 'tests/models-registry-shots.spec.ts')
+  assert.ok(registryShots && gated.some(spec => spec.file === registryShots.file), 'The registry design check must remain in the gate')
+  // AEON-1289 adds its terminal regressions after the prior baseline; charge the spec's weight separately.
+  const expertTerminal = real.groups.flatMap(group => group.specs).find(spec => spec.file === 'tests/native-expert-terminal.spec.ts')
+  assert.ok(expertTerminal && gated.some(spec => spec.file === expertTerminal.file), 'Expert terminal regressions must remain in the gate')
+  // AEON-1315 adds the entry-check regression; keep the historical gate budget
+  // unchanged and charge this new spec's explicit scheduling weight.
+  const entryChecks = real.groups.flatMap(group => group.specs).find(spec => spec.file === 'tests/entry-checks.spec.ts')
+  assert.ok(entryChecks && gated.some(spec => spec.file === entryChecks.file), 'Entry-check regressions must remain in the gate')
+  // AEON-1331 adds lesson decisions after the prior baseline. Preserve that
+  // baseline and charge only this slice's independently bounded spec budget.
+  // AEON-1363 adds three Knowledge lesson-line cases to the same spec.
+  const deskLessons = real.groups.flatMap(group => group.specs).find(spec => spec.file === 'tests/decision-desk-lessons.spec.ts')
+  assert.ok(deskLessons && deskLessons.listedTests === 26, 'Lesson decision regressions must remain in the gate')
+  assert.ok(gated.some(spec => spec.file === deskLessons.file), 'Lesson decisions must remain gated')
+  // AEON-1309 splits its nine unchanged panel cases so files can be packed
+  // independently. Charge only this slice's declared weights, like the other
+  // additions above; the historical <300s bound and twelve shards stay intact.
+  const panelFiles = new Set(['tests/native-session-program.spec.ts',
+    'tests/native-session-program-390.spec.ts', 'tests/native-session-program-1024.spec.ts',
+    'tests/native-session-program-1440.spec.ts', 'tests/native-session-program-reader.spec.ts',
+    'tests/native-session-program-validation.spec.ts'])
+  const panelAdded = real.groups.flatMap(group => group.specs).filter(spec => panelFiles.has(spec.file))
+  assert.equal(panelAdded.length, 6, 'All six balanced panel files must remain declared')
+  assert.equal(panelAdded.reduce((sum, spec) => sum + spec.listedTests, 0), 9, 'The split must retain every panel case')
+  for (const spec of panelAdded) assert.ok(gated.some(candidate => candidate.file === spec.file), 'Panel specs must remain in the declared gate')
+  const panelGrowth = panelAdded.reduce((sum, spec) => sum + spec.weightSeconds, 0)
+  // AEON-1316 adds its project Definitions spec after the historical budget.
+  // Keep the old budget and charge only this independently bounded addition.
+  // FIX4 adds six verdict regressions alongside the original three flows.
+  const projectDefinitions = real.groups.flatMap(group => group.specs).find(spec => spec.file === 'tests/definitions.spec.ts')
+  assert.ok(projectDefinitions && projectDefinitions.listedTests === 9, 'Project Definitions regressions must remain declared')
+  assert.ok(gated.some(spec => spec.file === projectDefinitions.file), 'Project Definitions must remain gated')
+  // AEON-1425 adds eight project-name wrap cases after the historical budget.
+  // Leaving the file inside that budget packs the twelve shards to 301.322264s.
+  // Keep the old budget and charge only this file's scheduling weight.
+  const nameWrap = real.groups.flatMap(group => group.specs).find(spec => spec.file === 'tests/project-name-wrap.spec.ts')
+  assert.ok(nameWrap && nameWrap.listedTests === 8, 'Project name wrap regressions must remain declared')
+  assert.ok(gated.some(spec => spec.file === nameWrap.file), 'Project name wrap must remain gated')
+  // AEON-1318 adds its four ownership flows after the historical baseline.
+  // FIX8 adds the phone title-line regression alongside those flows.
+  // Retain the five-minute bound for every prior case and charge only this
+  // independently measured, bounded addition, as for Project Definitions.
+  const personSteps = real.groups.flatMap(group => group.specs).find(spec => spec.file === 'tests/person-steps.spec.ts')
+  assert.ok(personSteps && personSteps.listedTests === 5, 'All five person-step ownership and phone regressions must remain declared')
+  assert.equal(gated.filter(spec => spec.file === personSteps.file).length, 1, 'Person-step ownership must remain gated exactly once')
+  const personTiming = real.nightlyTiming.files[personSteps.file]
+  assert.equal(personTiming?.selectedTests, personSteps.listedTests, 'Person-step timing must cover the complete file')
+  assert.equal(personSteps.weightSeconds, personTiming?.seconds, 'Charge only the measured person-step scheduling cost')
+  assert.ok(personSteps.weightSeconds <= 40, 'The five person-step flows must retain their independently bounded measured cost')
+  // AEON-1406 adds four empty-Desk cases (two widths x two themes) after the historical budget.
+  // AEON-1477 adds six refresh-stability cases, the failed-first-load case, three
+  // Open/Decided tab-switch cases and one touch Try again case.
+  // Keep the old budget and charge only this file's scheduling weight, as for project name wrap.
+  const deskEmpty = real.groups.flatMap(group => group.specs).find(spec => spec.file === 'tests/desk-empty.spec.ts')
+  assert.ok(deskEmpty && deskEmpty.listedTests === 15, 'Empty Desk and refresh regressions must remain declared')
+  assert.ok(gated.some(spec => spec.file === deskEmpty.file), 'Empty Desk regressions must remain gated')
+  // AEON-1448 adds four Desk tab-row cases after the historical budget.
+  // Keep the old budget and charge only this file's scheduling weight, as for project name wrap.
+  const deskTabRow = real.groups.flatMap(group => group.specs).find(spec => spec.file === 'tests/aeon-1448-desk-tabrow.spec.ts')
+  assert.ok(deskTabRow && deskTabRow.listedTests === 4, 'Desk tab-row regressions must remain declared')
+  assert.ok(gated.some(spec => spec.file === deskTabRow.file), 'Desk tab-row regressions must remain gated')
+  // AEON-1453 adds seven ViewSwitch cases (Projects, the ticket list default, the Releases sheet; package B:
+  // the session panel's old pin, its phone ⋯ choice, its ?tab= link and the worker last tab) after the
+  // historical budget, charged like the empty Desk: only this file's scheduling weight.
+  const viewSwitch = real.groups.flatMap(group => group.specs).find(spec => spec.file === 'tests/view-switch.spec.ts')
+  assert.ok(viewSwitch && viewSwitch.listedTests === 7, 'ViewSwitch regressions must remain declared')
+  assert.ok(gated.some(spec => spec.file === viewSwitch.file), 'ViewSwitch regressions must remain gated')
+  const priorGate = {
+    ...real,
+    groups: real.groups.filter(group => group !== attention).map(group => ({
+      ...group,
+      specs: group.specs.filter(spec => !deskFiles.has(spec.file) && !panelFiles.has(spec.file) && spec !== themeApply && spec !== registryShots && spec !== expertTerminal && spec !== entryChecks && spec !== deskLessons && spec !== projectDefinitions && spec !== nameWrap && spec !== personSteps && spec !== deskEmpty && spec !== deskTabRow && spec !== viewSwitch).map(spec =>
+        spec === autopilot ? { ...spec, weightSeconds: autopilotOnMain } :
+          spec === noShift ? { ...spec, weightSeconds: noShiftOnMain } : spec),
+    })),
+  }
+  const priorMax = Math.max(...balanceShards(priorGate, 12).map(s => s.weightSeconds))
+  assert.ok(priorMax < 300, 'prior gate exceeds its five-minute estimate budget')
+  const added = attention.specs.reduce((sum, spec) => sum + spec.weightSeconds, 0) + autopilotGrowth + deskGrowth + themeApply.weightSeconds + registryShots.weightSeconds + expertTerminal.weightSeconds + entryChecks.weightSeconds + deskLessons.weightSeconds + panelGrowth + projectDefinitions.weightSeconds + nameWrap.weightSeconds + personSteps.weightSeconds + deskEmpty.weightSeconds + deskTabRow.weightSeconds + viewSwitch.weightSeconds
+  assert.ok(Math.max(...balanceShards(real, 12).map(s => s.weightSeconds)) < priorMax + added,
+    'expanded gate exceeds the prior estimate plus the attention, autopilot, cutover, theme application, registry design-check, expert terminal, entry-check, lesson decision, panel, project Definitions, project name wrap, person-step ownership, empty Desk, Desk tab-row and ViewSwitch specs')
 })
 
 test('runtime reconciliation leaves new specs ungated, drops removed specs and reports drift', async () => {
@@ -512,7 +790,47 @@ test('Settings cases stay classified: strict validation rejects stale and unclas
   const rows = validate(manifest, collected, undefined, { strict: true })
   assert.deepEqual(rows.map(key).sort(), collected.map(key).sort())
   const evidence = rows.filter(row => row.name.startsWith('settings layout evidence'))
-  assert.equal(evidence.length, 1)
-  assert.equal(evidence[0].tier, 'NIGHTLY', 'screenshot evidence stays nightly')
-  for (const row of rows) if (row !== evidence[0]) assert.ok(['ESSENTIAL', 'GATED-FULL'].includes(row.tier), `${key(row)} needs an explicit gate tier`)
+  assert.deepEqual(evidence.map(row => row.name).sort(), [390, 1024, 1440].flatMap(width => ['light', 'dark'].map(theme =>
+    `settings layout evidence in light and dark at phone, tablet and desktop sizes: ${width}px ${theme}`)).sort())
+  for (const row of evidence) assert.equal(row.tier, 'ESSENTIAL', 'AEON-1326 R0 grant gates each independent evidence variant')
+  for (const row of rows) assert.ok(['ESSENTIAL', 'GATED-FULL'].includes(row.tier), `${key(row)} needs an explicit gate tier`)
+  for (const event of ['pull_request', 'merge_group']) {
+    const selected = select(rows, { event, paths: ['.github/workflows/ci.yml'] }).tests
+    assert.deepEqual(selected.map(key), rows.map(key), `${event} must gate every Settings case, including evidence`)
+  }
+  const policy = loadManifest()
+  const declarations = policy.groups.flatMap(group => group.specs.filter(spec => spec.file === file).map(spec => ({ group, spec })))
+  assert.equal(declarations.length, 1, 'Settings must have exactly one shard declaration')
+  assert.notEqual(declarations[0].group.gate, false, 'Settings must remain in the full browser gate')
+  assert.equal(declarations[0].spec.listedTests, collected.length)
+})
+
+// Native expansion catches parameterized routing cases; strict reconciliation
+// prevents new cases from silently becoming nightly-only after a merge.
+for (const [kind, file, minimum] of [
+  ['vitest', 'tests/settings-routing.unit.test.ts', 35],
+  ['node', 'tests/agent-login.test.ts', 3],
+]) test(`${file} native registrations stay explicitly gated`, () => {
+  const directory = mkdtempSync(resolve(tmpdir(), 'aeon-706-native-tiers-'))
+  try {
+    let collected
+    if (kind === 'vitest') {
+      const output = resolve(directory, 'vitest-list.json')
+      command(process.execPath, ['node_modules/vitest/vitest.mjs', 'list', file, `--json=${output}`,
+        '--no-staticParse', '--maxWorkers=1', '--no-fileParallelism', '--configLoader=runner'], { cwd: webRoot, timeout: 30_000 })
+      collected = JSON.parse(readFileSync(output, 'utf8')).map(row => ({ kind, file, name: row.name }))
+    } else {
+      collected = JSON.parse(command(process.execPath, ['--import', resolve(root, 'scripts/test-tiers/node-collect-hook.mjs'),
+        resolve(root, 'scripts/test-tiers/node-collect.mjs'), resolve(webRoot, file)], { cwd: webRoot, timeout: 30_000 }))
+        .map(row => ({ ...row, kind, file }))
+    }
+    assert.ok(collected.length >= minimum, `${file}: native collection must retain parameterized cases`)
+    const stored = JSON.parse(readFileSync(resolve(root, 'scripts/ci/web-test-tiers.json'), 'utf8'))
+    const manifest = { version: stored.version, tests: stored.tests.filter(row => row.file === file) }
+    const rows = validate(manifest, collected, undefined, { strict: true })
+    for (const event of ['pull_request', 'merge_group']) {
+      const selected = select(rows, { event, paths: ['.github/workflows/ci.yml'] }).tests
+      assert.deepEqual(selected.map(key).sort(), collected.map(key).sort(), `${event}: every registration must gate`)
+    }
+  } finally { rmSync(directory, { recursive: true, force: true }) }
 })

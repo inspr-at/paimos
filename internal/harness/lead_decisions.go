@@ -17,6 +17,7 @@ import (
 	"github.com/inspr-at/paimos/internal/authz"
 	"github.com/inspr-at/paimos/internal/db"
 	"github.com/inspr-at/paimos/internal/events"
+	"github.com/inspr-at/paimos/internal/httpapi"
 	"github.com/inspr-at/paimos/internal/reviewgate"
 	"github.com/inspr-at/paimos/internal/tenant"
 	"github.com/inspr-at/paimos/internal/workorders"
@@ -258,7 +259,7 @@ func withoutCode(codes []string, code string) []string {
 
 func (m *Module) recordLeadDecision(r *http.Request, tx pgx.Tx, p tenant.Principal) (any, error) {
 	var in LeadDecisionWrite
-	r.Body = http.MaxBytesReader(nil, r.Body, 8192)
+	r.Body = httpapi.RequestBodyReader(nil, r, 8192)
 	if err := workorders.Decode(r, &in); err != nil {
 		return nil, err
 	}

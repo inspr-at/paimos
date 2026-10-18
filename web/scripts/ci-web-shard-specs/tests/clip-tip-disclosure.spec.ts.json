@@ -1,0 +1,22 @@
+{
+  "group": "clipped-names-and-preferences",
+  "nightlyTiming": {
+    "seconds": 36.53,
+    "selectedTests": 24
+  },
+  "spec": {
+    "file": "tests/clip-tip-disclosure.spec.ts",
+    "listedTests": 24,
+    "tierTiming": {
+      "caseSeconds": {
+        "max": 2.049,
+        "median": 1.414,
+        "min": 1.205
+      },
+      "seconds": 36.53,
+      "selectedTests": 24
+    },
+    "weightSeconds": 22.425751,
+    "weightSource": "tierTiming:37377299349"
+  }
+}

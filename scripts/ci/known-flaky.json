@@ -6,11 +6,11 @@
       "owner": "AEON-675"
     },
     {
-      "key": "browser:tests/clip-tip.spec.ts:touch fix5: 1440px light › production table hold discloses without selection and the next tap opens the ticket",
+      "key": "browser:tests/clip-tip-touch.spec.ts:touch fix5: 1440px light › production table hold discloses without selection and the next tap opens the ticket",
       "owner": "AEON-676"
     },
     {
-      "key": "browser:tests/no-shift.spec.ts:approval choices, typing and failure keep the decision controls put at 1440",
+      "key": "browser:tests/no-shift-agents.spec.ts:approval choices, typing and failure keep the decision controls put at 1440",
       "owner": "AEON-683"
     },
     {
@@ -18,7 +18,7 @@
       "owner": "AEON-683"
     },
     {
-      "key": "browser:tests/no-shift.spec.ts:approval choices, typing and failure keep the decision controls put at 390",
+      "key": "browser:tests/no-shift-agents.spec.ts:approval choices, typing and failure keep the decision controls put at 390",
       "owner": "AEON-683"
     },
     {

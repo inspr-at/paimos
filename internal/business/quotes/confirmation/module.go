@@ -313,7 +313,7 @@ func (m *Module) retry(w http.ResponseWriter, r *http.Request) {
 	var input struct {
 		AcknowledgeUncertain bool `json:"acknowledge_uncertain"`
 	}
-	d := json.NewDecoder(io.LimitReader(r.Body, 1025))
+	d := httpapi.NewRequestDecoder(w, r, 1025)
 	d.DisallowUnknownFields()
 	if err := d.Decode(&input); err != nil {
 		fail(w, 400, "invalid retry request")

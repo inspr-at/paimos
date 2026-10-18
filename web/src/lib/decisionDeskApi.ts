@@ -1,21 +1,25 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // Single adapter for P1/P2/P3 and protected AEON-455/436/524 integrations.
+import { acceptLearning, dismissLearning, draftLearning, getKnowledge, listLearnings, type MethodLearning } from './knowledge'
 import { readKeyTrims, decideKeyTrim, type KeyTrimProposal, type KeyTrimCursors } from './keyTrim'
-import { api, APIError, getNode, getProjects, getRelations, lookupNodeKeys, type WorkNode } from './api'
-import { listApprovals, decideApproval, listMessages, resolveMessage, type Approval, type ProjectMessage, type HarnessSession } from './agents'
+import { approveStepup, declineStepup, readStepups, stepupAnswer, stepupDelivery, stepupTitle, type StepupDevices, type StepupRequest } from './stepup'
+import { api, APIError, getNode, getProjects, getRelations, lookupNodeKeys, lookupNodes, type WorkNode } from './api'
+import { listApprovals, decideApproval, listMessages, resolveMessage, type Approval, type ProjectMessage, type HarnessSession, type AgentRun } from './agents'
 import { canDecideApproval, decidedApprovals } from './agentState'
 import { getDoctrineInbox, submitDoctrineInbox, dismissDoctrineInbox, type DoctrineInboxItem } from './doctrine'
 import { listAttachments, type Attachment } from './attachments'
 import { loadTicketOutcomes, type OutcomeEvent } from './ticketOutcomes'
 import { decidePhone, phoneRequest, reviewPath, type PhoneReview } from './deskPhoneApproval'
 import { readTierResponse, decideTierResponse } from './agentRows'
-import { answerFor, CUSTOM_ANSWER, type DeskChoice, type DeskDraft, type DeskItem, type DeskOutcome } from './decisionDesk'
+import { answerFor, CUSTOM_ANSWER, deskItemID, deskLinkOut, type DeskChoice, type DeskDraft, type DeskItem, type DeskOutcome, type DeskProjection, type DeskProjectionItem, type DeskOutcomeAvailability, type DeskDoctrineTarget, type DeskOutcomeEffect, type DeskSource, type DeskTicket } from './decisionDesk'
 
 export interface QuestionInput {
   request_id: string; question: string; context?: string; findings?: string; options: DeskChoice[]
   recommend?: string; why?: string; meanwhile: 'carries_on' | 'parked' | 'paused' | 'stopped'; meanwhile_text?: string
   ticket_id?: string; source_handover_id?: string; suggested_outcome?: DeskOutcome
-  source_request_id?: string
+  source_request_id?: string; doctrine?: DeskDoctrineTarget
+  /** The verified session that asked (api/areas/shared.yaml QuestionInput); questions bind to a session by it, never by principal. */
+  session_id?: string
 }
 export interface QuestionAnswer {
   id: string; revision: number; answer: string; option_id?: string; reason?: string; outcome: DeskOutcome
@@ -24,9 +28,9 @@ export interface QuestionAnswer {
 export interface Question {
   id: string; project_id: string; revision: number; state: 'open' | 'answered'; input: QuestionInput
   suggested_outcome: DeskOutcome; suggestion_reason: 'agent_suggestion' | 'ticket_default' | 'project_default'
-  askers: { id: string; principal_id: string; reply_root_id: string; comment_node_id: string; input: QuestionInput; from_record?: { label: 'From the record'; decision_id: string; revision: number } }[]
+  askers: { id: string; principal_id: string; session_id?: string; reply_root_id: string; comment_node_id: string; input: QuestionInput; from_record?: { label: 'From the record'; decision_id: string; revision: number } }[]
   answer?: QuestionAnswer; created_at: string; updated_at: string
-  pending: { id: string; revision: number; kind: 'inbox' | 'comment' | 'outcome'; state: 'pending' | 'delivered' | 'failed' | 'replaced'; deliver_after: string; receipt_state?: 'queued' | 'handed_off' | 'failed'; error_code?: string }[]
+  outcomes?: DeskOutcomeAvailability[]; pending: DeskOutcomeEffect[]
 }
 export interface QuestionPage { items: Question[]; has_more: boolean; next_cursor?: string }
 export async function deskRequest<T>(path: string, body?: unknown): Promise<T> {
@@ -70,8 +74,10 @@ export function deliveryTime(value?: string): string {
   return Number.isFinite(timestamp) ? new Intl.DateTimeFormat(undefined, { dateStyle: 'medium', timeStyle: 'short' }).format(timestamp) : 'an unavailable time'
 }
 export const readQuestion = (id: string) => deskRequest<Question>(`/questions/${encodeURIComponent(id)}`)
-export const decideQuestion = (id: string, revision: number, draft: DeskDraft, requestId: string) => deskRequest<Question>(`/questions/${encodeURIComponent(id)}/decision`, {
+export const readApproval = (id: string) => deskRequest<Approval>(`/approvals/${encodeURIComponent(id)}`)
+export const decideQuestion = (id: string, revision: number, draft: DeskDraft, requestId: string, doctrine?: DeskDoctrineTarget) => deskRequest<Question>(`/questions/${encodeURIComponent(id)}/decision`, {
   request_id: requestId, expected_revision: revision, outcome: draft.outcome,
+  ...(draft.outcome === 'doctrine' && doctrine ? { doctrine: { ...doctrine } } : {}),
   ...(draft.optionId === CUSTOM_ANSWER ? { answer: draft.answer.trim() } : { option_id: draft.optionId }), reason: draft.reason.trim(),
 })
 export function questionItem(question: Question, projectName: string): DeskItem {
@@ -82,7 +88,7 @@ export function questionItem(question: Question, projectName: string): DeskItem 
     : pending.some(effect => effect.state === 'delivered') ? 'Dispatched; receiver confirmation may still be pending.' : undefined
   const reuse = question.askers.find(asker => asker.from_record)?.from_record
   return {
-    id: `q:${question.id}`, kind: question.input.source_handover_id ? 'handover' : 'question', projectId: question.project_id, projectName,
+    id: `q:${question.id}`, source: `/api/questions/${encodeURIComponent(question.id)}`, kind: question.input.source_handover_id ? 'handover' : 'question', projectId: question.project_id, projectName,
     ticketId: question.input.ticket_id, title: question.input.question, context: question.input.context ?? '', findings: question.input.findings ?? '',
     meanwhile: question.input.meanwhile_text || question.input.meanwhile.replaceAll('_', ' '),
     destination: `${question.askers.length} asker${question.askers.length === 1 ? '' : 's'} · inbox or verified successor · ${question.input.ticket_id ? 'ticket comment' : 'question record'}`,
@@ -91,7 +97,15 @@ export function questionItem(question: Question, projectName: string): DeskItem 
     suggestion: question.suggestion_reason === 'agent_suggestion' ? 'Suggested by the agent.' : question.suggestion_reason === 'ticket_default' ? 'This question belongs to a ticket.' : `For ${projectName}, from now on.`,
     revision: question.revision, createdAt: question.created_at, held: question.input.meanwhile !== 'carries_on', decided: question.state === 'answered',
     answer: question.answer?.answer, optionId: question.answer ? question.answer.option_id || CUSTOM_ANSWER : undefined, reason: question.answer?.reason, delivery: question.answer?.replaces ? `Correction of the earlier answer. ${delivery ?? 'Delivery state is not supplied.'}` : delivery,
+    outcomes: question.outcomes?.map(row => ({ ...row })), doctrine: question.input.doctrine ? { ...question.input.doctrine } : undefined,
+    outcomeEffects: question.pending.filter(effect => effect.revision === question.revision && effect.kind === 'outcome').map(effect => ({ ...effect, effect_data: effect.effect_data ? { ...effect.effect_data, review_required: effect.effect_data.review_required?.map(review => ({ ...review })) } : undefined })),
     fromRecord: reuse ? `${reuse.label} · revision ${reuse.revision}` : undefined,
+    askers: question.askers.slice(0, 20).map(asker => ({ principalId: asker.principal_id, sessionId: asker.session_id })),
+    meanwhileKind: question.input.meanwhile, suggested: question.suggested_outcome,
+    suggestedBy: question.suggestion_reason === 'agent_suggestion' ? 'agent' : question.suggestion_reason === 'ticket_default' ? 'ticket' : 'project',
+    decidedAt: question.answer?.created_at, deliverAfter: question.answer?.deliver_after ?? pending[0]?.deliver_after,
+    deliveryState: pending.some(effect => effect.state === 'failed' || effect.receipt_state === 'failed') ? 'failed'
+      : pending.some(effect => effect.state === 'pending') ? 'pending' : pending.some(effect => effect.state === 'delivered') ? 'delivered' : undefined,
   }
 }
 function base(id: string, kind: DeskItem['kind'], title: string, context: string, choices: DeskChoice[]): DeskItem {
@@ -102,20 +116,72 @@ export function approvalItem(approval: Approval, projectName = approval.resource
   return { ...base(`a:${approval.id}`, 'approval', `Allow ${approval.scope}?`, approval.rationale, [
     { id: 'approved', title: 'Approve', description: 'Grant this request through the approvals API.', answer: 'Approved' },
     { id: 'denied', title: 'Deny', description: 'Keep the permission unchanged.', answer: 'Denied' },
-  ]), projectName, ticketId: approval.resource_kind === 'node' ? approval.resource_id ?? undefined : undefined, createdAt: approval.proposed_at, expiresAt: approval.expires_at, decided: decidedApprovals([approval], Date.now()).length > 0, optionId: approval.decision ?? undefined, answer: approval.decision ?? (Date.parse(approval.expires_at) <= Date.now() ? 'Expired without a decision' : undefined) }
+  ]), askers: [{ principalId: approval.agent_principal_id, name: approval.agent_name?.trim() || undefined }], approval: { ...approval }, source: `/api/approvals/${encodeURIComponent(approval.id)}`, projectName, ticketId: approval.resource_kind === 'node' ? approval.resource_id ?? undefined : undefined, runId: approval.resource_kind === 'run' ? approval.resource_id || undefined : undefined, createdAt: approval.proposed_at, expiresAt: approval.expires_at, decided: decidedApprovals([approval], Date.now()).length > 0, optionId: approval.decision ?? undefined, answer: approval.decision ?? (Date.parse(approval.expires_at) <= Date.now() ? 'Expired without a decision' : undefined) }
 }
 export function actionItem(message: ProjectMessage, projectId: string, projectName: string): DeskItem {
-  return { ...base(`m:${message.id}`, 'action', 'An agent needs your steer', message.body, [
+  return { ...base(`m:${message.id}`, 'action', 'Action request', message.body, [
     { id: 'reply', title: 'Reply to the agent', description: 'Steer the work with an inbox reply.', answer: '', field: true },
     { id: 'resolved', title: 'I did it myself', description: 'Resolve the request.', answer: 'Resolved' },
     { id: 'dismissed', title: 'Not needed', description: 'Dismiss the request.', answer: 'Dismissed' },
-  ]), projectId, projectName, createdAt: message.created_at ?? '', destination: 'Reply to the original request, or its native Resolve / Dismiss action.' }
+  ]), projectId, projectName, createdAt: message.created_at ?? '', askers: [{ principalId: message.sender_principal_id, sessionId: message.sender_session_id ?? undefined, name: message.sender_label?.trim() || undefined }], destination: 'Reply to the original request, or its native Resolve / Dismiss action.' }
 }
 export function ruleItem(rule: DoctrineInboxItem): DeskItem {
   return { ...base(`r:${rule.id}`, 'rule', rule.label, rule.why ?? '', [
-    { id: 'propose', title: 'Propose the change', description: 'Open the existing doctrine pull request flow.', answer: 'Propose the change' },
+    { id: 'propose', title: 'Propose the change', description: 'Open the existing doctrine pull request flow.', answer: 'Propose the change', unavailable: rule.outdated ? 'The rule changed since this was proposed. Edit against the current rule first.' : undefined },
     { id: 'dismiss', title: 'Not now', description: 'Return a reason to the proposer.', answer: 'Not now' },
-  ]), prUrl: rule.pr_url || undefined, createdAt: rule.created_at, findings: rule.proposed ?? '', ticketKey: rule.ticket, destination: 'Doctrine inbox, reviewed pull request, release, then pin.' }
+  ]), askers: rule.proposer ? [{ principalId: '', name: rule.proposer }] : undefined, rule: { ...rule }, prUrl: rule.pr_url || undefined, createdAt: rule.created_at, findings: rule.proposed ?? '', ticketKey: rule.ticket, destination: 'Doctrine inbox, reviewed pull request, release, then pin.' }
+}
+/** The entry and its Changelog. The house separator is a word divider; a text chevron is an icon. */
+export function lessonChangelogLabel(title: string | undefined): string {
+  return `${title} · Changelog`
+}
+/** A lesson keeps the exact native recommendation frozen for the round. */
+export function lessonItem(row: DeskProjectionItem, learning: MethodLearning, projectName: string, outdated = false): DeskItem {
+  const rec = learning.recommendation!
+  return { ...base(deskItemID(row), 'lesson', rec.lesson!, rec.source_summary ?? '', [
+    { id: 'accept', title: 'Accept', description: rec.rule_layer_id ? 'Add the prepared line to the rule draft.' : 'Add the prepared line to the changelog.', answer: 'Accepted' },
+    { id: 'dismiss', title: 'Dismiss', description: 'Nothing is written.', answer: 'Dismissed' },
+  ]), projectId: row.project_id!, projectName, revision: rec.event_id, createdAt: row.created_at, held: false,
+    source: row.source, destination: rec.rule_layer_id ? `Rule draft ${rec.knowledge_title}` : lessonChangelogLabel(rec.knowledge_title),
+    lesson: { learning: { ...learning, recommendation: { ...rec } }, outdated }, suggestion: 'Accept or Dismiss the prepared lesson.' }
+}
+async function readLessons(rows: readonly DeskProjectionItem[], name: (id: string) => string) {
+  const items: DeskItem[] = [], warnings: string[] = []
+  const targets = new Map<string, Promise<{ id: string; updated_at: string }>>()
+  const pending = rows.filter(row => row.kind === 'lesson')
+  const projects = [...new Set(pending.map(row => row.project_id).filter((id): id is string => !!id))]
+  if (pending.length > 1000) throw new Error('Lesson coverage exceeds 1,000 records.')
+  for (let at = 0; at < projects.length; at += 5) {
+    const reads = await Promise.allSettled(projects.slice(at, at + 5).map(async project => {
+      const wanted = pending.filter(row => row.project_id === project), found = new Map<string, MethodLearning>()
+      let cursor: string | undefined
+      const cursors = new Set<string>()
+      for (let page = 0; page < 20; page++) {
+        const result = await listLearnings(project, undefined, cursor)
+        if (result.items.length > 50) throw new Error('The lesson page exceeded its limit.')
+        for (const learning of result.items) found.set(`/api/knowledge/learnings/${learning.id}`, learning)
+        if (wanted.every(row => found.has(row.source)) || !result.truncated) break
+        if (!result.next_cursor || result.next_cursor.length > 512 || cursors.has(result.next_cursor)) throw new Error('Lesson continuation is unavailable.')
+        cursor = result.next_cursor; cursors.add(cursor)
+      }
+      const confirmed: DeskItem[] = []
+      for (const row of wanted) {
+        const learning = found.get(row.source), rec = learning?.recommendation
+        if (!learning || !rec?.prepared || rec.event_id !== row.revision || rec.lesson !== row.title) continue
+        // The timestamp is read from the native target; do not guess a stale
+        // target from the source-learning stale flag.
+        const targetId = rec.knowledge_id!
+        if (!targets.has(targetId)) targets.set(targetId, rec.rule_layer_id ? getNode(targetId) : getKnowledge(targetId))
+        const target = await targets.get(targetId)!
+        if (target.id !== rec.knowledge_id) throw new Error('Lesson target identity changed.')
+        confirmed.push(lessonItem(row, learning, name(project), Date.parse(target.updated_at) > Date.parse(rec.at)))
+      }
+      return confirmed
+    }))
+    for (const read of reads) if (read.status === 'fulfilled') items.push(...read.value)
+    else warnings.push('Lessons could not be read. Retry before deciding.')
+  }
+  return { items, warnings }
 }
 export function keyTrimItem(proposal: KeyTrimProposal): DeskItem {
   const pending = proposal.state === 'pending'
@@ -130,36 +196,106 @@ export function keyTrimItem(proposal: KeyTrimProposal): DeskItem {
     delivery: proposal.state === 'applied' ? 'Trim applied. Restore is available for 30 days, subject to current scopes and grant authority.' : proposal.state === 'restored' ? 'The previous scope set was restored.' : undefined,
   }
 }
-export interface DeskSources { questions: Map<string, Question>; approvals: Map<string, Approval>; actions: Map<string, ProjectMessage>; rules: Map<string, DoctrineInboxItem>; keyTrims: Map<string, KeyTrimProposal> }
-export const emptySources = (): DeskSources => ({ questions: new Map(), approvals: new Map(), actions: new Map(), rules: new Map(), keyTrims: new Map() })
+export function stepupItem(request: StepupRequest, projectName = request.project_id ? 'Project name unavailable' : 'Workspace'): DeskItem {
+  const pending = request.state === 'pending'
+  return { ...base(`s:${request.id}`, 'stepup', stepupTitle(request, projectName), 'An agent asked for this one protected change. Its own key cannot make it.', []),
+    projectId: request.project_id ?? '', projectName, revision: request.revision, createdAt: request.created_at,
+    expiresAt: pending ? request.expires_at : undefined, decided: !pending, stepup: request, answer: stepupAnswer(request),
+    findings: `Needs ${request.permission} · ${projectName}\nUsed once; expires 15 minutes after the request.\nBound to this change (sha256):\n${request.request_digest}`,
+    meanwhile: 'The agent waits for this one change.',
+    destination: 'This change only, applied once as you after your passkey or a fresh sign-in. The agent keeps its key and scopes as they are.',
+    suggestion: 'Approve asks for your passkey or a fresh sign-in, then applies exactly this change, once.',
+    delivery: stepupDelivery(request),
+  }
+}
+export interface DeskSources { questions: Map<string, Question>; approvals: Map<string, Approval>; actions: Map<string, ProjectMessage>; rules: Map<string, DoctrineInboxItem>; keyTrims: Map<string, KeyTrimProposal>; stepups: Map<string, StepupRequest>; lessons: Map<string, MethodLearning> }
+export const emptySources = (): DeskSources => ({ questions: new Map(), approvals: new Map(), actions: new Map(), rules: new Map(), keyTrims: new Map(), stepups: new Map(), lessons: new Map() })
 /** Upstream owners supply their native, permission-checked flows here. No
  * guessed endpoints, boolean verification bypass, or Q&A fallback is accepted. */
 export interface ProtectedDeskAdapters {
+  // Run rows pass through the Agents ledger before ownership is inspected.
+  approvalRun?: (id: string) => Promise<AgentRun | undefined>
   // AEON-455 owns user verification and the approval write together.
   phoneApproval?: (approval: Approval, decision: 'approved' | 'denied', reason: string) => Promise<void>
   // AEON-436's exact generation, revision and native permission contract.
-  tiers?: { read: () => Promise<{ items: DeskItem[]; warnings: string[] }>; allowed: (item: DeskItem) => boolean; decide: (item: DeskItem, draft: DeskDraft, requestId: string) => Promise<DeskItem> }
+  tiers?: { read: (pending?: readonly DeskProjectionItem[]) => Promise<{ items: DeskItem[]; warnings: string[]; failed?: boolean }>; allowed: (item: DeskItem) => boolean; decide: (item: DeskItem, draft: DeskDraft, requestId: string) => Promise<DeskItem> }
+  // AEON-1048: the browser's passkey prompt and navigation, injectable for tests.
+  stepup?: StepupDevices
 }
 interface TierRequest { id: string; session_id: string; tier: 'default' | 'fast' | 'fastest'; reason: string; state: 'pending' | 'approved' | 'declined'; created_at: string }
 interface SessionTier { session_id: string; revision: number; read_only: boolean; read_only_reason?: string; requests: TierRequest[] }
 async function tierBody(response: Response): Promise<SessionTier> {
-  if (!response.ok) { const error = await response.json().catch(() => ({})); throw new APIError(response.status, error.error || 'Tier requests are unavailable.', error) }
-  return response.json()
+  const maxBytes = 2 * 1024 * 1024
+  if (Number(response.headers.get('Content-Length')) > maxBytes) { await response.body?.cancel(); throw new Error('Tier response is too large.') }
+  if (!response.body) throw new Error('Tier response is empty.')
+  const reader = response.body.getReader(), decoder = new TextDecoder()
+  let bytes = 0, text = ''
+  try {
+    for (;;) {
+      const chunk = await reader.read()
+      if (chunk.done) break
+      bytes += chunk.value.byteLength
+      if (bytes > maxBytes) { await reader.cancel(); throw new Error('Tier response is too large.') }
+      text += decoder.decode(chunk.value, { stream: true })
+    }
+    text += decoder.decode()
+  } finally { reader.releaseLock() }
+  const body = JSON.parse(text)
+  if (!response.ok) throw new APIError(response.status, body.error || 'Tier requests are unavailable.', body)
+  return body
 }
-export function nativeTierAdapter(sessions: () => Promise<readonly HarnessSession[]>, can: (permission: string, project?: string) => boolean): NonNullable<ProtectedDeskAdapters['tiers']> {
+/** A confirmed session list, or a refresh that did not confirm one. An `{ok:false}`
+ * result is not an empty list: tier coverage stays unanswered until discovery succeeds. */
+export type TierSessionDiscovery = readonly HarnessSession[] | { ok: false; sessions?: readonly HarnessSession[] }
+export function tierSessionsFromRefresh(outcome: { ok: boolean }, sessions: readonly HarnessSession[]): TierSessionDiscovery {
+  return outcome.ok ? sessions : { ok: false, sessions }
+}
+function unconfirmedDiscovery(value: TierSessionDiscovery): value is { ok: false; sessions?: readonly HarnessSession[] } {
+  return !Array.isArray(value)
+}
+export function nativeTierAdapter(sessions: () => Promise<TierSessionDiscovery>, can: (permission: string, project?: string) => boolean, detail?: (project: string, id: string) => Promise<HarnessSession | undefined>): NonNullable<ProtectedDeskAdapters['tiers']> {
   let records = new Map<string, { session: HarnessSession; tier: SessionTier; request: TierRequest }>()
   return {
-    async read() {
-      const available = (await sessions()).filter(session => session.advertised_capabilities.includes('service_tier_v1'))
-      const warnings: string[] = available.length > 30 ? ['Tier requests are limited to the first 30 visible sessions.'] : []
+    async read(pending = []) {
+      const discovered = await sessions()
+      // A plain list is a confirmed discovery. {ok:false} keeps any cached sessions
+      // but does not let an empty cache look like a clean capability skip.
+      const discoveryFailed = unconfirmedDiscovery(discovered)
+      const known = discoveryFailed ? (Array.isArray(discovered.sessions) ? discovered.sessions : []) : discovered
+      const available = known.filter(session => session.advertised_capabilities.includes('service_tier_v1'))
+      const warnings: string[] = available.length > 30 ? ['Tier history is limited to the first 30 visible sessions; canonical pending requests are read separately.'] : []
+      const selected = new Map<string, { project: string; session: HarnessSession | undefined }>(available.slice(0, 30).map(session => [session.id, { project: session.project_id, session }]))
+      const targets = new Map<string, string>()
+      // Source paths identify the exact session; never execute a supplied URL.
+      // All reads use the native permission-checked API and admitted ledger.
+      const canonical = pending.filter(row => row.kind === 'tier_request')
+      if (canonical.length > 1000) warnings.push('Only 1,000 canonical tier requests can be hydrated in one read.')
+      for (const row of canonical.slice(0, 1000)) {
+        const match = /^\/api\/projects\/([a-zA-Z0-9-]{1,80})\/harness-sessions\/([a-zA-Z0-9-]{1,80})\/tier$/.exec(row.source)
+        if (!match || match[1] !== row.project_id) { warnings.push('A tier source mapping could not be confirmed. Retry before deciding.'); continue }
+        targets.set(match[2]!, match[1]!)
+      }
+      for (const [id, project] of targets) if (!selected.has(id)) {
+        const known = available.find(session => session.id === id && session.project_id === project)
+        selected.set(id, { project, session: known })
+      }
       const next = new Map<string, { session: HarnessSession; tier: SessionTier; request: TierRequest }>()
-      const reads = await Promise.allSettled(available.slice(0, 30).map(async session => ({ session, tier: await tierBody(await readTierResponse(session.project_id, session.id)) })))
+      const entries = [...selected.entries()], reads: PromiseSettledResult<{ session: HarnessSession; tier: SessionTier }>[] = []
+      for (let at = 0; at < entries.length; at += 5) reads.push(...await Promise.allSettled(entries.slice(at, at + 5).map(async ([id, target]) => {
+        const session = target.session ?? await detail?.(target.project, id)
+        if (!session || session.id !== id || session.project_id !== target.project || !session.advertised_capabilities.includes('service_tier_v1')) throw new Error('Tier session identity could not be confirmed.')
+        const tier = await tierBody(await readTierResponse(target.project, id))
+        if (tier.session_id !== id || !Number.isSafeInteger(tier.revision) || tier.revision < 0 || !Array.isArray(tier.requests)) throw new Error('Tier source identity could not be confirmed.')
+        return { session, tier }
+      })))
       const items: DeskItem[] = []
       for (const read of reads) {
         if (read.status === 'rejected') continue
         const { session, tier } = read.value
-        if (tier.requests.length > 100) warnings.push('Only the first 100 tier requests per session are shown.')
-        for (const request of tier.requests.slice(0, 100)) {
+        const requests = [...tier.requests.filter(request => request.state === 'pending'), ...tier.requests.filter(request => request.state !== 'pending')]
+        if (requests.length > 100) warnings.push('Only the first 100 tier requests per session are shown, with pending requests first.')
+        for (const request of requests.slice(0, 100)) {
+          if (request.session_id !== session.id) { warnings.push('A tier request belongs to a different session. Retry before deciding.'); continue }
           const id = `t:${request.id}`; next.set(id, { session, tier, request })
           items.push({ ...base(id, 'tier', `Use ${request.tier === 'fastest' ? 'Fastest' : request.tier === 'fast' ? 'Fast' : 'Default'} for this session?`, request.reason, [
             { id: 'approve', title: 'Approve the tier request', description: 'Use the native ownership and tier revision checks.', answer: 'Tier request approved' },
@@ -171,8 +307,11 @@ export function nativeTierAdapter(sessions: () => Promise<readonly HarnessSessio
         }
       }
       records = next
-      if (reads.some(read => read.status === 'rejected')) warnings.push('Some tier requests could not be read. Open Agents to inspect their source.')
-      return { items, warnings }
+      const failed = discoveryFailed || reads.some(read => read.status === 'rejected')
+      if (failed) warnings.push('Some tier requests could not be read. Open Agents to inspect their source.')
+      // A confirmed discovery, including a capability skip with no requests, omits failed.
+      // The exact { items, warnings } shape is pinned, and loadDesk treats only true as unanswered.
+      return failed ? { items, warnings, failed } : { items, warnings }
     },
     allowed: item => can('harness.control', item.projectId),
     async decide(item, draft, requestId) {
@@ -201,7 +340,19 @@ export async function nativePhoneApproval(approval: Approval, decision: 'approve
 export interface DeskRead {
   items: DeskItem[]; sources: DeskSources; warnings: string[]; hasMore: Record<QuestionState, boolean>
   questionPositions: Record<QuestionState, QuestionPosition | undefined>; projectNames: Map<string, string>
+  /** Project id to key, for the project link (AEON-1057). */
+  projectKeys?: Map<string, string>
   nextKeyTrims: KeyTrimCursors
+  canonical?: boolean
+  /** Sources that did not answer this read (AEON-1406). */
+  unanswered?: DeskSource[]
+}
+/** One permission-checked, bounded ticket lookup shared by the desk and panel. */
+export async function readDoctrineProjects(rules: readonly DoctrineInboxItem[]): Promise<Map<string, string>> {
+  const tickets = [...new Set(rules.map(rule => rule.ticket).filter((key): key is string => !!key))].slice(0, 100)
+  const projects = new Map<string, string>()
+  if (tickets.length) for (const node of (await lookupNodeKeys(tickets)).items) if (node.project_id) projects.set(node.requested_key ?? node.key, node.project_id)
+  return projects
 }
 /** Continue only the requested list. Refresh uses loadDesk to recheck all
  * sources from the beginning; callers keep this snapshot bound to its owner.
@@ -215,52 +366,87 @@ export async function loadMoreQuestions(previous: DeskRead, state: QuestionState
   const sources = { ...current.sources, questions: new Map(current.sources.questions), actions: new Map(current.sources.actions) }
   const items = new Map(current.items.filter(item => item.kind === 'question' || item.kind === 'handover').map(item => [item.id, item]))
   for (const question of result.items) {
-    const item = questionItem(question, current.projectNames.get(question.project_id) ?? 'Project name unavailable')
+    const item = { ...questionItem(question, current.projectNames.get(question.project_id) ?? 'Project name unavailable'), projectKey: current.projectKeys?.get(question.project_id) }
     sources.questions.set(item.id, question); items.set(item.id, item)
   }
-  const projected = new Set([...sources.questions.values()].map(question => question.input.source_request_id).filter(Boolean))
+  if (current.canonical) {
+    const seen = new Set(current.items.map(item => item.id))
+    // History pagination must retain the server's open membership and order.
+    // Native Open pages can hydrate existing records, but cannot add new ones.
+    return { ...current, sources, items: [
+      ...current.items.map(item => items.get(item.id) ?? item),
+      ...[...items.values()].filter(item => item.decided && !seen.has(item.id)),
+    ], hasMore: { ...current.hasMore, [state]: result.has_more },
+    questionPositions: { ...current.questionPositions, [state]: nextPosition } }
+  }
+  const projected = new Set([...sources.questions.values()].flatMap(question => [question.input.source_request_id, ...question.askers.map(asker => asker.input.source_request_id)]).filter(Boolean))
   for (const [id, message] of sources.actions) if (projected.has(message.id)) sources.actions.delete(id)
   const protectedItems = current.items.filter(item => item.kind !== 'question' && item.kind !== 'handover' && !(item.kind === 'action' && projected.has(item.id.slice(2))))
   return { ...current, sources, items: [...items.values(), ...protectedItems], hasMore: { ...current.hasMore, [state]: result.has_more },
     questionPositions: { ...current.questionPositions, [state]: nextPosition } }
 }
-export async function loadDesk(pages = { open: 1, answered: 1 }, adapters: ProtectedDeskAdapters = {}, trimCursors: KeyTrimCursors = {}): Promise<DeskRead> {
-  const sources = emptySources(), warnings: string[] = [], items: DeskItem[] = []
-  const [projectsResult, openResult, answeredResult, approvalsResult, rulesResult, trimsResult] = await Promise.allSettled([getProjects(), readQuestionPages('open', pages.open), readQuestionPages('answered', pages.answered), listApprovals(), getDoctrineInbox(), readKeyTrims(trimCursors)])
+export async function loadDesk(pages = { open: 1, answered: 1 }, adapters: ProtectedDeskAdapters = {}, trimCursorsOrProjection: KeyTrimCursors | DeskProjection | null = {}, suppliedProjection?: DeskProjection | null): Promise<DeskRead> {
+  const projection = trimCursorsOrProjection === null || 'items' in trimCursorsOrProjection ? trimCursorsOrProjection : suppliedProjection
+  const trimCursors: KeyTrimCursors = trimCursorsOrProjection && !('items' in trimCursorsOrProjection) ? trimCursorsOrProjection : {}
+  const sources = emptySources(), warnings: string[] = [], items: DeskItem[] = [], unanswered = new Set<DeskSource>()
+  const [projectsResult, openResult, answeredResult, approvalsResult, rulesResult, trimsResult, stepupsResult] = await Promise.allSettled([getProjects(), readQuestionPages('open', pages.open), readQuestionPages('answered', pages.answered), listApprovals(), getDoctrineInbox(), readKeyTrims(trimCursors), readStepups()])
   const projects = projectsResult.status === 'fulfilled' ? projectsResult.value.items : []
-  if (projectsResult.status === 'rejected') warnings.push('Project names unavailable; source access could not be confirmed.')
+  if (projectsResult.status === 'rejected') { warnings.push('Project names unavailable; source access could not be confirmed.'); unanswered.add('projects') }
   const name = (id: string) => projects.find(project => project.id === id)?.title ?? 'Project name unavailable'
   for (const result of [openResult, answeredResult]) {
     if (result.status === 'fulfilled') for (const question of result.value.items) { sources.questions.set(`q:${question.id}`, question); items.push(questionItem(question, name(question.project_id))) }
-    else warnings.push('Questions could not be read. They may be inaccessible; this is not an empty desk.')
+    else { warnings.push('Questions could not be read. They may be inaccessible; this is not an empty desk.'); unanswered.add('questions') }
   }
   if (approvalsResult.status === 'fulfilled') {
     if (approvalsResult.value.length >= 200) warnings.push('Approvals may be incomplete: the source limit is 200 requests.')
     // Reuse the ticket ancestry contract, bounded and cached within this read.
     const nodes = new Map<string, Promise<WorkNode>>()
     const readNode = (id: string) => { if (!nodes.has(id)) nodes.set(id, getNode(id)); return nodes.get(id)! }
-    const nodeIds = [...new Set(approvalsResult.value.filter(row => row.resource_kind === 'node').map(row => row.resource_id).filter((id): id is string => !!id))].slice(0, 30)
-    const names = new Map<string, string>()
-    await Promise.all(nodeIds.map(async resource => {
-      let id: string | null = resource
+    const canonicalProjects = new Map((projection?.items ?? []).filter(row => row.kind === 'approval' && row.project_id).map(row => [row.id, row.project_id!]))
+    const resources = new Map(approvalsResult.value.slice(0, 200).filter(row => row.resource_kind !== 'tenant' && row.resource_id && !canonicalProjects.has(row.id))
+      .map(row => [`${row.resource_kind}:${row.resource_id}`, row]))
+    const owners = new Map<string, { id: string; title: string }>(), workOrders = new Map<string, string>()
+    if (resources.size > 30) warnings.push('Project ownership for approval history is limited to 30 resources in this read.')
+    const entries = [...resources.entries()].slice(0, 30)
+    for (let at = 0; at < entries.length; at += 5) await Promise.all(entries.slice(at, at + 5).map(async ([resource, approval]) => {
+      let id: string | null = approval.resource_id ?? null
       try {
+        if (approval.resource_kind === 'run' && id) {
+          const run = await adapters.approvalRun?.(id)
+          if (!run || run.id !== id) return
+          id = run.work_order_id
+          if (id) workOrders.set(resource, id)
+        }
         for (let depth = 0; id && depth < 8; depth++) {
           const project = projects.find(project => project.id === id)
-          if (project) { names.set(resource, project.title); break }
+          if (project) { owners.set(resource, project); break }
           id = (await readNode(id)).parent_id
         }
       } catch { /* A missing name never becomes a fictitious Workspace. */ }
     }))
-    for (const approval of approvalsResult.value.slice(0, 200)) { sources.approvals.set(`a:${approval.id}`, approval); items.push(approvalItem(approval, approval.resource_id ? names.get(approval.resource_id) : undefined)) }
-  } else warnings.push('Approvals could not be read.')
-  if (rulesResult.status === 'fulfilled') for (const rule of rulesResult.value.items) { sources.rules.set(`r:${rule.id}`, rule); items.push(ruleItem(rule)) }
-  else warnings.push('Rule changes could not be read.')
+    for (const approval of approvalsResult.value.slice(0, 200)) {
+      const owner = owners.get(`${approval.resource_kind}:${approval.resource_id}`)
+      const projectId = canonicalProjects.get(approval.id) ?? owner?.id ?? ''
+      const workOrderId = workOrders.get(`${approval.resource_kind}:${approval.resource_id}`)
+      sources.approvals.set(`a:${approval.id}`, approval); items.push({ ...approvalItem(approval, projectId ? name(projectId) : owner?.title), projectId, ...(workOrderId ? { workOrderId } : {}) })
+    }
+  } else { warnings.push('Approvals could not be read.'); unanswered.add('approvals') }
+  if (rulesResult.status === 'fulfilled') {
+    // A rule change names its project through its ticket: one bounded key lookup.
+    let ticketProjects = new Map<string, string>()
+    try { ticketProjects = await readDoctrineProjects(rulesResult.value.items) }
+    catch { warnings.push('The projects of some rule changes could not be read.') }
+    for (const rule of rulesResult.value.items) {
+      const project = rule.ticket ? projects.find(project => project.id === ticketProjects.get(rule.ticket!)) : undefined
+      sources.rules.set(`r:${rule.id}`, rule); items.push(project ? { ...ruleItem(rule), projectId: project.id, projectName: project.title } : ruleItem(rule))
+    }
+  } else { warnings.push('Rule changes could not be read.'); unanswered.add('rules') }
   if (projects.length > 30) warnings.push('Action requests are limited to the first 30 visible projects in this read.')
   const actionReads = await Promise.allSettled(projects.slice(0, 30).map(async project => ({ project, page: await listMessages(project.id, { pending: true, limit: 100 }) })))
   for (const read of actionReads) {
-    if (read.status === 'rejected') { warnings.push('Some action requests could not be read.'); continue }
+    if (read.status === 'rejected') { warnings.push('Some action requests could not be read.'); unanswered.add('actions'); continue }
     if (read.value.page.items.length === 100) warnings.push(`Action requests for ${read.value.project.title} may be incomplete.`)
-    const projected = new Set([...sources.questions.values()].map(question => question.input.source_request_id).filter(Boolean))
+    const projected = new Set([...sources.questions.values()].flatMap(question => [question.input.source_request_id, ...question.askers.map(asker => asker.input.source_request_id)]).filter(Boolean))
     for (const message of read.value.page.items.filter(message => message.is_action_request && message.status === 'held' && !message.human_resolution_outcome && !projected.has(message.id))) {
       const item = actionItem(message, read.value.project.id, read.value.project.title); sources.actions.set(item.id, message); items.push(item)
     }
@@ -268,24 +454,105 @@ export async function loadDesk(pages = { open: 1, answered: 1 }, adapters: Prote
   if (trimsResult.status === 'fulfilled') {
     warnings.push(...trimsResult.value.warnings)
     for (const proposal of trimsResult.value.items) { const item = keyTrimItem(proposal); sources.keyTrims.set(item.id, proposal); items.push(item) }
-  } else warnings.push('Key trim proposals could not be read; key management rights are required.')
+  } else { warnings.push('Key trim proposals could not be read; key management rights are required.'); unanswered.add('keyTrims') }
+  if (stepupsResult.status === 'fulfilled') {
+    warnings.push(...stepupsResult.value.warnings)
+    for (const request of stepupsResult.value.items) { const item = stepupItem(request, request.project_id ? name(request.project_id) : 'Workspace'); sources.stepups.set(item.id, request); items.push(item) }
+  } else { warnings.push('Step-up approvals could not be read.'); unanswered.add('stepups') }
   if (adapters.tiers) {
-    try { const read = await adapters.tiers.read(); items.push(...read.items.slice(0, 100).map(item => ({ ...item, kind: 'tier' as const }))); warnings.push(...read.warnings); if (read.items.length > 100) warnings.push('Only the first 100 tier requests are shown.') }
-    catch { warnings.push('Tier requests could not be read.') }
+    try {
+      const read = await adapters.tiers.read(projection?.items)
+      const pending = read.items.filter(item => !item.decided), history = read.items.filter(item => item.decided)
+      items.push(...[...pending, ...history.slice(0, 100)].map(item => ({ ...item, kind: 'tier' as const })))
+      warnings.push(...read.warnings)
+      if (read.failed) unanswered.add('tiers')
+      if (history.length > 100) warnings.push('Only the first 100 tier history records are shown; pending requests have a separate budget.')
+    }
+    catch { warnings.push('Tier requests could not be read.'); unanswered.add('tiers') }
   }
+  const lessonRead = await readLessons(projection?.items ?? [], name)
+  warnings.push(...lessonRead.warnings)
+  // Every lesson warning is a project whose lessons did not answer.
+  if (lessonRead.warnings.length) unanswered.add('lessons')
+  for (const item of lessonRead.items) { sources.lessons.set(item.id, item.lesson!.learning); items.push(item) }
+  // Canonical membership suppresses every linked source, even beyond the
+  // question pages loaded for history. One source has one position and count.
+  if (projection !== undefined) {
+    const history = items.filter(item => item.decided), byID = new Map(items.map(item => [item.id, item]))
+    const missing = (projection?.items ?? []).filter(row => ['question', 'approval', 'action_request'].includes(row.kind) && !row.person_step && !byID.has(deskItemID(row)))
+    if (missing.length > 100) warnings.push('Only 100 additional source details are read at once. Some items need more source pages before review.')
+    // Hydrate canonical sources outside their first page in bounded batches,
+    // through their permission-checked native reads.
+    for (let at = 0; at < Math.min(100, missing.length); at += 5) {
+      const reads = await Promise.allSettled(missing.slice(at, at + 5).map(async row => {
+        if (row.kind === 'approval') {
+          const approval = await readApproval(row.id)
+          if (approval.id !== row.id) throw new Error('Approval identity changed')
+          const item = { ...approvalItem(approval, row.project_id ? name(row.project_id) : 'Workspace'), projectId: row.project_id ?? '' }
+          sources.approvals.set(item.id, approval); return item
+        }
+        if (row.kind === 'action_request' && row.project_id) {
+          const page = await listMessages(row.project_id, { thread: row.id, pending: true, newest_first: false, limit: 100 })
+          const message = page.items.find(message => message.id === row.id && message.is_action_request && message.status === 'held' && !message.human_resolution_outcome)
+          if (!message) throw new Error('Held request changed')
+          const item = actionItem(message, row.project_id, name(row.project_id)); sources.actions.set(item.id, message); return item
+        }
+        const question = await readQuestion(row.id)
+        if (question.id !== row.id) throw new Error('Question identity changed')
+        const item = questionItem(question, name(question.project_id)); sources.questions.set(item.id, question); return item
+      }))
+      for (const read of reads) if (read.status === 'fulfilled') {
+        byID.set(read.value.id, read.value)
+      }
+    }
+    const open = (projection?.items ?? []).map(row => {
+      const id = deskItemID(row), item = byID.get(id), linkOut = deskLinkOut(row)
+      if (row.person_step) return { ...base(id, 'action', row.title, '', []), personStep: { ...row.person_step, can_tick: row.can_decide === true }, projectId: row.project_id ?? '', projectName: name(row.project_id ?? ''), ticketId: row.person_step.node_id, ticketKey: row.person_step.ticket_key, revision: row.revision, createdAt: row.created_at, meanwhile: row.person_step.check_id === 'human' ? 'gates Delivered and Accepted' : `before ${row.person_step.to_status === 'in_progress' ? 'In progress' : row.person_step.to_status === 'done' ? 'Done' : 'QA'}`, source: row.source }
+      if (linkOut) return { ...base(id, 'account_matrix', row.title, '', []), linkOut, revision: row.revision, createdAt: row.created_at, held: row.held, source: row.source,
+        meanwhile: 'Confirm which accounts agents may use in Settings.', destination: 'Settings · Accounts', unavailable: row.can_decide === false ? 'This person may read this request but cannot decide it.' : undefined }
+      if (item && !item.decided) return { ...item, held: row.held, source: row.source,
+        ...(row.kind === 'approval' && row.project_id ? { projectId: row.project_id, projectName: name(row.project_id) } : {}),
+        unavailable: row.can_decide === false ? 'This person may read this request but cannot decide it.' : item.unavailable }
+      warnings.push('Some source details could not be confirmed. Retry remains available.')
+      return { ...base(id, row.kind === 'lesson' ? 'lesson' : row.kind === 'question' ? 'question' : row.kind === 'action_request' ? 'action' : row.kind === 'doctrine' ? 'rule' : row.kind === 'tier_request' ? 'tier' : row.kind === 'key_trim' ? 'key_trim' : row.kind === 'stepup' ? 'stepup' : row.kind === 'account_matrix' ? 'account_matrix' : 'approval', row.title, '', []),
+        projectId: row.project_id ?? '', projectName: row.project_id ? name(row.project_id) : 'Workspace', revision: row.revision, createdAt: row.created_at,
+        held: row.held, source: row.source, unavailable: 'Source details are unavailable or changed. Close and Retry before deciding.' }
+    })
+    // A missing or partial canonical desk is unanswered: zero listed rows then prove nothing (AEON-1406).
+    if (!projection) { warnings.push('The canonical desk could not be read. Retry before deciding; the count is unknown.'); unanswered.add('desk') }
+    else if (projection.has_more || open.length !== projection.counts.open) { warnings.push('The canonical desk is partial or changed while reading. Retry for current coverage.'); unanswered.add('desk') }
+    items.splice(0, items.length, ...open, ...history.filter(item => !open.some(row => row.id === item.id)))
+  }
+  const projectKeys = new Map(projects.map(project => [project.id, project.key]))
+  for (const item of items) if (item.projectId) item.projectKey = projectKeys.get(item.projectId)
   return { items, sources, warnings: [...new Set(warnings)], hasMore: { open: openResult.status === 'fulfilled' && openResult.value.has_more, answered: answeredResult.status === 'fulfilled' && answeredResult.value.has_more },
     questionPositions: { open: openResult.status === 'fulfilled' ? openResult.value.position : undefined, answered: answeredResult.status === 'fulfilled' ? answeredResult.value.position : undefined },
-    projectNames: new Map(projects.map(project => [project.id, project.title])), nextKeyTrims: trimsResult.status === 'fulfilled' ? trimsResult.value.next : {} }
+    projectNames: new Map(projects.map(project => [project.id, project.title])), projectKeys, nextKeyTrims: trimsResult.status === 'fulfilled' ? trimsResult.value.next : {}, canonical: projection !== undefined, unanswered: [...unanswered] }
 }
 export function decisionPermission(item: DeskItem, sources: DeskSources, can: (permission: string, project?: string) => boolean, adapters: ProtectedDeskAdapters = {}): boolean {
+  if (item.personStep) return item.personStep.can_tick && can('nodes.write', item.projectId)
   if (item.kind === 'question' || item.kind === 'handover') return can('questions.read', item.projectId) && can('questions.decide', item.projectId)
+  if (item.kind === 'lesson') return !!sources.lessons.get(item.id) && can('knowledge.read', item.projectId) && can('knowledge.write', item.projectId) && (!item.lesson?.learning.recommendation?.rule_layer_id || can('rules.write', item.projectId))
   if (item.kind === 'key_trim') return can('keys.manage')
+  if (item.kind === 'stepup') return !!item.stepup && can(item.stepup.permission, item.stepup.project_id)
   if (item.kind === 'approval') { const approval = sources.approvals.get(item.id); return !!approval && canDecideApproval(approval, can) }
-  if (item.kind === 'action') return can('inbox.manage')
+  if (item.kind === 'action') return can('inbox.manage', item.projectId)
   if (item.kind === 'rule') return can('rules.write')
   return item.kind === 'tier' && adapters.tiers?.allowed(item) === true
 }
 export async function commitDesk(item: DeskItem, draft: DeskDraft, sources: DeskSources, requestId: string, phone: boolean, adapters: ProtectedDeskAdapters = {}): Promise<DeskItem> {
+  if (item.kind === 'lesson') {
+    const source = sources.lessons.get(item.id), rec = source?.recommendation
+    if (!source || !rec?.prepared || rec.event_id !== item.revision || !item.lesson || source.id !== item.lesson.learning.id || item.decided) throw new Error('The lesson changed. Reopen it before deciding.')
+    if (draft.optionId !== 'accept' && draft.optionId !== 'dismiss') throw new Error('Choose Accept or Dismiss.')
+    const result = draft.optionId === 'dismiss' ? await dismissLearning(source.id, draft.reason.trim() || undefined, source.text, rec.event_id)
+      : rec.rule_layer_id ? await draftLearning(source.id, { layer_id: rec.rule_layer_id, set_id: rec.knowledge_id! }, rec.event_id)
+      : await acceptLearning(source.id, rec.knowledge_id!, undefined, false, rec.lesson, source.text, rec.event_id)
+    const expected = draft.optionId === 'dismiss' ? 'dismissed' : rec.rule_layer_id ? 'drafted' : 'accepted'
+    if (result.id !== source.id || result.decision !== expected || !Number.isSafeInteger(result.event_id) || result.event_id <= 0 || (expected === 'accepted' && (result.line !== rec.line || result.knowledge_id !== rec.knowledge_id)) || (expected === 'drafted' && (result.rule_set_id !== rec.knowledge_id || result.rule_layer_id !== rec.rule_layer_id))) throw new Error('The native lesson decision was not confirmed. Refresh before continuing.')
+    return { ...item, decided: true, answer: answerFor(item, draft), optionId: draft.optionId, reason: draft.reason,
+      undoEvent: result.event_id, delivery: expected === 'dismissed' ? 'Dismissed. Nothing is written.' : expected === 'drafted' ? 'Added to the rule draft.' : 'Added to the changelog.' }
+  }
   if (item.kind === 'key_trim') {
     const source = sources.keyTrims.get(item.id)
     if (!source || !item.keyTrim || source.key_id !== item.keyTrim.key_id || source.revision !== item.revision || source.state !== item.keyTrim.state) throw new Error('The key trim source changed. Reopen the memo.')
@@ -296,12 +563,20 @@ export async function commitDesk(item: DeskItem, draft: DeskDraft, sources: Desk
     sources.keyTrims.set(item.id, updated)
     return keyTrimItem(updated)
   }
+  if (item.kind === 'stepup') {
+    const source = sources.stepups.get(item.id)
+    if (!source || !item.stepup || source.request_digest !== item.stepup.request_digest || source.revision !== item.revision || source.state !== 'pending' || item.decided) throw new Error('The step-up request changed. Reopen the memo.')
+    if (draft.optionId !== 'approve' && draft.optionId !== 'decline') throw new Error('Choose Approve or Decline.')
+    const updated = draft.optionId === 'approve' ? await approveStepup(source, adapters.stepup) : await declineStepup(source, adapters.stepup?.signal)
+    sources.stepups.set(item.id, updated)
+    return stepupItem(updated, item.projectName)
+  }
   if (item.kind === 'question' || item.kind === 'handover') {
     const question = sources.questions.get(item.id)
     if (!question || question.revision !== item.revision) throw new Error('The question changed. Reopen it before deciding.')
-    const updated = await decideQuestion(question.id, item.revision, draft, requestId)
+    const updated = await decideQuestion(question.id, item.revision, draft, requestId, item.doctrine)
     sources.questions.set(item.id, updated)
-    return questionItem(updated, item.projectName)
+    return { ...questionItem(updated, item.projectName), projectKey: item.projectKey }
   }
   if (item.kind === 'approval') {
     const approval = sources.approvals.get(item.id)
@@ -309,10 +584,14 @@ export async function commitDesk(item: DeskItem, draft: DeskDraft, sources: Desk
     if (phone) {
       if (item.decided) throw new Error('This protected decision cannot be replaced here.')
       await (adapters.phoneApproval ?? nativePhoneApproval)(approval, draft.optionId === 'approved' ? 'approved' : 'denied', draft.reason.trim())
+      sources.approvals.set(item.id, { ...approval, decision: draft.optionId === 'approved' ? 'approved' : 'denied' })
       return { ...item, decided: true, answer: answerFor(item, draft), optionId: draft.optionId, reason: draft.reason, delivery: 'Recorded by the verified approval workflow.' }
     }
     if (item.decided) throw new Error('This protected decision cannot be replaced here.')
-    await decideApproval(approval.id, draft.optionId === 'approved' ? 'approved' : 'denied', draft.reason.trim())
+    const expected = draft.optionId === 'approved' ? 'approved' : 'denied'
+    const updated = await decideApproval(approval.id, expected, draft.reason.trim())
+    if (updated.id !== approval.id || updated.decision !== expected) throw new Error('The native approval decision was not confirmed. Refresh before trying again.')
+    sources.approvals.set(item.id, { ...approval, ...updated })
   } else if (item.kind === 'action') {
     const source = sources.actions.get(item.id)
     if (!source) throw new Error('The original request is unavailable.')
@@ -323,9 +602,11 @@ export async function commitDesk(item: DeskItem, draft: DeskDraft, sources: Desk
       if (reply.status === 'held') throw new Error('The reply remains held. Delivery was not confirmed.')
       if (reply.status === 'pending' && (!reply.question_id || !reply.answer_revision || !reply.deliver_after)) throw new Error('The pending reply response is incomplete. Refresh before trying again.')
       return { ...item, decided: true, answer: answerFor(item, draft), optionId: draft.optionId, reason: draft.reason,
+        deliveryState: reply.status === 'pending' ? 'pending' : 'delivered', deliverAfter: reply.deliver_after,
         delivery: reply.status === 'pending' ? `Reply recorded; delivery scheduled for ${deliveryTime(reply.deliver_after)}.` : 'Reply accepted by the inbox; receiver confirmation is pending.' }
     } else await resolveMessage(item.projectId, source.id, draft.optionId === 'resolved' ? 'resolved' : 'dismissed', draft.reason.trim())
   } else if (item.kind === 'rule') {
+    if (sources.rules.get(item.id)?.outdated && draft.optionId === 'propose') throw new Error('The rule changed since this was proposed. Edit against the current rule first.')
     if (draft.optionId === 'propose') await submitDoctrineInbox(item.id.slice(2))
     else await dismissDoctrineInbox(item.id.slice(2), draft.reason.trim())
   } else if (item.kind === 'tier' && adapters.tiers?.allowed(item)) return adapters.tiers.decide(item, draft, requestId)
@@ -333,6 +614,23 @@ export async function commitDesk(item: DeskItem, draft: DeskDraft, sources: Desk
   return { ...item, decided: true, answer: answerFor(item, draft), optionId: draft.optionId, reason: draft.reason, delivery: 'Recorded by the native workflow.' }
 }
 export interface DeskContext { ticket?: WorkNode; attachments: Attachment[]; related: WorkNode[]; outcomes: OutcomeEvent[]; warnings: string[] }
+const NODE_UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i, TICKET_REF = /^[A-Za-z0-9][A-Za-z0-9_-]{0,79}$/
+/** The tickets list rows are about, resolved as the memo resolves its own (AEON-1339): a key through the
+ * key lookup, an id through the bounded id lookup (it takes UUIDs only), any other id read on its own.
+ * Found tickets are keyed by id, and keys as `key:<KEY>`; a failed read leaves its rows without a chip. */
+export async function readDeskTickets(rows: readonly Pick<DeskItem, 'ticketId' | 'ticketKey'>[], known: ReadonlyMap<string, DeskTicket>): Promise<Map<string, DeskTicket>> {
+  const ids = [...new Set(rows.map(row => row.ticketId).filter((id): id is string => !!id && TICKET_REF.test(id) && !known.has(id)))]
+  const keys = [...new Set(rows.filter(row => !row.ticketId && row.ticketKey).map(row => row.ticketKey!).filter(key => TICKET_REF.test(key) && !known.has(`key:${key}`)))].slice(0, 100)
+  const uuids = ids.filter(id => NODE_UUID.test(id)).slice(0, 100), others = ids.filter(id => !NODE_UUID.test(id)).slice(0, 20)
+  const found = new Map<string, DeskTicket>()
+  if (!uuids.length && !keys.length && !others.length) return found
+  const [byId, byKey, ...single] = await Promise.allSettled([uuids.length ? lookupNodes(uuids) : Promise.resolve({ items: [] }), keys.length ? lookupNodeKeys(keys) : Promise.resolve({ items: [] }), ...others.map(id => getNode(id))])
+  const ticket = (node: { key?: unknown; title?: unknown }) => typeof node.key === 'string' && node.key ? { key: node.key, title: typeof node.title === 'string' ? node.title : '' } : undefined
+  if (byId?.status === 'fulfilled' && Array.isArray(byId.value?.items)) for (const node of byId.value.items.slice(0, 100)) { const row = uuids.includes(node.id) ? ticket(node) : undefined; if (row) found.set(node.id, row) }
+  if (byKey?.status === 'fulfilled' && Array.isArray(byKey.value?.items)) for (const node of byKey.value.items.slice(0, 100)) { const asked = node.requested_key ?? node.key, row = keys.includes(asked) ? ticket(node) : undefined; if (row) found.set(`key:${asked}`, row) }
+  single.forEach((read, at) => { const row = read.status === 'fulfilled' && read.value.id === others[at] ? ticket(read.value) : undefined; if (row) found.set(others[at]!, row) })
+  return found
+}
 export async function loadDeskContext(ticketId: string, ticketKey?: string): Promise<DeskContext> {
   if (ticketKey) {
     try {

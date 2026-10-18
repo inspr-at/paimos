@@ -4,9 +4,12 @@ package cli
 
 import (
 	"bytes"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"io"
+	"math"
 	"mime/multipart"
 	"net/http"
 	"net/url"
@@ -17,6 +20,7 @@ import (
 type attachmentView struct {
 	ID          string `json:"id"`
 	NodeID      string `json:"node_id"`
+	SHA256      string `json:"sha256,omitempty"`
 	Name        string `json:"name"`
 	ContentType string `json:"content_type"`
 	Size        int64  `json:"size"`
@@ -99,7 +103,9 @@ func (rt *runtime) cmdAttach() *Command {
 			return nil
 		}},
 		{Name: "get", Short: "Get attachment metadata or bytes", Use: "attach get <id> [--download PATH]", minArgs: 1, maxArgs: 1,
-			addFlags: func(fs *flagSet) { fs.string(&download, "download", 0, "write bytes to path or - for stdout") }, run: func(args []string) error {
+			addFlags: func(fs *flagSet) {
+				fs.string(&download, "download", 0, "write verified bytes to path or - for stdout; output errors may leave partial stdout bytes")
+			}, run: func(args []string) error {
 				if !validUUID(args[0]) {
 					return usagef("attachment id must be an Aeon UUID")
 				}
@@ -111,16 +117,11 @@ func (rt *runtime) cmdAttach() *Command {
 					return err
 				}
 				if download != "" {
-					raw, err := rt.rawAPI(http.MethodGet, "/api/attachments/"+args[0]+"/content", nil, "")
-					if err != nil {
+					if err := rt.downloadAttachment(meta, download); err != nil {
 						return err
 					}
 					if download == "-" {
-						_, err = rt.stdout.Write(raw)
-						return err
-					}
-					if err := os.WriteFile(download, raw, 0600); err != nil {
-						return err
+						return nil
 					}
 					if rt.jsonOut {
 						return rt.printJSON(map[string]any{"attachment": meta, "downloaded_to": download})
@@ -152,20 +153,75 @@ func (rt *runtime) cmdAttach() *Command {
 }
 
 func (rt *runtime) findAttachment(id string) (attachmentView, error) {
-	nodes, err := rt.walkNodes(nil, nil)
+	var meta attachmentView
+	err := rt.do(http.MethodGet, "/api/attachments/"+url.PathEscape(id), nil, &meta)
+	return meta, err
+}
+
+// Verify size and the available metadata SHA-256 in a unique private spool
+// before publishing any output, including stdout. A file destination uses a
+// spool in the same directory so rename is atomic. A stdout write failure can
+// still leave partial output and must return an error.
+func (rt *runtime) downloadAttachment(meta attachmentView, destination string) error {
+	if meta.Size < 0 || meta.Size == math.MaxInt64 {
+		return fmt.Errorf("invalid attachment size")
+	}
+	if meta.SHA256 != "" {
+		if len(meta.SHA256) != hex.EncodedLen(sha256.Size) {
+			return fmt.Errorf("invalid attachment sha256")
+		}
+		if _, err := hex.DecodeString(meta.SHA256); err != nil {
+			return fmt.Errorf("invalid attachment sha256")
+		}
+	}
+	resp, key, err := rt.rawResponse(http.MethodGet, "/api/attachments/"+url.PathEscape(meta.ID)+"/content", nil, "")
 	if err != nil {
-		return attachmentView{}, err
+		return err
 	}
-	for _, n := range nodes {
-		var items []attachmentView
-		if err := rt.do(http.MethodGet, "/api/nodes/"+url.PathEscape(n.ID)+"/attachments", nil, &items); err != nil {
-			return attachmentView{}, err
-		}
-		for _, a := range items {
-			if a.ID == id {
-				return a, nil
-			}
-		}
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		_, err = readRawResponse(resp, maxRawResponseBytes)
+		return rt.fail(err, key)
 	}
-	return attachmentView{}, rt.fail(fmt.Errorf("attachment %s not found", id), "")
+	defer resp.Body.Close()
+	dir := ""
+	if destination != "-" {
+		dir = filepath.Dir(destination)
+	}
+	tmp, err := os.CreateTemp(dir, ".aeon-download-*")
+	if err != nil {
+		return err
+	}
+	defer os.Remove(tmp.Name())
+	defer tmp.Close()
+	hash := sha256.New()
+	n, err := io.Copy(io.MultiWriter(tmp, hash), io.LimitReader(resp.Body, meta.Size+1))
+	if err != nil {
+		return rt.fail(err, key)
+	}
+	if n != meta.Size {
+		return rt.fail(fmt.Errorf("incomplete attachment download: got %d bytes, expected %d", n, meta.Size), key)
+	}
+	if meta.SHA256 != "" && hex.EncodeToString(hash.Sum(nil)) != meta.SHA256 {
+		return rt.fail(fmt.Errorf("attachment download sha256 mismatch"), key)
+	}
+	if err := tmp.Sync(); err != nil {
+		return err
+	}
+	if destination == "-" {
+		if _, err := tmp.Seek(0, io.SeekStart); err != nil {
+			return err
+		}
+		n, err = io.Copy(rt.stdout, tmp)
+		if err != nil {
+			return err
+		}
+		if n != meta.Size {
+			return fmt.Errorf("incomplete attachment stdout write: got %d bytes, expected %d", n, meta.Size)
+		}
+		return nil
+	}
+	if err := tmp.Close(); err != nil {
+		return err
+	}
+	return os.Rename(tmp.Name(), destination)
 }

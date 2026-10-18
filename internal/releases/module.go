@@ -1,13 +1,12 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 
 // Package releases implements the R3 release walker and planning API.
-// The coordinator mounts New(pool); release creation and stage transitions
-// belong to the journey module. No version or completion state is invented.
+// The coordinator mounts New(pool). Planning is independent of the retired Flow;
+// no version or completion state is invented.
 package releases
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"io"
 	"log/slog"
@@ -31,6 +30,8 @@ type module struct{ pool *pgxpool.Pool }
 // persists only the complete eligible ticket order and selected ticket set.
 func New(pool *pgxpool.Pool) httpapi.Module { return &module{pool} }
 func (m *module) Mount(mux *http.ServeMux) {
+	mux.HandleFunc("POST /api/projects/{projectId}/releases", m.createRelease)
+	mux.HandleFunc("GET /api/projects/{projectId}/releases", m.listPlanningReleases)
 	mux.HandleFunc("GET /api/projects/{projectId}/releases/{releaseId}/note-snapshot", m.noteSnapshot)
 	mux.HandleFunc("GET /api/projects/{projectId}/releases/{releaseId}/walker", m.get)
 	mux.HandleFunc("GET /api/projects/{projectId}/release-memberships", m.readMemberships)
@@ -155,7 +156,7 @@ func (m *module) put(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var in planInput
-	d := json.NewDecoder(http.MaxBytesReader(w, r.Body, 1<<20))
+	d := httpapi.NewRequestDecoder(w, r, 1<<20)
 	d.DisallowUnknownFields()
 	if err := d.Decode(&in); err != nil {
 		respond(w, nil, fail(400, "invalid plan"))
@@ -233,9 +234,8 @@ func load(ctx context.Context, tx pgx.Tx, project, release string) (Walker, erro
 			return out, err
 		}
 		out.Tickets = append(out.Tickets, t)
-		// R1 uses 'done' for completed nodes. Other tenant-defined states are not
-		// guessed to be completion evidence.
-		if t.FeatureID != nil && state != "done" {
+		// Use the same terminal states as membership and the ticket picker.
+		if t.FeatureID != nil && !closedTicketState(state) {
 			c := counts[*t.FeatureID]
 			c[0]++
 			if t.Included {

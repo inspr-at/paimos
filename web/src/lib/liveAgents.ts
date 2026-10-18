@@ -6,8 +6,8 @@
 // screen readers and the live region. Free of Vue so it can be unit tested.
 import { duration, harnessLabel } from './agentState.ts'
 import type { Harness, NodeSummary } from './agents.ts'
-
 import { DEFAULT_AGENT_STATE, STATE_LABEL, STATE_PRIORITY, deriveAgentState, waitingLabel, type AttentionReason, type AgentState, type AgentStatePreference } from './agentSignals.ts'
+
 export type LiveBotState = AgentState
 export interface LiveAgent {
   vendor_limited?: boolean; limit_window?: string; limit_resets_at?: string | null
@@ -26,6 +26,8 @@ export interface LiveAgent {
   // The last persisted activity entry, withheld with the note when harness.read
   // is absent. Heartbeats and sequence changes do not advance it.
   activity_note?: string | null; activity_note_id?: number
+  // Public model display metadata and the fresh agent summary (AEON-741 lead panel).
+  model?: string | null; reasoning_effort?: string | null; current_activity?: { text: string } | null
   activity_sequence?: number
   // Derived presentation state; shared evidence and viewer thresholds decide it.
   state?: LiveBotState
@@ -36,7 +38,6 @@ export interface LivePage { items: LiveAgent[]; at: string; fresh_seconds: numbe
 // Polling cadence: heartbeats arrive every minute, so 20 seconds keeps a card
 // honest without asking often.
 export const LIVE_POLL_MS = 20_000
-export const LIVE_FRESH_MS = 120_000
 
 // Session snapshots that can change a ticket's workers, ETA or completion.
 // The stream carries the old and new bindings; clients re-read authorized views.

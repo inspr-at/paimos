@@ -3,6 +3,7 @@ import { readFileSync, writeFileSync, statSync, openSync, closeSync, fsyncSync, 
 import { randomUUID } from 'node:crypto'
 import { resolve } from 'node:path'
 import { tiers, key } from './core.mjs'
+import { policySources, loadPolicy, formatSpecSource } from '../../web/scripts/ci-web-shard-source.mjs'
 
 export const manifestPaths = ['scripts/ci/go-test-tiers.json', 'scripts/ci/web-test-tiers.json', 'web/ci-web-shards.json']
 export const fixCommand = 'node scripts/test-tiers/cli.mjs manifests --write'
@@ -155,7 +156,7 @@ function renderManifest(normalized, file, markers = new Map()) {
       return `[\n${rows.length ? rows.join(`\n${child},\n`) + '\n' : ''}${indent}]`
     }
     if (object(value)) {
-      const compact = path.join('.') === 'timingWeights.owners'
+      const compact = path.join('.') === 'timingWeights.owners' || path.join('.') === 'nightlyTiming.files'
       const rows = Object.entries(value).map(([k, v]) => {
         const valuePath = [...path, k]
         const marked = conflicts ? marker(valuePath, depth + 1, compact) : undefined
@@ -180,6 +181,12 @@ export function checkManifests(root) {
     try {
       const source = readManifest(resolve(root, file))
       if (source !== formatManifest(JSON.parse(source), file)) failures.push(file)
+      if (file === 'web/ci-web-shards.json') {
+        const { records } = policySources(resolve(root, file))
+        for (const record of records) if (record.source !== formatSpecSource(record.value)) failures.push(record.file)
+        // Rebuild from source on every check; cross-source errors fail CI too.
+        normalizeManifest(loadPolicy(resolve(root, file)), file, { rejectDuplicates: true })
+      }
     } catch (error) { failures.push(`${file}: ${error.message}`) }
   }
   if (failures.length) throw new ManifestInputError(`Noncanonical CI manifests:\n${failures.join('\n')}\nFix: ${fixCommand}`)
@@ -188,6 +195,9 @@ export function checkManifests(root) {
 export function writeManifests(root) {
   // Validate every input before writing any of the three files.
   const outputs = manifestPaths.map(file => [resolve(root, file), formatManifest(JSON.parse(readManifest(resolve(root, file))), file)])
+  const policyPath = resolve(root, 'web/ci-web-shards.json')
+  normalizeManifest(loadPolicy(policyPath), 'web/ci-web-shards.json', { rejectDuplicates: true })
+  outputs.push(...policySources(policyPath).records.map(record => [record.file, formatSpecSource(record.value)]))
   for (const [path, source] of outputs) atomicWrite(path, source)
 }
 
@@ -202,7 +212,12 @@ export function classifyManifest(manifest, discovered, { tier, only } = {}) {
     const { leaf, line, id: nativeId, active, file, ...entry } = row
     added.push({ ...entry, ...(row.kind === 'go' ? {} : { file }), tier })
   }
-  return { manifest: { ...manifest, tests: [...manifest.tests, ...added] }, added }
+  // Newly classified NIGHTLY cases were never part of the legacy full gate.
+  // Keep their inventory with the rows so the gate-preservation check can
+  // distinguish them without exempting or demoting any existing case.
+  const postGateCases = tier === 'NIGHTLY' && added.length
+    ? { postGateCases: [...(manifest.postGateCases ?? []), ...added.map(key)] } : {}
+  return { manifest: { ...manifest, ...postGateCases, tests: [...manifest.tests, ...added] }, added }
 }
 
 export function mergeManifests(base, ours, theirs, file) {

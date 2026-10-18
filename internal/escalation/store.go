@@ -114,6 +114,11 @@ func ObserveTx(ctx context.Context, tx pgx.Tx, p tenant.Principal, ticket, proje
 			}
 		}
 	}
+	limits, err := modelprefs.LoadSituationLimits(ctx, tx)
+	if err != nil {
+		return err
+	}
+	s.FixRoundLimit = limits.FixRounds
 	if err := s.apply(applyKind, payload); err != nil {
 		return err
 	}

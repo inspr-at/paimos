@@ -3,6 +3,7 @@
 package cli
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -24,7 +25,7 @@ import (
 // served yet (see unsupportedCompat). MCP tools that still lack a handler
 // report the same with "arrives in R1".
 func Run(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
-	rt := &runtime{stdin: stdin, stdout: stdout, stderr: stderr, program: "aeon"}
+	rt := &runtime{stdin: stdin, stdout: stdout, stderr: stderr, program: "aeon", harnessAccount: probeHarnessAccount}
 	if len(args) > 0 {
 		rt.program = programName(args[0])
 	}
@@ -68,6 +69,14 @@ type runtime struct {
 	kinds              *kindTable
 	messagingDeliverer localDeliverer
 	personClient       *client.Client
+	// pairedHook is a test seam. Production leaves it nil and dials agentd.
+	pairedHook hookPeerExchange
+	// subagentLocked observes child-lock ownership in barrier tests. Production
+	// leaves it nil; it never supplies lifecycle metadata or changes lock order.
+	subagentLocked func()
+	// harnessAccount asks a harness which account it is signed in to (AEON-1285).
+	// Run installs the real probe; a test runtime leaves it nil or injects one.
+	harnessAccount harnessAccountProbe
 }
 
 func (rt *runtime) execute(args []string) error {
@@ -110,6 +119,10 @@ func (rt *runtime) printErr(ee *exitError) {
 		return
 	}
 	if rt.jsonOut && (ee.code == 1 || ee.code == 3) {
+		if len(ee.apiBody) > 0 {
+			_ = json.NewEncoder(rt.stderr).Encode(ee.apiBody)
+			return
+		}
 		_ = json.NewEncoder(rt.stderr).Encode(map[string]string{"error": ee.msg})
 		return
 	}
@@ -124,14 +137,49 @@ func (rt *runtime) printJSON(v any) error {
 
 func (rt *runtime) fail(err error, secrets ...string) error {
 	message := err.Error()
-	for _, secret := range secrets {
-		message = redact(message, secret)
-	}
-	exit := &exitError{code: 1, msg: message}
+	exit := &exitError{code: 1}
 	var status *client.StatusError
 	if errors.As(err, &status) {
 		exit.apiStatus = status.Status
+		if len(status.EntryChecksFailure) > 0 {
+			body := bytes.Clone(status.EntryChecksFailure)
+			for _, secret := range secrets {
+				if secret != "" {
+					encoded, _ := json.Marshal(secret)
+					body = bytes.ReplaceAll(body, encoded[1:len(encoded)-1], []byte("[redacted]"))
+				}
+			}
+			var detail struct {
+				Checks []struct {
+					ID, Label, Reason string
+				} `json:"checks"`
+				Failed []struct {
+					ID, Label, Reason string
+				} `json:"failed"`
+			}
+			if json.Unmarshal(body, &detail) == nil {
+				checks := detail.Checks
+				if checks == nil {
+					checks = detail.Failed
+				}
+				if len(checks) <= 32 {
+					exit.apiBody = body
+					message = "api 409: entry_checks_failed"
+					for _, check := range checks {
+						label := check.Label
+						if label == "" {
+							label = check.ID
+						}
+						message += "\n✗ " + strings.Join(strings.Fields(label), " ") + ": " + strings.Join(strings.Fields(check.Reason), " ")
+					}
+				}
+			}
+		}
 	}
+	for _, secret := range secrets {
+		message = redact(message, secret)
+	}
+	exit.msg = message
 	return exit
 }
 
@@ -153,10 +201,13 @@ func (rt *runtime) root() *Command {
 		rt.cmdMe(),
 		rt.cmdIssue(),
 		rt.cmdQueue(),
+		rt.cmdReview(),
 		rt.cmdLead(),
 		rt.cmdRecur(),
 		rt.cmdOutcome(),
 		rt.cmdProject(),
+		rt.cmdDeploy(),
+		rt.cmdGoal(),
 		rt.cmdRelation(),
 		rt.cmdRulesImport(),
 		rt.cmdRulesTLDR(),
@@ -165,7 +216,6 @@ func (rt *runtime) root() *Command {
 		rt.cmdDoctrine(),
 		rt.cmdTag(),
 		rt.cmdAttach(),
-		rt.cmdExternalStage(),
 		rt.cmdApply(),
 		rt.cmdSchema(),
 		rt.cmdDoctor(),

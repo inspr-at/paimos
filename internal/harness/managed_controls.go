@@ -12,6 +12,7 @@ import (
 	"unicode/utf8"
 
 	"github.com/inspr-at/paimos/internal/authz"
+	"github.com/inspr-at/paimos/internal/httpapi"
 	"github.com/inspr-at/paimos/internal/ownedprocess"
 	"github.com/inspr-at/paimos/internal/rules"
 	"github.com/inspr-at/paimos/internal/servicetier"
@@ -98,7 +99,7 @@ func (m *Module) queueManagedControl(r *http.Request, tx pgx.Tx, p tenant.Princi
 		Text      string                `json:"text"`
 		Ownership ownedprocess.Identity `json:"expected_ownership"`
 	}
-	r.Body = http.MaxBytesReader(nil, r.Body, 16384)
+	r.Body = httpapi.RequestBodyReader(nil, r, 16384)
 	if err := workorders.Decode(r, &in); err != nil {
 		return nil, err
 	}
@@ -263,6 +264,12 @@ func (m *Module) managedContext(r *http.Request, tx pgx.Tx, p tenant.Principal) 
 }
 
 func controlRequesterAuthorized(r *http.Request, tx pgx.Tx, p tenant.Principal, s Session, c Control) (bool, error) {
+	if c.Kind == "stop" && c.ExpectedOwnership != nil {
+		allowed, err := routineStopAuthorizedTx(r.Context(), tx, s, c)
+		if allowed || err != nil {
+			return allowed, err
+		}
+	}
 	if (c.ExpectedOwnership == nil && (c.RequestPayload == nil || !c.RequestPayload.StopNow && c.RequestPayload.Level != "pause_quickly")) || c.Kind == "force_stop" {
 		return true, nil
 	}

@@ -20,6 +20,9 @@ func TestRecurCLIContract(t *testing.T) {
 		body         map[string]any
 	}{
 		{[]string{"recur", "list"}, "GET", "/api/recurrences", nil},
+		{[]string{"recur", "templates", "list"}, "GET", "/api/recurrences/templates", nil},
+		{[]string{"recur", "templates", "preview", "weekly-cleanup", "1", "--body-file", "-"}, "POST", "/api/recurrences/templates/weekly-cleanup/1/preview", map[string]any{"project_id": id}},
+		{[]string{"recur", "templates", "apply", "website-release-update", "1", "--body-file", "-"}, "POST", "/api/recurrences/templates/website-release-update/1/apply", map[string]any{"project_id": id}},
 		{[]string{"recur", "get", id}, "GET", "/api/recurrences/" + id, nil},
 		{[]string{"recur", "create", "--body-file", "-"}, "POST", "/api/recurrences", map[string]any{"project_id": id}},
 		{[]string{"recur", "update", id, "--body-file", "-"}, "PUT", "/api/recurrences/" + id, map[string]any{"project_id": id}},

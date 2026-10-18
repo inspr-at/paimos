@@ -12,17 +12,20 @@ import { estimateHours } from './estimates.ts'
 import { compareModelSort, planningSortValue } from './planning.ts'
 import type { Facets, ListItem, ListQuery, WorkCountBucket } from './api.ts'
 import { normalizeColumnIds, PINNED, type ColumnId } from './columns.ts'
-import { DEFAULT_SORT, KINDS, PRIORITIES, kindLabel, normaliseState, parseSort, priorityLabel, serializeSort, statusMeta, statusOptions, type SortKey } from './work.ts'
+import { DEFAULT_SORT, PRIORITIES, kindLabel, normaliseState, parseSort, priorityLabel, serializeSort, statusMeta, statusOptions, type SortField, type SortKey } from './work.ts'
+import { workLevel, type WorkVocabulary } from './workVocabulary.ts'
 
 export type Dimension = 'status' | 'priority' | 'assignee' | 'type' | 'tag' | 'epic' | 'cost' | 'release' | 'human_check' | 'shape' | 'depth'
-export type GroupBy = 'none' | 'status' | 'assignee' | 'priority' | 'type' | 'epic' | 'tag'
+export type GroupBy = 'none' | 'status' | 'assignee' | 'priority' | 'type' | 'epic' | 'tag' | 'project'
 export type DateField = 'updated' | 'created' | 'start' | 'end' | 'accepted'
 export type DatePreset = 'today' | '7d' | '30d' | '90d' | 'month' | 'year'
 // A date filter: one field, and a relative preset (kept relative in saved views)
 // or a custom range of calendar days (inclusive, either end open).
 export interface DateFilter { field: DateField; preset: DatePreset | null; from: string | null; to: string | null }
-export interface FacetOption { value: string; label: string; count?: number; hint?: string; color?: string }
+// members: every value the option stands for (Type levels that share one name).
+export interface FacetOption { value: string; label: string; count?: number; hint?: string; color?: string; icon?: string; members?: string[] }
 export interface ListFilters {
+  mode: 'list' | 'outline' | 'graph'
   q: string
   status: string[]
   // Header filters use canonical statuses or exact server work buckets. Kept
@@ -30,6 +33,7 @@ export interface ListFilters {
   statusScope?: 'canonical' | 'open' | 'in_progress' | 'done' | 'closed'
   priority: string[]
   assignee: string[]
+  // Work levels (AEON-974): "leaf", else a parent's depth; the workspace names them.
   type: string[]
   tag: string[]
   epic: string[]
@@ -45,35 +49,44 @@ export interface ListFilters {
   hideRestore?: boolean
   sort: SortKey[]
   group: GroupBy
+  // The grouped-by column orders the groups (AEON-1390): natural order, or reversed. Never a row sort key.
+  groupDesc?: boolean
   // An explicit column set (free columns in order; Key and Title always lead).
   cols: ColumnId[] | null
   // The saved view the state came from.
   view: string | null
 }
-export interface DimensionDef { key: Dimension; title: string; facet: string | null; primary: boolean; none: string }
+// advanced: offered only while applied (older saved views and links); Type covers them.
+export interface DimensionDef { key: Dimension; title: string; facet: string | null; primary: boolean; none: string; advanced?: boolean }
 export const DIMENSIONS: DimensionDef[] = [
   { key: 'status', title: 'Status', facet: 'state', primary: true, none: '' },
   { key: 'priority', title: 'Priority', facet: 'priority', primary: true, none: 'No priority' },
   { key: 'assignee', title: 'Assignee', facet: 'assignee', primary: true, none: 'Unassigned' },
-  { key: 'shape', title: 'Parents / Leaves', facet: 'shape', primary: true, none: '' },
-  { key: 'depth', title: 'Depth', facet: 'depth', primary: false, none: '' },
-  { key: 'type', title: 'Legacy type', facet: 'kind', primary: true, none: '' },
+  { key: 'type', title: 'Type', facet: 'level', primary: true, none: '' },
+  { key: 'shape', title: 'Parents / Leaves', facet: 'shape', primary: false, none: '', advanced: true },
+  { key: 'depth', title: 'Depth', facet: 'depth', primary: false, none: '', advanced: true },
   { key: 'tag', title: 'Labels', facet: 'tag', primary: false, none: 'No labels' },
-  { key: 'human_check', title: 'Human check', facet: 'human_check', primary: false, none: 'No human check' },
+  { key: 'human_check', title: 'Waiting for a person', facet: 'person_waiting', primary: false, none: 'Not waiting' },
   { key: 'epic', title: 'Parent', facet: null, primary: false, none: 'No parent' },
   { key: 'cost', title: 'Cost unit', facet: 'cost_unit', primary: false, none: 'No cost unit' },
-  // Imported fields.release only. The ticket Release column reads native journey membership.
+  // Imported fields.release only. The ticket Release column reads native release membership.
   { key: 'release', title: 'Imported release', facet: 'release', primary: false, none: 'No imported release' },
 ]
+// The filters a person can add: advanced ones only while they are applied, or
+// while a surface that showed them is open (keep), so nothing vanishes under the pointer.
+export function offeredDimensions(filters: ListFilters, only?: Dimension[], keep: readonly Dimension[] = []): DimensionDef[] {
+  return DIMENSIONS.filter(d => (!only || only.includes(d.key)) && (!d.advanced || filters[d.key].length > 0 || keep.includes(d.key)))
+}
 export const DIMENSION_BY_KEY = new Map(DIMENSIONS.map(d => [d.key, d]))
 export const DIMENSION_KEYS = DIMENSIONS.map(d => d.key)
 // The counts every page carries; the others are asked for when a menu opens.
 export const LIST_FACETS = ['state', 'priority', 'assignee', 'kind']
 export const WORK_KINDS = ['work', 'ticket', 'task', 'epic']
 export const PAGE_SIZE = 200
+const GROUP_SORT: Partial<Record<GroupBy, SortField>> = { status: 'state', priority: 'priority', type: 'kind', assignee: 'assignee' }
 export const GROUPS: { value: GroupBy; label: string }[] = [
   { value: 'none', label: 'None' }, { value: 'status', label: 'Status' }, { value: 'assignee', label: 'Assignee' }, { value: 'priority', label: 'Priority' },
-  { value: 'type', label: 'Type' }, { value: 'epic', label: 'Epic' }, { value: 'tag', label: 'Label' },
+  { value: 'project', label: 'Project' }, { value: 'type', label: 'Type' }, { value: 'epic', label: 'Epic' }, { value: 'tag', label: 'Label' },
 ]
 export const DATE_FIELDS: { value: DateField; label: string }[] = [
   { value: 'updated', label: 'Updated' }, { value: 'created', label: 'Created' }, { value: 'start', label: 'Start' }, { value: 'end', label: 'End' }, { value: 'accepted', label: 'Accepted' },
@@ -124,36 +137,126 @@ export function serializeDate(date: DateFilter): string {
 }
 function parseCols(raw: unknown): ColumnId[] | null {
   if (typeof raw !== 'string') return null
-  const ids = normalizeColumnIds(list(raw)).filter(id => !PINNED.includes(id))
-  return ids.length ? ids : null
+  const valid = normalizeColumnIds(list(raw))
+  return valid.length ? valid.filter(id => !PINNED.includes(id)) : null
 }
+// ---------- Type: work levels in the workspace's names ----------
+// A level is "leaf", else a parent's depth. Links and saved views from before
+// AEON-974 carried the legacy kind (type=epic) or Parents / Leaves (shape):
+// they read as the closest level, epic as the top level and ticket or task as
+// the leaf. "work" was every kind, so it no longer narrows anything.
+const LEVEL = /^(leaf|[1-9][0-9]{0,4})$/
+const LEGACY_LEVEL: Record<string, string | null> = { epic: '1', ticket: 'leaf', task: 'leaf', work: null }
+function levels(values: string[]): string[] {
+  const out = new Set<string>()
+  for (const value of values) {
+    const token = bare(value)
+    const level = token in LEGACY_LEVEL ? LEGACY_LEVEL[token] : LEVEL.test(token) && (token === 'leaf' || Number(token) <= 50000) ? token : null
+    if (level) out.add(isExcluded(value) ? `!${level}` : level)
+  }
+  return [...out]
+}
+// Parents / Leaves and Depth fold into Type when they say the same: only leaves,
+// or parents at named depths. Other combinations stay as they were.
+function foldShape(type: string[], shape: string[], depth: string[]): { type: string[]; shape: string[]; depth: string[] } {
+  if (type.length || !shape.length) return { type, shape, depth }
+  const only = (value: string) => shape.length === 1 && shape[0] === value
+  if ((only('leaf') || only('!parent')) && !depth.length) return { type: ['leaf'], shape: [], depth: [] }
+  if ((only('parent') || only('!leaf')) && depth.length && !excluded(depth).length) return { type: depth, shape: [], depth: [] }
+  return { type, shape, depth }
+}
+export const levelOf = (row: { is_leaf?: boolean; depth?: number; kind_slug?: string }): string =>
+  row.is_leaf === false || (row.is_leaf === undefined && row.kind_slug === 'epic') ? String(row.depth ?? 1) : 'leaf'
+const EMPTY_VOCABULARY: WorkVocabulary = { revision: 0, leaf: { name: '', icon: '' }, levels: [] }
+export function levelName(level: string, vocabulary: WorkVocabulary = EMPTY_VOCABULARY): string {
+  return level === 'leaf' ? workLevel(vocabulary, true, 1).name : workLevel(vocabulary, false, Number(level)).name
+}
+// One option per name, top level first and the leaf last. Levels that share a
+// name are one option; it stands for all of them (members).
+function levelOptions(counts: Record<string, number>, selected: string[], vocabulary: WorkVocabulary = EMPTY_VOCABULARY): FacetOption[] {
+  const present = [...new Set(['1', ...vocabulary.levels.map((_, i) => String(i + 1)), ...Object.keys(counts), ...selected])]
+    .filter(level => LEVEL.test(level) && level !== 'leaf')
+    .sort((a, b) => Number(a) - Number(b))
+  const byName = new Map<string, FacetOption & { members: string[] }>()
+  for (const level of [...present, 'leaf']) {
+    const shape = level === 'leaf' ? workLevel(vocabulary, true, 1) : workLevel(vocabulary, false, Number(level))
+    const key = shape.name.toLocaleLowerCase()
+    const option = byName.get(key)
+    if (option) { option.members.push(level); option.count = (option.count ?? 0) + (counts[level] ?? 0) }
+    else byName.set(key, { value: level, label: shape.name, icon: shape.icon, count: counts[level] ?? 0, members: [level] })
+  }
+  return [...byName.values()]
+}
+// Include, exclude or drop every member of a Type option together. A partly
+// chosen option (mixed) becomes fully chosen, never less.
+export function toggleMembers(values: string[], members: string[], mode: 'in' | 'out'): string[] {
+  const on = members.every(member => valueState(values, member) === mode)
+  const rest = values.filter(value => !members.includes(bare(value)))
+  return on ? rest : [...rest, ...members.map(member => mode === 'out' ? `!${member}` : member)]
+}
+// What an option shows: every member included or excluded, or "mixed" when its
+// members differ (a saved view or link that chose only some of them).
+export function optionState(values: string[], option: FacetOption): ValueState | 'mixed' {
+  const states = new Set((option.members ?? [option.value]).map(member => valueState(values, member)))
+  return states.size > 1 ? 'mixed' : [...states][0] ?? null
+}
+// A list already on screen keeps its rows while it is open: each row keeps its
+// place (one that is gone stays, uncounted) and a new option joins at the end,
+// or waits for the next opening (grow false: rows below it stay put).
+// A row is the option with its value, else one with its name (a status's other spelling).
+export function heldOptions(held: FacetOption[], live: FacetOption[], grow = true): FacetOption[] {
+  const now = new Map<FacetOption, FacetOption>(), taken = new Set<FacetOption>()
+  const pair = (same: (option: FacetOption, row: FacetOption) => boolean) => {
+    for (const row of held) {
+      const option = now.has(row) ? undefined : live.find(option => !taken.has(option) && same(option, row))
+      if (option) { now.set(row, option); taken.add(option) }
+    }
+  }
+  pair((a, b) => a.value === b.value || !!a.members?.includes(b.value) || !!b.members?.includes(a.value))
+  pair((a, b) => a.label === b.label)
+  const rows = held.map(row => now.get(row) ?? (row.count === undefined ? row : { ...row, count: 0 }))
+  return grow ? [...rows, ...live.filter(option => !taken.has(option))] : rows
+}
+
 const VIEW_ID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
 export function filtersFromQuery(query: Record<string, unknown>): ListFilters {
   const group = GROUPS.find(g => g.value === query.group)?.value ?? 'none'
+  const structure = foldShape(
+    levels(list(query.type)),
+    list(query.shape).filter(v => ['parent', 'leaf'].includes(bare(v))),
+    list(query.depth).filter(v => /^[1-9][0-9]{0,4}$/.test(bare(v)) && Number(bare(v)) <= 50000),
+  )
   return {
+    mode: query.view === 'outline' || query.view === 'graph' ? query.view : 'list',
     q: typeof query.q === 'string' ? query.q : '',
     status: list(query.status),
     ...(list(query.status).length && ['canonical', 'open', 'in_progress', 'done', 'closed'].includes(String(query.status_scope))
       ? { statusScope: query.status_scope as ListFilters['statusScope'] } : {}),
     priority: list(query.priority),
     assignee: list(query.assignee),
-    shape: list(query.shape).filter(v => ['parent', 'leaf'].includes(bare(v))),
-    depth: list(query.depth).filter(v => /^[1-9][0-9]{0,4}$/.test(bare(v)) && Number(bare(v)) <= 50000),
-    type: list(query.type).filter(kind => WORK_KINDS.includes(bare(kind))),
+    ...structure,
     tag: list(query.tag),
     epic: list(query.epic).filter(value => /^[\w-]{1,64}$/.test(bare(value))),
     cost: list(query.cost),
     release: list(query.release),
-    human_check: list(query.human_check).filter(value => ['pending', 'none'].includes(bare(value))),
+    human_check: list(query.human_check).filter(value => ['pending', 'mine', 'none'].includes(bare(value))),
     date: parseDate(query.date),
     showClosed: query.closed === '1',
     ...(typeof query.hide_states === 'string' ? { hideStates: parseHiddenStates(query.hide_states) } : {}),
     ...(query.hide_restore === '1' && query.closed === '1' && list(query.status).length ? { hideRestore: true } : {}),
-    sort: parseSort(typeof query.sort === 'string' ? query.sort : ''),
+    ...groupedSort(parseSort(typeof query.sort === 'string' ? query.sort : ''), group, query.group_order),
     group,
     cols: parseCols(query.cols),
     view: typeof query.v === 'string' && VIEW_ID.test(query.v) ? query.v : null,
   }
+}
+// A row sort on the grouped-by column orders the groups instead (older links and views sorted by it): its direction
+// becomes the group order unless the link names one, and it leaves the row sort.
+function groupedSort(sort: SortKey[], group: GroupBy, order: unknown): { sort: SortKey[]; groupDesc?: boolean } {
+  const lead = GROUP_SORT[group]
+  const key = lead ? sort.find(entry => entry.field === lead) : undefined
+  const desc = group === 'none' ? false : order === 'reversed' || (order !== 'natural' && !!key?.desc)
+  return { sort: key ? sort.filter(entry => entry !== key) : sort, ...(desc ? { groupDesc: true } : {}) }
 }
 export function filtersToQuery(filters: ListFilters): Record<string, string> {
   const out: Record<string, string> = {}
@@ -166,7 +269,9 @@ export function filtersToQuery(filters: ListFilters): Record<string, string> {
   if (filters.showClosed && filters.hideRestore && filters.status.length) out.hide_restore = '1'
   if (filters.sort.length) out.sort = serializeSort(filters.sort)
   if (filters.group !== 'none') out.group = filters.group
-  if (filters.cols?.length) out.cols = filters.cols.join(',')
+  if (filters.group !== 'none' && filters.groupDesc) out.group_order = 'reversed'
+  if (filters.cols) out.cols = filters.cols.length ? filters.cols.join(',') : PINNED.join(',')
+  if (filters.mode !== 'list') out.view = filters.mode
   if (filters.view) out.v = filters.view
   return out
 }
@@ -184,18 +289,21 @@ export function clearedFilters(): Partial<ListFilters> {
 }
 
 // ---------- Saved views: the same state, without the view marker ----------
-export interface ViewShape { filters: Record<string, string>; sort_keys: string[]; group_by: GroupBy; columns: ColumnId[] }
+export interface ViewShape { filters: Record<string, string>; sort_keys: string[]; group_by: GroupBy; columns: ColumnId[]; mode: ListFilters['mode'] }
 export function viewShape(filters: ListFilters): ViewShape {
-  const { sort, group: _group, cols: _cols, v: _v, ...rest } = filtersToQuery(filters)
-  return { filters: rest, sort_keys: sort ? sort.split(',') : [], group_by: filters.group, columns: filters.cols ?? [] }
+  const { sort, group: _group, cols: _cols, v: _v, view: _mode, ...rest } = filtersToQuery(filters)
+  // No column choice stays empty and reloads as automatic. An explicit set, including
+  // pinned-only, keeps Key and Title so it does not collapse back into the person's columns.
+  return { filters: rest, sort_keys: sort ? sort.split(',') : [], group_by: filters.group, columns: filters.cols == null ? [] : [...PINNED, ...filters.cols], mode: filters.mode }
 }
-export function filtersFromView(view: { id: string; filters: Record<string, unknown>; sort_keys: string[]; group_by: string; columns: string[] }): ListFilters {
+export function filtersFromView(view: { id: string; filters: Record<string, unknown>; sort_keys: string[]; group_by: string; columns: string[]; mode?: ListFilters['mode'] }): ListFilters {
   const query: Record<string, unknown> = {}
   for (const [key, value] of Object.entries(view.filters ?? {})) if (typeof value === 'string') query[key] = value
   query.sort = view.sort_keys.join(',')
   query.group = view.group_by
   query.cols = view.columns.join(',')
   query.v = view.id
+  query.view = view.mode ?? 'list'
   return filtersFromQuery(query)
 }
 // The list looks as the view says (a view with changes shows a dot and Save).
@@ -235,7 +343,6 @@ export function localInstant(date: Date): string {
   const abs = Math.abs(offset)
   return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}T00:00:00${sign}${pad(Math.floor(abs / 60))}:${pad(abs % 60)}`
 }
-export function isoDay(date: Date): string { return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}` }
 export function dateBounds(date: DateFilter | null, now = new Date()): { from: string | null; to: string | null } | null {
   if (!date) return null
   const today = new Date(now.getFullYear(), now.getMonth(), now.getDate())
@@ -278,24 +385,41 @@ function stateSpellings(states: string[]): string[] {
   }
   return [...out]
 }
-// The work kinds to ask for; excluding every kind asks for a kind that does not exist.
-function kindsFor(values: string[]): string[] {
-  const wanted = included(values).filter(kind => WORK_KINDS.includes(kind))
-  const not = new Set(excluded(values))
-  const kinds = (wanted.length ? wanted : WORK_KINDS).filter(kind => !not.has(kind))
-  return kinds.length ? kinds : ['none']
-}
-const GROUP_SORT: Partial<Record<GroupBy, SortKey['field']>> = { status: 'state', priority: 'priority', type: 'kind', assignee: 'assignee' }
+// Grouping sorts by its key first, in the group order, so groups stay together across pages. The rows inside a group
+// follow the row sort, or the list's default order when only the group order is set (AEON-1390).
 export function effectiveSort(filters: ListFilters): SortKey[] {
-  const keys = filters.sort.length ? [...filters.sort] : [...DEFAULT_SORT]
-  // Grouping sorts by its key first, so groups stay together across pages.
   const lead = GROUP_SORT[filters.group]
-  if (lead && keys[0]?.field !== lead) {
-    const index = keys.findIndex(key => key.field === lead)
-    keys.unshift(index >= 0 ? keys.splice(index, 1)[0] : { field: lead, desc: false })
-  }
+  const rows = filters.sort.filter(key => key.field !== lead)
+  const keys = rows.length ? [...rows] : [...DEFAULT_SORT]
+  if (lead) keys.unshift({ field: lead, desc: !!filters.groupDesc })
   if (!keys.some(key => key.field === 'updated_at')) keys.push({ field: 'updated_at', desc: true })
   return keys
+}
+// The sort key a grouping orders its groups by, when the list API can follow it.
+export const groupSortField = (group: GroupBy): SortField | null => GROUP_SORT[group] ?? null
+// Switching the grouping: a row sort on the new grouped-by column becomes the group order and leaves the row sort;
+// otherwise the groups start in their natural order.
+export function withGrouping(filters: Pick<ListFilters, 'sort'>, group: GroupBy): Pick<ListFilters, 'group' | 'sort' | 'groupDesc'> {
+  const { sort, groupDesc } = groupedSort(filters.sort, group, undefined)
+  return { group, sort, groupDesc }
+}
+// The groups' natural order per grouping, as the group arrow's tooltip and the Display menu name it (AEON-1390).
+const GROUP_ORDER_NAMES: Record<Exclude<GroupBy, 'none'>, string> = { status: 'workflow order', priority: 'high to low', assignee: 'you first, then A–Z', type: 'work order', tag: 'A–Z', epic: 'list order', project: 'by key' }
+export const groupOrderTip = (group: GroupBy, desc: boolean) => group === 'none' ? '' : `Groups: ${desc ? 'reversed' : GROUP_ORDER_NAMES[group]}`
+// How the row sort orders the tickets inside each group, for the row-sort column's tooltip.
+const ROW_ORDER: Record<SortField, [string, string]> = {
+  key: ['lowest key first', 'highest key first'], title: ['title A–Z', 'title Z–A'], state: ['workflow order', 'reversed workflow order'],
+  priority: ['highest priority first', 'lowest priority first'], updated_at: ['least recently updated first', 'most recently updated first'],
+  created_at: ['oldest first', 'newest first'], kind: ['type A–Z', 'type Z–A'], assignee: ['assignee A–Z', 'assignee Z–A'],
+  eta_ready: ['soonest ready first', 'latest ready first'], progress: ['least done first', 'most done first'], estimate: ['lowest estimate first', 'highest estimate first'],
+  model: ['model A–Z', 'model Z–A'], tokens: ['fewest tokens first', 'most tokens first'], list_cost: ['lowest cost first', 'highest cost first'], paid: ['lowest paid first', 'highest paid first'],
+}
+export const rowOrderTip = (key: SortKey) => `Tickets in each group: ${ROW_ORDER[key.field][key.desc ? 1 : 0]}`
+// A row sort from the Display menu: the grouped-by column's key sets the group order instead.
+export function withRowSort(filters: Pick<ListFilters, 'group' | 'groupDesc'>, sort: SortKey[]): Pick<ListFilters, 'sort' | 'groupDesc'> {
+  const lead = GROUP_SORT[filters.group]
+  const key = lead ? sort.find(entry => entry.field === lead) : undefined
+  return { sort: key ? sort.filter(entry => entry !== key) : sort, groupDesc: key ? key.desc || undefined : filters.groupDesc }
 }
 export function apiParams(within: string, filters: ListFilters, options: { omit?: Dimension; facets?: string[]; limit?: number; cursor?: string; now?: Date } = {}): ListQuery {
   const { omit } = options
@@ -304,8 +428,8 @@ export function apiParams(within: string, filters: ListFilters, options: { omit?
   const bounds = dateBounds(filters.date, options.now)
   return {
     within,
-    shape: take('shape'), depth: take('depth'),
-    kind: omit === 'type' ? WORK_KINDS : [...kindsFor(filters.type), ...excluded(filters.type).map(kind => `!${kind}`)],
+    shape: take('shape'), depth: take('depth'), level: take('type'),
+    kind: WORK_KINDS,
     state: filters.statusScope && omit !== 'status' ? [] : [...stateSpellings(included(status)), ...stateSpellings(excluded(status)).map(s => `!${s}`)],
     ...(status.length && filters.statusScope === 'canonical' ? { work_state: status } : {}),
     ...(status.length && filters.statusScope && filters.statusScope !== 'canonical'
@@ -316,7 +440,7 @@ export function apiParams(within: string, filters: ListFilters, options: { omit?
     epic: take('epic'),
     cost_unit: take('cost'),
     release: take('release'),
-    ...(take('human_check').length ? { human_check: take('human_check') } : {}),
+    ...(take('human_check').length ? { person_waiting: take('human_check') } : {}),
     ...(filters.date ? { date_field: filters.date.field, date_from: bounds?.from ?? undefined, date_to: bounds?.to ?? undefined } : {}),
     q: filters.q.trim(),
     hide_closed: !filters.showClosed,
@@ -335,7 +459,7 @@ export function totalFrom(facets: Facets | undefined): number | null {
 
 // ---------- Facet options ----------
 export interface EpicOption { id: string; key: string; title: string; state?: string }
-export interface OptionContext { names?: Map<string, string>; me?: string; colors?: Map<string, string>; epics?: EpicOption[]; workName?: string }
+export interface OptionContext { names?: Map<string, string>; me?: string; colors?: Map<string, string>; epics?: EpicOption[]; workName?: string; vocabulary?: WorkVocabulary }
 // Labels (tags, cost units, releases) are counted by spelling; one label is one option.
 function labelOptions(dimension: Dimension, counts: Record<string, number>, selected: string[], colors: Map<string, string> = new Map()): FacetOption[] {
   const byName = new Map<string, FacetOption>()
@@ -354,7 +478,7 @@ function labelOptions(dimension: Dimension, counts: Record<string, number>, sele
 }
 export function facetOptions(dimension: Dimension, counts: Record<string, number> = {}, selectedValues: string[] = [], names: Map<string, string> = new Map(), me?: string, context: OptionContext = {}): FacetOption[] {
   const selected = selectedValues.map(bare)
-  if (dimension === 'human_check') return [{ value: 'pending', label: 'Needs a human check', count: counts.pending ?? 0 }, { value: 'none', label: 'No human check', count: counts.none ?? 0 }]
+  if (dimension === 'human_check') return [{ value: 'pending', label: 'Waiting for a person', count: counts.pending ?? 0 }, { value: 'mine', label: 'Waiting for you', count: counts.mine ?? 0 }, { value: 'none', label: 'Not waiting', count: counts.none ?? 0 }]
   if (dimension === 'status') {
     const byKey = new Map<string, FacetOption>()
     const seen = new Set<string>()
@@ -384,7 +508,7 @@ export function facetOptions(dimension: Dimension, counts: Record<string, number
   }
   if (dimension === 'shape') return [{ value: 'parent', label: 'Parents', count: counts.parent ?? 0 }, { value: 'leaf', label: 'Leaves', count: counts.leaf ?? 0 }]
   if (dimension === 'depth') return [...new Set([...Object.keys(counts), ...selected, '1', '2', '3'])].sort((a,b) => Number(a)-Number(b)).map(value => ({ value, label: `Level ${value}`, count: counts[value] ?? 0 }))
-  if (dimension === 'type') return KINDS.map(kind => ({ value: kind.value, label: kind.value === 'work' && context.workName ? context.workName : kind.label, count: counts[kind.value] ?? 0 }))
+  if (dimension === 'type') return levelOptions(counts, selected, context.vocabulary)
   if (dimension === 'tag' || dimension === 'cost' || dimension === 'release') return labelOptions(dimension, counts, selectedValues, context.colors)
   if (dimension === 'epic') {
     const epics = context.epics ?? []
@@ -406,12 +530,12 @@ export function facetOptions(dimension: Dimension, counts: Record<string, number
 export function valueLabel(dimension: Dimension, value: string, context: OptionContext = {}): string {
   if (value === 'none' && DIMENSION_BY_KEY.get(dimension)!.none) return DIMENSION_BY_KEY.get(dimension)!.none
   switch (dimension) {
-    case 'human_check': return value === 'pending' ? 'Needs a human check' : 'No human check'
+    case 'human_check': return value === 'pending' ? 'Waiting for a person' : value === 'mine' ? 'Waiting for you' : 'Not waiting'
     case 'status': return value === 'queued' ? 'Queued' : statusMeta(value).label
     case 'priority': return priorityLabel(value)
     case 'shape': return value === 'parent' ? 'Parents' : 'Leaves'
     case 'depth': return `Level ${value}`
-    case 'type': return value === 'work' && context.workName ? context.workName : kindLabel(value)
+    case 'type': return levelName(value, context.vocabulary)
     case 'assignee': return value === context.me ? 'Me' : context.names?.get(value) ?? 'Someone'
     case 'epic': return context.epics?.find(e => e.id === value)?.title ?? context.names?.get(value) ?? 'A parent'
     default: return value
@@ -509,16 +633,26 @@ export function rowTags(row: ListItem): { name: string; color: string }[] {
   })
 }
 
+export type TicketRow = ListItem & { project_key?: string }
 export interface RowGroup {
-  key: string; label: string; rows: ListItem[]; total: number
+  key: string; label: string; rows: TicketRow[]; total: number
+  project?: { id: string; key: string; title: string }; icon?: string
+  loaded?: number; hasMore?: boolean; loadingMore?: boolean; moreError?: string
   state?: string; epic?: EpicRef; person?: { id: string; name: string }; priority?: string; kind?: string; tag?: { name: string; color: string }
 }
 // Counts are the list API's facet for the grouped dimension (state, assignee,
 // priority, kind or tag), so a group shows its whole size while pages load.
 // layout gives the values a row is grouped by (a live list holds them while an
 // update waits); the group still lists the row itself.
-export function groupRows(rows: ListItem[], group: GroupBy, counts: Record<string, number> = {}, options: { me?: string; layout?: (row: ListItem) => ListItem; workName?: string } = {}): RowGroup[] {
-  if (group === 'none') return [{ key: 'all', label: '', rows, total: rows.length }]
+// reversed flips the groups' natural order (AEON-1390); the "No …" groups and unknown statuses stay last either way.
+export function groupRows(rows: TicketRow[], group: GroupBy, counts: Record<string, number> = {}, options: { me?: string; layout?: (row: ListItem) => ListItem; workName?: string; reversed?: boolean } = {}): RowGroup[] {
+  if (group === 'none') return [{ key: 'all', label: '', rows, total: rows.length, loaded: rows.length, hasMore: false }]
+  const ordered = naturalGroups(rows, group, counts, options)
+  if (!options.reversed) return ordered
+  const last = (entry: RowGroup) => entry.key === 'none' || (group === 'status' && statusMeta(entry.state ?? '').key === 'other')
+  return [...ordered.filter(entry => !last(entry)).reverse(), ...ordered.filter(last)]
+}
+function naturalGroups(rows: TicketRow[], group: Exclude<GroupBy, 'none'>, counts: Record<string, number>, options: { me?: string; layout?: (row: ListItem) => ListItem; workName?: string }): RowGroup[] {
   const layout = options.layout ?? (row => row)
   if (group === 'status') {
     const groups = new Map<string, RowGroup>()
@@ -537,6 +671,22 @@ export function groupRows(rows: ListItem[], group: GroupBy, counts: Record<strin
       entry.total = Math.max(counted, entry.rows.length)
     }
     return [...groups.values()].sort((a, b) => statusMeta(a.state!).order - statusMeta(b.state!).order)
+  }
+  if (group === 'project') {
+    const groups = new Map<string, RowGroup>()
+    for (const row of rows) {
+      const placed = layout(row) as TicketRow
+      const project = placed.project ?? (placed.project_key ? { id: placed.project_key, key: placed.project_key, title: placed.project_key } : null)
+      const key = project?.id ?? 'none'
+      if (!groups.has(key)) groups.set(key, { key, label: project?.title ?? 'No project', ...(project ? { project } : {}), rows: [], total: 0 })
+      groups.get(key)!.rows.push(row)
+    }
+    for (const entry of groups.values()) {
+      entry.loaded = entry.rows.length
+      entry.total = Math.max(counts[entry.key] ?? 0, entry.loaded)
+      entry.hasMore = entry.loaded < entry.total
+    }
+    return [...groups.values()].sort((a, b) => Number(!a.project) - Number(!b.project) || (a.project?.key ?? '').localeCompare(b.project?.key ?? '') || a.key.localeCompare(b.key))
   }
   if (group === 'epic') {
     const byId = new Map(rows.map(row => [row.id, row]))
@@ -595,4 +745,15 @@ export function groupRows(rows: ListItem[], group: GroupBy, counts: Record<strin
 // The facet whose counts give a grouping its totals.
 export function groupFacet(group: GroupBy): string | null {
   return ({ status: 'state', assignee: 'assignee', priority: 'priority', type: 'kind', tag: 'tag' } as Partial<Record<GroupBy, string>>)[group] ?? null
+}
+
+// Hosts own selection. Use this same bounded loaded-row update for a group
+// checkbox; folded rows count, unloaded rows do not. Other groups stay selected.
+export function selectLoadedGroup(group: RowGroup, selected: ReadonlySet<string>, on: boolean): Set<string> {
+  const next = new Set(selected)
+  for (const row of group.rows) {
+    if (!on) next.delete(row.id)
+    else if (next.size < 100) next.add(row.id)
+  }
+  return next
 }

@@ -1,0 +1,11 @@
+{
+  "schema": "aeon.migration-policy-exceptions.v1",
+  "exceptions": [
+    {
+      "file": "1066_run_kinds.sql",
+      "sha256": "2b8877cc3537051d2095fbdd0e83c0fd9842c317856af9593b51c39fbd586303",
+      "ticket": "AEON-501",
+      "reason": "Expand-only family widening: replace the existing harness check with its strict superset (media and terminal). No existing value, row, column, or route is removed; nullable execution labels preserve previous-binary writes. The classifier conservatively flags DROP CONSTRAINT. This exact-byte exception is exposed in the draft PR for coordinator review, with previous-binary migration compatibility exercised in CI."
+    }
+  ]
+}

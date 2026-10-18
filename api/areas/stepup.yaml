@@ -1,0 +1,154 @@
+# SPDX-License-Identifier: AGPL-3.0-only
+# aeon:owner internal/stepup
+# aeon:owner internal/auth
+paths:
+  /stepup-requests:
+    post:
+      operationId: createStepupRequest
+      security: [{agentKey: []}]
+      description: "Request one protected change as an agent with approvals.request and target read access. The server derives the permission and before/after snapshots from a registered typed target. No keys, grants or scopes change. Payloads are bounded to 32 KiB; requests expire after 15 minutes. The initial target is a known feature override (kind=feature, key, project_id, enabled, expected_revision)."
+      requestBody:
+        required: true
+        content: {application/json: {schema: {$ref: '#/components/schemas/StepupCreate'}}}
+      responses:
+        '201': {description: "Pending request", content: {application/json: {schema: {$ref: '#/components/schemas/StepupRequest'}}}}
+        '400': {$ref: '#/components/responses/Error'}
+        '403': {$ref: '#/components/responses/Error'}
+        '409': {$ref: '#/components/responses/Error'}
+    get:
+      operationId: listStepupRequests
+      security: [{session: []}, {agentKey: []}]
+      description: "Bounded keyset listing. Agents see their own requests; people see requests whose target permission they currently hold. state=decided gives newest decisions first. Expiry is persisted and audited before returning the page."
+      parameters:
+        - {name: limit, in: query, schema: {type: integer, minimum: 1, maximum: 100, default: 50}}
+        - {name: cursor, in: query, schema: {type: string, maxLength: 512}}
+        - {name: state, in: query, schema: {type: string, enum: [pending, decided], default: pending}}
+      responses:
+        '200': {description: "Visible requests", content: {application/json: {schema: {$ref: '#/components/schemas/StepupPage'}}}}
+        '400': {$ref: '#/components/responses/Error'}
+        '403': {$ref: '#/components/responses/Error'}
+  /stepup-requests/{requestId}:
+    parameters:
+      - {name: requestId, in: path, required: true, schema: {type: string, format: uuid}}
+    get:
+      operationId: getStepupRequest
+      security: [{session: []}, {agentKey: []}]
+      responses:
+        '200': {description: "Authorized request including outcome and authentication method", content: {application/json: {schema: {$ref: '#/components/schemas/StepupRequest'}}}}
+        '404': {$ref: '#/components/responses/Error'}
+  /stepup-requests/{requestId}/options:
+    parameters:
+      - {name: requestId, in: path, required: true, schema: {type: string, format: uuid}}
+    post:
+      operationId: stepupAuthenticationOptions
+      security: [{session: []}]
+      description: "Person-only, same-origin Approve action. Uses an existing passkey when available, otherwise fresh OIDC sign-in with prompt=login and max_age=0. Proof is bound to person, request digest and approve decision, one-use, and expires after two minutes. Fresh sign-in returns authorize_url and applies via the existing OIDC callback only for the same signed-in identity with auth_time strictly after this action."
+      requestBody:
+        required: true
+        content: {application/json: {schema: {$ref: '#/components/schemas/StepupDecision'}}}
+      responses:
+        '200': {description: "Passkey options or OIDC authorization URL", content: {application/json: {schema: {type: object, properties: {method: {type: string, enum: [passkey, oidc_reauth]}, challenge_id: {type: string, format: uuid}, publicKey: {type: object, additionalProperties: true}, authorize_url: {type: string, format: uri}}}}}}
+        '403': {$ref: '#/components/responses/Error'}
+        '409': {$ref: '#/components/responses/Error'}
+        '503': {$ref: '#/components/responses/Error'}
+  /stepup-requests/{requestId}/approve:
+    parameters:
+      - {name: requestId, in: path, required: true, schema: {type: string, format: uuid}}
+    post:
+      operationId: approveStepupRequest
+      security: [{session: []}]
+      description: "A person with the target permission approves using a bound passkey assertion. Rechecks authority and before-hash under the final write fence, then applies as that person in the same transaction. Changed targets become stale without applying; expired and withdrawn requests cannot apply. First decision wins; later authorized deciders receive the settled request. Assertions are never retained in audit."
+      requestBody:
+        required: true
+        content: {application/json: {schema: {allOf: [{$ref: '#/components/schemas/StepupDecision'}, {type: object, required: [challenge_id, credential], properties: {challenge_id: {type: string, format: uuid}, credential: {type: object, additionalProperties: true}}}]}}}
+      responses:
+        '200': {description: "Applied or settled request", content: {application/json: {schema: {$ref: '#/components/schemas/StepupRequest'}}}}
+        '403': {$ref: '#/components/responses/Error'}
+        '409': {$ref: '#/components/responses/Error'}
+  /stepup-requests/{requestId}/decline:
+    parameters:
+      - {name: requestId, in: path, required: true, schema: {type: string, format: uuid}}
+    post:
+      operationId: declineStepupRequest
+      security: [{session: []}]
+      description: "Person-only; current target permission required. Decline requires no step-up. Revision and digest bind the decision to the request on screen. First decision wins."
+      requestBody:
+        required: true
+        content: {application/json: {schema: {$ref: '#/components/schemas/StepupDecision'}}}
+      responses:
+        '200': {description: "Declined or settled request", content: {application/json: {schema: {$ref: '#/components/schemas/StepupRequest'}}}}
+        '403': {$ref: '#/components/responses/Error'}
+        '409': {$ref: '#/components/responses/Error'}
+  /stepup-requests/{requestId}/withdraw:
+    parameters:
+      - {name: requestId, in: path, required: true, schema: {type: string, format: uuid}}
+    post:
+      operationId: withdrawStepupRequest
+      security: [{agentKey: []}]
+      description: "Only the requesting agent with approvals.request may withdraw a pending request. Revision and digest bind the action. Settled requests are returned without changing their first outcome."
+      requestBody:
+        required: true
+        content: {application/json: {schema: {$ref: '#/components/schemas/StepupDecision'}}}
+      responses:
+        '200': {description: "Withdrawn or settled request", content: {application/json: {schema: {$ref: '#/components/schemas/StepupRequest'}}}}
+        '403': {$ref: '#/components/responses/Error'}
+        '409': {$ref: '#/components/responses/Error'}
+components:
+  schemas:
+    StepupCreate:
+      type: object
+      additionalProperties: false
+      required: [payload, before_hash]
+      properties:
+        payload: {$ref: '#/components/schemas/StepupFeatureChange'}
+        before_hash: {type: string, pattern: '^[0-9a-f]{64}$'}
+        session_id: {type: string, format: uuid}
+    StepupFeatureChange:
+      type: object
+      additionalProperties: false
+      required: [kind, key, enabled, expected_revision]
+      properties:
+        kind: {type: string, enum: [feature]}
+        key: {type: string, maxLength: 64}
+        project_id: {type: [string, 'null'], format: uuid}
+        enabled: {type: [boolean, 'null']}
+        expected_revision: {type: integer, minimum: 0}
+    StepupDecision:
+      type: object
+      required: [request_digest, revision]
+      properties:
+        request_digest: {type: string, pattern: '^[0-9a-f]{64}$'}
+        revision: {type: integer, minimum: 1}
+    StepupRequest:
+      type: object
+      required: [id, requested_by, permission, payload, before, after, before_hash, after_hash, request_digest, created_at, expires_at, state, revision]
+      properties:
+        id: {type: string, format: uuid}
+        requested_by: {type: string, format: uuid}
+        session_id: {type: string, format: uuid}
+        project_id: {type: string, format: uuid}
+        permission: {type: string}
+        payload: {type: object, additionalProperties: true}
+        before: {type: object, additionalProperties: true}
+        after: {type: object, additionalProperties: true}
+        before_hash: {type: string}
+        after_hash: {type: string}
+        request_digest: {type: string}
+        created_at: {type: string, format: date-time}
+        expires_at: {type: string, format: date-time}
+        state: {type: string, enum: [pending, applied, declined, expired, stale, withdrawn, failed]}
+        revision: {type: integer, minimum: 1}
+        decided_by: {type: string, format: uuid}
+        decided_by_name: {type: string}
+        decision: {type: string, enum: [approve, decline, withdraw, expire]}
+        method: {type: string, enum: [passkey_platform, passkey, oidc_reauth]}
+        auth_time: {type: string, format: date-time}
+        applied_at: {type: string, format: date-time}
+        decided_at: {type: string, format: date-time}
+    StepupPage:
+      type: object
+      required: [items, has_more]
+      properties:
+        items: {type: array, maxItems: 100, items: {$ref: '#/components/schemas/StepupRequest'}}
+        has_more: {type: boolean}
+        next_cursor: {type: string}

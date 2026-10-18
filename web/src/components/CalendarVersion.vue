@@ -9,7 +9,7 @@ import { attachVersionReveal, revealControl } from '../lib/version-reveal'
 
 // A calendar version in the shared INSPR renderer's Pretty display. Standing
 // alone it is the renderer's own pill (hover, focus or tap reveals the seconds;
-// a click copies). Inside a control (a release row, a journey release button)
+// a click copies). Inside a control (a release row or button)
 // that control keeps its action and its hover or focus reveals the seconds.
 // Other versions read as text.
 // `full` draws the shared Pretty stamp with seconds already visible, without interaction.

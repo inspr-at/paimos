@@ -66,7 +66,7 @@ func TestSharedQuotaReservations(t *testing.T) {
 		s := capacity.DefaultSchedule("UTC")
 		s.Override = "sprint"
 		s.Reserve = capacity.ReserveOff
-		callStatus(t, mod, &admin, "", "PUT", "/api/agent-accounts/capacity/schedule", encoded(t, scheduleOverride{Scope: "account", AccountID: a.ID, Schedule: &s}), 204, nil)
+		seedExistingSchedule(t, admin, scheduleOverride{Scope: "account", AccountID: a.ID, Schedule: &s})
 	}
 	run := insertRun(t, admin, runner, profile)
 	mustRoute(t, mod, runner, token, run, "daemon-a", []Account{first}, map[string]int64{"requests": 1})
@@ -150,7 +150,7 @@ func sharedFixture(t *testing.T) (tenant.Principal, tenant.Principal, string, st
 		s := capacity.DefaultSchedule("UTC")
 		s.Override = "sprint"
 		s.Reserve = capacity.ReserveOff
-		callStatus(t, mod, &admin, "", "PUT", "/api/agent-accounts/capacity/schedule", encoded(t, scheduleOverride{Scope: "account", AccountID: a.ID, Schedule: &s}), 204, nil)
+		seedExistingSchedule(t, admin, scheduleOverride{Scope: "account", AccountID: a.ID, Schedule: &s})
 	}
 	return admin, runner, profile, token, mod, doors, now
 }

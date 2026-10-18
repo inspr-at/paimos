@@ -1,14 +1,17 @@
 <!-- SPDX-License-Identifier: AGPL-3.0-only -->
 <script setup lang="ts">
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
-import { DIMENSION_BY_KEY, DIMENSIONS, activeDimensions, dateLabel, excluded, fieldLabel, included, type DateFilter, type Dimension, type FacetOption, type GroupBy, type ListFilters } from '../../lib/ticketList'
+import { DIMENSION_BY_KEY, DIMENSIONS, GROUPS, activeDimensions, dateLabel, excluded, fieldLabel, included, type DateFilter, type Dimension, type FacetOption, type GroupBy, type ListFilters } from '../../lib/ticketList'
 import { TICKET_GRAPH_FILTERS } from '../../lib/ticketGraphRenderer'
-import { plural, type SortKey } from '../../lib/work'
+import type { SortKey } from '../../lib/work'
+import { menuPanelWidth } from '../../lib/menuColumns'
 import AppIcon from '../AppIcon.vue'
-import ProjectTabs from './ProjectTabs.vue'
+import ViewSwitch from '../ViewSwitch.vue'
 import { TICKET_VIEWS, KNOWLEDGE_VIEWS, type TicketView } from './projectNavigation'
 import DateMenu from './DateMenu.vue'
+import DisplayMenu from './DisplayMenu.vue'
 import DisplayPanel from './DisplayPanel.vue'
+import HeaderRoomyChoice from './HeaderRoomyChoice.vue'
 import FacetMenu from './FacetMenu.vue'
 import FilterMenu from './FilterMenu.vue'
 import FloatingPanel from './FloatingPanel.vue'
@@ -20,6 +23,7 @@ import HideOptions from './HideOptions.vue'
 import type { ColumnId } from '../../lib/columns'
 import { workNoun } from '../../lib/workVocabulary'
 import { useWorkVocabulary } from '../../stores/workVocabulary'
+import { ATTENTION_KINDS, type AttentionFacet, type AttentionFilters, type AttentionGrouping } from '../../lib/attention'
 
 const vocabulary = useWorkVocabulary()
 const createLabel = computed(() => `New ${workNoun(vocabulary.leaf.name)}`)
@@ -34,14 +38,18 @@ const props = defineProps<{
   loading: boolean
   density: 'comfortable' | 'compact'
   stuck: boolean
-  view: TicketView | 'journey' | 'knowledge'
+  view: TicketView | 'knowledge'
   knowledgeView?: 'entries' | 'graph'
+  // The person's default of the shown switch (List, Outline, Graph or Entries, Graph), for its pin (AEON-1453).
+  defaultView?: string | null
   // The table's columns for the Display menu's picker.
   columns?: { order: ColumnId[]; visible: ColumnId[]; customised: boolean; notes?: Partial<Record<string, string>> } | null
   facetLoading?: boolean
-  headerGraph?: boolean
   settingsTarget?: string
   projectHeader?: boolean
+  // The project header is collapsed: Display moves into the toolbar and carries what the header hid.
+  collapsedHeader?: boolean
+  attention?: { owner: string; filters: AttentionFilters; group: AttentionGrouping; facets: { projects: AttentionFacet[]; assignees: AttentionFacet[] }; truncated: boolean; locale: string }
 }>()
 const emit = defineEmits<{
   search: [q: string]
@@ -59,13 +67,16 @@ const emit = defineEmits<{
   needOptions: [dimension: Dimension]
   create: []
   view: [value: string]
+  setDefault: [value: string | null]
   expandAll: []
   collapseAll: []
   expandGroups: []
   collapseGroups: []
+  groupOrder: [desc: boolean]
   columns: [order: ColumnId[], visible: ColumnId[]]
   columnsReset: []
-  headerGraph: [value: boolean]
+  attentionFilter: [field: keyof AttentionFilters, value: string]
+  attentionGroup: [value: AttentionGrouping]
 }>()
 
 const draft = ref(props.filters.q)
@@ -78,34 +89,59 @@ onMounted(() => {
   resize = new ResizeObserver(([entry]) => { narrow.value = entry.contentRect.width < 940 })
   resize.observe(root.value)
 })
+// Windows this narrow (and phones) show the collapsed header's Display menu as a sheet.
+const sheetMode = ref(window.innerWidth <= 900)
+const menuColumns = ref(1)
+const onWindowResize = () => { sheetMode.value = window.innerWidth <= 900 }
+onMounted(() => window.addEventListener('resize', onWindowResize))
+onBeforeUnmount(() => window.removeEventListener('resize', onWindowResize))
 const input = ref<HTMLInputElement>()
 const filterButton = ref<HTMLButtonElement>()
 const open = ref<{ dimension: Dimension; anchor: HTMLElement } | null>(null)
 const dateAnchor = ref<HTMLElement | null>(null)
 const menuAnchor = ref<HTMLElement | null>(null)
 const displayAnchor = ref<HTMLElement | null>(null)
+const displayButton = ref<HTMLButtonElement>()
+const collapsedDisplayButton = ref<HTMLButtonElement>()
+const filtersButton = ref<HTMLButtonElement>()
+const attentionMenu = ref<{ field: 'kind' | 'project_id' | 'assignee'; anchor: HTMLElement } | null>(null)
+const attentionWord = (en: string, de: string) => props.attention?.locale === 'de' ? de : en
+const attentionFacets = computed(() => [{ field: 'kind', label: attentionWord('Kind', 'Art') }, { field: 'project_id', label: attentionWord('Project', 'Projekt') }, { field: 'assignee', label: attentionWord('Assignee', 'Zuständig') }] as const)
+const attentionOptions = computed<AttentionFacet[]>(() => attentionMenu.value?.field === 'kind'
+  ? [{ id: '', label: attentionWord('Every kind', 'Alle Arten') }, ...ATTENTION_KINDS.map(kind => ({ id: kind.id, label: props.attention?.locale === 'de' ? kind.labelDe : kind.label }))]
+  : attentionMenu.value?.field === 'project_id' ? [{ id: '', label: attentionWord('All projects', 'Alle Projekte') }, ...(props.attention?.facets.projects ?? [])]
+    : [{ id: '', label: attentionWord('Every assignee', 'Alle Zuständigen') }, { id: 'none', label: attentionWord('Unassigned', 'Niemand') }, ...(props.attention?.facets.assignees ?? [])])
+function closeAttention(restore: boolean) { const anchor = attentionMenu.value?.anchor; attentionMenu.value = null; if (restore) anchor?.focus() }
+function attentionMenuKeys(event: KeyboardEvent) {
+  if (event.altKey || event.ctrlKey || event.metaKey || !['ArrowDown', 'ArrowUp', 'Home', 'End'].includes(event.key)) return
+  const buttons = [...(event.currentTarget as HTMLElement).querySelectorAll<HTMLButtonElement>('[role="menuitemradio"]')]
+  const index = buttons.indexOf(document.activeElement as HTMLButtonElement)
+  const next = event.key === 'Home' ? 0 : event.key === 'End' ? buttons.length - 1 : (index + (event.key === 'ArrowDown' ? 1 : -1) + buttons.length) % buttons.length
+  event.preventDefault(); event.stopPropagation(); buttons[next]?.focus()
+}
 const hideAnchor = ref<HTMLElement | null>(null)
 const hideName = computed(() => hideLabel(props.filters.hideStates))
 const hideNames = computed(() => hiddenStates(props.filters.hideStates).map(state => statusMeta(state).label).join(', '))
 function closeHide(restore: boolean) { const anchor = hideAnchor.value; hideAnchor.value = null; if (restore) anchor?.focus() }
 let timer: ReturnType<typeof setTimeout> | undefined
+watch(() => props.attention?.owner, () => { clearTimeout(timer); closeAttention(false); displayAnchor.value = null; draft.value = props.filters.q })
 watch(() => props.filters.q, value => { if (value !== draft.value.trim()) draft.value = value })
 watch(draft, value => {
   clearTimeout(timer)
-  timer = setTimeout(() => { if (value.trim() !== props.filters.q) emit('search', value.trim()) }, 220)
+  timer = setTimeout(() => { if (value.trim() !== props.filters.q) emit('search', props.attention ? value.slice(0, 200) : value.trim()) }, props.attention ? 250 : 220)
 })
 onBeforeUnmount(() => { clearTimeout(timer); resize?.disconnect() })
 
 const graph = computed(() => props.view === 'graph')
-const dimensions = computed(() => DIMENSIONS.filter(d => !graph.value || TICKET_GRAPH_FILTERS.includes(d.key)))
 // Keep the trigger's geometry and labels until its popover closes. Actual
 // options still read live filters, including selections/exclusions made now.
 const presented = ref(props.filters)
 // Resolving a person's name or an epic's title can finish after the menu opens.
 // Snapshot the words too, for the visible label, accessible name and clip-tip.
+// Type levels that share a name read once ("Task", not "Task, Task").
 const resolvedLabels = computed(() => new Map(DIMENSIONS.map(({ key }) => [key, {
-  plain: included(props.filters[key]).map(value => props.label(key, value)),
-  not: excluded(props.filters[key]).map(value => props.label(key, value)),
+  plain: [...new Set(included(props.filters[key]).map(value => props.label(key, value)))],
+  not: [...new Set(excluded(props.filters[key]).map(value => props.label(key, value)))],
 }])))
 const presentedLabels = ref(resolvedLabels.value)
 watch([() => props.filters, resolvedLabels, open, dateAnchor, menuAnchor], () => {
@@ -114,15 +150,33 @@ watch([() => props.filters, resolvedLabels, open, dateAnchor, menuAnchor], () =>
     presentedLabels.value = resolvedLabels.value
   }
 }, { flush: 'sync' })
-const primary = computed(() => dimensions.value.filter(d => d.primary || presented.value[d.key].length))
 const active = computed(() => activeDimensions(presented.value).filter(key => !graph.value || TICKET_GRAPH_FILTERS.includes(key)))
-const secondaryActive = computed(() => active.value.filter(key => !DIMENSION_BY_KEY.get(key)!.primary).length + (!graph.value && presented.value.date ? 1 : 0))
+// Only applied filters show, as pills to the right of Filter (AEON-974). A new
+// pill joins at the end, so the pills already there never move.
+const pillOrder = ref<(Dimension | 'date')[]>([])
+watch(() => [...active.value, ...(!graph.value && presented.value.date ? ['date' as const] : [])], applied => {
+  pillOrder.value = [...pillOrder.value.filter(key => applied.includes(key)), ...applied.filter(key => !pillOrder.value.includes(key))]
+}, { immediate: true, flush: 'sync' })
+const pills = computed(() => pillOrder.value.map(key => key === 'date' ? null : DIMENSION_BY_KEY.get(key)!))
 const filterCount = computed(() => active.value.reduce((sum, key) => sum + props.filters[key].length, 0) + (props.filters.q ? 1 : 0) + (!graph.value && presented.value.date ? 1 : 0))
 const activeFilterCount = computed(() => active.value.length + (!graph.value && presented.value.date ? 1 : 0))
 const groupWord = computed(() => props.filters.group === 'tag' ? 'label' : props.filters.group)
 const displayLabel = computed(() => props.view === 'outline' || props.filters.group === 'none' ? 'Display' : `Grouped by ${groupWord.value}`)
 watch(() => props.view, () => { open.value = null; menuAnchor.value = null; dateAnchor.value = null; displayAnchor.value = null; hideAnchor.value = null })
-const displayText = computed(() => props.view === 'outline' || props.filters.group === 'none' ? 'Display' : `By ${groupWord.value}`)
+// Every label the collapsed trigger can show. The button is as wide as the longest,
+// so choosing a grouping never resizes it or the New button beside it.
+function displayPhrase(group: GroupBy) { return group === 'none' ? 'Display' : `By ${group === 'tag' ? 'label' : group}` }
+const displayWords = GROUPS.map(option => displayPhrase(option.value))
+const displayText = computed(() => props.view === 'outline' ? 'Display' : displayPhrase(props.filters.group))
+// The collapsed header's menu replaces the plain Display panel; the attention host keeps its own.
+const collapsedMenu = computed(() => !!props.collapsedHeader && !props.attention)
+// Opened away from its own buttons (the filter sheet's link), Display is a sheet of its own;
+// closing it, also by Expand or Collapse all, hands focus back to Filters.
+const detachedDisplay = computed(() => !!displayAnchor.value && displayAnchor.value !== displayButton.value && displayAnchor.value !== collapsedDisplayButton.value)
+const displaySheet = computed(() => detachedDisplay.value || (collapsedMenu.value && sheetMode.value))
+const displayOn = computed(() => props.view === 'list' && props.filters.group !== 'none')
+// Folding or unfolding the header moves the Display button: its popovers anchor to the old place.
+watch(() => props.collapsedHeader, () => { displayAnchor.value = null; hideAnchor.value = null })
 
 function title(dimension: Dimension) { return DIMENSION_BY_KEY.get(dimension)!.title }
 function openMenu(dimension: Dimension, anchor: HTMLElement) {
@@ -148,13 +202,15 @@ function filterText(dimension: Dimension, full = false) {
   const shorten = (parts: string[]) => !full && parts.length > 2 ? `${parts.slice(0, 2).join(', ')} +${parts.length - 2}` : parts.join(', ')
   return [plain.length ? shorten(plain) : '', not.length ? `not ${shorten(not)}` : ''].filter(Boolean).join(' · ')
 }
+// How many values a pill holds, as named (levels that share a name count once).
+function valueCount(dimension: Dimension) { const { plain, not } = presentedLabels.value.get(dimension)!; return plain.length + not.length }
 function filterKey(event: KeyboardEvent, clear: () => void) {
   if (event.key === 'Backspace' || event.key === 'Delete') {
     event.preventDefault()
     const chip = (event.currentTarget as HTMLElement).closest('.facet-control')
     const next = (chip?.nextElementSibling ?? chip?.previousElementSibling)?.querySelector<HTMLElement>('button')
     clear()
-    void nextTick(() => (next ?? input.value)?.focus())
+    void nextTick(() => (next?.isConnected ? next : filterButton.value ?? input.value)?.focus())
   }
 }
 function closeDisplay(restore: boolean) {
@@ -162,6 +218,8 @@ function closeDisplay(restore: boolean) {
   displayAnchor.value = null
   if (restore) anchor?.focus()
 }
+// The gear in the collapsed menu: Hide's choices open where the Display button is, once the menu has closed.
+function openHideFromMenu() { const anchor = displayAnchor.value; closeDisplay(false); hideAnchor.value = anchor }
 function closeDate(restore: boolean) {
   const anchor = dateAnchor.value
   dateAnchor.value = null
@@ -173,58 +231,74 @@ function clearSearch() { draft.value = ''; emit('search', ''); input.value?.focu
 function searchKey(event: KeyboardEvent) {
   if (event.key === 'Escape') {
     event.preventDefault()
+    if (props.attention) { input.value?.blur(); return }
     if (draft.value) clearSearch()
     else input.value?.blur()
   }
 }
-defineExpose({ focusSearch, openFilterMenu, input })
+function closeOverlays() { closeAttention(false); closeDisplay(false) }
+// The filter sheet's "Display settings…" (AEON-1188). Display opens under the Display button the
+// window shows; with none in sight (a phone or tablet under an unfolded header) it opens as a
+// sheet, and closing it hands focus back to Filters.
+function openDisplay() {
+  const button = props.collapsedHeader ? collapsedDisplayButton.value : displayButton.value
+  displayAnchor.value = (button?.offsetParent ? button : null) ?? filtersButton.value ?? root.value ?? null
+}
+defineExpose({ focusSearch, openFilterMenu, openDisplay, input, closeOverlays })
 </script>
 
 <template>
-  <div ref="root" class="toolbar" :class="{ stuck, graph, knowledge: view === 'knowledge' }" role="toolbar" :aria-label="view === 'knowledge' ? 'Knowledge controls' : view === 'journey' ? 'Journey controls' : 'Ticket list controls'">
-    <ProjectTabs v-if="view !== 'journey'" class="view-switch"
-      :items="view === 'knowledge' ? KNOWLEDGE_VIEWS : TICKET_VIEWS"
+  <div ref="root" class="toolbar" :class="{ stuck, graph, attention: !!attention, knowledge: view === 'knowledge' }" role="toolbar" :aria-label="attention ? attentionWord('List controls', 'Listensteuerung') : view === 'knowledge' ? 'Knowledge controls' : 'Ticket list controls'">
+    <ViewSwitch v-if="!attention" class="view-switch"
+      :options="view === 'knowledge' ? KNOWLEDGE_VIEWS : TICKET_VIEWS"
       :selected="view === 'knowledge' ? knowledgeView ?? 'entries' : view"
-      :tips="view !== 'knowledge'"
-      :label="view === 'knowledge' ? 'Knowledge views' : 'Ticket views'" @select="value => emit('view', value)" />
-    <span v-if="view !== 'knowledge' && view !== 'journey'" class="count-live">
-      <slot name="freshness" />
-      <span class="count mono" role="status" aria-live="polite"><span v-if="total === null && loading" class="skeleton count-skeleton" aria-label="Counting tickets" /><template v-else-if="total !== null">{{ plural(total, 'ticket') }}</template></span>
+      :tips="view !== 'knowledge'" :default-id="defaultView ?? null"
+      :label="view === 'knowledge' ? 'Knowledge views' : 'Ticket views'" @select="value => emit('view', value)" @set-default="value => emit('setDefault', value)" />
+    <span v-if="attention" class="count-live">
+      <span class="count mono" role="status" aria-live="polite"><span v-if="total === null && loading" class="skeleton count-skeleton" aria-label="Counting tickets" /><template v-else-if="total !== null">{{ `${total} ${attentionWord('suggestions', 'Vorschläge')}` }}</template></span>
     </span>
-    <span v-if="view !== 'knowledge' && view !== 'journey'" class="phone-break" aria-hidden="true" />
-    <template v-if="view !== 'knowledge' && view !== 'journey'">
+    <span v-if="view !== 'knowledge'" class="phone-break" aria-hidden="true" />
+    <template v-if="view !== 'knowledge'">
     <label class="search-field list-search">
       <AppIcon name="search" :size="14" />
-      <input ref="input" v-model="draft" class="field" type="search" :placeholder="narrow ? 'Search' : graph ? 'Search tickets' : 'Search this list'" aria-label="Search tickets in this project" aria-keyshortcuts="/" autocomplete="off" spellcheck="false" @keydown="searchKey" />
+      <input ref="input" v-model="draft" class="field" type="search" :maxlength="attention ? 200 : undefined" :placeholder="attention ? attentionWord('Search this list', 'Liste durchsuchen') : narrow ? 'Search' : graph ? 'Search tickets' : 'Search this list'" :aria-label="attention ? 'Search this view' : 'Search tickets in this project'" aria-keyshortcuts="/" autocomplete="off" spellcheck="false" @keydown="searchKey" />
       <kbd v-if="!draft && !narrow" class="keycap slash" aria-hidden="true">/</kbd>
       <button v-if="draft" type="button" class="clear-q" aria-label="Clear search" @click="clearSearch"><AppIcon name="close" :size="12" /></button>
     </label>
 
-    <div class="facets" aria-label="Ticket filters">
-      <span v-for="dimension in primary" :key="dimension.key" class="facet-control" :data-dim="dimension.key" :class="{ on: presented[dimension.key].length }">
-        <button type="button" class="btn sm facet-btn" :data-dim="dimension.key"
-          :class="{ on: presented[dimension.key].length }" :aria-label="presented[dimension.key].length ? `Edit ${dimension.title} filter: ${filterText(dimension.key, true)}` : dimension.title"
-          :data-tip="presented[dimension.key].length ? `${dimension.title}: ${filterText(dimension.key, true)}` : undefined"
-          :aria-expanded="open?.dimension === dimension.key" aria-haspopup="dialog" @click="openMenu(dimension.key, $event.currentTarget as HTMLElement)"
-          @keydown="filterKey($event, () => emit('clear', dimension.key))">
-          {{ dimension.title }}
-          <span v-if="presented[dimension.key].length" v-clip-tip="filterText(dimension.key, true)" class="facet-value"> · {{ filterText(dimension.key) }}</span>
-          <span class="facet-end"><span v-if="presented[dimension.key].length" class="facet-count mono">{{ presented[dimension.key].length }}</span><AppIcon v-else name="chevron" :size="12" class="facet-chevron" /></span>
-        </button>
-        <button v-if="presented[dimension.key].length" type="button" class="facet-x" :aria-label="`Remove ${dimension.title} filter`" @click="emit('clear', dimension.key)"><AppIcon name="close" :size="11" /></button>
-      </span>
-      <span v-if="!graph && presented.date" class="facet-control on date-filter">
-        <button type="button" class="btn sm facet-btn on" :aria-label="`Edit date filter: ${fieldLabel(presented.date.field)} ${dateLabel(presented.date)}`"
-          :data-tip="`${fieldLabel(presented.date.field)}: ${dateLabel(presented.date)}`" aria-haspopup="dialog" :aria-expanded="!!dateAnchor" @click="dateAnchor = $event.currentTarget as HTMLElement">
-          <AppIcon name="calendar" :size="12" />{{ fieldLabel(presented.date.field) }}<span class="facet-value"> · {{ dateLabel(presented.date) }}</span><span class="facet-count date-count">1</span>
-        </button>
-        <button type="button" class="facet-x" aria-label="Remove date filter" @click="emit('date', null)"><AppIcon name="close" :size="11" /></button>
-      </span>
-      <button ref="filterButton" type="button" class="btn sm facet-btn more-btn" :class="{ on: secondaryActive }" aria-haspopup="menu" :aria-expanded="!!menuAnchor"
-        aria-label="Filter by more" aria-keyshortcuts="Shift+F" :data-tip="graph ? 'Status, priority, type · Shift F' : 'Labels, human check, epic, cost unit, release, date · Shift F'" @click="menuAnchor = menuAnchor ? null : ($event.currentTarget as HTMLElement)">
+    <div v-if="attention" class="facets attention-facets" aria-label="Suggestion filters">
+      <button v-for="facet in attentionFacets" :key="facet.field" type="button" class="btn sm facet-button" :class="{ on: !!attention.filters[facet.field] }" :aria-label="`${facet.label} filter`" :aria-expanded="attentionMenu?.field === facet.field" @click="attentionMenu = attentionMenu?.field === facet.field ? null : { field: facet.field, anchor: $event.currentTarget as HTMLElement }">{{ facet.label }}<AppIcon name="chevron" :size="12" /></button>
+      <button type="button" class="btn sm ghost reset" :aria-disabled="!Object.values(attention.filters).some(Boolean)" @click="emit('clearAll')">{{ attentionWord('Clear filters', 'Filter löschen') }}</button>
+    </div>
+    <!-- Filter stays first and never moves; applied filters follow as pills, then Clear all (AEON-974). -->
+    <div v-else class="facets" aria-label="Ticket filters">
+      <button ref="filterButton" type="button" class="btn sm facet-btn more-btn" aria-haspopup="menu" :aria-expanded="!!menuAnchor"
+        aria-label="Add a filter" aria-keyshortcuts="Shift+F" data-tip="Add a filter · Shift F" @click="menuAnchor = menuAnchor ? null : ($event.currentTarget as HTMLElement)">
         <AppIcon name="filter" :size="13" /><span class="more-label">Filter</span>
-        <span v-if="secondaryActive" class="facet-count mono">{{ secondaryActive }}</span>
       </button>
+      <div v-if="pills.length" class="pills" aria-label="Applied filters">
+        <template v-for="dimension in pills" :key="dimension?.key ?? 'date'">
+        <span v-if="dimension" class="facet-control on" :data-dim="dimension.key">
+          <button type="button" class="btn sm facet-btn on" :data-dim="dimension.key"
+            :aria-label="`Edit ${dimension.title} filter: ${filterText(dimension.key, true)}`"
+            :data-tip="`${dimension.title}: ${filterText(dimension.key, true)}`"
+            :aria-expanded="open?.dimension === dimension.key" aria-haspopup="dialog" @click="openMenu(dimension.key, $event.currentTarget as HTMLElement)"
+            @keydown="filterKey($event, () => emit('clear', dimension.key))">
+            {{ dimension.title }}
+            <span v-clip-tip="filterText(dimension.key, true)" class="facet-value"> · {{ filterText(dimension.key) }}</span>
+            <span class="facet-end"><span class="facet-count mono">{{ valueCount(dimension.key) }}</span></span>
+          </button>
+          <button type="button" class="facet-x" :aria-label="`Remove ${dimension.title} filter`" @click="emit('clear', dimension.key)"><AppIcon name="close" :size="11" /></button>
+        </span>
+        <span v-else-if="presented.date" class="facet-control on date-filter">
+          <button type="button" class="btn sm facet-btn on" :aria-label="`Edit date filter: ${fieldLabel(presented.date.field)} ${dateLabel(presented.date)}`"
+            :data-tip="`${fieldLabel(presented.date.field)}: ${dateLabel(presented.date)}`" aria-haspopup="dialog" :aria-expanded="!!dateAnchor" @click="dateAnchor = $event.currentTarget as HTMLElement">
+            <AppIcon name="calendar" :size="12" />{{ fieldLabel(presented.date.field) }}<span class="facet-value"> · {{ dateLabel(presented.date) }}</span><span class="facet-count date-count">1</span>
+          </button>
+          <button type="button" class="facet-x" aria-label="Remove date filter" @click="emit('date', null)"><AppIcon name="close" :size="11" /></button>
+        </span>
+        </template>
+      </div>
       <button v-if="activeFilterCount || presented.q" type="button" class="btn sm ghost clear-all" @click="emit('clearAll')">Clear all</button>
     </div>
 
@@ -232,7 +306,7 @@ defineExpose({ focusSearch, openFilterMenu, input })
 
     <Teleport defer :to="settingsTarget ?? 'body'" :disabled="!settingsTarget">
     <div class="view-settings">
-    <div class="hide-control">
+    <div v-if="!attention" class="hide-control">
     <label class="switch closed-switch" :data-tip="hideNames">
       <input type="checkbox" :aria-label="hideName === 'Hide' ? `Hide ${hideNames}` : hideName" :checked="!filters.showClosed" @change="emit('showClosed', !($event.target as HTMLInputElement).checked)" />
       <HideLabel :states="filters.hideStates" />
@@ -243,25 +317,36 @@ defineExpose({ focusSearch, openFilterMenu, input })
     ><AppIcon :name="filters.showClosed ? 'eye' : 'eye-off'" :size="14" /><HideLabel :states="filters.hideStates" /></button>
     <button type="button" class="hide-gear" aria-label="Choose what Hide hides" data-tip="Choose what Hide hides" aria-haspopup="dialog" :aria-expanded="!!hideAnchor" @click="hideAnchor = hideAnchor ? null : ($event.currentTarget as HTMLElement)"><AppIcon name="gear" :size="14" /></button>
     </div>
-    <button v-if="!graph" type="button" class="btn sm display-btn" :class="{ on: view === 'list' && filters.group !== 'none' }" aria-haspopup="dialog" :aria-expanded="!!displayAnchor" :aria-label="`Display: ${displayLabel}`" data-tip="Grouping, sort, row and header height, and columns" @click="displayAnchor = displayAnchor ? null : ($event.currentTarget as HTMLElement)">
-      <AppIcon name="layers" :size="13" /><span class="display-label">{{ displayText }}</span><AppIcon name="chevron" :size="12" class="facet-chevron" />
+    <button v-if="!graph" ref="displayButton" type="button" class="btn sm display-btn" :class="{ on: displayOn }" aria-haspopup="dialog" :aria-expanded="!!displayAnchor" :aria-label="`Display: ${displayLabel}`" data-tip="Grouping, sort, row and header height, and columns" @click="displayAnchor = displayAnchor ? null : ($event.currentTarget as HTMLElement)">
+      <AppIcon name="layers" :size="13" /><span class="display-label">{{ attention ? attention.group === 'project' ? attentionWord('By project', 'Nach Projekt') : attention.group === 'kind' ? attentionWord('By kind', 'Nach Art') : attentionWord('Display', 'Anzeige') : displayText }}</span><AppIcon name="chevron" :size="12" class="facet-chevron" />
     </button>
 
     </div>
     </Teleport>
-    <button v-if="!graph" type="button" class="btn primary new-btn" :aria-label="createLabel" aria-keyshortcuts="n" :data-tip="`${createLabel} · n`" @click="emit('create')"><AppIcon name="plus" :size="14" /><span class="new-label">New</span></button>
-    <button type="button" class="btn filters-btn" :class="{ on: filterCount }" aria-label="Filters" aria-haspopup="dialog" data-tip="Filters and display options" @click="emit('openSheet')">
+    <!-- Collapsed header: Display sits beside New. The other densities keep its place free, as an
+         inert twin of the same size, so folding or unfolding the header moves nothing in this row. -->
+    <div v-if="settingsTarget && !attention" class="collapsed-display" :class="{ reserved: !collapsedHeader }" :inert="!collapsedHeader" :aria-hidden="collapsedHeader ? undefined : 'true'">
+      <button ref="collapsedDisplayButton" type="button" class="btn sm display-btn" :class="{ on: displayOn }" aria-haspopup="dialog" :aria-expanded="!!displayAnchor && collapsedHeader" :aria-label="`Display: ${displayLabel}`" data-tip="Sections, saved views, Hide closed, grouping, sort, row height and columns" :tabindex="collapsedHeader ? undefined : -1" @click="displayAnchor = displayAnchor ? null : ($event.currentTarget as HTMLElement)">
+        <AppIcon name="layers" :size="13" /><span class="display-label"><span class="display-current">{{ displayText }}</span><span class="display-sizer" aria-hidden="true"><span v-for="word in displayWords" :key="word">{{ word }}</span></span></span><AppIcon name="chevron" :size="12" class="facet-chevron" />
+      </button>
+    </div>
+    <button v-if="!graph && !attention" type="button" class="btn primary new-btn" :aria-label="createLabel" aria-keyshortcuts="n" :data-tip="`${createLabel} · n`" @click="emit('create')"><AppIcon name="plus" :size="14" /><span class="new-label">New</span></button>
+    <button v-if="!attention" ref="filtersButton" type="button" class="btn filters-btn" :class="{ on: filterCount }" aria-label="Filters" aria-haspopup="dialog" data-tip="Filters and display options" @click="closeDisplay(false); emit('openSheet')">
       <AppIcon name="sliders" :size="14" /><span class="filters-label">Filters</span><span v-if="filterCount" class="facet-count mono">{{ filterCount }}</span>
     </button>
 
     </template>
     <!-- The Knowledge tab teleports its own controls here (KnowledgeTab.vue). -->
-    <div v-else-if="view === 'knowledge'" id="knowledge-controls" class="knowledge-controls" />
-    <span v-else class="spacer" />
-    <slot name="journey" />
+    <div v-else id="knowledge-controls" class="knowledge-controls" />
 
+    <FloatingPanel v-if="attention && attentionMenu" :anchor="attentionMenu.anchor" :label="`${attentionFacets.find(facet => facet.field === attentionMenu!.field)!.label} filter`" @close="closeAttention">
+      <div class="attention-menu" role="menu" :aria-label="`${attentionFacets.find(facet => facet.field === attentionMenu!.field)!.label} filter`" @keydown="attentionMenuKeys">
+        <button v-for="option in attentionOptions" :key="option.id" type="button" role="menuitemradio" :aria-checked="attention.filters[attentionMenu.field] === option.id" :data-autofocus="attention.filters[attentionMenu.field] === option.id ? '' : undefined" @click="emit('attentionFilter', attentionMenu!.field, option.id); closeAttention(true)"><span v-clip-tip>{{ option.label }}</span><AppIcon v-if="attention.filters[attentionMenu.field] === option.id" name="check" :size="13" /></button>
+      </div>
+      <p v-if="attention.truncated" class="attention-note">{{ attentionWord('Only the first 100 facet choices are shown. Search narrows the ticket list.', 'Nur die ersten 100 Filterwerte werden gezeigt. Die Suche grenzt die Ticket-Liste ein.') }}</p>
+    </FloatingPanel>
     <FacetMenu
-      v-if="open" :anchor="open.anchor" :dimension="open.dimension" :title="title(open.dimension)" :options="options(open.dimension)" :selected="filters[open.dimension]" :loading="facetLoading"
+      v-if="open" :key="open.dimension" :anchor="open.anchor" :dimension="open.dimension" :title="title(open.dimension)" :options="options(open.dimension)" :selected="filters[open.dimension]" :loading="facetLoading"
       @toggle="value => emit('toggle', open!.dimension, value)" @exclude="value => emit('exclude', open!.dimension, value)" @clear="emit('clear', open!.dimension)" @close="closeMenu"
     />
     <FilterMenu v-if="menuAnchor" :anchor="menuAnchor" :filters="filters" :dimensions="graph ? TICKET_GRAPH_FILTERS : undefined" :show-date="!graph" @choose="chooseFilter" @close="restore => { const a = menuAnchor; menuAnchor = null; if (restore) a?.focus() }" />
@@ -269,16 +354,33 @@ defineExpose({ focusSearch, openFilterMenu, input })
     <FloatingPanel v-if="hideAnchor" :anchor="hideAnchor" :width="288" align="end" label="What Hide hides" cycle @close="closeHide">
       <HideOptions :states="filters.hideStates" :summary="summary" :show-closed="filters.showClosed" @change="states => emit('hideStates', states)" />
     </FloatingPanel>
-    <FloatingPanel v-if="displayAnchor" :anchor="displayAnchor" :width="320" :tallest="760" align="end" label="Display options" @close="closeDisplay">
-      <DisplayPanel
-        :filters="filters" :view="view === 'outline' ? 'outline' : 'list'" :density="density" :columns="columns" :grouped="view === 'list' && filters.group !== 'none'"
-        :header-graph="headerGraph" :project-header="projectHeader"
-        @group="value => emit('group', value)" @sort="keys => emit('sort', keys)" @density="value => emit('density', value)"
-        @columns="(order, visible) => emit('columns', order, visible)" @columns-reset="emit('columnsReset')"
-        @header-graph="value => emit('headerGraph', value)"
-        @expand-all="emit('expandAll'); closeDisplay(false)" @collapse-all="emit('collapseAll'); closeDisplay(false)"
-        @expand-groups="emit('expandGroups')" @collapse-groups="emit('collapseGroups')"
-      />
+    <FloatingPanel
+      v-if="displayAnchor" :anchor="displayAnchor" :width="collapsedMenu ? menuPanelWidth(menuColumns) : 320" :tallest="collapsedMenu || displaySheet ? 4000 : 760" align="end" label="Display options"
+      :cycle="collapsedMenu || displaySheet" :sheet="displaySheet" @close="closeDisplay"
+    >
+      <DisplayMenu :plain="!collapsedMenu" :anchor="displayAnchor" :sheet="displaySheet" @columns="count => menuColumns = count" @done="closeDisplay(true)">
+        <template #nav><slot name="header-nav" :anchor="displayAnchor!" :close="closeDisplay" /></template>
+        <template #hide>
+          <div class="menu-hide">
+            <label class="switch menu-switch" :data-tip="hideNames">
+              <input type="checkbox" :aria-label="hideName === 'Hide' ? `Hide ${hideNames}` : hideName" :checked="!filters.showClosed" @change="emit('showClosed', !($event.target as HTMLInputElement).checked)" />
+              <HideLabel :states="filters.hideStates" />
+            </label>
+            <button type="button" class="menu-gear" aria-label="Choose what Hide hides" data-tip="Choose what Hide hides" aria-haspopup="dialog" @click="openHideFromMenu"><AppIcon name="gear" :size="14" /></button>
+          </div>
+        </template>
+        <DisplayPanel
+          v-if="!graph"
+          :attention-group="attention?.group" :locale="attention?.locale" @attention-group="value => emit('attentionGroup', value)"
+          :filters="filters" :view="view === 'outline' ? 'outline' : 'list'" :density="density" :columns="columns" :grouped="view === 'list' && filters.group !== 'none'"
+          :project-header="projectHeader" :sheet="displaySheet" :stable-sort="collapsedMenu"
+          @group="value => emit('group', value)" @sort="keys => emit('sort', keys)" @density="value => emit('density', value)"
+          @columns="(order, visible) => emit('columns', order, visible)" @columns-reset="emit('columnsReset')"
+          @expand-all="emit('expandAll'); closeDisplay(detachedDisplay)" @collapse-all="emit('collapseAll'); closeDisplay(detachedDisplay)"
+          @expand-groups="emit('expandGroups')" @collapse-groups="emit('collapseGroups')" @group-order="desc => emit('groupOrder', desc)"
+        />
+        <HeaderRoomyChoice v-else />
+      </DisplayMenu>
     </FloatingPanel>
   </div>
 </template>
@@ -301,7 +403,7 @@ defineExpose({ focusSearch, openFilterMenu, input })
 /* Chevron and count badge share one slot so buttons never change width. */
 .facet-end { display: inline-grid; place-items: center; width: 18px; }
 .facet-chevron { color: var(--ink-3); }
-.facet-count { display: inline-grid; place-items: center; min-width: 17px; height: 17px; padding: 0 5px; border-radius: 999px; background: linear-gradient(180deg, #1a8683, #0e6f6c); color: #fff; font-size: 10.5px; font-weight: 700; }
+.facet-count { display: inline-grid; place-items: center; min-width: 17px; height: 17px; padding: 0 5px; border-radius: 999px; background: linear-gradient(180deg, var(--primary-hi), var(--primary)); color: var(--primary-on); font-size: 10.5px; font-weight: 700; }
 .clear-all { padding: 0 8px; }
 .spacer { flex: 1; }
 /* The count keeps its width while numbers change, so the controls beside it never shift. */
@@ -320,7 +422,7 @@ defineExpose({ focusSearch, openFilterMenu, input })
    the tip. Project sections and Knowledge are not this switch. Phones keep the
    full names on their own row. */
 @media (min-width: 601px) {
-  @container toolbar (max-width: 1500px) { .more-label { display: none; } .more-btn { padding: 0 9px; } .list-search { width: 208px; } }
+  @container toolbar (max-width: 1500px) { .list-search { width: 208px; } }
   @container toolbar (max-width: 1420px) {
     .toolbar:not(.knowledge) :deep(.view-switch button:not([aria-selected="true"]) .tab-label) { display: none; }
     .toolbar:not(.knowledge) :deep(.view-switch button:not([aria-selected="true"])) { padding: 0 8px; }
@@ -330,14 +432,11 @@ defineExpose({ focusSearch, openFilterMenu, input })
     .toolbar:not(.knowledge) :deep(.view-switch button) { padding: 0 8px; }
   }
 }
-@container toolbar (max-width: 1300px) { .more-label { display: none; } .more-btn { padding: 0 9px; } .list-search { width: 190px; } }
-@container toolbar (max-width: 1000px) { .list-search { width: 190px; } .count { display: none; } .new-btn { width: 32px; padding: 0; } .new-label { display: none; } .facet-btn[data-dim="type"]:not(.on) { display: none; } .display-label { display: none; } .display-btn { padding: 0 9px; } }
-@container toolbar (max-width: 920px) { .list-search { width: 150px; } .facet-btn { padding: 0 11px; } .facet-btn:not(.on) .facet-end { display: none; } }
-@container toolbar (max-width: 820px) { .list-search { width: 112px; } .list-search .field { padding-right: 10px; } .facet-btn { padding: 0 10px; } .facet-btn:not(.on) .facet-end { display: none; } }
-@container toolbar (max-width: 760px) { .facet-btn[data-dim="assignee"]:not(.on) { display: none; } }
-/* Docked beside a wide ticket panel the list can be phone-narrow: unused quick
-   filters wait in the Filter menu, so the controls take two lines, not three. */
-@container toolbar (max-width: 460px) { .facet-btn:not(.on):not(.more-btn) { display: none; } }
+@container toolbar (max-width: 1300px) { .list-search { width: 190px; } }
+@container toolbar (max-width: 1000px) { .list-search { width: 190px; } .count { display: none; } .new-btn { width: 32px; padding: 0; } .new-label { display: none; } .display-label { display: none; } .display-btn { padding: 0 9px; } }
+@container toolbar (max-width: 920px) { .list-search { width: 150px; } .facet-btn { padding: 0 11px; } }
+/* Narrow docked lists: Filter keeps its icon and its place; the word goes. */
+@container toolbar (max-width: 820px) { .list-search { width: 112px; } .list-search .field { padding-right: 10px; } .facet-btn { padding: 0 10px; } .more-label { display: none; } .more-btn { padding: 0 9px; } }
 /* Narrowest docked width: a labelled pill replaces the switch and its longer label. */
 .closed-pill { display: none; gap: 6px; padding: 0 11px 0 9px; color: var(--ink-2); }
 .closed-pill.on { color: var(--teal-ink); }
@@ -363,7 +462,11 @@ defineExpose({ focusSearch, openFilterMenu, input })
 .toolbar:not(.knowledge) { flex-wrap: nowrap; min-height: 44px; padding: 6px 0; }
 .view-switch { order: 0; }
 .list-search { order: 1; flex: 0 1 240px; min-width: 150px; }
-.facets { order: 2; min-width: 0; flex: 0 1 auto; overflow-x: auto; scrollbar-width: thin; padding: 3px; }
+/* Filter never scrolls away: only the applied pills scroll when they overflow.
+   What precedes Filter keeps its width, so pills coming and going never move it. */
+@media (min-width: 901px) { .toolbar:not(.attention) :is(.view-switch, .list-search) { flex: none; } }
+.facets { order: 2; align-items: center; min-width: 0; flex: 0 1 auto; padding: 3px; }
+.pills { display: flex; gap: 6px; min-width: 0; flex: 0 1 auto; overflow-x: auto; scrollbar-width: thin; padding: 3px; margin: -3px 0; }
 .facet-control { display: inline-flex; align-items: center; flex: none; height: 28px; border-radius: 8px; }
 .facet-control.on { background: var(--chip-teal-bg); box-shadow: inset 0 0 0 1px var(--chip-teal-line); }
 .facet-control.on .facet-btn { background: transparent; border-color: transparent; box-shadow: none; border-radius: 8px 0 0 8px; padding-right: 4px; }
@@ -405,8 +508,62 @@ defineExpose({ focusSearch, openFilterMenu, input })
   .new-btn { order: 3; }
 }
 @media (pointer: coarse) and (min-width: 601px) {
-  .facet-control, .facet-btn, .facet-x, .clear-all, .new-btn { min-height: 44px; }
+  .facet-control, .facet-btn, .facet-x, .clear-all, .new-btn, .collapsed-display .display-btn { min-height: 44px; }
   .facet-x { min-width: 44px; }
 }
 
+/* Collapsed project header (AEON-1028): Display sits beside New and carries what the header hid.
+   In the other densities the same button waits there inert and unseen, so folding or unfolding
+   the header moves nothing in this row. It stays on every window width, where the Display button
+   of the header's own bar is hidden below 900px. */
+.collapsed-display { order: 4; display: flex; align-items: center; flex: none; }
+.collapsed-display.reserved { visibility: hidden; pointer-events: none; }
+.collapsed-display .display-btn { display: inline-flex; }
+/* As wide as the longest grouping label, so "Display" and "By assignee" share one footprint. */
+.collapsed-display .display-label { display: inline-grid; }
+.collapsed-display .display-current, .collapsed-display .display-sizer { grid-area: 1 / 1; }
+.collapsed-display .display-current { white-space: nowrap; }
+.collapsed-display .display-sizer { visibility: hidden; display: grid; }
+.collapsed-display .display-sizer > span { grid-area: 1 / 1; white-space: nowrap; }
+@container toolbar (max-width: 1000px) { .collapsed-display .display-label { display: none; } }
+/* On tablets Filters shares the row: Display still sits right against New. */
+@media (min-width: 601px) and (max-width: 900px) { .collapsed-display { order: 5; } .new-btn { order: 6; } }
+@media (max-width: 600px) {
+  .collapsed-display { order: 3; }
+  .collapsed-display .display-btn { width: 44px; height: 44px; padding: 0; justify-content: center; }
+  .collapsed-display .display-label, .collapsed-display .facet-chevron { display: none; }
+}
+/* The collapsed menu's Hide closed row: the switch and the gear to Hide's choices. */
+.menu-hide { display: flex; align-items: center; justify-content: space-between; gap: 8px; min-height: 34px; }
+.menu-switch { min-height: 34px; font-size: 13px; }
+.menu-gear { display: grid; place-items: center; flex: none; width: 34px; height: 34px; padding: 0; border: 0; border-radius: 8px; background: transparent; color: var(--ink-3); }
+.menu-gear:hover { background: var(--row-hover); color: var(--ink); }
+.menu-gear:focus-visible { box-shadow: var(--focus-ring); }
+@media (pointer: coarse), (max-width: 900px) { .menu-hide, .menu-switch { min-height: 44px; } .menu-gear { width: 44px; height: 44px; } }
+
+/* The attention host keeps its three facets and Display on every screen. */
+.toolbar.attention { flex-wrap: wrap; gap: 8px 10px; padding: 9px 0; }
+.attention .count-live { order: 0; }
+.attention .count-live .count { display: inline-block; min-width: 16ch; text-align: left; }
+.attention .phone-break { display: none; }
+.attention .list-search { flex: 0 1 240px; }
+.attention .facets { display: flex; overflow: visible; flex: none; padding: 0; }
+.attention .spacer { display: block; }
+.attention .view-settings { display: flex; order: 4; }
+.attention .display-btn { display: inline-flex; min-inline-size: 11em; }
+.attention .display-label { display: inline; }
+.attention .facet-button { min-inline-size: 7em; }
+.attention-menu { display: grid; }
+.attention-menu button { display: flex; align-items: center; justify-content: space-between; gap: 12px; min-height: 34px; padding: 6px 10px; border: 0; border-radius: 6px; background: transparent; color: var(--ink); text-align: left; font-size: 13px; }
+.attention-menu button:hover, .attention-menu button[aria-checked="true"] { background: var(--row-selected); }
+.attention-menu button:focus-visible { box-shadow: var(--focus-ring); }
+.attention-note { padding: 8px 10px; color: var(--ink-3); font-size: 12px; }
+@media (pointer: coarse), (max-width: 720px) { .attention .btn.sm, .attention-menu button { min-height: 44px; } }
+@media (max-width: 720px) {
+  .attention .count-live { flex-basis: 100%; }
+  .attention .list-search { flex: 1 1 100%; }
+  .attention .list-search .field { height: 44px; font-size: 16px; }
+  .attention .facets { flex: 1 1 100%; flex-wrap: wrap; }
+  .attention .spacer { display: none; }
+}
 </style>

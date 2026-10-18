@@ -475,3 +475,51 @@ func TestWorkStatusNodeLimitRecoveryAndTombstones(t *testing.T) {
 		}
 	})
 }
+
+func TestWorkStatusReadSnapshotWithDerivationEnabled(t *testing.T) {
+	f := newStatusFixture(t)
+	f.node("WK-1", "PRJ-1", "open")
+	f.node("WK-2", "WK-1", "open")
+	f.enable()
+	f.change("WK-2", "in_progress")
+	if err := db.InTenantReadSnapshot(dbtest.Seed(t.Context()), f.d.App, f.tid, func(tx pgx.Tx) error {
+		var state, access, isolation string
+		if err := tx.QueryRow(t.Context(), `SELECT state,current_setting('transaction_read_only'),current_setting('transaction_isolation') FROM nodes WHERE key='WK-1'`).Scan(&state, &access, &isolation); err != nil {
+			return err
+		}
+		if state != "in_progress" || access != "on" || isolation != "repeatable read" {
+			t.Fatalf("snapshot lost derived state or read contract: state=%s access=%s isolation=%s", state, access, isolation)
+		}
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestWorkStatusGuardedReadSnapshotSkipsDerivation(t *testing.T) {
+	f := newStatusFixture(t)
+	f.node("WK-1", "PRJ-1", "open")
+	f.node("WK-2", "WK-1", "open")
+	f.enable()
+	f.change("WK-2", "in_progress")
+	guarded := false
+	ctx := db.WithTenantGuard(dbtest.Seed(t.Context()), func(ctx context.Context, tx pgx.Tx, tid string) error {
+		if _, err := tx.Exec(ctx, `SELECT id FROM tenants WHERE id=$1 FOR SHARE`, tid); err != nil {
+			return err
+		}
+		guarded = true
+		return nil
+	})
+	if err := db.InTenantReadSnapshot(ctx, f.d.App, f.tid, func(tx pgx.Tx) error {
+		var state, access, isolation, entered string
+		if err := tx.QueryRow(ctx, `SELECT state,current_setting('transaction_read_only'),current_setting('transaction_isolation'),coalesce(current_setting('aeon.work_status_entered',true),'') FROM nodes WHERE key='WK-1'`).Scan(&state, &access, &isolation, &entered); err != nil {
+			return err
+		}
+		if !guarded || state != "in_progress" || access != "off" || isolation != "repeatable read" || entered == f.tid {
+			t.Fatalf("guarded snapshot lost its fence or entered derivation: guarded=%v state=%s access=%s isolation=%s entered=%s", guarded, state, access, isolation, entered)
+		}
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+}

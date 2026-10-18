@@ -3,13 +3,14 @@
 package workorders
 
 import (
-	"bytes"
+	"context"
 	"crypto/sha256"
 	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"io"
+	"net"
 	"net/http"
 	"strconv"
 	"strings"
@@ -24,6 +25,7 @@ import (
 	"github.com/inspr-at/paimos/internal/db"
 	"github.com/inspr-at/paimos/internal/httpapi"
 	"github.com/inspr-at/paimos/internal/tenant"
+	"github.com/inspr-at/paimos/internal/workerlease"
 )
 
 // Error is a safe HTTP failure shared by the work-order and run modules.
@@ -33,6 +35,7 @@ type Error struct {
 }
 
 func (e *Error) Error() string              { return e.Message }
+func (e *Error) HTTPStatus() int            { return e.Status }
 func Fail(status int, message string) error { return &Error{status, message} }
 
 type orderPage struct {
@@ -67,6 +70,12 @@ func decodeCursor(tenantID, raw string) (string, error) {
 // The server must install auth.Middleware; agent scopes are rechecked against
 // the exact bearer key because R1 Principal does not carry key scopes.
 func Endpoint(pool *pgxpool.Pool, scope string, agentOnly bool, status int, fn func(*http.Request, pgx.Tx, tenant.Principal) (any, error)) http.HandlerFunc {
+	return EndpointPrepared(pool, scope, agentOnly, status, nil, fn)
+}
+
+// EndpointPrepared decodes/prepares before acquiring the final transaction's
+// fences. The request shares one deadline across both phases.
+func EndpointPrepared(pool *pgxpool.Pool, scope string, agentOnly bool, status int, prepare func(*http.Request, tenant.Principal) (*http.Request, error), fn func(*http.Request, pgx.Tx, tenant.Principal) (any, error)) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Cache-Control", "no-store")
 		p, ok := tenant.PrincipalFrom(r.Context())
@@ -84,24 +93,57 @@ func Endpoint(pool *pgxpool.Pool, scope string, agentOnly bool, status int, fn f
 				return
 			}
 		}
-		// Finish network reads before InTenant can acquire admission, tree or
-		// tenant locks. Handlers still decode and authorize in the transaction,
-		// but their body is now bounded memory, never a stalled client socket.
-		if err := BufferBody(w, r); err != nil {
+		ctx, cancel := context.WithTimeout(r.Context(), 30*time.Second)
+		defer cancel()
+		r = r.WithContext(ctx)
+		// Ordinary handlers decode inside fn; replay bounded memory there,
+		// never transport input while holding tenant/tree/resource fences.
+		if err := BufferEndpointBody(w, r); err != nil {
 			WriteError(w, err)
 			return
 		}
+		if prepare != nil {
+			var err error
+			r, err = prepare(r, p)
+			if err != nil {
+				WriteError(w, err)
+				return
+			}
+		}
 		var result any
 		err := db.InTenant(r.Context(), pool, p.TenantID, func(tx pgx.Tx) error {
+			if _, err := tx.Exec(r.Context(), `SELECT set_config('lock_timeout','5s',true),set_config('statement_timeout','5s',true)`); err != nil {
+				return err
+			}
+			if err := db.LockTenant(r.Context(), tx, p.TenantID); err != nil {
+				return err
+			}
 			if workBindingMutation(r) {
 				if err := db.LockWorkTreeTx(r.Context(), tx); err != nil {
 					return err
 				}
 			}
-			if err := authorizeKey(r, tx, p, scope); err != nil {
+			if prepare != nil {
+				// Decoded composite entries sample exact-key expiry only after
+				// their shared tree fence, before target/order/run/account work.
+				if err := db.LockTree(r.Context(), tx, p.TenantID); err != nil {
+					return err
+				}
+			}
+			current, err := CurrentKeyPrincipal(r, tx, p, scope)
+			if err != nil {
 				return err
 			}
-			var err error
+			if prepare != nil {
+				p = current
+				if err := RefreshPrincipal(r.Context(), tx, p); err != nil {
+					return err
+				}
+			}
+			// Ordinary endpoints retain their authenticated caller's narrowed
+			// principal and visibility until their own final authorization check.
+			// Replacing it with the bearer row can widen secondary permissions or
+			// hide the target before that check reports a revoked grant.
 			result, err = fn(r, tx, p)
 			return err
 		})
@@ -111,7 +153,7 @@ func Endpoint(pool *pgxpool.Pool, scope string, agentOnly bool, status int, fn f
 		}
 		// An explicit error response returned as the result is emitted after
 		// commit, for mutations that release an obsolete hold before a conflict.
-		if failure, ok := result.(*Error); ok {
+		if failure, ok := result.(error); ok {
 			WriteError(w, failure)
 			return
 		}
@@ -134,29 +176,16 @@ func Endpoint(pool *pgxpool.Pool, scope string, agentOnly bool, status int, fn f
 // transaction admission. Failed reads retain the deadline for net/http's drain;
 // successful reads replace the body with memory and clear the deadline.
 func BufferBody(w http.ResponseWriter, r *http.Request) error {
-	if r.Body == nil || r.Body == http.NoBody {
-		r.Body = http.NoBody
-		return nil
-	}
-	controller := http.NewResponseController(w)
-	// net/http supports this through the production middleware's Unwrap.
-	// In-memory response recorders used by handler tests have no connection.
-	if err := controller.SetReadDeadline(time.Now().Add(10 * time.Second)); err != nil && !errors.Is(err, http.ErrNotSupported) {
-		return err
-	}
-	body, err := io.ReadAll(http.MaxBytesReader(w, r.Body, 1<<20))
-	if err != nil {
-		// Keep the deadline on failed reads so net/http cannot drain a stalled
-		// body indefinitely after the handler returns.
-		var timeout interface{ Timeout() bool }
-		if errors.As(err, &timeout) && timeout.Timeout() {
+	if err := httpapi.BufferRequestBody(w, r, 1<<20); err != nil {
+		var timeout net.Error
+		if errors.Is(err, context.DeadlineExceeded) || errors.Is(err, context.Canceled) || errors.As(err, &timeout) && timeout.Timeout() {
 			return Fail(http.StatusRequestTimeout, "request body read timed out")
 		}
+		// Oversized lifecycle and probe bodies stay 400 invalid JSON. The
+		// transport suggestion must not relabel that classification as 413.
+		httpapi.RetainClassifiedBodyStatus(r)
 		return Fail(http.StatusBadRequest, "invalid JSON")
 	}
-	_ = r.Body.Close()
-	_ = controller.SetReadDeadline(time.Time{})
-	r.Body = io.NopCloser(bytes.NewReader(body))
 	return nil
 }
 
@@ -178,35 +207,98 @@ func workBindingMutation(r *http.Request) bool {
 	return false
 }
 
-func authorizeKey(r *http.Request, tx pgx.Tx, p tenant.Principal, scope string) error {
+// BufferEndpointBody finishes network reads within the 30-second endpoint budget
+// before preparation or transaction admission, preserving earlier caller deadlines.
+func BufferEndpointBody(w http.ResponseWriter, r *http.Request) error {
+	if err := httpapi.BufferRequestBodyTimeout(w, r, 1<<20, 30*time.Second); err != nil {
+		var tooLarge *http.MaxBytesError
+		if errors.As(err, &tooLarge) {
+			return Fail(http.StatusRequestEntityTooLarge, "request body too large")
+		}
+		var timeout net.Error
+		if r.Context().Err() != nil || errors.Is(err, context.DeadlineExceeded) || errors.As(err, &timeout) && timeout.Timeout() {
+			return Fail(http.StatusRequestTimeout, "request body read timed out")
+		}
+		return Fail(http.StatusBadRequest, "could not read request body")
+	}
+	return nil
+}
+
+// CurrentKeyPrincipal repeats the exact initiating key ceiling under the caller's
+// tenant fence, including current scopes and creator. It never logs key material.
+func CurrentKeyPrincipal(r *http.Request, tx pgx.Tx, p tenant.Principal, scope string) (tenant.Principal, error) {
 	if p.Kind == tenant.Person {
-		return nil
+		return p, nil
 	}
-	scheme, token, ok := strings.Cut(strings.TrimSpace(r.Header.Get("Authorization")), " ")
-	if !ok || !strings.EqualFold(scheme, "Bearer") {
-		return Fail(403, "scoped agent key required")
+	var now time.Time
+	if err := tx.QueryRow(r.Context(), `SELECT clock_timestamp()`).Scan(&now); err != nil {
+		return p, err
 	}
-	rest, ok := strings.CutPrefix(strings.TrimSpace(token), "aeon_")
-	if !ok {
-		return Fail(403, "scoped agent key required")
+	return CurrentKeyPrincipalAt(r, tx, p, scope, now)
+}
+
+// CurrentKeyPrincipalAt accepts a post-fence database clock sample. Preparation
+// may inject that sample for deterministic expiry-boundary tests.
+func CurrentKeyPrincipalAt(r *http.Request, tx pgx.Tx, p tenant.Principal, scope string, now time.Time) (tenant.Principal, error) {
+	if p.Kind == tenant.Person {
+		return p, nil
+	}
+	token, malformed := workerlease.AgentToken(strings.TrimSpace(r.Header.Get("Authorization")))
+	if malformed || token == "" {
+		return p, Fail(403, "scoped agent key required")
+	}
+	rest, ok := strings.CutPrefix(token, "aeon_")
+	if !ok || len(rest) > 512 {
+		return p, Fail(403, "scoped agent key required")
 	}
 	prefix, secret, ok := strings.Cut(rest, "_")
 	if !ok {
-		return Fail(403, "scoped agent key required")
+		return p, Fail(403, "scoped agent key required")
 	}
 	sum := sha256.Sum256([]byte(secret))
-	var allowed bool
-	err := tx.QueryRow(r.Context(), `SELECT EXISTS (SELECT 1 FROM agent_keys
-	 WHERE tenant_id=$1 AND principal_id=$2 AND prefix=$3 AND hash=$4
-	 AND revoked_at IS NULL AND (expires_at IS NULL OR expires_at>clock_timestamp())
-	 AND $5=ANY(scopes))`, p.TenantID, p.ID, prefix, hex.EncodeToString(sum[:]), scope).Scan(&allowed)
+	var creator *string
+	err := tx.QueryRow(r.Context(), `SELECT scopes,created_by_principal_id::text,coalesce(full_access,false) FROM agent_keys
+ WHERE tenant_id=$1 AND principal_id=$2 AND prefix=$3 AND hash=$4
+ AND revoked_at IS NULL AND (expires_at IS NULL OR expires_at>$5)`, p.TenantID, p.ID, prefix, hex.EncodeToString(sum[:]), now).Scan(&p.Scopes, &creator, &p.FullAccess)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return p, Fail(403, "key scope required: "+scope)
+	}
 	if err != nil {
-		return err
+		return p, err
+	}
+	p.Scopes = authz.ResolveKeyScopes(p.Scopes, p.FullAccess)
+	allowed := false
+	for _, s := range p.Scopes {
+		if s == scope || scope == "models.read" && strings.ReplaceAll(s, ":", ".") == scope {
+			allowed = true
+		}
+	}
+	// Historical coordinator keys have the established read-only ceiling.
+	// Re-evaluate it from this exact key's current stored scopes; RequireTx
+	// still requires current principal and creator bindings. Other operations
+	// retain their original exact scope requirement.
+	if scope == "models.read" && authz.CoordinatorCeiling(p.Scopes, scope) {
+		allowed = true
 	}
 	if !allowed {
-		return Fail(403, "key scope required: "+scope)
+		return p, Fail(403, "key scope required: "+scope)
 	}
-	return nil
+	p.KeyCreatorID = ""
+	if creator != nil {
+		p.KeyCreatorID = *creator
+	}
+	return p, nil
+}
+
+// RefreshPrincipal re-derives RLS visibility after the access fence. Cached
+// middleware placement/creator authority cannot select the preparation scope.
+func RefreshPrincipal(ctx context.Context, tx pgx.Tx, p tenant.Principal) error {
+	var creator any
+	if UUID(p.KeyCreatorID) {
+		creator = p.KeyCreatorID
+	}
+	_, err := tx.Exec(ctx, `SELECT aeon_enter_principal($1::uuid,$2::uuid,$3::uuid)`, p.TenantID, p.ID, creator)
+	return err
 }
 
 func WriteError(w http.ResponseWriter, err error) {
@@ -218,7 +310,15 @@ func WriteError(w http.ResponseWriter, err error) {
 		ErrorCode() string
 	}
 	if errors.As(err, &coded) {
-		httpapi.WriteJSON(w, coded.HTTPStatus(), map[string]string{"error": coded.Error(), "code": coded.ErrorCode()})
+		body := map[string]any{"error": coded.Error(), "code": coded.ErrorCode()}
+		if details, ok := coded.(interface{ ErrorDetails() map[string]any }); ok {
+			for key, value := range details.ErrorDetails() {
+				if key != "error" && key != "code" {
+					body[key] = value
+				}
+			}
+		}
+		httpapi.WriteJSON(w, coded.HTTPStatus(), body)
 		return
 	}
 	if errors.Is(err, authz.ErrForbidden) {
@@ -254,7 +354,7 @@ func WriteError(w http.ResponseWriter, err error) {
 
 // Decode accepts one bounded JSON object with no unknown fields.
 func Decode(r *http.Request, dst any) error {
-	dec := json.NewDecoder(r.Body)
+	dec := httpapi.NewRequestDecoder(nil, r, 1<<20)
 	dec.DisallowUnknownFields()
 	if err := dec.Decode(dst); err != nil {
 		return Fail(400, "invalid JSON")

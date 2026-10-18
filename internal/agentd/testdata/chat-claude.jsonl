@@ -1,0 +1,8 @@
+{"kind":"turn_started"}
+{"kind":"chat","update":{"sessionUpdate":"agent_message_chunk","content":{"type":"text","text":"Hello "}}}
+{"kind":"chat","update":{"sessionUpdate":"agent_message_chunk","content":{"type":"text","text":"world"}}}
+{"kind":"chat","update":{"sessionUpdate":"tool_call","toolCallId":"call-1","title":"Bash","status":"in_progress"}}
+{"kind":"chat","update":{"sessionUpdate":"state","state":"requires_action"}}
+{"kind":"chat","update":{"sessionUpdate":"tool_call","toolCallId":"call-1","title":"Bash","status":"completed"}}
+{"kind":"turn_completed"}
+{"kind":"future","payload":"PRIVATE_SENTINEL"}

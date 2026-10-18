@@ -1,0 +1,11 @@
+{
+  "schema": "aeon.migration-policy-exceptions.v1",
+  "exceptions": [
+    {
+      "file": "1232_work_lifecycle_actions.sql",
+      "sha256": "a782b1ce60511cf07ecf6c0bc2d996db88d30ca770075b444f05e22f77c75d09",
+      "ticket": "AEON-652",
+      "reason": "AEON-648 graceful handover installs bounded durable intents and replaces the work-leaf admission helper to refuse pending handovers. Existing bindings, historical sessions and FORCE tenant/project RLS remain intact; no process signal authority is granted. Exact unpublished bytes require coordinator consolidated review before merge/release under stopped-writer maintenance and instance-specific verified backup/restore; this worker grants no acceptance or deployment authority."
+    }
+  ]
+}

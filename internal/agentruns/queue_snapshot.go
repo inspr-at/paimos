@@ -2,16 +2,19 @@
 package agentruns
 
 import (
+	"bytes"
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
+	"io"
 	"net/http"
 	"time"
 
 	"github.com/inspr-at/paimos/internal/authz"
 	"github.com/inspr-at/paimos/internal/events"
+	"github.com/inspr-at/paimos/internal/httpapi"
 	"github.com/inspr-at/paimos/internal/tenant"
 	"github.com/inspr-at/paimos/internal/workorders"
 	"github.com/inspr-at/paimos/internal/workqueue"
@@ -28,6 +31,7 @@ type snapshotNode struct {
 	Revision time.Time `json:"revision"`
 }
 type snapshotItem struct {
+	Reason   string         `json:"reason,omitempty"`
 	NodeID   string         `json:"node_id"`
 	Revision time.Time      `json:"revision"`
 	Outcome  string         `json:"outcome"`
@@ -267,27 +271,75 @@ func snapshotVisible(ctx context.Context, tx pgx.Tx, p tenant.Principal, s paren
 	out.Start = nil
 	out.Next = nil
 	out.Items = []snapshotItem{}
+	// Capture bounds the stored membership at snapshotLeaves. Re-read current
+	// visibility through RLS in one query; full ticket fields and blockers are
+	// unnecessary here and formerly cost one round trip for every leaf.
+	if len(s.Items) > snapshotLeaves {
+		return out, workorders.Fail(409, "snapshot exceeds item bound")
+	}
+	ids := make([]string, len(s.Items))
+	for i, item := range s.Items {
+		ids[i] = item.NodeID
+	}
+	rows, err := tx.Query(ctx, `SELECT id::text,project_id::text FROM nodes WHERE id=ANY($1::uuid[]) AND deleted_at IS NULL`, ids)
+	if err != nil {
+		return out, err
+	}
+	projects := make(map[string]*string, len(ids))
+	for rows.Next() {
+		var id string
+		var project *string
+		if err = rows.Scan(&id, &project); err != nil {
+			rows.Close()
+			return out, err
+		}
+		projects[id] = project
+	}
+	rows.Close()
+	if err = rows.Err(); err != nil {
+		return out, err
+	}
+	// These are read permissions for this projection only, scoped to the current
+	// project returned above. Mutation checks still run for every target inside
+	// queueSnapshotApply/queuePrepare under the tenant/tree/access fences.
+	type readScope struct {
+		project string
+		runs    bool
+	}
+	permissions := make(map[readScope]error)
+	permission := func(project *string, runs bool) error {
+		key := readScope{runs: runs}
+		if project != nil {
+			key.project = *project
+		}
+		if checked, ok := permissions[key]; ok {
+			return checked
+		}
+		var err error
+		if runs {
+			err = authz.RequireTx(ctx, tx, p, "run.read", authz.Scope{ProjectID: key.project})
+		} else {
+			err = queuePermission(ctx, tx, p, project, false)
+		}
+		permissions[key] = err
+		return err
+	}
 	for _, item := range s.Items {
-		t, err := queueLoadTicket(ctx, tx, item.NodeID, false)
-		if errors.Is(err, pgx.ErrNoRows) {
+		project, visible := projects[item.NodeID]
+		if !visible {
+			out.Partial = true
+			continue
+		}
+		err := permission(project, false)
+		if errors.Is(err, authz.ErrForbidden) {
 			out.Partial = true
 			continue
 		}
 		if err != nil {
 			return out, err
 		}
-		if err = queuePermission(ctx, tx, p, t.ProjectID, false); errors.Is(err, authz.ErrForbidden) {
-			out.Partial = true
-			continue
-		} else if err != nil {
-			return out, err
-		}
 		if item.RunID != "" && p.Kind != tenant.Agent {
-			project := ""
-			if t.ProjectID != nil {
-				project = *t.ProjectID
-			}
-			err = authz.RequireTx(ctx, tx, p, "run.read", authz.Scope{ProjectID: project})
+			err = permission(project, true)
 			if errors.Is(err, authz.ErrForbidden) {
 				item.RunID = ""
 			} else if err != nil {
@@ -362,7 +414,38 @@ func snapshotPathCurrent(ctx context.Context, tx pgx.Tx, path []snapshotNode) (b
 	return true, nil
 }
 
+// Empty and JSON null stay valid for callers that apply a snapshot with no body.
+func decodeOptionalObject(r *http.Request, dst any) error {
+	raw, err := httpapi.ReadRequestBody(nil, r, 1<<20, httpapi.DefaultBodyReadTimeout)
+	if err != nil {
+		return workorders.Fail(400, "invalid JSON")
+	}
+	raw = bytes.TrimSpace(raw)
+	if len(raw) == 0 || string(raw) == "null" {
+		return nil
+	}
+	dec := json.NewDecoder(bytes.NewReader(raw))
+	dec.DisallowUnknownFields()
+	if err = dec.Decode(dst); err != nil {
+		return workorders.Fail(400, "invalid JSON")
+	}
+	var extra any
+	if err = dec.Decode(&extra); !errors.Is(err, io.EOF) {
+		return workorders.Fail(400, "expected one JSON object")
+	}
+	return nil
+}
+
 func (m *module) queueSnapshotApply(r *http.Request, tx pgx.Tx, p tenant.Principal) (any, error) {
+	var in struct {
+		BuildDelivery *workorders.BuildCandidate `json:"build_delivery,omitempty"`
+	}
+	if err := decodeOptionalObject(r, &in); err != nil {
+		return nil, err
+	}
+	if err := workorders.ValidateBuildCandidate(in.BuildDelivery); err != nil {
+		return nil, err
+	}
 	ctx := r.Context()
 	s, err := loadQueueSnapshot(ctx, tx, p, r.PathValue("snapshotId"), true)
 	if err != nil {
@@ -435,6 +518,18 @@ func (m *module) queueSnapshotApply(r *http.Request, tx pgx.Tx, p tenant.Princip
 		if !errors.Is(loadErr, pgx.ErrNoRows) {
 			return nil, loadErr
 		}
+		if err = workqueue.RequireBuildAdmissionTx(ctx, tx, p, t.ID, "", nil, &workorders.BuildAdmission{Candidate: in.BuildDelivery}); err != nil {
+			var conflict *workqueue.BuildConflict
+			if errors.As(err, &conflict) {
+				item.Outcome, item.Reason = "active", "build in flight"
+				if conflict.Reason == "built_unmerged" {
+					item.Reason = "already built — ship it"
+				}
+				s.Partial = true
+				continue
+			}
+			return nil, err
+		}
 		// Shared membership replay above remains idempotent. Every other live
 		// binding (session, child-order run, or running order) uses the canonical
 		// predicate under the pairing/tree/access fences before creating work.
@@ -452,7 +547,7 @@ func (m *module) queueSnapshotApply(r *http.Request, tx pgx.Tx, p tenant.Princip
 			s.Partial = true
 			continue
 		}
-		prepared, err := m.queuePrepare(ctx, tx, p, t, queueTarget{})
+		prepared, err := m.queuePrepare(ctx, tx, p, t, queueTarget{}, in.BuildDelivery)
 		if err != nil {
 			var qe *queueError
 			if errors.As(err, &qe) && qe.Code == "queue_not_ready" {

@@ -274,7 +274,7 @@ onBeforeUnmount(() => {
   position: fixed; z-index: 80; inset: auto; top: 0; left: 0; margin: 0; border: 0; width: max-content; max-width: min(320px, calc(100vw - 16px)); max-height: calc(100dvh - 16px); padding: 5px 10px; border-radius: 8px; pointer-events: none; overflow-wrap: anywhere;
   overflow-y: auto; overscroll-behavior: contain;
   background: var(--tip-bg); color: var(--tip-ink); font-size: 12.5px; line-height: 1.4; white-space: pre-line;
-  box-shadow: 0 0 0 1px var(--glass-rim), 0 10px 24px -10px rgba(0, 0, 0, .5);
+  box-shadow: 0 0 0 1px var(--glass-rim), 0 10px 24px -10px color-mix(in srgb, var(--shadow-black) 50%, transparent);
 }
 /* Only overflowing text takes pointer input; ordinary tips leave controls
    underneath reachable. */

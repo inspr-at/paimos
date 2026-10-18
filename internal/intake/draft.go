@@ -335,27 +335,6 @@ func createAcceptedNode(ctx context.Context, tx pgx.Tx, p tenant.Principal, proj
 	if err != nil {
 		return "", 0, err
 	}
-	if stored.Kind == "requirement" {
-		kind := ""
-		if stored.RequirementKind != nil {
-			kind = *stored.RequirementKind
-		}
-		var revision int64
-		if err := tx.QueryRow(ctx, `
-			UPDATE journey_projects
-			SET requirements_revision = requirements_revision + 1, updated_at = now()
-			WHERE project_node_id = $1::uuid
-			RETURNING requirements_revision`, projectID).Scan(&revision); err != nil {
-			return "", 0, err
-		}
-		if _, err := tx.Exec(ctx, `
-			INSERT INTO journey_requirements (
-				tenant_id, requirement_node_id, project_node_id, kind, revision, status, origin_draft_id, creation_key)
-			VALUES ($1::uuid, $2::uuid, $3::uuid, $4, $5, 'draft', $6::uuid, $7)`,
-			p.TenantID, node.ID, projectID, kind, revision, stored.ID, stored.IdempotencyKey); err != nil {
-			return "", 0, err
-		}
-	}
 	return node.ID, ev.ID, nil
 }
 

@@ -20,6 +20,7 @@ import (
 )
 
 type pendingCode struct {
+	authTime      int64
 	challenge     string
 	nonce         string
 	subject       string
@@ -136,6 +137,9 @@ func (f *fakeOIDC) token(w http.ResponseWriter, r *http.Request) {
 		"nonce": nonce,
 		"email": pend.email,
 		"name":  pend.name,
+	}
+	if pend.authTime > 0 {
+		claims["auth_time"] = pend.authTime
 	}
 	if pend.emailVerified != nil {
 		claims["email_verified"] = *pend.emailVerified

@@ -67,7 +67,9 @@ test('default order is start time and survives live refreshes with shuffled hear
   await page.goto('/agents')
   const expected = [sid(3), sid(1), sid(2), sid(4)]
   await expect.poll(() => rowOrder(page)).toEqual(expected)
-  await expect(page.getByRole('columnheader', { name: 'State' })).toHaveAttribute('aria-sort', 'ascending')
+  // The state lives in each row's avatar, so it has no column (AEON-1211); Display names the order.
+  await expect(page.locator('.sessions .sort-tool')).toHaveAccessibleName('Display: sort sessions by State, ascending')
+  await expect(page.locator('.sessions [role="columnheader"][aria-sort]')).toHaveCount(0)
   await expect(page.getByRole('button', { name: 'Default order' })).toHaveCount(0)
   for (let i = 0; i < 2; i++) {
     await liveRefresh()
@@ -75,34 +77,45 @@ test('default order is start time and survives live refreshes with shuffled hear
   }
 })
 
-test('clicking Ticket orders rows by ticket, stays put on refresh, is remembered, and resets', async ({ page }) => {
+test('choosing Ticket in Display orders rows by ticket, stays put on refresh, is remembered, and resets', async ({ page }) => {
   const { liveRefresh } = await setup(page)
   await page.goto('/agents')
   await expect.poll(() => rowOrder(page)).toEqual([sid(3), sid(1), sid(2), sid(4)])
-  const ticket = page.getByRole('columnheader', { name: 'Ticket' })
-  await ticket.getByRole('button').click()
+  // The ticket key opens each name, so Ticket has no column (AEON-1211, design AEON-1196); Display orders by it.
+  await expect(page.getByRole('columnheader', { name: 'Ticket' })).toHaveCount(0)
+  const tool = page.locator('.sessions .sort-tool')
+  const bar = page.getByRole('group', { name: 'Sort sessions' })
+  await tool.click()
+  await bar.getByRole('combobox', { name: 'Sort' }).selectOption('ticket')
   const byTicket = [sid(2), sid(3), sid(1), sid(4)] // PHAROS-4, -12, -30, -100
   await expect.poll(() => rowOrder(page)).toEqual(byTicket)
-  await expect(ticket).toHaveAttribute('aria-sort', 'ascending')
-  await expect(page.getByRole('columnheader', { name: 'State' })).not.toHaveAttribute('aria-sort', /.+/)
+  await page.keyboard.press('Escape')
+  await expect(bar).toHaveCount(0)
+  await expect(tool).toHaveAccessibleName('Display: sort sessions by Ticket, ascending')
   await liveRefresh()
   await liveRefresh()
   expect(await rowOrder(page)).toEqual(byTicket)
 
-  // Keyboard: the header is a button; Enter reverses the order.
-  await ticket.getByRole('button').focus()
+  // Keyboard: Display's direction button reverses the order with Enter.
+  await tool.click()
+  await bar.getByRole('button', { name: /Order ascending/ }).focus()
   await page.keyboard.press('Enter')
   await expect.poll(() => rowOrder(page)).toEqual([...byTicket].reverse())
-  await expect(ticket).toHaveAttribute('aria-sort', 'descending')
+  await page.keyboard.press('Escape')
+  await expect(bar).toHaveCount(0)
+  await expect(tool).toHaveAccessibleName('Display: sort sessions by Ticket, descending')
 
   // Remembered for this viewer across a reload.
   expect(await page.evaluate(key => localStorage.getItem(key), storageKey)).toBe(JSON.stringify({ key: 'ticket', dir: 'desc' }))
   await page.reload()
   await expect.poll(() => rowOrder(page)).toEqual([...byTicket].reverse())
 
+  // Default order lives in Display, with the sort (AEON-1209); Display shows a chosen order in teal.
+  await expect(page.locator('.sessions .sort-tool')).toHaveClass(/\bon\b/)
+  await page.locator('.sessions .sort-tool').click()
   await page.getByRole('button', { name: 'Default order' }).click()
   await expect.poll(() => rowOrder(page)).toEqual([sid(3), sid(1), sid(2), sid(4)])
-  await expect(page.getByRole('columnheader', { name: 'State' })).toHaveAttribute('aria-sort', 'ascending')
+  await expect(page.locator('.sessions .sort-tool')).toHaveAccessibleName('Display: sort sessions by State, ascending')
   await expect(page.getByRole('button', { name: 'Default order' })).toHaveCount(0)
   expect(await page.evaluate(key => localStorage.getItem(key), storageKey)).toBeNull()
 })
@@ -120,7 +133,7 @@ test('sorting still works when storage refuses the choice', async ({ page }) => 
   await setup(page)
   await page.goto('/agents')
   await expect.poll(() => rowOrder(page)).toEqual([sid(3), sid(1), sid(2), sid(4)])
-  await page.getByRole('columnheader', { name: 'Running' }).getByRole('button').click()
+  await page.getByRole('columnheader', { name: 'Time' }).getByRole('button').click()
   await expect.poll(() => rowOrder(page)).toEqual([sid(4), sid(2), sid(1), sid(3)])
 })
 
@@ -129,7 +142,8 @@ test('the Heartbeat sort explains that fresh beats tie, for screen readers too',
   await page.goto('/agents')
   await expect.poll(() => rowOrder(page)).toHaveLength(4)
   const help = 'Beats under 3 minutes old count as equal; start time and id then decide their order.'
-  const beat = page.getByRole('columnheader', { name: 'Heartbeat' }).getByRole('button')
+  // The column is named Beat (AEON-1211, design AEON-1196); it orders by the heartbeat.
+  const beat = page.getByRole('columnheader', { name: 'Beat' }).getByRole('button')
   await expect(beat).toHaveAccessibleDescription(help)
   await expect(beat).toHaveAttribute('data-tip', new RegExp(help.slice(0, 30)))
 })
@@ -141,6 +155,10 @@ test('at 390 px the compact sort control orders by Ticket, reverses, and restore
   const start = [sid(3), sid(1), sid(2), sid(4)]
   await expect.poll(() => rowOrder(page)).toEqual(start)
   await expect(page.locator('.thead')).toBeHidden()
+  // The Sessions head's Display opens the same select and direction (AEON-784, AEON-1209).
+  const tool = page.locator('.sessions .sort-tool')
+  await expect(tool).toHaveAccessibleName(/^Display: sort sessions by State, ascending/)
+  await tool.click()
   const bar = page.getByRole('group', { name: 'Sort sessions' })
   const pick = bar.getByRole('combobox', { name: 'Sort' })
   await expect(pick).toHaveValue('state')
@@ -162,6 +180,10 @@ test('at 390 px the compact sort control orders by Ticket, reverses, and restore
   await expect(bar.getByText('Beats under 3 minutes old count as equal', { exact: false })).toBeVisible()
   await expect(pick).toHaveAccessibleDescription(/Beats under 3 minutes old/)
 
+  await page.keyboard.press('Escape')
+  await expect(bar).toHaveCount(0)
+  await expect(tool).toHaveAccessibleName(/^Display: sort sessions by Beat, ascending/)
+  await tool.click()
   await page.getByRole('button', { name: 'Default order' }).click()
   await expect.poll(() => rowOrder(page)).toEqual(start)
   await expect(pick).toHaveValue('state')

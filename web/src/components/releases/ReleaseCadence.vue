@@ -173,7 +173,7 @@ const tipStyle = computed(() => {
 .cadence {
   display: flex; flex-direction: column; min-width: 0; padding: 20px 22px 16px; border-radius: 20px;
   background: var(--glass); -webkit-backdrop-filter: blur(14px) saturate(1.3); backdrop-filter: blur(14px) saturate(1.3);
-  box-shadow: 0 0 0 1px var(--line), inset 0 1px 0 var(--glass-edge), 0 14px 34px -20px var(--card-glow, rgba(14, 111, 108, .35));
+  box-shadow: 0 0 0 1px var(--line), inset 0 1px 0 var(--glass-edge), 0 14px 34px -20px var(--card-glow, color-mix(in srgb, var(--primary-line) 35%, transparent));
 }
 .top { display: flex; align-items: flex-start; gap: 12px; }
 .title { margin: 6px 0 0; font: 500 10.5px/1.4 var(--mono); letter-spacing: .16em; text-transform: uppercase; color: var(--ink-3); }
@@ -211,9 +211,9 @@ const tipStyle = computed(() => {
 .dense .val { font-size: 10px; }
 .peak .val { color: var(--ink); font-weight: 700; }
 .current .val, .active .val { color: var(--teal-ink); font-weight: 700; }
-.avg { position: absolute; left: var(--axis); right: 0; height: 1.5px; margin-bottom: -.75px; background: repeating-linear-gradient(90deg, color-mix(in srgb, var(--gold-ink) 75%, transparent) 0 5px, transparent 5px 9px); pointer-events: none; }
-.avg-label { position: absolute; right: 2px; padding: 1px 6px; border-radius: 6px; background: color-mix(in srgb, var(--surface) 92%, transparent); font: 600 10.5px/1.4 var(--mono); color: var(--gold-ink); pointer-events: none; }
-.tip { position: absolute; z-index: 2; width:max-content; min-width:min(180px,100%); max-width:100%; padding: 10px 12px; border-radius: 12px; background: var(--tip-bg); color: var(--tip-ink); box-shadow: 0 8px 24px rgba(16, 35, 39, .25); pointer-events: none; }
+.avg { position: absolute; left: var(--axis); right: 0; height: 1.5px; margin-bottom: -.75px; background: repeating-linear-gradient(90deg, color-mix(in srgb, var(--secondary-ink) 75%, transparent) 0 5px, transparent 5px 9px); pointer-events: none; }
+.avg-label { position: absolute; right: 2px; padding: 1px 6px; border-radius: 6px; background: color-mix(in srgb, var(--surface) 92%, transparent); font: 600 10.5px/1.4 var(--mono); color: var(--secondary-ink); pointer-events: none; }
+.tip { position: absolute; z-index: 2; width:max-content; min-width:min(180px,100%); max-width:100%; padding: 10px 12px; border-radius: 12px; background: var(--tip-bg); color: var(--tip-ink); box-shadow: 0 8px 24px color-mix(in srgb, var(--shadow-color) 25%, transparent); pointer-events: none; }
 .tip-title { margin: 0; font: 600 13px/1.3 var(--font); color: var(--tip-ink); }
 .tip-count { margin: 2px 0 0; font: 700 18px/1.3 var(--font); letter-spacing: -.01em; color: var(--tip-ink); }
 .tip-range { margin: 6px 0 0; font: 500 11.5px/1.45 var(--mono); color: color-mix(in srgb, var(--tip-ink) 80%, transparent); overflow-wrap:anywhere; }

@@ -23,6 +23,7 @@ func (rt *runtime) cmdIssue() *Command {
 		Use:   "issue <command>",
 		subs: []*Command{
 			rt.cmdIssueList(),
+			rt.cmdIssuePillReport(),
 			rt.cmdIssueGet(),
 			rt.cmdIssueCreate(),
 			rt.cmdIssueUpdate(),
@@ -31,6 +32,21 @@ func (rt *runtime) cmdIssue() *Command {
 			rt.cmdIssueComment(),
 			rt.cmdIssueMove(),
 			rt.cmdSearch("issue search"),
+		},
+	}
+}
+
+func (rt *runtime) cmdIssuePillReport() *Command {
+	var project string
+	return &Command{
+		Name: "pill-report", Short: "Report invalid pills on visible open tickets (read-only)",
+		Use: "issue pill-report --project KEY", maxArgs: 0,
+		addFlags: func(fs *flagSet) { fs.string(&project, "project", 'p', "project key (required)") },
+		run: func(_ []string) error {
+			if strings.TrimSpace(project) == "" {
+				return usagef("--project is required")
+			}
+			return rt.reportInvalidPills(project)
 		},
 	}
 }
@@ -520,13 +536,13 @@ func (rt *runtime) cmdModelResolve() *Command {
 	var author, harness, workspace, ticket string
 	return &Command{
 		Name:    "resolve",
-		Short:   "Resolve a model role",
+		Short:   "Resolve a role and print its exact command; run review commands unchanged",
 		Use:     "model resolve [role] [--ticket KEY]",
 		minArgs: 0,
 		maxArgs: 1,
 		addFlags: func(fs *flagSet) {
-			fs.string(&author, "author-family", 0, "author model family; required for review-gate once this exists")
-			fs.string(&harness, "harness", 0, "restrict to codex, claude, pi, or cursor")
+			fs.string(&author, "author-family", 0, "author provider family or alias (claude, codex, grok, gemini); required for review-gate")
+			fs.string(&harness, "harness", 0, "restrict to codex, claude, grok, pi, cursor, gemini, or opencode; Codex review prints --ignore-user-config -s read-only")
 			fs.string(&workspace, "workspace", 0, "workspace path")
 			fs.string(&ticket, "ticket", 0, "ticket key or UUID; uses its placement and role")
 		},

@@ -143,8 +143,8 @@ func issueKey(t *testing.T, p tenant.Principal, scopes []string) string {
 	prefix = prefix[:48]
 	err := db.InTenant(dbtest.Seed(t.Context()), appPool, p.TenantID, func(tx pgx.Tx) error {
 		_, err := tx.Exec(t.Context(), `
-			INSERT INTO agent_keys (tenant_id, principal_id, name, prefix, hash, scopes)
-			VALUES ($1::uuid, $2::uuid, $3, $4, $5, $6)`,
+			INSERT INTO agent_keys (tenant_id, principal_id, name, prefix, hash, scopes,created_by_principal_id)
+			VALUES ($1::uuid, $2::uuid, $3, $4, $5, $6,(SELECT id FROM principals WHERE tenant_id=$1::uuid AND kind='person' ORDER BY created_at,id LIMIT 1))`,
 			p.TenantID, p.ID, p.Name, prefix, hex.EncodeToString(sum[:]), scopes)
 		return err
 	})
@@ -156,6 +156,13 @@ func issueKey(t *testing.T, p tenant.Principal, scopes []string) string {
 
 func call(t *testing.T, mod httpapi.Module, p *tenant.Principal, token, method, path, body string) (int, []byte) {
 	t.Helper()
+	return callAt(t, mod, p, token, method, path, body, time.Time{})
+}
+
+// callAt is call with the in-process clock pinned. A zero time leaves the
+// handler on transaction time. The clock cannot be set through HTTP.
+func callAt(t *testing.T, mod httpapi.Module, p *tenant.Principal, token, method, path, body string, now time.Time) (int, []byte) {
+	t.Helper()
 	mux := http.NewServeMux()
 	mod.Mount(mux)
 	var r *http.Request
@@ -164,9 +171,14 @@ func call(t *testing.T, mod httpapi.Module, p *tenant.Principal, token, method, 
 	} else {
 		r = httptest.NewRequest(method, path, nil)
 	}
+	ctx := r.Context()
 	if p != nil {
-		r = r.WithContext(tenant.WithPrincipal(r.Context(), *p))
+		ctx = tenant.WithPrincipal(ctx, *p)
 	}
+	if !now.IsZero() {
+		ctx = context.WithValue(ctx, clockKey{}, now)
+	}
+	r = r.WithContext(ctx)
 	if token != "" {
 		r.Header.Set("Authorization", "Bearer "+token)
 	}
@@ -250,7 +262,12 @@ func windowBody(start, end time.Time, unit string, allowance int64, pace string)
 
 func callStatus(t *testing.T, mod httpapi.Module, p *tenant.Principal, token, method, path, body string, want int, dst any) {
 	t.Helper()
-	status, raw := call(t, mod, p, token, method, path, body)
+	callStatusAt(t, mod, p, token, method, path, body, time.Time{}, want, dst)
+}
+
+func callStatusAt(t *testing.T, mod httpapi.Module, p *tenant.Principal, token, method, path, body string, now time.Time, want int, dst any) {
+	t.Helper()
+	status, raw := callAt(t, mod, p, token, method, path, body, now)
 	if status != want {
 		t.Fatalf("%s %s status %d, want %d: %s", method, path, status, want, raw)
 	}
@@ -686,5 +703,55 @@ func grantClaim(t *testing.T, person, agent tenant.Principal, runID string) {
 	})
 	if err != nil {
 		t.Fatalf("grant: %v", err)
+	}
+}
+
+// Risk: a person request passes its precheck, then loses its management permission
+// before the final write. Stale session roles must not authorize rows or audit.
+func TestPersonWriteRechecksRevokedPermission(t *testing.T) {
+	reset(t)
+	person := makePrincipal(t, "write-revocation", "person", "Admin", []string{"admin"})
+	var beforeAudit int
+	if err := adminPool.QueryRow(t.Context(), `SELECT count(*) FROM events WHERE tenant_id=$1`, person.TenantID).Scan(&beforeAudit); err != nil {
+		t.Fatal(err)
+	}
+	pool, barrier, ctx := dbtest.BarrierPool(t, appPool, func(sql string) bool { return sql == "commit" })
+	mux := http.NewServeMux()
+	New(pool).Mount(mux)
+	req := httptest.NewRequest(http.MethodPost, "/api/agent-accounts/groups", strings.NewReader(`{"harness":"codex","name":"Revoked","exclusive":false}`))
+	req = req.WithContext(tenant.WithPrincipal(ctx, person))
+	done := make(chan *httptest.ResponseRecorder, 1)
+	go func() {
+		rec := httptest.NewRecorder()
+		mux.ServeHTTP(rec, req)
+		done <- rec
+	}()
+	barrier.Wait(t, ctx) // The successful permission precheck has committed.
+	revoke, err := adminPool.Begin(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer revoke.Rollback(ctx)
+	if err := db.LockTenant(ctx, revoke, person.TenantID); err != nil {
+		t.Fatal(err)
+	}
+	tag, err := revoke.Exec(ctx, `UPDATE role_bindings b SET role_id=r.id FROM roles r WHERE b.tenant_id=$1 AND b.principal_id=$2 AND b.scope_type='workspace' AND r.tenant_id=b.tenant_id AND r.key='member'`, person.TenantID, person.ID)
+	if err != nil || tag.RowsAffected() != 1 {
+		t.Fatalf("demote person binding: %v (%d rows)", err, tag.RowsAffected())
+	}
+	if err := revoke.Commit(ctx); err != nil {
+		t.Fatal(err)
+	}
+	barrier.Release()
+	rec := dbtest.Await(t, ctx, done)
+	if rec.Code != http.StatusForbidden || !strings.Contains(rec.Body.String(), `"error":"permission denied"`) {
+		t.Fatalf("revoked write: %d %s", rec.Code, rec.Body.String())
+	}
+	var groups, audit int
+	if err := adminPool.QueryRow(ctx, `SELECT (SELECT count(*) FROM account_groups WHERE tenant_id=$1), (SELECT count(*) FROM events WHERE tenant_id=$1)`, person.TenantID).Scan(&groups, &audit); err != nil {
+		t.Fatal(err)
+	}
+	if groups != 0 || audit != beforeAudit {
+		t.Fatalf("revoked write left %d groups and %d events", groups, audit)
 	}
 }

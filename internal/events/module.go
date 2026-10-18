@@ -55,9 +55,12 @@ func WithCausalUndoHandlers(handlers map[string]UndoFunc) Option {
 }
 
 type module struct {
-	pool       *pgxpool.Pool
-	undo       map[string]UndoFunc
-	causalUndo map[string]UndoFunc
+	pool             *pgxpool.Pool
+	undo             map[string]UndoFunc
+	causalUndo       map[string]UndoFunc
+	subscriptions    subscriptionLimits
+	subscriptionWait func(context.Context, db.NotificationListener, time.Time) error
+	listenTimeout    func(context.Context, time.Duration) (context.Context, context.CancelFunc)
 }
 
 // New returns a module for event history, SSE and registered resource undo.
@@ -71,7 +74,9 @@ func New(pool *pgxpool.Pool, options ...Option) httpapi.Module {
 
 func (m *module) Mount(mux *http.ServeMux) {
 	mux.HandleFunc("GET /api/events", m.list)
+	mux.HandleFunc("GET /api/events/activity", m.activity)
 	mux.HandleFunc("GET /api/events/stream", m.stream)
+	mux.HandleFunc("GET /api/events/subscribe", m.subscribe)
 	mux.HandleFunc("POST /api/events/{eventId}/undo", m.handleUndo)
 	mux.HandleFunc("GET /api/events/{eventId}/undo-preview", m.handleUndoPreview)
 }
@@ -325,7 +330,7 @@ func (m *module) handleUndo(w http.ResponseWriter, r *http.Request) {
 		failure(w, ErrConflict)
 		return
 	}
-	decoder := json.NewDecoder(r.Body)
+	decoder := httpapi.NewRequestDecoder(w, r, 1<<20)
 	decoder.DisallowUnknownFields()
 	decodeErr := decoder.Decode(&confirm)
 	if decodeErr != nil && decodeErr != io.EOF {

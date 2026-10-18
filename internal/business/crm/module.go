@@ -4,7 +4,6 @@ package crm
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"io"
 	"log/slog"
@@ -136,7 +135,7 @@ func (m *module) bind(w http.ResponseWriter, r *http.Request) {
 	var body struct {
 		PrincipalID string `json:"principal_id"`
 	}
-	dec := json.NewDecoder(http.MaxBytesReader(w, r.Body, 4<<10))
+	dec := httpapi.NewRequestDecoder(w, r, 4<<10)
 	dec.DisallowUnknownFields()
 	if err := dec.Decode(&body); err != nil {
 		writeErr(w, errInvalid("invalid contact binding"))
@@ -284,6 +283,7 @@ func parseUUID(s string) (string, bool) {
 }
 
 func writeErr(w http.ResponseWriter, err error) {
+	err = providerImportError(err)
 	var he *httpError
 	if errors.As(err, &he) {
 		writeBody(w, he.status, he.code, he.message)
@@ -315,4 +315,17 @@ func writeBody(w http.ResponseWriter, status int, code, message string) {
 		Code    string `json:"code"`
 		Message string `json:"message"`
 	}{code, message})
+}
+
+// A competing import is a normal conflict; unrelated unique violations remain errors.
+func providerImportError(err error) error {
+	var pe *pgconn.PgError
+	if errors.As(err, &pe) && pe.Code == "23505" && pe.ConstraintName == "crm_external_identity_unique" {
+		return providerIdentityConflict()
+	}
+	return err
+}
+
+func providerIdentityConflict() error {
+	return &httpError{status: http.StatusConflict, code: "external_identity_conflict", message: "customer already imported from this provider"}
 }

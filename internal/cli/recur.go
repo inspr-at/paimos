@@ -17,9 +17,70 @@ import (
 // A JSON body keeps templates, RRULEs and tags lossless and avoids shell
 // quoting for multiline criteria. All existing named-instance/auth flags apply.
 func (rt *runtime) cmdRecur() *Command {
-	return &Command{Name: "recur", Short: "Manage server-scheduled recurring tickets", Use: "recur <create|list|get|update|pause|resume|run-now|preview>", subs: []*Command{
+	return &Command{Name: "recur", Short: "Manage server-scheduled recurring tickets", Use: "recur <create|list|get|update|pause|resume|run-now|preview|templates>", subs: []*Command{
 		rt.recurWrite("create"), rt.recurList(), rt.recurWrite("update"), rt.recurAction("get"), rt.recurAction("pause"), rt.recurAction("resume"), rt.recurAction("run-now"), rt.recurAction("preview"),
+		rt.recurTemplates(),
 	}}
+}
+
+func (rt *runtime) recurTemplates() *Command {
+	return &Command{Name: "templates", Short: "Discover and explicitly apply paused versioned routines", Use: "recur templates <list|preview|apply>", subs: []*Command{
+		{Name: "list", Short: "List immutable templates without installing them", Use: "recur templates list", maxArgs: 0, run: func([]string) error {
+			var out struct {
+				Items []recurrences.RoutineTemplatePreset `json:"items"`
+			}
+			if err := rt.do(http.MethodGet, "/api/recurrences/templates", nil, &out); err != nil {
+				return err
+			}
+			if rt.jsonOut {
+				return rt.printJSON(out)
+			}
+			for _, p := range out.Items {
+				if _, err := fmt.Fprintf(rt.stdout, "%s %s · %s / %s · paused, unconsented\n", p.ID, p.Version, p.EN.Name, p.DE.Name); err != nil {
+					return err
+				}
+			}
+			return nil
+		}},
+		rt.recurTemplateConfig("preview"), rt.recurTemplateConfig("apply"),
+	}}
+}
+
+func (rt *runtime) recurTemplateConfig(action string) *Command {
+	var bodyFile string
+	return &Command{Name: action, Short: action + " a pinned routine template with explicit tenant references", Use: "recur templates " + action + " <template-id> <version> [--body-file FILE|-]", minArgs: 2, maxArgs: 2,
+		addFlags: func(fs *flagSet) {
+			fs.string(&bodyFile, "body-file", 0, "JSON configuration; default or - reads stdin")
+		},
+		run: func(args []string) error {
+			if len(args[0]) > 80 || len(args[1]) > 32 || args[0] == "" || args[1] == "" || strings.ContainsAny(args[0]+args[1], "/?#%") {
+				return usagef("a template-id and pinned version are required")
+			}
+			if bodyFile == "" {
+				bodyFile = "-"
+			}
+			raw, err := rt.recurTextFile(bodyFile, 1<<20)
+			if err != nil {
+				return err
+			}
+			var body map[string]any
+			if json.Unmarshal([]byte(raw), &body) != nil || body == nil {
+				return usagef("one JSON configuration object is required")
+			}
+			path := "/api/recurrences/templates/" + url.PathEscape(args[0]) + "/" + url.PathEscape(args[1]) + "/" + action
+			if action == "preview" {
+				var out recurrences.RoutineTemplatePreview
+				if err := rt.do(http.MethodPost, path, body, &out); err != nil {
+					return err
+				}
+				return rt.printJSON(out)
+			}
+			var out recurrences.Recurrence
+			if err := rt.do(http.MethodPost, path, body, &out); err != nil {
+				return err
+			}
+			return rt.printRecurrence(out)
+		}}
 }
 func (rt *runtime) recurWrite(action string) *Command {
 	var bodyFile, descriptionFile, criteriaFile string

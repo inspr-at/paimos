@@ -356,8 +356,8 @@ func TestResidencyEvidenceRechecksAfterConcurrentAccessChange(t *testing.T) {
 			for {
 				var waiting bool
 				if err := adminPool.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM pg_stat_activity
- WHERE datname=current_database() AND query=$2
- AND $1=ANY(pg_blocking_pids(pid)))`, blockerPID, `SELECT id FROM tenants WHERE id=current_setting('aeon.tenant_id')::uuid FOR NO KEY UPDATE`).Scan(&waiting); err != nil {
+ WHERE datname=current_database() AND query LIKE '%FROM tenants WHERE%FOR NO KEY UPDATE%'
+ AND $1=ANY(pg_blocking_pids(pid)))`, blockerPID).Scan(&waiting); err != nil {
 					t.Fatal(err)
 				}
 				if waiting {

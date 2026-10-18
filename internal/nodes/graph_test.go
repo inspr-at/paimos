@@ -37,7 +37,7 @@ func TestTicketGraphShapeClosedFilterAndIsolation(t *testing.T) {
 	elsewhere := mustNode(t, p, fmt.Sprintf(`{"kind_id":%q,"title":"Glint"}`, projectKind.ID))
 	epic := mustNode(t, p, fmt.Sprintf(`{"kind_id":%q,"title":"Fleet","parent_id":%q,"state":"backlog"}`, epicKind.ID, project.ID))
 	open := mustNode(t, p, fmt.Sprintf(`{"kind_id":%q,"title":"Rotate keys","parent_id":%q,"state":"new","fields":{"priority":"high"},"body":"BODY-SHOULD-NOT-LEAK"}`, ticketKind.ID, epic.ID))
-	doing := mustNode(t, p, fmt.Sprintf(`{"kind_id":%q,"title":"In progress","parent_id":%q,"state":"in_progress"}`, ticketKind.ID, epic.ID))
+	doing := mustNode(t, p, fmt.Sprintf(`{"kind_id":%q,"title":"In progress","parent_id":%q,"state":"in_progress","fields":%s}`, ticketKind.ID, epic.ID, workStatusFieldsTest(t)))
 	qa := mustNode(t, p, fmt.Sprintf(`{"kind_id":%q,"title":"In QA","parent_id":%q,"state":"qa"}`, ticketKind.ID, project.ID))
 	done := mustNode(t, p, fmt.Sprintf(`{"kind_id":%q,"title":"Shipped","parent_id":%q,"state":"done","fields":%s}`, ticketKind.ID, epic.ID, benefitFields))
 	cancelled := mustNode(t, p, fmt.Sprintf(`{"kind_id":%q,"title":"Cancelled","parent_id":%q,"state":"cancelled"}`, ticketKind.ID, project.ID))
@@ -251,6 +251,13 @@ func TestTicketGraphCap(t *testing.T) {
 		relateFrom, relateTo = relateTo, relateFrom
 	}
 	insertGraphRelation(t, p, relateFrom, relateTo, "relates")
+	// A split package starts with different prior planner statistics. This bulk
+	// fixture proves the graph cap, rather than autovacuum's scheduling: refresh
+	// its isolated database after loading all 1501 nodes, as the aggregate
+	// benchmark does. Keep the full fixture and every response assertion.
+	if _, err := adminPool.Exec(t.Context(), `ANALYZE nodes; ANALYZE node_kinds; ANALYZE harness_sessions; ANALYZE ticket_live_eta`); err != nil {
+		t.Fatal(err)
+	}
 
 	status, body := call(t, &p, http.MethodGet, "/api/tickets/graph?project_id="+project.ID, "")
 	g := decode[TicketGraph](t, status, body, http.StatusOK)
@@ -345,7 +352,7 @@ func TestTicketGraphAgentKeyScope(t *testing.T) {
 	handler := (&httpapi.Server{Pool: appPool, Modules: []httpapi.Module{mod, New(appPool, nil)}, Middleware: []func(http.Handler) http.Handler{mod.Middleware}}).Handler()
 	key := func(name string, scopes []string) string {
 		t.Helper()
-		_, _, token, err := auth.OperatorCreateAgentKey(t.Context(), appPool, p.TenantID, name, "", scopes, nil)
+		_, _, token, err := auth.OperatorCreateAgentKey(t.Context(), appPool, p.TenantID, name, "", scopes, nil, p.ID)
 		if err != nil {
 			t.Fatal(err)
 		}

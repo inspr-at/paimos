@@ -19,6 +19,7 @@ import (
 // requests remain shared inbox attention; neither age nor labels imply ownership.
 // All queries use the caller's tenant transaction and project visibility.
 type StateEvidence struct {
+	AgentRecovery    *AgentDiagnosis    `json:"agent_recovery,omitempty"`
 	VendorLimited    bool               `json:"vendor_limited,omitempty"`
 	LimitWindow      string             `json:"limit_window,omitempty"`
 	LimitResetsAt    *time.Time         `json:"limit_resets_at,omitempty"`
@@ -189,6 +190,11 @@ func readStateEvidence(ctx context.Context, tx pgx.Tx, ids []string) (map[string
 			evidence.LimitWindow = ""
 			evidence.LimitResetsAt = nil
 			out[id] = evidence
+		}
+	}
+	if p.Kind == tenant.Person {
+		if err := readAgentRecoveryEvidence(ctx, tx, ids, out, allowed); err != nil {
+			return nil, err
 		}
 	}
 	return out, nil

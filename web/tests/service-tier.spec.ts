@@ -6,6 +6,7 @@ import { agentData, mockAgents } from './agents-fixtures'
 import { expectStableControls } from './helpers/stable'
 import { mockEffectivePermissions } from './authz-fixtures'
 import type { TierReport, TierState } from '../src/lib/serviceTier'
+import type { HarnessSession } from '../src/lib/agents'
 
 const id = '5e000000-0000-4000-8000-000000000001'
 const ownership = { daemon_id: 'fixture', generation: 'a'.repeat(32), process_id: 'b'.repeat(32), root_pid: 1234, group_id: 1234, started_at: '2026-10-02T00:00:00Z' }
@@ -45,6 +46,10 @@ async function setup(page: Page, options: { unpriced?: boolean; unmanaged?: bool
   else state.estimates = report.tiers.map(t => ({ tier: t.tier, n: 0, basis: 'No estimate yet · 0 runs. A completed run with final tokens and frozen prices is required.', run_id: null, cost_usd: null, duration_ms: null }))
   let releaseTierRead!: () => void
   const tierReadGate = new Promise<void>(resolve => { releaseTierRead = resolve })
+  await page.route('**/api/decision-desk/projection?**', route => {
+    const items = state.requests.filter(q => q.state === 'pending').map(q => ({ id: q.id, kind: 'tier_request', project_id: data.sessions[0]!.project_id, revision: state.revision, title: 'Tier request', created_at: q.created_at, held: false, can_decide: !options.denied, href: `/decision-desk?item=t:${q.id}`, source: `/api/projects/${data.sessions[0]!.project_id}/harness-sessions/${id}/tier` }))
+    return route.fulfill({ json: { items, counts: { open: items.length, held: 0, chores: 0 }, has_more: false, as_of: new Date().toISOString() } })
+  })
   const writes: Record<string, unknown>[] = []
   let reads = 0
   function cancel(requestID: string) {
@@ -55,6 +60,8 @@ async function setup(page: Page, options: { unpriced?: boolean; unmanaged?: bool
     Object.assign(data.sessions[0]!, { service_tier_revision: state.revision })
   }
   await page.route('**/api/projects/*/harness-sessions/*/tier**', async route => {
+    const target = data.sessions.find(session => new URL(route.request().url()).pathname.split('/')[5] === session.id) as unknown as HarnessSession | undefined
+    if (route.request().method() === 'GET' && target && target.id !== id) return route.fulfill({ json: { session_id: target.id, revision: target.service_tier_revision, active_tier: target.service_tier, pending: null, reports: target.service_tier_reports, requests: [], read_only: false, read_only_reason: '' } })
     if (route.request().method() === 'GET') { reads++; if (options.tierRead === 'delayed') await tierReadGate; if (options.tierRead === 'error') return route.fulfill({ status: 503, json: { error: 'Tier evidence unavailable.' } }); return route.fulfill({ json: state }) }
     const body = route.request().postDataJSON(); writes.push(body)
     if (options.fail) return route.fulfill({ status: 409, json: { error: 'process ownership changed; refresh' } })
@@ -72,9 +79,9 @@ async function setup(page: Page, options: { unpriced?: boolean; unmanaged?: bool
   return { data, writes, releaseTierRead, getReads: () => reads, cancelElsewhere: () => cancel('other-viewer-undo'), reject: () => { state = { ...state, pending: null, last_change: { ...state.pending!, state: 'completed', outcome: 'rejected', reason: 'vendor_rejected' } } }, confirm: () => { state = { ...state, active_tier: state.pending!.value, pending: null, revision: state.revision + 1 }; Object.assign(data.sessions[0]!, { service_tier: state.active_tier, service_tier_revision: state.revision }) }, getState: () => state }
 }
 const row = (page: Page) => page.locator(`[data-row="s:${id}"]`)
-// The list uses its inline control when a docked panel narrows its container.
-// Do not focus a hidden copy: Undo and rejection assertions must still execute.
-const glyph = (page: Page) => row(page).locator('[data-tier]:visible')
+// Tier controls belong to the selected session's panel; Undo and rejection
+// assertions still target the actual visible focus node after their move.
+const glyph = (page: Page) => page.locator('.session-panel .service-tier [data-tier]:visible')
 const picker = (page: Page) => page.getByRole('dialog', { name: 'Change tier', exact: true })
 
 for (const width of [320, 390]) test(`${width}: phone Change tier menu opens and restores its actual trigger`, async ({ page }) => {
@@ -82,23 +89,22 @@ for (const width of [320, 390]) test(`${width}: phone Change tier menu opens and
   const { writes } = await setup(page, { managedControls: true })
   await page.goto(`/agents/${id}`)
   const panel = page.getByRole('complementary', { name: 'Session details' })
-  const more = panel.getByRole('button', { name: 'More session controls', exact: true })
-  await expectStableControls({ controls: { more }, interactions: [
-    { name: 'open tier from overflow', run: async () => {
-      await more.click()
-      await page.getByRole('menuitem', { name: 'Change tier…', exact: true }).click()
+  // AEON-1213 / #591 moved tier selection to the Overview Service tier block.
+  const change = panel.getByRole('region', { name: 'Service tier', exact: true }).getByRole('button', { name: 'Change tier', exact: true })
+  await expectStableControls({ controls: { change }, interactions: [
+    { name: 'open tier from Overview', run: async () => {
+      await change.click()
       await expect(picker(page)).toBeVisible()
       await expect(page.getByRole('menu', { name: 'More session actions' })).toHaveCount(0)
       await picker(page).getByRole('button', { name: /Cancel/ }).click()
       await expect(picker(page)).toHaveCount(0)
-      await expect(more).toBeFocused()
+      await expect(change).toBeFocused()
     } },
   ] })
   expect(writes).toHaveLength(0)
-  // Selecting through the same menu targets this session, rather than merely
+  // Selecting through the same trigger targets this session, rather than merely
   // opening an unrelated or detached sheet.
-  await more.click()
-  await page.getByRole('menuitem', { name: 'Change tier…', exact: true }).click()
+  await change.click()
   await expect(picker(page).locator('[data-option=fast]')).toHaveAttribute('aria-disabled', 'false')
   await picker(page).locator('[data-option=fast]').click()
   await picker(page).locator('.tp-go').click()
@@ -111,13 +117,21 @@ test('1440: compact Default tier control keeps its box through confirmation and 
   await page.setViewportSize({ width: 1440, height: 900 })
   const { writes, confirm, getState } = await setup(page)
   await page.goto(`/agents/${id}`)
-  await expect(page.locator('.agents-page')).toHaveClass(/panel-open/)
-  const list = page.locator('.sessions'), host = row(page).locator('.host-badge'), actions = row(page).locator('.more')
+  await expect(page.locator('.session-panel')).toHaveClass(/docked/)
+  // AEON-1309 / #678 opens sessions in Focus, whose two-line list has no Time
+  // column. Overview can open wider than the compact-table boundary; use the
+  // live divider to exercise the narrow layout without changing its width checks.
+  await page.keyboard.press('s')
+  await expect(page.locator('.agents-work')).toHaveAttribute('data-layout', 'overview')
+  await page.getByRole('separator', { name: 'Resize the session list' }).press('ArrowLeft')
+  // The five-column list retains the menu; tier controls live in the panel (AEON-1213).
+  const list = page.locator('.sessions'), time = row(page).locator('.c-time'), actions = row(page).locator('.more')
   expect((await list.boundingBox())!.width).toBeLessThanOrEqual(880)
   await expect(glyph(page)).toHaveCount(1)
   await expect(glyph(page)).toBeVisible()
   await expect(glyph(page)).toHaveAccessibleName(/^Service tier: Default/)
-  await expectStableControls({ controls: { tier: glyph(page), host, actions, row: row(page) }, scrollAreas: { list }, interactions: [
+  await glyph(page).scrollIntoViewIfNeeded()
+  await expectStableControls({ controls: { tier: glyph(page), time, actions, row: row(page) }, scrollAreas: { list, details: page.locator('.session-panel .scroll:visible') }, interactions: [
     { name: 'keyboard step from Default', run: async () => {
       await glyph(page).focus(); await expect(glyph(page)).toBeFocused()
       await glyph(page).press('ArrowRight'); await expect(page.locator('.tier-toast')).toBeVisible()
@@ -135,29 +149,33 @@ test('1440: compact Default tier control keeps its box through confirmation and 
   expect(writes[1]).toMatchObject({ tier: 'default', expected_revision: 3, expected_ownership: ownership })
 })
 
-for (const width of [1280, 1366, 1440]) test(`${width}: panel-open session table fits and keeps Host and overflow controls`, async ({ page }) => {
+for (const width of [1280, 1366, 1440]) test(`${width}: panel-open session table fits; Tier sits in the details and the overflow in the row`, async ({ page }) => {
   await page.setViewportSize({ width, height: 900 })
   const { data } = await setup(page)
   Object.assign(data.sessions[0]!, { eta_ready_at: new Date(Date.now() + 600_000).toISOString(), progress_pct: 50 })
   await page.goto(`/agents/${id}`)
-  await expect(page.locator('.agents-page')).toHaveClass(/panel-open/)
+  await expect(page.locator('.session-panel')).toHaveClass(/docked/)
+  await page.getByRole('separator', { name: 'Resize the session list' }).press('ArrowLeft')
   await expect(row(page)).toBeVisible()
-  const list = page.locator('.sessions'), actions = row(page).locator('.more'), host = row(page).locator('.host-badge')
+  const list = page.locator('.sessions'), actions = row(page).locator('.more'), tier = glyph(page), panel = page.getByRole('complementary', { name: 'Session details' })
+  await tier.scrollIntoViewIfNeeded()
   await row(page).hover()
-  await expect(actions).toBeVisible(); await expect(host).toBeVisible()
+  await expect(actions).toBeVisible(); await expect(tier).toBeVisible()
+  await expect(row(page).locator('.host-badge')).toBeHidden()
+  await expect(row(page).locator('[data-tier]')).toHaveCount(0)
   const measure = async () => {
     const dimensions = await list.evaluate(el => ({ scroll: el.scrollWidth, client: el.clientWidth }))
     expect(dimensions.scroll).toBeLessThanOrEqual(dimensions.client)
-    const listBox = (await list.boundingBox())!, actionBox = (await actions.boundingBox())!, hostBox = (await host.boundingBox())!
-    expect(actionBox.width).toBeGreaterThan(0); expect(hostBox.width).toBeGreaterThan(0)
-    for (const box of [actionBox, hostBox]) {
-      expect(box.x).toBeGreaterThanOrEqual(listBox.x)
-      expect(box.x + box.width).toBeLessThanOrEqual(listBox.x + listBox.width)
+    const listBox = (await list.boundingBox())!, panelBox = (await panel.boundingBox())!, actionBox = (await actions.boundingBox())!, tierBox = (await tier.boundingBox())!
+    expect(actionBox.width).toBeGreaterThan(0); expect(tierBox.width).toBeGreaterThan(0)
+    for (const [box, frame] of [[actionBox, listBox], [tierBox, panelBox]] as const) {
+      expect(box.x).toBeGreaterThanOrEqual(frame.x)
+      expect(box.x + box.width).toBeLessThanOrEqual(frame.x + frame.width)
     }
     expect(await actions.evaluate(el => { const r = el.getBoundingClientRect(); return !!document.elementFromPoint(r.right - 1, r.y + r.height / 2)?.closest('.more') })).toBe(true)
   }
   await measure()
-  await expectStableControls({ controls: { actions, host, row: row(page) }, interactions: [{ name: 'open overflow', run: async () => { await actions.click(); await expect(page.getByRole('menuitem', { name: 'Change tier…' })).toBeVisible() } }] })
+  await expectStableControls({ controls: { actions, tier, row: row(page) }, scrollAreas: { details: panel.locator('.scroll:visible') }, interactions: [{ name: 'open overflow', run: async () => { await actions.click(); await expect(page.getByRole('menuitem', { name: 'Change tier…' })).toBeVisible() } }] })
   await measure()
 })
 test('an unopened row shows its pending agent tier request', async ({ page }) => {
@@ -167,7 +185,7 @@ test('an unopened row shows its pending agent tier request', async ({ page }) =>
 })
 test('daemon rejection clears the switch toast and shows the actual outcome', async ({ page }) => {
   const { reject, writes } = await setup(page)
-  await page.goto('/agents'); await glyph(page).focus(); await glyph(page).press('ArrowRight')
+  await page.goto(`/agents/${id}`); await glyph(page).focus(); await glyph(page).press('ArrowRight')
   await expect(page.locator('.tier-toast')).toBeVisible()
   reject()
   await expect(page.getByText('Change to Fast was not applied. vendor rejected', { exact: true })).toBeVisible()
@@ -259,15 +277,15 @@ for (const width of [1440, 390]) for (const theme of ['light', 'dark'] as const)
     await page.setViewportSize({ width, height: 900 }); await page.emulateMedia({ colorScheme: theme })
     const errors: string[] = []; page.on('pageerror', e => errors.push(e.message))
     await setup(page, { active: width === 390 ? 'fast' : 'default' })
-    await page.goto('/agents')
     if (width === 390) {
-      const host = row(page).locator('.host-badge'), tier = row(page).locator('.phone-tier [data-tier]')
-      await expect(host).toBeVisible()
-      const hb = (await host.boundingBox())!, tb = (await tier.boundingBox())!
-      expect(tb.x + tb.width).toBeLessThanOrEqual(hb.x + .5)
-      await tier.click()
+      // AEON-1213 / #591: use the same details trigger on phones.
+      await page.goto('/agents')
+      await row(page).locator('.agent-link').click()
+      await glyph(page).click()
+    } else {
+      await page.goto(`/agents/${id}`)
+      await glyph(page).click()
     }
-    else await glyph(page).click()
     await expect(picker(page).getByRole('radio', { name: /Fastest:/ })).toHaveAttribute('aria-disabled', 'false')
     const controls = { choices: picker(page).getByRole('radiogroup'), fast: picker(page).locator('[data-option=fast]'), default: picker(page).locator('[data-option=default]'), fastest: picker(page).locator('[data-option=fastest]'), cancel: picker(page).getByRole('button', { name: /Cancel/ }), confirm: picker(page).locator('.tp-go'), ...(width === 390 ? { frame: picker(page) } : {}) }
     await expectStableControls({ controls, scrollAreas: { body: picker(page), notes: picker(page).locator('.tp-notes') }, interactions: ['fastest', 'default', 'fast'].map(t => ({ name: `choose ${t}`, run: async () => { await picker(page).locator(`[data-option=${t}]`).click(); await expect(picker(page).locator(`[data-option=${t}]`)).toHaveAttribute('aria-checked', 'true') } })) })
@@ -279,15 +297,22 @@ for (const width of [1440, 390]) for (const theme of ['light', 'dark'] as const)
   })
 }
 
-test('offered-only chevrons share one centre; hover, step and pending Undo hold boxes', async ({ page }) => {
+// The tier lives in the details; every offered-tier count keeps the same control centre.
+test('the tier control in the details holds its box through hover, step and pending Undo', async ({ page }) => {
   await page.setViewportSize({ width: 1440, height: 900 })
-  const { writes } = await setup(page)
-  await page.goto('/agents')
-  await expect(glyph(page)).toBeVisible()
-  const centres = await page.locator('.c-tier .tier-glyph').evaluateAll(elements => elements.map(el => { const r = el.getBoundingClientRect(); return r.x + r.width / 2 }))
+  const { writes, data } = await setup(page)
+  const centres: number[] = []
+  // Sample the one-, two- and three-tier sessions at the same panel position.
+  for (const session of [data.sessions[1]!, data.sessions[2]!, data.sessions[0]!]) {
+    await page.goto(`/agents/${session.id}`)
+    await expect(glyph(page)).toBeVisible()
+    centres.push(await glyph(page).locator('.tier-glyph').evaluate(el => { const r = el.getBoundingClientRect(); return r.x + r.width / 2 }))
+  }
   expect(centres).toHaveLength(3); expect(Math.max(...centres) - Math.min(...centres)).toBeLessThanOrEqual(.5)
-  await expectStableControls({ controls: { row: row(page), cell: row(page).locator('.c-tier'), glyph: glyph(page) }, interactions: [
-    { name: 'hover', run: () => row(page).locator('.c-tier').hover() },
+  const cell = page.locator('.session-panel .tier-head .tier-cell')
+  await glyph(page).scrollIntoViewIfNeeded()
+  await expectStableControls({ controls: { row: row(page), cell, glyph: glyph(page) }, scrollAreas: { details: page.locator('.session-panel .scroll:visible') }, interactions: [
+    { name: 'hover', run: () => cell.hover() },
     { name: 'step up', run: async () => { await glyph(page).focus(); await glyph(page).press('ArrowRight'); await expect(page.locator('.tier-toast')).toBeVisible() } },
     { name: 'Undo pending', run: async () => { await page.locator('.tier-toast').getByRole('button', { name: 'Undo' }).click(); await expect(page.locator('.tier-toast')).toHaveCount(0) } },
   ] })
@@ -295,7 +320,7 @@ test('offered-only chevrons share one centre; hover, step and pending Undo hold 
 })
 test('Undo after daemon confirmation queues a reverse change; modified arrows stay native', async ({ page }) => {
   const { writes, confirm } = await setup(page)
-  await page.goto('/agents'); await expect(glyph(page)).toBeVisible()
+  await page.goto(`/agents/${id}`); await expect(glyph(page)).toBeVisible()
   await glyph(page).focus(); await glyph(page).press('Control+ArrowRight'); expect(writes).toHaveLength(0)
   await glyph(page).press('ArrowRight'); await expect(page.locator('.tier-toast')).toBeVisible()
   confirm()
@@ -305,7 +330,7 @@ test('Undo after daemon confirmation queues a reverse change; modified arrows st
 })
 test('Enter opens and confirms, Escape cancels and restores the glyph', async ({ page }) => {
   const { writes } = await setup(page)
-  await page.goto('/agents'); await glyph(page).focus(); await glyph(page).press('Enter')
+  await page.goto(`/agents/${id}`); await glyph(page).focus(); await glyph(page).press('Enter')
   await expect(picker(page).locator('[data-option=fast]')).toHaveAttribute('aria-disabled', 'false')
   await expect(picker(page).getByRole('radio', { name: /Default:/ })).toBeFocused()
   await page.keyboard.press('ArrowRight'); await expect(picker(page).locator('[data-option=fast]')).toHaveAttribute('aria-checked', 'true')
@@ -315,7 +340,7 @@ test('Enter opens and confirms, Escape cancels and restores the glyph', async ({
 })
 test('no cited price disables paid tiers and hides their chevrons', async ({ page }) => {
   const { writes } = await setup(page, { unpriced: true })
-  await page.goto('/agents'); await expect(glyph(page).locator('path')).toHaveCount(1)
+  await page.goto(`/agents/${id}`); await expect(glyph(page).locator('path')).toHaveCount(1)
   await glyph(page).click(); await expect(picker(page).getByRole('radio', { name: /Fast: not offered: no published price/ })).toHaveAttribute('aria-disabled', 'true')
   await expect(picker(page).locator('[data-option=default]')).toHaveAttribute('aria-disabled', 'false')
   await picker(page).locator('[data-option=default]').focus(); await page.keyboard.press('ArrowRight')
@@ -328,22 +353,30 @@ for (const kind of ['unmanaged', 'ended', 'denied'] as const) test(`${kind} sess
   await expect(page.getByRole('region', { name: 'Service tier', exact: true }).getByRole('button', { name: 'Change tier', exact: true })).toHaveCount(0)
   expect(writes).toHaveLength(0)
 })
-for (const width of [1440, 390]) test(`${width}: the panel request retains its actions after approval`, async ({ page }) => {
+for (const width of [1440, 390]) test(`${width}: the panel request points to stable desk actions for approval`, async ({ page }) => {
   await page.setViewportSize({ width, height: 900 })
   const { writes } = await setup(page, { request: true })
   await page.goto(`/agents/${id}`)
   const request = page.locator('.tier-request')
   await expect(request).toContainText('QA waits on this screen')
-  await expectStableControls({ controls: { approve: request.getByRole('button', { name: 'Approve Fast' }), decline: request.getByRole('button', { name: 'Decline' }) }, interactions: [{ name: 'approve', run: async () => { await request.getByRole('button', { name: 'Approve Fast' }).click(); await expect(request).toContainText('Approved · Fast') } }] })
+  await expect(request.getByRole('link', { name: 'Review in Decision Desk' })).toHaveAttribute('href', '/decision-desk?item=t:request-fixture')
+  await request.getByRole('link', { name: 'Review in Decision Desk' }).click()
+  await expect(page.getByTestId('choice-0')).toBeEnabled()
+  await expectStableControls({ controls: { approve: page.getByTestId('choice-0'), decline: page.getByTestId('choice-1'), decide: page.getByTestId('desk-decide') }, interactions: [{ name: 'choose the protected approval', run: async () => { await page.getByTestId('choice-0').click(); await expect(page.getByTestId('choice-0')).toHaveAttribute('aria-checked', 'true') } }] })
+  // The round's only item: after the decision the sheet says All decided, then the desk closes (AEON-1339).
+  await page.getByTestId('desk-decide').click()
+  await expect(page.getByTestId('desk-announcement')).toContainText('application waits for the next safe point')
+  await expect(page.getByTestId('desk-all-decided')).toBeVisible()
   expect(writes[0]).toMatchObject({ decision: 'approve', tier: 'fast', expected_ownership: ownership })
 })
-test('the panel request can be declined without a tier change', async ({ page }) => {
+test('the panel request can be declined in the desk without a tier change', async ({ page }) => {
   const { writes, getState } = await setup(page, { request: true })
-  await page.goto(`/agents/${id}`); await page.locator('.tier-request').getByRole('button', { name: 'Decline' }).click()
-  await expect(page.locator('.tier-request')).toContainText('Declined · Fast'); expect(getState().active_tier).toBe('default'); expect(writes[0]?.decision).toBe('decline')
+  await page.goto(`/agents/${id}`); await page.locator('.tier-request').getByRole('link', { name: 'Review in Decision Desk' }).click()
+  await page.getByTestId('choice-1').click(); await page.getByTestId('desk-decide').click()
+  await expect.poll(() => getState().requests[0]?.state).toBe('declined'); expect(getState().active_tier).toBe('default'); expect(writes[0]?.decision).toBe('decline')
 })
 test('a rejected write reports the error and offers no false-success Undo', async ({ page }) => {
-  await setup(page, { fail: true }); await page.goto('/agents')
+  await setup(page, { fail: true }); await page.goto(`/agents/${id}`)
   await glyph(page).focus(); await glyph(page).press('ArrowRight')
   await expect(page.getByText('Tier outcome unconfirmed: process ownership changed; refresh', { exact: true })).toBeVisible()
   await expect(page.locator('.tier-toast')).toHaveCount(0)
@@ -373,22 +406,26 @@ for (const width of [320, 390]) test(`${width}: agent request labels keep phone 
 test('an agent asks for its own tier; field shortcuts and the active tier stay intact', async ({ page }) => {
   const { writes, getState } = await setup(page, { agent: true })
   await page.goto(`/agents/${id}`)
-  await page.getByRole('button', { name: 'Ask for a tier', exact: true }).click()
-  await expect(picker(page).locator('[data-option=fast]')).toHaveAttribute('aria-disabled', 'false')
-  await picker(page).locator('[data-option=fast]').click()
-  const reason = picker(page).getByRole('textbox', { name: 'Why' })
-  const mac = await page.evaluate(() => /Mac|iPhone|iPad/.test(navigator.platform))
-  await reason.fill('replace this text')
-  await reason.press(mac ? 'Meta+a' : 'Control+a')
-  await reason.pressSequentially('QA waits on this screen')
-  await expect(reason).toHaveValue('QA waits on this screen')
-  await reason.press('Enter'); expect(writes).toHaveLength(0)
-  await reason.press('Escape'); await expect(picker(page)).toBeVisible()
-  await reason.focus()
-  await reason.press(mac ? 'Meta+Enter' : 'Control+Enter')
-  await expect(picker(page)).toHaveCount(0)
-  await expect(page.locator('.tier-request')).toContainText('You asked for Fast')
-  await expect(page.locator('.tier-request')).toContainText('Waiting for a person')
+  const change = page.getByRole('button', { name: 'Ask for a tier', exact: true })
+  await glyph(page).scrollIntoViewIfNeeded()
+  await expectStableControls({ controls: { tier: glyph(page), change }, scrollAreas: { details: page.locator('.session-panel .scroll:visible') }, interactions: [{ name: 'request text grows below the tier controls', run: async () => {
+    await change.click()
+    await expect(picker(page).locator('[data-option=fast]')).toHaveAttribute('aria-disabled', 'false')
+    await picker(page).locator('[data-option=fast]').click()
+    const reason = picker(page).getByRole('textbox', { name: 'Why' })
+    const mac = await page.evaluate(() => /Mac|iPhone|iPad/.test(navigator.platform))
+    await reason.fill('replace this text')
+    await reason.press(mac ? 'Meta+a' : 'Control+a')
+    await reason.pressSequentially('QA waits on this screen')
+    await expect(reason).toHaveValue('QA waits on this screen')
+    await reason.press('Enter'); expect(writes).toHaveLength(0)
+    await reason.press('Escape'); await expect(picker(page)).toBeVisible()
+    await reason.focus()
+    await reason.press(mac ? 'Meta+Enter' : 'Control+Enter')
+    await expect(picker(page)).toHaveCount(0)
+    await expect(page.locator('.tier-request')).toContainText('You asked for Fast')
+    await expect(page.locator('.tier-request')).toContainText('Waiting for a person')
+  } }] })
   expect(writes[0]).toMatchObject({ tier: 'fast', reason: 'QA waits on this screen' })
   expect(getState().active_tier).toBe('default')
 })
@@ -455,9 +492,12 @@ for (const width of [1440, 390]) for (const theme of ['light', 'dark'] as const)
   })
 }
 test('failed evidence reads show placeholders, never a zero-run or vendor conclusion', async ({ page }) => {
-  await setup(page, { tierRead: 'error' }); await page.goto(`/agents/${id}`)
+  const { getState } = await setup(page, { tierRead: 'error' }); await page.goto(`/agents/${id}`)
   const panel = page.getByRole('region', { name: 'Service tier', exact: true })
-  await expect(panel.getByRole('alert')).toContainText('Tier evidence unavailable')
+  await expect(panel.getByRole('alert')).toContainText("Couldn't read the service tier.")
+  await expect(panel.getByRole('alert')).not.toContainText('Tier evidence unavailable')
+  const retry = panel.getByRole('button', { name: 'Try again', exact: true })
+  await expect(retry).toBeVisible()
   await expect(panel.locator('.compare-estimate').first()).toHaveText('—')
   await expect(panel.locator('.estimate-source')).toHaveCount(0)
   await panel.getByRole('button', { name: 'Change tier', exact: true }).click()
@@ -466,6 +506,16 @@ test('failed evidence reads show placeholders, never a zero-run or vendor conclu
   await expect(dialog.locator('[data-option=fast] .tp-estimate')).toHaveText('—')
   await expect(dialog.locator('[data-option=fast] .tp-text')).not.toContainText('not offered')
   await expect(dialog.locator('.estimate-source')).toHaveCount(0)
+  await page.keyboard.press('Escape'); await expect(dialog).toHaveCount(0)
+  await expectStableControls({ controls: { retry, change: panel.getByRole('button', { name: 'Change tier', exact: true }) }, scrollAreas: { details: page.locator('.session-panel > .scroll') }, interactions: [{ name: 'failed retry keeps the human error and its controls', run: async () => {
+    const failed = page.waitForResponse(response => response.url().endsWith(`/harness-sessions/${id}/tier`) && response.status() === 503)
+    await retry.click(); await (await failed).finished()
+    await expect(panel.getByRole('alert')).toContainText("Couldn't read the service tier.")
+  } }] })
+  await page.route('**/api/projects/*/harness-sessions/*/tier', route => route.fulfill({ json: getState() }))
+  await retry.click()
+  await expect(panel.getByRole('alert')).toHaveCount(0)
+  await expect(panel.locator('.source')).toContainText('fixture-adapter')
 })
 
 test('live evidence ignores sibling sessions and batches selected telemetry over five seconds', async ({ page }) => {

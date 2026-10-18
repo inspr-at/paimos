@@ -303,6 +303,31 @@ func (rt *runtime) projectNode(ref string) (apiNode, error) {
 	return rt.projectNodeCtx(rt.context(), ref)
 }
 
+// projectIdentityCtx performs one bounded lookup without kinds, rich lists or
+// cached permissions. Server writes and inbox reads still authorize the target.
+func (rt *runtime) projectIdentityCtx(ctx context.Context, ref string) (string, error) {
+	if err := ctx.Err(); err != nil {
+		return "", err
+	}
+	if len(ref) > 1024 {
+		return "", usagef("project reference exceeds 1024 bytes")
+	}
+	ref = strings.TrimSpace(ref)
+	if ref == "" {
+		return "", usagef("--project is required")
+	}
+	var project struct {
+		ID string `json:"id"`
+	}
+	if err := rt.doCtx(ctx, http.MethodGet, "/api/projects/lookup?"+url.Values{"ref": {ref}}.Encode(), nil, &project); err != nil {
+		return "", err
+	}
+	if !validUUID(project.ID) {
+		return "", rt.fail(errors.New("project lookup returned an invalid identity"), "")
+	}
+	return project.ID, nil
+}
+
 func (rt *runtime) projectNodeCtx(ctx context.Context, ref string) (apiNode, error) {
 	if err := ctx.Err(); err != nil {
 		return apiNode{}, err

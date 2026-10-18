@@ -6,6 +6,7 @@ import { compareRevision, describeFields } from './liveUpdates'
 import { RefreshRetry } from './refreshRetry'
 import { rowStore, type EditorSession, type RowStore } from './rowStore'
 import { linkBody, linkedSentence, relationLabel, unlinkedSentence, type RelationChoice } from './relations'
+import { entryFailure, requestEntryPanel } from './entryChecks'
 import { benefitGateError } from './doneGate'
 import { toast } from './toast'
 import { statusMeta } from './work'
@@ -361,6 +362,11 @@ export function useTicket(item: Ref<ListItem | null>, context: {
         rows.gone(target.id, sent)
         if (!rows.isDeleted(target.id)) void refresh()
         sync(target, null)
+        return 'error'
+      }
+      const refused = entryFailure(e)
+      if (refused) {
+        if (item.value?.id === target.id && item.value.updated_at === copy.updated_at) requestEntryPanel({ row: target, toStatus: change.state ?? refused.to_status, refusal: refused })
         return 'error'
       }
       if (benefitGateError(e)) {

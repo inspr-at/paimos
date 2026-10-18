@@ -170,7 +170,7 @@ func ReadContained(path string, roots []string, maxBytes int) (string, string, i
 	if info.Size() > int64(maxBytes) {
 		return "", "", 0, ErrByteBound
 	}
-	return readOpenedDoctrine(f)
+	return readOpenedDoctrineLimit(f, io.ReadAll, maxBytes)
 }
 
 func validateContainedPath(path string, roots []string) (string, error) {
@@ -248,7 +248,11 @@ func readOpenedDoctrine(f *os.File) (string, string, int, error) {
 }
 
 func readOpenedDoctrineWith(f *os.File, read func(io.Reader) ([]byte, error)) (string, string, int, error) {
-	raw, err := readBoundedText(f, read)
+	return readOpenedDoctrineLimit(f, read, MaxFileBytes)
+}
+
+func readOpenedDoctrineLimit(f *os.File, read func(io.Reader) ([]byte, error), maxBytes int) (string, string, int, error) {
+	raw, err := readBoundedTextLimit(f, read, maxBytes)
 	if err != nil {
 		return "", "", 0, err
 	}
@@ -282,6 +286,10 @@ func NormalizeInstructionBytes(raw []byte) string {
 }
 
 func readBoundedText(f *os.File, read func(io.Reader) ([]byte, error)) ([]byte, error) {
+	return readBoundedTextLimit(f, read, MaxFileBytes)
+}
+
+func readBoundedTextLimit(f *os.File, read func(io.Reader) ([]byte, error), maxBytes int) ([]byte, error) {
 	info, err := f.Stat()
 	if err != nil {
 		return nil, fmt.Errorf("cannot inspect doctrine descriptor")
@@ -289,14 +297,14 @@ func readBoundedText(f *os.File, read func(io.Reader) ([]byte, error)) ([]byte, 
 	if !info.Mode().IsRegular() {
 		return nil, ErrNotRegular
 	}
-	if info.Size() > MaxFileBytes {
+	if info.Size() > int64(maxBytes) {
 		return nil, ErrByteBound
 	}
-	raw, err := read(io.LimitReader(f, MaxFileBytes+1))
+	raw, err := read(io.LimitReader(f, int64(maxBytes)+1))
 	if err != nil {
 		return nil, fmt.Errorf("cannot read doctrine descriptor")
 	}
-	if len(raw) > MaxFileBytes {
+	if len(raw) > maxBytes {
 		return nil, ErrByteBound
 	}
 	if bytes.ContainsRune(raw, 0) || !utf8.Valid(raw) {

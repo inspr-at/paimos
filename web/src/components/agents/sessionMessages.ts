@@ -1,8 +1,9 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import type { ProjectMessage } from '../../lib/agents.ts'
 
-// last_event is the newest sent_event_id folded into the group (read watermarks).
-export type MessageGroup = ProjectMessage & { count: number; last_event: number; answered: boolean }
+// last_event is the newest sent_event_id folded into the group (read watermarks);
+// members names every post folded into it, the first one included.
+export type MessageGroup = ProjectMessage & { count: number; last_event: number; answered: boolean; members: string[] }
 
 // Delivery acknowledges receipt; only an accepted counterpart reply is an answer.
 export function answeredMessages(messages: ProjectMessage[]): Set<string> {
@@ -27,14 +28,15 @@ export function collapseMessages(messages: ProjectMessage[]): MessageGroup[] {
     const key = JSON.stringify([message.sender_principal_id, message.recipient_principal_id,
       message.sender_session_id, message.recipient_session_id, message.sender_label, message.from, message.to, message.body,
       message.reply_to, message.delivery_level, message.is_action_request, message.expects_reply,
-      message.reply_obligation, message.human_resolution_outcome, answered.has(message.id)])
+      message.reply_obligation, message.human_resolution_outcome, answered.has(message.id),
+      message.optimistic ? message.id : null, message.send_failed ?? false])
     // Only consecutive duplicates collapse: a repeated answer after a person's
     // next question must stay in its chronological place.
     const previous = groups.at(-1)
     const elapsed = Date.parse(message.created_at ?? '') - Date.parse(previous?.created_at ?? '')
-    if (previous && key === previousKey && elapsed >= 0 && elapsed <= 60_000) { previous.count++; previous.last_event = Math.max(previous.last_event, message.sent_event_id) }
+    if (previous && key === previousKey && elapsed >= 0 && elapsed <= 60_000) { previous.count++; previous.last_event = Math.max(previous.last_event, message.sent_event_id); previous.members.push(message.id) }
     else {
-      const group = { ...message, count: 1, last_event: message.sent_event_id, answered: answered.has(message.id) }
+      const group = { ...message, count: 1, last_event: message.sent_event_id, answered: answered.has(message.id), members: [message.id] }
       groups.push(group)
     }
     previousKey = key

@@ -51,6 +51,7 @@ type OutcomeAvailability struct {
 	Why            string `json:"why"`
 }
 type Input struct {
+	GoalID           string          `json:"goal_id,omitempty"`
 	Doctrine         *DoctrineTarget `json:"doctrine,omitempty"`
 	RequestID        string          `json:"request_id"`
 	Question         string          `json:"question"`
@@ -108,6 +109,7 @@ type Answer struct {
 	DeliverAfter time.Time `json:"deliver_after"`
 }
 type Pending struct {
+	PickedUpAt        *time.Time `json:"picked_up_at,omitempty"`
 	DoctrineState     string     `json:"doctrine_state,omitempty"`
 	ErrorMessage      string     `json:"error_message,omitempty"`
 	EffectData        EffectData `json:"effect_data,omitempty"`
@@ -160,7 +162,7 @@ func (in *Input) Validate() error {
 		return fmt.Errorf("request_id must be a UUID")
 	}
 	in.RequestID = strings.ToLower(in.RequestID)
-	for _, id := range []*string{&in.TicketID, &in.SessionID, &in.SourceRequestID, &in.SourceHandoverID} {
+	for _, id := range []*string{&in.GoalID, &in.TicketID, &in.SessionID, &in.SourceRequestID, &in.SourceHandoverID} {
 		if *id != "" && !uuidRE.MatchString(*id) {
 			return fmt.Errorf("invalid reference UUID")
 		}

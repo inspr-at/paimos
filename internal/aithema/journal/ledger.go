@@ -160,7 +160,8 @@ func getHold(ctx context.Context, tx pgx.Tx, st *session, id, claim string) (*ho
 // committed worker acknowledgement matching every admission field permits
 // dispatch. An omitted lane_kind denotes the contract's default remote lane.
 func journaledHold(ctx context.Context, tx pgx.Tx, st *session, h *hold) error {
-	rows, err := tx.Query(ctx, `SELECT document FROM aithema_journal_records WHERE tenant_id=$1 AND sid=$2 AND kind='budget.hold'`, st.Tenant, st.ID)
+	key := marshal([]any{st.ID, "worker", h.Generation, h.ID, h.Attempt, h.Lane, h.Max, h.Currency, h.LaneKind})
+	rows, err := tx.Query(ctx, `SELECT document FROM aithema_journal_records WHERE tenant_id=$1 AND sid=$2 AND kind='budget.hold' AND aeon_budget_ack_key(document)=$3::jsonb LIMIT 1`, st.Tenant, st.ID, key)
 	if err != nil {
 		return err
 	}

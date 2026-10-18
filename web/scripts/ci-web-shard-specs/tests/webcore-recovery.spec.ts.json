@@ -1,0 +1,22 @@
+{
+  "group": "webcore-recovery",
+  "nightlyTiming": {
+    "seconds": 34.315,
+    "selectedTests": 9
+  },
+  "spec": {
+    "file": "tests/webcore-recovery.spec.ts",
+    "listedTests": 4,
+    "tierTiming": {
+      "caseSeconds": {
+        "max": 5.031,
+        "median": 4.311,
+        "min": 1.969
+      },
+      "seconds": 34.315,
+      "selectedTests": 9
+    },
+    "weightSeconds": 12,
+    "weightSource": "unmeasured-test-count-estimate"
+  }
+}

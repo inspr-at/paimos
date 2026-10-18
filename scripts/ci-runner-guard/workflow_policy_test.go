@@ -178,17 +178,17 @@ func TestWorkflowPolicyMutations(t *testing.T) {
 		}
 	}
 
-	for _, id := range []string{"go-test", "go-timing", "go-static", "web-setup", "web-unit", "web-shard", "release-check-run", "e2e-run", "go", "web", "release-check", "e2e", "tier-measurements"} {
-		add("raw-lane-consumer/"+id, "ci.yml", "effective tier-plan lane", func(w map[string]any) {
+	for _, id := range []string{"go-test", "go-timing", "go-static", "web-catalogue", "web-setup", "web-unit", "web-shard", "release-check-run", "e2e-run", "go", "web", "release-check", "e2e", "tier-measurements"} {
+		add("retired-lane-consumer/"+id, "ci.yml", "effective ci-plan lane", func(w map[string]any) {
 			job := mapping(mapping(w["jobs"])[id])
-			if condition, ok := job["if"].(string); ok && strings.Contains(condition, "needs.tier-plan.outputs.lane") {
-				job["if"] = strings.ReplaceAll(condition, "needs.tier-plan.outputs.lane", "needs.ci-plan.outputs.lane")
+			if condition, ok := job["if"].(string); ok && strings.Contains(condition, "needs.ci-plan.outputs.lane") {
+				job["if"] = strings.ReplaceAll(condition, "needs.ci-plan.outputs.lane", "needs.tier-plan.outputs.lane")
 				return
 			}
 			for _, value := range job["steps"].([]any) {
 				env := mapping(mapping(value)["env"])
-				if env["CI_LANE"] == "${{ needs.tier-plan.outputs.lane }}" {
-					env["CI_LANE"] = "${{ needs.ci-plan.outputs.lane }}"
+				if env["CI_LANE"] == "${{ needs.ci-plan.outputs.lane }}" {
+					env["CI_LANE"] = "${{ needs.tier-plan.outputs.lane }}"
 					return
 				}
 			}
@@ -196,11 +196,41 @@ func TestWorkflowPolicyMutations(t *testing.T) {
 		})
 	}
 	add("effective-lane-publisher-missing", "ci.yml", "publish the effective lane", func(w map[string]any) {
-		delete(mapping(mapping(mapping(w["jobs"])["tier-plan"])["outputs"]), "lane")
+		delete(mapping(mapping(mapping(w["jobs"])["ci-plan"])["outputs"]), "lane")
 	})
+	add("raw-lane-publisher", "ci.yml", "publish the effective lane", func(w map[string]any) {
+		mapping(mapping(mapping(w["jobs"])["ci-plan"])["outputs"])["lane"] = "${{ steps.plan.outputs.lane }}"
+	})
+	for _, output := range []string{"mode", "layout", "browser_scope", "browser_plan_sha256"} {
+		add("tier-output-unpublished/"+output, "ci.yml", "publish the effective tier outputs", func(w map[string]any) {
+			delete(mapping(mapping(mapping(w["jobs"])["ci-plan"])["outputs"]), output)
+		})
+	}
+	add("separate-tier-planner", "ci.yml", "tier planning must remain consolidated", func(w map[string]any) {
+		mapping(w["jobs"])["tier-plan"] = map[string]any{"runs-on": "ubuntu-latest"}
+	})
+	for _, id := range []string{"ci-plan", "runner-route"} {
+		add("dependent-planner-or-route/"+id, "ci.yml", "must run independently", func(w map[string]any) {
+			mapping(mapping(w["jobs"])[id])["needs"] = "tree-reuse"
+		})
+	}
+	for _, id := range []string{"go-test", "web-unit", "web-shard"} {
+		for _, field := range []string{"if", "run", "env"} {
+			add("merge-group-full-proof/"+id+"/"+field, "ci.yml", "prove full tier execution", func(w map[string]any) {
+				for _, value := range mapping(mapping(w["jobs"])[id])["steps"].([]any) {
+					step := mapping(value)
+					if step["name"] == "Confirm full tier execution" {
+						delete(step, field)
+						return
+					}
+				}
+				t.Fatal("missing proof mutation target")
+			})
+		}
+	}
 	// All contexts and supporting job identities are reserved, even on a
 	// path-filtered workflow, and even when a different id sets a reserved name.
-	for _, id := range []string{"go", "web", "release-check", "e2e", "go-test", "go-static", "go-timing", "runner-route", "ci-plan", "web-setup", "web-unit", "web-shard", "e2e-run", "release-check-run", "cross-family", "gate/cross-family"} {
+	for _, id := range []string{"go", "web", "release-check", "e2e", "go-test", "go-static", "go-timing", "runner-route", "ci-plan", "web-catalogue", "web-setup", "web-unit", "web-shard", "e2e-run", "release-check-run", "cross-family", "gate/cross-family"} {
 		for _, identity := range []string{id, strings.ToUpper(id)} {
 			add("reserved-id/"+identity, "extra.yaml", "reserved to ci.yml", func(w map[string]any) {
 				w["jobs"] = map[string]any{identity: map[string]any{"runs-on": "ubuntu-latest"}}
@@ -275,6 +305,40 @@ func TestWorkflowPolicyMutations(t *testing.T) {
 		add("smoke-route/"+name, "test-runner-smoke.yml", want, func(w map[string]any) { edit(mapping(mapping(w["jobs"])["smoke"])) })
 	}
 
+	for _, key := range []string{"AEON_POOL_EVENTS", "AEON_PR_HEAD_REPOSITORY", "AEON_MBP2606_AVAILABILITY", "AEON_REQUIRED_IDLE_RUNNERS"} {
+		for _, wrong := range []any{nil, "", "pull_request", "${{ github.event.pull_request.base.repo.full_name }}"} {
+			add(fmt.Sprintf("router-input/%s/%v", key, wrong), "test-runner-route.yml", "pool router must bind "+key, func(w map[string]any) {
+				for _, value := range mapping(mapping(w["jobs"])["route"])["steps"].([]any) {
+					step := mapping(value)
+					if step["id"] == "route" {
+						mapping(step["env"])[key] = wrong
+					}
+				}
+			})
+		}
+	}
+	add("router-step-missing", "test-runner-route.yml", "pool router policy step is missing", func(w map[string]any) {
+		mapping(mapping(w["jobs"])["route"])["steps"] = nil
+	})
+	add("router-command-bypassed", "test-runner-route.yml", "pool router must execute", func(w map[string]any) {
+		for _, value := range mapping(mapping(w["jobs"])["route"])["steps"].([]any) {
+			step := mapping(value)
+			if step["id"] == "route" {
+				step["run"] = "echo bypass"
+			}
+		}
+	})
+	for name, old := range map[string]string{
+		"same-repo-head": "github.event.pull_request.head.repo.full_name == github.repository",
+		"main-ref":       "github.ref == 'refs/heads/main'",
+		"attempt":        "needs.runner-route.outputs.run_attempt == github.run_attempt",
+	} {
+		add("ci-pool/"+name, "ci.yml", "runner selection is not proven", func(w map[string]any) {
+			job := mapping(mapping(w["jobs"])["go-test"])
+			job["runs-on"] = strings.Replace(job["runs-on"].(string), old, "true", 1)
+		})
+	}
+
 	// The original review's CI trigger, gate, dependency and runner mutations.
 	for name, push := range map[string]any{
 		"unfiltered-push": nil,
@@ -308,7 +372,7 @@ func TestWorkflowPolicyMutations(t *testing.T) {
 	add("non-pr-shared-group", "ci.yml", "reviewed concurrency policy", func(w map[string]any) {
 		mapping(w["concurrency"])["group"] = "ci-${{ github.event_name }}-${{ github.event.pull_request.number || github.ref }}"
 	})
-	for _, id := range []string{"go", "web", "release-check", "e2e", "go-test", "go-static", "go-timing", "runner-route", "ci-plan", "web-setup", "web-unit", "web-shard", "e2e-run", "release-check-run", "migration-compat"} {
+	for _, id := range []string{"go", "web", "release-check", "e2e", "go-test", "go-static", "go-timing", "runner-route", "ci-plan", "web-catalogue", "web-setup", "web-unit", "web-shard", "e2e-run", "release-check-run", "migration-compat"} {
 		for _, rename := range []bool{false, true} {
 			add(fmt.Sprintf("missing-or-renamed/%s/%t", id, rename), "ci.yml", "is missing", func(w map[string]any) {
 				jobs := mapping(w["jobs"])
@@ -322,7 +386,7 @@ func TestWorkflowPolicyMutations(t *testing.T) {
 			})
 		}
 		if id == "runner-route" || id == "ci-plan" || id == "migration-compat" {
-			for _, condition := range []any{false, "success()", nil, "needs.tier-plan.outputs.lane == 'full'"} {
+			for _, condition := range []any{false, "success()", nil, "needs.ci-plan.outputs.lane == 'full'"} {
 				add(fmt.Sprintf("conditional/%s/%v", id, condition), "ci.yml", "must run without an if condition", func(w map[string]any) { mapping(mapping(w["jobs"])[id])["if"] = condition })
 			}
 			continue
@@ -336,13 +400,53 @@ func TestWorkflowPolicyMutations(t *testing.T) {
 		add("renamed-check-context/"+id, "ci.yml", "renamed to", func(w map[string]any) { mapping(mapping(w["jobs"])[id])["name"] = "other" })
 	}
 	add("missing-go-dependency", "ci.yml", "effective lane publisher", func(w map[string]any) { mapping(mapping(w["jobs"])["go"])["needs"] = []any{"go-test", "go-timing"} })
+	for _, condition := range []any{nil, false, "always()", "needs.tree-reuse.outputs.reuse != 'merge_group'"} {
+		add(fmt.Sprintf("go-main-gate-condition/%v", condition), "ci.yml", "main's full timing gate", func(w map[string]any) {
+			steps := mapping(mapping(w["jobs"])["go"])["steps"].([]any)
+			mapping(steps[0])["if"] = condition
+		})
+		add(fmt.Sprintf("go-pr-gate-condition/%v", condition), "ci.yml", "confirmed PR proof", func(w map[string]any) {
+			steps := mapping(mapping(w["jobs"])["go"])["steps"].([]any)
+			mapping(steps[len(steps)-1])["if"] = condition
+		})
+	}
+	add("go-main-timing-skipped", "ci.yml", "main's full timing gate", func(w map[string]any) {
+		steps := mapping(mapping(w["jobs"])["go"])["steps"].([]any)
+		gate := mapping(steps[0])
+		gate["run"] = strings.Replace(gate["run"].(string), `full) expected=success`, `full) expected=skipped`, 1)
+	})
 	add("missing-web-dependency", "ci.yml", "effective lane publisher", func(w map[string]any) { mapping(mapping(w["jobs"])["web"])["needs"] = []any{"web-setup"} })
+	for _, field := range []string{"if", "continue-on-error", "env", "run"} {
+		add("web-scope-validation-weakened/"+field, "ci.yml", "validate browser execution scope unconditionally", func(w map[string]any) {
+			steps := mapping(mapping(w["jobs"])["web"])["steps"].([]any)
+			scope := mapping(steps[0])
+			switch field {
+			case "if":
+				scope[field] = "needs.tree-reuse.outputs.reuse == 'none'"
+			case "continue-on-error":
+				scope[field] = true
+			case "env":
+				mapping(scope[field])["BROWSER_SCOPE"] = "gated-full"
+			case "run":
+				delete(scope, field)
+			}
+		})
+	}
+	for index := 1; index <= 3; index++ {
+		add(fmt.Sprintf("web-proof-optional/%d", index), "ci.yml", "must revalidate every reused PR proof", func(w map[string]any) {
+			steps := mapping(mapping(w["jobs"])["web"])["steps"].([]any)
+			mapping(steps[index])["continue-on-error"] = true
+		})
+	}
 	add("web-skipped-on-failure", "ci.yml", "web must report failures", func(w map[string]any) { delete(mapping(mapping(w["jobs"])["web"]), "if") })
 	add("web-full-shards-omitted", "ci.yml", "web shard matrix must retain", func(w map[string]any) {
 		mapping(mapping(mapping(mapping(w["jobs"])["web-shard"])["strategy"])["matrix"])["shard"] = []any{1}
 	})
+	add("web-shard-list-unpublished", "ci.yml", "publish the planned web shard list", func(w map[string]any) {
+		delete(mapping(mapping(mapping(w["jobs"])["ci-plan"])["outputs"]), "web_shards")
+	})
 	add("web-units-omitted-from-aggregate", "ci.yml", "web must gate setup, every unit shard", func(w map[string]any) {
-		mapping(mapping(w["jobs"])["web"])["needs"] = []any{"ci-plan", "web-setup", "web-shard", "tree-reuse", "cache-prime", "tier-plan"}
+		mapping(mapping(w["jobs"])["web"])["needs"] = []any{"ci-plan", "web-catalogue", "web-setup", "web-shard", "tree-reuse", "cache-prime"}
 	})
 	for _, mutate := range []string{"matrix", "fail-fast", "continue-on-error"} {
 		add("web-unit-weakened/"+mutate, "ci.yml", "four blocking shards", func(w map[string]any) {
@@ -460,9 +564,60 @@ func TestWorkflowPolicyAllowsReviewedWorkflowsAndFilteredPRs(t *testing.T) {
 	}
 }
 
+// planningEnabledEnv clears the AEON-1333 kill switch for one gate simulation.
+// CI publishes CI_IMPACT=off on the test process. These cases prove classified
+// lanes, the static layout and reuse while planning stays enabled. Kill-switch
+// rejection scenarios set CI_IMPACT=off explicitly.
+// Assigned keys replace inherited entries so the shell observes that value.
+func planningEnabledEnv(t *testing.T, values map[string]string) []string {
+	t.Helper()
+	assigned := make(map[string]string, len(values)+2)
+	for name, value := range values {
+		assigned[name] = value
+	}
+	assigned["CI_IMPACT"] = ""
+	assigned["GITHUB_STEP_SUMMARY"] = filepath.Join(t.TempDir(), "summary")
+	return scenarioEnviron(assigned)
+}
+
+// scenarioEnviron isolates workflow switches from the caller's scenario.
+// Explicit scenario values replace inherited entries, including CI_IMPACT=off,
+// so ambient workflow settings cannot mask a lane or disable its kill switch.
+func scenarioEnviron(scenario map[string]string) []string {
+	blocked := map[string]struct{}{
+		"CI_IMPACT":        {},
+		"CI_AFFECTED_LANE": {},
+		"CI_MG_REUSE":      {},
+		"CI_TREE_REUSE":    {},
+	}
+	env := make([]string, 0, len(os.Environ())+len(scenario))
+	for _, entry := range os.Environ() {
+		key, _, _ := strings.Cut(entry, "=")
+		if _, drop := blocked[key]; drop {
+			continue
+		}
+		if _, replaced := scenario[key]; replaced {
+			continue
+		}
+		env = append(env, entry)
+	}
+	names := make([]string, 0, len(scenario))
+	for name := range scenario {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+	for _, name := range names {
+		env = append(env, name+"="+scenario[name])
+	}
+	return env
+}
+
 // Execute the actual YAML gate commands. A fabricated green/skipped fixture
 // must not conceal a failed, cancelled or unexpectedly omitted dependency.
 func TestCIClassifiedAggregateResults(t *testing.T) {
+	// 2ffd1aee accepted these lanes only when the test process had no kill
+	// switch. CI sets CI_IMPACT=off, and the gate then rejected them.
+	t.Setenv("CI_IMPACT", "off")
 	var workflow map[string]any
 	if err := yaml.Unmarshal(readPolicyWorkflows(t)["ci.yml"], &workflow); err != nil {
 		t.Fatal(err)
@@ -475,6 +630,9 @@ func TestCIClassifiedAggregateResults(t *testing.T) {
 	for _, id := range []string{"go", "web", "release-check", "e2e"} {
 		steps := mapping(jobs[id])["steps"].([]any)
 		step := mapping(steps[len(steps)-1])
+		if id == "go" {
+			step = mapping(steps[0])
+		}
 		run, ok := step["run"].(string)
 		if !ok {
 			t.Fatalf("%s has no executable gate", id)
@@ -495,7 +653,7 @@ func TestCIClassifiedAggregateResults(t *testing.T) {
 						continue
 					}
 					values[name] = "skipped"
-					if lane == "full" || lane == "spec-only" && (name == "WEB_SETUP" || name == "WEB_UNIT" || name == "WEB_SHARD") {
+					if lane == "full" || lane == "spec-only" && (name == "WEB_CATALOGUE" || name == "WEB_SETUP" || name == "WEB_UNIT" || name == "WEB_SHARD") {
 						values[name] = "success"
 					}
 				}
@@ -503,20 +661,22 @@ func TestCIClassifiedAggregateResults(t *testing.T) {
 					t.Helper()
 					cmd := exec.Command("bash", "-c", run)
 					cmd.Dir = root
-					cmd.Env = append(os.Environ(), "GITHUB_STEP_SUMMARY="+filepath.Join(t.TempDir(), "summary"))
-					for name, value := range values {
-						if name == changed {
-							value = result
+					current := values
+					if changed != "" {
+						current = make(map[string]string, len(values))
+						for name, value := range values {
+							current[name] = value
 						}
-						cmd.Env = append(cmd.Env, name+"="+value)
+						current[changed] = result
 					}
+					cmd.Env = planningEnabledEnv(t, current)
 					return cmd.Run()
 				}
 				if err := execute("", ""); err != nil {
 					t.Fatalf("legitimate %s gate rejected: %v", lane, err)
 				}
 				for name, expected := range values {
-					if name == "CI_LANE" || name == "REUSE" || name == "REUSE_PROOF" || name == "SOURCE_RUN" || name == "CACHE_PRIME" || name == "TIER_LAYOUT" {
+					if name == "CI_LANE" || name == "REUSE" || name == "REUSE_PROOF" || name == "SOURCE_RUN" || name == "CACHE_PRIME" || name == "TIER_LAYOUT" || strings.HasPrefix(name, "PR_CONFIRM_") {
 						continue
 					}
 					wrong := "success"
@@ -547,20 +707,20 @@ func TestCIClassifiedWebShardMatrix(t *testing.T) {
 	expression := mapping(mapping(shard["strategy"])["matrix"])["shard"].(string)
 	expression = strings.TrimPrefix(expression, "${{ fromJSON(")
 	expression = strings.TrimSuffix(expression, ") }}")
-	for _, lane := range []string{"full", "spec-only"} {
+	// AEON-1389: the planner owns PR sizing. Other events retain all seventeen
+	// shards even if a candidate publishes an empty, one-row or essential list.
+	full := "[1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17]"
+	for _, planned := range []string{"", "[1]", "[1,2,3,4]", "[1,2,3,4,5,6]", full} {
 		for _, event := range []string{"pull_request", "merge_group", "push", "workflow_dispatch"} {
-			for _, mode := range []string{"full", "essential"} {
-				const premerge = `contains(fromJSON('["pull_request","merge_group"]'), github.event_name)`
-				got := expandConcurrency(t, "${{ "+expression+" }}", map[string]string{"needs.tier-plan.outputs.lane": lane, "needs.tier-plan.outputs.mode": mode, premerge: map[bool]string{true: "yes", false: ""}[event == "pull_request" || event == "merge_group"]})
-				want := "[1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12]"
-				if lane == "spec-only" {
-					want = "[1]"
-				} else if mode == "essential" && (event == "pull_request" || event == "merge_group") {
-					want = "[1, 2]"
-				}
-				if got != want {
-					t.Fatalf("%s/%s/%s matrix = %s, want %s", lane, event, mode, got, want)
-				}
+			got := expandConcurrency(t, "${{ "+expression+" }}", map[string]string{
+				"github.event_name": event, "needs.ci-plan.outputs.web_shards": planned,
+			})
+			want := full
+			if event == "pull_request" && planned != "" {
+				want = planned
+			}
+			if got != want {
+				t.Fatalf("%s/%s matrix = %s, want %s", event, planned, got, want)
 			}
 		}
 	}
@@ -571,7 +731,7 @@ func TestCIClassifiedWebShardMatrix(t *testing.T) {
 	if checkout["fetch-depth"] != "${{ github.event_name == 'pull_request' && '0' || '1' }}" || checkout["persist-credentials"] != false {
 		t.Fatal("classifier checkout must keep PR-only history and no persisted credentials")
 	}
-	for _, id := range []string{"go-test", "go-static", "go-timing", "web-setup", "web-unit", "web-shard", "release-check-run", "e2e-run"} {
+	for _, id := range []string{"go-test", "go-static", "go-timing", "web-catalogue", "web-setup", "web-unit", "web-shard", "release-check-run", "e2e-run"} {
 		steps := mapping(jobs[id])["steps"].([]any)
 		if depth := mapping(mapping(steps[0])["with"])["fetch-depth"]; depth != nil {
 			t.Fatalf("%s heavy checkout must retain shallow history; got %v", id, depth)
@@ -627,18 +787,24 @@ func TestCIPlanUsesTrustedBaseClassifier(t *testing.T) {
 // aggregates accept exactly the skipped shard/timing/smoke jobs and still
 // require static checks, setup and units; any other layout value is rejected.
 func TestCIStaticLayoutAggregatesAndJobGates(t *testing.T) {
+	// Same inherited kill switch as TestCIClassifiedAggregateResults: a static
+	// PR layout is legitimate only while planning is enabled.
+	t.Setenv("CI_IMPACT", "off")
 	var workflow map[string]any
 	if err := yaml.Unmarshal(readPolicyWorkflows(t)["ci.yml"], &workflow); err != nil {
 		t.Fatal(err)
 	}
 	jobs := mapping(workflow["jobs"])
-	if mapping(mapping(jobs["tier-plan"])["outputs"])["layout"] != "${{ steps.tiers.outputs.layout }}" {
-		t.Fatal("tier-plan must publish the layout output")
+	if mapping(mapping(jobs["ci-plan"])["outputs"])["layout"] != "${{ steps.tiers.outputs.layout }}" {
+		t.Fatal("ci-plan must publish the layout output")
 	}
-	for id, static := range map[string]bool{"go-test": true, "go-timing": true, "web-shard": true, "e2e-run": true, "go-static": false, "web-setup": false, "web-unit": false, "release-check-run": false} {
+	for id, static := range map[string]bool{"go-test": true, "go-timing": true, "web-shard": true, "e2e-run": true, "go-static": false, "web-catalogue": false, "web-setup": false, "web-unit": false, "release-check-run": false} {
 		condition, _ := mapping(jobs[id])["if"].(string)
-		if strings.Contains(condition, "needs.tier-plan.outputs.layout != 'static'") != static {
+		if strings.Contains(condition, "needs.ci-plan.outputs.layout != 'static'") != static {
 			t.Fatalf("%s static-layout gate = %v, want %v", id, !static, static)
+		}
+		if static && !strings.Contains(condition, "(github.event_name != 'pull_request' || needs.ci-plan.outputs.layout != 'static')") {
+			t.Fatalf("%s must allow the static-layout shortcut only on PRs", id)
 		}
 	}
 	if _, exists := mapping(jobs["migration-compat"])["if"]; exists {
@@ -658,8 +824,8 @@ func TestCIStaticLayoutAggregatesAndJobGates(t *testing.T) {
 			rejected: []map[string]string{{"GO_TEST": "success"}, {"GO_TEST": "failure"}, {"GO_TIMING": "success"}, {"GO_STATIC": "skipped"}, {"GO_STATIC": "failure"}, {"GITHUB_EVENT_NAME": "merge_group"}, {"GITHUB_EVENT_NAME": "push"}, {"CI_LANE": "spec-only"}, {"TIER_LAYOUT": "bogus"}, {"TIER_LAYOUT": ""}, {"TIER_PLAN": "failure"}},
 		},
 		"web": {
-			accepted: map[string]string{"WEB_SETUP": "success", "WEB_UNIT": "success", "WEB_SHARD": "skipped"},
-			rejected: []map[string]string{{"WEB_SHARD": "success"}, {"WEB_SHARD": "failure"}, {"WEB_UNIT": "skipped"}, {"WEB_UNIT": "failure"}, {"WEB_SETUP": "skipped"}, {"GITHUB_EVENT_NAME": "merge_group"}, {"TIER_LAYOUT": "bogus"}, {"TIER_LAYOUT": ""}},
+			accepted: map[string]string{"WEB_CATALOGUE": "success", "WEB_SETUP": "success", "WEB_UNIT": "success", "WEB_SHARD": "skipped"},
+			rejected: []map[string]string{{"WEB_CATALOGUE": "failure"}, {"WEB_CATALOGUE": "cancelled"}, {"WEB_CATALOGUE": "skipped"}, {"WEB_CATALOGUE": ""}, {"WEB_SHARD": "success"}, {"WEB_SHARD": "failure"}, {"WEB_UNIT": "skipped"}, {"WEB_UNIT": "failure"}, {"WEB_SETUP": "skipped"}, {"GITHUB_EVENT_NAME": "merge_group"}, {"TIER_LAYOUT": "bogus"}, {"TIER_LAYOUT": ""}},
 		},
 		"e2e": {
 			accepted: map[string]string{"CHECK_RESULT": "skipped"},
@@ -669,6 +835,9 @@ func TestCIStaticLayoutAggregatesAndJobGates(t *testing.T) {
 	for id, c := range cases {
 		steps := mapping(jobs[id])["steps"].([]any)
 		step := mapping(steps[len(steps)-1])
+		if id == "go" {
+			step = mapping(steps[0])
+		}
 		run := step["run"].(string)
 		if _, exists := mapping(step["env"])["TIER_LAYOUT"]; !exists {
 			t.Fatalf("%s must read the tier layout", id)
@@ -683,10 +852,7 @@ func TestCIStaticLayoutAggregatesAndJobGates(t *testing.T) {
 			}
 			cmd := exec.Command("bash", "-c", run)
 			cmd.Dir = root
-			cmd.Env = append(os.Environ(), "GITHUB_STEP_SUMMARY="+filepath.Join(t.TempDir(), "summary"))
-			for name, value := range values {
-				cmd.Env = append(cmd.Env, name+"="+value)
-			}
+			cmd.Env = planningEnabledEnv(t, values)
 			return cmd.Run()
 		}
 		if err := execute(nil); err != nil {
@@ -701,5 +867,74 @@ func TestCIStaticLayoutAggregatesAndJobGates(t *testing.T) {
 	// release-check has no layout input: the static lane keeps release checks.
 	if _, exists := mapping(mapping(mapping(jobs["release-check"])["steps"].([]any)[0])["env"])["TIER_LAYOUT"]; exists {
 		t.Fatal("release checks must not vary with the tier layout")
+	}
+}
+
+// The release-check job publishes CI_IMPACT=off. Aggregate simulations must
+// keep the lanes they classify, and must still reject those lanes when the
+// scenario itself engages the kill switch.
+func TestAggregateScenariosIgnoreAmbientImpactKillSwitch(t *testing.T) {
+	t.Setenv("CI_IMPACT", "off")
+	t.Setenv("CI_AFFECTED_LANE", "off")
+	var workflow map[string]any
+	if err := yaml.Unmarshal(readPolicyWorkflows(t)["ci.yml"], &workflow); err != nil {
+		t.Fatal(err)
+	}
+	jobs := mapping(workflow["jobs"])
+	root, err := filepath.Abs("../..")
+	if err != nil {
+		t.Fatal(err)
+	}
+	run := func(id string, index int, values map[string]string) error {
+		t.Helper()
+		steps := mapping(jobs[id])["steps"].([]any)
+		script, _ := mapping(steps[index])["run"].(string)
+		scenario := make(map[string]string, len(values)+1)
+		for name, value := range values {
+			scenario[name] = value
+		}
+		scenario["GITHUB_STEP_SUMMARY"] = filepath.Join(t.TempDir(), "summary")
+		cmd := exec.Command("bash", "-c", script)
+		cmd.Dir = root
+		cmd.Env = scenarioEnviron(scenario)
+		out, err := cmd.CombinedOutput()
+		if err != nil {
+			return fmt.Errorf("%w: %s", err, out)
+		}
+		return nil
+	}
+	docs := map[string]string{
+		"CI_LANE": "docs-only", "CI_PLAN": "success", "REUSE": "none", "REUSE_PROOF": "skipped",
+		"SOURCE_RUN": "", "CACHE_PRIME": "skipped", "TIER_PLAN": "success", "TIER_LAYOUT": "full",
+		"GO_TEST": "skipped", "GO_STATIC": "skipped", "GO_TIMING": "skipped",
+	}
+	if err := run("go", 0, docs); err != nil {
+		t.Fatalf("ambient CI_IMPACT=off rejected a docs-only aggregate: %v", err)
+	}
+	spec := map[string]string{
+		"CI_LANE": "spec-only", "CI_PLAN": "success", "REUSE": "none", "REUSE_PROOF": "skipped",
+		"SOURCE_RUN": "", "CACHE_PRIME": "skipped", "TIER_PLAN": "success", "TIER_LAYOUT": "full",
+		"WEB_CATALOGUE": "success", "WEB_SETUP": "success", "WEB_UNIT": "success", "WEB_SHARD": "success",
+	}
+	webSteps := mapping(jobs["web"])["steps"].([]any)
+	if err := run("web", len(webSteps)-1, spec); err != nil {
+		t.Fatalf("ambient CI_IMPACT=off rejected a spec-only aggregate: %v", err)
+	}
+	static := map[string]string{
+		"CI_LANE": "full", "CI_PLAN": "success", "TIER_PLAN": "success", "TIER_LAYOUT": "static",
+		"REUSE": "none", "REUSE_PROOF": "skipped", "SOURCE_RUN": "", "CACHE_PRIME": "skipped",
+		"GITHUB_EVENT_NAME": "pull_request", "CHECK_RESULT": "skipped",
+	}
+	e2eSteps := mapping(jobs["e2e"])["steps"].([]any)
+	if err := run("e2e", len(e2eSteps)-1, static); err != nil {
+		t.Fatalf("ambient CI_IMPACT=off rejected the static e2e layout: %v", err)
+	}
+	killed := make(map[string]string, len(docs)+1)
+	for name, value := range docs {
+		killed[name] = value
+	}
+	killed["CI_IMPACT"] = "off"
+	if err := run("go", 0, killed); err == nil {
+		t.Fatal("scenario CI_IMPACT=off accepted a docs-only aggregate")
 	}
 }

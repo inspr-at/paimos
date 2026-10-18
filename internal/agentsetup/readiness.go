@@ -82,7 +82,7 @@ func readinessAction(v View, local LocalStatus) (string, string) {
 		case "binding_missing":
 			stage = "blocked"
 			action = fmt.Sprintf("%s was approved but isn't set up on this computer. Run `aeon-agentd add-harness --harness %s`, or remove %s from this computer in Aeon.", name, a.Harness, name)
-		case "probe_pending", "starting":
+		case "probe_pending", "starting", PinRenewed:
 			if !local.Ready {
 				action = account + " is waiting for its sign-in and availability check (up to 60 seconds after daemon startup)."
 			}
@@ -106,6 +106,8 @@ func readinessAction(v View, local LocalStatus) (string, string) {
 					}
 				case "probe_timeout":
 					reason = "its sign-in and availability check did not finish within 60 seconds"
+				case UnsettledPreviousRun:
+					reason = "a previous run's reservation settlement could not be confirmed. Restore the helper's connection to Aeon; reconciliation retries automatically. If the block persists, ask the operator to inspect the previous run and its reservations"
 				case "probe_failed":
 					reason = "its availability check failed or could not be confirmed by Aeon"
 					if detail := SafeProbeDetail(d.Reason, d.ReasonDetail); detail != "" {

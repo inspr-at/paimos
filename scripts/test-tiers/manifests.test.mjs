@@ -11,6 +11,9 @@ import { fileURLToPath } from 'node:url'
 import { manifestPaths, formatManifest, normalizeManifest, checkManifests, writeManifests, mergeManifests, classifyManifest, fixCommand } from './manifests.mjs'
 import { classifyArgs, classify } from './cli.mjs'
 import { proveManifests, proveConversion } from './prove-manifests.mjs'
+import { command } from './collect.mjs'
+import { loadManifest, checkSpecInventory, discoverSpecs } from '../../web/scripts/ci-web-shard.mjs'
+import { specSource, formatSpecSource, loadPolicy } from '../../web/scripts/ci-web-shard-source.mjs'
 
 const root = fileURLToPath(new URL('../../', import.meta.url))
 const goFile = manifestPaths[0], webFile = manifestPaths[1], shardsFile = manifestPaths[2]
@@ -50,6 +53,53 @@ function assertUnresolved(result) {
   assert.match(result.output, /\n>>>>>>> theirs\n/m)
   assert.throws(() => JSON.parse(result.output), SyntaxError)
 }
+
+test('AEON-735 native collection failures retain bounded stdout and stderr diagnostics', t => {
+  const script = resolve(fixtureDirectory(t, 'aeon735-collection-'), 'failure.mjs')
+  for (const stderr of ['', 'stderr diagnostic']) {
+    writeFileSync(script, `
+      process.stdout.write('discarded stdout prefix' + 'x'.repeat(3000) + 'native collection failure');
+      process.stderr.write(${JSON.stringify(stderr)});
+      process.exit(7);
+    `)
+    assert.throws(() => command(process.execPath, [script]), error => {
+      assert.match(error.message, /failed \(7\)/)
+      assert.match(error.message, /native collection failure/)
+      if (stderr) assert.ok(error.message.endsWith(stderr))
+      assert.ok(!error.message.includes('discarded stdout prefix'))
+      assert.ok(error.message.length < 5000)
+      return true
+    })
+  }
+})
+
+test('AEON-735 native Go collection reports an earlier failed package before later successful output', t => {
+  const directory = fixtureDirectory(t, 'aeon735-go-collection-')
+  const failed = 'github.com/inspr-at/paimos/internal/failed'
+  const passed = 'github.com/inspr-at/paimos/internal/passed'
+  const output = [
+    { Action: 'build-output', ImportPath: failed, Output: 'native compiler diagnostic\n' },
+    { Action: 'build-fail', ImportPath: failed },
+    { Action: 'output', Package: failed, Output: 'native package diagnostic\n' },
+    { Action: 'fail', Package: failed },
+    { Action: 'output', Package: passed, Output: 'later successful output'.repeat(300) },
+    { Action: 'pass', Package: passed },
+  ].map(row => JSON.stringify(row)).join('\n') + '\n'
+  const script = resolve(directory, 'go')
+  for (const suffix of ['', 'interrupted JSON']) {
+    writeFileSync(script, `#!${process.execPath}\nprocess.stdout.write(${JSON.stringify(output + suffix)}); process.exit(1);\n`, { mode: 0o755 })
+    assert.throws(() => command('go', ['test', '-json'], { env: { PATH: directory } }), error => {
+      assert.match(error.message, /go test -json failed \(1\)/)
+      if (suffix) assert.ok(error.message.endsWith(suffix))
+      else {
+        assert.match(error.message, /internal\/failed: native compiler diagnostic\nnative package diagnostic/)
+        assert.ok(!error.message.includes('later successful output'))
+      }
+      assert.ok(error.message.length < 2500)
+      return true
+    })
+  }
+})
 
 test('OPS-257 committed CI manifests are canonical; failures name the fix command', t => {
   checkManifests(root)
@@ -168,6 +218,58 @@ test('OPS-257 classify CLI requires an explicit tier in new syntax while retaini
   for (const flags of [[], ['--tier'], ['--tier', 'OTHER'], ['--tier', 'NIGHTLY', '--kind', 'unknown'], ['--tier', 'NIGHTLY', '--tier', 'ESSENTIAL'], ['--wat'], ['--only', '--tier']]) assert.throws(() => classifyArgs(flags))
   const result = spawnSync(process.execPath, [resolve(root, 'scripts/test-tiers/cli.mjs'), 'classify', '--tier', 'OTHER'], { encoding: 'utf8' })
   assert.equal(result.status, 1); assert.match(result.stderr, /requires --tier/)
+})
+
+test('AEON-588 classification records only newly added NIGHTLY identities as post-gate cases', () => {
+  const source = {
+    ...manifest([row('TestCore', 'ESSENTIAL'), row('TestLegacy', 'NIGHTLY'), row('TestRecorded', 'NIGHTLY')]),
+    postGateCases: ['internal/auth:TestRecorded'],
+  }
+  const before = structuredClone(source)
+  const discovered = [...source.tests, row('TestNew'), row('TestElse', 'NIGHTLY', 'internal/nodes')]
+  const result = classifyManifest(source, discovered, { tier: 'NIGHTLY', only: 'internal/auth:' })
+  assert.deepEqual(result.manifest.postGateCases, ['internal/auth:TestRecorded', 'internal/auth:TestNew'])
+  assert.deepEqual(result.manifest.tests, [...source.tests, row('TestNew', 'NIGHTLY')])
+  assert.deepEqual(source, before, 'classification must not mutate its input')
+  const again = classifyManifest(result.manifest, discovered, { tier: 'NIGHTLY', only: 'internal/auth:' })
+  assert.deepEqual(again.added, [])
+  assert.deepEqual(again.manifest, result.manifest, 'repeated classification must not duplicate post-gate entries')
+  for (const tier of ['ESSENTIAL', 'GATED-FULL']) {
+    const gated = classifyManifest(source, discovered, { tier, only: 'internal/auth:' })
+    assert.deepEqual(gated.manifest.postGateCases, source.postGateCases)
+    assert.deepEqual(gated.added, [row('TestNew', tier)])
+  }
+})
+
+test('AEON-588 classification initializes post-gate identities for Go and native web occurrences', () => {
+  const cases = [
+    [row('TestNew'), 'internal/auth:TestNew'],
+    [{ kind: 'node', file: 'tests/a.test.ts', name: 'case' }, 'node:tests/a.test.ts:case'],
+    [{ kind: 'vitest', file: 'tests/a.unit.test.ts', name: 'case', occurrence: 2 }, 'vitest:tests/a.unit.test.ts:case#2'],
+    [{ kind: 'browser', file: 'tests/a.spec.ts', name: 'case', occurrence: 2, config: 'playwright.ui.config.ts', project: '' }, 'browser:tests/a.spec.ts:case#2'],
+  ]
+  for (const [entry, id] of cases) {
+    const source = manifest([])
+    const result = classifyManifest(source, [entry], { tier: 'NIGHTLY' })
+    assert.deepEqual(result.manifest.postGateCases, [id])
+    assert.deepEqual(source, manifest([]))
+    assert.deepEqual(classifyManifest(source, [entry], { tier: 'NIGHTLY', only: 'no match' }).manifest, source)
+    for (const tier of ['ESSENTIAL', 'GATED-FULL']) {
+      assert.equal(Object.hasOwn(classifyManifest(source, [entry], { tier }).manifest, 'postGateCases'), false)
+    }
+  }
+})
+
+test('AEON-588 legacy classify CLI saves NIGHTLY rows and post-gate identities together', () => {
+  const source = manifest([row('TestKnown')]), saves = []
+  assert.equal(classify(['go'], {
+    collect: () => ({ tests: [row('TestKnown'), row('TestNew')] }),
+    read: () => source,
+    save: (path, data) => saves.push({ path, data: roundtrip(data) }),
+  }), 0)
+  assert.equal(saves.length, 1)
+  assert.deepEqual(saves[0].data.tests, [row('TestKnown'), row('TestNew', 'NIGHTLY')])
+  assert.deepEqual(saves[0].data.postGateCases, ['internal/auth:TestNew'])
 })
 
 test('OPS-257 classify CLI saves canonical rows through discovery and validates both kinds before writing', t => {
@@ -357,4 +459,126 @@ test('OPS-257 conflict markers fail the canonical checker before staging', t => 
   assert.throws(() => checkManifests(directory), error => error.message.includes(goFile) && error.message.includes('JSON'))
   assert.throws(() => writeManifests(directory), SyntaxError)
   assert.equal(readFileSync(resolve(directory, goFile), 'utf8'), result.output)
+})
+
+// Risk: old-format additions can merge cleanly but block both manifest commands.
+test('AEON-1389 legacy policy additions explain conversion and retain their spec metadata', t => {
+  const directory = fixtures(t), path = resolve(directory, shardsFile)
+  const initial = JSON.parse(readFileSync(path, 'utf8'))
+  Object.assign(initial.groups[0].specs[1], { listedTests: 3, weightSource: 'fixture measurement',
+    tierTiming: { seconds: 7, selectedTests: 3 } })
+  initial.nightlyTiming = { run: 'fixture run', files: { 'tests/a.spec.ts': { seconds: 9, selectedTests: 3 } } }
+  const policy = structuredClone(initial)
+  policy.specSource = specSource
+  const [existing] = policy.groups[0].specs.splice(0, 1)
+  const put = value => {
+    const record = resolve(directory, 'web', specSource, `${value.spec.file}.json`)
+    mkdirSync(resolve(record, '..'), { recursive: true })
+    writeFileSync(record, formatSpecSource(value))
+  }
+  put({ group: policy.groups[0].id, spec: existing })
+  writeFileSync(path, formatManifest(policy, shardsFile))
+  const before = manifestPaths.map(file => readFileSync(resolve(directory, file), 'utf8'))
+  for (const operation of [checkManifests, writeManifests]) {
+    assert.throws(() => operation(directory), error => {
+      assert.match(error.message, /Expected per-spec sources and empty policy spec lists/)
+      assert.ok(error.message.includes('web/scripts/ci-web-shard-specs/<spec.file>.json'))
+      assert.ok(error.message.includes('{"group":"<group.id>","spec":<original spec entry>}'))
+      assert.match(error.message, /preserving all spec metadata/)
+      assert.match(error.message, /empty each policy group specs array/)
+      assert.ok(error.message.includes(fixCommand))
+      assert.ok(error.message.includes('node scripts/test-tiers/cli.mjs manifests --check'))
+      return true
+    })
+    assert.deepEqual(manifestPaths.map(file => readFileSync(resolve(directory, file), 'utf8')), before,
+      'Failed conversion validation must not partially rewrite manifests')
+  }
+  // Follow the diagnostic, then prove that only the storage format changed.
+  for (const group of policy.groups) {
+    for (const spec of group.specs) put({ group: group.id, spec })
+    group.specs = []
+  }
+  writeFileSync(path, JSON.stringify(policy))
+  for (const operation of [checkManifests, writeManifests]) {
+    assert.throws(() => operation(directory), error => {
+      assert.match(error.message, /Nightly file timings belong in per-spec sources/)
+      assert.ok(error.message.includes('nightlyTiming.files[spec.file]'))
+      assert.ok(error.message.includes('web/scripts/ci-web-shard-specs/<spec.file>.json as nightlyTiming'))
+      assert.ok(error.message.includes(fixCommand))
+      return true
+    })
+  }
+  for (const group of initial.groups) for (const spec of group.specs) {
+    const nightlyTiming = policy.nightlyTiming.files[spec.file]
+    if (nightlyTiming) put({ group: group.id, spec, nightlyTiming })
+  }
+  policy.nightlyTiming.files = {}
+  writeFileSync(path, JSON.stringify(policy))
+  writeManifests(directory)
+  checkManifests(directory)
+  assert.equal(proveConversion(initial, loadPolicy(path), shardsFile).tiersWeightsAndMetadataUnchanged, true)
+})
+
+// Risk: GitHub does not install clone-local merge drivers. Concurrent new
+// specs must merge with ordinary Git, retain their owners and regenerate once.
+test('AEON-1389 independent spec sources merge canonically without custom drivers', t => {
+  const directory = fixtures(t)
+  const env = { ...process.env, GIT_CONFIG_GLOBAL: '/dev/null', GIT_CONFIG_NOSYSTEM: '1',
+    GIT_AUTHOR_NAME: 'Fixture', GIT_AUTHOR_EMAIL: 'fixture@example.invalid',
+    GIT_COMMITTER_NAME: 'Fixture', GIT_COMMITTER_EMAIL: 'fixture@example.invalid' }
+  const git = args => {
+    const result = spawnSync('git', ['-c', 'core.hooksPath=/dev/null', ...args], { cwd: directory, env, encoding: 'utf8', timeout: 10_000 })
+    assert.ifError(result.error); assert.equal(result.status, 0, result.stderr)
+    return result.stdout.trim()
+  }
+  const put = (file, source) => {
+    mkdirSync(resolve(directory, file, '..'), { recursive: true })
+    writeFileSync(resolve(directory, file), source)
+  }
+  const addSpec = (file, weightSeconds) => {
+    put(`web/${file}`, '// fixture\n')
+    put(`web/${specSource}/${file}.json`, formatSpecSource({ group: 'first', spec: spec(file, weightSeconds) }))
+  }
+  const initial = JSON.parse(readFileSync(resolve(directory, shardsFile)))
+  for (const row of initial.groups[0].specs) addSpec(row.file, row.weightSeconds)
+  const policy = { ...initial, specSource, groups: initial.groups.map(group => ({ ...group, specs: [] })) }
+  put(shardsFile, formatManifest(policy, shardsFile))
+  put('.gitattributes', readFileSync(resolve(root, '.gitattributes')))
+  writeManifests(directory)
+  git(['-c', 'init.templateDir=', 'init', '-q'])
+  assert.equal(git(['check-attr', 'merge', '--', shardsFile]), `${shardsFile}: merge: unspecified`)
+  assert.doesNotMatch(git(['config', '--local', '--list']), /^merge\./m)
+  git(['add', '.']); git(['commit', '-qm', 'base'])
+  const base = git(['rev-parse', 'HEAD'])
+  git(['checkout', '-qb', 'left'])
+  addSpec('tests/left.spec.ts', 7)
+  git(['add', '.']); git(['commit', '-qm', 'left adds spec'])
+  git(['checkout', '-qb', 'right', base])
+  addSpec('tests/right.spec.ts', 8)
+  git(['add', '.']); git(['commit', '-qm', 'right adds spec'])
+  git(['checkout', 'left']); git(['merge', '--no-edit', 'right'])
+  const expected = structuredClone(initial)
+  expected.groups[0].specs.push(spec('tests/left.spec.ts', 7), spec('tests/right.spec.ts', 8))
+  const assembled = loadManifest(resolve(directory, shardsFile))
+  assert.equal(formatManifest(assembled, shardsFile), formatManifest(expected, shardsFile))
+  assert.deepEqual(checkSpecInventory(assembled, discoverSpecs(resolve(directory, 'web'))), { specs: 4, excluded: 0 })
+  checkManifests(directory)
+  writeManifests(directory)
+  assert.equal(git(['status', '--porcelain']), '', 'regeneration after a plain merge is already canonical')
+  assert.equal(readFileSync(resolve(directory, shardsFile), 'utf8'), formatManifest(policy, shardsFile), 'shared policy never gained spec rows')
+  const record = resolve(directory, 'web', specSource, 'tests/left.spec.ts.json')
+  writeFileSync(record, JSON.stringify(JSON.parse(readFileSync(record)), null, 4))
+  assert.throws(() => checkManifests(directory), /Noncanonical CI manifests/)
+  writeManifests(directory)
+  checkManifests(directory)
+  assert.equal(git(['status', '--porcelain']), '', 'the canonical writer restores source layout')
+  for (const value of [
+    { group: 'unknown', spec: spec('tests/left.spec.ts', 7) },
+    { group: 'first', spec: spec('tests/right.spec.ts', 7) },
+    { group: 'first', spec: spec('tests/left.spec.ts', 0) },
+  ]) {
+    writeFileSync(record, formatSpecSource(value))
+    assert.throws(() => loadPolicy(resolve(directory, shardsFile)), /Unknown policy group|Invalid spec source identity/)
+    assert.throws(() => checkManifests(directory), /Noncanonical CI manifests/)
+  }
 })

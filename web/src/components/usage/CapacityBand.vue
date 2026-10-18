@@ -34,8 +34,10 @@ const readyCount = computed(() => configuredAccounts.value.filter(account => acc
 // The complete inventory also needs pairing: an account may exist there before
 // its first probe registers it in the accounts projection.
 const accountsLoaded = computed(() => agents.accountsUpdatedAt !== null)
-const computersFailed = computed(() => capacity.computersState === 'error' || capacity.computersStale)
-const loading = computed(() => (!capacity.loaded && capacity.state !== 'error') || (!accountsLoaded.value && agents.accountsState !== 'error') || (!capacity.computersLoaded && capacity.computersState !== 'error'))
+const computersRestricted = computed(() => capacity.computersRestricted)
+const computersFailed = computed(() => !computersRestricted.value && (capacity.computersState === 'error' || capacity.computersState === 'forbidden' || capacity.computersStale))
+const lastKnownComputers = computed(() => capacity.computersLoaded && capacity.computersState !== 'forbidden')
+const loading = computed(() => (!capacity.loaded && capacity.state !== 'error') || (!accountsLoaded.value && agents.accountsState !== 'error') || (!capacity.computersLoaded && capacity.computersState === 'idle'))
 const failed = computed(() => (capacity.state === 'error' && !capacity.loaded) || (agents.accountsState === 'error' && !accountsLoaded.value))
 const retry = () => Promise.all([agents.refreshAccounts(), capacity.load()])
 
@@ -58,13 +60,15 @@ function resetTip(row: BandRow) {
   <section class="band glass-card" aria-labelledby="band-title">
     <header class="band-head">
       <h2 id="band-title">Capacity</h2>
-      <span v-if="computersFailed" class="meta">Account status incomplete</span>
+      <span v-if="computersRestricted" class="meta">Inventory restricted</span>
+      <span v-else-if="computersFailed" class="meta">Account status incomplete</span>
       <span v-else-if="configuredAccounts.length && !loading && !failed" class="meta">{{ readyCount }} of {{ plural(configuredAccounts.length, 'account') }} ready</span>
       <RouterLink class="pacing" to="/agents" data-tip="Work days, Keep for you, nights, Sprint and Hold are on the Agents desk"><AppIcon name="sliders" :size="15" />Pacing</RouterLink>
     </header>
 
-    <p v-if="computersFailed" class="empty partial-notice" role="alert">
-      {{ capacity.computersLoaded ? 'Computers could not be refreshed. Showing last known account status.' : 'Computers could not be loaded. Some configured accounts may be missing.' }}
+    <p v-if="computersRestricted" class="empty inventory-notice" role="status">Computer inventory is restricted. Only accessible accounts are shown.</p>
+    <p v-else-if="computersFailed" class="empty partial-notice" role="alert">
+      {{ lastKnownComputers ? 'Computers could not be refreshed. Showing last known account status.' : 'Computers could not be loaded. Some configured accounts may be missing.' }}
       <button type="button" class="btn sm" @click="retry()">Try again</button>
     </p>
     <div v-if="loading" class="rows" aria-hidden="true">
@@ -73,7 +77,7 @@ function resetTip(row: BandRow) {
     <p v-else-if="failed" class="empty" role="alert">
       Capacity could not be loaded right now. <button type="button" class="btn sm" @click="retry()">Try again</button>
     </p>
-    <p v-else-if="!rows.length && !computersFailed" class="empty">
+    <p v-else-if="!rows.length && !computersFailed && !computersRestricted" class="empty">
       No accounts yet. Sign in to a harness on a connected computer and it appears here.
       <RouterLink class="btn sm" to="/agents/register-agent"><AppIcon name="monitor" :size="14" />Connect your machine</RouterLink>
     </p>
@@ -96,7 +100,7 @@ function resetTip(row: BandRow) {
             <div class="account-head">
               <span class="account-identity">{{ account.identity }}</span>
               <span v-if="account.row.host" class="account-host">{{ account.row.host }}</span>
-              <span class="account-state" :class="account.readiness.tone" :data-tip="account.readiness.tip">{{ computersFailed ? capacity.computersLoaded ? `Last known: ${account.readiness.text}` : 'Status not checked' : account.readiness.text }}</span>
+              <span class="account-state" :class="account.readiness.tone" :data-tip="account.readiness.tip">{{ computersFailed ? lastKnownComputers ? `Last known: ${account.readiness.text}` : 'Status not checked' : account.readiness.text }}</span>
             </div>
             <p v-if="account.readiness.hint" class="account-hint">{{ account.readiness.hint }}</p>
             <p v-if="account.readiness.command" class="account-fix">On {{ account.row.host || 'its computer' }}, run <code>{{ account.readiness.command }}</code></p>
@@ -106,6 +110,7 @@ function resetTip(row: BandRow) {
               <template v-else-if="account.capacity.kind === 'offline'">No reading while the computer is offline</template>
               <template v-else>{{ unreportedCapacity(account.harness) }}</template>
             </p>
+            <p v-if="account.learnedUse" class="learned-use">{{ account.learnedUse }}</p>
           </li>
         </ul>
       </li>
@@ -123,6 +128,7 @@ function resetTip(row: BandRow) {
 @media (hover: hover) { .pacing:hover { background: var(--row-hover); color: var(--ink); } }
 .pacing:focus-visible { box-shadow: var(--focus-ring); }
 .empty { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; padding: 16px 20px; color: var(--ink-2); font-size: 13.5px; }
+.inventory-notice { margin: 0; }
 .partial-notice { margin: 0; color: var(--warn-ink); background: color-mix(in srgb, var(--gold) 8%, transparent); }
 .rows { margin: 0; padding: 4px 0; list-style: none; }
 .row {
@@ -131,7 +137,7 @@ function resetTip(row: BandRow) {
 }
 .row + .row { border-top: 1px solid var(--line); }
 .name { grid-area: name; display: flex; align-items: center; gap: 9px; min-width: 0; }
-.vendor { display: grid; place-items: center; flex: none; width: 28px; height: 28px; border-radius: 8px; background: var(--surface-raised); box-shadow: inset 0 0 0 1px var(--line), 0 1px 2px rgba(32, 60, 61, .06); color: var(--ink); }
+.vendor { display: grid; place-items: center; flex: none; width: 28px; height: 28px; border-radius: 8px; background: var(--surface-raised); box-shadow: inset 0 0 0 1px var(--line), 0 1px 2px color-mix(in srgb, var(--shadow-color) 6%, transparent); color: var(--ink); }
 .pool-name { color: var(--ink); font-size: 14.5px; font-weight: 650; white-space: nowrap; }
 .plan-name { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--ink-3); font-size: 12.5px; }
 .bar { grid-area: bar; }
@@ -145,7 +151,7 @@ function resetTip(row: BandRow) {
 .sentence { grid-area: sentence; margin: 2px 0 0; color: var(--ink-2); font-size: 13px; line-height: 1.5; text-wrap: pretty; }
 .sentence :deep(b) { color: var(--ink); font-weight: 600; }
 .sentence :deep(.n) { color: var(--teal-ink); font-weight: 700; font-variant-numeric: tabular-nums; }
-.sentence.ahead :deep(.n) { color: var(--gold-ink); }
+.sentence.ahead :deep(.n) { color: var(--warn-ink); }
 .partial { color: var(--ink); }
 .account-list { grid-column: 1 / -1; display: grid; gap: 9px; margin: 8px 0 0 37px; padding: 0; list-style: none; min-width: 0; }
 .account-line { min-width: 0; font-size: 12.5px; line-height: 1.5; }
@@ -155,6 +161,7 @@ function resetTip(row: BandRow) {
 .account-state { margin-left: auto; color: var(--ink-2); }
 .account-state.warn { color: var(--warn-ink); }
 .account-hint, .account-fix, .account-reading { margin: 3px 0 0; color: var(--ink-2); overflow-wrap: anywhere; }
+.learned-use { margin: 4px 0 0; color: var(--ink-2); font-size: 13px; line-height: 1.4; font-variant-numeric: tabular-nums; overflow-wrap: anywhere; }
 .account-hint { color: var(--warn-ink); }
 .account-fix code { color: var(--ink); font-size: 12px; user-select: all; }
 .skeleton-row { display: flex; gap: 18px; }

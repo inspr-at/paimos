@@ -18,6 +18,7 @@ import (
 
 	"github.com/inspr-at/paimos/internal/db"
 	"github.com/inspr-at/paimos/internal/events"
+	"github.com/inspr-at/paimos/internal/httpapi"
 	"github.com/inspr-at/paimos/internal/tenant"
 )
 
@@ -35,7 +36,7 @@ func (m *module) createTicket(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	in := ticketInput{Included: true}
-	d := json.NewDecoder(http.MaxBytesReader(w, r.Body, 1<<20))
+	d := httpapi.NewRequestDecoder(w, r, 1<<20)
 	d.DisallowUnknownFields()
 	// Reject explicit nulls: all supplied fields have non-null contract types.
 	var raw map[string]json.RawMessage

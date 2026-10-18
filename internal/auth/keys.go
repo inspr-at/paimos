@@ -44,6 +44,7 @@ type identityJSON struct {
 }
 
 type meJSON struct {
+	FullAccess            bool          `json:"full_access"`
 	OwnerWorkstation      bool          `json:"owner_workstation,omitempty"`
 	WorkstationComputerID string        `json:"workstation_computer_id,omitempty"`
 	DevMode               bool          `json:"dev_mode"`
@@ -54,6 +55,8 @@ type meJSON struct {
 }
 
 type agentKeyJSON struct {
+	FullAccess            bool       `json:"full_access"`
+	CreatedByPrincipalID  *string    `json:"created_by_principal_id"`
 	OwnerWorkstation      bool       `json:"owner_workstation"`
 	WorkstationComputerID *string    `json:"workstation_computer_id"`
 	ID                    string     `json:"id"`
@@ -78,6 +81,7 @@ func (m *Module) meJSONFrom(v meView) meJSON {
 		roles = []string{}
 	}
 	out := meJSON{
+		FullAccess:            v.Principal.FullAccess,
 		OwnerWorkstation:      v.Principal.OwnerWorkstation,
 		WorkstationComputerID: v.Principal.WorkstationComputerID,
 		DevMode:               m.cfg.Dev(),
@@ -106,10 +110,12 @@ func (m *Module) meJSONFrom(v meView) meJSON {
 
 func keyJSON(rec keyRecord) agentKeyJSON {
 	scopes := rec.Scopes
-	if scopes == nil {
+	if scopes == nil || rec.FullAccess {
 		scopes = []string{}
 	}
 	return agentKeyJSON{
+		FullAccess:            rec.FullAccess,
+		CreatedByPrincipalID:  rec.CreatedByPrincipalID,
 		OwnerWorkstation:      rec.OwnerWorkstation,
 		WorkstationComputerID: rec.WorkstationComputerID,
 		ID:                    rec.ID,
@@ -147,6 +153,7 @@ func (m *Module) handleCreateAgentKey(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var body struct {
+		FullAccess     *bool      `json:"full_access"`
 		RotateKeyID    *string    `json:"rotate_key_id"`
 		RotationScopes []string   `json:"rotation_scopes"`
 		Name           string     `json:"name"`
@@ -166,6 +173,10 @@ func (m *Module) handleCreateAgentKey(w http.ResponseWriter, r *http.Request) {
 			writeBadRequest(w, "rotation requires rotate_key_id and optional expires_at or rotation_scopes only")
 			return
 		}
+		if body.FullAccess != nil && *body.FullAccess && len(body.RotationScopes) > 0 {
+			writeBadRequest(w, "full_access cannot include rotation_scopes")
+			return
+		}
 		var scopes []string
 		if body.RotationScopes != nil {
 			var err error
@@ -175,8 +186,8 @@ func (m *Module) handleCreateAgentKey(w http.ResponseWriter, r *http.Request) {
 				return
 			}
 		}
-		rec, err := m.rotateAgentKeyWithScopes(r.Context(), p, *body.RotateKeyID, body.ExpiresAt, scopes)
-		m.writeCreatedAgentKey(w, rec, err)
+		rec, err := m.rotateAgentKeyWithScopes(r.Context(), p, *body.RotateKeyID, body.ExpiresAt, scopes, body.FullAccess)
+		m.writeCreatedAgentKey(w, r, rec, err)
 		return
 	}
 	if body.RotationScopes != nil {
@@ -193,16 +204,20 @@ func (m *Module) handleCreateAgentKey(w http.ResponseWriter, r *http.Request) {
 		writeBadRequest(w, "name is required")
 		return
 	}
+	if body.FullAccess != nil && *body.FullAccess && len(body.Scopes) > 0 {
+		writeBadRequest(w, "full_access cannot include scopes")
+		return
+	}
 	scopes, err := cleanScopes(body.Scopes)
 	if err != nil {
 		writeBadRequest(w, "invalid scopes")
 		return
 	}
-	rec, err := m.createAgentKey(r.Context(), p, name, principalID, scopes, body.ExpiresAt)
-	m.writeCreatedAgentKey(w, rec, err)
+	rec, err := m.createAgentKey(r.Context(), p, name, principalID, scopes, body.ExpiresAt, body.FullAccess != nil && *body.FullAccess)
+	m.writeCreatedAgentKey(w, r, rec, err)
 }
 
-func (m *Module) writeCreatedAgentKey(w http.ResponseWriter, rec keyRecord, err error) {
+func (m *Module) writeCreatedAgentKey(w http.ResponseWriter, r *http.Request, rec keyRecord, err error) {
 	if err != nil {
 		if errors.Is(err, errKeyRevoked) {
 			writeJSON(w, http.StatusConflict, errorJSON{Error: "key already revoked or rotated"})
@@ -224,7 +239,7 @@ func (m *Module) writeCreatedAgentKey(w http.ResponseWriter, rec keyRecord, err 
 			writeForbidden(w)
 			return
 		}
-		writeInternal(w)
+		internalFailure(w, r, "create_agent_key", err)
 		return
 	}
 	created := agentKeyCreatedJSON{agentKeyJSON: keyJSON(rec), Token: rec.Token}
@@ -238,7 +253,7 @@ func (m *Module) handleListAgentKeys(w http.ResponseWriter, r *http.Request) {
 	}
 	recs, err := m.listAgentKeys(r.Context(), p.TenantID)
 	if err != nil {
-		writeInternal(w)
+		internalFailure(w, r, "list_agent_keys", err)
 		return
 	}
 	out := make([]agentKeyJSON, 0, len(recs))
@@ -264,7 +279,7 @@ func (m *Module) handleRevokeAgentKey(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if err != nil {
-		writeInternal(w)
+		internalFailure(w, r, "revoke_agent_key", err)
 		return
 	}
 	w.Header().Set("Cache-Control", "no-store")

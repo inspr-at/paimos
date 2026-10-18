@@ -6,7 +6,7 @@
 import { describe, expect, it } from 'vitest'
 import type { PairingView } from '../src/lib/agentPairing'
 import { buildRows, defaultSchedule, type AccountCapacity, type AccountInput, type CapacityWindow } from '../src/lib/capacity'
-import { buildComputerCards, computerCaption, middleEllipsis, pacingSummary, readySummary } from '../src/lib/computerAccounts'
+import { buildComputerCards, computerCaption, pacingSummary } from '../src/lib/computerAccounts'
 
 const NOW = Date.parse('2026-10-01T12:30:00Z')
 const CODEX = 'ac000000-0000-4000-8000-000000000001'
@@ -16,10 +16,10 @@ const COMPUTER = 'c0000000-0000-4000-8000-000000000001'
 function computer(over: Partial<PairingView> = {}): PairingView {
   return {
     request_id: 'r1', tenant_id: 't1', tenant_name: 'Barta', state: 'redeemed', request_digest: 'd', expires_at: '2026-10-02T00:00:00Z',
-    computer_name: 'mbp2607', platform: 'darwin', arch: 'arm64', workspace_path: '/Users/markus/Code', capabilities: [], requested_accounts: [], verification: null,
+    computer_name: 'build-7', platform: 'darwin', arch: 'arm64', workspace_path: '/Users/markus/Code', capabilities: [], requested_accounts: [], verification: null,
     computer_id: COMPUTER, computer_state: 'connected', principal_id: 'p1', daemon_id: 'd1', runtime_prefix: null, local_cleanup: 'pending', local_processes: 'unconfirmed',
     enrollments: [
-      { account_id: CODEX, account_key: 'k1', harness: 'codex', label: 'admin@augmentoring.com', model_profile_id: '', state: 'connected', local_cleanup: 'pending', verification_run_id: null, active_run_ids: [] },
+      { account_id: CODEX, account_key: 'k1', harness: 'codex', label: 'admin@example.com', model_profile_id: '', state: 'connected', local_cleanup: 'pending', verification_run_id: null, active_run_ids: [] },
       { account_id: CURSOR, account_key: 'k2', harness: 'cursor', label: 'markus@barta.com', model_profile_id: '', state: 'connected', local_cleanup: 'pending', verification_run_id: null, active_run_ids: [] },
     ],
     setup_state: 'connected', connectivity: 'online', last_seen_at: new Date(NOW - 20_000).toISOString(),
@@ -29,8 +29,8 @@ function computer(over: Partial<PairingView> = {}): PairingView {
 }
 function inputs(connectivity: 'online' | 'offline'): AccountInput[] {
   return [
-    { id: CODEX, label: 'admin@augmentoring.com', harness: 'codex', host: 'mbp2607', state: 'available', last_probe_ok: true, connectivity },
-    { id: CURSOR, label: 'markus@barta.com', harness: 'cursor', host: 'mbp2607', state: 'available', last_probe_ok: true, connectivity },
+    { id: CODEX, label: 'admin@example.com', harness: 'codex', host: 'build-7', state: 'available', last_probe_ok: true, connectivity },
+    { id: CURSOR, label: 'markus@barta.com', harness: 'cursor', host: 'build-7', state: 'available', last_probe_ok: true, connectivity },
   ]
 }
 function weekly(left: number): CapacityWindow {
@@ -73,9 +73,6 @@ describe('offline computer', () => {
     const [card] = buildComputerCards({ computers: [stale], rows: buildRows(inputs('offline'), capacity()), now: NOW })
     expect(card.accounts.map(a => a.readiness.text)).toEqual(['Paused · computer offline', 'Paused · computer offline'])
   })
-  it('the header pill names the computer', () => {
-    expect(readySummary(cards)).toEqual({ text: '0 of 2 ready · mbp2607 offline', tone: 'warn' })
-  })
 })
 
 describe('online, no readings yet', () => {
@@ -84,15 +81,24 @@ describe('online, no readings yet', () => {
   it('is online, seen just now, with the full identities', () => {
     expect(cards[0].status).toEqual({ text: 'Online · seen just now', tone: 'ok', live: true })
     expect(cards[0].notice).toBeNull()
-    expect(cards[0].accounts.map(a => [a.vendor, a.identity])).toEqual([['Codex', 'admin@augmentoring.com'], ['Cursor', 'markus@barta.com']])
+    expect(cards[0].accounts.map(a => [a.vendor, a.identity])).toEqual([['Codex', 'admin@example.com'], ['Cursor', 'markus@barta.com']])
   })
   it('each account is ready, and capacity says honestly that nothing was read', () => {
     expect(cards[0].accounts.map(a => a.readiness.kind)).toEqual(['ready', 'ready'])
     expect(cards[0].accounts[0].capacity).toEqual({ kind: 'none' })
     // Cursor has no quota reader, independently of whether learning has begun.
-    expect(cards[0].accounts[1].capacity).toEqual({ kind: 'quiet', text: "Cursor doesn't show its limit · one run at a time by day" })
+    expect(cards[0].accounts[1].capacity).toEqual({ kind: 'quiet', text: 'Usage unknown · reserve not enforceable' })
+    expect(cards[0].accounts[1].learnedUse).toBe('')
     expect(cards[0].legend).toBe(false)
-    expect(readySummary(cards)).toEqual({ text: '2 of 2 ready', tone: 'ok' })
+  })
+  it('shows observed spend when the vendor reports no window', () => {
+    const cap = capacity()
+    cap[1].learning = { windows: [], tokens: 24000, cost_micros: 0, runs: 3, limit_hits: 0 }
+    const [card] = buildComputerCards({ computers: [computer()], rows: buildRows(inputs('online'), cap), now: NOW })
+    const cursor = card.accounts[1]
+    expect(cursor.capacity).toEqual({ kind: 'quiet', text: 'Usage unknown · reserve not enforceable' })
+    expect(cursor.learnedUse).toBe('3 runs · 24k tokens')
+    expect(cursor.capacity.kind).not.toBe('bar')
   })
 })
 
@@ -113,7 +119,6 @@ describe('online with readings', () => {
     const [card] = buildComputerCards({ computers: [computer()], rows: buildRows(inputs('online'), capacity([weekly(0)])), now: NOW })
     expect(card.accounts[0].readiness.kind).toBe('limit')
     expect(card.accounts[0].readiness.text).toMatch(/^At limit until /)
-    expect(readySummary([card])?.text).toBe('1 of 2 ready')
   })
   it('the server routing wait decides when it gives one', () => {
     const cap = capacity([weekly(40)])
@@ -133,30 +138,18 @@ describe('waits from the server routing', () => {
   it('a run still working makes the account busy, not ready', () => {
     const cards = waiting('capacity')
     expect(cards[0].accounts[0].readiness).toMatchObject({ kind: 'busy', text: 'Busy · run in progress', tone: 'mute', tip: 'Waiting for the current run to finish' })
-    expect(readySummary(cards)).toEqual({ text: '1 of 2 ready', tone: 'mute' })
   })
   it('a reading on its way makes the account wait, not ready', () => {
     const cards = waiting('reading')
     expect(cards[0].accounts[0].readiness).toMatchObject({ kind: 'waiting', text: 'Waiting for a reading', tone: 'mute' })
-    expect(readySummary(cards)).toEqual({ text: '1 of 2 ready', tone: 'mute' })
   })
   it('a residency wait explains allowed providers and keeps the account out of the ready count', () => {
     const cards = waiting('residency')
     expect(cards[0].accounts[0].readiness).toMatchObject({ kind: 'attention', text: 'Outside allowed providers', tone: 'warn', tip: 'Waiting for an account within the allowed providers' })
-    expect(readySummary(cards)).toEqual({ text: '1 of 2 ready', tone: 'warn' })
+
     expect(cards[0].accounts[0].capacity).toMatchObject({ kind: 'bar', dim: true })
   })
-  it('the only account busy is "0 of 1 ready", and a warning elsewhere still warns', () => {
-    const cap = capacity([weekly(40)]).slice(0, 1)
-    cap[0].routing = { rank: 0, available_slots: 0, wait: { code: 'capacity', run_now_allowed: false } }
-    const view = computer({ enrollments: computer().enrollments.slice(0, 1) })
-    const cards = buildComputerCards({ computers: [view], rows: buildRows(inputs('online').slice(0, 1), cap), now: NOW })
-    expect(readySummary(cards)).toEqual({ text: '0 of 1 ready', tone: 'mute' })
-    const signin = computer({ harness_statuses: { codex: 'ready', cursor: 'login_required' }, harness_details: { cursor: { state: 'login_required', reason: 'login_required' } } })
-    const mixed = capacity([weekly(40)])
-    mixed[0].routing = { rank: 0, available_slots: 0, wait: { code: 'reading', run_now_allowed: false } }
-    expect(readySummary(buildComputerCards({ computers: [signin], rows: buildRows(inputs('online'), mixed), now: NOW }))).toEqual({ text: '0 of 2 ready', tone: 'warn' })
-  })
+
   it('a ranked account with a free slot stays ready', () => {
     const cap = capacity([weekly(40)])
     cap[0].routing = { rank: 1, available_slots: 2 }
@@ -204,7 +197,7 @@ describe('one state per account', () => {
   it('revoked computers stay out of the cards; accounts without a listed computer group by host', () => {
     const rows = buildRows([...inputs('online'), { id: 'ac000000-0000-4000-8000-000000000009', label: 'ops@barta.com', harness: 'claude', host: 'studio', state: 'available', last_probe_ok: true }], capacity())
     const cards = buildComputerCards({ computers: [computer(), computer({ computer_id: 'c2', computer_name: 'old', computer_state: 'revoked', enrollments: [] })], rows, now: NOW })
-    expect(cards.map(c => c.name)).toEqual(['mbp2607', 'studio'])
+    expect(cards.map(c => c.name)).toEqual(['build-7', 'studio'])
     expect(cards[1].computer).toBeNull()
   })
 })
@@ -216,11 +209,8 @@ describe('words', () => {
     const s = { ...defaultSchedule('Europe/Vienna'), week: defaultSchedule('UTC').week.map(d => ({ ...d, on: true })), reserve: 'fixed' as const, reserve_percent: 10, nights: true }
     expect(pacingSummary(s)).toBe('7 days · keep 10% · nights 22–08')
     expect(pacingSummary(defaultSchedule('UTC'))).toBe('5 days · keep auto · no nights')
-    expect(middleEllipsis('admin@augmentoring.com', 40)).toBe('admin@augmentoring.com')
-    expect(middleEllipsis('admin@augmentoring.com', 15)).toBe('admin@a…ing.com')
   })
 })
-
 
 describe('AEON-623 account diagnostics', () => {
   it('keeps a blocked Claude account without a capacity projection, with its exact cause and repair', () => {
@@ -261,7 +251,6 @@ it('AEON-623: revoked bindings cannot reappear as live loose accounts; active an
   expect(kept.find(a => a.id === CODEX)?.capacity.kind).toBe('bar')
 })
 
-
 it('AEON-623: account cards keep different blocked causes and never borrow an unknown account repair', () => {
   const permission = 'the default Claude profile is not private (requires mode 0700)'
   const signedOut = "the approved account is signed out in the daemon's view"
@@ -291,7 +280,7 @@ describe('expired account verification', () => {
     view.enrollments[0].verification_expired_ready = true
     const cards = buildComputerCards({ computers: [view], rows: buildRows(inputs('online'), capacity()), now: NOW })
     expect(cards[0].accounts[0].readiness).toMatchObject({ kind: 'ready', text: 'Ready', tip: 'Verification expired; the live account probe is ready.' })
-    expect(readySummary(cards)?.text).toBe('2 of 2 ready')
+
     expect(view.enrollments[0].verification_state).toBe('expired')
   })
   it('uses the server’s own probe rather than a ready sibling', () => {
@@ -307,6 +296,59 @@ describe('expired account verification', () => {
       view.enrollments[0].verification_state = 'expired'
       const cards = buildComputerCards({ computers: [view], rows: buildRows(inputs('online'), capacity()), now: NOW })
       expect(cards[0].accounts[0].readiness.kind).not.toBe('ready')
+    }
+  })
+})
+
+describe('verification reporting failures', () => {
+  it('shows a stalled check as a problem without changing its active ownership', () => {
+    const view = computer()
+    Object.assign(view.enrollments[0], { verification_state: 'starting', verification_stalled: true, verification_error: 'verification_timeout', active_run_ids: ['run'] })
+    const cards = buildComputerCards({ computers: [view], rows: buildRows(inputs('online'), capacity()), now: NOW })
+    expect(cards[0].accounts[0].readiness).toMatchObject({ kind: 'attention', text: 'Verification stalled' })
+    expect(cards[0].accounts[0].readiness.tip).toContain('helper must confirm that it stopped')
+    expect(view.enrollments[0].verification_state).toBe('starting')
+    expect(view.enrollments[0].active_run_ids).toEqual(['run'])
+    expect(cards[0].accounts[1].readiness.kind).toBe('ready')
+  })
+  it('explains a rejected report without blaming the vendor protocol or exposing raw errors', () => {
+    const view = computer()
+    Object.assign(view.enrollments[0], { verification_state: 'failed', verification_error: 'reporter_unavailable' })
+    const cards = buildComputerCards({ computers: [view], rows: buildRows(inputs('online'), capacity()), now: NOW })
+    expect(cards[0].accounts[0].readiness).toMatchObject({ kind: 'attention', text: 'Verification failed' })
+    expect(cards[0].accounts[0].readiness.tip).toContain('Update the helper, then use Verify again')
+    expect(cards[0].accounts[0].readiness.tip).toContain('Usage may be incomplete')
+    view.enrollments[0].verification_error = 'raw-private-error'
+    expect(buildComputerCards({ computers: [view], rows: buildRows(inputs('online'), capacity()), now: NOW })[0].accounts[0].readiness.tip).not.toContain('raw-private-error')
+  })
+})
+
+describe('verification warnings preserve recovery precedence', () => {
+  it('keeps failed verification behind offline, disconnecting and setup states', () => {
+    for (const [over, kind] of [
+      [{ connectivity: 'offline' }, 'offline'],
+      [{ computer_state: 'draining' }, 'paused'],
+      [{ connectivity: 'unknown', setup_state: 'provisioning' }, 'setup'],
+    ] as const) {
+      const v = computer(over)
+      Object.assign(v.enrollments[0], { verification_state: 'failed', verification_error: 'reporter_unavailable' })
+      const row = buildComputerCards({ computers: [v], rows: buildRows(inputs('online'), capacity()), now: NOW })[0].accounts[0]
+      expect(row.readiness.kind).toBe(kind)
+      expect(row.readiness.text).not.toMatch(/Verification/)
+    }
+  })
+  it('keeps failed and stalled checks behind sign-in and harness repair commands', () => {
+    for (const stalled of [false, true]) {
+      for (const [state, reason, text, command] of [
+        ['login_required', 'login_required', 'Signed out', 'codex login'],
+        ['blocked', 'dependency_invalid', 'Dependency needs repair', 'aeon-agentd add-harness --harness codex'],
+      ] as const) {
+        const v = computer({ harness_statuses: { codex: state, cursor: 'ready' }, harness_details: { codex: { state, reason } } })
+        Object.assign(v.enrollments[0], { verification_state: stalled ? 'starting' : 'failed', verification_stalled: stalled, verification_error: 'reporter_unavailable' })
+        const row = buildComputerCards({ computers: [v], rows: buildRows(inputs('online'), capacity()), now: NOW })[0].accounts[0]
+        expect(row.readiness.text).toBe(text)
+        expect(row.readiness.command).toBe(command)
+      }
     }
   })
 })

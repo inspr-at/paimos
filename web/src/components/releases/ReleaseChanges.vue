@@ -131,7 +131,7 @@ function parts(text: string) {
 .group-h { display: flex; align-items: center; gap: 9px; margin-bottom: 6px; font: 650 13px/1.4 var(--font); color: var(--ink); letter-spacing: 0; }
 .g-icon { display: grid; place-items: center; width: 24px; height: 24px; border-radius: 8px; background: var(--surface-2); color: var(--ink-2); }
 .features .g-icon { background: var(--chip-teal-bg); box-shadow: inset 0 0 0 1px var(--chip-teal-line); color: var(--teal-ink); }
-.fixes .g-icon { background: var(--gold-wash); box-shadow: inset 0 0 0 1px rgba(214, 155, 49, .35); color: var(--gold-ink); }
+.fixes .g-icon { background: var(--secondary-tint-3); box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--secondary-line) 35%, transparent); color: var(--secondary-ink); }
 .count { margin-left: 2px; font-size: 11px; font-weight: 500; color: var(--ink-3); }
 ul { margin: 0; padding: 0; list-style: none; display: grid; gap: 1px; }
 .group > ul { padding-left: 33px; }
@@ -156,7 +156,7 @@ ul { margin: 0; padding: 0; list-style: none; display: grid; gap: 1px; }
   .change-glyph { height: 1cap; vertical-align: baseline; }
 }
 .features .change-glyph { color: var(--teal-ink); }
-.fixes .change-glyph { color: var(--gold-ink); }
+.fixes .change-glyph { color: var(--secondary-ink); }
 .other .change-glyph { color: var(--ink-3); }
 .benefit { margin: 0; font-size: 14px; line-height: 1.45; color: var(--ink); text-wrap: pretty; overflow-wrap: anywhere; }
 .commits { min-width: 0; }

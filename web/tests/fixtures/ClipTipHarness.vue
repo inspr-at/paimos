@@ -9,12 +9,10 @@ import LabelMenu from '../../src/components/work/LabelMenu.vue'
 import OptionMenu from '../../src/components/work/OptionMenu.vue'
 import RelationPicker from '../../src/components/work/RelationPicker.vue'
 import TicketProperties from '../../src/components/work/TicketProperties.vue'
-import LiveLine from '../../src/components/agents/LiveLine.vue'
 import ConnectedComputers from '../../src/components/agents/ConnectedComputers.vue'
 import { vClipTip } from '../../src/directives/clipTip'
-import { clipSession, longAgent, longName } from '../clip-tip-fixtures'
+import { longName } from '../clip-tip-fixtures'
 import type { ListItem } from '../../src/lib/api'
-import type { SessionView } from '../../src/stores/agents'
 import { toggleIn, toggleOut } from '../../src/lib/ticketList'
 
 const anchor = ref<HTMLElement>()
@@ -24,7 +22,6 @@ const selected = ref<string[]>([])
 const chosen = ref('')
 const standalone = ref(longName)
 const item = { id: 'n-1', key: 'PHAROS-11', title: longName, state: 'backlog', kind_slug: 'ticket', kind_label: 'Ticket', fields: {}, priority: null, assignee: null, parent: null, project: null, children_count: 0, created_at: new Date().toISOString(), updated_at: new Date().toISOString() } as ListItem
-const view = { session: clipSession, name: longAgent, status: { state: 'problem', group: 'problem', label: 'Failed', reasons: [] }, harness: 'Codex', account: '', model: '', projectKey: 'PHAROS', projectTitle: 'Pharos', ticket: null } as SessionView
 const permissions = { canLookup: false, canApprove: false, canDeny: false, canDisconnect: false, canListComputers: true, canApproveAccounts: false, canForceStop: false as const }
 const options = [{ value: 'long', label: longName, count: 2 }, { value: 'short', label: 'Kurz', count: 1 }]
 function toggle(value: string) { selected.value = toggleIn(selected.value, value) }
@@ -42,7 +39,6 @@ function exclude(value: string) { selected.value = toggleOut(selected.value, val
     <section><h2>Standalone name</h2><p v-clip-tip class="standalone" tabindex="0">{{ standalone }}</p><button class="btn" @click="standalone = standalone === longName ? 'Kurz' : longName">Change name</button></section>
     <section><h2>Children</h2><ChildList :children="[item, { ...item, id: 'n-short', key: 'PHAROS-12', title: 'Kurz' }]" :loading="false" :editable="false" child-label="ticket" :progress="{ done: 0, total: 2, percent: 0 }" :add="async () => null" @open="chosen = $event" /></section>
     <section><h2>Filter</h2><FacetOptions dimension="tag" :options="options" :selected="selected" @toggle="toggle" @exclude="exclude" /></section>
-    <section><h2>Agent state</h2><LiveLine :views="[view]" :now="Date.now()" loaded @open="chosen = $event" /></section>
     <section><h2>Ticket properties</h2><TicketProperties :item="item" :editable="false" layout="column" :now="Date.now()" /></section>
     <section><h2>Computers</h2><ConnectedComputers :permissions="permissions" embedded /></section>
     <p role="status">{{ chosen }}</p>

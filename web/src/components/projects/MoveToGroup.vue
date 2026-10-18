@@ -56,7 +56,8 @@ const optionId = (index: number) => `${id}-option-${index}`
       v-model="term" class="field picker-search" type="text" placeholder="Group name" aria-label="Find or name a group" role="combobox" autocomplete="off" spellcheck="false"
       :aria-controls="`${id}-options`" aria-expanded="true" aria-autocomplete="list" :aria-activedescendant="count ? optionId(active) : undefined" data-autofocus @keydown="keydown"
     />
-    <div :id="`${id}-options`" class="options" role="listbox" :aria-label="`Groups for ${subject}`">
+    <div class="options" :style="{ gridTemplateRows: `repeat(${Math.max(1, count)}, auto)` }">
+      <div :id="`${id}-options`" class="option-list" role="listbox" :aria-label="`Groups for ${subject}`">
       <div v-for="(option, index) in shown" :key="option.group.id" class="option-row" role="presentation">
         <button
           :id="optionId(index)" type="button" role="option" class="option" tabindex="-1"
@@ -72,7 +73,6 @@ const optionId = (index: number) => `${id}-option-${index}`
           <span v-if="option.current" class="current">Here now</span>
           <span v-else class="count mono">{{ option.count }}</span>
         </button>
-        <ReadName :text="[option.group.name, option.reason].filter(Boolean).join('\n')" />
       </div>
       <button
         v-if="newName" :id="optionId(shown.length)" type="button" role="option" class="option create" tabindex="-1" :aria-selected="active === shown.length"
@@ -80,6 +80,8 @@ const optionId = (index: number) => `${id}-option-${index}`
       >
         <AppIcon name="plus" :size="13" /><span class="text"><span v-clip-tip="`Create group “${newName}”`" class="name">Create group “{{ newName }}”</span></span>
       </button>
+      </div>
+      <ReadName v-for="(option, index) in shown" :key="option.group.id" :text="[option.group.name, option.reason].filter(Boolean).join('\n')" :style="{ gridColumn: 2, gridRow: index + 1 }" />
       <p v-if="!count" class="note">{{ term.trim() ? 'A group name can be up to 60 characters.' : 'No groups yet.' }}</p>
     </div>
     <p class="option-note" aria-live="polite">{{ shown[active]?.reason }}</p>
@@ -90,8 +92,9 @@ const optionId = (index: number) => `${id}-option-${index}`
 <style scoped>
 .menu-title { padding: 6px 10px 4px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .picker-search { height: 34px; margin: 0 0 6px; font-size: 13.5px; }
-.options { display: grid; grid-template-columns: minmax(0, 1fr); gap: 1px; }
-.option-row { display: grid; grid-template-columns: minmax(0, 1fr) auto; }
+.options { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 1px 0; }
+.option-list { display: grid; grid-column: 1; grid-row: 1 / -1; grid-template-rows: subgrid; min-width: 0; }
+.option-row { display: grid; grid-template-columns: minmax(0, 1fr); }
 .option { display: flex; align-items: center; min-width: 0; gap: 10px; height: 40px; padding: 0 10px; border: 0; border-radius: 8px; background: transparent; color: var(--ink); font-size: 13.5px; text-align: left; }
 .option[aria-selected="true"] { background: var(--row-selected); }
 .option.off { color: var(--ink-2); cursor: default; }

@@ -23,10 +23,9 @@ func TestMislabelledProfileRejectedAndLegacyRouteRetired(t *testing.T) {
 	f.tx(t, func(tx pgx.Tx) error {
 		// Simulate immutable history written by the old validator. The account
 		// is eligible for this harness, so identity must be the rejecting gate.
-		if _, err := tx.Exec(t.Context(), `INSERT INTO model_profiles(tenant_id,id,slug,version,harness,family,model,effort,tier) VALUES($1,$2,'legacy-mislabel','1','claude','xai','review-model','xhigh','frontier')`, f.person.TenantID, id); err != nil {
-			return err
-		}
-		_, err := tx.Exec(t.Context(), `INSERT INTO model_role_routes(tenant_id,role,priority,profile_id,state) VALUES($1,'review-gate',10,$2,'available')`, f.person.TenantID, id)
+		// Its xai:review-model line is already in the saved Review order, so
+		// Models walks this route right after the fixture's Cursor route.
+		_, err := tx.Exec(t.Context(), `INSERT INTO model_profiles(tenant_id,id,slug,version,harness,family,model,effort,tier) VALUES($1,$2,'legacy-mislabel','1','claude','xai','review-model','xhigh','frontier')`, f.person.TenantID, id)
 		return err
 	})
 	var resolved modelregistry.Resolution

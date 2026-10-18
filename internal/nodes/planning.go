@@ -14,11 +14,11 @@ import (
 	"strings"
 	"time"
 
-	"github.com/jackc/pgx/v5"
-
+	"github.com/inspr-at/paimos/internal/modelprefs"
 	"github.com/inspr-at/paimos/internal/modelregistry"
 	"github.com/inspr-at/paimos/internal/tenant"
 	"github.com/inspr-at/paimos/internal/usagedashboard"
+	"github.com/jackc/pgx/v5"
 )
 
 // Planning columns (AEON-329). A list row carries the model its role and area
@@ -55,11 +55,14 @@ type planningView struct {
 	// RouteGap says why a role has no model: "area" (no area set),
 	// "review_gate" (resolved against the author's family at dispatch) or
 	// "registry" (no available route in the registry).
-	RouteGap string            `json:"route_gap,omitempty"`
-	Models   []planningModel   `json:"models,omitempty"`
-	Tokens   planningTokens    `json:"tokens"`
-	Cost     *planningCost     `json:"cost,omitempty"`
-	Children *planningChildren `json:"children,omitempty"`
+	RouteGap string `json:"route_gap,omitempty"`
+	// RouteTruncated marks a "registry" gap where the model registry exceeds
+	// Models' bounds, so no route was resolved (dispatch refuses it too).
+	RouteTruncated bool              `json:"route_truncated,omitempty"`
+	Models         []planningModel   `json:"models,omitempty"`
+	Tokens         planningTokens    `json:"tokens"`
+	Cost           *planningCost     `json:"cost,omitempty"`
+	Children       *planningChildren `json:"children,omitempty"`
 }
 type planningRoute struct {
 	Provider string `json:"provider,omitempty"`
@@ -137,9 +140,6 @@ func planningStatesCTE() string {
 func planningOpenChild(c string) string {
 	return ` JOIN node_kinds ` + c + `k ON ` + c + `k.tenant_id=` + c + `.tenant_id AND ` + c + `k.id=` + c + `.kind_id AND ` + c + `k.slug IN ('work','ticket','task')
     LEFT JOIN plan_states ` + c + `s ON ` + c + `s.kind_id=` + c + `.kind_id AND ` + c + `s.norm=` + workStateNormSQL(c+".state")
-}
-func planningOpenWhere(c string) string {
-	return c + `.deleted_at IS NULL AND ` + workCountBucketSQL(c+".state", c+"s") + ` NOT IN ('cancelled','archived')`
 }
 
 // planningSubtreeSQL lists each historical work node once per requested root.
@@ -633,12 +633,13 @@ type planPrice struct {
 // planRoute is one resolved placement, shared by rows with the same project,
 // person, kind, bucket, role and residency. view is nil without a selected model.
 type planRoute struct {
-	cell     usagedashboard.LearningCell
-	price    *planPrice
-	view     *planningRoute
-	key      routeKey
-	mixPrice *float64
-	gap      string
+	cell      usagedashboard.LearningCell
+	price     *planPrice
+	view      *planningRoute
+	key       routeKey
+	mixPrice  *float64
+	gap       string
+	truncated bool
 }
 
 // planBilling is how a harness was billed most recently.
@@ -763,7 +764,7 @@ func (pl *planner) view(self planRow, kids []planRow, used *planUsage, costVisib
 			case route == nil && self.area == "":
 				view.RouteGap = "area"
 			case route != nil && route.gap != "":
-				view.RouteGap = route.gap
+				view.RouteGap, view.RouteTruncated = route.gap, route.truncated
 			case route == nil || route.view == nil:
 				view.RouteGap = "registry"
 			default:
@@ -1069,7 +1070,7 @@ type planRouteCacheKey struct{}
 func resolvePlanRoutes(ctx context.Context, tx pgx.Tx, rows []planRow) (map[string]*planRoute, error) {
 	out := map[string]*planRoute{}
 	cache, _ := ctx.Value(planRouteCacheKey{}).(map[string]*planRoute)
-	revision := ""
+	revision, revised, bounded := "", false, false
 	now := time.Now()
 	for _, r := range rows {
 		if r.role == "" || out[r.placementKey()] != nil || !modelregistry.KnownRouteRole(r.role) {
@@ -1079,16 +1080,27 @@ func resolvePlanRoutes(ctx context.Context, tx pgx.Tx, rows []planRow) (map[stri
 			out[r.placementKey()] = cached
 			continue
 		}
-		if revision == "" {
+		if !revised {
 			var err error
-			if revision, err = modelregistry.Revision(ctx, tx); err != nil {
+			// A registry beyond Models' bounds has no route for any row. Say so
+			// on each row rather than failing the whole page.
+			revision, err = modelregistry.Revision(ctx, tx)
+			if errors.Is(err, modelprefs.ErrBoardBounds) {
+				bounded, err = true, nil
+			}
+			if err != nil {
 				return nil, err
 			}
+			revised = true
 		}
 		route := &planRoute{}
 		out[r.placementKey()] = route
 		if cache != nil {
 			cache[r.placementKey()] = route
+		}
+		if bounded && !strings.HasPrefix(r.role, "review-gate") {
+			route.gap, route.truncated = "registry", true
+			continue
 		}
 		if strings.HasPrefix(r.role, "review-gate") {
 			if r.area == "" {
@@ -1108,6 +1120,10 @@ func resolvePlanRoutes(ctx context.Context, tx pgx.Tx, rows []planRow) (map[stri
 		}
 		resolved, err := modelregistry.ResolveWork(ctx, tx, tenant.Principal{}, modelregistry.WorkQuery{
 			Role: r.role, Area: r.area, Complexity: complexity, ProjectID: r.project, PersonID: person, TicketResidency: r.residency}, now)
+		if errors.Is(err, modelprefs.ErrBoardBounds) {
+			route.gap, route.truncated = "registry", true
+			continue
+		}
 		if err != nil {
 			return nil, err
 		}
@@ -1118,10 +1134,14 @@ func resolvePlanRoutes(ctx context.Context, tx pgx.Tx, rows []planRow) (map[stri
 		if resolved.Profile != nil {
 			p := *resolved.Profile
 			setBy := ""
-			if resolved.Trace.Selector != nil {
+			// A matrix selector or the person's own Models row is a preference
+			// someone set; the workspace walk alone names no one.
+			if resolved.Trace.Selector != nil || resolved.Trace.SetBy == "person" {
 				setBy = resolved.Trace.SetBy
+			} else if resolved.Trace.PreferenceOf != nil && resolved.Trace.PreferenceOf.Source == "person" {
+				setBy = "person"
 			}
-			route.view = &planningRoute{Provider: p.Provider, Display: p.Display, EffortLevel: p.EffortLevel, Label: p.Label(), Profile: p.Slug, Harness: p.Harness, Model: p.Model, Effort: p.Effort, Revision: revision, SetBy: setBy, FollowsLatest: resolved.Trace.Mode == "latest", Pinned: resolved.Trace.Mode == "pinned"}
+			route.view = &planningRoute{Provider: p.Provider, Display: p.Display, EffortLevel: p.EffortLevel, Label: p.Label(), Profile: p.Slug, Harness: p.Harness, Model: p.Model, Effort: p.Effort, Revision: revision, SetBy: setBy, FollowsLatest: resolved.Trace.Mode == "latest" || resolved.Trace.PreferenceOf != nil, Pinned: resolved.Trace.Mode == "pinned"}
 			route.cell = usagedashboard.CellFor(p, resolved.Trace.Kind, resolved.Trace.Bucket)
 			route.key = routeKey{harness: p.Harness, model: modelregistry.ModelKey(p.Model), effort: strings.ToLower(p.Effort), learning: strings.Join([]string{p.ID, route.cell.Kind, route.cell.Bucket, route.cell.Version}, "|")}
 			var in, outRate, cached *float64

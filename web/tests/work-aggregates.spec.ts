@@ -151,7 +151,7 @@ for (const scenario of [
     parent.eta = { finished: false, progress_pct: scenario.progress, leaf_count: 2, estimated_leaves: scenario.estimated, progress_basis: 'estimate', open_leaves: 1, ready_leaves: scenario.partial ? 0 : 1, ready_partial: scenario.partial, eta_ready_at: '2026-10-04T12:00:00Z', ready_reported_at: '2026-10-04T08:00:00Z', ready_stale: true }
     await mockWork(page, data)
     await page.goto('/p/PHAROS')
-    await expect(page.locator('.list-freshness')).toHaveText('Live')
+    await expect(page.locator('footer.app-footer .sum')).toHaveAttribute('data-conn', 'on')
     const row = page.locator('#row-n-1')
     const eta = row.locator('.eta-cell')
     const progress = row.locator('.progress-read')

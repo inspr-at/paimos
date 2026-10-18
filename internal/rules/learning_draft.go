@@ -130,3 +130,63 @@ func sameLearningRule(got, want Rule) bool {
 		got.Source.Reference == want.Source.Reference && got.Source.Revision == want.Source.Revision &&
 		got.Source.Identity == want.Source.Identity && got.Source.EditedHere == want.Source.EditedHere
 }
+
+// LearningTarget validates a prepared rule target without writing or changing
+// the caller's surrounding project visibility. Actual drafting checks write
+// permission again through AppendLearningRule.
+func LearningTarget(ctx context.Context, tx pgx.Tx, p tenant.Principal, layerID, setID, projectID string) (string, error) {
+	return learningTarget(ctx, tx, p, layerID, setID, projectID, false)
+}
+
+// LockLearningTarget retains FK-compatible reference locks in the outer
+// mutation transaction, before its event counter is acquired.
+func LockLearningTarget(ctx context.Context, tx pgx.Tx, p tenant.Principal, layerID, setID, projectID string) (string, error) {
+	return learningTarget(ctx, tx, p, layerID, setID, projectID, true)
+}
+
+func learningTarget(ctx context.Context, tx pgx.Tx, p tenant.Principal, layerID, setID, projectID string, lock bool) (string, error) {
+	var prior []string
+	if lock {
+		if err := tx.QueryRow(ctx, `SELECT ARRAY[coalesce(current_setting('aeon.rules_access',true),''),coalesce(current_setting('aeon.rules_owner',true),''),coalesce(current_setting('aeon.rules_agent',true),''),coalesce(current_setting('aeon.rules_projects',true),''),coalesce(current_setting('aeon.visible_projects',true),'')]`).Scan(&prior); err != nil {
+			return "", err
+		}
+	}
+	sp, err := tx.Begin(ctx)
+	if err != nil {
+		return "", err
+	}
+	defer sp.Rollback(ctx)
+	owner, err := actorOwner(ctx, sp, p)
+	if err != nil {
+		return "", err
+	}
+	agent := ""
+	if p.Kind == tenant.Agent {
+		agent = p.ID
+	}
+	if err = enterRules(ctx, sp, owner, agent); err != nil {
+		return "", err
+	}
+	f, parent, err := nodeFields(ctx, sp, setID, "set")
+	if err != nil {
+		return "", err
+	}
+	if parent != layerID || (f.Scope.Layer == "project" && f.Scope.ProjectID != projectID) {
+		return "", fail(404, "rule_unavailable", "That rule set is not available.")
+	}
+	if err := permission(ctx, sp, p, f.Scope, "rules.read"); err != nil {
+		return "", err
+	}
+	if lock {
+		if _, err := sp.Exec(ctx, `SELECT id FROM nodes WHERE tenant_id=$1 AND id=ANY($2::uuid[]) ORDER BY id FOR KEY SHARE`, p.TenantID, []string{layerID, setID}); err != nil {
+			return "", err
+		}
+		if _, err := sp.Exec(ctx, `SELECT set_config('aeon.rules_access',$1,true),set_config('aeon.rules_owner',$2,true),set_config('aeon.rules_agent',$3,true),set_config('aeon.rules_projects',$4,true),set_config('aeon.visible_projects',$5,true)`, prior[0], prior[1], prior[2], prior[3], prior[4]); err != nil {
+			return "", err
+		}
+		if err := sp.Commit(ctx); err != nil {
+			return "", err
+		}
+	}
+	return f.Name, nil
+}

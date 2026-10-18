@@ -188,7 +188,7 @@ onBeforeUnmount(() => { ++saveGeneration; upload?.abort(); URL.revokeObjectURL(u
 .head h2 { font-size: 17px; }
 .body { display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 24px; align-items: start; }
 .left { display: grid; gap: 10px; justify-items: center; max-width: 320px; }
-.stage { position: relative; overflow: hidden; border-radius: 14px; background: #0c1a1c; cursor: grab; touch-action: none; user-select: none; outline: none; }
+.stage { position: relative; overflow: hidden; border-radius: 14px; background: var(--media-stage); cursor: grab; touch-action: none; user-select: none; outline: none; }
 .stage:active { cursor: grabbing; }
 .stage:focus-visible { box-shadow: var(--focus-ring); }
 .photo { position: absolute; top: 0; left: 0; max-width: none; transform-origin: 0 0; pointer-events: none; }

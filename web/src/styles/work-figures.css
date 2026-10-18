@@ -1,0 +1,39 @@
+/* SPDX-License-Identifier: AGPL-3.0-only */
+/* AEON-1358 (design r4b §3.1–§3.2, §5.1): the figure tips' content (the work bar's counts and the column header
+   figures) and the group swatches. The tip itself is FigureTip.vue; it is the app tooltip, opaque. */
+
+/* A group swatch: the bar fill as a 12 × 8 key. Swatches never slide. */
+.wk-sw { display: inline-block; flex: none; width: 12px; height: 8px; border-radius: 2px; }
+.wk-sw.sw-open { color: var(--ink-3); background: var(--track); box-shadow: inset 0 0 0 1px var(--line-2); }
+
+.figure-tip p { margin: 0; color: inherit; }
+.figure-tip .wf-hint { white-space: pre-line; }
+.figure-tip .wf-rule { height: 1px; margin: 6px -12px 5px; background: var(--tip-line); }
+/* One figure line: the label left, the value right in tabular digits, a muted note after the value. Fixed 20 px. */
+.figure-tip .wf-line { display: grid; grid-template-columns: minmax(0, 1fr) auto; column-gap: 12px; align-items: center; height: 20px; line-height: 20px; white-space: nowrap; }
+.figure-tip .wf-line > :first-child { display: flex; align-items: center; gap: 6px; min-width: 0; overflow: hidden; }
+.figure-tip .wf-line > :first-child > span { overflow: hidden; text-overflow: ellipsis; }
+.figure-tip .wf-line .wf-v { text-align: right; font-weight: 600; font-variant-numeric: tabular-nums; }
+.figure-tip .wf-line .wf-v small { margin-left: 6px; font-size: 11.5px; font-weight: 500; color: var(--tip-muted); }
+.figure-tip .wf-line.head > :first-child, .figure-tip .wf-line.head .wf-v { font-weight: 700; }
+.figure-tip .wf-line.sub > :first-child, .figure-tip .wf-line.sub .wf-v { font-weight: 500; color: var(--tip-muted); }
+.figure-tip .wf-line.wait > :first-child { color: var(--tip-muted); }
+.figure-tip .wf-mark { flex: none; display: inline-grid; place-items: center; width: 12px; height: 12px; font-weight: 700; color: var(--tip-muted); }
+.figure-tip .wf-mark.ok, .figure-tip .wf-mark.ok svg.measured { color: var(--tip-ok); }
+.figure-tip .wf-mark svg.prio { color: var(--tip-muted); }
+.figure-tip .wf-foot { height: 18px; margin-top: 3px; overflow: hidden; font-size: 11.5px; line-height: 18px; color: var(--tip-muted); white-space: nowrap; text-overflow: ellipsis; }
+.figure-tip .wf-foot.lines { white-space: normal; }
+.figure-tip .wf-foot .wf-fline { display: block; height: 18px; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+.figure-tip .wf-ttl { font-weight: 650; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+/* The work bar's counts: a small table, hours and tickets side by side. */
+.figure-tip .wf-tbl { display: grid; grid-template-columns: minmax(0, 1fr) repeat(4, auto); column-gap: 12px; align-items: center; font-variant-numeric: tabular-nums; }
+.figure-tip .wf-tbl > * { height: 20px; line-height: 20px; white-space: nowrap; }
+.figure-tip .wf-tbl .h { height: 16px; font-size: 11px; line-height: 16px; text-align: right; color: var(--tip-muted); }
+.figure-tip .wf-tbl .n { text-align: right; font-weight: 600; }
+.figure-tip .wf-tbl .s { text-align: right; color: var(--tip-muted); }
+.figure-tip .wf-tbl .g { display: flex; align-items: center; gap: 6px; }
+.figure-tip .wf-tbl .g.wait { color: var(--tip-muted); }
+/* Inside the dark tip the swatches keep their meaning in tip colours, in both themes. */
+.figure-tip .wk-sw.fc-delivered, .figure-tip .wk-sw.fc-done { color: var(--tip-ok); }
+.figure-tip .wk-sw.fc-progress { color: var(--tip-progress); }
+.figure-tip .wk-sw.sw-open { background: rgba(237, 244, 240, .14); box-shadow: inset 0 0 0 1px rgba(237, 244, 240, .4); }

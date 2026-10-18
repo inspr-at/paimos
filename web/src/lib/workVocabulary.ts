@@ -2,9 +2,13 @@
 import type { ListItem } from './api.ts'
 import type { IconName } from '../components/AppIcon.vue'
 import { kindLabel } from './work.ts'
-export const WORK_ICONS = ['ticket', 'epic', 'task', 'layers', 'tree', 'folder', 'check', 'box'] as const
+import { isWorkIcon } from './workIcons.ts'
+
+export { WORK_ICONS } from './workIcons.ts'
 export interface WorkLevel { name: string; icon: string }
-export interface WorkVocabulary { revision: number; leaf: WorkLevel; levels: WorkLevel[] }
+export interface LeadNames { singular: string; plural: string }
+/** `lead` is absent while the workspace uses Lead/Leads (AEON-791). */
+export interface WorkVocabulary { revision: number; leaf: WorkLevel; levels: WorkLevel[]; lead?: LeadNames }
 // Keep custom spelling (including capitalized German nouns) in sentences.
 export function workNoun(name: string): string { return ['Ticket', 'Epic', 'Task', 'Story'].includes(name) ? name.toLowerCase() : name }
 export function workLevel(v: WorkVocabulary, leaf: boolean, depth: number): WorkLevel {
@@ -12,13 +16,34 @@ export function workLevel(v: WorkVocabulary, leaf: boolean, depth: number): Work
   const custom = leaf ? v.leaf : v.levels[depth - 1]
   return { name: custom?.name || fallback.name, icon: custom?.icon || fallback.icon }
 }
+/** The icon to draw for a stored choice: unknown or blank values draw the default. */
+export function workIconChoice(icon: string, fallback: IconName): IconName {
+  return isWorkIcon(icon) ? icon : fallback
+}
+/** Settings label of a level: levels[0] is the top level, the leaf comes last. */
+export function vocabularyLabel(index: number, leaf = false): string {
+  return leaf ? 'Leaf (work item)' : index === 0 ? 'Top level' : `Level ${index + 1}`
+}
+export interface VocabularyRow { key: string; leaf: boolean; index: number; depth: number; label: string; level: WorkLevel; placeholder: string; fallback: IconName }
+/** The configured levels as they nest: top level first, the leaf last. */
+export function vocabularyRows(v: WorkVocabulary): VocabularyRow[] {
+  const row = (leaf: boolean, index: number): VocabularyRow => {
+    const defaults = workLevel({ revision: 0, leaf: { name: '', icon: '' }, levels: [] }, leaf, index + 1)
+    return { key: leaf ? 'leaf' : `level-${index + 1}`, leaf, index, depth: leaf ? v.levels.length : index, label: vocabularyLabel(index, leaf), level: leaf ? v.leaf : v.levels[index], placeholder: defaults.name, fallback: defaults.icon as IconName }
+  }
+  return [...v.levels.map((_, i) => row(false, i)), row(true, 0)]
+}
+/** What each configured level is called, top-down, ending with the leaf. */
+export function vocabularyChain(v: WorkVocabulary): WorkLevel[] {
+  return [...v.levels.map((_, i) => workLevel(v, false, i + 1)), workLevel(v, true, 1)]
+}
 export function workLabel(row: Pick<ListItem, 'kind_slug'> & { level_name?: string; is_leaf?: boolean; depth?: number }, vocabulary?: WorkVocabulary): string {
   return row.level_name || (row.kind_slug === 'work'
     ? workLevel(vocabulary ?? { revision: 0, leaf: { name: '', icon: '' }, levels: [] }, row.is_leaf !== false, row.depth ?? 1).name
     : kindLabel(row.kind_slug))
 }
 export function workIcon(row: Pick<ListItem, 'kind_slug'> & { level_icon?: string; is_leaf?: boolean }): IconName {
-  if (WORK_ICONS.includes(row.level_icon as typeof WORK_ICONS[number])) return row.level_icon as IconName
+  if (row.level_icon && isWorkIcon(row.level_icon)) return row.level_icon
   return row.is_leaf === false || row.kind_slug === 'epic' ? 'epic' : row.kind_slug === 'task' ? 'task' : 'ticket'
 }
 export function isWorkParent(row: { is_leaf?: boolean; kind_slug: string }): boolean { return row.is_leaf === false || (row.is_leaf === undefined && row.kind_slug === 'epic') }

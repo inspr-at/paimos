@@ -1,10 +1,8 @@
 // SPDX-License-Identifier: AGPL-3.0-only
-import { mkdirSync } from 'node:fs'
 import { test, expect, type Locator, type Page } from '@playwright/test'
 import { fixtures, mockWork, mockView, me } from './work-fixtures'
 import { expectStableControls } from './helpers/stable'
 
-const shots = 'test-results/aeon-639'
 const errors = new WeakMap<Page, string[]>()
 test.beforeEach(async ({ page }) => {
   const failures: string[] = []; errors.set(page, failures)
@@ -34,10 +32,17 @@ async function noSideways(controls: Record<string, Locator>, before: Awaited<Ret
     expect(after[name]!.height - before[name]!.height, `${name} height change`).toBe(0)
   }
 }
-async function capture(page: Page, name: string) { await settled(page); mkdirSync(shots, { recursive: true }); await page.screenshot({ path: `${shots}/${name}.png` }) }
-async function phoneRoomy(page: Page, name: string) {
+async function capture(page: Page, name: string) { await settled(page); await page.screenshot({ path: test.info().outputPath(`${name}.png`) }) }
+// AEON-1188: phones reach the one Display menu through the Filters sheet's link.
+async function phoneDisplay(page: Page) {
   await page.getByRole('button', { name: 'Filters', exact: true }).click()
-  const sheet = page.getByRole('dialog', { name: 'Filters', exact: true })
+  await page.getByRole('dialog', { name: 'Filters', exact: true }).getByRole('button', { name: 'Display settings…', exact: true }).click()
+  const sheet = page.getByRole('dialog', { name: 'Display options', exact: true })
+  await expect(sheet.locator('.display-menu.as-sheet')).toBeVisible()
+  return sheet
+}
+async function phoneRoomy(page: Page, name: string) {
+  const sheet = await phoneDisplay(page)
   const group = sheet.getByRole('radiogroup', { name: 'Project header density' })
   await group.getByRole('radio', { name, exact: true }).click()
   await expect(group.getByRole('radio', { name, exact: true })).toHaveAttribute('aria-checked', 'true')
@@ -62,9 +67,12 @@ for (const width of [390, 1024, 1440]) {
       await settled(page)
       const toolbar = page.getByRole('toolbar', { name: 'Ticket list controls' })
       const controls: Record<string, Locator> = {
-        views: toolbar.getByRole('tablist', { name: 'Ticket views' }), search: search(page), count: toolbar.locator('.count-live'), new: page.getByRole('button', { name: 'New ticket', exact: true }),
+        views: toolbar.getByRole('tablist', { name: 'Ticket views' }), search: search(page), new: page.getByRole('button', { name: 'New ticket', exact: true }),
         ...(width === 390 ? { filters: page.getByRole('button', { name: 'Filters', exact: true }) } : { status: toolbar.locator('.facet-control[data-dim="status"]'), filters: toolbar.locator('.facets'), clear: toolbar.getByRole('button', { name: 'Clear all', exact: true }) }),
       }
+      // The tablet deliberately hides the count; measure the remaining controls,
+      // and retain its responsive visibility assertion at every density below.
+      if (width === 1024) await expect(toolbar.locator('.count')).toBeHidden()
       const before = await samples(controls)
       await capture(page, `${width}-${theme}-compact`)
       if (width === 390) {
@@ -76,13 +84,13 @@ for (const width of [390, 1024, 1440]) {
           interactions: ['Comfortable', 'Collapsed', 'Compact', 'Comfortable'].map(name => ({ name, run: async () => { await density(page, name).click(); await expect(page.locator('.project-page')).toHaveClass(new RegExp(`header-${name.toLowerCase()}`)) } })) })
       }
       await expect(page.locator('.project-page')).toHaveClass(/header-comfortable/)
-      await settled(page); await noSideways(controls, before)
+      await settled(page); await noSideways(controls, before); if (width === 1024) await expect(toolbar.locator('.count')).toBeHidden()
       await capture(page, `${width}-${theme}-comfortable`)
       if (width === 390) {
         await expectStableControls({ controls: { fold: fold(page), appbar: page.locator('.app-header') }, interactions: ['collapsed', 'comfortable', 'collapsed'].map(mode => ({ name: mode, run: async () => { await fold(page).click(); await expect(page.locator('.project-page')).toHaveClass(new RegExp(`header-${mode}`)) } })) })
       } else await density(page, 'Collapsed').click()
       await expect(page.locator('#project-header-fold')).toBeHidden()
-      await settled(page); await noSideways(controls, before)
+      await settled(page); await noSideways(controls, before); if (width === 1024) await expect(toolbar.locator('.count')).toBeHidden()
       await capture(page, `${width}-${theme}-collapsed`)
       await search(page).focus(); await search(page).press('Escape')
       await expect(page.locator('.project-page')).toHaveClass(/header-collapsed/)
@@ -90,14 +98,14 @@ for (const width of [390, 1024, 1440]) {
       const mac = await page.evaluate(() => /Mac|iPhone|iPad/.test(navigator.platform || navigator.userAgent))
       await search(page).focus(); await search(page).press(mac ? 'Meta+Shift+Period' : 'Control+Shift+Period')
       await expect(page.locator('.project-page')).toHaveClass(/header-comfortable/)
-      await settled(page); await noSideways(controls, before)
+      await settled(page); await noSideways(controls, before); if (width === 1024) await expect(toolbar.locator('.count')).toBeHidden()
       if (width === 390) await phoneRoomy(page, 'Compact'); else await density(page, 'Compact').click()
-      await settled(page); await noSideways(controls, before)
+      await settled(page); await noSideways(controls, before); if (width === 1024) await expect(toolbar.locator('.count')).toBeHidden()
       await expect(page.locator('.chips')).toHaveCount(0)
       if (width !== 390) {
         await expect(page.locator('.project-navigation').getByRole('button', { name: 'Display: Display', exact: true })).toBeVisible()
         await expect(toolbar.getByRole('button', { name: 'Display: Display', exact: true })).toHaveCount(0)
-        if (width === 1024) { await expect(toolbar.locator('.facet-value').first()).toBeHidden(); await expect(toolbar.locator('.count')).toBeHidden() }
+        if (width === 1024) { await expect(toolbar.locator('.facet-value').first()).toBeHidden(); await expect(toolbar.locator('.count-live')).toHaveCount(0) }
         else { await expect(toolbar.locator('.facet-value').first()).toContainText('New, Backlog +3'); await expect(page.locator('.description')).toHaveAttribute('data-clip-tip', '') }
       }
       expect(await page.locator('.project-page').evaluate(el => el.scrollWidth - el.clientWidth)).toBeLessThanOrEqual(1)
@@ -111,18 +119,21 @@ test('filter triggers stay still until the popover closes and removals clear rea
   const data = fixtures(); data.preferences['list:display'] = { headerGraph: false }
   await mockWork(page, data); await page.goto('/p/PHAROS')
   const toolbar = page.getByRole('toolbar', { name: 'Ticket list controls' })
-  const status = toolbar.locator('.facet-btn[data-dim="status"]')
-  await status.click()
+  // Status opens from Filter, where its pill appears once the popover closes (AEON-974).
+  const filter = toolbar.getByRole('button', { name: 'Add a filter' })
+  await filter.click()
+  await page.getByRole('menu', { name: 'Filter by' }).getByRole('menuitem', { name: 'Status', exact: true }).click()
   const dialog = page.getByRole('dialog', { name: 'Filter by Status', exact: true })
   await expect(dialog.getByRole('checkbox', { name: /New/ })).toBeVisible()
-  await expectStableControls({ controls: { trigger: status, newRow: dialog.locator('.facet-option').filter({ has: page.getByRole('checkbox', { name: /New/ }) }), new: dialog.getByRole('checkbox', { name: /New/ }), backlog: dialog.getByRole('checkbox', { name: /Backlog/ }) },
+  await expectStableControls({ controls: { trigger: filter, newRow: dialog.locator('.facet-option').filter({ has: page.getByRole('checkbox', { name: /New/ }) }), new: dialog.getByRole('checkbox', { name: /New/ }), backlog: dialog.getByRole('checkbox', { name: /Backlog/ }) },
     interactions: ['New', 'Backlog'].map(name => ({ name, run: async () => { await dialog.getByRole('checkbox', { name: new RegExp(name) }).check(); await expect(page).toHaveURL(/status=/) } })) })
   await page.keyboard.press('Escape'); await expect(dialog).toBeHidden()
+  const status = toolbar.locator('.facet-btn[data-dim="status"]')
   await expect(status).toHaveAccessibleName(/Edit Status filter: New, Backlog/)
   await toolbar.getByRole('button', { name: 'Remove Status filter' }).click()
   await expect(page).not.toHaveURL(/status=/)
   await expect(toolbar.getByRole('button', { name: 'Clear all', exact: true })).toBeHidden()
-  await toolbar.getByRole('button', { name: 'Filter by more' }).click()
+  await toolbar.getByRole('button', { name: 'Add a filter' }).click()
   await page.getByRole('menuitem', { name: /Labels/ }).click()
   const labels = page.getByRole('dialog', { name: 'Filter by Labels' })
   await labels.getByRole('checkbox', { name: /BUG/ }).check()
@@ -144,8 +155,8 @@ for (const dimension of ['assignee', 'epic'] as const) {
     const epic = data.nodes.find(node => node.id === 'n-epic')!
     epic.title = 'Mandantenübergreifende Berechtigungsverwaltung und Betriebsprüfung'
     const value = dimension === 'assignee' ? person.id : epic.id
-    const title = dimension === 'assignee' ? 'Assignee' : 'Epic'
-    const placeholder = dimension === 'assignee' ? 'Someone' : 'An epic'
+    const title = dimension === 'assignee' ? 'Assignee' : 'Parent'
+    const placeholder = dimension === 'assignee' ? 'Someone' : 'A parent'
     const resolved = dimension === 'assignee' ? person.name : epic.title
     let release!: () => void, requested!: () => void
     const response = new Promise<void>(resolve => { release = resolve })
@@ -153,7 +164,7 @@ for (const dimension of ['assignee', 'epic'] as const) {
     await mockWork(page, data, { hold: ({ path, query }) => {
       const resolver = dimension === 'assignee'
         ? query.get('assignee') === value && query.get('limit') === '1'
-        : query.get('kind') === 'epic'
+        : query.get('kind') === 'work,epic'
       if (path === '/api/nodes' && resolver) return { until: response, computed: requested }
     } })
     try {
@@ -166,7 +177,7 @@ for (const dimension of ['assignee', 'epic'] as const) {
       await expect(dialog).toBeVisible()
       await request
       await expectStableControls({
-        controls: { trigger, search: search(page), priority: toolbar.locator('.facet-btn[data-dim="priority"]'), more: toolbar.getByRole('button', { name: 'Filter by more' }), clear: toolbar.getByRole('button', { name: 'Clear all', exact: true }), new: toolbar.getByRole('button', { name: 'New ticket', exact: true }) },
+        controls: { trigger, search: search(page), more: toolbar.getByRole('button', { name: 'Add a filter' }), clear: toolbar.getByRole('button', { name: 'Clear all', exact: true }), new: toolbar.getByRole('button', { name: 'New ticket', exact: true }) },
         interactions: [{ name: 'resolve the selected label while its menu is open', run: async () => {
           release()
           // The option proves the response reached Vue; no sleep or timing guess.
@@ -242,10 +253,9 @@ test('device preference persists across projects and reloads, but separates peop
 test('phone Display choices and pinned actions stay still through density changes', async ({ page }) => {
   await page.setViewportSize({ width: 390, height: 900 })
   await mockWork(page, fixtures()); await page.goto('/p/PHAROS')
-  await page.getByRole('button', { name: 'Filters', exact: true }).click()
-  const sheet = page.getByRole('dialog', { name: 'Filters', exact: true })
+  const sheet = await phoneDisplay(page)
   const group = sheet.getByRole('radiogroup', { name: 'Project header density' })
-  await expectStableControls({ controls: { frame: sheet, header: sheet.locator('header'), action: sheet.locator('footer button'), group, comfortable: group.getByRole('radio', { name: 'Comfortable' }), compact: group.getByRole('radio', { name: 'Compact' }) }, scrollAreas: { body: sheet.locator('.sheet-scroll') },
+  await expectStableControls({ controls: { frame: sheet, header: sheet.locator('header'), action: sheet.locator('footer button'), group, comfortable: group.getByRole('radio', { name: 'Comfortable' }), compact: group.getByRole('radio', { name: 'Compact' }) }, scrollAreas: { body: sheet.locator('.menu-body') },
     interactions: ['Comfortable', 'Compact', 'Comfortable'].map(name => ({ name, run: async () => { await group.getByRole('radio', { name }).click(); await expect(group.getByRole('radio', { name })).toHaveAttribute('aria-checked', 'true') } })) })
 })
 
@@ -275,8 +285,7 @@ test('scrolling leaves density alone and section changes keep the view settings 
 test('phone Graph retains header density in the Display sheet', async ({ page }) => {
   await page.setViewportSize({ width: 390, height: 900 })
   await mockWork(page, fixtures()); await page.goto('/p/PHAROS?view=graph')
-  await page.getByRole('button', { name: 'Filters', exact: true }).click()
-  const sheet = page.getByRole('dialog', { name: 'Filters', exact: true })
+  const sheet = await phoneDisplay(page)
   const group = sheet.getByRole('radiogroup', { name: 'Project header density' })
-  await expectStableControls({ controls: { group, compact: group.getByRole('radio', { name: 'Compact' }), comfortable: group.getByRole('radio', { name: 'Comfortable' }), action: sheet.locator('footer button') }, scrollAreas: { body: sheet.locator('.sheet-scroll') }, interactions: ['Comfortable', 'Compact'].map(name => ({ name, run: async () => { await group.getByRole('radio', { name }).click(); await expect(group.getByRole('radio', { name })).toHaveAttribute('aria-checked', 'true') } })) })
+  await expectStableControls({ controls: { group, compact: group.getByRole('radio', { name: 'Compact' }), comfortable: group.getByRole('radio', { name: 'Comfortable' }), action: sheet.locator('footer button') }, scrollAreas: { body: sheet.locator('.menu-body') }, interactions: ['Comfortable', 'Compact'].map(name => ({ name, run: async () => { await group.getByRole('radio', { name }).click(); await expect(group.getByRole('radio', { name })).toHaveAttribute('aria-checked', 'true') } })) })
 })

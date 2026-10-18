@@ -10,6 +10,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/inspr-at/paimos/internal/authz"
 	"github.com/inspr-at/paimos/internal/db"
 	"github.com/inspr-at/paimos/internal/dbtest"
 	"github.com/inspr-at/paimos/internal/harness"
@@ -464,6 +465,7 @@ func TestWorkLifecycleLostContactBlocksOrdinaryWrites(t *testing.T) {
 	if status != 409 || !containsBytes(raw, "live session") {
 		t.Fatalf("lost contact must expose recovery requirement: %d %s", status, raw)
 	}
+	t.Run("bounded stale holds", testWorkLifecycleStaleHolds)
 }
 
 func TestWorkLifecyclePendingFencesOriginalBindings(t *testing.T) {
@@ -661,4 +663,354 @@ func TestWorkLifecyclePendingFencesOrderAndRunBindings(t *testing.T) {
 			}
 		})
 	}
+}
+
+// R4/R6/R7/R9: stale administrative holds must not strand cancellation, claim
+// process-exit evidence, release accounting, leak private diagnostics or bypass
+// the original person's current authority. Fixed timestamps prove the boundary.
+func testWorkLifecycleStaleHolds(t *testing.T) {
+	t.Run("SQL grace boundary and exit proof", func(t *testing.T) {
+		useDB(t)
+		now := time.Date(2026, 10, 10, 12, 0, 0, 0, time.UTC)
+		old, young, boundary := now.Add(-3*time.Hour), now.Add(-time.Hour), now.Add(-2*time.Hour)
+		reasons := []string{"heartbeat_lost", "archived_process_unknown", "removed_process_unknown", "attach detached; process exit unconfirmed"}
+		for _, reason := range reasons {
+			for _, c := range []struct {
+				name               string
+				stopped, heartbeat *time.Time
+				want               bool
+			}{
+				{"young NULL heartbeat", &young, nil, false}, {"old NULL heartbeat", &old, nil, true},
+				{"exact boundary", &boundary, nil, true}, {"recent heartbeat", &old, &young, false},
+				{"old heartbeat", &old, &old, true}, {"live", nil, &old, false},
+			} {
+				t.Run(reason+"/"+c.name, func(t *testing.T) {
+					var released, confirmed bool
+					err := appPool.QueryRow(t.Context(), `SELECT aeon_work_session_released($1::timestamptz,$2::text,$3::timestamptz,$4::timestamptz),aeon_work_session_stopped($1::timestamptz,$2::text)`, c.stopped, reason, c.heartbeat, now).Scan(&released, &confirmed)
+					if err != nil || released != c.want || confirmed {
+						t.Fatalf("released=%t confirmed=%t want=%t: %v", released, confirmed, c.want, err)
+					}
+				})
+			}
+		}
+		for _, c := range []struct {
+			reason  string
+			stopped *time.Time
+			want    bool
+		}{
+			{"completed", &now, true}, {"completed", nil, false}, {"ownership_lost", &old, false}, {"unknown", &old, false},
+		} {
+			var got bool
+			if err := appPool.QueryRow(t.Context(), `SELECT aeon_work_session_released($1::timestamptz,$2::text,NULL,$3::timestamptz)`, c.stopped, c.reason, now).Scan(&got); err != nil || got != c.want {
+				t.Fatalf("%s released=%t: %v", c.reason, got, err)
+			}
+		}
+	})
+	for _, reason := range []string{"heartbeat_lost", "archived_process_unknown", "removed_process_unknown", "attach detached; process exit unconfirmed", "completed", "unknown", "live"} {
+		for _, age := range []int{1, 3} {
+			t.Run(fmt.Sprintf("cancel/%s/%dh", reason, age), func(t *testing.T) {
+				p := newPrincipal(t, "stale-hold")
+				project := mustNode(t, p, fmt.Sprintf(`{"kind_id":%q,"title":"Project"}`, kindBySlug(t, p, "project").ID))
+				leaf := workNodeTest(t, p, project.ID, "open")
+				sid := lifecycleSession(t, p, project.ID, leaf.ID, false)
+				if err := db.InTenant(dbtest.Seed(t.Context()), appPool, p.TenantID, func(tx pgx.Tx) error {
+					_, err := tx.Exec(t.Context(), `UPDATE harness_sessions SET display_label='gate-stale',host='private-host',created_at=now()-interval '4 hours',heartbeat_at=NULL,
+      stopped_at=CASE WHEN $2='live' THEN NULL ELSE now()-make_interval(hours=>$3) END,
+      stop_reason=CASE WHEN $2='live' THEN NULL ELSE $2 END,phase=CASE WHEN $2='live' THEN 'working' ELSE 'stopped' END WHERE id=$1`, sid, reason, age)
+					return err
+				}); err != nil {
+					t.Fatal(err)
+				}
+				released := reason == "completed" || age == 3 && reason != "unknown" && reason != "live"
+				if lifecyclePreview(t, p, leaf.ID).Busy == released {
+					t.Fatal("preview disagrees with hold expiry")
+				}
+				status, raw := call(t, &p, "PATCH", "/api/nodes/"+leaf.ID, `{"state":"cancelled"}`)
+				if released {
+					decode[nodeJSON](t, status, raw, 200)
+				} else {
+					if status != 409 || !containsBytes(raw, "busy_work_leaf") || !containsBytes(raw, sid) || !containsBytes(raw, "gate-stale") || !containsBytes(raw, "age ") || containsBytes(raw, "private-host") {
+						t.Fatalf("wrong holder diagnostic: %d %s", status, raw)
+					}
+					if currentWorkTest(t, p, leaf.ID).State != "open" {
+						t.Fatal("busy cancel mutated work")
+					}
+				}
+				var binding, saved string
+				if err := db.InTenant(dbtest.Seed(t.Context()), appPool, p.TenantID, func(tx pgx.Tx) error {
+					return tx.QueryRow(t.Context(), `SELECT ticket_node_id::text,coalesce(stop_reason,'live') FROM harness_sessions WHERE id=$1`, sid).Scan(&binding, &saved)
+				}); err != nil {
+					t.Fatal(err)
+				}
+				if binding != leaf.ID || saved != reason {
+					t.Fatal("expiry rewrote process evidence or historical binding")
+				}
+			})
+		}
+	}
+	for _, c := range []struct {
+		name                  string
+		age                   int
+		reason                string
+		telemetry, ticketOnly bool
+		want                  string
+	}{
+		{name: "young orphan", age: 1, want: "rejected"},
+		{name: "historical closure before new run", age: 1, reason: "historical_completed", ticketOnly: true, want: "rejected"},
+		{name: "revoked run authority", age: 3, want: "forbidden"},
+		{name: "old orphan", age: 3, want: "completed"},
+		{name: "old run young uncertain session", age: 3, reason: "heartbeat_lost", want: "rejected"},
+		{name: "expired session", age: 3, reason: "expired", want: "completed"},
+		{name: "confirmed session", age: 1, reason: "completed", want: "completed"},
+		{name: "fresh telemetry after expired session", age: 3, reason: "expired", telemetry: true, want: "rejected"},
+		{name: "fresh telemetry orphan", age: 3, telemetry: true, want: "rejected"},
+		{name: "old run live session", age: 3, reason: "live", want: "waiting"},
+		{name: "old run live ticket binding", age: 3, reason: "live", ticketOnly: true, want: "waiting"},
+	} {
+		t.Run("graceful run/"+c.name, func(t *testing.T) {
+			p := newPrincipal(t, "stale-run-hold")
+			project := mustNode(t, p, fmt.Sprintf(`{"kind_id":%q,"title":"Project"}`, kindBySlug(t, p, "project").ID))
+			leaf := workNodeTest(t, p, project.ID, "open")
+			var sid, run, order, agent string
+			if c.reason != "" {
+				sid = lifecycleSession(t, p, project.ID, leaf.ID, false)
+			}
+			if err := db.InTenant(dbtest.Seed(t.Context()), appPool, p.TenantID, func(tx pgx.Tx) error {
+				o, err := workorders.Create(t.Context(), tx, p, workorders.CreateInput{Title: "Private order title", Parent: &leaf.ID, Criteria: []string{"Done"}})
+				if err != nil {
+					return err
+				}
+				order = o.NodeID
+				if sid != "" {
+					err = tx.QueryRow(t.Context(), `SELECT agent_principal_id::text FROM harness_sessions WHERE id=$1`, sid).Scan(&agent)
+				} else {
+					err = tx.QueryRow(t.Context(), `INSERT INTO principals(tenant_id,kind,name) VALUES($1,'agent','Private principal') RETURNING id::text`, p.TenantID).Scan(&agent)
+				}
+				if err != nil {
+					return err
+				}
+				if err = tx.QueryRow(t.Context(), `INSERT INTO agent_runs(tenant_id,work_order_id,queue_node_id,agent_principal_id,status,queue_by_principal_id,queue_at,queue_security_review_required,created_at,started_at,trace)
+     VALUES($1,$2,$3,$4,'running',$5,now()-make_interval(hours=>$6),false,now()-make_interval(hours=>$6),now()-make_interval(hours=>$6),'{"worker_assignment":{"state":"launched"}}') RETURNING id::text`, p.TenantID, order, leaf.ID, agent, p.ID, c.age).Scan(&run); err != nil {
+					return err
+				}
+				if _, err = tx.Exec(t.Context(), `UPDATE work_orders SET status='running' WHERE node_id=$1`, order); err != nil {
+					return err
+				}
+				if sid != "" {
+					sessionAge := 1
+					reason := c.reason
+					if reason == "historical_completed" {
+						sessionAge = 3
+						reason = "completed"
+					}
+					if reason == "expired" {
+						sessionAge = 3
+						reason = "heartbeat_lost"
+					}
+					_, err = tx.Exec(t.Context(), `UPDATE harness_sessions SET run_id=CASE WHEN $3 THEN NULL ELSE $2::uuid END,display_label='gate-run',heartbeat_at=NULL,
+      stopped_at=CASE WHEN $4='live' THEN NULL ELSE now()-make_interval(hours=>$5) END,
+      phase=CASE WHEN $4='live' THEN 'working' ELSE 'stopped' END,stop_reason=CASE WHEN $4='live' THEN NULL ELSE $4 END WHERE id=$1`, sid, run, c.ticketOnly, reason, sessionAge)
+					if err != nil {
+						return err
+					}
+				}
+				if c.telemetry {
+					_, err = tx.Exec(t.Context(), `INSERT INTO run_telemetry(tenant_id,run_id,sequence,kind) VALUES($1,$2,1,'heartbeat')`, p.TenantID, run)
+				}
+				return err
+			}); err != nil {
+				t.Fatal(err)
+			}
+			// An active run/order still requires the person action even after expiry.
+			status, raw := call(t, &p, "PATCH", "/api/nodes/"+leaf.ID, `{"state":"cancelled"}`)
+			if status != 409 || !containsBytes(raw, run) || !containsBytes(raw, order) || !containsBytes(raw, "age ") || containsBytes(raw, "Private order title") || containsBytes(raw, "Private principal") {
+				t.Fatalf("run/order diagnostic: %d %s", status, raw)
+			}
+			if c.want == "forbidden" {
+				// Builtin role permissions come from the registry, not these rows.
+				// Bind a custom copy so removing the grant really revokes it.
+				effective, err := authz.Load(dbtest.Seed(t.Context()), appPool, p, project.ID)
+				if err != nil {
+					t.Fatal(err)
+				}
+				if err := db.InTenant(dbtest.Seed(t.Context()), appPool, p.TenantID, func(tx pgx.Tx) error {
+					var role string
+					if err := tx.QueryRow(t.Context(), `INSERT INTO roles(tenant_id,key,name) VALUES($1,'stale_hold_controller','Stale hold controller') RETURNING id::text`, p.TenantID).Scan(&role); err != nil {
+						return err
+					}
+					if _, err := tx.Exec(t.Context(), `INSERT INTO role_permissions(tenant_id,role_id,permission) SELECT $1,$2,unnest($3::text[])`, p.TenantID, role, effective.Workspace.Permissions); err != nil {
+						return err
+					}
+					if _, err := tx.Exec(t.Context(), `UPDATE role_bindings SET role_id=$2 WHERE principal_id=$1 AND scope_type='workspace'`, p.ID, role); err != nil {
+						return err
+					}
+					scope := authz.Scope{ProjectID: project.ID}
+					if err := authz.RequireTx(t.Context(), tx, p, "run.create", scope); err != nil {
+						return err
+					}
+					tag, err := tx.Exec(t.Context(), `DELETE FROM role_permissions WHERE role_id=$1 AND permission='run.create'`, role)
+					if err != nil {
+						return err
+					}
+					if tag.RowsAffected() != 1 || !errors.Is(authz.RequireTx(t.Context(), tx, p, "run.create", scope), authz.ErrForbidden) {
+						t.Fatal("fixture did not revoke the live run.create grant")
+					}
+					return nil
+				}); err != nil {
+					t.Fatal(err)
+				}
+			}
+			request, status, raw := lifecycleRequest(t, p, leaf.ID, "cancel", nil)
+			if c.want == "forbidden" {
+				if status != 403 || !containsBytes(raw, "forbidden") {
+					t.Fatalf("revoked run authority was accepted: %d %s", status, raw)
+				}
+			} else if c.want == "rejected" {
+				if status != 409 || !containsBytes(raw, "live session") || !containsBytes(raw, run) {
+					t.Fatalf("young or reporting hold was released: %d %s", status, raw)
+				}
+			} else {
+				if a := decode[workAction](t, status, raw, 200); a.State != c.want {
+					t.Fatalf("want %s: %s", c.want, raw)
+				}
+			}
+			if c.want == "completed" {
+				status, raw = call(t, &p, "POST", "/api/nodes/"+leaf.ID+"/work-lifecycle/"+request+"/continue", "")
+				if a := decode[workAction](t, status, raw, 200); a.State != "completed" {
+					t.Fatal("completed replay failed")
+				}
+			}
+			if err := db.InTenant(dbtest.Seed(t.Context()), appPool, p.TenantID, func(tx pgx.Tx) error {
+				var state, assignment, orderState string
+				var audits int
+				var proof bool
+				if err := tx.QueryRow(t.Context(), `SELECT status,trace->'worker_assignment'->>'state' FROM agent_runs WHERE id=$1`, run).Scan(&state, &assignment); err != nil {
+					return err
+				}
+				if err := tx.QueryRow(t.Context(), `SELECT status FROM work_orders WHERE node_id=$1`, order).Scan(&orderState); err != nil {
+					return err
+				}
+				if err := tx.QueryRow(t.Context(), `SELECT count(*),coalesce(bool_or((after->>'process_exit_confirmed')::boolean),false) FROM events WHERE node_id=$1 AND type='run.stale_hold_released' AND after->'run'->>'id'=$2 AND actor_principal_id=$3 AND after->>'action_id'=$4`, order, run, p.ID, request).Scan(&audits, &proof); err != nil {
+					return err
+				}
+				if c.want == "completed" {
+					if state != "ownership_lost" || orderState != "cancelled" || audits != 1 || proof || currentWorkTest(t, p, leaf.ID).State != "cancelled" {
+						t.Fatalf("stale release: run=%s order=%s audits=%d exit=%t", state, orderState, audits, proof)
+					}
+				} else if state != "running" || audits != 0 || orderState != "running" {
+					t.Fatal("live or young run was mutated")
+				}
+				if assignment != "launched" {
+					t.Fatal("expiry erased unconfirmed writer evidence")
+				}
+				return nil
+			}); err != nil {
+				t.Fatal(err)
+			}
+		})
+	}
+	for _, c := range []struct {
+		name       string
+		age        int
+		closureAge int
+		reason     string
+		want       int
+	}{
+		{"young standalone order", 1, 0, "", 409}, {"old standalone order", 3, 0, "", 200}, {"confirmed standalone order", 1, 0, "completed", 200},
+		{"historical confirmed closure with new order", 1, 4, "completed", 409},
+		{"historical expired closure with new order", 1, 4, "heartbeat_lost", 409},
+		{"historical closure with old order", 3, 4, "completed", 200},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			p := newPrincipal(t, "stale-order")
+			project := mustNode(t, p, fmt.Sprintf(`{"kind_id":%q,"title":"Project"}`, kindBySlug(t, p, "project").ID))
+			leaf := workNodeTest(t, p, project.ID, "open")
+			if c.reason != "" {
+				sid := lifecycleSession(t, p, project.ID, leaf.ID, true)
+				if err := db.InTenant(dbtest.Seed(t.Context()), appPool, p.TenantID, func(tx pgx.Tx) error {
+					_, err := tx.Exec(t.Context(), `UPDATE harness_sessions SET created_at=now()-make_interval(hours=>$2)-interval '1 hour',stopped_at=now()-make_interval(hours=>$2),stop_reason=$3,heartbeat_at=NULL WHERE id=$1`, sid, c.closureAge, c.reason)
+					return err
+				}); err != nil {
+					t.Fatal(err)
+				}
+			}
+			var order string
+			if err := db.InTenant(dbtest.Seed(t.Context()), appPool, p.TenantID, func(tx pgx.Tx) error {
+				o, err := workorders.Create(t.Context(), tx, p, workorders.CreateInput{Title: "Order", Parent: &leaf.ID, Criteria: []string{"Done"}})
+				if err != nil {
+					return err
+				}
+				order = o.NodeID
+				_, err = tx.Exec(t.Context(), `UPDATE work_orders SET status='running',updated_at=now()-make_interval(hours=>$2) WHERE node_id=$1`, order, c.age)
+				return err
+			}); err != nil {
+				t.Fatal(err)
+			}
+			_, status, raw := lifecycleRequest(t, p, leaf.ID, "cancel", nil)
+			if status != c.want {
+				t.Fatalf("order hold status %d want %d: %s", status, c.want, raw)
+			}
+			if status == 409 && (!containsBytes(raw, order) || !containsBytes(raw, "age ")) {
+				t.Fatalf("missing order holder: %s", raw)
+			}
+			if status == 409 {
+				if !containsBytes(raw, "running work must publish a live session") {
+					t.Fatalf("standalone order rejected for the wrong reason: %s", raw)
+				}
+				if err := db.InTenant(dbtest.Seed(t.Context()), appPool, p.TenantID, func(tx pgx.Tx) error {
+					var state string
+					var actions int
+					if err := tx.QueryRow(t.Context(), `SELECT status FROM work_orders WHERE node_id=$1`, order).Scan(&state); err != nil {
+						return err
+					}
+					if err := tx.QueryRow(t.Context(), `SELECT count(*) FROM work_lifecycle_actions WHERE node_id=$1`, leaf.ID).Scan(&actions); err != nil {
+						return err
+					}
+					if state != "running" || actions != 0 || currentWorkTest(t, p, leaf.ID).State != "open" {
+						t.Fatal("held standalone order or ticket was mutated")
+					}
+					return nil
+				}); err != nil {
+					t.Fatal(err)
+				}
+			}
+			if status == 200 {
+				if a := decode[workAction](t, status, raw, 200); a.State != "completed" {
+					t.Fatalf("order did not settle: %s", raw)
+				}
+			}
+		})
+	}
+	t.Run("diagnostic visibility and truncation", func(t *testing.T) {
+		p := newPrincipal(t, "hold-diagnostics")
+		project := mustNode(t, p, fmt.Sprintf(`{"kind_id":%q,"title":"Project"}`, kindBySlug(t, p, "project").ID))
+		leaf := workNodeTest(t, p, project.ID, "open")
+		hidden := lifecycleSession(t, p, project.ID, leaf.ID, false)
+		if err := db.InTenant(dbtest.Seed(t.Context()), appPool, p.TenantID, func(tx pgx.Tx) error {
+			if _, err := tx.Exec(t.Context(), `UPDATE harness_sessions SET display_label='private-label' WHERE id=$1`, hidden); err != nil {
+				return err
+			}
+			if _, err := tx.Exec(t.Context(), `SELECT set_config('aeon.visible_projects','',true),set_config('aeon.system','off',true)`); err != nil {
+				return err
+			}
+			var busy bool
+			var holders string
+			if err := tx.QueryRow(t.Context(), `SELECT aeon_work_busy($1),aeon_work_busy_holders($1)`, leaf.ID).Scan(&busy, &holders); err != nil {
+				return err
+			}
+			if !busy || strings.Contains(holders, hidden) || strings.Contains(holders, "private-label") {
+				t.Fatalf("hidden holder leaked or fence lost: %s", holders)
+			}
+			return nil
+		}); err != nil {
+			t.Fatal(err)
+		}
+		for range 20 {
+			lifecycleSession(t, p, project.ID, leaf.ID, false)
+		}
+		status, raw := call(t, &p, "PATCH", "/api/nodes/"+leaf.ID, `{"state":"cancelled"}`)
+		if status != 409 || !containsBytes(raw, "additional holders omitted") || strings.Count(string(raw), "age ") != 20 {
+			t.Fatalf("unbounded or silent truncation: %d %s", status, raw)
+		}
+	})
 }

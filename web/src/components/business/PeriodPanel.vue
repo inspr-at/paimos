@@ -169,14 +169,14 @@ async function approve() {
 .head-text p { font-size: 12.5px; color: var(--ink-2); }
 .spacer { flex: 1; }
 .state-chip { display: inline-flex; align-items: center; gap: 5px; height: 22px; padding: 0 9px; border-radius: 999px; background: var(--chip-bg); box-shadow: inset 0 0 0 1px var(--chip-line); color: var(--ink-2); font: 600 10.5px/1 var(--mono); letter-spacing: .06em; text-transform: uppercase; font-variant-ligatures: none; }
-.state-chip.ok { background: rgba(47, 122, 90, .1); box-shadow: inset 0 0 0 1px rgba(47, 122, 90, .3); color: var(--ok); }
+.state-chip.ok { background: var(--ok-bg); box-shadow: inset 0 0 0 1px var(--ok-line); color: var(--ok); }
 .scroll { flex: 1; min-height: 0; overflow: auto; overscroll-behavior: contain; padding: 18px 22px 24px; }
 .metrics { display: grid; grid-template-columns: 1fr 1fr 2fr; gap: 8px; }
 .metric { display: grid; gap: 4px; padding: 10px 12px; border-radius: 10px; background: var(--code-bg); }
 .metric-label { font-size: 11.5px; color: var(--ink-2); }
 .metric :deep(.money .cur) { color: var(--ink-2); }
 .metric b { display: flex; flex-wrap: wrap; gap: 4px 10px; font: 600 15px/1.2 var(--mono); color: var(--ink); font-variant-numeric: tabular-nums; }
-.approved-line { display: flex; align-items: center; gap: 8px; margin-top: 12px; padding: 8px 12px; border-radius: 10px; background: rgba(47, 122, 90, .08); color: var(--ok); font-size: 12.5px; }
+.approved-line { display: flex; align-items: center; gap: 8px; margin-top: 12px; padding: 8px 12px; border-radius: 10px; background: color-mix(in srgb, var(--ok) 8%, transparent); color: var(--ok); font-size: 12.5px; }
 .block { margin-top: 22px; }
 .block .eyebrow { margin-bottom: 8px; }
 .tickets, .entries { margin: 0; padding: 0; list-style: none; }

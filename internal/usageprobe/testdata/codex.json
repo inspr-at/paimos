@@ -1,0 +1,15 @@
+{
+  "rate_limit": {
+    "primary_window": {
+      "used_percent": 17,
+      "reset_at": 1791388800,
+      "limit_window_seconds": 18000
+    },
+    "secondary_window": {
+      "used_percent": 34,
+      "reset_at": 1791763200,
+      "limit_window_seconds": 604800
+    }
+  },
+  "plan_type": "ignored-vendor-text"
+}

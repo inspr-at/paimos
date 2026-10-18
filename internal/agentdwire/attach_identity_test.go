@@ -84,14 +84,52 @@ func TestAttachConflictDiagnosticIsSurfacedAndBounded(t *testing.T) {
 	if _, err = client.Attach(t.Context(), agentd.AttachLocalRequest{}); err == nil || !strings.Contains(err.Error(), "watch requires") {
 		t.Fatal("legacy local diagnostic hidden", err)
 	}
-	if _, err = client.Lifecycle(t.Context(), ""); err == nil || err.Error() != "local lifecycle request rejected" {
-		t.Fatal("lifecycle contract changed", err)
+	if _, err = client.Lifecycle(t.Context(), ""); err == nil || err.Error() != "local lifecycle request rejected (HTTP 409): watch requires --transcript PATH; choose --status-only for no conversation text" {
+		t.Fatal("lifecycle diagnostic was hidden", err)
 	}
 	for _, code := range []string{"attach_version_mismatch", "attach_pairing_revoked", "attach_ticket_not_visible", "attach_code_expired", "attach_live_limit", "attach_draining", "attach_enrollment_unavailable", "attach_registration_lost", "attach_poll_key_unknown", "attach_pairing_unavailable", "attach_scope_changed", "attach_computer_limit", "attach_attempt_limit", "attach_registration_limit", "attach_poll_limit", "attach_rate_limit", "attach_snapshot_changed", "attach_consent_required", "attach_ended", "attach_invalid_request", "attach_offline", "attach_server_unavailable", "attach_unknown", "attach_local_unavailable", "attach_pairing_mismatch"} {
 		body.Store(`{"code":"` + code + `","hint":"Check the cause and run attach again."}`)
 		_, err := client.Attach(t.Context(), agentd.AttachLocalRequest{Operation: "poll"})
 		if !errors.As(err, &detail) || detail.Code != code {
 			t.Fatal("owner repair cause was discarded by local transport")
+		}
+	}
+}
+
+func TestLifecycleReasonsAreSurfacedWithoutUnsafeResponseText(t *testing.T) {
+	root, err := os.MkdirTemp("", "wire-")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.RemoveAll(root) })
+	root, err = filepath.EvalSymlinks(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	socket := filepath.Join(root, "a.sock")
+	if err := os.WriteFile(socket+".token", []byte("12345678901234567890123456789012"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	listener, err := net.Listen("unix", socket)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var body atomic.Value
+	body.Store("paired installation proof unavailable\n")
+	server := &http.Server{Handler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(409)
+		_, _ = w.Write([]byte(body.Load().(string)))
+	})}
+	go func() { _ = server.Serve(listener) }()
+	defer server.Close()
+	client := Client{Socket: socket, TokenFile: socket + ".token"}
+	if _, err := client.AccountLink(t.Context(), agentd.AccountLinkRequest{Harness: "claude", Operation: "offer"}); err == nil || err.Error() != "local lifecycle request rejected (HTTP 409): paired installation proof unavailable" {
+		t.Fatalf("proof failure hidden: %v", err)
+	}
+	for _, unsafe := range []string{strings.Repeat("x", 769), "secret\x1b[31m", `{"error":"arbitrary response"}`} {
+		body.Store(unsafe)
+		if _, err := client.Lifecycle(t.Context(), ""); err == nil || err.Error() != "local lifecycle request rejected (HTTP 409): diagnostic unavailable" {
+			t.Fatalf("unsafe response text displayed: %v", err)
 		}
 	}
 }

@@ -26,9 +26,25 @@ func ResolveEscalation(ctx context.Context, tx pgx.Tx, p tenant.Principal, q Wor
 		out.Trace.Blocked = "role has no automatic escalation"
 		return out, nil
 	}
+	q.Situation = "stuck"
+	q.Escalation = true
+	if q.TicketRole == "" {
+		q.TicketRole = q.Role
+	}
+	if len(excluded) > 0 && q.PreviousFamily == "" {
+		if err := tx.QueryRow(ctx, `SELECT family FROM model_profiles WHERE id=$1`, excluded[0]).Scan(&q.PreviousFamily); err != nil {
+			return out, err
+		}
+	}
+	q.Role = "build-hard"
+	if board, err := resolveBoardWork(ctx, tx, p, q, now, excluded); err != nil {
+		return out, err
+	} else if board != nil {
+		return *board, nil
+	}
 	// Bound fan-out before decoding profiles or projecting account windows.
 	var tooLarge bool
-	if err := tx.QueryRow(ctx, `SELECT (SELECT count(*) FROM (SELECT 1 FROM model_profiles LIMIT 513) p)>512 OR (SELECT count(*) FROM (SELECT 1 FROM agent_accounts LIMIT 257) a)>256 OR (SELECT count(*) FROM (SELECT 1 FROM model_role_routes WHERE role='build-hard' LIMIT 65) r)>64 OR (SELECT count(*) FROM (SELECT 1 FROM account_allowance_windows WHERE NOT pairing_verification AND NOT capacity_retired AND removed_at IS NULL LIMIT 4097) w)>4096`).Scan(&tooLarge); err != nil {
+	if err := tx.QueryRow(ctx, `SELECT (SELECT count(*) FROM (SELECT 1 FROM model_profiles LIMIT 513) p)>512 OR (SELECT count(*) FROM (SELECT 1 FROM agent_accounts LIMIT 257) a)>256 OR (SELECT count(*) FROM (SELECT 1 FROM account_allowance_windows WHERE NOT pairing_verification AND NOT capacity_retired AND removed_at IS NULL LIMIT 4097) w)>4096`).Scan(&tooLarge); err != nil {
 		return out, err
 	}
 	if tooLarge {
@@ -95,14 +111,14 @@ func ResolveEscalation(ctx context.Context, tx pgx.Tx, p tenant.Principal, q Wor
 		identities[harness+"/"+model+"/"+effort] = true
 	}
 	waiting := false
-	health, err := agentaccounts.HarnessHealthAt(ctx, tx, now)
+	health, err := agentaccounts.HarnessHealthAt(ctx, tx, now, q.ProjectID)
 	if err != nil {
 		return out, err
 	}
 	role, _ := roleByName("build-hard")
 	for _, step := range steps {
 		pr := step.Profile
-		reasons := skipReasons(step, role, resolveQuery{Role: "build-hard", Harness: q.Harness}, now, health)
+		reasons := skipReasons(step, role, resolveQuery{Role: "build-hard", Harness: q.Harness, OffHarnesses: q.OffHarnesses}, now, health)
 		if locked && preferred[pr.ID] == 0 {
 			reasons = append(reasons, "locked model preference")
 		}
@@ -112,7 +128,7 @@ func ResolveEscalation(ctx context.Context, tx pgx.Tx, p tenant.Principal, q Wor
 		if identities[pr.Harness+"/"+pr.Model+"/"+pr.Effort] {
 			reasons = append(reasons, "already attempted")
 		}
-		policyReasons := skipReasons(step, role, resolveQuery{Role: "build-hard", Harness: q.Harness}, now, nil)
+		policyReasons := skipReasons(step, role, resolveQuery{Role: "build-hard", Harness: q.Harness, OffHarnesses: q.OffHarnesses}, now, nil)
 		if len(policyReasons) == 0 && escalationRank(pr, q.Area) < 99 && !identities[pr.Harness+"/"+pr.Model+"/"+pr.Effort] && (!locked || preferred[pr.ID] > 0) {
 			waiting = true
 		}

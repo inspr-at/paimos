@@ -9,6 +9,8 @@ import { expectStableControls } from './helpers/stable'
 
 const now = Date.parse('2026-10-01T14:00:00Z')
 const before = process.env.AEON_501_CAPTURE === 'before'
+// The rows name a model the registry does not list by its words, never its raw id (AEON-1211).
+const SHOWN: Record<string, string> = { 'gpt-fixture': 'Gpt Fixture', 'grok-fixture': 'Grok Fixture' }
 
 async function availableHostBadgeWidth(hostCell: Locator) {
   return hostCell.evaluate(el => {
@@ -52,7 +54,7 @@ test('host capacity guard rejects a spill that the old 160px ceiling accepts', a
     .c-host { width: 132px; box-sizing: border-box; padding: 0 8px; }
     .host-control { display: inline-flex; padding-right: 22px; }
     .host-badge { display: inline-block; flex: none; width: 94px; }
-  </style><div class="c-host"><span class="host-control"><span class="host-badge">mbp2606</span></span></div>`)
+  </style><div class="c-host"><span class="host-control"><span class="host-badge">build-6</span></span></div>`)
   const cell = page.locator('.c-host')
   const badge = page.locator('.host-badge')
   const available = await availableHostBadgeWidth(cell)
@@ -93,8 +95,8 @@ for (const theme of ['light', 'dark'] as const) test(`ended and lost-contact pho
   work.preferences.theme = { choice: 'system' }
   await mockWork(page, work, { admin: true })
   const data = agentData({ now, me: me.id, projects: { pharos: 'p-pharos', aeon: 'p-aeon', pai: 'p-frozen' }, tickets: { fleet: 'n-1', restore: 'n-2', web: 'n-a1', release: 'n-5', approvals: 'n-6' } })
-  const ended = { ...data.sessions[6]!, display_label: 'Ended', brief: 'Ship', host: 'mbp2606', harness: 'terminal', command: 'ffmpeg', run_id: null, ticket_node_id: null, ticket: null }
-  const silent = { ...data.sessions[4]!, display_label: 'Silent', brief: 'Ship', host: 'mbp2606', harness: 'terminal', command: 'ffmpeg', run_id: null, ticket_node_id: null, ticket: null, heartbeat_at: new Date(now - 20 * 60_000).toISOString() }
+  const ended = { ...data.sessions[6]!, display_label: 'Ended', brief: 'Ship', host: 'build-6', harness: 'terminal', command: 'ffmpeg', run_id: null, ticket_node_id: null, ticket: null }
+  const silent = { ...data.sessions[4]!, display_label: 'Silent', brief: 'Ship', host: 'build-6', harness: 'terminal', command: 'ffmpeg', run_id: null, ticket_node_id: null, ticket: null, heartbeat_at: new Date(now - 20 * 60_000).toISOString() }
   data.sessions.splice(0, data.sessions.length, ended, silent)
   data.runs.splice(0); data.approvals.splice(0); data.messages.splice(0); data.targets.splice(0)
   await mockAgents(page, data)
@@ -107,8 +109,7 @@ for (const theme of ['light', 'dark'] as const) test(`ended and lost-contact pho
     await route.fulfill({ status: 503, json: { error: 'Removal unavailable in layout fixture' } })
   })
   await page.goto('/agents')
-  const accounts = page.getByRole('button', { name: /^Accounts and computers/ })
-  if (await accounts.getAttribute('aria-expanded') === 'true') await accounts.click()
+  // AEON-1209: Accounts and computers is a chip in the capacity row; there is no card to fold away.
   await page.getByRole('button', { name: /^Ended/ }).click()
   await expect(page.locator(`[data-row="s:${ended.id}"]`)).toHaveAttribute('data-state', 'stopped')
   await expect(page.locator(`[data-row="s:${silent.id}"]`)).toHaveAttribute('data-state', 'unresponsive')
@@ -122,12 +123,59 @@ for (const theme of ['light', 'dark'] as const) test(`ended and lost-contact pho
       const menu = row.getByRole('button', { name: `Actions for ${session.display_label}`, exact: true })
       await row.scrollIntoViewIfNeeded()
       await expect(row.locator('.result')).toHaveText('Ship')
-      await expect(remove).toBeVisible()
       await expect(menu).toBeVisible()
+      if (width <= 390) {
+        // Current main and the candidate both keep removal in Actions on
+        // compact rows. "before" selects the capture, not a legacy layout.
+        await expect(host).toBeHidden()
+        await expect(row.locator('.op-mark')).toHaveAttribute('aria-label', 'Terminal · ffmpeg')
+        await expect(remove).toBeHidden()
+        for (const action of [menu]) {
+          const actionBox = (await action.boundingBox())!
+          expect(actionBox.width).toBeGreaterThanOrEqual(44)
+          expect(actionBox.height).toBeGreaterThanOrEqual(44)
+        }
+        await expectStableControls({ controls: { row, menu }, scrollAreas: { row }, interactions: [
+          { name: 'open row Actions', run: async () => {
+            await menu.click()
+            await expect(menu).toHaveAttribute('aria-expanded', 'true')
+            await expect(page.getByRole('menu', { name: `Actions for ${session.display_label}` })).toBeVisible()
+            const removeItem = page.getByRole('menu', { name: `Actions for ${session.display_label}` }).getByRole('menuitem', { name: 'Remove stale session', exact: true })
+            await expect(removeItem).toBeVisible()
+            const box = (await removeItem.boundingBox())!
+            expect(box.width).toBeGreaterThanOrEqual(44)
+            expect(box.height).toBeGreaterThanOrEqual(44)
+          } },
+          { name: 'close row Actions', run: async () => {
+            await page.keyboard.press('Escape')
+            await expect(menu).toHaveAttribute('aria-expanded', 'false')
+          } },
+          { name: 'click Remove and report its failure', run: async () => {
+            const count = removed.length
+            await menu.click()
+            await page.getByRole('menu', { name: `Actions for ${session.display_label}` }).getByRole('menuitem', { name: 'Remove stale session', exact: true }).click()
+            await expect(menu).toHaveAttribute('aria-expanded', 'false')
+            await expect.poll(() => removed.length).toBe(count + 1)
+            expect(removed.at(-1)).toBe(session.id)
+            await expect(page.getByText('Removal unavailable in layout fixture', { exact: true }).last()).toBeVisible()
+          } },
+        ] })
+        if (width === 390 && session === ended) {
+          // The details name the computer and rename it, where the row no longer has room.
+          await row.locator('.l2').click()
+          const details = page.getByRole('complementary', { name: 'Session details' })
+          await details.locator('.host-fact .host-badge').click()
+          await expect(dialog.getByRole('textbox')).toBeEnabled()
+          await dialog.getByRole('button', { name: 'Cancel', exact: true }).click()
+          await expect(dialog).toHaveCount(0)
+          await page.keyboard.press('Escape')
+          await expect(details).toHaveCount(0)
+        }
+        continue
+      }
+      await expect(remove).toBeVisible()
       for (const action of [remove, menu]) {
         const actionBox = (await action.boundingBox())!
-        expect(actionBox.width).toBeGreaterThanOrEqual(width <= 390 ? 44 : 1)
-        expect(actionBox.height).toBeGreaterThanOrEqual(width <= 390 ? 44 : 1)
         for (const control of [host, pencil]) {
           const controlBox = (await control.boundingBox())!
           const overlapWidth = Math.min(actionBox.x + actionBox.width, controlBox.x + controlBox.width) - Math.max(actionBox.x, controlBox.x)
@@ -136,46 +184,6 @@ for (const theme of ['light', 'dark'] as const) test(`ended and lost-contact pho
         }
       }
       expectModelGlyphFits(await modelGlyphSize(row.locator('.exec-model'), 6), `${width}px ${session.display_label}: complete ffmpeg remains visible`)
-      if (width <= 390) {
-        const stateBox = (await row.locator('.agent-state-label').boundingBox())!
-        const ticketBox = (await row.locator('.c-ticket').boundingBox())!
-        expect(stateBox.x + stateBox.width, `${width}px ${session.display_label}: state stays clear of project`).toBeLessThanOrEqual(ticketBox.x + .5)
-      }
-      if (width <= 390) await expectStableControls({ controls: { row, host, pencil, remove, menu }, scrollAreas: { row }, interactions: [
-        { name: 'open Host from badge', run: async () => {
-          await host.click()
-          await expect(dialog.getByRole('textbox')).toBeEnabled()
-        } },
-        { name: 'cancel Host draft', run: async () => {
-          await dialog.getByRole('button', { name: 'Cancel', exact: true }).click()
-          await expect(dialog).toHaveCount(0)
-        } },
-        { name: 'open Host from rename control', run: async () => {
-          await pencil.click()
-          await expect(dialog.getByRole('textbox')).toBeEnabled()
-        } },
-        { name: 'cancel rename', run: async () => {
-          await dialog.getByRole('button', { name: 'Cancel', exact: true }).click()
-          await expect(dialog).toHaveCount(0)
-        } },
-        { name: 'open row Actions', run: async () => {
-          await menu.click()
-          await expect(menu).toHaveAttribute('aria-expanded', 'true')
-          await expect(page.getByRole('menu', { name: `Actions for ${session.display_label}` })).toBeVisible()
-        } },
-        { name: 'close row Actions', run: async () => {
-          await page.keyboard.press('Escape')
-          await expect(menu).toHaveAttribute('aria-expanded', 'false')
-        } },
-        { name: 'click Remove and report its failure', run: async () => {
-          const count = removed.length
-          await remove.click()
-          await expect.poll(() => removed.length).toBe(count + 1)
-          expect(removed.at(-1)).toBe(session.id)
-          await expect(remove).toBeEnabled()
-          await expect(page.getByText('Removal unavailable in layout fixture', { exact: true }).last()).toBeVisible()
-        } },
-      ] })
     }
     expect(await page.evaluate(() => document.documentElement.scrollWidth - innerWidth)).toBeLessThanOrEqual(1)
     const shots = process.env.AEON_670_FIX2_SHOTS
@@ -195,8 +203,8 @@ test('execution kinds and person-specific host names on the real agents table', 
   await mockWork(page, work, { admin: true })
   const data = agentData({ now, me: me.id, projects: { pharos: 'p-pharos', aeon: 'p-aeon', pai: 'p-frozen' }, tickets: { fleet: 'n-1', restore: 'n-2', web: 'n-a1', release: 'n-5', approvals: 'n-6' }, nodes: { 'n-1': { key: 'PHAROS-42', title: 'Ship the execution kinds' } } })
   const lead = data.sessions[0]!
-  Object.assign(lead, { display_label: 'Release coordinator', model: 'claude-fixture', role: 'coordinator', harness: 'claude', run_id: null, host: 'mbp2607', progress_pct: 50, eta_live_at: new Date(now + 20 * 60_000).toISOString(), heartbeat_at: new Date(now - 5_000).toISOString() })
-  const ai = { ...data.sessions[1]!, run_id: null, ticket_node_id: lead.ticket_node_id, ticket: lead.ticket, parent_harness_session_id: lead.id, display_label: 'AI worker', harness: 'codex', model: 'gpt-fixture', reasoning_effort: 'high', host: 'mbp2606', phase: 'working', activity: 'busy', progress_pct: 20, eta_ready_at: new Date(now + 10 * 60_000).toISOString() }
+  Object.assign(lead, { display_label: 'Release coordinator', model: 'claude-fixture', role: 'coordinator', harness: 'claude', run_id: null, host: 'build-7', progress_pct: 50, eta_live_at: new Date(now + 20 * 60_000).toISOString(), heartbeat_at: new Date(now - 5_000).toISOString() })
+  const ai = { ...data.sessions[1]!, run_id: null, ticket_node_id: lead.ticket_node_id, ticket: lead.ticket, parent_harness_session_id: lead.id, display_label: 'AI worker', harness: 'codex', model: 'gpt-fixture', reasoning_effort: 'high', host: 'build-6', phase: 'working', activity: 'busy', progress_pct: 20, eta_ready_at: new Date(now + 10 * 60_000).toISOString() }
   const xai = { ...ai, id: '52000000-0000-4000-8000-000000000001', display_label: 'xAI worker', harness: 'grok', model: 'grok-fixture' }
   const media = { ...ai, id: '52000000-0000-4000-8000-000000000002', display_label: 'Media worker', harness: 'media', model: null, reasoning_effort: null, generator: 'higgsfield/kling3_0', progress_pct: 40 }
   const terminal = { ...ai, id: '52000000-0000-4000-8000-000000000003', display_label: 'Terminal worker', harness: 'terminal', model: null, reasoning_effort: null, command: 'ffmpeg', progress_pct: 90 }
@@ -212,13 +220,13 @@ test('execution kinds and person-specific host names on the real agents table', 
     } else await route.fulfill({ json: [...names].map(([host, label]) => ({ host, label })) })
   })
   await page.goto('/agents')
-  const accounts = page.getByRole('button', { name: /^Accounts and computers/ })
-  if (await accounts.getAttribute('aria-expanded') === 'true') await accounts.click()
+  // AEON-1209: Accounts and computers is a chip in the capacity row; there is no card to fold away.
   await expect(page.locator(`[data-row="s:${ai.id}"]`)).toBeVisible()
-  const table = page.getByRole('table', { name: 'Agent sessions' })
+  const table = page.getByRole('treegrid', { name: 'Agent sessions' })
   if (!before) {
-    await expect(table.getByRole('columnheader').filter({ hasText: /^Name/ })).toBeVisible()
-    await expect(table.getByRole('columnheader').filter({ hasText: /^Host/ })).toBeVisible()
+    // The approved column names (AEON-1211, design AEON-1196): Session · Time · Execution · Computer · Beat.
+    await expect(table.getByRole('columnheader').filter({ hasText: /^Session/ })).toBeVisible()
+    await expect(table.getByRole('columnheader').filter({ hasText: /^Computer/ })).toBeVisible()
     await expect(page.locator(`[data-row="s:${media.id}"] .c-exec`)).toContainText('higgsfield/kling3_0')
     await expect(page.locator(`[data-row="s:${terminal.id}"] .c-exec`)).toContainText('ffmpeg')
     await expect(page.locator('[data-run-kind="media"]')).toHaveCount(1)
@@ -260,7 +268,7 @@ test('execution kinds and person-specific host names on the real agents table', 
         await expect(dialog).toHaveCount(0)
       } },
     ] })
-    await expect(workerHost).toContainText('mbp2606')
+    await expect(workerHost).toContainText('build-6')
     expect(names.size).toBe(0)
     await workerHost.click()
     await expect(dialog.getByRole('textbox')).toBeEnabled()
@@ -268,7 +276,7 @@ test('execution kinds and person-specific host names on the real agents table', 
     expect(await workerHost.boundingBox()).toEqual(original)
     await dialog.getByRole('button', { name: 'Save', exact: true }).click()
     for (const child of [ai, xai, media, terminal]) await expect(page.locator(`[data-row="s:${child.id}"] .host-badge`)).toContainText("David's MacBook")
-    await expect(page.locator(`[data-row="s:${lead.id}"] .host-badge`)).toContainText('mbp2607')
+    await expect(page.locator(`[data-row="s:${lead.id}"] .host-badge`)).toContainText('build-7')
     const renamed = await workerHost.boundingBox()
     expect(renamed!.width).toBeGreaterThan(original!.width)
     expectHostBadgeFits(renamed!.width, availableBadgeWidth, 'renamed badge fits the cell beside the pencil')
@@ -276,7 +284,7 @@ test('execution kinds and person-specific host names on the real agents table', 
     await workerHost.click()
     await expect(dialog.getByRole('button', { name: 'Use registered name', exact: true })).toBeEnabled()
     await dialog.getByRole('button', { name: 'Use registered name', exact: true }).click()
-    await expect(workerHost).toContainText('mbp2606')
+    await expect(workerHost).toContainText('build-6')
     expect((await workerHost.boundingBox())?.width).toBe(original?.width)
     // Long labels use the available width up to the cap, visibly ellipsised.
     const longLabel = 'Gemeinsame Entwicklungsstation für teamübergreifende Qualitätssicherung und Agenturkoordination'
@@ -286,7 +294,7 @@ test('execution kinds and person-specific host names on the real agents table', 
     await dialog.getByRole('button', { name: 'Save', exact: true }).click()
     await expect(dialog).toHaveCount(0)
     await expect(workerHost.locator('.host-name')).toHaveText(longLabel)
-    await expect(workerHost).toHaveAttribute('title', `${longLabel} · mbp2606`)
+    await expect(workerHost).toHaveAttribute('title', `${longLabel} · build-6`)
     const longBadge = await workerHost.boundingBox()
     expectHostBadgeFits(longBadge!.width, availableBadgeWidth, 'long badge fits the cell beside the pencil')
     expect(longBadge!.width).toBeGreaterThan(original!.width)
@@ -301,6 +309,20 @@ test('execution kinds and person-specific host names on the real agents table', 
         await page.setViewportSize({ width, height: width === 390 ? 844 : 1000 })
         await page.emulateMedia({ colorScheme: theme })
         await page.mouse.move(0, 0)
+        if (width < 1024) {
+          // AEON-1211 (design AEON-1196): a table under 880 px names the computer in the details, and a
+          // phone shows compact rows whose opener mark names the model or command.
+          await expect(workerHost).toBeHidden()
+          for (const child of [ai, xai, media, terminal]) {
+            const row = page.locator(`[data-row="s:${child.id}"]`)
+            const what = child.model ? SHOWN[child.model]! : ('generator' in child ? child.generator : 'command' in child ? child.command : '')
+            if (width === 390) await expect(row.locator('.op-mark')).toHaveAttribute('aria-label', new RegExp(what.replace(/[.*+?^${}()|[\]\\/]/g, '\\$&')))
+            else expectModelGlyphFits(await modelGlyphSize(row.locator('.exec-model'), child === terminal ? terminal.command.length : 1), `${width}px ${child.display_label}: execution text fits`, true)
+          }
+          expect.soft(await page.evaluate(() => document.documentElement.scrollWidth - innerWidth)).toBeLessThanOrEqual(1)
+          await page.locator('.sessions').screenshot({ path: info.outputPath(`terminal-command-${width}-${theme}.png`), animations: 'disabled' })
+          return
+        }
         await workerHost.scrollIntoViewIfNeeded()
         await expect(workerHost).toBeVisible()
         const responsiveBadge = await workerHost.boundingBox()
@@ -309,65 +331,20 @@ test('execution kinds and person-specific host names on the real agents table', 
         const responsivePencil = await page.locator(`[data-row="s:${ai.id}"] .host-pencil`).boundingBox()
         expect.soft(responsivePencil!.x + responsivePencil!.width).toBeLessThanOrEqual(responsiveCell!.x + responsiveCell!.width + 0.5)
         const leadName = page.locator(`[data-row="s:${lead.id}"] .host-name`)
-        await expect(leadName).toHaveText('mbp2607')
+        await expect(leadName).toHaveText('build-7')
         const leadNameSize = await leadName.evaluate(el => ({ scroll: el.scrollWidth, client: el.clientWidth }))
         expect.soft(leadNameSize.scroll, `${width}px: short host name stays fully visible`).toBeLessThanOrEqual(leadNameSize.client)
-        if (width <= 768) {
-          expect.soft(responsiveBadge!.width, 'compact cap follows the sessions container').toBeLessThanOrEqual(104)
-          for (const child of [ai, xai, media, terminal]) {
-            const row = page.locator(`[data-row="s:${child.id}"]`)
-            const copy = row.locator('.exec-copy')
-            const copySize = await copy.evaluate(el => ({ scrollWidth: el.scrollWidth, clientWidth: el.clientWidth }))
-            expect.soft(copySize.scrollWidth, `${child.display_label}: execution copy does not overflow`).toBeLessThanOrEqual(copySize.clientWidth)
-            const harnessBox = await row.locator('.exec-harness').boundingBox()
-            const badgeBox = await row.locator('.host-badge').boundingBox()
-            expect.soft(harnessBox!.x + harnessBox!.width, `${child.display_label}: execution stays before host`).toBeLessThanOrEqual(badgeBox!.x + 0.5)
-          }
-        }
         // Real execution text must fit beside Host even on phones: the
         // generated separator alone must never satisfy this guard.
         for (const child of [ai, xai, media, terminal]) {
           const model = page.locator(`[data-row="s:${child.id}"] .exec-model`)
-          await expect(model).toContainText(child.model || ('generator' in child ? child.generator : 'command' in child ? child.command : ''))
-          const characters = child === terminal ? terminal.command.length : width === 390 ? 3 : 1
+          await expect(model).toContainText(child.model ? SHOWN[child.model]! : ('generator' in child ? child.generator : 'command' in child ? child.command : ''))
+          const characters = child === terminal ? terminal.command.length : 1
           const glyph = await modelGlyphSize(model, characters)
           expectModelGlyphFits(glyph, `${width}px ${child.display_label}: ${characters} execution characters fit after the separator and before any ellipsis`, true)
         }
-        if (width === 390) {
-          await expectStableControls({ controls: { host: workerHost, pencil, row, menu: row.locator('.more') }, scrollAreas: { row }, interactions: [
-            { name: 'hover compact host', run: async () => {
-              await workerHost.hover()
-              await expect(pencil).toHaveCSS('opacity', '1')
-            } },
-            { name: 'edit compact host draft', run: async () => {
-              await pencil.click()
-              await expect(dialog.getByRole('textbox')).toBeEnabled()
-              await dialog.getByRole('textbox').fill('Draft only')
-              await expect(workerHost.locator('.host-name')).toHaveText(longLabel)
-            } },
-            { name: 'cancel compact host draft', run: async () => {
-              await dialog.getByRole('button', { name: 'Cancel', exact: true }).click()
-              await expect(dialog).toHaveCount(0)
-              await expect(workerHost.locator('.host-name')).toHaveText(longLabel)
-            } },
-          ] })
-          await workerHost.click()
-          await expect(dialog.getByRole('textbox')).toBeEnabled()
-          await dialog.getByRole('textbox').fill('mba')
-          await dialog.getByRole('button', { name: 'Save', exact: true }).click()
-          await expect(dialog).toHaveCount(0)
-          await expect(workerHost.locator('.host-name')).toHaveText('mba')
-          expect((await workerHost.boundingBox())!.width).toBeLessThan(responsiveBadge!.width)
-          const shortHostModel = await modelGlyphSize(row.locator('.exec-model'), 3)
-          expectModelGlyphFits(shortHostModel, 'short host leaves real model text visible')
-          await workerHost.click()
-          await expect(dialog.getByRole('textbox')).toBeEnabled()
-          await dialog.getByRole('textbox').fill(longLabel)
-          await dialog.getByRole('button', { name: 'Save', exact: true }).click()
-          await expect(dialog).toHaveCount(0)
-          await expect(workerHost.locator('.host-name')).toHaveText(longLabel)
-        }
         expect.soft(await page.evaluate(() => document.documentElement.scrollWidth - innerWidth)).toBeLessThanOrEqual(1)
+        await page.locator('.sessions').screenshot({ path: info.outputPath(`terminal-command-${width}-${theme}.png`), animations: 'disabled' })
         if (shots) await page.locator('.sessions').screenshot({ path: join(shots, `${width}-${theme}.png`), animations: 'disabled' })
       })
     }
@@ -379,7 +356,7 @@ test('execution kinds and person-specific host names on the real agents table', 
     await expect(dialog.getByRole('button', { name: 'Use registered name', exact: true })).toBeEnabled()
     await dialog.getByRole('button', { name: 'Use registered name', exact: true }).click()
     await expect(dialog).toHaveCount(0)
-    await expect(workerHost.locator('.host-name')).toHaveText('mbp2606')
+    await expect(workerHost.locator('.host-name')).toHaveText('build-6')
   }
   expect(page.viewportSize(), 'base and candidate captures use the same viewport').toEqual({ width: 1600, height: 1000 })
   expect(await page.evaluate(() => matchMedia('(prefers-color-scheme: light)').matches), 'base and candidate captures use the light theme').toBe(true)
@@ -392,7 +369,7 @@ test('execution kinds and person-specific host names on the real agents table', 
     mkdirSync(root, { recursive: true })
     const layout = await page.locator('[data-row^="s:"]').evaluateAll(items => items.map(item => {
       const row = item.getBoundingClientRect()
-      const state = item.querySelector('.c-state')!.getBoundingClientRect()
+      const state = item.querySelector('.ava')!.getBoundingClientRect()
       return { id: item.getAttribute('data-row'), height: row.height, top: row.top, stateLeft: state.left }
     }))
     const path = join(root, 'before-layout.json')

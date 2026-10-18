@@ -22,6 +22,9 @@ const panel = ref<HTMLElement>()
 let opener: HTMLElement | null = null
 const focusables = () => [...(panel.value?.querySelectorAll<HTMLElement>('a[href], button:not(:disabled), input:not(:disabled), select:not(:disabled), textarea:not(:disabled), [tabindex="0"]') ?? [])].filter(el => el.offsetParent !== null)
 function keydown(event: KeyboardEvent) {
+  // A disclosure opened after the sheet mounted owns its first Escape, too.
+  // Its capture listener closes it and restores the disclosure button's focus.
+  if (event.key === 'Escape' && panel.value?.querySelector('.read-name[aria-expanded="true"]')) return
   if (document.querySelector('.floating, dialog[open]')) return
   if (props.submitShortcut && panel.value?.contains(document.activeElement) && !event.isComposing && !event.repeat && !event.altKey && !event.shiftKey && (event.metaKey || event.ctrlKey) && event.key === 'Enter') {
     event.preventDefault(); event.stopPropagation(); if (!session.requiresSignIn) emit('submit')

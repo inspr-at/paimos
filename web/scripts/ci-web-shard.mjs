@@ -1,9 +1,11 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // OPS-257: the manifest owns spec selection, launch policy and timing weights.
-import { readFileSync, readdirSync, existsSync, mkdirSync, writeFileSync } from 'node:fs'
+import { readFileSync, readdirSync, existsSync, mkdirSync, writeFileSync, renameSync } from 'node:fs'
 import { resolve, relative } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { runPlaywright } from '../../scripts/playwright-safe.mjs'
+import { tierWeights } from '../../scripts/test-tiers/core.mjs'
+import { loadPolicy } from './ci-web-shard-source.mjs'
 import { validatePath } from '../../scripts/ci-pr-plan.mjs'
 
 export const webRoot = fileURLToPath(new URL('../', import.meta.url))
@@ -57,6 +59,17 @@ export function validateManifest(manifest) {
     if (excluded.has(exclusion.file)) throw new Error(`Duplicate exclusion: ${exclusion.file}`)
     excluded.add(exclusion.file)
   }
+  if (manifest.nightlyTiming !== undefined) {
+    const files = manifest.nightlyTiming?.files
+    if (typeof manifest.nightlyTiming !== 'object' || manifest.nightlyTiming === null || Array.isArray(manifest.nightlyTiming) ||
+        typeof files !== 'object' || files === null || Array.isArray(files)) throw new Error('Invalid nightly timing')
+    for (const [file, entry] of Object.entries(files)) {
+      // Membership is not required here: callers filter groups and still carry
+      // the catalogue map. Packing rejects a file the manifest does not own.
+      if (!specPath.test(file) || !Number.isFinite(entry?.seconds) || entry.seconds <= 0 || !Number.isSafeInteger(entry?.selectedTests) || entry.selectedTests < 1)
+        throw new Error(`Invalid nightly timing: ${file}`)
+    }
+  }
   return manifest
 }
 
@@ -73,38 +86,100 @@ export function checkSpecInventory(manifest, discovered) {
 }
 
 export function loadManifest(path = manifestPath) {
-  const manifest = validateManifest(JSON.parse(readFileSync(path, 'utf8')))
+  const manifest = validateManifest(loadPolicy(path))
   // `unlisted` is the synthetic group reconcileManifest adds for specs the manifest does not know.
   if (manifest.groups.some(group => group.id === 'unlisted')) throw new Error('Manifest must not declare the reserved group id: unlisted')
   return manifest
 }
 
-// Longest-processing-time scheduling. File names break weight ties, and the
-// lowest shard index breaks load ties; manifest order cannot change assignment.
+// Longest-processing-time scheduling, then bounded moves/swaps to reduce its
+// longest shard. File names break weight ties, and the lowest shard index
+// breaks load ties; manifest order cannot change assignment.
 // Groups with gate:false are declared (so drift is still caught) but only run with all:true.
 export const gatedGroups = (manifest, all = false) => manifest.groups.filter(group => all || group.gate !== false)
 
-// The tier runner executes with one worker, while some historical measured
-// steps used two. Convert those file allocations to serial scheduling estimates
-// without changing the original weights used by the exact-spec runner. Local
-// serial timings and unmeasured/test-count estimates already use a serial basis.
-export function tierWeights(manifest, rows) {
-  const sources = new Map((manifest.ciInventory ?? []).map(source => [source.id, source]))
-  return Object.fromEntries(manifest.groups.flatMap(group => group.specs.map(spec => {
-    if (spec.tierTiming) {
-      const { seconds, selectedTests } = spec.tierTiming
-      if (!Number.isFinite(seconds) || seconds <= 0 || !Number.isSafeInteger(selectedTests) || selectedTests < 1) throw new Error(`Invalid tier timing: ${spec.file}`)
-      // Hosted reports measure the gated slice. Other selections are estimates
-      // proportional to that slice, without pretending nightly was measured.
-      const selected = rows ? rows.filter(row => row.file === spec.file).length : selectedTests
-      return [spec.file, seconds * selected / selectedTests]
+const specSum = specs => specs.reduce((total, spec) => total + spec.weightSeconds, 0)
+
+// Non-empty subsets of at most `limit` specs. Specs must already be in the
+// deterministic file-name order the caller wants ties to follow.
+function specSubsets(specs, limit) {
+  const found = []
+  const walk = (start, left, chosen) => {
+    if (left === 0) { found.push(chosen.slice()); return }
+    for (let i = start; i <= specs.length - left; i++) {
+      chosen.push(specs[i])
+      walk(i + 1, left - 1, chosen)
+      chosen.pop()
     }
-    const source = sources.get(spec.weightSource)
-    const workers = source?.flags?.map(flag => /^--workers=(\d+)$/.exec(flag)).find(Boolean)
-    const factor = source?.kind === 'browser-test' && source.measuredSeconds > 0 && workers ? Number(workers[1]) : 1
-    if (!Number.isSafeInteger(factor) || factor < 1 || factor > 64) throw new Error(`Invalid measured worker count: ${spec.file}`)
-    return [spec.file, spec.weightSeconds * factor]
-  })))
+  }
+  const sizes = Math.min(limit, specs.length)
+  for (let size = 1; size <= sizes; size++) walk(0, size, [])
+  return found
+}
+
+// Pairwise swaps stop at a local peak. When two branches each add a small
+// gated spec, exchanging up to three specs a side can still lower the
+// descending shard weights. Spec weights themselves do not change.
+function lowerMakespan(shards, passes) {
+  const descending = values => values.slice().sort((left, right) => right - left)
+  const lower = (next, current) => {
+    for (let i = 0; i < next.length; i++) {
+      if (next[i] < current[i] - 1e-9) return true
+      if (next[i] > current[i] + 1e-9) return false
+    }
+    return false
+  }
+  for (let pass = 0; pass < passes; pass++) {
+    for (const shard of shards) shard.specs.sort((left, right) => compare(left.file, right.file))
+    const current = descending(shards.map(shard => shard.weightSeconds))
+    let best = null
+    for (let i = 0; i < shards.length; i++) {
+      const giveSets = specSubsets(shards[i].specs, shards[i].specs.length > 12 ? 2 : 3)
+      for (let j = i + 1; j < shards.length; j++) {
+        const takeSets = specSubsets(shards[j].specs, shards[j].specs.length > 12 ? 2 : 3)
+        for (const give of giveSets) {
+          const giveWeight = specSum(give)
+          for (const take of takeSets) {
+            const delta = giveWeight - specSum(take)
+            const nextI = shards[i].weightSeconds - delta
+            const nextJ = shards[j].weightSeconds + delta
+            if (nextI > current[0] + 1e-9 || nextJ > current[0] + 1e-9) continue
+            const key = descending(shards.map((shard, index) => index === i ? nextI : index === j ? nextJ : shard.weightSeconds))
+            if (lower(key, current) && (!best || lower(key, best.key))) best = { i, j, give, take, key }
+          }
+        }
+      }
+    }
+    if (!best) return
+    const { i, j, give, take } = best
+    const given = new Set(give), taken = new Set(take)
+    shards[i].specs = shards[i].specs.filter(spec => !given.has(spec)).concat(take)
+    shards[j].specs = shards[j].specs.filter(spec => !taken.has(spec)).concat(give)
+    shards[i].weightSeconds = specSum(shards[i].specs)
+    shards[j].weightSeconds = specSum(shards[j].specs)
+  }
+}
+
+// Shared by the lightweight planner and the tier runner.
+export { tierWeights } from '../../scripts/test-tiers/core.mjs'
+
+// Catalogue shards (nightly --all and schedule) pack from hosted wall time.
+// PR and merge-group lanes keep tierTiming. Files this run did not measure
+// fall back to that lane so a new spec still has a weight.
+export function nightlyWeights(manifest, rows) {
+  const base = tierWeights(manifest, rows)
+  const files = manifest.nightlyTiming?.files
+  if (files == null) return base
+  const known = new Set(manifest.groups.flatMap(group => group.specs.map(spec => spec.file)))
+  const weights = { ...base }
+  for (const [file, entry] of Object.entries(files)) {
+    const { seconds, selectedTests } = entry ?? {}
+    if (!known.has(file) || !Number.isFinite(seconds) || seconds <= 0 || !Number.isSafeInteger(selectedTests) || selectedTests < 1)
+      throw new Error(`Invalid nightly timing: ${file}`)
+    const selected = rows ? rows.filter(row => row.file === file).length : selectedTests
+    weights[file] = seconds * selected / selectedTests
+  }
+  return weights
 }
 
 export function balanceShards(manifest, count, { all = false } = {}) {
@@ -118,7 +193,50 @@ export function balanceShards(manifest, count, { all = false } = {}) {
     shard.specs.push(spec)
     shard.weightSeconds += spec.weightSeconds
   }
-  for (const shard of shards) shard.specs.sort((a, b) => compare(a.file, b.file))
+  // Indivisible files can leave LPT just over the gate budget even when there
+  // is room. Each move or swap lowers the affected pair's maximum; no other
+  // shard grows. Bound refinement independently of convergence and keep all
+  // weights, owning groups and launch policies intact. Swaps cover the peak
+  // reduction main added; moves keep a 15/15 fit when no exchange can.
+  for (let pass = 0; pass < Math.min(specs.length, 256); pass++) {
+    const high = shards.reduce((best, candidate) => candidate.weightSeconds > best.weightSeconds ? candidate : best)
+    let best, bestMaximum = high.weightSeconds
+    for (const low of shards) {
+      if (low === high) continue
+      for (let a = 0; a < high.specs.length; a++) {
+        // b=-1 moves a file; otherwise exchange it with a lighter file.
+        for (let b = -1; b < low.specs.length; b++) {
+          const delta = high.specs[a].weightSeconds - (b < 0 ? 0 : low.specs[b].weightSeconds)
+          if (delta <= 0) continue
+          const maximum = Math.max(high.weightSeconds - delta, low.weightSeconds + delta)
+          if (maximum < bestMaximum - 1e-9) {
+            bestMaximum = maximum
+            best = { low, a, b, delta }
+          }
+        }
+      }
+    }
+    if (!best) break
+    const { low, a, b, delta } = best, spec = high.specs[a]
+    if (b < 0) {
+      high.specs.splice(a, 1)
+      low.specs.push(spec)
+    } else {
+      high.specs[a] = low.specs[b]
+      low.specs[b] = spec
+    }
+    high.weightSeconds -= delta
+    low.weightSeconds += delta
+  }
+  // Single moves and swaps stop at a local peak; main's multi-spec exchange
+  // (up to three files a side) can still lower the descending shard weights.
+  // One pass per shard matches the pairwise cap above. The real 12-way gate
+  // needs fewer passes than that to bring every shard under five minutes.
+  lowerMakespan(shards, count)
+  for (const shard of shards) {
+    shard.specs.sort((a, b) => compare(a.file, b.file))
+    shard.weightSeconds = shard.specs.reduce((total, spec) => total + spec.weightSeconds, 0)
+  }
   return shards
 }
 
@@ -347,10 +465,6 @@ export async function main(args, { manifest = loadManifest(), env = process.env,
   if (env.RUNNER_ENVIRONMENT !== 'github-hosted') throw new Error('CI web shards require RUNNER_ENVIRONMENT=github-hosted')
   const jsonReport = !!env.PLAYWRIGHT_JSON_OUTPUT_FILE || options.reporter?.split(',').includes('json')
   const aggregatePath = env.PLAYWRIGHT_JSON_OUTPUT_FILE ? resolve(root, env.PLAYWRIGHT_JSON_OUTPUT_FILE) : undefined
-  if (aggregatePath) {
-    mkdirSync(resolve(aggregatePath, '..'), { recursive: true })
-    writeFileSync(aggregatePath, '')
-  }
   const reports = []
   let commands = plans[0].commands
   if (env.CI_FLAKE_PLAYWRIGHT_TESTS) {
@@ -373,51 +487,83 @@ export async function main(args, { manifest = loadManifest(), env = process.env,
       return info.failedTests.length > 0
     })
   }
-  let code = 0
-  for (const command of commands) {
-    out(`CI web shard ${options.shard.index}/${options.count}: ${command.group} (${command.files.join(', ')})`)
-    const childEnv = { ...env, ...command.env }
-    let reporter = options.reporter ?? (jsonReport ? 'line,json' : undefined)
-    if (jsonReport && !reporter.split(',').includes('json')) reporter += ',json'
-    const extraArgs = [
-      ...(options.lastFailed ? ['--last-failed', '--pass-with-no-tests'] : []),
-      ...(options.testList ? ['--test-list', resolve(root, options.testList), '--pass-with-no-tests'] : []),
-      ...(reporter ? ['--reporter', reporter] : []),
-    ]
-    let reportPath
+  let code = 0, activeGroup, completedGroups = 0, interruption
+  const persist = (status, reason) => {
+    const report = mergeReports(reports)
+    Object.assign(report, { runId: env.GITHUB_RUN_ID, attempt: env.GITHUB_RUN_ATTEMPT, sha: env.GITHUB_SHA,
+      execution: { status, completedGroups, ...(activeGroup ? { activeGroup } : {}), ...(reason ? { reason } : {}) },
+      notRunGroups: commands.slice(completedGroups + (activeGroup ? 1 : 0))
+        .map(command => ({ group: command.group, files: command.files, reason: reason ?? 'Group has not executed' })),
+    })
+    if (status !== 'completed') report.errors.push({ message: reason })
+    if (aggregatePath) {
+      mkdirSync(resolve(aggregatePath, '..'), { recursive: true })
+      const temporary = `${aggregatePath}.${process.pid}.tmp`
+      writeFileSync(temporary, `${JSON.stringify(report)}\n`)
+      renameSync(temporary, aggregatePath)
+    }
+    return report
+  }
+  if (jsonReport) persist('running', 'Shard execution has not finished')
+  try {
+    for (const command of commands) {
+      activeGroup = command.group
+      if (jsonReport) persist('running', 'Shard execution has not finished')
+      out(`CI web shard ${options.shard.index}/${options.count}: ${command.group} (${command.files.join(', ')})`)
+      const childEnv = { ...env, ...command.env }
+      let reporter = options.reporter ?? (jsonReport ? 'line,json' : undefined)
+      if (jsonReport && !reporter.split(',').includes('json')) reporter += ',json'
+      const extraArgs = [
+        ...(options.lastFailed ? ['--last-failed', '--pass-with-no-tests'] : []),
+        ...(options.testList ? ['--test-list', resolve(root, options.testList), '--pass-with-no-tests'] : []),
+        ...(reporter ? ['--reporter', reporter] : []),
+      ]
+      let reportPath
+      if (jsonReport) {
+        reportPath = resolve(reportDirectory ?? resolve(root, 'test-results', 'ci-web-reports'), `shard-${options.shard.index}`, `${command.group}.json`)
+        mkdirSync(resolve(reportPath, '..'), { recursive: true })
+        // Invalidate prior output before launch; startup failures must not inherit
+        // a green report from a previous attempt.
+        writeFileSync(reportPath, '')
+        childEnv.PLAYWRIGHT_JSON_OUTPUT_FILE = reportPath
+      }
+      const result = await run([...command.args, ...extraArgs], { cwd: root, env: childEnv })
+      if (result.code) code = result.code
+      if (reportPath) {
+        try {
+          const report = JSON.parse(readFileSync(reportPath, 'utf8'))
+          if (!report || !Array.isArray(report.suites) || !Array.isArray(report.errors) || !report.stats || typeof report.stats !== 'object') throw new Error('Invalid report schema')
+          reports.push(report)
+        }
+        catch {
+          code ||= 1
+          reports.push({ suites: [], errors: [{ message: `Missing or invalid Playwright JSON report for ${command.group}` }], stats: {} })
+        }
+      }
+      // Failed groups must not suppress later groups; interrupted jobs must stop
+      // after saving every completed report, including earlier failed groups.
+      const signal = result.signal ?? result.metrics?.signal ?? ({129:'SIGHUP',130:'SIGINT',143:'SIGTERM'}[result.code])
+      if (signal) {
+        interruption = `Shard execution interrupted by ${signal}`
+        code = result.code || 1
+        break
+      }
+      completedGroups++
+      activeGroup = undefined
+      if (jsonReport) persist('running', 'Shard execution has not finished')
+    }
     if (jsonReport) {
-      reportPath = resolve(reportDirectory ?? resolve(root, 'test-results', 'ci-web-reports'), `shard-${options.shard.index}`, `${command.group}.json`)
-      mkdirSync(resolve(reportPath, '..'), { recursive: true })
-      // Invalidate prior output before launch; startup failures must not inherit
-      // a green report from a previous attempt.
-      writeFileSync(reportPath, '')
-      childEnv.PLAYWRIGHT_JSON_OUTPUT_FILE = reportPath
+      const report = persist(interruption ? 'interrupted' : 'completed', interruption)
+      if (!aggregatePath) out(JSON.stringify(report))
     }
-    const result = await run([...command.args, ...extraArgs], { cwd: root, env: childEnv })
-    if (result.code) code = result.code
-    if (reportPath) {
-      try {
-        const report = JSON.parse(readFileSync(reportPath, 'utf8'))
-        if (!report || !Array.isArray(report.suites) || !Array.isArray(report.errors) || !report.stats || typeof report.stats !== 'object') throw new Error('Invalid report schema')
-        reports.push(report)
-      }
-      catch {
-        code ||= 1
-        reports.push({ suites: [], errors: [{ message: `Missing or invalid Playwright JSON report for ${command.group}` }], stats: {} })
-      }
-    }
-    // Failed groups must not suppress later groups; interrupted jobs must stop.
-    if ([130, 143, 129].includes(result.code)) return result.code
+    return code
+  } catch (error) {
+    if (jsonReport) persist(error.signal ? 'interrupted' : 'incomplete', error.message.slice(0,4096))
+    throw error
   }
-  if (jsonReport) {
-    const report = JSON.stringify(mergeReports(reports))
-    if (aggregatePath) writeFileSync(aggregatePath, `${report}\n`)
-    else out(report)
-  }
-  return code
 }
 
 if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
   try { process.exitCode = await main(process.argv.slice(2)) }
-  catch (error) { console.error(error.message); process.exitCode = 1 }
+  catch (error) { console.error(error.message); process.exitCode = ({SIGINT:130,SIGTERM:143,SIGHUP:129}[error.signal]) ?? 1 }
 }

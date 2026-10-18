@@ -436,7 +436,7 @@ func TestAnalysisCapsAndRuleDedupe(t *testing.T) {
 		t.Fatal(err)
 	}
 	first := finding{Pattern: "gate:validation", RulesVersion: "v1", Harness: "codex", TicketKind: "ticket", Count: 3, Status: "pending"}
-	src, in, ok := analysisTarget(layer, first)
+	src, in, ok := New(nil, Options{}).analysisTarget(layer, first)
 	if !ok {
 		t.Fatal("fixture mapping")
 	}

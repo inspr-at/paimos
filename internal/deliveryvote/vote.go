@@ -175,7 +175,7 @@ func (m *module) put(w http.ResponseWriter, r *http.Request) {
 		httpapi.WriteError(w, http.StatusBadRequest, "invalid id")
 		return
 	}
-	r.Body = http.MaxBytesReader(w, r.Body, 8<<10)
+	r.Body = httpapi.RequestBodyReader(w, r, 8<<10)
 	var body voteWrite
 	if err := workorders.Decode(r, &body); err != nil {
 		write(w, err, nil)

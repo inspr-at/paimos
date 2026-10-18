@@ -820,7 +820,7 @@ func TestExpiredReadingRestoresUnknownSlots(t *testing.T) {
 	// multi-day window only the hours left today, which is below two
 	// reservations late in the day.
 	s.Override = "sprint"
-	callStatus(t, mod, &person, "", "PUT", "/api/agent-accounts/capacity/schedule", encoded(t, scheduleOverride{Scope: "account", AccountID: a.ID, Schedule: &s}), 204, nil)
+	seedExistingSchedule(t, person, scheduleOverride{Scope: "account", AccountID: a.ID, Schedule: &s})
 	measured := insertRun(t, person, runner, profile)
 	other := insertRun(t, person, runner, profile)
 	mustRoute(t, mod, runner, token, measured, "daemon-a", []Account{a}, map[string]int64{"requests": 1})
@@ -1060,7 +1060,7 @@ func TestUnstartedRecoveryReleasesPermit(t *testing.T) {
 	held.Override = "hold"
 	until := time.Now().UTC().Add(time.Hour)
 	held.OverrideUntil = &until
-	callStatus(t, mod, &person, "", "PUT", "/api/agent-accounts/capacity/schedule", encoded(t, scheduleOverride{Scope: "account", AccountID: a.ID, Schedule: &held}), 204, nil)
+	seedExistingSchedule(t, person, scheduleOverride{Scope: "account", AccountID: a.ID, Schedule: &held})
 	if w := admit(day); w == nil || w.Code != "hold" || w.RunNowAllowed || w.Until == nil || !w.Until.Equal(until) {
 		t.Fatalf("hold after spent grant: %+v", w)
 	}

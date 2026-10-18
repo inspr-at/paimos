@@ -18,25 +18,32 @@ const Permission = "recurrences.manage"
 const Job = "recurring-work"
 
 type Template struct {
-	Name          string   `json:"name,omitempty"`
-	Title         string   `json:"title"`
-	Description   string   `json:"description"`
-	Criteria      []string `json:"acceptance_criteria"`
-	EstimateHours float64  `json:"estimate_hours"`
-	Priority      string   `json:"priority"`
-	Tags          []string `json:"tags"`
-	Type          string   `json:"type"`
+	Name                 string   `json:"name,omitempty"`
+	Title                string   `json:"title"`
+	Description          string   `json:"description"`
+	Criteria             []string `json:"acceptance_criteria"`
+	EstimateHours        float64  `json:"estimate_hours"`
+	Priority             string   `json:"priority"`
+	Tags                 []string `json:"tags"`
+	Type                 string   `json:"type"`
+	PillEN               string   `json:"pill_en,omitempty"`
+	PillDE               string   `json:"pill_de,omitempty"`
+	BenefitEN            string   `json:"benefit_en,omitempty"`
+	BenefitDE            string   `json:"benefit_de,omitempty"`
+	HideFromReleaseNotes *bool    `json:"hide_from_release_notes,omitempty"`
 }
 type Input struct {
-	ProjectID     string   `json:"project_id"`
-	ParentID      string   `json:"parent_id"`
-	Template      Template `json:"template"`
-	Trigger       Trigger  `json:"trigger"`
-	QueueEach     bool     `json:"queue_each"`
-	OverlapPolicy string   `json:"overlap_policy"`
-	CatchUpPolicy string   `json:"catch_up_policy"`
+	ProjectID     string      `json:"project_id"`
+	ParentID      string      `json:"parent_id"`
+	Template      Template    `json:"template"`
+	Trigger       Trigger     `json:"trigger"`
+	QueueEach     bool        `json:"queue_each"`
+	OverlapPolicy string      `json:"overlap_policy"`
+	CatchUpPolicy string      `json:"catch_up_policy"`
+	Definition    *Definition `json:"definition,omitempty"`
 }
 type Recurrence struct {
+	ExecutionPolicy *ExecutionPolicy `json:"execution_policy,omitempty"`
 	Input
 	ID              string     `json:"id"`
 	Paused          bool       `json:"paused"`
@@ -50,6 +57,7 @@ type Recurrence struct {
 	UpdatedAt       time.Time  `json:"updated_at"`
 	LastResult      *Result    `json:"last_result,omitempty"`
 	OpenPrevious    *Result    `json:"open_previous,omitempty"`
+	LastRun         *LastRun   `json:"last_run,omitempty"`
 }
 type Result struct {
 	Occurrence
@@ -58,15 +66,16 @@ type Result struct {
 	State   string `json:"state,omitempty"`
 }
 type Occurrence struct {
-	RecurrenceID  string    `json:"recurrence_id"`
-	Key           string    `json:"occurrence_key"`
-	Number        int64     `json:"number"`
-	ScheduledAt   time.Time `json:"scheduled_at"`
-	NodeID        *string   `json:"node_id"`
-	SourceEventID *int64    `json:"source_event_id"`
-	Outcome       string    `json:"outcome"`
-	Reason        string    `json:"reason"`
-	CreatedAt     time.Time `json:"created_at"`
+	RecurrenceID  string      `json:"recurrence_id"`
+	Key           string      `json:"occurrence_key"`
+	Number        int64       `json:"number"`
+	ScheduledAt   time.Time   `json:"scheduled_at"`
+	NodeID        *string     `json:"node_id"`
+	SourceEventID *int64      `json:"source_event_id"`
+	Outcome       string      `json:"outcome"`
+	Reason        string      `json:"reason"`
+	CreatedAt     time.Time   `json:"created_at"`
+	Run           *RunReceipt `json:"run,omitempty"`
 }
 
 var variablePattern = regexp.MustCompile(`\{\{([^{}]*)\}\}`)
@@ -91,7 +100,16 @@ func (in *Input) normalize(now time.Time) error {
 	}
 	in.ProjectID = strings.ToLower(in.ProjectID)
 	in.ParentID = strings.ToLower(in.ParentID)
+	if in.Definition != nil {
+		if err := in.Definition.normalize(); err != nil {
+			return err
+		}
+	}
 	t := &in.Template
+	if t.HideFromReleaseNotes == nil {
+		hidden := true
+		t.HideFromReleaseNotes = &hidden
+	}
 	t.Name = strings.TrimSpace(t.Name)
 	if len(t.Name) > 80 {
 		return fmt.Errorf("name must be at most 80 bytes")
@@ -122,7 +140,10 @@ func (in *Input) normalize(now time.Time) error {
 	if strings.TrimSpace(t.Title) == "" || len(t.Title) > 512 || len(t.Description) > 65536 || math.IsNaN(t.EstimateHours) || math.IsInf(t.EstimateHours, 0) || t.EstimateHours < 0 || t.EstimateHours > 200 || len(t.Criteria) > 100 || len(t.Tags) > 50 {
 		return fmt.Errorf("template exceeds its limits")
 	}
-	values := append([]string{t.Title, t.Description}, t.Criteria...)
+	if len(t.PillEN) > 512 || len(t.PillDE) > 512 || len(t.BenefitEN) > 4096 || len(t.BenefitDE) > 4096 {
+		return fmt.Errorf("release copy exceeds its limits")
+	}
+	values := append([]string{t.Title, t.Description, t.PillEN, t.PillDE, t.BenefitEN, t.BenefitDE}, t.Criteria...)
 	for _, value := range values {
 		if err := validateVariables(value); err != nil {
 			return err
@@ -166,8 +187,11 @@ func (in *Input) normalize(now time.Time) error {
 		_, err := parseSchedule(in.Trigger)
 		return err
 	case "event":
-		if in.Trigger.Event != "release.published" || in.Trigger.RRULE != "" || in.Trigger.TimeOfDay != "" || in.Trigger.Timezone != "" || in.Trigger.StartDate != "" {
-			return fmt.Errorf("event trigger supports only release.published and no time fields")
+		if err := in.Trigger.normalizeEvent(); err != nil {
+			return err
+		}
+		if in.Trigger.RRULE != "" || in.Trigger.TimeOfDay != "" || in.Trigger.Timezone != "" || in.Trigger.StartDate != "" {
+			return fmt.Errorf("event trigger must not contain time fields")
 		}
 		if in.Trigger.EventStart != "" && in.Trigger.EventStart != "now" && in.Trigger.EventStart != "hour" && in.Trigger.EventStart != "morning" {
 			return fmt.Errorf("event_start must be now, hour or morning")
@@ -224,7 +248,11 @@ func load(ctx context.Context, tx pgx.Tx, id string, lock bool) (Recurrence, err
 	if lock {
 		query += ` FOR UPDATE`
 	}
-	return scanRecurrence(tx.QueryRow(ctx, query, id))
+	r, err := scanRecurrence(tx.QueryRow(ctx, query, id))
+	if err == nil {
+		err = definitions(ctx, tx, []Recurrence{r}, func(items []Recurrence) { r = items[0] })
+	}
+	return r, err
 }
 
 const occurrenceColumns = `recurrence_id::text,occurrence_key,number,scheduled_at,node_id::text,source_event_id,outcome,reason,created_at`

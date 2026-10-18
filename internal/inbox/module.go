@@ -6,10 +6,9 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
-	"encoding/json"
 	"errors"
+	"github.com/inspr-at/paimos/internal/authz"
 	"io"
-	"log/slog"
 	"net/http"
 	"strconv"
 	"strings"
@@ -20,26 +19,33 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/jackc/pgx/v5/pgxpool"
 
+	"github.com/inspr-at/paimos/internal/attachedmsg"
 	"github.com/inspr-at/paimos/internal/db"
 	"github.com/inspr-at/paimos/internal/httpapi"
 	"github.com/inspr-at/paimos/internal/tenant"
+	"github.com/inspr-at/paimos/internal/workerlease"
 )
 
 const scopeInboxSend = "inbox.send"
 
 type module struct {
+	attached   *attachedmsg.Service
 	pool       *pgxpool.Pool
 	heartbeat  time.Duration
-	waitNotify func(context.Context, *pgx.Conn, string, time.Time) error
+	waitNotify func(context.Context, db.NotificationListener, string, time.Time) error
 }
 
 // New returns the inbox HTTP module. See the package doc for coordinator wiring.
-func New(pool *pgxpool.Pool) httpapi.Module {
-	return newModule(pool)
+func New(pool *pgxpool.Pool, attached ...*attachedmsg.Service) httpapi.Module {
+	return newModule(pool, attached...)
 }
 
-func newModule(pool *pgxpool.Pool) *module {
-	return &module{pool: pool, heartbeat: 15 * time.Second, waitNotify: waitTenantNotify}
+func newModule(pool *pgxpool.Pool, attached ...*attachedmsg.Service) *module {
+	var service *attachedmsg.Service
+	if len(attached) > 0 {
+		service = attached[0]
+	}
+	return &module{pool: pool, heartbeat: 15 * time.Second, waitNotify: waitTenantNotify, attached: service}
 }
 
 func (m *module) Mount(mux *http.ServeMux) {
@@ -48,6 +54,7 @@ func (m *module) Mount(mux *http.ServeMux) {
 	mux.HandleFunc("GET /api/inbox/stream", m.stream)
 	mux.HandleFunc("GET /api/inbox/messages/{messageId}/receipt", m.handleReceipt)
 	mux.HandleFunc("POST /api/inbox/messages/{messageId}/ack", m.handleAck)
+	mux.HandleFunc("POST /api/inbox/messages/{messageId}/cancel", m.cancelAttached)
 	mux.HandleFunc("GET /api/inbox/targets", m.handleListTargets)
 	mux.HandleFunc("POST /api/inbox/targets", m.handleCreateTarget)
 	mux.HandleFunc("DELETE /api/inbox/targets/{targetId}", m.handleDeleteTarget)
@@ -98,6 +105,9 @@ func writeJSON(w http.ResponseWriter, status int, v any) {
 }
 
 func failure(w http.ResponseWriter, err error) {
+	if attachedmsg.WriteError(w, err) {
+		return
+	}
 	var he *httpError
 	if errors.As(err, &he) {
 		writeError(w, he.status, he.code, he.msg)
@@ -116,7 +126,6 @@ func failure(w http.ResponseWriter, err error) {
 	case errors.As(err, &pe) && pe.Code == "P0001":
 		writeError(w, 409, "conflict", "wake target does not belong to the recipient")
 	default:
-		slog.Error("inbox", "err", err)
 		writeError(w, 500, "internal_error", "internal error")
 	}
 }
@@ -148,8 +157,7 @@ func mapWrite(err error) error {
 }
 
 func decodeJSON(w http.ResponseWriter, r *http.Request, limit int64, dst any) bool {
-	r.Body = http.MaxBytesReader(w, r.Body, limit)
-	dec := json.NewDecoder(r.Body)
+	dec := httpapi.NewRequestDecoder(w, r, limit)
 	dec.DisallowUnknownFields()
 	if err := dec.Decode(dst); err != nil {
 		writeError(w, 400, "invalid_request", "invalid JSON body")
@@ -199,13 +207,14 @@ func (m *module) authorizeSend(ctx context.Context, r *http.Request, p tenant.Pr
 	sum := sha256.Sum256([]byte(secret))
 	hash := hex.EncodeToString(sum[:])
 	var scopes []string
+	var fullAccess bool
 	err := db.InTenant(tenant.WithPrincipal(ctx, p), m.pool, p.TenantID, func(tx pgx.Tx) error {
 		return tx.QueryRow(ctx, `
-			SELECT scopes FROM agent_keys
+			SELECT scopes,coalesce(full_access,false) FROM agent_keys
 			WHERE prefix = $1 AND hash = $2 AND principal_id = $3::uuid
 			  AND revoked_at IS NULL
 			  AND (expires_at IS NULL OR expires_at > now())`,
-			prefix, hash, p.ID).Scan(&scopes)
+			prefix, hash, p.ID).Scan(&scopes, &fullAccess)
 	})
 	if errors.Is(err, pgx.ErrNoRows) {
 		return errForbidden
@@ -213,7 +222,7 @@ func (m *module) authorizeSend(ctx context.Context, r *http.Request, p tenant.Pr
 	if err != nil {
 		return err
 	}
-	for _, scope := range scopes {
+	for _, scope := range authz.ResolveKeyScopes(scopes, fullAccess) {
 		if scope == scopeInboxSend {
 			return nil
 		}
@@ -222,11 +231,11 @@ func (m *module) authorizeSend(ctx context.Context, r *http.Request, p tenant.Pr
 }
 
 func splitBearer(h string) (prefix, secret string, ok bool) {
-	scheme, token, found := strings.Cut(strings.TrimSpace(h), " ")
-	if !found || !strings.EqualFold(scheme, "Bearer") {
+	token, malformed := workerlease.AgentToken(strings.TrimSpace(h))
+	if malformed || token == "" {
 		return "", "", false
 	}
-	rest, ok := strings.CutPrefix(strings.TrimSpace(token), "aeon_")
+	rest, ok := strings.CutPrefix(token, "aeon_")
 	if !ok {
 		return "", "", false
 	}

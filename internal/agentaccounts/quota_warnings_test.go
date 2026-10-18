@@ -432,7 +432,7 @@ type quotaFenceContext struct{}
 
 func (q *quotaFenceTrace) TraceQueryStart(ctx context.Context, c *pgx.Conn, data pgx.TraceQueryStartData) context.Context {
 	switch data.SQL {
-	case `SELECT id FROM tenants WHERE id=current_setting('aeon.tenant_id')::uuid FOR NO KEY UPDATE`:
+	case db.TenantFenceSQL:
 		q.started <- c.PgConn().PID()
 		return context.WithValue(ctx, quotaFenceContext{}, !q.first.Swap(true))
 	}
@@ -533,5 +533,17 @@ func TestQuotaWarningsConcurrentComputersDeduplicate(t *testing.T) {
 	}
 	if n := scalar(t, f.admin, `SELECT count(*) FROM account_quota_warnings WHERE suppressed`); n != 1 {
 		t.Fatalf("overlapping reports duplicated suppressed early receipt: %d", n)
+	}
+}
+
+func TestQuotaWarningSettingsUndoRejectsInterveningWrite(t *testing.T) {
+	f := readinessWorld(t, "quota-undo", time.Date(2026, 10, 5, 12, 0, 0, 0, time.UTC))
+	callStatus(t, f.mod, &f.admin, "", "PUT", "/api/settings/quota-warnings", `{"early_percent":20,"urgent_percent":5,"expected_early_percent":10,"expected_urgent_percent":3}`, 200, nil)
+	callStatus(t, f.mod, &f.admin, "", "PUT", "/api/settings/quota-warnings", `{"early_percent":25,"urgent_percent":6}`, 200, nil)
+	callStatus(t, f.mod, &f.admin, "", "PUT", "/api/settings/quota-warnings", `{"early_percent":10,"urgent_percent":3,"expected_early_percent":20,"expected_urgent_percent":5}`, 409, nil)
+	var actual QuotaWarningSettings
+	callStatus(t, f.mod, &f.admin, "", "GET", "/api/settings/quota-warnings", "", 200, &actual)
+	if actual != (QuotaWarningSettings{25, 6}) {
+		t.Fatal("stale Undo overwrote another manager", actual)
 	}
 }

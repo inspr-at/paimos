@@ -91,8 +91,9 @@ describe('manual order by column', () => {
 
   it('Execution: model line, models unknown last, ties by id', () => {
     const views = [view({ id: 'b', model: 'gpt-6.1-sol' }), view({ id: 'a', model: 'claude-opus-5-5' }), view({ id: 'c', model: 'claude-opus-5-5' }), view({ id: 'none' })]
-    expect(sorted(views, 'execution', 'asc')).toEqual(['a', 'c', 'b', 'none'])
-    expect(sorted(views, 'execution', 'desc')).toEqual(['b', 'a', 'c', 'none'])
+    // The name the row shows (AEON-1240): "GPT-6.1 Sol" sorts before "Opus 5.5".
+    expect(sorted(views, 'execution', 'asc')).toEqual(['b', 'a', 'c', 'none'])
+    expect(sorted(views, 'execution', 'desc')).toEqual(['a', 'c', 'b', 'none'])
   })
 
   it('Heartbeat: on-time beats tie and keep start order; silence and never sort after', () => {

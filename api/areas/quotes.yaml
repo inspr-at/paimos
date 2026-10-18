@@ -1,0 +1,589 @@
+# SPDX-License-Identifier: AGPL-3.0-only
+# aeon:owner internal/business/quotes
+# aeon:owner internal/business/quotes/collaboration
+# aeon:owner internal/business/quotes/confirmation
+# aeon:owner internal/business/quotes/public
+paths:
+  /quotes:
+    get:
+      operationId: listQuotes
+      summary: List quote projections
+      security: *auth
+      parameters:
+        - {name: project_node_id, in: query, schema: {type: string, format: uuid}}
+        - {name: customer_org_node_id, in: query, schema: {type: string, format: uuid}}
+        - {name: state, in: query, schema: {type: string, enum: [draft, issued, accepted, void]}}
+        - {name: archived, in: query, schema: {type: string, enum: ['true', 'false', all], default: 'false'}}
+        - {name: limit, in: query, schema: {type: integer, minimum: 1, maximum: 200, default: 100}}
+        - {name: cursor, in: query, schema: {type: string}}
+      responses:
+        '200': {description: Quotes in created order; X-Next-Cursor is present when another page exists, headers: {X-Next-Cursor: {schema: {type: string}}}, content: {application/json: {schema: {type: array, items: {$ref: '#/components/schemas/BusinessQuoteListItem'}}}}}
+    post:
+      operationId: createQuote
+      summary: Create a quote node and projection
+      description: Requires enabled business plugins. A linked project is optional when tenant quote settings are configured; the customer organisation is required. New configured quotes allocate commercial and customer numbers atomically.
+      security: *auth
+      requestBody: {required: true, content: {application/json: {schema: {$ref: '#/components/schemas/QuoteCreate'}}}}
+      responses:
+        '201': {description: Quote, content: {application/json: {schema: {$ref: '#/components/schemas/BusinessQuote'}}}}
+        '403': {$ref: '#/components/responses/Error'}
+  /quotes/acceptances:
+    get:
+      operationId: listQuoteAcceptanceNotices
+      summary: List recent acceptance notices for quote staff, optionally limited to the signed-in offer creator's latest 20
+      security: [{session: []}]
+      parameters: [{name: created_by_me, in: query, schema: {type: boolean, default: false}, description: Return at most 20 notices for offers created by the signed-in principal}]
+      responses:
+        '200': {description: Recent notices, content: {application/json: {schema: {type: array, items: {type: object}}}}}
+  /quotes/readiness:
+    get:
+      operationId: quoteConfirmationReadiness
+      summary: Report renderer availability and disabled email transport
+      security: [{session: []}]
+      responses:
+        '200': {description: Readiness, content: {application/json: {schema: {type: object, properties: {renderer_available: {type: boolean}, smtp_enabled: {type: boolean}, smtp_configured: {type: boolean}, email_delivery: {type: string}}}}}}
+  /quotes/settings:
+    get:
+      operationId: getQuoteSettings
+      summary: Read tenant quote defaults and sender
+      security: [{session: []}]
+      responses:
+        '200': {description: Settings, content: {application/json: {schema: {$ref: '#/components/schemas/QuoteSettings'}}}}
+    patch:
+      operationId: updateQuoteSettings
+      summary: Compare and set future quote defaults
+      description: Admin person only. expected_revision is zero for first setup. Email delivery is disabled; smtp_confirmation_enabled must be false. Existing drafts and versions are not rewritten.
+      security: [{session: []}]
+      requestBody: {required: true, content: {application/json: {schema: {$ref: '#/components/schemas/QuoteSettingsWrite'}}}}
+      responses:
+        '428': {$ref: '#/components/responses/OwnerWorkstationStepUpRequired'}
+        '200': {description: Updated settings, content: {application/json: {schema: {$ref: '#/components/schemas/QuoteSettings'}}}}
+        '409': {$ref: '#/components/responses/Error'}
+  /quotes/{quoteId}:
+    get:
+      operationId: getQuote
+      summary: Get quote projection
+      security: *auth
+      parameters: [{name: quoteId, in: path, required: true, schema: {type: string, format: uuid}}]
+      responses:
+        '200': {description: Quote, content: {application/json: {schema: {$ref: '#/components/schemas/BusinessQuote'}}}}
+        '404': {$ref: '#/components/responses/Error'}
+    delete:
+      operationId: deleteQuoteDraft
+      summary: Delete a draft that was never issued
+      description: Admin person only. Only a draft with no frozen version can be deleted; anything once issued is evidence and is archived instead (409). The quote is hidden, not erased, and its number stays allocated. Records quote.deleted, reversible through POST /events/{eventId}/undo while the quote is unchanged.
+      security: [{session: []}]
+      parameters: [{name: quoteId, in: path, required: true, schema: {type: string, format: uuid}}, {name: expected_revision, in: query, required: true, schema: {type: integer, minimum: 1}}]
+      responses:
+        '204': {headers: {X-Aeon-Event-Ids: {$ref: '#/components/headers/MutationEventIds'}}, description: Deleted}
+        '400': {$ref: '#/components/responses/Error'}
+        '403': {$ref: '#/components/responses/Error'}
+        '409': {$ref: '#/components/responses/Error'}
+  /quotes/{quoteId}/collaboration/stream:
+    get:
+      operationId: streamQuoteCollaboration
+      summary: Quote-scoped SSE presence snapshots and durable revision notices
+      description: Revalidates roles and plugin installation on every poll. Last-Event-ID resumes durable quote event IDs; each connection starts with a fresh transient presence snapshot. Notices exclude document content, cursors and acceptance secrets.
+      security: [{session: []}]
+      parameters: [{name: quoteId, in: path, required: true, schema: {type: string, format: uuid}}, {name: Last-Event-ID, in: header, schema: {type: string, pattern: '^[0-9]+$'}}]
+      responses:
+        '200': {description: 'text/event-stream with presence, quote_change and access_revoked events', content: {text/event-stream: {schema: {type: string}}}}
+        '403': {$ref: '#/components/responses/Error'}
+  /quotes/{quoteId}/draft:
+    get:
+      operationId: getQuoteDraft
+      summary: Read the mutable document draft
+      security: [{session: []}]
+      parameters: [{name: quoteId, in: path, required: true, schema: {type: string, format: uuid}}]
+      responses:
+        '200': {description: Draft with ETag "qd-N", content: {application/json: {schema: {$ref: '#/components/schemas/QuoteDraft'}}}}
+        '404': {$ref: '#/components/responses/Error'}
+    patch:
+      operationId: saveQuoteDraft
+      summary: Save one full document with compare and swap
+      description: Requires If-Match "qd-N", client_session_id, mutation_id and writer_version. Writer version 2 preserves inline marks; a marked document raises the minimum writer version to 2, including on later edits that remove its marks. Unformatted version-1 drafts remain writable by version-1 clients. The mutation receipt is durable and replays the acknowledgement for the same payload. A stale precondition returns 412; no document content enters the event stream.
+      security: [{session: []}]
+      parameters:
+        - {name: quoteId, in: path, required: true, schema: {type: string, format: uuid}}
+        - {name: If-Match, in: header, required: true, schema: {type: string, pattern: '^"qd-[1-9][0-9]*"$'}}
+      requestBody: {required: true, content: {application/json: {schema: {$ref: '#/components/schemas/QuoteDraftWrite'}}}}
+      responses:
+        '200': {description: Mutation acknowledgement and canonical document for a new save, content: {application/json: {schema: {$ref: '#/components/schemas/QuoteMutationReceipt'}}}}
+        '400': {description: Invalid draft document includes field reasons; malformed request errors retain the standard error body, content: {application/json: {schema: {oneOf: [{$ref: '#/components/schemas/QuoteDraftValidationError'}, {$ref: '#/components/schemas/ApiError'}]}}}}
+        '412': {$ref: '#/components/responses/Error'}
+        '428': {$ref: '#/components/responses/Error'}
+  /quotes/{quoteId}/draft/branch:
+    post:
+      operationId: branchQuoteDraft
+      summary: Branch an issued document version into a mutable draft
+      description: Admin person only. The previous issued or accepted version and its evidence remain immutable. A new finalization creates the next version on this quote; duplicate creates a separate numbered quote.
+      security: [{session: []}]
+      parameters: [{name: quoteId, in: path, required: true, schema: {type: string, format: uuid}}]
+      requestBody: {required: true, content: {application/json: {schema: {$ref: '#/components/schemas/QuoteBranchWrite'}}}}
+      responses:
+        '200': {description: Branched draft with ETag, content: {application/json: {schema: {$ref: '#/components/schemas/QuoteDraft'}}}}
+        '409': {$ref: '#/components/responses/Error'}
+  /quotes/{quoteId}/duplicate:
+    post:
+      operationId: duplicateQuote
+      summary: Duplicate into a new numbered draft for the same customer
+      description: Undoing quote.duplicated (POST /events/{eventId}/undo, admin) deletes the copy while it is still untouched.
+      security: [{session: []}]
+      parameters: [{name: quoteId, in: path, required: true, schema: {type: string, format: uuid}}]
+      requestBody: {required: true, content: {application/json: {schema: {type: object, additionalProperties: false, required: [expected_revision], properties: {expected_revision: {type: integer, minimum: 1}}}}}}
+      responses:
+        '201': {headers: {X-Aeon-Event-Ids: {$ref: '#/components/headers/MutationEventIds'}}, description: New quote, content: {application/json: {schema: {$ref: '#/components/schemas/BusinessQuote'}}}}
+        '409': {$ref: '#/components/responses/Error'}
+  /quotes/{quoteId}/finalize:
+    post:
+      operationId: finalizeQuoteDraft
+      summary: Freeze and issue the exact saved draft atomically
+      description: "Admin person only. Does not send email. Creates an immutable document snapshot (canonical document-v2 digest; historical document-v1 is retained) with cent-half-up-v1 pricing and digest plus a scoped public link in the same transaction; existing R4 versions retain r4-v1."
+      security: [{session: []}]
+      parameters: [{name: quoteId, in: path, required: true, schema: {type: string, format: uuid}}]
+      requestBody: {required: true, content: {application/json: {schema: {$ref: '#/components/schemas/QuoteFinalizeWrite'}}}}
+      responses:
+        '200': {description: Issued quote, content: {application/json: {schema: {$ref: '#/components/schemas/BusinessQuote'}}}}
+        '409': {$ref: '#/components/responses/Error'}
+  /quotes/{quoteId}/presence:
+    get:
+      operationId: listQuotePresence
+      summary: Read leased collaborator presence and current revisions
+      description: Authenticated staff or viewer only; names come from tenant principals. Presence expires after 45 seconds and is never part of quote documents or PDFs.
+      security: [{session: []}]
+      parameters: [{name: quoteId, in: path, required: true, schema: {type: string, format: uuid}}]
+      responses:
+        '200': {description: Current snapshot, content: {application/json: {schema: {$ref: '#/components/schemas/QuotePresenceSnapshot'}}}}
+        '403': {$ref: '#/components/responses/Error'}
+    post:
+      operationId: joinQuotePresence
+      summary: Join or resume a quote collaboration session
+      description: The server mints an opaque session ID. A resume ID is accepted only for the same live principal and quote. This is advisory presence, not a lock.
+      security: [{session: []}]
+      parameters: [{name: quoteId, in: path, required: true, schema: {type: string, format: uuid}}]
+      requestBody: {required: true, content: {application/json: {schema: {$ref: '#/components/schemas/QuotePresenceWrite'}}}}
+      responses:
+        '201': {description: Session and current snapshot, content: {application/json: {schema: {type: object, properties: {session_id: {type: string, format: uuid}, snapshot: {$ref: '#/components/schemas/QuotePresenceSnapshot'}}}}}}
+        '403': {$ref: '#/components/responses/Error'}
+        '429': {$ref: '#/components/responses/Error'}
+  /quotes/{quoteId}/presence/{sessionId}:
+    patch:
+      operationId: updateQuotePresence
+      summary: Heartbeat or bounded anchor update
+      description: At most five updates per second. An unverified precise anchor is reduced to section fidelity; no selected text is stored.
+      security: [{session: []}]
+      parameters: [{name: quoteId, in: path, required: true, schema: {type: string, format: uuid}}, {name: sessionId, in: path, required: true, schema: {type: string, format: uuid}}]
+      requestBody: {required: true, content: {application/json: {schema: {$ref: '#/components/schemas/QuotePresenceWrite'}}}}
+      responses:
+        '200': {description: Current snapshot, content: {application/json: {schema: {$ref: '#/components/schemas/QuotePresenceSnapshot'}}}}
+        '404': {$ref: '#/components/responses/Error'}
+        '429': {$ref: '#/components/responses/Error'}
+    delete:
+      operationId: leaveQuotePresence
+      summary: Best effort leave; otherwise lease expires
+      security: [{session: []}]
+      parameters: [{name: quoteId, in: path, required: true, schema: {type: string, format: uuid}}, {name: sessionId, in: path, required: true, schema: {type: string, format: uuid}}]
+      responses:
+        '204': {description: Session removed}
+  /quotes/{quoteId}/profile:
+    put:
+      operationId: selectQuoteProfile
+      summary: Snapshot the current profile revision into an editable quote draft
+      description: An empty profile_id removes the profile, so the draft prints as the standard document again.
+      security: [{session: []}]
+      parameters: [{name: quoteId, in: path, required: true, schema: {type: string, format: uuid}}]
+      requestBody: {required: true, content: {application/json: {schema: {type: object, required: [expected_draft_revision, profile_id], properties: {expected_draft_revision: {type: integer, minimum: 1}, profile_id: {type: string, description: 'A profile id, or empty for the standard document', pattern: '^([0-9a-fA-F-]{36})?$'}}}}}}
+      responses:
+        '200': {description: Updated draft, content: {application/json: {schema: {$ref: '#/components/schemas/QuoteDraft'}}}}
+        '409': {$ref: '#/components/responses/Error'}
+  /quotes/{quoteId}/versions:
+    get:
+      operationId: listQuoteVersions
+      summary: List frozen versions of a quote
+      security: *auth
+      parameters: [{name: quoteId, in: path, required: true, schema: {type: string, format: uuid}}]
+      responses:
+        '200': {description: Versions, content: {application/json: {schema: {type: array, items: {$ref: '#/components/schemas/QuoteVersion'}}}}}
+        '404': {$ref: '#/components/responses/Error'}
+    post:
+      operationId: createQuoteVersion
+      summary: Freeze a new offer version and its line items
+      description: "Locks the quote and checks expected_revision. Archived quotes are read-only and return 409 without creating a version. Rate, quantity, currency and cost-unit references are copied into a content digest; later rate changes do not rewrite this version."
+      security: *auth
+      parameters: [{name: quoteId, in: path, required: true, schema: {type: string, format: uuid}}]
+      requestBody: {required: true, content: {application/json: {schema: {$ref: '#/components/schemas/QuoteVersionWrite'}}}}
+      responses:
+        '201': {description: Version, content: {application/json: {schema: {$ref: '#/components/schemas/QuoteVersion'}}}}
+        '409': {$ref: '#/components/responses/Error'}
+  /quotes/{quoteId}/versions/{version}:
+    get:
+      operationId: getQuoteVersion
+      summary: Read one frozen quote version
+      security: *auth
+      parameters:
+        - {name: quoteId, in: path, required: true, schema: {type: string, format: uuid}}
+        - {name: version, in: path, required: true, schema: {type: integer, minimum: 1}}
+      responses:
+        '200': {description: Version, content: {application/json: {schema: {$ref: '#/components/schemas/QuoteVersion'}}}}
+        '404': {$ref: '#/components/responses/Error'}
+  /quotes/{quoteId}/versions/{version}/accept:
+    post:
+      operationId: acceptQuoteVersion
+      summary: Customer approves one issued quote version
+      description: Signed-in person must be bound to the version's recipient contact. expected_content_sha256 fences stale offers. Agents cannot accept.
+      security: [{session: []}]
+      parameters:
+        - {name: quoteId, in: path, required: true, schema: {type: string, format: uuid}}
+        - {name: version, in: path, required: true, schema: {type: integer, minimum: 1}}
+      requestBody: {required: true, content: {application/json: {schema: {$ref: '#/components/schemas/QuoteAcceptanceWrite'}}}}
+      responses:
+        '201': {description: Acceptance, content: {application/json: {schema: {$ref: '#/components/schemas/QuoteAcceptance'}}}}
+        '403': {$ref: '#/components/responses/Error'}
+        '409': {$ref: '#/components/responses/Error'}
+  /quotes/{quoteId}/versions/{version}/confirmation:
+    get:
+      operationId: getQuoteConfirmation
+      summary: Read the acceptance receipt job state
+      security: [{session: []}]
+      parameters: [{name: quoteId, in: path, required: true, schema: {type: string, format: uuid}}, {name: version, in: path, required: true, schema: {type: integer, minimum: 1}}]
+      responses:
+        '200': {description: Job state, content: {application/json: {schema: {$ref: '#/components/schemas/QuoteConfirmationJob'}}}}
+  /quotes/{quoteId}/versions/{version}/confirmation/receipt:
+    get:
+      operationId: getQuoteConfirmationReceipt
+      summary: Download the immutable accepted PDF receipt
+      security: [{session: []}]
+      parameters: [{name: quoteId, in: path, required: true, schema: {type: string, format: uuid}}, {name: version, in: path, required: true, schema: {type: integer, minimum: 1}}]
+      responses:
+        '200': {description: PDF receipt, content: {application/pdf: {schema: {type: string, format: binary}}}}
+  /quotes/{quoteId}/versions/{version}/confirmation/retry:
+    post:
+      operationId: retryQuoteConfirmation
+      summary: Retry a failed job or explicitly acknowledge an uncertain state
+      security: [{session: []}]
+      parameters: [{name: quoteId, in: path, required: true, schema: {type: string, format: uuid}}, {name: version, in: path, required: true, schema: {type: integer, minimum: 1}}]
+      requestBody: {required: true, content: {application/json: {schema: {type: object, additionalProperties: false, required: [acknowledge_uncertain], properties: {acknowledge_uncertain: {type: boolean}}}}}}
+      responses:
+        '200': {description: Requeued job, content: {application/json: {schema: {$ref: '#/components/schemas/QuoteConfirmationJob'}}}}
+        '409': {$ref: '#/components/responses/Error'}
+  /quotes/{quoteId}/versions/{version}/export:
+    get:
+      operationId: exportQuoteVersion
+      summary: Render a frozen quote as Markdown or PDF
+      description: Pure view of stored version and lines. Export has no independent mutable offer state or acceptance authority.
+      security: *auth
+      parameters:
+        - {name: quoteId, in: path, required: true, schema: {type: string, format: uuid}}
+        - {name: version, in: path, required: true, schema: {type: integer, minimum: 1}}
+        - {name: format, in: query, required: true, schema: {type: string, enum: [markdown, pdf]}}
+      responses:
+        '200': {description: Rendered offer, content: {text/markdown: {schema: {type: string}}, application/pdf: {schema: {type: string, format: binary}}}}
+        '404': {$ref: '#/components/responses/Error'}
+  /quotes/{quoteId}/versions/{version}/issue:
+    post:
+      operationId: issueQuoteVersion
+      summary: Issue the current frozen offer to its recipient
+      description: Issuing records an event and makes this exact digest eligible for customer acceptance.
+      security: [{session: []}]
+      parameters:
+        - {name: quoteId, in: path, required: true, schema: {type: string, format: uuid}}
+        - {name: version, in: path, required: true, schema: {type: integer, minimum: 1}}
+      responses:
+        '200': {description: Issued quote, content: {application/json: {schema: {$ref: '#/components/schemas/BusinessQuote'}}}}
+        '409': {$ref: '#/components/responses/Error'}
+  /quotes/{quoteId}/versions/{version}/public-link:
+    post:
+      operationId: createQuotePublicLink
+      summary: Create a scoped capability for the current issued document
+      description: Admin person only. Finalization creates the first link when a persistent link or messaging host key is configured; otherwise explicit creation returns a one-time link. The projection stores only a SHA-256 verifier. Retained capabilities are AES-256-GCM encrypted for admin re-copy. Without a host key re-copy is unavailable. Revoke before reissue; expired links stay readable but cannot accept.
+      security: [{session: []}]
+      parameters: [{name: quoteId, in: path, required: true, schema: {type: string, format: uuid}}, {name: version, in: path, required: true, schema: {type: integer, minimum: 1}}]
+      requestBody: {required: false, content: {application/json: {schema: {type: object, additionalProperties: false, properties: {expires_at: {type: string, format: date-time}}}}}}
+      responses:
+        '201': {description: Link and metadata, content: {application/json: {schema: {$ref: '#/components/schemas/QuotePublicLink'}}}}
+        '409': {$ref: '#/components/responses/Error'}
+    get:
+      operationId: getQuotePublicLink
+      summary: Read link metadata and, when a host key is available, decrypt the stable path as an admin
+      security: [{session: []}]
+      parameters: [{name: quoteId, in: path, required: true, schema: {type: string, format: uuid}}, {name: version, in: path, required: true, schema: {type: integer, minimum: 1}}]
+      responses:
+        '200': {description: Metadata, content: {application/json: {schema: {$ref: '#/components/schemas/QuotePublicLink'}}}}
+  /quotes/{quoteId}/versions/{version}/public-link/revoke:
+    post:
+      operationId: revokeQuotePublicLink
+      summary: Revoke the active capability link
+      security: [{session: []}]
+      parameters: [{name: quoteId, in: path, required: true, schema: {type: string, format: uuid}}, {name: version, in: path, required: true, schema: {type: integer, minimum: 1}}]
+      responses:
+        '200': {description: Revoked metadata, content: {application/json: {schema: {$ref: '#/components/schemas/QuotePublicLink'}}}}
+  /quotes/{quoteId}/visibility:
+    patch:
+      operationId: setQuoteVisibility
+      summary: Archive or restore without deleting history
+      description: "Admin person only. quote.visibility_changed is reversible through POST /events/{eventId}/undo while both the archived state and quote revision are unchanged. Historical events lacking a quote revision cannot be undone; use an explicit visibility change."
+      security: [{session: []}]
+      parameters: [{name: quoteId, in: path, required: true, schema: {type: string, format: uuid}}]
+      requestBody: {required: true, content: {application/json: {schema: {type: object, additionalProperties: false, required: [expected_revision, archived], properties: {expected_revision: {type: integer, minimum: 1}, archived: {type: boolean}}}}}}
+      responses:
+        '200': {headers: {X-Aeon-Event-Ids: {$ref: '#/components/headers/MutationEventIds'}}, description: Quote, content: {application/json: {schema: {$ref: '#/components/schemas/BusinessQuote'}}}}
+        '409': {$ref: '#/components/responses/Error'}
+components:
+  schemas:
+    BusinessQuote:
+      type: object
+      required: [quote_node_id, customer_org_node_id, current_version, state, revision, archived, project_ref, classic_status]
+      properties:
+        quote_node_id: {type: string, format: uuid}
+        project_node_id: {type: string, description: UUID or empty when customer-only}
+        customer_org_node_id: {type: string, format: uuid}
+        current_version: {type: integer, minimum: 0}
+        state: {type: string, enum: [draft, issued, accepted, void]}
+        revision: {type: integer, minimum: 1}
+        offer_no: {type: string, description: Immutable commercial number for configured quotes}
+        archived: {type: boolean}
+        project_ref: {type: string}
+        classic_status: {type: string, enum: [draft, sent, expired, accepted, void], description: Presentation mapping; expired is derived from the frozen validity day}
+    BusinessQuoteListItem:
+      description: A quote as the Quotes list shows it. Title, dates, currency and net total come from the draft while the quote is a draft and from the frozen current version otherwise; no document body is included.
+      allOf:
+        - {$ref: '#/components/schemas/BusinessQuote'}
+        - type: object
+          required: [key, title, customer_name, created_at, updated_at]
+          properties:
+            key: {type: string, description: 'The quote node key, such as QUO-12'}
+            title: {type: string}
+            customer_name: {type: string, description: Current title of the customer organisation}
+            currency: {type: string, pattern: '^[A-Z]{3}$'}
+            net_total_cents: {type: integer, minimum: 0, description: Net total in cents; drafts round each position half up like a save does; absent when a draft has no document}
+            offer_date: {type: string, format: date}
+            valid_until: {type: string, format: date}
+            created_at: {type: string, format: date-time}
+            updated_at: {type: string, format: date-time, description: 'Latest of document, version, decision and archive changes'}
+            issued_at: {type: string, format: date-time, description: When the current version was issued}
+            accepted_at: {type: string, format: date-time, description: When the current version was accepted}
+    QuoteAcceptance:
+      type: object
+      required: [quote_node_id, version, customer_principal_id, recipient_contact_node_id, accepted_content_sha256, accepted_at, event_id]
+      properties:
+        quote_node_id: {type: string, format: uuid}
+        version: {type: integer, minimum: 1}
+        customer_principal_id: {type: string, format: uuid}
+        recipient_contact_node_id: {type: string, format: uuid}
+        accepted_content_sha256: {type: string, pattern: '^[0-9a-f]{64}$'}
+        accepted_at: {type: string, format: date-time}
+        event_id: {type: integer, minimum: 1}
+    QuoteAcceptanceWrite:
+      type: object
+      additionalProperties: false
+      required: [expected_content_sha256]
+      properties:
+        expected_content_sha256: {type: string, pattern: '^[0-9a-f]{64}$'}
+    QuoteBranchWrite:
+      type: object
+      additionalProperties: false
+      required: [expected_quote_revision, expected_version, expected_content_sha256]
+      properties:
+        expected_quote_revision: {type: integer, minimum: 1}
+        expected_version: {type: integer, minimum: 1}
+        expected_content_sha256: {type: string, pattern: '^[0-9a-f]{64}$'}
+    QuoteConfirmationJob:
+      type: object
+      required: [quote_node_id, version, state, attempts, next_attempt_at, updated_at]
+      properties:
+        quote_node_id: {type: string, format: uuid}
+        version: {type: integer, minimum: 1}
+        state: {type: string, enum: [pending, rendering, ready, sending, sent, failed, uncertain]}
+        attempts: {type: integer, minimum: 0}
+        next_attempt_at: {type: string, format: date-time}
+        receipt_sha256: {type: string, pattern: '^[0-9a-f]{64}$'}
+        renderer_version: {type: string}
+        updated_at: {type: string, format: date-time}
+    QuoteCreate:
+      type: object
+      additionalProperties: false
+      required: [title, customer_org_node_id]
+      properties:
+        title: {type: string, minLength: 1}
+        project_node_id: {type: string, format: uuid, description: Optional linked project}
+        customer_org_node_id: {type: string, format: uuid}
+    QuoteDraft:
+      type: object
+      required: [document, document_sha256, draft_revision, quote_revision, schema_version, minimum_writer_version, base_version, updated_at, updated_by_principal_id]
+      properties:
+        document: {$ref: '#/components/schemas/QuoteDocument'}
+        document_sha256: {type: string, pattern: '^[0-9a-f]{64}$'}
+        draft_revision: {type: integer, minimum: 1}
+        quote_revision: {type: integer, minimum: 1, description: Aggregate lifecycle revision}
+        schema_version: {type: integer, minimum: 1}
+        minimum_writer_version: {type: integer, minimum: 1}
+        base_version: {type: integer, minimum: 0}
+        updated_at: {type: string, format: date-time}
+        updated_by_principal_id: {type: string, format: uuid}
+    QuoteDraftValidationError:
+      type: object
+      required: [error, errors]
+      properties:
+        error: {type: string}
+        errors: {type: object, description: Field paths within the draft request mapped to reasons, additionalProperties: {type: string}}
+    QuoteDraftWrite:
+      type: object
+      additionalProperties: false
+      required: [client_session_id, mutation_id, writer_version, document]
+      properties:
+        client_session_id: {type: string, format: uuid}
+        mutation_id: {type: string, format: uuid}
+        writer_version: {type: integer, enum: [1, 2]}
+        document: {$ref: '#/components/schemas/QuoteDocument'}
+    QuoteFinalizeWrite:
+      type: object
+      additionalProperties: false
+      required: [expected_quote_revision, expected_draft_revision, expected_document_sha256]
+      properties:
+        expected_quote_revision: {type: integer, minimum: 1}
+        expected_draft_revision: {type: integer, minimum: 1}
+        expected_document_sha256: {type: string, pattern: '^[0-9a-f]{64}$'}
+    QuoteLine:
+      allOf:
+        - {$ref: '#/components/schemas/QuoteLineWrite'}
+        - {type: object, required: [position, rate_amount, net_amount], properties: {position: {type: integer, minimum: 0}, rate_amount: {type: number, minimum: 0}, net_amount: {type: number, minimum: 0}}}
+    QuoteLineWrite:
+      type: object
+      additionalProperties: false
+      required: [description, cost_unit_node_id, unit, quantity, tax_rate]
+      properties:
+        description: {type: string, minLength: 1}
+        cost_unit_node_id: {type: string, format: uuid}
+        unit: {type: string, enum: [hour, day, item]}
+        quantity: {type: number, exclusiveMinimum: 0}
+        tax_rate: {type: number, minimum: 0, maximum: 1}
+    QuoteMutationReceipt:
+      type: object
+      required: [mutation_id, acknowledged_revision, acknowledged_quote_revision, current_revision, current_quote_revision, replayed]
+      properties:
+        mutation_id: {type: string, format: uuid}
+        acknowledged_revision: {type: integer, minimum: 1}
+        acknowledged_quote_revision: {type: integer, minimum: 1}
+        current_revision: {type: integer, minimum: 1}
+        current_quote_revision: {type: integer, minimum: 1}
+        replayed: {type: boolean}
+        document: {$ref: '#/components/schemas/QuoteDocument'}
+        document_sha256: {type: string, pattern: '^[0-9a-f]{64}$'}
+        updated_at: {type: string, format: date-time}
+        updated_by_principal_id: {type: string, format: uuid}
+    QuotePresenceAnchor:
+      type: object
+      required: [section_id, observed_revision, fidelity]
+      properties:
+        section_id: {type: string, format: uuid}
+        node_id: {type: string, format: uuid}
+        observed_revision: {type: integer, minimum: 1}
+        text_sha256: {type: string, pattern: '^[0-9a-f]{64}$'}
+        anchor: {type: integer, minimum: 0, maximum: 65535, description: UTF-16 offset}
+        focus: {type: integer, minimum: 0, maximum: 65535, description: UTF-16 offset}
+        fidelity: {type: string, enum: [section, precise]}
+    QuotePresenceSnapshot:
+      type: object
+      required: [sessions, draft_revision, quote_revision, state]
+      properties:
+        sessions:
+          type: array
+          maxItems: 50
+          items:
+            type: object
+            required: [session_id, principal_id, name, has_avatar, mode, observed_revision, expires_at]
+            properties:
+              session_id: {type: string, format: uuid}
+              principal_id: {type: string, format: uuid}
+              name: {type: string}
+              has_avatar: {type: boolean, description: 'The person has a profile picture at /api/people/{id}/avatar/{size}; clients request it only then and show initials otherwise.'}
+              mode: {type: string, enum: [viewing, editing, idle]}
+              anchor: {$ref: '#/components/schemas/QuotePresenceAnchor'}
+              observed_revision: {type: integer, minimum: 1}
+              expires_at: {type: string, format: date-time}
+        draft_revision: {type: integer, minimum: 1}
+        quote_revision: {type: integer, minimum: 1}
+        state: {type: string, enum: [draft, issued, accepted, void]}
+    QuotePresenceWrite:
+      type: object
+      additionalProperties: false
+      required: [mode, observed_revision]
+      properties:
+        resume_session_id: {type: string, format: uuid}
+        mode: {type: string, enum: [viewing, editing, idle]}
+        observed_revision: {type: integer, minimum: 1}
+        interacted: {type: boolean, description: True only when local editing or selection activity occurred; heartbeat alone does not prevent idle state}
+        anchor: {$ref: '#/components/schemas/QuotePresenceAnchor'}
+    QuotePublicLink:
+      type: object
+      required: [id, public_tenant, quote_node_id, version, target_content_sha256, expires_at]
+      properties:
+        id: {type: string, format: uuid}
+        public_tenant: {type: string, description: Opaque selector; never a tenant slug}
+        quote_node_id: {type: string, format: uuid}
+        version: {type: integer, minimum: 1}
+        target_content_sha256: {type: string, pattern: '^[0-9a-f]{64}$'}
+        expires_at: {type: string, format: date-time}
+        revoked_at: {type: string, format: date-time}
+        path: {type: string, description: Returned on creation or to admins for an active link whose retained capability can be decrypted; omitted after one-time delivery without a host key}
+        token: {type: string, description: Returned only on creation}
+        copy_unavailable_reason: {type: string, enum: [key_not_configured], description: Active links cannot be re-copied when the server has no persistent link key}
+    QuoteSettings:
+      type: object
+      required: [revision, numbering_time_zone, default_currency, sender, defaults, layout, smtp_confirmation_enabled, smtp_configured]
+      properties:
+        revision: {type: integer, minimum: 0}
+        numbering_time_zone: {type: string, description: Explicit IANA time zone such as Europe/Vienna}
+        default_currency: {type: string, pattern: '^$|^[A-Z]{3}$', description: Empty only before first setup}
+        sender: {type: object, description: 'Tenant-owned company, address, contact, registration and bank fields'}
+        defaults: {type: object, description: 'Tenant-owned intro, blocks, acceptance and VAT prose'}
+        layout: {type: object, description: Neutral rendering preferences and file references}
+        smtp_confirmation_enabled: {type: boolean}
+        smtp_configured: {type: boolean}
+        default_profile_id: {type: string, format: uuid, description: Optional profile selected for new quotes}
+    QuoteSettingsWrite:
+      type: object
+      additionalProperties: false
+      required: [expected_revision, numbering_time_zone, default_currency, sender, defaults, layout, smtp_confirmation_enabled]
+      properties:
+        expected_revision: {type: integer, minimum: 0}
+        numbering_time_zone: {type: string}
+        default_currency: {type: string, pattern: '^[A-Z]{3}$'}
+        sender: {type: object}
+        defaults: {type: object}
+        layout: {type: object}
+        smtp_confirmation_enabled: {type: boolean, enum: [false], description: Email delivery is disabled}
+        default_profile_id: {type: string, format: uuid}
+    QuoteVersion:
+      type: object
+      required: [quote_node_id, version, currency, title, terms_markdown, lines, subtotal, tax_total, total, content_sha256, created_by_principal_id, created_at, digest_mode, pricing_mode]
+      properties:
+        quote_node_id: {type: string, format: uuid}
+        version: {type: integer, minimum: 1}
+        recipient_contact_node_id: {type: string, description: Bound contact UUID for R4 or optional document snapshot}
+        currency: {type: string, pattern: '^[A-Z]{3}$'}
+        title: {type: string}
+        terms_markdown: {type: string}
+        lines: {type: array, items: {$ref: '#/components/schemas/QuoteLine'}}
+        subtotal: {type: number, minimum: 0}
+        tax_total: {type: number, minimum: 0}
+        total: {type: number, minimum: 0}
+        content_sha256: {type: string, pattern: '^[0-9a-f]{64}$'}
+        created_by_principal_id: {type: string, format: uuid}
+        created_at: {type: string, format: date-time}
+        digest_mode: {type: string, enum: [r4-v1, document-v1, document-v2]}
+        pricing_mode: {type: string, enum: [rate-4, cent-half-up-v1]}
+        document: {$ref: '#/components/schemas/QuoteDocument'}
+        offer_no: {type: string}
+        validity_time_zone: {type: string, description: IANA zone frozen for local validity checks}
+    QuoteVersionWrite:
+      type: object
+      additionalProperties: false
+      required: [expected_revision, recipient_contact_node_id, currency, title, terms_markdown, lines]
+      properties:
+        expected_revision: {type: integer, minimum: 1}
+        recipient_contact_node_id: {type: string, format: uuid}
+        currency: {type: string, pattern: '^[A-Z]{3}$'}
+        title: {type: string, minLength: 1}
+        terms_markdown: {type: string}
+        lines: {type: array, minItems: 1, items: {$ref: '#/components/schemas/QuoteLineWrite'}}

@@ -55,10 +55,8 @@ const ticketHref = (agent: LiveAgent) => {
   return routeKey ? `/p/${encodeURIComponent(routeKey)}/${encodeURIComponent(agent.ticket.key)}` : ''
 }
 
-function preferences() {
-  const project = projects.byRouteKey(props.project.routeKey)
-  if (project) { hide(); openModelPrefs({ project: { id: project.id, title: project.title }, level: 'project' }) }
-}
+// Settings › Models has no per-project choices, so the link promises none (Tick, AEON-1138): it opens Models as it is.
+function preferences() { hide(); openModelPrefs() }
 
 // ---------- Opening ----------
 let openTimer: ReturnType<typeof setTimeout> | undefined
@@ -173,7 +171,7 @@ onBeforeUnmount(() => {
         <p class="pop-head">
           <span>{{ headLabel }}</span>
           <span class="pop-project">{{ project.title }}</span>
-          <button type="button" class="icon-btn sm flat" :aria-label="`Model preferences for ${project.title}`" @click="preferences"><AppIcon name="gear" :size="14" /></button>
+          <button type="button" class="icon-btn sm flat" aria-label="Model preferences" @click="preferences"><AppIcon name="gear" :size="14" /></button>
         </p>
         <ul class="pop-list">
           <li v-for="(agent, i) in shown" :key="agent.session_id ?? `${agent.since}${i}`" class="pop-agent agent-state-surface" :style="appearance(agent.state ?? 'working')">
@@ -205,7 +203,8 @@ onBeforeUnmount(() => {
 
 
 .live-chip {
-  position: relative; display: inline-flex; align-items: center; flex-wrap: nowrap; gap: 5px; min-width: 0; width: max-content; max-width: 100%; min-height: 28px; padding: 0 8px 0 6px;
+  /* Only the name column may shrink; the robot and complete state word retain their intrinsic widths. */
+  position: relative; display: inline-grid; grid-template-columns: auto minmax(0, 1fr) auto; align-items: center; gap: 5px; min-width: 0; max-width: 100%; min-height: 28px; padding: 0 8px 0 6px;
   border: 0; border-radius: 999px; background: var(--chip-bg); box-shadow: inset 0 0 0 1px color-mix(in oklab, var(--signal) 14%, var(--chip-line));
   color: var(--ink); font: 500 12px/1 var(--font); cursor: pointer; -webkit-user-select: none; user-select: none; transition: none;
 }
@@ -272,6 +271,7 @@ a.agent-line:hover .go { color: var(--teal-ink); }
 .chip-state :deep(.state-word) { white-space: nowrap; }
 .live-chip { opacity: var(--agent-state-opacity, 1); }
 .live-chip :deep(.live-bot), .live-chip :deep(.agent-state-label) { opacity: 1; }
+.live-pop :deep(.icon-btn) { transition: opacity .12s, transform .12s; }
 /* A narrow card keeps one line by showing two robots; the count still says how many. */
 @container live-card (max-width: 300px) {
   .as-card .face:nth-child(n+3) { display: none; }

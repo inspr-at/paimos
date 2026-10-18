@@ -138,7 +138,7 @@ test('an entry reads with a table of contents, anchors, how agents read it and w
   // The body's own title heading is not repeated under the page title.
   await expect(page.getByRole('heading', { name: 'Deploy a release to production' })).toHaveCount(1)
   const toc = page.getByRole('navigation', { name: 'On this page' })
-  await expect(toc.getByRole('link')).toHaveText(['Before you start', 'Build and pin the image', 'Roll out', 'Canary on csb1', 'The rest of the fleet', 'Roll back', 'After the deploy'])
+  await expect(toc.getByRole('link')).toHaveText(['Before you start', 'Build and pin the image', 'Roll out', 'Canary on prod-1', 'The rest of the fleet', 'Roll back', 'After the deploy'])
   await toc.getByRole('link', { name: 'Roll back' }).click()
   await expect(page).toHaveURL(`${entry}#roll-back`)
   await expect(toc.getByRole('link', { name: 'Roll back' })).toHaveAttribute('aria-current', 'location')
@@ -192,7 +192,7 @@ test('editing saves against the version read, warns before a rename and undoes i
   await page.getByRole('button', { name: 'Undo' }).click()
   await expect.poll(() => world.entries.find(item => item.id === 'k-deploy')?.slug).toBe('deploy-release')
   await expect(page).toHaveURL('/p/PHAROS/knowledge/runbook/deploy-release')
-  await expect(page.getByRole('heading', { name: 'Canary on csb1' })).toBeVisible()
+  await expect(page.getByRole('heading', { name: 'Canary on prod-1' })).toBeVisible()
   await expect(page.locator('.e-note.proposed')).toHaveCount(0)
   // Escape with changes asks first.
   await page.keyboard.press('e')

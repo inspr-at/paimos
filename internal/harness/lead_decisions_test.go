@@ -415,6 +415,10 @@ func TestLeadDecisionRequestIdentitySurvivesChangedVisibility(t *testing.T) {
 	if len(decode(t, w)["items"].([]any)) != 0 || leadEventCount(t, f) != 1 {
 		t.Fatal("fixture did not hide the retained decision")
 	}
+	var beforeRefusal int64
+	if err := f.db.Admin.QueryRow(t.Context(), `SELECT last_id FROM event_counters WHERE tenant_id=$1`, f.person.TenantID).Scan(&beforeRefusal); err != nil {
+		t.Fatal(err)
+	}
 	// Make the submitted evidence valid in the original project, but different
 	// from the hidden decision. Request identity must still prevent the append.
 	body["ticket_node_id"] = ""
@@ -426,6 +430,13 @@ func TestLeadDecisionRequestIdentitySurvivesChangedVisibility(t *testing.T) {
 	}
 	if leadEventCount(t, f) != 1 {
 		t.Fatal("changed visibility allowed request identity reuse")
+	}
+	var afterRefusal int64
+	if err := f.db.Admin.QueryRow(t.Context(), `SELECT last_id FROM event_counters WHERE tenant_id=$1`, f.person.TenantID).Scan(&afterRefusal); err != nil {
+		t.Fatal(err)
+	}
+	if afterRefusal != beforeRefusal {
+		t.Fatal("conflict consumed an event ID")
 	}
 	// The failed append rolls back its counter allocation and leaves the exact
 	// original snapshot available to a member who can still see both projects.
@@ -443,7 +454,7 @@ func TestLeadDecisionRequestIdentitySurvivesChangedVisibility(t *testing.T) {
 	body["request_id"] = uid()
 	w = f.call(f.agent, "POST", path, body, lease)
 	expect(t, w, 200)
-	if decode(t, w)["decision"].(map[string]any)["event_id"] != first["event_id"].(float64)+1 || leadEventCount(t, f) != 2 {
+	if decode(t, w)["decision"].(map[string]any)["event_id"] != float64(beforeRefusal+1) || leadEventCount(t, f) != 2 {
 		t.Fatal("conflict consumed an event ID or blocked a fresh request")
 	}
 }

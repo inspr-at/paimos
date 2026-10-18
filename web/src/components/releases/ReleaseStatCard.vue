@@ -119,7 +119,7 @@ const ICONS: Record<StatKey, string[]> = {
 .stat-card {
   position: relative; display: flex; flex-direction: column; min-width: 0; padding: 20px 22px 12px; border-radius: 20px;
   background: var(--glass); -webkit-backdrop-filter: blur(14px) saturate(1.3); backdrop-filter: blur(14px) saturate(1.3);
-  box-shadow: 0 0 0 1px var(--line), inset 0 1px 0 var(--glass-edge), 0 14px 34px -20px var(--card-glow, rgba(14, 111, 108, .35));
+  box-shadow: 0 0 0 1px var(--line), inset 0 1px 0 var(--glass-edge), 0 14px 34px -20px var(--card-glow, color-mix(in srgb, var(--primary-line) 35%, transparent));
 }
 .slide { display:grid; min-width:0; }
 .slide-size { visibility:hidden; pointer-events:none; }

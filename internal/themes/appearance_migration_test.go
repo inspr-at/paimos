@@ -2,6 +2,7 @@
 package themes
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -208,7 +209,6 @@ func TestAppearanceMigrationPreservesInheritedExplicitChoices(t *testing.T) {
 				s := Store{d.App}
 				var people []tenant.Principal
 				var before Active
-				var explicitTheme *string
 				seeded := false
 				err = db.MigrateWithHook(ctx, d.App, func(name string) error {
 					if name != "1235_agent_appearance_themes.sql" {
@@ -229,14 +229,13 @@ func TestAppearanceMigrationPreservesInheritedExplicitChoices(t *testing.T) {
 						dbtest.BindRole(t, d, tid, id, "member")
 						people = append(people, p)
 					}
+					// Saved row at the pre-1235 cutoff. Store would authorize through
+					// principals.messaging_only, which 1352 has not added yet.
+					themeName := ""
 					if choice == "theme" {
-						theme, err := s.Create(ctx, people[1], CreateInput{Name: "Explicit alias choice", Scope: "personal"})
-						if err != nil {
-							return err
-						}
-						explicitTheme = &theme.ID
+						themeName = "Explicit alias choice"
 					}
-					if _, err := s.Select(ctx, people[1], SelectionInput{ThemeID: explicitTheme}); err != nil {
+					if _, err := seedExplicitChoice(ctx, d, people[1], themeName); err != nil {
 						return err
 					}
 					if canonicalRow == "unsaved" {
@@ -258,7 +257,7 @@ func TestAppearanceMigrationPreservesInheritedExplicitChoices(t *testing.T) {
 						}
 					}
 					var err error
-					before, err = s.Active(ctx, people[0])
+					before, err = historicalActive(ctx, s, people[0])
 					return err
 				})
 				if err != nil || !seeded {
@@ -315,6 +314,45 @@ func TestAppearanceMigrationPreservesInheritedExplicitChoices(t *testing.T) {
 
 func ptr[T any](value T) *T { return &value }
 
+// The appearance fixtures migrate to the schema just before
+// 1235_agent_appearance_themes.sql. principals.messaging_only arrives in 1352,
+// and Store authorizes through that current principals query. Seeding here
+// therefore uses only columns present at the cutoff, and the pre-migration
+// read goes through active rather than Store. A later additive column on the
+// authz query cannot fail this seed. Store runs only after MigrateWithHook,
+// once the schema is current. Production authz is unchanged.
+
+func seedExplicitChoice(ctx context.Context, d *dbtest.DB, p tenant.Principal, name string) (*string, error) {
+	var themeID *string
+	if name != "" {
+		raw, err := json.Marshal(Porcelain())
+		if err != nil {
+			return nil, err
+		}
+		var id string
+		if err := d.Admin.QueryRow(ctx, `INSERT INTO themes(tenant_id,name,scope,owner_principal_id,config) VALUES($1,$2,'personal',$3,$4::jsonb) RETURNING id::text`, p.TenantID, name, p.ID, raw).Scan(&id); err != nil {
+			return nil, err
+		}
+		themeID = &id
+	}
+	// revision 1 and a null unsaved_revision is a saved choice: the migration
+	// treats unsaved_revision distinct from revision as explicit and keeps it.
+	if _, err := d.Admin.Exec(ctx, `INSERT INTO theme_selections(tenant_id,principal_id,theme_id,revision) VALUES($1,$2,$3,1)`, p.TenantID, p.ID, themeID); err != nil {
+		return nil, err
+	}
+	return themeID, nil
+}
+
+func historicalActive(ctx context.Context, s Store, p tenant.Principal) (Active, error) {
+	var out Active
+	err := db.InTenant(tenant.WithPrincipal(ctx, p), s.Pool, p.TenantID, func(tx pgx.Tx) error {
+		var err error
+		out, err = active(ctx, tx, p)
+		return err
+	})
+	return out, err
+}
+
 func TestAppearanceMigrationRetainsLegacyAliasAfterExplicitCanonicalUnlink(t *testing.T) {
 	for _, choice := range []string{"theme", "default"} {
 		t.Run(choice, func(t *testing.T) {
@@ -348,15 +386,11 @@ func TestAppearanceMigrationRetainsLegacyAliasAfterExplicitCanonicalUnlink(t *te
 					}
 					dbtest.BindRole(t, d, tid, p.ID, "member")
 				}
-				var selected *string
+				themeName := ""
 				if choice == "theme" {
-					theme, err := s.Create(ctx, canonical, CreateInput{Name: "Explicit canonical", Scope: "personal"})
-					if err != nil {
-						return err
-					}
-					selected = &theme.ID
+					themeName = "Explicit canonical"
 				}
-				if _, err := s.Select(ctx, canonical, SelectionInput{ThemeID: selected}); err != nil {
+				if _, err := seedExplicitChoice(ctx, d, canonical, themeName); err != nil {
 					return err
 				}
 				if _, err := d.Admin.Exec(ctx, `INSERT INTO user_preferences(tenant_id,principal_id,key,value) VALUES($1,$2,'agent-indicator','{"style":"orbit","ring":"off","hovering":true,"size":67}'),($1,$2,'agent-state','{"palette":"tritan","dimInactive":false,"inactiveOpacity":73,"yellowMinutes":7}')`, tid, alias.ID); err != nil {
@@ -369,7 +403,7 @@ func TestAppearanceMigrationRetainsLegacyAliasAfterExplicitCanonicalUnlink(t *te
 				if !linked.Changed {
 					return fmt.Errorf("link fixture did not change")
 				}
-				before, err = s.Active(ctx, alias)
+				before, err = historicalActive(ctx, s, alias)
 				return err
 			})
 			if err != nil || !seeded {
@@ -520,7 +554,7 @@ func TestAppearanceMigrationKeepsCanonicalAppearanceWhileLinkedAndAliasesAfterUn
 						return fmt.Errorf("link fixture did not change")
 					}
 				}
-				before, err = s.Active(ctx, canonical)
+				before, err = historicalActive(ctx, s, canonical)
 				return err
 			})
 			if err != nil || !seeded {

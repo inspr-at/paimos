@@ -2,18 +2,29 @@
 <script lang="ts">
 // One inline SVG set: 16×16 grid, stroke 1.8, round caps and joins, currentColor.
 export type IconName =
+  | 'flag' | 'square'
+  | 'repo' | 'circle' | 'signal-off'
   | 'queue' | 'queue-add' | 'queue-on' | 'queue-off' | 'to-top' | 'repeat'
   | 'sun' | 'moon' | 'user' | 'chevron' | 'chevron-right' | 'chevron-left' | 'chevron-up' | 'arrow' | 'arrow-up' | 'arrow-down'
-  | 'logout' | 'tree' | 'compass' | 'search' | 'list' | 'plus' | 'close' | 'edit' | 'copy' | 'external' | 'filter' | 'check'
+  | 'logout' | 'tree' | 'compass' | 'search' | 'list' | 'plus' | 'close' | 'edit' | 'copy' | 'reply' | 'external' | 'filter' | 'check'
   | 'rows-comfortable' | 'rows-compact' | 'keyboard' | 'epic' | 'ticket' | 'task' | 'alert' | 'refresh' | 'sliders' | 'enter'
   | 'inbox' | 'folder' | 'layers' | 'archive' | 'clock' | 'expand' | 'collapse' | 'more' | 'link' | 'trash' | 'agent' | 'outline' | 'expand-all' | 'collapse-all' | 'arrow-left' | 'eye' | 'eye-off' | 'monitor' | 'key'
-  | 'pause' | 'play' | 'stop' | 'shield' | 'send' | 'bolt' | 'gauge' | 'interrupt' | 'halt'
+  | 'snowflake' | 'pause' | 'hold' | 'play' | 'winddown' | 'stop' | 'shield' | 'send' | 'bolt' | 'gauge' | 'interrupt' | 'halt'
   | 'minus' | 'compare' | 'download' | 'paperclip' | 'image' | 'upload' | 'info' | 'journey'
   | 'users' | 'history' | 'sparkle' | 'wrench' | 'bug' | 'gear' | 'commit' | 'tag' | 'box' | 'rollback'
   | 'command' | 'option' | 'backspace'
   | 'book' | 'runbook' | 'guideline' | 'memory' | 'server' | 'folders' | 'terminal' | 'hash' | 'graph'
-  | 'bookmark' | 'pin' | 'lock' | 'star' | 'calendar' | 'coin' | 'not' | 'sort' | 'select' | 'shift' | 'thumbs-down'
-  | 'person-check' | 'cards' | 'columns' | 'grip' | 'sort-name' | 'progress' | 'help' | 'pulse' | 'message'
+  | 'leaf' | 'bookmark' | 'pin' | 'lock' | 'star' | 'calendar' | 'coin' | 'not' | 'sort' | 'select' | 'shift' | 'thumbs-down'
+  | 'merge' | 'person-check' | 'person-wait' | 'sentence' | 'cards' | 'columns' | 'layout-focus' | 'layout-overview' | 'layout-list' | 'grip' | 'sort-name' | 'progress' | 'help' | 'pulse' | 'message'
+  | 'bars' | 'flow' | 'half' | 'v-on' | 'v-close' | 'v-far' | 'v-none'
+  | 'folder-kanban' | 'folder-tree' | 'list-tree' | 'network' | 'workflow' | 'component' | 'blocks' | 'kanban' | 'package' | 'package-check'
+  | 'check-check' | 'square-check-big' | 'circle-check' | 'circle-dot' | 'list-checks' | 'list-todo' | 'clipboard-list' | 'clipboard-check'
+  | 'flag-triangle-right' | 'milestone' | 'target' | 'goal' | 'rocket' | 'mountain' | 'trophy' | 'award' | 'gem' | 'diamond'
+  | 'hexagon' | 'code' | 'database' | 'git-branch' | 'git-pull-request' | 'hammer' | 'book-open' | 'file-text' | 'notebook-pen'
+  | 'sticky-note' | 'scroll-text' | 'presentation' | 'palette' | 'pen-tool' | 'brush' | 'shapes' | 'puzzle' | 'beaker' | 'flask-conical'
+  | 'telescope' | 'lightbulb' | 'triangle-alert' | 'siren' | 'flame' | 'shield-alert' | 'messages-square' | 'handshake' | 'megaphone'
+  | 'gavel' | 'scale' | 'vote' | 'calendar-check' | 'timer' | 'hourglass' | 'trending-up' | 'sprout'
+  | 'wait' | 'hand' | 'route' | 'park' | 'req' | 'skip'
 </script>
 <script setup lang="ts">
 withDefaults(defineProps<{ name: IconName; size?: number }>(), { size: 16 })
@@ -21,7 +32,13 @@ withDefaults(defineProps<{ name: IconName; size?: number }>(), { size: 16 })
 
 <template>
   <svg :width="size" :height="size" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false">
-    <path v-if="name === 'queue'" d="M2.4 4h10.4M10.8 1.9 12.9 4l-2.1 2.1M2.4 8h7.8M2.4 12h7.8" />
+    <template v-if="name === 'repo'"><path d="M2.8 12.3V3.7c0-.7.6-1.3 1.3-1.3h9.1v9.6H4.1c-.7 0-1.3.6-1.3 1.3s.6 1.3 1.3 1.3h1.5" /><path d="M5.6 2.4V12M7.6 12.7v2.1l1.2-.8 1.2.8v-2.1" /></template>
+    <circle v-else-if="name === 'circle'" cx="8" cy="8" r="6" />
+    <path v-else-if="name === 'skip'" d="M3.6 3.6 9 8l-5.4 4.4zM12.2 3.6v8.8" />
+    <path v-else-if="name === 'signal-off'" d="M8 12.6h.01M5.6 10.2a3.4 3.4 0 0 1 4.8 0M3.2 7.8a6.8 6.8 0 0 1 5.6-2.1M12.8 7.8a6.8 6.8 0 0 0-1.4-1.1M2 2l12 12" />
+    <path v-if="name === 'flag'" d="M3.5 14V2.6M3.5 3h8.2l-1.8 3 1.8 3H3.5" />
+    <rect v-else-if="name === 'square'" x="2.2" y="2.2" width="11.6" height="11.6" rx="2" />
+    <path v-else-if="name === 'queue'" d="M2.4 4h10.4M10.8 1.9 12.9 4l-2.1 2.1M2.4 8h7.8M2.4 12h7.8" />
     <path v-else-if="name === 'queue-add'" d="M2.4 4h10.4M10.8 1.9 12.9 4l-2.1 2.1M2.4 8h5.4M2.4 12h3.6M11.6 8.8v5.4M8.9 11.5h5.4" />
     <path v-else-if="name === 'queue-on'" d="M2.4 4h10.4M10.8 1.9 12.9 4l-2.1 2.1M2.4 8h5.4M2.4 12h3.6M8.6 11.6l1.9 1.9 3.6-3.9" />
     <path v-else-if="name === 'queue-off'" d="M2.4 4h10.4M10.8 1.9 12.9 4l-2.1 2.1M2.4 8h5.4M2.4 12h3.6M8.9 11.5h5.4" />
@@ -29,6 +46,8 @@ withDefaults(defineProps<{ name: IconName; size?: number }>(), { size: 16 })
     <template v-else-if="name === 'sun'"><circle cx="8" cy="8" r="2.8" /><path d="M8 1.6v1.3M8 13.1v1.3M1.6 8h1.3M13.1 8h1.3M3.5 3.5l.9.9M11.6 11.6l.9.9M3.5 12.5l.9-.9M11.6 4.4l.9-.9" /></template>
     <path v-else-if="name === 'moon'" d="M13.6 9.6A5.9 5.9 0 0 1 6.4 2.4a6 6 0 1 0 7.2 7.2Z" />
     <template v-else-if="name === 'users'"><circle cx="6.2" cy="5.6" r="2.4" /><path d="M1.8 13.6c0-2.6 2-4.2 4.4-4.2s4.4 1.6 4.4 4.2M10.4 3.4a2.1 2.1 0 1 1 .9 4M12 9.6c1.4.4 2.4 1.6 2.4 3.6" /></template>
+    <template v-else-if="name === 'person-wait'"><circle cx="6.4" cy="5" r="2.6" /><path d="M1.8 13.6c.5-2.6 2.3-4 4.6-4 1 0 1.9.3 2.6.8" /><circle cx="11.8" cy="11.6" r="2.8" /><path d="M11.8 10.2v1.5l.9.7" /></template>
+    <path v-else-if="name === 'sentence'" d="M2.5 4.5h11M2.5 8h11M2.5 11.5h6.5" />
     <template v-else-if="name === 'person-check'"><circle cx="6.2" cy="5.2" r="2.5" /><path d="M1.8 13.6c0-2.6 2-4.2 4.4-4.2 1 0 1.9.3 2.6.7" /><path d="m9.8 11.6 1.7 1.7 3-3.3" /></template>
     <template v-else-if="name === 'user'"><circle cx="8" cy="5.4" r="2.6" /><path d="M2.8 14c0-2.9 2.3-4.6 5.2-4.6s5.2 1.7 5.2 4.6" /></template>
     <path v-else-if="name === 'chevron'" d="m4.5 6.3 3.5 3.5 3.5-3.5" />
@@ -66,11 +85,17 @@ withDefaults(defineProps<{ name: IconName; size?: number }>(), { size: 16 })
     <path v-else-if="name === 'refresh'" d="M13.2 8a5.2 5.2 0 1 1-1.6-3.8M13.4 2.4v3.2h-3.2" />
     <template v-else-if="name === 'sliders'"><path d="M2.4 4.6h6.6M12.6 4.6h1M2.4 11.4h1M7 11.4h6.6" /><circle cx="10.8" cy="4.6" r="1.7" /><circle cx="5.2" cy="11.4" r="1.7" /></template>
     <path v-else-if="name === 'enter'" d="M13 3.4v4.4c0 .9-.7 1.6-1.6 1.6H3.2M6 6.6 3.2 9.4 6 12.2" />
+    <path v-else-if="name === 'reply'" d="M6.4 3.6 2.6 7.4l3.8 3.8M2.6 7.4h6.8a4 4 0 0 1 4 4v1" />
     <template v-else-if="name === 'inbox'"><path d="M2 9.4 4.2 3.6h7.6L14 9.4v3a1 1 0 0 1-1 1H3a1 1 0 0 1-1-1Z" /><path d="M2 9.4h3.3l1 1.5h3.4l1-1.5H14" /></template>
+    <template v-else-if="name === 'park'"><rect x="2.4" y="2.4" width="11.2" height="11.2" rx="2.6" /><path d="M6.4 11.4V4.8h2.2a1.9 1.9 0 0 1 0 3.8H6.4" /></template>
+    <template v-else-if="name === 'req'"><rect x="2.6" y="2.4" width="10.8" height="11.2" rx="2" /><path d="m5.4 8.2 1.8 1.8 3.4-3.6" /></template>
     <path v-else-if="name === 'folder'" d="M2 4.6c0-.6.4-1 1-1h3.2l1.5 1.5H13c.6 0 1 .4 1 1V12c0 .6-.4 1-1 1H3c-.6 0-1-.4-1-1Z" />
     <path v-else-if="name === 'layers'" d="M8 2 14 5 8 8 2 5ZM2 8.2l6 3 6-3M2 11.2l6 3 6-3" />
     <template v-else-if="name === 'cards'"><rect x="2" y="2" width="5.2" height="5.2" rx="1.4" /><rect x="8.8" y="2" width="5.2" height="5.2" rx="1.4" /><rect x="2" y="8.8" width="5.2" height="5.2" rx="1.4" /><rect x="8.8" y="8.8" width="5.2" height="5.2" rx="1.4" /></template>
     <template v-else-if="name === 'columns'"><rect x="1.8" y="2.6" width="12.4" height="10.8" rx="1.8" /><path d="M6 2.6v10.8M10 2.6v10.8" /></template>
+    <template v-else-if="name === 'layout-focus'"><rect x="1.8" y="2.6" width="12.4" height="10.8" rx="2" /><path d="M6 2.6v10.8M3.4 5.4h1.2M3.4 7.6h1.2M3.4 9.8h1.2" /></template>
+    <template v-else-if="name === 'layout-overview'"><rect x="1.8" y="2.6" width="12.4" height="10.8" rx="2" /><path d="M10.4 2.6v10.8M3.6 5.4h5M3.6 7.6h5M3.6 9.8h5" /></template>
+    <template v-else-if="name === 'layout-list'"><rect x="1.8" y="2.6" width="12.4" height="10.8" rx="2" /><path d="M4 5.4h8M4 7.6h8M4 9.8h8" /></template>
     <template v-else-if="name === 'grip'"><circle cx="6" cy="3.8" r="1.1" fill="currentColor" stroke="none" /><circle cx="10" cy="3.8" r="1.1" fill="currentColor" stroke="none" /><circle cx="6" cy="8" r="1.1" fill="currentColor" stroke="none" /><circle cx="10" cy="8" r="1.1" fill="currentColor" stroke="none" /><circle cx="6" cy="12.2" r="1.1" fill="currentColor" stroke="none" /><circle cx="10" cy="12.2" r="1.1" fill="currentColor" stroke="none" /></template>
     <template v-else-if="name === 'archive'"><rect x="1.8" y="2.8" width="12.4" height="3.4" rx="1" /><path d="M3 6.2v6.2c0 .6.4 1 1 1h8c.6 0 1-.4 1-1V6.2M6.4 9h3.2" /></template>
     <path v-else-if="name === 'expand'" d="M9.4 2.6h4v4M13.4 2.6 9.2 6.8M6.6 13.4h-4v-4M2.6 13.4l4.2-4.2" />
@@ -82,7 +107,10 @@ withDefaults(defineProps<{ name: IconName; size?: number }>(), { size: 16 })
     <path v-else-if="name === 'collapse-all'" d="m4.4 6.8 3.6-3.2 3.6 3.2M4.4 12.4 8 9.2l3.6 3.2" />
     <template v-else-if="name === 'agent'"><rect x="2.6" y="5" width="10.8" height="8.2" rx="2.4" /><path d="M8 5V2.6M6 9h.01M10 9h.01M1 8.4v2M15 8.4v2" /><circle cx="8" cy="2.2" r=".6" fill="currentColor" stroke="none" /></template>
     <path v-else-if="name === 'trash'" d="M2.8 4.2h10.4M6.2 4.2V2.8h3.6v1.4M4.2 4.2l.7 8.6c.1.7.6 1.2 1.3 1.2h3.6c.7 0 1.2-.5 1.3-1.2l.7-8.6M6.8 7v4.2M9.2 7v4.2" />
+    <template v-else-if="name === 'snowflake'"><path d="M8 1.8v12.4M2.6 4.9l10.8 6.2M2.6 11.1l10.8-6.2" /><path d="m6.5 2.9 1.5 1.3 1.5-1.3M6.5 13.1 8 11.8l1.5 1.3" /></template>
     <path v-else-if="name === 'pause'" d="M6 3.8v8.4M10 3.8v8.4" />
+    <template v-else-if="name === 'hold'"><circle cx="8" cy="8" r="6" /><path d="M6.4 5.6v4.8M9.6 5.6v4.8" /></template>
+    <path v-else-if="name === 'winddown'" d="M1.6 13.6h12.8M4.8 13.6a3.2 3.2 0 0 1 6.4 0M8 1.8v5.2M5.8 4.9 8 7.1l2.2-2.2" />
     <path v-else-if="name === 'play'" d="M5.4 3.6v8.8l7-4.4z" stroke-linejoin="round" />
     <rect v-else-if="name === 'stop'" x="3.8" y="3.8" width="8.4" height="8.4" rx="1.6" />
     <template v-else-if="name === 'shield'"><path d="M8 1.9 13 3.8v3.9c0 3-2.1 5.4-5 6.4-2.9-1-5-3.4-5-6.4V3.8Z" /><path d="m5.9 8 1.5 1.5 2.8-2.9" /></template>
@@ -90,6 +118,7 @@ withDefaults(defineProps<{ name: IconName; size?: number }>(), { size: 16 })
     <template v-else-if="name === 'halt'"><path d="M5.5 1.9h5l3.6 3.6v5l-3.6 3.6h-5l-3.6-3.6v-5Z" /><rect x="6" y="6" width="4" height="4" rx=".6" fill="currentColor" stroke="none" /></template>
     <path v-else-if="name === 'send'" d="M14 2 7.2 8.8M14 2 9.6 14 7.2 8.8 2 6.4Z" />
     <path v-else-if="name === 'bolt'" d="M9 1.8 3.6 9h4l-.8 5.2L12.4 7h-4Z" />
+    <template v-else-if="name === 'wait'"><circle cx="8" cy="8" r="5.7" /><path d="M6.7 6v4M9.3 6v4" /></template>
     <template v-else-if="name === 'gauge'"><path d="M2.4 11.6a5.6 5.6 0 1 1 11.2 0" /><path d="m8 11.6 2.6-3.4" /></template>
     <path v-else-if="name === 'minus'" d="M3.6 8h8.8" />
     <template v-else-if="name === 'compare'"><rect x="1.9" y="2.8" width="12.2" height="10.4" rx="1.8" /><path d="M8 1.6v12.8" /><path d="m5 6.4-1.4 1.6L5 9.6M11 6.4l1.4 1.6L11 9.6" /></template>
@@ -104,6 +133,7 @@ withDefaults(defineProps<{ name: IconName; size?: number }>(), { size: 16 })
     <path v-else-if="name === 'wrench'" d="M13.75 5.01A3.4 3.4 0 1 1 10.99 2.25l.61 2.15ZM8 8 2.6 13.4" />
     <template v-else-if="name === 'gear'"><path d="M12.4 6.2 14.2 6.8 14.2 9.2 12.4 9.8 13.2 11.5 11.5 13.2 9.8 12.4 9.2 14.2 6.8 14.2 6.2 12.4 4.5 13.2 2.8 11.5 3.6 9.8 1.8 9.2 1.8 6.8 3.6 6.2 2.8 4.5 4.5 2.8 6.2 3.6 6.8 1.8 9.2 1.8 9.8 3.6 11.5 2.8 13.2 4.5Z" /><circle cx="8" cy="8" r="1.9" /></template>
     <template v-else-if="name === 'bug'"><path d="M4.8 8.4a3.2 3.2 0 0 1 6.4 0v2.2a3.2 3.2 0 0 1-6.4 0Z" /><path d="M6.7 5.4 5.9 3.2M9.3 5.4l.8-2.2M4.8 9.6H2.3M11.2 9.6h2.5M5.2 12.4l-1.9 1.2M10.8 12.4l1.9 1.2" /></template>
+    <template v-else-if="name === 'merge'"><circle cx="4.4" cy="3.6" r="1.6" /><circle cx="4.4" cy="12.4" r="1.6" /><circle cx="11.6" cy="8" r="1.6" /><path d="M4.4 5.2v5.6M4.4 5.4c0 1.8 1.6 2.6 5.6 2.6" /></template>
     <template v-else-if="name === 'commit'"><circle cx="8" cy="8" r="2.5" /><path d="M1.6 8h3.9M10.5 8h3.9" /></template>
     <template v-else-if="name === 'tag'"><path d="M2.2 2.9v4.3c0 .3.1.6.4.8l5.6 5.6c.4.4 1 .4 1.4 0l3.9-3.9c.4-.4.4-1 0-1.4L7.9 2.7a1.1 1.1 0 0 0-.8-.3H2.7a.5.5 0 0 0-.5.5Z" /><circle cx="5.2" cy="5.4" r=".6" fill="currentColor" stroke="none" /></template>
     <template v-else-if="name === 'box'"><path d="M8 1.8 13.6 4.9v6.2L8 14.2l-5.6-3.1V4.9Z" /><path d="M2.4 4.9 8 8l5.6-3.1M8 8v6.2" /></template>
@@ -123,6 +153,7 @@ withDefaults(defineProps<{ name: IconName; size?: number }>(), { size: 16 })
     <template v-else-if="name === 'graph'"><circle cx="4" cy="4.6" r="1.9" /><circle cx="12" cy="3.8" r="1.6" /><circle cx="11.2" cy="12" r="2.1" /><circle cx="3.6" cy="11.8" r="1.5" /><path d="M5.8 4.4 10.4 4M5.5 5.8l4.3 4.7M11.7 5.4l-.3 4.5M5.1 11.8h4" /></template>
     <path v-else-if="name === 'hash'" d="M6.3 2.4 5.1 13.6M10.9 2.4 9.7 13.6M2.8 5.9h10.6M2.6 10.1h10.6" />
     <path v-else-if="name === 'bookmark'" d="M4.4 2.2h7.2c.3 0 .6.3.6.6v11L8 11.1l-4.2 2.7v-11c0-.3.3-.6.6-.6Z" />
+    <template v-else-if="name === 'leaf'"><path d="M13.5 2.5c-6-1-11 1-10 6 .5 3 5 4.5 7 1 1-2 1-4 3-7Z" /><path d="m2.5 13.5 6-6" /></template>
     <path v-else-if="name === 'star'" d="m8 2 1.8 3.7 4 .6-2.9 2.8.7 4L8 11.2l-3.6 1.9.7-4-2.9-2.8 4-.6Z" />
     <template v-else-if="name === 'calendar'"><rect x="2.2" y="3.2" width="11.6" height="10.6" rx="2.2" /><path d="M2.2 6.8h11.6M5.4 1.8v2.8M10.6 1.8v2.8" /></template>
     <template v-else-if="name === 'coin'"><circle cx="8" cy="8" r="6" /><path d="M9.9 5.9c-.4-.6-1.1-1-1.9-1-1.1 0-1.9.6-1.9 1.4 0 2 3.8 1 3.8 3.1 0 .8-.8 1.4-1.9 1.4-.8 0-1.6-.4-2-1M8 3.8v1.1M8 11v1.2" /></template>
@@ -138,7 +169,81 @@ withDefaults(defineProps<{ name: IconName; size?: number }>(), { size: 16 })
     <template v-else-if="name === 'help'"><circle cx="8" cy="8" r="6.2" /><path d="M6.2 6.3a1.9 1.9 0 0 1 3.7.5c0 1.3-1.9 1.6-1.9 2.8M8 11.4v.05" /></template>
     <path v-else-if="name === 'pulse'" d="M1.8 8.4h2.6l1.6-4 2.6 8 1.8-5.2.9 1.2h2.9" />
     <path v-else-if="name === 'message'" d="M2.4 4.2c0-.9.7-1.6 1.6-1.6h8c.9 0 1.6.7 1.6 1.6v5.4c0 .9-.7 1.6-1.6 1.6H7l-3 2.4v-2.4a1.6 1.6 0 0 1-1.6-1.6Z" />
+    <path v-else-if="name === 'bars'" d="M3 13.2V8.6M8 13.2V3M13 13.2V6.2" />
+    <template v-else-if="name === 'flow'"><circle cx="3.4" cy="8" r="1.7" /><circle cx="12.6" cy="8" r="1.7" /><path d="M5.1 8h5.8M8 4.6V3M8 13v-1.6" /></template>
+    <template v-else-if="name === 'half'"><circle cx="8" cy="8" r="5.4" /><path d="M8 2.6v10.8A5.4 5.4 0 0 0 8 2.6Z" fill="currentColor" /></template>
+    <template v-else-if="name === 'v-on'"><circle cx="8" cy="8" r="6.6" fill="currentColor" stroke="none" /><path d="m5 8.2 2 2 4-4.4" stroke-width="1.9" style="stroke: var(--canvas)" /></template>
+    <template v-else-if="name === 'v-close'"><circle cx="8" cy="8" r="5.9" /><path d="M8 2.1a5.9 5.9 0 0 1 0 11.8Z" fill="currentColor" stroke="none" /></template>
+    <template v-else-if="name === 'v-far'"><circle cx="8" cy="8" r="5.9" /><path d="M8 4.9v3.6M8 11.1v.05" /></template>
+    <circle v-else-if="name === 'v-none'" cx="8" cy="8" r="5.9" stroke-dasharray="2.2 2.2" />
     <template v-else-if="name === 'info'"><circle cx="8" cy="8" r="6.2" /><path d="M8 7.4v3.8M8 4.9v.05" /></template>
+    <!-- Work icons (AEON-1142): Lucide path data (ISC, see NOTICE) scaled from its 24 grid to this one, simplified where it clogged at 16 px. -->
+    <path v-else-if="name === 'folder-kanban'" d="M2.67 13.33h10.67a1.33 1.33 0 0 0 1.33-1.33V5.33a1.33 1.33 0 0 0-1.33-1.33h-5.29a1.33 1.33 0 0 1-1.11-.6l-.55-.8A1.33 1.33 0 0 0 5.29 2H2.67a1.33 1.33 0 0 0-1.33 1.33v8.67c0 .73 .6 1.33 1.33 1.33ZM4.67 6.67v2.67M8 6.67v1.33M11.33 6.67v4" />
+    <path v-else-if="name === 'folder-tree'" d="M13.33 6.67a.67 .67 0 0 0 .67-.67V4a.67 .67 0 0 0-.67-.67h-1.67a.67 .67 0 0 1-.53-.27l-.6-.8A.67 .67 0 0 0 10 2h-1.33a.67 .67 0 0 0-.67 .67v3.33a.67 .67 0 0 0 .67 .67ZM13.33 14a.67 .67 0 0 0 .67-.67v-2a.67 .67 0 0 0-.67-.67h-1.93a.67 .67 0 0 1-.59-.37l-.28-.57a.67 .67 0 0 0-.61-.4H8.67a.67 .67 0 0 0-.67 .67v3.33a.67 .67 0 0 0 .67 .67ZM2 3.33a1.33 1.33 0 0 0 1.33 1.33h2M2 2v8.67a1.33 1.33 0 0 0 1.33 1.33h2" />
+    <path v-else-if="name === 'list-tree'" d="M5.33 3.33h8.67M8.67 8h5.33M8.67 12.67h5.33M2 6.67a1.33 1.33 0 0 0 1.33 1.33h2M2 3.33v8a1.33 1.33 0 0 0 1.33 1.33h2" />
+    <template v-else-if="name === 'network'"><path d="M3.33 10.67v-2a.67 .67 0 0 1 .67-.67h8a.67 .67 0 0 1 .67 .67v2M8 8V5.33" /><rect x="10.67" y="10.67" width="4" height="4" rx=".67" /><rect x="1.33" y="10.67" width="4" height="4" rx=".67" /><rect x="6" y="1.33" width="4" height="4" rx=".67" /></template>
+    <template v-else-if="name === 'hand'"><path d="M5.2 8.4V3.6a1 1 0 0 1 2 0v4M7.2 7.6V2.8a1 1 0 0 1 2 0v4.8M9.2 7.6V3.8a1 1 0 0 1 2 0v5.4" /><path d="M11.2 6.8a1 1 0 0 1 2 0v2.6c0 2.6-1.8 4.6-4.6 4.6-2 0-3-1-4-2.4L3 9.4a1 1 0 0 1 1.6-1.2l.6.8" /></template>
+    <template v-else-if="name === 'route'"><circle cx="4" cy="4" r="1.7" /><circle cx="12" cy="12" r="1.7" /><path d="M4 5.7v1.8A2.5 2.5 0 0 0 6.5 10h3.2M5.7 4h4.8a2 2 0 0 1 0 4H9" /></template>
+    <template v-else-if="name === 'workflow'"><path d="M4.67 7.33v2.67a1.33 1.33 0 0 0 1.33 1.33h2.67" /><rect x="2" y="2" width="5.33" height="5.33" rx="1.33" /><rect x="8.67" y="8.67" width="5.33" height="5.33" rx="1.33" /></template>
+    <path v-else-if="name === 'component'" d="M10.36 7.53a.67 .67 0 0 0 0 .94l1.58 1.58a.67 .67 0 0 0 .94 0l1.58-1.58a.67 .67 0 0 0 0-.94l-1.58-1.58a.67 .67 0 0 0-.94 0zM1.53 7.53a.67 .67 0 0 0 0 .94l1.58 1.58a.67 .67 0 0 0 .94 0l1.58-1.58a.67 .67 0 0 0 0-.94L4.06 5.94a.67 .67 0 0 0-.94 0zM5.94 11.94a.67 .67 0 0 0 0 .94l1.58 1.58a.67 .67 0 0 0 .94 0l1.58-1.58a.67 .67 0 0 0 0-.94l-1.58-1.58a.67 .67 0 0 0-.94 0zM5.94 3.12a.67 .67 0 0 0 0 .94l1.58 1.58a.67 .67 0 0 0 .94 0l1.58-1.58a.67 .67 0 0 0 0-.94l-1.58-1.58a.67 .67 0 0 0-.94 0z" />
+    <template v-else-if="name === 'blocks'"><path d="M6.67 14.67V4.67a.67 .67 0 0 0-.67-.67H2.67a1.33 1.33 0 0 0-1.33 1.33v8a1.33 1.33 0 0 0 1.33 1.33h8a1.33 1.33 0 0 0 1.33-1.33v-3.33a.67 .67 0 0 0-.67-.67H1.33" /><rect x="9.33" y="1.33" width="5.33" height="5.33" rx=".67" /></template>
+    <path v-else-if="name === 'kanban'" d="M3.33 2v9.33M8 2v5.33M12.67 2v12" />
+    <path v-else-if="name === 'package'" d="M7.33 14.49a1.33 1.33 0 0 0 1.33 0l4.67-2.67A1.33 1.33 0 0 0 14 10.67V5.33a1.33 1.33 0 0 0-.67-1.15l-4.67-2.67a1.33 1.33 0 0 0-1.33 0l-4.67 2.67A1.33 1.33 0 0 0 2 5.33v5.33a1.33 1.33 0 0 0 .67 1.15zM8 14.67V8M2.19 4.67L8 8L13.81 4.67M5 2.85l6 3.43" />
+    <path v-else-if="name === 'package-check'" d="M8 14.67V8M10.67 11.33l1.33 1.33 2.67-2.67M14 7.42V5.33a1.33 1.33 0 0 0-.67-1.15l-4.67-2.67a1.33 1.33 0 0 0-1.33 0l-4.67 2.67A1.33 1.33 0 0 0 2 5.33v5.33a1.33 1.33 0 0 0 .67 1.15l4.67 2.67a1.33 1.33 0 0 0 1.33 0l.88-.5M2.19 4.67 8 8l5.81-3.33" />
+    <path v-else-if="name === 'check-check'" d="M12 4 4.67 11.33l-3.33-3.33M14.67 6.67l-5 5L8.67 10.67" />
+    <path v-else-if="name === 'square-check-big'" d="M14 7.1V12.67a1.33 1.33 0 0 1-1.33 1.33H3.33a1.33 1.33 0 0 1-1.33-1.33V3.33a1.33 1.33 0 0 1 1.33-1.33h8.23M6 7.33l2 2L14.67 2.67" />
+    <template v-else-if="name === 'circle-check'"><path d="M10.67 6l-3.67 3.67L5.33 8" /><circle cx="8" cy="8" r="6.67" /></template>
+    <template v-else-if="name === 'circle-dot'"><circle cx="8" cy="8" r=".67" /><circle cx="8" cy="8" r="6.67" /></template>
+    <path v-else-if="name === 'list-checks'" d="M8.67 3.33h5.33M8.67 8h5.33M8.67 12.67h5.33M2 11.33l1.33 1.33 2.67-2.67M2 4.67l1.33 1.33 2.67-2.67" />
+    <template v-else-if="name === 'list-todo'"><path d="M8.67 3.33h5.33M8.67 8h5.33M8.67 12.67h5.33M2 11.33l1.33 1.33 2.67-2.67" /><rect x="2" y="2.67" width="4" height="4" rx=".67" /></template>
+    <template v-else-if="name === 'clipboard-list'"><path d="M10.67 2.67h1.33a1.33 1.33 0 0 1 1.33 1.33v9.33a1.33 1.33 0 0 1-1.33 1.33H4a1.33 1.33 0 0 1-1.33-1.33V4a1.33 1.33 0 0 1 1.33-1.33h1.33M8 7.33h2.67M8 10.67h2.67M5.33 7.33h.01M5.33 10.67h.01" /><rect x="5.33" y="1.33" width="5.33" height="2.67" rx=".67" /></template>
+    <template v-else-if="name === 'clipboard-check'"><path d="M10.67 2.67h1.33a1.33 1.33 0 0 1 1.33 1.33v9.33a1.33 1.33 0 0 1-1.33 1.33H4a1.33 1.33 0 0 1-1.33-1.33V4a1.33 1.33 0 0 1 1.33-1.33h1.33M6 9.33l1.33 1.33 2.67-2.67" /><rect x="5.33" y="1.33" width="5.33" height="2.67" rx=".67" /></template>
+    <path v-else-if="name === 'flag-triangle-right'" d="M4 14.67V1.87a.53 .53 0 0 1 .78-.47l7.59 3.79a.53 .53 0 0 1 0 .96L4 10.33" />
+    <path v-else-if="name === 'milestone'" d="M8 8.67v5.33M8 2v2M12.11 4a1.33 1.33 0 0 1 .94 .39l1.37 1.37a.8 .8 0 0 1 0 1.14l-1.37 1.37a1.33 1.33 0 0 1-.94 .39H2.67a.67 .67 0 0 1-.67-.67V4.67a.67 .67 0 0 1 .67-.67z" />
+    <template v-else-if="name === 'target'"><path d="M8 8h.01" /><circle cx="8" cy="8" r="6.67" /><circle cx="8" cy="8" r="3" /></template>
+    <path v-else-if="name === 'goal'" d="M8 8.67V1.33l5.33 2.67-5.33 2.67M13.71 6.81a6 6 0 1 1-8.37-3.53" />
+    <path v-else-if="name === 'rocket'" d="M8 10v3.33s2.02-.37 2.67-1.33c.72-1.08 0-3.33 0-3.33M3 11c-1 .84-1.33 3.33-1.33 3.33s2.49-.33 3.33-1.33c.47-.56 .47-1.42-.06-1.94a1.45 1.45 0 0 0-1.94-.06M6 8a14.67 14.67 0 0 1 1.33-2.63A8.59 8.59 0 0 1 14.67 1.33c0 1.81-.52 5-4 7.33a14.93 14.93 0 0 1-2.67 1.33zM6 8H2.67s.37-2.02 1.33-2.67c1.08-.72 3.33 .03 3.33 .03" />
+    <path v-else-if="name === 'mountain'" d="M5.33 2l2.67 5.33 3.33-3.33 3.33 10H1.33L5.33 2z" />
+    <path v-else-if="name === 'trophy'" d="M11.94 6.67H13A1.67 1.67 0 0 0 14.67 5V3.33a.67 .67 0 0 0-.67-.67h-2M4 6a4 4 0 0 0 8 0V2a.67 .67 0 0 0-.67-.67H4.67a.67 .67 0 0 0-.67 .67zM4.06 6.67H3A1.67 1.67 0 0 1 1.33 5V3.33a.67 .67 0 0 1 .67-.67h2M8 10v4.67M4.67 14.67h6.67" />
+    <template v-else-if="name === 'award'"><path d="M10.32 8.59l1.01 5.68a.33 .33 0 0 1-.54 .31l-2.39-1.79a.67 .67 0 0 0-.8 0l-2.39 1.79a.33 .33 0 0 1-.54-.31l1.01-5.68" /><circle cx="8" cy="5.33" r="4" /></template>
+    <path v-else-if="name === 'gem'" d="M11.33 2a1.33 1.33 0 0 1 1.07 .53l2 2.67a1.33 1.33 0 0 1 .01 1.59l-5.33 7.32a1.33 1.33 0 0 1-2.16 0l-5.33-7.32A1.33 1.33 0 0 1 1.6 5.2l2-2.66A1.33 1.33 0 0 1 4.67 2zM1.33 6h13.33M7 2 5.33 6M9 2 10.67 6" />
+    <path v-else-if="name === 'diamond'" d="M1.8 6.87a1.61 1.61 0 0 0 0 2.27l5.06 5.06a1.61 1.61 0 0 0 2.27 0l5.06-5.06a1.61 1.61 0 0 0 0-2.27l-5.06-5.06a1.61 1.61 0 0 0-2.27 0Z" />
+    <path v-else-if="name === 'hexagon'" d="M14 10.67V5.33a1.33 1.33 0 0 0-.67-1.15l-4.67-2.67a1.33 1.33 0 0 0-1.33 0l-4.67 2.67A1.33 1.33 0 0 0 2 5.33v5.33a1.33 1.33 0 0 0 .67 1.15l4.67 2.67a1.33 1.33 0 0 0 1.33 0l4.67-2.67A1.33 1.33 0 0 0 14 10.67z" />
+    <path v-else-if="name === 'code'" d="M10.67 12l4-4-4-4M5.33 4l-4 4 4 4" />
+    <template v-else-if="name === 'database'"><path d="M2 3.33V12.67A6 2 0 0 0 14 12.67V3.33M2 8A6 2 0 0 0 14 8" /><ellipse cx="8" cy="3.33" rx="6" ry="2" /></template>
+    <template v-else-if="name === 'git-branch'"><path d="M10 4a6 6 0 0 0-6 6V2" /><circle cx="12" cy="4" r="2" /><circle cx="4" cy="12" r="2" /></template>
+    <template v-else-if="name === 'git-pull-request'"><path d="M8.67 4h2a1.33 1.33 0 0 1 1.33 1.33v4.67M4 6L4 14" /><circle cx="12" cy="12" r="2" /><circle cx="4" cy="4" r="2" /></template>
+    <path v-else-if="name === 'hammer'" d="M10 8l-6.25 6.25a.67 .67 0 0 1-2-2L8 6M12 10l2.67-2.67M14.33 7.67l-1.28-1.28A1.33 1.33 0 0 1 12.67 5.45v-.23a1.33 1.33 0 0 0-.39-.94l-1.1-1.1A4 4 0 0 0 8.34 2H6l.83 .83A4 4 0 0 1 8 5.66V6.67l1.33 1.33h.78a1.33 1.33 0 0 1 .94 .39L12.33 9.67" />
+    <path v-else-if="name === 'book-open'" d="M8 3.33v10.67M13.33 12.67A1.33 1.33 0 0 0 14.67 11.33V3.33a1.33 1.33 0 0 0-1.33-1.33L10.67 2A3.33 3.33 0 0 0 8 3.33a3.33 3.33 0 0 0-2.67-1.33H2.67a1.33 1.33 0 0 0-1.33 1.33v8a1.33 1.33 0 0 0 1.33 1.33H5.33a3.33 3.33 0 0 1 2.67 1.33 3.33 3.33 0 0 1 2.67-1.33z" />
+    <path v-else-if="name === 'file-text'" d="M4 14.67a1.33 1.33 0 0 1-1.33-1.33V2.67a1.33 1.33 0 0 1 1.33-1.33h5.33a1.6 1.6 0 0 1 1.14 .47l2.39 2.39A1.6 1.6 0 0 1 13.33 5.33v8a1.33 1.33 0 0 1-1.33 1.33zM9.33 1.33v3.33a.67 .67 0 0 0 .67 .67h3.33M10.67 8.67H5.33M10.67 11.33H5.33" />
+    <path v-else-if="name === 'notebook-pen'" d="M8.93 1.33H4a1.33 1.33 0 0 0-1.33 1.33v10.67a1.33 1.33 0 0 0 1.33 1.33h8a1.33 1.33 0 0 0 1.33-1.33v-4.93M1.33 4h2.67M1.33 12h2.67M14.25 3.75a.67 .67 0 1 0-2-2l-3.34 3.34a1.33 1.33 0 0 0-.34 .57l-.56 1.91a.33 .33 0 0 0 .41 .41l1.91-.56a1.33 1.33 0 0 0 .57-.34zM1.33 8h2.67" />
+    <path v-else-if="name === 'sticky-note'" d="M14 6a1.6 1.6 0 0 0-.47-1.14l-2.39-2.39A1.6 1.6 0 0 0 10 2H3.33a1.33 1.33 0 0 0-1.33 1.33v9.33a1.33 1.33 0 0 0 1.33 1.33h9.33a1.33 1.33 0 0 0 1.33-1.33zM10 2v3.33a.67 .67 0 0 0 .67 .67h3.33" />
+    <path v-else-if="name === 'scroll-text'" d="M10 8h-3.33M10 5.33h-3.33M12.67 11.33V3.33a1.33 1.33 0 0 0-1.33-1.33H2.67M5.33 14h8a1.33 1.33 0 0 0 1.33-1.33v-.67a.67 .67 0 0 0-.67-.67H7.33a.67 .67 0 0 0-.67 .67v.67a1.33 1.33 0 1 1-2.67 0V3.33a1.33 1.33 0 1 0-2.67 0v1.33a.67 .67 0 0 0 .67 .67h2" />
+    <path v-else-if="name === 'presentation'" d="M1.33 2h13.33M14 2v7.33a1.33 1.33 0 0 1-1.33 1.33H3.33a1.33 1.33 0 0 1-1.33-1.33V2M4.67 14l3.33-3.33 3.33 3.33" />
+    <path v-else-if="name === 'palette'" d="M8 14.67a.67 .67 0 0 1 0-13.33 6.67 6 0 0 1 6.67 6 3.33 3.33 0 0 1-3.33 3.33h-1.5a1.17 1.17 0 0 0-.93 1.87l.2 .27a1.17 1.17 0 0 1-.93 1.87zM9 4.33h.01M11.67 7h.01M5.67 5h.01" />
+    <template v-else-if="name === 'pen-tool'"><path d="M12 8.67l-.44-3.16a2.67 2.67 0 0 0-1.84-2.18l-6.11-1.93a1.33 1.33 0 0 0-1.34 .33l-.55 .55a1.33 1.33 0 0 0-.33 1.34l1.93 6.11a2.67 2.67 0 0 0 2.18 1.84L8.67 12M12.43 8.23a.8 .8 0 0 1 1.14 0l.86 .86a.8 .8 0 0 1 0 1.14l-4.2 4.2a.8 .8 0 0 1-1.14 0l-.86-.86a.8 .8 0 0 1 0-1.14z" /><circle cx="7.33" cy="7.33" r="1.33" /></template>
+    <path v-else-if="name === 'brush'" d="M7.33 6.67l2 2M4.33 14A2.33 2.33 0 1 0 2 11.67a1.75 1.75 0 0 1-.47 1.19A.67 .67 0 0 0 2 14zM6.65 11.35 14.25 3.75a.67 .67 0 0 0-2-2L4.64 9.35" />
+    <template v-else-if="name === 'shapes'"><path d="M5.53 6.67a.47 .47 0 0 1-.42-.72L7.6 2a.47 .47 0 0 1 .8-.03L10.87 5.93a.47 .47 0 0 1-.38 .73Z" /><rect x="2" y="9.33" width="4.67" height="4.67" rx=".67" /><circle cx="11.67" cy="11.67" r="2.33" /></template>
+    <path v-else-if="name === 'puzzle'" d="M10.26 2.93a.67 .67 0 0 0 1.12-.32 1.67 1.67 0 1 1 2.01 2.01 .67 .67 0 0 0-.32 1.12l1.12 1.12a1.61 1.61 0 0 1 0 2.28L13.07 10.26a.67 .67 0 0 1-1.12-.32 1.67 1.67 0 1 0-2.01 2.01 .67 .67 0 0 1 .32 1.12l-1.12 1.12a1.61 1.61 0 0 1-2.28 0L5.74 13.07a.67 .67 0 0 0-1.12 .32 1.67 1.67 0 1 1-2.01-2.01 .67 .67 0 0 0 .32-1.12l-1.12-1.12a1.61 1.61 0 0 1 0-2.28L2.93 5.74a.67 .67 0 0 1 1.12 .32 1.67 1.67 0 1 0 2.01-2.01 .67 .67 0 0 1-.32-1.12l1.12-1.12a1.61 1.61 0 0 1 2.28 0z" />
+    <path v-else-if="name === 'beaker'" d="M3 2h10M4 2v10.67a1.33 1.33 0 0 0 1.33 1.33h5.33a1.33 1.33 0 0 0 1.33-1.33V2M4 9.33h8" />
+    <path v-else-if="name === 'flask-conical'" d="M9.33 1.33v4a1.33 1.33 0 0 0 .16 .64l3.67 6.72A1.33 1.33 0 0 1 12 14.67H4a1.33 1.33 0 0 1-1.17-1.97l3.67-6.72A1.33 1.33 0 0 0 6.67 5.33V1.33M4.3 10h7.4M5.67 1.33h4.67" />
+    <path v-else-if="name === 'telescope'" d="M6.71 8.33l-4.12 .88a.62 .62 0 0 1-.74-.47l-.36-1.43a.71 .71 0 0 1 .46-.84l9-2.96M9.04 7.83l2.89-.62M10.67 14l-2.07-4.14M10.99 3.96a1.33 1.33 0 0 1 .97-1.62l.73-.18a.67 .67 0 0 1 .81 .48l1.01 4.04a.67 .67 0 0 1-.48 .81l-.73 .18a1.33 1.33 0 0 1-1.62-.97zM5.33 14l2.07-4.14" />
+    <path v-else-if="name === 'lightbulb'" d="M10 9.33c.13-.67 .47-1.13 1-1.67 .67-.6 1-1.47 1-2.33A4 4 0 0 0 4 5.33c0 .67 .13 1.47 1 2.33 .47 .47 .87 1 1 1.67M6 12h4M6.67 14.67h2.67" />
+    <path v-else-if="name === 'triangle-alert'" d="M14.49 12l-5.33-9.33a1.33 1.33 0 0 0-2.32 0l-5.33 9.33A1.33 1.33 0 0 0 2.67 14h10.67a1.33 1.33 0 0 0 1.15-2M8 6v2.67M8 11.33h.01" />
+    <path v-else-if="name === 'siren'" d="M4.67 14v-5.33a3.33 3.33 0 0 1 6.67 0v5.33M3 14h10M8 9.33v2.67M8 2v.67M3.29 3.95l.47 .47M12.71 3.95l-.47 .47M1.33 8.67h.67M14 8.67h.67" />
+    <path v-else-if="name === 'flame'" d="M8 2q.67 2.67 2.67 4.33t2 3.67a.67 .67 0 0 1-9.33 0 3.33 3.33 0 0 1 .67-2 .67 .67 0 0 0 3.33 0c0-1.33-1-2-1-3.33q0-1.33 1.67-2.67" />
+    <path v-else-if="name === 'shield-alert'" d="M13.33 8.67c0 3.33-2.33 5-5.11 5.97a.67 .67 0 0 1-.45-.01C5 13.67 2.67 12 2.67 8.67V4a.67 .67 0 0 1 .67-.67c1.33 0 3-.8 4.16-1.81a.78 .78 0 0 1 1.01 0C9.67 2.54 11.33 3.33 12.67 3.33a.67 .67 0 0 1 .67 .67zM8 5.33v2.67M8 10.67h.01" />
+    <path v-else-if="name === 'messages-square'" d="M10.67 6.67a1.33 1.33 0 0 1-1.33 1.33H4.55a1.33 1.33 0 0 0-.94 .39l-1.47 1.47A.47 .47 0 0 1 1.33 9.52V2.67a1.33 1.33 0 0 1 1.33-1.33h6.67a1.33 1.33 0 0 1 1.33 1.33zM13.33 6a1.33 1.33 0 0 1 1.33 1.33v6.86a.47 .47 0 0 1-.81 .33l-1.47-1.47A1.33 1.33 0 0 0 11.45 12.67H6.67a1.33 1.33 0 0 1-1.33-1.33v-.67" />
+    <path v-else-if="name === 'handshake'" d="M9.33 9.33l1.67 1.67a.67 .67 0 1 0 2-2l-2.59-2.59a2 2 0 0 0-2.83 0l-.59 .59a.67 .67 0 1 1-2-2l1.87-1.87a3.86 3.86 0 0 1 4.71-.58l.31 .19a1.33 1.33 0 0 0 .95 .17L14 2.67M14 2l.67 7.33h-1.33M2 2 1.33 9.33l4.33 4.33a.67 .67 0 1 0 2-2M2 2.67h5.33" />
+    <path v-else-if="name === 'megaphone'" d="M7.33 4a8.67 8.67 0 0 0 5.6-1.87A.67 .67 0 0 1 14 2.67v8a.67 .67 0 0 1-1.07 .53A8.67 8.67 0 0 0 7.33 9.33H3.33a1.33 1.33 0 0 1-1.33-1.33V5.33a1.33 1.33 0 0 1 1.33-1.33zM4 9.33a8 8 0 0 0 1.6 4.8 1.33 1.33 0 0 0 2.13-1.6A5.33 5.33 0 0 1 6.67 9.33" />
+    <path v-else-if="name === 'gavel'" d="M9.33 8.67l-5.59 5.59a.67 .67 0 0 1-2-2l5.59-5.59M10.67 10.67l4-4M14.33 7l-5.33-5.33M5.33 5.33l4-4M5.67 5l5.33 5.33" />
+    <path v-else-if="name === 'scale'" d="M8 2v12M12.67 5.33l2 5.33a3.33 3.33 0 0 1-4 0zV4.67M2 4.67h.67a11.33 11.33 0 0 0 5.33-1.33 11.33 11.33 0 0 0 5.33 1.33h.67M3.33 5.33l2 5.33a3.33 3.33 0 0 1-4 0zV4.67M4.67 14h6.67" />
+    <path v-else-if="name === 'vote'" d="M6 8l1.33 1.33 2.67-2.67M3.33 4.67c0-.73 .6-1.33 1.33-1.33h6.67a1.33 1.33 0 0 1 1.33 1.33v8H3.33V4.67ZM14.67 12.67H1.33" />
+    <template v-else-if="name === 'calendar-check'"><path d="M5.33 1.33v2M10.67 1.33v2M2 6h12M6 10l1.33 1.33 2.67-2.67" /><rect x="2" y="2" width="12" height="12" rx="1.33" /></template>
+    <template v-else-if="name === 'timer'"><path d="M6.67 1.33L9.33 1.33M8 9.33L10 7.33" /><circle cx="8" cy="9.33" r="5.33" /></template>
+    <path v-else-if="name === 'hourglass'" d="M3.33 14.67h9.33M3.33 1.33h9.33M11.33 14.67v-2.78a1.33 1.33 0 0 0-.39-.94L8 8l-2.94 2.94A1.33 1.33 0 0 0 4.67 11.89V14.67M4.67 1.33v2.78a1.33 1.33 0 0 0 .39 .94L8 8l2.94-2.94A1.33 1.33 0 0 0 11.33 4.11V1.33" />
+    <path v-else-if="name === 'trending-up'" d="M10.67 4.67h4v4M14.67 4.67l-5.67 5.67-3.33-3.33L1.33 11.33" />
+    <path v-else-if="name === 'sprout'" d="M9.33 6.36V4.67a2.67 2.67 0 0 1 2.67-2.67h1a.33 .33 0 0 1 .33 .33V3.33a2.67 2.67 0 0 1-2.67 2.67 2.67 2.67 0 0 0-2.67 2.67c0 1.33 .67 2 .67 3.33a3.33 3.33 0 0 1-.67 2M2.67 6a3.33 3.33 0 0 1 5.33 2.67 3.33 3.33 0 0 1-5.33-2.67M3.33 14h9.33" />
     <template v-else><circle cx="8" cy="8" r="6.2" /><path d="M10.6 5.4 9.2 9.2l-3.8 1.4 1.4-3.8Z" /></template>
   </svg>
 </template>

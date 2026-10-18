@@ -1,0 +1,67 @@
+# SPDX-License-Identifier: AGPL-3.0-only
+# aeon:owner internal/auth
+paths:
+  /agents/assistants:
+    post:
+      operationId: createMessagingAssistant
+      summary: Provision an owner-bounded messaging assistant
+      description: "Requires a person with agents.create and keys.manage, or a person-owned full-access/coordinator agent with live workspace coordinator grants and an owner who currently holds both permissions. Messaging-only callers are always denied. Creates a uniquely named messaging_only principal without role bindings and a key with exactly inbox.read, inbox.send and inbox.receipt. At most three assistants with live keys per owner. The secret is returned once, with no-store, and only its hash is persisted. A workspace audit event and an FYI inbox notice to the owner commit atomically."
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [name, expires_at]
+              properties:
+                name: {type: string, minLength: 1, maxLength: 200}
+                expires_at: {type: string, format: date-time, description: "Required future expiry, at most 30 days from provisioning."}
+      responses:
+        "201":
+          description: "Messaging assistant provisioned; token is returned only once."
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/AgentKeyCreated"}
+        "400": {description: "Invalid name or expiry, or unexpected fields."}
+        "403": {description: "Caller or owner lacks live authority."}
+        "409": {description: "Name already used or owner already has three active assistants."}
+  /agents/assistants/{principalId}/rotate:
+    post:
+      operationId: rotateMessagingAssistant
+      summary: Renew a messaging assistant through the same owner-bound authorization
+      description: "Requires the provisioning predicate and the same owner. Issues exactly the three inbox scopes with required expiry at most 30 days away. Every previous live key is revoked immediately, within the maximum 24-hour overlap. The one-time secret, FYI notice and audit follow the creation rules. General agent-key creation cannot renew an assistant."
+      parameters:
+        - {name: principalId, in: path, required: true, schema: {type: string, format: uuid}}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [expires_at]
+              properties:
+                expires_at: {type: string, format: date-time}
+      responses:
+        "201":
+          description: "Replacement key; token returned only once."
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/AgentKeyCreated"}
+        "400": {description: "Invalid expiry or unexpected fields."}
+        "403": {description: "Caller or owner lacks live authority."}
+        "404": {description: "No assistant owned by this person."}
+        "409": {description: "Owner already has three other active assistants."}
+  /agents/assistants/{principalId}:
+    delete:
+      operationId: revokeMessagingAssistant
+      summary: Revoke all keys and deactivate an owned messaging assistant
+      description: "Requires the provisioning predicate and the same owner. Revocation, deactivation, owner FYI and workspace audit commit together."
+      parameters:
+        - {name: principalId, in: path, required: true, schema: {type: string, format: uuid}}
+      responses:
+        "204": {description: "Assistant revoked."}
+        "403": {description: "Caller or owner lacks live authority."}
+        "404": {description: "No assistant owned by this person."}
+components:

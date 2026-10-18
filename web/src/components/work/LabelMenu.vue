@@ -102,8 +102,8 @@ function keydown(event: KeyboardEvent) {
 .option:focus-visible { background: var(--row-selected); box-shadow: inset 0 0 0 1px var(--glass-rim); }
 .option.create { color: var(--teal-ink); font-weight: 600; }
 .option.changed .name { font-weight: 600; }
-.box { display: grid; place-items: center; flex-shrink: 0; width: 16px; height: 16px; border-radius: 5px; box-shadow: inset 0 0 0 1.5px var(--line-2); color: #fff; }
-.box.all, .box.some { background: var(--teal); box-shadow: none; }
+.box { display: grid; place-items: center; flex-shrink: 0; width: 16px; height: 16px; border-radius: 5px; box-shadow: inset 0 0 0 1.5px var(--line-2); color: var(--primary-on); }
+.box.all, .box.some { background: var(--primary); box-shadow: none; }
 .name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .on { font-size: 11px; color: var(--ink-3); }
 .none { padding: 8px 10px; font-size: 12.5px; color: var(--ink-3); }
@@ -111,13 +111,13 @@ function keydown(event: KeyboardEvent) {
 .summary { font-size: 12px; color: var(--ink-2); }
 .foot .btn { gap: 6px; }
 .tag-dot { flex-shrink: 0; width: 8px; height: 8px; border-radius: 50%; background: var(--ink-3); }
-.tag-dot[data-color="blue"] { background: #4f86c6; }
-.tag-dot[data-color="red"] { background: #d0625b; }
-.tag-dot[data-color="green"] { background: #4f9e6f; }
-.tag-dot[data-color="yellow"], .tag-dot[data-color="orange"] { background: var(--gold); }
-.tag-dot[data-color="purple"] { background: #8a6cc2; }
-.tag-dot[data-color="teal"], .tag-dot[data-color="cyan"] { background: var(--teal); }
-.tag-dot[data-color="pink"] { background: #c7679a; }
+.tag-dot[data-color="blue"] { background: var(--label-blue); }
+.tag-dot[data-color="red"] { background: var(--label-red); }
+.tag-dot[data-color="green"] { background: var(--label-green); }
+.tag-dot[data-color="yellow"], .tag-dot[data-color="orange"] { background: var(--label-yellow); }
+.tag-dot[data-color="purple"] { background: var(--label-purple); }
+.tag-dot[data-color="teal"], .tag-dot[data-color="cyan"] { background: var(--label-teal); }
+.tag-dot[data-color="pink"] { background: var(--label-pink); }
 
 @media (max-width: 720px) {
   .option { height: 52px; min-height: 52px; }

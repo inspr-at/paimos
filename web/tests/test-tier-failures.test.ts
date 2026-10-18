@@ -18,6 +18,39 @@ function childEnvironment(summary: string) {
 }
 
 // Ordinary CI diagnostics regressions: NIGHTLY, also selected when this area changes.
+test('native Go enumeration reports package failure output and retains a failing exit', () => {
+  const directory=mkdtempSync(resolve(tmpdir(),'aeon-go-list-failure-'))
+  const manifest=fileURLToPath(new URL('../../scripts/ci/go-test-tiers.json',import.meta.url))
+  const cli=fileURLToPath(new URL('../../scripts/test-tiers/cli.mjs',import.meta.url))
+  writeFileSync(resolve(directory,'go'),`#!${process.execPath}
+const fs=require('node:fs');
+// Cached discovery probes identity before it enumerates native tests. Keep
+// those reads successful so this fixture fails at enumeration, as asserted.
+if(process.argv.includes('version')) {
+  // Each generated executable has its own cache identity and package graph.
+  console.log(${JSON.stringify(`go version native-enumeration-fixture ${directory}`)});
+} else if(process.argv.includes('env')) {
+  console.log(JSON.stringify({GOOS:'fixture',GOARCH:'fixture',GOFLAGS:'',CGO_ENABLED:'0',GOVERSION:'fixture',GOEXPERIMENT:'',GOWORK:'off'}));
+} else if(process.argv.includes('run')) {
+  const tests=JSON.parse(fs.readFileSync(${JSON.stringify(manifest)},'utf8')).tests.map(row=>({...row,active:true}));
+  const imports=Object.fromEntries([...new Set(tests.map(row=>row.package))].map(owner=>[owner,[]]));
+  console.log(JSON.stringify({tests,imports}));
+} else {
+  console.log(JSON.stringify({Action:'build-output',ImportPath:'github.com/inspr-at/paimos/internal/proof',Output:'enumeration fixture failure\\n'}));
+  console.log(JSON.stringify({Action:'build-fail',ImportPath:'github.com/inspr-at/paimos/internal/proof'}));
+  process.exitCode=6;
+}
+`,{mode:0o700})
+  const env=childEnvironment(resolve(directory,'summary.txt'))
+  env.PATH=`${directory}:${env.PATH}`
+  const result=spawnSync(process.execPath,[cli,'check','go'],{env,encoding:'utf8',timeout:30_000})
+  assert.equal(result.error,undefined)
+  assert.equal(result.status,1,result.stderr)
+  assert.match(result.stdout,/FAIL go: "internal\/proof" — "\(package\)"/,result.stderr.slice(-2000))
+  assert.match(result.stdout,/enumeration fixture failure/)
+  assert.match(result.stderr,/failed \(6\)/)
+})
+
 test('failed Go jsonl names the package and test with the last 40 lines in logs and summary', () => {
   const directory=mkdtempSync(resolve(tmpdir(),'aeon-tier-failure-'))
   const path=resolve(directory,'go.jsonl'),summary=resolve(directory,'summary.txt')
@@ -208,17 +241,25 @@ test('native planning regression reuses one collected snapshot for unchanged-tre
   const directory=mkdtempSync(resolve(tmpdir(),'aeon-planning-snapshot-'))
   const hook=resolve(directory,'fixture.mjs'),calls=resolve(directory,'collections.txt')
   const collector=new URL('../../scripts/test-tiers/collect.mjs',import.meta.url).href
-  const manifest=JSON.parse(readFileSync(new URL('../../scripts/ci/web-test-tiers.json',import.meta.url),'utf8'))
-  const policy=JSON.parse(readFileSync(new URL('../ci-web-shards.json',import.meta.url),'utf8'))
-  const optional=new Set(policy.groups.filter(group=>group.gate===false).flatMap(group=>group.specs.map(spec=>spec.file)))
-  const essential=manifest.tests.find(row=>row.kind==='browser'&&row.tier==='ESSENTIAL')
-  const nightly=manifest.tests.find(row=>row.kind==='browser'&&row.tier==='NIGHTLY'&&optional.has(row.file))
-  assert.ok(essential);assert.ok(nightly)
-  const wrapper=`export * from ${JSON.stringify(`${collector}?collection-count-fixture`)};
-import {appendFileSync} from 'node:fs';
+  const manifest=fileURLToPath(new URL('../../scripts/ci/web-test-tiers.json',import.meta.url))
+  const tests=JSON.parse(readFileSync(manifest,'utf8')).tests
+  const obligations=JSON.parse(readFileSync(new URL('../../scripts/test-tiers/drift-obligations.json',import.meta.url),'utf8'))
+  const driftFiles=new Set(obligations.browserFiles)
+  const recorded=new Set(obligations.cases.filter(row=>row.kind==='browser').map(row=>`${row.file}\0${row.name}`))
+  const essential=tests.find(row=>row.kind==='browser'&&row.tier==='ESSENTIAL')
+  const driftNightly=tests.find(row=>row.kind==='browser'&&row.tier==='NIGHTLY'&&recorded.has(`${row.file}\0${row.name}`))
+  const deferred=tests.find(row=>row.kind==='browser'&&row.tier==='NIGHTLY'&&!driftFiles.has(row.file))
+  assert.ok(essential);assert.ok(driftNightly);assert.ok(deferred)
+  assert.notEqual(deferred.file,driftNightly.file)
+  // The declared catalogue keeps the recorded drift files and a deferred nightly.
+  // A partial stand-in makes the full gate report every other row as stale.
+  // Reading Playwright's list here exceeds this regression's hang guard.
+  const real=`${collector}?collection-count-fixture`
+  const wrapper=`export * from ${JSON.stringify(real)};
+import {appendFileSync,readFileSync} from 'node:fs';
 export const collectWeb = () => {
   appendFileSync(${JSON.stringify(calls)},'collection\\n');
-  return ${JSON.stringify({tests:[essential,nightly]})};
+  return {tests:JSON.parse(readFileSync(${JSON.stringify(manifest)},'utf8')).tests};
 };`
   writeFileSync(hook,`import {registerHooks} from 'node:module';
 registerHooks({load(url,context,next) {

@@ -278,7 +278,15 @@ func TestAutomaticallyObservedProfilesRequirePersonGrant(t *testing.T) {
 	grantModelReporter(t, owner, agent)
 	agent.Scopes = []string{"models.read", "models.report", "models.refresh", "models.manage"}
 	enrollEvidenceHarness(t, owner, agent, "grok") // null allowlist
-	before := decode[[]Route](t, &owner, "PUT", "/api/models/routes", "[]", 200)
+	// Saved policy the grant must leave alone (a pause on another model).
+	inRegistry(t, owner, func(tx pgx.Tx) error {
+		_, err := tx.Exec(t.Context(), `INSERT INTO model_pauses(tenant_id,harness,model,reason,set_by) VALUES($1,'grok','grok-4.7','Owner hold',$2)`, owner.TenantID, owner.ID)
+		return err
+	})
+	before := modelsPolicy(t, owner)
+	if !strings.Contains(before, "Owner hold") {
+		t.Fatalf("policy snapshot lost the saved pause: %s", before)
+	}
 	o := Observation{ReportID: EvidenceID("observed-disabled"), Harness: "grok", Model: "grok-next", Effort: "xhigh", Status: "advertised"}
 	if result := reportEvidence(t, agent, []Observation{o}, 200); result.Added != 1 {
 		t.Fatal(result)
@@ -293,7 +301,7 @@ func TestAutomaticallyObservedProfilesRequirePersonGrant(t *testing.T) {
 	if observed.ID == "" || observed.Enabled {
 		t.Fatal("observation was granted automatically")
 	}
-	if observed.FullName() != "Grok grok-next" || observed.Provider != "xai" || observed.EffortLevel == nil || *observed.EffortLevel != 4 {
+	if observed.FullName() != "grok-next" || observed.Provider != "xai" || observed.EffortLevel != nil {
 		t.Fatalf("disabled observation lost display or effort metadata: %+v", observed)
 	}
 	status := decode[struct {
@@ -313,7 +321,7 @@ func TestAutomaticallyObservedProfilesRequirePersonGrant(t *testing.T) {
 	if !accepted.Enabled || accepted.ID == observed.ID {
 		t.Fatal("person grant did not create a separate enabled pin")
 	}
-	if accepted.Display != observed.Display || accepted.Provider != observed.Provider || accepted.EffortLevel == nil || *accepted.EffortLevel != *observed.EffortLevel {
+	if accepted.Display != observed.Display || accepted.Provider != observed.Provider || accepted.EffortLevel != nil || observed.EffortLevel != nil {
 		t.Fatalf("accepted successor lost display or effort metadata: %+v", accepted)
 	}
 	inRegistry(t, owner, func(tx pgx.Tx) error {
@@ -327,9 +335,28 @@ func TestAutomaticallyObservedProfilesRequirePersonGrant(t *testing.T) {
 		return nil
 	})
 	decode[Profile](t, &owner, "POST", "/api/models/proposals/accept", accept, 200)
-	if eventCount(t, owner, "model.proposal_accepted") != 1 || !reflect.DeepEqual(before, registryRoutes(t, owner)) {
+	if eventCount(t, owner, "model.proposal_accepted") != 1 || modelsPolicy(t, owner) != before {
 		t.Fatal("grant replay or grant changed policy")
 	}
+}
+
+// modelsPolicy is the saved Models policy: preference profiles, orders,
+// situation orders, pauses, rules and row constraints, plus the retained
+// ladder tables. Catalog pins are not policy.
+func modelsPolicy(t *testing.T, p tenant.Principal) string {
+	t.Helper()
+	var state string
+	inRegistry(t, p, func(tx pgx.Tx) error {
+		return tx.QueryRow(t.Context(), `SELECT jsonb_build_object(
+ 'prefs',(SELECT jsonb_agg(to_jsonb(p) ORDER BY id) FROM model_pref_profiles p),
+ 'orders',(SELECT jsonb_agg(to_jsonb(o) ORDER BY profile_id,column_key,situation) FROM model_pref_orders o),
+ 'situations',(SELECT jsonb_agg(to_jsonb(o) ORDER BY profile_id,column_key,situation) FROM model_pref_situation_orders o),
+ 'pauses',(SELECT jsonb_agg(to_jsonb(o) ORDER BY harness,model) FROM model_pauses o),
+ 'rules',(SELECT jsonb_agg(to_jsonb(r) ORDER BY scope,column_key,line) FROM model_rules r),
+ 'constraints',(SELECT jsonb_agg(to_jsonb(o) ORDER BY scope,column_key,line) FROM model_row_constraints o),
+ 'ladders',(SELECT jsonb_agg(to_jsonb(r) ORDER BY role,priority) FROM model_role_routes r))::text`).Scan(&state)
+	})
+	return state
 }
 
 func TestRefreshReleasesCatalogLockAndSharesIntervalWithAgents(t *testing.T) {
@@ -357,6 +384,9 @@ func TestRefreshReleasesCatalogLockAndSharesIntervalWithAgents(t *testing.T) {
 	}
 	started, release, finished := make(chan struct{}), make(chan struct{}), make(chan error, 1)
 	m.discovery = &http.Client{Transport: roundTripFunc(func(r *http.Request) (*http.Response, error) {
+		if r.URL.String() != vendorURLs["openai"] {
+			return fixtureCatalogClient(t, nil).Transport.RoundTrip(r)
+		}
 		deadline, ok := r.Context().Deadline()
 		if !ok || time.Until(deadline) > discoveryDeadline {
 			return nil, errors.New("missing round trip deadline")
@@ -434,7 +464,7 @@ func TestVendorDiscoveryCapsPagesModelsAndUsesOneDeadline(t *testing.T) {
 		body := fmt.Sprintf(`{"data":[{"id":"claude-%d"}],"has_more":true,"last_id":"claude-%d"}`, calls, calls)
 		return &http.Response{StatusCode: 200, Body: io.NopCloser(strings.NewReader(body))}, nil
 	})}
-	if _, err := listVendorModels(t.Context(), client, "anthropic", "fixture-key"); err == nil || calls != maxDiscoveryPages {
+	if _, err := fetchProviderCatalog(t.Context(), client, "anthropic", "fixture-key", time.Now()); err == nil || calls != maxDiscoveryPages {
 		t.Fatalf("pagination bound: %d calls, %v", calls, err)
 	}
 	rows := []map[string]string{}
@@ -445,7 +475,7 @@ func TestVendorDiscoveryCapsPagesModelsAndUsesOneDeadline(t *testing.T) {
 	client.Transport = roundTripFunc(func(*http.Request) (*http.Response, error) {
 		return &http.Response{StatusCode: 200, Body: io.NopCloser(strings.NewReader(string(raw)))}, nil
 	})
-	if _, err := listVendorModels(t.Context(), client, "openai", "fixture-key"); err == nil {
+	if _, err := fetchProviderCatalog(t.Context(), client, "openai", "fixture-key", time.Now()); err == nil {
 		t.Fatal("unbounded model identifiers")
 	}
 	ctx, cancel := context.WithCancel(t.Context())
@@ -454,8 +484,8 @@ func TestVendorDiscoveryCapsPagesModelsAndUsesOneDeadline(t *testing.T) {
 		t.Fatal("cancelled discovery made an outbound call")
 		return nil, io.EOF
 	})
-	if _, err := listVendorModels(ctx, client, "openai", "fixture-key"); err == nil {
-		t.Fatal("cancelled discovery succeeded")
+	if _, err := fetchProviderCatalog(ctx, client, "openai", "fixture-key", time.Now()); !errors.Is(err, context.Canceled) {
+		t.Fatalf("cancelled discovery returned %v, want context.Canceled", err)
 	}
 }
 
@@ -463,29 +493,40 @@ func TestRefreshBoundsProfileAdditionsAndRejectsDisabledDiscoveryResults(t *test
 	reset(t)
 	owner := makePrincipal(t, "bounded-refresh", "person", "Owner", []string{"admin"})
 	agent := addPrincipal(t, owner.TenantID, "agent", "Reporter", nil)
-	account := enrollEvidenceHarness(t, owner, agent, "codex")
+	account := enrollEvidenceHarness(t, owner, agent, "claude")
 	m := NewWithVault(appPool, []byte(strings.Repeat("x", 32)))
 	decode[[]Profile](t, &owner, "GET", "/api/models", "", 200)
 	before := registryRoutes(t, owner)
-	cipher, err := linkvault.Encrypt(m.vaultKey, owner.TenantID, "models/"+account+"/openai", "fixture-key")
+	cipher, err := linkvault.Encrypt(m.vaultKey, owner.TenantID, "models/"+account+"/anthropic", "fixture-key")
 	if err != nil {
 		t.Fatal(err)
 	}
 	inRegistry(t, owner, func(tx pgx.Tx) error {
-		if _, err := tx.Exec(t.Context(), `INSERT INTO model_discovery_credentials(tenant_id,account_id,vendor,ciphertext) VALUES($1,$2,'openai',$3)`, owner.TenantID, account, cipher); err != nil {
+		if _, err := tx.Exec(t.Context(), `INSERT INTO model_discovery_credentials(tenant_id,account_id,vendor,ciphertext) VALUES($1,$2,'anthropic',$3)`, owner.TenantID, account, cipher); err != nil {
 			return err
 		}
 		_, err := tx.Exec(t.Context(), `UPDATE model_refresh_settings SET api_enabled=true`)
 		return err
 	})
-	models := []map[string]string{}
+	models := []map[string]any{}
 	for i := 0; i < maxRefreshObservations+50; i++ {
-		models = append(models, map[string]string{"id": fmt.Sprintf("gpt-future-%03d", i)})
+		models = append(models, map[string]any{"id": fmt.Sprintf("claude-future-%03d", i), "capabilities": map[string]any{"effort": map[string]any{"high": map[string]any{"supported": true}}}})
 	}
 	raw, _ := json.Marshal(map[string]any{"data": models})
 	calls := 0
 	disableDuringFetch := false
-	m.discovery = &http.Client{Transport: roundTripFunc(func(*http.Request) (*http.Response, error) {
+	m.discovery = &http.Client{Transport: roundTripFunc(func(r *http.Request) (*http.Response, error) {
+		if !strings.HasPrefix(r.URL.String(), vendorURLs["anthropic"]) {
+			// Isolate revocation of credentialed discovery from independent
+			// keyless sources: all public catalogs are valid but empty here.
+			body := "{}"
+			if r.URL.String() == vendorURLs["openrouter"] {
+				body = `{"data":[]}`
+			} else if r.URL.String() != vendorURLs["modelsdev"] && r.URL.String() != vendorURLs["litellm"] {
+				t.Fatal("unexpected public catalog destination")
+			}
+			return &http.Response{StatusCode: 200, Body: io.NopCloser(strings.NewReader(body))}, nil
+		}
 		calls++
 		if disableDuringFetch {
 			inRegistry(t, owner, func(tx pgx.Tx) error {
@@ -502,13 +543,13 @@ func TestRefreshBoundsProfileAdditionsAndRejectsDisabledDiscoveryResults(t *test
 	}
 	inRegistry(t, owner, func(tx pgx.Tx) error {
 		var granted, observed int
-		if err := tx.QueryRow(t.Context(), `SELECT count(*),count(*) FILTER(WHERE enabled) FROM model_profiles WHERE version='observed-1'`).Scan(&observed, &granted); err != nil {
+		if err := tx.QueryRow(t.Context(), `SELECT count(*),count(*) FILTER(WHERE enabled) FROM model_profiles WHERE version='observed-2'`).Scan(&observed, &granted); err != nil {
 			return err
 		}
 		if observed != maxRefreshObservations || granted != 0 {
 			t.Fatalf("discovery created or granted too many profiles: %d/%d", observed, granted)
 		}
-		_, err := tx.Exec(t.Context(), `UPDATE model_refresh_settings SET last_run_at=NULL`)
+		_, err := tx.Exec(t.Context(), `UPDATE model_refresh_settings SET last_run_at=NULL,last_manual_run_at=NULL`)
 		return err
 	})
 	disableDuringFetch = true
@@ -517,7 +558,7 @@ func TestRefreshBoundsProfileAdditionsAndRejectsDisabledDiscoveryResults(t *test
 		t.Fatalf("disabled discovery published results: %+v, %v", result, err)
 	}
 	inRegistry(t, owner, func(tx pgx.Tx) error {
-		_, err := tx.Exec(t.Context(), `UPDATE model_refresh_settings SET last_run_at=NULL`)
+		_, err := tx.Exec(t.Context(), `UPDATE model_refresh_settings SET last_run_at=NULL,last_manual_run_at=NULL`)
 		return err
 	})
 	if _, err = m.runRefresh(ctx, owner, false); err != nil {
@@ -553,6 +594,9 @@ func TestRefreshVendorsShareDeadlineAndStopWhenDiscoveryDisabled(t *testing.T) {
 	disable := false
 	var deadline time.Time
 	m.discovery = &http.Client{Transport: roundTripFunc(func(r *http.Request) (*http.Response, error) {
+		if r.URL.String() != vendorURLs["openai"] && r.URL.String() != vendorURLs["xai"] {
+			return fixtureCatalogClient(t, nil).Transport.RoundTrip(r)
+		}
 		calls++
 		current, ok := r.Context().Deadline()
 		if !ok || (!deadline.IsZero() && !current.Equal(deadline)) {
@@ -572,7 +616,7 @@ func TestRefreshVendorsShareDeadlineAndStopWhenDiscoveryDisabled(t *testing.T) {
 		t.Fatalf("multi-vendor refresh: %d calls, %v", calls, err)
 	}
 	inRegistry(t, owner, func(tx pgx.Tx) error {
-		_, err := tx.Exec(t.Context(), `UPDATE model_refresh_settings SET last_run_at=NULL`)
+		_, err := tx.Exec(t.Context(), `UPDATE model_refresh_settings SET last_run_at=NULL,last_manual_run_at=NULL`)
 		return err
 	})
 	deadline = time.Time{}

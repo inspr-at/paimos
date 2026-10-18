@@ -38,7 +38,7 @@ for (const theme of ['light', 'dark']) {
       await expect(art).toHaveCSS('height', `${size}px`)
       // Signal colour is the agent state palette, not the brand teal, amber or backlog grey.
       const colors = await art.evaluate((element, state) => {
-        const token = state === 'working' ? '--agent-standard-working' : state === 'waiting' ? '--agent-standard-waiting' : '--agent-standard-inactive'
+        const token = state === 'working' ? '--agent-working' : state === 'waiting' ? '--agent-waiting' : '--agent-idle'
         return {
           actual: getComputedStyle(element).getPropertyValue('--signal').trim(),
           expected: getComputedStyle(document.documentElement).getPropertyValue(token).trim(),
@@ -101,7 +101,8 @@ test('only new event counters glint, including consecutive events; stale cancels
   for (const name of variants) {
     const glint = probe(page, name).locator('.glint')
     await expect(glint).toHaveCount(1)
-    await expect(glint).toHaveCSS('fill', 'rgb(201, 162, 74)')
+    const ink = await glint.evaluate(el => { const probe = document.createElement('span'); probe.style.color = 'var(--secondary-line)'; el.append(probe); const color = getComputedStyle(probe).color; probe.remove(); return color })
+    await expect(glint).toHaveCSS('fill', ink)
     await expect(glint).toHaveCSS('animation-duration', '0.6s')
     await expect(glint).toHaveCSS('animation-iteration-count', '1')
   }

@@ -412,27 +412,44 @@ func TestClaudeBridgeOnlyAllowsDaemonFileTools(t *testing.T) {
  return {streamInput:async()=>{},interrupt:async()=>({still_queued:[]}),close:()=>{},async *[Symbol.asyncIterator](){
  const entry=options.hooks.PreToolUse[0], hook=entry.hooks[0];
  if(entry.matcher!=='.*' || options.tools.length!==0) throw Error('native tool inventory');
+ if(JSON.stringify([...options.allowedTools].sort())!==JSON.stringify(expectedTools.map(n=>'mcp__aeon__'+n).sort())) throw Error('wrong fixed inventory');
  for(const name of ['Read','Edit','Write','Glob','Grep','Bash','Agent','mcp__other__read']) {
    const r=await hook({tool_name:name,tool_input:{file_path:options.cwd+'/safe/file'}});
    if(r.hookSpecificOutput?.permissionDecision!=='deny') throw Error('native tool escaped');
  }
- for(const name of ['aeon_read','aeon_write','aeon_edit','aeon_glob','aeon_grep','aeon_terminal']) {
+ for(const name of expectedTools) {
    const tool='mcp__aeon__'+name;
    if(!options.allowedTools.includes(tool)) throw Error('missing proxy');
    if((await hook({tool_name:tool})).hookSpecificOutput?.permissionDecision==='deny') throw Error('proxy denied');
+ }
+ for(const name of ['aeon_read','aeon_write','aeon_terminal','aeon_comment','aeon_request_approval','aeon_browser_capture'].filter(n=>!expectedTools.includes(n))) {
+   if((await hook({tool_name:'mcp__aeon__'+name})).hookSpecificOutput?.permissionDecision!=='deny') throw Error('foreign proxy escaped');
  }
  yield {type:'system',subtype:'init',session_id:'fixture',capabilities:['interrupt_receipt_v1']};
  yield {type:'result',modelUsage:{fixture:{inputTokens:1,outputTokens:1}}};
  }};
 }`
-	if err := os.WriteFile(sdkPath, []byte(sdk), 0600); err != nil {
-		t.Fatal(err)
-	}
-	cmd := exec.Command(node, bridgePath, sdkPath, "/bin/true", workspace)
-	cmd.Stdin = strings.NewReader(`{"op":"start","prompt":"fixture","max_tokens":1,"tools":{"url":"http://127.0.0.1:12345","token":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"}}` + "\n")
-	out, err := cmd.Output()
-	if err != nil || !strings.Contains(string(out), `"kind":"budget_exhausted"`) {
-		t.Fatalf("read/search gate: %v %s", err, out)
+	for _, fixture := range []struct {
+		name                 string
+		routine, browserOnly bool
+		tools                []string
+	}{
+		{"ordinary", false, false, []string{"aeon_comment", "aeon_status", "aeon_check_criterion", "aeon_evidence", "aeon_request_approval", "aeon_reply", "aeon_terminal", "aeon_read", "aeon_write", "aeon_edit", "aeon_glob", "aeon_grep", "aeon_activity"}},
+		{"routine builder", true, false, []string{"aeon_terminal", "aeon_read", "aeon_write", "aeon_edit", "aeon_glob", "aeon_grep", "aeon_browser_capture"}},
+		{"native capture", true, true, []string{"aeon_browser_capture"}},
+	} {
+		expected, _ := json.Marshal(fixture.tools)
+		if err := os.WriteFile(sdkPath, []byte("const expectedTools = "+string(expected)+";\n"+sdk), 0600); err != nil {
+			t.Fatal(err)
+		}
+		frame, _ := json.Marshal(map[string]any{"op": "start", "prompt": "fixture", "max_tokens": 1,
+			"tools": RunTools{URL: "http://127.0.0.1:12345", Token: strings.Repeat("a", 64), Routine: fixture.routine, BrowserCaptureOnly: fixture.browserOnly}})
+		cmd := exec.Command(node, bridgePath, sdkPath, "/bin/true", workspace)
+		cmd.Stdin = strings.NewReader(string(frame) + "\n")
+		out, err := cmd.Output()
+		if err != nil || !strings.Contains(string(out), `"kind":"budget_exhausted"`) {
+			t.Fatalf("%s tool gate: %v %s", fixture.name, err, out)
+		}
 	}
 }
 

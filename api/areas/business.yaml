@@ -1,0 +1,23 @@
+# SPDX-License-Identifier: AGPL-3.0-only
+# aeon:owner internal/business/directory
+paths:
+  /business/principals:
+    get:
+      operationId: listBusinessPrincipals
+      summary: Name the tenant's people and agents for business screens
+      description: Admin or member person, while at least one business plugin is enabled at its compiled digest. A read model of principals (who logged time, whose period waits for approval); grants nothing.
+      security: [{session: []}]
+      responses:
+        '200': {description: 'Principals, people first', content: {application/json: {schema: {type: array, items: {$ref: '#/components/schemas/BusinessPrincipal'}}}}}
+        '403': {$ref: '#/components/responses/Error'}
+components:
+  schemas:
+    BusinessPrincipal:
+      type: object
+      required: [id, kind, name, roles, has_avatar]
+      properties:
+        id: {type: string, format: uuid}
+        kind: {type: string, enum: [person, agent]}
+        name: {type: string}
+        roles: {type: array, items: {type: string}}
+        has_avatar: {type: boolean, description: 'The person has a profile picture at /api/people/{id}/avatar/{size}; clients request it only then and show initials otherwise.'}

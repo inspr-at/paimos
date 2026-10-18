@@ -1,0 +1,21 @@
+{
+  "group": "work-node-integration",
+  "nightlyTiming": {
+    "seconds": 67.501,
+    "selectedTests": 16
+  },
+  "spec": {
+    "file": "tests/parent-benefits.spec.ts",
+    "listedTests": 21,
+    "tierTiming": {
+      "caseSeconds": {
+        "max": 19.232,
+        "median": 3.483,
+        "min": 2.002
+      },
+      "seconds": 67.501,
+      "selectedTests": 16
+    },
+    "weightSeconds": 60
+  }
+}

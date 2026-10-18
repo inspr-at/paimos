@@ -113,14 +113,14 @@ const claimExistsSQL = `SELECT EXISTS(SELECT 1 FROM desk_notification_claims c
  OR $3='action_request' AND c.kind='question' AND EXISTS(
   SELECT 1 FROM desk_askers a WHERE a.tenant_id=$1 AND a.source_request_id=$4::uuid AND a.question_id=c.item_id)))`
 
-// ClaimTx is the final admission in the scheduler's claim transaction. Tree,
-// tenant access fence, native source row and current-source authorization precede
+// ClaimTx is the final admission in the scheduler's claim transaction. Tenant,
+// tree fence, native source row and current-source authorization precede
 // the insert. No later lock or event acquisition belongs in this transaction.
 func ClaimTx(ctx context.Context, tx pgx.Tx, p tenant.Principal, item Item) (bool, error) {
 	if p.Kind != tenant.Person || p.KeyCreatorID != "" || !validID(item.ID) || item.Revision < 1 {
 		return false, nil
 	}
-	// Match project-access mutations: canonical tree fence before tenant SHARE.
+	// Match project-access mutations: tenant NO KEY UPDATE before the tree fence.
 	// LockProjectWrite retains both through the final authorization and insert.
 	if err := authz.LockProjectWrite(ctx, tx, p.TenantID); err != nil {
 		return false, err
@@ -185,11 +185,11 @@ func FinishTx(ctx context.Context, tx pgx.Tx, p tenant.Principal, item Item, sta
 // Payload never includes title, question, rationale, context, findings or an
 // answer. Opening a pointer performs the source's normal authorization again.
 func Payload(item Item) ([]byte, error) {
-	if !validKind(item.Kind) || item.Kind == "doctrine" || !validID(item.ID) || item.Revision < 1 {
+	if (item.Kind != "question" && item.Kind != "approval" && item.Kind != "action_request") || !validID(item.ID) || item.Revision < 1 {
 		return nil, errors.New("invalid desk pointer")
 	}
 	prefix := map[string]string{"question": "q:", "action_request": "m:"}[item.Kind]
-	href := "/agents?needs=" + prefix + item.ID
+	href := "/decision-desk?item=" + prefix + item.ID
 	if item.Kind == "approval" {
 		href = "/phone-approvals/approval/" + item.ID
 	}

@@ -130,14 +130,14 @@ func createEntry(t *testing.T, f fixture, p tenant.Principal, body map[string]an
 func TestCreateReadListAndIsolation(t *testing.T) {
 	f := setup(t)
 	deploy := createEntry(t, f, f.a, map[string]any{"type": "runbook", "slug": "deploy-flow", "title": "Deploy flow", "key_prefix": "PHAROS",
-		"body": "# Deploy flow\n\nBuild the image, then **roll out** to `csb1`.\n\n## Rollback\n\nPin the previous tag."})
+		"body": "# Deploy flow\n\nBuild the image, then **roll out** to `prod-1`.\n\n## Rollback\n\nPin the previous tag."})
 	if deploy.Key != "PHAROS-8" || deploy.Type != "runbook" || deploy.Kind != "runbook" || deploy.Slug != "deploy-flow" || deploy.Status != "active" || deploy.State != "backlog" {
 		t.Fatalf("created %+v", deploy.Item)
 	}
 	if deploy.Project == nil || deploy.Project.ID != f.project || deploy.Author == nil || deploy.Author.Name != "Markus Barta" || deploy.UpdatedBy == nil || deploy.EventID == nil {
 		t.Fatalf("created entry context %+v", deploy)
 	}
-	if deploy.Excerpt != "Build the image, then roll out to csb1. Rollback: Pin the previous tag." {
+	if deploy.Excerpt != "Build the image, then roll out to prod-1. Rollback: Pin the previous tag." {
 		t.Fatalf("excerpt %q", deploy.Excerpt)
 	}
 	// external-system needs its kind: created on first use, with kind.created.

@@ -12,6 +12,7 @@ import (
 	"net"
 	"os"
 	"path/filepath"
+	"reflect"
 	"runtime"
 	"strings"
 	"testing"
@@ -108,7 +109,12 @@ func TestGrokNativeUsageUpdate(t *testing.T) {
 }
 
 func TestGrokNotificationsRejectToolsAndBoundAnswer(t *testing.T) {
-	p := &grokProcess{sessionID: "session"}
+	var updates []ChatUpdate
+	p := &grokProcess{sessionID: "session", wireProcess: &wireProcess{sessionID: "session", observe: func(ev AdapterEvent) {
+		if ev.Chat != nil {
+			updates = append(updates, *ev.Chat)
+		}
+	}}}
 	valid := map[string]any{"method": "session/update", "params": map[string]any{"sessionId": "session", "update": map[string]any{
 		"sessionUpdate": "agent_message_chunk", "content": map[string]string{"type": "text", "text": "answer"}}}}
 	raw, _ := json.Marshal(valid)
@@ -116,6 +122,11 @@ func TestGrokNotificationsRejectToolsAndBoundAnswer(t *testing.T) {
 	if p.violation.Load() || p.Evidence() != "answer" {
 		t.Fatal("bounded answer event rejected")
 	}
+	if !reflect.DeepEqual(updates, []ChatUpdate{chatText("answer")}) {
+		t.Fatal("native Grok dropped the live chat chunk")
+	}
+	// Keep the synthetic connection unowned so the refusal never signals a PID.
+	p.wireProcess = nil
 	p.onEvent([]byte(`{"method":"session/request_permission","params":{"sessionId":"session"}}`))
 	if !p.violation.Load() {
 		t.Fatal("tool permission request accepted")

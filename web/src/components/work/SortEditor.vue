@@ -84,7 +84,8 @@ function keydown(event: KeyboardEvent, index: number) {
 .add { display: inline-flex; align-items: center; gap: 6px; justify-self: start; height: 28px; margin-left: 14px; padding: 0 10px; border: 0; border-radius: 999px; background: transparent; color: var(--teal-ink); font-size: 12.5px; font-weight: 600; }
 .add:hover { background: var(--row-hover); }
 .add:focus-visible { box-shadow: var(--focus-ring); }
-/* Sheet actions precede the variable key list, so adding keys never moves Add. */
-.stable .head { order: -2; }
+/* Actions precede the variable key list, so adding keys never moves Add.
+   The head stays as tall as Default (24px): that action appears with the first key. */
+.stable .head { order: -2; min-height: 24px; }
 .stable .add { order: -1; }
 </style>

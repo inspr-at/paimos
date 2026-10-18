@@ -3,7 +3,6 @@ package questions
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"io"
 	"net/http"
@@ -82,8 +81,7 @@ func principal(w http.ResponseWriter, r *http.Request) (tenant.Principal, bool) 
 	return p, true
 }
 func decode(w http.ResponseWriter, r *http.Request, v any) error {
-	r.Body = http.MaxBytesReader(w, r.Body, MaxBody)
-	d := json.NewDecoder(r.Body)
+	d := httpapi.NewRequestDecoder(w, r, MaxBody)
 	d.DisallowUnknownFields()
 	if err := d.Decode(v); err != nil {
 		var large *http.MaxBytesError

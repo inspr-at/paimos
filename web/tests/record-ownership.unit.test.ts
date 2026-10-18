@@ -6,6 +6,7 @@ import * as CRM from '../src/lib/crm'
 import * as Knowledge from '../src/lib/knowledge'
 import * as WorkVocabulary from '../src/lib/workVocabulary'
 import { APIError } from '../src/lib/api'
+import { displayLanguage } from '../src/lib/displayLanguage'
 
 const stopped: (() => void)[] = []
 function setup(path: string, props: Record<string, unknown>, modules: Record<string, unknown>) {
@@ -69,7 +70,8 @@ function quoteSetup(overrides: Record<string, unknown> = {}) {
   const scope = reactive({ identity: { tenant: { id: 't' }, principal: { id: 'p' } } })
   const made = setup('components/business/QuoteWorkspace.vue', props, {
     'vue-router': { onBeforeRouteLeave() {} }, '../../lib/brand': {}, '../../lib/chrome': { headerFolded: ref(false) }, '../../lib/confirm': { confirmAction: async () => true },
-    '../../lib/preferences': { usePreference: () => ({ value: ref(null), ready: Promise.resolve(), save() {} }) }, '../../lib/quotePresence': {}, '../../lib/quoteWorkspace': { acquireQuote: (_s: unknown, id: string) => id === 'A' ? a : b, releaseQuote() {}, dropQuote() {} },
+    '../../lib/preferences': { usePreference: () => ({ value: ref(null), ready: Promise.resolve(), save() {} }) }, '../../lib/quotePresence': {},
+    '../../lib/viewSwitch': { viewKey: (name: string) => `view:${name}`, useViewSwitch: () => ({ current: ref('format'), defaultId: ref(null), choose() {}, setDefault() {} }) }, '../../lib/quoteWorkspace': { acquireQuote: (_s: unknown, id: string) => id === 'A' ? a : b, releaseQuote() {}, dropQuote() {} },
     '../../lib/quotes/api': draft, '../../lib/quotes/editor': {}, '../../lib/quotes/lifecycle': lifecycle,
     '../../lib/quotes/list': { statusOf: () => 'draft' }, '../../lib/quotes/profile': profile, '../../lib/quotes/zoom': {}, '../../lib/quotes/saveProblems': {}, '../../lib/quoteRecovery': {},
     '../../lib/toast': { toast: (_text: string, opts: object = {}) => notices.push(opts) }, '../../stores/business': { useBusiness: () => ({ staff: true, admin: true }) },
@@ -182,12 +184,19 @@ it('S8-013: a delayed session-ended send error for A cannot disable B', async ()
   const pending = deferred(), props = reactive({ view: { session: { id: 'A', project_id: 'p', agent_principal_id: 'agent', advertised_capabilities: [], management_mode: 'unmanaged' } }, now: 0, canWrite: true, active: false })
   const helpers = await import('../src/components/agents/sessionChat')
   const state = setup('components/agents/SessionChat.vue', props, {
-    '../../lib/api': { APIError }, '../../lib/agents': {}, '../../lib/agentRows': { readSessionMarker: async () => null },
-    '../../stores/agents': { useAgents: () => ({ thread: () => [], addressOf: () => 'agent', refreshThread: async () => {}, send: () => pending.promise }) },
-    '../../stores/session': { useSession: () => ({ identity: { principal: { id: 'viewer', kind: 'agent' } } }) },
-    './sessionMessages': { collapseMessages: () => [] }, './sessionChat': helpers,
+    '../../lib/api': { APIError }, '../../lib/displayLanguage': { displayLanguage }, '../../lib/agents': {}, '../../lib/agentRows': { readSessionMarker: async () => null }, '../../lib/toast': { toast: () => {} },
+    '../../stores/agents': { useAgents: () => ({ thread: () => [], threadState: () => 'idle', addressOf: () => 'agent', refreshThread: async () => {}, send: () => pending.promise, controls: {} }) },
+    '../../stores/session': { useSession: () => ({ identity: { tenant: { id: 'tenant' }, principal: { id: 'viewer', kind: 'agent' } } }) },
+    '../../stores/profile': { useProfile: () => ({ profile: null }) },
+    './sessionMessages': { collapseMessages: () => [] }, './sessionChat': helpers, './chatLive': await import('../src/components/agents/chatLive'),
   }).state
-  await flush(); state.draft.value = 'To A'; const sending = state.send()
+  await flush()
+  expect(state.words.value.ended).toBe('This session has ended.')
+  expect(state.words.value.placeholder).toBe('Message')
+  state.draft.value = 'To A'; const sending = state.send()
+  // The ended rejection is only caught when the send actually leaves. A missing
+  // navigator.onLine must not refuse it and leave this rejection unhandled.
+  expect(state.sending.value).toBe(true)
   props.view.session = { ...props.view.session, id: 'B' }; await flush(); state.draft.value = 'To B'
   pending.reject(new APIError(409, 'ended', { code: 'session_ended' })); await sending
   expect(state.sendError.value).toBe('')
@@ -208,9 +217,10 @@ it('S8-007: confirming deletion of A passes A even after selection moves to B', 
     '../../lib/work': { kindLabel: () => 'Ticket' }, '../../lib/useAttachments': { useAttachments: () => ({}) }, '../../lib/doneGate': {},
     '../../lib/workVocabulary': WorkVocabulary,
     '../../stores/workVocabulary': { useWorkVocabulary: () => ({ value: { revision: 0, leaf: { name: '', icon: '' }, levels: [] } }) },
+    '../../lib/developerSettings': { useDeveloperSettings: () => ({ showExpertStart: ref(false) }) },
     '../../lib/recurrences': {}, '../../lib/useIdentityScope': { useIdentityScope: () => ({ owner: ref(''), reset() {} }) },
     '../../lib/ticketBenefits': { benefitDraft: () => ({}) }, '../../lib/authz': { can: () => false }, '../../lib/releaseAssign': {}, '../../lib/releaseMembership': {},
-    '../../stores/journey': { useJourney: () => ({}) }, '../../stores/workQueue': { useWorkQueue: () => ({ load: async () => {} }) },
+    '../../stores/workQueue': { useWorkQueue: () => ({ load: async () => {} }) },
     '../../lib/usePolledData': { usePoller: () => ({ start() {}, stop() {} }) }, '../../stores/session': { useSession: () => ({}) },
   }).state
   const deleting = state.remove(); props.item = { ...a, id: 'B', key: 'AEON-2' }; await flush()

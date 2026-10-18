@@ -28,6 +28,7 @@ type State struct {
 	Revision        int64          `json:"revision"`
 	Status          string         `json:"status"`
 	Reason          string         `json:"reason"`
+	FixRoundLimit   int            `json:"fix_round_limit,omitempty"`
 	FixRounds       int            `json:"fix_rounds"`
 	Attempts        int            `json:"attempts"`
 	HeldCost        int64          `json:"held_cost_micros"`
@@ -99,7 +100,11 @@ func (s *State) apply(kind string, payload json.RawMessage) error {
 		}
 		s.LastFixRound = in.Round
 		s.FixRounds++
-		if s.FixRounds >= FixRoundThreshold {
+		limit := s.FixRoundLimit
+		if limit == 0 {
+			limit = FixRoundThreshold
+		}
+		if s.FixRounds >= limit {
 			s.stuck("failed_fix_rounds")
 		}
 	case "ci_result":

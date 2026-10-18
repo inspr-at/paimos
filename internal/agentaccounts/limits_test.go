@@ -70,6 +70,74 @@ func limitWorldAt(t *testing.T, slug string, parallel int, at time.Time) limitFi
 	return f
 }
 
+// seedExistingLimit represents a rule written before AEON-1177. Tests of
+// admission must not recreate it through a retired HTTP write.
+func seedExistingLimit(t *testing.T, f limitFixture, amount int64, unit, period string, fromWindow *string) LimitRule {
+	t.Helper()
+	var rule LimitRule
+	err := db.InTenant(dbtest.Seed(t.Context()), appPool, f.admin.TenantID, func(tx pgx.Tx) error {
+		if _, err := tx.Exec(t.Context(), `UPDATE account_limit_rules SET removed_at=clock_timestamp() WHERE account_id=$1 AND removed_at IS NULL`, f.account.ID); err != nil {
+			return err
+		}
+		var err error
+		rule, err = scanLimit(tx.QueryRow(t.Context(), `INSERT INTO account_limit_rules(tenant_id,account_id,amount,unit,period,from_window_id,created_by) VALUES($1,$2,$3,$4,$5,$6,$7) RETURNING `+limitColumns, f.admin.TenantID, f.account.ID, amount, unit, period, fromWindow, f.admin.ID))
+		return err
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	return rule
+}
+
+// The retired routes reject every authorized write, including an identical
+// rule, malformed input and absent targets, without changing legacy settings.
+func TestRetiredAccountLimitWrites(t *testing.T) {
+	f := limitWorld(t, "limit-retired", 3)
+	path := "/api/agent-accounts/" + f.account.ID + "/limit"
+	for _, body := range []string{`{"amount":1,"unit":"runs","period":"day"}`, "", "{", `{"amount":0,"pace_model":"steady"}`} {
+		var result struct{ Error, Code string }
+		callStatus(t, f.mod, &f.admin, "", "PUT", path, body, http.StatusGone, &result)
+		if result.Code != "limit_retired" || result.Error == "" {
+			t.Fatalf("retired limit response: %+v", result)
+		}
+	}
+	if n := scalar(t, f.admin, `SELECT count(*) FROM account_limit_rules WHERE account_id=$1`, f.account.ID); n != 0 {
+		t.Fatal("retired write created a rule")
+	}
+	rule := seedExistingLimit(t, f, 1, "runs", "day", nil)
+	now := time.Now().UTC().Truncate(time.Second)
+	var window Window
+	callStatus(t, f.mod, &f.admin, "", "POST", "/api/agent-accounts/"+f.account.ID+"/windows", windowBody(now.Add(-time.Hour), now.Add(48*time.Hour), "requests", 100, "unrestricted"), 201, &window)
+	repeat := "/api/agent-accounts/" + f.account.ID + "/windows/" + window.ID + "/repeat"
+	for _, req := range []struct{ method, path, body string }{
+		{"PUT", path, `{"amount":1,"unit":"runs","period":"day"}`},
+		{"PUT", path, `{"amount":100,"unit":"runs","period":"day"}`},
+		{"PUT", "/api/agent-accounts/missing/limit", ""},
+		{"POST", repeat, ""},
+		{"POST", "/api/agent-accounts/missing/windows/missing/repeat", ""},
+	} {
+		var result struct{ Error, Code string }
+		callStatus(t, f.mod, &f.admin, "", req.method, req.path, req.body, http.StatusGone, &result)
+		if result.Code != "limit_retired" || result.Error == "" {
+			t.Fatalf("%s %s: %+v", req.method, req.path, result)
+		}
+		callStatus(t, f.mod, nil, "", req.method, req.path, req.body, 401, nil)
+		callStatus(t, f.mod, &f.runner, f.token, req.method, req.path, req.body, 403, nil)
+	}
+	if c := f.capacity(t); c.Limit == nil || c.Limit.ID != rule.ID || c.Limit.Amount != 1 {
+		t.Fatalf("retired write changed the rule: %+v", c.Limit)
+	}
+	if n := scalar(t, f.admin, `SELECT count(*) FROM account_limit_rules WHERE account_id=$1`, f.account.ID); n != 1 {
+		t.Fatal("retired write replaced the rule")
+	}
+	if n := scalar(t, f.admin, `SELECT count(*) FROM account_allowance_windows WHERE id=$1 AND removed_at IS NULL AND allowance=100`, window.ID); n != 1 {
+		t.Fatal("retired repeat changed the window")
+	}
+	if n := scalar(t, f.admin, `SELECT count(*) FROM events WHERE type IN ('account.limit_set','account.window_removed')`); n != 0 {
+		t.Fatal("retired writes emitted mutation events")
+	}
+}
+
 func (f limitFixture) report(t *testing.T, used float64, readAt, resets time.Time) {
 	t.Helper()
 	r := capacity.Reading{WindowKind: "weekly", WindowMinutes: 7 * 24 * 60, UsedPercent: used, ResetsAt: resets, ReadAt: readAt, Source: "harness"}
@@ -270,28 +338,52 @@ func TestLateReadingDailyShareStillCapsObservedUsage(t *testing.T) {
 	}
 }
 
-// AEON-384 acceptance: the Advanced sentence round-trips, and it caps.
-func TestAdvancedSentenceRoundTripsAndCaps(t *testing.T) {
+// AEON-959: CI at 2026-10-08 01:41 Europe/Vienna (23:41 UTC) dropped an enrolled
+// account whose 5h window opened at that instant with 14% already on the counter.
+// That first sample is a baseline. The account stays routable on a 24/7 UTC day.
+func TestFiveHourFirstReadingNearUTCMidnightStaysEligible(t *testing.T) {
+	at := time.Date(2026, 10, 7, 23, 41, 39, 91263000, time.UTC)
+	f := limitWorldAt(t, "five-hour-midnight", 1, at)
+	s := capacity.DefaultSchedule()
+	s.Reserve = capacity.ReserveOff
+	for i := range s.Week {
+		s.Week[i] = capacity.Day{On: true, Start: 0, End: 24}
+	}
+	callStatus(t, f.mod, &f.admin, "", "PUT", "/api/agent-accounts/capacity/schedule", encoded(t, scheduleOverride{Scope: "account", AccountID: f.account.ID, Schedule: &s}), 204, nil)
+	readings := []capacity.Reading{
+		{WindowKind: "5h", WindowMinutes: 300, UsedPercent: 14, ResetsAt: at.Add(5 * time.Hour), ReadAt: at, Source: "harness"},
+		{WindowKind: "weekly", WindowMinutes: 10080, UsedPercent: 24, ResetsAt: at.Add(28 * time.Hour), ReadAt: at, Source: "harness"},
+	}
+	callStatus(t, f.mod, &f.runner, f.token, "POST", "/api/agent-accounts/"+f.account.ID+"/readings", encoded(t, readingsWrite{readings}), 204, nil)
+	c := f.capacity(t)
+	var paced *capacity.Pacing
+	for i := range c.Windows {
+		if c.Windows[i].Reading.WindowKind == "5h" {
+			paced = &c.Windows[i].Pacing
+		}
+	}
+	if paced == nil || paced.UsedTodayPercent != 0 || paced.AvailableNowPercent < 1 {
+		t.Fatalf("first 5h sample was charged as today's consumption: %+v", c.Windows)
+	}
+	var next CapacityNext
+	callStatus(t, f.mod, &f.admin, "", "GET", "/api/agent-accounts/capacity/next?harness=codex", "", 200, &next)
+	if len(next.Accounts) != 1 || next.Accounts[0].AccountID != f.account.ID || next.ParallelRuns < 1 || next.Wait != nil {
+		t.Fatalf("first 5h sample near UTC midnight was not routable: %+v", next)
+	}
+}
+
+// AEON-384 / AEON-1177: an existing Advanced sentence round-trips and caps
+// admission after new writes are retired.
+func TestExistingAdvancedLimitRoundTripsAndCaps(t *testing.T) {
 	f := limitWorld(t, "advanced", 4)
 	mod := accountsMod()
 	path := "/api/agent-accounts/" + f.account.ID + "/limit"
-	var rule LimitRule
-	callStatus(t, mod, &f.admin, "", "PUT", path, `{"amount":20,"unit":"percent","period":"day"}`, 200, &rule)
-	if rule.Amount != 20 || rule.Unit != "percent" || rule.Period != "day" || rule.AccountID != f.account.ID {
-		t.Fatalf("rule: %+v", rule)
-	}
+	rule := seedExistingLimit(t, f, 20, "percent", "day", nil)
 	got := f.capacity(t).Limit
 	if got == nil || got.ID != rule.ID || got.Amount != 20 || got.Unit != "percent" || got.Period != "day" || !got.PeriodEnd.After(time.Now()) {
 		t.Fatalf("the sentence did not round-trip: %+v", got)
 	}
-	var again LimitRule
-	callStatus(t, mod, &f.admin, "", "PUT", path, `{"amount":20,"unit":"percent","period":"day"}`, 200, &again)
-	if again.ID != rule.ID {
-		t.Fatal("an identical sentence was stored twice")
-	}
-	for _, bad := range []string{`{"amount":0,"unit":"percent","period":"day"}`, `{"amount":101,"unit":"percent","period":"day"}`, `{"amount":5,"unit":"micros","period":"day"}`, `{"amount":5,"unit":"runs","period":"year"}`, `{"amount":5,"unit":"runs","period":"day","pace_model":"steady"}`} {
-		callStatus(t, mod, &f.admin, "", "PUT", path, bad, 400, nil)
-	}
+	callStatus(t, mod, &f.admin, "", "PUT", path, `{"amount":20,"unit":"percent","period":"day"}`, 410, nil)
 	callStatus(t, mod, &f.runner, f.token, "PUT", path, `{"amount":5,"unit":"runs","period":"day"}`, 403, nil)
 
 	// Percent counts each vendor window's rise today (Vienna), your own use
@@ -341,8 +433,7 @@ func TestAdvancedSentenceRoundTripsAndCaps(t *testing.T) {
 	}
 
 	// Runs: the queued run holding the account counts.
-	var runs LimitRule
-	callStatus(t, mod, &f.admin, "", "PUT", path, `{"amount":1,"unit":"runs","period":"week"}`, 200, &runs)
+	runs := seedExistingLimit(t, f, 1, "runs", "week", nil)
 	if runs.ID == rule.ID {
 		t.Fatal("a changed sentence reused the old rule")
 	}
@@ -365,9 +456,8 @@ func TestAdvancedSentenceRoundTripsAndCaps(t *testing.T) {
 	}
 }
 
-// Make this repeat turns an old window into the sentence and removes the
-// window in the same step; the use counted this period stays counted.
-func TestMakeThisRepeat(t *testing.T) {
+// A rule repeated before retirement keeps its original window and counted use.
+func TestExistingRepeatedWindowCapsRequests(t *testing.T) {
 	f := limitWorld(t, "repeat", 4)
 	mod := accountsMod()
 	now := time.Now().UTC().Truncate(time.Second)
@@ -375,25 +465,16 @@ func TestMakeThisRepeat(t *testing.T) {
 	callStatus(t, mod, &f.admin, "", "POST", "/api/agent-accounts/"+f.account.ID+"/windows", windowBody(now.Add(-time.Hour), now.Add(30*24*time.Hour), "requests", 100, "unrestricted"), 201, &old)
 	path := "/api/agent-accounts/" + f.account.ID + "/windows/" + old.ID + "/repeat"
 	callStatus(t, mod, &f.runner, f.token, "POST", path, "", 403, nil)
-	var rule LimitRule
-	callStatus(t, mod, &f.admin, "", "POST", path, "", 200, &rule)
-	if rule.Amount != 100 || rule.Unit != "requests" || rule.Period != "month" || rule.FromWindowID == nil || *rule.FromWindowID != old.ID {
-		t.Fatalf("repeat: %+v", rule)
+	rule := seedExistingLimit(t, f, 100, "requests", "month", &old.ID)
+	if err := db.InTenant(dbtest.Seed(t.Context()), appPool, f.admin.TenantID, func(tx pgx.Tx) error {
+		_, err := tx.Exec(t.Context(), `UPDATE account_allowance_windows SET removed_at=clock_timestamp() WHERE id=$1`, old.ID)
+		return err
+	}); err != nil {
+		t.Fatal(err)
 	}
-	if len(f.setByYou(t)) != 0 {
-		t.Fatal("the repeated window is still listed next to its sentence")
-	}
-	if n := scalar(t, f.admin, `SELECT count(*) FROM account_allowance_windows WHERE id=$1 AND removed_at IS NOT NULL AND allowance=100`, old.ID); n != 1 {
-		t.Fatal("the repeated window's row was lost")
-	}
-	callStatus(t, mod, &f.admin, "", "POST", path, "", 404, nil)
-	for _, d := range []struct {
-		length time.Duration
-		period string
-	}{{24 * time.Hour, "day"}, {7 * 24 * time.Hour, "week"}, {31 * 24 * time.Hour, "month"}} {
-		if got := periodFor(d.length); got != d.period {
-			t.Fatalf("%v: %s", d.length, got)
-		}
+	callStatus(t, mod, &f.admin, "", "POST", path, "", 410, nil)
+	if rule.FromWindowID == nil || *rule.FromWindowID != old.ID || len(f.setByYou(t)) != 0 {
+		t.Fatal("legacy repeat fixture lost its original window")
 	}
 	// Requests count run telemetry this month: 100 turns reach the sentence.
 	f.report(t, 10, now.Add(-time.Minute), now.Add(48*time.Hour))

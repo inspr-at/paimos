@@ -23,13 +23,16 @@ import (
 	"github.com/inspr-at/paimos/internal/agentpairing"
 	"github.com/inspr-at/paimos/internal/agentruns"
 	"github.com/inspr-at/paimos/internal/agentsetup"
+	"github.com/inspr-at/paimos/internal/attachedmsg"
 	"github.com/inspr-at/paimos/internal/auth"
 	"github.com/inspr-at/paimos/internal/config"
 	"github.com/inspr-at/paimos/internal/db"
 	"github.com/inspr-at/paimos/internal/dbtest"
 	"github.com/inspr-at/paimos/internal/events"
 	"github.com/inspr-at/paimos/internal/harness"
+	"github.com/inspr-at/paimos/internal/hostcapacity"
 	"github.com/inspr-at/paimos/internal/httpapi"
+	"github.com/inspr-at/paimos/internal/inbox"
 	"github.com/inspr-at/paimos/internal/modelregistry"
 	"github.com/inspr-at/paimos/internal/nodes"
 	"github.com/inspr-at/paimos/internal/tenant"
@@ -77,6 +80,36 @@ func TestComputerCompatibilityUsesItsReportedAgent(t *testing.T) {
 	}
 }
 
+// Risk: Settings offers an add-harness command for an install the machine does
+// not have (AEON-733), or one machine's report leaks into another's view.
+func TestComputerReportsItsInstallMethod(t *testing.T) {
+	f := newFixture(t)
+	p := f.propose("claude")
+	f.approve(p, "connect_only")
+	v := f.redeem(p)
+	if !slices.Contains(v.ServerCapabilities, agentpairing.InstallCapability) {
+		t.Fatal("server does not advertise the install report")
+	}
+	for _, tc := range []struct{ reported, want string }{
+		{"homebrew", "homebrew"},
+		{"nix", "nix"},
+		{"direct", "direct"},
+		{"winget", ""},
+		{"", ""},
+	} {
+		t.Run("reported "+tc.reported, func(t *testing.T) {
+			progress := agentpairing.SetupProgress{State: "connected", InstallMethod: tc.reported}
+			var report agentpairing.View
+			decodeResult(t, f.call("POST", "/api/agent-pairing/reconcile", map[string]any{"tenant_id": f.tenantID, "request_id": p.id, "lifecycle_secret": p.lifecycle, "progress": progress}, false, "", 200), &report)
+			var listed agentpairing.View
+			decodeResult(t, f.call("GET", "/api/agent-pairing/computers/"+*v.ComputerID, nil, true, "", 200), &listed)
+			if report.InstallMethod != tc.want || listed.InstallMethod != tc.want || report.SetupState != "connected" {
+				t.Fatalf("install method = %q/%q, want %q", report.InstallMethod, listed.InstallMethod, tc.want)
+			}
+		})
+	}
+}
+
 func nixGuideFixture() *config.PairingNixGuide {
 	return &config.PairingNixGuide{
 		ModuleURL: "https://example.test/instance/module.nix", ServiceOption: "services.aeon.enable",
@@ -85,6 +118,7 @@ func nixGuideFixture() *config.PairingNixGuide {
 }
 
 type fixture struct {
+	messages   []*attachedmsg.Service
 	pairing    *agentpairing.Module
 	t          *testing.T
 	db         *dbtest.DB
@@ -119,19 +153,19 @@ func uuid(t *testing.T, d *dbtest.DB) string {
 	}
 	return id
 }
-func newFixture(t *testing.T) *fixture {
+func newFixture(t *testing.T, messages ...*attachedmsg.Service) *fixture {
 	t.Helper()
-	return newFixtureInTenant(t, dbtest.Open(t), "pairtest")
+	return newFixtureInTenant(t, dbtest.Open(t), "pairtest", messages...)
 }
 
-func newFixtureInTenant(t *testing.T, d *dbtest.DB, slug string) *fixture {
+func newFixtureInTenant(t *testing.T, d *dbtest.DB, slug string, messages ...*attachedmsg.Service) *fixture {
 	t.Helper()
 	id, err := tenantbootstrap.Create(t.Context(), d.App, slug, "Pairing test")
 	if err != nil {
 		t.Fatal(err)
 	}
 	sessionKey := []byte(nonce())
-	f := &fixture{t: t, db: d, tenantID: id, tenantSlug: slug, profiles: map[string]string{}, sessionKey: sessionKey}
+	f := &fixture{t: t, db: d, tenantID: id, tenantSlug: slug, profiles: map[string]string{}, sessionKey: sessionKey, messages: messages}
 	f.rebuildHandler()
 	login := f.call("POST", "/api/auth/dev-login", map[string]string{"email": "pairing@example.test"}, false, "", 200)
 	cookies := login.Result().Cookies()
@@ -183,9 +217,17 @@ func (f *fixture) rebuildHandler() {
 	if err := pairing.ConfigureAccountLink(f.sessionKey); err != nil {
 		f.t.Fatal(err)
 	}
-	api := &httpapi.Server{Pool: f.db.App, Modules: []httpapi.Module{am, pairing, events.New(f.db.App), agentaccounts.New(f.db.App), nodes.New(f.db.App, nil), modelregistry.New(f.db.App), harness.New(f.db.App), workorders.New(f.db.App), agentruns.New(f.db.App, func(ctx context.Context, tx pgx.Tx, p tenant.Principal, r agentruns.Run, _ agentruns.Telemetry) error {
-		return agentaccounts.Settle(ctx, tx, p, r.ID)
+	api := &httpapi.Server{Pool: f.db.App, Modules: []httpapi.Module{am, pairing, events.New(f.db.App), agentaccounts.New(f.db.App), nodes.New(f.db.App, nil), modelregistry.New(f.db.App), harness.New(f.db.App), workorders.New(f.db.App), agentruns.New(f.db.App, func(ctx context.Context, tx pgx.Tx, p tenant.Principal, r agentruns.Run, _ agentruns.Telemetry, pending *[]events.Change) error {
+		return agentaccounts.SettleDeferred(ctx, tx, p, r.ID, pending)
 	})}, Middleware: []func(http.Handler) http.Handler{am.Middleware}}
+	if len(f.messages) > 0 {
+		pairing.SetAttachedMessages(f.messages[0])
+		messaging, err := inbox.NewMessaging(f.db.App, make([]byte, 32), inbox.WithAttachedMessages(f.messages[0]))
+		if err != nil {
+			f.t.Fatal(err)
+		}
+		api.Modules = append(api.Modules, inbox.New(f.db.App, f.messages[0]), messaging)
+	}
 	f.pairing, f.h = pairing, api.Handler()
 }
 
@@ -338,9 +380,23 @@ func TestPairingApprovalRedemptionIsolationAndOneShot(t *testing.T) {
 		t.Fatal("approval falsely reports connected or exposes runtime prefix")
 	}
 	v := f.redeem(p)
+	var creator string
+	var required bool
+	if err := f.db.Admin.QueryRow(t.Context(), `SELECT k.created_by_principal_id::text,k.person_owner_required FROM agent_pairing_computers c JOIN agent_keys k ON k.tenant_id=c.tenant_id AND k.id=c.key_id WHERE c.tenant_id=$1 AND c.id=$2`, f.tenantID, *v.ComputerID).Scan(&creator, &required); err != nil || creator != f.person || !required {
+		t.Fatal("pairing omitted approving person creator or ownership marker")
+	}
+
 	key := "aeon_" + v.RuntimePrefix + "_" + p.runtime
 	if v.State != "redeemed" || len(v.Enrollments) != 1 {
 		t.Fatal("missing redemption bindings")
+	}
+	// Risk: the verification profile must not freeze the paired account's
+	// harness catalog at enrollment, while its verification binding stays exact.
+	var unpinned bool
+	if err := f.db.Admin.QueryRow(t.Context(), `SELECT a.allowed_model_profile_ids IS NULL AND e.model_profile_id=$2::uuid
+ FROM agent_accounts a JOIN agent_pairing_enrollments e ON e.tenant_id=a.tenant_id AND e.account_id=a.id
+ WHERE a.id=$1`, v.Enrollments[0].AccountID, f.profiles["claude"]).Scan(&unpinned); err != nil || !unpinned {
+		t.Fatalf("pairing pinned model allowance or lost verification profile: %v", err)
 	}
 	retry := f.redeem(p)
 	if retry.RuntimePrefix != v.RuntimePrefix || *retry.Enrollments[0].VerificationRunID != *v.Enrollments[0].VerificationRunID {
@@ -433,6 +489,94 @@ func TestPairingDrainSelectiveRevocationAndTombstone(t *testing.T) {
 		t.Fatal("stale setup revived revoked key")
 	}
 	f.call("POST", "/api/agent-pairing/computers/"+*v.ComputerID+"/disconnect", map[string]string{"mode": "drain"}, true, "", 200)
+}
+
+// Risk: a stale ticket release drops host occupancy or revokes the paired
+// daemon during drain before that daemon can confirm its process has exited.
+func TestPairingStaleWorkReleaseRetainsCapacityAndDrain(t *testing.T) {
+	f := newFixture(t)
+	p := f.propose("claude")
+	f.approve(p, "one_per_harness")
+	v := f.redeem(p)
+	e := v.Enrollments[0]
+	key := "aeon_" + v.RuntimePrefix + "_" + p.runtime
+	f.probe(v, e, key, 200)
+	f.claim(v, e, key, f.reserve(v, e, key, 200), 200)
+	if _, err := f.db.Admin.Exec(t.Context(), `UPDATE agent_runs SET status='ownership_lost',ended_at=clock_timestamp(),trace='{"work_lifecycle_release":{"exit_unconfirmed":true}}' WHERE id=$1`, *e.VerificationRunID); err != nil {
+		t.Fatal(err)
+	}
+	policy := hostcapacity.Default()
+	policy.MaximumAgents = 1
+	f.call("PUT", "/api/agent-pairing/computers/"+*v.ComputerID+"/capacity", map[string]any{"expected_revision": v.Revision, "policy": policy}, true, "", 200)
+	var occupied agentpairing.View
+	decodeResult(t, f.call("GET", "/api/agent-pairing/computers/"+*v.ComputerID, nil, true, "", 200), &occupied)
+	if occupied.HostCapacity == nil || occupied.HostCapacity.Running != 1 || occupied.HostCapacity.Reason != "maximum_agents" || !slices.Contains(occupied.Enrollments[0].ActiveRunIDs, *e.VerificationRunID) || occupied.AccountingState != "unconfirmed" {
+		t.Fatalf("unconfirmed process lost host or enrollment occupancy: %+v", occupied)
+	}
+	actor := tenant.Principal{ID: *v.PrincipalID, TenantID: f.tenantID, Kind: tenant.Agent}
+	err := db.InTenant(tenant.WithPrincipal(t.Context(), actor), f.db.App, f.tenantID, func(tx pgx.Tx) error {
+		if err := agentpairing.LockMutation(t.Context(), tx); err != nil {
+			return err
+		}
+		return agentpairing.RunFence(t.Context(), tx, e.AccountID, *e.VerificationRunID, true)
+	})
+	if denied, ok := err.(*agentpairing.Error); !ok || denied.Code != "host_capacity_wait" {
+		t.Fatalf("host admitted an unconfirmed process or rejected for another reason: %v", err)
+	}
+	var draining agentpairing.View
+	decodeResult(t, f.call("POST", "/api/agent-pairing/computers/"+*v.ComputerID+"/disconnect", map[string]string{"mode": "drain"}, true, "", 200), &draining)
+	if *draining.ComputerState != "draining" || draining.Enrollments[0].State != "draining" || draining.AccountingState != "unconfirmed" || !slices.Contains(draining.Enrollments[0].ActiveRunIDs, *e.VerificationRunID) {
+		t.Fatal("drain revoked the daemon needed to reconcile an unconfirmed process")
+	}
+	var holds int
+	if err := f.db.Admin.QueryRow(t.Context(), `SELECT count(*) FROM account_reservations WHERE run_id=$1 AND state='active'`, *e.VerificationRunID).Scan(&holds); err != nil || holds != 1 {
+		t.Fatalf("drain lost reservation: holds=%d err=%v", holds, err)
+	}
+	// Missing exit evidence and a different daemon cannot clear the hold.
+	for _, tc := range []struct {
+		process, daemon string
+		status          int
+		reason          string
+	}{
+		{"unconfirmed", *v.DaemonID, 409, "run is not live"},
+		{"exited", "other-daemon", 409, "daemon generation conflict"},
+		{"exited", *v.DaemonID, 200, ""},
+	} {
+		r := f.request("POST", "/api/runs/"+*e.VerificationRunID+"/telemetry", map[string]any{"sequence": 1, "kind": "finished", "status": "completed", "process_state": tc.process, "turn_count_delta": 1}, false, key)
+		r.Header.Set(agentruns.DaemonHeader, tc.daemon)
+		r.Header.Set(agentruns.GenerationHeader, "test-generation")
+		w := httptest.NewRecorder()
+		f.h.ServeHTTP(w, r)
+		if w.Code != tc.status || !strings.Contains(w.Body.String(), tc.reason) {
+			t.Fatalf("exit report %s/%s: %d want %d: %s", tc.process, tc.daemon, w.Code, tc.status, w.Body.String())
+		}
+	}
+	var settled agentpairing.View
+	decodeResult(t, f.call("GET", "/api/agent-pairing/computers/"+*v.ComputerID, nil, true, "", 200), &settled)
+	if *settled.ComputerState != "revoked" || settled.AccountingState != "settled" || len(settled.Enrollments[0].ActiveRunIDs) != 0 || settled.HostCapacity.Running != 0 {
+		t.Fatal("owned exit did not release occupancy and finish drain")
+	}
+	var retained bool
+	var reserved, used int64
+	if err := f.db.Admin.QueryRow(t.Context(), `SELECT r.trace->'work_lifecycle_release'->>'exit_unconfirmed'='true',w.reserved,w.used FROM agent_runs r JOIN account_allowance_windows w ON w.account_id=r.account_id WHERE r.id=$1`, *e.VerificationRunID).Scan(&retained, &reserved, &used); err != nil || retained || reserved != 0 || used != 1 {
+		t.Fatalf("exit settlement: retained=%t reserved=%d used=%d err=%v", retained, reserved, used, err)
+	}
+	t.Run("immediate revocation retains unsettled removal guard", func(t *testing.T) {
+		f := newFixture(t)
+		p := f.propose("claude")
+		f.approve(p, "one_per_harness")
+		v := f.redeem(p)
+		e := v.Enrollments[0]
+		key := "aeon_" + v.RuntimePrefix + "_" + p.runtime
+		f.probe(v, e, key, 200)
+		f.claim(v, e, key, f.reserve(v, e, key, 200), 200)
+		if _, err := f.db.Admin.Exec(t.Context(), `UPDATE agent_runs SET status='ownership_lost',ended_at=clock_timestamp(),trace='{"work_lifecycle_release":{"exit_unconfirmed":true}}' WHERE id=$1`, *e.VerificationRunID); err != nil {
+			t.Fatal(err)
+		}
+		f.call("POST", "/api/agent-pairing/computers/"+*v.ComputerID+"/disconnect", map[string]string{"mode": "revoke_now"}, true, "", 200)
+		retryErrorCode(t, f.call("POST", "/api/agent-pairing/computers/"+*v.ComputerID+"/remove", nil, true, "", 409), "runs_unsettled")
+		retryErrorCode(t, f.call("POST", "/api/agent-accounts/"+e.AccountID+"/archive", nil, true, "", 409), "account_busy")
+	})
 }
 
 func TestPairingImmediateRevokeRetainsActiveAccounting(t *testing.T) {

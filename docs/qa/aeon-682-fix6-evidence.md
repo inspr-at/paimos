@@ -14,7 +14,7 @@ Validation:
 
 - The exact route map from `7e75cdf4` fails the current `TestRouteDeclarationsFailClosed` assertion with `queue Undo entry permission: "", declared=false`; the corrected map passes that test, `TestRouteSourceCoverage` and `TestRealMuxRouteCoverage`.
 - Remote pre-fix commit `0085cc69` fails both `TestStaleQueueAfterNodeMutation/bulk_unassign` and `/bulk_priority` for `QueueStale:false`. Its bulk handler is identical to `7e75cdf4` (`git diff` between those revisions for that file is empty).
-- Final affected Go packages: remote-test.sh on approved mbp2606 at `354f0e05`, `internal/agentruns`, `internal/authz`, `internal/nodes`, `internal/workqueue`: all four passed (agentruns 37.709s, authz 17.991s, nodes 92.334s, workqueue 0.410s).
+- Final affected Go packages: remote-test.sh on approved build-6 at `354f0e05`, `internal/agentruns`, `internal/authz`, `internal/nodes`, `internal/workqueue`: all four passed (agentruns 37.709s, authz 17.991s, nodes 92.334s, workqueue 0.410s).
 - Local, sequential touched files: work-queue.test.ts 6/6; work-queue-store.unit.test.ts 18/18; work-queue.spec.ts 18/18, isolated Chromium, workers=1, no retries. Existing stability guards pass, and the browser wrapper reports zero remaining processes.
 - Twenty-four screenshots are outside git in `/private/tmp/claude-501/-Users-markus-Code-aithema/af3ab8bf-63f6-4fb5-bccf-086eb11c043e/scratchpad/aeon/shots/aeon-682-fix6/`, including `aeon-682-list-{390,1024,1440}-{light,dark}.png` and `aeon-682-ticket-{390,1024,1440}-{light,dark}.png` with the long German fixture.
 - git diff --check passes. No migrations added.

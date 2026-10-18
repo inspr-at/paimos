@@ -19,9 +19,7 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
-	"encoding/json"
 	"errors"
-	"io"
 	"net/http"
 	"strings"
 	"time"
@@ -198,7 +196,7 @@ func (m *Module) putName(r *http.Request, tx pgx.Tx, p tenant.Principal) (any, e
 	var in struct {
 		ShortName *string `json:"short_name"`
 	}
-	dec := json.NewDecoder(r.Body)
+	dec := httpapi.NewRequestDecoder(nil, r, 1<<20)
 	dec.DisallowUnknownFields()
 	if err := dec.Decode(&in); err != nil || in.ShortName == nil {
 		return nil, fail(http.StatusBadRequest, "expected {\"short_name\": \"…\"}")
@@ -238,7 +236,7 @@ func (m *Module) putLogo(r *http.Request, tx pgx.Tx, p tenant.Principal) (any, e
 	if err != nil {
 		return nil, err
 	}
-	body, err := io.ReadAll(r.Body)
+	body, err := httpapi.ReadRequestBody(nil, r, 1<<20, httpapi.DefaultBodyReadTimeout)
 	if err != nil {
 		return nil, err
 	}

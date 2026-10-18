@@ -9,6 +9,7 @@ import { fixtures, me, mockWork, watchErrors } from './work-fixtures'
 import { mockEffectivePermissions } from './authz-fixtures'
 import { readyGaps } from '../src/lib/workQueue'
 import type { QueueWireEntry } from '../src/lib/workQueue'
+import type { EntryBlock, EntryCheck } from '../src/lib/entryChecks'
 const shots = process.env.WORK_QUEUE_SHOTS ?? '../.agent-shots/queue'
 const now = '2026-10-01T18:00:00Z'
 const agent = '33333333-3333-4333-8333-333333333333', account = '44444444-4444-4444-8444-444444444444', profile = '55555555-5555-4555-8555-555555555555'
@@ -48,6 +49,18 @@ async function world(page: Page, options: { viewer?: boolean; missing?: boolean;
     const req = route.request(), url = new URL(req.url()), path = url.pathname, method = req.method()
     const body = req.postData() ? req.postDataJSON() as Record<string, unknown> : null
     const json = (value: unknown, status = 200) => route.fulfill({ status, json: value })
+    const entryNode = /^\/api\/nodes\/([^/]+)\/entry-checks$/.exec(path)
+    if (entryNode) {
+      const node = data.nodes.find(n => n.id === entryNode[1])!
+      const gaps = gapsFor(node)
+      const checks: EntryCheck[] = [
+        { id: 'estimate_set', label: 'Estimate set', applicable: true, passed: !gaps.includes('estimate'), reason: 'Set an estimate', can_tick: false },
+        { id: 'acceptance_present', label: 'Acceptance criteria written', applicable: true, passed: !gaps.includes('criteria'), reason: 'Write acceptance criteria', can_tick: false },
+        { id: 'blocker_named', label: 'Blocker named', condition: 'blocked', applicable: node.state === 'blocked', passed: !gaps.includes('blocker'), reason: 'Name the blocker', can_tick: false },
+      ]
+      const block: EntryBlock = { to_status: 'in_progress', checks, total: checks.filter(c => c.applicable).length, passed: checks.filter(c => c.applicable && c.passed).length }
+      return json({ node_id: node.id, revision: node.updated_at, definition: { id: 'definition', revision: now, source: 'workspace', checks: {} }, blocks: [block], entries: [], latest_refusal: null })
+    }
     if (path === '/api/me/permissions') {
       const permissions = mockEffectivePermissions(options.viewer ? 'viewer' : 'admin', url.searchParams.get('project_id') ?? undefined)
       if (!options.viewer) permissions.workspace.permissions.push('run.create', 'models.read', 'account.read')
@@ -131,22 +144,32 @@ test('key copies, row opens, Queue toggles without a fake status, and q/bulk use
 })
 test('keyboard and drag moves persist, use workspace positions, retain focus, reset and filter membership', async ({ page }) => {
   const { state, calls } = await world(page, { offset: 4 })
+  // The mock records a request only once Playwright routes it, which can trail
+  // the click on a slow runner. Wait for each move to be recorded before reading it.
+  const moves = () => state.queueCalls.filter(call => call.path.endsWith('/move'))
   await page.getByRole('button', { name: /queued\. Open the work queue/ }).click()
   const panel = page.getByRole('dialog', { name: 'Work queue', exact: true })
   await expect(panel.getByRole('button', { name: 'Move PHAROS-14 to the top' })).toBeDisabled()
   await panel.getByRole('button', { name: 'Move PHAROS-13 to the top' }).click()
-  expect(state.queueCalls.filter(call => call.path.endsWith('/move')).at(-1)?.body).toEqual({ position: 5 })
+  await expect.poll(() => moves().length).toBe(1)
+  expect(moves()[0]!.body).toEqual({ position: 5 })
   await expect(panel.getByRole('button', { name: 'Move PHAROS-13 to the top' })).toBeDisabled()
+  await expect(panel.getByRole('button', { name: /^Number 5: PHAROS-13/ })).toBeFocused()
   await panel.getByRole('button', { name: 'Reset shared queue across projects' }).click()
+  await expect(panel.getByRole('note')).toHaveCount(0)
+  await expect(panel.getByRole('button', { name: 'Move PHAROS-13 to the top' })).toBeEnabled()
   await panel.getByRole('button', { name: /^Number 6: PHAROS-13/ }).focus()
+  await expect(panel.getByRole('button', { name: /^Number 6: PHAROS-13/ })).toBeFocused()
   await page.keyboard.press('Alt+ArrowUp')
   await expect(panel.getByRole('note')).toContainText('Manual order')
-  expect(state.queueCalls.find(call => call.path.endsWith('/move'))?.body).toEqual({ position: 5 })
+  expect(moves()).toHaveLength(2)
+  expect(moves()[1]!.body).toEqual({ position: 5 })
   await expect(panel.getByRole('button', { name: /^Number 5: PHAROS-13/ })).toBeFocused()
   await panel.getByRole('button', { name: 'Reset shared queue across projects' }).click()
   await expect(panel.getByRole('note')).toHaveCount(0)
   await panel.locator('[data-ticket="n-3"]').dragTo(panel.locator('[data-ticket="n-4"]'), { targetPosition: { x: 120, y: 2 } })
   await expect.poll(() => state.ids[0]).toBe('n-3')
+  expect(moves()).toHaveLength(3)
   await panel.getByRole('button', { name: 'Show queued in the list' }).click()
   await expect(page).toHaveURL(/status=queued/)
   await expect(page.locator('tr.ticket-row:not(.ghost)')).toHaveCount(2)
@@ -163,28 +186,72 @@ test('keyboard and drag moves persist, use workspace positions, retain focus, re
   await expect(drawer).toHaveCount(0)
   await row(page, 'PHAROS-14').locator('.title-text').click()
   await drawer.getByRole('button', { name: 'Move to top', exact: true }).click()
-  expect(state.queueCalls.filter(call => call.path.endsWith('/move')).at(-1)?.body).toEqual({ position: 5 })
+  await expect.poll(() => moves().length).toBe(4)
+  expect(moves()[3]!.body).toEqual({ position: 5 })
   await expect(drawer.getByRole('button', { name: 'Move to top', exact: true })).toBeDisabled()
 })
+// Risk: a pending queue refresh reorders the focused ticket after the request's
+// original control has lost focus, leaving subsequent keyboard moves on the page.
+for (const theme of ['light', 'dark']) for (const width of [390, 1024, 1440]) {
+  test(`queue refresh preserves the ticket focused while a reset is pending ${width} ${theme}`, async ({ page }, testInfo) => {
+    const { state, data } = await world(page, { offset: 4 })
+    data.nodes.find(node => node.id === 'n-4')!.title = 'Veröffentlichung vorbereiten und die Ergebnisse der automatischen Prüfungen vollständig dokumentieren'
+    await page.setViewportSize({ width, height: 1000 })
+    await page.evaluate(value => { document.documentElement.dataset.theme = value }, theme)
+    const opener = page.getByRole('button', { name: /queued\. Open the work queue/ })
+    await opener.click()
+    const panel = page.getByRole('dialog', { name: 'Work queue', exact: true })
+    await panel.getByRole('button', { name: 'Move PHAROS-13 to the top' }).click()
+    await expect(panel.getByRole('button', { name: /^Number 5: PHAROS-13/ })).toBeFocused()
+    const reset = panel.getByRole('button', { name: 'Reset shared queue across projects' })
+    await expect(reset).toBeEnabled()
+    let reached!: () => void, release!: () => void
+    const requested = new Promise<void>(resolve => { reached = resolve })
+    const response = new Promise<void>(resolve => { release = resolve })
+    await page.route('**/api/queue/reset', async route => { reached(); await response; await route.fallback() })
+    try {
+      const ticket = panel.locator('[data-ticket="n-4"] [data-action="open"]')
+      await expectStableControls({
+        controls: { opener, reset, ticket, actions: panel.locator('[data-ticket="n-4"] .qv-acts') },
+        scrollAreas: { queue: panel, page: page.locator('html') },
+        interactions: [{ name: 'focus the ticket while reset is pending', run: async () => {
+          await reset.click()
+          await requested
+          await ticket.focus()
+          await expect(ticket).toBeFocused()
+        } }],
+      })
+      release()
+      await expect(panel.getByRole('note')).toHaveCount(0)
+      await expect(panel.getByRole('button', { name: /^Number 5: PHAROS-14/ })).toBeFocused()
+      expect(state.ids).toEqual(['n-4', 'n-3'])
+      await expect(panel.getByRole('button', { name: 'Move PHAROS-14 down' })).toBeEnabled()
+      await page.keyboard.press('Alt+ArrowDown')
+      await expect(panel.getByRole('button', { name: /^Number 6: PHAROS-14/ })).toBeFocused()
+      expect(state.queueCalls.filter(call => call.path.endsWith('/move')).at(-1)?.body).toEqual({ position: 6 })
+      await page.screenshot({ path: testInfo.outputPath(`queue-focus-${width}-${theme}.png`) })
+    } finally { release() }
+  })
+}
 test('not-ready fixes apply server estimate and explicitly save criteria/blocker without erasing other fields', async ({ page }) => {
   const { data, state } = await world(page, { missing: true })
   await row(page, 'PHAROS-14').hover()
   await row(page, 'PHAROS-14').getByRole('button', { name: /Queue PHAROS-14/ }).click()
-  const panel = page.getByRole('dialog', { name: /PHAROS-14: what is missing/ })
+  const panel = page.getByRole('dialog', { name: 'PHAROS-14: Ready checks' })
   await expect(panel.getByRole('button', { name: 'Queue', exact: true })).toBeDisabled()
-  await expect(panel.getByRole('button', { name: 'Apply ~3 h' })).toBeVisible()
-  await expect(panel.getByRole('status')).toHaveText('Still missing: estimate, acceptance criteria, a named blocker.')
+  await expect(panel.getByRole('button', { name: 'Suggest estimate' })).toBeVisible()
+  await expect(panel.getByRole('heading', { name: 'Ready 0 of 3' })).toBeVisible()
   for (const theme of ['light', 'dark']) { await page.evaluate(value => { document.documentElement.dataset.theme = value }, theme); await page.screenshot({ path: join(shots, `not-ready-${theme}.png`) }) }
-  await panel.getByRole('button', { name: 'Apply ~3 h' }).click()
-  await expect(panel.getByRole('status')).toHaveText('Still missing: acceptance criteria, a named blocker.')
-  await panel.getByRole('button', { name: 'Draft criteria' }).click()
-  await panel.getByRole('textbox', { name: 'Draft acceptance criteria' }).fill('- [ ] Verified in both themes')
-  await panel.getByRole('button', { name: 'Save criteria' }).click()
+  await panel.getByRole('button', { name: 'Suggest estimate' }).click()
+  await expect(panel.getByRole('heading', { name: 'Ready 1 of 3' })).toBeVisible()
+  await panel.getByRole('button', { name: 'Write criteria' }).click()
+  await panel.getByRole('textbox', { name: 'Acceptance criteria', exact: true }).fill('- [ ] Verified in both themes')
+  await panel.getByRole('button', { name: /^Save/ }).click()
   await panel.getByRole('button', { name: 'Name it' }).click()
   await panel.getByRole('textbox', { name: 'Name the blocker' }).fill('PHAROS-11')
-  await panel.getByRole('button', { name: 'Save blocker' }).click()
+  await panel.getByRole('button', { name: /^Save/ }).click()
   await expect(panel.getByRole('button', { name: 'Queue', exact: true })).toBeEnabled()
-  await expect(panel.getByRole('status')).toHaveText('Queued work meets the definition of ready.')
+  await expect(panel.getByRole('heading', { name: 'Ready 3 of 3' })).toBeVisible()
   await panel.getByRole('button', { name: 'Queue', exact: true }).click()
   await expect.poll(() => state.ids.includes('n-4')).toBe(true)
   const node = data.nodes.find(n => n.id === 'n-4')!
@@ -228,9 +295,31 @@ test('a live blocks relation satisfies readiness for the dot, Queue, bulk and St
   await blocked.hover(); await blocked.getByRole('button', { name: 'Queue PHAROS-14', exact: true }).click()
   await expect.poll(() => state.ids.includes('n-4')).toBe(true)
   await expect(page.getByRole('dialog', { name: /what is missing/ })).toHaveCount(0)
-  await blocked.getByRole('button', { name: /Remove PHAROS-14 from the queue/ }).click()
-  await blocked.getByRole('checkbox', { name: 'Select PHAROS-14' }).check(); await page.keyboard.press('q')
+  await expect(blocked.getByRole('button', { name: /Remove PHAROS-14 from the queue/ })).toBeEnabled()
+  // Hold the membership refresh after DELETE: the fixture has already removed
+  // the item while the store still owns the write and ignores bulk shortcuts.
+  let releaseRefresh!: () => void, refreshEntered!: () => void
+  const refreshHeld = new Promise<void>(resolve => { releaseRefresh = resolve })
+  const refreshStarted = new Promise<void>(resolve => { refreshEntered = resolve })
+  let held = false
+  await page.route(url => url.pathname === '/api/queue', async route => {
+    if (!held && route.request().method() === 'GET' && !state.ids.includes('n-4')) {
+      held = true; refreshEntered(); await refreshHeld
+    }
+    await route.fallback()
+  })
+  try {
+    await blocked.getByRole('button', { name: /Remove PHAROS-14 from the queue/ }).click()
+    await refreshStarted
+    await expect(blocked.locator('.q-btn')).toBeDisabled()
+    await blocked.getByRole('checkbox', { name: 'Select PHAROS-14' }).check()
+  } finally { releaseRefresh() }
+  const add = blocked.getByRole('button', { name: 'Queue PHAROS-14', exact: true })
+  await expect(add).toBeEnabled()
+  await expect(add).toHaveAttribute('aria-pressed', 'false')
+  await page.keyboard.press('q')
   await expect.poll(() => state.ids.includes('n-4')).toBe(true)
+  await expect(blocked.getByRole('button', { name: /Remove PHAROS-14 from the queue/ })).toBeEnabled()
   await page.keyboard.press('Escape')
   await blocked.getByRole('button', { name: /Change assignee/ }).click()
   const menu = page.getByRole('dialog', { name: 'Assignee of PHAROS-14', exact: true })
@@ -394,13 +483,15 @@ test('approved queue surfaces in light/dark and narrow layouts, with accessible 
     const fold = page.locator('.phone-header-fold')
     if (await fold.count()) {
       for (const density of ['Comfortable', 'Compact']) {
+        // AEON-1188: header density lives in the Display menu, linked from the Filters sheet.
         await page.getByRole('button', { name: 'Filters', exact: true }).click()
-        const sheet = page.getByRole('dialog', { name: 'Filters', exact: true })
+        await page.getByRole('dialog', { name: 'Filters', exact: true }).getByRole('button', { name: 'Display settings…', exact: true }).click()
+        const sheet = page.getByRole('dialog', { name: 'Display options', exact: true })
         const group = sheet.getByRole('radiogroup', { name: 'Project header density', exact: true })
         const choice = group.getByRole('radio', { name: density, exact: true })
         await expectStableControls({
           controls: { sheet, group, choice, apply: sheet.locator('footer button') },
-          scrollAreas: { body: sheet.locator('.sheet-scroll') },
+          scrollAreas: { body: sheet.locator('.menu-body') },
           interactions: [{ name: `${density} header`, run: async () => { await choice.click(); await expect(choice).toHaveAttribute('aria-checked', 'true') } }],
         })
         await sheet.locator('footer button').click()
@@ -526,7 +617,7 @@ test('live-work In progress stays disabled even when worker details are hidden',
 })
 
 
-test('stale progress hints and ticket actions stay still in both themes at phone tablet and desktop widths', async ({ page }) => {
+test('stale progress hints and ticket actions stay still in both themes at phone tablet and desktop widths', async ({ page }, testInfo) => {
   await world(page, { stale: true, longTitle: true })
   for (const width of [390, 1024, 1440]) {
     await page.setViewportSize({ width, height: 1000 })
@@ -534,10 +625,16 @@ test('stale progress hints and ticket actions stay still in both themes at phone
     for (const theme of ['light', 'dark']) {
       await page.evaluate(value => { document.documentElement.dataset.theme = value }, theme)
       for (const dismiss of await page.locator('.toast-close').all()) await dismiss.click()
-      await ticket.hover()
-      await expect(ticket.locator('.stale-hint.shown')).toHaveCount(1)
-      await page.screenshot({ path: join(shots, `aeon-682-list-${width}-${theme}.png`) })
-      await ticket.locator('.title-text').click()
+      const title = ticket.locator('.title-text')
+      // The reserved person-waiting slot must leave a real title target in a
+      // narrow saved layout, including a long name beside its parent chip.
+      const geometry = await ticket.locator('.c-title .title-cell').evaluate(cell => [...cell.children].map(child => ({ class: child.className, width: child.getBoundingClientRect().width })))
+      await expect(title, `${width}px ${theme}: ${JSON.stringify(geometry)}`).toBeVisible()
+      await expectStableControls({ controls: { title, ticket, copy: ticket.getByRole('button', { name: 'Copy PHAROS-12', exact: true }) }, interactions: [
+        { name: 'hover stale ticket', run: async () => { await ticket.hover(); await expect(ticket.locator('.stale-hint.shown')).toHaveCount(1) } },
+      ] })
+      await page.screenshot({ path: testInfo.outputPath(`aeon-682-list-${width}-${theme}.png`) })
+      await title.click()
       const drawer = page.getByRole('complementary', { name: 'Ticket details' })
       await expect(drawer.locator('.stale-hint.shown')).toHaveCount(1)
       const action = drawer.locator('.q-btn')
@@ -546,7 +643,7 @@ test('stale progress hints and ticket actions stay still in both themes at phone
         { name: 'Undo in detail view', run: async () => { await page.getByRole('button', { name: 'Undo', exact: true }).click(); await expect(action).toHaveAttribute('aria-pressed', 'false') } },
       ] })
       for (const dismiss of await page.locator('.toast-close').all()) await dismiss.click()
-      await page.screenshot({ path: join(shots, `aeon-682-ticket-${width}-${theme}.png`) })
+      await page.screenshot({ path: testInfo.outputPath(`aeon-682-ticket-${width}-${theme}.png`) })
       await drawer.getByRole('button', { name: 'Close ticket details' }).click()
     }
   }
@@ -557,10 +654,10 @@ test('stale progress queued through readiness fixes also offers Undo', async ({ 
   const { data, state } = await world(page, { stale: true, staleMissing: true })
   const ticket = row(page, 'PHAROS-12')
   await ticket.hover(); await ticket.locator('.q-btn').click()
-  const panel = page.getByRole('dialog', { name: 'PHAROS-12: what is missing to queue it' })
-  await panel.getByRole('button', { name: 'Draft criteria' }).click()
-  await panel.getByRole('textbox', { name: 'Draft acceptance criteria' }).fill('- [ ] Recovery verified')
-  await panel.getByRole('button', { name: 'Save criteria' }).click()
+  const panel = page.getByRole('dialog', { name: 'PHAROS-12: Ready checks' })
+  await panel.getByRole('button', { name: 'Write criteria' }).click()
+  await panel.getByRole('textbox', { name: 'Acceptance criteria', exact: true }).fill('- [ ] Recovery verified')
+  await panel.getByRole('button', { name: /^Save/ }).click()
   await expect(panel.getByRole('button', { name: 'Queue', exact: true })).toBeEnabled()
   await panel.getByRole('button', { name: 'Queue', exact: true }).click()
   await expect(ticket.locator('.c-status')).toContainText('Open')
@@ -571,7 +668,19 @@ test('stale progress queued through readiness fixes also offers Undo', async ({ 
 })
 
 test('successful Undo refreshes membership and reports a failed ticket read honestly', async ({ page }) => {
+  // The fixture stream's initial open schedules a 400 ms workspace + project
+  // queue refresh. Drain it under an injected clock before counting Undo reads;
+  // otherwise its two reads can race the stability guard on Linux Chromium.
+  await page.clock.install({ time: new Date(now) })
+  await page.clock.pauseAt(new Date(Date.parse(now) + 1000))
   const { state, data } = await world(page, { stale: true })
+  const initialQueueReads = ['', 'p-pharos'].map(project => page.waitForResponse(response => {
+    const url = new URL(response.url())
+    return response.request().method() === 'GET' && url.pathname === '/api/queue' && (url.searchParams.get('project_id') ?? '') === project
+  }))
+  await page.clock.fastForward(1000)
+  await Promise.all(initialQueueReads)
+  await page.clock.resume()
   const ticket = row(page, 'PHAROS-12'), queue = ticket.locator('.q-btn')
   await ticket.hover(); await queue.click()
   await expect(queue).toHaveAttribute('aria-pressed', 'true')

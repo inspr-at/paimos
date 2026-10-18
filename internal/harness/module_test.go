@@ -12,12 +12,15 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"os/exec"
 	"strings"
 	"testing"
 	"time"
 
 	"github.com/jackc/pgx/v5"
 
+	"github.com/inspr-at/paimos/internal/agentruns"
 	"github.com/inspr-at/paimos/internal/db"
 	"github.com/inspr-at/paimos/internal/dbtest"
 	"github.com/inspr-at/paimos/internal/events"
@@ -25,7 +28,18 @@ import (
 	"github.com/inspr-at/paimos/internal/nodes"
 	"github.com/inspr-at/paimos/internal/plugins"
 	"github.com/inspr-at/paimos/internal/tenant"
+	"github.com/inspr-at/paimos/internal/workerlease"
 )
+
+func TestMain(m *testing.M) {
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	if output, err := exec.CommandContext(ctx, "node", "../../api/generate.mjs", "--write").CombinedOutput(); err != nil {
+		fmt.Fprintf(os.Stderr, "prepare OpenAPI: %v\n%s", err, output)
+		os.Exit(1)
+	}
+	os.Exit(m.Run())
+}
 
 func uid() string {
 	var b [16]byte
@@ -96,14 +110,14 @@ func fixtureWithKind(t *testing.T, now func() time.Time, kind string) *harnessFi
 	// Production authentication carries the key row on the principal; lead
 	// claims bind it as the generation's dispatch credential.
 	f.tx(t, f.agent, func(tx pgx.Tx) error {
-		return tx.QueryRow(t.Context(), `INSERT INTO agent_keys(tenant_id,principal_id,name,prefix,hash,scopes) VALUES($1,$2,'harness-test',$3,$4,$5) RETURNING id::text`, f.agent.TenantID, f.agent.ID, prefix, hex.EncodeToString(sum[:]), []string{"harness.read", "harness.write", "harness.worker", "harness.control"}).Scan(&f.agent.AuthKeyID)
+		return tx.QueryRow(t.Context(), `INSERT INTO agent_keys(tenant_id,principal_id,name,prefix,hash,scopes,created_by_principal_id) VALUES($1,$2,'harness-test',$3,$4,$5,(SELECT id FROM principals WHERE tenant_id=$1::uuid AND kind='person' ORDER BY created_at,id LIMIT 1)) RETURNING id::text`, f.agent.TenantID, f.agent.ID, prefix, hex.EncodeToString(sum[:]), []string{"harness.read", "harness.write", "harness.worker", "harness.control"}).Scan(&f.agent.AuthKeyID)
 	})
 	f.key = "aeon_" + prefix + "_" + secret
 	// Registration needs worker authority; keep read authority absent so the
 	// live-list privacy fixtures still exercise a worker-only caller.
 	f.agent.Scopes = []string{"harness.worker"}
 	if now == nil {
-		harness.New(f.db.App, nodes.CapturePlanningStart).Mount(f.mux)
+		harness.NewWithSessionRecovery(f.db.App, agentruns.PrepareSessionRecovery, nodes.CapturePlanningStart).Mount(f.mux)
 	} else {
 		harness.NewWithOwnershipClock(f.db.App, now).Mount(f.mux)
 	}
@@ -115,7 +129,7 @@ func (f *harnessFixture) tx(t *testing.T, p tenant.Principal, fn func(pgx.Tx) er
 		t.Fatal(err)
 	}
 }
-func (f *harnessFixture) call(p tenant.Principal, method, path string, body any, lease string) *httptest.ResponseRecorder {
+func (f *harnessFixture) call(p tenant.Principal, method, path string, body any, lease string, headers ...map[string]string) *httptest.ResponseRecorder {
 	raw, _ := json.Marshal(body)
 	r := httptest.NewRequest(method, path, bytes.NewReader(raw)).WithContext(tenant.WithPrincipal(context.Background(), p))
 	if p.Kind == tenant.Agent {
@@ -123,6 +137,11 @@ func (f *harnessFixture) call(p tenant.Principal, method, path string, body any,
 	}
 	if lease != "" {
 		r.Header.Set("X-Aeon-Worker-Lease", lease)
+	}
+	for _, group := range headers {
+		for name, value := range group {
+			r.Header.Set(name, value)
+		}
 	}
 	w := httptest.NewRecorder()
 	f.mux.ServeHTTP(w, r)
@@ -303,7 +322,7 @@ func TestHarnessBindingRevisionAndHierarchy(t *testing.T) {
 	parent := register("vendor-ref-00000000000000003", nil)
 	child := register("vendor-ref-00000000000000004", &parent)
 	bind := func(session string, revision int, parentID *string) *httptest.ResponseRecorder {
-		return f.call(f.person, "PATCH", base+"/"+session+"/binding", map[string]any{"expected_revision": revision, "parent_harness_session_id": parentID, "ticket_node_id": f.ticket, "work_shape": "ship"}, "")
+		return f.call(f.person, "PATCH", base+"/"+session+"/binding", map[string]any{"expected_revision": revision, "parent_harness_session_id": parentID, "ticket_node_id": f.ticket, "work_shape": "ship", "parallel_reason": "Exercise independent hierarchy bindings on the same ticket"}, "")
 	}
 	w := bind(child, 1, &parent)
 	expect(t, w, 200)
@@ -363,6 +382,56 @@ func TestHistoricalRegistrationAndHeartbeatWithoutRequestContract(t *testing.T) 
 			if got := decode(t, w); got["harness"] != name || got["phase"] != "working" {
 				t.Fatal("historical heartbeat changed:", got)
 			}
+		})
+	}
+}
+
+// Risk: a leaked generation proof remains usable after stop, or migration drops
+// authentication for either supported transport. Only synthetic proofs are used.
+func TestWorkerLeaseHeaderTransitionAndStoppedAuthority(t *testing.T) {
+	for _, transport := range []string{"legacy", "scheme"} {
+		t.Run(transport, func(t *testing.T) {
+			f := fixture(t)
+			path, _, lease := usageSession(t, f, "unmanaged")
+			headers := map[string]string{}
+			if transport == "legacy" {
+				headers[workerlease.LegacyHeader] = lease
+			} else {
+				headers["Authorization"] = workerlease.Value(f.key, lease)
+			}
+			beat := map[string]any{"phase": "working", "activity_sequence": 1}
+			call := func(suffix string, body any) *httptest.ResponseRecorder {
+				w := f.call(f.agent, "POST", path+suffix, body, "", headers)
+				if strings.Contains(w.Body.String(), lease) {
+					t.Fatal("response exposed worker proof")
+				}
+				return w
+			}
+			expect(t, call("/heartbeat", beat), 200)
+			expect(t, f.call(f.agent, "POST", path+"/heartbeat", beat, ""), 403)
+			expect(t, f.call(f.person, "POST", path+"/heartbeat", beat, "", headers), 403)
+			wrong := "wrong-worker-lease-" + uid()
+			wrongHeaders := map[string]string{workerlease.LegacyHeader: wrong}
+			if transport == "scheme" {
+				wrongHeaders = map[string]string{"Authorization": workerlease.Value(f.key, wrong)}
+			}
+			expect(t, f.call(f.agent, "POST", path+"/heartbeat", beat, "", wrongHeaders), 403)
+			// A malformed worker scheme never falls back to a valid legacy proof.
+			expect(t, f.call(f.agent, "POST", path+"/heartbeat", beat, "", map[string]string{"Authorization": "Aeon-Worker " + f.key, workerlease.LegacyHeader: lease}), 403)
+			expect(t, f.call(f.agent, "POST", path+"/heartbeat", beat, "", map[string]string{"Authorization": workerlease.Value(f.key, lease), workerlease.LegacyHeader: wrong}), 403)
+			// Proxy-Authorization is hop-by-hop. It is not worker proof.
+			expect(t, f.call(f.agent, "POST", path+"/heartbeat", beat, "", map[string]string{"Proxy-Authorization": "Bearer " + lease}), 403)
+			stop := map[string]any{"reason": "process_exited"}
+			expect(t, call("/stop", stop), 200)
+			// Preserve the existing completed-stop replay policy. Explicit
+			// exit confirmation remains idempotent after stopped_at is set.
+			expect(t, call("/stop", stop), 403)
+			expect(t, call("/confirm-exit", stop), 200)
+			expect(t, call("/heartbeat", beat), 403)
+			expect(t, call("/yield", map[string]any{}), 403)
+			report := usagePayload()
+			expect(t, call("/usage", report), 200)
+			expect(t, call("/usage", report), 200)
 		})
 	}
 }

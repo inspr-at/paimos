@@ -1,0 +1,70 @@
+{
+  "_license": "SPDX-License-Identifier: AGPL-3.0-only",
+  "builtin_roles": {
+    "admin": [
+      "comments.delete",
+      "comments.read",
+      "comments.write"
+    ],
+    "guest": [
+      "comments.read",
+      "comments.write"
+    ],
+    "member": [
+      "comments.delete",
+      "comments.read",
+      "comments.write"
+    ],
+    "owner": [
+      "comments.delete",
+      "comments.read",
+      "comments.write"
+    ],
+    "viewer": [
+      "comments.read"
+    ]
+  },
+  "registry": [
+    {
+      "agent_grantable": true,
+      "description": "Delete comments",
+      "grantable_at": [
+        "workspace",
+        "project"
+      ],
+      "group": "Comments",
+      "key": "comments.delete",
+      "owner_workstation_grantable": true,
+      "risk": "high"
+    },
+    {
+      "agent_grantable": true,
+      "description": "Read comments",
+      "grantable_at": [
+        "workspace",
+        "project"
+      ],
+      "group": "Comments",
+      "key": "comments.read",
+      "owner_workstation_grantable": true,
+      "risk": "low"
+    },
+    {
+      "agent_grantable": true,
+      "description": "Write comments",
+      "grantable_at": [
+        "workspace",
+        "project"
+      ],
+      "group": "Comments",
+      "key": "comments.write",
+      "owner_workstation_grantable": true,
+      "risk": "medium"
+    }
+  ],
+  "words": {
+    "resources": {
+      "comments": "comments"
+    }
+  }
+}

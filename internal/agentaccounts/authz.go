@@ -13,14 +13,15 @@ import (
 
 	"github.com/inspr-at/paimos/internal/authz"
 	"github.com/inspr-at/paimos/internal/tenant"
+	"github.com/inspr-at/paimos/internal/workerlease"
 )
 
 func presentedSecret(r *http.Request) (prefix, secret string, ok bool) {
-	scheme, token, found := strings.Cut(strings.TrimSpace(r.Header.Get("Authorization")), " ")
-	if !found || !strings.EqualFold(scheme, "Bearer") {
+	token, malformed := workerlease.AgentToken(strings.TrimSpace(r.Header.Get("Authorization")))
+	if malformed || token == "" {
 		return "", "", false
 	}
-	rest, ok := strings.CutPrefix(strings.TrimSpace(token), "aeon_")
+	rest, ok := strings.CutPrefix(token, "aeon_")
 	if !ok {
 		return "", "", false
 	}
@@ -42,8 +43,9 @@ func readKeyScopes(ctx context.Context, tx pgx.Tx, r *http.Request, p tenant.Pri
 	}
 	sum := sha256.Sum256([]byte(secret))
 	var scopes []string
+	var fullAccess bool
 	query := `
-		SELECT scopes FROM agent_keys
+		SELECT scopes,coalesce(full_access,false) FROM agent_keys
 		WHERE prefix = $1 AND hash = $2 AND principal_id = $3::uuid
 		  AND revoked_at IS NULL
 		  AND (expires_at IS NULL OR expires_at > now())`
@@ -53,11 +55,11 @@ func readKeyScopes(ctx context.Context, tx pgx.Tx, r *http.Request, p tenant.Pri
 		query += ` FOR SHARE`
 	}
 	err := tx.QueryRow(ctx, query,
-		prefix, hex.EncodeToString(sum[:]), p.ID).Scan(&scopes)
+		prefix, hex.EncodeToString(sum[:]), p.ID).Scan(&scopes, &fullAccess)
 	if err != nil {
 		return nil, fail(http.StatusForbidden, "agent key required")
 	}
-	return scopes, nil
+	return authz.ResolveKeyScopes(scopes, fullAccess), nil
 }
 
 func hasScope(scopes []string, want string) bool {

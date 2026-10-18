@@ -20,6 +20,7 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 
+	"github.com/inspr-at/paimos/internal/attachedmsg"
 	"github.com/inspr-at/paimos/internal/authz"
 	"github.com/inspr-at/paimos/internal/db"
 	"github.com/inspr-at/paimos/internal/events"
@@ -82,6 +83,7 @@ func (m *messaging) Mount(mux *http.ServeMux) {
 	mux.HandleFunc("POST /api/projects/{projectId}/messages", m.sendMessage)
 	mux.HandleFunc("GET /api/projects/{projectId}/messages", m.inspectMessages)
 	mux.HandleFunc("POST /api/projects/{projectId}/messages/{messageId}/resolution", m.resolveMessage)
+	mux.HandleFunc("POST /api/projects/{projectId}/messages/{messageId}/cancel", m.cancelSessionMessage)
 	mux.HandleFunc("GET /api/projects/{projectId}/messages/listen", m.listenMessages)
 	mux.HandleFunc("POST /api/projects/{projectId}/messages/{messageId}/ack", m.ackCompatMessage)
 	mux.HandleFunc("GET /api/projects/{projectId}/message-deliveries", m.getDeliveries)
@@ -93,6 +95,9 @@ func (m *messaging) Mount(mux *http.ServeMux) {
 // Messaging errors must not log pgx errors: they can contain private row
 // values. Return only controlled error codes, including on encryption failure.
 func messagingFailure(w http.ResponseWriter, err error) {
+	if attachedmsg.WriteError(w, err) {
+		return
+	}
 	var he *httpError
 	if errors.As(err, &he) {
 		writeError(w, he.status, he.code, he.msg)
@@ -405,4 +410,9 @@ func (m *messaging) getTargets(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, 200, items)
+}
+
+// WithAttachedMessages shares the volatile broker with raw inbox and pairing.
+func WithAttachedMessages(service *attachedmsg.Service) func(*messaging) {
+	return func(m *messaging) { m.base.attached = service }
 }

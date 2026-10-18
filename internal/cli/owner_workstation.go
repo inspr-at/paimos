@@ -13,12 +13,13 @@ import (
 // Whitelist metadata: even a faulty server cannot print a token through these
 // commands. Session cookies are used only for the explicitly supplied request.
 type workstationKeyView struct {
-	ID               string   `json:"id"`
-	PrincipalID      string   `json:"principal_id"`
-	Name             string   `json:"name"`
-	Scopes           []string `json:"scopes"`
-	OwnerWorkstation bool     `json:"owner_workstation"`
-	Computer         *string  `json:"workstation_computer_id"`
+	CreatedByPrincipalID *string  `json:"created_by_principal_id"`
+	ID                   string   `json:"id"`
+	PrincipalID          string   `json:"principal_id"`
+	Name                 string   `json:"name"`
+	Scopes               []string `json:"scopes"`
+	OwnerWorkstation     bool     `json:"owner_workstation"`
+	Computer             *string  `json:"workstation_computer_id"`
 }
 
 func (rt *runtime) keyMetadataRequest(method, path, sessionFile, rawURL string, body, result any) error {
@@ -117,6 +118,26 @@ func (rt *runtime) cmdOwnerWorkstation() *Command {
 			}
 			var result workstationKeyView
 			if err := rt.keyMetadataRequest("PUT", "/api/agent-keys/"+args[0]+"/owner-workstation", sessionFile, rawURL, body, &result); err != nil {
+				return err
+			}
+			return rt.printWorkstationKey(result)
+		},
+	}
+}
+
+func (rt *runtime) cmdKeyAdopt() *Command {
+	var sessionFile, rawURL string
+	return &Command{Name: "adopt", Short: "Make yourself the person owner of a creatorless key", Use: "keys adopt <key-id> --session-file PATH [--url URL]", minArgs: 1, maxArgs: 1,
+		addFlags: func(fs *flagSet) {
+			fs.string(&sessionFile, "session-file", 0, "person session cookie file, or - for stdin")
+			fs.string(&rawURL, "url", 0, "instance URL for --session-file")
+		},
+		run: func(args []string) error {
+			if !validUUID(args[0]) || sessionFile == "" {
+				return usagef("key UUID and person --session-file required")
+			}
+			var result workstationKeyView
+			if err := rt.keyMetadataRequest("POST", "/api/agent-keys/"+args[0]+"/adopt", sessionFile, rawURL, nil, &result); err != nil {
 				return err
 			}
 			return rt.printWorkstationKey(result)

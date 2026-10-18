@@ -88,6 +88,12 @@ func (rt *runtime) resolveModelForTicket(role, author, harness, ticket string) e
 	if strings.HasPrefix(result.Role, "review-gate") && result.Profile != nil && result.Profile.Family == author {
 		return rt.fail(fmt.Errorf("invalid review resolution: selected author family"), "")
 	}
+	if strings.HasPrefix(result.Role, "review-gate") && result.Profile != nil {
+		p := result.Profile
+		if err := modelregistry.ValidateReviewCommand(p.Harness, p.Model, p.Effort, result.CommandTemplate); err != nil {
+			return rt.fail(fmt.Errorf("invalid review resolution: %w", err), "")
+		}
+	}
 	var profiles []modelProfile
 	if err := rt.do(http.MethodGet, "/api/models", nil, &profiles); err != nil {
 		return err
@@ -131,8 +137,10 @@ func (rt *runtime) resolveModelForTicket(role, author, harness, ticket string) e
 		if err := rt.printJSON(out); err != nil {
 			return err
 		}
-	} else if result.Profile != nil {
-		fmt.Fprintf(rt.stdout, "%s@%s — %s\n%s\n", result.Profile.Slug, result.Profile.Version, result.Profile.Family, result.CommandTemplate)
+	} else if result.Profile != nil || result.OwnerRequired {
+		if result.Profile != nil {
+			fmt.Fprintf(rt.stdout, "%s@%s — %s\n%s\n", result.Profile.Slug, result.Profile.Version, result.Profile.Family, result.CommandTemplate)
+		}
 		for _, step := range result.Ladder {
 			label := slugByID[step.ProfileID]
 			if label == "" {
@@ -166,6 +174,9 @@ func (rt *runtime) resolveModelForTicket(role, author, harness, ticket string) e
 		fmt.Fprintln(rt.stdout)
 	}
 	if result.OwnerRequired {
+		if !strings.HasPrefix(result.Role, "review-gate") {
+			return rt.fail(fmt.Errorf("no allowed model route can run right now"), "")
+		}
 		return rt.fail(fmt.Errorf("owner approval required; review gate remains closed"), "")
 	}
 	return nil
@@ -184,11 +195,13 @@ func (rt *runtime) cmdSessionStart() *Command {
 	var project, agent, format, bundle string
 	var ruleOpts rulesOptions
 	var receiveOpts rulesReceiveOptions
+	var native nativeSessionOptions
 	return &Command{
 		Name:  "start",
 		Short: "Mint an attribution id, preview rules, or explicitly receive rules for a registered session",
 		Use:   "session start --project KEY --agent NAME",
 		addFlags: func(fs *flagSet) {
+			native.flags(fs)
 			fs.string(&project, "project", 0, "project key (required)")
 			fs.string(&agent, "agent", 0, "agent name (required)")
 			fs.string(&format, "format", 0, "env (default) or json")
@@ -197,6 +210,18 @@ func (rt *runtime) cmdSessionStart() *Command {
 			receiveOpts.flags(fs)
 		},
 		run: func(args []string) error {
+			if native.Profile != "" {
+				if native.Profile != "native" {
+					return usagef("--profile must be native")
+				}
+				if len(args) != 0 || agent != "" || format != "" || bundle != "" || ruleOpts.Preview || receiveOpts.used() {
+					return usagef("native start is separate from attribution and rules flags")
+				}
+				return rt.startNativeSession(project, native)
+			}
+			if native.used() {
+				return usagef("native session flags require --profile native")
+			}
 			if strings.TrimSpace(project) == "" {
 				return usagef("--project is required")
 			}
@@ -555,38 +580,6 @@ func (rt *runtime) cmdMessageTargetList() *Command {
 			}
 			return nil
 		},
-	}
-}
-
-func stubCommand(name, use, reason string, subs ...string) *Command {
-	if len(subs) == 0 {
-		return &Command{
-			Name:  name,
-			Short: "Not available on Aeon",
-			Use:   use,
-			run: func(args []string) error {
-				return notYet(reason)
-			},
-		}
-	}
-	children := make([]*Command, 0, len(subs))
-	for _, sub := range subs {
-		subName := sub
-		children = append(children, &Command{
-			Name:    subName,
-			Short:   "Not available on Aeon",
-			Use:     name + " " + subName,
-			maxArgs: -1,
-			run: func(args []string) error {
-				return notYet(reason)
-			},
-		})
-	}
-	return &Command{
-		Name:  name,
-		Short: "Not available on Aeon",
-		Use:   use,
-		subs:  children,
 	}
 }
 

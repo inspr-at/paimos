@@ -4,6 +4,7 @@ package doctrine
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"slices"
 	"strings"
@@ -17,6 +18,7 @@ type Release struct {
 	Repository string
 	Ref        string
 	Commit     string
+	Stale      bool
 }
 
 // Indexed is one git-backed rule from the AEON-318 index. Identity is
@@ -44,19 +46,27 @@ func LoadCatalog(ctx context.Context, tx pgx.Tx) (Catalog, error) {
 	}
 	cat := Catalog{Releases: make([]Release, 0, len(sources)), Rules: []Indexed{}}
 	for _, s := range sources {
+		stale := false
 		if s.CredentialRef != "" {
 			var tenantID string
 			if err := tx.QueryRow(ctx, `SELECT current_setting('aeon.tenant_id')`).Scan(&tenantID); err != nil {
 				return Catalog{}, err
 			}
 			credentials, _ := ctx.Value(catalogCredentialsKey{}).(Credentials)
-			if err := credentials.authorize(s.CredentialRef, tenantID, s.Repository); err != nil {
-				// Fail closed before reading the cache or exposing a matching
-				// identity. Publication cannot certify an inaccessible source.
-				return Catalog{}, err
+			if err := credentials.authorizeSource(s, tenantID); err != nil {
+				if errors.Is(err, errMirrorCommitChanged) && s.IndexedAt != nil {
+					// The host export advances independently of this indexed pin.
+					// Its grant and read-only marker remain valid; deliver only
+					// the pinned cache, never bytes from the new export.
+					stale = true
+				} else {
+					// Fail closed before exposing an inaccessible source's cache
+					// or matching identity, including revoked or invalid mirrors.
+					return Catalog{}, err
+				}
 			}
 		}
-		cat.Releases = append(cat.Releases, Release{Repository: s.Repository, Ref: s.Ref, Commit: s.Commit})
+		cat.Releases = append(cat.Releases, Release{Repository: s.Repository, Ref: s.Ref, Commit: s.Commit, Stale: stale})
 		if s.IndexedAt == nil {
 			continue
 		}
@@ -99,10 +109,14 @@ func (c Catalog) Pointer() string {
 	var b strings.Builder
 	b.WriteString("Doctrine (harness channel, not repeated here):\n")
 	for _, rel := range c.Releases {
+		status := ""
+		if rel.Stale {
+			status = " (stale: host mirror advanced; serving the indexed pin)"
+		}
 		if rel.Ref != "" {
-			fmt.Fprintf(&b, "- %s@%s %s\n", rel.Repository, rel.Ref, rel.Commit)
+			fmt.Fprintf(&b, "- %s@%s %s%s\n", rel.Repository, rel.Ref, rel.Commit, status)
 		} else {
-			fmt.Fprintf(&b, "- %s@%s\n", rel.Repository, rel.Commit)
+			fmt.Fprintf(&b, "- %s@%s%s\n", rel.Repository, rel.Commit, status)
 		}
 	}
 	b.WriteByte('\n')

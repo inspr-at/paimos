@@ -1,0 +1,615 @@
+// SPDX-License-Identifier: AGPL-3.0-only
+package delivery
+
+import (
+	"bytes"
+	"context"
+	"encoding/json"
+	"errors"
+	"fmt"
+	"log/slog"
+	"net/http/httptest"
+	"strings"
+	"testing"
+	"time"
+
+	"github.com/inspr-at/paimos/internal/crossreview"
+	"github.com/inspr-at/paimos/internal/db"
+	"github.com/inspr-at/paimos/internal/tenant"
+	"github.com/jackc/pgx/v5"
+)
+
+// metricsFake serves recorded GitHub API bodies by request path.
+type metricsFake struct {
+	*auditFake
+	respond func(path string) (any, error)
+	calls   []string
+	source  string
+}
+
+// A green queue suite has no failed checks to quarantine. Keep that ingress
+// reader available while independently injecting the Actions runs for Flow.
+type metricsQueueFake struct{ *metricsFake }
+
+func (g *metricsQueueFake) QueueChecks(context.Context, queueSuite, *queueRun) (string, []queueRun, error) {
+	return "CI", nil, nil
+}
+
+func (g *metricsFake) MetricsRead(_ context.Context, tenantID string, read func(func(string, any) error, string) error) error {
+	if tenantID == "" {
+		return errRead
+	}
+	source := g.source
+	if source == "" {
+		source = historyActions
+	}
+	return read(func(path string, out any) error {
+		g.calls = append(g.calls, path)
+		body, err := g.respond(path)
+		if err != nil {
+			return err
+		}
+		raw, _ := json.Marshal(body)
+		return json.Unmarshal(raw, out)
+	}, source)
+}
+
+func newMetricsFixture(t *testing.T) (*fixture, *metricsFake) {
+	t.Helper()
+	f := newFixture(t)
+	g := &metricsFake{auditFake: &auditFake{fakeGitHub: f.gh, facts: map[string]*MergeFact{}, checks: map[string][]Check{}}}
+	g.respond = func(path string) (any, error) { return nil, fmt.Errorf("unexpected GitHub read %s", path) }
+	f.m.github = g
+	var source MetricSource
+	f.call(t, f.person, "PUT", "/api/projects/"+f.project+"/delivery/metrics/source", map[string]any{"repository": f.m.config.Repository}, 200, &source)
+	if !source.AppConnected || source.Backfill != "running" || source.CIWorkflow != defaultCIWorkflow {
+		t.Fatalf("source: %+v", source)
+	}
+	return f, g
+}
+
+func githubRunBody(id int64, attempt int, workflow, event, branch, head string, created time.Time, wall time.Duration, conclusion string, suite int64) map[string]any {
+	return map[string]any{"id": id, "run_attempt": attempt, "name": "CI", "path": workflow, "event": event, "head_branch": branch, "head_sha": head, "status": "completed", "conclusion": conclusion,
+		"created_at": created, "run_started_at": created.Add(time.Minute), "updated_at": created.Add(time.Minute + wall), "check_suite_id": suite, "pull_requests": []any{}}
+}
+
+// githubJobsBody is a GitHub jobs list of one attempt: the five required checks,
+// each waiting waitSeconds for a runner, and one skipped job that "started" much
+// later (a skipped job has no wait). A conclusion "-" leaves that required job out.
+func githubJobsBody(created time.Time, waitSeconds int, conclusions map[string]string) map[string]any {
+	jobs := []any{}
+	for _, name := range defaultRequiredChecks {
+		conclusion := "success"
+		if v, ok := conclusions[name]; ok {
+			conclusion = v
+		}
+		if conclusion == "-" {
+			continue
+		}
+		jobs = append(jobs, map[string]any{"name": name, "conclusion": conclusion, "created_at": created, "started_at": created.Add(time.Duration(waitSeconds) * time.Second)})
+	}
+	jobs = append(jobs, map[string]any{"name": "go-test (1)", "conclusion": "skipped", "created_at": created, "started_at": created.Add(time.Hour)})
+	return map[string]any{"total_count": len(jobs), "jobs": jobs}
+}
+
+func metricCounts(t *testing.T, f *fixture) (runs, pulls, marks int) {
+	t.Helper()
+	f.tx(t, func(tx pgx.Tx) error {
+		return tx.QueryRow(t.Context(), `SELECT (SELECT count(*) FROM delivery_metric_runs),(SELECT count(*) FROM delivery_metric_pulls),(SELECT count(*) FROM delivery_metric_marks)`).Scan(&runs, &pulls, &marks)
+	})
+	return
+}
+
+func TestDeliveryWebhookUnlinkedMetricSource(t *testing.T) {
+	// Risk: an unconfigured metric consumer rejects an authenticated delivery
+	// on an unnecessary Actions read, or suppresses linked checks/queue facts.
+	for _, tc := range []struct {
+		name                                                                                                         string
+		linked, queue, projectedQueue, suiteRefs, suitePR, unrelated, delayed, unlinked, fail, reconciled, saturated bool
+	}{
+		{name: "read_available"},
+		{name: "read_unavailable", fail: true},
+		{name: "unrelated_linked_pull", linked: true, unrelated: true, fail: true},
+		{name: "linked_checks_empty_suite_pulls", linked: true},
+		{name: "linked_checks_explicit_suite_pull", linked: true, suitePR: true},
+		{name: "delayed_empty_suite_after_synchronization", linked: true, delayed: true},
+		{name: "reconciled_then_synchronized_delayed_empty_suite", linked: true, delayed: true, reconciled: true},
+		{name: "delayed_suite_current_link_removed", linked: true, delayed: true, unlinked: true, fail: true},
+		{name: "saturated_history_all_links_removed", linked: true, delayed: true, unlinked: true, saturated: true, fail: true},
+		{name: "linked_queue_empty_suite_pulls", linked: true, queue: true},
+		{name: "linked_queue_refs_prefix", linked: true, queue: true, suiteRefs: true},
+		{name: "linked_queue_projected_head", linked: true, queue: true, projectedQueue: true},
+		{name: "linked_read_failure_then_redelivery", linked: true, fail: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			f := newFixture(t)
+			g := &metricsFake{auditFake: &auditFake{fakeGitHub: f.gh, facts: map[string]*MergeFact{}, checks: map[string][]Check{}}}
+			f.m.github = g
+			if tc.queue {
+				f.m.github = &metricsQueueFake{metricsFake: g}
+			}
+			p := f.pull()
+			if tc.linked {
+				f.gh.pulls[7] = p
+				if tc.reconciled {
+					if err := f.m.Reconcile(t.Context(), f.person.TenantID); err != nil {
+						t.Fatal(err)
+					}
+				} else {
+					auditSend(t, f, "pull_request", "unconfigured-pr-open", map[string]any{"action": "opened", "pull_request": map[string]any{"number": 7, "created_at": f.at.Add(-2 * time.Hour), "head": map[string]any{"sha": p.Head, "ref": p.Branch}, "base": map[string]any{"sha": p.Base, "ref": "main", "repo": map[string]any{"full_name": f.m.config.Repository}}}}, 204)
+				}
+				if item := f.item(t, 7); item.Ticket == nil || *item.Ticket != f.ticket {
+					t.Fatal("fixture pull is not linked to its ticket")
+				}
+			}
+			head, branch, event, stepKey := strings.Repeat("d", 40), "work/aeon-1241", "pull_request", "ci"
+			if tc.linked && !tc.unrelated {
+				head, branch = p.Head, p.Branch
+			}
+			if tc.queue {
+				head, branch, event, stepKey = strings.Repeat("c", 40), "gh-readonly-queue/main/pr-7-"+p.Head, "merge_group", "queue"
+			}
+			if tc.projectedQueue {
+				auditSend(t, f, "merge_group", "unconfigured-queue", map[string]any{"action": "checks_requested", "merge_group": map[string]any{"head_sha": head, "base_sha": p.Base, "head_ref": "refs/heads/" + branch}}, 204)
+			}
+			if tc.delayed {
+				current := p
+				current.Head = strings.Repeat("e", 40)
+				f.gh.pulls[7] = current
+				auditSend(t, f, "pull_request", "unconfigured-pr-sync", map[string]any{"action": "synchronize", "pull_request": map[string]any{"number": 7, "created_at": f.at.Add(-2 * time.Hour), "head": map[string]any{"sha": current.Head, "ref": current.Branch}, "base": map[string]any{"sha": current.Base, "ref": "main", "repo": map[string]any{"full_name": f.m.config.Repository}}}}, 204)
+				if item := f.item(t, 7); item.Head != current.Head || item.Head == head {
+					t.Fatal("synchronization did not replace the projected head")
+				}
+				if tc.unlinked {
+					f.tx(t, func(tx pgx.Tx) error {
+						if tc.saturated {
+							_, err := tx.Exec(t.Context(), `INSERT INTO delivery_github_events(tenant_id,delivery_id,event,repository,head_sha,received_at,payload_sha256,observations,fanout_done,processed_at)
+								SELECT tenant_id,'saturated-'||n,event,repository,head_sha,received_at,payload_sha256,observations,true,processed_at
+								FROM delivery_github_events CROSS JOIN generate_series(1,101) n WHERE delivery_id='unconfigured-pr-open'`)
+							if err != nil {
+								return err
+							}
+						}
+						_, err := tx.Exec(t.Context(), `UPDATE delivery_items SET project_id=NULL,ticket_node_id=NULL WHERE repository=$1 AND pull_request=7`, f.m.config.Repository)
+						return err
+					})
+				}
+			}
+			needsFlow := tc.linked && !tc.unrelated && !tc.unlinked
+			unavailable := tc.fail
+			g.respond = func(path string) (any, error) {
+				if path != "/actions/runs?check_suite_id=900&head_sha="+head+"&per_page=2" {
+					t.Fatalf("unexpected GitHub read: %s", path)
+				}
+				if unavailable {
+					return nil, crossreview.ErrUnavailable
+				}
+				run := githubRunBody(501, 1, defaultCIWorkflow, event, branch, head, f.at.Add(-time.Hour), 10*time.Minute, "success", 900)
+				if needsFlow && !tc.queue {
+					run["pull_requests"] = []any{map[string]any{"number": 7}}
+				}
+				return map[string]any{"total_count": 1, "workflow_runs": []any{run}}, nil
+			}
+			var logs bytes.Buffer
+			f.m.webhookFailures.logger = slog.New(slog.NewJSONHandler(&logs, nil))
+			f.tx(t, func(tx pgx.Tx) error {
+				var sources int
+				if err := tx.QueryRow(t.Context(), `SELECT count(*) FROM delivery_metric_sources`).Scan(&sources); err != nil {
+					return err
+				}
+				if sources != 0 {
+					t.Fatalf("fixture unexpectedly linked %d metric sources", sources)
+				}
+				return nil
+			})
+			suiteBranch := branch
+			if tc.suiteRefs {
+				suiteBranch = "refs/heads/" + branch
+			}
+			if tc.projectedQueue {
+				suiteBranch = ""
+			}
+			pulls := []any{}
+			if tc.suitePR {
+				pulls = append(pulls, map[string]any{"number": 7})
+			}
+			body := map[string]any{
+				"action":       "completed",
+				"installation": map[string]any{"id": 456},
+				"repository":   map[string]any{"full_name": f.m.config.Repository, "default_branch": "main"},
+				"check_suite":  map[string]any{"id": 900, "head_sha": head, "head_branch": suiteBranch, "status": "completed", "app": map[string]any{"slug": "github-actions"}, "pull_requests": pulls},
+			}
+			raw, err := json.Marshal(body)
+			if err != nil {
+				t.Fatal(err)
+			}
+			send := func() *httptest.ResponseRecorder {
+				r := webhookLogRequest("check_suite", string(raw))
+				r.Header.Set("X-Hub-Signature-256", signed(raw, f.m.secret))
+				w := httptest.NewRecorder()
+				f.mux.ServeHTTP(w, r)
+				return w
+			}
+			w := send()
+			var ledger int
+			f.tx(t, func(tx pgx.Tx) error {
+				return tx.QueryRow(t.Context(), `SELECT count(*) FROM delivery_github_events WHERE delivery_id='delivery-log-test' AND event='check_suite'`).Scan(&ledger)
+			})
+			if ledger != 1 {
+				t.Fatalf("authenticated projection ledger: %d, want 1", ledger)
+			}
+			if needsFlow && unavailable {
+				if w.Code != 502 || len(g.calls) != 1 || flowEventCount(t, f) != 0 {
+					t.Fatalf("required flow read failure: status=%d reads=%d flow events=%d", w.Code, len(g.calls), flowEventCount(t, f))
+				}
+				assertWebhookFailureLine(t, &logs, "check_suite", "completed", "flow", "github_unavailable", 502, nil)
+				// Explicit redelivery compatibility remains covered here;
+				// internal recovery has separate per-step receipt regressions.
+				unavailable = false
+				logs.Reset()
+				g.calls = nil
+				w = send()
+			}
+			if w.Code != 204 {
+				t.Fatalf("unlinked metric source: status %d, want 204", w.Code)
+			}
+			runs, metricPulls, marks := metricCounts(t, f)
+			if runs+metricPulls+marks != 0 || logs.Len() != 0 {
+				t.Fatalf("unlinked metrics must be a no-op: facts=%d logs=%d", runs+metricPulls+marks, logs.Len())
+			}
+			if !needsFlow {
+				if len(g.calls) != 0 || flowEventCount(t, f) != 0 {
+					t.Fatalf("no consumer: reads=%d flow events=%d", len(g.calls), flowEventCount(t, f))
+				}
+				return
+			}
+			if len(g.calls) != 1 {
+				t.Fatalf("linked flow Actions reads: %d, want 1", len(g.calls))
+			}
+			if key, ended, outcome := flowStepRow(t, f, "github_app", "run/501/1"); key != stepKey || ended == nil || outcome == nil || *outcome != "green" {
+				t.Fatalf("linked flow step: %s %v %v", key, ended, outcome)
+			}
+			if tc.queue {
+				if key, ended, _ := flowStepRow(t, f, "github_app", "run/501/1/queued"); key != "queue" || ended == nil {
+					t.Fatalf("queue wait: %s %v", key, ended)
+				}
+			}
+			before := flowEventCount(t, f)
+			if before == 0 {
+				t.Fatal("linked flow wrote no events")
+			}
+			if w = send(); w.Code != 204 || flowEventCount(t, f) != before {
+				t.Fatalf("redelivery changed flow: status=%d events=%d -> %d", w.Code, before, flowEventCount(t, f))
+			}
+			if runs, pulls, marks := metricCounts(t, f); runs+pulls+marks != 0 {
+				t.Fatal("redelivery wrote unconfigured metrics")
+			}
+		})
+	}
+
+	t.Run("unconfigured_pull_and_review", func(t *testing.T) {
+		f := newFixture(t)
+		g := &metricsFake{auditFake: &auditFake{fakeGitHub: f.gh, facts: map[string]*MergeFact{}, checks: map[string][]Check{}}}
+		g.respond = func(path string) (any, error) { t.Fatalf("unexpected metric read: %s", path); return nil, errRead }
+		f.m.github = g
+		p := f.pull()
+		f.gh.pulls[7] = p
+		auditSend(t, f, "pull_request", "no-source-pull", map[string]any{"action": "opened", "pull_request": map[string]any{"number": 7, "created_at": f.at.Add(-time.Hour), "head": map[string]any{"sha": p.Head, "ref": p.Branch}, "base": map[string]any{"sha": p.Base, "ref": "main", "repo": map[string]any{"full_name": f.m.config.Repository}}}}, 204)
+		auditSend(t, f, "status", "no-source-review", map[string]any{"sha": p.Head, "state": "success", "context": "aeon/review", "created_at": f.at}, 204)
+		if runs, pulls, marks := metricCounts(t, f); runs+pulls+marks != 0 || len(g.calls) != 0 {
+			t.Fatalf("unconfigured pull/review metrics: runs=%d pulls=%d marks=%d reads=%d", runs, pulls, marks, len(g.calls))
+		}
+	})
+}
+
+func TestDeliveryMetricsWebhookRecordsEachEventKind(t *testing.T) {
+	// Risk: a webhook kind is accepted but its timing fact is lost, a
+	// redelivery duplicates it, or a failed GitHub read reports success.
+	f, g := newMetricsFixture(t)
+	p := f.pull()
+	f.gh.pulls[7] = p
+	opened := f.at.Add(-3 * time.Hour)
+	auditSend(t, f, "pull_request", "metrics-pr-open", map[string]any{"action": "opened", "pull_request": map[string]any{"number": 7, "created_at": opened, "head": map[string]any{"sha": p.Head, "ref": p.Branch}, "base": map[string]any{"sha": p.Base, "ref": "main", "repo": map[string]any{"full_name": f.m.config.Repository}}}}, 204)
+
+	head := strings.Repeat("d", 40)
+	created := f.at.Add(-2 * time.Hour)
+	suite := map[string]any{"action": "completed", "check_suite": map[string]any{"id": 900, "head_sha": head, "head_branch": "work/aeon-848-delivery", "status": "completed", "conclusion": "success", "app": map[string]any{"slug": "github-actions"}, "pull_requests": []any{}}}
+	latest := githubRunBody(501, 2, defaultCIWorkflow, "pull_request", "work/aeon-848-delivery", head, created.Add(30*time.Minute), 12*time.Minute, "success", 900)
+	latest["pull_requests"] = []any{map[string]any{"number": 7}}
+	first := githubRunBody(501, 1, defaultCIWorkflow, "pull_request", "work/aeon-848-delivery", head, created, 10*time.Minute, "failure", 900)
+	g.respond = func(path string) (any, error) {
+		switch path {
+		case "/actions/runs?check_suite_id=900&head_sha=" + head + "&per_page=2":
+			return map[string]any{"total_count": 1, "workflow_runs": []any{latest}}, nil
+		case "/actions/runs/501/attempts/1":
+			return first, nil
+		}
+		return nil, errRead
+	}
+	auditSend(t, f, "check_suite", "metrics-suite", suite, 204)
+	// A redelivery converges on the same rows.
+	auditSend(t, f, "check_suite", "metrics-suite", suite, 204)
+	pending := f.at.Add(-90 * time.Minute)
+	auditSend(t, f, "status", "metrics-review-pending", map[string]any{"sha": head, "state": "pending", "context": "aeon/review", "created_at": pending}, 204)
+	auditSend(t, f, "status", "metrics-review-ok", map[string]any{"sha": head, "state": "success", "context": "aeon/review", "created_at": pending.Add(11 * time.Minute)}, 204)
+	// Other contexts and check runs carry no metric fact of their own.
+	auditSend(t, f, "status", "metrics-other-status", map[string]any{"sha": head, "state": "success", "context": "lint", "created_at": pending}, 204)
+	auditSend(t, f, "check_run", "metrics-check-run", map[string]any{"action": "completed", "check_run": map[string]any{"head_sha": head, "name": "go-test", "status": "completed", "conclusion": "success"}}, 204)
+
+	runs, pulls, marks := metricCounts(t, f)
+	if runs != 2 || pulls != 1 || marks != 2 {
+		t.Fatalf("facts runs=%d pulls=%d marks=%d, want 2/1/2", runs, pulls, marks)
+	}
+	var conclusions string
+	f.tx(t, func(tx pgx.Tx) error {
+		return tx.QueryRow(t.Context(), `SELECT string_agg(attempt||':'||conclusion||':'||coalesce(pull_request::text,'-')||':'||source,',' ORDER BY attempt) FROM delivery_metric_runs WHERE run_id=501`).Scan(&conclusions)
+	})
+	if conclusions != "1:failure:-:webhook,2:success:7:webhook" {
+		t.Fatalf("run attempts: %s", conclusions)
+	}
+
+	// A merged close records the merge time on the existing pull.
+	merged := f.at.Add(-time.Hour)
+	body := auditPRBody(f, MergeFact{SHA: strings.Repeat("e", 40), Head: p.Head, Title: "AEON-848: delivery", Branch: p.Branch, MergedBy: "octo", PR: ptrInt(7), At: merged})
+	body["pull_request"].(map[string]any)["created_at"] = opened
+	auditSend(t, f, "pull_request", "metrics-pr-merged", body, 204)
+
+	// A suite whose run GitHub cannot return stays retryable: 502, no row.
+	g.respond = func(string) (any, error) { return nil, errRead }
+	broken := map[string]any{"action": "completed", "check_suite": map[string]any{"id": 901, "head_sha": strings.Repeat("f", 40), "head_branch": "work/x", "status": "completed", "app": map[string]any{"slug": "github-actions"}, "pull_requests": []any{}}}
+	auditSend(t, f, "check_suite", "metrics-suite-broken", broken, 502)
+	if runs, _, _ := metricCounts(t, f); runs != 2 {
+		t.Fatalf("failed read stored runs: %d", runs)
+	}
+
+	var out DeliveryMetrics
+	f.call(t, f.person, "GET", "/api/projects/"+f.project+"/delivery/metrics", nil, 200, &out)
+	if out.Source == nil || out.Source.CoveredSince == nil || !out.Source.CoveredSince.Equal(f.at) || len(out.Metrics) != 20 {
+		t.Fatalf("metrics source: %+v (%d metrics)", out.Source, len(out.Metrics))
+	}
+	wall := metricByKey(t, out.Metrics, "pr_ci_wall")
+	wantWindow(t, wall, 30, "partial", 1, f64(10), f64(10), f64(10))
+	flaky := metricByKey(t, out.Metrics, "flaked_failures")
+	wantWindow(t, flaky, 30, "no_data", 1, nil, nil, nil)
+	wantCounts(t, flaky, 30, map[string]int{"confirmed": 0, "workflow_rescue": 1})
+	wantWindow(t, metricByKey(t, out.Metrics, "pr_open_to_merged"), 30, "partial", 1, f64(120), f64(120), f64(120))
+	wantWindow(t, metricByKey(t, out.Metrics, "review_time"), 30, "partial", 1, f64(11), f64(11), f64(11))
+}
+
+func ptrInt(n int64) *int64 { return &n }
+
+func TestDeliveryMetricsBackfillIsBoundedResumableAndIdempotent(t *testing.T) {
+	// Risk: a backfill that fails midway loses its place or writes half a
+	// step, a repeat duplicates facts, or one call reads without bound.
+	f, g := newMetricsFixture(t)
+	day := f.at.AddDate(0, 0, -3) // 2026-10-04
+	ci := "/actions/workflows/ci.yml/runs?created=" + day.Format("2006-01-02") + "&status=completed&per_page=100&page=1"
+	nightly := "/actions/workflows/nightly-full.yml/runs?created=" + day.Format("2006-01-02") + "&status=completed&per_page=100&page=1"
+	rerun := githubRunBody(601, 2, defaultCIWorkflow, "pull_request", "work/a", strings.Repeat("1", 40), day.Add(2*time.Hour), 9*time.Minute, "success", 0)
+	failOn := ""
+	g.respond = func(path string) (any, error) {
+		// An empty failOn means the step should succeed. The repository read
+		// uses that empty path, so the sentinel must not match it.
+		if failOn != "" && path == failOn {
+			return nil, errRead
+		}
+		switch {
+		case path == "":
+			return map[string]any{"full_name": f.m.config.Repository, "default_branch": "main"}, nil
+		case path == ci:
+			return map[string]any{"total_count": 2, "workflow_runs": []any{
+				githubRunBody(600, 1, defaultCIWorkflow, "merge_group", "gh-readonly-queue/main/pr-7-"+strings.Repeat("a", 40), strings.Repeat("a", 40), day.Add(time.Hour), 14*time.Minute, "success", 0), rerun}}, nil
+		case path == "/actions/runs/601/attempts/1":
+			return githubRunBody(601, 1, defaultCIWorkflow, "pull_request", "work/a", strings.Repeat("1", 40), day.Add(time.Hour), 8*time.Minute, "failure", 0), nil
+		case strings.HasPrefix(path, "/actions/runs/") && strings.HasSuffix(path, "/attempts/1/jobs?per_page=100&page=1"):
+			return githubJobsBody(day.Add(time.Hour), 30, nil), nil
+		case path == nightly:
+			return map[string]any{"total_count": 1, "workflow_runs": []any{githubRunBody(602, 1, defaultNightlyWorkflow, "schedule", "main", strings.Repeat("2", 40), day.Add(3*time.Hour), 40*time.Minute, "failure", 0)}}, nil
+		case strings.HasPrefix(path, "/actions/workflows/"):
+			return map[string]any{"total_count": 0, "workflow_runs": []any{}}, nil
+		case path == "/pulls?state=all&sort=updated&direction=desc&per_page=100&page=1":
+			pull := func(n int64, updated time.Time) map[string]any {
+				return map[string]any{"number": n, "created_at": updated.Add(-time.Hour), "updated_at": updated, "merged_at": updated, "closed_at": updated, "head": map[string]any{"ref": "work/x"}, "base": map[string]any{"ref": "main", "repo": map[string]any{"full_name": f.m.config.Repository}}}
+			}
+			return []any{pull(7, day.Add(5*time.Hour)), pull(8, day.Add(-60*24*time.Hour))}, nil
+		}
+		return nil, fmt.Errorf("unexpected GitHub read %s", path)
+	}
+	// 31 days × 3 workflows (CI, nightly, preflight). The first two bounded
+	// steps stay in runs; the third is the one that reaches pulls.
+	var step BackfillResult
+	backfillPath := "/api/projects/" + f.project + "/delivery/metrics/backfill"
+	f.call(t, f.person, "POST", backfillPath, map[string]any{"days": 30}, 200, &step)
+	if step.State != "running" || step.Calls > backfillCallBudget || step.Phase != "runs" || step.Day == nil {
+		t.Fatalf("first step: %+v", step)
+	}
+	f.call(t, f.person, "POST", backfillPath, map[string]any{}, 200, &step)
+	if step.Phase != "runs" || step.Day == nil || step.Calls > backfillCallBudget {
+		t.Fatalf("second step still in runs: %+v", step)
+	}
+	anchor := step
+	// The next step fails on the pulls page: nothing is written and the
+	// stored position stays where the previous step left it.
+	failOn = "/pulls?state=all&sort=updated&direction=desc&per_page=100&page=1"
+	f.call(t, f.person, "POST", backfillPath, map[string]any{}, 502, nil)
+	runsBefore, pullsBefore, _ := metricCounts(t, f)
+	var cursor []byte
+	f.tx(t, func(tx pgx.Tx) error {
+		return tx.QueryRow(t.Context(), `SELECT backfill_cursor FROM delivery_metric_sources WHERE project_id=$1`, f.project).Scan(&cursor)
+	})
+	var stored backfillCursor
+	if err := json.Unmarshal(cursor, &stored); err != nil || stored.Phase != "runs" || stored.Day != *anchor.Day {
+		t.Fatalf("failed step moved the cursor: %s (%v)", cursor, err)
+	}
+	if pullsBefore != 0 {
+		t.Fatalf("failed step wrote %d pulls", pullsBefore)
+	}
+	failOn = ""
+	// Explicit Check again bypasses the new server retry delay.
+	f.call(t, f.person, "POST", "/api/projects/"+f.project+"/delivery/metrics/check-again", nil, 200, &step)
+	// The runs and pulls are in, but two first attempts still lack their jobs:
+	// the backfill is not done until the jobs pass has read them.
+	if step.State != "running" || step.Phase != "jobs" {
+		t.Fatalf("resumed step: %+v", step)
+	}
+	f.call(t, f.person, "POST", "/api/projects/"+f.project+"/delivery/metrics/backfill", map[string]any{}, 200, &step)
+	// Both eligible first attempts fit in this step. Nothing is deferred, so
+	// the same call finishes. The call above rejects done before they are read.
+	if step.State != "done" || step.Phase != "done" || step.Jobs != 2 || step.RetryAt != nil {
+		t.Fatalf("jobs step: %+v", step)
+	}
+	runs, pulls, _ := metricCounts(t, f)
+	if runs != 4 || pulls != 1 || runsBefore > runs {
+		t.Fatalf("backfilled runs=%d pulls=%d (before %d)", runs, pulls, runsBefore)
+	}
+	// Done is sticky without restart and reads nothing.
+	calls := len(g.calls)
+	f.call(t, f.person, "POST", "/api/projects/"+f.project+"/delivery/metrics/backfill", map[string]any{}, 200, &step)
+	if step.State != "done" || len(g.calls) != calls {
+		t.Fatalf("done backfill read GitHub again: %+v", step)
+	}
+	// A restart reads the same history and converges on the same rows.
+	f.call(t, f.person, "POST", "/api/projects/"+f.project+"/delivery/metrics/backfill", map[string]any{"days": 30, "restart": true}, 200, &step)
+	for i := 0; step.State != "done" && i < 12; i++ {
+		f.call(t, f.person, "POST", "/api/projects/"+f.project+"/delivery/metrics/backfill", map[string]any{}, 200, &step)
+	}
+	if r, p, _ := metricCounts(t, f); r != runs || p != pulls {
+		t.Fatalf("restart duplicated facts: runs %d→%d pulls %d→%d", runs, r, pulls, p)
+	}
+	var out DeliveryMetrics
+	f.call(t, f.person, "GET", "/api/projects/"+f.project+"/delivery/metrics", nil, 200, &out)
+	if out.Source == nil || out.Source.Backfill != "done" || out.Source.CoveredSince == nil || !out.Source.CoveredSince.Equal(dayStart(f.at.AddDate(0, 0, -30))) {
+		t.Fatalf("source after backfill: %+v", out.Source)
+	}
+	wantWindow(t, metricByKey(t, out.Metrics, "first_attempt_green"), 30, "ok", 1, f64(0), nil, nil)
+	wantWindow(t, metricByKey(t, out.Metrics, "queue_run_wall"), 30, "ok", 1, f64(14), f64(14), f64(14))
+	wantWindow(t, metricByKey(t, out.Metrics, "nightly_green"), 30, "ok", 1, f64(0), nil, nil)
+}
+
+func TestDeliveryMetricsBackfillStepsCoverEveryDayOnce(t *testing.T) {
+	// Risk: resuming from a stored cursor skips or repeats a day.
+	now := time.Date(2026, 10, 8, 12, 0, 0, 0, time.UTC)
+	since := dayStart(now.AddDate(0, 0, -60))
+	seen := map[string]int{}
+	get := func(path string, out any) error {
+		if path == "" {
+			return json.Unmarshal([]byte(`{"full_name":"example/delivery","default_branch":"main"}`), out)
+		}
+		if strings.HasPrefix(path, "/pulls") {
+			return json.Unmarshal([]byte(`[]`), out)
+		}
+		seen[path]++
+		return json.Unmarshal([]byte(`{"total_count":0,"workflow_runs":[]}`), out)
+	}
+	cursor := backfillCursor{Since: since, Phase: "runs", Day: since.Format("2006-01-02"), Page: 1}
+	steps := 0
+	for cursor.Phase != "done" {
+		next, batch, err := backfillStep(get, "example/delivery", []string{defaultCIWorkflow, defaultNightlyWorkflow}, cursor, now)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if batch.Calls > backfillCallBudget {
+			t.Fatalf("step used %d calls", batch.Calls)
+		}
+		cursor = next
+		if steps++; steps > 10 {
+			t.Fatal("backfill did not finish")
+		}
+	}
+	if len(seen) != 2*61 || steps < 3 {
+		t.Fatalf("listed %d workflow days in %d steps, want %d", len(seen), steps, 2*61)
+	}
+	for path, n := range seen {
+		if n != 1 {
+			t.Fatalf("%s read %d times", path, n)
+		}
+	}
+}
+
+func TestDeliveryMetricsReadIsProjectMembersOnly(t *testing.T) {
+	// Risk: delivery numbers or facts leak to people outside the project.
+	f, _ := newMetricsFixture(t)
+	release := map[string]any{"facts": []any{map[string]any{"kind": "release", "key": "261008161926.0.0", "started_at": f.at.Add(-50 * time.Minute), "at": f.at.Add(-10 * time.Minute), "outcome": "live"}}}
+	var stored map[string]int
+	f.call(t, f.person, "POST", "/api/projects/"+f.project+"/delivery/metrics/facts", release, 200, &stored)
+	if stored["stored"] != 1 {
+		t.Fatalf("stored: %v", stored)
+	}
+	// The same key corrects the earlier report instead of adding one.
+	f.call(t, f.person, "POST", "/api/projects/"+f.project+"/delivery/metrics/facts", release, 200, &stored)
+	f.call(t, f.person, "POST", "/api/projects/"+f.project+"/delivery/metrics/facts", map[string]any{"facts": []any{map[string]any{"kind": "merge_round", "key": "x", "at": f.at, "outcome": "model"}}}, 400, nil)
+	var otherProject, reader, nodesOnly, outsider string
+	f.tx(t, func(tx pgx.Tx) error {
+		if err := tx.QueryRow(t.Context(), `INSERT INTO nodes(tenant_id,key,kind_id,title) SELECT $1,'OTHER-1',id,'Other project' FROM node_kinds WHERE slug='project' RETURNING id::text`, f.person.TenantID).Scan(&otherProject); err != nil {
+			return err
+		}
+		role := func(key string, permissions ...string) (string, error) {
+			var id string
+			if err := tx.QueryRow(t.Context(), `INSERT INTO roles(tenant_id,key,name) VALUES($1,$2,$2) RETURNING id::text`, f.person.TenantID, key).Scan(&id); err != nil {
+				return "", err
+			}
+			for _, permission := range permissions {
+				if _, err := tx.Exec(t.Context(), `INSERT INTO role_permissions(tenant_id,role_id,permission) VALUES($1,$2,$3)`, f.person.TenantID, id, permission); err != nil {
+					return "", err
+				}
+			}
+			return id, nil
+		}
+		readerRole, err := role("metrics_reader", "delivery.read", "nodes.read")
+		if err != nil {
+			return err
+		}
+		nodesRole, err := role("metrics_nodes", "nodes.read")
+		if err != nil {
+			return err
+		}
+		person := func(name string) (string, error) {
+			var id string
+			err := tx.QueryRow(t.Context(), `INSERT INTO principals(tenant_id,kind,name) VALUES($1,'person',$2) RETURNING id::text`, f.person.TenantID, name).Scan(&id)
+			return id, err
+		}
+		if reader, err = person("Project reader"); err != nil {
+			return err
+		}
+		if nodesOnly, err = person("Nodes only"); err != nil {
+			return err
+		}
+		if outsider, err = person("Other project member"); err != nil {
+			return err
+		}
+		for _, b := range []struct{ who, role, project string }{{reader, readerRole, f.project}, {nodesOnly, nodesRole, f.project}, {outsider, readerRole, otherProject}} {
+			if _, err := tx.Exec(t.Context(), `INSERT INTO role_bindings(tenant_id,principal_id,role_id,scope_type,scope_id) VALUES($1,$2,$3,'project',$4)`, f.person.TenantID, b.who, b.role, b.project); err != nil {
+				return err
+			}
+		}
+		return nil
+	})
+	path := "/api/projects/" + f.project + "/delivery/metrics"
+	who := func(id string) tenant.Principal {
+		return tenant.Principal{ID: id, TenantID: f.person.TenantID, Kind: tenant.Person}
+	}
+	var out DeliveryMetrics
+	f.call(t, who(reader), "GET", path, nil, 200, &out)
+	rel := metricByKey(t, out.Metrics, "release_queue_to_live")
+	if rel.Latest == nil || rel.Latest.Value != 40 || rel.Windows[1].N != 1 {
+		t.Fatalf("member reads the reported release: %+v", rel)
+	}
+	f.call(t, who(reader), "POST", "/api/projects/"+f.project+"/delivery/metrics/facts", release, 403, nil)
+	f.call(t, who(nodesOnly), "GET", path, nil, 403, nil)
+	f.call(t, who(outsider), "GET", path, nil, 404, nil)
+	f.call(t, f.foreign, "GET", path, nil, 404, nil)
+	// Row security keeps the facts themselves inside the project too.
+	count := func(id string) int {
+		var n int
+		err := db.InTenant(tenant.WithPrincipal(t.Context(), who(id)), f.d.App, f.person.TenantID, func(tx pgx.Tx) error {
+			return tx.QueryRow(t.Context(), `SELECT (SELECT count(*) FROM delivery_metric_marks)+(SELECT count(*) FROM delivery_metric_sources)`).Scan(&n)
+		})
+		if err != nil && !errors.Is(err, pgx.ErrNoRows) {
+			t.Fatal(err)
+		}
+		return n
+	}
+	if count(reader) != 2 || count(outsider) != 0 {
+		t.Fatalf("row security: reader %d, other project %d", count(reader), count(outsider))
+	}
+}

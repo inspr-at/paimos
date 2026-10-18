@@ -2,6 +2,7 @@
 import { defineStore } from 'pinia'
 import { computed, ref, shallowRef, triggerRef } from 'vue'
 import { APIError, getNode } from '../lib/api'
+import { ensurePermissions } from '../lib/authz'
 import {
   decideApproval, getControl, listAccounts, listApprovals, listMessages, listModels, listTargets, requestManagedControl,
   requestControl, resolveMessage, revokeApproval, sendMessage, setAccountState, archiveAccount,
@@ -9,7 +10,7 @@ import {
 } from '../lib/agents'
 import { cancelRun, getSession, listAllSessions, listRuns, type AgentRunRow, type HarnessSessionRow } from '../lib/agentRows'
 import { openRow, type Wire } from '../lib/wire'
-import { agentName, byStart, byStopped, harnessLabel, heldRequests, mergeSessionEvidence, needsYou, pendingApprovals, runModel, sessionStatus, type SessionStatus } from '../lib/agentState'
+import { agentName, byStart, byStopped, harnessLabel, heldRequests, mergeSessionEvidence, needsYou, pendingApprovals, retriedBy, retriedStatus, runModel, sessionStatus, type SessionStatus } from '../lib/agentState'
 import { advanceActivity, type ActivityEvidence } from '../lib/liveAgents'
 import { toast } from '../lib/toast'
 import { managedControlSession } from '../lib/managedControl'
@@ -94,6 +95,8 @@ export interface NodeRef { id: string; key: string; title: string }
 export interface SessionView {
   session: HarnessSession; status: SessionStatus; name: string; harness: string; account: string; model: string
   run?: AgentRun; projectKey: string; projectTitle: string; ticket: (NodeRef & { href: string }) | null
+  /** The attempt that retried this failed one (AEON-1285); its details link there. */
+  retry?: { id: string; name: string }
 }
 export type HeldRequest = ProjectMessage & { projectId: string }
 
@@ -175,9 +178,13 @@ export const useAgents = defineStore('agents', () => {
   const accounts = accountsRead.data
   const accountsState = computed(() => accountsRead.status.value.state)
   const accountsUpdatedAt = computed(() => accountsRead.status.value.updatedAt)
+  const accountsStatus = accountsRead.status
   const messagingState = ref<Availability>('idle')
   const pendingHeld = ref<Record<string, ProjectMessage[]>>({})
   const threads = ref<Record<string, ProjectMessage[]>>({})
+  const threadStates = ref<Record<string, Availability>>({})
+  const threadMore = ref<Record<string, boolean>>({})
+  let threadGeneration = 0
   const addresses = ref<Record<string, string>>({})
   const runs = shallowRef<Record<string, AgentRun>>({})
   const agentRuns = ref<Record<string, string[]>>({})
@@ -220,13 +227,16 @@ export const useAgents = defineStore('agents', () => {
   // The newest runs cover the rows' account, model and telemetry in one read.
   const refreshRuns = runsRead.refresh
   // Held action requests still waiting on a person, and message addresses for names.
+  // This poll is not the session thread. pending=true requires inbox.manage, so a
+  // harness reader is refused; that refusal must not hide the composer. Only the
+  // thread read (refreshThread) sets messagingState.
   const messagingOrder = createReadOrder()
   async function refreshMessaging(force = false, retried = false): Promise<void> {
     if (!force && Date.now() - messagingAt < 30_000) return
     messagingAt = Date.now()
     const ticket = messagingOrder.begin()
     const ids = sessionProjects()
-    if (!ids.length) { pendingHeld.value = {}; if (messagingState.value === 'idle') messagingState.value = 'ready'; return }
+    if (!ids.length) { pendingHeld.value = {}; return }
     const held: Record<string, ProjectMessage[]> = {}
     const names: Record<string, string> = { ...addresses.value }
     const positions: (number | undefined)[] = []
@@ -243,8 +253,7 @@ export const useAgents = defineStore('agents', () => {
     const verdict = messagingOrder.land(ticket, failure ? undefined : lowestPosition(positions))
     if (verdict === 'older') return
     if (verdict === 'stale') return retried ? undefined : refreshMessaging(true, true)
-    if (failure && !Object.keys(held).length) { messagingState.value = availability(failure); return }
-    messagingState.value = 'ready'
+    if (failure && !Object.keys(held).length) return
     pendingHeld.value = held
     addresses.value = names
     learnAddresses(Object.values(held).flat())
@@ -263,6 +272,13 @@ export const useAgents = defineStore('agents', () => {
         // Sessions do not wait for optional project or account metadata.
         await Promise.all([projects.load(), refreshApprovals(), sessionRead, refreshRuns(), refreshAccounts(), refreshModels()])
         await Promise.all([refreshMessaging(), resourceNodes()])
+        // The first visible bundle includes the grants used by its controls.
+        // Session ledger admission above remains immediate; a failed permission
+        // read still grants nothing, and later refreshes keep the current frame.
+        if (!loaded.value) {
+          await ensurePermissions()
+          await all([...new Set(sessions.value.map(session => session.project_id).filter(Boolean))], async projectId => { await ensurePermissions(projectId) })
+        }
         loaded.value = true
         needsAt = Date.now()
     })().finally(() => { loadFlight = undefined; loading.value = false; now.value = Math.max(now.value, Date.now()) })
@@ -303,14 +319,78 @@ export const useAgents = defineStore('agents', () => {
     if (!order) orders.set(key, order = createReadOrder())
     return order
   }
-  async function refreshThread(projectId: string, sessionId: string) {
-    try {
-      await readOrdered(orderFor(threadOrders, sessionId), () => listMessages(projectId, { session: sessionId, limit: 200 }), page => {
-        threads.value = { ...threads.value, [sessionId]: page.items }
-        learnAddresses(page.items)
-        if (messagingState.value !== 'ready') messagingState.value = 'ready'
-      })
-    } catch (e) { if (messagingState.value !== 'ready') messagingState.value = availability(e) }
+  // A poll already in flight is not the result of a later send or hint.
+  // The first overlapping request starts a catch-up immediately, so that
+  // caller is not stuck behind the poll and the poll cannot overwrite it.
+  // Further requests join the catch-up and leave one trailing read.
+  const threadFlights = new Map<string, { again: boolean; catchingUp: boolean; promise: Promise<void> }>()
+  onReset(() => {
+    threadGeneration++
+    threads.value = {}; threadStates.value = {}; threadMore.value = {}; messagingState.value = 'idle'
+    threadFlights.clear(); threadOrders.clear()
+  })
+  function refreshThread(projectId: string, sessionId: string): Promise<void> {
+    const generation = threadGeneration
+    const pending = threadFlights.get(sessionId)
+    if (pending?.catchingUp) { pending.again = true; return pending.promise }
+    if (pending) pending.catchingUp = true
+    const flight = { again: false, catchingUp: !!pending, promise: Promise.resolve() }
+    threadFlights.set(sessionId, flight)
+    flight.promise = (async () => {
+      // Re-read the most recent loaded window, then catch up forwards. A
+      // reconnect with more than 50 new posts must not leave a hidden gap
+      // between the retained history and the newest page.
+      const recent = threads.value[sessionId]?.slice(-50)
+      let cursor = recent?.length ? Math.max(0, recent[0]!.sent_event_id - 1) : undefined
+      do {
+        flight.again = false
+        try {
+          await readOrdered(orderFor(threadOrders, sessionId), () => listMessages(projectId, { session: sessionId, limit: 50, ...(cursor === undefined ? {} : { newest_first: false, after: cursor }) }), page => {
+            if (generation !== threadGeneration) return
+            threadStates.value = { ...threadStates.value, [sessionId]: 'ready' }
+            if (threadMore.value[sessionId] === undefined) threadMore.value = { ...threadMore.value, [sessionId]: page.items.length === 50 }
+            mergeThread(sessionId, page.items)
+            if (cursor !== undefined && page.items.length) {
+              cursor = Math.max(...page.items.map(message => message.sent_event_id))
+              if (page.items.length === 50) flight.again = true
+            }
+            learnAddresses(page.items)
+            if (messagingState.value !== 'ready') messagingState.value = 'ready'
+          })
+        } catch (e) {
+          if (generation === threadGeneration) {
+            const state = availability(e)
+            threadStates.value = { ...threadStates.value, [sessionId]: state }
+            if (state === 'forbidden') { threads.value = { ...threads.value, [sessionId]: [] }; threadMore.value = { ...threadMore.value, [sessionId]: false } }
+            messagingState.value = state
+          }
+        }
+      } while (flight.again && generation === threadGeneration)
+    })().finally(() => { if (threadFlights.get(sessionId) === flight) threadFlights.delete(sessionId) })
+    return flight.promise
+  }
+  function mergeThread(sessionId: string, items: ProjectMessage[]) {
+    const all = new Map((threads.value[sessionId] ?? []).map(message => [message.id, message]))
+    for (const message of items) all.set(message.id, message)
+    threads.value = { ...threads.value, [sessionId]: [...all.values()].sort((a, b) => a.sent_event_id - b.sent_event_id) }
+  }
+  async function earlierThread(projectId: string, sessionId: string) {
+    const generation = threadGeneration
+    const first = threads.value[sessionId]?.[0]
+    if (!first || !threadMore.value[sessionId]) return
+    let page
+    try { page = await listMessages(projectId, { session: sessionId, limit: 50, after: first.sent_event_id }) }
+    catch (error) {
+      if (generation === threadGeneration && availability(error) === 'forbidden') {
+        threads.value = { ...threads.value, [sessionId]: [] }
+        threadStates.value = { ...threadStates.value, [sessionId]: 'forbidden' }
+        threadMore.value = { ...threadMore.value, [sessionId]: false }
+      }
+      throw error
+    }
+    if (generation !== threadGeneration || threadStates.value[sessionId] === 'forbidden') return
+    mergeThread(sessionId, page.items)
+    threadMore.value = { ...threadMore.value, [sessionId]: page.items.length === 50 }
   }
   async function refreshAgentRuns(principalId: string) {
     try {
@@ -340,7 +420,17 @@ export const useAgents = defineStore('agents', () => {
       ticket: node && routeKey ? { id: node.id, key: node.key, title: node.title, href: `/p/${encodeURIComponent(routeKey)}/${encodeURIComponent(node.key)}` } : null,
     }
   }
-  const views = computed(() => sessions.value.filter(s => !s.archived_at).map(viewOf))
+  // A failed attempt that was retried ends in favour of its retry (AEON-1285): it reads Ended, names
+  // the retry and moves to Ended like any ended row; its own history stays in its details.
+  function withRetries(list: SessionView[], among: SessionView[] = list): SessionView[] {
+    const retries = retriedBy(among)
+    if (!retries.size) return list
+    return list.map(view => {
+      const retry = retries.get(view.session.id)
+      return retry ? { ...view, status: retriedStatus(view.session, retry.name), retry: { id: retry.session.id, name: retry.name } } : view
+    })
+  }
+  const views = computed(() => withRetries(sessions.value.filter(s => !s.archived_at).map(viewOf)))
   const removedViews = computed(() => sessions.value.filter(s => s.archived_at).map(viewOf))
   // History (AEON-291): the list reads only sessions that ended in the last 24
   // hours. Every ended or removed generation is read on demand, newest first.
@@ -393,7 +483,8 @@ export const useAgents = defineStore('agents', () => {
     const byId = new Map(historySessions.value.map(item => [item.id, item]))
     for (const item of sessions.value) if (item.stopped_at || item.archived_at || byId.has(item.id)) byId.set(item.id, item)
     const ended = (item: HarnessSession) => Date.parse(item.archived_at ?? item.stopped_at ?? item.created_at)
-    return [...byId.values()].filter(item => item.stopped_at || item.archived_at).sort((a, b) => ended(b) - ended(a)).map(viewOf)
+    const history = [...byId.values()].filter(item => item.stopped_at || item.archived_at).sort((a, b) => ended(b) - ended(a)).map(viewOf)
+    return withRetries(history, [...history, ...views.value])
   })
   const grouped = computed(() => {
     const out: Record<SessionStatus['group'], SessionView[]> = { pausing: [], paused: [], problem: [], unresponsive: [], needs: [], awaiting: [], throttled: [], working: [], idle: [], stopped: [] }
@@ -418,6 +509,7 @@ export const useAgents = defineStore('agents', () => {
   // Oldest first for reading; the server returns the newest 200.
   const thread = (session: HarnessSession) => (threads.value[session.id] ?? [])
     .slice().sort((a, b) => a.sent_event_id - b.sent_event_id)
+  const threadState = (session: HarnessSession) => threadStates.value[session.id] ?? 'idle'
   const addressOf = (principalId: string) => addresses.value[principalId] ?? ''
 
   // ---------- One rule for every write (AEON-402) ----------
@@ -522,11 +614,12 @@ export const useAgents = defineStore('agents', () => {
   }
   // `to` is the registered harness address when one exists, otherwise the principal id.
   // recipient_session_id is always the open generation and is never dropped.
-  async function send(session: HarnessSession, to: string, body: string, level: 'simple' | 'steer', replyTo?: string) {
-    await sendMessage(session.project_id, { to, body, recipient_session_id: session.id, idempotency_key: crypto.randomUUID(), expects_reply: false, is_action_request: false, delivery_level: level, ...(replyTo ? { reply_to: replyTo } : {}) })
+  async function send(session: HarnessSession, to: string, body: string, level: 'simple' | 'steer', replyTo?: string, clientId: string = crypto.randomUUID(), resendOf?: string) {
+    const message = await sendMessage(session.project_id, { to, body, recipient_session_id: session.id, idempotency_key: clientId, expects_reply: false, is_action_request: false, delivery_level: level, ...(replyTo ? { reply_to: replyTo } : {}), ...(resendOf ? { resend_of: resendOf } : {}) })
     // A message can change what the lists show (held requests, reply obligations); the open thread is read first.
     void afterWrite()
-    await refreshThread(session.project_id, session.id)
+    void refreshThread(session.project_id, session.id)
+    return message
   }
   async function setAccount(account: AgentAccount, state: AgentAccount['state']) {
     const updated = await setAccountState(account.id, state)
@@ -545,12 +638,14 @@ export const useAgents = defineStore('agents', () => {
   // Bumped by delivery events (AEON-280); an open chat re-reads its message status.
   const deliveryPulse = ref(0)
   function deliveryChanged() { deliveryPulse.value++ }
+  const threadPulse = ref(0)
+  function threadChanged() { threadPulse.value++ }
 
   return {
-    now, sessions, sessionsState, sessionsError, sessionsUpdatedAt, sessionsStale, refreshStale, approvals, approvalsState, approvalsError, approvalsHardError, accounts, accountsState, accountsUpdatedAt, messagingState, runs, nodes, controls, models, eventPulseFor,
+    now, sessions, sessionsState, sessionsError, sessionsUpdatedAt, sessionsStale, refreshStale, approvals, approvalsState, approvalsError, approvalsHardError, accounts, accountsState, accountsUpdatedAt, accountsStatus, messagingState, runs, nodes, controls, models, eventPulseFor,
     loading, loaded, pending, held, needsCount, views, removedViews, historyViews, historyState, historyMore, loadHistory, loadOlderHistory, recordSession, loadSessionDetail, admitSessions, sessionById, admitRun, admitRuns, grouped,
-    loadAll, loadNeeds, ensureTicket, refreshApprovals, refreshAccounts, refreshSessions, refreshThread, refreshAgentRuns, tick, deliveryPulse, deliveryChanged,
-    viewOf, byAgent, forTicket, recentRuns, askerName, thread, addressOf, decide, revoke, resolve, control, send, setAccount, removeAccount, cancelQueuedRun,
+    loadAll, loadNeeds, ensureTicket, refreshApprovals, refreshAccounts, refreshSessions, refreshThread, earlierThread, threadMore, refreshAgentRuns, tick, deliveryPulse, deliveryChanged, threadPulse, threadChanged,
+    viewOf, byAgent, forTicket, recentRuns, askerName, thread, threadState, addressOf, decide, revoke, resolve, control, send, setAccount, removeAccount, cancelQueuedRun,
     invalidatePolls, afterWrite, onWrite,
   }
 })

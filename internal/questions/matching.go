@@ -5,6 +5,7 @@ import (
 	"context"
 	"errors"
 
+	"github.com/inspr-at/paimos/internal/authz"
 	"github.com/inspr-at/paimos/internal/tenant"
 	"github.com/jackc/pgx/v5"
 )
@@ -27,15 +28,16 @@ func liveAsker(ctx context.Context, tx pgx.Tx, p tenant.Principal) (tenant.Princ
 		return p, nil
 	}
 	var creator *string
-	err := tx.QueryRow(ctx, `SELECT scopes,created_by_principal_id::text FROM agent_keys
+	err := tx.QueryRow(ctx, `SELECT scopes,created_by_principal_id::text,coalesce(full_access,false) FROM agent_keys
  WHERE tenant_id=$1 AND id=$2 AND principal_id=$3 AND revoked_at IS NULL
- AND (expires_at IS NULL OR expires_at>clock_timestamp()) FOR SHARE`, p.TenantID, p.AuthKeyID, p.ID).Scan(&p.Scopes, &creator)
+ AND (expires_at IS NULL OR expires_at>clock_timestamp()) FOR SHARE`, p.TenantID, p.AuthKeyID, p.ID).Scan(&p.Scopes, &creator, &p.FullAccess)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return p, fail(401, "unauthorized", "authenticated key is no longer active")
 	}
 	if err != nil {
 		return p, err
 	}
+	p.Scopes = authz.ResolveKeyScopes(p.Scopes, p.FullAccess)
 	p.KeyCreatorID = ""
 	if creator != nil {
 		p.KeyCreatorID = *creator
@@ -43,13 +45,13 @@ func liveAsker(ctx context.Context, tx pgx.Tx, p tenant.Principal) (tenant.Princ
 	return p, nil
 }
 
-// The caller holds tenant -> tree locks and has checked ask/read permissions.
+// The caller holds tenant -> tree -> pairing locks and has checked ask/read permissions.
 // Exact fingerprints include ticket scope, context and every option field. An
 // Source-linked and requirement/doctrine inputs have no fingerprint. Anyway
 // bypasses the incoming lookup; a subsequently approved Always may be reused.
 func matchQuestion(ctx context.Context, tx pgx.Tx, p tenant.Principal, project string, body []byte) (questionMatch, error) {
 	var fingerprint *string
-	if err := tx.QueryRow(ctx, `SELECT CASE WHEN coalesce($1::jsonb->>'anyway_reason','')='' THEN aeon_desk_fingerprint($1::jsonb) END`, body).Scan(&fingerprint); err != nil || fingerprint == nil {
+	if err := tx.QueryRow(ctx, `SELECT CASE WHEN coalesce($1::jsonb->>'anyway_reason','')='' THEN aeon_desk_fingerprint($1::jsonb-'goal_id') END`, body).Scan(&fingerprint); err != nil || fingerprint == nil {
 		return questionMatch{}, err
 	}
 	// Two active records are ambiguous, even if the text looks similar. Limit
@@ -134,6 +136,9 @@ func addAsker(ctx context.Context, tx pgx.Tx, p tenant.Principal, project, id st
 	var askerID string
 	err := tx.QueryRow(ctx, `INSERT INTO desk_askers(tenant_id,project_id,question_id,principal_id,request_id,request_digest,session_id,source_request_id,ticket_id,comment_node_id,input,reused_decision_id,reused_revision)
  VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13) RETURNING id::text`, p.TenantID, project, id, p.ID, in.RequestID, hash, nullable(in.SessionID), nullable(in.SourceRequestID), nullable(in.TicketID), dest, body, nullable(match.decisionID), revision).Scan(&askerID)
+	if err == nil && in.GoalID != "" {
+		_, err = tx.Exec(ctx, `INSERT INTO node_relations(tenant_id,source_node_id,target_node_id,type) VALUES($1,$2,$3,'asks_for') ON CONFLICT DO NOTHING`, p.TenantID, dest, in.GoalID)
+	}
 	return askerID, err
 }
 

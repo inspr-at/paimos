@@ -11,7 +11,9 @@ for (const width of [390, 1024, 1440]) for (const theme of ['light', 'dark']) {
     const revision = node.updated_at
     const children = data.nodes.filter(n => n.parent_id === node.id)
     expect(children.length).toBeGreaterThan(0)
-    await mockWork(page, data)
+    // This route is the event stream. The fixture's quiet EventSource never
+    // requests it, so the derived refresh would never arrive.
+    await mockWork(page, data, { nativeEvents: true })
     let changed = false
     let connected = false
     await page.route('**/api/events/stream**', route => {

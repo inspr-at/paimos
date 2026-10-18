@@ -25,6 +25,7 @@ func messagingWorld(t *testing.T) (*world, *messaging, string, *httptest.Server)
 	t.Helper()
 	w := newWorld(t)
 	w.agent = insertPrincipal(t, w.db, w.sender.TenantID, tenant.Agent, "worker", nil)
+	w.agent.Scopes = []string{"inbox.send", "inbox.read"}
 	var project string
 	err := db.InTenant(dbtest.Seed(t.Context()), w.db.App, w.sender.TenantID, func(tx pgx.Tx) error {
 		return tx.QueryRow(t.Context(), `INSERT INTO nodes(tenant_id,kind_id,key,title) SELECT $1::uuid,id,'MSG-1','Messaging' FROM node_kinds WHERE slug='project' RETURNING id::text`, w.sender.TenantID).Scan(&project)

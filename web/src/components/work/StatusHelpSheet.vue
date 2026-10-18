@@ -83,7 +83,7 @@ const triageWord = computed(() => { const mode = help.value.triage.mode; return 
             <tr v-if="def.state === 'cancelled'" class="queued"><td class="st"><span class="st-cell"><AppIcon name="inbox" :size="14" />{{ help.queued.label }}</span></td><td class="meaning">{{ help.queued.meaning }}</td><td data-label="Set by">Work queue</td><td data-label="Automatic rule">Open or Blocked in the queue; not a status</td></tr>
             <tr v-if="def.state === 'cancelled'" class="recurring"><td class="st"><span class="st-cell"><TicketTypeIcon kind="ticket" :recurrence="recurringSample" />{{ recurringLabel }}</span></td><td class="meaning">{{ (help.recurring ?? defaultStatusHelp().recurring)?.meaning }}</td><td data-label="Set by">Recurring work</td><td data-label="Automatic rule">A marker, not a status</td></tr>
             <tr v-if="def.state === 'cancelled'" class="group"><td colspan="4"><span class="eyebrow">Exits</span></td></tr>
-            <tr :data-status="def.state"><td class="st"><span class="st-cell"><StatusIcon :state="def.state" />{{ def.label }}</span></td><td class="meaning">{{ def.meaning }}</td><td data-label="Set by">{{ def.set_by }}</td><td data-label="Automatic rule">
+            <tr :data-status="def.state" data-status-motion><td class="st"><span class="st-cell"><StatusIcon :state="def.state" />{{ def.label }}</span></td><td class="meaning">{{ def.meaning }}</td><td data-label="Set by">{{ def.set_by }}</td><td data-label="Automatic rule">
               <div v-if="def.state === 'blocked'" class="rule-line">Blocker required</div>
               <div v-for="key in def.rules" :key="key" class="rule-line" :class="{ 'rule-off': !ruleLive(help, key) }" :data-rule="key">
                 <span v-if="!ruleLive(help, key)" class="off-chip">Off</span>
@@ -135,7 +135,7 @@ h2 { font-size: 19px; }
 .flag-explain { display: grid; gap: 8px; margin-top: 16px; padding: 12px 14px; border-radius: 12px; background: var(--surface-2); }
 .flag-explain p { font-size: 13px; line-height: 1.5; }
 .hc-sample { display: inline-flex; align-items: center; gap: 8px; justify-self: start; max-width: 100%; padding: 5px 10px; border-radius: 8px; background: var(--gold-wash); box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--gold) 28%, transparent); font-size: 12.5px; color: var(--ink); }
-.hc-sample svg { color: var(--gold-ink); }
+.hc-sample svg { color: var(--warn-ink); }
 .hc-sample span { min-width: 0; overflow-wrap: anywhere; }
 .help-foot { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 10px; margin-top: 14px; font-size: 12px; color: var(--ink-3); }
 .help-foot code { padding: 2px 6px; border-radius: 6px; background: var(--code-bg); color: var(--ink-2); font-size: 11.5px; }

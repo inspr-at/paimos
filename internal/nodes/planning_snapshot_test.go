@@ -44,7 +44,7 @@ func TestWorkStartSnapshotBaselineHistoryAndCostScope(t *testing.T) {
 		t.Fatal(err)
 	}
 	// Status start coalesces with the earlier session; re-estimation is live only.
-	code, raw := call(t, &w.admin, "PATCH", "/api/nodes/"+n.ID, `{"state":"in_progress","fields":{"estimate_hours":4}}`)
+	code, raw := call(t, &w.admin, "PATCH", "/api/nodes/"+n.ID, `{"state":"in_progress","fields":{"estimate_hours":4,"acceptance_criteria":"The planning baseline survives re-estimation"}}`)
 	decode[nodeJSON](t, code, raw, 200)
 	changed := planningOf(t, w.admin, path)[n.Key]
 	if changed.Snapshot.RateBasis.PriceVersion == nil || *changed.Snapshot.RateBasis.PriceVersion != *priceVersion || changed.Snapshot.Cost == nil || *changed.Snapshot.Cost != *first.Cost || changed.Snapshot.ID != first.ID || *changed.Snapshot.Hours != 2 || *changed.Tokens.Estimated != 20_000_000 {

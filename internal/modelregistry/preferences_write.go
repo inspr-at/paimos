@@ -5,12 +5,14 @@ import (
 	"context"
 	"net/http"
 	"regexp"
+	"strings"
 
 	"github.com/inspr-at/paimos/internal/agentaccounts"
 	"github.com/inspr-at/paimos/internal/events"
 	"github.com/inspr-at/paimos/internal/httpapi"
 	"github.com/inspr-at/paimos/internal/modelprefs"
 	"github.com/inspr-at/paimos/internal/tenant"
+	"github.com/inspr-at/paimos/internal/workorders"
 	"github.com/jackc/pgx/v5"
 )
 
@@ -28,6 +30,7 @@ type preferenceRowWrite struct {
 	Complex  *modelprefs.Cell `json:"complex"`
 }
 type preferenceWriteResult struct {
+	PersonID       *string                    `json:"person_id"`
 	Level          preferenceLevel            `json:"level"`
 	Revision       int64                      `json:"revision"`
 	RunningOutside []string                   `json:"running_outside"`
@@ -54,35 +57,76 @@ func validateSelector(ctx context.Context, tx pgx.Tx, c modelprefs.Cell, kind st
 	} else {
 		return prefFail(422, "invalid_selector")
 	}
-	profiles, err := listProfiles(ctx, tx)
+	// Only existence is needed. Never decode the catalog or the review ladder.
+	// Keep the line expression equivalent to ProfileLine; parity is tested against
+	// all catalog harnesses and the concrete/alias/suffix forms.
+	var exists, review bool
+	err := tx.QueryRow(ctx, `
+ WITH candidates AS NOT MATERIALIZED (
+   SELECT p.id,p.harness,p.effort,p.tier,coalesce(p.registered_effort_level,d.effort_level) AS effort_level,
+     CASE WHEN p.harness='opencode' THEN regexp_replace(regexp_replace(p.model,'^google/',''),'^ollama/','')
+          WHEN p.harness='pi' THEN regexp_replace(p.model,'^anthropic/','')
+          ELSE p.model END AS model
+   FROM model_profiles p
+   JOIN model_profile_display d ON d.tenant_id=p.tenant_id AND d.profile_id=p.id
+   WHERE ($1='pinned' AND p.id=NULLIF($2,'')::uuid)
+      OR ($1='latest' AND p.family=$3 AND p.effort=$5 AND ($6='' OR p.harness=$6))
+ ), normalized AS NOT MATERIALIZED (
+   SELECT *, CASE WHEN harness IN ('claude','pi') THEN regexp_replace(model,'^claude-','')
+                  ELSE model END AS normalized_model FROM candidates
+ ), parts AS NOT MATERIALIZED (
+   SELECT *, regexp_match(normalized_model,'^(.+?)(-(low|medium|high|xhigh|max|ultra))?(-fast)?$') AS cursor_parts
+   FROM normalized
+ ), lines AS NOT MATERIALIZED (
+   SELECT *,
+     regexp_match(CASE WHEN harness='cursor' THEN cursor_parts[1] ELSE normalized_model END,
+                  '^([a-z][a-z-]*?)-?([0-9]+(?:[.-][0-9]+)*)(.*)$') AS concrete_parts,
+     regexp_match(normalized_model,'^gpt-([0-9]+(?:\.[0-9]+)*)-(.+)$') AS codex_parts
+   FROM parts
+ ), matches AS NOT MATERIALIZED (
+   SELECT * FROM lines WHERE $1='pinned' OR
+     (CASE WHEN harness='codex' THEN codex_parts[2]
+           WHEN harness IN ('claude','pi') AND normalized_model IN ('opus','sonnet','haiku','fable') THEN normalized_model
+           ELSE concrete_parts[1]||concrete_parts[3]||CASE WHEN harness='cursor' THEN coalesce(cursor_parts[4],'') ELSE '' END
+      END)=$4
+ )
+ SELECT EXISTS(SELECT 1 FROM matches LIMIT 1),
+        CASE WHEN $7 THEN EXISTS(SELECT 1 FROM matches p
+          WHERE p.effort_level>=4 AND p.tier IN ('strong','frontier')
+          LIMIT 1) ELSE true END`, c.Mode, c.ProfileID, c.Family, c.Line, c.Effort, c.Harness, kind == "review").Scan(&exists, &review)
 	if err != nil {
 		return err
 	}
-	matches := expandPreference(c, profiles)
-	if len(matches) == 0 {
+	if !exists {
 		if c.Mode == "pinned" {
 			return prefFail(422, "unknown_profile")
 		}
 		return prefFail(422, "unknown_line")
 	}
-	if kind != "review" {
+	if !review {
+		return prefFail(422, "review_floor")
+	}
+	return nil
+}
+
+type selectorCheck struct {
+	Cell   modelprefs.Cell
+	Review bool
+}
+type selectorChecks map[selectorCheck]bool
+
+func (checks selectorChecks) validate(ctx context.Context, tx pgx.Tx, cell modelprefs.Cell, kind string) error {
+	key := selectorCheck{cell, kind == "review"}
+	if checks[key] {
 		return nil
 	}
-	// Review selectors can only name the existing review ladder at its floor.
-	// Runtime family, capability, account and residency gates still decide.
-	steps, err := loadLadder(ctx, tx, "review-gate")
-	if err != nil {
+	if err := validateSelector(ctx, tx, cell, kind); err != nil {
 		return err
 	}
-	for _, profile := range matches {
-		for _, step := range steps {
-			if profile.ID == step.Profile.ID && profile.Effort == "xhigh" && (profile.Tier == "strong" || profile.Tier == "frontier") {
-				return nil
-			}
-		}
-	}
-	return prefFail(422, "review_floor")
+	checks[key] = true
+	return nil
 }
+
 func preferenceKind(ctx context.Context, tx pgx.Tx, id, level, project string) (modelprefs.Kind, error) {
 	var k modelprefs.Kind
 	if !uuidRE.MatchString(id) {
@@ -108,12 +152,12 @@ func unlockedRow(chain []modelprefs.Scope, index int, kind string) error {
 	}
 	return nil
 }
-func writeRow(ctx context.Context, tx pgx.Tx, p tenant.Principal, scope modelprefs.Scope, k modelprefs.Kind, row preferenceRow) error {
+func writeRow(ctx context.Context, tx pgx.Tx, p tenant.Principal, scope modelprefs.Scope, k modelprefs.Kind, row preferenceRow, checks selectorChecks) error {
 	if scope.Level == "project" && row.Locked {
 		return prefFail(422, "lock_at_project")
 	}
 	for _, cell := range []modelprefs.Cell{row.Normal, row.Complex} {
-		if err := validateSelector(ctx, tx, cell, k.Slug); err != nil {
+		if err := checks.validate(ctx, tx, cell, k.Slug); err != nil {
 			return err
 		}
 	}
@@ -136,6 +180,10 @@ func (m *Module) writePreferences(w http.ResponseWriter, r *http.Request) {
 	}
 	project, err := projectInput(r)
 	if err != nil {
+		writePreferenceError(w, err)
+		return
+	}
+	if err := workBody(w, r); err != nil {
 		writePreferenceError(w, err)
 		return
 	}
@@ -180,7 +228,13 @@ func (m *Module) writePreferences(w http.ResponseWriter, r *http.Request) {
 		if err := preferenceFence(ctx, tx, p); err != nil {
 			return err
 		}
-		person := modelprefs.PrefsPerson(ctx, tx, p)
+		if err := workorders.RefreshPrincipal(ctx, tx, p); err != nil {
+			return err
+		}
+		person, err := currentPreferencePerson(ctx, tx, p)
+		if err != nil {
+			return err
+		}
 		if err := authorizePreference(ctx, tx, p, level, project, person); err != nil {
 			return err
 		}
@@ -189,6 +243,14 @@ func (m *Module) writePreferences(w http.ResponseWriter, r *http.Request) {
 				return err
 			}
 		}
+		expected, err := expectedPreferencePerson(r, level)
+		if err != nil {
+			return err
+		}
+		if expected != "" && (person == nil || *person != expected) {
+			return prefFail(409, "preference_person_changed")
+		}
+		out.PersonID = person
 		kinds, err := visibleKinds(ctx, tx, project)
 		if err != nil {
 			return err
@@ -214,6 +276,8 @@ func (m *Module) writePreferences(w http.ResponseWriter, r *http.Request) {
 		if level == "project" {
 			scope.ProjectID = &project
 		}
+		checks := selectorChecks{}
+		replacementKinds := map[string]modelprefs.Kind{}
 		var kind *modelprefs.Kind
 		if rowID != "" {
 			k, err := preferenceKind(ctx, tx, rowID, level, project)
@@ -271,9 +335,19 @@ func (m *Module) writePreferences(w http.ResponseWriter, r *http.Request) {
 					if err := unlockedRow(chain, index, k.Slug); err != nil {
 						return err
 					}
+					if level == "project" && rr.Locked {
+						return prefFail(422, "lock_at_project")
+					}
+					for _, cell := range []modelprefs.Cell{rr.Normal, rr.Complex} {
+						if err := checks.validate(ctx, tx, cell, k.Slug); err != nil {
+							return err
+						}
+					}
+					replacementKinds[rr.KindID] = k
 				}
 			}
 		}
+		var pending []events.Change
 		var priorRequirements map[string]string
 		if kind == nil && (before.Residency != nil || scope.Residency != nil || before.ResidencyLocked != scope.ResidencyLocked) {
 			priorRequirements, err = modelprefs.SnapshotRunRequirements(ctx, tx, scope)
@@ -289,17 +363,14 @@ func (m *Module) writePreferences(w http.ResponseWriter, r *http.Request) {
 			if r.Method == http.MethodDelete {
 				_, err = tx.Exec(ctx, `DELETE FROM model_pref_rows WHERE scope_id=$1 AND kind_id=$2`, scope.ID, kind.ID)
 			} else {
-				err = writeRow(ctx, tx, p, scope, *kind, preferenceRow{kind.ID, row.Locked, *row.Normal, *row.Complex})
+				err = writeRow(ctx, tx, p, scope, *kind, preferenceRow{kind.ID, row.Locked, *row.Normal, *row.Complex}, checks)
 			}
 		} else if r.Method == http.MethodDelete || in.Rows != nil {
 			_, err = tx.Exec(ctx, `DELETE FROM model_pref_rows WHERE scope_id=$1`, scope.ID)
 			if err == nil && r.Method != http.MethodDelete {
 				for _, rr := range *in.Rows {
-					k, err2 := preferenceKind(ctx, tx, rr.KindID, level, project)
-					if err2 != nil {
-						return err2
-					}
-					if err = writeRow(ctx, tx, p, scope, k, rr); err != nil {
+					k := replacementKinds[rr.KindID]
+					if err = writeRow(ctx, tx, p, scope, k, rr, checks); err != nil {
 						break
 					}
 				}
@@ -320,10 +391,11 @@ func (m *Module) writePreferences(w http.ResponseWriter, r *http.Request) {
 		// Restamp on a residency change; loosening leaves all stamps untouched.
 		out.RunningOutside = []string{}
 		if priorRequirements != nil {
-			runs, err := modelprefs.RestampAfter(ctx, tx, p, scope, priorRequirements)
+			runs, changes, err := modelprefs.RestampAfterDeferred(ctx, tx, scope, priorRequirements)
 			if err != nil {
 				return err
 			}
+			pending = append(pending, changes...)
 			now, err := dbNow(ctx, tx)
 			if err != nil {
 				return err
@@ -352,7 +424,12 @@ func (m *Module) writePreferences(w http.ResponseWriter, r *http.Request) {
 		out.Revision = after.Revision
 		out.Residency = modelprefs.ResolveResidency(chain[:index+1])
 		metadata := map[string]any{"level": level, "scope": scope.ID, "kind": rowID, "before": before, "after": after}
-		// No resource locks follow this final event append.
+		// Flush only after all mutations, response loading and residency checks.
+		for _, change := range pending {
+			if _, err := events.Append(ctx, tx, p, change); err != nil {
+				return err
+			}
+		}
 		_, err = events.Append(ctx, tx, p, events.Change{Type: "model.preferences_changed", Before: map[string]any{"level": level, "scope": scope.ID, "kind": rowID, "value": before}, After: metadata})
 		return err
 	})
@@ -365,3 +442,157 @@ func (m *Module) writePreferences(w http.ResponseWriter, r *http.Request) {
 
 // Count characters after the caller's normalization, matching SQL length.
 func boundedText(s string, max int) bool { return len([]rune(s)) <= max }
+
+// The value is an equality precondition only; target selection stays server-side.
+func expectedPreferencePerson(r *http.Request, level string) (string, error) {
+	values := r.Header.Values("If-Prefs-Person")
+	if len(values) == 0 {
+		if level == "person" {
+			return "", prefFail(428, "person_precondition_required")
+		}
+		return "", nil
+	}
+	if len(values) != 1 || len(values[0]) != 36 || !uuidRE.MatchString(values[0]) {
+		return "", prefFail(400, "invalid_person_precondition")
+	}
+	return strings.ToLower(values[0]), nil
+}
+
+// A row-level never rule belongs to the workspace, even when a person has
+// their own order. Keep other pins and never rules untouched by these writes.
+func (m *Module) writeNeverRule(w http.ResponseWriter, r *http.Request) {
+	p, ok := principal(w, r)
+	if !ok {
+		return
+	}
+	if p.Kind != tenant.Person {
+		writePreferenceError(w, prefFail(403, "person_required"))
+		return
+	}
+	column, line := r.PathValue("column"), r.PathValue("line")
+	if len(column) > 64 || len(line) > 128 || r.URL.Query().Get("project_id") != "" {
+		writePreferenceError(w, prefFail(400, "invalid_rule_scope"))
+		return
+	}
+	var in struct {
+		Why      string `json:"why"`
+		Revision *int64 `json:"revision"`
+	}
+	if r.Method == http.MethodDelete {
+		revision, err := requestedRevision(r)
+		if err != nil {
+			writePreferenceError(w, err)
+			return
+		}
+		in.Revision = &revision
+	} else {
+		if err := workBody(w, r); err != nil {
+			writePreferenceError(w, err)
+			return
+		}
+		if err := decodeJSON(w, r, &in); err != nil {
+			writePreferenceError(w, err)
+			return
+		}
+		in.Why = strings.TrimSpace(in.Why)
+		if in.Why == "" || !boundedText(in.Why, 1000) || strings.ContainsRune(in.Why, '\x00') {
+			writePreferenceError(w, prefFail(422, "invalid_rule"))
+			return
+		}
+	}
+	if in.Revision == nil || *in.Revision < 0 {
+		writePreferenceError(w, prefFail(400, "revision_required"))
+		return
+	}
+	var out rulesDocument
+	err := m.in(r.Context(), p.TenantID, func(tx pgx.Tx) error {
+		ctx := r.Context()
+		if _, err := boardWriteAuthority(ctx, tx, r, p, "default", ""); err != nil {
+			return err
+		}
+		s, err := modelprefs.LoadBoard(ctx, tx, nil, "")
+		if err != nil {
+			return err
+		}
+		if !validBoardColumn(s, column) {
+			return prefFail(422, "unknown_column")
+		}
+		revision, err := ruleRevision(ctx, tx, "workspace", "")
+		if err != nil {
+			return err
+		}
+		if revision != *in.Revision {
+			return prefFail(409, "stale_revision")
+		}
+		c, err := loadBoardCatalog(ctx, tx)
+		if err != nil {
+			return err
+		}
+		// The page shows provider identities, while earlier writers stored
+		// harness-derived aliases. Match, replace and remove every equivalent
+		// line, and store only the provider identity.
+		canonical := modelsIdentity(c)
+		identity := canonical(line)
+		var before *modelprefs.Rule
+		count := 0
+		equivalent := []string{line, identity}
+		for _, rule := range s.Rules {
+			if rule.Column != column {
+				continue
+			}
+			count++
+			if canonical(rule.Line) == identity {
+				if rule.Lock != "not" {
+					return prefFail(409, "rule_conflict")
+				}
+				if before == nil {
+					copy := rule
+					before = &copy
+				}
+				equivalent = append(equivalent, rule.Line)
+			}
+		}
+		if r.Method != http.MethodDelete {
+			if _, ok := modelsWriteCatalog(c).profiles[line]; !ok {
+				return prefFail(422, "unknown_line")
+			}
+			if before == nil && (count >= 512 || len(s.Rules) >= 4096) {
+				return modelprefs.ErrBoardBounds
+			}
+		}
+		if _, err := tx.Exec(ctx, `DELETE FROM model_rules WHERE scope='workspace' AND column_key=$1 AND line=ANY($2::text[]) AND lock='not' AND moved_to_models IS NOT TRUE`, column, equivalent); err != nil {
+			return err
+		}
+		if _, err := tx.Exec(ctx, `DELETE FROM model_row_constraints WHERE scope='workspace' AND column_key=$1 AND line=ANY($2::text[]) AND kind='never'`, column, equivalent); err != nil {
+			return err
+		}
+		if r.Method != http.MethodDelete {
+			if _, err := tx.Exec(ctx, `INSERT INTO model_row_constraints(tenant_id,scope,column_key,line,kind,why,set_by) VALUES($1,'workspace',$2,$3,'never',$4,$5)`, p.TenantID, column, identity, in.Why, p.ID); err != nil {
+				return err
+			}
+		}
+		if err := tx.QueryRow(ctx, `INSERT INTO model_rule_revisions(tenant_id,scope,scope_key,revision) VALUES($1,'workspace','',1) ON CONFLICT(tenant_id,scope,scope_key) DO UPDATE SET revision=model_rule_revisions.revision+1 RETURNING revision`, p.TenantID).Scan(&out.Revision); err != nil {
+			return err
+		}
+		after, err := modelprefs.LoadBoard(ctx, tx, nil, "")
+		if err != nil {
+			return err
+		}
+		out.Rules = after.Rules
+		// Audit the affected row, like the retained rule editor. The read
+		// response can contain all workspace rows; an event stays bounded.
+		audit := rulesDocument{Revision: out.Revision, Rules: []modelprefs.Rule{}}
+		for _, rule := range after.Rules {
+			if rule.Column == column {
+				audit.Rules = append(audit.Rules, rule)
+			}
+		}
+		_, err = events.Append(ctx, tx, p, events.Change{Type: "model.rules_changed", Before: map[string]any{"column": column, "line": identity, "rule": before}, After: audit})
+		return err
+	})
+	if err != nil {
+		writeBoardError(w, err)
+		return
+	}
+	httpapi.WriteJSON(w, 200, out)
+}

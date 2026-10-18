@@ -6,9 +6,9 @@
 // that do not report a limit, and the legend
 // appears only where a bar is drawn. Everything here is a pure mapping of the
 // capacity projection, the pairing list and the person's schedule.
-import { agentUpdateAdvice, describeEnrollmentDiagnostic, describeEnrollmentStatus, describeHarnessFix, describeHarnessHint, platformCaption, type PairingEnrollment, type PairingView } from './agentPairing.ts'
+import { agentUpdateAdvice, describeEnrollmentDiagnostic, describeEnrollmentStatus, describeHarnessFix, describeHarnessHint, platformCaption, verificationFailureText, type PairingEnrollment, type PairingView } from './agentPairing.ts'
 import {
-  HARNESS_NAME, LOGIN_COMMAND, accountPlan, activeOverride, estimateLabel, gauge as gaugeOf, hidesCapacityLimit, hourLabel, pct, unreportedCapacity, when, type AccountRow, type CapacitySchedule, type CapacityWindow, type Gauge,
+  HARNESS_NAME, LOGIN_COMMAND, accountPlan, activeOverride, consumptionLine, estimateLabel, gauge as gaugeOf, hidesCapacityLimit, hourLabel, pct, unreportedCapacity, when, type AccountRow, type CapacitySchedule, type CapacityWindow, type Gauge,
 } from './capacity.ts'
 import { capacityWaitText } from './capacityWait.ts'
 
@@ -35,12 +35,14 @@ export interface AccountLine {
   harness: string
   /** The vendor's name: Codex, Claude, Cursor. */
   vendor: string
-  /** The full sign-in identity, e.g. admin@augmentoring.com. */
+  /** The full sign-in identity, e.g. admin@example.com. */
   identity: string
   /** Its group when kept separate from the vendor's pool ("Client"). */
   group: string
   readiness: Readiness
   capacity: CapacityCell
+  /** Observed spend when this vendor reported no window. Empty without numeric evidence. */
+  learnedUse: string
   row: AccountRow
 }
 export interface ComputerNotice { title: string; body: string; command: string }
@@ -130,7 +132,7 @@ export function readiness(row: AccountRow, computer: PairingView | null, now: nu
       const command = /^Verif/.test(label) ? '' : diagnostic?.command ?? (soleAccount ? describeHarnessFix(computer, row.harness) : '')
       const signin = /sign in/i.test(label)
       const waiting = /^(Verification queued|Verifying account)/.test(label)
-      return { kind: waiting ? 'waiting' : signin ? 'signin' : 'attention', text: signin ? 'Signed out' : label, tone: waiting ? 'mute' : 'warn', ...(command ? { command } : {}), tip: `${HARNESS_NAME[row.harness] ?? row.harness} on ${computer.computer_name}: ${label}.` }
+      return { kind: waiting ? 'waiting' : signin ? 'signin' : 'attention', text: signin ? 'Signed out' : label, tone: waiting ? 'mute' : 'warn', ...(command ? { command } : {}), tip: label === 'Verification failed' || label === 'Verification stalled' ? verificationFailureText(enrollment) : `${HARNESS_NAME[row.harness] ?? row.harness} on ${computer.computer_name}: ${label}.` }
     }
   }
   if (row.state === 'paused') return { kind: 'paused', text: 'Paused in Settings', tone: 'mute', tip: 'Turn “Agents may use it” back on in Settings / Accounts to resume.' }
@@ -169,6 +171,17 @@ export function readiness(row: AccountRow, computer: PairingView | null, now: nu
 }
 
 const WINDOW_WORD: Record<string, string> = { weekly: 'this week', monthly: 'this month', '5h': 'this window', other: 'this period' }
+
+/**
+ * Spend Aeon already observed, when the vendor reported no window.
+ * A missing quota stays the unknown-usage sentence; this does not invent a bar or a reserve.
+ */
+export function learnedUseText(row: AccountRow): string {
+  const learning = row.learning
+  if (row.primary || !learning) return ''
+  if (learning.runs <= 0 && learning.cost_micros <= 0 && learning.tokens <= 0) return ''
+  return consumptionLine(learning)
+}
 
 /** The capacity cell: a bar only for a real reading, otherwise one honest sentence. */
 export function capacityCell(row: AccountRow, ready: Readiness, now: number, sharedWith = ''): CapacityCell {
@@ -218,7 +231,7 @@ export function buildComputerCards(input: { computers: PairingView[]; rows: Acco
     if (!state.hint && hint && !/accounts? needs? attention$/.test(hint)) state.hint = hint
     const shared = row.sameQuotaAs && byId.has(row.sameQuotaAs) && byId.get(row.sameQuotaAs)!.primary ? byId.get(row.sameQuotaAs)! : null
     const sharedWith = shared ? `${shared.name}${shared.host && shared.host !== row.host ? ` on ${shared.host}` : ''}` : ''
-    return { id: row.id, harness: row.harness, vendor: HARNESS_NAME[row.harness] ?? row.harness, identity: row.name, group: row.groupName, readiness: state, capacity: capacityCell(row, state, now, sharedWith), row }
+    return { id: row.id, harness: row.harness, vendor: HARNESS_NAME[row.harness] ?? row.harness, identity: row.name, group: row.groupName, readiness: state, capacity: capacityCell(row, state, now, sharedWith), learnedUse: learnedUseText(row), row }
   }
   const cards: ComputerCard[] = live.map(computer => {
     const own = rows.filter(r => owner.get(r.id) === computer)
@@ -260,27 +273,4 @@ function enrollmentRow(e: PairingEnrollment, computer: PairingView): AccountRow 
     limitingReset: '', awaitingReading: false, fingerprint: '', groupId: '', groupName: '', hosts: [computer.computer_name], sameQuotaAs: '',
     ...(e.state === 'draining' ? { disconnecting: true } : {}),
   }
-}
-
-/** The header pill: "2 of 2 ready", "0 of 2 ready · mbp2607 offline". */
-export function readySummary(cards: ComputerCard[]): { text: string; tone: Tone } | null {
-  const lines = cards.flatMap(c => c.accounts)
-  if (!lines.length) return null
-  const ready = lines.filter(l => l.readiness.kind === 'ready').length
-  const offline = cards.filter(c => c.offline && c.accounts.length)
-  const tail = offline.length === 1 ? ` · ${offline[0].name} offline` : offline.length > 1 ? ` · ${offline.length} computers offline` : ''
-  // Busy or waiting is not a problem: the pill warns only when something needs fixing.
-  const tone: Tone = ready === lines.length ? 'ok' : offline.length || lines.some(l => l.readiness.tone === 'warn') ? 'warn' : 'mute'
-  return { text: `${ready} of ${lines.length} ready${tail}`, tone }
-}
-
-/**
- * Middle ellipsis for an identity that does not fit: the start and the domain
- * stay readable ("admin@augmen…ring.com"). Short ones are returned whole.
- */
-export function middleEllipsis(text: string, max: number): string {
-  if (text.length <= max || max < 5) return text
-  const keep = max - 1
-  const tail = Math.ceil(keep / 2)
-  return `${text.slice(0, keep - tail)}…${text.slice(text.length - tail)}`
 }

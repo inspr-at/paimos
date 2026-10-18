@@ -15,11 +15,14 @@ import (
 	"github.com/jackc/pgx/v5"
 
 	"github.com/inspr-at/paimos/internal/authz"
+	"github.com/inspr-at/paimos/internal/db"
 	"github.com/inspr-at/paimos/internal/events"
+	"github.com/inspr-at/paimos/internal/httpapi"
 	"github.com/inspr-at/paimos/internal/tenant"
 )
 
 type keyScopeDelta struct {
+	FullAccess    *bool             `json:"full_access,omitempty"`
 	Add           []string          `json:"add"`
 	Remove        []string          `json:"remove"`
 	RoleExtension *keyRoleExtension `json:"role_extension,omitempty"`
@@ -56,8 +59,7 @@ func (m *Module) handleAgentKeyScopes(w http.ResponseWriter, r *http.Request) {
 	var delta *keyScopeDelta
 	if r.Method == http.MethodPatch {
 		delta = &keyScopeDelta{}
-		r.Body = http.MaxBytesReader(w, r.Body, 64<<10)
-		dec := json.NewDecoder(r.Body)
+		dec := httpapi.NewRequestDecoder(w, r, 64<<10)
 		dec.DisallowUnknownFields()
 		if err := dec.Decode(delta); err != nil {
 			writeBadRequest(w, "invalid JSON")
@@ -68,8 +70,8 @@ func (m *Module) handleAgentKeyScopes(w http.ResponseWriter, r *http.Request) {
 			writeBadRequest(w, "expected one JSON object")
 			return
 		}
-		if delta.Add == nil && delta.Remove == nil && delta.ExpiresAt == nil {
-			writeBadRequest(w, "add, remove or expires_at is required")
+		if delta.Add == nil && delta.Remove == nil && delta.ExpiresAt == nil && delta.FullAccess == nil {
+			writeBadRequest(w, "add, remove, expires_at or full_access is required")
 			return
 		}
 	}
@@ -86,7 +88,7 @@ func (m *Module) handleAgentKeyScopes(w http.ResponseWriter, r *http.Request) {
 	case errors.Is(err, errKeyExpiry):
 		writeBadRequest(w, errKeyExpiry.Error())
 	case err != nil:
-		writeInternal(w)
+		internalFailure(w, r, "handleAgentKeyScopes", err)
 	case delta != nil:
 		writeJSON(w, http.StatusOK, view.Key)
 	default:
@@ -106,7 +108,7 @@ func normalizeWorkstationScopeDelta(delta *keyScopeDelta, marked bool) (*keyScop
 	if len(delta.ExpiresAt) > 128 {
 		return nil, errKeyExpiry
 	}
-	out := &keyScopeDelta{ExpiresAt: slices.Clone(delta.ExpiresAt)}
+	out := &keyScopeDelta{ExpiresAt: slices.Clone(delta.ExpiresAt), FullAccess: delta.FullAccess}
 	if out.ExpiresAt != nil {
 		if _, err := keyScopeExpiry(out.ExpiresAt, time.Now()); err != nil {
 			return nil, err
@@ -152,8 +154,11 @@ func (m *Module) agentKeyScopes(ctx context.Context, p tenant.Principal, id stri
 	if (p.Kind != tenant.Person && !authz.OwnerWorkstation(p)) || p.ID == "" {
 		return view, authz.ErrForbidden
 	}
+	// Management reads can prune retired scopes, so they also need the exclusive
+	// target fence. Include any authenticating workstation key in the same batch.
+	ctx = db.WithKeyScopeChange(tenant.WithPrincipal(ctx, p), p.TenantID, id)
 	err := m.inTenant(ctx, m.pool, p.TenantID, func(tx pgx.Tx) error {
-		// Match role management and rotation: tenant first, then key. All live
+		// After key admission: tenant first, then key rows. All live
 		// grants, role extensions, cleanup and audit share this transaction.
 		var locked string
 		if err := tx.QueryRow(ctx, `SELECT id::text FROM tenants WHERE id=$1::uuid FOR NO KEY UPDATE`, p.TenantID).Scan(&locked); err != nil {
@@ -166,12 +171,24 @@ func (m *Module) agentKeyScopes(ctx context.Context, p tenant.Principal, id stri
 		if err != nil {
 			return err
 		}
+		if delta != nil {
+			if err := refuseMessagingAssistantKeyTx(ctx, tx, key.PrincipalID); err != nil {
+				return err
+			}
+		}
 		delta, err = normalizeWorkstationScopeDelta(delta, key.OwnerWorkstation)
 		if err != nil {
 			return err
 		}
 		if key.RevokedAt != nil || key.ExpiresAt != nil && !key.ExpiresAt.After(time.Now()) {
 			return errKeyInactive
+		}
+		full := key.FullAccess
+		if delta != nil && delta.FullAccess != nil {
+			full = *delta.FullAccess
+		}
+		if full && delta != nil && (len(delta.Add) > 0 || len(delta.Remove) > 0 || delta.RoleExtension != nil) {
+			return errKeyScopes
 		}
 		before := keySnapshot(key)
 		expires := key.ExpiresAt
@@ -274,7 +291,11 @@ func (m *Module) agentKeyScopes(ctx context.Context, p tenant.Principal, id stri
 		// editor explicitly removes them. Never invent replacement permissions.
 		after := []string{}
 		pruned := []string{}
-		for _, stored := range key.Scopes {
+		storedScopes := key.Scopes
+		if full || key.FullAccess {
+			storedScopes = nil
+		}
+		for _, stored := range storedScopes {
 			scope := strings.ReplaceAll(stored, ":", ".")
 			if _, known := authz.Lookup(scope); !known {
 				pruned = append(pruned, stored)
@@ -303,11 +324,12 @@ func (m *Module) agentKeyScopes(ctx context.Context, p tenant.Principal, id stri
 			}
 		}
 		expiryChanged := (key.ExpiresAt == nil) != (expires == nil) || key.ExpiresAt != nil && expires != nil && !key.ExpiresAt.Equal(*expires)
-		if roleChanged || expiryChanged || !slices.Equal(key.Scopes, after) {
-			if _, err := tx.Exec(ctx, `UPDATE agent_keys SET scopes=$2::text[],expires_at=$3 WHERE id=$1::uuid`, id, after, expires); err != nil {
+		if roleChanged || expiryChanged || key.FullAccess != full || !slices.Equal(key.Scopes, after) {
+			if _, err := tx.Exec(ctx, `UPDATE agent_keys SET scopes=$2::text[],expires_at=$3,full_access=$4 WHERE id=$1::uuid`, id, after, expires, full); err != nil {
 				return err
 			}
 			key.Scopes = after
+			key.FullAccess = full
 			key.ExpiresAt = expires
 			auditAfter := keySnapshot(key)
 			if roleChanged {

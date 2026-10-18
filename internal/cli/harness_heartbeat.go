@@ -14,6 +14,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	goruntime "runtime"
 	"sort"
 	"strings"
 	"time"
@@ -21,8 +22,12 @@ import (
 	"unicode/utf8"
 
 	"github.com/inspr-at/paimos/internal/agentactivity"
+	"github.com/inspr-at/paimos/internal/agentd"
+	"github.com/inspr-at/paimos/internal/agentdwire"
+	"github.com/inspr-at/paimos/internal/agentsetup"
 	"github.com/inspr-at/paimos/internal/eta"
 	"github.com/inspr-at/paimos/internal/harness"
+	"github.com/inspr-at/paimos/internal/hookbinding"
 	"github.com/inspr-at/paimos/internal/modelreport"
 	"github.com/inspr-at/paimos/internal/rules"
 	"github.com/inspr-at/paimos/internal/runkind"
@@ -62,6 +67,7 @@ var (
 	errOwnerGone               = errors.New("owner process is not alive")
 	errHeartbeatTerminal       = errors.New("heartbeat generation is closed")
 	errHeartbeatAlreadyStopped = errors.New("heartbeat generation is already stopped")
+	errHeartbeatStopRequested  = errors.New("heartbeat stop requested by server")
 	errHeartbeatStopBound      = errors.New("heartbeat stop retry bound reached")
 	errHeartbeatStopRejected   = errors.New("heartbeat stop was rejected")
 	errHeartbeatBusy           = errors.New("heartbeat state is already in use")
@@ -82,6 +88,7 @@ type heartbeatDeps struct {
 }
 
 type heartbeatOptions struct {
+	ReconnectSocket   string
 	OwnedStop         bool
 	LinkAccountID     string
 	LinkSetupRoot     string
@@ -92,6 +99,7 @@ type heartbeatOptions struct {
 	Interval          int
 	StateDir          string
 	Project           string
+	ProjectID         string
 	Agent             string
 	Harness           string
 	Generator         string
@@ -115,6 +123,7 @@ type heartbeatOptions struct {
 	Shape             string
 	Management        string
 	Role              string
+	ParallelReason    string
 	SourceSession     string
 	CodexIndex        string
 	ClaudeProjects    string
@@ -148,10 +157,12 @@ func (rt *runtime) harnessRunHeartbeat() *Command {
 		Use:   "harness run-heartbeat --owner-pid PID --state-dir DIR --project KEY --agent NAME --harness KIND",
 		addFlags: func(fs *flagSet) {
 			o.Capacity.flags(fs)
+			fs.string(&o.ReconnectSocket, "reconnect-socket", 0, "paired daemon socket for this existing heartbeat/inbox hook; no process control")
 			fs.int(&o.OwnerPID, "owner-pid", "process id whose exit stops the session")
 			fs.int(&o.Interval, "interval", "seconds between beats (default 50)")
 			fs.string(&o.StateDir, "state-dir", 0, "private directory for registration and resume")
 			fs.string(&o.Project, "project", 'p', "project key")
+			fs.string(&o.ProjectID, "project-id", 0, "known project UUID; skips project-list lookup for registration and beats")
 			fs.string(&o.Agent, "agent", 0, "authenticated agent name")
 			fs.string(&o.Harness, "harness", 0, "execution family: "+runkind.Accepted)
 			fs.string(&o.Generator, "generator", 0, "public media generator label")
@@ -176,6 +187,7 @@ func (rt *runtime) harnessRunHeartbeat() *Command {
 			fs.string(&o.Shape, "work-shape", 0, "required with --ticket; one of: ship, scout")
 			fs.string(&o.Management, "management", 0, "managed or unmanaged")
 			fs.string(&o.Role, "role", 0, "worker or coordinator")
+			fs.string(&o.ParallelReason, "parallel-reason", 0, "explicit public reason for parallel work; requires person or coordinator authority")
 			fs.string(&o.SourceSession, "source-session", 0, "harness session UUID for the name source and inbox index")
 			fs.string(&o.CodexIndex, "codex-index", 0, "Codex session_index.jsonl (default ~/.codex/session_index.jsonl)")
 			fs.string(&o.ClaudeProjects, "claude-projects", 0, "Claude Code projects directory (default $CLAUDE_CONFIG_DIR/projects or ~/.claude/projects)")
@@ -197,6 +209,7 @@ func (rt *runtime) harnessRunHeartbeat() *Command {
 			if err := o.prepare(); err != nil {
 				return err
 			}
+			o.discoverReconnectSocket()
 			ctx, stop := signalContext()
 			defer stop()
 			return rt.runHeartbeat(ctx, o, heartbeatDeps{})
@@ -267,14 +280,20 @@ func (o *heartbeatOptions) prepare() error {
 		}
 	}
 	o.normalize()
+	if o.ReconnectSocket != "" && (o.Management != "unmanaged" || !validUUID(o.SourceSession) || o.Harness != "claude" || !filepath.IsAbs(o.ReconnectSocket)) {
+		return usagef("--reconnect-socket requires an absolute paired socket, an unmanaged Claude session and --source-session with the installed inbox hook")
+	}
 	if o.OwnerPID <= 0 {
 		return usagef("--owner-pid must be a positive process id")
 	}
 	if strings.TrimSpace(o.StateDir) == "" {
 		return usagef("--state-dir is required")
 	}
-	if strings.TrimSpace(o.Project) == "" {
-		return usagef("--project is required")
+	if strings.TrimSpace(o.Project) == "" && o.ProjectID == "" {
+		return usagef("--project or --project-id is required")
+	}
+	if o.ProjectID != "" && !validUUID(o.ProjectID) {
+		return usagef("--project-id must be a UUID")
 	}
 	if !agentNameRE.MatchString(o.Agent) {
 		return usagef("--agent must be a valid agent name")
@@ -409,6 +428,29 @@ func (rt *runtime) runHeartbeat(ctx context.Context, o heartbeatOptions, dep hea
 	if !dep.alive(o.OwnerPID) {
 		return rt.rejectDeadOwner(o, &session)
 	}
+	if validUUID(o.SourceSession) {
+		inst, err := rt.resolve()
+		if err != nil {
+			return err
+		}
+		me, err := rt.caller()
+		if err != nil {
+			return err
+		}
+		config, err := rt.configFile()
+		if err != nil {
+			return err
+		}
+		config, err = filepath.Abs(config)
+		if err != nil {
+			return err
+		}
+		session.disk.HookOrigin = strings.TrimRight(inst.URL, "/")
+		session.disk.HookInstance, session.disk.HookConfig, session.disk.HookPrincipal = inst.Name, config, me.Principal.ID
+		if err := saveHeartbeatSession(&session); err != nil {
+			return err
+		}
+	}
 	if err := recordSessionIndex(rt, o, &session); err != nil {
 		return err
 	}
@@ -419,6 +461,12 @@ func (rt *runtime) runHeartbeat(ctx context.Context, o heartbeatOptions, dep hea
 
 // heartbeatLoop serves both the PID observer and a one-shot child process.
 func (rt *runtime) heartbeatLoop(ctx context.Context, o heartbeatOptions, dep heartbeatDeps, session *heartbeatSession) error {
+	defer func() {
+		if session.subagentScan != nil {
+			session.subagentScan.Close()
+			session.subagentScan = nil
+		}
+	}()
 	if dep.alive == nil {
 		pid, start := session.disk.OwnerPID, session.disk.OwnerStart
 		dep.alive = func(int) bool { return ownerAlive(pid, start) }
@@ -444,6 +492,15 @@ func (rt *runtime) heartbeatLoop(ctx context.Context, o heartbeatOptions, dep he
 		}
 		err := rt.heartbeatBeat(ctx, o, dep, session)
 		switch {
+		case errors.Is(err, errHeartbeatStopRequested):
+			// A PID observer owns only its reporting lifetime. Signalling is
+			// reserved for the launcher that owns and fences its exact child.
+			session.stopReason = "stopped"
+			if err := finish(); err != nil {
+				return err
+			}
+			fmt.Fprintf(rt.stderr, "heartbeat: session %s is stopped; observed owner process exit is unconfirmed\n", session.id)
+			return nil
 		case errors.Is(err, errHeartbeatTerminal):
 			rememberSettlement(session)
 			if serr := saveHeartbeatSession(session); serr != nil {
@@ -451,12 +508,14 @@ func (rt *runtime) heartbeatLoop(ctx context.Context, o heartbeatOptions, dep he
 				return serr
 			}
 			releaseSessionIndex(session)
+			explainClosedHeartbeat(rt, session)
 			return nil
 		case err != nil && ctx.Err() != nil:
 			return finish()
 		case err != nil:
 			fmt.Fprintf(rt.stderr, "heartbeat: beat failed: %s\n", err.Error())
 		default:
+			rt.heartbeatSubagents(ctx, session, false)
 			if serr := saveHeartbeatSession(session); serr != nil {
 				fmt.Fprintf(rt.stderr, "heartbeat: state save failed\n")
 			}
@@ -538,6 +597,16 @@ func waitHeartbeat(ctx context.Context, pid int, alive func(int) bool, interval 
 }
 
 func (rt *runtime) finishHeartbeat(o heartbeatOptions, session *heartbeatSession) error {
+	if session.subagentScan != nil {
+		session.subagentScan.Close()
+		session.subagentScan = nil
+	}
+	session.subagentNames = nil
+	rt.heartbeatSubagents(context.Background(), session, true)
+	if session.subagentScan != nil {
+		session.subagentScan.Close()
+		session.subagentScan = nil
+	}
 	if !session.disk.Terminal {
 		usageCtx, cancel := context.WithTimeout(context.Background(), heartbeatUsageFlushTimeout)
 		rt.drainHeartbeatUsage(usageCtx, o, session)
@@ -825,6 +894,9 @@ func (rt *runtime) openHeartbeatSession(ctx context.Context, o heartbeatOptions,
 		return heartbeatSession{}, false, err
 	}
 	if ok {
+		if o.ProjectID != "" && !strings.EqualFold(o.ProjectID, existing.disk.ProjectID) {
+			return heartbeatSession{}, false, usagef("--project-id differs from this generation's project")
+		}
 		if existing.disk.StartRev == "" {
 			existing.disk.StartRev, _ = gitHEAD(ctx, o.Worktree)
 		}
@@ -842,7 +914,7 @@ func (rt *runtime) openHeartbeatSession(ctx context.Context, o heartbeatOptions,
 		fmt.Fprintf(rt.stderr, "heartbeat: owner %d failed the start check\n", o.OwnerPID)
 		return heartbeatSession{}, false, errOwnerGone
 	}
-	projectID, err := rt.harnessProjectCtx(ctx, o.Project)
+	projectID, err := rt.heartbeatProjectCtx(ctx, o.Project, o.ProjectID)
 	if err != nil {
 		return heartbeatSession{}, false, err
 	}
@@ -861,10 +933,7 @@ func (rt *runtime) openHeartbeatSession(ctx context.Context, o heartbeatOptions,
 	if err != nil {
 		return heartbeatSession{}, false, err
 	}
-	// A native coordinator session survives a helper process restart.
-	if o.Role == "coordinator" && o.SourceSession != "" {
-		ref = o.Harness + ":" + strings.ToLower(o.SourceSession)
-	}
+	ref = heartbeatRegistrationRef(o, ref)
 	label, haveLabel := resolveHeartbeatLabel(ctx, o, dep, true)
 	body := map[string]any{
 		"max_session_file_bytes": rules.SessionFileLimit(o.Harness), "rules_client_version": version.Version,
@@ -877,11 +946,17 @@ func (rt *runtime) openHeartbeatSession(ctx context.Context, o heartbeatOptions,
 		"role":                    o.Role,
 		"advertised_capabilities": []string{"status"},
 	}
+	if o.ParallelReason != "" {
+		body["parallel_reason"] = o.ParallelReason
+	}
 	if o.PrintControls {
 		body["advertised_capabilities"] = []string{"status", "pause"}
 	}
 	if o.OwnedStop {
 		body["advertised_capabilities"] = []string{"status", "owned_stop_v1"}
+	}
+	if o.ReconnectSocket != "" || o.Management == "unmanaged" && o.Harness == "claude" && validUUID(o.SourceSession) {
+		body["advertised_capabilities"] = append(body["advertised_capabilities"].([]string), "inbox")
 	}
 	putText(body, "generator", o.Generator, true)
 	putText(body, "command", o.CommandLabel, true)
@@ -921,7 +996,7 @@ func (rt *runtime) openHeartbeatSession(ctx context.Context, o heartbeatOptions,
 	}
 	// Capture the owner before registration: a long predecessor timeout must
 	// not attach the new generation to a process that reused the owner's PID.
-	disk := heartbeatDisk{Schema: heartbeatSchema, OwnerPID: o.OwnerPID, ProjectID: projectID, BoundTicket: boundTicket}
+	disk := heartbeatDisk{Schema: heartbeatSchema, OwnerPID: o.OwnerPID, ProjectID: projectID, BoundTicket: boundTicket, RegisteredRef: ref}
 	if proved.Start != "" {
 		disk.OwnerPID = proved.PID
 		disk.OwnerStart = proved.Start
@@ -979,6 +1054,15 @@ func (rt *runtime) openHeartbeatSession(ctx context.Context, o heartbeatOptions,
 		disk.SentLabel = label
 	}
 	return heartbeatSession{id: disk.SessionID, lease: lease, disk: disk, hold: session.hold}, true, nil
+}
+
+// A native coordinator session survives a helper process restart. Claim uses
+// the same rule for state written before the registered reference was saved.
+func heartbeatRegistrationRef(o heartbeatOptions, fallback string) string {
+	if o.Role == "coordinator" && o.SourceSession != "" {
+		return o.Harness + ":" + strings.ToLower(o.SourceSession)
+	}
+	return fallback
 }
 
 func (rt *runtime) recoverStopIntent(o heartbeatOptions, session *heartbeatSession) error {
@@ -1138,11 +1222,14 @@ func (rt *runtime) heartbeatBeat(ctx context.Context, o heartbeatOptions, dep he
 	if err := ctx.Err(); err != nil {
 		return err
 	}
-	// Resolve on the beat's context every time. A cached id would hide a
-	// cancelled lookup, and the shutdown path reads ProjectID instead.
-	projectID, err := rt.harnessProjectCtx(ctx, o.Project)
+	// The opt-in UUID avoids project-list reads, while context cancellation
+	// and the generation's existing project binding remain authoritative.
+	projectID, err := rt.heartbeatProjectCtx(ctx, o.Project, o.ProjectID)
 	if err != nil {
 		return err
+	}
+	if o.ProjectID != "" && session.disk.ProjectID != "" && !strings.EqualFold(projectID, session.disk.ProjectID) {
+		return usagef("--project-id differs from this generation's project")
 	}
 	var controls []heartbeatControl
 	if o.PrintControls {
@@ -1181,7 +1268,8 @@ func (rt *runtime) heartbeatBeat(ctx context.Context, o heartbeatOptions, dep he
 			body["model_reports"] = []modelreport.Observation{{ReportID: modelreport.EvidenceID(session.id + "/advertised/" + model + "/" + effort), Harness: o.Harness, Model: model, Effort: effort, Status: "advertised"}}
 		}
 	}
-	putText(body, "account_label", heartbeatText(o.AccountLabel, 128), true)
+	// The account the harness is signed in to now, not only the one it launched with (AEON-1285).
+	putText(body, "account_label", rt.heartbeatAccountLabel(ctx, o, &session.disk, time.Now().UTC()), true)
 	putText(body, "brief", heartbeatText(o.Brief, 240), true)
 	putText(body, "worktree", heartbeatText(o.Worktree, 512), true)
 	putText(body, "branch", heartbeatText(o.Branch, 200), true)
@@ -1237,6 +1325,16 @@ func (rt *runtime) heartbeatBeat(ctx context.Context, o heartbeatOptions, dep he
 			body["doing"], body["doing_at"] = doing, at
 		}
 	}
+	// An adoption failure occupies the existing status space on the next beat.
+	// Respect the person's activity visibility setting and keep ordinary progress.
+	if adoption := session.disk.LeadAdoption; adoption != nil && adoption.Note != "" && !adoption.Claimed {
+		if session.disk.ActivityMode == "" || session.disk.ActivityMode == agentactivity.Summary {
+			body["activity_note"] = adoption.Note
+		}
+		if session.disk.ActivityMode == agentactivity.Summary {
+			body["doing"], body["doing_at"] = adoption.Note, now
+		}
+	}
 	commits := heartbeatCommits(ctx, o, dep, &session.disk)
 	if len(commits) > 0 {
 		items := make([]map[string]any, 0, len(commits))
@@ -1251,9 +1349,12 @@ func (rt *runtime) heartbeatBeat(ctx context.Context, o heartbeatOptions, dep he
 	}
 	path := harnessPath(projectID, session.id) + "/heartbeat"
 	var response struct {
-		Mode     string                    `json:"agent_activity_mode"`
-		Warnings []harness.EstimateWarning `json:"warnings"`
-		Pause    *harness.Pause            `json:"pause"`
+		ID        string                    `json:"id"`
+		Phase     string                    `json:"phase"`
+		StoppedAt *time.Time                `json:"stopped_at"`
+		Mode      string                    `json:"agent_activity_mode"`
+		Warnings  []harness.EstimateWarning `json:"warnings"`
+		Pause     *harness.Pause            `json:"pause"`
 	}
 	postBeat := func() error {
 		err := rt.harnessDoCtx(ctx, http.MethodPost, path, session.lease, body, &response)
@@ -1278,12 +1379,22 @@ func (rt *runtime) heartbeatBeat(ctx context.Context, o heartbeatOptions, dep he
 	}
 	if err != nil && heartbeatStatus(err) == http.StatusConflict {
 		var status struct {
-			ActivitySequence int64 `json:"activity_sequence"`
+			ActivitySequence int64      `json:"activity_sequence"`
+			ID               string     `json:"id"`
+			Phase            string     `json:"phase"`
+			StoppedAt        *time.Time `json:"stopped_at"`
 		}
-		if readErr := rt.harnessDoCtx(ctx, http.MethodGet, harnessPath(projectID, session.id), "", nil, &status); readErr == nil && status.ActivitySequence >= session.disk.Sequence {
-			session.disk.Sequence = status.ActivitySequence + 1
-			body["activity_sequence"] = session.disk.Sequence
-			err = postBeat()
+		if readErr := rt.harnessDoCtx(ctx, http.MethodGet, harnessPath(projectID, session.id), "", nil, &status); readErr == nil {
+			if strings.EqualFold(status.ID, session.id) && (status.StoppedAt != nil || status.Phase == "stopped") {
+				session.disk.Sequence--
+				markHeartbeatTerminal(session, "stopped")
+				return errHeartbeatTerminal
+			}
+			if status.ActivitySequence >= session.disk.Sequence {
+				session.disk.Sequence = status.ActivitySequence + 1
+				body["activity_sequence"] = session.disk.Sequence
+				err = postBeat()
+			}
 		}
 	}
 	if heartbeatTerminalStatus(err) {
@@ -1295,6 +1406,71 @@ func (rt *runtime) heartbeatBeat(ctx context.Context, o heartbeatOptions, dep he
 	if err != nil {
 		session.disk.Sequence--
 		return err
+	}
+	if response.ID != "" && !strings.EqualFold(response.ID, session.id) {
+		return errors.New("heartbeat response belongs to another generation")
+	}
+	if strings.EqualFold(response.ID, session.id) && (response.StoppedAt != nil || response.Phase == "stopped") {
+		markHeartbeatTerminal(session, "stopped")
+		return errHeartbeatTerminal
+	}
+	if dep.stopOwned == nil && response.Pause != nil && response.Pause.StopRequested && response.Pause.Deliver {
+		return errHeartbeatStopRequested
+	}
+	// Only an exact accepted worker heartbeat can supply this generation's proof.
+	// Keep adoption independent of optional paired-daemon binding and usage.
+	if strings.EqualFold(response.ID, session.id) && (response.Pause == nil || !response.Pause.StopRequested) {
+		rt.heartbeatClaimLeadAdoption(ctx, o, session)
+	}
+
+	// The heartbeat's own key remains the only authority for this generation.
+	// A different paired principal cannot consume it; generic hooks use the
+	// indexed CLI account instead. Report binding failure without skipping usage.
+	bindingCode := ""
+	if o.Management == "unmanaged" && o.Harness == "claude" && validUUID(o.SourceSession) {
+		if o.Worktree != "" {
+			home, _ := os.UserHomeDir()
+			executable, _ := os.Executable()
+			bindingCode = inboxHookCheck(o.Worktree, home, executable, session.disk.HookInstance)
+		}
+		indexed, _, result := lookupSessionIndex(strings.ToLower(o.SourceSession))
+		if result != sessionIndexBound || indexed != session.id {
+			bindingCode = "hook_index_mismatch"
+		}
+		if bindingCode == "" && o.ReconnectSocket != "" {
+			// Explicit sockets remain subject to the daemon's own verification.
+			// Auto-discovered runtime metadata permits an early, value-free diagnosis.
+			preflight := pairedBindingCheck(session.disk.HookOrigin, session.disk.HookPrincipal)
+			if preflight == "instance_mismatch" || preflight == "principal_mismatch" {
+				bindingCode = preflight
+			} else {
+				active, apiErr := rt.api()
+				if apiErr != nil {
+					return apiErr
+				}
+				local := agentdwire.Client{Socket: o.ReconnectSocket, TokenFile: o.ReconnectSocket + ".token"}
+				hookCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
+				hookErr := local.BindAttachedHook(hookCtx, agentd.AttachedHookRequest{PrincipalID: session.disk.HookPrincipal, Origin: strings.TrimRight(active.BaseURL, "/"), ProjectID: projectID, SessionID: session.id, Harness: o.Harness, Lease: session.lease, OwnerPID: o.OwnerPID, Sequence: session.disk.Sequence, Activity: o.Activity})
+				cancel()
+				if hookErr != nil {
+					bindingCode = "daemon_unavailable"
+					var refusal *hookbinding.Refusal
+					if errors.As(hookErr, &refusal) {
+						bindingCode = refusal.Code
+					}
+				}
+			}
+		}
+		// Same-sequence metadata update is replayable and uses the worker's
+		// original lease. It adds no process/watch/control authority.
+		var code *string
+		if bindingCode != "" {
+			code = &bindingCode
+		}
+		diagnostic := map[string]any{"phase": o.Phase, "activity": o.Activity, "activity_sequence": session.disk.Sequence, "inbox_binding_error": code, "inbox_binding_report": true}
+		if err := rt.harnessDoCtx(ctx, http.MethodPost, path, session.lease, diagnostic, new(map[string]any)); err != nil {
+			return errors.New("heartbeat reported, but inbox binding diagnostic could not be saved; the server must support harness-session/3.1")
+		}
 	}
 	if dep.stopOwned != nil && response.Pause != nil && response.Pause.StopRequested && response.Pause.StopExpiresInMS > 0 && response.Pause.StopExpiresInMS <= 45000 {
 		deadline := beatStarted.Add(time.Duration(response.Pause.StopExpiresInMS) * time.Millisecond)
@@ -1346,7 +1522,208 @@ func (rt *runtime) heartbeatBeat(ctx context.Context, o heartbeatOptions, dep he
 	if o.PrintControls {
 		rt.printHeartbeatControls(ctx, session.id, o.Harness, controls)
 	}
+	if bindingCode != "" {
+		return fmt.Errorf("heartbeat reported, but paired reconnect binding was refused: %s", hookbinding.Reason(bindingCode))
+	}
 	return nil
+}
+
+// Discovery uses the existing redacted lead read. Only adoption_pending is a
+// person-confirmed selection; start, resume and succession are never automated.
+// The claim remains a separate fenced transaction with this heartbeat's bearer
+// and lease, and the existing writer records lead.claim_checked on commit.
+func (rt *runtime) heartbeatClaimLeadAdoption(ctx context.Context, o heartbeatOptions, session *heartbeatSession) {
+	if o.Role != "coordinator" || o.Parent != "" || session.disk.Closed || session.disk.Terminal || session.disk.LeadAdoption != nil && session.disk.LeadAdoption.Claimed {
+		return
+	}
+	ctx, cancel := context.WithTimeout(ctx, 8*time.Second)
+	defer cancel()
+	path := "/api/projects/" + session.disk.ProjectID + "/lead"
+	read := func() (harness.Lead, error) {
+		var lead harness.Lead
+		err := rt.harnessDoCtx(ctx, http.MethodGet, path, "", nil, &lead)
+		if err == nil && (!strings.EqualFold(lead.ProjectID, session.disk.ProjectID) || lead.Revision < 0 || lead.Generation < 0) {
+			err = errors.New("invalid lead snapshot")
+		}
+		return lead, err
+	}
+	note := func(text string) {
+		if session.disk.LeadAdoption == nil {
+			session.disk.LeadAdoption = &heartbeatLeadAdoption{}
+		}
+		session.disk.LeadAdoption.Note = text
+		if err := saveHeartbeatSession(session); err != nil {
+			fmt.Fprintln(rt.stderr, "heartbeat: lead adoption state could not be saved; repair the private state directory")
+		}
+	}
+	claimed := func(lead harness.Lead) bool {
+		return lead.SessionID != nil && strings.EqualFold(*lead.SessionID, session.id) && lead.Generation > 0
+	}
+	pending := func(lead harness.Lead) bool {
+		return lead.Reason == "adoption_pending" && lead.State == "waiting_for_room" && lead.Revision > 0 && lead.Generation == 0 && lead.ProcessActive && lead.SessionID != nil && strings.EqualFold(*lead.SessionID, session.id)
+	}
+	lead, err := read()
+	if err != nil {
+		note(heartbeatLeadFailure(err))
+		return
+	}
+	if claimed(lead) {
+		// Reconcile a lost response or a helper restart without replaying the
+		// ordinary claim (which would rerun admission and increment revision).
+		if session.disk.LeadAdoption != nil && len(session.disk.LeadAdoption.Attempts) > 0 {
+			session.disk.LeadAdoption.Claimed = true
+			note("")
+		} else if session.disk.LeadAdoption != nil {
+			session.disk.LeadAdoption = nil
+			_ = saveHeartbeatSession(session)
+		}
+		return
+	}
+	if !pending(lead) {
+		// A coordinator with no adoption intent keeps its normal activity. A
+		// previous own-session attempt still needs its cancellation/failure note.
+		related := lead.SessionID != nil && strings.EqualFold(*lead.SessionID, session.id) || session.disk.LeadAdoption != nil && len(session.disk.LeadAdoption.Attempts) > 0
+		if !related && lead.SessionID == nil {
+			if session.disk.LeadAdoption != nil {
+				session.disk.LeadAdoption = nil
+				_ = saveHeartbeatSession(session)
+			}
+			return
+		}
+		if session.disk.LeadAdoption != nil {
+			session.disk.LeadAdoption.Ended = true
+		}
+		if lead.SessionID != nil && !strings.EqualFold(*lead.SessionID, session.id) {
+			if session.disk.LeadAdoption != nil {
+				if len(session.disk.LeadAdoption.Attempts) > 0 {
+					note("Lead selection changed; confirm this running session again.")
+				} else {
+					session.disk.LeadAdoption = nil
+					_ = saveHeartbeatSession(session)
+				}
+			}
+		} else if lead.Reason == "owner_revoked" {
+			note("Owner grants revoked; restore grants and confirm again.")
+		} else if lead.Reason == "adoption_pending" && lead.Revision > 0 {
+			note("Session ineligible; check owner, reporting and pause/stop.")
+		} else if lead.Generation == 0 {
+			// Retain the attempt journal until another confirmation replaces it.
+			note("Waiting for a person to confirm adoption; use the lead card.")
+		}
+		return
+	}
+	adoption := session.disk.LeadAdoption
+	if adoption != nil && !adoption.Ended && len(adoption.Attempts) > 0 && (adoption.Revision == lead.Revision || adoption.Refreshed) {
+		return
+	}
+	if adoption == nil || adoption.Ended || adoption.Revision != lead.Revision {
+		adoption = &heartbeatLeadAdoption{Revision: lead.Revision}
+		session.disk.LeadAdoption = adoption
+	}
+	if !rt.heartbeatLeadReferenceMatches(ctx, o, session) {
+		note("Reference mismatch; use original registered helper state.")
+		return
+	}
+	for attempt := 0; attempt < 2; attempt++ {
+		adoption.Attempts = append(adoption.Attempts, heartbeatLeadAttempt{Revision: lead.Revision, At: time.Now().UTC(), Result: "Awaiting claim result"})
+		// Refuse the write if its intent cannot be retained. This also makes an
+		// interrupted request safe: the next beat reads current selection first.
+		if err := saveHeartbeatSession(session); err != nil {
+			note("Adoption state unsaved; repair state and confirm again.")
+			return
+		}
+		var result harness.Lead
+		err = rt.harnessDoCtx(ctx, http.MethodPost, path+"/claim", session.lease, map[string]any{"expected_revision": lead.Revision, "session_id": session.id}, &result)
+		last := &adoption.Attempts[len(adoption.Attempts)-1]
+		if err == nil {
+			if !strings.EqualFold(result.ProjectID, session.disk.ProjectID) || !claimed(result) || result.Revision != lead.Revision+1 || result.Generation != 1 || result.Reason != "" || (result.State != "working" && result.State != "starting") {
+				last.Result = "Claim result could not be verified"
+				note("Claim result unverified; check lead card before claiming.")
+				return
+			}
+			last.Result, adoption.Claimed = "Claimed", true
+			note("")
+			return
+		}
+		last.Result = heartbeatLeadFailure(err)
+		if heartbeatStatus(err) != http.StatusConflict || adoption.Refreshed {
+			if heartbeatStatus(err) == http.StatusConflict {
+				last.Result = "Claim conflicted again; reload and confirm this session."
+			}
+			note(last.Result)
+			return
+		}
+		adoption.Refreshed = true
+		last.Result = "Claim conflicted; checking the same confirmed session."
+		note(last.Result)
+		fresh, readErr := read()
+		if readErr != nil {
+			note(heartbeatLeadFailure(readErr))
+			return
+		}
+		if claimed(fresh) {
+			adoption.Claimed = true
+			note("")
+			return
+		}
+		if !pending(fresh) {
+			note("Lead selection changed; confirm this running session again.")
+			return
+		}
+		if fresh.Revision <= lead.Revision {
+			note("Session ineligible; check owner, reporting and pause/stop.")
+			return
+		}
+		note("Lead changed; retrying once with the same confirmed session.")
+		lead = fresh
+	}
+}
+
+// Use the same derivation as AEON-1140. Never substitute session.ref for a
+// missing registered reference, even when the heartbeat's UUID is known.
+func (rt *runtime) heartbeatLeadReferenceMatches(ctx context.Context, o heartbeatOptions, session *heartbeatSession) bool {
+	ref := session.disk.RegisteredRef
+	if o.SourceSession == "" {
+		return len(ref) >= 16 && len(ref) <= 4096 && !strings.ContainsAny(ref, "\r\n")
+	}
+	if !validUUID(o.SourceSession) {
+		return false
+	}
+	derived := heartbeatRegistrationRef(o, "")
+	if ref != "" {
+		return ref == derived
+	}
+	// Legacy native state has the original source binding, but no RegisteredRef.
+	// Verify server metadata before deriving; a changed invocation is not proof.
+	raw, err := session.hold.readFile("index.source", 256)
+	if err != nil || !strings.EqualFold(strings.TrimSpace(string(raw)), o.SourceSession) {
+		return false
+	}
+	var registered struct {
+		ID        string  `json:"id"`
+		ProjectID string  `json:"project_id"`
+		Harness   string  `json:"harness"`
+		Role      string  `json:"role"`
+		ParentID  *string `json:"parent_harness_session_id"`
+	}
+	if rt.harnessDoCtx(ctx, http.MethodGet, harnessPath(session.disk.ProjectID, session.id), "", nil, &registered) != nil {
+		return false
+	}
+	return strings.EqualFold(registered.ID, session.id) && strings.EqualFold(registered.ProjectID, session.disk.ProjectID) && registered.Role == "coordinator" && registered.ParentID == nil && registered.Harness == o.Harness
+}
+
+// Deliberately ignore upstream bodies, which can echo private proof or codes.
+func heartbeatLeadFailure(err error) string {
+	switch heartbeatStatus(err) {
+	case http.StatusUnauthorized, http.StatusForbidden:
+		return "Lead proof refused; restore grants and original account."
+	case http.StatusNotFound, http.StatusMethodNotAllowed:
+		return "Adoption unavailable; upgrade or claim from saved state."
+	case http.StatusConflict:
+		return "Claim conflicted; reload and confirm this session again."
+	default:
+		return "Adoption unverified; check lead card and claim from state."
+	}
 }
 
 func proveOwnerAtStart(pid int, dep heartbeatDeps) (ownerStamp, error) {
@@ -1891,4 +2268,26 @@ func addTokens(a, b int64) (int64, bool) {
 		return 0, false
 	}
 	return a + b, true
+}
+
+// A normal attached heartbeat with the existing source-session inbox hook
+// discovers only the known owner-only paired socket. No home scan, credential
+// file or foreign registration is used. The daemon/server verify instance and
+// principal before advertising recovery; older or absent daemons fail closed.
+func (o *heartbeatOptions) discoverReconnectSocket() {
+	if o.ReconnectSocket != "" || o.Management != "unmanaged" || o.Harness != "claude" || !validUUID(o.SourceSession) {
+		return
+	}
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return
+	}
+	root, err := agentsetup.DefaultStateRoot(goruntime.GOOS, home, os.Getenv("XDG_STATE_HOME"))
+	if err != nil {
+		return
+	}
+	local, err := agentdwire.OpenClient(filepath.Join(root, "daemon"))
+	if err == nil {
+		o.ReconnectSocket = local.Socket
+	}
 }

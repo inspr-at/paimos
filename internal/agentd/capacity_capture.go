@@ -94,9 +94,13 @@ func (a *CodexAdapter) captureCapacityResult(ctx context.Context, key string, la
 		cleanup, stop := context.WithTimeout(context.Background(), 2*time.Second)
 		defer stop()
 		if p.cmd.Process != nil {
-			if p.lifetime == nil || p.lifetime.Signal(true) != nil && !p.ProcessExited() {
+			if p.lifetime == nil {
 				out = CapacityCapture{Result: "launch_failed", CleanupUnconfirmed: true}
 			} else {
+				// The final waiter can revoke signaling before publishing
+				// waitDone. A declined signal is not cleanup evidence: join
+				// the retained waiter and use its bounded final outcome.
+				_ = p.lifetime.Signal(true)
 				select {
 				case <-p.waitDone:
 					if p.cleanupResult() != nil {

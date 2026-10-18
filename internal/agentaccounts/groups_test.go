@@ -10,9 +10,11 @@ import (
 
 	"github.com/jackc/pgx/v5"
 
+	"github.com/inspr-at/paimos/internal/agentpairing"
 	"github.com/inspr-at/paimos/internal/capacity"
 	"github.com/inspr-at/paimos/internal/db"
 	"github.com/inspr-at/paimos/internal/dbtest"
+	"github.com/inspr-at/paimos/internal/hostcapacity"
 	"github.com/inspr-at/paimos/internal/httpapi"
 	"github.com/inspr-at/paimos/internal/tenant"
 )
@@ -20,7 +22,7 @@ import (
 func TestGroupFenceHoldsAndExclusiveWaits(t *testing.T) {
 	reset(t)
 	admin, runner, profile, token, mod := groupFixture(t)
-	member := groupAccount(t, mod, admin, runner, token, "member", "daemon-a", "Member", "mbp2607")
+	member := groupAccount(t, mod, admin, runner, token, "member", "daemon-a", "Member", "build-7")
 	outside := groupAccount(t, mod, admin, runner, token, "outside", "daemon-a", "Outside", "studio")
 	project, run := insertProjectRun(t, admin, runner, profile, "Client")
 	var group AccountGroup
@@ -36,7 +38,7 @@ func TestGroupFenceHoldsAndExclusiveWaits(t *testing.T) {
 
 	reset(t)
 	admin, runner, profile, token, mod = groupFixture(t)
-	member = groupAccount(t, mod, admin, runner, token, "member", "daemon-a", "Member", "mbp2607")
+	member = groupAccount(t, mod, admin, runner, token, "member", "daemon-a", "Member", "build-7")
 	outside = groupAccount(t, mod, admin, runner, token, "outside", "daemon-a", "Outside", "studio")
 	project, run = insertProjectRun(t, admin, runner, profile, "Client")
 	callStatus(t, mod, &admin, "", "POST", "/api/agent-accounts/groups", encoded(t, map[string]any{
@@ -62,7 +64,7 @@ func TestGroupFenceHoldsAndExclusiveWaits(t *testing.T) {
 func TestSharedQuotaCountsOnce(t *testing.T) {
 	reset(t)
 	admin, runner, profile, token, mod := groupFixture(t)
-	first := groupAccount(t, mod, admin, runner, token, "door-a", "daemon-a", "Spare", "mbp2607")
+	first := groupAccount(t, mod, admin, runner, token, "door-a", "daemon-a", "Spare", "build-7")
 	second := groupAccount(t, mod, admin, runner, token, "door-b", "daemon-b", "Spare", "studio")
 	fp := strings.Repeat("ab", 32)
 	seed(t, admin, func(tx pgx.Tx) error {
@@ -95,6 +97,241 @@ func TestSharedQuotaCountsOnce(t *testing.T) {
 	}
 }
 
+// Risk: an idle or uncertain native coordinator makes its alias appear free to
+// legacy workers, or root replay counts itself or a worker sidecar twice.
+func TestNativeRootsFenceWorkerAliasAndProjectOwnClaim(t *testing.T) {
+	reset(t)
+	admin, runner, profile, token, mod := groupFixture(t)
+	first := groupAccount(t, mod, admin, runner, token, "native-a", "daemon-a", "Native", "build-7")
+	alias := groupAccount(t, mod, admin, runner, token, "native-b", "daemon-b", "Alias", "studio")
+	const session = "01900000-0000-4000-8000-000000000101"
+	const sibling = "01900000-0000-4000-8000-000000000102"
+	const computer = "01900000-0000-4000-8000-000000000103"
+	first.QuotaPoolFingerprint, alias.QuotaPoolFingerprint = strings.Repeat("ac", 32), strings.Repeat("ac", 32)
+	seed(t, admin, func(tx pgx.Tx) error {
+		_, err := tx.Exec(t.Context(), `UPDATE agent_accounts SET quota_fingerprint=$1,quota_pool_fingerprint=$1 WHERE id=ANY($2::uuid[])`, strings.Repeat("ac", 32), []string{first.ID, alias.ID})
+		if err != nil {
+			return err
+		}
+		_, err = tx.Exec(t.Context(), `INSERT INTO native_session_roots(tenant_id,id,owned_session_id,account_id,computer_id,hold_state) VALUES($1,gen_random_uuid(),$2,$3,$4,'idle')`, admin.TenantID, session, first.ID, computer)
+		return err
+	})
+	blocked := insertRun(t, admin, runner, profile)
+	seed(t, admin, func(tx pgx.Tx) error {
+		_, err := tx.Exec(t.Context(), `UPDATE agent_runs SET requested_account_id=$2 WHERE id=$1`, blocked, alias.ID)
+		return err
+	})
+	for _, state := range []string{"queued", "starting", "running", "idle", "taken", "exit_unconfirmed"} {
+		seed(t, admin, func(tx pgx.Tx) error {
+			if _, err := tx.Exec(t.Context(), `UPDATE native_session_roots SET hold_state=$2 WHERE owned_session_id=$1`, session, state); err != nil {
+				return err
+			}
+			wait, err := WaitForRun(t.Context(), tx, blocked)
+			if err != nil {
+				return err
+			}
+			if wait == nil || wait.Code != "capacity" {
+				t.Fatalf("%s freed alias: %+v", state, wait)
+			}
+			return nil
+		})
+		status, raw := call(t, mod, &runner, token, "POST", "/api/agent-accounts/route", routeBody(t, blocked, "daemon-b", []Account{alias}, map[string]int64{"requests": 1}))
+		// The route's existing public refusal is deliberately generic. The
+		// preceding WaitForRun assertion proves the precise capacity cause.
+		if status != 409 || strings.TrimSpace(string(raw)) != `{"error":"no eligible account"}` {
+			t.Fatalf("%s: wrong worker refusal %d %s", state, status, raw)
+		}
+		status, raw = call(t, mod, &admin, "", "POST", "/api/agent-accounts/"+first.ID+"/archive", "")
+		if status != 409 || !strings.Contains(string(raw), "account_busy") {
+			t.Fatalf("%s: native account archive was not fenced: %d %s", state, status, raw)
+		}
+	}
+	seed(t, admin, func(tx pgx.Tx) error {
+		// The second hold uses the alias; a forged worker sidecar adds no root.
+		if _, err := tx.Exec(t.Context(), `INSERT INTO native_session_roots(tenant_id,id,owned_session_id,account_id,computer_id,hold_state,run_id) VALUES($1,gen_random_uuid(),$2,$3,$4,'taken',NULL),($1,gen_random_uuid(),gen_random_uuid(),$3,$4,'idle',$5)`, admin.TenantID, sibling, alias.ID, computer, blocked); err != nil {
+			return err
+		}
+		used, err := occupancy(t.Context(), tx)
+		if err != nil {
+			return err
+		}
+		quota, err := quotaOccupancy(t.Context(), tx)
+		if err != nil {
+			return err
+		}
+		if used[first.ID] != 1 || used[alias.ID] != 1 || slotCount(alias, used, quota) != 2 {
+			t.Fatalf("root occupancy: %+v %+v", used, quota)
+		}
+		used, err = occupancyExceptNative(t.Context(), tx, "", session)
+		if err != nil {
+			return err
+		}
+		quota, err = quotaOccupancyExceptNative(t.Context(), tx, "", session)
+		if err != nil {
+			return err
+		}
+		if used[first.ID] != 0 || used[alias.ID] != 1 || slotCount(first, used, quota) != 1 {
+			t.Fatalf("claim replay excluded a sibling or double-counted own root: %+v %+v", used, quota)
+		}
+		return nil
+	})
+	if scalar(t, admin, `SELECT count(*) FROM agent_runs WHERE id=$1 AND account_id IS NOT NULL`, blocked) != 0 || scalar(t, admin, `SELECT count(*) FROM account_reservations WHERE run_id=$1`, blocked) != 0 {
+		t.Fatal("refused route mutated worker reservation")
+	}
+	seed(t, admin, func(tx pgx.Tx) error {
+		_, err := tx.Exec(t.Context(), `UPDATE native_session_roots SET released_at=clock_timestamp() WHERE owned_session_id=ANY($1::uuid[])`, []string{session, sibling})
+		return err
+	})
+	if got := mustRoute(t, mod, runner, token, blocked, "daemon-b", []Account{alias}, map[string]int64{"requests": 1}); got.AccountID != alias.ID {
+		t.Fatal("verified release did not reopen the alias", got)
+	}
+}
+
+// Risk: a native writer on another account consumes no host slot in legacy
+// pairing/engine admission, permitting a second process despite the owner cap.
+func TestNativeRootFencesLegacyHostAdmission(t *testing.T) {
+	reset(t)
+	admin, runner, profile, token, mod := groupFixture(t)
+	account := groupAccount(t, mod, admin, runner, token, "worker", "daemon-a", "Worker", "build-7")
+	other := groupAccount(t, mod, admin, runner, token, "native", "daemon-a", "Native", "studio")
+	const computer = "01900000-0000-4000-8000-000000000111"
+	const request = "01900000-0000-4000-8000-000000000112"
+	const session = "01900000-0000-4000-8000-000000000113"
+	now := time.Now()
+	policy := hostcapacity.Default()
+	policy.MaximumAgents = 1
+	policyRaw := encoded(t, policy)
+	load := 1.0
+	signals := encoded(t, hostcapacity.Signals{Cores: 8, Load: &load, MemoryPressure: "normal", Power: "plugged_in", Thermal: "normal"})
+	seed(t, admin, func(tx pgx.Tx) error {
+		if _, err := tx.Exec(t.Context(), `INSERT INTO agent_pairing_requests(tenant_id,id,user_code,device_hash,runtime_hash,lifecycle_hash,details,request_digest,state,approved_by)
+ VALUES($1,$2,'123456789',$3,$4,$5,'{"platform":"darwin","arch":"arm64"}','fixture','redeemed',$6)`, admin.TenantID, request, strings.Repeat("a", 64), strings.Repeat("b", 64), strings.Repeat("c", 64), admin.ID); err != nil {
+			return err
+		}
+		if _, err := tx.Exec(t.Context(), `INSERT INTO agent_pairing_computers(tenant_id,id,request_id,principal_id,key_id,daemon_id,lifecycle_hash,capacity_policy,capacity_signals,capacity_reported_at)
+ SELECT $1,$2,$3,$4,id,'daemon-a',$5,$6,$7,$8 FROM agent_keys WHERE principal_id=$4 ORDER BY created_at DESC LIMIT 1`, admin.TenantID, computer, request, runner.ID, strings.Repeat("c", 64), policyRaw, signals, now); err != nil {
+			return err
+		}
+		if _, err := tx.Exec(t.Context(), `INSERT INTO agent_pairing_enrollments(tenant_id,account_id,computer_id,request_id,model_profile_id,ongoing_approved_at,verification_expires_at)
+ VALUES($1,$2,$3,$4,$5,$6,$6::timestamptz+interval '1 hour')`, admin.TenantID, account.ID, computer, request, profile, now); err != nil {
+			return err
+		}
+		return nil
+	})
+	check := func(held bool) {
+		t.Helper()
+		seed(t, admin, func(tx pgx.Tx) error {
+			v, err := agentpairing.HostCapacityForPrincipal(t.Context(), tx, runner.ID)
+			if err != nil {
+				return err
+			}
+			wantCount, wantHost, wantEngine := 0, "", ""
+			if held {
+				wantCount, wantHost, wantEngine = 1, "maximum_agents", "host_maximum_agents"
+			}
+			if v == nil || v.Running != wantCount || v.Reason != wantHost {
+				t.Fatalf("pairing host: %+v; want %d/%s", v, wantCount, wantHost)
+			}
+			reason, err := engineHost(t.Context(), tx, account.ID, admin.ID, now, "")
+			if err != nil {
+				return err
+			}
+			if reason != wantEngine {
+				t.Fatalf("engine host: %s; want %s", reason, wantEngine)
+			}
+			return nil
+		})
+	}
+	check(false)
+	seed(t, admin, func(tx pgx.Tx) error {
+		_, err := tx.Exec(t.Context(), `INSERT INTO native_session_roots(tenant_id,id,owned_session_id,account_id,computer_id,hold_state) VALUES($1,gen_random_uuid(),$2,$3,$4,'exit_unconfirmed')`, admin.TenantID, session, other.ID, computer)
+		return err
+	})
+	check(true)
+	seed(t, admin, func(tx pgx.Tx) error {
+		_, err := tx.Exec(t.Context(), `UPDATE native_session_roots SET released_at=$2 WHERE owned_session_id=$1`, session, now)
+		return err
+	})
+	check(false)
+}
+
+// Risk: clearing a ticket's stale hold admits another process on its account
+// or shared quota pool while the original writer's exit remains unconfirmed.
+func TestStaleWorkReleaseRetainsAdmissionUntilExit(t *testing.T) {
+	for _, shared := range []bool{false, true} {
+		t.Run(fmt.Sprintf("shared_pool_%t", shared), func(t *testing.T) {
+			reset(t)
+			admin, runner, profile, token, mod := groupFixture(t)
+			first := groupAccount(t, mod, admin, runner, token, "door-a", "daemon-a", "Main", "build-7")
+			target, daemon := first, "daemon-a"
+			if shared {
+				target = groupAccount(t, mod, admin, runner, token, "door-b", "daemon-b", "Sibling", "studio")
+				daemon = "daemon-b"
+				seed(t, admin, func(tx pgx.Tx) error {
+					_, err := tx.Exec(t.Context(), `UPDATE agent_accounts SET quota_fingerprint=$1,quota_pool_fingerprint=$1 WHERE id=ANY($2::uuid[])`, strings.Repeat("ab", 32), []string{first.ID, target.ID})
+					return err
+				})
+			}
+			held := insertRun(t, admin, runner, profile)
+			heldRoute := mustRoute(t, mod, runner, token, held, "daemon-a", []Account{first}, map[string]int64{"requests": 1})
+			// Every sibling's manual window binds the shared pool, so routing
+			// retains one reservation per window, not just the selected account.
+			reservationCount := 1
+			if shared {
+				reservationCount = 2
+			}
+			if len(heldRoute.Reservations) != reservationCount {
+				t.Fatalf("fixture did not reserve every binding window: %+v", heldRoute)
+			}
+			seed(t, admin, func(tx pgx.Tx) error {
+				_, err := tx.Exec(t.Context(), `UPDATE agent_runs SET status='ownership_lost',started_at=created_at,ended_at=clock_timestamp(),trace='{"work_lifecycle_release":{"exit_unconfirmed":true}}' WHERE id=$1`, held)
+				return err
+			})
+			blocked := insertRun(t, admin, runner, profile)
+			seed(t, admin, func(tx pgx.Tx) error {
+				_, err := tx.Exec(t.Context(), `UPDATE agent_runs SET requested_account_id=$2 WHERE id=$1`, blocked, target.ID)
+				return err
+			})
+			seed(t, admin, func(tx pgx.Tx) error {
+				single, err := WaitForRun(t.Context(), tx, blocked)
+				if err != nil {
+					return err
+				}
+				batch, err := WaitForRuns(t.Context(), tx, []string{blocked})
+				if err != nil {
+					return err
+				}
+				if single == nil || single.Code != "capacity" || batch[blocked] == nil || batch[blocked].Code != "capacity" {
+					t.Fatalf("unconfirmed writer lost occupancy: single=%+v batch=%+v", single, batch[blocked])
+				}
+				return nil
+			})
+			callStatus(t, mod, &runner, token, "POST", "/api/agent-accounts/route", routeBody(t, blocked, daemon, []Account{target}, map[string]int64{"requests": 1}), 409, nil)
+			status, raw := call(t, mod, &admin, "", "POST", "/api/agent-accounts/"+first.ID+"/archive", "")
+			if status != 409 || !strings.Contains(string(raw), "account_busy") {
+				t.Fatalf("unconfirmed writer lost account removal protection: %d %s", status, raw)
+			}
+			if scalar(t, admin, `SELECT count(*) FROM agent_runs WHERE id=$1 AND account_id IS NOT NULL`, blocked) != 0 || scalar(t, admin, `SELECT count(*) FROM account_reservations WHERE run_id=$1`, blocked) != 0 || scalar(t, admin, `SELECT count(*) FROM account_reservations WHERE run_id=$1 AND state='active'`, held) != int64(reservationCount) {
+				t.Fatal("blocked admission changed assignment or retained reservation")
+			}
+			for _, reservation := range heldRoute.Reservations {
+				if scalar(t, admin, `SELECT count(*) FROM account_reservations r JOIN account_allowance_windows w ON w.id=r.window_id
+ WHERE r.id=$1 AND r.run_id=$2 AND r.window_id=$3 AND r.state='active' AND r.reserved_units=1
+ AND r.actual_units IS NULL AND r.settled_at IS NULL AND w.reserved=1 AND w.used=0`, reservation.ReservationID, held, reservation.WindowID) != 1 {
+					t.Fatalf("blocked admission changed original reservation or window: %+v", reservation)
+				}
+			}
+			// The pairing regression exercises authenticated exit telemetry. Here
+			// isolate admission's response to the resulting confirmed marker.
+			seed(t, admin, func(tx pgx.Tx) error {
+				_, err := tx.Exec(t.Context(), `UPDATE agent_runs SET trace=jsonb_set(trace,'{work_lifecycle_release,exit_unconfirmed}','false'::jsonb) WHERE id=$1`, held)
+				return err
+			})
+			mustRoute(t, mod, runner, token, blocked, daemon, []Account{target}, map[string]int64{"requests": 1})
+		})
+	}
+}
+
 func TestGroupScheduleSitsBetweenAccountAndPool(t *testing.T) {
 	reset(t)
 	admin, runner, _, token, mod := groupFixture(t)
@@ -121,7 +358,7 @@ func TestGroupScheduleSitsBetweenAccountAndPool(t *testing.T) {
 func TestUseAccountPayloadHasNoPath(t *testing.T) {
 	reset(t)
 	admin, runner, _, token, mod := groupFixture(t)
-	first := groupAccount(t, mod, admin, runner, token, "door-a", "daemon-a", "Spare", "mbp2607")
+	first := groupAccount(t, mod, admin, runner, token, "door-a", "daemon-a", "Spare", "build-7")
 	second := groupAccount(t, mod, admin, runner, token, "door-b", "daemon-b", "Spare", "studio")
 	fp := strings.Repeat("cd", 32)
 	seed(t, admin, func(tx pgx.Tx) error {
@@ -159,7 +396,7 @@ func TestUseAccountPayloadHasNoPath(t *testing.T) {
 func TestTicketPinDoesNotCrossAFence(t *testing.T) {
 	reset(t)
 	admin, runner, profile, token, mod := groupFixture(t)
-	member := groupAccount(t, mod, admin, runner, token, "member", "daemon-a", "Member", "mbp2607")
+	member := groupAccount(t, mod, admin, runner, token, "member", "daemon-a", "Member", "build-7")
 	outside := groupAccount(t, mod, admin, runner, token, "outside", "daemon-a", "Outside", "studio")
 	project, ticket, run := insertTicketRun(t, admin, runner, profile)
 	var group AccountGroup

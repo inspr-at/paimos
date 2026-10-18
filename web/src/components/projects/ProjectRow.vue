@@ -90,7 +90,7 @@ const value = (project: Project, kind: StatKind) => kind === 'open' ? project.op
 .name { min-width: 0; font-size: 14.5px; font-weight: 650; letter-spacing: -.005em; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .project-desc { font-size: 13px; color: var(--ink-2); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .state-chip { height: 18px; padding: 0 7px; font-size: 10px; text-transform: uppercase; letter-spacing: .08em; }
-.state-chip.frozen { color: var(--gold-ink); box-shadow: inset 0 0 0 1px rgba(214, 155, 49, .45); }
+.state-chip.frozen { color: var(--warn-ink); box-shadow: inset 0 0 0 1px var(--warn-line); }
 .stat { justify-self: stretch; }
 .stats-line { display: none; }
 .progress { display: flex; align-items: center; gap: 10px; }

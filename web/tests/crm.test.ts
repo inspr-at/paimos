@@ -130,3 +130,22 @@ test('edit mode: the draft round-trips and reports what it cannot save', async (
   assert.deepEqual(Object.keys(draftProblems({ ...draft, name: ' ', currency: 'eu', hourly: '1.234', employees: 'many' })).sort(), ['currency', 'employees', 'hourly', 'name'])
   assert.equal(draftProblems({ ...draft, currency: '' }).currency, 'Amounts need a currency, such as EUR.')
 })
+
+test('newline-heavy accepted notes stay within the diff allocation and render budget', () => {
+  const original = Array.from
+  let cells = 0
+  Array.from = ((input: ArrayLike<unknown>, ...args: unknown[]) => {
+    if (input.length > 2_000) throw new Error('unbounded diff allocation')
+    cells += input.length * input.length
+    return Reflect.apply(original, Array, [input, ...args])
+  }) as typeof Array.from
+  try {
+    const changed = lineDiff('a\n'.repeat(10_000), 'b\n'.repeat(10_000))
+    assert.equal(changed.length, 1)
+    assert.equal(changed[0].kind, 'summary')
+    assert.match(changed[0].text, /Review the two full versions/)
+    const equal = lineDiff('a\n'.repeat(10_000), 'a\n'.repeat(10_000))
+    assert.match(equal[0].text, /identical/)
+    assert.equal(cells, 0)
+  } finally { Array.from = original }
+})

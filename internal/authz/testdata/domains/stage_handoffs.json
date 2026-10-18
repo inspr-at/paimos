@@ -1,0 +1,65 @@
+{
+  "_license": "SPDX-License-Identifier: AGPL-3.0-only",
+  "builtin_roles": {
+    "admin": [
+      "stage_handoffs.decide",
+      "stage_handoffs.read",
+      "stage_handoffs.write"
+    ],
+    "member": [
+      "stage_handoffs.read",
+      "stage_handoffs.write"
+    ],
+    "owner": [
+      "stage_handoffs.decide",
+      "stage_handoffs.read",
+      "stage_handoffs.write"
+    ],
+    "viewer": [
+      "stage_handoffs.read"
+    ]
+  },
+  "registry": [
+    {
+      "agent_grantable": true,
+      "description": "Decide stage handoffs",
+      "grantable_at": [
+        "workspace",
+        "project"
+      ],
+      "group": "Stage Handoffs",
+      "key": "stage_handoffs.decide",
+      "owner_workstation_grantable": true,
+      "risk": "high"
+    },
+    {
+      "agent_grantable": true,
+      "description": "Read stage handoffs",
+      "grantable_at": [
+        "workspace",
+        "project"
+      ],
+      "group": "Stage Handoffs",
+      "key": "stage_handoffs.read",
+      "owner_workstation_grantable": true,
+      "risk": "low"
+    },
+    {
+      "agent_grantable": true,
+      "description": "Write stage handoffs",
+      "grantable_at": [
+        "workspace",
+        "project"
+      ],
+      "group": "Stage Handoffs",
+      "key": "stage_handoffs.write",
+      "owner_workstation_grantable": true,
+      "risk": "medium"
+    }
+  ],
+  "words": {
+    "resources": {
+      "stage_handoffs": "stage handoffs"
+    }
+  }
+}

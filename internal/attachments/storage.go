@@ -181,10 +181,10 @@ func (s Store) StageNamed(ctx context.Context, tenant string, src io.Reader, nam
 			ct = "text/html; charset=utf-8"
 		}
 	}
-	// Unknown binaries (logs, exports, office files that don't sniff as zip)
-	// are stored too; they are only ever served as a download with nosniff
-	// and a sandboxing CSP, never inline.
-	allowed := ct == "image/png" || ct == "image/jpeg" || ct == "image/gif" || ct == "image/webp" || ct == "application/pdf" || ct == "application/zip" || ct == "text/plain; charset=utf-8" || ct == "application/octet-stream" || isHTML(ct)
+	// Archives and unknown binaries (logs, exports, office files that don't
+	// sniff as zip) are stored without extraction; they are only ever served
+	// as a download with nosniff and a sandboxing CSP, never inline.
+	allowed := ct == "image/png" || ct == "image/jpeg" || ct == "image/gif" || ct == "image/webp" || ct == "application/pdf" || ct == "application/zip" || ct == "application/x-gzip" || ct == "text/plain; charset=utf-8" || ct == "application/octet-stream" || isHTML(ct)
 	if !allowed {
 		return nil, fmt.Errorf("%w %s", ErrUnsupportedType, ct)
 	}

@@ -1,0 +1,22 @@
+{
+  "group": "stable-controls",
+  "nightlyTiming": {
+    "seconds": 40.545,
+    "selectedTests": 12
+  },
+  "spec": {
+    "file": "tests/native-expert-stream.spec.ts",
+    "listedTests": 12,
+    "tierTiming": {
+      "caseSeconds": {
+        "max": 5.763,
+        "median": 3.683,
+        "min": 0.496
+      },
+      "seconds": 40.545,
+      "selectedTests": 12
+    },
+    "weightSeconds": 10,
+    "weightSource": "aeon-1270-guarded-serial-wall"
+  }
+}

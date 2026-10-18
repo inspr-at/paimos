@@ -3,7 +3,7 @@ import { defineStore } from 'pinia'
 import { onScopeDispose, ref, watch } from 'vue'
 import { api, getSession, sessionEnded, type Identity } from '../lib/api'
 import { resetAgentTheme, restoreAgentTheme } from '../lib/agentTheme'
-import { restoreTheme } from '../lib/theme'
+import { resetTheme, restoreTheme } from '../lib/theme'
 import { accessChanged, clearPermissions, refreshPermissions, revokePermissions } from '../lib/authz'
 import { clearSignInReturn } from '../lib/signInReturn'
 import { dropAttachCode } from '../lib/attachLink'
@@ -12,6 +12,7 @@ import { resetToasts } from '../lib/toast'
 import { settleConfirm } from '../lib/confirm'
 import { setPreferenceOwner } from '../lib/preferences'
 import { resetPositions } from '../lib/position'
+import { resetReleaseOpen } from '../lib/releaseMembership'
 
 export class SignInError extends Error {
   readonly reason: 'not_member' | 'disabled' | 'invalid' | 'network' | 'failed'
@@ -37,6 +38,7 @@ export const useSession = defineStore('session', () => {
   watch(identity, (who, before) => {
     const same = !!who && !!before && who.tenant.id === before.tenant.id && who.principal.id === before.principal.id
     if (!same) {
+      resetReleaseOpen()
       resetToasts()
       settleConfirm(false)
     }
@@ -52,9 +54,12 @@ export const useSession = defineStore('session', () => {
 
   function invalidate() {
     epoch++
+    // Mounted editors capture their local recovery context synchronously,
+    // before clearing the identity invalidates every owner-bound cache.
+    requiresSignIn.value = true
     identity.value = null
     resetAgentTheme()
-    requiresSignIn.value = true
+    resetTheme()
     error.value = ''
     dropAttachCode()
     revokePermissions()
@@ -97,16 +102,19 @@ export const useSession = defineStore('session', () => {
         if (session.identity) {
           resetAgentTheme(`${session.identity.tenant.id}/${session.identity.principal.id}`)
           void refreshPermissions()
-          await restoreAgentTheme(`${session.identity.tenant.id}/${session.identity.principal.id}`)
+          const owner = session.identity
+          const current = () => started === epoch && tabs.current() && identity.value?.principal.id === owner.principal.id && identity.value?.tenant.id === owner.tenant.id
+          await Promise.all([restoreAgentTheme(`${owner.tenant.id}/${owner.principal.id}`), restoreTheme(current)])
           if (started !== epoch || !tabs.current()) return
-        } else resetAgentTheme()
+        } else { resetAgentTheme(); resetTheme() }
       }
       readSignInConfig(session)
-      if (session.identity) void restoreTheme()
+      if (same && session.identity) void restoreTheme(() => started === epoch && tabs.current() && identity.value === session.identity)
     } catch {
       if (started !== epoch || !tabs.current()) return
       identity.value = null
       resetAgentTheme()
+      resetTheme()
       clearPermissions()
       devMode.value = false
       error.value = 'We couldn’t reach your workspace. Please try again.'

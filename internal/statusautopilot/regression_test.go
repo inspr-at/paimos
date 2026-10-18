@@ -232,6 +232,9 @@ func TestHumanChecksPermitNonDeliveryDailyRules(t *testing.T) {
 		days        int
 	}{{"new", "triage_list", 7}, {"backlog", "cancel_suggested", 90}, {"blocked", "blocked_reminder", 14}, {"in_progress", "", 3}, {"done", "missed_release", 14}} {
 		id := f.add(fmt.Sprintf("AUT-%d", i+2), "work", tc.state, tc.days, &human)
+		if tc.state == "done" {
+			f.merge(id, tc.days)
+		}
 		f.run(f.now.Add(time.Duration(i) * 24 * time.Hour))
 		n := f.state(id)
 		if tc.flag == "" {
@@ -457,6 +460,9 @@ func TestCurrentFlagsOutliveRecentChangesAndDisappearOnResolution(t *testing.T) 
 		days  int
 	}{{"backlog", 100}, {"blocked", 20}, {"done", 20}} {
 		ids = append(ids, f.add(fmt.Sprintf("AUT-%d", i+100), "work", tc.state, tc.days, nil))
+		if tc.state == "done" {
+			f.merge(ids[len(ids)-1], tc.days)
+		}
 	}
 	f.run(f.now)
 	f.tx(func(tx pgx.Tx) error {
@@ -474,6 +480,23 @@ func TestCurrentFlagsOutliveRecentChangesAndDisappearOnResolution(t *testing.T) 
 	}
 	if len(recent.Items) != 50 || len(current.Items) != 56 {
 		t.Fatalf("history=%d current=%d", len(recent.Items), len(current.Items))
+	}
+	var latest struct {
+		Items []Change `json:"items"`
+	}
+	if err := json.Unmarshal(f.call(f.p, "GET", "/api/status-autopilot/changes?limit=5", "", 200).Body.Bytes(), &latest); err != nil {
+		t.Fatal(err)
+	}
+	if len(latest.Items) != 5 {
+		t.Fatalf("latest changes=%d", len(latest.Items))
+	}
+	for i := range latest.Items {
+		if latest.Items[i].EventID != recent.Items[i].EventID {
+			t.Fatal("latest changes lost reverse chronological order")
+		}
+	}
+	for _, limit := range []string{"0", "51", "five"} {
+		f.call(f.p, "GET", "/api/status-autopilot/changes?limit="+limit, "", 400)
 	}
 	seen := map[string]bool{}
 	for _, c := range current.Items {
@@ -499,4 +522,68 @@ func TestCurrentFlagsOutliveRecentChangesAndDisappearOnResolution(t *testing.T) 
 	if len(current.Items) != 54 {
 		t.Fatalf("resolved flags stayed listed: %d", len(current.Items))
 	}
+}
+
+func TestProjectSettingsPagesSearchInheritanceAndAuthority(t *testing.T) {
+	f := setup(t)
+	f.tx(func(tx pgx.Tx) error {
+		_, err := tx.Exec(t.Context(), `WITH made AS (
+   INSERT INTO nodes(tenant_id,kind_id,key,title,state)
+   SELECT $1,k.id,'PAGE-'||g,'Project '||g,'open' FROM node_kinds k CROSS JOIN generate_series(1,55) g
+   WHERE k.tenant_id=$1 AND k.slug='project' RETURNING id,tenant_id)
+   INSERT INTO status_autopilot_projects(tenant_id,project_id,mode,revision)
+   SELECT tenant_id,id,'off',7 FROM made`, f.p.TenantID)
+		return err
+	})
+	read := func(path string) projectSettingsPage {
+		var page projectSettingsPage
+		if err := json.Unmarshal(f.call(f.p, "GET", "/api/status-autopilot/projects"+path, "", 200).Body.Bytes(), &page); err != nil {
+			t.Fatal(err)
+		}
+		return page
+	}
+	first := read("")
+	if len(first.Items) != 50 || first.Next == nil || first.Inherited != 1 {
+		t.Fatalf("first page=%+v", first)
+	}
+	seen := map[string]bool{}
+	for _, item := range first.Items {
+		if item.Override.Mode != "off" || item.Override.Revision != 7 || item.Override.Effective {
+			t.Fatalf("override=%+v", item)
+		}
+		seen[item.ID] = true
+	}
+	last := read("?after=" + *first.Next)
+	if len(last.Items) != 5 || last.Next != nil {
+		t.Fatalf("last page=%+v", last)
+	}
+	for _, item := range last.Items {
+		if seen[item.ID] {
+			t.Fatal("keyset repeated a project")
+		}
+		seen[item.ID] = true
+	}
+	if len(seen) != 55 {
+		t.Fatal("projects omitted")
+	}
+	inherit := read("?mode=inherit")
+	if len(inherit.Items) != 1 || inherit.Items[0].ID != f.project || inherit.Items[0].Override.Mode != "inherit" || !inherit.Items[0].Override.Effective {
+		t.Fatalf("inherit=%+v", inherit)
+	}
+	found := read("?q=PAGE-55")
+	if len(found.Items) != 1 || found.Items[0].Key != "PAGE-55" {
+		t.Fatalf("search=%+v", found)
+	}
+	f.call(f.p, "GET", "/api/status-autopilot/projects?mode=all", "", 400)
+	f.call(f.p, "GET", "/api/status-autopilot/projects?after=invalid", "", 400)
+	f.call(f.p, "GET", "/api/status-autopilot/projects?q="+strings.Repeat("a", 201), "", 400)
+	member := attentionMember(f)
+	var visible projectSettingsPage
+	if err := json.Unmarshal(f.call(member, "GET", "/api/status-autopilot/projects?mode=inherit", "", 200).Body.Bytes(), &visible); err != nil {
+		t.Fatal(err)
+	}
+	if len(visible.Items) != 1 || visible.Items[0].ID != f.project || visible.Inherited != 1 || visible.Next != nil {
+		t.Fatalf("project reader visibility: %+v", visible)
+	}
+	f.call(member, "PUT", "/api/projects/"+f.project+"/status-autopilot", `{"mode":"off","expected_revision":0}`, 403)
 }

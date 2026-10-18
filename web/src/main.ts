@@ -2,7 +2,9 @@
 import { createApp } from 'vue'
 import { createPinia } from 'pinia'
 import './styles/tokens.css'
+import './styles/agent-states.css'
 import './styles/base.css'
+import './styles/status-icons.css'
 import App from './App.vue'
 import { router } from './router'
 
@@ -22,4 +24,4 @@ app.config.errorHandler = (error, _instance, info) => {
 }
 router.onError((error, to) => { console.error(error); reportFatal(error, 'navigation', to.fullPath) })
 // Mount even when the first navigation fails, so the error page shows instead of a blank tab.
-void router.isReady().catch(() => undefined).then(() => app.mount('#app'))
+void router.isReady().catch(() => undefined).then(() => { app.mount('#app'); delete document.documentElement.dataset.appearanceLoading })

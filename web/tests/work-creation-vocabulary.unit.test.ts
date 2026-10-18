@@ -141,8 +141,10 @@ it('recurrence templates display the configured leaf name and child description'
   const context: { teleports?: Record<string, string> } = {}
   await renderToString(Vue.createSSRApp(component('components/recurrences/RecurrenceEditor.vue', true, {
     vue: { ...Vue, onMounted() {}, onBeforeUnmount() {}, watch: () => () => {} },
-    '../../lib/api': {}, '../../lib/authz': { can: () => true }, '../../lib/recurrences': recurrences,
+    '../../lib/api': {}, '../../lib/authz': { can: () => true, myProjectRole: () => null, myWorkspaceRole: () => null }, '../../lib/recurrences': recurrences,
     '../../lib/useIdentityScope': { useIdentityScope: () => ({ owner: Vue.computed(() => 'tenant/person'), lane: () => ({ cancel() {} }) }) },
+    '../../lib/access': {}, '../../lib/displayLanguage': { displayLanguage: () => 'en' }, '../../lib/toast': { toast() {} }, '../../lib/workKinds': { activeKinds: () => [] },
+    '../../stores/projects': { useProjects: () => ({ projects: [], byId: () => undefined }) }, '../../stores/session': { useSession: () => fixture.session },
   }), { project: { id: 'project', routeKey: 'PRJ' }, source: { id: 'parent', key: 'PRJ-1', title: 'Parent', kind_slug: 'work', is_leaf: false, fields: {}, body: '' } }), context)
   const html = context.teleports?.body
   expect(html).toBeDefined()

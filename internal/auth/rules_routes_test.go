@@ -39,11 +39,11 @@ func TestDoctrineRulesReadKeyAtMiddleware(t *testing.T) {
 	handler := m.Middleware(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(http.StatusNoContent)
 	}))
-	reader, err := m.createAgentKey(t.Context(), tenant.Principal{TenantID: tid}, "doctrine-reader", "", []string{"rules.read"}, nil)
+	reader, err := m.createAgentKey(t.Context(), tenant.Principal{TenantID: tid, KeyCreatorID: keyTestPerson(t, m.pool, tid)}, "doctrine-reader", "", []string{"rules.read"}, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
-	writer, err := m.createAgentKey(t.Context(), tenant.Principal{TenantID: tid}, "doctrine-writer", "", []string{"rules.write"}, nil)
+	writer, err := m.createAgentKey(t.Context(), tenant.Principal{TenantID: tid, KeyCreatorID: keyTestPerson(t, m.pool, tid)}, "doctrine-writer", "", []string{"rules.write"}, nil)
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -151,12 +151,14 @@ func readTicketExport(raw []byte, tenantID, projectID string) (HistoricTicketExp
 		if json.Unmarshal(ticket.Fields, &fields) != nil || fields == nil {
 			return export, nil, nil, nil, fmt.Errorf("invalid historic ticket fields")
 		}
-		if flag, present := fields["hide_from_release_notes"]; present {
-			var value bool
-			if bytes.Equal(bytes.TrimSpace(flag), []byte("null")) || json.Unmarshal(flag, &value) != nil {
-				return export, nil, nil, nil, fmt.Errorf("invalid historic hide flag")
+		for _, key := range []string{"hide_from_release_notes", "no_release_needed"} {
+			if flag, present := fields[key]; present {
+				var value bool
+				if bytes.Equal(bytes.TrimSpace(flag), []byte("null")) || json.Unmarshal(flag, &value) != nil {
+					return export, nil, nil, nil, fmt.Errorf("invalid historic %s flag", key)
+				}
+				hidden[ticket.Key] = hidden[ticket.Key] || value
 			}
-			hidden[ticket.Key] = value
 		}
 		tickets[ticket.Key] = ticket
 		meta[ticket.Key] = ParseTicketMeta(ticket.Kind, ticket.Fields)

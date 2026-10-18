@@ -1,5 +1,7 @@
 <!-- SPDX-License-Identifier: AGPL-3.0-only -->
 <script setup lang="ts">
+import EntryChecklistHost from './components/work/EntryChecklistHost.vue'
+import { displayLanguage } from './lib/displayLanguage'
 import { computed, defineAsyncComponent, nextTick, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue'
 import { isNavigationFailure, useRoute, useRouter } from 'vue-router'
 import AppHeader from './components/AppHeader.vue'
@@ -7,7 +9,6 @@ import ConfirmHost from './components/ConfirmHost.vue'
 import PauseDialog from './components/agents/PauseDialog.vue'
 import DoneGateHost from './components/DoneGateHost.vue'
 import ToastHost from './components/ToastHost.vue'
-import { modelPrefsContext, closeModelPrefs } from './lib/modelPrefsCommand'
 import TooltipHost from './components/TooltipHost.vue'
 import AppFooter from './components/AppFooter.vue'
 import ErrorPage from './components/ErrorPage.vue'
@@ -16,6 +17,7 @@ import ShortcutSheet from './components/work/ShortcutSheet.vue'
 import StatusHelpSheet from './components/work/StatusHelpSheet.vue'
 import AppIcon from './components/AppIcon.vue'
 import TicketPeekHost from './components/TicketPeekHost.vue'
+import LeadOverlays from './components/lead/LeadOverlays.vue'
 import { command, consume } from './lib/commands'
 import { clearFatal, fatal } from './lib/fatal'
 import { provideTicketPeek } from './lib/ticketPeek'
@@ -25,20 +27,21 @@ import { brand } from './lib/brand'
 import { toast } from './lib/toast'
 import { getRelease, releaseTitle } from './lib/releases'
 import { updateToast } from './lib/codenames'
-import { useProfile } from './stores/profile'
 import { headerFolded } from './lib/chrome'
 import { usePoller } from './lib/usePolledData'
 import { sessionFreezeApplies } from './lib/agentPairing'
+import { useStatusMotion } from './lib/statusMotion'
+import { useDeskTab } from './lib/useDeskTab'
 
-const ModelPrefsDialog = defineAsyncComponent(() => import('./components/model-prefs/ModelPrefsDialog.vue'))
 const ReleasesSheet = defineAsyncComponent(() => import('./components/releases/ReleasesSheet.vue'))
 const session = useSession()
-const profile = useProfile()
 const route = useRoute()
 const router = useRouter()
-watch(() => session.identity ? `${session.identity.tenant.id}/${session.identity.principal.id}` : undefined, closeModelPrefs)
-watch(() => route.fullPath, closeModelPrefs)
 const ticketPeek = provideTicketPeek()
+// Status icons play their one-off on hover or keyboard focus and pause in hidden tabs (AEON-1362).
+useStatusMotion()
+// The Decision Desk count leads the tab's title and marks its icon (AEON-1473).
+useDeskTab()
 const main = ref<HTMLElement>()
 const shortcuts = ref<InstanceType<typeof ShortcutSheet>>()
 const retrying = ref(false)
@@ -47,10 +50,10 @@ const bare = computed(() => !!route.meta.bare && !fatal.value)
 const sessionEndedHere = computed(() => sessionFreezeApplies(route.path, session.requiresSignIn))
 // Keep the mounted page readable and copyable after a 401, while every editor
 // and action control becomes inert. The observer covers controls rendered after
-// an in-flight request settles.
+// an in-flight request settles. The lead panel and sheets live in the shell, not the page.
 function freezePage() {
   if (!sessionEndedHere.value) return
-  for (const root of document.querySelectorAll<HTMLElement>('.page-flow, .sheet-root')) {
+  for (const root of document.querySelectorAll<HTMLElement>('.page-flow, .sheet-root, .lead-panel, .lead-sheet')) {
     for (const field of root.querySelectorAll<HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement>('input, textarea, select')) {
       if (field instanceof HTMLSelectElement || (field instanceof HTMLInputElement && ['checkbox', 'radio', 'file', 'button', 'submit'].includes(field.type))) {
         if (!field.disabled) field.disabled = true
@@ -164,7 +167,7 @@ watch(() => releases.available, async version => {
   // The new server knows what the release was about; say it in its reading form.
   const release = await getRelease(version)
   if (version !== releases.available) return
-  const title = release ? releaseTitle(release, profile.profile?.locale) : ''
+  const title = release ? releaseTitle(release, displayLanguage()) : ''
   const about = title ? `: ${title}` : ''
   // The marketing name leads; the calendar version shows on hover, and stands in only for a release with no known name.
   const { message, release: named } = updateToast(brand.value.wordmark, version, release?.codename, about)
@@ -175,14 +178,9 @@ watch(() => releases.available, async version => {
 })
 
 // ---------- Footer: on phones it folds away while reading down and returns on the way up ----------
-// A project flow pill lives in the footer, so the bar stays while that pill is shown.
 const footerHidden = ref(false)
-const flowPillShown = ref(false)
-function onFlowPill(shown: boolean) {
-  flowPillShown.value = shown
-  if (shown) footerHidden.value = false
-}
-const phoneQuery = window.matchMedia('(max-width: 600px)')
+// Short landscape phones too (AEON-1286): there the bar cost an eighth of the screen.
+const phoneQuery = window.matchMedia('(max-width: 600px), (max-height: 480px)')
 let lastTop = 0, travel = 0, settleUntil = 0
 function scrolled() {
   const el = main.value
@@ -190,7 +188,6 @@ function scrolled() {
   const top = el.scrollTop
   const delta = top - lastTop
   lastTop = top
-  if (flowPillShown.value) { footerHidden.value = false; travel = 0; return }
   if (!phoneQuery.matches || Date.now() < settleUntil) return
   // Near the end of the page the footer stays: it is where the page ends.
   const nearEnd = el.scrollHeight - el.clientHeight - top < 48
@@ -220,6 +217,7 @@ watch(() => [route.path, route.params.projectKey, route.params.ticketKey, route.
 </script>
 
 <template>
+  <EntryChecklistHost />
   <div class="app-shell" :class="{ bare, 'footer-hidden': footerHidden && !bare, 'header-folded': folded }">
     <a class="skip-link" href="#main">Skip to content</a>
     <AppHeader v-if="!bare && !folded" />
@@ -239,11 +237,11 @@ watch(() => [route.path, route.params.projectKey, route.params.ticketKey, route.
         <RouterView v-else />
       </div>
     </main>
-    <!-- A row of the shell: the page, docked panels and toasts all end above it. -->
-    <AppFooter v-if="!bare" :hidden="footerHidden" @releases="openRunningRelease" @pill="onFlowPill" />
+    <!-- A row of the shell; on phones it lies over the page's end. Docked panels and toasts end above it. -->
+    <AppFooter v-if="!bare" :hidden="footerHidden" @releases="openRunningRelease" />
     <ReleasesSheet v-if="releasesOpen" ref="releasesSheet" :target="releasesTarget" @select="selectRelease" @query="setReleasesQuery" @close="closeReleases" @home="goHome" @navigate="leaveReleasesFor" />
     <TicketPeekHost v-if="ticketPeek.openKey.value && !releasesOpen" :ref="ticketPeek.bind" :ticket-key="ticketPeek.openKey.value" :back-label="ticketPeek.backLabel.value" @close="ticketPeek.close()" />
-    <ModelPrefsDialog v-if="modelPrefsContext && session.identity && !session.requiresSignIn" :key="modelPrefsContext.requestId" :context="modelPrefsContext" @close="closeModelPrefs" />
+    <LeadOverlays v-if="session.identity && !bare && !fatal" />
     <ToastHost />
     <ConfirmHost />
     <PauseDialog />
@@ -260,13 +258,20 @@ watch(() => [route.path, route.params.projectKey, route.params.ticketKey, route.
 .app-shell { box-sizing: border-box; height: 100%; padding: 0 env(safe-area-inset-right) env(safe-area-inset-bottom) env(safe-area-inset-left); display: grid; grid-template-columns: minmax(0, 1fr); grid-template-rows: var(--header-h) minmax(0, 1fr) var(--footer-h); }
 .app-shell.bare { --footer-h: 0px; grid-template-rows: minmax(0, 1fr); }
 .app-shell.header-folded { grid-template-rows: minmax(0, 1fr) var(--footer-h); }
-@media (max-width: 600px) {
-  .app-shell { transition: --footer-h .22s ease; }
-  .app-shell.footer-hidden { --footer-h: 0px; }
-}
-@media (prefers-reduced-motion: reduce) { .app-shell { transition: none; } }
 /* The gutter is reserved so a scrollbar appearing as content loads never shifts the page sideways. */
 main { position: relative; min-height: 0; overflow: auto; scrollbar-gutter: stable; outline: none; scroll-padding-top: 96px; }
+/* Phones: the footer lies over the end of the page and slides away while reading down (AEON-1279).
+   The page keeps its size: a scroller that grew under momentum made the scroll run away. Its end
+   keeps the footer's room, so the last row still clears the footer when it shows.
+   Short landscape phones too (AEON-1286). */
+@media (max-width: 600px), (max-height: 480px) {
+  .app-shell { grid-template-rows: var(--header-h) minmax(0, 1fr); }
+  .app-shell.header-folded { grid-template-rows: minmax(0, 1fr); }
+  /* The footer component has two roots (the bar and its hover card), so it carries no scope of ours. */
+  .app-shell > main, .app-shell > :deep(.app-footer) { grid-row: -2; grid-column: 1; }
+  .app-shell > :deep(.app-footer) { align-self: end; }
+  main { padding-bottom: var(--footer-h); scroll-padding-bottom: var(--footer-h); }
+}
 main:focus-visible { box-shadow: none; }
 .session-ended { position: sticky; top: 0; z-index: 50; display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 10px; padding: 10px 28px; background: var(--chip-teal-bg); box-shadow: inset 0 -1px 0 var(--line); font-size: 13px; }
 .page-flow { display: flex; flex-direction: column; min-height: 100%; }

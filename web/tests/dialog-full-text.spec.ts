@@ -1,13 +1,10 @@
 // SPDX-License-Identifier: AGPL-3.0-only
-import { mkdirSync } from 'node:fs'
-import { join } from 'node:path'
 import { expect, test, type Page } from '@playwright/test'
 import { fixtures, mockWork, watchErrors } from './work-fixtures'
 import { expectStableControls } from './helpers/stable'
 import type { FloatingList } from './helpers/floating-lists'
 
 const name = 'Projektübergreifende Entwicklungszusammenarbeit und Qualitätsverantwortung'
-const shots = join(process.cwd(), 'test-results', 'aeon-624', 'r5')
 
 async function openList(page: Page, kind: FloatingList, theme: 'light' | 'dark') {
   const data = fixtures()
@@ -24,7 +21,7 @@ async function openList(page: Page, kind: FloatingList, theme: 'light' | 'dark')
     mountFloatingList(kind, true)
   }, kind)
   if (kind === 'facet') await page.getByRole('button', { name: 'Choices', exact: true }).click()
-  const panel = page.locator('.floating[role="dialog"]')
+  const panel = kind === 'epic' ? page.getByRole('dialog', { name: 'Parent for PHAROS-11', exact: true }) : page.locator('.floating[role="dialog"]')
   await expect(panel).toBeVisible()
   return panel
 }
@@ -65,8 +62,7 @@ for (const width of [390, 1024]) for (const theme of ['light', 'dark'] as const)
         await expect(disclosure).toHaveText(text)
       } }],
     })
-    mkdirSync(shots, { recursive: true })
-    await page.screenshot({ path: join(shots, `long-name-${width}-${theme}.png`) })
+    await page.screenshot({ path: test.info().outputPath(`long-name-${width}-${theme}.png`) })
     await read.press('Tab')
     await expect(disclosure).toBeFocused()
     await disclosure.press('Tab')
@@ -125,8 +121,7 @@ for (const width of [390, 1024, 1440]) for (const theme of ['light', 'dark'] as 
           } },
         ] })
         expect(await events(page)).toEqual([])
-        mkdirSync(shots, { recursive: true })
-        await page.screenshot({ path: join(shots, `keyboard-${kind}-${width}-${theme}.png`) })
+        await page.screenshot({ path: test.info().outputPath(`keyboard-${kind}-${width}-${theme}.png`) })
         expect(errors).toEqual([])
       })
     }
@@ -152,7 +147,7 @@ for (const width of [390, 1024, 1440]) for (const theme of ['light', 'dark'] as 
           expect(rowBox.x + rowBox.width).toBeLessThanOrEqual(readBox.x + .5)
           await expectStableControls({
             controls: { panel, row, read, search: panel.locator('input:not([type="checkbox"])'), group: panel.locator('.options, .menu, .picker-list') },
-            scrollAreas: { panel },
+            scrollAreas: { panel: kind === 'epic' && width === 390 ? panel.locator('.sheet-body') : panel },
             interactions: [{ name: 'tap the separate name disclosure', run: async () => {
               await read.tap()
               await expect(page.getByRole('region', { name: 'Full name', exact: true })).toHaveText(text as string)
@@ -180,8 +175,7 @@ for (const width of [390, 1024, 1440]) for (const theme of ['light', 'dark'] as 
               await expect(page.getByRole('region', { name: 'Full name', exact: true })).toHaveText(text as string)
             } }],
           })
-          mkdirSync(shots, { recursive: true })
-          await page.screenshot({ path: join(shots, `touch-${kind}-${width}-${theme}.png`) })
+          await page.screenshot({ path: test.info().outputPath(`touch-${kind}-${width}-${theme}.png`) })
           await row.tap()
           await expect.poll(async () => (await events(page)).length).toBe(1)
           const selected = (await events(page))[0]

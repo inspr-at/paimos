@@ -51,9 +51,9 @@ func TestWorkerStoresRewritesAndIsolates(t *testing.T) {
 	)
 	seedTenant(t, d, tenantA, "alpha")
 	seedTenant(t, d, tenantB, "beta")
-	baseline := countEvents(t, d.App, tenantA)
 	insertNode(t, d.App, tenantA, nodeA, "PAI-1", "English search title", "Markdown body", "open")
 	insertNode(t, d.App, tenantB, nodeB, "PAI-1", "Other tenant", "hidden", "open")
+	baseline := countEvents(t, d.App, tenantA)
 
 	provider := fixedProvider{model: "test-model", vec: unitVector()}
 	w := NewWorker(d.App, provider, Options{})
@@ -191,7 +191,6 @@ func TestWorkerBackoffAndDeletedNodes(t *testing.T) {
 	)
 	seedTenant(t, d, tenantID, "alpha")
 	insertNode(t, d.App, tenantID, liveID, "PAI-1", "Retry me", "body", "open")
-	baseline := countEvents(t, d.App, tenantID)
 	insertNode(t, d.App, tenantID, deadID, "PAI-2", "Delete me", "body", "open")
 	if err := db.InTenant(dbtest.Seed(ctx), d.App, tenantID, func(tx pgx.Tx) error {
 		_, err := tx.Exec(ctx, `UPDATE nodes SET deleted_at = now() WHERE id = $1`, deadID)
@@ -199,6 +198,7 @@ func TestWorkerBackoffAndDeletedNodes(t *testing.T) {
 	}); err != nil {
 		t.Fatal(err)
 	}
+	baseline := countEvents(t, d.App, tenantID)
 
 	failing := NewWorker(d.App, fixedProvider{model: "test-model", err: errors.New("boom")}, Options{})
 	if _, err := failing.ProcessOnce(ctx); err == nil {

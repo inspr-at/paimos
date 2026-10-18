@@ -1,0 +1,22 @@
+{
+  "group": "attachment-security",
+  "nightlyTiming": {
+    "seconds": 23.685,
+    "selectedTests": 10
+  },
+  "spec": {
+    "file": "tests/account-link.spec.ts",
+    "listedTests": 10,
+    "tierTiming": {
+      "caseSeconds": {
+        "max": 4.079,
+        "median": 2.291,
+        "min": 1.466
+      },
+      "seconds": 23.685,
+      "selectedTests": 10
+    },
+    "weightSeconds": 19.833333,
+    "weightSource": "web-15"
+  }
+}

@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: AGPL-3.0-only
-import { readFileSync } from 'node:fs'
+import { existsSync, readFileSync } from 'node:fs'
 import vm from 'node:vm'
 import ts from 'typescript'
 import { describe, expect, it, vi } from 'vitest'
@@ -24,51 +24,43 @@ function keyEvent(key: string, region: string, shiftKey = false) {
   return { key, target: new Target(region), shiftKey, metaKey: false, ctrlKey: false, altKey: false,
     defaultPrevented: false, repeat: false, isComposing: false, preventDefault: vi.fn(), stopPropagation: vi.fn() }
 }
-const scrolling = ['ArrowDown', 'ArrowUp', 'ArrowLeft', 'ArrowRight', ' ', 'PageDown', 'PageUp', 'Home', 'End']
+// AEON-1339: the sheet is the one scroll container. Reading keys stay native on it;
+// arrows choose, as the approved artifact does, and Escape closes.
+const scrolling = [' ', 'PageDown', 'PageUp', 'Home', 'End']
 function desk() {
-  const choose = vi.fn(), navigate = vi.fn(), close = vi.fn(), submit = vi.fn()
+  const choose = vi.fn(), navigate = vi.fn(), close = vi.fn(), submit = vi.fn(), skip = vi.fn(), stamp = vi.fn()
   const keys = handler('agents/DecisionDeskMemo.vue', 'keys', {
-    Element: Target, viewing: { value: false }, fieldTarget: () => false, submitModifier: () => false,
-    mac: false, pager: { value: false }, outcomeKeys: ['O', 'A', 'R', 'D'],
-    item: { value: { choices: [{ id: 'first' }, { id: 'second' }] } }, draft: { value: { optionId: 'first' } },
-    choose, navigate, close, submit,
+    Element: Target, HTMLButtonElement: class {}, viewing: { value: false }, fieldTarget: () => false, submitModifier: () => false,
+    mac: false, pager: { value: false }, keysOpen: { value: false }, finished: { value: false }, outcomeKeys: ['O', 'A', 'R', 'D'], outcomes: ['once', 'always', 'requirement', 'doctrine'],
+    item: { value: { choices: [{ id: 'first' }, { id: 'second' }] } }, draft: { value: { optionId: 'first' } }, editable: { value: true }, question: { value: true },
+    outcomeUnavailable: () => '', status: { value: '' }, ghost: { value: 'skip' }, project: { value: undefined }, memo: { value: null }, decideButton: { value: null },
+    choose, navigate, close, submit, skip, stamp,
   })
-  return { keys, choose, navigate, close, submit }
+  return { keys, choose, navigate, close, submit, skip, stamp }
 }
-function walker() {
-  const toggle = vi.fn(), stepScreen = vi.fn(), step = vi.fn(), feature = vi.fn(), close = vi.fn(), dismissHint = vi.fn()
-  const keys = handler('journey/ReleaseWalker.vue', 'keydown', {
-    Element: Target, sheet: { value: false }, searching: { value: false }, compare: { value: false }, zoom: { value: false },
-    dialog: { value: {} }, toggle, stepScreen, step, feature, close, dismissHint,
-  })
-  return { keys, toggle, stepScreen, step, feature, close }
-}
-
-describe('Decision Desk selected-answer scrolling', () => {
-  for (const key of scrolling) for (const shift of [false, true]) it(`keeps ${shift ? 'Shift+' : ''}${key} native without changing the answer or memo`, () => {
-    const { keys, choose, navigate, submit } = desk(), event = keyEvent(key, '.answer-slot', shift)
+describe('Decision Desk sheet scrolling', () => {
+  for (const key of scrolling) for (const shift of [false, true]) it(`keeps ${shift ? 'Shift+' : ''}${key === ' ' ? 'Space' : key} native without changing the answer or memo`, () => {
+    const { keys, choose, navigate, submit, skip } = desk(), event = keyEvent(key, '', shift)
     keys(event)
     expect(event.preventDefault).not.toHaveBeenCalled()
-    expect(choose).not.toHaveBeenCalled(); expect(navigate).not.toHaveBeenCalled(); expect(submit).not.toHaveBeenCalled()
+    expect(choose).not.toHaveBeenCalled(); expect(navigate).not.toHaveBeenCalled(); expect(submit).not.toHaveBeenCalled(); expect(skip).not.toHaveBeenCalled()
   })
-  it('retains choice navigation outside the summary and Escape inside it', () => {
+  it('keeps Shift+arrows native and lets plain arrows choose; Escape closes', () => {
     const { keys, choose, close } = desk()
+    const shifted = keyEvent('ArrowDown', '', true); keys(shifted)
+    expect(shifted.preventDefault).not.toHaveBeenCalled(); expect(choose).not.toHaveBeenCalled()
     const down = keyEvent('ArrowDown', ''); keys(down)
     expect(choose).toHaveBeenCalledWith('second'); expect(down.preventDefault).toHaveBeenCalledOnce()
-    keys(keyEvent('Escape', '.answer-slot')); expect(close).toHaveBeenCalledOnce()
+    keys(keyEvent('Escape', '')); expect(close).toHaveBeenCalledOnce()
   })
 })
-describe('Release Walker description scrolling', () => {
-  for (const key of scrolling) for (const shift of [false, true]) it(`keeps ${shift ? 'Shift+' : ''}${key} native without changing membership, screens or tickets`, () => {
-    const { keys, toggle, stepScreen, step, feature } = walker(), event = keyEvent(key, '.description.revealed', shift)
-    keys(event)
-    expect(event.preventDefault).not.toHaveBeenCalled()
-    expect(toggle).not.toHaveBeenCalled(); expect(stepScreen).not.toHaveBeenCalled(); expect(step).not.toHaveBeenCalled(); expect(feature).not.toHaveBeenCalled()
-  })
-  it('retains membership and screen shortcuts outside the description and Escape inside it', () => {
-    const { keys, toggle, stepScreen, close } = walker()
-    keys(keyEvent(' ', '')); expect(toggle).toHaveBeenCalledOnce()
-    keys(keyEvent('ArrowDown', '')); expect(stepScreen).toHaveBeenCalledWith(1)
-    keys(keyEvent('Escape', '.description.revealed')); expect(close).toHaveBeenCalledOnce()
+describe('retired Release Walker', () => {
+  // At 560b78d9 this suite still called handler() on the deleted walker, and every case threw ENOENT.
+  it('is not opened by this scrolling suite', () => {
+    const suite = readFileSync(new URL('./decision-scroll.unit.test.ts', import.meta.url), 'utf8')
+    const calls = [...suite.matchAll(/handler\(\s*'([^']+)'/g)].map(match => match[1])
+    expect(calls).toEqual(['agents/DecisionDeskMemo.vue'])
+    const retired = ['journey', 'ReleaseWalker.vue'].join('/')
+    expect(existsSync(new URL(`../src/components/${retired}`, import.meta.url))).toBe(false)
   })
 })

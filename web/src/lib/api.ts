@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 export interface Identity {
+  full_access?: boolean
   principal: { id: string; name: string; email?: string; kind?: 'person' | 'agent'; roles?: string[] }
   // brand: the workspace's own header brand (AEON-431), absent when unset.
   // slug: the workspace's stable short name (also the default CLI instance name).
@@ -22,11 +23,9 @@ import type { TicketEta } from './eta.ts'
 import type { TicketEstimate } from './estimates.ts'
 import type { TicketPlanning } from './planning.ts'
 import { rowStore } from './rowStore.ts'
-import type { HistoryFilter, Recurrence, RecurrenceHistoryEntry, RecurrenceInput, RecurrencePreview, RecurrenceRelease, RecurrenceResult } from './recurrences'
+import type { ExecutionPrincipal, HistoryFilter, Recurrence, RecurrenceHistoryEntry, RecurrenceInput, RecurrencePreview, RecurrenceRelease, RecurrenceResult, RoutineExecutionSettings, RoutineGuardPolicy, RoutineScopeKind } from './recurrences'
 
 export interface Version { version: string; scheme: string; brand?: import('./brand').Brand; codename?: string }
-
-export const listRecurrences = (projectId: string, after?: string, signal?: AbortSignal) => json<Page<Recurrence>>(`/recurrences${query({ project_id: projectId, after })}`, 'GET', undefined, {}, signal)
 export const getRecurrence = (id: string, signal?: AbortSignal) => json<Recurrence>(`/recurrences/${encodeURIComponent(id)}`, 'GET', undefined, {}, signal)
 export const createRecurrence = (input: RecurrenceInput, signal?: AbortSignal) => json<Recurrence>('/recurrences', 'POST', input, {}, signal)
 export const updateRecurrence = (id: string, input: RecurrenceInput, revision: number, signal?: AbortSignal) => json<Recurrence>(`/recurrences/${encodeURIComponent(id)}`, 'PUT', { ...input, expected_revision: revision }, {}, signal)
@@ -37,6 +36,22 @@ export const previewRecurrenceDraft = (input: RecurrenceInput, signal?: AbortSig
 export const previewRecurrence = (id: string, signal?: AbortSignal) => json<RecurrencePreview>(`/recurrences/${encodeURIComponent(id)}/preview?count=4`, 'GET', undefined, {}, signal)
 export const recurrenceHistory = (id: string, filter: HistoryFilter, before?: number, signal?: AbortSignal) => json<{ items: RecurrenceHistoryEntry[]; next_cursor: number | null }>(`/recurrences/${encodeURIComponent(id)}/history${query({ filter, before })}`, 'GET', undefined, {}, signal)
 export const recurrenceReleases = (id: string, signal?: AbortSignal) => json<{ items: RecurrenceRelease[]; truncated: boolean }>(`/recurrences/${encodeURIComponent(id)}/releases`, 'GET', undefined, {}, signal)
+// Routines (AEON-1182). Lists filter by definition scope before the bounded 100-row page.
+export const listRoutines = (filter: { projectId?: string; scope?: RoutineScopeKind; after?: string }, signal?: AbortSignal) => json<Page<Recurrence>>(`/recurrences${query({ project_id: filter.projectId, scope: filter.scope, after: filter.after })}`, 'GET', undefined, {}, signal)
+export const putRoutineConsent = (id: string, body: { expected_revision: number; execute_consent: boolean; execution_principal_id: string | null }, signal?: AbortSignal) => json<Recurrence>(`/recurrences/${encodeURIComponent(id)}/execution-consent`, 'PUT', body, {}, signal)
+export const getRoutineGuardrails = (id: string, signal?: AbortSignal) => json<RoutineGuardPolicy>(`/recurrences/${encodeURIComponent(id)}/guardrails`, 'GET', undefined, {}, signal)
+// AEON-1184: restricted agents the owner may pick, at most 100 a page; page on until next_cursor is null.
+export const listExecutionPrincipals = (id: string, after?: string, signal?: AbortSignal) => json<{ items: ExecutionPrincipal[]; next_cursor: string | null }>(`/recurrences/${encodeURIComponent(id)}/execution-principals${query({ after })}`, 'GET', undefined, {}, signal)
+export const getRoutineExecutionSettings = (projectId: string, signal?: AbortSignal) => json<RoutineExecutionSettings>(`/projects/${encodeURIComponent(projectId)}/routine-execution-settings`, 'GET', undefined, {}, signal)
+export const putRoutineExecutionSettings = (projectId: string, body: { expected_revision: number; automatic_launch_enabled: boolean; qualification_id: string | null }, signal?: AbortSignal) => json<RoutineExecutionSettings>(`/projects/${encodeURIComponent(projectId)}/routine-execution-settings`, 'PUT', body, {}, signal)
+// Kind of work for a routine's output project (one bounded page) and the route its effort resolves to today.
+export const listRoutineWorkKinds = (projectId: string, lang: string, signal?: AbortSignal) => json<Page<import('./workKinds').WorkKind>>(`/work-kinds${query({ project_id: projectId, limit: 100, lang })}`, 'GET', undefined, {}, signal)
+// The routine logbook (AEON-1192, S21 reads): runs newest first, and one run's bounded evidence.
+// These are a routine's own runs under /recurrences, not the agent run endpoints agentRows.ts owns.
+const routineRunsPath = (id: string, ...rest: string[]) => ['/recurrences', encodeURIComponent(id), 'runs', ...rest.map(encodeURIComponent)].join('/')
+export const listRoutineRuns = (id: string, before?: string, signal?: AbortSignal) => json<unknown>(routineRunsPath(id) + query({ before, limit: 20 }), 'GET', undefined, {}, signal)
+export const getRoutineRun = (id: string, runId: string, signal?: AbortSignal) => json<unknown>(routineRunsPath(id, runId), 'GET', undefined, {}, signal)
+export const resolveRoutineRoute = (role: string, projectId: string, signal?: AbortSignal) => json<{ role: string; profile: import('./modelsSimple').RegistryProfile | null; owner_required: boolean }>(`/models/resolve${query({ role, project_id: projectId })}`, 'GET', undefined, {}, signal)
 
 export class StaleRequestError extends Error {}
 export class RequestFailure extends Error {
@@ -156,7 +171,7 @@ export interface NodeCreate {
   kind_id: string; title: string; body?: string; fields?: Record<string, unknown>
   state?: string; parent_id?: string | null; before_id?: string | null; key_prefix?: string
 }
-export type NodePatch = Partial<Pick<WorkNode, 'title' | 'body' | 'fields' | 'state' | 'human_check'>>
+export type NodePatch = Partial<Pick<WorkNode, 'title' | 'body' | 'fields' | 'state' | 'human_check'>> & { override_reason?: string }
 
 export class APIError extends Error {
   readonly status: number
@@ -231,6 +246,7 @@ export interface ListParent { id: string; key: string; title: string; kind_slug:
 export interface ListProject { id: string; key: string; title: string }
 export interface LeadWorker { name: string; key: string }
 export interface ListItem extends WorkNode {
+  person_waiting?: { check_id: string; label: string; owner: { id: string; name: string } }[]
   kind_slug: string; kind_label: string; priority: string | null; assignee: ListPerson | null
   parent: ListParent | null; children_count: number; project: ListProject | null
   // The nearest epic above the item (a task's is its ticket's epic); absent on older servers.
@@ -245,6 +261,9 @@ export type Facets = Record<string, Record<string, number>>
 export interface ListPage extends Page<ListItem> { facets?: Facets }
 export interface ListQuery {
  shape?: string[]; depth?: string[]
+  // Work levels: leaf, else a parent's depth (AEON-974).
+  level?: string[]
+  person_waiting?: string[]
   human_check?: string[]
   within?: string; kind?: string[]; state?: string[]; priority?: string[]; assignee?: string[]
   tag?: string[]; epic?: string[]; cost_unit?: string[]; release?: string[]
@@ -285,13 +304,43 @@ export const listNodes = async (params: ListQuery, options: { signal?: AbortSign
   learnPictures(page.items.map(item => item.assignee))
   return stampAt(page, { position, start }, 2)
 }
+// AEON-1368/1358 view figures (api/areas/project-figures.yaml): the header work bar and the column hover figures of
+// one list view, over every matching row. The server ignores Hide closed, sort, facets and paging; they are left out
+// here too, so the request and its key depend on the view's filters only.
+export interface FigureNumbers { count: number; total: number; median: number | null; average: number | null }
+export interface FigureValue { value: string; kind?: 'person' | 'agent'; count: number; hours: number; measured_cost?: number; estimated_cost?: number }
+export interface ColumnFigures {
+  rows: number; included: number; without_value: number; others: number; partial: boolean
+  values?: FigureValue[]; numbers?: FigureNumbers; measured?: FigureNumbers; estimated?: FigureNumbers
+  typical?: { count: number; median: number | null; average: number | null; approximate: boolean }
+  weighted_percent?: number; reading_count?: number; from?: string; to?: string; median_age_seconds?: number; stale?: number
+  running?: number; next_finish?: { at: string; key: string }; last_finish?: { at: string; key: string }
+  parents?: number; leaves?: number; first_key?: string; last_key?: string
+}
+export interface WorkFigureGroup { hours: number; tickets: number; statuses: Record<string, number> }
+export interface ProjectFigures {
+  view_key: string; computed_at: string
+  scope: { kind: 'whole_project' | 'this_view'; rows: number; parents: number; leaves: number; project_leaves: number; closed: number }
+  marks_releases: boolean; total_hours: number; approximate: boolean; without_estimate: number; open_estimated_leaves: number
+  groups: { completed: WorkFigureGroup; done_not_live: WorkFigureGroup; in_progress: WorkFigureGroup; open: WorkFigureGroup }
+  columns: Record<string, ColumnFigures>
+}
+const PRESENTATION: (keyof ListQuery)[] = ['hide_closed', 'hide_states', 'facets', 'sort', 'limit', 'cursor']
+export function figuresQuery(params: ListQuery): ListQuery {
+  const out = { ...params }
+  for (const key of PRESENTATION) delete out[key]
+  return out
+}
+export const figuresPath = (projectId: string, params: ListQuery) => `/projects/${idPath(projectId)}/figures${listQuery(figuresQuery(params))}`
+export const getProjectFigures = (projectId: string, params: ListQuery, signal?: AbortSignal) => json<ProjectFigures>(figuresPath(projectId, params), 'GET', undefined, {}, signal)
 // U22 saved views: a project's list state with a name, own or shared (api/openapi.yaml SavedView).
+export type SavedViewMode = 'list' | 'outline' | 'graph'
 export interface SavedView {
   id: string; owner_principal_id: string; project_id: string | null; name: string
-  filters: Record<string, unknown>; sort_keys: string[]; group_by: string; columns: string[]; shared: boolean
+  filters: Record<string, unknown>; sort_keys: string[]; group_by: string; mode: SavedViewMode; columns: string[]; shared: boolean
   created_at: string; updated_at: string; deleted_at: string | null
 }
-export interface ViewWrite { name: string; project_id?: string | null; filters: Record<string, string>; sort_keys: string[]; group_by: string; columns: string[]; shared: boolean }
+export interface ViewWrite { name: string; project_id?: string | null; filters: Record<string, string>; sort_keys: string[]; group_by: string; mode: SavedViewMode; columns: string[]; shared: boolean }
 export const listViews = (projectId: string) => json<{ items: SavedView[] }>(`/views${query({ project_id: projectId })}`)
 export const createView = (body: ViewWrite) => json<SavedView>('/views', 'POST', body)
 export const updateView = (id: string, body: Partial<Omit<ViewWrite, 'project_id'>>) => json<SavedView>(`/views/${idPath(id)}`, 'PATCH', body)
@@ -324,6 +373,7 @@ export const undoGroupEvent = (eventId: number) => json<unknown>(`/events/${even
 export type ChangeField = 'status' | 'priority' | 'assignee' | 'title' | 'parent' | 'tags' | 'kind' | 'human_check'
 export interface ActivityChange { field: ChangeField; from: string | null; to: string | null }
 export interface ActivityItem {
+  entry_checks?: { type: 'refused' | 'override'; to_status: string; failed: string[]; reason: string | null; count: number }
   id: string; at: string; type: 'comment' | 'change' | 'created'
   author: { id: string | null; name: string; has_avatar?: boolean; automatic?: boolean; job?: string; reason?: string }
   automatic_change?: import('./statusAutopilot').AutomaticChange

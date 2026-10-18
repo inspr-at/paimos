@@ -1,0 +1,98 @@
+{
+  "_license": "SPDX-License-Identifier: AGPL-3.0-only",
+  "builtin_roles": {
+    "admin": [
+      "rules.publish",
+      "rules.read",
+      "rules.write"
+    ],
+    "member": [
+      "rules.read",
+      "rules.write"
+    ],
+    "owner": [
+      "rules.publish",
+      "rules.read",
+      "rules.write"
+    ]
+  },
+  "project_decided": {
+    "GET /api/rules/budget": true,
+    "GET /api/rules/channels": true,
+    "GET /api/rules/comparisons": true,
+    "GET /api/rules/explained": true,
+    "GET /api/rules/layers": true,
+    "GET /api/rules/merged": true,
+    "GET /api/rules/sets": true,
+    "GET /api/rules/sets/{setId}": true,
+    "GET /api/rules/sets/{setId}/versions": true,
+    "GET /api/rules/sets/{setId}/versions/{version}": true,
+    "POST /api/rules/comparisons": true,
+    "POST /api/rules/layers": true,
+    "POST /api/rules/publish": true,
+    "POST /api/rules/sets": true,
+    "POST /api/rules/sets/{setId}/publish": true,
+    "POST /api/rules/sets/{setId}/restore": true,
+    "PUT /api/rules/sets/{setId}/draft": true,
+    "PUT /api/rules/sets/{setId}/tldr": true
+  },
+  "registry": [
+    {
+      "agent_grantable": false,
+      "description": "Publish rules",
+      "grantable_at": [
+        "workspace",
+        "project"
+      ],
+      "group": "Rules",
+      "key": "rules.publish",
+      "owner_workstation_grantable": true,
+      "risk": "high"
+    },
+    {
+      "agent_grantable": true,
+      "description": "Read rules",
+      "grantable_at": [
+        "workspace",
+        "project"
+      ],
+      "group": "Rules",
+      "key": "rules.read",
+      "owner_workstation_grantable": true,
+      "risk": "low"
+    },
+    {
+      "agent_grantable": true,
+      "description": "Write rules",
+      "grantable_at": [
+        "workspace",
+        "project"
+      ],
+      "group": "Rules",
+      "key": "rules.write",
+      "owner_workstation_grantable": true,
+      "risk": "medium"
+    }
+  ],
+  "routes": {
+    "GET /api/rules/budget": "rules.read",
+    "GET /api/rules/channels": "rules.read",
+    "GET /api/rules/comparisons": "rules.read",
+    "GET /api/rules/explained": "rules.read",
+    "GET /api/rules/layers": "rules.read",
+    "GET /api/rules/merged": "rules.read",
+    "GET /api/rules/sets": "rules.read",
+    "GET /api/rules/sets/{setId}": "rules.read",
+    "GET /api/rules/sets/{setId}/versions": "rules.read",
+    "GET /api/rules/sets/{setId}/versions/{version}": "rules.read",
+    "POST /api/rules/comparisons": "rules.write",
+    "POST /api/rules/layers": "rules.write",
+    "POST /api/rules/publish": "rules.publish",
+    "POST /api/rules/sets": "rules.write",
+    "POST /api/rules/sets/{setId}/publish": "rules.publish",
+    "POST /api/rules/sets/{setId}/restore": "rules.publish",
+    "PUT /api/rules/budget": "settings.manage",
+    "PUT /api/rules/sets/{setId}/draft": "rules.write",
+    "PUT /api/rules/sets/{setId}/tldr": "rules.write"
+  }
+}

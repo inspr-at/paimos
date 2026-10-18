@@ -1,0 +1,32 @@
+# SPDX-License-Identifier: AGPL-3.0-only
+openapi: 3.1.0
+info:
+  title: PAIMOS AEON API
+  version: dev
+  license: {name: AGPL-3.0-only}
+  description: >-
+    AEON-580 adds an explicit owner-workstation exception to the person-only
+    governance routes documented below. Unmarked keys are unchanged. Marked
+    keys may hold owner_workstation_grantable permissions within their live role
+    and creator ceilings; they remain agents. High-risk governance writes return
+    OwnerWorkstationStepUp (428) and accept the Aeon-Step-Up header. This exception
+    never permits ownership.transfer, customer-portal permissions or deciding
+    the acting agent's own approval requests. Marking itself requires an Owner
+    person session and matching Origin. Member reactivation and project-member
+    replacement require the same step-up as deactivation and workspace-role changes.
+    Confirmation summaries include the canonical query and stored route-target and
+    query-selected role names; requests return 400 if the complete summary cannot
+    fit within 256 UTF-8 bytes. Client confirmation is implemented in AEON-581.
+servers:
+  - url: /api
+paths:
+components:
+  # Reporter-facing versions are independent of the product release coordinate.
+  # Additive optional response fields require a minor bump; removals, type changes,
+  # and newly required fields require a major bump. Never add a version body field.
+  headers:
+  securitySchemes:
+  schemas:
+  parameters:
+  requestBodies:
+  responses:

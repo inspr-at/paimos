@@ -1,0 +1,547 @@
+// SPDX-License-Identifier: AGPL-3.0-only
+package delivery
+
+import (
+	"context"
+	"encoding/json"
+	"errors"
+	"fmt"
+	"net/http"
+	"regexp"
+	"slices"
+	"strings"
+	"time"
+
+	"github.com/inspr-at/paimos/internal/authz"
+	"github.com/inspr-at/paimos/internal/db"
+	"github.com/inspr-at/paimos/internal/events"
+	"github.com/inspr-at/paimos/internal/reviewgate"
+	"github.com/inspr-at/paimos/internal/statusautopilot"
+	"github.com/inspr-at/paimos/internal/tenant"
+	"github.com/inspr-at/paimos/internal/ticketbenefits"
+	"github.com/inspr-at/paimos/internal/workqueue"
+	"github.com/jackc/pgx/v5"
+)
+
+var mergeTicketKey = regexp.MustCompile(`(?i)\bAEON-[1-9][0-9]*\b`)
+
+func mergeKeys(title, branch string) ([]string, error) {
+	if len(title) > 4096 || len(branch) > 255 {
+		return nil, errRead
+	}
+	keys := mergeTicketKey.FindAllString(title+" "+branch, 51)
+	if len(keys) > 50 {
+		return nil, errRead
+	}
+	for i := range keys {
+		keys[i] = strings.ToUpper(keys[i])
+	}
+	slices.Sort(keys)
+	return slices.Compact(keys), nil
+}
+
+// mergeWebhook accepts a durable, verified receipt before any downstream work.
+func (m *Module) mergeWebhook(w http.ResponseWriter, r *http.Request) {
+	m.receiveWebhook(w, r)
+}
+
+// The authenticated audit phase has accepted before merge completion starts.
+func (m *Module) finishMergeWebhook(w http.ResponseWriter, r *http.Request, raw []byte, reader MergeReader) {
+	name := r.Header.Get("X-GitHub-Event")
+	if _, err := m.completeWebhook(r.Context(), name, raw, reader); err != nil {
+		step := "completion"
+		var failed *webhookStepError
+		if errors.As(err, &failed) {
+			step = failed.step
+		}
+		status := 502
+		if step == "parse" {
+			status = 400
+		}
+		m.rejectWebhook(w, r, webhookLogAction(raw, name), step, status, err)
+		return
+	}
+	w.WriteHeader(204)
+}
+
+func (m *Module) completeWebhook(ctx context.Context, name string, raw []byte, reader MergeReader) (webhookOutcome, error) {
+	var e struct {
+		Action string `json:"action"`
+		Ref    string `json:"ref"`
+		After  string `json:"after"`
+		Pull   struct {
+			Number int64 `json:"number"`
+			Merged *bool `json:"merged"`
+			Base   struct {
+				Ref string `json:"ref"`
+			} `json:"base"`
+		} `json:"pull_request"`
+		Group struct {
+			Head string `json:"head_sha"`
+		} `json:"merge_group"`
+	}
+	if err := json.Unmarshal(raw, &e); err != nil {
+		return webhookFailed, &webhookStepError{step: "parse", err: webhookClass("invalid_json")}
+	}
+	var err error
+	pending := false
+	step := ""
+	facts := []MergeFact{}
+	switch name {
+	case "pull_request":
+		if e.Action == "closed" {
+			// The signed closure explicitly proves a terminal no-op. An absent
+			// merged field is not proof; canonical reads still resolve it.
+			if e.Pull.Merged != nil && !*e.Pull.Merged || e.Pull.Base.Ref != "" && e.Pull.Base.Ref != "main" {
+				return webhookNothingToRecord, nil
+			}
+			step = "reader-MergedPull"
+			var f *MergeFact
+			f, pending, err = readMergedPull(ctx, reader, e.Pull.Number)
+			if f != nil {
+				facts = append(facts, *f)
+			}
+		}
+	case "merge_group":
+		if e.Action == "destroyed" {
+			step = "reader-completedGroup"
+			facts, pending, err = m.completedGroup(ctx, reader, e.Group.Head)
+		}
+	case "push":
+		if e.Ref == "refs/heads/main" {
+			step = "reader-MergedGroup"
+			facts, pending, err = readMergedGroup(ctx, reader, e.After, false)
+		}
+	}
+	if err == nil && len(facts) > 0 {
+		step = "completeMerges"
+		var refused bool
+		refused, err = m.completeMergesPending(ctx, facts)
+		pending = pending || refused
+	}
+	if err != nil {
+		return webhookFailed, &webhookStepError{step: step, err: err}
+	}
+	if step == "" {
+		return webhookNothingToRecord, nil
+	}
+	// Canonical merge proof can arrive after destruction/closure. A refused
+	// ticket can also become eligible later; neither is a completed effect.
+	if pending {
+		return webhookPending, nil
+	}
+	if len(facts) == 0 {
+		return webhookNothingToRecord, nil
+	}
+	return webhookRecorded, nil
+}
+
+// Queue refs can disappear before destroyed is delivered. The authenticated
+// checks_requested ledger retains every constituent; confirm each through the
+// canonical pull endpoint, including distinct merge SHAs in one group.
+func (m *Module) completedGroup(ctx context.Context, reader MergeReader, head string) ([]MergeFact, bool, error) {
+	var raw []byte
+	err := db.InTenant(db.AllProjects(ctx, "merge group completion subjects"), m.pool, m.config.TenantID, func(tx pgx.Tx) error {
+		return tx.QueryRow(ctx, `SELECT observations FROM delivery_github_events WHERE repository=$1 AND event='merge_group' AND action='checks_requested' AND head_sha=$2 ORDER BY sequence DESC LIMIT 1`, m.config.Repository, head).Scan(&raw)
+	})
+	if errors.Is(err, pgx.ErrNoRows) {
+		return readMergedGroup(ctx, reader, head, true)
+	}
+	if err != nil {
+		return nil, false, err
+	}
+	var observations []Observation
+	if json.Unmarshal(raw, &observations) != nil || len(observations) > 100 {
+		return nil, false, errRead
+	}
+	if len(observations) == 0 {
+		return readMergedGroup(ctx, reader, head, true)
+	}
+	out := []MergeFact{}
+	pending := false
+	for _, o := range observations {
+		if o.PR == nil {
+			return nil, false, errRead
+		}
+		f, waiting, err := readMergedPull(ctx, reader, *o.PR)
+		if err != nil {
+			return nil, false, err
+		}
+		if f != nil {
+			out = append(out, *f)
+		}
+		pending = pending || waiting
+	}
+	return out, pending, nil
+}
+
+type mergeEntry struct {
+	Ticket         string    `json:"ticket_node_id"`
+	Key            string    `json:"key"`
+	Project        *string   `json:"project_id"`
+	PR             int64     `json:"pull_request"`
+	SHA            string    `json:"merge_sha"`
+	Head           string    `json:"head_sha"`
+	MergedAt       time.Time `json:"merged_at"`
+	Revision       time.Time `json:"revision"`
+	From           string    `json:"from"`
+	To             string    `json:"to"`
+	Result         string    `json:"result"`
+	Reason         string    `json:"reason,omitempty"`
+	before         json.RawMessage
+	fields         json.RawMessage
+	kind, category string
+}
+
+func mergeIdentity(repo string, e mergeEntry) string {
+	return digest([]byte(repo + "|" + e.SHA + "|" + e.Ticket + "|" + e.To))
+}
+
+// Resolve every title/branch reference; never infer parent completion or rely
+// on the projection's single-ticket association. Lock the full sorted batch
+// before any write/event, so multi-ticket PRs preserve the global lock order.
+func mergeEntriesTx(ctx context.Context, tx pgx.Tx, facts []MergeFact, project string) ([]mergeEntry, error) {
+	byKey := map[string]MergeFact{}
+	for _, f := range facts {
+		if f.PR == nil || *f.PR < 1 || !reviewgate.ValidSHA(f.SHA) || !reviewgate.ValidSHA(f.Head) || f.At.IsZero() {
+			return nil, errRead
+		}
+		keys, err := mergeKeys(f.Title, f.Branch)
+		if err != nil {
+			return nil, err
+		}
+		for _, key := range keys {
+			if prior, ok := byKey[key]; !ok || f.At.After(prior.At) {
+				byKey[key] = f
+			}
+		}
+	}
+	if len(byKey) > 100 {
+		return nil, errRead
+	}
+	keys := make([]string, 0, len(byKey))
+	for key := range byKey {
+		keys = append(keys, key)
+	}
+	rows, err := tx.Query(ctx, `SELECT n.id::text,n.key,n.project_id::text,n.state,n.updated_at,n.fields,k.slug,
+ aeon_work_status_category(n.state,k.field_schema),to_jsonb(n)
+ FROM nodes n JOIN node_kinds k ON k.id=n.kind_id WHERE upper(n.key)=ANY($1::text[]) AND n.deleted_at IS NULL
+ AND k.slug='work' AND NOT EXISTS(SELECT 1 FROM work_orders w WHERE w.node_id=n.id)
+ AND ($2='' OR n.project_id=nullif($2,'')::uuid) ORDER BY n.id FOR UPDATE OF n`, keys, project)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := []mergeEntry{}
+	for rows.Next() {
+		var e mergeEntry
+		if err := rows.Scan(&e.Ticket, &e.Key, &e.Project, &e.From, &e.Revision, &e.fields, &e.kind, &e.category, &e.before); err != nil {
+			return nil, err
+		}
+		f := byKey[strings.ToUpper(e.Key)]
+		e.PR, e.SHA, e.Head, e.MergedAt, e.To = *f.PR, f.SHA, f.Head, f.At, "done"
+		out = append(out, e)
+	}
+	return out, rows.Err()
+}
+
+func mergeGateTx(ctx context.Context, tx pgx.Tx, e mergeEntry) (string, error) {
+	parent, err := db.WorkStatusParentTx(ctx, tx, e.Ticket)
+	if err != nil {
+		return "", err
+	}
+	// The worker rule also protects projects whose parent-status rollout is off.
+	if !parent {
+		if err := tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM nodes c JOIN node_kinds k ON k.id=c.kind_id WHERE c.parent_id=$1 AND c.deleted_at IS NULL AND k.slug='work')`, e.Ticket).Scan(&parent); err != nil {
+			return "", err
+		}
+	}
+	if parent {
+		return "parent status follows its children", nil
+	}
+	if ticketbenefits.Completed(e.category) && !(e.category == "done" && e.To == "delivered") {
+		return "", nil
+	}
+	if e.category == "cancelled" || e.category == "archived" {
+		return "ticket is cancelled or archived", nil
+	}
+	var busy, handover bool
+	var human *string
+	// aeon_work_busy is live sessions, queued runs and running child orders.
+	// A waiting split or cancel is aeon_work_pending after that work has stopped.
+	if err := tx.QueryRow(ctx, `SELECT aeon_work_busy(id),aeon_work_pending(id) IS NOT NULL,human_check FROM nodes WHERE id=$1`, e.Ticket).Scan(&busy, &handover, &human); err != nil {
+		return "", err
+	}
+	if handover {
+		return "waiting for handover", nil
+	}
+	if busy {
+		return "a worker is still running or waiting for handover", nil
+	}
+	if human != nil && strings.TrimSpace(*human) != "" {
+		return "needs a human check: " + *human, nil
+	}
+	if issues := ticketbenefits.PillIssues(e.fields); len(issues) > 0 {
+		return "before done: " + strings.Join(issues, "; "), nil
+	}
+	return "", nil
+}
+
+// mergeOwnerLimit bounds each responsible-person class. A configured lead is
+// not a class: that person is the only candidate, and a missing grant refuses.
+const mergeOwnerLimit = 16
+
+// mergeOwnerTx authorizes the state change as a person who already holds
+// nodes.write. A configured lead owner (project lead settings, else the lead
+// principal) is authoritative: if that person lacks the grant, completion
+// refuses and does not substitute anyone else. Only a project with neither
+// setting falls back, in order, to an existing project role binding (admin,
+// then member, then any other project role), a workspace owner, admin, or
+// member, then the person who created the ticket. No role, key, or scope is
+// created, and an agent is never the fallback.
+func mergeOwnerTx(ctx context.Context, tx pgx.Tx, tid string, project *string, ticket string) (*tenant.Principal, error) {
+	var id *string
+	err := tx.QueryRow(ctx, `SELECT coalesce((SELECT owner_person_id FROM project_lead_settings WHERE project_id=$1),
+ (SELECT owner_principal_id FROM project_leads WHERE project_id=$1))::text`, project).Scan(&id)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	if id != nil {
+		return mergeOwnerAllowed(ctx, tx, tid, project, *id)
+	}
+	p, err := mergeOwnerCandidate(ctx, tx, tid, project, `SELECT p.id::text FROM role_bindings b
+ JOIN principals p ON p.tenant_id=b.tenant_id AND p.id=b.principal_id
+ JOIN roles r ON r.tenant_id=b.tenant_id AND r.id=b.role_id
+ WHERE p.kind='person' AND p.status='active' AND p.linked_to IS NULL
+ AND b.scope_type='project' AND b.scope_id=$1::uuid
+ GROUP BY p.id
+ ORDER BY min(CASE r.key WHEN 'admin' THEN 0 WHEN 'member' THEN 1 ELSE 2 END), min(b.created_at), p.id
+ LIMIT $2`, project, mergeOwnerLimit)
+	if p != nil || err != nil {
+		return p, err
+	}
+	p, err = mergeOwnerCandidate(ctx, tx, tid, project, `SELECT p.id::text FROM role_bindings b
+ JOIN principals p ON p.tenant_id=b.tenant_id AND p.id=b.principal_id
+ JOIN roles r ON r.tenant_id=b.tenant_id AND r.id=b.role_id
+ WHERE p.kind='person' AND p.status='active' AND p.linked_to IS NULL
+ AND b.scope_type='workspace' AND r.key IN ('owner','admin','member')
+ GROUP BY p.id
+ ORDER BY min(CASE r.key WHEN 'owner' THEN 0 WHEN 'admin' THEN 1 ELSE 2 END), min(b.created_at), p.id
+ LIMIT $1`, mergeOwnerLimit)
+	if p != nil || err != nil {
+		return p, err
+	}
+	return mergeOwnerCandidate(ctx, tx, tid, project, `SELECT canonical.id::text FROM events e
+ JOIN principals actor ON actor.tenant_id=e.tenant_id AND actor.id=e.actor_principal_id
+ JOIN principals canonical ON canonical.tenant_id=actor.tenant_id AND canonical.id=coalesce(actor.linked_to,actor.id)
+ WHERE e.node_id=$1::uuid AND e.type='node.created' AND canonical.kind='person' AND canonical.status='active' AND canonical.linked_to IS NULL
+ ORDER BY e.id LIMIT 1`, ticket)
+}
+
+func mergeOwnerAllowed(ctx context.Context, tx pgx.Tx, tid string, project *string, id string) (*tenant.Principal, error) {
+	p := tenant.Principal{ID: id, TenantID: tid, Kind: tenant.Person}
+	err := authz.RequireTx(ctx, tx, p, "nodes.write", scope(project))
+	if errors.Is(err, authz.ErrForbidden) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	return &p, nil
+}
+
+func mergeOwnerCandidate(ctx context.Context, tx pgx.Tx, tid string, project *string, query string, args ...any) (*tenant.Principal, error) {
+	rows, err := tx.Query(ctx, query, args...)
+	if err != nil {
+		return nil, err
+	}
+	ids := []string{}
+	for rows.Next() {
+		var id string
+		if err := rows.Scan(&id); err != nil {
+			rows.Close()
+			return nil, err
+		}
+		ids = append(ids, id)
+	}
+	err = rows.Err()
+	rows.Close()
+	if err != nil {
+		return nil, err
+	}
+	if len(ids) > mergeOwnerLimit {
+		return nil, errRead
+	}
+	seen := map[string]bool{}
+	for _, id := range ids {
+		if seen[id] {
+			continue
+		}
+		seen[id] = true
+		p, err := mergeOwnerAllowed(ctx, tx, tid, project, id)
+		if p != nil || err != nil {
+			return p, err
+		}
+	}
+	return nil, nil
+}
+
+// prepareMergeTx records merge evidence for leaf completion and already-Done
+// leaves, retaining other fields and human checks.
+// Receipt lookup and writes share the tenant/tree fence. Events are returned
+// for the caller to append after the whole batch's resource locks and writes.
+func prepareMergeTx(ctx context.Context, tx pgx.Tx, actor tenant.Principal, repo string, e *mergeEntry) (*events.Change, error) {
+	identity := mergeIdentity(repo, *e)
+	var seen bool
+	if err := tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM events WHERE node_id=$1 AND type='delivery.merge_done' AND metadata->>'merge_identity'=$2)`, e.Ticket, identity).Scan(&seen); err != nil {
+		return nil, err
+	}
+	if seen {
+		e.Result = "already_applied"
+		return nil, nil
+	}
+	if e.Result == "refused" {
+		return nil, nil
+	}
+	alreadyDone := e.category == "done" && e.To != "delivered"
+	if ticketbenefits.Completed(e.category) && e.category != "done" {
+		e.Result = "already_complete"
+		return nil, nil
+	}
+	var entry *workqueue.EntryRecord
+	if !alreadyDone {
+		target, err := workqueue.EntryTicketTx(ctx, tx, e.Ticket)
+		if err != nil {
+			return nil, err
+		}
+		entry, err = workqueue.RequireEntryTx(ctx, tx, actor, target, "done", nil)
+		var failed *workqueue.EntryFailure
+		if errors.As(err, &failed) {
+			e.Result = "refused"
+			labels := []string{}
+			for _, check := range failed.Failed {
+				labels = append(labels, check.Label+": "+check.Reason)
+			}
+			e.Reason = "Entry checks missing: " + strings.Join(labels, ", ")
+			return nil, nil
+		}
+		if err != nil {
+			return nil, err
+		}
+	}
+	var after json.RawMessage
+	if alreadyDone {
+		// This is an evidence write, not another completion. Keep the exact
+		// configured Done state and all existing marks under the same fence.
+		if err := tx.QueryRow(ctx, `UPDATE nodes SET fields=jsonb_set(fields,'{merged_at}',to_jsonb($2::text)),updated_at=greatest(clock_timestamp(),updated_at+interval '1 microsecond') WHERE id=$1 RETURNING to_jsonb(nodes)`, e.Ticket, e.MergedAt.UTC().Format(time.RFC3339Nano)).Scan(&after); err != nil {
+			return nil, err
+		}
+		e.Result = "already_complete"
+	} else {
+		if err := tx.QueryRow(ctx, `UPDATE nodes SET state=$2,fields=jsonb_set(fields,'{merged_at}',to_jsonb($3::text)),status_autopilot='{}',updated_at=greatest(clock_timestamp(),updated_at+interval '1 microsecond') WHERE id=$1 RETURNING to_jsonb(nodes)`, e.Ticket, e.To, e.MergedAt.UTC().Format(time.RFC3339Nano)).Scan(&after); err != nil {
+			return nil, err
+		}
+		e.Result = "applied"
+	}
+	if _, err := tx.Exec(ctx, `UPDATE status_autopilot_proposals SET status='applied' WHERE node_id=$1 AND rule='merge_refused' AND anchor LIKE $2`, e.Ticket, identity+"/%"); err != nil {
+		return nil, err
+	}
+	meta, _ := json.Marshal(map[string]any{"job": "merge-done", "repository": repo, "pull_request": e.PR, "merge_sha": e.SHA, "head_sha": e.Head, "merged_at": e.MergedAt, "merge_identity": identity, "entry_checks": entry})
+	return &events.Change{Type: "delivery.merge_done", NodeID: &e.Ticket, Before: e.before, After: after, Metadata: meta}, nil
+}
+
+func flushMergeTx(ctx context.Context, tx pgx.Tx, actor tenant.Principal, repo string, entries []mergeEntry, changes []events.Change) error {
+	for _, e := range entries {
+		if e.Result != "refused" {
+			continue
+		}
+		anchor := mergeIdentity(repo, e) + "/" + digest([]byte(e.Reason))
+		reason := fmt.Sprintf("%s · PR #%d merged to main; %s transition refused: %s", e.Key, e.PR, e.To, e.Reason)
+		if err := statusautopilot.MergeRefusalTx(ctx, tx, actor, e.Ticket, anchor, reason); err != nil {
+			return err
+		}
+	}
+	for _, c := range changes {
+		// node.updated keeps existing live-update and node-history consumers.
+		update := c
+		update.Type = "node.updated"
+		if _, err := events.Append(ctx, tx, actor, update); err != nil {
+			return err
+		}
+		if _, err := events.Append(ctx, tx, actor, c); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func lockMergeEventParentsTx(ctx context.Context, tx pgx.Tx, actor tenant.Principal, project *string) error {
+	if _, err := tx.Exec(ctx, `SELECT id FROM principals WHERE id=$1 FOR KEY SHARE`, actor.ID); err != nil {
+		return err
+	}
+	if project != nil {
+		_, err := tx.Exec(ctx, `SELECT id FROM nodes WHERE id=$1 FOR KEY SHARE`, project)
+		return err
+	}
+	return nil
+}
+
+func (m *Module) completeMerges(ctx context.Context, facts []MergeFact) error {
+	_, err := m.completeMergesPending(ctx, facts)
+	return err
+}
+
+func (m *Module) completeMergesPending(ctx context.Context, facts []MergeFact) (bool, error) {
+	if len(facts) > 100 {
+		return false, errRead
+	}
+	actor, err := m.auditActor(ctx, m.config.TenantID)
+	if err != nil {
+		return false, err
+	}
+	pending := false
+	err = db.InTenant(db.AllProjects(ctx, "authenticated main merge completion"), m.pool, m.config.TenantID, func(tx pgx.Tx) error {
+		if err := db.LockWorkTreeTx(ctx, tx); err != nil {
+			return err
+		}
+		entries, err := mergeEntriesTx(ctx, tx, facts, "")
+		if err != nil {
+			return err
+		}
+		if err := lockMergeEventParentsTx(ctx, tx, actor, nil); err != nil {
+			return err
+		}
+		changes := []events.Change{}
+		for i := range entries {
+			e := &entries[i]
+			p, err := mergeOwnerTx(ctx, tx, actor.TenantID, e.Project, e.Ticket)
+			if err != nil {
+				return err
+			}
+			if p == nil {
+				e.Reason = "no active project owner with nodes.write"
+			} else {
+				e.Reason, err = mergeGateTx(ctx, tx, *e)
+			}
+			if err != nil {
+				return err
+			}
+			if e.Reason != "" {
+				e.Result = "refused"
+			}
+			c, err := prepareMergeTx(ctx, tx, actor, m.config.Repository, e)
+			if err != nil {
+				return err
+			}
+			if c != nil {
+				changes = append(changes, *c)
+			}
+			pending = pending || e.Result == "refused"
+		}
+		return flushMergeTx(ctx, tx, actor, m.config.Repository, entries, changes)
+	})
+	return pending, err
+}

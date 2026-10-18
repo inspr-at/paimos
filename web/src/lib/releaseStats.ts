@@ -118,7 +118,6 @@ export function distinctTickets(list: { release: Release; at: number }[]) {
 
 // ---------- The seven stats ----------
 export type StatKey = 'perweek' | 'features' | 'since' | 'median' | 'week' | 'streak' | 'busiest'
-export const STAT_KEYS: readonly StatKey[] = ['perweek', 'features', 'since', 'median', 'week', 'streak', 'busiest']
 // The data each stat's small visual draws; the card turns it into SVG.
 export type StatViz =
   | { kind: 'cumulative'; points: number[]; total: number; from: string; pace: string; aria: string }

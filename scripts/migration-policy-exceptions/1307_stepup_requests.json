@@ -1,0 +1,11 @@
+{
+  "schema": "aeon.migration-policy-exceptions.v1",
+  "exceptions": [
+    {
+      "file": "1307_stepup_requests.sql",
+      "sha256": "03502fff87593c40f79749816e52b4111edc569d4060a72bd397ae74cc0c4a30",
+      "ticket": "AEON-1047",
+      "reason": "AEON-1046 owner-approved step-up delta explicitly adds stepup to the 1092 phone kind checks. Only two named historical CHECKs are replaced, after installing and validating strict supersets that retain registration/approval/attach. No data, table, column, RLS policy, key, grant or scope changes. The classifier conservatively flags the two CHECK drops; this exact-byte draft requires coordinator review before merge/release and does not waive previous-binary compatibility or grant release authority."
+    }
+  ]
+}

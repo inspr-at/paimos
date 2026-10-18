@@ -7,5 +7,14 @@ FROM alpine:3.24@sha256:294b683cb724975bec92580e1e685676bd4b50bda910ddb8c51d4cab
 # Export with epoch 0 and rewrite-timestamp=true, independently of
 # source/version; its OCI digest freezes all transitive APK bytes too.
 # APK repositories remain mutable during preparation, not during assembly.
-RUN apk add --no-cache ca-certificates chromium=152.0.7977.82-r0 tini=0.19.0-r3 \
+# Chromium allow-list, newest first. A bump edits these exact chromium=
+# versions (newest on the first apk line). tini stays 0.19.0-r3. Preparation
+# installs the first exact chromium the index can satisfy and fails when none
+# match. Never a floating chromium. The install lines are literal package
+# versions, not shell variables. The next instruction records the installed APK.
+RUN apk add --no-cache ca-certificates "chromium=155.0.8059.39-r0" "tini=0.19.0-r3" \
+    || apk add --no-cache ca-certificates "chromium=152.0.7977.82-r0" "tini=0.19.0-r3" \
+    || { echo "runtime APK pins: no allow-listed chromium version is in the Alpine index" >&2; exit 1; } \
     && addgroup -S -g 65532 aeon && adduser -S -D -u 65532 -G aeon aeon
+RUN set -o pipefail; apk list --installed chromium | cut -d ' ' -f 1 | cut -d - -f 2- > /etc/aeon-chromium-apk \
+    && test -s /etc/aeon-chromium-apk

@@ -24,6 +24,7 @@ import (
 
 	"github.com/inspr-at/paimos/internal/activity"
 	"github.com/inspr-at/paimos/internal/auth"
+	"github.com/inspr-at/paimos/internal/capacity"
 	"github.com/inspr-at/paimos/internal/db"
 	"github.com/inspr-at/paimos/internal/dbtest"
 	"github.com/inspr-at/paimos/internal/harness"
@@ -128,6 +129,7 @@ func TestCompatEndToEnd(t *testing.T) {
 	peer := mintAgent(t, srv.URL, "peer")
 	seedProject(t, srv.URL, worker.Token)
 	seedKnowledgeKinds(t, srv.URL)
+	seedCompletionDefinition(t, srv.URL)
 	t.Setenv("PAIMOS_API_KEY", worker.Token)
 
 	code, out, errOut := runCLI([]string{"paimos", "--config", missing, "whoami"}, "")
@@ -200,9 +202,10 @@ func TestCompatEndToEnd(t *testing.T) {
 		t.Fatalf("json get %+v", got)
 	}
 
-	// AEON-256/655: the ticket alias creates work; hiding it cannot bypass the server gate.
-	code, _, errOut = runCLI([]string{"paimos", "--config", missing, "issue", "update", key, "--status", "done", "--hide-from-release-notes", "true"}, "")
-	if code == 0 || !strings.Contains(errOut, "benefit_de") {
+	// Q1 (AEON-1248): visible work keeps the bilingual entry check; hiding is
+	// explicitly exempt. The agent cannot override a failing configured check.
+	code, _, errOut = runCLI([]string{"paimos", "--config", missing, "issue", "update", key, "--status", "done", "--hide-from-release-notes", "false"}, "")
+	if code == 0 || !strings.Contains(errOut, "entry_checks_failed") || !strings.Contains(errOut, "benefit_de") {
 		t.Fatalf("missing benefits accepted: %d %s", code, errOut)
 	}
 	code, _, errOut = runCLI([]string{"paimos", "--config", missing, "issue", "update", key, "--status", "done", "--pill-en", "Clear release notes", "--pill-de", "Verständliche Release Notes", "--benefit-en", "Tickets explain what you gain.", "--benefit-de", "Tickets erklären den Nutzen.", "--hide-from-release-notes", "true"}, "")
@@ -240,6 +243,70 @@ func TestCompatEndToEnd(t *testing.T) {
 		t.Fatalf("knowledge update code %d out %q err %q", code, out, errOut)
 	}
 
+	// Risk: an ID-only catalog must not erase this fixture's selected model or
+	// launch template. Prepare through the API, then own its pins and routes
+	// before enrolling accounts for both native harnesses.
+	status, raw := doJSON(t, &http.Client{}, http.MethodGet, srv.URL+"/api/models", "", http.Header{"Authorization": {"Bearer " + worker.Token}})
+	if status != http.StatusOK {
+		t.Fatalf("models %d %s", status, raw)
+	}
+	if err := db.InTenant(dbtest.Seed(ctx), opened.App, worker.TenantID, func(tx pgx.Tx) error {
+		// An ID-only catalog reports no native levels, so the reviewer pin
+		// declares its own: reviews need the highest level at xhigh or above.
+		if _, err := tx.Exec(ctx, `INSERT INTO model_profiles(tenant_id,slug,version,harness,family,model,effort,tier,registered_effort_level) VALUES
+			($1,'compat-codex','compat-fixture','codex','openai','gpt-6.1-sol','high','standard',NULL),
+			($1,'compat-claude','compat-fixture','claude','anthropic','opus','xhigh','frontier',4)`, worker.TenantID); err != nil {
+			return err
+		}
+		// The Default and its Review order run Codex, then Claude (build and
+		// review-gate ladders before Models v2 migration 1333).
+		var pins []string
+		if err := tx.QueryRow(ctx, `SELECT array_agg(id::text ORDER BY harness='claude') FROM model_profiles WHERE slug IN ('compat-codex','compat-claude')`).Scan(&pins); err != nil {
+			return err
+		}
+		for _, situation := range []string{"first", "review"} {
+			if err := dbtest.ModelsOrder(ctx, tx, worker.TenantID, "other", situation, "wait", pins...); err != nil {
+				return err
+			}
+		}
+		var owner string
+		if err := tx.QueryRow(ctx, `SELECT created_by_principal_id::text FROM agent_keys WHERE principal_id=$1`, worker.PrincipalID).Scan(&owner); err != nil {
+			return err
+		}
+		for _, harness := range []string{"codex", "claude"} {
+			var account string
+			if err := tx.QueryRow(ctx, `
+				INSERT INTO agent_accounts (tenant_id, account_key, harness, daemon_id,
+					registered_by_principal_id, label, last_probe_at, last_probe_ok,
+					last_daemon_generation, capacity_owner, owner_person_id, linked_at,
+					allowed_model_profile_ids)
+				SELECT $1, $2, $2, 'compat-fixture', $3, 'Compat fixture', now(), true,
+					'fixture-generation', $4, $4, now(), array_agg(id)
+				FROM model_profiles WHERE harness=$2 AND enabled
+				RETURNING id::text`, worker.TenantID, harness, worker.PrincipalID, owner).Scan(&account); err != nil {
+				return err
+			}
+			if _, err := tx.Exec(ctx, `INSERT INTO account_allowance_windows
+				(tenant_id, account_id, starts_at, ends_at, unit, allowance, pace_model)
+				VALUES ($1, $2, now()-interval '1 hour', now()+interval '1 day', 'requests', 1000, 'unrestricted')`, worker.TenantID, account); err != nil {
+				return err
+			}
+			schedule := capacity.DefaultSchedule()
+			schedule.Override, schedule.Reserve = "sprint", capacity.ReserveOff
+			scheduleJSON, err := json.Marshal(schedule)
+			if err != nil {
+				return err
+			}
+			if _, err := tx.Exec(ctx, `INSERT INTO account_capacity_schedules
+				(tenant_id, principal_id, scope, scope_key, account_id, schedule)
+				VALUES ($1, $2, 'account', $3::uuid::text, $3, $4)`, worker.TenantID, owner, account, scheduleJSON); err != nil {
+				return err
+			}
+		}
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
 	code, out, errOut = runCLI([]string{"paimos", "--config", missing, "model", "resolve", "build"}, "")
 	if code != 0 || !strings.Contains(out, " — ") || !strings.Contains(out, "'{prompt}'") || !strings.Contains(out, "selected") {
 		t.Fatalf("resolve code %d out %q err %q", code, out, errOut)
@@ -247,7 +314,8 @@ func TestCompatEndToEnd(t *testing.T) {
 	code, out, errOut = runCLI([]string{"paimos", "--config", missing, "model", "resolve", "review-gate", "--author-family", "xai"}, "")
 	line, _, _ := strings.Cut(out, "\n")
 	if code != 0 || !strings.Contains(out, "'{prompt}'") || strings.HasSuffix(strings.TrimSpace(line), "xai") {
-		t.Fatalf("review-gate code %d out %q err %q", code, out, errOut)
+		_, ladder, _ := runCLI([]string{"paimos", "--config", missing, "--json", "model", "resolve", "review-gate", "--author-family", "xai"}, "")
+		t.Fatalf("review-gate code %d out %q err %q; resolution %s", code, out, errOut, ladder)
 	}
 
 	code, out, errOut = runCLI([]string{"paimos", "--config", missing, "session", "start", "--project", "AEON", "--agent", "worker"}, "")
@@ -485,7 +553,7 @@ type mintedKey struct {
 	TenantID    string
 }
 
-func mintAgent(t *testing.T, base, name string) mintedKey {
+func mintAgent(t testing.TB, base, name string) mintedKey {
 	t.Helper()
 	jar, err := cookiejar.New(nil)
 	if err != nil {
@@ -523,7 +591,7 @@ func mintAgent(t *testing.T, base, name string) mintedKey {
 	return mintedKey{Token: created.Token, PrincipalID: created.PrincipalID, TenantID: me.Tenant.ID}
 }
 
-func seedProject(t *testing.T, base, token string) {
+func seedProject(t testing.TB, base, token string) {
 	t.Helper()
 	hc := &http.Client{}
 	authz := http.Header{"Authorization": {"Bearer " + token}}
@@ -581,7 +649,26 @@ func seedKnowledgeKinds(t *testing.T, base string) {
 	}
 }
 
-func doJSON(t *testing.T, hc *http.Client, method, url, body string, header http.Header) (int, []byte) {
+// Definitions are person-admin work. The CLI's agent exercises the configured
+// check without receiving authority to change it.
+func seedCompletionDefinition(t *testing.T, base string) {
+	t.Helper()
+	jar, err := cookiejar.New(nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	hc := &http.Client{Jar: jar}
+	status, raw := doJSON(t, hc, http.MethodPost, base+"/api/auth/dev-login", `{"email":"admin@example.com","tenant":"aeon"}`, nil)
+	if status != http.StatusOK {
+		t.Fatalf("definition admin login: %d", status)
+	}
+	status, raw = doJSON(t, hc, http.MethodPut, base+"/api/settings/definitions", `{"expected_revision":null,"checks":{"done":[{"id":"release_copy_set"}]}}`, nil)
+	if status != http.StatusOK {
+		t.Fatalf("completion definition: %d %s", status, raw)
+	}
+}
+
+func doJSON(t testing.TB, hc *http.Client, method, url, body string, header http.Header) (int, []byte) {
 	t.Helper()
 	var rdr io.Reader
 	if body != "" {

@@ -52,6 +52,8 @@ export interface TicketPlanning {
   estimate_snapshot?: PlanningSnapshot
   route: PlanningRoute | null
   route_gap?: 'area' | 'review_gate' | 'registry'
+  /** A registry gap because the registry exceeds the Models bounds. */
+  route_truncated?: boolean
   tokens: PlanningTokens
   cost?: PlanningCost
   children?: { total: number; estimated: number; uncalibrated?: number }
@@ -61,8 +63,6 @@ export interface PlanningRow { kind_slug: string; fields: Record<string, unknown
 
 export type PlanningColumn = 'model' | 'tokens' | 'list_cost' | 'paid'
 export const PLANNING_COLUMNS: PlanningColumn[] = ['model', 'tokens', 'list_cost']
-// Cost columns show only to people who may see usage (harness.read).
-export const COST_COLUMNS: PlanningColumn[] = ['list_cost', 'paid']
 
 const DEFAULT_RATE = 5_000_000
 const compact = new Intl.NumberFormat('en-US', { notation: 'compact', maximumSignificantDigits: 3 })
@@ -114,6 +114,18 @@ function roleArea(row: PlanningRow): string {
 export interface ModelCell { text: string; tip: string; state: 'none' | 'planned' | 'measured'; harness: string; provider: string; more: number; label: string; effort: number | null; fullName: string }
 function plannedRoute(row: PlanningRow): PlanningRoute | null | undefined {
   return row.planning?.estimate_snapshot ? row.planning.estimate_snapshot.route : row.planning?.route
+}
+// The view figures' Model popup (AEON-1358) names each model id exactly as the Model column shows it: the row's first
+// used model, otherwise its planned route (the one the server counts), with the person's display choices. An id that
+// no loaded row carries keeps its id.
+export function shownModelNames(rows: Iterable<PlanningRow>, prefs = DEFAULT_MODEL_DISPLAY): (id: string) => string {
+  const names = new Map<string, string>()
+  for (const row of rows) {
+    if (row.kind_slug === 'epic') continue
+    const model = row.planning?.models?.[0] ?? plannedRoute(row)
+    if (model?.model && !names.has(model.model)) names.set(model.model, shownModelName(model, prefs))
+  }
+  return id => names.get(id) ?? id
 }
 function shortModelLabel(label: string): string { return label.split(' · ')[0]!.replace(/\bgpt-\d+(?:\.\d+)?-/, '') }
 function shortModel(route: PlanningRoute): string { return shortModelLabel(route.label) }

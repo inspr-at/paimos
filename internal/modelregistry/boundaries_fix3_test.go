@@ -1,0 +1,425 @@
+// SPDX-License-Identifier: AGPL-3.0-only
+package modelregistry
+
+import (
+	"bufio"
+	"context"
+	"errors"
+	"io"
+	"net"
+	"net/http"
+	"net/http/httptest"
+	"strings"
+	"sync"
+	"testing"
+	"time"
+
+	"github.com/inspr-at/paimos/internal/db"
+	"github.com/inspr-at/paimos/internal/dbtest"
+	"github.com/inspr-at/paimos/internal/modelprefs"
+	"github.com/inspr-at/paimos/internal/tenant"
+	"github.com/inspr-at/paimos/internal/workorders"
+	"github.com/jackc/pgx/v5"
+)
+
+// Read signals the exact stalled-input boundary; Close releases it, including
+// on assertion failure. No sleep is needed to establish the interleaving.
+type stalledEndpointBody struct {
+	entered chan struct{}
+	release chan struct{}
+	read    sync.Once
+	close   sync.Once
+	reader  io.Reader
+}
+
+type observedEndpointBody struct {
+	io.ReadCloser
+	entered chan struct{}
+	once    sync.Once
+}
+
+func (b *observedEndpointBody) Read(p []byte) (int, error) {
+	b.once.Do(func() { close(b.entered) })
+	return b.ReadCloser.Read(p)
+}
+
+func TestEndpointCancelledHTTPBodyInterruptsTransport(t *testing.T) {
+	p := tenant.Principal{ID: "00000000-0000-0000-0000-000000000001", TenantID: "00000000-0000-0000-0000-000000000002", Kind: tenant.Person}
+	ctx, cancel := context.WithCancel(tenant.WithPrincipal(t.Context(), p))
+	defer cancel()
+	entered := make(chan struct{})
+	prepared := make(chan struct{}, 1)
+	handler := workorders.EndpointPrepared(nil, "work_orders.write", false, 200, func(r *http.Request, _ tenant.Principal) (*http.Request, error) {
+		prepared <- struct{}{}
+		return nil, workorders.Fail(400, "preparation should not run")
+	}, nil)
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		r.Body = &observedEndpointBody{ReadCloser: r.Body, entered: entered}
+		handler(w, r.WithContext(ctx))
+	}))
+	defer server.Close()
+	conn, err := net.DialTimeout("tcp", server.Listener.Addr().String(), 10*time.Second)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer conn.Close() // Unblock server cleanup even if a regression stalls input.
+	if err := conn.SetDeadline(time.Now().Add(10 * time.Second)); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := io.WriteString(conn, "POST /endpoint HTTP/1.1\r\nHost: localhost\r\nContent-Length: 100\r\nConnection: close\r\n\r\n{"); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case <-entered:
+	case <-time.After(10 * time.Second):
+		t.Fatal("transport read not entered")
+	}
+	cancel()
+	response, err := http.ReadResponse(bufio.NewReader(conn), nil)
+	if err != nil {
+		t.Fatalf("cancelled transport did not return a response: %v", err)
+	}
+	defer response.Body.Close()
+	raw, err := io.ReadAll(response.Body)
+	if err != nil || response.StatusCode != http.StatusRequestTimeout || !strings.Contains(string(raw), "request body read timed out") {
+		t.Fatalf("wrong transport cancellation result: status=%d error=%v body=%s", response.StatusCode, err, raw)
+	}
+	select {
+	case <-prepared:
+		t.Fatal("stalled transport reached preparation")
+	default:
+	}
+}
+
+type deadlineEndpointRecorder struct {
+	*httptest.ResponseRecorder
+	deadlines []time.Time
+}
+
+func (w *deadlineEndpointRecorder) SetReadDeadline(deadline time.Time) error {
+	w.deadlines = append(w.deadlines, deadline)
+	return nil
+}
+
+func (b *stalledEndpointBody) Read(p []byte) (int, error) {
+	b.read.Do(func() { close(b.entered) })
+	<-b.release
+	return b.reader.Read(p)
+}
+
+func (b *stalledEndpointBody) Close() error {
+	b.close.Do(func() { close(b.release) })
+	return nil
+}
+
+func TestEndpointStalledBodyHoldsNoTenantFence(t *testing.T) {
+	reset(t)
+	p := makePrincipal(t, "stalled-body", "person", "Owner", []string{"admin"})
+	for _, prepared := range []bool{false, true} {
+		t.Run(map[bool]string{false: "ordinary", true: "prepared"}[prepared], func(t *testing.T) {
+			body := &stalledEndpointBody{entered: make(chan struct{}), release: make(chan struct{}), reader: strings.NewReader(`{"value":"complete"}`)}
+			r := httptest.NewRequest(http.MethodPost, "/endpoint", nil)
+			r.Body = body
+			r = r.WithContext(tenant.WithPrincipal(r.Context(), p))
+			rec := httptest.NewRecorder()
+			fn := func(r *http.Request, _ pgx.Tx, _ tenant.Principal) (any, error) {
+				var in struct {
+					Value string `json:"value"`
+				}
+				if err := workorders.Decode(r, &in); err != nil {
+					return nil, err
+				}
+				return in, nil
+			}
+			handler := workorders.Endpoint(appPool, "work_orders.write", false, 200, fn)
+			if prepared {
+				handler = workorders.EndpointPrepared(appPool, "work_orders.write", false, 200, func(r *http.Request, _ tenant.Principal) (*http.Request, error) {
+					return r, nil
+				}, fn)
+			}
+			done := make(chan struct{})
+			go func() { defer close(done); handler(rec, r) }()
+			defer func() {
+				_ = body.Close()
+				select {
+				case <-done:
+				case <-time.After(10 * time.Second):
+					t.Error("endpoint did not finish after body release")
+				}
+			}()
+			select {
+			case <-body.entered:
+			case <-time.After(10 * time.Second):
+				t.Fatal("endpoint never reached body read")
+			}
+			tx, err := adminPool.Begin(t.Context())
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer tx.Rollback(context.Background())
+			if _, err := tx.Exec(t.Context(), `SELECT id FROM tenants WHERE id=$1 FOR NO KEY UPDATE NOWAIT`, p.TenantID); err != nil {
+				t.Fatalf("stalled input holds tenant write fence: %v", err)
+			}
+			if err := tx.Rollback(t.Context()); err != nil {
+				t.Fatal(err)
+			}
+			_ = body.Close()
+			select {
+			case <-done:
+			case <-time.After(10 * time.Second):
+				t.Fatal("endpoint did not complete")
+			}
+			if rec.Code != 200 || !strings.Contains(rec.Body.String(), `"value":"complete"`) {
+				t.Fatalf("body was not replayed to handler: %d %s", rec.Code, rec.Body.String())
+			}
+		})
+	}
+}
+
+func TestProjectQualifiedResolvePreservesLegacyLadder(t *testing.T) {
+	var p tenant.Principal
+	var project string
+	prefsFixture(t, func(tx pgx.Tx, who tenant.Principal) error {
+		p = who
+		if err := tx.QueryRow(t.Context(), `INSERT INTO nodes(tenant_id,kind_id,key,title) SELECT $1,id,'LEGACY-1','Legacy project' FROM node_kinds WHERE slug='project' RETURNING id::text`, p.TenantID).Scan(&project); err != nil {
+			return err
+		}
+		eu := "eu"
+		_, err := modelprefs.SaveScope(t.Context(), tx, p, modelprefs.Scope{Level: "project", ProjectID: &project, Residency: &eu})
+		return err
+	})
+	path := "/api/models/resolve?role=review-gate&author_family=openai&harness=claude"
+	profiles := decode[[]Profile](t, &p, http.MethodGet, "/api/models", "", http.StatusOK)
+	minimalAccount(t, p, profileBySlug(profiles, "claude-fable-xhigh"))
+	legacy := decode[Resolution](t, &p, http.MethodGet, path, "", 200)
+	if legacy.Profile == nil || legacy.CommandTemplate == "" || legacy.OwnerRequired {
+		t.Fatal("fixture must have a runnable Automatic review")
+	}
+	// Models v2 qualifies every route by residency (design c1), so the project's
+	// EU floor now holds review too: no EU account means no reviewer.
+	qualified := decode[struct {
+		Resolution
+		Trace PreferenceTrace `json:"trace"`
+	}](t, &p, http.MethodGet, path+"&project_id="+project, "", 200)
+	if qualified.Profile != nil || !qualified.OwnerRequired || qualified.CommandTemplate != "" {
+		t.Fatalf("project residency did not hold the review route: %+v", qualified.Resolution)
+	}
+	if qualified.Trace.PersonID == nil || *qualified.Trace.PersonID != p.ID || qualified.Trace.Residency.Value != "eu" {
+		t.Fatalf("project residency evidence lost: %+v", qualified.Trace)
+	}
+	placement := decode[struct {
+		WorkResolution
+		Preference PreferenceDecision `json:"preference"`
+	}](t, &p, http.MethodGet, path+"&project_id="+project+"&mode=placement", "", 200)
+	if placement.Preference.Role != "review-gate" || placement.Trace.Residency.Value != "eu" || placement.CommandTemplate != "" || !placement.OwnerRequired {
+		t.Fatalf("explicit placement must enforce managed-review account requirements: %+v", placement)
+	}
+}
+
+// Risk: disabled history beyond the 512-profile bound fails harness-filtered
+// resolution, although live routing bounds only the enabled catalog.
+func TestResolveHarnessFilterIgnoresDisabledHistoryBound(t *testing.T) {
+	var p tenant.Principal
+	prefsFixture(t, func(tx pgx.Tx, who tenant.Principal) error {
+		p = who
+		return nil
+	})
+	profiles := decode[[]Profile](t, &p, http.MethodGet, "/api/models", "", http.StatusOK)
+	fable := profileBySlug(profiles, "claude-fable-xhigh")
+	minimalAccount(t, p, fable)
+	var total, enabled int
+	inRegistry(t, p, func(tx pgx.Tx) error {
+		if _, err := tx.Exec(t.Context(), `INSERT INTO model_profiles(tenant_id,slug,version,harness,family,model,effort,tier,enabled)
+			SELECT $1,'disabled-history-'||n,'1','claude','anthropic','claude-opus-4','high','strong',false
+			FROM generate_series(1,513) n`, p.TenantID); err != nil {
+			return err
+		}
+		return tx.QueryRow(t.Context(), `SELECT count(*),count(*) FILTER (WHERE enabled) FROM model_profiles`).Scan(&total, &enabled)
+	})
+	if total <= 512 || enabled == 0 || enabled > 512 {
+		t.Fatalf("fixture must exceed the bound only through disabled history: total %d, enabled %d", total, enabled)
+	}
+	path := "/api/models/resolve?role=review-gate&author_family=openai"
+	filtered := decode[Resolution](t, &p, http.MethodGet, path+"&harness=claude", "", http.StatusOK)
+	if filtered.Profile == nil || filtered.Profile.ID != fable.ID || filtered.CommandTemplate == "" {
+		t.Fatalf("harness-filtered resolve lost its enabled route: %+v", filtered)
+	}
+	unfiltered := decode[Resolution](t, &p, http.MethodGet, path, "", http.StatusOK)
+	if unfiltered.Profile == nil || unfiltered.Profile.ID != fable.ID || unfiltered.CommandTemplate == "" {
+		t.Fatalf("unfiltered resolve lost its enabled route: %+v", unfiltered)
+	}
+	status, body := call(t, &p, http.MethodGet, "/api/models/resolve?role=scout&harness=cursor", "")
+	if status != http.StatusBadRequest || !strings.Contains(string(body), "role and harness combination is unsupported") {
+		t.Fatalf("harness outside the role's enabled routes: %d %s", status, body)
+	}
+}
+
+// Risk: a harness that only a project rule brings into the role's routes is
+// refused as unsupported, although resolution for that project runs it.
+func TestResolveHarnessFilterIncludesProjectRules(t *testing.T) {
+	admin, _ := boardFixture(t)
+	var project string
+	if err := db.InTenant(dbtest.Seed(t.Context()), appPool, admin.TenantID, func(tx pgx.Tx) error {
+		return tx.QueryRow(t.Context(), `INSERT INTO nodes(tenant_id,kind_id,key,title) SELECT $1,id,'PIN-1','Pinned project' FROM node_kinds WHERE slug='project' RETURNING id::text`, admin.TenantID).Scan(&project)
+	}); err != nil {
+		t.Fatal(err)
+	}
+	boardDecode[boardWriteResult](t, boardCall(t, admin, "PUT", "/api/model-preferences/orders/other/first?for=default", map[string]any{"rank": []string{"openai:sol"}, "not": []string{}, "revision": 0}, ""), 200)
+	inRegistry(t, admin, func(tx pgx.Tx) error {
+		_, err := tx.Exec(t.Context(), `INSERT INTO model_rules(tenant_id,scope,project_id,column_key,line,lock,why,set_by) VALUES($1,'project',$2,'other','anthropic:opus','top','Project pins Opus',$3)`, admin.TenantID, project, admin.ID)
+		return err
+	})
+	opus := map[string]bool{}
+	for _, profile := range decode[[]Profile](t, &admin, http.MethodGet, "/api/models", "", http.StatusOK) {
+		if profile.Enabled && profile.Harness == "claude" && profile.Family == "anthropic" && strings.Contains(profile.Model, "opus") {
+			minimalAccount(t, admin, profile)
+			opus[profile.ID] = true
+		}
+	}
+	if len(opus) == 0 {
+		t.Fatal("fixture needs an enabled Claude Opus route")
+	}
+	path := "/api/models/resolve?role=build&harness=claude"
+	status, body := call(t, &admin, http.MethodGet, path, "")
+	if status != http.StatusBadRequest || !strings.Contains(string(body), "role and harness combination is unsupported") {
+		t.Fatalf("fixture Default must offer no Claude route without the project: %d %s", status, body)
+	}
+	pinned := decode[Resolution](t, &admin, http.MethodGet, path+"&project_id="+project, "", http.StatusOK)
+	if pinned.Profile == nil || !opus[pinned.Profile.ID] || pinned.CommandTemplate == "" || pinned.OwnerRequired {
+		t.Fatalf("project-pinned Claude route was not resolved: %+v", pinned)
+	}
+}
+
+func TestEndpointBodyDeadlineBeforePreparation(t *testing.T) {
+	reset(t)
+	p := makePrincipal(t, "body-deadline", "person", "Owner", []string{"admin"})
+	body := &stalledEndpointBody{entered: make(chan struct{}), release: make(chan struct{}), reader: strings.NewReader(`{}`)}
+	deadline := time.Now().Add(15 * time.Second)
+	ctx, cancel := context.WithDeadline(tenant.WithPrincipal(t.Context(), p), deadline)
+	defer cancel()
+	r := httptest.NewRequest(http.MethodPost, "/endpoint", nil).WithContext(ctx)
+	r.Body = body
+	rec := &deadlineEndpointRecorder{ResponseRecorder: httptest.NewRecorder()}
+	prepared := make(chan struct{}, 1)
+	handler := workorders.EndpointPrepared(appPool, "work_orders.write", false, 200, func(r *http.Request, _ tenant.Principal) (*http.Request, error) {
+		prepared <- struct{}{}
+		return r, nil
+	}, func(r *http.Request, _ pgx.Tx, _ tenant.Principal) (any, error) {
+		var in map[string]any
+		return in, workorders.Decode(r, &in)
+	})
+	done := make(chan struct{})
+	go func() { defer close(done); handler(rec, r) }()
+	defer func() {
+		_ = body.Close()
+		select {
+		case <-done:
+		case <-time.After(10 * time.Second):
+			t.Error("endpoint did not finish after body release")
+		}
+	}()
+	select {
+	case <-body.entered:
+	case <-time.After(10 * time.Second):
+		t.Fatal("body read not entered")
+	}
+	cancel() // Deterministically expire the input phase; no wall-clock threshold.
+	select {
+	case <-done:
+	case <-time.After(10 * time.Second):
+		t.Fatal("cancelled input did not finish")
+	}
+	if rec.Code != http.StatusRequestTimeout {
+		t.Fatalf("wrong body timeout status: %d %s", rec.Code, rec.Body.String())
+	}
+	// A failed read keeps its transport deadline (AEON-652): the interrupt is
+	// the last deadline call, never followed by a clear.
+	if len(rec.deadlines) != 2 || !rec.deadlines[0].Equal(deadline) || !rec.deadlines[1].Equal(time.Unix(1, 0)) {
+		t.Fatalf("transport read deadline not installed and interrupted, or cleared after the failed read: %v", rec.deadlines)
+	}
+	select {
+	case <-prepared:
+		t.Fatal("preparation ran before body arrived")
+	default:
+	}
+	if !errors.Is(ctx.Err(), context.Canceled) {
+		t.Fatal("test did not cancel input")
+	}
+}
+
+func TestExplicitPlacementModeSelectsManagedReview(t *testing.T) {
+	reset(t)
+	p := makePrincipal(t, "explicit-placement", "person", "Owner", []string{"admin"})
+	got := decode[struct {
+		WorkResolution
+		Preference PreferenceDecision `json:"preference"`
+	}](t, &p, http.MethodGet, "/api/models/resolve?role=review-gate&author_family=openai&harness=claude&mode=placement", "", http.StatusOK)
+	// Models v2 reviews are the Review situation of the work's row (Default here).
+	if got.Preference.Role != "review-gate" || got.Preference.Kind.Slug != "other" || got.Trace.Situation != "review" || got.CommandTemplate != "" || !got.OwnerRequired || got.Profile != nil {
+		t.Fatalf("explicit placement bypassed managed-review requirements: %+v", got)
+	}
+}
+
+// The closed board an explicit placement request initializes stays at revision
+// zero. Review dispatch reads the same Models board and stays Automatic.
+func TestClosedBoardAnswersExplicitPlacementButNotReviewDispatch(t *testing.T) {
+	reset(t)
+	p := makePrincipal(t, "closed-board", "person", "Owner", []string{"admin"})
+	got := decode[struct {
+		WorkResolution
+		Preference PreferenceDecision `json:"preference"`
+	}](t, &p, http.MethodGet, "/api/models/resolve?role=review-gate&author_family=openai&harness=claude&mode=placement", "", http.StatusOK)
+	if got.Preference.Kind.Slug != "other" || got.Trace.Situation != "review" || got.Trace.PreferenceOf == nil {
+		t.Fatalf("explicit placement did not read the initialized board: %+v", got.Trace)
+	}
+	var revision int
+	var review ReviewRoute
+	if err := db.InTenant(dbtest.Seed(t.Context()), appPool, p.TenantID, func(tx pgx.Tx) error {
+		if err := tx.QueryRow(t.Context(), `SELECT revision FROM model_pref_profiles WHERE scope='workspace'`).Scan(&revision); err != nil {
+			return err
+		}
+		var err error
+		review, err = ResolveReviewFor(t.Context(), tx, p, WorkQuery{AuthorFamily: "openai"}, time.Now())
+		return err
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if revision != 0 {
+		t.Fatalf("fixture is not the closed initializer: revision %d", revision)
+	}
+	// Since Models v2 every dispatch reads Models; with no saved Review order
+	// review stays Automatic (the former legacy order), untouched by the read.
+	if review.Trace.PreferenceOf == nil || review.Trace.OrderMode != reviewOrderLegacy {
+		t.Fatalf("closed board review dispatch is not Automatic through Models: %+v", review.Trace)
+	}
+}
+
+func TestEndpointOversizedBodyBeforePreparation(t *testing.T) {
+	p := tenant.Principal{ID: "00000000-0000-0000-0000-000000000001", TenantID: "00000000-0000-0000-0000-000000000002", Kind: tenant.Person}
+	r := httptest.NewRequest(http.MethodPost, "/endpoint", strings.NewReader(strings.Repeat(" ", (1<<20)+1)))
+	r = r.WithContext(tenant.WithPrincipal(r.Context(), p))
+	rec := httptest.NewRecorder()
+	prepared := false
+	workorders.EndpointPrepared(nil, "work_orders.write", false, 200, func(r *http.Request, _ tenant.Principal) (*http.Request, error) {
+		prepared = true
+		return nil, workorders.Fail(400, "preparation should not run")
+	}, nil)(rec, r)
+	if prepared || rec.Code != http.StatusRequestEntityTooLarge || !strings.Contains(rec.Body.String(), "request body too large") {
+		t.Fatalf("oversized input reached preparation: prepared=%v status=%d body=%s", prepared, rec.Code, rec.Body.String())
+	}
+}
+
+func TestInvalidResolutionModeDoesNotPrepareCatalog(t *testing.T) {
+	reset(t)
+	p := makePrincipal(t, "invalid-mode", "person", "Owner", []string{"admin"})
+	before := catalogSetupState(t, p)
+	for _, mode := range []string{"", "unknown"} {
+		status, body := call(t, &p, http.MethodGet, "/api/models/resolve?role=build&mode="+mode, "")
+		if status != http.StatusBadRequest || !strings.Contains(string(body), "invalid resolution mode") {
+			t.Fatalf("wrong mode refusal: %d %s", status, body)
+		}
+		if after := catalogSetupState(t, p); after != before {
+			t.Fatal("invalid mode persisted catalog setup")
+		}
+	}
+}

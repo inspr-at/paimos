@@ -81,7 +81,7 @@ onMounted(() => { void projects.load() })
       </select>
       <div v-if="preset" class="preset-preview">
         <p class="hint">{{ preset.description }} Preview these scopes; apply them in the first key sheet.</p>
-        <p class="mono preset-scopes">{{ presetScopes(preset.scopes, access.registry).join(', ') }}</p>
+        <p v-if="preset.scopes !== 'all'" class="mono preset-scopes">{{ presetScopes(preset.scopes, access.registry).join(', ') }}</p>
       </div>
       <label for="agent-description">Description <span class="optional">optional</span></label>
       <textarea id="agent-description" v-model="description" class="field" rows="2" maxlength="1000" :disabled="busy" placeholder="What this agent does" @input="descriptionEdited = true" />

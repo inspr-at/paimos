@@ -17,7 +17,6 @@ import (
 	"github.com/inspr-at/paimos/internal/capacity"
 	"github.com/inspr-at/paimos/internal/db"
 	"github.com/inspr-at/paimos/internal/dbtest"
-	"github.com/inspr-at/paimos/internal/modelprefs"
 	"github.com/inspr-at/paimos/internal/modelregistry"
 	"github.com/inspr-at/paimos/internal/tenant"
 	"github.com/jackc/pgx/v5"
@@ -45,7 +44,7 @@ type placementEUEvidence struct{ expires time.Time }
 
 func (f placementEUEvidence) ResidencyClass(_ context.Context, _ pgx.Tx, a agentaccounts.Account, _ string) (string, string, *time.Time, error) {
 	class := "any"
-	if a.Harness == "grok" {
+	if a.Harness == "gemini" {
 		class = "eu"
 	}
 	return class, "fixture-proof", &f.expires, nil
@@ -58,21 +57,23 @@ func TestPlanningLinkedViewerAndCanonicalAssignee(t *testing.T) {
 	d := insertPerson(t, w.admin.TenantID, "Other assignee")
 	operator := tenant.Principal{ID: w.agent, TenantID: w.admin.TenantID, Kind: tenant.Agent}
 	dbtest.BindRole(t, testDB, operator.TenantID, operator.ID, "admin")
-	var grok string
+	// The person's EU pick needs tools: Grok has none in PAIMOS (Models v2
+	// skips it for build work), so the EU route is a Gemini one.
+	var gemini string
 	if err := db.InTenant(dbtest.Seed(t.Context()), appPool, w.admin.TenantID, func(tx pgx.Tx) error {
 		if _, err := tx.Exec(t.Context(), `UPDATE principals SET linked_to=$2 WHERE id=$1`, alias.ID, w.admin.ID); err != nil {
 			return err
 		}
-		if err := tx.QueryRow(t.Context(), `INSERT INTO model_profiles(tenant_id,slug,version,harness,family,model,effort,tier) VALUES($1,'grok-pref-high','1','grok','xai','grok-4.7','high','strong') RETURNING id::text`, w.admin.TenantID).Scan(&grok); err != nil {
+		if err := tx.QueryRow(t.Context(), `INSERT INTO model_profiles(tenant_id,slug,version,harness,family,model,effort,tier) VALUES($1,'gemini-pref-high','1','gemini','google','gemini-2.5-pro','high','strong') RETURNING id::text`, w.admin.TenantID).Scan(&gemini); err != nil {
 			return err
 		}
-		if _, err := tx.Exec(t.Context(), `INSERT INTO model_prices(tenant_id,model,version,input_usd_per_million,output_usd_per_million,cached_input_usd_per_million) VALUES($1,'grok-4.7',100,1,1,1)`, w.admin.TenantID); err != nil {
+		if _, err := tx.Exec(t.Context(), `INSERT INTO model_prices(tenant_id,model,version,input_usd_per_million,output_usd_per_million,cached_input_usd_per_million) VALUES($1,'gemini-2.5-pro',100,1,1,1)`, w.admin.TenantID); err != nil {
 			return err
 		}
 		schedule := capacity.DefaultSchedule()
 		schedule.Override, schedule.Reserve = "sprint", capacity.ReserveOff
 		raw, _ := json.Marshal(schedule)
-		for _, h := range []string{"grok", "claude", "codex"} {
+		for _, h := range []string{"gemini", "claude", "codex"} {
 			var account string
 			if err := tx.QueryRow(t.Context(), `INSERT INTO agent_accounts(tenant_id,account_key,harness,daemon_id,registered_by_principal_id,label,last_probe_at,last_probe_ok,last_daemon_generation,capacity_owner) VALUES($1,$2,$2,'placement-runner',$3,$2,now(),true,'fixture',$4) RETURNING id::text`, w.admin.TenantID, h, w.agent, w.admin.ID).Scan(&account); err != nil {
 				return err
@@ -84,16 +85,13 @@ func TestPlanningLinkedViewerAndCanonicalAssignee(t *testing.T) {
 				return err
 			}
 		}
-		eu := "eu"
-		scope, err := modelprefs.SaveScope(t.Context(), tx, w.admin, modelprefs.Scope{Level: "person", PersonID: &w.admin.ID, Residency: &eu})
-		if err != nil {
+		// The person's own Models row for the kind, with EU residency (a
+		// pinned matrix cell and an EU person scope before migration 1275).
+		if err := dbtest.PersonModelsOrder(t.Context(), tx, w.admin.TenantID, w.admin.ID, "backend", "first", "default", gemini); err != nil {
 			return err
 		}
-		kind, _, err := modelprefs.LookupKind(t.Context(), tx, "backend", "")
-		if err != nil {
-			return err
-		}
-		return modelprefs.PutRow(t.Context(), tx, w.admin, scope, kind.ID, modelprefs.Row{Cells: map[string]modelprefs.Cell{"normal": {Mode: "pinned", ProfileID: grok}}})
+		_, err := tx.Exec(t.Context(), `UPDATE model_pref_profiles SET residency='eu' WHERE person_id=$1`, w.admin.ID)
+		return err
 	}); err != nil {
 		t.Fatal(err)
 	}
@@ -106,8 +104,8 @@ func TestPlanningLinkedViewerAndCanonicalAssignee(t *testing.T) {
 		tickets = append(tickets, placementNode(t, w, fmt.Sprintf("LINK-%d", i+1), fields))
 	}
 	for i := range 5 {
-		n := w.node(t, fmt.Sprintf("GROKHIST-%d", i+1), "work", w.root.ID, "done", nil)
-		w.session(t, n.ID, "grok", "grok-4.7", "high", "grok-4.7", 60, 1_000_000, 0, 0, "api", "")
+		n := w.node(t, fmt.Sprintf("GEMINIHIST-%d", i+1), "work", w.root.ID, "done", nil)
+		w.session(t, n.ID, "gemini", "gemini-2.5-pro", "high", "gemini-2.5-pro", 60, 1_000_000, 0, 0, "api", "")
 	}
 	if _, err := testDB.Admin.Exec(t.Context(), `UPDATE harness_sessions SET created_at='2026-09-30T12:00:00Z',stopped_at='2026-09-30T13:00:00Z' WHERE tenant_id=$1`, w.admin.TenantID); err != nil {
 		t.Fatal(err)
@@ -134,8 +132,12 @@ func TestPlanningLinkedViewerAndCanonicalAssignee(t *testing.T) {
 		}
 		for _, i := range []int{0, 1, 2, 4} {
 			v := byID[tickets[i].ID]
-			if v == nil || v.Route == nil || v.Route.Profile != "grok-pref-high" || v.Route.SetBy != "person" || !v.Route.Pinned || v.Route.Effort != "high" || v.Tokens.Calibration.TokensPerHour != 1_000_000 || *v.Tokens.Estimated != 2_000_000 || *v.Cost.ListEstimated != "2.000000" {
-				t.Fatalf("canonical You preview %d on %s: %+v", i, order, v)
+			// Models has picks, not matrix modes: the person's own row is not "pinned".
+			if v == nil || v.Route == nil || v.Route.Profile != "gemini-pref-high" || v.Route.SetBy != "person" || v.Route.Pinned || v.Route.Effort != "high" || v.Tokens.Calibration.TokensPerHour != 1_000_000 || *v.Tokens.Estimated != 2_000_000 || *v.Cost.ListEstimated != "2.000000" {
+				if v == nil || v.Route == nil {
+					t.Fatalf("canonical You preview %d on %s: %+v", i, order, v)
+				}
+				t.Fatalf("canonical You preview %d on %s: route %+v calibration %+v estimated %v cost %+v", i, order, *v.Route, v.Tokens.Calibration, v.Tokens.Estimated, v.Cost)
 			}
 			if !reflect.DeepEqual(v, byID[tickets[4].ID]) {
 				t.Fatalf("assignee fallback differs from canonical assignment %d", i)
@@ -222,16 +224,19 @@ func TestPlanningEmptyMatrixLegacyEqualityAndSecurityChange(t *testing.T) {
 			fields := map[string]any{"area": area, "route_role": role, "complexity": "M", "estimate_hours": 2}
 			n := placementNode(t, w, fmt.Sprintf("EQUAL-%d", i*5+j+1), fields)
 			e := expected{node: n, area: area, role: role, rate: 5_000_000, cost: 10}
-			known := i >= 4
+			// full-stack is not a default kind (approved board). A stored value on a
+			// fresh tenant is not a column, so it keeps the unknown-area contract.
+			// Tenants that still have the kind are covered by the historical test.
+			known := i >= 4 && area != "full-stack"
 			switch {
 			case role == "":
 			case !known:
 				e.gap = "area"
 			case role == "review-gate":
 				e.gap = "review_gate"
-			case role == "mechanical":
-				e.gap = "registry"
-			case role == "build":
+			case role == "build" || role == "mechanical":
+				// Quick jobs has no fast model here, so mechanical work runs
+				// the Default (approved Models v2 design c1).
 				e.profile, e.rate, e.cost = "claude-opus-high", 8_000_000, 16
 			case role == "build-hard":
 				e.profile, e.rate, e.cost = "codex-astra-xhigh", 2_000_000, 4
@@ -401,6 +406,30 @@ func TestPlanningEmptyMatrixLegacyEqualityAndSecurityChange(t *testing.T) {
 		return nil
 	}); err != nil {
 		t.Fatal(err)
+	}
+}
+
+// A fresh board leaves a stored full-stack area on the unknown-area path.
+// Inserting the kind migration 1104 gave existing tenants restores the
+// legacy build route. Both halves use the same numeric checks as the matrix.
+func TestPlanningHistoricalFullStackKindKeepsLegacyRoute(t *testing.T) {
+	w := planningSetup(t)
+	placementCalibration(t, w)
+	n := placementNode(t, w, "STACK-1", map[string]any{"area": "full-stack", "route_role": "build", "complexity": "M", "estimate_hours": 2})
+	path := "/api/nodes?within=" + w.root.ID + "&q=STACK-1&limit=10"
+	fresh := planningOf(t, w.admin, path)[n.Key]
+	if fresh == nil || fresh.Route != nil || fresh.RouteGap != "area" || fresh.Tokens.Calibration == nil || !fresh.Tokens.Calibration.AnyRoute || fresh.Tokens.Calibration.TokensPerHour != 5_000_000 || fresh.Tokens.Estimated == nil || *fresh.Tokens.Estimated != 10_000_000 || fresh.Cost == nil || fresh.Cost.ListEstimated == nil || *fresh.Cost.ListEstimated != "10.000000" {
+		t.Fatalf("fresh full-stack picked a column: %+v", fresh)
+	}
+	if err := db.InTenant(dbtest.Seed(t.Context()), appPool, w.admin.TenantID, func(tx pgx.Tx) error {
+		_, err := tx.Exec(t.Context(), `INSERT INTO work_kinds(tenant_id,slug,label,hint,position) VALUES($1,'full-stack','Full stack','both ends in one change',3)`, w.admin.TenantID)
+		return err
+	}); err != nil {
+		t.Fatal(err)
+	}
+	kept := planningOf(t, w.admin, path)[n.Key]
+	if kept == nil || kept.RouteGap != "" || kept.Route == nil || kept.Route.Profile != "claude-opus-high" || kept.Route.SetBy != "" || kept.Tokens.Calibration == nil || kept.Tokens.Calibration.AnyRoute || kept.Tokens.Calibration.TokensPerHour != 8_000_000 || kept.Tokens.Estimated == nil || *kept.Tokens.Estimated != 16_000_000 || kept.Cost == nil || kept.Cost.ListEstimated == nil || *kept.Cost.ListEstimated != "16.000000" {
+		t.Fatalf("historical full-stack kind lost its route: %+v", kept)
 	}
 }
 

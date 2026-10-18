@@ -1,44 +1,163 @@
 <!-- SPDX-License-Identifier: AGPL-3.0-only -->
 <script setup lang="ts">
+import { displayLanguage } from '../../lib/displayLanguage'
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { APIError } from '../../lib/api'
-import { messageStatuses, type MessageStatus, type ProjectMessage } from '../../lib/agents'
+import { cancelSessionMessage, chatThreadForSession, chatThreadMessages, markChatSeen, messageStatuses, sendChatMessage, type MessageStatus, type ProjectMessage } from '../../lib/agents'
 import { readSessionMarker, writeSessionMarker } from '../../lib/agentRows'
 import { useAgents, type SessionView } from '../../stores/agents'
 import { useSession } from '../../stores/session'
+import { toast } from '../../lib/toast'
 import AppIcon from '../AppIcon.vue'
 import KeyCap from '../KeyCap.vue'
 import SessionMessages from './SessionMessages.vue'
-import SessionRequests from './SessionRequests.vue'
+import ChatReferences from './ChatReferences.vue'
+import SessionQuestion from './SessionQuestion.vue'
+import type { Question } from '../../lib/decisionDeskApi'
+import ChatLiveBlock from './ChatLiveBlock.vue'
+import { applyLiveFrame, chatFinals, chatSeenIds, chatSeenMark, chatSent, followChatLive, liveQueue, liveWorking, offeredSteer, rebaseTurn, sessionReadMark, settleStop, settled, type LiveSource, type LiveTurn, type SendTransport } from './chatLive'
 import { collapseMessages } from './sessionMessages'
-import { awaitsInboxHook, hookDeliveryNotice, hookNoticeVisible, hookReceipts, keepFailedReadMark, loadReadMark, markerFromServer, nearBottom, preferReadMark, queueReadMark, readMarkFlushDelay, receiptQueryBatches, saveReadMark, sessionBoundSends, unreadGroups, type ReadMark } from './sessionChat'
+import { inboxBindingReason, advanceReceipt, chatCapability, isQueuedMessage, chatSendLevel, chatWords, awaitsInboxHook, hookNoticeVisible, hookReceipts, keepFailedReadMark, loadReadMark, markerFromServer, nearBottom, preferReadMark, queueReadMark, readMarkFlushDelay, receiptQueryBatches, saveReadMark, sessionBoundSends, unreadGroups, type ReadMark } from './sessionChat'
 
 // The Messages tab of the session panel (AEON-273): the thread with a read
 // watermark per viewer, a pinned bottom with a jump button, and the composer.
-const props = defineProps<{ view: SessionView; now: number; canWrite: boolean; active: boolean }>()
-const emit = defineEmits<{ unread: [count: number] }>()
+const props = defineProps<{ view: SessionView; now: number; canWrite: boolean; active: boolean; interruptBlock: string; questions?: Question[]; questionReadable?: boolean; questionFocus?: string }>()
+const emit = defineEmits<{ unread: [count: number]; interrupt: [] }>()
 const agents = useAgents()
 const identity = useSession()
+const words = computed(() => chatWords[displayLanguage()])
 const me = computed(() => identity.identity?.principal.id ?? '')
 const person = computed(() => identity.identity?.principal.kind === 'person')
 const s = computed(() => props.view.session)
-const messages = computed(() => agents.thread(s.value))
+const bindingReason = computed(() => ended.value ? '' : inboxBindingReason(s.value.inbox_binding_error, displayLanguage()))
+// Retain answered cards for this visit. The shared projection alone supplies
+// open questions; a card rereads its own record when it leaves that projection.
+const seenQuestions = ref<Question[]>([])
+watch(() => [identity.identity?.tenant.id, me.value, s.value.id], () => { seenQuestions.value = [] }, { flush: 'sync' })
+watch(() => [props.questions, props.questionReadable] as const, ([questions, readable]) => {
+  if (readable === false) { seenQuestions.value = []; return }
+  const known = new Map(seenQuestions.value.map(question => [question.id, question]))
+  for (const question of questions ?? []) known.set(question.id, question)
+  seenQuestions.value = [...known.values()].slice(-20)
+}, { deep: true, immediate: true })
+async function focusQuestion() {
+  if (!props.active || !props.questionFocus) return
+  await nextTick()
+  const card = document.getElementById(`question-${props.questionFocus}`)
+  if (!card || !root.value?.contains(card)) return
+  const area = card.closest<HTMLElement>('.thread-scroll')
+  if (area) area.scrollTop += card.getBoundingClientRect().top - area.getBoundingClientRect().top
+  card.focus({ preventScroll: true })
+}
+watch(() => [props.active, props.questionFocus, seenQuestions.value.length], () => { void focusQuestion() })
+const localSends = ref<ProjectMessage[]>([])
+// In-flight optimistic sends belong to the session they were addressed to.
+// A late failure for A must not leave B looking busy (S8-013).
+const sending = computed(() => localSends.value.some(message => message.optimistic && !message.send_failed && message.recipient_session_id === s.value.id))
+const statuses = ref<Record<string, MessageStatus>>({})
+// Saved chat-native messages of the bound chat thread (AEON-1071): the agent's
+// replies and the viewer's replies to them. They are stored only there, never
+// in the project message list.
+const chatMessages = ref<ProjectMessage[]>([])
+let chatThread = ''
+// The bound thread's saved history has been read once. Before that a turn has
+// no baseline: an older saved reply arriving late must not end it.
+let chatBaseline = false
+const messages = computed(() => {
+  if (!me.value) return []
+  const project = agents.thread(s.value)
+  const stored = new Set(project.map(message => message.id))
+  const chat = chatMessages.value.filter(message => (message.sender_session_id === s.value.id || message.recipient_session_id === s.value.id) && !stored.has(message.id))
+  const server = [...project, ...chat].sort((a, b) => a.sent_event_id - b.sent_event_id)
+  const known = new Set(server.map(message => message.id))
+  return [...server, ...localSends.value.filter(message => !known.has(message.id))]
+})
 const address = computed(() => agents.addressOf(s.value.agent_principal_id))
 // A registered address is sent when one exists. Otherwise the recipient is the session's principal.
 const recipient = computed(() => address.value || s.value.agent_principal_id)
-const current = computed(() => collapseMessages(messages.value))
+// A live turn proves the agent is working before the session row catches up.
+const liveTurn = ref<LiveTurn | null>(null)
+const working = computed(() => s.value.activity === 'busy' || liveWorking(liveTurn.value))
+const capability = computed(() => chatCapability(s.value))
+const atPrompt = computed(() => capability.value === 'between' && awaitsInboxHook(s.value))
+const uncertain = ref<Set<string>>(new Set())
+const queuedIds = ref<Set<string>>(new Set())
+const queue = computed(() => messages.value.filter(message => message.sender_principal_id === me.value && !message.cancelled && !statuses.value[message.id]?.cancelled && isQueuedMessage({ ...message, queue_pending: message.queue_pending || queuedIds.value.has(message.id) }, statuses.value[message.id], working.value, atPrompt.value)))
+const threadMessages = computed(() => {
+  const queued = new Set(queue.value.map(message => message.id))
+  return messages.value.filter(message => !message.cancelled && !queued.has(message.id) && !statuses.value[message.id]?.cancelled).sort((a, b) => {
+    // Insert a live queue item when delivery is evidenced. Historical receipt
+    // reads must not reorder already loaded posts or move a reader's anchor.
+    const at = Date.parse((queuedIds.value.has(a.id) && statuses.value[a.id]?.delivered_at) || a.created_at || '')
+    const bt = Date.parse((queuedIds.value.has(b.id) && statuses.value[b.id]?.delivered_at) || b.created_at || '')
+    return Number.isFinite(at) && Number.isFinite(bt) && at !== bt ? at - bt : a.sent_event_id - b.sent_event_id
+  })
+})
+const current = computed(() => collapseMessages(threadMessages.value))
 const ended = computed(() => s.value.phase === 'stopped' || !!s.value.stopped_at || !!s.value.archived_at)
-// Managed sessions (AEON-260) take input only through the Session controls above:
-// no composer and no Reply here.
-const managed = computed(() => s.value.advertised_capabilities.includes('managed_control_v1'))
-// Unmanaged sessions take rename/model requests next to the composer (AEON-225).
+// The steer slot stays in place for the whole session, enabled only while
+// the agent works, so a turn starting or ending never moves the composer.
+const steerAdvertised = computed(() => s.value.advertised_capabilities.includes('steer'))
+const steerOffered = computed(() => !!offeredSteer(capability.value, steerAdvertised.value, 'managed'))
+// The next send's transport decides what the slot offers. A reply to a
+// chat-native message goes to the chat outbox, consumed only between turns:
+// the slot then says so instead of offering a send mode nothing would honour.
+const transport = computed<SendTransport>(() => !editing.value && replyTo.value?.chat_thread ? 'chat' : 'managed')
+const steerMode = computed(() => offeredSteer(capability.value, steerAdvertised.value, transport.value))
+const canSteer = computed(() => working.value && !!steerMode.value)
+const alternative = computed(() => steerMode.value === 'next' ? words.value.next : words.value.now)
+const primaryLabel = computed(() => editing.value ? words.value.save : working.value && capability.value !== 'between' ? words.value.after : words.value.send)
 const unmanaged = computed(() => s.value.management_mode === 'unmanaged')
+// The slot left of the primary action (AEON-1438): Send now, its transport note
+// or Stop and send. It is reserved for the whole session and shows only while a
+// turn runs, so a turn starting or ending never moves the composer.
+const choiceOffered = computed(() => !!steerMode.value || steerOffered.value || capability.value === 'abort')
+// Phones show that choice on a second row, once the person types during a turn.
+// It stays until the draft is sent or cleared; the turn alone never toggles it.
+const twoRow = ref(false)
+// "+" on phones inserts a reference at the caret, never an attachment.
+const referenceAnchor = ref<HTMLElement | null>(null)
+const mac = typeof navigator !== 'undefined' && /Mac|iPhone|iPad/.test(navigator.platform || navigator.userAgent)
 
+// A copy counts toward the pending cap only until the thread has its server id.
+// The id swap can land after the read that already contains it, so both the
+// thread watch and deliver drop it.
+function forgetSettled() {
+  const known = new Set([...agents.thread(s.value), ...chatMessages.value].map(message => message.id))
+  const next = localSends.value.filter(message => !known.has(message.id))
+  if (next.length !== localSends.value.length) localSends.value = next
+}
+watch(() => [...agents.thread(s.value), ...chatMessages.value].map(message => message.id).join(), forgetSettled)
 const draft = ref('')
-const level = ref<'simple' | 'steer'>('simple')
+watch(draft, value => { if (!value.trim()) twoRow.value = false; else if (working.value && choiceOffered.value) twoRow.value = true })
+const editing = ref<ProjectMessage | null>(null)
+const queueBusy = ref(false)
+// A missing navigator.onLine is not a reported outage. Only an explicit false,
+// or a stale/offline session state, closes the composer (streamHealth).
+const browserOnline = () => typeof navigator === 'undefined' || navigator.onLine !== false
+const online = ref(browserOnline())
+const offline = computed(() => !online.value || ['stale', 'offline'].includes(props.view.status?.state ?? ''))
+const noPermission = computed(() => agents.threadState(s.value) === 'forbidden')
 const replyTo = ref<ProjectMessage | null>(null)
-const sending = ref(false)
 const sendError = ref('')
+const historyLoading = ref(false)
+const historyError = ref('')
+const canStop = computed(() => !ended.value && working.value && !props.interruptBlock)
+function interrupted() { if (liveWorking(liveTurn.value)) markStopping(agents.controls[s.value.id]?.id) }
+function chatKeys(event: KeyboardEvent) {
+  if (!props.active || event.key !== 'Escape' || event.repeat || event.defaultPrevented || event.isComposing || event.altKey || event.ctrlKey || event.metaKey) return
+  if (document.querySelector('dialog[open], .floating, .ticket-peek-host')) return
+  if (event.target instanceof HTMLElement && event.target !== document.body && !root.value?.contains(event.target)) return
+  if (editing.value) { event.preventDefault(); event.stopPropagation(); editing.value = null; return }
+  if (replyTo.value) { event.preventDefault(); event.stopPropagation(); replyTo.value = null; return }
+  // The repo keyboard convention takes precedence over the mock: the first
+  // Escape leaves a text field; the next press closes the panel.
+  const target = event.target
+  if (target instanceof HTMLElement && target.closest('input, textarea, select, [contenteditable="true"]')) {
+    event.preventDefault(); event.stopPropagation(); target.blur(); return
+  }
+  // The next Escape reaches the panel close action.
+}
 
 // ---------- Read state ----------
 const mark = ref<ReadMark | null>(null)
@@ -46,17 +165,64 @@ const unread = computed(() => me.value ? unreadGroups(current.value, me.value, m
 const newFrom = ref<string>()
 const newCount = ref(0)
 watch(() => unread.value.length, n => emit('unread', n), { immediate: true })
-function markRead(event: number, id: string) {
+function markRead(event: number, id: string, rows: readonly string[] = [id]) {
   if (holdingMarker()) return
   if (!me.value || !id || !Number.isFinite(event)) return
   if (!mark.value || mark.value.event < event) mark.value = saveReadMark(me.value, s.value.id, event, id)
   if (!person.value || !mark.value) return
+  // A chat-native post is evidence for its thread's read marker only.
+  const seenBefore = seenPending.size
+  if (chatThread) { seenThread = chatThread; for (const seenId of chatSeenIds(messages.value, current.value, rows)) seenPending.add(seenId) }
+  const before = pending?.event ?? -1
+  queueSessionMark(mark.value)
+  // A repeated look at the same post must not postpone a flush that is already waiting.
+  if (flushTimer === undefined || (pending?.event ?? -1) > before || seenPending.size > seenBefore) arm()
+}
+// The furthest event the session's read marker holds, once read this visit.
+let serverEvent: number | undefined
+// The local watermark reaches the session marker only through a loaded
+// project message. A cached mark on reopening may name a message that is not
+// loaded yet, so every thread load tries again.
+function reconcileMark() {
+  const local = mark.value
+  if (!person.value || !local?.id || serverEvent === undefined) return
+  const session = sessionReadMark(local, messages.value)
+  if (!session || session.event <= serverEvent || (pending && pending.event >= session.event)) return
   boundProject = s.value.project_id
   boundSession = s.value.id
-  const before = pending?.event ?? -1
-  pending = queueReadMark(pending, mark.value)
-  // A repeated look at the same post must not postpone a flush that is already waiting.
-  if (flushTimer === undefined || (pending?.event ?? -1) > before) arm()
+  pending = queueReadMark(pending, session)
+  arm()
+}
+watch(() => agents.thread(s.value).map(message => message.id).join(), () => reconcileMark())
+// The session's read marker names only its project messages.
+function queueSessionMark(next: ReadMark) {
+  const session = sessionReadMark(next, messages.value)
+  if (!session || (serverEvent !== undefined && session.event <= serverEvent)) return
+  boundProject = s.value.project_id
+  boundSession = s.value.id
+  pending = queueReadMark(pending, session)
+}
+// Chat-native posts seen on screen, waiting for the same trailing flush.
+const seenPending = new Set<string>()
+let seenThread = ''
+let seenSending = false
+async function flushSeen() {
+  if (seenSending || !seenPending.size || !seenThread || !person.value) return
+  const thread = seenThread, ids = [...seenPending].slice(0, 100)
+  seenSending = true
+  try {
+    await markChatSeen(thread, ids)
+    for (const id of ids) seenPending.delete(id)
+    if (thread === chatThread) chatMessages.value = chatMessages.value.map(message => ids.includes(message.id) ? { ...message, chat_seen: true } : message)
+    if (seenPending.size) arm()
+  } catch { /* They stay queued for the next flush. */ }
+  finally { seenSending = false }
+}
+// A thread change sends what the old thread saw, then starts empty.
+function leaveChatThread(next = '') {
+  void flushSeen()
+  seenPending.clear(); seenThread = ''
+  chatThread = next
 }
 // One trailing timer. Hide and unmount flush immediately. A failed send stays
 // in `pending` and leaves on the next flush, with no toast.
@@ -78,7 +244,7 @@ let anchorTop = 0
 let placeChain: Promise<void> = Promise.resolve()
 const holdingMarker = () => markerHold !== 0 && markerHold === readGeneration
 function arm() {
-  if (!pending || !person.value) return
+  if ((!pending && !seenPending.size) || !person.value) return
   if (flushTimer !== undefined) clearTimeout(flushTimer)
   flushTimer = setTimeout(() => { flushTimer = undefined; void flush() }, readMarkFlushDelay)
 }
@@ -96,6 +262,11 @@ async function sendMark(projectId: string, sessionId: string, viewer: string, ge
   const response = await writeSessionMarker(projectId, sessionId, { last_read_message_id: next.id, last_read_event_id: next.event })
   if (!response.ok || generation !== readGeneration || s.value.id !== sessionId) return response.ok && generation === readGeneration
   const remote = markerFromServer(await response.json())
+  if (generation !== readGeneration || s.value.id !== sessionId || me.value !== viewer) return false
+  serverEvent = Math.max(serverEvent ?? -1, next.event, remote?.event ?? -1)
+  // An observation during the PUT may queue the same project mark again.
+  // Acknowledgement consumes it; a newer observation still waits for its flush.
+  if (pending && pending.event <= serverEvent) pending = null
   if (remote && s.value.id === sessionId && (!mark.value || remote.event > mark.value.event)) {
     mark.value = saveReadMark(viewer, sessionId, remote.event, remote.id, undefined, remote.at)
   }
@@ -103,6 +274,7 @@ async function sendMark(projectId: string, sessionId: string, viewer: string, ge
 }
 async function flush() {
   if (flushTimer !== undefined) { clearTimeout(flushTimer); flushTimer = undefined }
+  void flushSeen()
   if (!person.value || !pending) return
   if (markSending) { flushAgain = true; return }
   const next = pending
@@ -140,6 +312,7 @@ async function pullReadMark(projectId: string, sessionId: string, viewer: string
       return
     }
     const remote = markerFromServer(await response.json())
+    serverEvent = Math.max(serverEvent ?? -1, remote?.event ?? -1)
     const advanced = !!(remote && preferReadMark(mark.value, remote) === remote)
     if (advanced && remote) mark.value = saveReadMark(viewer, sessionId, remote.event, remote.id, undefined, remote.at)
     const waiting = awaitingServerPlacement && generation === readGeneration
@@ -155,12 +328,7 @@ async function pullReadMark(projectId: string, sessionId: string, viewer: string
     }
     // The reader left the provisional bottom before the marker arrived.
     if (held && entered && placed && userMoved) observe()
-    const current = mark.value
-    if (!person.value || !current?.id || (remote && current.event <= remote.event)) return
-    boundProject = projectId
-    boundSession = sessionId
-    pending = queueReadMark(pending, current)
-    arm()
+    reconcileMark()
   } catch {
     // Offline: the local watermark stands, and a provisional landing may observe.
     releaseMarkerHold(generation)
@@ -173,12 +341,32 @@ function repull() {
 
 // ---------- Scrolling ----------
 const scroller = ref<HTMLElement>()
+const root = ref<HTMLElement>()
 const textarea = ref<HTMLTextAreaElement>()
 const distance = ref(0)
 // Unread posts are always below the read ones, so they are what the jump button counts.
 const below = computed(() => props.active ? unread.value.length : 0)
 const jump = computed(() => distance.value > 160 || (below.value > 0 && distance.value > 32))
 let stick = true, lastTop = 0, entered = false, loaded = false
+let paging = false
+async function earlier() {
+  if (historyLoading.value) return
+  const session = s.value, viewer = me.value, generation = readGeneration
+  const el = scroller.value
+  if (!el) return
+  historyLoading.value = true; historyError.value = ''; paging = true
+  stick = false
+  try {
+    await agents.earlierThread(session.project_id, session.id)
+    if (generation !== readGeneration || viewer !== me.value || session.id !== s.value.id) return
+    await nextTick()
+    onScroll(); observe()
+  } catch {
+    if (generation === readGeneration) historyError.value = words.value.historyError
+  } finally {
+    if (generation === readGeneration) { historyLoading.value = false; paging = false }
+  }
+}
 // Finger origin for a touch. A move downward (clientY grows) scrolls the thread up.
 let touchY: number | undefined
 const reduced = () => typeof matchMedia === 'function' && matchMedia('(prefers-reduced-motion: reduce)').matches
@@ -191,7 +379,7 @@ const canScrollUp = () => (scroller.value?.scrollTop ?? 0) > 0
 // Input runs before the browser queues scroll. Remember the reader so a marker
 // resolved in that gap cannot reclaim the position. Clear the pinned bottom
 // only for an upward gesture that can scroll, or for a real scroll while that
-// marker is still pending. A tap or click never unpins.
+// marker is still pending. A tap or click after placement never unpins.
 function claimReader() {
   if (!props.active || !entered) return false
   userMoved = true
@@ -203,12 +391,14 @@ function onWheel(event: WheelEvent) {
   if (!claimReader()) return
   if ((event.deltaY < 0 && canScrollUp()) || pending) stick = false
 }
-function onPointerDown() {
+function onPointerDown(event: PointerEvent) {
+  if (markerPending() || (event.target as HTMLElement).closest('.code-fold')) stick = false
   claimReader()
 }
 function onTouchStart(event: TouchEvent) {
   const point = event.touches?.[0] ?? event.changedTouches?.[0]
   touchY = point?.clientY
+  if (markerPending()) stick = false
   claimReader()
 }
 function onTouchMove(event: TouchEvent) {
@@ -222,6 +412,7 @@ function onTouchEnd() {
   touchY = undefined
 }
 function onScrollKey(event: KeyboardEvent) {
+  if (['Enter', ' '].includes(event.key) && (event.target as HTMLElement).closest('.code-fold')) stick = false
   if (event.defaultPrevented || event.altKey || event.ctrlKey || event.metaKey) return
   if (!['ArrowUp', 'ArrowDown', 'PageUp', 'PageDown', 'Home', 'End', ' '].includes(event.key)) return
   const target = event.target
@@ -342,13 +533,24 @@ watch(() => props.active, active => {
 })
 // New posts keep the view pinned when the reader is at the bottom; otherwise they
 // only count toward the jump button.
-watch(() => current.value.map(m => `${m.id}:${m.count}`).join(), async (_now, _before, onCleanup) => {
+watch(() => current.value.map(m => `${m.id}:${m.count}:${m.body}`).join(), async (_now, _before, onCleanup) => {
+  const el = scroller.value
+  const anchor = el ? [...el.querySelectorAll<HTMLElement>('.msg')].find(node => node.getBoundingClientRect().bottom > el.getBoundingClientRect().top) : undefined
+  const offset = anchor?.getBoundingClientRect().top
   let cancelled = false
   onCleanup(() => { cancelled = true })
   await nextTick()
   if (cancelled || !props.active || !entered) return
-  if (stick) keepBottom()
-  else onScroll()
+  if (stick && !paging) keepBottom()
+  else {
+    if (el && anchor?.isConnected && offset !== undefined) {
+      adjusting = true
+      el.scrollTop += anchor.getBoundingClientRect().top - offset
+      anchorTop = el.scrollTop; lastTop = el.scrollTop
+      adjusting = false
+    }
+    onScroll()
+  }
   observe()
 })
 
@@ -366,13 +568,17 @@ function observe() {
     if (!props.active || document.visibilityState !== 'visible') return
     const rootHeight = el.clientHeight
     let best: { event: number; id: string } | undefined
+    // Every qualifying row is read evidence for its chat-native posts; the
+    // newest one moves the watermark.
+    const rows: string[] = []
     for (const entry of entries) {
       if (!entry.isIntersecting || (entry.intersectionRatio < 0.6 && entry.intersectionRect.height < rootHeight * 0.5)) continue
       const target = entry.target as HTMLElement
       const event = Number(target.dataset.event)
+      if (target.dataset.id) rows.push(target.dataset.id)
       if (!best || event > best.event) best = { event, id: target.dataset.id ?? '' }
     }
-    if (best) markRead(best.event, best.id)
+    if (best) markRead(best.event, best.id, rows)
   }, { root: el, threshold: [0, 0.6, 1] })
   el.querySelectorAll<HTMLElement>('.msg[data-event]').forEach(node => seen!.observe(node))
 }
@@ -385,16 +591,21 @@ function onFocus() { repull() }
 onMounted(() => {
   document.addEventListener('visibilitychange', onVisibility)
   window.addEventListener('focus', onFocus)
+  window.addEventListener('keydown', chatKeys, true)
   if (typeof ResizeObserver !== 'undefined' && scroller.value) {
     // The keyboard or a taller composer shrinks the thread: stay on the latest post.
     resize = new ResizeObserver(() => { if (props.active && entered && stick) keepBottom() })
     resize.observe(scroller.value)
+    // The whole column: messages, questions, pending sends and the live turn.
+    const content = scroller.value.querySelector('.thread-col')
+    if (content) resize.observe(content)
   }
 })
 onBeforeUnmount(() => {
   seen?.disconnect(); resize?.disconnect()
   document.removeEventListener('visibilitychange', onVisibility)
   window.removeEventListener('focus', onFocus)
+  window.removeEventListener('keydown', chatKeys, true)
   void flush()
 })
 
@@ -402,26 +613,31 @@ onBeforeUnmount(() => {
 // Outstanding sends are asked in batches the status route will accept. A
 // delivered receipt on screen is asked again so it can become read, after
 // every send that still has no terminal receipt.
-const statuses = ref<Record<string, MessageStatus>>({})
 // Session-bound sends from the loaded thread. Receipts, not memory, decide
 // which of them still wait on the inbox hook, so a reload matches the server.
-const boundHookIds = computed(() => sessionBoundSends(messages.value, s.value.id, me.value))
+// Chat-native inputs have no project receipt; the status route cannot answer for them.
+const boundHookIds = computed(() => sessionBoundSends(messages.value.filter(message => !message.chat_thread), s.value.id, me.value))
 let statusFlight: Promise<void> | undefined
 let statusAgain = false
 function refreshReceipts() {
   if (!props.active || !me.value) return
   if (statusFlight) { statusAgain = true; return }
-  const visible = current.value.filter(m => m.sender_principal_id === me.value).slice(-30).map(m => m.id)
+  const visible = current.value.filter(m => m.sender_principal_id === me.value && !m.chat_thread).slice(-30).map(m => m.id)
   const batches = receiptQueryBatches(boundHookIds.value, visible, statuses.value)
   if (!batches.length) return
-  const session = s.value.id
+  const session = s.value.id, viewer = me.value, generation = readGeneration
   statusFlight = (async () => {
     for (const ids of batches) {
       const page = await messageStatuses(ids)
-      if (s.value.id !== session) return
+      if (s.value.id !== session || me.value !== viewer || readGeneration !== generation) return
       const next = { ...statuses.value }
-      for (const item of page.items) next[item.message_id] = item
+      for (const item of page.items) next[item.message_id] = advanceReceipt(next[item.message_id], item)
       statuses.value = next
+      const held = new Set(queuedIds.value)
+      for (const message of messages.value) {
+        if (message.sender_principal_id === me.value && isQueuedMessage(message, next[message.id], working.value, atPrompt.value)) held.add(message.id)
+      }
+      queuedIds.value = held
     }
   })().catch(() => { /* The status simply stays as it was. */ }).finally(() => {
     statusFlight = undefined
@@ -431,21 +647,20 @@ function refreshReceipts() {
 watch(() => agents.deliveryPulse, () => refreshReceipts())
 
 // ---------- Load and live refresh ----------
-let refreshedAt = 0
 async function refresh() {
-  refreshedAt = Date.now()
   await agents.refreshThread(s.value.project_id, s.value.id)
 }
-watch([() => me.value, () => s.value.id], async ([viewer, id]) => {
+watch([() => me.value, () => s.value.id], async ([viewer, id], before) => {
   const generation = ++readGeneration
   if (flushTimer !== undefined) { clearTimeout(flushTimer); flushTimer = undefined }
   const leftover = pending
   const leftoverProject = boundProject
   const leftoverSession = boundSession
   pending = null
-  if (leftover && person.value && leftoverSession && leftoverSession !== id) void sendMark(leftoverProject, leftoverSession, viewer, generation - 1, leftover).catch(() => undefined)
+  if (leftover && person.value && before?.[0] === viewer && leftoverSession && leftoverSession !== id) void sendMark(leftoverProject, leftoverSession, viewer, generation - 1, leftover).catch(() => undefined)
   const local = viewer ? loadReadMark(viewer, id) : null
   mark.value = local
+  serverEvent = undefined
   statuses.value = {}
   entered = false; loaded = false; newFrom.value = undefined; distance.value = 0; stick = true
   userMoved = false
@@ -454,135 +669,529 @@ watch([() => me.value, () => s.value.id], async ([viewer, id]) => {
   touchY = undefined
   markerHold = viewer && person.value && !local ? generation : 0
   seen?.disconnect()
-  draft.value = ''; replyTo.value = null; sendError.value = ''; sending.value = false
+  draft.value = ''; replyTo.value = null; editing.value = null; queueBusy.value = false; uncertain.value = new Set(); queuedIds.value = new Set(); sendError.value = ''; localSends.value = []
+  twoRow.value = false; referenceAnchor.value = null
+  chatMessages.value = []; leaveChatThread(); chatBaseline = false
+  historyLoading.value = false; historyError.value = ''; paging = false
   const projectId = s.value.project_id
   boundProject = projectId
   boundSession = id
   // The thread renders from the messages read. The marker catches up after.
   if (viewer && person.value) void pullReadMark(projectId, id, viewer, generation)
-  await refresh()
+  if (viewer) await refresh()
   if (generation !== readGeneration || s.value.id !== id) return
   loaded = true
+  // Without a viewer this runs during setup, before the live state exists.
+  if (viewer) startLive()
   if (props.active) await enter()
   refreshReceipts()
 }, { immediate: true })
-// The agents page re-reads sessions on every wake and poll; the open thread follows.
-watch(() => agents.sessionsUpdatedAt, () => { if (loaded && Date.now() - refreshedAt > 4000) void refresh().then(refreshReceipts) })
-watch(() => props.active, active => { if (active) refreshReceipts() })
+// Message hints refresh the open thread immediately; session reads retain the
+// periodic recovery path. The store coalesces bursts with a trailing read.
+watch([() => agents.threadPulse, () => agents.sessionsUpdatedAt], () => { if (loaded && props.active) { void refresh().then(refreshReceipts); refreshChat() } })
+watch(() => props.active, active => { if (active && loaded) void refresh().then(refreshReceipts) })
+
+// ---------- Live turn (AEON-1071, transcript policy A) ----------
+// Deltas and tool activity render in place, batched per animation frame. They
+// stay in this view's memory only; a reload shows final messages alone.
+const agentMessages = computed(() => new Set(messages.value.filter(message => message.sender_principal_id === s.value.agent_principal_id).map(message => message.id)))
+const latestAgentMessage = computed(() => {
+  for (let i = messages.value.length - 1; i >= 0; i--) if (messages.value[i]!.sender_principal_id === s.value.agent_principal_id) return messages.value[i]!.id
+  return ''
+})
+let liveDropped: number | undefined
+let liveGeneration = 0
+let follower: ReturnType<typeof followChatLive> | undefined
+let stopTimer: ReturnType<typeof setTimeout> | undefined
+let stopBefore: string | undefined
+let stopIssued = false
+let chatFlight = false
+let chatAgain = false
+function applyLiveFrames(frames: string[]) {
+  let turn = liveTurn.value, hint = false
+  const at = Date.now()
+  for (const data of frames) {
+    const applied = applyLiveFrame(turn, data, at, chatBaseline ? latestAgentMessage.value : undefined, liveDropped)
+    turn = applied.turn
+    if (applied.dropped !== undefined) liveDropped = applied.dropped
+    if (applied.hint) hint = true
+  }
+  liveTurn.value = turn
+  if (hint && loaded) { void refresh().then(refreshReceipts); refreshChat() }
+}
+const liveFrames = liveQueue(applyLiveFrames, { schedule: run => requestAnimationFrame(run), cancel: handle => cancelAnimationFrame(handle) })
+function resetLive() {
+  liveFrames.clear()
+  if (stopTimer !== undefined) { clearTimeout(stopTimer); stopTimer = undefined }
+  liveDropped = undefined; liveTurn.value = null
+}
+// Saved replies come from the bound chat thread's newest page. A failed read
+// leaves the live block in place; the next hint or session read retries.
+function refreshChat() {
+  const thread = chatThread
+  if (!thread || !me.value) return
+  if (chatFlight) { chatAgain = true; return }
+  chatFlight = true
+  const session = s.value.id, agent = s.value.agent_principal_id, viewer = me.value, generation = liveGeneration
+  void chatThreadMessages(thread).then(page => {
+    if (chatThread !== thread || s.value.id !== session || me.value !== viewer || liveGeneration !== generation) return
+    const merged = new Map(chatMessages.value.map(message => [message.id, message]))
+    for (const message of chatFinals(page.items, agent, session, viewer, props.view.name, thread)) merged.set(message.id, message)
+    chatMessages.value = [...merged.values()].sort((a, b) => a.sent_event_id - b.sent_event_id).slice(-200)
+    if (!chatBaseline) { chatBaseline = true; liveTurn.value = rebaseTurn(liveTurn.value, latestAgentMessage.value) }
+    adoptChatSeen()
+  }).catch(() => { /* The live block stays until a read succeeds. */ }).finally(() => {
+    chatFlight = false
+    if (chatAgain) { chatAgain = false; refreshChat() }
+  })
+}
+// The thread's read marker is the other devices' evidence for chat-native
+// posts. The furthest one seen advances this view's watermark.
+function adoptChatSeen() {
+  const seen = chatSeenMark(messages.value)
+  if (!seen || !me.value || (mark.value && mark.value.event >= seen.event)) return
+  mark.value = saveReadMark(me.value, s.value.id, seen.event, seen.id)
+  if (entered) syncDivider()
+}
+function withdrawStop() { liveTurn.value = settleStop(liveTurn.value, 'withdrawn') }
+// "Stopping" holds only while an interrupt is on record; "You stopped this
+// turn" needs it applied. A refused one, or none within five seconds,
+// withdraws the claim, even when the turn ended meanwhile.
+function markStopping(before: string | undefined) {
+  const turn = liveTurn.value
+  if (!turn) return
+  liveTurn.value = { ...turn, stop: 'requested' }
+  stopBefore = before; stopIssued = false
+  if (stopTimer !== undefined) clearTimeout(stopTimer)
+  stopTimer = setTimeout(() => { stopTimer = undefined; if (!stopIssued) withdrawStop() }, 5000)
+}
+watch(() => agents.controls[s.value.id], control => {
+  if (!control || control.kind !== 'interrupt' || control.id === stopBefore) return
+  stopIssued = true
+  if (control.state !== 'completed') return
+  liveTurn.value = settleStop(liveTurn.value, control.outcome === 'applied' ? 'applied' : 'withdrawn')
+})
+watch([liveTurn, latestAgentMessage, agentMessages], ([turn, latest, ids]) => { if (settled(turn, latest, ids)) liveTurn.value = null })
+const openLive = (url: string) => typeof EventSource === 'undefined' ? null : new EventSource(url, { withCredentials: true }) as unknown as LiveSource
+// One stream per open chat tab and person; it ends with the session. It
+// starts after the first thread read, so a turn knows which agent message
+// preceded it.
+function startLive() {
+  follower?.stop(); follower = undefined
+  resetLive()
+  if (!loaded || !me.value || !person.value || !props.active || ended.value || !s.value.id) return
+  const generation = ++liveGeneration
+  follower = followChatLive(s.value.id, {
+    frame: data => { if (generation === liveGeneration) liveFrames.push(data) },
+    resync: () => {
+      if (generation !== liveGeneration) return
+      resetLive()
+      if (loaded) { void refresh().then(refreshReceipts); refreshChat() }
+    },
+    thread: id => {
+      if (generation !== liveGeneration) return
+      if (id !== chatThread) { leaveChatThread(id); chatBaseline = false }
+      refreshChat()
+    },
+    attached: () => {},
+  }, { lookup: chatThreadForSession, open: openLive })
+}
+watch([() => me.value, () => s.value.id, () => props.active, ended], startLive)
+// A session without a live thread so far may get one when a turn starts.
+watch(() => s.value.activity, activity => { if (activity === 'busy') follower?.retry() })
+// Streaming grows only at the bottom; keep a pinned reader on the latest line.
+watch(() => liveTurn.value && `${liveTurn.value.text.length}:${liveTurn.value.tools.length}:${liveTurn.value.state}:${liveTurn.value.ended}`, async () => {
+  await nextTick()
+  if (props.active && entered && stick && !paging) keepBottom()
+  else onScroll()
+})
+onBeforeUnmount(() => { liveGeneration++; follower?.stop(); resetLive() })
 
 // ---------- Composer ----------
 const composeBlock = computed(() => {
-  if (ended.value || sendError.value === 'This session has ended.') return 'This session has ended.'
-  if (agents.messagingState === 'error') return 'Messages could not be loaded right now. Close and reopen the session to try again.'
-  if (agents.messagingState === 'forbidden') return 'Messages are open to workspace admins.'
+  if (ended.value || sendError.value === words.value.ended) return words.value.ended
+  if (agents.threadState(s.value) === 'error') return words.value.loadError
+  if (agents.threadState(s.value) === 'forbidden') return words.value.noPermission
   // Only a message with no session still needs a registered target.
   if (!s.value.id && !address.value) return `${props.view.name} has no message address yet. It gets one when it registers a message target.`
   return ''
 })
 const hookReceipt = computed(() => hookReceipts(boundHookIds.value, statuses.value))
-const showHookNotice = computed(() => hookNoticeVisible(awaitsInboxHook(s.value), hookReceipt.value))
-async function send() {
-  if (!draft.value.trim() || sending.value || composeBlock.value) return
-  const sessionId = s.value.id, viewer = me.value, request = readGeneration
-  const currentSend = () => request === readGeneration && sessionId === s.value.id && viewer === me.value
-  sending.value = true; sendError.value = ''
+const showHookNotice = computed(() => unmanaged.value && hookNoticeVisible(awaitsInboxHook(s.value), hookReceipt.value))
+async function deliver(local: ProjectMessage) {
+  const session = s.value, viewer = me.value, generation = readGeneration
+  const stillHere = () => generation === readGeneration && session.id === s.value.id && viewer === me.value
+  local.send_failed = false
   try {
-    await agents.send(s.value, recipient.value, draft.value.trim(), level.value, replyTo.value?.id)
-    if (!currentSend()) return
-    refreshedAt = Date.now()
-    draft.value = ''; replyTo.value = null
-    await nextTick(); if (currentSend()) { toBottom(true); refreshReceipts() }
-  } catch (e) { if (currentSend()) sendError.value = e instanceof APIError && e.status === 409 && e.body.code === 'session_ended' ? 'This session has ended.' : e instanceof Error ? e.message : 'The message was not sent. Please try again.' }
-  finally { if (currentSend()) sending.value = false }
+    if (local.chat_thread) {
+      // A reply to a chat-native message stays in its chat thread; the project
+      // message route would refuse the parent. The client ID keeps a retry idempotent.
+      const thread = local.chat_thread
+      const result = await sendChatMessage(thread, { client_message_id: local.client_id ?? local.id, body: local.body, ...(local.reply_to ? { reply_to: local.reply_to } : {}) })
+      if (!stillHere()) return
+      const sent = chatSent(result.message, viewer, session.agent_principal_id, session.id, thread, local.created_at ?? new Date().toISOString())
+      if (thread === chatThread) chatMessages.value = [...chatMessages.value.filter(message => message.id !== sent.id), sent].sort((a, b) => a.sent_event_id - b.sent_event_id)
+      localSends.value = localSends.value.map(message => message.client_id === local.client_id ? { ...sent, client_id: local.client_id } : message)
+      forgetSettled()
+      return
+    }
+    const accepted = await agents.send(session, recipient.value, local.body, local.delivery_level, local.reply_to ?? undefined, local.client_id, local.resend_of)
+    if (!stillHere()) return
+    if (local.queue_pending) queuedIds.value = new Set([...queuedIds.value, accepted.id])
+    localSends.value = localSends.value.map(message => message.client_id === local.client_id ? { ...accepted, client_id: local.client_id, queue_pending: local.queue_pending } : message)
+    forgetSettled()
+    refreshReceipts()
+  } catch (error) {
+    if (!stillHere()) return
+    localSends.value = localSends.value.map(message => message.client_id === local.client_id ? { ...message, send_failed: true } : message)
+    if (error instanceof APIError && error.status === 409 && error.body.code === 'session_ended') sendError.value = words.value.ended
+  }
 }
+async function send(level: 'simple' | 'steer' = 'simple', source?: ProjectMessage): Promise<boolean> {
+  const body = source?.body ?? draft.value.trim()
+  if (!body || !props.canWrite || composeBlock.value || offline.value || queueBusy.value) return false
+  if (editing.value && !source) return saveEdit()
+  if (localSends.value.length >= 100) { toast(words.value.pendingLimit); return false }
+  const clientId = crypto.randomUUID()
+  // The parent's origin decides the route: a chat-native parent keeps the reply in its thread.
+  const chat = source ? source.chat_thread : replyTo.value?.chat_thread
+  const local: ProjectMessage = {
+    id: clientId, client_id: clientId, optimistic: true, queue_pending: chat ? false : source?.queue_pending ?? (working.value || atPrompt.value), resend_of: chat ? undefined : source?.id, body, sender_principal_id: me.value,
+    recipient_principal_id: s.value.agent_principal_id, recipient_session_id: s.value.id, to: recipient.value,
+    sent_event_id: Number.MAX_SAFE_INTEGER, is_action_request: false, expects_reply: false,
+    delivery_level: chat ? 'simple' : level, reply_to: source ? source.reply_to : replyTo.value?.id, status: 'accepted', reply_obligation: 'none', created_at: new Date().toISOString(),
+    ...(chat ? { chat_thread: chat } : {}),
+  }
+  if (local.queue_pending) queuedIds.value = new Set([...queuedIds.value, local.id])
+  localSends.value = [...localSends.value, local]
+  if (!source) { draft.value = ''; replyTo.value = null }
+  void deliver(local)
+  await nextTick(); if (stick) keepBottom()
+  return true
+}
+function retry(message: ProjectMessage) {
+  if (!props.canWrite || composeBlock.value || offline.value) return
+  if (message.send_failed && message.client_id) {
+    // An ambiguous POST reuses its idempotency key. A confirmed terminal
+    // delivery failure is a new explicit send, never automatic reinjection.
+    localSends.value = localSends.value.map(item => item.client_id === message.client_id ? { ...item, send_failed: false } : item)
+    void deliver(message)
+  } else if (statuses.value[message.id]?.status === 'not_delivered') {
+    void send(message.delivery_level, message)
+  }
+}
+function queueWhen(message: ProjectMessage) {
+  if (uncertain.value.has(message.id)) return words.value.unclear
+  if (message.send_failed || statuses.value[message.id]?.status === 'not_delivered') return words.value.failed
+  if (bindingReason.value) return `${words.value.deliveryBlocked}: ${bindingReason.value}`
+  if (capability.value === 'between') return words.value.queueBetween
+  return message.delivery_level === 'steer' ? capability.value === 'next' ? words.value.queueNext : words.value.queueNow : words.value.after
+}
+function editQueued(message: ProjectMessage) {
+  if (queueBusy.value || !props.canWrite || message.optimistic) return
+  editing.value = { ...message }; replyTo.value = null; draft.value = message.body
+  void nextTick(() => textarea.value?.focus())
+}
+async function cancelQueued(message: ProjectMessage, forEdit = false) {
+  if (queueBusy.value || !props.canWrite || message.optimistic) return false
+  const session = s.value, viewer = me.value, generation = readGeneration
+  queueBusy.value = true
+  try {
+    const result = await cancelSessionMessage(session.project_id, message.id)
+    if (generation !== readGeneration || session.id !== s.value.id || viewer !== me.value) return false
+    if (result.result === 'cancelled') {
+      statuses.value = { ...statuses.value, [message.id]: { message_id: message.id, status: 'not_delivered', cancelled: true, delivered_at: null, read_at: null, deliver_by: statuses.value[message.id]?.deliver_by ?? null } }
+      if (!forEdit) { toast(words.value.cancelled); if (editing.value?.id === message.id) editing.value = null }
+      return true
+    }
+    if (result.result === 'uncertain') uncertain.value = new Set([...uncertain.value, message.id])
+    toast(result.result === 'too_late' ? words.value.tooLate : words.value.unclear)
+    refreshReceipts()
+    return false
+  } catch {
+    if (generation === readGeneration) toast(words.value.cancelFailed, { tone: 'error' })
+    return false
+  } finally { if (generation === readGeneration) queueBusy.value = false }
+}
+async function saveEdit(): Promise<boolean> {
+  const message = editing.value, body = draft.value.trim(), generation = readGeneration
+  if (!message || !body) return false
+  const cancelled = await cancelQueued(message, true)
+  if (generation !== readGeneration || editing.value?.id !== message.id) return false
+  // too_late and uncertainty keep the text and leave edit mode, matching the accepted queue flow.
+  if (!cancelled) { editing.value = null; return false }
+  const enqueued = await send(message.delivery_level, { ...message, body, queue_pending: true })
+  if (generation !== readGeneration || editing.value?.id !== message.id) return false
+  // A refused replacement must stay editable. The cancel already happened, so the next Save retries it.
+  if (!enqueued) return false
+  editing.value = null
+  if (draft.value.trim() === body) draft.value = ''
+  return true
+}
+async function stopAndSend() {
+  if (!canStop.value || !draft.value.trim() || editing.value || queueBusy.value || offline.value) return
+  const view = props.view, generation = readGeneration, body = draft.value.trim(), parent = replyTo.value?.id, chat = replyTo.value?.chat_thread
+  queueBusy.value = true
+  try {
+    await agents.control(view, 'interrupt')
+    if (generation !== readGeneration || view.session.id !== s.value.id) return
+    queueBusy.value = false
+    // After-turn delivery waits for the explicit interrupt to end the turn.
+    const enqueued = await send('simple', { body, reply_to: parent, queue_pending: true, chat_thread: chat } as ProjectMessage)
+    if (generation !== readGeneration || view.session.id !== s.value.id) return
+    if (enqueued && draft.value.trim() === body) { draft.value = ''; replyTo.value = null }
+  } catch {
+    if (generation === readGeneration) toast(words.value.cancelFailed, { tone: 'error' })
+  } finally { if (generation === readGeneration) queueBusy.value = false }
+}
+function connectionChanged() { online.value = browserOnline(); if (online.value) void refresh().then(refreshReceipts) }
+onMounted(() => { window.addEventListener('online', connectionChanged); window.addEventListener('offline', connectionChanged) })
+onBeforeUnmount(() => { window.removeEventListener('online', connectionChanged); window.removeEventListener('offline', connectionChanged) })
+function suggest(text: string) { if (props.canWrite && !composeBlock.value) { draft.value = text; void nextTick(() => textarea.value?.focus()) } }
 function composerKeys(event: KeyboardEvent) {
-  if (event.key === 'Enter' && (event.metaKey || event.ctrlKey)) { event.preventDefault(); void send() }
+  const level = chatSendLevel(event, canSteer.value)
+  if (level) { event.preventDefault(); void send(level) }
 }
 function reply(message: ProjectMessage) {
+  editing.value = null
   replyTo.value = message
   void nextTick(() => textarea.value?.focus())
 }
-defineExpose({ focusComposer: () => textarea.value?.focus() })
+// The field grows with its text: one line idle, at most six, then it scrolls.
+function grow() {
+  const field = textarea.value
+  // A hidden tab has no layout to measure; it grows again when shown.
+  if (!field || !field.getClientRects().length) return
+  const style = getComputedStyle(field)
+  const edges = parseFloat(style.paddingTop) + parseFloat(style.paddingBottom) + parseFloat(style.borderTopWidth) + parseFloat(style.borderBottomWidth)
+  const line = parseFloat(style.lineHeight) || 22
+  const most = line * 6 + edges
+  field.style.height = 'auto'
+  const full = field.scrollHeight + parseFloat(style.borderTopWidth) + parseFloat(style.borderBottomWidth)
+  field.style.height = `${Math.min(full, most)}px`
+  field.style.overflowY = full > most + 0.5 ? 'auto' : 'hidden'
+}
+watch(draft, () => { void nextTick(grow) })
+watch(() => props.active, active => { if (active) void nextTick(grow) })
+onMounted(() => { grow(); window.addEventListener('resize', grow) })
+onBeforeUnmount(() => window.removeEventListener('resize', grow))
+function closeReferences(restore: boolean) {
+  const anchor = referenceAnchor.value
+  referenceAnchor.value = null
+  if (restore && anchor?.isConnected) anchor.focus({ preventScroll: true })
+}
+function insertReference(text: string) {
+  const field = textarea.value, value = draft.value
+  const start = field?.selectionStart ?? value.length, end = field?.selectionEnd ?? value.length
+  const before = value.slice(0, start), after = value.slice(end)
+  const lead = before && !/\s$/.test(before) ? ' ' : ''
+  const insert = `${lead}${text} `
+  draft.value = `${before}${insert}${after}`
+  referenceAnchor.value = null
+  void nextTick(() => { field?.focus(); const caret = before.length + insert.length; field?.setSelectionRange(caret, caret) })
+}
+defineExpose({ focusComposer: () => textarea.value?.focus(), interrupted, working })
 </script>
 
 <template>
-  <div class="session-chat">
+  <div ref="root" class="session-chat">
     <div class="thread-wrap">
       <div ref="scroller" class="thread-scroll" @scroll.passive="onScroll"
         @wheel.capture.passive="onWheel" @touchstart.capture.passive="onTouchStart"
         @touchmove.capture.passive="onTouchMove" @touchend.capture.passive="onTouchEnd"
         @touchcancel.capture.passive="onTouchEnd" @pointerdown.capture.passive="onPointerDown"
         @keydown.capture="onScrollKey">
-        <SessionMessages :messages="messages" :principal-id="s.agent_principal_id" :now="now"
-          :can-reply="canWrite && !composeBlock && !managed" :new-from="newFrom" :new-count="newCount" :statuses="statuses" @reply="reply" />
+        <!-- One reading column (AEON-1438): at most 720 px on desktop. -->
+        <div class="thread-col">
+          <div class="history-head">
+            <button v-if="agents.threadMore[s.id]" type="button" class="earlier" :disabled="historyLoading" @click="earlier">{{ words.older }}</button>
+            <span v-else-if="agents.threadState(s) === 'ready' && threadMessages.length && !bindingReason">{{ words.start }}</span>
+            <span v-if="historyError" class="history-error" role="alert">{{ historyError }}</span>
+          </div>
+          <p v-if="bindingReason && !noPermission" class="binding-error" role="status">{{ words.liveDisconnected }}: {{ bindingReason }}</p>
+          <div v-if="noPermission" class="empty-state"><AppIcon name="lock" :size="32" /><h3>{{ words.noPermissionTitle }}</h3><p>{{ words.noPermission }}</p></div>
+          <div v-else-if="agents.threadState(s) === 'ready' && !messages.length && !liveTurn && !seenQuestions.length" class="empty-state"><AppIcon name="agent" :size="32" /><h3>{{ words.emptyTitle }} {{ view.name }}</h3><p>{{ words.emptyBody }}</p><div class="suggestions"><button v-for="text in [words.suggest1, words.suggest2, words.suggest3]" :key="text" type="button" :disabled="!canWrite || ended" @click="suggest(text)">{{ text }}</button></div></div>
+          <SessionMessages v-else :messages="threadMessages" :principal-id="s.agent_principal_id" :session-id="s.id" :now="now" :questions="questions"
+            :can-reply="canWrite && !composeBlock" :new-from="newFrom" :new-count="newCount" :statuses="statuses" @reply="reply" @retry="retry" />
+          <div v-if="seenQuestions.length" class="chat-questions">
+            <SessionQuestion v-for="question in seenQuestions" :key="`${identity.identity?.tenant.id}:${me}:${s.id}:${question.id}`" :question="question" :label="view.name" :session-id="s.id" :open="!!questions?.some(item => item.id === question.id)" />
+          </div>
+          <!-- Sends waiting for their turn sit at the thread's end as pending bubbles (AEON-1438), so the growing field never moves them. -->
+          <ul v-if="queue.length" class="chat-queue" :aria-label="words.queued">
+            <li v-for="message in queue" :key="message.id" class="queue-item" :class="{ editing: editing?.id === message.id }" :data-id="message.id" :data-status="message.send_failed ? 'not_delivered' : statuses[message.id]?.status ?? 'sent'">
+              <p class="queue-text">{{ message.body }}</p>
+              <div class="queue-meta">
+                <AppIcon :name="message.delivery_level === 'steer' ? 'bolt' : 'queue'" :size="13" />
+                <span class="queue-when">{{ queueWhen(message) }}</span>
+                <button v-if="message.send_failed || statuses[message.id]?.status === 'not_delivered'" type="button" class="icon-btn sm flat" :aria-label="words.retry" :data-tip="words.retry" :disabled="queueBusy || !canWrite || offline" @click="retry(message)"><AppIcon name="refresh" :size="14" /></button>
+                <button type="button" class="icon-btn sm flat" :aria-label="words.edit" :data-tip="words.edit" :disabled="queueBusy || !canWrite || message.optimistic || offline" @click="editQueued(message)"><AppIcon name="edit" :size="14" /></button>
+                <button type="button" class="icon-btn sm flat" :aria-label="words.cancel" :data-tip="words.cancel" :disabled="queueBusy || !canWrite || message.optimistic || offline" @click="cancelQueued(message)"><AppIcon name="close" :size="14" /></button>
+              </div>
+            </li>
+          </ul>
+          <ChatLiveBlock v-if="liveTurn && !noPermission" :turn="liveTurn" :name="view.name" :now="now" :can-stop="canStop" />
+        </div>
       </div>
+      <p v-if="offline" class="offline-banner" role="status"><AppIcon name="refresh" :size="14" />{{ words.offline }}</p>
       <Transition name="jump">
         <button v-if="jump" type="button" class="jump" :class="{ labelled: below > 0 }"
-          :aria-label="below > 0 ? `${below} new ${below === 1 ? 'message' : 'messages'}, go to the latest` : 'Go to the latest message'"
+          :aria-label="below > 0 ? `${words.newCount(below)}, ${words.latest}` : words.latest"
           :data-tip="below > 0 ? undefined : 'Latest message'" @click="toBottom(true)">
-          <span v-if="below > 0" class="jump-count">{{ below }} new</span>
-          <AppIcon name="chevron" :size="16" />
+          <AppIcon name="arrow-down" :size="16" />
+          <span v-if="below > 0" class="jump-count">{{ words.newCount(below) }}</span>
         </button>
       </Transition>
     </div>
 
-    <p v-if="managed && !ended" class="managed-hint"><AppIcon name="send" :size="13" />Steer this managed session with the controls above.</p>
-    <footer v-else class="composer">
-      <SessionRequests v-if="unmanaged" :key="s.id" :session="s" :now="now" />
-      <p v-if="composeBlock" class="compose-block"><AppIcon name="inbox" :size="13" />{{ composeBlock }}</p>
-      <form v-else class="compose" @submit.prevent="send">
-        <p v-if="showHookNotice" class="compose-block" role="status">{{ hookDeliveryNotice }}</p>
-        <p v-if="replyTo" class="replying"><span>Replying to “{{ replyTo.body.slice(0, 80) }}{{ replyTo.body.length > 80 ? '…' : '' }}”</span><button type="button" class="icon-btn sm flat" aria-label="Cancel the reply" @click="replyTo = null"><AppIcon name="close" :size="12" /></button></p>
-        <label class="sr-only" :for="`compose-${s.id}`">Message to {{ view.name }}</label>
-        <textarea :id="`compose-${s.id}`" ref="textarea" v-model="draft" class="field" rows="2" :placeholder="`Message ${view.name}…`" :disabled="!canWrite || sending" @keydown="composerKeys" @focus="toBottom(true)" />
-        <p v-if="sendError" class="send-error" role="alert"><AppIcon name="alert" :size="12" />{{ sendError }}</p>
-        <div class="compose-row">
-          <div class="seg level" role="radiogroup" aria-label="Delivery">
-            <button type="button" role="radio" :aria-checked="level === 'simple'" data-tip="Waits until the agent reads its inbox" @click="level = 'simple'">Simple</button>
-            <button type="button" role="radio" :aria-checked="level === 'steer'" data-tip="Reaches the agent during its current turn" @click="level = 'steer'"><AppIcon name="bolt" :size="11" />Steer</button>
+    <footer v-if="!noPermission" class="composer" :class="{ two: twoRow }">
+      <div class="composer-col">
+        <p v-if="composeBlock" class="compose-block"><AppIcon name="inbox" :size="13" />{{ composeBlock }}</p>
+        <form v-else class="compose" @submit.prevent="send()">
+          <p v-if="showHookNotice && !queue.length" class="compose-block hook-notice" role="status">{{ bindingReason ? words.unmanagedBlocked : `${view.name} ${words.unmanagedNote}` }}</p>
+          <p v-if="editing" class="replying" role="status"><AppIcon name="edit" :size="13" /><span>{{ words.editing }}</span><button type="button" class="icon-btn sm flat" :aria-label="words.cancel" @click="editing = null"><AppIcon name="close" :size="12" /></button></p>
+          <p v-else-if="replyTo" class="replying"><AppIcon name="reply" :size="13" /><span :title="replyTo.body">{{ words.replying }} “{{ replyTo.body }}”</span><button type="button" class="icon-btn sm flat" :aria-label="words.cancelReply" @click="replyTo = null"><AppIcon name="close" :size="12" /></button></p>
+          <p v-if="capability === 'abort'" class="gemini-note">{{ words.geminiNote }}</p>
+          <p v-if="sendError" class="send-error" role="alert"><AppIcon name="alert" :size="12" />{{ sendError }}</p>
+          <div class="compose-box">
+            <button type="button" class="plus" :aria-label="words.addReference" aria-haspopup="menu" :aria-expanded="!!referenceAnchor" :disabled="!canWrite" @click="referenceAnchor = referenceAnchor ? null : $event.currentTarget as HTMLElement"><AppIcon name="plus" :size="20" /></button>
+            <label class="sr-only" :for="`compose-${s.id}`">{{ words.message }} {{ view.name }}</label>
+            <textarea :id="`compose-${s.id}`" ref="textarea" v-model="draft" rows="1" :placeholder="`${words.placeholder} ${view.name}`" :disabled="!canWrite" aria-keyshortcuts="Enter" @keydown="composerKeys" @focus="toBottom(true)" />
+            <div class="compose-row" :class="{ steering: steerOffered }">
+              <!-- Keycaps for a fine pointer only, shown while the field has focus. -->
+              <span class="compose-hint" aria-hidden="true"><KeyCap k="enter" />{{ primaryLabel }}<template v-if="primaryLabel === words.after && canSteer"><span class="mid">·</span><KeyCap k="mod" /><KeyCap k="enter" />{{ alternative }}</template><template v-else-if="primaryLabel !== words.after"><span class="mid">·</span><KeyCap k="shift" /><KeyCap k="enter" />{{ words.newLine }}</template></span>
+              <span v-if="choiceOffered" class="choice" :class="{ idle: !working }">
+                <button v-if="steerMode" type="button" class="cbtn alt steer-send" :aria-label="alternative" :aria-busy="sending" :aria-keyshortcuts="mac ? 'Meta+Enter' : 'Control+Enter'" :data-tip="words.nowTip(view.name)" :disabled="!canSteer || !draft.trim() || !canWrite || queueBusy || !!editing || offline" @click="send('steer')"><AppIcon name="bolt" :size="14" />{{ alternative }}</button>
+                <span v-else-if="steerOffered" class="steer-note" role="status">{{ words.chatBetween }}</span>
+                <button v-else type="button" class="cbtn alt stop-send" :aria-label="words.stopSend" :aria-busy="sending" :disabled="!draft.trim() || !canWrite || queueBusy || !!editing || !canStop || offline" @click="stopAndSend"><AppIcon name="alert" :size="14" />{{ words.stopSend }}</button>
+              </span>
+              <button type="submit" class="cbtn primary send" :aria-label="primaryLabel" :aria-busy="sending" :data-tip="primaryLabel === words.after ? words.afterTip : undefined" :disabled="!draft.trim() || !canWrite || queueBusy || offline"><AppIcon name="send" :size="14" /><span class="send-label"><span>{{ primaryLabel }}</span><span aria-hidden="true" class="label-size">{{ capability === 'between' ? words.send : words.after }}</span></span></button>
+            </div>
           </div>
-          <span class="compose-hint" aria-hidden="true"><KeyCap k="mod" /><KeyCap k="enter" /></span>
-          <button type="submit" class="btn sm primary send" :disabled="!draft.trim() || sending || !canWrite"><AppIcon name="send" :size="13" />{{ sending ? 'Sending…' : 'Send' }}</button>
-        </div>
-      </form>
+        </form>
+      </div>
+      <ChatReferences v-if="referenceAnchor" :anchor="referenceAnchor" :project-id="s.project_id" :session-id="s.id" @pick="insertReference" @close="closeReferences" />
     </footer>
   </div>
 </template>
 
 <style scoped>
+.offline-banner { position: absolute; z-index: 2; top: 8px; left: 50%; transform: translateX(-50%); display: flex; align-items: center; gap: 6px; padding: 6px 10px; border-radius: 999px; background: var(--surface-raised); box-shadow: var(--shadow-pop); font-size: 12px; white-space: nowrap; }
+.empty-state { display: grid; justify-items: center; gap: 10px; max-width: 340px; margin: 24px auto; text-align: center; color: var(--ink-2); }
+.empty-state h3 { font-size: 17px; color: var(--ink); }
+.empty-state p { font-size: 13.5px; }
+.suggestions { display: grid; justify-items: center; }
+.suggestions button { min-height: 44px; border: 0; background: none; color: var(--teal-ink); font: inherit; font-size: 13px; }
+/* Pending own bubbles: a hairline instead of the delivered tint, when and actions under them. */
+.chat-queue { display: grid; grid-template-columns: minmax(0, 1fr); gap: var(--thread-gap); margin: var(--thread-gap) 0 0; padding: 0; list-style: none; }
+.queue-item { justify-self: end; display: flex; flex-direction: column; align-items: flex-end; min-width: 0; max-width: min(82%, 640px); }
+.queue-text { margin: 0; padding: 9px 14px; border-radius: 18px; background: transparent; box-shadow: inset 0 0 0 1px var(--chip-teal-line); color: var(--ink); font-size: 14.5px; line-height: 1.5; white-space: pre-wrap; overflow-wrap: anywhere; word-break: break-word; }
+.queue-item.editing .queue-text { background: var(--chip-teal-bg); }
+.queue-meta { display: flex; align-items: center; justify-content: flex-end; flex-wrap: wrap; gap: 2px 4px; min-height: 28px; margin-top: 2px; font-size: 12px; color: var(--ink-3); }
+.queue-meta > svg { flex: none; }
+.queue-when { min-width: 0; margin-right: 2px; overflow-wrap: anywhere; }
+.queue-item[data-status="not_delivered"] .queue-when { color: var(--danger); font-weight: 600; }
+.queue-meta .icon-btn { flex: none; border-radius: 8px; color: var(--ink-3); }
+@media (hover: hover) { .queue-meta .icon-btn:hover:not(:disabled) { color: var(--teal-ink); background: var(--row-hover); } }
+@media (pointer: coarse), (max-width: 720px) { .queue-meta .icon-btn, .replying .icon-btn { width: 44px; height: 44px; } }
+.binding-error { color: var(--ink-2); font-size: 13.5px; overflow-wrap: anywhere; margin: 12px 0; }
+.gemini-note { margin: 0 0 6px; font-size: 12px; color: var(--ink-2); }
+.chat-questions { display: grid; gap: var(--thread-gap); margin-top: var(--thread-gap); }
 .session-chat { flex: 1; display: flex; flex-direction: column; min-height: 0; min-width: 0; }
 .thread-wrap { position: relative; flex: 1; min-height: 0; display: flex; flex-direction: column; }
-.thread-scroll { flex: 1; min-height: 0; overflow-x: hidden; overflow-y: auto; overscroll-behavior: contain; padding: 18px 24px 20px; }
-.jump { position: absolute; right: 16px; bottom: 12px; display: inline-flex; align-items: center; justify-content: center; gap: 6px; min-width: 40px; height: 40px; padding: 0; border: 0; border-radius: 999px; background: var(--surface-raised); color: var(--ink-2); box-shadow: var(--shadow-pop); }
+/* One reading column. It stays top-anchored, so a short thread never moves when the composer changes height. */
+.thread-scroll { flex: 1; min-height: 0; overflow-x: hidden; overflow-y: auto; overscroll-behavior: contain; padding: 14px 24px 8px; scrollbar-gutter: stable both-edges; }
+/* One gap between thread items of every kind: messages, Desk cards, questions, pending sends and the live turn. */
+.thread-col { --thread-gap: 20px; width: 100%; max-width: 720px; min-width: 0; margin: 0 auto; }
+.jump { z-index: 1; position: absolute; left: 50%; transform: translateX(-50%); bottom: 12px; display: inline-flex; align-items: center; justify-content: center; gap: 6px; min-width: 44px; height: 44px; padding: 0; border: 0; border-radius: 999px; background: var(--surface-raised); color: var(--ink-2); box-shadow: var(--shadow-pop); }
+.history-head { position: relative; display: flex; justify-content: center; align-items: center; min-height: 44px; margin-bottom: 12px; font-size: 12px; color: var(--ink-3); }
+.earlier { border: 0; background: transparent; color: var(--teal-ink); min-height: 44px; padding: 0 10px; font: inherit; font-weight: 600; }
+.history-error { position: absolute; top: 100%; left: 0; right: 0; z-index: 1; background: var(--surface-raised); color: var(--danger); box-shadow: var(--shadow-pop); padding: 8px; }
 .jump svg { flex: none; }
 .jump.labelled { padding: 0 12px 0 14px; color: var(--teal-ink); }
 .jump-count { font-size: 12.5px; font-weight: 650; white-space: nowrap; }
 @media (hover: hover) { .jump:hover { color: var(--ink); background: var(--btn-bg-hover); } }
 .jump:focus-visible { outline: none; box-shadow: var(--shadow-pop), var(--focus-ring); }
 .jump-enter-active, .jump-leave-active { transition: opacity .16s ease, transform .16s ease; }
-.jump-enter-from, .jump-leave-to { opacity: 0; transform: translateY(6px); }
+.jump-enter-from, .jump-leave-to { opacity: 0; transform: translate(-50%, 6px); }
 @media (prefers-reduced-motion: reduce) { .jump-enter-active, .jump-leave-active { transition: none; } }
-.composer { flex-shrink: 0; padding: 10px 14px 12px; border-top: 1px solid var(--line); background: var(--surface-raised-2); border-radius: 0 0 var(--radius) var(--radius); }
-.compose { display: grid; grid-template-columns: minmax(0, 1fr); gap: 8px; min-width: 0; }
-.compose textarea { width: 100%; min-width: 0; min-height: 56px; max-height: 180px; resize: vertical; padding: 9px 11px; font: inherit; font-size: 13.5px; line-height: 1.45; }
-.compose-row { display: flex; align-items: center; gap: 10px; min-width: 0; }
-.level { flex-shrink: 0; }
-.level button { display: inline-flex; align-items: center; gap: 4px; }
-.compose-hint { margin-left: auto; display: inline-flex; gap: 2px; }
+
+/* ---------- One calm composer (AEON-1438) ---------- */
+.composer { flex-shrink: 0; padding: 4px 24px max(12px, env(safe-area-inset-bottom)); }
+.composer-col { width: 100%; max-width: 720px; margin: 0 auto; }
+.compose { position: relative; display: grid; grid-template-columns: minmax(0, 1fr); min-width: 0; }
+.compose-box { display: grid; grid-template-columns: minmax(0, 1fr); min-width: 0; padding: 10px 8px 8px 14px; border-radius: 16px; background: var(--field-bg); box-shadow: var(--field-inset), 0 0 0 1px var(--line-2); }
+.compose-box:focus-within { box-shadow: 0 0 0 1px var(--primary-line), 0 0 0 4px color-mix(in srgb, var(--primary) 14%, transparent); }
+.compose-box textarea { display: block; width: 100%; min-width: 0; height: 23px; min-height: 23px; margin: 0; padding: 0 6px 0 0; border: 0; outline: 0; border-radius: 0; resize: none; overflow-y: hidden; background: transparent; box-shadow: none; color: var(--ink); font: 14.5px/23px var(--font); }
+.compose-box textarea::placeholder { color: var(--ink-3); }
+.compose-box textarea:disabled { cursor: not-allowed; }
+.plus { display: none; }
+.compose-row { display: flex; align-items: center; gap: 6px; min-width: 0; min-height: 32px; margin-top: 6px; }
+.compose-hint { display: inline-flex; align-items: center; gap: 5px; flex: 1; min-width: 0; overflow: hidden; font-size: 12px; color: var(--ink-3); white-space: nowrap; opacity: 0; }
+.compose-hint .mid { margin: 0 3px; }
+.compose-box:focus-within .compose-hint { opacity: 1; }
+@media (hover: none), (pointer: coarse) { .compose-hint { visibility: hidden; } }
+.choice { display: inline-flex; flex: 0 1 auto; min-width: 0; }
+.choice > .cbtn { flex: none; }
+/* Reserved for the whole session; what it holds shows only while a turn runs. */
+.choice.idle > * { visibility: hidden; }
+.cbtn { display: inline-flex; align-items: center; justify-content: center; gap: 7px; flex: none; height: 32px; padding: 0 14px 0 12px; border: 0; border-radius: 999px; font: inherit; font-size: 13px; font-weight: 600; white-space: nowrap; }
+.cbtn > svg { flex: none; }
+.cbtn.alt { background: var(--chip-teal-bg); color: var(--teal-ink); box-shadow: inset 0 0 0 1px var(--chip-teal-line); }
+@media (hover: hover) { .cbtn.alt:hover:not(:disabled) { box-shadow: inset 0 0 0 1px var(--primary-line); } }
+.cbtn.primary { background: var(--primary); color: var(--primary-on); box-shadow: 0 6px 14px -10px color-mix(in srgb, var(--primary) 70%, transparent); }
+@media (hover: hover) { .cbtn.primary:hover:not(:disabled) { background: var(--primary-lo); } }
+/* A disabled action reads disabled: no fill, a faint label. */
+.cbtn:disabled { background: var(--chip-bg); color: var(--ink-3); box-shadow: inset 0 0 0 1px var(--line); cursor: default; }
+.cbtn:focus-visible, .plus:focus-visible { outline: none; box-shadow: var(--focus-ring); }
+.stop-send:not(:disabled) { color: var(--warn-ink); background: var(--gold-wash); box-shadow: inset 0 0 0 1px var(--warn-line); }
+/* Shrinks and wraps inside the action row instead of pushing the actions to a new line. */
+.steer-note { display: flex; align-items: center; min-width: 0; min-height: 32px; max-width: 220px; font-size: 12px; line-height: 1.3; text-align: right; color: var(--ink-3); overflow-wrap: anywhere; }
+.send-label { display: grid; }
+.send-label > span { grid-area: 1 / 1; }
+.label-size { visibility: hidden; }
 .compose-block { display: flex; align-items: center; gap: 8px; font-size: 12.5px; color: var(--ink-2); padding: 6px 2px; overflow-wrap: anywhere; }
 .compose-block svg { flex: none; }
-.managed-hint { flex-shrink: 0; display: flex; align-items: center; gap: 8px; margin: 0; padding: 10px 18px calc(10px + env(safe-area-inset-bottom)); border-top: 1px solid var(--line); font-size: 12.5px; color: var(--ink-2); overflow-wrap: anywhere; }
-.managed-hint svg { flex: none; color: var(--ink-3); }
-.replying { display: flex; align-items: center; gap: 6px; min-width: 0; padding: 4px 4px 4px 10px; border-radius: 8px; background: var(--code-bg); font-size: 12px; color: var(--ink-2); }
+.replying { display: flex; align-items: center; gap: 8px; min-width: 0; margin: 0 0 6px; padding: 2px 2px 2px 12px; border-radius: 10px; background: var(--surface-sunken); font-size: 12.5px; color: var(--ink-2); }
+.replying > svg { flex: none; color: var(--ink-3); }
 .replying span { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.send-error { display: flex; align-items: center; gap: 6px; font-size: 12px; color: var(--danger); overflow-wrap: anywhere; }
-@media (max-width: 720px) {
-  .thread-scroll { padding: 14px 16px 16px; }
-  .jump { right: 12px; }
-  .composer { border-radius: 0; padding: 8px 12px calc(8px + env(safe-area-inset-bottom)); background: var(--surface-raised); }
+.compose > .compose-block { pointer-events: none; position: absolute; bottom: calc(100% + 8px); left: 0; right: 0; margin: 0; padding: 8px 12px; background: var(--surface-raised); box-shadow: var(--shadow-pop); }
+.send-error { display: flex; align-items: center; gap: 6px; font-size: 12px; color: var(--danger); overflow-wrap: anywhere; position: absolute; bottom: calc(100% + 8px); left: 0; right: 0; background: var(--surface-raised); }
+@media (max-width: 860px) { .thread-scroll, .composer { padding-inline: 16px; } }
+
+/* ---------- Phones: "+" · field · send in one row ---------- */
+/* Short landscape phones use it too, so the thread keeps at least 60 % of the height (AEON-1286). */
+@media (max-width: 720px), (max-height: 480px) {
+  .thread-scroll { padding: 10px 16px 16px; scrollbar-gutter: auto; }
+  .thread-col { --thread-gap: 16px; max-width: none; }
+  .queue-item { max-width: 85%; }
+  .queue-text { font-size: 15px; line-height: 1.45; border-radius: 18px 18px 6px 18px; }
+  /* The home indicator's inset replaces the bottom padding; it is never added on top (AEON-1286). */
+  .composer { padding: 8px 8px max(8px, env(safe-area-inset-bottom)); border-top: 1px solid var(--line); background: var(--surface-raised); }
+  .composer-col { max-width: none; }
+  .replying { margin: -2px 0 6px; padding-left: 14px; font-size: 13px; background: none; }
+  .compose-box { grid-template-columns: 44px minmax(0, 1fr) 44px; grid-template-areas: "plus field send"; column-gap: 4px; align-items: end; padding: 0; border-radius: 0; background: none; box-shadow: none; }
+  .compose-box:focus-within { box-shadow: none; }
   /* 16px keeps iOS Safari from zooming the page when the field takes focus. */
-  .compose textarea { font-size: 16px; min-height: 48px; resize: none; }
+  .compose-box textarea { grid-area: field; height: 44px; min-height: 44px; padding: 10px 15px; border: 1px solid var(--glass-edge); border-radius: 22px; background: var(--field-bg); box-shadow: var(--field-inset), 0 0 0 1px var(--line); font: 16px/22px var(--font); }
+  .compose-box textarea:focus { box-shadow: var(--field-inset), 0 0 0 1px var(--line), 0 0 0 2px color-mix(in srgb, var(--primary) 45%, transparent); }
+  .plus { display: grid; grid-area: plus; place-items: center; width: 44px; height: 44px; padding: 0; border: 0; border-radius: 999px; background: transparent; color: var(--ink-2); }
+  .plus:disabled { opacity: .5; }
+  @media (hover: hover) { .plus:hover:not(:disabled) { background: var(--row-hover); color: var(--ink); } }
+  .compose-row { display: contents; }
   .compose-hint { display: none; }
-  .compose-row .send { margin-left: auto; height: 40px; }
+  .choice { display: none; }
+  .send { grid-area: send; width: 44px; height: 44px; padding: 0; background: linear-gradient(180deg, var(--primary-hi), var(--primary) 60%, var(--primary-lo)); box-shadow: 0 0 0 1px color-mix(in srgb, var(--primary-line) 50%, transparent), 0 6px 14px -8px color-mix(in srgb, var(--primary) 55%, transparent), inset 0 1px 0 var(--glass-edge); }
+  .send > svg { width: 18px; height: 18px; }
+  .send .send-label { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
+  .send:disabled { background: var(--seg-bg); color: color-mix(in srgb, var(--ink-3) 70%, transparent); box-shadow: none; }
+  /* Typing during a turn: the field takes the first row, the choice the second. */
+  .composer.two .compose-box { grid-template-columns: 44px minmax(0, 1fr) minmax(0, auto) auto; grid-template-areas: "field field field field" "plus . now send"; row-gap: 8px; column-gap: 8px; }
+  .composer.two .choice { display: inline-flex; grid-area: now; align-self: center; }
+  .composer.two .cbtn { height: 44px; padding: 0 16px; font-size: 14.5px; }
+  .composer.two .send { width: auto; }
+  .composer.two .send > svg { width: 15px; height: 15px; }
+  .composer.two .send .send-label { position: static; width: auto; height: auto; overflow: visible; clip-path: none; }
+  .composer.two .steer-note { min-height: 44px; }
 }
+@media (max-width: 359px) { .composer.two .compose-box { column-gap: 4px; } .composer.two .cbtn { padding: 0 10px; gap: 5px; font-size: 13.5px; } }
 </style>

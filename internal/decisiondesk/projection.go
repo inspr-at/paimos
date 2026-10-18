@@ -9,7 +9,11 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/inspr-at/paimos/internal/approvals"
 	"github.com/inspr-at/paimos/internal/authz"
+	"github.com/inspr-at/paimos/internal/knowledge"
+	"github.com/inspr-at/paimos/internal/recurrences"
+	"github.com/inspr-at/paimos/internal/stepup/server"
 	"github.com/inspr-at/paimos/internal/tenant"
 	"github.com/jackc/pgx/v5"
 )
@@ -42,7 +46,7 @@ questions(id,kind,project_id,revision,title,created_at,expires_at,held,source) A
  AND ($2='' OR $2='question' AND q.node_id=$3::uuid)
 ), approvals(id,kind,project_id,revision,title,created_at,expires_at,held,source) AS (
  SELECT r.id,'approval'::text,coalesce(n.project_id,wn.project_id),1::bigint,
- 'Approval · '||r.scope,r.proposed_at,r.expires_at,
+ CASE WHEN r.scope LIKE '%.routine\_%' ESCAPE '\' THEN 'Routine action approval' ELSE 'Approval · '||r.scope END,r.proposed_at,r.expires_at,
  (n.id IS NOT NULL AND n.deleted_at IS NULL AND coalesce(n.state,'') NOT IN ('done','delivered','cancelled','canceled','closed')
   AND (nw.node_id IS NULL OR nw.status NOT IN ('done','cancelled'))
   AND (nk.slug IN ('ticket','task','epic','work_order') OR nk.field_schema->>'issue_family'='true'))
@@ -86,11 +90,115 @@ questions(id,kind,project_id,revision,title,created_at,expires_at,held,source) A
  WHERE t.tenant_id=$1 AND t.state='pending' AND t.expires_at>(SELECT at FROM clock)
  AND k.revoked_at IS NULL AND (k.expires_at IS NULL OR k.expires_at>(SELECT at FROM clock))
  AND ($2='' OR $2='key_trim' AND t.id=$3::uuid)
+), stepups(id,kind,project_id,revision,title,created_at,expires_at,held,source) AS (
+ SELECT s.id,'stepup'::text,s.project_id,s.revision,'Step-up approval · '||s.permission,s.created_at,s.expires_at,true,
+ '/api/stepup-requests'
+ FROM stepup_requests s LEFT JOIN nodes project ON project.tenant_id=s.tenant_id AND project.id=s.project_id
+ WHERE s.tenant_id=$1 AND s.state='pending' AND s.expires_at>(SELECT at FROM clock)
+ AND (s.project_id IS NULL OR project.id IS NOT NULL AND project.deleted_at IS NULL)
+ AND ($2='' OR $2='stepup' AND s.id=$3::uuid)
+), tier_requests(id,kind,project_id,revision,title,created_at,expires_at,held,source) AS (
+ SELECT r.id,'tier_request'::text,s.project_id,s.service_tier_revision,
+ 'Tier request · '||r.tier,r.created_at,NULL::timestamptz,false,
+ '/api/projects/'||s.project_id||'/harness-sessions/'||s.id||'/tier'
+ FROM harness_tier_requests r
+ JOIN harness_sessions s ON s.tenant_id=r.tenant_id AND s.id=r.session_id
+ JOIN nodes project ON project.tenant_id=s.tenant_id AND project.id=s.project_id
+ WHERE r.tenant_id=$1 AND r.state='pending' AND project.deleted_at IS NULL
+ AND s.stopped_at IS NULL AND s.archived_at IS NULL AND s.phase<>'stopping'
+ AND s.management='managed' AND 'service_tier_v1'=ANY(s.capabilities)
+ AND ($2='' OR $2='tier_request' AND r.id=$3::uuid)
+), account_matrix(id,kind,project_id,revision,title,created_at,expires_at,held,source) AS (
+ SELECT r.tenant_id,'account_matrix'::text,NULL::uuid,r.revision,'Looks right? · Account matrix'::text,
+ coalesce((SELECT min(e.at) FROM events e WHERE e.type='account_use.migrated'), 'epoch'::timestamptz),
+ NULL::timestamptz,false,'/api/account-use'
+ FROM account_use_rules r WHERE r.tenant_id=$1 AND r.confirmation_required
+ AND ($2='' OR $2='account_matrix' AND r.tenant_id=$3::uuid)
 )`
 
-const visibleSQL = sourceSQL + `, visible AS MATERIALIZED (
- SELECT *,CASE WHEN held AND kind='approval' THEN 0 WHEN held THEN 1 ELSE 2 END AS bucket,
- CASE WHEN held AND kind='approval' THEN expires_at ELSE created_at END AS order_at
+// Select bounded, current-owner candidates separately from the combined Desk
+// projection. PostgreSQL expands RLS in each plan; combining both trees retained
+// a much larger planner allocation in every pooled backend. The HTTP reader
+// runs both statements in its existing repeatable-read transaction. The final
+// projection also rechecks the candidate's project, activity and current owner.
+const personCandidateSQL = ` SELECT n.id::text,n.project_id::text FROM nodes n
+ JOIN node_kinds k ON k.tenant_id=n.tenant_id AND k.id=n.kind_id
+ LEFT JOIN LATERAL (
+   SELECT d.id,d.updated_at,d.fields FROM nodes d JOIN node_kinds dk ON dk.tenant_id=d.tenant_id AND dk.id=d.kind_id
+   WHERE d.tenant_id=n.tenant_id AND dk.slug='definition' AND d.deleted_at IS NULL AND (d.parent_id=n.project_id OR d.parent_id IS NULL)
+   ORDER BY (d.parent_id IS NULL),d.id LIMIT 1
+ ) definition ON true
+ CROSS JOIN LATERAL (SELECT CASE WHEN replace(replace(lower(btrim(n.state)),' ','_'),'-','_')='qa'
+   THEN 'qa' ELSE aeon_work_status_category(n.state,k.field_schema) END AS current_status,
+   CASE WHEN coalesce(n.fields->>'assignee','') ~* '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$'
+   THEN (n.fields->>'assignee')::uuid END AS assignee) work
+ CROSS JOIN LATERAL (SELECT coalesce(array_agg(lower(CASE WHEN jsonb_typeof(x)='object' THEN x->>'name' ELSE x#>>'{}' END)),'{}') AS labels
+   FROM jsonb_array_elements(
+     CASE WHEN jsonb_typeof(n.fields->'tags')='array' THEN n.fields->'tags' ELSE '[]'::jsonb END ||
+     CASE WHEN jsonb_typeof(n.fields->'labels')='array' THEN n.fields->'labels' ELSE '[]'::jsonb END) x) tags
+ WHERE n.tenant_id=$1 AND n.project_id=ANY($3::uuid[]) AND n.deleted_at IS NULL AND k.slug IN ('work','ticket','task')
+ AND (n.human_check IS NOT NULL AND btrim(n.human_check)<>'' AND work.current_status='done'
+   AND EXISTS(SELECT 1 FROM (SELECT (SELECT e.after FROM events e
+     WHERE e.tenant_id=n.tenant_id AND e.node_id=n.id AND e.type='node.person_step_reassigned'
+     AND e.after->>'check_id'='human' ORDER BY e.id DESC LIMIT 1) AS assignment) human
+     WHERE aeon_person_step_owner(n.project_id,CASE WHEN human.assignment IS NOT NULL
+       THEN (human.assignment->>'owner_id')::uuid ELSE work.assignee END,NULL)=$2::uuid)
+ OR EXISTS(SELECT 1 FROM jsonb_array_elements(CASE WHEN jsonb_typeof(definition.fields->'checks')='object' THEN
+   coalesce(definition.fields->'checks'->CASE
+     WHEN work.current_status='qa' THEN 'done'
+     WHEN work.current_status IN ('in_progress','progress','active') THEN 'qa'
+     WHEN work.current_status IN ('new','backlog','open','blocked') THEN 'in_progress'
+   END,'[]'::jsonb) ELSE '[]'::jsonb END) rule
+   LEFT JOIN LATERAL (SELECT e.after FROM events e
+     WHERE e.tenant_id=n.tenant_id AND e.node_id=n.id AND e.type='node.person_step_reassigned'
+     AND e.after->>'check_id'=rule->>'id' AND e.after->>'definition_id'=definition.id::text
+     AND (e.after->>'definition_revision')::timestamptz=definition.updated_at ORDER BY e.id DESC LIMIT 1) assigned ON true
+   LEFT JOIN LATERAL (SELECT e.after FROM events e
+     WHERE e.tenant_id=n.tenant_id AND e.node_id=n.id AND e.type IN ('entry_check.ticked','node.entry_check_ticked')
+     AND e.after->>'check_id'=rule->>'id' AND e.after->>'definition_id'=definition.id::text
+     AND (e.after->>'definition_revision')::timestamptz=definition.updated_at ORDER BY e.id DESC LIMIT 1) mark ON true
+   WHERE rule->>'id' LIKE 'manual:%' AND NOT coalesce((mark.after->>'checked')::boolean,false)
+   AND CASE coalesce(rule->>'condition','all')
+     WHEN 'ui' THEN 'ui'=ANY(tags.labels) OR n.fields->>'area'='frontend'
+     WHEN 'code' THEN coalesce(n.fields->>'no_release_needed','false')<>'true' AND NOT ('docs'=ANY(tags.labels) OR 'content'=ANY(tags.labels))
+     WHEN 'blocked' THEN work.current_status='blocked'
+     WHEN 'release_notes' THEN coalesce(n.fields->>'hide_from_release_notes','false')<>'true'
+     WHEN 'releases' THEN coalesce(n.fields->>'no_release_needed','false')<>'true' AND EXISTS(
+       SELECT 1 FROM nodes r JOIN node_kinds rk ON rk.tenant_id=r.tenant_id AND rk.id=r.kind_id
+       WHERE r.tenant_id=n.tenant_id AND r.project_id=n.project_id AND r.deleted_at IS NULL AND rk.slug='release')
+     ELSE true END
+   AND (jsonb_array_length(coalesce(rule->'kinds','[]'))=0 OR rule->'kinds' ? k.slug)
+   AND NOT EXISTS(SELECT 1 FROM jsonb_array_elements_text(coalesce(rule->'labels','[]')) v WHERE NOT lower(v)=ANY(tags.labels))
+   AND aeon_person_step_owner(n.project_id,CASE
+     WHEN assigned.after IS NOT NULL THEN (assigned.after->>'owner_id')::uuid
+     WHEN rule->>'owner_id' IS NOT NULL THEN (rule->>'owner_id')::uuid
+     ELSE work.assignee END,
+     CASE WHEN assigned.after IS NULL AND rule->>'owner_id' IS NULL THEN (rule->>'fallback_owner_id')::uuid END)=$2::uuid))
+ ORDER BY n.id LIMIT 1001`
+
+const visibleSQL = sourceSQL + `, routine_consents(id,kind,project_id,revision,title,created_at,expires_at,held,source) AS (
+ SELECT id,'routine_consent'::text,project_id,revision,title,created_at,NULL::timestamptz,false,href
+ FROM jsonb_to_recordset($26::jsonb) AS r(id uuid,project_id uuid,revision bigint,title text,created_at timestamptz,href text)
+), lessons(id,kind,project_id,revision,title,created_at,expires_at,held,source) AS (
+ SELECT id,'lesson'::text,project_id,revision,title,created_at,NULL::timestamptz,false,source
+ FROM jsonb_to_recordset($27::jsonb) AS r(id uuid,project_id uuid,revision bigint,title text,created_at timestamptz,source text)
+), person_candidates AS MATERIALIZED (
+ SELECT n.id,n.project_id FROM jsonb_to_recordset($28::jsonb) AS c(id uuid,project_id uuid)
+ JOIN nodes n ON n.tenant_id=$1 AND n.id=c.id AND n.project_id=c.project_id
+ WHERE n.deleted_at IS NULL
+), person_request_details AS MATERIALIZED (
+ SELECT n.project_id,step FROM person_candidates n
+ CROSS JOIN LATERAL jsonb_array_elements(aeon_person_steps(n.id)) step
+ WHERE step->>'active'='true' AND step->'owner'->>'id'=$4::uuid::text
+), person_requests(id,kind,project_id,revision,title,created_at,expires_at,held,source) AS (
+ SELECT (step->>'id')::uuid,'action_request'::text,project_id,
+ (extract(epoch FROM (step->>'revision')::timestamptz)*1000000)::bigint,
+ 'Confirm: '||(step->>'label'),(step->>'created_at')::timestamptz,NULL::timestamptz,false,
+ '/api/nodes/'||(step->>'node_id')||'/person-steps/'||(step->>'check_id')
+ FROM person_request_details
+), visible AS MATERIALIZED (
+ SELECT *,(SELECT step FROM person_request_details WHERE (step->>'id')::uuid=items.id AND items.kind='action_request') AS person_step,CASE WHEN held AND kind IN ('approval','stepup') THEN 0 WHEN held THEN 1 ELSE 2 END AS bucket,
+ CASE WHEN held AND kind IN ('approval','stepup') THEN expires_at ELSE created_at END AS order_at
  FROM (
  SELECT * FROM questions WHERE project_id=ANY($5::uuid[]) AND (NOT $16 OR project_id=ANY($20::uuid[]))
  UNION ALL SELECT * FROM approvals WHERE (project_id=ANY($6::uuid[]) OR project_id IS NULL AND $8) AND (NOT $16 OR $19)
@@ -99,6 +207,12 @@ const visibleSQL = sourceSQL + `, visible AS MATERIALIZED (
   WHERE a.tenant_id=$1 AND a.source_request_id=held_requests.id AND q.project_id=ANY($5::uuid[]))
  UNION ALL SELECT * FROM doctrine WHERE $9
  UNION ALL SELECT * FROM key_trims WHERE $21
+ UNION ALL SELECT * FROM stepups WHERE EXISTS(SELECT 1 FROM stepup_requests s WHERE s.tenant_id=$1 AND s.id=stepups.id AND coalesce($22::jsonb->s.permission,'[]'::jsonb) @> jsonb_build_array(coalesce(s.project_id::text,'')))
+ UNION ALL SELECT * FROM tier_requests WHERE project_id=ANY($23::uuid[]) AND project_id=ANY($24::uuid[])
+ UNION ALL SELECT * FROM account_matrix WHERE $25
+ UNION ALL SELECT * FROM routine_consents
+ UNION ALL SELECT * FROM lessons
+ UNION ALL SELECT * FROM person_requests
  ) items
 ), totals AS (
  SELECT count(*)::int AS open,count(*) FILTER (WHERE held)::int AS held,
@@ -117,16 +231,16 @@ const visibleSQL = sourceSQL + `, visible AS MATERIALIZED (
  ORDER BY bucket,order_at,id,kind LIMIT $15
 )
 SELECT (SELECT at FROM clock),totals.open,totals.held,totals.chores,
- coalesce((SELECT jsonb_agg(to_jsonb(page) ORDER BY bucket,order_at,id,kind) FROM page),'[]'::jsonb) FROM totals`
+ coalesce((SELECT jsonb_agg(to_jsonb(page) ORDER BY bucket,order_at,id,kind) FROM page),'[]'::jsonb), (SELECT count(*) FROM person_candidates) FROM totals`
 
 // ReadTx serves the canonical HTTP projection for the future desk cutover.
 // NoticesTx reuses its source predicates for the pending phone integration.
 // Neither projection read acquires source mutation locks.
-func ReadTx(ctx context.Context, tx pgx.Tx, p tenant.Principal, limit int, after *cursor) (Page, error) {
-	return readProjection(ctx, tx, p, limit, after, false, false)
+func ReadTx(ctx context.Context, tx pgx.Tx, p tenant.Principal, limit int, after *cursor, readers ...recurrences.ExecutionRuntimeReader) (Page, error) {
+	return readProjection(ctx, tx, p, limit, after, false, false, readers...)
 }
 
-func readProjection(ctx context.Context, tx pgx.Tx, p tenant.Principal, limit int, after *cursor, eligibleOnly, unclaimedOnly bool) (Page, error) {
+func readProjection(ctx context.Context, tx pgx.Tx, p tenant.Principal, limit int, after *cursor, eligibleOnly, unclaimedOnly bool, readers ...recurrences.ExecutionRuntimeReader) (Page, error) {
 	page := Page{Items: []Item{}}
 	if p.Kind != tenant.Person || p.KeyCreatorID != "" || limit < 1 || limit > 100 {
 		return page, errors.New("invalid desk reader")
@@ -135,7 +249,14 @@ func readProjection(ctx context.Context, tx pgx.Tx, p tenant.Principal, limit in
 	if err != nil {
 		return page, err
 	}
-	projects := map[string][]string{"questions.read": {}, "questions.decide": {}, "approvals.read": {}, "inbox.manage": {}}
+	projects := map[string][]string{"questions.read": {}, "questions.decide": {}, "approvals.read": {}, "inbox.manage": {}, "harness.control": {}, "harness.read": {}, "knowledge.read": {}, "nodes.read": {}, "nodes.write": {}}
+	stepupPermissions := map[string][]string{}
+	for _, permission := range stepup.TargetPermissions() {
+		stepupPermissions[permission] = []string{}
+		if check(permission, "") {
+			stepupPermissions[permission] = append(stepupPermissions[permission], "")
+		}
+	}
 	rows, err := tx.Query(ctx, `SELECT n.id::text FROM nodes n JOIN node_kinds k ON k.tenant_id=n.tenant_id AND k.id=n.kind_id WHERE n.tenant_id=$1 AND k.slug='project' AND n.deleted_at IS NULL ORDER BY n.id LIMIT 1001`, p.TenantID)
 	if err != nil {
 		return page, err
@@ -153,6 +274,11 @@ func readProjection(ctx context.Context, tx pgx.Tx, p tenant.Principal, limit in
 				projects[permission] = append(projects[permission], id)
 			}
 		}
+		for permission := range stepupPermissions {
+			if check(permission, id) {
+				stepupPermissions[permission] = append(stepupPermissions[permission], id)
+			}
+		}
 	}
 	rows.Close()
 	if err = rows.Err(); err != nil {
@@ -166,9 +292,50 @@ func readProjection(ctx context.Context, tx pgx.Tx, p tenant.Principal, limit in
 		c = *after
 	}
 	var raw []byte
-	err = tx.QueryRow(ctx, visibleSQL, p.TenantID, "", nil, p.ID, projects["questions.read"], projects["approvals.read"], projects["inbox.manage"], check("approvals.read", ""), check("rules.read", "") && check("rules.write", ""), after != nil, c.Bucket, c.At, c.ID, c.Kind, limit+1, eligibleOnly, unclaimedOnly, int(NearExpiry/time.Second), check("approvals.decide", ""), projects["questions.decide"], check("keys.manage", "")).Scan(&page.AsOf, &page.Counts.Open, &page.Counts.Held, &page.Counts.Chores, &raw)
+	var personCandidates int
+	stepupVisibility, err := json.Marshal(stepupPermissions)
 	if err != nil {
 		return page, err
+	}
+	var reader recurrences.ExecutionRuntimeReader
+	if len(readers) > 0 {
+		reader = readers[0]
+	}
+	consents, err := recurrences.ConsentRequestsTx(ctx, tx, p, reader)
+	if err != nil {
+		return page, err
+	}
+	consentSource, err := json.Marshal(consents)
+	if err != nil {
+		return page, err
+	}
+	lessonRows := []knowledge.DeskLesson{}
+	if !eligibleOnly {
+		lessonRows, err = knowledge.DeskLessonsTx(ctx, tx, p, projects["knowledge.read"])
+		if err != nil {
+			return page, err
+		}
+	}
+	if !eligibleOnly {
+		page.Counts.Lessons = make(map[string]int)
+		for _, lesson := range lessonRows {
+			page.Counts.Lessons[lesson.ProjectID]++
+		}
+	}
+	lessonSource, err := json.Marshal(lessonRows)
+	if err != nil {
+		return page, err
+	}
+	personCandidatesJSON, err := personCandidatesTx(ctx, tx, p, projects["nodes.read"])
+	if err != nil {
+		return page, err
+	}
+	err = tx.QueryRow(ctx, visibleSQL, p.TenantID, "", nil, p.ID, projects["questions.read"], projects["approvals.read"], projects["inbox.manage"], check("approvals.read", ""), check("rules.read", "") && check("rules.write", ""), after != nil, c.Bucket, c.At, c.ID, c.Kind, limit+1, eligibleOnly, unclaimedOnly, int(NearExpiry/time.Second), check("approvals.decide", ""), projects["questions.decide"], check("keys.manage", ""), stepupVisibility, projects["harness.control"], projects["harness.read"], check("account.use.manage", ""), consentSource, lessonSource, personCandidatesJSON).Scan(&page.AsOf, &page.Counts.Open, &page.Counts.Held, &page.Counts.Chores, &raw, &personCandidates)
+	if err != nil {
+		return page, err
+	}
+	if personCandidates > 1000 {
+		return page, ErrPersonStepCoverage
 	}
 	// The internal order fields also form the opaque keyset cursor.
 	var records []struct {
@@ -189,14 +356,49 @@ func readProjection(ctx context.Context, tx pgx.Tx, p tenant.Principal, limit in
 		if err = json.Unmarshal(record.OrderAt, &i.OrderAt); err != nil {
 			return page, err
 		}
-		if i.Kind == "doctrine" {
-			i.Href = "/settings/agent-rules#doctrine-inbox"
-		} else {
-			prefix := map[string]string{"question": "q:", "approval": "a:", "action_request": "m:", "key_trim": "k:"}[i.Kind]
-			i.Href = "/agents?needs=" + prefix + i.ID
-			if i.Kind == "key_trim" {
-				i.Href = "/decision-desk?needs=k:" + i.ID
+		prefix := map[string]string{"question": "q:", "approval": "a:", "action_request": "m:", "doctrine": "r:", "tier_request": "t:", "key_trim": "k:", "stepup": "s:", "lesson": "l:"}[i.Kind]
+		i.Href = "/decision-desk?item=" + prefix + i.ID
+		if i.Kind == "routine_consent" {
+			i.Href = i.Source
+		}
+		if i.Kind == "account_matrix" {
+			i.Href = "/settings/accounts#account-use"
+		}
+		if i.Kind == "key_trim" || i.Kind == "stepup" {
+			i.Href = "/decision-desk?needs=" + prefix + i.ID
+		}
+		if i.Kind == "account_matrix" {
+			i.Href = "/settings/accounts#account-use"
+		}
+		switch i.Kind {
+		case "question":
+			i.CanDecide = check("questions.decide", i.ProjectID)
+		case "approval":
+			i.CanDecide, err = approvals.CanNotify(ctx, tx, p, i.ID)
+			if err != nil {
+				return page, err
 			}
+		case "action_request":
+			if i.PersonStep != nil {
+				i.CanDecide = i.PersonStep.Owner.ID == p.ID && check("nodes.write", i.ProjectID)
+				i.PersonStep.CanTick = i.CanDecide
+			} else {
+				i.CanDecide = check("inbox.manage", i.ProjectID)
+			}
+		case "doctrine":
+			i.CanDecide = check("rules.write", "")
+		case "tier_request":
+			i.CanDecide = check("harness.control", i.ProjectID)
+		case "stepup":
+			i.CanDecide = true // Membership already checked each native target permission.
+		case "key_trim":
+			i.CanDecide = check("keys.manage", "")
+		case "account_matrix":
+			i.CanDecide = check("account.use.manage", "")
+		case "lesson":
+			i.CanDecide = check("knowledge.write", i.ProjectID)
+		case "routine_consent":
+			i.CanDecide = true // Canonical owner and native policy checked before paging.
 		}
 		page.Items = append(page.Items, i)
 	}
@@ -209,4 +411,33 @@ func readProjection(ctx context.Context, tx pgx.Tx, p tenant.Principal, limit in
 		page.NextCursor = base64.RawURLEncoding.EncodeToString(b)
 	}
 	return page, nil
+}
+
+// The query caps IDs before decoding/serialization. A project identity travels
+// with each candidate so the projection cannot follow a node moved elsewhere.
+func personCandidatesTx(ctx context.Context, tx pgx.Tx, p tenant.Principal, projects []string) ([]byte, error) {
+	rows, err := tx.Query(ctx, personCandidateSQL, p.TenantID, p.ID, projects)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	type candidate struct {
+		ID      string `json:"id"`
+		Project string `json:"project_id"`
+	}
+	candidates := []candidate{}
+	for rows.Next() {
+		var c candidate
+		if err := rows.Scan(&c.ID, &c.Project); err != nil {
+			return nil, err
+		}
+		candidates = append(candidates, c)
+		if len(candidates) > 1000 {
+			return nil, ErrPersonStepCoverage
+		}
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return json.Marshal(candidates)
 }

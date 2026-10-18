@@ -200,8 +200,8 @@ defineExpose({ focus: () => heading.value?.focus({ preventScroll: false }) })
 .live-chip .live-dot { width: 6px; height: 6px; box-shadow: none; }
 .counts { display:flex; flex-wrap:wrap; gap:7px; font-size:13px; color:var(--ink-2); }
 .counts strong { font-weight:650; color:var(--ink); }
-.chip.new { background: var(--gold-wash); box-shadow: inset 0 0 0 1px rgba(214, 155, 49, .45); color: color-mix(in oklab, var(--gold-ink), var(--ink) 35%); }
-.live-dot { width: 7px; height: 7px; border-radius: 50%; background: var(--ok); box-shadow: 0 0 0 3px rgba(47, 122, 90, .16); }
+.chip.new { background: var(--secondary-tint-3); box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--secondary-line) 45%, transparent); color: color-mix(in oklab, var(--secondary-ink), var(--ink) 35%); }
+.live-dot { width: 7px; height: 7px; border-radius: 50%; background: var(--ok); box-shadow: 0 0 0 3px color-mix(in srgb, var(--ok) 16%, transparent); }
 .detail-info { font-size:11px; color:var(--ink-3); }
 .when { font-size: 13px; color: var(--ink-2); }
 .live-line { font-size: 15px; line-height: 1.5; color: var(--ink-2); }
@@ -236,7 +236,7 @@ dd { display: flex; align-items: center; flex-wrap: wrap; gap: 6px 10px; margin:
 .ext { display: inline-flex; align-items: center; gap: 6px; color: var(--teal-ink); border-radius: 6px; }
 @media (hover: hover) { .ext:hover { text-decoration: underline; text-underline-offset: 3px; } }
 .run { display: inline-flex; align-items: center; height: 20px; padding: 0 8px; border-radius: 999px; background: var(--surface-2); color: var(--ink-2); font-size: 11.5px; font-weight: 600; }
-.run.success { background: rgba(47, 122, 90, .12); color: color-mix(in oklab, var(--ok), var(--ink) 35%); }
+.run.success { background: color-mix(in srgb, var(--ok) 12%, transparent); color: color-mix(in oklab, var(--ok), var(--ink) 35%); }
 .run.failure, .run.timed_out { background: var(--danger-bg); color: var(--danger); }
 .copy { display: inline-flex; align-items: center; gap: 5px; height: 26px; padding: 0 9px; border: 0; border-radius: 999px; background: var(--surface-2); color: var(--ink-2); font-size: 11.5px; font-weight: 600; }
 @media (hover: hover) { .copy:hover { background: var(--row-selected); color: var(--teal-ink); } }

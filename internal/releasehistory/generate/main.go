@@ -50,7 +50,15 @@ func main() {
 		fmt.Fprintln(os.Stderr, "release history:", err)
 		os.Exit(1)
 	}
-	raw, err := json.MarshalIndent(h, "", "  ")
+	publication, err := releasehistory.BuildPublication(ctx, opts, h)
+	if err != nil {
+		fmt.Fprintln(os.Stderr, "release publication:", err)
+		os.Exit(1)
+	}
+	raw, err := json.MarshalIndent(struct {
+		releasehistory.History
+		Publication *releasehistory.Publication `json:"delivery_publication,omitempty"`
+	}{h, publication}, "", "  ")
 	if err != nil {
 		fmt.Fprintln(os.Stderr, "release history:", err)
 		os.Exit(1)

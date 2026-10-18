@@ -143,7 +143,7 @@ const shapes = computed<Shape[]>(() => {
 .viz { display: block; width: 100%; height: auto; overflow: visible; }
 .base { stroke: var(--line-2); stroke-width: 1.2; }
 .grid { stroke: var(--line); stroke-width: 1; }
-.trend { fill: none; stroke: var(--gold-ink); stroke-width: 1.3; stroke-dasharray: 3 3; opacity: .7; }
+.trend { fill: none; stroke: var(--secondary-ink); stroke-width: 1.3; stroke-dasharray: 3 3; opacity: .7; }
 .area { fill: color-mix(in srgb, var(--teal) 12%, transparent); }
 .stroke { fill: none; stroke: var(--teal); stroke-width: 2.2; stroke-linejoin: round; stroke-linecap: round; }
 .dot { fill: var(--teal); }
@@ -152,15 +152,15 @@ const shapes = computed<Shape[]>(() => {
 .col-mid { fill: color-mix(in srgb, var(--teal) 55%, transparent); }
 .col-dim { fill: color-mix(in srgb, var(--teal) 28%, transparent); }
 .col-on { fill: var(--teal); }
-.fix { fill: color-mix(in srgb, var(--gold) 65%, transparent); }
+.fix { fill: color-mix(in srgb, var(--secondary-line) 65%, transparent); }
 .placeholder { fill: none; stroke: var(--line-2); stroke-width: 1.2; stroke-dasharray: 2 2; }
 .tick { stroke: color-mix(in srgb, var(--teal) 42%, transparent); stroke-width: 2.2; stroke-linecap: round; }
 .tick-on { stroke: var(--teal); stroke-width: 2.8; stroke-linecap: round; }
 .earlier { fill: none; stroke: var(--teal); stroke-width: 2.8; stroke-linecap: round; stroke-linejoin: round; }
-.wait { stroke: var(--gold-ink); stroke-width: 2.4; stroke-dasharray: 3 3; stroke-linecap: round; }
-.now { fill: var(--surface); stroke: var(--gold-ink); stroke-width: 2.2; }
-.bracket { fill: none; stroke: var(--gold-ink); stroke-width: 1.2; stroke-linejoin: round; }
-.marker { stroke: var(--gold-ink); stroke-width: 1.6; stroke-dasharray: 2.5 2.5; }
+.wait { stroke: var(--secondary-ink); stroke-width: 2.4; stroke-dasharray: 3 3; stroke-linecap: round; }
+.now { fill: var(--surface); stroke: var(--secondary-ink); stroke-width: 2.2; }
+.bracket { fill: none; stroke: var(--secondary-ink); stroke-width: 1.2; stroke-linejoin: round; }
+.marker { stroke: var(--secondary-ink); stroke-width: 1.6; stroke-dasharray: 2.5 2.5; }
 .chain { stroke: color-mix(in srgb, var(--teal) 42%, transparent); stroke-width: 2; }
 .bead { fill: color-mix(in srgb, var(--teal) 45%, var(--surface)); stroke: var(--surface); stroke-width: 1.5; }
 .bead-off { fill: none; stroke: var(--line-2); stroke-width: 1.4; }
@@ -169,7 +169,7 @@ text { font-family: var(--mono); font-size: 9.5px; font-weight: 500; font-varian
 .label { fill: var(--ink-3); }
 .label-on, .value-on { fill: var(--teal-ink); font-weight: 600; }
 .label-strong { fill: var(--teal-ink); font-size: 10px; font-weight: 700; }
-.label-gold { fill: var(--gold-ink); font-weight: 600; }
+.label-gold { fill: var(--secondary-ink); font-weight: 600; }
 .small { font-size: 9px; }
 .tiny { font-size: 8.5px; font-weight: 400; }
 </style>

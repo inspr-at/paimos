@@ -1,0 +1,595 @@
+// SPDX-License-Identifier: AGPL-3.0-only
+package agentpairing
+
+import (
+	"go/ast"
+	"go/parser"
+	"go/token"
+	"io/fs"
+	"os"
+	"path/filepath"
+	"reflect"
+	"sort"
+	"strconv"
+	"strings"
+	"testing"
+)
+
+// This explicit caller inventory makes newly connected entry paths reviewable.
+// Actual contention and FK compatibility are exercised by boundary/recurrence tests.
+var sharedFenceCallers = map[string][]string{
+	"db.LockTree":               {"accountuse/module.go", "authz/project_members.go", "crossreview/policy.go", "db/fences.go", "delivery/admission_api.go", "delivery/admission_queue.go", "delivery/alerts.go", "delivery/audit.go", "delivery/audit_store.go", "delivery/reviews_api.go", "delivery/routing.go", "delivery/webhook_receipts.go", "goals/revalidate.go", "goals/store.go", "modelregistry/module.go", "modelregistry/preparation.go", "modelregistry/refresh.go", "nativesessions/receipts/repository.go", "operatoractor/actor.go", "stepup/server/store.go", "workorders/common.go"},
+	"db.LockTenant":             {"accountuse/module.go", "accountuse/policy.go", "auth/messaging_assistant.go", "auth/store.go", "business/costunits/module.go", "crossreview/reporter.go", "db/fences.go", "delivery/admission_publisher.go", "delivery/admission_queue.go", "delivery/alerts.go", "delivery/api.go", "delivery/audit_store.go", "delivery/audit_webhook.go", "delivery/flow_store.go", "delivery/metrics_api.go", "delivery/metrics_worker.go", "delivery/module.go", "delivery/quarantine.go", "delivery/reconcile.go", "delivery/store.go", "delivery/webhook.go", "delivery/webhook_receipts.go", "delivery/workqueue.go", "delivery/workqueue_api.go", "engineadmission/module.go", "features/features.go", "modelregistry/module.go", "modelregistry/preferences_http.go", "modelregistry/preparation.go", "modelregistry/proposals.go", "plugins/module.go", "projectgroups/module.go", "routineexec/recovery.go", "statusautopilot/attention_bulk.go", "workorders/common.go"},
+	"db.LockCurrentTree":        {"agentpairing/lifecycle.go", "nodes/module.go"},
+	"agentpairing.LockRead":     {"agentaccounts/residency_evidence.go", "agentruns/runs.go"},
+	"agentpairing.Lock":         {"agentaccounts/native_session.go", "agentaccounts/route.go", "agentpairing/lifecycle.go", "agentpairing/provision.go", "agentruns/routine_launch.go", "agentruns/runs.go", "agentruns/telemetry.go", "crossreview/module.go", "harness/lead_runtime.go", "knowledge/tagger.go", "knowledge/undo.go", "modelregistry/harness_probes.go", "modelregistry/preparation.go", "nativeintegration/pilot.go", "nativesessions/interaction/store.go", "nativesessions/store/claim.go", "nativesessions/store/read.go", "nativesessions/store/start.go", "nodes/bulk.go", "nodes/nodes.go", "routineactions/catalog.go", "routineactions/pipeline.go", "routineactions/pr.go", "routinebudget/store.go", "routineexec/dispatch.go", "routineexec/recovery.go", "routineexec/review.go"},
+	"agentpairing.LockMutation": {"agentaccounts/module.go", "agentpairing/module.go", "agentruns/queue.go", "auth/owner_workstation.go", "harness/agent_recovery.go", "harness/module.go", "modelprovider/settings.go", "parentbenefits/module.go", "portal/market.go", "portal/moderate.go", "portal/module.go", "portal/products.go", "questions/store.go"},
+	"authz.LockProjectMutation": {"authz/agent_creation.go", "authz/members.go", "authz/project_members.go", "importer/users_backfill.go", "importer/writer.go", "statusautopilot/settings.go"},
+	"authz.LockProjectWrite":    {"attachments/module.go", "decisiondesk/notifications.go", "delivery/status_timing_store.go", "events/causal_undo.go", "events/module.go", "harness/lead_decisions.go", "knowledge/learning_cleanup.go", "knowledge/learnings.go", "nodes/causal_undo.go", "nodes/portal_publish.go", "projectdraft/create.go", "themes/store.go", "themes/undo.go"},
+	"operatoractor.Ensure":      {"auth/store.go", "authz/operator.go", "operatoractor/actor.go"},
+	"rules.PrepareWrite":        {"knowledge/learning_draft.go"},
+}
+
+func TestSharedFenceCallerInventory(t *testing.T) {
+	root := ".."
+	observed := map[string]map[string]bool{}
+	err := filepath.WalkDir(root, func(path string, d fs.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		if d.IsDir() || !strings.HasSuffix(path, ".go") || strings.HasSuffix(path, "_test.go") {
+			return nil
+		}
+		rel, err := filepath.Rel(root, path)
+		if err != nil {
+			return err
+		}
+		file, err := parser.ParseFile(token.NewFileSet(), path, nil, 0)
+		if err != nil {
+			return err
+		}
+		ast.Inspect(file, func(n ast.Node) bool {
+			call, ok := n.(*ast.CallExpr)
+			if !ok {
+				return true
+			}
+			key := ""
+			switch fn := call.Fun.(type) {
+			case *ast.SelectorExpr:
+				if pkg, ok := fn.X.(*ast.Ident); ok {
+					key = pkg.Name + "." + fn.Sel.Name
+				}
+			case *ast.Ident:
+				key = file.Name.Name + "." + fn.Name
+			}
+			if key == "operatoractor.EnsureWithProduction" {
+				key = "operatoractor.Ensure"
+			}
+			if _, ok := sharedFenceCallers[key]; ok {
+				if observed[key] == nil {
+					observed[key] = map[string]bool{}
+				}
+				observed[key][filepath.ToSlash(rel)] = true
+			}
+			return true
+		})
+		return nil
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for key, want := range sharedFenceCallers {
+		got := []string{}
+		for path := range observed[key] {
+			got = append(got, path)
+		}
+		sort.Strings(got)
+		sort.Strings(want)
+		if !reflect.DeepEqual(got, want) {
+			t.Errorf("%s callers changed; inventory and analyze entry order: got %v want %v", key, got, want)
+		}
+	}
+}
+
+func TestSharedFencePrimitiveOrder(t *testing.T) {
+	checks := []struct{ path, fn, first, second string }{
+		// AEON-1411: access fences precede final permission checks and resource locks.
+		{"../agentaccounts/module.go", "in", "agentpairing.LockMutation(", "accountuse.LockShared("},
+		{"../agentaccounts/module.go", "write", "m.in(", "authz.RequireTx("},
+		{"../agentaccounts/module.go", "write", "authz.RequireTx(", "return fn(tx)"},
+		{"../plugins/module.go", "Configure", "db.LockTenant(", "authz.RequireTx("},
+		{"../plugins/module.go", "Configure", "authz.RequireTx(", "loadInstall("},
+		{"../business/costunits/module.go", "Module.insertRate", "db.LockTenant(", "authz.RequireTx("},
+		{"../business/costunits/module.go", "Module.insertRate", "authz.RequireTx(", "m.authorize("},
+		{"../features/features.go", "Save", "db.LockTenant(", "authorize("},
+		{"../features/features.go", "Save", "authorize(", "pg_advisory_xact_lock"},
+		{"../projectgroups/module.go", "create", "db.LockTenant(", "authz.RequireTx("},
+		{"../projectgroups/module.go", "create", "authz.RequireTx(", "lockGroups("},
+		{"../projectgroups/module.go", "patch", "db.LockTenant(", "authz.RequireTx("},
+		{"../projectgroups/module.go", "patch", "authz.RequireTx(", "lockGroups("},
+		{"../projectgroups/module.go", "remove", "db.LockTenant(", "authz.RequireTx("},
+		{"../projectgroups/module.go", "remove", "authz.RequireTx(", "lockGroups("},
+		{"../projectgroups/module.go", "assign", "db.LockTenant(", "authz.RequireTx("},
+		{"../projectgroups/module.go", "assign", "authz.RequireTx(", "lockGroups("},
+		{"ledger.go", "enrollLedger", "m.in(", "accountuse.LockExclusive("},
+		{"ledger.go", "enrollLedger", "accountuse.LockExclusive(", "authz.RequireTx("},
+		{"ledger.go", "enrollLedger", "authz.RequireTx(", "FOR NO KEY UPDATE"},
+		{"ledger.go", "enrollLedger", "out, err = view(", "return audit("},
+		{"../agentaccounts/route.go", "reserve", "RequireLedgerWork(", "activeRoute("},
+		{"../agentruns/runs.go", "claim", "RequireLedgerWork(", "refuseVerification("},
+		// Routine review/fix continuation (AEON-1201) takes tenant/tree/pairing,
+		// then the account-use fence before outbox/resource rows. The owner is
+		// re-authorized inside that transaction; child writes precede events.
+		{"../routineexec/review.go", "ContinueTx", "agentpairing.Lock(", "accountuse.LockShared("},
+		{"../routineexec/review.go", "ContinueTx", "accountuse.LockShared(", "FOR NO KEY UPDATE"},
+		{"../routineexec/review.go", "advance", "authz.RequireTx(", "FOR NO KEY UPDATE"},
+		{"../routineexec/review.go", "advance", "e.fix(", "events.Append("},
+		{"../routineexec/review.go", "advance", "e.finishActor(", "events.Append("},
+		// The fix account's project matrix is checked in the fenced write,
+		// before profile compatibility and the new run, rather than inherited
+		// from the completed writer's historical admission.
+		{"../agentruns/review.go", "QueueRoutineFixTx", "authz.RequireTx(", "accountuse.RequireProject("},
+		{"../agentruns/review.go", "QueueRoutineFixTx", "accountuse.RequireProject(", "aeon_account_allows_profile("},
+		{"../agentruns/review.go", "QueueRoutineFixTx", "aeon_account_allows_profile(", "INSERT INTO agent_runs"},
+		{"../db/fences.go", "LockTree", "LockTenant(", "pg_advisory_xact_lock"},
+		{"lifecycle.go", "Lock", "db.LockCurrentTree(", "aeon-pairing:"},
+		// Native intent, claim and read entries (AEON-1267) take tenant/tree/pairing
+		// before current authority and target rows. Claim observation stays outside
+		// the final fenced transaction; registration and reservation precede events.
+		{"../nativesessions/store/start.go", "Start", "agentpairing.Lock(", "requireStart("},
+		{"../nativesessions/store/start.go", "Start", "requireStart(", "INSERT INTO native_session_bindings"},
+		{"../nativesessions/store/start.go", "Start", "INSERT INTO native_session_intents", "appendEvent("},
+		{"../nativesessions/store/claim.go", "Claim", "s.observer.Observe(", "agentpairing.Lock("},
+		{"../nativesessions/store/claim.go", "Claim", "agentpairing.Lock(", "loadPending(ctx, tx, in.OperationID, true)"},
+		{"../nativesessions/store/claim.go", "Claim", "loadPending(ctx, tx, in.OperationID, true)", "requireStart("},
+		{"../nativesessions/store/claim.go", "Claim", "requireStart(", "nativeCapacity("},
+		{"../nativesessions/store/claim.go", "Claim", "agentaccounts.ReserveNativeRootTx(", "appendEvent("},
+		{"../nativesessions/store/read.go", "read", "agentpairing.Lock(", "authz.RequireTx("},
+		{"../nativesessions/store/read.go", "read", "authz.RequireTx(", "SELECT b.view"},
+		// Receipt projection and final drain (AEON-1271) enter tenant/tree
+		// before refreshing visibility and invoking current authority. Receipt
+		// events follow row writes; final storage follows authority and row locks.
+		{"../nativesessions/receipts/repository.go", "write", "db.LockTree(", "SELECT aeon_enter_principal("},
+		{"../nativesessions/receipts/repository.go", "write", "SELECT aeon_enter_principal(", "return fn(ctx, tx)"},
+		{"../nativesessions/receipts/repository.go", "Report", "s.write(", "s.authority.ReceiptTx("},
+		{"../nativesessions/receipts/repository.go", "Report", "s.authority.ReceiptTx(", "authz.RequireTx("},
+		{"../nativesessions/receipts/repository.go", "Report", "authz.RequireTx(", "FOR NO KEY UPDATE"},
+		{"../nativesessions/receipts/repository.go", "Report", "INSERT INTO native_session_receipts", "events.Append("},
+		{"../nativesessions/receipts/page.go", "Receipts", "s.write(", "s.authority.ReadTx("},
+		{"../nativesessions/receipts/page.go", "Receipts", "s.authority.ReadTx(", "authz.RequireTx("},
+		{"../nativesessions/receipts/page.go", "Receipts", "authz.RequireTx(", "SELECT receipt FROM native_session_receipts"},
+		// Sink.Persist delegates; Repository.Persist owns the transaction.
+		{"../nativesessions/receipts/final.go", "Repository.Persist", "s.write(", "s.authority.FinalTx("},
+		{"../nativesessions/receipts/final.go", "Repository.Persist", "s.authority.FinalTx(", "authz.RequireTx("},
+		{"../nativesessions/receipts/final.go", "Repository.Persist", "authz.RequireTx(", "FOR NO KEY UPDATE"},
+		{"../nativesessions/receipts/final.go", "Repository.Persist", "FOR NO KEY UPDATE", "s.chat.StoreNativeFinalTx("},
+		{"../auth/store.go", "revokeAgentKeyTx", "db.LockTenant(", "lockAgentKey("},
+		{"../rules/module.go", "endpoint", "lockAccess(", "pg_advisory_xact_lock"},
+		{"../rules/learning_draft.go", "PrepareWrite", "lockAccess(", "pg_advisory_xact_lock"},
+		{"../recurrences/module.go", "lock", "FOR NO KEY UPDATE", "pg_try_advisory_xact_lock"},
+		// Attached heartbeats and recovery enter tenant/tree/pairing before
+		// policy/session/recovery rows; control events are flushed afterward.
+		{"../harness/module.go", "heartbeat", "agentpairing.LockMutation(", "lockActivityPolicy("},
+		{"../harness/agent_recovery.go", "requestAgentRecovery", "agentpairing.LockMutation(", "recoveryPerson("},
+		{"../harness/agent_recovery.go", "readAgentRecovery", "agentpairing.LockMutation(", "authz.RequireTx("},
+		{"../harness/agent_recovery.go", "claimAgentRecoveries", "agentpairing.LockMutation(", "recoveryDaemon("},
+		{"../harness/agent_recovery.go", "completeAgentRecovery", "agentpairing.LockMutation(", "recoveryDaemon("},
+		// Learning decisions (AEON-788) enter the project fence and re-authorize
+		// before the learning advisory lock and node rows; the event is appended last.
+		{"../knowledge/learnings.go", "fenceLearningWrite", "authz.LockProjectWrite(", "authz.RequireTx("},
+		{"../knowledge/learnings.go", "acceptLearning", "fenceLearningWrite(", "lockLearning("},
+		{"../knowledge/learnings.go", "acceptLearning", "lockNode(", "events.Append("},
+		{"../knowledge/learnings.go", "dismissLearning", "fenceLearningWrite(", "lockLearning("},
+		{"../knowledge/learnings.go", "dismissLearning", "lockLearning(", "recordDismissal("},
+		{"../knowledge/learning_cleanup.go", "recordDismissal", "FOR KEY SHARE", "events.Append("},
+		{"../knowledge/learning_cleanup.go", "cleanupLegacyItem", "authz.LockProjectWrite(", "lockLearning("},
+		{"../knowledge/learning_cleanup.go", "cleanupLegacyItem", "requireCleanupActor(", "recordDismissal("},
+		{"../knowledge/learning_draft.go", "draftLearning", "fenceLearningWrite(", "rules.PrepareWrite("},
+		{"../knowledge/learning_draft.go", "draftLearning", "FOR KEY SHARE", "rules.AppendLearningRule("},
+		{"../knowledge/learning_draft.go", "draftLearning", "rules.AppendLearningRule(", "events.Append("},
+		// Autopilot settings and project overrides (AEON-696) enter the shared
+		// project fence before the settings row; the event is appended after it.
+		{"../statusautopilot/settings.go", "settings", "authz.LockProjectMutation(", "INSERT INTO status_autopilot_settings"},
+		{"../statusautopilot/settings.go", "settings", "INSERT INTO status_autopilot_settings", "events.Append("},
+		{"../statusautopilot/settings.go", "project", "authz.LockProjectMutation(", "INSERT INTO status_autopilot_projects"},
+		{"../statusautopilot/settings.go", "project", "INSERT INTO status_autopilot_projects", "events.Append("},
+		// Review policy (AEON-851) enters the shared tree fence before the
+		// project row and re-checks authority there. Review rows are marked
+		// dirty before the event counter.
+		{"../crossreview/policy.go", "writePolicy", "db.LockTree(", "policyProject("},
+		{"../crossreview/policy.go", "writePolicy", "db.LockTree(", "authz.RequireTx("},
+		{"../crossreview/policy.go", "writePolicy", "UPDATE work_order_reviews", "events.Append("},
+		// Publication re-reads under the tenant fence after network I/O, before
+		// it writes the review row. The binding invalidation commits earlier,
+		// in its own transaction, and does not hold this fence across the post.
+		{"../crossreview/reporter.go", "publishReview", "db.LockTenant(", "github_status=$2"},
+		// Stall alerts (AEON-849) prepare System under the tenant fence in a
+		// separate transaction, then enter the shared tree fence before rows,
+		// lead authority and inbox acceptance. Acceptance is the first event.
+		{"../delivery/alerts.go", "alertItem", "db.LockTenant(", "systemactor.Ensure("},
+		{"../delivery/alerts.go", "alertItem", "db.LockTree(", "authz.RequireTx("},
+		{"../delivery/alerts.go", "alertItem", "db.LockTree(", "FOR KEY SHARE"},
+		{"../delivery/alerts.go", "alertItem", "FOR KEY SHARE", "inbox.AcceptMessageTx("},
+		{"../delivery/alerts.go", "alertItem", "INSERT INTO delivery_alerts", "inbox.AcceptMessageTx("},
+		{"../delivery/alerts.go", "alertItem", "inbox.AcceptMessageTx(", "events.Append("},
+		// Merge audit (AEON-852) prepares the System actor in its own fenced
+		// transaction. Writes and retries take tenant/tree before audit and
+		// recipient rows; recipient authorization and writes precede events.
+		{"../delivery/audit_store.go", "auditActor", "db.LockTenant(", "systemactor.Ensure("},
+		{"../delivery/audit_webhook.go", "auditCheckEvent", "db.LockTenant(", "INSERT INTO delivery_github_events"},
+		{"../delivery/audit_store.go", "auditMerge", "db.LockTree(", "auditRecipientTx("},
+		{"../delivery/audit_store.go", "auditMerge", "auditRecipientTx(", "INSERT INTO delivery_merge_audit"},
+		{"../delivery/audit_store.go", "auditMerge", "INSERT INTO delivery_merge_audit", "events.Append("},
+		{"../delivery/audit.go", "retryAuditAlerts", "db.LockTree(", "FOR NO KEY UPDATE"},
+		{"../delivery/audit.go", "retryAuditAlerts", "db.LockTree(", "auditRecipientTx("},
+		{"../delivery/audit.go", "retryAuditAlerts", "auditRecipientTx(", "UPDATE delivery_merge_audit"},
+		{"../delivery/audit.go", "retryAuditAlerts", "UPDATE delivery_merge_audit", "auditAlert("},
+		// Merge-queue quarantine (AEON-850) takes the shared tenant fence before
+		// failure rows and the ledger. recordTx appends the event counter after.
+		// Delivery Flow (AEON-1004): tenant fence, then authorization and the
+		// item/step/incident rows; the value-free hints are appended last.
+		{"../delivery/flow_store.go", "flowWrite", "db.LockTenant(", "build(ctx, tx, apply)"},
+		{"../delivery/flow_store.go", "flowWrite", "build(ctx, tx, apply)", "events.Append("},
+		{"../delivery/quarantine.go", "quarantineEvent", "db.LockTenant(", "INSERT INTO delivery_queue_failures"},
+		{"../delivery/quarantine.go", "quarantineEvent", "INSERT INTO delivery_queue_failures", "recordTx("},
+		// Shadow admission (AEON-887) re-checks authority under the tenant fence
+		// after the GitHub WIP read. The decision row precedes the event.
+		{"../engineadmission/module.go", "admit", "db.LockTenant(", "INSERT INTO engine_admission_decisions"},
+		{"../engineadmission/module.go", "admit", "INSERT INTO engine_admission_decisions", "events.Append("},
+		{"../engineadmission/module.go", "settings", "db.LockTenant(", "authz.RequireTx("},
+		{"../engineadmission/module.go", "settings", "authz.RequireTx(", "events.Append("},
+		// Attention bulk (AEON-914) enters the canonical tenant fence, then the
+		// pairing advisory, then the shared tree advisory, before any batch row.
+		// Item commits lock the batch before node resolution; the summary event
+		// is appended only after that batch lock, with no later fence.
+		{"../statusautopilot/attention_bulk.go", "attentionMutationContext", "db.LockTenant(", "aeon-pairing:"},
+		{"../statusautopilot/attention_bulk.go", "attentionMutationContext", "aeon-pairing:", "return lock("},
+		{"../statusautopilot/attention_bulk.go", "processAttentionBatch", "lockAttentionBatch(", "resolveAttention("},
+		{"../statusautopilot/attention_bulk.go", "processAttentionBatch", "lockAttentionBatch(", "events.Append("},
+	}
+	for _, c := range checks {
+		raw, err := os.ReadFile(c.path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		tree, err := parser.ParseFile(token.NewFileSet(), c.path, raw, 0)
+		if err != nil {
+			t.Fatal(err)
+		}
+		receiver, name, qualified := strings.Cut(c.fn, ".")
+		if !qualified {
+			name = c.fn
+		}
+		var body string
+		for _, decl := range tree.Decls {
+			fn, ok := decl.(*ast.FuncDecl)
+			if ok && fn.Name.Name == name {
+				if qualified {
+					if fn.Recv == nil || len(fn.Recv.List) != 1 {
+						continue
+					}
+					typ := fn.Recv.List[0].Type
+					if pointer, ok := typ.(*ast.StarExpr); ok {
+						typ = pointer.X
+					}
+					ident, ok := typ.(*ast.Ident)
+					if !ok || ident.Name != receiver {
+						continue
+					}
+				}
+				body = string(raw[int(fn.Pos())-1 : int(fn.End())-1])
+				break
+			}
+		}
+		first, second := strings.Index(body, c.first), strings.Index(body, c.second)
+		if first < 0 || second < 0 || first >= second {
+			t.Errorf("%s.%s must acquire %s before %s", c.path, c.fn, c.first, c.second)
+		}
+	}
+	// The first admin check is before the fence. The revocation re-check is the
+	// admin call that remains after LockProjectMutation.
+	for _, fn := range []string{"settings", "project"} {
+		body := functionBody(t, "../statusautopilot/settings.go", fn)
+		lock := strings.Index(body, "authz.LockProjectMutation(")
+		if lock < 0 || !strings.Contains(body[lock:], "admin(") {
+			t.Errorf("statusautopilot.%s must re-check admin after LockProjectMutation", fn)
+		}
+	}
+	// The message-id writeback touches only the row inserted before acceptance.
+	// It must not take a fence, advisory lock or FK share lock after that event.
+	body := functionBody(t, "../delivery/alerts.go", "alertItem")
+	accept := strings.Index(body, "inbox.AcceptMessageTx(")
+	if accept < 0 {
+		t.Fatal("delivery.alertItem missing inbox acceptance")
+	}
+	tail := body[accept:]
+	if strings.Contains(tail, "FOR KEY SHARE") || strings.Contains(tail, "db.Lock") || strings.Contains(tail, "pg_advisory") || strings.Contains(tail, "FOR UPDATE") || strings.Contains(tail, "FOR NO KEY UPDATE") {
+		t.Error("delivery.alertItem must not acquire fences or row locks after inbox acceptance")
+	}
+	if !strings.Contains(tail, "UPDATE delivery_alerts SET inbox_message_id") || strings.Index(tail, "events.Append(") < strings.Index(tail, "UPDATE delivery_alerts SET inbox_message_id") {
+		t.Error("delivery.alertItem must write the accepted message id before the stall event")
+	}
+	// The bulk summary is the last event in the function. Nothing after it may
+	// take a tenant, tree, pairing or batch fence.
+	bulk := functionBody(t, "../statusautopilot/attention_bulk.go", "processAttentionBatch")
+	summary := strings.LastIndex(bulk, "events.Append(")
+	if summary < 0 {
+		t.Fatal("attention bulk missing summary event")
+	}
+	afterSummary := bulk[summary:]
+	if strings.Contains(afterSummary, "db.Lock") || strings.Contains(afterSummary, "pg_advisory") || strings.Contains(afterSummary, "FOR UPDATE") || strings.Contains(afterSummary, "FOR NO KEY UPDATE") || strings.Contains(afterSummary, "lockAttentionBatch(") || strings.Contains(afterSummary, "lock(") {
+		t.Error("attention bulk must not acquire fences after the summary event")
+	}
+}
+
+func TestEngineAdmissionJoinsSharedTenantFence(t *testing.T) {
+	// Risk: shadow admission reads GitHub between two transactions. The write
+	// must re-enter db.LockTenant, and that caller stays in the shared inventory.
+	body := functionBody(t, "../engineadmission/module.go", "admit")
+	lock := strings.Index(body, "db.LockTenant(")
+	preview := strings.Index(body, "admissionAuthority(")
+	insert := strings.Index(body, "INSERT INTO engine_admission_decisions")
+	event := strings.Index(body, "events.Append(")
+	if lock < 0 || preview < 0 || preview >= lock || insert < lock || event < insert {
+		t.Fatal("admit must preview authority, re-check it under the tenant fence, then append the event")
+	}
+	if strings.Index(body[lock:], "admissionAuthority(") < 0 {
+		t.Fatal("admit must re-check admission authority after the tenant fence")
+	}
+	tail := body[event:]
+	if strings.Contains(tail, "db.Lock") || strings.Contains(tail, "FOR UPDATE") || strings.Contains(tail, "FOR NO KEY UPDATE") {
+		t.Fatal("admit must not take another lock after the event")
+	}
+	var listed bool
+	for _, path := range sharedFenceCallers["db.LockTenant"] {
+		if path == "engineadmission/module.go" {
+			listed = true
+		}
+	}
+	if !listed {
+		t.Fatal("engine admission must be inventoried as a db.LockTenant caller")
+	}
+}
+
+func functionBody(t *testing.T, path, name string) string {
+	t.Helper()
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	tree, err := parser.ParseFile(token.NewFileSet(), path, raw, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, decl := range tree.Decls {
+		fn, ok := decl.(*ast.FuncDecl)
+		if ok && fn.Name.Name == name {
+			return string(raw[int(fn.Pos())-1 : int(fn.End())-1])
+		}
+	}
+	t.Fatalf("%s missing function %s", path, name)
+	return ""
+}
+
+// Risk: a new or moved person mutation trusts an earlier authorization
+// transaction. Scan the affected modules, following local transaction helpers;
+// only reads may be exempt, and a check in an earlier transaction cannot count.
+func TestPersonMutationsRecheckPermissions(t *testing.T) {
+	reads := map[string]bool{
+		"agentaccounts/Module.list":            true,
+		"agentaccounts/Module.catalog":         true,
+		"agentaccounts/Module.use":             true,
+		"agentaccounts/Module.capacityHistory": true,
+		"agentaccounts/Module.capacityList":    true,
+		"agentaccounts/Module.capacityPreview": true,
+		"agentaccounts/Module.capacityNext":    true,
+	}
+	for _, area := range []string{"agentaccounts", "plugins", "projectgroups", "business/costunits", "features"} {
+		files, err := filepath.Glob(filepath.Join("..", area, "*.go"))
+		if err != nil {
+			t.Fatal(err)
+		}
+		functions := permissionGuardFunctions{}
+		for _, path := range files {
+			if strings.HasSuffix(path, "_test.go") {
+				continue
+			}
+			tree, err := parser.ParseFile(token.NewFileSet(), path, nil, 0)
+			if err != nil {
+				t.Fatal(err)
+			}
+			functions.add(tree)
+		}
+		if len(functions) == 0 {
+			t.Fatalf("guard found no source in %s", area)
+		}
+		for name, fn := range functions {
+			if !permissionPrecheck(fn) {
+				continue
+			}
+			key := area + "/" + name
+			writes, missing := functions.transactions(fn, map[string]bool{})
+			if reads[key] && writes > 0 {
+				t.Errorf("%s: read-only exemption contains a mutation", key)
+			} else if missing > 0 {
+				t.Errorf("%s: %d mutating transactions have a precheck but no RequireTx inside the final write", key, missing)
+			}
+		}
+	}
+	// Each plant has a real write and an earlier check. In particular, RequireTx
+	// outside the callback or in a separate read transaction must not satisfy it.
+	for _, planted := range []string{
+		`m.requirePermission(r,p,"account.manage"); m.in(ctx,p.TenantID,func(tx pgx.Tx) error { _,err:=tx.Exec(ctx,"INSERT INTO things VALUES(1)"); return err })`,
+		`authz.Require(ctx,"account.manage",authz.Scope{}); authz.RequireTx(ctx,old,p,"account.manage",authz.Scope{}); m.in(ctx,p.TenantID,func(tx pgx.Tx) error { _,err:=tx.Exec(ctx,"UPDATE things SET value=1"); return err })`,
+		`m.admin(w,r); m.in(ctx,p.TenantID,func(tx pgx.Tx) error { return authz.RequireTx(ctx,tx,p,"account.manage",authz.Scope{}) }); m.in(ctx,p.TenantID,func(tx pgx.Tx) error { _,err:=tx.Exec(ctx,"DELETE FROM things"); return err })`,
+		`m.requirePermission(r,p,"account.manage"); m.in(ctx,p.TenantID,func(tx pgx.Tx) error { m.in(ctx,p.TenantID,func(other pgx.Tx) error { return authz.RequireTx(ctx,other,p,"account.manage",authz.Scope{}) }); _,err:=tx.Exec(ctx,"INSERT INTO things VALUES(1)"); return err })`,
+	} {
+		tree, err := parser.ParseFile(token.NewFileSet(), "planted.go", `package planted; func (m *Module) handle() { `+planted+` }`, 0)
+		if err != nil {
+			t.Fatal(err)
+		}
+		functions := permissionGuardFunctions{}
+		functions.add(tree)
+		fn := functions["Module.handle"]
+		writes, missing := functions.transactions(fn, map[string]bool{})
+		if !permissionPrecheck(fn) || writes != 1 || missing != 1 {
+			t.Errorf("guard missed planted handler (%d writes, %d missing): %s", writes, missing, planted)
+		}
+	}
+	tree, err := parser.ParseFile(token.NewFileSet(), "guarded.go", `package guarded; func (m *Module) handle() {
+        m.requirePermission(r,p,"account.manage")
+        m.in(ctx,p.TenantID,func(tx pgx.Tx) error {
+            if err:=authz.RequireTx(ctx,tx,p,"account.manage",authz.Scope{}); err!=nil { return err }
+            _,err:=tx.Exec(ctx,"INSERT INTO things VALUES(1)"); return err
+        })
+    }`, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	functions := permissionGuardFunctions{}
+	functions.add(tree)
+	if writes, missing := functions.transactions(functions["Module.handle"], map[string]bool{}); writes != 1 || missing != 0 {
+		t.Fatalf("guard rejected an in-transaction recheck (%d writes, %d missing)", writes, missing)
+	}
+}
+
+type permissionGuardFunctions map[string]*ast.FuncDecl
+
+func (functions permissionGuardFunctions) add(tree *ast.File) {
+	for _, decl := range tree.Decls {
+		fn, ok := decl.(*ast.FuncDecl)
+		if !ok || fn.Body == nil {
+			continue
+		}
+		_, receiver := permissionReceiver(fn)
+		name := fn.Name.Name
+		if receiver != "" {
+			name = receiver + "." + name
+		}
+		functions[name] = fn
+	}
+}
+
+func permissionReceiver(fn *ast.FuncDecl) (string, string) {
+	if fn.Recv == nil || len(fn.Recv.List) != 1 {
+		return "", ""
+	}
+	field := fn.Recv.List[0]
+	typ := field.Type
+	if pointer, ok := typ.(*ast.StarExpr); ok {
+		typ = pointer.X
+	}
+	ident, ok := typ.(*ast.Ident)
+	if !ok || len(field.Names) != 1 {
+		return "", ""
+	}
+	return field.Names[0].Name, ident.Name
+}
+
+func permissionCall(fn *ast.FuncDecl, call *ast.CallExpr) string {
+	switch target := call.Fun.(type) {
+	case *ast.Ident:
+		return target.Name
+	case *ast.SelectorExpr:
+		if ident, ok := target.X.(*ast.Ident); ok {
+			name, typ := permissionReceiver(fn)
+			if ident.Name == name {
+				return typ + "." + target.Sel.Name
+			}
+			return ident.Name + "." + target.Sel.Name
+		}
+	}
+	return ""
+}
+
+func permissionPrecheck(fn *ast.FuncDecl) bool {
+	found := false
+	ast.Inspect(fn.Body, func(node ast.Node) bool {
+		if call, ok := node.(*ast.CallExpr); ok {
+			name := permissionCall(fn, call)
+			found = found || name == "authz.Require" || name == "Module.requirePermission" || name == "Module.admin"
+		}
+		return true
+	})
+	return found
+}
+
+func permissionTx(params *ast.FieldList) bool {
+	if params != nil {
+		for _, field := range params.List {
+			if typ, ok := field.Type.(*ast.SelectorExpr); ok {
+				if pkg, ok := typ.X.(*ast.Ident); ok && pkg.Name == "pgx" && typ.Sel.Name == "Tx" {
+					return true
+				}
+			}
+		}
+	}
+	return false
+}
+
+// evidence only follows helpers accepting the current transaction. A helper
+// opening its own transaction cannot authorize its caller's final write.
+func (functions permissionGuardFunctions) evidence(fn *ast.FuncDecl, node ast.Node, seen map[string]bool) (write, recheck bool) {
+	ast.Inspect(node, func(node ast.Node) bool {
+		if _, nested := node.(*ast.FuncLit); nested {
+			return false
+		}
+		call, ok := node.(*ast.CallExpr)
+		if !ok {
+			return true
+		}
+		name := permissionCall(fn, call)
+		recheck = recheck || name == "authz.RequireTx"
+		write = write || name == "events.Append" || name == "Module.appendEvent"
+		if strings.HasSuffix(name, ".Exec") || strings.HasSuffix(name, ".QueryRow") {
+			ast.Inspect(call, func(arg ast.Node) bool {
+				if lit, ok := arg.(*ast.BasicLit); ok && lit.Kind == token.STRING {
+					value, _ := strconv.Unquote(lit.Value)
+					sql := strings.ToUpper(strings.Join(strings.Fields(value), " "))
+					write = write || strings.Contains(sql, "INSERT INTO ") || strings.Contains(sql, "DELETE FROM ") || strings.Contains(sql, "UPDATE ") && strings.Contains(sql, " SET ")
+				}
+				return true
+			})
+		}
+		if helper := functions[name]; helper != nil && permissionTx(helper.Type.Params) && !seen[name] {
+			seen[name] = true
+			w, r := functions.evidence(helper, helper.Body, seen)
+			write, recheck = write || w, recheck || r
+		}
+		return true
+	})
+	return write, recheck
+}
+
+func (functions permissionGuardFunctions) transactions(fn *ast.FuncDecl, seen map[string]bool) (writes, missing int) {
+	ast.Inspect(fn.Body, func(node ast.Node) bool {
+		call, ok := node.(*ast.CallExpr)
+		if !ok {
+			return true
+		}
+		name := permissionCall(fn, call)
+		for _, arg := range call.Args {
+			callback, ok := arg.(*ast.FuncLit)
+			if !ok || !permissionTx(callback.Type.Params) {
+				continue
+			}
+			write, recheck := functions.evidence(fn, callback.Body, map[string]bool{})
+			if write {
+				writes++
+				// Module.write's fence/recheck/callback order is independently
+				// pinned by TestSharedFencePrimitiveOrder above.
+				if !recheck && name != "Module.write" {
+					missing++
+				}
+			}
+			return false
+		}
+		if helper := functions[name]; helper != nil && !seen[name] {
+			seen[name] = true
+			w, m := functions.transactions(helper, seen)
+			writes, missing = writes+w, missing+m
+		}
+		return true
+	})
+	return writes, missing
+}

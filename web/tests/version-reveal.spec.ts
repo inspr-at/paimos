@@ -8,7 +8,6 @@
 import { test, expect, type Locator, type Page } from '@playwright/test'
 import { fixtures, mockWork } from './work-fixtures'
 import { mockReleases, releaseHistory } from './releases-fixtures'
-import { journeyWorld, mockJourney } from './journey-fixtures'
 
 const sheet = (page: Page) => page.getByRole('dialog', { name: 'PAIMOS AEON releases' })
 const options = (page: Page) => page.getByRole('grid', { name: 'Releases, newest first' }).getByRole('row')
@@ -139,47 +138,6 @@ test('release heading and the history dock: copy controls reveal on hover and fo
   await page.keyboard.press('Enter')
   await expect(dock.getByRole('status')).toHaveText('Version copied')
   expect(await page.evaluate(() => navigator.clipboard.readText())).toBe(history.current)
-})
-
-test('journey release list: hover and focus reveal; a click still opens the release', async ({ page }) => {
-  await page.setViewportSize({ width: 1440, height: 900 })
-  await mockWork(page, fixtures())
-  await mockJourney(page, journeyWorld('build', { derived: true }))
-  await page.goto('/p/PHAROS?view=journey')
-  const list = page.getByRole('list', { name: 'Releases, newest first' })
-  const row = list.getByRole('button').filter({ has: page.locator('[data-canonical="260901120000.0.0"]') })
-  await expect(row).toBeVisible()
-  await expectRest(row)
-  await row.hover()
-  await expectRevealed(row)
-  await away(page)
-  await expectRest(row)
-  await row.focus()
-  await expectRevealed(row)
-  await row.blur()
-  await expectRest(row)
-  await version(row).click()
-  await expect(page).toHaveURL(/[?&]release=PHAROS-30(&|$)/)
-  await expect(row).toHaveAttribute('aria-current', 'true')
-})
-
-test('journey Live heading: the standalone copy pill reveals on keyboard focus and copies', async ({ page, context }) => {
-  await context.grantPermissions(['clipboard-read', 'clipboard-write'])
-  await page.setViewportSize({ width: 1440, height: 900 })
-  await mockWork(page, fixtures())
-  await mockJourney(page, journeyWorld('build', { derived: true }))
-  await page.goto('/p/PHAROS?view=journey&stage=live&release=PHAROS-30')
-  const head = page.locator('section[aria-labelledby="live-tickets"] .j-card-head')
-  // Omitted `interactive` means the renderer's own pill, never a bare image.
-  const copy = head.getByRole('button', { name: /^260901120000\.0\.0 · .* — Copy version$/ })
-  await expect(copy).toBeVisible()
-  await expectRest(head)
-  await copy.focus()
-  await expect(copy).toBeFocused()
-  await expectRevealed(head)
-  await page.keyboard.press('Enter')
-  await expect(copy).toHaveAttribute('data-copy-state', 'copied')
-  expect(await page.evaluate(() => navigator.clipboard.readText())).toBe('260901120000.0.0')
 })
 
 test('reduced motion reveals at once, without a transition', async ({ page }) => {

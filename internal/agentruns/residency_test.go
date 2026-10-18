@@ -121,6 +121,10 @@ func TestRunCreationStampsStarterAndRejectsDisallowedAccount(t *testing.T) {
 				requester = f.agent
 				if kind == "creator-key" {
 					requester.KeyCreatorID = f.person.ID
+					f.tx(t, f.person, func(tx pgx.Tx) error {
+						_, err := tx.Exec(t.Context(), `UPDATE agent_keys SET created_by_principal_id=$2 WHERE principal_id=$1`, f.agent.ID, f.person.ID)
+						return err
+					})
 				} else {
 					want = ""
 				}

@@ -1,0 +1,46 @@
+{
+  "version": 3,
+  "records": [
+    {
+      "tenant_id": "tenant",
+      "principal_id": "agent",
+      "run_id": "863fe008-0000-4000-8000-000000000000",
+      "work_order_id": "order",
+      "generation": "294214612eaf-fixture",
+      "workspace": "",
+      "pid": 3456,
+      "account_id": "account",
+      "execution_mode": "pairing_verification",
+      "state": "failed",
+      "exit_observed": true,
+      "sequence": 5,
+      "settlement_gap": true,
+      "report_rejections": 1,
+      "terminal_recovery": true,
+      "dead_letters": [
+        {
+          "sequence": 1,
+          "kind": "status",
+          "effective_model": "claude-fable-5-1",
+          "model_evidence": "vendor_reported"
+        },
+        {
+          "sequence": 2,
+          "kind": "turn",
+          "turn_count_delta": 1
+        },
+        {
+          "sequence": 3,
+          "kind": "started",
+          "status": "running"
+        },
+        {
+          "sequence": 4,
+          "kind": "finished",
+          "status": "failed",
+          "error_code": "app_server_protocol"
+        }
+      ]
+    }
+  ]
+}

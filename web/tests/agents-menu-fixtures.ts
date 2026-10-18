@@ -2,6 +2,6 @@
 import type { Page } from '@playwright/test'
 
 export async function openAttachSession(page: Page) {
-  await page.getByRole('button', { name: 'New: start an agent, attach a session or connect a machine', exact: true }).click()
+  await page.getByRole('button', { name: 'New: start a lead, attach a session or connect a machine', exact: true }).click()
   await page.getByRole('menuitem', { name: /Attach a running session/ }).click()
 }

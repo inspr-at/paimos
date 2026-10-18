@@ -14,9 +14,12 @@ import (
 	"time"
 
 	"github.com/inspr-at/paimos/internal/agentactivity"
+	"github.com/inspr-at/paimos/internal/attachedmsg"
 	"github.com/inspr-at/paimos/internal/attachwatch"
 	"github.com/inspr-at/paimos/internal/authz"
 	"github.com/inspr-at/paimos/internal/db"
+	"github.com/inspr-at/paimos/internal/events"
+	"github.com/inspr-at/paimos/internal/httpapi"
 	"github.com/inspr-at/paimos/internal/tenant"
 	"github.com/inspr-at/paimos/internal/workorders"
 	"github.com/jackc/pgx/v5"
@@ -33,6 +36,7 @@ type watchPollKey struct {
 	hash         string
 	protocol     int
 	proofVersion int
+	messages     bool
 }
 
 func (m *Module) registerWatchKey(ctx context.Context, p tenant.Principal, in attachwatch.DeviceRequest) error {
@@ -92,7 +96,7 @@ func (m *Module) registerWatchKey(ctx context.Context, p tenant.Principal, in at
 		if m.watchKeys.keys == nil {
 			m.watchKeys.keys = make(map[string]watchPollKey)
 		}
-		m.watchKeys.keys[key] = watchPollKey{hash: digest(in.PollKey), protocol: protocol, proofVersion: in.LocalConsentProofVersion}
+		m.watchKeys.keys[key] = watchPollKey{hash: digest(in.PollKey), protocol: protocol, proofVersion: in.LocalConsentProofVersion, messages: in.MessageProtocol == attachedmsg.Protocol}
 	}
 	return err
 }
@@ -209,7 +213,7 @@ func (m *Module) attachDevice(w http.ResponseWriter, r *http.Request) {
 	}
 	var in attachwatch.DeviceRequest
 	// JSON escapes can expand a bounded text record sixfold.
-	r.Body = http.MaxBytesReader(w, r.Body, 128<<10)
+	r.Body = httpapi.RequestBodyReader(w, r, 128<<10)
 	if workorders.Decode(r, &in) != nil || !uuidRE.MatchString(in.ComputerID) || len(in.Text) > attachwatch.MaxText || !inertText(in.Text) {
 		WriteError(w, fail(400, "invalid_request", "invalid attach request"))
 		return
@@ -226,6 +230,10 @@ func (m *Module) attachDevice(w http.ResponseWriter, r *http.Request) {
 	}
 	if len(in.LocalAuthSignature) > 144 || in.LocalAuthNonce != "" && !attachwatch.LocalAuthNonceValid(in.LocalAuthNonce) || in.Operation != "poll" && (in.LocalAuthSignature != "" || in.LocalAuthNonce != "") {
 		WriteError(w, fail(400, "invalid_request", "invalid local confirmation proof"))
+		return
+	}
+	if len(in.MessageLocalAuthSignature) > 144 || in.MessageLocalAuthNonce != "" && !attachwatch.LocalAuthNonceValid(in.MessageLocalAuthNonce) || in.Operation != "message_activate" && (in.MessageLocalAuthSignature != "" || in.MessageLocalAuthNonce != "") {
+		WriteError(w, fail(400, "invalid_request", "invalid messaging confirmation proof"))
 		return
 	}
 	if in.Operation == "register" {
@@ -251,6 +259,10 @@ func (m *Module) attachDevice(w http.ResponseWriter, r *http.Request) {
 	}
 	if !uuidRE.MatchString(in.RequestID) {
 		WriteError(w, fail(400, "invalid_request", "invalid attach request"))
+		return
+	}
+	if in.Operation == "message_request" || in.Operation == "message_activate" || in.Operation == "message_observed" || in.Operation == "message_offer" || in.Operation == "message_receipt" || in.Operation == "message_validate" {
+		m.messageDevice(w, r, p, in, expected)
 		return
 	}
 	if in.Operation != "request" && in.Operation != "poll" && in.Operation != "detach" && in.Operation != "exited" {
@@ -357,7 +369,12 @@ func (m *Module) attachDevice(w http.ResponseWriter, r *http.Request) {
 			}
 			out, _, _, err = loadAttach(ctx, tx, in.RequestID)
 			out.UserCode = code
-			return err
+			if err != nil {
+				return err
+			}
+			// The committed event wakes phone delivery. Keep registration proofs,
+			// the one-time code and the process snapshot out of its payload.
+			return appendEvent(ctx, tx, p, events.Change{Type: "harness.attach_requested", After: map[string]string{"request_id": in.RequestID, "owner_id": owner}})
 		}
 		var approvedOwner string
 		out, approvedOwner, _, err = loadAttach(ctx, tx, in.RequestID)
@@ -458,6 +475,12 @@ func (m *Module) attachDevice(w http.ResponseWriter, r *http.Request) {
 			if in.Text != "" {
 				rejected = fail(400, "invalid_request", "activation contains no transcript")
 				return attachEnd(ctx, tx, &out, "detached")
+			}
+			// Owner consent permits observing this process, not a parallel build.
+			// The tenant/tree/pairing fences and current attachScope check above
+			// remain in force through admission, session creation and lease commit.
+			if err = workorders.RequireBuildAdmissionTx(ctx, tx, p, out.Snapshot.TicketID, "", nil); err != nil {
+				return err
 			}
 			secret, err := randomHex(32)
 			if err != nil {

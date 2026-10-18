@@ -63,7 +63,7 @@ func leadQueueDemand(ctx context.Context, tx pgx.Tx, owner string) ([]leadDemand
  FROM agent_runs r JOIN nodes n ON n.tenant_id=r.tenant_id AND n.id=r.queue_node_id
  JOIN project_leads l ON l.tenant_id=n.tenant_id AND l.project_id=n.project_id
  JOIN nodes project ON project.tenant_id=l.tenant_id AND project.id=l.project_id
- WHERE l.owner_principal_id=$1 AND project.deleted_at IS NULL AND project.state<>'archived'
+ WHERE l.owner_principal_id=$1 AND project.deleted_at IS NULL AND project.state NOT IN ('frozen','archived')
  AND r.status='queued' AND n.deleted_at IS NULL AND n.state='open'
  AND (r.queue_routed_at IS NULL OR (r.trace->'project_lead'->>'session_id'=l.session_id::text AND r.trace->'project_lead'->>'generation'=l.generation::text))
  AND aeon_work_leaf(n.id) AND aeon_work_pending(n.id) IS NULL
@@ -135,7 +135,7 @@ func (m *Module) leadScheduleWait(ctx context.Context, tx pgx.Tx, p tenant.Princ
 				} else if err != nil {
 					return "", err
 				}
-				projected, err := projectLead(ctx, step, p, other)
+				projected, err := m.projectLead(ctx, step, p, other)
 				if err != nil {
 					return "", err
 				}
@@ -176,7 +176,7 @@ func (m *Module) leadScheduleWait(ctx context.Context, tx pgx.Tx, p tenant.Princ
 			if d.project != l.ProjectID {
 				// A paused intent or missing/stale start evidence is not an eligible
 				// contender and cannot head-of-line block another project's workers.
-				other, err = projectLead(ctx, step, p, other)
+				other, err = m.projectLead(ctx, step, p, other)
 				if err != nil {
 					return "", err
 				}
@@ -317,7 +317,7 @@ func (m *Module) yieldLead(r *http.Request, tx pgx.Tx, p tenant.Principal) (resu
 		return nil, authz.ErrForbidden
 	}
 	if l.State == "paused" && (l.Reason == "idle_yield" || l.Reason == "worker_priority") {
-		return projectLead(ctx, tx, p, l)
+		return m.projectLead(ctx, tx, p, l)
 	}
 	if l.State != "working" {
 		return nil, workorders.Fail(409, "current working lead required")
@@ -370,5 +370,5 @@ func (m *Module) yieldLead(r *http.Request, tx pgx.Tx, p tenant.Principal) (resu
 	if err = record(ctx, tx, p, Session{ProjectID: id}, "lead_yielded", before, l); err != nil {
 		return nil, err
 	}
-	return projectLead(ctx, tx, p, l)
+	return m.projectLead(ctx, tx, p, l)
 }

@@ -15,6 +15,7 @@ import (
 	"math/big"
 	"net/http"
 	"net/http/httptest"
+	"slices"
 	"sort"
 	"strings"
 	"sync"
@@ -49,17 +50,35 @@ func workstationSigner(n int64) *ecdsa.PrivateKey {
 	return &ecdsa.PrivateKey{PublicKey: ecdsa.PublicKey{Curve: elliptic.P256(), X: x, Y: y}, D: d}
 }
 
-func newWorkstationFixture(t *testing.T) *workstationFixture {
+// workstationOrdinaryScopes is every agent-grantable permission a built-in
+// owner can actually place on a key. Recurrence, delivery and review-policy
+// management stay out: the fixture switches the agent to built-in Admin, and
+// those need an explicit custom-role grant. reviews.visual_approve is
+// agent-grantable but withheld from every built-in role, so a catalog request
+// that includes it is forbidden until that grant exists.
+func workstationOrdinaryScopes(t *testing.T) []string {
 	t.Helper()
-	m, owner := keyFixture(t)
+	held, ok := authz.BuiltinPermissions("owner")
+	if !ok || slices.Contains(held, "reviews.visual_approve") {
+		t.Fatal("built-in owner must not implicitly hold visual approval")
+	}
+	excluded := builtinAgentExclusions(t)
 	scopes := []string{}
 	for _, p := range authz.Registry {
-		// The fixture switches to built-in Admin below. Recurrence automation
-		// requires an explicit custom-role grant, even for workstation keys.
-		if p.AgentGrantable && p.Key != "recurrences.manage" {
+		if p.AgentGrantable && !excluded[p.Key] && slices.Contains(held, p.Key) {
 			scopes = append(scopes, p.Key)
 		}
 	}
+	if slices.Contains(scopes, "reviews.visual_approve") {
+		t.Fatal("ordinary workstation scopes included ungranted visual approval")
+	}
+	return scopes
+}
+
+func newWorkstationFixture(t *testing.T) *workstationFixture {
+	t.Helper()
+	m, owner := keyFixture(t)
+	scopes := workstationOrdinaryScopes(t)
 	key := decodeKey(t, keyRequest(m, owner, map[string]any{"name": "Synthetic workstation", "scopes": scopes}))
 	other := decodeKey(t, keyRequest(m, owner, map[string]any{"principal_id": key.PrincipalID, "name": "Unmarked sibling", "scopes": scopes}))
 	f := &workstationFixture{m: m, owner: owner, key: key, other: other, runtime: key, deviceProof: strings.Repeat("b", 64), signer: workstationSigner(1), mux: http.NewServeMux()}
@@ -187,6 +206,21 @@ func workstationProof(t *testing.T, key *ecdsa.PrivateKey, c workstationTestChal
 		t.Fatal(err)
 	}
 	return c.ID + "." + base64.StdEncoding.EncodeToString(raw)
+}
+
+// Risk: reviews.visual_approve is agent-grantable and absent from the built-in
+// owner. A workstation catalog that requests every agent-grantable scope then
+// fails closed (403) and blocks pairing, challenge and proof tests. The
+// ordinary catalog must still be created, and the permission must not appear
+// on that key or become grantable without an explicit person grant.
+func TestWorkstationOrdinaryKeySurvivesExplicitVisualPermission(t *testing.T) {
+	f := newWorkstationFixture(t)
+	if slices.Contains(f.key.Scopes, "reviews.visual_approve") || slices.Contains(f.other.Scopes, "reviews.visual_approve") {
+		t.Fatal("workstation fixture granted visual approval without an explicit person grant")
+	}
+	if w := keyRequest(f.m, f.owner, map[string]any{"name": "visual", "scopes": []string{"reviews.visual_approve"}}); w.Code != http.StatusForbidden {
+		t.Fatalf("ungranted visual approval status = %d, want 403", w.Code)
+	}
 }
 
 func TestWorkstationMarkOwnerOnlyBindingAndUnmarkedIsolation(t *testing.T) {
@@ -406,7 +440,7 @@ func TestWorkstationForeignTenantAndSelfApproval(t *testing.T) {
 			return fmt.Errorf("foreign challenges visible")
 		}
 		p := tenant.Principal{ID: f.key.PrincipalID, TenantID: foreign, Kind: tenant.Agent, KeyID: f.key.ID, OwnerWorkstation: true, WorkstationComputerID: f.computer, WorkstationGeneration: 1}
-		_, _, err := authz.WorkstationKeyTx(t.Context(), tx, p)
+		_, _, _, err := authz.WorkstationKeyTx(t.Context(), tx, p)
 		if !errors.Is(err, authz.ErrForbidden) {
 			return fmt.Errorf("foreign key binding accepted")
 		}
@@ -487,9 +521,15 @@ func TestWorkstationCreatesAndRotatesOrdinaryKeys(t *testing.T) {
 	body := `{"name":"New synthetic worker","scopes":["nodes.read"]}`
 	c := f.challenge(t, "POST", "/api/agent-keys", body)
 	key := decodeKey(t, f.call(f.key.Token, "POST", "/api/agent-keys", body, workstationProof(t, f.signer, c)))
+	if *key.CreatedByPrincipalID != f.owner.ID {
+		t.Fatal("workstation creation omitted its person owner")
+	}
 	body = `{"rotate_key_id":"` + key.ID + `"}`
 	c = f.challenge(t, "POST", "/api/agent-keys", body)
 	rotated := decodeKey(t, f.call(f.key.Token, "POST", "/api/agent-keys", body, workstationProof(t, f.signer, c)))
+	if *rotated.CreatedByPrincipalID != f.owner.ID {
+		t.Fatal("workstation rotation omitted its person owner")
+	}
 	if rotated.OwnerWorkstation || rotated.PrincipalID != key.PrincipalID {
 		t.Fatal("rotation changed authority")
 	}

@@ -4,16 +4,29 @@
 //
 // Coordinator wiring: events.New(pool, relations.UndoOption()) returns an
 // httpapi.Module; add it and relations.New(pool) to Server.Modules after auth.
-// There are no background workers to start or stop. Each SSE request owns a
-// dedicated LISTEN connection (outside the query pool); all durable replay runs
-// through db.InTenant. Disconnects release the listener, and clients reconnect
-// with Last-Event-ID. Notifications contain only a tenant and event ID.
+// Each SSE request subscribes to the pool-owned shared aeon_events listener
+// outside the query pool; all durable replay runs through db.InTenant. Listener
+// gaps and bounded-mailbox overflow trigger durable rescan. The last subscriber
+// closes the backend; clients reconnect with Last-Event-ID. Database notifications
+// contain only a tenant and event ID.
 // Live views open the stream with ?after=latest: it starts at the newest
 // event, and each connection first sends stream.ready naming its resume ID.
 // Reading attaches node_changes to node.* events (id, project, changed
 // attribute names, revision); nothing about them is stored.
 // Late harness.usage_reported events attach a projection hint for the current
 // readable session binding, so spend can refresh after a session has stopped.
+//
+// Agents subscribe at /api/events/subscribe?topics=plan&after=latest with an
+// explicitly delegated events.subscribe scope and custom workspace role.
+// Built-in agent roles do not grant subscription authority. Plan hints also
+// require agents.plan.read and belong only to the key creator's canonical
+// person. Other allowlisted topics check their current resource permissions
+// and every referenced project before emitting id/type/topic/at hints. Values
+// are fetched through the existing authorized resource APIs, never the stream.
+// Numeric subscription cursors replay without the browser stream's backlog
+// cutoff. Persist stream.cursor after processing earlier hints; reconnect with
+// Last-Event-ID. Pings do not change this cursor. Listener admission, bounded
+// replay, write deadlines and live key/creator checks constrain each request.
 //
 // Every resource mutation must call Append(ctx, tx, principal, Change{...})
 // inside its existing db.InTenant callback, after taking resource locks. Append

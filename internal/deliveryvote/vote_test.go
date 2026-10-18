@@ -41,6 +41,11 @@ func TestDeliveryRoutesArePersonRead(t *testing.T) {
 
 func TestProjectGuestDeliveryRatingThroughMiddleware(t *testing.T) {
 	f := newFix(t)
+	// Auth reads principals.messaging_only. This fixture stops before 1215, so 1352 never applies.
+	// The columns stay unrecorded: the upgrade test replays 1352's bare ADD COLUMN.
+	if _, err := f.db.App.Exec(t.Context(), `ALTER TABLE principals ADD COLUMN messaging_only boolean, ADD COLUMN messaging_owner_id uuid`); err != nil {
+		t.Fatal(err)
+	}
 	project, hiddenProject, ticket, hiddenTicket := id(), id(), id(), id()
 	f.node(t, project, "project", "VT1-1", "Visible", "")
 	f.node(t, ticket, "ticket", "VT1-2", "Ticket", project)

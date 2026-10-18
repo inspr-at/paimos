@@ -4,6 +4,7 @@ import { createPinia, disposePinia, setActivePinia } from 'pinia'
 import { ref } from 'vue'
 import { resetPositions } from '../src/lib/position'
 import { clearPermissions, revokePermissions } from '../src/lib/authz'
+import { PairingError } from '../src/lib/agentPairing'
 import { defaultSchedule } from '../src/lib/capacity'
 import { pairingView, pairingEnrollment } from './agent-pairing-fixtures'
 
@@ -103,4 +104,22 @@ it('reports a failed pairing refresh while retaining the current identity snapsh
   expect(await store.refreshComputers()).toEqual({ ok: false, error: 'pairing unavailable' })
   expect(store.computers).toEqual(inventory)
   expect(store.computersStale).toBe(true)
+})
+
+// AEON-1209 G7 · risk: a forbidden computer inventory becomes a successful empty read.
+it('AEON-1209: a refused computer read stays forbidden and never becomes a successful empty inventory', async () => {
+  const store = useCapacity()
+  mocks.computers.mockRejectedValue(new PairingError(403, 'owners only'))
+  await store.load()
+  expect(store.computersState).toBe('forbidden')
+  expect(store.computersLoaded).toBe(false)
+  expect(store.computersStatus.error).toContain('owners only')
+  mocks.computers.mockResolvedValue(inventory)
+  await store.refreshComputers()
+  const at = store.computersStatus.updatedAt
+  expect(store.computers).toEqual(inventory)
+  mocks.computers.mockRejectedValue(new PairingError(403, 'access revoked'))
+  await store.refreshComputers()
+  expect(store.computersState).toBe('forbidden')
+  expect(store.computersStatus.updatedAt).toBe(at)
 })

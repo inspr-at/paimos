@@ -13,12 +13,16 @@ import (
 	"encoding/json"
 	"encoding/pem"
 	"errors"
+	"fmt"
 	"io"
+	"net"
 	"net/http"
 	"os"
 	"path/filepath"
 	"regexp"
 	"strconv"
+	"strings"
+	"syscall"
 	"time"
 
 	"github.com/inspr-at/paimos/internal/reviewgate"
@@ -41,14 +45,65 @@ type GitHubApp struct {
 }
 
 var appNumber = regexp.MustCompile(`^[1-9][0-9]{0,18}$`)
-var appToken = regexp.MustCompile(`^[A-Za-z0-9_.-]{8,255}$`)
+
+// Provider tokens are opaque and variable-length: never decode, log or cap their
+// length. Mint responses are already bounded to 64 KiB before decoding.
+var appToken = regexp.MustCompile(`^[A-Za-z0-9_.-]{8,}$`)
 var errGitHub = errors.New("GitHub review status could not be confirmed")
+
+// ErrUnavailable identifies transport, permission and partial-read refusals
+// without exposing their request, response or credential contents.
+var ErrUnavailable = errGitHub
+
+// ErrTransient preserves a retryable transport failure without retaining a
+// request URL, response body or credential-bearing underlying error.
+var ErrTransient = fmt.Errorf("%w: transient transport failure", errGitHub)
+
+func IsTransientGitHubError(err error) bool {
+	var response *GitHubHTTPError
+	var network net.Error
+	return errors.Is(err, ErrTransient) || errors.Is(err, context.DeadlineExceeded) ||
+		errors.As(err, &response) && response.StatusCode >= 500 && response.StatusCode <= 599 ||
+		errors.As(err, &network) && network.Timeout() ||
+		errors.Is(err, syscall.ECONNRESET) || errors.Is(err, syscall.ECONNREFUSED) ||
+		errors.Is(err, io.ErrUnexpectedEOF)
+}
+
+func githubTransportError(err error) error {
+	if IsTransientGitHubError(err) {
+		return ErrTransient
+	}
+	return errGitHub
+}
+
+// ErrNotFound is a confirmed absence of the requested GitHub resource.
+// Transport failures, permission failures and partial bodies stay errGitHub.
+var ErrNotFound = errors.New("GitHub resource not found")
+
+// GitHubHTTPError retains only content-free response metadata. Error and
+// Unwrap preserve the existing refusal/absence semantics for callers.
+type GitHubHTTPError struct {
+	StatusCode          int
+	RequestID           string
+	ActionsReadRequired bool
+}
+
+func (e *GitHubHTTPError) Error() string { return e.Unwrap().Error() }
+func (e *GitHubHTTPError) Unwrap() error {
+	if e.StatusCode == http.StatusNotFound {
+		return ErrNotFound
+	}
+	return errGitHub
+}
 
 func (g *GitHubApp) Configured(tenantID, repository string) bool {
 	a := g.Config
 	return appNumber.MatchString(a.ID) && appNumber.MatchString(a.InstallationID) && filepath.IsAbs(a.KeyFile) && workorders.UUID(a.TenantID) && reviewgate.ValidRepository(a.Repository) && tenantID == a.TenantID && repository == a.Repository
 }
 func (g *GitHubApp) request(ctx context.Context, token, method, path string, body, out any) error {
+	return g.requestBounded(ctx, token, method, path, body, out, 64<<10)
+}
+func (g *GitHubApp) requestBounded(ctx context.Context, token, method, path string, body, out any, limit int64) error {
 	var raw []byte
 	if body != nil {
 		var err error
@@ -75,18 +130,42 @@ func (g *GitHubApp) request(ctx context.Context, token, method, path string, bod
 	}
 	res, err := client.Do(req)
 	if err != nil {
-		return errGitHub
+		return githubTransportError(err)
 	}
 	defer res.Body.Close()
-	if res.StatusCode < 200 || res.StatusCode >= 300 {
-		return errGitHub
+	id := res.Header.Get("X-GitHub-Request-Id")
+	// A request id is a bounded opaque identifier, never response text.
+	if len(id) > 128 || strings.IndexFunc(id, func(c rune) bool {
+		return !(c >= 'A' && c <= 'Z' || c >= 'a' && c <= 'z' || c >= '0' && c <= '9' || c == ':' || c == '-')
+	}) >= 0 {
+		id = ""
 	}
-	raw, err = io.ReadAll(io.LimitReader(res.Body, 64<<10+1))
-	if err != nil || len(raw) > 64<<10 {
-		return errGitHub
+	// Retain only the known permission, never arbitrary header text.
+	permissions := res.Header.Get("X-Accepted-GitHub-Permissions")
+	// Actions endpoints identify the required permission even when GitHub
+	// omits its permission header ("Resource not accessible by integration").
+	parts := strings.SplitN(path, "/", 6)
+	actionsRead := res.StatusCode == http.StatusForbidden && len(parts) == 6 && parts[1] == "repos" && parts[4] == "actions"
+	if len(permissions) <= 1024 {
+		for _, entry := range strings.FieldsFunc(permissions, func(r rune) bool { return r == ',' || r == ';' }) {
+			if strings.TrimSpace(entry) == "actions=read" {
+				actionsRead = true
+			}
+		}
+	}
+	responseErr := &GitHubHTTPError{StatusCode: res.StatusCode, RequestID: id, ActionsReadRequired: actionsRead}
+	if res.StatusCode < 200 || res.StatusCode >= 300 {
+		return responseErr
+	}
+	raw, err = io.ReadAll(io.LimitReader(res.Body, limit+1))
+	if err != nil {
+		return githubTransportError(err)
+	}
+	if int64(len(raw)) > limit {
+		return responseErr
 	}
 	if out != nil && json.Unmarshal(raw, out) != nil {
-		return errGitHub
+		return responseErr
 	}
 	return nil
 }
@@ -193,18 +272,198 @@ func (g *GitHubApp) Publish(ctx context.Context, tenantID string, v Review, stat
 	if state == "success" && v.GitHubStatus == "success" {
 		return state, nil
 	}
-	description := "Independent review pending"
-	switch state {
-	case "success":
-		description = "Pinned commit range passed cross-family review"
-	case "failure":
-		description = "Independent review requires changes"
-	case "error":
-		description = "Independent review unavailable; gate closed"
-	}
-	err = g.request(ctx, token.Token, "POST", "/repos/"+v.Repository+"/statuses/"+v.HeadSHA, map[string]string{"context": "aeon/review", "state": state, "description": description}, nil)
+	// The stale branch above keeps its own binding sentence, including when the
+	// pull request moved and GitHubStatus is not yet stale. Every other post
+	// uses the same bounded gate reason the local reporter compares.
+	err = g.request(ctx, token.Token, "POST", "/repos/"+v.Repository+"/statuses/"+v.HeadSHA, map[string]string{"context": "aeon/review", "state": state, "description": statusDescription(v, state)}, nil)
 	if err != nil {
 		return "error", err
 	}
 	return state, nil
+}
+
+// GitHubPull and GitHubCheck carry bounded observation data, never a write API.
+type GitHubPull struct {
+	Number int64  `json:"number"`
+	Title  string `json:"title"`
+	State  string `json:"state"`
+	Merged bool   `json:"merged"`
+	Head   struct {
+		SHA string `json:"sha"`
+		Ref string `json:"ref"`
+	} `json:"head"`
+	Base struct {
+		Ref  string `json:"ref"`
+		SHA  string `json:"sha"`
+		Repo struct {
+			FullName string `json:"full_name"`
+		} `json:"repo"`
+	} `json:"base"`
+}
+type GitHubCheck struct {
+	ID         int64  `json:"id"`
+	Name       string `json:"name"`
+	Status     string `json:"status"`
+	Conclusion string `json:"conclusion"`
+}
+
+// ReadInstallation mints a separate token with read permissions only. Callers
+// never receive it. The existing publisher's token and writes are unchanged.
+func (g *GitHubApp) ReadInstallation(ctx context.Context, read func(func(string, any) error, func(int64, string) (bool, string, error)) error) error {
+	return g.readInstallation(ctx, false, func(get func(string, any) error, queue func(int64, string) (bool, string, error), _ func(int64) ([]byte, error)) error {
+		return read(get, queue)
+	})
+}
+
+// ReadShippingInstallation additionally requests actions:read to distinguish
+// failed aggregate jobs from cancelled shards. No PR, queue or actions write
+// scope is requested in the shadow rollout, even if the App supports them.
+func (g *GitHubApp) ReadShippingInstallation(ctx context.Context, read func(func(string, any) error, func(int64, string) (bool, string, error)) error) error {
+	return g.readInstallation(ctx, true, func(get func(string, any) error, queue func(int64, string) (bool, string, error), _ func(int64) ([]byte, error)) error {
+		return read(get, queue)
+	})
+}
+
+// ReadHistoryInstallation selects a read-only history channel from the actual
+// installation grants. Never request Actions on an installation without it,
+// and never widen the token to an unrelated repository or a write permission.
+func (g *GitHubApp) ReadHistoryInstallation(ctx context.Context, read func(get func(string, any) error, source string) error) error {
+	if !g.Configured(g.Config.TenantID, g.Config.Repository) {
+		return errGitHub
+	}
+	jwt, err := g.jwt()
+	if err != nil {
+		return err
+	}
+	var installation struct {
+		ID          int64             `json:"id"`
+		AppID       int64             `json:"app_id"`
+		Permissions map[string]string `json:"permissions"`
+		Suspended   *time.Time        `json:"suspended_at"`
+	}
+	if err = g.request(ctx, jwt, "GET", "/app/installations/"+g.Config.InstallationID, nil, &installation); err != nil {
+		return err
+	}
+	if strconv.FormatInt(installation.ID, 10) != g.Config.InstallationID || strconv.FormatInt(installation.AppID, 10) != g.Config.ID || installation.Suspended != nil {
+		return errGitHub
+	}
+	scopes := map[string]string{"checks": "read", "contents": "read", "pull_requests": "read", "metadata": "read"}
+	for name := range scopes {
+		if level := installation.Permissions[name]; level != "read" && level != "write" {
+			return errGitHub
+		}
+	}
+	source := "checks"
+	if level := installation.Permissions["actions"]; level == "read" || level == "write" {
+		scopes["actions"], source = "read", "actions"
+	}
+	return g.readScopedInstallation(ctx, jwt, scopes, func(get func(string, any) error, _ func(int64, string) (bool, string, error), _ func(int64) ([]byte, error)) error {
+		return read(func(path string, out any) error {
+			if source != "actions" && strings.HasPrefix(path, "/actions/") {
+				return errGitHub
+			}
+			return get(path, out)
+		}, source)
+	})
+}
+
+// ReadArtifactInstallation uses the same existing, repository-scoped read-only
+// authority as shipping. Signed artifact URLs and tokens never leave this layer.
+func (g *GitHubApp) ReadArtifactInstallation(ctx context.Context, read func(func(string, any) error, func(int64) ([]byte, error)) error) error {
+	return g.readInstallation(ctx, true, func(get func(string, any) error, _ func(int64, string) (bool, string, error), archive func(int64) ([]byte, error)) error {
+		return read(get, archive)
+	})
+}
+
+func (g *GitHubApp) readInstallation(ctx context.Context, shipping bool, read func(func(string, any) error, func(int64, string) (bool, string, error), func(int64) ([]byte, error)) error) error {
+	if !g.Configured(g.Config.TenantID, g.Config.Repository) {
+		return errGitHub
+	}
+	jwt, err := g.jwt()
+	if err != nil {
+		return err
+	}
+	scopes := map[string]string{"pull_requests": "read", "checks": "read", "contents": "read", "metadata": "read", "statuses": "read"}
+	if shipping {
+		scopes["actions"] = "read"
+	}
+	return g.readScopedInstallation(ctx, jwt, scopes, read)
+}
+
+func (g *GitHubApp) readScopedInstallation(ctx context.Context, jwt string, scopes map[string]string, read func(func(string, any) error, func(int64, string) (bool, string, error), func(int64) ([]byte, error)) error) error {
+	var token struct {
+		Token        string            `json:"token"`
+		Permissions  map[string]string `json:"permissions"`
+		Repositories []struct {
+			FullName string `json:"full_name"`
+		} `json:"repositories"`
+	}
+	if err := g.request(ctx, jwt, "POST", "/app/installations/"+g.Config.InstallationID+"/access_tokens", map[string]any{"repositories": []string{filepath.Base(g.Config.Repository)}, "permissions": scopes}, &token); err != nil {
+		return err
+	}
+	if !appToken.MatchString(token.Token) {
+		return errGitHub
+	}
+	defer func() {
+		cleanup, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		_ = g.request(cleanup, token.Token, "DELETE", "/installation/token", nil, nil)
+	}()
+	if len(token.Repositories) != 1 || token.Repositories[0].FullName != g.Config.Repository {
+		return errGitHub
+	}
+	for name, level := range token.Permissions {
+		if scopes[name] != "read" || level != "read" {
+			return errGitHub
+		}
+	}
+	for name := range scopes {
+		if token.Permissions[name] != "read" {
+			return errGitHub
+		}
+	}
+	return read(func(path string, out any) error {
+		return g.requestBounded(ctx, token.Token, "GET", "/repos/"+g.Config.Repository+path, nil, out, 4<<20)
+	}, func(number int64, head string) (bool, string, error) {
+		if number <= 0 || number > 2147483647 || !reviewgate.ValidSHA(head) {
+			return false, "", errGitHub
+		}
+		owner, name, _ := strings.Cut(g.Config.Repository, "/")
+		var response struct {
+			Data struct {
+				Repository struct {
+					Pull *struct {
+						Number int64  `json:"number"`
+						Head   string `json:"headRefOid"`
+						Entry  *struct {
+							ID   string `json:"id"`
+							Head *struct {
+								OID string `json:"oid"`
+							} `json:"headCommit"`
+						} `json:"mergeQueueEntry"`
+					} `json:"pullRequest"`
+				} `json:"repository"`
+			} `json:"data"`
+			Errors []json.RawMessage `json:"errors"`
+		}
+		query := `query($owner:String!,$name:String!,$number:Int!){repository(owner:$owner,name:$name){pullRequest(number:$number){number headRefOid mergeQueueEntry{id headCommit{oid}}}}}`
+		if err := g.request(ctx, token.Token, "POST", "/graphql", map[string]any{"query": query, "variables": map[string]any{"owner": owner, "name": name, "number": number}}, &response); err != nil {
+			return false, "", err
+		}
+		pull := response.Data.Repository.Pull
+		if len(response.Errors) > 0 || pull == nil || pull.Number != number || pull.Head != head {
+			return false, "", errGitHub
+		}
+		if pull.Entry == nil {
+			return false, "", nil
+		}
+		queueHead := ""
+		if pull.Entry.Head != nil {
+			queueHead = pull.Entry.Head.OID
+			if !reviewgate.ValidSHA(queueHead) {
+				return false, "", errGitHub
+			}
+		}
+		return true, queueHead, nil
+	}, func(id int64) ([]byte, error) { return g.artifactArchive(ctx, token.Token, id) })
 }

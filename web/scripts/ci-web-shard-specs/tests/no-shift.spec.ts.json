@@ -1,0 +1,22 @@
+{
+  "group": "stable-controls",
+  "nightlyTiming": {
+    "seconds": 60.824,
+    "selectedTests": 20
+  },
+  "spec": {
+    "file": "tests/no-shift.spec.ts",
+    "listedTests": 20,
+    "tierTiming": {
+      "caseSeconds": {
+        "max": 5.794,
+        "median": 3.064,
+        "min": 0.164
+      },
+      "seconds": 60.824,
+      "selectedTests": 20
+    },
+    "weightSeconds": 40.171603,
+    "weightSource": "tierTiming:37377299349 plus conservative AEON-569 estimate for twelve new cases"
+  }
+}

@@ -31,7 +31,7 @@ func syntheticProfile() profileDefinition {
 		Typography: map[string]string{"body_pt": "10", "title_pt": "17"},
 		Page:       profilePage{WidthMM: "210", HeightMM: "297", TopMM: "18", RightMM: "20", BottomMM: "16", LeftMM: "22"},
 		Cover:      map[string]string{"top_mm": "11"}, Sections: map[string]string{"numbering": "upper-roman"},
-		PositionsTable: profileTable{Columns: []profileColumn{{"position", "9"}, {"description", "71"}, {"quantity", "15"}, {"unit", "22"}, {"unit_price", "24"}, {"total", "27"}}, Separator: "rule", RepeatHeader: true},
+		PositionsTable: profileTable{Columns: []profileColumn{{Key: "position", WidthMM: "9"}, {Key: "description", WidthMM: "71"}, {Key: "quantity", WidthMM: "15"}, {Key: "unit", WidthMM: "22"}, {Key: "unit_price", WidthMM: "24"}, {Key: "total", WidthMM: "27"}}, Separator: "rule", RepeatHeader: true},
 		Totals:         profileTotals{VAT: "note", Discount: "hidden", NetLabel: "Net total"}, PaymentTerms: profilePayment{Position: "sections", Heading: "Payment"},
 		Acceptance: profileAcceptance{SignatureColumns: 2, GapMM: "14", LeadMM: "28"}, Footer: profileFooter{WidthMM: "33", OffsetMM: "0", PageNumberFormat: "PAGE {page} OF {total}"},
 		Labels: map[string]string{"quote": "QUOTE"},

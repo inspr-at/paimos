@@ -51,6 +51,13 @@ func TestDoctorReportsOneChannel(t *testing.T) {
 	if err := os.MkdirAll(filepath.Join(home, ".claude"), 0o700); err != nil {
 		t.Fatal(err)
 	}
+	executable, err := os.Executable()
+	if err != nil {
+		t.Fatal(err)
+	}
+	// The rules-channel cases that install an inbox hook need a verified
+	// current CLI, so a binding warning cannot mask their rules assertions.
+	inboxHookBytes, _ := json.Marshal(map[string]any{"hooks": map[string]any{"Stop": []any{map[string]any{"hooks": []any{map[string]string{"type": "command", "command": shellHookQuote(executable) + " hook claude Stop" + inboxHookMarker}}}}}})
 	sessionPath := filepath.Join(home, "received session.txt")
 	hookBytes, _ := json.Marshal(map[string]any{"hooks": map[string]any{"SessionStart": []any{map[string]any{"hooks": []any{map[string]string{"type": "command", "command": "aeon session start --rules-out " + shellHookQuote(sessionPath) + rulesHookMarker}}}}}})
 	hook := string(hookBytes)
@@ -155,7 +162,7 @@ func TestDoctorReportsOneChannel(t *testing.T) {
 				args = append(args, "--rules-harness", "claude", "--rules-out", dir)
 				want = 1
 			case "inbox only", "explicit session", "codex session":
-				mustWrite(filepath.Join(home, ".claude", "settings.json"), `{"hooks":{"Stop":[{"hooks":[{"type":"command","command":"aeon hook claude Stop`+inboxHookMarker+`"}]}]}}`)
+				mustWrite(filepath.Join(home, ".claude", "settings.json"), string(inboxHookBytes))
 				want, phrase = 0, "rules session hook not installed"
 				if mode != "inbox only" {
 					harness := "claude"

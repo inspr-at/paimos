@@ -40,6 +40,10 @@ func undoUpdated(ctx context.Context, tx pgx.Tx, p tenant.Principal, e events.Ev
 		if current.DeletedAt != nil {
 			return savedView{}, events.ErrConflict
 		}
+		// Events from older clients predate the mode field.
+		if before.Mode == "" {
+			before.Mode = "list"
+		}
 		return writeView(ctx, tx, before)
 	}, "view.updated")
 }

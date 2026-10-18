@@ -37,9 +37,11 @@ test('headline totals use leaf state facets instead of grouping row counts', () 
 test('migrated work is included by the default list and live filter', () => {
   const filters = filtersFromQuery({})
   assert.ok(apiParams('project', filters).kind?.includes('work'))
+  // Legacy type=work was every kind, so it no longer narrows (AEON-974): migrated work stays in.
   const typed = filtersFromQuery({ type: 'work' })
-  assert.deepEqual(typed.type, ['work'])
-  assert.deepEqual(apiParams('project', typed).kind, ['work'])
+  assert.deepEqual(typed.type, [])
+  assert.deepEqual(apiParams('project', typed).kind, ['work', 'ticket', 'task', 'epic'])
+  assert.deepEqual(apiParams('project', typed).level, [])
 })
 
 for (const scenario of [

@@ -26,6 +26,24 @@ async function drainAnswer() { for (let i = 0; i < 8; i++) await Promise.resolve
 beforeEach(() => { vi.resetModules(); vi.resetAllMocks(); mocks.session = reactive({ identity: { tenant: { id: 'tenant' }, principal: { id: 'person', kind: 'person' } } }) })
 afterEach(() => vi.unstubAllGlobals())
 
+it.each(['HTTP failure', 'missing preference'] as const)('AEON-644: a %s keeps the current display mode', async failure => {
+  vi.stubGlobal('window', { matchMedia: () => ({ matches: false, addEventListener() {} }) })
+  vi.stubGlobal('document', { documentElement: { dataset: {} } })
+  const fetch = vi.fn(async () => {
+    return failure === 'HTTP failure' ? new Response(null, { status: 503 }) : new Response(JSON.stringify({ value: null }))
+  })
+  vi.stubGlobal('fetch', fetch)
+  const { setPreferenceOwner } = await import('../src/lib/preferences')
+  const { setTheme, restoreTheme, themeChoice, dark } = await import('../src/lib/theme')
+  setPreferenceOwner({ tenant: { id: 'tenant' }, principal: { id: 'person' } })
+  setTheme('dark', false)
+  await restoreTheme()
+  expect(fetch).toHaveBeenCalledExactlyOnceWith('/api/preferences/theme', expect.any(Object))
+  expect(themeChoice.value).toBe('dark')
+  expect(dark.value).toBe(true)
+  expect(document.documentElement.dataset.theme).toBe('dark')
+})
+
 it.each(['restoration first', 'editor first'])('a newer restoration owns runtime and editor in both response orders: %s', async order => {
   const api = await import('../src/lib/themes')
   const runtime = await import('../src/lib/agentTheme')

@@ -1,12 +1,15 @@
 // SPDX-License-Identifier: AGPL-3.0-only
+// AEON-1233 / #583 moved project Routines into settings/routines.
 import { test, expect, type Page } from '@playwright/test'
 import { mkdirSync } from 'node:fs'
 import { join } from 'node:path'
-import { fixtures, mockWork, watchErrors } from './work-fixtures'
+import { fixtures, mockWork, me, watchErrors } from './work-fixtures'
 import { mockEffectivePermissions } from './authz-fixtures'
 import { expectStableControls } from './helpers/stable'
 import type { NodeRecurrence } from '../src/lib/api'
 import type { Recurrence } from '../src/lib/recurrences'
+import { colourContrast, PORCELAIN } from '../src/lib/themeEngine'
+import type { ThemeRecord } from '../src/lib/themes'
 
 const id = '63700000-0000-4000-8000-000000000001'
 const provenance: NodeRecurrence = { id, project_id: 'p-pharos', project_key: 'PRJ-17', number: 4, retired: false, trigger: { kind: 'time', rrule: 'FREQ=WEEKLY;BYDAY=MO', time_of_day: '09:00', timezone: 'Europe/Vienna' } }
@@ -35,6 +38,46 @@ async function setup(page: Page, manage = true, locale = 'en-GB') {
   })
   return { data, errors, calls, recurrenceReads }
 }
+
+test('extreme primary accents keep recurrence glyphs readable without moving controls', async ({ page }, testInfo) => {
+  const { errors } = await setup(page, true, 'de-AT')
+  const theme: ThemeRecord = { id: 'recurrence-contrast', name: 'Recurrence contrast', scope: 'personal', tenant_id: 't1', owner_principal_id: me.id, revision: 1, created_at: '', updated_at: '',
+    values: { ...PORCELAIN, primary: { light: '#ffffff', dark: '#000000' }, recurring_marker: { source: 'custom', custom: '#3a5fc4' } } }
+  await page.route('**/api/themes?*', route => route.fulfill({ json: { items: [theme], next_cursor: null } }))
+  await page.route('**/api/me/theme', route => route.fulfill({ json: { theme, default_theme_id: 'default', selected_theme_id: theme.id, revision: 1, fallback_notice: null } }))
+  await page.goto('/p/PHAROS?sort=key&group=none')
+  await expect.poll(() => page.locator('#aeon-theme').textContent()).toContain('--primary: #000000;')
+  const icon = row(page).locator('.ticket-type-icon'), marker = icon.locator('.recurrence-dot'), glyph = marker.locator('svg')
+  for (const width of [390, 1024, 1440]) for (const mode of ['dark', 'light'] as const) {
+    await page.setViewportSize({ width, height: 1000 })
+    await page.evaluate(mode => { document.documentElement.dataset.theme = mode }, mode)
+    await expect(glyph).toBeVisible()
+    const rendered = await glyph.evaluate(el => {
+      const rgba = (value: string) => {
+        const canvas = document.createElement('canvas')
+        canvas.width = canvas.height = 1
+        const context = canvas.getContext('2d', { willReadFrequently: true })!
+        context.fillStyle = value
+        context.fillRect(0, 0, 1, 1)
+        const channels = Array.from(context.getImageData(0, 0, 1, 1).data)
+        return { hex: '#' + channels.slice(0, 3).map(channel => channel.toString(16).padStart(2, '0')).join(''), alpha: channels[3] }
+      }
+      const style = getComputedStyle(el), background = getComputedStyle(el.parentElement!).backgroundColor
+      return { stroke: rgba(style.stroke), fill: rgba(background), marker: rgba(style.getPropertyValue('--marker').trim()) }
+    })
+    expect(rendered.stroke.alpha).toBe(255)
+    expect(rendered.fill.alpha).toBe(255)
+    expect(rendered.fill).toEqual(rendered.marker)
+    expect(colourContrast(rendered.stroke.hex, rendered.fill.hex), `${width} ${mode}: recurrence glyph on its configured marker fill`).toBeGreaterThanOrEqual(3)
+    await expectStableControls({
+      controls: { 'type slot': icon, 'recurrence marker': marker, 'ticket title': row(page).locator('.title-link'), 'clicked row': row(page) },
+      interactions: [{ name: 'hover marker', run: () => icon.hover() }, { name: 'keyboard focus marker', run: () => icon.focus() }],
+      scrollAreas: { list: page.locator('.table-card') },
+    })
+    await page.screenshot({ path: testInfo.outputPath(`recurrence-contrast-${width}-${mode}.png`) })
+  }
+  expect(errors).toEqual([])
+})
 
 test.describe('touch permission changes', () => {
   test.use({ hasTouch: true })
@@ -107,7 +150,8 @@ test.describe('touch permission changes', () => {
           } }],
         })
         expect((await pill.boundingBox())!.height).toBeGreaterThanOrEqual(44)
-        await expect(pill).toContainText('Wiederkehrend')
+        await expect(pill).toContainText('Routine')
+        await expect(pill).not.toContainText('Wiederkehrend')
         await screenshot('after')
         expect(errors).toEqual([])
       } finally { releasePermissions() }
@@ -121,7 +165,7 @@ for (const width of [390, 1024, 1440]) for (const theme of ['light', 'dark'] as 
     await page.emulateMedia({ colorScheme: theme })
     const locale = width === 390 ? 'de-AT' : 'en-GB'
     const { data, errors, recurrenceReads } = await setup(page, true, locale)
-    const label = width === 390 ? 'Wiederkehrend · jeden Montag · Nr. 4' : 'Recurring · every Monday · #4'
+    const label = 'Routine · every Monday · #4'
     await page.goto('/p/PHAROS?sort=key&group=none')
     await expect(row(page).getByRole('img', { name: label, exact: true })).toBeVisible()
     await expect(page.locator('#row-n-4 .recurrence-dot')).toHaveCount(0)
@@ -130,9 +174,9 @@ for (const width of [390, 1024, 1440]) for (const theme of ['light', 'dark'] as 
     }
     const icon = row(page).locator('.ticket-type-icon'), title = row(page).locator('.title-link')
     await expect(icon).toHaveAttribute('title', label)
-    const geometry = await icon.locator('.recurrence-dot').evaluate(el => ({ width: el.getBoundingClientRect().width, height: el.getBoundingClientRect().height, ring: getComputedStyle(el).boxShadow, gold: getComputedStyle(el).backgroundColor, token: getComputedStyle(document.documentElement).getPropertyValue('--gold').trim() }))
-    expect(geometry.width).toBe(11); expect(geometry.height).toBe(11); expect(geometry.ring).toContain('1.5px')
-    expect(geometry.gold).toBe(await page.evaluate(() => { const el = document.createElement('span'); el.style.color = 'var(--gold)'; document.body.append(el); const color = getComputedStyle(el).color; el.remove(); return color }))
+    const geometry = await icon.locator('.recurrence-dot').evaluate(el => ({ width: el.getBoundingClientRect().width, height: el.getBoundingClientRect().height, ring: getComputedStyle(el).boxShadow, gold: getComputedStyle(el).backgroundColor, token: getComputedStyle(document.documentElement).getPropertyValue('--marker').trim() }))
+    expect(geometry.width).toBe(12); expect(geometry.height).toBe(12); expect(geometry.ring).toContain('1.5px')
+    expect(geometry.gold).toBe(await page.evaluate(() => { const el = document.createElement('span'); el.style.color = 'var(--marker)'; document.body.append(el); const color = getComputedStyle(el).color; el.remove(); return color }))
     mkdirSync(shots, { recursive: true })
     await page.screenshot({ path: join(shots, `list-${width}-${theme}.png`) })
     await expectStableControls({
@@ -149,6 +193,8 @@ for (const width of [390, 1024, 1440]) for (const theme of ['light', 'dark'] as 
     await page.goto('/p/PHAROS/PHAROS-11')
     const pill = workspace(page).getByRole('link', { name: label, exact: true })
     await expect(pill).toBeVisible()
+    // Provenance links retain the compatible settings entry; #583's router
+    // redirects the recurrence query into its canonical Routines section.
     await expect(pill).toHaveAttribute('href', `/p/PRJ-17/settings?recurrence=${id}`)
     await page.screenshot({ path: join(shots, `ticket-${width}-${theme}.png`) })
     const more = workspace(page).getByRole('button', { name: 'More actions', exact: true })
@@ -163,8 +209,8 @@ for (const width of [390, 1024, 1440]) for (const theme of ['light', 'dark'] as 
     await expectStableControls({ controls: { 'help close': sheet.getByRole('button', { name: 'Close the status help' }) }, interactions: [{ name: 'focus sample marker', run: () => sheet.locator('tr.recurring .ticket-type-icon').focus() }], scrollAreas: { 'help body': sheet.locator('.sheet-card') } })
     await page.keyboard.press('Escape')
     await pill.click()
-    await expect(page).toHaveURL(new RegExp(`/p/PRJ-17/settings\\?recurrence=${id}$`))
-    await expect(page.getByRole('heading', { name: 'Recurring work', exact: true })).toBeVisible()
+    await expect(page).toHaveURL(new RegExp(`/p/PRJ-17/settings/routines\\?recurrence=${id}$`))
+    await expect(page.getByRole('heading', { name: 'Routines', exact: true })).toBeVisible()
     await expect(page.locator(`#recurrence-${id}`)).toContainText('Website audit')
     await page.screenshot({ path: join(shots, `settings-${width}-${theme}.png`) })
     expect(errors).toEqual([])
@@ -174,7 +220,7 @@ for (const width of [390, 1024, 1440]) for (const theme of ['light', 'dark'] as 
 test('readers and retired sources keep a marker without a management link', async ({ page }) => {
   const { data, errors } = await setup(page, false)
   await page.goto('/p/PHAROS/PHAROS-11')
-  await expect(workspace(page).getByRole('img', { name: 'Recurring · every Monday · #4' })).toBeVisible()
+  await expect(workspace(page).getByRole('img', { name: 'Routine · every Monday · #4' })).toBeVisible()
   await expect(workspace(page).locator('a.recurring-pill')).toHaveCount(0)
   data.nodes.find(node => node.id === 'n-1')!.recurrence!.retired = true
   await page.reload()
@@ -190,7 +236,7 @@ test('a manager cannot follow a retired source and header controls stay still ac
   data.nodes.find(node => node.id === 'n-1')!.recurrence!.retired = true
   await page.setViewportSize({ width: 390, height: 1000 })
   await page.goto('/p/PHAROS/PHAROS-11')
-  await expect(workspace(page).getByRole('img', { name: 'Recurring · every Monday · #4' })).toBeVisible()
+  await expect(workspace(page).getByRole('img', { name: 'Routine · every Monday · #4' })).toBeVisible()
   await expect(workspace(page).locator('a.recurring-pill')).toHaveCount(0)
   await expectStableControls({ controls: { 'header actions': workspace(page).getByRole('button', { name: 'More actions', exact: true }), 'copy key': workspace(page).locator('.key-chip') }, interactions: [
     { name: 'ordinary ticket in series', run: async () => { await page.goto('/p/PHAROS/PHAROS-14'); await expect(workspace(page).locator('.recurring-pill')).toHaveCount(0) } },
@@ -215,7 +261,7 @@ for (const projection of ['retired', 'withheld'] as const) {
     if (projection === 'retired') {
       await expect(workspace(page).locator('.recurring-pill')).toBeVisible()
       await expect(workspace(page).locator('a.recurring-pill')).toHaveCount(0)
-      await expect(workspace(page).locator('.recurrence-provenance')).toContainText('a deleted recurrence')
+      await expect(workspace(page).locator('.recurrence-provenance')).toContainText('a deleted routine')
     } else {
       await expect(workspace(page).locator('.recurring-pill')).toHaveCount(0)
       await expect(workspace(page).locator('.recurrence-provenance')).toHaveCount(0)
@@ -251,13 +297,13 @@ test('a linked source outside page one is selected directly and stays selected w
     if (path.endsWith('/preview')) return route.fulfill({ json: { times: [], trigger_kind: 'time' } })
     return route.fulfill({ status: 404, json: { error: 'not found' } })
   })
-  await page.goto(`/p/PHAROS/settings?recurrence=${id}`)
+  await page.goto(`/p/PHAROS/settings/routines?recurrence=${id}`)
   const history = page.getByRole('region', { name: 'Recurrence history' })
   await expect(history.getByRole('heading', { name: target.template.name, exact: true })).toBeVisible()
   expect(gets).toBe(1)
   await expect(page.locator('#recurrence-first-0')).not.toHaveClass(/selected/)
-  await expectStableControls({ controls: { 'New recurring work': page.getByRole('button', { name: 'New…', exact: true }), 'first page row': page.locator('#recurrence-first-0'), 'first page actions': page.locator('#recurrence-first-0 .row-actions') }, interactions: [{ name: 'load the second page', run: async () => {
-    await page.getByRole('button', { name: 'More recurring work', exact: true }).click()
+  await expectStableControls({ controls: { 'New routine': page.getByRole('button', { name: 'New routine…', exact: true }), 'first page row': page.locator('#recurrence-first-0'), 'first page actions': page.locator('#recurrence-first-0 .row-actions') }, interactions: [{ name: 'load the second page', run: async () => {
+    await page.getByRole('button', { name: 'More routines', exact: true }).click()
     await expect(page.locator(`#recurrence-${id}`)).toHaveClass(/selected/)
     await expect(history.getByRole('heading', { name: target.template.name, exact: true })).toBeVisible()
   } }] })
@@ -275,7 +321,7 @@ test('moved ticket provenance and source editing use the receipt source project 
   await expect(line.getByRole('link', { name: 'Website audit' })).toHaveAttribute('href', `/p/PRJ-17/settings?recurrence=${id}`)
   await workspace(page).getByRole('button', { name: 'More actions', exact: true }).click()
   await page.getByRole('menuitem', { name: 'Edit Website audit…', exact: true }).click()
-  const editor = page.getByRole('dialog', { name: 'Edit recurring work', exact: true })
+  const editor = page.getByRole('dialog', { name: 'Edit routine', exact: true })
   await expect(editor).toBeVisible()
   await expect(editor.getByRole('button', { name: 'Parent', exact: true })).toContainText('No parent (top level of the project)')
   await expect(editor.getByRole('textbox', { name: 'Name', exact: true })).toHaveValue('Website audit')
@@ -304,7 +350,7 @@ test('withheld provenance closes an open source editor and clears its source-edi
   const more = workspace(page).getByRole('button', { name: 'More actions', exact: true })
   await more.click()
   await page.getByRole('menuitem', { name: 'Edit Website audit…', exact: true }).click()
-  const editor = page.getByRole('dialog', { name: 'Edit recurring work', exact: true })
+  const editor = page.getByRole('dialog', { name: 'Edit routine', exact: true })
   await expect(editor).toBeVisible()
   ticket.recurrence = undefined
   await page.evaluate(() => {
@@ -322,8 +368,8 @@ test('withheld provenance closes an open source editor and clears its source-edi
 
 test('a source link for another project exposes the error without selecting a substitute', async ({ page }) => {
   const { errors } = await setup(page)
-  await page.goto(`/p/AEON/settings?recurrence=${id}`)
-  await expect(page.getByRole('alert')).toContainText('This recurrence belongs to another project.')
+  await page.goto(`/p/AEON/settings/routines?recurrence=${id}`)
+  await expect(page.getByRole('alert')).toContainText('This routine belongs to another project.')
   await expect(page.getByRole('region', { name: 'Recurrence history' })).toHaveCount(0)
   expect(errors).toEqual([])
 })
@@ -378,7 +424,7 @@ for (const width of [390, 1024, 1440]) for (const theme of ['light', 'dark'] as 
       mkdirSync(shots, { recursive: true })
       await page.screenshot({ path: join(shots, `ticket-delayed-permissions-${width}-${theme}.png`) })
       await edit.click()
-      const editor = page.getByRole('dialog', { name: 'Edit recurring work', exact: true })
+      const editor = page.getByRole('dialog', { name: 'Edit routine', exact: true })
       await expect(editor).toBeVisible()
       await expect(editor.getByRole('textbox', { name: 'Name', exact: true })).toHaveValue('Website audit')
       expect(sourceReads()).toHaveLength(2)
@@ -386,3 +432,56 @@ for (const width of [390, 1024, 1440]) for (const theme of ['light', 'dark'] as 
     } finally { releasePermissions() }
   })
 }
+
+test('theme token consumers recolour while fixed warnings and controls stay still', async ({ page }, testInfo) => {
+  const { errors } = await setup(page, true, 'de-AT')
+  await page.goto('/p/PHAROS?sort=key&group=none')
+  await expect(row(page)).toBeVisible()
+  // Exercise the real shared styles with deliberately long labels. The app's
+  // actual list/recurrence components remain on screen beneath this specimen.
+  await page.evaluate(() => {
+    const sample = document.createElement('section')
+    sample.id = 'theme-consumers'
+    sample.setAttribute('aria-label', 'Theme token specimens')
+    sample.style.cssText = 'position:fixed;inset:0;z-index:10000;overflow:auto;padding:20px;background:var(--canvas);color:var(--ink);display:grid;align-content:start;gap:20px'
+    sample.innerHTML = `<h2>Regelmäßige Prüfung umfangreicher Zugangsberechtigungen</h2>
+      <div style="display:flex;flex-wrap:wrap;gap:16px;align-items:center"><button class="btn primary" id="sample-action">Änderungen speichern</button><button class="button" id="sample-legacy">Prüfung abschließen</button></div>
+      <div style="display:flex;gap:20px"><label class="switch"><input id="sample-switch" type="checkbox" checked aria-label="Automatische Prüfung">Automatisch</label><input id="sample-check" class="check-box" type="checkbox" checked aria-label="Ausgewählt"></div>
+      <div class="bar"><i id="sample-progress" style="width:68%"></i></div>
+      <p><a href="#theme-consumers" id="sample-link">Weitere Informationen</a> · <mark id="sample-highlight">Prüfergebnis</mark></p>
+      <div id="sample-warning" style="padding:10px;background:var(--gold-wash);color:var(--warn-ink);box-shadow:inset 0 0 0 1px var(--warn-line)">Warnung: Berechtigung fehlt</div>
+      <div id="sample-categories" style="display:flex;gap:12px"><svg width="20" height="20"><circle cx="10" cy="10" r="8" fill="var(--label-blue)" /></svg><svg width="20" height="20"><circle cx="10" cy="10" r="8" fill="var(--st-progress)" /></svg></div>`
+    document.body.append(sample)
+  })
+  const { themeCss } = await import('../src/lib/themeEngine')
+  const action = page.locator('#sample-action'), toggle = page.locator('#sample-switch'), check = page.locator('#sample-check')
+  const colour = (selector: string, property: string) => page.locator(selector).evaluate((el, property) => getComputedStyle(el).getPropertyValue(property), property)
+  for (const width of [390, 1024, 1440]) for (const mode of ['light', 'dark'] as const) {
+    await page.setViewportSize({ width, height: 1000 })
+    await page.evaluate(mode => { document.documentElement.dataset.theme = mode }, mode)
+    const baseline = { action: await colour('#sample-action', 'background-image'), highlight: await colour('#sample-highlight', 'background-color'), warning: await colour('#sample-warning', 'color'), category: await colour('#sample-categories svg:first-child circle', 'fill'), status: await colour('#sample-categories svg:nth-child(2) circle', 'fill') }
+    await expectStableControls({ controls: { action, legacy: page.locator('#sample-legacy'), toggle, check }, interactions: [
+      { name: 'apply different accents', run: async () => {
+        await page.addStyleTag({ content: themeCss({ ...PORCELAIN, primary: { light: '#3a5fc4', dark: '#c8a0ee' }, secondary: { light: '#bf3d6d', dark: '#89d875' } }) })
+        expect(await colour('#sample-action', 'background-image')).not.toBe(baseline.action)
+        expect(await colour('#sample-highlight', 'background-color')).not.toBe(baseline.highlight)
+        expect(await colour('#sample-warning', 'color')).toBe(baseline.warning)
+        expect(await colour('#sample-categories svg:first-child circle', 'fill')).toBe(baseline.category)
+        expect(await colour('#sample-categories svg:nth-child(2) circle', 'fill')).toBe(baseline.status)
+        const tick = await check.evaluate(el => {
+          const mark = getComputedStyle(el, '::after')
+          return { ink: mark.backgroundColor, left: mark.borderLeftStyle, top: mark.borderTopStyle }
+        })
+        expect(tick.left).toBe('none')
+        expect(tick.top).toBe('none')
+        expect(tick.ink).toBe(await colour('#sample-action', 'color'))
+      } },
+      { name: 'hover primary action', run: () => action.hover() },
+      { name: 'toggle shared switch', run: () => toggle.uncheck() },
+      { name: 'check shared switch', run: () => toggle.check() },
+    ] })
+    await page.screenshot({ path: testInfo.outputPath(`theme-consumers-${width}-${mode}.png`) })
+    await page.addStyleTag({ content: themeCss(PORCELAIN) })
+  }
+  expect(errors).toEqual([])
+})

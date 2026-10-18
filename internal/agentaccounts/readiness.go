@@ -144,14 +144,25 @@ func ProjectReadiness(in ReadinessInput) AccountReadiness {
 
 // Legacy readings remain readable during rollout. Selection is by the same
 // resource/window, never by a different bucket or allowance retirement bit.
+const capacityLegacyReadingsSQL = `SELECT window_kind,bucket,window_minutes,used_percent::float8,resets_at,read_at,source,ordinary_usage_allowed FROM (
+        SELECT DISTINCT ON(window_kind,bucket) * FROM account_capacity_readings WHERE account_id IN (` + quotaAccounts + `) AND source<>'estimate'
+        ORDER BY window_kind,bucket,read_at DESC,CASE source WHEN 'harness' THEN 0 ELSE 1 END) r ORDER BY window_kind,bucket LIMIT 33`
+
 func legacyReadinessFacts(ctx context.Context, tx pgx.Tx, a Account, now time.Time) ([]ReadinessFact, error) {
+	if s := projectionInputs(tx); s != nil {
+		if s.local[a.ID] == "" {
+			return nil, pgx.ErrNoRows
+		}
+		if len(s.legacy[a.ID]) > 32 {
+			return nil, fail(503, "too many readiness windows")
+		}
+		return s.legacy[a.ID], nil
+	}
 	resource, err := localReadinessResource(ctx, tx, a)
 	if err != nil {
 		return nil, err
 	}
-	rows, err := tx.Query(ctx, `SELECT window_kind,bucket,window_minutes,used_percent::float8,resets_at,read_at,source,ordinary_usage_allowed FROM (
-        SELECT DISTINCT ON(window_kind,bucket) * FROM account_capacity_readings WHERE account_id IN (`+quotaAccounts+`) AND source<>'estimate'
-        ORDER BY window_kind,bucket,read_at DESC,CASE source WHEN 'harness' THEN 0 ELSE 1 END) r ORDER BY window_kind,bucket LIMIT 33`, a.ID)
+	rows, err := tx.Query(ctx, capacityLegacyReadingsSQL, a.ID)
 	if err != nil {
 		return nil, err
 	}
@@ -166,16 +177,7 @@ func legacyReadinessFacts(ctx context.Context, tx pgx.Tx, a Account, now time.Ti
 		if err := rows.Scan(&kind, &bucket, &minutes, &used, &reset, &at, &source, &allowed); err != nil {
 			return nil, err
 		}
-		age := max(int64(0), int64(now.Sub(at)/time.Second))
-		f := ReadinessFact{ReadinessFactWrite: ReadinessFactWrite{ResourceID: resource, WindowKey: kind + ":" + bucket, Source: source, ObservedAt: at, ReadingAt: &at, ResetsAt: &reset, UsedPercent: &used, CreditState: "unknown", StopKind: "none"}, ReadingAgeSeconds: &age}
-		if used >= 100 || allowed != nil && !*allowed {
-			f.StopKind = "named_reset"
-			f.DenialReason = "vendor_denied"
-			if used >= 100 {
-				f.DenialReason = "quota_exhausted"
-			}
-		}
-		f.legacyReading = &capacity.Reading{WindowKind: kind, Bucket: bucket, WindowMinutes: minutes, UsedPercent: used, ResetsAt: reset, ReadAt: at, Source: source}
+		f := legacyCapacityFact(resource, capacity.Reading{WindowKind: kind, Bucket: bucket, WindowMinutes: minutes, UsedPercent: used, ResetsAt: reset, ReadAt: at, Source: source, OrdinaryUsageAllowed: allowed}, now)
 		out = append(out, f)
 	}
 	if len(out) > 32 {
@@ -211,7 +213,7 @@ func loadReadiness(ctx context.Context, tx pgx.Tx, a Account, now time.Time, slo
 	}
 	var approved, models bool
 	if err := tx.QueryRow(ctx, `SELECT NOT EXISTS(SELECT 1 FROM agent_pairing_enrollments e JOIN agent_pairing_computers c ON c.tenant_id=e.tenant_id AND c.id=e.computer_id JOIN agent_pairing_requests q ON q.tenant_id=e.tenant_id AND q.id=e.request_id WHERE e.account_id=$1 AND (e.state<>'connected' OR c.state<>'connected' OR q.state<>'redeemed' OR e.ongoing_approved_at IS NULL)),
-        EXISTS(SELECT 1 FROM model_profiles WHERE enabled AND harness=$2 AND ($3::uuid[] IS NULL OR id=ANY($3::uuid[])))`, a.ID, a.Harness, a.AllowedProfileIDs).Scan(&approved, &models); err != nil {
+        EXISTS(SELECT 1 FROM model_profiles WHERE enabled AND harness=$2 AND aeon_account_allows_profile($2,$3::uuid[],id))`, a.ID, a.Harness, a.AllowedProfileIDs).Scan(&approved, &models); err != nil {
 		return AccountReadiness{}, err
 	}
 	if !approved {
@@ -301,7 +303,7 @@ func (m *Module) readinessList(w http.ResponseWriter, r *http.Request) {
 		Items     []AccountReadiness `json:"items"`
 		NextAfter *string            `json:"next_after"`
 	}{Items: []AccountReadiness{}}
-	err := m.in(ctx, p.TenantID, func(tx pgx.Tx) error {
+	err := m.read(ctx, p.TenantID, func(tx pgx.Tx) error {
 		if authz.RequireTx(ctx, tx, p, "account.read", authz.Scope{}) != nil {
 			return fail(403, "account read permission required")
 		}

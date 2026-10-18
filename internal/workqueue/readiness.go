@@ -2,11 +2,59 @@
 package workqueue
 
 import (
-	"encoding/json"
-	"math"
+	"context"
 	"regexp"
-	"strings"
+
+	"github.com/inspr-at/paimos/internal/workorders"
+	"github.com/jackc/pgx/v5"
 )
+
+// BlockingTx is a bounded, redacted eligibility probe. A relation can itself be
+// hidden by project RLS, so first collect its sources in a savepoint with full
+// project visibility, then judge them under the original caller visibility.
+// Tenant RLS is never widened. Call under the shared tenant/tree fence; this
+// returns no hidden source identities and grants no authority to mutate them.
+func BlockingTx(ctx context.Context, tx pgx.Tx, nodeID string) (string, error) {
+	const limit = 64
+	sources := []string{}
+	err := withFullOrder(ctx, tx, func(step pgx.Tx) error {
+		rows, err := step.Query(ctx, `SELECT source_node_id::text FROM node_relations WHERE target_node_id=$1 AND type='blocks' ORDER BY source_node_id LIMIT 65`, nodeID)
+		if err != nil {
+			return err
+		}
+		defer rows.Close()
+		for rows.Next() {
+			var id string
+			if err := rows.Scan(&id); err != nil {
+				return err
+			}
+			sources = append(sources, id)
+		}
+		return rows.Err()
+	})
+	if err != nil {
+		return "", err
+	}
+	if len(sources) > limit {
+		return "blocker_scan_partial", nil
+	}
+	if len(sources) == 0 {
+		return "", nil
+	}
+	var visible int
+	var resolved bool
+	err = tx.QueryRow(ctx, `SELECT count(*),coalesce(bool_and(aeon_work_status_category(n.state,k.field_schema) IN ('done','delivered','accepted','cancelled','archived')),false) FROM nodes n JOIN node_kinds k ON k.tenant_id=n.tenant_id AND k.id=n.kind_id WHERE n.id=ANY($1::uuid[]) AND n.deleted_at IS NULL`, sources).Scan(&visible, &resolved)
+	if err != nil {
+		return "", err
+	}
+	if visible != len(sources) {
+		return "blocker_unavailable", nil
+	}
+	if !resolved {
+		return "dependency_wait", nil
+	}
+	return "", nil
+}
 
 // Readiness is advice only. Add and pickup recheck the live ticket.
 type Readiness struct {
@@ -18,39 +66,10 @@ type Readiness struct {
 	SecurityReviewRequired bool     `json:"security_review_required"`
 }
 
-func State(s string) string {
-	return strings.ReplaceAll(strings.ReplaceAll(strings.ToLower(strings.TrimSpace(s)), " ", "_"), "-", "_")
-}
-func Hours(fields map[string]any) float64 {
-	h, ok := fields["estimate_hours"].(float64)
-	if !ok || math.IsNaN(h) || math.IsInf(h, 0) || h <= 0 || h > 200 {
-		return 0
-	}
-	return h
-}
-func Criteria(fields map[string]any) []string {
-	out := []string{}
-	switch value := fields["acceptance_criteria"].(type) {
-	case string:
-		for _, line := range strings.Split(value, "\n") {
-			if line = strings.TrimSpace(line); strings.Trim(line, "- *#[]xX\t") != "" {
-				out = append(out, line)
-			}
-		}
-	case []any:
-		for _, v := range value {
-			if s, ok := v.(string); ok && strings.TrimSpace(s) != "" {
-				out = append(out, strings.TrimSpace(s))
-			}
-		}
-	}
-	return out
-}
-func Fields(raw []byte) map[string]any {
-	out := map[string]any{}
-	_ = json.Unmarshal(raw, &out)
-	return out
-}
+func State(s string) string                   { return workorders.EntryState(s) }
+func Hours(fields map[string]any) float64     { return workorders.EntryHours(fields) }
+func Criteria(fields map[string]any) []string { return workorders.EntryCriteria(fields) }
+func Fields(raw []byte) map[string]any        { return workorders.EntryFields(raw) }
 
 var securityWords = regexp.MustCompile(`(?i)\b(security|permissions?|authorization|authentication|auth|rls|credentials?)\b`)
 

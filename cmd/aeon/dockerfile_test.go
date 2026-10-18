@@ -11,7 +11,7 @@ import (
 	"testing"
 )
 
-// The runtime UID/GID is a contract with the host: csb1's aeon-files
+// The runtime UID/GID is a contract with the host: prod-1's aeon-files
 // directory is owned by 65532. v260924170915 lost file access when the image
 // user floated to an alpine default (UID 100). The last USER in the runtime
 // stage is the one the image runs as; an earlier 65532 line does not count.

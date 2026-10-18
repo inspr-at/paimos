@@ -13,6 +13,7 @@ import (
 	"unicode/utf8"
 
 	"github.com/inspr-at/paimos/internal/authz"
+	"github.com/inspr-at/paimos/internal/httpapi"
 	"github.com/inspr-at/paimos/internal/ownedprocess"
 	"github.com/inspr-at/paimos/internal/servicetier"
 	"github.com/inspr-at/paimos/internal/tenant"
@@ -165,7 +166,7 @@ func (m *Module) reportTiers(r *http.Request, tx pgx.Tx, p tenant.Principal) (an
 		Reports []servicetier.Report `json:"reports"`
 		Active  *string              `json:"active_tier"`
 	}
-	r.Body = http.MaxBytesReader(nil, r.Body, 65536)
+	r.Body = httpapi.RequestBodyReader(nil, r, 65536)
 	if err = workorders.Decode(r, &in); err != nil {
 		return nil, err
 	}

@@ -28,6 +28,24 @@ type Config[T any] struct {
 	MaxRecords int
 	Key        func(T) (string, error)
 	Validate   func(T) error
+	// Migrations decode explicitly supported older schemas into the current
+	// record. Open validates the entire checkpoint and WAL before persisting
+	// the migrated state. Callers must serialize Open with their instance lock.
+	Migrations map[int]func(json.RawMessage) (T, error)
+}
+
+// SchemaVersionError distinguishes an incompatible schema from damaged data.
+// Open returns it before changing either state file.
+type SchemaVersionError struct {
+	Stored    int
+	Supported int
+}
+
+func (e *SchemaVersionError) Error() string {
+	if e.Stored > e.Supported {
+		return fmt.Sprintf("local journal schema version %d is newer than supported version %d; use a newer daemon or, after stopping the daemon, restore the matching pre-upgrade checkpoint and journal backups; state files were left unchanged", e.Stored, e.Supported)
+	}
+	return fmt.Sprintf("local journal schema version %d cannot be migrated to version %d; use a daemon that supports this schema; state files were left unchanged", e.Stored, e.Supported)
 }
 
 type event[T any] struct {
@@ -52,6 +70,8 @@ type Journal[T any] struct {
 	maxRecords     int
 	key            func(T) (string, error)
 	validate       func(T) error
+	migrations     map[int]func(json.RawMessage) (T, error)
+	migrated       bool
 	records        map[string]T
 }
 
@@ -60,6 +80,13 @@ func Open[T any](config Config[T]) (*Journal[T], error) {
 		config.Prefix == "" || strings.ContainsAny(config.Prefix, "/\\\x00\r\n") ||
 		config.Version < 1 || config.MaxBytes < 1024 || config.MaxRecords < 1 || config.Key == nil || config.Validate == nil {
 		return nil, errors.New("local journal configuration is invalid")
+	}
+	migrations := make(map[int]func(json.RawMessage) (T, error), len(config.Migrations))
+	for version, migrate := range config.Migrations {
+		if version < 1 || version >= config.Version || migrate == nil {
+			return nil, errors.New("local journal migration configuration is invalid")
+		}
+		migrations[version] = migrate
 	}
 	if err := os.MkdirAll(config.Directory, 0o700); err != nil {
 		return nil, fmt.Errorf("create local journal state: %w", err)
@@ -74,7 +101,7 @@ func Open[T any](config Config[T]) (*Journal[T], error) {
 	j := &Journal[T]{dir: config.Directory, journalPath: filepath.Join(config.Directory, config.Prefix+".journal"),
 		checkpointPath: filepath.Join(config.Directory, config.Prefix+".checkpoint.json"), version: config.Version,
 		maxBytes: config.MaxBytes, maxRecords: config.MaxRecords, key: config.Key, validate: config.Validate,
-		records: map[string]T{}}
+		records: map[string]T{}, migrations: migrations}
 	if err := j.loadCheckpoint(); err != nil {
 		return nil, fmt.Errorf("load local journal checkpoint %s: %w", j.checkpointPath, err)
 	}
@@ -95,11 +122,18 @@ func (j *Journal[T]) loadCheckpoint() error {
 	if err != nil {
 		return err
 	}
-	var state checkpoint[T]
-	if strictJSON(raw, &state) != nil || state.Version != j.version || len(state.Records) > j.maxRecords {
+	if _, err := j.schemaVersion(raw); err != nil {
+		return err
+	}
+	var state checkpoint[json.RawMessage]
+	if strictJSON(raw, &state) != nil || len(state.Records) > j.maxRecords {
 		return errors.New("local journal checkpoint is corrupt or unsupported")
 	}
-	for _, record := range state.Records {
+	for _, rawRecord := range state.Records {
+		record, err := j.decodeRecord(state.Version, rawRecord)
+		if err != nil {
+			return err
+		}
 		key, keyErr := j.key(record)
 		if keyErr != nil || j.validate(record) != nil {
 			return errors.New("local journal checkpoint is corrupt or unsupported")
@@ -109,12 +143,49 @@ func (j *Journal[T]) loadCheckpoint() error {
 		}
 		j.records[key] = record
 	}
+	j.migrated = state.Version != j.version
 	return nil
+}
+
+// Read the version before strict decoding of the envelope or records: future
+// fields must produce a version refusal rather than an apparent corruption.
+func (j *Journal[T]) schemaVersion(raw []byte) (int, error) {
+	var header struct {
+		Version int `json:"version"`
+	}
+	if json.Unmarshal(raw, &header) != nil || header.Version < 1 {
+		return 0, errors.New("local journal is corrupt or unsupported")
+	}
+	if header.Version != j.version && j.migrations[header.Version] == nil {
+		return 0, &SchemaVersionError{Stored: header.Version, Supported: j.version}
+	}
+	return header.Version, nil
+}
+
+func (j *Journal[T]) decodeRecord(version int, raw json.RawMessage) (T, error) {
+	var record T
+	var err error
+	if bytes.Equal(bytes.TrimSpace(raw), []byte("null")) {
+		return record, errors.New("local journal record is corrupt or unsupported")
+	}
+	if version == j.version {
+		err = strictJSON(raw, &record)
+	} else {
+		record, err = j.migrations[version](raw)
+	}
+	if err != nil {
+		// Decoder/migration errors may contain private values or field names.
+		return record, errors.New("local journal record is corrupt or unsupported")
+	}
+	return record, nil
 }
 
 func (j *Journal[T]) replay() error {
 	raw, err := readBounded(j.journalPath, j.maxBytes)
 	if errors.Is(err, os.ErrNotExist) {
+		if j.migrated {
+			return j.checkpoint()
+		}
 		return nil
 	}
 	if err != nil {
@@ -122,7 +193,16 @@ func (j *Journal[T]) replay() error {
 	}
 	repairTail := len(raw) > 0 && raw[len(raw)-1] != '\n'
 	if repairTail {
-		if boundary := bytes.LastIndexByte(raw, '\n'); boundary >= 0 {
+		boundary := bytes.LastIndexByte(raw, '\n')
+		// A complete future entry without its newline is still evidence of
+		// a newer writer. Do not erase it as a torn append on downgrade.
+		if _, err := j.schemaVersion(raw[boundary+1:]); err != nil {
+			var versionErr *SchemaVersionError
+			if errors.As(err, &versionErr) {
+				return err
+			}
+		}
+		if boundary >= 0 {
 			raw = raw[:boundary+1]
 		} else {
 			raw = nil
@@ -133,20 +213,27 @@ func (j *Journal[T]) replay() error {
 	replayed := false
 	for scanner.Scan() {
 		replayed = true
-		var entry event[T]
-		if strictJSON(scanner.Bytes(), &entry) != nil || entry.Version != j.version {
+		if _, err := j.schemaVersion(scanner.Bytes()); err != nil {
+			return err
+		}
+		var entry event[json.RawMessage]
+		if strictJSON(scanner.Bytes(), &entry) != nil {
 			return errors.New("local journal is corrupt or unsupported")
 		}
 		switch entry.Op {
 		case "put":
-			if entry.Record == nil || entry.Key != "" || j.validate(*entry.Record) != nil {
+			if entry.Record == nil || entry.Key != "" {
 				return errors.New("local journal is corrupt or unsupported")
 			}
-			key, keyErr := j.key(*entry.Record)
-			if keyErr != nil {
+			record, err := j.decodeRecord(entry.Version, *entry.Record)
+			if err != nil {
+				return err
+			}
+			key, keyErr := j.key(record)
+			if keyErr != nil || j.validate(record) != nil {
 				return errors.New("local journal is corrupt or unsupported")
 			}
-			j.records[key] = *entry.Record
+			j.records[key] = record
 		case "delete":
 			if entry.Record != nil || entry.Key == "" {
 				return errors.New("local journal is corrupt or unsupported")
@@ -159,7 +246,7 @@ func (j *Journal[T]) replay() error {
 	if scanner.Err() != nil || len(j.records) > j.maxRecords {
 		return errors.New("local journal is corrupt or exceeds its bound")
 	}
-	if replayed || repairTail {
+	if replayed || repairTail || j.migrated {
 		return j.checkpoint()
 	}
 	return nil

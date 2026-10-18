@@ -37,7 +37,7 @@ func TestResolvePlacementAuthorizationPrecedesPersonAndTicketMismatch(t *testing
 	expectPrefError(t, viewer, "GET", "/api/models/resolve?ticket="+ticket+"&project_id=aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa", "", 404, "not found")
 	expectPrefError(t, admin, "GET", "/api/models/resolve?role=build&person_id=bad", "", 400, "invalid_placement")
 	denied := addPrincipal(t, admin.TenantID, "person", "Denied", nil)
-	expectPrefError(t, denied, "GET", "/api/models/resolve?role=build&person_id=bad", "", 403, "permission")
+	expectPrefError(t, denied, "GET", "/api/models/resolve?role=build&person_id="+admin.ID, "", 403, "permission")
 }
 
 func TestRestoringUnretiredProfileDoesNotInventAnEvent(t *testing.T) {

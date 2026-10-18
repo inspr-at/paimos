@@ -16,6 +16,7 @@ import (
 	"github.com/inspr-at/paimos/internal/agentruns"
 	"github.com/inspr-at/paimos/internal/auth"
 	"github.com/inspr-at/paimos/internal/authz"
+	"github.com/inspr-at/paimos/internal/dbtest"
 	"github.com/inspr-at/paimos/internal/harness"
 	"github.com/inspr-at/paimos/internal/tenant"
 	"github.com/inspr-at/paimos/internal/workorders"
@@ -42,6 +43,7 @@ func bindLeadKey(t *testing.T, f *fixture, project, token string) string {
 func leadQueueFixture(t *testing.T) (*fixture, tenant.Principal, string, string, string, qEntry) {
 	t.Helper()
 	f := setup(t)
+	f.agent.Scopes = []string{"run.claim", "run.telemetry", "run.read"}
 	f.queueAccount(t, 1000000)
 	project, session := uuid(), uuid()
 	lease := "fixture-lead-lease-private-0000000000000"
@@ -170,7 +172,11 @@ func TestLeadQueueDispatchAndWorkerGenerationFence(t *testing.T) {
 		_, err := tx.Exec(t.Context(), `UPDATE project_leads SET generation=1 WHERE project_id=$1`, project)
 		return err
 	})
-	f.call(t, f.agent, "POST", "/api/runs/"+e.Run.ID+"/claim", claimBody(ids), 200, nil)
+	var h agentruns.WorkerHandoff
+	f.call(t, f.person, "GET", "/api/runs/"+e.Run.ID+"/handoff", nil, 200, &h)
+	pickup := claimBody(ids)
+	pickup["handoff"] = agentruns.WorkerPickup{TicketRevision: h.TicketRevision, WorkOrderRevision: h.WorkOrderRevision, BriefSHA256: h.BriefSHA256, WorktreeID: strings.Repeat("a", 64)}
+	f.call(t, f.agent, "POST", "/api/runs/"+e.Run.ID+"/claim", pickup, 200, nil)
 }
 
 func TestLegacyQueueSkipsOtherProjectDispatchAuthorities(t *testing.T) {
@@ -245,7 +251,12 @@ func TestLeadQueueFairRoutingUsesLiveSecurityRoute(t *testing.T) {
 			refDigest := sha256.Sum256([]byte("aeon.harness.ref\x00live-route-reference"))
 			leaseDigest := sha256.Sum256([]byte("aeon.harness.lease\x00" + lease))
 			f.tx(t, f.person, func(tx pgx.Tx) error {
-				if _, err := tx.Exec(t.Context(), `INSERT INTO model_role_routes(tenant_id,role,priority,profile_id) VALUES($1,'build',1,$2)`, f.person.TenantID, f.profile); err != nil {
+				if err := dbtest.ModelsOrder(t.Context(), tx, f.person.TenantID, "other", "first", "wait", f.profile); err != nil {
+					return err
+				}
+				// The row's model is strong, so build-hard would follow it; an
+				// explicit empty Stuck order ending in Wait is "no build-hard route".
+				if err := dbtest.ModelsOrder(t.Context(), tx, f.person.TenantID, "other", "stuck", "wait"); err != nil {
 					return err
 				}
 				if _, err := tx.Exec(t.Context(), `INSERT INTO nodes(tenant_id,id,key,kind_id,title) SELECT $1,$2,'LQ-2',id,'Younger project' FROM node_kinds WHERE slug='project'`, f.person.TenantID, project); err != nil {
@@ -273,7 +284,7 @@ func TestLeadQueueFairRoutingUsesLiveSecurityRoute(t *testing.T) {
 					return err
 				}
 				var savedSecurity, hardRoute bool
-				if err := tx.QueryRow(t.Context(), `SELECT coalesce(queue_security_review_required,false),EXISTS(SELECT 1 FROM model_role_routes WHERE role='build-hard') FROM agent_runs WHERE id=$1`, older.Run.ID).Scan(&savedSecurity, &hardRoute); err != nil {
+				if err := tx.QueryRow(t.Context(), `SELECT coalesce(queue_security_review_required,false),EXISTS(SELECT 1 FROM model_pref_orders WHERE situation='stuck' AND cardinality(rank)>0) FROM agent_runs WHERE id=$1`, older.Run.ID).Scan(&savedSecurity, &hardRoute); err != nil {
 					return err
 				}
 				if savedSecurity || hardRoute {
@@ -350,7 +361,7 @@ func TestLeadQueueFairRoutingSkipsLeadWithoutDispatchAuthority(t *testing.T) {
 	refDigest := sha256.Sum256([]byte("aeon.harness.ref\x00dispatch-authority-reference"))
 	leaseDigest := sha256.Sum256([]byte("aeon.harness.lease\x00" + lease))
 	f.tx(t, f.person, func(tx pgx.Tx) error {
-		if _, err := tx.Exec(t.Context(), `INSERT INTO model_role_routes(tenant_id,role,priority,profile_id) VALUES($1,'build',1,$2)`, f.person.TenantID, f.profile); err != nil {
+		if err := dbtest.ModelsOrder(t.Context(), tx, f.person.TenantID, "other", "first", "wait", f.profile); err != nil {
 			return err
 		}
 		if _, err := tx.Exec(t.Context(), `INSERT INTO principals(tenant_id,id,kind,name) VALUES($1,$2,'agent','Younger lead')`, f.person.TenantID, younger.ID); err != nil {
@@ -468,7 +479,7 @@ func TestLeadQueueFairRoutingThroughProductionAuthentication(t *testing.T) {
 	var creatorRole string
 	creator := tenant.Principal{ID: uuid(), TenantID: f.person.TenantID, Kind: tenant.Person}
 	f.tx(t, f.person, func(tx pgx.Tx) error {
-		if _, err := tx.Exec(t.Context(), `INSERT INTO model_role_routes(tenant_id,role,priority,profile_id) VALUES($1,'build',1,$2)`, f.person.TenantID, f.profile); err != nil {
+		if err := dbtest.ModelsOrder(t.Context(), tx, f.person.TenantID, "other", "first", "wait", f.profile); err != nil {
 			return err
 		}
 		if _, err := tx.Exec(t.Context(), `INSERT INTO principals(tenant_id,id,kind,name) VALUES($1,$2,'person','Key creator')`, f.person.TenantID, creator.ID); err != nil {
@@ -652,8 +663,7 @@ func TestLeadQueueFairRoutingAndWorkerRestartPriority(t *testing.T) {
 	f := setup(t)
 	f.queueAccount(t, 1000000)
 	f.tx(t, f.person, func(tx pgx.Tx) error {
-		_, err := tx.Exec(t.Context(), `INSERT INTO model_role_routes(tenant_id,role,priority,profile_id) VALUES($1,'build',1,$2)`, f.person.TenantID, f.profile)
-		return err
+		return dbtest.ModelsOrder(t.Context(), tx, f.person.TenantID, "other", "first", "wait", f.profile)
 	})
 
 	unrouteableWorker := uuid()
@@ -785,9 +795,14 @@ func TestLeadQueueFairRoutingAndWorkerRestartPriority(t *testing.T) {
 		})
 	}
 	resetRoutingFixture()
-	// Shared demand with no model route also yields to a ready project.
+	// Shared demand with no model route also yields to a ready project. Scout
+	// work always has Quick jobs or the Default in Models v2, so the routeless
+	// demand is build-hard work whose explicit Stuck order is empty and waits.
 	f.tx(t, f.person, func(tx pgx.Tx) error {
-		_, err := tx.Exec(t.Context(), `UPDATE nodes SET fields=fields||'{"route_role":"scout"}'::jsonb WHERE id=ANY($1::uuid[])`, tickets[:2])
+		if err := dbtest.ModelsOrder(t.Context(), tx, f.person.TenantID, "other", "stuck", "wait"); err != nil {
+			return err
+		}
+		_, err := tx.Exec(t.Context(), `UPDATE nodes SET fields=fields||'{"route_role":"build-hard"}'::jsonb WHERE id=ANY($1::uuid[])`, tickets[:2])
 		return err
 	})
 	next(1, tickets[2], "")
@@ -947,7 +962,7 @@ func TestLeadQueueFairRoutingBindsLeadDispatchCredential(t *testing.T) {
 	refDigest := sha256.Sum256([]byte("aeon.harness.ref\x00bound-credential-reference"))
 	leaseDigest := sha256.Sum256([]byte("aeon.harness.lease\x00" + lease))
 	f.tx(t, f.person, func(tx pgx.Tx) error {
-		if _, err := tx.Exec(t.Context(), `INSERT INTO model_role_routes(tenant_id,role,priority,profile_id) VALUES($1,'build',1,$2)`, f.person.TenantID, f.profile); err != nil {
+		if err := dbtest.ModelsOrder(t.Context(), tx, f.person.TenantID, "other", "first", "wait", f.profile); err != nil {
 			return err
 		}
 		if _, err := tx.Exec(t.Context(), `INSERT INTO principals(tenant_id,id,kind,name) VALUES($1,$2,'agent','Younger lead')`, f.person.TenantID, younger.ID); err != nil {

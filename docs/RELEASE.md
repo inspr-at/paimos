@@ -58,7 +58,7 @@ node scripts/create-release-tag.mjs --write
 ```
 
 The check reads the exact workflow identity, paginated runs, every job and step,
-and the unexpired receipt artifact for that SHA and run attempt. PR/fork/other
+and the unexpired receipt artifact for that SHA and run attempt. PR/fork/ineligible
 branch runs, a different commit, a newer failed or pending attempt, a skipped
 platform or missing receipt all leave the gate closed. The tag workflow checks
 the same receipt before either native signing work or image publication can
@@ -103,10 +103,36 @@ changes to `web/**`, `internal/**/*.json` and its build inputs. Shared JSON
 imports keep their full checkout paths; the obsolete Docker `web` stage no
 longer compiles anything. Both image rehearsals also check these imports.
 
+### Hotfix releases
+
+Use this path for an incident fix with minimal scope on the last released tree.
+Name the branch `hotfix/<seq>` (at least three digits, for example `hotfix/132`)
+and protect it with a ruleset that forbids deletion and force-push. Merge its
+exact tip into `main` with a merge commit **before tagging**; squash or rebase
+would lose the ancestry required by the release gate. Dispatch the rehearsal
+on the hotfix branch while the release commit is its exact tip:
+
+```sh
+gh workflow run release-image-check.yml --ref hotfix/132
+# After the exact-tip rehearsal succeeds, from a clean hotfix/132 checkout:
+node scripts/create-release-tag.mjs --hotfix hotfix/132
+# After the coordinator's release approval, create only the annotated local tag:
+node scripts/create-release-tag.mjs --hotfix hotfix/132 --write
+```
+
+Hotfix mode fetches `origin/main` and requires HEAD to be its ancestor. The
+shared rehearsal check independently reads current `main` through the GitHub
+API and requires an `ahead` or `identical` comparison whose base and merge-base
+both equal the release SHA. API errors or missing proof leave the gate closed.
+The newest eligible run across `main` and hotfix branches still decides, with
+the same required jobs, steps and exact-SHA receipt. The pin bot and nixcfg pin
+gate also check ancestry, so a hotfix merged this way passes their ancestry
+checks. OPS retains the existing tag push, release and deployment procedure.
+
 ### Cross-family verdict and merge queue (AEON-411)
 
 The required **`gate/cross-family`** is a commit status posted **outside
-GitHub Actions** by `inspr-mbp2606-runner` (App ID `5134402`, existing
+GitHub Actions** by the configured gate runner App (App ID `5134402`, existing
 installation `166478088`). The companion ruleset in
 `.github/cross-family-ruleset.json` binds that exact context to the App. Neither
 a successful nor a skipped Actions job with the same name can satisfy the
@@ -233,24 +259,62 @@ not live GitHub enforcement. This worker changes no permissions, settings,
 rulesets, watcher deployment, merges or queues. Acceptance remains with the
 lead; the process runbook is PPM AEON `runbook/flywheel`, §2.5–§2.7.
 
-### Test runner routing (AEON-438, AEON-459)
+### Test runner routing (AEON-438, AEON-459, AEON-777)
+
+Machine labels and host paths below are neutral examples (`build-6`,
+`prod-1`). Resolve actual labels, availability variables and paths from the
+installed controller and deployment configuration; these examples do not
+change the live routing or deployment target.
+
+The `public-names` static check scans product source, web fixtures, API and
+documentation for operator host and business names. It runs in CI and the
+existing pre-push static bundle. Replace a new match with a neutral fictional
+example or tenant-reported data. Only published release-note history may be
+allowlisted in `scripts/ci/public-names-allowlist.json`, with each exception
+pinned to its release version and the SHA-256 of its entry's compact JSON
+with object keys sorted recursively (array order is preserved). The guard
+scans all other release entries and bundle metadata. Adding a release needs
+no allowlist update; changing an exempt published entry fails the check.
+Whole files and other paths cannot be exempted.
 
 CI's hosted `runner-route` job calls `test-runner-route.yml`, requests four idle
 slots, and selects the entire Go batch behind independent event, ref and
 rerun-attempt guards. The manual smoke workflow calls its own router for one
-slot. Only `push` and `workflow_dispatch` on `refs/heads/main` may use the pool:
+slot. By default, only `push` and `workflow_dispatch` on `refs/heads/main` may use the pool:
 
-- A verified main push: `runs-on: [self-hosted, Linux, ARM64, mbp2606, mbp2606-push]`.
-- A verified main dispatch: `runs-on: [self-hosted, Linux, ARM64, mbp2606, mbp2606-dispatch]`.
+- A verified main push: `runs-on: [self-hosted, Linux, ARM64, build-6, build-6-push]`.
+- A verified main dispatch: `runs-on: [self-hosted, Linux, ARM64, build-6, build-6-dispatch]`.
 
-The controller mints the base labels `self-hosted, Linux, ARM64, mbp2606` plus
+**AEON-777 event switch:** set the repository variable `AEON_POOL_EVENTS` to
+`push,workflow_dispatch,pull_request,merge_group` to opt all four CI events
+into the pool. A nonempty comma list replaces the default event list. PRs use
+`build-6-pr` only when their head repository equals `github.repository`; even
+approved fork PRs stay hosted. Merge groups use `build-6-mq` and retain full
+coverage. Each also requires its event in the controller's **schema-2 lease
+`events` array**. A schema-1 lease or missing, malformed or nonmatching event
+advertisement keeps that event hosted even with the switch on. With this router
+deployed, the switch and controller upgrade can be enabled in either order:
+PR/merge-group routing begins only when both advertise the event. The controller
+must advertise an event only after its allowlist, event-class labels, ref checks
+and job-started hook support it. Pushes and dispatches still require
+`refs/heads/main` and accept schema 1 or 2 without requiring `events`. Every route
+still requires a fresh 30-second lease and enough idle capacity; CI requests
+four slots and uses four Go shards on the pool. Runner selection and shard
+count retain the run-attempt guard. Revert by unsetting `AEON_POOL_EVENTS` (or
+setting it to the empty string): this restores the original main push/dispatch
+routing and hosted PR/merge-group routing for new routing decisions. Removing
+the event from the lease also stops new routing for that event. Drain already
+routed jobs before rolling back controller admission support. The controller
+details below describe the pinned AEON-438 deployment, not an AEON-777 rollout.
+
+The controller mints the base labels `self-hosted, Linux, ARM64, build-6` plus
 **exactly one** class label matching the verified run's event; the configured
 sets contain neither both classes on one runner nor hosted-looking labels
 ([default.nix:115–143](https://github.com/markus-barta/nixcfg/blob/5e304365cad08794fc839487c8a4512928d738cd/modules/aeon-builder/default.nix#L115-L143), [aeon_builder.py:120–123](https://github.com/markus-barta/nixcfg/blob/5e304365cad08794fc839487c8a4512928d738cd/modules/aeon-builder/aeon_builder.py#L120-L123), [aeon_builder.py:857–875](https://github.com/markus-barta/nixcfg/blob/5e304365cad08794fc839487c8a4512928d738cd/modules/aeon-builder/aeon_builder.py#L857-L875)).
 `could_take` is a case-insensitive **subset** check against the complete minted
 label set, so a competing job need not request a class label to match
 ([aeon_builder.py:93–100](https://github.com/markus-barta/nixcfg/blob/5e304365cad08794fc839487c8a4512928d738cd/modules/aeon-builder/aeon_builder.py#L93-L100)).
-The reviewed workflows route PRs to `ubuntu-latest`;
+Without the event opt-in, the reviewed workflows route PRs to `ubuntu-latest`;
 a PR can modify those workflows or the guard, so runner-side admission is the
 enforcement boundary. The manual `Test runner smoke` workflow exercises the same
 router and small Go/Node checks. Go tests use four pool shards when routing
@@ -265,18 +329,31 @@ delay browser fan-out. Unit shard 1 also runs shard-policy regressions and
 browser-runner safety once. Spec-only PRs retain one unit job with the existing
 unit command; docs-only PRs skip all three web job families. Dependency and Chromium
 caches are keyed by the lockfile hash and resolved Playwright version; each of
-12 hosted `web-shard` jobs restores that runtime and installs only Chromium's
+17 hosted `web-shard` jobs restores that runtime and installs only Chromium's
 system libraries. The shard command is `npm --prefix web run ci:web:shard --
 i/12` for exact-spec inspection; full-lane execution uses
-`scripts/test-tiers/cli.mjs run web --shard i/12` with zero retries. Traces and
+`scripts/test-tiers/cli.mjs run web --shard i/17` with zero retries. Traces and
 screenshots are retained in `web-shard-i-evidence` for seven days. The required
 check remains exactly `web`: its unconditional aggregate rejects failed,
 cancelled or skipped setup, unit shards or browser shards in the full lane.
-All four unit measurements and twelve browser measurements feed the tier report;
+All four unit measurements and seventeen browser measurements feed the tier report;
 nightly retains its existing once-only `web-unit` evidence. Skipped Actions jobs
 with zero timestamps report absent duration; executed jobs with invalid timestamps
 still fail accounting. Spec-only reports explicitly use `untiered` coverage and
 claim no tier case passes; its native checks still block `web`.
+
+Nightly-full uses 24 hosted browser shards (AEON-1325), each selecting every tier
+with `scripts/test-tiers/cli.mjs run web --all --shard i/24`. Catalogue packing
+uses `nightlyTiming` from hosted run 38488051180 (AEON-1327); the measured
+24-shard estimate peaks near 15 minutes. Browser execution uses a 30-minute
+step cap (AEON-1351: shard 23 passed every case and still hit the old
+20-minute step at 19.83 minutes). The job budget stays 40 minutes so a hung
+job is still caught; dependency installation keeps its own 13-minute step cap.
+The `nightly-web` aggregate requires setup and the entire shard matrix;
+tier accounting consumes all 24 shard measurements and rejects missing or
+interrupted evidence. PR and merge-group layouts use seventeen shards packed
+from `tierTiming` weights, inside the fifteen-minute planner budget. The
+twenty-minute job cap stays the hang guard.
 
 **Affected PR planning (OPS-257 / AEON-743):** `CI_AFFECTED_LANE` is a repository
 variable, default off. Only its exact value `on` enables new rules; unset, `off`
@@ -287,6 +364,15 @@ tier runners. Merge groups always use the full gated catalogue and the full
 layout regardless of the switch. Main push, manual and nightly selection keep
 their established behavior. Required check names, skipped-job accounting, tier
 evidence, tree reuse and unconditional `migration-compat` stay unchanged.
+
+For worker pre-push checks and LEAD's `remote-affected.sh`, run
+`node scripts/test-tiers/affected.mjs [--base origin/main] [--kind web|go|all] [--json]`
+to list unique browser specs and unit files relative to `web/`, and Go packages
+for HEAD's merge-base diff through the same PR planner with the affected lane
+on. This offline, read-only view uses the checked-in tier manifests; unavailable
+browser-impact evidence or other uncertainty prints `FULL: <reason>` without
+test lists. Run the full shards in that case or rely on PR CI. CI's trusted
+planner and native inventory remain authoritative.
 
 **The bar (OPS decision, phase 2):** the PR lane is feedback only. The merge
 queue is the authoritative full gate, main push stays full or exact-tree reuse,
@@ -306,8 +392,8 @@ or the mapping is unknowable.
 
 **Modes and layouts.** The planner publishes `mode` (`full` or `essential`) and
 `layout` (`full` or `static`). `essential`/`full` is the phase-1 shape: two Go
-shards, two browser shards, four unit shards, timing, static, release, smoke and
-migration jobs (22 hosted jobs). `essential`/`static` keeps only `ci-plan`,
+shards, four browser shards, four unit shards, timing, static, release, smoke and
+migration jobs (24 hosted jobs). `essential`/`static` keeps only `ci-plan`,
 `tier-plan`, `runner-route`, `go-static`, `go`, `web-setup`, four `web-unit`
 shards, `web`, `release-check-run`, `release-check`, `e2e`, `migration-compat`
 and `tier-measurements` (16 jobs): no Go shards, no timing, no browsers, no
@@ -410,7 +496,10 @@ planner modes force the `full` aggregate lane, with the trusted layout deciding
 which jobs execute. `spec-only` is retained only when both classifiers say
 `spec-only`; `docs-only` only when the trusted planner says `docs`. A raw `full`
 lane never narrows. Missing or invalid planner data fails closed to full; merge
-queue, main and manual events stay full. With the flag off (including unset or
+queue, main and manual events stay full. The workflow itself forces full mode,
+layout and lane for merge groups without executing the candidate planner,
+restricts essential/static shortcuts to PRs, and checks full execution on every
+merge-group shard. With the flag off (including unset or
 any value other than exact `on`), the raw `ci-plan` lane is preserved unchanged.
 Every execution condition, shard matrix, runner tier selection, full-execution
 check, required aggregate and tier measurement uses this effective output.
@@ -442,8 +531,10 @@ essential (20%); new lane 36 of 80 narrowed (45%: 20 newly essential,
 16 unchanged, 0 static
 because every sampled manifest or audit PR also changed sources). Projected
 hosted jobs for the sample fall from 2710 to 2420 (full 37, essential 22,
-static 16, spec-only 12, docs-only 9). The pre-fix lane narrowed 38; two of
-those PRs now correctly stay full on unsupported SQL. PR 235 retains its
+static 16, spec-only 12, docs-only 9). That sample used two essential browser
+shards; the live essential/full path schedules four (24 hosted jobs). The
+pre-fix lane narrowed 38; two of those PRs now correctly stay full on
+unsupported SQL. PR 235 retains its
 essential tier selection but widens its raw spec-only workflow lane to full
 (22 jobs rather than 12), following trusted planner precedence. The 44 PRs that stay
 full: CI machinery
@@ -508,7 +599,7 @@ and 164 ungated specs across 12 shards. No behavior or assertion was changed.
 
 The worker is forbidden to push; local checks do not close this gate. The
 coordinator must complete `CI` on the integrated branch (PR or branch dispatch,
-keeping mbp2606 off limits). Retain the run URL, checked-out SHA, logs/reports
+keeping build-6 off limits). Retain the run URL, checked-out SHA, logs/reports
 showing `clip-tip`, `aeon-632b-clip`, `aeon-632b-clip-settings`, `key-trim` and `model-prefs` actually
 executed without skips, and successful `web-setup`, all 12 `web-shard` jobs
 and the required `web` aggregate. A later revision must retain these fixes
@@ -534,12 +625,12 @@ are pinned to [nixcfg #890](https://github.com/markus-barta/nixcfg/pull/890) at
 `5e304365cad08794fc839487c8a4512928d738cd`; module filenames mean
 `modules/aeon-builder/`, and test filenames mean `tests/`. These are source
 references, not live acceptance evidence. Publishing
-`AEON_MBP2606_AVAILABILITY` remains gated on coordinator verification of all
+the configured pool-availability repository variable remains gated on coordinator verification of all
 three controls and their integration. A JIT registration is not a reservation
 for the checked job: even a base-only job fits the runner's labels
 ([aeon_builder.py:93–100](https://github.com/markus-barta/nixcfg/blob/5e304365cad08794fc839487c8a4512928d738cd/modules/aeon-builder/aeon_builder.py#L93-L100), [test_aeon_builder.py:615–624](https://github.com/markus-barta/nixcfg/blob/5e304365cad08794fc839487c8a4512928d738cd/tests/test_aeon_builder.py#L615-L624)).
 
-1. **Verified JIT minting:** `tick` selects queued jobs carrying `mbp2606` and
+1. **Verified JIT minting:** `tick` selects queued jobs carrying `build-6` and
    verifies the repository and head repository, allowed event, workflow path,
    `main` head branch and head SHA reachability; missing or mismatched run
    metadata is rejected
@@ -552,7 +643,7 @@ for the checked job: even a base-only job fits the runner's labels
    unique runner name before requesting its JIT configuration
    ([aeon_builder.py:811–828](https://github.com/markus-barta/nixcfg/blob/5e304365cad08794fc839487c8a4512928d738cd/modules/aeon-builder/aeon_builder.py#L811-L828), [aeon_builder.py:867–872](https://github.com/markus-barta/nixcfg/blob/5e304365cad08794fc839487c8a4512928d738cd/modules/aeon-builder/aeon_builder.py#L867-L872)).
    `class_ok` requires exactly the verified event's class from the configured
-   pair: `mbp2606-push` for `push`, `mbp2606-dispatch` for `workflow_dispatch`
+   pair: `build-6-push` for `push`, `build-6-dispatch` for `workflow_dispatch`
    ([aeon_builder.py:103–117](https://github.com/markus-barta/nixcfg/blob/5e304365cad08794fc839487c8a4512928d738cd/modules/aeon-builder/aeon_builder.py#L103-L117), [default.nix:125–143](https://github.com/markus-barta/nixcfg/blob/5e304365cad08794fc839487c8a4512928d738cd/modules/aeon-builder/default.nix#L125-L143)).
    At candidate selection, a missing, opposite or doubled class triggers a
    cancellation attempt and prevents that run from being served
@@ -565,7 +656,7 @@ for the checked job: even a base-only job fits the runner's labels
    `class_ok`, **including jobs of already verified runs**
    ([aeon_builder.py:899–929](https://github.com/markus-barta/nixcfg/blob/5e304365cad08794fc839487c8a4512928d738cd/modules/aeon-builder/aeon_builder.py#L899-L929)).
    It attempts to cancel runs failing either check, including base-only jobs
-   such as `[self-hosted, Linux, ARM64, mbp2606]`, `self-hosted`,
+   such as `[self-hosted, Linux, ARM64, build-6]`, `self-hosted`,
    `[self-hosted, linux]` or `ARM64`
    ([aeon_builder.py:909–929](https://github.com/markus-barta/nixcfg/blob/5e304365cad08794fc839487c8a4512928d738cd/modules/aeon-builder/aeon_builder.py#L909-L929), [test_aeon_builder.py:595–609](https://github.com/markus-barta/nixcfg/blob/5e304365cad08794fc839487c8a4512928d738cd/tests/test_aeon_builder.py#L595-L609), [test_aeon_builder.py:633–641](https://github.com/markus-barta/nixcfg/blob/5e304365cad08794fc839487c8a4512928d738cd/tests/test_aeon_builder.py#L633-L641)).
    Cancellation uses `actions:write`; JIT registration uses
@@ -690,7 +781,7 @@ next known-good copy after the external check, and scratch disks are discarded
 **Network precondition:** host `pf` rules block configured private ranges and
 host loopback for user `ci`, except the stateless Lima SSH loopback range from
 `sshPortBase - 1` through `sshPortBase + slots - 1`
-([aeon_builder.py:208–224](https://github.com/markus-barta/nixcfg/blob/5e304365cad08794fc839487c8a4512928d738cd/modules/aeon-builder/aeon_builder.py#L208-L224), [default.nix:222–235](https://github.com/markus-barta/nixcfg/blob/5e304365cad08794fc839487c8a4512928d738cd/modules/aeon-builder/default.nix#L222-L235), [hosts/mbp2606/home-ci.nix:24–35](https://github.com/markus-barta/nixcfg/blob/5e304365cad08794fc839487c8a4512928d738cd/hosts/mbp2606/home-ci.nix#L24-L35)).
+([aeon_builder.py:208–224](https://github.com/markus-barta/nixcfg/blob/5e304365cad08794fc839487c8a4512928d738cd/modules/aeon-builder/aeon_builder.py#L208-L224), [default.nix:222–235](https://github.com/markus-barta/nixcfg/blob/5e304365cad08794fc839487c8a4512928d738cd/modules/aeon-builder/default.nix#L222-L235)).
 The pinned defaults provide four job slots plus one base/proof port; the base
 and proof use the preceding port, with no host mounts or SSH agent forwarding
 ([default.nix:162–165](https://github.com/markus-barta/nixcfg/blob/5e304365cad08794fc839487c8a4512928d738cd/modules/aeon-builder/default.nix#L162-L165), [default.nix:191–200](https://github.com/markus-barta/nixcfg/blob/5e304365cad08794fc839487c8a4512928d738cd/modules/aeon-builder/default.nix#L191-L200), [aeon_builder.py:175–205](https://github.com/markus-barta/nixcfg/blob/5e304365cad08794fc839487c8a4512928d738cd/modules/aeon-builder/aeon_builder.py#L175-L205), [aeon_builder.py:573–586](https://github.com/markus-barta/nixcfg/blob/5e304365cad08794fc839487c8a4512928d738cd/modules/aeon-builder/aeon_builder.py#L573-L586)).
@@ -716,22 +807,38 @@ retaining the baked job-started hook as defence in depth.
 Fork-PR approval is `all_external_contributors` (set by the lead, 2026-09-30).
 That is defence in depth, not the runner admission boundary. A `merge_group` run
 executes PR code, so queueing a PR is a decision to run it on the Mac if routing
-is ever enabled for that event. **It is excluded from the mbp2606 allowlist in
-mode B today**: GitHub documents exact pinned workflow refs; matching
+is enabled for that event. **It is excluded from the build-6 allowlist in the
+pinned AEON-438 deployment**: GitHub documents exact pinned workflow refs; matching
 `gh-readonly-queue/…` refs to the selected `main` workflows is unverified.
-Merge-queue CI continues on hosted runners. See GitHub's
+Merge-queue CI stays hosted until both the event switch and a schema-2 lease
+advertise `merge_group`, backed by the upgraded controller admission checks.
+See GitHub's
 [runner-group workflow restrictions](https://docs.github.com/en/enterprise-cloud%40latest/actions/how-tos/manage-runners/self-hosted-runners/manage-access).
 
-Routing is disabled until NIX-600's controller publishes the repository variable
-`AEON_MBP2606_AVAILABILITY` on `inspr-at/paimos` with this value-free shape
+Routing is disabled until the controller publishes the repository variable
+the configured pool-availability repository variable on `inspr-at/paimos`. The pinned NIX-600 controller
+publishes schema 1, which supports only main push/dispatch routing
 ([aeon_builder.py:161–172](https://github.com/markus-barta/nixcfg/blob/5e304365cad08794fc839487c8a4512928d738cd/modules/aeon-builder/aeon_builder.py#L161-L172), [aeon_builder.py:388–404](https://github.com/markus-barta/nixcfg/blob/5e304365cad08794fc839487c8a4512928d738cd/modules/aeon-builder/aeon_builder.py#L388-L404)):
 
 ```json
 {"schema":1,"repository":"inspr-at/paimos","os":"linux","arch":"arm64","online":true,"busy":false,"observed_at":"2026-09-30T10:00:00Z","idle_runners":4}
 ```
 
-The schema remains **version 1**; mode and rerun-attempt metadata require no new
-availability fields. In mode B, `idle_runners` counts free VM slots after
+The paired AEON-777 controller upgrade publishes **schema 2** with this exact
+shape (refresh `observed_at` at publication and advertise only supported events):
+
+```json
+{"schema":2,"repository":"inspr-at/paimos","os":"linux","arch":"arm64","online":true,"busy":false,"observed_at":"2026-10-06T13:40:39Z","idle_runners":4,"events":["push","workflow_dispatch","pull_request","merge_group"]}
+```
+
+`events` is an array of zero to four unique exact names from `push`,
+`workflow_dispatch`, `pull_request`, `merge_group`; order does not matter.
+Unknown names, duplicates, non-string entries, non-arrays and more than four
+entries invalidate the advertisement for PR/merge-group routing. Empty or
+missing arrays advertise neither event. Schema 1 never advertises PR/merge-group
+support, even if it contains an `events` field. Push/dispatch retain the existing
+lease checks under schema 1 or 2 regardless of `events`; unknown schema versions
+fall back to hosted. In mode B, `idle_runners` counts free VM slots after
 occupied slots and pending jobs are subtracted, not idle registered runners
 ([aeon_builder.py:161–172](https://github.com/markus-barta/nixcfg/blob/5e304365cad08794fc839487c8a4512928d738cd/modules/aeon-builder/aeon_builder.py#L161-L172), [aeon_builder.py:607–616](https://github.com/markus-barta/nixcfg/blob/5e304365cad08794fc839487c8a4512928d738cd/modules/aeon-builder/aeon_builder.py#L607-L616)).
 The publisher waits `min(5, pollSeconds)` seconds between publication attempts;
@@ -758,15 +865,15 @@ and evidence remain hosted.
 
 **Off/drain:** with a running controller, `off` attempts to clear availability
 and enters `draining`; `tick` keeps serving verified queued jobs carrying
-`mbp2606` and passing
+`build-6` and passing
 `class_ok`, with the same mint checks, until candidates and active slots/workers
 are gone ([aeon_builder.py:1268–1287](https://github.com/markus-barta/nixcfg/blob/5e304365cad08794fc839487c8a4512928d738cd/modules/aeon-builder/aeon_builder.py#L1268-L1287), [aeon_builder.py:645–705](https://github.com/markus-barta/nixcfg/blob/5e304365cad08794fc839487c8a4512928d738cd/modules/aeon-builder/aeon_builder.py#L645-L705), [aeon_builder.py:849–869](https://github.com/markus-barta/nixcfg/blob/5e304365cad08794fc839487c8a4512928d738cd/modules/aeon-builder/aeon_builder.py#L849-L869)).
 **Pause:** a ruleset/network failure or failed post-job attribution calls
 `pause`, stops minting and attempts to clear availability and cancel runs with
 queued jobs matching the combined `pool_labels` by case-insensitive subset
 ([aeon_builder.py:615–643](https://github.com/markus-barta/nixcfg/blob/5e304365cad08794fc839487c8a4512928d738cd/modules/aeon-builder/aeon_builder.py#L615-L643), [aeon_builder.py:719–723](https://github.com/markus-barta/nixcfg/blob/5e304365cad08794fc839487c8a4512928d738cd/modules/aeon-builder/aeon_builder.py#L719-L723), [aeon_builder.py:849–854](https://github.com/markus-barta/nixcfg/blob/5e304365cad08794fc839487c8a4512928d738cd/modules/aeon-builder/aeon_builder.py#L849-L854), [aeon_builder.py:1083–1091](https://github.com/markus-barta/nixcfg/blob/5e304365cad08794fc839487c8a4512928d738cd/modules/aeon-builder/aeon_builder.py#L1083-L1091), [aeon_builder.py:1149–1157](https://github.com/markus-barta/nixcfg/blob/5e304365cad08794fc839487c8a4512928d738cd/modules/aeon-builder/aeon_builder.py#L1149-L1157)).
-`pool_labels` contains the base labels plus **both** `mbp2606-push` and
-`mbp2606-dispatch` ([aeon_builder.py:126–128](https://github.com/markus-barta/nixcfg/blob/5e304365cad08794fc839487c8a4512928d738cd/modules/aeon-builder/aeon_builder.py#L126-L128), [default.nix:115–130](https://github.com/markus-barta/nixcfg/blob/5e304365cad08794fc839487c8a4512928d738cd/modules/aeon-builder/default.nix#L115-L130)).
+`pool_labels` contains the base labels plus **both** `build-6-push` and
+`build-6-dispatch` ([aeon_builder.py:126–128](https://github.com/markus-barta/nixcfg/blob/5e304365cad08794fc839487c8a4512928d738cd/modules/aeon-builder/aeon_builder.py#L126-L128), [default.nix:115–130](https://github.com/markus-barta/nixcfg/blob/5e304365cad08794fc839487c8a4512928d738cd/modules/aeon-builder/default.nix#L115-L130)).
 **Hard stop:** with a running controller, `off --now` enters `stopping` and
 attempts to clear availability and cancel runs with queued or in-progress jobs
 matching that same combined set; monitored workers stop and retire their VMs
@@ -786,7 +893,7 @@ duties cover already queued jobs ([aeon_builder.py:645–705](https://github.com
 
 **Go shard integration (AEON-459):** `go-test` depends on `runner-route` and
 uses its guarded runner selection and class to choose **4 Go shards on
-mbp2606, 7 on hosted**. The same event/ref/attempt guards protect the matrix
+build-6, 7 on hosted**. The same event/ref/attempt guards protect the matrix
 when GitHub evaluates it. A failed-job or individual-job rerun may retain
 earlier matrix values; do not assume it creates seven hosted shards. Use
 **Re-run all jobs** to refresh both the router and the entire shard layout.
@@ -814,7 +921,7 @@ completion of the required `go` aggregate; the aggregate's own short duration
 does not measure the tests. Include queue delay within that phase. Keep this
 route only if the Mac median is lower; otherwise retain hosted routing.
 
-Every evidence-producing Go test on mbp2606 uses **`go test -count=1`** to bypass
+Every evidence-producing Go test on build-6 uses **`go test -count=1`** to bypass
 cached test results. Routed action caches are written only by main pushes.
 The controller's persistent Go, npm and Playwright slot cache is for verified
 pushes; dispatches receive disposable scratch copies of known-good
@@ -836,9 +943,9 @@ The hosted `release-check` runs both guard and router tests. Release workflows,
 image build/relink, attestation and pin gates always stay hosted; attestation
 verification must retain `--deny-self-hosted-runners` in its owning gate.
 
-The lead accepted mbp2606 green evidence for tree-keyed reuse of **tests/evals**
+The lead accepted build-6 green evidence for tree-keyed reuse of **tests/evals**
 only (AEON-438, 2026-09-30). Successful routed jobs record their actual
-`runner_class=hosted|mbp2606`, source commit and event in the job summary. Any
+`runner_class=hosted|build-6`, source commit and event in the job summary. Any
 future reuse record must preserve that class. Image provenance, attestations and
 pin gates may never reuse that evidence. This change adds no tree-skip mechanism.
 
@@ -848,10 +955,10 @@ The server image pipeline starts independently of the macOS jobs (AEON-407, AEON
 
 1. Each `image-platform` matrix job checks out all tags, validates the calendar coordinate and presentation bundle, and requires an annotated tag matching `version.json`. It refuses an existing GitHub release (including drafts) or GHCR release tag; lookup errors fail closed.
 2. Generate the release-history manifest once. Freeze the source commit timestamp as `SOURCE_DATE_EPOCH`; compile web and Go on the native host. The npm cache is restored (every tarball is checked against the lockfile); **no Go cache is restored**, and Go compiles cold from modules verified against `go.sum` (see [Cold Go compilation](#cold-go-compilation-for-shipped-binaries)). `scripts/build-image-inputs.mjs` runs the production prebuild checks, uses `-trimpath -buildvcs=false -tags webembed`, disables CGO, and injects the exact reserved version. The input manifest records the tree, toolchain versions, generated-history hash, web hashes and binary hash; the final executable has mode 755 and a fixed mtime.
-3. Prepare the runtime closure cold: build `scripts/Dockerfile.runtime` (the digest-pinned Alpine base plus the pinned `chromium` and `tini`) with `no-cache` and without any registry cache, in every tag build and every rehearsal (see [Runtime closure](#runtime-closure-prepared-cold-on-every-build)). Bind the exported OCI runtime manifest digest as the `aeon-runtime` named context and print it per architecture. The main Dockerfile only copies `dist/image-input/paimos` and `NOTICE`, retaining UID/GID 65532 and the tini entrypoint. Import the existing `:buildcache` or `:buildcache-arm64` assembly cache and load the native image. Resolve its tag with `docker image ls --quiet --no-trunc`, require exactly one full ID, then run the full smoke gate on that immutable ID. Both assembly and export use the same working-directory context, base digest and single-platform arguments, with `rewrite-timestamp=true` and OCI media types.
+3. Prepare the runtime closure cold: build `scripts/Dockerfile.runtime` (the digest-pinned Alpine base plus the chromium allow-list and exact `tini`) with `no-cache` and without any registry cache, in every tag build and every rehearsal (see [Runtime closure](#runtime-closure-prepared-cold-on-every-build)). Bind the exported OCI runtime manifest digest as the `aeon-runtime` named context and print it per architecture. The main Dockerfile only copies `dist/image-input/paimos` and `NOTICE`, retaining UID/GID 65532 and the tini entrypoint. Import the existing `:buildcache` or `:buildcache-arm64` assembly cache and load the native image. Resolve its tag with `docker image ls --quiet --no-trunc`, require exactly one full ID, then run the full smoke gate on that immutable ID. Both assembly and export use the same working-directory context, base digest and single-platform arguments, with `rewrite-timestamp=true` and OCI media types.
 4. Record assembly plus smoke timing and require two clean same-input rebuilds (below). After these gates pass, export the same image inputs with BuildKit `provenance: mode=max` and push **by digest only**. Update that architecture's assembly cache in `mode=max`. Platform jobs never assign the release tag. Before anything is attested, `scripts/verify-pushed-image.mjs` reads the pushed digest back, walks to its `linux/<arch>` manifest and requires the image config digest of the smoked build; a mismatch fails the job and prints both digests. Each job then creates and verifies a GitHub build-provenance attestation bound to its digest, repository, workflow, source tag and commit, and uploads its digest artifact. That handoff is the job's last step.
 5. The `image` job waits for both platform jobs to succeed, rechecks release/tag immutability, and combines their immutable references using `docker buildx imagetools create`. Before publishing and after reading back, require exactly linux/amd64 and linux/arm64 runtime manifests with separate bound BuildKit provenance descriptors. Publish one multi-arch OCI index at `ghcr.io/inspr-at/aeon:<version>`, without a `latest` alias.
-6. Attest and verify the index digest too. Preserve `needs.image.outputs.version` and `needs.image.outputs.digest`; **digest is the index digest**, also recorded in the summary and draft release notes. The notes keep exactly one `Digest:` line (the index, which `scripts/verify-live.mjs` requires) and add one `Runtime closure linux/<arch>:` line per architecture. Production **csb1 is x86_64 and automatically pulls linux/amd64 from this index**. ARM servers and Apple-silicon Linux VMs pull linux/arm64 from the same tag or digest, without emulation.
+6. Attest and verify the index digest too. Preserve `needs.image.outputs.version` and `needs.image.outputs.digest`; **digest is the index digest**, also recorded in the summary and draft release notes. The notes keep exactly one `Digest:` line (the index, which `scripts/verify-live.mjs` requires) and add one `Runtime closure linux/<arch>:` line per architecture. Production **prod-1 is x86_64 and automatically pulls linux/amd64 from this index**. ARM servers and Apple-silicon Linux VMs pull linux/arm64 from the same tag or digest, without emulation.
 
 The index is the deployment and rollback pin. Partial by-digest platform exports are untagged and cannot be deployed through the release coordinate. Once an index tag has been published, a later failure still requires a new coordinate; reruns cannot replace it. Real registry push/attestation and deployment verification remain coordinator release gates.
 
@@ -876,7 +983,7 @@ The attestation action uses the existing `packages`, `attestations` and OIDC wri
 Immediately after the multi-arch index attestation passes, the `image` job
 runs `scripts/release-pin-pr.mjs`. The only foreign-repository write path this
 bot may use is a **draft PR** against `markus-barta/nixcfg` `main`, changing
-exactly the Aeon image line in `hosts/csb1/docker/compose-spec.nix`. It preserves
+exactly the Aeon image line in `hosts/prod-1/docker/compose-spec.nix`. It preserves
 the rest of the file, including comments. This implements AEON-413 as a proposal;
 the worker brief supersedes the older ticket's `--auto` request. The bot never
 enables auto-merge, merges, approves, pushes to main, publishes or deploys.
@@ -951,10 +1058,17 @@ the evidence. Fixture timings are not live acceptance evidence.
 
 ### Host compilation, runtime pin and digest proof (AEON-422)
 
+The tag and rehearsal workflows pin Buildx `v0.37.1` and the docker-container builder to `moby/buildkit:v0.33.1@sha256:cec9f139f45e93c5c69c60f8b07cfad9f43f4ef6b6a6cd917527fea5ff2e3dea`. All three setups disable the shared Buildx binary cache. Their identical guards resolve Docker CLI plugin precedence, reject missing, symlinked or shadowed plugins, and verify the downloaded binary against the pinned per-architecture SHA256 before invoking Buildx to assert its version and the bootstrapped BuildKit version. Both platform jobs have a 45-minute budget. To bump the pins, update both workflows and the releaseworkflow expectations with the Buildx version, both Linux amd64/arm64 checksums from the official versioned `https://github.com/docker/buildx/releases/download/<version>/checksums.txt`, and the BuildKit version and multi-architecture image digest; regenerate the changed rehearsal coverage fingerprints with `go run scripts/rehearsal-step.go inventory`, preserving the reviewed counterparts. Rehearse on both native architectures, then tag only after a green PR rehearsal and a green exact-SHA main rehearsal of the merged commit. Release 124 requires both new green rehearsals; the earlier receipt (run 37427550810) no longer covers the changed release workflow.
+
 `scripts/Dockerfile.runtime` pins the official Alpine 3.24 multi-platform index
-by digest (3.24.2 when observed on 2026-10-05), while preserving Chromium
-152.0.7977.82-r0 and tini 0.19.0-r3. The index keeps both native architectures;
-the smoke gate still checks their installed pins, licenses, NOTICE, UID/GID,
+by digest (3.24.2 when observed on 2026-10-05). Chromium is an exact-version
+allow-list, newest first (AEON-1450: `155.0.8059.39-r0`, then
+`152.0.7977.82-r0`). Preparation installs the first version the index can
+satisfy and fails when none match. tini stays exactly `0.19.0-r3`. A bump
+edits those exact `chromium=` arguments. Image evidence records the installed
+chromium APK. The
+index keeps both native architectures; the smoke gate still checks the
+installed pin against the allow-list, plus licenses, NOTICE, UID/GID,
 mounted files, embedded web, authenticated APIs and Chromium PDF rendering.
 The runtime closure uses epoch 0, so neither the source commit's timestamp nor
 the build time enters it. Every tag build and every rehearsal prepares it cold;
@@ -987,7 +1101,9 @@ changes the input: equality across independently regenerated cold closures is
 not claimed. Retain the complete runtime OCI layout when replaying old
 evidence; the input/base hashes in JSON identify it but cannot recover its
 bytes. Pin/package changes require the existing render-parity and NOTICE
-review; unavailable pinned APKs fail preparation rather than being upgraded.
+review. An allow-listed chromium version that is absent from the index is
+skipped. Preparation fails when none of the allow-list can be selected.
+It never installs a floating chromium.
 
 `scripts/reproduce-image.mjs RUNTIME_LAYOUT EVIDENCE.json` requires a clean
 tracked checkout. It archives the exact commit into two distinct fresh source
@@ -1064,7 +1180,7 @@ No job that produces a shipped binary restores a Go cache. `actions/setup-go`
 runs with `cache: false` in every job of `release.yml` and
 `release-image-check.yml`. The reason: the go command never re-verifies a
 build-cache entry, and the caches `setup-go` restores are also written by CI
-jobs, including main-push shards on the self-hosted mbp2606 pool. A poisoned
+jobs, including main-push shards on the self-hosted build-6 pool. A poisoned
 entry would be compiled into a release, outside what
 `--deny-self-hosted-runners` on the attestation covers.
 
@@ -1098,7 +1214,7 @@ release latency.
 There is no runtime closure cache. Every tag build, and every rehearsal,
 prepares the closure cold: `scripts/Dockerfile.runtime` is built with
 `no-cache: true` and without a registry cache, from the digest-pinned Alpine
-3.24 index and the pinned `chromium` and `tini` packages. Nothing is restored
+3.24 index, the chromium allow-list and the exact `tini` pin. Nothing is restored
 from an earlier build and nothing is saved for a later one. Workflow tests
 reject a cache for it, a second source, a second preparation, and any step
 after the platform job's digest handoff.
@@ -1117,7 +1233,7 @@ describe the closure that this build prepared and shipped, never a shared or
 reused one:
 
 - each platform job's summary: runtime manifest digest, config digest, layer
-  diff IDs and the recipe hash;
+  diff IDs, the recipe hash and the installed chromium APK;
 - `runtime_base` in `image-reproducibility.json`: the same values;
 - the draft release notes: one `Runtime closure linux/<arch>:` line per
   architecture with the runtime manifest digest.
@@ -1320,7 +1436,7 @@ must supply these fields and dispatch after pin merge; its integration and
 first attended live run remain coordinator acceptance, not worker evidence.
 
 `scripts/verify-live.mjs` rechecks the actual merged main pin PR and its single
-image-line diff in `hosts/csb1/docker/compose-spec.nix`, annotated release tag,
+image-line diff in `hosts/prod-1/docker/compose-spec.nix`, annotated release tag,
 source commit on main, tagged version/scheme and the hosted image attestation.
 It requires the exact nine-asset release, qualified checksum-file hash and
 downloaded SHA-256 of every binary. It polls `/api/version` for at most ten
@@ -1815,15 +1931,19 @@ about in a few words, the headline says what changes for them in one sentence, t
 intro adds context in two or three. No ticket keys, package names or commit
 jargon; those stay in the rows and the commits.
 
-Status autopilot (AEON-521) is the final post-release check: release publication
-through the journey calls the deterministic hook in the publication transaction.
-Only linked tickets already Done at publication become Delivered; tickets awaiting
-a human check get a skip comment. The hook applies at most 50 tickets, queues the
-rest durably, and the worker drains committed batches every minute. A ticket
-failure is isolated from release settlement; disappeared releases are skipped.
-Verify their Activity reasons and `/api/status-autopilot/changes`; a flagged ticket
-gets a comment and is retried after its check is cleared. Historical releases
-are discovered once; queued work and the daily ticket cursor survive restarts.
+Status autopilot (AEON-521 / AEON-1481) is the final post-release check. The
+running tagged build supplies complete Git ancestry between its tag and the
+previous published tag; the worker checks that delta every minute, starting at
+server startup. The configured GitHub App tenant/repository confines it to the
+owning AEON project. Only Done work leaves with their newest merge in the delta
+become Delivered; a later follow-up merge keeps Done. Person checks get a skip
+comment. Events name the release and verified merge; receipts survive retries,
+restarts and Undo. Workspace/server/project policy still applies. Verify Activity
+reasons and `/api/status-autopilot/changes`; inspect logs for an ownership mismatch
+or failed batch. Historic releases require the separately approved OPS backfill;
+see [publication delivery](features/release-publication-delivery.md) and the
+[captured dry-run inventory](ops/aeon-1481-backfill.md). No Journey publish hook is
+used by the Git release flow.
 Workspace admins configure the seven limits in Settings → Workspace → Autopilot,
 with Inherit / On / Off per project. The daily UTC job lists triage and cancellation
 suggestions, reminds blocked work, reopens stalled work and accepts deliveries
@@ -1860,7 +1980,7 @@ container while this check fails. Existing schema-conflict, backup, human
 approval, paused-writer and release gates remain authoritative; the worker's
 preflight does not grant deployment approval.
 
-OPS's 2026-10-04 csb1 real-data rehearsal (AEON-684) migrated 241 files from
+OPS's 2026-10-04 prod-1 real-data rehearsal (AEON-684) migrated 241 files from
 schema 1148 through 1230 in 8 seconds. Epic 317 + task 811 + ticket 5239 became
 6367 work nodes; keys, parents, titles, counters and relations were
 byte-identical. These are OPS-provided facts, not a rehearsal performed by this
@@ -1869,7 +1989,7 @@ Release 122's server boots on that migrated database despite not knowing the
 `work` kind. Boot success therefore does not prove rollback correctness.
 **Rollback requires restoring the matching verified pre-switch database and
 file/blob dump plus the exact old artifact; merely repinning release 122 is
-unsupported.** A partial later migration failure can leave 1215 committed;
+unsupported.** After a restore, re-check the account matrix and revoked keys/roles. A partial later migration failure can leave 1215 committed;
 never delete ledger rows or modify published migration bytes to retry.
 
 Integration retains ledger-owned 1237 for release-leaf lifecycle and renumbers
@@ -1935,6 +2055,119 @@ Known rows retain their classifications; unmatched and stale rows retain the
 existing runtime warning/default policy. Known-flaky ESSENTIAL restrictions still
 apply. Legacy `classify go|web` keeps its NIGHTLY default and strict stale check,
 and now writes canonical form. Web discovery lists cases without launching browsers.
+
+### Central registry merge drivers (AEON-981)
+
+The five authored JSON registries below use `merge=registries`. Install a
+reviewed copy outside the repository, alongside the tier driver. A branch being
+merged must never supply the executable that decides its own merge. Installation
+is a coordinator action; workers test configuration in a disposable clone only.
+Neither these drivers nor the regeneration command grant review or merge approval.
+
+```sh
+mkdir -p "$HOME/.local/share/aeon-ci"
+cp <repo>/scripts/merge-drivers/registries.mjs "$HOME/.local/share/aeon-ci/registries.mjs"
+# Replace /absolute/path/to/node with the absolute path from command -v node.
+git -C <repo> config merge.registries.driver '"/absolute/path/to/node" "$HOME/.local/share/aeon-ci/registries.mjs" %O %A %B %P'
+```
+
+Preserve the existing `$GIT_COMMON_DIR/info/attributes` and append these lines
+once, so PR branches from before this change also use the reviewed driver:
+
+```gitattributes
+internal/authz/builtin_agent_exclusions.json merge=registries
+internal/authz/permission_labels.json merge=registries
+internal/auth/testdata/key_scope_ceiling.json merge=registries
+internal/dsar/inventory.json merge=registries
+internal/authz/testdata/builtin_agent_exclusions.json merge=registries
+```
+
+Resolve `$GIT_COMMON_DIR` with
+`git -C <repo> rev-parse --path-format=absolute --git-common-dir`. Refresh the
+installed copy only after reviewing and testing its replacement. It uses only
+Node built-ins and runs from old checkouts without importing their source.
+
+| Hotspot | Classification and merge policy |
+| --- | --- |
+| `internal/authz/builtin_agent_exclusions.json` | DATA: permission strings form a keyed set. Independent exclusions survive, sorted. |
+| `internal/authz/testdata/builtin_agent_exclusions.json` | DATA: the independent expected exclusion definition, extracted from the existing Go test. The same set driver preserves additions and deletions; the Go test still checks exact equality and live grant behavior. |
+| `internal/authz/permission_labels.json` | DATA: labels merge by group and key; divergent labels conflict. |
+| `internal/auth/testdata/key_scope_ceiling.json` | DATA: permissions key by `key`, cases by `name`. Each record is atomic; divergent grant flags, locations or case expectations conflict. |
+| `internal/dsar/inventory.json` | DATA: tables key by `table`, columns by name. Independent columns survive, including on a concurrently introduced table. Each table's classification and locator form one atomic safety header; divergent headers or column classifications conflict. |
+| `scripts/ci/go-test-tiers.json`, `scripts/ci/web-test-tiers.json`, `web/ci-web-shards.json` | DATA with regenerated canonical layout: retain the existing `tiers` driver and authored test tiers, weights and launch policy. |
+| `internal/authz/route_map.go` | CODE holding route lists: leave for AEON-982. |
+| `internal/authz/registry.go` | CODE constructing the permission catalog and grant rules: leave for AEON-982. |
+| `internal/authz/authz_test.go` | CODE with policy assertions and fixtures: only the literal expected exclusion list moves to data, with a strict test loader. Remaining lists and assertions stay for AEON-982. |
+| `internal/agentpairing/shared_fence_test.go` | CODE with call-site inventory and lock-order assertions: leave for AEON-982. |
+| `web/src/router.ts` | CODE with route lists and guards: leave for AEON-982. |
+| `web/src/lib/settings.ts` | CODE with setting lists and visibility policy: leave for AEON-982. |
+| `web/src/views/SettingsView.vue` | CODE with rendering and section registration: leave for AEON-982. |
+| `api/areas/*.yaml`, `api/openapi.base.yaml` | Authored contract sources (AEON-984): ordinary text merge per area. `api/openapi.yaml` is ignored generated output; generate before contract checks. |
+| `scripts/ci/go-shards.txt`, `scripts/ci/go-shards-4.txt` | GENERATED from measured CI logs and test JSON. Existing coverage checks run; regeneration still requires those measurements via `ci-go-shards generate -log ... -json ...`. Do not invent replacement weights during a merge. |
+
+The registry driver implements a three-way keyed merge: independent additions
+are retained; a deletion against an unchanged entry is honoured; deletion against
+an edited entry conflicts. Identical changes agree, and a unilateral edit is
+retained. Permission records and case records are never combined field by field
+into a policy neither author supplied. Table classification and locator together
+are also indivisible. Array
+order inside fixture cases and grants is retained; top-level sets and object
+keys sort deterministically. No permission, privacy classification or expected
+ceiling is inferred from code.
+
+Exit 0 writes validated canonical JSON to OURS. Exit 1 writes whole-document
+diff3 conflict markers to OURS and names the conflicting key on stderr; the
+index remains conflicted and the markers cannot parse as JSON. Exit 2 covers
+usage, schema, parse and I/O failures and leaves OURS unchanged. Duplicate row
+identities, duplicate JSON object keys (including escaped aliases), unknown
+fields, invalid classifications and unsupported paths fail closed. Inputs are
+bounded to 4 MiB, 64 levels and 500,000 tokens. Output uses a sibling temporary
+file, fsync and atomic rename; failure before rename preserves OURS.
+
+After the coordinator's normal merge, run one preparation command:
+
+```sh
+git merge origin/main
+node scripts/merge-main.mjs --regenerate
+```
+
+The command refuses an unmerged index or unresolved diff markers before writing.
+It validates all five registries and three tier manifests before canonicalizing
+their layouts, runs the driver regressions, then runs the existing full fast
+static pre-filter with `--here` against the actual working tree. The canonical
+layouts are the only regenerated outputs in this scope; none of the safety
+registries is generated from code. Exit 0 means ready to commit. Static failures,
+missing prerequisites and incomplete/skipped checks retain their nonzero codes
+(including 3 for incomplete); they never report ready. It does not stage,
+commit, push, install drivers, approve a merge, or deploy. Run it on the approved
+test offload machine when the static checks require heavy Go work. The required
+committed-HEAD `ci-static --merge-main` handover check remains separate.
+
+The new regressions run in the existing fixed script-test lane through
+`scripts/test-tiers/test-tiers.test.mjs`; they introduce no Go/web test identities
+or tier changes. Source ownership is already covered by slice S7's `scripts/**`.
+
+Pinned reproduction used main `9a12d8450ee2c60b4153e6fc5f0b65bc37b1ec25`
+and `git merge-tree --write-tree --name-only MAIN BRANCH`. The after runs used
+copies of both drivers outside a throwaway clone, with clone-only config and
+`info/attributes`; the shared repository configuration was untouched.
+
+| Branch (pinned tip) | Before conflicts → after | Remaining |
+| --- | --- | --- |
+| `aeon-880-prefusage` (`0943795e206f8c000b397881161bf311839a3dfe`) | 3 → 2; exit 1 → 1 | `internal/accountprivacy/privacy.go`, `internal/agentaccounts/capacity.go` |
+| `aeon-881-prefexpert` (`f943d18debd54a650789ee568789ef1928ee7189`) | 1 → 0; exit 1 → 0 | Clean merge. |
+| `aeon-889-routing` (`b0df44a955d2e6aafd1236024b8b26a80b1173e2`) | 7 → 6; exit 1 → 1 | `internal/agentpairing/shared_fence_test.go`, `internal/agentplan/store.go` (add/add), `internal/auth/testdata/key_scope_ceiling.json`, `internal/authz/authz_test.go`, `internal/authz/registry.go`, `internal/views/agents_plan.go` |
+| `aeon-890-reviews` (`3cfadf2f5a8a23cf9743465b036475595f7d7171`) | 5 → 4; exit 1 → 1 | `internal/agentpairing/shared_fence_test.go`, `internal/auth/testdata/key_scope_ceiling.json`, `internal/authz/authz_test.go`, `internal/authz/route_map.go` |
+| `aeon-891-shipapp` (`97f645a8b4cf48516a7fca8fa3361dfc808096fe`) | 5 → 4; exit 1 → 1 | Same files as AEON-890. |
+
+Conflicted files fall from 21 to 16, including registry conflicts from 8 to 3.
+All three retained registry conflicts concern divergent edits to the case
+`built-in Admin excludes explicit recurrence automation`. They require explicit
+fixture review; mechanically merging those expectations could conceal drift.
+The remaining code lists need the scoped fragment design in AEON-982. Unrelated
+behavior conflicts still go through the coordinator's usual review round.
+
+### Test-tier driver installation
 
 Once per clone, install the self-contained driver at a stable absolute path
 outside the repository, then configure local merge-main rounds. This copy uses
@@ -2106,3 +2339,115 @@ worktree. Cleanup failures are reported without replacing the original result;
 pruning is attempted afterwards. A reported residue path is this run's detached
 worktree: inspect it, then use `git worktree remove --force <reported-path>` and
 `git worktree prune`. Do not remove other workers' worktrees.
+
+
+### OpenAPI area sources (AEON-984)
+
+The canonical contract is authored in `api/areas/*.yaml`. Each fragment owns
+complete path and component entries; shared referenced components live in
+`api/areas/shared.yaml`. `api/openapi.base.yaml` owns document metadata and
+component section order. The generator discovers fragments from the directory;
+there is no committed aggregate or fragment index. The separate messaging
+contract and harness reconciliation contract remain unchanged.
+
+```sh
+node api/generate.mjs --write
+node api/generate.mjs --check
+node --test scripts/openapi-sort.test.mjs
+# Before direct Go tests in a fresh checkout:
+node api/generate.mjs --write
+```
+
+`--stdout` returns the same complete contract for consumers and artifact export.
+`api/openapi.yaml` is ignored and is rebuilt atomically. Never edit or add it to
+Git; edit an area source and regenerate. The lossless scanner and sorter move
+whole source blocks, retain scalar bytes and comments, maintain anchor bindings,
+and reject duplicate ownership, unsafe anchors, unsupported source shapes and
+symlinks. Sources require LF and a final newline. Assembly admits at most 256
+fragments and 16 MiB in total. The sorter CLI prepares the generated contract;
+its scalar/anchor safety tests remain in place. The reporter pin command reads
+the generator's output directly, so local bundle drift cannot alter pins.
+
+The tier runner prepares the bundle once before Go execution. The local static
+check prepares the merged checkout before running checks. Other direct Go
+runners must generate first, or use
+`go test -exec "node /absolute/checkout/api/test-exec.mjs" <packages>`.
+The execution wrapper is also usable by the approved remote-test runner without
+changing its ownership or host gates.
+
+Fragment impact uses the live R2 reader scan for `api/openapi.yaml`. Area owner
+comments (`# aeon:owner internal/package`) add owning packages. Shared component
+fragments have no handler owner; route fragments with unresolved owners remain
+full. Module-local `internal/**/openapi.yaml` also selects its own package. The
+regression asserts exact package-set equality against the live scan, including
+`scripts` (the reporter tool), for all area fragments and the base. Fragment plus
+`internal/reportercontract/` remains full. No route, permission, schema pin,
+contract version, or fallback/subtree coverage changes in this slice.
+
+Consumer audit: Go tests in `cmd/aeon`, agentpairing, chat, harness, knowledge,
+modelregistry, reportercontract and themes read the generated path. Other Go
+source/documentation references, including agents, business, nodes, inbox,
+ciproof and scripts, remain in the live R2 scan. Web wire types are handwritten;
+there is no web types generator to migrate. Nix disables sandbox Go checks and
+builds the CLI without embedding OpenAPI. Image/client builds also do not embed
+it. The existing release workflow publishes no standalone OpenAPI artifact;
+any future contract artifact must use `node api/generate.mjs --stdout`, never
+`git show HEAD:api/openapi.yaml`.
+
+S0 on 2026-10-08: main ruleset 24240960 requires GitHub's MERGE queue. GitHub API
+reported PR #209 (`367ec948588b746130b52933adb7e51b28653915`) as
+`mergeable=false`, `mergeable_state=dirty`; the ordinary three-way bundle merge
+against baseline `79348b98ca1e10e861784fcfd8e3360e1585f8df` produced four conflict
+blocks. `git check-attr merge -- api/openapi.yaml` was unspecified. Custom merge
+drivers are executable definitions in local Git configuration, not installed
+by the server; no repository workflow can repair a conflict before the server
+creates its merge group. GitHub's [queue documentation](https://docs.github.com/en/repositories/configuring-branches-and-merges-in-your-repository/configuring-pull-request-merges/managing-a-merge-queue)
+confirms base conflicts remove a PR from the queue; Git's
+[driver documentation](https://git-scm.com/docs/gitattributes#_defining_a_custom_merge_driver)
+locates executable driver definitions in Git configuration. This supports
+removing the aggregate rather than relying on a client-side driver.
+
+The one-time migration proof is reproducible after fetching the pre-fragment
+baseline commit:
+
+```sh
+node api/prove.mjs 79348b98ca1e10e861784fcfd8e3360e1585f8df
+```
+
+It compares actual bytes with the historical Git blob, without committing a
+second aggregate fixture. Result: identical, 1,486,647 bytes, 587 paths, 810
+component entries, SHA-256
+`c74c3a5e81bbdaf34acf4a05547052e573a45adc03743dd36280033ea448258e`.
+The proof is a conversion check; later contract edits are checked by the
+unchanged Go safety suites rather than this frozen migration digest.
+
+OPS handoff (`.github/workflows/ci.yml` is outside the worker write set): after
+Node setup, add the following step to `go-static` before `go vet ./...`.
+The `go-test` and `go-timing` tier entrypoints already generate before tests.
+
+```yaml
+      - name: Generate OpenAPI from area sources
+        run: node api/generate.mjs --write
+```
+
+The existing release-check `ci-static.test.mjs` entry imports all generator and
+sorter regressions; it prepares its own bundle. Register the new hosted command
+in `scripts/ci/static-checks.json` as a mirrored Node check (30-second timeout),
+then run the workflow/static mirror tests. To expose a downloadable contract,
+OPS can upload the generated `api/openapi.yaml`; this is separate from current
+release behavior. Update worker contract-edit guidance to the area sources
+when integrating. Rollback is a revert of this mechanical commit plus OPS's
+preparation step; it restores the original tracked bundle and old readers.
+
+
+Account-matrix rollback floor (AEON-1051): before any tenant activates, rollback
+below the account-use release is `digest_safe`. The first matrix denial or ledger
+enrolment activates a monotonic tenant floor. Thereafter rollback below that
+release is `restore_required`: old binaries receive SQLSTATE `0A000` at every
+principal transaction entry, including empty account pools, and cannot resolve,
+hand out, reserve or claim an account. Roll forward, or restore the verified
+pre-release database and exact artifact. The release record must state this
+conditional rollback class. New binaries refuse startup when the database
+requires a capability they do not support. Manual SQL against an activated
+tenant must declare `SET LOCAL aeon.account_use_capable = 'on'` inside its
+transaction; this is a version capability, not authorization or a credential.

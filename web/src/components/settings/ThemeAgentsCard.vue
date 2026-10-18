@@ -99,7 +99,7 @@ function radioKeys(event: KeyboardEvent, options: readonly string[], current: st
           <legend>State colours</legend>
           <div class="palettes" role="radiogroup" aria-label="State colours" @keydown="radioKeys($event, AGENT_PALETTES.map(p => p.id), appearance.palette, value => change({ palette: value as AgentPalette }))">
             <button v-for="palette in AGENT_PALETTES" :key="palette.id" type="button" role="radio" :aria-checked="appearance.palette === palette.id" :tabindex="appearance.palette === palette.id ? 0 : -1" :disabled="!editable" :aria-describedby="`${id}-palette-detail`" @click="change({ palette: palette.id })">
-              <span class="palette-dots" aria-hidden="true"><i v-for="state in ['working', 'waiting', 'throttled', 'problem']" :key="state" :style="{ background: `var(--agent-${palette.id}-${state})` }" /></span>{{ palette.id === 'standard' || palette.id === 'monochrome' ? palette.name : palette.id[0]!.toUpperCase() + palette.id.slice(1) }}
+              <span class="palette-dots" aria-hidden="true"><i v-for="(state, index) in ['working', 'waiting', 'throttled', 'problem']" :key="state" :style="{ background: `light-dark(${palette.light[index]}, ${palette.dark[index]})` }" /></span>{{ ['standard', 'monochrome', 'focus', 'errors'].includes(palette.id) ? palette.name : palette.id[0]!.toUpperCase() + palette.id.slice(1) }}
             </button>
           </div>
           <p :id="`${id}-palette-detail`" class="detail palette-detail">{{ AGENT_PALETTES.find(p => p.id === appearance.palette)?.description }}</p>
@@ -140,7 +140,8 @@ button:disabled { cursor: default; }
 .control-row:first-of-type { margin-top: 8px; }
 .seg { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); }
 .seg button { min-height: 44px; padding: 0 4px; font-size: 12px; }
-.switch { justify-self: start; }.switch span { min-width: 3ch; }.switch input { width: 44px; height: 24px; }
+/* 44px is the label's hit target. The track stays the shared switch. */
+.switch { justify-self: start; min-width: 44px; min-height: 44px; }.switch span { min-width: 3ch; }
 .range-control { display: grid; grid-template-columns: minmax(0, 1fr) 5ch; gap: 8px; align-items: center; }
 .range-control input { width: 100%; min-width: 0; height: 44px; accent-color: var(--teal); }
 output { text-align: right; font-variant-numeric: tabular-nums; }

@@ -11,6 +11,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"sort"
 	"strings"
 	"testing"
 	"unicode/utf16"
@@ -537,7 +538,7 @@ func checkDoctrineGuard(t *testing.T, pubDocs, privDocs map[string]string) {
 	identity, nonLatin := 0, 0
 	for _, view := range views {
 		for _, rule := range view.Rules {
-			err := guardPublic(publicRepository, rule.Source)
+			err := New(nil, Options{}).guardPublic(publicRepository, rule.Source)
 			if err == nil {
 				continue
 			}
@@ -610,7 +611,7 @@ func checkDoctrineGuard(t *testing.T, pubDocs, privDocs map[string]string) {
 				}
 				n++
 				text := attack.fn(rule.Text)
-				if guardPublic(publicRepository, text) == nil && !corpus.quotes(allow, text) {
+				if New(nil, Options{}).guardPublic(publicRepository, text) == nil && !corpus.quotes(allow, text) {
 					pass++
 				}
 			}
@@ -731,4 +732,17 @@ func smallCapitalAttack(s string) string {
 		}
 		return r
 	}, strings.ToLower(s))
+}
+
+func corpusFrom(key []byte, docs map[string]string) *guardCorpus {
+	c := newGuardCorpus(key)
+	paths := make([]string, 0, len(docs))
+	for path := range docs {
+		paths = append(paths, path)
+	}
+	sort.Strings(paths)
+	for _, path := range paths {
+		c.add(path, docs[path])
+	}
+	return c
 }

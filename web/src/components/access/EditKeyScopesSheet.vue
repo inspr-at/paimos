@@ -1,7 +1,7 @@
 <!-- SPDX-License-Identifier: AGPL-3.0-only -->
 <script setup lang="ts">
 import { computed, onMounted, ref } from 'vue'
-import { AccessError, agentScopeCeiling, changeAgentKeyScopes, getAgentKeyScopes, grantablePresetScopes, groupPermissions, keyHint, keyExpiryAfter, selectScopeGroup, matchesScope, MAX_KEY_SCOPES, type Agent, type Role } from '../../lib/access'
+import { AccessError, agentScopeCeiling, changeAgentKeyScopes, getAgentKeyScopes, grantablePresetScopes, groupPermissions, keyHint, keyExpiryAfter, selectScopeGroup, matchesScope, MAX_KEY_SCOPES, fullAccessLabel, type Agent, type Role } from '../../lib/access'
 import { can, myPermissions } from '../../lib/authz'
 import type { AgentKey } from '../../lib/settings'
 import { useAccess } from '../../stores/access'
@@ -20,6 +20,8 @@ const submitModifier = /Mac|iPhone|iPad/.test(navigator.platform) ? 'Cmd' : 'Ctr
 const originalExpiry = ref<string | null>(props.agentKey.expires_at)
 const days = ref(-1)
 const expiryChanged = computed(() => days.value !== -1 && !(days.value === 0 && originalExpiry.value === null))
+const originalFullAccess = ref(props.agentKey.full_access ?? false)
+const fullAccess = ref(originalFullAccess.value)
 const original = ref<string[]>([])
 const selected = ref(new Set<string>())
 const grantable = ref(new Set<string>())
@@ -42,11 +44,11 @@ const groups = computed(() => {
   for (const key of original.value) if (!scopes.some(p => p.key === key)) scopes.push({ key, group: 'Other', description: key, risk: 'low', grantable_at: [], agent_grantable: false })
   return groupPermissions(scopes.filter(p => matchesScope(p, term.value) && (term.value.trim() || showUnavailable.value || grantable.value.has(p.key) || mayExtend(p.key) || original.value.includes(p.key))))
 })
-const added = computed(() => [...selected.value].filter(k => !original.value.includes(k)))
-const removed = computed(() => original.value.filter(k => !selected.value.has(k)))
-const roleAdded = computed(() => [...selected.value].filter(k => !grantable.value.has(k) && mayExtend(k)))
-const invalid = computed(() => [...selected.value].some(k => !grantable.value.has(k) && !mayExtend(k)))
-const changed = computed(() => added.value.length + removed.value.length + roleAdded.value.length > 0 || expiryChanged.value)
+const added = computed(() => fullAccess.value ? [] : [...selected.value].filter(k => !original.value.includes(k)))
+const removed = computed(() => fullAccess.value ? [] : original.value.filter(k => !selected.value.has(k)))
+const roleAdded = computed(() => fullAccess.value ? [] : [...selected.value].filter(k => !grantable.value.has(k) && mayExtend(k)))
+const invalid = computed(() => !fullAccess.value && [...selected.value].some(k => !grantable.value.has(k) && !mayExtend(k)))
+const changed = computed(() => added.value.length + removed.value.length + roleAdded.value.length > 0 || expiryChanged.value || fullAccess.value !== originalFullAccess.value)
 async function load() {
   busy.value = true
   error.value = ''
@@ -54,6 +56,8 @@ async function load() {
     const view = await getAgentKeyScopes(props.agentKey.id)
     originalExpiry.value = view.key.expires_at
     days.value = -1
+    originalFullAccess.value = view.key.full_access ?? false
+    fullAccess.value = originalFullAccess.value
     original.value = view.key.scopes
     selected.value = new Set(view.key.scopes)
     grantable.value = new Set(view.grantable_scopes)
@@ -70,8 +74,8 @@ function toggle(key: string) {
   else if (grantable.value.has(key) || mayExtend(key)) next.add(key)
   selected.value = next
 }
-function preset(keys: string[]) {
-  if (!busy.value && allowed.value) selected.value = new Set(grantablePresetScopes(keys, presetHeld.value, access.registry))
+function preset(keys: string[], full = false) {
+  if (!busy.value && allowed.value) { fullAccess.value = full; selected.value = new Set(full ? [] : grantablePresetScopes(keys, presetHeld.value, access.registry)) }
 }
 function selectGroup(keys: string[], all: boolean) {
   if (!busy.value && allowed.value) selected.value = selectScopeGroup(selected.value, keys, all, presetHeld.value, access.registry)
@@ -95,7 +99,7 @@ async function save() {
   busy.value = true
   error.value = ''
   try {
-    await changeAgentKeyScopes(props.agentKey.id, [...new Set([...added.value, ...roleAdded.value])], removed.value, roleAdded.value.length && agentRole.value ? { role_id: agentRole.value.id, add: roleAdded.value } : undefined, expiryChanged.value ? keyExpiryAfter(days.value) : undefined)
+    await changeAgentKeyScopes(props.agentKey.id, [...new Set([...added.value, ...roleAdded.value])], removed.value, roleAdded.value.length && agentRole.value ? { role_id: agentRole.value.id, add: roleAdded.value } : undefined, expiryChanged.value ? keyExpiryAfter(days.value) : undefined, fullAccess.value !== originalFullAccess.value ? fullAccess.value : undefined)
     emit('saved')
     emit('close')
   } catch (e) {
@@ -111,12 +115,15 @@ onMounted(load)
       <p class="note">Changes to <span class="mono">{{ keyHint(agentKey.prefix) }}</span> apply immediately with the same key.</p>
       <template v-if="loaded">
         <KeyLifetime v-model="days" :current="originalExpiry" :disabled="busy || !allowed" />
-        <ScopeCodeField :unavailable="codeUnavailable" :disabled="busy || !allowed" @applied="selected = $event" />
+        <ScopeCodeField :unavailable="codeUnavailable" :disabled="busy || !allowed || fullAccess" @applied="selected = $event" />
         <label class="search-field">
           <AppIcon name="search" :size="14" />
-          <input v-model="term" class="field" type="search" aria-label="Find a scope" placeholder="Find a scope by name, id or group" data-autofocus autocomplete="off" />
+          <input v-model="term" class="field" type="search" aria-label="Find a scope" :disabled="fullAccess" placeholder="Find a scope by name, id or group" data-autofocus autocomplete="off" />
         </label>
         <ScopePresets :held="presetHeld" :registry="access.registry" :disabled="busy || !allowed" @apply="preset" />
+        <button type="button" class="btn sm ghost scope-toggle" :disabled="busy || !allowed || (!selected.size && !fullAccess)" @click="preset([])">Clear</button>
+        <p v-if="fullAccess" class="note">{{ fullAccessLabel() }}. The agent’s role, creator permissions and project access still apply.</p>
+        <template v-else>
         <fieldset class="scopes" :disabled="busy || !allowed">
           <legend>{{ selected.size }} {{ selected.size === 1 ? 'scope' : 'scopes' }}</legend>
           <div v-for="group in groups" :key="group.group" class="scope-group" role="group" :aria-label="group.group">
@@ -135,6 +142,7 @@ onMounted(load)
         <p v-if="!selected.size" class="note">This key will have no access.</p>
         <p v-else-if="invalid" class="note" role="alert">Remove unavailable scopes before saving.</p>
         <p v-if="selected.size > MAX_KEY_SCOPES" class="note" role="alert">Choose at most {{ MAX_KEY_SCOPES }} scopes.</p>
+        </template>
         <p v-if="changed" class="changes" aria-live="polite">{{ added.length }} added · {{ removed.length }} removed{{ expiryChanged ? ' · expiry changed' : '' }}</p>
         <section v-if="roleAdded.length && agentRole" class="role-confirm" aria-label="Confirm role changes" aria-live="polite">
           <h3>Also add to the agent's role?</h3>

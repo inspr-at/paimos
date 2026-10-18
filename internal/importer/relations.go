@@ -90,7 +90,7 @@ func applyClassicRelation(ctx context.Context, tx pgx.Tx, tenantID, actor string
 		return 0, err
 	}
 	nodeID := src
-	if _, err := events.Append(ctx, tx, tenant.Principal{TenantID: tenantID, ID: actor}, events.Change{
+	if _, err := appendImportEvent(ctx, tx, tenant.Principal{TenantID: tenantID, ID: actor}, events.Change{
 		NodeID: &nodeID, Type: "relation.created", After: raw,
 	}); err != nil {
 		return 0, err
@@ -197,7 +197,7 @@ func applyReleaseMembership(ctx context.Context, tx pgx.Tx, tenantID, actor stri
 		payload["ticket_node_id"] = memberID
 		nodeID = memberID
 	}
-	if _, err := events.Append(ctx, tx, tenant.Principal{TenantID: tenantID, ID: actor}, events.Change{
+	if _, err := appendImportEvent(ctx, tx, tenant.Principal{TenantID: tenantID, ID: actor}, events.Change{
 		NodeID: &nodeID, Type: "import.release_membership", After: payload,
 	}); err != nil {
 		return 0, err
@@ -206,22 +206,45 @@ func applyReleaseMembership(ctx context.Context, tx pgx.Tx, tenantID, actor stri
 }
 
 func releaseProjectNode(ctx context.Context, tx pgx.Tx, tenantID, releaseNodeID string) (string, error) {
-	var classic string
+	var classic, source string
+	pending := pendingNodeBaseline(ctx, releaseNodeID)
+	if len(pending) > 0 {
+		var snapshot struct {
+			Fields struct {
+				Classic Record `json:"classic"`
+			} `json:"fields"`
+		}
+		if err := json.Unmarshal(pending, &snapshot); err != nil {
+			return "", err
+		}
+		project, ok := intField(snapshot.Fields.Classic, "project_id")
+		source = stringField(snapshot.Fields.Classic, "source_id")
+		if ok && source != "" {
+			var projectID string
+			err := tx.QueryRow(ctx, `SELECT n.id::text FROM nodes n JOIN node_kinds k ON k.id=n.kind_id AND k.tenant_id=n.tenant_id WHERE n.tenant_id=$1::uuid AND k.slug='project' AND n.deleted_at IS NULL AND n.fields->'classic'->>'id'=$2 AND n.fields->'classic'->>'source_id'=$3`, tenantID, fmt.Sprint(project), source).Scan(&projectID)
+			if err == nil {
+				return projectID, nil
+			}
+			if !errors.Is(err, pgx.ErrNoRows) {
+				return "", err
+			}
+		}
+	}
 	err := tx.QueryRow(ctx, `
-		SELECT e.after->'fields'->'classic'->>'project_id'
+		SELECT e.after->'fields'->'classic'->>'project_id',coalesce(e.after->'fields'->'classic'->>'source_id','')
 		FROM events e
 		WHERE e.tenant_id=$1 AND e.node_id=$2
 		  AND e.type IN ('import.node_created','import.node_updated')
 		  AND coalesce(e.after->'fields'->'classic'->>'project_id','') ~ '^[0-9]+$'
 		ORDER BY e.id DESC
-		LIMIT 1`, tenantID, releaseNodeID).Scan(&classic)
+		LIMIT 1`, tenantID, releaseNodeID).Scan(&classic, &source)
 	if err != nil && !errors.Is(err, pgx.ErrNoRows) {
 		return "", err
 	}
 	if classic != "" {
 		var projectID string
-		err = tx.QueryRow(ctx, `
-			SELECT n.id::text
+		rows, queryErr := tx.Query(ctx, `
+			SELECT DISTINCT n.id::text
 			FROM events e
 			JOIN nodes n ON n.tenant_id=e.tenant_id AND n.id=e.node_id
 			JOIN node_kinds k ON k.tenant_id=n.tenant_id AND k.id=n.kind_id
@@ -230,13 +253,30 @@ func releaseProjectNode(ctx context.Context, tx pgx.Tx, tenantID, releaseNodeID 
 			  AND k.slug='project'
 			  AND n.deleted_at IS NULL
 			  AND e.after->'fields'->'classic'->>'id'=$2
-			ORDER BY e.id DESC
-			LIMIT 1`, tenantID, classic).Scan(&projectID)
-		if err == nil {
-			return projectID, nil
+			  AND coalesce(e.after->'fields'->'classic'->>'source_id','')=$3
+			LIMIT 2`, tenantID, classic, source)
+		if queryErr != nil {
+			return "", queryErr
 		}
-		if !errors.Is(err, pgx.ErrNoRows) {
-			return "", err
+		for rows.Next() {
+			var candidate string
+			if err := rows.Scan(&candidate); err != nil {
+				rows.Close()
+				return "", err
+			}
+			if projectID != "" && projectID != candidate {
+				rows.Close()
+				return "", errors.New("ambiguous imported release project")
+			}
+			projectID = candidate
+		}
+		queryErr = rows.Err()
+		rows.Close()
+		if queryErr != nil {
+			return "", queryErr
+		}
+		if projectID != "" {
+			return projectID, nil
 		}
 	}
 	var projectID string

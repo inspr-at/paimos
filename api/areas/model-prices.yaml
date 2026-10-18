@@ -1,0 +1,56 @@
+# SPDX-License-Identifier: AGPL-3.0-only
+paths:
+  /model-prices:
+    get:
+      operationId: listModelPrices
+      security: *auth
+      description: Latest immutable price version per model for the tenant. Requires harness.read. A migration seeds published api list prices. Prices are not inferred at request time. Subscription billing does not use these rates for dashboard dollars.
+      parameters:
+        - {name: model, in: query, schema: {type: string, minLength: 1, maxLength: 128}}
+      responses:
+        '200':
+          description: Latest tenant prices
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items]
+                properties:
+                  items: {type: array, items: {$ref: '#/components/schemas/ModelPrice'}}
+    post:
+      operationId: createModelPrice
+      security: *auth
+      description: A person with models.manage creates an immutable, increasing version for an exact model identifier. Exact version/value retry is idempotent; conflicting or older new versions return 409. USD decimal strings have at most six fractional places.
+      requestBody: {required: true, content: {application/json: {schema: {$ref: '#/components/schemas/ModelPriceWrite'}}}}
+      responses:
+        '201': {description: Immutable tenant price version, content: {application/json: {schema: {$ref: '#/components/schemas/ModelPrice'}}}}
+        '400': {description: Invalid price}
+        '403': {description: models.manage person permission required}
+        '409': {description: Conflicting or out-of-order version}
+components:
+  schemas:
+    ModelPrice:
+      type: object
+      required: [model, version, input_usd_per_million, output_usd_per_million, cached_input_usd_per_million, currency, created_at]
+      properties:
+        model: {type: string}
+        version: {type: integer, format: int64}
+        input_usd_per_million: {$ref: '#/components/schemas/ModelPriceRate'}
+        output_usd_per_million: {$ref: '#/components/schemas/ModelPriceRate'}
+        cached_input_usd_per_million: {$ref: '#/components/schemas/ModelPriceRate'}
+        currency: {type: string, const: USD}
+        created_at: {type: string, format: date-time}
+    ModelPriceRate:
+      type: string
+      pattern: '^(?:(?:0|[1-9][0-9]{0,5})(?:\.[0-9]{1,6})?|1000000(?:\.0{1,6})?)$'
+      description: USD per million tokens, nonnegative and at most 1000000, at most six fractional places.
+    ModelPriceWrite:
+      type: object
+      additionalProperties: false
+      required: [model, version, input_usd_per_million, output_usd_per_million, cached_input_usd_per_million]
+      properties:
+        model: {type: string, minLength: 1, maxLength: 128, pattern: '^[A-Za-z0-9][A-Za-z0-9._:/-]*$'}
+        version: {type: integer, format: int64, minimum: 1, maximum: 1000000000000}
+        input_usd_per_million: {$ref: '#/components/schemas/ModelPriceRate'}
+        output_usd_per_million: {$ref: '#/components/schemas/ModelPriceRate'}
+        cached_input_usd_per_million: {$ref: '#/components/schemas/ModelPriceRate'}

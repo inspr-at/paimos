@@ -76,7 +76,8 @@ func (s *Supervisor) managedRules(ctx context.Context, entry *owned, run Run, pr
 
 // Local counters update before telemetry I/O, including before Start returns.
 // Reporting boundaries may overshoot the token limit; they are not a provider
-// billing cap. A single graceful stop is scheduled; failure escalates through
+// billing cap and cannot qualify RoutineBudgetAdapter. A single graceful stop
+// is scheduled; failure escalates through
 // Process.Stop, whose owned lifetime fences every process-group signal.
 func (s *Supervisor) observeBudget(entry *owned, ev AdapterEvent) {
 	entry.budgetMu.Lock()

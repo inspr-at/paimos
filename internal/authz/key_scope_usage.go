@@ -11,12 +11,26 @@ import (
 	"github.com/jackc/pgx/v5"
 )
 
-// LockKeyScopeUseTx serializes grants and trims before resource locking.
+// LockKeyScopeUseTx admits parallel grants and excludes scope changes.
 // InTenant takes the authenticating-key fence before calling handlers, so
 // RequireTx only re-enters it even when it follows a resource row lock.
-// Person-owned trims take the target-key fence before their tenant fence.
+// Scope changes take LockKeyScopeChangeTx before their tenant fence.
 func LockKeyScopeUseTx(ctx context.Context, tx pgx.Tx, tenantID, keyID string) error {
 	return db.LockKeyScopeUseTx(ctx, tx, tenantID, keyID)
+}
+
+// LockKeyScopeChangeTx exclusively fences a scope/authority change against uses.
+// Call before tenant/tree/resource locks; do not upgrade a shared use fence.
+func LockKeyScopeChangeTx(ctx context.Context, tx pgx.Tx, tenantID, keyID string) error {
+	return db.LockKeyScopeChangeTx(ctx, tx, tenantID, keyID)
+}
+
+func validateKeyCreatorTx(ctx context.Context, tx pgx.Tx, p tenant.Principal) error {
+	if err := db.ValidateKeyCreatorTx(ctx, tx, p); errors.Is(err, db.ErrKeyAuthorityChanged) {
+		return ErrForbidden
+	} else {
+		return err
+	}
 }
 
 func recordKeyScopeUseTx(ctx context.Context, tx pgx.Tx, p tenant.Principal, permission string) error {
@@ -29,15 +43,18 @@ func recordKeyScopeUseTx(ctx context.Context, tx pgx.Tx, p tenant.Principal, per
 	// A grant waiting behind approval must see the new live ceiling. SELECT
 	// takes no key row lock; the usage fence, shared with trims, is authoritative.
 	var scopes []string
-	err := tx.QueryRow(ctx, `SELECT scopes FROM agent_keys WHERE tenant_id=$1::uuid AND id=$2::uuid
-	 AND principal_id=$3::uuid AND revoked_at IS NULL AND (expires_at IS NULL OR expires_at>clock_timestamp())`,
-		p.TenantID, p.KeyID, p.ID).Scan(&scopes)
+	var fullAccess bool
+	err := tx.QueryRow(ctx, `SELECT scopes,coalesce(full_access,false) FROM agent_keys WHERE tenant_id=$1::uuid AND id=$2::uuid
+	 AND principal_id=$3::uuid AND created_by_principal_id IS NOT DISTINCT FROM NULLIF($4,'')::uuid
+	 AND revoked_at IS NULL AND (expires_at IS NULL OR expires_at>clock_timestamp())`,
+		p.TenantID, p.KeyID, p.ID, p.KeyCreatorID).Scan(&scopes, &fullAccess)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return ErrForbidden
 	}
 	if err != nil {
 		return err
 	}
+	scopes = ResolveKeyScopes(scopes, fullAccess)
 	used := []string{permission}
 	if !containsScope(scopes, permission) {
 		if !CoordinatorCeiling(scopes, permission) {
@@ -56,8 +73,14 @@ func recordKeyScopeUseTx(ctx context.Context, tx pgx.Tx, p tenant.Principal, per
 }
 
 func upsertKeyScopeUseTx(ctx context.Context, tx pgx.Tx, p tenant.Principal, scope string, at time.Time) error {
+	// A fresh committed timestamp needs no tuple lock. ON CONFLICT's WHERE
+	// alone still locks the row and would serialize all otherwise shared uses.
+	// Keep that final predicate too: simultaneous first/expired uses may race.
 	_, err := tx.Exec(ctx, `INSERT INTO agent_key_scope_usage(tenant_id,key_id,scope,last_used_at)
-	 VALUES($1::uuid,$2::uuid,$3,$4)
+	 SELECT $1::uuid,$2::uuid,$3,$4::timestamptz
+	 WHERE NOT EXISTS (SELECT 1 FROM agent_key_scope_usage
+	  WHERE tenant_id=$1::uuid AND key_id=$2::uuid AND scope=$3
+	  AND last_used_at>$4::timestamptz-interval '1 minute')
 	 ON CONFLICT(tenant_id,key_id,scope) DO UPDATE SET last_used_at=EXCLUDED.last_used_at
 	 WHERE agent_key_scope_usage.last_used_at<=EXCLUDED.last_used_at-interval '1 minute'`, p.TenantID, p.KeyID, scope, at)
 	return err

@@ -31,7 +31,7 @@ func RecordEvidence(ctx context.Context, tx pgx.Tx, orderID, evidenceID, princip
         WHERE v.work_order_id=$1 AND r.id=$2 AND r.agent_principal_id=$3
         AND r.status IN ('starting','running','waiting') AND r.daemon_id=$4 AND r.daemon_generation=$5
         AND a.registered_by_principal_id=r.agent_principal_id AND a.daemon_id=r.daemon_id AND a.last_daemon_generation=r.daemon_generation
- AND p.id=v.reviewer_profile_id AND p.family=v.reviewer_family AND p.family<>v.author_family`, orderID, runID, principalID, daemon, generation).Scan(&harness, &model, &family)
+ AND p.id=v.reviewer_profile_id AND p.family=v.reviewer_family`, orderID, runID, principalID, daemon, generation).Scan(&harness, &model, &family)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return ErrEvidence
 	}
@@ -39,6 +39,30 @@ func RecordEvidence(ctx context.Context, tx pgx.Tx, orderID, evidenceID, princip
 		return err
 	}
 	if !harnesslaunch.FamilyMatches(harness, model, family) || kind != "text" || daemon == "" || generation == "" {
+		return ErrEvidence
+	}
+	var project *string
+	var author string
+	var authorRun, authorHarness, authorModel, authorFamily *string
+	err = tx.QueryRow(ctx, `SELECT n.project_id::text,v.author_family,v.author_run_id::text,ap.harness,ap.model,ap.family
+ FROM work_order_reviews v JOIN nodes n ON n.tenant_id=v.tenant_id AND n.id=v.ticket_node_id
+ LEFT JOIN agent_runs ar ON ar.tenant_id=v.tenant_id AND ar.id=v.author_run_id
+ LEFT JOIN model_profiles ap ON ap.tenant_id=ar.tenant_id AND ap.id=ar.model_profile_id
+ WHERE v.work_order_id=$1`, orderID).Scan(&project, &author, &authorRun, &authorHarness, &authorModel, &authorFamily)
+	if err != nil {
+		return err
+	}
+	if authorRun != nil {
+		if authorHarness == nil || authorModel == nil || authorFamily == nil || !harnesslaunch.FamilyMatches(*authorHarness, *authorModel, *authorFamily) {
+			return ErrEvidence
+		}
+		author = *authorFamily
+	}
+	policy, err := LoadFamilyPolicyTx(ctx, tx, project)
+	if err != nil {
+		return err
+	}
+	if !ValidFamily(author) || policy.Effective.Mode != "off" && family == author {
 		return ErrEvidence
 	}
 	result := Parse(text)

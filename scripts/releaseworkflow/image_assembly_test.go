@@ -214,8 +214,9 @@ func TestPushedImageMatchesSmokedBuild(t *testing.T) {
 	_, smoke := named(t, j, "Build cached smoke image")
 	pushAt, push := named(t, j, "Build and push")
 	checkAt, check := named(t, j, "Require pushed image to equal the smoked build")
+	runtimeAt, _ := named(t, j, "Verify pushed runtime matches smoke")
 	attestAt, _ := named(t, j, "Attest pushed image")
-	if checkAt != pushAt+1 || attestAt != checkAt+1 {
+	if checkAt != pushAt+1 || runtimeAt != checkAt+1 || attestAt != runtimeAt+1 {
 		t.Fatal("the pushed image must be compared directly after the push and before attestation")
 	}
 	if smoke.ID != "build" || push.ID != "push" || check.If != "" || check.ContinueOnError || check.Uses != "" ||
@@ -303,7 +304,7 @@ func goIsolationProblems(release, dry workflow) []string {
 		job, name, dryJob, dryName, cache string
 		commands                          []string
 	}{
-		{"agentd-darwin", "Build darwin paimos-agentd with LocalAuthentication", "agentd-rehearsal", "Build darwin paimos-agentd with LocalAuthentication", "go-build-agentd", []string{"bash scripts/build-release-binaries.sh darwin-agentd"}},
+		{"agentd-darwin", "Build darwin paimos-agentd with LocalAuthentication", "agentd-rehearsal", "Build darwin paimos-agentd with LocalAuthentication", "go-build-agentd", []string{"bash scripts/build-release-binaries.sh darwin-agentd", `GOCACHE="$RUNNER_TEMP/go-build-cli-darwin" bash scripts/build-release-binaries.sh cli-darwin` + "\n"}},
 		{"image-platform", "Release history", "image-dry-run", "Release history fixture", "go-build-history", []string{"go mod download\n", "go mod verify\n", "go run ./internal/releasehistory/generate"}},
 		{"image-platform", "Compile web and Go outside Docker", "image-dry-run", "Compile web and Go outside Docker", "go-build-image", []string{"node scripts/build-image-inputs.mjs build"}},
 		// Each proof run creates its own build cache; none may be passed in.
@@ -348,7 +349,7 @@ func goIsolationProblems(release, dry workflow) []string {
 	if assets, ok := find(release, "assets", "Build linux paimos-agentd and aeon-cli"); ok {
 		for _, line := range []string{
 			`GOCACHE="$RUNNER_TEMP/go-build-linux-agentd" bash scripts/build-release-binaries.sh linux-agentd` + "\n",
-			`GOCACHE="$RUNNER_TEMP/go-build-cli" bash scripts/build-release-binaries.sh cli` + "\n",
+			`GOCACHE="$RUNNER_TEMP/go-build-cli" bash scripts/build-release-binaries.sh cli-linux` + "\n",
 		} {
 			if strings.Count(assets.Run, line) != 1 {
 				problems = append(problems, "assets: every compilation needs its own empty build cache")
@@ -404,7 +405,7 @@ func TestShippedGoBuildsCompileColdFromVerifiedModules(t *testing.T) {
 		{"history verified late", "release", "          go mod download\n          go mod verify\n          go run ./internal/releasehistory/generate -repo . -repository \"${GITHUB_REPOSITORY}\"\n", "          go mod download\n          go run ./internal/releasehistory/generate -repo . -repository \"${GITHUB_REPOSITORY}\"\n          go mod verify\n", "modules are not verified before go run"},
 		{"proof given a build cache", "release", "          # Each proof run creates its own empty GOCACHE; none is passed here.\n", "          GOCACHE: ${{ runner.temp }}/go-build-proof\n", "image-platform/Prove two clean image rebuilds: not compiled cold"},
 		{"assets share one cache", "release", `GOCACHE="$RUNNER_TEMP/go-build-cli" bash`, `GOCACHE="$RUNNER_TEMP/go-build-linux-agentd" bash`, "every compilation needs its own empty build cache"},
-		{"assets unnamed cache", "release", `GOCACHE="$RUNNER_TEMP/go-build-cli" bash scripts/build-release-binaries.sh cli`, "bash scripts/build-release-binaries.sh cli", "every compilation needs its own empty build cache"},
+		{"assets unnamed cache", "release", `GOCACHE="$RUNNER_TEMP/go-build-cli" bash scripts/build-release-binaries.sh cli-linux`, "bash scripts/build-release-binaries.sh cli-linux", "every compilation needs its own empty build cache"},
 		{"rehearsal drifts", "dry", "GOCACHE: ${{ runner.temp }}/go-build-image", "GOCACHE: ${{ runner.temp }}/go-build-other", "rehearsal differs in GOCACHE"},
 		{"rehearsal assets without modules", "dry", "      - name: Exact production assets assembly\n        env:\n          GOMODCACHE: ${{ runner.temp }}/go-mod\n          GOFLAGS: -mod=readonly\n", "      - name: Exact production assets assembly\n", "rehearsal differs in GOMODCACHE"},
 	} {
@@ -444,7 +445,10 @@ case "$1" in
     printf 'CGO_ENABLED=%s\nGOOS=%s\nGOARCH=%s\n' "$CGO_ENABLED" "$GOOS" "$GOARCH" > "$out"
     if [ -n "${GOCACHE:-}" ]; then mkdir -p "$GOCACHE" && : > "$GOCACHE/compiled"; fi
     ;;
-  version) cat "$3" ;;
+  version)
+    cat "$3"
+    if [ "${AEON_RELEASE_TEST_LONG_BUILDINFO:-}" = true ]; then printf '%131072s\n' ''; fi
+    ;;
 esac
 `
 	run := func(t *testing.T, mode string, vars ...string) (string, string, error) {
@@ -470,7 +474,7 @@ esac
 		for _, entry := range os.Environ() {
 			key, _, _ := strings.Cut(entry, "=")
 			switch key {
-			case "GITHUB_ACTIONS", "RUNNER_TEMP", "GOCACHE", "GOMODCACHE", "GOFLAGS", "VERSION", "AEON_DEVELOPER_ID_TEAM", "AEON_DARWIN_ARCH", "PATH":
+			case "GITHUB_ACTIONS", "RUNNER_TEMP", "GOCACHE", "GOMODCACHE", "GOFLAGS", "VERSION", "AEON_DEVELOPER_ID_TEAM", "AEON_DARWIN_ARCH", "AEON_RELEASE_TEST_LONG_BUILDINFO", "PATH":
 			default:
 				cmd.Env = append(cmd.Env, entry)
 			}
@@ -505,6 +509,26 @@ esac
 		}
 		if builds != 4 {
 			t.Fatalf("want four CLI builds, got %d: %q", builds, lines)
+		}
+	})
+	// Risk: grep -q exits as soon as it finds metadata. With pipefail, a
+	// printf writer receiving SIGPIPE can then reject a correctly built binary.
+	// Force unread output beyond the pipe buffer; no scheduling or sleep needed.
+	t.Run("long build info keeps strict metadata checks", func(t *testing.T) {
+		vars := append(append([]string{}, hosted...), "AEON_RELEASE_TEST_LONG_BUILDINFO=true")
+		calls, output, err := run(t, "cli", vars...)
+		if err != nil {
+			t.Fatalf("%v: %s", err, output)
+		}
+		lines := strings.Split(strings.TrimSpace(calls), "\n")
+		const settings = "|$TEMP/runner/go-build-cli|$TEMP/runner/go-mod|-mod=readonly"
+		if len(lines) != 10 || lines[0] != "mod download"+settings || lines[1] != "mod verify"+settings {
+			t.Fatalf("all four builds and metadata checks must follow module verification: %q", lines)
+		}
+		for i := 2; i < len(lines); i += 2 {
+			if !strings.HasPrefix(lines[i], "build ") || !strings.HasPrefix(lines[i+1], "version -m ") || !strings.HasSuffix(lines[i], settings) || !strings.HasSuffix(lines[i+1], settings) {
+				t.Fatalf("each cold build must pass its metadata check: %q", lines[i:i+2])
+			}
 		}
 	})
 	for _, tc := range []struct {

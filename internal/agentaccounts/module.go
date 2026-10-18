@@ -7,6 +7,7 @@ import (
 	"errors"
 	"net/http"
 
+	"github.com/inspr-at/paimos/internal/accountuse"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 
@@ -20,9 +21,10 @@ import (
 
 // Module serves /api/agent-accounts.
 type Module struct {
-	pool       *pgxpool.Pool
-	preview    *previewGuard
-	openRouter openrouter.Catalog
+	pool        *pgxpool.Pool
+	preview     *previewGuard
+	openRouter  openrouter.Catalog
+	resetVendor ResetVendor
 }
 
 var _ httpapi.Module = (*Module)(nil)
@@ -45,6 +47,7 @@ func (m *Module) Mount(mux *http.ServeMux) {
 	handle("PUT /api/settings/quota-warnings", m.warningSettings)
 	handle("POST /api/agent-accounts/{accountId}/check", m.check)
 	handle("PUT /api/agent-accounts/{accountId}/sharing", m.sharing)
+	handle("PUT /api/agent-accounts/{accountId}/usage-probe", m.usageProbe)
 	handle("PUT /api/agent-accounts/quota-pool", m.quotaPool)
 	handle("PUT /api/agent-accounts/{accountId}/signals", m.signals)
 	handle("GET /api/agent-accounts/{accountId}/statusline", m.statusline)
@@ -52,6 +55,14 @@ func (m *Module) Mount(mux *http.ServeMux) {
 	handle("POST /api/agent-accounts/{accountId}/quota-key", m.quotaKey)
 	handle("GET /api/agent-accounts", m.list)
 	handle("GET /api/agent-accounts/catalog", m.catalog)
+	handle("GET /api/agent-accounts/overview", m.overview)
+	handle("GET /api/agent-accounts/posture", m.postures)
+	handle("PUT /api/agent-accounts/boost", m.writeBoost)
+	handle("PUT /api/agent-accounts/{accountId}/posture", m.writeUsagePolicy)
+	handle("PUT /api/agent-accounts/{accountId}/floor", m.writeUsagePolicy)
+	handle("PUT /api/agent-accounts/{accountId}/reset-policy", m.resetPolicy)
+	handle("POST /api/agent-accounts/{accountId}/resets/use", m.useReset)
+	handle("POST /api/agent-accounts/{accountId}/resets/{actionId}/undo", m.undoReset)
 	handle("GET /api/agent-accounts/groups", m.groups)
 	handle("POST /api/agent-accounts/groups", m.groups)
 	handle("PATCH /api/agent-accounts/groups/{id}", m.group)
@@ -91,12 +102,44 @@ func (m *Module) Mount(mux *http.ServeMux) {
 	handle("PATCH /api/agent-accounts/{accountId}", m.patch)
 	handle("POST /api/agent-accounts/{accountId}/archive", m.archive)
 	handle("POST /api/agent-accounts/{accountId}/probe", m.probe)
+	// The batch returns typed acknowledgements containing only submitted IDs
+	// and statuses, never account projections needing a privacy reread.
+	mux.HandleFunc("POST /api/agent-accounts/probes", m.probes)
 }
 
 func (m *Module) in(ctx context.Context, tenantID string, fn func(pgx.Tx) error) error {
 	return db.InTenant(ctx, m.pool, tenantID, func(tx pgx.Tx) error {
 		if err := agentpairing.LockMutation(ctx, tx); err != nil {
 			return err
+		}
+		if err := accountuse.LockShared(ctx, tx); err != nil {
+			return err
+		}
+		return fn(tx)
+	})
+}
+
+// read keeps account projections and their authority in one MVCC snapshot,
+// without taking tenant/tree mutation fences. It must never mutate resources.
+func (m *Module) read(ctx context.Context, tenantID string, fn func(pgx.Tx) error) error {
+	return db.InTenantReadSnapshot(ctx, m.pool, tenantID, fn)
+}
+
+func (m *Module) readPerson(ctx context.Context, p tenant.Principal, permission string, fn func(pgx.Tx) error) error {
+	return m.read(ctx, p.TenantID, func(tx pgx.Tx) error {
+		if p.Kind != tenant.Person || authz.RequireTx(ctx, tx, p, permission, authz.Scope{}) != nil {
+			return fail(http.StatusForbidden, "permission denied")
+		}
+		return fn(tx)
+	})
+}
+
+// write rechecks person authority under the tenant/tree fences held by in,
+// before the callback acquires resource rows or appends events.
+func (m *Module) write(ctx context.Context, p tenant.Principal, permission string, fn func(pgx.Tx) error) error {
+	return m.in(ctx, p.TenantID, func(tx pgx.Tx) error {
+		if p.Kind != tenant.Person || authz.RequireTx(ctx, tx, p, permission, authz.Scope{}) != nil {
+			return fail(http.StatusForbidden, "permission denied")
 		}
 		return fn(tx)
 	})
@@ -112,7 +155,7 @@ func (m *Module) list(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var items []Account
-	err := m.in(r.Context(), p.TenantID, func(tx pgx.Tx) error {
+	err := m.read(r.Context(), p.TenantID, func(tx pgx.Tx) error {
 		var err error
 		items, err = queryAccounts(r.Context(), tx, p.Kind == tenant.Agent)
 		if err == nil && p.Kind == tenant.Person {
@@ -211,7 +254,7 @@ func (m *Module) createWindow(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var out Window
-	err := m.in(r.Context(), p.TenantID, func(tx pgx.Tx) error {
+	err := m.write(r.Context(), p, "account.manage", func(tx pgx.Tx) error {
 		var err error
 		out, err = createWindow(r.Context(), tx, p, r.PathValue("accountId"), in)
 		return err
@@ -238,7 +281,7 @@ func (m *Module) patch(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var out Account
-	err := m.in(r.Context(), p.TenantID, func(tx pgx.Tx) error {
+	err := m.write(r.Context(), p, "account.manage", func(tx pgx.Tx) error {
 		var err error
 		out, err = updateState(r.Context(), tx, p, r.PathValue("accountId"), in.State)
 		return err
@@ -261,7 +304,7 @@ func (m *Module) archive(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var out Account
-	err := m.in(r.Context(), p.TenantID, func(tx pgx.Tx) error {
+	err := m.write(r.Context(), p, "account.manage", func(tx pgx.Tx) error {
 		var err error
 		out, err = archiveAccount(r.Context(), tx, p, r.PathValue("accountId"))
 		return err

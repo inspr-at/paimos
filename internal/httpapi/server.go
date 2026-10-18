@@ -12,6 +12,7 @@ import (
 	"strings"
 	"sync"
 	"sync/atomic"
+	"time"
 
 	"github.com/jackc/pgx/v5/pgxpool"
 
@@ -31,9 +32,12 @@ type PublicModule interface {
 
 // Server holds what every module needs.
 type Server struct {
-	Mux        *http.ServeMux
-	Pool       *pgxpool.Pool
-	Middleware []func(http.Handler) http.Handler // applied outermost-first to /api
+	Mux  *http.ServeMux
+	Pool *pgxpool.Pool
+	// Middleware applies outermost-first to /api. The first middleware performs
+	// authentication and authorization under the admission deadline; remaining
+	// middleware runs with the handler lifetime and authenticated context.
+	Middleware []func(http.Handler) http.Handler
 	Modules    []Module
 	// Web is the SPA filesystem (AEON_WEB_DIR or the webembed dist).
 	// Nil serves a placeholder page.
@@ -59,9 +63,15 @@ type Server struct {
 	// not draining; liveness (GET /api/health) ignores both.
 	serving  atomic.Bool
 	draining atomic.Bool
-	// readyProbe overrides the readiness database ping. Nil uses Pool.Ping.
+	// readyProbe overrides the readiness database ping. Nil uses db.Probe.
 	// Tests inject it; production leaves it nil.
 	readyProbe func(context.Context) error
+	// AuthProbe exercises shared authentication reads without minting credentials
+	// or renewing activity. It shares readiness's 500ms total budget.
+	AuthProbe func(context.Context) error
+	authReady authReadiness
+	readyNow  func() time.Time
+	Metrics   TransportMetrics
 
 	once    sync.Once
 	handler http.Handler
@@ -107,12 +117,19 @@ func (s *Server) build() {
 	s.Mux.HandleFunc("/api", handleNotFound)
 
 	var api http.Handler = s.Mux
-	for i := len(s.Middleware) - 1; i >= 0; i-- {
+	for i := len(s.Middleware) - 1; i > 0; i-- {
 		api = s.Middleware[i](api)
 	}
+	// Restore the handler lifetime before response middleware captures the
+	// request for post-mutation reads such as the event-position watermark.
+	api = handlerBudgetMiddleware(api)
+	if len(s.Middleware) > 0 {
+		api = s.Middleware[0](api)
+	}
 	api = readStatementTimeoutMiddleware(api)
+	api = requestBudgetMiddleware(api)
 	api = routePatternMiddleware(s.Mux, api)
-	api = commonMiddleware(api)
+	api = requestIDMiddlewareWithMetrics(recoverMiddleware(securityMiddleware(api)), &s.Metrics)
 
 	publicMux := http.NewServeMux()
 	publicMounted := false
@@ -139,6 +156,9 @@ func (s *Server) build() {
 	spa := commonMiddleware(view)
 	if publicMounted {
 		root.Handle("GET /aithema/preview/{design_rev}", commonMiddleware(publicMux))
+		// AEON-1441: START's form POST. Public and cookie-free: it never
+		// passes the API middleware, so no session is read or renewed here.
+		root.Handle("POST /import/project-draft", commonMiddleware(publicMux))
 		root.Handle("GET /portal/{tenantSlug}/products/{productSlug}/llms.txt", commonMiddleware(publicMux))
 		root.Handle("GET /portal/{tenantSlug}/products/{productSlug}/catalog.json", commonMiddleware(publicMux))
 		root.Handle("GET /portal/{tenantSlug}/products/{productSlug}/roadmap.json", commonMiddleware(publicMux))

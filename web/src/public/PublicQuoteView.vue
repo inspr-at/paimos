@@ -228,7 +228,7 @@ onBeforeUnmount(() => { sizer?.disconnect(); cancelAnimationFrame(frame); poll.s
 .pq-sender { font: 600 17px/1.3 var(--serif); color: var(--ink); overflow-wrap: anywhere; }
 .pq-ref { display: flex; flex-wrap: wrap; gap: 4px 12px; font: 500 12.5px/1.4 var(--mono); color: var(--ink-2); font-variant-ligatures: none; }
 .pq-wrap { max-width: 880px; margin: 0 auto; padding: 0 20px; }
-.pq-card { margin: 24px 0; padding: 24px; border-radius: 16px; background: var(--surface-raised); box-shadow: inset 0 0 0 1px var(--line-2), 0 1px 2px rgba(20, 40, 40, .04); }
+.pq-card { margin: 24px 0; padding: 24px; border-radius: 16px; background: var(--surface-raised); box-shadow: inset 0 0 0 1px var(--line-2), 0 1px 2px color-mix(in srgb, var(--shadow-color) 4%, transparent); }
 .pq-card h1 { font: 650 clamp(22px, 4.2vw, 30px)/1.2 var(--serif); letter-spacing: -.01em; text-wrap: balance; overflow-wrap: anywhere; }
 .pq-card h2 { font-size: 19px; font-weight: 650; }
 .pq-card p { font-size: 14.5px; line-height: 1.55; color: var(--ink-2); }
@@ -247,8 +247,8 @@ onBeforeUnmount(() => { sizer?.disconnect(); cancelAnimationFrame(frame); poll.s
 .pq-btn { display: inline-flex; align-items: center; justify-content: center; gap: 7px; min-height: 44px; padding: 0 18px; border: 1px solid var(--line-2); border-radius: 10px; background: var(--surface-raised); color: var(--ink); font: 600 14px/1 var(--font); text-decoration: none; white-space: nowrap; cursor: pointer; }
 @media (hover: hover) { .pq-btn:hover { background: var(--row-hover); } }
 .pq-btn:focus-visible { outline: none; box-shadow: var(--focus-ring); }
-.pq-btn.primary { border-color: var(--teal); background: var(--teal); color: var(--button-ink); }
-@media (hover: hover) { .pq-btn.primary:hover { filter: brightness(1.06); background: var(--teal); } }
+.pq-btn.primary { border-color: var(--primary-line); background: var(--primary); color: var(--primary-on); }
+@media (hover: hover) { .pq-btn.primary:hover { filter: brightness(1.06); background: var(--primary); } }
 .pq-btn:disabled { opacity: .5; cursor: default; }
 .pq-note { margin-top: -8px; font-size: 13px; color: var(--danger); }
 /* The desk: the frozen document on a quiet surface, as light paper in any theme. */

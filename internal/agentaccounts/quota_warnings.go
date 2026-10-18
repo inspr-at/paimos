@@ -40,24 +40,49 @@ func (m *Module) warningSettings(w http.ResponseWriter, r *http.Request) {
 	ctx, cancel := context.WithTimeout(r.Context(), 10*time.Second)
 	defer cancel()
 	var out QuotaWarningSettings
+	var expected struct {
+		QuotaWarningSettings
+		Early  *int `json:"expected_early_percent,omitempty"`
+		Urgent *int `json:"expected_urgent_percent,omitempty"`
+	}
 	if r.Method == http.MethodPut {
-		if err := decodeJSON(w, r, &out); err != nil {
+		if err := decodeJSON(w, r, &expected); err != nil {
 			writeErr(w, err)
 			return
 		}
-		if !out.valid() {
+		out = expected.QuotaWarningSettings
+		if (expected.Early == nil) != (expected.Urgent == nil) || !out.valid() {
 			writeErr(w, fail(400, "thresholds must be integers from 1 to 50, with urgent lower than early"))
 			return
 		}
 	}
-	err := m.inReadinessWrite(ctx, p, func(tx pgx.Tx) error {
-		if authz.RequireTx(ctx, tx, p, "settings.manage", authz.Scope{}) != nil || r.Method == http.MethodPut && p.Kind != tenant.Person {
+	enter := m.inReadinessWrite
+	if r.Method == http.MethodGet {
+		enter = func(ctx context.Context, p tenant.Principal, fn func(pgx.Tx) error) error {
+			return m.read(ctx, p.TenantID, fn)
+		}
+	}
+	err := enter(ctx, p, func(tx pgx.Tx) error {
+		permission := "account.read"
+		if r.Method == http.MethodPut {
+			permission = "settings.manage"
+		}
+		if authz.RequireTx(ctx, tx, p, permission, authz.Scope{}) != nil || r.Method == http.MethodPut && p.Kind != tenant.Person {
 			return fail(403, "workspace settings management required")
 		}
 		if r.Method == http.MethodGet {
 			var err error
 			out, err = quotaWarningSettings(ctx, tx)
 			return err
+		}
+		if expected.Early != nil {
+			current, err := quotaWarningSettings(ctx, tx)
+			if err != nil {
+				return err
+			}
+			if current.EarlyPercent != *expected.Early || current.UrgentPercent != *expected.Urgent {
+				return fail(409, "thresholds changed; review them again")
+			}
 		}
 		if _, err := tx.Exec(ctx, `INSERT INTO quota_warning_settings(tenant_id,early_percent,urgent_percent) VALUES($1,$2,$3) ON CONFLICT(tenant_id) DO UPDATE SET early_percent=EXCLUDED.early_percent,urgent_percent=EXCLUDED.urgent_percent`, p.TenantID, out.EarlyPercent, out.UrgentPercent); err != nil {
 			return err
@@ -398,7 +423,7 @@ func (m *Module) warningSessions(w http.ResponseWriter, r *http.Request) {
 		Items     []QuotaWarningSession `json:"items"`
 		NextAfter *string               `json:"next_after"`
 	}{Items: []QuotaWarningSession{}}
-	err := m.in(ctx, p.TenantID, func(tx pgx.Tx) error {
+	err := m.read(ctx, p.TenantID, func(tx pgx.Tx) error {
 		if authz.RequireTx(ctx, tx, p, "account.read", authz.Scope{}) != nil {
 			return fail(403, "account read permission required")
 		}

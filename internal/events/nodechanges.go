@@ -33,6 +33,7 @@ type NodeChange struct {
 // Event types whose snapshots are nodes (node.project_moved wraps it in
 // "node", node.bulk_changed lists them in "items").
 var nodeChangeTypes = map[string]bool{
+	"status_autopilot.attention_apply": true, "status_autopilot.attention_dismiss": true, "status_autopilot.attention_undone": true,
 	"status_autopilot.derived": true, "import.node_updated": true, "import.node_created": true,
 	"status_autopilot.changed": true, "status_autopilot.undone": true, "import.parent_changed": true,
 	"node.benefits_generated": true, "node.created": true, "node.updated": true, "node.moved": true, "node.kind_changed": true,
@@ -190,6 +191,14 @@ func nodeChangeOf(before, after snapshotObject) (NodeChange, bool) {
 // summarizeNodeChanges derives the node changes one event describes, without
 // projects. Unknown types and shapes describe none.
 func summarizeNodeChanges(e Event) []NodeChange {
+	if (e.Type == "entry_check.ticked" || e.Type == "node.entry_check_ticked" || e.Type == "node.person_step_reassigned") && e.NodeID != nil {
+		after := objectOf(e.After)
+		revision := stringOf(after["revision"])
+		if revision == nil {
+			revision = stringOf(after["at"])
+		}
+		return []NodeChange{{ID: *e.NodeID, Change: "updated", Fields: []string{"person_waiting"}, Revision: revision}}
+	}
 	if !nodeChangeTypes[e.Type] {
 		return nil
 	}

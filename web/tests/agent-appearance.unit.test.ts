@@ -9,6 +9,32 @@ beforeEach(async () => {
 afterEach(() => vi.unstubAllGlobals())
 const response = (value: unknown) => new Response(JSON.stringify({ value }))
 
+it('personal behaviour writes preserve stored accessibility choices while a theme is active', async () => {
+  const stored = { palette: 'deutan', dimInactive: false, inactiveOpacity: 72, yellowMinutes: 8, redMinutes: 21 }
+  const writes: unknown[] = []
+  let written!: () => void
+  const saved = new Promise<void>(resolve => { written = resolve })
+  vi.stubGlobal('fetch', vi.fn(async (url: string, init: RequestInit) => {
+    expect(url).toBe('/api/preferences/agent-state')
+    if (init.method === 'PUT') {
+      writes.push(JSON.parse(String(init.body)).value)
+      written()
+      return response(writes.at(-1))
+    }
+    return response(stored)
+  }))
+  const { useAgentAppearance } = await import('../src/lib/agentAppearance')
+  const { applyTheme } = await import('../src/lib/themeRuntime')
+  const { PORCELAIN } = await import('../src/lib/themeEngine')
+  const settings = useAgentAppearance()
+  await settings.ready
+  applyTheme(PORCELAIN)
+  expect(settings.choice.value.palette).toBe('standard')
+  settings.save({ yellowMinutes: 9 })
+  await saved
+  expect(writes).toEqual([{ ...stored, yellowMinutes: 9 }])
+})
+
 it('shares viewer state preferences across surfaces and preserves independent settings', async () => {
   const writes: unknown[] = []
   const fetch = vi.fn(async (url: string, init: RequestInit) => {
@@ -24,12 +50,12 @@ it('shares viewer state preferences across surfaces and preserves independent se
   const settings = useAgentAppearance(), cards = useAgentAppearance(), sessions = useAgentAppearance()
   await settings.ready
   expect(fetch).toHaveBeenCalledTimes(1)
-  expect(cards.appearance('stopped')).toMatchObject({ '--agent-state-opacity': '0.7', '--agent-state-saturation': '0' })
+  expect(cards.appearance('stopped')).toMatchObject({ '--agent-state-opacity': 'var(--agent-idle-opacity)', '--agent-idle-opacity': '0.7', '--agent-state-saturation': '1' })
   // The pre-AEON-242 red–green choice reads as Deutan without a write.
   expect(cards.choice.value.palette).toBe('deutan')
-  expect(cards.appearance('working')['--agent-state-color']).toBe('var(--agent-deutan-working)')
+  expect(cards.appearance('working')['--agent-state-color']).toBe('var(--agent-working)')
   settings.save({ palette: 'monochrome', dimInactive: false })
-  expect(sessions.appearance('idle')['--agent-state-opacity']).toBe('1')
+  expect(sessions.appearance('idle')['--agent-idle-opacity']).toBe('1')
   expect(sessions.appearance('working')['--agent-state-saturation']).toBe('0')
   await vi.waitFor(() => expect(writes).toEqual([{ palette: 'monochrome', dimInactive: false, inactiveOpacity: 70, yellowMinutes: 5, redMinutes: 12 }]))
   settings.save({ yellowMinutes: 15 })

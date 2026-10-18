@@ -3,6 +3,7 @@ package themes
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"errors"
 	"io"
@@ -96,23 +97,33 @@ func completeValues(raw json.RawMessage) bool {
 			return false
 		}
 	}
+	if raw, present := a["custom_states"]; present && string(raw) != "null" {
+		states, ok := object(raw, "working", "waiting", "throttled", "problem", "idle")
+		if !ok {
+			return false
+		}
+		for _, key := range []string{"working", "waiting", "throttled", "problem", "idle"} {
+			if _, ok := object(states[key], "light", "dark"); !ok {
+				return false
+			}
+		}
+	}
+	if string(a["palette"]) == `"custom"` && (a["custom_states"] == nil || string(a["custom_states"]) == "null") {
+		return false
+	}
 	return true
 }
 func input(w http.ResponseWriter, r *http.Request, out any, required ...string) bool {
-	controller := http.NewResponseController(w)
-	if err := controller.SetReadDeadline(time.Now().Add(10 * time.Second)); err == nil {
-		defer controller.SetReadDeadline(time.Time{})
-	} else if !errors.Is(err, http.ErrNotSupported) {
+	raw, err := httpapi.ReadRequestBody(w, r, 8<<10, 10*time.Second)
+	if errors.Is(err, httpapi.ErrBodyDeadlineUnavailable) {
 		httpapi.WriteError(w, 500, "theme request deadline could not be set")
 		return false
 	}
-	r.Body = http.MaxBytesReader(w, r.Body, 8<<10)
-	raw, err := io.ReadAll(r.Body)
 	if err != nil {
 		var size *http.MaxBytesError
 		if errors.As(err, &size) {
 			httpapi.WriteError(w, 413, "theme request exceeds 8 KiB")
-		} else if errors.Is(err, os.ErrDeadlineExceeded) {
+		} else if errors.Is(err, os.ErrDeadlineExceeded) || errors.Is(err, context.DeadlineExceeded) || errors.Is(err, context.Canceled) {
 			httpapi.WriteError(w, 408, "theme request body timed out")
 		} else {
 			httpapi.WriteError(w, 400, "invalid theme JSON")

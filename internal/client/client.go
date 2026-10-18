@@ -6,15 +6,18 @@ package client
 import (
 	"bytes"
 	"context"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
 	"strconv"
 	"strings"
 	"time"
 
 	"github.com/inspr-at/paimos/internal/stepup"
+	"github.com/inspr-at/paimos/internal/workerlease"
 )
 
 // Me is the GET /api/me response.
@@ -58,6 +61,8 @@ type StatusError struct {
 	AttachRefusal string
 	ReasonCode    string
 	RetryAfter    time.Duration
+	// EntryChecksFailure retains only the bounded public entry-refusal body.
+	EntryChecksFailure json.RawMessage
 }
 
 func (e *StatusError) Error() string {
@@ -75,6 +80,49 @@ type Client struct {
 	HTTP         *http.Client
 	// ConfirmStepUp receives only a challenge ID. Nil fails closed on 428.
 	ConfirmStepUp func(context.Context, string) (string, error)
+	// Tests inject the wait to prove cancellation without sleeping.
+	workReadWait func(context.Context, time.Duration) error
+}
+
+type workReadRetryKey struct{}
+
+// WithWorkReadRetry opts an authorized routine read into one aggregate-limit
+// retry. Callers must apply the project execution flag before opting in; normal
+// CLI, MCP and daemon requests keep their existing single-attempt behaviour.
+func WithWorkReadRetry(ctx context.Context) context.Context {
+	return context.WithValue(ctx, workReadRetryKey{}, true)
+}
+
+const workAggregateLimitMessage = "Work aggregates exceeded a resource limit; narrow the scope or retry."
+
+func workReadPath(path string) bool {
+	u, err := url.Parse(path)
+	if err != nil || u.IsAbs() || u.Host != "" {
+		return false
+	}
+	if u.Path == "/api/nodes" {
+		return true
+	}
+	if ref, ok := strings.CutPrefix(u.Path, "/api/node-keys/"); ok {
+		return ref != "" && !strings.Contains(ref, "/")
+	}
+	if ref, ok := strings.CutPrefix(u.Path, "/api/nodes/"); ok && len(ref) == 36 &&
+		ref[8] == '-' && ref[13] == '-' && ref[18] == '-' && ref[23] == '-' {
+		decoded, err := hex.DecodeString(strings.ReplaceAll(ref, "-", ""))
+		return err == nil && len(decoded) == 16
+	}
+	return false
+}
+
+func waitWorkRead(ctx context.Context, delay time.Duration) error {
+	timer := time.NewTimer(delay)
+	defer timer.Stop()
+	select {
+	case <-ctx.Done():
+		return ctx.Err()
+	case <-timer.C:
+		return ctx.Err()
+	}
 }
 
 // New returns a client for baseURL. token is sent as a Bearer credential and is never logged.
@@ -110,10 +158,14 @@ func (c *Client) Do(ctx context.Context, method, path string, body, dest any) er
 	return c.DoWithHeaders(ctx, method, path, body, dest, nil)
 }
 
-// DoWithHeaders sends one JSON request with additional non-credential protocol
-// headers such as a run's daemon fencing identity.
+// DoWithHeaders sends one JSON request with additional protocol headers. Worker
+// proofs and step-up credentials refuse redirects, even to the same origin.
 // MaxResponseBytes caps one response body the client reads.
 const MaxResponseBytes = 64 << 20
+
+// Refusals include two compatible copies of a definition bounded to 64 KiB,
+// plus evaluated reasons and owners. Keep room for all 32 checks.
+const maxEntryChecksFailureBytes = 1 << 20
 
 func (c *Client) DoWithHeaders(ctx context.Context, method, path string, body, dest any, headers map[string]string) error {
 	if c.BaseURL == "" {
@@ -150,7 +202,8 @@ func (c *Client) DoWithHeaders(ctx context.Context, method, path string, body, d
 	if hc == nil {
 		hc = http.DefaultClient
 	}
-	if req.Header.Get(stepup.Header) != "" {
+	req.Header.Del("Proxy-Authorization")
+	if req.Header.Get(stepup.Header) != "" || workerlease.Carries(req.Header) {
 		proofHTTP := *hc
 		proofHTTP.CheckRedirect = func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }
 		hc = &proofHTTP
@@ -227,12 +280,61 @@ func (c *Client) DoWithHeaders(ctx context.Context, method, path string, body, d
 			}
 		}
 		if res.StatusCode < 200 || res.StatusCode >= 300 {
+			// A proxy/server may reflect a request header in an error body.
+			// Worker callers log these errors, so remove both proof forms
+			// before decoding messages or retaining structured refusals.
+			var proofs []string
+			for _, proof := range workerlease.Proofs(req.Header) {
+				if proof == "" {
+					continue
+				}
+				proofs = append(proofs, proof)
+				encoded, _ := json.Marshal(proof)
+				payload = bytes.ReplaceAll(payload, encoded[1:len(encoded)-1], []byte("[redacted]"))
+			}
 			var detail struct {
+				Error         string `json:"error"`
 				AttachRefusal string `json:"attach_refusal"`
 				ReasonCode    string `json:"reason_code"`
 			}
 			_ = json.Unmarshal(payload, &detail)
-			return &StatusError{Status: res.StatusCode, Message: errorMessage(payload), AttachRefusal: detail.AttachRefusal, ReasonCode: detail.ReasonCode, RetryAfter: retryAfter(res.Header.Get("Retry-After"), time.Now())}
+			// Decode before the final pass too: a JSON escape must not bring
+			// the proof back into a message after byte-level redaction.
+			redact := func(value string) string {
+				for _, proof := range proofs {
+					value = strings.ReplaceAll(value, proof, "[redacted]")
+				}
+				return value
+			}
+			status := &StatusError{Status: res.StatusCode, Message: redact(errorMessage(payload)), AttachRefusal: redact(detail.AttachRefusal), ReasonCode: redact(detail.ReasonCode), RetryAfter: retryAfter(res.Header.Get("Retry-After"), time.Now())}
+			if res.StatusCode == http.StatusConflict && detail.Error == "entry_checks_failed" && len(payload) <= maxEntryChecksFailureBytes && json.Valid(payload) {
+				status.EntryChecksFailure = payload
+			}
+			enabled, _ := ctx.Value(workReadRetryKey{}).(bool)
+			if attempt == 0 && enabled && method == http.MethodGet && body == nil &&
+				workReadPath(path) && req.Header.Get(stepup.Header) == "" &&
+				(res.Request == nil || (res.Request.Method == req.Method && res.Request.URL.String() == req.URL.String())) &&
+				res.StatusCode == http.StatusServiceUnavailable && detail.Error == workAggregateLimitMessage {
+				delay := 200 * time.Millisecond
+				if status.RetryAfter > delay {
+					delay = min(status.RetryAfter, time.Second)
+				}
+				wait := c.workReadWait
+				if wait == nil {
+					wait = waitWorkRead
+				}
+				if err := ctx.Err(); err != nil {
+					return err
+				}
+				if err := wait(ctx, delay); err != nil {
+					return err
+				}
+				if err := ctx.Err(); err != nil {
+					return err
+				}
+				continue
+			}
+			return status
 		}
 		if dest == nil || len(bytes.TrimSpace(payload)) == 0 {
 			return nil
@@ -274,6 +376,45 @@ func errorMessage(payload []byte) string {
 		Message string `json:"message"`
 	}
 	if json.Unmarshal(payload, &wrap) == nil && wrap.Error != "" {
+		// Keep the server's explicit failed checks readable in CLI refusals.
+		// Render only this public contract, with bounded output, never raw JSON.
+		if wrap.Error == "entry_checks_failed" && len(payload) <= 65536 {
+			var details struct {
+				Checks []struct {
+					ID     string `json:"id"`
+					Label  string `json:"label"`
+					Reason string `json:"reason"`
+				} `json:"checks"`
+				Failed []struct {
+					ID     string `json:"id"`
+					Label  string `json:"label"`
+					Reason string `json:"reason"`
+				} `json:"failed"`
+			}
+			if json.Unmarshal(payload, &details) != nil {
+				return wrap.Error
+			}
+			checks := details.Checks
+			if checks == nil {
+				checks = details.Failed
+			}
+			if len(checks) > 32 {
+				return wrap.Error
+			}
+			parts := []string{wrap.Error}
+			const omitted = "additional check details omitted"
+			remaining := 4096 - len(wrap.Error) - len(omitted) - 2
+			for _, check := range checks {
+				part := check.ID + " (" + check.Label + "): " + check.Reason
+				if len(part)+2 > remaining {
+					parts = append(parts, omitted)
+					break
+				}
+				parts = append(parts, part)
+				remaining -= len(part) + 2
+			}
+			return strings.Join(parts, "; ")
+		}
 		return wrap.Error
 	}
 	if wrap.Message != "" {

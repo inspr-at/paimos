@@ -14,7 +14,9 @@ import (
 
 	"github.com/inspr-at/paimos/internal/authz"
 	"github.com/inspr-at/paimos/internal/eta"
+	"github.com/inspr-at/paimos/internal/goals"
 	"github.com/inspr-at/paimos/internal/tenant"
+	"github.com/inspr-at/paimos/internal/workerlease"
 	"github.com/inspr-at/paimos/internal/workorders"
 )
 
@@ -202,6 +204,26 @@ func (m *Module) stampSessions(ctx context.Context, tx pgx.Tx, sessions []*Sessi
 	return stampMoveRights(ctx, tx, sessions)
 }
 
+// heartbeatReceipt preserves authoritative write fields, including finished
+// and process_observed_at. Missing optional projections are unknown, never a
+// fresh estimate or a cached coordinator percent (which may predate its workers).
+// The unknown-projection warning is declared in the pinned reporter contract.
+func heartbeatReceipt(s Session) heartbeatResponse {
+	if s.Role == "coordinator" && s.StoppedAt == nil && s.ArchivedAt == nil {
+		s.ProgressPct = nil
+	}
+	// The reporting interval is constrained to at most 240 minutes. Beyond
+	// two maximum intervals the estimate is certainly stale; anything newer
+	// has unknown freshness until a read loads the setting. Use the committed
+	// beat's database timestamp, never the API host's clock.
+	s.EtaStale = s.StoppedAt == nil && s.EtaReportedAt != nil && s.HeartbeatAt != nil &&
+		s.HeartbeatAt.Sub(*s.EtaReportedAt) > 480*time.Minute
+	return heartbeatResponse{reporterSession(s), []EstimateWarning{{
+		Code: "projection_unavailable",
+		Hint: "Heartbeat accepted; ETA freshness, coordinator progress and estimate guidance are unknown on this receipt. Read session status separately; a failed read is not a failed heartbeat.",
+	}}}
+}
+
 func stampSessionEta(s *Session, interval time.Duration, now time.Time) {
 	if s == nil {
 		return
@@ -225,7 +247,8 @@ func (m *Module) getEtaInterval(r *http.Request, tx pgx.Tx, p tenant.Principal) 
 
 func (m *Module) putEtaInterval(r *http.Request, tx pgx.Tx, p tenant.Principal) (any, error) {
 	var in struct {
-		Minutes int `json:"interval_minutes"`
+		Minutes  int  `json:"interval_minutes"`
+		Expected *int `json:"expected_interval_minutes,omitempty"`
 	}
 	if err := workorders.Decode(r, &in); err != nil {
 		return nil, err
@@ -233,11 +256,25 @@ func (m *Module) putEtaInterval(r *http.Request, tx pgx.Tx, p tenant.Principal) 
 	if in.Minutes < 1 || in.Minutes > 240 {
 		return nil, workorders.Fail(400, "interval must be from 1 to 240 minutes")
 	}
+	if in.Expected != nil && (*in.Expected < 1 || *in.Expected > 240) {
+		return nil, workorders.Fail(400, "expected value outside allowed range")
+	}
+	if err := lockAgentWorkSettings(r.Context(), tx, p); err != nil {
+		return nil, err
+	}
+	before, err := etaInterval(r.Context(), tx)
+	if err != nil {
+		return nil, err
+	}
+	if in.Expected != nil && *in.Expected != int(before/time.Minute) {
+		return nil, workorders.Fail(409, "agent settings changed; reload before undoing")
+	}
 	if _, err := tx.Exec(r.Context(), `INSERT INTO eta_settings(tenant_id,interval_minutes) VALUES($1,$2)
 		ON CONFLICT (tenant_id) DO UPDATE SET interval_minutes=EXCLUDED.interval_minutes, updated_at=now()`, p.TenantID, in.Minutes); err != nil {
 		return nil, err
 	}
-	return map[string]int{"interval_minutes": in.Minutes}, nil
+	err = recordAgentWorkSetting(r.Context(), tx, p, "interval_minutes", int(before/time.Minute), in.Minutes)
+	return map[string]int{"interval_minutes": in.Minutes}, err
 }
 
 func (m *Module) setLiveEta(r *http.Request, tx pgx.Tx, p tenant.Principal) (any, error) {
@@ -282,7 +319,7 @@ func (m *Module) setLiveEta(r *http.Request, tx pgx.Tx, p tenant.Principal) (any
 		WHERE agent_principal_id=$1 AND role='coordinator' AND stopped_at IS NULL AND project_id=$2
 		  AND lease_digest=$3
 		ORDER BY (ticket_node_id IS NOT DISTINCT FROM $4::uuid) DESC, heartbeat_at DESC NULLS LAST
-		LIMIT 1`, p.ID, projectID, digest("lease", r.Header.Get("X-Aeon-Worker-Lease")), nodeID).Scan(&sessionID)
+		LIMIT 1`, p.ID, projectID, digest("lease", workerlease.Read(r)), nodeID).Scan(&sessionID)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return nil, workorders.Fail(403, "live ETA is reported by the coordinator")
 	}
@@ -296,11 +333,22 @@ func (m *Module) setLiveEta(r *http.Request, tx pgx.Tx, p tenant.Principal) (any
 	if err := proof(s, r, p); err != nil {
 		return nil, err
 	}
+	goalETAs, err := goals.CaptureTicketETAs(ctx, tx, []string{nodeID})
+	if err != nil {
+		return nil, err
+	}
 	if err := writeTicketLive(ctx, tx, p, nodeID, s.ProjectID, at); err != nil {
 		return nil, err
 	}
 	if err := syncBoundLive(ctx, tx, s.ID, nodeID, at); err != nil {
 		return nil, err
 	}
-	return eta.One(ctx, tx, nodeID)
+	view, err := eta.One(ctx, tx, nodeID)
+	if err != nil {
+		return nil, err
+	}
+	if err := goalETAs.Append(ctx, tx, p); err != nil {
+		return nil, err
+	}
+	return view, nil
 }

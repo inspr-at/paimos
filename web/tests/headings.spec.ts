@@ -373,7 +373,7 @@ for (const width of [390, 768, 1024, 1440]) for (const theme of ['light', 'dark'
     await scene(page, width, theme)
     await mockWork(page, fixtures(), { admin: true })
     const data = agentData({ me: me.id, projects: { pharos: 'p-pharos', aeon: 'p-aeon', pai: 'p-frozen' }, tickets: { fleet: 'n-1', restore: 'n-2', web: 'n-a1', release: 'n-5', approvals: 'n-6' } })
-    Object.assign(data.sessions[0]!, { display_label: longTitle })
+    Object.assign(data.sessions[0]!, { display_label: longTitle, ticket_node_id: null, ticket: null })
     data.accounts[0]!.label = longName
     await mockAgents(page, data)
     await page.route('**/api/me/permissions*', route => {
@@ -384,13 +384,30 @@ for (const width of [390, 768, 1024, 1440]) for (const theme of ['light', 'dark'
     await page.goto(`/agents/${data.sessions[0]!.id}`)
     const panel = page.getByRole('complementary', { name: 'Session details' })
     await expect(panel).toBeVisible()
-    await fullText(panel.locator('.name'), longTitle)
+    // AEON-1309 condenses the head to one line. AEON-1433: the full session
+    // identity must still be readable in its disclosure, including without a ticket.
+    const heading = panel.locator('.pane-title')
+    await expect(heading.locator('.name')).toHaveText(longTitle)
+    expect(await heading.evaluate(el => getComputedStyle(el).whiteSpace)).toBe('nowrap')
+    await expect(heading).toHaveAttribute('data-tip', new RegExp(`^${longTitle} · `))
+    const identity = (await heading.getAttribute('data-tip'))!
     const close = panel.getByRole('button', { name: 'Close session details' })
-    await expectStableControls({ controls: { close }, scrollAreas: { panel }, interactions: [{ name: 'hover wrapped session name', run: () => panel.locator('.name').hover() }] })
+    await expectStableControls({ controls: { close, tabs: panel.getByRole('tablist') }, scrollAreas: { panel }, interactions: [
+      { name: 'read the complete session identity by keyboard', run: async () => {
+        await page.keyboard.press('Tab')
+        await heading.focus()
+        await fittingTip(page.locator('.tooltip'), identity)
+      } },
+      { name: 'hover the condensed session identity', run: () => heading.hover() },
+    ] })
+    // AEON-1286's approved aeon-1438-chat-phone-approved.html uses a 56 px head + 60 px tab row + hairline.
+    expect((await panel.locator('.panel-head').boundingBox())!.height).toBeLessThanOrEqual(width <= 720 ? 117 : 45)
     await screenshot(page, 'session', width, theme)
     await noOverflow(page)
     await page.goto('/settings/accounts')
-    await page.getByRole('button', { name: `Details for ${longName}`, exact: true }).click()
+    // AEON-686: an account's logins open in its docked panel.
+    await page.locator(`.list-row[data-accounts~="${data.accounts[0]!.id}"]`).click()
+    await page.locator('section.pane').getByRole('button', { name: `Details for ${longName}`, exact: true }).click()
     const name = page.locator('.detail .nm')
     await fullText(name, longName)
     const rename = page.getByRole('button', { name: `Rename ${longName}`, exact: true })

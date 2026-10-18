@@ -14,6 +14,8 @@ const workstreams = [
 // 60 nodes: five epics, each with eleven plausible tickets and mixed relations.
 export function ticketGraphWorld() {
   const work = fixtures()
+  // AEON-1042: the header glimpse is a developer opt-in; graph worlds turn it on.
+  work.preferences['developer-ui'] = { show_header_graph: true }
   work.nodes = work.nodes.filter(n => n.project !== 'p-pharos')
   const nodes: TicketGraphNode[] = [], links: TicketGraphLink[] = []
   workstreams.forEach((titles, cluster) => titles.forEach((title, index) => {

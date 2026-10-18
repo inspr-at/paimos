@@ -138,12 +138,14 @@ func TestProjectVisibilityFailsClosed(t *testing.T) {
 		t.Fatalf("NoProjects: %+v", system)
 	}
 	all := countVisible(t, db.AllProjects(ctx, "test"), f)
-	if all.nodes != 5 || all.relations != 1 || all.nodeEvents != 2 || all.attachments != 2 || all.embeddingJobs != 5 {
+	// Workspace visibility also includes the matrix-mapping audit per project.
+	if all.nodes != 5 || all.relations != 1 || all.nodeEvents != 4 || all.attachments != 2 || all.embeddingJobs != 5 {
 		t.Fatalf("all projects: %+v", all)
 	}
 	onlyA := countVisible(t, db.OnlyProjects(ctx, f.projectA), f)
 	// Project A and its ticket; not B, not the workspace-level organisation;
-	// the relation to B is hidden because one end is invisible.
+	// the relation to B is hidden because one end is invisible. Matrix decisions
+	// retain the existing workspace-only event-domain boundary.
 	if onlyA.nodes != 2 || onlyA.relations != 0 || onlyA.nodeEvents != 1 || onlyA.attachments != 1 || onlyA.embeddingJobs != 2 {
 		t.Fatalf("only project A: %+v", onlyA)
 	}

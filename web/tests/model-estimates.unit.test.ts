@@ -3,7 +3,7 @@ import { describe, expect, it, vi } from 'vitest'
 import { createSSRApp } from 'vue'
 import { renderToString } from '@vue/server-renderer'
 import ModelEstimateHint from '../src/components/settings/ModelEstimateHint.vue'
-import { modelEstimateHint, modelEstimateHistory, type ModelEstimateHistory } from '../src/lib/modelEstimates'
+import { modelEstimateHint, type ModelEstimateHistory } from '../src/lib/modelEstimates'
 import { modelCell, tokensCell, listCostCell, planningSortValue, type PlanningRow } from '../src/lib/planning'
 
 vi.mock('../src/lib/api', () => ({ api: vi.fn() }))
@@ -27,15 +27,6 @@ describe('model picker history', () => {
       if (history?.tickets === 12) { expect(html).toContain('n=12'); expect(html).toContain(measured.basis) }
       else expect(html).not.toContain('typically')
     }
-  })
-  it('passes the captured picker context and cancellation signal to the API', async () => {
-    const { api } = await import('../src/lib/api')
-    vi.mocked(api).mockResolvedValue(new Response(JSON.stringify(measured)))
-    const signal = new AbortController().signal
-    await expect(modelEstimateHistory('p', 'backend', 'complex', 'project', signal)).resolves.toEqual(measured)
-    expect(api).toHaveBeenCalledWith('/usage/model-estimates?profile_id=p&kind=backend&bucket=complex&project_id=project', { signal })
-    vi.mocked(api).mockResolvedValue(new Response('', { status: 403 }))
-    await expect(modelEstimateHistory('p', 'backend', 'complex')).rejects.toThrow('could not be loaded')
   })
 })
 
@@ -97,5 +88,4 @@ describe('honest planning estimates', () => {
       expect(cell.tip).toContain('Sum of 1 of 3')
     }
   })
-
 })

@@ -11,13 +11,14 @@ import (
 	"net/url"
 	"os"
 	"strings"
+	"time"
 
 	"github.com/inspr-at/paimos/internal/questions"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 )
 
 func (rt *runtime) cmdAsk() *Command {
-	var project, ticket, contextFile string
+	var project, ticket, contextFile, goal string
 	var options []string
 	in := questions.Input{Meanwhile: "carries_on"}
 	return &Command{Name: "ask", Short: "Leave a durable question for a person", Use: `ask --project KEY [--ticket KEY] QUESTION --option '["Title","Description","Answer"]'`, minArgs: 1, maxArgs: 1,
@@ -32,6 +33,7 @@ func (rt *runtime) cmdAsk() *Command {
 		addFlags: func(fs *flagSet) {
 			fs.string(&project, "project", 0, "project key or UUID (required)")
 			fs.string(&ticket, "ticket", 0, "optional ticket key or UUID")
+			fs.string(&goal, "goal", 0, "optional goal key or UUID")
 			fs.string(&contextFile, "context-file", 0, "UTF-8 context file (at most 16000 bytes; - reads stdin)")
 			fs.strings(&options, "option", "JSON [title,description,answer] or {id,title,description,answer}; repeat up to 9 times")
 			fs.string(&in.RequestID, "request-id", 0, "stable request UUID for retries (generated and printed if omitted)")
@@ -85,6 +87,17 @@ func (rt *runtime) cmdAsk() *Command {
 			}
 			// Print before the request so even a lost response can be retried exactly.
 			fmt.Fprintln(rt.stderr, "request_id:", in.RequestID)
+			if goal != "" {
+				if validUUID(goal) {
+					in.GoalID = goal
+				} else {
+					var node apiNode
+					if err := rt.do(http.MethodGet, "/api/node-keys/"+url.PathEscape(goal), nil, &node); err != nil {
+						return err
+					}
+					in.GoalID = node.ID
+				}
+			}
 			q, err := rt.sendQuestion(context.Background(), project, ticket, in)
 			if err != nil {
 				return err
@@ -92,6 +105,27 @@ func (rt *runtime) cmdAsk() *Command {
 			return rt.printQuestion(q)
 		}}
 }
+
+// adjustKeep mirrors questions.availability for the mapping the asker supplies.
+// Doctrine needs an authorized source, rule and exact base mapping. Requirement
+// needs a linked ticket. Person permissions stay on the decision. An unusable
+// suggestion is asked as once, with a warning, so the desk is not stuck.
+func adjustKeep(in *questions.Input) string {
+	switch in.SuggestedOutcome {
+	case "doctrine":
+		if in.Doctrine == nil {
+			in.SuggestedOutcome = "once"
+			return "Suggested: Doctrine · not available for this question; asking with Once. Doctrine needs an authorized source, rule and exact base mapping."
+		}
+	case "requirement":
+		if strings.TrimSpace(in.TicketID) == "" {
+			in.SuggestedOutcome = "once"
+			return "Suggested: Requirement · not available for this question; asking with Once. Requirement needs a linked editable ticket."
+		}
+	}
+	return ""
+}
+
 func parseQuestionOption(raw string, n int) (questions.Option, error) {
 	var o questions.Option
 	if strings.HasPrefix(strings.TrimSpace(raw), "[") {
@@ -153,6 +187,11 @@ func (rt *runtime) sendQuestion(ctx context.Context, project, ticket string, in 
 	if err := in.Validate(); err != nil {
 		return out, usagef("%s", err.Error())
 	}
+	// availability refuses these stamps when the asker did not supply the
+	// mapping. Once stays decidable; person permissions are still checked later.
+	if warning := adjustKeep(&in); warning != "" {
+		fmt.Fprintln(rt.stderr, "warning:", warning)
+	}
 	body, err := json.Marshal(in)
 	if err != nil {
 		return out, err
@@ -184,6 +223,18 @@ func (rt *runtime) printQuestion(q questions.Question) error {
 	}
 	if q.Answer != nil {
 		fmt.Fprintln(rt.stdout, "answer:", q.Answer.Answer)
+		pickedUp, inboxEffects := true, 0
+		for _, p := range q.Pending {
+			if p.Kind == "inbox" {
+				inboxEffects++
+				pickedUp = pickedUp && p.ReceiptState != "failed" && (p.PickedUpAt != nil || p.ReceiptState == "handed_off")
+			}
+		}
+		if inboxEffects > 0 && pickedUp {
+			fmt.Fprintln(rt.stdout, "answered · delivered")
+		} else {
+			fmt.Fprintf(rt.stdout, "answered · not yet picked up (since %s)\n", q.Answer.CreatedAt.UTC().Format(time.RFC3339))
+		}
 	}
 	for _, p := range q.Pending {
 		state := p.State

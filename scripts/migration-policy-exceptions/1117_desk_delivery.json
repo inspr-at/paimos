@@ -1,0 +1,11 @@
+{
+  "schema": "aeon.migration-policy-exceptions.v1",
+  "exceptions": [
+    {
+      "file": "1117_desk_delivery.sql",
+      "sha256": "4eac5b9c842ae660571c645c99018e682dd7089b998b82def80415412838faac",
+      "ticket": "AEON-564",
+      "reason": "Relax immediate sent_event_id NOT NULL checks on inbox_messages and inbox_compat_messages only within a transaction so message rows can be reserved before the tenant event counter. Deferred constraint triggers still reject any surviving row without a sent event at commit. Previous-binary writers continue supplying non-null event IDs at INSERT, so their writes remain valid and readers never see committed null event references during the rollout window. No columns, rows, foreign keys or RLS policies are removed. DROP NOT NULL, the dynamic trigger function and CREATE CONSTRAINT TRIGGER are outside the conservative expand-safe allowlist; retaining immediate NOT NULL would break the existing reservation path. This exact-byte exception requires coordinator review before merge/release and does not skip previous-binary compatibility probes in CI."
+    }
+  ]
+}

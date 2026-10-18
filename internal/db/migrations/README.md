@@ -25,9 +25,13 @@ unqualified lowercase identifiers. Other statements, including `SET`, and
 multiple index builds are rejected in this mode; use separate numbered files.
 
 The runner executes the index build outside a transaction, with a session
-`lock_timeout` of five seconds covering both creation and retry cleanup. This
-bounds lock acquisition, not the total build duration. The previous timeout is
-restored before returning the connection to the pool, including on failure.
+`lock_timeout` of five seconds covering both creation and retry cleanup, and a
+thirty-minute `statement_timeout` for each build/cleanup statement. Ordinary
+migration SQL uses a five-minute statement budget; the migration connection's
+idle transaction budget is one minute. All three previous settings are restored
+before returning the connection to the pool, including on failure. Application
+defaults and SQL-only job overrides are described in
+[`database-backstops.md`](../../../docs/features/database-backstops.md).
 
 The advisory lock covers inspection, creation and recording. On retry, the runner
 keeps a valid index on the expected table, drops an invalid partial index with
@@ -62,7 +66,7 @@ rejects missing, expired, future-dated or superseded evidence. The additive tabl
 does not change existing account rows or grant any account residency by default.
 
 Migration 1104's tenant-loop seed and replacement area-schema helper require an
-exact-byte exception in `scripts/migration-policy-exceptions.json`. The new
+exact-byte exception in `scripts/migration-policy-exceptions/`. The new
 slug pattern includes every previous area, and current Go area validation stays
 unchanged. Coordinator review and previous-binary compatibility CI remain
 required before merge/release. Before rolling back below this fence, set all
@@ -75,7 +79,31 @@ retain their defaults; the marked-key decision path keeps self-approval refused.
 The exception is a draft-CI review artifact. Coordinator review and the existing
 previous-binary compatibility gate remain required before merge/release.
 
+AEON-1022's `1304_delivery_flow_release_record.sql` adds two nullable columns to
+`delivery_flow_items` (the qualification evidence reference and the rollback
+class); previous binaries never write them. `1305_delivery_flow_step_keys.sql`
+replaces the `step_key` check of `delivery_flow_steps` with its strict superset
+(the 23 released keys plus `rehearsal` and `catalogue`) in one transaction. Every
+key a previous binary writes still passes, so the replacement is rollback-safe
+by digest; `DROP CONSTRAINT` is outside the expand-safe allowlist, so the file
+carries an exact-byte exception and a case module that pins the key list.
+
 ## Expand and contract (AEON-415)
+
+AEON-587 uses 1119 for the shared `document-v2` digest and 1123 to move the
+issue event FK and event-type/actor check to commit. Quote completeness, current
+draft state, totals and append-only issue evidence still validate on insertion.
+The importer predicts issue event IDs while holding the tenant/tree/quote locks,
+inserts issues and changes state, then appends events in the final flush. Any
+counter drift, missing event or invalid event evidence rolls the transaction
+back. Native writers that already append before inserting remain compatible.
+Neither migration changes a stored digest or historical snapshot. V1 readers
+retain the frozen importer field order and map-shaped prose alongside native
+v1 verification. Pre-baseline mappings bootstrap only without a later native
+event, recording both the pre-update and final snapshots as new import events.
+Both migrations have exact-byte policy exceptions requiring coordinator review
+and previous-binary compatibility CI before merge/release; a rollback below
+1119 still requires a v2-capable reader once any v2 quote has been issued.
 
 Ship schema changes in two releases. The expansion release adds the replacement
 table or column, backfills data, and moves readers and writers while retaining
@@ -145,13 +173,49 @@ domain types, `MATCH FULL`, referential-action suffixes and any other unsafe
 ALTER action.
 
 Merged but unreleased contract steps must not be disguised as expansion or
-added to historical grandfathering. `scripts/migration-policy-exceptions.json`
-is a separate, explicit review artifact naming each file, its SHA-256, owning
-ticket and rollout reason. The guard prints every exception, rejects malformed
+added to historical grandfathering. `scripts/migration-policy-exceptions/`
+contains one `NNNN_name.json` review artifact per migration, naming its exact SQL
+filename, SHA-256, owning ticket and rollout reason. Each file uses the existing
+`aeon.migration-policy-exceptions.v1` schema with exactly one `exceptions` entry.
+The checker discovers and sorts these files, then assembles the v1 manifest in
+memory; no combined ledger or generated index is committed. The guard prints
+every exception, rejects malformed
 or duplicate entries and changed/removed files, and retains number uniqueness
 and published/baseline immutability checks. An exception does not make its SQL
 expand-safe and does not skip runtime compatibility. Coordinator review of
 each exception is required before merge/release; workers only measure draft CI.
+
+Migration-specific checker tests live in
+`scripts/check-migrations-cases/NNNN_name.mjs`, matching the SQL filename. The
+existing `node --test scripts/check-migrations.test.mjs` entry point discovers
+and imports every case module, so CI commands stay unchanged. Add new checks to
+that migration's module rather than extending a central case list. A case file
+without its SQL migration, a mismatched exception filename, a duplicate record,
+malformed input or missing directory fails closed. The generic classifier,
+release-evidence and immutability tests remain in the entry point.
+
+AEON-985's conversion can be rechecked against its legacy commit:
+
+```sh
+node scripts/check-migrations-proof.mjs --base-ref 79348b98ca1e10e861784fcfd8e3360e1585f8df
+```
+
+This conversion-only oracle requires the base Git objects and fails if they are
+missing. It compares every assembled exception field, all 37 original test
+names and assertion bodies (normalizing only relocated paths, the loader call
+and the two file lists), and the unchanged policy decision function. Do not run
+it as a permanent gate for later migrations: new records and test cases are
+expected to change these sets. The directory regression tests and existing
+migration guard remain the ongoing checks. Reverting AEON-985 restores the
+ledger and tests together; there is no database migration or dependent runtime
+schema change.
+
+Conversion validation at `e6a8d1c19`: the dump proof passed for all 27 exception
+records and 37 original cases; all 38 migration tests passed. The full
+`internal/db` suite passed on build-6, and the locked remote
+`ci-static --merge-main` run passed all 40 checks with zero skips. The local
+static/planner regressions (294 tests) and ownership audit (33 tests) also
+passed. No origin push, deployment or worker-run review gate was performed.
 
 The sole initial exception, AEON-397's `1054_confirmed_quota_pools.sql`, replaces
 the reservation guard immediately. Existing accounts start unconfirmed, so
@@ -185,7 +249,14 @@ its API. It then applies the candidate's real embedded migrations and backfills,
 restarts those same previous-image bytes, and checks health, readiness, embedded
 SPA, session/permissions, members, kinds, project summaries, node lists
 and seeded node details. An unhealthy startup, failed read or missing seeded row
-fails the `migration-compat` job. No image is built or pushed.
+fails the `migration-compat` job. The account-use rollback-floor counterexample
+then boots the digest-pinned pre-capability release `v261009095632.0.0`
+on the same migrated disposable database, repeats the reads and activates the
+legacy probes. That image must refuse activated empty and populated pools at
+capability entry; the latest published release may already support account use.
+All existing
+refusal and unchanged-state assertions remain in the below-floor probe.
+No image is built or pushed.
 
 Run the same checks locally (Go, Node, Python and Docker required):
 
@@ -451,7 +522,7 @@ The first authz attempt preceded creation of its maintenance database; the
 subsequent package run passes, and that worker-owned database is now removed.
 Evidence: `tmp/aeon619-merge-main/summary.json`, `preservation.json` and retained
 logs. Main's release metadata and presentation pin are retained. No feature
-changes were authored. mbp2606 was not accessed under the explicit hold; no
+changes were authored. build-6 was not accessed under the explicit hold; no
 ticket status change, push or deployment ran. Consolidated approval and release
 remain coordinator work.
 
@@ -504,7 +575,7 @@ migration. Independent preservation checks retained 23 branch and
 cases are explicitly NIGHTLY, with post-gate provenance so the tier regression
 continues checking every legacy classification.
 
-Approved remote validation on mbp2606 passed all eleven affected Go packages
+Approved remote validation on build-6 passed all eleven affected Go packages
 (including OpenAPI reporter-contract checks), 26 migration-checker tests, the
 241-migration guard against `v261003095616.0.0`, 33 tier tests, web typecheck,
 lint and build, and 27 focused web tests across three files. The guard's missing
@@ -520,7 +591,7 @@ under the same target and referenced-node visibility checks. This lets another
 person's leaf Undo refresh aggregates when the parent status is unchanged.
 
 The exact-byte policy records for 1225 and 1230 pin their owning tickets and
-source commits in `scripts/migration-policy-exceptions.json`. They expose the
+source commits in `scripts/migration-policy-exceptions/`. They expose the
 non-allowlisted function bodies, helper replacements and event-policy widening
 for the coordinator's consolidated review; they are not evidence that byte
 approval or previous-binary compatibility has passed. The owner-accepted

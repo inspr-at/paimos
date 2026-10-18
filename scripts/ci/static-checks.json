@@ -12,13 +12,8 @@
     },
     "ci-plan": {
       "kind": "not-static",
-      "reason": "Hosted event classification and GitHub output wiring.",
-      "runs_sha256": "96970e7553db0fcff6ca67811bc56ec35fc1e92d4b2c3429ae8e1d5ee1cdcdae"
-    },
-    "tier-plan": {
-      "kind": "not-static",
-      "reason": "Hosted tier scheduling and output wiring.",
-      "runs_sha256": "1ab52397cefc307e01b6c29041a8a82eda009bad87da6f761ffba92ef8309ccd"
+      "reason": "Combined hosted event classification, tier scheduling and evidence; routing and reuse stay independent.",
+      "runs_sha256": "0b9c2b3f9bb2ccebe4ff0c83e2efb6cf28cdd8094a51ae937deeed6c85220a62"
     },
     "runner-route": {
       "kind": "not-static",
@@ -28,7 +23,7 @@
     "go-test": {
       "kind": "not-static",
       "reason": "Database-backed tier execution; property lint is a supplement.",
-      "runs_sha256": "8d2ee7a5280e716a86adb19100a477ab41b0c81be95db2421db3004f1fb928d1"
+      "runs_sha256": "af006cee28516c502267a87e50e3124920c265e7e91171111b3aa4569ddfaabb"
     },
     "go-timing": {
       "kind": "not-static",
@@ -41,7 +36,10 @@
     "go": {
       "kind": "not-static",
       "reason": "Hosted aggregate status gate.",
-      "runs_sha256": "a14dd718fde807a0eaa604ad4ba50db65880d5c3c6e2544efc456e9cdb872003"
+      "runs_sha256": "e724c360cf0ede3794e8390d34b0d263392940ee8e851f05e67c4732d42dfc16"
+    },
+    "web-catalogue": {
+      "kind": "static"
     },
     "web-setup": {
       "kind": "static"
@@ -52,17 +50,17 @@
     "web-shard": {
       "kind": "not-static",
       "reason": "Browser tier execution and infrastructure preparation.",
-      "runs_sha256": "bbe9bd9c51a7b4a1d8665eda611fdb1334c895c648ca2ac8a807359199774f81"
+      "runs_sha256": "601c133460c6b87d69d4087e12293d6eac12eb4cf373bc5ff6807fbaa5e593d8"
     },
     "web": {
       "kind": "not-static",
       "reason": "Hosted aggregate status gate.",
-      "runs_sha256": "aa426035e3ec87ec44c164ded9b4af17645384876ee472dc87f6d96bc6442852"
+      "runs_sha256": "64f1f6aca3ffe08e9772a4e9e1470bbeed30ca19b1b116ba969ccbc962e0d0fb"
     },
     "release-check": {
       "kind": "not-static",
       "reason": "Hosted aggregate status gate.",
-      "runs_sha256": "de7190f359ffbc46154e54f23987f3042b891ff87347fb80397d5b567a5f80d1"
+      "runs_sha256": "22afd3ba7f4ee25ff8755b669a9e498b4a0fe24495caeed51d38a161ca2a5a3e"
     },
     "release-check-run": {
       "kind": "static"
@@ -70,12 +68,12 @@
     "e2e": {
       "kind": "not-static",
       "reason": "Hosted aggregate status gate.",
-      "runs_sha256": "88e16593a23854e7f1a2a8ee88032dc680b86d2abe6145d5feb82118cd3c083a"
+      "runs_sha256": "dcf0f15d770bb84efb097acbd9e8d633332afb0cc30db0f6d459c6f8ade32be7"
     },
     "e2e-run": {
       "kind": "not-static",
       "reason": "Build, database and browser end-to-end execution.",
-      "runs_sha256": "62ae1990fe28604e8325a5dee018268fc2b1064b8eb8eac1c13c117ec5e13648"
+      "runs_sha256": "13936e512d39dfba01146f60e6cbf7948dc2499bda882824a91ca892b7439697"
     },
     "migration-compat": {
       "kind": "static"
@@ -83,10 +81,24 @@
     "tier-measurements": {
       "kind": "not-static",
       "reason": "Hosted artifact aggregation and reporting.",
-      "runs_sha256": "1d0fd9b32ba61807e7e552be08524b3202312c0ffea75fb167726d20b902406c"
+      "runs_sha256": "7854095e549016705c7c0757450788386f9d6ba1092f0d46d6b75241ef65e782"
     }
   },
   "exclusions": [
+    {
+      "job": "web-catalogue",
+      "step": "Resolve lockfile and Playwright cache keys",
+      "cwd": ".",
+      "command": "set -euo pipefail\npw_version=\"$(node -p \"require('./web/package-lock.json').packages['node_modules/@playwright/test'].version\")\"\necho \"dependencies=web-deps-v1-${RUNNER_OS}-${RUNNER_ARCH}-node24-${LOCKFILE_HASH}-pw${pw_version}\" >> \"$GITHUB_OUTPUT\"\necho \"browsers=web-playwright-v1-${RUNNER_OS}-${RUNNER_ARCH}-${LOCKFILE_HASH}-pw${pw_version}\" >> \"$GITHUB_OUTPUT\"",
+      "reason": "Infrastructure, build or hosted tier report; outside the static pre-filter."
+    },
+    {
+      "job": "web-catalogue",
+      "step": "Install web dependencies",
+      "cwd": "web",
+      "command": "npm ci",
+      "reason": "Infrastructure, build or hosted tier report; outside the static pre-filter."
+    },
     {
       "job": "web-setup",
       "step": "Resolve lockfile and Playwright cache keys",
@@ -107,6 +119,13 @@
       "cwd": "web",
       "command": "npm run build",
       "reason": "Infrastructure, build or hosted tier report; outside the static pre-filter."
+    },
+    {
+      "job": "web-setup",
+      "step": "Prove web build reproducibility",
+      "cwd": ".",
+      "command": "node scripts/check-web-reproducibility.mjs",
+      "reason": "Reuses the installed dependencies for one additional Vite build; outside the static pre-filter."
     },
     {
       "job": "web-setup",
@@ -133,7 +152,7 @@
       "job": "web-unit",
       "step": "Install shells used by command round-trip unit tests",
       "cwd": ".",
-      "command": "sudo apt-get update -qq && sudo apt-get install -y -qq fish zsh",
+      "command": "bash \"$GITHUB_WORKSPACE/scripts/ci/bounded-apt.sh\" apt fish zsh",
       "reason": "Infrastructure, build or hosted tier report; outside the static pre-filter."
     },
     {
@@ -217,6 +236,36 @@
       "timeout_seconds": 120
     },
     {
+      "id": "public-names",
+      "command": "node --test scripts/check-public-names.test.mjs && node scripts/check-public-names.mjs",
+      "cwd": ".",
+      "ci": {
+        "job": "go-static",
+        "step": "Keep operator names out of public source",
+        "command": "node --test scripts/check-public-names.test.mjs && node scripts/check-public-names.mjs",
+        "cwd": "."
+      },
+      "needs": [
+        "node"
+      ],
+      "timeout_seconds": 60
+    },
+    {
+      "id": "request-body-ownership",
+      "command": "go test -p 2 ./internal/httpapi -run '^TestHTTP(ReadDeadlineOwnership|RequestBodyOwnership)$' -count=1",
+      "cwd": ".",
+      "ci": {
+        "job": "go-static",
+        "step": "Bound every HTTP request body read",
+        "command": "go test -p 2 ./internal/httpapi -run '^TestHTTP(ReadDeadlineOwnership|RequestBodyOwnership)$' -count=1",
+        "cwd": "."
+      },
+      "needs": [
+        "go"
+      ],
+      "timeout_seconds": 120
+    },
+    {
       "id": "go-vet",
       "command": "go vet ./...",
       "cwd": ".",
@@ -260,23 +309,23 @@
         "node",
         "go"
       ],
-      "timeout_seconds": 120
+      "timeout_seconds": 180
     },
     {
       "id": "go-tiers",
-      "command": "node scripts/test-tiers/cli.mjs check go",
+      "command": "node scripts/test-tiers/cli.mjs check go --strict",
       "cwd": ".",
       "ci": {
         "job": "go-static",
         "step": "Validate every Go tier against native collection",
-        "command": "node scripts/test-tiers/cli.mjs check go",
+        "command": "node scripts/test-tiers/cli.mjs check go --strict",
         "cwd": "."
       },
       "needs": [
         "node",
         "go"
       ],
-      "timeout_seconds": 120
+      "timeout_seconds": 180
     },
     {
       "id": "go-shards-7",
@@ -457,6 +506,21 @@
         "python3"
       ],
       "timeout_seconds": 120
+    },
+    {
+      "id": "tracked-bytecode",
+      "command": "node scripts/check-tracked-bytecode.mjs",
+      "cwd": ".",
+      "ci": {
+        "job": "release-check-run",
+        "step": "Offline code-health audit toolkit and slice ownership",
+        "command": "node scripts/check-tracked-bytecode.mjs",
+        "cwd": "."
+      },
+      "needs": [
+        "node"
+      ],
+      "timeout_seconds": 30
     },
     {
       "id": "ci-plan-tests",
@@ -688,7 +752,7 @@
         "node",
         "npm-installed"
       ],
-      "timeout_seconds": 120,
+      "timeout_seconds": 600,
       "optional": true
     },
     {
@@ -709,7 +773,7 @@
     },
     {
       "id": "web-tiers",
-      "command": "node scripts/test-tiers/cli.mjs check web",
+      "command": "node scripts/test-tiers/cli.mjs check web --strict",
       "cwd": ".",
       "ci": {
         "job": "web-unit",
@@ -756,6 +820,58 @@
         "npm-installed"
       ],
       "optional": true,
+      "timeout_seconds": 120
+    },
+    {
+      "id": "openapi-sort",
+      "command": "node scripts/openapi-sort.mjs --check",
+      "cwd": ".",
+      "ci": {
+        "job": "release-check-run",
+        "step": "PR classification and exact-SHA reuse regressions",
+        "command": "node --test scripts/ci-pr-plan.test.mjs scripts/ci-tree-reuse.test.mjs scripts/ci-static.test.mjs",
+        "cwd": "."
+      },
+      "needs": [
+        "node"
+      ],
+      "timeout_seconds": 30,
+      "supplement": "AEON-747: the existing ci-static.test.mjs hosted entry imports openapi-sort.test.mjs, which executes this lint and its regression cases."
+    },
+    {
+      "id": "theme-colour-literals",
+      "command": "node scripts/check-theme-colours.mjs",
+      "cwd": ".",
+      "needs": [
+        "node"
+      ],
+      "timeout_seconds": 30,
+      "local_only": "AEON-752: component colour-literal guard belongs to ci-static only; artwork and documents are explicitly exempted."
+    },
+    {
+      "id": "apt-step-bounds",
+      "command": "node --test scripts/check-apt-bounds.test.mjs",
+      "cwd": ".",
+      "needs": [
+        "node"
+      ],
+      "timeout_seconds": 30,
+      "local_only": "AEON-933: every apt and Playwright install-deps step must carry a step timeout and a bounded retry. This guard only reads workflow files."
+    },
+    {
+      "id": "web-classification",
+      "command": "node scripts/test-tiers/cli.mjs check web --strict",
+      "cwd": ".",
+      "ci": {
+        "job": "web-catalogue",
+        "step": "Require every web case to be classified",
+        "command": "node scripts/test-tiers/cli.mjs check web --strict",
+        "cwd": "."
+      },
+      "needs": [
+        "node",
+        "npm-installed"
+      ],
       "timeout_seconds": 120
     }
   ]

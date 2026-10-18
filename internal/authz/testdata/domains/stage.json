@@ -1,0 +1,76 @@
+{
+  "_license": "SPDX-License-Identifier: AGPL-3.0-only",
+  "builtin_roles": {
+    "admin": [
+      "stage.apply",
+      "stage.deploy",
+      "stage.prepare",
+      "stage.verify"
+    ],
+    "member": [
+      "stage.prepare",
+      "stage.verify"
+    ],
+    "owner": [
+      "stage.apply",
+      "stage.deploy",
+      "stage.prepare",
+      "stage.verify"
+    ]
+  },
+  "registry": [
+    {
+      "agent_grantable": true,
+      "description": "Apply stage",
+      "grantable_at": [
+        "workspace",
+        "project"
+      ],
+      "group": "Stage",
+      "key": "stage.apply",
+      "owner_workstation_grantable": true,
+      "risk": "high"
+    },
+    {
+      "agent_grantable": true,
+      "description": "Deploy stage",
+      "grantable_at": [
+        "workspace",
+        "project"
+      ],
+      "group": "Stage",
+      "key": "stage.deploy",
+      "owner_workstation_grantable": true,
+      "risk": "high"
+    },
+    {
+      "agent_grantable": true,
+      "description": "Prepare stage",
+      "grantable_at": [
+        "workspace",
+        "project"
+      ],
+      "group": "Stage",
+      "key": "stage.prepare",
+      "owner_workstation_grantable": true,
+      "risk": "medium"
+    },
+    {
+      "agent_grantable": true,
+      "description": "Verify stage",
+      "grantable_at": [
+        "workspace",
+        "project"
+      ],
+      "group": "Stage",
+      "key": "stage.verify",
+      "owner_workstation_grantable": true,
+      "risk": "medium"
+    }
+  ],
+  "words": {
+    "resources": {
+      "stage": "stages"
+    }
+  }
+}

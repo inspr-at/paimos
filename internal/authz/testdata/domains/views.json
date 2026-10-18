@@ -1,0 +1,87 @@
+{
+  "_license": "SPDX-License-Identifier: AGPL-3.0-only",
+  "builtin_roles": {
+    "admin": [
+      "views.read",
+      "views.share",
+      "views.write"
+    ],
+    "guest": [
+      "views.read"
+    ],
+    "member": [
+      "views.read",
+      "views.share",
+      "views.write"
+    ],
+    "owner": [
+      "views.read",
+      "views.share",
+      "views.write"
+    ],
+    "viewer": [
+      "views.read"
+    ]
+  },
+  "project_filtered": {
+    "GET /api/preferences/{key}": true,
+    "GET /api/views": true,
+    "GET /api/views/deleted": true,
+    "GET /api/views/{viewId}": true,
+    "PUT /api/preferences/{key}": true
+  },
+  "registry": [
+    {
+      "agent_grantable": true,
+      "description": "Read views",
+      "grantable_at": [
+        "workspace",
+        "project"
+      ],
+      "group": "Views",
+      "key": "views.read",
+      "owner_workstation_grantable": true,
+      "risk": "low"
+    },
+    {
+      "agent_grantable": true,
+      "description": "Share views",
+      "grantable_at": [
+        "workspace",
+        "project"
+      ],
+      "group": "Views",
+      "key": "views.share",
+      "owner_workstation_grantable": true,
+      "risk": "medium"
+    },
+    {
+      "agent_grantable": true,
+      "description": "Write views",
+      "grantable_at": [
+        "workspace",
+        "project"
+      ],
+      "group": "Views",
+      "key": "views.write",
+      "owner_workstation_grantable": true,
+      "risk": "medium"
+    }
+  ],
+  "routes": {
+    "DELETE /api/views/{viewId}": "views.write",
+    "GET /api/preferences/{key}": "views.read",
+    "GET /api/views": "views.read",
+    "GET /api/views/deleted": "views.read",
+    "GET /api/views/{viewId}": "views.read",
+    "PATCH /api/views/{viewId}": "views.write",
+    "POST /api/views": "views.write",
+    "POST /api/views/{viewId}/restore": "views.write",
+    "PUT /api/preferences/{key}": "views.write"
+  },
+  "words": {
+    "resources": {
+      "views": "saved views"
+    }
+  }
+}

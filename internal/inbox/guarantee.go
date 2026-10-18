@@ -24,6 +24,8 @@ import (
 // delivery goes dead, the receipt fails, the message leaves every read path and
 // one system notice reaches the sender (plus the recipient session's
 // coordinator). A late acknowledgement cannot move a failed receipt back.
+// Desk replies are the AEON-1432 exception: no_listener/deadline keep the
+// existing reply pending, including a crash between pickup and confirmation.
 
 // Failure reasons written by the delivery guarantee. Adapter reasons written by
 // the routine dispatcher (http_error, transport_error, ...) remain valid too.
@@ -150,7 +152,7 @@ func handOver(ctx context.Context, tx pgx.Tx, p tenant.Principal, via string, id
 		return alive, nil
 	}
 	rows, err := tx.Query(ctx, `SELECT id::text,sender_principal_id::text,fetched_at IS NULL FROM inbox_messages
- WHERE chat_thread_id IS NULL AND id=ANY($1::uuid[]) AND recipient_principal_id=$2::uuid AND acked_at IS NULL AND (expires_at IS NULL OR expires_at>clock_timestamp())
+ WHERE content_mode='durable' AND chat_thread_id IS NULL AND id=ANY($1::uuid[]) AND recipient_principal_id=$2::uuid AND acked_at IS NULL AND (expires_at IS NULL OR expires_at>clock_timestamp())
  ORDER BY id FOR NO KEY UPDATE`, ids, p.ID)
 	if err != nil {
 		return nil, err
@@ -270,12 +272,23 @@ func failMessage(ctx context.Context, tx pgx.Tx, messageID, reason string, respe
  FROM inbox_messages m JOIN principals rp ON rp.tenant_id=m.tenant_id AND rp.id=m.recipient_principal_id
  LEFT JOIN harness_sessions rs ON rs.tenant_id=m.tenant_id AND rs.id=m.recipient_session_id
  LEFT JOIN harness_sessions ps ON ps.tenant_id=rs.tenant_id AND ps.id=rs.parent_id AND ps.role='coordinator' AND ps.project_id=rs.project_id
- WHERE m.chat_thread_id IS NULL AND m.id=$1::uuid FOR UPDATE OF m`, messageID).Scan(&f.tenant, &f.id, &f.sender, &f.recipient, &f.recipientName, &f.recipientSession, &f.senderSession, &f.sessionLabel, &f.parentSession, &f.parentPrincipal, &f.body, &f.createdAt, &acked)
+ WHERE m.content_mode='durable' AND m.chat_thread_id IS NULL AND m.id=$1::uuid FOR UPDATE OF m`, messageID).Scan(&f.tenant, &f.id, &f.sender, &f.recipient, &f.recipientName, &f.recipientSession, &f.senderSession, &f.sessionLabel, &f.parentSession, &f.parentPrincipal, &f.body, &f.createdAt, &acked)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return false, nil
 	}
 	if err != nil || acked != nil {
 		return false, err
+	}
+	// Desk answers wait for pickup rather than failing because the agent is
+	// offline. This marker is written only by RecordDeskReply, not by ordinary
+	// sends (whose compat keys are digests). Session-end routing and real adapter
+	// failures keep their existing terminal semantics.
+	if reason == ReasonNoListener || reason == ReasonDeadline {
+		var desk bool
+		if err := tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM inbox_compat_messages c
+ WHERE c.inbox_message_id=$1::uuid AND c.key_digest='desk/'||c.id::text)`, messageID).Scan(&desk); err != nil || desk {
+			return false, err
+		}
 	}
 	var state string
 	var deadline *time.Time

@@ -1,0 +1,126 @@
+# SPDX-License-Identifier: AGPL-3.0-only
+# aeon:owner internal/projectgroups
+paths:
+  /project-groups:
+    get:
+      operationId: listProjectGroups
+      summary: Shared project groups with their member projects
+      description: Groups on the Projects page are personal by default and live in the person's preferences. A group an admin shares with the workspace is this entity; everyone in the tenant reads it. A project is in at most one shared group. Deleted projects are left out of project_ids.
+      security: *auth
+      responses:
+        '200':
+          description: Shared groups in their default order (position, then name)
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items]
+                properties:
+                  items: {type: array, items: {$ref: '#/components/schemas/ProjectGroup'}}
+        '401': {$ref: '#/components/responses/Error'}
+    post:
+      operationId: createProjectGroup
+      summary: Share a group with the workspace (admins)
+      description: Creates the group with its projects; a project already in another shared group moves into this one. Appends project_group.created, which POST /events/{eventId}/undo reverses (the group goes, its projects return to the groups they came from).
+      security: *auth
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [name]
+              properties:
+                name: {type: string, minLength: 1, maxLength: 60, description: Trimmed; unique in the workspace regardless of case}
+                project_ids: {type: array, maxItems: 500, items: {type: string, format: uuid}}
+                position: {type: integer, minimum: 0, maximum: 100000, description: Defaults to after the last group}
+      responses:
+        '201': {description: Created, content: {application/json: {schema: {$ref: '#/components/schemas/ProjectGroupWrite'}}}}
+        '400': {$ref: '#/components/responses/Error'}
+        '403': {$ref: '#/components/responses/Error'}
+        '409': {$ref: '#/components/responses/Error'}
+  /project-groups/assign:
+    post:
+      operationId: assignProjectGroup
+      summary: Move projects into a shared group, or out of every shared group (admins)
+      description: Only projects whose shared group changes are recorded, in one project_group.assigned event that undo reverses while every project is still where the move put it. event_id is null when nothing changed.
+      security: *auth
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [group_id, project_ids]
+              properties:
+                group_id: {type: [string, 'null'], format: uuid, description: null takes the projects out of their shared group}
+                project_ids: {type: array, minItems: 1, maxItems: 500, items: {type: string, format: uuid}}
+      responses:
+        '200': {description: Moved, content: {application/json: {schema: {$ref: '#/components/schemas/ProjectGroupWrite'}}}}
+        '400': {$ref: '#/components/responses/Error'}
+        '403': {$ref: '#/components/responses/Error'}
+        '404': {$ref: '#/components/responses/Error'}
+  /project-groups/{groupId}:
+    parameters:
+      - {name: groupId, in: path, required: true, schema: {type: string, format: uuid}}
+    patch:
+      operationId: updateProjectGroup
+      summary: Rename or reorder a shared group (admins)
+      description: Appends project_group.updated (undoable) when something changed; event_id is null otherwise.
+      security: *auth
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              minProperties: 1
+              properties:
+                name: {type: string, minLength: 1, maxLength: 60}
+                position: {type: integer, minimum: 0, maximum: 100000}
+      responses:
+        '200': {description: Updated, content: {application/json: {schema: {$ref: '#/components/schemas/ProjectGroupWrite'}}}}
+        '400': {$ref: '#/components/responses/Error'}
+        '403': {$ref: '#/components/responses/Error'}
+        '404': {$ref: '#/components/responses/Error'}
+        '409': {$ref: '#/components/responses/Error'}
+    delete:
+      operationId: deleteProjectGroup
+      summary: Stop sharing a group (admins); its projects are in no shared group after
+      description: Appends project_group.deleted with the whole group; undo brings it back under its id with the projects that are still live and not in another shared group.
+      security: *auth
+      responses:
+        '200': {description: Deleted, content: {application/json: {schema: {$ref: '#/components/schemas/ProjectGroupWrite'}}}}
+        '403': {$ref: '#/components/responses/Error'}
+        '404': {$ref: '#/components/responses/Error'}
+components:
+  schemas:
+    ProjectGroup:
+      type: object
+      required: [id, name, position, project_ids, created_by, created_at, updated_at]
+      properties:
+        id: {type: string, format: uuid}
+        name: {type: string}
+        position: {type: integer}
+        project_ids: {type: array, items: {type: string, format: uuid}}
+        created_by: {type: string, format: uuid}
+        created_at: {type: string, format: date-time}
+        updated_at: {type: string, format: date-time}
+    ProjectGroupWrite:
+      type: object
+      required: [event_id]
+      description: The result of a shared group write and the event that undoes it.
+      properties:
+        group: {$ref: '#/components/schemas/ProjectGroup'}
+        assignments:
+          type: array
+          items:
+            type: object
+            required: [project_id, group_id]
+            properties:
+              project_id: {type: string, format: uuid}
+              group_id: {type: [string, 'null'], format: uuid}
+        event_id: {type: [integer, 'null'], format: int64}

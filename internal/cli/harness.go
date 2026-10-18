@@ -27,12 +27,13 @@ import (
 	"github.com/inspr-at/paimos/internal/rules"
 	"github.com/inspr-at/paimos/internal/runkind"
 	"github.com/inspr-at/paimos/internal/version"
+	"github.com/inspr-at/paimos/internal/workerlease"
 )
 
 // cmdHarnessV2 is the complete P5.3 harness command tree.
 func (rt *runtime) cmdHarnessV2() *Command {
 	return &Command{Name: "harness", Short: "Manage durable harness generations", Use: "harness <command>", subs: []*Command{
-		rt.harnessDecision(),
+		rt.harnessDecision(), rt.harnessLead(),
 		rt.harnessRegister(), rt.harnessLeadUsage(), rt.harnessLeavingAt(), rt.harnessPauseDefault(), rt.harnessPause("pause"), rt.harnessPause("resume"), rt.harnessWorker("pause-plan"), rt.harnessRead("list"), rt.harnessRead("status"), rt.harnessRead("orchestrator"), rt.harnessBind(), rt.harnessWorker("heartbeat"), rt.harnessWorker("yield"), rt.harnessWorker("drain"), rt.harnessWorker("complete-delivery"), rt.harnessControl("interrupt"), rt.harnessControl("stop"), rt.harnessControl("complete-control"), rt.harnessWorker("mark-stopped"), rt.harnessRunHeartbeat(), rt.harnessRun(), rt.harnessProvenance(), rt.harnessInvoke(),
 	}}
 }
@@ -170,7 +171,7 @@ func (rt *runtime) reportedSessionFileLimit(projectID, sessionID string) (int, e
 }
 
 // harnessDoCtx is harnessDo bound to ctx so a heartbeat can abort on shutdown.
-func (rt *runtime) harnessDoCtx(ctx context.Context, method, path, lease string, body, dest any) error {
+func (rt *runtime) harnessDoCtx(ctx context.Context, method, path, lease string, body, dest any, extra ...map[string]string) error {
 	if ctx == nil {
 		ctx = context.Background()
 	}
@@ -194,11 +195,15 @@ func (rt *runtime) harnessDoCtx(ctx context.Context, method, path, lease string,
 	if body != nil {
 		req.Header.Set("Content-Type", "application/json")
 	}
-	if c.Token != "" {
+	if c.Token != "" && lease != "" {
+		workerlease.Install(req.Header, c.Token, lease)
+	} else if c.Token != "" {
 		req.Header.Set("Authorization", "Bearer "+c.Token)
 	}
-	if lease != "" {
-		req.Header.Set("X-Aeon-Worker-Lease", lease)
+	for _, headers := range extra {
+		for name, value := range headers {
+			req.Header.Set(name, value)
+		}
 	}
 	hc := &http.Client{Timeout: 30 * time.Second, CheckRedirect: func(*http.Request, []*http.Request) error { return errors.New("harness request redirect refused") }}
 	res, err := hc.Do(req)
@@ -240,8 +245,23 @@ func (rt *runtime) harnessProjectCtx(ctx context.Context, ref string) (string, e
 	if strings.TrimSpace(ref) == "" {
 		return "", usagef("--project is required")
 	}
-	n, err := rt.projectNodeCtx(ctx, ref)
-	return n.ID, err
+	return rt.projectIdentityCtx(ctx, ref)
+}
+
+// A coordinator can supply its known project UUID to keep heartbeat reports
+// independent of the optional project-list projection. The server still
+// checks current project authority and exact generation ownership on writes.
+func (rt *runtime) heartbeatProjectCtx(ctx context.Context, ref, id string) (string, error) {
+	if err := ctx.Err(); err != nil {
+		return "", err
+	}
+	if id != "" {
+		if !validUUID(id) {
+			return "", usagef("--project-id must be a UUID")
+		}
+		return id, nil
+	}
+	return rt.harnessProjectCtx(ctx, ref)
 }
 func (rt *runtime) printHarness(v any) error {
 	if rt.jsonOut {
@@ -328,6 +348,7 @@ func harnessAgentMismatch(name string) error {
 func (rt *runtime) harnessRegister() *Command {
 	var project, agent, harness, generator, commandLabel, host, label, model, effort, accountLabel, harnessVersion, brief, worktree, branch, refFile, leaseFile, registrationFile, management, role, parent, ticket, shape, runID, orderID, succeeds string
 	var ticketIDFlag int
+	var parallelReason string
 	var caps []string
 	return &Command{Name: "register", Short: "Register one public harness generation", Use: "harness register --project KEY --agent NAME --harness KIND --host HOST --harness-session-file PATH --worker-lease-file PATH", addFlags: func(fs *flagSet) {
 		fs.string(&project, "project", 'p', "project key")
@@ -349,6 +370,7 @@ func (rt *runtime) harnessRegister() *Command {
 		fs.string(&registrationFile, "registration-file", 0, "private JSON with both registration secrets, or - for stdin")
 		fs.string(&management, "management", 0, "managed or unmanaged")
 		fs.string(&role, "role", 0, "worker or coordinator")
+		fs.string(&parallelReason, "parallel-reason", 0, "explicit public reason for parallel work; requires person or coordinator authority")
 		fs.string(&parent, "parent-session", 0, "parent public session UUID")
 		fs.string(&succeeds, "succeeds", 0, "paused worker or stopped/heartbeat-lost coordinator UUID")
 		fs.string(&ticket, "ticket", 0, "ticket node key")
@@ -459,6 +481,9 @@ func (rt *runtime) harnessRegister() *Command {
 			order = &orderID
 		}
 		body := map[string]any{"succeeds_session_id": predecessor, "max_session_file_bytes": rules.SessionFileLimit(harness), "rules_client_version": version.Version, "agent_principal_id": me.Principal.ID, "harness": harness, "host": host, "display_label": label, "model": model, "reasoning_effort": effort, "account_label": accountLabel, "harness_version": harnessVersionOrProbe(context.Background(), harness, harnessVersion), "brief": brief, "worktree": worktree, "branch": branch, "harness_session_ref": ref, "worker_lease": lease, "management_mode": management, "role": role, "parent_harness_session_id": parentID, "ticket_node_id": ticketID, "work_shape": shape, "work_order_id": order, "run_id": run, "advertised_capabilities": caps}
+		if parallelReason != "" {
+			body["parallel_reason"] = parallelReason
+		}
 		putText(body, "generator", generator, true)
 		putText(body, "command", commandLabel, true)
 		attachVendorSessionRef(body, harness, ref, lease, parent, "")
@@ -543,6 +568,7 @@ func (rt *runtime) harnessBind() *Command {
 }
 func (rt *runtime) harnessWorker(kind string) *Command {
 	var capacityOptions heartbeatCapacity
+	var projectID, knownHarness string
 	var project, session, agent, leaseFile, phase, activity, activityKind, note, doing, model, effort, accountLabel, harnessVersion, brief, worktree, branch, deliveryID, level, reason, etaReady, etaLive, progress string
 	// The sentinel distinguishes an omitted flag from --label "", which clears a label.
 	const omittedLabel = "\x00"
@@ -557,6 +583,8 @@ func (rt *runtime) harnessWorker(kind string) *Command {
 		fs.string(&leaseFile, "worker-lease-file", 0, "private generation lease file")
 		switch kind {
 		case "heartbeat":
+			fs.string(&projectID, "project-id", 0, "known project UUID; skips project-list lookup for this heartbeat")
+			fs.string(&knownHarness, "harness", 0, "known execution family; skips session-status lookup for the client byte limit")
 			capacityOptions.flags(fs)
 			fs.string(&phase, "phase", 0, "starting, working, yielded or stopping")
 			fs.string(&label, "label", 0, "current session display name (empty clears it)")
@@ -591,7 +619,7 @@ func (rt *runtime) harnessWorker(kind string) *Command {
 		if err := capacityOptions.validate(); err != nil {
 			return err
 		}
-		id, err := rt.harnessProject(project)
+		id, err := rt.heartbeatProjectCtx(rt.context(), project, projectID)
 		if err != nil {
 			return err
 		}
@@ -631,9 +659,18 @@ func (rt *runtime) harnessWorker(kind string) *Command {
 					return usagef("unknown activity kind %q", activityKind)
 				}
 			}
-			limit, err := rt.reportedSessionFileLimit(id, session)
-			if err != nil {
-				return err
+			var limit int
+			if knownHarness != "" {
+				if !runkind.Valid(knownHarness) {
+					return usagef("unsupported session harness %q", knownHarness)
+				}
+				limit = rules.SessionFileLimit(knownHarness)
+			} else {
+				var err error
+				limit, err = rt.reportedSessionFileLimit(id, session)
+				if err != nil {
+					return err
+				}
 			}
 			body = map[string]any{"max_session_file_bytes": limit, "rules_client_version": version.Version, "phase": phase, "activity": activity, "activity_sequence": sequence}
 			if label != omittedLabel {

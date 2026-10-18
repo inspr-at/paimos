@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/google/jsonschema-go/jsonschema"
+	"github.com/inspr-at/paimos/internal/authz"
 	"github.com/inspr-at/paimos/internal/db"
 	"github.com/inspr-at/paimos/internal/events"
 	"github.com/inspr-at/paimos/internal/tenant"
@@ -154,8 +155,10 @@ func (m *Module) runNow(w http.ResponseWriter, r *http.Request) {
 			return err
 		}
 		key, name, version := "manual:"+in.Key, "", ""
+		var source *EventContext
+		var eventID *int64
 		if in.ReleaseKey != "" {
-			if item.Trigger.Kind != "event" {
+			if item.Trigger.Kind != "event" || item.Trigger.Event != "release.published" {
 				return workorders.Fail(400, "release_key requires an event trigger")
 			}
 			choices, _, err := m.releases(r.Context(), tx, item, now)
@@ -168,11 +171,17 @@ func (m *Module) runNow(w http.ResponseWriter, r *http.Request) {
 					found = true
 					if choice.Receipt != nil {
 						out = choice.Receipt.Occurrence
-						return nil
+						return runReceipt(r.Context(), tx, &out)
 					}
 					key = "release:" + choice.Key
 					name = choice.Name
 					version = choice.Version
+					eventID = choice.eventID
+					source = &EventContext{Event: "release.published", ProjectID: choice.ProjectID, ReleaseID: choice.ReleaseID,
+						Name: choice.Name, Version: choice.Version, publishedAt: choice.PublishedAt}
+					if eventID != nil {
+						source.EventID = *eventID
+					}
 					break
 				}
 			}
@@ -180,11 +189,14 @@ func (m *Module) runNow(w http.ResponseWriter, r *http.Request) {
 				return workorders.Fail(404, "published release not found")
 			}
 		}
-		out, err = occur(r.Context(), tx, actor, item, key, now, nil, name, version, in.Force)
+		out, err = occurSource(r.Context(), tx, actor, item, key, now, eventID, name, version, source, in.Force)
 		return err
 	})
 	reply(w, 200, out, err)
 }
+
+var errPublicationPending = workorders.Fail(409, "previous occurrence remains open; publication pending")
+
 func httpError(w http.ResponseWriter, status int, message string) {
 	workorders.WriteError(w, workorders.Fail(status, message))
 }
@@ -193,6 +205,10 @@ func httpError(w http.ResponseWriter, status int, message string) {
 // have finished. A failure rolls the entire transaction back; the durable key
 // and count are committed atomically, including overlap skips.
 func occur(ctx context.Context, tx pgx.Tx, actor tenant.Principal, r Recurrence, key string, at time.Time, eventID *int64, name, version string, forceOverlap ...bool) (Occurrence, error) {
+	return occurSource(ctx, tx, actor, r, key, at, eventID, name, version, nil, forceOverlap...)
+}
+
+func occurSource(ctx context.Context, tx pgx.Tx, actor tenant.Principal, r Recurrence, key string, at time.Time, eventID *int64, name, version string, source *EventContext, forceOverlap ...bool) (Occurrence, error) {
 	// Normalize historical definitions defensively as well as migrating storage.
 	switch r.Template.Type {
 	case "epic", "ticket", "task":
@@ -201,7 +217,8 @@ func occur(ctx context.Context, tx pgx.Tx, actor tenant.Principal, r Recurrence,
 
 	existing, err := scanOccurrence(tx.QueryRow(ctx, `SELECT `+occurrenceColumns+` FROM recurrence_occurrences WHERE recurrence_id=$1 AND occurrence_key=$2`, r.ID, key))
 	if err == nil {
-		return existing, nil
+		err = runReceipt(ctx, tx, &existing)
+		return existing, err
 	}
 	if !errors.Is(err, pgx.ErrNoRows) {
 		return Occurrence{}, err
@@ -221,6 +238,15 @@ func occur(ctx context.Context, tx pgx.Tx, actor tenant.Principal, r Recurrence,
 	if err != nil {
 		return Occurrence{}, err
 	}
+	if err = authorizeRunOwner(ctx, tx, actor, r); err != nil {
+		return Occurrence{}, err
+	}
+	if reason == "" {
+		reason, err = authz.ProjectStartReasonTx(ctx, tx, r.ProjectID)
+		if err != nil {
+			return Occurrence{}, err
+		}
+	}
 	// The locked reload replaces the earlier normalized copy.
 	switch r.Template.Type {
 	case "epic", "ticket", "task":
@@ -234,7 +260,26 @@ func occur(ctx context.Context, tx pgx.Tx, actor tenant.Principal, r Recurrence,
 			return Occurrence{}, err
 		}
 		if open {
+			if releaseSubscription(r.Input) && strings.HasPrefix(key, "release:") {
+				return Occurrence{}, errPublicationPending
+			}
 			reason = "previous_occurrence_open"
+		}
+	}
+	if releaseSubscription(r.Input) && strings.HasPrefix(key, "release:") {
+		// A ticket can be closed while its agent still owns an unfinished run.
+		// Unknown states hold the publication rather than guessing completion.
+		if r.OverlapPolicy == "skip" && !(len(forceOverlap) > 0 && forceOverlap[0]) {
+			var open bool
+			if err := tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM routine_runs WHERE recurrence_id=$1 AND state NOT IN ('done','skipped','succeeded','failed','cancelled','completed'))`, r.ID).Scan(&open); err != nil {
+				return Occurrence{}, err
+			}
+			if open {
+				return Occurrence{}, errPublicationPending
+			}
+		}
+		if reason != "" {
+			return Occurrence{}, workorders.Fail(409, "release publication target unavailable")
 		}
 	}
 	o := Occurrence{RecurrenceID: r.ID, Key: key, Number: r.OccurrenceCount + 1, ScheduledAt: at, SourceEventID: eventID, Outcome: "skipped", Reason: reason}
@@ -242,6 +287,13 @@ func occur(ctx context.Context, tx pgx.Tx, actor tenant.Principal, r Recurrence,
 	if reason == "" {
 		title := render(r.Template.Title, o.Number, at, r.Trigger, name, version)
 		body := render(r.Template.Description, o.Number, at, r.Trigger, name, version)
+		if source != nil {
+			raw, err := json.Marshal(source)
+			if err != nil || len(raw) > 4096 {
+				return Occurrence{}, workorders.Fail(400, "trigger context exceeds limits")
+			}
+			body += "\n\nTrigger context (source identifiers):\n```json\n" + string(raw) + "\n```"
+		}
 		criteria := make([]string, len(r.Template.Criteria))
 		for i, c := range r.Template.Criteria {
 			criteria[i] = render(c, o.Number, at, r.Trigger, name, version)
@@ -258,6 +310,23 @@ func occur(ctx context.Context, tx pgx.Tx, actor tenant.Principal, r Recurrence,
 				tags = append(tags, tagName)
 			}
 			fields := map[string]any{"type": r.Template.Type, "tags": tags, "priority": r.Template.Priority, "acceptance_criteria": criteria, "recurrence_id": r.ID, "occurrence_key": key, "occurrence_number": o.Number}
+			fields["hide_from_release_notes"] = r.Template.HideFromReleaseNotes == nil || *r.Template.HideFromReleaseNotes
+			for _, copy := range []struct {
+				key, value string
+				limit      int
+			}{
+				{"pill_en", r.Template.PillEN, 512}, {"pill_de", r.Template.PillDE, 512},
+				{"benefit_en", r.Template.BenefitEN, 4096}, {"benefit_de", r.Template.BenefitDE, 4096},
+			} {
+				if copy.value == "" {
+					continue
+				}
+				text := render(copy.value, o.Number, at, r.Trigger, name, version)
+				if len(text) > copy.limit {
+					o.Reason = "rendered_template_invalid"
+				}
+				fields[copy.key] = text
+			}
 			if r.Template.EstimateHours > 0 {
 				fields["estimate_hours"] = r.Template.EstimateHours
 				fields["estimate_source"] = "agent"
@@ -312,13 +381,21 @@ func occur(ctx context.Context, tx pgx.Tx, actor tenant.Principal, r Recurrence,
 			}
 		}
 	}
+	if releaseSubscription(r.Input) && strings.HasPrefix(key, "release:") && o.Outcome != "created" {
+		return Occurrence{}, workorders.Fail(409, "release publication template unavailable")
+	}
 	if _, err = tx.Exec(ctx, `UPDATE recurrences SET occurrence_count=$2,updated_at=clock_timestamp() WHERE id=$1`, r.ID, o.Number); err != nil {
 		return Occurrence{}, err
 	}
+	if err = persistRun(ctx, tx, actor, r, &o, source, name, version); err != nil {
+		return Occurrence{}, err
+	}
+	run := o.Run
 	o, err = scanOccurrence(tx.QueryRow(ctx, `INSERT INTO recurrence_occurrences(tenant_id,recurrence_id,occurrence_key,number,scheduled_at,node_id,source_event_id,outcome,reason) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9) RETURNING `+occurrenceColumns, actor.TenantID, r.ID, key, o.Number, at, o.NodeID, eventID, o.Outcome, o.Reason))
 	if err != nil {
 		return Occurrence{}, err
 	}
+	o.Run = run
 	typ := "recurrence.occurred"
 	if o.Outcome == "skipped" {
 		typ = "recurrence.skipped"

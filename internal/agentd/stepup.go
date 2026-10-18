@@ -11,6 +11,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/inspr-at/paimos/internal/httpapi"
 	"github.com/inspr-at/paimos/internal/stepup"
 )
 
@@ -150,17 +151,19 @@ func (m *StepUpManager) serve(w http.ResponseWriter, r *http.Request, token stri
 		_ = json.NewEncoder(w).Encode(stepup.Info{Origin: m.cfg.Origin, ComputerID: m.cfg.ComputerID, Ready: m.cfg.Ready})
 		return
 	}
-	controller := http.NewResponseController(w)
-	_ = controller.SetReadDeadline(time.Now().Add(5 * time.Second))
-	r.Body = http.MaxBytesReader(w, r.Body, 256)
-	d := json.NewDecoder(r.Body)
-	d.DisallowUnknownFields()
-	var in stepup.Request
-	if d.Decode(&in) != nil || d.Decode(&struct{}{}) != io.EOF {
+	if err := httpapi.BufferRequestBodyTimeout(w, r, 256, 5*time.Second); err != nil {
+		httpapi.RetainClassifiedBodyStatus(r)
 		http.Error(w, "only challenge_id is accepted", 400)
 		return
 	}
-	_ = controller.SetReadDeadline(time.Time{})
+	d := httpapi.NewRequestDecoder(w, r, 1<<20)
+	d.DisallowUnknownFields()
+	var in stepup.Request
+	if d.Decode(&in) != nil || d.Decode(&struct{}{}) != io.EOF {
+		httpapi.RetainClassifiedBodyStatus(r)
+		http.Error(w, "only challenge_id is accepted", 400)
+		return
+	}
 	out, err := m.confirm(r, in.ChallengeID)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusConflict)

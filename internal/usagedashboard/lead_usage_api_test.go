@@ -8,6 +8,8 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"regexp"
+	"strconv"
 	"strings"
 	"sync"
 	"testing"
@@ -219,7 +221,9 @@ func TestLeadUsageBoundsAndPrivacy(t *testing.T) {
 		return err
 	})
 	code, out, body := w.getLeadUsage(t, w.member, project, "")
-	if code != 200 || out.Total.Tokens.Measured != nil || !out.Partial || strings.Contains(body, hidden) || strings.Contains(body, "999") || out.Held.State != "withheld" {
+	// The withheld quantity is 999. Echoed project ids can contain those digits;
+	// scan measurements after identifiers are removed, and still reject the hidden id.
+	if code != 200 || out.Total.Tokens.Measured != nil || !out.Partial || strings.Contains(body, hidden) || withheldQuantityDisclosed(body, 999) || out.Held.State != "withheld" {
 		t.Fatalf("privacy %d %s", code, body)
 	}
 	code, _, body = w.getLeadUsage(t, w.member, hidden, "")
@@ -239,6 +243,59 @@ func TestLeadUsageBoundsAndPrivacy(t *testing.T) {
 	code, _, body = w.getLeadUsage(t, w.home, project, "&generation=2")
 	if code != 404 {
 		t.Fatalf("unknown generation %d %s", code, body)
+	}
+}
+
+// Identifiers are echoed and can contain the same digits as a withheld count.
+var leadUsageIdentifier = regexp.MustCompile(`[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}`)
+
+func withheldQuantityDisclosed(body string, quantity int) bool {
+	return strings.Contains(leadUsageIdentifier.ReplaceAllString(body, ""), strconv.Itoa(quantity))
+}
+
+// The c1470609 CI body. Its project id contains the withheld digits 999.
+const ciLeadUsagePrivacyBody = `{"project_id":"8ea8f0dd-d382-44fc-9997-d2e4a18df772","generation":null,"from":"2026-09-01T00:00:00Z","to":"2026-10-01T00:00:00Z","basis":"cumulative_for_sessions_and_segments_started_in_range","partial":true,"truncated":false,"gaps":["source_visibility_incomplete","source_project_unreadable","incomplete_measurement"],"total":{"contributions":1,"attempts":1,"tokens":{"measured":null,"known":0,"unknown":1},"active_ms":{"measured":null,"known":0,"unknown":1},"waiting_ms":{"measured":null,"known":0,"unknown":1}},"lead":{"contributions":1,"attempts":1,"tokens":{"measured":null,"known":0,"unknown":1},"active_ms":{"measured":null,"known":0,"unknown":1},"waiting_ms":{"measured":null,"known":0,"unknown":1}},"worker":{"contributions":0,"attempts":0,"tokens":{"measured":null,"known":0,"unknown":0},"active_ms":{"measured":null,"known":0,"unknown":0},"waiting_ms":{"measured":null,"known":0,"unknown":0}},"review":{"contributions":0,"attempts":0,"tokens":{"measured":null,"known":0,"unknown":0},"active_ms":{"measured":null,"known":0,"unknown":0},"waiting_ms":{"measured":null,"known":0,"unknown":0}},"fix":{"contributions":0,"attempts":0,"tokens":{"measured":null,"known":0,"unknown":0},"active_ms":{"measured":null,"known":0,"unknown":0},"waiting_ms":{"measured":null,"known":0,"unknown":0}},"held":{"state":"withheld","scope":"attributed_run_reservations_not_exclusive_quota","windows":[]},"finish_forecast":"estimate_unavailable"}`
+
+func TestLeadUsagePrivacyIdentifierCIBody(t *testing.T) {
+	// c1470609 failed TestLeadUsageBoundsAndPrivacy because this body contains
+	// the digits 999 inside the echoed project id, not as a measurement.
+	if !strings.Contains(ciLeadUsagePrivacyBody, "999") {
+		t.Fatal("c1470609 fixture lost the colliding digits")
+	}
+	if withheldQuantityDisclosed(ciLeadUsagePrivacyBody, 999) {
+		t.Fatal("c1470609 privacy body was treated as a withheld-quantity leak")
+	}
+	for _, leaked := range []string{
+		strings.Replace(ciLeadUsagePrivacyBody, `"measured":null`, `"measured":"999"`, 1),
+		strings.Replace(ciLeadUsagePrivacyBody, `"contributions":1`, `"contributions":999`, 1),
+		strings.Replace(ciLeadUsagePrivacyBody, `"state":"withheld"`, `"state":"saw 999 tokens"`, 1),
+		strings.Replace(ciLeadUsagePrivacyBody, `"unknown":1`, `"unknown":1999`, 1),
+	} {
+		if !withheldQuantityDisclosed(leaked, 999) {
+			t.Fatalf("accepted disclosed quantity: %s", leaked)
+		}
+	}
+}
+
+func TestLeadUsagePrivacyIdentifierDigitsAreNotTheQuantity(t *testing.T) {
+	w := newWorld(t)
+	w.leadContracts(t)
+	// Same id that failed c1470609: 999 sits inside the echoed project id.
+	project := w.projectWithID(t, w.home, "8ea8f0dd-d382-44fc-9997-d2e4a18df772", "PRIVATE-8", "Colliding id")
+	lead := w.leadSession(t, project, nil, nil, "coordinator", 1)
+	w.leadGeneration(t, project, lead, 1)
+	hidden := w.project(t, w.home, "HIDDEN-8", "Secret")
+	ticket := w.ticket(t, w.home, hidden, "HIDDEN-9", "Secret work")
+	episode := w.leadEpisode(t, hidden, ticket)
+	worker := w.leadSession(t, project, &lead, nil, "worker", 2)
+	w.leadContribution(t, hidden, episode, worker, "built", nil, true, 999)
+	w.tx(t, w.home, func(tx pgx.Tx) error {
+		_, err := tx.Exec(t.Context(), `INSERT INTO role_bindings(tenant_id,principal_id,role_id,scope_type,scope_id) SELECT $1,$2,id,'project',$3 FROM roles WHERE tenant_id=$1 AND key='member'`, w.home.TenantID, w.member.ID, project)
+		return err
+	})
+	code, out, body := w.getLeadUsage(t, w.member, project, "")
+	if code != 200 || out.Total.Tokens.Measured != nil || !out.Partial || strings.Contains(body, hidden) || withheldQuantityDisclosed(body, 999) || out.Held.State != "withheld" || !strings.Contains(body, "999") {
+		t.Fatalf("privacy %d %s", code, body)
 	}
 }
 
