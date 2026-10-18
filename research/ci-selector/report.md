@@ -265,3 +265,52 @@ Worker status stays at 95 rather than claiming this check passed.
 The branch still differs from main only in the original six AEON-1485 paths.
 No feature changes, area activation, authored workflow or registry changes,
 origin push, deployment, model CLI calls or review gates were performed.
+
+### CI fix round 3 (2026-10-18)
+
+CI on `f534dd101` reported two header-glimpse cases that left the graph mounted
+after shrinking to 390 px. Both cases and four related checks pass on the
+unfixed base through the approved remote Chromium runner, so the original
+failure is intermittent. The added regression deterministically covers the
+remaining notification gap: animation frames are held and window, visual
+viewport, media-query and document-root resize deliveries are dropped after
+the graph is ready. It proves the layout reached 390 px before requiring the
+graph to be removed and the existing header's off marker to remain.
+
+That regression fails against the exact `f534dd101` product code and passes
+with fix `2ce1b0ee0`. Its negative-control commit existed only on an owned
+scratch branch; the delivery branch contains no negative-control commit and
+the scratch branch was removed. The fix adds an independent 250 ms check
+while the graph is painted, using the same clear-only width gate. Paint end
+and component unmount cancel it. Existing event/frame handling, the one-pixel
+widen catch-up and all existing assertions are retained.
+
+One new ESSENTIAL browser row and the existing spec's registration count were
+updated with the canonical manifest functions. No other tier rows changed,
+and no new source file or audit ownership row was needed. The research
+candidate, historical measurement and disabled area rollout are unchanged.
+
+Validation on `2ce1b0ee0`:
+
+- `remote-spec.sh`, both `header-glimpse.spec.ts` and
+  `header-glimpse-context.spec.ts`: **34 passed**, including both reported CI
+  cases and the new regression. The approved runner used macOS Chromium on
+  mbp2606; a Linux Chromium run remains for coordinator CI.
+- `remote-test.sh`: reportercontract passed; selector/shard suites **390
+  passed**, zero failed or skipped; header node units **9 passed**; developer
+  header-setting units **3 passed**; ownership audit **33 passed**; web
+  typecheck and targeted HeaderGlimpse lint passed. All ran in the guarded
+  remote checkout, using its existing dependency cache.
+- Local candidate research tests: **5 passed**. Canonical manifest and diff
+  checks passed.
+- Header screenshots from the successful full browser run are under
+  `web/test-results/remote/aeon-chunks-WbqWa0/chunk-1/`, including
+  `header-390-light.png`, `header-390-dark.png`, `header-1280-light.png`,
+  `header-1280-dark.png`, `header-1600-light.png` and `header-1600-dark.png`
+  in their respective case directories. They remain uncommitted artifacts.
+
+`ci-static-locked.sh` returned **exit 3 twice** because the night protocol
+pauses remote static checks. The required full
+`node scripts/ci-static.mjs --merge-main` remains unproven until an approved
+run or hosted CI. Worker status stays at 95; this is not a green static check.
+No guard bypass, push to origin, deployment, model CLI or review gate was run.
