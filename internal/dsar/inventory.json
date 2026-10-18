@@ -6,6 +6,20 @@
       "columns": {
         "account_id": "metadata",
         "binding_revision": "metadata",
+        "hour_at": "personal",
+        "samples": "personal",
+        "tenant_id": "metadata"
+      },
+      "locator": {
+        "tenant_column": "tenant_id"
+      },
+      "table": "account_quota_hourly"
+    },
+    {
+      "classification": "personal",
+      "columns": {
+        "account_id": "metadata",
+        "binding_revision": "metadata",
         "id": "metadata",
         "person_id": "personal",
         "read_at": "personal",
@@ -20,20 +34,6 @@
         "tenant_column": "tenant_id"
       },
       "table": "account_daily_observations"
-    },
-    {
-      "classification": "personal",
-      "columns": {
-        "account_id": "metadata",
-        "binding_revision": "metadata",
-        "hour_at": "personal",
-        "samples": "personal",
-        "tenant_id": "metadata"
-      },
-      "locator": {
-        "tenant_column": "tenant_id"
-      },
-      "table": "account_quota_hourly"
     },
     {
       "classification": "personal",
@@ -253,107 +253,6 @@
         "tenant_column": "tenant_id"
       },
       "table": "cross_family_policies"
-    },
-    {
-      "classification": "metadata",
-      "columns": {
-        "tenant_id": "metadata",
-        "repository": "metadata",
-        "pull_request": "metadata",
-        "binding_revision": "metadata",
-        "target_branch": "metadata",
-        "base_sha": "metadata",
-        "head_sha": "metadata",
-        "scope": "metadata",
-        "review_run_id": "metadata",
-        "visual_run_id": "metadata"
-      },
-      "locator": {
-        "tenant_column": "tenant_id"
-      },
-      "table": "delivery_admission_approvals"
-    },
-    {
-      "classification": "review",
-      "columns": {
-        "tenant_id": "metadata",
-        "repository": "metadata",
-        "pull_request": "metadata",
-        "project_id": "metadata",
-        "ticket_node_id": "metadata",
-        "target_branch": "metadata",
-        "base_sha": "metadata",
-        "head_sha": "metadata",
-        "scope": "metadata",
-        "revision": "metadata",
-        "control_revision": "metadata",
-        "holds": "review",
-        "fix": "metadata"
-      },
-      "locator": {
-        "tenant_column": "tenant_id"
-      },
-      "table": "delivery_admission_bindings"
-    },
-    {
-      "table": "delivery_admission_outbox",
-      "classification": "metadata",
-      "columns": {
-        "tenant_id": "metadata",
-        "repository": "metadata",
-        "sha": "metadata",
-        "context": "metadata",
-        "kind": "metadata",
-        "members": "metadata",
-        "active": "metadata",
-        "invalidated": "metadata",
-        "revision": "metadata",
-        "published_revision": "metadata",
-        "confirmed_state": "metadata",
-        "uncertain": "metadata",
-        "checked_at": "metadata",
-        "retired": "metadata",
-        "resolved": "metadata"
-      },
-      "locator": {
-        "tenant_column": "tenant_id"
-      }
-    },
-    {
-      "table": "delivery_admission_queue",
-      "classification": "metadata",
-      "columns": {
-        "tenant_id": "metadata",
-        "repository": "metadata",
-        "pull_request": "metadata",
-        "head_sha": "metadata",
-        "attempts": "metadata",
-        "infra_retries": "metadata",
-        "consumed_group": "metadata",
-        "policy_removed": "metadata",
-        "quarantined": "metadata",
-        "enforcement": "metadata",
-        "notice_sent": "metadata",
-        "checked_at": "metadata"
-      },
-      "locator": {
-        "tenant_column": "tenant_id"
-      }
-    },
-    {
-      "classification": "review",
-      "columns": {
-        "tenant_id": "metadata",
-        "project_id": "metadata",
-        "revision": "metadata",
-        "block_on_nightly_red": "metadata",
-        "nightly_state": "metadata",
-        "holds": "review"
-      },
-      "locator": {
-        "tenant_column": "tenant_id"
-      },
-      "table": "delivery_admission_settings"
     },
     {
       "classification": "metadata",
@@ -920,28 +819,6 @@
         "tenant_column": "tenant_id"
       },
       "table": "harness_sessions"
-    },
-    {
-      "table": "import_project_drafts",
-      "classification": "personal",
-      "columns": {
-        "tenant_id": "metadata",
-        "id": "metadata",
-        "capability_digest": "secret",
-        "payload": "personal",
-        "payload_bytes": "metadata",
-        "language": "metadata",
-        "created_at": "metadata",
-        "expires_at": "metadata",
-        "consumed_at": "personal",
-        "consumed_by": "personal",
-        "project_id": "metadata",
-        "ticket_count": "metadata"
-      },
-      "locator": {
-        "person_column": "consumed_by",
-        "tenant_column": "tenant_id"
-      }
     },
     {
       "classification": "personal",
@@ -1629,45 +1506,6 @@
     {
       "classification": "personal",
       "columns": {
-        "author_family": "metadata",
-        "author_session_id": "metadata",
-        "base_sha": "metadata",
-        "created_at": "personal",
-        "created_by": "personal",
-        "credential_digest": "secret",
-        "credential_key_id": "personal",
-        "expires_at": "metadata",
-        "harness": "metadata",
-        "head_sha": "metadata",
-        "id": "metadata",
-        "kind": "metadata",
-        "model": "metadata",
-        "project_id": "metadata",
-        "pull_request": "metadata",
-        "reason": "review",
-        "reasoning_effort": "metadata",
-        "repository": "metadata",
-        "reviewer_family": "metadata",
-        "reviewer_principal_id": "personal",
-        "reviewer_session_id": "metadata",
-        "scope": "metadata",
-        "submitted_at": "personal",
-        "target_branch": "metadata",
-        "tenant_id": "metadata",
-        "ticket_node_id": "metadata",
-        "verdict": "metadata",
-        "visual_impact": "metadata",
-        "admission_revision": "metadata"
-      },
-      "locator": {
-        "person_column": "reviewer_principal_id",
-        "tenant_column": "tenant_id"
-      },
-      "table": "review_runs"
-    },
-    {
-      "classification": "personal",
-      "columns": {
         "action_key": "metadata",
         "approval_id": "metadata",
         "attempt_id": "metadata",
@@ -2048,6 +1886,168 @@
         "tenant_column": "tenant_id"
       },
       "table": "work_kinds"
+    },
+    {
+      "classification": "personal",
+      "columns": {
+        "author_family": "metadata",
+        "author_session_id": "metadata",
+        "base_sha": "metadata",
+        "created_at": "personal",
+        "created_by": "personal",
+        "credential_digest": "secret",
+        "credential_key_id": "personal",
+        "expires_at": "metadata",
+        "harness": "metadata",
+        "head_sha": "metadata",
+        "id": "metadata",
+        "kind": "metadata",
+        "model": "metadata",
+        "project_id": "metadata",
+        "pull_request": "metadata",
+        "reason": "review",
+        "reasoning_effort": "metadata",
+        "repository": "metadata",
+        "reviewer_family": "metadata",
+        "reviewer_principal_id": "personal",
+        "reviewer_session_id": "metadata",
+        "scope": "metadata",
+        "submitted_at": "personal",
+        "target_branch": "metadata",
+        "tenant_id": "metadata",
+        "ticket_node_id": "metadata",
+        "verdict": "metadata",
+        "visual_impact": "metadata",
+        "admission_revision": "metadata"
+      },
+      "locator": {
+        "person_column": "reviewer_principal_id",
+        "tenant_column": "tenant_id"
+      },
+      "table": "review_runs"
+    },
+    {
+      "classification": "review",
+      "columns": {
+        "tenant_id": "metadata",
+        "repository": "metadata",
+        "pull_request": "metadata",
+        "project_id": "metadata",
+        "ticket_node_id": "metadata",
+        "target_branch": "metadata",
+        "base_sha": "metadata",
+        "head_sha": "metadata",
+        "scope": "metadata",
+        "revision": "metadata",
+        "control_revision": "metadata",
+        "holds": "review",
+        "fix": "metadata"
+      },
+      "locator": {
+        "tenant_column": "tenant_id"
+      },
+      "table": "delivery_admission_bindings"
+    },
+    {
+      "classification": "metadata",
+      "columns": {
+        "tenant_id": "metadata",
+        "repository": "metadata",
+        "pull_request": "metadata",
+        "binding_revision": "metadata",
+        "target_branch": "metadata",
+        "base_sha": "metadata",
+        "head_sha": "metadata",
+        "scope": "metadata",
+        "review_run_id": "metadata",
+        "visual_run_id": "metadata"
+      },
+      "locator": {
+        "tenant_column": "tenant_id"
+      },
+      "table": "delivery_admission_approvals"
+    },
+    {
+      "classification": "review",
+      "columns": {
+        "tenant_id": "metadata",
+        "project_id": "metadata",
+        "revision": "metadata",
+        "block_on_nightly_red": "metadata",
+        "nightly_state": "metadata",
+        "holds": "review"
+      },
+      "locator": {
+        "tenant_column": "tenant_id"
+      },
+      "table": "delivery_admission_settings"
+    },
+    {
+      "table": "delivery_admission_outbox",
+      "classification": "metadata",
+      "columns": {
+        "tenant_id": "metadata",
+        "repository": "metadata",
+        "sha": "metadata",
+        "context": "metadata",
+        "kind": "metadata",
+        "members": "metadata",
+        "active": "metadata",
+        "invalidated": "metadata",
+        "revision": "metadata",
+        "published_revision": "metadata",
+        "confirmed_state": "metadata",
+        "uncertain": "metadata",
+        "checked_at": "metadata",
+        "retired": "metadata",
+        "resolved": "metadata"
+      },
+      "locator": {
+        "tenant_column": "tenant_id"
+      }
+    },
+    {
+      "table": "delivery_admission_queue",
+      "classification": "metadata",
+      "columns": {
+        "tenant_id": "metadata",
+        "repository": "metadata",
+        "pull_request": "metadata",
+        "head_sha": "metadata",
+        "attempts": "metadata",
+        "infra_retries": "metadata",
+        "consumed_group": "metadata",
+        "policy_removed": "metadata",
+        "quarantined": "metadata",
+        "enforcement": "metadata",
+        "notice_sent": "metadata",
+        "checked_at": "metadata"
+      },
+      "locator": {
+        "tenant_column": "tenant_id"
+      }
+    },
+    {
+      "table": "import_project_drafts",
+      "classification": "personal",
+      "columns": {
+        "tenant_id": "metadata",
+        "id": "metadata",
+        "capability_digest": "secret",
+        "payload": "personal",
+        "payload_bytes": "metadata",
+        "language": "metadata",
+        "created_at": "metadata",
+        "expires_at": "metadata",
+        "consumed_at": "personal",
+        "consumed_by": "personal",
+        "project_id": "metadata",
+        "ticket_count": "metadata"
+      },
+      "locator": {
+        "person_column": "consumed_by",
+        "tenant_column": "tenant_id"
+      }
     }
   ],
   "version": 1

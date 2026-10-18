@@ -129,7 +129,7 @@ func TestCompletionBeatsSweeperUnderConcurrency(t *testing.T) {
 // Acknowledgement and sweep race on unleased messages: exactly one wins, both
 // finish without error or deadlock, and the loser changes nothing.
 func TestAckAndSweepAgreeUnderConcurrency(t *testing.T) {
-	w, m, project, _ := messagingWorld(t)
+	w, m, project, _ := messagingWorld(t, true)
 	session := messageTestSession(t, w, project, w.agent, "Contended worker")
 	for i := range 12 {
 		msg := boundMessage(t, w, m, project, session, fmt.Sprintf("contended-%d", i))

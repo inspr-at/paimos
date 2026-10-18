@@ -91,7 +91,7 @@ func TestSessionChatQueuedPickupAndStall(t *testing.T) {
 				}
 			}
 			for _, kind := range []string{"inbox.message_fetched", "inbox.acked", "inbox.receipt_handed_off"} {
-				if n := countSQL(t, w.db.Admin, w.sender.TenantID, `SELECT count(*) FROM events WHERE type=$1 AND after->>'message_id'=ANY($2::text[])`, kind, ids); n != 3 {
+				if n := countSQL(t, w.db.Admin, w.sender.TenantID, `SELECT count(*) FROM events WHERE type=$1 AND coalesce(after->>'message_id',after->>'id')=ANY($2::text[])`, kind, ids); n != 3 {
 					t.Fatalf("%s count=%d want 3", kind, n)
 				}
 			}
@@ -201,4 +201,13 @@ func TestSessionChatQueuedPickupAndStall(t *testing.T) {
 			t.Fatalf("stalled message undeliverable: %+v %v", items, err)
 		}
 	})
+}
+
+// Independent wire-format probes retry after the prior pickup lease expires.
+// The lifecycle test above separately rejects a retry during an active lease.
+func expireChatPickupLease(t *testing.T, w *world, sessions ...string) {
+	t.Helper()
+	if _, err := w.db.Admin.Exec(t.Context(), `UPDATE inbox_messages SET pickup_lease_until=clock_timestamp()-interval '1 second' WHERE recipient_session_id=ANY($1::uuid[])`, sessions); err != nil {
+		t.Fatal(err)
+	}
 }

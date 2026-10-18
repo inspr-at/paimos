@@ -194,7 +194,7 @@ func TestUnpulledMessageFailsNoListenerAndPeopleHaveNoDeadline(t *testing.T) {
 		t.Fatalf("notice %+v", n)
 	}
 	// A message to a person has no delivery path to guarantee.
-	status, body := do(t, srv, w.sender.ID, "POST", "/api/inbox/messages", sendJSON(w.recipient.ID, "to a person", "person", nil, nil), nil)
+	status, body := do(t, srv, w.admin.ID, "POST", "/api/inbox/messages", sendJSON(w.recipient.ID, "to a person", "person", nil, nil), nil)
 	if status != 201 {
 		t.Fatalf("send to person %d %s", status, body)
 	}
@@ -204,7 +204,7 @@ func TestUnpulledMessageFailsNoListenerAndPeopleHaveNoDeadline(t *testing.T) {
 		t.Fatalf("person message deadline %v", deadline)
 	}
 	// An agent's plain principal message takes the unbound default.
-	status, body = do(t, srv, w.sender.ID, "POST", "/api/inbox/messages", sendJSON(w.agent.ID, "to an agent", "agent", nil, nil), nil)
+	status, body = do(t, srv, w.admin.ID, "POST", "/api/inbox/messages", sendJSON(w.agent.ID, "to an agent", "agent", nil, nil), nil)
 	if status != 201 {
 		t.Fatalf("send to agent %d %s", status, body)
 	}
@@ -471,6 +471,7 @@ func TestExactSessionLeavesOutBroadcasts(t *testing.T) {
 	if status != 200 || len(mustJSON[Page](t, body).Items) != 4 {
 		t.Fatalf("default session pull changed: %d %s", status, body)
 	}
+	expireChatPickupLease(t, w, session)
 	status, body = do(t, srv, w.agent.ID, "GET", base+"&exact_session=true", "", nil)
 	page := mustJSON[Page](t, body)
 	if status != 200 || len(page.Items) != 1 || page.Items[0].ID != bound.ID {
@@ -481,6 +482,7 @@ func TestExactSessionLeavesOutBroadcasts(t *testing.T) {
 			t.Fatalf("%s: %d %s", bad, status, body)
 		}
 	}
+	expireChatPickupLease(t, w, session)
 	ctx, cancel := context.WithTimeout(t.Context(), 20*time.Second)
 	defer cancel()
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, srv.URL+"/api/inbox/stream?exact_session=true&session="+session, nil)

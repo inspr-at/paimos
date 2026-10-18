@@ -121,8 +121,12 @@ func (s *Sweeper) alertChatPickup(ctx context.Context, tid, sysID, id string, no
 		if _, err := tx.Exec(ctx, `SELECT 1 FROM principals WHERE id=ANY($1::uuid[]) ORDER BY id FOR KEY SHARE`, []string{sender, sysID}); err != nil {
 			return err
 		}
-		if _, err := tx.Exec(ctx, `SELECT 1 FROM inbox_delivery_targets WHERE principal_id=$1::uuid AND kind='webhook' AND enabled ORDER BY id FOR KEY SHARE`, sender); err != nil {
+		var targets int
+		if err := tx.QueryRow(ctx, `SELECT count(*) FROM (SELECT id FROM inbox_delivery_targets WHERE principal_id=$1::uuid AND kind='webhook' AND enabled ORDER BY id LIMIT 33 FOR KEY SHARE) t`, sender).Scan(&targets); err != nil {
 			return err
+		}
+		if targets > 32 {
+			return errors.New("chat pickup notice target limit exceeded")
 		}
 		sys, err := systemActor(ctx, tx, tid)
 		if err != nil {
