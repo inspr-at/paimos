@@ -9272,6 +9272,8 @@
     ,
     {"kind":"browser","file":"tests/group-figures.spec.ts","name":"AEON-1390 the grouped-by column flips the group order; other columns sort inside the groups; both arrows hold their slots","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
+    {"kind":"browser","file":"tests/group-figures.spec.ts","name":"AEON-1486 phones: a long epic title keeps the summary visible, disclosed and still at 390 px","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
     {"kind":"browser","file":"tests/group-figures.spec.ts","name":"coarse pointer › AEON-1388 a coarse pointer shows the first cell’s controls, 44 px each, above the group rows’ own","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
     {"kind":"browser","file":"tests/groups.spec.ts","name":"one quota, its own pool, and move 1600 dark","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
