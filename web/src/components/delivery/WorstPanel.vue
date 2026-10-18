@@ -1,7 +1,7 @@
 <!-- SPDX-License-Identifier: AGPL-3.0-only -->
 <script setup lang="ts">
 // Building it › Worst in this window (AEON-1493): the five worst items of one number, anchored to its tile and
-// flipping above when there is no room below; a bottom sheet at 760 px and narrower. Each row links to the ticket
+// flipping above when there is no room below, never over the app header; a bottom sheet at 760 px and narrower. Each row links to the ticket
 // and shows one mark per round. Enter on the tile opens it with the first row focused; Esc closes and returns focus
 // to the tile, an outside click closes. ↑/↓ move between the rows.
 import { computed, ref } from 'vue'
@@ -31,7 +31,7 @@ function move(event: KeyboardEvent) {
 </script>
 
 <template>
-  <FloatingPanel :anchor="anchor" :width="440" :tallest="560" :label="tile.worst.title" cycle phone-sheet :sheet-below="760" class="dl-worst" data-testid="delivery-worst" @close="restore => emit('close', restore)" @keydown="move">
+  <FloatingPanel :anchor="anchor" :width="440" :tallest="560" :label="tile.worst.title" cycle phone-sheet :sheet-below="760" below-header class="dl-worst" data-testid="delivery-worst" @close="restore => emit('close', restore)" @keydown="move">
     <div class="wp-grab" aria-hidden="true" />
     <div class="wp-head">
       <div class="wp-tt" :data-autofocus="focusFirst && tile.worst.rows.length ? undefined : ''" tabindex="-1">

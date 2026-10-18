@@ -8424,6 +8424,8 @@
     ,
     {"kind":"browser","file":"tests/delivery-building.spec.ts","name":"Building it at 1024, light and dark: four tiles, Simple and Expert, in the design's order","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
+    {"kind":"browser","file":"tests/delivery-building.spec.ts","name":"Building it at 1440, 1024 and 768: the worst five never cover the app header","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
     {"kind":"browser","file":"tests/delivery-building.spec.ts","name":"Building it at 1440, light and dark: four tiles, Simple and Expert, in the design's order","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
     {"kind":"browser","file":"tests/delivery-building.spec.ts","name":"Building it at 1440: loading, a failed read, the retry and no data keep every control in place","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}

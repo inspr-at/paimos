@@ -48,12 +48,20 @@ onBeforeUnmount(() => resize?.disconnect())
 // ---------- Worst in this window ----------
 // The panel keeps the rows it opened with: a refresh landing meanwhile never reorders them under the pointer.
 const open = ref<{ key: BuildingKey; anchor: HTMLElement; focusFirst: boolean; tile: BuildingTileView } | null>(null)
-function toggle(tile: BuildingTileView, event: MouseEvent) {
-  const anchor = event.currentTarget as HTMLElement
+function toggle(tile: BuildingTileView, anchor: HTMLElement, keyboard: boolean) {
   if (open.value?.key === tile.key) { close(true); return }
   if (!canOpen.value) return
-  // Enter or Space arrive as a click without a pointer: the first row takes the focus.
-  open.value = { key: tile.key, anchor, focusFirst: event.detail === 0, tile }
+  open.value = { key: tile.key, anchor, focusFirst: keyboard, tile }
+}
+// Enter or Space arrive as a click without a pointer: the first row takes the focus.
+const pressed = (tile: BuildingTileView, event: MouseEvent) => toggle(tile, event.currentTarget as HTMLElement, event.detail === 0)
+// Clipped text sits above the tile's button, so its full text shows on hover and focus like every other tile's;
+// a click on it still opens the worst items.
+function clipped(tile: BuildingTileView, event: MouseEvent) {
+  const target = event.target as Element
+  if (!target.closest('[data-clip-tip]') || target.closest('button, a[href], .plot')) return
+  const anchor = (event.currentTarget as HTMLElement).querySelector<HTMLButtonElement>('.bd-open')
+  if (anchor && !anchor.disabled) toggle(tile, anchor, false)
 }
 function close(restore: boolean) {
   const anchor = open.value?.anchor
@@ -80,9 +88,9 @@ const label = (tile: BuildingTileView) => fill(t.value.open, { n: tile.simple.na
       <span v-else class="bd-cnt" :class="{ quiet: view.head.kind === 'nodata' }" :aria-hidden="view.head.kind === 'loading' || undefined" data-testid="delivery-building-head">{{ view.head.text }}</span>
     </div>
     <div class="bd-grid" :class="{ busy }" role="list">
-      <SimpleTile v-for="tile in view.tiles" :key="tile.key" class="bd-tile" :tile="tile.simple" :state="state" :text="words" :data-building="tile.key">
+      <SimpleTile v-for="tile in view.tiles" :key="tile.key" class="bd-tile" :tile="tile.simple" :state="state" :text="words" :data-building="tile.key" @click="clipped(tile, $event)">
         <template #trigger>
-          <button type="button" class="bd-open" :aria-label="label(tile)" aria-haspopup="dialog" :aria-expanded="open?.key === tile.key" :disabled="!canOpen" data-testid="delivery-building-open" @click="toggle(tile, $event)" />
+          <button type="button" class="bd-open" :aria-label="label(tile)" aria-haspopup="dialog" :aria-expanded="open?.key === tile.key" :disabled="!canOpen" data-testid="delivery-building-open" @click="pressed(tile, $event)" />
         </template>
         <template v-if="level === 'expert'" #detail>
           <p class="s-pp"><span v-if="state === 'loading'" class="sk" style="width: 70%; height: 10px" /><span v-else v-clip-tip><template v-for="(part, index) in tile.pp" :key="index"><b v-if="part.strong">{{ part.text }}</b><template v-else>{{ part.text }}</template></template></span></p>
@@ -99,10 +107,10 @@ const label = (tile: BuildingTileView) => fill(t.value.open, { n: tile.simple.na
       <span v-else class="bd-cnt" :class="{ quiet: view.head.kind === 'nodata' }" :aria-hidden="view.head.kind === 'loading' || undefined" data-testid="delivery-building-head">{{ view.head.text }}</span>
     </div>
     <div class="tiles bd" :class="{ busy }" role="list">
-      <ExpertTile v-for="tile in view.tiles" :key="tile.key" class="bd-tile" :tile="tile.expert" :state="state" :text="page" :info-open="openTile === tile.expert.def.key" :data-building="tile.key"
+      <ExpertTile v-for="tile in view.tiles" :key="tile.key" class="bd-tile" :tile="tile.expert" :state="state" :text="page" :info-open="openTile === tile.expert.def.key" :data-building="tile.key" @click="clipped(tile, $event)"
         @info="(anchor, pin) => emit('info', tile.expert, anchor, pin)" @info-leave="emit('info-leave')">
         <template #trigger>
-          <button type="button" class="bd-open" :aria-label="label(tile)" aria-haspopup="dialog" :aria-expanded="open?.key === tile.key" :disabled="!canOpen" data-testid="delivery-building-open" @click="toggle(tile, $event)" />
+          <button type="button" class="bd-open" :aria-label="label(tile)" aria-haspopup="dialog" :aria-expanded="open?.key === tile.key" :disabled="!canOpen" data-testid="delivery-building-open" @click="pressed(tile, $event)" />
         </template>
         <template #extra><TrendChart :model="tile.chart" :state="state" :text="page" small bare /></template>
         <template #foot><span class="bd-more" :class="{ off: !canOpen }" aria-hidden="true"><AppIcon name="list" :size="12" />{{ t.more }}</span></template>
@@ -149,6 +157,10 @@ const label = (tile: BuildingTileView) => fill(t.value.open, { n: tile.simple.na
 .bd-open[aria-expanded="true"] { background: var(--row-hover); box-shadow: 0 0 0 1.5px color-mix(in srgb, var(--teal) 60%, transparent); }
 .bd-open:disabled { cursor: default; }
 .bd-tile :deep(.learn), .bd-tile :deep(.info), .bd-tile :deep(.plot) { z-index: 1; }
+/* Clipped text (v-clip-tip marks it) answers the pointer itself, so hover shows its full text; it keeps the tile's tint. */
+.bd-tile :deep([data-clip-tip]) { position: relative; z-index: 1; }
+.bd-tile:has(> .bd-open:not(:disabled)) :deep([data-clip-tip]) { cursor: pointer; }
+.bd-tile:has([data-clip-tip]:hover) > .bd-open:not(:disabled) { background: var(--row-hover); }
 .bd-tile :deep(.plot) { position: relative; }
 /* Only the plot answers the pointer; the rest of the embedded chart opens the worst items like the tile around it. */
 .bd-tile :deep(.chart-card.bare) { position: static; margin-top: 8px; }
@@ -158,7 +170,7 @@ const label = (tile: BuildingTileView) => fill(t.value.open, { n: tile.simple.na
 .bd-tile :deep(.src-t) { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
 .bd-more { display: inline-flex; align-items: center; gap: 4px; flex: none; font-weight: 600; color: var(--ink-3); }
 .bd-more.off { visibility: hidden; }
-.bd-open:hover:not(:disabled) ~ * .bd-more, .bd-open[aria-expanded="true"] ~ * .bd-more { color: var(--teal-ink); }
+.bd-open:hover:not(:disabled) ~ * .bd-more, .bd-open[aria-expanded="true"] ~ * .bd-more, .bd-tile:has([data-clip-tip]:hover) > .bd-open:not(:disabled) ~ * .bd-more { color: var(--teal-ink); }
 .s-pp { display: flex; align-items: center; height: 18px; margin: 0; font: 500 11.5px/18px var(--mono); font-variant-numeric: tabular-nums; color: var(--ink-2); white-space: nowrap; overflow: hidden; }
 .s-pp > span { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
 .s-pp b { font-weight: 600; color: var(--ink); }

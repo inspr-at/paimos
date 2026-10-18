@@ -10,7 +10,10 @@ import { getCurrentInstance, nextTick, onBeforeUnmount, onMounted, ref, watch } 
 // `phoneSheet`: on a portrait phone the menu opens as a sheet from the bottom edge, over a scrim,
 // its items in thumb reach (AEON-1286); elsewhere it stays anchored to its trigger.
 // `sheetBelow` is the widest viewport that still opens the phone sheet (Delivery's worst items use 760, AEON-1493).
-const props = withDefaults(defineProps<{ anchor: HTMLElement | null; align?: 'start' | 'end'; width?: number; label: string; tallest?: number; cycle?: boolean; sheet?: boolean; compactSheet?: boolean; fieldEscape?: boolean; settingsKeys?: boolean; phoneSheet?: boolean; sheetBelow?: number }>(), { align: 'start', width: 240, tallest: 420, cycle: false, sheet: false, fieldEscape: false, phoneSheet: false, sheetBelow: 720 })
+// `belowHeader`: flipped above its trigger, the panel stops 8 px below the app header instead of covering it. When it
+// fits on neither side, the page first scrolls the trigger to 16 px below the header (a jump with reduced motion), and
+// the panel then opens below it (Delivery's worst items, AEON-1493).
+const props = withDefaults(defineProps<{ anchor: HTMLElement | null; align?: 'start' | 'end'; width?: number; label: string; tallest?: number; cycle?: boolean; sheet?: boolean; compactSheet?: boolean; fieldEscape?: boolean; settingsKeys?: boolean; phoneSheet?: boolean; sheetBelow?: number; belowHeader?: boolean }>(), { align: 'start', width: 240, tallest: 420, cycle: false, sheet: false, fieldEscape: false, phoneSheet: false, sheetBelow: 720, belowHeader: false })
 defineOptions({ inheritAttrs: false })
 const floatingID = `floating-${getCurrentInstance()!.uid}`
 const floatingOwner = (props.anchor instanceof Element ? props.anchor.closest<HTMLElement>('[data-floating-id]') : null)?.dataset.floatingId
@@ -28,7 +31,12 @@ const placedHeight = ref<number>()
 const compactWidth = ref(props.width)
 const above = ref(false)
 const scrim = ref<HTMLElement>()
+// Hidden, without its opening animation, while the page scrolls to make room; it opens once placed.
+const parked = ref(false)
 let placedAnchor: DOMRect | null = null
+let unmounted = false
+// The highest top edge of a panel above its trigger: the screen's top, or with `belowHeader` the app header's bottom.
+const ceiling = () => props.belowHeader ? Math.max(0, document.querySelector('header.app-header')?.getBoundingClientRect().bottom ?? 0) + 8 : 6
 
 // Below the trigger, content grows downward. Above it, reserve the opening
 // height so a search field cannot move when its result count changes.
@@ -59,9 +67,10 @@ function place(keepSide = false) {
   }
   const height = panel.value.scrollHeight
   const room = innerHeight - rect.bottom - 12
+  const top = ceiling(), roomAbove = rect.top - 6 - top
   // Open above when the menu would not fit below and there is more room above.
-  if (!keepSide) above.value = room < Math.min(height, props.tallest) && rect.top > room
-  maxHeight.value = Math.max(160, Math.min(props.tallest, above.value ? rect.top - 12 : room))
+  if (!keepSide) above.value = room < Math.min(height, props.tallest) && (props.belowHeader ? roomAbove : rect.top) > room
+  maxHeight.value = Math.max(160, Math.min(props.tallest, above.value ? roomAbove : room))
   if (above.value) {
     if (!keepSide) {
       const searchRoom = panel.value.querySelector('input:not([type=checkbox]):not([type=radio])') ? Math.min(320, props.tallest) : 0
@@ -71,7 +80,47 @@ function place(keepSide = false) {
   const width = Math.min(props.width, innerWidth - 16)
   const left = props.align === 'end' ? rect.right - width : rect.left
   x.value = Math.round(Math.min(Math.max(8, left), innerWidth - width - 8))
-  y.value = Math.round(above.value ? rect.top - Math.min(placedHeight.value ?? height, maxHeight.value) - 6 : rect.bottom + 6)
+  const lifted = rect.top - Math.min(placedHeight.value ?? height, maxHeight.value) - 6
+  y.value = Math.round(above.value ? props.belowHeader ? Math.max(top, lifted) : lifted : rect.bottom + 6)
+}
+// `belowHeader`: with no room on either side of the trigger, scroll its page so the trigger sits 16 px below the
+// header, then let place() open the panel below it. The panel stays parked until the page has come to rest.
+async function makeRoom() {
+  if (!props.belowHeader || bottom.value || props.sheet || !(props.anchor instanceof HTMLElement) || !panel.value) return
+  const rect = props.anchor.getBoundingClientRect(), need = Math.min(panel.value.scrollHeight, props.tallest), top = ceiling()
+  if (innerHeight - rect.bottom - 12 >= need || rect.top - 6 - top >= need) return
+  const scroller = scrollerOf(props.anchor)
+  const target = Math.round(Math.max(0, Math.min(scroller.scrollHeight - scroller.clientHeight, scroller.scrollTop + rect.top - (top + 8))))
+  if (Math.abs(target - scroller.scrollTop) < 1) return
+  parked.value = true
+  scroller.scrollTo({ top: target, behavior: matchMedia('(prefers-reduced-motion: reduce)').matches ? 'instant' : 'smooth' })
+  await rest(scroller, target)
+  parked.value = false
+}
+function scrollerOf(element: HTMLElement): HTMLElement {
+  for (let parent = element.parentElement; parent; parent = parent.parentElement) {
+    const overflow = getComputedStyle(parent).overflowY
+    if ((overflow === 'auto' || overflow === 'scroll') && parent.scrollHeight > parent.clientHeight) return parent
+  }
+  return (document.scrollingElement ?? document.documentElement) as HTMLElement
+}
+// At rest: the target is reached, or the page has stopped for six frames after it moved (a person scrolled too).
+// A smooth scroll that has not started yet is waited for; 90 frames bound it all.
+let restFrame = 0
+function rest(scroller: HTMLElement, target: number) {
+  return new Promise<void>(resolve => {
+    const start = scroller.scrollTop
+    let last = start, still = 0, frames = 0
+    const tick = () => {
+      const now = scroller.scrollTop
+      still = Math.abs(now - last) < .5 ? still + 1 : 0
+      last = now
+      frames++
+      if (unmounted || Math.abs(now - target) < 1 || (still >= 6 && (Math.abs(now - start) >= .5 || frames >= 30)) || frames >= 90) { restFrame = 0; resolve(); return }
+      restFrame = requestAnimationFrame(tick)
+    }
+    restFrame = requestAnimationFrame(tick)
+  })
 }
 // Teleported child pickers belong to the trigger's overlay. Keep ancestors
 // open while interacting in a child, and let the top overlay consume Escape.
@@ -157,6 +206,8 @@ const onResize = () => place()
 watch(() => props.width, () => place(true))
 onMounted(async () => {
   await nextTick()
+  await makeRoom()
+  if (unmounted) return
   place()
   document.addEventListener('pointerdown', outside, true)
   // A scroll already under way when the popover opens (the page settling after the
@@ -170,6 +221,8 @@ onMounted(async () => {
   first?.focus({ preventScroll: true })
 })
 onBeforeUnmount(() => {
+  unmounted = true
+  cancelAnimationFrame(restFrame)
   cancelAnimationFrame(scrollFrame)
   cancelAnimationFrame(settleFrame)
   document.removeEventListener('pointerdown', outside, true)
@@ -184,7 +237,7 @@ defineExpose({ place })
 <template>
   <Teleport :to="layer">
     <div v-if="bottom" ref="scrim" class="floating-scrim" aria-hidden="true" @click="emit('close', false)" />
-    <div ref="panel" v-bind="$attrs" :data-floating-id="floatingID" :data-floating-owner="floatingOwner" class="floating pop" :class="{ above, sheet, bottom }" role="dialog" :aria-label="label" :style="{ transform: bottom ? 'none' : `translate(${x}px, ${y}px)`, width: sheet ? compactSheet ? `${compactWidth}px` : undefined : bottom ? '100%' : `${Math.min(width, 9999)}px`, height: placedHeight === undefined ? undefined : `${placedHeight}px`, boxSizing: 'border-box', maxHeight: `${maxHeight}px`, '--floating-max': `${maxHeight}px` }" @keydown="keydown">
+    <div ref="panel" v-bind="$attrs" :data-floating-id="floatingID" :data-floating-owner="floatingOwner" class="floating pop" :class="{ above, sheet, bottom, parked }" role="dialog" :aria-label="label" :style="{ transform: bottom ? 'none' : `translate(${x}px, ${y}px)`, width: sheet ? compactSheet ? `${compactWidth}px` : undefined : bottom ? '100%' : `${Math.min(width, 9999)}px`, height: placedHeight === undefined ? undefined : `${placedHeight}px`, boxSizing: 'border-box', maxHeight: `${maxHeight}px`, '--floating-max': `${maxHeight}px` }" @keydown="keydown">
       <slot />
     </div>
   </Teleport>
@@ -205,4 +258,6 @@ defineExpose({ place })
   @keyframes sheet-up { from { opacity: 0; transform: translateY(16px); } to { opacity: 1; transform: none; } }
   @keyframes pop-in-above { from { opacity: 0; margin-top: 4px; } to { opacity: 1; margin-top: 0; } }
 }
+/* After the media rules, so the opening animation starts only once the panel is placed. */
+.floating.parked { visibility: hidden; animation: none; }
 </style>
