@@ -31,13 +31,14 @@ const sweepBatch = 100
 type Sweeper struct {
 	pool     *pgxpool.Pool
 	interval time.Duration
+	clock    func() time.Time
 	mu       sync.Mutex
 	// Tenants whose pre-AEON-280 receipts are healed; a one-time bounded job.
 	legacyHealed map[string]bool
 }
 
 func NewSweeper(pool *pgxpool.Pool) *Sweeper {
-	return &Sweeper{pool: pool, interval: SweepInterval, legacyHealed: map[string]bool{}}
+	return &Sweeper{pool: pool, interval: SweepInterval, clock: time.Now, legacyHealed: map[string]bool{}}
 }
 
 // Run sweeps now and then every interval until ctx ends.
@@ -125,6 +126,9 @@ func (s *Sweeper) SweepTenant(ctx context.Context, tenantID string) (int, error)
 	if err := s.heal(ctx, tenantID); err != nil {
 		return 0, err
 	}
+	if err := s.sweepChatPickup(ctx, tenantID); err != nil {
+		return 0, err
+	}
 	var candidates []sweepCandidate
 	err := db.InTenant(ctx, s.pool, tenantID, func(tx pgx.Tx) error {
 		candidates = nil
@@ -147,6 +151,8 @@ func (s *Sweeper) SweepTenant(ctx context.Context, tenantID string) (int, error)
  WHERE m.content_mode='durable' AND m.chat_thread_id IS NULL AND r.state='queued' AND r.deliver_by IS NOT NULL AND m.acked_at IS NULL
    AND NOT (coalesce(d.attempts,0)<$1 AND coalesce(c.key_digest='desk/'||c.id::text,false)
      AND (rs.id IS NULL OR (rs.stopped_at IS NULL AND rs.archived_at IS NULL)))
+   AND NOT ((`+personSessionChatSQL+`) AND coalesce(d.attempts,0)<$1
+     AND rs.stopped_at IS NULL AND rs.archived_at IS NULL)
    AND NOT coalesce(d.state='pending' AND d.lease_until>clock_timestamp(),false)
    AND NOT EXISTS(SELECT 1 FROM harness_deliveries h WHERE h.message_id=m.id AND h.completed_at IS NULL AND h.released_at IS NULL AND h.leased_at>clock_timestamp()-interval '2 minutes')
    AND (r.deliver_by<=clock_timestamp()

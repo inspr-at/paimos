@@ -12,6 +12,57 @@ import { controlStability } from './control-stability'
 const now = Date.parse('2026-09-29T06:00:00Z')
 
 for (const width of [390, 1024, 1440]) for (const theme of ['light', 'dark'] as const) {
+  test(`AEON-1487 waiting chat ${theme} ${width}: stall notice keeps controls still`, async ({ page }, testInfo) => {
+    // Risk: offline chat offers a duplicate resend, or the stall notice moves
+    // its queue actions/composer. Only receipt evidence changes during the test.
+    await page.addInitScript(() => {
+      class Stream extends EventTarget {
+        onopen: ((event: Event) => void) | null = null
+        onerror: ((event: Event) => void) | null = null
+        receive = (event: Event) => this.dispatchEvent(new MessageEvent((event as CustomEvent<string>).detail, { data: '{}' }))
+        constructor() { super(); window.addEventListener('test:pickup', this.receive); queueMicrotask(() => this.onopen?.(new Event('open'))) }
+        close() { window.removeEventListener('test:pickup', this.receive) }
+      }
+      Object.assign(window, { EventSource: Stream })
+    })
+    const { worker, messages } = await setup(page, { theme, count: 3 })
+    const message = messages[2]!
+    message.body = 'Bitte die ausführliche Freigabeprüfung und den vollständigen Übergabebericht berücksichtigen.'
+    let stalled = false
+    await page.route('**/api/inbox/message-status?*', route => route.fulfill({ json: { items: [{
+      message_id: message.id, status: 'sent', waiting_for_pickup: true,
+      ...(stalled ? { pickup_stalled_at: new Date(now).toISOString() } : {}),
+      delivered_at: null, read_at: null, deliver_by: null,
+    }] } }))
+    await page.setViewportSize({ width, height: 900 })
+    await page.goto(`/agents/${worker.id}?tab=messages`)
+    const panel = panelOf(page)
+    const queue = panel.locator(`.queue-item[data-id="${message.id}"]`)
+    const label = queue.locator('.queue-when')
+    await expect(label).toHaveText('Waiting for the session to pick it up')
+    await expect(queue.getByRole('button', { name: 'Retry', exact: true })).toHaveCount(0)
+    await expect(panel.getByText('Not delivered', { exact: true })).toHaveCount(0)
+    const guard = await controlStability(page, {
+      frame: panel, composer: panel.getByRole('textbox', { name: 'Message to release-lead' }),
+      send: panel.getByRole('button', { name: /^(Send|After this turn)$/, exact: true }),
+      edit: queue.getByRole('button', { name: 'Edit', exact: true }),
+      cancel: queue.getByRole('button', { name: 'Cancel', exact: true }),
+    })
+    await guard.check(async () => {
+      stalled = true
+      await page.evaluate(() => window.dispatchEvent(new CustomEvent('test:pickup', { detail: 'delivery.stall_alerted' })))
+      await expect(label).toHaveAttribute('data-tip', /owner or lead has been alerted.*stays queued/)
+      await label.focus()
+      await expect(label).toBeFocused()
+      await expect(label).toHaveText('Waiting for the session to pick it up')
+      await expect(queue.getByRole('button', { name: 'Retry', exact: true })).toHaveCount(0)
+    })
+    guard.done()
+    await page.screenshot({ path: testInfo.outputPath(`aeon-1487-${theme}-${width}.png`) })
+  })
+}
+
+for (const width of [390, 1024, 1440]) for (const theme of ['light', 'dark'] as const) {
   test(`fast chat ${theme} ${width}: live bursts retain the latest post and stable controls`, async ({ page }, testInfo) => {
     // Risk: a message arriving inside the old four-second window, or during
     // an in-flight read, stays unseen. Frozen timers cannot rescue this test.

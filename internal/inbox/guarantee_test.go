@@ -88,7 +88,7 @@ func sweepNow(t *testing.T, w *world, tenantID string) int {
 }
 
 func TestSessionDeadlineDeliveredThenFailedLoudly(t *testing.T) {
-	w, m, project, srv := messagingWorld(t)
+	w, m, project, srv := messagingWorld(t, true)
 	get := func(principal, path string) (int, []byte) { return do(t, srv, principal, "GET", path, "", nil) }
 	session := messageTestSession(t, w, project, w.agent, "Deadline worker")
 	in := compatInput("codex:worker", "bound")
@@ -178,7 +178,7 @@ func TestSessionDeadlineDeliveredThenFailedLoudly(t *testing.T) {
 }
 
 func TestUnpulledMessageFailsNoListenerAndPeopleHaveNoDeadline(t *testing.T) {
-	w, m, project, srv := messagingWorld(t)
+	w, m, project, srv := messagingWorld(t, true)
 	session := messageTestSession(t, w, project, w.agent, "Quiet worker")
 	in := compatInput("codex:worker", "never-pulled")
 	in.RecipientSessionID = &session
@@ -326,7 +326,7 @@ func TestAttemptCapAndSettings(t *testing.T) {
 		t.Fatalf("settings %d %s", status, body)
 	}
 	status, body := do(t, srv, w.admin.ID, "GET", "/api/settings/inbox-delivery", "", nil)
-	if got := mustJSON[DeliverySettings](t, body); status != 200 || got != (DeliverySettings{120, 900, 1}) {
+	if got := mustJSON[DeliverySettings](t, body); status != 200 || got != (DeliverySettings{120, 900, 1, 600}) {
 		t.Fatalf("settings read %d %+v", status, got)
 	}
 	if _, err := m.storeTarget(t.Context(), w.admin, project, targetInput{Address: "codex:worker", Adapter: "codex", Kind: "codex_thread", Ref: "thread-fixture", Role: "primary", MaximumLevel: "simple"}); err != nil {
@@ -431,7 +431,7 @@ func TestStreamCarriesSessionMessagesAndMarksListening(t *testing.T) {
 }
 
 func TestSweeperIsASingleRunner(t *testing.T) {
-	w, m, project, _ := messagingWorld(t)
+	w, m, project, _ := messagingWorld(t, true)
 	session := messageTestSession(t, w, project, w.agent, "Locked worker")
 	in := compatInput("codex:worker", "locked")
 	in.RecipientSessionID = &session
