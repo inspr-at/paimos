@@ -22,5 +22,6 @@ pickup lease excludes competing readers, including a harness drain. If a
 response is lost before acknowledgement, the same message IDs can be replayed
 after the lease; consumers retain their existing ID-based deduplication and
 acknowledgement protocol. Pickup and confirmation events are recorded once.
+The receipt reaches Read after recipient acknowledgement.
 Decision Desk replies keep their existing replay behavior and thirty-minute
 stall threshold.

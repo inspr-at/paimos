@@ -55,6 +55,8 @@ for (const width of [390, 1024, 1440]) for (const theme of ['light', 'dark'] as 
       await expect(label).toHaveAttribute('data-tip', /owner or lead has been alerted.*stays queued/)
       await label.focus()
       await expect(label).toBeFocused()
+      await expect(page.locator('.tooltip')).toBeVisible()
+      await expect(page.locator('.tooltip')).toContainText('The owner or lead has been alerted.')
       await expect(label).toHaveText('Waiting for the session to pick it up')
       await expect(queue.getByRole('button', { name: 'Retry', exact: true })).toHaveCount(0)
     })
