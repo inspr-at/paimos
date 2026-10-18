@@ -6408,7 +6408,7 @@
     ,
     {"kind":"go","package":"internal/dsar","name":"TestMigratedInventoryGuard","tier":"ESSENTIAL"}
     ,
-    {"kind":"go","package":"internal/dsar","name":"TestParseCommands","tier":"ESSENTIAL"}
+    {"kind":"go","package":"internal/dsar","name":"TestParseCommands","tier":"GATED-FULL"}
     ,
     {"kind":"go","package":"internal/dsar","name":"TestQuarantineInventoryParsesWithWorkflowColumn","tier":"ESSENTIAL"}
     ,
