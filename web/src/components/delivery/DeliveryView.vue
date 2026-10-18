@@ -11,6 +11,7 @@ import { computed, onBeforeUnmount, onMounted, ref, shallowRef, watch } from 'vu
 import { useRoute, useRouter } from 'vue-router'
 import AppIcon from '../AppIcon.vue'
 import ViewSwitch from '../ViewSwitch.vue'
+import BuildingSection from './BuildingSection.vue'
 import ExpertTile from './ExpertTile.vue'
 import FlowView from './FlowView.vue'
 import LevelSwitch from './LevelSwitch.vue'
@@ -36,6 +37,8 @@ import { repositoryState } from '../../lib/projectDeliverySettings'
 import { ticketsModel, type TicketTileModel } from '../../lib/deliveryTickets'
 import { NO_FILTERS, type TimingFilters } from '../../lib/statusTiming'
 import { useTicketTiming } from '../../lib/useTicketTiming'
+import { buildingView } from '../../lib/deliveryBuilding'
+import { useDeliveryBuilding } from '../../lib/useDeliveryBuilding'
 import { shortDay } from '../../lib/workFigures'
 
 const props = defineProps<{ project: { id: string; routeKey: string; title: string } }>()
@@ -163,6 +166,11 @@ const tickets = useTicketTiming({ projectId: () => projectId.value, window: () =
 const ticketState = computed<'loading' | 'error' | 'ready'>(() => !prefsReady.value ? 'loading' : tickets.status.value)
 const ticketView = computed(() => ticketsModel(ticketState.value === 'ready' ? tickets.data.value : null, prefs.value.window, lang.value, tickets.final.value))
 function setTicketFilters(next: TimingFilters) { closeTip(); ticketFilters.value = next }
+
+// ---------- Building it (AEON-1493): rounds, waits and first tries, per window and the Tickets filters ----------
+const building = useDeliveryBuilding({ projectId: () => projectId.value, window: () => prefs.value.window, filters: () => ticketFilters.value, active: () => view.value === 'numbers' && prefsReady.value })
+const buildingState = computed<'loading' | 'error' | 'ready'>(() => !prefsReady.value ? 'loading' : building.status.value)
+const buildingModel = computed(() => buildingView(buildingState.value === 'ready' ? building.data.value : null, prefs.value.window, buildingState.value, lang.value))
 const numbers = computed(() => data.value ? numbersOf(data.value, prefs.value.window, lang.value) : null)
 // Placeholders keep every tile and chart in its slot while loading or after a failed read.
 const empty = computed(() => numbersOf({ project_id: projectId.value, generated_at: '', source: null, metrics: [] }, prefs.value.window, lang.value))
@@ -329,15 +337,20 @@ watch(state, (next, prev) => {
         </div>
       </div>
 
-      <SimpleNumbers v-if="prefs.level === 'simple'" :data="data" :window="prefs.window" :state="state" :no-data="noData || (state === 'ready' && !source)" :lang="lang">
+      <SimpleNumbers v-if="prefs.level === 'simple'" :data="data" :window="prefs.window" :state="state" :no-data="noData || (state === 'ready' && !source)" :lang="lang" :extra="buildingModel.summary">
         <template #tickets>
           <TicketsSection :model="ticketView" :state="ticketState" :busy="tickets.busy.value" :filters="ticketFilters" level="simple" :window="prefs.window" :lang="lang"
             @filters="setTicketFilters" @retry="tickets.retry" />
+        </template>
+        <template #building>
+          <BuildingSection :view="buildingModel" :state="buildingState" :busy="building.busy.value" level="simple" :window="prefs.window" :lang="lang" :route-key="routeKey" @retry="building.retry" />
         </template>
       </SimpleNumbers>
       <div v-else class="expert">
         <TicketsSection :model="ticketView" :state="ticketState" :busy="tickets.busy.value" :filters="ticketFilters" level="expert" :window="prefs.window" :lang="lang"
           :open-tile="tip?.tile.def.key ?? null" @filters="setTicketFilters" @retry="tickets.retry" @info="openTip" @info-leave="leaveTip" />
+        <BuildingSection :view="buildingModel" :state="buildingState" :busy="building.busy.value" level="expert" :window="prefs.window" :lang="lang" :route-key="routeKey"
+          :open-tile="tip?.tile.def.key ?? null" @retry="building.retry" @info="openTip" @info-leave="leaveTip" />
         <p class="tiles-cap sub">{{ fill(text.cap, { w: prefs.window }) }}</p>
         <div class="tiles" role="list" data-testid="delivery-tiles">
           <ExpertTile v-for="tile in tiles" :key="tile.def.key" :tile="tile" :state="state" :text="text" :info-open="tip?.tile.def.key === tile.def.key"
@@ -384,7 +397,7 @@ watch(state, (next, prev) => {
         <b>{{ tip.tile.label }}</b>
         <p>{{ tip.tile.definition }}</p>
         <p v-if="tip.tile.reason"><span class="meta">{{ tip.tile.status === 'no_data' ? text.whyNone : text.why }}</span><br>{{ tip.tile.reason }}</p>
-        <p class="meta">{{ text.source }}: {{ tip.tile.source }}<br>{{ text.window }}: {{ fill(text.windowT, { w: prefs.window }) }}<br>{{ tip.tile.target }} · {{ text.arion }}</p>
+        <p class="meta">{{ text.source }}: {{ tip.tile.source }}<br>{{ text.window }}: {{ fill(text.windowT, { w: prefs.window }) }}<br>{{ tip.tile.target }}<template v-if="!tip.tile.def.key.startsWith('building-')"> · {{ text.arion }}</template></p>
       </div>
     </Teleport>
   </section>

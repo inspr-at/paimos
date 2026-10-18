@@ -8,6 +8,7 @@ import { deriveAgentState, normalizeAgentState, STATE_PRIORITY } from '../src/li
 import { benefitIssues, completedTicketState } from '../src/lib/ticketBenefits.ts'
 import { leadWorkerKey, who, type LiveAgent } from '../src/lib/liveAgents.ts'
 import { mockEffectivePermissions } from './authz-fixtures'
+import { buildingAnswer } from './delivery-building-fixtures'
 import { compareModelSort, planningSortValue, type PlanningColumn } from '../src/lib/planning.ts'
 import { defaultStatusHelp } from '../src/lib/statusDefinitions.ts'
 import { PORCELAIN } from '../src/lib/themeEngine.ts'
@@ -422,6 +423,9 @@ export async function mockWork(page: Page, data: Fixtures, options: MockOptions 
       return route.fulfill({ json: { project_id: timingProject[1], generated_at: new Date().toISOString(), window: Number(query.get('window') ?? 90), final_status: 'delivered', steps, rework: 0,
         coverage: { tickets: 0, complete: 0, inferred: 0, gaps: 0, since: null, partial: true }, buckets: [] } })
     }
+    // AEON-1493: Delivery › Building it. No round recorded yet: the section shows its no-data line.
+    const buildingProject = /^\/api\/projects\/([^/]+)\/delivery\/building$/.exec(path)
+    if (buildingProject && method === 'GET') return route.fulfill({ json: buildingAnswer(decodeURIComponent(buildingProject[1]), Number(query.get('window') ?? 7), { empty: true }) })
     const entryNode = /^\/api\/nodes\/([^/]+)\/entry-checks$/.exec(path)
     if (entryNode && method === 'GET') {
       const node = data.nodes.find(n => n.id === entryNode[1])

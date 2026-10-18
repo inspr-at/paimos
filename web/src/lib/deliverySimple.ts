@@ -15,7 +15,8 @@ import { simpleText, type SimpleText } from './deliverySimpleText'
 const NB = ' '
 export type Mode = 'loading' | 'error' | 'ready'
 export type VerdictLevel = 'on' | 'close' | 'far' | 'none'
-export interface Verdict { level: VerdictLevel; word: string; gap: string; ratio: number | null }
+/** `sep` joins word and gap (default " · "): Building it's lead time reads "No target yet: watched". */
+export interface Verdict { level: VerdictLevel; word: string; gap: string; ratio: number | null; sep?: string }
 export interface Trend { cls: 'better' | 'worse' | 'same' | 'none'; icon: 'arrow-up' | 'arrow-down' | 'arrow' | 'minus'; text: string }
 export type Night = 'ok' | 'bad' | 'none' | 'nodata'
 export interface SparkModel {
@@ -23,9 +24,11 @@ export interface SparkModel {
   target: { value: number; up: boolean; label: string } | null; nights: Night[]; unit: BucketUnit; mode: Mode
 }
 export interface SimpleTileModel {
-  key: MetricTextKey; name: string; up: boolean; hasTarget: boolean; value: { text: string; unit: string }[] | null; empty: string
+  // Building it (AEON-1493) tiles carry their own key.
+  key: MetricTextKey | `building-${string}`; name: string; up: boolean; hasTarget: boolean; value: { text: string; unit: string }[] | null; empty: string
   verdict: Verdict; trend: Trend; say: string; partial: boolean; foot: string; spark: SparkModel
-  learn: { body: string; expert: string; target: string }
+  // `facts` replace the Expert name and Arion target lines in Learn (Building it's own targets and source).
+  learn: { body: string; expert: string; target: string; facts?: string[] }
 }
 export interface SimpleSection { title: string; sub: string; count: string; tiles: SimpleTileModel[] }
 export type SimpleSummary =
@@ -276,7 +279,7 @@ export function summaryOf(tiles: SimpleTileModel[], days: WindowDays, source: Me
 }
 
 /** The Simple page of one window: summary and three sections in path order. */
-export function simpleNumbersOf(data: DeliveryMetrics | null, days: WindowDays, mode: Mode, noData: boolean, lang: DeliveryLanguage) {
+export function simpleNumbersOf(data: DeliveryMetrics | null, days: WindowDays, mode: Mode, noData: boolean, lang: DeliveryLanguage, extra: SimpleTileModel[] = []) {
   const text = simpleText(lang)
   const metrics = new Map((data?.metrics ?? []).map(metric => [metric.key, metric] as const))
   const source = data?.source ?? null
@@ -286,7 +289,7 @@ export function simpleNumbersOf(data: DeliveryMetrics | null, days: WindowDays, 
     const withTarget = tiles.filter(tile => tile.hasTarget)
     return { ...text.sections[index], tiles, count: mode === 'ready' && !noData && withTarget.length ? fill(text.onTarget, { k: withTarget.filter(tile => tile.verdict.level === 'on').length, t: withTarget.length }) : '' }
   })
-  return { summary: summaryOf([...byKey.values()], days, source, mode, noData, text, lang), sections }
+  return { summary: summaryOf([...byKey.values(), ...extra], days, source, mode, noData, text, lang), sections }
 }
 
 // ---------- The small chart: target zone, "better" on the axis, hatched no data ----------

@@ -25,14 +25,17 @@ watch(() => props.state, (next, prev) => {
 
 <template>
   <article ref="root" class="s-tile" role="listitem" :aria-labelledby="`sn-${tile.key}`" :aria-busy="state === 'loading' || undefined" :data-key="tile.key" :style="hold > 0 ? { minHeight: `${hold}px` } : undefined">
+    <!-- Building it (AEON-1493): a whole-tile trigger, a detail line under the verdict and an action in the foot. -->
+    <slot name="trigger" />
     <div class="s-top">
       <h4 :id="`sn-${tile.key}`" class="s-name">{{ tile.name }}</h4>
-      <LearnPopover :id="tile.key" :name="tile.name" :body="tile.learn.body" :expert="tile.learn.expert" :target="tile.learn.target"
+      <LearnPopover :id="tile.key" :name="tile.name" :body="tile.learn.body" :expert="tile.learn.expert" :target="tile.learn.target" :facts="tile.learn.facts"
         :labels="{ learn: text.learn, expertName: text.expertName, arion: text.arion }" />
     </div>
     <template v-if="state === 'loading'">
       <div class="s-valrow"><span class="sk" style="width: 45%; height: 30px" /></div>
       <div class="s-verdict"><span class="sk" style="width: 65%; height: 14px" /></div>
+      <slot name="detail" />
       <TileSpark :model="tile.spark" :text="text" />
       <div class="s-trend"><span class="sk" style="width: 70%; height: 12px" /></div>
       <div class="s-say"><span class="sk" style="width: 90%; height: 12px" /><span class="sk" style="width: 60%; height: 12px" /></div>
@@ -45,8 +48,9 @@ watch(() => props.state, (next, prev) => {
       </div>
       <p class="s-verdict" :class="tile.verdict.level" data-testid="verdict">
         <AppIcon :name="ICON[tile.verdict.level]" :size="16" />
-        <span v-clip-tip><b>{{ tile.verdict.word }}</b><span v-if="tile.verdict.gap" class="gap"> · {{ tile.verdict.gap }}</span></span>
+        <span v-clip-tip><b>{{ tile.verdict.word }}</b><span v-if="tile.verdict.gap" class="gap">{{ tile.verdict.sep ?? ' · ' }}{{ tile.verdict.gap }}</span></span>
       </p>
+      <slot name="detail" />
       <TileSpark :model="tile.spark" :text="text" />
       <p class="s-trend" :class="tile.trend.cls"><AppIcon :name="tile.trend.icon" :size="13" /><span v-clip-tip>{{ tile.trend.text }}</span></p>
       <p class="s-say">{{ tile.say }}</p>
@@ -55,8 +59,9 @@ watch(() => props.state, (next, prev) => {
       <span v-if="state === 'loading'" class="sk" style="width: 55%; height: 9px" />
       <template v-else>
         <span v-if="tile.partial && tile.foot" class="partial"><AppIcon name="half" :size="10" />{{ text.partial }}</span>
-        <span v-clip-tip>{{ tile.foot }}</span>
+        <span v-clip-tip class="src-t">{{ tile.foot }}</span>
       </template>
+      <slot name="foot" />
     </div>
   </article>
 </template>

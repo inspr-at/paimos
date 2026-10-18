@@ -9,7 +9,8 @@ import { getCurrentInstance, nextTick, onBeforeUnmount, onMounted, ref, watch } 
 // a small form (`cycle`) keeps Tab among its own controls instead.
 // `phoneSheet`: on a portrait phone the menu opens as a sheet from the bottom edge, over a scrim,
 // its items in thumb reach (AEON-1286); elsewhere it stays anchored to its trigger.
-const props = withDefaults(defineProps<{ anchor: HTMLElement | null; align?: 'start' | 'end'; width?: number; label: string; tallest?: number; cycle?: boolean; sheet?: boolean; compactSheet?: boolean; fieldEscape?: boolean; settingsKeys?: boolean; phoneSheet?: boolean }>(), { align: 'start', width: 240, tallest: 420, cycle: false, sheet: false, fieldEscape: false, phoneSheet: false })
+// `sheetBelow` is the widest viewport that still opens the phone sheet (Delivery's worst items use 760, AEON-1493).
+const props = withDefaults(defineProps<{ anchor: HTMLElement | null; align?: 'start' | 'end'; width?: number; label: string; tallest?: number; cycle?: boolean; sheet?: boolean; compactSheet?: boolean; fieldEscape?: boolean; settingsKeys?: boolean; phoneSheet?: boolean; sheetBelow?: number }>(), { align: 'start', width: 240, tallest: 420, cycle: false, sheet: false, fieldEscape: false, phoneSheet: false, sheetBelow: 720 })
 defineOptions({ inheritAttrs: false })
 const floatingID = `floating-${getCurrentInstance()!.uid}`
 const floatingOwner = (props.anchor instanceof Element ? props.anchor.closest<HTMLElement>('[data-floating-id]') : null)?.dataset.floatingId
@@ -18,7 +19,7 @@ const panel = ref<HTMLElement>()
 const x = ref(-9999)
 const y = ref(-9999)
 // A phone sheet is decided before the first paint, so it never changes form, width or edge while it opens.
-const bottomSheet = () => props.phoneSheet && innerWidth <= 720 && innerHeight > 480
+const bottomSheet = () => props.phoneSheet && innerWidth <= props.sheetBelow && innerHeight > 480
 const bottom = ref(bottomSheet())
 const sheetMax = () => Math.max(160, innerHeight - 48)
 // Until placed (off-screen), the content may take its full height so place() measures it.
@@ -141,7 +142,7 @@ let resized: ResizeObserver | null = null
 function keydown(event: KeyboardEvent) {
   if (event.key !== 'Tab') return
   if (!props.cycle) { emit('close', false); return }
-  const stops = [...(panel.value?.querySelectorAll<HTMLElement>('input, button, textarea, select, [tabindex]') ?? [])]
+  const stops = [...(panel.value?.querySelectorAll<HTMLElement>('input, button, textarea, select, a[href], [tabindex]') ?? [])]
     .filter(el => el.tabIndex >= 0 && !(el as HTMLButtonElement).disabled && el.getClientRects().length)
   if (!stops.length) return
   const edge = event.shiftKey ? stops[0] : stops[stops.length - 1]

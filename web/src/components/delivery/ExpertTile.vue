@@ -16,6 +16,8 @@ const id = (suffix: string) => `dl-${props.tile.def.key}-${suffix}`
 
 <template>
   <div class="tile" role="listitem" :aria-labelledby="id('label')" :aria-busy="state === 'loading' || undefined">
+    <!-- Building it (AEON-1493): a whole-tile trigger, the daily chart below the target and an action in the foot. -->
+    <slot name="trigger" />
     <div class="t-top">
       <span :id="id('label')" v-clip-tip class="t-label">{{ tile.label }}</span>
       <button type="button" class="info" :aria-label="`${text.infoFor} ${tile.label}`" :aria-expanded="infoOpen"
@@ -35,7 +37,7 @@ const id = (suffix: string) => `dl-${props.tile.def.key}-${suffix}`
       <div class="t-line t-delta none"><AppIcon name="minus" :size="13" /><span v-clip-tip>{{ state === 'error' ? text.notLoaded : tile.delta.text }}</span></div>
     </template>
     <template v-else>
-      <div class="t-value">{{ tile.value.main }}<small>{{ tile.value.unit }}</small></div>
+      <div class="t-value">{{ tile.value.main }}<small>{{ tile.value.unit }}</small><template v-if="tile.value.more">{{ tile.value.more.main }}<small>{{ tile.value.more.unit }}</small></template></div>
       <div class="t-line">
         <span v-if="tile.lineA.squares" class="mini-n" aria-hidden="true"><i v-for="(night, index) in tile.lineA.squares" :key="index" :class="night" /></span>
         <span v-clip-tip :class="{ 't-pp': tile.lineA.mono }"><template v-for="(part, index) in tile.lineA.parts" :key="index"><b v-if="part.strong">{{ part.text }}</b><template v-else>{{ part.text }}</template></template></span>
@@ -50,12 +52,14 @@ const id = (suffix: string) => `dl-${props.tile.def.key}-${suffix}`
       <svg class="lg-sw" width="18" height="8" aria-hidden="true"><line x1="0" y1="4" x2="18" y2="4" class="g-target" /></svg>
       <span v-clip-tip>{{ tile.target }}</span>
     </div>
+    <slot name="extra" />
     <div class="t-foot">
       <template v-if="state === 'loading'"><span class="sk" style="width: 60%; height: 9px" /></template>
       <template v-else>
         <span v-if="state === 'ready' && tile.partial" class="partial"><AppIcon name="half" :size="10" />{{ text.partial }}</span>
-        <span v-clip-tip>{{ state === 'ready' ? tile.foot : tile.source }}</span>
+        <span v-clip-tip class="src-t">{{ state === 'ready' ? tile.foot : tile.source }}</span>
       </template>
+      <slot name="foot" />
     </div>
   </div>
 </template>
