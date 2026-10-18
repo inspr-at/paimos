@@ -8,7 +8,8 @@ import { fileURLToPath } from 'node:url'
 
 const roots = ['web/src', 'web/tests', 'internal', 'cmd', 'api', 'docs', 'tests']
 const history = 'internal/releasehistory/data/product-notes.json'
-const privateNames = /agm[0-9]+|csb[0-9]+|hsb[0-9]+|mbp26[0-9]{2}|augmentoring/gi
+export const privateNameSource = 'agm[0-9]+|csb[0-9]+|hsb[0-9]+|mbp26[0-9]{2}|augmentoring'
+const privateNames = new RegExp(privateNameSource, 'gi')
 const digest = bytes => createHash('sha256').update(bytes).digest('hex')
 const isRecord = value => value !== null && typeof value === 'object' && !Array.isArray(value)
 // Formatting and object-key order can change when packnotes writes the bundle.

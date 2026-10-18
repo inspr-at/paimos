@@ -1017,7 +1017,7 @@ toggles release publication or modifies a published asset.
 `v*` tag restrictions. Add only approved `main` dispatch access with required
 coordinator approval; never wildcard branch access or expose signing to PRs.
 These settings are not changed by this package. Until configured, manual
-completion holds at the environment gate. All jobs remain hosted; the mbp2606
+completion holds at the environment gate. All jobs remain hosted; self-hosted
 main-only runner admission rules are unchanged. Registry, signing, native
 qualification, partial-draft recovery and environment protection still need an
 authorized release run as live acceptance evidence; fixture tests are not that

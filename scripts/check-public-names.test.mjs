@@ -7,7 +7,7 @@ import { mkdirSync, mkdtempSync, readFileSync, writeFileSync, rmSync } from 'nod
 import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
-import { checkPublicNames } from './check-public-names.mjs'
+import { checkPublicNames, privateNameSource } from './check-public-names.mjs'
 
 const historyPath = 'internal/releasehistory/data/product-notes.json'
 const allowlistPath = 'scripts/ci/public-names-allowlist.json'
@@ -24,6 +24,17 @@ function publishedFixture(t) {
   const save = () => writeFileSync(join(root, historyPath), JSON.stringify(history, null, 2) + '\n')
   return { root, history, save }
 }
+
+test('shipped release guide names no operator host', () => {
+  // Risk: completion instructions name a workstation; public docs must stay neutral.
+  const release = readFileSync(new URL('../docs/RELEASE.md', import.meta.url), 'utf8')
+  const pattern = new RegExp(privateNameSource, 'i')
+  const hits = []
+  for (const [index, line] of release.split('\n').entries()) {
+    if (pattern.test(line)) hits.push(index + 1)
+  }
+  assert.deepEqual(hits, [])
+})
 
 test('public name guard permits neutral new releases without refreshing published pins', t => {
   // Risk: reserving the next release breaks CI despite unchanged published history.
