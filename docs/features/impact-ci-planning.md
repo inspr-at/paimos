@@ -105,10 +105,17 @@ snapshot supplies the concurrency rollback.
 Capacity and admission regressions run through the existing `ci-plan-tests`
 static entry, alongside planner and reuse checks. Selector, kill-switch and
 measurement integration remain in the existing fixed tier regression entry.
-No native Go/web cases or browser launch records are added, so no tier rows are
-needed. The existing `scripts/**` ownership slice covers the tooling and its
-measurement baseline. The static registry removes the retired `tier-plan` job
-and pins the consolidated planner's command inventory.
+These tooling changes add no native Go/web cases or browser launch records,
+so they need no tier rows. The existing `scripts/**` ownership slice covers
+the tooling and its measurement baseline. The static registry removes the
+retired `tier-plan` job and pins the consolidated planner's command inventory.
+
+The CI fix round also connects the header glimpse to visual-viewport resize
+deliveries. It applies the existing layout-width gate immediately when the
+next animation frame is delayed. One ESSENTIAL browser regression holds
+frames and drops the other viewport notifications, then proves the delivered
+visual resize clears the glimpse. The header-glimpse spec inventory increases
+to 27 cases; the existing assertions and timeouts remain unchanged.
 
 The 2026-10-17 UTC window runs from 00:00 to 23:40, including the scheduled
 nightly. Collection covered 22 visible repositories, 1,297 workflow runs
