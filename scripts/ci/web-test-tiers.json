@@ -12930,6 +12930,10 @@
     ,
     {"kind":"browser","file":"tests/reserved-versions.spec.ts","name":"turning reservations off removes any reserved comparison endpoints","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
+    {"kind":"browser","file":"tests/reserved-versions.spec.ts","name":"withdrawn coordinates stay out of rows, details, names and statistics with opt-in false","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/reserved-versions.spec.ts","name":"withdrawn coordinates stay out of rows, details, names and statistics with opt-in true","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
     {"kind":"browser","file":"tests/resilient-polling.spec.ts","name":"Agents retries a stalled session read and keeps the loaded table through three failed refreshes","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
     {"kind":"browser","file":"tests/resilient-polling.spec.ts","name":"Live Agents pauses in a hidden tab and refreshes when shown and back online","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
@@ -16750,6 +16754,8 @@
     ,
     {"kind":"node","file":"tests/releases.test.ts","name":"regenerated missing snapshots preserve the v1 archive headline, tickets and filters with an honest gap","tier":"GATED-FULL"}
     ,
+    {"kind":"node","file":"tests/releases.test.ts","name":"reserved rows are opt-in without mutating loaded history; withdrawals are never visible","tier":"ESSENTIAL"}
+    ,
     {"kind":"node","file":"tests/releases.test.ts","name":"reserved versions are opt-in without changing the full history or result counts","tier":"GATED-FULL"}
     ,
     {"kind":"node","file":"tests/releases.test.ts","name":"search and filters look at headlines, changes and ticket keys","tier":"GATED-FULL"}
@@ -19672,6 +19678,8 @@
     ,
     {"kind":"vitest","file":"tests/release-stats.unit.test.ts","name":"the seven stats > this week counts since Monday, per day so far, and last week from the first release","tags":["delete-candidate"],"tier":"GATED-FULL"}
     ,
+    {"kind":"vitest","file":"tests/release-stats.unit.test.ts","name":"the seven stats > withdrawals never affect any statistic, cadence range, feature count or name","tier":"ESSENTIAL"}
+    ,
     {"kind":"vitest","file":"tests/releases-store.unit.test.ts","name":"waits for a delayed developer-ui read before counting and marking seen (false)","tier":"GATED-FULL"}
     ,
     {"kind":"vitest","file":"tests/releases-store.unit.test.ts","name":"waits for a delayed developer-ui read before counting and marking seen (null)","tier":"GATED-FULL"}
@@ -19691,6 +19699,14 @@
     {"kind":"vitest","file":"tests/reserved-versions.unit.test.ts","name":"defaults off for missing or malformed preferences ({\"show_reserved_versions\":false})","tier":"GATED-FULL"}
     ,
     {"kind":"vitest","file":"tests/reserved-versions.unit.test.ts","name":"defaults off for missing or malformed preferences ({})","tier":"GATED-FULL"}
+    ,
+    {"kind":"vitest","file":"tests/reserved-versions.unit.test.ts","name":"detail reads retain published and reserved rows only (published)","tier":"ESSENTIAL"}
+    ,
+    {"kind":"vitest","file":"tests/reserved-versions.unit.test.ts","name":"detail reads retain published and reserved rows only (reserved)","tier":"ESSENTIAL"}
+    ,
+    {"kind":"vitest","file":"tests/reserved-versions.unit.test.ts","name":"detail reads retain published and reserved rows only (withdrawn)","tier":"ESSENTIAL"}
+    ,
+    {"kind":"vitest","file":"tests/reserved-versions.unit.test.ts","name":"loads reservations for opt-in rows but never remembers withdrawn names from an older server","tier":"ESSENTIAL"}
     ,
     {"kind":"vitest","file":"tests/reserved-versions.unit.test.ts","name":"saves each choice without discarding the other setting or unknown fields","tier":"GATED-FULL"}
     ,

@@ -25,9 +25,10 @@ export interface Release {
   notes?: ReleaseNotes
   presentation?: ReleasePresentation
   // The release's sci-fi codename from its sequence (AEON-430), English in
-  // both languages. Absent on a reservation whose sequence another release took.
+  // both languages. Absent on withdrawn attempts and reservations whose
+  // sequence a published release took.
   codename?: string
-  version: string; tag: string; release_channel: string; release_sequence: number; state: 'published' | 'reserved' | 'candidate'
+  version: string; tag: string; release_channel: string; release_sequence: number; state: 'published' | 'reserved' | 'candidate' | 'withdrawn'
   reserved_at: string | null; tagged_at: string | null; published_at: string | null; headline: string
   tickets: string[]; changes: ReleaseChange[]; changes_omitted: number; evidence: ReleaseEvidence
 }
@@ -44,7 +45,7 @@ export async function getReleases(): Promise<ReleaseHistory> {
   }
   const body = await response.json() as ReleaseHistory
   if (body.schema !== 'inspr.release-history.v1' || !Array.isArray(body.releases)) throw new Error('The server sent an unknown release history format.')
-  return { ...body, releases: body.releases.map(withPublicNoteItems) }
+  return { ...body, releases: visibleReleases(body.releases, true).map(withPublicNoteItems) }
 }
 
 // Product notes are portable: the wire shape never invents tenant ticket UUIDs.
@@ -58,7 +59,9 @@ export function withPublicNoteItems(release: Release): Release {
 export async function getRelease(version: string): Promise<Release | null> {
   try {
     const response = await api(`/releases/${encodeURIComponent(version)}`)
-    return response.ok ? withPublicNoteItems(await response.json() as Release) : null
+    if (!response.ok) return null
+    const release = await response.json() as Release
+    return release.state === 'published' || release.state === 'reserved' || release.state === 'candidate' ? withPublicNoteItems(release) : null
   } catch { return null }
 }
 
@@ -500,9 +503,10 @@ export function evidenceSearch(r: Release): { texts: string[]; ids: string[] } {
 }
 
 // ---------- New since the last visit ----------
-// Visibility never changes the source history used by statistics or deep links.
-export function visibleReleases(releases: Release[], showReservedVersions = false): Release[] {
-  return releases.filter(r => showReservedVersions || r.state !== 'reserved')
+// Reservations remain loaded for statistics and deep links, but are opt-in in
+// the sheet. Withdrawn coordinates never belong to either visibility scope.
+export function visibleReleases(releases: readonly Release[], showReservedVersions = false): Release[] {
+  return releases.filter(r => r.state === 'published' || r.state === 'candidate' || (showReservedVersions && r.state === 'reserved'))
 }
 // Visible releases newer than the one the person last saw; nothing on a first visit.
 export function newSince(releases: Release[], lastSeen: string | null, showReservedVersions = false) {

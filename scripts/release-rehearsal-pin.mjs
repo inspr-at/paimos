@@ -3,12 +3,15 @@
 // Live tag/attestation checks cannot succeed before publication; keep them live
 // in release.yml, and exercise their exact gh arguments without network here.
 import { mkdtempSync, writeFileSync, readFileSync } from 'node:fs';
+import { createHash } from 'node:crypto';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { proposePin, attestationArgs, SOURCE } from './release-pin-pr.mjs';
 import { checkGH } from './release-rehearsal-gh.mjs';
 
-const version = JSON.parse(readFileSync('version.json', 'utf8')).version;
+const ledger = readFileSync('version.json');
+const version = JSON.parse(ledger.toString('utf8')).version;
+const ledgerSHA = createHash('sha1').update(`blob ${ledger.length}\0`).update(ledger).digest('hex');
 const sha = process.env.GITHUB_SHA;
 const tagSHA = 'b'.repeat(40);
 const digest = `sha256:${'c'.repeat(64)}`;
@@ -24,6 +27,8 @@ const result = await proposePin(inputs, { pinFile }, {
       [`/repos/${SOURCE}/git/ref/tags/v${version}`]: { ref: inputs.GITHUB_REF, object: { type: 'tag', sha: tagSHA } },
       [`/repos/${SOURCE}/git/tags/${tagSHA}`]: { sha: tagSHA, tag: `v${version}`, object: { type: 'commit', sha } },
       [`/repos/${SOURCE}/git/ref/heads/main`]: { ref: 'refs/heads/main', object: { type: 'commit', sha } },
+      [`/repos/${SOURCE}/contents/version.json?ref=${sha}`]: { type: 'file', encoding: 'base64',
+        content: ledger.toString('base64'), sha: ledgerSHA },
       [`/repos/${SOURCE}/compare/${sha}...${sha}`]: { status: 'identical', base_commit: { sha }, merge_base_commit: { sha } },
     }[path];
     if (!data) throw new Error('Rehearsal refuses unexpected API reads');

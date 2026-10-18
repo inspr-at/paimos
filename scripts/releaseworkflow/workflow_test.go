@@ -841,3 +841,19 @@ func TestPinProposalFollowsVerificationWithoutWaitingForAssets(t *testing.T) {
 		t.Fatal("pin regressions must retain classified validation and the required aggregate")
 	}
 }
+
+func TestCurrentWithdrawalLedgerBeforeImagePublication(t *testing.T) {
+	w := readWorkflow(t, "release.yml")
+	for _, id := range []string{"image-platform", "image"} {
+		j := w.Jobs[id]
+		guardIndex, guard := named(t, j, "Enforce current release withdrawal ledger")
+		pushName := "Build and push"
+		if id == "image" {
+			pushName = "Publish multi-arch index"
+		}
+		pushIndex, _ := named(t, j, pushName)
+		if guardIndex >= pushIndex || guard.If != "" || guard.ContinueOnError || guard.Run != `node scripts/release-withdrawals.mjs coordinate "$VERSION" --current-main` || guard.Env["VERSION"] != "${{ steps.version.outputs.version }}" || guard.Env["GH_TOKEN"] != "${{ secrets.GITHUB_TOKEN }}" {
+			t.Fatal("withdrawn coordinate can bypass current-main guard", id)
+		}
+	}
+}

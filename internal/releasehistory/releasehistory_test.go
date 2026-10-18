@@ -347,15 +347,20 @@ func TestWithCodenames(t *testing.T) {
 		{Version: "260923134631.0.0", ReleaseSequence: 1, State: StatePublished},
 		{Version: "260923134337.0.0", ReleaseSequence: 1, State: StateReserved},
 		{Version: "260923140000.0.0", State: StateReserved},
+		{Version: "260923150000.0.0", ReleaseSequence: 2, State: StateWithdrawn, Codename: "Withdrawn Name"},
 	}}
 	got := WithCodenames(h)
 	names := []string{}
 	for _, r := range got.Releases {
 		names = append(names, r.Codename)
 	}
-	// The function wins over any stored name; a reservation keeps its own slot.
-	if strings.Join(names, "|") != "Fresh Flyby|Inner Iota|Avid Axle||" {
+	// Reservations keep their names unless a published release took the sequence;
+	// withdrawn attempts never own a name or sequence.
+	if strings.Join(names, "|") != "Fresh Flyby|Inner Iota|Avid Axle|||" {
 		t.Fatalf("codenames %q", names)
+	}
+	if got.Releases[5].ReleaseSequence != 0 || h.Releases[5].ReleaseSequence != 2 {
+		t.Fatal("withdrawn sequence must be cleared only in the copy")
 	}
 	if h.Releases[0].Codename != "Stale Name" || h.Releases[2].Codename != "" {
 		t.Fatal("WithCodenames must copy the releases")
@@ -423,7 +428,7 @@ func TestRepositoryCodenames(t *testing.T) {
 	}
 	var named []codename.Named
 	for _, r := range h.Releases {
-		named = append(named, codename.Named{Sequence: r.ReleaseSequence, Name: r.Codename})
+		named = append(named, codename.Named{Sequence: r.ReleaseSequence, Name: r.Codename, Reusable: r.State != StatePublished})
 	}
 	if raw, err := os.ReadFile("../../version.json"); err == nil {
 		var v versionFile
