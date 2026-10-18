@@ -283,14 +283,14 @@ test('Building it at 1440, 1024 and 768: the worst five never cover the app head
       await placeTile(page, lead, low)
       await watchHeader(page)
       await open()
-      let box = (await panel.boundingBox())!
-      expect(box.y + box.height).toBeLessThanOrEqual(low + 1)
-      expect(box.y).toBeGreaterThanOrEqual(headerBottom + 8 - .5)
-      expect(Math.round((await lead.boundingBox())!.y)).toBe(Math.round(low))
       let shot = await stopWatch(page)
       expect(shot.frames).toBeGreaterThan(0)
       expect(shot.hits).toEqual([])
       expect(shot.scrolls).toEqual([])
+      let box = (await panel.boundingBox())!
+      expect(box.y + box.height).toBeLessThanOrEqual(low + 1)
+      expect(box.y).toBeGreaterThanOrEqual(headerBottom + 8 - .5)
+      expect(Math.round((await lead.boundingBox())!.y)).toBe(Math.round(low))
       await shut()
 
       // Room on neither side (Tick's case): the page scrolls the tile to 16 px below the header, then it opens below.
@@ -301,14 +301,14 @@ test('Building it at 1440, 1024 and 768: the worst five never cover the app head
         expect(900 - (middle + tileHeight) - 12, 'room below the tile').toBeLessThan(need)
         await watchHeader(page)
         await open()
-        const tile = (await lead.boundingBox())!
-        box = (await panel.boundingBox())!
-        expect(Math.abs(tile.y - (headerBottom + 16))).toBeLessThanOrEqual(1)
-        expect(box.y).toBeGreaterThanOrEqual(tile.y + tile.height - 1)
         shot = await stopWatch(page)
         expect(shot.frames).toBeGreaterThan(0)
         expect(shot.hits).toEqual([])
         expect(shot.scrolls.map(call => call.behavior)).toEqual([motion === 'reduce' ? 'instant' : 'smooth'])
+        const tile = (await lead.boundingBox())!
+        box = (await panel.boundingBox())!
+        expect(Math.abs(tile.y - (headerBottom + 16))).toBeLessThanOrEqual(1)
+        expect(box.y).toBeGreaterThanOrEqual(tile.y + tile.height - 1)
         await shut()
       }
     })
