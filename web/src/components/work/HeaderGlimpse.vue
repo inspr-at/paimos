@@ -159,7 +159,7 @@ function onResize() { followViewport(); scheduleMeasure() }
 // Keep reading until the paint ends, and only clear.
 function samplePaintedViewport() {
   if (!mounted || !paint.value) { paintSample = 0; return }
-  const signal = { mediaMatches: window.matchMedia(wideMedia).matches, layoutWidth: window.innerWidth }
+  const signal = { mediaMatches: window.matchMedia(wideMedia).matches, layoutWidth: viewportWidth() }
   if (headerGlimpsePaintClears(wide.value, signal)) wide.value = false
   if (!mounted || !paint.value) { paintSample = 0; return }
   paintSample = requestAnimationFrame(samplePaintedViewport)
@@ -214,7 +214,12 @@ async function load() {
     applyMotion()
   } catch { /* A missing graph leaves the header as it was. */ }
 }
-watch(paint, value => { emit('active', value); if (value) startPaintSample() })
+watch(paint, value => {
+  emit('active', value)
+  cancelAnimationFrame(paintSample)
+  paintSample = 0
+  if (value) startPaintSample()
+})
 watch([allowed, idle, () => props.projectId, () => props.projectKey, () => JSON.stringify(filtersToQuery(filters.value))], () => { void load() })
 onMounted(() => {
   mounted = true

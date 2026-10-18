@@ -40,6 +40,24 @@ func flowStepsFromRuns(runs []metricRun) []flowStepInput {
 	var out []flowStepInput
 	byAttempt := map[[2]int64]metricRun{}
 	for _, r := range sorted {
+		if checksRun(r) {
+			// A suite observes a span, not a workflow attempt or a queue wait.
+			// Keep its provenance visible without changing the three feed names.
+			stepKey := "ci"
+			if r.Event == "merge_group" {
+				stepKey = "queue"
+			}
+			var outcome *string
+			if r.Conclusion == "success" {
+				outcome = flowStr("green")
+			} else if failed(r.Conclusion) {
+				outcome = flowStr("red")
+			}
+			completed := r.Completed
+			out = append(out, flowStepInput{Source: "github_app", Key: fmt.Sprintf("check_suite/%d", -r.ID), StepKey: stepKey, Round: 1, Kind: "work",
+				Actor: FlowActor{Type: "ci", Label: "Checks (derived from check suite)"}, Started: r.Started, Ended: &completed, Outcome: outcome})
+			continue
+		}
 		byAttempt[[2]int64{r.ID, int64(r.Attempt)}] = r
 		stepKey, actor := "ci", FlowActor{Type: "ci", Label: "Checks"}
 		if r.Event == "merge_group" {
@@ -84,10 +102,6 @@ func (m *Module) flowFromRuns(ctx context.Context, runs []metricRun) error {
 	byPR := map[int64][]metricRun{}
 	var prs []int64
 	for _, r := range runs {
-		// A checks envelope has no attempt or queue-wait facts for Flow.
-		if checksRun(r) {
-			continue
-		}
 		if r.PR == nil || r.Event != "pull_request" && r.Event != "merge_group" {
 			continue
 		}
@@ -103,40 +117,64 @@ func (m *Module) flowFromRuns(ctx context.Context, runs []metricRun) error {
 	service := db.AllProjects(ctx, "delivery flow: GitHub checks and merge-queue runs of linked changes")
 	_, err := m.flowWrite(service, m.config.TenantID, nil, func(ctx context.Context, tx pgx.Tx, apply func([]flowBatch) error) error {
 		for _, pr := range prs {
-			var project, ticket string
-			err := tx.QueryRow(ctx, `SELECT project_id::text,ticket_node_id::text FROM delivery_items WHERE repository=$1 AND pull_request=$2 AND project_id IS NOT NULL AND ticket_node_id IS NOT NULL`,
-				m.config.Repository, pr).Scan(&project, &ticket)
-			if errors.Is(err, pgx.ErrNoRows) {
-				continue
-			}
+			batch, err := m.flowRunBatchTx(ctx, tx, pr, byPR[pr])
 			if err != nil {
 				return err
 			}
-			ci := defaultCIWorkflow
-			if err = tx.QueryRow(ctx, `SELECT ci_workflow FROM delivery_metric_sources WHERE project_id=$1 AND repository=$2`, project, m.config.Repository).Scan(&ci); err != nil && !errors.Is(err, pgx.ErrNoRows) {
-				return err
-			}
-			var own []metricRun
-			for _, r := range byPR[pr] {
-				if sameWorkflow(r, ci) {
-					own = append(own, r)
-				}
-			}
-			t, err := flowTicketTx(ctx, tx, ticket)
-			if err != nil {
-				return err
-			}
-			if len(own) == 0 || t == nil || t.Project != project {
+			if batch == nil {
 				continue
 			}
-			batch := flowBatch{Item: flowItemInput{Project: project, Kind: "change", Ref: t.Key, Title: t.Title, Ticket: &ticket, PRs: []int64{pr}, Repository: m.config.Repository}, Steps: flowStepsFromRuns(own)}
-			if err := apply([]flowBatch{batch}); err != nil {
+			if err := apply([]flowBatch{*batch}); err != nil {
 				return err
 			}
 		}
 		return nil
 	})
 	return err
+}
+
+func (m *Module) flowRunBatchTx(ctx context.Context, tx pgx.Tx, pr int64, runs []metricRun) (*flowBatch, error) {
+	var project, ticket string
+	err := tx.QueryRow(ctx, `SELECT project_id::text,ticket_node_id::text FROM delivery_items WHERE repository=$1 AND pull_request=$2 AND project_id IS NOT NULL AND ticket_node_id IS NOT NULL`,
+		m.config.Repository, pr).Scan(&project, &ticket)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	ci := defaultCIWorkflow
+	if err = tx.QueryRow(ctx, `SELECT ci_workflow FROM delivery_metric_sources WHERE project_id=$1 AND repository=$2`, project, m.config.Repository).Scan(&ci); err != nil && !errors.Is(err, pgx.ErrNoRows) {
+		return nil, err
+	}
+	var own []metricRun
+	for _, r := range runs {
+		if !sameWorkflow(r, ci) {
+			continue
+		}
+		if checksRun(r) {
+			var exact bool
+			if err := tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM delivery_metric_runs WHERE repository=$1 AND pull_request=$2 AND head_sha=$3 AND run_id>0 AND regexp_replace(workflow_path,'^.*/','')=regexp_replace($4::text,'^.*/',''))`, m.config.Repository, pr, r.Head, ci).Scan(&exact); err != nil {
+				return nil, err
+			}
+			for _, candidate := range runs {
+				exact = exact || !checksRun(candidate) && candidate.Head == r.Head && sameWorkflow(candidate, ci)
+			}
+			if exact {
+				continue
+			}
+		}
+		own = append(own, r)
+	}
+	t, err := flowTicketTx(ctx, tx, ticket)
+	if err != nil {
+		return nil, err
+	}
+	if len(own) == 0 || t == nil || t.Project != project {
+		return nil, nil
+	}
+	batch := &flowBatch{Item: flowItemInput{Project: project, Kind: "change", Ref: t.Key, Title: t.Title, Ticket: &ticket, PRs: []int64{pr}, Repository: m.config.Repository}, Steps: flowStepsFromRuns(own)}
+	return m.flowWithHarnessBuildsTx(ctx, tx, batch)
 }
 
 // flowLiveRun is one workflow-run transition. Phase is queued, running or
@@ -396,8 +434,11 @@ func (m *Module) flowFromWorkflowRun(ctx context.Context, raw []byte) error {
 			}
 			writeSteps = flowLiveStepsKeepingClass(run, known)
 		}
-		batch := flowBatch{Item: flowItemInput{Project: project, Kind: "change", Ref: t.Key, Title: t.Title, Ticket: &ticket, PRs: []int64{run.PR}, Repository: m.config.Repository}, Steps: writeSteps}
-		return apply([]flowBatch{batch})
+		batch, err := m.flowWithHarnessBuildsTx(ctx, tx, &flowBatch{Item: flowItemInput{Project: project, Kind: "change", Ref: t.Key, Title: t.Title, Ticket: &ticket, PRs: []int64{run.PR}, Repository: m.config.Repository}, Steps: writeSteps})
+		if err != nil {
+			return err
+		}
+		return apply([]flowBatch{*batch})
 	})
 	return err
 }

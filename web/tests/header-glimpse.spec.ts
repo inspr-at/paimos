@@ -291,6 +291,51 @@ test('a dropped wide-media change still hides the glimpse below 1280', async ({ 
   await expect(page.locator('[data-header-glimpse="on"]')).toHaveCount(0)
 })
 
+// Risk: the software-rendered canvas outlives the last viewport notification.
+// Drop the root observer as well as resize/media events after a ready wide
+// frame. Real layout still shrinks, so painting must follow it without a timer.
+test('AEON-1472: an active glimpse stops after all viewport notifications are dropped', async ({ page }) => {
+  await page.addInitScript(() => {
+    const state = { dropping: false, rootDrops: 0 }
+    ;(window as unknown as { __aeonViewportDrops: typeof state }).__aeonViewportDrops = state
+    window.addEventListener('resize', event => { if (state.dropping) event.stopImmediatePropagation() }, { capture: true })
+    const matchMedia = window.matchMedia.bind(window)
+    window.matchMedia = query => {
+      const list = matchMedia(query)
+      if (query === '(min-width: 1280px)') list.addEventListener('change', event => { if (state.dropping) event.stopImmediatePropagation() }, { capture: true })
+      return list
+    }
+    const NativeObserver = window.ResizeObserver
+    window.ResizeObserver = class extends NativeObserver {
+      constructor(callback: ResizeObserverCallback) {
+        super((entries, observer) => {
+          const delivered = entries.filter(entry => {
+            if (!state.dropping || entry.target !== document.documentElement) return true
+            state.rootDrops++
+            return false
+          })
+          if (delivered.length) callback(delivered, observer)
+        })
+      }
+    }
+  })
+  await mockHeaderGraph(page, sized(8, true))
+  await page.goto('/p/PHAROS/tickets')
+  await ready(page)
+  // Drain the existing two-frame follow-up before removing the next signals.
+  await page.evaluate(() => new Promise<void>(resolve => requestAnimationFrame(() => requestAnimationFrame(() => requestAnimationFrame(() => {
+    (window as unknown as { __aeonViewportDrops: { dropping: boolean } }).__aeonViewportDrops.dropping = true
+    resolve()
+  })))))
+  await resizeSeen(page, { width: 390, height: 844 })
+  await expect.poll(() => page.evaluate(() => ({
+    layout: document.documentElement.getBoundingClientRect().width,
+    dropped: (window as unknown as { __aeonViewportDrops: { rootDrops: number } }).__aeonViewportDrops.rootDrops > 0,
+  }))).toEqual({ layout: 390, dropped: true })
+  await expect(page.locator('[data-header-glimpse="on"]')).toHaveCount(0)
+  await expect(page.locator('[data-header-glimpse="off"]')).toBeAttached()
+})
+
 // 835d2134: 1279 → 1280 → 390 left the painted glimpse on. Resize, the media
 // change and the document-element observer can all stay silent together while
 // the canvas paints. The paint frame is the read that must still clear it.

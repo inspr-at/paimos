@@ -6,7 +6,9 @@ import (
 	"encoding/json"
 	"errors"
 	"log/slog"
+	"sort"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/inspr-at/paimos/internal/db"
@@ -22,6 +24,16 @@ const (
 const flowSourceEventsSQL = `SELECT id,type,node_id::text,at,before,after,metadata FROM events
 	WHERE id>$1 AND (type LIKE 'delivery.work\_queue.%' OR type LIKE 'delivery.review.%' OR type='delivery.state_changed')
 	ORDER BY id LIMIT $2`
+
+// Exact event types use events_subscription_type_cursor_idx. Keep the original
+// queue reader on its partial index; neither reader walks unrelated heartbeats.
+var flowHarnessEventTypes = []string{"harness.registered", "harness.bound", "harness.stopped", "harness.stop_confirmed", "review_run.created", "coordinator_review.recorded", "delivery.ship.decision"}
+
+const flowHarnessEventsSQL = `SELECT e.id,e.type,e.node_id::text,e.at,e.before,e.after,e.metadata
+	FROM unnest($3::text[]) AS kinds(kind)
+	CROSS JOIN LATERAL (SELECT id,type,node_id,at,before,after,metadata FROM events
+		WHERE type=kinds.kind AND id>$1 ORDER BY id LIMIT $2) e
+	ORDER BY e.id LIMIT $2`
 
 // RunFlow keeps the Flow steps of PAIMOS work in step with the event log:
 // build, fix and merge rounds of the work queue, review gates and holds.
@@ -116,20 +128,33 @@ func (m *Module) SyncFlow(ctx context.Context, tid string) (bool, error) {
 		if err != nil && !errors.Is(err, pgx.ErrNoRows) {
 			return err
 		}
-		rows, err := tx.Query(ctx, flowSourceEventsSQL, after, flowSyncBatch)
-		if err != nil {
-			return err
-		}
-		for rows.Next() {
-			var e flowSourceEvent
-			if err := rows.Scan(&e.ID, &e.Type, &e.NodeID, &e.At, &e.Before, &e.After, &e.Metadata); err != nil {
-				rows.Close()
+		for _, harness := range []bool{false, true} {
+			query, args := flowSourceEventsSQL, []any{after, flowSyncBatch}
+			if harness {
+				query, args = flowHarnessEventsSQL, append(args, flowHarnessEventTypes)
+			}
+			rows, err := tx.Query(ctx, query, args...)
+			if err != nil {
 				return err
 			}
-			batch = append(batch, e)
+			for rows.Next() {
+				var e flowSourceEvent
+				if err := rows.Scan(&e.ID, &e.Type, &e.NodeID, &e.At, &e.Before, &e.After, &e.Metadata); err != nil {
+					rows.Close()
+					return err
+				}
+				batch = append(batch, e)
+			}
+			rows.Close()
+			if err := rows.Err(); err != nil {
+				return err
+			}
 		}
-		rows.Close()
-		return rows.Err()
+		sort.Slice(batch, func(i, j int) bool { return batch[i].ID < batch[j].ID })
+		if len(batch) > flowSyncBatch {
+			batch = batch[:flowSyncBatch]
+		}
+		return nil
 	})
 	if err != nil || len(batch) == 0 {
 		return false, err
@@ -150,7 +175,7 @@ func (m *Module) SyncFlow(ctx context.Context, tid string) (bool, error) {
 				continue
 			}
 			// Applied one event at a time: a close reads what earlier events opened.
-			b, err := flowFromPaimosTx(ctx, tx, tid, e)
+			b, err := m.flowSourceBatchTx(ctx, tx, tid, e)
 			if err != nil {
 				return err
 			}
@@ -166,6 +191,23 @@ func (m *Module) SyncFlow(ctx context.Context, tid string) (bool, error) {
 		return err
 	})
 	return more, err
+}
+
+func (m *Module) flowSourceBatchTx(ctx context.Context, tx pgx.Tx, tid string, e flowSourceEvent) (*flowBatch, error) {
+	var b *flowBatch
+	var err error
+	switch {
+	case strings.HasPrefix(e.Type, "harness.") || e.Type == "review_run.created" || e.Type == "coordinator_review.recorded":
+		b, err = m.flowFromHarnessTx(ctx, tx, e)
+	case e.Type == "delivery.ship.decision":
+		b, err = m.flowFromShipTx(ctx, tx, e)
+	default:
+		b, err = flowFromPaimosTx(ctx, tx, tid, e)
+	}
+	if err != nil {
+		return nil, err
+	}
+	return m.flowWithHarnessBuildsTx(ctx, tx, b)
 }
 
 // flowRoundSnapshot reads the fields of work and review round snapshots.
@@ -383,6 +425,13 @@ func flowFromHoldTx(ctx context.Context, tx pgx.Tx, tid string, e flowSourceEven
 	}
 	if merged {
 		b.Item.Ended = &at
+		var exists bool
+		if err := tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM delivery_flow_items WHERE id=$1)`, flowItemID(tid, t.Project, "change", t.Key)).Scan(&exists); err != nil {
+			return nil, err
+		}
+		if exists {
+			b.Steps = append(b.Steps, flowMergeStep(meta.Item, at))
+		}
 	}
 	prefix := "hold/" + meta.Item + "/"
 	if held && !wasHeld {

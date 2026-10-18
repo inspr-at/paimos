@@ -23,7 +23,7 @@ const EN = {
   pickRun: 'Run to replay', pickPair: 'What to race', final: 'final', soFarRun: 'so far', vsTarget: '{a} vs. Arion target',
   inRun: '{t} · {d} in', targetReached: 'target reached',
   loading: 'Loading the flow', errT: 'The flow could not be loaded.', errB: 'No old runs are shown in place of new ones.', retry: 'Retry',
-  none: 'No recorded runs yet.', noneB: 'Runs appear here once work goes through the PAIMOS work queue.',
+  none: 'No recorded runs yet.', noneB: 'No linked GitHub App workflow runs or derived check suites, PAIMOS harness deliveries or work-queue rounds, or OPS rollout records have been recorded for this project.',
   nothingLive: 'Nothing is moving right now.', nothingLiveB: 'Replay shows the recorded runs.', noRuns: 'No run recorded yet.',
   noRelease: `No release with the steps a ${TO} l recorded yet.`, truncated: 'More runs exist than are shown here.',
   tableLabel: 'Runs in flight', run: 'Run',
@@ -36,7 +36,7 @@ const EN = {
   clickSeg: 'Click a step for its details.', noInc: 'No incident at this moment.', incOn: 'Incident active', soFarMin: '{m} min so far', ends: 'ends {t}', liveAfter: 'live after +{d}',
   ongoing: 'still going',
   terms: { started: 'Start', took: 'Took', elapsed: 'So far', expectedEnd: 'Expected end', outcome: 'Outcome', round: 'Round', waitsFor: 'Waits for', step: 'Step', actor: 'Actor', startEnd: `Start ${TO} end`, duration: 'Duration', source: 'Source' },
-  sources: { github_app: 'GitHub App', paimos: 'PAIMOS', ops_rollout: 'OPS rollout record', arion: 'Arion target (Project Arion v5, § 4b)' } as Record<string, string>,
+  sources: { github_app: 'GitHub App', check_suite: 'GitHub App · derived from check suite', paimos: 'PAIMOS', ops_rollout: 'OPS rollout record', arion: 'Arion target (Project Arion v5, § 4b)' } as Record<string, string>,
   kindWords: { work: 'work', wait: 'wait', rework: 'rework' } as Record<string, string>, incidentWord: 'incident', sideWord: 'alongside',
   // The release record under the card (AEON-1022): what a rollout reported besides the steps.
   rec: {
@@ -72,7 +72,7 @@ const DE: FlowText = {
   pickRun: 'Wiederzugebender Lauf', pickPair: 'Was antritt', final: 'final', soFarRun: 'bis jetzt', vsTarget: '{a} gegen Arion-Ziel',
   inRun: '{t} · {d} seit Start', targetReached: 'Ziel erreicht',
   loading: 'Ablauf wird geladen', errT: 'Der Ablauf konnte nicht geladen werden.', errB: 'Alte Läufe werden nicht anstelle neuer gezeigt.', retry: 'Erneut versuchen',
-  none: 'Noch keine aufgezeichneten Läufe.', noneB: 'Läufe erscheinen hier, sobald Arbeit durch die PAIMOS-Arbeitswarteschlange geht.',
+  none: 'Noch keine aufgezeichneten Läufe.', noneB: 'Für dieses Projekt fehlen bisher verknüpfte Workflow-Läufe oder abgeleitete Check-Suites der GitHub-App, PAIMOS-Harness-Lieferungen oder Arbeitsrunden sowie OPS-Rollout-Einträge.',
   nothingLive: 'Gerade läuft nichts.', nothingLiveB: 'Unter Wiedergabe stehen die aufgezeichneten Läufe.', noRuns: 'Noch kein Lauf aufgezeichnet.',
   noRelease: `Noch kein Release mit den Schritten a ${TO} l aufgezeichnet.`, truncated: 'Es gibt mehr Läufe, als hier zu sehen sind.',
   tableLabel: 'Laufende Einträge', run: 'Lauf',
@@ -85,7 +85,7 @@ const DE: FlowText = {
   clickSeg: 'Einen Schritt anklicken für Details.', noInc: 'Gerade keine Störung.', incOn: 'Störung aktiv', soFarMin: '{m} min bisher', ends: 'Ende {t}', liveAfter: 'live nach +{d}',
   ongoing: 'läuft noch',
   terms: { started: 'Start', took: 'Dauer', elapsed: 'Bisher', expectedEnd: 'Erwartetes Ende', outcome: 'Ergebnis', round: 'Runde', waitsFor: 'Wartet auf', step: 'Schritt', actor: 'Akteur', startEnd: `Start ${TO} Ende`, duration: 'Dauer', source: 'Quelle' },
-  sources: { github_app: 'GitHub-App', paimos: 'PAIMOS', ops_rollout: 'OPS-Rollout-Eintrag', arion: 'Arion-Ziel (Project Arion v5, § 4b)' },
+  sources: { github_app: 'GitHub-App', check_suite: 'GitHub-App · aus Check-Suite abgeleitet', paimos: 'PAIMOS', ops_rollout: 'OPS-Rollout-Eintrag', arion: 'Arion-Ziel (Project Arion v5, § 4b)' },
   kindWords: { work: 'Arbeit', wait: 'Warten', rework: 'Nacharbeit' }, incidentWord: 'Störung', sideWord: 'nebenher',
   rec: {
     title: 'Release-Nachweise', none: 'nicht erfasst', partial: 'außerhalb des gelesenen Zeitraums', running: 'läuft seit {t}', soFar: '{m} min bisher', runs: '{n} Läufe', usually: 'üblich {m} min',

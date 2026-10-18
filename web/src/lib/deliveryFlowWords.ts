@@ -65,13 +65,17 @@ const both = (make: (lang: DeliveryLanguage) => string): Words => ({ en: make('e
 export interface StepWordsInput {
   key: string; kind: 'work' | 'wait' | 'rework' | 'recovery'; round: number
   outcome: StepOutcome | null; waitReason: WaitReason | null; waitsFor: string | null
-  model: string | null; open: boolean; person: boolean
+  model: string | null; open: boolean; person: boolean; derived?: boolean
 }
 /** Expert and Simple labels of one recorded step. */
 export function stepWords(input: StepWordsInput): { expert: Words; simple: Words } {
   const words = isStepKey(input.key) ? KEYS[input.key] : { expert: [input.key, input.key] as Pair, simple: [input.key, input.key] as Pair }
   const name = (level: 'expert' | 'simple', lang: DeliveryLanguage) => L(words[level], lang)
   const round = input.round > 1 ? input.round : 0
+  if (input.derived) return {
+    expert: both(lang => lang === 'de' ? 'Check-Suite · abgeleitet' : 'Check suite · derived'),
+    simple: both(lang => lang === 'de' ? 'Checks · aus Check-Suite abgeleitet' : 'Checks · derived from check suite'),
+  }
   if (input.kind === 'wait') {
     const reason = input.waitReason
     return {
