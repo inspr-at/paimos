@@ -39,7 +39,8 @@ for (const width of [390, 1024, 1440]) for (const theme of ['light', 'dark'] as 
     const panel = panelOf(page)
     const queue = panel.locator(`.queue-item[data-id="${message.id}"]`)
     const label = queue.locator('.queue-when')
-    await expect(label).toHaveText('Waiting for the session to pick it up')
+    await expect(label).toHaveText('Waiting for pickup')
+    await expect(label).toHaveAttribute('data-tip', 'Waiting for the session to pick it up')
     await expect(queue.getByRole('button', { name: 'Retry', exact: true })).toHaveCount(0)
     await expect(panel.getByText('Not delivered', { exact: true })).toHaveCount(0)
     const guard = await controlStability(page, {
@@ -57,7 +58,7 @@ for (const width of [390, 1024, 1440]) for (const theme of ['light', 'dark'] as 
       await expect(label).toBeFocused()
       await expect(page.locator('.tooltip')).toBeVisible()
       await expect(page.locator('.tooltip')).toContainText('The owner or lead has been alerted.')
-      await expect(label).toHaveText('Waiting for the session to pick it up')
+      await expect(label).toHaveText('Waiting for pickup')
       await expect(queue.getByRole('button', { name: 'Retry', exact: true })).toHaveCount(0)
     })
     guard.done()

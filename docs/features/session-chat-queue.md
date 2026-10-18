@@ -6,7 +6,8 @@ not turn it into a failed message. Session end and actual handoff failures keep
 their existing failure behavior, including an explicit sender expiry; attached volatile messages use their own
 protocol. Previously failed messages are not resent automatically.
 
-Chat shows “Waiting for the session to pick it up”. After ten minutes without
+Chat shows “Waiting for pickup”, with “Waiting for the session to pick it up”
+in its existing tooltip. After ten minutes without
 first pickup, the sender receives one System notice. The same
 `delivery.stall_alerted` event channel used by Decision Desk replies alerts the
 coordinator, with session owner/lead routing metadata and no message body. The

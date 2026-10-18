@@ -26,7 +26,7 @@ const identity = useSession()
 const language = computed(() => displayLanguage())
 const german = computed(() => language.value === 'de')
 const words = computed(() => chatWords[language.value])
-const label = (status: MessageStatus) => status.waiting_for_pickup && status.status === 'sent' ? words.value.waitingPickup : ({ sent: words.value.sending, delivered: words.value.delivered, read: words.value.read, not_delivered: words.value.failed })[status.status]
+const label = (status: MessageStatus) => status.waiting_for_pickup && status.status === 'sent' ? words.value.waitingPickupLabel : ({ sent: words.value.sending, delivered: words.value.delivered, read: words.value.read, not_delivered: words.value.failed })[status.status]
 const me = computed(() => identity.identity?.principal.id ?? '')
 const items = computed(() => collapseMessages(props.messages))
 // Day labels follow the clock, so "Today" turns into "Yesterday" overnight. The
