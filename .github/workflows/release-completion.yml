@@ -12,6 +12,14 @@ on:
         description: Previously verified immutable multi-arch index digest
         required: true
         type: string
+      runtime-amd64:
+        description: Original recorded linux/amd64 runtime closure digest, when available
+        required: false
+        type: string
+      runtime-arm64:
+        description: Original recorded linux/arm64 runtime closure digest, when available
+        required: false
+        type: string
   workflow_call:
     inputs:
       tag:

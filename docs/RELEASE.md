@@ -962,7 +962,7 @@ The server image pipeline starts independently of the macOS jobs (AEON-407, AEON
 
 The index is the deployment and rollback pin. Partial by-digest platform exports are untagged and cannot be deployed through the release coordinate. After index publication, **never rerun the publishing jobs or replace the index**. A late completion failure can use the existing coordinate only through the verified completion stage below. A failed index attestation, changed source or changed artifact set requires a new coordinate. Real registry push/attestation and deployment verification remain coordinator release gates.
 
-After the verified index job succeeds, `release.yml` calls `release-completion.yml`. Its hosted preparation job validates the existing annotated tag, the tag commit's ancestry on current main, tagged `version.json`, the current GHCR coordinate's exact index digest, both runtime/provenance descriptors and the original hosted `release.yml` attestation. Retired coordinates in current main's `unpublished_reservations`, and coordinates/digests in AEON-530's `withdrawn_releases`, are refused. Preparation also requires the current exact-source rehearsal receipt before signing or asset writes. macOS runners then build darwin `paimos-agentd` with CGO enabled and `aeon-cli` from that exact source SHA in separate empty build caches, sign both with Developer ID (team P66J39QV6V, hardened runtime) and notarize it in `release-signing` (docs/AGENT_INTEGRATION.md, Signed release daemon). They restore and verify an existing uploaded Darwin binary instead of signing it again. The `assets` job waits for both Darwin targets and preparation, builds Linux `paimos-agentd` and Linux `aeon-cli` targets cold from the same tagged source, and assembles the nine assets. Pin proposals run independently; their failure cannot block asset assembly. New draft notes retain one index digest line, both attested runtime-closure digests and the original source SHA; pin evidence remains in the independent pin job summary.
+After the verified index job succeeds, `release.yml` calls `release-completion.yml`. Its hosted preparation job validates the existing annotated tag, the tag commit's ancestry on current main, tagged `version.json`, the current GHCR coordinate's exact index digest, both runtime/provenance descriptors and the original hosted `release.yml` attestation. Retired coordinates in current main's `unpublished_reservations`, and coordinates/digests in AEON-530's `withdrawn_releases`, are refused. Preparation also requires the current exact-source rehearsal receipt before signing or asset writes. macOS runners then build darwin `paimos-agentd` with CGO enabled and `aeon-cli` from that exact source SHA in separate empty build caches, sign both with Developer ID (team P66J39QV6V, hardened runtime) and notarize both in `release-signing` (docs/AGENT_INTEGRATION.md, Signed release daemon). They restore and verify an existing uploaded Darwin binary instead of signing it again. The `assets` job waits for both Darwin targets and preparation, builds Linux `paimos-agentd` and Linux `aeon-cli` targets cold from the same tagged source, and assembles the nine assets. Pin proposals run independently; their failure cannot block asset assembly. New draft notes retain one index digest line, the runtime-closure digests supplied by the original image job and the original source SHA; pin evidence remains in the independent pin job summary.
 
 ### Completion retry and unpublished reservation retry (AEON-532)
 
@@ -981,7 +981,10 @@ build scripts and signing scripts come from the original tag's resolved commit
 in `release-source/`. Each restore/upload operation rechecks source ancestry,
 the live coordinate's unchanged digest and the original attestation with exact
 source **and signer** SHA, workflow and tag, retaining
-`--deny-self-hosted-runners`. Record both tooling and build-source SHAs. Main's
+`--deny-self-hosted-runners`. Record both tooling and build-source SHAs. For a missing draft, the optional `runtime-amd64` and `runtime-arm64` dispatch
+inputs carry the original recorded runtime-closure digests; missing evidence is
+shown as `unknown`, never reconstructed from a new runtime build. Existing
+release notes remain unchanged. Main's
 workflow fixes may supersede orchestration at the tag without rebuilding or
 reattesting the index; code fixes to the product require a new coordinate.
 
@@ -1259,7 +1262,7 @@ Baseline evidence: [release run 36647379702](https://github.com/inspr-at/paimos/
 #### Cold Go compilation for shipped binaries
 
 No job that produces a shipped binary restores a Go cache. `actions/setup-go`
-runs with `cache: false` in every job of `release.yml` and
+runs with `cache: false` in every job of `release.yml`, `release-completion.yml` and
 `release-image-check.yml`. The reason: the go command never re-verifies a
 build-cache entry, and the caches `setup-go` restores are also written by CI
 jobs, including main-push shards on the self-hosted build-6 pool. A poisoned
