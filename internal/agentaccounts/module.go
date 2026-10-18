@@ -80,6 +80,7 @@ func (m *Module) Mount(mux *http.ServeMux) {
 	handle("PUT /api/agent-accounts/capacity/schedule", m.capacitySchedule)
 	handle("POST /api/agent-accounts/{accountId}/readings", m.ingestReadings)
 	handle("GET /api/agent-accounts/{accountId}/readings", m.capacityHistory)
+	handle("GET /api/agent-accounts/{accountId}/quota-series", m.quotaSeries)
 	handle("PUT /api/agent-accounts/{accountId}/metadata", m.metadata)
 	handle("PUT /api/agent-accounts/{accountId}/label", m.rename)
 	handle("PUT /api/agent-accounts/{accountId}/model", m.piModel)

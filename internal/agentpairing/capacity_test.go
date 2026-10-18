@@ -2,6 +2,7 @@
 package agentpairing_test
 
 import (
+	"net/url"
 	"testing"
 	"time"
 
@@ -31,10 +32,22 @@ func TestPairedCapacityReadingsThroughAuthMiddleware(t *testing.T) {
 	if len(got) != 1 || !got[0].ReadAt.Equal(now) || got[0].UsedPercent != 20 {
 		t.Fatal("paired daemon could not read its observation")
 	}
+	seriesQuery := "?from=" + url.QueryEscape(now.Truncate(time.Hour).Format(time.RFC3339)) + "&to=" + url.QueryEscape(now.Truncate(time.Hour).Add(time.Hour).Format(time.RFC3339))
+	var series struct {
+		Latest []struct {
+			UsedPercent float64 `json:"used_percent"`
+		} `json:"latest_readings"`
+		Hours []any `json:"hourly_readings"`
+	}
+	decodeResult(t, f.call("GET", "/api/agent-accounts/"+e.AccountID+"/quota-series"+seriesQuery, nil, false, key, 200), &series)
+	if len(series.Latest) != 1 || series.Latest[0].UsedPercent != 20 || len(series.Hours) != 1 {
+		t.Fatal("paired daemon could not read its hourly quota")
+	}
 	other := f.propose("codex")
 	f.approve(other, "connect_only")
 	otherView := f.redeem(other)
 	f.call("GET", "/api/agent-accounts/"+otherView.Enrollments[0].AccountID+"/readings", nil, false, key, 403)
+	f.call("GET", "/api/agent-accounts/"+otherView.Enrollments[0].AccountID+"/quota-series"+seriesQuery, nil, false, key, 403)
 	f.call("GET", "/api/agent-accounts/"+uuid(t, f.db)+"/readings", nil, false, key, 403)
 	f.call("GET", "/api/agent-accounts/not-a-uuid/readings", nil, false, key, 403)
 	f.call("GET", "/api/agent-accounts/"+e.AccountID, nil, false, key, 403)
@@ -42,6 +55,7 @@ func TestPairedCapacityReadingsThroughAuthMiddleware(t *testing.T) {
 		t.Fatal(err)
 	}
 	f.call("GET", "/api/agent-accounts/"+e.AccountID+"/readings", nil, false, key, 403)
+	f.call("GET", "/api/agent-accounts/"+e.AccountID+"/quota-series"+seriesQuery, nil, false, key, 403)
 	if _, err := f.db.Admin.Exec(t.Context(), `UPDATE agent_keys SET scopes=ARRAY['account.probe'] WHERE principal_id=$1`, *v.PrincipalID); err != nil {
 		t.Fatal(err)
 	}
@@ -49,6 +63,7 @@ func TestPairedCapacityReadingsThroughAuthMiddleware(t *testing.T) {
 		t.Fatal(err)
 	}
 	f.call("GET", "/api/agent-accounts/"+e.AccountID+"/readings", nil, false, key, 403)
+	f.call("GET", "/api/agent-accounts/"+e.AccountID+"/quota-series"+seriesQuery, nil, false, key, 403)
 }
 
 func TestObservedCapacityPreservesSeparatePairingApproval(t *testing.T) {

@@ -26,6 +26,7 @@ func init() {
 		"GET /api/agent-accounts/readiness":                              "account.read",
 		"GET /api/agent-accounts/use":                                    "account.read|account.probe",
 		"GET /api/agent-accounts/{accountId}/readings":                   "account.read|account.probe", // Handler requires read for people, probe + ownership for agents.
+		"GET /api/agent-accounts/{accountId}/quota-series":               "account.read|account.probe", // Same owner-sharing and computer ceiling as readings.
 		"GET /api/agent-accounts/{accountId}/residency-evidence":         "account.read",
 		"GET /api/agent-accounts/{accountId}/statusline":                 "account.probe",
 		"GET /api/settings/quota-warnings":                               "account.read",

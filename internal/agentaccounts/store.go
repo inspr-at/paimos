@@ -608,8 +608,12 @@ func reportProbe(ctx context.Context, tx pgx.Tx, p tenant.Principal, accountID s
 	if err != nil {
 		return Account{}, err
 	}
-	if err := writeEvent(ctx, tx, p, evProbed, before, after); err != nil {
-		return Account{}, err
+	// Idle measurements retain their latest state and hourly quota rollup.
+	// They are telemetry, not a new audit event on every successful poll.
+	if !in.MeasurementOnly {
+		if err := writeEvent(ctx, tx, p, evProbed, before, after); err != nil {
+			return Account{}, err
+		}
 	}
 	if err := flushQuotaNotices(ctx, tx, system, notices); err != nil {
 		return Account{}, err

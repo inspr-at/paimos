@@ -18,6 +18,7 @@ func TestCapacityReadingUsesProbeScope(t *testing.T) {
 	id := "/api/agent-accounts/11111111-1111-4111-8111-111111111111"
 	for _, tc := range []struct{ method, path, scope string }{
 		{"GET", id + "/readings", "account.probe"},
+		{"GET", id + "/quota-series", "account.probe"},
 		{"POST", id + "/readings", "account.probe"},
 		{"PUT", id + "/signals", "account.probe"},
 		{"GET", id + "/statusline", "account.probe"},

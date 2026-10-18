@@ -58,6 +58,17 @@ func TestReadinessRedactionDoesNotPretendMeasuredZero(t *testing.T) {
 	if err != nil || string(history) != "[]" {
 		t.Fatalf("history leak: %s %v", history, err)
 	}
+	// Sharing may change after the series handler's snapshot. The final HTTP
+	// boundary must also hide the cursor, which reveals observation hours.
+	series := []byte(`{"account_id":"` + id + `","latest_readings":[{"used_percent":41}],"hourly_readings":[{"hour_at":"2026-10-18T12:00:00Z","readings":[{"used_percent":41}]}],"next_cursor":"2026-10-18T12:00:00Z"}`)
+	masked, err := Redact(series, Policy{}, id, false)
+	if err != nil || string(masked) != `{"account_id":"`+id+`","hourly_readings":[],"latest_readings":[],"next_cursor":""}` {
+		t.Fatalf("quota series leaked after sharing revocation: %s %v", masked, err)
+	}
+	visible, err := Redact(series, Policy{id: true}, id, false)
+	if err != nil || !strings.Contains(string(visible), `"used_percent":41`) || !strings.Contains(string(visible), `"next_cursor":"2026-10-18T12:00:00Z"`) {
+		t.Fatalf("owner lost series or pagination: %s %v", visible, err)
+	}
 }
 
 func TestEventSnapshotFailsClosedForUnidentifiedAndFutureDetails(t *testing.T) {

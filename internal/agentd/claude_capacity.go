@@ -6,12 +6,14 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"io"
 	"os"
 	"sync"
 	"time"
 
 	"github.com/inspr-at/paimos/internal/capacity"
+	"github.com/inspr-at/paimos/internal/ownedprocess"
 )
 
 // An idle usage capability is compiled, never operator-configurable. Both the
@@ -19,7 +21,9 @@ import (
 // together before adding a production entry. No production entry is approved
 // yet: live verification belongs to the coordinator, not this fixture build.
 type claudeUsageCapability struct {
-	binaryPath, binarySHA256, version string
+	binaryPath, binarySHA256, version          string
+	nodePath, nodeSHA256                       string
+	startupHooks, inheritedConfig, termination bool
 	// capture is the verified exchange; it receives the minimal child env.
 	capture func(context.Context, string, []string) (json.RawMessage, error)
 	decode  func(json.RawMessage, time.Time) []capacity.Reading
@@ -81,7 +85,8 @@ func exactCapacityBinary(path, digest string) bool {
 }
 func (a *ClaudeAdapter) CanCaptureCapacity(key string) bool {
 	c := a.usage
-	if c == nil || c.version == "" || c.capture == nil || c.decode == nil || c.binaryPath != a.ClaudePath || !exactCapacityBinary(a.ClaudePath, c.binarySHA256) {
+	if c == nil || c.version == "" || c.capture == nil || c.decode == nil || !c.startupHooks || !c.inheritedConfig || !c.termination ||
+		c.binaryPath != a.ClaudePath || c.nodePath != a.NodePath || !exactCapacityBinary(a.ClaudePath, c.binarySHA256) || !exactCapacityBinary(a.NodePath, c.nodeSHA256) {
 		return false
 	}
 	_, err := localHome(a.Homes, key)
@@ -100,7 +105,13 @@ func (a *ClaudeAdapter) CaptureCapacityResult(ctx context.Context, key string) C
 	}
 	op, cancel := context.WithTimeout(ctx, 10*time.Second)
 	defer cancel()
+	if op.Err() != nil {
+		return captureError(op)
+	}
 	raw, err := a.usage.capture(op, home, claudeEnvironment(home, a.NodePath, a.ClaudePath))
+	if errors.Is(err, ownedprocess.ErrCleanupUnconfirmed) {
+		return CapacityCapture{Result: "launch_failed", CleanupUnconfirmed: true}
+	}
 	if err != nil || len(raw) > 64<<10 {
 		return captureError(op)
 	}

@@ -757,6 +757,10 @@ func coreAgentScope(r *http.Request) (string, bool) {
 	case "agent-accounts":
 		if len(parts) == 3 {
 			switch parts[2] {
+			case "quota-series":
+				if r.Method == http.MethodGet {
+					return "account.probe", true
+				}
 			case "readings":
 				if r.Method == http.MethodGet || r.Method == http.MethodPost {
 					return "account.probe", true
