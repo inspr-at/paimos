@@ -1,7 +1,7 @@
 # Impact CI: shadow selection
 
 AEON-1333 adds rollout step 1 of Impact CI. Every PR publishes the
-`impact-ci-shadow-plan` artifact and a job summary from `tier-plan`. The plan
+`impact-ci-shadow-plan` artifact and a job summary from `ci-plan`. The plan
 records what browser selection would have done; execution still uses the
 existing lane, tier decision and shard matrices. No runner or required check
 consumes the shadow plan. This step does not yet reduce CI execution time.
@@ -30,11 +30,10 @@ project, configuration, title and repeated-title occurrence. First adoption or
 unavailable trusted code publishes a full fallback with `complete: false` and
 explicitly unavailable shard accounting; it never claims skipped coverage.
 
-The `tier-plan` checkout stays depth 1. The shadow step then fetches that merge
-commit at depth 2, so the base and source head exist as parent objects.
-`merge-base` cannot see those parents in the depth-1 commit alone, and fetching
-only the base leaves it unrelated to `HEAD`. Without the deepen, every pull
-request publishes the full fallback and zero planned skips.
+Since AEON-1337, the shared `ci-plan` job checks out PR history once for the
+trusted classifier and tier/shadow steps. The shadow bootstrap retains its exact
+base and depth-2 merge fetch, so it also remains valid with a shallow checkout:
+`merge-base` needs both parent objects. See [planning and capacity](impact-ci-planning.md).
 
 The shadow planner and its dependency graph come from the immutable PR base.
 Candidate files are parsed as bounded data. Imports are supplemented by
@@ -118,7 +117,7 @@ sizes that selection. This execution plan comes from the trusted tier planner;
 the `impact-ci-shadow-plan` artifact stays observational.
 
 The complete plan travels as `affected-browser-plan`, containing
-`browser-plan.json`; the tier-plan output contains only its SHA-256. Browser
+`browser-plan.json`; the ci-plan output contains only its SHA-256. Browser
 runners download the file and verify that digest before parsing the bounded
 contents. Case lists never enter an environment variable, whose per-string
 limit on Linux is smaller than even the essential browser catalogue. A token

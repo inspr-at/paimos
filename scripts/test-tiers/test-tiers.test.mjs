@@ -1931,12 +1931,16 @@ test('workflow merge-group planner writes only full outputs without executing ca
 })
 
 test('static layout accounting expects skipped Go shards, timing and browser shards but still requires unit evidence',()=>{
-  const finished={status:'completed',conclusion:'success',started_at:'2026-10-06T01:00:00Z',completed_at:'2026-10-06T01:02:00Z'}
+  const finished={status:'completed',conclusion:'success',created_at:'2026-10-06T00:59:50Z',started_at:'2026-10-06T01:00:00Z',completed_at:'2026-10-06T01:02:00Z'}
   const skipped={status:'completed',conclusion:'skipped',started_at:'2026-10-06T01:00:00Z',completed_at:'0001-01-01T00:00:00Z',steps:[]}
   const jobs=[{...finished,name:'ci-plan'},{...finished,name:'web-setup'},{...finished,name:'web-unit (1)'},{...skipped,name:'go-test (1)'},{...skipped,name:'go-timing'},{...skipped,name:'web-shard (1)'},{...skipped,name:'e2e-run'}]
   const unit={version:1,job:'web-unit-1',classes:{ESSENTIAL:{selected:1,run:1,passed:1,skipped:0,failed:0,notRun:0,platformInactive:0}}}
   const report=aggregate([unit],jobs,{lane:'full',layout:'static'})
   assert.equal(report.coverage,'reported');assert.deepEqual(report.missingEvidence,[]);assert.deepEqual(report.skippedJobs,[])
+  assert.equal(report.measured.sharedPlanningRunnerMinutes,2,'the consolidated planner is counted once')
+  assert.equal(report.jobs[0].runner_queue_seconds,10)
+  assert.equal(report.jobs[0].execution_seconds,120)
+  assert.equal(report.jobs.find(job=>job.name==='web-shard (1)').execution_seconds,null,'planned skips are not execution samples')
   const withoutUnits=aggregate([],jobs,{lane:'full',layout:'static'})
   assert.equal(withoutUnits.coverage,'incomplete');assert.deepEqual(withoutUnits.missingEvidence,['web-unit-1'])
   const fullLayout=aggregate([unit],jobs,{lane:'full',layout:'full'})

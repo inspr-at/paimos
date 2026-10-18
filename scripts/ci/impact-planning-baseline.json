@@ -1,0 +1,260 @@
+{
+  "_comment": "SPDX-License-Identifier: AGPL-3.0-only; AEON-1337. Read-only observation and reviewed local proposal; never an execution selector or a ruleset writer.",
+  "schema": 1,
+  "ticket": "AEON-1337",
+  "observed_at": "2026-10-18T00:22:32.950Z",
+  "repository": "inspr-at/paimos",
+  "organization": "inspr-at",
+  "window": {
+    "from": "2026-10-17T00:00:00Z",
+    "to": "2026-10-17T23:40:00Z",
+    "lookback": "2026-10-16T00:00:00.000Z"
+  },
+  "organization_plan": {
+    "name": "enterprise",
+    "hosted_slots": 500,
+    "source": "GET /orgs/inspr-at; GitHub Actions standard hosted-runner concurrency table",
+    "documentation": "https://docs.github.com/en/actions/reference/limits#job-concurrency-limits-for-github-hosted-runners"
+  },
+  "coverage": {
+    "visible_repositories": 22,
+    "active_repositories": 4,
+    "run_histories_including_lookback": 2680,
+    "workflow_runs_created_in_window": 1297,
+    "job_rows_including_lookback": 23854,
+    "hosted_job_start_samples": 11377,
+    "self_hosted_jobs": 0,
+    "retained_execution_rows": 310,
+    "never_started_cancellations": 253
+  },
+  "observed": {
+    "hosted_running": {
+      "peak": 153,
+      "p95": 96,
+      "mean": 45.57908450704225
+    },
+    "hosted_waiting": {
+      "peak": 39,
+      "p95": 1,
+      "mean": 0.2673239436619718
+    },
+    "competing_demand": {
+      "peak": 133,
+      "p95": 88,
+      "mean": 37.73227699530516
+    },
+    "full_build_samples": 22,
+    "merge_build_slots_p95": 33,
+    "phases": {
+      "job_scope": "hosted jobs starting within the window",
+      "admission_seconds": {
+        "samples": 34,
+        "p50": 18,
+        "p95": 19
+      },
+      "runner_queue_seconds": {
+        "samples": 11377,
+        "p50": 2,
+        "p95": 3
+      },
+      "execution_seconds": {
+        "samples": 11376,
+        "p50": 239,
+        "p95": 944
+      }
+    }
+  },
+  "capacity_budget": {
+    "hosted_slots": 500,
+    "p95_competing_slots": 88,
+    "safety_slots": 2,
+    "p95_full_build_slots": 33,
+    "max_entries_to_build": 12,
+    "configured_builds_modeled_slots": 288
+  },
+  "live_ruleset": {
+    "id": 24240960,
+    "enforcement": "active",
+    "required_checks": [
+      "go",
+      "web",
+      "release-check",
+      "e2e",
+      "migration-compat"
+    ],
+    "merge_queue": {
+      "merge_method": "MERGE",
+      "max_entries_to_build": 6,
+      "min_entries_to_merge": 1,
+      "max_entries_to_merge": 6,
+      "min_entries_to_merge_wait_minutes": 1,
+      "grouping_strategy": "ALLGREEN",
+      "check_response_timeout_minutes": 360
+    }
+  },
+  "decision": {
+    "max_entries_to_build": 6,
+    "action": "retain_current",
+    "reason": "OPS-324 already applied 6/6 on Enterprise. Admission p95 19s and hosted job queue p95 3s show no measured admission or runner-capacity bottleneck. Six builds fit the measured budget with headroom; the computed twelve-build ceiling does not demonstrate a throughput benefit from raising concurrency.",
+    "requires_pool_pin_lockstep_for_future_changes": true,
+    "live_mutations_performed": false
+  },
+  "scheduled_nightly_runs": [
+    {
+      "run": 39007089039,
+      "created_at": "2026-10-17T05:39:59Z",
+      "sha": "dae01caa180f97dd985dc4989af67510d09dc5e0"
+    }
+  ],
+  "full_queue_builds": [
+    {
+      "run": 39010329217,
+      "head_sha": "8bd74d34e3b10028c0e6ecd9cc6fe0ff4fddb4ba",
+      "peak_slots": 31,
+      "go_layout": "hosted-7"
+    },
+    {
+      "run": 39014752685,
+      "head_sha": "1647ff8d7bdff54dded11957b3116f542042e2fa",
+      "peak_slots": 33,
+      "go_layout": "hosted-7"
+    },
+    {
+      "run": 39016471610,
+      "head_sha": "814c37f66cc02f78ad7e5e63c47f2ed3d3bc1d73",
+      "peak_slots": 33,
+      "go_layout": "hosted-7"
+    },
+    {
+      "run": 39021180910,
+      "head_sha": "a5a28171e7f1088babb928aaef15f07763819306",
+      "peak_slots": 31,
+      "go_layout": "hosted-7"
+    },
+    {
+      "run": 39024419048,
+      "head_sha": "14ffee70934bfb57d7698301c6a12e0b93a53f21",
+      "peak_slots": 31,
+      "go_layout": "hosted-7"
+    },
+    {
+      "run": 39025194555,
+      "head_sha": "418a0df9647df4b7e788c80ba96507243df820ba",
+      "peak_slots": 31,
+      "go_layout": "hosted-7"
+    },
+    {
+      "run": 39027255133,
+      "head_sha": "c53b4aa6589fbf4023e9273427ee4eebaa037b13",
+      "peak_slots": 30,
+      "go_layout": "hosted-7"
+    },
+    {
+      "run": 39027952194,
+      "head_sha": "6013ae4ba89bf3da52dd5a335189e4009bc67b2d",
+      "peak_slots": 31,
+      "go_layout": "hosted-7"
+    },
+    {
+      "run": 39033143185,
+      "head_sha": "2c4d80a8055e676cbf9b4b114b3494aba36d3149",
+      "peak_slots": 31,
+      "go_layout": "hosted-7"
+    },
+    {
+      "run": 39034476947,
+      "head_sha": "f78e32bab3ce1c832b9b0b45996e91e9af1f6729",
+      "peak_slots": 31,
+      "go_layout": "hosted-7"
+    },
+    {
+      "run": 39035306979,
+      "head_sha": "ecd5a9d718e48c86a07d28ca0d5b04d39abdfa41",
+      "peak_slots": 32,
+      "go_layout": "hosted-7"
+    },
+    {
+      "run": 39041918459,
+      "head_sha": "dbe45791b713dec1521046994e4f3aaa18892792",
+      "peak_slots": 33,
+      "go_layout": "hosted-7"
+    },
+    {
+      "run": 39047911358,
+      "head_sha": "869d991d5d48f322ea67474ce16384589a4f800c",
+      "peak_slots": 31,
+      "go_layout": "hosted-7"
+    },
+    {
+      "run": 39052581310,
+      "head_sha": "6d6c1c1fc39da6ec25df54d01391dfe7106e5659",
+      "peak_slots": 31,
+      "go_layout": "hosted-7"
+    },
+    {
+      "run": 39053245919,
+      "head_sha": "6ed5444e677e91ad390cdd11a6f73dba21510b15",
+      "peak_slots": 33,
+      "go_layout": "hosted-7"
+    },
+    {
+      "run": 39053646698,
+      "head_sha": "021f509baff7cc6fec5a9f3ea8d4609b57e33d57",
+      "peak_slots": 31,
+      "go_layout": "hosted-7"
+    },
+    {
+      "run": 39058361722,
+      "head_sha": "0234b63d219e181b41b469eec0a111234b47bff2",
+      "peak_slots": 31,
+      "go_layout": "hosted-7"
+    },
+    {
+      "run": 39067417705,
+      "head_sha": "6f136f09cf1462b2925bb63bde0a1dcbf90fa931",
+      "peak_slots": 31,
+      "go_layout": "hosted-7"
+    },
+    {
+      "run": 39069340960,
+      "head_sha": "c1a741760740719add2c08f0a690d4e5858be947",
+      "peak_slots": 31,
+      "go_layout": "hosted-7"
+    },
+    {
+      "run": 39076979260,
+      "head_sha": "be4948cc747c9cf11f237ffa93fc198183f57eda",
+      "peak_slots": 31,
+      "go_layout": "hosted-7"
+    },
+    {
+      "run": 39077399571,
+      "head_sha": "882f8ac626e037fd0fb70c8e048f6b15c72314b9",
+      "peak_slots": 31,
+      "go_layout": "hosted-7"
+    },
+    {
+      "run": 39078185277,
+      "head_sha": "17012e35a5f8ebd7b4451b801cfd442af7e95ff3",
+      "peak_slots": 31,
+      "go_layout": "hosted-7"
+    }
+  ],
+  "provenance": {
+    "collector": "node scripts/ci-queue-measure.mjs --slots --from 2026-10-17T00:00:00Z --to 2026-10-17T23:40:00Z --capacity 500 --safety-slots 2 --save tmp/aeon-1337-slot-snapshot-day.json",
+    "replay": "node scripts/ci-queue-measure.mjs --slots --input tmp/aeon-1337-slot-snapshot-day.json --capacity 500 --safety-slots 2",
+    "raw_snapshot_path": "tmp/aeon-1337-slot-snapshot-day.json",
+    "raw_snapshot_sha256": "9907c74913fbce2da011e0a165c70e4cffb24a7344cdcb6576d61d8e2a4230d2",
+    "raw_snapshot_bytes": 15857847,
+    "transport": "Read-only GitHub REST GET and fixed GraphQL timeline queries; cached successful REST responses and bounded retries for transient failures.",
+    "operator_context": "PPM OPS-324 (read 2026-10-18): Enterprise upgrade and ruleset/pool-pin lockstep, 6/6 applied 2026-10-17T09:19:42Z."
+  },
+  "limitations": [
+    "Organization inventory is limited to repositories visible to the authenticated reader.",
+    "Runnable demand uses job created_at through completed_at; runner occupancy uses started_at through completed_at.",
+    "The 24-hour lookback bounds history; completed jobs from older runs and unobservable re-run requests can be missing.",
+    "Admission is enqueue to first observed CI run creation per queue session; missing or left-censored sessions remain null.",
+    "Retained rerun rows are excluded only with exact earlier-attempt runner/timing evidence; runnerless cancellations never count as execution.",
+    "A capacity recommendation is a budget for this measured mix, not a throughput guarantee or an automatic ruleset change."
+  ]
+}

@@ -12,6 +12,7 @@ const failureConclusions = new Set(["failure", "timed_out", "action_required", "
 const perPage = 100;
 const maxPages = 10;
 const maxAttempts = 51; // GitHub permits 50 reruns in addition to the first attempt.
+const maxSlotRuns = 5000;
 
 function readJSON(file) {
   if (statSync(file).size > 64 * 1024 * 1024) throw new Error("JSON input exceeds 64 MiB");
@@ -44,12 +45,19 @@ function latest(values) {
   return values.filter((v) => timestamp(v) !== null).sort((a, b) => timestamp(b) - timestamp(a))[0] ?? null;
 }
 
-async function pages(get, endpoint, field) {
+async function pages(get, endpoint, field, { strict = false } = {}) {
   const items = [];
+  let expected;
   for (let page = 1; page <= maxPages; page++) {
     const body = await get(`${endpoint}${endpoint.includes("?") ? "&" : "?"}per_page=${perPage}&page=${page}`);
     const batch = field ? body[field] : body;
-    if (!Array.isArray(batch)) throw new Error(`invalid API ${field ?? "array"} response`);
+    if (!Array.isArray(batch) || strict && batch.length > perPage) throw new Error(`invalid API ${field ?? "array"} response`);
+    if (strict && field) {
+      if (!Number.isSafeInteger(body.total_count) || body.total_count < 0 || body.total_count > maxPages * perPage ||
+          expected !== undefined && body.total_count !== expected) throw new Error("invalid or bounded API total count; narrow the slot window");
+      expected = body.total_count;
+      if (items.length + batch.length > expected || batch.length < perPage && items.length + batch.length < expected) throw new Error("incomplete API page; refusing truncated evidence");
+    }
     items.push(...batch);
     if (batch.length < perPage || (Number.isSafeInteger(body.total_count) && items.length >= body.total_count)) return items;
   }
@@ -126,9 +134,13 @@ export function percentile(values, fraction) {
 
 // AEON-1337: job creation is distinct from merge-queue admission. A skipped
 // job (or an explicitly runnerless cancellation) has no execution sample.
+function neverAcquiredRunner(job) {
+  return job.conclusion === "cancelled" && !job.runner_id &&
+    (job.never_started === true || Array.isArray(job.steps) && !job.steps.length);
+}
 export function jobPhases(job) {
   if (job.conclusion === "skipped") return { runner_queue_seconds: null, execution_seconds: null };
-  const neverRan = job.never_started === true || job.conclusion === "cancelled" && !job.runner_id && Array.isArray(job.steps) && !job.steps.length;
+  const neverRan = neverAcquiredRunner(job);
   return {
     runner_queue_seconds: neverRan ? null : seconds(job.created_at, job.started_at),
     execution_seconds: neverRan || job.status !== "completed" ? null : seconds(job.started_at, job.completed_at),
@@ -170,7 +182,7 @@ export async function collectSlotDemand({ organization = "inspr-at", repository 
   const deadline = now() + 20 * 60_000;
   const guard = () => { if (now() >= deadline) throw new Error("slot collection deadline reached; refusing partial evidence"); };
   const read = async endpoint => { guard(); return get(endpoint); };
-  const repositories = await pages(read, `orgs/${organization}/repos?type=all`, null);
+  const repositories = await pages(read, `orgs/${organization}/repos?type=all`, null, { strict: true });
   if (!repositories.length || repositories.some(repo => !repositoryPattern.test(repo.full_name) || repo.full_name.split("/")[0] !== organization) ||
       new Set(repositories.map(repo => repo.full_name)).size !== repositories.length || !repositories.some(repo => repo.full_name === repository)) throw new Error("invalid organization inventory");
   const lookback = new Date(timestamp(from) - 86400_000).toISOString();
@@ -182,29 +194,38 @@ export async function collectSlotDemand({ organization = "inspr-at", repository 
     // ceiling is an error, even when the API pretends the last page is final.
     for (let day = Math.floor(timestamp(lookback) / 86400_000) * 86400_000; day <= timestamp(to); day += 86400_000) {
       const date = new Date(day).toISOString().slice(0, 10);
-      const runs = await pages(read, `repos/${repo}/actions/runs?created=${date}`, "workflow_runs");
+      const runs = await pages(read, `repos/${repo}/actions/runs?created=${date}`, "workflow_runs", { strict: true });
       if (runs.length >= 1000) throw new Error("Actions search cap reached; narrow the slot window");
       for (const run of runs) if (timestamp(run.created_at) >= timestamp(lookback) && timestamp(run.created_at) < timestamp(to)) found.set(`${repo}:${run.id}`, { ...run, repository: repo });
     }
     for (const status of ["queued", "in_progress", "waiting", "pending", "requested"]) {
-      for (const run of await pages(read, `repos/${repo}/actions/runs?status=${status}`, "workflow_runs")) {
+      for (const run of await pages(read, `repos/${repo}/actions/runs?status=${status}`, "workflow_runs", { strict: true })) {
         if (timestamp(run.created_at) < timestamp(to)) found.set(`${repo}:${run.id}`, { ...run, repository: repo });
       }
     }
-    if (found.size > 2000) throw new Error("slot run bound reached; narrow the window");
+    if (found.size > maxSlotRuns) throw new Error("slot run bound reached; narrow the window");
   }
-  for (const run of found.values()) {
+  const collectRun = async run => {
+    integer(run.id, "slot run id", Number.MAX_SAFE_INTEGER);
     const attempts = [];
     for (let number = 1; number <= integer(run.run_attempt ?? 1, "run_attempt", maxAttempts); number++) {
-      const jobs = await pages(read, `repos/${run.repository}/actions/runs/${run.id}/attempts/${number}/jobs`, "jobs");
+      const jobs = await pages(read, `repos/${run.repository}/actions/runs/${run.id}/attempts/${number}/jobs`, "jobs", { strict: true });
       if (jobs.some(job => job.run_attempt !== number || job.run_id !== run.id)) throw new Error("slot job attempt/run identity mismatch");
       attempts.push({ number, jobs: jobs.map(job => Object.fromEntries(
         [...["id", "name", "run_attempt", "status", "conclusion", "created_at", "started_at", "completed_at", "labels", "runner_id", "runner_group_name"]
-          .map(key => [key, job[key]]), ["never_started", job.conclusion === "cancelled" && !job.runner_id && Array.isArray(job.steps) && !job.steps.length],
+          .map(key => [key, job[key]]), ["never_started", neverAcquiredRunner(job)],
           ["full_tier_execution", job.steps?.filter(step => step.name === "Confirm full tier execution" && step.status === "completed" && step.conclusion === "success").length === 1]])) });
     }
-    snapshot.runs.push({ repository: run.repository, id: run.id, path: run.path, event: run.event, head_branch: run.head_branch,
-      head_sha: run.head_sha, created_at: run.created_at, run_attempt: run.run_attempt ?? 1, attempts });
+    return { repository: run.repository, id: run.id, path: run.path, event: run.event, head_branch: run.head_branch,
+      head_sha: run.head_sha, created_at: run.created_at, run_attempt: run.run_attempt ?? 1, attempts };
+  };
+  const pending = [...found.values()];
+  // Four bounded independent reads at once keep large org inventories inside
+  // the deadline. Each run's attempts remain ordered; publication is atomic.
+  for (let offset = 0; offset < pending.length; offset += 4) {
+    snapshot.runs.push(...await Promise.all(pending.slice(offset, offset + 4).map(collectRun)));
+  }
+  for (const run of snapshot.runs) {
     if (run.repository === repository && run.event === "merge_group" && run.path === ".github/workflows/ci.yml" && queuePR(run)) {
       const pr = queuePR(run);
       if (!Object.hasOwn(snapshot.timelines, pr)) {
@@ -265,23 +286,25 @@ function demand(intervals, from, to) {
     mean: spans.reduce((sum, span) => sum + span.count * span.milliseconds, 0) / duration };
 }
 
-export function analyzeSlotDemand(snapshot, { slots = 60, safetySlots = 2 } = {}) {
-  if (snapshot.schema !== demandSchema || !Array.isArray(snapshot.runs) || snapshot.runs.length > 2000 ||
+export function analyzeSlotDemand(snapshot, { slots, safetySlots = 2 } = {}) {
+  if (snapshot.schema !== demandSchema || !Array.isArray(snapshot.runs) || snapshot.runs.length > maxSlotRuns ||
       !Array.isArray(snapshot.repositories) || snapshot.repositories.length > 1000 ||
       new Set(snapshot.repositories).size !== snapshot.repositories.length || !snapshot.repositories.includes(snapshot.repository) ||
       Object.keys(snapshot.timelines ?? {}).length > 2000 || Object.values(snapshot.timelines ?? {}).some(events => !Array.isArray(events) || events.length > 1000)) throw new Error("invalid slot snapshot");
   windowBounds(snapshot.from, snapshot.to);
+  if (timestamp(snapshot.lookback) !== timestamp(snapshot.from) - 86400_000) throw new Error("invalid slot history lookback");
   integer(slots, "slots", 1000); integer(safetySlots, "safety slots", slots);
   const from = timestamp(snapshot.from), to = timestamp(snapshot.to);
   const hosted = [], waiting = [], competing = [], builds = [], timings = [], sessions = new Set(), runIDs = new Set(), jobIDs = new Set();
-  let selfHostedJobs = 0;
+  let selfHostedJobs = 0, neverStartedCancellations = 0;
+  const retainedExecutionRows = [];
   for (const run of [...snapshot.runs].sort((a, b) => timestamp(a.created_at) - timestamp(b.created_at))) {
     const identity = `${run.repository}:${run.id}`;
     if (runIDs.has(identity) || !snapshot.repositories.includes(run.repository) || timestamp(run.created_at) === null ||
         !Array.isArray(run.attempts) || run.attempts.length !== integer(run.run_attempt, "run_attempt", maxAttempts)) throw new Error("incomplete or duplicate slot run");
     runIDs.add(identity);
     const mergeBuild = run.repository === snapshot.repository && run.path === ".github/workflows/ci.yml" && run.event === "merge_group";
-    const runIntervals = [], runJobs = [];
+    const runIntervals = [], runJobs = [], executions = new Map();
     for (const [index, attempt] of run.attempts.entries()) {
       if (attempt.number !== index + 1 || !Array.isArray(attempt.jobs) || attempt.jobs.length > 1000) throw new Error("incomplete slot attempt");
       for (const job of attempt.jobs) {
@@ -289,24 +312,47 @@ export function analyzeSlotDemand(snapshot, { slots = 60, safetySlots = 2 } = {}
         jobIDs.add(job.id);
         if (jobIDs.size > 100_000) throw new Error("slot job bound reached; narrow the window");
         if (job.conclusion === "skipped") continue;
-        const created = timestamp(job.created_at), start = timestamp(job.started_at), finish = timestamp(job.completed_at);
-        if (created === null || job.status === "completed" && (finish === null || finish < created) || start !== null && start < created || finish !== null && start !== null && finish < start) throw new Error("invalid slot job timestamps");
+        const neverStarted = neverAcquiredRunner(job);
+        const created = timestamp(job.created_at), start = neverStarted ? null : timestamp(job.started_at), finish = timestamp(job.completed_at);
+        // GitHub can synthesize a cancelled row after its workflow was already
+        // cancelled. Explicit runnerless evidence proves no execution interval.
+        if (neverStarted && job.conclusion === "cancelled" && !job.runner_id) {
+          neverStartedCancellations++;
+          if (created !== null && finish !== null && finish <= created) continue;
+        }
+        const executionKey = JSON.stringify([job.name, start, finish, job.runner_id, job.conclusion, job.full_tier_execution === true]);
+        const prior = executions.get(executionKey);
+        // Partial reruns create new IDs/created_at values for retained jobs,
+        // while copying the original runner and execution timestamps. Only
+        // exact earlier-attempt evidence permits excluding these copies.
+        if (start !== null && finish !== null && prior && prior.attempt < attempt.number) {
+          retainedExecutionRows.push({ run: run.id, attempt: attempt.number, job: job.id, source_attempt: prior.attempt, source_job: prior.job });
+          continue;
+        }
+        if (created === null || job.status === "completed" && (finish === null || finish < created) || start !== null && start < created || finish !== null && start !== null && finish < start) throw new Error(`invalid slot job timestamps: run ${run.id}, job ${job.id}`);
+        if (start !== null && finish !== null) executions.set(executionKey, { attempt: attempt.number, job: job.id });
         const end = finish ?? to;
         if (created >= to || end <= from) continue;
+        if (mergeBuild) runJobs.push(job);
         if (!Array.isArray(job.labels) || !job.labels.length || job.labels.length > 100 || job.labels.some(label => typeof label !== "string")) throw new Error("unknown runner class; no capacity recommendation");
         if (job.labels.some(label => label.toLowerCase() === "self-hosted")) { selfHostedJobs++; continue; }
         if (!job.labels.some(label => /^(?:ubuntu|windows|macos)-/.test(label)) && job.runner_group_name !== "GitHub Actions") throw new Error("unknown runner class; no capacity recommendation");
         const interval = [created, end];
         hosted.push([start ?? end, end]); waiting.push([created, start ?? end]);
-        if (mergeBuild) { runIntervals.push(interval); runJobs.push(job); } else competing.push(interval);
+        if (mergeBuild) runIntervals.push(interval); else competing.push(interval);
         if (start !== null && start >= from && start < to) timings.push({ repository: run.repository, run: run.id, attempt: attempt.number, job: job.name, ...jobPhases(job) });
       }
     }
     if (mergeBuild && timestamp(run.created_at) >= from && timestamp(run.created_at) < to) {
       // Reused/partial queue runs cannot stand in for a full build's demand.
-      const full = requiredJobs.filter(name => /^(?:go-test|web-unit|web-shard) \(/.test(name))
-        .every(name => runJobs.some(job => job.name === name && job.full_tier_execution === true));
+      const proven = (name, pool) => runJobs.some(job => job.name === name && job.full_tier_execution === true &&
+        (pool === undefined || job.labels.some(label => label.toLowerCase() === "self-hosted") === pool));
+      const hostedGoNames = requiredJobs.filter(name => /^go-test \(/.test(name));
+      const hostedGo = hostedGoNames.length > 0 && hostedGoNames.every(name => proven(name, false));
+      const poolGo = Array.from({ length: 4 }, (_, i) => `go-test (${i + 1})`).every(name => proven(name, true));
+      const full = (hostedGo || poolGo) && requiredJobs.filter(name => /^(?:web-unit|web-shard) \(/.test(name)).every(name => proven(name));
       builds.push({ run: run.id, head_sha: run.head_sha, full_execution: full,
+        go_layout: hostedGo ? `hosted-${hostedGoNames.length}` : poolGo ? "self-hosted-4" : "unproven",
         peak_slots: demand(runIntervals, from, to).peak, admission: admission(run, snapshot, sessions) });
     } else if (mergeBuild) admission(run, snapshot, sessions);
   }
@@ -318,17 +364,19 @@ export function analyzeSlotDemand(snapshot, { slots = 60, safetySlots = 2 } = {}
   return { schema: demandSchema, organization: snapshot.organization, repository: snapshot.repository,
     window: { from: snapshot.from, to: snapshot.to, lookback: snapshot.lookback }, repositories: snapshot.repositories,
     observed_runs: snapshot.runs.length, observed_jobs: jobIDs.size, self_hosted_jobs: selfHostedJobs,
+    never_started_cancellations: neverStartedCancellations, retained_execution_rows: retainedExecutionRows,
     hosted_running: running, hosted_waiting: queued, competing_demand: other, full_build_samples: fullBuilds.length,
     merge_build_slots_p95: buildSlots, slots, safety_slots: safetySlots,
-    recommendation: { max_entries_to_build: fits > 0 && fullBuilds.length >= 5 ? Math.min(100, fits) : null,
-      reason: fullBuilds.length < 5 ? "at least five observed full queue builds required" : fits < 1 ? "no full build fits the observed competing demand; retain current value pending capacity review" : "floor((hosted slots - p95 competing runnable demand - safety slots) / p95 full-build peak demand)" },
-    phases: { admission_seconds: distribution(builds.map(build => build.admission.seconds)),
+    capacity_budget: { max_entries_to_build: fits > 0 && fullBuilds.length >= 5 ? Math.min(100, fits) : null,
+      reason: fullBuilds.length < 5 ? "at least five observed full queue builds required" : fits < 1 ? "no full build fits the supplied budget; review capacity and competing demand" : "floor((hosted slots - p95 competing runnable demand - safety slots) / p95 full-build peak demand)" },
+    phases: { job_scope: "hosted jobs starting within the window", admission_seconds: distribution(builds.map(build => build.admission.seconds)),
       runner_queue_seconds: distribution(timings.map(job => job.runner_queue_seconds)), execution_seconds: distribution(timings.map(job => job.execution_seconds)) },
     builds, jobs: timings,
     limitations: ["Organization inventory is limited to repositories visible to the authenticated reader.",
       "Runnable demand uses job created_at through completed_at; runner occupancy uses started_at through completed_at.",
       "The 24-hour lookback bounds history; completed jobs from older runs and unobservable re-run requests can be missing.",
       "Admission is enqueue to first observed CI run creation per queue session; missing or left-censored sessions remain null.",
+      "Retained rerun rows are excluded only with exact earlier-attempt runner/timing evidence; runnerless cancellations never count as execution.",
       "A capacity recommendation is a budget for this measured mix, not a throughput guarantee or an automatic ruleset change."] };
 }
 
@@ -429,7 +477,7 @@ export function rulesetPlan(current, plan = readJSON(planURL)) {
   return { candidate, rollback, diff };
 }
 
-const help = `Usage (Node 22+, authenticated gh; every network call is GET):
+const help = `Usage (Node 22+, authenticated gh; network reads only):
   node scripts/ci-queue-measure.mjs [--count 20] [--split-at ISO] [--json]
     [--repo inspr-at/paimos] [--workflow ci.yml] [--save snapshot.json]
   node scripts/ci-queue-measure.mjs --input snapshot.json [--split-at ISO] [--json]
@@ -437,9 +485,9 @@ const help = `Usage (Node 22+, authenticated gh; every network call is GET):
   node scripts/ci-queue-measure.mjs --dry-run --snapshot current-ruleset.json
   node scripts/ci-queue-measure.mjs --ruleset-payload --snapshot current-ruleset.json
   node scripts/ci-queue-measure.mjs --rollback-payload --snapshot current-ruleset.json
-  node scripts/ci-queue-measure.mjs --slots --from UTC --to UTC [--org inspr-at]
-    [--repo inspr-at/paimos] [--capacity 60] [--safety-slots 2] [--save snapshot.json]
-  node scripts/ci-queue-measure.mjs --slots --input snapshot.json [--capacity 60] [--safety-slots 2]
+  node scripts/ci-queue-measure.mjs --slots --from UTC --to UTC --capacity SLOTS
+    [--org inspr-at] [--repo inspr-at/paimos] [--safety-slots 2] [--save snapshot.json]
+  node scripts/ci-queue-measure.mjs --slots --input snapshot.json --capacity SLOTS [--safety-slots 2]
 
 --count is unique workflow runs, including all attempts (max 1000 runs/51 attempts).
 --split-at is the change's UTC/offset timestamp; omit for an older/newer-half comparison.
@@ -449,8 +497,9 @@ emit complete PUT bodies locally; they never invoke PUT. Read the patch's _comme
 for operator backup/apply/rollback commands. No --apply mode exists.
 Slot mode also uses fixed read-only GraphQL queue-timeline queries. It emits JSON
 with organization demand and separate admission, runner queueing and execution
-samples. Missing capacity evidence produces no concurrency recommendation. Capacity is an
-explicit hosted-slot budget, not discovered from the billing API.
+samples. Missing capacity evidence produces no concurrency budget. Capacity must
+be supplied from the verified current hosted-slot limit. The computed ceiling
+bounds a reviewed setting; admission and runner wait determine whether to raise it.
 `;
 
 export async function main(argv = process.argv.slice(2), get = ghGet) {
@@ -469,8 +518,11 @@ export async function main(argv = process.argv.slice(2), get = ghGet) {
   if (opts["--slots"]) {
     if (["--ruleset", "--snapshot", "--dry-run", "--ruleset-payload", "--rollback-payload", "--count", "--split-at", "--workflow"].some(key => opts[key])) throw new Error("slot options cannot be combined with queue/ruleset options");
     if (opts["--input"] && ["--save", "--repo", "--org", "--from", "--to"].some(key => opts[key])) throw new Error("slot input already defines the inventory/window");
+    if (!opts["--capacity"]) throw new Error("slot mode requires --capacity from the verified current hosted-slot limit");
+    const budget = { slots: integer(opts["--capacity"], "capacity", 1000), safetySlots: integer(opts["--safety-slots"] ?? 2, "safety slots", 1000) };
+    integer(budget.safetySlots, "safety slots", budget.slots);
     const snapshot = opts["--input"] ? readJSON(opts["--input"]) : await collectSlotDemand({ organization: opts["--org"] ?? "inspr-at", repository, from: opts["--from"], to: opts["--to"], get });
-    const report = analyzeSlotDemand(snapshot, { slots: integer(opts["--capacity"] ?? 60, "capacity", 1000), safetySlots: integer(opts["--safety-slots"] ?? 2, "safety slots", 1000) });
+    const report = analyzeSlotDemand(snapshot, budget);
     if (opts["--save"]) writeFileSync(opts["--save"], JSON.stringify(snapshot, null, 2) + "\n", { flag: "wx" });
     return JSON.stringify(report, null, 2) + "\n";
   }
