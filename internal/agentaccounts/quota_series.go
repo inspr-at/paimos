@@ -4,6 +4,7 @@ package agentaccounts
 import (
 	"context"
 	"encoding/json"
+	"math"
 	"net/http"
 	"sort"
 	"strconv"
@@ -111,7 +112,14 @@ func storeQuotaSamples(ctx context.Context, tx pgx.Tx, tenantID string, a Accoun
 	}
 	byHour := map[time.Time][]quotaSample{}
 	for _, v := range samples {
-		if quotaMinutes(v.WindowKind) == 0 || v.Source != "harness" && v.Source != "agentd" || v.reading().Validate(now) != nil || looksLikeCredential(v.Bucket) {
+		// Ingress already validates window identities. Readiness facts can name
+		// a reset more than one nominal window after their original reading
+		// (including old outbox receipts); retain that evidence as reported.
+		// The rollup must not impose the legacy allowance's inferred start.
+		if quotaMinutes(v.WindowKind) == 0 || v.Source != "harness" && v.Source != "agentd" ||
+			math.IsNaN(v.UsedPercent) || math.IsInf(v.UsedPercent, 0) || v.UsedPercent < 0 || v.UsedPercent > 100 ||
+			v.ReadAt.IsZero() || v.ReadAt.After(now.Add(time.Minute)) || v.ResetsAt.IsZero() || !v.ResetsAt.After(v.ReadAt) ||
+			len(v.Bucket) > 64 || looksLikeCredential(v.Bucket) {
 			return fail(400, "invalid quota sample")
 		}
 		hour := v.ReadAt.UTC().Truncate(time.Hour)
@@ -277,6 +285,7 @@ func (m *Module) quotaSeries(w http.ResponseWriter, r *http.Request) {
 			if err := rows.Scan(&hour.HourAt, &raw); err != nil {
 				return err
 			}
+			hour.HourAt = hour.HourAt.UTC()
 			if len(out.HourlyReadings) == limit {
 				out.NextCursor = out.HourlyReadings[limit-1].HourAt.UTC().Format(time.RFC3339)
 				break
