@@ -193,9 +193,10 @@ const deskLink = computed(() => props.goal.waits.question_ids[0] ? { path: '/dec
 .too-large { grid-column: 3 / -3; margin: 0 0 8px; font-size: 12.5px; color: var(--ink-3); }
 
 .fold-line { padding: 0; }
-/* A · The chevron sits in the items' 20 px icon slot, so it lines up with the step and item icons. */
-.fold-btn { grid-column: 3 / -3; justify-self: start; display: inline-flex; align-items: center; gap: 8px; height: 30px; padding: 0 9px 0 6px; margin-left: -6px; border: 0; border-radius: 8px; background: transparent; color: var(--ink-3); font-size: 12.5px; }
-.fold-btn .f-ic { flex: none; display: inline-grid; place-items: center; width: 20px; }
+/* A · The chevron sits in the items' 20 px icon slot, so it lines up with the step and item icons,
+   and the words start at the items' key. */
+.fold-btn { grid-column: 3 / -3; justify-self: start; display: inline-flex; align-items: center; gap: 6px; height: 30px; padding: 0 9px 0 6px; margin-left: -6px; border: 0; border-radius: 8px; background: transparent; color: var(--ink-3); font-size: 12.5px; }
+.fold-btn .f-ic { flex: none; display: inline-grid; place-items: center; width: 20px; margin-right: 2px; }
 .fold-btn b { font-weight: 600; color: var(--ink-2); font-variant-numeric: tabular-nums; }
 .fold-btn .today { color: var(--ink-3); font-variant-numeric: tabular-nums; }
 /* "show" and "hide" share one box, so the button never changes width. */
@@ -231,8 +232,8 @@ const deskLink = computed(() => props.goal.waits.question_ids[0] ? { path: '/dec
   .steps-head, .steps ol { display: none; }
   .phone-next { display: block; margin: 0; padding: 0 0 6px; font-size: 13.5px; line-height: 1.4; color: var(--ink-2); }
   .phone-next .lbl { color: var(--ink-3); }
-  .fold-btn { grid-column: 2 / -1; gap: 6px; height: 44px; margin-left: -4px; font-size: 13px; }
-  .fold-btn .f-ic { width: auto; }
+  .fold-btn { grid-column: 2 / -1; height: 44px; margin-left: -4px; font-size: 13px; }
+  .fold-btn .f-ic { width: auto; margin-right: 0; }
 }
 /* Touch: the agent chips keep their look and get a 44 px hit area. */
 @media (max-width: 760px), (pointer: coarse) {

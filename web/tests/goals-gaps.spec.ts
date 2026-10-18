@@ -345,9 +345,10 @@ for (const size of [{ width: 1440, height: 900 }, { width: 1024, height: 800 }, 
       }
       // One-ticket items start their labels at one x.
       expect(Math.abs((await box(noted.locator('.i-label'))).x - (await box(items.nth(2).locator('.i-label'))).x)).toBeLessThanOrEqual(.5)
-      // The fold lines' chevrons centre on the same x.
-      const chevron = await box(release.locator('.fold-btn .f-ic svg').first())
+      // The fold lines' chevrons centre on the same x, and their words start at the key's x.
+      const chevron = await box(release.locator('.fold-btn .f-ic svg').first()), count = await box(release.locator('.fold-btn b').first())
       expect(Math.abs(chevron.x + chevron.width / 2 - (step.x + step.width / 2))).toBeLessThanOrEqual(1)
+      expect(Math.abs(count.x - (await box(noted.locator('.i-keys'))).x)).toBeLessThanOrEqual(1)
       // The second ticket is in the "+1" tip.
       await expect(long.locator('.i-keys .more')).toHaveText('+1')
       await expect(long.locator('.i-keys .more')).toHaveAttribute('data-tip', 'AEON-1409')
