@@ -6418,6 +6418,8 @@
     ,
     {"kind":"go","package":"internal/deploytarget","name":"TestNormalizeRequiresDestinationAndChange","tier":"GATED-FULL"}
     ,
+    {"kind":"go","package":"internal/dsar","name":"TestDeliverySettingsBuildingTargetsStayReview","tier":"ESSENTIAL"}
+    ,
     {"kind":"go","package":"internal/dsar","name":"TestExecuteFailureEmitsNothing","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/dsar","name":"TestInventoryAndAdapters","tier":"ESSENTIAL"}
