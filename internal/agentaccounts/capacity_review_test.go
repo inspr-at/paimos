@@ -54,10 +54,39 @@ func TestCapacityProjectionBatchAndGolden(t *testing.T) {
 	// Stable identities and audit timestamps leave every computed field in the
 	// golden, including pacing, limits, learning and routing advice.
 	one[0].AccountID = "account"
+	for i := range one[0].Contexts {
+		one[0].Contexts[i].ID = "context"
+	}
 	one[0].Limit.ID = "limit"
 	one[0].Limit.AccountID = "account"
 	one[0].Limit.CreatedAt = now
 	raw, err := json.MarshalIndent(one, "", "  ")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var canonical any
+	if err := json.Unmarshal(raw, &canonical); err != nil {
+		t.Fatal(err)
+	}
+	var normalize func(any) any
+	normalize = func(v any) any {
+		switch x := v.(type) {
+		case map[string]any:
+			for k, v := range x {
+				x[k] = normalize(v)
+			}
+		case []any:
+			for i, v := range x {
+				x[i] = normalize(v)
+			}
+		case string:
+			if at, err := time.Parse(time.RFC3339Nano, x); err == nil {
+				return at.UTC().Format(time.RFC3339Nano)
+			}
+		}
+		return v
+	}
+	raw, err = json.MarshalIndent(normalize(canonical), "", "  ")
 	if err != nil {
 		t.Fatal(err)
 	}

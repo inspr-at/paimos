@@ -37,7 +37,7 @@ func TestCapacityReadSnapshot(t *testing.T) {
 		if err := tx.QueryRow(t.Context(), `INSERT INTO principals(tenant_id,kind,name) VALUES($1,'agent','Runner') RETURNING id::text`, person.TenantID).Scan(&agent); err != nil {
 			return err
 		}
-		if err := tx.QueryRow(t.Context(), `INSERT INTO agent_accounts(tenant_id,account_key,harness,daemon_id,label,registered_by_principal_id,owner_person_id) VALUES($1,'main','codex','daemon','Main',$2,$3) RETURNING id::text`, person.TenantID, agent, person.ID).Scan(&account); err != nil {
+		if err := tx.QueryRow(t.Context(), `INSERT INTO agent_accounts(tenant_id,account_key,harness,daemon_id,label,registered_by_principal_id,owner_person_id,linked_at) VALUES($1,'main','codex','daemon','Main',$2,$3,now()) RETURNING id::text`, person.TenantID, agent, person.ID).Scan(&account); err != nil {
 			return err
 		}
 		return tx.QueryRow(t.Context(), `INSERT INTO nodes(tenant_id,key,kind_id,title) SELECT $1,'READ-1',id,'Polling must not block edits' FROM node_kinds WHERE slug='work' RETURNING id::text`, person.TenantID).Scan(&node)
