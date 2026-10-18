@@ -2,7 +2,9 @@
 package harness_test
 
 import (
+	"encoding/json"
 	"errors"
+	"maps"
 	"net/http"
 	"net/http/httptest"
 	"slices"
@@ -14,6 +16,8 @@ import (
 	"github.com/inspr-at/paimos/internal/db"
 	"github.com/inspr-at/paimos/internal/dbtest"
 	"github.com/inspr-at/paimos/internal/harness"
+	"github.com/inspr-at/paimos/internal/nodes"
+	"github.com/inspr-at/paimos/internal/reviewgate"
 	"github.com/inspr-at/paimos/internal/tenant"
 	"github.com/inspr-at/paimos/internal/workorders"
 	"github.com/inspr-at/paimos/internal/workqueue"
@@ -638,4 +642,231 @@ func TestTicketBuiltUnmergedAdmissionUsesLinkedDeliveryAndMerge(t *testing.T) {
 		}
 		return err
 	})
+}
+
+// Risk: read-only work becomes invisible behind a delivery/build conflict, or
+// caller-supplied scout metadata substitutes for authenticated review authority.
+func TestReadOnlyTicketAdmissionAndReviewerIdentity(t *testing.T) {
+	for _, blocker := range []string{"delivery", "builder"} {
+		t.Run(blocker, func(t *testing.T) {
+			f := fixture(t)
+			nodes.New(f.db.App, nil).Mount(f.mux)
+			base := "/api/projects/" + f.project + "/harness-sessions"
+			author := tenant.Principal{ID: uid(), TenantID: f.person.TenantID, Kind: tenant.Agent}
+			f.tx(t, f.person, func(tx pgx.Tx) error {
+				_, err := tx.Exec(t.Context(), `INSERT INTO principals(tenant_id,id,kind,name) VALUES($1,$2,'agent','Author')`, author.TenantID, author.ID)
+				return err
+			})
+			dbtest.BindRole(t, f.db, author.TenantID, author.ID, "member")
+			body := buildRegistration(f, "author")
+			body["agent_principal_id"], body["model"] = author.ID, "gpt-6.1-sol"
+			w := f.call(f.person, "POST", base, body, "")
+			expect(t, w, 201)
+			authorID := decode(t, w)["id"].(string)
+			f.tx(t, f.person, func(tx pgx.Tx) error {
+				if blocker == "delivery" {
+					if _, err := tx.Exec(t.Context(), `UPDATE harness_sessions SET stopped_at=clock_timestamp(),phase='stopped',stop_reason='process_exited' WHERE id=$1`, authorID); err != nil {
+						return err
+					}
+				}
+				if _, err := tx.Exec(t.Context(), `INSERT INTO delivery_metric_sources(tenant_id,project_id,repository,ci_workflow,nightly_workflow,updated_at) VALUES($1,$2,'owner/linked','CI','Nightly',clock_timestamp())`, f.person.TenantID, f.project); err != nil {
+					return err
+				}
+				if _, err := tx.Exec(t.Context(), `UPDATE agent_keys SET scopes=array_append(scopes,'nodes.read') WHERE id=$1`, f.agent.AuthKeyID); err != nil {
+					return err
+				}
+				_, err := tx.Exec(t.Context(), `INSERT INTO delivery_items(tenant_id,id,project_id,ticket_node_id,repository,pull_request,branch,head_sha,state,state_since,owner,observation,updated_at)
+				 VALUES($1,$2,$3,$4,'owner/linked',42,'work/hts-2-built',repeat('b',40),'built',clock_timestamp(),'fixture',jsonb_build_object('open',true,'base_sha',repeat('a',40),'target_branch','main'),clock_timestamp())`, f.person.TenantID, uid(), f.project, f.ticket)
+				return err
+			})
+			f.agent.KeyID = f.agent.AuthKeyID
+			f.agent.KeyCreatorID = f.person.ID
+			f.agent.Scopes = []string{"harness.worker", "harness.write", "nodes.read"}
+			var reviewerID string
+			for _, label := range []string{"scout", "reviewer"} {
+				readOnly := buildRegistration(f, label)
+				readOnly["work_shape"] = "scout"
+				readOnly["harness"], readOnly["model"], readOnly["reasoning_effort"] = "claude", "claude-opus-4-6", "xhigh"
+				w := f.call(f.agent, "POST", base, readOnly, "")
+				expect(t, w, 201)
+				session := decode(t, w)
+				id := session["id"].(string)
+				if session["ticket_node_id"] != f.ticket || session["work_shape"] != "scout" || session["build_continuation"] != nil || session["parallel_reason"] != nil {
+					t.Fatal("read-only registration lost ticket or invented builder authority")
+				}
+				read := f.call(f.person, "GET", base+"/"+id, nil, "")
+				expect(t, read, 200)
+				if decode(t, read)["ticket_node_id"] != f.ticket {
+					t.Fatal("existing session read lost ticket visibility")
+				}
+				expect(t, f.call(f.agent, "POST", base, readOnly, ""), 201)
+				f.tx(t, f.person, func(tx pgx.Tx) error {
+					var registered, admitted int
+					err := tx.QueryRow(t.Context(), `SELECT
+					 (SELECT count(*) FROM events WHERE type='harness.registered' AND after->>'id'=$1),
+					 (SELECT count(*) FROM events WHERE node_id=$2 AND type='harness.read_only_admitted' AND actor_principal_id=$3 AND after->>'session_id'=$1 AND after->>'work_shape'='scout' AND after->>'authority_granted'='false')`, id, f.ticket, f.agent.ID).Scan(&registered, &admitted)
+					if err == nil && (registered != 1 || admitted != 1) {
+						t.Errorf("read-only admission/replay audit: registered=%d admitted=%d", registered, admitted)
+					}
+					return err
+				})
+				if label == "reviewer" {
+					reviewerID = id
+				}
+			}
+			// The dispatcher binds the normally registered reviewer to the exact
+			// delivery through AEON-1391. No reviewer role/second authority exists.
+			create := reviewgate.RunCreate{Repository: "owner/linked", PR: 42, Target: "main", Base: strings.Repeat("a", 40), Head: strings.Repeat("b", 40), AuthorSession: authorID, ReviewerSession: reviewerID, Kind: "review"}
+			create.Scope = create.Base + ".." + create.Head
+			w = f.call(f.person, "POST", "/api/nodes/"+f.ticket+"/review-runs", create, "")
+			expect(t, w, 201)
+			var run reviewgate.Run
+			if json.Unmarshal(w.Body.Bytes(), &run) != nil || run.ReviewerSession != reviewerID || run.Reviewer != f.agent.ID || run.ReviewerFamily != "anthropic" {
+				t.Fatal("dispatcher did not bind the registered reviewer identity")
+			}
+			claimPath := "/api/review-runs/" + run.ID + "/credential"
+			expect(t, f.call(f.person, "POST", claimPath, nil, ""), 403)
+			expect(t, f.call(author, "POST", claimPath, nil, ""), 403)
+			verdict := reviewgate.RunSubmit{Binding: run.RunBinding, Verdict: "ok", VisualImpact: "no", Reason: "Fixture review"}
+			expect(t, f.call(f.agent, "POST", "/api/review-runs/"+run.ID+"/verdict", verdict, ""), 403)
+			claim := f.call(f.agent, "POST", claimPath, nil, "")
+			if claim.Code != 200 {
+				t.Fatalf("bound reviewer claim: status %d (response omitted)", claim.Code)
+			}
+			capability, ok := decode(t, claim)["credential"].(string)
+			if !ok || capability == "" {
+				t.Fatal("reviewer claim omitted credential")
+			}
+			submit := func(id string, input reviewgate.RunSubmit, status int) {
+				t.Helper()
+				raw, _ := json.Marshal(input)
+				r := httptest.NewRequest("POST", "/api/review-runs/"+id+"/verdict", strings.NewReader(string(raw)))
+				r.Header.Set(reviewgate.CredentialHeader, capability)
+				w := httptest.NewRecorder()
+				f.mux.ServeHTTP(w, r)
+				if w.Code != status {
+					t.Fatalf("review submission: status %d, want %d (response omitted)", w.Code, status)
+				}
+			}
+			w = f.call(f.person, "POST", "/api/nodes/"+f.ticket+"/review-runs", create, "")
+			expect(t, w, 201)
+			submit(decode(t, w)["id"].(string), verdict, 401)
+			wrong := verdict
+			wrong.Binding.Head = strings.Repeat("c", 40)
+			wrong.Binding.Scope = wrong.Binding.Base + ".." + wrong.Binding.Head
+			submit(run.ID, wrong, 409)
+			// A run-bound reviewer cannot detach/rebind the session to impersonate
+			// another ticket. Failure preserves the original session and audit.
+			snapshot := readOnlyState(t, f)
+			binding := map[string]any{"expected_revision": 1, "ticket_node_id": nil, "work_shape": "unknown"}
+			denied := f.call(f.agent, "PATCH", base+"/"+reviewerID+"/binding", binding, "")
+			expect(t, denied, 409)
+			if readOnlyState(t, f) != snapshot {
+				t.Fatal("rejected reviewer identity substitution mutated state")
+			}
+			submit(run.ID, verdict, 200)
+			reason := "built_unmerged"
+			if blocker == "builder" {
+				reason = "active_builder"
+			}
+			buildRefusal(t, f.call(f.agent, "POST", base, buildRegistration(f, "still a builder"), ""), reason)
+		})
+	}
+}
+
+// Snapshot stored data, not computed heartbeat clocks or session projections.
+func readOnlyState(t *testing.T, f *harnessFixture) string {
+	t.Helper()
+	var state string
+	f.tx(t, f.person, func(tx pgx.Tx) error {
+		return tx.QueryRow(t.Context(), `SELECT jsonb_build_object(
+		 'sessions',(SELECT jsonb_agg(to_jsonb(s) ORDER BY id) FROM harness_sessions s),
+		 'deliveries',(SELECT jsonb_agg(to_jsonb(d) ORDER BY id) FROM delivery_items d),
+		 'reviews',(SELECT jsonb_agg(to_jsonb(r) ORDER BY id) FROM review_runs r),
+		 'events',(SELECT count(*) FROM events))::text`).Scan(&state)
+	})
+	return state
+}
+
+// Risk: a read-only generation sheds its restriction by detach/rebind, reports
+// delivery commits, or resumes with builder metadata. Failed writes are atomic.
+func TestReadOnlySessionLifecycleCannotBecomeBuilder(t *testing.T) {
+	f := fixture(t)
+	base := "/api/projects/" + f.project + "/harness-sessions"
+	body := buildRegistration(f, "scout")
+	body["work_shape"], body["advertised_capabilities"] = "scout", []string{"pause"}
+	for _, field := range []string{"branch", "work_order_id", "run_id"} {
+		bad := maps.Clone(body)
+		bad[field] = uid()
+		if field == "branch" {
+			bad[field] = "work/hts-2-built"
+		}
+		before := readOnlyState(t, f)
+		w := f.call(f.agent, "POST", base, bad, "")
+		expect(t, w, 409)
+		if !strings.Contains(w.Body.String(), "read-only session") || readOnlyState(t, f) != before {
+			t.Fatalf("%s registration did not fail atomically for read-only binding", field)
+		}
+	}
+	w := f.call(f.agent, "POST", base, body, "")
+	expect(t, w, 201)
+	session := decode(t, w)
+	path, lease := base+"/"+session["id"].(string), body["worker_lease"].(string)
+	for _, update := range []map[string]any{
+		{"branch": "work/hts-2-built"},
+		{"commits": []map[string]any{{"sha": strings.Repeat("c", 40), "subject": "Fabricated delivery commit"}}},
+	} {
+		update["phase"], update["activity"], update["activity_sequence"] = "working", "busy", 1
+		before := readOnlyState(t, f)
+		w := f.call(f.agent, "POST", path+"/heartbeat", update, lease)
+		expect(t, w, 409)
+		if !strings.Contains(w.Body.String(), "read-only session") || readOnlyState(t, f) != before {
+			t.Fatal("rejected branch/commit heartbeat changed state or failed for another reason")
+		}
+	}
+	for _, p := range []tenant.Principal{f.person, f.agent} {
+		for _, shape := range []string{"ship", "unknown"} {
+			binding := map[string]any{"expected_revision": session["revision"], "ticket_node_id": f.ticket, "work_shape": shape}
+			if shape == "unknown" {
+				binding["ticket_node_id"] = nil
+			}
+			before := readOnlyState(t, f)
+			w := f.call(p, "PATCH", path+"/binding", binding, "")
+			expect(t, w, 409)
+			if !strings.Contains(w.Body.String(), "read-only session") || readOnlyState(t, f) != before {
+				t.Fatal("rejected shape promotion/detach changed state")
+			}
+		}
+	}
+	// Read-only sessions do not occupy a builder slot even when first to arrive.
+	expect(t, f.call(f.agent, "POST", base, buildRegistration(f, "builder after scout"), ""), 201)
+	buildRefusal(t, f.call(f.agent, "POST", base, buildRegistration(f, "competing builder"), ""), "active_builder")
+	// Ordinary heartbeats remain usable; only delivery writes are restricted.
+	expect(t, f.call(f.agent, "POST", path+"/heartbeat", map[string]any{"phase": "working", "activity": "busy", "activity_sequence": 1}, lease), 200)
+	w = f.call(f.person, "POST", path+"/pause", map[string]any{}, "")
+	expect(t, w, 200)
+	finishPaused(t, f, path, lease, decode(t, w)["pause"].(map[string]any)["control_id"].(string))
+	expect(t, f.call(f.person, "POST", path+"/resume", map[string]any{}, ""), 200)
+	for _, change := range []map[string]any{{"work_shape": "ship"}, {"role": "coordinator"}, {"branch": "work/hts-2-built"}, {"work_order_id": uid()}} {
+		successor := maps.Clone(body)
+		successor["succeeds_session_id"] = session["id"]
+		successor["harness_session_ref"], successor["worker_lease"] = "successor-ref-"+uid(), "successor-lease-"+uid()
+		maps.Copy(successor, change)
+		before := readOnlyState(t, f)
+		w := f.call(f.person, "POST", base, successor, "")
+		expect(t, w, 409)
+		if readOnlyState(t, f) != before {
+			t.Fatal("rejected resume changed predecessor, successor, review or audit")
+		}
+	}
+	proof := map[string]any{"harness_session_ref": "readonly-resume-ref-" + uid(), "worker_lease": "readonly-resume-lease-" + uid()}
+	w = f.call(f.person, "POST", path+"/resume", map[string]any{"registration": proof}, "")
+	expect(t, w, 200)
+	next := decode(t, w)["successor"].(map[string]any)
+	if next["work_shape"] != "scout" || next["branch"] != nil || next["ticket_node_id"] != f.ticket {
+		t.Fatal("resumed session lost read-only classification")
+	}
+	nextPath := base + "/" + next["id"].(string)
+	expect(t, f.call(f.agent, "PATCH", nextPath+"/binding", map[string]any{"expected_revision": next["revision"], "ticket_node_id": f.ticket, "work_shape": "ship"}, ""), 409)
+	expect(t, f.call(f.agent, "POST", nextPath+"/heartbeat", map[string]any{"phase": "working", "activity_sequence": 1, "commits": []map[string]any{{"sha": strings.Repeat("c", 40), "subject": "Delivery"}}}, proof["worker_lease"].(string)), 409)
 }

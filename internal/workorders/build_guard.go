@@ -325,7 +325,7 @@ const activeBuildersSQL = `WITH builders AS (
  LEFT JOIN agent_runs r ON r.tenant_id=s.tenant_id AND r.id=s.run_id
  CROSS JOIN LATERAL (SELECT coalesce(r.work_order_id,s.work_order_id,s.ticket_node_id) AS node_id,r.queue_node_id AS queue_ticket,s.ticket_node_id AS direct_ticket) b
  ` + buildTicketJoinsSQL + `
- WHERE s.role='worker' AND s.stopped_at IS NULL AND s.id::text<>$2
+ WHERE s.role='worker' AND s.work_shape<>'scout' AND s.stopped_at IS NULL AND s.id::text<>$2
 ) `
 
 // RequireBuildAdmissionTx is the single builder/queue admission predicate.

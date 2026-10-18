@@ -866,6 +866,9 @@ func (m *Module) registerBeforeEvents(r *http.Request, tx pgx.Tx, p tenant.Princ
 			return nil, err
 		}
 	}
+	if err := readOnlyDeliveryBinding(in.WorkShape, in.Branch, in.WorkOrderID, in.RunID, nil); err != nil {
+		return nil, err
+	}
 	var agentKind string
 	err = tx.QueryRow(ctx, `SELECT kind FROM principals WHERE id=$1`, in.AgentPrincipalID).Scan(&agentKind)
 	if err != nil {
@@ -1030,7 +1033,7 @@ func (m *Module) registerBeforeEvents(r *http.Request, tx pgx.Tx, p tenant.Princ
 	if err != nil {
 		return nil, err
 	}
-	if in.Role == "worker" {
+	if in.Role == "worker" && (in.WorkShape != "scout" || in.ParallelReason != nil) {
 		buildTicket, e := workqueue.BuildTicketTx(ctx, tx, in.TicketNodeID, in.WorkOrderID, in.RunID)
 		if e != nil {
 			return nil, e
@@ -1086,6 +1089,9 @@ func (m *Module) registerBeforeEvents(r *http.Request, tx pgx.Tx, p tenant.Princ
 		if err != nil {
 			return nil, err
 		}
+	}
+	if err = recordReadOnlyAdmission(ctx, tx, p, s); err != nil {
+		return nil, err
 	}
 	if err = recordParallelBuild(ctx, tx, p, s); err != nil {
 		return nil, err
@@ -1333,6 +1339,22 @@ func (m *Module) bind(r *http.Request, tx pgx.Tx, p tenant.Principal) (any, erro
 	if s.StoppedAt != nil || s.Revision != in.ExpectedRevision {
 		return nil, workorders.Fail(409, "session revision conflict")
 	}
+	// The locked stored shape is the authority. Detaching must not erase it.
+	if s.WorkShape == "scout" && in.WorkShape != "scout" {
+		return nil, workorders.Fail(409, "read-only session cannot change work shape or detach")
+	}
+	if err := readOnlyDeliveryBinding(in.WorkShape, s.Branch, s.WorkOrderID, s.RunID, s.Commits); err != nil {
+		return nil, err
+	}
+	if !same(s.TicketNodeID, in.TicketNodeID) {
+		var reviewer bool
+		if err := tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM review_runs WHERE reviewer_session_id=$1)`, s.ID).Scan(&reviewer); err != nil {
+			return nil, err
+		}
+		if reviewer {
+			return nil, workorders.Fail(409, "authenticated reviewer session must retain its ticket")
+		}
+	}
 	if in.ParallelReason != nil && (s.Role != "worker" || in.TicketNodeID == nil) {
 		return nil, workorders.Fail(400, "parallel_reason requires a worker bound to a ticket")
 	}
@@ -1368,7 +1390,7 @@ func (m *Module) bind(r *http.Request, tx pgx.Tx, p tenant.Principal) (any, erro
 		return nil, err
 	}
 	if !same(s.TicketNodeID, in.TicketNodeID) {
-		if s.Role == "worker" {
+		if s.Role == "worker" && (in.WorkShape != "scout" || in.ParallelReason != nil) {
 			buildTicket, e := workqueue.BuildTicketTx(ctx, tx, in.TicketNodeID, s.WorkOrderID, s.RunID)
 			if e != nil {
 				return nil, e
@@ -1415,6 +1437,11 @@ func (m *Module) bind(r *http.Request, tx pgx.Tx, p tenant.Principal) (any, erro
 	}
 	if err = record(ctx, tx, p, s, "bound", before, s); err != nil {
 		return nil, err
+	}
+	if !same(before.TicketNodeID, s.TicketNodeID) || before.WorkShape != s.WorkShape {
+		if err = recordReadOnlyAdmission(ctx, tx, p, s); err != nil {
+			return nil, err
+		}
 	}
 	if !same(before.TicketNodeID, s.TicketNodeID) {
 		err = recordParallelBuild(ctx, tx, p, s)
@@ -1473,6 +1500,9 @@ func (m *Module) heartbeat(r *http.Request, tx pgx.Tx, p tenant.Principal) (resu
 	}
 	s, err := worker(ctx, tx, r, p)
 	if err != nil {
+		return nil, err
+	}
+	if err := readOnlyDeliveryBinding(s.WorkShape, in.Branch, nil, nil, in.Commits); err != nil {
 		return nil, err
 	}
 	bindingError := s.inboxBindingCode

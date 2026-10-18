@@ -12,6 +12,21 @@ different model families even when the generic review policy is `off`. Harness,
 model and reasoning effort are captured from the reviewer session when the run
 is created and cannot be supplied in the verdict. Runs expire after 30 minutes.
 
+Reviewers first register through the normal harness path as `role=worker`,
+`work_shape=scout`. Scouts remain visible on their ticket alongside an active
+builder or open delivery without claiming a builder slot. The stored scout
+classification cannot be removed by rebind, detach, heartbeat or paused resume.
+Branch, work-order and agent-run bindings and delivery commit reports are
+refused inside the mutation transaction. Each read-only admission has a
+`harness.read_only_admitted` ticket event, including the session and actor;
+registration replay does not duplicate it. A reviewer session used by a review
+run retains its ticket. Worker/coordinator hierarchy roles remain unchanged.
+
+The dispatcher then uses that session in the existing review-run creation path
+below. Scout metadata grants no approval authority; only the bound reviewer can
+claim and submit that run credential. This admission slice belongs to the
+AEON-1394 go-live and adds no separate rollout control.
+
 The assigned reviewer uses its own agent key to claim the run credential once.
 The creator and any principal with coordinator authority cannot claim it. The
 credential is bound to that key and run, stored only as a digest, and consumed
