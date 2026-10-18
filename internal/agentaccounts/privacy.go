@@ -45,7 +45,7 @@ func (m *Module) privateResponse(next http.HandlerFunc) http.HandlerFunc {
 				return
 			}
 			if len(ids) > 0 {
-				err = db.InTenant(r.Context(), m.pool, p.TenantID, func(tx pgx.Tx) error {
+				err = db.InTenantReadSnapshot(r.Context(), m.pool, p.TenantID, func(tx pgx.Tx) error {
 					policy, err := accountprivacy.Load(r.Context(), tx, p, ids)
 					if err != nil {
 						return err

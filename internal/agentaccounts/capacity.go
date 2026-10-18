@@ -292,6 +292,13 @@ func ingestLockedReadings(ctx context.Context, tx pgx.Tx, tenantID string, a Acc
 }
 
 func readCapacity(ctx context.Context, tx pgx.Tx, id string, current bool) ([]capacity.Reading, error) {
+	if s := projectionInputs(tx); s != nil && current {
+		v := s.readings[id]
+		if v == nil {
+			v = []capacity.Reading{}
+		}
+		return v, nil
+	}
 	query := `SELECT window_kind,bucket,window_minutes,used_percent::float8,resets_at,read_at,source,plan,ordinary_usage_allowed,COALESCE(run_id::text,''),phase,plus_minus::float8,evidence FROM account_capacity_readings WHERE account_id=$1 ORDER BY read_at DESC, CASE source WHEN 'harness' THEN 0 WHEN 'agentd' THEN 1 ELSE 2 END LIMIT 200`
 	args := []any{id}
 	if current {
@@ -300,7 +307,7 @@ func readCapacity(ctx context.Context, tx pgx.Tx, id string, current bool) ([]ca
 			return nil, err
 		}
 		args = append(args, now)
-		query = `SELECT window_kind,bucket,window_minutes,used_percent::float8,resets_at,read_at,source,plan,ordinary_usage_allowed,COALESCE(run_id::text,''),phase,plus_minus::float8,evidence FROM (SELECT DISTINCT ON(window_kind,bucket) * FROM account_capacity_readings WHERE account_id=$1 AND (EXISTS(SELECT 1 FROM account_allowance_windows w WHERE w.account_id=account_capacity_readings.account_id AND w.capacity_kind=window_kind AND w.capacity_bucket=bucket AND w.capacity_read_at=read_at AND NOT w.capacity_retired)) ORDER BY window_kind,bucket,CASE WHEN source<>'estimate' AND read_at>=$2::timestamptz-interval '10 minutes' AND resets_at>$2 THEN 0 ELSE 1 END,read_at DESC, CASE source WHEN 'harness' THEN 0 WHEN 'agentd' THEN 1 ELSE 2 END) r ORDER BY resets_at,window_kind,bucket`
+		query = currentReadingsSQL
 	}
 	rows, err := tx.Query(ctx, query, args...)
 	if err != nil {
@@ -329,7 +336,7 @@ func (m *Module) capacityHistory(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	var out []capacity.Reading
-	err := m.in(r.Context(), p.TenantID, func(tx pgx.Tx) error {
+	err := m.read(r.Context(), p.TenantID, func(tx pgx.Tx) error {
 		id := r.PathValue("accountId")
 		if !uuidRE.MatchString(id) {
 			return fail(404, "account not found")
@@ -400,7 +407,7 @@ func (m *Module) capacityList(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var out []accountCapacity
-	err := m.in(r.Context(), p.TenantID, func(tx pgx.Tx) error {
+	err := m.read(r.Context(), p.TenantID, func(tx pgx.Tx) error {
 		var err error
 		out, err = projectCapacity(r.Context(), tx, p.ID, nil, 0)
 		return err
@@ -477,7 +484,7 @@ func (m *Module) capacityPreview(w http.ResponseWriter, r *http.Request) {
 		draft.Override, draft.OverrideUntil = "", nil
 	}
 	var out []accountCapacity
-	err = m.in(ctx, p.TenantID, func(tx pgx.Tx) error {
+	err = m.read(ctx, p.TenantID, func(tx pgx.Tx) error {
 		if draft.Override == "away" {
 			now, err := dbNow(ctx, tx)
 			if err != nil {
@@ -511,8 +518,10 @@ type previewDraft struct {
 // paces every account on the schedule it would follow after saving the draft,
 // walking at most budget integration steps.
 func projectCapacity(ctx context.Context, tx pgx.Tx, person string, draft *previewDraft, budget int) ([]accountCapacity, error) {
+	ctx, cancel := context.WithTimeout(ctx, 10*time.Second)
+	defer cancel()
 	out := []accountCapacity{}
-	accounts, err := listAccounts(ctx, tx)
+	accounts, err := queryCapacityAccounts(ctx, tx, false)
 	if err != nil {
 		return nil, err
 	}
@@ -520,12 +529,21 @@ func projectCapacity(ctx context.Context, tx pgx.Tx, person string, draft *previ
 	if err != nil {
 		return nil, err
 	}
+	ctx = context.WithValue(ctx, clockKey{}, now)
+	snapshot, err := loadCapacityProjection(ctx, tx, person, now)
+	if err != nil {
+		return nil, err
+	}
+	tx = &capacityReadTx{Tx: tx, projection: snapshot}
 	entries, err := loadScheduleEntries(ctx, tx, person)
 	if err != nil {
 		return nil, err
 	}
 	fallback, err := personDefaultSchedule(ctx, tx, person)
 	if err != nil {
+		return nil, err
+	}
+	if err := snapshot.loadProjectionBaselines(ctx, tx.(*capacityReadTx).Tx, accounts, person, draft, now); err != nil {
 		return nil, err
 	}
 	previous := userSchedule(entries, fallback)
@@ -549,12 +567,9 @@ func projectCapacity(ctx context.Context, tx pgx.Tx, person string, draft *previ
 		}
 		summary := learned.summary(now, s)
 		item.Learning = &summary
-		if err := tx.QueryRow(ctx, `SELECT NOT EXISTS(SELECT 1 FROM agent_pairing_enrollments WHERE account_id=$1 AND (ongoing_approved_at IS NULL OR state<>'connected'))`, a.ID).Scan(&item.OngoingUseApproved); err != nil {
-			return nil, err
-		}
-		if err := tx.QueryRow(ctx, `SELECT a.last_probe_failure,(SELECT min(w.ends_at) FROM account_allowance_windows w WHERE w.account_id=a.id AND `+currentCapacityWindows+`) FROM agent_accounts a WHERE a.id=$1`, a.ID).Scan(&item.ProbeFailure, &item.LimitingReset); err != nil {
-			return nil, err
-		}
+		item.OngoingUseApproved = a.OngoingUseApproved
+		item.ProbeFailure = snapshot.stats[a.ID].failure
+		item.LimitingReset = snapshot.stats[a.ID].reset
 		readings, err := readCapacity(ctx, tx, a.ID, true)
 		if err != nil {
 			return nil, err
@@ -638,7 +653,11 @@ func (m *Module) capacitySchedule(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	out := []scheduleOverride{}
-	err := m.in(r.Context(), p.TenantID, func(tx pgx.Tx) error {
+	enter := m.in
+	if r.Method == http.MethodGet {
+		enter = m.read
+	}
+	err := enter(r.Context(), p.TenantID, func(tx pgx.Tx) error {
 		if r.Method == "GET" {
 			rows, err := tx.Query(r.Context(), `SELECT scope,scope_key,schedule FROM account_capacity_schedules WHERE principal_id=$1 ORDER BY scope,scope_key`, p.ID)
 			if err != nil {
@@ -905,6 +924,8 @@ func (s *scheduleOverride) UnmarshalJSON(raw []byte) error {
 // account_readiness_facts, and the observation is the window start, so the
 // reported percent is use inside this period. A missing readings row must not
 // zero that use on every update and reopen the day's share.
+const capacityBaselineSQL = `SELECT used_percent::float8,read_at FROM account_capacity_readings WHERE account_id=$1 AND window_kind=$2 AND bucket=$3 AND resets_at=$4 AND read_at>=$5 AND read_at<=$6 AND source<>'estimate' ORDER BY read_at,CASE source WHEN 'harness' THEN 0 ELSE 1 END LIMIT 1`
+
 func readingPacing(ctx context.Context, tx pgx.Tx, id string, v capacity.Reading, now time.Time, s capacity.Schedule) (capacity.Pacing, bool, error) {
 	period, _ := s.Period(now)
 	start := v.StartsAt()
@@ -921,9 +942,7 @@ func readingPacing(ctx context.Context, tx pgx.Tx, id string, v capacity.Reading
 		if openedHere {
 			bound = start
 		}
-		var baseline float64
-		var at time.Time
-		err := tx.QueryRow(ctx, `SELECT used_percent::float8,read_at FROM account_capacity_readings WHERE account_id=$1 AND window_kind=$2 AND bucket=$3 AND resets_at=$4 AND read_at>=$5 AND read_at<=$6 AND source<>'estimate' ORDER BY read_at,CASE source WHEN 'harness' THEN 0 ELSE 1 END LIMIT 1`, id, v.WindowKind, v.Bucket, v.ResetsAt, bound, v.ReadAt).Scan(&baseline, &at)
+		baseline, at, err := readPacingBaseline(ctx, tx, id, v, bound)
 		if err != nil && !isNoRows(err) {
 			return capacity.Pacing{}, false, err
 		}
@@ -944,7 +963,9 @@ func readingPacing(ctx context.Context, tx pgx.Tx, id string, v capacity.Reading
 	}
 	metric := learned.metric(v, now, s, "")
 	var parallel int
-	if err := tx.QueryRow(ctx, `SELECT max_parallel_runs FROM agent_accounts WHERE id=$1`, id).Scan(&parallel); err != nil {
+	if inputs := projectionInputs(tx); inputs != nil {
+		parallel = inputs.accounts[id].MaxParallel
+	} else if err := tx.QueryRow(ctx, `SELECT max_parallel_runs FROM agent_accounts WHERE id=$1`, id).Scan(&parallel); err != nil {
 		return capacity.Pacing{}, false, err
 	}
 	drift := 0.0
@@ -963,17 +984,22 @@ func readingPacing(ctx context.Context, tx pgx.Tx, id string, v capacity.Reading
 	return p, known, err
 }
 
-func routingSchedule(ctx context.Context, tx pgx.Tx, a Account) (capacity.Schedule, error) {
-	var person *string
-	// Pairing and an explicit account owner take precedence. An unpaired agent
-	// with one human key creator can use that person's pool/user defaults before
-	// an account override has ever been saved. Ambiguous ownership stays unset.
-	err := tx.QueryRow(ctx, `SELECT COALESCE(
+const capacityOwnerSQL = `SELECT COALESCE(
  a.owner_person_id,
  (SELECT p.approved_by FROM agent_pairing_enrollments e JOIN agent_pairing_requests p ON p.tenant_id=e.tenant_id AND p.id=e.request_id WHERE e.account_id=a.id),
  a.capacity_owner,
  (SELECT (array_agg(DISTINCT k.created_by_principal_id))[1] FROM agent_keys k JOIN principals p ON p.tenant_id=k.tenant_id AND p.id=k.created_by_principal_id WHERE k.tenant_id=a.tenant_id AND k.principal_id=a.registered_by_principal_id AND p.kind='person' HAVING count(DISTINCT k.created_by_principal_id)=1)
-)::text FROM agent_accounts a WHERE a.id=$1`, a.ID).Scan(&person)
+)::text FROM agent_accounts a WHERE a.id=$1`
+
+func routingSchedule(ctx context.Context, tx pgx.Tx, a Account) (capacity.Schedule, error) {
+	if s := projectionInputs(tx); s != nil {
+		return s.schedules[a.ID], nil
+	}
+	var person *string
+	// Pairing and an explicit account owner take precedence. An unpaired agent
+	// with one human key creator can use that person's pool/user defaults before
+	// an account override has ever been saved. Ambiguous ownership stays unset.
+	err := tx.QueryRow(ctx, capacityOwnerSQL, a.ID).Scan(&person)
 	if err != nil {
 		return capacity.Schedule{}, err
 	}

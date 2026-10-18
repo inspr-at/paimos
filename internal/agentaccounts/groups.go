@@ -99,7 +99,11 @@ func (m *Module) groups(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	var out any
-	err := m.write(r.Context(), p, permission, func(tx pgx.Tx) error {
+	enter := m.write
+	if r.Method == http.MethodGet {
+		enter = m.readPerson
+	}
+	err := enter(r.Context(), p, permission, func(tx pgx.Tx) error {
 		if r.Method == http.MethodGet {
 			items, err := listGroups(r.Context(), tx)
 			out = items
@@ -185,7 +189,11 @@ func (m *Module) pins(w http.ResponseWriter, r *http.Request) {
 		in.Harness = r.URL.Query().Get("harness")
 	}
 	var out []TicketPin
-	err := m.write(r.Context(), p, permission, func(tx pgx.Tx) error {
+	enter := m.write
+	if r.Method == http.MethodGet {
+		enter = m.readPerson
+	}
+	err := enter(r.Context(), p, permission, func(tx pgx.Tx) error {
 		switch r.Method {
 		case http.MethodGet:
 			var err error
@@ -231,7 +239,7 @@ func (m *Module) use(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var out UseResult
-	err := m.in(r.Context(), p.TenantID, func(tx pgx.Tx) error {
+	err := m.read(r.Context(), p.TenantID, func(tx pgx.Tx) error {
 		ownOnly := p.Kind == tenant.Agent
 		if p.Kind == tenant.Agent {
 			scopes, err := keyScopes(r.Context(), tx, r, p)

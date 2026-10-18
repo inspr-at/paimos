@@ -31,6 +31,9 @@ type scheduleEntry struct {
 }
 
 func loadScheduleEntries(ctx context.Context, tx pgx.Tx, person string) ([]scheduleEntry, error) {
+	if s := projectionInputs(tx); s != nil {
+		return s.entries[person], nil
+	}
 	rows, err := tx.Query(ctx, `SELECT scope,scope_key,schedule FROM account_capacity_schedules WHERE principal_id=$1 ORDER BY scope,scope_key`, person)
 	if err != nil {
 		return nil, err
@@ -52,6 +55,9 @@ func loadScheduleEntries(ctx context.Context, tx pgx.Tx, person string) ([]sched
 }
 
 func personDefaultSchedule(ctx context.Context, tx pgx.Tx, person string) (capacity.Schedule, error) {
+	if s := projectionInputs(tx); s != nil {
+		return s.defaults[person], nil
+	}
 	var zone string
 	err := tx.QueryRow(ctx, `SELECT timezone FROM personal_profiles WHERE principal_id=$1`, person).Scan(&zone)
 	if err != nil && !isNoRows(err) {

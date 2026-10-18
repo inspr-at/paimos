@@ -143,8 +143,16 @@ const currentReadinessResources = `SELECT m.resource_id FROM account_readiness_m
  WHERE m.account_id IN (` + quotaAccounts + `) AND m.binding_revision=member.link_revision
  AND (resource.identity_kind<>'person_confirmed' OR resource.identity_key=encode(sha256(convert_to('quota:'||member.harness||':'||COALESCE(member.quota_pool_fingerprint,''),'UTF8')),'hex'))`
 
+const capacityFactsSQL = `SELECT f.resource_id::text,f.window_key,f.source,f.observed_at,f.resets_at,f.reading_at,f.used_percent,f.credit_state,f.remaining,f.stop_kind,f.denial_reason,f.reading_error,f.failure_count,f.check_next_attempt_at,f.backoff_step,f.next_attempt_at,f.wait_id::text,f.early_recovery_used,f.recovery_run_id::text FROM account_readiness_facts f WHERE f.resource_id IN (` + currentReadinessResources + `) AND (f.window_key<>'check' OR (f.reported_by_account_id=$1 AND f.binding_revision=$2)) ORDER BY 1,2 LIMIT 33`
+
 func loadReadinessFacts(ctx context.Context, tx pgx.Tx, a Account, now time.Time) ([]ReadinessFact, error) {
-	rows, err := tx.Query(ctx, `SELECT f.resource_id::text,f.window_key,f.source,f.observed_at,f.resets_at,f.reading_at,f.used_percent,f.credit_state,f.remaining,f.stop_kind,f.denial_reason,f.reading_error,f.failure_count,f.check_next_attempt_at,f.backoff_step,f.next_attempt_at,f.wait_id::text,f.early_recovery_used,f.recovery_run_id::text FROM account_readiness_facts f WHERE f.resource_id IN (`+currentReadinessResources+`) AND (f.window_key<>'check' OR (f.reported_by_account_id=$1 AND f.binding_revision=$2)) ORDER BY 1,2 LIMIT 33`, a.ID, a.LinkRevision)
+	if s := projectionInputs(tx); s != nil {
+		if len(s.facts[a.ID]) > 32 {
+			return nil, fail(503, "too many readiness facts")
+		}
+		return s.facts[a.ID], nil
+	}
+	rows, err := tx.Query(ctx, capacityFactsSQL, a.ID, a.LinkRevision)
 	if err != nil {
 		return nil, err
 	}
@@ -379,6 +387,12 @@ func ensureLocalReadinessResource(ctx context.Context, tx pgx.Tx, p tenant.Princ
 // The same canonical local membership is used for legacy observations and
 // per-account capture status; read paths never invent resource identifiers.
 func localReadinessResource(ctx context.Context, tx pgx.Tx, a Account) (string, error) {
+	if s := projectionInputs(tx); s != nil {
+		if id := s.local[a.ID]; id != "" {
+			return id, nil
+		}
+		return "", pgx.ErrNoRows
+	}
 	kind := "subscription_quota"
 	if a.Harness == "pi" {
 		kind = "key_cap"

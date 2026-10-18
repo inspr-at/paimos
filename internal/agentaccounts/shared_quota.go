@@ -107,6 +107,12 @@ func sharedQuotaWindows(ctx context.Context, tx pgx.Tx, a Account, own []Window,
 }
 
 func sharedQuotaWindowsLimit(ctx context.Context, tx pgx.Tx, a Account, own []Window, now time.Time, accountBound, windowBound int) ([]Window, error) {
+	if s := projectionInputs(tx); s != nil {
+		if a.QuotaPoolFingerprint == "" {
+			return own, nil
+		}
+		return s.shared[a.Harness+":"+a.QuotaPoolFingerprint], nil
+	}
 	if a.QuotaPoolFingerprint == "" {
 		return own, nil
 	}
@@ -142,6 +148,10 @@ func sharedQuotaWindowsLimit(ctx context.Context, tx pgx.Tx, a Account, own []Wi
 	if err != nil {
 		return nil, err
 	}
+	return projectQuotaWindows(ids, all, now), nil
+}
+
+func projectQuotaWindows(ids []string, all map[string][]Window, now time.Time) []Window {
 	var history, out []Window
 	latest := map[string]Window{}
 	for _, id := range ids {
@@ -185,5 +195,5 @@ func sharedQuotaWindowsLimit(ctx context.Context, tx pgx.Tx, a Account, own []Wi
 		out = append(out, w)
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].ID < out[j].ID })
-	return out, nil
+	return out
 }

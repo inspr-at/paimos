@@ -58,7 +58,9 @@ func admissionInputs(ctx context.Context, tx pgx.Tx, a Account, all []Window, no
 	}
 	if a.LastProbeOK != nil && !*a.LastProbeOK {
 		var failure string
-		if err := tx.QueryRow(ctx, `SELECT last_probe_failure FROM agent_accounts WHERE id=$1`, a.ID).Scan(&failure); err != nil {
+		if data := projectionInputs(tx); data != nil {
+			failure = data.stats[a.ID].failure
+		} else if err := tx.QueryRow(ctx, `SELECT last_probe_failure FROM agent_accounts WHERE id=$1`, a.ID).Scan(&failure); err != nil {
 			return nil, nil, err
 		}
 		if failure == "auth_failed" {
@@ -72,7 +74,9 @@ func admissionInputs(ctx context.Context, tx pgx.Tx, a Account, all []Window, no
 	if slots >= a.MaxParallel {
 		wait := waitFor("capacity")
 		var unconfirmed bool
-		if err := tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM agent_runs WHERE account_id=$1
+		if data := projectionInputs(tx); data != nil {
+			unconfirmed = data.stats[a.ID].unconfirmed
+		} else if err := tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM agent_runs WHERE account_id=$1
  AND trace->'work_lifecycle_release'->>'exit_unconfirmed'='true')`, a.ID).Scan(&unconfirmed); err != nil {
 			return nil, nil, err
 		}
@@ -82,11 +86,16 @@ func admissionInputs(ctx context.Context, tx pgx.Tx, a Account, all []Window, no
 		return nil, wait, nil
 	}
 	var approved bool
-	err := tx.QueryRow(ctx, `SELECT NOT EXISTS(
+	var err error
+	if data := projectionInputs(tx); data != nil {
+		approved = data.stats[a.ID].approved
+	} else {
+		err = tx.QueryRow(ctx, `SELECT NOT EXISTS(
  SELECT 1 FROM agent_pairing_enrollments e
  JOIN agent_pairing_computers c ON c.tenant_id=e.tenant_id AND c.id=e.computer_id
  JOIN agent_pairing_requests q ON q.tenant_id=e.tenant_id AND q.id=e.request_id
  WHERE e.account_id=$1 AND (e.ongoing_approved_at IS NULL OR e.state<>'connected' OR c.state<>'connected' OR q.state<>'redeemed'))`, a.ID).Scan(&approved)
+	}
 	if err != nil {
 		return nil, nil, err
 	}

@@ -47,6 +47,9 @@ func scanLimit(row scanner) (LimitRule, error) {
 }
 
 func currentLimit(ctx context.Context, tx pgx.Tx, accountID string) (*LimitRule, error) {
+	if s := projectionInputs(tx); s != nil {
+		return s.limits[accountID], nil
+	}
 	r, err := scanLimit(tx.QueryRow(ctx, `SELECT `+limitColumns+` FROM account_limit_rules WHERE account_id=$1 AND removed_at IS NULL`, accountID))
 	if isNoRows(err) {
 		return nil, nil
@@ -139,6 +142,9 @@ func limitPeriod(period, timezone string, now time.Time) (time.Time, time.Time) 
 // counters, a vendor name, or session-only list prices are not cost accounting
 // for routed runs. Legacy zero-default deltas cannot prove a measured zero.
 func costLimitSupported(ctx context.Context, tx pgx.Tx, accountID string) (bool, error) {
+	if s := projectionInputs(tx); s != nil {
+		return s.stats[accountID].cost, nil
+	}
 	var supported bool
 	err := tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM run_telemetry t JOIN agent_runs r
  ON r.tenant_id=t.tenant_id AND r.id=t.run_id WHERE r.account_id=$1 AND t.cost_micros_delta>0)`, accountID).Scan(&supported)
@@ -150,16 +156,25 @@ func costLimitSupported(ctx context.Context, tx pgx.Tx, accountID string) (bool,
 // one dollar. A caller can increase a hold, but cannot lower learned/default use.
 // Persist all units, even without a rule, so adding/repeating a cap counts runs
 // that were already admitted. Account locking makes this snapshot atomic.
-func learnedLimitEstimates(ctx context.Context, tx pgx.Tx, accountID string, requested map[string]int64) (map[string]int64, error) {
-	out := map[string]int64{"runs": 1, "percent": 1}
-	var requests, tokens, cost *int64
-	err := tx.QueryRow(ctx, `WITH recent AS (
+const capacityEstimatesSQL = `WITH recent AS (
  SELECT id,tenant_id FROM agent_runs WHERE account_id=$1 AND purpose='managed'
  AND status IN ('completed','failed','cancelled','ownership_lost') AND started_at IS NOT NULL
  ORDER BY started_at DESC LIMIT 20), totals AS (
  SELECT sum(t.turn_count_delta)::bigint requests, sum(t.input_tokens_delta+t.output_tokens_delta)::bigint tokens,
  sum(t.cost_micros_delta)::bigint cost FROM recent r JOIN run_telemetry t ON t.tenant_id=r.tenant_id AND t.run_id=r.id GROUP BY r.id)
- SELECT max(requests) FILTER(WHERE requests>0),max(tokens) FILTER(WHERE tokens>0),max(cost) FILTER(WHERE cost>0) FROM totals`, accountID).Scan(&requests, &tokens, &cost)
+ SELECT max(requests) FILTER(WHERE requests>0),max(tokens) FILTER(WHERE tokens>0),max(cost) FILTER(WHERE cost>0) FROM totals`
+
+func learnedLimitEstimates(ctx context.Context, tx pgx.Tx, accountID string, requested map[string]int64) (map[string]int64, error) {
+	if s := projectionInputs(tx); s != nil {
+		v := map[string]int64{}
+		for unit, n := range s.estimates[accountID] {
+			v[unit] = max(n, requested[unit])
+		}
+		return v, nil
+	}
+	out := map[string]int64{"runs": 1, "percent": 1}
+	var requests, tokens, cost *int64
+	err := tx.QueryRow(ctx, capacityEstimatesSQL, accountID).Scan(&requests, &tokens, &cost)
 	if err != nil {
 		return nil, err
 	}
@@ -181,9 +196,7 @@ func learnedLimitEstimates(ctx context.Context, tx pgx.Tx, accountID string, req
 // Each epoch gets its last pre-period reading as a baseline. For an epoch that
 // opened during the period, its first observed usage counts too. Corrections
 // never refund usage. Different overlapping limits are not added together.
-func percentUsed(ctx context.Context, tx pgx.Tx, accountID string, start, now time.Time) (float64, error) {
-	var used float64
-	err := tx.QueryRow(ctx, `WITH samples AS (
+const capacityPercentSQL = `WITH samples AS (
  SELECT DISTINCT ON (window_kind,bucket,resets_at,read_at) window_kind,bucket,resets_at,read_at,window_minutes,used_percent
  FROM account_capacity_readings WHERE account_id=$1 AND source<>'estimate' AND read_at<=$3
  ORDER BY window_kind,bucket,resets_at,read_at,CASE source WHEN 'harness' THEN 0 ELSE 1 END,used_percent DESC
@@ -193,7 +206,11 @@ func percentUsed(ctx context.Context, tx pgx.Tx, accountID string, start, now ti
  SELECT window_kind,bucket,sum(greatest(0,used_percent-COALESCE(previous,
  CASE WHEN resets_at-window_minutes*interval '1 minute'>=$2 THEN 0 ELSE used_percent END))) total
  FROM deltas WHERE read_at>=$2 GROUP BY window_kind,bucket)
- SELECT COALESCE(max(total),0)::float8 FROM totals`, accountID, start, now).Scan(&used)
+ SELECT COALESCE(max(total),0)::float8 FROM totals`
+
+func percentUsed(ctx context.Context, tx pgx.Tx, accountID string, start, now time.Time) (float64, error) {
+	var used float64
+	err := tx.QueryRow(ctx, capacityPercentSQL, accountID, start, now).Scan(&used)
 	return used, err
 }
 
@@ -202,7 +219,30 @@ func percentUsed(ctx context.Context, tx pgx.Tx, accountID string, start, now ti
 // after a started run finishes keeps its estimate for each overlapping period.
 // Unstarted cancelled/released runs consume nothing. Existing runs predating
 // the snapshot column use the same conservative estimate as a new admission.
+const capacityPercentHeldSQL = `SELECT COALESCE(sum(COALESCE((r.account_limit_estimates->>'percent')::bigint,1)),0)::float8
+ FROM agent_runs r WHERE r.account_id=$1 AND r.id::text<>$2 AND r.purpose='managed' AND (
+ r.status IN ('queued','starting','running','waiting') OR
+ (r.started_at<=$4 AND COALESCE(r.ended_at,r.started_at)>=$3 AND EXISTS(SELECT 1 FROM account_reservations ar JOIN account_allowance_windows w
+ ON w.tenant_id=ar.tenant_id AND w.id=ar.window_id WHERE ar.run_id=r.id AND w.capacity_kind IN ('refresh','blind'))
+ AND NOT EXISTS(SELECT 1 FROM account_capacity_readings c WHERE c.account_id=r.account_id AND c.source<>'estimate' AND c.read_at>=COALESCE(r.ended_at,r.started_at) AND c.read_at<=$4)))`
+
+const capacityRunsSQL = `SELECT count(*)::float8 FROM agent_runs WHERE account_id=$1 AND id::text<>$2 AND purpose='managed'
+ AND ((started_at>=$3 AND started_at<=$4) OR status IN ('queued','starting','running','waiting'))`
+
+const capacityUnitsSQL = `WITH usage AS (
+ SELECT r.id,r.status,r.started_at,r.ended_at,COALESCE((r.account_limit_estimates->>$2)::bigint,$6) estimate,
+ COALESCE(sum(CASE $2 WHEN 'requests' THEN t.turn_count_delta WHEN 'tokens' THEN t.input_tokens_delta+t.output_tokens_delta ELSE t.cost_micros_delta END),0) total,
+ COALESCE(sum(CASE $2 WHEN 'requests' THEN t.turn_count_delta WHEN 'tokens' THEN t.input_tokens_delta+t.output_tokens_delta ELSE t.cost_micros_delta END) FILTER(WHERE t.at>=$3),0) period_use
+ FROM agent_runs r LEFT JOIN run_telemetry t ON t.tenant_id=r.tenant_id AND t.run_id=r.id AND t.at<=$4
+ WHERE r.account_id=$1 AND r.id::text<>$5 AND r.purpose='managed' GROUP BY r.tenant_id,r.id
+ ) SELECT COALESCE(sum(period_use+CASE
+ WHEN status IN ('queued','starting','running','waiting') THEN greatest(0,estimate-total)
+ WHEN COALESCE(ended_at,started_at)>=$3 AND started_at<=$4 AND total=0 THEN estimate ELSE 0 END),0)::float8 FROM usage`
+
 func limitUsed(ctx context.Context, tx pgx.Tx, accountID string, rule LimitRule, windows []Window, start time.Time, exceptRun string, now time.Time) (float64, error) {
+	if s := projectionInputs(tx); s != nil {
+		return s.limitUse[accountID], nil
+	}
 	nativeHeld, err := nativeLimitHeldTx(ctx, tx, accountID, rule.Unit, start, exceptRun, now)
 	if err != nil {
 		return 0, err
@@ -213,18 +253,12 @@ func limitUsed(ctx context.Context, tx pgx.Tx, accountID string, rule LimitRule,
 			return 0, err
 		}
 		var held float64
-		err = tx.QueryRow(ctx, `SELECT COALESCE(sum(COALESCE((r.account_limit_estimates->>'percent')::bigint,1)),0)::float8
- FROM agent_runs r WHERE r.account_id=$1 AND r.id::text<>$2 AND r.purpose='managed' AND (
- r.status IN ('queued','starting','running','waiting') OR
- (r.started_at<=$4 AND COALESCE(r.ended_at,r.started_at)>=$3 AND EXISTS(SELECT 1 FROM account_reservations ar JOIN account_allowance_windows w
- ON w.tenant_id=ar.tenant_id AND w.id=ar.window_id WHERE ar.run_id=r.id AND w.capacity_kind IN ('refresh','blind'))
- AND NOT EXISTS(SELECT 1 FROM account_capacity_readings c WHERE c.account_id=r.account_id AND c.source<>'estimate' AND c.read_at>=COALESCE(r.ended_at,r.started_at) AND c.read_at<=$4)))`, accountID, exceptRun, start, now).Scan(&held)
+		err = tx.QueryRow(ctx, capacityPercentHeldSQL, accountID, exceptRun, start, now).Scan(&held)
 		return measured + held + nativeHeld, err
 	}
 	if rule.Unit == "runs" {
 		var n float64
-		err := tx.QueryRow(ctx, `SELECT count(*)::float8 FROM agent_runs WHERE account_id=$1 AND id::text<>$2 AND purpose='managed'
- AND ((started_at>=$3 AND started_at<=$4) OR status IN ('queued','starting','running','waiting'))`, accountID, exceptRun, start, now).Scan(&n)
+		err := tx.QueryRow(ctx, capacityRunsSQL, accountID, exceptRun, start, now).Scan(&n)
 		return n + nativeHeld, err
 	}
 	estimates, err := learnedLimitEstimates(ctx, tx, accountID, nil)
@@ -232,15 +266,7 @@ func limitUsed(ctx context.Context, tx pgx.Tx, accountID string, rule LimitRule,
 		return 0, err
 	}
 	var n float64
-	err = tx.QueryRow(ctx, `WITH usage AS (
- SELECT r.id,r.status,r.started_at,r.ended_at,COALESCE((r.account_limit_estimates->>$2)::bigint,$6) estimate,
- COALESCE(sum(CASE $2 WHEN 'requests' THEN t.turn_count_delta WHEN 'tokens' THEN t.input_tokens_delta+t.output_tokens_delta ELSE t.cost_micros_delta END),0) total,
- COALESCE(sum(CASE $2 WHEN 'requests' THEN t.turn_count_delta WHEN 'tokens' THEN t.input_tokens_delta+t.output_tokens_delta ELSE t.cost_micros_delta END) FILTER(WHERE t.at>=$3),0) period_use
- FROM agent_runs r LEFT JOIN run_telemetry t ON t.tenant_id=r.tenant_id AND t.run_id=r.id AND t.at<=$4
- WHERE r.account_id=$1 AND r.id::text<>$5 AND r.purpose='managed' GROUP BY r.tenant_id,r.id
- ) SELECT COALESCE(sum(period_use+CASE
- WHEN status IN ('queued','starting','running','waiting') THEN greatest(0,estimate-total)
- WHEN COALESCE(ended_at,started_at)>=$3 AND started_at<=$4 AND total=0 THEN estimate ELSE 0 END),0)::float8 FROM usage`, accountID, rule.Unit, start, now, exceptRun, estimates[rule.Unit]).Scan(&n)
+	err = tx.QueryRow(ctx, capacityUnitsSQL, accountID, rule.Unit, start, now, exceptRun, estimates[rule.Unit]).Scan(&n)
 	return n + nativeHeld, err
 }
 
@@ -266,8 +292,17 @@ func limitWait(ctx context.Context, tx pgx.Tx, a Account, active []Window, now t
 	// A repeat does not refund old usage or release the original paced cap.
 	if rule.FromWindowID != nil {
 		var w Window
-		err := tx.QueryRow(ctx, `SELECT starts_at,ends_at,unit,allowance,used,reserved,pace_model,burst_ratio::float8
+		var err error
+		if inputs := projectionInputs(tx); inputs != nil {
+			var ok bool
+			w, ok = inputs.fromWindows[*rule.FromWindowID]
+			if !ok {
+				err = pgx.ErrNoRows
+			}
+		} else {
+			err = tx.QueryRow(ctx, `SELECT starts_at,ends_at,unit,allowance,used,reserved,pace_model,burst_ratio::float8
  FROM account_allowance_windows WHERE id=$1 AND account_id=$2`, *rule.FromWindowID, a.ID).Scan(&w.StartsAt, &w.EndsAt, &w.Unit, &w.Allowance, &w.Used, &w.Reserved, &w.PaceModel, &w.BurstRatio)
+		}
 		if err != nil {
 			return nil, err
 		}
@@ -356,6 +391,9 @@ func accountLimitUse(ctx context.Context, tx pgx.Tx, a Account, now time.Time) (
 // monthSpend is the list-price spend this local month of an account billed by
 // API key, in dollars with cents. Empty when no usage was ever billed by key.
 func monthSpend(ctx context.Context, tx pgx.Tx, accountID, timezone string, now time.Time) (string, error) {
+	if s := projectionInputs(tx); s != nil {
+		return s.spend[accountID], nil
+	}
 	start, _ := limitPeriod("month", timezone, now)
 	var api *bool
 	var spend string

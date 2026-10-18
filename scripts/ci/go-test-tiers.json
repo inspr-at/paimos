@@ -758,6 +758,10 @@
     ,
     {"kind":"go","package":"internal/agentaccounts","name":"TestCapacityProbeFailureCause","tier":"GATED-FULL"}
     ,
+    {"kind":"go","package":"internal/agentaccounts","name":"TestCapacityProjectionBatchAndGolden","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/agentaccounts","name":"TestCapacityReadSnapshot","tier":"ESSENTIAL"}
+    ,
     {"kind":"go","package":"internal/agentaccounts","name":"TestCapacityStaleManualOverrideAndSchedules","tier":"GATED-FULL"}
     ,
     {"kind":"go","package":"internal/agentaccounts","name":"TestCatalogAvailabilityAndAllowanceBoundaries","tier":"GATED-FULL"}

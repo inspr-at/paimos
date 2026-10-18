@@ -56,7 +56,13 @@ func (m *Module) warningSettings(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
-	err := m.inReadinessWrite(ctx, p, func(tx pgx.Tx) error {
+	enter := m.inReadinessWrite
+	if r.Method == http.MethodGet {
+		enter = func(ctx context.Context, p tenant.Principal, fn func(pgx.Tx) error) error {
+			return m.read(ctx, p.TenantID, fn)
+		}
+	}
+	err := enter(ctx, p, func(tx pgx.Tx) error {
 		permission := "account.read"
 		if r.Method == http.MethodPut {
 			permission = "settings.manage"
@@ -417,7 +423,7 @@ func (m *Module) warningSessions(w http.ResponseWriter, r *http.Request) {
 		Items     []QuotaWarningSession `json:"items"`
 		NextAfter *string               `json:"next_after"`
 	}{Items: []QuotaWarningSession{}}
-	err := m.in(ctx, p.TenantID, func(tx pgx.Tx) error {
+	err := m.read(ctx, p.TenantID, func(tx pgx.Tx) error {
 		if authz.RequireTx(ctx, tx, p, "account.read", authz.Scope{}) != nil {
 			return fail(403, "account read permission required")
 		}
