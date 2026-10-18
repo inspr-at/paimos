@@ -7,6 +7,7 @@ func init() {
 	registerPermissions("delivery", []Permission{
 		{Key: "delivery.manage", Group: "Delivery", Description: "Manage delivery", Risk: "high", GrantableAt: []string{"workspace", "project"}, AgentGrantable: true, OwnerWorkstationGrantable: true},
 		{Key: "delivery.read", Group: "Delivery", Description: "Read delivery", Risk: "low", GrantableAt: []string{"workspace", "project"}, AgentGrantable: true, OwnerWorkstationGrantable: true},
+		{Key: "delivery.rollout.write", Group: "Delivery", Description: "Report validated rollout timing facts", Risk: "medium", GrantableAt: []string{"workspace", "project"}, AgentGrantable: true, OwnerWorkstationGrantable: true},
 		{Key: "delivery.route", Group: "Delivery", Description: "Route delivery", Risk: "medium", GrantableAt: []string{"workspace", "project"}, AgentGrantable: true, OwnerWorkstationGrantable: true},
 	})
 }

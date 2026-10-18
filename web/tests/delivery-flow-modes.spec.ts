@@ -10,10 +10,11 @@ import { mockSettings, settingsData } from './settings-fixtures'
 import { controlStability } from './control-stability'
 import { deliveryMetrics, mockDelivery } from './delivery-numbers-fixtures'
 import { mockFlow, RUN, ZONE } from './delivery-flow-fixtures'
+import { flowText } from '../src/lib/deliveryFlowText'
 
 test.use({ timezoneId: ZONE })
 
-async function setup(page: Page, options: { theme?: 'light' | 'dark'; lang?: 'en' | 'de'; level?: 'simple' | 'expert'; empty?: boolean; record?: boolean } = {}) {
+async function setup(page: Page, options: { theme?: 'light' | 'dark'; lang?: 'en' | 'de'; level?: 'simple' | 'expert'; empty?: boolean; record?: boolean; derived?: boolean } = {}) {
   const work = fixtures()
   work.preferences.theme = { choice: options.theme ?? 'light' }
   work.preferences['delivery:numbers'] = { level: options.level ?? 'simple', window: 7 }
@@ -22,7 +23,7 @@ async function setup(page: Page, options: { theme?: 'light' | 'dark'; lang?: 'en
   await mockWork(page, work, { nativeEvents: true })
   if (options.lang === 'de') { const data = settingsData(); data.profile.locale = 'de-AT'; await mockSettings(page, data) }
   await mockDelivery(page, async () => ({ status: 200, body: deliveryMetrics() }), ['delivery.read'])
-  return mockFlow(page, { empty: options.empty, record: options.record })
+  return mockFlow(page, { empty: options.empty, record: options.record, derived: options.derived })
 }
 const lanes = (page: Page) => page.getByTestId('flow-lanes')
 const chip = (page: Page) => page.getByTestId('flow-chip').locator('.shown')
@@ -222,11 +223,21 @@ test('a release no record has reported on says "not recorded" in the same four r
 // the first recorded run replaces it without a reload.
 test('without a recorded run every mode shows the empty state and no sample data, until the first run is recorded', async ({ page }) => {
   await page.setViewportSize({ width: 1440, height: 1300 })
-  const flow = await setup(page, { empty: true })
+  const flow = await setup(page, { empty: true, derived: true })
   await page.goto('/p/AEON/delivery?view=flow')
   const empty = page.getByTestId('flow-empty')
-  const copy = 'No recorded runs yet. Runs appear here once work goes through the PAIMOS work queue.'
+  const copy = 'No recorded runs yet. No linked GitHub App workflow runs or derived check suites, PAIMOS harness deliveries or work-queue rounds, or OPS rollout records have been recorded for this project.'
   await expect(empty).toHaveText(copy)
+  // Regional preferences keep the app in English (AEON-998); retain complete,
+  // impersonal German wording for the translated surface without changing that policy.
+  for (const [lang, missing, sources] of [
+    ['en', 'No linked', ['GitHub App', 'derived check suites', 'PAIMOS harness deliveries', 'work-queue rounds', 'OPS rollout records']],
+    ['de', 'fehlen', ['GitHub-App', 'Check-Suites', 'PAIMOS-Harness-Lieferungen', 'Arbeitsrunden', 'OPS-Rollout-Einträge']],
+  ] as const) {
+    const wording = flowText(lang).noneB
+    expect(wording).toContain(missing)
+    for (const source of sources) expect(wording).toContain(source)
+  }
   const button = (mode: string) => modes(page).locator(`[data-mode="${mode}"]`)
   const guard = await controlStability(page, { modes: modes(page), live: button('live'), replay: button('replay'), compare: button('compare'), empty })
   for (const mode of ['replay', 'compare', 'live'] as const) {
@@ -244,21 +255,35 @@ test('without a recorded run every mode shows the empty state and no sample data
   await expect(empty).toHaveCount(0)
   await expect(lanes(page).locator('.ln-lane')).toHaveCount(6)
   await expect(page.getByTestId('flow-moment-head')).toContainText('Release 126 is live but not working properly')
+  const selection = await controlStability(page, { modes: modes(page), follow: page.getByTestId('flow-follow'), zoom: page.getByTestId('flow-bar').getByRole('radiogroup', { name: 'Zoom' }) })
+  await selection.check(() => lanes(page).locator(`[data-step="0:${RUN.c991}:3"] .fl-hit`).click())
+  selection.done()
+  await expect(page.getByTestId('flow-moment-detail')).toContainText('derived from check suite')
+  await page.getByRole('radiogroup', { name: 'Level of detail' }).getByRole('radio', { name: 'Expert', exact: true }).click()
+  await expect(page.getByTestId('flow-moment-detail')).toContainText('GitHub App · derived from check suite')
+  await expect(page.getByTestId('flow-moment-detail').getByText('Round', { exact: true })).toHaveCount(0)
 })
 
 for (const [width, theme] of [[390, 'light'], [390, 'dark'], [1024, 'light'], [1024, 'dark'], [1440, 'light'], [1440, 'dark']] as const) {
   test(`the Flow empty state at ${width} ${theme} sits under the mode controls without sample data`, async ({ page }, info) => {
     await page.setViewportSize({ width, height: 900 })
-    await setup(page, { theme, empty: true })
+    await setup(page, { theme, lang: 'de', empty: true })
     await page.goto('/p/AEON/delivery?view=flow')
     const empty = page.getByTestId('flow-empty')
-    await expect(empty).toHaveText('No recorded runs yet. Runs appear here once work goes through the PAIMOS work queue.')
+    // A German regional preference does not change the app's English language.
+    await expect(empty).toHaveText('No recorded runs yet. No linked GitHub App workflow runs or derived check suites, PAIMOS harness deliveries or work-queue rounds, or OPS rollout records have been recorded for this project.')
+    const button = (mode: string) => modes(page).locator(`[data-mode="${mode}"]`)
+    const guard = await controlStability(page, { modes: modes(page), live: button('live'), replay: button('replay'), compare: button('compare') })
+    for (const mode of ['replay', 'compare', 'live']) {
+      await guard.check(async () => { await button(mode).click(); await expect(button(mode)).toHaveAttribute('aria-checked', 'true') })
+    }
+    guard.done()
     // Below the mode controls, inside the page, with the whole sentence readable.
     const [top, box] = [(await modes(page).boundingBox())!, (await empty.boundingBox())!]
     expect(box.y).toBeGreaterThanOrEqual(top.y + top.height)
     expect(box.x + box.width).toBeLessThanOrEqual(width + 0.5)
     expect(await empty.evaluate(el => el.scrollWidth - el.clientWidth)).toBeLessThanOrEqual(0)
-    await page.locator('.fl').screenshot({ path: info.outputPath(`aeon-1135/flow-empty-${width}-${theme}.png`) })
+    await page.locator('.fl').screenshot({ path: info.outputPath(`aeon-1472/flow-empty-${width}-${theme}.png`) })
   })
 }
 

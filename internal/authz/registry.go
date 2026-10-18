@@ -96,6 +96,9 @@ func builtinPermissions(key string) []string {
 		if p.Key == "agents.create" {
 			allow = key == "owner" || key == "admin"
 		}
+		if p.Key == "delivery.rollout.write" {
+			allow = key == "owner" || key == "admin"
+		}
 		if p.Key == "agents.plan.read" && key != "customer" {
 			allow = true
 		}
