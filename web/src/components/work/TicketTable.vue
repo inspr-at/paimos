@@ -1811,9 +1811,10 @@ button.release-chip:focus-visible { box-shadow: var(--focus-ring); }
   /* Keep the name and its facts on one line beside the touch controls. The
      shared clip tip discloses facts that do not fit, without hiding the name. */
   .group-caption { display: flex; align-items: center; flex: 1; min-width: 0; gap: 8px; }
-  .group-caption:has(.group-facts) > .group-label { flex: 0 1 auto; max-width: 40%; }
+  .group-caption > .group-label { flex: 0 1 auto; max-width: 40%; }
   .group-caption > :not(.group-label, .group-facts, .group-epic) { flex: none; }
   .group-caption .group-facts { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+  .group-caption + .group-spacer { display: none; }
   .group-end { flex: 0 0 100%; justify-content: flex-end; padding-left: 44px; }
   .group-toggle, .group-check-target { width: 44px; height: 44px; }
   .group-more, .group-more td { display: block; }
