@@ -449,9 +449,10 @@ test.describe('settings written from the detail', () => {
     await expect(claude.getByRole('radio', { name: 'Wait' })).toHaveCount(0)
     await expect(claude.locator('.cap-st')).toHaveText('At today’s limit · Codex next in the Models order')
     await expect(row(page, 'claude').locator('.cap-stl')).toHaveText('At today’s limit · Codex next')
-    // The line keeps the AEON-1030 place: after Boost today, before the account, one row as high as a folded setting.
-    expect((await claude.locator('.cd-dl > dt').allTextContents()).map(t => t.trim())).toEqual(['Pace', 'Boost today', 'At the limit', 'Account'])
-    const [boostRow, limitRow] = await Promise.all([claude.locator('.cd-dl > dd').nth(1).boundingBox(), claude.locator('.cd-dl > dd').nth(2).boundingBox()])
+    // The line keeps the AEON-1030 place: after Boost today, one row as high as a folded setting. AEON-1497's
+    // approved design starts the list with today's points; the accounts are the usage list above it.
+    expect((await claude.locator('.cd-dl > dt').allTextContents()).map(t => t.trim())).toEqual(['Today', 'Pace', 'Boost today', 'At the limit'])
+    const [boostRow, limitRow] = await Promise.all([claude.locator('.cd-dl > dd').nth(2).boundingBox(), claude.locator('.cd-dl > dd').nth(3).boundingBox()])
     expect(Math.abs(limitRow!.height - boostRow!.height)).toBeLessThanOrEqual(0.5)
     expect(backend.puts).toEqual([])
     // A later edit still sends at_limit for the previous release: the ladder the server reported, never the old Wait.
