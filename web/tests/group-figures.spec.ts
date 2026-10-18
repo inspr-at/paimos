@@ -57,6 +57,7 @@ async function open(page: Page, options: { width?: number; theme?: 'light' | 'da
   await options.routes?.(page)
   await page.goto(`/p/PHAROS${options.query ?? '?group=status'}`)
   await expect(rows(page).first()).toBeVisible()
+  await page.evaluate(() => document.fonts.ready)
   return { calls, errors, data: d }
 }
 const boxOf = (locator: Locator) => locator.evaluate(el => { const r = el.getBoundingClientRect(); return { x: r.x, y: r.y, width: r.width, height: r.height } })
@@ -330,12 +331,15 @@ test('AEON-1390 Display › Groups matches the header and a saved view keeps the
   await expect(groups.getByRole('radio', { name: 'Natural order' })).toHaveAttribute('aria-checked', 'true')
 })
 
-test('AEON-1388 phones: one muted line after the name, at most three facts in order, never wrapped; Display orders the groups', async ({ page }) => {
+test('AEON-1388 phones: one muted line after the name, at most three facts in order, never wrapped; Display orders the groups', async ({ page }, testInfo) => {
   await open(page, { width: 390 })
   const line = groupRow(page, 'In progress').locator('.group-facts')
   await expect(line).toHaveText('· 2 working · 2 stale · ~7.5h')
   const facts = await line.evaluate(el => el.textContent!.split('·').map(part => part.trim()).filter(Boolean))
   expect(facts.length).toBeLessThanOrEqual(3)
+  await groupRow(page, 'In progress').scrollIntoViewIfNeeded()
+  const crop = await boxOf(groupRow(page, 'In progress'))
+  await page.screenshot({ path: testInfo.outputPath('aeon-1486-group-390.png'), clip: { x: 0, y: Math.max(0, crop.y), width: 390, height: Math.min(crop.height, 844 - Math.max(0, crop.y)) } })
   const lineBox = await boxOf(line), label = await boxOf(groupRow(page, 'In progress').locator('.group-label'))
   expect(Math.abs(lineBox.y + lineBox.height / 2 - (label.y + label.height / 2)), 'the facts share the name’s line').toBeLessThanOrEqual(2)
   expect(await line.evaluate(el => el.getClientRects().length)).toBe(1)
