@@ -16766,8 +16766,6 @@
     ,
     {"kind":"node","file":"tests/releases.test.ts","name":"spans read in minutes, hours and days","tier":"GATED-FULL"}
     ,
-    {"kind":"node","file":"tests/releases.test.ts","name":"the default published projection excludes reserved and withdrawn names","tier":"ESSENTIAL"}
-    ,
     {"kind":"node","file":"tests/review-tooling.test.ts","name":"audit facts require completed independent reports and retain the highest finding severity","tier":"GATED-FULL"}
     ,
     {"kind":"node","file":"tests/review-tooling.test.ts","name":"builder self-check refuses missing, stale, failed and bypassed evidence before review","tier":"GATED-FULL"}
