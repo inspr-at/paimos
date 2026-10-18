@@ -28,6 +28,8 @@ const words = computed(() => simpleText(props.lang))
 const page = computed(() => deliveryText(props.lang))
 const uid = useId()
 const ready = computed(() => props.state === 'ready')
+// The worst five open once the window has items; loading, a failed read and no data leave the tiles closed.
+const canOpen = computed(() => ready.value && props.view.head.kind === 'ready')
 
 // ---------- Phones: Expert stacks Simple's essentials, decided by the section's own width ----------
 const root = ref<HTMLElement>()
@@ -42,22 +44,22 @@ onMounted(() => {
 onBeforeUnmount(() => resize?.disconnect())
 
 // ---------- Worst in this window ----------
-const open = ref<{ key: BuildingKey; anchor: HTMLElement; focusFirst: boolean } | null>(null)
-const openTileView = computed<BuildingTileView | null>(() => open.value ? props.view.tiles.find(tile => tile.key === open.value!.key) ?? null : null)
+// The panel keeps the rows it opened with: a refresh landing meanwhile never reorders them under the pointer.
+const open = ref<{ key: BuildingKey; anchor: HTMLElement; focusFirst: boolean; tile: BuildingTileView } | null>(null)
 function toggle(tile: BuildingTileView, event: MouseEvent) {
   const anchor = event.currentTarget as HTMLElement
   if (open.value?.key === tile.key) { close(true); return }
+  if (!canOpen.value) return
   // Enter or Space arrive as a click without a pointer: the first row takes the focus.
-  open.value = { key: tile.key, anchor, focusFirst: event.detail === 0 }
+  open.value = { key: tile.key, anchor, focusFirst: event.detail === 0, tile }
 }
 function close(restore: boolean) {
   const anchor = open.value?.anchor
   open.value = null
   if (restore && anchor?.isConnected) anchor.focus({ preventScroll: true })
 }
-// The items behind an open panel belong to this window, filters and answer.
-watch([() => props.window, () => props.level, () => props.lang, () => props.state, narrow], () => { if (open.value) close(false) })
-watch(() => props.view, view => { if (open.value && !view.tiles.find(tile => tile.key === open.value!.key)?.worst) close(false) })
+// The items behind an open panel belong to this window, level and answer: another one closes it.
+watch([() => props.window, () => props.level, () => props.lang, () => props.state, () => props.busy, narrow], () => { if (open.value) close(false) })
 const label = (tile: BuildingTileView) => fill(t.value.open, { n: tile.simple.name })
 </script>
 
@@ -78,12 +80,12 @@ const label = (tile: BuildingTileView) => fill(t.value.open, { n: tile.simple.na
     <div class="s-grid" :class="{ busy }" role="list">
       <SimpleTile v-for="tile in view.tiles" :key="tile.key" class="bd-tile" :tile="tile.simple" :state="state" :text="words" :data-building="tile.key">
         <template #trigger>
-          <button type="button" class="bd-open" :aria-label="label(tile)" aria-haspopup="dialog" :aria-expanded="open?.key === tile.key" :disabled="!ready" data-testid="delivery-building-open" @click="toggle(tile, $event)" />
+          <button type="button" class="bd-open" :aria-label="label(tile)" aria-haspopup="dialog" :aria-expanded="open?.key === tile.key" :disabled="!canOpen" data-testid="delivery-building-open" @click="toggle(tile, $event)" />
         </template>
         <template v-if="level === 'expert'" #detail>
           <p class="s-pp"><span v-if="state === 'loading'" class="sk" style="width: 70%; height: 10px" /><span v-else v-clip-tip><template v-for="(part, index) in tile.pp" :key="index"><b v-if="part.strong">{{ part.text }}</b><template v-else>{{ part.text }}</template></template></span></p>
         </template>
-        <template #foot><span class="bd-more" :class="{ off: !ready }" aria-hidden="true"><AppIcon name="list" :size="12" />{{ t.more }}</span></template>
+        <template #foot><span class="bd-more" :class="{ off: !canOpen }" aria-hidden="true"><AppIcon name="list" :size="12" />{{ t.more }}</span></template>
       </SimpleTile>
     </div>
   </section>
@@ -98,17 +100,17 @@ const label = (tile: BuildingTileView) => fill(t.value.open, { n: tile.simple.na
       <ExpertTile v-for="tile in view.tiles" :key="tile.key" class="bd-tile" :tile="tile.expert" :state="state" :text="page" :info-open="openTile === tile.expert.def.key" :data-building="tile.key"
         @info="(anchor, pin) => emit('info', tile.expert, anchor, pin)" @info-leave="emit('info-leave')">
         <template #trigger>
-          <button type="button" class="bd-open" :aria-label="label(tile)" aria-haspopup="dialog" :aria-expanded="open?.key === tile.key" :disabled="!ready" data-testid="delivery-building-open" @click="toggle(tile, $event)" />
+          <button type="button" class="bd-open" :aria-label="label(tile)" aria-haspopup="dialog" :aria-expanded="open?.key === tile.key" :disabled="!canOpen" data-testid="delivery-building-open" @click="toggle(tile, $event)" />
         </template>
         <template #extra><TrendChart :model="tile.chart" :state="state" :text="page" small bare /></template>
-        <template #foot><span class="bd-more" :class="{ off: !ready }" aria-hidden="true"><AppIcon name="list" :size="12" />{{ t.more }}</span></template>
+        <template #foot><span class="bd-more" :class="{ off: !canOpen }" aria-hidden="true"><AppIcon name="list" :size="12" />{{ t.more }}</span></template>
       </ExpertTile>
     </div>
   </section>
 
   </div>
 
-  <WorstPanel v-if="open && openTileView" :key="open.key" :tile="openTileView" :anchor="open.anchor" :route-key="routeKey" :text="t" :focus-first="open.focusFirst" @close="close" />
+  <WorstPanel v-if="open" :key="open.key" :tile="open.tile" :anchor="open.anchor" :route-key="routeKey" :text="t" :focus-first="open.focusFirst" @close="close" />
 </template>
 
 <style scoped>

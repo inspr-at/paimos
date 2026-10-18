@@ -209,12 +209,11 @@ export function buildingView(data: DeliveryBuilding | null, days: WindowDays, mo
       p50: c.p50 == null ? '–' : figure(key, c.p50, lang), p90: c.p90 == null ? '–' : figure(key, c.p90, lang), mean: c.mean == null ? '–' : num(c.mean, lang, 1),
       v: c.value == null ? '–' : key === 'rounds' ? num(Math.ceil(c.value), lang) : key === 'first_try' ? pct(c.value, lang) : hm(c.value, lang),
     }
+    // As designed: this window's sentence once there are figures, else what is wanted. Short enough for the two
+    // lines a phone reserves, so no state moves the tiles below (AEON-541).
     const wants = fill(w.wants, values)
-    let say = wants
-    if (has) {
-      const sentence = key === 'rounds' && c.value! <= 1 ? w.sayOne! : key === 'first_try' && one(c.n) ? w.sayOne! : w.say
-      say = `${fill(sentence, values)} ${key === 'lead' ? '' : wants}`.trim()
-    }
+    const sentence = key === 'rounds' && c.value != null && c.value <= 1 ? w.sayOne! : key === 'first_try' && one(c.n) ? w.sayOne! : w.say
+    const say = has ? fill(sentence, values) : wants
     const trend = trendOf(metric, mode, days, lang)
     const raw = metric.buckets
     const buckets = bucketsOf(raw, days, lang)

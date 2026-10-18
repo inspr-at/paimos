@@ -32,7 +32,7 @@ it('AEON-1493: the four tiles say the server\'s figures, changes and verdicts in
   expect(first.simple.value).toEqual([{ text: '29', unit: '%' }])
   expect(first.simple.verdict).toMatchObject({ level: 'far', word: 'Far off', gap: '29% vs. 60% wanted' })
   expect(first.simple.trend).toEqual({ cls: 'worse', icon: 'arrow-down', text: 'Worse than the 7 days before (−5 pts)' })
-  expect(first.simple.say).toBe('6 of 21 items passed on the first try. Wanted: at least 60% of items merged after one round.')
+  expect(first.simple.say).toBe('6 of 21 items passed on the first try.')
   expect(text(first.expert.lineA.parts)).toBe('6 of 21 merged after one round')
   expect(first.expert.lineA.parts.find(part => part.strong)?.text).toBe('6 of 21')
   expect(first.expert.lineB).toBe('21 items · 15 needed more rounds')
@@ -45,7 +45,8 @@ it('AEON-1493: the four tiles say the server\'s figures, changes and verdicts in
   expect(rounds.expert.delta).toEqual({ cls: 'worse', icon: 'arrow-up', text: '+0.3', word: 'worse' })
   expect(text(rounds.expert.lineA.parts)).toBe('p50 3.2 · mean 3.6')
   expect(text(rounds.pp)).toBe('p50 3.2 · mean 3.6 · p90 6')
-  expect(rounds.simple.say).toBe('Half the items needed 4 rounds or more. Wanted: 1.6 rounds or fewer on the typical item.')
+  expect(rounds.simple.say).toBe('Half the items needed 4 rounds or more.')
+  expect(rounds.simple.learn.body).toBe('Every round until merged: the first build, each fix round after a gate verdict, and each merge-forward round that brings in the newest main. p50 3.2: half of the items needed this many or fewer.')
 
   const idle = tile(view, 'idle')
   expect(idle.simple.value).toEqual([{ text: '22', unit: 'min' }])
