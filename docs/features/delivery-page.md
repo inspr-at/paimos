@@ -76,6 +76,48 @@ flake) and the Expert name: hover or keyboard focus shows it, a click or Enter p
 Esc closes it and leaves focus on the button. Below the sections the technical words
 are explained simply.
 
+**Building it** (AEON-1493) is the first section of the path, after the summary card and
+Tickets and before "Making a change ready": from the first build to a change that passes
+its checks. It reads `GET /api/projects/{projectId}/delivery/building` (`delivery.read`)
+for the window and the Tickets filters (type, priority, worked by), refreshed every minute
+while shown. The server computes every figure, the change against the window before and
+the verdict from the Flow projection of the event log (see
+[Delivery Flow data](delivery-flow-data.md)): builder steps (harness sessions and
+work-queue rounds), gate verdicts, check and merge-queue runs, and the merge that ends a
+change. An item is a change linked to a ticket, counted in the window where it merged; a
+round is one builder pass (the first build, a fix round or a merge-forward round). Builder
+steps that overlap are one round, and a coordinator's claim joins the build it starts.
+
+- **First-try rate**: the share of items merged after exactly one round. Target at least
+  60 %.
+- **Rounds per item**: rounds until merged, p50 (Expert adds the mean and p90). Target
+  at most 1.6.
+- **Idle between rounds**: from the end of a round (its gate verdict or checks when they
+  came after the builder finished) to the next step (the next round, the merge enqueue,
+  or the merge), p50 and p90 over every wait. Target p50 under 15 minutes.
+- **Lead time per item**: from the start of the first build to the merge, p50 and p90.
+  No target yet: watched.
+
+The targets are the delivery settings' Building it targets, returned as `targets` by
+the effective `GET /api/projects/{projectId}/delivery-settings` and
+`GET /api/settings/delivery`. They are the defaults above until targets can be saved; a
+settings write that names them is refused. Items without any recorded round are counted
+apart (`coverage.without_rounds`) and never as a first try; a round whose end is unknown
+has no idle sample; days before the first recorded round are "no data yet". The head says
+"N of 3 on target", the no-data sentence or "Not loaded · Retry" in one line, and the
+summary card's count and off-target line include the three targets.
+
+Simple shows the four tiles in the SimpleTile language; Expert in the ExpertTile language
+with a daily chart inside each tile and the source "Event log: rounds, gate verdicts,
+merges". The whole tile opens **Worst in this window**: the five worst items of that
+number, each a link to its ticket with one mark per round (passed ✓, changes −, failed ×,
+merge-forward hollow; a dotted ring when no verdict was recorded), a legend and "Filters
+apply: type, priority, worked by". Enter opens it with the first row focused, ↑/↓ move,
+Esc closes and returns focus to the tile, an outside click closes. It is anchored to the
+tile and flips above when there is no room; at 760 px and narrower it is a bottom sheet.
+On a phone the tiles stack with value, verdict, sentence and footer; Expert adds one
+p50/p90 line.
+
 **Flow** (A Lanes) shows who worked and who waited, one lane per actor (you, LEAD,
 OPS, Reviewer, Builder, Checks). A wait sits in the lane of whoever is awaited, repeats
 are rose, an incident is its own red band, and dotted connectors mark hand-overs. Rows

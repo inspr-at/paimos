@@ -6004,6 +6004,14 @@
     ,
     {"kind":"go","package":"internal/delivery","name":"TestDeliveryBackfillSkipsConfirmedAbsentPreflight","tier":"ESSENTIAL"}
     ,
+    {"kind":"go","package":"internal/delivery","name":"TestDeliveryBuildingEndpointReadsFlowUnderRLS","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/delivery","name":"TestDeliveryBuildingFiltersAndEmptyWindow","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/delivery","name":"TestDeliveryBuildingJudgements","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/delivery","name":"TestDeliveryBuildingRoundsAndWindows","tier":"ESSENTIAL"}
+    ,
     {"kind":"go","package":"internal/delivery","name":"TestDeliveryChecksHistoryActionsReplacesOnlyItsStoredSuite","tier":"GATED-FULL"}
     ,
     {"kind":"go","package":"internal/delivery","name":"TestDeliveryChecksHistoryPersistsPacingAndUsesActionsAfterGrant","tier":"GATED-FULL"}

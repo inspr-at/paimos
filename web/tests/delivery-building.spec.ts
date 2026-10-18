@@ -18,7 +18,7 @@ async function setup(page: Page, options: { theme?: 'light' | 'dark'; level?: 's
   work.preferences['delivery:numbers'] = { level: options.level ?? 'simple', window: 7 }
   await mockWork(page, work)
   await mockDelivery(page, () => ({ status: 200, body: deliveryMetrics() }))
-  const state = { next: options.first ?? 'ready' as Answer, held: gate(), reads: 0 }
+  const state = { next: options.first ?? 'ready' as Answer, held: gate(), reads: 0, work }
   await mockBuilding(page, async (projectId, window) => {
     state.reads++
     let now = state.next
@@ -34,10 +34,12 @@ const trigger = (page: Page, name: string) => section(page).getByRole('button', 
 const learnBelow = (page: Page) => page.getByTestId('delivery-simple').getByRole('button', { name: 'Learn: How long the PR checks take' })
 
 for (const width of [1440, 1024, 390] as const) {
-  for (const theme of ['light', 'dark'] as const) {
-    test(`Building it at ${width} ${theme}: four tiles, Simple and Expert, in the design's order`, async ({ page }, info) => {
-      await page.setViewportSize({ width, height: width === 390 ? 844 : 1000 })
-      await setup(page, { theme })
+  test(`Building it at ${width}, light and dark: four tiles, Simple and Expert, in the design's order`, async ({ page }, info) => {
+    await page.setViewportSize({ width, height: width === 390 ? 844 : 1000 })
+    const state = await setup(page)
+    for (const theme of ['light', 'dark'] as const) {
+      state.work.preferences.theme = { choice: theme }
+      state.work.preferences['delivery:numbers'] = { level: 'simple', window: 7 }
       await page.goto('/p/AEON/delivery')
       const head = section(page).getByTestId('delivery-building-head')
       await expect(head).toHaveText('0 of 3 on target')
@@ -73,8 +75,16 @@ for (const width of [1440, 1024, 390] as const) {
       }
       await section(page).scrollIntoViewIfNeeded()
       await section(page).screenshot({ path: info.outputPath(`aeon-1493/building-expert-${width}-${theme}.png`) })
-    })
-  }
+      if (theme === 'dark') {
+        // The design's dark Expert overlay (and the phone sheet in dark).
+        await trigger(page, 'Idle between rounds').click()
+        await expect(page.getByTestId('delivery-worst')).toContainText('idle 2 h 10 min')
+        await page.screenshot({ path: info.outputPath(`aeon-1493/building-overlay-idle-expert-${width}-dark.png`) })
+        await page.keyboard.press('Escape')
+        await expect(page.getByTestId('delivery-worst')).toHaveCount(0)
+      }
+    }
+  })
 }
 
 test('Building it: Enter opens the worst five on the first row, ↓ moves, Esc closes and returns focus; nothing moves', async ({ page }, info) => {

@@ -84,6 +84,9 @@ func TestDeliveryBuildingEndpointReadsFlowUnderRLS(t *testing.T) {
 		t.Fatalf("overrides view invented targets %+v", saved.Targets)
 	}
 
+	// Targets cannot be saved yet: a write that names them is refused, never silently dropped.
+	f.call(t, f.person, "PUT", "/api/projects/"+f.project+"/delivery-settings", map[string]any{"targets": map[string]float64{"first_try_rate": 80}}, 400, nil)
+
 	// Another workspace does not see the project; a key without delivery.read is refused.
 	f.call(t, f.foreign, "GET", path, nil, 404, nil)
 	reader := tenant.Principal{ID: f.agent.ID, TenantID: f.agent.TenantID, Kind: tenant.Agent, Scopes: []string{"nodes.read", "events.read"}}
