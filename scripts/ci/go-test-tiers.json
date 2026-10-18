@@ -672,6 +672,8 @@
     ,
     {"kind":"go","package":"internal/agentaccounts","name":"TestAccountContextSelectionPaths","tier":"ESSENTIAL"}
     ,
+    {"kind":"go","package":"internal/agentaccounts","name":"TestAccountLookupOutageIsServerError","tier":"ESSENTIAL"}
+    ,
     {"kind":"go","package":"internal/agentaccounts","name":"TestAccountMetadataCharacterBoundary","tier":"GATED-FULL"}
     ,
     {"kind":"go","package":"internal/agentaccounts","name":"TestAccountPoolRoutingAndLedger","tier":"ESSENTIAL"}
@@ -4118,6 +4120,8 @@
     ,
     {"kind":"go","package":"internal/business/crm","name":"TestBindingJSONOmitsNoExtraAuthority","tier":"GATED-FULL"}
     ,
+    {"kind":"go","package":"internal/business/crm","name":"TestCRMBackgroundJobsJSONIsEmptyArray","tier":"ESSENTIAL"}
+    ,
     {"kind":"go","package":"internal/business/crm","name":"TestCRMDeletionAndProjectUndo","tier":"GATED-FULL"}
     ,
     {"kind":"go","package":"internal/business/crm","name":"TestCRMUndoBindingRequiresManageGrant","tier":"NIGHTLY"}
@@ -4709,6 +4713,8 @@
     {"kind":"go","package":"internal/cli","name":"TestDoctorRulesHookOutputs","tier":"GATED-FULL"}
     ,
     {"kind":"go","package":"internal/cli","name":"TestDoctrineProposeCommand","tier":"GATED-FULL"}
+    ,
+    {"kind":"go","package":"internal/cli","name":"TestEmptyIssueListJSONIsArray","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/cli","name":"TestEntryRefusalReasonsAndWriterPreview","tier":"ESSENTIAL"}
     ,
@@ -9026,6 +9032,10 @@
     ,
     {"kind":"go","package":"internal/plugins","name":"TestDigestIgnoresOrderAndWhitespace","tier":"GATED-FULL"}
     ,
+    {"kind":"go","package":"internal/plugins","name":"TestEmptyInstallationPermissionsStayArray","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/plugins","name":"TestEmptyPluginArraysStayArrays","tier":"ESSENTIAL"}
+    ,
     {"kind":"go","package":"internal/plugins","name":"TestGrantIsNarrowAndJobWritesAnEvent","tier":"GATED-FULL"}
     ,
     {"kind":"go","package":"internal/plugins","name":"TestGrantNarrowCannotWidenOrMutate","tier":"ESSENTIAL"}
@@ -9509,6 +9519,8 @@
     {"kind":"go","package":"internal/releasehistory","name":"TestCandidatePublishedHistoryGolden","tags":["delete-candidate"],"tier":"GATED-FULL"}
     ,
     {"kind":"go","package":"internal/releasehistory","name":"TestCandidateRejectsInvalidInputs","tier":"GATED-FULL"}
+    ,
+    {"kind":"go","package":"internal/releasehistory","name":"TestClassificationKeepsEmptyNoteArrays","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/releasehistory","name":"TestClassifyTicketsAndTagMessages","tier":"GATED-FULL"}
     ,

@@ -256,5 +256,10 @@ func cloneSteps(in []WorkflowStep) []WorkflowStep {
 }
 
 func cloneCaps(in []Capability) []Capability {
-	return append([]Capability(nil), in...)
+	if in == nil {
+		return []Capability{}
+	}
+	out := make([]Capability, len(in))
+	copy(out, in)
+	return out
 }
