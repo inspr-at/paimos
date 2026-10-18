@@ -80,7 +80,7 @@ paths:
       - {name: sessionId, in: path, required: true, schema: {type: string, format: uuid}}
     patch:
       operationId: bindHarnessSession
-      description: 'Rebind an active generation under its expected revision. Workers entering another ticket repeat builder admission; an explicitly authorized parallel_reason is scoped to that ticket and audited there. Omitting it on an unchanged binding preserves the stored reason.'
+      description: 'Rebind an active generation under its expected revision. Workers entering another ticket repeat builder admission; scouts remain read-only, cannot detach or change shape, and authenticated reviewer sessions retain their ticket; an explicitly authorized parallel_reason is scoped to that ticket and audited there. Omitting it on an unchanged binding preserves the stored reason.'
       requestBody:
         required: true
         content:

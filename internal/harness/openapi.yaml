@@ -718,7 +718,7 @@ components:
         host: {type: string, maxLength: 128}
         management_mode: {type: string, enum: [managed, unmanaged]}
         role: {type: string, enum: [coordinator, worker]}
-        work_shape: {type: string, enum: [unknown, ship, scout]}
+        work_shape: {type: string, enum: [unknown, ship, scout], description: "Scout sessions remain read-only across binding and resume. No branch, work-order/run binding or commit reports; approval requires a dispatcher-created authenticated review run."}
         advertised_capabilities: {type: array, items: {type: string, enum: [inbox, status, steer, interrupt, stop]}}
         harness_session_ref: {type: string, writeOnly: true}
         vendor_session_ref: {type: string, writeOnly: true, description: 'Optional harness-native session id for this generation, not its parent. Digested like harness_session_ref. Unique among active generations per tenant and agent across all harnesses. Omitted on replay does not clear a stored value.'}
@@ -731,7 +731,7 @@ components:
         parent_harness_session_id: {type: [string, 'null'], format: uuid}
         ticket_node_id: {type: [string, 'null'], format: uuid}
         parallel_reason: {$ref: '../../api/openapi.yaml#/components/schemas/BuildParallelReason'}
-        work_shape: {type: string, enum: [unknown, ship, scout]}
+        work_shape: {type: string, enum: [unknown, ship, scout], description: "Scout sessions remain read-only across binding and resume. No branch, work-order/run binding or commit reports; approval requires a dispatcher-created authenticated review run."}
     HarnessProvenanceWrite:
       type: object
       required: [items]

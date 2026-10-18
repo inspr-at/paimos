@@ -1139,7 +1139,9 @@ executable, pinned Node, startup hooks, inherited configuration/tools and proces
 termination. A successful fake protocol does not qualify a live executable.
 Qualified captures use only initialize → initialized → account/read →
 account/rateLimits/read, with identity matched before quota is read. Claude idle
-get_usage also remains disabled until qualified. Codex run events and Claude run
+get_usage also remains disabled until the exact executable and pinned interpreter,
+startup hooks, inherited configuration/tools and owned-process cleanup are
+qualified together. A cleanup uncertainty retains the capture fence. Codex run events and Claude run
 events/statusline continue supplying readings; missing measurements stay unknown.
 Pi with an approved OpenRouter profile checks only /key. Its null cap leaves
 remaining credit unknown, and an unavailable measurement does not invalidate a
@@ -1171,11 +1173,33 @@ measurement errors, while a newer confirmed identity failure replaces it.
 | --- | --- | --- |
 | Codex | Registry `home` → `CODEX_HOME` | Not available idle until exact executable/interpreter and startup/cleanup boundaries are qualified |
 | Pi (OpenRouter) | Approved local profile | Key cap from `/key`; total balance stays unknown |
-| Claude | Registry `home` → `CLAUDE_CONFIG_DIR` | Not available idle; readings start with a run |
+| Claude | Registry `home` → `CLAUDE_CONFIG_DIR` | Not available idle until exact executable/interpreter and startup/cleanup boundaries are qualified; run readings remain available |
 | Grok | Registry `home` → `GROK_HOME` | Not available: billing capability unverified |
 | Cursor | Registry `home` → `CURSOR_CONFIG_DIR` | Not available headless |
 | Gemini CLI | Approved local profile `home` → `HOME` / `GEMINI_CLI_HOME` | Not available: quota-neutral API unqualified |
 | OpenCode | Approved local profile `home` → `HOME` and private XDG directories | Not available: provider capacity unqualified |
+
+AEON-1499 does **not** qualify Claude 2.1.296 or codex-cli 0.162.1. No live
+vendor CLI was invoked and no credential file was inspected in this work.
+Both production capability lists remain empty. A version string, installed
+binary digest or synthetic protocol success alone is insufficient: enabling a
+release requires recorded evidence for the exact binary/interpreter digests,
+quota-neutral account read, account identity, restricted child environment,
+startup/config/tool isolation, deadlines and confirmed owned-group cleanup.
+An unknown or replaced digest fails closed before launch, with no operator flag
+to bypass qualification. Live qualification remains a release-owned prerequisite.
+
+Accepted normalized Claude/Codex observations now also feed a credential-free
+latest snapshot and one UTC hourly rollup per account through the existing
+account probe/readings paths. Measurement-only probes do not append
+`account.probed` telemetry. Original reading times survive replay; newer samples
+win per window/bucket, with harness authority on equal timestamps. The
+`GET /api/agent-accounts/{accountId}/quota-series` read provides bounded hourly
+pages and the last actual reading, including age and reset after inactivity.
+Usage sharing, tenant RLS, paired-computer scope and current binding revision
+apply. Missing quota remains empty, never zero. See
+[account quota history](features/account-quota-history.md) for the read contract.
+AEON-1497 owns the Accounts/dial presentation; no UI changes ship here.
 
 Homes come from each approved local registry/runtime account, not from directory
 crawling or credential extraction. Cursor uses the same explicit home for its

@@ -645,6 +645,25 @@ paths:
                 required: [key]
                 properties:
                   key: {type: string, contentEncoding: base64}
+  /agent-accounts/{accountId}/quota-series:
+    parameters:
+      - {name: accountId, in: path, required: true, schema: {type: string, format: uuid}}
+    get:
+      operationId: getAccountQuotaSeries
+      summary: "Latest quota and hourly observations for an account"
+      description: "Person account.read or the registering agent with account.probe scope; paired keys remain computer-scoped. Owner usage sharing applies, including to administrators. Returns only the current binding's measured weekly and five-hour quota. Missing data stays empty; inactive accounts retain the actual reading time and age. At most one row per account and UTC hour is stored, with the latest sample for each window and bucket; no per-probe history or telemetry event is added."
+      security: *auth
+      parameters:
+        - {name: from, in: query, required: true, description: "Inclusive UTC hour boundary (RFC3339).", schema: {type: string, format: date-time}}
+        - {name: to, in: query, required: true, description: "Exclusive UTC hour boundary, at most 31 days after from.", schema: {type: string, format: date-time}}
+        - {name: window_kind, in: query, schema: {type: string, enum: [5h, weekly]}}
+        - {name: limit, in: query, schema: {type: integer, minimum: 1, maximum: 168, default: 168}}
+        - {name: cursor, in: query, description: "Exclusive hour boundary from next_cursor; keep other query parameters unchanged.", schema: {type: string, format: date-time}}
+      responses:
+        '200': {description: "Latest readings and a bounded ascending hourly page; empty arrays also represent private or missing quota.", content: {application/json: {schema: {$ref: '#/components/schemas/AccountQuotaSeries'}}}}
+        '400': {description: "Invalid window, limit or cursor."}
+        '403': {description: "Permission, scope or computer ownership mismatch."}
+        '404': {description: "Account not found in this tenant."}
   /agent-accounts/{accountId}/readings:
     parameters:
       - {name: accountId, in: path, required: true, schema: {type: string, format: uuid}}
@@ -811,6 +830,37 @@ paths:
         '422': {description: 'unsupported_limit_unit - this account does not report priced run usage.', content: {application/json: {schema: {type: object, required: [error, code], properties: {error: {type: string}, code: {type: string, const: unsupported_limit_unit}}}}}}
 components:
   schemas:
+    AccountQuotaReading:
+      type: object
+      additionalProperties: false
+      required: [window_kind, bucket, used_percent, remaining_percent, read_at, resets_at, source, reading_age_seconds, freshness]
+      properties:
+        window_kind: {type: string, enum: [5h, weekly]}
+        bucket: {type: string, maxLength: 64}
+        used_percent: {type: number, minimum: 0, maximum: 100}
+        remaining_percent: {type: number, minimum: 0, maximum: 100}
+        read_at: {type: string, format: date-time}
+        resets_at: {type: string, format: date-time}
+        source: {type: string, enum: [harness, agentd]}
+        reading_age_seconds: {type: integer, minimum: 0}
+        freshness: {type: string, enum: [fresh, aging, stale, expired]}
+    AccountQuotaHour:
+      type: object
+      additionalProperties: false
+      required: [hour_at, readings]
+      properties:
+        hour_at: {type: string, format: date-time}
+        readings: {type: array, maxItems: 32, items: {$ref: '#/components/schemas/AccountQuotaReading'}}
+    AccountQuotaSeries:
+      type: object
+      additionalProperties: false
+      required: [account_id, latest_readings, hourly_readings, next_cursor]
+      properties:
+        account_id: {type: string, format: uuid}
+        latest_readings: {type: array, maxItems: 32, items: {$ref: '#/components/schemas/AccountQuotaReading'}}
+        hourly_readings: {type: array, maxItems: 168, items: {$ref: '#/components/schemas/AccountQuotaHour'}}
+        next_cursor: {type: string, description: "Exclusive UTC hour cursor for the next page; empty when complete or private."}
+
     AccountCapacity:
       type: object
       required: [account_id, schedule, windows]

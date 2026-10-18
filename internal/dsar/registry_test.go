@@ -81,6 +81,16 @@ func TestInventoryAndAdapters(t *testing.T) {
 	if !contains(byTable["method_learning_decisions"].Review, "decided_by") || !contains(byTable["method_learning_decisions"].Subjects, "decided_by") {
 		t.Fatal("method learning decision actor is personal data")
 	}
+	// Hourly quota is personal through its account. The JSON snapshots stay in
+	// review; the hour boundary is the only exported fact. account_id cannot
+	// be metadata because it identifies the account holder.
+	hourly := byTable["account_quota_hourly"]
+	if hourly.Export != "hour_at" || hourly.Review != "account_id samples" || hourly.Secret != "" || hourly.Metadata != "tenant_id binding_revision" || hourly.Subjects != "" || hourly.Locator != "account_id hour_at" || hourly.Hold != "none" || hourly.Parent == nil || hourly.Parent.Table != "agent_accounts" || hourly.Parent.Local != "account_id" || hourly.Parent.Remote != "id" {
+		t.Fatalf("hourly quota adapter = %+v", hourly)
+	}
+	if !contains(byTable["agent_accounts"].Review, "quota_latest") || contains(byTable["agent_accounts"].Export, "quota_latest") || contains(byTable["agent_accounts"].Metadata, "quota_latest") || contains(byTable["agent_accounts"].Secret, "quota_latest") {
+		t.Fatal("latest quota snapshot must stay in review")
+	}
 	// The workspace status note is personal free text written by one principal.
 	// Body stays on the review list (it can name other people); set_by is the subject.
 	notes := byTable["goal_status_notes"]
