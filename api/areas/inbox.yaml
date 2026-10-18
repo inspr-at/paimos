@@ -257,7 +257,7 @@ components:
         reason: {type: string, description: 'Present only for not_delivered: deadline, attempts, session_ended, no_listener or an adapter reason.'}
         delivered_at: {type: [string, 'null'], format: date-time, description: First hand-over to the recipient.}
         read_at: {type: [string, 'null'], format: date-time, description: Receiver confirmation (receipt handed_off_at).}
-        deliver_by: {type: [string, 'null'], format: date-time, description: The deadline; null for messages to people and for messages sent before deadlines existed.}
+        deliver_by: {type: [string, 'null'], format: date-time, description: "The normal delivery deadline; null for messages to people and for messages sent before deadlines existed. Durable person-to-session chat and Desk answers keep waiting through an elapsed pickup deadline; waiting_for_pickup and pickup_stalled_at describe chat pickup."}
     InboxPage:
       type: object
       required: [items, next_after]
