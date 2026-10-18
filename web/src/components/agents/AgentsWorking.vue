@@ -434,7 +434,8 @@ p { margin: 0; }
 /* AEON-1497: the usage summary; its state word carries an icon, never a fill. */
 .f-sel .sub { display: flex; align-items: center; gap: 0 5px; max-width: 100%; min-height: 18px; overflow: hidden; color: var(--ink-2); font-size: 12.5px; line-height: 1.35; white-space: nowrap; font-variant-numeric: tabular-nums; }
 .f-sel .sub > span { overflow: hidden; text-overflow: ellipsis; }
-.f-sel .sub .skeleton { width: min(220px, 80%); height: 10px; }
+/* A definite width: the line shrink-wraps its content, so a percentage would resolve to nothing. */
+.f-sel .sub .skeleton { flex: none; width: 168px; max-width: 100%; height: 10px; }
 .f-sel .sub .quiet { color: var(--ink-3); }
 .vw { display: inline-flex; align-items: center; gap: 4px; flex: none; }
 .vw svg { flex: none; }
