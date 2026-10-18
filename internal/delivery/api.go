@@ -312,7 +312,17 @@ func (m *Module) settings(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	w.Header().Set("ETag", etag)
-	httpapi.WriteJSON(w, 200, out)
+	if overrides {
+		httpapi.WriteJSON(w, 200, out)
+		return
+	}
+	// The effective settings carry the Building it targets (AEON-1493): the
+	// defaults until saved targets exist, read by Delivery › Numbers.
+	targets := buildingTargetDefaults()
+	httpapi.WriteJSON(w, 200, struct {
+		Settings
+		Targets BuildingTargets `json:"targets"`
+	}{out, targets})
 }
 func (m *Module) hold(w http.ResponseWriter, r *http.Request) {
 	p, ok := principal(w, r)

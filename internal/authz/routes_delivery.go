@@ -23,6 +23,7 @@ func init() {
 		"GET /api/projects/{projectId}/delivery-settings":                    "delivery.read",
 		"GET /api/projects/{projectId}/delivery-shipping":                    "delivery_ship.read",
 		"GET /api/projects/{projectId}/delivery-shipping/settings":           "delivery_ship.read",
+		"GET /api/projects/{projectId}/delivery/building":                    "delivery.read",
 		"GET /api/projects/{projectId}/delivery/flow":                        "delivery.read",
 		"GET /api/projects/{projectId}/delivery/flow/runs/{itemId}":          "delivery.read",
 		"GET /api/projects/{projectId}/delivery/flow/stream":                 "delivery.read",

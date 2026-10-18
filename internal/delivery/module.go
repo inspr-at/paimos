@@ -50,6 +50,7 @@ func (m *Module) Mount(mux *http.ServeMux) {
 	m.mountMetrics(mux)
 	m.mountFlow(mux)
 	m.mountStatusTiming(mux)
+	m.mountBuilding(mux)
 	// Every authenticated delivery is durable before projection/audit/flow work.
 	mux.HandleFunc("POST /api/github/webhook", m.mergeWebhook)
 	mux.HandleFunc("POST /api/projects/{projectId}/delivery/merge-backfill", m.mergeBackfill)
