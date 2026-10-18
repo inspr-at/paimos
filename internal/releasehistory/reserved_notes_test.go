@@ -58,6 +58,41 @@ func TestReservedNotesFreezeOwnRelease(t *testing.T) {
 	}
 }
 
+func TestRereservedNotesKeepOriginalExport(t *testing.T) {
+	r, raw := reservedFixture(t)
+	b := EmptyProductNotes()
+	if err := b.AddReserved(raw, r, historicTenant, historicProject); err != nil {
+		t.Fatal(err)
+	}
+	next := r
+	next.Version = "261002120000.0.0"
+	if err := b.AddRereserved(raw, next, r.Version, historicTenant, historicProject); err != nil {
+		t.Fatal(err)
+	}
+	a, _ := json.Marshal(b.Releases[r.Version])
+	other, _ := json.Marshal(b.Releases[next.Version])
+	if string(a) != string(other) {
+		t.Fatal("retry changed frozen public projection or provenance")
+	}
+	for _, mutate := range []func(*NoteReservation){
+		func(r *NoteReservation) { r.Sequence++ },
+		func(r *NoteReservation) { r.Channel = "preview" },
+		func(r *NoteReservation) { r.Tickets = r.Tickets[:1] },
+	} {
+		bad := next
+		mutate(&bad)
+		if err := b.AddRereserved(raw, bad, r.Version, historicTenant, historicProject); err == nil {
+			t.Fatal("changed scope/channel/sequence accepted")
+		}
+	}
+	if err := b.AddRereserved(append(raw, '\n'), next, r.Version, historicTenant, historicProject); err == nil {
+		t.Fatal("fresh export accepted in place of original exact bytes")
+	}
+	if err := b.AddRereserved(raw, next, r.Version, historicProject, historicTenant); err == nil {
+		t.Fatal("source binding changed")
+	}
+}
+
 func TestReservedNotesFailClosed(t *testing.T) {
 	r, raw := reservedFixture(t)
 	for name, mutate := range map[string]func(*HistoricTicketExport){

@@ -370,7 +370,7 @@ func TestShippedGoBuildsCompileColdFromVerifiedModules(t *testing.T) {
 		}
 		return string(data)
 	}
-	release, dry := read("release.yml"), read("release-image-check.yml")
+	release, dry := releaseYAML(t), read("release-image-check.yml")
 	if problems := goIsolationProblems(parseWorkflow(t, release), parseWorkflow(t, dry)); len(problems) != 0 {
 		t.Fatal(strings.Join(problems, "\n"))
 	}
@@ -609,20 +609,26 @@ esac
 // second "Digest: " line, which scripts/verify-live.mjs requires to be unique.
 func TestDraftNotesNameRuntimeClosures(t *testing.T) {
 	w := readWorkflow(t, "release.yml")
+	c := readWorkflow(t, "release-completion.yml")
 	platform, index := w.Jobs["image-platform"], w.Jobs["image"]
 	_, bind := named(t, platform, "Bind runtime closure digest")
-	_, draft := named(t, w.Jobs["assets"], "Create draft GitHub release with signed assets")
+	_, draft := named(t, c.Jobs["assets"], "Complete draft with missing signed assets only")
+	data, err := os.ReadFile(filepath.Join(root(t), "scripts/release-completion.mjs"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	helper := string(data)
 	for _, arch := range []string{"amd64", "arm64"} {
 		key := "runtime_" + arch
-		if bind.ID != "runtime" || platform.Outputs[key] != "${{ steps.runtime.outputs."+key+" }}" || index.Outputs[key] != "${{ needs.image-platform.outputs."+key+" }}" {
-			t.Fatalf("runtime closure digest for %s does not reach the image job", arch)
+		if bind.ID != "runtime" || platform.Outputs[key] != "${{ steps.runtime.outputs."+key+" }}" || index.Outputs[key] != "${{ needs.image-platform.outputs."+key+" }}" || w.Jobs["completion"].With["runtime-"+arch] != "${{ needs.image.outputs."+key+" }}" {
+			t.Fatalf("runtime closure digest for %s does not reach completion", arch)
 		}
 		env := "RUNTIME_" + strings.ToUpper(arch)
-		if draft.Env[env] != "${{ needs.image.outputs."+key+" }}" || strings.Count(draft.Run, `"Runtime closure linux/`+arch+`: ${`+env+`:-unknown}"`) != 1 {
+		if c.Env[env] != "${{ inputs.runtime-"+arch+" }}" || !strings.Contains(helper, "process.env."+env) || strings.Count(helper, "`Runtime closure linux/"+arch+": ") != 1 {
 			t.Fatalf("draft notes do not name the %s runtime closure", arch)
 		}
 	}
-	if len(platform.Outputs) != 2 || strings.Count(draft.Run, `"Digest: `) != 1 || strings.Count(draft.Run, "Digest: ") != 1 {
+	if len(platform.Outputs) != 2 || strings.Count(helper, "`Digest: ${release.digest}`,") != 1 || draft.Run != "node scripts/release-completion.mjs complete release-source/dist --write" {
 		t.Fatal("release notes must keep exactly one Digest line, for the release index")
 	}
 }

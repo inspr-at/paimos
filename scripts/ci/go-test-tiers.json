@@ -9606,9 +9606,17 @@
     ,
     {"kind":"go","package":"internal/releasehistory","name":"TestProductNotesProjectionAndImmutability","tier":"ESSENTIAL"}
     ,
+    {"kind":"go","package":"internal/releasehistory","name":"TestProspectiveSequenceReuse","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/releasehistory","name":"TestPublicReleaseHTTPKeepsReservationsAndExcludesWithdrawals","tier":"ESSENTIAL"}
+    ,
     {"kind":"go","package":"internal/releasehistory","name":"TestPublicationUsesCompleteTagAncestry","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/releasehistory","name":"TestRepositoryCodenames","tier":"GATED-FULL"}
+    ,
+    {"kind":"go","package":"internal/releasehistory","name":"TestRereservedNotesKeepOriginalExport","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/releasehistory","name":"TestReserveFileReusesOnlyClassifiedFailure","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/releasehistory","name":"TestReservedNotesFailClosed","tier":"GATED-FULL"}
     ,
@@ -9623,6 +9631,8 @@
     {"kind":"go","package":"internal/releasehistory","name":"TestSnapshotsAcceptBothCalendarSchemes","tier":"GATED-FULL"}
     ,
     {"kind":"go","package":"internal/releasehistory","name":"TestWithCodenames","tags":["delete-candidate"],"tier":"GATED-FULL"}
+    ,
+    {"kind":"go","package":"internal/releasehistory","name":"TestWithdrawnTagKeepsEvidenceNotNotes","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/releasehistory/codename","name":"TestAppendingKeepsOldNames","tier":"GATED-FULL"}
     ,
@@ -9665,6 +9675,8 @@
     {"kind":"go","package":"internal/releasehistory/generate","name":"TestCandidateRunWorkflowNameBounds","tier":"GATED-FULL"}
     ,
     {"kind":"go","package":"internal/releasehistory/packnotes","name":"TestPackHistoricReservation","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/releasehistory/packnotes","name":"TestPackRetryRequiresSequenceAbovePublished","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/releases","name":"TestBackfillNoteSnapshotsPlansAppliesAndLeavesExistingRows","tier":"GATED-FULL"}
     ,
@@ -11098,7 +11110,11 @@
     ,
     {"kind":"go","package":"scripts/releaseworkflow","name":"TestComposePostgresHealthRequiresDatabaseAndVector","tier":"GATED-FULL"}
     ,
+    {"kind":"go","package":"scripts/releaseworkflow","name":"TestCurrentWithdrawalLedgerBeforeImagePublication","tier":"ESSENTIAL"}
+    ,
     {"kind":"go","package":"scripts/releaseworkflow","name":"TestDarwinHookCLIIsSignedAndRehearsedBeforeAssembly","tier":"GATED-FULL"}
+    ,
+    {"kind":"go","package":"scripts/releaseworkflow","name":"TestDarwinRestoreGateRequiresExactReleaseVersion","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"scripts/releaseworkflow","name":"TestDirectPushCannotSkipWithoutQueueProof","tier":"GATED-FULL"}
     ,

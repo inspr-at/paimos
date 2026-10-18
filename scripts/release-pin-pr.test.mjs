@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: AGPL-3.0-only
+import './release-withdrawals.test.mjs';
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
 import { spawnSync } from "node:child_process";
@@ -38,6 +39,7 @@ function fixture(overrides = {}) {
     base: { ref: "main", repo: { full_name: TARGET } }, head: { ref: branch, sha: headSHA, repo: { full_name: TARGET } },
   };
   const data = { tagRef, tag, sourceMain, ancestry, base, content, comparison, pull, ...overrides };
+  const policyText = JSON.stringify(overrides.policy ?? { product: 'PAIMOS AEON', withdrawn_releases: [], unpublished_reservations: [] });
   const dependencies = {
     jwt: () => "fixture-jwt",
     verify: async inputs => { calls.push({ method: "VERIFY", args: attestationArgs(inputs.VERSION, inputs.DIGEST, inputs.GITHUB_SHA) }); if (overrides.unattested) throw new Error("pin bot: image attestation verification failed"); },
@@ -47,6 +49,7 @@ function fixture(overrides = {}) {
       if (path === "/installation/token" && method === "DELETE") return { status: 204, data: null };
       if (path === `/repos/${SOURCE}/git/ref/tags/v${version}`) return { status: 200, data: data.tagRef };
       if (path === `/repos/${SOURCE}/git/tags/${tagSHA}`) return { status: 200, data: data.tag };
+      if (path === `/repos/${SOURCE}/contents/version.json?ref=${data.sourceMain.object.sha}`) return { status: 200, data: overrides.ledger ?? { type: 'file', encoding: 'base64', content: Buffer.from(policyText).toString('base64'), sha: blob(policyText) } };
       if (path === `/repos/${SOURCE}/git/ref/heads/main`) return { status: 200, data: data.sourceMain };
       if (path.startsWith(`/repos/${SOURCE}/compare/`)) return { status: 200, data: data.ancestry };
       if (path === `/repos/${TARGET}/installation`) return { status: 200, data: { id: 7 } };
@@ -69,6 +72,28 @@ function fixture(overrides = {}) {
   return { calls, data, dependencies };
 }
 const changes = f => f.calls.filter(call => ["POST", "PUT", "PATCH"].includes(call.method) && call.path.startsWith(`/repos/${TARGET}/`) && !call.path.endsWith("/installation"));
+
+for (const write of [false, true]) {
+  for (const [label, policy] of [
+    ['coordinate', { product: 'PAIMOS AEON', withdrawn_releases: [{ version, digest: oldDigest, ticket: 'AEON-530', reason: 'failed completion' }] }],
+    ['digest alias', { product: 'PAIMOS AEON', withdrawn_releases: [{ version: oldVersion, digest, ticket: 'AEON-530', reason: 'failed completion' }] }],
+    ['unpublished', { product: 'PAIMOS AEON', unpublished_reservations: [version] }],
+  ]) test(`current main denies ${label} before verification or target auth (${write ? 'write' : 'dry run'})`, async () => {
+    const f = fixture({ policy, sourceMain: { ref: 'refs/heads/main', object: { type: 'commit', sha: headSHA } } });
+    await assert.rejects(proposePin(env(), { write }, f.dependencies), /never deployable/);
+    assert.ok(f.calls.some(call => call.path === `/repos/${SOURCE}/contents/version.json?ref=${headSHA}`));
+    assert.equal(f.calls.some(call => call.method === 'VERIFY' || call.path?.startsWith(`/repos/${TARGET}/`)), false);
+    assert.deepEqual(changes(f), []);
+  });
+}
+
+test('missing, malformed and mismatched current-main ledgers fail closed', async () => {
+  for (const ledger of [{}, { type: 'file', encoding: 'base64', content: Buffer.from('{}').toString('base64'), sha: blob('{}') }, { type: 'file', encoding: 'base64', content: Buffer.from('{}').toString('base64'), sha: sourceCommit }]) {
+    const f = fixture({ ledger });
+    await assert.rejects(proposePin(env(), { write: true }, f.dependencies));
+    assert.deepEqual(changes(f), []);
+  }
+});
 
 test("pin diff changes one line, preserving comments, whitespace, newline and unrelated bytes", () => {
   const result = plan();
@@ -100,6 +125,20 @@ test("default dry run verifies source then reads target with a restricted token,
   assert.ok(f.calls.findIndex(call => call.method === "VERIFY") < f.calls.findIndex(call => call.path === `/repos/${TARGET}/installation`));
   assert.equal(f.calls.at(-1).path, "/installation/token");
   assert.equal(f.calls.at(-1).method, "DELETE");
+});
+
+test('main completion dispatch verifies the original tag source, independently of tooling SHA', async () => {
+  const f = fixture();
+  const input = { ...env(), GITHUB_EVENT_NAME: 'workflow_dispatch', GITHUB_REF: 'refs/heads/main', GITHUB_SHA: headSHA, RELEASE_TAG: `v${version}`, RELEASE_SOURCE_SHA: sourceCommit };
+  assert.equal((await proposePin(input, {}, f.dependencies)).status, 'dry-run');
+  const verified = f.calls.find(call => call.method === 'VERIFY').args;
+  assert.equal(verified[verified.indexOf('--source-digest') + 1], sourceCommit);
+  assert.equal(verified[verified.indexOf('--signer-digest') + 1], sourceCommit);
+  for (const override of [{ GITHUB_REF: 'refs/heads/work/bad' }, { RELEASE_SOURCE_SHA: '' }, { RELEASE_TAG: 'vwrong' }]) {
+    const rejected = fixture();
+    await assert.rejects(proposePin({ ...input, ...override }, {}, rejected.dependencies));
+    assert.equal(rejected.calls.length, 0);
+  }
 });
 
 test("write creates only a pin branch and a draft PR, recording rollback and verification evidence", async () => {
@@ -269,19 +308,20 @@ test("tag and rehearsal keep every Buildx setup pinned and immediately checked",
   assert.match(dry, /^    timeout-minutes: 45$/m);
 });
 
-test("release records the digest before the non-blocking pin proposal and preserves asset dependencies", () => {
+test("release records the digest before separate completion; optional pin cannot block assets", () => {
   const workflow = readFileSync(new URL("../.github/workflows/release.yml", import.meta.url), "utf8");
-  const image = workflow.split("\n  image:\n")[1].split("\n  assets:\n")[0];
+  const image = workflow.split("\n  image:\n")[1].split("\n  completion:\n")[0];
   const record = image.indexOf("      - name: Record pushed digest\n");
-  const proposal = image.indexOf("      - name: Propose verified nixcfg deployment pin\n");
-  assert.ok(record >= 0 && proposal > record);
-  assert.match(image.slice(proposal), /^        continue-on-error: true$/m);
+  assert.ok(record >= 0);
+  assert.ok(!image.includes('Propose verified nixcfg deployment pin'));
   assert.match(image, /^      digest: \$\{\{ steps.push.outputs.digest \}\}$/m);
-  assert.match(workflow.split("\n  assets:\n")[1], /^    needs: \[agentd-darwin, image\]$/m);
+  const completion = readFileSync(new URL('../.github/workflows/release-completion.yml', import.meta.url), 'utf8');
+  assert.match(completion.split('\n  assets:\n')[1], /^    needs: \[prepare, agentd-darwin\]$/m);
+  assert.match(completion.split('      - name: Propose verified nixcfg deployment pin\n')[1], /^        continue-on-error: true$/m);
 });
 
 test("release pin shell reports failures in dry-run and write modes without hiding the failed outcome", () => {
-  const workflow = readFileSync(new URL("../.github/workflows/release.yml", import.meta.url), "utf8");
+  const workflow = readFileSync(new URL("../.github/workflows/release-completion.yml", import.meta.url), "utf8");
   const proposal = workflow.split("      - name: Propose verified nixcfg deployment pin\n")[1].split("\n  assets:\n")[0];
   const script = proposal.split("        run: |\n")[1].split("\n").map(line => line.replace(/^          /, "")).join("\n");
   const directory = mkdtempSync(join(tmpdir(), "aeon-pin-workflow-"));

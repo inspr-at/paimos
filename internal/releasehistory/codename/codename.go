@@ -74,6 +74,9 @@ func LetterCapacity(letter byte) int {
 type Named struct {
 	Sequence int
 	Name     string
+	// Reusable marks an abandoned attempt, never a published release. Its
+	// sequence does not constrain future lists or own a public name.
+	Reusable bool
 }
 
 // Guard fails when the newest lists would rename a release that already has a
@@ -377,7 +380,7 @@ func (l *Lists) denied(li, a, n, seq int) bool {
 // version 2's first sequence. Version 1 is exempt.
 func (l *Lists) Guard(named []Named) error {
 	for _, r := range named {
-		if r.Sequence < 1 {
+		if r.Sequence < 1 || r.Reusable {
 			continue
 		}
 		if r.Name != "" {

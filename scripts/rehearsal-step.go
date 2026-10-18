@@ -16,18 +16,31 @@ import (
 
 func main() {
 	if len(os.Args) == 2 && os.Args[1] == "inventory" {
-		data, err := os.ReadFile(".github/workflows/release.yml")
-		if err != nil {
-			panic(err)
-		}
 		var document struct {
 			Jobs map[string]struct{ Steps []map[string]any }
 		}
-		if err := yaml.Unmarshal(data, &document); err != nil {
-			panic(err)
+		document.Jobs = make(map[string]struct{ Steps []map[string]any })
+		for _, name := range []string{"release.yml", "release-completion.yml"} {
+			data, err := os.ReadFile(".github/workflows/" + name)
+			if err != nil {
+				panic(err)
+			}
+			var part struct {
+				Jobs map[string]struct{ Steps []map[string]any }
+			}
+			if err := yaml.Unmarshal(data, &part); err != nil {
+				panic(err)
+			}
+			for id, job := range part.Jobs {
+				if _, exists := document.Jobs[id]; exists {
+					panic("duplicate release job")
+				}
+				document.Jobs[id] = job
+			}
 		}
 		inventory := map[string][]map[string]string{}
 		for id, job := range document.Jobs {
+			inventory[id] = []map[string]string{}
 			for _, step := range job.Steps {
 				body, err := json.Marshal(step)
 				if err != nil {
@@ -52,15 +65,18 @@ func main() {
 		panic("usage: rehearsal-step.go JOB STEP")
 	}
 	allowed := map[string]bool{
-		"assets/Build linux paimos-agentd and aeon-cli":         true,
-		"assets/Create draft GitHub release with signed assets": true,
-		"image/Publish multi-arch index":                        true,
-		"image/Verify pushed image attestation":                 true,
+		"assets/Build linux paimos-agentd and aeon-cli": true,
+		"image/Publish multi-arch index":                true,
+		"image/Verify pushed image attestation":         true,
 	}
 	if !allowed[os.Args[1]+"/"+os.Args[2]] {
 		panic("step has no safe rehearsal adapter")
 	}
-	data, err := os.ReadFile(".github/workflows/release.yml")
+	file := "release.yml"
+	if os.Args[1] == "assets" {
+		file = "release-completion.yml"
+	}
+	data, err := os.ReadFile(".github/workflows/" + file)
 	if err != nil {
 		panic(err)
 	}

@@ -303,12 +303,24 @@ test('feature and fix filters follow the visible ticket lines, in the viewer loc
 })
 
 test('new since the last visit: newer published releases, nothing on a first visit', () => {
-  const releases = [rel('3', ''), rel('2', ''), rel('2.5', '', { state: 'reserved' }), rel('1', '')]
+  const releases = [rel('3', ''), rel('2', ''), rel('2.5', '', { state: 'reserved' }), rel('2.6', '', { state: 'withdrawn' }), rel('1', '')]
   assert.deepEqual([...newSince(releases, '1')].sort(), ['2', '3'])
   assert.equal(newSince(releases, null).size, 0)
   assert.deepEqual([...newSince(releases, '1', true)].sort(), ['2', '2.5', '3'])
   assert.equal(newSince(releases, null, true).size, 0)
   assert.equal(newSince([releases[2]], '1').size, 0)
+})
+
+test('reserved rows are opt-in without mutating loaded history; withdrawals are never visible', () => {
+  const published = rel('3', '')
+  const reserved = rel('2', '', { state: 'reserved' })
+  const withdrawn = rel('2.5', '', { state: 'withdrawn', codename: 'Withdrawn Name' })
+  const candidate = rel('4', '', { state: 'candidate' })
+  const releases = [published, reserved, withdrawn, candidate]
+  const before = structuredClone(releases)
+  assert.deepEqual(visibleReleases(releases), [published, candidate])
+  assert.deepEqual(visibleReleases(releases, true), [published, reserved, candidate])
+  assert.deepEqual(releases, before)
 })
 
 test('reserved versions are opt-in without changing the full history or result counts', () => {

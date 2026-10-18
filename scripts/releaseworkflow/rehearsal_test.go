@@ -77,10 +77,7 @@ func coverageProblems(data, inventory []byte, dry workflow, tests string) []stri
 }
 
 func TestEveryReleaseStepHasReviewedRehearsalCounterpart(t *testing.T) {
-	data, err := os.ReadFile(filepath.Join(root(t), ".github/workflows/release.yml"))
-	if err != nil {
-		t.Fatal(err)
-	}
+	data := []byte(releaseYAML(t))
 	inventory, err := os.ReadFile(filepath.Join(root(t), "scripts/release-rehearsal-coverage.json"))
 	if err != nil {
 		t.Fatal(err)
@@ -105,7 +102,7 @@ func TestEveryReleaseStepHasReviewedRehearsalCounterpart(t *testing.T) {
 	for _, mutation := range []string{
 		strings.Replace(string(data), "jobs:\n", "jobs:\n  extra:\n    runs-on: ubuntu-latest\n    steps: [{run: 'echo untested'}]\n", 1),
 		strings.Replace(string(data), "      - name: Release checks\n", "      - name: New release step\n        run: echo untested\n      - name: Release checks\n", 1),
-		strings.Replace(string(data), "--verify-tag", "--verify-tag --new-unrehearsed-flag", 1),
+		strings.Replace(string(data), "complete release-source/dist --write", "complete release-source/dist --write --new-unrehearsed-flag", 1),
 	} {
 		if len(coverageProblems([]byte(mutation), inventory, dry, tests.String())) == 0 {
 			t.Fatal("release drift silently passed")
@@ -118,21 +115,32 @@ func TestEveryReleaseStepHasReviewedRehearsalCounterpart(t *testing.T) {
 }
 
 func TestRehearsalGateBeforeSideEffects(t *testing.T) {
-	w := readWorkflow(t, "release.yml")
+	w := releaseJobs(t)
 	for id, boundaries := range map[string][]string{
 		"agentd-darwin":  {"Build darwin paimos-agentd with LocalAuthentication", "Sign and notarize paimos-agentd"},
 		"image-platform": {"Release checks", "Build and push"},
 	} {
-		gateAt, gate := named(t, w.Jobs[id], "Require exact-SHA release rehearsal")
+		gateJob := id
+		if id == "agentd-darwin" {
+			gateJob = "prepare"
+		}
+		gateAt, gate := named(t, w.Jobs[gateJob], "Require exact-SHA release rehearsal")
 		for _, boundary := range boundaries {
 			boundaryAt, _ := named(t, w.Jobs[id], boundary)
-			if gateAt >= boundaryAt {
+			if gateJob == id && gateAt >= boundaryAt {
 				t.Fatalf("%s can run %s before the rehearsal gate", id, boundary)
 			}
 		}
-		if gate.If != "" || gate.ContinueOnError || !strings.HasPrefix(gate.Run, `node scripts/check-release-rehearsal.mjs --sha "`) || gate.Env["GH_TOKEN"] != "${{ secrets.GITHUB_TOKEN }}" || w.Jobs[id].Permissions["actions"] != "read" {
+		if gate.If != "" || gate.ContinueOnError || !strings.HasPrefix(gate.Run, `node scripts/check-release-rehearsal.mjs --sha "`) || gate.Env["GH_TOKEN"] != "${{ secrets.GITHUB_TOKEN }}" || w.Jobs[gateJob].Permissions["actions"] != "read" {
 			t.Fatalf("%s can bypass exact-SHA receipt", id)
 		}
+	}
+	if !reflect.DeepEqual(w.Jobs["agentd-darwin"].Needs, []string{"prepare"}) || w.Jobs["prepare"].Outputs["source_sha"] != "${{ steps.prepare.outputs.source_sha }}" {
+		t.Fatal("signing must depend on exact-source rehearsal preparation")
+	}
+	_, gate := named(t, w.Jobs["prepare"], "Require exact-SHA release rehearsal")
+	if gate.Env["SOURCE_SHA"] != "${{ steps.prepare.outputs.source_sha }}" || gate.Run != `node scripts/check-release-rehearsal.mjs --sha "$SOURCE_SHA"` {
+		t.Fatal("completion rehearsal must use the original tag source")
 	}
 	gateAt, _ := named(t, w.Jobs["image-platform"], "Require exact-SHA release rehearsal")
 	loginFound := false
@@ -298,7 +306,7 @@ node() { printf '%s\n' "$*" >> "$RUNNER_TEMP/verify"; }
 
 func TestRehearsalBuildsAndReceiptCannotSkip(t *testing.T) {
 	w := readWorkflow(t, "release-image-check.yml")
-	r := readWorkflow(t, "release.yml")
+	r := releaseJobs(t)
 	native := w.Jobs["agentd-rehearsal"]
 	if !reflect.DeepEqual(native.Strategy, r.Jobs["agentd-darwin"].Strategy) || native.Environment != "" {
 		t.Fatal("native rehearsal differs from production targets or requests signing")

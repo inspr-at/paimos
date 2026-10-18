@@ -137,6 +137,6 @@ func candidateNotes(h History, head versionFile, git func(...string) (string, er
 	if !sameProductNotes(h, bundle) || !ok || (notes.ReleaseChannel != "" && notes.ReleaseChannel != head.ReleaseChannel) || (notes.ReleaseSequence != 0 && notes.ReleaseSequence != head.ReleaseSequence) {
 		return nil, nil, fmt.Errorf("candidate requires matching committed product notes")
 	}
-	withNotes := withProductNotes(History{Product: h.Product, Repository: h.Repository, Releases: []Release{{Version: head.Version}}}, bundle)
+	withNotes := withProductNotes(History{Product: h.Product, Repository: h.Repository, Releases: []Release{{Version: head.Version, State: StateCandidate}}}, bundle)
 	return withNotes.Releases[0].Notes, &bundle, nil
 }

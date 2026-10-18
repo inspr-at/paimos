@@ -25,10 +25,11 @@ type step struct {
 }
 
 type job struct {
-	TimeoutMinutes int `yaml:"timeout-minutes"`
-	Env            map[string]string
+	Uses           string
+	With           map[string]string
 	RunsOn         string `yaml:"runs-on"`
 	If             string
+	TimeoutMinutes int `yaml:"timeout-minutes"`
 	Strategy       struct {
 		FailFast bool `yaml:"fail-fast"`
 		Matrix   struct {
@@ -41,6 +42,7 @@ type job struct {
 	}
 	Needs       []string
 	Permissions map[string]string
+	Env         map[string]string
 	Outputs     map[string]string
 	Environment string
 	Steps       []step
@@ -88,6 +90,36 @@ func named(t *testing.T, j job, name string) (int, step) {
 
 // Risk: a host's older pg_dump can neither read pg18 nor perform the vector-free
 // backup drill. Both CI lanes must use the clients from their exact service.
+// releaseYAML joins only job sections for invariant tests; the real publisher
+// still calls the independently tested completion workflow with bound inputs.
+func releaseYAML(t *testing.T) string {
+	t.Helper()
+	read := func(name string) string {
+		data, err := os.ReadFile(filepath.Join(root(t), ".github/workflows", name))
+		if err != nil {
+			t.Fatal(err)
+		}
+		return string(data)
+	}
+	completion := strings.SplitN(read("release-completion.yml"), "\njobs:\n", 2)
+	if len(completion) != 2 {
+		t.Fatal("completion jobs missing")
+	}
+	return read("release.yml") + "\n" + completion[1]
+}
+
+func releaseJobs(t *testing.T) workflow { return parseWorkflow(t, releaseYAML(t)) }
+
+func nativeBuildCommands(body string) string {
+	var commands []string
+	for _, line := range strings.Split(body, "\n") {
+		if strings.Contains(line, "bash scripts/build-release-binaries.sh") {
+			commands = append(commands, strings.TrimSpace(line))
+		}
+	}
+	return strings.Join(commands, "\n")
+}
+
 func TestNightlyBackupUsesItsPostgresServiceClients(t *testing.T) {
 	for _, lane := range []struct{ file, job string }{
 		{"ci.yml", "go-test"}, {"nightly-full.yml", "nightly-go-test"},
@@ -116,41 +148,157 @@ func TestNightlyBackupUsesItsPostgresServiceClients(t *testing.T) {
 
 func TestImageDoesNotWaitForClients(t *testing.T) {
 	w := readWorkflow(t, "release.yml")
+	c := readWorkflow(t, "release-completion.yml")
 	if len(w.On) != 1 || w.On["push"] == nil {
 		t.Fatal("publishing must remain tag-push only")
 	}
 	if len(w.Jobs["image-platform"].Needs) != 0 || !reflect.DeepEqual(w.Jobs["image"].Needs, []string{"image-platform"}) || w.Jobs["image"].If != "" {
 		t.Fatal("server image waits for another job")
 	}
-	if !reflect.DeepEqual(w.Jobs["assets"].Needs, []string{"agentd-darwin", "image"}) {
-		t.Fatal("assets must wait for signed darwin binaries and the verified digest")
+	if !reflect.DeepEqual(w.Jobs["completion"].Needs, []string{"image"}) || w.Jobs["completion"].Uses != "./.github/workflows/release-completion.yml" {
+		t.Fatal("completion must follow the verified index")
+	}
+	if w.Jobs["completion"].With["digest"] != "${{ needs.image.outputs.digest }}" || w.Jobs["completion"].With["tag"] != "v${{ needs.image.outputs.version }}" {
+		t.Fatal("completion inputs must bind the immutable index")
+	}
+	if !reflect.DeepEqual(c.Jobs["assets"].Needs, []string{"prepare", "agentd-darwin"}) {
+		t.Fatal("assets must wait for signed binaries and validation, independently of pin proposals")
 	}
 	image := w.Jobs["image"]
-	if image.Outputs["digest"] != "${{ steps.push.outputs.digest }}" || image.Outputs["version"] != "${{ steps.version.outputs.version }}" {
-		t.Fatal("missing image digest/version outputs")
+	if image.Environment != "release-pinning" {
+		t.Fatal("index publication must retain its original environment boundary")
 	}
-	_, draft := named(t, w.Jobs["assets"], "Create draft GitHub release with signed assets")
-	for _, flag := range []string{"--draft", "--verify-tag"} {
-		if !strings.Contains(draft.Run, flag) {
-			t.Fatalf("release creation missing %s", flag)
+	if image.Outputs["digest"] != "${{ steps.push.outputs.digest }}" || image.Outputs["version"] != "${{ steps.version.outputs.version }}" {
+		t.Fatal("missing image outputs")
+	}
+	if c.On["workflow_dispatch"] == nil || c.On["workflow_call"] == nil || len(c.On) != 2 {
+		t.Fatal("completion needs only reusable/manual entrypoints")
+	}
+	for _, guard := range []string{"github.event_name == 'workflow_dispatch'", "github.ref == 'refs/heads/main'", "github.repository == 'inspr-at/paimos'"} {
+		if !strings.Contains(c.Jobs["prepare"].If, guard) {
+			t.Fatalf("missing completion dispatch guard: %s", guard)
 		}
 	}
-	if draft.Env["DIGEST"] != "${{ needs.image.outputs.digest }}" || draft.Env["VERSION"] != "${{ needs.image.outputs.version }}" {
-		t.Fatal("release notes must use the image job's coordinate and digest")
+	_, draft := named(t, c.Jobs["assets"], "Complete draft with missing signed assets only")
+	if draft.Run != "node scripts/release-completion.mjs complete release-source/dist --write" {
+		t.Fatal("only additive completion may write release assets")
+	}
+	for _, name := range []string{"agentd-darwin", "assets"} {
+		found := false
+		for _, s := range c.Jobs[name].Steps {
+			if s.With["path"] == "release-source" && s.With["ref"] == "${{ needs.prepare.outputs.source_sha }}" && s.With["persist-credentials"] == "false" {
+				found = true
+			}
+		}
+		if !found {
+			t.Fatalf("%s does not build the attested tagged source", name)
+		}
 	}
 	if _, ok := w.Jobs["homebrew-tap"]; ok {
-		t.Fatal("Homebrew must stay on AEON-356's separate post-publication workflow")
+		t.Fatal("tap stays on its separate protected coordinator workflow")
+	}
+}
+
+func TestDarwinRestoreGateRequiresExactReleaseVersion(t *testing.T) {
+	j := readWorkflow(t, "release-completion.yml").Jobs["agentd-darwin"]
+	for _, kind := range []string{"agentd", "cli"} {
+		gateName, assetPrefix, versionPrefix := "Verify darwin signature", "paimos-agentd-darwin-", "paimos-agentd "
+		if kind == "cli" {
+			gateName, assetPrefix, versionPrefix = "Verify darwin CLI signature and version", "aeon-cli-darwin-", ""
+		}
+		gateIndex, gate := named(t, j, gateName)
+		if gate.If != "" || gate.Env["VERSION"] != "${{ needs.prepare.outputs.version }}" || j.Env["AEON_DEVELOPER_ID_TEAM"] != "P66J39QV6V" {
+			t.Fatal("restored and newly signed binaries must verify the exact prepared version and team")
+		}
+		for i, s := range j.Steps {
+			if strings.HasPrefix(s.Uses, "actions/upload-artifact@") && i <= gateIndex {
+				t.Fatal("Darwin verification must precede artifact upload")
+			}
+		}
+		const version = "261002120000.0.0"
+		for _, arch := range []string{"arm64", "amd64"} {
+			for _, tc := range []struct {
+				name, embedded, team             string
+				signed, probeFails, ok, executed bool
+			}{
+				{"same-coordinate", version, "P66J39QV6V", true, false, true, true},
+				{"same-coordinate-ledger", version + " ledger-v1", "P66J39QV6V", true, false, true, true},
+				{"signed-other-coordinate", "261001120000.0.0", "P66J39QV6V", true, false, false, true},
+				{"version-suffix", version + "-other", "P66J39QV6V", true, false, false, true},
+				{"failed-version-probe", version, "P66J39QV6V", true, true, false, true},
+				{"wrong-team", version, "OTHERTEAM00", true, false, false, false},
+				{"invalid-signature", version, "P66J39QV6V", false, false, false, false},
+			} {
+				if kind == "cli" && tc.name == "same-coordinate-ledger" {
+					continue
+				}
+				t.Run(kind+"/"+arch+"/"+tc.name, func(t *testing.T) {
+					dir := t.TempDir()
+					binDir := filepath.Join(dir, "release-source", "dist")
+					if err := os.MkdirAll(binDir, 0700); err != nil {
+						t.Fatal(err)
+					}
+					// Model a valid Developer ID signature independently of the embedded
+					// coordinate; only the version probe distinguishes the older release.
+					codesign := `#!/bin/bash
+case "$1" in
+  --verify) [ "$SIGNATURE_OK" = true ] && { [ "$BINARY_KIND" != cli ] || [ "$SIGNED_TEAM" = P66J39QV6V ]; } ;;
+  -dv) printf 'TeamIdentifier=%s\n' "$SIGNED_TEAM" >&2 ;;
+  *) exit 1 ;;
+esac
+`
+					binary := `#!/bin/bash
+[ "$1" = --version ] || exit 1
+printf 'executed\n' >> "$TRACE"
+printf '%s%s\n' "$BINARY_PREFIX" "$BINARY_VERSION"
+[ "$VERSION_FAIL" != true ]
+`
+					asset := assetPrefix + arch
+					for path, content := range map[string]string{filepath.Join(dir, "codesign"): codesign, filepath.Join(binDir, asset): binary} {
+						if err := os.WriteFile(path, []byte(content), 0700); err != nil {
+							t.Fatal(err)
+						}
+					}
+					trace := filepath.Join(dir, "trace")
+					cmd := exec.Command("bash", "-c", gate.Run)
+					cmd.Dir = dir
+					cmd.Env = append(os.Environ(), "PATH="+dir+":"+os.Getenv("PATH"), "ASSET_NAME="+asset,
+						"BINARY_KIND="+kind, "BINARY_PREFIX="+versionPrefix, "VERSION="+version, "AEON_DEVELOPER_ID_TEAM=P66J39QV6V", "SIGNED_TEAM="+tc.team,
+						"SIGNATURE_OK="+map[bool]string{true: "true", false: "false"}[tc.signed], "BINARY_VERSION="+tc.embedded,
+						"VERSION_FAIL="+map[bool]string{true: "true", false: "false"}[tc.probeFails], "TRACE="+trace)
+					output, err := cmd.CombinedOutput()
+					if (err == nil) != tc.ok {
+						t.Fatalf("Darwin gate success %v, want %v: %s", err == nil, tc.ok, output)
+					}
+					if tc.signed && !tc.probeFails && tc.team == "P66J39QV6V" && !tc.ok && !strings.Contains(string(output), "version does not match") {
+						t.Fatalf("validly signed stale agent must fail the version check: %s", output)
+					}
+					_, err = os.Stat(trace)
+					if (err == nil) != tc.executed {
+						t.Fatal("the version probe must run only after signature and team verification")
+					}
+				})
+			}
+		}
 	}
 }
 
 func TestDarwinHookCLIIsSignedAndRehearsedBeforeAssembly(t *testing.T) {
-	w := readWorkflow(t, "release.yml")
+	w := readWorkflow(t, "release-completion.yml")
 	dry := readWorkflow(t, "release-image-check.yml")
 	buildAt, build := named(t, w.Jobs["agentd-darwin"], "Build darwin paimos-agentd with LocalAuthentication")
 	signAt, sign := named(t, w.Jobs["agentd-darwin"], "Sign and notarize paimos-agentd")
 	_, rehearsal := named(t, dry.Jobs["agentd-rehearsal"], "Build darwin paimos-agentd with LocalAuthentication")
-	if buildAt >= signAt || build.Run != rehearsal.Run || !reflect.DeepEqual(build.Env, rehearsal.Env) || !strings.Contains(build.Run, "build-release-binaries.sh cli-darwin") {
+	if buildAt >= signAt || nativeBuildCommands(build.Run) != nativeBuildCommands(rehearsal.Run) || !strings.Contains(build.Run, "build-release-binaries.sh cli-darwin") {
 		t.Fatal("native rehearsal must build the same CLI and daemon as production")
+	}
+	for _, key := range []string{"AEON_DARWIN_ARCH", "GOCACHE", "GOMODCACHE", "GOFLAGS"} {
+		if build.Env[key] != rehearsal.Env[key] {
+			t.Fatalf("native rehearsal differs in %s", key)
+		}
+	}
+	if build.Env["RESTORED_AGENTD"] != "${{ steps.restore.outputs.restored }}" || build.Env["RESTORED_CLI"] != "${{ steps.restore-cli.outputs.restored }}" {
+		t.Fatal("only verified restored assets may skip native rebuilding")
 	}
 	for _, fragment := range []string{
 		`sign-notarize.sh --identifier aeon-cli "dist/aeon-cli-darwin-${{ matrix.arch }}"`,
@@ -357,6 +505,7 @@ func TestExportsShareSourceEpoch(t *testing.T) {
 func TestReadOnlyDryRunAndLeastPrivilege(t *testing.T) {
 	release := readWorkflow(t, "release.yml")
 	dry := readWorkflow(t, "release-image-check.yml")
+	completion := readWorkflow(t, "release-completion.yml")
 	web := readWorkflow(t, "docker-web-check.yml")
 	if !reflect.DeepEqual(release.Permissions, map[string]string{"contents": "read"}) || !reflect.DeepEqual(dry.Permissions, map[string]string{"contents": "read"}) || !reflect.DeepEqual(web.Permissions, map[string]string{"contents": "read"}) {
 		t.Fatal("workflow defaults must be read-only")
@@ -374,10 +523,10 @@ func TestReadOnlyDryRunAndLeastPrivilege(t *testing.T) {
 			t.Fatalf("web check misses %s", path)
 		}
 	}
-	if !reflect.DeepEqual(release.Jobs["image-platform"].Permissions, map[string]string{"contents": "write", "actions": "read", "packages": "write", "attestations": "write", "id-token": "write"}) || !reflect.DeepEqual(release.Jobs["image"].Permissions, map[string]string{"contents": "write", "packages": "write", "attestations": "write", "id-token": "write"}) || !reflect.DeepEqual(release.Jobs["assets"].Permissions, map[string]string{"contents": "write"}) {
+	if !reflect.DeepEqual(release.Jobs["image-platform"].Permissions, map[string]string{"contents": "write", "actions": "read", "packages": "write", "attestations": "write", "id-token": "write"}) || !reflect.DeepEqual(release.Jobs["image"].Permissions, map[string]string{"contents": "write", "packages": "write", "attestations": "write", "id-token": "write"}) || !reflect.DeepEqual(completion.Jobs["assets"].Permissions, map[string]string{"contents": "write", "packages": "read", "attestations": "read"}) {
 		t.Fatal("token writes must be scoped to the image and assets jobs")
 	}
-	if release.Jobs["agentd-darwin"].Environment != "release-signing" || !reflect.DeepEqual(release.Jobs["agentd-darwin"].Permissions, map[string]string{"contents": "read", "actions": "read"}) {
+	if completion.Jobs["agentd-darwin"].Environment != "release-signing" || !reflect.DeepEqual(completion.Jobs["agentd-darwin"].Permissions, map[string]string{"contents": "write", "packages": "read", "attestations": "read"}) {
 		t.Fatal("darwin signing boundary changed")
 	}
 	if _, ok := dry.On["workflow_dispatch"]; !ok {
@@ -406,10 +555,10 @@ func TestReadOnlyDryRunAndLeastPrivilege(t *testing.T) {
 		}
 	}
 	pin := regexp.MustCompile(`@[a-f0-9]{40}$`)
-	for _, w := range []workflow{release, dry, tap, web} {
+	for _, w := range []workflow{release, completion, dry, tap, web} {
 		for _, j := range w.Jobs {
 			for _, s := range j.Steps {
-				if s.Uses != "" && !pin.MatchString(s.Uses) {
+				if s.Uses != "" && !strings.HasPrefix(s.Uses, "./.github/workflows/") && !pin.MatchString(s.Uses) {
 					t.Fatalf("unpinned action %s", s.Uses)
 				}
 			}
@@ -479,7 +628,6 @@ func TestImmutabilityGuardsFailClosed(t *testing.T) {
 	for _, target := range []struct{ job, step, coordinate string }{
 		{"image-platform", "Reject an existing GitHub release", "v260930120000.0.0"},
 		{"image", "Reject an existing GitHub release", "v260930120000.0.0"},
-		{"assets", "Reject an existing GitHub release", "v260930120000.0.0"},
 		{"image-platform", "Reject an existing image tag", "260930120000.0.0"},
 		{"image", "Reject an existing image tag", "260930120000.0.0"},
 	} {
@@ -629,67 +777,42 @@ func TestNativePlatformsAndIndexPublication(t *testing.T) {
 }
 
 func TestPinProposalFollowsVerificationWithoutWaitingForAssets(t *testing.T) {
-	w := readWorkflow(t, "release.yml")
-	image := w.Jobs["image"]
-	verifyIndex, _ := named(t, image, "Verify pushed image attestation")
-	recordIndex, record := named(t, image, "Record pushed digest")
-	pinIndex, pin := named(t, image, "Propose verified nixcfg deployment pin")
-	if recordIndex != verifyIndex+1 || pinIndex != recordIndex+1 || pin.If != "" || pin.ID != "pin" {
-		t.Fatal("record the verified digest before the optional pin proposal")
+	w := readWorkflow(t, "release-completion.yml")
+	pinJob := w.Jobs["pin"]
+	if !reflect.DeepEqual(pinJob.Needs, []string{"prepare"}) || pinJob.Environment != "release-pinning" {
+		t.Fatal("pin credentials require the verified completion stage")
 	}
-	if record.Env["DIGEST"] != "${{ steps.push.outputs.digest }}" || !strings.Contains(record.Run, "ghcr.io/inspr-at/aeon@${DIGEST}") {
-		t.Fatal("digest summary must bind the verified release index")
-	}
-	if !pin.ContinueOnError {
-		t.Fatal("a pin proposal failure must not fail image or skip assets")
-	}
-	for _, s := range image.Steps {
-		if s.ID != "pin" && s.ContinueOnError {
-			t.Fatal("only the optional pin proposal may ignore failures")
-		}
-	}
-	if image.Environment != "release-pinning" || image.Outputs["pin_evidence"] != "${{ steps.pin.outputs.pin_evidence }}" {
-		t.Fatal("pin credentials and release evidence must use the documented boundary")
+	verifyIndex, _ := named(t, pinJob, "Reverify index before pin proposal")
+	pinIndex, pin := named(t, pinJob, "Propose verified nixcfg deployment pin")
+	if pinIndex <= verifyIndex || !pin.ContinueOnError || pin.ID != "pin" || pin.If != "" {
+		t.Fatal("optional pin must follow verification without blocking assets")
 	}
 	for key, expected := range map[string]string{
-		"GH_TOKEN":             "${{ secrets.GITHUB_TOKEN }}",
-		"VERSION":              "${{ steps.version.outputs.version }}",
-		"DIGEST":               "${{ steps.push.outputs.digest }}",
-		"AEON_PIN_BOT_ENABLED": "${{ vars.AEON_PIN_BOT_ENABLED }}",
-		"AEON_PIN_APP_ID":      "${{ secrets.AEON_PIN_APP_ID }}",
-		"AEON_PIN_APP_KEY":     "${{ secrets.AEON_PIN_APP_KEY }}",
-		"INDEX_PUSHED_AT":      "${{ steps.push.outputs.pushed_at }}",
+		"VERSION": "${{ needs.prepare.outputs.version }}", "DIGEST": "${{ needs.prepare.outputs.digest }}", "RELEASE_SOURCE_SHA": "${{ needs.prepare.outputs.source_sha }}",
+		"AEON_PIN_BOT_ENABLED": "${{ vars.AEON_PIN_BOT_ENABLED }}", "AEON_PIN_APP_ID": "${{ secrets.AEON_PIN_APP_ID }}", "AEON_PIN_APP_KEY": "${{ secrets.AEON_PIN_APP_KEY }}",
 	} {
 		if pin.Env[key] != expected {
-			t.Fatalf("pin proposal input %s is not bound to the approved release", key)
+			t.Fatalf("unbound pin input %s", key)
 		}
 	}
-	for _, fragment := range []string{`args=(scripts/release-pin-pr.mjs)`, `if [ "$AEON_PIN_BOT_ENABLED" = true ]`, `args+=(--write)`, `if ! node "${args[@]}"; then`} {
+	for _, fragment := range []string{`args=(scripts/release-pin-pr.mjs)`, `args+=(--write)`, `if ! node "${args[@]}"; then`, "::warning::Deployment pin proposal failed", `>> "$GITHUB_STEP_SUMMARY"`, "exit 1"} {
 		if !strings.Contains(pin.Run, fragment) {
-			t.Fatalf("pin proposal lacks explicit read-only/write routing: %s", fragment)
+			t.Fatalf("missing pin safety %s", fragment)
 		}
-	}
-	for _, fragment := range []string{"::warning::Deployment pin proposal failed", "Deployment pin proposal failed; release assets will still be built.", `>> "$GITHUB_STEP_SUMMARY"`, "exit 1"} {
-		if !strings.Contains(pin.Run, fragment) {
-			t.Fatalf("pin failure must retain its outcome, annotation and summary: %s", fragment)
-		}
-	}
-	_, draft := named(t, w.Jobs["assets"], "Create draft GitHub release with signed assets")
-	if draft.Env["PIN_EVIDENCE"] != "${{ needs.image.outputs.pin_evidence }}" || !strings.Contains(draft.Run, `"$PIN_EVIDENCE"`) {
-		t.Fatal("draft release must carry the image job's verified pin evidence")
 	}
 	for name, j := range w.Jobs {
 		for _, s := range j.Steps {
 			for key, value := range s.Env {
-				if strings.HasPrefix(key, "AEON_PIN_APP_") && (name != "image" || s.ID != "pin" || !strings.Contains(value, "secrets.AEON_PIN_APP_")) {
-					t.Fatal("pin credentials escaped the verified image proposal step")
+				if strings.HasPrefix(key, "AEON_PIN_APP_") && (name != "pin" || s.ID != "pin" || !strings.Contains(value, "secrets.AEON_PIN_APP_")) {
+					t.Fatal("pin credentials escaped the proposal step")
 				}
 			}
 			if strings.Contains(s.Run, "gh pr merge") || strings.Contains(s.Run, "--auto") || strings.Contains(s.Run, "nixos-rebuild") {
-				t.Fatal("release workflow must never merge or deploy a pin proposal")
+				t.Fatal("completion must never merge or deploy")
 			}
 		}
 	}
+
 	// CI has scalar and list needs; only parse the steps used by this check.
 	var ci struct {
 		Jobs map[string]struct {
@@ -716,5 +839,21 @@ func TestPinProposalFollowsVerificationWithoutWaitingForAssets(t *testing.T) {
 	if worker.If != "always() && needs.ci-plan.result == 'success' && (needs.ci-plan.outputs.lane == 'full') && needs.tree-reuse.outputs.reuse != 'merge_group' && needs.tree-reuse.outputs.reuse != 'pull_request'" || gate.If != "always()" ||
 		!reflect.DeepEqual(gate.Needs, []any{"ci-plan", "release-check-run", "tree-reuse", "cache-prime"}) {
 		t.Fatal("pin regressions must retain classified validation and the required aggregate")
+	}
+}
+
+func TestCurrentWithdrawalLedgerBeforeImagePublication(t *testing.T) {
+	w := readWorkflow(t, "release.yml")
+	for _, id := range []string{"image-platform", "image"} {
+		j := w.Jobs[id]
+		guardIndex, guard := named(t, j, "Enforce current release withdrawal ledger")
+		pushName := "Build and push"
+		if id == "image" {
+			pushName = "Publish multi-arch index"
+		}
+		pushIndex, _ := named(t, j, pushName)
+		if guardIndex >= pushIndex || guard.If != "" || guard.ContinueOnError || guard.Run != `node scripts/release-withdrawals.mjs coordinate "$VERSION" --current-main` || guard.Env["VERSION"] != "${{ steps.version.outputs.version }}" || guard.Env["GH_TOKEN"] != "${{ secrets.GITHUB_TOKEN }}" {
+			t.Fatal("withdrawn coordinate can bypass current-main guard", id)
+		}
 	}
 }

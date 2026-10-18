@@ -141,7 +141,7 @@ func TestBackfillNoteSnapshotsPlansAppliesAndLeavesExistingRows(t *testing.T) {
 	}
 	// The same native backfill reaches the product release history too.
 	historyMux := http.NewServeMux()
-	releasehistory.NewWith(releasehistory.History{Releases: []releasehistory.Release{{Version: gapVersion, Notes: releasehistory.MissingNotes()}}}, gapVersion).WithBackfills(f.db.App, f.project).Mount(historyMux)
+	releasehistory.NewWith(releasehistory.History{Releases: []releasehistory.Release{{Version: gapVersion, State: releasehistory.StatePublished, Notes: releasehistory.MissingNotes()}}}, gapVersion).WithBackfills(f.db.App, f.project).Mount(historyMux)
 	historyResponse := httptest.NewRecorder()
 	historyMux.ServeHTTP(historyResponse, httptest.NewRequest("GET", "/api/releases/"+gapVersion, nil).WithContext(tenant.WithPrincipal(t.Context(), f.person)))
 	if historyResponse.Code != 200 || !strings.Contains(historyResponse.Body.String(), backfillBenefit) || !strings.Contains(historyResponse.Body.String(), `"written_after_release":true`) {
