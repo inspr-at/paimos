@@ -113,6 +113,9 @@ func queryAccountsLimit(ctx context.Context, tx pgx.Tx, retired bool, bound int)
 	return attachWindows(ctx, tx, out)
 }
 
+// loadAccount reads one account. Tests replace it to inject lookup failures.
+var loadAccount = getAccount
+
 func getAccount(ctx context.Context, tx pgx.Tx, id string) (Account, error) {
 	row := tx.QueryRow(ctx, `
 		SELECT id::text, account_key, harness, daemon_id, label, max_parallel_runs,
@@ -345,6 +348,15 @@ func findAccount(ctx context.Context, tx pgx.Tx, daemonID, harness, key string) 
 
 func isNoRows(err error) bool {
 	return errors.Is(err, pgx.ErrNoRows)
+}
+
+// accountNotFound maps a missing account to 404. Any other lookup error,
+// including a database outage, stays a server error.
+func accountNotFound(err error) error {
+	if isNoRows(err) {
+		return fail(404, "account not found")
+	}
+	return err
 }
 
 type probeWrite struct {
