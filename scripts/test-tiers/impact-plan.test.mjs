@@ -321,7 +321,7 @@ test('AEON-1333 kill switch aggregates reject planned skips, stale layouts, prio
 
 test('AEON-1333 workflow publishes shadow evidence from immutable base with Actions read authority and never feeds shadow selection to execution', () => {
   const workflow = readFileSync(new URL('../../.github/workflows/ci.yml', import.meta.url), 'utf8')
-  const tier = /\n  tier-plan:\n([\s\S]*?)(?=\n  runner-route:)/.exec(workflow)[1]
+  const tier = /\n  ci-plan:\n([\s\S]*?)(?=\n  runner-route:)/.exec(workflow)[1]
   assert.match(tier, /actions: read/); assert.match(tier, /GH_TOKEN: \$\{\{ secrets.GITHUB_TOKEN \}\}/)
   assert.match(tier, /git fetch --no-tags --depth=2 origin "\$GITHUB_SHA"/)
   assert.match(tier, /git archive "\$PR_BASE_SHA"/); assert.match(tier, /AEON_IMPACT_CHECKOUT="\$GITHUB_WORKSPACE" node "\$snapshot\/scripts\/test-tiers\/impact-plan.mjs"/)

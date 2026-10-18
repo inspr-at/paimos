@@ -235,7 +235,7 @@ test("CI expressions honor the router switch, fork boundary and attempt for runn
   // Evaluate the checked-in expressions, not a separate implementation of the
   // workflow decision. These expressions use the common JS/Actions operators.
   function evaluate(expression, github, outputs, tierMode="essential") {
-    const source = expression.slice(3, -2).replaceAll("needs.runner-route.outputs.", "outputs.").replaceAll("needs.tier-plan.outputs.mode", "tierMode");
+    const source = expression.slice(3, -2).replaceAll("needs.runner-route.outputs.", "outputs.").replaceAll("needs.ci-plan.outputs.mode", "tierMode");
     return Function("github", "outputs", "contains", "fromJSON", "tierMode", `return (${source});`)(
       github, outputs, (values, value) => values.includes(value), JSON.parse, tierMode,
     );

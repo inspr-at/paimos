@@ -147,15 +147,26 @@ jobs:
           path: ${{ steps.go-cache-path.outputs.path }}
           key: go-test-v1-${{ runner.os }}-${{ runner.arch }}-${{ steps.setup-go.outputs.go-version }}-${{ hashFiles('go.sum') }}-7-7-main-${{ github.sha }}
 
-  # AEON-427a: only PRs may omit heavy validation; classification errors run full.
+  # AEON-1337: one runner/checkout for classification, tiers and shadow evidence.
+  # Only PRs may omit heavy validation; classification errors run full.
   ci-plan:
+    permissions:
+      contents: read
+      actions: read
     runs-on: ubuntu-latest
-    timeout-minutes: 5
+    timeout-minutes: 7
     outputs:
-      lane: ${{ steps.plan.outputs.lane }}
+      lane: ${{ steps.tiers.outputs.lane }}
       specs: ${{ steps.plan.outputs.specs }}
       nix_vendor: ${{ steps.plan.outputs.nix_vendor }}
       pr_tree_proof: ${{ steps.pr-tree.outputs.proof }}
+      mode: ${{ steps.tiers.outputs.mode }}
+      # full: the mode's shard layout. static (affected PR lane only): static,
+      # unit, release and migration jobs; no Go shards, timing, browsers or e2e.
+      layout: ${{ steps.tiers.outputs.layout }}
+      web_shards: ${{ steps.tiers.outputs.web_shards }}
+      browser_scope: ${{ steps.tiers.outputs.browser_scope }}
+      browser_plan_sha256: ${{ steps.tiers.outputs.browser_plan_sha256 }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
@@ -206,48 +217,24 @@ jobs:
           appendFileSync(process.env.GITHUB_OUTPUT, `proof=pr-tree-v1:${run}:${attempt}:${head}:${base}:${sha}:${tree}\n`);
           JS
 
-  tier-plan:
-    needs: ci-plan
-    permissions:
-      contents: read
-      actions: read
-    runs-on: ubuntu-latest
-    timeout-minutes: 2
-    outputs:
-      mode: ${{ steps.tiers.outputs.mode }}
-      # Effective lane: trusted coverage wins over classifier exemptions when on.
-      lane: ${{ steps.tiers.outputs.lane }}
-      # full: the mode's shard layout. static (affected PR lane only): static,
-      # unit, release and migration jobs; no Go shards, timing, browsers or e2e.
-      layout: ${{ steps.tiers.outputs.layout }}
-      web_shards: ${{ steps.tiers.outputs.web_shards }}
-      browser_scope: ${{ steps.tiers.outputs.browser_scope }}
-      browser_plan_sha256: ${{ steps.tiers.outputs.browser_plan_sha256 }}
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
-        if: contains(fromJSON('["pull_request","merge_group"]'), github.event_name)
-        with:
-          persist-credentials: false
-          fetch-depth: 1
-      # Hosted Ubuntu's Node runs this dependency-free planner. Fetch only the
-      # exact event base; skip checkout entirely when this event runs full.
-      - id: tiers
+      - name: Plan test tiers
+        id: tiers
         env:
-          CI_PLAN_LANE: ${{ needs.ci-plan.outputs.lane }}
+          CI_PLAN_LANE: ${{ steps.plan.outputs.lane }}
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           if [ "${CI_IMPACT:-}" = off ]; then
-            printf 'mode=full\nlayout=full\nlane=full\nweb_shards=[1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17]\n' >> "$GITHUB_OUTPUT"
+            printf 'mode=full\nlayout=full\nlane=full\nweb_shards=[1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17]\nbrowser_scope=gated-full\nbrowser_plan_sha256=\n' >> "$GITHUB_OUTPUT"
             exit 0
           fi
           case "$GITHUB_EVENT_NAME" in
             pull_request) node scripts/test-tiers/diff.mjs ;;
             # Enforce full merge-group coverage here: the candidate planner can be edited by a PR.
-            merge_group) printf 'mode=full\nlayout=full\nlane=full\nweb_shards=[1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17]\n' >> "$GITHUB_OUTPUT" ;;
+            merge_group) printf 'mode=full\nlayout=full\nlane=full\nweb_shards=[1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17]\nbrowser_scope=gated-full\nbrowser_plan_sha256=\n' >> "$GITHUB_OUTPUT" ;;
             *)
               lane=full
               if [ "$CI_AFFECTED_LANE" != on ]; then lane="$CI_PLAN_LANE"; fi
-              printf 'mode=full\nlayout=full\nlane=%s\nweb_shards=[1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17]\n' "$lane" >> "$GITHUB_OUTPUT" ;;
+              printf 'mode=full\nlayout=full\nlane=%s\nweb_shards=[1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17]\nbrowser_scope=gated-full\nbrowser_plan_sha256=\n' "$lane" >> "$GITHUB_OUTPUT" ;;
           esac
 
 
@@ -327,14 +314,14 @@ jobs:
       required-idle-runners: 4
 
   go-test:
-    if: always() && needs.ci-plan.result == 'success' && needs.tier-plan.result == 'success' && (needs.tier-plan.outputs.lane == 'full' && (github.event_name != 'pull_request' || needs.tier-plan.outputs.layout != 'static')) && needs.tree-reuse.outputs.reuse != 'merge_group' && needs.tree-reuse.outputs.reuse != 'pull_request' && needs.runner-route.result == 'success'
-    needs: [runner-route, ci-plan, tree-reuse, tier-plan]
+    if: always() && needs.ci-plan.result == 'success' && (needs.ci-plan.outputs.lane == 'full' && (github.event_name != 'pull_request' || needs.ci-plan.outputs.layout != 'static')) && needs.tree-reuse.outputs.reuse != 'merge_group' && needs.tree-reuse.outputs.reuse != 'pull_request' && needs.runner-route.result == 'success'
+    needs: [runner-route, ci-plan, tree-reuse]
     strategy:
       fail-fast: false
       matrix:
         # Use the same event/ref/attempt guards as runs-on when evaluated.
         # Re-run all jobs: partial reruns may retain earlier matrix values.
-        shard: ${{ fromJSON(((contains(fromJSON('["push","workflow_dispatch"]'), github.event_name) && github.ref == 'refs/heads/main') || (github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository) || github.event_name == 'merge_group') && needs.runner-route.outputs.run_attempt == github.run_attempt && needs.runner-route.outputs.runner_class == 'mbp2606' && '[1, 2, 3, 4]' || github.event_name == 'pull_request' && needs.tier-plan.outputs.mode == 'essential' && '[1, 2]' || '[1, 2, 3, 4, 5, 6, 7]') }}
+        shard: ${{ fromJSON(((contains(fromJSON('["push","workflow_dispatch"]'), github.event_name) && github.ref == 'refs/heads/main') || (github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository) || github.event_name == 'merge_group') && needs.runner-route.outputs.run_attempt == github.run_attempt && needs.runner-route.outputs.runner_class == 'mbp2606' && '[1, 2, 3, 4]' || github.event_name == 'pull_request' && needs.ci-plan.outputs.mode == 'essential' && '[1, 2]' || '[1, 2, 3, 4, 5, 6, 7]') }}
     runs-on: ${{ fromJSON(((contains(fromJSON('["push","workflow_dispatch"]'), github.event_name) && github.ref == 'refs/heads/main') || (github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository) || github.event_name == 'merge_group') && needs.runner-route.outputs.run_attempt == github.run_attempt && needs.runner-route.outputs.runs_on || '["ubuntu-latest"]') }}
     services:
       postgres:
@@ -392,8 +379,8 @@ jobs:
       - name: Install shells when this shard runs pairing path-proof tests
         timeout-minutes: 4
         env:
-          AEON_TEST_TIER_MODE: ${{ needs.tier-plan.outputs.mode }}
-          AEON_TEST_TIER_LAYOUT: ${{ needs.tier-plan.outputs.layout }}
+          AEON_TEST_TIER_MODE: ${{ needs.ci-plan.outputs.mode }}
+          AEON_TEST_TIER_LAYOUT: ${{ needs.ci-plan.outputs.layout }}
           TIER_SHARD: ${{ matrix.shard }}
         run: |
           set -euo pipefail
@@ -415,12 +402,12 @@ jobs:
         env:
           # Matching clients in this exact service, never a named local container.
           AEON_TEST_POSTGRES_CONTAINER: ${{ job.services.postgres.id }}
-          AEON_TEST_TIER_MODE: ${{ needs.tier-plan.outputs.mode }}
-          AEON_TEST_TIER_LAYOUT: ${{ needs.tier-plan.outputs.layout }}
+          AEON_TEST_TIER_MODE: ${{ needs.ci-plan.outputs.mode }}
+          AEON_TEST_TIER_LAYOUT: ${{ needs.ci-plan.outputs.layout }}
           GOFLAGS: -count=1
         run: node scripts/test-tiers/cli.mjs run go --shard ${{ matrix.shard }}/${{ strategy.job-total }} --job go-test-${{ matrix.shard }}
       - name: Confirm full tier execution
-        if: github.event_name != 'pull_request' || needs.tier-plan.outputs.mode != 'essential'
+        if: github.event_name != 'pull_request' || needs.ci-plan.outputs.mode != 'essential'
         env:
           TIER_REPORT: tmp/test-tiers/go-test-${{ matrix.shard }}-measurement.json
         run: node scripts/test-tiers/check-full.mjs
@@ -445,8 +432,8 @@ jobs:
   # Timing budgets were calibrated on hosted hardware. Full validation always
   # runs this job, regardless of the selected Go shard layout.
   go-timing:
-    needs: [ci-plan, tree-reuse, tier-plan]
-    if: always() && needs.ci-plan.result == 'success' && needs.tier-plan.result == 'success' && (needs.tier-plan.outputs.lane == 'full' && (github.event_name != 'pull_request' || needs.tier-plan.outputs.layout != 'static')) && needs.tree-reuse.outputs.reuse != 'merge_group'
+    needs: [ci-plan, tree-reuse]
+    if: always() && needs.ci-plan.result == 'success' && (needs.ci-plan.outputs.lane == 'full' && (github.event_name != 'pull_request' || needs.ci-plan.outputs.layout != 'static')) && needs.tree-reuse.outputs.reuse != 'merge_group'
     runs-on: ubuntu-latest
     services:
       postgres:
@@ -490,8 +477,8 @@ jobs:
           overwrite: true
 
   go-static:
-    needs: [ci-plan, tree-reuse, tier-plan]
-    if: always() && needs.ci-plan.result == 'success' && needs.tier-plan.result == 'success' && (needs.tier-plan.outputs.lane == 'full') && needs.tree-reuse.outputs.reuse != 'merge_group'
+    needs: [ci-plan, tree-reuse]
+    if: always() && needs.ci-plan.result == 'success' && (needs.ci-plan.outputs.lane == 'full') && needs.tree-reuse.outputs.reuse != 'merge_group'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
@@ -546,7 +533,7 @@ jobs:
   # job fails because if: always() still runs this gate.
   go:
     if: always()
-    needs: [ci-plan, go-test, go-static, go-timing, tree-reuse, cache-prime, tier-plan]
+    needs: [ci-plan, go-test, go-static, go-timing, tree-reuse, cache-prime]
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -559,10 +546,10 @@ jobs:
           REUSE_PROOF: ${{ needs.tree-reuse.result }}
           SOURCE_RUN: ${{ needs.tree-reuse.outputs.run }}
           CACHE_PRIME: ${{ needs.cache-prime.result }}
-          TIER_PLAN: ${{ needs.tier-plan.result }}
-          TIER_LAYOUT: ${{ needs.tier-plan.outputs.layout }}
+          TIER_PLAN: ${{ needs.ci-plan.result }}
+          TIER_LAYOUT: ${{ needs.ci-plan.outputs.layout }}
           CI_PLAN: ${{ needs.ci-plan.result }}
-          CI_LANE: ${{ needs.tier-plan.outputs.lane }}
+          CI_LANE: ${{ needs.ci-plan.outputs.lane }}
           GO_TEST: ${{ needs.go-test.result }}
           GO_STATIC: ${{ needs.go-static.result }}
           GO_TIMING: ${{ needs.go-timing.result }}
@@ -637,10 +624,10 @@ jobs:
           PR_CONFIRM_RUN: ${{ steps.pr-confirm.outputs.run }}
           SOURCE_RUN: ${{ needs.tree-reuse.outputs.run }}
           CACHE_PRIME: ${{ needs.cache-prime.result }}
-          TIER_PLAN: ${{ needs.tier-plan.result }}
-          TIER_LAYOUT: ${{ needs.tier-plan.outputs.layout }}
+          TIER_PLAN: ${{ needs.ci-plan.result }}
+          TIER_LAYOUT: ${{ needs.ci-plan.outputs.layout }}
           CI_PLAN: ${{ needs.ci-plan.result }}
-          CI_LANE: ${{ needs.tier-plan.outputs.lane }}
+          CI_LANE: ${{ needs.ci-plan.outputs.lane }}
           GO_TEST: ${{ needs.go-test.result }}
           GO_STATIC: ${{ needs.go-static.result }}
           GO_TIMING: ${{ needs.go-timing.result }}
@@ -670,8 +657,8 @@ jobs:
 
   # Strict discovery runs beside runtime preparation; the required web gate joins both.
   web-catalogue:
-    needs: [ci-plan, tree-reuse, tier-plan]
-    if: always() && needs.ci-plan.result == 'success' && needs.tier-plan.result == 'success' && (needs.tier-plan.outputs.lane != 'docs-only') && needs.tree-reuse.outputs.reuse != 'merge_group' && needs.tree-reuse.outputs.reuse != 'pull_request'
+    needs: [ci-plan, tree-reuse]
+    if: always() && needs.ci-plan.result == 'success' && (needs.ci-plan.outputs.lane != 'docs-only') && needs.tree-reuse.outputs.reuse != 'merge_group' && needs.tree-reuse.outputs.reuse != 'pull_request'
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
@@ -711,8 +698,8 @@ jobs:
   # status-help, status-autopilot, model-settings); their unit tests run once in
   # the parallel web-unit matrix via the tier runner.
   web-setup:
-    needs: [ci-plan, tree-reuse, tier-plan]
-    if: always() && needs.ci-plan.result == 'success' && needs.tier-plan.result == 'success' && (needs.tier-plan.outputs.lane != 'docs-only') && needs.tree-reuse.outputs.reuse != 'merge_group' && needs.tree-reuse.outputs.reuse != 'pull_request'
+    needs: [ci-plan, tree-reuse]
+    if: always() && needs.ci-plan.result == 'success' && (needs.ci-plan.outputs.lane != 'docs-only') && needs.tree-reuse.outputs.reuse != 'merge_group' && needs.tree-reuse.outputs.reuse != 'pull_request'
     runs-on: ubuntu-latest
     timeout-minutes: 20
     outputs:
@@ -792,15 +779,15 @@ jobs:
 
   # Units start with the UI shards; setup only prepares their shared runtime.
   web-unit:
-    if: always() && needs.ci-plan.result == 'success' && needs.tier-plan.result == 'success' && (needs.tier-plan.outputs.lane != 'docs-only') && needs.tree-reuse.outputs.reuse != 'merge_group' && needs.tree-reuse.outputs.reuse != 'pull_request' && needs.web-setup.result == 'success'
-    needs: [ci-plan, web-setup, tree-reuse, tier-plan]
+    if: always() && needs.ci-plan.result == 'success' && (needs.ci-plan.outputs.lane != 'docs-only') && needs.tree-reuse.outputs.reuse != 'merge_group' && needs.tree-reuse.outputs.reuse != 'pull_request' && needs.web-setup.result == 'success'
+    needs: [ci-plan, web-setup, tree-reuse]
     runs-on: ubuntu-latest
     timeout-minutes: 20
     strategy:
       fail-fast: false
       matrix:
         # Spec-only retains the existing exact-spec lane's once-only unit command.
-        shard: ${{ fromJSON(github.event_name == 'pull_request' && needs.tier-plan.outputs.lane == 'spec-only' && '[1]' || '[1, 2, 3, 4]') }}
+        shard: ${{ fromJSON(github.event_name == 'pull_request' && needs.ci-plan.outputs.lane == 'spec-only' && '[1]' || '[1, 2, 3, 4]') }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
@@ -820,9 +807,9 @@ jobs:
         run: bash "$GITHUB_WORKSPACE/scripts/ci/bounded-apt.sh" apt fish zsh
       - name: Run selected web units without retries
         env:
-          CI_LANE: ${{ needs.tier-plan.outputs.lane }}
-          AEON_TEST_TIER_MODE: ${{ needs.tier-plan.outputs.mode }}
-          AEON_TEST_TIER_LAYOUT: ${{ needs.tier-plan.outputs.layout }}
+          CI_LANE: ${{ needs.ci-plan.outputs.lane }}
+          AEON_TEST_TIER_MODE: ${{ needs.ci-plan.outputs.mode }}
+          AEON_TEST_TIER_LAYOUT: ${{ needs.ci-plan.outputs.layout }}
         working-directory: web
         run: |
           if [ "$CI_LANE" = spec-only ]; then
@@ -834,7 +821,7 @@ jobs:
             node ../scripts/test-tiers/cli.mjs run web --unit --shard ${{ matrix.shard }}/${{ strategy.job-total }} --job web-unit-${{ matrix.shard }}
           fi
       - name: Confirm full tier execution
-        if: github.event_name != 'pull_request' || (needs.tier-plan.outputs.lane == 'full' && needs.tier-plan.outputs.mode != 'essential')
+        if: github.event_name != 'pull_request' || (needs.ci-plan.outputs.lane == 'full' && needs.ci-plan.outputs.mode != 'essential')
         env:
           TIER_REPORT: tmp/test-tiers/web-unit-${{ matrix.shard }}-measurement.json
         run: node scripts/test-tiers/check-full.mjs
@@ -853,14 +840,14 @@ jobs:
         run: npm run test:browser-safety
 
   web-shard:
-    if: always() && needs.ci-plan.result == 'success' && needs.tier-plan.result == 'success' && (needs.tier-plan.outputs.lane != 'docs-only' && (github.event_name != 'pull_request' || needs.tier-plan.outputs.layout != 'static')) && needs.tree-reuse.outputs.reuse != 'merge_group' && needs.tree-reuse.outputs.reuse != 'pull_request' && needs.web-setup.result == 'success'
-    needs: [ci-plan, web-setup, tree-reuse, tier-plan]
+    if: always() && needs.ci-plan.result == 'success' && (needs.ci-plan.outputs.lane != 'docs-only' && (github.event_name != 'pull_request' || needs.ci-plan.outputs.layout != 'static')) && needs.tree-reuse.outputs.reuse != 'merge_group' && needs.tree-reuse.outputs.reuse != 'pull_request' && needs.web-setup.result == 'success'
+    needs: [ci-plan, web-setup, tree-reuse]
     runs-on: ubuntu-latest
     timeout-minutes: 20
     strategy:
       fail-fast: false
       matrix:
-        shard: ${{ fromJSON(github.event_name == 'pull_request' && needs.tier-plan.outputs.web_shards || '[1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17]') }}
+        shard: ${{ fromJSON(github.event_name == 'pull_request' && needs.ci-plan.outputs.web_shards || '[1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17]') }}
     env:
       PW_RETRIES: '0'
     steps:
@@ -889,19 +876,19 @@ jobs:
         working-directory: web
         run: bash "$GITHUB_WORKSPACE/scripts/ci/bounded-apt.sh" playwright install-deps chromium
       - name: Download affected browser execution plan
-        if: github.event_name == 'pull_request' && needs.tier-plan.outputs.browser_scope == 'affected'
+        if: github.event_name == 'pull_request' && needs.ci-plan.outputs.browser_scope == 'affected'
         uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
         with:
           name: affected-browser-plan
           path: tmp/test-tiers
       - name: Run selected UI cases without retries
         env:
-          CI_LANE: ${{ needs.tier-plan.outputs.lane }}
+          CI_LANE: ${{ needs.ci-plan.outputs.lane }}
           CI_CHANGED_SPECS: ${{ needs.ci-plan.outputs.specs }}
-          AEON_TEST_TIER_MODE: ${{ needs.tier-plan.outputs.mode }}
-          AEON_TEST_TIER_LAYOUT: ${{ needs.tier-plan.outputs.layout }}
-          AEON_BROWSER_PLAN_FILE: ${{ github.event_name == 'pull_request' && needs.tier-plan.outputs.browser_scope == 'affected' && 'tmp/test-tiers/browser-plan.json' || '' }}
-          AEON_BROWSER_PLAN_SHA256: ${{ github.event_name == 'pull_request' && needs.tier-plan.outputs.browser_scope == 'affected' && needs.tier-plan.outputs.browser_plan_sha256 || '' }}
+          AEON_TEST_TIER_MODE: ${{ needs.ci-plan.outputs.mode }}
+          AEON_TEST_TIER_LAYOUT: ${{ needs.ci-plan.outputs.layout }}
+          AEON_BROWSER_PLAN_FILE: ${{ github.event_name == 'pull_request' && needs.ci-plan.outputs.browser_scope == 'affected' && 'tmp/test-tiers/browser-plan.json' || '' }}
+          AEON_BROWSER_PLAN_SHA256: ${{ github.event_name == 'pull_request' && needs.ci-plan.outputs.browser_scope == 'affected' && needs.ci-plan.outputs.browser_plan_sha256 || '' }}
           RELEASE_LIST_SHOTS: ${{ runner.temp }}/aeon-release-list-shots
           AEON_DESK_SHOTS: ${{ runner.temp }}/aeon-desk-shots
           ATTACH_DISCOVERABLE_SHOTS: ${{ runner.temp }}/aeon-attach-shots
@@ -913,7 +900,7 @@ jobs:
             node scripts/test-tiers/cli.mjs run web --shard ${{ matrix.shard }}/${{ strategy.job-total }} --job web-shard-${{ matrix.shard }}
           fi
       - name: Confirm full tier execution
-        if: github.event_name != 'pull_request' || (needs.tier-plan.outputs.lane == 'full' && needs.tier-plan.outputs.mode != 'essential')
+        if: github.event_name != 'pull_request' || (needs.ci-plan.outputs.lane == 'full' && needs.ci-plan.outputs.mode != 'essential')
         env:
           TIER_REPORT: tmp/test-tiers/web-shard-${{ matrix.shard }}-measurement.json
         run: node scripts/test-tiers/check-full.mjs
@@ -951,7 +938,7 @@ jobs:
   web:
     name: web
     if: always()
-    needs: [ci-plan, web-catalogue, web-setup, web-unit, web-shard, tree-reuse, cache-prime, tier-plan]
+    needs: [ci-plan, web-catalogue, web-setup, web-unit, web-shard, tree-reuse, cache-prime]
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -959,10 +946,10 @@ jobs:
     steps:
       - name: Validate browser execution scope
         env:
-          BROWSER_SCOPE: ${{ needs.tier-plan.outputs.browser_scope || 'gated-full' }}
-          TIER_MODE: ${{ needs.tier-plan.outputs.mode }}
-          TIER_LAYOUT: ${{ needs.tier-plan.outputs.layout }}
-          CI_LANE: ${{ needs.tier-plan.outputs.lane }}
+          BROWSER_SCOPE: ${{ needs.ci-plan.outputs.browser_scope || 'gated-full' }}
+          TIER_MODE: ${{ needs.ci-plan.outputs.mode }}
+          TIER_LAYOUT: ${{ needs.ci-plan.outputs.layout }}
+          CI_LANE: ${{ needs.ci-plan.outputs.lane }}
           WEB_SHARD: ${{ needs.web-shard.result }}
         run: |
           set -euo pipefail
@@ -1010,10 +997,10 @@ jobs:
           PR_CONFIRM_RUN: ${{ steps.pr-confirm.outputs.run }}
           SOURCE_RUN: ${{ needs.tree-reuse.outputs.run }}
           CACHE_PRIME: ${{ needs.cache-prime.result }}
-          TIER_PLAN: ${{ needs.tier-plan.result }}
-          TIER_LAYOUT: ${{ needs.tier-plan.outputs.layout }}
+          TIER_PLAN: ${{ needs.ci-plan.result }}
+          TIER_LAYOUT: ${{ needs.ci-plan.outputs.layout }}
           CI_PLAN: ${{ needs.ci-plan.result }}
-          CI_LANE: ${{ needs.tier-plan.outputs.lane }}
+          CI_LANE: ${{ needs.ci-plan.outputs.lane }}
           WEB_CATALOGUE: ${{ needs.web-catalogue.result }}
           WEB_SETUP: ${{ needs.web-setup.result }}
           WEB_UNIT: ${{ needs.web-unit.result }}
@@ -1093,7 +1080,7 @@ jobs:
 
   release-check:
     if: always()
-    needs: [ci-plan, release-check-run, tree-reuse, cache-prime, tier-plan]
+    needs: [ci-plan, release-check-run, tree-reuse, cache-prime]
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -1124,9 +1111,9 @@ jobs:
           PR_CONFIRM_RUN: ${{ steps.pr-confirm.outputs.run }}
           SOURCE_RUN: ${{ needs.tree-reuse.outputs.run }}
           CACHE_PRIME: ${{ needs.cache-prime.result }}
-          CI_LANE: ${{ needs.tier-plan.outputs.lane }}
-          TIER_PLAN: ${{ needs.tier-plan.result }}
-          TIER_LAYOUT: ${{ needs.tier-plan.outputs.layout }}
+          CI_LANE: ${{ needs.ci-plan.outputs.lane }}
+          TIER_PLAN: ${{ needs.ci-plan.result }}
+          TIER_LAYOUT: ${{ needs.ci-plan.outputs.layout }}
           CI_PLAN: ${{ needs.ci-plan.result }}
           CHECK_RESULT: ${{ needs.release-check-run.result }}
         run: |
@@ -1177,8 +1164,8 @@ jobs:
           esac
 
   release-check-run:
-    needs: [ci-plan, tree-reuse, tier-plan]
-    if: always() && needs.ci-plan.result == 'success' && needs.tier-plan.result == 'success' && (needs.tier-plan.outputs.lane == 'full') && needs.tree-reuse.outputs.reuse != 'merge_group' && needs.tree-reuse.outputs.reuse != 'pull_request'
+    needs: [ci-plan, tree-reuse]
+    if: always() && needs.ci-plan.result == 'success' && (needs.ci-plan.outputs.lane == 'full') && needs.tree-reuse.outputs.reuse != 'merge_group' && needs.tree-reuse.outputs.reuse != 'pull_request'
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
@@ -1237,7 +1224,7 @@ jobs:
 
   e2e:
     if: always()
-    needs: [ci-plan, e2e-run, tree-reuse, cache-prime, tier-plan]
+    needs: [ci-plan, e2e-run, tree-reuse, cache-prime]
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -1268,10 +1255,10 @@ jobs:
           PR_CONFIRM_RUN: ${{ steps.pr-confirm.outputs.run }}
           SOURCE_RUN: ${{ needs.tree-reuse.outputs.run }}
           CACHE_PRIME: ${{ needs.cache-prime.result }}
-          CI_LANE: ${{ needs.tier-plan.outputs.lane }}
-          TIER_PLAN: ${{ needs.tier-plan.result }}
+          CI_LANE: ${{ needs.ci-plan.outputs.lane }}
+          TIER_PLAN: ${{ needs.ci-plan.result }}
           CI_PLAN: ${{ needs.ci-plan.result }}
-          TIER_LAYOUT: ${{ needs.tier-plan.outputs.layout }}
+          TIER_LAYOUT: ${{ needs.ci-plan.outputs.layout }}
           CHECK_RESULT: ${{ needs.e2e-run.result }}
         run: |
           set -euo pipefail
@@ -1329,8 +1316,8 @@ jobs:
           esac
 
   e2e-run:
-    needs: [ci-plan, tree-reuse, tier-plan]
-    if: always() && needs.ci-plan.result == 'success' && needs.tier-plan.result == 'success' && (needs.tier-plan.outputs.lane == 'full' && (github.event_name != 'pull_request' || needs.tier-plan.outputs.layout != 'static')) && needs.tree-reuse.outputs.reuse != 'merge_group' && needs.tree-reuse.outputs.reuse != 'pull_request'
+    needs: [ci-plan, tree-reuse]
+    if: always() && needs.ci-plan.result == 'success' && (needs.ci-plan.outputs.lane == 'full' && (github.event_name != 'pull_request' || needs.ci-plan.outputs.layout != 'static')) && needs.tree-reuse.outputs.reuse != 'merge_group' && needs.tree-reuse.outputs.reuse != 'pull_request'
     runs-on: ubuntu-latest
     services:
       postgres:
@@ -1453,7 +1440,7 @@ jobs:
   tier-measurements:
     name: ${{ github.event_name == 'pull_request' && vars.CI_MG_REUSE == 'on' && needs.ci-plan.outputs.pr_tree_proof != '' && format('tier-measurements / {0}', needs.ci-plan.outputs.pr_tree_proof) || 'tier-measurements' }}
     if: always()
-    needs: [go, web, release-check, e2e, migration-compat, tree-reuse, ci-plan, tier-plan]
+    needs: [go, web, release-check, e2e, migration-compat, tree-reuse, ci-plan]
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -1471,14 +1458,14 @@ jobs:
           path: tmp/tier-job-evidence
       - name: Report cases and complete job runner minutes
         env:
-          CI_LANE: ${{ needs.tier-plan.outputs.lane }}
-          TIER_LAYOUT: ${{ needs.tier-plan.outputs.layout }}
+          CI_LANE: ${{ needs.ci-plan.outputs.lane }}
+          TIER_LAYOUT: ${{ needs.ci-plan.outputs.layout }}
           REUSE: ${{ needs.tree-reuse.outputs.reuse }}
           SOURCE_RUN: ${{ needs.tree-reuse.outputs.run }}
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: node scripts/test-tiers/measure.mjs tmp/tier-job-evidence
       - name: Confirm PR tree proof
-        if: github.event_name == 'pull_request' && vars.CI_MG_REUSE == 'on' && needs.tier-plan.result == 'success' && needs.tier-plan.outputs.lane == 'full' && needs.tier-plan.outputs.layout == 'full' && needs.tier-plan.outputs.mode == 'full' && needs.go.result == 'success' && needs.web.result == 'success' && needs.release-check.result == 'success' && needs.e2e.result == 'success' && needs.migration-compat.result == 'success'
+        if: github.event_name == 'pull_request' && vars.CI_MG_REUSE == 'on' && needs.ci-plan.result == 'success' && needs.ci-plan.outputs.lane == 'full' && needs.ci-plan.outputs.layout == 'full' && needs.ci-plan.outputs.mode == 'full' && needs.go.result == 'success' && needs.web.result == 'success' && needs.release-check.result == 'success' && needs.e2e.result == 'success' && needs.migration-compat.result == 'success'
         run: echo 'Full PR suite completed; checkout identity is bound in this job name.'
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         if: always()

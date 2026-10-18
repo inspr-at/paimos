@@ -179,16 +179,16 @@ func TestWorkflowPolicyMutations(t *testing.T) {
 	}
 
 	for _, id := range []string{"go-test", "go-timing", "go-static", "web-catalogue", "web-setup", "web-unit", "web-shard", "release-check-run", "e2e-run", "go", "web", "release-check", "e2e", "tier-measurements"} {
-		add("raw-lane-consumer/"+id, "ci.yml", "effective tier-plan lane", func(w map[string]any) {
+		add("retired-lane-consumer/"+id, "ci.yml", "effective ci-plan lane", func(w map[string]any) {
 			job := mapping(mapping(w["jobs"])[id])
-			if condition, ok := job["if"].(string); ok && strings.Contains(condition, "needs.tier-plan.outputs.lane") {
-				job["if"] = strings.ReplaceAll(condition, "needs.tier-plan.outputs.lane", "needs.ci-plan.outputs.lane")
+			if condition, ok := job["if"].(string); ok && strings.Contains(condition, "needs.ci-plan.outputs.lane") {
+				job["if"] = strings.ReplaceAll(condition, "needs.ci-plan.outputs.lane", "needs.tier-plan.outputs.lane")
 				return
 			}
 			for _, value := range job["steps"].([]any) {
 				env := mapping(mapping(value)["env"])
-				if env["CI_LANE"] == "${{ needs.tier-plan.outputs.lane }}" {
-					env["CI_LANE"] = "${{ needs.ci-plan.outputs.lane }}"
+				if env["CI_LANE"] == "${{ needs.ci-plan.outputs.lane }}" {
+					env["CI_LANE"] = "${{ needs.tier-plan.outputs.lane }}"
 					return
 				}
 			}
@@ -196,8 +196,24 @@ func TestWorkflowPolicyMutations(t *testing.T) {
 		})
 	}
 	add("effective-lane-publisher-missing", "ci.yml", "publish the effective lane", func(w map[string]any) {
-		delete(mapping(mapping(mapping(w["jobs"])["tier-plan"])["outputs"]), "lane")
+		delete(mapping(mapping(mapping(w["jobs"])["ci-plan"])["outputs"]), "lane")
 	})
+	add("raw-lane-publisher", "ci.yml", "publish the effective lane", func(w map[string]any) {
+		mapping(mapping(mapping(w["jobs"])["ci-plan"])["outputs"])["lane"] = "${{ steps.plan.outputs.lane }}"
+	})
+	for _, output := range []string{"mode", "layout", "browser_scope", "browser_plan_sha256"} {
+		add("tier-output-unpublished/"+output, "ci.yml", "publish the effective tier outputs", func(w map[string]any) {
+			delete(mapping(mapping(mapping(w["jobs"])["ci-plan"])["outputs"]), output)
+		})
+	}
+	add("separate-tier-planner", "ci.yml", "tier planning must remain consolidated", func(w map[string]any) {
+		mapping(w["jobs"])["tier-plan"] = map[string]any{"runs-on": "ubuntu-latest"}
+	})
+	for _, id := range []string{"ci-plan", "runner-route"} {
+		add("dependent-planner-or-route/"+id, "ci.yml", "must run independently", func(w map[string]any) {
+			mapping(mapping(w["jobs"])[id])["needs"] = "tree-reuse"
+		})
+	}
 	for _, id := range []string{"go-test", "web-unit", "web-shard"} {
 		for _, field := range []string{"if", "run", "env"} {
 			add("merge-group-full-proof/"+id+"/"+field, "ci.yml", "prove full tier execution", func(w map[string]any) {
@@ -370,7 +386,7 @@ func TestWorkflowPolicyMutations(t *testing.T) {
 			})
 		}
 		if id == "runner-route" || id == "ci-plan" || id == "migration-compat" {
-			for _, condition := range []any{false, "success()", nil, "needs.tier-plan.outputs.lane == 'full'"} {
+			for _, condition := range []any{false, "success()", nil, "needs.ci-plan.outputs.lane == 'full'"} {
 				add(fmt.Sprintf("conditional/%s/%v", id, condition), "ci.yml", "must run without an if condition", func(w map[string]any) { mapping(mapping(w["jobs"])[id])["if"] = condition })
 			}
 			continue
@@ -427,10 +443,10 @@ func TestWorkflowPolicyMutations(t *testing.T) {
 		mapping(mapping(mapping(mapping(w["jobs"])["web-shard"])["strategy"])["matrix"])["shard"] = []any{1}
 	})
 	add("web-shard-list-unpublished", "ci.yml", "publish the planned web shard list", func(w map[string]any) {
-		delete(mapping(mapping(mapping(w["jobs"])["tier-plan"])["outputs"]), "web_shards")
+		delete(mapping(mapping(mapping(w["jobs"])["ci-plan"])["outputs"]), "web_shards")
 	})
 	add("web-units-omitted-from-aggregate", "ci.yml", "web must gate setup, every unit shard", func(w map[string]any) {
-		mapping(mapping(w["jobs"])["web"])["needs"] = []any{"ci-plan", "web-catalogue", "web-setup", "web-shard", "tree-reuse", "cache-prime", "tier-plan"}
+		mapping(mapping(w["jobs"])["web"])["needs"] = []any{"ci-plan", "web-catalogue", "web-setup", "web-shard", "tree-reuse", "cache-prime"}
 	})
 	for _, mutate := range []string{"matrix", "fail-fast", "continue-on-error"} {
 		add("web-unit-weakened/"+mutate, "ci.yml", "four blocking shards", func(w map[string]any) {
@@ -697,7 +713,7 @@ func TestCIClassifiedWebShardMatrix(t *testing.T) {
 	for _, planned := range []string{"", "[1]", "[1,2,3,4]", "[1,2,3,4,5,6]", full} {
 		for _, event := range []string{"pull_request", "merge_group", "push", "workflow_dispatch"} {
 			got := expandConcurrency(t, "${{ "+expression+" }}", map[string]string{
-				"github.event_name": event, "needs.tier-plan.outputs.web_shards": planned,
+				"github.event_name": event, "needs.ci-plan.outputs.web_shards": planned,
 			})
 			want := full
 			if event == "pull_request" && planned != "" {
@@ -779,15 +795,15 @@ func TestCIStaticLayoutAggregatesAndJobGates(t *testing.T) {
 		t.Fatal(err)
 	}
 	jobs := mapping(workflow["jobs"])
-	if mapping(mapping(jobs["tier-plan"])["outputs"])["layout"] != "${{ steps.tiers.outputs.layout }}" {
-		t.Fatal("tier-plan must publish the layout output")
+	if mapping(mapping(jobs["ci-plan"])["outputs"])["layout"] != "${{ steps.tiers.outputs.layout }}" {
+		t.Fatal("ci-plan must publish the layout output")
 	}
 	for id, static := range map[string]bool{"go-test": true, "go-timing": true, "web-shard": true, "e2e-run": true, "go-static": false, "web-catalogue": false, "web-setup": false, "web-unit": false, "release-check-run": false} {
 		condition, _ := mapping(jobs[id])["if"].(string)
-		if strings.Contains(condition, "needs.tier-plan.outputs.layout != 'static'") != static {
+		if strings.Contains(condition, "needs.ci-plan.outputs.layout != 'static'") != static {
 			t.Fatalf("%s static-layout gate = %v, want %v", id, !static, static)
 		}
-		if static && !strings.Contains(condition, "(github.event_name != 'pull_request' || needs.tier-plan.outputs.layout != 'static')") {
+		if static && !strings.Contains(condition, "(github.event_name != 'pull_request' || needs.ci-plan.outputs.layout != 'static')") {
 			t.Fatalf("%s must allow the static-layout shortcut only on PRs", id)
 		}
 	}

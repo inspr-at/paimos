@@ -27,15 +27,8 @@
     "path": ".github/workflows/ci.yml"
   },
   "jobs": {
-    "total_count": 45,
+    "total_count": 44,
     "jobs": [
-      {
-        "name": "tier-plan",
-        "run_attempt": 1,
-        "status": "completed",
-        "conclusion": "success",
-        "steps": []
-      },
       {
         "name": "tier-measurements / pr-tree-v1:123:1:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb:cccccccccccccccccccccccccccccccccccccccc:dddddddddddddddddddddddddddddddddddddddd",
         "run_attempt": 1,
@@ -92,6 +85,11 @@
         "steps": [
           {
             "name": "Classify local PR diff",
+            "status": "completed",
+            "conclusion": "success"
+          },
+          {
+            "name": "Plan test tiers",
             "status": "completed",
             "conclusion": "success"
           }

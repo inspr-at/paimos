@@ -366,7 +366,12 @@ test('AEON-1336 native runner uses the trusted plan without another map fetch an
   assert.throws(() => checkFull({ version: 1, full: true, scope: result.scope, exitCode: 0 }), /scope is not proven/)
   const jobs = requiredJobs.map(name => ({ name, run_attempt: 1, status: 'completed', conclusion: 'success', steps: [
     { name: executionSteps[name] ?? (name.startsWith('go-test (') ? 'Test this shard (essential plus changed area, or full on main)' : name.startsWith('web-unit (') ? 'Run selected web units without retries' : 'Run selected UI cases without retries'), status: 'completed', conclusion: 'success' },
-    { name: 'Confirm full tier execution', status: 'completed', conclusion: name.startsWith('web-shard (') ? 'skipped' : 'success' }] }))
+    { name: 'Confirm full tier execution', status: 'completed', conclusion: name.startsWith('web-shard (') ? 'skipped' : 'success' },
+    ...(name === 'ci-plan' ? [{ name: 'Plan test tiers', status: 'completed', conclusion: 'success' }] : [])] }))
+  const fullJobs = structuredClone(jobs)
+  for (const job of fullJobs) for (const step of job.steps) step.conclusion = 'success'
+  assert.doesNotThrow(() => verifyJobs({ total_count: fullJobs.length, jobs: fullJobs }, 1),
+    'the fixture must prove full execution when the browser confirmation steps succeed')
   assert.throws(() => verifyJobs({ total_count: jobs.length, jobs }, 1), /missing full tier execution evidence/)
 })
 
@@ -402,12 +407,12 @@ test('AEON-1336 browser aggregate accepts only explicit planned scopes and rejec
     assert.equal(run(proof), 0, `${reuse.REUSE} full proof must remain reusable`)
     assert.notEqual(run({ ...proof, BROWSER_SCOPE: 'affected' }), 0, 'reuse must not bypass scope validation')
   }
-  assert.ok(workflow.includes("AEON_BROWSER_PLAN_FILE: ${{ github.event_name == 'pull_request' && needs.tier-plan.outputs.browser_scope == 'affected' && 'tmp/test-tiers/browser-plan.json' || '' }}"))
-  assert.ok(workflow.includes("AEON_BROWSER_PLAN_SHA256: ${{ github.event_name == 'pull_request' && needs.tier-plan.outputs.browser_scope == 'affected' && needs.tier-plan.outputs.browser_plan_sha256 || '' }}"),
+  assert.ok(workflow.includes("AEON_BROWSER_PLAN_FILE: ${{ github.event_name == 'pull_request' && needs.ci-plan.outputs.browser_scope == 'affected' && 'tmp/test-tiers/browser-plan.json' || '' }}"))
+  assert.ok(workflow.includes("AEON_BROWSER_PLAN_SHA256: ${{ github.event_name == 'pull_request' && needs.ci-plan.outputs.browser_scope == 'affected' && needs.ci-plan.outputs.browser_plan_sha256 || '' }}"),
     'full and queue execution must receive empty file and digest values')
   assert.ok(!workflow.includes('AEON_BROWSER_PLAN:'), 'the full plan must never enter an environment variable')
   assert.match(workflow, /name: Preserve affected browser execution plan\n        if: github.event_name == 'pull_request' && steps.tiers.outputs.browser_scope == 'affected'\n        uses: actions\/upload-artifact@[^\n]+\n        with:\n          name: affected-browser-plan\n          path: tmp\/test-tiers\/browser-plan.json\n          if-no-files-found: error/)
-  assert.match(workflow, /name: Download affected browser execution plan\n        if: github.event_name == 'pull_request' && needs.tier-plan.outputs.browser_scope == 'affected'\n        uses: actions\/download-artifact@[^\n]+\n        with:\n          name: affected-browser-plan\n          path: tmp\/test-tiers\n      - name: Run selected UI cases without retries/)
+  assert.match(workflow, /name: Download affected browser execution plan\n        if: github.event_name == 'pull_request' && needs.ci-plan.outputs.browser_scope == 'affected'\n        uses: actions\/download-artifact@[^\n]+\n        with:\n          name: affected-browser-plan\n          path: tmp\/test-tiers\n      - name: Run selected UI cases without retries/)
   const nightly = readFileSync(new URL('../../.github/workflows/nightly-full.yml', import.meta.url), 'utf8')
   assert.match(nightly, /run web --all --shard/); assert.ok(!nightly.includes('AEON_BROWSER_PLAN'))
   const output = resolve(directory, 'outputs')
