@@ -19480,6 +19480,8 @@
     ,
     {"kind":"vitest","file":"tests/project-related.unit.test.ts","name":"a resolved old key PHAROS-14 follows the canonical record AEON-2 and retains Back history","tier":"GATED-FULL"}
     ,
+    {"kind":"vitest","file":"tests/quota-outlook-refresh.unit.test.ts","name":"a client clock hours ahead of the server still reads the server’s age, and only elapsed time ages it","tier":"ESSENTIAL"}
+    ,
     {"kind":"vitest","file":"tests/quota-outlook-refresh.unit.test.ts","name":"a failed refresh keeps the snapshot and ages it from the reading","tier":"ESSENTIAL"}
     ,
     {"kind":"vitest","file":"tests/quota-outlook.unit.test.ts","name":"the answer in words > before the outlook is read, the plan’s accounts decide: pending rows, or no quota for a harness that never reports it","tier":"ESSENTIAL"}
