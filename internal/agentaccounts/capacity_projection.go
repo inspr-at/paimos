@@ -244,7 +244,7 @@ func capacityContextLabels(ctx context.Context, tx pgx.Tx, ids []string) (map[st
 	return out, rows.Err()
 }
 
-func loadCapacityProjection(ctx context.Context, tx pgx.Tx, person string, now time.Time) (*capacityProjection, error) {
+func loadCapacityProjection(ctx context.Context, tx pgx.Tx, accounts []Account, person string, now time.Time) (*capacityProjection, error) {
 	s := &capacityProjection{
 		accounts:    map[string]Account{},
 		learning:    map[string]capacityLearning{},
@@ -272,7 +272,11 @@ func loadCapacityProjection(ctx context.Context, tx pgx.Tx, person string, now t
 	}
 	// Retired confirmed siblings can still hold quota, native roots or limits.
 	// Include them in the input set, while the response retains its live list.
-	all, err := queryCapacityAccounts(ctx, tx, true)
+	activeIDs := make([]string, len(accounts))
+	for i, a := range accounts {
+		activeIDs[i] = a.ID
+	}
+	all, err := queryCapacityAccounts(ctx, tx, true, activeIDs)
 	if err != nil {
 		return nil, err
 	}

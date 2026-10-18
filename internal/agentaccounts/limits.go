@@ -296,7 +296,7 @@ func limitWait(ctx context.Context, tx pgx.Tx, a Account, active []Window, now t
 		if inputs := projectionInputs(tx); inputs != nil {
 			var ok bool
 			w, ok = inputs.fromWindows[*rule.FromWindowID]
-			if !ok {
+			if !ok || w.AccountID != a.ID {
 				err = pgx.ErrNoRows
 			}
 		} else {

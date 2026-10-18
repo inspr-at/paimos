@@ -530,7 +530,7 @@ func projectCapacity(ctx context.Context, tx pgx.Tx, person string, draft *previ
 		return nil, err
 	}
 	ctx = context.WithValue(ctx, clockKey{}, now)
-	snapshot, err := loadCapacityProjection(ctx, tx, person, now)
+	snapshot, err := loadCapacityProjection(ctx, tx, accounts, person, now)
 	if err != nil {
 		return nil, err
 	}

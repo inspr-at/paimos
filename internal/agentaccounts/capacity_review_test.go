@@ -30,7 +30,15 @@ func TestCapacityProjectionBatchAndGolden(t *testing.T) {
 		f2 := f
 		f2.account = a
 		f2.report(t, 30, now.Add(-time.Minute), now.Add(time.Duration(80+index)*time.Hour))
-		seedExistingLimit(t, f2, 80, "percent", "day", nil)
+		unit := []string{"percent", "runs", "tokens", "requests", "cost_micros"}[index%5]
+		amount := int64(80)
+		if unit == "tokens" {
+			amount = 200_000
+		}
+		if unit == "cost_micros" {
+			amount = 2_000_000
+		}
+		seedExistingLimit(t, f2, amount, unit, "day", nil)
 	}
 	seed(f.account, 0)
 	project := func() ([]accountCapacity, dbtest.ReadWork) {
@@ -41,7 +49,41 @@ func TestCapacityProjectionBatchAndGolden(t *testing.T) {
 		if err := db.InTenantReadSnapshot(ctx, appPool, f.admin.TenantID, func(tx pgx.Tx) error {
 			var err error
 			out, err = projectCapacity(ctx, dbtest.CountReads(tx, &work), f.admin.ID, nil, 0)
-			return err
+			if err != nil {
+				return err
+			}
+			// Reservation readers are an independent oracle for the set-loaded
+			// projection: exercise each limit unit and every routing decision.
+			accounts, err := listAccounts(ctx, tx)
+			if err != nil {
+				return err
+			}
+			advice, err := routingAdvice(ctx, tx, accounts, "", runRow{Purpose: "managed"}, now)
+			if err != nil {
+				return err
+			}
+			for i, item := range out {
+				if encoded(t, item.Routing) != encoded(t, advice[item.AccountID]) {
+					t.Fatalf("batched routing differs from reservation readers: got %s want %s", encoded(t, item.Routing), encoded(t, advice[item.AccountID]))
+				}
+				limit, err := accountLimitUse(ctx, tx, accounts[i], now)
+				if err != nil {
+					return err
+				}
+				if encoded(t, item.Limit) != encoded(t, limit) {
+					t.Fatalf("batched %s limit differs: got %s want %s", limit.Unit, encoded(t, item.Limit), encoded(t, limit))
+				}
+				for _, window := range item.Windows {
+					pacing, known, err := readingPacing(ctx, tx, item.AccountID, window.Reading, now, item.Schedule)
+					if err != nil {
+						return err
+					}
+					if known != window.UsageTodayKnown || encoded(t, pacing) != encoded(t, window.Pacing) {
+						t.Fatal("batched pacing differs from reservation readers")
+					}
+				}
+			}
+			return nil
 		}); err != nil {
 			t.Fatal(err)
 		}

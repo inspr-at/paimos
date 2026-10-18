@@ -99,20 +99,12 @@ func (m *Module) groups(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	var out any
-	enter := m.write
+	var err error
 	if r.Method == http.MethodGet {
-		enter = m.readPerson
+		err = m.readPerson(r.Context(), p, permission, func(tx pgx.Tx) error { items, err := listGroups(r.Context(), tx); out = items; return err })
+	} else {
+		err = m.write(r.Context(), p, permission, func(tx pgx.Tx) error { group, err := createGroup(r.Context(), tx, p, in); out = group; return err })
 	}
-	err := enter(r.Context(), p, permission, func(tx pgx.Tx) error {
-		if r.Method == http.MethodGet {
-			items, err := listGroups(r.Context(), tx)
-			out = items
-			return err
-		}
-		group, err := createGroup(r.Context(), tx, p, in)
-		out = group
-		return err
-	})
 	if err != nil {
 		writeErr(w, err)
 		return
@@ -189,22 +181,17 @@ func (m *Module) pins(w http.ResponseWriter, r *http.Request) {
 		in.Harness = r.URL.Query().Get("harness")
 	}
 	var out []TicketPin
-	enter := m.write
+	var err error
 	if r.Method == http.MethodGet {
-		enter = m.readPerson
-	}
-	err := enter(r.Context(), p, permission, func(tx pgx.Tx) error {
-		switch r.Method {
-		case http.MethodGet:
-			var err error
-			out, err = listPins(r.Context(), tx, in.TicketID)
-			return err
-		case http.MethodDelete:
-			return deletePin(r.Context(), tx, p, in.TicketID, in.Harness)
-		default:
+		err = m.readPerson(r.Context(), p, permission, func(tx pgx.Tx) error { var err error; out, err = listPins(r.Context(), tx, in.TicketID); return err })
+	} else {
+		err = m.write(r.Context(), p, permission, func(tx pgx.Tx) error {
+			if r.Method == http.MethodDelete {
+				return deletePin(r.Context(), tx, p, in.TicketID, in.Harness)
+			}
 			return putPin(r.Context(), tx, p, in)
-		}
-	})
+		})
+	}
 	if err != nil {
 		writeErr(w, err)
 		return

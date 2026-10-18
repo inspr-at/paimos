@@ -36,7 +36,13 @@ func signalAccount(r *http.Request, tx pgx.Tx, p tenant.Principal) (Account, err
 	if err := agentpairing.AccountFence(r.Context(), tx, r.PathValue("accountId"), true); err != nil {
 		return Account{}, err
 	}
-	a, err := lockAccount(r.Context(), tx, r.PathValue("accountId"))
+	var a Account
+	var err error
+	if r.Method == http.MethodGet {
+		a, err = getAccount(r.Context(), tx, r.PathValue("accountId"))
+	} else {
+		a, err = lockAccount(r.Context(), tx, r.PathValue("accountId"))
+	}
 	if err != nil {
 		return a, err
 	}
