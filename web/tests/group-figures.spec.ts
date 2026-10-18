@@ -6,6 +6,7 @@
 // click doesn't change or that "No …" groups break, and folds or group order lost on reload or in a saved view.
 import { test, expect, type Locator, type Page } from '@playwright/test'
 import { fixtures, liveAgent, mockView, mockWork, watchErrors, type Fixtures } from './work-fixtures'
+import { expectStableControls } from './helpers/stable'
 
 test.beforeEach(async ({ page }) => { await page.clock.setSystemTime(new Date('2026-09-23T12:00:00Z')) })
 
@@ -342,7 +343,20 @@ test('AEON-1388 phones: one muted line after the name, at most three facts in or
   await page.screenshot({ path: testInfo.outputPath('aeon-1486-group-390.png'), clip: { x: 0, y: Math.max(0, crop.y), width: 390, height: Math.min(crop.height, 844 - Math.max(0, crop.y)) } })
   const lineBox = await boxOf(line), label = await boxOf(groupRow(page, 'In progress').locator('.group-label'))
   expect(Math.abs(lineBox.y + lineBox.height / 2 - (label.y + label.height / 2)), 'the facts share the name’s line').toBeLessThanOrEqual(2)
+  expect(await groupRow(page, 'In progress').locator('.group-label').evaluate(el => el.clientWidth >= el.scrollWidth), 'the short group name stays readable beside the facts').toBe(true)
   expect(await line.evaluate(el => el.getClientRects().length)).toBe(1)
+  await expect(line).toHaveAttribute('data-tip', '· 2 working · 2 stale · ~7.5h')
+  await expectStableControls({
+    controls: {
+      row: groupRow(page, 'In progress'), label: groupRow(page, 'In progress').locator('.group-label'), facts: line,
+      fold: groupRow(page, 'In progress').locator('.group-toggle'), check: groupRow(page, 'In progress').locator('.group-check-target'),
+    },
+    interactions: [
+      { name: 'disclose all facts', run: async () => { await line.focus(); await expect(page.locator('.tooltip')).toContainText('2 working · 2 stale · ~7.5h') } },
+      { name: 'dismiss the disclosure', run: async () => { await page.keyboard.press('Escape'); await expect(page.locator('.tooltip')).toHaveCount(0) } },
+    ],
+    scrollAreas: { grid: grid(page) },
+  })
   await expect(grid(page).locator('.group-row td.group-fig')).toHaveCount(0)
   // No column headers on a phone: Filters › Display settings… › Groups is the way to order the groups.
   await page.getByRole('button', { name: 'Filters', exact: true }).click()
