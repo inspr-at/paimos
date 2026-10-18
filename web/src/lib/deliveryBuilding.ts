@@ -7,7 +7,7 @@ import { api, APIError } from './api.ts'
 import type { DeliveryLanguage } from './delivery'
 import { bucketOf, durationTop, niceCeil, num, pct, type BucketStatus, type BucketUnit, type ChartBucket, type ChartModel, type Delta, type Part, type WindowDays } from './deliveryNumbers'
 import { deliveryText, fill } from './deliveryNumbersText'
-import type { SimpleTileModel, SparkModel, Trend, Verdict, VerdictLevel } from './deliverySimple'
+import { ratioGap, type SimpleTileModel, type SparkModel, type Trend, type Verdict, type VerdictLevel } from './deliverySimple'
 import { simpleText } from './deliverySimpleText'
 import { buildingText, type BuildingKey, type RoundOutcome } from './deliveryBuildingText'
 import type { TicketTileModel } from './deliveryTickets'
@@ -187,10 +187,7 @@ function verdictOf(metric: BuildingMetric, target: BuildingMetric['target'], mod
   let gap = ''
   if (level !== 'on' && level !== 'none') {
     if (metric.key === 'first_try') gap = `${pct(value, lang)} vs. ${pct(target.value, lang)} ${words.wanted}`
-    else if (ratio != null) {
-      const rounded = ratio >= 2 ? Math.round(ratio) : Math.round(ratio * 10) / 10
-      gap = `${Math.abs(rounded - ratio) > 0.1 ? `${words.about} ` : ''}${num(rounded, lang, rounded % 1 ? 1 : 0)}× ${words.theTarget}`
-    }
+    else if (ratio != null) gap = ratioGap(ratio, words, lang)
   }
   return { level, word: words[level === 'none' ? 'none' : level], gap, ratio }
 }

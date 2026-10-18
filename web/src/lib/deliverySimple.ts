@@ -80,6 +80,12 @@ export function targetOf(def: TileDef, metric: Metric | undefined): { value: num
   return { value: target.value, up: target.direction === 'min' }
 }
 
+/** A multiple of the target in words: "1.6× the target", "about 5× the target". */
+export function ratioGap(ratio: number, text: SimpleText, lang: DeliveryLanguage): string {
+  const rounded = ratio >= 2 ? Math.round(ratio) : Math.round(ratio * 10) / 10
+  return `${Math.abs(rounded - ratio) > 0.1 ? `${text.about} ` : ''}${num(rounded, lang, rounded % 1 ? 1 : 0)}× ${text.theTarget}`
+}
+
 /** On target ≤ 1×, close ≤ 1.5×, far off beyond (Markus, 2026-10-08). */
 export function verdictOf(def: TileDef, value: number | null, target: { value: number; up: boolean } | null, mode: Mode, text: SimpleText, lang: DeliveryLanguage, nightlyGap = ''): Verdict {
   if (mode === 'error') return { level: 'none', word: text.notLoaded, gap: '', ratio: null }
@@ -94,10 +100,7 @@ export function verdictOf(def: TileDef, value: number | null, target: { value: n
   let gap = ''
   if (level !== 'on') {
     if (percentKind(def.kind)) gap = `${pct(value, lang)} vs. ${pct(target.value, lang)} ${text.wanted}`
-    else if (Number.isFinite(ratio)) {
-      const rounded = ratio >= 2 ? Math.round(ratio) : Math.round(ratio * 10) / 10
-      gap = `${Math.abs(rounded - ratio) > 0.1 ? `${text.about} ` : ''}${num(rounded, lang, rounded % 1 ? 1 : 0)}× ${text.theTarget}`
-    }
+    else if (Number.isFinite(ratio)) gap = ratioGap(ratio, text, lang)
   }
   return { level, word: text[level], gap, ratio: Number.isFinite(ratio) ? ratio : null }
 }
