@@ -20,6 +20,7 @@ const filters = computed(() => props.filters ?? filtersFromQuery(projectSection(
 const wideMedia = `(min-width: ${GLIMPSE_MIN_WIDTH}px)`
 const wideQuery = window.matchMedia(wideMedia)
 const reducedQuery = window.matchMedia('(prefers-reduced-motion: reduce)')
+const visualViewport = window.visualViewport
 const wide = ref(headerGlimpseViewportWide(wideQuery.matches, viewportWidth())), reduced = ref(reducedQuery.matches), idle = ref(false)
 const paint = ref(false), userPaused = ref(false), occluded = ref(false)
 const data = shallowRef<GraphData>({ nodes: [], links: [] })
@@ -227,9 +228,9 @@ onMounted(() => {
   reducedQuery.addEventListener('change', onReduced)
   document.addEventListener('visibilitychange', onVisibility)
   window.addEventListener('resize', onResize)
-  // Software GL can stall frames and miss window/media/root deliveries during
-  // a shrink. The visual viewport still notifies; re-read layout immediately.
-  window.visualViewport?.addEventListener('resize', onResize)
+  // Software GL can delay animation frames along with the layout viewport's
+  // notifications. This independent delivery checks the same width gate now.
+  visualViewport?.addEventListener('resize', onResize)
   viewportWatch = new ResizeObserver(followViewport)
   viewportWatch.observe(document.documentElement)
   syncWide()
@@ -250,7 +251,7 @@ onBeforeUnmount(() => {
   cancelAnimationFrame(paintSample)
   viewportWatch?.disconnect()
   window.removeEventListener('resize', onResize)
-  window.visualViewport?.removeEventListener('resize', onResize)
+  visualViewport?.removeEventListener('resize', onResize)
   wideQuery.removeEventListener('change', onWide)
   reducedQuery.removeEventListener('change', onReduced)
   document.removeEventListener('visibilitychange', onVisibility)
