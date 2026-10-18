@@ -30,14 +30,16 @@ type AttachedStatus struct {
 	Generation    *string    `json:"message_generation,omitempty"`
 }
 type MessageStatus struct {
-	Cancelled   bool            `json:"cancelled,omitempty"`
-	Attached    *AttachedStatus `json:"attached,omitempty"`
-	MessageID   string          `json:"message_id"`
-	Status      string          `json:"status"`
-	Reason      string          `json:"reason,omitempty"`
-	DeliveredAt *time.Time      `json:"delivered_at"`
-	ReadAt      *time.Time      `json:"read_at"`
-	DeliverBy   *time.Time      `json:"deliver_by"`
+	WaitingForPickup bool            `json:"waiting_for_pickup,omitempty"`
+	PickupStalledAt  *time.Time      `json:"pickup_stalled_at,omitempty"`
+	Cancelled        bool            `json:"cancelled,omitempty"`
+	Attached         *AttachedStatus `json:"attached,omitempty"`
+	MessageID        string          `json:"message_id"`
+	Status           string          `json:"status"`
+	Reason           string          `json:"reason,omitempty"`
+	DeliveredAt      *time.Time      `json:"delivered_at"`
+	ReadAt           *time.Time      `json:"read_at"`
+	DeliverBy        *time.Time      `json:"deliver_by"`
 }
 
 const maxStatusIDs = 100
@@ -69,7 +71,7 @@ func (m *module) handleMessageStatus(w http.ResponseWriter, r *http.Request) {
 	items := []MessageStatus{}
 	err := db.InTenant(tenant.WithPrincipal(r.Context(), p), m.pool, p.TenantID, func(tx pgx.Tx) error {
 		items = items[:0]
-		rows, err := tx.Query(r.Context(), `SELECT m.cancelled_at IS NOT NULL,m.id::text,r.state,r.failure_reason,m.fetched_at,r.handed_off_at,r.deliver_by,m.content_mode,m.attached_outcome,m.recipient_message_generation::text,d.leased_at,d.shown_at,d.completed_at,d.offer_deadline
+		rows, err := tx.Query(r.Context(), `SELECT m.cancelled_at IS NOT NULL,m.id::text,r.state,r.failure_reason,m.fetched_at,r.handed_off_at,r.deliver_by,m.content_mode,m.attached_outcome,m.recipient_message_generation::text,d.leased_at,d.shown_at,d.completed_at,d.offer_deadline,(`+personSessionChatSQL+`),r.pickup_stalled_at
  FROM inbox_messages m JOIN inbox_receipts r ON r.tenant_id=m.tenant_id AND r.message_id=m.id
  LEFT JOIN harness_deliveries d ON d.tenant_id=m.tenant_id AND d.message_id=m.id AND d.mode='attached_hook'
  WHERE m.chat_thread_id IS NULL AND m.id=ANY($1::uuid[]) AND m.sender_principal_id=$2::uuid ORDER BY m.sent_event_id`, ids, p.ID)
@@ -82,7 +84,8 @@ func (m *module) handleMessageStatus(w http.ResponseWriter, r *http.Request) {
 			var evidence AttachedStatus
 			var state, mode string
 			var outcome, generation *string
-			if err := rows.Scan(&s.Cancelled, &s.MessageID, &state, &s.Reason, &s.DeliveredAt, &s.ReadAt, &s.DeliverBy, &mode, &outcome, &generation, &evidence.OfferedAt, &evidence.ShownAt, &evidence.CompletedAt, &evidence.OfferDeadline); err != nil {
+			var chat bool
+			if err := rows.Scan(&s.Cancelled, &s.MessageID, &state, &s.Reason, &s.DeliveredAt, &s.ReadAt, &s.DeliverBy, &mode, &outcome, &generation, &evidence.OfferedAt, &evidence.ShownAt, &evidence.CompletedAt, &evidence.OfferDeadline, &chat, &s.PickupStalledAt); err != nil {
 				return err
 			}
 			switch {
@@ -97,6 +100,10 @@ func (m *module) handleMessageStatus(w http.ResponseWriter, r *http.Request) {
 			}
 			if state != "failed" {
 				s.Reason = ""
+			}
+			s.WaitingForPickup = chat && s.Status == "sent" && !s.Cancelled
+			if !s.WaitingForPickup {
+				s.PickupStalledAt = nil
 			}
 			if mode != "durable" {
 				s.Attached = &evidence
@@ -151,14 +158,21 @@ func (m *module) handlePutDeliverySettings(w http.ResponseWriter, r *http.Reques
 	if !ok {
 		return
 	}
-	var in DeliverySettings
-	if !decodeJSON(w, r, 1024, &in) {
+	var input struct {
+		SessionDeadlineSeconds int  `json:"session_deadline_seconds"`
+		UnboundDeadlineSeconds int  `json:"unbound_deadline_seconds"`
+		MaxAttempts            int  `json:"max_attempts"`
+		ChatPickupStallSeconds *int `json:"chat_pickup_stall_seconds"`
+	}
+	if !decodeJSON(w, r, 1024, &input) {
 		return
 	}
+	in := DeliverySettings{SessionDeadlineSeconds: input.SessionDeadlineSeconds, UnboundDeadlineSeconds: input.UnboundDeadlineSeconds, MaxAttempts: input.MaxAttempts}
 	if in.SessionDeadlineSeconds < 60 || in.SessionDeadlineSeconds > 86400 ||
 		in.UnboundDeadlineSeconds < 60 || in.UnboundDeadlineSeconds > 604800 ||
-		in.MaxAttempts < 1 || in.MaxAttempts > 50 {
-		failure(w, badRequest("session deadline 60–86400 s, unbound deadline 60–604800 s, attempts 1–50"))
+		in.MaxAttempts < 1 || in.MaxAttempts > 50 ||
+		input.ChatPickupStallSeconds != nil && (*input.ChatPickupStallSeconds < 60 || *input.ChatPickupStallSeconds > 86400) {
+		failure(w, badRequest("session deadline 60–86400 s, unbound deadline 60–604800 s, attempts 1–50, chat pickup notice 60–86400 s"))
 		return
 	}
 	err := db.InTenant(tenant.WithPrincipal(r.Context(), p), m.pool, p.TenantID, func(tx pgx.Tx) error {
@@ -178,12 +192,16 @@ func (m *module) handlePutDeliverySettings(w http.ResponseWriter, r *http.Reques
 		if err != nil {
 			return err
 		}
+		in.ChatPickupStallSeconds = before.ChatPickupStallSeconds
+		if input.ChatPickupStallSeconds != nil {
+			in.ChatPickupStallSeconds = *input.ChatPickupStallSeconds
+		}
 		if before == in {
 			return nil
 		}
-		_, err = tx.Exec(ctx, `INSERT INTO inbox_delivery_settings(tenant_id,session_deadline_seconds,unbound_deadline_seconds,max_attempts) VALUES($1::uuid,$2,$3,$4)
- ON CONFLICT (tenant_id) DO UPDATE SET session_deadline_seconds=EXCLUDED.session_deadline_seconds,unbound_deadline_seconds=EXCLUDED.unbound_deadline_seconds,max_attempts=EXCLUDED.max_attempts,updated_at=clock_timestamp()`,
-			p.TenantID, in.SessionDeadlineSeconds, in.UnboundDeadlineSeconds, in.MaxAttempts)
+		_, err = tx.Exec(ctx, `INSERT INTO inbox_delivery_settings(tenant_id,session_deadline_seconds,unbound_deadline_seconds,max_attempts,chat_pickup_stall_seconds) VALUES($1::uuid,$2,$3,$4,$5)
+ ON CONFLICT (tenant_id) DO UPDATE SET session_deadline_seconds=EXCLUDED.session_deadline_seconds,unbound_deadline_seconds=EXCLUDED.unbound_deadline_seconds,max_attempts=EXCLUDED.max_attempts,chat_pickup_stall_seconds=EXCLUDED.chat_pickup_stall_seconds,updated_at=clock_timestamp()`,
+			p.TenantID, in.SessionDeadlineSeconds, in.UnboundDeadlineSeconds, in.MaxAttempts, in.ChatPickupStallSeconds)
 		if err != nil {
 			return err
 		}

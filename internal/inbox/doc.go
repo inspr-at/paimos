@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 
 // Package inbox is AEON's durable principal inbox (AEON-27, migration 0200).
-// Decision Desk replies (AEON-1432) wait for their asking agent: no_listener
+// Decision Desk replies (AEON-1432) and person-to-session chat (AEON-1487) wait for pickup: no_listener
 // and elapsed deadlines leave their delivery and receipt pending. Reads keep
 // sent-event order and replay the same IDs until an idempotent acknowledgement.
 // Ended-session routing and terminal adapter failures retain their semantics.

@@ -47,6 +47,7 @@ func TestSessionMessagesIsolationAndLegacyWire(t *testing.T) {
 		}
 	}
 	for _, base := range []string{path + "/listen?to=codex:worker", "/api/inbox/messages?wait_ms=0"} {
+		expireChatPickupLease(t, w, first, second)
 		for _, id := range []string{first, second} {
 			status, body := do(t, srv, w.agent.ID, "GET", base+"&session="+id, "", nil)
 			page := mustJSON[compatPage](t, body)

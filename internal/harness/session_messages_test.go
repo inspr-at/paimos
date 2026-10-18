@@ -159,8 +159,15 @@ func TestDrainLeaseHoldsOffTheSweeper(t *testing.T) {
 	w := f.call(f.person, "POST", base, map[string]any{"agent_principal_id": f.agent.ID, "harness": "codex", "host": "test", "harness_session_ref": "ref-" + lease, "worker_lease": lease, "management_mode": "managed", "role": "worker", "advertised_capabilities": []string{"inbox"}}, "")
 	expect(t, w, 201)
 	id := decode(t, w)["id"].(string)
+	peer := uid()
+	f.tx(t, f.person, func(tx pgx.Tx) error {
+		_, err := tx.Exec(t.Context(), `INSERT INTO principals(tenant_id,id,kind,name) VALUES($1,$2,'agent','Peer sender')`, f.person.TenantID, peer)
+		return err
+	})
 	bound := func() string {
-		compat, message := attentionMessage(t, f, f.project, f.person.ID, f.agent.ID, false)
+		// Agent-authored messages retain terminal deadlines. Person chat now
+		// waits through a missed deadline (AEON-1487).
+		compat, message := attentionMessage(t, f, f.project, peer, f.agent.ID, false)
 		f.tx(t, f.person, func(tx pgx.Tx) error {
 			if _, err := tx.Exec(t.Context(), `UPDATE inbox_compat_messages SET recipient_session_id=$2 WHERE id=$1`, compat, id); err != nil {
 				return err
@@ -214,4 +221,58 @@ func TestDrainLeaseHoldsOffTheSweeper(t *testing.T) {
 		t.Fatalf("stale lease receipt %s", state)
 	}
 	expect(t, f.call(f.agent, "POST", base+"/"+id+"/complete-delivery", map[string]any{"delivery_id": d["delivery_id"], "cursor": d["cursor"]}, lease), 409)
+}
+
+// Risk: a hook and the managed drain hand the same chat to two consumers. An
+// expired hook lease must still replay the original identity after a lost reply.
+func TestSessionChatHookLeaseFencesDrain(t *testing.T) {
+	f := fixture(t)
+	inbox.New(f.db.App).Mount(f.mux)
+	base, lease := "/api/projects/"+f.project+"/harness-sessions", "chat-pickup-generation-lease-0000000001"
+	w := f.call(f.person, "POST", base, map[string]any{"agent_principal_id": f.agent.ID, "harness": "codex", "host": "test", "harness_session_ref": "ref-" + lease, "worker_lease": lease, "management_mode": "managed", "role": "worker", "advertised_capabilities": []string{"inbox"}}, "")
+	expect(t, w, 201)
+	id := decode(t, w)["id"].(string)
+	compat, message := attentionMessage(t, f, f.project, f.person.ID, f.agent.ID, false)
+	f.tx(t, f.person, func(tx pgx.Tx) error {
+		if _, err := tx.Exec(t.Context(), `UPDATE inbox_compat_messages SET recipient_session_id=$2 WHERE id=$1`, compat, id); err != nil {
+			return err
+		}
+		_, err := tx.Exec(t.Context(), `UPDATE inbox_messages SET recipient_session_id=$2 WHERE id=$1`, message, id)
+		return err
+	})
+	pull := func() inbox.Page {
+		w := f.call(f.agent, "GET", "/api/inbox/messages?session="+id+"&exact_session=true", nil, "")
+		expect(t, w, 200)
+		var page inbox.Page
+		if err := json.Unmarshal(w.Body.Bytes(), &page); err != nil {
+			t.Fatal(err)
+		}
+		return page
+	}
+	if page := pull(); len(page.Items) != 1 || page.Items[0].ID != message {
+		t.Fatalf("hook pickup: %+v", page)
+	}
+	w = f.call(f.agent, "POST", base+"/"+id+"/drain", map[string]any{}, lease)
+	expect(t, w, 200)
+	var deliveries []map[string]any
+	if err := json.Unmarshal(w.Body.Bytes(), &deliveries); err != nil || len(deliveries) != 0 {
+		t.Fatalf("drain duplicated a live hook pickup: %s", w.Body.String())
+	}
+	f.tx(t, f.person, func(tx pgx.Tx) error {
+		_, err := tx.Exec(t.Context(), `UPDATE inbox_messages SET pickup_lease_until=clock_timestamp()-interval '1 second' WHERE id=$1`, message)
+		return err
+	})
+	w = f.call(f.agent, "POST", base+"/"+id+"/drain", map[string]any{}, lease)
+	expect(t, w, 200)
+	if err := json.Unmarshal(w.Body.Bytes(), &deliveries); err != nil || len(deliveries) != 1 || deliveries[0]["message_id"] != message {
+		t.Fatalf("drain lost replay identity: %s", w.Body.String())
+	}
+	if page := pull(); len(page.Items) != 0 {
+		t.Fatalf("hook duplicated managed pickup: %+v", page)
+	}
+	delivery := deliveries[0]
+	expect(t, f.call(f.agent, "POST", base+"/"+id+"/complete-delivery", map[string]any{"delivery_id": delivery["delivery_id"], "cursor": delivery["cursor"]}, lease), 200)
+	if page := pull(); len(page.Items) != 0 {
+		t.Fatalf("confirmed message reappeared: %+v", page)
+	}
 }

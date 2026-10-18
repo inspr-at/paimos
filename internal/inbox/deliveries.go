@@ -621,7 +621,8 @@ func (m *messaging) readMessages(w http.ResponseWriter, r *http.Request, inspect
  WHERE ($10 OR NOT c.is_action_request) AND (c.content_mode='durable' OR ($10 AND c.content_mode='attached_volatile' AND c.sender_principal_id=$4::uuid
  AND EXISTS(SELECT 1 FROM harness_attach_requests ar JOIN agent_pairing_computers pc ON pc.tenant_id=ar.tenant_id AND pc.id=ar.computer_id JOIN agent_pairing_requests pr ON pr.tenant_id=pc.tenant_id AND pr.id=pc.request_id
  WHERE ar.session_id=c.recipient_session_id AND ar.owner_id=$4::uuid AND pr.approved_by=$4::uuid))) AND c.project_id=$1::uuid AND `+comparison+`
- AND ($3 OR (c.recipient_principal_id=$4::uuid AND NOT c.is_action_request AND i.acked_at IS NULL AND (i.expires_at IS NULL OR i.expires_at>clock_timestamp())))
+ AND ($3 OR (c.recipient_principal_id=$4::uuid AND NOT c.is_action_request AND i.acked_at IS NULL AND (i.expires_at IS NULL OR i.expires_at>clock_timestamp())
+ AND (NOT (`+strings.ReplaceAll(personSessionChatSQL, "m.", "i.")+`) OR (`+strings.ReplaceAll(chatPickupAvailableSQL, "m.", "i.")+`))))
  AND (($3 AND ($9::uuid IS NULL OR c.id IN (SELECT id FROM session_thread)))
       OR (NOT $3 AND (c.recipient_session_id IS NULL OR c.recipient_session_id=$9::uuid)))
  AND ($5='' OR c.recipient_address=$5 OR (NOT $3 AND c.key_digest='desk/'||c.id::text))

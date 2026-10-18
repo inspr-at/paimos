@@ -21,9 +21,15 @@ import (
 	"github.com/inspr-at/paimos/internal/tenant"
 )
 
-func messagingWorld(t *testing.T) (*world, *messaging, string, *httptest.Server) {
+func messagingWorld(t *testing.T, agentSender ...bool) (*world, *messaging, string, *httptest.Server) {
 	t.Helper()
 	w := newWorld(t)
+	if len(agentSender) > 0 && agentSender[0] {
+		// Deadline tests retain agent-to-agent failure guarantees; person chat
+		// uses the durable pickup path covered by TestSessionChatQueuedPickupAndStall.
+		w.sender = insertPrincipal(t, w.db, w.sender.TenantID, tenant.Agent, "sender-agent", nil)
+		w.sender.Scopes = []string{"inbox.send", "inbox.read", "inbox.receipt"}
+	}
 	w.agent = insertPrincipal(t, w.db, w.sender.TenantID, tenant.Agent, "worker", nil)
 	w.agent.Scopes = []string{"inbox.send", "inbox.read"}
 	var project string
