@@ -3,7 +3,7 @@ import { readFileSync } from 'node:fs'
 import { resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { collectGo, command, flattenBrowser, web } from './collect.mjs'
-import { key, exactPattern, select, shard, splitOwner, fullWebShardCount, webShardPlan, assertWebShardBudget } from './core.mjs'
+import { key, exactPattern, select, shard, splitOwner, fullWebShardCount, nightlyWebShardCount, webShardPlan, assertWebShardBudget } from './core.mjs'
 import { load, plan } from './cli.mjs'
 import { loadManifest, nightlyWeights, tierWeights } from '../../web/scripts/ci-web-shard.mjs'
 
@@ -66,7 +66,7 @@ export function proveSlowOwners(browserRows, goRows) {
     }
     const selected = select(browserRows, { event, paths: ['.github/workflows/ci.yml'] }).tests.filter(row => row.kind === 'browser')
     const weights = (event === 'schedule' ? nightlyWeights : tierWeights)(policy, selected)
-    const count = event === 'schedule' ? 24 : fullWebShardCount
+    const count = event === 'schedule' ? nightlyWebShardCount : fullWebShardCount
     const bins = Array.from({ length: count }, (_, i) => shard(selected, i + 1, count, weights))
     provePartition(selected, bins)
     const loads = bins.map(bin => [...new Set(bin.map(row => row.file))].reduce((n, file) => n + weights[file], 0))
