@@ -19,7 +19,7 @@ import (
 const mainRoutedRunner = `${{ fromJSON(contains(fromJSON('["push","workflow_dispatch"]'), github.event_name) && github.ref == 'refs/heads/main' && needs.runner-route.outputs.run_attempt == github.run_attempt && needs.runner-route.outputs.runs_on || '["ubuntu-latest"]') }}`
 
 const routedRunner = `${{ fromJSON(((contains(fromJSON('["push","workflow_dispatch"]'), github.event_name) && github.ref == 'refs/heads/main') || (github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository) || github.event_name == 'merge_group') && needs.runner-route.outputs.run_attempt == github.run_attempt && needs.runner-route.outputs.runs_on || '["ubuntu-latest"]') }}`
-const routedGoShards = `${{ fromJSON(((contains(fromJSON('["push","workflow_dispatch"]'), github.event_name) && github.ref == 'refs/heads/main') || (github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository) || github.event_name == 'merge_group') && needs.runner-route.outputs.run_attempt == github.run_attempt && needs.runner-route.outputs.runner_class == 'mbp2606' && '[1, 2, 3, 4]' || github.event_name == 'pull_request' && needs.tier-plan.outputs.mode == 'essential' && '[1, 2]' || '[1, 2, 3, 4, 5, 6, 7]') }}`
+const routedGoShards = `${{ fromJSON(((contains(fromJSON('["push","workflow_dispatch"]'), github.event_name) && github.ref == 'refs/heads/main') || (github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository) || github.event_name == 'merge_group') && needs.runner-route.outputs.run_attempt == github.run_attempt && needs.runner-route.outputs.runner_class == 'mbp2606' && '[1, 2, 3, 4]' || github.event_name == 'pull_request' && needs.ci-plan.outputs.mode == 'essential' && '[1, 2]' || '[1, 2, 3, 4, 5, 6, 7]') }}`
 
 const ciConcurrencyGroup = `ci-${{ github.event_name }}-${{ github.event_name == 'push' && github.ref == 'refs/heads/main' && github.ref || github.event.pull_request.number || github.run_id }}`
 
@@ -501,7 +501,7 @@ func checkCITriggersAndRequiredChecks(workflow map[string]any) error {
 			receipt = mapping(step)
 		}
 	}
-	if receipt == nil || receipt["if"] != "github.event_name == 'pull_request' && vars.CI_MG_REUSE == 'on' && needs.tier-plan.result == 'success' && needs.tier-plan.outputs.lane == 'full' && needs.tier-plan.outputs.layout == 'full' && needs.tier-plan.outputs.mode == 'full' && needs.go.result == 'success' && needs.web.result == 'success' && needs.release-check.result == 'success' && needs.e2e.result == 'success' && needs.migration-compat.result == 'success'" || receipt["continue-on-error"] != nil || !hasNeed(measurement["needs"], "tier-plan") {
+	if receipt == nil || receipt["if"] != "github.event_name == 'pull_request' && vars.CI_MG_REUSE == 'on' && needs.ci-plan.result == 'success' && needs.ci-plan.outputs.lane == 'full' && needs.ci-plan.outputs.layout == 'full' && needs.ci-plan.outputs.mode == 'full' && needs.go.result == 'success' && needs.web.result == 'success' && needs.release-check.result == 'success' && needs.e2e.result == 'success' && needs.migration-compat.result == 'success'" || receipt["continue-on-error"] != nil || !hasNeed(measurement["needs"], "ci-plan") {
 		return fmt.Errorf("PR tree proof must be emitted only by the full successful aggregate")
 	}
 	for _, id := range []string{"runner-route", "ci-plan", "migration-compat"} {
@@ -512,22 +512,28 @@ func checkCITriggersAndRequiredChecks(workflow map[string]any) error {
 		if _, exists := job["if"]; exists {
 			return fmt.Errorf("required CI job %q must run without an if condition", id)
 		}
-		if id == "migration-compat" {
-			if _, exists := job["needs"]; exists {
-				return fmt.Errorf("migration-compat must run independently of classification")
-			}
+		if _, exists := job["needs"]; exists {
+			return fmt.Errorf("%s must run independently of classification and reuse", id)
 		}
 	}
-	tiers := mapping(jobs["tier-plan"])
-	if !hasNeed(tiers["needs"], "ci-plan") || mapping(tiers["outputs"])["lane"] != "${{ steps.tiers.outputs.lane }}" {
-		return fmt.Errorf("tier-plan must publish the effective lane after ci-plan")
+	if jobs["tier-plan"] != nil {
+		return fmt.Errorf("tier planning must remain consolidated in ci-plan")
+	}
+	tiers := plan
+	if mapping(tiers["outputs"])["lane"] != "${{ steps.tiers.outputs.lane }}" {
+		return fmt.Errorf("ci-plan must publish the effective lane after classification")
+	}
+	for _, output := range []string{"mode", "layout", "browser_scope", "browser_plan_sha256"} {
+		if mapping(tiers["outputs"])[output] != "${{ steps.tiers.outputs."+output+" }}" {
+			return fmt.Errorf("ci-plan must publish the effective tier outputs: %s", output)
+		}
 	}
 	for id, value := range jobs {
 		encoded := fmt.Sprint(value)
-		if id != "tier-plan" && strings.Contains(encoded, "needs.ci-plan.outputs.lane") {
-			return fmt.Errorf("CI job %q must consume the effective tier-plan lane", id)
+		if strings.Contains(encoded, "needs.tier-plan.") || hasNeed(mapping(value)["needs"], "tier-plan") {
+			return fmt.Errorf("CI job %q must consume the effective ci-plan lane", id)
 		}
-		if strings.Contains(encoded, "needs.tier-plan.outputs.lane") && !hasNeed(mapping(value)["needs"], "tier-plan") {
+		if strings.Contains(encoded, "needs.ci-plan.outputs.") && !hasNeed(mapping(value)["needs"], "ci-plan") {
 			return fmt.Errorf("CI job %q must depend on the effective lane publisher", id)
 		}
 	}
@@ -536,23 +542,19 @@ func checkCITriggersAndRequiredChecks(workflow map[string]any) error {
 		if job == nil {
 			return fmt.Errorf("required CI job %q is missing", id)
 		}
-		condition := "needs.tier-plan.outputs.lane == 'full'"
+		condition := "needs.ci-plan.outputs.lane == 'full'"
 		switch id {
 		case "web-catalogue", "web-setup", "web-unit", "web-shard":
-			condition = "needs.tier-plan.outputs.lane != 'docs-only'"
+			condition = "needs.ci-plan.outputs.lane != 'docs-only'"
 		}
 		// OPS-257 L4: the static layout (PR-only affected lane) skips exactly
 		// the Go shards, timing, browser shards and the server smoke. Static
 		// checks, web setup/units, release checks and migrations always run.
 		switch id {
 		case "go-test", "go-timing", "web-shard", "e2e-run":
-			condition += " && (github.event_name != 'pull_request' || needs.tier-plan.outputs.layout != 'static')"
+			condition += " && (github.event_name != 'pull_request' || needs.ci-plan.outputs.layout != 'static')"
 		}
-		tierGuard := "needs.tier-plan.result == 'success' && "
-		if !hasNeed(job["needs"], "tier-plan") {
-			return fmt.Errorf("required CI job %q must gate tier planning", id)
-		}
-		condition = "always() && needs.ci-plan.result == 'success' && " + tierGuard + "(" + condition + ") && needs.tree-reuse.outputs.reuse != 'merge_group'"
+		condition = "always() && needs.ci-plan.result == 'success' && (" + condition + ") && needs.tree-reuse.outputs.reuse != 'merge_group'"
 		if id != "go-static" && id != "go-timing" {
 			condition += " && needs.tree-reuse.outputs.reuse != 'pull_request'"
 		}
@@ -567,20 +569,20 @@ func checkCITriggersAndRequiredChecks(workflow map[string]any) error {
 		}
 	}
 	if mapping(tiers["outputs"])["web_shards"] != "${{ steps.tiers.outputs.web_shards }}" {
-		return fmt.Errorf("tier-plan must publish the planned web shard list")
+		return fmt.Errorf("ci-plan must publish the planned web shard list")
 	}
 	webMatrix := mapping(mapping(mapping(jobs["web-shard"])["strategy"])["matrix"])["shard"]
-	if webMatrix != `${{ fromJSON(github.event_name == 'pull_request' && needs.tier-plan.outputs.web_shards || '[1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17]') }}` {
+	if webMatrix != `${{ fromJSON(github.event_name == 'pull_request' && needs.ci-plan.outputs.web_shards || '[1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17]') }}` {
 		return fmt.Errorf("web shard matrix must retain 17 full rows outside PRs and consume the planned PR shard list")
 	}
 	unit := mapping(jobs["web-unit"])
-	if mapping(mapping(unit["strategy"])["matrix"])["shard"] != `${{ fromJSON(github.event_name == 'pull_request' && needs.tier-plan.outputs.lane == 'spec-only' && '[1]' || '[1, 2, 3, 4]') }}` || mapping(unit["strategy"])["fail-fast"] != false || unit["continue-on-error"] != nil {
+	if mapping(mapping(unit["strategy"])["matrix"])["shard"] != `${{ fromJSON(github.event_name == 'pull_request' && needs.ci-plan.outputs.lane == 'spec-only' && '[1]' || '[1, 2, 3, 4]') }}` || mapping(unit["strategy"])["fail-fast"] != false || unit["continue-on-error"] != nil {
 		return fmt.Errorf("web units must retain four blocking shards and one spec-only row")
 	}
 	for _, id := range []string{"go-test", "web-unit", "web-shard"} {
-		condition := "github.event_name != 'pull_request' || (needs.tier-plan.outputs.lane == 'full' && needs.tier-plan.outputs.mode != 'essential')"
+		condition := "github.event_name != 'pull_request' || (needs.ci-plan.outputs.lane == 'full' && needs.ci-plan.outputs.mode != 'essential')"
 		if id == "go-test" {
-			condition = "github.event_name != 'pull_request' || needs.tier-plan.outputs.mode != 'essential'"
+			condition = "github.event_name != 'pull_request' || needs.ci-plan.outputs.mode != 'essential'"
 		}
 		var proofs int
 		steps, _ := mapping(jobs[id])["steps"].([]any)
@@ -621,10 +623,10 @@ func checkCITriggersAndRequiredChecks(workflow map[string]any) error {
 			scope := mapping(steps[0])
 			body, _ := scope["run"].(string)
 			if len(scope) != 3 || scope["name"] != "Validate browser execution scope" || strings.TrimSpace(body) == "" || !reflect.DeepEqual(mapping(scope["env"]), map[string]any{
-				"BROWSER_SCOPE": "${{ needs.tier-plan.outputs.browser_scope || 'gated-full' }}",
-				"TIER_MODE":     "${{ needs.tier-plan.outputs.mode }}",
-				"TIER_LAYOUT":   "${{ needs.tier-plan.outputs.layout }}",
-				"CI_LANE":       "${{ needs.tier-plan.outputs.lane }}",
+				"BROWSER_SCOPE": "${{ needs.ci-plan.outputs.browser_scope || 'gated-full' }}",
+				"TIER_MODE":     "${{ needs.ci-plan.outputs.mode }}",
+				"TIER_LAYOUT":   "${{ needs.ci-plan.outputs.layout }}",
+				"CI_LANE":       "${{ needs.ci-plan.outputs.lane }}",
 				"WEB_SHARD":     "${{ needs.web-shard.result }}",
 			}) {
 				return fmt.Errorf("web must validate browser execution scope unconditionally before proof revalidation")
@@ -662,7 +664,7 @@ func checkCITriggersAndRequiredChecks(workflow map[string]any) error {
 			if job["if"] != "always()" {
 				return fmt.Errorf("go must report failures even when its dependencies fail: %v", job["if"])
 			}
-			if !reflect.DeepEqual(job["needs"], []any{"ci-plan", "go-test", "go-static", "go-timing", "tree-reuse", "cache-prime", "tier-plan"}) {
+			if !reflect.DeepEqual(job["needs"], []any{"ci-plan", "go-test", "go-static", "go-timing", "tree-reuse", "cache-prime"}) {
 				return fmt.Errorf("go must gate every shard, static checks and timing: %v", job["needs"])
 			}
 		} else if context == "web" {
@@ -670,12 +672,11 @@ func checkCITriggersAndRequiredChecks(workflow map[string]any) error {
 			if job["if"] != "always()" {
 				return fmt.Errorf("web must report failures even when its dependencies fail: %v", job["if"])
 			}
-			if !reflect.DeepEqual(job["needs"], []any{"ci-plan", "web-catalogue", "web-setup", "web-unit", "web-shard", "tree-reuse", "cache-prime", "tier-plan"}) {
+			if !reflect.DeepEqual(job["needs"], []any{"ci-plan", "web-catalogue", "web-setup", "web-unit", "web-shard", "tree-reuse", "cache-prime"}) {
 				return fmt.Errorf("web must gate setup, every unit shard, every UI shard and the strict catalogue: %v", job["needs"])
 			}
 		} else {
 			needs := []any{"ci-plan", context + "-run", "tree-reuse", "cache-prime"}
-			needs = append(needs, "tier-plan") // all aggregates consume the effective lane
 			if job["if"] != "always()" || !reflect.DeepEqual(job["needs"], needs) {
 				return fmt.Errorf("required check %q must aggregate classified validation for every CI event", context)
 			}
