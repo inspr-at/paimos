@@ -8,7 +8,7 @@ import { spawn, spawnSync, execFileSync } from 'node:child_process'
 import { once } from 'node:events'
 import { createHash } from 'node:crypto'
 import { fileURLToPath } from 'node:url'
-import { validate, select, shard, key, exactPattern, webGraph, counts, measuredWeights, uncertain, affectedRisk, impactRisk, machineryPattern, manifestPromotions, migrationObjects, consumers, consumerCaseBound, isDocsLike, browserDataInput, registryImpact, webShardPlan, fullGateTests, driftCases, browserScopeNoneAllowlist, fullWebShards, fullWebShardCount, assertWebShardBudget } from './core.mjs'
+import { validate, select, shard, key, exactPattern, webGraph, counts, measuredWeights, uncertain, affectedRisk, impactRisk, machineryPattern, manifestPromotions, migrationObjects, consumers, consumerCaseBound, isDocsLike, browserDataInput, registryImpact, webShardPlan, fullGateTests, driftCases, browserScopeNoneAllowlist, fullWebShards, fullWebShardCount, nightlyWebShardCount, nightlyWebShards, assertWebShardBudget } from './core.mjs'
 import { reportCases, goOutcomes, browserOutcomes } from './report.mjs'
 import { aggregate, jobMinutes, readReports } from './measure.mjs'
 import { checkFull } from './check-full.mjs'
@@ -2259,7 +2259,7 @@ test('serial tier weights rebalance the full browser shards without changing ful
   ]) {
     const selected=select(rows,options).tests.filter(row=>row.kind==='browser')
     const weights=tierWeights(manifest,selected)
-    const count=['schedule','workflow_dispatch'].includes(options.event)?24:fullWebShardCount
+    const count=['schedule','workflow_dispatch'].includes(options.event)?nightlyWebShardCount:fullWebShardCount
     const bins=Array.from({length:count},(_,i)=>shard(selected,i+1,count,weights))
     assert.deepEqual(bins.flat().map(key).sort(),selected.map(key).sort(),options.event)
     if(options.paths?.[0]==='.github/workflows/ci.yml'||options.event==='push') {
@@ -2271,11 +2271,12 @@ test('serial tier weights rebalance the full browser shards without changing ful
   }
 })
 
-test('AEON-1325 nightly shards retain every browser case and require all 24 measurements',()=>{
+test('AEON-1325 nightly shards retain every browser case and require all 26 measurements',()=>{
   const workflow=readFileSync(new URL('../../.github/workflows/nightly-full.yml',import.meta.url),'utf8')
   const job=workflow.slice(workflow.indexOf('\n  nightly-web-shard:'),workflow.indexOf('\n  # Preserve the ruleset'))
   const indices=JSON.parse(/shard: (\[[^\n]+\])/.exec(job)[1])
-  assert.deepEqual(indices,Array.from({length:24},(_,i)=>i+1))
+  assert.equal(nightlyWebShardCount,26)
+  assert.deepEqual(indices,nightlyWebShards)
   assert.match(job,/run web --all --shard \$\{\{ matrix.shard \}\}\/\$\{\{ strategy.job-total \}\}/)
   const rows=JSON.parse(readFileSync(new URL('../ci/web-test-tiers.json',import.meta.url))).tests
   const selected=select(rows,{event:'schedule'}).tests.filter(row=>row.kind==='browser')
@@ -2295,16 +2296,17 @@ test('AEON-1325 nightly shards retain every browser case and require all 24 meas
   const loads=bins.map(bin=>[...new Set(bin.map(row=>row.file))].reduce((n,file)=>n+weights[file],0))
   const peak=Math.max(...loads)
   assert.ok(peak<=16*60,`Nightly estimates need four minutes under the 20-minute cap: ${peak}`)
+  assert.ok(peak<=900,`Nightly estimates need a minute under the 16-minute budget: ${peak}`)
   const jobs=indices.map(index=>({name:`nightly-web-shard (${index})`,status:'completed',conclusion:'success',
     started_at:'2026-10-13T01:00:00Z',completed_at:'2026-10-13T01:10:00Z'}))
   const reports=bins.map((bin,i)=>reportCases(bin,bin.map(row=>({key:key(row),status:'passed',started:true})),600,`web-shard-${i+1}`))
   const complete=aggregate(reports,jobs)
   assert.equal(complete.coverage,'reported')
-  assert.equal(complete.measured.webRunnerMinutes,240)
+  assert.equal(complete.measured.webRunnerMinutes,nightlyWebShardCount*10)
   assert.equal(Object.values(complete.classes).reduce((sum,tier)=>sum+tier.passed,0),selected.length)
   const missing=aggregate(reports.slice(0,-1),jobs)
   assert.equal(missing.coverage,'incomplete')
-  assert.deepEqual(missing.missingEvidence,['web-shard-24'])
+  assert.deepEqual(missing.missingEvidence,[`web-shard-${nightlyWebShardCount}`])
 })
 
 test('hosted unit and Go weights preserve files/packages and every selected identity',()=>{

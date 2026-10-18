@@ -80,7 +80,7 @@ func TestExactAPIDeliverySettingsAtomicAuditAndNoop(t *testing.T) {
 	if err := w.db.Admin.QueryRow(t.Context(), `SELECT actor_principal_id::text,before,after FROM events WHERE tenant_id=$1 AND type='inbox.delivery_settings_changed'`, w.admin.TenantID).Scan(&actor, &before, &after); err != nil {
 		t.Fatal(err)
 	}
-	if actor != w.admin.ID || mustJSON[DeliverySettings](t, before) != DefaultDeliverySettings || mustJSON[DeliverySettings](t, after) != (DeliverySettings{120, 900, 1}) {
+	if actor != w.admin.ID || mustJSON[DeliverySettings](t, before) != DefaultDeliverySettings || mustJSON[DeliverySettings](t, after) != (DeliverySettings{120, 900, 1, 600}) {
 		t.Fatal("audit lacks effective before/after or actor")
 	}
 	if put(first) != 200 {
@@ -99,11 +99,11 @@ func TestExactAPIDeliverySettingsAtomicAuditAndNoop(t *testing.T) {
 		t.Fatalf("failed audit returned %d", status)
 	}
 	status, body := do(t, srv, w.admin.ID, "GET", "/api/settings/inbox-delivery", "", nil)
-	if status != 200 || mustJSON[DeliverySettings](t, body) != (DeliverySettings{120, 900, 1}) {
+	if status != 200 || mustJSON[DeliverySettings](t, body) != (DeliverySettings{120, 900, 1, 600}) {
 		t.Fatalf("settings not rolled back: %s", body)
 	}
 	var obj map[string]any
-	if err := json.Unmarshal(after, &obj); err != nil || len(obj) != 3 {
+	if err := json.Unmarshal(after, &obj); err != nil || len(obj) != 4 {
 		t.Fatal("audit payload is not content-free settings")
 	}
 }

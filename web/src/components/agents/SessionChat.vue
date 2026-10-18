@@ -17,7 +17,7 @@ import type { Question } from '../../lib/decisionDeskApi'
 import ChatLiveBlock from './ChatLiveBlock.vue'
 import { applyLiveFrame, chatFinals, chatSeenIds, chatSeenMark, chatSent, followChatLive, liveQueue, liveWorking, offeredSteer, rebaseTurn, sessionReadMark, settleStop, settled, type LiveSource, type LiveTurn, type SendTransport } from './chatLive'
 import { collapseMessages } from './sessionMessages'
-import { inboxBindingReason, advanceReceipt, chatCapability, isQueuedMessage, chatSendLevel, chatWords, awaitsInboxHook, hookNoticeVisible, hookReceipts, keepFailedReadMark, loadReadMark, markerFromServer, nearBottom, preferReadMark, queueReadMark, readMarkFlushDelay, receiptQueryBatches, saveReadMark, sessionBoundSends, unreadGroups, type ReadMark } from './sessionChat'
+import { pickupNotice, inboxBindingReason, advanceReceipt, chatCapability, isQueuedMessage, chatSendLevel, chatWords, awaitsInboxHook, hookNoticeVisible, hookReceipts, keepFailedReadMark, loadReadMark, markerFromServer, nearBottom, preferReadMark, queueReadMark, readMarkFlushDelay, receiptQueryBatches, saveReadMark, sessionBoundSends, unreadGroups, type ReadMark } from './sessionChat'
 
 // The Messages tab of the session panel (AEON-273): the thread with a read
 // watermark per viewer, a pinned bottom with a jump button, and the composer.
@@ -883,6 +883,7 @@ function retry(message: ProjectMessage) {
 function queueWhen(message: ProjectMessage) {
   if (uncertain.value.has(message.id)) return words.value.unclear
   if (message.send_failed || statuses.value[message.id]?.status === 'not_delivered') return words.value.failed
+  if (statuses.value[message.id]?.waiting_for_pickup) return words.value.waitingPickupLabel
   if (bindingReason.value) return `${words.value.deliveryBlocked}: ${bindingReason.value}`
   if (capability.value === 'between') return words.value.queueBetween
   return message.delivery_level === 'steer' ? capability.value === 'next' ? words.value.queueNext : words.value.queueNow : words.value.after
@@ -1022,7 +1023,7 @@ defineExpose({ focusComposer: () => textarea.value?.focus(), interrupted, workin
               <p class="queue-text">{{ message.body }}</p>
               <div class="queue-meta">
                 <AppIcon :name="message.delivery_level === 'steer' ? 'bolt' : 'queue'" :size="13" />
-                <span class="queue-when">{{ queueWhen(message) }}</span>
+                <span class="queue-when" :data-tip="pickupNotice(statuses[message.id], displayLanguage()) || undefined" :tabindex="statuses[message.id]?.waiting_for_pickup ? 0 : undefined">{{ queueWhen(message) }}</span>
                 <button v-if="message.send_failed || statuses[message.id]?.status === 'not_delivered'" type="button" class="icon-btn sm flat" :aria-label="words.retry" :data-tip="words.retry" :disabled="queueBusy || !canWrite || offline" @click="retry(message)"><AppIcon name="refresh" :size="14" /></button>
                 <button type="button" class="icon-btn sm flat" :aria-label="words.edit" :data-tip="words.edit" :disabled="queueBusy || !canWrite || message.optimistic || offline" @click="editQueued(message)"><AppIcon name="edit" :size="14" /></button>
                 <button type="button" class="icon-btn sm flat" :aria-label="words.cancel" :data-tip="words.cancel" :disabled="queueBusy || !canWrite || message.optimistic || offline" @click="cancelQueued(message)"><AppIcon name="close" :size="14" /></button>

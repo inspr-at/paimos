@@ -538,9 +538,10 @@ components:
       additionalProperties: false
       required: [session_deadline_seconds, unbound_deadline_seconds, max_attempts]
       properties:
-        session_deadline_seconds: {type: integer, minimum: 60, maximum: 86400, description: Deadline for a message bound to one session. Default 300.}
+        session_deadline_seconds: {type: integer, minimum: 60, maximum: 86400, description: "Normal deadline for a message bound to one session. Default 300. Durable person-to-session chat and Desk answers keep waiting through an elapsed pickup deadline."}
         unbound_deadline_seconds: {type: integer, minimum: 60, maximum: 604800, description: 'Deadline for any other message to an agent (adapter target, blocked or principal inbox). Default 1800.'}
         max_attempts: {type: integer, minimum: 1, maximum: 50, description: Adapter claims before a delivery fails with reason attempts. Default 8.}
+        chat_pickup_stall_seconds: {type: integer, minimum: 60, maximum: 86400, description: "Notify the sender and alert the coordinator when a person-to-session chat has not been picked up after this many seconds. Default 600. Omitted on PUT preserves the saved value. This is a notice threshold, not a delivery expiry."}
     LeadNames:
       type: object
       additionalProperties: false

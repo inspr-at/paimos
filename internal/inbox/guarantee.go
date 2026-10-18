@@ -24,8 +24,8 @@ import (
 // delivery goes dead, the receipt fails, the message leaves every read path and
 // one system notice reaches the sender (plus the recipient session's
 // coordinator). A late acknowledgement cannot move a failed receipt back.
-// Desk replies are the AEON-1432 exception: no_listener/deadline keep the
-// existing reply pending, including a crash between pickup and confirmation.
+// Desk replies (AEON-1432) and person-to-session chat (AEON-1487) wait
+// through no_listener/deadline, including a crash before confirmation.
 
 // Failure reasons written by the delivery guarantee. Adapter reasons written by
 // the routine dispatcher (http_error, transport_error, ...) remain valid too.
@@ -70,14 +70,15 @@ type DeliverySettings struct {
 	SessionDeadlineSeconds int `json:"session_deadline_seconds"`
 	UnboundDeadlineSeconds int `json:"unbound_deadline_seconds"`
 	MaxAttempts            int `json:"max_attempts"`
+	ChatPickupStallSeconds int `json:"chat_pickup_stall_seconds"`
 }
 
 // DefaultDeliverySettings apply until a tenant chooses otherwise.
-var DefaultDeliverySettings = DeliverySettings{SessionDeadlineSeconds: 300, UnboundDeadlineSeconds: 1800, MaxAttempts: 8}
+var DefaultDeliverySettings = DeliverySettings{SessionDeadlineSeconds: 300, UnboundDeadlineSeconds: 1800, MaxAttempts: 8, ChatPickupStallSeconds: 600}
 
 func loadDeliverySettings(ctx context.Context, tx pgx.Tx) (DeliverySettings, error) {
 	s := DefaultDeliverySettings
-	err := tx.QueryRow(ctx, `SELECT session_deadline_seconds,unbound_deadline_seconds,max_attempts FROM inbox_delivery_settings`).Scan(&s.SessionDeadlineSeconds, &s.UnboundDeadlineSeconds, &s.MaxAttempts)
+	err := tx.QueryRow(ctx, `SELECT session_deadline_seconds,unbound_deadline_seconds,max_attempts,coalesce(chat_pickup_stall_seconds,600) FROM inbox_delivery_settings`).Scan(&s.SessionDeadlineSeconds, &s.UnboundDeadlineSeconds, &s.MaxAttempts, &s.ChatPickupStallSeconds)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return DefaultDeliverySettings, nil
 	}
@@ -151,22 +152,27 @@ func handOver(ctx context.Context, tx pgx.Tx, p tenant.Principal, via string, id
 	if len(ids) == 0 {
 		return alive, nil
 	}
-	rows, err := tx.Query(ctx, `SELECT id::text,sender_principal_id::text,fetched_at IS NULL FROM inbox_messages
- WHERE content_mode='durable' AND chat_thread_id IS NULL AND id=ANY($1::uuid[]) AND recipient_principal_id=$2::uuid AND acked_at IS NULL AND (expires_at IS NULL OR expires_at>clock_timestamp())
- ORDER BY id FOR NO KEY UPDATE`, ids, p.ID)
+	rows, err := tx.Query(ctx, `SELECT m.id::text,m.sender_principal_id::text,m.fetched_at IS NULL,`+personSessionChatSQL+` FROM inbox_messages m
+ WHERE m.content_mode='durable' AND m.chat_thread_id IS NULL AND m.id=ANY($1::uuid[]) AND m.recipient_principal_id=$2::uuid AND m.acked_at IS NULL AND (m.expires_at IS NULL OR m.expires_at>clock_timestamp())
+ AND ($3 OR NOT (`+personSessionChatSQL+`) OR (`+chatPickupAvailableSQL+`))
+ ORDER BY m.id FOR NO KEY UPDATE OF m`, ids, p.ID, via == SeenDrain)
 	if err != nil {
 		return nil, err
 	}
 	type fetched struct{ id, sender string }
 	var first []fetched
+	var claimed []string
 	for rows.Next() {
 		var f fetched
-		var fresh bool
-		if err := rows.Scan(&f.id, &f.sender, &fresh); err != nil {
+		var fresh, chat bool
+		if err := rows.Scan(&f.id, &f.sender, &fresh, &chat); err != nil {
 			rows.Close()
 			return nil, err
 		}
 		alive[f.id] = true
+		if chat && via != SeenDrain {
+			claimed = append(claimed, f.id)
+		}
 		if fresh {
 			first = append(first, f)
 		}
@@ -175,10 +181,20 @@ func handOver(ctx context.Context, tx pgx.Tx, p tenant.Principal, via string, id
 	if err := rows.Err(); err != nil {
 		return nil, err
 	}
+	if len(claimed) > 0 {
+		// Bounded retry lease: concurrent hooks cannot inject the same chat.
+		// A lost response remains replayable with the same message identity.
+		if _, err := tx.Exec(ctx, `UPDATE inbox_messages SET pickup_lease_until=clock_timestamp()+interval '2 minutes' WHERE id=ANY($1::uuid[])`, claimed); err != nil {
+			return nil, err
+		}
+	}
+	// Finish every row mutation before the event counter is acquired.
 	for _, f := range first {
 		if _, err := tx.Exec(ctx, `UPDATE inbox_messages SET fetched_at=clock_timestamp() WHERE id=$1::uuid AND fetched_at IS NULL`, f.id); err != nil {
 			return nil, err
 		}
+	}
+	for _, f := range first {
 		after := map[string]any{"message_id": f.id, "sender_principal_id": f.sender, "recipient_principal_id": p.ID}
 		if via != "" {
 			after["via"] = via
@@ -284,9 +300,9 @@ func failMessage(ctx context.Context, tx pgx.Tx, messageID, reason string, respe
 	// sends (whose compat keys are digests). Session-end routing and real adapter
 	// failures keep their existing terminal semantics.
 	if reason == ReasonNoListener || reason == ReasonDeadline {
-		var desk bool
-		if err := tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM inbox_compat_messages c
- WHERE c.inbox_message_id=$1::uuid AND c.key_digest='desk/'||c.id::text)`, messageID).Scan(&desk); err != nil || desk {
+		var waits bool
+		if err := tx.QueryRow(ctx, `SELECT ((`+personSessionChatSQL+`) AND ($2='no_listener' OR m.expires_at IS NULL OR m.expires_at>clock_timestamp())) OR EXISTS(SELECT 1 FROM inbox_compat_messages c
+ WHERE c.inbox_message_id=m.id AND c.key_digest='desk/'||c.id::text) FROM inbox_messages m WHERE m.id=$1::uuid`, messageID, reason).Scan(&waits); err != nil || waits {
 			return false, err
 		}
 	}

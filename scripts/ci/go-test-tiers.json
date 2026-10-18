@@ -7078,6 +7078,8 @@
     ,
     {"kind":"go","package":"internal/harness","name":"TestSessionBoundAttentionStaysWithItsGeneration","tier":"GATED-FULL"}
     ,
+    {"kind":"go","package":"internal/harness","name":"TestSessionChatHookLeaseFencesDrain","tier":"ESSENTIAL"}
+    ,
     {"kind":"go","package":"internal/harness","name":"TestSessionEtaStalenessUsesDatabaseClock","tier":"GATED-FULL"}
     ,
     {"kind":"go","package":"internal/harness","name":"TestSessionLabelsAndLiveHierarchy","tier":"GATED-FULL"}
@@ -7581,6 +7583,8 @@
     {"kind":"go","package":"internal/inbox","name":"TestSessionBoundSendNeedsNoTarget","tier":"GATED-FULL"}
     ,
     {"kind":"go","package":"internal/inbox","name":"TestSessionChatCancelAndLinkedResend","tier":"GATED-FULL"}
+    ,
+    {"kind":"go","package":"internal/inbox","name":"TestSessionChatQueuedPickupAndStall","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/inbox","name":"TestSessionDeadlineDeliveredThenFailedLoudly","tier":"GATED-FULL"}
     ,

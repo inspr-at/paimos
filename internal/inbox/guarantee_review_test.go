@@ -41,7 +41,7 @@ func boundMessage(t *testing.T, w *world, m *messaging, project, session, key st
 }
 
 func TestPullDropsAMessageFailedAfterItWasSelected(t *testing.T) {
-	w, m, project, _ := messagingWorld(t)
+	w, m, project, _ := messagingWorld(t, true)
 	session := messageTestSession(t, w, project, w.agent, "Racing worker")
 	msg := boundMessage(t, w, m, project, session, "race")
 	expireDeadline(t, w, msg.ID)
@@ -129,7 +129,7 @@ func TestCompletionBeatsSweeperUnderConcurrency(t *testing.T) {
 // Acknowledgement and sweep race on unleased messages: exactly one wins, both
 // finish without error or deadlock, and the loser changes nothing.
 func TestAckAndSweepAgreeUnderConcurrency(t *testing.T) {
-	w, m, project, _ := messagingWorld(t)
+	w, m, project, _ := messagingWorld(t, true)
 	session := messageTestSession(t, w, project, w.agent, "Contended worker")
 	for i := range 12 {
 		msg := boundMessage(t, w, m, project, session, fmt.Sprintf("contended-%d", i))
@@ -213,7 +213,7 @@ func TestProjectOnlyCallersCanFailMessages(t *testing.T) {
 // The coordinator copy needs a real coordinator of the recipient's project, and
 // quotes the message only when that coordinator runs as the recipient principal.
 func TestCoordinatorCopyPrivacy(t *testing.T) {
-	w, m, project, _ := messagingWorld(t)
+	w, m, project, _ := messagingWorld(t, true)
 	lead := insertPrincipal(t, w.db, w.sender.TenantID, tenant.Agent, "lead", nil)
 	child := func(parentPrincipal tenant.Principal, role string) (string, string) {
 		parent := messageTestSession(t, w, project, parentPrincipal, "Parent "+role)
