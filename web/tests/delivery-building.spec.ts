@@ -250,8 +250,14 @@ test('Building it at 1440, 1024 and 768: the worst five never cover the app head
   await expect(section(page).getByTestId('delivery-building-head')).toHaveText('0 of 3 on target', { timeout: 15_000 })
   await settledExpert(page)
   const lead = trigger(page, 'Lead time per item'), panel = page.getByTestId('delivery-worst')
-  // The tile's top padding: clipped text and the chart answer the pointer themselves.
-  const open = async () => { await lead.click({ position: { x: 24, y: 6 } }); await expect(panel).toBeVisible(); await expect(panel.getByRole('link')).toHaveCount(5) }
+  // A mouse click on the tile's top padding (clipped text and the chart answer the pointer themselves). Unlike a
+  // locator click it never scrolls first: main's 96 px scroll padding would make it move a tile placed under the header.
+  const open = async () => {
+    const at = (await lead.boundingBox())!
+    await page.mouse.click(at.x + 24, at.y + 6)
+    await expect(panel).toBeVisible()
+    await expect(panel.getByRole('link')).toHaveCount(5)
+  }
   const shut = async () => { await page.keyboard.press('Escape'); await expect(panel).toHaveCount(0) }
   for (const width of [1440, 1024, 768] as const) {
     await test.step(`at ${width}`, async () => {
