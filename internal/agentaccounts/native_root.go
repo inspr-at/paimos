@@ -328,19 +328,21 @@ func ReserveNativeRootTx(ctx context.Context, tx pgx.Tx, in NativeAdmission, ses
 // periods; without native telemetry a confirmed exit retains the overlapping
 // period's estimate. A fresh vendor reading can reconcile an exited percent
 // hold, exactly as for legacy blind runs. Workers never enter this sum.
+const capacityNativeHeldSQL = `SELECT coalesce(sum(coalesce((r.account_limit_estimates->>$5)::bigint,$6)),0)::float8
+ FROM native_session_roots r WHERE r.account_id=$1 AND r.run_id IS NULL AND r.owned_session_id::text<>$2
+ AND (r.released_at IS NULL OR
+ ($5='runs' AND r.created_at>=$3 AND r.created_at<=$4) OR
+ ($5<>'runs' AND r.created_at<=$4 AND r.released_at>=$3 AND
+ ($5<>'percent' OR NOT EXISTS(SELECT 1 FROM account_capacity_readings c
+ WHERE c.account_id=r.account_id AND c.source<>'estimate' AND c.read_at>=r.released_at AND c.read_at<=$4))))`
+
 func nativeLimitHeldTx(ctx context.Context, tx pgx.Tx, accountID, unit string, start time.Time, exceptSession string, now time.Time) (float64, error) {
 	estimates, err := learnedLimitEstimates(ctx, tx, accountID, nil)
 	if err != nil {
 		return 0, err
 	}
 	var held float64
-	err = tx.QueryRow(ctx, `SELECT coalesce(sum(coalesce((r.account_limit_estimates->>$5)::bigint,$6)),0)::float8
- FROM native_session_roots r WHERE r.account_id=$1 AND r.run_id IS NULL AND r.owned_session_id::text<>$2
- AND (r.released_at IS NULL OR
- ($5='runs' AND r.created_at>=$3 AND r.created_at<=$4) OR
- ($5<>'runs' AND r.created_at<=$4 AND r.released_at>=$3 AND
- ($5<>'percent' OR NOT EXISTS(SELECT 1 FROM account_capacity_readings c
- WHERE c.account_id=r.account_id AND c.source<>'estimate' AND c.read_at>=r.released_at AND c.read_at<=$4))))`, accountID, exceptSession, start, now, unit, estimates[unit]).Scan(&held)
+	err = tx.QueryRow(ctx, capacityNativeHeldSQL, accountID, exceptSession, start, now, unit, estimates[unit]).Scan(&held)
 	return held, err
 }
 

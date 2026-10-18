@@ -77,6 +77,12 @@ func reconcileReadinessResources(ctx context.Context, tx pgx.Tx, a Account) erro
 }
 
 func vendorReadinessResource(ctx context.Context, tx pgx.Tx, a Account) (string, error) {
+	if s := projectionInputs(tx); s != nil {
+		if id := s.resources[a.ID]; id != "" {
+			return id, nil
+		}
+		return "", pgx.ErrNoRows
+	}
 	if a.Harness != "pi" && a.QuotaPoolFingerprint != "" {
 		sum := sha256.Sum256([]byte("quota:" + a.Harness + ":" + a.QuotaPoolFingerprint))
 		var id string

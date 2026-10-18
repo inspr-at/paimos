@@ -99,16 +99,12 @@ func (m *Module) groups(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	var out any
-	err := m.write(r.Context(), p, permission, func(tx pgx.Tx) error {
-		if r.Method == http.MethodGet {
-			items, err := listGroups(r.Context(), tx)
-			out = items
-			return err
-		}
-		group, err := createGroup(r.Context(), tx, p, in)
-		out = group
-		return err
-	})
+	var err error
+	if r.Method == http.MethodGet {
+		err = m.readPerson(r.Context(), p, permission, func(tx pgx.Tx) error { items, err := listGroups(r.Context(), tx); out = items; return err })
+	} else {
+		err = m.write(r.Context(), p, permission, func(tx pgx.Tx) error { group, err := createGroup(r.Context(), tx, p, in); out = group; return err })
+	}
 	if err != nil {
 		writeErr(w, err)
 		return
@@ -185,18 +181,17 @@ func (m *Module) pins(w http.ResponseWriter, r *http.Request) {
 		in.Harness = r.URL.Query().Get("harness")
 	}
 	var out []TicketPin
-	err := m.write(r.Context(), p, permission, func(tx pgx.Tx) error {
-		switch r.Method {
-		case http.MethodGet:
-			var err error
-			out, err = listPins(r.Context(), tx, in.TicketID)
-			return err
-		case http.MethodDelete:
-			return deletePin(r.Context(), tx, p, in.TicketID, in.Harness)
-		default:
+	var err error
+	if r.Method == http.MethodGet {
+		err = m.readPerson(r.Context(), p, permission, func(tx pgx.Tx) error { var err error; out, err = listPins(r.Context(), tx, in.TicketID); return err })
+	} else {
+		err = m.write(r.Context(), p, permission, func(tx pgx.Tx) error {
+			if r.Method == http.MethodDelete {
+				return deletePin(r.Context(), tx, p, in.TicketID, in.Harness)
+			}
 			return putPin(r.Context(), tx, p, in)
-		}
-	})
+		})
+	}
 	if err != nil {
 		writeErr(w, err)
 		return
@@ -231,7 +226,7 @@ func (m *Module) use(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var out UseResult
-	err := m.in(r.Context(), p.TenantID, func(tx pgx.Tx) error {
+	err := m.read(r.Context(), p.TenantID, func(tx pgx.Tx) error {
 		ownOnly := p.Kind == tenant.Agent
 		if p.Kind == tenant.Agent {
 			scopes, err := keyScopes(r.Context(), tx, r, p)

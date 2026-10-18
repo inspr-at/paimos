@@ -131,7 +131,7 @@ func (m *Module) catalog(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var out Catalog
-	err := m.in(r.Context(), p.TenantID, func(tx pgx.Tx) error {
+	err := m.read(r.Context(), p.TenantID, func(tx pgx.Tx) error {
 		now, err := dbNow(r.Context(), tx)
 		if err != nil {
 			return err

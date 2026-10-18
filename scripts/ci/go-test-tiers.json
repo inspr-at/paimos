@@ -678,6 +678,8 @@
     ,
     {"kind":"go","package":"internal/agentaccounts","name":"TestAccountPoolRoutingAndLedger","tier":"ESSENTIAL"}
     ,
+    {"kind":"go","package":"internal/agentaccounts","name":"TestAccountPrivacyInTransaction","tier":"ESSENTIAL"}
+    ,
     {"kind":"go","package":"internal/agentaccounts","name":"TestAccountSignalsOwnershipTenantKeyAndConsent","tier":"GATED-FULL"}
     ,
     {"kind":"go","package":"internal/agentaccounts","name":"TestAdmissionNeverGrantsDuringUnexpiredDenial","tier":"GATED-FULL"}
@@ -759,6 +761,10 @@
     {"kind":"go","package":"internal/agentaccounts","name":"TestCapacityPreviewSlowBodyHoldsNoSlot","tier":"GATED-FULL"}
     ,
     {"kind":"go","package":"internal/agentaccounts","name":"TestCapacityProbeFailureCause","tier":"GATED-FULL"}
+    ,
+    {"kind":"go","package":"internal/agentaccounts","name":"TestCapacityProjectionBatchAndGolden","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/agentaccounts","name":"TestCapacityReadSnapshot","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/agentaccounts","name":"TestCapacityStaleManualOverrideAndSchedules","tier":"GATED-FULL"}
     ,

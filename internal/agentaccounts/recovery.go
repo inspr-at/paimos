@@ -27,17 +27,32 @@ func recoverableFact(f ReadinessFact) bool {
 
 // Current legacy telemetry is projected even before its first fenced write.
 // Its canonical row prevents a cleared run stop from being imported again.
-func legacyVendorFact(ctx context.Context, tx pgx.Tx, a Account, now time.Time) (*ReadinessFact, error) {
-	var at time.Time
-	var reset *time.Time
-	var runID, kind string
-	err := tx.QueryRow(ctx, `SELECT t.at,COALESCE(t.limit_resets_at,
- (SELECT max(r.resets_at) FROM account_capacity_readings r WHERE r.account_id IN (`+quotaAccounts+`)
+const capacityVendorSQL = `SELECT t.at,COALESCE(t.limit_resets_at,
+ (SELECT max(r.resets_at) FROM account_capacity_readings r WHERE r.account_id IN (` + quotaAccounts + `)
   AND r.run_id=t.run_id AND r.source<>'estimate' AND (r.ordinary_usage_allowed=false OR r.used_percent>=100)
   AND (t.limit_window='' OR r.window_kind=t.limit_window) AND r.resets_at>t.at)),t.run_id::text,t.limit_window
  FROM run_telemetry t JOIN agent_runs ar ON ar.tenant_id=t.tenant_id AND ar.id=t.run_id
- WHERE ar.account_id IN (`+quotaAccounts+`) AND t.error_code='vendor_limit'
- ORDER BY t.at DESC,t.run_id,t.sequence DESC LIMIT 1`, a.ID).Scan(&at, &reset, &runID, &kind)
+ WHERE ar.account_id IN (` + quotaAccounts + `) AND t.error_code='vendor_limit'
+ ORDER BY t.at DESC,t.run_id,t.sequence DESC LIMIT 1`
+
+const capacityVendorClearedSQL = `SELECT EXISTS(SELECT 1 FROM account_capacity_readings original
+ JOIN LATERAL (SELECT r.* FROM account_capacity_readings r
+ WHERE r.account_id IN (` + quotaAccounts + `) AND r.window_kind=original.window_kind
+ AND r.bucket=original.bucket AND r.window_minutes=original.window_minutes
+ AND r.source<>'estimate' ORDER BY r.read_at DESC,r.id DESC LIMIT 1) latest ON true
+ WHERE original.run_id=$2 AND original.source<>'estimate'
+ AND (original.ordinary_usage_allowed=false OR original.used_percent>=100)
+ AND ($3='' OR original.window_kind=$3) AND latest.read_at>original.read_at
+ AND (latest.resets_at<=$4 OR latest.used_percent<100 AND latest.ordinary_usage_allowed IS DISTINCT FROM false))`
+
+func legacyVendorFact(ctx context.Context, tx pgx.Tx, a Account, now time.Time) (*ReadinessFact, error) {
+	if data := projectionInputs(tx); data != nil {
+		return data.vendor[a.ID], nil
+	}
+	var at time.Time
+	var reset *time.Time
+	var runID, kind string
+	err := tx.QueryRow(ctx, capacityVendorSQL, a.ID).Scan(&at, &reset, &runID, &kind)
 	if isNoRows(err) {
 		return nil, nil
 	}
@@ -48,15 +63,7 @@ func legacyVendorFact(ctx context.Context, tx pgx.Tx, a Account, now time.Time) 
 		// Named telemetry follows only the denying bucket attached to that run.
 		// A newer weekly or unrelated bucket cannot clear a five-hour stop.
 		var cleared bool
-		err := tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM account_capacity_readings original
- JOIN LATERAL (SELECT r.* FROM account_capacity_readings r
- WHERE r.account_id IN (`+quotaAccounts+`) AND r.window_kind=original.window_kind
- AND r.bucket=original.bucket AND r.window_minutes=original.window_minutes
- AND r.source<>'estimate' ORDER BY r.read_at DESC,r.id DESC LIMIT 1) latest ON true
- WHERE original.run_id=$2 AND original.source<>'estimate'
- AND (original.ordinary_usage_allowed=false OR original.used_percent>=100)
- AND ($3='' OR original.window_kind=$3) AND latest.read_at>original.read_at
- AND (latest.resets_at<=$4 OR latest.used_percent<100 AND latest.ordinary_usage_allowed IS DISTINCT FROM false))`, a.ID, runID, kind, now).Scan(&cleared)
+		err := tx.QueryRow(ctx, capacityVendorClearedSQL, a.ID, runID, kind, now).Scan(&cleared)
 		if err != nil || cleared {
 			return nil, err
 		}
@@ -91,6 +98,12 @@ func reconcileVendorStop(ctx context.Context, tx pgx.Tx, a Account, now time.Tim
 	return storeReadinessFact(ctx, tx, a, f.ReadinessFactWrite, f.ObservedAt)
 }
 
+const capacityNamedStopSQL = `SELECT max(t.limit_resets_at) FROM run_telemetry t
+ JOIN agent_runs ar ON ar.tenant_id=t.tenant_id AND ar.id=t.run_id
+ WHERE ar.account_id IN (` + quotaAccounts + `) AND t.error_code='vendor_limit' AND t.limit_resets_at>$2
+ AND NOT EXISTS(SELECT 1 FROM account_capacity_readings r WHERE r.run_id=t.run_id AND r.source<>'estimate'
+ AND (r.ordinary_usage_allowed=false OR r.used_percent>=100) AND (t.limit_window='' OR r.window_kind=t.limit_window))`
+
 func admissionFacts(ctx context.Context, tx pgx.Tx, a Account, now time.Time) ([]ReadinessFact, error) {
 	facts, err := loadReadinessFacts(ctx, tx, a, now)
 	if err != nil {
@@ -104,11 +117,9 @@ func admissionFacts(ctx context.Context, tx pgx.Tx, a Account, now time.Time) ([
 	// Older reset-only stops also retain their own deadlines when a later
 	// unnamed stop arrives. They have no attached bucket to supply a reading.
 	var namedReset *time.Time
-	if err := tx.QueryRow(ctx, `SELECT max(t.limit_resets_at) FROM run_telemetry t
- JOIN agent_runs ar ON ar.tenant_id=t.tenant_id AND ar.id=t.run_id
- WHERE ar.account_id IN (`+quotaAccounts+`) AND t.error_code='vendor_limit' AND t.limit_resets_at>$2
- AND NOT EXISTS(SELECT 1 FROM account_capacity_readings r WHERE r.run_id=t.run_id AND r.source<>'estimate'
- AND (r.ordinary_usage_allowed=false OR r.used_percent>=100) AND (t.limit_window='' OR r.window_kind=t.limit_window))`, a.ID, now).Scan(&namedReset); err != nil {
+	if data := projectionInputs(tx); data != nil {
+		namedReset = data.named[a.ID]
+	} else if err := tx.QueryRow(ctx, capacityNamedStopSQL, a.ID, now).Scan(&namedReset); err != nil {
 		return nil, err
 	}
 	if namedReset != nil {
@@ -150,17 +161,36 @@ func factWindows(ctx context.Context, tx pgx.Tx, a Account, now time.Time) ([]Wi
 			capacityAllowed: true, capacityKind: "fact", capacityBucket: bucket, capacitySource: f.Source}
 		// One existing ledger is reused; overlapping old holds remain bounds even
 		// when a new observation changes the reset or reporting account.
-		err := tx.QueryRow(ctx, `SELECT id::text,account_id::text FROM account_allowance_windows WHERE capacity_kind='fact' AND capacity_bucket=$1 AND ends_at=$2 ORDER BY id LIMIT 1`, bucket, w.EndsAt).Scan(&w.ID, &w.AccountID)
-		if err != nil && !isNoRows(err) {
-			return nil, err
-		}
-		if err := tx.QueryRow(ctx, `SELECT COALESCE(sum(reserved),0)::bigint FROM account_allowance_windows WHERE capacity_kind='fact' AND capacity_bucket=$1 AND starts_at<$2 AND ends_at>$3`, bucket, w.EndsAt, w.StartsAt).Scan(&w.Reserved); err != nil {
-			return nil, err
+		if data := projectionInputs(tx); data != nil {
+			ledger := data.factLedgers[factLedgerKey(a.ID, bucket, w.EndsAt)]
+			w.ID, w.AccountID, w.Reserved = ledger.id, ledger.account, ledger.reserved
+		} else {
+			err := tx.QueryRow(ctx, `SELECT id::text,account_id::text FROM account_allowance_windows WHERE capacity_kind='fact' AND capacity_bucket=$1 AND ends_at=$2 ORDER BY id LIMIT 1`, bucket, w.EndsAt).Scan(&w.ID, &w.AccountID)
+			if err != nil && !isNoRows(err) {
+				return nil, err
+			}
+			if err := tx.QueryRow(ctx, `SELECT COALESCE(sum(reserved),0)::bigint FROM account_allowance_windows WHERE capacity_kind='fact' AND capacity_bucket=$1 AND starts_at<$2 AND ends_at>$3`, bucket, w.EndsAt, w.StartsAt).Scan(&w.Reserved); err != nil {
+				return nil, err
+			}
 		}
 		out = append(out, w)
 	}
 	return out, nil
 }
+
+const capacityEarlyCheckSQL = `SELECT c.id::text FROM account_readiness_check_waits w
+ JOIN account_readiness_checks c ON c.tenant_id=w.tenant_id AND c.id=w.check_id
+ JOIN agent_accounts a ON a.tenant_id=c.tenant_id AND a.id=c.account_id
+ JOIN account_readiness_memberships m ON m.tenant_id=w.tenant_id AND m.resource_id=w.resource_id AND m.account_id=a.id AND m.binding_revision=a.link_revision
+ WHERE w.resource_id=$1 AND w.window_key=$2 AND w.wait_id=$3 AND c.early_recovery_requested
+ AND c.state IN ('pending','completed') AND c.binding_revision=a.link_revision
+ AND c.daemon_generation IS NOT DISTINCT FROM a.last_daemon_generation
+ AND c.actor_principal_id=a.owner_person_id AND c.requested_at>$4
+ ORDER BY c.requested_at,c.id LIMIT 1`
+
+const capacityRecoveryBusySQL = `SELECT EXISTS(SELECT 1 FROM agent_runs ar WHERE
+ (ar.status IN ('starting','running','waiting') OR ar.status='queued' AND (NOT $4 OR ar.started_at IS NOT NULL))
+ AND ar.id::text<>$3 AND (ar.account_id IN (` + quotaAccounts + `) OR ar.account_id IN (SELECT m.account_id FROM account_readiness_memberships m JOIN agent_accounts a ON a.tenant_id=m.tenant_id AND a.id=m.account_id WHERE m.resource_id=$2 AND m.binding_revision=a.link_revision)))`
 
 func readinessAdmission(ctx context.Context, tx pgx.Tx, a Account, now time.Time, run runRow, claiming bool) ([]recoveryPermit, *CapacityWait, error) {
 	facts, err := admissionFacts(ctx, tx, a, now)
@@ -204,15 +234,16 @@ func readinessAdmission(ctx context.Context, tx pgx.Tx, a Account, now time.Time
 				allowed = until != nil && !now.Before(*until)
 				if !allowed && !f.EarlyRecoveryUsed {
 					var check string
-					err := tx.QueryRow(ctx, `SELECT c.id::text FROM account_readiness_check_waits w
- JOIN account_readiness_checks c ON c.tenant_id=w.tenant_id AND c.id=w.check_id
- JOIN agent_accounts a ON a.tenant_id=c.tenant_id AND a.id=c.account_id
- JOIN account_readiness_memberships m ON m.tenant_id=w.tenant_id AND m.resource_id=w.resource_id AND m.account_id=a.id AND m.binding_revision=a.link_revision
- WHERE w.resource_id=$1 AND w.window_key=$2 AND w.wait_id=$3 AND c.early_recovery_requested
- AND c.state IN ('pending','completed') AND c.binding_revision=a.link_revision
- AND c.daemon_generation IS NOT DISTINCT FROM a.last_daemon_generation
- AND c.actor_principal_id=a.owner_person_id AND c.requested_at>$4
- ORDER BY c.requested_at,c.id LIMIT 1`, f.ResourceID, f.WindowKey, *f.WaitID, now.Add(-CheckTTL)).Scan(&check)
+					var err error
+					if data := projectionInputs(tx); data != nil {
+						if saved := data.early[recoveryKey(a.ID, f.ResourceID, f.WindowKey, *f.WaitID)]; saved != nil {
+							check = *saved
+						} else {
+							err = pgx.ErrNoRows
+						}
+					} else {
+						err = tx.QueryRow(ctx, capacityEarlyCheckSQL, f.ResourceID, f.WindowKey, *f.WaitID, now.Add(-CheckTTL)).Scan(&check)
+					}
 					if err != nil && !isNoRows(err) {
 						return nil, nil, err
 					}
@@ -223,9 +254,9 @@ func readinessAdmission(ctx context.Context, tx pgx.Tx, a Account, now time.Time
 			}
 			if allowed && f.recoveryRunID == nil {
 				var busy bool
-				if err := tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM agent_runs ar WHERE
- (ar.status IN ('starting','running','waiting') OR ar.status='queued' AND (NOT $4 OR ar.started_at IS NOT NULL))
- AND ar.id::text<>$3 AND (ar.account_id IN (`+quotaAccounts+`) OR ar.account_id IN (SELECT m.account_id FROM account_readiness_memberships m JOIN agent_accounts a ON a.tenant_id=m.tenant_id AND a.id=m.account_id WHERE m.resource_id=$2 AND m.binding_revision=a.link_revision)))`, a.ID, f.ResourceID, run.ID, promotable).Scan(&busy); err != nil {
+				if data := projectionInputs(tx); data != nil {
+					busy = data.busy[recoveryKey(a.ID, f.ResourceID, f.WindowKey, *f.WaitID)]
+				} else if err := tx.QueryRow(ctx, capacityRecoveryBusySQL, a.ID, f.ResourceID, run.ID, promotable).Scan(&busy); err != nil {
 					return nil, nil, err
 				}
 				allowed = !busy

@@ -103,7 +103,7 @@ func (m *Module) overview(w http.ResponseWriter, r *http.Request) {
 	ctx, cancel := context.WithTimeout(r.Context(), 5*time.Second)
 	defer cancel()
 	var out overviewPage
-	err := m.in(ctx, p.TenantID, func(tx pgx.Tx) error {
+	err := m.read(ctx, p.TenantID, func(tx pgx.Tx) error {
 		if _, err := tx.Exec(ctx, `SET LOCAL statement_timeout='5s'`); err != nil {
 			return err
 		}

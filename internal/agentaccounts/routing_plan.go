@@ -10,6 +10,7 @@ import (
 
 	"github.com/inspr-at/paimos/internal/agentpairing"
 	"github.com/inspr-at/paimos/internal/authz"
+	"github.com/inspr-at/paimos/internal/hostcapacity"
 	"github.com/inspr-at/paimos/internal/httpapi"
 	"github.com/inspr-at/paimos/internal/tenant"
 	"github.com/jackc/pgx/v5"
@@ -229,7 +230,11 @@ func routingAdvice(ctx context.Context, tx pgx.Tx, accounts []Account, profile s
 	estimates := map[string]int64{"requests": 1, "tokens": 1, "cost_micros": 1}
 	for _, a := range accounts {
 		var allowed bool
-		err = tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM model_profiles WHERE enabled AND harness=$1 AND ($2='' OR id::text=$2) AND aeon_account_allows_profile($1,$3::uuid[],id))`, a.Harness, profile, a.AllowedProfileIDs).Scan(&allowed)
+		if inputs := projectionInputs(tx); inputs != nil {
+			allowed = inputs.stats[a.ID].allowed
+		} else {
+			err = tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM model_profiles WHERE enabled AND harness=$1 AND ($2='' OR id::text=$2) AND aeon_account_allows_profile($1,$3::uuid[],id))`, a.Harness, profile, a.AllowedProfileIDs).Scan(&allowed)
+		}
 		if err != nil {
 			return nil, err
 		}
@@ -245,7 +250,14 @@ func routingAdvice(ctx context.Context, tx pgx.Tx, accounts []Account, profile s
 		if wait == nil {
 			wait = windowWait(windows, now)
 		}
-		host, owner, err := agentpairing.HostCapacityForAccount(ctx, tx, a.ID)
+		var host *hostcapacity.View
+		var owner string
+		if inputs := projectionInputs(tx); inputs != nil {
+			host = inputs.hosts[a.ID].View
+			owner = inputs.hosts[a.ID].Owner
+		} else {
+			host, owner, err = agentpairing.HostCapacityForAccount(ctx, tx, a.ID)
+		}
 		if err != nil {
 			return nil, err
 		}
@@ -370,7 +382,7 @@ func (m *Module) capacityNext(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	var out CapacityNext
-	err := m.in(r.Context(), p.TenantID, func(tx pgx.Tx) error {
+	err := m.read(r.Context(), p.TenantID, func(tx pgx.Tx) error {
 		ownOnly := p.Kind == tenant.Agent
 		if p.Kind == tenant.Agent {
 			scopes, err := keyScopes(r.Context(), tx, r, p)

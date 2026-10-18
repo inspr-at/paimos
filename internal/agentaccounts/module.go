@@ -119,6 +119,21 @@ func (m *Module) in(ctx context.Context, tenantID string, fn func(pgx.Tx) error)
 	})
 }
 
+// read keeps account projections and their authority in one MVCC snapshot,
+// without taking tenant/tree mutation fences. It must never mutate resources.
+func (m *Module) read(ctx context.Context, tenantID string, fn func(pgx.Tx) error) error {
+	return db.InTenantReadSnapshot(ctx, m.pool, tenantID, fn)
+}
+
+func (m *Module) readPerson(ctx context.Context, p tenant.Principal, permission string, fn func(pgx.Tx) error) error {
+	return m.read(ctx, p.TenantID, func(tx pgx.Tx) error {
+		if p.Kind != tenant.Person || authz.RequireTx(ctx, tx, p, permission, authz.Scope{}) != nil {
+			return fail(http.StatusForbidden, "permission denied")
+		}
+		return fn(tx)
+	})
+}
+
 // write rechecks person authority under the tenant/tree fences held by in,
 // before the callback acquires resource rows or appends events.
 func (m *Module) write(ctx context.Context, p tenant.Principal, permission string, fn func(pgx.Tx) error) error {
@@ -140,7 +155,7 @@ func (m *Module) list(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var items []Account
-	err := m.in(r.Context(), p.TenantID, func(tx pgx.Tx) error {
+	err := m.read(r.Context(), p.TenantID, func(tx pgx.Tx) error {
 		var err error
 		items, err = queryAccounts(r.Context(), tx, p.Kind == tenant.Agent)
 		if err == nil && p.Kind == tenant.Person {
