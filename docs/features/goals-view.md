@@ -40,7 +40,8 @@ default, and `?view=goals` once.
 - **Column header.** PROJECT · GOAL · MOVING · QUEUED · DONE · PROGRESS · LANDS. The
   labels are the sort controls; LANDS (ETA, soonest first) is the default and a second
   click turns any order around. The server sorts and filters.
-- **A goal row** shows its project keys, kind (goal or release), name and "Next",
+- **A goal row** shows its project keys, kind (goal or release), name (wrapping to two
+  lines, the rest in its tip) and "Next" (one line),
   one agent-badge column shared with its items (reserved when no one works), the three
   counts, progress with "N of M done" (the percent is the rollup over the goal's own
   items; a hand-set value always shows a pen and the tip "Progress set by hand"), the waits-on-you
@@ -53,9 +54,18 @@ default, and `?view=goals` once.
   Queued (five, then "N more queued · show"), Paused; Done folds into one line, which
   says how many of them finished today in the viewer's time zone ("8 done · 7 today ·
   show", from the `merged_at` the merge records); the "Handed over" line closes the
-  agents' part. An item's live line is its agent's note: a speech icon, at most two
-  lines, closed by the author and time ("· AEON-LEAD 18:52"); a clipped note shows in
-  full as a tip. A search that finds only items opens their goal and shows just those.
+  agents' part. Items nest under the goal: the state icon sits at the steps' icon x,
+  then the ticket key ("+1" when there are more, named in its tip), then the label;
+  the project-key column belongs to goal rows, and the fold lines line up the same
+  way. An item's live line is its agent's note: a speech icon, one line closed by the
+  author and time ("· AEON-LEAD 18:52"), which stay readable; a clipped note or label
+  shows in full as a tip. When the counts show and the goal column gives the key and
+  label at least 280 px, each item is one line: the label in the goal column, its
+  agent's badge in the agent column and the live line in the Moving → Progress span.
+  Otherwise the label runs from the key to the ETA in at most two lines, and the live
+  line and the agent's face share one line under it. The choice is made when the
+  goals arrive or the window resizes, never while someone works in the list. A search
+  that finds only items opens their goal and shows just those.
 - **The ETA popover** (hover or keyboard focus) says who set the ETA and when, and
   what it was before, right-aligned to the ETA and flipping above when there is no
   room. A passed ETA (the server's bit) is gold: "passed · update pending". For a goal
@@ -83,7 +93,8 @@ default, and `?view=goals` once.
   reconnect moves nothing. On phones it is the list's last line. The keyboard line
   follows.
 - **Phones** show name, ETA and progress; the state chips, Hide done and Expand all are
-  behind ⋯, with a 44 px Expand all row above the first goal. An opened item links
+  behind ⋯, with a 44 px Expand all row above the first goal. An opened item stacks
+  its label, ETA and note (up to two lines) and links
   each of its tickets, with a 44 px target, so an item without an agent still opens
   its work. The same ⋯ menu says when the counts omit oversized goals.
 
