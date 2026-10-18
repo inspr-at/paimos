@@ -227,6 +227,9 @@ onMounted(() => {
   reducedQuery.addEventListener('change', onReduced)
   document.addEventListener('visibilitychange', onVisibility)
   window.addEventListener('resize', onResize)
+  // Software GL can stall frames and miss window/media/root deliveries during
+  // a shrink. The visual viewport still notifies; re-read layout immediately.
+  window.visualViewport?.addEventListener('resize', onResize)
   viewportWatch = new ResizeObserver(followViewport)
   viewportWatch.observe(document.documentElement)
   syncWide()
@@ -247,6 +250,7 @@ onBeforeUnmount(() => {
   cancelAnimationFrame(paintSample)
   viewportWatch?.disconnect()
   window.removeEventListener('resize', onResize)
+  window.visualViewport?.removeEventListener('resize', onResize)
   wideQuery.removeEventListener('change', onWide)
   reducedQuery.removeEventListener('change', onReduced)
   document.removeEventListener('visibilitychange', onVisibility)

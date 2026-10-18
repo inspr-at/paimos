@@ -291,6 +291,49 @@ test('a dropped wide-media change still hides the glimpse below 1280', async ({ 
   await expect(page.locator('[data-header-glimpse="on"]')).toHaveCount(0)
 })
 
+// Risk: software-rendered frames stop during a shrink, so the paint sampler
+// cannot recover missed window/media/root notifications. The independent
+// visual-viewport event must clear an already painted glimpse without a frame.
+test('AEON-1414: a visual viewport shrink clears the glimpse while frames and other resize notifications are held', async ({ page }) => {
+  await page.addInitScript(() => {
+    const state = { holding: false, visualWidths: [] as number[] }
+    ;(window as unknown as { __aeonHeldViewport: typeof state }).__aeonHeldViewport = state
+    const frame = window.requestAnimationFrame.bind(window)
+    window.requestAnimationFrame = callback => frame(time => { if (!state.holding) callback(time) })
+    window.addEventListener('resize', event => { if (state.holding) event.stopImmediatePropagation() }, { capture: true })
+    const media = window.matchMedia.bind(window)
+    window.matchMedia = query => {
+      const list = media(query)
+      if (query === '(min-width: 1280px)') list.addEventListener('change', event => { if (state.holding) event.stopImmediatePropagation() }, { capture: true })
+      return list
+    }
+    const Observer = window.ResizeObserver
+    window.ResizeObserver = class extends Observer {
+      constructor(callback: ResizeObserverCallback) {
+        super((entries, observer) => {
+          const delivered = entries.filter(entry => !state.holding || entry.target !== document.documentElement)
+          if (delivered.length) callback(delivered, observer)
+        })
+      }
+    }
+    window.visualViewport?.addEventListener('resize', () => {
+      if (state.holding) state.visualWidths.push(window.visualViewport!.width)
+    })
+  })
+  await mockHeaderGraph(page, sized(8, true))
+  await page.goto('/p/PHAROS/tickets')
+  await ready(page)
+  await expect(page.locator('[data-header-glimpse="on"]')).toBeAttached()
+  await page.evaluate(() => { (window as unknown as { __aeonHeldViewport: { holding: boolean } }).__aeonHeldViewport.holding = true })
+  await resizeSeen(page, { width: 390, height: 844 })
+  await expect.poll(() => page.evaluate(() => ({
+    layout: document.documentElement.getBoundingClientRect().width,
+    visual: (window as unknown as { __aeonHeldViewport: { visualWidths: number[] } }).__aeonHeldViewport.visualWidths.at(-1),
+  }))).toEqual({ layout: 390, visual: 390 })
+  await expect(page.locator('[data-header-glimpse="on"]')).toHaveCount(0)
+  await expect(page.locator('[data-header-glimpse="off"]')).toBeAttached()
+})
+
 // Risk: the software-rendered canvas outlives the last viewport notification.
 // Drop the root observer as well as resize/media events after a ready wide
 // frame. Real layout still shrinks, so painting must follow it without a timer.
