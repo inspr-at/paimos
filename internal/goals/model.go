@@ -112,6 +112,8 @@ type Stall struct {
 
 // DeriveStall receives the last change of the visibility-filtered displayed
 // pct (including a manual override), or created_at when it never changed.
+// Since is UTC: detail scans timestamptz in the session zone, list decodes
+// jsonb timestamps in UTC, and both must publish the same instant.
 func DeriveStall(moving int, since, now time.Time) Stall {
-	return Stall{Stalled: moving > 0 && !now.Before(since.Add(StallAfter)), Since: since}
+	return Stall{Stalled: moving > 0 && !now.Before(since.Add(StallAfter)), Since: since.UTC()}
 }
