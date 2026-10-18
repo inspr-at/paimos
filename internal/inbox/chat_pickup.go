@@ -70,12 +70,13 @@ func (s *Sweeper) sweepChatPickup(ctx context.Context, tid string) error {
 	if err != nil {
 		return err
 	}
+	var first error
 	for _, id := range ids {
-		if err := s.alertChatPickup(ctx, tid, sysID, id, now); err != nil {
-			return err
+		if err := s.alertChatPickup(ctx, tid, sysID, id, now); err != nil && first == nil {
+			first = err
 		}
 	}
-	return nil
+	return first
 }
 
 func (s *Sweeper) alertChatPickup(ctx context.Context, tid, sysID, id string, now time.Time) error {

@@ -127,9 +127,6 @@ func (s *Sweeper) SweepTenant(ctx context.Context, tenantID string) (int, error)
 	if err := s.heal(ctx, tenantID); err != nil {
 		return 0, err
 	}
-	if err := s.sweepChatPickup(ctx, tenantID); err != nil {
-		return 0, err
-	}
 	var candidates []sweepCandidate
 	err := db.InTenant(ctx, s.pool, tenantID, func(tx pgx.Tx) error {
 		candidates = nil
@@ -200,6 +197,10 @@ func (s *Sweeper) SweepTenant(ctx context.Context, tenantID string) (int, error)
 		if done {
 			failed++
 		}
+	}
+	// A notice failure must not hold back terminal guarantees for other messages.
+	if err := s.sweepChatPickup(ctx, tenantID); err != nil && first == nil {
+		first = err
 	}
 	return failed, first
 }
