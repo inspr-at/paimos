@@ -108,6 +108,27 @@ func TestIdleQuotaProbeHourlyRoundTrip(t *testing.T) {
 	if len(page.HourlyReadings) != 1 || page.HourlyReadings[0].HourAt.Hour() != 14 || page.NextCursor != "" {
 		t.Fatalf("last page: %+v", page)
 	}
+	// Separate enrolled accounts of the same harness keep separate snapshots.
+	var sibling Account
+	status, raw := callAt(t, f.mod, &f.runner, f.token, "POST", "/api/agent-accounts", `{"account_key":"secondary","harness":"codex","daemon_id":"daemon-a","label":"Main"}`, now)
+	if status != 201 || json.Unmarshal(raw, &sibling) != nil {
+		t.Fatalf("second enrollment: %d %s", status, raw)
+	}
+	ownFixtureAccount(t, f.admin, &sibling)
+	siblingPath := "/api/agent-accounts/" + sibling.ID
+	v := capacity.Reading{WindowKind: "weekly", WindowMinutes: 10080, UsedPercent: 73, ReadAt: now, ResetsAt: now.Add(time.Hour), Source: "harness"}
+	status, raw = callAt(t, f.mod, &f.runner, f.token, "POST", siblingPath+"/readings", encoded(t, readingsWrite{[]capacity.Reading{v}}), now)
+	if status != 204 {
+		t.Fatalf("second account reading: %d %s", status, raw)
+	}
+	var siblingQuota quotaSeries
+	status, raw = callAt(t, f.mod, &f.admin, "", "GET", siblingPath+"/quota-series"+query, "", now)
+	if status != 200 || json.Unmarshal(raw, &siblingQuota) != nil || len(siblingQuota.LatestReadings) != 1 || siblingQuota.LatestReadings[0].UsedPercent != 73 || len(siblingQuota.HourlyReadings) != 1 {
+		t.Fatalf("second account lost its own quota: %d %s", status, raw)
+	}
+	if original := read(f.admin, "", "&window_kind=weekly", now.Add(2*time.Hour)); len(original.LatestReadings) != 1 || original.LatestReadings[0].UsedPercent != 45 {
+		t.Fatal("a sibling replaced this account's quota")
+	}
 	// A different tenant cannot read or insert rows for this account through RLS.
 	other := makePrincipal(t, "idle-quota-other", "person", "Other tenant", []string{"admin"})
 	callStatus(t, f.mod, &other, "", "GET", path+"/quota-series"+query, "", 404, nil)
