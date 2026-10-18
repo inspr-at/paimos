@@ -102,7 +102,7 @@ function syncWide() {
   const next = readWide()
   if (wide.value !== next) wide.value = next
 }
-let viewportWatch: ResizeObserver | undefined, viewportFrame = 0, paintSample = 0
+let viewportWatch: ResizeObserver | undefined, viewportFrame = 0, paintSample = 0, paintTask = 0
 function followViewport() {
   syncWide()
   if (viewportFrame) return
@@ -158,16 +158,29 @@ function onVisibility() { applyMotion() }
 function onResize() { followViewport(); scheduleMeasure() }
 // The observers above can all stay silent while the canvas is painting.
 // Keep reading until the paint ends, and only clear.
-function samplePaintedViewport() {
-  if (!mounted || !paint.value) { paintSample = 0; return }
+function checkPaintedViewport() {
+  if (!mounted || !paint.value) return false
   const signal = { mediaMatches: window.matchMedia(wideMedia).matches, layoutWidth: viewportWidth() }
   if (headerGlimpsePaintClears(wide.value, signal)) wide.value = false
-  if (!mounted || !paint.value) { paintSample = 0; return }
+  return true
+}
+function samplePaintedViewport() {
+  paintSample = 0
+  if (!checkPaintedViewport()) return
   paintSample = requestAnimationFrame(samplePaintedViewport)
 }
+// Software GL can stall animation frames along with every viewport delivery.
+// A task still runs in that gap. One pending check while painted bounds the
+// fallback work; ordinary events and paint frames keep their immediate path.
+function samplePaintedViewportTask() {
+  paintTask = 0
+  if (!checkPaintedViewport()) return
+  paintTask = window.setTimeout(samplePaintedViewportTask, 250)
+}
 function startPaintSample() {
-  if (!mounted || !paint.value || paintSample) return
-  samplePaintedViewport()
+  if (!mounted || !paint.value) return
+  if (!paintSample) samplePaintedViewport()
+  if (!paintTask) paintTask = window.setTimeout(samplePaintedViewportTask, 250)
 }
 function attachSizing() {
   const header = column.value?.closest('header'), page = header?.closest('.project-page')
@@ -219,6 +232,8 @@ watch(paint, value => {
   emit('active', value)
   cancelAnimationFrame(paintSample)
   paintSample = 0
+  clearTimeout(paintTask)
+  paintTask = 0
   if (value) startPaintSample()
 })
 watch([allowed, idle, () => props.projectId, () => props.projectKey, () => JSON.stringify(filtersToQuery(filters.value))], () => { void load() })
@@ -249,6 +264,7 @@ onBeforeUnmount(() => {
   cancelAnimationFrame(measureFrame)
   cancelAnimationFrame(viewportFrame)
   cancelAnimationFrame(paintSample)
+  clearTimeout(paintTask)
   viewportWatch?.disconnect()
   window.removeEventListener('resize', onResize)
   visualViewport?.removeEventListener('resize', onResize)
