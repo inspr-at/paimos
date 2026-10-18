@@ -325,7 +325,7 @@ func mutateItems(ctx context.Context, tx pgx.Tx, p tenant.Principal, target stri
 		if up.Label.Value != nil {
 			n.Title = *up.Label.Value
 		}
-		setField(n.Fields, "note", up.Note)
+		setNote(&n, up.Note, p, now)
 		setField(n.Fields, "state_set", up.State)
 		setETA(&n, up.ETA, p, now)
 		if up.Position.Set {

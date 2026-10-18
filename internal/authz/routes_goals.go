@@ -7,8 +7,10 @@ func init() {
 		"GET /api/goals/{goalId}":         "nodes.read",
 		"GET /api/goals/{goalId}/history": "nodes.read",
 		"GET /api/goals/{goalId}/series":  "nodes.read",
+		"GET /api/goals/status-note":      "nodes.read",
 		"POST /api/goals":                 "nodes.write",
 		"PATCH /api/goals/{goalId}":       "nodes.write",
+		"PATCH /api/goals/status-note":    "nodes.write",
 	})
 	registerDeclarations("goals", "project_filtered", ProjectFilteredRoutes, map[string]bool{
 		"GET /api/goals":                  true,

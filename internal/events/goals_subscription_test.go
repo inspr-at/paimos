@@ -100,3 +100,69 @@ func TestGoalsSubscriptionUsesOutcomeVisibility(t *testing.T) {
 		t.Fatalf("goal hints %+v %v", hints, err)
 	}
 }
+
+// Risk (AEON-1494): the workspace status note's node-less event never reaches
+// a topics=goals subscriber, or reaches a key that only sees one project.
+func TestGoalsSubscriptionDeliversStatusNoteToWorkspaceReaders(t *testing.T) {
+	d, p, _ := fixture(t)
+	ctx := t.Context()
+	var role, author, project string
+	if err := d.Admin.QueryRow(ctx, `INSERT INTO roles(tenant_id,key,name) VALUES($1,'subscribe_note','Subscribe') RETURNING id::text`, p.TenantID).Scan(&role); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := d.Admin.Exec(ctx, `INSERT INTO role_permissions(tenant_id,role_id,permission) VALUES($1,$2,'events.subscribe')`, p.TenantID, role); err != nil {
+		t.Fatal(err)
+	}
+	if err := d.Admin.QueryRow(ctx, `INSERT INTO principals(tenant_id,kind,name) VALUES($1,'person','Author') RETURNING id::text`, p.TenantID).Scan(&author); err != nil {
+		t.Fatal(err)
+	}
+	dbtest.BindRole(t, d, p.TenantID, author, "owner")
+	var readRole string
+	if err := d.Admin.QueryRow(ctx, `INSERT INTO roles(tenant_id,key,name) VALUES($1,'subscribe_read','Subscribe and read') RETURNING id::text`, p.TenantID).Scan(&readRole); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := d.Admin.Exec(ctx, `INSERT INTO role_permissions(tenant_id,role_id,permission) VALUES($1,$2,'events.subscribe')`, p.TenantID, readRole); err != nil {
+		t.Fatal(err)
+	}
+	readers := map[string]tenant.Principal{}
+	for name, bound := range map[string]string{"workspace": readRole, "project": role} {
+		key := tenant.Principal{TenantID: p.TenantID, Kind: tenant.Agent, KeyCreatorID: author, Scopes: []string{"events.subscribe", "nodes.read"}}
+		if err := d.Admin.QueryRow(ctx, `INSERT INTO principals(tenant_id,kind,name) VALUES($1,'agent',$2) RETURNING id::text`, p.TenantID, name).Scan(&key.ID); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := d.Admin.Exec(ctx, `INSERT INTO role_bindings(tenant_id,principal_id,role_id,scope_type) VALUES($1,$2,$3,'workspace')`, p.TenantID, key.ID, bound); err != nil {
+			t.Fatal(err)
+		}
+		if err := d.Admin.QueryRow(ctx, `INSERT INTO agent_keys(tenant_id,principal_id,name,prefix,hash,scopes,created_by_principal_id) VALUES($1,$2,'fixture',$3,repeat('0',64),$4,$5) RETURNING id::text`, p.TenantID, key.ID, name, key.Scopes, author).Scan(&key.KeyID); err != nil {
+			t.Fatal(err)
+		}
+		readers[name] = key
+	}
+	// One workspace role per principal: the workspace key's role also reads nodes.
+	if _, err := d.Admin.Exec(ctx, `INSERT INTO role_permissions(tenant_id,role_id,permission) SELECT $1,id,'nodes.read' FROM roles WHERE tenant_id=$1 AND key='subscribe_read'`, p.TenantID); err != nil {
+		t.Fatal(err)
+	}
+	var through int64
+	err := db.InTenant(dbtest.Seed(ctx), d.App, p.TenantID, func(tx pgx.Tx) error {
+		if err := tx.QueryRow(ctx, `INSERT INTO nodes(tenant_id,kind_id,key,title) SELECT $1,id,aeon_next_node_key($1,short_prefix),'Project' FROM node_kinds WHERE tenant_id=$1 AND slug='project' RETURNING id::text`, p.TenantID).Scan(&project); err != nil {
+			return err
+		}
+		if _, err := tx.Exec(ctx, `INSERT INTO role_bindings(tenant_id,principal_id,role_id,scope_type,scope_id) SELECT $1,$2,id,'project',$3 FROM roles WHERE tenant_id=$1 AND key='viewer'`, p.TenantID, readers["project"].ID, project); err != nil {
+			return err
+		}
+		event, err := Append(ctx, tx, tenant.Principal{ID: author, TenantID: p.TenantID, Kind: tenant.Person}, Change{Type: "goal.status_note_changed", After: map[string]any{"text": "Status", "by": author}})
+		through = event.ID
+		return err
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	m := New(d.App).(*module)
+	for name, want := range map[string]int{"workspace": 1, "project": 0} {
+		reader := readers[name]
+		hints, _, err := m.subscriptionRead(tenant.WithPrincipal(ctx, reader), reader, 0, through, map[string]bool{"goals": true})
+		if err != nil || len(hints) != want || want == 1 && (hints[0].ID != through || hints[0].Type != "goal.status_note_changed" || hints[0].Topic != "goals") {
+			t.Fatalf("%s reader hints %+v %v", name, hints, err)
+		}
+	}
+}

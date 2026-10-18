@@ -699,11 +699,15 @@
     }
   },
   "goals": {
-    "version": "goals/1.4",
-    "sha256": "9c8a44fa2951311e01d2d19821f4c6fc4834d69977de89783b583d813a6b5441",
+    "version": "goals/1.5",
+    "sha256": "1b974b40ca014f65a19b35a07fc2fd4d69eed7e42ecb5eb6197395f0534fdeb3",
     "shape": {
       "GET /goals 200": {
         "properties": {
+          "eta_last_set_at": {
+            "format": "date-time",
+            "type": "string"
+          },
           "generation": {
             "format": "int64",
             "minimum": 1,
@@ -881,7 +885,22 @@
                       "label": {
                         "type": "string"
                       },
+                      "merged_at": {
+                        "format": "date-time",
+                        "type": "string"
+                      },
                       "note": {
+                        "type": "string"
+                      },
+                      "note_at": {
+                        "format": "date-time",
+                        "type": "string"
+                      },
+                      "note_by": {
+                        "format": "uuid",
+                        "type": "string"
+                      },
+                      "note_by_name": {
                         "type": "string"
                       },
                       "passed": {
@@ -1030,6 +1049,14 @@
                       "minimum": 0,
                       "type": "integer"
                     },
+                    "remaining_hours": {
+                      "minimum": 0,
+                      "type": "number"
+                    },
+                    "remaining_unestimated": {
+                      "minimum": 0,
+                      "type": "integer"
+                    },
                     "source": {
                       "enum": [
                         "computed",
@@ -1050,7 +1077,9 @@
                     "total",
                     "done",
                     "items_without_estimate",
-                    "items_partially_estimated"
+                    "items_partially_estimated",
+                    "remaining_hours",
+                    "remaining_unestimated"
                   ],
                   "type": "object"
                 },
@@ -1248,6 +1277,33 @@
             "minimum": 0,
             "type": "integer"
           },
+          "status_note": {
+            "properties": {
+              "by": {
+                "format": "uuid",
+                "type": "string"
+              },
+              "by_name": {
+                "type": "string"
+              },
+              "set_at": {
+                "format": "date-time",
+                "type": "string"
+              },
+              "text": {
+                "maxLength": 2000,
+                "minLength": 1,
+                "type": "string"
+              }
+            },
+            "required": [
+              "text",
+              "by",
+              "by_name",
+              "set_at"
+            ],
+            "type": "object"
+          },
           "totals": {
             "properties": {
               "done": {
@@ -1288,6 +1344,60 @@
           "totals_partial",
           "quiet_projects",
           "truncated",
+          "read_through",
+          "generation"
+        ],
+        "type": "object"
+      },
+      "GET /goals/status-note 200": {
+        "properties": {
+          "generation": {
+            "format": "int64",
+            "minimum": 1,
+            "type": "integer"
+          },
+          "note": {
+            "anyOf": [
+              {
+                "properties": {
+                  "by": {
+                    "format": "uuid",
+                    "type": "string"
+                  },
+                  "by_name": {
+                    "type": "string"
+                  },
+                  "set_at": {
+                    "format": "date-time",
+                    "type": "string"
+                  },
+                  "text": {
+                    "maxLength": 2000,
+                    "minLength": 1,
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "text",
+                  "by",
+                  "by_name",
+                  "set_at"
+                ],
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "read_through": {
+            "format": "int64",
+            "minimum": 0,
+            "type": "integer"
+          }
+        },
+        "required": [
+          "note",
           "read_through",
           "generation"
         ],
@@ -1464,7 +1574,22 @@
                 "label": {
                   "type": "string"
                 },
+                "merged_at": {
+                  "format": "date-time",
+                  "type": "string"
+                },
                 "note": {
+                  "type": "string"
+                },
+                "note_at": {
+                  "format": "date-time",
+                  "type": "string"
+                },
+                "note_by": {
+                  "format": "uuid",
+                  "type": "string"
+                },
+                "note_by_name": {
                   "type": "string"
                 },
                 "passed": {
@@ -1613,6 +1738,14 @@
                 "minimum": 0,
                 "type": "integer"
               },
+              "remaining_hours": {
+                "minimum": 0,
+                "type": "number"
+              },
+              "remaining_unestimated": {
+                "minimum": 0,
+                "type": "integer"
+              },
               "source": {
                 "enum": [
                   "computed",
@@ -1633,7 +1766,9 @@
               "total",
               "done",
               "items_without_estimate",
-              "items_partially_estimated"
+              "items_partially_estimated",
+              "remaining_hours",
+              "remaining_unestimated"
             ],
             "type": "object"
           },
@@ -2032,6 +2167,64 @@
         "required": [
           "range",
           "expansion",
+          "read_through",
+          "generation"
+        ],
+        "type": "object"
+      },
+      "PATCH /goals/status-note 200": {
+        "properties": {
+          "changed": {
+            "type": "boolean"
+          },
+          "generation": {
+            "format": "int64",
+            "minimum": 1,
+            "type": "integer"
+          },
+          "note": {
+            "anyOf": [
+              {
+                "properties": {
+                  "by": {
+                    "format": "uuid",
+                    "type": "string"
+                  },
+                  "by_name": {
+                    "type": "string"
+                  },
+                  "set_at": {
+                    "format": "date-time",
+                    "type": "string"
+                  },
+                  "text": {
+                    "maxLength": 2000,
+                    "minLength": 1,
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "text",
+                  "by",
+                  "by_name",
+                  "set_at"
+                ],
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "read_through": {
+            "format": "int64",
+            "minimum": 0,
+            "type": "integer"
+          }
+        },
+        "required": [
+          "changed",
+          "note",
           "read_through",
           "generation"
         ],

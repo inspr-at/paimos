@@ -17,6 +17,7 @@ var subscriptionTypes = map[string]subscriptionPolicy{
 	"goal.items_changed":                {"goals", "nodes.read"},
 	"goal.eta_changed":                  {"goals", "nodes.read"},
 	"goal.passed_changed":               {"goals", "nodes.read"},
+	"goal.status_note_changed":          {"goals", "nodes.read"},
 	"model.preferences_changed":         {"preferences", "models.resolve"},
 	"review_policy.changed":             {"policies", "reviewpolicy.read"},
 	"approval.proposed":                 {"approvals", "approvals.read"},

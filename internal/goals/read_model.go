@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"math"
 	"slices"
 	"sort"
 	"time"
@@ -55,6 +56,10 @@ type GoalProgress struct {
 	ItemsPartiallyEstimated int    `json:"items_partially_estimated"`
 	OverrideBy              string `json:"override_by,omitempty"`
 	OverrideAt              string `json:"override_at,omitempty"`
+	// Open estimate hours over the goal's unfinished visible work leaves
+	// (AEON-1494), and how many of those leaves carry no estimate.
+	RemainingHours       float64 `json:"remaining_hours"`
+	RemainingUnestimated int     `json:"remaining_unestimated"`
 }
 type OutcomeView struct {
 	ID       string   `json:"id"`
@@ -69,6 +74,12 @@ type OutcomeView struct {
 	Coverage   Coverage     `json:"coverage"`
 	Weight     float64      `json:"weight"`
 	HandedOver bool         `json:"handed_over"`
+	// The note's author and time (AEON-1494); absent on unattributed notes.
+	NoteBy     string     `json:"note_by,omitempty"`
+	NoteByName string     `json:"note_by_name,omitempty"`
+	NoteAt     *time.Time `json:"note_at,omitempty"`
+	// A done item's latest merge, recorded on its work leaves by the merge.
+	MergedAt *time.Time `json:"merged_at,omitempty"`
 }
 type GoalView struct {
 	ID         string         `json:"id"`
@@ -93,6 +104,7 @@ type GoalView struct {
 	HandedOver *HandedOver    `json:"handed_over,omitempty"`
 	Watermark
 	created        time.Time
+	etaSetAt       time.Time
 	movingProjects []string
 	targets        []string
 	node           storedNode
@@ -105,6 +117,8 @@ type leafFact struct {
 	Hours                               float64
 	Sessions                            []string
 	PR, Review, Paused, Queued, Blocked bool
+	// Merged is the merged_at a merge records on a done leaf (delivery.merge_done).
+	Merged *string
 }
 
 // These predicates are shared by detail/list/revalidation. Work membership and
@@ -124,9 +138,10 @@ const leafFactsProjectionSQL = `leaves AS MATERIALIZED (SELECT DISTINCT id,field
  OR EXISTS(SELECT 1 FROM delivery_items d WHERE d.ticket_node_id=l.id AND d.state='held')
  OR EXISTS(SELECT 1 FROM desk_askers a JOIN desk_questions q ON q.node_id=a.question_id WHERE q.state='open' AND a.input->>'meanwhile' IN ('parked','paused','stopped') AND a.input->'blocked_node_ids' ? l.id::text) AS paused,
  EXISTS(SELECT 1 FROM agent_runs a WHERE a.queue_node_id=l.id AND a.status='queued' AND replace(replace(lower(btrim(n.state)),' ','_'),'-','_') IN ('new','open','backlog','blocked')) AS queued,
- lower(n.state)='blocked' AS blocked
+ lower(n.state)='blocked' AS blocked,
+ CASE WHEN l.bucket='done' AND jsonb_typeof(n.fields->'merged_at')='string' THEN left(n.fields->>'merged_at',64) END AS merged
  FROM leaves l JOIN nodes n ON n.id=l.id)
- SELECT s.root::text,f.id::text,f.done,f.hours,f.sessions,f.pr,f.review,f.paused,f.queued,f.blocked
+ SELECT s.root::text,f.id::text,f.done,f.hours,f.sessions,f.pr,f.review,f.paused,f.queued,f.blocked,f.merged
  FROM scope s JOIN leaf_facts f ON f.id=s.id ORDER BY s.root,f.id`
 
 func loadLeafFacts(ctx context.Context, tx pgx.Tx, roots []string, now time.Time) (map[string][]leafFact, error) {
@@ -142,7 +157,7 @@ func loadLeafFacts(ctx context.Context, tx pgx.Tx, roots []string, now time.Time
 	for rows.Next() {
 		var root string
 		var leaf leafFact
-		if err := rows.Scan(&root, &leaf.ID, &leaf.Done, &leaf.Hours, &leaf.Sessions, &leaf.PR, &leaf.Review, &leaf.Paused, &leaf.Queued, &leaf.Blocked); err != nil {
+		if err := rows.Scan(&root, &leaf.ID, &leaf.Done, &leaf.Hours, &leaf.Sessions, &leaf.PR, &leaf.Review, &leaf.Paused, &leaf.Queued, &leaf.Blocked, &leaf.Merged); err != nil {
 			return nil, err
 		}
 		if len(leaf.Sessions) > 200 {
@@ -238,7 +253,11 @@ func readGoal(ctx context.Context, tx pgx.Tx, p tenant.Principal, n storedNode, 
 	if err := nested.Commit(ctx); err != nil {
 		return out, err
 	}
-	return expanded, nil
+	single := []GoalView{expanded}
+	if err := attachNoteAuthors(ctx, tx, single); err != nil {
+		return out, err
+	}
+	return single[0], nil
 }
 func expandGoal(ctx context.Context, tx pgx.Tx, p tenant.Principal, out GoalView, now time.Time) (GoalView, error) {
 	children, err := childNodes(ctx, tx, out.ID)
@@ -303,9 +322,13 @@ func deriveGoal(out GoalView, children []storedNode, facts map[string][]leafFact
 	inputs := []ProgressOutcome{}
 	out.Items = []OutcomeView{}
 	states := StateCounts{}
+	// Open leaves of unfinished items, once each across overlapping items.
+	open := map[string]float64{}
+	out.etaSetAt = fieldTime(out.node, "eta_set_at")
 	for _, n := range children {
 		f := StateFacts{HandedOver: fieldString(n, "handed_over_at") != "", StateSet: State(fieldString(n, "state_set"))}
 		leaves := []LeafEstimate{}
+		own := []leafFact{}
 		seen := map[string]bool{}
 		for _, root := range n.Targets {
 			for _, l := range facts[root] {
@@ -313,6 +336,7 @@ func deriveGoal(out GoalView, children []storedNode, facts map[string][]leafFact
 					continue
 				}
 				seen[l.ID] = true
+				own = append(own, l)
 				f.TotalLeaves++
 				if l.Done {
 					f.DoneLeaves++
@@ -349,7 +373,28 @@ func deriveGoal(out GoalView, children []storedNode, facts map[string][]leafFact
 		}
 		sort.Strings(keys)
 		value := etas[n.ID]
-		out.Items = append(out.Items, OutcomeView{ID: n.ID, Ref: fieldString(n, "outcome_ref"), Label: n.Title, Note: fieldString(n, "note"), Position: Position(n.Position), Keys: keys, EffectiveState: state, ETA: value, Passed: Passed(value.At, state.State, now), HandedOver: f.HandedOver})
+		item := OutcomeView{ID: n.ID, Ref: fieldString(n, "outcome_ref"), Label: n.Title, Note: fieldString(n, "note"), Position: Position(n.Position), Keys: keys, EffectiveState: state, ETA: value, Passed: Passed(value.At, state.State, now), HandedOver: f.HandedOver}
+		if item.Note != "" && fieldString(n, "note_by") != "" {
+			item.NoteBy = fieldString(n, "note_by")
+			if at := fieldTime(n, "note_at"); !at.IsZero() {
+				item.NoteAt = &at
+			}
+		}
+		for _, l := range own {
+			switch {
+			case state.State != Done && !l.Done:
+				open[l.ID] = l.Hours
+			case state.State == Done && l.Done && l.Merged != nil:
+				if at, err := time.Parse(time.RFC3339Nano, *l.Merged); err == nil && (item.MergedAt == nil || at.After(*item.MergedAt)) {
+					at = at.UTC()
+					item.MergedAt = &at
+				}
+			}
+		}
+		if at := fieldTime(n, "eta_set_at"); at.After(out.etaSetAt) {
+			out.etaSetAt = at
+		}
+		out.Items = append(out.Items, item)
 		inputs = append(inputs, ProgressOutcome{State: state.State, Leaves: leaves})
 	}
 	rollup := ComputeRollup(inputs)
@@ -358,6 +403,7 @@ func deriveGoal(out GoalView, children []storedNode, facts map[string][]leafFact
 		out.Items[i].Weight = rollup.Outcomes[i].Hours
 	}
 	progress := GoalProgress{Pct: rollup.Pct, ComputedPct: rollup.Pct, Source: "computed", Basis: rollup.Basis, Total: rollup.Total, Done: rollup.Done, ItemsWithoutEstimate: rollup.ItemsWithoutEstimate, ItemsPartiallyEstimated: rollup.ItemsPartiallyEstimated}
+	progress.RemainingHours, progress.RemainingUnestimated = remainingWork(open)
 	if pct, ok := out.node.Fields["progress_override_pct"].(float64); ok {
 		progress.Pct = int(pct)
 		progress.Source = "override"
@@ -450,4 +496,66 @@ func goalWaits(ctx context.Context, tx pgx.Tx, p tenant.Principal, goal string, 
 	out := Waits{QuestionIDs: []string{}}
 	err := tx.QueryRow(ctx, `WITH visible AS MATERIALIZED (SELECT DISTINCT q.node_id FROM desk_questions q JOIN nodes n ON n.id=q.node_id JOIN desk_askers a ON a.question_id=q.node_id WHERE q.state='open' AND n.deleted_at IS NULL AND ($1 OR a.principal_id=$2::uuid) AND (a.ticket_id=ANY($3::uuid[]) OR EXISTS(SELECT 1 FROM node_relations r WHERE r.type='asks_for' AND r.source_node_id=a.comment_node_id AND r.target_node_id=$4))) SELECT count(*)::int,ARRAY(SELECT node_id::text FROM visible ORDER BY node_id LIMIT 3) FROM visible`, p.Kind == tenant.Person, p.ID, targets, goal).Scan(&out.Count, &out.QuestionIDs)
 	return out, err
+}
+
+func fieldTime(n storedNode, key string) time.Time {
+	at, err := time.Parse(time.RFC3339Nano, fieldString(n, key))
+	if err != nil {
+		return time.Time{}
+	}
+	return at.UTC()
+}
+
+// remainingWork sums the open leaves' estimate hours (to a tenth) and counts
+// the open leaves without an estimate, so "hours left" never hides them.
+func remainingWork(open map[string]float64) (float64, int) {
+	hours, unestimated := 0.0, 0
+	for _, h := range open {
+		if h > 0 {
+			hours += h
+		} else {
+			unestimated++
+		}
+	}
+	return math.Round(hours*10) / 10, unestimated
+}
+
+// attachNoteAuthors names the principals who wrote the item notes on screen.
+// Names are tenant-visible; ids stay the stable reference.
+func attachNoteAuthors(ctx context.Context, tx pgx.Tx, goals []GoalView) error {
+	ids := []string{}
+	for _, g := range goals {
+		for _, item := range g.Items {
+			if item.NoteBy != "" && uuidPattern.MatchString(item.NoteBy) {
+				ids = append(ids, item.NoteBy)
+			}
+		}
+	}
+	if len(ids) == 0 {
+		return nil
+	}
+	ids = slices.Compact(slices.Sorted(slices.Values(ids)))
+	rows, err := tx.Query(ctx, `SELECT id::text,name FROM principals WHERE id=ANY($1::uuid[]) ORDER BY id LIMIT 20001`, ids)
+	if err != nil {
+		return err
+	}
+	names := map[string]string{}
+	for rows.Next() {
+		var id, name string
+		if err := rows.Scan(&id, &name); err != nil {
+			rows.Close()
+			return err
+		}
+		names[id] = name
+	}
+	rows.Close()
+	if err := rows.Err(); err != nil {
+		return err
+	}
+	for i := range goals {
+		for j := range goals[i].Items {
+			goals[i].Items[j].NoteByName = names[goals[i].Items[j].NoteBy]
+		}
+	}
+	return nil
 }

@@ -254,6 +254,31 @@ func setETA(n *storedNode, f Field[ETAInput], p tenant.Principal, now time.Time)
 	n.Fields["eta_set_by"] = p.ID
 	n.Fields["eta_set_at"] = now.UTC().Format(time.RFC3339Nano)
 }
+
+// setNote attributes an item's live note (AEON-1494) to its writer, like an
+// ETA. Repeating the current text is a no-op; null or blank text removes the
+// note together with its author and time.
+func setNote(n *storedNode, f Field[string], p tenant.Principal, now time.Time) {
+	if !f.Set {
+		return
+	}
+	text := ""
+	if f.Value != nil {
+		text = strings.TrimSpace(*f.Value)
+	}
+	if text == "" {
+		for _, key := range []string{"note", "note_by", "note_at"} {
+			delete(n.Fields, key)
+		}
+		return
+	}
+	if fieldString(*n, "note") == text && fieldString(*n, "note_by") != "" {
+		return
+	}
+	n.Fields["note"] = text
+	n.Fields["note_by"] = p.ID
+	n.Fields["note_at"] = now.UTC().Format(time.RFC3339Nano)
+}
 func etaSnapshot(n storedNode) map[string]any {
 	out := map[string]any{"source": "agent"}
 	for _, pair := range [][2]string{{"eta_text", "text"}, {"eta_at", "at"}, {"eta_set_by", "by"}} {
