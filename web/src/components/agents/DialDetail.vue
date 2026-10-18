@@ -119,7 +119,7 @@ const paceHome = computed(() => `/settings/capacity#pace-${harness.value}`)
     <template v-else-if="view.kind !== 'none'">
       <dl class="cd-dl">
         <dt><span class="eyebrow">Today</span></dt>
-        <dd><p class="cd-line cd-td">{{ today }}<span v-if="attention" class="cap-st" :class="`st-${view.kind}`"><AppIcon :name="view.kind === 'at_limit' ? 'pause' : 'alert'" :size="13" /><span>{{ stateWords(view) }}</span></span></p><p v-if="resets" class="cap-rs"><AppIcon name="refresh" :size="13" /><span>{{ resets }}</span></p></dd>
+        <dd><p class="cd-td">{{ today }}<span v-if="attention" class="cap-st" :class="`st-${view.kind}`"><AppIcon :name="view.kind === 'at_limit' ? 'pause' : 'alert'" :size="13" /><span>{{ stateWords(view) }}</span></span></p><p v-if="resets" class="cap-rs"><AppIcon name="refresh" :size="13" /><span>{{ resets }}</span></p></dd>
         <dt><button type="button" class="cd-fh" :aria-expanded="open('pace')" :aria-controls="id('pace')" :tabindex="tabbable()" @click="emit('fold', 'pace')"><AppIcon class="cap-chev" name="chevron-right" :size="12" /><span class="eyebrow">Pace</span></button></dt>
         <dd :class="{ open: open('pace') }">
           <p class="cd-sum" @click="emit('fold', 'pace')">{{ paceSummary(view) }}</p>
@@ -178,7 +178,8 @@ p { margin: 0; }
 .cd-fh[aria-expanded="true"] .cap-chev { transform: rotate(90deg); }
 .cd-sum { display: flex; align-items: center; min-height: 30px; color: var(--ink-2); font-size: 13.5px; text-align: left; cursor: pointer; font-variant-numeric: tabular-nums; }
 .cd-dl dd.open .cd-sum { color: var(--ink); font-weight: 600; }
-.cd-line { display: flex; align-items: center; flex-wrap: wrap; gap: 0 5px; min-height: 30px; color: var(--ink-2); font-size: 13.5px; }
+.cd-line, .cd-td { display: flex; align-items: center; flex-wrap: wrap; gap: 0 5px; min-height: 30px; color: var(--ink-2); font-size: 13.5px; }
+.cd-td { font-variant-numeric: tabular-nums; }
 .cd-fb { padding: 6px 0 4px; }
 .cap-opt { display: flex; align-items: center; gap: 8px; min-height: 30px; color: var(--ink); font-size: 13px; cursor: pointer; }
 .cap-opt input { accent-color: var(--teal); margin: 0; }
