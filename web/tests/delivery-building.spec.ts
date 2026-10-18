@@ -40,6 +40,7 @@ const learnBelow = (page: Page) => page.getByTestId('delivery-simple').getByRole
 
 for (const width of [1440, 1024, 390] as const) {
   test(`Building it at ${width}, light and dark: four tiles, Simple and Expert, in the design's order`, async ({ page }, info) => {
+    test.setTimeout(90_000)
     await page.setViewportSize({ width, height: width === 390 ? 844 : 1000 })
     const state = await setup(page)
     for (const theme of ['light', 'dark'] as const) {
@@ -47,7 +48,8 @@ for (const width of [1440, 1024, 390] as const) {
       state.work.preferences['delivery:numbers'] = { level: 'simple', window: 7 }
       await page.goto('/p/AEON/delivery')
       const head = section(page).getByTestId('delivery-building-head')
-      await expect(head).toHaveText('0 of 3 on target', { timeout: 15_000 })
+      // A cold dev server compiles the Delivery route on the first visit.
+      await expect(head).toHaveText('0 of 3 on target', { timeout: 45_000 })
       const tiles = section(page).getByRole('listitem')
       await expect(tiles).toHaveCount(4)
       await expect(tiles.getByRole('heading', { level: 4 })).toHaveText(['First-try rate', 'Rounds per item', 'Idle between rounds', 'Lead time per item'])
@@ -177,7 +179,10 @@ for (const width of [1440, 390] as const) {
     await expect(section(page).getByRole('listitem').first()).toHaveAttribute('aria-busy', 'true')
     const learnFirst = section(page).getByRole('button', { name: 'Learn: First-try rate' }), learnLead = section(page).getByRole('button', { name: 'Learn: Lead time per item' })
     await learnBelow(page).scrollIntoViewIfNeeded()
-    const guard = await controlStability(page, { learnFirst, learnLead, below: learnBelow(page) })
+    // Measured top-down, so the first name that moves says where a shift starts: above the section, its head, or a tile.
+    const ticketsLearn = page.getByTestId('delivery-tickets').getByRole('button', { name: /^Learn: / }).first()
+    const title = section(page).getByRole('heading', { name: 'Building it', level: 3 }), sub = section(page).getByText('From the first build to a change that passes its checks', { exact: false })
+    const guard = await controlStability(page, { ticketsLearn, title, sub, learnFirst, learnLead, below: learnBelow(page) })
     // Loading → a failed read: "Not loaded" with Retry in the head's own line.
     state.next = 'error'
     await guard.check(async () => {
