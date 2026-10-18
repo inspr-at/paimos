@@ -68,13 +68,13 @@ const label = (tile: BuildingTileView) => fill(t.value.open, { n: tile.simple.na
   <section v-if="level === 'simple' || narrow" class="s-sec bd" :class="{ 'bd-x': level === 'expert' }" :aria-labelledby="`${uid}-head`" data-testid="delivery-building">
     <div v-if="level === 'simple'" class="s-sec-head">
       <h3 :id="`${uid}-head`">{{ t.title }}</h3>
-      <span v-if="view.head.kind === 'error'" class="cnt bd-cnt err" role="alert"><span v-clip-tip>{{ view.head.text }}</span><button type="button" class="retry" @click="emit('retry')">{{ t.retry }}</button></span>
+      <span v-if="view.head.kind === 'error'" class="cnt bd-cnt err" role="alert">{{ view.head.text }}<button type="button" class="retry" @click="emit('retry')">{{ t.retry }}</button></span>
       <span v-else v-clip-tip class="cnt bd-cnt" :class="{ quiet: view.head.kind === 'nodata' }" :role="view.head.kind === 'nodata' ? 'status' : undefined" :aria-hidden="view.head.kind === 'loading' || undefined" data-testid="delivery-building-head">{{ view.head.text }}</span>
       <p>{{ t.sub }}</p>
     </div>
     <div v-else class="tk-cap-row">
       <p :id="`${uid}-head`" v-clip-tip class="tiles-cap">{{ fill(t.cap, { w: window }) }}</p>
-      <span v-if="view.head.kind === 'error'" class="bd-cnt err" role="alert"><span v-clip-tip>{{ view.head.text }}</span><button type="button" class="retry" @click="emit('retry')">{{ t.retry }}</button></span>
+      <span v-if="view.head.kind === 'error'" class="bd-cnt err" role="alert">{{ view.head.text }}<button type="button" class="retry" @click="emit('retry')">{{ t.retry }}</button></span>
       <span v-else class="bd-cnt" :class="{ quiet: view.head.kind === 'nodata' }" :role="view.head.kind === 'nodata' ? 'status' : undefined" :aria-hidden="view.head.kind === 'loading' || undefined" data-testid="delivery-building-head">{{ view.head.text }}</span>
     </div>
     <div class="s-grid" :class="{ busy }" role="list">
@@ -93,7 +93,7 @@ const label = (tile: BuildingTileView) => fill(t.value.open, { n: tile.simple.na
   <section v-else class="bd-x" :aria-labelledby="`${uid}-cap`" data-testid="delivery-building">
     <div class="tk-cap-row">
       <p :id="`${uid}-cap`" v-clip-tip class="tiles-cap">{{ fill(t.cap, { w: window }) }}</p>
-      <span v-if="view.head.kind === 'error'" class="bd-cnt err" role="alert"><span v-clip-tip>{{ view.head.text }}</span><button type="button" class="retry" @click="emit('retry')">{{ t.retry }}</button></span>
+      <span v-if="view.head.kind === 'error'" class="bd-cnt err" role="alert">{{ view.head.text }}<button type="button" class="retry" @click="emit('retry')">{{ t.retry }}</button></span>
       <span v-else class="bd-cnt" :class="{ quiet: view.head.kind === 'nodata' }" :role="view.head.kind === 'nodata' ? 'status' : undefined" :aria-hidden="view.head.kind === 'loading' || undefined" data-testid="delivery-building-head">{{ view.head.text }}</span>
     </div>
     <div class="tiles bd" :class="{ busy }" role="list">
@@ -119,9 +119,11 @@ const label = (tile: BuildingTileView) => fill(t.value.open, { n: tile.simple.na
 .s-sec-head { display: flex; align-items: baseline; flex-wrap: wrap; gap: 2px 12px; }
 .s-sec-head h3 { margin: 0; font: 650 15px/1.3 var(--font); color: var(--ink); }
 .s-sec-head p { flex-basis: 100%; margin: 0; font-size: 12.5px; color: var(--ink-2); }
-/* The count, the no-data sentence and the failed read share one line of fixed height. */
-.bd-cnt { display: inline-flex; align-items: baseline; gap: 6px; flex: 0 1 auto; min-width: 0; min-height: 1lh; font-size: 12.5px; font-weight: 600; color: var(--ink-2); font-variant-numeric: tabular-nums; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.bd-cnt > span { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+/* The count, the no-data sentence and the failed read share one line of the same box: text, then Retry on that line,
+   so the head never changes height or baseline between states (AEON-541). */
+.bd-cnt { display: block; flex: 0 1 auto; min-width: 0; min-height: 1lh; font-size: 12.5px; font-weight: 600; color: var(--ink-2); font-variant-numeric: tabular-nums; white-space: nowrap; overflow: clip; overflow-clip-margin: 14px; text-overflow: ellipsis; }
+/* The clip margin keeps Retry's 44 px touch area (its ::before) reachable above and below the line. */
+.bd-cnt .retry { margin-left: 6px; }
 .bd-cnt.quiet { font-weight: 500; }
 .bd-cnt.err { color: var(--danger); }
 .retry { position: relative; display: inline; height: auto; margin: 0; padding: 0; border: 0; background: none; color: var(--teal-ink); font: inherit; font-weight: 600; cursor: pointer; text-decoration: underline; text-underline-offset: 2px; }
