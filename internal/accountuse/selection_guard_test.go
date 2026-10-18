@@ -16,6 +16,10 @@ import (
 // residency re-stamps and model-version propagation (not start authority).
 func TestAccountUseSelectionCallSiteGuard(t *testing.T) {
 	expected := map[string]int{
+		// AEON-1414 batches workspace model readiness, like readiness.go below;
+		// executable selection still checks the run/project matrix separately.
+		"internal/agentaccounts/capacity_projection.go": 1,
+
 		"internal/agentaccounts/engine_admission.go":  1,
 		"internal/agentaccounts/groups.go":            1,
 		"internal/agentaccounts/model_allowance.go":   1,

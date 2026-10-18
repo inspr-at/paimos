@@ -36,7 +36,13 @@ func signalAccount(r *http.Request, tx pgx.Tx, p tenant.Principal) (Account, err
 	if err := agentpairing.AccountFence(r.Context(), tx, r.PathValue("accountId"), true); err != nil {
 		return Account{}, err
 	}
-	a, err := lockAccount(r.Context(), tx, r.PathValue("accountId"))
+	var a Account
+	var err error
+	if r.Method == http.MethodGet {
+		a, err = getAccount(r.Context(), tx, r.PathValue("accountId"))
+	} else {
+		a, err = lockAccount(r.Context(), tx, r.PathValue("accountId"))
+	}
 	if err != nil {
 		return a, err
 	}
@@ -142,7 +148,11 @@ func (m *Module) statusline(w http.ResponseWriter, r *http.Request) {
 	}
 	var enabled bool
 	plan := ""
-	err := m.in(r.Context(), p.TenantID, func(tx pgx.Tx) error {
+	enter := m.in
+	if r.Method == http.MethodGet {
+		enter = m.read
+	}
+	err := enter(r.Context(), p.TenantID, func(tx pgx.Tx) error {
 		if r.Method == http.MethodPut && authz.RequireTx(r.Context(), tx, p, "account.manage", authz.Scope{}) != nil {
 			return fail(http.StatusForbidden, "permission denied")
 		}

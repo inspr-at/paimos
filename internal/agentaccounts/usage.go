@@ -41,28 +41,39 @@ func validPosture(s string) bool { return s == "careful" || s == "balanced" || s
 // The account's canonical owner chooses usage, never the run's requester or
 // registering agent. An old explicit capacity schedule remains authoritative
 // until a stored usage preference exists.
+func capacityUsageSQL() string {
+	return `SELECT
+ CASE WHEN a.usage_posture_person_id=` + modelprefs.CanonicalPersonSQL("a.owner_person_id") + ` AND a.usage_posture_link_revision=a.link_revision THEN a.usage_posture END,
+ (SELECT usage FROM model_pref_profiles WHERE scope='person' AND person_id=` + modelprefs.CanonicalPersonSQL("a.owner_person_id") + `),
+ (SELECT usage FROM model_pref_profiles WHERE scope='workspace'),
+ COALESCE(a.usage_floor_percent,0),COALESCE(a.usage_revision,0),a.link_revision,
+ (SELECT COALESCE(max(usage_floor_percent),0) FROM agent_accounts WHERE id IN (` + quotaAccounts + `)),
+ CASE WHEN a.boost_person_id=` + modelprefs.CanonicalPersonSQL("a.owner_person_id") + ` AND a.boost_link_revision=a.link_revision AND a.boost_until>$2 THEN COALESCE(a.boost_percent,0) ELSE 0 END,
+ CASE WHEN a.boost_person_id=` + modelprefs.CanonicalPersonSQL("a.owner_person_id") + ` AND a.boost_link_revision=a.link_revision AND a.boost_until>$2 AND a.boost_percent>0 THEN a.boost_until END
+ FROM agent_accounts a WHERE a.id=$1`
+}
+
 func loadUsagePolicy(ctx context.Context, tx pgx.Tx, id string) (usagePolicy, error) {
+	if s := projectionInputs(tx); s != nil {
+		return s.policies[id], nil
+	}
 	p := usagePolicy{AccountID: id, Posture: "balanced", Source: "schedule"}
 	var account, person, workspace *string
 	now, err := dbNow(ctx, tx)
 	if err != nil {
 		return p, err
 	}
-	err = tx.QueryRow(ctx, `SELECT
- CASE WHEN a.usage_posture_person_id=`+modelprefs.CanonicalPersonSQL("a.owner_person_id")+` AND a.usage_posture_link_revision=a.link_revision THEN a.usage_posture END,
- (SELECT usage FROM model_pref_profiles WHERE scope='person' AND person_id=`+modelprefs.CanonicalPersonSQL("a.owner_person_id")+`),
- (SELECT usage FROM model_pref_profiles WHERE scope='workspace'),
- COALESCE(a.usage_floor_percent,0),COALESCE(a.usage_revision,0),a.link_revision,
- (SELECT COALESCE(max(usage_floor_percent),0) FROM agent_accounts WHERE id IN (`+quotaAccounts+`)),
- CASE WHEN a.boost_person_id=`+modelprefs.CanonicalPersonSQL("a.owner_person_id")+` AND a.boost_link_revision=a.link_revision AND a.boost_until>$2 THEN COALESCE(a.boost_percent,0) ELSE 0 END,
- CASE WHEN a.boost_person_id=`+modelprefs.CanonicalPersonSQL("a.owner_person_id")+` AND a.boost_link_revision=a.link_revision AND a.boost_until>$2 AND a.boost_percent>0 THEN a.boost_until END
- FROM agent_accounts a WHERE a.id=$1`, id, now).Scan(&account, &person, &workspace, &p.OwnFloor, &p.Revision, &p.BindingRevision, &p.Floor, &p.Boost, &p.BoostUntil)
+	err = tx.QueryRow(ctx, capacityUsageSQL(), id, now).Scan(&account, &person, &workspace, &p.OwnFloor, &p.Revision, &p.BindingRevision, &p.Floor, &p.Boost, &p.BoostUntil)
 	if isNoRows(err) {
 		return p, fail(404, "account not found")
 	}
 	if err != nil {
 		return p, err
 	}
+	return resolveUsagePolicy(p, account, person, workspace)
+}
+
+func resolveUsagePolicy(p usagePolicy, account, person, workspace *string) (usagePolicy, error) {
 	for _, v := range []struct {
 		value  *string
 		source string
@@ -323,7 +334,7 @@ func (m *Module) postures(w http.ResponseWriter, r *http.Request) {
 		Cursor   string         `json:"next_cursor,omitempty"`
 		AsOf     time.Time      `json:"as_of"`
 	}{Accounts: []guardPosture{}}
-	err := m.in(ctx, p.TenantID, func(tx pgx.Tx) error {
+	err := m.read(ctx, p.TenantID, func(tx pgx.Tx) error {
 		if _, err := tx.Exec(ctx, `SET LOCAL statement_timeout='5s'`); err != nil {
 			return err
 		}

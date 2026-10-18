@@ -33,6 +33,19 @@ async function resizeSeen(page: Page, size: { width: number; height: number }) {
   await page.setViewportSize(size)
   await expect.poll(() => page.evaluate(() => window.innerWidth), { timeout: 20_000 }).toBe(size.width)
 }
+// Keep the individual signal regressions independent of the task fallback.
+// Holding timeout deliveries leaves their chosen viewport/frame signal as the
+// only recovery path, including callbacks queued before the hold begins.
+async function holdTimeoutsWhile(page: Page, key: string, field?: string) {
+  await page.addInitScript(({ key, field }) => {
+    const timeout = window.setTimeout.bind(window)
+    window.setTimeout = (handler, delay, ...args) => timeout(typeof handler === 'function' ? (...values: unknown[]) => {
+      const state = (window as unknown as Record<string, unknown>)[key]
+      const holding = field ? (state as Record<string, unknown> | undefined)?.[field] : state
+      if (holding !== true) handler(...values)
+    } : handler, delay, ...args)
+  }, { key, field })
+}
 // Fixed 60fps steps, released after layout, so the contrast shot pauses on one
 // orbit angle. 17ms stays above the renderer's frame gate. Do not relax 0.78.
 const GLIMPSE_PIN_FRAMES = 192
@@ -295,6 +308,7 @@ test('a dropped wide-media change still hides the glimpse below 1280', async ({ 
 // With the other viewport notifications lost, a frame-based fallback cannot
 // clear the decoration. The visual viewport delivery must work independently.
 test('AEON-1337: a visual viewport resize clears the glimpse before the next animation frame', async ({ page }) => {
+  await holdTimeoutsWhile(page, '__aeonViewportFrameHold', 'holding')
   await page.addInitScript(() => {
     const state = { holding: false, framesHeld: 0, rootsDropped: 0, visualResizes: 0 }
     ;(window as unknown as { __aeonViewportFrameHold: typeof state }).__aeonViewportFrameHold = state
@@ -347,30 +361,69 @@ test('AEON-1337: a visual viewport resize clears the glimpse before the next ani
   await expect(page.locator('[data-header-glimpse="off"]')).toBeAttached()
 })
 
-// Risk: software GL can hold animation frames while all viewport deliveries
-// are lost. Wait for the frame hold before shrinking, then prove the real
-// layout moved and every remaining notification was dropped.
-test('AEON-1485: a narrow viewport clears the glimpse with frames held and viewport notifications dropped', async ({ page }) => {
+// Risk: software-rendered frames stop during a shrink, so the paint sampler
+// cannot recover missed window/media/root notifications. The independent
+// visual-viewport event must clear an already painted glimpse without a frame.
+test('AEON-1414: a visual viewport shrink clears the glimpse while frames and other resize notifications are held', async ({ page }) => {
+  await holdTimeoutsWhile(page, '__aeonHeldViewport', 'holding')
   await page.addInitScript(() => {
-    const state = { holding: false, framesHeld: 0, rootDrops: 0, visualDrops: 0, windowDrops: 0 }
-    ;(window as unknown as { __aeonGlimpseStall: typeof state }).__aeonGlimpseStall = state
+    const state = { holding: false, visualWidths: [] as number[] }
+    ;(window as unknown as { __aeonHeldViewport: typeof state }).__aeonHeldViewport = state
+    const frame = window.requestAnimationFrame.bind(window)
+    window.requestAnimationFrame = callback => frame(time => { if (!state.holding) callback(time) })
+    window.addEventListener('resize', event => { if (state.holding) event.stopImmediatePropagation() }, { capture: true })
+    const media = window.matchMedia.bind(window)
+    window.matchMedia = query => {
+      const list = media(query)
+      if (query === '(min-width: 1280px)') list.addEventListener('change', event => { if (state.holding) event.stopImmediatePropagation() }, { capture: true })
+      return list
+    }
+    const Observer = window.ResizeObserver
+    window.ResizeObserver = class extends Observer {
+      constructor(callback: ResizeObserverCallback) {
+        super((entries, observer) => {
+          const delivered = entries.filter(entry => !state.holding || entry.target !== document.documentElement)
+          if (delivered.length) callback(delivered, observer)
+        })
+      }
+    }
+    window.visualViewport?.addEventListener('resize', () => {
+      if (state.holding) state.visualWidths.push(window.visualViewport!.width)
+    })
+  })
+  await mockHeaderGraph(page, sized(8, true))
+  await page.goto('/p/PHAROS/tickets')
+  await ready(page)
+  await expect(page.locator('[data-header-glimpse="on"]')).toBeAttached()
+  await page.evaluate(() => { (window as unknown as { __aeonHeldViewport: { holding: boolean } }).__aeonHeldViewport.holding = true })
+  await resizeSeen(page, { width: 390, height: 844 })
+  await expect.poll(() => page.evaluate(() => ({
+    layout: document.documentElement.getBoundingClientRect().width,
+    visual: (window as unknown as { __aeonHeldViewport: { visualWidths: number[] } }).__aeonHeldViewport.visualWidths.at(-1),
+  }))).toEqual({ layout: 390, visual: 390 })
+  await expect(page.locator('[data-header-glimpse="on"]')).toHaveCount(0)
+  await expect(page.locator('[data-header-glimpse="off"]')).toBeAttached()
+})
+
+// Risk: software GL stalls animation frames at the same time as the viewport
+// notifications. Advance an injected clock with every other recovery path
+// held, so a task must clear the mounted glimpse after the real layout shrinks.
+test('AEON-1414: a shrink clears the glimpse while viewport notifications and animation frames are stalled', async ({ page }) => {
+  await page.clock.install({ time: new Date('2026-10-18T03:00:00Z') })
+  await page.addInitScript(() => {
+    const state = { holding: false, framesHeld: 0, rootsDropped: 0 }
+    ;(window as unknown as { __aeonViewportStall: typeof state }).__aeonViewportStall = state
     const frame = window.requestAnimationFrame.bind(window)
     window.requestAnimationFrame = callback => frame(time => {
       if (state.holding) { state.framesHeld++; return }
       callback(time)
     })
-    window.addEventListener('resize', event => {
-      if (state.holding) { state.windowDrops++; event.stopImmediatePropagation() }
-    }, { capture: true })
-    window.visualViewport!.addEventListener('resize', event => {
-      if (state.holding) { state.visualDrops++; event.stopImmediatePropagation() }
-    }, { capture: true })
-    const matchMedia = window.matchMedia.bind(window)
+    window.addEventListener('resize', event => { if (state.holding) event.stopImmediatePropagation() }, { capture: true })
+    window.visualViewport?.addEventListener('resize', event => { if (state.holding) event.stopImmediatePropagation() }, { capture: true })
+    const media = window.matchMedia.bind(window)
     window.matchMedia = query => {
-      const list = matchMedia(query)
-      if (query === '(min-width: 1280px)') list.addEventListener('change', event => {
-        if (state.holding) event.stopImmediatePropagation()
-      }, { capture: true })
+      const list = media(query)
+      if (query === '(min-width: 1280px)') list.addEventListener('change', event => { if (state.holding) event.stopImmediatePropagation() }, { capture: true })
       return list
     }
     const Observer = window.ResizeObserver
@@ -379,7 +432,7 @@ test('AEON-1485: a narrow viewport clears the glimpse with frames held and viewp
         super((entries, observer) => {
           const delivered = entries.filter(entry => {
             if (!state.holding || entry.target !== document.documentElement) return true
-            state.rootDrops++
+            state.rootsDropped++
             return false
           })
           if (delivered.length) callback(delivered, observer)
@@ -387,22 +440,21 @@ test('AEON-1485: a narrow viewport clears the glimpse with frames held and viewp
       }
     }
   })
+  await page.setViewportSize({ width: 1279, height: 900 })
   await mockHeaderGraph(page, sized(8, true))
   await page.goto('/p/PHAROS/tickets')
+  await expect(page.locator('[data-header-glimpse="off"]')).toBeAttached()
+  await expect(surface(page)).toHaveCount(0)
+  await resizeSeen(page, { width: 1280, height: 900 })
   await ready(page)
-  await page.evaluate(() => { (window as unknown as { __aeonGlimpseStall: { holding: boolean } }).__aeonGlimpseStall.holding = true })
-  await expect.poll(() => page.evaluate(() => (window as unknown as { __aeonGlimpseStall: { framesHeld: number } }).__aeonGlimpseStall.framesHeld > 0)).toBe(true)
+  await page.clock.pauseAt(new Date(await page.evaluate(() => Date.now()) + 1000))
+  await page.evaluate(() => { (window as unknown as { __aeonViewportStall: { holding: boolean } }).__aeonViewportStall.holding = true })
   await resizeSeen(page, { width: 390, height: 844 })
+  await page.clock.runFor(1000)
   await expect.poll(() => page.evaluate(() => {
-    const state = (window as unknown as { __aeonGlimpseStall: { rootDrops: number; visualDrops: number; windowDrops: number } }).__aeonGlimpseStall
-    return {
-      layout: document.documentElement.getBoundingClientRect().width,
-      media: window.matchMedia('(min-width: 1280px)').matches,
-      rootDropped: state.rootDrops > 0,
-      visualDropped: state.visualDrops > 0,
-      windowDropped: state.windowDrops > 0,
-    }
-  })).toEqual({ layout: 390, media: false, rootDropped: true, visualDropped: true, windowDropped: true })
+    const state = (window as unknown as { __aeonViewportStall: { framesHeld: number; rootsDropped: number } }).__aeonViewportStall
+    return { layout: document.documentElement.getBoundingClientRect().width, framesHeld: state.framesHeld > 0, rootsDropped: state.rootsDropped > 0 }
+  })).toEqual({ layout: 390, framesHeld: true, rootsDropped: true })
   await expect(page.locator('[data-header-glimpse="on"]')).toHaveCount(0)
   await expect(page.locator('[data-header-glimpse="off"]')).toBeAttached()
 })
@@ -411,10 +463,12 @@ test('AEON-1485: a narrow viewport clears the glimpse with frames held and viewp
 // Drop the root observer as well as resize/media events after a ready wide
 // frame. Real layout still shrinks, so painting must follow it without a timer.
 test('AEON-1472: an active glimpse stops after all viewport notifications are dropped', async ({ page }) => {
+  await holdTimeoutsWhile(page, '__aeonViewportDrops', 'dropping')
   await page.addInitScript(() => {
     const state = { dropping: false, rootDrops: 0 }
     ;(window as unknown as { __aeonViewportDrops: typeof state }).__aeonViewportDrops = state
     window.addEventListener('resize', event => { if (state.dropping) event.stopImmediatePropagation() }, { capture: true })
+    window.visualViewport?.addEventListener('resize', event => { if (state.dropping) event.stopImmediatePropagation() }, { capture: true })
     const matchMedia = window.matchMedia.bind(window)
     window.matchMedia = query => {
       const list = matchMedia(query)
@@ -456,9 +510,11 @@ test('AEON-1472: an active glimpse stops after all viewport notifications are dr
 // change and the document-element observer can all stay silent together while
 // the canvas paints. The paint frame is the read that must still clear it.
 test('AEON-1477 a painted glimpse hides below 1280 when resize, media and the document observer stay silent', async ({ page }) => {
+  await holdTimeoutsWhile(page, '__aeonDropViewportSignals')
   await page.addInitScript(() => {
     const dropping = () => (window as unknown as { __aeonDropViewportSignals?: boolean }).__aeonDropViewportSignals === true
     window.addEventListener('resize', event => { if (dropping()) event.stopImmediatePropagation() }, { capture: true })
+    window.visualViewport?.addEventListener('resize', event => { if (dropping()) event.stopImmediatePropagation() }, { capture: true })
     const originalMedia = window.matchMedia.bind(window)
     window.matchMedia = (query: string) => {
       const list = originalMedia(query)

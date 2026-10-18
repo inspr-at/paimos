@@ -15,7 +15,19 @@ import (
 	"github.com/jackc/pgx/v5"
 )
 
+const hostCapacitySQL = `SELECT capacity_policy,capacity_signals,capacity_reported_at,capacity_history,
+ (SELECT count(*) FROM agent_runs r WHERE r.agent_principal_id=c.principal_id AND r.account_id IS NOT NULL AND (r.status IN ('starting','running','waiting')
+  OR r.trace->'work_lifecycle_release'->>'exit_unconfirmed'='true'))
+ + (SELECT count(*) FROM native_session_roots r WHERE r.tenant_id=c.tenant_id AND r.computer_id=c.id
+     AND r.run_id IS NULL AND r.released_at IS NULL),
+ (SELECT count(*) FROM agent_runs r WHERE r.agent_principal_id=c.principal_id AND r.status='queued'),clock_timestamp(),coalesce(q.details->>'platform',''),c.state
+ FROM agent_pairing_computers c JOIN agent_pairing_requests q ON q.tenant_id=c.tenant_id AND q.id=c.request_id WHERE c.id=$1`
+
 func hostCapacity(ctx context.Context, tx pgx.Tx, computer string) (hostcapacity.View, error) {
+	return scanHostCapacity(tx.QueryRow(ctx, hostCapacitySQL, computer))
+}
+
+func scanHostCapacity(row interface{ Scan(...any) error }) (hostcapacity.View, error) {
 	v := hostcapacity.View{History: []hostcapacity.Point{}}
 	var policy, signals, history []byte
 	var platform, state string
@@ -25,13 +37,7 @@ func hostCapacity(ctx context.Context, tx pgx.Tx, computer string) (hostcapacity
 	// A principal can also have external worker assignments. Only an account
 	// reservation belongs to this daemon's managed launch path; lifecycle
 	// release markers alone cannot turn an external process into a managed slot.
-	err := tx.QueryRow(ctx, `SELECT capacity_policy,capacity_signals,capacity_reported_at,capacity_history,
- (SELECT count(*) FROM agent_runs r WHERE r.agent_principal_id=c.principal_id AND r.account_id IS NOT NULL AND (r.status IN ('starting','running','waiting')
-  OR r.trace->'work_lifecycle_release'->>'exit_unconfirmed'='true'))
- + (SELECT count(*) FROM native_session_roots r WHERE r.tenant_id=c.tenant_id AND r.computer_id=c.id
-     AND r.run_id IS NULL AND r.released_at IS NULL),
- (SELECT count(*) FROM agent_runs r WHERE r.agent_principal_id=c.principal_id AND r.status='queued'),clock_timestamp(),coalesce(q.details->>'platform',''),c.state
- FROM agent_pairing_computers c JOIN agent_pairing_requests q ON q.tenant_id=c.tenant_id AND q.id=c.request_id WHERE c.id=$1`, computer).Scan(&policy, &signals, &v.ReportedAt, &history, &v.Running, &v.Queued, &now, &platform, &state)
+	err := row.Scan(&policy, &signals, &v.ReportedAt, &history, &v.Running, &v.Queued, &now, &platform, &state)
 	if err != nil {
 		return v, notFound(err)
 	}
@@ -251,6 +257,51 @@ func HostCapacityForAccount(ctx context.Context, tx pgx.Tx, account string) (*ho
 	}
 	v, err := hostCapacity(ctx, tx, computer)
 	return &v, owner, err
+}
+
+// AccountHostCapacity is advisory and grants no authority to start a process.
+type AccountHostCapacity struct {
+	View  *hostcapacity.View
+	Owner string
+}
+
+// HostCapacitiesForAccounts evaluates a bounded account set on one clock and
+// snapshot, using the same host-capacity projector as reserve and claim.
+func HostCapacitiesForAccounts(ctx context.Context, tx pgx.Tx, ids []string, now time.Time) (map[string]AccountHostCapacity, error) {
+	if len(ids) > 4096 {
+		return nil, fail(503, "capacity_unavailable", "too many accounts for host capacity")
+	}
+	query := strings.NewReplacer("$1", "e.computer_id", "clock_timestamp()", "$2::timestamptz").Replace(hostCapacitySQL)
+	rows, err := tx.Query(ctx, `SELECT e.account_id::text,coalesce(q.approved_by::text,''),data.* FROM agent_pairing_enrollments e
+ JOIN agent_pairing_computers c ON c.tenant_id=e.tenant_id AND c.id=e.computer_id
+ JOIN agent_pairing_requests q ON q.tenant_id=c.tenant_id AND q.id=c.request_id
+ CROSS JOIN LATERAL (`+query+`) data WHERE e.account_id=ANY($1::uuid[]) AND c.state='connected' LIMIT 4097`, ids, now)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := map[string]AccountHostCapacity{}
+	for rows.Next() {
+		if len(out) == 4096 {
+			return nil, fail(503, "capacity_unavailable", "too many accounts for host capacity")
+		}
+		var id, owner string
+		v, err := scanHostCapacity(hostCapacityPrefix{rows, &id, &owner})
+		if err != nil {
+			return nil, err
+		}
+		out[id] = AccountHostCapacity{&v, owner}
+	}
+	return out, rows.Err()
+}
+
+type hostCapacityPrefix struct {
+	row       pgx.Rows
+	id, owner *string
+}
+
+func (r hostCapacityPrefix) Scan(dest ...any) error {
+	return r.row.Scan(append([]any{r.id, r.owner}, dest...)...)
 }
 
 func (m *Module) renameComputer(w http.ResponseWriter, r *http.Request, p tenant.Principal) {

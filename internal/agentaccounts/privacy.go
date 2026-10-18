@@ -45,7 +45,14 @@ func (m *Module) privateResponse(next http.HandlerFunc) http.HandlerFunc {
 				return
 			}
 			if len(ids) > 0 {
-				err = db.InTenant(r.Context(), m.pool, p.TenantID, func(tx pgx.Tx) error {
+				read := db.InTenantReadSnapshot
+				if db.HasTransaction(r.Context()) {
+					// Atomic callers retain uncommitted account and ownership writes.
+					// Redact in their savepoint so privacy sees that state and shares
+					// the caller's rollback; ordinary reads keep independent snapshots.
+					read = db.InTenant
+				}
+				err = read(r.Context(), m.pool, p.TenantID, func(tx pgx.Tx) error {
 					policy, err := accountprivacy.Load(r.Context(), tx, p, ids)
 					if err != nil {
 						return err

@@ -7,6 +7,7 @@ import (
 	"errors"
 	"math"
 	"net/http"
+	"strconv"
 	"time"
 
 	"github.com/inspr-at/paimos/internal/accountuse"
@@ -65,16 +66,36 @@ func queryAccounts(ctx context.Context, tx pgx.Tx, retired bool) ([]Account, err
 }
 
 func queryAccountsLimit(ctx context.Context, tx pgx.Tx, retired bool, bound int) ([]Account, error) {
+	return queryAccountsInputs(ctx, tx, retired, bound, accountuse.ContextLabels, nil)
+}
+
+func queryCapacityAccounts(ctx context.Context, tx pgx.Tx, retired bool, related ...[]string) ([]Account, error) {
+	var ids []string
+	if len(related) > 0 {
+		ids = related[0]
+	}
+	return queryAccountsInputs(ctx, tx, retired, maxWaitAccounts, capacityContextLabels, ids)
+}
+
+func queryAccountsInputs(ctx context.Context, tx pgx.Tx, retired bool, bound int, labels func(context.Context, pgx.Tx, []string) (map[string][]accountuse.ContextLabel, error), related []string) ([]Account, error) {
+	predicate := `$1 OR NOT ` + retiredSQL
+	if related != nil {
+		predicate = `(` + predicate + `)`
+	}
 	query := `
 		SELECT id::text, account_key, harness, daemon_id, label, max_parallel_runs,
 		       registered_by_principal_id::text, state, last_probe_at, last_probe_ok,
 		       last_daemon_generation, created_at, plan, host_label, allowed_model_profile_ids::text[], reading_support, quota_fingerprint, statusline_enabled, provider, model, model_status, model_data_note, openrouter_credits, COALESCE(group_id::text,''), quota_pool_fingerprint, billing_mode
 		FROM agent_accounts
-		WHERE $1 OR NOT ` + retiredSQL + `
-		ORDER BY created_at, id`
+		WHERE ` + predicate
 	args := []any{retired}
+	if related != nil {
+		query += ` AND (id=ANY($2::uuid[]) OR EXISTS(SELECT 1 FROM agent_accounts own WHERE own.id=ANY($2::uuid[]) AND own.quota_pool_fingerprint<>'' AND own.harness=agent_accounts.harness AND own.quota_pool_fingerprint=agent_accounts.quota_pool_fingerprint))`
+		args = append(args, related)
+	}
+	query += ` ORDER BY created_at, id`
 	if bound > 0 {
-		query += ` LIMIT $2`
+		query += ` LIMIT $` + strconv.Itoa(len(args)+1)
 		args = append(args, bound+1)
 	}
 	rows, err := tx.Query(ctx, query, args...)
@@ -100,7 +121,7 @@ func queryAccountsLimit(ctx context.Context, tx pgx.Tx, retired bool, bound int)
 	for i, a := range out {
 		ids[i] = a.ID
 	}
-	contexts, err := accountuse.ContextLabels(ctx, tx, ids)
+	contexts, err := labels(ctx, tx, ids)
 	if err != nil {
 		return nil, err
 	}
@@ -201,12 +222,48 @@ func attachWindowsLimit(ctx context.Context, tx pgx.Tx, accounts []Account, boun
 	if err := rows.Err(); err != nil {
 		return nil, err
 	}
-	for i := range accounts {
-		if err := tx.QueryRow(ctx, `SELECT NOT EXISTS(SELECT 1 FROM agent_pairing_enrollments WHERE account_id=$1 AND (ongoing_approved_at IS NULL OR state<>'connected')),a.owner_person_id::text,COALESCE(p.name,''),a.linked_at,a.link_revision,a.share_usage,COALESCE(a.usage_probe_enabled AND a.usage_probe_revision=a.link_revision AND a.owner_person_id IS NOT NULL,false),a.usage_budget,
+	metadata, err := tx.Query(ctx, `SELECT a.id::text, NOT EXISTS(SELECT 1 FROM agent_pairing_enrollments WHERE account_id=a.id AND (ongoing_approved_at IS NULL OR state<>'connected')),a.owner_person_id::text,COALESCE(p.name,''),a.linked_at,a.link_revision,a.share_usage,COALESCE(a.usage_probe_enabled AND a.usage_probe_revision=a.link_revision AND a.owner_person_id IS NOT NULL,false),a.usage_budget,
  (SELECT e.evidence FROM agent_account_residency_evidence e WHERE e.tenant_id=a.tenant_id AND e.account_id=a.id AND e.binding=`+residencyBindingSQL+`)
- FROM agent_accounts a LEFT JOIN principals p ON p.tenant_id=a.tenant_id AND p.id=a.owner_person_id WHERE a.id=$1`, accounts[i].ID).Scan(&accounts[i].OngoingUseApproved, &accounts[i].OwnerPersonID, &accounts[i].OwnerPersonName, &accounts[i].LinkedAt, &accounts[i].LinkRevision, &accounts[i].ShareUsage, &accounts[i].UsageProbeEnabled, &accounts[i].UsageBudget, &accounts[i].residencyEvidence); err != nil {
+ FROM agent_accounts a LEFT JOIN principals p ON p.tenant_id=a.tenant_id AND p.id=a.owner_person_id WHERE a.id=ANY($1::uuid[])`, ids)
+	if err != nil {
+		return nil, err
+	}
+	byID := make(map[string]int, len(accounts))
+	for i := range accounts {
+		byID[accounts[i].ID] = i
+	}
+	for metadata.Next() {
+		var id string
+		var a Account
+		if err := metadata.Scan(&id, &a.OngoingUseApproved, &a.OwnerPersonID, &a.OwnerPersonName, &a.LinkedAt, &a.LinkRevision, &a.ShareUsage, &a.UsageProbeEnabled, &a.UsageBudget, &a.residencyEvidence); err != nil {
+			metadata.Close()
 			return nil, err
 		}
+		i, ok := byID[id]
+		if !ok {
+			metadata.Close()
+			return nil, pgx.ErrNoRows
+		}
+		accounts[i].OngoingUseApproved = a.OngoingUseApproved
+		accounts[i].OwnerPersonID = a.OwnerPersonID
+		accounts[i].OwnerPersonName = a.OwnerPersonName
+		accounts[i].LinkedAt = a.LinkedAt
+		accounts[i].LinkRevision = a.LinkRevision
+		accounts[i].ShareUsage = a.ShareUsage
+		accounts[i].UsageProbeEnabled = a.UsageProbeEnabled
+		accounts[i].UsageBudget = a.UsageBudget
+		accounts[i].residencyEvidence = a.residencyEvidence
+		delete(byID, id)
+	}
+	metadata.Close()
+	if err := metadata.Err(); err != nil {
+		return nil, err
+	}
+	if len(byID) != 0 {
+		return nil, pgx.ErrNoRows
+	}
+	for i := range accounts {
+
 		if ws := byAccount[accounts[i].ID]; ws != nil {
 			accounts[i].Windows = ws
 		} else {
