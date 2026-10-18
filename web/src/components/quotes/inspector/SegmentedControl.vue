@@ -41,12 +41,12 @@ function keys(event: KeyboardEvent, index: number) {
 </template>
 
 <style scoped>
-.segmented { display: grid; grid-auto-flow: column; grid-auto-columns: minmax(0, 1fr); gap: 2px; padding: 3px; border-radius: 10px; background: var(--seg-bg); box-shadow: inset 0 1px 2px rgba(32, 60, 61, .08); }
+.segmented { display: grid; grid-auto-flow: column; grid-auto-columns: minmax(0, 1fr); gap: 2px; padding: 3px; border-radius: 10px; background: var(--seg-bg); box-shadow: inset 0 1px 2px color-mix(in srgb, var(--shadow-color) 8%, transparent); }
 .segment { display: inline-flex; align-items: center; justify-content: center; gap: 5px; min-width: 0; height: 30px; padding: 0 5px; border: 0; border-radius: 7px; background: transparent; color: var(--ink-2); font-size: 12.5px; font-weight: 600; white-space: nowrap; }
 .segment-label { overflow: hidden; text-overflow: ellipsis; }
 .segment svg { flex-shrink: 0; }
 @media (hover: hover) { .segment:hover:not(:disabled) { color: var(--ink); background: var(--row-hover); } }
-.segment[aria-checked="true"] { background: var(--seg-on); color: var(--teal-ink); box-shadow: 0 1px 2px rgba(32, 60, 61, .14), inset 0 0 0 1px var(--glass-edge); }
+.segment[aria-checked="true"] { background: var(--seg-on); color: var(--teal-ink); box-shadow: 0 1px 2px color-mix(in srgb, var(--shadow-color) 14%, transparent), inset 0 0 0 1px var(--glass-edge); }
 .segment:focus-visible { box-shadow: var(--focus-ring); }
 .segment:disabled { color: var(--ink-3); cursor: not-allowed; }
 .glyph-text { font: 600 14px/1 var(--mono); font-variant-ligatures: none; }

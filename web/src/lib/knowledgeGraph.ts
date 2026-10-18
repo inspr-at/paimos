@@ -23,6 +23,7 @@ export const graphRadius = (node: GraphNode) => 8 * Math.sqrt(node.degree + 1)
 export const graphTypeTokens: Record<GraphNode['type'], string> = {
   runbook: '--kind-runbook', guideline: '--kind-guideline', memory: '--kind-memory',
   'external-system': '--kind-external-system', 'related-project': '--kind-related-project', ticket: '--kind-ticket',
+  decision: '--kind-decision',
 }
 export interface GraphPalette { background: string; ink: string; muted: string; dark: boolean; colors: Record<string, string>; font: string; label: string; line: string }
 export function graphPalette(): GraphPalette {
@@ -56,11 +57,6 @@ export function filterGraph(data: KnowledgeGraphData, type: KnowledgeType | ''):
 export function graphMatches(nodes: GraphNode[], query: string): Set<string> {
   const words = query.toLowerCase().trim().split(/\s+/).filter(Boolean)
   return new Set(nodes.filter(n => words.every(word => `${n.title} ${n.slug} ${n.key} ${n.type}`.toLowerCase().includes(word))).map(n => n.id))
-}
-export function graphNeighbours(edges: GraphEdge[], id: string): Set<string> {
-  const ids = new Set<string>([id])
-  for (const edge of edges) { if (edge.source === id) ids.add(edge.target); if (edge.target === id) ids.add(edge.source) }
-  return ids
 }
 export function graphLayout(data: KnowledgeGraphData): { nodes: LayoutNode[]; links: LayoutEdge[] } {
   return { nodes: data.nodes.map(n => ({ ...n })), links: data.edges.map(e => ({ ...e })) }

@@ -4,11 +4,14 @@ package httpapi
 
 import (
 	"context"
+	"errors"
+	"fmt"
 	"log/slog"
 	"net/http"
 	"time"
 
 	"github.com/inspr-at/paimos/internal/brand"
+	"github.com/inspr-at/paimos/internal/db"
 	"github.com/inspr-at/paimos/internal/version"
 )
 
@@ -25,7 +28,10 @@ type healthBody struct {
 }
 
 type readyBody struct {
-	Status string `json:"status"`
+	Status string        `json:"status"`
+	Reason string        `json:"reason,omitempty"`
+	Detail string        `json:"detail,omitempty"`
+	Pool   *db.PoolStats `json:"pool,omitempty"`
 }
 
 // versionBody carries Codename, the running release's marketing name
@@ -41,8 +47,11 @@ type versionBody struct {
 func (s *Server) handleHealth(w http.ResponseWriter, r *http.Request) {
 	dbState := "down"
 	if s.Pool != nil {
-		if err := s.Pool.Ping(r.Context()); err != nil {
-			slog.Error("database ping failed", "err", err)
+		ctx, cancel := context.WithTimeout(r.Context(), readyProbeTimeout)
+		defer cancel()
+		if err := db.Probe(ctx, s.Pool); err != nil {
+			LogFailure(r, "liveness_probe", err)
+			slog.Warn("liveness database probe failed", "error_class", ErrorClass(err), "request_context", ErrorClass(r.Context().Err()), "pool", db.Stats(s.Pool))
 		} else {
 			dbState = "ok"
 		}
@@ -55,8 +64,18 @@ func (s *Server) handleHealth(w http.ResponseWriter, r *http.Request) {
 // does not change during drain.
 func (s *Server) handleReady(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Cache-Control", "no-store")
+	body := readyBody{Status: "unavailable"}
+	if s.Pool != nil {
+		stats := db.Stats(s.Pool)
+		body.Pool = &stats
+	}
 	if !s.accepting() || !s.readyPingAvailable() {
-		WriteJSON(w, http.StatusServiceUnavailable, readyBody{Status: "unavailable"})
+		LogFailure(r, "readiness_admission", nil)
+		body.Reason = "not_accepting"
+		if s.accepting() {
+			body.Reason = "database_unavailable"
+		}
+		WriteJSON(w, http.StatusServiceUnavailable, body)
 		return
 	}
 	// WithTimeout bounds a caller that has no deadline. It keeps cancellation
@@ -64,17 +83,56 @@ func (s *Server) handleReady(w http.ResponseWriter, r *http.Request) {
 	ctx, cancel := context.WithTimeout(r.Context(), readyProbeTimeout)
 	defer cancel()
 	if err := s.pingReady(ctx); err != nil {
-		slog.Error("readiness database ping failed", "err", err)
-		WriteJSON(w, http.StatusServiceUnavailable, readyBody{Status: "unavailable"})
+		body.Reason = "database_unavailable"
+		if s.Pool != nil {
+			stats := db.Stats(s.Pool)
+			body.Pool = &stats
+		}
+		if errors.Is(err, db.ErrPoolExhausted) {
+			body.Reason = "pool_exhausted"
+			body.Detail = fmt.Sprintf("pool exhausted: %d acquired, %d waiting", body.Pool.Acquired, body.Pool.Waiting)
+		}
+		LogFailure(r, "readiness_probe", err)
+		slog.Warn("readiness database probe failed", "reason", body.Reason, "error_class", ErrorClass(err), "pool", body.Pool)
+		WriteJSON(w, http.StatusServiceUnavailable, body)
 		return
+	}
+	if s.AuthProbe != nil {
+		err := s.AuthProbe(ctx)
+		// Client cancellations must not become a process health observation.
+		if r.Context().Err() != nil {
+			body.Reason = "database_unavailable"
+			WriteJSON(w, http.StatusServiceUnavailable, body)
+			return
+		}
+		now := time.Now()
+		if s.readyNow != nil {
+			now = s.readyNow()
+		}
+		if !s.authReady.observe(now, err != nil) {
+			body.Reason = "authentication_unavailable"
+			LogFailure(r, "readiness_authentication", err)
+			WriteJSON(w, http.StatusServiceUnavailable, body)
+			return
+		}
+		if err != nil {
+			LogFailure(r, "readiness_authentication", err)
+		}
 	}
 	// Drain can start while the ping is in flight. The check above would
 	// otherwise answer ready from a state that is already false.
 	if !s.accepting() {
-		WriteJSON(w, http.StatusServiceUnavailable, readyBody{Status: "unavailable"})
+		LogFailure(r, "readiness_drain", nil)
+		body.Reason = "not_accepting"
+		WriteJSON(w, http.StatusServiceUnavailable, body)
 		return
 	}
-	WriteJSON(w, http.StatusOK, readyBody{Status: "ready"})
+	body.Status = "ready"
+	if s.Pool != nil {
+		stats := db.Stats(s.Pool)
+		body.Pool = &stats
+	}
+	WriteJSON(w, http.StatusOK, body)
 }
 
 func (s *Server) readyPingAvailable() bool {
@@ -85,7 +143,7 @@ func (s *Server) pingReady(ctx context.Context) error {
 	if s.readyProbe != nil {
 		return s.readyProbe(ctx)
 	}
-	return s.Pool.Ping(ctx)
+	return db.Probe(ctx, s.Pool)
 }
 
 // handleVersion answers the build's calendar version and the product's names

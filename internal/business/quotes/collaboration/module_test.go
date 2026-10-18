@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: AGPL-3.0-only
-package collaboration_test
+package collaboration
 
 import (
 	"bufio"
@@ -17,7 +17,6 @@ import (
 	"github.com/jackc/pgx/v5"
 
 	"github.com/inspr-at/paimos/internal/business/quotes"
-	"github.com/inspr-at/paimos/internal/business/quotes/collaboration"
 	"github.com/inspr-at/paimos/internal/db"
 	"github.com/inspr-at/paimos/internal/dbtest"
 	"github.com/inspr-at/paimos/internal/events"
@@ -29,6 +28,7 @@ import (
 type fixture struct {
 	db                                            *dbtest.DB
 	mux                                           *http.ServeMux
+	module                                        *Module
 	tenant, quote, admin, other, viewer, customer string
 }
 
@@ -103,10 +103,11 @@ func setup(t *testing.T) fixture {
 	if err != nil {
 		t.Fatal(err)
 	}
-	module, err := collaboration.New(f.db.App, reg)
+	module, err := New(f.db.App, reg)
 	if err != nil {
 		t.Fatal(err)
 	}
+	f.module = module.(*Module)
 	f.mux = http.NewServeMux()
 	module.Mount(f.mux)
 	return f
@@ -165,9 +166,23 @@ func TestLeasesAndAuthorization(t *testing.T) {
 	if code, out := f.call(t, f.admin, "POST", base, precise); code != 201 || out["snapshot"].(map[string]any)["sessions"].([]any)[0].(map[string]any)["anchor"].(map[string]any)["fidelity"] != "precise" {
 		t.Fatalf("verified caret %d %v", code, out)
 	}
+	// Freeze the heartbeat clock at the committed join timestamp; runner load
+	// must not decide whether the next request crosses the 200 ms limit.
+	var lastSeen time.Time
+	if err := db.InTenant(dbtest.Seed(t.Context()), f.db.App, f.tenant, func(tx pgx.Tx) error {
+		return tx.QueryRow(t.Context(), `SELECT last_seen FROM quote_presence WHERE session_id=$1::uuid`, session).Scan(&lastSeen)
+	}); err != nil {
+		t.Fatal(err)
+	}
+	f.module.now = func() time.Time { return lastSeen.Add(200*time.Millisecond - time.Nanosecond) }
 	if code, _ := f.call(t, f.admin, "PATCH", base+"/"+session, `{"mode":"editing","observed_revision":1}`); code != 429 {
 		t.Fatalf("unbounded cursor update %d", code)
 	}
+	f.module.now = func() time.Time { return lastSeen.Add(200 * time.Millisecond) }
+	if code, out := f.call(t, f.admin, "PATCH", base+"/"+session, strings.Replace(precise, fmt.Sprintf(`,"resume_session_id":%q`, session), "", 1)); code != 200 {
+		t.Fatalf("cursor update at rate boundary %d %v", code, out)
+	}
+	f.module.now = time.Now
 	ctx := context.Background()
 	err := db.InTenant(dbtest.Seed(ctx), f.db.App, f.tenant, func(tx pgx.Tx) error {
 		_, e := tx.Exec(ctx, `UPDATE quote_presence SET last_seen=clock_timestamp()-interval '1 second',last_interaction=clock_timestamp()-interval '61 seconds' WHERE session_id=$1::uuid`, session)

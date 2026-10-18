@@ -1,0 +1,34 @@
+{
+  "ticket": "AEON-648",
+  "round": "int-fix4",
+  "finding": "review-int648r3 P3",
+  "owner": "coordinator / AEON-655",
+  "recorded_at": "2026-10-04T20:50:59.537897+00:00",
+  "reviewed_commit": "a5573a11ef7614c7ab76899830fd4b8882c89263",
+  "reservation_status": "missing",
+  "expected_line": "1238 AEON-655 (work vocabulary)",
+  "ledger": "/private/tmp/claude-501/-Users-markus-Code-aithema/af3ab8bf-63f6-4fb5-bccf-086eb11c043e/scratchpad/aeon/migration-ledger.txt",
+  "ledger_sha256": "849007af43ae78c35d917d5ed4ff9399c5aee06a19cc70c7562497356e9b71c9",
+  "matching_lines": [],
+  "migration": "internal/db/migrations/1238_work_vocabulary.sql",
+  "migration_sha256": "27eaf2c0851a1b633ae7f070a9f5283d3d1b7a3eace74a792bed4dace5c789c4",
+  "migration_provenance": "d15114c1a98d24c72448ee5caea712416bc6a7c9 P0.7: unify work surfaces and validate vocabulary (AEON-655)",
+  "migration_matches_original": true,
+  "worker_action": "Rechecked the current shared ledger and original AEON-655 migration; attached exact owner, reservation line and hashes without writing outside the assigned worktree. No SQL change is required.",
+  "coordinator_action": "Append the expected line once under AEON-655 ownership; attach its actual line number and resulting shared-ledger SHA-256. Check for a concurrent reservation before appending.",
+  "ownership_constraints": [
+    "worker-common.md: Work ONLY in your worktree and branch (named in your brief).",
+    "review-int648r3.out: Fix: coordinator records 1238 AEON-655 (work vocabulary) and attaches the resulting ledger line/hash.",
+    "User: Preserve all safety and ownership constraints."
+  ],
+  "resolved": false,
+  "proposed_append": {
+    "status": "proposal only; not applied",
+    "precondition_ledger_sha256": "849007af43ae78c35d917d5ed4ff9399c5aee06a19cc70c7562497356e9b71c9",
+    "text": "1238 AEON-655 (work vocabulary)",
+    "line_number_if_unchanged": 111,
+    "predicted_result_sha256_if_unchanged": "de32f3418d4c8a722242aaf46d1e2531dc2fdb80c5b678ebb554ae8155e0bbe5",
+    "application_owner": "coordinator / AEON-655",
+    "instruction": "Re-read the ledger first; do not append if 1238 is already reserved. Publish observed line/hash after the coordinator applies the entry."
+  }
+}

@@ -90,7 +90,7 @@ func TestPairingReportReachesOnlyTheApprovingPerson(t *testing.T) {
 	f := newFixture(t)
 	p := f.propose("claude")
 	f.approve(p, "connect_only")
-	f.redeem(p)
+	paired := f.redeem(p)
 	f.call("POST", "/api/agent-pairing/reconcile", map[string]any{"tenant_id": f.tenantID, "request_id": p.id, "lifecycle_secret": p.lifecycle, "progress": agentpairing.SetupProgress{State: "connected"}}, false, "", 200)
 	if f.events(reportedEvent) != 1 {
 		t.Fatal("daemon connect did not publish the report")
@@ -136,22 +136,13 @@ func TestPairingReportReachesOnlyTheApprovingPerson(t *testing.T) {
 	if n := readReported(t, f, f.tenantID, agentPrincipal); n != 0 {
 		t.Fatalf("the agent key read %d reports", n)
 	}
-	var page struct {
-		Items []struct {
-			Type string `json:"type"`
-		} `json:"items"`
-	}
-	agentList := f.request("GET", "/api/events?limit=200", nil, false, p.runtime)
-	recorder := httptest.NewRecorder()
-	f.h.ServeHTTP(recorder, agentList)
-	if recorder.Code == 200 {
-		decodeResult(t, recorder, &page)
-		for _, e := range page.Items {
-			if e.Type == reportedEvent {
-				t.Fatal("the agent key listed a report")
-			}
-		}
-	}
+	key := "aeon_" + paired.RuntimePrefix + "_" + p.runtime
+	// Prove authentication first; a malformed bearer must not satisfy refusal.
+	f.call("GET", "/api/me", nil, false, key, http.StatusOK)
+	// Normal paired runtime keys do not hold events.read. Filtering is covered
+	// independently by the authenticated principal's direct RLS read above.
+	f.call("GET", "/api/events?limit=200", nil, false, key, http.StatusForbidden)
+	f.call("GET", "/api/events/stream", nil, false, key, http.StatusForbidden)
 
 	// Another tenant reads nothing of this one, not even with every project
 	// visible.

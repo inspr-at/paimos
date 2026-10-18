@@ -20,6 +20,12 @@ on:
       digest:
         required: true
         type: string
+      runtime-amd64:
+        required: false
+        type: string
+      runtime-arm64:
+        required: false
+        type: string
       index-pushed-at:
         required: false
         type: string
@@ -35,6 +41,8 @@ env:
   RELEASE_TAG: ${{ inputs.tag }}
   DIGEST: ${{ inputs.digest }}
   GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+  RUNTIME_AMD64: ${{ inputs.runtime-amd64 }}
+  RUNTIME_ARM64: ${{ inputs.runtime-arm64 }}
 
 jobs:
   prepare:
@@ -47,6 +55,7 @@ jobs:
       contents: read
       packages: read
       attestations: read
+      actions: read
     outputs:
       source_sha: ${{ steps.prepare.outputs.source_sha }}
       tag: ${{ steps.prepare.outputs.tag }}
@@ -64,6 +73,11 @@ jobs:
       - name: Verify existing index and tagged source
         id: prepare
         run: node scripts/release-completion.mjs prepare
+      - name: Require exact-SHA release rehearsal
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          SOURCE_SHA: ${{ steps.prepare.outputs.source_sha }}
+        run: node scripts/check-release-rehearsal.mjs --sha "$SOURCE_SHA"
       - name: Record completion provenance
         env:
           SOURCE_SHA: ${{ steps.prepare.outputs.source_sha }}
@@ -110,23 +124,41 @@ jobs:
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
           go-version: "1.26"
+          cache: false
       - name: Restore immutable darwin asset when present
         id: restore
         env:
           ASSET_NAME: paimos-agentd-darwin-${{ matrix.arch }}
         run: node scripts/release-completion.mjs restore "$ASSET_NAME" release-source/dist
+      - name: Restore immutable darwin CLI asset when present
+        id: restore-cli
+        env:
+          ASSET_NAME: aeon-cli-darwin-${{ matrix.arch }}
+        run: node scripts/release-completion.mjs restore "$ASSET_NAME" release-source/dist
       - name: Build darwin paimos-agentd with LocalAuthentication
-        if: steps.restore.outputs.restored != 'true'
         working-directory: release-source
         env:
           AEON_DARWIN_ARCH: ${{ matrix.arch }}
-        run: bash scripts/build-release-binaries.sh darwin-agentd
+          GOCACHE: ${{ runner.temp }}/go-build-agentd
+          GOMODCACHE: ${{ runner.temp }}/go-mod
+          GOFLAGS: -mod=readonly
+          RESTORED_AGENTD: ${{ steps.restore.outputs.restored }}
+          RESTORED_CLI: ${{ steps.restore-cli.outputs.restored }}
+        run: |
+          set -euo pipefail
+          if [ "$RESTORED_AGENTD" != true ]; then
+            bash scripts/build-release-binaries.sh darwin-agentd
+          fi
+          if [ "$RESTORED_CLI" != true ]; then
+            GOCACHE="$RUNNER_TEMP/go-build-cli-darwin" bash scripts/build-release-binaries.sh cli-darwin
+          fi
       # Before upload: SHA256SUMS in the assets job is computed over the signed
       # binary. Bare binaries cannot be stapled; Gatekeeper checks online.
       - name: Sign and notarize paimos-agentd
-        if: steps.restore.outputs.restored != 'true'
         working-directory: release-source
         env:
+          RESTORED_AGENTD: ${{ steps.restore.outputs.restored }}
+          RESTORED_CLI: ${{ steps.restore-cli.outputs.restored }}
           APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
           APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
           APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
@@ -141,7 +173,13 @@ jobs:
             echo "::error::signing team does not match AEON_DEVELOPER_ID_TEAM; Mac confirmation would fail closed"
             exit 1
           fi
-          bash scripts/sign-notarize.sh --identifier paimos-agentd "dist/paimos-agentd-darwin-${{ matrix.arch }}"
+          if [ "$RESTORED_AGENTD" != true ]; then
+            bash scripts/sign-notarize.sh --identifier paimos-agentd "dist/paimos-agentd-darwin-${{ matrix.arch }}"
+          fi
+          if [ "$RESTORED_CLI" != true ]; then
+            bash scripts/sign-notarize.sh --identifier aeon-cli "dist/aeon-cli-darwin-${{ matrix.arch }}"
+          fi
+          /usr/bin/codesign --verify --strict -R='anchor apple generic and identifier "aeon-cli" and certificate leaf[subject.OU] = "P66J39QV6V"' "dist/aeon-cli-darwin-${{ matrix.arch }}"
       # Backstop for sign-notarize.sh's EXIT trap, which a cancellation during
       # notarization can skip: however the signing step ended, delete the
       # temporary keychain (private key), drop it from the search list and
@@ -199,18 +237,34 @@ jobs:
           codesign --verify --strict "release-source/dist/$ASSET_NAME"
           codesign -dv --verbose=4 "release-source/dist/$ASSET_NAME" 2>&1 | grep -Fx "TeamIdentifier=$AEON_DEVELOPER_ID_TEAM"
           agent_version="$("release-source/dist/$ASSET_NAME" --version)"
-          if [ "$agent_version" != "paimos-agentd $VERSION" ]; then
+          if [ "$agent_version" != "paimos-agentd $VERSION" ] && [ "$agent_version" != "paimos-agentd $VERSION ledger-v1" ]; then
             echo "::error::darwin agent version does not match the release coordinate"
+            exit 1
+          fi
+      - name: Verify darwin CLI signature and version
+        env:
+          ASSET_NAME: aeon-cli-darwin-${{ matrix.arch }}
+          VERSION: ${{ needs.prepare.outputs.version }}
+        run: |
+          set -euo pipefail
+          codesign --verify --strict -R='anchor apple generic and identifier "aeon-cli" and certificate leaf[subject.OU] = "P66J39QV6V"' "release-source/dist/$ASSET_NAME"
+          cli_version="$("release-source/dist/$ASSET_NAME" --version)"
+          if [ "$cli_version" != "$VERSION" ]; then
+            echo "::error::darwin CLI version does not match the release coordinate"
             exit 1
           fi
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: agentd-darwin-${{ matrix.arch }}
-          path: release-source/dist/paimos-agentd-darwin-${{ matrix.arch }}
+          path: |
+            release-source/dist/paimos-agentd-darwin-${{ matrix.arch }}
+            release-source/dist/aeon-cli-darwin-${{ matrix.arch }}
           if-no-files-found: error
 
   pin:
     needs: [prepare]
+    outputs:
+      pin_evidence: ${{ steps.pin.outputs.pin_evidence }}
     runs-on: ubuntu-24.04
     environment: release-pinning
     permissions:
@@ -277,21 +331,24 @@ jobs:
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
           go-version: "1.26"
+          cache: false
       - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
         with:
           pattern: agentd-darwin-*
           path: release-source/dist
           merge-multiple: true
-      - name: Build linux paimos-agentd and aeon-cli from tagged source
+      - name: Build linux paimos-agentd and aeon-cli
         working-directory: release-source
         env:
           VERSION: ${{ needs.prepare.outputs.version }}
+          GOMODCACHE: ${{ runner.temp }}/go-mod
+          GOFLAGS: -mod=readonly
         run: |
           set -euo pipefail
           node scripts/verify-release.mjs --release
           node scripts/check-own-release-notes.mjs
-          bash scripts/build-release-binaries.sh linux-agentd
-          bash scripts/build-release-binaries.sh cli
+          GOCACHE="$RUNNER_TEMP/go-build-linux-agentd" bash scripts/build-release-binaries.sh linux-agentd
+          GOCACHE="$RUNNER_TEMP/go-build-cli" bash scripts/build-release-binaries.sh cli-linux
           bash scripts/build-release-binaries.sh verify-darwin
       - name: Complete draft with missing signed assets only
         run: node scripts/release-completion.mjs complete release-source/dist --write

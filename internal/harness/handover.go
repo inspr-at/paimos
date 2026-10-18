@@ -36,10 +36,22 @@ func heartbeatExpired(ctx context.Context, tx pgx.Tx, s Session) (bool, error) {
 }
 
 func handoverPredecessor(ctx context.Context, tx pgx.Tx, projectID string, in registration, ref []byte) (*Session, error) {
-	if in.Role != "coordinator" {
-		if in.SucceedsID != nil {
-			return nil, workorders.Fail(400, "only coordinators can succeed a lead")
+	if in.SucceedsID != nil {
+		s, err := load(ctx, tx, projectID, *in.SucceedsID, true)
+		if err != nil {
+			return nil, err
 		}
+		if s.Pause != nil && s.StopReason != nil && *s.StopReason == "paused" {
+			if err = pausedPredecessor(s, in); err != nil {
+				return nil, err
+			}
+			return &s, nil
+		}
+		if in.Role != "coordinator" {
+			return nil, workorders.Fail(409, "worker predecessor must be paused")
+		}
+	}
+	if in.Role != "coordinator" {
 		return nil, nil
 	}
 	var s Session
@@ -54,6 +66,9 @@ func handoverPredecessor(ctx context.Context, tx pgx.Tx, projectID string, in re
 	}
 	if err != nil {
 		return nil, err
+	}
+	if s.StopReason != nil && *s.StopReason == "paused" {
+		return nil, workorders.Fail(409, "paused generations require an explicit succeeds_session_id and resume request")
 	}
 	if s.AgentPrincipalID != in.AgentPrincipalID || s.Role != "coordinator" || s.ArchivedAt != nil || s.HandedOverToID != nil {
 		if in.SucceedsID == nil {
@@ -81,7 +96,13 @@ func adoptChildren(ctx context.Context, tx pgx.Tx, p tenant.Principal, old, next
 			return err
 		}
 	}
-	rows, err := tx.Query(ctx, `SELECT `+sessionColumns+` FROM harness_sessions WHERE project_id=$1 AND parent_id=$2 AND stopped_at IS NULL AND archived_at IS NULL ORDER BY id FOR UPDATE`, old.ProjectID, old.ID)
+	// Resume adopts paused children as well as live ones. Bound their combined
+	// scope before materializing snapshots or changing any child; hierarchy
+	// writers already share the project lock, so this set cannot grow mid-write.
+	includePaused := old.Pause != nil && old.Pause.State == "resume_requested"
+	rows, err := tx.Query(ctx, `SELECT `+sessionColumns+` FROM harness_sessions WHERE project_id=$1 AND parent_id=$2 AND archived_at IS NULL
+ AND (stopped_at IS NULL OR ($3 AND stop_reason='paused' AND pause_record->>'state' IN ('paused','resume_requested')))
+ ORDER BY id LIMIT $4 FOR UPDATE`, old.ProjectID, old.ID, includePaused, maxAdoptedChildren+1)
 	if err != nil {
 		return err
 	}
@@ -97,6 +118,9 @@ func adoptChildren(ctx context.Context, tx pgx.Tx, p tenant.Principal, old, next
 	rows.Close()
 	if err = rows.Err(); err != nil {
 		return err
+	}
+	if len(children) > maxAdoptedChildren {
+		return workorders.Fail(409, "handover exceeds 1000 direct children")
 	}
 	for _, child := range children {
 		if err = validateParent(ctx, tx, old.ProjectID, next.ID, child.ID); err != nil {

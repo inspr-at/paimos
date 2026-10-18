@@ -133,7 +133,7 @@ func (m *Module) analyzeOnce(parent context.Context, now time.Time) error {
 		candidates = candidates[:100]
 	}
 	for _, f := range candidates {
-		target, in, ok := analysisTarget(layer, f)
+		target, in, ok := m.analysisTarget(layer, f)
 		data := findingData{finding: f}
 		if !ok {
 			data.Status = "internal_note"
@@ -184,7 +184,7 @@ func ruleLabel(source SourceView, in ProposalInput) string {
 // Prefer a single exact vocabulary match, never guess between rules. A
 // source's full original rule remains intact; a fixed continuation proposes
 // the smallest clarification through AEON-319's reword operation.
-func analysisTarget(layer Layer, f finding) (SourceView, ProposalInput, bool) {
+func (m *Module) analysisTarget(layer Layer, f finding) (SourceView, ProposalInput, bool) {
 	class, advice := patternAdvice(f.Pattern)
 	if class == "" {
 		return SourceView{}, ProposalInput{}, false
@@ -195,7 +195,7 @@ func analysisTarget(layer Layer, f finding) (SourceView, ProposalInput, bool) {
 	}
 	matches := []match{}
 	for _, s := range layer.Sources {
-		if s.State != "ready" || !writableSource(Source{Repository: s.Repository, Visibility: s.Visibility}) {
+		if s.State != "ready" || !m.writableSource(Source{Repository: s.Repository, Visibility: s.Visibility}) {
 			continue
 		}
 		for _, file := range s.Files {
@@ -274,7 +274,7 @@ func (m *Module) attemptFinding(ctx context.Context, actor tenant.Principal, f *
 	}
 	// Reconstruction must identify the same pinned rule and exact input after
 	// a restart. Never reuse a request UUID for a new source version.
-	source, in, ok := analysisTarget(layer, f.finding)
+	source, in, ok := m.analysisTarget(layer, f.finding)
 	if !ok || source.ID != f.SourceID || in.Path != f.Path || in.RuleKey != f.RuleKey || in.RuleSHA != f.RuleSHA {
 		return m.noteFinding(ctx, actor, f, "The indexed rule changed or its mapping is ambiguous; inspect the reserved proposal.")
 	}
@@ -293,7 +293,7 @@ func (m *Module) attemptFinding(ctx context.Context, actor tenant.Principal, f *
 	if err != nil {
 		return err
 	}
-	changed, editErr := editRule(Source{Repository: source.Repository, Commit: source.Commit, Visibility: source.Visibility}, files, in)
+	changed, editErr := m.editRule(Source{Repository: source.Repository, Commit: source.Commit, Visibility: source.Visibility}, files, in)
 	if editErr == nil {
 		f.AfterFileSHA = hashText(changed[in.Path])
 	}

@@ -1,0 +1,57 @@
+# SPDX-License-Identifier: AGPL-3.0-only
+# aeon:owner internal/portal
+paths:
+  /portal/competitors:
+    post:
+      operationId: createPortalCompetitor
+      summary: Add a competitor that stays off the public page until it is published
+      security: [{session: []}]
+      requestBody: {required: true, content: {application/json: {schema: {$ref: '#/components/schemas/PortalCompetitorWrite'}}}}
+      responses:
+        '428': {$ref: '#/components/responses/OwnerWorkstationStepUpRequired'}
+        '200': {description: Stored competitor, content: {application/json: {schema: {$ref: '#/components/schemas/PortalCompetitor'}}}}
+        '400': {$ref: '#/components/responses/Error'}
+        '401': {$ref: '#/components/responses/Error'}
+        '403': {$ref: '#/components/responses/Error'}
+        '404': {$ref: '#/components/responses/Error'}
+        '409': {$ref: '#/components/responses/Error'}
+  /portal/competitors/{competitorId}:
+    patch:
+      operationId: patchPortalCompetitor
+      summary: Rename a competitor or publish it on the comparison
+      security: [{session: []}]
+      parameters: [{name: competitorId, in: path, required: true, schema: {type: string, format: uuid}}]
+      requestBody: {required: true, content: {application/json: {schema: {$ref: '#/components/schemas/PortalCompetitorPatch'}}}}
+      responses:
+        '428': {$ref: '#/components/responses/OwnerWorkstationStepUpRequired'}
+        '200': {description: Stored competitor, content: {application/json: {schema: {$ref: '#/components/schemas/PortalCompetitor'}}}}
+        '400': {$ref: '#/components/responses/Error'}
+        '401': {$ref: '#/components/responses/Error'}
+        '403': {$ref: '#/components/responses/Error'}
+        '404': {$ref: '#/components/responses/Error'}
+        '409': {$ref: '#/components/responses/Error'}
+    delete:
+      operationId: deletePortalCompetitor
+      summary: Remove a competitor and its cells
+      security: [{session: []}]
+      parameters: [{name: competitorId, in: path, required: true, schema: {type: string, format: uuid}}]
+      responses:
+        '428': {$ref: '#/components/responses/OwnerWorkstationStepUpRequired'}
+        '200': {description: Removed, content: {application/json: {schema: {$ref: '#/components/schemas/PortalDeleted'}}}}
+        '401': {$ref: '#/components/responses/Error'}
+        '403': {$ref: '#/components/responses/Error'}
+        '404': {$ref: '#/components/responses/Error'}
+components:
+  schemas:
+    PortalCompetitorPatch:
+      type: object
+      additionalProperties: false
+      properties:
+        name: {type: string, minLength: 1, maxLength: 80}
+        published: {type: boolean}
+    PortalCompetitorWrite:
+      type: object
+      additionalProperties: false
+      required: [name]
+      properties:
+        name: {type: string, minLength: 1, maxLength: 80}

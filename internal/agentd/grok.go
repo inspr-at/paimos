@@ -14,6 +14,7 @@ import (
 
 	"github.com/inspr-at/paimos/internal/agentverification"
 	"github.com/inspr-at/paimos/internal/grokprobe"
+	"github.com/inspr-at/paimos/internal/harnesslaunch"
 	"github.com/inspr-at/paimos/internal/sessionusage"
 )
 
@@ -61,7 +62,7 @@ func (a *GrokAdapter) Start(ctx context.Context, r StartRequest, observe func(Ad
 	if err := validExecutionMode(r.Run, a); err != nil {
 		return nil, err
 	}
-	if r.Profile.Harness != Grok || r.Profile.Model != grokModel || r.Profile.Effort != grokEffort || r.AccountKey == "" {
+	if r.Profile.Harness != Grok || r.Profile.Model != grokModel || !validGrokEffort(r.Profile.Effort) || !harnesslaunch.FamilyMatches(r.Profile.Harness, r.Profile.Model, r.Profile.Family) || r.AccountKey == "" {
 		return nil, errors.New("native Grok profile or account unavailable")
 	}
 	b, ok := a.Bindings[r.AccountKey]
@@ -70,6 +71,12 @@ func (a *GrokAdapter) Start(ctx context.Context, r StartRequest, observe func(Ad
 	}
 	return a.startNative(ctx, r, b, observe)
 }
+
+func grokNativeArguments(seatbeltPath, binaryPath, workPath, profilePath, effort string) []string {
+	return []string{"-f", seatbeltPath, binaryPath, "--no-auto-update", "--no-memory", "--no-subagents", "--disable-web-search", "--permission-mode", "dontAsk", "--cwd", workPath, "agent", "--agent-profile", profilePath, "--no-leader", "-m", grokModel, "--reasoning-effort", effort, "stdio"}
+}
+
+func validGrokEffort(e string) bool { return e == "medium" || e == "high" || e == "xhigh" }
 
 func sha256Hex(raw []byte) string { sum := sha256.Sum256(raw); return hex.EncodeToString(sum[:]) }
 

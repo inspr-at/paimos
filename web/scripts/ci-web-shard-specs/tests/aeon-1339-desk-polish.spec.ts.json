@@ -1,0 +1,22 @@
+{
+  "group": "remaining-ui",
+  "nightlyTiming": {
+    "seconds": 100.579,
+    "selectedTests": 5
+  },
+  "spec": {
+    "file": "tests/aeon-1339-desk-polish.spec.ts",
+    "listedTests": 5,
+    "tierTiming": {
+      "caseSeconds": {
+        "max": 46.596,
+        "median": 14.785,
+        "min": 4.31
+      },
+      "seconds": 100.579,
+      "selectedTests": 5
+    },
+    "weightSeconds": 150,
+    "weightSource": "AEON-1339 fix7 estimate: fix4 weight plus a four-pass run-approval step, with margin"
+  }
+}

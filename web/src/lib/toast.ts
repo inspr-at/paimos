@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: AGPL-3.0-only
-import { reactive } from 'vue'
+import { reactive, ref } from 'vue'
 
 export interface ToastAction { label: string; run: () => void }
 // A release named inside a toast's sentence: `message` is the whole sentence in
@@ -8,15 +8,21 @@ export interface ToastAction { label: string; run: () => void }
 export interface ToastRelease { version: string; name?: string; before: string; after?: string }
 export interface Toast { id: number; message: string; tone: 'info' | 'error'; actions: ToastAction[]; sticky: boolean; key?: string; release?: ToastRelease }
 export const toasts = reactive<Toast[]>([])
+// A fixed action bar reports its measured height and gap above the shell footer.
+export const toastBottomClearance = ref(0)
 let next = 1
+let ownerEpoch = 0
+export function resetToasts() { ownerEpoch++; toasts.splice(0) }
+export function captureToastOwner() { const started = ownerEpoch; return () => started === ownerEpoch }
 
 // Short, dismissible confirmations. Errors stay a little longer than info. A sticky
 // toast stays until it is acted on or dismissed; a keyed one replaces its earlier self.
 export function toast(message: string, options: { tone?: Toast['tone']; action?: ToastAction; actions?: ToastAction[]; timeout?: number; sticky?: boolean; key?: string; release?: ToastRelease } = {}) {
   if (options.key) { const earlier = toasts.find(item => item.key === options.key); if (earlier) dismiss(earlier.id) }
+  const current = captureToastOwner()
   const item: Toast = {
     id: next++, message, tone: options.tone ?? 'info', sticky: options.sticky ?? false, key: options.key, release: options.release,
-    actions: [...(options.action ? [options.action] : []), ...(options.actions ?? [])],
+    actions: [...(options.action ? [options.action] : []), ...(options.actions ?? [])].map(action => ({ ...action, run: () => { if (current()) return action.run() } })),
   }
   toasts.push(item)
   // Sticky toasts are kept when the stack is full; the oldest passing one goes.

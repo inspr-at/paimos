@@ -6,6 +6,7 @@
 // policies: the production one on the app's pages and the stricter public one
 // here, with no violation reported by the browser.
 import AxeBuilder from '@axe-core/playwright'
+import { randomBytes } from 'node:crypto'
 import { expect, test, type Page } from '@playwright/test'
 import { crmData, mockCRM } from './crm-fixtures'
 import { Q, mockPublicQuote, mockQuotes, quoteWorld } from './quote-list-fixtures'
@@ -29,7 +30,12 @@ async function withPolicy(page: Page, policy: string) {
   await page.route('**/*', async route => {
     if (route.request().resourceType() !== 'document') return route.fallback()
     const response = await route.fetch()
-    await route.fulfill({ response, headers: { ...response.headers(), 'content-security-policy': `${policy}; ${DEV_STYLES}` } })
+    // The production SPA gives only its theme bootstrap a per-response nonce.
+    // Vite serves the unreplaced template; reproduce that boundary here too.
+    const nonce = randomBytes(16).toString('base64')
+    const body = (await response.text()).replaceAll('__AEON_THEME_NONCE__', nonce)
+    const directives = policy.split(';').map(value => value.trim()).filter(value => !value.startsWith('script-src '))
+    await route.fulfill({ response, body, headers: { ...response.headers(), 'content-security-policy': `${directives.join('; ')}; script-src 'self' 'nonce-${nonce}'; ${DEV_STYLES}` } })
   })
 }
 const violations = (page: Page) => page.evaluate(() => (window as unknown as { cspViolations: string[] }).cspViolations)

@@ -13,6 +13,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/inspr-at/paimos/internal/httpapi"
 	"github.com/inspr-at/paimos/internal/releasehistory"
 	"github.com/inspr-at/paimos/internal/rules"
 	"github.com/inspr-at/paimos/internal/tenant"
@@ -67,7 +68,7 @@ func (m *Module) recordRulesReceipt(r *http.Request, tx pgx.Tx, p tenant.Princip
 	var in RulesReceiptWrite
 	// All strings are UUIDs, digests, fixed enums or calendar versions. Unknown
 	// fields (including bodies, paths and caller-supplied evidence) are rejected.
-	r.Body = http.MaxBytesReader(nil, r.Body, 8192)
+	r.Body = httpapi.RequestBodyReader(nil, r, 8192)
 	if err := workorders.Decode(r, &in); err != nil {
 		return nil, err
 	}

@@ -1,7 +1,11 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import { afterEach, beforeEach, expect, it, vi } from 'vitest'
 
-beforeEach(() => vi.resetModules())
+beforeEach(async () => {
+  vi.resetModules()
+  const { setPreferenceOwner } = await import('../src/lib/preferences')
+  setPreferenceOwner({ tenant: { id: 'test-tenant' }, principal: { id: 'test-person' } })
+})
 afterEach(() => vi.unstubAllGlobals())
 const response = (value: unknown) => new Response(JSON.stringify({ value }))
 

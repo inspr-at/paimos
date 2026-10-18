@@ -108,7 +108,7 @@ function removeRule(index: number) {
         <BizIcon name="chevron-right" :size="14" class="chev" />
         <span class="names">
           <span class="title-row">
-            <h4 :id="`${id}-name`" class="name" :title="set.name">{{ set.name }}</h4>
+            <h4 :id="`${id}-name`" v-clip-tip="set.name" class="name">{{ set.name }}</h4>
             <span v-if="subtitle" class="subtitle">{{ subtitle }}</span>
             <span class="summary">{{ summary }}</span>
           </span>
@@ -198,6 +198,11 @@ function removeRule(index: number) {
 .error { display: flex; gap: 6px; align-items: flex-start; color: var(--danger); }
 .error svg { flex: none; margin-top: 2px; }
 .buttons { display: flex; gap: 8px; margin-left: auto; }
+@media (max-width: 720px) {
+  .name { white-space: normal; overflow-wrap: anywhere; display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; }
+  .head { align-items: flex-start; }
+  .head > .chip, .head > .set-tick, .head > .icon-btn { margin-top: 6px; }
+}
 .sr-only { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
 @media (max-width: 600px) {
   .rules { padding-left: 8px; }

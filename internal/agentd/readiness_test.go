@@ -4,6 +4,7 @@ package agentd
 import (
 	"context"
 	"errors"
+	"fmt"
 	"slices"
 	"testing"
 	"time"
@@ -131,6 +132,112 @@ type readinessProbeErrorAPI struct{ *readinessQueueAPI }
 
 func (*readinessProbeErrorAPI) Probe(context.Context, string, string, string, bool) error {
 	return errors.New("private probe diagnostic must not be logged")
+}
+
+type cancelledPollAdapter struct {
+	*fakeAdapter
+	cancel context.CancelFunc
+}
+
+func (a *cancelledPollAdapter) ProbeStatus(context.Context, string) ProbeStatus {
+	a.cancel()
+	return ProbeStatus{Failure: ProbeUnavailable}
+}
+
+type cancelledProbeReporter struct {
+	*readinessQueueAPI
+	cancel context.CancelFunc
+	err    error
+}
+
+func (a *cancelledProbeReporter) Probe(context.Context, string, string, string, bool) error {
+	if a.cancel != nil {
+		a.cancel()
+	}
+	if a.err != nil {
+		return a.err
+	}
+	return context.Canceled
+}
+
+type contextErrorHarnessAdapter struct {
+	*fakeAdapter
+	err error
+}
+
+func (a *contextErrorHarnessAdapter) ProbeHarness(context.Context, string) (ProbeStatus, error) {
+	return probeUnavailable, a.err
+}
+
+func TestPollContextErrorCausesDoNotConsumePendingProbe(t *testing.T) {
+	for _, cause := range []error{context.Canceled, context.DeadlineExceeded} {
+		for _, phase := range []string{"queue", "probe", "report"} {
+			t.Run(cause.Error()+"/"+phase, func(t *testing.T) {
+				s, api, _ := testSupervisor(t)
+				queue := &readinessQueueAPI{fakeAPI: api}
+				s.api = queue
+				wrapped := fmt.Errorf("interrupted fixture: %w", cause)
+				switch phase {
+				case "queue":
+					queue.queueErr = wrapped
+				case "probe":
+					s.adapters[Codex] = &contextErrorHarnessAdapter{fakeAdapter: &fakeAdapter{}, err: wrapped}
+				case "report":
+					s.api = &cancelledProbeReporter{readinessQueueAPI: queue, err: wrapped}
+				}
+				since := s.probePendingSince["account"]
+				var diagnostics []string
+				s.pollDiagnostic = func(reason string) { diagnostics = append(diagnostics, reason) }
+				if err := s.PollOnce(t.Context()); !errors.Is(err, cause) {
+					t.Fatalf("lost context cause: %v", err)
+				}
+				if !s.probePendingSince["account"].Equal(since) || s.harnessFailed["account"] || len(diagnostics) != 0 {
+					t.Fatal("context error consumed probe wait or recorded failure", diagnostics)
+				}
+				if got := s.lifecycleAt("", since).AccountStatuses["account"]; got.State != "checking" || got.Reason != "probe_pending" {
+					t.Fatalf("interrupted probe changed pending health: %+v", got)
+				}
+			})
+		}
+	}
+}
+
+func TestCancelledPollPreservesAccountHealthAndEmitsNoDiagnostic(t *testing.T) {
+	for _, dispatch := range []bool{false, true} {
+		for _, phase := range []string{"before_poll", "during_probe", "during_report"} {
+			t.Run(fmt.Sprintf("dispatch=%t/%s", dispatch, phase), func(t *testing.T) {
+				s, api, _ := testSupervisor(t)
+				queue := &readinessQueueAPI{fakeAPI: api}
+				s.api = queue
+				ctx, cancel := context.WithCancel(t.Context())
+				defer cancel()
+				switch phase {
+				case "before_poll":
+					cancel()
+				case "during_probe":
+					s.adapters[Codex] = &cancelledPollAdapter{fakeAdapter: &fakeAdapter{}, cancel: cancel}
+				case "during_report":
+					s.api = &cancelledProbeReporter{readinessQueueAPI: queue, cancel: cancel}
+				}
+				var diagnostics []string
+				s.pollDiagnostic = func(reason string) { diagnostics = append(diagnostics, reason) }
+				s.probedAccounts["account"] = true
+				delete(s.probePendingSince, "account")
+				if err := s.pollOnce(ctx, dispatch); !errors.Is(err, context.Canceled) {
+					t.Fatalf("expected cancellation, got %v", err)
+				}
+				if got := s.Lifecycle("").AccountStatuses["account"]; got.State != "ready" || got.Reason != "" || !s.accountAvailable("account") {
+					t.Fatalf("shutdown changed account health: %+v", got)
+				}
+				if len(diagnostics) != 0 || s.loginRequired["account"] || s.harnessFailed["account"] {
+					t.Fatalf("shutdown recorded a failure: %v", diagnostics)
+				}
+				if phase != "during_report" && len(queue.probed) != 0 {
+					t.Fatal("cancelled probe was published")
+				}
+			})
+		}
+	}
 }
 
 func TestPollDiagnosticsContainOnlyBoundedCauses(t *testing.T) {

@@ -1,0 +1,22 @@
+{
+  "group": "stable-controls",
+  "nightlyTiming": {
+    "seconds": 78.191,
+    "selectedTests": 22
+  },
+  "spec": {
+    "file": "tests/no-shift-dialogs.spec.ts",
+    "listedTests": 22,
+    "tierTiming": {
+      "caseSeconds": {
+        "max": 5.581,
+        "median": 3.276,
+        "min": 2.107
+      },
+      "seconds": 78.191,
+      "selectedTests": 22
+    },
+    "weightSeconds": 36.564633,
+    "weightSource": "tierTiming:37377299349"
+  }
+}

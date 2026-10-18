@@ -1,0 +1,22 @@
+{
+  "group": "model-settings",
+  "nightlyTiming": {
+    "seconds": 3.187,
+    "selectedTests": 2
+  },
+  "spec": {
+    "file": "tests/policies-ladders-moved.spec.ts",
+    "listedTests": 2,
+    "tierTiming": {
+      "caseSeconds": {
+        "max": 1.782,
+        "median": 1.578,
+        "min": 1.374
+      },
+      "seconds": 3.187,
+      "selectedTests": 2
+    },
+    "weightSeconds": 4,
+    "weightSource": "AEON-1204 local-single-worker-2.1s-plus-margin"
+  }
+}

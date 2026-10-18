@@ -1,0 +1,22 @@
+{
+  "group": "remaining-ui",
+  "nightlyTiming": {
+    "seconds": 24.327,
+    "selectedTests": 16
+  },
+  "spec": {
+    "file": "tests/footer-summary.spec.ts",
+    "listedTests": 13,
+    "tierTiming": {
+      "caseSeconds": {
+        "max": 2.484,
+        "median": 1.294,
+        "min": 1.063
+      },
+      "seconds": 24.327,
+      "selectedTests": 16
+    },
+    "weightSeconds": 20,
+    "weightSource": "estimate"
+  }
+}

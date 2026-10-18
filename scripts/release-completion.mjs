@@ -17,7 +17,7 @@ export const BINARIES = [
   'aeon-cli-linux-amd64', 'aeon-cli-linux-arm64',
 ];
 // These CGO_ENABLED=0, -trimpath builds must reproduce the tagged source bytes.
-export const STATIC_BINARIES = BINARIES.filter(name => !name.startsWith('paimos-agentd-darwin-'));
+export const STATIC_BINARIES = BINARIES.filter(name => !name.includes('-darwin-'));
 export const ASSETS = [...BINARIES, 'SHA256SUMS'];
 const digestOK = value => /^sha256:[a-f0-9]{64}$/.test(value ?? '');
 const commitOK = value => /^[a-f0-9]{40}$/.test(value ?? '');
@@ -139,7 +139,12 @@ export function checksumMap(text) {
   return sums;
 }
 
-export function complete(release, directory, { write = false, pinEvidence = '' } = {}, run = command) {
+export function draftArgs(release, notes) {
+  return ['release', 'create', release.tag, '--repo', REPOSITORY, '--draft', '--verify-tag', '--target', release.source_sha, '--title', release.tag, '--notes-file', notes];
+}
+
+export function complete(release, directory, { write = false, pinEvidence = '', runtimeAMD64 = '', runtimeARM64 = '' } = {}, run = command) {
+  for (const runtime of [runtimeAMD64, runtimeARM64]) if (runtime && !digestOK(runtime)) fail('invalid runtime closure digest');
   let existing = findRelease(release, run);
   const bytes = new Map();
   // Preserve original uploaded bytes, including nondeterministic Apple signatures.
@@ -171,12 +176,14 @@ export function complete(release, directory, { write = false, pinEvidence = '' }
   if (!existing) {
     const notes = join(directory, 'completion-notes.txt');
     writeFileSync(notes, [
-      `Signed/notarized Darwin paimos-agentd and static Linux paimos-agentd / aeon-cli ${release.version}.`,
+      `Signed/notarized Darwin paimos-agentd / aeon-cli and static Linux paimos-agentd / aeon-cli ${release.version}.`,
       'Verify SHA256SUMS before installing. Native qualification and publication remain coordinator gates.',
       `Container: ghcr.io/inspr-at/aeon:${release.version}`, `Digest: ${release.digest}`,
+      `Runtime closure linux/amd64: ${runtimeAMD64 || 'unknown'}`,
+      `Runtime closure linux/arm64: ${runtimeARM64 || 'unknown'}`,
       `Source commit: ${release.source_sha}`, '', pinEvidence,
     ].join('\n'));
-    run('gh', ['release', 'create', release.tag, '--repo', REPOSITORY, '--draft', '--verify-tag', '--target', release.source_sha, '--title', release.tag, '--notes-file', notes]);
+    run('gh', draftArgs(release, notes));
     existing = findRelease(release, run);
     if (!existing?.draft) fail('draft creation did not produce a draft');
   }
@@ -207,7 +214,7 @@ if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) 
       const restored = restore(release, args[0], args[1]);
       if (process.env.GITHUB_OUTPUT) appendFileSync(process.env.GITHUB_OUTPUT, `restored=${restored}\n`);
     } else if (mode === 'complete' && args.length >= 1 && args.length <= 2 && (!args[1] || args[1] === '--write')) {
-      console.log(JSON.stringify(complete(release, args[0], { write: args[1] === '--write', pinEvidence: process.env.PIN_EVIDENCE ?? '' })));
+      console.log(JSON.stringify(complete(release, args[0], { write: args[1] === '--write', pinEvidence: process.env.PIN_EVIDENCE ?? '', runtimeAMD64: process.env.RUNTIME_AMD64 ?? '', runtimeARM64: process.env.RUNTIME_ARM64 ?? '' })));
     } else fail('usage: prepare | restore ASSET DIST | complete DIST [--write]');
   } catch (error) {
     console.error(error.message?.startsWith('release completion:') ? error.message : 'release completion: operation failed');

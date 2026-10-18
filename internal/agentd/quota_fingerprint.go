@@ -85,7 +85,10 @@ func (s *Supervisor) publishSignals(ctx context.Context) {
 		}
 		v := AccountSignals{ReadingSupport: "none"}
 		if a.Harness == Codex {
-			v.ReadingSupport = "every_5_min"
+			v.ReadingSupport = "first_run"
+			if c, ok := adapter.(interface{ CanCaptureCapacity(string) bool }); ok && c.CanCaptureCapacity(a.Key) {
+				v.ReadingSupport = "every_5_min"
+			}
 		}
 		if a.Harness == Claude {
 			v.ReadingSupport = "first_run"

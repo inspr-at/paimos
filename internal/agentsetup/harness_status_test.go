@@ -104,8 +104,8 @@ func TestPartialAttentionKeepsOnlyAProperSubset(t *testing.T) {
 	if len(PartialAttention("codex", []string{"a"}, "ready", []AccountAttention{{AccountID: "a", Reason: PinDrifted}}).Accounts) != 0 {
 		t.Fatal("a single enrollment was treated as a partial block")
 	}
-	if len(PartialAttention("codex", enrolled, "blocked", []AccountAttention{{AccountID: "a", Reason: PinDrifted}}).Accounts) != 0 {
-		t.Fatal("attention stuck to a blocked harness")
+	if len(PartialAttention("codex", enrolled, "blocked", []AccountAttention{{AccountID: "a", Reason: PinDrifted}}).Accounts) != 1 {
+		t.Fatal("account diagnostic lost from a blocked harness")
 	}
 	raw := []byte(`{"state":"ready","attention_accounts":[{"account_id":"a","reason":"pin_drifted"},"nope",{"account_id":"b"}],"fix":"legacy string"}`)
 	var detail HarnessDetail

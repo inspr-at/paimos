@@ -17,4 +17,12 @@ test('catalog wait validation rejects broken and arbitrary reasons', () => {
   assert.equal(isCapacityWait({ code: 'schedule', until: 'garbage', run_now_allowed: true }), false)
   assert.equal(isCapacityWait({ code: 'raw vendor text', run_now_allowed: true }), false)
   assert.equal(isCapacityWait({ code: 'hold', run_now_allowed: false }), true)
+  assert.equal(isCapacityWait({ code: 'context', run_now_allowed: false }), true)
+  assert.equal(isCapacityWait({ code: 'context', context: {}, run_now_allowed: false }), false)
+})
+
+
+test('residency waits survive strict parsing and explain the account fence', () => {
+  assert.equal(isCapacityWait({ code: 'residency', run_now_allowed: false }), true)
+  assert.equal(capacityWaitText({ code: 'residency', run_now_allowed: false }), 'Waiting for an account within the allowed providers')
 })

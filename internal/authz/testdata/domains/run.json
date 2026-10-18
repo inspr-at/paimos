@@ -1,0 +1,81 @@
+{
+  "_license": "SPDX-License-Identifier: AGPL-3.0-only",
+  "builtin_roles": {
+    "admin": [
+      "run.claim",
+      "run.create",
+      "run.read",
+      "run.telemetry"
+    ],
+    "member": [
+      "run.claim",
+      "run.create",
+      "run.read",
+      "run.telemetry"
+    ],
+    "owner": [
+      "run.claim",
+      "run.create",
+      "run.read",
+      "run.telemetry"
+    ],
+    "viewer": [
+      "run.read"
+    ]
+  },
+  "registry": [
+    {
+      "agent_grantable": true,
+      "description": "Claim run",
+      "grantable_at": [
+        "workspace",
+        "project"
+      ],
+      "group": "Run",
+      "key": "run.claim",
+      "owner_workstation_grantable": true,
+      "risk": "medium"
+    },
+    {
+      "agent_grantable": true,
+      "description": "Create run",
+      "grantable_at": [
+        "workspace",
+        "project"
+      ],
+      "group": "Run",
+      "key": "run.create",
+      "owner_workstation_grantable": true,
+      "risk": "medium"
+    },
+    {
+      "agent_grantable": true,
+      "description": "Read run",
+      "grantable_at": [
+        "workspace",
+        "project"
+      ],
+      "group": "Run",
+      "key": "run.read",
+      "owner_workstation_grantable": true,
+      "risk": "low"
+    },
+    {
+      "agent_grantable": true,
+      "description": "Telemetry run",
+      "grantable_at": [
+        "workspace",
+        "project"
+      ],
+      "group": "Run",
+      "key": "run.telemetry",
+      "owner_workstation_grantable": true,
+      "risk": "medium"
+    }
+  ],
+  "words": {
+    "resources": {
+      "run": "runs"
+    }
+  }
+}

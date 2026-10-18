@@ -1,0 +1,8 @@
+/* SPDX-License-Identifier: AGPL-3.0-only */
+/* Imported as a scoped style by the shared Settings components. Deep selectors
+   include consumer-owned slot actions and keep other screens unchanged. */
+:deep(.btn.primary) { box-shadow: none; }
+:deep(.btn.primary:focus-visible) {
+  outline: 2px solid var(--teal);
+  outline-offset: 3px;
+}

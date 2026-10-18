@@ -1,0 +1,45 @@
+{
+  "_license": "SPDX-License-Identifier: AGPL-3.0-only",
+  "builtin_roles": {
+    "admin": [
+      "search.read"
+    ],
+    "guest": [
+      "search.read"
+    ],
+    "member": [
+      "search.read"
+    ],
+    "owner": [
+      "search.read"
+    ],
+    "viewer": [
+      "search.read"
+    ]
+  },
+  "project_filtered": {
+    "GET /api/search": true
+  },
+  "registry": [
+    {
+      "agent_grantable": true,
+      "description": "Read search",
+      "grantable_at": [
+        "workspace",
+        "project"
+      ],
+      "group": "Search",
+      "key": "search.read",
+      "owner_workstation_grantable": true,
+      "risk": "low"
+    }
+  ],
+  "routes": {
+    "GET /api/search": "search.read"
+  },
+  "words": {
+    "resources": {
+      "search": "search"
+    }
+  }
+}

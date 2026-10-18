@@ -1,0 +1,9 @@
+{
+  "id": "/",
+  "name": "Aeon",
+  "short_name": "Aeon",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "icons": [{ "src": "/brand/aeon-icon.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any" }]
+}

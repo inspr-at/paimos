@@ -1,0 +1,22 @@
+{
+  "group": "remaining-ui",
+  "nightlyTiming": {
+    "seconds": 650.505,
+    "selectedTests": 12
+  },
+  "spec": {
+    "file": "tests/project-delivery-settings.spec.ts",
+    "listedTests": 12,
+    "tierTiming": {
+      "caseSeconds": {
+        "max": 90.738,
+        "median": 65.237,
+        "min": 2.446
+      },
+      "seconds": 650.505,
+      "selectedTests": 12
+    },
+    "weightSeconds": 180,
+    "weightSource": "unmeasured-estimate"
+  }
+}

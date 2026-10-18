@@ -10,19 +10,28 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"net/netip"
 	"net/url"
 	"os"
 	"path"
+	"path/filepath"
 	"regexp"
 	"strings"
+
+	"github.com/inspr-at/paimos/internal/doctrinerepo"
 )
 
 // Config is the process configuration for `paimos serve`.
 type Config struct {
-	Addr        string
-	DatabaseURL string
-	Env         string // "dev" or "prod"
-	PublicURL   string
+	ChatEnabled                    bool // disabled by default; deployment opt-in via AEON_CHAT_ENABLED
+	AttachedMessages               bool // disabled by default; also requires single-instance qualification
+	AttachedMessagesSingleInstance bool
+	PhonePush                      *PhonePushConfig
+	Addr                           string
+	DatabaseURL                    string
+	Env                            string // "dev" or "prod"
+	StatusAutopilot                string // Deployment cap: "off", "suggest" or "on".
+	PublicURL                      string
 	// Deployment-owned exact host:port exceptions for an operator-local
 	// Aithema service. Empty by default; never writable by tenants.
 	AithemaOperatorLocalServices []string
@@ -39,10 +48,17 @@ type Config struct {
 	LinkKey []byte
 	// FilesDir is the attachment store root (AEON_FILES_DIR, default data/files).
 	FilesDir string
+	// HTMLSandboxOrigin is a dedicated HTTPS origin on a different registrable
+	// domain. Empty/unsafe values disable live HTML previews, not downloads.
+	HTMLSandboxOrigin string
 	// DoctrineCredentialsDir holds host-provisioned doctrine read tokens and App
 	// keys, one credential file and <ref>.allowlist.json per reference
 	// (AEON_DOCTRINE_CREDENTIALS_DIR, AEON-318). Aeon stores only the names.
 	DoctrineCredentialsDir string
+	DoctrineMirrorDir      string
+	DoctrineDefaultSource  bool
+	// DoctrineRepositories is validated deployment-owned proposal policy.
+	DoctrineRepositories *doctrinerepo.Pair
 	// PairingNixGuide is deployment-admin-owned public guidance. There is no
 	// tenant or pairing-peer write path; absent configuration hides the block.
 	PairingNixGuide *PairingNixGuide
@@ -53,18 +69,34 @@ type Config struct {
 	DoctrineGuardKey []byte
 	// Reviewed host configuration only: exact private-tree path -> SHA-256.
 	// Empty by default. Never supplied by a proposal or a source's HTTP API.
-	DoctrineBinaryAllowlist map[string]string
-	DoctrineAppID           string
-	DoctrineInstallationID  string
-	DoctrineAppKeyRef       string
-	DoctrineAppTenantID     string
-	DoctrineGateLogin       string
-	DoctrineDCOAcknowledged bool
-	ReviewAppID             string
-	ReviewInstallationID    string
-	ReviewAppKeyFile        string
-	ReviewAppTenantID       string
-	ReviewAppRepository     string
+	DoctrineBinaryAllowlist  map[string]string
+	DoctrineAppID            string
+	DoctrineInstallationID   string
+	DoctrineAppKeyRef        string
+	DoctrineAppTenantID      string
+	DoctrineGateLogin        string
+	DoctrineDCOAcknowledged  bool
+	DeliveryAdmissionEnabled bool
+	// DeliveryAdmissionQueue starts enqueue, dequeue, quarantine and queue Desk
+	// notices. Status publication does not use it. Off unless the env value is
+	// exactly "true", so a deploy can publish aeon/admission before the App has
+	// pull_requests:write and contents:write.
+	DeliveryAdmissionQueue bool
+	ReviewAppID            string
+	ReviewInstallationID   string
+	ReviewAppKeyFile       string
+	ReviewAppTenantID      string
+	ReviewAppRepository    string
+	ReviewWebhookSecret    []byte // Host-owned HMAC key; never logged or tenant-writable.
+	// ImportTenantSlug names the one tenant that receives conversations handed
+	// over from START as project drafts (AEON-1441, AEON_IMPORT_TENANT_SLUG).
+	// It defaults to the bootstrap tenant; "off" disables the handoff. A
+	// payload or a session cookie can never choose another tenant.
+	ImportTenantSlug string
+	// TrustedProxies are the reverse-proxy peers whose X-Forwarded-For names
+	// the client for public rate limits (AEON_TRUSTED_PROXIES: comma-separated
+	// addresses or CIDRs, default loopback, "none" trusts no proxy).
+	TrustedProxies []netip.Prefix
 }
 
 // FromEnv reads AEON_* variables. Empty optional values take their defaults.
@@ -73,27 +105,33 @@ type Config struct {
 // file (host-generated secret) so it never appears in the environment.
 func FromEnv() (Config, error) {
 	cfg := Config{
-		Addr:                getenv("AEON_ADDR", ":8080"),
-		DatabaseURL:         os.Getenv("AEON_DATABASE_URL"),
-		Env:                 getenv("AEON_ENV", "dev"),
-		PublicURL:           os.Getenv("AEON_PUBLIC_URL"),
-		WebDir:              os.Getenv("AEON_WEB_DIR"),
-		BootstrapTenantSlug: getenv("AEON_BOOTSTRAP_TENANT_SLUG", "inspr"),
-		BootstrapTenantName: getenv("AEON_BOOTSTRAP_TENANT_NAME", "INSPR"),
-		FilesDir:            getenv("AEON_FILES_DIR", "data/files"),
+		AttachedMessages:               os.Getenv("AEON_ATTACHED_MESSAGES") == "true",
+		AttachedMessagesSingleInstance: os.Getenv("AEON_ATTACHED_MESSAGES_SINGLE_INSTANCE") == "true",
+		Addr:                           getenv("AEON_ADDR", ":8080"),
+		DatabaseURL:                    os.Getenv("AEON_DATABASE_URL"),
+		Env:                            getenv("AEON_ENV", "dev"),
+		PublicURL:                      os.Getenv("AEON_PUBLIC_URL"),
+		WebDir:                         os.Getenv("AEON_WEB_DIR"),
+		BootstrapTenantSlug:            getenv("AEON_BOOTSTRAP_TENANT_SLUG", "inspr"),
+		BootstrapTenantName:            getenv("AEON_BOOTSTRAP_TENANT_NAME", "INSPR"),
+		FilesDir:                       getenv("AEON_FILES_DIR", "data/files"),
+		HTMLSandboxOrigin:              os.Getenv("AEON_HTML_SANDBOX_ORIGIN"),
 		// Only the directory path is read here; a token is read at fetch time.
-		DoctrineCredentialsDir:  os.Getenv("AEON_DOCTRINE_CREDENTIALS_DIR"),
-		DoctrineAppID:           os.Getenv("AEON_DOCTRINE_APP_ID"),
-		DoctrineInstallationID:  os.Getenv("AEON_DOCTRINE_INSTALLATION_ID"),
-		DoctrineAppKeyRef:       os.Getenv("AEON_DOCTRINE_APP_KEY_REF"),
-		DoctrineAppTenantID:     os.Getenv("AEON_DOCTRINE_APP_TENANT_ID"),
-		DoctrineGateLogin:       os.Getenv("AEON_DOCTRINE_GATE_LOGIN"),
-		DoctrineDCOAcknowledged: os.Getenv("AEON_DOCTRINE_DCO_ACKNOWLEDGED") == "true",
-		ReviewAppID:             os.Getenv("AEON_REVIEW_APP_ID"),
-		ReviewInstallationID:    os.Getenv("AEON_REVIEW_INSTALLATION_ID"),
-		ReviewAppKeyFile:        os.Getenv("AEON_REVIEW_APP_KEY_FILE"),
-		ReviewAppTenantID:       os.Getenv("AEON_REVIEW_APP_TENANT_ID"),
-		ReviewAppRepository:     os.Getenv("AEON_REVIEW_APP_REPOSITORY"),
+		DoctrineCredentialsDir:   os.Getenv("AEON_DOCTRINE_CREDENTIALS_DIR"),
+		DoctrineMirrorDir:        os.Getenv("AEON_DOCTRINE_MIRROR_DIR"),
+		DoctrineAppID:            os.Getenv("AEON_DOCTRINE_APP_ID"),
+		DoctrineInstallationID:   os.Getenv("AEON_DOCTRINE_INSTALLATION_ID"),
+		DoctrineAppKeyRef:        os.Getenv("AEON_DOCTRINE_APP_KEY_REF"),
+		DoctrineAppTenantID:      os.Getenv("AEON_DOCTRINE_APP_TENANT_ID"),
+		DoctrineGateLogin:        os.Getenv("AEON_DOCTRINE_GATE_LOGIN"),
+		DoctrineDCOAcknowledged:  os.Getenv("AEON_DOCTRINE_DCO_ACKNOWLEDGED") == "true",
+		DeliveryAdmissionEnabled: os.Getenv("AEON_DELIVERY_ADMISSION_ENABLED") == "true",
+		DeliveryAdmissionQueue:   os.Getenv("AEON_DELIVERY_ADMISSION_QUEUE") == "true",
+		ReviewAppID:              os.Getenv("AEON_REVIEW_APP_ID"),
+		ReviewInstallationID:     os.Getenv("AEON_REVIEW_INSTALLATION_ID"),
+		ReviewAppKeyFile:         os.Getenv("AEON_REVIEW_APP_KEY_FILE"),
+		ReviewAppTenantID:        os.Getenv("AEON_REVIEW_APP_TENANT_ID"),
+		ReviewAppRepository:      os.Getenv("AEON_REVIEW_APP_REPOSITORY"),
 	}
 	switch cfg.Env {
 	case "dev", "prod":
@@ -103,8 +141,50 @@ func FromEnv() (Config, error) {
 	if cfg.DatabaseURL == "" {
 		return Config{}, fmt.Errorf("AEON_DATABASE_URL is required")
 	}
+	switch getenv("AEON_CHAT_ENABLED", "false") {
+	case "true":
+		cfg.ChatEnabled = true
+	case "false":
+	default:
+		return Config{}, fmt.Errorf("AEON_CHAT_ENABLED must be true or false")
+	}
+	publicRepository, publicSet := os.LookupEnv("AEON_DOCTRINE_PUBLIC_REPOSITORY")
+	if !publicSet {
+		publicRepository = doctrinerepo.DefaultPublic
+	}
+	privateRepository, privateSet := os.LookupEnv("AEON_DOCTRINE_PRIVATE_REPOSITORY")
+	if !privateSet {
+		privateRepository = doctrinerepo.DefaultPrivate
+	}
+	repositories, repositoryErr := doctrinerepo.Parse(publicRepository, privateRepository)
+	if repositoryErr != nil {
+		return Config{}, repositoryErr
+	}
+	cfg.DoctrineRepositories = &repositories
+	cfg.DoctrineDefaultSource = privateSet && cfg.DoctrineAppTenantID != ""
+	if cfg.DoctrineMirrorDir != "" && !filepath.IsAbs(cfg.DoctrineMirrorDir) {
+		return Config{}, fmt.Errorf("AEON_DOCTRINE_MIRROR_DIR must be an absolute host directory")
+	}
+	if file := os.Getenv("AEON_REVIEW_WEBHOOK_SECRET_FILE"); file != "" {
+		secret, err := reviewWebhookSecret(file)
+		if err != nil {
+			return Config{}, err
+		}
+		cfg.ReviewWebhookSecret = secret
+	}
+	var modeErr error
+	cfg.StatusAutopilot, modeErr = StatusAutopilotMode()
+	if modeErr != nil {
+		return Config{}, modeErr
+	}
 	if raw := os.Getenv("AEON_AITHEMA_OPERATOR_LOCAL_SERVICES"); raw != "" {
 		cfg.AithemaOperatorLocalServices = strings.Split(raw, ",")
+	}
+	cfg.ImportTenantSlug = getenv("AEON_IMPORT_TENANT_SLUG", cfg.BootstrapTenantSlug)
+	var proxyErr error
+	cfg.TrustedProxies, proxyErr = TrustedProxies(getenv("AEON_TRUSTED_PROXIES", "127.0.0.0/8,::1"))
+	if proxyErr != nil {
+		return Config{}, proxyErr
 	}
 	var policyErr error
 	cfg.DoctrineBinaryAllowlist, policyErr = doctrineBinaryAllowlist(os.Getenv("AEON_DOCTRINE_BINARY_ALLOWLIST"))
@@ -141,6 +221,10 @@ func FromEnv() (Config, error) {
 	if err != nil {
 		return Config{}, err
 	}
+	cfg.PhonePush, err = phonePushFromFile(os.Getenv("AEON_PHONE_PUSH_VAPID_FILE"))
+	if err != nil {
+		return Config{}, err
+	}
 	cfg.LinkKey, err = LinkKeyFromEnv()
 	if err != nil {
 		return Config{}, err
@@ -153,6 +237,44 @@ func FromEnv() (Config, error) {
 		cfg.DatabaseURL = u
 	}
 	return cfg, nil
+}
+
+func reviewWebhookSecret(file string) ([]byte, error) {
+	invalid := errors.New("AEON_REVIEW_WEBHOOK_SECRET_FILE requires a private physical file with 32–4096 bytes")
+	physical, err := filepath.EvalSymlinks(file)
+	if err != nil || !filepath.IsAbs(file) || physical != file {
+		return nil, invalid
+	}
+	f, err := os.Open(file)
+	if err != nil {
+		return nil, invalid
+	}
+	defer f.Close()
+	info, err := f.Stat()
+	if err != nil || !info.Mode().IsRegular() || info.Mode().Perm()&0077 != 0 {
+		return nil, invalid
+	}
+	raw, err := io.ReadAll(io.LimitReader(f, 4097))
+	if err != nil || len(raw) > 4096 {
+		return nil, invalid
+	}
+	secret := strings.TrimSpace(string(raw))
+	if len(secret) < 32 {
+		return nil, invalid
+	}
+	return []byte(secret), nil
+}
+
+// StatusAutopilotMode is also read by transactional publication hooks, which
+// share the deployment's process environment with the background worker.
+func StatusAutopilotMode() (string, error) {
+	mode := getenv("AEON_STATUS_AUTOPILOT", "on")
+	switch mode {
+	case "off", "suggest", "on":
+		return mode, nil
+	default:
+		return "", fmt.Errorf("AEON_STATUS_AUTOPILOT must be off, suggest or on")
+	}
 }
 
 func doctrineBinaryAllowlist(raw string) (map[string]string, error) {
@@ -272,4 +394,28 @@ func withPasswordFile(dsn, file string) (string, error) {
 	}
 	u.User = url.UserPassword(u.User.Username(), pw)
 	return u.String(), nil
+}
+
+// TrustedProxies parses AEON_TRUSTED_PROXIES. "none" trusts no proxy; every
+// other entry is an IP address or a CIDR. A bad entry stops startup rather
+// than silently trusting forwarded headers from anyone.
+func TrustedProxies(raw string) ([]netip.Prefix, error) {
+	raw = strings.TrimSpace(raw)
+	if raw == "" || raw == "none" {
+		return nil, nil
+	}
+	var out []netip.Prefix
+	for _, item := range strings.Split(raw, ",") {
+		item = strings.TrimSpace(item)
+		if prefix, err := netip.ParsePrefix(item); err == nil {
+			out = append(out, prefix.Masked())
+			continue
+		}
+		addr, err := netip.ParseAddr(item)
+		if err != nil {
+			return nil, fmt.Errorf("AEON_TRUSTED_PROXIES: %q is not an address or CIDR", item)
+		}
+		out = append(out, netip.PrefixFrom(addr.Unmap(), addr.Unmap().BitLen()))
+	}
+	return out, nil
 }

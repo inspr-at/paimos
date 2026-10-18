@@ -63,7 +63,7 @@ func TestNoKeyForAReactivatedRetiredComputer(t *testing.T) {
 			return err
 		}
 		var key, request string
-		if err := tx.QueryRow(ctx, `INSERT INTO agent_keys(tenant_id,principal_id,name,prefix,hash,scopes,revoked_at) VALUES($1::uuid,$2::uuid,'runtime','old-laptop-runtime','old-laptop-hash','{nodes.read}',now()) RETURNING id::text`, owner.TenantID, principal).Scan(&key); err != nil {
+		if err := tx.QueryRow(ctx, `INSERT INTO agent_keys(tenant_id,principal_id,name,prefix,hash,scopes,revoked_at,created_by_principal_id) VALUES($1::uuid,$2::uuid,'runtime','old-laptop-runtime','old-laptop-hash','{nodes.read}',now(),(SELECT id FROM principals WHERE tenant_id=$1::uuid AND kind='person' ORDER BY created_at,id LIMIT 1)) RETURNING id::text`, owner.TenantID, principal).Scan(&key); err != nil {
 			return err
 		}
 		if err := tx.QueryRow(ctx, `INSERT INTO agent_pairing_requests(tenant_id,id,user_code,device_hash,runtime_hash,lifecycle_hash,details,request_digest,state)

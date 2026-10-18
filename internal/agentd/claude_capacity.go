@@ -88,23 +88,26 @@ func (a *ClaudeAdapter) CanCaptureCapacity(key string) bool {
 	return err == nil
 }
 func (a *ClaudeAdapter) CaptureCapacity(ctx context.Context, key string) []capacity.Reading {
-	if ctx.Err() != nil || !a.CanCaptureCapacity(key) {
-		return nil
+	return a.CaptureCapacityResult(ctx, key).Readings
+}
+func (a *ClaudeAdapter) CaptureCapacityResult(ctx context.Context, key string) CapacityCapture {
+	if !a.CanCaptureCapacity(key) {
+		return CapacityCapture{Result: "unsupported"}
 	}
 	home, err := localHome(a.Homes, key)
 	if err != nil {
-		return nil
+		return CapacityCapture{Result: "launch_failed"}
 	}
-	op, cancel := context.WithTimeout(ctx, 3*time.Second)
+	op, cancel := context.WithTimeout(ctx, 10*time.Second)
 	defer cancel()
 	raw, err := a.usage.capture(op, home, claudeEnvironment(home, a.NodePath, a.ClaudePath))
 	if err != nil || len(raw) > 64<<10 {
-		return nil
+		return captureError(op)
 	}
 	now := time.Now().UTC()
 	rs := a.usage.decode(raw, now)
-	if len(rs) > 32 {
-		return nil
+	if len(rs) == 0 || len(rs) > 32 {
+		return CapacityCapture{Result: "protocol"}
 	}
 	for i := range rs {
 		rs[i].Source = "agentd"
@@ -112,8 +115,8 @@ func (a *ClaudeAdapter) CaptureCapacity(ctx context.Context, key string) []capac
 		rs[i].RunID = ""
 		rs[i].Phase = ""
 		if rs[i].Validate(now) != nil {
-			return nil
+			return CapacityCapture{Result: "protocol"}
 		}
 	}
-	return rs
+	return CapacityCapture{Result: "success", Readings: rs}
 }

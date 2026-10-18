@@ -45,8 +45,10 @@ var errRate = errors.New("presence updates are too frequent")
 var errInvalid = errors.New("invalid presence request")
 
 type Module struct {
-	pool     *pgxpool.Pool
-	registry *plugins.Registry
+	pool        *pgxpool.Pool
+	registry    *plugins.Registry
+	now         func() time.Time
+	streamTicks func() (<-chan time.Time, func())
 }
 
 var _ httpapi.Module = (*Module)(nil)
@@ -63,7 +65,7 @@ func New(pool *pgxpool.Pool, registry *plugins.Registry) (httpapi.Module, error)
 	if _, ok := registry.Lookup("business_quotes"); !ok {
 		return nil, errors.New("collaboration: quote manifest is not registered")
 	}
-	return &Module{pool: pool, registry: registry}, nil
+	return &Module{pool: pool, registry: registry, now: time.Now}, nil
 }
 
 func (m *Module) Mount(mux *http.ServeMux) {
@@ -133,7 +135,7 @@ func writeError(w http.ResponseWriter, err error) {
 	}
 }
 func decode(r *http.Request, value any) error {
-	d := json.NewDecoder(io.LimitReader(r.Body, 8193))
+	d := httpapi.NewRequestDecoder(nil, r, 8193)
 	d.DisallowUnknownFields()
 	if d.Decode(value) != nil {
 		return errInvalid
@@ -438,7 +440,8 @@ func (m *Module) heartbeat(w http.ResponseWriter, r *http.Request) {
 		if owner != p.ID {
 			return errDenied
 		}
-		if time.Since(last) < 200*time.Millisecond {
+		now := m.now()
+		if now.Sub(last) < 200*time.Millisecond {
 			return errRate
 		}
 		a, e := validateAnchor(r.Context(), tx, id, in.Anchor)
@@ -454,7 +457,7 @@ func (m *Module) heartbeat(w http.ResponseWriter, r *http.Request) {
 		}
 		interaction := in.Mode == "editing" && (in.Interacted || !jsonEqual(priorAnchor, payload))
 		mode := in.Mode
-		if mode == "editing" && !interaction && time.Since(lastInteraction) >= 60*time.Second {
+		if mode == "editing" && !interaction && now.Sub(lastInteraction) >= 60*time.Second {
 			mode = "idle"
 		}
 		_, e = tx.Exec(r.Context(), `UPDATE quote_presence SET mode=$1,anchor=$2::jsonb,observed_revision=$3,last_seen=clock_timestamp(),last_interaction=CASE WHEN $4 THEN clock_timestamp() ELSE last_interaction END,expires_at=clock_timestamp()+interval '45 seconds' WHERE quote_node_id=$5::uuid AND session_id=$6::uuid`, mode, payload, in.ObservedRevision, interaction, id, session)
@@ -569,35 +572,54 @@ func (m *Module) stream(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Cache-Control", "no-store")
 	w.Header().Set("X-Accel-Buffering", "no")
 	rc := http.NewResponseController(w)
+	defer func() { _ = rc.SetWriteDeadline(time.Time{}) }()
+	// Each event and heartbeat owns a fresh bounded write. No deadline is left
+	// on the connection while the stream waits for its next poll.
+	writeFrame := func(frame string) (err error) {
+		if err = rc.SetWriteDeadline(time.Now().Add(5 * time.Second)); err != nil && !errors.Is(err, http.ErrNotSupported) {
+			return err
+		}
+		defer func() {
+			clearErr := rc.SetWriteDeadline(time.Time{})
+			if err == nil && clearErr != nil && !errors.Is(clearErr, http.ErrNotSupported) {
+				err = clearErr
+			}
+		}()
+		if _, err = fmt.Fprint(w, frame); err != nil {
+			return err
+		}
+		return rc.Flush()
+	}
 	send := func(kind string, id int64, value any) error {
 		raw, e := json.Marshal(value)
 		if e != nil {
-			return e
-		}
-		if e = rc.SetWriteDeadline(time.Now().Add(5 * time.Second)); e != nil && !errors.Is(e, http.ErrNotSupported) {
 			return e
 		}
 		prefix := ""
 		if id > 0 {
 			prefix = fmt.Sprintf("id: %d\n", id)
 		}
-		if _, e = fmt.Fprintf(w, "%sevent: %s\ndata: %s\n\n", prefix, kind, raw); e != nil {
-			return e
-		}
-		return rc.Flush()
+		return writeFrame(fmt.Sprintf("%sevent: %s\ndata: %s\n\n", prefix, kind, raw))
 	}
 	if send("presence", 0, first) != nil {
 		return
 	}
 	lastPresence, _ := json.Marshal(first)
-	lastKeepalive := time.Now()
-	ticker := time.NewTicker(time.Second)
-	defer ticker.Stop()
+	lastKeepalive := m.now()
+	var ticks <-chan time.Time
+	var stop func()
+	if m.streamTicks != nil {
+		ticks, stop = m.streamTicks()
+	} else {
+		ticker := time.NewTicker(time.Second)
+		ticks, stop = ticker.C, ticker.Stop
+	}
+	defer stop()
 	for {
 		select {
 		case <-r.Context().Done():
 			return
-		case <-ticker.C:
+		case now := <-ticks:
 			var s snapshot
 			var notices []durableNotice
 			err = m.inQuote(r.Context(), p, id, false, func(tx pgx.Tx) error {
@@ -625,12 +647,12 @@ func (m *Module) stream(w http.ResponseWriter, r *http.Request) {
 					return
 				}
 				lastPresence = current
-				lastKeepalive = time.Now()
-			} else if time.Since(lastKeepalive) >= 15*time.Second {
-				if _, err = fmt.Fprint(w, ": keepalive\n\n"); err != nil || rc.Flush() != nil {
+				lastKeepalive = now
+			} else if now.Sub(lastKeepalive) >= 15*time.Second {
+				if writeFrame(": keepalive\n\n") != nil {
 					return
 				}
-				lastKeepalive = time.Now()
+				lastKeepalive = now
 			}
 		}
 	}

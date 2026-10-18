@@ -3,6 +3,7 @@ package importer
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"testing"
@@ -133,8 +134,25 @@ func TestStateNormalizationAndStoredUserBackfill(t *testing.T) {
 }
 
 func TestNormalizeStatesMigrationEventsAndRollback(t *testing.T) {
-	d := dbtest.Open(t)
 	ctx := t.Context()
+	d, err := dbtest.NewUnmigrated(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		if err := d.Close(); err != nil {
+			t.Error(err)
+		}
+	})
+	stop := errors.New("before historical state normalization")
+	if err := db.MigrateWithHook(ctx, d.App, func(name string) error {
+		if name == "0531_normalize_states.sql" {
+			return stop
+		}
+		return nil
+	}); !errors.Is(err, stop) {
+		t.Fatal(err)
+	}
 	migration, err := os.ReadFile("../db/migrations/0531_normalize_states.sql")
 	if err != nil {
 		t.Fatal(err)
@@ -156,6 +174,10 @@ func TestNormalizeStatesMigrationEventsAndRollback(t *testing.T) {
 		}
 	}
 	// Execute exactly the migration SQL, first in a transaction that must roll back.
+	var baseline int
+	if err := d.Admin.QueryRow(ctx, `SELECT count(*) FROM events WHERE tenant_id=$1`, tenants[0]).Scan(&baseline); err != nil {
+		t.Fatal(err)
+	}
 	sentinel := fmt.Errorf("rollback probe")
 	if err := db.InTenant(dbtest.Seed(ctx), d.Admin, tenants[0], func(tx pgx.Tx) error {
 		if _, err := tx.Exec(ctx, string(migration)); err != nil {
@@ -170,7 +192,7 @@ func TestNormalizeStatesMigrationEventsAndRollback(t *testing.T) {
 		if err := tx.QueryRow(ctx, `SELECT count(*) FROM events WHERE tenant_id=$1`, tenants[0]).Scan(&count); err != nil {
 			return err
 		}
-		if count != 0 {
+		if count != baseline {
 			return fmt.Errorf("rolled back migration retained %d events", count)
 		}
 		var state string

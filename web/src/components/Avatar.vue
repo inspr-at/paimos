@@ -60,14 +60,16 @@ function failed() { if (props.id && !mine.value) missing.add(props.id); loaded.v
   --c: .05; --h: 250;
   position: relative; display: inline-grid; place-items: center; flex-shrink: 0; width: var(--size); height: var(--size); border-radius: 50%; overflow: hidden;
   background: oklch(var(--avatar-l-bg) var(--c) var(--h)); color: oklch(var(--avatar-l-ink) calc(var(--c) * 1.6) var(--h));
-  box-shadow: inset 0 0 0 1px var(--avatar-rim);
   font: 650 calc(var(--size) * .38)/1 var(--font); letter-spacing: .01em; user-select: none;
 }
+/* The rim lies above the picture, so photos, initials and agents show the same one. */
+.avatar::after { content: ''; position: absolute; inset: 0; border-radius: inherit; box-shadow: inset 0 0 0 1px var(--avatar-rim); pointer-events: none; }
 .letters { font-variant-numeric: tabular-nums; }
 img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; opacity: 0; transition: opacity .2s ease; }
 .loaded img { opacity: 1; }
 .loaded .letters { visibility: hidden; }
-.agent { background: var(--surface-2); color: var(--ink-2); box-shadow: inset 0 0 0 1px var(--line); }
+/* An agent's disc is a tint; --avatar-base (a stack's surface) makes it opaque over a face behind. */
+.agent { background: linear-gradient(var(--surface-2), var(--surface-2)) var(--avatar-base, transparent); color: var(--ink-2); }
 .c-slate { --h: 255; --c: .02; } .c-sage { --h: 150; --c: .04; } .c-moss { --h: 125; --c: .06; } .c-ocean { --h: 222; --c: .06; }
 .c-steel { --h: 238; --c: .03; } .c-denim { --h: 258; --c: .07; } .c-iris { --h: 290; --c: .07; } .c-plum { --h: 330; --c: .06; }
 .c-rose { --h: 12; --c: .07; } .c-clay { --h: 45; --c: .07; } .c-sand { --h: 82; --c: .06; } .c-teal { --h: 188; --c: .06; }

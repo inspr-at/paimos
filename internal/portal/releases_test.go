@@ -51,46 +51,46 @@ func TestPublicReleaseHistoryWhitelist(t *testing.T) {
 	kept := `{"pill_en":"Kept from snapshot","pill_de":"Aus dem Schnappschuss","benefit_en":"The frozen line stays.","benefit_de":"Die eingefrorene Zeile bleibt.","hide_from_release_notes":false}`
 
 	relSup := insertNode(t, d, harbour, "REL-1", "release", "SECRET-RELEASE-TITLE", "", "open", project, "{}")
-	tktVisible := insertNode(t, d, harbour, "TKT-1", "ticket", "SECRET-TICKET-TITLE", "", "open", project, visible)
-	tktHidden := insertNode(t, d, harbour, "TKT-2", "ticket", "SECRET-HIDDEN-TITLE", "", "open", project, hidden)
-	tktGap := insertNode(t, d, harbour, "TKT-6", "ticket", "SECRET-GAP-TITLE", "", "open", project, gap)
+	tktVisible := insertNode(t, d, harbour, "TKT-1", "work", "SECRET-TICKET-TITLE", "", "open", project, visible)
+	tktHidden := insertNode(t, d, harbour, "TKT-2", "work", "SECRET-HIDDEN-TITLE", "", "open", project, hidden)
+	tktGap := insertNode(t, d, harbour, "TKT-6", "work", "SECRET-GAP-TITLE", "", "open", project, gap)
 	publishRelease(t, d, harbour, project, relSup, 1, "released", "260901120000.0.0", -28*24*time.Hour, []string{tktVisible, tktHidden, tktGap})
 	setNodeFields(t, d, harbour, tktVisible, strings.Replace(visible, "You can see what shipped.", "SECRET-EDITED-LATER", 1))
 	setReleaseState(t, d, harbour, relSup, "superseded")
 
 	relCurrent := insertNode(t, d, harbour, "REL-3", "release", "SECRET-CURRENT-TITLE", "", "open", project, "{}")
-	tktLatest := insertNode(t, d, harbour, "TKT-91", "ticket", "SECRET-LATEST-TITLE", "", "open", project, latest)
+	tktLatest := insertNode(t, d, harbour, "TKT-91", "work", "SECRET-LATEST-TITLE", "", "open", project, latest)
 	publishRelease(t, d, harbour, project, relCurrent, 3, "released", "260926120000.0.0", -3*24*time.Hour, []string{tktLatest})
 	setNodeFields(t, d, harbour, tktLatest, strings.Replace(latest, "The latest note stays.", "SECRET-EDITED-LATER", 1))
 
 	relDated := insertNode(t, d, harbour, "REL-2", "release", "SECRET-DATED-TITLE", "", "open", project, "{}")
-	tktDated := insertNode(t, d, harbour, "TKT-5", "ticket", "SECRET-DATED-TICKET", "", "open", project, dated)
+	tktDated := insertNode(t, d, harbour, "TKT-5", "work", "SECRET-DATED-TICKET", "", "open", project, dated)
 	publishRelease(t, d, harbour, project, relDated, 2, "released", "", -19*24*time.Hour, []string{tktDated})
 
 	relKept := insertNode(t, d, harbour, "REL-7", "release", "SECRET-KEPT-TITLE", "", "open", project, "{}")
-	tktKept := insertNode(t, d, harbour, "TKT-7", "ticket", "SECRET-KEPT-TICKET", "", "open", project, kept)
+	tktKept := insertNode(t, d, harbour, "TKT-7", "work", "SECRET-KEPT-TICKET", "", "open", project, kept)
 	publishRelease(t, d, harbour, project, relKept, 7, "released", "260920120000.0.0", -9*24*time.Hour, []string{tktKept})
 	clearReleaseVersion(t, d, harbour, relKept)
 
 	relMismatch := insertNode(t, d, harbour, "REL-6", "release", "SECRET-MISMATCH-TITLE", "", "open", project, "{}")
-	tktMismatch := insertNode(t, d, harbour, "TKT-8", "ticket", "SECRET-MISMATCH-TICKET", "", "open", project, `{"pill_en":"Mismatch stays hidden","pill_de":"Abweichung bleibt verborgen","benefit_en":"SECRET-MISMATCH","benefit_de":"SECRET-MISMATCH","hide_from_release_notes":false}`)
+	tktMismatch := insertNode(t, d, harbour, "TKT-8", "work", "SECRET-MISMATCH-TICKET", "", "open", project, `{"pill_en":"Mismatch stays hidden","pill_de":"Abweichung bleibt verborgen","benefit_en":"SECRET-MISMATCH","benefit_de":"SECRET-MISMATCH","hide_from_release_notes":false}`)
 	publishRelease(t, d, harbour, project, relMismatch, 6, "released", "260915120000.0.0", -14*24*time.Hour, []string{tktMismatch})
 	setReleaseVersion(t, d, harbour, relMismatch, "260916120000.0.0")
 
 	relFuture := insertNode(t, d, harbour, "REL-4", "release", "SECRET-FUTURE-TITLE", "", "open", project, "{}")
-	tktFuture := insertNode(t, d, harbour, "TKT-4", "ticket", "SECRET-FUTURE-TICKET", "", "open", project, `{"pill_en":"Future stays hidden","pill_de":"Zukunft bleibt verborgen","benefit_en":"SECRET-FUTURE","benefit_de":"SECRET-FUTURE","hide_from_release_notes":false}`)
+	tktFuture := insertNode(t, d, harbour, "TKT-4", "work", "SECRET-FUTURE-TICKET", "", "open", project, `{"pill_en":"Future stays hidden","pill_de":"Zukunft bleibt verborgen","benefit_en":"SECRET-FUTURE","benefit_de":"SECRET-FUTURE","hide_from_release_notes":false}`)
 	publishRelease(t, d, harbour, project, relFuture, 4, "released", "261201120000.0.0", 2*24*time.Hour, []string{tktFuture})
 
 	relPlan := insertNode(t, d, harbour, "REL-8", "release", "SECRET-PLANNING-TITLE", "", "open", project, "{}")
-	tktPlan := insertNode(t, d, harbour, "TKT-3", "ticket", "SECRET-PLANNING-TICKET", "", "open", project, `{"pill_en":"Plan stays hidden","pill_de":"Plan bleibt verborgen","benefit_en":"SECRET-PLANNING-NOTE","benefit_de":"SECRET-PLANNING-NOTE","hide_from_release_notes":false}`)
+	tktPlan := insertNode(t, d, harbour, "TKT-3", "work", "SECRET-PLANNING-TICKET", "", "open", project, `{"pill_en":"Plan stays hidden","pill_de":"Plan bleibt verborgen","benefit_en":"SECRET-PLANNING-NOTE","benefit_de":"SECRET-PLANNING-NOTE","hide_from_release_notes":false}`)
 	publishRelease(t, d, harbour, project, relPlan, 8, "planning", "", 0, []string{tktPlan})
 
 	relCandidate := insertNode(t, d, harbour, "REL-5", "release", "SECRET-CANDIDATE-TITLE", "", "open", project, "{}")
-	tktCandidate := insertNode(t, d, harbour, "TKT-9", "ticket", "SECRET-CANDIDATE-TICKET", "", "open", project, `{"pill_en":"Candidate stays hidden","pill_de":"Kandidat bleibt verborgen","benefit_en":"SECRET-CANDIDATE","benefit_de":"SECRET-CANDIDATE","hide_from_release_notes":false}`)
+	tktCandidate := insertNode(t, d, harbour, "TKT-9", "work", "SECRET-CANDIDATE-TICKET", "", "open", project, `{"pill_en":"Candidate stays hidden","pill_de":"Kandidat bleibt verborgen","benefit_en":"SECRET-CANDIDATE","benefit_de":"SECRET-CANDIDATE","hide_from_release_notes":false}`)
 	publishRelease(t, d, harbour, project, relCandidate, 5, "candidate", "", 0, []string{tktCandidate})
 
 	relOther := insertNode(t, d, harbour, "REL-9", "release", "SECRET-OTHER-RELEASE", "", "open", otherProject, "{}")
-	tktOther := insertNode(t, d, harbour, "TKT-10", "ticket", "SECRET-OTHER-TICKET", "", "open", otherProject, `{"pill_en":"Other project hidden","pill_de":"Anderes Projekt","benefit_en":"SECRET-OTHER-RELEASE","benefit_de":"SECRET-OTHER-RELEASE","hide_from_release_notes":false}`)
+	tktOther := insertNode(t, d, harbour, "TKT-10", "work", "SECRET-OTHER-TICKET", "", "open", otherProject, `{"pill_en":"Other project hidden","pill_de":"Anderes Projekt","benefit_en":"SECRET-OTHER-RELEASE","benefit_de":"SECRET-OTHER-RELEASE","hide_from_release_notes":false}`)
 	publishRelease(t, d, harbour, otherProject, relOther, 1, "released", "260910120000.0.0", -2*24*time.Hour, []string{tktOther})
 
 	relCold := insertNode(t, d, harbour, "REL-10", "release", "SECRET-UNFROZEN-TITLE", "", "open", project, "{}")
@@ -99,11 +99,11 @@ func TestPublicReleaseHistoryWhitelist(t *testing.T) {
 	publishExisting(t, d, harbour, relCold, -1*24*time.Hour)
 
 	relEmpty := insertNode(t, d, harbour, "REL-12", "release", "SECRET-EMPTY-TITLE", "", "open", project, "{}")
-	tktEmpty := insertNode(t, d, harbour, "TKT-12", "ticket", "SECRET-EMPTY-TICKET", "", "open", project, `{"pill_en":"SECRET-EMPTY-RELEASE","pill_de":"SECRET-EMPTY-RELEASE","benefit_en":"SECRET-EMPTY-RELEASE","benefit_de":"SECRET-EMPTY-RELEASE","hide_from_release_notes":true}`)
+	tktEmpty := insertNode(t, d, harbour, "TKT-12", "work", "SECRET-EMPTY-TICKET", "", "open", project, `{"pill_en":"SECRET-EMPTY-RELEASE","pill_de":"SECRET-EMPTY-RELEASE","benefit_en":"SECRET-EMPTY-RELEASE","benefit_de":"SECRET-EMPTY-RELEASE","hide_from_release_notes":true}`)
 	publishRelease(t, d, harbour, project, relEmpty, 12, "released", "260912120000.0.0", -6*24*time.Hour, []string{tktEmpty})
 
 	relGone := insertNode(t, d, harbour, "REL-11", "release", "SECRET-DELETED-TITLE", "", "open", project, "{}")
-	tktGone := insertNode(t, d, harbour, "TKT-11", "ticket", "SECRET-DELETED-TICKET", "", "open", project, `{"pill_en":"Deleted stays hidden","pill_de":"Gelöscht bleibt verborgen","benefit_en":"SECRET-DELETED-RELEASE","benefit_de":"SECRET-DELETED-RELEASE","hide_from_release_notes":false}`)
+	tktGone := insertNode(t, d, harbour, "TKT-11", "work", "SECRET-DELETED-TICKET", "", "open", project, `{"pill_en":"Deleted stays hidden","pill_de":"Gelöscht bleibt verborgen","benefit_en":"SECRET-DELETED-RELEASE","benefit_de":"SECRET-DELETED-RELEASE","hide_from_release_notes":false}`)
 	publishRelease(t, d, harbour, project, relGone, 11, "released", "260905120000.0.0", -4*24*time.Hour, []string{tktGone})
 	softDeleteNode(t, d, harbour, relGone)
 
@@ -113,7 +113,7 @@ func TestPublicReleaseHistoryWhitelist(t *testing.T) {
 	otherProj := insertNode(t, d, other, "PRJ-1", "project", "SECRET-OTHER-TENANT-PROJECT", "", "open", "", "{}")
 	linkPace(t, d, other, otherProj)
 	otherRel := insertNode(t, d, other, "REL-1", "release", "SECRET-OTHER-TENANT-TITLE", "", "open", otherProj, "{}")
-	otherTkt := insertNode(t, d, other, "TKT-1", "ticket", "SECRET-OTHER-TENANT-TICKET", "", "open", otherProj, `{"pill_en":"Other tenant hidden","pill_de":"Anderer Mandant","benefit_en":"SECRET-OTHER-TENANT","benefit_de":"SECRET-OTHER-TENANT","hide_from_release_notes":false}`)
+	otherTkt := insertNode(t, d, other, "TKT-1", "work", "SECRET-OTHER-TENANT-TICKET", "", "open", otherProj, `{"pill_en":"Other tenant hidden","pill_de":"Anderer Mandant","benefit_en":"SECRET-OTHER-TENANT","benefit_de":"SECRET-OTHER-TENANT","hide_from_release_notes":false}`)
 	publishRelease(t, d, other, otherProj, otherRel, 1, "released", "260926120000.0.0", -3*24*time.Hour, []string{otherTkt})
 
 	insertNode(t, d, closed, "PPR-1", "portal_product", "Closed catalog", "Closed summary.", "published", "", "{}")

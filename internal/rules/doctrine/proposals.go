@@ -20,6 +20,10 @@ import (
 
 // Proposal holds references and workflow evidence, never proposed prose.
 type Proposal struct {
+	InboxDigest      string    `json:"inbox_digest,omitempty"`
+	DeskQuestionID   string    `json:"desk_question_id,omitempty"`
+	DeskAnswerID     string    `json:"desk_answer_id,omitempty"`
+	SupersededBy     string    `json:"superseded_by,omitempty"`
 	Draft            bool      `json:"draft,omitempty"`
 	Automatic        bool      `json:"automatic,omitempty"`
 	ID               string    `json:"id"`
@@ -50,6 +54,10 @@ type Proposal struct {
 	Version          int64     `json:"-"`
 	OperationID      string    `json:"-"`
 	OperationUntil   time.Time `json:"-"`
+
+	// Immutable inbox request evidence; publication edits change InputDigest only.
+	InboxRequestDigest string `json:"-"`
+
 	// Doctrine inbox (AEON-444): references and decisions, never prose.
 	Inbox          bool   `json:"inbox,omitempty"`
 	BaseRuleSHA    string `json:"base_rule_sha256,omitempty"`
@@ -70,10 +78,11 @@ type Proposal struct {
 
 type proposalData struct {
 	Proposal
-	GateReviewID   int64     `json:"gate_review_id,omitempty"`
-	Version        int64     `json:"version"`
-	OperationID    string    `json:"operation_id,omitempty"`
-	OperationUntil time.Time `json:"operation_until,omitempty"`
+	InboxRequestDigest string    `json:"inbox_request_digest,omitempty"`
+	GateReviewID       int64     `json:"gate_review_id,omitempty"`
+	Version            int64     `json:"version"`
+	OperationID        string    `json:"operation_id,omitempty"`
+	OperationUntil     time.Time `json:"operation_until,omitempty"`
 }
 
 const proposalColumns = `id::text,source_id::text,repository,path,rule_key,input_digest,base_commit,proposed_by::text,created_at,data`
@@ -94,6 +103,7 @@ func scanProposal(row pgx.Row, extra ...any) (Proposal, error) {
 	}
 	d.ID, d.SourceID, d.Repository, d.Path, d.RuleKey, d.InputDigest, d.BaseCommit, d.ProposedBy, d.CreatedAt = p.ID, p.SourceID, p.Repository, p.Path, p.RuleKey, p.InputDigest, p.BaseCommit, p.ProposedBy, p.CreatedAt
 	d.GateReview = d.GateReviewID
+	d.Proposal.InboxRequestDigest = d.InboxRequestDigest
 	d.Proposal.Version, d.Proposal.OperationID, d.Proposal.OperationUntil = d.Version, d.OperationID, d.OperationUntil
 	if d.State == "" {
 		d.State = "proposed"
@@ -118,7 +128,7 @@ func countPins(ctx context.Context, tx pgx.Tx, p *Proposal) error {
 	return nil
 }
 func saveProposal(ctx context.Context, tx pgx.Tx, actor tenant.Principal, p *Proposal, event string) error {
-	raw, err := json.Marshal(proposalData{Proposal: *p, GateReviewID: p.GateReview, Version: p.Version + 1, OperationID: p.OperationID, OperationUntil: p.OperationUntil})
+	raw, err := json.Marshal(proposalData{Proposal: *p, InboxRequestDigest: p.InboxRequestDigest, GateReviewID: p.GateReview, Version: p.Version + 1, OperationID: p.OperationID, OperationUntil: p.OperationUntil})
 	if err != nil {
 		return err
 	}
@@ -133,6 +143,11 @@ func saveProposal(ctx context.Context, tx pgx.Tx, actor tenant.Principal, p *Pro
 	if event == "" {
 		return nil
 	}
+	_, err = events.Append(ctx, tx, actor, proposalChange(*p, event))
+	return err
+}
+
+func proposalChange(p Proposal, event string) events.Change {
 	after := map[string]any{
 		"proposal_id": p.ID, "repository": p.Repository, "pr_number": p.PRNumber, "head_sha": p.HeadSHA, "state": p.State, "proposed_by": p.ProposedBy, "approved_by": p.ApprovedBy, "gate_review_id": p.GateReview, "merge_commit": p.MergeCommit, "release": p.Release, "release_commit": p.ReleaseCommit, "release_requested": p.ReleaseRequested,
 	}
@@ -147,8 +162,7 @@ func saveProposal(ctx context.Context, tx pgx.Tx, actor tenant.Principal, p *Pro
 		after["dismissed_by"] = p.DismissedBy
 		after["promoted_commit"] = p.PromotedCommit
 	}
-	_, err = events.Append(ctx, tx, actor, events.Change{Type: event, After: after})
-	return err
+	return events.Change{Type: event, After: after}
 }
 func (m *Module) proposalAccess(p tenant.Principal) error {
 	if !m.app.configured() {
@@ -258,16 +272,16 @@ func (m *Module) proposeChange(parent context.Context, actor tenant.Principal, i
 		if err != nil {
 			return err
 		}
-		if !writableSource(source) {
-			return fail(422, "unsupported_repository", "Only the public and private INSPR doctrine repositories accept proposals; their visibility must match.")
+		if !m.writableSource(source) {
+			return fail(422, "unsupported_repository", "Only the deployment-configured doctrine repositories accept proposals; their visibility must match.")
 		}
 		if source.CredentialRef != "" {
-			if err := m.credentials.authorize(source.CredentialRef, actor.TenantID, source.Repository); err != nil {
+			if err := m.credentials.authorizeSource(source, actor.TenantID); err != nil {
 				return err
 			}
 		}
 		files, err = cachedFiles(ctx, tx, source)
-		if err == nil && source.Repository == publicRepository {
+		if err == nil && m.repositories.IsPublic(source.Repository) {
 			guard, err = m.privateGuard(ctx, tx, actor)
 		}
 		return err
@@ -329,7 +343,7 @@ func (m *Module) preparePublication(ctx context.Context, actor tenant.Principal,
 	if !humanActor(actor) {
 		return nil, "", nil, errPersonPublishes
 	}
-	changed, _, _, err := editRuleViews(source, files, in)
+	changed, _, _, err := m.editRuleViews(source, files, in)
 	if err != nil {
 		return nil, "", nil, err
 	}
@@ -561,7 +575,7 @@ func (m *Module) withProposal(r *http.Request, actor tenant.Principal, permissio
 	})
 }
 func (m *Module) approveProposal(r *http.Request, actor tenant.Principal) (any, error) {
-	if actor.Kind != tenant.Person || actor.KeyCreatorID != "" {
+	if (actor.Kind != tenant.Person || actor.KeyCreatorID != "") && !authz.OwnerWorkstation(actor) {
 		return nil, authz.ErrForbidden
 	}
 	var in struct {
@@ -576,6 +590,9 @@ func (m *Module) approveProposal(r *http.Request, actor tenant.Principal) (any, 
 	// Approval intent survives an uncertain merge response. An already merged
 	// PR is an observation, never a new approval attributed to this person.
 	_, err := m.withProposal(r, actor, "rules.publish", func(ctx context.Context, g *GitHub, p *Proposal) (string, error) {
+		if authz.OwnerWorkstation(actor) && (p.ProposedBy == actor.ID || p.SubmittedBy == actor.ID || p.EditedBy == actor.ID) {
+			return "", authz.ErrForbidden
+		}
 		if in.Head != p.HeadSHA {
 			return "", fail(409, "stale_head", "Reload the PR before approving its current commit.")
 		}

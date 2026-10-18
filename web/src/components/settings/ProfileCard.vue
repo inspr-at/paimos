@@ -248,7 +248,7 @@ const name = computed(() => [p.value?.first_name, p.value?.last_name].filter(Boo
 .photo:focus-visible { box-shadow: var(--focus-ring); }
 .change {
   position: absolute; inset: 4px; display: grid; place-content: center; justify-items: center; gap: 4px; border-radius: 50%;
-  background: rgba(8, 20, 22, .55); color: #fff; font-size: 12.5px; font-weight: 600; opacity: 0; transition: opacity .15s ease;
+  background: color-mix(in srgb, var(--overlay-ink) 55%, transparent); color: var(--surface-highlight); font-size: 12.5px; font-weight: 600; opacity: 0; transition: opacity .15s ease;
 }
 .photo:hover .change, .photo:focus-visible .change { opacity: 1; }
 @media (hover: none) { .change { opacity: 1; inset: auto 4px 4px 4px; height: 30px; border-radius: 0 0 52px 52px; grid-auto-flow: column; gap: 5px; font-size: 11.5px; } }

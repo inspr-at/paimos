@@ -4,9 +4,7 @@ package quotes
 import (
 	"bytes"
 	"context"
-	"crypto/sha256"
 	"encoding/binary"
-	"encoding/hex"
 	"encoding/json"
 	"encoding/xml"
 	"errors"
@@ -14,88 +12,33 @@ import (
 	"io"
 	"io/fs"
 	"net/http"
-	"os"
-	"path/filepath"
 	"regexp"
 	"strconv"
 	"strings"
 
 	"github.com/jackc/pgx/v5"
 
+	"github.com/inspr-at/paimos/internal/business/quotedocument"
+
 	"github.com/inspr-at/paimos/internal/attachments"
+	"github.com/inspr-at/paimos/internal/httpapi"
 	"github.com/inspr-at/paimos/internal/plugins/fence"
 )
 
 // Profiles are part of the existing business_quotes module and compiled
 // ManifestPlugin. The coordinator mounts quotes.New; this package does not
 // register itself in cmd/aeon or the builtin plugin registry.
-type profileFont struct {
-	Role    string `json:"role"`
-	Family  string `json:"family"`
-	Weight  int    `json:"weight"`
-	Style   string `json:"style"`
-	AssetID string `json:"asset_id"`
-}
-type profilePage struct {
-	WidthMM  string `json:"width_mm"`
-	HeightMM string `json:"height_mm"`
-	TopMM    string `json:"top_mm"`
-	RightMM  string `json:"right_mm"`
-	BottomMM string `json:"bottom_mm"`
-	LeftMM   string `json:"left_mm"`
-}
-type profileColumn struct {
-	Key     string `json:"key"`
-	WidthMM string `json:"width_mm"`
-}
-type profileTable struct {
-	Columns      []profileColumn `json:"columns"`
-	Separator    string          `json:"separator"`
-	RepeatHeader bool            `json:"repeat_header"`
-}
-type profileTotals struct {
-	VAT      string `json:"vat"`
-	Discount string `json:"discount"`
-	NetLabel string `json:"net_label"`
-}
-type profilePayment struct {
-	Position string `json:"position"`
-	Heading  string `json:"heading"`
-}
-type profileAcceptance struct {
-	SignatureColumns int    `json:"signature_columns"`
-	GapMM            string `json:"gap_mm"`
-	LeadMM           string `json:"lead_mm"`
-}
-type profileFooter struct {
-	AssetID          string `json:"asset_id,omitempty"`
-	DotsAssetID      string `json:"dots_asset_id,omitempty"`
-	WidthMM          string `json:"width_mm"`
-	OffsetMM         string `json:"offset_mm"`
-	PageNumberFormat string `json:"page_number_format"`
-}
-type profileDefinition struct {
-	Schema         string            `json:"schema"`
-	LayoutVariant  string            `json:"layout_variant"`
-	Locale         string            `json:"locale"`
-	Fonts          []profileFont     `json:"fonts"`
-	Colors         map[string]string `json:"colors"`
-	Typography     map[string]string `json:"typography"`
-	Page           profilePage       `json:"page"`
-	Cover          map[string]string `json:"cover"`
-	Sections       map[string]string `json:"sections"`
-	PositionsTable profileTable      `json:"positions_table"`
-	Totals         profileTotals     `json:"totals"`
-	PaymentTerms   profilePayment    `json:"payment_terms"`
-	Acceptance     profileAcceptance `json:"acceptance"`
-	Footer         profileFooter     `json:"footer"`
-	Labels         map[string]string `json:"labels"`
-}
-type documentProfileSnapshot struct {
-	ID         string            `json:"id"`
-	Revision   int               `json:"revision"`
-	Definition profileDefinition `json:"definition"`
-}
+type profileFont = quotedocument.Font
+type profilePage = quotedocument.Page
+type profileColumn = quotedocument.Column
+type profileTable = quotedocument.Table
+type profileTotals = quotedocument.Totals
+type profilePayment = quotedocument.Payment
+type profileAcceptance = quotedocument.Acceptance
+type profileFooter = quotedocument.Footer
+type profileDefinition = quotedocument.ProfileDefinition
+type documentProfileSnapshot = quotedocument.ProfileSnapshot
+
 type profileRow struct {
 	ID         string            `json:"id"`
 	Name       string            `json:"name"`
@@ -278,7 +221,7 @@ func readProfile(ctx context.Context, tx pgx.Tx, id string, revision int) (profi
 	if err := json.Unmarshal(raw, &out.Definition); err != nil {
 		return out, err
 	}
-	out.Definition = out.Definition.normalized()
+	out.Definition = out.Definition.Normalized()
 	return out, nil
 }
 func (m *Module) profileList(w http.ResponseWriter, r *http.Request) {
@@ -307,7 +250,7 @@ func (m *Module) profileList(w http.ResponseWriter, r *http.Request) {
 			if err = json.Unmarshal(raw, &item.Definition); err != nil {
 				return err
 			}
-			item.Definition = item.Definition.normalized()
+			item.Definition = item.Definition.Normalized()
 			out = append(out, item)
 		}
 		return rows.Err()
@@ -373,7 +316,7 @@ func (m *Module) profileWrite(w http.ResponseWriter, r *http.Request) {
 	}
 	var out profileRow
 	e = m.tx(r.Context(), p, fence.PermNodesContribute, true, func(tx pgx.Tx) error {
-		in.Definition = in.Definition.normalized()
+		in.Definition = in.Definition.Normalized()
 		if err := validateProfile(r.Context(), tx, in.Definition); err != nil {
 			return err
 		}
@@ -657,49 +600,8 @@ func safeProfileSVG(raw []byte) bool {
 // Profile fonts and safe SVGs have their own strict validator above. The
 // general attachment upload deliberately does not accept those media types.
 // Keep the same tenant/hash file layout so Store.Open can serve the asset.
-func putProfileAsset(ctx context.Context, tenantID string, raw []byte, kind, filesDir string) (attachments.Prepared, error) {
-	if kind == "image/png" {
-		return (attachments.Store{FilesDir: filesDir}).Put(ctx, tenantID, bytes.NewReader(raw))
-	}
-	hash := sha256.Sum256(raw)
-	digest := hex.EncodeToString(hash[:])
-	root := filesDir
-	if root == "" {
-		root = os.Getenv("AEON_FILES_DIR")
-	}
-	if root == "" {
-		root = "./data/files"
-	}
-	directory := filepath.Join(root, tenantID, digest[:2], digest[2:4])
-	if err := os.MkdirAll(directory, 0700); err != nil {
-		return attachments.Prepared{}, err
-	}
-	if err := ctx.Err(); err != nil {
-		return attachments.Prepared{}, err
-	}
-	tmp, err := os.CreateTemp(directory, "profile-*")
-	if err != nil {
-		return attachments.Prepared{}, err
-	}
-	defer os.Remove(tmp.Name())
-	if _, err := tmp.Write(raw); err != nil {
-		_ = tmp.Close()
-		return attachments.Prepared{}, err
-	}
-	if err := tmp.Sync(); err != nil {
-		_ = tmp.Close()
-		return attachments.Prepared{}, err
-	}
-	if err := tmp.Close(); err != nil {
-		return attachments.Prepared{}, err
-	}
-	if err := ctx.Err(); err != nil {
-		return attachments.Prepared{}, err
-	}
-	if err := os.Rename(tmp.Name(), filepath.Join(directory, digest)); err != nil {
-		return attachments.Prepared{}, err
-	}
-	return attachments.Prepared{SHA256: digest, ContentType: kind, Size: int64(len(raw))}, nil
+func putProfileAsset(ctx context.Context, tx pgx.Tx, tenantID string, raw []byte, kind, filesDir string) (attachments.Prepared, error) {
+	return (attachments.Store{FilesDir: filesDir}).PutProfileAsset(ctx, tx, tenantID, raw, kind)
 }
 
 func (m *Module) profileAssetUpload(w http.ResponseWriter, r *http.Request) {
@@ -712,7 +614,7 @@ func (m *Module) profileAssetUpload(w http.ResponseWriter, r *http.Request) {
 		respond(w, 0, nil, denied())
 		return
 	}
-	raw, e := io.ReadAll(http.MaxBytesReader(w, r.Body, 10<<20))
+	raw, e := httpapi.ReadRequestBody(w, r, 10<<20, httpapi.UploadBodyReadTimeout)
 	if e != nil {
 		respond(w, 0, nil, bad("asset exceeds 10 MiB"))
 		return
@@ -722,13 +624,12 @@ func (m *Module) profileAssetUpload(w http.ResponseWriter, r *http.Request) {
 		respond(w, 0, nil, bad("expected TTF, OTF, WOFF2, PNG or safe SVG"))
 		return
 	}
-	prepared, e := putProfileAsset(r.Context(), p.TenantID, raw, kind, "")
-	if e != nil {
-		respond(w, 0, nil, bad("asset storage rejected file"))
-		return
-	}
 	var out profileAsset
 	e = m.tx(r.Context(), p, fence.PermNodesContribute, true, func(tx pgx.Tx) error {
+		prepared, err := putProfileAsset(r.Context(), tx, p.TenantID, raw, kind, "")
+		if err != nil {
+			return err
+		}
 		out.SHA256 = prepared.SHA256
 		out.ContentType = kind
 		out.Size = prepared.Size
@@ -822,6 +723,12 @@ func (m *Module) selectProfile(w http.ResponseWriter, r *http.Request) {
 	}
 	var out draftRow
 	e = m.tx(r.Context(), p, fence.PermNodesContribute, true, func(tx pgx.Tx) error {
+		// Bundle refresh takes profile, quote, then draft. Take the snapshot
+		// first, including when this selection will later fail its revision.
+		profile, err := readProfileSnapshot(r.Context(), tx, in.ProfileID)
+		if err != nil {
+			return err
+		}
 		q, err := readQuote(r.Context(), tx, id, true)
 		if err != nil {
 			return err
@@ -835,10 +742,6 @@ func (m *Module) selectProfile(w http.ResponseWriter, r *http.Request) {
 		}
 		if current.DraftRevision != in.ExpectedDraftRevision {
 			return conflict("draft revision is stale")
-		}
-		profile, err := readProfileSnapshot(r.Context(), tx, in.ProfileID)
-		if err != nil {
-			return err
 		}
 		doc, err := decodeDocument(current.Document)
 		if err != nil {

@@ -3,11 +3,68 @@
 package main
 
 import (
+	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 	"testing"
 )
+
+func TestMissingBlankPageFailsRegardlessOfPixelTolerance(t *testing.T) {
+	if _, err := exec.LookPath("pdftoppm"); err != nil {
+		if _, err := os.Stat("/opt/homebrew/bin/pdftoppm"); err != nil {
+			t.Skip("pdftoppm unavailable")
+		}
+	}
+	dir := t.TempDir()
+	for pages := 1; pages <= 2; pages++ {
+		kids := "3 0 R"
+		if pages == 2 {
+			kids += " 4 0 R"
+		}
+		objects := []string{"<< /Type /Catalog /Pages 2 0 R >>", fmt.Sprintf("<< /Type /Pages /Kids [%s] /Count %d >>", kids, pages)}
+		for page := 0; page < pages; page++ {
+			objects = append(objects, "<< /Type /Page /Parent 2 0 R /MediaBox [0 0 200 200] >>")
+		}
+		var pdf strings.Builder
+		pdf.WriteString("%PDF-1.4\n")
+		var offsets []int
+		for i, object := range objects {
+			offsets = append(offsets, pdf.Len())
+			fmt.Fprintf(&pdf, "%d 0 obj\n%s\nendobj\n", i+1, object)
+		}
+		xref := pdf.Len()
+		fmt.Fprintf(&pdf, "xref\n0 %d\n0000000000 65535 f \n", len(objects)+1)
+		for _, offset := range offsets {
+			fmt.Fprintf(&pdf, "%010d 00000 n \n", offset)
+		}
+		fmt.Fprintf(&pdf, "trailer\n<< /Root 1 0 R /Size %d >>\nstartxref\n%d\n%%%%EOF\n", len(objects)+1, xref)
+		if err := os.WriteFile(filepath.Join(dir, fmt.Sprint(pages, ".pdf")), []byte(pdf.String()), 0600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	for _, missing := range []string{"left", "right"} {
+		t.Run(missing, func(t *testing.T) {
+			left, right := "1.pdf", "2.pdf"
+			if missing == "right" {
+				left, right = right, left
+			}
+			out := filepath.Join(dir, missing)
+			code, err := Run(filepath.Join(dir, left), filepath.Join(dir, right), Options{OutDir: out, DPI: 36, Tolerance: 255, Threshold: 100})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if code != 2 {
+				t.Fatalf("missing blank page exit=%d, want 2", code)
+			}
+			html, err := os.ReadFile(filepath.Join(out, "summary.html"))
+			if err != nil || !strings.Contains(string(html), "missing "+missing) {
+				t.Fatalf("missing report: %s %v", html, err)
+			}
+		})
+	}
+}
 
 func TestIdenticalSyntheticPDFsMatch(t *testing.T) {
 	if _, err := exec.LookPath("pdftoppm"); err != nil {

@@ -25,11 +25,12 @@ type step struct {
 }
 
 type job struct {
-	Uses     string
-	With     map[string]string
-	RunsOn   string `yaml:"runs-on"`
-	If       string
-	Strategy struct {
+	Uses           string
+	With           map[string]string
+	RunsOn         string `yaml:"runs-on"`
+	If             string
+	TimeoutMinutes int `yaml:"timeout-minutes"`
+	Strategy       struct {
 		FailFast bool `yaml:"fail-fast"`
 		Matrix   struct {
 			Include []struct {
@@ -48,6 +49,7 @@ type job struct {
 }
 
 type workflow struct {
+	Env         map[string]string
 	On          map[string]any
 	Permissions map[string]string
 	Jobs        map[string]job
@@ -84,6 +86,64 @@ func named(t *testing.T, j job, name string) (int, step) {
 	}
 	t.Fatalf("missing step %q", name)
 	return -1, step{}
+}
+
+// Risk: a host's older pg_dump can neither read pg18 nor perform the vector-free
+// backup drill. Both CI lanes must use the clients from their exact service.
+// releaseYAML joins only job sections for invariant tests; the real publisher
+// still calls the independently tested completion workflow with bound inputs.
+func releaseYAML(t *testing.T) string {
+	t.Helper()
+	read := func(name string) string {
+		data, err := os.ReadFile(filepath.Join(root(t), ".github/workflows", name))
+		if err != nil {
+			t.Fatal(err)
+		}
+		return string(data)
+	}
+	completion := strings.SplitN(read("release-completion.yml"), "\njobs:\n", 2)
+	if len(completion) != 2 {
+		t.Fatal("completion jobs missing")
+	}
+	return read("release.yml") + "\n" + completion[1]
+}
+
+func releaseJobs(t *testing.T) workflow { return parseWorkflow(t, releaseYAML(t)) }
+
+func nativeBuildCommands(body string) string {
+	var commands []string
+	for _, line := range strings.Split(body, "\n") {
+		if strings.Contains(line, "bash scripts/build-release-binaries.sh") {
+			commands = append(commands, strings.TrimSpace(line))
+		}
+	}
+	return strings.Join(commands, "\n")
+}
+
+func TestNightlyBackupUsesItsPostgresServiceClients(t *testing.T) {
+	for _, lane := range []struct{ file, job string }{
+		{"ci.yml", "go-test"}, {"nightly-full.yml", "nightly-go-test"},
+	} {
+		t.Run(lane.file, func(t *testing.T) {
+			data, err := os.ReadFile(filepath.Join(root(t), ".github/workflows", lane.file))
+			if err != nil {
+				t.Fatal(err)
+			}
+			var w struct {
+				Jobs map[string]struct{ Steps []step }
+			}
+			if err := yaml.Unmarshal(data, &w); err != nil {
+				t.Fatal(err)
+			}
+			_, run := named(t, job{Steps: w.Jobs[lane.job].Steps}, "Test this shard (essential plus changed area, or full on main)")
+			if run.Env["AEON_TEST_POSTGRES_CONTAINER"] != "${{ job.services.postgres.id }}" {
+				t.Fatal("backup/restore must use the PostgreSQL service's exact client version")
+			}
+			if run.ContinueOnError || run.If != "" {
+				t.Fatal("the database regressions must remain mandatory")
+			}
+		})
+	}
 }
 
 func TestImageDoesNotWaitForClients(t *testing.T) {
@@ -135,81 +195,149 @@ func TestImageDoesNotWaitForClients(t *testing.T) {
 		}
 	}
 	if _, ok := w.Jobs["homebrew-tap"]; ok {
-		t.Fatal("tap stays publication-triggered")
+		t.Fatal("tap stays on its separate protected coordinator workflow")
 	}
 }
 
 func TestDarwinRestoreGateRequiresExactReleaseVersion(t *testing.T) {
 	j := readWorkflow(t, "release-completion.yml").Jobs["agentd-darwin"]
-	gateIndex, gate := named(t, j, "Verify darwin signature")
-	if gate.If != "" || gate.Env["VERSION"] != "${{ needs.prepare.outputs.version }}" || j.Env["AEON_DEVELOPER_ID_TEAM"] != "P66J39QV6V" {
-		t.Fatal("restored and newly signed binaries must verify the exact prepared version and team")
-	}
-	for i, s := range j.Steps {
-		if strings.HasPrefix(s.Uses, "actions/upload-artifact@") && i <= gateIndex {
-			t.Fatal("Darwin verification must precede artifact upload")
+	for _, kind := range []string{"agentd", "cli"} {
+		gateName, assetPrefix, versionPrefix := "Verify darwin signature", "paimos-agentd-darwin-", "paimos-agentd "
+		if kind == "cli" {
+			gateName, assetPrefix, versionPrefix = "Verify darwin CLI signature and version", "aeon-cli-darwin-", ""
 		}
-	}
-	const version = "261002120000.0.0"
-	for _, arch := range []string{"arm64", "amd64"} {
-		for _, tc := range []struct {
-			name, embedded, team             string
-			signed, probeFails, ok, executed bool
-		}{
-			{"same-coordinate", version, "P66J39QV6V", true, false, true, true},
-			{"signed-other-coordinate", "261001120000.0.0", "P66J39QV6V", true, false, false, true},
-			{"version-suffix", version + "-other", "P66J39QV6V", true, false, false, true},
-			{"failed-version-probe", version, "P66J39QV6V", true, true, false, true},
-			{"wrong-team", version, "OTHERTEAM00", true, false, false, false},
-			{"invalid-signature", version, "P66J39QV6V", false, false, false, false},
-		} {
-			t.Run(arch+"/"+tc.name, func(t *testing.T) {
-				dir := t.TempDir()
-				binDir := filepath.Join(dir, "release-source", "dist")
-				if err := os.MkdirAll(binDir, 0700); err != nil {
-					t.Fatal(err)
+		gateIndex, gate := named(t, j, gateName)
+		if gate.If != "" || gate.Env["VERSION"] != "${{ needs.prepare.outputs.version }}" || j.Env["AEON_DEVELOPER_ID_TEAM"] != "P66J39QV6V" {
+			t.Fatal("restored and newly signed binaries must verify the exact prepared version and team")
+		}
+		for i, s := range j.Steps {
+			if strings.HasPrefix(s.Uses, "actions/upload-artifact@") && i <= gateIndex {
+				t.Fatal("Darwin verification must precede artifact upload")
+			}
+		}
+		const version = "261002120000.0.0"
+		for _, arch := range []string{"arm64", "amd64"} {
+			for _, tc := range []struct {
+				name, embedded, team             string
+				signed, probeFails, ok, executed bool
+			}{
+				{"same-coordinate", version, "P66J39QV6V", true, false, true, true},
+				{"same-coordinate-ledger", version + " ledger-v1", "P66J39QV6V", true, false, true, true},
+				{"signed-other-coordinate", "261001120000.0.0", "P66J39QV6V", true, false, false, true},
+				{"version-suffix", version + "-other", "P66J39QV6V", true, false, false, true},
+				{"failed-version-probe", version, "P66J39QV6V", true, true, false, true},
+				{"wrong-team", version, "OTHERTEAM00", true, false, false, false},
+				{"invalid-signature", version, "P66J39QV6V", false, false, false, false},
+			} {
+				if kind == "cli" && tc.name == "same-coordinate-ledger" {
+					continue
 				}
-				// Model a valid Developer ID signature independently of the embedded
-				// coordinate; only the version probe distinguishes the older release.
-				codesign := `#!/bin/bash
+				t.Run(kind+"/"+arch+"/"+tc.name, func(t *testing.T) {
+					dir := t.TempDir()
+					binDir := filepath.Join(dir, "release-source", "dist")
+					if err := os.MkdirAll(binDir, 0700); err != nil {
+						t.Fatal(err)
+					}
+					// Model a valid Developer ID signature independently of the embedded
+					// coordinate; only the version probe distinguishes the older release.
+					codesign := `#!/bin/bash
 case "$1" in
-  --verify) [ "$SIGNATURE_OK" = true ] ;;
+  --verify) [ "$SIGNATURE_OK" = true ] && { [ "$BINARY_KIND" != cli ] || [ "$SIGNED_TEAM" = P66J39QV6V ]; } ;;
   -dv) printf 'TeamIdentifier=%s\n' "$SIGNED_TEAM" >&2 ;;
   *) exit 1 ;;
 esac
 `
-				binary := `#!/bin/bash
+					binary := `#!/bin/bash
 [ "$1" = --version ] || exit 1
 printf 'executed\n' >> "$TRACE"
-printf 'paimos-agentd %s\n' "$BINARY_VERSION"
+printf '%s%s\n' "$BINARY_PREFIX" "$BINARY_VERSION"
 [ "$VERSION_FAIL" != true ]
 `
-				asset := "paimos-agentd-darwin-" + arch
-				for path, content := range map[string]string{filepath.Join(dir, "codesign"): codesign, filepath.Join(binDir, asset): binary} {
-					if err := os.WriteFile(path, []byte(content), 0700); err != nil {
-						t.Fatal(err)
+					asset := assetPrefix + arch
+					for path, content := range map[string]string{filepath.Join(dir, "codesign"): codesign, filepath.Join(binDir, asset): binary} {
+						if err := os.WriteFile(path, []byte(content), 0700); err != nil {
+							t.Fatal(err)
+						}
 					}
-				}
-				trace := filepath.Join(dir, "trace")
-				cmd := exec.Command("bash", "-c", gate.Run)
-				cmd.Dir = dir
-				cmd.Env = append(os.Environ(), "PATH="+dir+":"+os.Getenv("PATH"), "ASSET_NAME="+asset,
-					"VERSION="+version, "AEON_DEVELOPER_ID_TEAM=P66J39QV6V", "SIGNED_TEAM="+tc.team,
-					"SIGNATURE_OK="+map[bool]string{true: "true", false: "false"}[tc.signed], "BINARY_VERSION="+tc.embedded,
-					"VERSION_FAIL="+map[bool]string{true: "true", false: "false"}[tc.probeFails], "TRACE="+trace)
-				output, err := cmd.CombinedOutput()
-				if (err == nil) != tc.ok {
-					t.Fatalf("Darwin gate success %v, want %v: %s", err == nil, tc.ok, output)
-				}
-				if tc.signed && !tc.probeFails && tc.team == "P66J39QV6V" && !tc.ok && !strings.Contains(string(output), "version does not match") {
-					t.Fatalf("validly signed stale agent must fail the version check: %s", output)
-				}
-				_, err = os.Stat(trace)
-				if (err == nil) != tc.executed {
-					t.Fatal("the version probe must run only after signature and team verification")
-				}
-			})
+					trace := filepath.Join(dir, "trace")
+					cmd := exec.Command("bash", "-c", gate.Run)
+					cmd.Dir = dir
+					cmd.Env = append(os.Environ(), "PATH="+dir+":"+os.Getenv("PATH"), "ASSET_NAME="+asset,
+						"BINARY_KIND="+kind, "BINARY_PREFIX="+versionPrefix, "VERSION="+version, "AEON_DEVELOPER_ID_TEAM=P66J39QV6V", "SIGNED_TEAM="+tc.team,
+						"SIGNATURE_OK="+map[bool]string{true: "true", false: "false"}[tc.signed], "BINARY_VERSION="+tc.embedded,
+						"VERSION_FAIL="+map[bool]string{true: "true", false: "false"}[tc.probeFails], "TRACE="+trace)
+					output, err := cmd.CombinedOutput()
+					if (err == nil) != tc.ok {
+						t.Fatalf("Darwin gate success %v, want %v: %s", err == nil, tc.ok, output)
+					}
+					if tc.signed && !tc.probeFails && tc.team == "P66J39QV6V" && !tc.ok && !strings.Contains(string(output), "version does not match") {
+						t.Fatalf("validly signed stale agent must fail the version check: %s", output)
+					}
+					_, err = os.Stat(trace)
+					if (err == nil) != tc.executed {
+						t.Fatal("the version probe must run only after signature and team verification")
+					}
+				})
+			}
 		}
+	}
+}
+
+func TestDarwinHookCLIIsSignedAndRehearsedBeforeAssembly(t *testing.T) {
+	w := readWorkflow(t, "release-completion.yml")
+	dry := readWorkflow(t, "release-image-check.yml")
+	buildAt, build := named(t, w.Jobs["agentd-darwin"], "Build darwin paimos-agentd with LocalAuthentication")
+	signAt, sign := named(t, w.Jobs["agentd-darwin"], "Sign and notarize paimos-agentd")
+	_, rehearsal := named(t, dry.Jobs["agentd-rehearsal"], "Build darwin paimos-agentd with LocalAuthentication")
+	if buildAt >= signAt || nativeBuildCommands(build.Run) != nativeBuildCommands(rehearsal.Run) || !strings.Contains(build.Run, "build-release-binaries.sh cli-darwin") {
+		t.Fatal("native rehearsal must build the same CLI and daemon as production")
+	}
+	for _, key := range []string{"AEON_DARWIN_ARCH", "GOCACHE", "GOMODCACHE", "GOFLAGS"} {
+		if build.Env[key] != rehearsal.Env[key] {
+			t.Fatalf("native rehearsal differs in %s", key)
+		}
+	}
+	if build.Env["RESTORED_AGENTD"] != "${{ steps.restore.outputs.restored }}" || build.Env["RESTORED_CLI"] != "${{ steps.restore-cli.outputs.restored }}" {
+		t.Fatal("only verified restored assets may skip native rebuilding")
+	}
+	for _, fragment := range []string{
+		`sign-notarize.sh --identifier aeon-cli "dist/aeon-cli-darwin-${{ matrix.arch }}"`,
+		`codesign --verify --strict -R='anchor apple generic and identifier "aeon-cli" and certificate leaf[subject.OU] = "P66J39QV6V"'`,
+	} {
+		if !strings.Contains(sign.Run, fragment) {
+			t.Fatal("CLI signing requirement missing")
+		}
+	}
+	for _, j := range []job{w.Jobs["agentd-darwin"], dry.Jobs["agentd-rehearsal"]} {
+		found := false
+		for i, s := range j.Steps {
+			if strings.HasPrefix(s.Uses, "actions/upload-artifact@") {
+				found = true
+				if !strings.Contains(s.With["path"], "dist/aeon-cli-darwin-${{ matrix.arch }}") || (j.Environment == "release-signing" && i <= signAt) {
+					t.Fatal("CLI uploaded before signing or omitted")
+				}
+			}
+		}
+		if !found {
+			t.Fatal("missing native artifact handoff")
+		}
+	}
+	_, assemble := named(t, w.Jobs["assets"], "Build linux paimos-agentd and aeon-cli")
+	if !strings.Contains(assemble.Run, "build-release-binaries.sh cli-linux") || strings.Contains(assemble.Run, "build-release-binaries.sh cli\n") {
+		t.Fatal("assets assembly can overwrite signed Darwin CLI bytes")
+	}
+}
+
+func TestRehearsalEmbedsItsCandidateVersion(t *testing.T) {
+	j := readWorkflow(t, "release-image-check.yml").Jobs["image-dry-run"]
+	historyIndex, history := named(t, j, "Release history fixture")
+	buildIndex, _ := named(t, j, "Build cached smoke image")
+	if historyIndex >= buildIndex || history.Env["VERSION"] != "${{ steps.version.outputs.version }}" || !strings.Contains(history.Run, `-candidate "$VERSION"`) {
+		t.Fatal("rehearsal image must embed its own reserved version before building")
+	}
+	_, published := named(t, readWorkflow(t, "release.yml").Jobs["image-platform"], "Release history")
+	if strings.Contains(published.Run, "-candidate") {
+		t.Fatal("tagged release builds must keep their normal history generation")
 	}
 }
 
@@ -239,7 +367,7 @@ func TestSmokeBeforePushAndAttest(t *testing.T) {
 	if smoke.Env["AEON_SMOKE_IMAGE"] != "${{ steps.smoke-image.outputs.image }}" || smoke.Run != "bash scripts/smoke-image.sh" {
 		t.Fatal("smoke must exercise the loaded immutable image ID")
 	}
-	for _, key := range []string{"context", "platforms", "build-args", "cache-from"} {
+	for _, key := range []string{"context", "platforms", "build-args", "cache-from", "build-contexts"} {
 		if build.With[key] != push.With[key] || build.With[key] == "" {
 			t.Fatalf("smoked and pushed build inputs differ: %s", key)
 		}
@@ -247,7 +375,7 @@ func TestSmokeBeforePushAndAttest(t *testing.T) {
 	if push.With["context"] != "." || push.With["push"] != "true" || push.With["provenance"] != "mode=max" || !strings.Contains(push.With["cache-to"], "type=registry,") || !strings.HasSuffix(push.With["cache-to"], ",mode=max") {
 		t.Fatal("pushed image requires generated history, registry cache and provenance")
 	}
-	if push.With["tags"] != "" || push.With["outputs"] != "type=image,name=ghcr.io/inspr-at/aeon,push-by-digest=true,name-canonical=true,push=true" {
+	if push.With["tags"] != "" || push.With["outputs"] != "type=image,name=ghcr.io/inspr-at/aeon,push-by-digest=true,name-canonical=true,push=true,rewrite-timestamp=true,oci-mediatypes=true" {
 		t.Fatal("platform jobs must publish by digest without tagging the release")
 	}
 	if !strings.HasPrefix(attest.Uses, "actions/attest-build-provenance@") || attest.With["subject-name"] != "ghcr.io/inspr-at/aeon" || attest.With["subject-digest"] != "${{ steps.push.outputs.digest }}" || attest.With["push-to-registry"] != "true" || attest.With["create-storage-record"] != "false" {
@@ -302,12 +430,98 @@ func TestLoadedImageResolverFailsClosed(t *testing.T) {
 	}
 }
 
+func TestPublishedRuntimeMustMatchSmokedRuntime(t *testing.T) {
+	j := readWorkflow(t, "release.yml").Jobs["image-platform"]
+	pushIndex, _ := named(t, j, "Build and push")
+	identityIndex, identity := named(t, j, "Verify pushed runtime matches smoke")
+	attestIndex, _ := named(t, j, "Attest pushed image")
+	if !(pushIndex < identityIndex && identityIndex < attestIndex) || identity.If != "" || identity.ContinueOnError {
+		t.Fatal("runtime identity gate can be bypassed")
+	}
+	for _, tc := range []struct {
+		name, published string
+		ok              bool
+	}{
+		{"same-export", "smoked", true},
+		{"clock-only", "clock-only", true},
+		{"different-rootfs", "different-rootfs", false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			dir := t.TempDir()
+			smoked := "sha256:" + strings.Repeat("a", 64)
+			// Stub only Docker transport; identity data are the unchanged configs
+			// of real BuildKit exports, including two injected creation clocks.
+			stub := `#!/bin/bash
+if [[ $1 == pull ]]; then exit 0; fi
+if [[ ${@: -1} == "$SMOKED_IMAGE" ]]; then cat "$SMOKED_FIXTURE"; else cat "$PUBLISHED_FIXTURE"; fi
+`
+			if err := os.WriteFile(filepath.Join(dir, "docker"), []byte(stub), 0700); err != nil {
+				t.Fatal(err)
+			}
+			cmd := exec.Command("bash", "-c", identity.Run)
+			cmd.Dir = root(t)
+			fixtures := filepath.Join(root(t), "scripts/releaseworkflow/testdata/runtime-identity")
+			cmd.Env = append(os.Environ(), "PATH="+dir+":"+os.Getenv("PATH"), "RUNNER_TEMP="+dir, "SMOKED_IMAGE="+smoked, "DIGEST=sha256:"+strings.Repeat("c", 64), "SMOKED_FIXTURE="+filepath.Join(fixtures, "smoked.json"), "PUBLISHED_FIXTURE="+filepath.Join(fixtures, tc.published+".json"))
+			output, err := cmd.CombinedOutput()
+			if (err == nil) != tc.ok {
+				t.Fatalf("identity gate error=%v output=%s", err, output)
+			}
+		})
+	}
+}
+
+func TestExportsShareSourceEpoch(t *testing.T) {
+	j := readWorkflow(t, "release.yml").Jobs["image-platform"]
+	epochIndex, epoch := named(t, j, "Pin both exports to the source epoch")
+	buildIndex, build := named(t, j, "Build cached smoke image")
+	_, push := named(t, j, "Build and push")
+	if epochIndex >= buildIndex || epoch.ID != "source-epoch" || epoch.If != "" || epoch.ContinueOnError || epoch.Env["FROZEN_SOURCE_EPOCH"] != "${{ steps.inputs.outputs.epoch }}" || build.With["build-args"] != push.With["build-args"] {
+		t.Fatal("exports do not share an unconditional source epoch")
+	}
+	if strings.Count(build.With["build-args"], "SOURCE_DATE_EPOCH=${{ steps.inputs.outputs.epoch }}\n") != 1 {
+		t.Fatal("exports must share the frozen build-input epoch")
+	}
+	for _, value := range []string{"1700000000", "1700000100", "", "bad", "1700000000\n1700000100"} {
+		dir := t.TempDir()
+		stub := "#!/bin/bash\n[[ $1 == show && $2 == -s && $3 == --format=%ct && $4 == HEAD ]] || exit 1\nprintf '%s\\n' \"$FIXTURE_EPOCH\"\n"
+		if err := os.WriteFile(filepath.Join(dir, "git"), []byte(stub), 0700); err != nil {
+			t.Fatal(err)
+		}
+		output := filepath.Join(dir, "output")
+		cmd := exec.Command("bash", "-c", epoch.Run)
+		cmd.Env = append(os.Environ(), "PATH="+dir+":"+os.Getenv("PATH"), "FIXTURE_EPOCH="+value, "FROZEN_SOURCE_EPOCH=1700000000", "GITHUB_OUTPUT="+output)
+		if err := cmd.Run(); (err == nil) != (value == "1700000000") {
+			t.Fatalf("source epoch %q: %v", value, err)
+		}
+		if value == "1700000000" {
+			body, err := os.ReadFile(output)
+			if err != nil || string(body) != "epoch=1700000000\n" {
+				t.Fatal("source epoch output differs")
+			}
+		}
+	}
+}
+
 func TestReadOnlyDryRunAndLeastPrivilege(t *testing.T) {
 	release := readWorkflow(t, "release.yml")
 	dry := readWorkflow(t, "release-image-check.yml")
 	completion := readWorkflow(t, "release-completion.yml")
-	if !reflect.DeepEqual(release.Permissions, map[string]string{"contents": "read"}) || !reflect.DeepEqual(dry.Permissions, map[string]string{"contents": "read"}) {
+	web := readWorkflow(t, "docker-web-check.yml")
+	if !reflect.DeepEqual(release.Permissions, map[string]string{"contents": "read"}) || !reflect.DeepEqual(dry.Permissions, map[string]string{"contents": "read"}) || !reflect.DeepEqual(web.Permissions, map[string]string{"contents": "read"}) {
 		t.Fatal("workflow defaults must be read-only")
+	}
+	if web.Jobs["docker-web-stage"].RunsOn != "ubuntu-24.04" {
+		t.Fatal("Docker web check must use the hosted ubuntu-24.04 runner")
+	}
+	paths := web.On["pull_request"].(map[string]any)["paths"].([]any)
+	for _, path := range []string{"web/**", "internal/**/*.json", "Dockerfile", "version.json", "scripts/**", "go.mod", "NOTICE", ".dockerignore"} {
+		found := false
+		for _, actual := range paths {
+			found = found || actual == path
+		}
+		if !found {
+			t.Fatalf("web check misses %s", path)
+		}
 	}
 	if !reflect.DeepEqual(release.Jobs["image-platform"].Permissions, map[string]string{"contents": "write", "actions": "read", "packages": "write", "attestations": "write", "id-token": "write"}) || !reflect.DeepEqual(release.Jobs["image"].Permissions, map[string]string{"contents": "write", "packages": "write", "attestations": "write", "id-token": "write"}) || !reflect.DeepEqual(completion.Jobs["assets"].Permissions, map[string]string{"contents": "write", "packages": "read", "attestations": "read"}) {
 		t.Fatal("token writes must be scoped to the image and assets jobs")
@@ -327,30 +541,49 @@ func TestReadOnlyDryRunAndLeastPrivilege(t *testing.T) {
 		t.Fatal("dry run must exercise the production smoke build")
 	}
 	tap := readWorkflow(t, "homebrew-tap.yml")
-	if !reflect.DeepEqual(tap.On, map[string]any{"release": map[string]any{"types": []any{"published"}}}) || !reflect.DeepEqual(tap.Permissions, map[string]string{"contents": "read"}) {
-		t.Fatal("Homebrew must remain read-only and publication-triggered")
+	if _, ok := tap.On["workflow_dispatch"]; !ok || len(tap.On) != 1 || !reflect.DeepEqual(tap.Permissions, map[string]string{"contents": "read", "actions": "read"}) {
+		t.Fatal("Homebrew must use read-only main dispatch, never tag-controlled release workflows")
+	}
+	for _, j := range tap.Jobs {
+		if !strings.Contains(j.If, "github.ref == 'refs/heads/main'") || !strings.Contains(j.If, "github.actor_id == '276789'") || j.Environment != "homebrew-tap" {
+			t.Fatal("tap secrets require reviewed main-only coordinator dispatch")
+		}
+		for _, s := range j.Steps {
+			if strings.Contains(s.Uses, "actions/checkout@") && (s.With["ref"] != "${{ github.workflow_sha }}" || s.With["persist-credentials"] != "false") {
+				t.Fatal("tap code must come from the main workflow commit")
+			}
+		}
 	}
 	pin := regexp.MustCompile(`@[a-f0-9]{40}$`)
-	for _, w := range []workflow{release, completion, dry, tap} {
+	for _, w := range []workflow{release, completion, dry, tap, web} {
 		for _, j := range w.Jobs {
 			for _, s := range j.Steps {
-				if s.Uses != "" && !pin.MatchString(s.Uses) {
+				if s.Uses != "" && !strings.HasPrefix(s.Uses, "./.github/workflows/") && !pin.MatchString(s.Uses) {
 					t.Fatalf("unpinned action %s", s.Uses)
 				}
 			}
 		}
 	}
-	for _, j := range dry.Jobs {
-		if len(j.Permissions) != 0 || j.Environment != "" {
-			t.Fatal("dry run acquires privileged tokens or environments")
+	for _, name := range []string{"release-image-check.yml", "docker-web-check.yml"} {
+		data, err := os.ReadFile(filepath.Join(root(t), ".github/workflows", name))
+		if err != nil {
+			t.Fatal(err)
 		}
-		for _, s := range j.Steps {
-			if s.With["push"] == "true" || s.With["cache-to"] != "" || strings.Contains(s.Uses, "attest") || strings.Contains(s.Uses, "login-action") || strings.Contains(s.Run, "gh release") {
-				t.Fatalf("dry run has a publication side effect: %s", s.Name)
+		if strings.Contains(string(data), "secrets.") {
+			t.Fatalf("%s must not request secrets", name)
+		}
+		for _, j := range readWorkflow(t, name).Jobs {
+			if (len(j.Permissions) != 0 && !reflect.DeepEqual(j.Permissions, map[string]string{"contents": "read"})) || j.Environment != "" {
+				t.Fatal("dry run acquires privileged tokens or environments")
 			}
-			for _, v := range s.Env {
-				if strings.Contains(v, "secrets.") {
-					t.Fatal("dry run must not request secrets")
+			for _, s := range j.Steps {
+				if s.With["push"] == "true" || s.With["cache-to"] != "" || strings.Contains(s.Uses, "attest") || strings.Contains(s.Uses, "login-action") || strings.Contains(s.Run, "gh release") {
+					t.Fatalf("dry run has a publication side effect: %s", s.Name)
+				}
+				for _, v := range s.Env {
+					if strings.Contains(v, "secrets.") {
+						t.Fatal("dry run must not request secrets")
+					}
 				}
 			}
 		}
@@ -433,6 +666,10 @@ case "$*" in
 esac`,
 				"openssl": "echo fixture",
 				"trash":   "exit 0",
+				"node": `printf '%s\n' "$*" >> "$DOCKER_LOG"
+case "$*" in
+  *parseRuntimeApkPins*) printf '%s\n' '1.2.3-r0' '0.19.0-r3' ;;
+esac`,
 			}
 			for name, script := range stubs {
 				if err := os.WriteFile(filepath.Join(dir, name), []byte("#!/bin/bash\n"+script+"\n"), 0700); err != nil {
@@ -457,7 +694,7 @@ esac`,
 				if strings.Contains(calls, "build ") || strings.Contains(calls, "image rm ") || !strings.Contains(calls, "--entrypoint /bin/sh "+image) {
 					t.Fatalf("prebuilt image rebuilt, removed or not exercised: %s", calls)
 				}
-			} else if !strings.Contains(calls, "build --build-arg VERSION=260930120000.0.0") || !strings.Contains(calls, "image rm aeon-smoke:fixture") {
+			} else if !strings.Contains(calls, "scripts/assemble-image.mjs aeon-smoke:fixture") || !strings.Contains(calls, "image rm aeon-smoke:fixture") {
 				t.Fatalf("standalone build/cleanup behavior changed: %s", calls)
 			}
 		})
@@ -578,7 +815,11 @@ func TestPinProposalFollowsVerificationWithoutWaitingForAssets(t *testing.T) {
 
 	// CI has scalar and list needs; only parse the steps used by this check.
 	var ci struct {
-		Jobs map[string]struct{ Steps []step }
+		Jobs map[string]struct {
+			Steps []step
+			If    string
+			Needs any
+		}
 	}
 	data, err := os.ReadFile(filepath.Join(root(t), ".github/workflows/ci.yml"))
 	if err != nil {
@@ -588,10 +829,15 @@ func TestPinProposalFollowsVerificationWithoutWaitingForAssets(t *testing.T) {
 		t.Fatal(err)
 	}
 	found := false
-	for _, s := range ci.Jobs["release-check"].Steps {
+	for _, s := range ci.Jobs["release-check-run"].Steps {
 		found = found || strings.Contains(s.Run, "node --test scripts/release-pin-pr.test.mjs")
 	}
 	if !found {
-		t.Fatal("pin regression tests must run in ordinary draft PR CI")
+		t.Fatal("pin regression tests must run in full draft PR CI")
+	}
+	worker, gate := ci.Jobs["release-check-run"], ci.Jobs["release-check"]
+	if worker.If != "always() && needs.ci-plan.result == 'success' && (needs.ci-plan.outputs.lane == 'full') && needs.tree-reuse.outputs.reuse != 'merge_group' && needs.tree-reuse.outputs.reuse != 'pull_request'" || gate.If != "always()" ||
+		!reflect.DeepEqual(gate.Needs, []any{"ci-plan", "release-check-run", "tree-reuse", "cache-prime"}) {
+		t.Fatal("pin regressions must retain classified validation and the required aggregate")
 	}
 }

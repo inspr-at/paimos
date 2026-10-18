@@ -12,9 +12,9 @@ defineProps<{ tone: 'ok' | 'off' | 'wait' | 'muted' | 'info'; label: string }>()
 <style scoped>
 .status { display: inline-flex; align-items: center; gap: 6px; height: 22px; padding: 0 9px 0 8px; border-radius: 999px; background: var(--surface-2); color: var(--ink-2); font-size: 12px; font-weight: 600; white-space: nowrap; }
 .pip { width: 7px; height: 7px; border-radius: 50%; background: var(--ink-3); }
-.ok { background: rgba(47, 122, 90, .12); color: color-mix(in oklab, var(--ok), var(--ink) 35%); }
+.ok { background: color-mix(in srgb, var(--ok) 12%, transparent); color: color-mix(in oklab, var(--ok), var(--ink) 35%); }
 .ok .pip { background: var(--ok); }
-.wait { background: rgba(214, 155, 49, .14); color: var(--gold-ink); }
+.wait { background: color-mix(in srgb, var(--gold) 14%, transparent); color: var(--warn-ink); }
 .wait .pip { background: var(--gold); }
 .off { background: var(--surface-2); color: var(--ink-2); }
 .off .pip { background: transparent; box-shadow: inset 0 0 0 1.5px var(--ink-3); }

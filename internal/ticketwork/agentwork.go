@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 
-// Package ticketwork aggregates harness sessions onto a ticket, epic or task.
+// Package ticketwork aggregates harness sessions onto work and legacy ticket, epic or task nodes.
 // Token counts and list-price estimates come from the current
 // harness_session_usage rows (one per session and model). This package does
 // not price tokens, does not read receipt history, and does not add
@@ -249,7 +249,7 @@ func scope(ctx context.Context, tx pgx.Tx, tenantID, nodeID string) ([]string, s
 	err := tx.QueryRow(ctx, `SELECT k.slug FROM nodes n
 		JOIN node_kinds k ON k.tenant_id = n.tenant_id AND k.id = n.kind_id
 		WHERE n.tenant_id = $1::uuid AND n.id = $2::uuid AND n.deleted_at IS NULL
-			AND k.slug IN ('ticket', 'epic', 'task')
+			AND k.slug IN ('work', 'ticket', 'epic', 'task')
 			AND ((SELECT aeon_visible_all()) OR n.project_id = ANY ((SELECT aeon_visible_projects())::uuid[]))`, tenantID, nodeID).Scan(&kind)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return nil, "", false, nil

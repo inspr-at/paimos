@@ -3,6 +3,7 @@
 package cli
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -24,7 +25,7 @@ import (
 // served yet (see unsupportedCompat). MCP tools that still lack a handler
 // report the same with "arrives in R1".
 func Run(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
-	rt := &runtime{stdin: stdin, stdout: stdout, stderr: stderr, program: "aeon"}
+	rt := &runtime{stdin: stdin, stdout: stdout, stderr: stderr, program: "aeon", harnessAccount: probeHarnessAccount}
 	if len(args) > 0 {
 		rt.program = programName(args[0])
 	}
@@ -53,6 +54,7 @@ func programName(argv0 string) string {
 }
 
 type runtime struct {
+	requestContext     context.Context
 	program            string
 	stdin              io.Reader
 	stdout             io.Writer
@@ -66,6 +68,15 @@ type runtime struct {
 	version            bool
 	kinds              *kindTable
 	messagingDeliverer localDeliverer
+	personClient       *client.Client
+	// pairedHook is a test seam. Production leaves it nil and dials agentd.
+	pairedHook hookPeerExchange
+	// subagentLocked observes child-lock ownership in barrier tests. Production
+	// leaves it nil; it never supplies lifecycle metadata or changes lock order.
+	subagentLocked func()
+	// harnessAccount asks a harness which account it is signed in to (AEON-1285).
+	// Run installs the real probe; a test runtime leaves it nil or injects one.
+	harnessAccount harnessAccountProbe
 }
 
 func (rt *runtime) execute(args []string) error {
@@ -108,6 +119,10 @@ func (rt *runtime) printErr(ee *exitError) {
 		return
 	}
 	if rt.jsonOut && (ee.code == 1 || ee.code == 3) {
+		if len(ee.apiBody) > 0 {
+			_ = json.NewEncoder(rt.stderr).Encode(ee.apiBody)
+			return
+		}
 		_ = json.NewEncoder(rt.stderr).Encode(map[string]string{"error": ee.msg})
 		return
 	}
@@ -120,8 +135,52 @@ func (rt *runtime) printJSON(v any) error {
 	return enc.Encode(v)
 }
 
-func (rt *runtime) fail(err error, secret string) error {
-	return &exitError{code: 1, msg: redact(err.Error(), secret)}
+func (rt *runtime) fail(err error, secrets ...string) error {
+	message := err.Error()
+	exit := &exitError{code: 1}
+	var status *client.StatusError
+	if errors.As(err, &status) {
+		exit.apiStatus = status.Status
+		if len(status.EntryChecksFailure) > 0 {
+			body := bytes.Clone(status.EntryChecksFailure)
+			for _, secret := range secrets {
+				if secret != "" {
+					encoded, _ := json.Marshal(secret)
+					body = bytes.ReplaceAll(body, encoded[1:len(encoded)-1], []byte("[redacted]"))
+				}
+			}
+			var detail struct {
+				Checks []struct {
+					ID, Label, Reason string
+				} `json:"checks"`
+				Failed []struct {
+					ID, Label, Reason string
+				} `json:"failed"`
+			}
+			if json.Unmarshal(body, &detail) == nil {
+				checks := detail.Checks
+				if checks == nil {
+					checks = detail.Failed
+				}
+				if len(checks) <= 32 {
+					exit.apiBody = body
+					message = "api 409: entry_checks_failed"
+					for _, check := range checks {
+						label := check.Label
+						if label == "" {
+							label = check.ID
+						}
+						message += "\n✗ " + strings.Join(strings.Fields(label), " ") + ": " + strings.Join(strings.Fields(check.Reason), " ")
+					}
+				}
+			}
+		}
+	}
+	for _, secret := range secrets {
+		message = redact(message, secret)
+	}
+	exit.msg = message
+	return exit
 }
 
 func redact(msg, secret string) string {
@@ -139,10 +198,16 @@ func (rt *runtime) root() *Command {
 		rt.cmdKeys(),
 		rt.cmdScopes(),
 		rt.cmdWhoami(""),
+		rt.cmdMe(),
 		rt.cmdIssue(),
 		rt.cmdQueue(),
+		rt.cmdReview(),
+		rt.cmdLead(),
+		rt.cmdRecur(),
 		rt.cmdOutcome(),
 		rt.cmdProject(),
+		rt.cmdDeploy(),
+		rt.cmdGoal(),
 		rt.cmdRelation(),
 		rt.cmdRulesImport(),
 		rt.cmdRulesTLDR(),
@@ -151,7 +216,6 @@ func (rt *runtime) root() *Command {
 		rt.cmdDoctrine(),
 		rt.cmdTag(),
 		rt.cmdAttach(),
-		rt.cmdExternalStage(),
 		rt.cmdApply(),
 		rt.cmdSchema(),
 		rt.cmdDoctor(),
@@ -160,6 +224,7 @@ func (rt *runtime) root() *Command {
 		rt.cmdSearch("search"),
 		rt.cmdModel(),
 		rt.cmdCapacity(),
+		rt.cmdAgents(),
 		rt.cmdUse(),
 		rt.cmdOnboard(),
 		rt.cmdSession(),
@@ -168,6 +233,7 @@ func (rt *runtime) root() *Command {
 		rt.cmdListen(),
 		rt.cmdMessage(),
 		rt.cmdMCP(),
+		rt.cmdAsk(),
 		{
 			Name:  "version",
 			Short: "Print the calendar version",
@@ -346,6 +412,12 @@ func (rt *runtime) cmdWhoami(use string) *Command {
 	}
 }
 
+func (rt *runtime) cmdMe() *Command {
+	c := rt.cmdWhoami("me")
+	c.Name = "me"
+	return c
+}
+
 func (rt *runtime) whoami(ctx context.Context) error {
 	inst, err := rt.resolve()
 	if err != nil {
@@ -357,15 +429,35 @@ func (rt *runtime) whoami(ctx context.Context) error {
 	}
 	if rt.jsonOut {
 		return rt.printJSON(map[string]any{
-			"instance":  inst.Name,
-			"url":       inst.URL,
-			"principal": me.Principal,
-			"tenant":    me.Tenant,
-			"identity":  me.Identity,
+			"instance":                inst.Name,
+			"url":                     inst.URL,
+			"principal":               me.Principal,
+			"tenant":                  me.Tenant,
+			"identity":                me.Identity,
+			"owner_workstation":       me.OwnerWorkstation,
+			"workstation_computer_id": me.WorkstationComputerID,
 		})
 	}
 	fmt.Fprintf(rt.stdout, "instance: %s (%s)\n", inst.Name, inst.URL)
 	fmt.Fprintf(rt.stdout, "principal: %s (%s)\n", me.Principal.Name, me.Principal.Kind)
 	fmt.Fprintf(rt.stdout, "tenant: %s (%s)\n", me.Tenant.Name, me.Tenant.Slug)
+	if me.OwnerWorkstation {
+		fmt.Fprintf(rt.stdout, "owner workstation: %s\n", me.WorkstationComputerID)
+	}
 	return nil
+}
+
+func (rt *runtime) context() context.Context {
+	if rt.requestContext != nil {
+		return rt.requestContext
+	}
+	return context.Background()
+}
+
+// workRuntime isolates mutable caches and carries cancellation for one MCP call.
+func (rt *runtime) workRuntime(ctx context.Context) *runtime {
+	copy := *rt
+	copy.requestContext = ctx
+	copy.kinds = nil
+	return &copy
 }

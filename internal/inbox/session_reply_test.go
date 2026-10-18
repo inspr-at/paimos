@@ -234,3 +234,107 @@ func TestSessionThreadIncludesBothDirectionsAndUnboundReplies(t *testing.T) {
 		t.Fatal("foreign tenant inspected the thread")
 	}
 }
+
+// Session readers must not gain project-wide inspection or held action bodies.
+func TestSessionThreadParticipantReadsAndManagedReply(t *testing.T) {
+	w, m, project, srv := messagingWorld(t)
+	session := messageTestSession(t, w, project, w.agent, "Managed session")
+	workspaceTx(t, w, w.sender, func(tx pgx.Tx) error {
+		_, err := tx.Exec(t.Context(), `UPDATE harness_sessions SET owner_principal_id=$2 WHERE id=$1`, session, w.sender.ID)
+		return err
+	})
+	question := compatInput(w.agent.ID, "managed-question")
+	question.RecipientSessionID = &session
+	question.Body = "Question in the session"
+	asked := mustCompatSend(t, m, w.sender, project, question)
+	answer := compatInput(w.sender.ID, "managed-final-answer")
+	answer.SenderSessionID, answer.ReplyTo = &session, &asked.ID
+	answer.Body = "Final answer in the session"
+	path := "/api/projects/" + project + "/messages"
+	token := insertKey(t, w.db, w.agent, []string{"inbox.send"}, "managed-reply-fixture")
+	postReply := func() (int, []byte) {
+		raw, err := json.Marshal(answer)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return do(t, srv, w.agent.ID, "POST", path, string(raw), headerAuth(token))
+	}
+	status, body := postReply()
+	if status != 201 {
+		t.Fatalf("managed reply %d: %s", status, body)
+	}
+	answered := mustJSON[CompatMessage](t, body)
+	status, body = postReply()
+	if status != 201 || mustJSON[CompatMessage](t, body).ID != answered.ID {
+		t.Fatal("reply retry was not idempotent")
+	}
+	held := question
+	held.Key, held.Body, held.ActionRequest = "held-in-session", "Private held body", true
+	mustCompatSend(t, m, w.sender, project, held)
+	otherSession := messageTestSession(t, w, project, w.agent, "Other generation")
+	question.Key, question.RecipientSessionID = "other-generation", &otherSession
+	mustCompatSend(t, m, w.sender, project, question)
+	mustCompatSend(t, m, w.sender, project, compatInput(w.agent.ID, "unrelated-project-history"))
+	readPath := path + "?session=" + session + "&limit=200"
+	checkThread := func(p tenant.Principal) {
+		t.Helper()
+		response := workspaceCall(m, p, "GET", readPath, "", nil)
+		workspaceStatus(t, response, 200)
+		page := mustJSON[compatPage](t, response.Body.Bytes())
+		if len(page.Items) != 2 || page.Items[0].ID != asked.ID || page.Items[1].ID != answered.ID || page.Items[1].Body != answer.Body || page.Items[1].SenderSessionID == nil || *page.Items[1].SenderSessionID != session {
+			t.Fatalf("incorrect participant thread: %s", response.Body.String())
+		}
+	}
+	checkThread(w.sender) // Non-admin session owner.
+	// A project-only member has harness.read in this project, with no workspace grant.
+	if _, err := w.db.Admin.Exec(t.Context(), `DELETE FROM role_bindings WHERE principal_id=$1`, w.recipient.ID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := w.db.Admin.Exec(t.Context(), `INSERT INTO role_bindings(tenant_id,principal_id,role_id,scope_type,scope_id) SELECT $1,$2,id,'project',$3 FROM roles WHERE tenant_id=$1 AND key='member'`, w.recipient.TenantID, w.recipient.ID, project); err != nil {
+		t.Fatal(err)
+	}
+	checkThread(w.recipient)
+	workspaceStatus(t, workspaceCall(m, w.sender, "GET", path, "", nil), 403)
+	workspaceStatus(t, workspaceCall(m, w.sender, "GET", readPath+"&pending=true", "", nil), 403)
+	workspaceStatus(t, workspaceCall(m, w.agent, "GET", readPath, "", nil), 403)
+	workspaceStatus(t, workspaceCall(m, w.sender, "GET", path+"?session="+w.outsider.ID, "", nil), 404)
+	foreign := insertPrincipal(t, w.db, w.outsider.TenantID, tenant.Person, "foreign-admin-reader", []string{"admin"})
+	workspaceStatus(t, workspaceCall(m, foreign, "GET", readPath, "", nil), 404)
+	// A viewer still cannot inspect held content; the administrator retains inspection.
+	admin := workspaceCall(m, w.admin, "GET", readPath, "", nil)
+	workspaceStatus(t, admin, 200)
+	if len(mustJSON[compatPage](t, admin.Body.Bytes()).Items) != 3 {
+		t.Fatal("administrator inspection changed")
+	}
+	var acked, fetched bool
+	if err := w.db.Admin.QueryRow(t.Context(), `SELECT acked_at IS NOT NULL,fetched_at IS NOT NULL FROM inbox_messages WHERE id=$1`, asked.ID).Scan(&acked, &fetched); err != nil {
+		t.Fatal(err)
+	}
+	if acked || fetched {
+		t.Fatal("reading history acknowledged or handed off work")
+	}
+	// Move the project member to a custom read role, then revoke just harness.read.
+	// nodes.read keeps project visibility, so denial must come from this permission.
+	var role string
+	if err := w.db.Admin.QueryRow(t.Context(), `INSERT INTO roles(tenant_id,key,name) VALUES($1,'thread_reader','Thread reader') RETURNING id::text`, w.sender.TenantID).Scan(&role); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := w.db.Admin.Exec(t.Context(), `INSERT INTO role_permissions(tenant_id,role_id,permission) VALUES($1,$2,'nodes.read'),($1,$2,'harness.read')`, w.sender.TenantID, role); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := w.db.Admin.Exec(t.Context(), `UPDATE role_bindings SET role_id=$2 WHERE principal_id=$1`, w.recipient.ID, role); err != nil {
+		t.Fatal(err)
+	}
+	checkThread(w.recipient)
+	if _, err := w.db.Admin.Exec(t.Context(), `DELETE FROM role_permissions WHERE role_id=$1 AND permission='harness.read'`, role); err != nil {
+		t.Fatal(err)
+	}
+	workspaceStatus(t, workspaceCall(m, w.recipient, "GET", readPath, "", nil), 403)
+	// Project-bound replies also recheck current send permission in the final write.
+	denied := w.agent
+	denied.Scopes = []string{"inbox.read"}
+	answer.Key = "scope-revoked-answer"
+	if _, err := m.commitMessage(t.Context(), denied, project, answer); err != errForbidden {
+		t.Fatalf("revoked reply authority: %v", err)
+	}
+}

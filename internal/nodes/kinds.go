@@ -234,6 +234,10 @@ func (m *Module) updateKind(ctx context.Context, p tenant.Principal, id string, 
 	}
 	var kind kindJSON
 	err := m.tx(ctx, p.TenantID, func(ctx context.Context, tx pgx.Tx) error {
+		// Lock before loading the full snapshot used to merge a partial patch.
+		if _, err := tx.Exec(ctx, `SELECT id FROM node_kinds WHERE id=$1::uuid FOR NO KEY UPDATE`, id); err != nil {
+			return err
+		}
 		current, _, err := loadKind(ctx, tx, id)
 		if err != nil {
 			return err

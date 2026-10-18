@@ -1,0 +1,11 @@
+{
+  "_license": "SPDX-License-Identifier: AGPL-3.0-only",
+  "private": true,
+  "type": "module",
+  "imports": {
+    "#permission-data": {
+      "browser": "./permission_data_browser.mjs",
+      "default": "./permission_data_node.mjs"
+    }
+  }
+}

@@ -6,11 +6,13 @@ package agentd
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"time"
 
 	"github.com/inspr-at/paimos/internal/agentactivity"
 	"github.com/inspr-at/paimos/internal/capacity"
+	"github.com/inspr-at/paimos/internal/modelreport"
 	"github.com/inspr-at/paimos/internal/openrouter"
 	"github.com/inspr-at/paimos/internal/ownedprocess"
 	"github.com/inspr-at/paimos/internal/reviewgate"
@@ -45,21 +47,29 @@ var (
 
 // Run is the content-free AEON run projection returned by /runs endpoints.
 type Run struct {
-	ReadOnlyReview            bool   `json:"read_only_review,omitempty"`
-	RetryOfRunID              string `json:"retry_of_run_id"`
-	CapacityHandoff           bool   `json:"capacity_handoff,omitempty"`
-	Purpose                   string `json:"purpose,omitempty"`
-	VerificationTask          string `json:"verification_task,omitempty"`
-	MaxDurationSeconds        *int64 `json:"max_duration_seconds,omitempty"`
-	VerificationPolicy        string `json:"verification_policy,omitempty"`
-	RepositoryMutationAllowed *bool  `json:"repository_mutation_allowed,omitempty"`
-	ID                        string `json:"id"`
-	WorkOrderID               string `json:"work_order_id"`
-	AgentPrincipalID          string `json:"agent_principal_id"`
-	ModelProfileID            string `json:"model_profile_id"`
-	AccountID                 string `json:"account_id"`
-	RequestedAccountID        string `json:"requested_account_id"`
-	Status                    string `json:"status"`
+	RoutineLaunchID           *string         `json:"routine_launch_id,omitempty"`
+	ReservationsSettled       *bool           `json:"reservations_settled,omitempty"`
+	Trace                     json.RawMessage `json:"trace,omitempty"`
+	RecoveryBrief             string          `json:"recovery_brief,omitempty"`
+	RecoveryTier              string          `json:"recovery_service_tier,omitempty"`
+	RecoveryLabel             *string         `json:"recovery_display_label,omitempty"`
+	ReadOnlyReview            bool            `json:"read_only_review,omitempty"`
+	RetryOfRunID              string          `json:"retry_of_run_id"`
+	CapacityHandoff           bool            `json:"capacity_handoff,omitempty"`
+	Purpose                   string          `json:"purpose,omitempty"`
+	VerificationTask          string          `json:"verification_task,omitempty"`
+	MaxDurationSeconds        *int64          `json:"max_duration_seconds,omitempty"`
+	VerificationPolicy        string          `json:"verification_policy,omitempty"`
+	RepositoryMutationAllowed *bool           `json:"repository_mutation_allowed,omitempty"`
+	ID                        string          `json:"id"`
+	WorkOrderID               string          `json:"work_order_id"`
+	AgentPrincipalID          string          `json:"agent_principal_id"`
+	ModelProfileID            string          `json:"model_profile_id"`
+	AccountID                 string          `json:"account_id"`
+	RequestedAccountID        string          `json:"requested_account_id"`
+	Status                    string          `json:"status"`
+
+	RoutineBudget *RoutineProviderBudget `json:"routine_budget,omitempty"`
 }
 
 // requestedAccount retains the approved enrollment before Route fills AccountID.
@@ -89,6 +99,9 @@ type Node struct {
 // HarnessSession is the public binding plus the private worker lease held only
 // by this daemon generation. The lease is never persisted in the run journal.
 type HarnessSession struct {
+	AttachedHook     bool                    `json:"-"`
+	DisplayLabel     *string                 `json:"display_label,omitempty"`
+	ServiceTier      string                  `json:"service_tier,omitempty"`
 	Doing            string                  `json:"-"`
 	DoingAt          time.Time               `json:"-"`
 	ToolActivity     *agentactivity.Activity `json:"-"`
@@ -105,6 +118,10 @@ type HarnessSession struct {
 }
 
 type HarnessControl struct {
+	ExpectedGeneration string `json:"expected_generation"`
+	RequestPayload     *struct {
+		StopNow bool `json:"stop_now"`
+	} `json:"request_payload,omitempty"`
 	// deadline is local, monotonic, and never serialized or persisted.
 	deadline          time.Time
 	ExpiresInMS       int64                  `json:"expires_in_ms"`
@@ -116,14 +133,27 @@ type HarnessControl struct {
 	Kind              string                 `json:"kind"`
 }
 
+// InboxReplyTarget is captured from an authenticated drain, never from tool input.
+type InboxReplyTarget struct {
+	PrincipalID        string
+	ProjectID          string
+	ReplyToID          string
+	SenderSessionID    string
+	RecipientSessionID *string
+}
+
 type HarnessDelivery struct {
-	Outcome           string `json:"-"`
-	FailureReason     string `json:"-"`
-	ID                string `json:"delivery_id"`
-	MessageID         string `json:"message_id"`
-	Cursor            int64  `json:"cursor"`
-	SenderPrincipalID string `json:"sender_principal_id"`
-	Body              string `json:"body"`
+	Level             string  `json:"delivery_level,omitempty"`
+	ProjectID         string  `json:"project_id,omitempty"`
+	ReplyToID         string  `json:"reply_to_id,omitempty"`
+	SenderSessionID   *string `json:"sender_session_id,omitempty"`
+	Outcome           string  `json:"-"`
+	FailureReason     string  `json:"-"`
+	ID                string  `json:"delivery_id"`
+	MessageID         string  `json:"message_id"`
+	Cursor            int64   `json:"cursor"`
+	SenderPrincipalID string  `json:"sender_principal_id"`
+	Body              string  `json:"body"`
 }
 
 type WorkOrder struct {
@@ -145,6 +175,8 @@ type WorkCriterion struct {
 // Telemetry carries content-free, nonnegative deltas. TurnCountDelta is one
 // accepted user turn; token and cost deltas come from vendor usage reports.
 type Telemetry struct {
+	ProcessState           string                  `json:"process_state,omitempty"`
+	ServiceTier            string                  `json:"service_tier,omitempty"`
 	ReviewRange            *reviewgate.CommitRange `json:"review_range,omitempty"`
 	LimitWindow            string                  `json:"limit_window,omitempty"`
 	LimitResetsAt          *time.Time              `json:"limit_resets_at,omitempty"`
@@ -223,6 +255,14 @@ type API interface {
 }
 
 type StartRequest struct {
+	// ResourceEnvironment comes from AEON-1089's owned lease. Qualified
+	// routine adapters replace these variables in every native child/fixture.
+	ResourceEnvironment []string
+	ServiceTier         string
+	// Lifetime is the accepted run budget rooted in the supervisor lifetime.
+	// The Start call's context only covers dispatch/startup and may end as soon
+	// as polling finishes. Adapters without a supervisor use the caller context.
+	Lifetime      context.Context
 	ManagedPolicy bool
 	Capabilities  []string // Exact capabilities advertised for this session.
 	InboxEnabled  bool     // Keep the owned process alive between turns for leased inbox delivery.
@@ -244,11 +284,18 @@ type StartRequest struct {
 }
 
 type RunTools struct {
-	URL   string `json:"url"`
-	Token string `json:"token"`
+	URL                string `json:"url"`
+	Token              string `json:"token"`
+	Routine            bool   `json:"routine,omitempty"`
+	BrowserCaptureOnly bool   `json:"browser_capture_only,omitempty"`
 }
 
 type AdapterEvent struct {
+	InputID string // Transient exact native input correlation; never telemetry or a journal payload.
+	// Chat is transient output. It must never enter run telemetry or journals.
+	Chat         *ChatUpdate
+	ModelReports []modelreport.Observation
+	HarnessTier  string
 	Doing        string
 	ToolActivity *agentactivity.Activity
 	VendorLimit  *capacity.LimitHit
@@ -307,20 +354,27 @@ type AccountProber interface {
 	Probe(context.Context, string) bool
 }
 
-// ProbeStatus is an account probe with its cause. Failure is ProbeAuthFailed
-// only when the vendor's own status command ran and said this account is
-// signed out or signed in as someone else; errors, timeouts and unreadable
-// output are ProbeUnavailable. Vendor output never leaves the daemon.
+// ProbeStatus is an account probe with its bounded cause. Only ProbeAuthFailed
+// and ProbeIdentityMismatch describe confirmed authentication failures. Local
+// measurement failures never imply sign-out. The historical account-probe API
+// retains auth_failed/unavailable; lifecycle details can retain finer causes.
+// Vendor identity is local diagnostics only; vendor output never leaves the daemon.
 type ProbeStatus struct {
+	ActiveIdentity    string `json:"-"` // Validated local login label; never sent to Aeon.
 	BillingMode       string
 	OpenRouterCredits *openrouter.Credits
 	OK                bool
 	Failure           string
+	ReasonDetail      string // Fixed publishable phrase; never raw vendor output.
 }
 
 const (
-	ProbeAuthFailed  = "auth_failed"
-	ProbeUnavailable = "unavailable"
+	ProbeAuthFailed       = "auth_failed"
+	ProbeUnavailable      = "unavailable"
+	ProbeIdentityMismatch = "identity_mismatch"
+	ProbeTimeout          = "timeout"
+	ProbeProtocol         = "protocol"
+	ProbeLaunchFailed     = "launch_failed"
 	// ProbeUnverified is local evidence, not a confirmed vendor sign-out.
 	ProbeUnverified = "sign_in_unverified"
 )
@@ -351,6 +405,7 @@ type AccountMetadata struct {
 }
 
 type EnrolledAccount struct {
+	VerifiedIdentity string // local verified login ID; never sent to another server
 	ID, Key, Harness string
 	Metadata         *AccountMetadata
 	// DependencyBlocked means this enrollment's interpreter pin is missing,
@@ -364,7 +419,10 @@ type EnrolledAccount struct {
 
 type ControlRequest struct {
 	// Only the authenticated yield transport supplies a monotonic deadline.
-	deadline          time.Time
+	deadline time.Time
+	// Only the chat relay supplies writing: it runs when the inbox write
+	// begins, after this control waited behind any other.
+	writing           func()
 	Value             string                 `json:"value,omitempty"`
 	ExpiresAt         *time.Time             `json:"expires_at,omitempty"`
 	ExpectedOwnership *ownedprocess.Identity `json:"expected_ownership,omitempty"`

@@ -46,14 +46,17 @@ func TestAgentKeyBuildHistoryReadScope(t *testing.T) {
 		want                int
 	}{
 		{"GET", "/api/releases", reader.Token, 200},
+		{"GET", "/api/releases/pending", reader.Token, 200},
 		{"HEAD", "/api/releases", reader.Token, 200},
 		{"GET", "/api/releases/" + version, reader.Token, 200},
 		{"HEAD", "/api/releases/" + version, reader.Token, 200},
 		{"GET", "/api/releases", noScope.Token, 403},
+		{"GET", "/api/releases/pending", noScope.Token, 403},
 		{"GET", "/api/releases/" + version, noScope.Token, 403},
 		{"PUT", "/api/releases/" + version + "/presentation", reader.Token, 403},
 		{"DELETE", "/api/releases/" + version + "/presentation", reader.Token, 403},
 		{"GET", "/api/releases", "", 401},
+		{"GET", "/api/releases/pending", "", 401},
 	} {
 		req := httptest.NewRequest(tc.method, tc.path, nil)
 		if tc.token != "" {
@@ -87,7 +90,7 @@ func TestAgentKeyReleaseMembershipReadScopeAndVisibility(t *testing.T) {
 				return err
 			}
 			return tx.QueryRow(t.Context(), `INSERT INTO nodes(tenant_id,kind_id,key,title,parent_id)
-				SELECT $1::uuid,id,$2,$2,$3::uuid FROM node_kinds WHERE tenant_id=$1::uuid AND slug='ticket'
+				SELECT $1::uuid,id,$2,$2,$3::uuid FROM node_kinds WHERE tenant_id=$1::uuid AND slug='work'
 				RETURNING nodes.id::text`, tid, key+"-2", projectID).Scan(&ticketID)
 		})
 		if err != nil {

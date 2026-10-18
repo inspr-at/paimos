@@ -27,6 +27,7 @@ export class QuoteSession {
   readonly quoteId:string; readonly tenantId:string; readonly principalId:string; clientSessionId:string
   private readonly tabKey:string; private readonly instanceId=crypto.randomUUID(); private channel:BroadcastChannel|null=null
   private probe:{nonce:string;collided:boolean}|null=null
+  private tabPersistent=true
   private listeners=new Set<Listener>(); private generation=0; private editSequence=0; private disposed=false
   private inFlight:Promise<void>|null=null; private checking:Promise<void>|null=null; private pending:{id:string;revision:number;document:QuoteDocumentData;editSequence:number}|null=null
   private base:QuoteDocumentData|null=null; private reviewedTheirs:QuoteDraft|null=null; private baseVersion:number|undefined
@@ -35,8 +36,12 @@ export class QuoteSession {
   constructor(scope:{quoteId:string;tenantId:string;principalId:string;clientSessionId?:string}) {
     this.quoteId=scope.quoteId;this.tenantId=scope.tenantId;this.principalId=scope.principalId
     this.tabKey=`aeon-quote-tab:${scope.tenantId}:${scope.principalId}:${scope.quoteId}`
-    this.clientSessionId=scope.clientSessionId??sessionStorage.getItem(this.tabKey)??crypto.randomUUID()
-    if(!scope.clientSessionId) sessionStorage.setItem(this.tabKey,this.clientSessionId)
+    let stored:string|null=null
+    if(!scope.clientSessionId) {
+      try { stored=sessionStorage.getItem(this.tabKey) } catch { this.tabPersistent=false }
+    }
+    this.clientSessionId=scope.clientSessionId??stored??crypto.randomUUID()
+    if(!scope.clientSessionId) this.persistSessionId()
     try { this.channel=new BroadcastChannel('aeon-quote-tab-sessions')
       this.channel.onmessage=(event:MessageEvent<{kind:string;session:string;nonce?:string;to?:string;instance?:string}>)=>{
         const message=event.data;if(message.session!==this.clientSessionId || message.instance===this.instanceId)return
@@ -45,12 +50,18 @@ export class QuoteSession {
       }
     } catch { this.channel=null }
   }
+  private persistSessionId():void {
+    try { sessionStorage.setItem(this.tabKey,this.clientSessionId) }
+    catch { this.tabPersistent=false }
+    // Without a persistent tab ID, a durable draft cannot be found on reload.
+    if(!this.tabPersistent) this.view.durableRecovery=false
+  }
   private async ensureUniqueTab():Promise<void> {
     if(!this.channel)return
     const probe={nonce:crypto.randomUUID(),collided:false};this.probe=probe
     this.channel.postMessage({kind:'probe',session:this.clientSessionId,nonce:probe.nonce,instance:this.instanceId})
     await new Promise<void>(resolve=>window.setTimeout(resolve,80))
-    if(this.probe===probe && probe.collided){this.clientSessionId=crypto.randomUUID();sessionStorage.setItem(this.tabKey,this.clientSessionId)}
+    if(this.probe===probe && probe.collided){this.clientSessionId=crypto.randomUUID();this.persistSessionId()}
     this.probe=null
   }
   subscribe(fn:Listener):()=>void {this.listeners.add(fn);fn(this.view);return()=>this.listeners.delete(fn)}
@@ -62,7 +73,7 @@ export class QuoteSession {
   // overwrites a copy that does hold work).
   private async persist():Promise<void> {
     const value=this.recovery();if(!value || !holdsWork(value))return
-    const ok=await saveRecovery(value);if(!this.disposed){this.view.durableRecovery=ok;this.emit()}
+    const ok=await saveRecovery(value);if(!this.disposed){this.view.durableRecovery=ok && this.tabPersistent;this.emit()}
   }
   async open():Promise<RecoveryDraft|null> {
     const generation=++this.generation

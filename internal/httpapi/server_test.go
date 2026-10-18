@@ -6,7 +6,9 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"log/slog"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -15,16 +17,135 @@ import (
 	"time"
 
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/inspr-at/paimos/internal/brand"
 	"github.com/inspr-at/paimos/internal/db"
 	"github.com/inspr-at/paimos/internal/dbtest"
+	"github.com/inspr-at/paimos/internal/tenant"
 	"github.com/inspr-at/paimos/internal/version"
 )
 
 type moduleFunc func(*http.ServeMux)
 
 func (f moduleFunc) Mount(mux *http.ServeMux) { f(mux) }
+
+// AEON-1231 risk: authentication can wait without a deadline, or its new
+// deadline cuts off streams, long handler budgets, or live authorization values.
+func TestRequestBudgetPrecedesAuthenticationAndPreservesHandlerLifetime(t *testing.T) {
+	fixtures := []struct {
+		pattern, path string
+		separate      bool
+	}{
+		{"GET /api/ordinary", "/api/ordinary", false},
+		{"GET /api/ordinary/{id}", "/api/ordinary/stream", false},
+		{"GET /api/events/stream", "/api/events/stream", true},
+		{"GET /api/events/subscribe", "/api/events/subscribe", true},
+		{"GET /api/inbox/stream", "/api/inbox/stream", true},
+		{"GET /api/chat-threads/{id}/live", "/api/chat-threads/thread/live", true},
+		{"GET /api/quotes/{quoteId}/collaboration/stream", "/api/quotes/quote/collaboration/stream", true},
+		{"GET /api/projects/{projectId}/delivery/flow/stream", "/api/projects/project/delivery/flow/stream", true},
+		{"GET /api/projects/{projectId}/harness-sessions/{sessionId}/notifications", "/api/projects/project/harness-sessions/session/notifications", true},
+		{"GET /api/projects/{projectId}/harness-sessions/{sessionId}/watch", "/api/projects/project/harness-sessions/session/watch", true},
+		{"GET /api/runs/queued/notifications", "/api/runs/queued/notifications", true},
+		{"POST /api/projects/{projectId}/delivery/metrics/backfill", "/api/projects/project/delivery/metrics/backfill", true},
+		{"POST /api/projects/{projectId}/delivery/metrics/check-again", "/api/projects/project/delivery/metrics/check-again", true},
+		{"POST /api/projects/{projectId}/delivery/merge-backfill", "/api/projects/project/delivery/merge-backfill", true},
+	}
+	for _, fixture := range fixtures {
+		for _, earlier := range []bool{false, true} {
+			t.Run(fixture.pattern+map[bool]string{false: "", true: " with caller deadline"}[earlier], func(t *testing.T) {
+				parent, cancel := context.WithCancel(t.Context())
+				defer cancel()
+				var callerDeadline time.Time
+				if earlier {
+					callerDeadline = time.Now().Add(4 * time.Second)
+					var stop context.CancelFunc
+					parent, stop = context.WithDeadline(parent, callerDeadline)
+					defer stop()
+				}
+				var admission, handler context.Context
+				var admittedAt time.Time
+				served := false
+				principal := tenant.Principal{ID: "person", TenantID: "tenant", Kind: tenant.Person}
+				type guardKey struct{}
+				s := &Server{Modules: []Module{moduleFunc(func(mux *http.ServeMux) {
+					mux.HandleFunc(fixture.pattern, func(w http.ResponseWriter, r *http.Request) {
+						served = true
+						handler = r.Context()
+						p, ok := tenant.PrincipalFrom(handler)
+						if !ok || p.ID != principal.ID || handler.Value(guardKey{}) != "live guard" {
+							t.Fatal("handler lost authenticated principal/guard values")
+						}
+						if handler.Err() != nil || context.Cause(handler) != nil {
+							t.Fatal("handler inherited a cancelled authentication context")
+						}
+						deadline, bounded := handler.Deadline()
+						if fixture.separate {
+							if bounded != earlier || earlier && !deadline.Equal(callerDeadline) {
+								t.Fatal("handler lifetime differs from caller lifetime")
+							}
+							if admission.Err() != context.Canceled {
+								t.Fatal("authentication timer retained after handler admission")
+							}
+							// Existing long handlers can still choose their two-minute
+							// budget, independently of the five-second admission cap.
+							long, stop := context.WithTimeout(handler, 2*time.Minute)
+							defer stop()
+							longDeadline, _ := long.Deadline()
+							if earlier && !longDeadline.Equal(callerDeadline) || !earlier && !longDeadline.After(admittedAt.Add(authenticationBudget)) {
+								t.Fatal("long handler budget was shortened by authentication")
+							}
+						} else if !bounded {
+							t.Fatal("ordinary handler lost its request budget")
+						}
+						w.WriteHeader(http.StatusNoContent)
+					})
+				})}, Middleware: []func(http.Handler) http.Handler{func(next http.Handler) http.Handler {
+					return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+						admission, admittedAt = r.Context(), time.Now()
+						deadline, ok := admission.Deadline()
+						duration := ordinaryRequestBudget
+						if fixture.separate {
+							duration = authenticationBudget
+						}
+						if !ok || earlier && !deadline.Equal(callerDeadline) || !earlier && deadline.After(admittedAt.Add(duration)) {
+							t.Fatal("authentication has no bounded admission or extended caller deadline")
+						}
+						ctx := context.WithValue(tenant.WithPrincipal(r.Context(), principal), guardKey{}, "live guard")
+						next.ServeHTTP(w, r.WithContext(ctx))
+					})
+				}}}
+				method, _, _ := strings.Cut(fixture.pattern, " ")
+				req := httptest.NewRequest(method, fixture.path, nil).WithContext(parent)
+				req.Header.Set("Accept", "text/event-stream") // headers cannot exempt ordinary routes
+				w := httptest.NewRecorder()
+				s.Handler().ServeHTTP(w, req)
+				if !served || w.Code != http.StatusNoContent {
+					t.Fatal("authenticated request did not reach its handler")
+				}
+				if fixture.separate {
+					child, stop := context.WithCancel(handler)
+					defer stop()
+					if child.Err() != nil {
+						t.Fatal("derived handler context inherited authentication cancellation")
+					}
+					cancel()
+					guard, end := context.WithTimeout(t.Context(), 5*time.Second)
+					defer end()
+					select {
+					case <-child.Done():
+					case <-guard.Done():
+						t.Fatal("stream lost caller cancellation")
+					}
+					if handler.Err() != context.Canceled || child.Err() != context.Canceled {
+						t.Fatal("wrong handler cancellation reason")
+					}
+				}
+			})
+		}
+	}
+}
 
 func TestHandlersAndMiddleware(t *testing.T) {
 	t.Run("version", func(t *testing.T) {
@@ -211,6 +332,34 @@ func TestHandlersAndMiddleware(t *testing.T) {
 		if !strings.Contains(api.Header().Get("Content-Type"), "application/json") {
 			t.Fatalf("api content type %s", api.Header().Get("Content-Type"))
 		}
+		t.Run("theme bootstrap nonce", func(t *testing.T) {
+			page := []byte(`<script id="aeon-theme-boot" nonce="__AEON_THEME_NONCE__">/* cache bootstrap */</script>`)
+			app := (&Server{Web: fstest.MapFS{"index.html": {Data: page}}}).Handler()
+			seen := map[string]bool{}
+			for _, route := range []string{"/", "/index.html", "/settings/theme"} {
+				response := get(t, app, route, "")
+				policy := response.Header().Get("Content-Security-Policy")
+				body := response.Body.String()
+				_, tail, found := strings.Cut(body, `nonce="`)
+				nonce, _, closed := strings.Cut(tail, `"`)
+				if response.Code != http.StatusOK || !found || !closed || len(nonce) != 32 || seen[nonce] || strings.Contains(body, "__AEON_THEME_NONCE__") {
+					t.Fatalf("bootstrap nonce missing, reused or unrendered for %s", route)
+				}
+				seen[nonce] = true
+				for _, directive := range []string{"script-src", "style-src"} {
+					if !strings.Contains(policy, directive+" 'self' 'nonce-"+nonce+"'") {
+						t.Fatalf("%s nonce missing from policy for %s", directive, route)
+					}
+				}
+				if strings.Contains(policy, "unsafe-inline") || !strings.Contains(policy, "object-src 'none'") || response.Header().Get("Cache-Control") != "no-cache" {
+					t.Fatal("bootstrap relaxed unrelated CSP controls or caching")
+				}
+			}
+			plain := get(t, app, "/api/version", "")
+			if strings.Contains(plain.Header().Get("Content-Security-Policy"), "nonce-") {
+				t.Fatal("API policy inherited an application nonce")
+			}
+		})
 	})
 }
 
@@ -273,7 +422,15 @@ func TestReadyProbeDeadlineAndDrain(t *testing.T) {
 		reqCtx, cancel := context.WithCancel(context.Background())
 		cancel()
 		start := time.Now()
-		rec := serveReady(t, s, reqCtx)
+		// The outer connection guard now rejects cancelled arrivals before
+		// routing. Call the readiness handler directly to retain this unit
+		// proof that its probe inherits cancellation; the transport regression
+		// separately proves cancelled arrivals never run downstream handlers.
+		rec := httptest.NewRecorder()
+		s.handleReady(rec, httptest.NewRequest(http.MethodGet, "/api/ready", nil).WithContext(reqCtx))
+		if rec.Header().Get("Cache-Control") != "no-store" {
+			t.Fatal("cancelled readiness response was cacheable")
+		}
 		if time.Since(start) >= readyProbeTimeout {
 			t.Fatalf("cancelled caller waited %s", time.Since(start))
 		}
@@ -626,5 +783,89 @@ func TestClassicAPIPathsAreGone(t *testing.T) {
 				t.Fatalf("%s: %d %q", method, rec.Code, rec.Body.String())
 			}
 		}
+	}
+}
+
+// Risk: saturation is misreported as a broken DB, or a broken DB is declared
+// ready. Liveness must also finish while every foreground slot is retained.
+func TestReadyPoolSaturationAndDatabaseFailure(t *testing.T) {
+	fresh := dbtest.Open(t)
+	cfg, err := pgxpool.ParseConfig(fresh.AppURL)
+	if err != nil {
+		t.Fatal(err)
+	}
+	cfg.MaxConns = 4
+	cfg.MinConns = 0
+	if _, err := db.ConfigurePool(cfg); err != nil {
+		t.Fatal(err)
+	}
+	pool, err := pgxpool.NewWithConfig(t.Context(), cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer pool.Close()
+	s := &Server{Pool: pool}
+	s.SetServing(true)
+	handler := s.Handler()
+	held := []*pgxpool.Conn{}
+	defer func() {
+		for _, c := range held {
+			c.Release()
+		}
+	}()
+	for range 4 {
+		c, err := pool.Acquire(t.Context())
+		if err != nil {
+			t.Fatal(err)
+		}
+		held = append(held, c)
+	}
+	probe, cancel := context.WithTimeout(t.Context(), time.Second)
+	defer cancel()
+	rec := httptest.NewRecorder()
+	handler.ServeHTTP(rec, httptest.NewRequest("GET", "/api/ready", nil).WithContext(probe))
+	var ready readyBody
+	if err := json.Unmarshal(rec.Body.Bytes(), &ready); err != nil {
+		t.Fatal(err)
+	}
+	if rec.Code != 503 || ready.Reason != "pool_exhausted" || ready.Pool == nil || ready.Pool.Acquired != 4 || !strings.Contains(ready.Detail, "4 acquired") {
+		t.Fatalf("saturated readiness: %d %s", rec.Code, rec.Body.String())
+	}
+	rec = httptest.NewRecorder()
+	handler.ServeHTTP(rec, httptest.NewRequest("GET", "/api/health", nil).WithContext(probe))
+	var health healthBody
+	if err := json.Unmarshal(rec.Body.Bytes(), &health); err != nil {
+		t.Fatal(err)
+	}
+	if rec.Code != 200 || health.DB != "down" {
+		t.Fatalf("saturated liveness: %d %+v", rec.Code, health)
+	}
+	for _, c := range held {
+		c.Release()
+	}
+	held = nil
+	assertReady(t, handler, 200)
+	// The dialer is unreachable, so a real pgx ping cannot reach any DB. This
+	// refuses readiness rather than accepting a cached result or only pool stats.
+	brokenCfg := cfg.Copy()
+	if _, err := db.ConfigurePool(brokenCfg); err != nil {
+		t.Fatal(err)
+	}
+	brokenCfg.ConnConfig.DialFunc = func(context.Context, string, string) (net.Conn, error) {
+		return nil, errors.New("database unavailable in fixture")
+	}
+	broken, err := pgxpool.NewWithConfig(t.Context(), brokenCfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer broken.Close()
+	s = &Server{Pool: broken}
+	s.SetServing(true)
+	rec = get(t, s.Handler(), "/api/ready", "")
+	if err := json.Unmarshal(rec.Body.Bytes(), &ready); err != nil {
+		t.Fatal(err)
+	}
+	if rec.Code != 503 || ready.Reason != "database_unavailable" {
+		t.Fatalf("broken readiness: %d %s", rec.Code, rec.Body.String())
 	}
 }

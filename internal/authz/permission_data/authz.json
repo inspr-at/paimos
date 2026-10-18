@@ -1,0 +1,11 @@
+{
+  "_license": "SPDX-License-Identifier: AGPL-3.0-only",
+  "project_self_permissions": [
+    "authz.read"
+  ],
+  "words": {
+    "resources": {
+      "authz": "their own access"
+    }
+  }
+}

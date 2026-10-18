@@ -6,6 +6,7 @@ import "testing"
 
 func TestKnowledgeKindSlug(t *testing.T) {
 	cases := map[string]string{
+		"decision":        "decision",
 		"memory":          "memory",
 		"runbook":         "runbook",
 		"guideline":       "guideline",

@@ -1,0 +1,22 @@
+{
+  "group": "usage-dashboard",
+  "nightlyTiming": {
+    "seconds": 18.674,
+    "selectedTests": 10
+  },
+  "spec": {
+    "file": "tests/usage-dashboard.spec.ts",
+    "listedTests": 10,
+    "tierTiming": {
+      "caseSeconds": {
+        "max": 2.884,
+        "median": 1.713,
+        "min": 1.539
+      },
+      "seconds": 18.674,
+      "selectedTests": 10
+    },
+    "weightSeconds": 14.8,
+    "weightSource": "web-2"
+  }
+}

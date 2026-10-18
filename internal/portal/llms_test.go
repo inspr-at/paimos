@@ -101,7 +101,7 @@ func TestLlmsTextIsPublicAndBounded(t *testing.T) {
 			BenefitEN: "You can see what shipped.", BenefitDE: "Sichtbar, was geliefert wurde.",
 		}},
 	}}
-	text := renderLlms("harbour", doc, releases)
+	text := renderLlmsForProduct("harbour", "", doc, releases)
 	for _, want := range []string{
 		"# Harbour catalog\n\n> Work that is ready in the morning.\n",
 		"- [Deadline radar](/portal/harbour): Public summary. Live since 260926120000.0.0.\n",
@@ -122,7 +122,7 @@ func TestLlmsTextIsPublicAndBounded(t *testing.T) {
 		t.Fatal("llms.txt must end with a newline")
 	}
 	doc.ReleaseHistory = false
-	silent := renderLlms("harbour", doc, releases)
+	silent := renderLlmsForProduct("harbour", "", doc, releases)
 	if strings.Contains(silent, "Clear morning notes") || strings.Contains(silent, "Release history") || strings.Contains(silent, "You can see what shipped") {
 		t.Fatalf("llms published notes without the opt-in\n%s", silent)
 	}
@@ -131,7 +131,7 @@ func TestLlmsTextIsPublicAndBounded(t *testing.T) {
 	}
 
 	unsafe := portalDocument{Product: &portalProduct{Title: "Bad <script>", Summary: "still here"}, Catalog: []portalFeature{}, Wishes: []portalWish{}}
-	bare := renderLlms("harbour", unsafe, nil)
+	bare := renderLlmsForProduct("harbour", "", unsafe, nil)
 	if strings.Contains(bare, "<") || strings.Contains(bare, "script") || !strings.Contains(bare, "# Product portal\n") || !strings.Contains(bare, "> still here\n") {
 		t.Fatalf("unsafe title: %s", bare)
 	}
@@ -141,7 +141,7 @@ func TestLlmsTextIsPublicAndBounded(t *testing.T) {
 	for range 80 {
 		long.Catalog = append(long.Catalog, item)
 	}
-	capped := renderLlms("harbour", long, nil)
+	capped := renderLlmsForProduct("harbour", "", long, nil)
 	if len(capped) > llmsTextLimit || !strings.Contains(capped, "## Machine-readable\n") || !strings.HasSuffix(capped, "\n") {
 		t.Fatalf("cap len=%d", len(capped))
 	}

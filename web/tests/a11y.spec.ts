@@ -5,8 +5,8 @@ import AxeBuilder from '@axe-core/playwright'
 import { fixtures, me, mockWork } from './work-fixtures'
 import { agentData, mockAgents } from './agents-fixtures'
 import { businessData, mira, mockBusiness, type BusinessMockOptions } from './business-fixtures'
-import { journeyWorld, mockJourney, type JourneyStart, type WorldOptions } from './journey-fixtures'
 import { knowledgeWorld, mockKnowledge } from './knowledge-fixtures'
+import { expectStableControls } from './helpers/stable'
 
 const world = {
   me: me.id,
@@ -60,6 +60,68 @@ async function signedOut(page: Page) {
   })
 }
 
+// R18: the attention grid and selection controls must remain usable by people
+// using a screen reader, including retained resolutions and view-only rows.
+// Keep each axe scan in its own case: eight scans and two navigations used to
+// compete for one test deadline. Every state and both themes remain covered.
+for (const theme of ['light', 'dark'] as const) for (const state of ['initial', 'resolved', 'selected', 'menu'] as const) {
+  test(`axe: Needs attention ${state} in ${theme}`, async ({ page }) => {
+    await signedIn(page)
+    const items = [0, 1, 2].map(index => ({
+      event_id: index + 1, node_id: `attention-${index}`, project_id: 'p-aeon', key: `AEON-${index + 10}`,
+      title: 'Die vollständigen Abrechnungseinstellungen für sämtliche Arbeitsbereiche aktualisieren',
+      kind: 'triage', from: 'new', to: 'backlog', reason: 'Review the current suggestion.',
+      revision: '2026-10-04T08:00:00Z', at: '2026-10-03T08:00:00Z', editable: index !== 2, applicable: index !== 2,
+      unavailable_reason: index === 2 ? 'Editing this ticket needs permission' : undefined,
+    }))
+    await page.route('**/api/status-autopilot/attention**', route => {
+      const request = route.request(), path = new URL(request.url()).pathname
+      if (path.endsWith('/actions')) return route.fulfill({ json: { items: request.postDataJSON().items.map((item: { event_id: number }) => ({ event_id: item.event_id, ok: true, resolution_event_id: 1000 + item.event_id, revision: '2026-10-05T08:00:00Z' })) } })
+      if (path.endsWith('/groups')) return route.fulfill({ json: { total: 3, truncated: false, groups: [{ id: 'p-aeon', project_id: 'p-aeon', key: 'AEON', title: 'Aeon', total: 3, counts: { triage: 3 }, applicable: 2, editable: 2, override_mode: 'on', can_manage: false }] } })
+      return route.fulfill({ json: { items, total: 3, counts: { triage: 3 }, next_cursor: null, facets: { projects: [], assignees: [] }, facets_truncated: false } })
+    })
+    await page.setViewportSize({ width: theme === 'light' ? 1440 : 390, height: 1000 })
+    await page.goto('/tickets?view=needs-attention')
+    const grid = page.getByRole('grid', { name: 'Tickets needing attention' })
+    const first = grid.locator('#row-attention-1')
+    await expect(first).toBeVisible()
+    await page.evaluate(value => { document.documentElement.dataset.theme = value }, theme)
+    await page.evaluate(() => document.fonts.ready)
+    const scan = async () => {
+      const results = await new AxeBuilder({ page }).withTags(['wcag2a', 'wcag2aa', 'wcag21a', 'wcag21aa']).exclude('.version-coordinate').exclude('.calendar-version').analyze()
+      expect(results.violations.map(v => ({ rule: v.id, impact: v.impact, nodes: v.nodes.map(n => ({ target: n.target, failure: n.failureSummary })) }))).toEqual([])
+    }
+    if (state === 'initial') { await scan(); return }
+    await first.getByRole('button', { name: /^Apply to/ }).click()
+    await expect(first.getByRole('button', { name: 'Undo for AEON-10' })).toBeFocused()
+    if (state === 'resolved') { await scan(); return }
+    await first.getByRole('button', { name: 'Undo for AEON-10' }).click()
+    await grid.locator('.group-check').check()
+    await expect(page.getByRole('toolbar', { name: 'Selected tickets' })).toBeVisible()
+    if (state === 'selected') { await scan(); return }
+    await page.getByRole('toolbar', { name: 'Selected tickets' }).getByRole('button', { name: 'Clear the selection' }).click()
+    await grid.locator('#row-group-p-aeon').getByRole('button', { name: 'More for AEON' }).click()
+    const menu = page.getByRole('menu')
+    await expect(menu).toBeVisible()
+    // The phone sheet's heading, Close, and any alert sit beside the menu.
+    // Only menuitem buttons may be owned by role=menu (axe aria-required-children).
+    expect(await menu.evaluate(el => [...el.children].every(child => child.getAttribute('role') === 'menuitem'))).toBe(true)
+    await expect(menu.getByRole('heading')).toHaveCount(0)
+    await expect(menu.getByRole('button', { name: 'Close' })).toHaveCount(0)
+    await expect(menu.getByRole('alert')).toHaveCount(0)
+    if (theme === 'dark') {
+      await expect(page.getByRole('heading', { name: 'More for AEON' })).toBeVisible()
+      await expect(page.getByRole('button', { name: 'Close' })).toBeVisible()
+      await page.getByRole('menuitem').first().focus()
+      await page.keyboard.press('ArrowDown')
+      await expect(page.getByRole('menuitem').nth(1)).toBeFocused()
+    }
+    await scan()
+    await page.keyboard.press('Escape')
+    await expect(grid.locator('#group-more-p-aeon')).toBeFocused()
+  })
+}
+
 // name, setup, path, then what to wait for or do before the scan
 const screens: [string, (page: Page) => Promise<void>, string, (page: Page) => Promise<void>][] = [
   ['projects', signedIn, '/', async page => { await expect(page.getByRole('list', { name: 'Projects' })).toBeVisible() }],
@@ -95,20 +157,36 @@ const screens: [string, (page: Page) => Promise<void>, string, (page: Page) => P
     // AEON-313: unbound history of other sessions is no longer shown in this
     // thread, so the audit covers the conversation as the session shows it.
     const panel = page.getByRole('complementary', { name: 'Session details' })
-    await expect(panel.getByRole('region', { name: 'Conversation' })).toBeVisible()
+    // AEON-1212, merge #592: Chat is a named tabpanel in the unified pane.
+    const chat = panel.getByRole('tab', { name: /^Chat/ })
+    await chat.click()
+    await expect(chat).toHaveAttribute('aria-selected', 'true')
+    await expect(panel.getByRole('tabpanel', { name: /^Chat/ })).toBeVisible()
     await expect(panel.getByText(/^Other sessions of/)).toHaveCount(0)
   }],
   ['agents session overview', signedIn, '/agents/5e000000-0000-4000-8000-000000000001?tab=overview', async page => {
     await expect(page.getByRole('complementary', { name: 'Session details' }).locator('.now-step')).toBeVisible()
   }],
   ['business setup', business({ enabled: [] }), '/business', async page => { await expect(page.getByRole('heading', { name: 'Set up Business' })).toBeVisible() }],
+  ['business parts status', business({ enabled: ['business_costs'] }), '/business', async page => { await expect(page.getByRole('region', { name: 'Business parts' }).getByText('Needs Customers.')).toBeVisible() }],
   ['business overview', business(), '/business', async page => { await expect(page.getByRole('list', { name: 'Time per ticket' })).toBeVisible() }],
   ['hours week', business(), '/business/hours', async page => { await expect(page.locator('.week-grid tbody tr').first()).toBeVisible() }],
   ['hours ticket picker', business(), '/business/hours', async page => {
     await expect(page.locator('.week-grid tbody tr').first()).toBeVisible()
     await page.getByRole('button', { name: /^Ticket:/ }).click()
     await page.getByRole('combobox', { name: 'Ticket' }).fill('pharos')
-    await expect(page.getByRole('listbox', { name: 'Ticket' }).getByRole('option').first()).toBeVisible()
+    const search = page.getByRole('combobox', { name: 'Ticket' }), list = page.getByRole('listbox', { name: 'Ticket' })
+    const first = list.getByRole('option').first(), second = list.getByRole('option').nth(1)
+    await expect(first).toBeVisible()
+    const read = page.getByRole('group', { name: 'Read full ticket names' }).getByRole('button', { name: /^Read full name:/ }).first()
+    await expectStableControls({
+      controls: { search, list, first, second, read },
+      interactions: [
+        { name: 'read the complete ticket name', run: async () => { await read.focus(); await read.press('Enter'); await expect(page.getByRole('region', { name: 'Full name', exact: true })).toHaveText((await read.getAttribute('aria-label'))!.replace(/^Read full name: /, '')) } },
+        { name: 'leave the disclosure and select by keyboard', run: async () => { await read.press('Escape'); await expect(read).toBeFocused(); await search.focus(); await search.press('ArrowDown'); await expect(second).toHaveAttribute('aria-selected', 'true') } },
+        { name: 'return to the first option', run: async () => { await search.press('ArrowUp'); await expect(first).toHaveAttribute('aria-selected', 'true') } },
+      ],
+    })
   }],
   ['hours editing an entry', business(), '/business/hours', editEntry],
   ['hours entry conflict', businessConflict, '/business/hours', async page => {
@@ -131,8 +209,14 @@ const screens: [string, (page: Page) => Promise<void>, string, (page: Page) => P
   ['knowledge docked entry', signedIn, '/p/PHAROS/knowledge?entry=runbook/deploy-release', async page => { await page.setViewportSize({ width: 1440, height: 900 }); await expect(page.locator('.entry-page.dock .e-body')).toBeVisible() }],
   ['agents approve', signedInAdmin, '/agents', async page => {
     await expect(page.locator('.agents-page .row').first()).toBeVisible()
-    await page.keyboard.press('j'); await page.keyboard.press('a')
-    await expect(page.getByLabel('Reason (optional)')).toBeFocused()
+    // AEON-569, merge #458: approvals open the canonical Decision Desk memo.
+    await page.getByRole('navigation', { name: 'Places' }).getByRole('link', { name: /^Decision Desk/ }).click()
+    await page.getByTestId(/^desk-row-a:/).first().click()
+    await expect(page.getByRole('dialog', { name: 'Decision Desk memo', exact: true })).toBeVisible()
+    await expect(page.getByTestId('desk-paper')).toBeFocused()
+    const reason = page.getByRole('textbox', { name: 'Reason', exact: true })
+    await reason.focus()
+    await expect(reason).toBeFocused()
   }],
 ]
 
@@ -143,12 +227,42 @@ for (const colorScheme of ['light', 'dark'] as const) {
       await setup(page)
       await page.goto(path)
       await ready(page)
-      await page.waitForTimeout(250)
-      // The version coordinate (and the footer's calendar version) is the vendored INSPR calendar-version display (pinned presentation);
-      // its digit colours are reported to its owner rather than restyled here.
-      const results = await new AxeBuilder({ page }).withTags(['wcag2a', 'wcag2aa', 'wcag21a', 'wcag21aa']).exclude('.version-coordinate').exclude('.calendar-version').analyze()
-      const summary = results.violations.map(v => `${v.id} (${v.impact}): ${v.help}\n${v.nodes.slice(0, 4).map(n => `    ${n.target.join(' ')} — ${n.failureSummary?.split('\n').slice(1, 2).join(' ').trim()}`).join('\n')}`)
-      expect(summary, summary.join('\n')).toEqual([])
+      const evidence = name === 'ticket full page' || name === 'hours ticket picker'
+      for (const width of evidence ? [390, 1024, 1440] : [null]) {
+        if (width) await page.setViewportSize({ width, height: 1000 })
+        await page.evaluate(() => document.fonts.ready)
+        if (name === 'ticket full page') {
+          const ticket = page.getByRole('article', { name: 'Ticket details' })
+          // The tablet layout can show both property lists. Measure and read
+          // each list's feedback and selectors together, never across copies.
+          const feedbacks = await ticket.locator('.placement-feedback dd:visible').all()
+          expect(feedbacks.length).toBeGreaterThan(0)
+          for (const feedback of feedbacks) {
+            await expect(feedback).toContainText('Kind of work is unavailable.')
+            const properties = feedback.locator('xpath=ancestor::dl[1]')
+            const controls = { feedback, kind: properties.getByRole('combobox', { name: 'Kind of work', exact: true }), complexity: properties.getByRole('combobox', { name: 'Complexity', exact: true }) }
+            await expectStableControls({
+              controls,
+              interactions: [
+                { name: 'read long classification feedback', run: async () => {
+                  await feedback.evaluate(element => { element.textContent = `Kind of work is unavailable. Die Klassifizierung konnte nicht geladen werden; sämtliche vorgeschlagenen Werte bleiben unverändert, bis die Berechtigungen und die Verbindung erneut geprüft wurden. ${'Klassifizierung'.repeat(8)}` })
+                  await feedback.focus(); await expect(feedback).toBeFocused()
+                  await feedback.press('End')
+                  await expect.poll(() => feedback.evaluate(element => element.scrollTop)).toBeGreaterThan(0)
+                } },
+                { name: 'return to the start of feedback', run: async () => { await feedback.press('Home'); await expect.poll(() => feedback.evaluate(element => element.scrollTop)).toBe(0) } },
+              ],
+              scrollAreas: { feedback },
+            })
+          }
+        }
+        // The version coordinate (and the footer's calendar version) is the vendored INSPR calendar-version display (pinned presentation);
+        // its digit colours are reported to its owner rather than restyled here.
+        const results = await new AxeBuilder({ page }).withTags(['wcag2a', 'wcag2aa', 'wcag21a', 'wcag21aa']).exclude('.version-coordinate').exclude('.calendar-version').analyze()
+        const summary = results.violations.map(v => `${v.id} (${v.impact}): ${v.help}\n${v.nodes.slice(0, 4).map(n => `    ${n.target.join(' ')} — ${n.failureSummary?.split('\n').slice(1, 2).join(' ').trim()}\n    ${n.html}`).join('\n')}`)
+        expect(summary, summary.join('\n')).toEqual([])
+        if (evidence) await page.screenshot({ path: test.info().outputPath(`${name.replaceAll(' ', '-')}-${width}-${colorScheme}.png`) })
+      }
     })
   }
 }
@@ -185,54 +299,7 @@ for (const colorScheme of ['light', 'dark'] as const) {
       await signedIn(page)
       await page.goto(path)
       await ready(page)
-      await page.waitForTimeout(250)
-      const results = await new AxeBuilder({ page }).withTags(['wcag2a', 'wcag2aa', 'wcag21a', 'wcag21aa']).exclude('.version-coordinate').exclude('.calendar-version').analyze()
-      const summary = results.violations.map(v => `${v.id} (${v.impact}): ${v.help}\n${v.nodes.slice(0, 4).map(n => `    ${n.target.join(' ')} — ${n.failureSummary?.split('\n').slice(1, 2).join(' ').trim()}`).join('\n')}`)
-      expect(summary, summary.join('\n')).toEqual([])
-    })
-  }
-}
-
-// U10 journey: the rail and each kind of stage, the walker and its sheet.
-const journeyScreens: [string, JourneyStart, string, (page: Page) => Promise<void>, WorldOptions?][] = [
-  ['journey plan', 'plan', '/p/PHAROS?view=journey', async page => { await expect(page.locator('.release-tickets .tk').first()).toBeVisible() }],
-  ['journey plan earlier release', 'plan', '/p/PHAROS?view=journey&release=PHAROS-30', async page => { await expect(page.getByRole('heading', { name: 'Plan release 1' })).toBeVisible() }],
-  ['journey inspire', 'inspire', '/p/PHAROS?view=journey', async page => {
-    await expect(page.getByText('Voice conversation with Markus', { exact: true })).toBeVisible()
-    await page.getByRole('button', { name: 'Transcript' }).click()
-    await expect(page.locator('#turn-t-1')).toBeVisible()
-  }],
-  ['journey shape', 'shape', '/p/PHAROS?view=journey', async page => { await expect(page.getByRole('listitem', { name: /Shape gate/ })).toBeVisible() }],
-  ['journey requirements', 'requirements', '/p/PHAROS?view=journey', async page => { await expect(page.getByText('A new host is provisioned only after its price is approved.')).toBeVisible() }],
-  ['journey deploy', 'deploy', '/p/PHAROS?view=journey', async page => { await expect(page.getByText('The host policy refused it')).toBeVisible() }],
-  ['journey live', 'live', '/p/PHAROS?view=journey', async page => { await expect(page.locator('.release-list li').first()).toBeVisible() }],
-  ['journey walker', 'plan', '/p/PHAROS?view=journey&walk=PHAROS-11', async page => { await expect(page.locator('dialog.walker img.shot')).toBeVisible() }],
-  ['journey build derived', 'build', '/p/PHAROS?view=journey', async page => { await expect(page.getByRole('list', { name: 'Tickets by status' })).toBeVisible() }, { derived: true }],
-  ['journey history fold', 'build', '/p/PHAROS?view=journey&stage=inspire', async page => {
-    await page.locator('section.history').getByRole('button', { name: 'Show the sources' }).click()
-    await expect(page.getByText('Sources · stored with the project')).toBeVisible()
-  }],
-  ['journey imported origin', 'build', '/p/PHAROS?view=journey&stage=inspire', async page => { await expect(page.getByRole('list', { name: 'What the project brought' })).toBeVisible() }, { derived: true }],
-  ['journey imported plan backlog', 'open', '/p/PHAROS?view=journey', async page => { await expect(page.getByRole('region', { name: 'Backlog · what release 1 is chosen from' })).toBeVisible() }, { derived: true }],
-  ['journey deploy ready', 'deploy', '/p/PHAROS?view=journey', async page => { await expect(page.getByText('Launch admission · ready')).toBeVisible() }, { readiness: { can_admit: true, reason: '' } }],
-  ['journey mark candidate', 'mark', '/p/PHAROS?view=journey', async page => { await expect(page.getByRole('listitem', { name: /Build gate/ })).toBeVisible() }],
-  ['journey open release 1', 'open', '/p/PHAROS?view=journey', async page => { await expect(page.getByRole('region', { name: 'Decision: Open release 1' })).toBeVisible() }],
-  ['journey walker sheet', 'plan', '/p/PHAROS?view=journey&walk=PHAROS-12', async page => {
-    await expect(page.locator('dialog.walker .ck.on')).toBeVisible()
-    await page.keyboard.press('?')
-    await expect(page.getByRole('dialog', { name: 'Walker shortcuts' })).toBeVisible()
-  }],
-]
-for (const colorScheme of ['light', 'dark'] as const) {
-  for (const [name, start, path, ready, options] of journeyScreens) {
-    test(`axe: ${name} in ${colorScheme}`, async ({ page }) => {
-      await page.setViewportSize({ width: 1440, height: 1000 })
-      await page.emulateMedia({ colorScheme, reducedMotion: 'reduce' })
-      await mockWork(page, fixtures())
-      await mockJourney(page, journeyWorld(start, options))
-      await page.goto(path)
-      await ready(page)
-      await page.waitForTimeout(250)
+      await page.evaluate(() => document.fonts.ready)
       const results = await new AxeBuilder({ page }).withTags(['wcag2a', 'wcag2aa', 'wcag21a', 'wcag21aa']).exclude('.version-coordinate').exclude('.calendar-version').analyze()
       const summary = results.violations.map(v => `${v.id} (${v.impact}): ${v.help}\n${v.nodes.slice(0, 4).map(n => `    ${n.target.join(' ')} — ${n.failureSummary?.split('\n').slice(1, 2).join(' ').trim()}`).join('\n')}`)
       expect(summary, summary.join('\n')).toEqual([])

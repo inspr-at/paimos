@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
+import { readFileSync } from 'node:fs'
 import { compareModelSort, formatDollars, formatTokenCount, listCostCell, modelCell, planningPresent, planningSortValue, tokensCell, type PlanningRow, type TicketPlanning } from '../src/lib/planning.ts'
 import { compareRows } from '../src/lib/ticketList.ts'
 import type { ListItem } from '../src/lib/api.ts'
@@ -14,6 +15,65 @@ function row(planning: Partial<TicketPlanning> | undefined, fields: Record<strin
 }
 const tokens = (spent: number | null, estimated: number | null, extra: object = {}) => ({ spent, input: spent ?? 0, output: 0, cached: 0, sessions: spent === null ? 0 : 2, unreported: 0, estimated, ...extra })
 const cost = (extra: object) => ({ list_spent: null, list_estimated: null, list_unpriced: false, paid_spent: null, paid_estimated: null, paid_unknown: false, plans: [], ...extra })
+
+test('canonical work aggregates disclose excluded uncalibrated leaves in token and cost tips', async t => {
+  for (const [name, render] of [['tokens', tokensCell], ['cost', listCostCell]] as const) await t.test(name, () => {
+    for (const uncalibrated of [1, 2, 0]) for (const spent of [null, 1_000_000]) for (const shape of [false, undefined]) {
+      const r = { ...row({ tokens: tokens(spent, 8_000_000), cost: cost({ list_spent: spent === null ? null : '2', list_estimated: '16' }),
+        children: { total: 4, estimated: 4 - uncalibrated, uncalibrated } }, {}, 'work'), is_leaf: shape }
+      const basis = `Sum of ${4 - uncalibrated} of 4 open and done children with an estimate${uncalibrated ? ` · partial: ${uncalibrated} uncalibrated ${uncalibrated === 1 ? 'child excluded' : 'children excluded'}` : ''}`
+      const cell = render(r)
+      assert.equal(cell.tip.split('\n').filter(line => line.startsWith('Sum of ')).length, 1, cell.tip)
+      assert.ok(cell.tip.split('\n').includes(basis), cell.tip)
+      assert.notEqual(cell.estimated, '')
+      assert.equal(cell.tip.includes('partial:'), uncalibrated > 0, cell.tip)
+    }
+  })
+})
+
+test('placement provenance labels a pin, latest, and Automatic without changing legacy cells', () => {
+  const legacy = modelCell(row({ route })).tip
+  assert.doesNotMatch(legacy, /preference/)
+  assert.match(modelCell(row({ route: { ...route, set_by: 'person', pinned: true } })).tip, /You preference · pinned version/)
+  assert.match(modelCell(row({ route: { ...route, set_by: 'project', follows_latest: true } })).tip, /Project preference · follows latest/)
+  assert.match(modelCell(row({ route: { ...route, set_by: 'default' } })).tip, /Default preference · Automatic/)
+})
+
+test('frozen default estimates have one uncalibrated basis line', () => {
+  for (const spent of [null, 1_000_000]) for (const basisText of [undefined, 'uncalibrated: documented planning fallback (n=4)', 'uncalibrated: documented planning fallback (n=4); history truncated']) {
+    const r = row({ route, tokens: tokens(spent, 99_000_000), cost: cost({ list_spent: spent === null ? null : '2', list_estimated: '999' }) })
+    r.planning!.estimate_snapshot = { id: 'frozen', started_at: '2026-10-01T09:12:00Z', source: 'session', estimate_hours: 2, estimated_tokens: 10_000_000, estimated_cost_usd: '20', route, rate_basis: { basis: 'default', tickets: 4, tokens_per_hour: 5_000_000, basis_text: basisText } }
+    for (const cell of [tokensCell(r), listCostCell(r)]) {
+      const basis = cell.tip.split('\n').filter(line => /uncalibrated|insufficient model history|default .*until/i.test(line))
+      assert.equal(basis.length, 1, cell.tip)
+      assert.match(basis[0]!, /^Uncalibrated · /)
+      if (basisText) assert.equal(basis[0], `Uncalibrated · ${basisText}`)
+      assert.match(cell.tip, /Estimate taken when work started/)
+      assert.notEqual(cell.estimated, '')
+    }
+  }
+})
+
+test('real capped registry list response keeps independent estimates and names the registry gap', () => {
+  // Exact API bytes emitted by TestPlanningTruncatedHistoryListFixture: a
+  // registry beyond Models' bounds resolves no route, so learning reads nothing.
+  const page = JSON.parse(readFileSync(new URL('./fixtures/planning-truncated-list.json', import.meta.url), 'utf8')) as { items: ListItem[] }
+  assert.equal(page.items.length, 1)
+  const r = page.items[0]!
+  assert.equal(r.planning!.route, null)
+  assert.equal(r.planning!.route_gap, 'registry')
+  assert.equal(r.planning!.route_truncated, true)
+  assert.equal(r.planning!.model_estimate, undefined)
+  assert.equal(r.planning!.tokens.calibration!.basis, 'median')
+  assert.equal(r.planning!.tokens.calibration!.level, 'route')
+  assert.equal(r.planning!.tokens.calibration!.any_route, true)
+  const basis = 'median of finished tickets on any route (n=5)'
+  assert.equal(modelCell(r).tip, 'No agent session yet\nBuild hard · backend\nThe model registry has no available route for this role')
+  assert.equal(tokensCell(r).estimated, '8M')
+  assert.equal(tokensCell(r).tip, `Estimated ~8M tokens · no agent session yet\n${basis}`)
+  assert.equal(listCostCell(r).estimated, '$80')
+  assert.equal(listCostCell(r).tip, `Estimated ~$80 at API list prices ($40.00/h)\nBilling shows once a session reports\n${basis}`)
+})
 
 test('dense figures', () => {
   assert.equal(formatTokenCount(940), '940')
@@ -29,7 +89,7 @@ test('dense figures', () => {
 })
 
 test('planning cells distinguish a planned model and measured figures', () => {
-  assert.equal(modelCell(row({ route })).text, 'Codex astra')
+  assert.equal(modelCell(row({ route })).text, 'astra')
   assert.equal(modelCell(row({ route })).state, 'planned')
   assert.match(modelCell(row({ route })).tip, /Model registry, revision 3f9a1c2b/)
   assert.equal(modelCell(row(undefined, {})).tip, 'No agent session yet\nNo model planned: set a role and area')
@@ -49,7 +109,7 @@ test('presence and sort values follow the list API', () => {
   const rows = [row({ route, tokens: tokens(5, null), cost: cost({ list_spent: '1' }) }), row(undefined, {})]
   assert.deepEqual(planningPresent(rows), { model: true, tokens: true, list_cost: true, paid: false })
   assert.deepEqual(planningPresent([row(undefined, {})]), { model: false, tokens: false, list_cost: false, paid: false })
-  assert.equal(planningSortValue(rows[0]!, 'model'), '3:backend')
+  assert.equal(planningSortValue(rows[0]!, 'model'), 'codex astra')
   assert.equal(planningSortValue(rows[1]!, 'model'), null)
   assert.equal(compareModelSort(rows[0]!, rows[1]!, false), -1)
   assert.equal(planningSortValue(rows[0]!, 'tokens'), 5)
@@ -100,21 +160,9 @@ test('cost sort compares micro-dollar integers past the float mantissa', () => {
   }
 })
 
-test('model sort still orders areas when both rows lack a role', () => {
-  const absent = { ...row(undefined, {}), id: 'A' } as ListItem
-  const backend = { ...row(undefined, { area: 'backend' }), id: 'B' } as ListItem
-  const frontend = { ...row(undefined, { area: 'frontend' }), id: 'C' } as ListItem
-  const rows = [absent, frontend, backend]
-  assert.deepEqual([...rows].sort(compareRows([{ field: 'model', desc: false }])).map(item => item.id), ['B', 'C', 'A'])
-  assert.deepEqual([...rows].sort(compareRows([{ field: 'model', desc: true }])).map(item => item.id), ['C', 'B', 'A'])
-})
-
-test('model sort keeps a missing area last in both directions', () => {
-  const withArea = { ...row(undefined, { route_role: 'build', area: 'frontend' }), id: 'a' } as ListItem
-  const noArea = { ...row(undefined, { route_role: 'build' }), id: 'b' } as ListItem
-  const higher = { ...row(undefined, { route_role: 'build-hard', area: 'backend' }), id: 'c' } as ListItem
-  const none = { ...row(undefined, {}), id: 'd' } as ListItem
-  const rows = [noArea, none, higher, withArea]
+test('model sort uses full identity and version, with absent models last', () => {
+  const item = (id: string, name?: string, version = '') => ({ ...row(name ? { route: { ...route, display_name: name, short_name: name.split(' ').pop(), model_version: version } } : undefined, {}), id }) as ListItem
+  const rows = [item('d'), item('c', 'Codex Sol', '6.1'), item('b', 'Claude Opus', '5.5'), item('a', 'Claude Opus', '5')]
   assert.deepEqual([...rows].sort(compareRows([{ field: 'model', desc: false }])).map(item => item.id), ['a', 'b', 'c', 'd'])
-  assert.deepEqual([...rows].sort(compareRows([{ field: 'model', desc: true }])).map(item => item.id), ['c', 'a', 'b', 'd'])
+  assert.deepEqual([...rows].sort(compareRows([{ field: 'model', desc: true }])).map(item => item.id), ['c', 'b', 'a', 'd'])
 })

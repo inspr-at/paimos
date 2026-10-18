@@ -1,0 +1,164 @@
+{
+  "ticket": "AEON-648",
+  "round": "int-fix16",
+  "base_commit": "7fbb3313301ede67fe97b911a6d72c53109f7fe6",
+  "review": "review-ci272.out",
+  "finding": {
+    "run": 37238802068,
+    "job": "release-check-run",
+    "step": "Offline code-health audit toolkit and slice ownership",
+    "root_cause": "Seven new Go source/test files had no audit slice owner, failing both the whole-snapshot check and the delta CLI check. Migration policy was not the failing step.",
+    "status": "addressed",
+    "assignments": {
+      "internal/fieldschema/**": "S5 (nodes and domain A)",
+      "internal/parentbenefits/**": "S6 (benefits and planning domain B)"
+    }
+  },
+  "regressions": {
+    "tests": [
+      "CoverageTests.test_field_schema_belongs_to_domain_a",
+      "CoverageTests.test_parent_benefits_belong_to_domain_b"
+    ],
+    "baseline_manifest_sha256": "176203d16500c9c1cb360e828889b5b6c5a61eb8f1be2ab10b93ea470f3d6a88",
+    "red": {
+      "command": "python3 -B -m unittest test_audit.CoverageTests.test_field_schema_belongs_to_domain_a test_audit.CoverageTests.test_parent_benefits_belong_to_domain_b",
+      "cwd": "scripts/audit",
+      "exit_code": 1,
+      "tests": 2,
+      "subtest_failures": 8,
+      "reason": "Both new regressions ran before the manifest edit, against the unchanged manifest from 7fbb3313. Expected S5/S6 owners were absent."
+    },
+    "green": {
+      "command": "python3 -B -m unittest discover -s scripts/audit -p 'test_*.py'",
+      "exit_code": 0,
+      "tests": 33
+    },
+    "existing_assertions": "Preserved all assertions and the whole-tree assignment requirement during delta checks. No skips or exemptions added."
+  },
+  "validation": {
+    "origin_main": {
+      "live_sha": "a3ca8c475a94ce1de6da1398182abe3dfe98eb9f",
+      "verified_with": "git ls-remote origin refs/heads/main",
+      "is_ancestor": true,
+      "pr_mergeable": "MERGEABLE",
+      "merge_required": false
+    },
+    "audit_assignment": {
+      "command": "python3 -B scripts/audit/covcheck.py --summary",
+      "exit_code": 0,
+      "errors": []
+    },
+    "migration_tests": {
+      "command": "node --test scripts/check-migrations.test.mjs",
+      "exit_code": 0,
+      "tests": 32
+    },
+    "migration_guard": {
+      "command": "node scripts/check-migrations.mjs --base-ref v261003095616.0.0",
+      "exit_code": 0,
+      "unique_numbers": 258,
+      "published_grandfathered_and_exception_bytes": "unchanged"
+    },
+    "release_checks": [
+      {
+        "name": "verify-release",
+        "command": [
+          "node",
+          "scripts/verify-release.mjs"
+        ],
+        "exit_code": 0,
+        "log": "web/test-results/aeon-648-int-fix16/logs/verify-release.log"
+      },
+      {
+        "name": "own-release-notes",
+        "command": [
+          "node",
+          "scripts/check-own-release-notes.mjs"
+        ],
+        "exit_code": 0,
+        "log": "web/test-results/aeon-648-int-fix16/logs/own-release-notes.log"
+      },
+      {
+        "name": "release-node-regressions",
+        "command": [
+          "node",
+          "--test",
+          "--test-concurrency=1",
+          "scripts/check-release-rehearsal.test.mjs",
+          "scripts/release-rehearsal-gh.test.mjs",
+          "scripts/create-release-tag.test.mjs",
+          "scripts/check-own-release-notes.test.mjs",
+          "scripts/homebrew-formula.test.mjs",
+          "scripts/homebrew-tap-pr.test.mjs",
+          "scripts/release-timing.test.mjs",
+          "scripts/verify-live.test.mjs",
+          "scripts/verify-live-policy.test.mjs",
+          "scripts/cross-family-gate.test.mjs",
+          "scripts/release-pin-pr.test.mjs",
+          "scripts/ci-pr-plan.test.mjs",
+          "scripts/ci-tree-reuse.test.mjs",
+          "scripts/full-ui-qa.test.mjs",
+          "scripts/ci-runner-route.test.mjs"
+        ],
+        "exit_code": 0,
+        "log": "web/test-results/aeon-648-int-fix16/logs/release-node-regressions.log"
+      },
+      {
+        "command": [
+          "/nix/store/6rfis26n64v1isv3gyav6hi6lljqmr0d-go-1.26.6/bin/go",
+          "test",
+          "-p",
+          "2",
+          "./scripts/releaseworkflow",
+          "-count=1"
+        ],
+        "exit_code": 0,
+        "name": "releaseworkflow"
+      },
+      {
+        "command": [
+          "/nix/store/6rfis26n64v1isv3gyav6hi6lljqmr0d-go-1.26.6/bin/go",
+          "test",
+          "-p",
+          "2",
+          "./scripts/ci-runner-guard",
+          "-count=1"
+        ],
+        "exit_code": 0,
+        "name": "ci-runner-guard"
+      },
+      {
+        "command": [
+          "/nix/store/6rfis26n64v1isv3gyav6hi6lljqmr0d-go-1.26.6/bin/go",
+          "run",
+          "./scripts/ci-runner-guard"
+        ],
+        "exit_code": 0,
+        "name": "ci-runner-boundary"
+      }
+    ],
+    "node_release_tests": {
+      "tests": 345,
+      "passed": 345,
+      "failed": 0,
+      "skipped": 0
+    },
+    "go_execution": "Only the two quick release-check workflow packages ran locally, sequentially, with GOMAXPROCS=2 and -p 2. No application Go package changed.",
+    "remote_and_web": "No affected application Go packages, web unit tests or UI specs in this audit-assignment-only round. remote-test.sh was not invoked because it pushes a temporary ref and the user explicitly prohibited pushes. No new remote, browser or hosted CI pass is claimed; previous evidence remains in the earlier round documents."
+  },
+  "scope": "Two additive audit manifest paths, two explicit ownership regression tests, and this evidence document. Application code, SQL, migration ledger, contracts, dependencies, UI, approved integration decisions and runtime ownership/safety fences are unchanged.",
+  "safety": {
+    "push": false,
+    "deploy": false,
+    "production_access": false,
+    "shared_ledger_modified": false,
+    "other_worktrees_modified": false,
+    "ticket_status_changed": false,
+    "credentials_read_or_displayed": false,
+    "model_reviews_or_subagents": false,
+    "generated_output_committed": false
+  },
+  "remaining": [
+    "Full hosted CI must be rerun by the coordinator after their push; this round proves the local release-check steps and migration guard, not overall PR CI success. Earlier reservation attribution and browser-lane residuals remain recorded in fix15 evidence."
+  ]
+}

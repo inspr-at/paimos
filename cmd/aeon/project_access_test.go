@@ -98,6 +98,7 @@ func TestProjectAccessOverHTTP(t *testing.T) {
 	// Nothing of project B, and nothing workspace-wide, through any read.
 	for _, path := range []string{
 		"/api/projects", "/api/nodes", "/api/nodes?limit=200", "/api/nodes/tree",
+		"/api/projects/lookup?ref=PA-1",
 		"/api/nodes/lookup?ids=" + w.ids["TA"] + "," + w.ids["TB"] + "," + w.ids["GB"],
 		"/api/search?q=zebra", "/api/events", "/api/events?limit=200", "/api/knowledge",
 		"/api/knowledge/graph?project_id=" + w.ids["A"],
@@ -121,9 +122,10 @@ func TestProjectAccessOverHTTP(t *testing.T) {
 	// Project B's resources by id, key and path are closed.
 	for _, path := range []string{
 		"/api/nodes/" + w.ids["TB"], "/api/node-keys/TB-1", "/api/nodes/" + w.ids["TB"] + "/activity",
+		"/api/projects/lookup?ref=PB-1",
 		"/api/nodes/" + w.ids["TB"] + "/attachments", "/api/attachments/" + w.ids["attB"] + "/content",
-		"/api/knowledge/" + w.ids["GB"], "/api/projects/" + w.ids["B"] + "/journey",
-		"/api/projects/" + w.ids["B"] + "/requirements", "/api/projects/" + w.ids["B"] + "/intake",
+		"/api/knowledge/" + w.ids["GB"], "/api/projects/" + w.ids["B"] + "/releases",
+		"/api/projects/" + w.ids["B"] + "/intake",
 		"/api/relations?node_id=" + w.ids["TB"], "/api/events?node_id=" + w.ids["TB"],
 		"/api/knowledge/resolve?project_id=" + w.ids["B"] + "&type=guideline&slug=gb",
 		"/api/projects/" + w.ids["B"] + "/members", "/api/knowledge/graph?project_id=" + w.ids["B"],
@@ -329,6 +331,7 @@ func TestProjectAccessOverHTTP(t *testing.T) {
 	// loses the workspace role and stays a guest of A. The batch event has no
 	// node; its items name B, so it is no longer theirs to read.
 	w.expect("member", "POST", "/api/nodes/bulk", `{"ids":["`+w.ids["TA2"]+`","`+w.ids["TB"]+`"],"state":"qa"}`, 200)
+	w.expect("member", "GET", "/api/projects/lookup?ref=PB-1", "", 200)
 	if _, err := w.d.Admin.Exec(ctx, `DELETE FROM role_bindings WHERE principal_id=$1`, w.people["member"]); err != nil {
 		t.Fatal(err)
 	}
@@ -336,6 +339,8 @@ func TestProjectAccessOverHTTP(t *testing.T) {
 		t.Fatal(err)
 	}
 	w.noLeak("member", "/api/events after demotion", w.expect("member", "GET", "/api/events?limit=200", "", 200))
+	w.expect("member", "GET", "/api/projects/lookup?ref=PB-1", "", 404)
+	w.expect("member", "GET", "/api/projects/lookup?ref=PA-1", "", 200)
 	w.noLeak("member", "/api/events/stream after demotion", w.stream("member"))
 }
 
@@ -376,17 +381,17 @@ func (w *accessWorld) seed() {
 		}
 		node("A", "project", "PA-1", "")
 		node("B", "project", "PB-1", "")
-		node("TA", "ticket", "TA-1", "A")
-		node("TA2", "ticket", "TA-2", "A")
-		node("TB", "ticket", "TB-1", "B")
+		node("TA", "work", "TA-1", "A")
+		node("TA2", "work", "TA-2", "A")
+		node("TB", "work", "TB-1", "B")
 		// Work of B that is moved into A later (review findings 1 and 2).
-		node("TB2", "ticket", "TB-2", "B")
-		node("TB3", "ticket", "TB-3", "B")
-		node("TB4", "ticket", "TB-4", "B")
+		node("TB2", "work", "TB-2", "B")
+		node("TB3", "work", "TB-3", "B")
+		node("TB4", "work", "TB-4", "B")
 		node("GA", "guideline", "GA-1", "A")
 		node("GB", "guideline", "GB-1", "B")
 		var ticketKind string
-		if err := tx.QueryRow(ctx, `SELECT id::text FROM node_kinds WHERE tenant_id=$1 AND slug='ticket'`, w.tid).Scan(&ticketKind); err != nil {
+		if err := tx.QueryRow(ctx, `SELECT id::text FROM node_kinds WHERE tenant_id=$1 AND slug='work'`, w.tid).Scan(&ticketKind); err != nil {
 			return err
 		}
 		w.ids["ticketKind"] = ticketKind

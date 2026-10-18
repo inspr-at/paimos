@@ -1,0 +1,22 @@
+{
+  "_comment": [
+    "SPDX-License-Identifier: AGPL-3.0-only; OPS-257 / AEON-1337. Proposal only: nothing is applied by the tooling.",
+    "RFC 6902 operations below are relative to the existing merge_queue rule's parameters. The tool resolves the rule index; never replace the whole rules array with this file.",
+    "Read and preview: gh api --method GET repos/inspr-at/paimos/rulesets/$RULESET_ID > /tmp/ops257-ruleset-before.json; node scripts/ci-queue-measure.mjs --ruleset $RULESET_ID --dry-run",
+    "Prepare candidate: node scripts/ci-queue-measure.mjs --ruleset-payload --snapshot /tmp/ops257-ruleset-before.json > /tmp/ops257-ruleset-after.json",
+    "Prepare rollback: node scripts/ci-queue-measure.mjs --rollback-payload --snapshot /tmp/ops257-ruleset-before.json > /tmp/ops257-ruleset-rollback.json",
+    "Operator apply (not executed by this tool): gh api --method PUT repos/inspr-at/paimos/rulesets/$RULESET_ID --input /tmp/ops257-ruleset-after.json",
+    "Operator rollback: gh api --method PUT repos/inspr-at/paimos/rulesets/$RULESET_ID --input /tmp/ops257-ruleset-rollback.json",
+    "Refresh the snapshot and recheck the diff immediately before any operator PUT. Full PUT/rollback bodies preserve this snapshot, so concurrent ruleset edits require a fresh plan.",
+    "Preserves merge_method, grouping_strategy, check timeout, required checks, enforcement, conditions and bypass actors. No HEADGREEN relaxation is proposed.",
+    "AEON-1337 changes concurrent builds only. Merge limits, ALLGREEN, timeout, merge method and required checks are copied unchanged from the fresh snapshot. Evidence: scripts/ci/impact-planning-baseline.json; docs/features/impact-ci-planning.md.",
+    "OPS-324 owns lockstep ruleset, runner-pool pin and generation changes. S5 retains the live six-build value; its observed live dry-run is empty. Future changes require that coordinated rollout.",
+    "API reference: https://docs.github.com/en/rest/repos/rules#update-a-repository-ruleset",
+    "Queue semantics: https://docs.github.com/en/repositories/configuring-branches-and-merges-in-your-repository/configuring-pull-request-merges/managing-a-merge-queue"
+  ],
+  "schema": 1,
+  "select": { "rule_type": "merge_queue" },
+  "patch": [
+    { "op": "replace", "path": "/max_entries_to_build", "value": 6 }
+  ]
+}

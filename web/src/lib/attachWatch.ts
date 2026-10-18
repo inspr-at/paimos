@@ -15,6 +15,11 @@ export interface AttachReview {
     process: { pid: number; uid: number; started: string; executable: string; cwd: string }
   }
 }
+// UI projection only: never contains a lookup code or changes the wire contract.
+export interface AttachQueueRow {
+  review: AttachReview; outcome: AttachOutcome | 'declined'; what: string; detail: string; left: string; soon: boolean
+  ticket: { key: string; title: string }
+}
 // What the person sees for a request that has not become a session yet. A client
 // clock past the server's expiry counts as expired right away; the next poll agrees.
 export type AttachOutcome = 'waiting' | 'approved' | 'expired' | 'cancelled'

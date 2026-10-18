@@ -9,6 +9,8 @@ import (
 	"unicode"
 
 	"github.com/inspr-at/paimos/internal/agentaccounts"
+	"github.com/inspr-at/paimos/internal/events"
+	"github.com/inspr-at/paimos/internal/modelprefs"
 	"github.com/inspr-at/paimos/internal/tenant"
 	"github.com/inspr-at/paimos/internal/workorders"
 	"github.com/jackc/pgx/v5"
@@ -17,6 +19,16 @@ import (
 // Only terminal failed attempts may hand off: never mid-turn, after a cancel,
 // or when ownership was lost. Replayed telemetry cannot arm a second retry.
 func armVendorRetry(ctx context.Context, tx pgx.Tx, v Run) error {
+	// Lead work returns through its qualified queue after exit reconciliation.
+	// A legacy vendor poll cannot inherit an assignment or bypass its lead.
+	h, err := runHandoff(v)
+	if err != nil {
+		return err
+	}
+	if h != nil {
+		return nil
+	}
+
 	if v.Status != "failed" || v.Purpose != "managed" || v.AccountID == nil || v.ReadOnlyReview {
 		return nil
 	}
@@ -42,7 +54,7 @@ func armVendorRetry(ctx context.Context, tx pgx.Tx, v Run) error {
 
 // The queue poll is already serialized by the pairing lock. Work-order then
 // run locks preserve the normal writer order; insertion and log are atomic.
-func retryVendorStops(ctx context.Context, tx pgx.Tx, p tenant.Principal) error {
+func retryVendorStops(ctx context.Context, tx pgx.Tx, p tenant.Principal, pending *[]events.Change) error {
 	rows, err := tx.Query(ctx, `SELECT id::text FROM agent_runs WHERE agent_principal_id=$1 AND vendor_retry_pending AND status='failed' ORDER BY created_at,id LIMIT 100`, p.ID)
 	if err != nil {
 		return err
@@ -69,12 +81,12 @@ func retryVendorStops(ctx context.Context, tx pgx.Tx, p tenant.Principal) error 
 		if err != nil {
 			return err
 		}
-		var pending, same, child bool
+		var retryPending, same, child bool
 		var at *time.Time
-		if err = tx.QueryRow(ctx, `SELECT vendor_retry_pending,vendor_retry_same_account,vendor_retry_at,EXISTS(SELECT 1 FROM agent_runs WHERE retry_of_run_id=$1) FROM agent_runs WHERE id=$1`, id).Scan(&pending, &same, &at, &child); err != nil {
+		if err = tx.QueryRow(ctx, `SELECT vendor_retry_pending,vendor_retry_same_account,vendor_retry_at,EXISTS(SELECT 1 FROM agent_runs WHERE retry_of_run_id=$1) FROM agent_runs WHERE id=$1`, id).Scan(&retryPending, &same, &at, &child); err != nil {
 			return err
 		}
-		if !pending {
+		if !retryPending {
 			continue
 		}
 		if child || v.Purpose != "managed" || v.AccountID == nil || v.DaemonID == nil || v.ProfileID == nil || o.Status != "ready" && o.Status != "running" || o.Assignee != nil && *o.Assignee != p.ID {
@@ -97,14 +109,18 @@ func retryVendorStops(ctx context.Context, tx pgx.Tx, p tenant.Principal) error 
 		if same {
 			only, exclude = *v.AccountID, ""
 		}
-		advice, err := agentaccounts.NextForRun(ctx, tx, id, *v.DaemonID, only, exclude, now)
+		policy, err := modelprefs.RunRequirement(ctx, tx, id)
+		if err != nil {
+			return err
+		}
+		advice, err := agentaccounts.NextForRun(ctx, tx, id, *v.DaemonID, only, exclude, now, policy.Residency)
 		if err != nil {
 			return err
 		}
 		// If the rest of the pool stays dry, retry the original account once
 		// its reset/backoff has passed, subject to the same admission checks.
 		if len(advice.Accounts) == 0 && !same && at != nil && !now.Before(*at) {
-			advice, err = agentaccounts.NextForRun(ctx, tx, id, *v.DaemonID, *v.AccountID, "", now)
+			advice, err = agentaccounts.NextForRun(ctx, tx, id, *v.DaemonID, *v.AccountID, "", now, policy.Residency)
 			if err != nil {
 				return err
 			}
@@ -114,7 +130,7 @@ func retryVendorStops(ctx context.Context, tx pgx.Tx, p tenant.Principal) error 
 			continue
 		}
 		next := advice.Accounts[0]
-		retry, err := scan(tx.QueryRow(ctx, `INSERT INTO agent_runs(tenant_id,work_order_id,agent_principal_id,model_profile_id,requested_model,requested_account_id,retry_of_run_id,retry_account_id) VALUES($1,$2,$3,$4,$5,$6,$7,$8) RETURNING `+columns, p.TenantID, o.NodeID, v.AgentID, v.ProfileID, v.RequestedModel, v.RequestedAccountID, id, next.AccountID))
+		retry, err := scan(tx.QueryRow(ctx, `INSERT INTO agent_runs(tenant_id,work_order_id,agent_principal_id,model_profile_id,requested_model,requested_account_id,retry_of_run_id,retry_account_id,residency,prefs_person_id,trace) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11) RETURNING `+columns, p.TenantID, o.NodeID, v.AgentID, v.ProfileID, v.RequestedModel, v.RequestedAccountID, id, next.AccountID, modelprefs.Stamp(policy.Residency), policy.PersonID, v.Trace))
 		if err != nil {
 			return err
 		}
@@ -136,12 +152,11 @@ func retryVendorStops(ctx context.Context, tx pgx.Tx, p tenant.Principal) error 
 				note += fmt.Sprintf(" (%s empty until %s UTC)", logLabel(label), at.UTC().Format("15:04"))
 			}
 		}
-		if err = workorders.Record(ctx, tx, p, o.NodeID, "run.capacity_handoff", v, struct {
+		nodeID := o.NodeID
+		*pending = append(*pending, events.Change{NodeID: &nodeID, Type: "run.capacity_handoff", Before: v, After: struct {
 			Run  Run    `json:"run"`
 			Note string `json:"note"`
-		}{retry, note}); err != nil {
-			return err
-		}
+		}{retry, note}})
 		// Append the same bounded line to the original session's activity history.
 		if _, err = tx.Exec(ctx, `INSERT INTO harness_activity_notes(tenant_id,session_id,note) SELECT tenant_id,id,$2 FROM harness_sessions WHERE run_id=$1`, id, note); err != nil {
 			return err

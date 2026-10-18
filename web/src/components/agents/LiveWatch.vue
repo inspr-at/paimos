@@ -4,7 +4,7 @@ import { computed, onBeforeUnmount, ref, watch } from 'vue'
 import type { HarnessSession } from '../../lib/agents'
 import { openSessionWatch } from '../../lib/agentRows'
 import { appendWatchText, attachAction, metadataOnlyAttach, watchText } from '../../lib/attachWatch'
-import { can, onAccessChange } from '../../lib/authz'
+import { can, onAccessRevalidate } from '../../lib/authz'
 import { useAgents } from '../../stores/agents'
 import { useSession } from '../../stores/session'
 import AppIcon from '../AppIcon.vue'
@@ -60,7 +60,7 @@ async function revoke() {
 // A fresh canonical row for the same consent must not clear a local revocation.
 watch([() => props.session.id, () => props.session.watch?.request_id, () => identity.identity?.tenant.id, () => identity.identity?.principal.id], () => { stop(); revoked.value = false; error.value = '' })
 watch([allowed, available], () => { if (!allowed.value || !available.value) stop(true) })
-const stopAccess = onAccessChange(() => stop(true))
+const stopAccess = onAccessRevalidate({ reset: () => stop(true) })
 function hidden() { if (document.hidden) stop() }
 document.addEventListener('visibilitychange', hidden)
 onBeforeUnmount(() => { stop(); stopAccess(); document.removeEventListener('visibilitychange', hidden) })

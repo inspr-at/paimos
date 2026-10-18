@@ -1,0 +1,115 @@
+{
+  "_license": "SPDX-License-Identifier: AGPL-3.0-only",
+  "builtin_roles": {
+    "admin": [
+      "profile.manage",
+      "profile.portal_read",
+      "profile.portal_write",
+      "profile.read",
+      "profile.write"
+    ],
+    "customer": [
+      "profile.portal_read",
+      "profile.portal_write"
+    ],
+    "guest": [
+      "profile.read"
+    ],
+    "member": [
+      "profile.portal_read",
+      "profile.portal_write",
+      "profile.read",
+      "profile.write"
+    ],
+    "owner": [
+      "profile.manage",
+      "profile.portal_read",
+      "profile.portal_write",
+      "profile.read",
+      "profile.write"
+    ],
+    "viewer": [
+      "profile.read"
+    ]
+  },
+  "project_filtered": {
+    "DELETE /api/me/avatar": true,
+    "GET /api/me/profile": true,
+    "PATCH /api/me/profile": true,
+    "POST /api/me/avatar": true
+  },
+  "project_self_permissions": [
+    "profile.read",
+    "profile.write",
+    "profile.portal_read",
+    "profile.portal_write"
+  ],
+  "registry": [
+    {
+      "agent_grantable": true,
+      "description": "Manage profile",
+      "grantable_at": [
+        "workspace"
+      ],
+      "group": "Profile",
+      "key": "profile.manage",
+      "owner_workstation_grantable": true,
+      "risk": "high"
+    },
+    {
+      "agent_grantable": false,
+      "description": "Portal Read profile",
+      "grantable_at": [
+        "workspace"
+      ],
+      "group": "Profile",
+      "key": "profile.portal_read",
+      "owner_workstation_grantable": false,
+      "risk": "low"
+    },
+    {
+      "agent_grantable": false,
+      "description": "Portal Write profile",
+      "grantable_at": [
+        "workspace"
+      ],
+      "group": "Profile",
+      "key": "profile.portal_write",
+      "owner_workstation_grantable": false,
+      "risk": "medium"
+    },
+    {
+      "agent_grantable": true,
+      "description": "Read profile",
+      "grantable_at": [
+        "workspace"
+      ],
+      "group": "Profile",
+      "key": "profile.read",
+      "owner_workstation_grantable": true,
+      "risk": "low"
+    },
+    {
+      "agent_grantable": true,
+      "description": "Write profile",
+      "grantable_at": [
+        "workspace"
+      ],
+      "group": "Profile",
+      "key": "profile.write",
+      "owner_workstation_grantable": true,
+      "risk": "medium"
+    }
+  ],
+  "routes": {
+    "DELETE /api/me/avatar": "profile.write|profile.portal_write",
+    "GET /api/me/profile": "profile.read|profile.portal_read",
+    "PATCH /api/me/profile": "profile.write|profile.portal_write",
+    "POST /api/me/avatar": "profile.write|profile.portal_write"
+  },
+  "words": {
+    "resources": {
+      "profile": "their own profile"
+    }
+  }
+}

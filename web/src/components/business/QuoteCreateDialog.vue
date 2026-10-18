@@ -201,7 +201,7 @@ defineExpose({ open })
 </template>
 
 <style scoped>
-.create { width: min(560px, calc(100vw - 24px)); max-height: calc(100dvh - 24px); padding: 0; border: 0; background: transparent; color: var(--ink); overflow: visible; }
+.create { width: min(var(--dialog-m), calc(100vw - 24px)); max-height: calc(100dvh - 24px); padding: 0; border: 0; background: transparent; color: var(--ink); overflow: visible; }
 .create::backdrop { background: var(--scrim); backdrop-filter: blur(2px); }
 .create-card { display: grid; gap: 16px; max-height: calc(100dvh - 24px); overflow: auto; padding: 20px 22px 18px; border-radius: var(--radius); border: 1px solid var(--glass-edge); background: linear-gradient(165deg, var(--surface-raised), var(--surface-raised-2)); box-shadow: var(--shadow-pop), var(--shadow); }
 .create-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; }

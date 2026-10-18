@@ -9,8 +9,19 @@ import (
 	"strings"
 	"unicode"
 
+	"github.com/inspr-at/paimos/internal/unicodeguard"
+
 	"golang.org/x/text/cases"
 	"golang.org/x/text/unicode/norm"
+)
+
+// The quotation and credential guards share one pinned Unicode data source.
+const unicodeGuardTableSHA256 = unicodeguard.TableSHA256
+
+var (
+	unicodeConfusables       = unicodeguard.Confusables
+	unicodeSmallCapitals     = unicodeguard.SmallCapitals
+	unicodeDefaultIgnorables = unicodeguard.DefaultIgnorables
 )
 
 // Increment when the comparison algorithm changes. Table and Unicode library

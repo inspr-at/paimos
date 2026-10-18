@@ -21,11 +21,12 @@ import (
 
 func TestConvertClearsForgedRoadmapPublication(t *testing.T) {
 	p := newPrincipal(t, "roadmap-convert")
+	customKind(t, p, "chore", "task")
 	agent := routeAgent(t, p.TenantID)
 	agent.Scopes = []string{"nodes.read", "nodes.write"}
 	projectKind := kindBySlug(t, p, "project")
-	taskKind := kindBySlug(t, p, "task")
-	ticketKind := kindBySlug(t, p, "ticket")
+	taskKind := kindBySlug(t, p, "chore")
+	ticketKind := kindBySlug(t, p, "work")
 	productKind := kindBySlug(t, p, "portal_product")
 	project := mustNode(t, p, `{"kind_id":"`+projectKind.ID+`","title":"Pace","state":"active"}`)
 	mustNode(t, p, `{"kind_id":"`+productKind.ID+`","title":"Harbour catalog","state":"published","body":"Ready."}`)
@@ -34,6 +35,10 @@ func TestConvertClearsForgedRoadmapPublication(t *testing.T) {
 			return err
 		}
 		if _, err := tx.Exec(t.Context(), `SELECT set_config('aeon.portal_moderation','on',true)`); err != nil {
+			return err
+		}
+		// This fixture represents a published legacy portal, not a new pilot.
+		if _, err := tx.Exec(t.Context(), `UPDATE portal_products SET published=true, participation_policy='legacy' WHERE tenant_id=$1::uuid`, p.TenantID); err != nil {
 			return err
 		}
 		_, err := tx.Exec(t.Context(), `INSERT INTO portal_pace(tenant_id, project_node_id) VALUES ($1::uuid, $2::uuid)`, p.TenantID, project.ID)
@@ -59,14 +64,14 @@ func TestConvertClearsForgedRoadmapPublication(t *testing.T) {
 	if !forgedPublication(t, task.Fields, p.ID) || !strings.Contains(string(task.Fields), "pill_en") {
 		t.Fatalf("task did not keep the forged publication: %s", task.Fields)
 	}
-	if code, raw := call(t, &agent, http.MethodPost, "/api/nodes/"+task.ID+"/convert", `{"to_kind":"ticket"}`); code != http.StatusForbidden {
+	if code, raw := call(t, &agent, http.MethodPost, "/api/nodes/"+task.ID+"/convert", `{"to_kind":"work"}`); code != http.StatusForbidden {
 		t.Fatalf("agent convert: %d %s", code, raw)
 	}
 	same, _ := getNode(t, p, task.ID)
 	if same.KindID != taskKind.ID || !forgedPublication(t, same.Fields, p.ID) {
 		t.Fatalf("agent convert changed the task: %s %s", same.KindID, same.Fields)
 	}
-	status, raw := call(t, &p, http.MethodPost, "/api/nodes/"+task.ID+"/convert", `{"to_kind":"task"}`)
+	status, raw := call(t, &p, http.MethodPost, "/api/nodes/"+task.ID+"/convert", `{"to_kind":"chore"}`)
 	kept := decode[nodeJSON](t, status, raw, http.StatusOK)
 	if kept.KindID != taskKind.ID || !forgedPublication(t, kept.Fields, p.ID) {
 		t.Fatalf("same kind stripped the task: %s", kept.Fields)
@@ -91,7 +96,7 @@ func TestConvertClearsForgedRoadmapPublication(t *testing.T) {
 		}
 	}
 
-	status, raw = call(t, &p, http.MethodPost, "/api/nodes/"+task.ID+"/convert", `{"to_kind":"ticket"}`)
+	status, raw = call(t, &p, http.MethodPost, "/api/nodes/"+task.ID+"/convert", `{"to_kind":"work"}`)
 	converted := decode[nodeJSON](t, status, raw, http.StatusOK)
 	if converted.KindID != ticketKind.ID || publicationPresent(t, converted.Fields) || !strings.Contains(string(converted.Fields), "pill_en") || !strings.Contains(string(converted.Fields), "roadmap") {
 		t.Fatalf("convert kept a publication: %s", converted.Fields)
@@ -114,7 +119,7 @@ func TestConvertClearsForgedRoadmapPublication(t *testing.T) {
 	}
 	assertUnpublished()
 
-	status, raw = call(t, &p, http.MethodPost, "/api/nodes/"+task.ID+"/convert", `{"to_kind":"ticket"}`)
+	status, raw = call(t, &p, http.MethodPost, "/api/nodes/"+task.ID+"/convert", `{"to_kind":"work"}`)
 	converted = decode[nodeJSON](t, status, raw, http.StatusOK)
 	if converted.KindID != ticketKind.ID || publicationPresent(t, converted.Fields) {
 		t.Fatalf("second convert: %s", converted.Fields)
@@ -144,7 +149,7 @@ func TestConvertClearsForgedRoadmapPublication(t *testing.T) {
 	}
 	assertPublished()
 
-	status, raw = call(t, &p, http.MethodPost, "/api/nodes/"+task.ID+"/convert", `{"to_kind":"task"}`)
+	status, raw = call(t, &p, http.MethodPost, "/api/nodes/"+task.ID+"/convert", `{"to_kind":"chore"}`)
 	demoted := decode[nodeJSON](t, status, raw, http.StatusOK)
 	if demoted.KindID != taskKind.ID || publicationPresent(t, demoted.Fields) {
 		t.Fatalf("demote kept the approval: %s", demoted.Fields)

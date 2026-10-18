@@ -18,11 +18,11 @@ import (
 
 func TestLookupNodesIsBoundedAndTenantScoped(t *testing.T) {
 	p := newPrincipal(t, "lookup")
-	kind := kindBySlug(t, p, "ticket")
+	kind := kindBySlug(t, p, "work")
 	first := mustNode(t, p, `{"kind_id":"`+kind.ID+`","title":"First"}`)
 	second := mustNode(t, p, `{"kind_id":"`+kind.ID+`","title":"Second"}`)
 	other := addPrincipal(t, "lookup-other")
-	outsider := mustNode(t, other, `{"kind_id":"`+kindBySlug(t, other, "ticket").ID+`","title":"Outside"}`)
+	outsider := mustNode(t, other, `{"kind_id":"`+kindBySlug(t, other, "work").ID+`","title":"Outside"}`)
 	missing := "00000000-0000-4000-8000-000000000099"
 	ids := second.ID + "," + outsider.ID + "," + first.ID + "," + second.ID + "," + missing
 	status, body := call(t, &p, http.MethodGet, "/api/nodes/lookup?ids="+url.QueryEscape(ids), "")
@@ -51,8 +51,8 @@ func TestLookupNodesIsBoundedAndTenantScoped(t *testing.T) {
 func TestLookupNodesByKeyResolvesProjectAndEarlierKeys(t *testing.T) {
 	p := newPrincipal(t, "lookup-keys")
 	projectKind := kindBySlug(t, p, "project")
-	ticketKind := kindBySlug(t, p, "ticket")
-	taskKind := kindBySlug(t, p, "task")
+	ticketKind := kindBySlug(t, p, "work")
+	taskKind := kindBySlug(t, p, "work")
 	project := mustNode(t, p, `{"kind_id":"`+projectKind.ID+`","title":"Release notes","fields":{"project_key":"REL"}}`)
 	ticket := mustNode(t, p, `{"kind_id":"`+ticketKind.ID+`","title":"Link tickets","parent_id":"`+project.ID+`","key_prefix":"REL"}`)
 	task := mustNode(t, p, `{"kind_id":"`+taskKind.ID+`","title":"Nested task","parent_id":"`+ticket.ID+`","key_prefix":"REL"}`)
@@ -63,7 +63,7 @@ func TestLookupNodesByKeyResolvesProjectAndEarlierKeys(t *testing.T) {
 		t.Fatal(err)
 	}
 	other := addPrincipal(t, "lookup-keys-other")
-	outsider := mustNode(t, other, `{"kind_id":"`+kindBySlug(t, other, "ticket").ID+`","title":"Outside","key_prefix":"ELSE"}`)
+	outsider := mustNode(t, other, `{"kind_id":"`+kindBySlug(t, other, "work").ID+`","title":"Outside","key_prefix":"ELSE"}`)
 	keys := strings.ToLower(task.Key) + ",NOPE-9," + outsider.Key + ",OLD-7," + ticket.Key + "," + task.Key
 	status, body := call(t, &p, http.MethodGet, "/api/nodes/lookup?keys="+url.QueryEscape(keys), "")
 	page := decode[struct {
@@ -123,7 +123,7 @@ func TestLookupNodesByKeyResolvesProjectAndEarlierKeys(t *testing.T) {
 func TestLookupNodesByKeyHidesProjectsTheCallerCannotSee(t *testing.T) {
 	member := newPrincipal(t, "lookup-keys-visibility")
 	projectKind := kindBySlug(t, member, "project")
-	ticketKind := kindBySlug(t, member, "ticket")
+	ticketKind := kindBySlug(t, member, "work")
 	open := mustNode(t, member, `{"kind_id":"`+projectKind.ID+`","title":"Open","fields":{"project_key":"OPN"}}`)
 	closed := mustNode(t, member, `{"kind_id":"`+projectKind.ID+`","title":"Closed","fields":{"project_key":"HID"}}`)
 	shown := mustNode(t, member, `{"kind_id":"`+ticketKind.ID+`","title":"Shown","parent_id":"`+open.ID+`","key_prefix":"OPN"}`)

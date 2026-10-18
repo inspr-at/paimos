@@ -63,6 +63,7 @@ type Checkpoint struct {
 
 // UsageReport matches the US1 per-session/model cumulative request body.
 type UsageReport struct {
+	ServiceTier       string  `json:"service_tier,omitempty"`
 	ReportID          string  `json:"report_id"`
 	Model             string  `json:"model"`
 	Sequence          int64   `json:"sequence"`

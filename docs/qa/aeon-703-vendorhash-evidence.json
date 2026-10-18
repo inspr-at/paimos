@@ -1,0 +1,49 @@
+{
+  "SPDX-License-Identifier": "AGPL-3.0-only",
+  "ticket": "AEON-703",
+  "base_commit": "73f40e0d89b35eefa7a3159a9fa39eaa48bdd5bf",
+  "system": "aarch64-darwin",
+  "stale_hash": "sha256-J60vwwsAGRGx0tMWiOWaWtqnOQYBrb3KI9sxAhmWzfU=",
+  "measured_hash": "sha256-JsIS5JaePz2VcseoqRYnUZ9Ac8/eYuK3lcVpuJoMRjE=",
+  "real_nix_checks": [
+    {
+      "command": "nix build .#aeon -L --no-link --cores 2 --max-jobs 1",
+      "hash": "stale",
+      "exit_code": 1,
+      "result": "hash mismatch in fixed-output derivation; specified stale_hash, got measured_hash"
+    },
+    {
+      "command": "bash scripts/check-nix-vendor-hash.sh",
+      "hash": "stale",
+      "exit_code": 1,
+      "result": "Temporarily restored only the original vendorHash; rejected with the exact specified/got mismatch, then restored the measured hash."
+    },
+    {
+      "command": "bash scripts/check-nix-vendor-hash.sh",
+      "hash": "measured",
+      "exit_code": 0,
+      "result": "Dependency realization and forced rebuild passed."
+    },
+    {
+      "command": "nix build .#aeon -L --no-link --no-write-lock-file --cores 2 --max-jobs 1",
+      "hash": "measured",
+      "exit_code": 0,
+      "result": "Full client package and existing installCheckPhase passed."
+    }
+  ],
+  "regressions": {
+    "ci_pr_plan": "15 passed",
+    "ci_tree_reuse": "62 passed",
+    "releaseworkflow": "go test -p 2 ./scripts/releaseworkflow -count=1 passed with GOMAXPROCS=2",
+    "tier_inventory": "29 workflow cases reconcile strictly; TestNixVendorHashGate is GATED-FULL; no unclassified cases in this package",
+    "runner_guard": "passed",
+    "audit_ownership": "passed",
+    "release_verifier": "passed",
+    "shell_syntax_and_diff_whitespace": "passed"
+  },
+  "limits": [
+    "Hosted Linux CI and its Nix install/cache actions were not executed; no branch push or draft PR under the user constraint.",
+    "The remote-test helper pushes temporary refs, so it was not invoked under the explicit no-push instruction. Only the quick relevant Go package ran locally.",
+    "Full repository Go/web suites were not run; no deployment, production access, release/version mutation or model review."
+  ]
+}

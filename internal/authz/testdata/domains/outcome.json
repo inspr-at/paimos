@@ -1,0 +1,49 @@
+{
+  "_license": "SPDX-License-Identifier: AGPL-3.0-only",
+  "builtin_roles": {
+    "admin": [
+      "outcome.read",
+      "outcome.write"
+    ],
+    "guest": [
+      "outcome.read"
+    ],
+    "member": [
+      "outcome.read",
+      "outcome.write"
+    ],
+    "owner": [
+      "outcome.read",
+      "outcome.write"
+    ],
+    "viewer": [
+      "outcome.read"
+    ]
+  },
+  "registry": [
+    {
+      "agent_grantable": true,
+      "description": "Read outcome",
+      "grantable_at": [
+        "workspace",
+        "project"
+      ],
+      "group": "Outcome",
+      "key": "outcome.read",
+      "owner_workstation_grantable": true,
+      "risk": "low"
+    },
+    {
+      "agent_grantable": true,
+      "description": "Write outcome",
+      "grantable_at": [
+        "workspace",
+        "project"
+      ],
+      "group": "Outcome",
+      "key": "outcome.write",
+      "owner_workstation_grantable": true,
+      "risk": "medium"
+    }
+  ]
+}

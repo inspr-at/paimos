@@ -15,6 +15,7 @@ import (
 
 	"golang.org/x/text/unicode/norm"
 
+	"github.com/inspr-at/paimos/internal/credentialguard"
 	"github.com/inspr-at/paimos/internal/workorders"
 	"gopkg.in/yaml.v3"
 )
@@ -89,17 +90,52 @@ func inputDigest(in ProposalInput) string {
 	return hex.EncodeToString(s[:])
 }
 
-func writableSource(s Source) bool {
-	return s.Repository == publicRepository && s.Visibility == "public" || s.Repository == privateRepository && s.Visibility == "private"
+// Keep the configured private repository name out of public proposals too.
+// Match separator variants after the same Unicode/confusable normalization.
+func privateRepositoryIdentity(repository string) *regexp.Regexp {
+	if repository == "" {
+		return nil
+	}
+	name := strings.SplitN(repository, "/", 2)[1]
+	parts := strings.FieldsFunc(name, func(r rune) bool { return r == '-' || r == '_' || r == '.' })
+	for i := range parts {
+		parts[i] = identityLiteral(parts[i])
+	}
+	if len(parts) == 0 {
+		return regexp.MustCompile(identityLiteral(repository))
+	}
+	return regexp.MustCompile(strings.Join(parts, `[^a-z0-9]+`))
 }
 
-func guardPublic(repository string, texts ...string) error {
+func (m *Module) writableSource(s Source) bool {
+	return m.repositories.Writable(s.Repository, s.Visibility)
+}
+
+// The shared detector preserves case and ASCII token bytes while checking
+// compatibility and confusable forms. Retain the legacy quotation-skeleton
+// checks as an additional defense for doctrine's existing refusal policy.
+func hasCredentials(text string) bool {
+	if credentialguard.Contains(text) {
+		return true
+	}
+	normalized := normalizeProposalText(text)
+	return credentialLeaks.MatchString(normalized) || credentialguard.Contains(normalized)
+}
+
+func guardCredentials(texts ...string) error {
 	for _, text := range texts {
-		if credentialLeaks.MatchString(normalizeProposalText(text)) {
+		if hasCredentials(text) {
 			return fail(422, "credential_text", "This proposal contains credential-shaped text. Remove credentials before publishing to either repository.")
 		}
 	}
-	if repository != publicRepository {
+	return nil
+}
+
+func (m *Module) guardPublic(repository string, texts ...string) error {
+	if err := guardCredentials(texts...); err != nil {
+		return err
+	}
+	if !m.repositories.IsPublic(repository) {
 		return nil
 	}
 	for _, text := range texts {
@@ -109,8 +145,8 @@ func guardPublic(repository string, texts ...string) error {
 		if !latinPublicText(text) {
 			return fail(422, "non_latin", "Public proposals may use only Latin letters, including German umlauts and ß, and ASCII digits. Nothing was published.")
 		}
-		if publicLeaks.MatchString(normalizeProposalText(text)) {
-			return fail(422, "public_identity", "This public proposal contains identity-bearing or credential-shaped text. Generalise it, or propose the private rule in inspr-doctrine-private. Nothing was published.")
+		if normalized := normalizeProposalText(text); publicLeaks.MatchString(normalized) || m.privateIdentity != nil && m.privateIdentity.MatchString(normalized) {
+			return fail(422, "public_identity", "This public proposal contains identity-bearing or credential-shaped text. Generalise it, or propose it in the configured private repository. Nothing was published.")
 		}
 	}
 	return nil
@@ -145,13 +181,13 @@ func latinPublicText(text string) bool {
 
 // editRule changes exactly one indexed rule and its sidecar entry. Parse both
 // sides, preserve every other rule, and reject malformed sidecars (no clobber).
-func editRule(s Source, files []File, in ProposalInput) (map[string]string, error) {
-	changed, _, _, err := editRuleViews(s, files, in)
+func (m *Module) editRule(s Source, files []File, in ProposalInput) (map[string]string, error) {
+	changed, _, _, err := m.editRuleViews(s, files, in)
 	return changed, err
 }
 
 // editRuleViews is editRule that also returns the rule before and after.
-func editRuleViews(s Source, files []File, in ProposalInput) (map[string]string, RuleView, RuleView, error) {
+func (m *Module) editRuleViews(s Source, files []File, in ProposalInput) (map[string]string, RuleView, RuleView, error) {
 	var target FileView
 	for _, v := range Render(s.Repository, s.Commit, s.Visibility == "private", files) {
 		if v.Path == in.Path {
@@ -242,7 +278,13 @@ func editRuleViews(s Source, files []File, in ProposalInput) (map[string]string,
 	if len(encoded) > MaxSidecarBytes {
 		return nil, RuleView{}, RuleView{}, fail(400, "invalid_request", "The TL;DR sidecar exceeds its size limit.")
 	}
-	if err := guardPublic(s.Repository, in.Source, in.TLDR.EN, in.TLDR.DE, in.Explanation); err != nil {
+	if err := m.guardPublic(s.Repository, in.Source, in.TLDR.EN, in.TLDR.DE, in.Explanation); err != nil {
+		return nil, RuleView{}, RuleView{}, err
+	}
+	// GitHub receives entire replacement blobs, including untouched rules and
+	// sidecar entries. Identity checks remain limited to the edited text, but
+	// credentials must never be copied into a new git object or tree path.
+	if err := guardCredentials(content, string(encoded), in.Path); err != nil {
 		return nil, RuleView{}, RuleView{}, err
 	}
 	return map[string]string{in.Path: content, SidecarPath(in.Path): string(encoded)}, old, next, nil

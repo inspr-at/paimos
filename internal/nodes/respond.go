@@ -4,14 +4,20 @@ package nodes
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"errors"
 	"io"
 	"log/slog"
 	"net/http"
 
+	"github.com/jackc/pgx/v5/pgconn"
+
+	"github.com/inspr-at/paimos/internal/authz"
 	"github.com/inspr-at/paimos/internal/httpapi"
 	"github.com/inspr-at/paimos/internal/tenant"
+	"github.com/inspr-at/paimos/internal/workorders"
+	"github.com/inspr-at/paimos/internal/workqueue"
 )
 
 type httpError struct {
@@ -63,6 +69,29 @@ func writeError(w http.ResponseWriter, status int, msg string) {
 }
 
 func writeErr(w http.ResponseWriter, err error) {
+	var entry *workqueue.EntryFailure
+	if errors.As(err, &entry) {
+		w.Header().Set("Cache-Control", "no-store")
+		workorders.WriteError(w, entry)
+		return
+	}
+	var public interface{ HTTPStatus() int }
+	if errors.As(err, &public) {
+		workorders.WriteError(w, err)
+		return
+	}
+	if errors.Is(err, authz.ErrForbidden) {
+		authz.WriteForbidden(w, err)
+		return
+	}
+	var pgerr *pgconn.PgError
+	scopeLimit := errors.As(err, &pgerr) && pgerr.Code == "54000" &&
+		(pgerr.Message == "work shape budget exceeded" || pgerr.Message == "work scope root budget exceeded" || pgerr.Message == "work scope expansion budget exceeded")
+	if scopeLimit || errors.Is(err, context.DeadlineExceeded) {
+		w.Header().Set("Cache-Control", "no-store")
+		writeError(w, http.StatusServiceUnavailable, "Work aggregates exceeded a resource limit; narrow the scope or retry.")
+		return
+	}
 	var he *httpError
 	if errors.As(err, &he) {
 		if he.code != "" || he.node != nil || len(he.children) > 0 || len(he.fields) > 0 {
@@ -86,8 +115,7 @@ func requirePrincipal(w http.ResponseWriter, r *http.Request) (tenant.Principal,
 }
 
 func readBody(w http.ResponseWriter, r *http.Request) ([]byte, bool) {
-	r.Body = http.MaxBytesReader(w, r.Body, 1<<20)
-	b, err := io.ReadAll(r.Body)
+	b, err := httpapi.ReadRequestBody(w, r, 1<<20, httpapi.DefaultBodyReadTimeout)
 	if err != nil || len(b) == 0 {
 		writeError(w, http.StatusBadRequest, "bad request")
 		return nil, false

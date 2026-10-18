@@ -10,13 +10,14 @@ import (
 	"github.com/inspr-at/paimos/internal/tenant"
 )
 
-// Roadmap publication is a person decision on tickets. Tasks and other kinds
-// may carry the same key for something else, so their fields stay untouched.
+// Roadmap publication is a person decision on work items and legacy tickets.
+// Tasks and other kinds may carry the same key for something else, so their fields
+// stay untouched.
 // False and a missing flag are the same unpublished state: an agent may send
 // false on an ordinary save. Turning the flag on, or clearing a stored true,
 // is refused for every principal that is not a person.
 func canonicalRoadmapPublication(p tenant.Principal, kindSlug string, raw, before json.RawMessage) (json.RawMessage, error) {
-	if kindSlug != "ticket" {
+	if kindSlug != "work" && kindSlug != "ticket" {
 		return raw, nil
 	}
 	next, err := decodeRouteFields(raw)

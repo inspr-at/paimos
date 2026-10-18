@@ -1,9 +1,9 @@
 <!-- SPDX-License-Identifier: AGPL-3.0-only -->
 <script setup lang="ts">
-import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
+import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { brand } from '../../lib/brand'
 import { api } from '../../lib/api'
-import { can, onAccessChange } from '../../lib/authz'
+import { can, onAccessRevalidate } from '../../lib/authz'
 import AppIcon from '../AppIcon.vue'
 import type { LocalAuthCapability, LocalAuthComputer, WatchConsentMode } from '../../lib/attachWatch'
 
@@ -64,6 +64,7 @@ async function request(save = false) {
   if (save && (!can('profile.write') || (choice.value === 'local_auth' && !canPickLocal.value))) return
   operation?.abort()
   const controller = new AbortController(); operation = controller
+  const draft = choice.value, previous = saved.value
   busy.value = true; error.value = ''; notice.value = ''
   try {
     const response = await api('/me/security/session-watching', {
@@ -76,13 +77,15 @@ async function request(save = false) {
     if (controller.signal.aborted || operation !== controller) return
     computers.value = readComputers(result.local_auth_computers)
     persisted.value = result.consent_saved === true || (result.consent_saved == null && result.consent_mode === 'local_auth')
-    saved.value = choice.value = result.consent_mode
+    saved.value = result.consent_mode
+    if (save || previous === null || (choice.value === draft && draft === previous)) choice.value = result.consent_mode
     if (save) notice.value = 'Saved for future approvals.'
   } catch {
     if (!controller.signal.aborted) error.value = save ? 'Your setting was not saved. Try again.' : 'Your setting could not be loaded.'
   } finally { if (operation === controller) busy.value = false }
 }
-const stopAccess = onAccessChange(() => { if (!can('profile.read')) { operation?.abort(); saved.value = null; persisted.value = false; busy.value = false } })
+const stopAccess = onAccessRevalidate({ reset: () => { operation?.abort(); saved.value = null; computers.value = []; persisted.value = false; choice.value = 'aeon'; busy.value = false; error.value = ''; notice.value = '' }, refresh: () => { if (can('profile.read') && !busy.value && (saved.value === null || choice.value === saved.value)) void request() } })
+watch(() => can('profile.read'), allowed => { if (allowed && saved.value === null && !busy.value) void request() })
 onMounted(() => void request())
 onBeforeUnmount(() => { operation?.abort(); stopAccess() })
 </script>

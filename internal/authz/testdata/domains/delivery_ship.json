@@ -1,0 +1,68 @@
+{
+  "_license": "SPDX-License-Identifier: AGPL-3.0-only",
+  "builtin_agent_exclusions": [
+    "delivery_ship.claim",
+    "delivery_ship.manage"
+  ],
+  "builtin_roles": {
+    "admin": [
+      "delivery_ship.claim",
+      "delivery_ship.manage",
+      "delivery_ship.read"
+    ],
+    "member": [
+      "delivery_ship.read"
+    ],
+    "owner": [
+      "delivery_ship.claim",
+      "delivery_ship.manage",
+      "delivery_ship.read"
+    ],
+    "viewer": [
+      "delivery_ship.read"
+    ]
+  },
+  "registry": [
+    {
+      "agent_grantable": true,
+      "description": "Claim delivery ship",
+      "grantable_at": [
+        "workspace",
+        "project"
+      ],
+      "group": "Delivery Ship",
+      "key": "delivery_ship.claim",
+      "owner_workstation_grantable": true,
+      "risk": "medium"
+    },
+    {
+      "agent_grantable": true,
+      "description": "Manage delivery ship",
+      "grantable_at": [
+        "workspace",
+        "project"
+      ],
+      "group": "Delivery Ship",
+      "key": "delivery_ship.manage",
+      "owner_workstation_grantable": true,
+      "risk": "high"
+    },
+    {
+      "agent_grantable": true,
+      "description": "Read delivery ship",
+      "grantable_at": [
+        "workspace",
+        "project"
+      ],
+      "group": "Delivery Ship",
+      "key": "delivery_ship.read",
+      "owner_workstation_grantable": true,
+      "risk": "low"
+    }
+  ],
+  "words": {
+    "resources": {
+      "delivery_ship": "delivery shipping"
+    }
+  }
+}

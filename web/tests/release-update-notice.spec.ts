@@ -26,6 +26,16 @@ const notices = (page: Page) => sheet(page).locator('.notice, .status-line.outda
 const outdated = (page: Page) => sheet(page).locator('.status-line.outdated')
 const title = (page: Page) => sheet(page).getByRole('heading', { level: 1 })
 
+async function expectServerVersion(page: Page) {
+  // AEON-635 keeps the unnamed hero and its separate version-copy dock.
+  // Assert the same server identity and UTC label at their current controls.
+  await expect(title(page)).toHaveText(SERVER)
+  const copy = sheet(page).locator('.status-dock').getByRole('button', { name: `Copy version ${SERVER}`, exact: true })
+  await expect(copy).toBeVisible()
+  await expect(copy.locator('.version-pretty')).toHaveAttribute('aria-label', versionLabel(SERVER, false))
+  await expect(copy.locator('.version-canonical')).toHaveText(SERVER)
+}
+
 async function openHistory(page: Page, history: History, running: string, target: string) {
   await mockWork(page, fixtures())
   await mockReleases(page, history, { running })
@@ -48,7 +58,7 @@ test('an outdated page shows one newer-version notice when the server version is
   await expect(outdated(page)).toHaveText(/^Live on the server · this page still runs /)
   await expect(outdated(page).locator('.calendar-version')).toHaveAttribute('aria-label', versionLabel(pageVersion, false))
   // The title names what the server runs; this one has no name in the history, so its version.
-  await expect(title(page).locator('.calendar-version')).toHaveAttribute('aria-label', versionLabel(SERVER))
+  await expectServerVersion(page)
   await expect(outdated(page).getByRole('button', { name: 'Reload' })).toBeVisible()
   await expect(sheet(page).getByText(/not in this build.s release history/)).toHaveCount(0)
   await expect(sheet(page).getByRole('row').first()).toHaveAttribute('aria-selected', 'true')
@@ -96,7 +106,7 @@ test('what’s new opens the one notice for a server version this build does not
   await expect(notices(page)).toHaveCount(1)
   await expect(outdated(page)).toContainText('this page still runs')
   await expect(outdated(page).locator('.calendar-version')).toHaveAttribute('aria-label', versionLabel(pageVersion, false))
-  await expect(title(page).locator('.calendar-version')).toHaveAttribute('aria-label', versionLabel(SERVER))
+  await expectServerVersion(page)
   await expect(sheet(page).getByText(/not in this build.s release history/)).toHaveCount(0)
 })
 
@@ -143,7 +153,7 @@ test('what’s new with the history cached before the deploy never shows the mis
     await expect(notices(page)).toHaveCount(1)
     await expect(outdated(page)).toContainText('this page still runs')
     await expect(outdated(page).locator('.calendar-version')).toHaveAttribute('aria-label', versionLabel(pageVersion, false))
-    await expect(title(page).locator('.calendar-version')).toHaveAttribute('aria-label', versionLabel(SERVER))
+    await expectServerVersion(page)
     await expect(sheet(page).getByText(/not in this build.s release history/)).toHaveCount(0)
     const during = await page.evaluate(() => (window as unknown as { __notices?: string[] }).__notices ?? [])
     expect(during.join('\n')).not.toMatch(/not in this build/)
@@ -154,7 +164,7 @@ test('what’s new with the history cached before the deploy never shows the mis
   await expect(sheet(page).getByRole('grid', { name: 'Releases, newest first' })).toBeVisible()
   await expect(notices(page)).toHaveCount(1)
   await expect(outdated(page)).toContainText('this page still runs')
-  await expect(title(page).locator('.calendar-version')).toHaveAttribute('aria-label', versionLabel(SERVER))
+  await expectServerVersion(page)
   await expect(sheet(page).getByText(/not in this build.s release history/)).toHaveCount(0)
   await expect(outdated(page).locator('.calendar-version')).toHaveAttribute('aria-label', versionLabel(pageVersion, false))
   const after = await page.evaluate(() => (window as unknown as { __notices?: string[] }).__notices ?? [])

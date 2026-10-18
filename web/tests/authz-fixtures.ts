@@ -5,7 +5,7 @@ export type MockRole = 'admin' | 'member' | 'viewer' | 'customer' | 'guest'
 
 const common = ['authz.read', 'nodes.read', 'kinds.read', 'knowledge.read', 'journey.read', 'views.read', 'search.read', 'profile.read']
 const member = [...common, 'nodes.write', 'nodes.move', 'nodes.delete', 'relations.read', 'relations.write', 'relations.delete', 'attachments.read', 'attachments.write', 'attachments.delete', 'knowledge.write', 'knowledge.delete', 'comments.write', 'comments.delete', 'journey.act', 'releases.write', 'requirements.write', 'harness.read', 'harness.control', 'run.claim', 'work_orders.write', 'approvals.decide', 'inbox.read', 'inbox.send', 'crm.read', 'crm.write', 'hours.read', 'hours.write', 'quotes.read', 'quotes.write', 'profile.write']
-const admin = [...member, 'harness.recover', 'harness.force_stop', 'approvals.decide_high', 'intake.decide', 'inbox.manage', 'settings.manage', 'plugins.manage', 'project_groups.write', 'keys.read', 'keys.manage', 'members.read', 'members.manage', 'roles.read', 'roles.manage', 'quotes.manage', 'quotes.issue', 'hours.approve']
+const admin = [...member, 'harness.recover', 'harness.force_stop', 'approvals.decide_high', 'intake.decide', 'inbox.manage', 'settings.manage', 'plugins.manage', 'project_groups.write', 'keys.read', 'keys.manage', 'members.read', 'members.manage', 'roles.read', 'roles.manage', 'quotes.manage', 'quotes.issue', 'hours.approve', 'models.read', 'models.manage', 'models.report', 'models.refresh']
 
 // Guest (ADR-003 P2) is a project role: nothing in the workspace, read and
 // comment on the projects it is bound to.

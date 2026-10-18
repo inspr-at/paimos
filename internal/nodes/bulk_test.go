@@ -14,7 +14,9 @@ import (
 
 func TestBulkChangeSkipsWithReasonsAndUndoesAsOne(t *testing.T) {
 	p := newPrincipal(t, "bulk")
-	project, epic, ticket, task := kindBySlug(t, p, "project"), kindBySlug(t, p, "epic"), kindBySlug(t, p, "ticket"), kindBySlug(t, p, "task")
+	customKind(t, p, "epic", "epic")
+	customKind(t, p, "task", "task")
+	project, epic, ticket, task := kindBySlug(t, p, "project"), kindBySlug(t, p, "epic"), kindBySlug(t, p, "work"), kindBySlug(t, p, "task")
 	create := func(kind, key, state, parent string, fields string) nodeJSON {
 		t.Helper()
 		if kind == ticket.ID {
@@ -107,7 +109,7 @@ func TestBulkChangeSkipsWithReasonsAndUndoesAsOne(t *testing.T) {
 	if string(tags) != `["keep",{"name":"ops"},{"color":"blue","name":"UI"}]` {
 		t.Fatalf("tags: %s", tags)
 	}
-	status, raw := call(t, &p, http.MethodGet, "/api/nodes?within="+root.ID+"&assignee=none&kind=ticket", "")
+	status, raw := call(t, &p, http.MethodGet, "/api/nodes?within="+root.ID+"&assignee=none&kind=work", "")
 	if page := decode[nodePage](t, status, raw, http.StatusOK); len(page.Items) != 2 {
 		t.Fatalf("unassigned after bulk: %d", len(page.Items))
 	}
@@ -117,7 +119,7 @@ func TestBulkChangeSkipsWithReasonsAndUndoesAsOne(t *testing.T) {
 	}
 
 	// Parents: kind rules, cycles and other projects are skipped with reasons.
-	status, raw = call(t, &p, http.MethodPatch, "/api/kinds/"+epic.ID, `{"allowed_child_kinds":["ticket"]}`)
+	status, raw = call(t, &p, http.MethodPatch, "/api/kinds/"+epic.ID, `{"allowed_child_kinds":["work"]}`)
 	decode[kindJSON](t, status, raw, http.StatusOK)
 	moved := bulk(`{"ids":["`+b.ID+`","`+sub.ID+`","`+e2.ID+`"],"parent_id":"`+e2.ID+`"}`, http.StatusOK)
 	if len(moved.Items) != 1 || moved.Items[0].ID != b.ID || *moved.Items[0].ParentID != e2.ID || len(moved.Skipped) != 2 {

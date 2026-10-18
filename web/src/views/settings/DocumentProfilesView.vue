@@ -5,6 +5,7 @@ import { computed, nextTick, onBeforeUnmount, onMounted, reactive, ref, useId, w
 import { onBeforeRouteLeave, onBeforeRouteUpdate, useRouter } from 'vue-router'
 import { contentUrl } from '../../lib/attachments'
 import { setPageTitle } from '../../lib/brand'
+import HeadingIdentity from '../../components/HeadingIdentity.vue'
 import { confirmAction } from '../../lib/confirm'
 import { useSession } from '../../stores/session'
 import { toast } from '../../lib/toast'
@@ -292,6 +293,7 @@ const FOCUS: Record<string, 'cover' | 'table' | 'end'> = { basics: 'cover', type
 const focus = computed(() => FOCUS[active.value] ?? 'cover')
 // Phones show the form or the preview; wider screens both.
 const pane = ref<'form' | 'preview'>('form')
+const heading = computed(() => creating.value ? 'New profile' : working.name.trim() || selected.value?.name || 'Document profiles')
 // On a phone the preview mounts only when shown, so it lays out at its real size.
 const narrowQuery = window.matchMedia('(max-width: 859px)')
 const narrow = ref(narrowQuery.matches)
@@ -308,7 +310,7 @@ watch(() => props.profileId, () => { void nextTick(() => form.value?.scrollTo({ 
         <RouterLink class="icon-btn sm flat back" to="/settings/business#quote-profiles" aria-label="Back to Business settings" data-tip="Business settings"><AppIcon name="arrow-left" :size="15" /></RouterLink>
         <div class="head-titles">
           <p class="eyebrow" role="status" aria-live="polite">Document profile<template v-if="!loading && (selected || creating)"> · <span v-if="archived">archived</span><span v-else-if="dirty" class="dirty">unsaved changes</span><span v-else-if="selected">revision {{ selected.revision }}</span><span v-else>not saved yet</span></template></p>
-          <h1 id="profiles-title">{{ creating ? 'New profile' : working.name.trim() || selected?.name || 'Document profiles' }}</h1>
+          <HeadingIdentity id="profiles-title" as="h1" :text="heading" />
         </div>
       </div>
       <div class="head-right">
@@ -550,13 +552,17 @@ watch(() => props.profileId, () => { void nextTick(() => form.value?.scrollTo({ 
 
 <style scoped>
 .profiles-page { display: flex; flex-direction: column; height: 100%; min-height: 0; min-width: 0; }
-.profiles-head { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 8px 16px; min-height: 60px; padding: 10px 16px; border-bottom: 1px solid var(--line-2); background: var(--surface-raised-2); }
-.head-left { display: flex; align-items: center; gap: 10px; min-width: 0; }
+.profiles-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 8px 16px; min-height: 60px; padding: 10px 16px; border-bottom: 1px solid var(--line-2); background: var(--surface-raised-2); }
+.head-left { display: flex; flex: 1; align-items: flex-start; gap: 10px; min-width: 0; }
+.head-left .back { flex: none; }
 .head-titles { min-width: 0; }
 .head-titles .eyebrow { font: 500 10.5px/1.3 var(--mono); letter-spacing: .14em; text-transform: uppercase; color: var(--ink-3); font-variant-ligatures: none; }
-.head-titles h1 { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font: 600 17px/1.3 var(--font); letter-spacing: 0; color: var(--ink); }
-.head-right { display: flex; align-items: center; flex-wrap: wrap; justify-content: flex-end; gap: 8px; }
-.head-titles .dirty { color: var(--gold-ink); font-weight: 700; }
+/* The live name has two lines; its full text remains available without moving
+   the editing fields and section navigation below the header. */
+.head-titles h1 { height: 2lh; overflow: hidden; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; white-space: normal; overflow-wrap: anywhere; font: 600 17px/1.3 var(--font); letter-spacing: 0; color: var(--ink); }
+@media (pointer: coarse) { .head-titles h1 { min-height: 44px; } }
+.head-right { flex: none; display: flex; align-items: center; justify-content: flex-end; gap: 8px; }
+.head-titles .dirty { color: var(--warn-ink); font-weight: 700; }
 .head-actions { display: flex; align-items: center; gap: 8px; }
 .pane-switch { display: none; }
 .profiles-body { flex: 1; min-height: 0; display: grid; grid-template-columns: 256px minmax(380px, 456px) minmax(0, 1fr); }
@@ -654,8 +660,9 @@ watch(() => props.profileId, () => { void nextTick(() => form.value?.scrollTo({ 
   .btn-text { display: none; }
 }
 @media (max-width: 520px) {
-  .profiles-head { padding: 8px 12px; }
-  .head-right { width: 100%; justify-content: space-between; }
+  .profiles-head { padding: 8px 12px; flex-direction: column; }
+  .head-left { width: 100%; }
+  .head-right { order: -1; width: 100%; justify-content: space-between; }
   .sections { padding: 0 12px 32px; }
   /* Touch-sized pane switch. */
   .pane-switch button { height: 36px; }

@@ -1,0 +1,313 @@
+// SPDX-License-Identifier: AGPL-3.0-only
+import { readFileSync, existsSync, writeFileSync, mkdtempSync, realpathSync, statSync, readdirSync, lstatSync, mkdirSync } from 'node:fs'
+import { createHash } from 'node:crypto'
+import { execFileSync } from 'node:child_process'
+import { tmpdir } from 'node:os'
+import { resolve } from 'node:path'
+import { fileURLToPath } from 'node:url'
+import { command, root } from './collect.mjs'
+import { boundedText, inputMetadata, readInput, inputBounds } from './inputs.mjs'
+import { reverseDependants, webGraph, graphIncomplete, goImpact, browserDataInput, impactRisk, validImpactPaths, manifestPromotions, semanticRegistryPattern, registryImpact, select, webShardPlan, fullWebShards } from './core.mjs'
+import { browserImpact, nightlyBrowserMap } from './browser-impact.mjs'
+import { loadPolicy } from '../../web/scripts/ci-web-shard-source.mjs'
+import { browserAreaDecision, hasBrowserSource, loadBrowserAreas } from './browser-areas.mjs'
+import { ownershipGraph } from './browser-ownership.mjs'
+import { makeBrowserPlan } from './browser-plan.mjs'
+
+// Shared bounded diff reader for Actions event bases and offline merge bases.
+export function pathsBetween(base, { exec=command }={}) {
+  try {
+    if (!/^[a-f0-9]{40}$/.test(base??'')) return undefined
+    const output=exec('git',['diff','--name-only','-z','--no-renames',base,'HEAD'],{timeout:30_000})
+    if(Buffer.byteLength(output)>2*1024*1024||(output&&!output.endsWith('\0')))return undefined
+    const paths=output.split('\0').filter(Boolean)
+    return validImpactPaths(paths)?paths:undefined
+  } catch { return undefined }
+}
+
+export function changedPaths(event, env=process.env, { fetchBase=false, exec=command }={}) {
+  if (!['pull_request','merge_group'].includes(event)) return undefined
+  try {
+    if(statSync(env.GITHUB_EVENT_PATH).size>2*1024*1024)return undefined
+    const payload=JSON.parse(readFileSync(env.GITHUB_EVENT_PATH,'utf8'))
+    const base=payload.pull_request?.base?.sha ?? payload.merge_group?.base_sha
+    if (!/^[a-f0-9]{40}$/.test(base??'')) return undefined
+    // The small planner checkout needs only HEAD and the exact event base, not
+    // the complete repository history. Other jobs retain their own checkout.
+    if (fetchBase) exec('git',['fetch','--no-tags','--depth=1','origin',base],{timeout:30_000})
+    return pathsBetween(base,{exec})
+  } catch { return undefined }
+}
+
+// The PR base commit from the Actions payload; undefined outside PR events.
+export function eventBase(env=process.env) {
+  try {
+    if(env.GITHUB_EVENT_NAME!=='pull_request'||statSync(env.GITHUB_EVENT_PATH).size>2*1024*1024)return undefined
+    const base=JSON.parse(readFileSync(env.GITHUB_EVENT_PATH,'utf8')).pull_request?.base?.sha
+    return /^[a-f0-9]{40}$/.test(base??'')?base:undefined
+  } catch { return undefined }
+}
+
+// Go sources and web tests of one checkout, read once per process. Bounded
+// walk: the consumer rules only need internal/, cmd/, scripts/ and web/tests.
+const trees=new Map()
+export function sourceTree(checkout=root, { bounds=inputBounds, read=readInput }={}) {
+  const cached=bounds===inputBounds&&read===readInput
+  if(cached&&trees.has(checkout))return trees.get(checkout)
+  const go=new Map(),webTests=new Map(), files=[]
+  let entries=0,totalBytes=0
+  const visit=(directory,into,accept,optional=false)=>{
+    const absolute=resolve(checkout,directory)
+    let stat
+    try { stat=lstatSync(absolute) } catch(error) { if(optional&&error.code==='ENOENT')return;throw error }
+    if(!stat.isDirectory()||stat.isSymbolicLink())throw new Error('non-directory or symlink in consumer scan')
+    for(const entry of readdirSync(absolute,{withFileTypes:true})) {
+      if(++entries>=bounds.entries)throw new Error('consumer entry count bound reached')
+      const file=`${directory}/${entry.name}`
+      if(entry.isSymbolicLink())throw new Error('symlink in consumer scan')
+      if(entry.isDirectory()) { if(!['node_modules','testdata','dist'].includes(entry.name)) visit(file,into,accept) }
+      else if(accept(file)) {
+        const metadata=inputMetadata(checkout,file,bounds.fileBytes)
+        if(files.length+1>=bounds.files)throw new Error('consumer file count bound reached')
+        totalBytes+=metadata.size
+        if(totalBytes>=bounds.totalBytes)throw new Error('consumer total byte bound reached')
+        files.push({file,into,metadata})
+      }
+    }
+  }
+  let tree
+  try {
+    if(!statSync(realpathSync(checkout)).isDirectory())throw new Error('missing consumer checkout')
+    // Preflight the complete file set and all sizes before the first read.
+    for(const directory of ['internal','cmd','scripts']) visit(directory,go,file=>file.endsWith('.go'),true)
+    visit('web/tests',webTests,file=>/\.(?:ts|mjs|js)$/.test(file),true)
+    for(const {file,into,metadata} of files)into.set(file,read(metadata,bounds.fileBytes))
+    const imports={}
+    for(const [file,text] of go) {
+      const owner=file.slice(0,file.lastIndexOf('/'))
+      imports[owner]??=[]
+      for(const match of text.matchAll(/["`]github\.com\/inspr-at\/paimos\/([^"`]+)["`]/g)) {
+        if(match[1].includes('\\'))throw new Error('escaped local Go import')
+        if(!imports[owner].includes(match[1]))imports[owner].push(match[1])
+      }
+    }
+    tree={complete:true,go,imports,webTests:new Map([...webTests].map(([file,text])=>[file.slice(4),text]))}
+  } catch(error) {
+    // Discard every partial result; no consumer rule may use a truncated tree.
+    tree={complete:false,reason:error.message,go:new Map(),webTests:new Map()}
+  }
+  if(cached)trees.set(checkout,tree)
+  return tree
+}
+
+export const manifestFiles={go:'scripts/ci/go-test-tiers.json',web:'scripts/ci/web-test-tiers.json'}
+export function manifestsAt(read) {
+  const manifests={}
+  for(const [kind,file] of Object.entries(manifestFiles)) {
+    const text=read(file)
+    if(typeof text==='string') manifests[kind]=JSON.parse(text)
+  }
+  return manifests
+}
+// Base manifests come from git (the exact event base is fetched by the
+// planner/runners); head manifests from the checkout. Missing data fails closed.
+export function promotionsBetween(base,{cwd=root,exec=command,baseDirectory}={}) {
+  try {
+    const before=manifestsAt(file=>{
+      if(baseDirectory!==undefined)return existsSync(resolve(baseDirectory,file))?readFileSync(resolve(baseDirectory,file),'utf8'):undefined
+      if(!/^[a-f0-9]{40}$/.test(base??''))return undefined
+      try { return exec('git',['show',`${base}:${file}`],{cwd,timeout:30_000}) } catch { return undefined }
+    })
+    const after=manifestsAt(file=>existsSync(resolve(cwd,file))?readFileSync(resolve(cwd,file),'utf8'):undefined)
+    for(const kind of Object.keys(manifestFiles)) if(after[kind]&&!before[kind])return undefined
+    return manifestPromotions(before,after)
+  } catch { return undefined }
+}
+
+// Read exactly the changed registries, from the trusted base and candidate.
+// Missing, deleted, symlinked, malformed or oversized inputs widen the gate.
+export function registryChangesBetween(base, paths, { cwd = root, exec = command, baseDirectory } = {}) {
+  const changes = new Map(), limit = 4 * 1024 * 1024
+  for (const file of paths.filter(path => semanticRegistryPattern.test(path))) {
+    try {
+      let before
+      if (baseDirectory !== undefined) before = boundedText(baseDirectory, file, limit)
+      else {
+        if (!/^[a-f0-9]{40}$/.test(base ?? '')) throw new Error('unbound registry base')
+        before = exec('git', ['show', `${base}:${file}`], { cwd, timeout: 15_000 })
+      }
+      const after = boundedText(cwd, file, limit)
+      if ([before, after].some(text => typeof text !== 'string' || Buffer.byteLength(text) >= limit)) throw new Error('unreadable registry')
+      changes.set(file, registryImpact(file, JSON.parse(before), JSON.parse(after)))
+    } catch { changes.set(file, { full: true, reason: 'registry comparison unavailable', promoted: [] }) }
+  }
+  return changes
+}
+
+export function schedulingDecision(event,paths,exists,{impact,affectedLane,graph,checkout=root,base,tree,registryChanges,readFile,tests:suppliedTests,imports,browserMap,baseTree,fingerprint,browserAreas}={}) {
+  exists??=path=>existsSync(resolve(checkout,path))
+  const full=reason=>({mode:'full',layout:'full',reason})
+  if(impact==='off')return full('CI_IMPACT=off')
+  if(event!=='pull_request'||!Array.isArray(paths)) return full('full event or missing diff')
+  if(!validImpactPaths(paths))return full('invalid or oversized impact diff')
+  const areaRollout=impact==='on'&&hasBrowserSource(paths)
+  if(areaRollout) {
+    if(affectedLane!=='on')return full('affected browser area rollout requires CI_AFFECTED_LANE=on')
+    const area=browserAreaDecision(paths,browserAreas??loadBrowserAreas(root))
+    if(area.full)return full(area.reason)
+  }
+  const browserData=paths.find(browserDataInput)
+  if(browserData)return full(`browser CSS, asset or data input: ${browserData}`)
+  const webChanges=paths.filter(path=>path.startsWith('web/')).map(path=>path.slice(4))
+  const on=affectedLane==='on'
+  if(webChanges.length) graph??=areaRollout?ownershipGraph(resolve(root,'web'),webGraph(resolve(root,'web'))):webGraph(resolve(root,'web'))
+  const goChanges=paths.some(path=>/^(?:internal|cmd)\//.test(path)&&!path.endsWith('.md'))
+  if(on||goChanges) {
+    tree??=sourceTree(checkout)
+  }
+  if (on && registryChanges === undefined) registryChanges = registryChangesBetween(base, paths, { cwd: checkout })
+  const manifests=on||goChanges||webChanges.length?manifestsAt(file=>boundedText(root,file)):{}
+  const tests=suppliedTests??Object.values(manifests).flatMap(manifest=>manifest.tests??[])
+  const risk=impactRisk(paths,{event,affectedLane,webImports:graph,tree,registryChanges,tests,
+    readFile:readFile??(path=>exists(path)?boundedText(checkout,path):undefined)})
+  if(risk.full)return full(risk.reasons.join('; ')||'full event or uncertain impact')
+  if(goChanges||risk.goSeeds.size) {
+    if(tree?.complete===false)return full(`incomplete Go consumer scan: ${tree.reason}`)
+    const go=goImpact(tests,paths,imports??tree?.imports,risk.goSeeds)
+    if(go.full)return full(`Go reverse dependencies exceed 300 extra cases (${go.extra})`)
+  }
+  for(const path of paths) {
+    if(risk.handled.has(path))continue
+    if(/^(?:docs\/|README(?:\.|$)|LICENSE(?:\.|$)|CHANGELOG(?:\.|$))/.test(path))continue
+    if(!exists(path)||!/^(?:(?:internal|cmd)\/|web\/(?:src|tests|e2e)\/)/.test(path))return full(`unmapped or deleted input: ${path}`)
+    if(path.startsWith('web/')&&!/\.(?:ts|js|mjs|vue|json|css)$/.test(path))return full(`unsupported web input: ${path}`)
+  }
+  const webSeeds=[...risk.webSeeds]
+  if(webChanges.length||webSeeds.length) {
+    graph??=webGraph(resolve(root,'web'))
+    if(graph[graphIncomplete])return full(`incomplete web dependency graph: ${graph[graphIncomplete]}`)
+    const changed=[...webChanges.filter(file=>!risk.handled.has(`web/${file}`)),...webSeeds]
+    const coverage=browserImpact(changed,graph,browserMap,baseTree,fingerprint)
+    if(coverage.full)return full(coverage.reason)
+    const impacted=new Set([...reverseDependants(new Set(changed),graph),...coverage.specs])
+    if(webChanges.some(file=>!risk.handled.has(`web/${file}`)&&!Object.hasOwn(graph,file)))return full('missing trusted web dependency metadata')
+    if(webChanges.some(file=>file.startsWith('src/'))&&![...impacted].some(file=>/^tests\/.*\.(?:spec|test)\.ts$/.test(file)))return full('web module has no mapped test importer')
+    // Large mapped fan-outs use the old full layout too. The tier selector
+    // still records the exact essential/changed union within those runners.
+    if(tests.filter(row=>row.kind==='browser'&&impacted.has(row.file)).length>300)return full('browser fan-out exceeds 300 cases')
+  }
+  return {mode:'essential',layout:risk.layout,reason:risk.reasons.join('; ')||'essential plus changed area and reverse dependencies'}
+}
+
+// One precedence rule for every workflow consumer. Only matching trusted
+// exemptions can keep a narrow PR lane. Essential/static are wider layouts.
+// Off returns the frozen classifier value unchanged, regardless of mode/event.
+export function effectiveLane(lane,{mode,event,affectedLane,impact}={}) {
+  if(impact==='off')return 'full'
+  if(affectedLane!=='on')return lane
+  if(event!=='pull_request')return 'full'
+  if(lane==='spec-only'&&mode==='spec-only')return lane
+  if(lane==='docs-only'&&mode==='docs')return lane
+  return 'full'
+}
+
+export function schedulingMode(event,paths,exists,options) {
+  return schedulingDecision(event,paths,exists,options).mode
+}
+
+// Reuse the execution selector on the catalogue, without native discovery or
+// browsers. In trusted mode policy/graph come from the base, and the candidate
+// catalogue is data only; unknown/new owners fail wide.
+export function sizeWebDecision(decision, paths, { event='pull_request', affectedLane, impact, checkout=root,
+  graph, tree, registryChanges, browserMap, baseTree, fingerprint, tests, policy, browserAreas, base, sha }={}) {
+  if (decision.mode !== 'essential' || decision.layout === 'static') return decision
+  tests ??= JSON.parse(boundedText(checkout,'scripts/ci/web-test-tiers.json',4*1024*1024)).tests
+  policy ??= loadPolicy(resolve(root,'web/ci-web-shards.json'))
+  graph ??= impact==='on'&&hasBrowserSource(paths)?ownershipGraph(resolve(root,'web'),webGraph(resolve(root,'web'))):webGraph(resolve(root,'web'))
+  const selection=select(tests,{event,paths,affectedLane,impact,webImports:graph,tree:tree??sourceTree(checkout),registryChanges,
+    browserMap,baseTree,fingerprint,browserAreas,readFile:path=>boundedText(checkout,path)})
+  if(selection.full) return {mode:'full',layout:'full',reason:selection.reason}
+  const webShardSizing=webShardPlan(selection.tests,policy)
+  const affected=selection.browser_scope==='affected'&&webShardSizing.fitsBudget
+  return {...decision,...(!webShardSizing.fitsBudget?{mode:'full',layout:'full',reason:'essential web shard projection exceeds budget; full gate required'}:{}),
+    ...(affected?{browser_scope:'affected',browserPlan:makeBrowserPlan(tests,selection.tests,{base,sha,areas:selection.browser_areas})}:{}),
+    webShards:webShardSizing.shards,webShardSizing}
+}
+
+// Snapshot the trusted planner AND graph inputs. An incomplete/old base copy
+// fails closed; never import candidate classifier code to enable narrowing.
+export function trustedSchedulingDecision(base, paths, env=process.env, {cwd=root}={}) {
+  if(!/^[a-f0-9]{40}$/.test(base??''))throw new Error('Invalid trusted planner base')
+  if(!validImpactPaths(paths))throw new Error('Invalid trusted paths')
+  const directory=realpathSync(mkdtempSync(resolve(tmpdir(),'aeon-trusted-tier-')))
+  const archive=execFileSync('git',['archive',base,'scripts/test-tiers','scripts/ci','scripts/ci-pr-plan.mjs','scripts/playwright-safe.mjs','scripts/playwright-global-setup.mjs','scripts/playwright-lock.mjs','scripts/playwright-processes.mjs','web/src','web/tests','web/e2e','web/scripts','web/ci-web-shards.json'],
+    {cwd,timeout:30_000,maxBuffer:64*1024*1024})
+  execFileSync('tar',['-x','-C',directory],{input:archive,timeout:30_000,maxBuffer:2*1024*1024})
+  const output=execFileSync(process.execPath,[resolve(directory,'scripts/test-tiers/diff.mjs'),'--trusted-paths'],
+    {cwd:directory,encoding:'utf8',timeout:30_000,maxBuffer:2*1024*1024,
+      env:{...env,GITHUB_OUTPUT:'',GITHUB_STEP_SUMMARY:'',AEON_TIER_PATHS:JSON.stringify(paths),AEON_TIER_CHECKOUT:cwd,AEON_TIER_BASE:base}})
+  const decision=JSON.parse(output)
+  if(!['full','essential'].includes(decision.mode)||typeof decision.reason!=='string')throw new Error('Invalid trusted planner decision')
+  // Pre-adoption base planners report no layout; that is the full layout.
+  decision.layout??='full'
+  if(!['full','static'].includes(decision.layout)||(decision.mode==='full'&&decision.layout!=='full'))throw new Error('Invalid trusted planner layout')
+  if(decision.browser_scope==='affected'&&(decision.mode!=='essential'||decision.layout!=='full'||decision.browserPlan?.base!==base||decision.browserPlan?.sha!==env.GITHUB_SHA))throw new Error('Invalid trusted browser plan')
+  return decision
+}
+
+export function main(env=process.env) {
+  const paths=env.GITHUB_EVENT_NAME==='pull_request'?changedPaths(env.GITHUB_EVENT_NAME,env,{fetchBase:true}):undefined
+  let decision
+  try {
+    if(env.CI_IMPACT==='off')decision={mode:'full',layout:'full',reason:'CI_IMPACT=off'}
+    else if(env.GITHUB_EVENT_NAME==='pull_request'&&env.CI_AFFECTED_LANE==='on'&&Array.isArray(paths)) {
+      const payload=JSON.parse(readFileSync(env.GITHUB_EVENT_PATH,'utf8'))
+      decision=trustedSchedulingDecision(payload.pull_request?.base?.sha,paths,env)
+    } else {
+      // A token on this step must not activate the unqualified legacy map.
+      // Only the opted-in, qualified trusted path below may fetch coverage.
+      const options={impact:env.CI_IMPACT,affectedLane:env.CI_AFFECTED_LANE}
+      decision=sizeWebDecision(schedulingDecision(env.GITHUB_EVENT_NAME,paths,undefined,options),paths,{event:env.GITHUB_EVENT_NAME,...options})
+    }
+  } catch { decision={mode:'full',layout:'full',reason:'trusted affected classification unavailable'} }
+  const {mode,reason}=decision
+  const layout=mode==='full'?'full':decision.layout??'full'
+  if(!env.GITHUB_OUTPUT)throw new Error('Missing Actions output path')
+  const lane=effectiveLane(env.CI_PLAN_LANE??'full',{mode,event:env.GITHUB_EVENT_NAME,affectedLane:env.CI_AFFECTED_LANE,impact:env.CI_IMPACT})
+  const webShards=lane==='spec-only'&&env.GITHUB_EVENT_NAME==='pull_request'?[1]:decision.webShards??fullWebShards
+  const browserScope=mode==='essential'&&decision.browser_scope==='affected'?'affected':env.GITHUB_EVENT_NAME==='pull_request'&&(layout==='static'||lane==='docs-only')?'none':'gated-full'
+  const browserPlan=browserScope==='affected'?JSON.stringify(decision.browserPlan):''
+  if(Buffer.byteLength(browserPlan)>=512*1024)throw new Error('Affected browser plan output bound')
+  let browserPlanSHA=''
+  if(browserPlan) {
+    mkdirSync(resolve(root,'tmp/test-tiers'),{recursive:true})
+    writeFileSync(resolve(root,'tmp/test-tiers/browser-plan.json'),browserPlan)
+    browserPlanSHA=createHash('sha256').update(browserPlan).digest('hex')
+  }
+  writeFileSync(env.GITHUB_OUTPUT,`mode=${mode}\nlayout=${layout}\nlane=${lane}\nweb_shards=${JSON.stringify(webShards)}\nbrowser_scope=${browserScope}\nbrowser_plan_sha256=${browserPlanSHA}\n`,{flag:'a'})
+  const sizing=decision.webShardSizing
+  const note=`Test tier scheduling: ${mode} (${layout} layout, ${lane} effective lane); browser_scope=${browserScope}; ${reason}; web shards ${webShards.length}${sizing?`; projected max ${sizing.projectedMaxSeconds.toFixed(1)}s / ${sizing.budgetSeconds}s budget (25% timeout headroom, setup included)`:''}`
+  console.log(`${note}; changed paths ${paths?.length??'unavailable'}`)
+  if(env.GITHUB_STEP_SUMMARY)writeFileSync(env.GITHUB_STEP_SUMMARY,`${note}\n`,{flag:'a'})
+  return 0
+}
+if(process.argv[1]&&resolve(process.argv[1])===fileURLToPath(import.meta.url)) {
+  try {
+    if(process.argv[2]==='--trusted-paths') {
+      const paths=JSON.parse(process.env.AEON_TIER_PATHS)
+      if(!validImpactPaths(paths))throw new Error('Invalid trusted paths')
+      // Base planner, base graph and base manifests come from this snapshot;
+      // the candidate checkout supplies the changed files and head manifests.
+      const checkout=process.env.AEON_TIER_CHECKOUT
+      const registryChanges=registryChangesBetween(undefined,paths,{cwd:checkout,baseDirectory:root})
+      const catalogue=manifestsAt(file=>boundedText(root,file)).web?.tests??[]
+      const browserAreas=process.env.CI_IMPACT==='on'?loadBrowserAreas(root):undefined
+      const qualified=browserAreas?browserAreaDecision(paths,browserAreas):undefined
+      const coverage=process.env.CI_IMPACT==='on'&&hasBrowserSource(paths)&&qualified?.full===false?nightlyBrowserMap(checkout,process.env.AEON_TIER_BASE,catalogue,{compatible:true}):{}
+      const options={event:process.env.GITHUB_EVENT_NAME,affectedLane:process.env.CI_AFFECTED_LANE,impact:process.env.CI_IMPACT,checkout,registryChanges,
+        browserAreas,base:process.env.AEON_TIER_BASE,sha:process.env.GITHUB_SHA,...coverage}
+      console.log(JSON.stringify(sizeWebDecision(schedulingDecision(process.env.GITHUB_EVENT_NAME,paths,
+        path=>existsSync(resolve(checkout,path)),options),paths,options)))
+    } else process.exitCode=main()
+  } catch(error) { console.error(error.message);process.exitCode=1 }
+}

@@ -9,6 +9,7 @@ export const COLLAPSE_MS = 5 * 60_000
 export const EDIT_WINDOW_MS = 15 * 60_000
 
 export type TimelineEntry =
+  | { kind: 'entry'; id: string; at: string; author: ActivityItem['author']; change: NonNullable<ActivityItem['entry_checks']> }
   | { kind: 'automatic'; id: string; at: string; author: ActivityItem['author']; change: NonNullable<ActivityItem['automatic_change']> }
   | { kind: 'comment'; id: string; at: string; author: ActivityItem['author']; body: string }
   | { kind: 'changes'; id: string; at: string; author: ActivityItem['author']; changes: ActivityChange[] }
@@ -34,6 +35,11 @@ function merge(into: ActivityChange[], next: ActivityChange[]): ActivityChange[]
 export function buildTimeline(items: ActivityItem[], windowMs = COLLAPSE_MS): TimelineEntry[] {
   const out: TimelineEntry[] = []
   for (const item of [...items].reverse()) {
+    if (item.entry_checks) {
+      const last = out.at(-1), change = item.entry_checks
+      if (last?.kind === 'entry' && last.change.type === 'refused' && change.type === 'refused' && change.count > 1 && sameAuthor(last.author, item.author) && last.change.to_status === change.to_status && JSON.stringify(last.change.failed) === JSON.stringify(change.failed)) out.pop()
+      out.push({ kind: 'entry', id: item.id, at: item.at, author: item.author, change }); continue
+    }
     if (item.automatic_change) { out.push({ kind: 'automatic', id: item.id, at: item.at, author: item.author, change: item.automatic_change }); continue }
     if (item.type === 'comment') { out.push({ kind: 'comment', id: item.id, at: item.at, author: item.author, body: item.body_markdown ?? '' }); continue }
     if (item.type === 'created') { out.push({ kind: 'created', id: item.id, at: item.at, author: item.author }); continue }

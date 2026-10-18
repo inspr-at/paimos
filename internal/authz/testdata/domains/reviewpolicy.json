@@ -1,0 +1,60 @@
+{
+  "_license": "SPDX-License-Identifier: AGPL-3.0-only",
+  "builtin_agent_exclusions": [
+    "reviewpolicy.manage"
+  ],
+  "builtin_roles": {
+    "admin": [
+      "reviewpolicy.manage",
+      "reviewpolicy.read"
+    ],
+    "member": [
+      "reviewpolicy.read"
+    ],
+    "owner": [
+      "reviewpolicy.manage",
+      "reviewpolicy.read"
+    ],
+    "viewer": [
+      "reviewpolicy.read"
+    ]
+  },
+  "registry": [
+    {
+      "agent_grantable": true,
+      "description": "Manage reviewpolicy",
+      "grantable_at": [
+        "workspace",
+        "project"
+      ],
+      "group": "Reviewpolicy",
+      "key": "reviewpolicy.manage",
+      "owner_workstation_grantable": true,
+      "risk": "high"
+    },
+    {
+      "agent_grantable": true,
+      "description": "Read reviewpolicy",
+      "grantable_at": [
+        "workspace",
+        "project"
+      ],
+      "group": "Reviewpolicy",
+      "key": "reviewpolicy.read",
+      "owner_workstation_grantable": true,
+      "risk": "low"
+    }
+  ],
+  "routes": {
+    "DELETE /api/projects/{projectId}/review-policy": "reviewpolicy.manage",
+    "GET /api/projects/{projectId}/review-policy": "reviewpolicy.read",
+    "GET /api/settings/review-policy": "reviewpolicy.read",
+    "PUT /api/projects/{projectId}/review-policy": "reviewpolicy.manage",
+    "PUT /api/settings/review-policy": "reviewpolicy.manage"
+  },
+  "words": {
+    "resources": {
+      "reviewpolicy": "review policy"
+    }
+  }
+}

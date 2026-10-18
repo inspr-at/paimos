@@ -1,0 +1,152 @@
+{
+  "ticket": "AEON-648",
+  "round": "int-fix13",
+  "recorded_at": "2026-10-04T21:52:44.620406+00:00",
+  "branch": "work/aeon-648-int",
+  "reviewed_commit": "046a9a9ebcad76df31c3cfc3f8e7072dcba0c2d4",
+  "review": "review-int648r12.out",
+  "completion": "Authorized worktree verification finished; requested reservation correction remains blocked by coordinator / AEON-655 ownership. No finding resolution or review pass is claimed.",
+  "findings": [
+    {
+      "severity": "P3",
+      "description": "Migration 1238 reservation remains missing from the shared ledger.",
+      "status": "unresolved",
+      "resolved": false,
+      "owner": "coordinator / AEON-655",
+      "required_action": "Coordinator records 1238 AEON-655 (work vocabulary) and supplies the actual line number and resulting SHA-256.",
+      "expected_line": "1238 AEON-655 (work vocabulary)",
+      "actual_line_number": null,
+      "observed_ledger": {
+        "observed_at": "2026-10-04T21:52:44.620406+00:00",
+        "path": "/private/tmp/claude-501/-Users-markus-Code-aithema/af3ab8bf-63f6-4fb5-bccf-086eb11c043e/scratchpad/aeon/migration-ledger.txt",
+        "sha256": "849007af43ae78c35d917d5ed4ff9399c5aee06a19cc70c7562497356e9b71c9",
+        "line_count": 110,
+        "matching_lines": []
+      },
+      "migration": {
+        "path": "internal/db/migrations/1238_work_vocabulary.sql",
+        "sha256": "27eaf2c0851a1b633ae7f070a9f5283d3d1b7a3eace74a792bed4dace5c789c4",
+        "original_commit": "d15114c1a98d24c72448ee5caea712416bc6a7c9",
+        "matches_original": true
+      },
+      "ownership_constraints": [
+        "worker-common.md: Work ONLY in your worktree and branch (named in your brief).",
+        "review-int648r12.out: Fix: coordinator records 1238 AEON-655 (work vocabulary) and supplies the actual line number and resulting SHA-256.",
+        "User: Preserve all safety and ownership constraints."
+      ],
+      "coordinator_handoff": {
+        "proposal": "docs/qa/aeon-648-int-fix4-reservation.json",
+        "status": "proposal only; not applied",
+        "precondition_ledger_sha256": "849007af43ae78c35d917d5ed4ff9399c5aee06a19cc70c7562497356e9b71c9",
+        "line_number_if_unchanged": 111,
+        "predicted_result_sha256_if_unchanged": "de32f3418d4c8a722242aaf46d1e2531dc2fdb80c5b678ebb554ae8155e0bbe5",
+        "instruction": "Re-read the ledger and check for a concurrent reservation before appending. Publish the actual line number and hash after applying; the prediction is not resolution evidence."
+      },
+      "worker_result": "Fresh read-only verification confirms migration 1238 remains absent from the unchanged shared ledger. Original AEON-655 SQL and the unapplied coordinator proposal match. The requested write is outside the assigned worktree and explicitly coordinator-owned; no shared-ledger write or finding resolution is claimed."
+    }
+  ],
+  "changes": {
+    "retained": "This fix13 evidence document only.",
+    "behavior_fixes": 0,
+    "new_migrations": 0,
+    "regression_requirement": "The review explicitly exempts this administrative correction from behavioral regression testing. Production, UI, tests, contracts, SQL, dependencies, CI and assertions are unchanged."
+  },
+  "validation": {
+    "origin_main": {
+      "live_sha": "a3ca8c475a94ce1de6da1398182abe3dfe98eb9f",
+      "verified_with": "git ls-remote origin refs/heads/main",
+      "is_ancestor": true,
+      "merge_required": false
+    },
+    "migration_guard": {
+      "result": "pass (fresh local static check)",
+      "command": "node scripts/check-migrations.mjs --base-ref v261003095616.0.0",
+      "exit_code": 0,
+      "unique_numbers": 258,
+      "main_sql_unchanged": true,
+      "matching_exception_hashes": 25,
+      "main_sql_files_checked": 247
+    },
+    "prior_artifacts": {
+      "result": "pass",
+      "verified_unique_hashes": 54,
+      "all_match": true,
+      "evidence_rounds": [
+        3,
+        4,
+        5,
+        6,
+        7,
+        8
+      ]
+    },
+    "source_equivalence": {
+      "result": "pass",
+      "tested_commit": "920c6fed1a1c416b85444b5f50ff870d7e68e93b",
+      "comparison": "git diff --name-status 920c6fed1a1c416b85444b5f50ff870d7e68e93b 046a9a9ebcad76df31c3cfc3f8e7072dcba0c2d4",
+      "differences": [
+        "D\t.qa648fix8/web_test.go",
+        "A\tdocs/qa/aeon-648-int-fix10-evidence.json",
+        "A\tdocs/qa/aeon-648-int-fix11-evidence.json",
+        "A\tdocs/qa/aeon-648-int-fix12-evidence.json",
+        "A\tdocs/qa/aeon-648-int-fix8-evidence.json",
+        "A\tdocs/qa/aeon-648-int-fix9-evidence.json"
+      ],
+      "production_tests_contracts_migrations_dependencies_ci_and_assertions_unchanged": true
+    },
+    "go_and_web": {
+      "result": "Prior remote passes retained; no new suite run in fix13.",
+      "evidence": "docs/qa/aeon-648-int-fix8-evidence.json",
+      "verified_summary": "web/test-results/aeon-648-int-fix8/logs/checks-summary.json",
+      "commit": "920c6fed1a1c416b85444b5f50ff870d7e68e93b",
+      "exit_code": 0,
+      "packages": {
+        "internal/releases": "pass",
+        "internal/db": "pass",
+        "internal/authz": "pass"
+      },
+      "build": "pass",
+      "lint": "pass",
+      "npm_run_test_unit": "pass",
+      "ci_web_shard_node_cases": 26,
+      "node_unit_cases": 764,
+      "vitest_cases": 2772,
+      "vitest_files": 99,
+      "reason": "No affected Go package, web unit test or UI spec in this administrative-only round. Verified source equivalence and all retained artifact hashes; passing suites are not repeated. No fresh remote or hosted CI pass is claimed. The current user prohibits pushes; remote-test.sh uses a temporary test-ref push and was not invoked."
+    },
+    "browser": {
+      "result": "pending; no browser or hosted CI pass claimed",
+      "owner": "coordinator / OPS-247",
+      "prior_launcher_result": "Remote browser lane unavailable: OPS-247 bootstrap and approved launcher are pending. Use draft PR hosted CI; no SSH, dependency or browser installation, or local fallback.",
+      "prior_launcher_exit_code": 3,
+      "requested_specs": [
+        "work-integration.spec.ts",
+        "morning-briefing.spec.ts",
+        "journey-imported.spec.ts",
+        "ticket-placement.spec.ts"
+      ],
+      "local_fallback": false
+    },
+    "evidence_document": "JSON, fresh read-only ledger snapshot, original AEON-655 SQL, all 247 main SQL files, all 25 exception hashes, all 54 retained artifact hashes, newest main ancestry and the exact unapplied coordinator proposal checked locally.",
+    "read_only_verification": {
+      "path": "web/test-results/aeon-648-int-fix13/logs/read-only-verification.json",
+      "sha256": "49716e878ad7a2ac2e6d221926dfd934f1643a8418331ba4d8c548290a71d009"
+    }
+  },
+  "safety": {
+    "deploy": false,
+    "production_access": false,
+    "shared_ledger_modified": false,
+    "other_worktrees_modified": false,
+    "ticket_status_changed": false,
+    "historical_migrations_modified": false,
+    "credentials_read_or_displayed": false,
+    "subagents_or_model_reviews": false,
+    "generated_build_output_committed": false,
+    "any_push_in_fix13": false
+  },
+  "remaining": [
+    "Coordinator / AEON-655 must apply the shared-ledger reservation and provide actual line/hash evidence. This is the sole review finding.",
+    "OPS-247 browser lane or coordinator-owned hosted CI must run the requested specs; this remains a residual check."
+  ]
+}

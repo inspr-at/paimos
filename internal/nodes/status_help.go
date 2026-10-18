@@ -39,7 +39,12 @@ type statusAutopilot struct {
 }
 type statusHelp struct {
 	Definitions []statusDefinition `json:"definitions"`
-	Queued      struct {
+	Recurring   struct {
+		Label    string `json:"label"`
+		Meaning  string `json:"meaning"`
+		IsStatus bool   `json:"is_status"`
+	} `json:"recurring"`
+	Queued struct {
 		Label    string `json:"label"`
 		Meaning  string `json:"meaning"`
 		IsStatus bool   `json:"is_status"`

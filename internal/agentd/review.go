@@ -9,6 +9,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/inspr-at/paimos/internal/harnesslaunch"
 	"github.com/inspr-at/paimos/internal/reviewgate"
 )
 
@@ -34,7 +35,7 @@ func reviewSensitivePath(name string) bool {
 }
 func reviewPrompt(ctx context.Context, workspace string, order WorkOrder, profile Profile) (string, error) {
 	b := order.Review
-	if b == nil || b.ProfileID == nil || *b.ProfileID != profile.ID || b.ReviewerFamily == nil || *b.ReviewerFamily != profile.Family || profile.Family == b.AuthorFamily || !reviewgate.ValidFamily(profile.Family) || !reviewgate.ValidRepository(b.Repository) || !reviewgate.ValidSHA(b.BaseSHA) || !reviewgate.ValidSHA(b.HeadSHA) || b.BaseSHA == b.HeadSHA {
+	if b == nil || b.ProfileID == nil || *b.ProfileID != profile.ID || b.ReviewerFamily == nil || *b.ReviewerFamily != profile.Family || profile.Family == b.AuthorFamily || !reviewgate.ValidFamily(b.AuthorFamily) || !harnesslaunch.FamilyMatches(profile.Harness, profile.Model, profile.Family) || !reviewgate.ValidRepository(b.Repository) || !reviewgate.ValidSHA(b.BaseSHA) || !reviewgate.ValidSHA(b.HeadSHA) || b.BaseSHA == b.HeadSHA {
 		return "", errReviewContext
 	}
 	ctx, cancel := context.WithTimeout(ctx, 30*time.Second)

@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { glimpseControlSpot, glimpseOverlaps, glimpseTextMask, headerGlimpseAllowed, headerGlimpseGraphReady } from '../src/lib/headerGlimpse.ts'
+import { glimpseControlSpot, glimpseOverlaps, glimpsePlaceControls, glimpseTextMask, headerGlimpseAllowed, headerGlimpseGraphReady, headerGlimpsePaintClears, headerGlimpseWide, nextHeaderGlimpseWide, headerGlimpseViewportWide } from '../src/lib/headerGlimpse.ts'
 
 const on = { enabled: true, reduced: false, wide: true, tickets: 8 }
 
@@ -11,6 +11,44 @@ test('the header glimpse needs a wide viewport, motion, and eight tickets', () =
   assert.equal(headerGlimpseAllowed({ ...on, reduced: true }), false)
   assert.equal(headerGlimpseAllowed({ ...on, wide: false }), false)
   assert.equal(headerGlimpseAllowed({ ...on, tickets: 7 }), false)
+  assert.equal(headerGlimpseWide(1280), true)
+  assert.equal(headerGlimpseWide(1279), false)
+  assert.equal(headerGlimpseWide(390), false)
+  assert.equal(headerGlimpseWide(Number.NaN), false)
+  // The CI failure: viewport 1280 turned the glimpse on, then 390 dropped the
+  // MediaQueryList change and the previous flag stayed on.
+  assert.equal(nextHeaderGlimpseWide({ mediaMatches: null, layoutWidth: 390 }), false)
+  assert.equal(nextHeaderGlimpseWide({ mediaMatches: null, layoutWidth: 1280 }), true)
+  assert.equal(nextHeaderGlimpseWide({ mediaMatches: true, layoutWidth: 1279 }), true)
+  assert.equal(nextHeaderGlimpseWide({ mediaMatches: false, layoutWidth: 1280 }), false)
+})
+
+test('a stale wide media query cannot keep the header glimpse once the layout is below 1280', () => {
+  assert.equal(headerGlimpseViewportWide(true, 1280), true)
+  assert.equal(headerGlimpseViewportWide(true, 1600), true)
+  assert.equal(headerGlimpseViewportWide(true, 1279), false)
+  assert.equal(headerGlimpseViewportWide(true, 390), false)
+  assert.equal(headerGlimpseViewportWide(false, 1280), false)
+  assert.equal(headerGlimpseViewportWide(false, 1600), false)
+  assert.equal(headerGlimpseViewportWide(true, Number.NaN), false)
+  assert.equal(headerGlimpseViewportWide(true, Number.POSITIVE_INFINITY), false)
+  // PR #737: 1279 → 1280 → 390 delivered the earlier matches:true after the
+  // layout had already left the threshold, and the glimpse stayed on.
+  // One pixel of catch-up remains wide; 390 and 1278 do not.
+  assert.equal(nextHeaderGlimpseWide({ mediaMatches: true, layoutWidth: 390 }), false)
+  assert.equal(nextHeaderGlimpseWide({ mediaMatches: true, layoutWidth: 1278 }), false)
+})
+
+test('AEON-1477 a paint frame clears a glimpse the viewport signals left on below 1280', () => {
+  // 835d2134 kept the glimpse on after 1279 → 1280 → 390: resize, the media
+  // change and the document observer can all stay silent while the canvas
+  // paints. The frame may only clear. Catch-up of one pixel stays wide.
+  assert.equal(headerGlimpsePaintClears(true, { mediaMatches: true, layoutWidth: 390 }), true)
+  assert.equal(headerGlimpsePaintClears(true, { mediaMatches: true, layoutWidth: 1278 }), true)
+  assert.equal(headerGlimpsePaintClears(true, { mediaMatches: false, layoutWidth: 1600 }), true)
+  assert.equal(headerGlimpsePaintClears(true, { mediaMatches: true, layoutWidth: 1279 }), false)
+  assert.equal(headerGlimpsePaintClears(true, { mediaMatches: true, layoutWidth: 1280 }), false)
+  assert.equal(headerGlimpsePaintClears(false, { mediaMatches: true, layoutWidth: 390 }), false)
 })
 
 test('a ready graph has eight tickets and at least one link', () => {
@@ -30,6 +68,37 @@ test('hover controls find room around text, including a long title and a crowded
   assert.ok(spot)
   assert.ok(boxes.every(box => !glimpseOverlaps(spot, box, 10)))
   assert.equal(glimpseControlSpot(250, 100, boxes, { width: 310, height: 34 }), null)
+})
+
+test('hover controls use a fine search before dropping labels when the 8px grid misses the only opening', () => {
+  // The only clear cell is exactly (10, 10). It is one pixel off the coarse
+  // grid, so the labelled size still fits once the search steps by a pixel.
+  const boxes = [
+    { x: 0, y: 0, width: 10, height: 200 },
+    { x: 110, y: 0, width: 290, height: 200 },
+    { x: 0, y: 0, width: 400, height: 10 },
+    { x: 0, y: 40, width: 400, height: 160 },
+  ]
+  const full = { width: 100, height: 30 }
+  assert.equal(glimpseControlSpot(400, 200, boxes, full), null)
+  const placed = glimpsePlaceControls(400, 200, boxes, { full, compact: { width: 40, height: 30 } })
+  assert.deepEqual(placed, { spot: { x: 10, y: 10, width: 100, height: 30 }, compact: false })
+  assert.ok(boxes.every(box => !glimpseOverlaps(placed!.spot, box, 0)))
+})
+
+test('hover controls drop to the compact size when the labelled row cannot fit', () => {
+  // 140px of free header. The labelled row is 180px at every inset and step.
+  const boxes = [
+    { x: 0, y: 0, width: 220, height: 200 },
+    { x: 360, y: 0, width: 40, height: 200 },
+    { x: 0, y: 80, width: 400, height: 120 },
+  ]
+  const full = { width: 180, height: 34 }, compact = { width: 120, height: 34 }
+  assert.equal(glimpseControlSpot(400, 200, boxes, full, 0, 8, 1), null)
+  const placed = glimpsePlaceControls(400, 200, boxes, { full, compact })
+  assert.equal(placed?.compact, true)
+  assert.equal(placed?.spot.width, 120)
+  assert.ok(boxes.every(box => !glimpseOverlaps(placed!.spot, box, 0)))
 })
 
 test('text exclusion masks are bounded SVG images with hard and feathered cutouts', () => {
@@ -59,7 +128,9 @@ test('the shared context pages the Tickets query and drops links outside its mem
       assert.deepEqual(query.get('state')?.split(','), ['in_progress', 'in-progress'])
       assert.equal(query.get('priority'), 'high')
       assert.equal(query.get('q'), 'body match')
-      assert.equal(query.get('kind'), 'ticket')
+      // Type narrows by work level over every work kind (AEON-974): a legacy ticket is a leaf.
+      assert.equal(query.get('level'), 'leaf')
+      assert.equal(query.get('kind'), 'work,ticket,task,epic')
     }
     assert.deepEqual(result.visible.nodes.map(node => node.id), ['a', 'b'])
     assert.deepEqual(result.visible.links, [{ source: 'a', target: 'b' }])

@@ -3,7 +3,6 @@
 package activity
 
 import (
-	"encoding/json"
 	"errors"
 	"io"
 	"net/http"
@@ -112,7 +111,7 @@ func (m *module) comment(w http.ResponseWriter, r *http.Request) {
 		Markdown string `json:"body_markdown"`
 	}
 	if r.Method != http.MethodDelete {
-		dec := json.NewDecoder(http.MaxBytesReader(w, r.Body, 512<<10))
+		dec := httpapi.NewRequestDecoder(w, r, 512<<10)
 		dec.DisallowUnknownFields()
 		if dec.Decode(&body) != nil || dec.Decode(new(any)) != io.EOF || !utf8.ValidString(body.Markdown) || strings.TrimSpace(body.Markdown) == "" || len(body.Markdown) > 65536 {
 			failure(w, errInvalid)

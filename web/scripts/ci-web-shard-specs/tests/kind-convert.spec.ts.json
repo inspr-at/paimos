@@ -1,0 +1,22 @@
+{
+  "group": "remaining-ui",
+  "nightlyTiming": {
+    "seconds": 13.753,
+    "selectedTests": 5
+  },
+  "spec": {
+    "file": "tests/kind-convert.spec.ts",
+    "listedTests": 5,
+    "tierTiming": {
+      "caseSeconds": {
+        "max": 3.308,
+        "median": 2.65,
+        "min": 2.499
+      },
+      "seconds": 13.753,
+      "selectedTests": 5
+    },
+    "weightSeconds": 11.097561,
+    "weightSource": "unmeasured-test-rate"
+  }
+}

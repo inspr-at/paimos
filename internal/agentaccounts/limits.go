@@ -8,13 +8,12 @@ import (
 
 	"github.com/jackc/pgx/v5"
 
+	"github.com/inspr-at/paimos/internal/authz"
 	"github.com/inspr-at/paimos/internal/capacity"
-	"github.com/inspr-at/paimos/internal/httpapi"
 	"github.com/inspr-at/paimos/internal/tenant"
 )
 
 const (
-	evLimitSet      = "account.limit_set"
 	evLimitRemoved  = "account.limit_removed"
 	evWindowRemoved = "account.window_removed"
 )
@@ -39,29 +38,6 @@ type limitUse struct {
 	PeriodEnd time.Time `json:"period_end"`
 }
 
-type limitWrite struct {
-	Amount int64  `json:"amount"`
-	Unit   string `json:"unit"`
-	Period string `json:"period"`
-}
-
-func (in limitWrite) validate() error {
-	switch in.Unit {
-	case "percent", "runs", "requests", "tokens", "cost_micros":
-	default:
-		return fail(http.StatusBadRequest, "invalid limit")
-	}
-	switch in.Period {
-	case "day", "week", "month":
-	default:
-		return fail(http.StatusBadRequest, "invalid limit")
-	}
-	if in.Amount < 1 || in.Amount > 1_000_000_000_000_000 || in.Unit == "percent" && in.Amount > 100 {
-		return fail(http.StatusBadRequest, "invalid limit")
-	}
-	return nil
-}
-
 const limitColumns = `id::text, account_id::text, amount, unit, period, from_window_id::text, created_at`
 
 func scanLimit(row scanner) (LimitRule, error) {
@@ -71,6 +47,9 @@ func scanLimit(row scanner) (LimitRule, error) {
 }
 
 func currentLimit(ctx context.Context, tx pgx.Tx, accountID string) (*LimitRule, error) {
+	if s := projectionInputs(tx); s != nil {
+		return s.limits[accountID], nil
+	}
 	r, err := scanLimit(tx.QueryRow(ctx, `SELECT `+limitColumns+` FROM account_limit_rules WHERE account_id=$1 AND removed_at IS NULL`, accountID))
 	if isNoRows(err) {
 		return nil, nil
@@ -89,44 +68,6 @@ func lockForLimit(ctx context.Context, tx pgx.Tx, accountID string) error {
 	}
 	_, err := lockAccount(ctx, tx, accountID)
 	return err
-}
-
-func setLimit(ctx context.Context, tx pgx.Tx, p tenant.Principal, accountID string, in limitWrite, fromWindow *string) (LimitRule, error) {
-	if err := in.validate(); err != nil {
-		return LimitRule{}, err
-	}
-	if err := lockForLimit(ctx, tx, accountID); err != nil {
-		return LimitRule{}, err
-	}
-	if in.Unit == "cost_micros" {
-		supported, err := costLimitSupported(ctx, tx, accountID)
-		if err != nil {
-			return LimitRule{}, err
-		}
-		if !supported {
-			return LimitRule{}, &httpError{status: http.StatusUnprocessableEntity, code: "unsupported_limit_unit", msg: "Dollar limits require priced run usage. This account does not report costs; choose runs or another supported limit."}
-		}
-	}
-	before, err := currentLimit(ctx, tx, accountID)
-	if err != nil {
-		return LimitRule{}, err
-	}
-	// An identical sentence is a no-op, so a retried Apply stores nothing twice.
-	if before != nil && fromWindow == nil && before.Amount == in.Amount && before.Unit == in.Unit && before.Period == in.Period {
-		return *before, nil
-	}
-	if _, err := tx.Exec(ctx, `UPDATE account_limit_rules SET removed_at=clock_timestamp() WHERE account_id=$1 AND removed_at IS NULL`, accountID); err != nil {
-		return LimitRule{}, err
-	}
-	after, err := scanLimit(tx.QueryRow(ctx, `INSERT INTO account_limit_rules(tenant_id,account_id,amount,unit,period,from_window_id,created_by)
- VALUES($1,$2,$3,$4,$5,$6,$7) RETURNING `+limitColumns, p.TenantID, accountID, in.Amount, in.Unit, in.Period, fromWindow, p.ID))
-	if err != nil {
-		return LimitRule{}, err
-	}
-	if err := writeEvent(ctx, tx, p, evLimitSet, before, after); err != nil {
-		return LimitRule{}, err
-	}
-	return after, nil
 }
 
 func removeLimit(ctx context.Context, tx pgx.Tx, p tenant.Principal, accountID string) error {
@@ -177,49 +118,6 @@ func removeWindow(ctx context.Context, tx pgx.Tx, p tenant.Principal, accountID,
 	return writeEvent(ctx, tx, p, evWindowRemoved, w, nil)
 }
 
-// repeatWindow is Make this repeat: the window's amount per the period its
-// length matches becomes the account's rule, and the window itself is removed
-// in the same transaction, so the use counted this period stays counted.
-func repeatWindow(ctx context.Context, tx pgx.Tx, p tenant.Principal, accountID, windowID string) (LimitRule, error) {
-	if err := lockForLimit(ctx, tx, accountID); err != nil {
-		return LimitRule{}, err
-	}
-	w, err := manualWindow(ctx, tx, accountID, windowID)
-	if err != nil {
-		return LimitRule{}, err
-	}
-	if w.Unit == "percent" {
-		return LimitRule{}, fail(http.StatusConflict, "this limit cannot repeat")
-	}
-	before, err := currentLimit(ctx, tx, accountID)
-	if err != nil {
-		return LimitRule{}, err
-	}
-	if before != nil {
-		return LimitRule{}, fail(http.StatusConflict, "This account already has a limit. Remove it explicitly before making this window repeat.")
-	}
-	rule, err := setLimit(ctx, tx, p, accountID, limitWrite{Amount: w.Allowance, Unit: w.Unit, Period: periodFor(w.EndsAt.Sub(w.StartsAt))}, &w.ID)
-	if err != nil {
-		return LimitRule{}, err
-	}
-	if _, err := tx.Exec(ctx, `UPDATE account_allowance_windows SET removed_at=clock_timestamp() WHERE id=$1`, w.ID); err != nil {
-		return LimitRule{}, err
-	}
-	return rule, writeEvent(ctx, tx, p, evWindowRemoved, w, rule)
-}
-
-// periodFor names the period a window's length is closest to.
-func periodFor(length time.Duration) string {
-	switch {
-	case length <= 36*time.Hour:
-		return "day"
-	case length <= 10*24*time.Hour:
-		return "week"
-	default:
-		return "month"
-	}
-}
-
 // limitPeriod is the local day, week (Monday first) or month around now.
 func limitPeriod(period, timezone string, now time.Time) (time.Time, time.Time) {
 	loc, err := time.LoadLocation(timezone)
@@ -244,6 +142,9 @@ func limitPeriod(period, timezone string, now time.Time) (time.Time, time.Time) 
 // counters, a vendor name, or session-only list prices are not cost accounting
 // for routed runs. Legacy zero-default deltas cannot prove a measured zero.
 func costLimitSupported(ctx context.Context, tx pgx.Tx, accountID string) (bool, error) {
+	if s := projectionInputs(tx); s != nil {
+		return s.stats[accountID].cost, nil
+	}
 	var supported bool
 	err := tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM run_telemetry t JOIN agent_runs r
  ON r.tenant_id=t.tenant_id AND r.id=t.run_id WHERE r.account_id=$1 AND t.cost_micros_delta>0)`, accountID).Scan(&supported)
@@ -255,16 +156,25 @@ func costLimitSupported(ctx context.Context, tx pgx.Tx, accountID string) (bool,
 // one dollar. A caller can increase a hold, but cannot lower learned/default use.
 // Persist all units, even without a rule, so adding/repeating a cap counts runs
 // that were already admitted. Account locking makes this snapshot atomic.
-func learnedLimitEstimates(ctx context.Context, tx pgx.Tx, accountID string, requested map[string]int64) (map[string]int64, error) {
-	out := map[string]int64{"runs": 1, "percent": 1}
-	var requests, tokens, cost *int64
-	err := tx.QueryRow(ctx, `WITH recent AS (
+const capacityEstimatesSQL = `WITH recent AS (
  SELECT id,tenant_id FROM agent_runs WHERE account_id=$1 AND purpose='managed'
  AND status IN ('completed','failed','cancelled','ownership_lost') AND started_at IS NOT NULL
  ORDER BY started_at DESC LIMIT 20), totals AS (
  SELECT sum(t.turn_count_delta)::bigint requests, sum(t.input_tokens_delta+t.output_tokens_delta)::bigint tokens,
  sum(t.cost_micros_delta)::bigint cost FROM recent r JOIN run_telemetry t ON t.tenant_id=r.tenant_id AND t.run_id=r.id GROUP BY r.id)
- SELECT max(requests) FILTER(WHERE requests>0),max(tokens) FILTER(WHERE tokens>0),max(cost) FILTER(WHERE cost>0) FROM totals`, accountID).Scan(&requests, &tokens, &cost)
+ SELECT max(requests) FILTER(WHERE requests>0),max(tokens) FILTER(WHERE tokens>0),max(cost) FILTER(WHERE cost>0) FROM totals`
+
+func learnedLimitEstimates(ctx context.Context, tx pgx.Tx, accountID string, requested map[string]int64) (map[string]int64, error) {
+	if s := projectionInputs(tx); s != nil {
+		v := map[string]int64{}
+		for unit, n := range s.estimates[accountID] {
+			v[unit] = max(n, requested[unit])
+		}
+		return v, nil
+	}
+	out := map[string]int64{"runs": 1, "percent": 1}
+	var requests, tokens, cost *int64
+	err := tx.QueryRow(ctx, capacityEstimatesSQL, accountID).Scan(&requests, &tokens, &cost)
 	if err != nil {
 		return nil, err
 	}
@@ -286,9 +196,7 @@ func learnedLimitEstimates(ctx context.Context, tx pgx.Tx, accountID string, req
 // Each epoch gets its last pre-period reading as a baseline. For an epoch that
 // opened during the period, its first observed usage counts too. Corrections
 // never refund usage. Different overlapping limits are not added together.
-func percentUsed(ctx context.Context, tx pgx.Tx, accountID string, start, now time.Time) (float64, error) {
-	var used float64
-	err := tx.QueryRow(ctx, `WITH samples AS (
+const capacityPercentSQL = `WITH samples AS (
  SELECT DISTINCT ON (window_kind,bucket,resets_at,read_at) window_kind,bucket,resets_at,read_at,window_minutes,used_percent
  FROM account_capacity_readings WHERE account_id=$1 AND source<>'estimate' AND read_at<=$3
  ORDER BY window_kind,bucket,resets_at,read_at,CASE source WHEN 'harness' THEN 0 ELSE 1 END,used_percent DESC
@@ -298,7 +206,11 @@ func percentUsed(ctx context.Context, tx pgx.Tx, accountID string, start, now ti
  SELECT window_kind,bucket,sum(greatest(0,used_percent-COALESCE(previous,
  CASE WHEN resets_at-window_minutes*interval '1 minute'>=$2 THEN 0 ELSE used_percent END))) total
  FROM deltas WHERE read_at>=$2 GROUP BY window_kind,bucket)
- SELECT COALESCE(max(total),0)::float8 FROM totals`, accountID, start, now).Scan(&used)
+ SELECT COALESCE(max(total),0)::float8 FROM totals`
+
+func percentUsed(ctx context.Context, tx pgx.Tx, accountID string, start, now time.Time) (float64, error) {
+	var used float64
+	err := tx.QueryRow(ctx, capacityPercentSQL, accountID, start, now).Scan(&used)
 	return used, err
 }
 
@@ -307,33 +219,17 @@ func percentUsed(ctx context.Context, tx pgx.Tx, accountID string, start, now ti
 // after a started run finishes keeps its estimate for each overlapping period.
 // Unstarted cancelled/released runs consume nothing. Existing runs predating
 // the snapshot column use the same conservative estimate as a new admission.
-func limitUsed(ctx context.Context, tx pgx.Tx, accountID string, rule LimitRule, windows []Window, start time.Time, exceptRun string, now time.Time) (float64, error) {
-	if rule.Unit == "percent" {
-		measured, err := percentUsed(ctx, tx, accountID, start, now)
-		if err != nil {
-			return 0, err
-		}
-		var held float64
-		err = tx.QueryRow(ctx, `SELECT COALESCE(sum(COALESCE((r.account_limit_estimates->>'percent')::bigint,1)),0)::float8
+const capacityPercentHeldSQL = `SELECT COALESCE(sum(COALESCE((r.account_limit_estimates->>'percent')::bigint,1)),0)::float8
  FROM agent_runs r WHERE r.account_id=$1 AND r.id::text<>$2 AND r.purpose='managed' AND (
  r.status IN ('queued','starting','running','waiting') OR
  (r.started_at<=$4 AND COALESCE(r.ended_at,r.started_at)>=$3 AND EXISTS(SELECT 1 FROM account_reservations ar JOIN account_allowance_windows w
  ON w.tenant_id=ar.tenant_id AND w.id=ar.window_id WHERE ar.run_id=r.id AND w.capacity_kind IN ('refresh','blind'))
- AND NOT EXISTS(SELECT 1 FROM account_capacity_readings c WHERE c.account_id=r.account_id AND c.source<>'estimate' AND c.read_at>=COALESCE(r.ended_at,r.started_at) AND c.read_at<=$4)))`, accountID, exceptRun, start, now).Scan(&held)
-		return measured + held, err
-	}
-	if rule.Unit == "runs" {
-		var n float64
-		err := tx.QueryRow(ctx, `SELECT count(*)::float8 FROM agent_runs WHERE account_id=$1 AND id::text<>$2 AND purpose='managed'
- AND ((started_at>=$3 AND started_at<=$4) OR status IN ('queued','starting','running','waiting'))`, accountID, exceptRun, start, now).Scan(&n)
-		return n, err
-	}
-	estimates, err := learnedLimitEstimates(ctx, tx, accountID, nil)
-	if err != nil {
-		return 0, err
-	}
-	var n float64
-	err = tx.QueryRow(ctx, `WITH usage AS (
+ AND NOT EXISTS(SELECT 1 FROM account_capacity_readings c WHERE c.account_id=r.account_id AND c.source<>'estimate' AND c.read_at>=COALESCE(r.ended_at,r.started_at) AND c.read_at<=$4)))`
+
+const capacityRunsSQL = `SELECT count(*)::float8 FROM agent_runs WHERE account_id=$1 AND id::text<>$2 AND purpose='managed'
+ AND ((started_at>=$3 AND started_at<=$4) OR status IN ('queued','starting','running','waiting'))`
+
+const capacityUnitsSQL = `WITH usage AS (
  SELECT r.id,r.status,r.started_at,r.ended_at,COALESCE((r.account_limit_estimates->>$2)::bigint,$6) estimate,
  COALESCE(sum(CASE $2 WHEN 'requests' THEN t.turn_count_delta WHEN 'tokens' THEN t.input_tokens_delta+t.output_tokens_delta ELSE t.cost_micros_delta END),0) total,
  COALESCE(sum(CASE $2 WHEN 'requests' THEN t.turn_count_delta WHEN 'tokens' THEN t.input_tokens_delta+t.output_tokens_delta ELSE t.cost_micros_delta END) FILTER(WHERE t.at>=$3),0) period_use
@@ -341,14 +237,43 @@ func limitUsed(ctx context.Context, tx pgx.Tx, accountID string, rule LimitRule,
  WHERE r.account_id=$1 AND r.id::text<>$5 AND r.purpose='managed' GROUP BY r.tenant_id,r.id
  ) SELECT COALESCE(sum(period_use+CASE
  WHEN status IN ('queued','starting','running','waiting') THEN greatest(0,estimate-total)
- WHEN COALESCE(ended_at,started_at)>=$3 AND started_at<=$4 AND total=0 THEN estimate ELSE 0 END),0)::float8 FROM usage`, accountID, rule.Unit, start, now, exceptRun, estimates[rule.Unit]).Scan(&n)
-	return n, err
+ WHEN COALESCE(ended_at,started_at)>=$3 AND started_at<=$4 AND total=0 THEN estimate ELSE 0 END),0)::float8 FROM usage`
+
+func limitUsed(ctx context.Context, tx pgx.Tx, accountID string, rule LimitRule, windows []Window, start time.Time, exceptRun string, now time.Time) (float64, error) {
+	if s := projectionInputs(tx); s != nil {
+		return s.limitUse[accountID], nil
+	}
+	nativeHeld, err := nativeLimitHeldTx(ctx, tx, accountID, rule.Unit, start, exceptRun, now)
+	if err != nil {
+		return 0, err
+	}
+	if rule.Unit == "percent" {
+		measured, err := percentUsed(ctx, tx, accountID, start, now)
+		if err != nil {
+			return 0, err
+		}
+		var held float64
+		err = tx.QueryRow(ctx, capacityPercentHeldSQL, accountID, exceptRun, start, now).Scan(&held)
+		return measured + held + nativeHeld, err
+	}
+	if rule.Unit == "runs" {
+		var n float64
+		err := tx.QueryRow(ctx, capacityRunsSQL, accountID, exceptRun, start, now).Scan(&n)
+		return n + nativeHeld, err
+	}
+	estimates, err := learnedLimitEstimates(ctx, tx, accountID, nil)
+	if err != nil {
+		return 0, err
+	}
+	var n float64
+	err = tx.QueryRow(ctx, capacityUnitsSQL, accountID, rule.Unit, start, now, exceptRun, estimates[rule.Unit]).Scan(&n)
+	return n + nativeHeld, err
 }
 
 // limitWait runs under the account FOR UPDATE lock during reserve/claim, in
 // the same transaction that stores the account and per-run estimates. Advisory
 // projections use the same arithmetic without reserving anything.
-func limitWait(ctx context.Context, tx pgx.Tx, a Account, active []Window, now time.Time, run runRow, claiming bool, s capacity.Schedule) (*CapacityWait, error) {
+func limitWait(ctx context.Context, tx pgx.Tx, a Account, active []Window, now time.Time, run runRow, claiming bool, s capacity.Schedule, exceptReservations ...string) (*CapacityWait, error) {
 	rule, err := currentLimit(ctx, tx, a.ID)
 	if err != nil || rule == nil {
 		return nil, err
@@ -367,12 +292,29 @@ func limitWait(ctx context.Context, tx pgx.Tx, a Account, active []Window, now t
 	// A repeat does not refund old usage or release the original paced cap.
 	if rule.FromWindowID != nil {
 		var w Window
-		err := tx.QueryRow(ctx, `SELECT starts_at,ends_at,unit,allowance,used,reserved,pace_model,burst_ratio::float8
+		var err error
+		if inputs := projectionInputs(tx); inputs != nil {
+			var ok bool
+			w, ok = inputs.fromWindows[*rule.FromWindowID]
+			if !ok || w.AccountID != a.ID {
+				err = pgx.ErrNoRows
+			}
+		} else {
+			err = tx.QueryRow(ctx, `SELECT starts_at,ends_at,unit,allowance,used,reserved,pace_model,burst_ratio::float8
  FROM account_allowance_windows WHERE id=$1 AND account_id=$2`, *rule.FromWindowID, a.ID).Scan(&w.StartsAt, &w.EndsAt, &w.Unit, &w.Allowance, &w.Used, &w.Reserved, &w.PaceModel, &w.BurstRatio)
+		}
 		if err != nil {
 			return nil, err
 		}
 		if !now.Before(w.StartsAt) && now.Before(w.EndsAt) {
+			if len(exceptReservations) > 0 && exceptReservations[0] != "" {
+				w.ID = *rule.FromWindowID
+				projection := []Window{w}
+				if err := excludeWindowReservations(ctx, tx, projection, exceptReservations[0], false); err != nil {
+					return nil, err
+				}
+				w = projection[0]
+			}
 			estimate := int64(0)
 			if !claiming {
 				estimates, err := learnedLimitEstimates(ctx, tx, a.ID, run.LimitEstimates)
@@ -414,7 +356,9 @@ func limitWait(ctx context.Context, tx pgx.Tx, a Account, active []Window, now t
 				continue
 			}
 			left := float64(rule.Amount) - used + float64(w.Reserved)
-			if claiming {
+			// Native replay projects its own window hold out; its final fits
+			// check adds that hold once, so retain it in the returned budget.
+			if claiming && run.Purpose != "native_root" {
 				left -= need
 			}
 			if w.capacityBudget == nil || *w.capacityBudget > left {
@@ -447,6 +391,9 @@ func accountLimitUse(ctx context.Context, tx pgx.Tx, a Account, now time.Time) (
 // monthSpend is the list-price spend this local month of an account billed by
 // API key, in dollars with cents. Empty when no usage was ever billed by key.
 func monthSpend(ctx context.Context, tx pgx.Tx, accountID, timezone string, now time.Time) (string, error) {
+	if s := projectionInputs(tx); s != nil {
+		return s.spend[accountID], nil
+	}
 	start, _ := limitPeriod("month", timezone, now)
 	var api *bool
 	var spend string
@@ -467,22 +414,7 @@ func (m *Module) putLimit(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, err)
 		return
 	}
-	var in limitWrite
-	if err := decodeJSON(w, r, &in); err != nil {
-		writeErr(w, err)
-		return
-	}
-	var out LimitRule
-	err := m.in(r.Context(), p.TenantID, func(tx pgx.Tx) error {
-		var err error
-		out, err = setLimit(r.Context(), tx, p, r.PathValue("accountId"), in, nil)
-		return err
-	})
-	if err != nil {
-		writeErr(w, err)
-		return
-	}
-	httpapi.WriteJSON(w, http.StatusOK, out)
+	writeErr(w, &httpError{status: http.StatusGone, code: "limit_retired", msg: "Advanced limit writes are retired. Existing limits remain in force until removed."})
 }
 
 func (m *Module) deleteLimit(w http.ResponseWriter, r *http.Request) {
@@ -495,6 +427,9 @@ func (m *Module) deleteLimit(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	err := m.in(r.Context(), p.TenantID, func(tx pgx.Tx) error {
+		if authz.RequireTx(r.Context(), tx, p, "account.manage", authz.Scope{}) != nil {
+			return fail(http.StatusForbidden, "permission denied")
+		}
 		return removeLimit(r.Context(), tx, p, r.PathValue("accountId"))
 	})
 	if err != nil {
@@ -513,7 +448,7 @@ func (m *Module) removeWindow(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, err)
 		return
 	}
-	err := m.in(r.Context(), p.TenantID, func(tx pgx.Tx) error {
+	err := m.write(r.Context(), p, "account.manage", func(tx pgx.Tx) error {
 		return removeWindow(r.Context(), tx, p, r.PathValue("accountId"), r.PathValue("windowId"))
 	})
 	if err != nil {
@@ -532,15 +467,5 @@ func (m *Module) repeatWindow(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, err)
 		return
 	}
-	var out LimitRule
-	err := m.in(r.Context(), p.TenantID, func(tx pgx.Tx) error {
-		var err error
-		out, err = repeatWindow(r.Context(), tx, p, r.PathValue("accountId"), r.PathValue("windowId"))
-		return err
-	})
-	if err != nil {
-		writeErr(w, err)
-		return
-	}
-	httpapi.WriteJSON(w, http.StatusOK, out)
+	writeErr(w, &httpError{status: http.StatusGone, code: "limit_retired", msg: "Repeating manual windows is retired. Existing windows and limits remain in force."})
 }

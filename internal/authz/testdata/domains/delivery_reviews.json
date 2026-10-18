@@ -1,0 +1,83 @@
+{
+  "_license": "SPDX-License-Identifier: AGPL-3.0-only",
+  "builtin_agent_exclusions": [
+    "delivery_reviews.claim",
+    "delivery_reviews.manage",
+    "delivery_reviews.report"
+  ],
+  "builtin_roles": {
+    "admin": [
+      "delivery_reviews.claim",
+      "delivery_reviews.manage",
+      "delivery_reviews.read",
+      "delivery_reviews.report"
+    ],
+    "member": [
+      "delivery_reviews.read"
+    ],
+    "owner": [
+      "delivery_reviews.claim",
+      "delivery_reviews.manage",
+      "delivery_reviews.read",
+      "delivery_reviews.report"
+    ],
+    "viewer": [
+      "delivery_reviews.read"
+    ]
+  },
+  "registry": [
+    {
+      "agent_grantable": true,
+      "description": "Claim delivery reviews",
+      "grantable_at": [
+        "workspace",
+        "project"
+      ],
+      "group": "Delivery Reviews",
+      "key": "delivery_reviews.claim",
+      "owner_workstation_grantable": true,
+      "risk": "medium"
+    },
+    {
+      "agent_grantable": true,
+      "description": "Manage delivery reviews",
+      "grantable_at": [
+        "workspace",
+        "project"
+      ],
+      "group": "Delivery Reviews",
+      "key": "delivery_reviews.manage",
+      "owner_workstation_grantable": true,
+      "risk": "high"
+    },
+    {
+      "agent_grantable": true,
+      "description": "Read delivery reviews",
+      "grantable_at": [
+        "workspace",
+        "project"
+      ],
+      "group": "Delivery Reviews",
+      "key": "delivery_reviews.read",
+      "owner_workstation_grantable": true,
+      "risk": "low"
+    },
+    {
+      "agent_grantable": true,
+      "description": "Report delivery reviews",
+      "grantable_at": [
+        "workspace",
+        "project"
+      ],
+      "group": "Delivery Reviews",
+      "key": "delivery_reviews.report",
+      "owner_workstation_grantable": true,
+      "risk": "medium"
+    }
+  ],
+  "words": {
+    "resources": {
+      "delivery_reviews": "delivery reviews"
+    }
+  }
+}

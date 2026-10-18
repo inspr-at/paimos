@@ -3,9 +3,12 @@ package agentaccounts
 
 import (
 	"crypto/sha256"
+	"errors"
 	"fmt"
 	"github.com/inspr-at/paimos/internal/agentpairing"
+	"github.com/inspr-at/paimos/internal/authz"
 	"github.com/inspr-at/paimos/internal/httpapi"
+	"github.com/inspr-at/paimos/internal/modelactivation"
 	"github.com/inspr-at/paimos/internal/openrouter"
 	"github.com/jackc/pgx/v5"
 	"net/http"
@@ -54,6 +57,12 @@ func (m *Module) piModel(w http.ResponseWriter, r *http.Request) {
 	var out Account
 	err = m.in(r.Context(), p.TenantID, func(tx pgx.Tx) error {
 		ctx := r.Context()
+		if err := modelactivation.Lock(ctx, tx); err != nil {
+			return err
+		}
+		if err := authz.RequireTx(ctx, tx, p, "account.manage", authz.Scope{}); err != nil {
+			return fail(403, "permission denied")
+		}
 		if err := agentpairing.AccountFence(ctx, tx, id, false); err != nil {
 			return err
 		}
@@ -71,12 +80,30 @@ func (m *Module) piModel(w http.ResponseWriter, r *http.Request) {
 		case "anthropic", "openai", "xai":
 			family = current.Provider
 		}
-		// The profile is immutable; active runs continue referencing the prior ID.
-		if _, err = tx.Exec(ctx, `INSERT INTO model_profiles(tenant_id,slug,version,harness,family,model,effort,tier) VALUES($1,$2,'1','pi',$3,$4,'off','standard') ON CONFLICT(tenant_id,slug,version) DO NOTHING`, p.TenantID, slug, family, full); err != nil {
-			return err
-		}
+		// Reuse an enabled immutable pin; accepting a withheld one creates a
+		// new version and keeps the old observation/history intact.
 		var profile string
-		if err = tx.QueryRow(ctx, `SELECT id::text FROM model_profiles WHERE slug=$1 AND version='1' AND harness='pi' AND model=$2 AND effort='off' AND enabled`, slug, full).Scan(&profile); err != nil {
+		err = tx.QueryRow(ctx, `SELECT id::text FROM model_profiles WHERE slug=$1 AND harness='pi' AND model=$2 AND effort='off' AND enabled ORDER BY created_at DESC,id LIMIT 1`, slug, full).Scan(&profile)
+		if isNoRows(err) {
+			var version string
+			if err = tx.QueryRow(ctx, `SELECT (count(*)+1)::text FROM model_profiles WHERE slug=$1`, slug).Scan(&version); err != nil {
+				return err
+			}
+			stored, insertErr := modelactivation.Activate(ctx, tx, p, modelactivation.Pin{
+				Slug: slug, Version: version, Harness: "pi", Family: family, Model: full,
+				Effort: "off", Tier: "standard", Enabled: true, Source: "manual", Permission: "account.manage",
+			}, modelactivation.Person)
+			if insertErr != nil {
+				if errors.Is(insertErr, authz.ErrForbidden) {
+					return fail(403, "model activation permission denied")
+				}
+				return insertErr
+			}
+			if !stored.Enabled {
+				return fail(409, "model activation withheld")
+			}
+			profile = stored.ID
+		} else if err != nil {
 			return err
 		}
 		if _, err = tx.Exec(ctx, `UPDATE agent_accounts SET model=$2,model_status=$3,model_data_note=$4,allowed_model_profile_ids=ARRAY[$5::uuid] WHERE id=$1`, id, in.Model, status, note, profile); err != nil {

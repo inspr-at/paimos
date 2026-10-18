@@ -6,19 +6,27 @@ package client
 import (
 	"bytes"
 	"context"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
+	"strconv"
 	"strings"
 	"time"
+
+	"github.com/inspr-at/paimos/internal/stepup"
+	"github.com/inspr-at/paimos/internal/workerlease"
 )
 
 // Me is the GET /api/me response.
 type Me struct {
-	Principal Principal `json:"principal"`
-	Tenant    Tenant    `json:"tenant"`
-	Identity  *Identity `json:"identity"`
+	OwnerWorkstation      bool      `json:"owner_workstation,omitempty"`
+	WorkstationComputerID string    `json:"workstation_computer_id,omitempty"`
+	Principal             Principal `json:"principal"`
+	Tenant                Tenant    `json:"tenant"`
+	Identity              *Identity `json:"identity"`
 }
 
 // Principal is the acting person or agent.
@@ -51,6 +59,10 @@ type StatusError struct {
 	Status        int
 	Message       string
 	AttachRefusal string
+	ReasonCode    string
+	RetryAfter    time.Duration
+	// EntryChecksFailure retains only the bounded public entry-refusal body.
+	EntryChecksFailure json.RawMessage
 }
 
 func (e *StatusError) Error() string {
@@ -60,11 +72,57 @@ func (e *StatusError) Error() string {
 	return fmt.Sprintf("api %d", e.Status)
 }
 
-// Client calls one Aeon instance with an agent API key.
+// Client calls one Aeon instance with an agent key or an explicit person session.
 type Client struct {
-	BaseURL string
-	Token   string
-	HTTP    *http.Client
+	BaseURL      string
+	Token        string
+	SessionToken string
+	HTTP         *http.Client
+	// ConfirmStepUp receives only a challenge ID. Nil fails closed on 428.
+	ConfirmStepUp func(context.Context, string) (string, error)
+	// Tests inject the wait to prove cancellation without sleeping.
+	workReadWait func(context.Context, time.Duration) error
+}
+
+type workReadRetryKey struct{}
+
+// WithWorkReadRetry opts an authorized routine read into one aggregate-limit
+// retry. Callers must apply the project execution flag before opting in; normal
+// CLI, MCP and daemon requests keep their existing single-attempt behaviour.
+func WithWorkReadRetry(ctx context.Context) context.Context {
+	return context.WithValue(ctx, workReadRetryKey{}, true)
+}
+
+const workAggregateLimitMessage = "Work aggregates exceeded a resource limit; narrow the scope or retry."
+
+func workReadPath(path string) bool {
+	u, err := url.Parse(path)
+	if err != nil || u.IsAbs() || u.Host != "" {
+		return false
+	}
+	if u.Path == "/api/nodes" {
+		return true
+	}
+	if ref, ok := strings.CutPrefix(u.Path, "/api/node-keys/"); ok {
+		return ref != "" && !strings.Contains(ref, "/")
+	}
+	if ref, ok := strings.CutPrefix(u.Path, "/api/nodes/"); ok && len(ref) == 36 &&
+		ref[8] == '-' && ref[13] == '-' && ref[18] == '-' && ref[23] == '-' {
+		decoded, err := hex.DecodeString(strings.ReplaceAll(ref, "-", ""))
+		return err == nil && len(decoded) == 16
+	}
+	return false
+}
+
+func waitWorkRead(ctx context.Context, delay time.Duration) error {
+	timer := time.NewTimer(delay)
+	defer timer.Stop()
+	select {
+	case <-ctx.Done():
+		return ctx.Err()
+	case <-timer.C:
+		return ctx.Err()
+	}
 }
 
 // New returns a client for baseURL. token is sent as a Bearer credential and is never logged.
@@ -74,6 +132,15 @@ func New(baseURL, token string) *Client {
 		Token:   token,
 		HTTP:    &http.Client{Timeout: 30 * time.Second},
 	}
+}
+
+// NewSession authenticates as a signed-in person, never as a bearer agent.
+func NewSession(baseURL, sessionToken string) *Client {
+	c := New(baseURL, "")
+	c.SessionToken = sessionToken
+	// A person cookie must never follow a redirect to another destination.
+	c.HTTP.CheckRedirect = func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }
+	return c
 }
 
 // Me calls GET /api/me.
@@ -91,10 +158,14 @@ func (c *Client) Do(ctx context.Context, method, path string, body, dest any) er
 	return c.DoWithHeaders(ctx, method, path, body, dest, nil)
 }
 
-// DoWithHeaders sends one JSON request with additional non-credential protocol
-// headers such as a run's daemon fencing identity.
+// DoWithHeaders sends one JSON request with additional protocol headers. Worker
+// proofs and step-up credentials refuse redirects, even to the same origin.
 // MaxResponseBytes caps one response body the client reads.
 const MaxResponseBytes = 64 << 20
+
+// Refusals include two compatible copies of a definition bounded to 64 KiB,
+// plus evaluated reasons and owners. Keep room for all 32 checks.
+const maxEntryChecksFailureBytes = 1 << 20
 
 func (c *Client) DoWithHeaders(ctx context.Context, method, path string, body, dest any, headers map[string]string) error {
 	if c.BaseURL == "" {
@@ -119,7 +190,9 @@ func (c *Client) DoWithHeaders(ctx context.Context, method, path string, body, d
 	if body != nil {
 		req.Header.Set("Content-Type", "application/json")
 	}
-	if c.Token != "" {
+	if c.SessionToken != "" {
+		req.AddCookie(&http.Cookie{Name: "aeon_session", Value: c.SessionToken})
+	} else if c.Token != "" {
 		req.Header.Set("Authorization", "Bearer "+c.Token)
 	}
 	for name, value := range headers {
@@ -129,36 +202,171 @@ func (c *Client) DoWithHeaders(ctx context.Context, method, path string, body, d
 	if hc == nil {
 		hc = http.DefaultClient
 	}
-	res, err := hc.Do(req)
-	if err != nil {
-		return err
+	req.Header.Del("Proxy-Authorization")
+	if req.Header.Get(stepup.Header) != "" || workerlease.Carries(req.Header) {
+		proofHTTP := *hc
+		proofHTTP.CheckRedirect = func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }
+		hc = &proofHTTP
 	}
-	defer res.Body.Close()
-	// A page of 200 imported tickets carries their full bodies and fields and
-	// passes 1 MiB on production data (AEON-140); a cut-off read then failed as
-	// "unexpected end of JSON input". Read up to MaxResponseBytes and say so
-	// plainly when a response is larger.
-	payload, err := io.ReadAll(io.LimitReader(res.Body, MaxResponseBytes+1))
-	if err != nil {
-		return err
-	}
-	if len(payload) > MaxResponseBytes {
-		return fmt.Errorf("%s %s: response is larger than %d MiB", method, path, MaxResponseBytes>>20)
-	}
-	if res.StatusCode < 200 || res.StatusCode >= 300 {
-		var detail struct {
-			AttachRefusal string `json:"attach_refusal"`
+	for attempt := 0; attempt < 2; attempt++ {
+		request := req.Clone(ctx)
+		if req.GetBody != nil {
+			request.Body, err = req.GetBody()
+			if err != nil {
+				return err
+			}
 		}
-		_ = json.Unmarshal(payload, &detail)
-		return &StatusError{Status: res.StatusCode, Message: errorMessage(payload), AttachRefusal: detail.AttachRefusal}
-	}
-	if dest == nil || len(bytes.TrimSpace(payload)) == 0 {
+		res, err := hc.Do(request)
+		if err != nil {
+			return err
+		}
+
+		// A page of 200 imported tickets carries their full bodies and fields and
+		// passes 1 MiB on production data (AEON-140); a cut-off read then failed as
+		// "unexpected end of JSON input". Read up to MaxResponseBytes and say so
+		// plainly when a response is larger.
+		limit := int64(MaxResponseBytes)
+		if res.StatusCode == http.StatusPreconditionRequired {
+			limit = 4096
+		}
+		payload, err := io.ReadAll(io.LimitReader(res.Body, limit+1))
+		_ = res.Body.Close()
+		if err != nil {
+			return err
+		}
+		if int64(len(payload)) > limit {
+			if limit == MaxResponseBytes {
+				return fmt.Errorf("%s %s: response is larger than %d MiB", method, path, MaxResponseBytes>>20)
+			}
+			return fmt.Errorf("%s %s: Touch ID challenge exceeds %d bytes", method, path, limit)
+		}
+		if res.StatusCode == http.StatusPreconditionRequired {
+			var required stepup.Required
+			if json.Unmarshal(payload, &required) == nil && required.Code == "step_up_required" {
+				if attempt != 0 || req.Header.Get(stepup.Header) != "" {
+					return fmt.Errorf("Touch ID proof refused; action was not retried again")
+				}
+				if !stepup.ValidID(required.ChallengeID) || !stepup.ValidExpiry(required.ExpiresAt, time.Now()) {
+					return fmt.Errorf("invalid or expired Touch ID challenge")
+				}
+				if res.Request == nil || res.Request.URL.String() != req.URL.String() || res.Request.Method != req.Method {
+					return fmt.Errorf("Touch ID challenge from a redirected request refused")
+				}
+				if c.ConfirmStepUp == nil {
+					return fmt.Errorf("Touch ID confirmation required; configure the local paired agentd")
+				}
+				deadline := required.ExpiresAt
+				if cap := time.Now().Add(stepup.ConfirmTimeout); cap.Before(deadline) {
+					deadline = cap
+				}
+				confirmCtx, cancel := context.WithDeadline(ctx, deadline)
+				signature, confirmErr := c.ConfirmStepUp(confirmCtx, required.ChallengeID)
+				if confirmErr == nil {
+					confirmErr = confirmCtx.Err()
+				}
+				cancel()
+				if confirmErr != nil {
+					return fmt.Errorf("Touch ID confirmation failed: %w", confirmErr)
+				}
+				if !time.Now().Before(required.ExpiresAt) || !stepup.ValidSignature(signature) {
+					return fmt.Errorf("invalid or expired Touch ID proof")
+				}
+				req.Header.Set(stepup.Header, required.ChallengeID+"."+signature)
+				// A proof must never follow redirects, including same-origin 307/308.
+				retryHTTP := *hc
+				retryHTTP.CheckRedirect = func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }
+				hc = &retryHTTP
+				continue
+			}
+		}
+		if res.StatusCode < 200 || res.StatusCode >= 300 {
+			// A proxy/server may reflect a request header in an error body.
+			// Worker callers log these errors, so remove both proof forms
+			// before decoding messages or retaining structured refusals.
+			var proofs []string
+			for _, proof := range workerlease.Proofs(req.Header) {
+				if proof == "" {
+					continue
+				}
+				proofs = append(proofs, proof)
+				encoded, _ := json.Marshal(proof)
+				payload = bytes.ReplaceAll(payload, encoded[1:len(encoded)-1], []byte("[redacted]"))
+			}
+			var detail struct {
+				Error         string `json:"error"`
+				AttachRefusal string `json:"attach_refusal"`
+				ReasonCode    string `json:"reason_code"`
+			}
+			_ = json.Unmarshal(payload, &detail)
+			// Decode before the final pass too: a JSON escape must not bring
+			// the proof back into a message after byte-level redaction.
+			redact := func(value string) string {
+				for _, proof := range proofs {
+					value = strings.ReplaceAll(value, proof, "[redacted]")
+				}
+				return value
+			}
+			status := &StatusError{Status: res.StatusCode, Message: redact(errorMessage(payload)), AttachRefusal: redact(detail.AttachRefusal), ReasonCode: redact(detail.ReasonCode), RetryAfter: retryAfter(res.Header.Get("Retry-After"), time.Now())}
+			if res.StatusCode == http.StatusConflict && detail.Error == "entry_checks_failed" && len(payload) <= maxEntryChecksFailureBytes && json.Valid(payload) {
+				status.EntryChecksFailure = payload
+			}
+			enabled, _ := ctx.Value(workReadRetryKey{}).(bool)
+			if attempt == 0 && enabled && method == http.MethodGet && body == nil &&
+				workReadPath(path) && req.Header.Get(stepup.Header) == "" &&
+				(res.Request == nil || (res.Request.Method == req.Method && res.Request.URL.String() == req.URL.String())) &&
+				res.StatusCode == http.StatusServiceUnavailable && detail.Error == workAggregateLimitMessage {
+				delay := 200 * time.Millisecond
+				if status.RetryAfter > delay {
+					delay = min(status.RetryAfter, time.Second)
+				}
+				wait := c.workReadWait
+				if wait == nil {
+					wait = waitWorkRead
+				}
+				if err := ctx.Err(); err != nil {
+					return err
+				}
+				if err := wait(ctx, delay); err != nil {
+					return err
+				}
+				if err := ctx.Err(); err != nil {
+					return err
+				}
+				continue
+			}
+			return status
+		}
+		if dest == nil || len(bytes.TrimSpace(payload)) == 0 {
+			return nil
+		}
+		if err := json.Unmarshal(payload, dest); err != nil {
+			return fmt.Errorf("decode response: %w", err)
+		}
 		return nil
 	}
-	if err := json.Unmarshal(payload, dest); err != nil {
-		return fmt.Errorf("decode response: %w", err)
+	return fmt.Errorf("Touch ID retry exhausted")
+}
+
+// Bound untrusted delay values to one day. Both HTTP forms are supported;
+// malformed, past or excessive values provide no retry instruction.
+func retryAfter(value string, now time.Time) time.Duration {
+	if len(value) > 128 {
+		return 0
 	}
-	return nil
+	value = strings.TrimSpace(value)
+	if seconds, err := strconv.ParseUint(value, 10, 32); err == nil {
+		if seconds <= 86400 {
+			return time.Duration(seconds) * time.Second
+		}
+		return 0
+	}
+	if until, err := http.ParseTime(value); err == nil {
+		delay := until.Sub(now)
+		if delay > 0 && delay <= 24*time.Hour {
+			return delay
+		}
+	}
+	return 0
 }
 
 func errorMessage(payload []byte) string {
@@ -168,6 +376,45 @@ func errorMessage(payload []byte) string {
 		Message string `json:"message"`
 	}
 	if json.Unmarshal(payload, &wrap) == nil && wrap.Error != "" {
+		// Keep the server's explicit failed checks readable in CLI refusals.
+		// Render only this public contract, with bounded output, never raw JSON.
+		if wrap.Error == "entry_checks_failed" && len(payload) <= 65536 {
+			var details struct {
+				Checks []struct {
+					ID     string `json:"id"`
+					Label  string `json:"label"`
+					Reason string `json:"reason"`
+				} `json:"checks"`
+				Failed []struct {
+					ID     string `json:"id"`
+					Label  string `json:"label"`
+					Reason string `json:"reason"`
+				} `json:"failed"`
+			}
+			if json.Unmarshal(payload, &details) != nil {
+				return wrap.Error
+			}
+			checks := details.Checks
+			if checks == nil {
+				checks = details.Failed
+			}
+			if len(checks) > 32 {
+				return wrap.Error
+			}
+			parts := []string{wrap.Error}
+			const omitted = "additional check details omitted"
+			remaining := 4096 - len(wrap.Error) - len(omitted) - 2
+			for _, check := range checks {
+				part := check.ID + " (" + check.Label + "): " + check.Reason
+				if len(part)+2 > remaining {
+					parts = append(parts, omitted)
+					break
+				}
+				parts = append(parts, part)
+				remaining -= len(part) + 2
+			}
+			return strings.Join(parts, "; ")
+		}
 		return wrap.Error
 	}
 	if wrap.Message != "" {

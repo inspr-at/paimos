@@ -1,8 +1,9 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { actionResults, assemble, keyQuery, projectResults, recentResults, ticketResults, type ActionResult } from '../src/lib/palette.ts'
+import { actionResults, assemble, keyQuery, knowledgeResults, projectResults, recentResults, ticketResults, type ActionResult } from '../src/lib/palette.ts'
 import type { ListItem, WorkNode } from '../src/lib/api.ts'
+import type { KnowledgeItem } from '../src/lib/knowledge.ts'
 
 function listed(key: string, title: string, kind = 'ticket'): ListItem {
   return { id: key, key, kind_id: `k-${kind}`, title, body: '', fields: {}, state: 'backlog', parent_id: null, position: '0', created_at: '', updated_at: '', kind_slug: kind, kind_label: kind, priority: null, assignee: null, parent: null, children_count: 0, project: null }
@@ -28,6 +29,27 @@ test('key queries recognise a project key with an optional number', () => {
   assert.equal(keyQuery('pharos'), null)
   assert.equal(keyQuery('oracle cloud'), null)
   assert.equal(keyQuery('a-1'), null)
+})
+
+// Risk: opening the wrong record or a result outside the selected project.
+test('knowledge keys retain their entry identity, project scope and bounded result group', () => {
+  const entry = (key: string, type: KnowledgeItem['type'], projectId: string | null): KnowledgeItem => ({
+    id: key, key, type, kind: type, slug: key.toLowerCase(), title: `Entry ${key}`,
+    status: 'active', state: 'backlog', project: projectId ? { id: projectId, key: projectId, title: projectId } : null,
+    excerpt: '', link_count: 0, created_at: '', updated_at: '', updated_by: null, imported: false,
+  })
+  const items = [entry('GUI-22', 'guideline', 'p2'), entry('RUN-40', 'runbook', 'p1'), entry('GUI-99', 'guideline', 'hidden-project'), entry('RUN-99', 'runbook', null)]
+  const routeKeyOf = (id: string) => projects.find(project => project.id === id)?.routeKey ?? null
+  assert.deepEqual(keyQuery('GUI-22'), { prefix: 'GUI', number: '22', exact: true })
+  assert.deepEqual(keyQuery('RUN-40'), { prefix: 'RUN', number: '40', exact: true })
+  const knowledge = knowledgeResults(items, routeKeyOf, null)
+  assert.deepEqual(knowledge.map(result => [result.id, result.kind, result.slug, result.projectKey]), [
+    ['k-GUI-22', 'guideline', 'gui-22', 'AEON'], ['k-RUN-40', 'runbook', 'run-40', 'PHAROS'],
+  ])
+  assert.deepEqual(knowledgeResults(items, routeKeyOf, 'AEON').map(result => result.id), ['k-GUI-22'])
+  assert.equal(knowledgeResults(Array.from({ length: 12 }, (_, i) => entry(`RUN-${i}`, 'runbook', 'p1')), routeKeyOf, null).length, 5)
+  const tickets = ticketResults('PHAROS-12', [listed('PHAROS-12', 'Exact')], [], work, projectFor, null)
+  assert.deepEqual(assemble('PHAROS-12', { recent: [], tickets, knowledge, projects: [], actions: [] }).map(result => result.id), ['tickets', 'knowledge'])
 })
 
 test('tickets: list matches first, then work search hits once, exact key leads', () => {
@@ -78,4 +100,13 @@ test('groups: empty shows Recent and Actions; a bare project key puts Projects f
   assert.deepEqual(assemble('', { recent: [], tickets, projects: [], actions }).map(g => g.id), ['actions'])
   assert.deepEqual(assemble('aeon', { recent, tickets, projects: projectResults('aeon', projects), actions: [] }).map(g => g.id), ['projects', 'tickets'])
   assert.deepEqual(assemble('foundation', { recent, tickets, projects: projectResults('foundation', projects), actions: actionResults('foundation', actions) }).map(g => g.id), ['tickets'])
+})
+
+
+test('canonical work survives palette exact-key and title results with scope and deduplication', () => {
+  const canonicalKinds = new Map([...work, ['k-work', 'work']])
+  assert.deepEqual(ticketResults('PHAROS-12', [listed('PHAROS-12', 'Exact', 'work')], [], canonicalKinds, projectFor, null).map(r => r.key), ['PHAROS-12'])
+  const out = ticketResults('connector', [listed('PHAROS-12', 'Connector', 'work')], [hit('PHAROS-12', 'Connector', 'work'), hit('PHAROS-7', 'Connector meaning', 'work'), hit('AEON-3', 'Foreign project', 'work'), hit('PHAROS-9', 'Gone', 'work', { deleted_at: '2026-10-01' })], canonicalKinds, projectFor, 'PHAROS')
+  assert.deepEqual(out.map(r => r.key), ['PHAROS-12', 'PHAROS-7'])
+  assert.equal(out[0].kind, 'work')
 })

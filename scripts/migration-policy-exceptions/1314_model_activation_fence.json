@@ -1,0 +1,11 @@
+{
+  "schema": "aeon.migration-policy-exceptions.v1",
+  "exceptions": [
+    {
+      "file": "1314_model_activation_fence.sql",
+      "sha256": "22a276ab3e63f0331e5767d974556b199e0a49413fa0fe93799cf5d512ebb5b4",
+      "ticket": "AEON-1052",
+      "reason": "The only non-allowlisted statement is CREATE CONSTRAINT TRIGGER for deferred activation audit. It rejects no previous-writer rows: T5 preserves unactivated behavior and withholds automatic pins only after lazy activation. Deferral keeps event-counter acquisition after all legacy resource locks. No existing table, column, constraint, policy, function or data is removed or rewritten. This exact-byte draft is a coordinator review artifact, not merge or release approval; previous published image compatibility remains a required controller gate."
+    }
+  ]
+}

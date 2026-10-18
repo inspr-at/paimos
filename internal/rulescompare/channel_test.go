@@ -5,7 +5,61 @@ package rulescompare
 import (
 	"strings"
 	"testing"
+
+	"github.com/inspr-at/paimos/internal/markdownsource/testfixture"
 )
+
+func TestDeliveryRequiresCompleteActiveInstruction(t *testing.T) {
+	release := PinnedRelease{Repository: "org/repo", Commit: strings.Repeat("a", 40), State: "ready", Rules: []PinnedRule{{Identity: "org/repo/kernel#safe", Text: "Preserve safety."}}}
+	cases := map[string]string{
+		"comment":           "<!-- Preserve safety. -->",
+		"multiline comment": "<!--\n- Preserve safety.\n-->",
+		"qualified":         "- Optionally: Preserve safety.",
+		"suffix":            "- Preserve safety. Unless inconvenient.",
+		"quote":             "> Preserve safety.",
+	}
+	for name, block := range testfixture.Blocks() {
+		cases[name] = strings.ReplaceAll(block, "Example instruction.", "Preserve safety.")
+	}
+	for name, body := range cases {
+		t.Run(name, func(t *testing.T) {
+			if status, _ := DeliveryReport([]HarnessFile{{Harness: "codex", Text: body}}, []PinnedRelease{release}, nil); status != "fail" {
+				t.Fatal("non-instruction certified as matching doctrine")
+			}
+			if doubles := sessionDoubles(HarnessFile{Harness: "codex", Session: true, Text: "# Aeon session rules\n\n" + body}, []PinnedRelease{release}); len(doubles) != 0 {
+				t.Fatalf("non-instruction certified as duplicate: %v", doubles)
+			}
+		})
+	}
+}
+
+func TestDeliveryComparesIndexedSourceAndStrength(t *testing.T) {
+	rule := PinnedRule{Identity: "org/repo/kernel#safe", Text: "🔴 Preserve safety.", Source: "- 🔴 Preserve safety.\n  Why: Never bypass the check.\n"}
+	release := PinnedRelease{Repository: "org/repo", Commit: strings.Repeat("a", 40), State: "ready", Rules: []PinnedRule{rule}}
+	for _, body := range []string{rule.Source, strings.ReplaceAll(rule.Source, "  Why:", "    Why:")} {
+		if status, detail := DeliveryReport([]HarnessFile{{Harness: "codex", Text: body}}, []PinnedRelease{release}, nil); status != "ok" {
+			t.Fatalf("legitimate indentation: %s %s", status, detail)
+		}
+	}
+	for _, body := range []string{strings.ReplaceAll(rule.Source, "🔴", "🟡"), "- " + rule.Text + "\n", strings.ReplaceAll(rule.Source, "Never bypass", "Sometimes bypass")} {
+		if status, _ := DeliveryReport([]HarnessFile{{Harness: "codex", Text: body}}, []PinnedRelease{release}, nil); status != "fail" {
+			t.Fatal("modified source certified")
+		}
+	}
+}
+
+func TestExampleSessionHeadingDoesNotEstablishDeliveryChannel(t *testing.T) {
+	release := PinnedRelease{Repository: "org/repo", Commit: strings.Repeat("a", 40), State: "ready", Rules: []PinnedRule{{Identity: "org/repo/kernel#safe", Text: "Preserve safety."}}}
+	for _, example := range []string{"<!--\n# Aeon session rules\n-->", "~~~\n# Aeon session rules\n~~~", "> # Aeon session rules"} {
+		body := example + "\n\n- Preserve safety.\n"
+		if status, detail := DeliveryReport([]HarnessFile{{Harness: "codex", Text: body}}, []PinnedRelease{release}, nil); status != "ok" {
+			t.Fatalf("example established session channel: %s %s", status, detail)
+		}
+		if status, _ := DeliveryReport([]HarnessFile{{Harness: "codex", Session: true, Text: example}}, nil, nil); status != "fail" {
+			t.Fatal("example verified a session file")
+		}
+	}
+}
 
 func TestDeliveryReportOneChannel(t *testing.T) {
 	const (

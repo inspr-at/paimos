@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // AEON owns this bridge process and one documented Agent SDK Query handle.
-// Lifecycle events are content-free. The explicit native_message frame carries
-// bounded send arguments transiently to the owner; it is never journaled.
+// Lifecycle events are content-free. Chat projections and native_message send
+// arguments are bounded, transient frames to the owner; never journal them.
 import { randomUUID } from "node:crypto";
 import { realpathSync } from "node:fs";
 import { isAbsolute } from "node:path";
@@ -13,6 +13,8 @@ const [, , sdkPath, claudePath, workspace] = process.argv;
 const MAX_INPUT_FRAME_BYTES = 8 * 1024 * 1024;
 const MAX_PROMPT_BYTES = 256 * 1024;
 const MAX_STEER_BYTES = 64 * 1024;
+// Mirrors agentd's inboxTextLimit: a 64 KiB person message after JSON escaping.
+const MAX_INBOX_BYTES = 7 * 64 * 1024;
 const MAX_PENDING_STEERS = 256;
 const CORRELATION_TTL_MS = 60 * 1000;
 const CONTROL_INPUT_TIMEOUT_MS = 30 * 1000;
@@ -21,6 +23,8 @@ const CONTROL_INPUT_TIMEOUT_MS = 30 * 1000;
 const AEON_TOOLS = ["aeon_comment", "aeon_status", "aeon_check_criterion", "aeon_evidence",
   "aeon_request_approval", "aeon_reply", "aeon_terminal", "aeon_read", "aeon_write",
   "aeon_edit", "aeon_glob", "aeon_grep", "aeon_activity"];
+const ROUTINE_TOOLS = ["aeon_terminal", "aeon_read", "aeon_write", "aeon_edit", "aeon_glob", "aeon_grep", "aeon_browser_capture"];
+const BROWSER_CAPTURE_TOOLS = ["aeon_browser_capture"];
 
 function managedToolHook(allowedTools) {
   return async (input) => allowedTools.includes(input?.tool_name) ? {} : {
@@ -194,7 +198,23 @@ if ((start?.capabilities !== undefined && (!Array.isArray(start.capabilities) ||
 
 // Older bridge callers required steering support for every non-verification run.
 const capabilities = start.capabilities ?? (start.purpose === "pairing_verification" ? [] : ["steer", "interrupt"]);
-const requiresInterrupt = capabilities.includes("steer") || capabilities.includes("interrupt");
+const native = start.profile === "native";
+const requiresInterrupt = !native && (capabilities.includes("steer") || capabilities.includes("interrupt"));
+const nativeGrant = start.native_grant;
+const grantExpiry = native ? Date.parse(nativeGrant?.expires_at) : 0;
+const UUID = /^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$/u;
+if ((start.profile !== undefined && !native) || (!native && (start.resume !== undefined || nativeGrant !== undefined)) ||
+    (native && (start.purpose || start.read_only_review || nativeGrant?.history_approved !== true ||
+      !UUID.test(nativeGrant?.session_id) || !/^[a-f0-9]{64}$/u.test(nativeGrant?.policy_digest) ||
+      !Number.isFinite(grantExpiry) || grantExpiry <= Date.now() || grantExpiry - Date.now() > 86400000 ||
+      !Array.isArray(nativeGrant?.allowed_tools) || nativeGrant.allowed_tools.length > AEON_TOOLS.length ||
+      new Set(nativeGrant.allowed_tools).size !== nativeGrant.allowed_tools.length ||
+      !nativeGrant.allowed_tools.every(tool => AEON_TOOLS.includes(tool)) ||
+      (start.resume !== undefined && !UUID.test(start.resume)) || capabilities.includes("steer")))) {
+  fail("app_server_protocol", "", "native_grant_invalid");
+  process.exit(1);
+}
+const grantCurrent = () => !native || Date.now() < grantExpiry;
 
 let queryHandle;
 let input;
@@ -203,6 +223,7 @@ let stopping = false;
 let verificationSucceeded = false;
 let sessionStarted = false;
 let sessionID = "";
+let effectiveServiceTier = "default";
 let effectiveModel = "";
 let effectiveEffort = start.effort || "";
 let modelEvidenceStatus = "";
@@ -210,6 +231,9 @@ let initialTurnStarted = false;
 let completedTurns = 0;
 let turnActive = false;
 let interruptReceipt = false;
+let grantTimer;
+let activeInputUUID = "";
+let activeCorrelationID = "";
 const correlations = new Map();
 function deleteCorrelation(uuid) {
   const state = correlations.get(uuid);
@@ -238,6 +262,7 @@ function observeReaction(message) {
   if (!state || state.reacted) return;
   state.reacted = true;
   state.resolveReaction();
+  if (native) { activeInputUUID = uuid; activeCorrelationID = state.correlationID; }
   turnActive = true;
   emit({ kind: "turn_started", correlation_id: state.correlationID });
   if (state.applied) deleteCorrelation(uuid);
@@ -283,6 +308,60 @@ function observeTool(message) {
   for (const block of blocks) if (block?.type === 'tool_use') {
     emit({ kind: 'tool_started', activity_text: toolActivity(block.name, block.input) });
   }
+}
+
+// Keep only bounded tool identities; no transcript, inputs, results or reasoning.
+const chatTools = new Map();
+function observeChat(message) {
+  const dropped = () => emit({ kind: "chat_dropped" });
+  const publish = (update) => emit({ kind: "chat", update });
+  if (message?.parent_tool_use_id) return; // Subagent output is not this chat.
+  if (message?.type === "stream_event") {
+    const event = message.event;
+    if (event?.type === "content_block_delta" && event.delta?.type === "text_delta") {
+      const text = event.delta.text;
+      if (typeof text !== "string" || text.length === 0 || Buffer.byteLength(text) > 65536 || text.includes("\0")) { dropped(); return; }
+      publish({ sessionUpdate: "agent_message_chunk", content: { type: "text", text } });
+      return;
+    }
+    if (!["message_start", "message_delta", "message_stop", "content_block_start", "content_block_delta", "content_block_stop", "ping"].includes(event?.type)) { dropped(); return; }
+  } else if (!["assistant", "user", "system", "result", "rate_limit_event", "tool_progress", "tool_use_summary", "auth_status"].includes(message?.type)) {
+    dropped(); return;
+  }
+  const blocks = message?.type === "assistant" || message?.type === "user" ? message.message?.content :
+    message?.type === "stream_event" && message.event?.type === "content_block_start" ? [message.event.content_block] : [];
+  if (!Array.isArray(blocks)) return;
+  for (const block of blocks) {
+    if (block?.type === "tool_use") {
+      if (!validID(block.id) || !validID(block.name, 128) || Buffer.byteLength(block.id) > 256 || Buffer.byteLength(block.name) > 128) { dropped(); continue; }
+      if (chatTools.has(block.id)) continue; // stream start then assistant snapshot
+      if (chatTools.size >= 256) { dropped(); continue; }
+      chatTools.set(block.id, block.name);
+      publish({ sessionUpdate: "tool_call", toolCallId: block.id, title: block.name, status: "in_progress" });
+      if (block.name === "mcp__aeon__aeon_request_approval") {
+        publish({ sessionUpdate: "state", state: "requires_action" });
+      }
+    } else if (block?.type === "tool_result") {
+      const title = chatTools.get(block.tool_use_id);
+      if (!title) { dropped(); continue; }
+      chatTools.delete(block.tool_use_id);
+      publish({ sessionUpdate: "tool_call", toolCallId: block.tool_use_id, title, status: block.is_error === true ? "failed" : "completed" });
+    }
+  }
+}
+
+// The final answer comes only from the SDK's own turn result record, never
+// from assembled deltas. Reviews and pairing verification are not chat.
+function observeChatFinal(message) {
+  if (start.purpose === "pairing_verification" || start.read_only_review === true) return;
+  if (message?.subtype !== "success" || message.is_error === true || message.parent_tool_use_id) return;
+  if (native && (!activeInputUUID || message.user_message_uuid !== activeInputUUID || message.session_id !== sessionID)) return;
+  const text = message.result;
+  if (typeof text !== "string" || text.length === 0 || Buffer.byteLength(text) > 65536 || text.includes("\0")) {
+    emit({ kind: "chat_dropped" });
+    return;
+  }
+  emit({ kind: "chat_final", text, ...(native ? { correlation_id: activeCorrelationID } : {}) });
 }
 
 // Project only the documented quota fields. Never forward arbitrary SDK data.
@@ -347,29 +426,44 @@ try {
   const toolBinding = start.tools ?? undefined;
   if (toolBinding !== undefined &&
       (typeof toolBinding?.url !== "string" || !/^http:\/\/127\.0\.0\.1:[0-9]+$/u.test(toolBinding.url) ||
-       typeof toolBinding?.token !== "string" || !/^[0-9a-f]{64}$/u.test(toolBinding.token))) {
+       typeof toolBinding?.token !== "string" || !/^[0-9a-f]{64}$/u.test(toolBinding.token) ||
+       (toolBinding.routine !== undefined && typeof toolBinding.routine !== "boolean") ||
+       (toolBinding.browser_capture_only !== undefined && typeof toolBinding.browser_capture_only !== "boolean") ||
+       (toolBinding.browser_capture_only === true && toolBinding.routine !== true))) {
     throw new Error("invalid managed tool binding");
   }
   const mcpServers = toolBinding ? { aeon: { type: "http", url: toolBinding.url,
     headers: { Authorization: `Bearer ${toolBinding.token}` } } } : {};
-  const allowedTools = !verification && toolBinding ? AEON_TOOLS.map((name) => `mcp__aeon__${name}`) : [];
+  const toolInventory = toolBinding?.browser_capture_only === true ? BROWSER_CAPTURE_TOOLS
+    : toolBinding?.routine === true ? ROUTINE_TOOLS : AEON_TOOLS;
+  if (native && (toolBinding?.routine || toolBinding?.browser_capture_only || (!toolBinding && nativeGrant.allowed_tools.length))) throw new Error("native tools");
+  const inventory = native ? nativeGrant.allowed_tools : toolInventory;
+  const allowedTools = !verification && toolBinding ? inventory.map((name) => `mcp__aeon__${name}`) : [];
   start.tools = undefined;
-  input = new InputStream(userMessage(start.prompt));
+  const initialUUID = native ? randomUUID() : undefined;
+  if (native) addCorrelation(initialUUID, "initial");
+  input = new InputStream(userMessage(start.prompt, initialUUID));
   start.prompt = "";
   const queryOptions = {
     cwd: workspace,
     pathToClaudeCodeExecutable: claudePath,
-    persistSession: false,
+    persistSession: native,
+    ...(native && start.resume ? { resume: start.resume } : {}),
     settingSources: [],
+    extraArgs: { settings: JSON.stringify({fastMode:false}) },
     strictMcpConfig: true,
     mcpServers,
     plugins: [],
     includePartialMessages: true,
     permissionMode: "dontAsk",
     additionalDirectories: [],
-    hooks: { PreToolUse: [{ matcher: ".*", hooks: [managedToolHook(allowedTools)] }] },
+    hooks: { PreToolUse: [{ matcher: ".*", hooks: [async input => grantCurrent() ? managedToolHook(allowedTools)(input) : {
+      hookSpecificOutput: { hookEventName: "PreToolUse", permissionDecision: "deny", permissionDecisionReason: "Coordinator grant expired" }
+    }] }] },
     allowedTools,
     tools: [],
+    ...(native ? { canUseTool: async (name, input) => grantCurrent() && allowedTools.includes(name)
+      ? { behavior: "allow", updatedInput: input } : { behavior: "deny", message: "Only current coordinator-bound tools are available" } } : {}),
     ...(verification ? { maxTurns: 1, canUseTool: async () => ({ behavior: "deny", message: "Verification has no tools" }) } : {}),
     systemPrompt: { type: "preset", preset: "claude_code", ...(start.rules ? { append: start.rules } : {}) },
     ...(!verification && Number.isSafeInteger(start.max_turns) && start.max_turns > 0 ? { maxTurns: start.max_turns } : {}),
@@ -380,10 +474,18 @@ try {
     options: queryOptions
   });
   if (!queryHandle || typeof queryHandle.streamInput !== "function" ||
-      (requiresInterrupt && typeof queryHandle.interrupt !== "function") || typeof queryHandle.close !== "function" ||
+      ((native || requiresInterrupt) && typeof queryHandle.interrupt !== "function") || typeof queryHandle.close !== "function" ||
       typeof queryHandle[Symbol.asyncIterator] !== "function") throw new Error("query capabilities");
   controlInput = new ControlStream();
   queryHandle.streamInput(controlInput).catch(() => { controlInput.abort(new Error("stream input failed")); });
+  if (native) {
+    grantTimer = setTimeout(() => {
+      stopping = true;
+      controlInput.close(); input.close(); queryHandle.close(); lines.close();
+      emit({ kind: "budget_exhausted", reason: "native_grant_expired" });
+    }, Math.max(1, grantExpiry - Date.now()));
+    grantTimer.unref?.();
+  }
 } catch {
   fail("app_server_protocol", "", "sdk_query_capability_missing");
   process.exit(1);
@@ -420,6 +522,31 @@ const handleControlLine = (line) => {
       fail();
       return;
     }
+    // Catalog reads reuse this already-owned SDK Query. They never submit a
+    // prompt, change settings or create an idle Claude process.
+    if (request?.method === "aeon/catalog" && Number.isSafeInteger(request.id)) {
+      try {
+        if (!sessionStarted || typeof queryHandle.supportedModels !== "function") throw new Error("unavailable");
+        const models = await queryHandle.supportedModels();
+        if (!Array.isArray(models) || models.length > 500) throw new Error("bound");
+        const projected = models.map(model => {
+          if (!validDispatchValue(model.value)) throw new Error("model");
+          const result = { value: model.value };
+          if (typeof model.displayName === "string" && model.displayName.length <= 256) result.displayName = model.displayName;
+          if (typeof model.supportsEffort === "boolean") result.supportsEffort = model.supportsEffort;
+          if (Array.isArray(model.supportedEffortLevels)) {
+            if (model.supportedEffortLevels.length > 32 || !model.supportedEffortLevels.every(level => validDispatchValue(level, 32))) throw new Error("levels");
+            result.supportedEffortLevels = model.supportedEffortLevels;
+          }
+          return result;
+        });
+        if (Buffer.byteLength(JSON.stringify(projected)) > 1024 * 1024) throw new Error("bound");
+        emit({ jsonrpc: "2.0", id: request.id, result: projected });
+      } catch {
+        emit({ jsonrpc: "2.0", id: request.id, error: { code: -32601, message: "catalog unavailable" } });
+      }
+      return;
+    }
     const correlationID = request?.correlation_id;
     if (!validID(correlationID, 128)) {
       fail();
@@ -429,6 +556,10 @@ const handleControlLine = (line) => {
     let fatal = false;
     let failureReason = "control_failed";
     try {
+      if (native && (!grantCurrent() || !["inbox", "interrupt", "stop"].includes(request.op)) && request.op !== "stop") {
+        fail("app_server_protocol", correlationID, "native_control_forbidden");
+        return;
+      }
       if ((start.purpose === "pairing_verification" || start.read_only_review === true) && request.op !== "stop") {
         fail("app_server_protocol", correlationID, "verification_control_forbidden");
         return;
@@ -436,7 +567,7 @@ const handleControlLine = (line) => {
       if (request.op === "steer" || request.op === "inbox") {
         expireCorrelations();
         if (typeof request.text !== "string" || request.text.length === 0 ||
-            Buffer.byteLength(request.text) > MAX_STEER_BYTES || request.text.includes("\0") || (request.op === "steer" && !interruptReceipt)) {
+            Buffer.byteLength(request.text) > (request.op === "inbox" ? MAX_INBOX_BYTES : MAX_STEER_BYTES) || request.text.includes("\0") || (request.op === "steer" && !interruptReceipt)) {
           fail("app_server_protocol", correlationID);
           return;
         }
@@ -479,6 +610,30 @@ const handleControlLine = (line) => {
         emit({ kind: "control_applied", correlation_id: correlationID, vendor_message_id: uuid });
         if (state.reacted) deleteCorrelation(uuid);
         controlUUID = "";
+      } else if (request.op === "tier") {
+        failureReason = "setting_rejected";
+        if (!sessionStarted || turnActive || !["default", "fast"].includes(request.value) ||
+            (request.value === "fast" && !["claude-opus-5-5", "claude-opus-5", "claude-opus-4-8"].includes(effectiveModel)) ||
+            typeof queryHandle.applyFlagSettings !== "function" ||
+            typeof queryHandle.reinitialize !== "function") throw new Error("unavailable");
+        try {
+          await queryHandle.applyFlagSettings({ fastMode: request.value === "fast" });
+          // A setter acknowledgement can hide a cooldown or account block.
+          const confirmed = await queryHandle.reinitialize();
+          if (confirmed?.fast_mode_state !== (request.value === "fast" ? "on" : "off")) throw new Error("tier unconfirmed");
+        } catch {
+          // Restore the last confirmed tier before any next turn. An uncertain
+          // rollback closes the Query instead of running with an unknown price.
+          try {
+            await queryHandle.applyFlagSettings({ fastMode: effectiveServiceTier === "fast" });
+            const restored = await queryHandle.reinitialize();
+            if (restored?.fast_mode_state !== (effectiveServiceTier === "fast" ? "on" : "off")) throw new Error("restore unconfirmed");
+          } catch { fatal = true; }
+          throw new Error("tier rejected");
+        }
+        effectiveServiceTier = request.value;
+        emit({ kind: "settings_changed", service_tier: request.value });
+        emit({ kind: "control_applied", correlation_id: correlationID });
       } else if (request.op === "model" || request.op === "effort") {
         failureReason = "setting_rejected";
         if (!sessionStarted || typeof queryHandle.supportedModels !== "function") throw new Error("unavailable");
@@ -504,7 +659,7 @@ const handleControlLine = (line) => {
         }
         emit({ kind: "control_applied", correlation_id: correlationID });
       } else if (request.op === "interrupt") {
-        if (!interruptReceipt) {
+        if (!interruptReceipt && !native) {
           fail("app_server_protocol", correlationID);
           return;
         }
@@ -513,11 +668,11 @@ const handleControlLine = (line) => {
           return;
         }
         const receipt = await queryHandle.interrupt();
-        if (!receipt || !Array.isArray(receipt.still_queued)) {
+        if (!native && (!receipt || !Array.isArray(receipt.still_queued))) {
           fatal = true;
           throw new Error("receipt");
         }
-        if (!turnActive) {
+        if (!turnActive && !native) {
           fail("app_server_protocol", correlationID, "not_running");
           return;
         }
@@ -527,7 +682,7 @@ const handleControlLine = (line) => {
         stopping = true;
         controlInput.close();
         input.close();
-        queryHandle.close();
+        await queryHandle.close();
         emit({ kind: "control_applied", correlation_id: correlationID });
         lines.close();
       } else {
@@ -551,7 +706,8 @@ for (const buffered of bufferedLines.splice(0)) handleControlLine(buffered);
 try {
   for await (const message of queryHandle) {
     if (message?.type === "system" && message.subtype === "init") {
-      if (!validID(message.session_id) || !Array.isArray(message.capabilities) ||
+      if (!validID(message.session_id) || (!native && !Array.isArray(message.capabilities)) ||
+          (native && (!UUID.test(message.session_id) || start.resume && message.session_id !== start.resume)) ||
           (requiresInterrupt && !message.capabilities.includes("interrupt_receipt_v1"))) {
         fail("app_server_protocol", "", "interrupt_receipt_v1_missing");
         queryHandle.close();
@@ -565,7 +721,7 @@ try {
       }
       const initModel = initModelMissing ? "" : message.model;
       const initModelEvidenceStatus = initModelMissing ? "unverified" : "vendor_reported";
-      interruptReceipt = message.capabilities.includes("interrupt_receipt_v1");
+      interruptReceipt = message.capabilities?.includes("interrupt_receipt_v1") === true;
       if (!sessionStarted) {
         sessionStarted = true;
         sessionID = message.session_id;
@@ -582,18 +738,30 @@ try {
         queryHandle.close();
         break;
       }
-      if (!initialTurnStarted) {
+      if (!initialTurnStarted && !native) {
         initialTurnStarted = true;
         turnActive = true;
         emit({ kind: "turn_started" });
       }
     }
+    if (native && sessionStarted && message?.session_id && message.session_id !== sessionID && !message.parent_tool_use_id) {
+      fail("app_server_protocol", "", "native_session_mismatch");
+      queryHandle.close();
+      break;
+    }
     observeCapacity(message);
     observeTurnActivity(message);
     observeReaction(message);
     observeTool(message);
+    observeChat(message);
     if (message?.type === "result") {
+      if (native && (!activeInputUUID || message.user_message_uuid !== activeInputUUID)) {
+        fail("app_server_protocol", "", "native_turn_correlation_missing");
+        queryHandle.close();
+        break;
+      }
       turnActive = false;
+      observeChatFinal(message);
       finishCapacity();
       const tokens = observeUsage(message);
       completedTurns++;
@@ -607,7 +775,7 @@ try {
         emit({ kind: "turn_completed" });
         break;
       }
-      emit({ kind: "turn_completed" });
+      emit({ kind: "turn_completed", ...(native ? { correlation_id: activeCorrelationID } : {}) });
       if (start.purpose === "pairing_verification" || start.read_only_review === true) {
         verificationSucceeded = message.subtype === "success" && message.is_error !== true;
         if (start.read_only_review === true && verificationSucceeded) {
@@ -623,6 +791,7 @@ try {
     }
   }
   queryEndedResolve();
+  clearTimeout(grantTimer);
   lines.close();
   controlInput.close();
   input.close();
@@ -634,6 +803,7 @@ try {
   }
 } catch {
   queryEndedResolve();
+  clearTimeout(grantTimer);
   lines.close();
   controlInput?.close();
   input?.close();

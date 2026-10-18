@@ -17,7 +17,7 @@ import (
 
 func knowledgeKindSlug(typ string) (string, bool) {
 	switch strings.TrimSpace(typ) {
-	case "memory", "runbook", "guideline":
+	case "memory", "runbook", "guideline", "decision":
 		return typ, true
 	case "external-system", "external_system":
 		return "external_system", true

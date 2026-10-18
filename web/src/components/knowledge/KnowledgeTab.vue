@@ -8,10 +8,12 @@ import { STATUS_VIEWS, type KnowledgeFilters, type KnowledgeState, type StatusVi
 import { toast } from '../../lib/toast'
 import { settledNavigation } from '../../lib/navigation'
 import { absoluteTime, plural, relativeTime } from '../../lib/work'
+import { knowledgeFooter } from '../../lib/footerProviders'
+import { useFooterSummary } from '../../lib/footerSummary'
 import AppIcon from '../AppIcon.vue'
 import FloatingPanel from '../work/FloatingPanel.vue'
 import KnowledgeCreateDialog from './KnowledgeCreateDialog.vue'
-import MethodLearnings from './MethodLearnings.vue'
+import { useDecisionDesk } from '../../stores/decisionDesk'
 
 // The project's Knowledge tab: every entry grouped by kind (runbooks first), with
 // a kind rail, search that also reads the bodies, status and sort, and keys for
@@ -27,6 +29,8 @@ const props = defineProps<{
   openEntry?: { type: KnowledgeType; slug: string } | null
 }>()
 const emit = defineEmits<{ update: [patch: Partial<KnowledgeFilters>]; accepted: [entry: KnowledgeEntry]; reverted: [] }>()
+const desk = useDecisionDesk()
+const waitingLessons = computed(() => props.person ? desk.projection?.counts.lessons?.[props.project.id] ?? (desk.projection?.has_more ? 0 : desk.projection?.items.filter(item => item.kind === 'lesson' && item.project_id === props.project.id).length ?? 0) : 0)
 const router = useRouter()
 const route = useRoute()
 const KnowledgeGraph = defineAsyncComponent(() => import('./KnowledgeGraph.vue'))
@@ -58,7 +62,6 @@ async function setMode(graph: boolean) {
 }
 // The page keeps the display (?mode=graph) and the docked entry (?entry=) while filters change.
 function updateFilters(patch: Partial<KnowledgeFilters>) { emit('update', patch) }
-function accepted(entry: KnowledgeEntry) { props.state.upsert(entry); emit('accepted', entry) }
 
 const input = ref<HTMLInputElement>()
 const draft = ref(props.filters.q)
@@ -139,6 +142,20 @@ function searchKey(event: KeyboardEvent) {
 function resetFilters() { draft.value = ''; updateFilters({ q: '', type: '', status: 'current' }) }
 function showAll() { updateFilters({ status: 'all' }) }
 
+// The footer says what this list shows: entries, and the proposed ones a person has to review (AEON-785).
+useFooterSummary(() => {
+  if (!props.state.loaded.value && props.state.error.value) return null
+  if (!props.state.loaded.value) return knowledgeFooter({ loaded: false, entries: 0, toReview: 0, updatedAt: null, now: props.now, act: { review: showReview, sort: showRecent } })
+  const items = props.state.visible.value
+  const updated = items.reduce((latest, item) => Math.max(latest, Date.parse(item.updated_at) || 0), 0)
+  return knowledgeFooter({
+    loaded: true, entries: items.length, toReview: items.filter(item => item.status === 'proposed').length, updatedAt: updated || null, now: props.now,
+    act: { review: showReview, sort: showRecent },
+  })
+})
+function showReview() { updateFilters({ status: 'proposed' }) }
+function showRecent() { updateFilters({ sort: 'updated' }) }
+
 // ---------- Keyboard: j k move, Enter or o opens, / searches, n writes ----------
 function rowEl(id: string) { return listEl.value?.querySelector<HTMLElement>(`[data-id="${id}"]`) ?? null }
 function move(step: number) {
@@ -176,7 +193,6 @@ function keydown(event: KeyboardEvent) {
   }
 }
 function focusSearch() { input.value?.focus(); input.value?.select() }
-function holdFocus() { input.value?.focus({ preventScroll: true }) }
 function openCreate(type?: KnowledgeType) { createDialog.value?.open(type ?? (props.filters.type || undefined)) }
 async function created(entry: KnowledgeEntry) {
   props.state.upsert(entry)
@@ -247,7 +263,7 @@ const who = (item: KnowledgeItem) => item.imported ? 'imported' : item.updated_b
   </Teleport>
 
   <div class="k-frame">
-  <MethodLearnings :project="project" :entries="state.items.value" :can-write="canWrite" :person="person" :now="now" @accepted="accepted" @reverted="emit('reverted')" @emptied="holdFocus" />
+  <p v-if="waitingLessons" class="lesson-link"><RouterLink :to="{ path: '/decision-desk', query: { kind: 'lesson', project: project.id } }">{{ plural(waitingLessons, 'lesson') }} {{ waitingLessons === 1 ? 'waits' : 'wait' }} on the Decision <span class="lesson-tail">Desk<AppIcon name="chevron-right" :size="12" class="lesson-go" /></span></RouterLink></p>
   <div class="k-layout">
     <nav class="k-rail" aria-label="Kinds of knowledge">
       <div class="k-kinds">
@@ -310,7 +326,7 @@ const who = (item: KnowledgeItem) => item.imported ? 'imported' : item.updated_b
         <div class="state-actions">
           <button v-if="filters.status !== 'all'" type="button" class="btn" @click="showAll">Include archived</button>
           <button type="button" class="btn" @click="resetFilters">Clear the filters</button>
-          <button v-if="canWrite && filters.type" type="button" class="btn primary" @click="openCreate(filters.type)"><AppIcon name="plus" :size="14" />New {{ TYPES.find(t => t.type === filters.type)?.label.toLowerCase() }}</button>
+          <button v-if="canWrite && filters.type && filters.type !== 'decision'" type="button" class="btn primary" @click="openCreate(filters.type)"><AppIcon name="plus" :size="14" />New {{ TYPES.find(t => t.type === filters.type)?.label.toLowerCase() }}</button>
         </div>
       </div>
 
@@ -321,7 +337,7 @@ const who = (item: KnowledgeItem) => item.imported ? 'imported' : item.updated_b
             <h2 :id="`k-group-${group.type}`">{{ group.meta.plural }}</h2>
             <span class="k-group-count mono">{{ group.items.length }}</span>
             <p class="k-group-hint">{{ group.meta.hint }}</p>
-            <button v-if="canWrite" type="button" class="btn sm ghost k-add" :aria-label="`New ${group.meta.label.toLowerCase()}`" @click="openCreate(group.type)"><AppIcon name="plus" :size="13" /><span>{{ group.meta.label }}</span></button>
+            <button v-if="canWrite && group.type !== 'decision'" type="button" class="btn sm ghost k-add" :aria-label="`New ${group.meta.label.toLowerCase()}`" @click="openCreate(group.type)"><AppIcon name="plus" :size="13" /><span>{{ group.meta.label }}</span></button>
           </header>
           <ul class="k-rows">
             <li v-for="item in group.items" :key="item.id">
@@ -378,10 +394,15 @@ const who = (item: KnowledgeItem) => item.imported ? 'imported' : item.updated_b
 </template>
 
 <style scoped>
+.lesson-link { margin: 0 0 18px; font-size: 12px; }.lesson-link a { color: var(--ink-3); text-decoration: none; }.lesson-link a:hover { color: var(--teal-ink); }
+/* The chevron sits in the line (base.css makes every SVG a block) and travels with the last word:
+   a narrow column wraps "Desk" and the chevron together, never the chevron alone. */
+.lesson-tail { white-space: nowrap; }
+.lesson-go { display: inline-block; margin-left: 3px; vertical-align: middle; }
 .k-mode-sep { flex-shrink: 0; width: 1px; height: 22px; margin: 0 2px; background: var(--line-2); }
 .k-mode { flex-shrink: 0; }
 .k-mode button { display: flex; align-items: center; justify-content: center; gap: 6px; height: 26px; padding: 0 10px; }
-.k-mode button[aria-pressed="true"] { background: var(--seg-on); box-shadow: 0 1px 2px rgba(32, 60, 61, .12), inset 0 0 0 1px var(--glass-edge); color: var(--teal-ink); }
+.k-mode button[aria-pressed="true"] { background: var(--seg-on); box-shadow: 0 1px 2px color-mix(in srgb, var(--shadow-color) 12%, transparent), inset 0 0 0 1px var(--glass-edge); color: var(--teal-ink); }
 /* ---------- Toolbar controls (teleported into the project toolbar) ---------- */
 .k-search { width: 260px; flex-shrink: 0; }
 .k-search .field { height: 32px; padding-right: 30px; font-size: 13.5px; }
@@ -474,10 +495,10 @@ li + li .k-row::before { content: ''; position: absolute; top: 0; left: 12px; ri
 .k-links-inner { display: inline-flex; align-items: center; gap: 4px; }
 .k-time { width: 64px; text-align: right; font-size: 12px; color: var(--ink-2); white-space: nowrap; }
 .k-status { display: inline-flex; align-items: center; height: 20px; padding: 0 8px; border-radius: 999px; font: 600 10px/1 var(--mono); letter-spacing: .08em; text-transform: uppercase; font-variant-ligatures: none; }
-.k-status.proposed { background: var(--gold-wash); box-shadow: inset 0 0 0 1px rgba(214, 155, 49, .45); color: var(--gold-ink); }
+.k-status.proposed { background: var(--gold-wash); box-shadow: inset 0 0 0 1px var(--warn-line); color: var(--warn-ink); }
 .k-status.archived { background: var(--chip-bg); box-shadow: inset 0 0 0 1px var(--chip-line); color: var(--ink-2); }
-.k-banner { display: flex; align-items: center; gap: 8px; padding: 9px 12px; border-radius: 10px; background: var(--gold-wash); box-shadow: inset 0 0 0 1px rgba(214, 155, 49, .35); font-size: 12.5px; color: var(--ink); }
-.k-banner svg { color: var(--gold-ink); flex-shrink: 0; }
+.k-banner { display: flex; align-items: center; gap: 8px; padding: 9px 12px; border-radius: 10px; background: var(--gold-wash); box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--gold) 35%, transparent); font-size: 12.5px; color: var(--ink); }
+.k-banner svg { color: var(--warn-ink); flex-shrink: 0; }
 
 /* ---------- States ---------- */
 .k-state { display: grid; justify-items: center; gap: 8px; padding: 52px 24px 56px; text-align: center; }

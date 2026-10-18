@@ -1,0 +1,22 @@
+{
+  "group": "remaining-ui",
+  "nightlyTiming": {
+    "seconds": 120.542,
+    "selectedTests": 29
+  },
+  "spec": {
+    "file": "tests/work-figures.spec.ts",
+    "listedTests": 28,
+    "tierTiming": {
+      "caseSeconds": {
+        "max": 9.941,
+        "median": 4.1,
+        "min": 1.928
+      },
+      "seconds": 120.542,
+      "selectedTests": 29
+    },
+    "weightSeconds": 63.645,
+    "weightSource": "AEON-1358 remote-spec 0641da41a: 28 cases, one worker on mbp2606, wall_ms 63645"
+  }
+}

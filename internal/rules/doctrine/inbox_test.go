@@ -62,7 +62,7 @@ func inboxTicket(t *testing.T, f doctrineFixture, p tenant.Principal) string {
 		if err := tx.QueryRow(t.Context(), `INSERT INTO nodes(tenant_id,kind_id,key,title) SELECT $1,id,'INB-1','Inbox fixtures' FROM node_kinds WHERE tenant_id=$1 AND slug='project' RETURNING nodes.id::text`, p.TenantID).Scan(&project); err != nil {
 			return err
 		}
-		return tx.QueryRow(t.Context(), `INSERT INTO nodes(tenant_id,kind_id,key,title,parent_id) SELECT $1,id,'INB-2','Estimate before work',$2 FROM node_kinds WHERE tenant_id=$1 AND slug='ticket' RETURNING nodes.id::text`, p.TenantID, project).Scan(&ticket)
+		return tx.QueryRow(t.Context(), `INSERT INTO nodes(tenant_id,kind_id,key,title,parent_id) SELECT $1,id,'INB-2','Estimate before work',$2 FROM node_kinds WHERE tenant_id=$1 AND slug='work' RETURNING nodes.id::text`, p.TenantID, project).Scan(&ticket)
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -141,6 +141,9 @@ func TestDoctrineInboxLifecycle(t *testing.T) {
 	in := InboxInput{RequestID: "44400000-0000-4000-8000-000000000001", Repository: "inspr-modules", Path: file.Path, RuleKey: small.Key,
 		Source: strings.Replace(small.Source, "Small commits.", "Small, reviewed commits.", 1), Why: "Reviews catch more in small commits.", Ticket: "INB-2"}
 	const path = "/api/rules/doctrine/inbox"
+	if empty := string(f.call(owner, "GET", path, nil, 200)); !strings.Contains(empty, `"items":[]`) || strings.Contains(empty, `"items":null`) {
+		t.Fatalf("empty inbox %s", empty)
+	}
 
 	// A rule without a TL;DR needs one with the change.
 	f.call(agent, "POST", path, in, 400)

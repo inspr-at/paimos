@@ -37,14 +37,14 @@ func (m *Module) content(w http.ResponseWriter, r *http.Request) {
 	var a Attachment
 	err := db.InTenant(r.Context(), m.Pool, p.TenantID, func(tx pgx.Tx) error {
 		var err error
-		a, err = scan(tx.QueryRow(r.Context(), `SELECT `+columns+` FROM attachments WHERE tenant_id=$1 AND id=$2 AND deleted_at IS NULL`, p.TenantID, id))
+		a, err = readAttachment(r.Context(), tx, p.TenantID, id)
 		return err
 	})
 	if err != nil {
 		apierr(w, err)
 		return
 	}
-	if variant != "original" && !strings.HasPrefix(a.ContentType, "image/") {
+	if variant != "original" && !strings.HasPrefix(a.ContentType, "image/") && !(isHTML(a.ContentType) && variant == "thumb") {
 		apierr(w, bad(404, "variant not found"))
 		return
 	}
@@ -81,7 +81,12 @@ func (m *Module) content(w http.ResponseWriter, r *http.Request) {
 		disposition = "inline"
 	}
 	w.Header().Set("ETag", etag)
-	w.Header().Set("Cache-Control", "private, max-age=31536000, immutable")
+	// Attachments are addressed by their exact bytes. In particular, HTML must
+	// not be rewritten by intermediary email obfuscation or script injection.
+	w.Header().Set("Cache-Control", "private, max-age=31536000, immutable, no-transform")
+	if isHTML(a.ContentType) {
+		w.Header().Set("Cache-Control", "no-store, private, no-transform")
+	}
 	w.Header().Set("X-Content-Type-Options", "nosniff")
 	w.Header().Set("Content-Type", contentType)
 	w.Header().Set("Content-Disposition", mime.FormatMediaType(disposition, map[string]string{"filename": a.Name}))

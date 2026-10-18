@@ -7,14 +7,18 @@
 // person's reserve on their own schedule, a pool may carry its own, and Away
 // rides on the person's schedule until its date.
 import { defineStore } from 'pinia'
-import { computed } from 'vue'
-import { listPairingComputers, type PairingView } from '../lib/agentPairing'
+import { computed, onScopeDispose, shallowRef } from 'vue'
+import { APIError, StaleRequestError } from '../lib/api'
+import { listPairingComputers, PairingError, type PairingView } from '../lib/agentPairing'
 import {
   activeOverride, buildPools, buildRows, clone, confirmsSave, uncertainFailure, defaultSchedule, listCapacity, listSchedules, putSchedule, sameShape, stripOverride, stripReserve, withReserve,
   type AccountCapacity, type AccountInput, type CapacitySchedule, type GaugePreference, type Override, type Pool, type ReserveMode, type ScheduleOverride,
 } from '../lib/capacity'
 import { usePreference } from '../lib/preferences'
-import { usePolledData } from '../lib/usePolledData'
+import { buildComputerCards } from '../lib/computerAccounts'
+import { initialRefreshStatus, usePolledData } from '../lib/usePolledData'
+import { onReset } from '../lib/position'
+import { onAccessRevalidate } from '../lib/authz'
 import { useAgents } from './agents'
 
 const browserZone = () => { try { return Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC' } catch { return 'UTC' } }
@@ -23,8 +27,28 @@ export const useCapacity = defineStore('capacity', () => {
   const agents = useAgents()
   const capacityRead = usePolledData(listCapacity, [] as AccountCapacity[])
   const schedulesRead = usePolledData(listSchedules, [] as ScheduleOverride[])
-  // Connectivity is optional detail: people without pairing access still see capacity.
-  const computersRead = usePolledData(() => listPairingComputers().catch(() => [] as PairingView[]), [] as PairingView[])
+  // Pairing access is optional. A failed read is not an empty inventory:
+  // preserve the previous snapshot and report the failure to its consumers.
+  const computerReadDenied = shallowRef(false)
+  const computersRead = usePolledData(async () => {
+    try { return { ok: true as const, computers: await listPairingComputers() } }
+    catch (error) { return { ok: false as const, error } }
+  }, [] as PairingView[], undefined, { adopt: result => {
+    // Adopt runs only after the poller's ownership/visibility fences. Classify
+    // the current failure here: a later 5xx must not look like another denial,
+    // even though the poller keeps access forbidden until a successful read.
+    if (result.ok) { computerReadDenied.value = false; return result.computers }
+    if (result.error instanceof StaleRequestError) throw result.error
+    computerReadDenied.value = (result.error instanceof PairingError || result.error instanceof APIError) && result.error.status === 403
+    if (result.error instanceof PairingError && result.error.status === 403) throw new APIError(403, result.error.message)
+    throw result.error
+  } })
+  const computersState = computed(() => computersRead.status.value.state)
+  const computersRestricted = computed(() => computersState.value === 'forbidden' && computerReadDenied.value)
+  const computersStale = computed(() => computersRead.stale.value)
+  // Retain the snapshot for transient failures, but never project pairing-only
+  // identities after access was denied. Only a successful read restores it.
+  const visibleComputers = computed(() => computersState.value === 'forbidden' ? [] : computersRead.data.value)
   const gaugePref = usePreference<GaugePreference>('agents.capacity.gauge')
   const state = computed(() => capacityRead.status.value.state)
   const loaded = computed(() => capacityRead.status.value.updatedAt !== null)
@@ -34,13 +58,34 @@ export const useCapacity = defineStore('capacity', () => {
   async function load() {
     await Promise.all([capacityRead.refresh(), schedulesRead.refresh(), computersRead.refresh()])
   }
+  // An enrollment write needs a new inventory read, even when polling already
+  // has a pre-write response in flight. Keep its outcome for honest UI feedback.
+  function refreshComputers() {
+    computersRead.invalidate()
+    return computersRead.refresh()
+  }
   const invalidate = () => { capacityRead.invalidate(); schedulesRead.invalidate(); computersRead.invalidate() }
+  // Snapshots belong to one person/workspace and access epoch. Retaining them
+  // across a transient failure is safe only until that ownership is reset.
+  function reset() {
+    invalidate()
+    capacityRead.data.value = []
+    schedulesRead.data.value = []
+    computersRead.data.value = []
+    computerReadDenied.value = false
+    for (const read of [capacityRead, schedulesRead, computersRead]) read.status.value = initialRefreshStatus()
+  }
+  onScopeDispose(onReset(reset))
+  onScopeDispose(onAccessRevalidate({ reset, refresh: () => { void load() } }))
   // Every write on /agents drops these reads too and reads them again (AEON-402).
-  agents.onWrite({ invalidate, refresh: load })
+  onScopeDispose(agents.onWrite({ invalidate, refresh: load }))
 
   const computerOf = computed(() => {
     const out = new Map<string, PairingView>()
-    for (const computer of computersRead.data.value) for (const e of computer.enrollments ?? []) out.set(e.account_id, computer)
+    for (const computer of visibleComputers.value) {
+      if (computer.computer_state === 'revoked') continue
+      for (const e of computer.enrollments ?? []) if (e.state !== 'revoked') out.set(e.account_id, computer)
+    }
     return out
   })
   const inputs = computed<AccountInput[]>(() => agents.accounts.map(a => {
@@ -54,6 +99,7 @@ export const useCapacity = defineStore('capacity', () => {
     }
   }))
   const rows = computed(() => buildRows(inputs.value, capacityRead.data.value))
+  const accountLines = computed(() => new Map(buildComputerCards({ computers: visibleComputers.value, rows: rows.value, now: agents.now }).flatMap(c => c.accounts.map(a => [a.id, a] as const))))
   /** The raw projection per account: windows, the Advanced limit, API-key spend. */
   const byAccount = computed(() => new Map(capacityRead.data.value.map(c => [c.account_id, c])))
   const pools = computed(() => buildPools(rows.value, agents.now))
@@ -179,8 +225,10 @@ export const useCapacity = defineStore('capacity', () => {
   const setGauge = (next: GaugePreference) => gaugePref.save(next, 0)
 
   return {
-    state, loaded, stale, load, inputs, rows, byAccount, computers: computersRead.data, computersLoaded: computed(() => computersRead.status.value.updatedAt !== null), refreshCapacity: capacityRead.refresh, pools, ready, signins, schedule, timezone, saveSchedule, setPreset, setNights, setPoolOverride, gauge, setGauge,
-    schedulesLoaded, away, reserveConfirmed, hasUserSchedule, poolReserves, saveKeep, confirmReserve, endAway,
+    capacityStatus: capacityRead.status, computersStatus: computersRead.status, schedulesStatus: schedulesRead.status,
+    state, loaded, stale, load, inputs, rows, accountLines, byAccount, computers: computersRead.data, computersLoaded: computed(() => computersRead.status.value.updatedAt !== null), computersState, computersRestricted, computersStale, refreshCapacity: capacityRead.refresh, pools, ready, signins, schedule, timezone, saveSchedule, setPreset, setNights, setPoolOverride, gauge, setGauge,
+    refreshSchedules: schedulesRead.refresh, schedulesLoaded, away, reserveConfirmed, hasUserSchedule, poolReserves, saveKeep, confirmReserve, endAway,
     invalidate,
+    refreshComputers,
   }
 })

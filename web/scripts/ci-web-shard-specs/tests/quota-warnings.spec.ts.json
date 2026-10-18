@@ -1,0 +1,22 @@
+{
+  "group": "remaining-ui",
+  "nightlyTiming": {
+    "seconds": 13.34,
+    "selectedTests": 2
+  },
+  "spec": {
+    "file": "tests/quota-warnings.spec.ts",
+    "listedTests": 3,
+    "tierTiming": {
+      "caseSeconds": {
+        "max": 6.799,
+        "median": 6.627,
+        "min": 6.454
+      },
+      "seconds": 13.34,
+      "selectedTests": 2
+    },
+    "weightSeconds": 6.658537,
+    "weightSource": "unmeasured-test-rate"
+  }
+}

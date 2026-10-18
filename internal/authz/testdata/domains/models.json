@@ -1,0 +1,87 @@
+{
+  "_license": "SPDX-License-Identifier: AGPL-3.0-only",
+  "builtin_roles": {
+    "admin": [
+      "models.manage",
+      "models.read",
+      "models.refresh",
+      "models.report",
+      "models.resolve"
+    ],
+    "member": [
+      "models.read"
+    ],
+    "owner": [
+      "models.manage",
+      "models.read",
+      "models.refresh",
+      "models.report",
+      "models.resolve"
+    ],
+    "viewer": [
+      "models.read"
+    ]
+  },
+  "registry": [
+    {
+      "agent_grantable": true,
+      "description": "Manage models",
+      "grantable_at": [
+        "workspace"
+      ],
+      "group": "Models",
+      "key": "models.manage",
+      "owner_workstation_grantable": true,
+      "risk": "high"
+    },
+    {
+      "agent_grantable": true,
+      "description": "Read models",
+      "grantable_at": [
+        "workspace"
+      ],
+      "group": "Models",
+      "key": "models.read",
+      "owner_workstation_grantable": true,
+      "risk": "low"
+    },
+    {
+      "agent_grantable": true,
+      "description": "Refresh models",
+      "grantable_at": [
+        "workspace"
+      ],
+      "group": "Models",
+      "key": "models.refresh",
+      "owner_workstation_grantable": true,
+      "risk": "medium"
+    },
+    {
+      "agent_grantable": true,
+      "description": "Report models",
+      "grantable_at": [
+        "workspace"
+      ],
+      "group": "Models",
+      "key": "models.report",
+      "owner_workstation_grantable": true,
+      "risk": "medium"
+    },
+    {
+      "agent_grantable": true,
+      "description": "Resolve models",
+      "grantable_at": [
+        "workspace"
+      ],
+      "group": "Models",
+      "key": "models.resolve",
+      "owner_workstation_grantable": true,
+      "risk": "low"
+    }
+  ],
+  "words": {
+    "resources": {
+      "models": "models"
+    }
+  }
+}

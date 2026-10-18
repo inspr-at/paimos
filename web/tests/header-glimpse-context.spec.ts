@@ -1,7 +1,8 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import { test, expect, type Page } from '@playwright/test'
 import { mockTicketGraph, ticketGraphWorld } from './ticket-graph-fixtures'
-import { mockView } from './work-fixtures'
+import { me, mockView } from './work-fixtures'
+import { headerStorageKey } from '../src/lib/projectHeader'
 
 test.use({ viewport: { width: 1600, height: 1000 }, reducedMotion: 'no-preference', launchOptions: { args: ['--use-gl=angle', '--use-angle=swiftshader', '--enable-unsafe-swiftshader'] } })
 test.setTimeout(60_000)
@@ -9,24 +10,27 @@ const glimpse = (page: Page) => page.locator('[data-header-glimpse="on"]')
 const ready = (page: Page, count: number) => expect(glimpse(page)).toHaveAttribute('data-shown', String(count), { timeout: 20_000 })
 
 test('Hide closed and status use the Tickets context and Open graph retains it', async ({ page }) => {
+  await page.addInitScript(({ key }) => localStorage.setItem(key, JSON.stringify({ density: 'comfortable', roomy: 'comfortable' })), { key: headerStorageKey('t1', me.id) })
   const { calls } = await mockTicketGraph(page)
   await page.goto('/p/PHAROS/tickets')
   await ready(page, 50)
-  expect(calls.at(-1)!.get('include_closed')).toBeNull()
+  // Fetch all topology; the shared work query applies the tenant's Hide policy.
+  expect(calls.at(-1)!.get('include_closed')).toBe('true')
   await expect(page.locator('.glimpse-count')).toHaveText('50 / 60')
   await page.getByRole('checkbox', { name: 'Hide closed', exact: true }).uncheck()
   await ready(page, 60)
   expect(calls.at(-1)!.get('include_closed')).toBe('true')
   await page.getByRole('checkbox', { name: 'Hide closed', exact: true }).check()
   await ready(page, 50)
-  await page.locator('.facet-btn[data-dim="status"]').click()
+  await page.getByRole('button', { name: 'Add a filter' }).click()
+  await page.getByRole('menu', { name: 'Filter by' }).getByRole('menuitem', { name: 'Status', exact: true }).click()
   await page.getByRole('checkbox', { name: /^In progress/ }).check()
   await page.keyboard.press('Escape')
   await ready(page, 20)
   await page.locator('.project-head').hover()
   await page.getByRole('button', { name: 'Open graph', exact: true }).click()
   await expect(page).toHaveURL(/status=in_progress/)
-  await expect(page.locator('.ticket-graph-canvas')).toHaveAttribute('aria-label', /20 tickets/)
+  await expect(page.locator('.ticket-graph-canvas')).toHaveAttribute('aria-label', /15 leaves · 5 parents ·/)
 })
 
 test('saved views, assignee, type, priority and server search determine the glimpse', async ({ page }) => {
@@ -68,6 +72,35 @@ test('scrolling the entire backdrop out of view pauses it and returning resumes 
   await page.locator('#main').evaluate(el => { el.scrollTop = 600 })
   await expect(canvas).toHaveAttribute('data-motion', 'still')
   await page.locator('#main').evaluate(el => { el.scrollTop = 0 })
+  await expect(canvas).toHaveAttribute('data-motion', 'on')
+})
+
+test('collapsing the project header pauses the backdrop and expanding resumes it', async ({ page }) => {
+  await page.addInitScript(({ key }) => localStorage.setItem(key, JSON.stringify({ density: 'comfortable', roomy: 'comfortable' })), { key: headerStorageKey('t1', me.id) })
+  await mockTicketGraph(page)
+  await page.goto('/p/PHAROS/tickets')
+  await ready(page, 50)
+  const canvas = page.locator('.header-glimpse-canvas')
+  const column = page.locator('.glimpse-col')
+  await expect(canvas).toHaveAttribute('data-motion', 'on')
+  const shown = await column.evaluate(el => el.getBoundingClientRect())
+  expect(shown.width).toBeGreaterThan(0)
+  expect(shown.height).toBeGreaterThan(0)
+  await page.getByRole('radio', { name: 'Collapsed project header', exact: true }).click()
+  await expect(page.locator('#project-header-fold')).toBeHidden()
+  await expect(page.locator('[data-header-glimpse="on"]')).toBeAttached()
+  // v-show keeps the canvas mounted. Its box is empty; motion has to stop.
+  await expect.poll(() => column.evaluate(el => {
+    const box = el.getBoundingClientRect()
+    return box.width <= 0 && box.height <= 0
+  })).toBe(true)
+  await expect(canvas).toHaveAttribute('data-motion', 'still')
+  await page.getByRole('radio', { name: 'Comfortable project header', exact: true }).click()
+  await expect(page.locator('#project-header-fold')).toBeVisible()
+  await expect.poll(() => column.evaluate(el => {
+    const box = el.getBoundingClientRect()
+    return box.width > 0 && box.height > 0
+  })).toBe(true)
   await expect(canvas).toHaveAttribute('data-motion', 'on')
 })
 

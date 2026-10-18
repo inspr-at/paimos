@@ -191,7 +191,7 @@ watch(() => props.definition.fonts.map(face => face.asset_id), ids => ids.forEac
 .face-row { display: grid; grid-template-columns: minmax(0, 1.4fr) minmax(0, 1fr); gap: 6px; }
 .group-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; min-height: 30px; }
 .group-head .btn { color: var(--ink-2); }
-.specimen-card { display: grid; gap: 6px; padding: 14px 16px; border-radius: 12px; box-shadow: inset 0 0 0 1px var(--line-2), 0 1px 3px rgba(32, 60, 61, .1); }
+.specimen-card { display: grid; gap: 6px; padding: 14px 16px; border-radius: 12px; box-shadow: inset 0 0 0 1px var(--line-2), 0 1px 3px color-mix(in srgb, var(--shadow-color) 10%, transparent); }
 .spec-heading { font-size: 20px; line-height: 1.2; letter-spacing: .04em; }
 .spec-body { font-size: 13.5px; line-height: 1.5; }
 .spec-note { margin-top: -6px; font-size: 12px; color: var(--ink-2); }

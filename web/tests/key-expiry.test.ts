@@ -1,7 +1,13 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { keyExpiry } from '../src/lib/access.ts'
+import { keyExpiry, keyExpiryAfter } from '../src/lib/access.ts'
+
+test('expiry choices include Never and use second precision from an injected clock', () => {
+  const now = Date.parse('2026-10-02T12:00:00.987Z')
+  assert.equal(keyExpiryAfter(0, now), null)
+  for (const days of [30, 90, 365]) assert.equal(Date.parse(keyExpiryAfter(days, now)!), Math.floor(now / 1000) * 1000 + days * 86_400_000)
+})
 
 const now = Date.parse('2026-09-26T12:00:00Z')
 const day = 86_400_000

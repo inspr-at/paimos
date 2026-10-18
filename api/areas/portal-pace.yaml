@@ -1,0 +1,27 @@
+# SPDX-License-Identifier: AGPL-3.0-only
+# aeon:owner internal/portal
+paths:
+  /portal/pace:
+    get:
+      operationId: readPortalPace
+      summary: Read the linked project and the aggregated pace figures
+      description: settings.manage, people only. The project title is admin-only. This read returns the exact counts and medians, including a sample smaller than five. The public document omits those small figures.
+      security: [{session: []}]
+      responses:
+        '200': {description: Pace for this portal, content: {application/json: {schema: {$ref: '#/components/schemas/PortalPace'}}}}
+        '401': {$ref: '#/components/responses/Error'}
+        '403': {$ref: '#/components/responses/Error'}
+    put:
+      operationId: writePortalPace
+      summary: Link one project whose release dates become the public count, clear it, or choose whether its frozen notes are public
+      description: settings.manage, people only. Sending project_id alone keeps release history when the project stays the same and turns it off when the project changes, and advances the link revision. Sending release_history also sends the project_id and revision from the read this publish is based on. That write is one update matching both, so it cannot publish notes for a project linked later; a mismatch is 409 and leaves the link as it is. Clearing the link deletes the row and keeps the issued revision, so linking again receives a new revision and a history write from before the clear does not match. Clearing the link and setting release history in one body is refused. Release history without that project and revision is refused.
+      security: [{session: []}]
+      requestBody: {required: true, content: {application/json: {schema: {$ref: '#/components/schemas/PortalPaceWrite'}}}}
+      responses:
+        '428': {$ref: '#/components/responses/OwnerWorkstationStepUpRequired'}
+        '200': {description: Pace after the link, content: {application/json: {schema: {$ref: '#/components/schemas/PortalPace'}}}}
+        '400': {$ref: '#/components/responses/Error'}
+        '401': {$ref: '#/components/responses/Error'}
+        '403': {$ref: '#/components/responses/Error'}
+        '409': {$ref: '#/components/responses/Error'}
+components:

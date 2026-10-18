@@ -4,18 +4,18 @@ import { nextTick, onMounted, ref } from 'vue'
 import AppIcon from '../AppIcon.vue'
 import FloatingPanel from './FloatingPanel.vue'
 
-// Name a new view (with sharing and "open the project with it"), or rename one.
+// Name a new view (with sharing), or rename one. Which view the project opens with is the
+// view switch's default: right-click the saved view (AEON-1453).
 const props = withDefaults(defineProps<{ anchor: HTMLElement | null; mode: 'create' | 'rename'; name: string; projectTitle: string; busy?: boolean; error?: string; canShare?: boolean }>(), { canShare: true })
-const emit = defineEmits<{ submit: [value: { name: string; shared: boolean; makeDefault: boolean }]; close: [restoreFocus: boolean] }>()
+const emit = defineEmits<{ submit: [value: { name: string; shared: boolean }]; close: [restoreFocus: boolean] }>()
 const name = ref(props.name)
 const shared = ref(false)
-const makeDefault = ref(false)
 const input = ref<HTMLInputElement>()
 onMounted(async () => { await nextTick(); input.value?.focus(); input.value?.select() })
 function submit() {
   const value = name.value.trim()
   if (!value || props.busy) return
-  emit('submit', { name: value, shared: shared.value, makeDefault: makeDefault.value })
+  emit('submit', { name: value, shared: shared.value })
 }
 </script>
 
@@ -31,10 +31,6 @@ function submit() {
         <label v-if="canShare" class="check-row">
           <input v-model="shared" type="checkbox" class="check-box" />
           <span><b>Share with the project</b><small>Everyone in {{ projectTitle }} sees it; only you change it.</small></span>
-        </label>
-        <label class="check-row">
-          <input v-model="makeDefault" type="checkbox" class="check-box" />
-          <span><b>Open {{ projectTitle }} with it</b><small>Your default view of this project.</small></span>
         </label>
       </template>
       <p v-if="error" class="error" role="alert"><AppIcon name="alert" :size="13" />{{ error }}</p>

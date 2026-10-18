@@ -146,7 +146,7 @@ watch(() => props.project.id, load)
     <p v-if="rows && !shown.length" class="empty">{{ filter === 'project' ? 'No one has a role on this project yet.' : 'No one reaches this project through the workspace.' }}</p>
     <ChoicePicker v-if="adding" :anchor="adding" :label="`Add to ${project.title}`" :choices="addChoices" current="" placeholder="Find a person or agent…" @choose="pickPerson" @close="adding = null" />
     <RolePicker
-      v-if="picker" :anchor="picker.anchor" :subject="picker.name" :place="project.title" :roles="access.roles" :current="picker.current" :registry="access.registry"
+      v-if="picker" :anchor="picker.anchor" :subject="picker.name" :place="project.title" :roles="access.roles" :role-details="access.runtimeRoleDetails" :current="picker.current" :registry="access.registry"
       :mine="myPermissions(project.id)" scope="project" :busy="busy" :can-apply="can('members.manage', project.id)" :error="roleError" @choose="choose" @close="picker = null"
     />
   </div>

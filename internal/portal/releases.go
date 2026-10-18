@@ -44,13 +44,20 @@ type publicReleasesDocument struct {
 // release history on and still exists. A pace link without that choice, or a
 // deleted project, publishes nothing.
 func portalPublishesReleases(ctx context.Context, tx pgx.Tx) (bool, error) {
+	productID, err := portalProductID(ctx, tx)
+	if errors.Is(err, errNoProduct) {
+		return false, nil
+	}
+	if err != nil {
+		return false, err
+	}
 	var on bool
-	err := tx.QueryRow(ctx, `
+	err = tx.QueryRow(ctx, `
 		SELECT true
-		FROM portal_pace p
+		FROM portal_product_pace p
 		JOIN nodes proj ON proj.tenant_id = p.tenant_id AND proj.id = p.project_node_id AND proj.deleted_at IS NULL
 		JOIN node_kinds pk ON pk.tenant_id = proj.tenant_id AND pk.id = proj.kind_id AND pk.slug = 'project'
-		WHERE p.release_history`).Scan(&on)
+		WHERE p.product_id=$1::uuid AND p.release_history`, productID).Scan(&on)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return false, nil
 	}
@@ -69,9 +76,16 @@ type frozenSnapshot struct {
 }
 
 func listFrozenSnapshots(ctx context.Context, tx pgx.Tx) ([]frozenSnapshot, error) {
+	productID, err := portalProductID(ctx, tx)
+	if errors.Is(err, errNoProduct) {
+		return []frozenSnapshot{}, nil
+	}
+	if err != nil {
+		return nil, err
+	}
 	rows, err := tx.Query(ctx, `
 		SELECT r.version, r.released_at, s.snapshot
-		FROM portal_pace p
+		FROM portal_product_pace p
 		JOIN nodes proj ON proj.tenant_id = p.tenant_id AND proj.id = p.project_node_id AND proj.deleted_at IS NULL
 		JOIN node_kinds pk ON pk.tenant_id = proj.tenant_id AND pk.id = proj.kind_id AND pk.slug = 'project'
 		JOIN journey_releases r ON r.tenant_id = p.tenant_id AND r.project_node_id = p.project_node_id
@@ -81,12 +95,12 @@ func listFrozenSnapshots(ctx context.Context, tx pgx.Tx) ([]frozenSnapshot, erro
 		  ON s.tenant_id = r.tenant_id AND s.release_node_id = r.release_node_id
 		 AND s.snapshot->>'schema' = 'aeon.release-note-snapshot.v1'
 		 AND s.snapshot->>'frozen' = 'true'
-		WHERE p.release_history
+		WHERE p.product_id=$1::uuid AND p.release_history
 		  AND r.state IN ('released', 'superseded')
 		  AND r.released_at IS NOT NULL
 		  AND r.released_at <= clock_timestamp()
 		ORDER BY r.released_at DESC, r.number DESC
-		LIMIT 100`)
+		LIMIT 100`, productID)
 	if err != nil {
 		return nil, err
 	}

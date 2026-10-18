@@ -47,9 +47,9 @@ export function useActivity(nodeId: Ref<string | null>) {
   }
   watch(nodeId, load, { immediate: true })
 
-  async function add(body: string): Promise<boolean> {
+  async function add(body: string, expectedId: string | null = nodeId.value): Promise<boolean> {
     const id = nodeId.value
-    if (!id || !body.trim()) return false
+    if (!id || id !== expectedId || !body.trim()) return false
     try {
       const created = await createComment(id, body)
       if (nodeId.value === id) items.value = [created, ...items.value]

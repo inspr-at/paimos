@@ -3,7 +3,6 @@
 package modelprovider
 
 import (
-	"encoding/json"
 	"errors"
 	"io"
 	"net/http"
@@ -66,7 +65,7 @@ func writeError(w http.ResponseWriter, err error) {
 }
 
 func decode(w http.ResponseWriter, r *http.Request, out any) error {
-	d := json.NewDecoder(http.MaxBytesReader(w, r.Body, 32<<10))
+	d := httpapi.NewRequestDecoder(w, r, 32<<10)
 	d.DisallowUnknownFields()
 	if err := d.Decode(out); err != nil {
 		return fault(400, "invalid provider settings")

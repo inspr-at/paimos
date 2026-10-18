@@ -1,0 +1,76 @@
+{
+  "_license": "SPDX-License-Identifier: AGPL-3.0-only",
+  "builtin_roles": {
+    "admin": [
+      "intake.decide",
+      "intake.read",
+      "intake.write"
+    ],
+    "guest": [
+      "intake.read"
+    ],
+    "member": [
+      "intake.read",
+      "intake.write"
+    ],
+    "owner": [
+      "intake.decide",
+      "intake.read",
+      "intake.write"
+    ],
+    "viewer": [
+      "intake.read"
+    ]
+  },
+  "registry": [
+    {
+      "agent_grantable": true,
+      "description": "Decide intake",
+      "grantable_at": [
+        "workspace",
+        "project"
+      ],
+      "group": "Intake",
+      "key": "intake.decide",
+      "owner_workstation_grantable": true,
+      "risk": "high"
+    },
+    {
+      "agent_grantable": true,
+      "description": "Read intake",
+      "grantable_at": [
+        "workspace",
+        "project"
+      ],
+      "group": "Intake",
+      "key": "intake.read",
+      "owner_workstation_grantable": true,
+      "risk": "low"
+    },
+    {
+      "agent_grantable": true,
+      "description": "Write intake",
+      "grantable_at": [
+        "workspace",
+        "project"
+      ],
+      "group": "Intake",
+      "key": "intake.write",
+      "owner_workstation_grantable": true,
+      "risk": "medium"
+    }
+  ],
+  "routes": {
+    "GET /api/projects/{projectId}/intake": "intake.read",
+    "POST /api/projects/{projectId}/intake/drafts": "intake.write",
+    "POST /api/projects/{projectId}/intake/drafts/{draftId}/accept": "intake.decide",
+    "POST /api/projects/{projectId}/intake/drafts/{draftId}/replace": "intake.write",
+    "POST /api/projects/{projectId}/intake/sources": "intake.write",
+    "POST /api/projects/{projectId}/intake/transcript-turns": "intake.write"
+  },
+  "words": {
+    "resources": {
+      "intake": "intake"
+    }
+  }
+}

@@ -1,0 +1,33 @@
+# SPDX-License-Identifier: AGPL-3.0-only
+name: Docker web stage
+on:
+  workflow_dispatch:
+  pull_request:
+    paths:
+      - web/**
+      - internal/**/*.json
+      - scripts/**
+      - version.json
+      - go.mod
+      - NOTICE
+      - Dockerfile
+      - .dockerignore
+      - .github/workflows/docker-web-check.yml
+permissions:
+  contents: read
+jobs:
+  docker-web-stage:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      # Keep the established check identity; production now compiles on the host.
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7
+        with:
+          node-version: "24"
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+      - name: Build the production web inputs
+        run: node scripts/build-image-inputs.mjs web

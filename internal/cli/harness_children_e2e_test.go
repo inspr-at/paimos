@@ -3,6 +3,7 @@
 package cli
 
 import (
+	"crypto/sha256"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -15,6 +16,8 @@ import (
 	"github.com/inspr-at/paimos/internal/db"
 	"github.com/inspr-at/paimos/internal/dbtest"
 	"github.com/inspr-at/paimos/internal/harness"
+	"github.com/inspr-at/paimos/internal/tenant"
+	"github.com/jackc/pgx/v5"
 )
 
 // Use the real CLI, agent auth, API and migrated database while the launcher's
@@ -33,7 +36,7 @@ func TestClaudeCoordinatorRegistersChildrenEndToEnd(t *testing.T) {
 	const vendor = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"
 	t.Setenv("CLAUDE_CODE_SESSION_ID", vendor)
 	config := filepath.Join(t.TempDir(), "missing")
-	register := func(name, parent, role string) (harness.Session, string, []string) {
+	prepare := func(name, parent, role string) (string, []string) {
 		t.Helper()
 		dir := t.TempDir()
 		ref := "claude-child-registration-" + name
@@ -45,26 +48,52 @@ func TestClaudeCoordinatorRegistersChildrenEndToEnd(t *testing.T) {
 		if err := os.WriteFile(leaseFile, []byte(lease), 0o600); err != nil {
 			t.Fatal(err)
 		}
-		args := []string{"aeon", "--config", config, "--json", "harness", "register", "--project", "AEON", "--agent", "aeon-coordinator", "--harness", "claude", "--host", "children-test", "--management", "unmanaged", "--role", role, "--harness-session-file", refFile, "--worker-lease-file", leaseFile}
+		args := []string{"aeon", "--config", config, "--json", "harness", "register", "--project", "AEON", "--agent", "aeon-coordinator", "--harness", "claude", "--harness-version", "2.1.0", "--host", "children-test", "--management", "unmanaged", "--role", role, "--harness-session-file", refFile, "--worker-lease-file", leaseFile}
 		if parent != "" {
 			args = append(args, "--parent-session", parent)
 		}
-		code, out, stderr := runCLI(args, "")
+		return lease, args
+	}
+	registered := func(name string, code int, out, stderr string) harness.Session {
+		t.Helper()
 		if code != 0 || stderr != "" {
 			t.Fatalf("register %s: code %d stderr %s", name, code, stderr)
 		}
-		if strings.Contains(out, ref) || strings.Contains(out, lease) || strings.Contains(out, vendor) || strings.Contains(out, key.Token) {
+		if strings.Contains(out, "claude-child-registration-") || strings.Contains(out, "synthetic-child-worker-lease-") || strings.Contains(out, vendor) || strings.Contains(out, key.Token) {
 			t.Fatal("registration exposed a private value")
 		}
 		var s harness.Session
 		if err := json.Unmarshal([]byte(out), &s); err != nil || !validUUID(s.ID) {
 			t.Fatal("registration did not return a valid session")
 		}
-		return s, lease, args
+		return s
 	}
-	parent, parentLease, _ := register("parent", "", "coordinator")
-	first, firstLease, firstArgs := register("first", parent.ID, "worker")
-	second, secondLease, _ := register("second", parent.ID, "worker")
+	parentLease, parentArgs := prepare("parent", "", "coordinator")
+	code, out, stderr := runCLI(parentArgs, "")
+	parent := registered("parent", code, out, stderr)
+	firstLease, firstArgs := prepare("first", parent.ID, "worker")
+	secondLease, secondArgs := prepare("second", parent.ID, "worker")
+	type result struct {
+		index       int
+		code        int
+		out, stderr string
+	}
+	start := make(chan struct{})
+	results := make(chan result, 2)
+	for i, args := range [][]string{firstArgs, secondArgs} {
+		go func() {
+			<-start
+			code, out, stderr := runCLI(args, "")
+			results <- result{i, code, out, stderr}
+		}()
+	}
+	close(start)
+	children := make([]harness.Session, 2)
+	for range children {
+		r := <-results
+		children[r.index] = registered([]string{"first", "second"}[r.index], r.code, r.out, r.stderr)
+	}
+	first, second := children[0], children[1]
 	if !parent.HasVendorSessionRef || first.HasVendorSessionRef || second.HasVendorSessionRef {
 		t.Fatal("children inherited the parent's vendor binding")
 	}
@@ -76,12 +105,24 @@ func TestClaudeCoordinatorRegistersChildrenEndToEnd(t *testing.T) {
 			t.Fatal("child lost its authenticated agent or parent")
 		}
 	}
-	code, out, stderr := runCLI(firstArgs, "")
+	code, out, stderr = runCLI(firstArgs, "")
 	var replay harness.Session
 	if code != 0 || stderr != "" || json.Unmarshal([]byte(out), &replay) != nil || replay.ID != first.ID {
 		t.Fatal("child exact replay did not preserve its generation")
 	}
 	c := client.New(base, key.Token)
+	for _, entry := range []struct{ ref, id string }{
+		{vendor, parent.ID},
+		{"claude-child-registration-first", first.ID},
+		{"claude-child-registration-second", second.ID},
+	} {
+		var binding struct {
+			SessionID string `json:"session_id"`
+		}
+		if err := c.Do(t.Context(), http.MethodPost, "/api/inbox/session-binding", map[string]string{"harness_session_ref": entry.ref}, &binding); err != nil || binding.SessionID != entry.id {
+			t.Fatal("session reference did not resolve to its own generation")
+		}
+	}
 	path := harnessPath(parent.ProjectID, "")
 	var sessions []harness.Session
 	if err := c.Do(t.Context(), http.MethodGet, path, nil, &sessions); err != nil {
@@ -107,7 +148,9 @@ func TestClaudeCoordinatorRegistersChildrenEndToEnd(t *testing.T) {
 	// an inherited ambient reference is not an exemption from uniqueness.
 	duplicate := map[string]any{"agent_principal_id": key.PrincipalID, "harness": "claude", "host": "children-test", "management_mode": "unmanaged", "role": "worker", "parent_harness_session_id": parent.ID, "harness_session_ref": "duplicate-child-registration-ref", "worker_lease": "synthetic-duplicate-child-lease-00000000", "vendor_session_ref": vendor}
 	err := c.Do(t.Context(), http.MethodPost, path, duplicate, nil)
-	if err == nil || err.Error() != "api 409: vendor_session_ref is already bound to an active generation for this agent" || strings.Contains(err.Error(), vendor) {
+	sum := sha256.Sum256([]byte("aeon.harness.ref\x00" + vendor))
+	wantConflict := fmt.Sprintf("api 409: vendor_session_ref is already bound to an active generation for this agent (sha256:%x)", sum[:8])
+	if err == nil || err.Error() != wantConflict || strings.Contains(err.Error(), vendor) || strings.Contains(err.Error(), key.Token) || strings.Contains(err.Error(), duplicate["worker_lease"].(string)) || strings.Contains(err.Error(), duplicate["harness_session_ref"].(string)) {
 		t.Fatalf("duplicate native reference diagnostic: %v", err)
 	}
 	assertParentBinding := func() {
@@ -129,7 +172,7 @@ func TestClaudeCoordinatorRegistersChildrenEndToEnd(t *testing.T) {
 		duplicate["worker_lease"] = "synthetic-child-family-lease-00000000-" + family
 		duplicate["vendor_session_ref"] = vendor
 		err := c.Do(t.Context(), http.MethodPost, path, duplicate, nil)
-		if err == nil || err.Error() != "api 409: vendor_session_ref is already bound to an active generation for this agent" || strings.Contains(err.Error(), vendor) {
+		if err == nil || err.Error() != wantConflict || strings.Contains(err.Error(), vendor) {
 			t.Fatalf("%s duplicate native reference diagnostic: %v", family, err)
 		}
 		assertParentBinding()
@@ -155,5 +198,75 @@ func TestClaudeCoordinatorRegistersChildrenEndToEnd(t *testing.T) {
 	code, _, stderr = runCLI(wrongAgent, "")
 	if code != 2 || !strings.Contains(stderr, fmt.Sprintf("authenticated agent %q", "aeon-coordinator")) || !strings.Contains(stderr, "--parent-session") {
 		t.Fatal("wrong agent diagnostic omitted the authenticated identity or child guidance")
+	}
+}
+
+// Risk: the CLI omits --branch or hides continuation metadata returned by the
+// real admission store. This exercises agent auth, CLI, API and migrated SQL.
+func TestHarnessRegisterContinuesDeliveryEndToEnd(t *testing.T) {
+	isolate(t)
+	d := dbtest.Open(t)
+	if err := db.EnsureTenant(t.Context(), d.App, "aeon", "Aeon"); err != nil {
+		t.Fatal(err)
+	}
+	base := renameServer(t, d, "aeon", true)
+	key := mintAgent(t, base, "continuation-worker")
+	seedProject(t, base, key.Token)
+	p := tenant.Principal{ID: key.PrincipalID, Kind: tenant.Agent}
+	if err := d.Admin.QueryRow(t.Context(), `SELECT id::text FROM tenants WHERE slug='aeon'`).Scan(&p.TenantID); err != nil {
+		t.Fatal(err)
+	}
+	var project, ticket, ticketKey string
+	ctx := tenant.WithPrincipal(t.Context(), p)
+	if err := db.InTenant(ctx, d.App, p.TenantID, func(tx pgx.Tx) error {
+		if err := db.LockWorkTreeTx(ctx, tx); err != nil {
+			return err
+		}
+		if err := tx.QueryRow(ctx, `SELECT id::text FROM nodes WHERE fields->>'project_key'='AEON'`).Scan(&project); err != nil {
+			return err
+		}
+		if err := tx.QueryRow(ctx, `INSERT INTO nodes(tenant_id,kind_id,key,title,parent_id) SELECT $1,k.id,aeon_next_node_key($1,k.short_prefix),'Fix delivery',$2 FROM node_kinds k WHERE k.slug='work' RETURNING id::text,key`, p.TenantID, project).Scan(&ticket, &ticketKey); err != nil {
+			return err
+		}
+		if _, err := tx.Exec(ctx, `INSERT INTO delivery_metric_sources(tenant_id,project_id,repository,ci_workflow,nightly_workflow,updated_at) VALUES($1,$2,'owner/linked','CI','Nightly',clock_timestamp())`, p.TenantID, project); err != nil {
+			return err
+		}
+		_, err := tx.Exec(ctx, `INSERT INTO delivery_metric_pulls(tenant_id,repository,pull_request,head_branch,opened_at,source,recorded_at) VALUES($1,'owner/linked',42,$2,clock_timestamp(),'webhook',clock_timestamp())`, p.TenantID, "work/"+strings.ToLower(ticketKey)+"-fix")
+		return err
+	}); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("AEON_URL", base)
+	t.Setenv("AEON_API_KEY", key.Token)
+	dir := t.TempDir()
+	refFile, leaseFile := filepath.Join(dir, "ref"), filepath.Join(dir, "lease")
+	for path, content := range map[string]string{refFile: "continuation-fixture-reference", leaseFile: "continuation-fixture-worker-lease-000000000000"} {
+		if err := os.WriteFile(path, []byte(content), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	branch := "work/" + strings.ToLower(ticketKey) + "-fix"
+	args := []string{"aeon", "--config", filepath.Join(dir, "missing"), "--json", "harness", "register", "--project", "AEON", "--agent", "continuation-worker", "--harness", "codex", "--harness-version", "1.0.0", "--host", "fixture", "--role", "worker", "--ticket", ticketKey, "--work-shape", "ship", "--branch", branch, "--harness-session-file", refFile, "--worker-lease-file", leaseFile}
+	code, out, stderr := runCLI(args, "")
+	if code != 0 || stderr != "" {
+		t.Fatalf("same-branch CLI register: exit %d stderr %s", code, stderr)
+	}
+	var s map[string]any
+	if err := json.Unmarshal([]byte(out), &s); err != nil {
+		t.Fatal(err)
+	}
+	continuation, ok := s["build_continuation"].(map[string]any)
+	if !ok || continuation["branch"] != branch || continuation["repository"] != "owner/linked" || continuation["pull_request"] != float64(42) || s["parallel_reason"] != nil {
+		t.Fatalf("CLI lost continuation result: %s", out)
+	}
+	if err := db.InTenant(ctx, d.App, p.TenantID, func(tx pgx.Tx) error {
+		var count int
+		err := tx.QueryRow(ctx, `SELECT count(*) FROM events WHERE node_id=$1 AND type='delivery.continued' AND actor_principal_id=$2 AND after->>'session_id'=$3`, ticket, p.ID, s["id"]).Scan(&count)
+		if err == nil && count != 1 {
+			t.Errorf("CLI continuation audit count = %d", count)
+		}
+		return err
+	}); err != nil {
+		t.Fatal(err)
 	}
 }

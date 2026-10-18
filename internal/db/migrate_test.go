@@ -5,6 +5,7 @@ package db_test
 import (
 	"context"
 	"embed"
+	"errors"
 	"fmt"
 	"io/fs"
 	"sort"
@@ -19,6 +20,15 @@ import (
 
 func TestEveryTenantTableHasForcedRLS(t *testing.T) {
 	database := dbtest.Open(t)
+	// This explicitly global capability catalog must contain only deployment
+	// metadata. Pin its shape before exempting it from tenant-row isolation.
+	var capabilityColumns []string
+	if err := database.Admin.QueryRow(t.Context(), `SELECT array_agg(column_name::text ORDER BY column_name) FROM information_schema.columns WHERE table_schema='public' AND table_name='aeon_required_capabilities'`).Scan(&capabilityColumns); err != nil {
+		t.Fatal(err)
+	}
+	if strings.Join(capabilityColumns, ",") != "capability,since" {
+		t.Fatalf("unexpected global capability columns: %v", capabilityColumns)
+	}
 	rows, err := database.Admin.Query(t.Context(), `
 		SELECT c.relname,
 		       EXISTS(SELECT 1 FROM pg_attribute a WHERE a.attrelid=c.oid AND a.attname='tenant_id' AND NOT a.attisdropped),
@@ -39,7 +49,7 @@ func TestEveryTenantTableHasForcedRLS(t *testing.T) {
 		if err := rows.Scan(&name, &hasTenant, &enabled, &forced, &policies); err != nil {
 			t.Fatal(err)
 		}
-		if name == "tenants" || name == "identities" || name == "schema_migrations" {
+		if name == "tenants" || name == "identities" || name == "schema_migrations" || name == "aeon_required_capabilities" {
 			continue
 		}
 		count++
@@ -76,6 +86,135 @@ func migrationNames(t *testing.T) []string {
 		t.Fatal("no embedded migrations")
 	}
 	return names
+}
+
+// AEON-1148: legacy off values must migrate under FORCE RLS for every tenant,
+// with revision-bound forms invalidated and one audit per changed workspace.
+func TestRetiredModelAutoUpdateMigrationIsTenantScopedAndIdempotent(t *testing.T) {
+	const name = "1329_retired_model_auto_update.sql"
+	d, err := dbtest.NewUnmigrated(t.Context())
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		if err := d.Close(); err != nil {
+			t.Error(err)
+		}
+	})
+	type fixture struct {
+		tenant, rule string
+		revision     int64
+	}
+	var fixtures []fixture
+	seed := dbtest.Seed(t.Context())
+	err = db.MigrateWithHook(t.Context(), d.App, func(next string) error {
+		if next != name {
+			return nil
+		}
+		for i, rule := range []string{"shipped_only", "shipped_only", "allow", "deny"} {
+			f := fixture{rule: rule}
+			if err := d.App.QueryRow(seed, `INSERT INTO tenants(slug,name) VALUES($1,'Auto-update migration') RETURNING id::text`, fmt.Sprintf("auto-update-%d", i)).Scan(&f.tenant); err != nil {
+				return err
+			}
+			if err := db.InTenant(seed, d.App, f.tenant, func(tx pgx.Tx) error {
+				if _, err := tx.Exec(seed, `INSERT INTO model_refresh_settings(tenant_id) VALUES($1)`, f.tenant); err != nil {
+					return err
+				}
+				if _, err := tx.Exec(seed, `UPDATE account_use_rules SET new_models=$1,new_accounts='ask',new_contexts='ask',new_projects='default',revision=10`, rule); err != nil {
+					return err
+				}
+				if _, err := tx.Exec(seed, `SELECT set_config('aeon.account_use_rule_write','on',true)`); err != nil {
+					return err
+				}
+				if _, err := tx.Exec(seed, `UPDATE model_refresh_settings SET auto_add_profiles=$1`, rule == "allow"); err != nil {
+					return err
+				}
+				return tx.QueryRow(seed, `SELECT revision FROM account_use_rules`).Scan(&f.revision)
+			}); err != nil {
+				return err
+			}
+			fixtures = append(fixtures, f)
+		}
+		return nil
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(fixtures) != 4 {
+		t.Fatal("upgrade fixtures did not run")
+	}
+	verify := func() {
+		t.Helper()
+		for _, f := range fixtures {
+			if err := db.InTenant(seed, d.App, f.tenant, func(tx pgx.Tx) error {
+				var rule, accounts, contexts, projects string
+				var revision int64
+				var auto bool
+				if err := tx.QueryRow(seed, `SELECT new_models,new_accounts,new_contexts,new_projects,revision,(SELECT auto_add_profiles FROM model_refresh_settings) FROM account_use_rules`).Scan(&rule, &accounts, &contexts, &projects, &revision, &auto); err != nil {
+					return err
+				}
+				want, wantRevision, wantAudits := f.rule, f.revision, 0
+				if f.rule == "shipped_only" {
+					want, wantRevision, wantAudits = "deny", f.revision+1, 1
+				}
+				if rule != want || revision != wantRevision || auto != (want == "allow") || accounts != "ask" || contexts != "ask" || projects != "default" {
+					return fmt.Errorf("tenant %s: rule=%s revision=%d auto=%t other=%s/%s/%s", f.tenant, rule, revision, auto, accounts, contexts, projects)
+				}
+				var audits, correct int
+				if err := tx.QueryRow(seed, `SELECT count(*),count(*) FILTER (WHERE tenant_id=$1::uuid AND before->>'new_models'='shipped_only' AND after->>'new_models'='deny' AND (after->>'revision')::bigint=$2 AND actor_principal_id=(SELECT id FROM principals WHERE name='System' AND roles @> ARRAY['system']::text[])) FROM events WHERE metadata->>'migration'='1329'`, f.tenant, wantRevision).Scan(&audits, &correct); err != nil {
+					return err
+				}
+				if audits != wantAudits || correct != wantAudits {
+					return fmt.Errorf("tenant %s: %d audits, %d correct, want %d", f.tenant, audits, correct, wantAudits)
+				}
+				return nil
+			}); err != nil {
+				t.Fatal(err)
+			}
+		}
+	}
+	verify()
+	if _, err := d.App.Exec(t.Context(), `DELETE FROM schema_migrations WHERE version=$1`, name); err != nil {
+		t.Fatal(err)
+	}
+	if err := db.MigrateWithHook(t.Context(), d.App, nil); err != nil {
+		t.Fatal(err)
+	}
+	verify()
+}
+
+// migrateLegacyWorkWithHook keeps cumulative ticket/task schema assertions at
+// the boundary before kind unification. Those fixtures intentionally include
+// incompatible legacy schemas; work_nodes_migration_test.go covers their
+// reconciliation separately. Use the real runner and verify the entire applied
+// prefix so an earlier migration failure or a missing boundary cannot pass.
+func migrateLegacyWorkWithHook(t *testing.T, d *dbtest.DB, before func(string) error) error {
+	t.Helper()
+	names := migrationNames(t)
+	end := sort.SearchStrings(names, workMigration)
+	if end == len(names) || names[end] != workMigration {
+		return fmt.Errorf("missing legacy work boundary %s", workMigration)
+	}
+	err := db.MigrateWithHook(t.Context(), d.App, func(name string) error {
+		if name == workMigration {
+			return beforeWork
+		}
+		if before != nil {
+			return before(name)
+		}
+		return nil
+	})
+	if !errors.Is(err, beforeWork) {
+		return fmt.Errorf("expected stop before %s, got %v", workMigration, err)
+	}
+	var applied string
+	if err := d.App.QueryRow(t.Context(), `SELECT coalesce(string_agg(version, ',' ORDER BY version), '') FROM schema_migrations`).Scan(&applied); err != nil {
+		return err
+	}
+	if want := strings.Join(names[:end], ","); applied != want {
+		return fmt.Errorf("legacy migration prefix = %s, want %s", applied, want)
+	}
+	return nil
 }
 
 func TestMigrationsApplyAndReapply(t *testing.T) {

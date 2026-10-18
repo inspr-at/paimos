@@ -12,6 +12,8 @@ import (
 
 var ErrAuthorizationExpired = errors.New("process signal authorization expired")
 
+var ErrCleanupUnconfirmed = errors.New("owned process group cleanup unconfirmed")
+
 // Lifetime keeps the group leader's PID reserved until all signaling has
 // finished. Wait first observes exit without reaping, then takes the same lock
 // as Signal before cmd.Wait releases the PID. A stored PID alone is never used.
@@ -66,7 +68,7 @@ func (l *Lifetime) waitOwned(observe func(int) error, killGroup bool) error {
 	l.reaped = true
 	l.mu.Unlock()
 	if groupErr != nil {
-		return errors.Join(result, groupErr)
+		return errors.Join(result, ErrCleanupUnconfirmed, groupErr)
 	}
 	return result
 }

@@ -39,6 +39,9 @@ type capacityLearning struct {
 }
 
 func loadLearning(ctx context.Context, tx pgx.Tx, id string) (capacityLearning, error) {
+	if s := projectionInputs(tx); s != nil {
+		return s.learning[id], nil
+	}
 	var l capacityLearning
 	var raw []byte
 	err := tx.QueryRow(ctx, `SELECT state FROM account_capacity_learning WHERE account_id=$1`, id).Scan(&raw)

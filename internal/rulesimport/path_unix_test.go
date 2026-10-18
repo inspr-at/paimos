@@ -238,3 +238,26 @@ func TestDoctrineDarwinAliases(t *testing.T) {
 		})
 	}
 }
+
+func TestContainedCustomCapSurvivesGrowthDuringRead(t *testing.T) {
+	path := writeDoc(t, t.TempDir(), "AGENTS.md", "small")
+	f, err := openNoFollow(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer f.Close()
+	const cap = 16
+	body, _, n, err := readOpenedDoctrineLimit(f, func(r io.Reader) ([]byte, error) {
+		if err := os.WriteFile(path, []byte(strings.Repeat("\r", cap+20)), 0600); err != nil {
+			t.Fatal(err)
+		}
+		b, e := io.ReadAll(r)
+		if len(b) != cap+1 {
+			t.Fatal("caller cap was not used before normalization")
+		}
+		return b, e
+	}, cap)
+	if !errors.Is(err, ErrByteBound) || body != "" || n != 0 {
+		t.Fatal("custom cap returned oversized content")
+	}
+}

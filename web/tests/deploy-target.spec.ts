@@ -4,7 +4,6 @@
 import { test, expect, type Page } from '@playwright/test'
 import { fixtures, me, mockWork } from './work-fixtures'
 import { agentData, mockAgents, type AgentWorld } from './agents-fixtures'
-import { journeyWorld, mockJourney } from './journey-fixtures'
 
 const world: AgentWorld = {
   me: me.id,
@@ -23,7 +22,8 @@ const namedTarget = {
 }
 const ahead = (minutes: number) => new Date(Date.now() + minutes * 60_000).toISOString()
 const ago = (minutes: number) => new Date(Date.now() - minutes * 60_000).toISOString()
-const queue = (page: Page) => page.getByRole('region', { name: 'Needs you' })
+// AEON-569 / #458 and AEON-1209 / #586 moved person decisions into the Desk.
+const request = (page: Page) => page.getByRole('region', { name: 'Permission request', exact: true })
 
 async function openAgents(page: Page) {
   await mockWork(page, fixtures(), { admin: true })
@@ -46,102 +46,32 @@ async function openAgents(page: Page) {
       target: { ...namedTarget, hosts: ['app-02'], environment: 'staging' }, target_digest_sha256: otherDigest,
     },
   )
-  await mockAgents(page, data)
-  await page.goto('/agents')
-  await expect(page.getByRole('heading', { name: 'Agents', level: 1 })).toBeVisible()
-  await expect(queue(page).getByText('app-01 · production', { exact: true }).first()).toBeVisible()
-  return data
+  const calls = await mockAgents(page, data)
+  await page.goto('/decision-desk?item=a:a9000000-0000-4000-8000-000000000091')
+  await expect(request(page).getByText('app-01 · production', { exact: true })).toBeVisible()
+  return { data, calls }
 }
 
-
-function namedJourney() {
-  const world = journeyWorld('deploy')
-  Object.assign(world.approvals[0], { target: namedTarget, target_digest_sha256: digest })
-  Object.assign(world.journey.stages.find(stage => stage.key === 'deploy')!, { target: namedTarget, target_digest_sha256: digest })
-  return world
-}
 
 test('Needs you names destinations and keeps target-less approvals usable', async ({ page }) => {
-  await openAgents(page)
-  const named = queue(page).locator('.item', { hasText: 'app-01' })
+  const { data, calls } = await openAgents(page)
+  const named = request(page)
   await expect(named.getByRole('region', { name: /Deploy target: app-01/ })).toContainText(namedTarget.change)
   await expect(named.getByText('named by the agent', { exact: true })).toBeVisible()
-  await expect(named.getByRole('region')).not.toContainText('imac0')
-  const absent = queue(page).locator('.item', { hasText: 'Deploy wherever the session host is' })
-  await expect(absent.getByRole('region', { name: 'Target not named' })).toBeVisible()
-  await absent.getByRole('button', { name: 'Approve', exact: true }).click()
-  await expect(absent.getByLabel('Reason (optional)')).toBeVisible()
-  await absent.getByRole('button', { name: 'Approve permission', exact: true }).click()
-  await expect(absent).toHaveCount(0)
-  await queue(page).getByRole('button', { name: /^Decided/ }).click()
-  const historical = queue(page).locator('.past', { hasText: 'app-02' })
-  await expect(historical).toContainText('staging')
-  await expect(historical.locator('.past-outcome')).toHaveText('Approved')
-})
-
-for (const width of [390, 1600]) for (const named of [true, false]) {
-  test(`journey decision and confirmation preserve optional targets: ${named} at ${width}`, async ({ page }) => {
-    await page.setViewportSize({ width, height: 1000 })
-    await mockWork(page, fixtures())
-    const calls = await mockJourney(page, named ? namedJourney() : journeyWorld('deploy'))
-    await page.goto('/p/PHAROS?view=journey')
-    const card = page.getByRole('region', { name: 'Decision: The host did not apply it' })
-    await expect(card.getByRole('region', { name: named ? /Deploy target: app-01/ : 'Target not named' })).toBeVisible()
-    const history = page.getByRole('region', { name: 'Handoffs · deploy and verify' })
-    // The strict 1.0 handoff has no target; never attribute the current stage's
-    // destination to a historical attempt. The stage and approval carry it.
-    await expect(history.getByRole('region', { name: /Deploy target:|Target not named/ })).toHaveCount(0)
-    await expect(page.getByRole('region', { name: 'Target', exact: true })).toContainText(named ? 'app-01' : 'Target not named')
-    if (named) await expect(card.getByText('named by the agent', { exact: true })).toBeVisible()
-    await card.getByRole('button', { name: 'Approve and retry deployment' }).click()
-    const dialog = page.getByRole('dialog', { name: 'Retry deployment?' })
-    await expect(dialog).toContainText(named ? 'Server: app-01 · production' : 'Target not named')
-    await dialog.getByRole('button', { name: 'Approve and retry deployment' }).click()
-    await expect.poll(() => calls.filter(call => call.path.endsWith('/decision')).length).toBe(1)
-  })
-}
-
-test('deploy target uses journey metadata when no approval is available', async ({ page }) => {
-  await mockWork(page, fixtures())
-  const world = namedJourney()
-  world.approvals = []
-  await mockJourney(page, world)
-  await page.goto('/p/PHAROS?view=journey')
-  const target = page.getByRole('region', { name: 'Target', exact: true })
-  await expect(target).toContainText('app-01 · production')
-  await expect(target).toContainText('named by the agent')
-})
-
-test('deploy target screenshots', async ({ page }) => {
-  test.skip(!process.env.DEPLOY_TARGET_SHOTS, 'Opt-in visual evidence')
-  test.setTimeout(120_000)
-  for (const surface of ['agents', 'journey']) {
-    if (surface === 'agents') {
-      await openAgents(page)
-      await expect(page.getByRole('region', { name: 'Live now' }).locator('.name').first()).toBeVisible()
-      await queue(page).getByRole('button', { name: /^Decided/ }).click()
-    } else {
-      await mockWork(page, fixtures())
-      await mockJourney(page, namedJourney())
-      await page.goto('/p/PHAROS?view=journey')
-    }
-    await expect(page.getByText('app-01 · production', { exact: true }).first()).toBeVisible()
-    for (const theme of ['light', 'dark'] as const) {
-      await page.emulateMedia({ colorScheme: theme })
-      await page.evaluate(value => { document.documentElement.dataset.theme = value }, theme)
-      for (const width of [1600, 390]) {
-        await page.setViewportSize({ width, height: width === 390 ? 844 : 1000 })
-        await page.getByText('app-01 · production', { exact: true }).first().scrollIntoViewIfNeeded()
-        expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true)
-        await page.screenshot({ animations: 'disabled', path: `${process.env.DEPLOY_TARGET_SHOTS}/${surface}-${theme}-${width}.png`, fullPage: true })
-        if (surface === 'agents') {
-          await queue(page).locator('.item', { hasText: 'Deploy wherever the session host is' }).screenshot({ animations: 'disabled', path: `${process.env.DEPLOY_TARGET_SHOTS}/missing-${theme}-${width}.png` })
-          await queue(page).locator('.history').screenshot({ animations: 'disabled', path: `${process.env.DEPLOY_TARGET_SHOTS}/approval-history-${theme}-${width}.png` })
-        } else {
-          await page.getByRole('region', { name: 'Decision: The host did not apply it' }).screenshot({ animations: 'disabled', path: `${process.env.DEPLOY_TARGET_SHOTS}/decision-${theme}-${width}.png` })
-          await page.getByRole('region', { name: 'Handoffs · deploy and verify' }).screenshot({ animations: 'disabled', path: `${process.env.DEPLOY_TARGET_SHOTS}/handoff-history-${theme}-${width}.png` })
-        }
-      }
-    }
-  }
+  await expect(named).not.toContainText('imac0')
+  await page.getByTestId('desk-close').click()
+  await page.getByTestId('desk-row-a:a9000000-0000-4000-8000-000000000092').click()
+  await expect(request(page).getByRole('region', { name: 'Target not named' })).toBeVisible()
+  await page.getByTestId('choice-0').click()
+  await expect(page.getByRole('textbox', { name: 'Reason', exact: true })).toBeEnabled()
+  await page.getByTestId('desk-decide').click()
+  await expect.poll(() => data.approvals.find(item => item.id.endsWith('92'))?.decision).toBe('approved')
+  expect(calls.filter(call => call.method === 'POST' && call.path.endsWith('/decision'))).toMatchObject([{ path: '/api/approvals/a9000000-0000-4000-8000-000000000092/decision', body: { decision: 'approved' } }])
+  await page.getByTestId('desk-close').click()
+  await expect(page.getByTestId('desk-row-a:a9000000-0000-4000-8000-000000000092')).toHaveCount(0)
+  await page.getByRole('radio', { name: /^Decided/ }).click()
+  await page.getByTestId('desk-row-a:a9000000-0000-4000-8000-000000000093').click()
+  await expect(request(page)).toContainText('app-02 · staging')
+  // AEON-1339: the decided line in the memo head says what happened.
+  await expect(page.getByTestId('desk-line')).toContainText('Approved')
 })

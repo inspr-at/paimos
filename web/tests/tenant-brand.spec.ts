@@ -149,7 +149,8 @@ test('the product mark stays left and the named release pill stays right', async
   const box = await pill.boundingBox()
   expect(box!.x).toBeGreaterThan((await footerName(page).boundingBox())!.x)
   await pill.hover()
-  await expect(pill.locator('.calendar-version')).toHaveAttribute('data-version-view', 'revealed')
+  await expect(pill.locator('.calendar-version')).toHaveAttribute('data-version-view', 'pretty')
+  await expect(page.locator('.release-hover-card .calendar-version')).toHaveAttribute('data-version-view', 'revealed')
   await expect(pill.locator('.footer-codename')).toBeVisible()
   await pill.click()
   await expect(page).toHaveURL(new RegExp(`releases=${history.current.replace(/\./g, '\\.')}`))
@@ -263,9 +264,8 @@ for (const locale of ['en-GB', 'de-AT']) {
     await page.goto('/settings/workspace#brand')
     const svg = WIDE.replace('<svg ', '<svg role="img" aria-label="Northwind" data-name="Logo" ')
     await page.locator('#brand').getByLabel('Logo file', { exact: true }).setInputFiles({ name: 'export.svg', mimeType: 'image/svg+xml', buffer: Buffer.from(svg) })
-    await expect(page.locator('.toast')).toContainText(locale === 'de-AT'
-      ? '3 nicht zeichnende Attribute entfernt (role, aria-label, data-name).'
-      : 'Removed 3 non-drawing attributes (role, aria-label, data-name).')
+    await expect(page.locator('.toast')).toContainText('Removed 3 non-drawing attributes (role, aria-label, data-name).')
+    await expect(page.locator('.toast')).not.toContainText('nicht zeichnende')
   })
 }
 

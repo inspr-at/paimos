@@ -46,9 +46,10 @@ for (const width of [390, 1600]) for (const colorScheme of ['light', 'dark'] as 
     await expect(ready.getByRole('button', { name: 'Copied', exact: true })).toBeVisible()
     expect(await page.evaluate(() => navigator.clipboard.readText())).toBe(await ready.getByLabel('New agent key').inputValue())
     const origin = new URL(page.url()).origin
-    await expect(ready.getByLabel('CLI login command')).toHaveValue(`paimos --instance 127.0.0.1 auth login --name 127.0.0.1 --url '${origin}'`)
+    // AEON-730: the instance is named after the workspace (no slug in this fixture: the host).
+    await expect(ready.getByLabel('CLI login command')).toHaveText(`paimos auth login --name 127.0.0.1 --url '${origin}'`)
     await ready.getByRole('button', { name: 'Copy command', exact: true }).click()
-    expect(await page.evaluate(() => navigator.clipboard.readText())).toBe(await ready.getByLabel('CLI login command').inputValue())
+    expect(await page.evaluate(() => navigator.clipboard.readText())).toBe(await ready.getByLabel('CLI login command').textContent())
     expect(new URL(page.url()).search).toBe('')
     await shot(page, `${width}-${colorScheme}-ready`)
     const violations = (await new AxeBuilder({ page }).withTags(['wcag2a', 'wcag2aa', 'wcag21aa']).analyze()).violations.filter(v => v.impact === 'serious' || v.impact === 'critical')
@@ -89,7 +90,7 @@ test('selected projects, clipboard rejection and duplicate-name recovery', async
   await expect(ready.getByRole('status')).toContainText('key is selected')
   expect(await ready.getByLabel('New agent key').evaluate((input: HTMLInputElement) => input.selectionStart === 0 && input.selectionEnd === input.value.length && document.activeElement === input)).toBe(true)
   await ready.getByRole('button', { name: 'Copy command', exact: true }).click()
-  expect(await ready.getByLabel('CLI login command').evaluate((input: HTMLTextAreaElement) => input.selectionStart === 0 && input.selectionEnd === input.value.length)).toBe(true)
+  expect(await ready.getByLabel('CLI login command').evaluate(command => getSelection()?.toString() === command.textContent && document.activeElement === command)).toBe(true)
   const created = world.agents.find(a => a.name === 'project-helper')!
   expect(created.workspace_role).toBeNull()
   expect(world.bindings.filter(b => b.principal_id === created.principal_id)).toEqual([{ principal_id: created.principal_id, project_id: 'p-pharos', role_id: 'role-viewer' }])
@@ -97,6 +98,41 @@ test('selected projects, clipboard rejection and duplicate-name recovery', async
   await expect(page).toHaveURL('/settings/access/agents')
   await page.reload()
   await expect(page.getByLabel('New agent key')).toHaveCount(0)
+})
+
+// AEON-730: the CLI command is a read-only textbox. Escape leaves it (and the
+// key field) first, so a stray Escape after a failed copy cannot lose the key.
+test('Escape leaves the key and the command before Key ready closes', async ({ page }) => {
+  await mockWork(page, fixtures())
+  const world = accessWorld()
+  await mockAccess(page, world)
+  await page.addInitScript(() => Object.defineProperty(navigator, 'clipboard', { value: { writeText: async () => { throw new Error('denied') } } }))
+  await page.goto('/settings/access/agents?new=1')
+  const form = page.getByRole('dialog', { name: 'New agent', exact: true })
+  await form.getByLabel('Name', { exact: true }).fill('escape-helper')
+  await form.getByRole('button', { name: 'Create agent', exact: true }).click()
+  const sheet = page.getByRole('dialog', { name: 'Create first key for escape-helper' })
+  await sheet.getByRole('checkbox', { name: /nodes\.read/ }).check()
+  await sheet.getByRole('button', { name: 'Create first key', exact: true }).click()
+  const ready = page.getByRole('dialog', { name: 'Key ready', exact: true })
+  const key = ready.getByLabel('New agent key')
+  const command = ready.getByLabel('CLI login command')
+  await ready.getByRole('button', { name: 'Copy key', exact: true }).click()
+  await expect(ready.getByRole('status')).toContainText('key is selected')
+  await expect(key).toBeFocused()
+  await page.keyboard.press('Escape')
+  await expect(key).not.toBeFocused()
+  await expect(ready).toBeVisible()
+  await ready.getByRole('button', { name: 'Copy command', exact: true }).click()
+  await expect(ready.getByRole('status').filter({ hasText: 'Command selected' })).toBeVisible()
+  await expect(command).toBeFocused()
+  await page.keyboard.press('Escape')
+  await expect(command).not.toBeFocused()
+  await expect(ready).toBeVisible()
+  await expect(key).toHaveValue(/\S/)
+  await page.keyboard.press('Escape')
+  await expect(ready).toHaveCount(0)
+  expect(world.keys.filter(k => k.principal_id === world.agents.find(a => a.name === 'escape-helper')!.principal_id)).toHaveLength(1)
 })
 
 for (const who of ['member', 'viewer', 'agent'] as const) test(`empty agents hint stays hidden for ${who}`, async ({ page }) => {

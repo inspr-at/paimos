@@ -104,7 +104,10 @@ test('j, k and Enter open a project from the keyboard', async ({ page }) => {
   await expect(page.getByRole('heading', { name: 'Pharos', level: 1 })).toBeVisible()
   // The breadcrumb continues from the Projects place.
   await expect(page.getByRole('navigation', { name: 'Places' }).getByRole('link', { name: 'Projects' })).toHaveAttribute('aria-current', 'true')
-  await expect(page.getByRole('navigation', { name: 'Breadcrumb' })).toHaveText('/PHAROSPharos')
+  // #261 added a phone fold control with its own key; assert the actual project link.
+  const projectLink = page.getByRole('navigation', { name: 'Breadcrumb' }).getByRole('link', { name: 'PHAROS Pharos', exact: true })
+  await expect(projectLink).toHaveText('PHAROSPharos')
+  await expect(projectLink).toHaveAttribute('href', '/p/PHAROS')
 })
 
 test('loading shows skeleton rows; a failure explains itself and retries', async ({ page }) => {

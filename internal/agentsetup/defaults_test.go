@@ -3,6 +3,7 @@
 package agentsetup
 
 import (
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
@@ -94,7 +95,7 @@ func TestBeginRejectsPrivateStoreInsideHomebrewShapedRepository(t *testing.T) {
 	if api.createCount != 0 || len(exec.calls) != 0 {
 		t.Fatal("unsafe private store reached pairing or service preflight")
 	}
-	if _, err := store.Read(snapshotName, 1<<20); !os.IsNotExist(err) {
+	if _, err := store.Read(snapshotName, 1<<20); !errors.Is(err, os.ErrNotExist) {
 		t.Fatal("unsafe private store persisted pairing state", err)
 	}
 }

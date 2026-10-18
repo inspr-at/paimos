@@ -11,6 +11,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/inspr-at/paimos/internal/harness"
 	"github.com/inspr-at/paimos/internal/ownedprocess"
 )
 
@@ -30,6 +31,7 @@ func (rt *runtime) harnessRun() *Command {
 			fs.string(&o.Label, "label", 0, "public session label")
 			fs.string(&o.Ticket, "ticket", 0, "ticket key")
 			fs.string(&role, "role", 0, "reviewer, fixer, worker or coordinator")
+			fs.string(&o.ParallelReason, "parallel-reason", 0, "explicit public reason for parallel work; requires person or coordinator authority")
 			fs.string(&o.Parent, "parent-session", 0, "lead session UUID")
 			fs.string(&o.Shape, "work-shape", 0, "ship or scout (reviewer defaults to scout)")
 			fs.string(&o.Model, "model", 0, "public model name")
@@ -95,13 +97,14 @@ func (rt *runtime) harnessRun() *Command {
 	}
 }
 
-func (rt *runtime) runHarnessCommand(ctx context.Context, o heartbeatOptions, args []string) error {
+func (rt *runtime) runHarnessCommand(ctx context.Context, o heartbeatOptions, args []string) (result error) {
 	if len(args) == 0 {
 		return usagef("command required after --")
 	}
 	if !ownedprocess.TrackingSupported() {
 		return errors.New("harness run requires process ownership support on this platform")
 	}
+	o.OwnedStop = true
 	o.applyRuntimeDefaults()
 	// Registration and private persistence precede execution: even a command
 	// that exits immediately has one durable generation and one stop.
@@ -118,7 +121,7 @@ func (rt *runtime) runHarnessCommand(ctx context.Context, o heartbeatOptions, ar
 	}
 	finish := func() error { return rt.finishHeartbeat(o, &session) }
 	if ctx.Err() != nil {
-		return errors.Join(&exitError{code: 143}, finish())
+		return errors.Join(&exitError{code: 143, msg: "harness run: interrupted before child launch"}, finish())
 	}
 	stopLink := rt.startAccountLink(ctx, o)
 	defer stopLink()
@@ -128,6 +131,17 @@ func (rt *runtime) runHarnessCommand(ctx context.Context, o heartbeatOptions, ar
 		session.stopReason = stopProcessFailed
 		return errors.Join(errors.New("owned process group unavailable"), finish())
 	}
+	restoreTerminal, err := prepareHarnessTerminal(cmd)
+	if err != nil {
+		session.stopReason = stopProcessFailed
+		return errors.Join(err, finish())
+	}
+	defer func() {
+		if err := restoreTerminal(); err != nil {
+			fmt.Fprintf(rt.stderr, "harness: terminal restoration failed: %v\n", err)
+			result = errors.Join(result, err)
+		}
+	}()
 	if err = cmd.Start(); err != nil {
 		session.stopReason = stopProcessFailed
 		return errors.Join(err, finish())
@@ -144,10 +158,23 @@ func (rt *runtime) runHarnessCommand(ctx context.Context, o heartbeatOptions, ar
 			done <- life.Wait()
 		}
 	}()
+	stopControls := make(chan string, 1)
 	beatCtx, cancelBeat := context.WithCancel(context.WithoutCancel(ctx))
 	beatDone := make(chan error, 1)
 	go func() {
-		beatDone <- rt.heartbeatLoop(beatCtx, o, heartbeatDeps{alive: func(int) bool { return true }}, &session)
+		beatDone <- rt.heartbeatLoop(beatCtx, o, heartbeatDeps{alive: func(int) bool { return true }, stopOwned: func(ctx context.Context, pause *harness.Pause, deadline time.Time) error {
+			if !verified || !validUUID(pause.StopControlID) {
+				return errors.New("owned stop unavailable")
+			}
+			if err := life.SignalBefore(ctx, true, deadline); err != nil {
+				return err
+			}
+			select {
+			case stopControls <- pause.StopControlID:
+			default:
+			}
+			return nil
+		}}, &session)
 	}()
 	var childErr error
 	select {
@@ -166,14 +193,27 @@ func (rt *runtime) runHarnessCommand(ctx context.Context, o heartbeatOptions, ar
 	// The stop names how the job ended: a clean exit finishes it, any other exit
 	// fails it, and an interrupt is a plain stop (AEON-437). Set before the loop
 	// that closes the session sees the cancellation.
-	session.stopReason = jobStopReason(ctx.Err() != nil, childErr)
 	cancelBeat()
 	beatErr := <-beatDone
+	requestedStop := false
+	select {
+	case id := <-stopControls:
+		requestedStop = true
+		completeCtx, cancel := context.WithTimeout(context.Background(), heartbeatStopTimeout)
+		completeErr := rt.harnessDoCtx(completeCtx, "POST", harnessPath(session.disk.ProjectID, session.id)+"/controls/"+id+"/complete", session.lease, map[string]string{"outcome": "applied", "reason": "owned_group_signalled_root_exited"}, nil)
+		cancel()
+		if completeErr != nil {
+			beatErr = errors.Join(beatErr, completeErr)
+		}
+	default:
+	}
+	session.stopReason = jobStopReason(ctx.Err() != nil || requestedStop, childErr)
+	beatErr = errors.Join(beatErr, finish())
 	if beatErr != nil {
-		fmt.Fprintf(rt.stderr, "harness: session cleanup needs recovery with run-heartbeat --state-dir %s\n", o.StateDir)
+		fmt.Fprintf(rt.stderr, "harness: session cleanup failed (API status %d); recover with run-heartbeat --state-dir %s\n", heartbeatStatus(beatErr), o.StateDir)
 	}
 	if ctx.Err() != nil {
-		return &exitError{code: 143}
+		return &exitError{code: 143, msg: "harness run: interrupted; child stopped"}
 	}
 	if childErr != nil {
 		var exit *exec.ExitError
@@ -182,7 +222,7 @@ func (rt *runtime) runHarnessCommand(ctx context.Context, o heartbeatOptions, ar
 			if code < 1 {
 				code = 1
 			}
-			return &exitError{code: code}
+			return &exitError{code: code, msg: fmt.Sprintf("harness run: child %s; check its output (interactive commands need a foreground terminal on stdin)", exit)}
 		}
 		return childErr
 	}

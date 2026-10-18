@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/inspr-at/paimos/internal/capacity"
+	"github.com/inspr-at/paimos/internal/httpapi"
 	"github.com/jackc/pgx/v5"
 )
 
@@ -30,6 +31,9 @@ type scheduleEntry struct {
 }
 
 func loadScheduleEntries(ctx context.Context, tx pgx.Tx, person string) ([]scheduleEntry, error) {
+	if s := projectionInputs(tx); s != nil {
+		return s.entries[person], nil
+	}
 	rows, err := tx.Query(ctx, `SELECT scope,scope_key,schedule FROM account_capacity_schedules WHERE principal_id=$1 ORDER BY scope,scope_key`, person)
 	if err != nil {
 		return nil, err
@@ -51,6 +55,9 @@ func loadScheduleEntries(ctx context.Context, tx pgx.Tx, person string) ([]sched
 }
 
 func personDefaultSchedule(ctx context.Context, tx pgx.Tx, person string) (capacity.Schedule, error) {
+	if s := projectionInputs(tx); s != nil {
+		return s.defaults[person], nil
+	}
 	var zone string
 	err := tx.QueryRow(ctx, `SELECT timezone FROM personal_profiles WHERE principal_id=$1`, person).Scan(&zone)
 	if err != nil && !isNoRows(err) {
@@ -227,13 +234,14 @@ func saveCarried(ctx context.Context, tx pgx.Tx, tenantID, person string, next c
 // concurrency limit, a deadline and the aggregate integration work. The preview
 // is read-only but CPU-bound, so every editor keystroke must stay cheap.
 type previewGuard struct {
-	mu      sync.Mutex
-	hits    map[string][]time.Time
-	limit   int
-	window  time.Duration
-	slots   chan struct{}
-	budget  int
-	timeout time.Duration
+	mu          sync.Mutex
+	hits        map[string][]time.Time
+	limit       int
+	window      time.Duration
+	slots       chan struct{}
+	budget      int
+	timeout     time.Duration
+	withTimeout func(context.Context, time.Duration) (context.Context, context.CancelFunc)
 }
 
 const (
@@ -247,7 +255,7 @@ const (
 )
 
 func newPreviewGuard(limit int, window time.Duration, slots, budget int, timeout time.Duration) *previewGuard {
-	return &previewGuard{hits: map[string][]time.Time{}, limit: limit, window: window, slots: make(chan struct{}, slots), budget: budget, timeout: timeout}
+	return &previewGuard{hits: map[string][]time.Time{}, limit: limit, window: window, slots: make(chan struct{}, slots), budget: budget, timeout: timeout, withTimeout: context.WithTimeout}
 }
 
 var defaultPreviewGuard = newPreviewGuard(previewRate, previewWindow, previewSlots, previewBudget, previewTimeout)
@@ -308,36 +316,19 @@ func previewSteps(start, reset time.Time) int {
 // connection gets a read deadline where the server supports it, and the handler
 // stops waiting at the deadline either way (408), so a stalled upload costs
 // neither a preview slot nor the caller's time.
-func readBodyBy(w http.ResponseWriter, r *http.Request, deadline time.Time) ([]byte, error) {
-	_ = http.NewResponseController(w).SetReadDeadline(deadline)
-	body := http.MaxBytesReader(w, r.Body, 1<<20)
-	type result struct {
-		raw []byte
-		err error
+func readBodyBy(ctx context.Context, w http.ResponseWriter, r *http.Request) ([]byte, error) {
+	raw, err := httpapi.ReadRequestBody(w, r.WithContext(ctx), 1<<20, 10*time.Second)
+	if err == nil {
+		return raw, nil
 	}
-	done := make(chan result, 1)
-	go func() {
-		raw, err := io.ReadAll(body)
-		done <- result{raw, err}
-	}()
-	timer := time.NewTimer(time.Until(deadline))
-	defer timer.Stop()
-	select {
-	case got := <-done:
-		if got.err != nil {
-			var tooLarge *http.MaxBytesError
-			if errors.As(got.err, &tooLarge) {
-				return nil, fail(http.StatusRequestEntityTooLarge, "request body too large")
-			}
-			return nil, fail(http.StatusRequestTimeout, "the preview request did not arrive in time")
-		}
-		return got.raw, nil
-	case <-timer.C:
-		_ = r.Body.Close()
-		return nil, fail(http.StatusRequestTimeout, "the preview request did not arrive in time")
-	case <-r.Context().Done():
+	var tooLarge *http.MaxBytesError
+	if errors.As(err, &tooLarge) {
+		return nil, fail(http.StatusRequestEntityTooLarge, "request body too large")
+	}
+	if errors.Is(context.Cause(ctx), context.Canceled) {
 		return nil, fail(http.StatusRequestTimeout, "the preview request was cancelled")
 	}
+	return nil, fail(http.StatusRequestTimeout, "the preview request did not arrive in time")
 }
 
 // decodeStrict is decodeJSON for a body already read: one JSON value, no unknown fields.

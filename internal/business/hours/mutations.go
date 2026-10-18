@@ -106,7 +106,7 @@ func (m *Module) mutateEntry(w http.ResponseWriter, r *http.Request) {
 	}
 	var patch EntryPatch
 	if r.Method == http.MethodPatch {
-		r.Body = http.MaxBytesReader(w, r.Body, 1<<20)
+		r.Body = httpapi.RequestBodyReader(w, r, 1<<20)
 		if err := workorders.Decode(r, &patch); err != nil {
 			workorders.WriteError(w, err)
 			return

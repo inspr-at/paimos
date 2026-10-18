@@ -65,7 +65,32 @@ func (m *Module) listEntries(r *http.Request, tx pgx.Tx, p tenant.Principal) (an
 		}
 		principal = p.ID
 	}
-	return entriesFor(r.Context(), tx, period, principal, node)
+	limit, after, since, until, err := listBounds(r)
+	if err != nil {
+		return nil, err
+	}
+	rows, err := tx.Query(r.Context(), `SELECT `+entryColumns+` FROM time_entries
+        WHERE ($1::uuid IS NULL OR period_id=$1) AND ($2::uuid IS NULL OR principal_id=$2)
+        AND ($3::uuid IS NULL OR node_id=$3) AND ($4::uuid IS NULL OR id>$4)
+        AND ($5::timestamptz IS NULL OR started_at >= $5) AND ($6::timestamptz IS NULL OR started_at < $6)
+        ORDER BY id LIMIT $7`, nullable(period), nullable(principal), nullable(node), nullable(after), since, until, limit+1)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := listPage[Entry]{items: []Entry{}}
+	for rows.Next() {
+		v, err := scanEntry(rows)
+		if err != nil {
+			return nil, err
+		}
+		if len(out.items) == limit {
+			out.next = out.items[limit-1].ID
+			break
+		}
+		out.items = append(out.items, v)
+	}
+	return out, rows.Err()
 }
 
 var currencyPattern = regexp.MustCompile(`^[A-Z]{3}$`)

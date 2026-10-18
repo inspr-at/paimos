@@ -10,6 +10,8 @@ import (
 	"strings"
 	"time"
 	"unicode"
+
+	"github.com/inspr-at/paimos/internal/markdownsource"
 )
 
 var (
@@ -83,12 +85,11 @@ type parser struct {
 	personal   bool
 	lockedHead bool
 
-	current     *rawRule
-	pendingID   string
-	pendingLn   int
-	blanks      int
-	inFence     bool
-	fenceInRule bool
+	current   *rawRule
+	pendingID string
+	pendingLn int
+	blanks    int
+	codeLines []bool
 
 	sawPersonal bool
 	sawOther    bool
@@ -103,13 +104,14 @@ type parser struct {
 
 func parseDocument(file SourceFile, text, section string) (fileParse, error) {
 	p := &parser{
-		lines:    splitLines(text),
-		headings: indexATXHeadings(text),
-		file:     file,
-		section:  section,
-		setSlug:  "preamble",
-		setTitle: "Preamble",
-		personal: file.Kind == "profile",
+		lines:     splitLines(text),
+		headings:  indexATXHeadings(text),
+		codeLines: markdownsource.CodeLines(text),
+		file:      file,
+		section:   section,
+		setSlug:   "preamble",
+		setTitle:  "Preamble",
+		personal:  file.Kind == "profile",
 	}
 	p.scan()
 	return p.finish()
@@ -130,13 +132,11 @@ func (p *parser) scan() {
 	for i, line := range p.lines {
 		n := i + 1
 		trim := strings.TrimSpace(line)
-		if strings.HasPrefix(trim, "```") {
-			p.toggleFence(n, line)
-			continue
-		}
-		if p.inFence {
-			if p.fenceInRule && p.current != nil {
+		if p.codeLines[i] {
+			if p.current != nil {
 				p.appendDetail(n, line)
+			} else if i == 0 || !p.codeLines[i-1] {
+				p.fences++
 			}
 			continue
 		}
@@ -173,25 +173,6 @@ func (p *parser) scan() {
 		}
 	}
 	p.flush(len(p.lines))
-}
-
-func (p *parser) toggleFence(n int, line string) {
-	if !p.inFence {
-		p.inFence = true
-		p.fenceInRule = p.current != nil
-		if p.fenceInRule {
-			p.appendDetail(n, line)
-		} else {
-			p.fences++
-		}
-		return
-	}
-	if p.fenceInRule && p.current != nil {
-		p.appendDetail(n, line)
-	}
-	p.inFence = false
-	p.fenceInRule = false
-	_ = n
 }
 
 func (p *parser) noteID(n int, id, raw string) {

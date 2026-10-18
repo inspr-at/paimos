@@ -6,6 +6,7 @@ export interface StatusDefinition { state: string; label: string; meaning: strin
 export interface StatusHelp {
   definitions: StatusDefinition[]
   queued: { label: string; meaning: string; is_status: false }
+  recurring?: { label: string; meaning: string; is_status: false }
   autopilot: { enabled: boolean; effective_enabled: boolean; project_mode: 'inherit' | 'on' | 'off'; rules: Record<string, StatusRule> }
   triage: { mode: 'off' | 'suggest' | 'apply'; available: boolean }
   limits_source: 'defaults' | 'workspace'

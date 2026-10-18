@@ -20,6 +20,7 @@ import (
 
 	"github.com/inspr-at/paimos/internal/grokprobe"
 	"github.com/inspr-at/paimos/internal/harnesslaunch"
+	"github.com/inspr-at/paimos/internal/ownedprocess"
 	"github.com/inspr-at/paimos/internal/piprobe"
 )
 
@@ -66,7 +67,7 @@ func (OSExecutor) Run(ctx context.Context, c Command) ([]byte, error) {
 	}
 	ctx, cancel := context.WithTimeout(ctx, 15*time.Second)
 	defer cancel()
-	cmd := exec.CommandContext(ctx, c.Path, c.Args...)
+	cmd := exec.Command(c.Path, c.Args...)
 	cmd.Stdin = bytes.NewReader(c.Input)
 	cmd.Env = c.Env
 	if c.Dir != "" {
@@ -94,7 +95,10 @@ func (OSExecutor) Run(ctx context.Context, c Command) ([]byte, error) {
 	if c.StatusStderr {
 		cmd.Stderr = io.MultiWriter(stderr, snippet)
 	}
-	if err := cmd.Run(); err != nil {
+	if err := ownedprocess.Run(ctx, cmd); err != nil {
+		if errors.Is(err, ownedprocess.ErrCleanupUnconfirmed) {
+			return nil, errors.New("local command cleanup unconfirmed")
+		}
 		var exit *exec.ExitError
 		if errors.As(err, &exit) {
 			return nil, &CommandError{ExitCode: exit.ExitCode(), stderr: capturedProbeLine(snippet.buf.Bytes(), snippet.truncated), command: probeCommandName(c.Path)}
@@ -161,8 +165,11 @@ type Discovery struct {
 	NodePath      string
 	Workspace     string
 	CodexIdentity func(context.Context, string, string) (string, error)
-	GrokProbe     func(context.Context, grokprobe.Binding) (grokprobe.Identity, error)
-	PiProvider    func(context.Context, string, string, string, string) (string, error)
+	// CodexProbe receives the exact candidate interpreter, never the saved pin.
+	CodexProbe func(context.Context, string, string, string, string) (string, error)
+	nodeClass  func(string) string // Synthetic installation roots in tests only.
+	GrokProbe  func(context.Context, grokprobe.Binding) (grokprobe.Identity, error)
+	PiProvider func(context.Context, string, string, string, string) (string, error)
 }
 
 var safeLabel = regexp.MustCompile(`^[^\x00-\x1f\x7f]{1,128}$`)
@@ -323,15 +330,27 @@ func (d Discovery) Detect(ctx context.Context, harness, accountContext string) (
 		if strings.TrimSpace(string(raw)) != "Logged in using ChatGPT" {
 			return c, errors.New("Codex subscription sign-in required; run codex login normally and resume setup")
 		}
-		inspect := d.CodexIdentity
+		inspect := d.CodexProbe
 		if inspect == nil {
-			inspect = func(ctx context.Context, path, home string) (string, error) {
-				return codexIdentity(ctx, path, home, c.Node.Path, probeDir)
+			inspect = codexIdentity
+			if d.CodexIdentity != nil {
+				inspect = func(ctx context.Context, path, home, _, _ string) (string, error) {
+					return d.CodexIdentity(ctx, path, home)
+				}
 			}
 		}
-		identity, err := inspect(ctx, physical, c.Home)
+		identity, err := inspect(ctx, physical, c.Home, c.Node.Path, probeDir)
 		if err != nil {
-			return c, errors.New("Codex account identity unavailable; use normal vendor login and resume")
+			// A shell wrapper can answer version/login without starting its
+			// env-node account/read shim. The version-only fallback above then
+			// misses Node. Retry every check through the candidate interpreter.
+			if c.Node.Path == "" && d.NodePath == "" && ctx.Err() == nil && !errors.Is(err, ownedprocess.ErrCleanupUnconfirmed) {
+				if node, lookupErr := d.LookPath("node"); lookupErr == nil {
+					d.NodePath = node
+					return d.Detect(ctx, harness, accountContext)
+				}
+			}
+			return c, &HarnessIssue{Reason: "probe_failed", Err: fmt.Errorf("Codex account identity unavailable: %w; resume add-harness after restoring the probe", safeCodexIdentityError(err))}
 		}
 		// A confirmed ChatGPT account need not disclose an email. Keep explicit
 		// account-context matching strict: an unnamed account cannot prove it.

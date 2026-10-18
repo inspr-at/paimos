@@ -4,6 +4,9 @@ import { expect, test, type Page } from '@playwright/test'
 
 // PORTAL_SHOTS names a directory. Unset, this file creates nothing at import.
 const shots = process.env.PORTAL_SHOTS ?? ''
+const binding = 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa:1'
+const bindingHeaders = { 'X-Portal-Binding': binding }
+const legacyParticipation = { policy: 'legacy', voting_enabled: true, wish_intake_enabled: true, corrections_enabled: true, registered_available: false, anonymous_history: [] }
 
 async function capture(page: Page, name: string) {
   if (!shots) return
@@ -47,6 +50,10 @@ async function install(page: Page, missing = false) {
       return
     }
     if (url.pathname.startsWith('/api/public/portal/')) {
+      if (url.pathname.endsWith('/participation') && !missing) {
+        await route.fulfill({ status: 200, headers: bindingHeaders, contentType: 'application/json', body: JSON.stringify(legacyParticipation) })
+        return
+      }
       if (route.request().method() === 'POST') {
         posted.push({ method: route.request().method(), body: route.request().postData(), path: url.pathname })
         const accepted = url.pathname.endsWith('/wishes') || url.pathname.endsWith('/corrections')
@@ -58,7 +65,7 @@ async function install(page: Page, missing = false) {
         await route.fulfill({ status: 404, contentType: 'application/json', body: JSON.stringify({ error: 'not found' }) })
         return
       }
-      await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(portal) })
+      await route.fulfill({ status: 200, headers: bindingHeaders, contentType: 'application/json', body: JSON.stringify(portal) })
       return
     }
     await route.fulfill({ status: 404, contentType: 'application/json', body: '{}' })
@@ -151,13 +158,17 @@ test('status chips appear only past six features, and a wish is title and summar
       await route.fulfill({ status: 401, contentType: 'application/json', body: '{}' })
       return
     }
+    if (url.pathname.endsWith('/participation')) {
+      await route.fulfill({ headers: bindingHeaders, json: legacyParticipation })
+      return
+    }
     if (url.pathname.startsWith('/api/public/portal/') && route.request().method() === 'POST' && url.pathname.endsWith('/wishes')) {
       posted.push({ method: 'POST', body: route.request().postData(), path: url.pathname })
       await route.fulfill({ status: 201, contentType: 'application/json', body: JSON.stringify({ accepted: true }) })
       return
     }
     if (url.pathname.startsWith('/api/public/portal/')) {
-      await route.fulfill({ json: { ...portal, catalog } })
+      await route.fulfill({ headers: bindingHeaders, json: { ...portal, catalog } })
       return
     }
     await route.fulfill({ status: 404, contentType: 'application/json', body: '{}' })
@@ -220,7 +231,7 @@ test('a catalog without release history hides the releases link', async ({ page 
     }
     if (url.pathname.startsWith('/api/public/portal/')) {
       const { release_history: _ignored, ...quiet } = portal
-      await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(quiet) })
+      await route.fulfill({ status: 200, headers: bindingHeaders, contentType: 'application/json', body: JSON.stringify(quiet) })
       return
     }
     await route.fulfill({ status: 404, contentType: 'application/json', body: '{}' })
@@ -240,3 +251,96 @@ test('a closed portal reads as unavailable', async ({ page }) => {
   await expect(page.getByRole('heading', { name: 'Catalog' })).toHaveCount(0)
   await expectFits(page)
 })
+
+test('disabled participation keeps the catalog readable and has no input controls', async ({ page }) => {
+  await install(page)
+  await page.route('**/api/public/portal/*/participation', route => route.fulfill({ status: 200, headers: bindingHeaders, contentType: 'application/json', body: JSON.stringify({ policy: 'disabled', voting_enabled: false, wish_intake_enabled: false, corrections_enabled: false, registered_available: false, anonymous_history: [] }) }))
+  await page.goto('/portal/harbour')
+  await expect(page.getByRole('heading', { name: 'Harbour office' })).toBeVisible()
+  await expect(page.getByText('Participation is currently unavailable. The catalog remains open for reading.')).toBeVisible()
+  await expect(page.getByRole('button', { name: 'Vote for Owner assembly on a phone' })).toHaveCount(0)
+  await expect(page.locator('.portal input, .portal textarea')).toHaveCount(0)
+})
+
+test('a product address keeps navigation and writes on that product', async ({ page }) => {
+  const posted = await install(page)
+  await page.goto('/portal/harbour/products/second')
+  await expect(page.getByRole('heading', { name: 'Harbour office' })).toBeVisible()
+  await expect(page.getByRole('link', { name: 'Releases' })).toHaveAttribute('href', '/portal/harbour/products/second/releases')
+  await expect(page.getByRole('link', { name: 'llms.txt' })).toHaveAttribute('href', '/portal/harbour/products/second/llms.txt')
+  await page.getByRole('button', { name: 'Vote for Owner assembly on a phone' }).click()
+  await expect(page.getByText('4 votes')).toBeVisible()
+  expect(posted).toHaveLength(1)
+  expect(posted[0].path).toBe('/api/public/portal/harbour/products/second/wishes/PWS-1/votes')
+  await page.getByLabel('Title').fill('Second product wish')
+  await page.getByLabel('Summary').fill('Keep this wish on the second product.')
+  await page.getByRole('button', { name: 'Send wish' }).click()
+  await expect(page.getByRole('status')).toHaveText('Sent for review.')
+  expect(posted).toHaveLength(2)
+  expect(posted[1].path).toBe('/api/public/portal/harbour/products/second/wishes')
+})
+
+test('an unavailable participation policy fails closed without closing the catalog', async ({ page }) => {
+  const posted = await install(page)
+  await page.route('**/api/public/portal/*/participation', route => route.fulfill({ status: 503, json: { error: 'portal unavailable' } }))
+  await page.goto('/portal/harbour')
+  await expect(page.getByRole('heading', { name: 'Harbour office' })).toBeVisible()
+  await expect(page.getByText('Participation is currently unavailable. The catalog remains open for reading.')).toBeVisible()
+  await expect(page.locator('.portal input, .portal textarea')).toHaveCount(0)
+  await expect(page.getByRole('button', { name: /Vote for/ })).toHaveCount(0)
+  expect(posted).toHaveLength(0)
+})
+
+test('a policy from a newly selected default never enables the old catalog', async ({ page }) => {
+  const posted = await install(page)
+  let requestedBinding = ''
+  await page.route('**/api/public/portal/*/participation', async route => {
+    requestedBinding = route.request().headers()['x-portal-binding'] ?? ''
+    await route.fulfill({ json: legacyParticipation, headers: { 'X-Portal-Binding': 'bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb:1' } })
+  })
+  await page.goto('/portal/harbour')
+  await expect(page.getByRole('heading', { name: 'Harbour office' })).toBeVisible()
+  await expect(page.getByText('Participation is currently unavailable. The catalog remains open for reading.')).toBeVisible()
+  expect(requestedBinding).toBe(binding)
+  await expect(page.locator('.portal input, .portal textarea')).toHaveCount(0)
+  await expect(page.getByRole('button', { name: /Vote for/ })).toHaveCount(0)
+  expect(posted).toHaveLength(0)
+})
+
+for (const action of ['wish', 'correction', 'vote'] as const) {
+  test(`a default switch while drafting a ${action} preserves the displayed binding and reports conflict`, async ({ page }) => {
+    await install(page)
+    let currentBinding = binding
+    const writes: string[] = []
+    let sentBinding = ''
+    await page.route('**/api/public/portal/**', async route => {
+      if (route.request().method() !== 'POST') { await route.fallback(); return }
+      sentBinding = route.request().headers()['x-portal-binding'] ?? ''
+      if (sentBinding !== currentBinding) {
+        await route.fulfill({ status: 409, json: { error: 'product changed; reload the catalog' } })
+      } else {
+        writes.push(currentBinding)
+        await route.fulfill({ status: 201, json: action === 'vote' ? { votes: 4 } : { accepted: true } })
+      }
+    })
+    await page.goto('/portal/harbour')
+    await expect(page.getByRole('button', { name: 'Vote for Owner assembly on a phone' })).toBeVisible()
+    if (action === 'wish') {
+      await page.getByLabel('Title').fill('For the displayed product')
+      await page.getByLabel('Summary').fill('A draft started before the default changed.')
+    } else if (action === 'correction') {
+      await page.getByLabel('Competitor').fill('Northwind')
+      await page.getByLabel('Aspect').fill('Deadlines')
+      await page.getByLabel('Statement').fill('A correction for the original product.')
+    }
+    currentBinding = 'bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb:2'
+    const button = action === 'vote' ? 'Vote for Owner assembly on a phone' : action === 'wish' ? 'Send wish' : 'Send correction'
+    await page.getByRole('button', { name: button }).click()
+    await expect(page.getByText('The product changed. Reload the catalog before sending again.')).toBeVisible()
+    expect(sentBinding).toBe(binding)
+    expect(writes).toEqual([])
+    await expect(page.getByText('Sent for review.', { exact: true })).toHaveCount(0)
+    await expect(page.getByText('Sent.', { exact: true })).toHaveCount(0)
+    await expect(page.getByText('4 votes', { exact: true })).toHaveCount(0)
+  })
+}

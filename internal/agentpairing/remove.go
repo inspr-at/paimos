@@ -15,7 +15,7 @@ import (
 // remove archives a revoked or never-confirmed computer (AEON-402). It leaves
 // the computers list with its account bindings; the rows, runs and audit
 // events stay. A never-confirmed computer is revoked first, in the same step.
-// Unsettled runs keep the computer in the list until their accounting is known.
+// Unsettled runs and unreleased native roots retain the computer and accounts.
 func (m *Module) remove(w http.ResponseWriter, r *http.Request, p tenant.Principal) {
 	var out View
 	err := m.in(r.Context(), p.TenantID, func(tx pgx.Tx) error {
@@ -50,6 +50,9 @@ func removeComputerTx(ctx context.Context, tx pgx.Tx, p tenant.Principal, comput
 	if archived != nil {
 		return nil
 	}
+	if err := requireNativeRootsReleased(ctx, tx, computer, ""); err != nil {
+		return err
+	}
 	if state != "revoked" {
 		// Never confirmed: approved, but the computer never redeemed or reported.
 		if seen != nil || request == "redeemed" {
@@ -61,7 +64,8 @@ func removeComputerTx(ctx context.Context, tx pgx.Tx, p tenant.Principal, comput
 	}
 	var unsettled bool
 	if err := tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM agent_runs r JOIN agent_pairing_enrollments e ON e.tenant_id=r.tenant_id AND e.account_id=r.account_id
-  WHERE e.computer_id=$1 AND r.status IN ('starting','running','waiting'))`, computer).Scan(&unsettled); err != nil {
+  WHERE e.computer_id=$1 AND (r.status IN ('starting','running','waiting')
+   OR r.trace->'work_lifecycle_release'->>'exit_unconfirmed'='true'))`, computer).Scan(&unsettled); err != nil {
 		return err
 	}
 	if unsettled {
@@ -94,10 +98,31 @@ func removeComputerTx(ctx context.Context, tx pgx.Tx, p tenant.Principal, comput
 // ErrActiveRuns reports that an account binding still has work in progress.
 var ErrActiveRuns = errors.New("account has active runs")
 
+// ErrNativeRootsUnreleased identifies ownership that must retain its paired
+// enrollment and daemon key for reconciliation and explicit final delivery.
+var ErrNativeRootsUnreleased = fail(409, "native_roots_unreleased", "native roots have not been released; retain paired ownership until verified exit")
+
+// Callers hold LockMutation, the same tenant/tree/pairing fence as native
+// claim/release. Do not infer release from state, heartbeat or generation.
+// Account-scoped checks include the account's holds on every computer.
+func requireNativeRootsReleased(ctx context.Context, tx pgx.Tx, computer, account string) error {
+	var held bool
+	err := tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM native_session_roots
+ WHERE run_id IS NULL AND released_at IS NULL
+ AND (($2='' AND computer_id::text=$1) OR ($2<>'' AND account_id::text=$2)))`, computer, account).Scan(&held)
+	if err != nil {
+		return err
+	}
+	if held {
+		return ErrNativeRootsUnreleased
+	}
+	return nil
+}
+
 // DisconnectAccount ends a paired account binding before a person removes the
 // account (AEON-402): queued runs are cancelled and the enrollment is revoked.
-// It refuses while a run is starting, running or waiting on the account, so
-// accounting stays known. An unpaired account, or a revoked one, is a no-op.
+// Active/uncertain runs and every unreleased native root retain ownership.
+// An unpaired account is a no-op; a revoked binding still checks native holds.
 func DisconnectAccount(ctx context.Context, tx pgx.Tx, p tenant.Principal, account string) error {
 	var computer, state string
 	err := tx.QueryRow(ctx, `SELECT computer_id::text,state FROM agent_pairing_enrollments WHERE account_id=$1`, account).Scan(&computer, &state)
@@ -107,8 +132,12 @@ func DisconnectAccount(ctx context.Context, tx pgx.Tx, p tenant.Principal, accou
 	if err != nil {
 		return err
 	}
+	if err = requireNativeRootsReleased(ctx, tx, computer, account); err != nil {
+		return err
+	}
 	var active bool
-	if err = tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM agent_runs WHERE account_id=$1 AND status IN ('starting','running','waiting'))`, account).Scan(&active); err != nil {
+	if err = tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM agent_runs WHERE account_id=$1 AND (status IN ('starting','running','waiting')
+  OR trace->'work_lifecycle_release'->>'exit_unconfirmed'='true'))`, account).Scan(&active); err != nil {
 		return err
 	}
 	if active {
@@ -117,6 +146,6 @@ func DisconnectAccount(ctx context.Context, tx pgx.Tx, p tenant.Principal, accou
 	if state == "revoked" {
 		return nil
 	}
-	// With no active run, a drain ends at once: finalizeDrain revokes it.
+	// With no active run or native hold, finalizeDrain can revoke the binding.
 	return disconnectTx(ctx, tx, p, computer, disconnectInput{Mode: "drain", AccountID: account})
 }

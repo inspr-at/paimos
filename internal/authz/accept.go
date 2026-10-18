@@ -29,6 +29,11 @@ func AcceptInvite(ctx context.Context, tx pgx.Tx, tenantID, identityID, email, n
 	if !emailPattern.MatchString(email) {
 		return tenant.Principal{}, ErrNoInvite
 	}
+	// Linking an imported person removes bindings, whose last-owner trigger
+	// takes the tenant fence. Acquire it before the link advisory and invite row.
+	if err := apply.Lock(ctx, tx, tenantID); err != nil {
+		return tenant.Principal{}, err
+	}
 	var hash any
 	if token != "" {
 		sum := sha256.Sum256([]byte(token))
@@ -91,12 +96,8 @@ func AcceptInvite(ctx context.Context, tx pgx.Tx, tenantID, identityID, email, n
 		}
 	}
 	grants = allowed
-	// Use the same tenant lock as manual linking, before examining candidates.
-	// Concurrent invites cannot claim the same imported person or create two
-	// active sign-in members for the same email.
-	if _, err := tx.Exec(ctx, `SELECT pg_advisory_xact_lock(hashtextextended($1,532))`, tenantID); err != nil {
-		return tenant.Principal{}, err
-	}
+	// The shared link lock also prevents two invitations from claiming the
+	// same imported person or creating two active members for the same email.
 	if err := refuseActiveMember(ctx, tx, tenantID, email); err != nil {
 		if errors.Is(err, errAlreadyMember) {
 			return tenant.Principal{}, ErrNoInvite

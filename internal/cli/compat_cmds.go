@@ -14,7 +14,7 @@ import (
 
 var (
 	modelRoles = map[string]bool{
-		"scout": true, "mechanical": true, "build": true, "build-hard": true, "review-gate": true,
+		"scout": true, "mechanical": true, "build": true, "build-hard": true, "review-gate": true, "review-gate-security": true,
 	}
 	modelHarnesses = map[string]bool{
 		"codex": true, "claude": true, "pi": true, "cursor": true, "grok": true, "gemini": true, "opencode": true,
@@ -39,32 +39,42 @@ type modelCandidate struct {
 }
 
 type modelResolution struct {
-	Role            string           `json:"role"`
-	AuthorFamily    string           `json:"author_family"`
-	Profile         *modelProfile    `json:"profile"`
-	Ladder          []modelCandidate `json:"ladder"`
-	CommandTemplate string           `json:"command_template"`
-	OwnerRequired   bool             `json:"owner_required"`
-	Source          string           `json:"source"`
+	Role            string                            `json:"role"`
+	AuthorFamily    string                            `json:"author_family"`
+	Profile         *modelProfile                     `json:"profile"`
+	Ladder          []modelCandidate                  `json:"ladder"`
+	CommandTemplate string                            `json:"command_template"`
+	OwnerRequired   bool                              `json:"owner_required"`
+	Source          string                            `json:"source"`
+	Preference      *modelregistry.PreferenceDecision `json:"preference,omitempty"`
 }
 
 func (rt *runtime) resolveModel(role, author, harness string) error {
+	return rt.resolveModelForTicket(role, author, harness, "")
+}
+func (rt *runtime) resolveModelForTicket(role, author, harness, ticket string) error {
 	role = strings.TrimSpace(role)
-	if !modelRoles[role] {
+	if !modelRoles[role] && !(role == "" && ticket != "") {
 		return usagef("unknown model role %q", role)
 	}
 	author, err := modelregistry.NormalizeAuthorFamily(author)
 	if err != nil {
 		return usagef("%s", err)
 	}
-	if role == "review-gate" && author == "" {
+	if strings.HasPrefix(role, "review-gate") && author == "" {
 		return usagef("review-gate requires --author-family")
 	}
 	harness = strings.TrimSpace(harness)
 	if harness != "" && !modelHarnesses[harness] {
 		return usagef("unsupported harness %q", harness)
 	}
-	q := url.Values{"role": {role}}
+	q := url.Values{}
+	if role != "" {
+		q.Set("role", role)
+	}
+	if ticket != "" {
+		q.Set("ticket", ticket)
+	}
 	if author != "" {
 		q.Set("author_family", author)
 	}
@@ -75,8 +85,14 @@ func (rt *runtime) resolveModel(role, author, harness string) error {
 	if err := rt.do(http.MethodGet, "/api/models/resolve?"+q.Encode(), nil, &result); err != nil {
 		return err
 	}
-	if role == "review-gate" && result.Profile != nil && result.Profile.Family == author {
+	if strings.HasPrefix(result.Role, "review-gate") && result.Profile != nil && result.Profile.Family == author {
 		return rt.fail(fmt.Errorf("invalid review resolution: selected author family"), "")
+	}
+	if strings.HasPrefix(result.Role, "review-gate") && result.Profile != nil {
+		p := result.Profile
+		if err := modelregistry.ValidateReviewCommand(p.Harness, p.Model, p.Effort, result.CommandTemplate); err != nil {
+			return rt.fail(fmt.Errorf("invalid review resolution: %w", err), "")
+		}
 	}
 	var profiles []modelProfile
 	if err := rt.do(http.MethodGet, "/api/models", nil, &profiles); err != nil {
@@ -104,6 +120,9 @@ func (rt *runtime) resolveModel(role, author, harness string) error {
 			"source":           "instance",
 			"stale":            false,
 		}
+		if result.Preference != nil {
+			out["preference"] = result.Preference
+		}
 		if result.Profile != nil {
 			out["profile"] = map[string]any{
 				"id":      result.Profile.Slug,
@@ -118,8 +137,10 @@ func (rt *runtime) resolveModel(role, author, harness string) error {
 		if err := rt.printJSON(out); err != nil {
 			return err
 		}
-	} else if result.Profile != nil {
-		fmt.Fprintf(rt.stdout, "%s@%s — %s\n%s\n", result.Profile.Slug, result.Profile.Version, result.Profile.Family, result.CommandTemplate)
+	} else if result.Profile != nil || result.OwnerRequired {
+		if result.Profile != nil {
+			fmt.Fprintf(rt.stdout, "%s@%s — %s\n%s\n", result.Profile.Slug, result.Profile.Version, result.Profile.Family, result.CommandTemplate)
+		}
 		for _, step := range result.Ladder {
 			label := slugByID[step.ProfileID]
 			if label == "" {
@@ -135,7 +156,27 @@ func (rt *runtime) resolveModel(role, author, harness string) error {
 			fmt.Fprintf(rt.stdout, "%s: %s\n", label, status)
 		}
 	}
+	if !rt.jsonOut && result.Preference != nil {
+		trace := result.Preference
+		fmt.Fprintf(rt.stdout, "Why: %s · %s · set by %s · providers %s", trace.Kind.Slug, trace.Complexity.Bucket, trace.Cell.SetBy, trace.Residency.Value)
+		if trace.Cell.LockedBy != "" {
+			fmt.Fprintf(rt.stdout, " · locked by %s", trace.Cell.LockedBy)
+		}
+		if trace.Residency.LoosenedLock {
+			fmt.Fprint(rt.stdout, " · warning: loosens a provider lock")
+		}
+		if trace.Fallback != nil {
+			fmt.Fprintf(rt.stdout, " · fallback: %s", trace.Fallback.Reason)
+		}
+		if trace.Blocked != nil {
+			fmt.Fprintf(rt.stdout, " · blocked: %s", trace.Blocked.Reason)
+		}
+		fmt.Fprintln(rt.stdout)
+	}
 	if result.OwnerRequired {
+		if !strings.HasPrefix(result.Role, "review-gate") {
+			return rt.fail(fmt.Errorf("no allowed model route can run right now"), "")
+		}
 		return rt.fail(fmt.Errorf("owner approval required; review gate remains closed"), "")
 	}
 	return nil
@@ -154,11 +195,13 @@ func (rt *runtime) cmdSessionStart() *Command {
 	var project, agent, format, bundle string
 	var ruleOpts rulesOptions
 	var receiveOpts rulesReceiveOptions
+	var native nativeSessionOptions
 	return &Command{
 		Name:  "start",
 		Short: "Mint an attribution id, preview rules, or explicitly receive rules for a registered session",
 		Use:   "session start --project KEY --agent NAME",
 		addFlags: func(fs *flagSet) {
+			native.flags(fs)
 			fs.string(&project, "project", 0, "project key (required)")
 			fs.string(&agent, "agent", 0, "agent name (required)")
 			fs.string(&format, "format", 0, "env (default) or json")
@@ -167,6 +210,18 @@ func (rt *runtime) cmdSessionStart() *Command {
 			receiveOpts.flags(fs)
 		},
 		run: func(args []string) error {
+			if native.Profile != "" {
+				if native.Profile != "native" {
+					return usagef("--profile must be native")
+				}
+				if len(args) != 0 || agent != "" || format != "" || bundle != "" || ruleOpts.Preview || receiveOpts.used() {
+					return usagef("native start is separate from attribution and rules flags")
+				}
+				return rt.startNativeSession(project, native)
+			}
+			if native.used() {
+				return usagef("native session flags require --profile native")
+			}
 			if strings.TrimSpace(project) == "" {
 				return usagef("--project is required")
 			}
@@ -525,38 +580,6 @@ func (rt *runtime) cmdMessageTargetList() *Command {
 			}
 			return nil
 		},
-	}
-}
-
-func stubCommand(name, use, reason string, subs ...string) *Command {
-	if len(subs) == 0 {
-		return &Command{
-			Name:  name,
-			Short: "Not available on Aeon",
-			Use:   use,
-			run: func(args []string) error {
-				return notYet(reason)
-			},
-		}
-	}
-	children := make([]*Command, 0, len(subs))
-	for _, sub := range subs {
-		subName := sub
-		children = append(children, &Command{
-			Name:    subName,
-			Short:   "Not available on Aeon",
-			Use:     name + " " + subName,
-			maxArgs: -1,
-			run: func(args []string) error {
-				return notYet(reason)
-			},
-		})
-	}
-	return &Command{
-		Name:  name,
-		Short: "Not available on Aeon",
-		Use:   use,
-		subs:  children,
 	}
 }
 

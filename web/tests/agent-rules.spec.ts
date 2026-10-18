@@ -171,7 +171,8 @@ test('preview lists controlled agents first and disables the rest with a plain r
     ],
   })
   await page.goto('/settings/agent-rules')
-  await page.getByRole('button', { name: 'Preview' }).click()
+  // AEON-1214 / #564 added the global Desk Preview; open this section's preview.
+  await page.getByRole('region', { name: 'Agent rules', exact: true }).getByRole('button', { name: 'Preview', exact: true }).click()
   const dialog = page.getByRole('dialog', { name: 'What agents receive' })
   await dialog.getByRole('button', { name: 'Change' }).click()
   const named = dialog.getByRole('combobox', { name: 'Named agent' })
@@ -201,11 +202,11 @@ test('preview lists controlled agents first and disables the rest with a plain r
 test('preview explains the session file for this project, you and the builder role', async ({ page }) => {
   const rules = await setup(page)
   await page.goto('/settings/agent-rules')
-  await page.getByRole('button', { name: 'Preview' }).click()
+  await page.getByRole('region', { name: 'Agent rules', exact: true }).getByRole('button', { name: 'Preview', exact: true }).click()
   const dialog = page.getByRole('dialog', { name: 'What agents receive' })
   await expect(dialog.getByRole('table', { name: 'Explanation and exact rule' })).toContainText('Never print the environment.')
   await expect(dialog).toContainText('Aeon · Markus Barta · Builder')
-  await expect(dialog.getByRole('radio', { name: 'Claude' })).toHaveAttribute('aria-checked', 'true')
+  await expect(dialog.getByRole('radio', { name: 'Claude Code' })).toHaveAttribute('aria-checked', 'true')
   await expect(dialog.getByLabel('Session file', { exact: true })).toHaveCount(0)
   await dialog.getByRole('button', { name: 'Show exact file' }).click()
   await expect(dialog.getByLabel('Session file', { exact: true })).toContainText('- [keep-secrets] Never print the environment.')
@@ -247,7 +248,7 @@ test('loaded-file comparison shows counts, hides rule text, and fits at 390', as
   await page.goto('/settings/agent-rules')
   const panel = page.getByRole('region', { name: 'Loaded vs published' })
   await expect(panel.getByRole('heading', { name: 'Loaded vs published' })).toBeVisible()
-  await expect(panel).toContainText('Claude · both 2, only local 1, only merged 0, differs 1')
+  await expect(panel).toContainText('Claude Code · both 2, only local 1, only merged 0, differs 1')
   await expect(panel).not.toContainText(sentinel)
   await expect(panel).not.toContainText('keep-secrets')
   await expect(panel.getByRole('button')).toHaveCount(0)

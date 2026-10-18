@@ -32,8 +32,10 @@ func ReadStatementTimedOut(ctx context.Context) bool {
 	return ok && limit.timedOut.Load()
 }
 
-// SetLocalStatementTimeout applies a positive timeout inside an open read
-// transaction. Integer GUC values are milliseconds; no caller text enters SQL.
+// SetLocalStatementTimeout applies a positive timeout inside an open transaction.
+// Longer jobs may override the backstop only for justified SQL work, with all
+// network/vendor waits outside the transaction. COMMIT/ROLLBACK removes it.
+// Integer GUC values are milliseconds; no caller text enters SQL.
 func SetLocalStatementTimeout(ctx context.Context, tx pgx.Tx, duration time.Duration) error {
 	if duration <= 0 {
 		return errors.New("statement timeout must be positive")

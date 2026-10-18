@@ -43,7 +43,10 @@ test('Open, Doing and Done cells: icons hold the left edge, numbers the right, t
     await expect(cells).toHaveCount(3)
     const lefts = new Set<number>(), rights = new Set<number>()
     for (const cell of await cells.all()) {
-      const outer = await box(cell), icon = await box(cell.locator('svg')), number = await box(cell.locator('.stat-num'))
+      // AEON-1362's in-progress stripes use an HTML shape; every status keeps
+      // the shared icon box, regardless of its rendering element.
+      await expect(cell.locator('.status-icon')).toHaveCount(1)
+      const outer = await box(cell), icon = await box(cell.locator('.status-icon')), number = await box(cell.locator('.stat-num'))
       // Icon at the cell's left edge, number at its right edge.
       expect(Math.abs(icon.x - outer.x)).toBeLessThanOrEqual(1)
       expect(Math.abs(number.x + number.width - (outer.x + outer.width))).toBeLessThanOrEqual(1)
@@ -176,7 +179,8 @@ test('cards: the switch is remembered; a card shows its ring, aligned counts, pe
   const { calls } = await open(page)
   await page.getByRole('radio', { name: 'Cards view' }).click()
   await expect(page.getByRole('radio', { name: 'Cards view' })).toHaveAttribute('aria-checked', 'true')
-  await expect.poll(() => lastPut(calls, 'projects')?.value).toEqual({ view: 'cards' })
+  // List · Cards is a view switch with its own key (AEON-1453).
+  await expect.poll(() => lastPut(calls, 'view:projects')?.value).toEqual({ last: 'cards' })
   const card = projects(page).locator('.card').filter({ hasText: 'PHAROS' })
   await expect(card.locator('.ring .pct')).toHaveText('17%')
   await expect(card.locator('.counts .stat-label')).toHaveText(['Open', 'Doing', 'Done'])
@@ -194,7 +198,8 @@ test('cards: the switch is remembered; a card shows its ring, aligned counts, pe
   // The … menu is the list's.
   await card.hover()
   await card.getByRole('button', { name: 'Actions for PHAROS Pharos' }).click()
-  await expect(page.getByRole('menu', { name: 'Project Pharos' }).getByRole('menuitem')).toHaveText(['OpenEnter', 'Move to group…m', 'Selectx', 'Move earlierIt is already first.', 'Move later', 'Copy link', 'Archive'])
+  // AEON-1233 / #583 added the project settings action after Open.
+  await expect(page.getByRole('menu', { name: 'Project Pharos' }).getByRole('menuitem')).toHaveText(['OpenEnter', 'Project settings', 'Move to group…m', 'Selectx', 'Move earlierIt is already first.', 'Move later', 'Copy link', 'Archive'])
 })
 
 test('cards: arrows walk the cards; x, Shift and Command clicks select; m moves the selection; undo', async ({ page }) => {
@@ -300,7 +305,9 @@ test('a member sees shared groups, may not add to them, and has no Share or Dele
   await page.keyboard.press('m')
   const option = page.getByRole('option', { name: /Clients/ })
   await expect(option).toHaveAttribute('aria-disabled', 'true')
-  await expect(option).toContainText('Only a workspace admin can add projects to a shared group.')
+  await expect(option).toHaveAttribute('aria-description', 'Only a workspace admin can add projects to a shared group.')
+  await option.hover()
+  await expect(page.locator('.option-note')).toHaveText('Only a workspace admin can add projects to a shared group.')
 })
 
 test('a server without shared groups still has personal ones', async ({ page }) => {

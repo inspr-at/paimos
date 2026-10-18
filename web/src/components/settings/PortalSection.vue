@@ -322,7 +322,7 @@ async function setWish(node: ListItem, state: 'published' | 'hidden' | 'rejected
         <button type="button" class="btn primary" @click="startProduct"><AppIcon name="plus" :size="13" />Publish product</button>
       </template>
       <template v-else>
-        <p class="name">{{ product.title }}</p>
+        <p v-clip-tip="product.title" class="name">{{ product.title }}</p>
         <p v-if="product.body" class="meta">{{ product.body }}</p>
         <p v-if="product.state !== 'published'" class="meta">Not on the public page.</p>
         <div class="actions">
@@ -359,7 +359,7 @@ async function setWish(node: ListItem, state: 'published' | 'hidden' | 'rejected
           </form>
           <template v-else>
             <div class="row-copy">
-              <p class="name">{{ item.title }}</p>
+              <p v-clip-tip="item.title" class="name">{{ item.title }}</p>
               <p class="meta"><template v-if="item.state === 'live' && textField(item, 'live_since')">Live since <ReleaseName :version="textField(item, 'live_since')" /></template><template v-else>{{ statusLabel(item.state) }}</template></p>
             </div>
             <button type="button" class="btn sm" @click="startFeature(item)">Edit</button>
@@ -403,7 +403,7 @@ async function setWish(node: ListItem, state: 'published' | 'hidden' | 'rejected
         <ul class="rows">
           <li v-for="wish in pending" :key="wish.id" class="row">
             <div class="row-copy">
-              <p class="name">{{ wish.title }}</p>
+              <p v-clip-tip="wish.title" class="name">{{ wish.title }}</p>
               <p v-if="wish.body" class="meta">{{ wish.body }}</p>
             </div>
             <div class="actions">
@@ -418,7 +418,7 @@ async function setWish(node: ListItem, state: 'published' | 'hidden' | 'rejected
       <ul v-if="publishedWishes.length" class="rows">
         <li v-for="wish in publishedWishes" :key="wish.id" class="row">
           <div class="row-copy">
-            <p class="name">{{ wish.title }}</p>
+            <p v-clip-tip="wish.title" class="name">{{ wish.title }}</p>
             <p v-if="wish.body" class="meta">{{ wish.body }}</p>
           </div>
           <button type="button" class="btn sm" :disabled="saving === wish.id" @click="setWish(wish, 'hidden')">Hide</button>
@@ -427,7 +427,7 @@ async function setWish(node: ListItem, state: 'published' | 'hidden' | 'rejected
       <ul v-if="hiddenWishes.length" class="rows">
         <li v-for="wish in hiddenWishes" :key="wish.id" class="row">
           <div class="row-copy">
-            <p class="name">{{ wish.title }}</p>
+            <p v-clip-tip="wish.title" class="name">{{ wish.title }}</p>
             <p class="meta">Hidden</p>
           </div>
           <button type="button" class="btn sm" :disabled="saving === wish.id" @click="setWish(wish, 'published')">Publish</button>
@@ -441,7 +441,7 @@ async function setWish(node: ListItem, state: 'published' | 'hidden' | 'rejected
 </template>
 
 <style scoped>
-.section { display: grid; gap: 14px; }
+.section { display: grid; grid-template-columns: minmax(0, 1fr); gap: 14px; }
 .empty-line { margin: 0 0 12px; color: var(--ink-2); }
 .url-row { display: flex; align-items: center; gap: 10px; min-width: 0; }
 .url { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font: 500 13px/1.4 var(--mono); color: var(--ink); font-variant-ligatures: none; }
@@ -460,6 +460,10 @@ textarea.field { height: auto; min-height: 76px; padding-block: 8px; line-height
 .meta { margin: 3px 0 0; color: var(--ink-2); font-size: 13px; line-height: 1.4; overflow-wrap: anywhere; }
 .live { margin: 0; color: var(--ink-2); font-size: 13px; }
 .queue { margin: 4px 0 0; font: 600 13px/1.4 var(--font); color: var(--ink-2); }
+@media (max-width: 720px) {
+  .name { white-space: normal; overflow-wrap: anywhere; display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; }
+  .row { align-items: start; }
+}
 @media (max-width: 600px) {
   .row, .url-row { grid-template-columns: minmax(0, 1fr); display: grid; }
   .url { white-space: normal; }

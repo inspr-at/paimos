@@ -26,9 +26,9 @@ import (
 // Managed generations are left to their daemon, which owns the process and
 // reports ownership_lost itself. Nothing here signals a process.
 //
-// No false kills: a later heartbeat with the same worker proof revives the
-// generation (harness.revived), unless it was archived or a new generation
-// already holds the same session reference.
+// Closing revokes ordinary worker proof, including heartbeat recovery. A returning
+// worker registers a fresh generation and lease; stop confirmation and usage
+// settlement can still authenticate the historical generation.
 
 const (
 	StopReasonHeartbeatLost      = "heartbeat_lost"
@@ -56,7 +56,8 @@ func (m *Module) getHeartbeatLost(r *http.Request, tx pgx.Tx, p tenant.Principal
 
 func (m *Module) putHeartbeatLost(r *http.Request, tx pgx.Tx, p tenant.Principal) (any, error) {
 	var in struct {
-		Minutes int `json:"heartbeat_lost_minutes"`
+		Minutes  int  `json:"heartbeat_lost_minutes"`
+		Expected *int `json:"expected_heartbeat_lost_minutes,omitempty"`
 	}
 	if err := workorders.Decode(r, &in); err != nil {
 		return nil, err
@@ -64,39 +65,30 @@ func (m *Module) putHeartbeatLost(r *http.Request, tx pgx.Tx, p tenant.Principal
 	if in.Minutes < minHeartbeatLostMinutes || in.Minutes > maxHeartbeatLostMinutes {
 		return nil, workorders.Fail(400, "heartbeat_lost_minutes must be from 5 to 1440")
 	}
+	if in.Expected != nil && (*in.Expected < 5 || *in.Expected > 1440) {
+		return nil, workorders.Fail(400, "expected value outside allowed range")
+	}
+	if err := lockAgentWorkSettings(r.Context(), tx, p); err != nil {
+		return nil, err
+	}
+	before, err := heartbeatLostMinutes(r.Context(), tx)
+	if err != nil {
+		return nil, err
+	}
+	if in.Expected != nil && *in.Expected != before {
+		return nil, workorders.Fail(409, "agent settings changed; reload before undoing")
+	}
 	if _, err := tx.Exec(r.Context(), `INSERT INTO harness_settings(tenant_id,heartbeat_lost_minutes) VALUES($1,$2)
 		ON CONFLICT (tenant_id) DO UPDATE SET heartbeat_lost_minutes=EXCLUDED.heartbeat_lost_minutes,updated_at=now()`, p.TenantID, in.Minutes); err != nil {
 		return nil, err
 	}
-	return map[string]int{"heartbeat_lost_minutes": in.Minutes}, nil
+	err = recordAgentWorkSetting(r.Context(), tx, p, "heartbeat_lost_minutes", before, in.Minutes)
+	return map[string]int{"heartbeat_lost_minutes": in.Minutes}, err
 }
 
 // lostContact reports a generation the sweeper closed and nobody archived.
 func lostContact(s Session) bool {
 	return s.ID != "" && s.ArchivedAt == nil && s.StoppedAt != nil && s.StopReason != nil && *s.StopReason == StopReasonHeartbeatLost
-}
-
-// revive reopens a lost-contact generation for its own worker. The caller has
-// verified the worker proof and holds the row lock. Once any newer generation
-// registered the same session reference, whatever its state now, it replaced
-// this one for good: the old generation stays closed.
-func revive(ctx context.Context, tx pgx.Tx, p tenant.Principal, s Session, phase string) (Session, error) {
-	if s.HandedOverToID != nil {
-		return s, workorders.Fail(403, "harness generation handed over")
-	}
-	var taken bool
-	if err := tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM harness_sessions WHERE project_id=$1 AND ref_digest=$2 AND id<>$3 AND (created_at,id)>($4,$3::uuid))`, s.ProjectID, s.refDigest, s.ID, s.CreatedAt).Scan(&taken); err != nil {
-		return s, err
-	}
-	if taken {
-		return s, workorders.Fail(403, "harness worker proof rejected")
-	}
-	before := s
-	s, err := scanSession(tx.QueryRow(ctx, `UPDATE harness_sessions SET phase=$2,stopped_at=NULL,stop_reason=NULL,revision=revision+1 WHERE id=$1 RETURNING `+sessionColumns, s.ID, phase))
-	if err != nil {
-		return s, err
-	}
-	return s, record(ctx, tx, p, s, "revived", before, s)
 }
 
 // SweepLostContact closes one tenant's silent unmanaged generations and
@@ -109,6 +101,9 @@ func SweepLostContact(ctx context.Context, pool *pgxpool.Pool, tenantID string) 
 	err := db.InTenant(ctx, pool, tenantID, func(tx pgx.Tx) error {
 		var mine bool
 		if err := tx.QueryRow(ctx, `SELECT pg_try_advisory_xact_lock(hashtextextended($1,$2))`, "harness-lost-contact:"+tenantID, lostContactAdvisoryNamespace).Scan(&mine); err != nil || !mine {
+			return err
+		}
+		if err := sweepPauseDeadlines(ctx, tx, tenantID); err != nil {
 			return err
 		}
 		mins, err := heartbeatLostMinutes(ctx, tx)
@@ -153,14 +148,17 @@ func SweepLostContact(ctx context.Context, pool *pgxpool.Pool, tenantID string) 
 // RunLostContactSweeper sweeps every tenant once a minute until ctx ends.
 // A tenant created later is picked up on the next round.
 func RunLostContactSweeper(ctx context.Context, pool *pgxpool.Pool) {
-	ticker := time.NewTicker(LostContactSweepInterval)
-	defer ticker.Stop()
 	for {
 		sweepAllTenants(ctx, pool)
+		// Keep the ordinary lost-contact cadence, but wake at a durable pause
+		// escalation/deadline when it is sooner. Restart recovers from SQL;
+		// no volatile timer is the sole record of a leaving request.
+		timer := time.NewTimer(nextPauseSweepDelay(ctx, pool))
 		select {
 		case <-ctx.Done():
+			timer.Stop()
 			return
-		case <-ticker.C:
+		case <-timer.C:
 		}
 	}
 }
@@ -202,4 +200,44 @@ func sweepAllTenants(ctx context.Context, pool *pgxpool.Pool) {
 			slog.Info("harness sessions lost contact", "tenant_id", id, "closed", n)
 		}
 	}
+}
+
+// The database returns a relative duration. Host clock skew cannot delay a
+// deadline, and a short floor prevents a hot loop at sub-millisecond boundaries.
+func nextPauseSweepDelay(ctx context.Context, pool *pgxpool.Pool) time.Duration {
+	delay := LostContactSweepInterval
+	var tenants []string
+	err := db.InTenant(db.NoProjects(ctx, "pause deadline tenant scan"), pool, "00000000-0000-0000-0000-000000000000", func(tx pgx.Tx) error {
+		rows, err := tx.Query(ctx, `SELECT id::text FROM tenants ORDER BY id`)
+		if err != nil {
+			return err
+		}
+		defer rows.Close()
+		for rows.Next() {
+			var id string
+			if err := rows.Scan(&id); err != nil {
+				return err
+			}
+			tenants = append(tenants, id)
+		}
+		return rows.Err()
+	})
+	if err != nil {
+		return delay
+	}
+	for _, id := range tenants {
+		var seconds *float64
+		err = db.InTenant(db.AllProjects(ctx, "pause deadline scheduling"), pool, id, func(tx pgx.Tx) error {
+			return tx.QueryRow(ctx, `SELECT extract(epoch FROM min(CASE
+ WHEN pause_record->>'level' IN ('pause','wrap_up') AND (pause_record->>'deadline_at')::timestamptz-interval '2 minutes'>clock_timestamp()
+ THEN (pause_record->>'deadline_at')::timestamptz-interval '2 minutes'
+ ELSE (pause_record->>'deadline_at')::timestamptz END)-clock_timestamp())::double precision
+ FROM harness_sessions WHERE archived_at IS NULL AND stopped_at IS NULL
+ AND pause_record->>'state' IN ('requested','planned') AND coalesce(pause_record->>'level','')<>''`).Scan(&seconds)
+		})
+		if err == nil && seconds != nil {
+			delay = min(delay, max(10*time.Millisecond, time.Duration(*seconds*float64(time.Second))))
+		}
+	}
+	return delay
 }

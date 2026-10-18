@@ -10,6 +10,10 @@
 // requesting or assigned principal. R1 Principal has no key-scope context, so
 // Endpoint verifies the acting bearer key's hash, tenant, principal, expiry,
 // revocation and exact scope inside db.InTenant. An approval cannot enlarge it.
+// All shared endpoints finish reading at most 1 MiB before preparation or any
+// transaction/fence, using the request's 30-second deadline for transport reads.
+// Stalled/cancelled bodies return 408 and oversized bodies return 413 before
+// preparation; ordinary handlers decode the buffered body inside their write.
 //
 // An order is a live work_order node plus typed detail. Creation uses the R1
 // tree lock and key allocator, and appends node.created and work_order.created

@@ -39,10 +39,11 @@ export class QuotePresence {
   sessionId:string|null=null; snapshot:PresenceSnapshot|null=null
   private stream:EventSource|null=null; private heartbeatTimer:number|undefined; private pendingTimer:number|undefined
   private lastUpdate=0; private desired:{ mode:'viewing'|'editing'|'idle'; anchor:PresenceAnchor|null; revision:number; interacted:boolean }|null=null
+  private updating=false; private pendingUpdate=false; private joinRequest:Promise<void>|null=null; private retryAt=0; private retryDelay=1000
   private disposed=false; private onSnapshot:Listener; private onNotice:NoticeListener
   constructor(quoteId:string,principalId:string,onSnapshot:Listener,onNotice:NoticeListener) { this.quoteId=quoteId;this.principalId=principalId;this.onSnapshot=onSnapshot;this.onNotice=onNotice }
   async start(revision:number):Promise<void> {
-    this.disposed=false; await this.join(revision)
+    this.disposed=false; this.desired??={mode:'viewing',anchor:null,revision,interacted:false}; await this.join(revision)
     if(this.disposed) return
     this.stream=new EventSource(`/api/quotes/${encodeURIComponent(this.quoteId)}/collaboration/stream`,{withCredentials:true})
     this.stream.addEventListener('presence',(event)=>{ if(this.disposed) return; this.snapshot=JSON.parse((event as MessageEvent).data) as PresenceSnapshot;this.onSnapshot(this.snapshot) })
@@ -52,10 +53,23 @@ export class QuotePresence {
     document.addEventListener('visibilitychange',this.visibility)
     window.addEventListener('focus',this.focus)
   }
-  private async join(revision:number):Promise<void> {
-    const body={mode:document.hidden?'idle':'viewing',observed_revision:revision,...(this.sessionId?{resume_session_id:this.sessionId}:{})}
+  private join(revision:number):Promise<void> {
+    if(this.joinRequest) return this.joinRequest
+    this.joinRequest=this.joinOnce(revision).finally(()=>{this.joinRequest=null})
+    return this.joinRequest
+  }
+  private async joinOnce(revision:number):Promise<void> {
+    const body={mode:document.hidden?'idle':this.desired?.mode??'viewing',observed_revision:revision,...(this.sessionId?{resume_session_id:this.sessionId}:{})}
     const result=await json<{session_id:string;snapshot:PresenceSnapshot}>(await api(path(this.quoteId),{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)}))
-    if(this.disposed) return; this.sessionId=result.session_id;this.snapshot=result.snapshot;this.onSnapshot(result.snapshot)
+    if(this.disposed) return; this.retryAt=0;this.retryDelay=1000;this.sessionId=result.session_id;this.snapshot=result.snapshot;this.onSnapshot(result.snapshot)
+  }
+  private async rejoin(revision:number):Promise<void> {
+    if(this.disposed || Date.now()<this.retryAt) return
+    try { await this.join(revision) }
+    catch(e) {
+      if(e instanceof APIError && (e.status===401 || e.status===403)) { this.stop(); return }
+      this.retryAt=Date.now()+this.retryDelay;this.retryDelay=Math.min(60000,this.retryDelay*2)
+    }
   }
   setSelection(anchor:PresenceAnchor|null,mode:'viewing'|'editing',revision:number):void {
     this.desired={mode,anchor,revision,interacted:mode==='editing'};if(this.disposed) return
@@ -63,17 +77,39 @@ export class QuotePresence {
   }
   private visibility=()=>{if(document.hidden && this.desired) this.desired.mode='idle';void this.update()}
   private focus=()=>{void this.refresh();void this.update()}
-  async refresh():Promise<void> { if(this.disposed) return; try { const s=await json<PresenceSnapshot>(await api(path(this.quoteId)));if(!this.disposed){this.snapshot=s;this.onSnapshot(s)} } catch { /* stream reconnects and the lease expires */ } }
+  async refresh():Promise<void> { if(this.disposed) return; try { const s=await json<PresenceSnapshot>(await api(path(this.quoteId)));if(!this.disposed){this.snapshot=s;this.onSnapshot(s)} } catch(e) { if(e instanceof APIError && (e.status===401 || e.status===403)) this.stop() } }
+  private finishUpdate():void {
+    this.updating=false
+    if(this.disposed || !this.pendingUpdate) return
+    // A timer may fire while a PATCH or rejoin is held. Coalesce those requests,
+    // then flush the latest desired state after the throttle and retry fence.
+    window.clearTimeout(this.pendingTimer)
+    this.pendingTimer=window.setTimeout(()=>{void this.update()},Math.max(0,220-(Date.now()-this.lastUpdate),this.retryAt-Date.now()))
+  }
   private async update():Promise<void> {
-    if(this.disposed || !this.sessionId || !this.desired) return
+    if(this.disposed || !this.desired) return
+    if(this.updating) {this.pendingUpdate=true;return}
+    if(!this.sessionId) {
+      this.updating=true
+      try { await this.rejoin(this.desired.revision) } finally {
+        // Joining restores the lease; PATCH carries its latest selection.
+        if(this.sessionId) this.pendingUpdate=true
+        this.finishUpdate()
+      }
+      return
+    }
     if(Date.now()-this.lastUpdate<200) {window.clearTimeout(this.pendingTimer);this.pendingTimer=window.setTimeout(()=>{void this.update()},220-(Date.now()-this.lastUpdate));return}
     this.lastUpdate=Date.now()
     const wanted=this.desired; const mode=document.hidden?'idle':wanted.mode
+    this.updating=true;this.pendingUpdate=false
     try {
       const s=await json<PresenceSnapshot>(await api(`${path(this.quoteId)}/${this.sessionId}`,{method:'PATCH',headers:{'Content-Type':'application/json'},body:JSON.stringify({mode,observed_revision:wanted.revision,anchor:wanted.anchor,interacted:wanted.interacted})}))
       if(this.desired===wanted) wanted.interacted=false
       if(!this.disposed){this.snapshot=s;this.onSnapshot(s)}
-    } catch(e) { if(e instanceof APIError && e.status===404 && !this.disposed){this.sessionId=null;try{await this.join(wanted.revision)}catch{/* retry on next heartbeat */}} if(e instanceof APIError && e.status===403) this.stop() }
+    } catch(e) {
+      if(e instanceof APIError && e.status===404 && !this.disposed){this.sessionId=null;await this.rejoin(wanted.revision)}
+      if(e instanceof APIError && (e.status===401 || e.status===403)) this.stop()
+    } finally { this.finishUpdate() }
   }
   stop():void {
     this.disposed=true;this.stream?.close();this.stream=null;window.clearInterval(this.heartbeatTimer);window.clearTimeout(this.pendingTimer)

@@ -99,10 +99,10 @@ function commitTyped() {
 .date-trigger { display: inline-flex; align-items: center; gap: 8px; min-width: 0; border: 0; background: transparent; color: inherit; font: inherit; text-align: left; cursor: pointer; }
 .date-trigger:disabled { cursor: default; }
 /* On the paper: the date reads like the text around it; a dotted line hints it can change. */
-.as-paper .date-trigger { padding: 0; margin: 0; line-height: inherit; text-decoration: underline dotted rgba(32, 60, 61, .35); text-underline-offset: 2px; }
+.as-paper .date-trigger { padding: 0; margin: 0; line-height: inherit; text-decoration: underline dotted color-mix(in srgb, var(--shadow-color) 35%, transparent); text-underline-offset: 2px; }
 .as-paper .date-trigger:disabled { text-decoration: none; }
 .as-paper .date-trigger:hover:not(:disabled) { text-decoration-color: currentColor; }
-.as-paper .date-trigger:focus-visible { outline: 1px solid rgba(14, 111, 108, .5); outline-offset: 2px; box-shadow: none; border-radius: 1px; }
+.as-paper .date-trigger:focus-visible { outline: 1px solid color-mix(in srgb, var(--primary-line) 50%, transparent); outline-offset: 2px; box-shadow: none; border-radius: 1px; }
 /* In the panel: a field like the others. */
 .as-field { width: 100%; }
 .as-field .date-trigger { justify-content: space-between; width: 100%; height: 30px; padding: 0 8px; border: 1px solid var(--glass-edge); border-radius: 8px; background: var(--field-bg); box-shadow: var(--field-inset), 0 0 0 1px var(--line); color: var(--ink); font: 500 13px/1 var(--mono); font-variant-numeric: tabular-nums; }

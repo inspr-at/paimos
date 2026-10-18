@@ -14,6 +14,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/inspr-at/paimos/internal/ownedprocess"
 )
 
 type replayInboxAPI struct {
@@ -57,10 +59,17 @@ func TestUncertainDeliveryDoesNotMaskHeartbeatFailure(t *testing.T) {
 }
 
 func TestIdleInboxLeaseReplayAndTerminalFence(t *testing.T) {
-	s, a, e, p := managedFixture(t)
-	e.mu.Lock()
-	e.inboxCapable = true
-	e.mu.Unlock()
+	// Service cycles are advanced explicitly. The scheduled-loop tests use
+	// injected hint/tick channels; no background loop may consume this outage.
+	s, a, process := testSupervisor(t)
+	p := &managedFake{fakeProcess: process, identity: ownedprocess.Identity{ProcessID: strings.Repeat("b", 32), RootPID: process.PID(), GroupID: process.PID(), StartedAt: time.Now().UTC()}}
+	e := &owned{record: Record{TenantID: s.tenantID, PrincipalID: s.principalID, RunID: a.run.ID, Generation: s.generation, State: "running", PID: p.PID(), Controls: map[string]replay{}},
+		harness: HarnessSession{ID: "session", ProjectID: "project", Model: a.profile.Model, ReasoningEffort: a.profile.Effort, Activity: "busy"}, process: p, managedPolicy: true, inboxCapable: true, replies: map[string]InboxReplyTarget{}, harnessWake: make(chan struct{}, 1),
+		budgetProcess: p, tokenBudget: defaultTokenBudget, turnBudget: defaultTurnBudget}
+	s.runs[a.run.ID] = e
+	if err := s.journal.Put(e.record); err != nil {
+		t.Fatal(err)
+	}
 	s.observe(e, AdapterEvent{Activity: "idle"})
 	api := &replayInboxAPI{fakeAPI: a, fail: true}
 	s.api = api

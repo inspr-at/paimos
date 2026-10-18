@@ -13,7 +13,7 @@ var skippedProjectFields = map[string]bool{
 var explicitIssueFields = []string{
 	"acceptance_criteria", "notes", "priority", "tags", "estimate_hours",
 	"estimate_lp", "budget_hours", "total_budget", "start_date", "end_date",
-	"release", "sprint_ids", "needs_review", "archived", "accepted_at",
+	"release", "sprint_ids", "needs_review", "archived", "accepted_at", "hide_from_release_notes",
 }
 
 // knowledgeTypes are the classic issue types the knowledge module serves. It

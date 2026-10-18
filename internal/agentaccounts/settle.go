@@ -9,6 +9,7 @@ import (
 
 	"github.com/jackc/pgx/v5"
 
+	"github.com/inspr-at/paimos/internal/events"
 	"github.com/inspr-at/paimos/internal/tenant"
 )
 
@@ -32,12 +33,30 @@ type reservationRow struct {
 // A second call with the same telemetry is a no-op. A later call may only
 // increase settled usage.
 func Settle(ctx context.Context, tx pgx.Tx, actor tenant.Principal, runID string) error {
+	var pending []events.Change
+	if err := SettleDeferred(ctx, tx, actor, runID, &pending); err != nil {
+		return err
+	}
+	for _, change := range pending {
+		if _, err := events.Append(ctx, tx, actor, change); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// SettleDeferred leaves events to the outer completion transaction.
+func SettleDeferred(ctx context.Context, tx pgx.Tx, actor tenant.Principal, runID string, pending *[]events.Change) error {
+	ctx = tenantContext(ctx, actor)
 	run, err := lockRun(ctx, tx, runID)
 	if err != nil {
 		return err
 	}
 	if err := actorMayUseRun(ctx, tx, actor, run.AgentID, run.ID); err != nil {
 		return err
+	}
+	if observed, err := routineExitObservedTx(ctx, tx, run); err != nil || !observed {
+		return err // Unknown exit retains every routine reservation.
 	}
 	if run.AccountID != nil {
 		a, err := lockAccount(ctx, tx, *run.AccountID)
@@ -46,6 +65,12 @@ func Settle(ctx context.Context, tx pgx.Tx, actor tenant.Principal, runID string
 		}
 		now, err := dbNow(ctx, tx)
 		if err != nil {
+			return err
+		}
+		if err := reconcileVendorStop(ctx, tx, a, now); err != nil {
+			return err
+		}
+		if err := settleRecovery(ctx, tx, run, now); err != nil {
 			return err
 		}
 		if err = learnRun(ctx, tx, a, run.ID, now); err != nil {
@@ -107,7 +132,8 @@ func Settle(ctx context.Context, tx pgx.Tx, actor tenant.Principal, runID string
 	if !changed {
 		return nil
 	}
-	return writeEvent(ctx, tx, actor, evSettled, nil, map[string]any{"run_id": run.ID, "requests": sums.requests, "tokens": sums.tokens, "cost_micros": sums.cost})
+	*pending = append(*pending, events.Change{Type: evSettled, After: map[string]any{"run_id": run.ID, "requests": sums.requests, "tokens": sums.tokens, "cost_micros": sums.cost}})
+	return nil
 }
 
 // Release returns unused reserved units after a queued cancel or a fenced
@@ -120,6 +146,12 @@ func Release(ctx context.Context, tx pgx.Tx, actor tenant.Principal, runID, daem
 	}
 	if err := actorMayUseRun(ctx, tx, actor, run.AgentID, run.ID); err != nil {
 		return err
+	}
+	if observed, err := routineExitObservedTx(ctx, tx, run); err != nil || !observed {
+		if err != nil {
+			return err
+		}
+		return fail(http.StatusConflict, "routine exit is unconfirmed")
 	}
 	if run.DaemonID != nil && *run.DaemonID != "" {
 		gen := ""
@@ -134,6 +166,13 @@ func Release(ctx context.Context, tx pgx.Tx, actor tenant.Principal, runID, daem
 	case "queued", "completed", "failed", "cancelled", "ownership_lost":
 	default:
 		return fail(http.StatusConflict, "live run keeps its reservation")
+	}
+	now, err := dbNow(ctx, tx)
+	if err != nil {
+		return err
+	}
+	if err := releaseRecovery(ctx, tx, run, now); err != nil {
+		return err
 	}
 	rows, err := lockReservations(ctx, tx, run.ID)
 	if err != nil {

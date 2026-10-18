@@ -41,6 +41,7 @@ func (rt *runtime) rulesChannelCheck(options doctorRulesOptions) doctorCheck {
 					Identity string `json:"identity"`
 					Key      string `json:"key"`
 					Text     string `json:"text"`
+					Source   string `json:"source"`
 				} `json:"rules"`
 			} `json:"files"`
 		} `json:"sources"`
@@ -74,7 +75,7 @@ func (rt *runtime) rulesChannelCheck(options doctorRulesOptions) doctorCheck {
 				return doctorCheck{Name: "rules", Status: "fail", Detail: "doctrine index unverified"}
 			}
 			for _, rule := range file.Rules {
-				rel.Rules = append(rel.Rules, rulescompare.PinnedRule{Identity: rule.Identity, Key: rule.Key, Text: rule.Text})
+				rel.Rules = append(rel.Rules, rulescompare.PinnedRule{Identity: rule.Identity, Key: rule.Key, Text: rule.Text, Source: rule.Source})
 			}
 		}
 		releases = append(releases, rel)

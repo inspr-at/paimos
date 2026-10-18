@@ -1,0 +1,22 @@
+{
+  "group": "clipped-names-and-preferences",
+  "nightlyTiming": {
+    "seconds": 104.965,
+    "selectedTests": 6
+  },
+  "spec": {
+    "file": "tests/aeon-632b-clip.spec.ts",
+    "listedTests": 6,
+    "tierTiming": {
+      "caseSeconds": {
+        "max": 18.132,
+        "median": 17.174,
+        "min": 16.519
+      },
+      "seconds": 104.965,
+      "selectedTests": 6
+    },
+    "weightSeconds": 37.260479,
+    "weightSource": "tierTiming:37377299349"
+  }
+}

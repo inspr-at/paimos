@@ -28,6 +28,8 @@ func isolate(t *testing.T) {
 	} {
 		t.Setenv(k, "")
 	}
+	// A test never asks the real harness which account it is signed in to (AEON-1285).
+	t.Setenv("AEON_ACCOUNT_PROBE", "off")
 }
 
 func meServer(t *testing.T, token string) *httptest.Server {
@@ -252,9 +254,10 @@ func TestCompatibilityVerbs(t *testing.T) {
 	}
 }
 
-func TestMCPWhoamiAndStubs(t *testing.T) {
+func TestMCPWhoamiAndWorkTools(t *testing.T) {
 	isolate(t)
-	srv := meServer(t, testKey)
+	var calls []transcriptRequest
+	srv := transcriptFixture(t, "ticket", "note", &calls)
 	defer srv.Close()
 	dir := t.TempDir()
 	cfg := filepath.Join(dir, "config.yaml")
@@ -340,7 +343,7 @@ func TestMCPWhoamiAndStubs(t *testing.T) {
 		t.Fatalf("whoami tool error %#v", res)
 	}
 	text := toolText(res)
-	if !strings.Contains(text, "cursor-grok") || strings.Contains(text, testKey) {
+	if !strings.Contains(text, "worker") || strings.Contains(text, testKey) {
 		t.Fatalf("whoami text %q", text)
 	}
 
@@ -351,7 +354,7 @@ func TestMCPWhoamiAndStubs(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !res.IsError || !strings.Contains(toolText(res), "issue_list arrives in R1") {
+	if res.IsError || !strings.Contains(toolText(res), "MEM-1") {
 		t.Fatalf("issue_list %#v text %q", res.IsError, toolText(res))
 	}
 	res, err = session.CallTool(ctx, &mcp.CallToolParams{
@@ -361,8 +364,8 @@ func TestMCPWhoamiAndStubs(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !res.IsError || !strings.Contains(toolText(res), "issue_create arrives in R1") {
-		t.Fatalf("fix marker arguments rejected before the existing placeholder: %q", toolText(res))
+	if res.IsError || !strings.Contains(toolText(res), "MEM-1") {
+		t.Fatalf("issue create failed: %q", toolText(res))
 	}
 	res, err = session.CallTool(ctx, &mcp.CallToolParams{
 		Name:      "search",
@@ -371,7 +374,7 @@ func TestMCPWhoamiAndStubs(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !res.IsError || !strings.Contains(toolText(res), "arrives in R1") {
+	if res.IsError || !strings.Contains(toolText(res), "MEM-1") {
 		t.Fatalf("search text %q", toolText(res))
 	}
 }

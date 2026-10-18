@@ -1,0 +1,66 @@
+{
+  "_license": "SPDX-License-Identifier: AGPL-3.0-only",
+  "builtin_roles": {
+    "admin": [
+      "work_orders.assign",
+      "work_orders.read",
+      "work_orders.write"
+    ],
+    "member": [
+      "work_orders.assign",
+      "work_orders.read",
+      "work_orders.write"
+    ],
+    "owner": [
+      "work_orders.assign",
+      "work_orders.read",
+      "work_orders.write"
+    ],
+    "viewer": [
+      "work_orders.read"
+    ]
+  },
+  "registry": [
+    {
+      "agent_grantable": true,
+      "description": "Assign work orders",
+      "grantable_at": [
+        "workspace",
+        "project"
+      ],
+      "group": "Work Orders",
+      "key": "work_orders.assign",
+      "owner_workstation_grantable": true,
+      "risk": "medium"
+    },
+    {
+      "agent_grantable": true,
+      "description": "Read work orders",
+      "grantable_at": [
+        "workspace",
+        "project"
+      ],
+      "group": "Work Orders",
+      "key": "work_orders.read",
+      "owner_workstation_grantable": true,
+      "risk": "low"
+    },
+    {
+      "agent_grantable": true,
+      "description": "Write work orders",
+      "grantable_at": [
+        "workspace",
+        "project"
+      ],
+      "group": "Work Orders",
+      "key": "work_orders.write",
+      "owner_workstation_grantable": true,
+      "risk": "medium"
+    }
+  ],
+  "words": {
+    "resources": {
+      "work_orders": "work orders"
+    }
+  }
+}

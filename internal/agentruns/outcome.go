@@ -80,40 +80,73 @@ func classifyEvidenceRef(ref string) (merged, pr, committed bool) {
 	return merged, pr, committed
 }
 
-func waitingMillis(ctx context.Context, tx pgx.Tx, runID string) (int64, error) {
-	rows, err := tx.Query(ctx, `SELECT status, at FROM run_telemetry WHERE run_id=$1 ORDER BY sequence`, runID)
+// waitingClock clips each span to this run's lifetime. Status-free heartbeats
+// leave the span open; terminal reports without status still close it at end.
+type waitingClock struct {
+	start, end, last, from time.Time
+	open                   bool
+	millis                 int64
+}
+
+func (c *waitingClock) observe(status *string, at time.Time) {
+	if status == nil || *status == "" {
+		return
+	}
+	if at.Before(c.start) {
+		at = c.start
+	}
+	if at.After(c.end) {
+		at = c.end
+	}
+	if at.Before(c.last) {
+		at = c.last
+	}
+	c.last = at
+	if *status == "waiting" {
+		if !c.open {
+			c.from = at
+			c.open = true
+		}
+		return
+	}
+	if c.open {
+		c.millis += at.Sub(c.from).Milliseconds()
+		c.open = false
+	}
+}
+func (c *waitingClock) finish() int64 {
+	if c.open {
+		c.millis += c.end.Sub(c.from).Milliseconds()
+		c.open = false
+	}
+	return c.millis
+}
+func waitingMillis(ctx context.Context, tx pgx.Tx, runID string, start, end time.Time) (*int64, error) {
+	rows, err := tx.Query(ctx, `SELECT status,at FROM run_telemetry WHERE run_id=$1 AND status IS NOT NULL ORDER BY sequence LIMIT 10001`, runID)
 	if err != nil {
-		return 0, err
+		return nil, err
 	}
 	defer rows.Close()
-	var waiting int64
-	var waitingFrom time.Time
-	var waitingOpen bool
+	clock := waitingClock{start: start, end: end}
+	count := 0
 	for rows.Next() {
+		count++
+		if count > 10000 {
+			// Overflow is missing timing evidence, not failed terminal telemetry.
+			return nil, nil
+		}
 		var status *string
 		var at time.Time
 		if err := rows.Scan(&status, &at); err != nil {
-			return 0, err
+			return nil, err
 		}
-		// A heartbeat stores no status. It must not end or restart a waiting span.
-		if status == nil || *status == "" {
-			continue
-		}
-		if *status == "waiting" {
-			if !waitingOpen {
-				waitingFrom = at
-				waitingOpen = true
-			}
-			continue
-		}
-		if waitingOpen {
-			if gap := at.Sub(waitingFrom).Milliseconds(); gap > 0 {
-				waiting += gap
-			}
-			waitingOpen = false
-		}
+		clock.observe(status, at)
 	}
-	return waiting, rows.Err()
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	waiting := clock.finish()
+	return &waiting, nil
 }
 
 func runEvidence(ctx context.Context, tx pgx.Tx, runID, orderID string, commits []GitCommit) ([]string, []string, error) {
@@ -159,20 +192,21 @@ func applyRunUsage(ctx context.Context, tx pgx.Tx, v *Run, t Telemetry) error {
 	if !terminal(v.Status) || v.StartedAt == nil || v.EndedAt == nil || v.DurationMS == nil {
 		return nil
 	}
-	waiting, err := waitingMillis(ctx, tx, v.ID)
+	waiting, err := waitingMillis(ctx, tx, v.ID, *v.StartedAt, *v.EndedAt)
 	if err != nil {
 		return err
 	}
-	active := *v.DurationMS - waiting
-	if active < 0 {
-		active = 0
+	var active *int64
+	if waiting != nil {
+		measured := max(int64(0), *v.DurationMS-*waiting)
+		active = &measured
 	}
 	shas, refs, err := runEvidence(ctx, tx, v.ID, v.OrderID, t.GitCommits)
 	if err != nil {
 		return err
 	}
 	detail := deriveOutcomeDetail(v.Status, t.GitCommits, shas, refs)
-	next, err := scan(tx.QueryRow(ctx, `UPDATE agent_runs SET active_ms=$2, outcome_detail=$3 WHERE id=$1 RETURNING `+columns, v.ID, active, detail))
+	next, err := scan(tx.QueryRow(ctx, `UPDATE agent_runs SET active_ms=$2, outcome_detail=$3, waiting_ms=$4 WHERE id=$1 RETURNING `+columns, v.ID, active, detail, waiting))
 	if err != nil {
 		return err
 	}

@@ -171,3 +171,11 @@ export async function mockAnonymousGuide(page: Page) {
 
 // Builders for other fixtures (capacity, agents desk).
 export { base as pairingView, enrollment as pairingEnrollment }
+
+// A connected computer as GET /agent-pairing/computers lists it (AEON-741 Start lead host choice).
+export function pairedComputer(overrides: Record<string, unknown> = {}) {
+  return base({
+    state: 'redeemed', computer_id: COMPUTER, computer_state: 'connected', revision: 4, setup_state: 'connected',
+    connectivity: 'online', last_seen_at: '2026-10-06T09:59:00.000Z', verification: verification('connect_only'), ...overrides,
+  })
+}

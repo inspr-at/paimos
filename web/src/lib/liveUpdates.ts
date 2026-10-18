@@ -129,11 +129,6 @@ export interface ApplyGuard {
   // The last pointer, key, wheel or scroll input, in ms (performance or epoch, like now).
   lastInputAt: number; now: number
 }
-// Nothing selected, no editor, menu, dialog, drag or scroll, the tab
-// visible and 2 s without input. Otherwise the pill waits; no countdown.
-export function canAutoApply(guard: ApplyGuard, idleMs = IDLE_MS): boolean {
-  return autoApplyDelay(guard, idleMs) === 0
-}
 // 0 when it may apply now; the ms until idle when only idleness is missing;
 // null while something else blocks it (check again when that changes).
 export function autoApplyDelay(guard: ApplyGuard, idleMs = IDLE_MS): number | null {

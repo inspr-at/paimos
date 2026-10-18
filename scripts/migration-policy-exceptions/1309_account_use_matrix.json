@@ -1,0 +1,11 @@
+{
+  "schema": "aeon.migration-policy-exceptions.v1",
+  "exceptions": [
+    {
+      "file": "1309_account_use_matrix.sql",
+      "sha256": "925ba6aed5410ffa92bacd6e41f1060d5aa55bce7d10154cbcfcb28af69110e2",
+      "ticket": "AEON-1051",
+      "reason": "Additive account/context tables and invoker triggers retain pre-matrix behavior until lazy activation. The checker does not allow CREATE CONSTRAINT TRIGGER; the four new deferred audit triggers deliberately append events only at transaction end, after legacy resource locks. No existing constraints, policies, functions or data are dropped or renamed. This exact-byte draft is a coordinator review artifact, not merge or release approval; the previous-binary compatibility gate remains required."
+    }
+  ]
+}

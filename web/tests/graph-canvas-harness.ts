@@ -23,3 +23,20 @@ export async function mountTicketGraph() {
   ]) }).use(router)
   app.mount(host)
 }
+
+// A glimpse in a fixed box, like the header backdrop: the renderer must take
+// this box's size, not the window's, however late its engine arrives.
+export async function mountGlimpseGraph() {
+  document.querySelector('#app')?.setAttribute('hidden', '')
+  const host = document.createElement('div'); host.id = 'glimpse-graph-harness'
+  host.style.cssText = 'position: relative; width: 480px; height: 140px;'
+  document.body.append(host)
+  const data: GraphData = { nodes: [
+    { id: 'ticket-1', label: 'One', group: 'doing', color: '--kind-ticket', weight: 1 },
+    { id: 'ticket-2', label: 'Two', group: 'backlog', color: '--kind-ticket', weight: 1 },
+    { id: 'ticket-3', label: 'Three', group: 'backlog', color: '--kind-ticket', weight: 1 },
+  ], links: [{ source: 'ticket-1', target: 'ticket-2', kind: 'blocks', directed: true }] }
+  const router = createRouter({ history: createMemoryHistory(), routes: [{ path: '/', component: { render: () => null } }] })
+  await router.push('/')
+  createApp({ render: () => h(GraphCanvas, { data, glimpse: true, layoutBias: 'elliptic', canvasClass: 'glimpse-harness-canvas' }) }).use(router).mount(host)
+}

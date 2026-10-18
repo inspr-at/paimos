@@ -23,8 +23,10 @@ import (
 // body search, the assignee sort and the new facets.
 func TestListFiltersExclusionsLabelsEpicsAndDates(t *testing.T) {
 	p := newPrincipal(t, "filters")
+	customKind(t, p, "epic", "epic")
+	customKind(t, p, "task", "task")
 	mira := addPrincipalIn(t, p.TenantID, "mira")
-	project, epic, ticket, task := kindBySlug(t, p, "project"), kindBySlug(t, p, "epic"), kindBySlug(t, p, "ticket"), kindBySlug(t, p, "task")
+	project, epic, ticket, task := kindBySlug(t, p, "project"), kindBySlug(t, p, "epic"), kindBySlug(t, p, "work"), kindBySlug(t, p, "task")
 	create := func(kind, key, title, state, parent string, fields map[string]any, body string) nodeJSON {
 		t.Helper()
 		if fields == nil {
@@ -49,10 +51,11 @@ func TestListFiltersExclusionsLabelsEpicsAndDates(t *testing.T) {
 	e1 := create(epic.ID, "PAI-1", "Provisioning", "backlog", root.ID, nil, "")
 	e2 := create(epic.ID, "PAI-2", "Billing", "backlog", root.ID, nil, "")
 	a := create(ticket.ID, "PAI-3", "Alpha", "new", e1.ID, map[string]any{"priority": "high", "assignee": p.ID,
-		"tags": []any{map[string]any{"id": 1, "name": "BUG", "color": "red"}, "hsb8"}, "cost_unit": map[string]any{"id": "x", "label": "Consulting"},
+		"tags": []any{map[string]any{"id": 1, "name": "BUG", "color": "red"}, "worker-8"}, "cost_unit": map[string]any{"id": "x", "label": "Consulting"},
 		"release": map[string]any{"id": 9, "label": "v4.7.8"}, "start_date": "2026-09-10"}, "")
 	b := create(ticket.ID, "PAI-4", "Beta", "in_progress", e2.ID, map[string]any{"priority": "low", "assignee": mira.ID,
-		"tags": []any{"bug"}, "classic": map[string]any{"cost_unit": map[string]any{"id": 4, "label": "Support"}}, "start_date": "2026-02-30"}, "The fleet agent restarts twice.")
+		"tags": []any{"bug"}, "classic": map[string]any{"cost_unit": map[string]any{"id": 4, "label": "Support"}}, "start_date": "2026-02-30",
+		"estimate_hours": 1, "acceptance_criteria": "The list retains the requested filters"}, "The fleet agent restarts twice.")
 	c := create(task.ID, "PAI-5", "Gamma", "qa", a.ID, map[string]any{"cost_unit": nil, "classic": map[string]any{"cost_unit": map[string]any{"label": "Support"}}}, "")
 	d := create(ticket.ID, "PAI-6", "Delta", "done", root.ID, map[string]any{"priority": "medium", "tags": []any{}}, "")
 	_ = create(ticket.ID, "OTH-1", "Elsewhere", "new", other.ID, map[string]any{"tags": []any{"bug"}}, "")
@@ -62,7 +65,7 @@ func TestListFiltersExclusionsLabelsEpicsAndDates(t *testing.T) {
 		if !strings.Contains(query, "sort=") {
 			query += "&sort=key"
 		}
-		status, body := call(t, &p, http.MethodGet, "/api/nodes?within="+root.ID+"&kind=ticket,task&"+query, "")
+		status, body := call(t, &p, http.MethodGet, "/api/nodes?within="+root.ID+"&kind=work,task&"+query, "")
 		page := decode[nodePage](t, status, body, http.StatusOK)
 		out := []string{}
 		for _, item := range page.Items {
@@ -93,9 +96,9 @@ func TestListFiltersExclusionsLabelsEpicsAndDates(t *testing.T) {
 
 	// Tags by name, case-insensitive, string or object elements; none and not.
 	expect("tag=bug", "PAI-3", "PAI-4")
-	expect("tag=HSB8", "PAI-3")
+	expect("tag=WORKER-8", "PAI-3")
 	expect("tag=none", "PAI-5", "PAI-6")
-	expect("tag=bug,!hsb8", "PAI-4")
+	expect("tag=bug,!worker-8", "PAI-4")
 	expect("tag=!none", "PAI-3", "PAI-4")
 
 	// Cost units: native wins (also an explicit null), classic falls back.
@@ -145,15 +148,15 @@ func TestListFiltersExclusionsLabelsEpicsAndDates(t *testing.T) {
 	}
 
 	// Facets for tags, cost units and releases; a cursor binds the new filters.
-	status, body := call(t, &p, http.MethodGet, "/api/nodes?within="+root.ID+"&kind=ticket,task&facets=tag,cost_unit,release,state&limit=1&tag=!none", "")
+	status, body := call(t, &p, http.MethodGet, "/api/nodes?within="+root.ID+"&kind=work,task&facets=tag,cost_unit,release,state&limit=1&tag=!none", "")
 	page := decode[nodePage](t, status, body, http.StatusOK)
-	if page.Facets["tag"]["BUG"]+page.Facets["tag"]["bug"] != 2 || page.Facets["tag"]["hsb8"] != 1 || page.Facets["cost_unit"]["Consulting"] != 1 || page.Facets["cost_unit"]["Support"] != 1 || page.Facets["release"]["none"] != 1 {
+	if page.Facets["tag"]["BUG"]+page.Facets["tag"]["bug"] != 2 || page.Facets["tag"]["worker-8"] != 1 || page.Facets["cost_unit"]["Consulting"] != 1 || page.Facets["cost_unit"]["Support"] != 1 || page.Facets["release"]["none"] != 1 {
 		t.Fatalf("facets: %#v", page.Facets)
 	}
 	if page.NextCursor == nil {
 		t.Fatal("expected a second page")
 	}
-	status, body = call(t, &p, http.MethodGet, "/api/nodes?within="+root.ID+"&kind=ticket,task&facets=tag,cost_unit,release,state&limit=1&tag=none&cursor="+url.QueryEscape(*page.NextCursor), "")
+	status, body = call(t, &p, http.MethodGet, "/api/nodes?within="+root.ID+"&kind=work,task&facets=tag,cost_unit,release,state&limit=1&tag=none&cursor="+url.QueryEscape(*page.NextCursor), "")
 	if status != http.StatusBadRequest || !strings.Contains(string(body), "cursor") {
 		t.Fatalf("cursor across filters: %d %s", status, body)
 	}
@@ -165,45 +168,32 @@ func TestList6000FiltersPerformance(t *testing.T) {
 }
 
 func TestList6000FiltersWithStaleKindStatistics(t *testing.T) {
-	// TRUNCATE resets relation estimates but retains column statistics from
-	// the previous tenant, just as it can between full-suite fixtures after
-	// autoanalyze. ANALYZE nodes alone does not refresh these join estimates.
-	newPrincipal(t, "previous-kind-statistics")
-	if _, err := appPool.Exec(t.Context(), `ANALYZE node_kinds`); err != nil {
-		t.Fatal(err)
-	}
+	// The cloned fixture retains node-kind statistics from a previous tenant.
 	p, path := testList6000FiltersPerformance(t)
 	plans := logListPerformancePlans(t, p, path)
 	for _, name := range []string{"list", "facets"} {
-		visits := filteredNodeVisits(plans[name], false)
+		visits := nodeVisitsInCTE(plans[name], "CTE filtered", false)
 		t.Logf("%s filtered node visits: %.0f", name, visits)
 		// Bound actual work, without prescribing an index or join algorithm.
 		// A kind join must not repeat the node lookup/filter for every kind.
 		if visits <= 0 || visits > 6002 {
 			t.Errorf("%s filtered node visits = %.0f, want one pass over 6001 nodes", name, visits)
 		}
+		// Risk: a common-parent estimate repeats a full child scan for every
+		// leaf. The flat fixture has two recursion levels, so scope may visit
+		// the table once per level plus its single indexed root lookup.
+		scopeVisits := nodeVisitsInCTE(plans[name], "CTE scope", false)
+		scopeVisits += nodeVisitsInCTE(plans[name], "CTE scope_children", false)
+		t.Logf("%s scope node visits: %.0f", name, scopeVisits)
+		if scopeVisits <= 0 || scopeVisits > 2*6001+1 {
+			t.Errorf("%s scope node visits = %.0f, want at most two passes over 6001 nodes and the root lookup", name, scopeVisits)
+		}
 	}
 }
 
 func testList6000FiltersPerformance(t *testing.T) (tenant.Principal, string) {
 	t.Helper()
-	p := newPrincipal(t, "large-filters")
-	project := kindBySlug(t, p, "project")
-	ticket := kindBySlug(t, p, "ticket")
-	root := mustNode(t, p, `{"kind_id":"`+project.ID+`","title":"Large project"}`)
-	err := db.InTenant(dbtest.Seed(t.Context()), appPool, p.TenantID, func(tx pgx.Tx) error {
-		_, err := tx.Exec(t.Context(), `INSERT INTO nodes (tenant_id,key,kind_id,title,fields,state,parent_id,position)
-            SELECT $1::uuid,'PERF-'||g,$2::uuid,'Item '||g,
-                jsonb_build_object('priority',CASE g%3 WHEN 0 THEN 'high' WHEN 1 THEN 'medium' ELSE 'low' END,
-                    'tags',CASE g%5 WHEN 0 THEN '[]'::jsonb ELSE jsonb_build_array(jsonb_build_object('name','T'||(g%7)),'bug') END,
-                    'cost_unit',jsonb_build_object('label','CU '||(g%4))),
-                CASE g%4 WHEN 0 THEN 'new' WHEN 1 THEN 'active' WHEN 2 THEN 'qa' ELSE 'done' END,
-                $3::uuid,g FROM generate_series(1,6000) AS g`, p.TenantID, ticket.ID, root.ID)
-		return err
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
+	p, root := useList6000Fixture(t)
 	if _, err := appPool.Exec(t.Context(), `ANALYZE nodes`); err != nil {
 		t.Fatal(err)
 	}
@@ -227,12 +217,18 @@ func testList6000FiltersPerformance(t *testing.T) (tenant.Principal, string) {
 			start := time.Now()
 			status, body := call(t, &p, http.MethodGet, path, "")
 			elapsed := time.Since(start)
+			if status != http.StatusOK {
+				logScopedListFailure(t, p, path)
+			}
 			page := decode[nodePage](t, status, body, http.StatusOK)
 			if (len(page.Items) != 50 && len(page.Items) != 1) || page.NextCursor == nil {
 				t.Fatalf("large list result: %d", len(page.Items))
 			}
-			if path == paths[0] && page.Facets["kind"]["ticket"] != 2058 {
-				t.Fatalf("filtered ticket facet = %d, want 2058", page.Facets["kind"]["ticket"])
+			if path == paths[0] && page.Facets["kind"]["work"] != 2058 {
+				t.Fatalf("filtered ticket facet = %d, want 2058", page.Facets["kind"]["work"])
+			}
+			if strings.Contains(path, "&epic=none&") && page.Facets["kind"]["work"] != 6000 {
+				t.Fatalf("no-parent filter lost root work: %#v", page.Facets)
 			}
 			for _, item := range page.Items {
 				if item.ChildrenCount != 0 {
@@ -270,7 +266,7 @@ func addPrincipalIn(t *testing.T, tenantID, name string) struct{ ID string } {
 func TestListAssigneeFacetOverLargeImportedFields(t *testing.T) {
 	p := newPrincipal(t, "large-fields")
 	project := kindBySlug(t, p, "project")
-	ticket := kindBySlug(t, p, "ticket")
+	ticket := kindBySlug(t, p, "work")
 	root := mustNode(t, p, `{"kind_id":"`+project.ID+`","title":"Imported project"}`)
 	// A workspace of people, most of them linked to classic accounts.
 	for i := 0; i < 14; i++ {
@@ -296,7 +292,7 @@ func TestListAssigneeFacetOverLargeImportedFields(t *testing.T) {
 	if _, err := appPool.Exec(t.Context(), `ANALYZE nodes`); err != nil {
 		t.Fatal(err)
 	}
-	path := "/api/nodes?within=" + root.ID + "&kind=ticket&facets=assignee,tag&limit=1"
+	path := "/api/nodes?within=" + root.ID + "&kind=work&facets=assignee,tag&limit=1"
 	var fastest time.Duration
 	for i := 0; i < 3; i++ {
 		start := time.Now()

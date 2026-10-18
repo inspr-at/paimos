@@ -63,6 +63,10 @@ func TestEffectiveRouteMatrix(t *testing.T) {
 		allow       bool
 	}{
 		{"owner", "POST /api/nodes", true}, {"owner", "POST /api/roles", true},
+		{"owner", "POST /api/work-kinds", true}, {"admin", "POST /api/work-kinds", true},
+		{"member", "POST /api/work-kinds", false}, {"viewer", "POST /api/work-kinds", false},
+		{"member", "GET /api/model-preferences", true}, {"member", "GET /api/work-kinds", true},
+		{"admin", "POST /api/models/{id}/retire", true}, {"member", "POST /api/models/{id}/retire", false},
 		{"admin", "POST /api/roles", true}, {"admin", "POST /api/nodes", true},
 		{"member", "POST /api/nodes", true}, {"member", "POST /api/kinds", false},
 		{"member", "POST /api/roles", false}, {"member", "POST /api/approvals/{approvalId}/decision", true},
@@ -73,6 +77,11 @@ func TestEffectiveRouteMatrix(t *testing.T) {
 		{"customer", "POST /api/quotes/{quoteId}/versions/{version}/accept", true},
 		{"customer", "GET /api/quotes", false},
 		{"customer", "GET /api/me/profile", true},
+		// Queue entry requires node visibility; the handler separately fences
+		// write permission and receipt ownership inside the final transaction.
+		{"owner", "POST /api/queue/{nodeId}/undo", true},
+		{"member", "POST /api/queue/{nodeId}/undo", true},
+		{"customer", "POST /api/queue/{nodeId}/undo", false},
 	} {
 		check(tc.role, people[tc.role], tc.route, tc.allow)
 	}
@@ -113,6 +122,28 @@ func TestEffectiveRouteMatrix(t *testing.T) {
 	checkIn("guest", guest, "GET /api/members", Scope{AnyProject: true}, false)
 	checkIn("guest", guest, "POST /api/nodes/{nodeId}/comments", Scope{ProjectID: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"}, false)
 	checkIn("customer", people["customer"], "GET /api/nodes", Scope{AnyProject: true}, false)
+	// A person bound only to a project can reach the filtered pause/resume
+	// batches; the handlers still authorize each target project and owner.
+	projectMember := tenant.Principal{TenantID: tid, Kind: tenant.Person}
+	if err := db.InTenant(dbtest.Seed(ctx), d.App, tid, func(tx pgx.Tx) error {
+		if err := tx.QueryRow(ctx, `INSERT INTO principals(tenant_id,kind,name) VALUES($1::uuid,'person','Project pause member') RETURNING id::text`, tid).Scan(&projectMember.ID); err != nil {
+			return err
+		}
+		_, err := tx.Exec(ctx, `INSERT INTO role_bindings(tenant_id,principal_id,role_id,scope_type,scope_id) SELECT $1::uuid,$2::uuid,id,'project',$3::uuid FROM roles WHERE tenant_id=$1::uuid AND key='member'`, tid, projectMember.ID, projectID)
+		return err
+	}); err != nil {
+		t.Fatal(err)
+	}
+	for _, operation := range []string{"pause", "resume"} {
+		pattern := "POST /api/harness-sessions/" + operation
+		scope, scoped, err := ResolveRouteScope(ctx, d.App, pattern, "/api/harness-sessions/"+operation)
+		if err != nil || !scoped || !scope.AnyProject {
+			t.Fatalf("pause batch scope: %+v scoped=%v err=%v", scope, scoped, err)
+		}
+		checkIn("project-only member", projectMember, pattern, scope, true)
+		checkIn("guest", guest, pattern, Scope{AnyProject: true}, false)
+		check("viewer", people["viewer"], pattern, false)
+	}
 	var agent tenant.Principal
 	agent.TenantID, agent.Kind = tid, tenant.Agent
 	if err := db.InTenant(dbtest.Seed(ctx), d.App, tid, func(tx pgx.Tx) error {

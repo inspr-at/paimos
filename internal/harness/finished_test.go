@@ -40,7 +40,7 @@ func TestFinishedNeedsAReportedHundredAndARecordedCleanExit(t *testing.T) {
 	}
 	ticketRow := func(p tenant.Principal, ticket string) *ticketEta {
 		t.Helper()
-		r := httptest.NewRequest(http.MethodGet, "/api/nodes?within="+f.project+"&kind=ticket", nil)
+		r := httptest.NewRequest(http.MethodGet, "/api/nodes?within="+f.project+"&kind=work", nil)
 		r = r.WithContext(tenant.WithPrincipal(r.Context(), p))
 		w := httptest.NewRecorder()
 		mux.ServeHTTP(w, r)
@@ -89,7 +89,7 @@ func TestFinishedNeedsAReportedHundredAndARecordedCleanExit(t *testing.T) {
 		t.Helper()
 		n++
 		ticket = uid()
-		f.addNode(t, ticket, fmt.Sprintf("FIN-%d", n), "ticket", f.project, name)
+		f.addNode(t, ticket, fmt.Sprintf("FIN-%d", n), "work", f.project, name)
 		lease := fmt.Sprintf("fin-lease-%022d", n)
 		session = f.registerSession(t, f.agent.ID, "worker", ticket, fmt.Sprintf("fin-ref-%016d", n), lease)
 		f.beat(t, session, lease, 1, map[string]any{"progress_pct": progress})
@@ -219,7 +219,7 @@ func TestFinishedIsARequiredBooleanInEveryPayload(t *testing.T) {
 		}
 	}
 	ticket := uid()
-	f.addNode(t, ticket, "REQ-1", "ticket", f.project, "required flag")
+	f.addNode(t, ticket, "REQ-1", "work", f.project, "required flag")
 	lease := "req-lease-0000000000000000000001"
 	registration := map[string]any{
 		"agent_principal_id": f.agent.ID, "harness": "codex", "host": "build-host",
@@ -302,7 +302,7 @@ func TestFinishedIsExplicitFalseWithoutAStopReason(t *testing.T) {
 	}
 
 	ticket := uid()
-	f.addNode(t, ticket, "REQ-2", "ticket", f.project, "no reason")
+	f.addNode(t, ticket, "REQ-2", "work", f.project, "no reason")
 	lease := "req-lease-0000000000000000000002"
 	session := f.registerSession(t, f.agent.ID, "worker", ticket, "req-ref-0000000000000002", lease)
 	f.beat(t, session, lease, 1, map[string]any{"progress_pct": 100})
@@ -346,7 +346,7 @@ func TestProgressSortUsesTheDisplayedCompletionAwarePercent(t *testing.T) {
 		t.Helper()
 		n++
 		ticket := uid()
-		f.addNode(t, ticket, key, "ticket", f.project, key)
+		f.addNode(t, ticket, key, "work", f.project, key)
 		lease := fmt.Sprintf("sort-lease-%022d", n)
 		session := f.registerSession(t, f.agent.ID, "worker", ticket, fmt.Sprintf("sort-ref-%016d", n), lease)
 		f.beat(t, session, lease, 1, map[string]any{"progress_pct": progress})
@@ -359,10 +359,10 @@ func TestProgressSortUsesTheDisplayedCompletionAwarePercent(t *testing.T) {
 	ticketAt("SORT-2", 100, "process_exited")
 	ticketAt("SORT-3", 70, "")
 	ticketAt("SORT-4", 100, "stopped") // ended early at 100%: no percent survives, unknown
-	f.addNode(t, uid(), "SORT-5", "ticket", f.project, "nothing reported")
+	f.addNode(t, uid(), "SORT-5", "work", f.project, "nothing reported")
 	order := func(sort string) []string {
 		t.Helper()
-		r := httptest.NewRequest(http.MethodGet, "/api/nodes?within="+f.project+"&kind=ticket&sort="+sort+"&limit=100", nil)
+		r := httptest.NewRequest(http.MethodGet, "/api/nodes?within="+f.project+"&kind=work&sort="+sort+"&limit=100", nil)
 		r = r.WithContext(tenant.WithPrincipal(r.Context(), f.person))
 		w := httptest.NewRecorder()
 		mux.ServeHTTP(w, r)

@@ -1,8 +1,9 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // AEON-206: ticket keys in Markdown open the app peek; a modified click follows
 // the real URL. Keys this workspace does not have stay plain text. Code and
-// existing links are left alone. The epic panel does not reserve an empty band
-// under the status chips.
+// existing links are left alone. The epic panel keeps the status chips against
+// the lifeline and the lifeline against Updated: the reserved strip (AEON-1359,
+// r4b) sits between them, and neither gap is an empty band.
 import { mkdirSync } from 'node:fs'
 import { test, expect, type Page } from '@playwright/test'
 import { fixtures, mockWork, watchErrors } from './work-fixtures'
@@ -65,7 +66,7 @@ test('a known ticket key links, an unknown key stays text, and code is left alon
   expect(errors).toEqual([])
 })
 
-test('a plain click opens the ticket peek and a modified click opens the URL', async ({ page }) => {
+test('a plain click follows the routed ticket and a modified click opens the URL', async ({ page }) => {
   await page.setViewportSize({ width: 1440, height: 900 })
   const { ws } = await openDescribed(page)
   const link = ws.getByRole('link', { name: 'PHAROS-14: Visual acceptance of the version pill' })
@@ -76,11 +77,13 @@ test('a plain click opens the ticket peek and a modified click opens the URL', a
   await expect(page).toHaveURL('/p/PHAROS/PHAROS-12')
 
   await link.click()
-  await expect(page).toHaveURL('/p/PHAROS/PHAROS-12?peek=PHAROS-14')
-  const peek = page.locator('.ticket-peek-host')
-  await expect(peek.getByRole('heading', { name: 'Visual acceptance of the version pill' })).toBeVisible()
+  await expect(page).toHaveURL('/p/PHAROS/PHAROS-14')
+  await expect(page.locator('.ticket-peek-host')).toHaveCount(0)
+  await expect(ws).toHaveCount(1)
+  await expect(ws.getByRole('heading', { name: 'Visual acceptance of the version pill' })).toBeVisible()
+  await page.goBack()
+  await expect(page).toHaveURL('/p/PHAROS/PHAROS-12')
   await expect(ws.getByRole('heading', { name: 'Add an Oracle Cloud connector' })).toBeVisible()
-  await expect(link).toHaveAttribute('aria-current', 'true')
 })
 
 test('the epic panel keeps the Updated line against the status chips', async ({ page }) => {
@@ -92,16 +95,29 @@ test('the epic panel keeps the Updated line against the status chips', async ({ 
   const ws = page.locator('.ticket-ws')
   await expect(ws.getByRole('heading', { name: 'Guarded multi-cloud provisioning' })).toBeVisible()
   await expect(ws.getByRole('button', { name: /Status:/ })).toBeVisible()
-  const gap = await ws.evaluate(root => {
+  // AEON-1359: the lifeline is a reserved strip between the chips and Updated
+  // (its one current visit in this fixture, or the same height while loading).
+  // AEON-206 still holds: neither side of that strip is an empty band.
+  const life = ws.getByTestId('ticket-lifeline')
+  await expect(life).toBeVisible()
+  await expect(life).not.toHaveAttribute('aria-busy')
+  const gaps = await ws.evaluate(root => {
     const props = root.querySelector('.ws-props')
-    const meta = root.querySelector('.meta')
-    if (!props || !meta) return -1
+    const strip = root.querySelector('[data-testid="ticket-lifeline"]')
+    const meta = [...root.querySelectorAll('.meta')].find(el => el.textContent?.includes('Updated'))
+    if (!props || !strip || !meta) return null
     const chips = [...props.querySelectorAll('.prop-btn, .prop-static, .hours-chip')]
+    if (!chips.length) return null
     const bottom = Math.max(...chips.map(el => el.getBoundingClientRect().bottom))
-    return meta.getBoundingClientRect().top - bottom
+    const stripBox = strip.getBoundingClientRect()
+    const metaBox = meta.getBoundingClientRect()
+    return { chipsToLifeline: stripBox.top - bottom, lifelineToUpdated: metaBox.top - stripBox.bottom }
   })
-  expect(gap).toBeGreaterThan(0)
-  expect(gap).toBeLessThan(24)
+  if (!gaps) throw new Error('the lifeline or the Updated line is missing')
+  expect(gaps.chipsToLifeline).toBeGreaterThan(0)
+  expect(gaps.chipsToLifeline).toBeLessThan(24)
+  expect(gaps.lifelineToUpdated).toBeGreaterThan(0)
+  expect(gaps.lifelineToUpdated).toBeLessThan(24)
 })
 
 test('markdown ticket links and the epic panel, light and dark', async ({ page }) => {
@@ -126,3 +142,46 @@ test('markdown ticket links and the epic panel, light and dark', async ({ page }
     }
   }
 })
+
+for (const [oldKey, canonicalKey, projectId, projectKey] of [
+  ['PHAROS-14', 'AEON-2', 'p-aeon', 'AEON'],
+  ['AEON-1', 'PHAROS-17', 'p-pharos', 'PHAROS'],
+]) {
+  test(`a moved Markdown key ${oldKey} follows ${canonicalKey} and Back restores the source`, async ({ page }) => {
+    const errors = watchErrors(page)
+    const data = fixtures()
+    const source = data.nodes.find(node => node.key === 'PHAROS-12')!
+    source.body = `Follow ${oldKey}.`
+    const moved = data.nodes.find(node => node.key === oldKey)!
+    moved.key = canonicalKey
+    moved.project = projectId
+    moved.parent_id = projectId
+    await mockWork(page, data)
+    // The server's key alias resolves the old display key to its current owner.
+    await page.route('**/api/nodes/lookup?*', async route => {
+      const keys = new URL(route.request().url()).searchParams.get('keys')?.split(',') ?? []
+      if (!keys.includes(oldKey)) return route.fallback()
+      await route.fulfill({ json: { items: [{ id: moved.id, key: moved.key, title: moved.title,
+        state: moved.state, requested_key: oldKey, project_id: moved.project }] } })
+    })
+    const sourceURL = '/p/PHAROS/PHAROS-12?q=Oracle&type=ticket'
+    await page.goto(sourceURL)
+    const ws = page.getByRole('complementary', { name: 'Ticket details' })
+    await expect(ws.getByRole('heading', { name: source.title, exact: true })).toBeVisible()
+    const link = ws.getByRole('link', { name: `${oldKey}: ${moved.title}`, exact: true })
+    await expect(link).toHaveText(oldKey)
+    await expect(link).toHaveAttribute('href', `/p/${projectKey}/${canonicalKey}`)
+    await link.click()
+    await expect(page).toHaveURL(`/p/${projectKey}/${canonicalKey}?q=Oracle&type=ticket`)
+    await expect(ws).toHaveCount(1)
+    await expect(ws.getByRole('button', { name: `Copy ${canonicalKey}`, exact: true })).toBeVisible()
+    await expect(ws.getByRole('heading', { name: moved.title, exact: true })).toBeVisible()
+    await expect(page).toHaveTitle(new RegExp(canonicalKey))
+    await expect(page.locator('.ticket-peek-host')).toHaveCount(0)
+    await ws.getByRole('button', { name: /Back to PHAROS-12/ }).click()
+    await expect(page).toHaveURL(sourceURL)
+    await expect(ws.getByRole('heading', { name: source.title, exact: true })).toBeVisible()
+    await expect(ws.getByRole('link', { name: `${oldKey}: ${moved.title}`, exact: true })).toBeVisible()
+    expect(errors).toEqual([])
+  })
+}

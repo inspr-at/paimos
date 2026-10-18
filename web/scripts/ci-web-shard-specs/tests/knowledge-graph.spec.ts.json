@@ -1,0 +1,22 @@
+{
+  "group": "remaining-ui",
+  "nightlyTiming": {
+    "seconds": 110.023,
+    "selectedTests": 16
+  },
+  "spec": {
+    "file": "tests/knowledge-graph.spec.ts",
+    "listedTests": 16,
+    "tierTiming": {
+      "caseSeconds": {
+        "max": 29.644,
+        "median": 4.71,
+        "min": 2.279
+      },
+      "seconds": 110.023,
+      "selectedTests": 16
+    },
+    "weightSeconds": 35.512195,
+    "weightSource": "unmeasured-test-rate"
+  }
+}

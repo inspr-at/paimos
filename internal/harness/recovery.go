@@ -68,7 +68,7 @@ func archiveUnavailable(s Session) string {
 }
 
 func recoveryAuthorized(r *http.Request, tx pgx.Tx, p tenant.Principal) error {
-	if p.Kind != tenant.Person {
+	if p.Kind != tenant.Person && !authz.OwnerWorkstation(p) {
 		return workorders.Fail(403, "a person with harness.recover permission is required")
 	}
 	err := authz.RequireTx(r.Context(), tx, p, "harness.recover", authz.Scope{ProjectID: r.PathValue("projectId")})
@@ -79,7 +79,7 @@ func recoveryAuthorized(r *http.Request, tx pgx.Tx, p tenant.Principal) error {
 }
 
 func (m *Module) recovery(r *http.Request, tx pgx.Tx, p tenant.Principal) (any, error) {
-	if p.Kind != tenant.Person {
+	if p.Kind != tenant.Person && !authz.OwnerWorkstation(p) {
 		return nil, workorders.Fail(403, "human recovery permission required")
 	}
 	scope := authz.Scope{ProjectID: r.PathValue("projectId")}

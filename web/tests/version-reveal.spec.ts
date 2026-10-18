@@ -1,14 +1,13 @@
 // SPDX-License-Identifier: AGPL-3.0-only
-// INSPR-CalVer3 (AEON-309): the seconds are collapsed at rest and every version
-// surface reveals them. Inside a control (the footer's history button, a release
-// row) the control's hover or keyboard focus reveals and its click still acts;
+// INSPR-CalVer3 (AEON-309): the seconds are collapsed at rest. Release controls
+// reveal on hover or keyboard focus and their clicks still act. The footer
+// keeps its resting width and shows full seconds in a hover card (AEON-542);
 // standing alone the detail heading is the shared renderer's copy pill. The
 // history's status dock crossfades Pretty to canonical text. Reduced motion
 // switches at once in either presentation.
 import { test, expect, type Locator, type Page } from '@playwright/test'
 import { fixtures, mockWork } from './work-fixtures'
 import { mockReleases, releaseHistory } from './releases-fixtures'
-import { journeyWorld, mockJourney } from './journey-fixtures'
 
 const sheet = (page: Page) => page.getByRole('dialog', { name: 'PAIMOS AEON releases' })
 const options = (page: Page) => page.getByRole('grid', { name: 'Releases, newest first' }).getByRole('row')
@@ -20,7 +19,9 @@ const pill = (page: Page) => page.getByRole('button', { name: /^Release history,
 async function setup(page: Page) {
   const history = releaseHistory()
   for (const release of history.releases) delete release.codename
-  await mockWork(page, fixtures())
+  const data = fixtures()
+  data.preferences['developer-ui'] = { show_reserved_versions: true }
+  await mockWork(page, data)
   await mockReleases(page, history)
   return history
 }
@@ -41,19 +42,30 @@ async function expectRest(scope: Locator) {
 }
 const away = (page: Page) => page.mouse.move(1, 1)
 
-test('footer pill: hover and keyboard focus reveal the seconds; a click still opens the history', async ({ page }) => {
+test('unnamed footer release: hover and keyboard focus show seconds in the card; a click opens history', async ({ page }) => {
   await setup(page)
   await page.goto('/p/PHAROS')
   const button = pill(page)
+  const card = page.locator('.release-hover-card')
   await expect(version(button)).toBeVisible()
   await expectRest(button)
+  const before = await button.boundingBox()
   await button.hover()
-  await expectRevealed(button)
-  await away(page)
+  await expect(card).toBeVisible()
+  await expectRevealed(card)
   await expectRest(button)
+  expect(await button.boundingBox()).toEqual(before)
+  await away(page)
+  await expect(card).toHaveCount(0)
+  await expectRest(button)
+  await page.keyboard.press('Tab')
   await button.focus()
-  await expectRevealed(button)
+  await expect(card).toBeVisible()
+  await expectRevealed(card)
+  await expectRest(button)
+  expect(await button.boundingBox()).toEqual(before)
   await page.locator('body').click({ position: { x: 5, y: 300 } })
+  await expect(card).toHaveCount(0)
   await expectRest(button)
   // A click on the version itself reaches the button.
   await version(button).click()
@@ -66,6 +78,7 @@ test('unnamed release rows: only the version copy control reveals; the row still
   await page.goto('/releases')
   await expect(options(page).first()).toHaveAttribute('aria-selected', 'true')
   const row = options(page).nth(2)
+  await expect(row).toContainText('Reserved, never published')
   await expectRest(row)
   await row.locator('.row-name').hover()
   await expectRest(row)
@@ -127,55 +140,15 @@ test('release heading and the history dock: copy controls reveal on hover and fo
   expect(await page.evaluate(() => navigator.clipboard.readText())).toBe(history.current)
 })
 
-test('journey release list: hover and focus reveal; a click still opens the release', async ({ page }) => {
-  await page.setViewportSize({ width: 1440, height: 900 })
-  await mockWork(page, fixtures())
-  await mockJourney(page, journeyWorld('build', { derived: true }))
-  await page.goto('/p/PHAROS?view=journey')
-  const list = page.getByRole('list', { name: 'Releases, newest first' })
-  const row = list.getByRole('button').filter({ has: page.locator('[data-canonical="260901120000.0.0"]') })
-  await expect(row).toBeVisible()
-  await expectRest(row)
-  await row.hover()
-  await expectRevealed(row)
-  await away(page)
-  await expectRest(row)
-  await row.focus()
-  await expectRevealed(row)
-  await row.blur()
-  await expectRest(row)
-  await version(row).click()
-  await expect(page).toHaveURL(/[?&]release=PHAROS-30(&|$)/)
-  await expect(row).toHaveAttribute('aria-current', 'true')
-})
-
-test('journey Live heading: the standalone copy pill reveals on keyboard focus and copies', async ({ page, context }) => {
-  await context.grantPermissions(['clipboard-read', 'clipboard-write'])
-  await page.setViewportSize({ width: 1440, height: 900 })
-  await mockWork(page, fixtures())
-  await mockJourney(page, journeyWorld('build', { derived: true }))
-  await page.goto('/p/PHAROS?view=journey&stage=live&release=PHAROS-30')
-  const head = page.locator('section[aria-labelledby="live-tickets"] .j-card-head')
-  // Omitted `interactive` means the renderer's own pill, never a bare image.
-  const copy = head.getByRole('button', { name: /^260901120000\.0\.0 · .* — Copy version$/ })
-  await expect(copy).toBeVisible()
-  await expectRest(head)
-  await copy.focus()
-  await expect(copy).toBeFocused()
-  await expectRevealed(head)
-  await page.keyboard.press('Enter')
-  await expect(copy).toHaveAttribute('data-copy-state', 'copied')
-  expect(await page.evaluate(() => navigator.clipboard.readText())).toBe('260901120000.0.0')
-})
-
 test('reduced motion reveals at once, without a transition', async ({ page }) => {
   await page.emulateMedia({ reducedMotion: 'reduce' })
-  await setup(page)
-  await page.goto('/p/PHAROS')
-  const button = pill(page)
-  await expect(version(button)).toBeVisible()
-  await button.hover()
-  await expect(version(button)).toHaveAttribute('data-version-view', 'revealed')
-  expect(await seconds(button).evaluate(el => [el.style.transition, getComputedStyle(el).opacity])).toEqual(['none', '0.7'])
-  expect(await secondsWidth(button)).toBeGreaterThan(0)
+  const history = await setup(page)
+  await page.goto('/releases')
+  const heading = sheet(page).getByRole('heading', { level: 2, name: history.current })
+  const copy = heading.getByRole('button')
+  await expectRest(heading)
+  await copy.hover()
+  await expect(version(heading)).toHaveAttribute('data-version-view', 'revealed')
+  expect(await seconds(heading).evaluate(el => [el.style.transition, getComputedStyle(el).opacity])).toEqual(['none', '0.7'])
+  expect(await secondsWidth(heading)).toBeGreaterThan(0)
 })

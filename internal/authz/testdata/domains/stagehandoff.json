@@ -1,0 +1,15 @@
+{
+  "_license": "SPDX-License-Identifier: AGPL-3.0-only",
+  "routes": {
+    "GET /api/projects/{projectId}/releases/{releaseId}/candidate-artifact": "stage_handoffs.read",
+    "GET /api/stage-handoffs/{handoffId}": "stage_handoffs.read|stage.prepare|stage.deploy|stage.verify|stage.apply",
+    "POST /api/projects/{projectId}/baseline-batches/batches/{batchId}/built-receipt": "stage.verify",
+    "POST /api/stage-handoffs": "stage_handoffs.write",
+    "POST /api/stage-handoffs/{handoffId}/classic-batch-alias": "stage_handoffs.decide",
+    "POST /api/stage-handoffs/{handoffId}/evidence": "stage_handoffs.write|stage.prepare|stage.deploy|stage.verify|stage.apply",
+    "POST /api/stage-handoffs/{handoffId}/launch/admit": "stage.deploy",
+    "POST /api/stage-handoffs/{handoffId}/launch/consume": "stage.deploy",
+    "POST /api/stage-handoffs/{handoffId}/result": "stage_handoffs.decide|stage.prepare|stage.deploy|stage.verify|stage.apply",
+    "PUT /api/projects/{projectId}/releases/{releaseId}/candidate-artifact": "stage_handoffs.write"
+  }
+}

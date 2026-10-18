@@ -3,12 +3,48 @@ import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
 import test from 'node:test';
 import { execFileSync } from 'node:child_process';
-import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, readdirSync } from 'node:fs';
+import childProcess from 'node:child_process';
+import { syncBuiltinESMExports } from 'node:module';
+import { mkdtempSync, mkdirSync, symlinkSync, writeFileSync, readFileSync, readdirSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { checkMigrations, contractMarker, destructive, publishedMigrations, splitSQL } from './check-migrations.mjs';
+import { checkMigrations, contractMarker, destructive, loadMigrationExceptions, publishedMigrations, splitSQL } from './check-migrations.mjs';
 
 const marker = '-- aeon:contract-phase AEON-415 expanded-in=v260930115354.0.0 expansion-migration=0001_tenants.sql\n';
+
+const migrationExceptionFiles = () => readdirSync(new URL('./migration-policy-exceptions/', import.meta.url)).sort().map(name => name.replace(/\.json$/, '.sql'));
+
+test('AEON-698 historical migration reads preserve exact bytes with two Git launches', () => {
+  const directory = mkdtempSync(join(tmpdir(), 'aeon-698-migration-batch-'));
+  const migrations = join(directory, 'internal/db/migrations');
+  mkdirSync(migrations, {recursive: true});
+  const git = (...args) => execFileSync('git', args, {cwd: directory, encoding: 'utf8'}).trim();
+  git('init', '-q');
+  const expected = new Map(Array.from({length: 8}, (_, i) => [
+    `000${i}_fixture.sql`, i === 0 ? '' : `-- Grüße ${i}\r\nSELECT 'blob 123\\n';${i % 2 ? '\n' : ''}`,
+  ]));
+  for (const [name, sql] of expected) writeFileSync(join(migrations, name), sql);
+  writeFileSync(join(migrations, 'README.txt'), 'not SQL');
+  git('add', '.');
+  const tree = git('write-tree');
+  const cwd = process.cwd(), original = childProcess.execFileSync, calls = [];
+  try {
+    process.chdir(directory);
+    childProcess.execFileSync = (bin, args, options) => {
+      calls.push({bin, args});
+      return original(bin, args, options);
+    };
+    syncBuiltinESMExports();
+    assert.deepEqual(publishedMigrations(tree), expected, 'empty, multibyte, CRLF and unterminated SQL stay byte-exact');
+    assert.equal(calls.length, 2, 'Git launch count must not grow with the migration count');
+    assert.ok(calls.every(call => call.bin === 'git'));
+    assert.deepEqual(calls[1].args, ['cat-file', '--batch']);
+  } finally {
+    childProcess.execFileSync = original;
+    syncBuiltinESMExports();
+    process.chdir(cwd);
+  }
+});
 
 test('duplicate numbers fail even with different names and SQL', () => {
   const problems = checkMigrations(new Map([['1050_first.sql', 'SELECT 1;'], ['1050_second.sql', 'SELECT 2;']]));
@@ -203,11 +239,187 @@ test('the runtime probe pulls by digest and rejects a malformed digest before Do
   writeFileSync(join(dir, 'go'), '#!/bin/bash\nexit 19\n', {mode: 0o700});
   const script = new URL('./migration-compat.sh', import.meta.url).pathname;
   const digest = 'sha256:' + 'a'.repeat(64);
-  assert.throws(() => execFileSync('bash', [script, 'v260930115354.0.0', digest], {env: {...process.env, PATH: `${dir}:${process.env.PATH}`}, stdio: 'pipe'}));
+  // Risk: allocating disposable resources before a failed image pull hides
+  // the pull failure and leaves cleanup to run against uncreated resources.
+  assert.throws(() => execFileSync('bash', [script, 'v260930115354.0.0', digest], {env: {...process.env, PATH: `${dir}:${process.env.PATH}`}, stdio: 'pipe'}), error => error.status === 19);
   assert.match(readFileSync(log, 'utf8'), new RegExp(`pull --platform linux/amd64 ghcr.io/inspr-at/aeon@${digest}`));
+  assert.equal(readFileSync(log, 'utf8'), `pull --platform linux/amd64 ghcr.io/inspr-at/aeon@${digest}\n`, 'a failed pull must precede any Docker resource allocation or cleanup');
+  const floorDigest = 'sha256:d916ebb57249fda5f192e74b37ebd770c0eb67c26aafeb1c0045a635e8aa940c';
+  writeFileSync(log, '');
+  writeFileSync(join(dir, 'docker'), `#!/bin/bash\nprintf '%s\\n' "$*" >> '${log}'\nif [[ "$*" = 'pull --platform linux/amd64 ghcr.io/inspr-at/aeon@${digest}' ]]; then exit 0; fi\nexit 19\n`, {mode: 0o700});
+  assert.throws(() => execFileSync('bash', [script, 'v260930115354.0.0', digest], {env: {...process.env, PATH: `${dir}:${process.env.PATH}`}, stdio: 'pipe'}), error => error.status === 19);
+  assert.equal(readFileSync(log, 'utf8'), `pull --platform linux/amd64 ghcr.io/inspr-at/aeon@${digest}\npull --platform linux/amd64 ghcr.io/inspr-at/aeon@${floorDigest}\n`, 'a failed rollback-floor pull must also precede Docker resource allocation or cleanup');
   writeFileSync(log, '');
   assert.throws(() => execFileSync('bash', [script, 'v260930115354.0.0', 'sha256:bad'], {env: {...process.env, PATH: `${dir}:${process.env.PATH}`}, stdio: 'pipe'}));
   assert.equal(readFileSync(log, 'utf8'), '');
+});
+
+test('the runtime probe checks the latest release and enforces the pinned account-use rollback floor', () => {
+  // Risk: after a capable release ships, treating it as a downgraded binary
+  // fails compatibility CI, or skipping its refusal also loses rollback proof.
+  const directory = mkdtempSync(join(tmpdir(), 'aeon-1112-compat-'));
+  const state = join(directory, 'state');
+  mkdirSync(state);
+  const log = join(directory, 'commands.log');
+  const fixture = (tool, body) => writeFileSync(join(directory, tool),
+    `#!/bin/bash\nprintf '${tool} %s\\n' "$*" >> "$AEON_COMPAT_FIXTURE_LOG"\n${body}\n`, {mode: 0o700});
+  fixture('docker', `if [[ "$1 $2" = 'image ls' ]]; then echo "\${5##*@}"; fi
+if [[ "$1" = port ]]; then echo 127.0.0.1:18080; fi`);
+  fixture('go', 'exit 0');
+  fixture('git', "echo 'func enterTenant() {}'");
+  fixture('python3', `if [[ "$2" = account-use && "$*" != *--release-tag* && "$AEON_COMPAT_FIXTURE_FLOOR_FAIL" = 1 ]]; then exit 23; fi
+exit 0`);
+  fixture('mktemp', 'echo "$AEON_COMPAT_FIXTURE_STATE"');
+  fixture('trash', 'exit 0');
+  const script = new URL('./migration-compat.sh', import.meta.url).pathname;
+  const latest = {tag: 'v261010123154.0.0', digest: 'sha256:' + 'a'.repeat(64)};
+  const floor = {tag: 'v261009095632.0.0', digest: 'sha256:d916ebb57249fda5f192e74b37ebd770c0eb67c26aafeb1c0045a635e8aa940c'};
+  const run = failFloor => {
+    writeFileSync(log, '');
+    const result = childProcess.spawnSync('bash', [script, latest.tag, latest.digest], {
+      env: {...process.env, PATH: `${directory}:${process.env.PATH}`, GITHUB_STEP_SUMMARY: '',
+        AEON_COMPAT_FIXTURE_LOG: log, AEON_COMPAT_FIXTURE_STATE: state,
+        AEON_COMPAT_FIXTURE_FLOOR_FAIL: failFloor ? '1' : '0'},
+      encoding: 'utf8', timeout: 15_000,
+    });
+    assert.ifError(result.error);
+    return {result, commands: readFileSync(log, 'utf8').trim().split('\n')};
+  };
+  const {result, commands} = run(false);
+  assert.equal(result.status, 0, result.stderr);
+  for (const release of [latest, floor]) {
+    assert.ok(commands.includes(`docker pull --platform linux/amd64 ghcr.io/inspr-at/aeon@${release.digest}`));
+    const boots = commands.filter(line => line.startsWith('docker run ') && line.endsWith(release.digest));
+    assert.equal(boots.length, 2, `${release.tag} must boot before and after candidate migrations`);
+    assert.equal(commands.filter(line => line.startsWith('python3 scripts/migration-compat-probe.py check ') && line.endsWith(release.tag.slice(1))).length, 1);
+  }
+  assert.equal(commands.filter(line => line === 'go run -p 2 ./scripts/migrate-candidate.go').length, 2);
+  const databases = commands.filter(line => line.startsWith('docker run ') && line.includes('POSTGRES_USER=postgres'));
+  assert.equal(databases.length, 2, 'each release must seed a fresh database');
+  const firstDatabase = commands.indexOf(databases[0]);
+  const nextDatabase = commands.indexOf(databases[1], firstDatabase + 1);
+  assert.ok(commands.slice(firstDatabase + 1, nextDatabase).some(line => line.startsWith('docker container rm -fv ')), 'the first database must be removed before the rollback fixture starts');
+  const policyProbes = commands.filter(line => line.startsWith('python3 scripts/migration-compat-probe.py account-use '));
+  assert.equal(policyProbes.length, 2, 'both the latest policy and rollback refusal must run');
+  assert.ok(policyProbes[0].endsWith(`--release-tag ${latest.tag}`));
+  const refusals = policyProbes.filter(line => !line.includes('--release-tag'));
+  assert.equal(refusals.length, 1, 'the below-floor refusal must always run');
+  assert.ok(refusals[0].includes(`--version ${floor.tag.slice(1)} --database-container `));
+  assert.ok(commands.indexOf(refusals[0]) > commands.indexOf(`docker pull --platform linux/amd64 ghcr.io/inspr-at/aeon@${floor.digest}`));
+  const failure = run(true);
+  assert.equal(failure.result.status, 23, 'a failed rollback refusal must fail compatibility CI');
+  assert.ok(failure.commands.some(line => line.startsWith('python3 scripts/migration-compat-probe.py account-use ') && line.includes(`--version ${floor.tag.slice(1)} `)));
+  assert.doesNotMatch(failure.result.stdout, new RegExp(`Migration compatibility passed: ${floor.tag}`));
+});
+
+test('AEON-1107 compatibility keeps latest-release reads and the below-floor activated refusal', () => {
+  // Risk: once the latest release supports account-use, testing its refusal
+  // falsely fails compatibility; replacing it must not lose the latest reads
+  // or accept an unrelated refusal from a different/untested binary. Each
+  // activated probe must use an independent fixture even for the same image.
+  const source = readFileSync(new URL('./migration-compat.sh', import.meta.url), 'utf8');
+  const rollbackTag = 'v261009095632.0.0';
+  const rollbackDigest = 'sha256:d916ebb57249fda5f192e74b37ebd770c0eb67c26aafeb1c0045a635e8aa940c';
+  const latestTag = 'v261010123154.0.0', latestDigest = 'sha256:' + 'a'.repeat(64);
+  for (const sameImage of [false, true]) {
+    const dir = mkdtempSync(join(tmpdir(), 'aeon-1107-compat-'));
+    const scripts = join(dir, 'scripts'), bin = join(dir, 'bin'), log = join(dir, 'calls.jsonl');
+    mkdirSync(scripts); mkdirSync(bin);
+    const script = join(scripts, 'migration-compat.sh');
+    writeFileSync(script, source);
+    const fixture = `#!/usr/bin/env python3
+import json, os, sys
+tool = os.path.basename(sys.argv[0])
+args = sys.argv[1:]
+with open(os.environ['AEON_COMPAT_CALLS'], 'a') as output:
+    output.write(json.dumps([tool, *args]) + '\\n')
+if tool == 'docker':
+    if args[:2] == ['image', 'ls']:
+        print('sha256:' + ('1' if args[-1].endswith('${rollbackDigest}') else '2') * 64)
+    elif args[:1] == ['port']:
+        print('127.0.0.1:55433' if args[-1] == '5432/tcp' else '127.0.0.1:18080')
+elif tool == 'git':
+    if args != ['show', '${rollbackTag}:internal/db/visibility.go']:
+        sys.exit(19)
+    print('func enterTenant() {}')
+elif tool == 'python3':
+    if args[1] == 'account-use':
+        mode = 'refusal' if '--require-refusal' in args else 'latest'
+        if os.environ.get('AEON_COMPAT_REFUSE_FAIL') == mode:
+            sys.exit(23)
+`;
+    // Use the real Python interpreter in the wrapper shebang to avoid calling
+    // the mocked python3 recursively. No database/container/build is started.
+    const python = execFileSync('python3', ['-c', 'import sys; print(sys.executable)'], {encoding: 'utf8'}).trim();
+    for (const tool of ['docker', 'go', 'python3', 'git', 'trash'])
+      writeFileSync(join(bin, tool), fixture.replace('#!/usr/bin/env python3', '#!' + python), {mode: 0o700});
+    const tag = sameImage ? rollbackTag : latestTag, digest = sameImage ? rollbackDigest : latestDigest;
+    const options = {env: {...process.env, PATH: `${bin}:${process.env.PATH}`, AEON_COMPAT_CALLS: log, GITHUB_STEP_SUMMARY: ''}, encoding: 'utf8', timeout: 15000};
+    const stdout = execFileSync('bash', [script, tag, digest], options);
+    const calls = readFileSync(log, 'utf8').trim().split('\n').map(line => JSON.parse(line));
+    const probes = calls.filter(call => call[0] === 'python3' && call[1] === 'scripts/migration-compat-probe.py');
+    const modes = probes.map(call => call[2]);
+    // Each image seeds and migrates its own disposable database, including
+    // when the requested latest image is itself the below-floor release.
+    assert.deepEqual(modes,
+      ['wait-ready', 'seed', 'wait-ready', 'check', 'account-use', 'wait-ready', 'seed', 'wait-ready', 'check', 'account-use']);
+    const version = call => call[call.indexOf('--version') + 1];
+    const checks = probes.filter(call => call[2] === 'check');
+    assert.deepEqual(checks.map(version), sameImage ? [rollbackTag.slice(1), rollbackTag.slice(1)] :
+      [latestTag.slice(1), rollbackTag.slice(1)]);
+    assert.equal(version(probes.at(-1)), rollbackTag.slice(1));
+    const activations = probes.filter(call => call[2] === 'account-use');
+    assert.deepEqual(activations.map(version), [tag.slice(1), rollbackTag.slice(1)]);
+    assert.deepEqual(activations.map(call => call.includes('--require-refusal')), [false, true]);
+    assert.equal(activations[0][activations[0].indexOf('--release-tag') + 1], tag);
+    assert.ok(!activations[1].includes('--release-tag'), 'legacy refusal stays unconditional');
+    assert.equal(activations[0].includes('--database'), false);
+    assert.equal(activations[1][activations[1].indexOf('--database') + 1], 'aeon_legacy');
+    const pulls = calls.filter(call => call[0] === 'docker' && call[1] === 'pull');
+    assert.deepEqual(pulls.map(call => call.at(-1)), sameImage ?
+      [`ghcr.io/inspr-at/aeon@${rollbackDigest}`] :
+      [`ghcr.io/inspr-at/aeon@${latestDigest}`, `ghcr.io/inspr-at/aeon@${rollbackDigest}`]);
+    const starts = calls.filter(call => call[0] === 'docker' && call[1] === 'run' && call.includes('256m'));
+    assert.deepEqual(starts.map(call => call.at(-1)), sameImage ? Array(4).fill('sha256:' + '1'.repeat(64)) :
+      ['sha256:' + '2'.repeat(64), 'sha256:' + '2'.repeat(64), 'sha256:' + '1'.repeat(64), 'sha256:' + '1'.repeat(64)]);
+    const databases = calls.filter(call => call[0] === 'docker' && call[1] === 'run' && call.includes('POSTGRES_USER=postgres'));
+    const databaseNames = databases.map(call => call[call.indexOf('--name') + 1]);
+    assert.equal(databases.length, 2);
+    assert.equal(new Set(databaseNames).size, 2);
+    assert.deepEqual(starts.map(call => call.find(arg => arg.startsWith('AEON_DATABASE_URL='))),
+      ['aeon', 'aeon', 'aeon_legacy', 'aeon_legacy'].map((database, index) =>
+        `AEON_DATABASE_URL=postgres://aeon:aeon@${databaseNames[Math.floor(index / 2)]}:5432/${database}?sslmode=disable`));
+    const first = calls.indexOf(databases[0]), second = calls.indexOf(databases[1]);
+    assert.ok(calls.slice(first + 1, second).some(call =>
+      call[0] === 'docker' && call[1] === 'container' && call[2] === 'rm' && call.includes('-fv')));
+    assert.equal(probes.at(-1)[probes.at(-1).indexOf('--database-container') + 1], databaseNames[1]);
+    const seeds = probes.filter(call => call[2] === 'seed');
+    assert.deepEqual(seeds.map(version), checks.map(version));
+    const migrations = calls.flatMap((call, i) => call[0] === 'go' ? [i] : []);
+    assert.equal(migrations.length, 2);
+    for (let i = 0; i < migrations.length; i++)
+      assert.ok(calls.indexOf(seeds[i]) < migrations[i] && migrations[i] < calls.indexOf(checks[i]));
+    assert.deepEqual(calls.filter(call => call[0] === 'git'), [['git', 'show', `${rollbackTag}:internal/db/visibility.go`]]);
+    for (let i = 0; i < activations.length; i++) {
+      assert.equal(activations[i][activations[i].indexOf('--database-container') + 1], databaseNames[i]);
+      assert.equal(activations[i][activations[i].indexOf('--state') + 1], seeds[i][seeds[i].indexOf('--state') + 1]);
+    }
+    const migration = calls.findIndex(call => call[0] === 'go');
+    const candidateCheck = calls.findIndex((call, i) => i > migration && call[2] === 'check');
+    const activated = calls.findIndex(call => call[2] === 'account-use');
+    assert.ok(migration > 0 && candidateCheck > migration && activated > candidateCheck);
+    const legacyMigration = calls.findIndex((call, i) => i > activated && call[0] === 'go');
+    const legacyCheck = calls.findIndex((call, i) => i > legacyMigration && call[2] === 'check');
+    const refusal = calls.indexOf(activations[1]);
+    assert.ok(second > activated && legacyMigration > second && legacyCheck > legacyMigration && refusal > legacyCheck);
+    assert.match(stdout, /Account-use rollback boundary passed/);
+    for (const mode of ['latest', 'refusal']) {
+      assert.throws(() => execFileSync('bash', [script, tag, digest], {
+        ...options, env: {...options.env, AEON_COMPAT_REFUSE_FAIL: mode},
+      }), error => error.status === 23 && !error.stdout.includes('Account-use rollback boundary passed') &&
+        !error.stdout.includes('Migration compatibility passed'));
+    }
+  }
 });
 
 test('marker must name an expansion release and ticket before SQL', () => {
@@ -255,15 +467,6 @@ test('a validated foreign key may include a newly added NULL column in the same 
   ]) assert.equal(destructive(sql), true, sql);
 });
 
-test('1056 is expand-safe without allowing replacements or opaque RLS blocks', () => {
-  const sql = readFileSync(new URL('../internal/db/migrations/1056_intake_replacements.sql', import.meta.url), 'utf8');
-  assert.equal(destructive(sql), false);
-  assert.deepEqual(checkMigrations(new Map([['1056_intake_replacements.sql', sql]])), []);
-  assert.equal(destructive(sql.replace('requester_principal_id uuid,', 'requester_principal_id uuid DEFAULT gen_random_uuid(),')), true);
-  assert.equal(destructive('CREATE OR REPLACE FUNCTION f() RETURNS void LANGUAGE plpgsql AS $$ BEGIN RETURN; END; $$;'), true);
-  assert.equal(destructive("CREATE TABLE extra(id text); DO $$ BEGIN EXECUTE 'ALTER TABLE extra ENABLE ROW LEVEL SECURITY'; END $$;"), true);
-});
-
 test('contract exceptions pin exact filenames and bytes with a ticket and reason', () => {
   const name = '1054_contract.sql', sql = 'CREATE OR REPLACE FUNCTION f() RETURNS int LANGUAGE sql AS $$ SELECT 1 $$;';
   const entry = {file: name, sha256: createHash('sha256').update(sql).digest('hex'), ticket: 'AEON-415', reason: 'Explicit contract behavior change for coordinator review.'};
@@ -288,83 +491,62 @@ test('contract exceptions pin exact filenames and bytes with a ticket and reason
   assert.match(checkMigrations(new Map([[name, sql]]), new Map(), null, {baseline, exceptions: manifest([entry])}).join('\n'), /pre-policy migration changed/);
 });
 
-test('integration exceptions pin the unchanged merged contract and run-kind expansion', () => {
-  const manifest = JSON.parse(readFileSync(new URL('./migration-policy-exceptions.json', import.meta.url), 'utf8'));
-  assert.equal(manifest.schema, 'aeon.migration-policy-exceptions.v1');
-  assert.deepEqual(manifest.exceptions.map(entry => entry.file), ['1054_confirmed_quota_pools.sql', '1066_run_kinds.sql', '1088_more_harnesses.sql', '1100_aithema_pending_content.sql']);
-  const entry = manifest.exceptions.find(entry => entry.file === '1054_confirmed_quota_pools.sql');
-  assert.ok(entry);
-  assert.equal(entry.file, '1054_confirmed_quota_pools.sql');
-  const runKinds = manifest.exceptions[1];
-  assert.equal(runKinds.file, '1066_run_kinds.sql');
-  assert.equal(runKinds.ticket, 'AEON-501');
-  const runKindSQL = readFileSync(new URL('../internal/db/migrations/' + runKinds.file, import.meta.url), 'utf8');
-  assert.equal(runKinds.sha256, createHash('sha256').update(runKindSQL).digest('hex'));
-  assert.match(runKinds.reason, /strict superset/);
-
-  assert.equal(entry.ticket, 'AEON-397');
-  assert.match(entry.reason, /contract|unconfirmed|person/i);
-  const source = execFileSync('git', ['show', `${entry.sourceCommit}:internal/db/migrations/${entry.file}`], {encoding: 'utf8'});
-  assert.ok(source);
-  assert.equal(entry.sha256, createHash('sha256').update(source).digest('hex'));
-  assert.equal(readFileSync(new URL(`../internal/db/migrations/${entry.file}`, import.meta.url), 'utf8'), source);
-  assert.equal(destructive(source), true);
-});
-
-test('AIT-89 storage-bound relaxation has an explicit pinned coordinator-review exception', () => {
-  const manifest = JSON.parse(readFileSync(new URL('./migration-policy-exceptions.json', import.meta.url), 'utf8'));
-  const entry = manifest.exceptions.find(entry => entry.file === '1100_aithema_pending_content.sql');
-  assert.equal(entry.ticket, 'AEON-483');
-  assert.match(entry.reason, /coordinator review before merge\/release/);
-  assert.match(entry.reason, /does not.*skip previous-binary compatibility/);
-  const source = readFileSync(new URL(`../internal/db/migrations/${entry.file}`, import.meta.url), 'utf8');
-  assert.equal(entry.sha256, createHash('sha256').update(source).digest('hex'));
-  assert.equal(destructive(source), true);
-  assert.match(source, /octet_length\(original_bytes\) <= 1048576/);
-  assert.match(source, /contract = 'aithema\.spec\.snapshot'/);
-  assert.match(source, /contract = 'aithema\.journal\.record' AND kind = 'pending_op\.content'/);
-  const statements = splitSQL(source);
-  const drops = statements.filter(sql => /DROP CONSTRAINT/.test(sql));
-  assert.deepEqual(drops, ['ALTER TABLE aithema_journal_records\n    DROP CONSTRAINT aithema_journal_records_original_bytes_check']);
-  assert.equal(destructive(statements.filter(sql => !drops.includes(sql)).join(';')), false);
-  assert.match(source, /\) NOT VALID;/);
-  assert.doesNotMatch(source, /VALIDATE CONSTRAINT|CREATE UNIQUE INDEX/);
-  assert.match(source, /total BETWEEN 1048577 AND 16777216/);
-  const validation = readFileSync(new URL('../internal/db/migrations/1101_aithema_content_bytes_validate.sql', import.meta.url), 'utf8');
-  assert.equal(destructive(validation), false);
-  assert.match(validation, /VALIDATE CONSTRAINT aithema_journal_records_content_bytes_check/);
-  const index = readFileSync(new URL('../internal/db/migrations/1102_aithema_content_address.sql', import.meta.url), 'utf8');
-  assert.equal(destructive(index), false);
-  assert.ok(index.startsWith('-- aeon:no-transaction\n'));
-  assert.equal(splitSQL(index).length, 1);
-  assert.match(index, /CREATE UNIQUE INDEX CONCURRENTLY/);
-
-});
-
 test('the current tree requires all exact-byte contract exceptions', () => {
   const directory = new URL('../internal/db/migrations/', import.meta.url);
   const files = new Map(readdirSync(directory).filter(name => name.endsWith('.sql')).map(name => [name, readFileSync(new URL(name, directory), 'utf8')]));
   const baseline = JSON.parse(readFileSync(new URL('./migration-policy-baseline.json', import.meta.url), 'utf8'));
-  const exceptions = JSON.parse(readFileSync(new URL('./migration-policy-exceptions.json', import.meta.url), 'utf8'));
+  const exceptions = loadMigrationExceptions();
   const published = publishedMigrations(`refs/tags/${baseline.releasedTag}`);
   assert.deepEqual(checkMigrations(files, published, baseline.releasedTag.slice(1), {baseline, exceptions}), []);
   const withoutException = checkMigrations(files, published, baseline.releasedTag.slice(1), {baseline});
-  assert.deepEqual(withoutException.map(problem => problem.split(':')[0]).sort(), ['1054_confirmed_quota_pools.sql', '1066_run_kinds.sql', '1088_more_harnesses.sql', '1100_aithema_pending_content.sql']);
+  assert.deepEqual(withoutException.map(problem => problem.split(':')[0]).sort(), migrationExceptionFiles());
   for (const problem of withoutException) assert.match(problem, /: non-allowlisted/);
 });
 
-test('1088 stages every widened check before definition-selected drops', () => {
-  const sql = readFileSync(new URL('../internal/db/migrations/1088_more_harnesses.sql', import.meta.url), 'utf8');
-  const adds = [...sql.matchAll(/ALTER TABLE (\w+) ADD CONSTRAINT (\w+)\s+CHECK ([\s\S]*?);/g)];
-  assert.equal(adds.length, 10);
-  for (const [, table, constraint, check] of adds) {
-    assert.match(check, /NOT VALID$/);
-    const validate = `ALTER TABLE ${table} VALIDATE CONSTRAINT ${constraint};`;
-    assert.ok(sql.includes(validate), `missing ${validate}`);
-    assert.ok(sql.indexOf(validate) < sql.indexOf('DROP CONSTRAINT'), 'drop before validation');
+// Keep CI's existing entry point; adding a migration check only adds its file.
+test('AEON-985 exception files assemble deterministically and fail closed on duplicates, orphans and malformed inputs', () => {
+  const sql = 'CREATE OR REPLACE FUNCTION f() RETURNS int LANGUAGE sql AS $$ SELECT 1 $$;';
+  const entry = {file: '1001_first.sql', sha256: createHash('sha256').update(sql).digest('hex'), ticket: 'AEON-985', reason: 'Fixture contract evidence.'};
+  const second = {...entry, file: '1002_second.sql'};
+  const manifest = exceptions => ({schema: 'aeon.migration-policy-exceptions.v1', exceptions});
+  const fixture = records => {
+    const directory = mkdtempSync(join(tmpdir(), 'aeon-985-exceptions-'));
+    for (const [name, value] of records) writeFileSync(join(directory, name), JSON.stringify(value));
+    return directory;
+  };
+  const directory = fixture([['1002_second.json', manifest([second])], ['1001_first.json', manifest([entry])]]);
+  const assembled = loadMigrationExceptions(directory);
+  assert.deepEqual(assembled, manifest([entry, second]), 'discovery order must not alter the legacy manifest or its fields');
+  const files = new Map([[entry.file, sql], [second.file, sql]]);
+  assert.deepEqual(checkMigrations(files, new Map(), null, {exceptions: assembled}), []);
+  assert.match(checkMigrations(new Map([[entry.file, sql]]), new Map(), null, {exceptions: assembled}).join('\n'), /1002_second.sql: exception migration removed/);
+  assert.match(checkMigrations(new Map([[entry.file, sql + '\n'], [second.file, sql]]), new Map(), null, {exceptions: assembled}).join('\n'), /1001_first.sql: exception migration changed/);
+  assert.throws(() => loadMigrationExceptions(fixture([['1001_first.json', manifest([entry])], ['1002_second.json', manifest([entry])]])), /duplicate migration exception/);
+  assert.throws(() => loadMigrationExceptions(fixture([['1001_first.json', manifest([second])]])), /matching migration filename/);
+  assert.throws(() => loadMigrationExceptions(fixture([['unexpected.json', manifest([entry])]])), /expected one migration exception file/);
+  for (const value of [null, {}, {schema: 'unknown', exceptions: [entry]}, manifest([]), manifest([entry, second])]) {
+    assert.throws(() => loadMigrationExceptions(fixture([['1001_first.json', value]])), /invalid migration exception manifest/);
   }
-  assert.match(sql, /pg_get_constraintdef/);
-  assert.doesNotMatch(sql, /DROP CONSTRAINT work_order_reviews_check/);
-  assert.match(sql, /reviewer_profile_id IS NULL/);
-  assert.match(sql, /reviewer_family IS NULL/);
+  const invalid = loadMigrationExceptions(fixture([['1001_first.json', manifest([{...entry, sha256: 'bad'}])]]));
+  const problems = checkMigrations(new Map([[entry.file, sql]]), new Map(), null, {exceptions: invalid}).join('\n');
+  assert.match(problems, /invalid migration exception/);
+  assert.match(problems, /1001_first.sql: non-allowlisted/);
+  const malformed = fixture([]);
+  writeFileSync(join(malformed, '1001_first.json'), '{');
+  assert.throws(() => loadMigrationExceptions(malformed), SyntaxError);
+  const nested = fixture([]);
+  mkdirSync(join(nested, '1001_first.json'));
+  assert.throws(() => loadMigrationExceptions(nested), /expected one migration exception file/);
+  const linked = fixture([]);
+  symlinkSync(join(directory, '1001_first.json'), join(linked, '1001_first.json'));
+  assert.throws(() => loadMigrationExceptions(linked), /expected one migration exception file/);
+  assert.throws(() => loadMigrationExceptions(join(directory, 'absent')), {code: 'ENOENT'});
 });
+
+const caseDirectory = new URL('./check-migrations-cases/', import.meta.url);
+for (const entry of readdirSync(caseDirectory, {withFileTypes: true}).sort((a, b) => a.name < b.name ? -1 : a.name > b.name ? 1 : 0)) {
+  if (!entry.isFile() || !/^\d{4}_[a-z0-9_]+\.mjs$/.test(entry.name)) throw new Error(`${entry.name}: expected migration case NNNN_name.mjs`);
+  const migration = new URL(`../internal/db/migrations/${entry.name.replace(/\.mjs$/, '.sql')}`, import.meta.url);
+  readFileSync(migration); // An orphan check must fail even if its body forgets to read SQL.
+  await import(new URL(entry.name, caseDirectory));
+}

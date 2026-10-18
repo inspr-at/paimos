@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"github.com/inspr-at/paimos/internal/business/quotedocument"
 	"math/big"
 	"regexp"
 	"strconv"
@@ -45,49 +46,11 @@ type legacyDocument struct {
 	NetTotalCents int64 `json:"net_total_cents"`
 }
 
-type Document struct {
-	SchemaVersion        int               `json:"schema_version"`
-	MinimumWriterVersion int               `json:"minimum_writer_version"`
-	Title                string            `json:"title"`
-	Subtitle             string            `json:"subtitle"`
-	ProjectRef           string            `json:"project_ref"`
-	OfferDate            string            `json:"offer_date"`
-	ValidUntil           string            `json:"valid_until"`
-	Currency             string            `json:"currency"`
-	Sender               json.RawMessage   `json:"sender"`
-	Recipient            json.RawMessage   `json:"recipient"`
-	Legal                map[string]string `json:"legal"`
-	Layout               map[string]string `json:"layout"`
-	Sections             []Section         `json:"sections"`
-	Positions            []Position        `json:"positions"`
-	NetTotalCents        int64             `json:"net_total_cents"`
-	Profile              *ProfileSnapshot  `json:"profile,omitempty"`
-}
-
-// ProfileSnapshot freezes the tenant's selected document profile into each
-// imported source revision, including issued versions.
-type ProfileSnapshot struct {
-	ID         string          `json:"id"`
-	Revision   int             `json:"revision"`
-	Definition json.RawMessage `json:"definition"`
-}
-type Section struct {
-	ID      string           `json:"id"`
-	Heading string           `json:"heading"`
-	Body    string           `json:"body"`
-	Nodes   []map[string]any `json:"nodes"`
-}
-type Position struct {
-	ID             string `json:"id"`
-	PricingSource  string `json:"pricing_source"`
-	ShortText      string `json:"short_text"`
-	LongText       string `json:"long_text"`
-	Quantity       string `json:"quantity"`
-	UnitLabel      string `json:"unit_label"`
-	UnitPriceCents int64  `json:"unit_price_cents"`
-	TotalCents     int64  `json:"total_cents"`
-	Currency       string `json:"currency"`
-}
+// Imports use the same model as native quote writes and verification.
+type Document = quotedocument.Document
+type ProfileSnapshot = quotedocument.ProfileSnapshot
+type Section = quotedocument.Section
+type Position = quotedocument.Position
 
 func convertDocument(instance string, o Offer, contactID string) (Document, error) {
 	var src legacyDocument
@@ -116,17 +79,26 @@ func convertDocument(instance string, o Offer, contactID string) (Document, erro
 		recipient["contact_node_id"] = contactID
 	}
 	recipientJSON, _ := json.Marshal(recipient)
-	d := Document{SchemaVersion: 1, MinimumWriterVersion: 1, Title: src.Title, Subtitle: src.Subtitle, ProjectRef: src.ProjectRef, OfferDate: src.OfferDate, ValidUntil: src.ValidUntil, Currency: "EUR", Sender: src.Sender, Recipient: recipientJSON, Legal: map[string]string{"intro": src.Intro, "accept_text": src.AcceptText, "vat_note": src.VATNote}, Layout: map[string]string{}, Sections: []Section{}, Positions: []Position{}}
+	d := Document{SchemaVersion: 1, MinimumWriterVersion: 1, Title: src.Title, Subtitle: src.Subtitle, ProjectRef: src.ProjectRef, OfferDate: src.OfferDate, ValidUntil: src.ValidUntil, Currency: "EUR", Sender: src.Sender, Recipient: recipientJSON, Legal: nil, Layout: nil, Sections: []Section{}, Positions: []Position{}}
+	d.Legal, err = json.Marshal(map[string]string{"intro": src.Intro, "accept_text": src.AcceptText, "vat_note": src.VATNote})
+	if err != nil {
+		return Document{}, err
+	}
+	layout := map[string]string{}
 	for _, key := range []string{"logo_width_mm", "logo_offset_mm"} {
 		if v, ok := src.Footer[key]; ok {
-			d.Layout[key] = v.String()
+			layout[key] = v.String()
 		}
+	}
+	d.Layout, err = json.Marshal(layout)
+	if err != nil {
+		return Document{}, err
 	}
 	for i, s := range src.Blocks {
 		if len(s.Nodes) > 100 {
 			return Document{}, errors.New("too many prose nodes")
 		}
-		section := Section{ID: stableID(instance, "offer", o.ID, "section", i), Heading: s.Heading, Body: s.Body, Nodes: []map[string]any{}}
+		section := Section{ID: stableID(instance, "offer", o.ID, "section", i), Heading: s.Heading, Body: s.Body, Nodes: []quotedocument.TextNode{}}
 		for j, n := range s.Nodes {
 			copyNode := map[string]any{}
 			for k, v := range n {
@@ -136,7 +108,20 @@ func convertDocument(instance string, o Offer, contactID string) (Document, erro
 				return Document{}, fmt.Errorf("offer %d section %d node %d: %w", o.ID, i, j, err)
 			}
 			copyNode["id"] = stableID(instance, "offer", o.ID, fmt.Sprintf("section-%d-node", i), j)
-			section.Nodes = append(section.Nodes, copyNode)
+			raw, err := json.Marshal(copyNode)
+			if err != nil {
+				return Document{}, err
+			}
+			var node quotedocument.TextNode
+			decoder := json.NewDecoder(strings.NewReader(string(raw)))
+			decoder.DisallowUnknownFields()
+			if err := decoder.Decode(&node); err != nil {
+				return Document{}, fmt.Errorf("offer %d prose node: %w", o.ID, err)
+			}
+			if len(node.Marks) > 0 {
+				d.MinimumWriterVersion = 2
+			}
+			section.Nodes = append(section.Nodes, node)
 		}
 		d.Sections = append(d.Sections, section)
 	}

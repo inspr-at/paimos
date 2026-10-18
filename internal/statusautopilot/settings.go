@@ -13,11 +13,14 @@ import (
 	"io"
 	"net/http"
 	"regexp"
+	"time"
 
 	"github.com/inspr-at/paimos/internal/authz"
+	"github.com/inspr-at/paimos/internal/config"
 	"github.com/inspr-at/paimos/internal/db"
 	"github.com/inspr-at/paimos/internal/events"
 	"github.com/inspr-at/paimos/internal/httpapi"
+	"github.com/inspr-at/paimos/internal/releasehistory"
 	"github.com/inspr-at/paimos/internal/tenant"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -49,10 +52,33 @@ func (r *Rule) UnmarshalJSON(raw []byte) error {
 }
 
 type Settings struct {
-	Enabled  bool            `json:"enabled"`
-	Rules    map[string]Rule `json:"rules"`
-	Revision int64           `json:"revision"`
+	Enabled       bool            `json:"enabled"`
+	Rules         map[string]Rule `json:"rules"`
+	Revision      int64           `json:"revision"`
+	ServerMode    string          `json:"server_mode"`
+	EffectiveMode string          `json:"effective_mode"`
+	SuggestUntil  *time.Time      `json:"suggest_until"`
 }
+
+// ModeAt caps even an explicit project On. Workspace Off retains its existing
+// New/Backlog attention lists; deployment Off suppresses all automation.
+func (s Settings) ModeAt(now time.Time) string {
+	if s.ServerMode == "off" {
+		return "off"
+	}
+	if s.ServerMode == "suggest" || s.SuggestUntil != nil && now.Before(*s.SuggestUntil) {
+		return "suggest"
+	}
+	return "on"
+}
+
+func (s *Settings) describeMode(now time.Time) {
+	s.EffectiveMode = s.ModeAt(now)
+	if !s.Enabled {
+		s.EffectiveMode = "off"
+	}
+}
+
 type Override struct {
 	Mode      string `json:"mode"`
 	Effective bool   `json:"effective_enabled"`
@@ -78,16 +104,23 @@ func Load(ctx context.Context, tx pgx.Tx) (Settings, error) {
 	s := Defaults()
 	var raw []byte
 	err := tx.QueryRow(ctx, `SELECT enabled,rules,revision FROM status_autopilot_settings WHERE tenant_id=current_setting('aeon.tenant_id')::uuid`).Scan(&s.Enabled, &raw, &s.Revision)
-	if errors.Is(err, pgx.ErrNoRows) {
-		return s, nil
-	}
-	if err != nil {
+	if err != nil && !errors.Is(err, pgx.ErrNoRows) {
 		return s, err
 	}
-	err = json.Unmarshal(raw, &s.Rules)
 	if err == nil {
-		err = s.Validate()
+		if err = json.Unmarshal(raw, &s.Rules); err != nil {
+			return s, err
+		}
+		if err = s.Validate(); err != nil {
+			return s, err
+		}
 	}
+	err = tx.QueryRow(ctx, `SELECT suggest_until FROM status_autopilot_upgrade WHERE confirmed_at IS NULL`).Scan(&s.SuggestUntil)
+	if err != nil && !errors.Is(err, pgx.ErrNoRows) {
+		return s, err
+	}
+	s.ServerMode, err = config.StatusAutopilotMode()
+	s.describeMode(time.Now().UTC())
 	return s, err
 }
 func Project(ctx context.Context, tx pgx.Tx, project string, workspace bool) (Override, error) {
@@ -108,7 +141,11 @@ func lock(ctx context.Context, tx pgx.Tx) error {
 	return err
 }
 
-type Module struct{ pool *pgxpool.Pool }
+type Module struct {
+	pool              *pgxpool.Pool
+	publication       *releasehistory.Publication
+	publicationTenant string
+}
 
 func New(pool *pgxpool.Pool) *Module { return &Module{pool: pool} }
 func (m *Module) Mount(mux *http.ServeMux) {
@@ -116,7 +153,15 @@ func (m *Module) Mount(mux *http.ServeMux) {
 	mux.HandleFunc("PUT /api/settings/status-autopilot", m.settings)
 	mux.HandleFunc("GET /api/projects/{projectId}/status-autopilot", m.project)
 	mux.HandleFunc("PUT /api/projects/{projectId}/status-autopilot", m.project)
+	mux.HandleFunc("GET /api/status-autopilot/attention", m.attention)
+	mux.HandleFunc("POST /api/status-autopilot/attention/actions", m.attentionActions)
+	mux.HandleFunc("GET /api/status-autopilot/attention/groups", m.attentionGroups)
+	mux.HandleFunc("POST /api/status-autopilot/attention/bulk", m.attentionBulk)
+	mux.HandleFunc("POST /api/status-autopilot/attention/bulk/{batch_id}/undo", m.attentionBulkUndo)
 	mux.HandleFunc("GET /api/status-autopilot/changes", m.changes)
+	mux.HandleFunc("GET /api/status-autopilot/projects", m.projects)
+	mux.HandleFunc("GET /api/status-autopilot/proposals", m.proposals)
+	mux.HandleFunc("PUT /api/status-autopilot/proposals/{eventId}", m.resolveProposal)
 }
 
 var uuid = regexp.MustCompile(`(?i)^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$`)
@@ -130,7 +175,7 @@ func principal(w http.ResponseWriter, r *http.Request) (tenant.Principal, bool) 
 	return p, true
 }
 func decode(w http.ResponseWriter, r *http.Request, v any) error {
-	d := json.NewDecoder(http.MaxBytesReader(w, r.Body, 16<<10))
+	d := httpapi.NewRequestDecoder(w, r, 16<<10)
 	d.DisallowUnknownFields()
 	if err := d.Decode(v); err != nil {
 		return err
@@ -156,7 +201,7 @@ func respond(w http.ResponseWriter, v any, err error) {
 	}
 }
 func admin(ctx context.Context, tx pgx.Tx, p tenant.Principal) error {
-	if p.Kind != tenant.Person {
+	if p.Kind != tenant.Person && !authz.OwnerWorkstation(p) {
 		return authz.ErrForbidden
 	}
 	return authz.RequireTx(ctx, tx, p, "settings.manage", authz.Scope{})
@@ -167,9 +212,10 @@ func (m *Module) settings(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var in struct {
-		Enabled  *bool           `json:"enabled"`
-		Rules    map[string]Rule `json:"rules"`
-		Expected *int64          `json:"expected_revision"`
+		Enabled        *bool           `json:"enabled"`
+		Rules          map[string]Rule `json:"rules"`
+		Expected       *int64          `json:"expected_revision"`
+		ConfirmUpgrade bool            `json:"confirm_upgrade"`
 	}
 	if r.Method == "PUT" {
 		if decode(w, r, &in) != nil || in.Enabled == nil || in.Expected == nil || *in.Expected < 0 {
@@ -187,7 +233,10 @@ func (m *Module) settings(w http.ResponseWriter, r *http.Request) {
 			if err := admin(r.Context(), tx, p); err != nil {
 				return err
 			}
-			if err := lock(r.Context(), tx); err != nil {
+			if err := authz.LockProjectMutation(r.Context(), tx, p.TenantID); err != nil {
+				return err
+			}
+			if err := admin(r.Context(), tx, p); err != nil {
 				return err
 			}
 		}
@@ -200,9 +249,19 @@ func (m *Module) settings(w http.ResponseWriter, r *http.Request) {
 			return events.ErrConflict
 		}
 		before := out
+		if in.ConfirmUpgrade {
+			if err := authz.RequireTx(r.Context(), tx, p, "ownership.transfer", authz.Scope{}); err != nil {
+				return err
+			}
+			if _, err := tx.Exec(r.Context(), `UPDATE status_autopilot_upgrade SET confirmed_at=clock_timestamp() WHERE confirmed_at IS NULL`); err != nil {
+				return err
+			}
+			out.SuggestUntil = nil
+		}
 		out.Enabled = *in.Enabled
 		out.Rules = in.Rules
 		out.Revision++
+		out.describeMode(time.Now().UTC())
 		raw, err := json.Marshal(in.Rules)
 		if err != nil {
 			return err
@@ -240,7 +299,10 @@ func (m *Module) project(w http.ResponseWriter, r *http.Request) {
 			if err := admin(r.Context(), tx, p); err != nil {
 				return err
 			}
-			if err := lock(r.Context(), tx); err != nil {
+			if err := authz.LockProjectMutation(r.Context(), tx, p.TenantID); err != nil {
+				return err
+			}
+			if err := admin(r.Context(), tx, p); err != nil {
 				return err
 			}
 		}

@@ -82,7 +82,7 @@ func TestSensitiveProseIsClean(t *testing.T) {
 		"Moved web/src/components/knowledge/KnowledgeEntryPage.vue to the new layout.",
 	}
 	for _, text := range prose {
-		if spans := sensitiveSpans(text); len(spans) > 0 {
+		if spans := sensitiveRanges("text", text); len(spans) > 0 {
 			t.Errorf("flagged %q at %v", text, spans)
 		}
 	}
@@ -174,7 +174,7 @@ func TestSensitiveCopyPaths(t *testing.T) {
 	for i, name := range []string{"short basic", "five char password", "markdown bold label", "quoted passphrase"} {
 		text := forms[name]
 		t.Run(name, func(t *testing.T) {
-			host := addNode(t, f, "SENS-"+strconv.Itoa(i+1), "ticket", "Sensitive host", &f.project)
+			host := addNode(t, f, "SENS-"+strconv.Itoa(i+1), "work", "Sensitive host", &f.project)
 			auto := addComment(t, f, host, "Incident: "+text)
 			if _, err := TagOnce(t.Context(), f.db.App); err != nil {
 				t.Fatal(err)

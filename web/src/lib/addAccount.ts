@@ -69,6 +69,8 @@ export interface AddMachineSource {
   computer_name: string
   computer_state: string | null
   platform: string
+  /** What agentd reports; anything but a known install is unknown. */
+  install_method?: string
   enrollments: readonly { harness: string; state: string }[]
 }
 
@@ -77,6 +79,50 @@ export interface AddMachine {
   name: string
   /** Harnesses still enrolled (connected or draining). Revoked ones are free again. */
   harnesses: readonly string[]
+  /** The add-harness entry point agentd reports reaching it, or null when unknown. */
+  install: AgentdInstall | null
+}
+
+export type InstallSource = 'reported' | 'chosen' | 'unknown'
+
+/** The reported install wins until the person chooses another one for this machine. Unknown starts at Homebrew. */
+export function chosenInstall(machine: AddMachine, override: AgentdInstall | null): { install: AgentdInstall; source: InstallSource } {
+  if (override && override !== machine.install) return { install: override, source: 'chosen' }
+  if (machine.install) return { install: machine.install, source: 'reported' }
+  return { install: 'homebrew', source: 'unknown' }
+}
+
+type ReadStore = Pick<Storage, 'getItem'>
+type WriteStore = Pick<Storage, 'setItem' | 'removeItem'>
+
+/**
+ * One remembered choice per signed-in person and machine. It records what the
+ * machine reported when the person chose, so a later report replaces it.
+ */
+export function installOverrideKey(owner: string, machineId: string): string {
+  return `aeon.addAccountInstall:${owner}:${machineId}`
+}
+
+export function readInstallOverride(storage: ReadStore | null, owner: string, machine: AddMachine): AgentdInstall | null {
+  if (!storage || !owner) return null
+  try {
+    const raw = storage.getItem(installOverrideKey(owner, machine.id))
+    if (!raw || raw.length > 128) return null
+    const value = JSON.parse(raw) as { install?: unknown; reported?: unknown }
+    if (typeof value?.install !== 'string' || !isAgentdInstall(value.install)) return null
+    if (value.reported !== (machine.install ?? '')) return null
+    return value.install
+  } catch { return null }
+}
+
+/** Choosing the reported install forgets the override. Storage may be disabled; the choice then lasts for the open panel. */
+export function writeInstallOverride(storage: WriteStore | null, owner: string, machine: AddMachine, install: AgentdInstall): void {
+  if (!storage || !owner) return
+  const key = installOverrideKey(owner, machine.id)
+  try {
+    if (install === machine.install) storage.removeItem(key)
+    else storage.setItem(key, JSON.stringify({ install, reported: machine.install ?? '' }))
+  } catch { /* Storage may be disabled. */ }
 }
 
 export function machinesForAdd(views: readonly AddMachineSource[]): AddMachine[] {
@@ -91,7 +137,8 @@ export function machinesForAdd(views: readonly AddMachineSource[]): AddMachine[]
     const platform = view.platform.trim()
     const name = (counts.get(base) ?? 0) > 1 && platform ? `${base} · ${platform}` : base
     const harnesses = [...new Set(view.enrollments.filter(item => item.state === 'connected' || item.state === 'draining').map(item => item.harness))]
-    return { id: view.computer_id as string, name, harnesses }
+    const install = view.install_method && isAgentdInstall(view.install_method) ? view.install_method : null
+    return { id: view.computer_id as string, name, harnesses, install }
   }).sort((a, b) => a.name.localeCompare(b.name) || a.id.localeCompare(b.id))
 }
 

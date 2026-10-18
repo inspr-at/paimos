@@ -1,46 +1,52 @@
 # SPDX-License-Identifier: AGPL-3.0-only
 name: Homebrew tap
 
-# The release coordinator publishes the draft only after live verification.
-# Creating the draft during the tag build must never open a tap pull request.
+# Main-only coordinator dispatch after native qualification and publication,
+# before the AEON-493 server switch. Release/tag workflows never receive a tap
+# credential: their workflow definition can come from tag-controlled code.
 on:
-  release:
-    types: [published]
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Published immutable calendar version (without v)"
+        required: true
+        type: string
 
 concurrency:
-  group: homebrew-tap-${{ github.event.release.tag_name }}
+  group: homebrew-tap-${{ inputs.version }}
   cancel-in-progress: false
 
 permissions:
   contents: read
+  actions: read
 
 jobs:
   homebrew-tap:
     if: >-
-      github.event.release.draft == false &&
-      github.event.release.prerelease == false &&
-      startsWith(github.event.release.tag_name, 'v')
+      github.repository == 'inspr-at/paimos' && github.ref == 'refs/heads/main' &&
+      github.actor == 'markus-barta' && github.actor_id == '276789' &&
+      github.triggering_actor == 'markus-barta'
     runs-on: ubuntu-latest
-    # Release events use refs/tags/<tag>; retain the environment's v* restriction.
+    # Coordinator installs main-only required-reviewer policy BEFORE App secrets.
     environment: homebrew-tap
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          ref: ${{ github.event.release.tag_name }}
+          ref: ${{ github.workflow_sha }}
           persist-credentials: false
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7
         with:
           node-version: "24"
-      - name: Validate published release tag
-        id: version
+      - name: Verify installed environment protection
         env:
-          RELEASE_TAG: ${{ github.event.release.tag_name }}
-        run: node scripts/release-tag.mjs "$RELEASE_TAG"
+          GH_TOKEN: ${{ github.token }}
+        run: node scripts/verify-live-policy.mjs homebrew-tap
       # App secrets are read only here; absent secrets skip the PR and succeed.
       - name: Open Homebrew tap formula pull request
         env:
           HOMEBREW_TAP_APP_ID: ${{ secrets.HOMEBREW_TAP_APP_ID }}
           HOMEBREW_TAP_APP_KEY: ${{ secrets.HOMEBREW_TAP_APP_KEY }}
-          VERSION: ${{ steps.version.outputs.version }}
+          VERSION: ${{ inputs.version }}
+          WORKFLOW_TOKEN: ${{ github.token }}
         run: node scripts/homebrew-tap-pr.mjs

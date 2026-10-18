@@ -20,6 +20,15 @@ type heartbeatHold struct {
 }
 
 type heartbeatDisk struct {
+	HookOrigin            string                  `json:"hook_origin,omitempty"`
+	HookInstance          string                  `json:"hook_instance,omitempty"`
+	HookConfig            string                  `json:"hook_config,omitempty"`
+	HookPrincipal         string                  `json:"hook_principal,omitempty"`
+	ModelSent             bool                    `json:"model_sent,omitempty"`
+	SentModel             string                  `json:"sent_model,omitempty"`
+	SentEffort            string                  `json:"sent_effort,omitempty"`
+	LiveAccount           string                  `json:"live_account,omitempty"`
+	AccountProbedAt       time.Time               `json:"account_probed_at,omitempty"`
 	ActivityMode          string                  `json:"agent_activity_mode,omitempty"`
 	WarningAt             map[string]time.Time    `json:"warning_at,omitempty"`
 	CapacityStarted       bool                    `json:"capacity_started,omitempty"`
@@ -34,6 +43,8 @@ type heartbeatDisk struct {
 	Schema                string                  `json:"schema"`
 	SessionID             string                  `json:"session_id"`
 	ProjectID             string                  `json:"project_id,omitempty"`
+	RegisteredRef         string                  `json:"registered_ref,omitempty"` // Private proof; never project or log.
+	LeadAdoption          *heartbeatLeadAdoption  `json:"lead_adoption,omitempty"`
 	Sequence              int64                   `json:"sequence"`
 	LabelSent             bool                    `json:"label_sent"`
 	SentLabel             string                  `json:"sent_label,omitempty"`
@@ -59,6 +70,28 @@ type heartbeatDisk struct {
 	TerminalReason        string                  `json:"terminal_reason,omitempty"`
 	Closed                bool                    `json:"closed,omitempty"`
 	SourcesRecorded       bool                    `json:"sources_recorded,omitempty"`
+
+	// The observation fence survives clearing RequestedModel and helper
+	// restarts. Keep the existing JSON key for compatibility with saved state.
+	RequestedModelBaseline *heartbeatModelBaseline `json:"requested_model_baseline,omitempty"`
+}
+
+// The helper journals a bounded own-session attempt before sending the claim.
+// The containing private state binds it to the registration, account and project.
+// No reference or lease is copied into the journal.
+type heartbeatLeadAdoption struct {
+	Revision  int64                  `json:"revision"`
+	Refreshed bool                   `json:"refreshed,omitempty"`
+	Ended     bool                   `json:"ended,omitempty"`
+	Claimed   bool                   `json:"claimed,omitempty"`
+	Note      string                 `json:"note,omitempty"`
+	Attempts  []heartbeatLeadAttempt `json:"attempts,omitempty"`
+}
+
+type heartbeatLeadAttempt struct {
+	Revision int64     `json:"revision"`
+	At       time.Time `json:"at"`
+	Result   string    `json:"result"`
 }
 
 // heartbeatCodexCursor is the Codex scan context that must survive between
@@ -106,18 +139,22 @@ type heartbeatPendingUsage struct {
 }
 
 type heartbeatSession struct {
-	id    string
-	lease string
-	disk  heartbeatDisk
-	hold  heartbeatHold
+	// pauseWakeAt is derived from a DB-clock hint and never persisted or used as signal authority.
+	pauseWakeAt time.Time
+	id          string
+	lease       string
+	disk        heartbeatDisk
+	hold        heartbeatHold
 	// stopReason is how the wrapped job ended. A stop that did not land keeps it in
 	// stop.intent, so the replay names the same ending (AEON-437). Empty is a plain stop.
-	stopReason string
+	stopReason    string
+	subagentScan  *os.File
+	subagentNames []string
 }
 
 func validStateName(name string) bool {
 	switch name {
-	case "session.id", "state.json", "lease.key", "session.ref", "stop.intent", "settle.intent", "heartbeat.lock", "activity.json", "activity-mode.json":
+	case "session.id", "state.json", "lease.key", "session.ref", "index.source", "stop.intent", "settle.intent", "heartbeat.lock", "activity.json", "activity-mode.json", "subagent.json", "subagent.stop", "subagent.start", "subagent.lifecycle.lock":
 		return true
 	default:
 		return false

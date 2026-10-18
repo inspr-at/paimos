@@ -1,0 +1,12 @@
+{
+  "_license": "SPDX-License-Identifier: AGPL-3.0-only",
+  "builtin_agent_exclusions": [
+    "delivery_ship.claim",
+    "delivery_ship.manage"
+  ],
+  "words": {
+    "resources": {
+      "delivery_ship": "delivery shipping"
+    }
+  }
+}

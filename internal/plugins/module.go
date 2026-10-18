@@ -217,6 +217,12 @@ func (m *Module) Configure(ctx context.Context, p tenant.Principal, pluginID str
 	}
 	var out Installation
 	err = m.inTenant(tenant.WithPrincipal(ctx, p), p.TenantID, func(tx pgx.Tx) error {
+		if err := db.LockTenant(ctx, tx, p.TenantID); err != nil {
+			return err
+		}
+		if authz.RequireTx(ctx, tx, p, "plugins.manage", authz.Scope{}) != nil {
+			return forbidden("permission denied")
+		}
 		current, err := loadInstall(ctx, tx, p.TenantID, pluginID, true)
 		if err != nil {
 			return err

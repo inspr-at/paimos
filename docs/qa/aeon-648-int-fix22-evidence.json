@@ -1,0 +1,192 @@
+{
+  "ticket": "AEON-648",
+  "round": "int-fix22",
+  "recorded_at": "2026-10-05T04:38:04.658718+00:00",
+  "branch": "work/aeon-648-int",
+  "base_commit": "84b27072a50ba989e2a8f1f415d3fd3703ffafa1",
+  "review": "review-int648r21.out",
+  "summary": "Resolved all three P2 findings: bulk missing estimates select canonical work leaves; aggregate planning tooltips disclose excluded uncalibrated leaves independently of kind spelling; a command-level default-mode tier regression proves one warning per unclassified native work case and exit 0. Classified four existing work CLI registrations discovered by strict affected-package reconciliation. No assertions relaxed.",
+  "ownership": {
+    "account": "PPM / INSPR / workstation-agents (agent)",
+    "github_account": "markus-barta",
+    "attribution": "Coordinator recorded worker marker before dispatch, per worker-common.md. No tracker status change."
+  },
+  "findings": [
+    {
+      "finding": "Bulk estimates break after migration",
+      "status": "fixed",
+      "changes": "On a workspace registering work, request kind=work, shape=leaf within the resolved project; accept only explicitly identified canonical leaves. Legacy-only kind registries keep their existing selection. Pagination bounds, preflight of the entire plan, already-estimated skips, revision preconditions and honest partial-write errors are retained.",
+      "regression": "TestEstimateMissingMigratedWorkLeaves: dry-run, apply, stale revision, parent target, unknown shape, missing revision. Two-page bounded project read; no writes in dry-run or invalid plans; existing person estimate preserved; agent provenance not forged. Fixture is synchronized with a mutex and mutates the person estimate after encoding the read snapshot, without sleeps."
+    },
+    {
+      "finding": "Parent planning estimates hide incomplete coverage",
+      "status": "fixed",
+      "changes": "Use planning.children aggregate metadata for the sum basis in both token and cost tooltips. Emit the basis once for complete and partial aggregates, with singular/plural uncalibrated-leaf exclusions.",
+      "regression": "Canonical work row, explicit parent and shape-absent responses, no usage and measured usage, 0/1/2 excluded leaves; independent token and cost subtests. Existing figures remain covered by their original assertions."
+    },
+    {
+      "finding": "Default-mode command regression was missing",
+      "status": "fixed",
+      "regression": {
+        "command": "node scripts/test-tiers/cli.mjs check web (no --strict)",
+        "native_unclassified_cases": 49,
+        "files": [
+          "tests/done-gate.test.ts",
+          "tests/release-membership.test.ts",
+          "tests/work-aggregates.test.ts",
+          "tests/work-surfaces-fix4.test.ts",
+          "tests/work-vocabulary.test.ts"
+        ],
+        "expected_exit": 0,
+        "exact_warnings": 49,
+        "method": "Collect native registrations without running their bodies. Child-process import hook isolates collection breadth and supplies a fixture manifest containing only a known sibling. The unchanged command, main and validator execute; assertions require exact warning identities/count and NIGHTLY inventory count. Strict classification checks remain separate."
+      }
+    }
+  ],
+  "classification": {
+    "go": {
+      "preserved": 3714,
+      "added": [
+        {
+          "kind": "go",
+          "package": "internal/cli",
+          "name": "TestEstimateMissingMigratedWorkLeaves",
+          "tier": "ESSENTIAL"
+        },
+        {
+          "kind": "go",
+          "package": "internal/cli",
+          "name": "TestWorkTypeAliasesUseCanonicalIDAndExposeShape",
+          "tier": "NIGHTLY"
+        },
+        {
+          "kind": "go",
+          "package": "internal/cli",
+          "name": "TestWorkAliasNeverRemapsNonWorkKinds",
+          "tier": "NIGHTLY"
+        },
+        {
+          "kind": "go",
+          "package": "internal/cli",
+          "name": "TestWorkMCPCancelAndListBounds",
+          "tier": "ESSENTIAL"
+        },
+        {
+          "kind": "go",
+          "package": "internal/cli",
+          "name": "TestMigratedWorkCLICompletionGate",
+          "tier": "ESSENTIAL"
+        }
+      ]
+    },
+    "web": {
+      "preserved": 7223,
+      "added": [
+        {
+          "kind": "node",
+          "file": "tests/planning.test.ts",
+          "name": "canonical work aggregates disclose excluded uncalibrated leaves in token and cost tips",
+          "tier": "NIGHTLY"
+        }
+      ]
+    },
+    "new_policy": "New estimate target/revision guard, existing completion-write refusal and cancellation/input bounds are ESSENTIAL; ordinary alias and aggregate regressions are NIGHTLY. Existing rows/tiers are preserved.",
+    "existing_go_omissions_fixed": [
+      "TestMigratedWorkCLICompletionGate",
+      "TestWorkAliasNeverRemapsNonWorkKinds",
+      "TestWorkMCPCancelAndListBounds",
+      "TestWorkTypeAliasesUseCanonicalIDAndExposeShape"
+    ]
+  },
+  "validation": {
+    "merge": {
+      "pr": 272,
+      "base": "main",
+      "mergeable": "MERGEABLE",
+      "merge_required": false
+    },
+    "go_targeted": {
+      "package": "internal/cli",
+      "top_level_passed": 9,
+      "failed": 0,
+      "skipped": 0,
+      "tests": [
+        "TestIssueEstimateRejectsConcurrentPersonEstimate",
+        "TestParseEstimate",
+        "TestEstimateMissingMigratedWorkLeaves",
+        "TestEstimateCLIFlagsAndPlan",
+        "TestIssueUpdateRefusesMissingRevision",
+        "TestIssueCreateAddsEstimateHint",
+        "TestWorkTypeAliasesUseCanonicalIDAndExposeShape",
+        "TestWorkAliasNeverRemapsNonWorkKinds",
+        "TestWorkMCPCancelAndListBounds"
+      ],
+      "command": "GOMAXPROCS=2 go test -p 2 -count=1 -v ./internal/cli -run <nine targeted names>",
+      "toolchain": "Go 1.26.6; existing store executable, no local Nix evaluation"
+    },
+    "node_planning": {
+      "top_level_passed": 10,
+      "token_cost_subtests_passed": 2,
+      "total_passed": 12,
+      "failed": 0,
+      "skipped": 0
+    },
+    "vitest_model_estimates": {
+      "passed": 10,
+      "failed": 0,
+      "skipped": 0,
+      "workers": 1
+    },
+    "ci_harness_file": {
+      "passed": 5,
+      "failed": 0,
+      "skipped": 0,
+      "native_selected_runner_cases": 3,
+      "runner_not_run": 0,
+      "browser_execution": false,
+      "note": "Existing full planning and browser-selector tests enumerate native registrations; no browser process is launched. The default-mode regression invokes a separate CLI process."
+    },
+    "strict_affected_inventory": {
+      "planning_native_cases": 10,
+      "cli_native_cases": 357,
+      "strict": true,
+      "new_go_tier": "ESSENTIAL",
+      "new_planning_tier": "NIGHTLY"
+    },
+    "baseline": {
+      "commit": "84b27072a",
+      "go": "Final migrated-leaf regression fails against exact original estimates.go via Go -overlay: legacy ticket,task scope and canonical nodes rejected. All six scenario subtests fail for the original scope/kind behavior.",
+      "web": "Final unchanged assertions fail independently for token and cost against exact original planning.ts supplied through a Node load hook: aggregate sum and exclusion warnings are absent.",
+      "command_coverage": "Default warning behavior already existed; the new regression passes against the unchanged tier command. This is a missing-coverage fix, not a product behavior change.",
+      "method": "git show baseline source into ignored worktree files; overlay/load hook substitutes only production dependencies. No tracked source or assertions replaced."
+    },
+    "ci_web_shard_check": "pass: 78 specs, 12 shards, 166 ungated registrations",
+    "git_diff_check": "pass",
+    "remote_go": "Not invoked: remote-test.sh transfers HEAD with git push to a temporary remote test ref; the direct user no-push instruction was preserved. Only the affected quick package selections ran locally. No full Go or DB migration suite is claimed.",
+    "remote_browser": {
+      "exit_code": 3,
+      "reason": "Approved scripts/playwright-remote.mjs refused before SSH or transfer: OPS-247 bootstrap/launcher unavailable. No local browser fallback."
+    },
+    "full_suites": "No fresh full Go/DB suite, npm build, full web unit suite, Linux Chromium execution or hosted CI rerun is claimed. Coordinator must run those after an authorized push. The newly classified existing DB-backed completion regression was enumerated but not executed this round."
+  },
+  "design_decisions": "No conflict with approved design fragments or ticket decisions was found. This round changes aggregate tooltip explanations using the existing planning cells; it adds no UI layout or control.",
+  "constraints": "Assigned worktree and branch only; no push, deploy, release gate, production mutation, secrets, credentials, version or migration change, foreign-worktree edits, subagents or other model CLIs/reviews.",
+  "logs_sha256": {
+    "cli-list.log": "88425df52fdaafd3d5d9d91b7b85f3f7d97a3d67f9d7e356ab26a6308b56f307",
+    "estimates-after.log": "b2e0e248f1b528d7c97bef2cf6bce8a0c6f2a82fc45624bb788b2e81c2d60c68",
+    "estimates-before.log": "e44a74a6e3a1ba0f0f15daca2cb41c3f23c2d631e49347b9a16071c636a63a62",
+    "estimates-final-baseline.log": "04fbe704607e2bf9fee46ca70f9fed07ee4ad15382d304854610c984b5f3399d",
+    "go-final-after.log": "918736e3f4a96a030f2b40969e1f8946e8188def5203c86db9149fdd4bbe24a7",
+    "go-final-baseline.log": "855fd467480a2ccfd9f92309df8b4603c6b8f069225287228682f8fa7fbb93aa",
+    "model-estimates-after.log": "f7661f3111859d1f0f7ea1bb39302ba7a08e98614162f0dfa8e2efb8919d219a",
+    "planning-after.log": "dd7703f7e3ae8ffd3ab78b23cd75c67a4a8e90165adc3443f567c9544f74ba37",
+    "planning-before.log": "1943d8c16567a4c83cac999898e7367e21c27222eb06415d9d9c303297245e03",
+    "planning-final-after.log": "85eee2a349154a99f976829c3264d87053e1808abb6ddc88d908b7c315ff0663",
+    "planning-final-baseline.log": "0ffa925e37872e8076dd6ece93a035a42e14a8241b815616a9336654dc27dca3",
+    "remote-browser.log": "773e28199e77ad2bac9a833bff42ef9ee0e895acc3fd79d293ced00421a420e2",
+    "shards-after.log": "309a912a4337d424310c7de2d0596ac13d6bfb9eef37690450a69fb66b40eb92",
+    "tier-command-after.log": "0f03446d944e9469fab9cc23a350163e72469c6f64ed4f1b635d4e211499a74f",
+    "tier-default.log": "1a9c67ddb84ca3d1916f2a8029b5b053ad707b96be1b3742aa7f7040343a146f",
+    "work-cli-after.log": "dd03f95093b89088190c977ce4ff9a35f4ad771afe18475accf78d83d4646700"
+  }
+}

@@ -151,6 +151,7 @@ func (a *fakeAdapter) Start(_ context.Context, _ StartRequest, _ func(AdapterEve
 type fakeProcess struct {
 	mu      sync.Mutex
 	calls   int
+	texts   []string
 	stopped chan struct{}
 	once    sync.Once
 	onExit  func()
@@ -164,10 +165,11 @@ func (p *fakeProcess) Wait() error {
 	}
 	return nil
 }
-func (p *fakeProcess) Control(_ context.Context, _, _ string) error {
+func (p *fakeProcess) Control(_ context.Context, _, text string) error {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	p.calls++
+	p.texts = append(p.texts, text)
 	return nil
 }
 func (p *fakeProcess) GracefulStop(ctx context.Context) error { return p.Stop(ctx) }
@@ -225,7 +227,7 @@ func TestManagedHarnessLifecycleAndControls(t *testing.T) {
 	a.harnessControls = []HarnessControl{{ID: "interrupt-1", Kind: "interrupt"}}
 	a.harnessDeliveries = []HarnessDelivery{{ID: "delivery-1", Cursor: 1, Body: "Please check this"}}
 	a.mu.Unlock()
-	if registration.ID != "session" || registration.ProjectID != "project" || len(registration.Lease) < 32 || len(caps) != 5 {
+	if registration.ID != "session" || registration.ProjectID != "project" || len(registration.Lease) < 32 || len(caps) != 6 {
 		t.Fatalf("managed registration binding or capabilities invalid: %v", caps)
 	}
 	if registration.Model != "" || registration.ReasoningEffort != "" || registration.AccountLabel != "Work subscription" {

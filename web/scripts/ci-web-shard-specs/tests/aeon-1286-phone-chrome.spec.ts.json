@@ -1,0 +1,13 @@
+{
+  "group": "remaining-ui",
+  "nightlyTiming": {
+    "seconds": 35.512195,
+    "selectedTests": 16
+  },
+  "spec": {
+    "file": "tests/aeon-1286-phone-chrome.spec.ts",
+    "listedTests": 16,
+    "weightSeconds": 35.512195,
+    "weightSource": "unmeasured-test-rate"
+  }
+}

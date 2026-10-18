@@ -11,12 +11,14 @@ import (
 	"strings"
 	"time"
 
+	"github.com/inspr-at/paimos/internal/accountuse"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
 
 	"github.com/inspr-at/paimos/internal/agentpairing"
 	"github.com/inspr-at/paimos/internal/authz"
 	"github.com/inspr-at/paimos/internal/httpapi"
+	"github.com/inspr-at/paimos/internal/modelprefs"
 	"github.com/inspr-at/paimos/internal/tenant"
 	"github.com/inspr-at/paimos/internal/workorders"
 )
@@ -97,16 +99,12 @@ func (m *Module) groups(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	var out any
-	err := m.in(r.Context(), p.TenantID, func(tx pgx.Tx) error {
-		if r.Method == http.MethodGet {
-			items, err := listGroups(r.Context(), tx)
-			out = items
-			return err
-		}
-		group, err := createGroup(r.Context(), tx, p, in)
-		out = group
-		return err
-	})
+	var err error
+	if r.Method == http.MethodGet {
+		err = m.readPerson(r.Context(), p, permission, func(tx pgx.Tx) error { items, err := listGroups(r.Context(), tx); out = items; return err })
+	} else {
+		err = m.write(r.Context(), p, permission, func(tx pgx.Tx) error { group, err := createGroup(r.Context(), tx, p, in); out = group; return err })
+	}
 	if err != nil {
 		writeErr(w, err)
 		return
@@ -140,7 +138,7 @@ func (m *Module) group(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	var out AccountGroup
-	err := m.in(r.Context(), p.TenantID, func(tx pgx.Tx) error {
+	err := m.write(r.Context(), p, "account.manage", func(tx pgx.Tx) error {
 		if r.Method == http.MethodDelete {
 			return deleteGroup(r.Context(), tx, p, id)
 		}
@@ -183,18 +181,17 @@ func (m *Module) pins(w http.ResponseWriter, r *http.Request) {
 		in.Harness = r.URL.Query().Get("harness")
 	}
 	var out []TicketPin
-	err := m.in(r.Context(), p.TenantID, func(tx pgx.Tx) error {
-		switch r.Method {
-		case http.MethodGet:
-			var err error
-			out, err = listPins(r.Context(), tx, in.TicketID)
-			return err
-		case http.MethodDelete:
-			return deletePin(r.Context(), tx, p, in.TicketID, in.Harness)
-		default:
+	var err error
+	if r.Method == http.MethodGet {
+		err = m.readPerson(r.Context(), p, permission, func(tx pgx.Tx) error { var err error; out, err = listPins(r.Context(), tx, in.TicketID); return err })
+	} else {
+		err = m.write(r.Context(), p, permission, func(tx pgx.Tx) error {
+			if r.Method == http.MethodDelete {
+				return deletePin(r.Context(), tx, p, in.TicketID, in.Harness)
+			}
 			return putPin(r.Context(), tx, p, in)
-		}
-	})
+		})
+	}
 	if err != nil {
 		writeErr(w, err)
 		return
@@ -212,6 +209,11 @@ func (m *Module) use(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	harness, label := r.URL.Query().Get("harness"), r.URL.Query().Get("label")
+	projectID := r.URL.Query().Get("project_id")
+	if projectID != "" && !uuidRE.MatchString(projectID) {
+		writeErr(w, fail(400, "invalid project id"))
+		return
+	}
 	accountID := strings.ToLower(r.URL.Query().Get("account_id"))
 	if !validHarness(harness) || (label == "") == (accountID == "") || label != "" && !pathFreeLabel(label) || accountID != "" && !uuidRE.MatchString(accountID) {
 		writeErr(w, fail(http.StatusBadRequest, "invalid account label"))
@@ -224,7 +226,7 @@ func (m *Module) use(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var out UseResult
-	err := m.in(r.Context(), p.TenantID, func(tx pgx.Tx) error {
+	err := m.read(r.Context(), p.TenantID, func(tx pgx.Tx) error {
 		ownOnly := p.Kind == tenant.Agent
 		if p.Kind == tenant.Agent {
 			scopes, err := keyScopes(r.Context(), tx, r, p)
@@ -256,6 +258,18 @@ func (m *Module) use(w http.ResponseWriter, r *http.Request) {
 		}
 		if len(matched) == 0 {
 			return fail(http.StatusNotFound, "account not found")
+		}
+		if accountID != "" {
+			if err := accountuse.RequireProject(r.Context(), tx, accountID, projectID); err != nil {
+				return err
+			}
+		}
+		matched, err = applyUse(r.Context(), tx, matched, projectID)
+		if err != nil {
+			return err
+		}
+		if len(matched) == 0 {
+			return fail(409, accountuse.NotAllowed)
 		}
 		quotas := map[string]bool{}
 		for _, a := range matched {
@@ -304,7 +318,7 @@ func (m *Module) runTarget(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, err)
 		return
 	}
-	err := m.in(r.Context(), p.TenantID, func(tx pgx.Tx) error {
+	err := m.write(r.Context(), p, "run.create", func(tx pgx.Tx) error {
 		return setRunTarget(r.Context(), tx, p, runID, strings.ToLower(in.AccountID), strings.ToLower(in.GroupID))
 	})
 	if err != nil {
@@ -631,6 +645,17 @@ func putPin(ctx context.Context, tx pgx.Tx, p tenant.Principal, in pinWrite) err
 	}
 	var account, group any
 	if in.AccountID != "" {
+		var project *string
+		if err := tx.QueryRow(ctx, `SELECT project_id::text FROM nodes WHERE id=$1`, in.TicketID).Scan(&project); err != nil {
+			return err
+		}
+		projectID := ""
+		if project != nil {
+			projectID = *project
+		}
+		if err := accountuse.RequireProject(ctx, tx, in.AccountID, projectID); err != nil {
+			return err
+		}
 		account = in.AccountID
 	}
 	if in.GroupID != "" {
@@ -664,7 +689,7 @@ func deletePin(ctx context.Context, tx pgx.Tx, p tenant.Principal, ticketID, har
 // node RLS and require the same project write authority as a ticket edit.
 func canEditPin(ctx context.Context, tx pgx.Tx, p tenant.Principal, ticketID string) error {
 	var project *string
-	err := tx.QueryRow(ctx, `SELECT n.project_id::text FROM nodes n JOIN node_kinds k ON k.tenant_id=n.tenant_id AND k.id=n.kind_id WHERE n.id=$1::uuid AND n.deleted_at IS NULL AND k.slug='ticket' FOR UPDATE OF n`, ticketID).Scan(&project)
+	err := tx.QueryRow(ctx, `SELECT n.project_id::text FROM nodes n JOIN node_kinds k ON k.tenant_id=n.tenant_id AND k.id=n.kind_id WHERE n.id=$1::uuid AND n.deleted_at IS NULL AND k.slug IN ('work','ticket') FOR UPDATE OF n`, ticketID).Scan(&project)
 	if isNoRows(err) {
 		return fail(http.StatusNotFound, "ticket not found")
 	}
@@ -709,12 +734,34 @@ func setRunTarget(ctx context.Context, tx pgx.Tx, p tenant.Principal, runID, acc
 		return fail(http.StatusConflict, "run is not awaiting an account")
 	}
 	if accountID != "" {
+		if err := accountuse.RequireRun(ctx, tx, accountID, runID); err != nil {
+			return err
+		}
 		var ok bool
 		if err := tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM agent_accounts WHERE id=$1::uuid AND harness=$2)`, accountID, harness).Scan(&ok); err != nil {
 			return err
 		}
 		if !ok {
 			return fail(http.StatusBadRequest, "invalid account")
+		}
+		policy, err := modelprefs.RunRequirement(ctx, tx, runID)
+		if err != nil {
+			return err
+		}
+		var profile string
+		if err := tx.QueryRow(ctx, `SELECT model_profile_id::text FROM agent_runs WHERE id=$1`, runID).Scan(&profile); err != nil {
+			return err
+		}
+		now, err := dbNow(ctx, tx)
+		if err != nil {
+			return err
+		}
+		qualifies, err := AccountMeetsResidency(ctx, tx, accountID, profile, policy.Residency, now)
+		if err != nil {
+			return err
+		}
+		if !qualifies {
+			return &httpError{status: 409, code: "residency_unmet", msg: "account is outside the allowed providers"}
 		}
 		if _, err := tx.Exec(ctx, `UPDATE agent_runs SET requested_account_id=$2::uuid WHERE id=$1::uuid`, runID, accountID); err != nil {
 			return err
@@ -804,49 +851,80 @@ type groupFence struct {
 
 // narrowCandidates applies the project fence, then a run or ticket pin.
 // A pin never widens a fence. An empty result waits; it does not spill.
-func narrowCandidates(ctx context.Context, tx pgx.Tx, run runRow, harness string, accounts []Account) ([]Account, error) {
+func narrowCandidates(ctx context.Context, tx pgx.Tx, run runRow, harness string, accounts []Account) ([]Account, bool, error) {
 	if run.Purpose == "pairing_verification" {
-		return accounts, nil
+		kept := []Account{}
+		for _, a := range accounts {
+			if err := accountuse.RequireRun(ctx, tx, a.ID, run.ID); err != nil {
+				var denied *accountuse.Error
+				if errors.As(err, &denied) && denied.Message == accountuse.NotAllowed {
+					continue
+				}
+				return nil, false, err
+			}
+			kept = append(kept, a)
+		}
+		return kept, false, nil
 	}
 	projectID, err := runProjectID(ctx, tx, run.ID)
 	if err != nil {
-		return nil, err
+		return nil, false, err
 	}
 	fences, err := loadFences(ctx, tx, harness)
 	if err != nil {
-		return nil, err
+		return nil, false, err
 	}
-	kept := applyFence(accounts, fences, projectID)
+	kept, err := applyUse(ctx, tx, applyFence(accounts, fences, projectID), projectID)
+	if err != nil {
+		return nil, false, err
+	}
+	policy, err := modelprefs.RunRequirement(ctx, tx, run.ID)
+	if err != nil {
+		return nil, false, err
+	}
+	req := modelprefs.Strictest(policy.Residency, run.Residency)
+	now, err := dbNow(ctx, tx)
+	if err != nil {
+		return nil, false, err
+	}
+	profile := ""
+	if run.ProfileID != nil {
+		profile = *run.ProfileID
+	}
+	kept, residencyEmptied, err := applyResidency(ctx, tx, kept, profile, req, now)
+	if err != nil {
+		return nil, false, err
+	}
 	if run.RequestedAccountID != nil && *run.RequestedAccountID != "" {
-		return keepAccount(kept, *run.RequestedAccountID), nil
+		return keepAccount(kept, *run.RequestedAccountID), residencyEmptied, nil
 	}
 	var target *string
 	err = tx.QueryRow(ctx, `SELECT group_id::text FROM account_run_targets WHERE run_id=$1::uuid`, run.ID).Scan(&target)
 	if err != nil && !isNoRows(err) {
-		return nil, err
+		return nil, false, err
 	}
 	if target != nil && *target != "" {
-		return keepGroup(kept, *target), nil
+		return keepGroup(kept, *target), residencyEmptied, nil
 	}
 	ticketID, err := runTicketID(ctx, tx, run.ID)
 	if err != nil || ticketID == "" {
-		return kept, err
+		return kept, residencyEmptied, err
 	}
 	var accountID, groupID *string
 	err = tx.QueryRow(ctx, `SELECT account_id::text, group_id::text FROM account_ticket_pins WHERE ticket_id=$1::uuid AND harness=$2`, ticketID, harness).Scan(&accountID, &groupID)
 	if isNoRows(err) {
-		return kept, nil
+		return kept, residencyEmptied, nil
 	}
 	if err != nil {
-		return nil, err
+		return nil, false, err
 	}
 	if accountID != nil && *accountID != "" {
-		return keepAccount(kept, *accountID), nil
+		return keepAccount(kept, *accountID), residencyEmptied, nil
 	}
 	if groupID != nil && *groupID != "" {
-		return keepGroup(kept, *groupID), nil
+		return keepGroup(kept, *groupID), residencyEmptied, nil
 	}
-	return kept, nil
+	return kept, residencyEmptied, nil
 }
 
 // The routing agent often has no project grant. The fence still has to know
@@ -869,10 +947,16 @@ func withAllProjects(ctx context.Context, tx pgx.Tx, query string, runID string)
 			return "", err
 		}
 	}
-	if isNoRows(qerr) || id == nil {
+	if isNoRows(qerr) {
 		return "", nil
 	}
-	return *id, qerr
+	if qerr != nil {
+		return "", qerr
+	}
+	if id == nil {
+		return "", nil
+	}
+	return *id, nil
 }
 
 func runProjectID(ctx context.Context, tx pgx.Tx, runID string) (string, error) {
@@ -892,9 +976,9 @@ func runTicketID(ctx context.Context, tx pgx.Tx, runID string) (string, error) {
 			FROM up
 			JOIN nodes p ON p.tenant_id=up.tenant_id AND p.id=up.parent_id
 			JOIN node_kinds pk ON pk.tenant_id=p.tenant_id AND pk.id=p.kind_id
-			WHERE up.slug<>'ticket' AND up.depth<32
+			WHERE up.slug NOT IN ('work','ticket') AND up.depth<32
 		)
-		SELECT id::text FROM up WHERE slug='ticket' ORDER BY depth LIMIT 1`, runID)
+		SELECT id::text FROM up WHERE slug IN ('work','ticket') ORDER BY depth LIMIT 1`, runID)
 }
 
 func loadFences(ctx context.Context, tx pgx.Tx, harness string) (map[string]groupFence, error) {
@@ -980,13 +1064,28 @@ func keepGroup(accounts []Account, id string) []Account {
 }
 
 func quotaOccupancy(ctx context.Context, tx pgx.Tx) (map[string]int, error) {
+	return quotaOccupancyExcept(ctx, tx, "")
+}
+
+func quotaOccupancyExcept(ctx context.Context, tx pgx.Tx, runID string) (map[string]int, error) {
+	return quotaOccupancyExceptNative(ctx, tx, runID, "")
+}
+
+func quotaOccupancyExceptNative(ctx context.Context, tx pgx.Tx, runID, ownedSessionID string) (map[string]int, error) {
 	rows, err := tx.Query(ctx, `
 		SELECT a.harness || ':' || a.quota_pool_fingerprint, count(*)
-		FROM agent_runs r
+		FROM (
+		  SELECT account_id,tenant_id FROM agent_runs
+		  WHERE account_id IS NOT NULL AND id::text<>$1
+		    AND (status IN ('queued','starting','running','waiting')
+		      OR trace->'work_lifecycle_release'->>'exit_unconfirmed'='true')
+		  UNION ALL
+		  SELECT account_id,tenant_id FROM native_session_roots
+		  WHERE run_id IS NULL AND released_at IS NULL AND owned_session_id::text<>$2
+		) r
 		JOIN agent_accounts a ON a.tenant_id=r.tenant_id AND a.id=r.account_id
-		WHERE a.quota_pool_fingerprint<>'' AND r.account_id IS NOT NULL
-		  AND r.status IN ('queued','starting','running','waiting')
-		GROUP BY a.harness, a.quota_pool_fingerprint`)
+		WHERE a.quota_pool_fingerprint<>''
+		GROUP BY a.harness, a.quota_pool_fingerprint`, runID, ownedSessionID)
 	if err != nil {
 		return nil, err
 	}

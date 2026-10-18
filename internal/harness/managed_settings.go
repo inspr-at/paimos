@@ -12,18 +12,24 @@ import (
 
 	"github.com/inspr-at/paimos/internal/agentaccounts"
 	"github.com/inspr-at/paimos/internal/authz"
+	"github.com/inspr-at/paimos/internal/servicetier"
 	"github.com/inspr-at/paimos/internal/tenant"
 	"github.com/inspr-at/paimos/internal/workorders"
 	"github.com/jackc/pgx/v5"
 )
 
-func settingKind(kind string) bool { return kind == "rename" || kind == "model" || kind == "effort" }
+func settingKind(kind string) bool {
+	return kind == "rename" || kind == "model" || kind == "effort" || kind == "tier"
+}
 func validSetting(kind, value string) bool {
 	if !settingKind(kind) {
 		return value == ""
 	}
 	if value == "" || value != strings.TrimSpace(value) || !utf8.ValidString(value) || utf8.RuneCountInString(value) > 128 || strings.ContainsFunc(value, unicode.IsControl) {
 		return false
+	}
+	if kind == "tier" {
+		return servicetier.Valid(value)
 	}
 	return kind != "effort" || supportedEffort(value)
 }
@@ -59,6 +65,9 @@ func settingModels(ctx context.Context, tx pgx.Tx, s Session) ([]settingModel, e
 	return out, nil
 }
 func validateSettingCatalog(ctx context.Context, tx pgx.Tx, s Session, kind, value string) error {
+	if kind == "tier" {
+		return validateTier(ctx, tx, s, value)
+	}
 	if kind != "model" && kind != "effort" {
 		return nil
 	}

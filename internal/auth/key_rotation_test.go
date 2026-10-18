@@ -69,6 +69,9 @@ func decodeKey(t *testing.T, w *httptest.ResponseRecorder) agentKeyCreatedJSON {
 	if err := json.Unmarshal(w.Body.Bytes(), &key); err != nil {
 		t.Fatal("invalid key response")
 	}
+	if key.CreatedByPrincipalID == nil {
+		t.Fatal("HTTP creation/rotation omitted person creator")
+	}
 	if key.Token == "" {
 		t.Fatal("missing one-time token")
 	}
@@ -387,7 +390,16 @@ func rotationProjectBinding(t *testing.T, m *Module, owner tenant.Principal, age
 	}
 }
 
-func TestRotationCannotPromoteProjectGrantsIntoWorkspace(t *testing.T) {
+func TestRotationRejectsProjectGrantsBeyondPrivateRole(t *testing.T) {
+	testRotationProjectGrants(t, false)
+}
+
+func TestRotationAcceptsProjectGrantsWithoutPromotingWorkspace(t *testing.T) {
+	testRotationProjectGrants(t, true)
+}
+
+func testRotationProjectGrants(t *testing.T, sharedRole bool) {
+	t.Helper()
 	for _, tc := range []struct {
 		name     string
 		proposed []string
@@ -415,6 +427,13 @@ func TestRotationCannotPromoteProjectGrantsIntoWorkspace(t *testing.T) {
 				if configured {
 					return errors.New("fixture must exercise an unconfigured agent")
 				}
+				if sharedRole {
+					// Keep identical permissions, but use a shared custom role key.
+					if _, err := tx.Exec(ctx, `UPDATE roles SET key='rotation_shared' WHERE id IN
+						(SELECT role_id FROM role_bindings WHERE principal_id=$1::uuid AND scope_type='workspace')`, old.PrincipalID); err != nil {
+						return err
+					}
+				}
 				ceiling, err := authz.AgentKeyCeilingTx(ctx, tx, tenant.Principal{ID: old.PrincipalID, TenantID: owner.TenantID, Kind: tenant.Agent})
 				if err != nil {
 					return err
@@ -437,19 +456,60 @@ func TestRotationCannotPromoteProjectGrantsIntoWorkspace(t *testing.T) {
 			if tc.proposed != nil {
 				body["rotation_scopes"] = tc.proposed
 			}
-			if w := keyRequest(m, editor, body); w.Code != http.StatusForbidden {
-				t.Fatalf("project/self permission promotion status = %d, want 403", w.Code)
+			response := keyRequest(m, editor, body)
+			if !sharedRole {
+				if response.Code != http.StatusForbidden {
+					t.Fatalf("rotation beyond private role status = %d, want 403", response.Code)
+				}
+				keys, events := keyCounts(t, m, owner)
+				if keys != beforeKeys || events != beforeEvents || rotationAccessSnapshot(t, m, owner) != before {
+					t.Fatal("rejected rotation changed grants or wrote a replacement key/audit event")
+				}
+				listed, err := m.listAgentKeys(ctx, owner.TenantID)
+				if err != nil || len(listed) != 1 || listed[0].ID != old.ID || listed[0].RevokedAt != nil || !slices.Equal(listed[0].Scopes, old.Scopes) {
+					t.Fatal("rejected rotation changed or revoked the original key")
+				}
+				prefix, secret, _ := parseBearer("Bearer " + old.Token)
+				if _, ok, err := m.authenticateAgent(ctx, prefix, secret); err != nil || !ok {
+					t.Fatal("rejected rotation invalidated the original bearer")
+				}
+				return
 			}
+			next := decodeKey(t, response)
 			if rotationAccessSnapshot(t, m, owner) != before {
-				t.Fatal("rejected rotation changed roles, permissions or bindings")
+				t.Fatal("rotation promoted project/self-service grants into the workspace role")
 			}
 			keys, events := keyCounts(t, m, owner)
-			if keys != beforeKeys || events != beforeEvents {
-				t.Fatal("rejected rotation left a replacement or audit event")
+			want := old.Scopes
+			if tc.proposed != nil {
+				want = tc.proposed
+			}
+			if keys != beforeKeys+1 || events != beforeEvents+2 || !slices.Equal(next.Scopes, want) || next.PrincipalID != old.PrincipalID {
+				t.Fatal("rotation did not commit only replacement and revocation with the requested scopes")
 			}
 			listed, err := m.listAgentKeys(ctx, owner.TenantID)
-			if err != nil || len(listed) != 1 || listed[0].RevokedAt != nil || !slices.Equal(listed[0].Scopes, old.Scopes) {
-				t.Fatal("rejected rotation changed or revoked the original key")
+			if err != nil || len(listed) != 2 {
+				t.Fatal("rotation lost a key record")
+			}
+			for _, key := range listed {
+				if key.ID == old.ID && (key.RevokedAt == nil || !slices.Equal(key.Scopes, old.Scopes)) {
+					t.Fatal("rotation did not revoke the original key intact")
+				}
+			}
+			if slices.Contains(next.Scopes, "nodes.write") {
+				if err := db.InTenant(ctx, m.pool, owner.TenantID, func(tx pgx.Tx) error {
+					p := tenant.Principal{ID: next.PrincipalID, TenantID: owner.TenantID, Kind: tenant.Agent, Scopes: next.Scopes, KeyCreatorID: editor.ID}
+					if err := authz.RequireTx(ctx, tx, p, "nodes.write", authz.Scope{}); !errors.Is(err, authz.ErrForbidden) {
+						return errors.New("project key scope granted workspace access")
+					}
+					var projectID string
+					if err := tx.QueryRow(ctx, `SELECT scope_id::text FROM role_bindings WHERE principal_id=$1::uuid AND scope_type='project'`, p.ID).Scan(&projectID); err != nil {
+						return err
+					}
+					return authz.RequireTx(ctx, tx, p, "nodes.write", authz.Scope{ProjectID: projectID})
+				}); err != nil {
+					t.Fatal(err)
+				}
 			}
 		})
 	}

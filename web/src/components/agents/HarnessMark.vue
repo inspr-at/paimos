@@ -2,11 +2,11 @@
 <script setup lang="ts">
 import { computed } from 'vue'
 import AppIcon from '../AppIcon.vue'
-import { BRAND_MARKS, harnessBrand } from './brandMarks'
+import { BRAND_MARKS, harnessBrand, providerBrand } from './brandMarks'
 
-const props = withDefaults(defineProps<{ harness: string; size?: number }>(), { size: 18 })
+const props = withDefaults(defineProps<{ harness: string; size?: number; provider?: string }>(), { size: 18 })
 const mark = computed(() => {
-  const brand = harnessBrand(props.harness)
+  const brand = providerBrand(props.provider ?? '') ?? harnessBrand(props.harness)
   return brand ? BRAND_MARKS[brand] : null
 })
 </script>

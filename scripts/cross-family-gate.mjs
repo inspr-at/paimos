@@ -201,16 +201,28 @@ export async function checkEvent({ eventName, event, config, repository, git, ap
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
   try {
     if (process.argv.length !== 3) throw new Error("usage: node cross-family-gate.mjs CONFIG_PATH");
-    const config = JSON.parse(readFileSync(process.argv[2], "utf8"));
     const event = JSON.parse(readFileSync(process.env.GITHUB_EVENT_PATH, "utf8"));
     const repository = process.env.GITHUB_REPOSITORY;
-    const results = await checkEvent({
-      eventName: process.env.GITHUB_EVENT_NAME, event, config, repository,
-      git: createGit(), api: githubAPI({ repository, token: process.env.GH_TOKEN }),
-    });
-    const evidence = results.map((pr) => `PR #${pr.number}: head ${pr.head}; reviewed ${pr.reviewed}; main merges ${pr.merges}`).join("\n");
-    console.log(evidence);
-    if (process.env.GITHUB_STEP_SUMMARY) appendFileSync(process.env.GITHUB_STEP_SUMMARY, `Cross-family gate passed:\n\n${evidence}\n`);
+    // Only the diagnostic CLI skips merge-group previews. checkEvent and the
+    // external App poster still enforce every queued PR's review evidence.
+    if (process.env.GITHUB_EVENT_NAME === "merge_group" && event.action === "checks_requested" &&
+        event.merge_group?.base_ref === "refs/heads/main" &&
+        event.merge_group.head_ref?.startsWith("refs/heads/gh-readonly-queue/main/") &&
+        shaPattern.test(event.merge_group.base_sha ?? "") && shaPattern.test(event.merge_group.head_sha ?? "") &&
+        event.repository?.full_name === repository && /^[a-zA-Z0-9_.-]+\/[a-zA-Z0-9_.-]+$/.test(repository ?? "")) {
+      const notice = "gate/policy-preview: merge-group preview skipped; required gate/cross-family enforces PR review verdicts (non-required diagnostic)";
+      console.log(`::notice::${notice}`);
+      if (process.env.GITHUB_STEP_SUMMARY) appendFileSync(process.env.GITHUB_STEP_SUMMARY, `${notice}\n`);
+    } else {
+      const config = JSON.parse(readFileSync(process.argv[2], "utf8"));
+      const results = await checkEvent({
+        eventName: process.env.GITHUB_EVENT_NAME, event, config, repository,
+        git: createGit(), api: githubAPI({ repository, token: process.env.GH_TOKEN }),
+      });
+      const evidence = results.map((pr) => `PR #${pr.number}: head ${pr.head}; reviewed ${pr.reviewed}; main merges ${pr.merges}`).join("\n");
+      console.log(evidence);
+      if (process.env.GITHUB_STEP_SUMMARY) appendFileSync(process.env.GITHUB_STEP_SUMMARY, `Cross-family gate passed:\n\n${evidence}\n`);
+    }
   } catch (error) {
     // Never emit request headers, API bodies, environment or transport errors.
     console.error(error instanceof Error && !["TypeError", "SyntaxError"].includes(error.name)

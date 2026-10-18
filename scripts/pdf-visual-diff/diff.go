@@ -35,7 +35,7 @@ type PageReport struct {
 }
 
 // Run renders both PDFs, aligns pages by index, and writes a summary.
-// Exit code 2 means at least one page is above the mismatch threshold.
+// Exit code 2 means a missing page or pixel mismatch above the threshold.
 func Run(leftPath, rightPath string, opt Options) (int, error) {
 	if opt.DPI <= 0 {
 		return 1, fmt.Errorf("dpi must be positive")
@@ -83,7 +83,7 @@ func Run(leftPath, rightPath string, opt Options) (int, error) {
 		if err := writePNG(filepath.Join(opt.OutDir, name), highlight(alignedA, alignedB, opt.Tolerance)); err != nil {
 			return 1, err
 		}
-		if report.MismatchPercent > opt.Threshold {
+		if report.Missing != "" || report.MismatchPercent > opt.Threshold {
 			over = true
 		}
 		reports = append(reports, report)

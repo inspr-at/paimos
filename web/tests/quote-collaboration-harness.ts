@@ -1,10 +1,8 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import { createApp, h, ref } from 'vue'
 import Overlay from '../src/components/quotes/collaboration/QuotePresenceOverlay.vue'
-import Bar from '../src/components/quotes/collaboration/QuoteCollaborationBar.vue'
 import type { QuoteDocumentData } from '../src/lib/quotes/types'
 import type { PresenceSnapshot } from '../src/lib/quotePresence'
-import type { SessionView } from '../src/lib/quoteSession'
 
 export async function mountOverlay(doc:QuoteDocumentData,sectionId:string,nodeId:string):Promise<string> {
   const root=document.createElement('div')
@@ -17,13 +15,4 @@ export async function mountOverlay(doc:QuoteDocumentData,sectionId:string,nodeId
   const presence:PresenceSnapshot={sessions:[{session_id:'session-1',principal_id:'other',name:'Alex',mode:'editing',observed_revision:1,expires_at:'2099-01-01',anchor:{section_id:sectionId,node_id:nodeId,observed_revision:1,text_sha256:hash,anchor:1,focus:3,fidelity:'precise'}}],draft_revision:1,quote_revision:1,state:'draft'}
   createApp({render:()=>h(Overlay,{root,document:model.value,revision:1,principalId:'mine',presence})}).mount(host)
   return JSON.stringify(model.value)
-}
-
-export function mountCollaborationBar(): void {
-  const host=document.createElement('div');document.body.appendChild(host)
-  const view=ref<SessionView>({local:'clean',remote:'current',working:null,baseRevision:1,highestRemoteRevision:1,remoteActorId:null,durableRecovery:true,review:null,pendingMutationId:null,error:null,quoteState:'draft'})
-  const presence=ref<PresenceSnapshot>({sessions:[],draft_revision:1,quote_revision:1,state:'draft'})
-  const actions:string[]=[]
-  ;(window as unknown as {quoteBarTest:{view:typeof view;presence:typeof presence;actions:string[]}}).quoteBarTest={view,presence,actions}
-  createApp({render:()=>h(Bar,{view:view.value,presence:presence.value,principalId:'mine',actorName:'Riley Example',onReload:()=>actions.push('reload'),onReview:()=>actions.push('review'),onRetry:()=>actions.push('retry')})}).mount(host)
 }

@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"os"
 	"reflect"
+	"regexp"
 	"slices"
 	"sort"
 	"testing"
@@ -36,7 +37,7 @@ func TestPlanningListHoverFixture(t *testing.T) {
 		if tc.estimated {
 			fields["estimate_hours"] = .48
 		}
-		n := w.node(t, tc.key, "ticket", w.root.ID, "open", fields)
+		n := w.node(t, tc.key, "work", w.root.ID, "open", fields)
 		if tc.reported {
 			billing, plan := "api", ""
 			if tc.key == "HOVER-8" {
@@ -66,7 +67,7 @@ func TestPlanningListHoverFixture(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	status, body := call(t, &w.admin, http.MethodGet, "/api/nodes?within="+w.root.ID+"&kind=ticket&sort=key", "")
+	status, body := call(t, &w.admin, http.MethodGet, "/api/nodes?within="+w.root.ID+"&kind=work&sort=key", "")
 	page := decode[nodePage](t, status, body, http.StatusOK)
 	if len(page.Items) != 8 {
 		t.Fatalf("fixture row count: %d", len(page.Items))
@@ -139,7 +140,29 @@ func planningFixtureProjection(t *testing.T, body []byte) map[string]any {
 	projection := map[string]any{}
 	for _, item := range page.Items {
 		planning := item["planning"].(map[string]any)
-		for _, model := range planning["models"].([]any) {
+		// Models revisions include tenant-owned identities and stamps. Validate
+		// the opaque token before comparing the complete planning content. Live
+		// change/equality assertions remain in TestListPlanningColumns.
+		normalizeRoute := func(raw any) {
+			if raw == nil {
+				return
+			}
+			route, ok := raw.(map[string]any)
+			if !ok {
+				t.Fatalf("invalid planning route: %T", raw)
+			}
+			revision, ok := route["revision"].(string)
+			if !ok || !regexp.MustCompile(`^[0-9a-f]{8}$`).MatchString(revision) {
+				t.Fatalf("invalid routing revision: %v", route["revision"])
+			}
+			route["revision"] = "revision"
+		}
+		normalizeRoute(planning["route"])
+		if snapshot, ok := planning["snapshot"].(map[string]any); ok {
+			normalizeRoute(snapshot["route"])
+		}
+		models, _ := planning["models"].([]any) // Absent on a ticket with no sessions; absence stays in the raw comparison.
+		for _, model := range models {
 			sessions := model.(map[string]any)["sessions"].([]any)
 			for _, session := range sessions {
 				session.(map[string]any)["id"] = "session"

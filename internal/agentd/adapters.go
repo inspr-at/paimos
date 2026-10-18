@@ -25,6 +25,7 @@ import (
 	"github.com/inspr-at/paimos/internal/openrouter"
 	"github.com/inspr-at/paimos/internal/piprobe"
 	"github.com/inspr-at/paimos/internal/rules"
+	"github.com/inspr-at/paimos/internal/servicetier"
 	"github.com/inspr-at/paimos/internal/sessionusage"
 )
 
@@ -32,18 +33,24 @@ func operationContext(ctx context.Context) (context.Context, context.CancelFunc)
 	return context.WithTimeout(ctx, 20*time.Second)
 }
 
+var (
+	errAccountHomeMissing  = errors.New("local account key is not enrolled")
+	errAccountHomePhysical = errors.New("local account home is not physical")
+	errAccountHomePrivate  = errors.New("local account home is not private")
+)
+
 func localHome(homes map[string]string, key string) (string, error) {
 	home := homes[key]
 	if key == "" || home == "" || !filepath.IsAbs(home) {
-		return "", errors.New("local account key is not enrolled")
+		return "", errAccountHomeMissing
 	}
 	physical, err := filepath.EvalSymlinks(home)
 	if err != nil || physical != home {
-		return "", errors.New("local account home is not physical")
+		return "", errAccountHomePhysical
 	}
 	info, err := os.Stat(home)
 	if err != nil || !info.IsDir() || info.Mode().Perm()&0077 != 0 {
-		return "", errors.New("local account home is not private")
+		return "", errAccountHomePrivate
 	}
 	return home, nil
 }
@@ -62,9 +69,23 @@ func withEnv(name, value string) []string {
 // Claude authenticates from its pinned account directory. Never inherit daemon
 // credentials, loader flags, provider overrides or arbitrary host configuration.
 func claudeEnvironment(home, nodePath, claudePath string) []string {
-	return []string{"HOME=" + home, "CLAUDE_CONFIG_DIR=" + home,
-		"PATH=" + strings.Join([]string{filepath.Dir(nodePath), filepath.Dir(claudePath), "/usr/bin", "/bin"}, string(os.PathListSeparator)),
-		"LANG=C", "LC_ALL=C"}
+	accountEnv := []string{"HOME=" + home, "CLAUDE_CONFIG_DIR=" + home}
+	// The default profile uses Claude's normal preferences and keychain item.
+	// Setting CLAUDE_CONFIG_DIR, even to ~/.claude, selects a different login.
+	if userHome, err := os.UserHomeDir(); err == nil && home == filepath.Join(userHome, ".claude") {
+		accountEnv = []string{"HOME=" + userHome}
+	}
+	// macOS Claude selects its Keychain account using USER. Preserve the
+	// login-session context also supplied by launchd/vendor CLI invocations,
+	// without inheriting credentials, provider overrides or loader settings.
+	for _, name := range []string{"USER", "LOGNAME", "TMPDIR"} {
+		if value := os.Getenv(name); value != "" {
+			accountEnv = append(accountEnv, name+"="+value)
+		}
+	}
+	return append(accountEnv,
+		"PATH="+strings.Join([]string{filepath.Dir(nodePath), filepath.Dir(claudePath), "/usr/bin", "/bin"}, string(os.PathListSeparator)),
+		"LANG=C", "LC_ALL=C")
 }
 
 func eventProbe(raw json.RawMessage) (method, kind, model string) {
@@ -88,6 +109,7 @@ func firstNonempty(a, b string) string {
 
 // CodexAdapter speaks the app-server thread and turn protocol.
 type CodexAdapter struct {
+	idleUsage   *codexIdleCapability // Release-owned qualification; never configured by enrollment.
 	quotaIDs    sync.Map
 	IdleTimeout time.Duration // Zero uses the ten-minute clean-turn completion window.
 	Path        string
@@ -109,6 +131,9 @@ type codexShutdown struct {
 }
 
 type codexProcess struct {
+	chatPending      []pendingCodexChat // normalized, bounded and memory-only before turn acknowledgement
+	chatCandidate    pendingCodexChat   // the last completed agent message before acknowledgement
+	serviceTier      string
 	capacityParser   capacity.Parser
 	capacityModel    string
 	lastCapacity     []capacity.Reading
@@ -148,6 +173,9 @@ func (p *codexProcess) Control(ctx context.Context, op, text string) error {
 	p.eventMu.Unlock()
 	if ended {
 		return ErrNotOwned
+	}
+	if op == "tier" {
+		return p.changeTier(ctx, text)
 	}
 	inbox := op == "inbox"
 	if inbox {
@@ -225,7 +253,7 @@ func (a *CodexAdapter) Start(ctx context.Context, r StartRequest, observe func(A
 	if _, err := p.request(op, "jsonrpc", "initialize", map[string]any{"clientInfo": map[string]string{"name": "aeon-agentd", "title": "AEON agentd", "version": "1"}, "capabilities": map[string]any{"experimentalApi": true}}); err != nil {
 		return fail(err)
 	}
-	if err := p.send(map[string]any{"jsonrpc": "2.0", "method": "initialized", "params": map[string]any{}}); err != nil {
+	if err := p.sendContext(op, map[string]any{"jsonrpc": "2.0", "method": "initialized", "params": map[string]any{}}); err != nil {
 		return fail(err)
 	}
 	expectedEmail := strings.TrimSpace(a.Emails[r.AccountKey])
@@ -247,6 +275,9 @@ func (a *CodexAdapter) Start(ctx context.Context, r StartRequest, observe func(A
 	if account.Account.ID != "" {
 		a.quotaIDs.Store(r.AccountKey, account.Account.ID)
 	}
+	probe, cancelProbe := context.WithTimeout(op, 2*time.Second)
+	reportCodexModels(probe, p, observe, r.Run.ID)
+	cancelProbe()
 	cp.readCapacity(op, "start")
 	if p.vendorLimited.Load() {
 		return fail(errors.New("Codex capacity refused run"))
@@ -259,7 +290,10 @@ func (a *CodexAdapter) Start(ctx context.Context, r StartRequest, observe func(A
 		Effort string `json:"reasoningEffort"`
 	}
 	threadArgs := map[string]any{"cwd": r.Workspace, "approvalPolicy": "never", "model": r.Profile.Model}
-	config := map[string]any{}
+	config := map[string]any{"service_tier": "default"}
+	if r.ServiceTier != "" {
+		config["service_tier"] = map[string]string{"default": "default", "fast": "fast", "fastest": "ultrafast"}[r.ServiceTier]
+	}
 	if r.Rules != "" {
 		// This limits the repository AGENTS.md chain, not developer instructions.
 		// Preserve Codex's default allowance when the delivered rules are smaller.
@@ -278,7 +312,7 @@ func (a *CodexAdapter) Start(ctx context.Context, r StartRequest, observe func(A
 	}
 	raw, err = p.request(op, "jsonrpc", "thread/start", threadArgs)
 	if err != nil || json.Unmarshal(raw, &thread) != nil || thread.Thread.ID == "" {
-		return fail(errors.New("Codex thread start failed"))
+		return fail(modelStartError("Codex thread start failed", err))
 	}
 	p.eventMu.Lock()
 	p.threadID = thread.Thread.ID
@@ -293,11 +327,16 @@ func (a *CodexAdapter) Start(ctx context.Context, r StartRequest, observe func(A
 	// Launch parameters alone are not evidence of its effective settings.
 	observe(AdapterEvent{HarnessModel: thread.Model, HarnessEffort: thread.Effort})
 	if err := cp.startTurn(op, r); err != nil {
-		return fail(errors.New("Codex turn start failed"))
+		return fail(modelStartError("Codex turn start failed", err))
 	}
 	observe(AdapterEvent{Kind: "turn", TurnCountDelta: 1})
 	return cp, nil
 }
+
+// thread/start's workspace sandbox does not bind an immutable inherited
+// MCP/hooks ceiling. Keep routine starts blocked before account probes and
+// app-server startup; manual operation and harmless verification are separate.
+func (*CodexAdapter) RoutineToolsSupported(agentsetup.RoutineGrant) bool { return false }
 
 // PiAdapter speaks Pi's JSONL RPC and verifies the effective state before
 // sending the first prompt or any steer.
@@ -309,7 +348,10 @@ type PiAdapter struct {
 	Nodes      map[string]piprobe.Node
 	probeMu    sync.Mutex
 	probes     map[string]piProbeResult
-	probeLocks map[string]*sync.Mutex
+	probeLocks map[string]chan struct{}
+	// In a supervised daemon only the durable capacity scheduler owns /key.
+	// Health and launch qualification inspect the local profile and launcher.
+	capacityManaged bool
 }
 
 type piProbeResult struct {
@@ -475,6 +517,7 @@ func (a *PiAdapter) Start(ctx context.Context, r StartRequest, observe func(Adap
 		scope: piHeldQueue{TenantID: r.TenantID, PrincipalID: r.PrincipalID, RunID: r.Run.ID, Generation: r.Generation}}
 	usage := &piUsageTracker{}
 	p.setOnEvent(func(raw json.RawMessage) {
+		p.observeChat(Pi, raw)
 		if ev, ok := usage.event(raw); ok {
 			observe(ev)
 		}
@@ -520,10 +563,11 @@ func (*CursorAdapter) Name() string { return Cursor }
 
 type cursorProcess struct {
 	*wireProcess
-	promptID    string
-	done        chan struct{}
-	doneOnce    sync.Once
-	terminalErr error
+	conversation *acpProcess // Persistent chat reuses the shared ACP turn lifecycle.
+	promptID     string
+	done         chan struct{}
+	doneOnce     sync.Once
+	terminalErr  error
 }
 
 func (p *cursorProcess) finish(err error) {
@@ -531,6 +575,9 @@ func (p *cursorProcess) finish(err error) {
 }
 
 func (p *cursorProcess) Wait() (err error) {
+	if p.conversation != nil {
+		return p.conversation.Wait()
+	}
 	defer func() { err = errors.Join(err, p.finishReader()) }()
 	select {
 	case <-p.done:
@@ -544,6 +591,9 @@ func (p *cursorProcess) Wait() (err error) {
 }
 
 func (p *cursorProcess) Control(ctx context.Context, op, text string) error {
+	if p.conversation != nil {
+		return p.conversation.Control(ctx, op, text)
+	}
 	if op != "interrupt" {
 		return ErrUnsupported
 	}
@@ -552,7 +602,7 @@ func (p *cursorProcess) Control(ctx context.Context, op, text string) error {
 		return ErrNotOwned
 	default:
 	}
-	if err := p.send(map[string]any{"jsonrpc": "2.0", "method": "session/cancel", "params": map[string]string{"sessionId": p.sessionID}}); err != nil {
+	if err := p.sendContext(ctx, map[string]any{"jsonrpc": "2.0", "method": "session/cancel", "params": map[string]string{"sessionId": p.sessionID}}); err != nil {
 		return err
 	}
 	select {
@@ -591,9 +641,16 @@ func (a *CursorAdapter) Start(ctx context.Context, r StartRequest, observe func(
 	}
 	p.limitVendor = Cursor
 	cp := &cursorProcess{wireProcess: p, done: make(chan struct{})}
+	if r.InboxEnabled && r.Run.Purpose != VerificationPurpose && !r.Run.ReadOnlyReview {
+		cp.conversation = &acpProcess{wireProcess: p, harness: Cursor, model: r.Profile.Model, persistent: true, done: make(chan struct{}), idleTimeout: 10 * time.Minute}
+	}
 	var costMicros int64
 	usageSeen := false
 	p.setOnEvent(func(raw json.RawMessage) {
+		if cp.conversation != nil {
+			cp.conversation.event(raw)
+			return
+		}
 		var frame struct {
 			ID     json.RawMessage `json:"id"`
 			Method string          `json:"method"`
@@ -634,11 +691,16 @@ func (a *CursorAdapter) Start(ctx context.Context, r StartRequest, observe func(
 							OutputTokensDelta: usageCount(report.OutputTokens), CachedInputTokensDelta: usageCount(report.CachedInputTokens), ReasoningTokensDelta: usageCount(report.ReasoningTokens)})
 					}
 				}
+				u := chatState("idle")
+				observe(AdapterEvent{Chat: &u})
 				cp.finish(nil)
 			}
 			return
 		}
 		method := frame.Method
+		if method != "" {
+			p.observeChat(Cursor, raw)
+		}
 		if method == "session/update" && frame.Params.SessionID == p.sessionID &&
 			frame.Params.Update.SessionUpdate == "usage_update" && frame.Params.Update.Cost != nil &&
 			frame.Params.Update.Cost.Currency == "USD" {
@@ -647,7 +709,7 @@ func (a *CursorAdapter) Start(ctx context.Context, r StartRequest, observe func(
 					observe(AdapterEvent{Kind: "usage", CostMicrosDelta: delta})
 				}
 			}
-		} else if method == "session/request_permission" {
+		} else if method == "session/request_permission" && frame.Params.SessionID == p.sessionID {
 			cp.finish(errors.New("Cursor ACP decision requires local operator"))
 			go func() {
 				ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
@@ -689,12 +751,28 @@ func (a *CursorAdapter) Start(ctx context.Context, r StartRequest, observe func(
 	p.eventMu.Lock()
 	p.sessionID = session.SessionID
 	p.eventMu.Unlock()
+	if cp.conversation != nil {
+		cp.conversation.mu.Lock()
+		_, err = cp.conversation.promptLocked(op, r.Prompt)
+		cp.conversation.mu.Unlock()
+		if err != nil {
+			return fail(err)
+		}
+		return cp, nil
+	}
+	p.eventMu.Lock()
 	cp.promptID = strconv.FormatInt(p.next.Add(1), 10)
 	id, _ := strconv.ParseInt(cp.promptID, 10, 64)
-	if err := p.send(map[string]any{"jsonrpc": "2.0", "id": id, "method": "session/prompt", "params": map[string]any{"sessionId": p.sessionID, "prompt": []map[string]string{{"type": "text", "text": r.Prompt}}}}); err != nil {
+	err = p.sendContext(op, map[string]any{"jsonrpc": "2.0", "id": id, "method": "session/prompt", "params": map[string]any{"sessionId": p.sessionID, "prompt": []map[string]string{{"type": "text", "text": r.Prompt}}}})
+	if err == nil {
+		observe(AdapterEvent{Kind: "turn", TurnCountDelta: 1})
+		u := chatState("running")
+		observe(AdapterEvent{Chat: &u})
+	}
+	p.eventMu.Unlock()
+	if err != nil {
 		return fail(err)
 	}
-	observe(AdapterEvent{Kind: "turn", TurnCountDelta: 1})
 	return cp, nil
 }
 
@@ -763,6 +841,8 @@ func (a *ClaudeAdapter) resolved(workspace string) (*ClaudeAdapter, error) {
 }
 
 type claudeProcess struct {
+	native        *NativeLeadSpec
+	serviceTier   string
 	answerMu      sync.Mutex
 	answer        string
 	managedPolicy bool
@@ -789,14 +869,26 @@ func (p *claudeProcess) Wait() error {
 	return err
 }
 func (p *claudeProcess) Control(ctx context.Context, op, text string) error {
-	ctx, cancel := operationContext(ctx)
-	defer cancel()
-	if op != "steer" && op != "inbox" && op != "interrupt" && op != "stop" && op != "model" && op != "effort" {
-		return ErrUnsupported
-	}
 	correlation, err := randomID()
 	if err != nil {
 		return err
+	}
+	return p.controlCorrelated(ctx, op, text, correlation)
+}
+
+func (p *claudeProcess) controlCorrelated(ctx context.Context, op, text, correlation string) error {
+	ctx, cancel := operationContext(ctx)
+	defer cancel()
+	if op != "steer" && op != "inbox" && op != "interrupt" && op != "stop" && op != "model" && op != "effort" && op != "tier" {
+		return ErrUnsupported
+	}
+	if p.native != nil {
+		if op != "inbox" && op != "interrupt" && op != "stop" {
+			return ErrUnsupported
+		}
+		if err := p.native.check(ctx); err != nil {
+			return err
+		}
 	}
 	ch := make(chan bool, 1)
 	p.controlMu.Lock()
@@ -844,6 +936,10 @@ func (a *ClaudeAdapter) Start(ctx context.Context, r StartRequest, observe func(
 	if err := validExecutionMode(r.Run, a); err != nil {
 		return nil, err
 	}
+	return a.startBridge(ctx, r, observe, nil)
+}
+
+func (a *ClaudeAdapter) startBridge(ctx context.Context, r StartRequest, observe func(AdapterEvent), native *NativeLeadSpec) (Process, error) {
 
 	// Resolve once for this start, then use only the checked physical paths in
 	// the probe, sanitized PATH and child arguments. The saved links stay intact.
@@ -851,7 +947,7 @@ func (a *ClaudeAdapter) Start(ctx context.Context, r StartRequest, observe func(
 	if err != nil {
 		return nil, err
 	}
-	if !resolved.probeResolved(ctx, r.AccountKey).OK {
+	if !resolved.probeClaudeProfile(ctx, r.AccountKey, native != nil).OK {
 		return nil, errors.New("Claude account probe unavailable")
 	}
 	home, err := localHome(a.Homes, r.AccountKey)
@@ -881,11 +977,21 @@ func (a *ClaudeAdapter) Start(ctx context.Context, r StartRequest, observe func(
 			return nil, e
 		}
 	}
-	p, err := launchWire(resolved.NodePath, []string{filepath.Join(dir, "bridge.mjs"), resolved.SDKPath, resolved.ClaudePath, r.Workspace}, r.Workspace, claudeEnvironment(home, resolved.NodePath, resolved.ClaudePath), "bridge", observe)
+	environment := claudeEnvironment(home, resolved.NodePath, resolved.ClaudePath)
+	if native != nil {
+		environment, err = nativeClaudeEnvironment(home, resolved.NodePath, resolved.ClaudePath)
+		if err != nil {
+			return nil, err
+		}
+		if err := native.check(ctx); err != nil {
+			return nil, err
+		}
+	}
+	p, err := launchWire(resolved.NodePath, []string{filepath.Join(dir, "bridge.mjs"), resolved.SDKPath, resolved.ClaudePath, r.Workspace}, r.Workspace, environment, "bridge", observe)
 	if err != nil {
 		return nil, err
 	}
-	cp := &claudeProcess{wireProcess: p, assetDir: dir, ready: make(chan error, 1), controls: map[string]chan bool{}, managedPolicy: r.ManagedPolicy}
+	cp := &claudeProcess{wireProcess: p, native: native, assetDir: dir, ready: make(chan error, 1), controls: map[string]chan bool{}, managedPolicy: r.ManagedPolicy}
 	for _, capability := range r.Capabilities {
 		cp.steerEnabled = cp.steerEnabled || capability == "steer"
 	}
@@ -902,6 +1008,7 @@ func (a *ClaudeAdapter) Start(ctx context.Context, r StartRequest, observe func(
 			EffectiveModel  string             `json:"effective_model"`
 			EffectiveEffort string             `json:"effective_effort"`
 			ModelEvidence   string             `json:"model_evidence_status"`
+			ServiceTier     string             `json:"service_tier"`
 			InputTokens     int64              `json:"input_tokens_total"`
 			OutputTokens    int64              `json:"output_tokens_total"`
 			CachedTokens    *int64             `json:"cached_input_tokens_total"`
@@ -910,6 +1017,19 @@ func (a *ClaudeAdapter) Start(ctx context.Context, r StartRequest, observe func(
 		}
 		if json.Unmarshal(raw, &frame) != nil {
 			return
+		}
+		if native == nil {
+			p.observeChat(Claude, raw)
+		} else {
+			updates, known := normalizeChat(Claude, raw, "", "")
+			if !known {
+				p.chatDropped.Add(1)
+			}
+			for _, update := range updates {
+				if update.valid() {
+					observe(AdapterEvent{Chat: &update, InputID: frame.CorrelationID})
+				}
+			}
 		}
 		switch frame.Kind {
 		case "review_result":
@@ -976,13 +1096,29 @@ func (a *ClaudeAdapter) Start(ctx context.Context, r StartRequest, observe func(
 				}
 			}
 		case "session_started":
+			if native != nil {
+				var init struct {
+					SessionID string `json:"harness_session_id"`
+				}
+				if json.Unmarshal(raw, &init) != nil || !uuidPattern.MatchString(init.SessionID) || native.Resume != "" && init.SessionID != native.Resume {
+					select {
+					case cp.ready <- ErrScope:
+					default:
+					}
+					return
+				}
+				observe(AdapterEvent{VendorSessionID: init.SessionID})
+			}
 			observe(AdapterEvent{Kind: "status", EffectiveModel: frame.EffectiveModel, ModelEvidence: frame.ModelEvidence, HarnessModel: frame.EffectiveModel})
 			select {
 			case cp.ready <- nil:
 			default:
 			}
 		case "settings_changed":
-			observe(AdapterEvent{HarnessModel: frame.EffectiveModel, HarnessEffort: frame.EffectiveEffort})
+			if servicetier.Valid(frame.ServiceTier) {
+				cp.serviceTier = frame.ServiceTier
+			}
+			observe(AdapterEvent{HarnessModel: frame.EffectiveModel, HarnessEffort: frame.EffectiveEffort, HarnessTier: frame.ServiceTier})
 		case "budget_exhausted":
 			if frame.Reason == "token_budget_exhausted" || frame.Reason == "turn_budget_exhausted" {
 				observe(AdapterEvent{BudgetExhausted: frame.Reason})
@@ -1009,6 +1145,10 @@ func (a *ClaudeAdapter) Start(ctx context.Context, r StartRequest, observe func(
 			reports := claudeModelReports(frame.Models)
 			for i := range reports {
 				report := reports[i]
+				report.ServiceTier = cp.serviceTier
+				if report.ServiceTier == "" {
+					report.ServiceTier = "default"
+				}
 				observe(AdapterEvent{SessionUsage: &report})
 			}
 		case "tool_started":
@@ -1022,17 +1162,38 @@ func (a *ClaudeAdapter) Start(ctx context.Context, r StartRequest, observe func(
 			ch := cp.controls[frame.CorrelationID]
 			cp.controlMu.Unlock()
 			if ch != nil {
-				ch <- frame.Kind == "control_applied"
+				select {
+				case ch <- frame.Kind == "control_applied":
+				default:
+				}
 			}
 		}
 	})
-	if err := p.send(map[string]any{"op": "start", "prompt": r.Prompt, "model": r.Profile.Model, "effort": r.Profile.Effort, "correlation_id": "initial", "tools": r.Tools, "purpose": r.Run.Purpose, "read_only_review": r.Run.ReadOnlyReview, "rules": r.Rules, "max_turns": r.MaxTurns, "max_tokens": r.MaxTokens, "capabilities": append([]string{}, r.Capabilities...)}); err != nil {
-		return p.failStart(err)
-	}
 	op, cancel := operationContext(ctx)
 	defer cancel()
+	tier := r.ServiceTier
+	if tier == "" {
+		tier = "default"
+	}
+	if !servicetier.Valid(tier) {
+		return p.failStart(errors.New("invalid serving tier"))
+	}
+	frame := map[string]any{"op": "start", "service_tier": tier, "prompt": r.Prompt, "model": r.Profile.Model, "effort": r.Profile.Effort, "correlation_id": "initial", "tools": r.Tools, "purpose": r.Run.Purpose, "read_only_review": r.Run.ReadOnlyReview, "rules": r.Rules, "max_turns": r.MaxTurns, "max_tokens": r.MaxTokens, "capabilities": append([]string{}, r.Capabilities...)}
+	if native != nil {
+		frame["profile"] = "native"
+		frame["native_grant"] = native.bridgeGrant()
+		if native.Resume != "" {
+			frame["resume"] = native.Resume
+		}
+	}
+	if err := p.sendContext(op, frame); err != nil {
+		return p.failStart(err)
+	}
 	select {
-	case <-cp.ready:
+	case readyErr := <-cp.ready:
+		if readyErr != nil {
+			return p.failStart(readyErr)
+		}
 		started = true
 		if r.Run.ReadOnlyReview {
 			return &claudeReviewProcess{cp}, nil

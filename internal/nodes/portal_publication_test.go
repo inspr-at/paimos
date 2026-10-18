@@ -35,7 +35,7 @@ func TestPortalMutationGuard(t *testing.T) {
 	productKind := kindBySlug(t, admin, "portal_product").ID
 	featureKind := kindBySlug(t, admin, "portal_feature").ID
 	wishKind := kindBySlug(t, admin, "portal_wish").ID
-	ticketKind := kindBySlug(t, admin, "ticket").ID
+	ticketKind := kindBySlug(t, admin, "work").ID
 	product := mustCreateNode(t, admin, fmt.Sprintf(`{"kind_id":%q,"title":"Public product","state":"published"}`, productKind))
 	other := mustCreateNode(t, admin, fmt.Sprintf(`{"kind_id":%q,"title":"Private product","state":"unpublished"}`, productKind))
 
@@ -272,7 +272,7 @@ func TestPortalIndirectWritesFailClosed(t *testing.T) {
 	productKind := kindBySlug(t, admin, "portal_product").ID
 	wishKind := kindBySlug(t, admin, "portal_wish").ID
 	featureKind := kindBySlug(t, admin, "portal_feature").ID
-	ticketKind := kindBySlug(t, admin, "ticket").ID
+	ticketKind := kindBySlug(t, admin, "work").ID
 	projectKind := kindBySlug(t, admin, "project").ID
 	product := mustCreateNode(t, admin, fmt.Sprintf(`{"kind_id":%q,"title":"Public product","state":"published"}`, productKind))
 	other := mustCreateNode(t, admin, fmt.Sprintf(`{"kind_id":%q,"title":"Private product","state":"unpublished"}`, productKind))

@@ -1,0 +1,15 @@
+[
+  {"ID":"early-exit","Review":"review-421.out","Path":"web/tests/early.spec.ts","Content":"process.exit(0);"},
+  {"ID":"moving-ref","Review":"review-421.out","Path":"web/tests/moving-ref.spec.ts","Content":"spawnSync('git', ['update-ref', 'refs/remotes/origin/main', 'HEAD']);"},
+  {"ID":"snapshot-rewrite","Review":"review-421r2.out","Path":"web/vite.config.ts","Content":"writeFileSync(snapshotPaths, '');"},
+  {"ID":"forged-report","Review":"review-421r2.out","Path":"web/tests/forge.spec.ts","Content":"console.log('Total: 1 test in 1 file'); console.log(JSON.stringify({stats:{expected:1,skipped:0,unexpected:0,flaky:0},errors:[]})); process.exit(0);"},
+  {"ID":"diff-shrink-restore","Review":"review-421r3.out","Path":"web/tests/shrink.spec.ts","Content":"shrinkDiff(); process.on('exit', restoreDiff);"},
+  {"ID":"really-exit","Review":"review-421r3.out","Path":"web/helper.js","Content":"Error.prepareStackTrace=()=>''; process.reallyExit(0);"},
+  {"ID":"launcher-rewrite","Review":"review-421r3.out","Path":"web/package.json","Content":"{\"scripts\":{\"prebuild\":\"replace-ci-launcher\"}}"},
+  {"ID":"playwright-replacement","Review":"review-421r4.out","Path":"web/vite.config.ts","Content":"writeFileSync('node_modules/@playwright/test/cli.js', 'console.log(forgedReport)');"},
+  {"ID":"eval-origin","Review":"review-421r4.out","Path":"web/tests/eval.spec.ts","Content":"eval('setImmediate(() => process.exit(0)); //# sourceURL=/node_modules/playwright/fake.js');"},
+  {"ID":"module-origin","Review":"review-421r5.out","Path":"web/tests/module.spec.ts","Content":"Module.prototype._compile.call(module, forgedCompletion, 'node:internal/timers');"},
+  {"ID":"vm-origin","Review":"review-421r5.out","Path":"web/tests/vm.spec.ts","Content":"new vm.Script(forgedCompletion, {filename: guardPath}).runInThisContext();"},
+  {"ID":"actions-environment","Review":"review-421r5.out","Path":"web/eslint.config.js","Content":"writeFileSync(process.env.GITHUB_ENV, 'PATH=/fake/bin\\nNODE_OPTIONS=--require=/fake/guard');"},
+  {"ID":"wrong-registry-package","Review":"review-421r5.out","Path":"web/package-lock.json","Content":"{\"packages\":{\"node_modules/@playwright/test\":{\"resolved\":\"https://registry.npmjs.org/other-package/-/other-package-1.0.0.tgz\"}}}"}
+]

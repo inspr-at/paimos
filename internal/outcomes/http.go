@@ -5,6 +5,7 @@ package outcomes
 import (
 	"bytes"
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"log/slog"
@@ -18,6 +19,7 @@ import (
 
 	"github.com/inspr-at/paimos/internal/authz"
 	"github.com/inspr-at/paimos/internal/db"
+	"github.com/inspr-at/paimos/internal/escalation"
 	"github.com/inspr-at/paimos/internal/httpapi"
 	"github.com/inspr-at/paimos/internal/tenant"
 )
@@ -33,7 +35,9 @@ func New(pool *pgxpool.Pool) *Module { return &Module{pool: pool} }
 // Mount registers GET and POST /api/outcomes.
 func (m *Module) Mount(mux *http.ServeMux) {
 	mux.HandleFunc("GET /api/outcomes", m.list)
+	mux.HandleFunc("GET /api/outcomes/measurement", m.measurement)
 	mux.HandleFunc("POST /api/outcomes", m.record)
+	mux.HandleFunc("GET /api/nodes/{nodeId}/escalation", m.escalationState)
 }
 
 type outcome struct {
@@ -96,13 +100,28 @@ func (m *Module) list(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, invalid("session_id must be a UUID"))
 		return
 	}
+	outcomeID := query.Get("outcome_id")
+	if query.Has("outcome_id") && !validUUID(outcomeID) {
+		writeErr(w, invalid("outcome_id must be a UUID"))
+		return
+	}
+	from, to, err := outcomeRange(query.Get("from"), query.Get("to"), query.Has("from") || query.Has("to"))
+	if err != nil {
+		writeErr(w, err)
+		return
+	}
+	before, beforeID, err := outcomeCursor(query.Get("cursor"), query.Has("cursor"))
+	if err != nil {
+		writeErr(w, err)
+		return
+	}
 	limit, err := limitOf(query.Get("limit"), query.Has("limit"))
 	if err != nil {
 		writeErr(w, err)
 		return
 	}
-	if ticket == "" && session == "" && rules == "" {
-		writeErr(w, invalid("filter by a ticket, session or rules version"))
+	if ticket == "" && session == "" && rules == "" && from == nil {
+		writeErr(w, invalid("filter by a ticket, session, rules version or from/to range"))
 		return
 	}
 	var items []outcome
@@ -125,9 +144,21 @@ func (m *Module) list(w http.ResponseWriter, r *http.Request) {
 		}
 		where := []string{"TRUE"}
 		args := []any{}
+		if from != nil {
+			args = append(args, *from, *to)
+			where = append(where, "o.recorded_at >= $1::timestamptz AND o.recorded_at < $2::timestamptz")
+		}
+		if before != nil {
+			args = append(args, *before, beforeID)
+			where = append(where, "(o.recorded_at, o.id) < ($"+itoa(len(args)-1)+"::timestamptz, $"+itoa(len(args))+"::uuid)")
+		}
 		if ticketID != "" {
 			args = append(args, ticketID)
 			where = append(where, "o.ticket_node_id = $"+itoa(len(args))+"::uuid")
+		}
+		if outcomeID != "" {
+			args = append(args, outcomeID)
+			where = append(where, "o.id = $"+itoa(len(args))+"::uuid")
 		}
 		if session != "" {
 			args = append(args, strings.ToLower(session))
@@ -138,7 +169,7 @@ func (m *Module) list(w http.ResponseWriter, r *http.Request) {
 			where = append(where, "o.rules_version = $"+itoa(len(args)))
 		}
 		if !check("outcome.read", "") {
-			allowed, err := readableOutcomeProjects(r.Context(), tx, where, args, check)
+			allowed, err := authz.GrantedProjectIDsTx(r.Context(), tx, p, "outcome.read")
 			if err != nil {
 				return err
 			}
@@ -149,7 +180,7 @@ func (m *Module) list(w http.ResponseWriter, r *http.Request) {
 			args = append(args, allowed)
 			where = append(where, "o.project_id = ANY($"+itoa(len(args))+"::uuid[])")
 		}
-		args = append(args, limit)
+		args = append(args, limit+1)
 		rows, err := tx.Query(r.Context(), outcomeSelect+`WHERE `+strings.Join(where, " AND ")+
 			` ORDER BY o.recorded_at DESC, o.id DESC LIMIT $`+itoa(len(args)), args...)
 		if err != nil {
@@ -171,28 +202,45 @@ func (m *Module) list(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	w.Header().Set("Cache-Control", "no-store")
-	httpapi.WriteJSON(w, http.StatusOK, map[string]any{"outcomes": items})
+	var next *string
+	if len(items) > limit {
+		items = items[:limit]
+		last := items[limit-1]
+		cursor := base64.RawURLEncoding.EncodeToString([]byte(last.RecordedAt.Format(time.RFC3339Nano) + "|" + last.ID))
+		next = &cursor
+	}
+	httpapi.WriteJSON(w, http.StatusOK, map[string]any{"outcomes": items, "next_cursor": next})
 }
 
-// readableOutcomeProjects keeps projects in this filter where the caller holds
-// outcome.read. A workspace grant is decided by the caller before this query.
-func readableOutcomeProjects(ctx context.Context, tx pgx.Tx, where []string, args []any, check authz.ProjectCheck) ([]string, error) {
-	rows, err := tx.Query(ctx, `SELECT DISTINCT o.project_id::text FROM outcome_events o WHERE `+strings.Join(where, " AND "), args...)
+func outcomeRange(fromRaw, toRaw string, present bool) (*time.Time, *time.Time, error) {
+	if !present {
+		return nil, nil, nil
+	}
+	from, fromErr := time.Parse(time.RFC3339Nano, fromRaw)
+	to, toErr := time.Parse(time.RFC3339Nano, toRaw)
+	if fromErr != nil || toErr != nil || !from.Before(to) || to.Sub(from) > 366*24*time.Hour {
+		return nil, nil, invalid("from and to must define an increasing RFC3339 range of at most 366 days")
+	}
+	return &from, &to, nil
+}
+
+func outcomeCursor(raw string, present bool) (*time.Time, string, error) {
+	if !present {
+		return nil, "", nil
+	}
+	if len(raw) > 256 {
+		return nil, "", invalid("invalid outcome cursor")
+	}
+	decoded, err := base64.RawURLEncoding.DecodeString(raw)
+	parts := strings.Split(string(decoded), "|")
+	if err != nil || len(parts) != 2 || !validUUID(parts[1]) {
+		return nil, "", invalid("invalid outcome cursor")
+	}
+	at, err := time.Parse(time.RFC3339Nano, parts[0])
 	if err != nil {
-		return nil, err
+		return nil, "", invalid("invalid outcome cursor")
 	}
-	defer rows.Close()
-	allowed := []string{}
-	for rows.Next() {
-		var id string
-		if err := rows.Scan(&id); err != nil {
-			return nil, err
-		}
-		if check("outcome.read", id) {
-			allowed = append(allowed, id)
-		}
-	}
-	return allowed, rows.Err()
+	return &at, parts[1], nil
 }
 
 func (m *Module) record(w http.ResponseWriter, r *http.Request) {
@@ -240,10 +288,16 @@ func (m *Module) record(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, err)
 		return
 	}
+	bounded, cancel := context.WithTimeout(r.Context(), 15*time.Second)
+	defer cancel()
+	r = r.WithContext(bounded)
 	ctx := authz.BindPool(r.Context(), m.pool)
 	var item outcome
 	created := false
 	err = db.InTenant(ctx, m.pool, p.TenantID, func(tx pgx.Tx) error {
+		if err := db.LockWorkTreeTx(r.Context(), tx); err != nil {
+			return err
+		}
 		node, err := resolveTicket(r.Context(), tx, ticket)
 		if err != nil {
 			return err
@@ -295,7 +349,13 @@ func (m *Module) record(w http.ResponseWriter, r *http.Request) {
 			created = true
 		}
 		item, err = scanOutcome(tx.QueryRow(r.Context(), outcomeSelect+`WHERE o.id=$1::uuid`, id))
-		return err
+		if err != nil {
+			return err
+		}
+		if created {
+			return escalation.ObserveTx(r.Context(), tx, p, node.id, node.projectID, id, kind, payload)
+		}
+		return nil
 	})
 	if err != nil {
 		writeErr(w, err)
@@ -344,8 +404,8 @@ func resolveTicket(ctx context.Context, tx pgx.Tx, ref string) (ticketRef, error
 	if len(found) > 1 {
 		return ticketRef{}, invalid("ticket is ambiguous")
 	}
-	if slug != "ticket" {
-		return ticketRef{}, invalid("outcomes are recorded on tickets")
+	if slug != "ticket" && slug != "work" {
+		return ticketRef{}, invalid("outcomes are recorded on work items or legacy tickets")
 	}
 	if found[0].projectID == "" {
 		return ticketRef{}, invalid("ticket has no project")
@@ -354,8 +414,7 @@ func resolveTicket(ctx context.Context, tx pgx.Tx, ref string) (ticketRef, error
 }
 
 func readRecord(w http.ResponseWriter, r *http.Request) (recordBody, error) {
-	r.Body = http.MaxBytesReader(w, r.Body, 8192)
-	dec := json.NewDecoder(r.Body)
+	dec := httpapi.NewRequestDecoder(w, r, 8192)
 	dec.DisallowUnknownFields()
 	var body recordBody
 	if err := dec.Decode(&body); err != nil {
@@ -489,3 +548,42 @@ func limitOf(raw string, present bool) (int, error) {
 }
 
 func itoa(n int) string { return strconv.Itoa(n) }
+
+func (m *Module) escalationState(w http.ResponseWriter, r *http.Request) {
+	ctx, cancel := context.WithTimeout(r.Context(), 10*time.Second)
+	defer cancel()
+	r = r.WithContext(ctx)
+	p, ok := principal(w, r)
+	if !ok {
+		return
+	}
+	id := r.PathValue("nodeId")
+	if !validUUID(id) {
+		writeErr(w, invalid("nodeId must be a UUID"))
+		return
+	}
+	var out any
+	err := db.InTenant(r.Context(), m.pool, p.TenantID, func(tx pgx.Tx) error {
+		node, err := resolveTicket(r.Context(), tx, id)
+		if err != nil {
+			return err
+		}
+		if err := authz.RequireTx(r.Context(), tx, p, "outcome.read", authz.Scope{ProjectID: node.projectID}); err != nil {
+			return err
+		}
+		state, err := escalation.LoadTx(r.Context(), tx, id)
+		if err != nil {
+			return err
+		}
+		if state != nil {
+			out = state.Public()
+		}
+		return nil
+	})
+	if err != nil {
+		writeErr(w, err)
+		return
+	}
+	w.Header().Set("Cache-Control", "no-store")
+	httpapi.WriteJSON(w, 200, map[string]any{"escalation": out})
+}

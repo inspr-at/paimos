@@ -37,14 +37,18 @@ for (const theme of ['light', 'dark'] as const) {
 
 test('events glint once, restart on new evidence, and never replay on mount or state changes', async ({ page }) => {
   await gallery(page)
+  // Hold the event animation while checking its colour and restart.
+  const freeze = await page.addStyleTag({ content: '.glint { animation-play-state: paused !important; }' })
   const working = page.locator('[data-variant="3"][data-state="working"] [data-size="26"] > svg')
   await expect(working.locator('.glint')).toHaveCount(0)
   await page.getByRole('button', { name: 'Send event', exact: true }).click()
-  await expect(working.locator('.glint')).toHaveCSS('fill', 'rgb(201, 162, 74)')
+  const ink = await working.evaluate(el => { const probe = document.createElement('span'); probe.style.color = 'var(--secondary-line)'; el.append(probe); const color = getComputedStyle(probe).color; probe.remove(); return color })
+  await expect(working.locator('.glint')).toHaveCSS('fill', ink)
   const first = await working.locator('.glint').elementHandle()
   await page.getByRole('button', { name: 'Send event', exact: true }).click()
   expect(await first!.evaluate(node => node.isConnected)).toBe(false)
   await expect(page.locator('.stale .glint')).toHaveCount(0)
+  await freeze.evaluate(el => el.remove())
   await expect(working.locator('.glint')).toHaveCount(0, { timeout: 1500 })
   await page.getByRole('button', { name: 'Reset counter', exact: true }).click()
   await expect(working.locator('.glint')).toHaveCount(0)
@@ -87,36 +91,4 @@ test('reduced motion has no loops and event feedback changes only opacity', asyn
   await expect(glint).toHaveCSS('animation-duration', '0.6s')
   expect(await page.locator('.robot-4 .pleased').first().evaluate(node => getComputedStyle(node).opacity)).toBe('0')
   await expect(glint).toHaveCount(0, { timeout: 1500 })
-})
-
-test('working motion and event glint visual beats', async ({ page }) => {
-  await page.emulateMedia({ reducedMotion: 'no-preference' })
-  await gallery(page)
-  const directory = resolve('..', '.agent-shots')
-  await mkdir(directory, { recursive: true })
-  // Freeze actual CSS animations at two points to inspect hand alignment and
-  // glances without timing-dependent captures on a busy shared workstation.
-  for (const time of [0, 450]) {
-    await page.locator(newRobots).evaluateAll((nodes, at) => {
-      for (const node of nodes) for (const animation of node.getAnimations({ subtree: true })) {
-        animation.pause()
-        const delay = Number(animation.effect?.getTiming().delay ?? 0)
-        animation.currentTime = at - delay
-      }
-    }, time)
-    await page.screenshot({ path: resolve(directory, `iv2-motion-${time}.png`), fullPage: true })
-  }
-  for (const theme of ['Light', 'Dark']) {
-    await page.getByRole('button', { name: theme, exact: true }).click()
-    await page.getByRole('button', { name: 'Send event', exact: true }).click()
-    await page.locator(newRobots).evaluateAll(nodes => {
-      for (const node of nodes) for (const animation of node.getAnimations({ subtree: true })) {
-        if (animation.effect?.getTiming().iterations === 1) {
-          animation.pause()
-          animation.currentTime = 180
-        }
-      }
-    })
-    await page.screenshot({ path: resolve(directory, `iv2-event-${theme.toLowerCase()}.png`), fullPage: true })
-  }
 })

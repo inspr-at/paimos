@@ -135,7 +135,7 @@ func decode(r *http.Request, v any) error {
 	if !strings.HasPrefix(r.Header.Get("Content-Type"), "application/json") {
 		return errors.New("JSON required")
 	}
-	d := json.NewDecoder(io.LimitReader(r.Body, 8193))
+	d := httpapi.NewRequestDecoder(nil, r, 8193)
 	d.DisallowUnknownFields()
 	if err := d.Decode(v); err != nil {
 		return err

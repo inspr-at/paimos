@@ -62,15 +62,15 @@ watch(() => props.state, state => { if (state !== 'working') glint.value = 0 })
   color: var(--signal); overflow: visible;
 }
 .nib, .engraving, .ink-track, .ink-line { fill: none; stroke: currentColor; stroke-width: calc(1.5px * var(--art-stroke, 1)); stroke-linecap: round; stroke-linejoin: round; }
-.nib { fill: color-mix(in srgb, currentColor 7%, var(--surface-raised, #fffefa)); }
+.nib { fill: color-mix(in srgb, currentColor 7%, var(--surface-raised)); }
 .nib-shade { fill: currentColor; opacity: .13; }
 .breather { fill: currentColor; }
 .ink-track { opacity: .18; }
 .ink-line { stroke-dasharray: 100; }
 .pen { transform-origin: 7.5px 22.5px; }
-.clock { fill: var(--surface-raised, #fffefa); stroke: currentColor; stroke-width: 1.5; stroke-linecap: round; stroke-linejoin: round; }
+.clock { fill: var(--surface-raised); stroke: currentColor; stroke-width: 1.5; stroke-linecap: round; stroke-linejoin: round; }
 .clock path { fill: none; }
-.glint { fill: #c9a24a; stroke: var(--surface-raised, #fffefa); stroke-width: .6; transform-origin: 7.5px 22.5px; animation: quill-flash .6s ease-out both; }
+.glint { fill: var(--secondary-line); stroke: var(--surface-raised); stroke-width: .6; transform-origin: 7.5px 22.5px; animation: quill-flash .6s ease-out both; }
 @media (prefers-reduced-motion: no-preference) {
   .working.lead .pen { animation: quill-write 3.6s ease-in-out infinite; animation-delay: var(--phase); }
   .working.lead .ink-line { animation: quill-ink 3.6s ease-in-out infinite; animation-delay: var(--phase); }

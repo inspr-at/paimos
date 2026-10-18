@@ -11,6 +11,43 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
+// Risk: a lead response addition changes an existing field or is not pinned,
+// leaving strict consumers unaware of an incompatible response contract.
+func TestProjectLeadReadContractAdditionIsMinor(t *testing.T) {
+	raw, err := os.ReadFile("../../api/openapi.yaml")
+	if err != nil {
+		t.Fatal(err)
+	}
+	current, err := Current(raw)
+	if err != nil {
+		t.Fatal(err)
+	}
+	now, ok := current["project-lead"]
+	if !ok || now.Version != ProjectLead {
+		t.Fatal("lead read is missing its declared contract pin")
+	}
+	var shape map[string]any
+	if err = json.Unmarshal(now.Shape, &shape); err != nil {
+		t.Fatal(err)
+	}
+	body := shape["GET /projects/{projectId}/lead 200"].(map[string]any)
+	props := body["properties"].(map[string]any)
+	for _, field := range []string{"actions", "automatic_launch_enabled"} {
+		if _, exists := props[field]; !exists || isRequired(body["required"], field) {
+			t.Fatalf("lead %s must remain an optional response addition", field)
+		}
+		delete(props, field)
+	}
+	before, err := json.Marshal(shape)
+	if err != nil {
+		t.Fatal(err)
+	}
+	bump, err := RequiredBump(Pin{Version: "project-lead/1.0", SHA256: "before-lead-actions", Shape: before}, now)
+	if err != nil || bump != "minor" {
+		t.Fatalf("lead actions: got %q, %v; want minor", bump, err)
+	}
+}
+
 // Status and heartbeat share HarnessSession. Callers that never send an estimate
 // must keep the attention-reason enum and the required payload unchanged; ETA
 // fields stay optional and eta_stale is not an attention kind.
@@ -70,7 +107,7 @@ func TestHarnessStatusAndHeartbeatContract(t *testing.T) {
 		if finished["type"] != "boolean" || !isRequired(required, "finished") {
 			t.Fatalf("%s finished must be a required response boolean", op)
 		}
-		for _, field := range []string{"eta_ready_at", "eta_live_at", "progress_pct", "eta_reported_at", "eta_stale", "controls", "has_vendor_session_ref", "warnings"} {
+		for _, field := range []string{"eta_ready_at", "eta_live_at", "progress_pct", "eta_reported_at", "eta_stale", "controls", "has_vendor_session_ref", "warnings", "pause_progress", "owner_principal_id"} {
 			if _, exists := props[field]; !exists {
 				t.Fatalf("%s missing optional %s", op, field)
 			}
@@ -78,6 +115,90 @@ func TestHarnessStatusAndHeartbeatContract(t *testing.T) {
 				t.Fatalf("%s requires %s", op, field)
 			}
 		}
+		// R10: a committed isolated receipt must remain decodable by strict
+		// reporters, including its explicit unknown-projection warning.
+		warnings, _ := props["warnings"].(map[string]any)
+		warning, _ := warnings["items"].(map[string]any)
+		warningProps, _ := warning["properties"].(map[string]any)
+		code, _ := warningProps["code"].(map[string]any)
+		if !reflect.DeepEqual(code["enum"], []any{"missing_progress", "missing_eta", "ticket_without_estimate", "projection_unavailable"}) {
+			t.Fatalf("%s warning enum rejects isolated receipts: %#v", op, code["enum"])
+		}
+	}
+}
+
+func TestPausePlanningHeartbeatFieldsStayOptional(t *testing.T) {
+	raw, err := os.ReadFile("../../api/openapi.yaml")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var doc map[string]any
+	if err := yaml.Unmarshal(raw, &doc); err != nil {
+		t.Fatal(err)
+	}
+	schema, err := child(doc, "paths", "/projects/{projectId}/harness-sessions/{sessionId}/heartbeat", "post", "requestBody", "content", "application/json", "schema")
+	if err != nil {
+		t.Fatal(err)
+	}
+	request := schema
+	if !reflect.DeepEqual(request["required"], []any{"phase", "activity_sequence"}) {
+		t.Fatal("planning report changed legacy heartbeat requirements")
+	}
+	fields := request["properties"].(map[string]any)
+	for _, field := range []string{"step", "next_point", "next_point_in_min", "finish_in_min", "finish_outcome", "interrupt", "command", "command_left_min"} {
+		if _, ok := fields[field]; !ok {
+			t.Fatalf("missing planning heartbeat field %s", field)
+		}
+	}
+	current, err := Current(raw)
+	if err != nil {
+		t.Fatal(err)
+	}
+	after := current["harness-session"]
+	var shape map[string]any
+	if err := json.Unmarshal(after.Shape, &shape); err != nil {
+		t.Fatal(err)
+	}
+	for _, value := range shape {
+		delete(value.(map[string]any)["properties"].(map[string]any), "pause_progress")
+	}
+	before, err := json.Marshal(shape)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if bump, err := RequiredBump(Pin{Version: "harness-session/2.3", SHA256: "before-planning", Shape: before}, after); err != nil || bump != "minor" {
+		t.Fatalf("optional planning snapshot classified as %s: %v", bump, err)
+	}
+}
+
+func TestHarnessPauseAndContinuationAdditionIsMinor(t *testing.T) {
+	openAPI, err := os.ReadFile("../../api/openapi.yaml")
+	if err != nil {
+		t.Fatal(err)
+	}
+	current, err := Current(openAPI)
+	if err != nil {
+		t.Fatal(err)
+	}
+	now := current["harness-session"]
+	var shape map[string]any
+	if err = json.Unmarshal(now.Shape, &shape); err != nil {
+		t.Fatal(err)
+	}
+	for op, value := range shape {
+		body := value.(map[string]any)
+		props := body["properties"].(map[string]any)
+		for _, field := range []string{"pause", "continuation"} {
+			if _, ok := props[field]; !ok || isRequired(body["required"].([]any), field) {
+				t.Fatalf("%s %s must be optional", op, field)
+			}
+			delete(props, field)
+		}
+	}
+	before, _ := json.Marshal(shape)
+	bump, err := RequiredBump(Pin{Version: "harness-session/1.9", SHA256: "before-pause", Shape: before}, now)
+	if err != nil || bump != "minor" {
+		t.Fatalf("pause addition: %s %v", bump, err)
 	}
 }
 

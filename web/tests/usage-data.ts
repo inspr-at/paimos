@@ -4,7 +4,7 @@
 // many sessions, none reported usage, but done tickets, agent time and waste
 // are known. "reported" has tokens from part of the sessions and a little API
 // spend. "empty" has no session in the range.
-import type { TokenParts, UsageDashboard, UsageGroup, UsageWork, WasteItem, WorkGroup, WorkTicket } from '../src/lib/usageFormat.ts'
+import type { AllowanceWindow, TokenParts, UsageDashboard, UsageGroup, UsageWork, WasteItem, WorkGroup, WorkTicket } from '../src/lib/usageFormat.ts'
 
 export const NOW = Date.parse('2026-09-29T12:02:00Z')
 export type UsageVariant = 'unreported' | 'reported' | 'empty'
@@ -12,6 +12,15 @@ export const DAY = 86_400_000
 const iso = (t: number) => new Date(t).toISOString()
 const minutesAgo = (m: number) => iso(NOW - m * 60_000)
 const H = 3600
+
+export function usageAllowanceWindow(): AllowanceWindow {
+  return {
+    account_id: 'account-visible', label: 'Permitted account budget', harness: 'codex', account_state: 'available',
+    window_id: 'window-visible', unit: 'requests', allowance: 10, used: 2, reserved: 1,
+    pace_model: 'unrestricted', burst_ratio: '0', starts_at: iso(NOW - DAY), ends_at: iso(NOW + DAY),
+    provisional: false, pace_cap: 10, headroom: 7, hard_remaining: 7,
+  }
+}
 
 function group(label: string, sessions: number, extra: Partial<UsageGroup> = {}): UsageGroup {
   return {
@@ -141,4 +150,3 @@ export function usageDashboard(variant: UsageVariant, days = 30): UsageDashboard
     work,
   }
 }
-

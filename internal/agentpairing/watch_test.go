@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/inspr-at/paimos/internal/agentactivity"
+	"github.com/inspr-at/paimos/internal/attachedmsg"
 	"github.com/inspr-at/paimos/internal/attachwatch"
 	"github.com/inspr-at/paimos/internal/authz"
 	"github.com/inspr-at/paimos/internal/db"
@@ -56,14 +57,21 @@ func TestAttachActivityRequiresActiveApprovalAndHonorsPolicy(t *testing.T) {
 	}
 }
 
-func watchFixture(t *testing.T) (*fixture, string, attachwatch.DeviceRequest) {
+func watchFixture(t *testing.T, messages ...*attachedmsg.Service) (*fixture, string, attachwatch.DeviceRequest) {
 	t.Helper()
-	return watchFixtureWithKey(t, "")
+	return watchFixtureWithHarness(t, "", "codex", messages...)
 }
 func watchFixtureWithKey(t *testing.T, publicKey string) (*fixture, string, attachwatch.DeviceRequest) {
 	t.Helper()
-	f := newFixture(t)
-	p := f.proposePlatformKey("darwin", "arm64", publicKey, "codex")
+	return watchFixtureWithHarness(t, publicKey, "codex")
+}
+func watchFixtureWithHarness(t *testing.T, publicKey, harness string, messages ...*attachedmsg.Service) (*fixture, string, attachwatch.DeviceRequest) {
+	t.Helper()
+	return watchFixtureFromFixture(t, newFixture(t, messages...), publicKey, harness)
+}
+func watchFixtureFromFixture(t *testing.T, f *fixture, publicKey, harness string) (*fixture, string, attachwatch.DeviceRequest) {
+	t.Helper()
+	p := f.proposePlatformKey("darwin", "arm64", publicKey, harness)
 	f.approve(p, "connect_only")
 	v := f.redeem(p)
 	project, ticket := uuid(t, f.db), uuid(t, f.db)
@@ -72,18 +80,33 @@ func watchFixtureWithKey(t *testing.T, publicKey string) (*fixture, string, atta
 		if err != nil {
 			return err
 		}
-		_, err = tx.Exec(t.Context(), `INSERT INTO nodes(tenant_id,id,kind_id,key,title,parent_id) SELECT $1,$2,id,'WATCH-2','Watch ticket',$3 FROM node_kinds WHERE slug='ticket'`, f.tenantID, ticket, project)
+		_, err = tx.Exec(t.Context(), `INSERT INTO nodes(tenant_id,id,kind_id,key,title,parent_id) SELECT $1,$2,id,'WATCH-2','Watch ticket',$3 FROM node_kinds WHERE slug='work'`, f.tenantID, ticket, project)
 		return err
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
 	in := attachwatch.DeviceRequest{Operation: "request", RequestID: uuid(t, f.db), ComputerID: *v.ComputerID, DeviceProof: p.lifecycle, Snapshot: attachwatch.Snapshot{ComputerID: *v.ComputerID, ProjectID: project, TicketID: ticket, Host: "Test workstation", Harness: "codex", Process: attachwatch.Process{PID: 123, UID: 501, Started: "fixture-start", Executable: "/usr/local/bin/codex", CWD: "/tmp/pairing-fixture/repo"}, Transcript: "/tmp/fixture/transcript.jsonl", FileID: "1:234"}}
+	in.Snapshot.Harness = harness
+	in.Snapshot.Process.Executable = "/usr/local/bin/" + harness
 	key := "aeon_" + v.RuntimePrefix + "_" + p.runtime
 	in.PollKey = nonce()
 	in.Digest = in.Snapshot.Digest()
-	f.call("POST", "/api/agent-pairing/attach", attachwatch.DeviceRequest{AttachProtocol: attachwatch.Protocol, LocalConsentProofVersion: attachwatch.LocalConsentProofVersion, Operation: "register", ComputerID: in.ComputerID, DeviceProof: p.lifecycle, PollKey: in.PollKey}, false, key, 200)
+	f.call("POST", "/api/agent-pairing/attach", attachwatch.DeviceRequest{MessageProtocol: attachedmsg.Protocol, AttachProtocol: attachwatch.Protocol, LocalConsentProofVersion: attachwatch.LocalConsentProofVersion, Operation: "register", ComputerID: in.ComputerID, DeviceProof: p.lifecycle, PollKey: in.PollKey}, false, key, 200)
 	return f, key, in
+}
+
+func siblingWatchTicket(t *testing.T, f *fixture, project string) string {
+	t.Helper()
+	id := uuid(t, f.db)
+	if err := db.InTenant(dbtest.Seed(t.Context()), f.db.App, f.tenantID, func(tx pgx.Tx) error {
+		_, err := tx.Exec(t.Context(), `INSERT INTO nodes(tenant_id,id,kind_id,key,title,parent_id)
+		 SELECT $1,$2,id,aeon_next_node_key($1,short_prefix),'Independent watch ticket',$3 FROM node_kinds WHERE slug='work'`, f.tenantID, id, project)
+		return err
+	}); err != nil {
+		t.Fatal(err)
+	}
+	return id
 }
 func requestWatch(t *testing.T, f *fixture, key string, in attachwatch.DeviceRequest) attachwatch.View {
 	t.Helper()
@@ -109,6 +132,66 @@ func activateWatch(t *testing.T, f *fixture, key string, in *attachwatch.DeviceR
 		t.Fatal("watch failed to activate")
 	}
 	return v
+}
+
+// Risk: person-approved attach activation creates a second worker outside the
+// shared store admission policy. Approval alone must not authorize parallelism.
+func TestAttachActivationRefusesOccupiedTicket(t *testing.T) {
+	f, key, in := watchFixture(t)
+	v := requestWatch(t, f, key, in)
+	in.ConsentDigest = v.ConsentDigest
+	f.call("POST", "/api/agent-pairing/attach/"+in.RequestID+"/approve", map[string]string{"request_digest": v.Digest, "consent_digest": v.ConsentDigest}, true, "", 200)
+	var agent string
+	if err := f.db.Admin.QueryRow(t.Context(), `SELECT principal_id::text FROM agent_pairing_computers WHERE id=$1`, in.ComputerID).Scan(&agent); err != nil {
+		t.Fatal(err)
+	}
+	base := "/api/projects/" + in.Snapshot.ProjectID + "/harness-sessions"
+	registration := map[string]any{"agent_principal_id": agent, "harness": "codex", "host": "Test workstation", "management_mode": "unmanaged", "role": "worker", "ticket_node_id": in.Snapshot.TicketID, "work_shape": "ship", "display_label": "direct builder", "harness_session_ref": nonce(), "worker_lease": nonce()}
+	var first map[string]any
+	decodeResult(t, f.call("POST", base, registration, true, "", 201), &first)
+	in.Operation, in.Sequence = "poll", 1
+	var refusal map[string]any
+	decodeResult(t, f.call("POST", "/api/agent-pairing/attach", in, false, key, 409), &refusal)
+	if refusal["code"] != "build_in_flight" || refusal["reason"] != "active_builder" || refusal["session_id"] != first["id"] || refusal["label"] != "direct builder" || refusal["since"] == nil {
+		t.Fatalf("attach lost the shared builder refusal: %+v", refusal)
+	}
+	var state string
+	var session *string
+	var active int
+	if err := f.db.Admin.QueryRow(t.Context(), `SELECT state,session_id::text,(SELECT count(*) FROM harness_sessions WHERE ticket_node_id=$2 AND stopped_at IS NULL AND role='worker') FROM harness_attach_requests WHERE id=$1`, in.RequestID, in.Snapshot.TicketID).Scan(&state, &session, &active); err != nil {
+		t.Fatal(err)
+	}
+	if state != "approved" || session != nil || active != 1 {
+		t.Fatalf("refused attach mutated approval or created a worker: state=%s session=%v active=%d", state, session, active)
+	}
+	stop := f.request("POST", base+"/"+first["id"].(string)+"/stop", map[string]string{"reason": "process_exited"}, false, key)
+	stop.Header.Set("X-Aeon-Worker-Lease", registration["worker_lease"].(string))
+	stopped := httptest.NewRecorder()
+	f.h.ServeHTTP(stopped, stop)
+	var denied map[string]any
+	decodeResult(t, stopped, &denied)
+	if stopped.Code != http.StatusForbidden || denied["code"] != "forbidden" || denied["error"] != "outside this computer's runtime authority" {
+		t.Fatalf("paired bearer gained control of a direct registration: status=%d body=%s", stopped.Code, stopped.Body)
+	}
+	// Establish the direct process's confirmed exit in the fixture without
+	// expanding the paired runtime's authority to control another registration.
+	if err := db.InTenant(dbtest.Seed(t.Context()), f.db.App, f.tenantID, func(tx pgx.Tx) error {
+		_, err := tx.Exec(t.Context(), `UPDATE harness_sessions SET phase='stopped',stopped_at=clock_timestamp(),stop_reason='process_exited' WHERE id=$1`, first["id"])
+		return err
+	}); err != nil {
+		t.Fatal(err)
+	}
+	// Retry the still-valid approval only after the occupying generation ended.
+	decodeResult(t, f.call("POST", "/api/agent-pairing/attach", in, false, key, 200), &v)
+	if v.State != "active" || v.SessionID == nil || *v.SessionID == first["id"] {
+		t.Fatal("freed ticket did not admit the approved attach")
+	}
+	var directRefusal map[string]any
+	registration["harness_session_ref"], registration["worker_lease"] = nonce(), nonce()
+	decodeResult(t, f.call("POST", base, registration, true, "", 409), &directRefusal)
+	if directRefusal["code"] != "build_in_flight" || directRefusal["session_id"] != *v.SessionID {
+		t.Fatal("attached worker did not occupy the shared admission slot")
+	}
 }
 func TestAttachApprovalIdentityAndLease(t *testing.T) {
 	f, key, in := watchFixture(t)
@@ -214,6 +297,8 @@ func TestAttachLiveStreamRevokesAndNeverStoresText(t *testing.T) {
 	second.ConsentDigest = ""
 	second.RequestID = uuid(t, f.db)
 	second.Snapshot.Process.PID++
+	// The privacy claim is two sessions on one principal, each on its own ticket.
+	second.Snapshot.TicketID = siblingWatchTicket(t, f, in.Snapshot.ProjectID)
 	secondView := activateWatch(t, f, key, &second)
 	if *secondView.SessionID == *v.SessionID {
 		t.Fatal("two sessions on a principal collided")
@@ -305,7 +390,10 @@ func TestAttachCannotRenewChangedSession(t *testing.T) {
 		t.Run(change, func(t *testing.T) {
 			f, key, in := watchFixture(t)
 			v := activateWatch(t, f, key, &in)
-			if _, err := f.db.Admin.Exec(t.Context(), "UPDATE harness_sessions SET "+change+" WHERE id=$1", *v.SessionID); err != nil {
+			if err := db.InTenant(dbtest.Seed(t.Context()), f.db.App, f.tenantID, func(tx pgx.Tx) error {
+				_, err := tx.Exec(t.Context(), "UPDATE harness_sessions SET "+change+" WHERE id=$1", *v.SessionID)
+				return err
+			}); err != nil {
 				t.Fatal(err)
 			}
 			in.Sequence++
@@ -426,4 +514,19 @@ func TestAttachRegisteredKeyStillRequiresSnapshotDigest(t *testing.T) {
 	f.call("POST", "/api/agent-pairing/attach", in, false, key, 409)
 	in.Digest = in.Snapshot.Digest()
 	f.call("POST", "/api/agent-pairing/attach", in, false, key, 410)
+}
+
+func TestAttachRequestEmitsOneRedactedCommittedEvent(t *testing.T) {
+	f, key, in := watchFixture(t)
+	requestWatch(t, f, key, in)
+	requestWatch(t, f, key, in) // Registration replay must not wake a new request.
+	var count int
+	var request, owner string
+	var fields int
+	if err := f.db.Admin.QueryRow(t.Context(), `SELECT count(*),min(after->>'request_id'),min(after->>'owner_id'),min((SELECT count(*) FROM jsonb_object_keys(after))) FROM events WHERE tenant_id=$1 AND type='harness.attach_requested'`, f.tenantID).Scan(&count, &request, &owner, &fields); err != nil {
+		t.Fatal(err)
+	}
+	if count != 1 || request != in.RequestID || owner != f.person || fields != 2 {
+		t.Fatalf("attach event: count=%d request=%s owner=%s fields=%d", count, request, owner, fields)
+	}
 }

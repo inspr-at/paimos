@@ -32,8 +32,7 @@ type VerifyReport struct {
 	Issues  []VerifyIssue `json:"issues"`
 }
 
-// Verify checks every blob referenced by a live or soft-deleted attachment.
-// Soft-deleted rows remain referenced because undo can restore them.
+// Verify checks the complete tenant owner inventory, including undo/history.
 func Verify(ctx context.Context, pool *pgxpool.Pool, store Store, tenantID string) (VerifyReport, error) {
 	report := VerifyReport{Issues: []VerifyIssue{}}
 	refs, err := references(ctx, pool, tenantID)
@@ -100,19 +99,9 @@ func references(ctx context.Context, pool *pgxpool.Pool, tenantID string) (map[s
 	}
 	refs := map[string]bool{}
 	err := db.InTenant(db.AllProjects(ctx, "attachment files verify and gc"), pool, tenantID, func(tx pgx.Tx) error {
-		rows, err := tx.Query(ctx, `SELECT sha256,content_type FROM attachments WHERE tenant_id=$1`, tenantID)
-		if err != nil {
-			return err
-		}
-		defer rows.Close()
-		for rows.Next() {
-			var hash, ct string
-			if err := rows.Scan(&hash, &ct); err != nil {
-				return err
-			}
-			refs[hash] = refs[hash] || strings.HasPrefix(ct, "image/")
-		}
-		return rows.Err()
+		var err error
+		refs, err = referencesTx(ctx, tx, tenantID, "")
+		return err
 	})
 	return refs, err
 }
@@ -124,8 +113,13 @@ type GCReport struct {
 }
 
 // GC examines only the selected tenant. apply=false is the dry-run default.
-// A seven-day minimum age protects in-flight uploads and failed transactions.
+// A seven-day minimum age preserves the orphan grace period. Shared lifetime
+// locks, rather than age, protect concurrent writers reusing an old digest.
 func GC(ctx context.Context, pool *pgxpool.Pool, store Store, tenantID string, apply bool) (GCReport, error) {
+	return gc(ctx, pool, store, tenantID, apply, os.Remove)
+}
+
+func gc(ctx context.Context, pool *pgxpool.Pool, store Store, tenantID string, apply bool, unlink func(string) error) (GCReport, error) {
 	report := GCReport{}
 	refs, err := references(ctx, pool, tenantID)
 	if err != nil {
@@ -148,7 +142,8 @@ func GC(ctx context.Context, pool *pgxpool.Pool, store Store, tenantID string, a
 		name := d.Name()
 		hash := strings.TrimSuffix(strings.TrimSuffix(name, ".thumb.png"), ".preview.png")
 		spool := filepath.Dir(path) == filepath.Join(base, "incoming") && strings.HasPrefix(name, "upload-")
-		if !spool && (!validHash(hash) || refs[hash]) {
+		_, referenced := refs[hash]
+		if !spool && (!validHash(hash) || referenced) {
 			return nil
 		}
 		info, err := d.Info()
@@ -165,19 +160,44 @@ func GC(ctx context.Context, pool *pgxpool.Pool, store Store, tenantID string, a
 		report.Bytes += info.Size()
 		if apply {
 			if !spool {
-				var referenced bool
+				removed := false
 				if err := db.InTenant(db.AllProjects(ctx, "attachment files verify and gc"), pool, tenantID, func(tx pgx.Tx) error {
-					return tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM attachments WHERE tenant_id=$1 AND sha256=$2)`, tenantID, hash).Scan(&referenced)
+					if err := lockBlob(ctx, tx, tenantID, hash); err != nil {
+						return err
+					}
+					current, err := referencesTx(ctx, tx, tenantID, hash)
+					if err != nil {
+						return err
+					}
+					if _, live := current[hash]; live {
+						return nil
+					}
+					// A writer may have recreated the file since discovery. Inspect
+					// age again under the lock, and hold it THROUGH the unlink.
+					latest, err := os.Lstat(path)
+					if errors.Is(err, os.ErrNotExist) {
+						return nil
+					}
+					if err != nil {
+						return err
+					}
+					if !latest.Mode().IsRegular() || time.Since(latest.ModTime()) < 7*24*time.Hour {
+						return nil
+					}
+					if err := unlink(path); err != nil {
+						return err
+					}
+					removed = true
+					return nil
 				}); err != nil {
 					return err
 				}
-				if referenced {
+				if !removed {
 					report.Candidates--
 					report.Bytes -= info.Size()
 					return nil
 				}
-			}
-			if err := os.Remove(path); err != nil {
+			} else if err := unlink(path); err != nil {
 				return err
 			}
 			report.Removed++

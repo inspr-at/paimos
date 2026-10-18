@@ -1,0 +1,11 @@
+{
+  "schema": "aeon.migration-policy-exceptions.v1",
+  "exceptions": [
+    {
+      "file": "1206_themes.sql",
+      "sha256": "5b289f99f660914f99861c22ba126dc09983d48c2811e735aa08af66a956ecc6",
+      "ticket": "AEON-641",
+      "reason": "Additive tenant themes and owner-only selections, with a fixed Porcelain seed for existing and future tenants. The classifier conservatively flags the tenant-loop DO backfill, ON CONFLICT DO NOTHING in the seed function, and REVOKE EXECUTE on fixed SECURITY DEFINER seed helpers. The events SELECT policy restricts only the new theme.* namespace; existing event types and previous-binary writes are unchanged. No existing table, column, route or constraint is removed. Exact bytes require coordinator review before merge/release and do not waive previous-binary compatibility probes or grant release authority."
+    }
+  ]
+}

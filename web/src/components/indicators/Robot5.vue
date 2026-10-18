@@ -89,7 +89,7 @@ onBeforeUnmount(() => clearTimeout(clear))
 .robot5 {
   --face: color-mix(in srgb, var(--glow) 9%, var(--surface-raised)); --rim: var(--glow); --eye: var(--ink);
   --disk: color-mix(in srgb, var(--glow) 12%, var(--surface-raised));
-  --glow: var(--signal); --spark: #d69b31; --blush: oklch(.8 .09 20 / .55);
+  --glow: var(--signal); --spark: var(--secondary); --blush: oklch(.8 .09 20 / .55);
   position: relative; display: inline-grid; place-items: center; flex-shrink: 0; width: var(--size); height: var(--size);
 }
 .disk {
@@ -134,7 +134,7 @@ onBeforeUnmount(() => clearTimeout(clear))
   .eye, .happy { transition: opacity .12s ease; }
 }
 .event-mark { position: absolute; inset: 0; width: 100%; height: 100%; overflow: visible; pointer-events: none; }
-.glint { fill: #c9a24a; stroke: var(--surface-raised); stroke-width: .65; transform-origin: 26px 6px; animation: event-opacity .6s ease-out both; }
+.glint { fill: var(--secondary-line); stroke: var(--surface-raised); stroke-width: .65; transform-origin: 26px 6px; animation: event-opacity .6s ease-out both; }
 @media (prefers-reduced-motion: no-preference) { .glint { animation-name: event-glint; } }
 @keyframes event-opacity { 0%, 100% { opacity: 0; } 25%, 50% { opacity: 1; } }
 @keyframes event-glint { 0% { opacity: 0; transform: scale(.65); } 25% { opacity: 1; transform: scale(1); } 100% { opacity: 0; transform: scale(.85); } }

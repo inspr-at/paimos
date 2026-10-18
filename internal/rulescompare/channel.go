@@ -7,6 +7,9 @@ import (
 	"fmt"
 	"sort"
 	"strings"
+
+	"github.com/inspr-at/paimos/internal/markdownsource"
+	"github.com/yuin/goldmark/ast"
 )
 
 // PinnedRule is one doctrine rule the harness channel is expected to carry.
@@ -16,6 +19,7 @@ type PinnedRule struct {
 	Identity string
 	Key      string
 	Text     string
+	Source   string // Complete indexed source, when supplied by the doctrine API.
 }
 
 // PinnedRelease is one doctrine pin and the rules indexed at that commit.
@@ -77,7 +81,7 @@ func DeliveryReport(files []HarnessFile, releases []PinnedRelease, duplicates []
 		}
 		if strings.TrimSpace(file.Text) == "" {
 			problems = append(problems, file.label()+": delivered file is empty")
-		} else if file.Session && !strings.Contains(file.Text, "# Aeon session rules") {
+		} else if file.Session && !hasSessionHeading(file.Text) {
 			problems = append(problems, file.label()+": session file is unverified")
 		}
 		if !file.Session {
@@ -115,11 +119,11 @@ func (f HarnessFile) label() string {
 
 func driftLines(file HarnessFile, releases []PinnedRelease) []string {
 	var lines []string
-	text := normalizedDeliveryText(file.Text)
+	instructions := deliveredInstructions(file)
 	for _, rel := range releases {
 		var ids []string
 		for _, rule := range rel.Rules {
-			if rule.Text != "" && strings.Contains(text, normalizedDeliveryText(rule.Text)) {
+			if matchesInstruction(instructions, rule) {
 				continue
 			}
 			ids = append(ids, rule.Identity)
@@ -143,15 +147,17 @@ func driftLines(file HarnessFile, releases []PinnedRelease) []string {
 // sessionDoubles reports doctrine text that was pasted into a session file
 // the harness is also loading. The doctrine file itself has no session header.
 func sessionDoubles(file HarnessFile, releases []PinnedRelease) []string {
-	if !file.Session && !strings.Contains(file.Text, "# Aeon session rules") {
+	if !file.Session && !hasSessionHeading(file.Text) {
 		return nil
 	}
 	var lines []string
-	text := normalizedDeliveryText(file.Text)
+	instructions := deliveredInstructions(file)
 	seen := map[string]bool{}
 	for _, rel := range releases {
 		for _, rule := range rel.Rules {
-			if rule.Text == "" || seen[rule.Identity] || !strings.Contains(text, normalizedDeliveryText(rule.Text)) {
+			// The session renderer emits the action text only, without source
+			// explanations. It must still be a complete active instruction.
+			if rule.Text == "" || seen[rule.Identity] || !instructions[normalizedDeliveryText(rule.Text)] {
 				continue
 			}
 			seen[rule.Identity] = true
@@ -164,4 +170,71 @@ func sessionDoubles(file HarnessFile, releases []PinnedRelease) []string {
 
 func normalizedDeliveryText(text string) string {
 	return strings.Join(strings.Fields(text), " ")
+}
+
+func matchesInstruction(instructions map[string]bool, rule PinnedRule) bool {
+	if rule.Source == "" {
+		return rule.Text != "" && instructions[normalizedDeliveryText(rule.Text)]
+	}
+	expected := deliveredInstructions(HarnessFile{Text: rule.Source})
+	if len(expected) == 0 {
+		return false
+	}
+	for text := range expected {
+		if !instructions[text] {
+			return false
+		}
+	}
+	return true
+}
+
+// Compare whole instruction blocks, preserving Markdown and strength markers.
+// Quoted examples, HTML/comments and code are not instructions. Only the
+// session renderer's explicit [identity] prefix is stripped; arbitrary prose
+// surrounding a rule never constitutes evidence that the rule was delivered.
+func deliveredInstructions(file HarnessFile) map[string]bool {
+	raw, doc, _ := markdownsource.Document(file.Text)
+	session := file.Session || sessionHeading(raw, doc)
+	out := map[string]bool{}
+	ast.Walk(doc, func(n ast.Node, entering bool) (ast.WalkStatus, error) {
+		if !entering {
+			return ast.WalkContinue, nil
+		}
+		switch n.Kind() {
+		case ast.KindBlockquote, ast.KindCodeBlock, ast.KindFencedCodeBlock, ast.KindHTMLBlock:
+			return ast.WalkSkipChildren, nil
+		case ast.KindParagraph, ast.KindTextBlock:
+			var body strings.Builder
+			for i := 0; i < n.Lines().Len(); i++ {
+				segment := n.Lines().At(i)
+				body.Write(segment.Value(raw))
+			}
+			instruction := normalizedDeliveryText(body.String())
+			if session {
+				if rest, ok := strings.CutPrefix(instruction, "["); ok {
+					if id, text, ok := strings.Cut(rest, "] "); ok && id != "" && !strings.ContainsAny(id, " \t[]") {
+						instruction = text
+					}
+				}
+			}
+			out[instruction] = true
+			return ast.WalkSkipChildren, nil
+		}
+		return ast.WalkContinue, nil
+	})
+	return out
+}
+
+func hasSessionHeading(source string) bool {
+	raw, doc, _ := markdownsource.Document(source)
+	return sessionHeading(raw, doc)
+}
+
+func sessionHeading(raw []byte, doc ast.Node) bool {
+	for n := doc.FirstChild(); n != nil; n = n.NextSibling() {
+		if h, ok := n.(*ast.Heading); ok && h.Level == 1 && string(h.Text(raw)) == "Aeon session rules" {
+			return true
+		}
+	}
+	return false
 }

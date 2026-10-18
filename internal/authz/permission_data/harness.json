@@ -1,0 +1,11 @@
+{
+  "_license": "SPDX-License-Identifier: AGPL-3.0-only",
+  "words": {
+    "resources": {
+      "harness": "harness sessions"
+    },
+    "special": {
+      "harness.watch": "View live conversations"
+    }
+  }
+}

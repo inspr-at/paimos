@@ -5,11 +5,13 @@ package agentaccounts
 import (
 	"math"
 	"time"
+
+	"github.com/inspr-at/paimos/internal/agentplan"
 )
 
 // ProbeFreshness is the oldest successful owner-daemon probe that can still
 // accept a new reservation.
-const ProbeFreshness = 2 * time.Minute
+const ProbeFreshness = agentplan.DailyFreshness
 
 func elapsedFraction(now, start, end time.Time) float64 {
 	span := end.Sub(start)
@@ -80,7 +82,7 @@ func fits(w Window, now time.Time, estimate int64) (int64, bool) {
 		return 0, false
 	}
 	projected, ok := addUsage(w.Used, w.Reserved, estimate)
-	if !ok || projected > w.Allowance {
+	if !ok || projected > w.Allowance || w.usageCeiling != nil && projected > *w.usageCeiling {
 		return 0, false
 	}
 	if w.capacityReadAt != nil {
@@ -94,9 +96,19 @@ func fits(w Window, now time.Time, estimate int64) (int64, bool) {
 			return 0, false
 		}
 	}
-	fraction := paceFraction(w.PaceModel, elapsedFraction(now, w.StartsAt, w.EndsAt), w.BurstRatio)
+	fraction := windowPaceFraction(w, now)
 	if projected > allowedUnits(w.Allowance, fraction) {
 		return 0, false
 	}
 	return projected, true
+}
+
+// Measured windows use Plan’s schedule-derived budget. A readiness observation
+// gives no vendor start time, so linear pacing from its reading time would
+// count the same policy twice and reject every freshly measured account.
+func windowPaceFraction(w Window, now time.Time) float64 {
+	if w.capacityBudget != nil {
+		return 1
+	}
+	return paceFraction(w.PaceModel, elapsedFraction(now, w.StartsAt, w.EndsAt), w.BurstRatio)
 }

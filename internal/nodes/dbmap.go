@@ -22,6 +22,11 @@ func mapDB(err error) *httpError {
 		return nil
 	}
 	switch pgErr.Code {
+	case "42501":
+		if pgErr.Message == "decision desk nodes require the question service" {
+			return &httpError{status: http.StatusForbidden, msg: "use the Decision Desk question API"}
+		}
+		return nil
 	case "40P01":
 		return conflictCoded("concurrent node update; retry request", "retryable_conflict")
 	case "23505":
@@ -39,11 +44,16 @@ func mapDB(err error) *httpError {
 		}
 		return badRequest("related row does not exist")
 	case "23514":
+		if pgErr.ConstraintName == "work_leaf_required" || pgErr.ConstraintName == "busy_work_leaf" || pgErr.ConstraintName == "work_handover_pending" {
+			return conflictCoded(pgErr.Message, pgErr.ConstraintName)
+		}
 		return badRequest("invalid value")
 	case "22P02":
 		return badRequest("bad request")
 	case "P0001":
 		switch pgErr.Message {
+		case "parent status follows its children":
+			return conflictCoded("parent status follows its children", "parent_status_derived")
 		case "node has live children":
 			return conflict("node has live children")
 		case "child kind is not allowed under parent kind":

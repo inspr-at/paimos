@@ -4,6 +4,7 @@ package agentpairing
 import (
 	"context"
 
+	"github.com/inspr-at/paimos/internal/events"
 	"github.com/jackc/pgx/v5"
 )
 
@@ -13,6 +14,16 @@ import (
 // is deliberately excluded: expiry is never evidence of local process exit.
 // Queue polls, pairing views and subsequent routing all perform this sweep.
 func ExpireUnclaimedVerifications(ctx context.Context, tx pgx.Tx) error {
+	return expireUnclaimedVerifications(ctx, tx)
+}
+
+// ExpireUnclaimedVerificationsDeferred lets a queue poll batch drain/link
+// cancellation events after retry/expiry resources and response projection.
+func ExpireUnclaimedVerificationsDeferred(ctx context.Context, tx pgx.Tx, pending *[]events.Change) error {
+	return expireUnclaimedVerifications(ctx, tx, pending)
+}
+
+func expireUnclaimedVerifications(ctx context.Context, tx pgx.Tx, pending ...*[]events.Change) error {
 	rows, err := tx.Query(ctx, `SELECT r.id::text,e.account_id::text,e.computer_id::text
  FROM agent_pairing_enrollments e JOIN agent_runs r ON r.tenant_id=e.tenant_id AND r.id=e.verification_run_id
  WHERE e.verification_claimed_at IS NULL AND e.verification_expires_at<=clock_timestamp()
@@ -43,7 +54,7 @@ func ExpireUnclaimedVerifications(ctx context.Context, tx pgx.Tx) error {
 		if _, err = tx.Exec(ctx, `UPDATE agent_pairing_enrollments SET verification_expired_at=clock_timestamp() WHERE account_id=$1 AND verification_claimed_at IS NULL`, x.account); err != nil {
 			return err
 		}
-		if err = finalizeDrain(ctx, tx, x.computer); err != nil {
+		if err = finalizeDrain(ctx, tx, x.computer, pending...); err != nil {
 			return err
 		}
 	}

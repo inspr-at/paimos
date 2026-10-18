@@ -124,6 +124,8 @@ func TestSessionThreadConcurrentMigrationRecovery(t *testing.T) {
 	cfg := d.App.Config()
 	cfg.MaxConns = 2
 	cfg.ConnConfig.RuntimeParams["lock_timeout"] = "7s"
+	cfg.ConnConfig.RuntimeParams["statement_timeout"] = "200ms"
+	cfg.ConnConfig.RuntimeParams["idle_in_transaction_session_timeout"] = "17s"
 	runner, err := pgxpool.NewWithConfig(t.Context(), cfg)
 	if err != nil {
 		t.Fatal(err)
@@ -137,12 +139,13 @@ func TestSessionThreadConcurrentMigrationRecovery(t *testing.T) {
 				t.Fatal(err)
 			}
 			defer conn.Release()
-			var timeout string
-			if err := conn.QueryRow(t.Context(), `SHOW lock_timeout`).Scan(&timeout); err != nil {
+			var timeout, statement, idle string
+			if err := conn.QueryRow(t.Context(), `SELECT current_setting('lock_timeout'),current_setting('statement_timeout'),
+				current_setting('idle_in_transaction_session_timeout')`).Scan(&timeout, &statement, &idle); err != nil {
 				t.Fatal(err)
 			}
-			if timeout != "7s" {
-				t.Fatalf("migration leaked lock_timeout: %s", timeout)
+			if timeout != "7s" || statement != "200ms" || idle != "17s" {
+				t.Fatalf("migration leaked SQL budgets: lock=%s statement=%s idle=%s", timeout, statement, idle)
 			}
 		}
 	}
@@ -150,9 +153,19 @@ func TestSessionThreadConcurrentMigrationRecovery(t *testing.T) {
 		"0992_session_thread_lookups.sql": "inbox_compat_sender_session",
 		"0993_session_thread_replies.sql": "inbox_compat_reply",
 		"0996_session_ticket_index.sql":   "harness_sessions_ticket_node",
+		"1344_work_kind_counts.sql":       "nodes_work_kind_area_idx",
 	}
 	invalidOIDs := make(map[string]uint32)
 	err = db.MigrateWithHook(t.Context(), runner, func(name string) error {
+		var statement string
+		if err := runner.QueryRow(t.Context(), `SHOW statement_timeout`).Scan(&statement); err != nil {
+			return err
+		}
+		// The other pooled connection keeps its application budget while the
+		// advisory-lock connection receives the longer migration budget.
+		if statement != "200ms" {
+			return fmt.Errorf("migration changed another connection's budget: %s", statement)
+		}
 		index, ok := files[name]
 		if !ok {
 			return nil
@@ -169,6 +182,9 @@ func TestSessionThreadConcurrentMigrationRecovery(t *testing.T) {
 		table := "inbox_compat_messages"
 		if name == "0996_session_ticket_index.sql" {
 			table = "harness_sessions"
+		}
+		if name == "1344_work_kind_counts.sql" {
+			table = "nodes"
 		}
 		if _, err := writer.Exec(t.Context(), `LOCK TABLE `+table+` IN ROW EXCLUSIVE MODE`); err != nil {
 			return err

@@ -3,7 +3,6 @@
 package modelregistry
 
 import (
-	"encoding/json"
 	"errors"
 	"io"
 	"net/http"
@@ -11,8 +10,10 @@ import (
 
 	"github.com/jackc/pgx/v5/pgconn"
 
+	"github.com/inspr-at/paimos/internal/authz"
 	"github.com/inspr-at/paimos/internal/httpapi"
 	"github.com/inspr-at/paimos/internal/tenant"
+	"github.com/inspr-at/paimos/internal/workorders"
 )
 
 type httpError struct {
@@ -21,6 +22,8 @@ type httpError struct {
 }
 
 func (e *httpError) Error() string { return e.msg }
+
+func (e *httpError) StatusCode() int { return e.status }
 
 func fail(status int, msg string) error { return &httpError{status: status, msg: msg} }
 
@@ -41,8 +44,7 @@ func principal(w http.ResponseWriter, r *http.Request) (tenant.Principal, bool) 
 }
 
 func decodeJSON(w http.ResponseWriter, r *http.Request, dst any) error {
-	r.Body = http.MaxBytesReader(w, r.Body, 1<<20)
-	dec := json.NewDecoder(r.Body)
+	dec := httpapi.NewRequestDecoder(w, r, 1<<20)
 	dec.DisallowUnknownFields()
 	if err := dec.Decode(dst); err != nil {
 		return fail(http.StatusBadRequest, "invalid JSON request body")
@@ -55,6 +57,15 @@ func decodeJSON(w http.ResponseWriter, r *http.Request, dst any) error {
 }
 
 func writeErr(w http.ResponseWriter, err error) {
+	if errors.Is(err, authz.ErrForbidden) {
+		authz.WriteForbidden(w, err)
+		return
+	}
+	var we *workorders.Error
+	if errors.As(err, &we) {
+		workorders.WriteError(w, err)
+		return
+	}
 	var he *httpError
 	if errors.As(err, &he) {
 		httpapi.WriteError(w, he.status, he.msg)

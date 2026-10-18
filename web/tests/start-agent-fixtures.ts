@@ -16,7 +16,15 @@ const laptopAccountId = 'ac000000-0000-4000-8000-000000000003'
 
 export async function mockStartAgent(page: Page, options: { wait?: CapacityWait; theme?: 'light' | 'dark'; offline?: boolean; unavailable?: boolean; forbidden?: boolean; failQueue?: boolean; staleGrant?: boolean; readOnly?: boolean; catalog?: 'missing' | 'invalid' | 'empty-grants' | 'two-hosts' | 'retry' | 'pi' | 'pi-openrouter' | 'provisional'; pin?: { ticket_id: string; harness: string; account_id?: string; group_id?: string } } = {}) {
   const work = fixtures()
+  const workParents = new Set(work.nodes.filter(node => ['work', 'epic', 'ticket', 'task'].includes(node.kind_slug)).map(node => node.parent_id))
+  for (const node of work.nodes) {
+    if (!['work', 'epic', 'ticket', 'task'].includes(node.kind_slug)) continue
+    node.is_leaf = !workParents.has(node.id)
+    node.kind_slug = 'work'
+  }
   if (options.theme) work.preferences.theme = { choice: options.theme }
+  // AEON-741: manual Start agent is an expert opt-in; these specs exercise it.
+  work.preferences['developer-ui'] = { show_expert_start: true }
   await mockWork(page, work, { admin: true })
   const profile: ModelProfile = { id: profileId, slug: 'Build · deliberate', harness: 'codex', family: 'openai', model: 'workspace-build', effort: 'high', tier: 'standard', enabled: true }
   if (options.catalog === 'pi-openrouter') Object.assign(profile, { harness: 'pi', family: 'unknown', model: 'openrouter/stealth/space-bunny-alpha', effort: 'off' })

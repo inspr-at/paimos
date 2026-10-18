@@ -1,0 +1,466 @@
+# SPDX-License-Identifier: AGPL-3.0-only
+paths:
+  /aithema/journal/sessions/{sid}/authority:
+    get:
+      operationId: aithemaJournalAuthorityGet
+      summary: Aithema journal authority
+      description: Requires the exact aithema.authority.read capability in a verified delegated token. Tenant, session, plugin and actor are bound to host-owned authorization; all routes except authority also check project and current epoch. Writes check the current worker generation in the same transaction as the effect. Responses are uncached.
+      security: [{aithemaDelegated: []}]
+      parameters:
+        - {name: sid, in: path, required: true, schema: {type: string, format: uuid}}
+      responses:
+        "200":
+          description: Authoritative result. Journal and admission retries return their original result; claims are single-use; recovery is idempotent.
+          headers:
+            Cache-Control:
+              schema: {type: string, const: no-store}
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/AithemaAuthority"}
+        "400":
+          description: Malformed or invalid contract, query, or snapshot context
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/AithemaHostError"}
+        "401":
+          description: Missing, invalid or expired delegated token
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/AithemaHostError"}
+        "403":
+          description: Capability or scope authorization refused
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/AithemaHostError"}
+        "404":
+          description: Unknown session, hold or claim
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/AithemaHostError"}
+        "409":
+          description: Revoked, fenced_generation, idempotency_conflict, snapshot_conflict, already_claimed, hold_closed, hold_not_journaled, suspended, or exhausted sequence
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/AithemaHostError"}
+        "413":
+          description: Encoded request exceeds 1 MiB
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/AithemaHostError"}
+        "422":
+          description: Contract requires a newer reader
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/AithemaHostError"}
+        "503":
+          description: Host storage or signing keys unavailable
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/AithemaHostError"}
+  /aithema/journal/sessions/{sid}/cursor:
+    get:
+      operationId: aithemaJournalCursorGet
+      summary: Aithema journal cursor
+      description: Requires the exact aithema.journal.read capability in a verified delegated token. Tenant, session, plugin and actor are bound to host-owned authorization; all routes except authority also check project and current epoch. Writes check the current worker generation in the same transaction as the effect. Responses are uncached.
+      security: [{aithemaDelegated: []}]
+      parameters:
+        - {name: sid, in: path, required: true, schema: {type: string, format: uuid}}
+        - {name: format, in: query, schema: {type: string, enum: [projection, stored], default: projection}, description: Stored envelopes include the document and original submitted UTF-8 bytes for lossless hydration.}
+        - {name: snapshot, in: query, schema: {type: string, enum: [seq]}, description: Return only the snapshot sequence for bounded chunk hydration. Required for snapshots larger than 1 MiB; inline cursor otherwise returns 413 too_large.}
+      responses:
+        "200":
+          description: Authoritative result. Journal and admission retries return their original result; claims are single-use; recovery is idempotent.
+          headers:
+            Cache-Control:
+              schema: {type: string, const: no-store}
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/AithemaJournalCursor"}
+        "400":
+          description: Malformed or invalid contract, query, or snapshot context
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/AithemaHostError"}
+        "401":
+          description: Missing, invalid or expired delegated token
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/AithemaHostError"}
+        "403":
+          description: Capability or scope authorization refused
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/AithemaHostError"}
+        "404":
+          description: Unknown session, hold or claim
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/AithemaHostError"}
+        "409":
+          description: Revoked, fenced_generation, idempotency_conflict, snapshot_conflict, already_claimed, hold_closed, hold_not_journaled, suspended, or exhausted sequence
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/AithemaHostError"}
+        "413":
+          description: Inline snapshot exceeds 1 MiB or encoded response exceeds 4 MiB; use snapshot=seq and range hydration (too_large).
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/AithemaHostError"}
+        "422":
+          description: Contract requires a newer reader
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/AithemaHostError"}
+        "503":
+          description: Host storage or signing keys unavailable
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/AithemaHostError"}
+  /aithema/journal/sessions/{sid}/op.result:
+    post:
+      operationId: aithemaJournalOp_ResultPost
+      summary: Aithema journal op.result
+      description: Requires the exact aithema.journal.write capability in a verified delegated token. Tenant, session, plugin and actor are bound to host-owned authorization; all routes except authority also check project and current epoch. Writes check the current worker generation in the same transaction as the effect. Responses are uncached. Every op.result data.op_key must begin with this session id followed by a colon; a foreign key returns 400 invalid_request without allocating a sequence or committing the client event id.
+      security: [{aithemaDelegated: []}]
+      parameters:
+        - {name: sid, in: path, required: true, schema: {type: string, format: uuid}}
+        - {name: format, in: query, schema: {type: string, enum: [projection, stored], default: projection}, description: Stored envelopes include the document and original submitted UTF-8 bytes for lossless hydration.}
+        - {name: ack, in: query, schema: {type: string, enum: [seq]}, description: Return only the committed host sequence.}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: "#/components/schemas/AithemaRecordDocument"}
+      responses:
+        "200":
+          description: Authoritative result. Journal and admission retries return their original result; claims are single-use; recovery is idempotent.
+          headers:
+            Cache-Control:
+              schema: {type: string, const: no-store}
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/AithemaJournalAck"}
+        "400":
+          description: Malformed or invalid contract, query, or snapshot context
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/AithemaHostError"}
+        "401":
+          description: Missing, invalid or expired delegated token
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/AithemaHostError"}
+        "403":
+          description: Capability or scope authorization refused
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/AithemaHostError"}
+        "404":
+          description: Unknown session, hold or claim
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/AithemaHostError"}
+        "409":
+          description: Revoked, fenced_generation, idempotency_conflict, snapshot_conflict, already_claimed, hold_closed, hold_not_journaled, suspended, or exhausted sequence
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/AithemaHostError"}
+        "413":
+          description: Encoded request exceeds 1 MiB
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/AithemaHostError"}
+        "422":
+          description: Contract requires a newer reader
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/AithemaHostError"}
+        "503":
+          description: Host storage or signing keys unavailable
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/AithemaHostError"}
+  /aithema/journal/sessions/{sid}/records:
+    post:
+      operationId: aithemaJournalRecordsPost
+      summary: Aithema journal records
+      description: Requires the exact aithema.journal.write capability in a verified delegated token. Tenant, session, plugin and actor are bound to host-owned authorization; all routes except authority also check project and current epoch. Writes check the current worker generation in the same transaction as the effect. Responses are uncached. Every op.result data.op_key must begin with this session id followed by a colon; a foreign key returns 400 invalid_request without allocating a sequence or committing the client event id.
+      security: [{aithemaDelegated: []}]
+      parameters:
+        - {name: sid, in: path, required: true, schema: {type: string, format: uuid}}
+        - {name: format, in: query, schema: {type: string, enum: [projection, stored], default: projection}, description: Stored envelopes include the document and original submitted UTF-8 bytes for lossless hydration.}
+        - {name: ack, in: query, schema: {type: string, enum: [seq]}, description: Return only the committed host sequence.}
+        - {name: upload, in: query, schema: {type: string, pattern: "^[0-9a-f]{64}$"}, description: "SHA-256 of the complete original UTF-8 submission. Requires ack=seq. Send consecutive 256 KiB base64 chunks; offset zero restarts staging. Only complete valid snapshots and pending_op.content commit; total is capped at 16 MiB."}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              oneOf:
+                - {$ref: "#/components/schemas/AithemaRecordDocument"}
+                - {$ref: "#/components/schemas/AithemaJournalUploadChunk"}
+      responses:
+        "200":
+          description: Authoritative result. Journal and admission retries return their original result; claims are single-use; recovery is idempotent.
+          headers:
+            Cache-Control:
+              schema: {type: string, const: no-store}
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/AithemaJournalAck"}
+        "400":
+          description: Malformed or invalid contract, query, or snapshot context
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/AithemaHostError"}
+        "401":
+          description: Missing, invalid or expired delegated token
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/AithemaHostError"}
+        "403":
+          description: Capability or scope authorization refused
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/AithemaHostError"}
+        "404":
+          description: Unknown session, hold or claim
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/AithemaHostError"}
+        "409":
+          description: Revoked, fenced_generation, idempotency_conflict, snapshot_conflict, already_claimed, hold_closed, hold_not_journaled, suspended, or exhausted sequence
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/AithemaHostError"}
+        "413":
+          description: Request exceeds 1 MiB, staged total exceeds 16 MiB, an inline record exceeds 1 MiB, or the encoded response exceeds 4 MiB (too_large). Use sequence lookup and range hydration for large records.
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/AithemaHostError"}
+        "422":
+          description: Contract requires a newer reader or referenced content is missing or mismatched (citation_invalid)
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/AithemaHostError"}
+        "503":
+          description: Host storage or signing keys unavailable
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/AithemaHostError"}
+    get:
+      operationId: aithemaJournalRecordsGet
+      summary: Aithema journal records
+      description: Requires the exact aithema.journal.read capability in a verified delegated token. Tenant, session, plugin and actor are bound to host-owned authorization; all routes except authority also check project and current epoch. Writes check the current worker generation in the same transaction as the effect. Responses are uncached.
+      security: [{aithemaDelegated: []}]
+      parameters:
+        - {name: sid, in: path, required: true, schema: {type: string, format: uuid}}
+        - {name: format, in: query, schema: {type: string, enum: [projection, stored], default: projection}, description: Stored envelopes include the document and original submitted UTF-8 bytes for lossless hydration.}
+        - {name: digests, in: query, schema: {type: string}, description: "Comma-separated SHA-256 content addresses (at most 1000). Returns sequence references in input order; missing digests are omitted. Exclusive of ids and after."}
+        - {name: offset, in: query, schema: {type: integer, minimum: 0, maximum: 9007199254740991}, description: "Read original byte chunks for one ids sequence. Exclusive of after and digests."}
+        - {name: length, in: query, schema: {type: integer, minimum: 1, maximum: 262144, default: 262144}, description: Requires offset; returns canonical base64 of the original UTF-8 byte range.}
+        - {name: after, in: query, schema: {type: integer, minimum: 0, maximum: 9007199254740991, default: 0}}
+        - {name: ids, in: query, schema: {type: string}, description: "Comma-separated host sequences; takes precedence over after. Inline reads require each selected record to be at most 1 MiB and the encoded response at most 4 MiB; otherwise 413 too_large. Fetch all cited sources, turns, summary leaves and design inputs by their sequences."}
+      responses:
+        "200":
+          description: Authoritative result. Journal and admission retries return their original result; claims are single-use; recovery is idempotent.
+          headers:
+            Cache-Control:
+              schema: {type: string, const: no-store}
+          content:
+            application/json:
+              schema:
+                oneOf:
+                  - type: array
+                    items:
+                      oneOf:
+                        - {$ref: "#/components/schemas/AithemaRecordDocument"}
+                        - {$ref: "#/components/schemas/AithemaSnapshotDocument"}
+                        - {$ref: "#/components/schemas/AithemaStoredRecord"}
+                        - {$ref: "#/components/schemas/AithemaJournalSequence"}
+                  - {$ref: "#/components/schemas/AithemaJournalReadChunk"}
+        "400":
+          description: Malformed or invalid contract, query, or snapshot context
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/AithemaHostError"}
+        "401":
+          description: Missing, invalid or expired delegated token
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/AithemaHostError"}
+        "403":
+          description: Capability or scope authorization refused
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/AithemaHostError"}
+        "404":
+          description: Unknown session, hold or claim
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/AithemaHostError"}
+        "409":
+          description: Revoked, fenced_generation, idempotency_conflict, snapshot_conflict, already_claimed, hold_closed, hold_not_journaled, suspended, or exhausted sequence
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/AithemaHostError"}
+        "413":
+          description: Request exceeds 1 MiB, staged total exceeds 16 MiB, an inline record exceeds 1 MiB, or the encoded response exceeds 4 MiB (too_large). Use sequence lookup and range hydration for large records.
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/AithemaHostError"}
+        "422":
+          description: Contract requires a newer reader
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/AithemaHostError"}
+        "503":
+          description: Host storage or signing keys unavailable
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/AithemaHostError"}
+  /aithema/journal/sessions/{sid}/snapshots:
+    post:
+      operationId: aithemaJournalSnapshotsPost
+      summary: Aithema journal snapshots
+      description: Requires the exact aithema.journal.write capability in a verified delegated token. Tenant, session, plugin and actor are bound to host-owned authorization; all routes except authority also check project and current epoch. Writes check the current worker generation in the same transaction as the effect. Responses are uncached. Snapshot revision CAS also requires consumed_seq to be nondecreasing and no greater than the current journal sequence, and every pending operation key to begin with this session id followed by a colon.
+      security: [{aithemaDelegated: []}]
+      parameters:
+        - {name: sid, in: path, required: true, schema: {type: string, format: uuid}}
+        - {name: format, in: query, schema: {type: string, enum: [projection, stored], default: projection}, description: Stored envelopes include the document and original submitted UTF-8 bytes for lossless hydration.}
+        - {name: ack, in: query, schema: {type: string, enum: [seq]}, description: Return only the committed host sequence.}
+        - {name: upload, in: query, schema: {type: string, pattern: "^[0-9a-f]{64}$"}, description: "SHA-256 of the complete original UTF-8 submission. Requires ack=seq. Send consecutive 256 KiB base64 chunks; offset zero restarts staging. Only complete valid snapshots and pending_op.content commit; total is capped at 16 MiB."}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              oneOf:
+                - {$ref: "#/components/schemas/AithemaSnapshotDocument"}
+                - {$ref: "#/components/schemas/AithemaJournalUploadChunk"}
+      responses:
+        "200":
+          description: Authoritative result. Journal and admission retries return their original result; claims are single-use; recovery is idempotent.
+          headers:
+            Cache-Control:
+              schema: {type: string, const: no-store}
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/AithemaJournalAck"}
+        "400":
+          description: Malformed or invalid contract, query, or snapshot context
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/AithemaHostError"}
+        "401":
+          description: Missing, invalid or expired delegated token
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/AithemaHostError"}
+        "403":
+          description: Capability or scope authorization refused
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/AithemaHostError"}
+        "404":
+          description: Unknown session, hold or claim
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/AithemaHostError"}
+        "409":
+          description: Revoked, fenced_generation, idempotency_conflict, snapshot_conflict, already_claimed, hold_closed, hold_not_journaled, suspended, or exhausted sequence
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/AithemaHostError"}
+        "413":
+          description: Request exceeds 1 MiB, staged total exceeds 16 MiB, an inline record exceeds 1 MiB, or the encoded response exceeds 4 MiB (too_large). Use sequence lookup and range hydration for large records.
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/AithemaHostError"}
+        "422":
+          description: Contract requires a newer reader or referenced content is missing or mismatched (citation_invalid)
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/AithemaHostError"}
+        "503":
+          description: Host storage or signing keys unavailable
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/AithemaHostError"}
+components:
+  schemas:
+    AithemaAuthority:
+      type: object
+      additionalProperties: false
+      required: [worker_generation, auth_epoch, tombstone, authorization, issued_at]
+      properties:
+        worker_generation: {type: integer, minimum: 1, maximum: 9007199254740991}
+        auth_epoch: {type: integer, minimum: 1, maximum: 9007199254740991}
+        tombstone: {type: boolean}
+        suspended: {type: boolean, description: 'Host pause; new admissions, claims and worker journal writes are refused until resume.'}
+        authorization: {$ref: '../internal/aithema/journal/contracts/authz-record.schema.json#/$defs/record'}
+        issued_at: {type: string, format: date-time, description: Current host timestamp; authority responses must never be cached.}
+    AithemaJournalAck:
+      oneOf:
+        - {$ref: "#/components/schemas/AithemaJournalSequence"}
+        - {$ref: "#/components/schemas/AithemaJournalUploadProgress"}
+        - {$ref: "#/components/schemas/AithemaRecordDocument"}
+        - {$ref: "#/components/schemas/AithemaSnapshotDocument"}
+        - {$ref: "#/components/schemas/AithemaStoredRecord"}
+    AithemaJournalCursor:
+      type: object
+      additionalProperties: false
+      required: [seq, working_rev, snapshot]
+      properties:
+        seq: {type: integer, minimum: 0, maximum: 9007199254740991}
+        working_rev: {type: integer, minimum: 0, maximum: 9007199254740991}
+        snapshot:
+          oneOf:
+            - {type: 'null'}
+            - {$ref: "#/components/schemas/AithemaJournalSequence"}
+            - {$ref: "#/components/schemas/AithemaSnapshotDocument"}
+            - {$ref: "#/components/schemas/AithemaStoredRecord"}
+    AithemaJournalReadChunk:
+      type: object
+      additionalProperties: false
+      required: [seq, offset, total, chunk]
+      properties:
+        seq: {type: integer, minimum: 1, maximum: 9007199254740991}
+        offset: {type: integer, minimum: 0, maximum: 9007199254740991}
+        total: {type: integer, minimum: 1, maximum: 9007199254740991}
+        chunk: {type: string, contentEncoding: base64, minLength: 4, maxLength: 349528}
+    AithemaJournalSequence:
+      type: object
+      additionalProperties: false
+      required: [seq]
+      properties:
+        seq: {type: integer, minimum: 1, maximum: 9007199254740991}
+    AithemaJournalUploadChunk:
+      type: object
+      additionalProperties: false
+      required: [offset, total, chunk]
+      properties:
+        offset: {type: integer, minimum: 0, maximum: 9007199254740991}
+        total: {type: integer, minimum: 1048577, maximum: 16777216}
+        chunk: {type: string, contentEncoding: base64, minLength: 4, maxLength: 349528}
+    AithemaJournalUploadProgress:
+      type: object
+      additionalProperties: false
+      required: [offset, total]
+      properties:
+        offset: {type: integer, minimum: 1, maximum: 9007199254740991}
+        total: {type: integer, minimum: 1048577, maximum: 16777216}
+    AithemaRecordDocument:
+      $ref: ../internal/aithema/journal/contracts/journal-record.schema.json#/$defs/record
+    AithemaSnapshotDocument:
+      $ref: ../internal/aithema/journal/contracts/spec-snapshot.schema.json#/$defs/snapshot
+    AithemaStoredRecord:
+      type: object
+      additionalProperties: false
+      required: [document, bytes]
+      properties:
+        document:
+          oneOf:
+            - {$ref: "#/components/schemas/AithemaRecordDocument"}
+            - {$ref: "#/components/schemas/AithemaSnapshotDocument"}
+        bytes: {type: string, description: "Exact submitted UTF-8 JSON, including whitespace and numeric spelling."}

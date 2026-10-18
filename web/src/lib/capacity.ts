@@ -63,7 +63,12 @@ export interface CapacityWindow {
   freshness: 'fresh' | 'aging' | 'stale' | 'expired'; usage_today_known?: boolean; pacing: CapacityPacing
 }
 export interface CapacityRouting { rank: number; available_slots: number; resets_at?: string; cap_percent?: number; wait?: CapacityWait; same_quota_as?: string }
+export interface CapacityBudget {
+  currency: 'USD'; source: 'agentd'; read_at: string; key_usage_usd: number
+  key_limit_usd: number | null; key_remaining_usd: number | null; balance_usd: number | null
+}
 export interface AccountCapacity {
+  budget?: CapacityBudget
   learning?: CapacityLearning
   routing?: CapacityRouting
   account_id: string; ongoing_use_approved?: boolean; schedule: CapacitySchedule; windows: CapacityWindow[]
@@ -281,6 +286,16 @@ export function when(iso: string | number, now: number, timezone?: string): stri
   if (diff > 1 && diff < 6) return `${WD[p.wd]} ${hm}`
   return `${WD[p.wd]} ${p.d} ${MO[p.m]}`
 }
+/** The day alone, for credits and plans: "today", "tomorrow", "Fri", "6 Nov". */
+export function dayLabel(iso: string, now: number, timezone?: string): string {
+  const p = parts(Date.parse(iso), timezone), diff = dayNumber(p) - dayNumber(parts(now, timezone))
+  return diff === 0 ? 'today' : diff === 1 ? 'tomorrow' : diff > 1 && diff < 6 ? WD[p.wd]! : `${p.d} ${MO[p.m]}`
+}
+/** The wall-clock time alone: "18:00". */
+export function clockLabel(iso: string, timezone?: string): string {
+  const p = parts(Date.parse(iso), timezone)
+  return `${pad(p.h)}:${pad(p.mi)}`
+}
 export function whenFull(iso: string, timezone?: string): string {
   const p = parts(Date.parse(iso), timezone)
   return `${WD[p.wd]} ${p.d} ${MO[p.m]} ${pad(p.h)}:${pad(p.mi)}`
@@ -366,6 +381,11 @@ export function accountUseCommand(account: { id: string; harness: string }): str
 }
 /** The vendor's own sign-in command, shown to copy. Aeon never takes the password. */
 export const LOGIN_COMMAND: Record<string, string> = { codex: 'codex login', claude: 'claude /login', cursor: 'cursor-agent login', gemini: 'gemini', opencode: 'opencode auth login' }
+/** These harnesses expose no quota reader; a first run cannot produce one. */
+export const hidesCapacityLimit = (harness: string) => ['cursor', 'grok', 'pi'].includes(harness)
+export const unreportedCapacity = (harness: string) => hidesCapacityLimit(harness)
+  ? 'Usage unknown · reserve not enforceable'
+  : harness === 'codex' ? 'No reading yet — readings need a managed run' : harness === 'claude' ? 'No reading yet — captured during a managed run' : 'No reading yet'
 
 const KIND_RANK: Record<string, number> = { monthly: 0, weekly: 1, other: 2, '5h': 3 }
 /** The long window is the bar; the 5-hour window, when there is another, is the small line under it. */
@@ -429,13 +449,6 @@ function uniqueHosts(hosts: string[]): string[] {
   const out: string[] = []
   for (const host of hosts) if (host && !out.includes(host)) out.push(host)
   return out
-}
-/** Two doors of one login: "Same account on mbp2607 and studio". */
-export function sameAccountCopy(hosts: string[]): string {
-  const list = uniqueHosts(hosts)
-  if (list.length < 2) return ''
-  if (list.length === 2) return `Same account on ${list[0]} and ${list[1]}`
-  return `Same account on ${list.slice(0, -1).join(', ')} and ${list[list.length - 1]}`
 }
 /** One gauge per quota. The door without sameQuotaAs keeps the windows; slots are not added twice. */
 function mergeQuotas(rows: AccountRow[]): AccountRow[] {
@@ -516,6 +529,14 @@ export function buildPools(rows: AccountRow[], now: number): PoolView[] {
   return pools
 }
 
+// ---------- Sprint, Hold and Back to the plan, per pool ----------
+// One wording for the account menus on /agents and in Settings (AEON-786).
+/** The pool an account row paces with: its door, or its group's or harness's pool. */
+export const poolOfRow = (pools: PoolView[], row: Pick<AccountRow, 'id' | 'groupId' | 'harness'>): PoolView | undefined =>
+  pools.find(p => p.rows.some(r => r.id === row.id)) ?? pools.find(p => p.id === (row.groupId ? `group:${row.groupId}` : row.harness))
+/** The pool's own override; Away comes from the person's schedule and ends in the header. */
+export const ownOverride = (pool: PoolView | undefined): Override => (!pool || pool.override === 'away' ? '' : pool.override)
+
 // ---------- The plan per account ----------
 export interface AccountPlan {
   left: number; used: number; budget: number; night: number; leftAtStart: number
@@ -562,28 +583,7 @@ export function gauge(row: AccountRow, plan: AccountPlan | null): Gauge {
   const today = Math.min(Math.max(0, plan.budget - plan.used), L - yours)
   return { yours, later: L - yours - today, today, spent, tick: Math.max(0, Math.min(100, plan.leftAtStart - plan.budget)), frozen }
 }
-export type TodayCell =
-  | { kind: 'quiet'; text: string }
-  | { kind: 'reserve'; text: string; tip: string }
-  | { kind: 'signin'; command: string }
-  | { kind: 'sprint'; text: string }
-  | { kind: 'ahead'; used: string; plan: string }
-  | { kind: 'share'; value: string; tip: string }
-export function todayCell(row: AccountRow, plan: AccountPlan | null): TodayCell {
-  if (row.state === 'offline') return { kind: 'quiet', text: `waits for ${row.host}` }
-  if (row.state === 'signin') return { kind: 'signin', command: LOGIN_COMMAND[row.harness] ?? '' }
-  if (row.state === 'paused') return { kind: 'quiet', text: 'paused' }
-  if (row.state === 'unavailable') return { kind: 'quiet', text: 'reading unavailable' }
-  if (row.sharedQuotaName) return { kind: 'quiet', text: '' }
-  if (!plan) return { kind: 'quiet', text: row.learning ? consumptionLine(row.learning) : 'no reading yet' }
-  if (plan.override === 'hold') return { kind: 'quiet', text: 'on hold' }
-  if (plan.override === 'sprint' || plan.override === 'away') return { kind: 'sprint', text: `all ${pct(plan.left)}` }
-  if (plan.dayOff && !plan.expiring) return { kind: 'quiet', text: 'day off' }
-  if (plan.ahead) return { kind: 'ahead', used: pct(plan.used), plan: `~${pct(plan.budget)}` }
-  if (plan.atReserve) return { kind: 'reserve', text: 'kept for you', tip: `The ${pct(plan.left)} left is kept for you while you work` }
-  const rest = Math.max(0, plan.budget - plan.used)
-  return { kind: 'share', value: `~${pct(plan.budget)}`, tip: `Plan for today ~${pct(plan.budget)}: ${pct(plan.used)} used, ${pct(rest)} to go${plan.night >= 0.5 ? `; ~${pct(plan.night)} of it tonight` : ''}` }
-}
+
 /** Who measured it, and how old it is. Empty when there is no reading yet. */
 export function sourceLine(row: AccountRow, now: number): string {
   const w = row.primary
@@ -692,9 +692,8 @@ function planSentence(pool: PoolView, now: number, timezone?: string): Sentence 
     if (first.state === 'unavailable') return { segs: [b(`Reading unavailable on ${first.host}.`), t(' Agents skip it until the next check succeeds.')] }
     if (first.state === 'paused' && first.disconnecting) return { segs: [b(`Disconnecting from ${first.host}.`), t(' Agents start nothing new on it.')] }
     if (first.state === 'paused') return { segs: [b('Paused in Settings / Accounts.'), t(' Turn “Agents may use it” back on there to resume.')] }
-    if (first.awaitingReading) return { segs: [b('No reading yet'), t(' — starts with the next run.')] }
-    if (first.learning && ['grok', 'cursor', 'pi'].includes(first.harness)) return { segs: [b(`${pool.name} doesn't show its limit.`), t(' One run at a time by day.')] }
-    return { segs: [b('No reading yet'), t(' — starts with the first run.')] }
+    if (hidesCapacityLimit(first.harness)) return { segs: [t(unreportedCapacity(first.harness))] }
+    return { segs: [t(`${unreportedCapacity(first.harness)}.`)] }
   }
   if (pool.override === 'hold') {
     if (pool.overrideUntil) return { segs: [b(`On hold until ${at(pool.overrideUntil)}.`), t(` Agents leave ${pool.name} alone until then; today's share moves to the coming days.`)] }
@@ -762,21 +761,3 @@ function planSentence(pool: PoolView, now: number, timezone?: string): Sentence 
 // ---------- Gauge preference ----------
 export type GaugeMode = 'left' | 'used'
 export interface GaugePreference { mode: GaugeMode; accounts: Record<string, GaugeMode> }
-export const gaugeModeFor = (pref: GaugePreference | null, accountId: string): GaugeMode => pref?.accounts?.[accountId] ?? pref?.mode ?? 'left'
-/** Toggle one account; an account that matches the global choice stores nothing. */
-export function toggleAccountMode(pref: GaugePreference | null, accountId: string): GaugePreference {
-  const base: GaugePreference = { mode: pref?.mode ?? 'left', accounts: { ...(pref?.accounts ?? {}) } }
-  const next: GaugeMode = gaugeModeFor(base, accountId) === 'left' ? 'used' : 'left'
-  if (next === base.mode) delete base.accounts[accountId]
-  else base.accounts[accountId] = next
-  return base
-}
-export const setGlobalMode = (_pref: GaugePreference | null, mode: GaugeMode): GaugePreference => ({ mode, accounts: {} })
-
-/** The folded Accounts and computers line on /agents (AEON-402): counts only, no filler. */
-export function setupSummary(input: { computers: number; ready: number; total: number }): string {
-  const parts: string[] = []
-  if (input.computers) parts.push(`${input.computers} ${input.computers === 1 ? 'computer' : 'computers'}`)
-  if (input.total) parts.push(input.ready === input.total ? `${input.total} ${input.total === 1 ? 'account' : 'accounts'} ready` : `${input.ready} of ${input.total} accounts ready`)
-  return parts.join(' · ')
-}

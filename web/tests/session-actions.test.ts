@@ -5,7 +5,7 @@ import { test } from 'node:test'
 import type { SessionView } from '../src/stores/agents.ts'
 import { assessAgentState, problemReason } from '../src/lib/agentSignals.ts'
 import { stopReasonLabel } from '../src/lib/agentState.ts'
-import { quickRemoval, removalConsequence, sessionMenu } from '../src/components/agents/sessionActions.ts'
+import { quickRemoval, removalConsequence, sessionMenu, recoveryAction } from '../src/components/agents/sessionActions.ts'
 
 const now = Date.parse('2026-09-29T09:00:00Z')
 const ago = (ms: number) => new Date(now - ms).toISOString()
@@ -98,4 +98,16 @@ test('"the process keeps running" is said only with a fresh heartbeat', () => {
   assert.equal(removalConsequence(view({ heartbeat_at: ago(4 * 60_000) }).session, now), '')
   assert.equal(removalConsequence(view({ heartbeat_at: null }).session, now), '')
   assert.equal(removalConsequence(view({ phase: 'stopped', stopped_at: ago(0) }).session, now), '')
+})
+
+test('recovery offers only the server diagnosis for the exact visible session and current person authority', () => {
+  const session = view({ agent_recovery: { session_id: 's1', observed_revision: 'a'.repeat(64), cause: 'heartbeat_overdue', detail: 'Heartbeat overdue', action: 'restart' } }).session
+  const permitted = (permission: string) => permission === 'harness.control' || permission === 'run.create'
+  assert.equal(recoveryAction(session, true, permitted), 'restart')
+  assert.equal(recoveryAction(session, false, permitted), '')
+  assert.equal(recoveryAction(session, true, () => false), '')
+  assert.equal(recoveryAction(session, true, permission => permission === 'harness.control'), '')
+  assert.equal(recoveryAction({ ...session, id: 'another-session' }, true, permitted), '')
+  assert.equal(recoveryAction({ ...session, archived_at: ago(0) }, true, permitted), '')
+  assert.equal(recoveryAction({ ...session, agent_recovery: { ...session.agent_recovery!, action: 'reconnect' } }, true, permission => permission === 'harness.control'), 'reconnect')
 })

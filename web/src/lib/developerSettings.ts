@@ -4,8 +4,8 @@ import { useSession } from '../stores/session'
 import { readPreference, writePreference } from './preferences'
 
 export const DEVELOPER_SETTINGS_KEY = 'developer-ui'
-interface Choice { show_flow_controls?: boolean }
-interface State { value: Choice; ready: Promise<void> | null; saving: boolean; failed: boolean }
+interface Choice { show_reserved_versions?: boolean; show_expert_start?: boolean; show_header_graph?: boolean }
+interface State { value: Choice; ready: Promise<void> | null; loaded: boolean; saving: boolean; failed: boolean }
 // This opt-in belongs to the authenticated person and workspace, including
 // account changes in the same document. Missing or unreadable values are off.
 const states = new Map<string, State>()
@@ -17,17 +17,24 @@ export function useDeveloperSettings() {
     const scope = JSON.stringify([identity.tenant.id, identity.principal.id])
     let entry = states.get(scope)
     if (!entry) {
-      entry = reactive<State>({ value: {}, ready: null, saving: false, failed: false })
+      entry = reactive<State>({ value: {}, ready: null, loaded: false, saving: false, failed: false })
       states.set(scope, entry)
     }
     return entry
   })
   watch(state, entry => {
     if (!entry || entry.ready) return
-    entry.ready = readPreference(DEVELOPER_SETTINGS_KEY).then(value => { entry.value = value ?? {} })
+    entry.ready = readPreference(DEVELOPER_SETTINGS_KEY).then(value => { entry.value = value ?? {}; entry.loaded = true })
   }, { immediate: true })
-  const showFlowControls = computed(() => state.value?.value.show_flow_controls === true)
-  async function setShowFlowControls(show: boolean) {
+  const showReservedVersions = computed(() => state.value?.value.show_reserved_versions === true)
+  // AEON-741: manual Start agent and Start now on… sit behind this expert opt-in.
+  const showExpertStart = computed(() => state.value?.value.show_expert_start === true)
+  // AEON-1042: the project-header graph glimpse is a developer opt-in. The old
+  // list:display headerGraph choice is not read, so everyone starts with it off.
+  const showHeaderGraph = computed(() => state.value?.value.show_header_graph === true)
+  const loading = computed(() => !!state.value && !state.value.loaded)
+  const ready = computed(() => state.value?.ready ?? Promise.resolve())
+  async function saveChoice(key: keyof Choice, show: boolean) {
     const entry = state.value
     if (!entry || entry.saving) return
     entry.saving = true
@@ -35,12 +42,15 @@ export function useDeveloperSettings() {
     // An initial read cannot race the write or discard other preference fields.
     await entry.ready
     if (entry !== state.value) { entry.saving = false; return }
-    const next = { ...entry.value, show_flow_controls: show }
+    const next = { ...entry.value, [key]: show }
     const saved = await writePreference(DEVELOPER_SETTINGS_KEY, next)
     // Reveal only after the deliberate choice has been saved successfully.
     if (saved) entry.value = next
     else entry.failed = true
     entry.saving = false
   }
-  return { showFlowControls, setShowFlowControls, saving: computed(() => state.value?.saving ?? false), failed: computed(() => state.value?.failed ?? false) }
+  const setShowReservedVersions = (show: boolean) => saveChoice('show_reserved_versions', show)
+  const setShowExpertStart = (show: boolean) => saveChoice('show_expert_start', show)
+  const setShowHeaderGraph = (show: boolean) => saveChoice('show_header_graph', show)
+  return { showReservedVersions, setShowReservedVersions, showExpertStart, setShowExpertStart, showHeaderGraph, setShowHeaderGraph, loading, ready, saving: computed(() => state.value?.saving ?? false), failed: computed(() => state.value?.failed ?? false) }
 }

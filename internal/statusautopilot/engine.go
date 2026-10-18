@@ -12,8 +12,10 @@ import (
 	"time"
 
 	"github.com/inspr-at/paimos/internal/authz"
+	"github.com/inspr-at/paimos/internal/db"
 	"github.com/inspr-at/paimos/internal/events"
 	"github.com/inspr-at/paimos/internal/tenant"
+	"github.com/inspr-at/paimos/internal/workorders"
 	"github.com/jackc/pgx/v5"
 )
 
@@ -30,10 +32,12 @@ type node struct {
 	Updated    time.Time                  `json:"updated_at"`
 }
 type candidate struct {
-	Node            node
-	Since, Activity time.Time
-	WorkActivity    time.Time
-	Work, Objection bool
+	Node                   node
+	Since, Activity        time.Time
+	WorkActivity           time.Time
+	Work, Objection        bool
+	MergedAt               time.Time
+	UsesReleases, Released bool
 }
 type decision struct {
 	Rule, To, Flag, Reason, Anchor string
@@ -41,19 +45,27 @@ type decision struct {
 }
 
 func pending(n node) bool { return n.HumanCheck != nil && strings.TrimSpace(*n.HumanCheck) != "" }
-func fieldTime(n node, key string) time.Time {
-	var s string
-	_ = json.Unmarshal(n.Fields[key], &s)
-	t, _ := time.Parse(time.RFC3339Nano, s)
-	return t
-}
+
 func fieldString(n node, key string) string {
 	var s string
 	_ = json.Unmarshal(n.Fields[key], &s)
 	return strings.TrimSpace(s)
 }
+func noReleaseNeeded(n node) bool {
+	var marked bool
+	_ = json.Unmarshal(n.Fields["no_release_needed"], &marked)
+	return marked
+}
+func classic(n node) bool {
+	_, imported := n.Fields["classic"]
+	return imported
+}
+
 func evaluate(c candidate, s Settings, now time.Time) *decision {
 	n := c.Node
+	if classic(n) {
+		return nil
+	}
 	var key, to, flag, reason string
 	since := c.Since
 	switch normaliseState(n.State) {
@@ -82,20 +94,27 @@ func evaluate(c candidate, s Settings, now time.Time) *decision {
 			return nil
 		}
 	case "done":
+		if noReleaseNeeded(n) {
+			key = "accept"
+			to = "accepted"
+			reason = "Done for %d days without objection; no release needed. Accepted under this workspace’s status policy."
+			break
+		}
 		key = "done"
 		flag = "missed_release"
-		reason = "Merged but not released for %d days; flagged as missed release."
-		if t := fieldTime(n, "merged_at"); !t.IsZero() {
-			since = t
+		reason = "Done, but in no release: merged %d+ days ago and not released."
+		if c.MergedAt.IsZero() || !c.UsesReleases || c.Released {
+			return nil
 		}
+		since = c.MergedAt
 	case "delivered":
 		key = "accept"
 		to = "accepted"
 		reason = "Delivered for %d days without objection; accepted under this workspace’s status policy."
-		if c.Objection || fieldString(n, "delivery_objection") != "" {
-			return nil
-		}
 	default:
+		return nil
+	}
+	if key == "accept" && (c.Objection || fieldString(n, "delivery_objection") != "") {
 		return nil
 	}
 	r := s.Rules[key]
@@ -126,6 +145,10 @@ func normaliseState(state string) string {
 	return stateSeparator.ReplaceAllString(strings.ToLower(strings.TrimSpace(state)), "_")
 }
 
+// Only delivery's recorded merge is evidence; editable ticket fields and import
+// events cannot establish a merge. Undo invalidates the recorded observation.
+const mergeEvidenceSQL = `e.type='delivery.merge_done' AND NOT EXISTS(SELECT 1 FROM events u WHERE u.tenant_id=e.tenant_id AND u.undo_of=e.id)`
+
 const candidateStateSQL = `regexp_replace(lower(btrim(n.state)), '[[:space:]-]+', '_', 'g')`
 
 func loadCandidates(ctx context.Context, tx pgx.Tx, ids []string, now time.Time) ([]candidate, error) {
@@ -134,14 +157,20 @@ func loadCandidates(ctx context.Context, tx pgx.Tx, ids []string, now time.Time)
  greatest(n.created_at,coalesce(activity.at,n.created_at),coalesce(work.at,n.created_at),coalesce(review.at,n.created_at)),
  greatest(coalesce(episode.at,n.created_at),coalesce(work.at,n.created_at),coalesce(review.at,n.created_at)),
  coalesce(work.live,false),
- EXISTS(SELECT 1 FROM events e JOIN principals p ON p.tenant_id=e.tenant_id AND p.id=e.actor_principal_id WHERE e.tenant_id=n.tenant_id AND e.node_id=n.id AND p.kind='person' AND (e.type IN ('comment.created','comment.updated') OR EXISTS(SELECT 1 FROM events original WHERE original.tenant_id=e.tenant_id AND original.id=e.undo_of AND original.metadata->>'rule'='accept')) AND e.at>=coalesce(episode.at,n.created_at))
+ EXISTS(SELECT 1 FROM events e JOIN principals p ON p.tenant_id=e.tenant_id AND p.id=e.actor_principal_id WHERE e.tenant_id=n.tenant_id AND e.node_id=n.id AND p.kind='person' AND (e.type IN ('comment.created','comment.updated') OR EXISTS(SELECT 1 FROM events original WHERE original.tenant_id=e.tenant_id AND original.id=e.undo_of AND original.metadata->>'rule'='accept')) AND e.at>=coalesce(episode.at,n.created_at)),
+ merged.merged_at,
+ EXISTS(SELECT 1 FROM journey_releases r JOIN nodes release ON release.tenant_id=r.tenant_id AND release.id=r.release_node_id WHERE r.tenant_id=n.tenant_id AND r.project_node_id=n.project_id AND release.deleted_at IS NULL),
+ EXISTS(SELECT 1 FROM journey_tickets t JOIN journey_releases r ON r.tenant_id=t.tenant_id AND r.release_node_id=t.release_node_id WHERE t.tenant_id=n.tenant_id AND t.ticket_node_id=n.id AND r.project_node_id=n.project_id AND r.state IN ('released','superseded'))
  FROM nodes n
- LEFT JOIN LATERAL (SELECT max(e.at) at FROM events e WHERE e.node_id=n.id AND e.tenant_id=n.tenant_id AND e.after->>'state'=n.state AND e.before->>'state' IS DISTINCT FROM e.after->>'state') episode ON true
+ LEFT JOIN LATERAL (SELECT max(e.at) at FROM events e WHERE e.node_id=n.id AND e.tenant_id=n.tenant_id AND e.after->>'state'=n.state AND e.before->>'state' IS DISTINCT FROM e.after->>'state' AND e.type NOT IN ('status_autopilot.attention_undone','import.node_created') AND NOT EXISTS(SELECT 1 FROM events u WHERE u.tenant_id=e.tenant_id AND u.undo_of=e.id)) episode ON true
  LEFT JOIN LATERAL (SELECT max(e.at) at FROM events e WHERE e.node_id=n.id AND e.tenant_id=n.tenant_id AND coalesce(e.metadata->>'job','')<>$2) activity ON true
  LEFT JOIN LATERAL (SELECT max(greatest(h.created_at,h.heartbeat_at,h.stopped_at)) at,
- bool_or(h.phase IN ('starting','working','stopping') AND h.stopped_at IS NULL AND h.archived_at IS NULL AND coalesce(h.heartbeat_at,h.created_at)>=$3) live
+ bool_or(h.archived_at IS NULL AND (
+ (h.phase IN ('starting','working','stopping') AND h.stopped_at IS NULL AND coalesce(h.heartbeat_at,h.created_at)>=$3)
+ OR (h.stop_reason='paused' AND h.pause_record->>'state' IN ('paused','resume_requested')))) live
  FROM harness_sessions h WHERE h.ticket_node_id=n.id AND h.tenant_id=n.tenant_id) work ON true
  LEFT JOIN LATERAL (SELECT max(r.created_at) at FROM work_order_reviews r WHERE r.ticket_node_id=n.id AND r.tenant_id=n.tenant_id AND r.pull_request IS NOT NULL) review ON true
+ LEFT JOIN LATERAL (SELECT e.metadata->>'merged_at' merged_at FROM events e WHERE e.tenant_id=n.tenant_id AND e.node_id=n.id AND `+mergeEvidenceSQL+` ORDER BY e.id DESC LIMIT 1) merged ON true
  WHERE n.id=ANY($1::uuid[]) AND n.deleted_at IS NULL ORDER BY n.id FOR UPDATE OF n`, ids, Job, now.Add(-15*time.Minute))
 	if err != nil {
 		return nil, err
@@ -151,11 +180,15 @@ func loadCandidates(ctx context.Context, tx pgx.Tx, ids []string, now time.Time)
 	for rows.Next() {
 		var c candidate
 		var raw []byte
-		if err = rows.Scan(&raw, &c.Since, &c.Activity, &c.WorkActivity, &c.Work, &c.Objection); err != nil {
+		var mergedAt *string
+		if err = rows.Scan(&raw, &c.Since, &c.Activity, &c.WorkActivity, &c.Work, &c.Objection, &mergedAt, &c.UsesReleases, &c.Released); err != nil {
 			return nil, err
 		}
 		if err = json.Unmarshal(raw, &c.Node); err != nil {
 			return nil, err
+		}
+		if mergedAt != nil {
+			c.MergedAt, _ = time.Parse(time.RFC3339Nano, *mergedAt)
 		}
 		out = append(out, c)
 	}
@@ -176,9 +209,28 @@ func loadCandidate(ctx context.Context, tx pgx.Tx, id string, now time.Time) (ca
 }
 
 func apply(ctx context.Context, tx pgx.Tx, p tenant.Principal, n node, d decision) error {
+	parent, err := db.WorkStatusParentTx(ctx, tx, n.ID)
+	if err != nil {
+		return err
+	}
+	if parent {
+		return events.ErrConflict
+	}
+
 	var seen bool
 	if err := tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM status_autopilot_receipts WHERE node_id=$1 AND rule=$2 AND anchor=$3)`, n.ID, d.Rule, d.Anchor).Scan(&seen); err != nil || seen {
 		return err
+	}
+	var entry *workorders.EntryRecord
+	if d.Rule == "queue_pickup" {
+		target, err := workorders.EntryTicketTx(ctx, tx, n.ID)
+		if err != nil {
+			return err
+		}
+		entry, err = workorders.RequireEntryTx(ctx, tx, p, target, "in_progress", nil)
+		if err != nil {
+			return err
+		}
 	}
 	var before, after []byte
 	if err := tx.QueryRow(ctx, `SELECT to_jsonb(n) FROM nodes n WHERE id=$1`, n.ID).Scan(&before); err != nil {
@@ -208,13 +260,16 @@ func apply(ctx context.Context, tx pgx.Tx, p tenant.Principal, n node, d decisio
 			return err
 		}
 	}
-	meta, _ := json.Marshal(map[string]any{"job": Job, "rule": d.Rule, "reason": d.Reason, "flag": d.Flag})
+	meta, _ := json.Marshal(map[string]any{"job": Job, "rule": d.Rule, "reason": d.Reason, "flag": d.Flag, "entry_checks": entry})
 	ev, err := events.Append(ctx, tx, p, events.Change{NodeID: &n.ID, Type: typ, Before: json.RawMessage(before), After: json.RawMessage(after), Metadata: meta})
 	if err != nil {
 		return err
 	}
 	_, err = tx.Exec(ctx, `INSERT INTO status_autopilot_receipts(tenant_id,node_id,rule,anchor,event_id) VALUES($1,$2,$3,$4,$5)`, p.TenantID, n.ID, d.Rule, d.Anchor, ev.ID)
 	if err != nil {
+		return err
+	}
+	if _, err = tx.Exec(ctx, `UPDATE status_autopilot_proposals SET status='applied' WHERE node_id=$1 AND rule=$2 AND anchor=$3 AND status='pending'`, n.ID, d.Rule, d.Anchor); err != nil {
 		return err
 	}
 	// The audit reason is also a durable comment for stalled, shipped, accepted
@@ -289,6 +344,13 @@ func undo(ctx context.Context, tx pgx.Tx, p tenant.Principal, e events.Event) (e
 		return events.Change{}, events.ErrForbidden
 	}
 	if !c.Node.Updated.Equal(after.Updated) || c.Node.State != after.State {
+		return events.Change{}, events.ErrConflict
+	}
+	parent, err := db.WorkStatusParentTx(ctx, tx, before.ID)
+	if err != nil {
+		return events.Change{}, err
+	}
+	if parent {
 		return events.Change{}, events.ErrConflict
 	}
 	marks, err := json.Marshal(before.Marks)

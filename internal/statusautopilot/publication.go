@@ -9,6 +9,8 @@ import (
 	"strings"
 	"time"
 
+	"github.com/inspr-at/paimos/internal/config"
+	"github.com/inspr-at/paimos/internal/db"
 	"github.com/inspr-at/paimos/internal/systemactor"
 	"github.com/inspr-at/paimos/internal/tenant"
 	"github.com/jackc/pgx/v5"
@@ -18,6 +20,10 @@ import (
 // remaining tickets are durably queued for the worker. A savepoint prevents an
 // automation failure from rolling back an otherwise valid release settlement.
 func PublishTx(ctx context.Context, tx pgx.Tx, tenantID, releaseID string) error {
+	mode, err := config.StatusAutopilotMode()
+	if err != nil || mode == "off" {
+		return err
+	}
 	batch, err := tx.Begin(ctx)
 	if err != nil {
 		return err
@@ -62,13 +68,14 @@ func queueReleaseTx(ctx context.Context, tx pgx.Tx, tenantID, releaseID string) 
  ) members ON members.id=n.id::text
  JOIN journey_releases r ON r.release_node_id=$1 AND r.tenant_id=n.tenant_id AND n.project_id=r.project_node_id
  JOIN nodes release ON release.tenant_id=r.tenant_id AND release.id=r.release_node_id AND release.deleted_at IS NULL
- WHERE n.deleted_at IS NULL AND `+candidateStateSQL+`='done' ON CONFLICT DO NOTHING`, releaseID, tenantID)
+ WHERE n.deleted_at IS NULL AND `+candidateStateSQL+`='done'
+ AND n.fields->'no_release_needed' IS DISTINCT FROM 'true'::jsonb ON CONFLICT DO NOTHING`, releaseID, tenantID)
 	return err
 }
 
 func deliveryBatchTx(ctx context.Context, tx pgx.Tx, tenantID, releaseID string, now time.Time) (int, error) {
 	s, err := Load(ctx, tx)
-	if err != nil || !s.Rules["publish"].Enabled {
+	if err != nil || !s.Rules["publish"].Enabled || s.ModeAt(now) == "off" {
 		return 0, err
 	}
 	// Remove disappeared work without loading a missing release/ticket. These
@@ -120,13 +127,14 @@ func deliveryBatchTx(ctx context.Context, tx pgx.Tx, tenantID, releaseID string,
 		if err != nil {
 			return 0, err
 		}
-		waiting := false
+		waiting, suggesting := false, false
 		c, _, err := loadCandidate(ctx, item, d.id, d.published)
 		if errors.Is(err, pgx.ErrNoRows) {
 			err = nil
-		} else if err == nil && c.Node.ProjectID != nil && *c.Node.ProjectID == d.project && normaliseState(c.Node.State) == "done" && !c.Since.After(d.published) {
+		} else if err == nil && c.Node.ProjectID != nil && *c.Node.ProjectID == d.project && normaliseState(c.Node.State) == "done" && !noReleaseNeeded(c.Node) && !c.Since.After(d.published) {
 			waiting = pending(c.Node)
-			err = deliver(ctx, item, p, c, d.release, d.title, d.version)
+			suggesting = s.ModeAt(now) == "suggest"
+			err = enact(ctx, item, p, c.Node, deliveryDecision(c.Node, d.release, d.title, d.version), s.ModeAt(now))
 		}
 		if err != nil {
 			if rollbackErr := item.Rollback(ctx); rollbackErr != nil {
@@ -135,7 +143,11 @@ func deliveryBatchTx(ctx context.Context, tx pgx.Tx, tenantID, releaseID string,
 			slog.Error("status autopilot ticket deferred", "node_id", d.id, "err", err)
 			_, err = tx.Exec(ctx, `UPDATE status_autopilot_deliveries SET retry_after=$3 WHERE release_id=$1 AND node_id=$2`, d.release, d.id, now.Add(24*time.Hour))
 		} else {
-			if waiting {
+			if suggesting {
+				// Preserve publication work through the suggestion period. Deferring
+				// the row also makes a full proposal batch yield instead of spinning.
+				_, err = item.Exec(ctx, `UPDATE status_autopilot_deliveries SET retry_after=$3 WHERE release_id=$1 AND node_id=$2`, d.release, d.id, now.Add(time.Minute))
+			} else if waiting {
 				_, err = item.Exec(ctx, `UPDATE status_autopilot_deliveries SET checked=true WHERE release_id=$1 AND node_id=$2`, d.release, d.id)
 			} else {
 				_, err = item.Exec(ctx, `DELETE FROM status_autopilot_deliveries WHERE release_id=$1 AND node_id=$2`, d.release, d.id)
@@ -153,9 +165,12 @@ func deliveryBatchTx(ctx context.Context, tx pgx.Tx, tenantID, releaseID string,
 	return max(len(work), int(cleaned.RowsAffected())), nil
 }
 
-func deliver(ctx context.Context, tx pgx.Tx, p tenant.Principal, c candidate, releaseID, title, version string) error {
-	n := c.Node
-	d := decision{Rule: "publish", To: "delivered", Anchor: releaseID, Reason: fmt.Sprintf("Shipped in release %s (%s).", title, version)}
+func deliveryDecision(n node, releaseID, title, version string) decision {
+	return publicationDecision(n, releaseID, fmt.Sprintf("Shipped in release %s (%s).", title, version), title+" ("+version+")")
+}
+
+func publicationDecision(n node, anchor, reason, source string) decision {
+	d := decision{Rule: "publish", To: "delivered", Anchor: anchor, Reason: reason}
 	if pr := fieldString(n, "pr_url"); pr != "" {
 		d.Reason += " PR: " + pr + "."
 	}
@@ -166,7 +181,54 @@ func deliver(ctx context.Context, tx pgx.Tx, p tenant.Principal, c candidate, re
 		d.Skip = true
 		d.To = ""
 		d.Anchor += "/human-check/" + *n.HumanCheck
-		d.Reason = "Needs a human check: " + strings.TrimSpace(*n.HumanCheck) + ". Delivery in " + title + " (" + version + ") was skipped."
+		d.Reason = "Needs a human check: " + strings.TrimSpace(*n.HumanCheck) + ". Delivery in " + source + " was skipped."
 	}
-	return apply(ctx, tx, p, n, d)
+	return d
+}
+
+type DeploymentResult struct {
+	NodeID string `json:"node_id"`
+	Result string `json:"result"`
+	Reason string `json:"reason,omitempty"`
+}
+
+// DeliverDeploymentTx is an explicitly authorized live confirmation, not an
+// unattended policy job. It shares publication decisions, human-check handling,
+// receipts, audit/comments and Undo with release publication. The caller holds
+// the tenant/pairing/tree fence, has verified the immutable merge evidence and
+// has rechecked releases.deploy for this project in this transaction.
+func DeliverDeploymentTx(ctx context.Context, tx pgx.Tx, p tenant.Principal, project, anchor, source string, ids []string, now time.Time) ([]DeploymentResult, error) {
+	// Acquire the complete sorted candidate batch before the first audit event.
+	candidates, err := loadCandidates(ctx, tx, ids, now)
+	if err != nil {
+		return nil, err
+	}
+	out := make([]DeploymentResult, 0, len(candidates))
+	for _, c := range candidates {
+		n := c.Node
+		r := DeploymentResult{NodeID: n.ID, Result: "unchanged"}
+		parent, err := db.WorkStatusParentTx(ctx, tx, n.ID)
+		if err != nil {
+			return nil, err
+		}
+		// Also protect projects where parent-status derivation is not enabled.
+		var leaf bool
+		if err := tx.QueryRow(ctx, `SELECT k.slug='work' AND NOT EXISTS(SELECT 1 FROM nodes child JOIN node_kinds ck ON ck.tenant_id=child.tenant_id AND ck.id=child.kind_id WHERE child.parent_id=n.id AND child.deleted_at IS NULL AND ck.slug='work') FROM nodes n JOIN node_kinds k ON k.tenant_id=n.tenant_id AND k.id=n.kind_id WHERE n.id=$1`, n.ID).Scan(&leaf); err != nil {
+			return nil, err
+		}
+		if n.ProjectID == nil || *n.ProjectID != project || parent || !leaf || normaliseState(n.State) != "done" || noReleaseNeeded(n) {
+			out = append(out, r)
+			continue
+		}
+		d := publicationDecision(n, anchor, "Confirmed live in "+source+".", source)
+		if err := apply(ctx, tx, p, n, d); err != nil {
+			return nil, err
+		}
+		r.Result = "delivered"
+		if d.Skip {
+			r.Result, r.Reason = "skipped", d.Reason
+		}
+		out = append(out, r)
+	}
+	return out, nil
 }

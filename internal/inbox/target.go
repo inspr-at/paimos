@@ -191,7 +191,7 @@ func (m *module) handleDeleteTarget(w http.ResponseWriter, r *http.Request) {
 func (m *module) disableTarget(ctx context.Context, p tenant.Principal, id string) error {
 	return db.InTenant(tenant.WithPrincipal(ctx, p), m.pool, p.TenantID, func(tx pgx.Tx) error {
 		item, err := scanTarget(tx.QueryRow(ctx, `SELECT id::text, principal_id::text, kind, webhook_url, enabled, created_at
-			FROM inbox_delivery_targets WHERE id = $1::uuid FOR UPDATE`, id))
+			FROM inbox_delivery_targets WHERE id = $1::uuid FOR NO KEY UPDATE`, id))
 		if errors.Is(err, pgx.ErrNoRows) {
 			return errNotFound
 		}

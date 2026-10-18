@@ -1,21 +1,26 @@
 <!-- SPDX-License-Identifier: AGPL-3.0-only -->
 <script setup lang="ts">
-import { computed, nextTick, ref } from 'vue'
+import { computed, nextTick, ref, watch } from 'vue'
 import KeyCap from '../KeyCap.vue'
 import PersonAvatar from './PersonAvatar.vue'
 
 // Write a comment: Markdown, Cmd/Ctrl+Enter posts, c focuses it from the panel.
-const props = defineProps<{ me: string; meId?: string | null; post: (body: string) => Promise<boolean>; disabled?: boolean }>()
-const draft = ref('')
+const props = defineProps<{ recordId?: string; me: string; meId?: string | null; post: (body: string) => Promise<boolean>; disabled?: boolean }>()
+const draft = defineModel<string>({ default: '' })
 const busy = ref(false)
 const focused = ref(false)
+let generation = 0
+function discard() { generation++; draft.value = ''; busy.value = false; focused.value = false }
+watch(() => props.recordId, discard, { flush: 'sync' })
 const area = ref<HTMLTextAreaElement>()
 const open = computed(() => focused.value || !!draft.value)
 function grow() { const el = area.value; if (el) { el.style.height = 'auto'; el.style.height = `${Math.min(el.scrollHeight + 2, 240)}px` } }
 async function submit() {
   if (!draft.value.trim() || busy.value) return
+  const request = generation
   busy.value = true
   const ok = await props.post(draft.value)
+  if (request !== generation) return
   busy.value = false
   if (ok) { draft.value = ''; await nextTick(); grow() }
 }
@@ -24,7 +29,7 @@ function keydown(event: KeyboardEvent) {
   else if (event.key === 'Escape') { event.preventDefault(); event.stopPropagation(); area.value?.blur() }
 }
 async function focus() { area.value?.focus(); await nextTick(); grow() }
-defineExpose({ focus, isDirty: () => !!draft.value.trim() })
+defineExpose({ focus, isDirty: () => !!draft.value.trim(), discard })
 </script>
 
 <template>

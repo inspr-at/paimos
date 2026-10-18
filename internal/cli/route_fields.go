@@ -12,9 +12,6 @@ func validateRouteFlags(role, area, complexity string) error {
 	if strings.TrimSpace(role) != "" && !modelregistry.KnownRouteRole(role) {
 		return usagef("--role must be scout, mechanical, build, build-hard, or review-gate")
 	}
-	if strings.TrimSpace(area) != "" && !modelregistry.KnownRouteArea(area) {
-		return usagef("--area must be backend, frontend, full-stack, infra, design, or docs")
-	}
 	complexity = strings.TrimSpace(complexity)
 	if complexity != "" && complexity != "S" && complexity != "M" && complexity != "L" {
 		return usagef("--complexity must be S, M, or L")

@@ -15,9 +15,11 @@ import (
 
 	"github.com/jackc/pgx/v5"
 
+	"github.com/inspr-at/paimos/internal/agentpairing"
 	"github.com/inspr-at/paimos/internal/authz"
 	"github.com/inspr-at/paimos/internal/db"
 	"github.com/inspr-at/paimos/internal/events"
+	"github.com/inspr-at/paimos/internal/httpapi"
 	"github.com/inspr-at/paimos/internal/tenant"
 )
 
@@ -74,10 +76,15 @@ func (m *Module) hideWish(w http.ResponseWriter, r *http.Request) {
 }
 
 func (m *Module) moderateWish(w http.ResponseWriter, r *http.Request, state, eventType string) {
-	m.moderate(w, r, func(ctx context.Context, tx pgx.Tx, p tenant.Principal) (portalEdit, error) {
+	if !m.decodeAdminInput(w, r, func() error {
 		if err := emptyWishBody(r); err != nil {
-			return portalEdit{}, err
+			return err
 		}
+		return nil
+	}) {
+		return
+	}
+	m.moderate(w, r, func(ctx context.Context, tx pgx.Tx, p tenant.Principal) (portalEdit, error) {
 		id := r.PathValue("wishId")
 		if !uuidPattern.MatchString(id) {
 			return portalEdit{}, statusError{status: http.StatusBadRequest, msg: "invalid wish"}
@@ -87,11 +94,16 @@ func (m *Module) moderateWish(w http.ResponseWriter, r *http.Request, state, eve
 }
 
 func (m *Module) editProduct(w http.ResponseWriter, r *http.Request) {
-	m.moderate(w, r, func(ctx context.Context, tx pgx.Tx, p tenant.Principal) (portalEdit, error) {
-		var in productWrite
+	var in productWrite
+	if !m.decodeAdminInput(w, r, func() error {
 		if err := decodeEdit(r, &in); err != nil || (in.Title == nil && in.Summary == nil && in.Published == nil) {
-			return portalEdit{}, statusError{status: http.StatusBadRequest, msg: "invalid product"}
+			return statusError{status: http.StatusBadRequest, msg: "invalid product"}
 		}
+		return nil
+	}) {
+		return
+	}
+	m.moderate(w, r, func(ctx context.Context, tx pgx.Tx, p tenant.Principal) (portalEdit, error) {
 		id := r.PathValue("productId")
 		if !uuidPattern.MatchString(id) {
 			return portalEdit{}, statusError{status: http.StatusBadRequest, msg: "invalid product"}
@@ -101,11 +113,16 @@ func (m *Module) editProduct(w http.ResponseWriter, r *http.Request) {
 }
 
 func (m *Module) editFeature(w http.ResponseWriter, r *http.Request) {
-	m.moderate(w, r, func(ctx context.Context, tx pgx.Tx, p tenant.Principal) (portalEdit, error) {
-		var in featureWrite
+	var in featureWrite
+	if !m.decodeAdminInput(w, r, func() error {
 		if err := decodeEdit(r, &in); err != nil || (in.Title == nil && in.Summary == nil && in.Status == nil && in.Legal == nil && in.Reason == nil && in.Live == nil) {
-			return portalEdit{}, statusError{status: http.StatusBadRequest, msg: "invalid feature"}
+			return statusError{status: http.StatusBadRequest, msg: "invalid feature"}
 		}
+		return nil
+	}) {
+		return
+	}
+	m.moderate(w, r, func(ctx context.Context, tx pgx.Tx, p tenant.Principal) (portalEdit, error) {
 		id := r.PathValue("featureId")
 		if !uuidPattern.MatchString(id) {
 			return portalEdit{}, statusError{status: http.StatusBadRequest, msg: "invalid feature"}
@@ -126,6 +143,9 @@ func (m *Module) moderate(w http.ResponseWriter, r *http.Request, fn func(contex
 	}
 	var item portalEdit
 	err := db.InTenant(r.Context(), m.pool, p.TenantID, func(tx pgx.Tx) error {
+		if err := agentpairing.LockMutation(r.Context(), tx); err != nil {
+			return err
+		}
 		if err := authz.RequireTx(r.Context(), tx, p, "settings.manage", authz.Scope{}); err != nil {
 			return err
 		}
@@ -154,7 +174,7 @@ func (m *Module) moderate(w http.ResponseWriter, r *http.Request, fn func(contex
 }
 
 func emptyWishBody(r *http.Request) error {
-	buf, err := io.ReadAll(io.LimitReader(r.Body, 64))
+	buf, err := httpapi.ReadRequestBody(nil, r, 64, httpapi.DefaultBodyReadTimeout)
 	if err != nil || len(buf) >= 64 {
 		return statusError{status: http.StatusBadRequest, msg: "invalid wish"}
 	}
@@ -169,7 +189,7 @@ func decodeEdit(r *http.Request, dest any) error {
 	if !strings.HasPrefix(r.Header.Get("Content-Type"), "application/json") {
 		return errors.New("JSON required")
 	}
-	buf, err := io.ReadAll(io.LimitReader(r.Body, portalEditLimit+1))
+	buf, err := httpapi.ReadRequestBody(nil, r, portalEditLimit+1, httpapi.DefaultBodyReadTimeout)
 	if err != nil || len(buf) == 0 || len(buf) > portalEditLimit {
 		return errors.New("invalid JSON")
 	}

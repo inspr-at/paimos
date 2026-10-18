@@ -35,7 +35,7 @@ onMounted(async () => {
         <RouterLink class="profile-row" :to="`/settings/business/profiles/${p.id}`">
           <ProfileThumb :definition="p.definition" :size="40" />
           <span class="row-text">
-            <span class="row-name">{{ p.name }}</span>
+            <span v-clip-tip="p.name" class="row-name">{{ p.name }}</span>
             <span class="row-meta">{{ p.definition.layout_variant === 'classic-v1' ? 'Classic' : 'Standard' }} layout · {{ p.definition.locale === 'en' ? 'English' : 'Deutsch' }} · revision {{ p.revision }}</span>
           </span>
           <span v-if="p.id === defaultId" class="default-chip">Default</span>
@@ -59,4 +59,8 @@ onMounted(async () => {
 .default-chip { flex-shrink: 0; height: 20px; padding: 0 7px; border-radius: 999px; background: var(--chip-teal-bg); box-shadow: inset 0 0 0 1px var(--chip-teal-line); color: var(--teal-ink); font: 600 10px/20px var(--mono); letter-spacing: .06em; text-transform: uppercase; font-variant-ligatures: none; }
 .row-chev { flex-shrink: 0; color: var(--ink-3); }
 .archived-note { margin-top: 8px; font-size: 12.5px; color: var(--ink-2); }
+@media (max-width: 720px) {
+  .row-name { white-space: normal; overflow-wrap: anywhere; display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; }
+  .profile-row { align-items: flex-start; }
+}
 </style>

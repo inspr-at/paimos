@@ -1,0 +1,11 @@
+{
+  "schema": "aeon.migration-policy-exceptions.v1",
+  "exceptions": [
+    {
+      "file": "1088_more_harnesses.sql",
+      "sha256": "933ef28a5dd85d16e2ad1e61b1fdd09a80bfd797ea79b6a7f91c82221942e4eb",
+      "ticket": "AEON-452",
+      "reason": "Only definition-selected drops of historical enum CHECKs need this one-file exception. Superset replacements are ADD CONSTRAINT CHECK NOT VALID followed by VALIDATE CONSTRAINT, both allowlisted. Every historical harness/family/adapter value, pi unknown-family policy and the review null-pairing predicate remain intact. No rows, columns, RLS policies or other constraints are removed. This exact-byte draft CI exception still requires coordinator acceptance before merge/release and previous-binary compatibility measurement; it grants no release authority."
+    }
+  ]
+}

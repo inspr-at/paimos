@@ -1,0 +1,26 @@
+{
+  "_license": "SPDX-License-Identifier: AGPL-3.0-only",
+  "builtin_roles": {
+    "owner": [
+      "ownership.transfer"
+    ]
+  },
+  "registry": [
+    {
+      "agent_grantable": false,
+      "description": "Transfer workspace ownership",
+      "grantable_at": [
+        "workspace"
+      ],
+      "group": "Ownership",
+      "key": "ownership.transfer",
+      "owner_workstation_grantable": false,
+      "risk": "high"
+    }
+  ],
+  "words": {
+    "resources": {
+      "ownership": "ownership"
+    }
+  }
+}

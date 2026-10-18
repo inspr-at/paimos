@@ -1,0 +1,22 @@
+{
+  "group": "work-node-integration",
+  "nightlyTiming": {
+    "seconds": 21.072,
+    "selectedTests": 6
+  },
+  "spec": {
+    "file": "tests/work-parent-status.spec.ts",
+    "listedTests": 6,
+    "tierTiming": {
+      "caseSeconds": {
+        "max": 3.448,
+        "median": 3.309,
+        "min": 3.237
+      },
+      "seconds": 21.072,
+      "selectedTests": 6
+    },
+    "weightSeconds": 16.082,
+    "weightSource": "hosted-CI-37321154870"
+  }
+}

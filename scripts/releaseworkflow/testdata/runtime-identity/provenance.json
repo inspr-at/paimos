@@ -1,0 +1,59 @@
+{
+  "description": "Real Docker BuildKit docker-export configs; fixture builds are FROM scratch with no credentials. Epoch injection replaces sleeps. Config bytes extracted unchanged from manifest.json Config path.",
+  "dockerfile": "FROM scratch\nCOPY payload /payload\nENV AEON_FIXTURE=runtime\nUSER 65532:65532\nWORKDIR /\nENTRYPOINT [\"/payload\"]\nCMD [\"serve\"]\nEXPOSE 8080\nLABEL org.inspr.fixture=AEON-588\nSTOPSIGNAL SIGTERM\n",
+  "exports": {
+    "smoked": {
+      "command": [
+        "docker",
+        "buildx",
+        "build",
+        "--build-arg",
+        "SOURCE_DATE_EPOCH=1700000000",
+        "--output",
+        "type=docker,dest=tmp/aeon-588-r2/smoked.tar",
+        "--tag",
+        "aeon-588-r2-fixture:smoked",
+        "tmp/aeon-588-r2/runtime-context"
+      ],
+      "source_date_epoch": 1700000000,
+      "payload": "AEON-588 runtime fixture\n",
+      "config_sha256": "2c66dd86bf14e8a1de9301dbb86e9343427a80b03fc2f1f6a7d0a9901ca351c3"
+    },
+    "clock-only": {
+      "command": [
+        "docker",
+        "buildx",
+        "build",
+        "--build-arg",
+        "SOURCE_DATE_EPOCH=1700000100",
+        "--output",
+        "type=docker,dest=tmp/aeon-588-r2/clock-only.tar",
+        "--tag",
+        "aeon-588-r2-fixture:clock-only",
+        "tmp/aeon-588-r2/runtime-context"
+      ],
+      "source_date_epoch": 1700000100,
+      "payload": "AEON-588 runtime fixture\n",
+      "config_sha256": "95b7d60c2584cef55d1fbd8279eda01ac5ea4039a38352a98493640d5409eaa2"
+    },
+    "different-rootfs": {
+      "command": [
+        "docker",
+        "buildx",
+        "build",
+        "--build-arg",
+        "SOURCE_DATE_EPOCH=1700000000",
+        "--output",
+        "type=docker,dest=tmp/aeon-588-r2/different-rootfs.tar",
+        "--tag",
+        "aeon-588-r2-fixture:different-rootfs",
+        "tmp/aeon-588-r2/runtime-context"
+      ],
+      "source_date_epoch": 1700000000,
+      "payload": "AEON-588 different rootfs fixture\n",
+      "config_sha256": "0269247405b5957b221e416e6c484a3e29ea3f856d208e7e5d91227150af8531"
+    }
+  },
+  "docker_version": "29.5.2",
+  "buildx_version": "github.com/docker/buildx v0.35.0"
+}

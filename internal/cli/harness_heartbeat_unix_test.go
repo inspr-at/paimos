@@ -5,13 +5,17 @@
 package cli
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"io"
+	"net"
 	"net/http"
+	"net/http/cookiejar"
 	"os"
 	"os/exec"
 	"path/filepath"
+	goruntime "runtime"
 	"strconv"
 	"strings"
 	"syscall"
@@ -20,10 +24,110 @@ import (
 
 	"github.com/jackc/pgx/v5"
 
+	"github.com/inspr-at/paimos/internal/agentd"
+	"github.com/inspr-at/paimos/internal/agentsetup"
 	"github.com/inspr-at/paimos/internal/db"
 	"github.com/inspr-at/paimos/internal/dbtest"
+	"github.com/inspr-at/paimos/internal/harness"
 	"golang.org/x/sys/unix"
 )
+
+// Risk: mock receipts can hide repeated ordinary claims, another dispatch key,
+// or missing person confirmation. Exercise the real auth, heartbeat and lead
+// transactions and inspect their committed generation and audit together.
+func TestHeartbeatAutomaticAdoptionCommitsOneProvenGeneration(t *testing.T) {
+	isolate(t)
+	t.Setenv("HOME", t.TempDir())
+	opened := dbtest.Open(t)
+	if err := db.EnsureTenant(t.Context(), opened.App, "aeon", "Aeon"); err != nil {
+		t.Fatal(err)
+	}
+	base := renameServer(t, opened, "aeon", true)
+	agent := mintAgent(t, base, "automatic-lead")
+	seedProject(t, base, agent.Token)
+	t.Setenv("AEON_URL", base)
+	t.Setenv("AEON_API_KEY", agent.Token)
+	var stdout, stderr bytes.Buffer
+	rt := &runtime{stdin: strings.NewReader(""), stdout: &stdout, stderr: &stderr, program: "aeon"}
+	o := heartbeatTestOptions(t.TempDir())
+	o.Agent, o.Role, o.SourceSession = "automatic-lead", "coordinator", "11111111-1111-4111-8111-111111111111"
+	o.HarnessVersion = "fixture"
+	project, err := rt.harnessProject(o.Project)
+	if err != nil {
+		t.Fatal(err)
+	}
+	o.ProjectID = project
+	session, created, err := rt.openHeartbeatSession(t.Context(), o, heartbeatDeps{alive: func(int) bool { return true }})
+	if err != nil || !created {
+		t.Fatal("could not register the fixture coordinator")
+	}
+	defer session.hold.release()
+	if err := saveHeartbeatSession(&session); err != nil {
+		t.Fatal(err)
+	}
+	beat := func() {
+		t.Helper()
+		// An optional inbox refusal must not starve the committed own-session
+		// claim, close the helper, or overwrite its saved receipt.
+		err := rt.heartbeatBeat(t.Context(), o, heartbeatDeps{}, &session)
+		if err == nil || !strings.Contains(err.Error(), "paired reconnect binding was refused") {
+			t.Fatalf("fixture did not exercise the optional inbox refusal: %v", err)
+		}
+	}
+	beat()
+	if session.disk.LeadAdoption != nil {
+		t.Fatal("unconfirmed coordinator attempted an automatic claim")
+	}
+	jar, err := cookiejar.New(nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	person := &http.Client{Jar: jar}
+	if status, _ := doJSON(t, person, http.MethodPost, base+"/api/auth/dev-login", `{"email":"admin@example.com","tenant":"aeon"}`, nil); status != http.StatusOK {
+		t.Fatalf("fixture person login returned %d", status)
+	}
+	body, _ := json.Marshal(map[string]any{"expected_revision": 0, "session_id": session.id})
+	status, raw := doJSON(t, person, http.MethodPost, base+"/api/projects/"+project+"/lead/adopt", string(body), nil)
+	if status != http.StatusOK {
+		t.Fatalf("fixture person confirmation returned %d", status)
+	}
+	var confirmed harness.Lead
+	if json.Unmarshal(raw, &confirmed) != nil || confirmed.Reason != "adoption_pending" || confirmed.Generation != 0 || confirmed.SessionID == nil || *confirmed.SessionID != session.id {
+		t.Fatal("person confirmation did not select the exact unclaimed session")
+	}
+	beat()
+	loaded, ok, err := loadHeartbeatSession(&session.hold)
+	if err != nil || !ok || loaded.disk.LeadAdoption == nil || !loaded.disk.LeadAdoption.Claimed || len(loaded.disk.LeadAdoption.Attempts) != 1 {
+		t.Fatal("successful automatic claim was not retained before the optional binding refusal")
+	}
+	session = loaded
+	beat()
+	beat()
+	err = db.InTenant(dbtest.Seed(t.Context()), opened.App, agent.TenantID, func(tx pgx.Tx) error {
+		var generation, revision, generations, claims int64
+		var exactSession, exactKey, unchangedOwner, stillRunning, noProofLeak bool
+		if err := tx.QueryRow(t.Context(), `SELECT l.generation,l.revision,l.session_id=$2::uuid,
+ l.dispatch_key_id=(SELECT id FROM agent_keys WHERE principal_id=$3::uuid),
+ s.owner_principal_id=(SELECT created_by_principal_id FROM agent_keys WHERE principal_id=$3::uuid),
+ s.agent_principal_id=$3::uuid AND s.parent_id IS NULL AND s.stopped_at IS NULL,
+ (SELECT count(*) FROM project_lead_generations WHERE project_id=$1),
+ (SELECT count(*) FROM events WHERE node_id=$1 AND type='lead.claim_checked'),
+ NOT EXISTS(SELECT 1 FROM events WHERE node_id=$1 AND (strpos(coalesce("before"::text,'')||coalesce("after"::text,''),$4)>0 OR strpos(coalesce("before"::text,'')||coalesce("after"::text,''),$5)>0))
+ FROM project_leads l JOIN harness_sessions s ON s.id=l.session_id WHERE l.project_id=$1`, project, session.id, agent.PrincipalID, session.disk.RegisteredRef, session.lease).Scan(&generation, &revision, &exactSession, &exactKey, &unchangedOwner, &stillRunning, &generations, &claims, &noProofLeak); err != nil {
+			return err
+		}
+		if generation != 1 || revision != confirmed.Revision+1 || generations != 1 || claims != 1 || !exactSession || !exactKey || !unchangedOwner || !stillRunning || !noProofLeak {
+			t.Error("automatic adoption did not commit exactly one owned generation, dispatch key and redacted claim audit")
+		}
+		return nil
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if session.disk.Closed || session.disk.Terminal || strings.Contains(stderr.String(), session.lease) || strings.Contains(stderr.String(), session.disk.RegisteredRef) {
+		t.Fatal("automatic adoption changed lifetime or exposed private proof")
+	}
+}
 
 func TestOwnerStampMatchesStartAndRejectsReuse(t *testing.T) {
 	stamp, err := readOwnerStamp(os.Getpid())
@@ -290,5 +394,167 @@ func TestOpenNoFollowRejectsFIFO(t *testing.T) {
 		}
 	case <-time.After(time.Second):
 		t.Fatal("opening a fifo blocked")
+	}
+}
+
+func TestHeartbeatPairedReconnectBindsOnlyItsLiveIndexedSession(t *testing.T) {
+	for _, code := range []int{200, 409} {
+		t.Run(strconv.Itoa(code), func(t *testing.T) {
+			var calls []hbCall
+			srv := heartbeatFixture(t, &calls, "", "")
+			defer srv.Close()
+			rt, _, stderr := heartbeatRuntime(t, srv)
+			dir, err := os.MkdirTemp("/tmp", "aeon-hb-hook-")
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer os.RemoveAll(dir)
+			dir, err = filepath.EvalSymlinks(dir)
+			if err != nil {
+				t.Fatal(err)
+			}
+			socket := filepath.Join(dir, "hook.sock")
+			if err := os.WriteFile(socket+".token", []byte(strings.Repeat("fixture-", 4)), 0600); err != nil {
+				t.Fatal(err)
+			}
+			listener, err := net.Listen("unix", socket)
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer listener.Close()
+			requests := make(chan map[string]any, 1)
+			server := &http.Server{Handler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				if r.URL.Path != "/v1/attached-hook" || r.Header.Get("Authorization") != "Bearer "+strings.Repeat("fixture-", 4) {
+					t.Error("unauthenticated or wrong local route")
+				}
+				var body map[string]any
+				if json.NewDecoder(r.Body).Decode(&body) != nil {
+					t.Error("bad local binding")
+				}
+				requests <- body
+				w.WriteHeader(code)
+				_, _ = w.Write([]byte("{}"))
+			})}
+			go func() { _ = server.Serve(listener) }()
+			defer server.Close()
+			o := heartbeatTestOptions(dir)
+			o.OwnerPID = os.Getpid()
+			o.SourceSession = "11111111-1111-4111-8111-111111111111"
+			o.ReconnectSocket = socket
+			if err := rt.runHeartbeat(t.Context(), o, heartbeatDeps{wait: func(context.Context, int, time.Duration) error { return errOwnerExited }}); err != nil {
+				t.Fatal(err)
+			}
+			select {
+			case body := <-requests:
+				if body["origin"] != srv.URL || body["session_id"] != transcriptSessionID || body["project_id"] != transcriptProjectID || body["owner_pid"] != float64(os.Getpid()) || body["activity_sequence"] != float64(1) || body["worker_lease"] == "" {
+					t.Fatal("binding lost exact session, origin, owner or lease")
+				}
+			default:
+				t.Fatalf("heartbeat never bound its indexed hook: %s", stderr.String())
+			}
+			if strings.Contains(stderr.String(), "binding was refused") != (code == 409) {
+				t.Fatal("partial binding result was not reported honestly")
+			}
+			registrations := hbWhere(calls, "POST", "/harness-sessions")
+			if len(registrations) != 1 {
+				t.Fatal("missing registration")
+			}
+			caps := registrations[0].body["advertised_capabilities"].([]any)
+			if len(caps) != 2 || caps[1] != "inbox" {
+				t.Fatal("attached hook inbox not advertised")
+			}
+		})
+	}
+}
+
+func TestPairedInboxHookAcknowledgesOnlyForegroundHandoff(t *testing.T) {
+	for _, scenario := range []string{"delivered", "short-output", "closed-output"} {
+		t.Run(scenario, func(t *testing.T) {
+			setupHookTest(t)
+			home, err := os.MkdirTemp("/tmp", "aeon-hook-home-")
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer os.RemoveAll(home)
+			home, err = filepath.EvalSymlinks(home)
+			if err != nil {
+				t.Fatal(err)
+			}
+			t.Setenv("HOME", home)
+			t.Setenv("AEON_SESSION_ID", hookSessionID)
+			root, err := agentsetup.DefaultStateRoot(goruntime.GOOS, home, "")
+			if err != nil {
+				t.Fatal(err)
+			}
+			state := filepath.Join(root, "daemon")
+			store, err := agentsetup.OpenStore(state, true)
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer store.Close()
+			socket, err := agentsetup.ResolveSocketPath(state, nil)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if err := agentsetup.PrepareSocketDirectory(socket); err != nil {
+				t.Fatal(err)
+			}
+			ref, _ := json.Marshal(agentsetup.ControlReference{Socket: socket, DaemonID: "fixture", Generation: strings.Repeat("a", 32)})
+			if err := store.Write("control.json", ref, true); err != nil {
+				t.Fatal(err)
+			}
+			listener, err := net.Listen("unix", socket)
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer func() { _ = listener.Close(); _ = os.Remove(socket); _ = os.Remove(socket + ".token") }()
+			if err := os.Chmod(socket, 0600); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.WriteFile(socket+".token", []byte(strings.Repeat("fixture-", 4)), 0600); err != nil {
+				t.Fatal(err)
+			}
+			var out observedHookWriter
+			var stdout io.Writer = &out
+			if scenario == "short-output" {
+				stdout = shortHookWriter{}
+			} else if scenario == "closed-output" {
+				stdout = failedHookWriter{}
+			}
+			var complete bool
+			delivery := agentd.HarnessDelivery{ID: "00000000-0000-4000-8000-000000000094", MessageID: hookMessageID, SenderPrincipalID: "00000000-0000-4000-8000-000000000093", Cursor: 7, Body: "Untrusted attached fixture message"}
+			server := &http.Server{Handler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				var request agentd.AttachedHookRequest
+				if r.URL.Path != "/v1/attached-hook" || json.NewDecoder(r.Body).Decode(&request) != nil || request.SessionID != hookSessionID || r.Header.Get("Authorization") != "Bearer "+strings.Repeat("fixture-", 4) {
+					t.Error("hook lost owner/session authentication")
+					w.WriteHeader(403)
+					return
+				}
+				switch request.Operation {
+				case "pull":
+					_ = json.NewEncoder(w).Encode([]agentd.HarnessDelivery{delivery})
+				case "complete":
+					if !out.emitted.Load() || request.DeliveryID != delivery.ID || request.Cursor != delivery.Cursor {
+						t.Error("ack before or outside exact stdout handoff")
+					}
+					complete = true
+					_ = json.NewEncoder(w).Encode([]agentd.HarnessDelivery{})
+				default:
+					t.Error("hook changed its binding")
+					w.WriteHeader(400)
+				}
+			})}
+			go func() { _ = server.Serve(listener) }()
+			defer server.Close()
+			rt := &runtime{stdin: strings.NewReader(`{"hook_event_name":"PostToolUse","session_id":"fixture-vendor"}`), stdout: stdout, stderr: io.Discard}
+			err = rt.runInboxHook(t.Context(), "PostToolUse")
+			if scenario == "delivered" {
+				if err != nil || !complete || !strings.Contains(out.String(), delivery.Body) {
+					t.Fatal("paired hook did not deliver and confirm stdout")
+				}
+			} else if err == nil || complete {
+				t.Fatal("failed foreground output was acknowledged")
+			}
+		})
 	}
 }

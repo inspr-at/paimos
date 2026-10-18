@@ -8,11 +8,11 @@ import (
 	"strings"
 	"time"
 
-	"github.com/jackc/pgx/v5"
-
 	"github.com/inspr-at/paimos/internal/events"
 	"github.com/inspr-at/paimos/internal/harnesslaunch"
+	"github.com/inspr-at/paimos/internal/modelactivation"
 	"github.com/inspr-at/paimos/internal/tenant"
+	"github.com/jackc/pgx/v5"
 )
 
 const (
@@ -21,8 +21,26 @@ const (
 	evRoutes  = "model.routes_replaced"
 )
 
+// Display is model identity for presentation; Version on Profile is the pin revision.
+type Display struct {
+	DisplayName  string `json:"display_name,omitempty"`
+	ShortName    string `json:"short_name,omitempty"`
+	ModelVersion string `json:"model_version,omitempty"`
+}
+
+func (d Display) FullName() string { return strings.TrimSpace(d.DisplayName + " " + d.ModelVersion) }
+
 // Profile is one immutable model pin.
 type Profile struct {
+	Source   string      `json:"source"`
+	Origin   string      `json:"origin"`
+	Note     string      `json:"note"`
+	RetireAt *time.Time  `json:"retire_at"`
+	Retired  bool        `json:"retired"`
+	Pause    *modelPause `json:"pause,omitempty"`
+	Display
+	EffortLevel *int      `json:"effort_level"`
+	Provider    string    `json:"provider"`
 	ID          string    `json:"id"`
 	Slug        string    `json:"slug"`
 	Version     string    `json:"version"`
@@ -30,7 +48,6 @@ type Profile struct {
 	Family      string    `json:"family"`
 	Model       string    `json:"model"`
 	Effort      string    `json:"effort"`
-	EffortLevel *int      `json:"effort_level,omitempty"`
 	Tier        string    `json:"tier"`
 	Enabled     bool      `json:"enabled"`
 	CreatedAt   time.Time `json:"created_at"`
@@ -48,6 +65,10 @@ type Route struct {
 }
 
 type profileWrite struct {
+	Source                string `json:"-"`
+	Note                  string `json:"note"`
+	RegisteredEffortLevel *int   `json:"-"`
+	Display
 	Slug    string `json:"slug"`
 	Version string `json:"version"`
 	Harness string `json:"harness"`
@@ -62,83 +83,129 @@ func writeEvent(ctx context.Context, tx pgx.Tx, p tenant.Principal, eventType st
 	return err
 }
 
-func ensureCatalog(ctx context.Context, tx pgx.Tx, p tenant.Principal) error {
-	var n int
-	if err := tx.QueryRow(ctx, `SELECT count(*) FROM model_profiles`).Scan(&n); err != nil {
-		return err
+func prepareCatalogDeferred(ctx context.Context, tx pgx.Tx, p tenant.Principal) ([]events.Change, error) {
+	if err := catalogLock(ctx, tx); err != nil {
+		return nil, err
 	}
-	if n > 0 {
-		return ensureAdditionalCatalog(ctx, tx, p)
+	var version string
+	err := tx.QueryRow(ctx, `SELECT catalog_version FROM model_refresh_settings`).Scan(&version)
+	if err != nil && err != pgx.ErrNoRows {
+		return nil, err
 	}
-	if _, err := tx.Exec(ctx, `SELECT pg_advisory_xact_lock(hashtextextended('aeon-model-registry:' || current_setting('aeon.tenant_id', true), 0))`); err != nil {
-		return err
+	if version == CatalogVersion {
+		return nil, nil
 	}
-	if err := tx.QueryRow(ctx, `SELECT count(*) FROM model_profiles`).Scan(&n); err != nil {
-		return err
+	if err := bootstrapCatalogFacts(ctx, tx, p.TenantID); err != nil {
+		return nil, err
 	}
-	if n > 0 {
-		return ensureAdditionalCatalog(ctx, tx, p)
+	if _, err := tx.Exec(ctx, `INSERT INTO model_refresh_settings(tenant_id,catalog_version) VALUES($1,$2) ON CONFLICT(tenant_id) DO UPDATE SET catalog_version=EXCLUDED.catalog_version`, p.TenantID, CatalogVersion); err != nil {
+		return nil, err
 	}
-	profiles := catalogProfiles()
-	ids := make(map[string]string, len(profiles))
-	seeded := make([]Profile, 0, len(profiles))
-	for _, profile := range profiles {
-		row, err := insertProfile(ctx, tx, p.TenantID, profileWrite{
-			Slug: profile.Slug, Version: profile.Version, Harness: profile.Harness,
-			Family: profile.Family, Model: profile.Model, Effort: profile.Effort, Tier: profile.Tier,
-		})
-		if err != nil {
-			return err
-		}
-		ids[profile.Slug] = row.ID
-		seeded = append(seeded, row)
+	event := "model.catalog_upgraded"
+	if err == pgx.ErrNoRows {
+		event = evSeeded
 	}
-	routes := make([]Route, 0)
-	for _, route := range defaultRoutes(profiles) {
-		id := ids[route.Slug]
-		if id == "" {
-			return fail(http.StatusInternalServerError, "catalog route is missing its profile")
-		}
-		stored := Route{Role: route.Role, Priority: route.Priority, ProfileID: id, State: "available"}
-		if err := insertRoute(ctx, tx, p.TenantID, stored); err != nil {
-			return err
-		}
-		routes = append(routes, stored)
-	}
-	return writeEvent(ctx, tx, p, evSeeded, nil, struct {
-		Profiles []Profile `json:"profiles"`
-		Routes   []Route   `json:"routes"`
-	}{seeded, routes})
+	return []events.Change{{Type: event, After: map[string]any{"version": CatalogVersion, "bootstrap": "ids_only"}}}, nil
 }
 
-func insertProfile(ctx context.Context, tx pgx.Tx, tenantID string, in profileWrite) (Profile, error) {
+// Discovery records a pin without granting it to wildcard accounts.
+func insertObservedProfile(ctx context.Context, tx pgx.Tx, tenantID string, in profileWrite) (Profile, error) {
+	return insertActivatedProfile(ctx, tx, tenant.Principal{TenantID: tenantID}, in, false, "")
+}
+
+func insertActivatedProfile(ctx context.Context, tx pgx.Tx, p tenant.Principal, in profileWrite, enabled bool, cause modelactivation.Cause) (Profile, error) {
 	var out Profile
-	err := tx.QueryRow(ctx, `
-		INSERT INTO model_profiles
-			(tenant_id, slug, version, harness, family, model, effort, tier, enabled)
-		VALUES ($1::uuid, $2, $3, $4, $5, $6, $7, $8, true)
-		RETURNING id::text, slug, version, harness, family, model, effort, tier, enabled, created_at`,
-		tenantID, in.Slug, in.Version, in.Harness, in.Family, in.Model, in.Effort, in.Tier).
-		Scan(&out.ID, &out.Slug, &out.Version, &out.Harness, &out.Family, &out.Model, &out.Effort, &out.Tier, &out.Enabled, &out.CreatedAt)
-	if out.Harness == "gemini" {
-		out.EffortLevel = harnesslaunch.GeminiEffortLevel(out.Effort)
+	if in.DisplayName == "" {
+		display, err := catalogPinDisplay(ctx, tx, in)
+		if err != nil {
+			return out, err
+		}
+		in.Display = display
+	}
+
+	overrides := map[string]string{}
+	if in.DisplayName != "" {
+		overrides["display_name"] = in.DisplayName
+	}
+	if in.ShortName != "" {
+		overrides["short_name"] = in.ShortName
+	}
+	if in.ModelVersion != "" {
+		overrides["model_version"] = in.ModelVersion
+	}
+	if cause == modelactivation.ShippedCatalog {
+		in.Source = "shipped"
+	}
+	// Keep the stored auto/manual contract readable by older servers. Origin
+	// is server-owned metadata, ignored by the existing display projection.
+	switch in.Source {
+	case "manual", "shipped", "provider", "harness":
+		overrides["origin"] = in.Source
+	}
+	stored, err := modelactivation.Activate(ctx, tx, p, modelactivation.Pin{
+		Slug: in.Slug, Version: in.Version, Harness: in.Harness, Family: in.Family,
+		Model: in.Model, Effort: in.Effort, Tier: in.Tier, Enabled: enabled,
+		DisplayOverrides: overrides, Source: profileSource(in.Source), Note: in.Note,
+		RegisteredEffortLevel: in.RegisteredEffortLevel, Permission: "models.manage",
+	}, cause)
+	out = Profile{ID: stored.ID, Slug: stored.Slug, Version: stored.Version, Harness: stored.Harness,
+		Family: stored.Family, Model: stored.Model, Effort: stored.Effort, Tier: stored.Tier,
+		Enabled: stored.Enabled, CreatedAt: stored.CreatedAt}
+	if err == nil {
+		err = tx.QueryRow(ctx, `SELECT model_display->>'display_name',model_display->>'short_name',model_display->>'model_version',effort_level,provider
+			FROM model_profile_display WHERE tenant_id=$1::uuid AND profile_id=$2::uuid`, p.TenantID, out.ID).
+			Scan(&out.DisplayName, &out.ShortName, &out.ModelVersion, &out.EffortLevel, &out.Provider)
+	}
+
+	out.Source, out.Note = profileSource(in.Source), in.Note
+	out.Origin = profileOrigin(out, in.Source)
+	if in.RegisteredEffortLevel != nil {
+		out.EffortLevel = in.RegisteredEffortLevel
 	}
 	return out, err
 }
-
-func insertRoute(ctx context.Context, tx pgx.Tx, tenantID string, route Route) error {
-	_, err := tx.Exec(ctx, `
-		INSERT INTO model_role_routes (tenant_id, role, priority, profile_id, state, reason, valid_until)
-		VALUES ($1::uuid, $2, $3, $4::uuid, $5, $6, $7)`,
-		tenantID, route.Role, route.Priority, route.ProfileID, route.State, route.Reason, route.ValidUntil)
-	return err
+func profileSource(source string) string {
+	if source == "manual" {
+		return "manual"
+	}
+	return "auto"
 }
 
 func listProfiles(ctx context.Context, tx pgx.Tx) ([]Profile, error) {
-	rows, err := tx.Query(ctx, `
-		SELECT id::text, slug, version, harness, family, model, effort, tier, enabled, created_at
-		FROM model_profiles
-		ORDER BY slug, version, id`)
+	return listProfilesLimit(ctx, tx, 0)
+}
+
+func listProfilesLimit(ctx context.Context, tx pgx.Tx, limit int, enabledOnly ...bool) ([]Profile, error) {
+	query := `
+		SELECT p.id::text, p.slug, p.version, p.harness, p.family, p.model, p.effort, p.tier, p.enabled, p.created_at, d.model_display->>'display_name', d.model_display->>'short_name', d.model_display->>'model_version', coalesce(p.registered_effort_level,d.effort_level), d.provider, coalesce(p.source,'auto'), coalesce(p.display_overrides->>'origin',''), coalesce(p.note,''),
+ (SELECT r.retire_at FROM model_profile_retirements r WHERE r.tenant_id=p.tenant_id AND r.profile_id=p.id),
+ EXISTS(SELECT 1 FROM model_profile_retirements r WHERE r.tenant_id=p.tenant_id AND r.profile_id=p.id AND (r.retire_at IS NULL OR r.retire_at<=now())),
+ (SELECT jsonb_build_object('until',x.until_at,'reason',x.reason,'by',x.set_by,'at',x.set_at) FROM model_pauses x WHERE x.harness=p.harness AND x.model=p.model AND (x.until_at IS NULL OR x.until_at>now()))
+		FROM model_profiles p JOIN model_profile_display d ON d.tenant_id=p.tenant_id AND d.profile_id=p.id
+		ORDER BY p.slug, p.version, p.id`
+	if len(enabledOnly) > 0 && enabledOnly[0] {
+		query = strings.Replace(query, "ORDER BY p.slug", "WHERE p.enabled ORDER BY p.slug", 1)
+	}
+	if limit > 0 {
+		return readProfiles(ctx, tx, query+` LIMIT $1`, limit)
+	}
+	return readProfiles(ctx, tx, query)
+}
+
+// listPickerProfiles bounds editor metadata before decoding and excludes retired revisions.
+func listPickerProfiles(ctx context.Context, tx pgx.Tx) ([]Profile, error) {
+	return readProfiles(ctx, tx, `
+		SELECT p.id::text, p.slug, p.version, p.harness, p.family, p.model, p.effort, p.tier, p.enabled, p.created_at, d.model_display->>'display_name', d.model_display->>'short_name', d.model_display->>'model_version', coalesce(p.registered_effort_level,d.effort_level), d.provider, coalesce(p.source,'auto'), coalesce(p.display_overrides->>'origin',''), coalesce(p.note,''),
+ (SELECT r.retire_at FROM model_profile_retirements r WHERE r.tenant_id=p.tenant_id AND r.profile_id=p.id),
+ EXISTS(SELECT 1 FROM model_profile_retirements r WHERE r.tenant_id=p.tenant_id AND r.profile_id=p.id AND (r.retire_at IS NULL OR r.retire_at<=now())),
+ (SELECT jsonb_build_object('until',x.until_at,'reason',x.reason,'by',x.set_by,'at',x.set_at) FROM model_pauses x WHERE x.harness=p.harness AND x.model=p.model AND (x.until_at IS NULL OR x.until_at>now()))
+		FROM model_profiles p JOIN model_profile_display d ON d.tenant_id=p.tenant_id AND d.profile_id=p.id
+		WHERE NOT EXISTS (SELECT 1 FROM model_profile_retirements r WHERE r.tenant_id=p.tenant_id AND r.profile_id=p.id AND (r.retire_at IS NULL OR r.retire_at<=now()))
+		ORDER BY p.slug, p.version, p.id LIMIT 257`)
+}
+
+func readProfiles(ctx context.Context, tx pgx.Tx, query string, args ...any) ([]Profile, error) {
+	rows, err := tx.Query(ctx, query, args...)
 	if err != nil {
 		return nil, err
 	}
@@ -146,38 +213,33 @@ func listProfiles(ctx context.Context, tx pgx.Tx) ([]Profile, error) {
 	out := []Profile{}
 	for rows.Next() {
 		var profile Profile
-		if err := rows.Scan(&profile.ID, &profile.Slug, &profile.Version, &profile.Harness, &profile.Family, &profile.Model, &profile.Effort, &profile.Tier, &profile.Enabled, &profile.CreatedAt); err != nil {
+		if err := rows.Scan(&profile.ID, &profile.Slug, &profile.Version, &profile.Harness, &profile.Family, &profile.Model, &profile.Effort, &profile.Tier, &profile.Enabled, &profile.CreatedAt, &profile.DisplayName, &profile.ShortName, &profile.ModelVersion, &profile.EffortLevel, &profile.Provider, &profile.Source, &profile.Origin, &profile.Note, &profile.RetireAt, &profile.Retired, &profile.Pause); err != nil {
 			return nil, err
 		}
-		if profile.Harness == "gemini" {
-			profile.EffortLevel = harnesslaunch.GeminiEffortLevel(profile.Effort)
-		}
+		profile.Source = profileSource(profile.Source)
+		profile.Origin = profileOrigin(profile, profile.Origin)
 		out = append(out, profile)
 	}
 	return out, rows.Err()
 }
 
-func listRoutes(ctx context.Context, tx pgx.Tx) ([]Route, error) {
-	rows, err := tx.Query(ctx, `
-		SELECT role, priority, profile_id::text, state, reason, valid_until
-		FROM model_role_routes
-		ORDER BY role, priority, profile_id`)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	out := []Route{}
-	for rows.Next() {
-		var route Route
-		if err := rows.Scan(&route.Role, &route.Priority, &route.ProfileID, &route.State, &route.Reason, &route.ValidUntil); err != nil {
-			return nil, err
-		}
-		out = append(out, route)
-	}
-	return out, rows.Err()
-}
-
 func validateProfile(in profileWrite) error {
+	if !boundedText(in.Note, 80) || strings.ContainsAny(in.Note, "\x00\r\n") {
+		return fail(400, "invalid model note")
+	}
+
+	for _, field := range []struct {
+		value string
+		max   int
+	}{{in.DisplayName, 128}, {in.ShortName, 128}, {in.ModelVersion, 64}} {
+		if len(field.value) > field.max || strings.ContainsAny(field.value, "\x00\r\n") {
+			return fail(http.StatusBadRequest, "invalid model display metadata")
+		}
+	}
+	if (in.DisplayName == "") != (in.ShortName == "") {
+		return fail(http.StatusBadRequest, "display_name and short_name must be supplied together")
+	}
+
 	in.Slug = strings.TrimSpace(in.Slug)
 	in.Version = strings.TrimSpace(in.Version)
 	in.Model = strings.TrimSpace(in.Model)
@@ -194,6 +256,9 @@ func validateProfile(in profileWrite) error {
 	if len(in.Model) > 128 || !modelRE.MatchString(in.Model) {
 		return fail(http.StatusBadRequest, "invalid model")
 	}
+	if harnesslaunch.ModelFamily(in.Harness, in.Model) != in.Family {
+		return fail(http.StatusBadRequest, "profile family does not match its harness/provider binding")
+	}
 	if len(in.Effort) > 32 || !effortRE.MatchString(in.Effort) {
 		return fail(http.StatusBadRequest, "invalid effort")
 	}
@@ -208,18 +273,24 @@ func validateProfile(in profileWrite) error {
 	return nil
 }
 
-func createProfile(ctx context.Context, tx pgx.Tx, p tenant.Principal, in profileWrite) (Profile, error) {
+func normalizeProfileWrite(in profileWrite) profileWrite {
 	in.Slug = strings.TrimSpace(in.Slug)
 	in.Version = strings.TrimSpace(in.Version)
 	in.Model = strings.TrimSpace(in.Model)
 	in.Effort = strings.TrimSpace(in.Effort)
+	return in
+}
+
+func createProfile(ctx context.Context, tx pgx.Tx, p tenant.Principal, in profileWrite) (Profile, error) {
+	in = normalizeProfileWrite(in)
+	in.Source = "manual"
 	if err := validateProfile(in); err != nil {
 		return Profile{}, err
 	}
-	if err := ensureCatalog(ctx, tx, p); err != nil {
+	if err := requireCatalog(ctx, tx); err != nil {
 		return Profile{}, err
 	}
-	out, err := insertProfile(ctx, tx, p.TenantID, in)
+	out, err := insertActivatedProfile(ctx, tx, p, in, true, modelactivation.Person)
 	if err != nil {
 		return Profile{}, err
 	}
@@ -229,149 +300,25 @@ func createProfile(ctx context.Context, tx pgx.Tx, p tenant.Principal, in profil
 	return out, nil
 }
 
-func replaceRoutes(ctx context.Context, tx pgx.Tx, p tenant.Principal, incoming []Route, now time.Time) ([]Route, error) {
-	if incoming == nil {
-		return nil, fail(http.StatusBadRequest, "routes must be an array")
-	}
-	if err := ensureCatalog(ctx, tx, p); err != nil {
-		return nil, err
-	}
-	normalized, err := normalizeRoutes(incoming, now)
-	if err != nil {
-		return nil, err
-	}
-	if err := profilesExist(ctx, tx, normalized); err != nil {
-		return nil, err
-	}
-	before, err := listRoutes(ctx, tx)
-	if err != nil {
-		return nil, err
-	}
-	if routesEqual(before, normalized) {
-		return before, nil
-	}
-	if _, err := tx.Exec(ctx, `DELETE FROM model_role_routes`); err != nil {
-		return nil, err
-	}
-	for _, route := range normalized {
-		if err := insertRoute(ctx, tx, p.TenantID, route); err != nil {
-			return nil, err
-		}
-	}
-	if err := writeEvent(ctx, tx, p, evRoutes, before, normalized); err != nil {
-		return nil, err
-	}
-	return normalized, nil
-}
-
-func normalizeRoutes(incoming []Route, now time.Time) ([]Route, error) {
-	seenPriority := map[string]bool{}
-	seenProfile := map[string]bool{}
-	out := make([]Route, 0, len(incoming))
-	for _, route := range incoming {
-		if !validRole(route.Role) {
-			return nil, fail(http.StatusBadRequest, "invalid role")
-		}
-		if route.Priority < 1 {
-			return nil, fail(http.StatusBadRequest, "priority must be positive")
-		}
-		if !uuidRE.MatchString(route.ProfileID) {
-			return nil, fail(http.StatusBadRequest, "invalid profile id")
-		}
-		switch route.State {
-		case "available", "unavailable", "conserved", "budget_limited":
-		default:
-			return nil, fail(http.StatusBadRequest, "invalid route state")
-		}
-		keyP := route.Role + "/" + itoa(route.Priority)
-		keyID := route.Role + "/" + strings.ToLower(route.ProfileID)
-		if seenPriority[keyP] || seenProfile[keyID] {
-			return nil, fail(http.StatusBadRequest, "duplicate route")
-		}
-		seenPriority[keyP] = true
-		seenProfile[keyID] = true
-		route.ProfileID = strings.ToLower(route.ProfileID)
-		route.Reason = strings.TrimSpace(route.Reason)
-		if route.State == "available" {
-			route.Reason = ""
-			route.ValidUntil = nil
-		} else {
-			if route.Reason == "" || len(route.Reason) > 512 || strings.ContainsAny(route.Reason, "\x00\r\n") {
-				return nil, fail(http.StatusBadRequest, "suppression requires a reason")
-			}
-			if route.ValidUntil == nil || !route.ValidUntil.After(now) {
-				return nil, fail(http.StatusBadRequest, "suppression requires a future expiry")
-			}
-		}
-		out = append(out, route)
-	}
-	return out, nil
-}
-
-func profilesExist(ctx context.Context, tx pgx.Tx, routes []Route) error {
-	if len(routes) == 0 {
-		return nil
-	}
-	ids := make([]string, len(routes))
-	seen := map[string]struct{}{}
-	for i, route := range routes {
-		ids[i] = route.ProfileID
-		seen[route.ProfileID] = struct{}{}
-	}
-	rows, err := tx.Query(ctx, `SELECT id::text FROM model_profiles WHERE id::text = ANY($1::text[])`, ids)
-	if err != nil {
-		return err
-	}
-	defer rows.Close()
-	found := map[string]struct{}{}
-	for rows.Next() {
-		var id string
-		if err := rows.Scan(&id); err != nil {
+// flushCatalogChanges runs after the caller's final resource operation.
+func flushCatalogChanges(ctx context.Context, tx pgx.Tx, p tenant.Principal, changes []events.Change) error {
+	for _, change := range changes {
+		if _, err := events.Append(ctx, tx, p, change); err != nil {
 			return err
 		}
-		found[id] = struct{}{}
-	}
-	if err := rows.Err(); err != nil {
-		return err
-	}
-	if len(found) != len(seen) {
-		return fail(http.StatusBadRequest, "unknown profile")
 	}
 	return nil
 }
 
-func routesEqual(a, b []Route) bool {
-	if len(a) != len(b) {
-		return false
+// Origin preserves the legacy auto/manual source contract while exposing provenance.
+// Later working observations cannot relabel an immutable shipped pin.
+func profileOrigin(p Profile, stored string) string {
+	switch stored {
+	case "manual", "shipped", "provider", "harness":
+		return stored
 	}
-	for i := range a {
-		if a[i].Role != b[i].Role || a[i].Priority != b[i].Priority || a[i].ProfileID != b[i].ProfileID || a[i].State != b[i].State || a[i].Reason != b[i].Reason {
-			return false
-		}
-		if !timePtrEqual(a[i].ValidUntil, b[i].ValidUntil) {
-			return false
-		}
+	if p.Source == "manual" {
+		return "manual"
 	}
-	return true
-}
-
-func timePtrEqual(a, b *time.Time) bool {
-	if a == nil || b == nil {
-		return a == nil && b == nil
-	}
-	return a.Equal(*b)
-}
-
-func itoa(n int) string {
-	if n == 0 {
-		return "0"
-	}
-	var buf [16]byte
-	i := len(buf)
-	for n > 0 {
-		i--
-		buf[i] = byte('0' + n%10)
-		n /= 10
-	}
-	return string(buf[i:])
+	return "harness"
 }

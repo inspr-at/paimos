@@ -12,10 +12,8 @@ What the first successful run writes through the application modules and operato
 
 - Three projects: Lumen Archive (`LUMEN`), Harbor Ledger (`HARBOR`), and North Glass (`NGLASS`), each with a description.
 - About 40 tickets under epics, with mixed states, assignees, comments, and relations. One Lumen ticket has a long fictional brief. Attachments are not seeded.
-- A journey on Lumen Archive that reaches the Build stage, with an open release and tickets selected into it. Personal profile, an accepted brief, agreed requirements, and a person-approved build gate.
-- A second journey on North Glass at Requirements, with an accepted brief and one revision-bound requirements approval left pending for GateApprovals.
 - Eight knowledge entries covering runbook, guideline, memory, external system, and related project, linked by `[[slug]]` mentions.
-- Three agents: Lumen Scribe (Codex), Harbor Clerk (Claude), and Glass Scout (Grok). Each has an ended harness session and a completed run on a fictional work order in its project. Clerk keeps its ticket approval request pending; Scribe keeps its journey role.
+- Three agents: Lumen Scribe (Codex), Harbor Clerk (Claude), and Glass Scout (Grok). Each has an ended harness session and a completed run on a fictional work order in its project. Clerk keeps its ticket approval request pending.
 - Three fictional accounts on Demo workstation: Lumen desk, Harbor desk, and North Glass desk. Each has a demo allowance and an explicit grant to an enabled registry profile for its harness. StartAgentDialog reads that host, the three harness choices, accounts, models and thinking levels from `/api/agent-accounts/catalog`.
 - Profile selection matches the harness. If no enabled Grok harness profile exists, the seed creates a demo Grok profile using an enabled Cursor/xAI registry pin's model, effort, tier and version. Existing profiles and role routes are preserved; no model ID is invented. Missing enabled profiles make the seed fail and roll back.
 - People and agent comments on `LT-1`, including Scribe's work marker and a link to the completed session. Its detail projects the completed run's state evidence. Its provenance contains the content hash and byte size of the authored fictional `lantern-review/SKILL.md` instructions. No workstation file is read.
@@ -23,7 +21,12 @@ What the first successful run writes through the application modules and operato
 
 The seed commits all its changes in one database transaction. An interrupted run rolls back its nodes, keys, bindings, and events; a retry starts cleanly. The completion marker is `fields.demo_seed` = `complete` on the Lumen Archive project node. A later run reads that marker and returns without new events or refreshed account probes, windows, gates, or provenance. Already completed demo tenants are not backfilled: create a fresh demo tenant to capture these additions.
 
-Journey gates use scopes `journey.requirements` and `journey.build`. Those names are what the journey module checks. They are not keys in the permission registry, so `paimos agent-key create` rejects them. The seed creates Scribe's key through the operator key store with registry scopes, then extends that exact key with the two journey prefixes and records `agent_key.scopes_extended` with its before and after scopes. Proposals and decisions after that go through the approvals API. The key token is kept in the process and is not printed.
+The seed no longer creates stages, gate grants, or handoffs from the historical
+INSPR Flow / Journey, retired by AEON-723 in
+[Direct Dome](https://github.com/inspr-at/paimos/releases/tag/v261007035250.0.0).
+Existing work, harness sessions, runs and ordinary approval evidence remain.
+[Flow 2 (AEON-821) is planned](features/web-workspace.md#planned-work);
+the seed does not demonstrate it.
 
 Money in the seed is an exact decimal rate (`80.00` internal, `140.00` bill, EUR per hour). Durations are whole seconds. Nothing is stored as a binary float.
 
@@ -51,7 +54,7 @@ Server startup opens and migrates the database and creates the configured bootst
 
 Use the dev sign-in at that origin with `demo.operator@demo.aeon.invalid` and tenant `lumen-demo`. The dev login creates a separate fictional capture operator; the seed's Demo Operator remains the author of its historical decisions. A headless capture context can POST `{"email":"demo.operator@demo.aeon.invalid","tenant":"lumen-demo"}` to `/api/auth/dev-login` and keep the response cookie in that context. Do not print, copy into a manifest, or commit the cookie. This route requires dev mode; it does not demonstrate IdP sign-in.
 
-Capture targets are the Start agent dialog on `LT-1`, Harbor Clerk's pending ticket approval in Needs you, the North Glass Requirements gate, and `LT-1` Activity filtered to People and agents. Follow the agent comment's session link for state evidence and instruction provenance. The session is ended and its run is completed, so it does not turn into a fabricated live delivery or a stale-heartbeat failure line.
+Capture targets are the Start agent dialog on `LT-1`, Harbor Clerk's pending ticket approval in Needs you, and `LT-1` Activity filtered to People and agents. Follow the agent comment's session link for state evidence and instruction provenance. The session is ended and its run is completed, so it does not turn into a fabricated live delivery or a stale-heartbeat failure line.
 
 Account probes and the two-hour allowance windows are fictional seed snapshots. They expire normally and replay does not refresh them. Use a fresh tenant for a new set of seed snapshots, or an actually paired account for live availability. Harness and model controls retain their registered names. The promo-owner decision for AEON-497 (2026-10-01) is to show a mix of Codex, Claude and Grok in the picker and session list so no single vendor is featured; promo framing must not ring or caption a vendor name. Local-provider configuration and IdP sign-in need their respective real setup; the seed supplies neither a provider service nor IdP credentials.
 

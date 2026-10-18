@@ -1,0 +1,22 @@
+{
+  "group": "remaining-ui",
+  "nightlyTiming": {
+    "seconds": 3.963,
+    "selectedTests": 1
+  },
+  "spec": {
+    "file": "tests/quotes/two-user-presence.spec.ts",
+    "listedTests": 1,
+    "tierTiming": {
+      "caseSeconds": {
+        "max": 3.937,
+        "median": 3.937,
+        "min": 3.937
+      },
+      "seconds": 3.963,
+      "selectedTests": 1
+    },
+    "weightSeconds": 2.219512,
+    "weightSource": "unmeasured-test-rate"
+  }
+}

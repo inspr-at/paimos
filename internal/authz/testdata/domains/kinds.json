@@ -1,0 +1,54 @@
+{
+  "_license": "SPDX-License-Identifier: AGPL-3.0-only",
+  "builtin_roles": {
+    "admin": [
+      "kinds.manage",
+      "kinds.read"
+    ],
+    "guest": [
+      "kinds.read"
+    ],
+    "member": [
+      "kinds.read"
+    ],
+    "owner": [
+      "kinds.manage",
+      "kinds.read"
+    ],
+    "viewer": [
+      "kinds.read"
+    ]
+  },
+  "project_self_permissions": [
+    "kinds.read"
+  ],
+  "registry": [
+    {
+      "agent_grantable": true,
+      "description": "Manage kinds",
+      "grantable_at": [
+        "workspace"
+      ],
+      "group": "Kinds",
+      "key": "kinds.manage",
+      "owner_workstation_grantable": true,
+      "risk": "high"
+    },
+    {
+      "agent_grantable": true,
+      "description": "Read kinds",
+      "grantable_at": [
+        "workspace"
+      ],
+      "group": "Kinds",
+      "key": "kinds.read",
+      "owner_workstation_grantable": true,
+      "risk": "low"
+    }
+  ],
+  "words": {
+    "resources": {
+      "kinds": "ticket types"
+    }
+  }
+}

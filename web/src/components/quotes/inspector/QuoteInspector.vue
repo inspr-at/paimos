@@ -108,11 +108,11 @@ function keys(event: KeyboardEvent) {
 .inspector { display: flex; flex-direction: column; min-height: 0; height: 100%; background: var(--surface-raised-2); color: var(--ink); }
 .inspector-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; min-height: 44px; padding: 10px 16px 4px; }
 .inspector-title { font: 600 14px/1.3 var(--font); color: var(--ink); }
-.tabs { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 2px; margin: 4px 16px 0; padding: 3px; border-radius: 10px; background: var(--seg-bg); box-shadow: inset 0 1px 2px rgba(32, 60, 61, .08); }
+.tabs { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 2px; margin: 4px 16px 0; padding: 3px; border-radius: 10px; background: var(--seg-bg); box-shadow: inset 0 1px 2px color-mix(in srgb, var(--shadow-color) 8%, transparent); }
 .tab { height: 30px; padding: 0 8px; border: 0; border-radius: 7px; background: transparent; color: var(--ink-2); font-size: 12.5px; font-weight: 600; }
 @media (max-width: 600px) { .tab { height: 44px; } }
 @media (hover: hover) { .tab:hover { color: var(--ink); background: var(--row-hover); } }
-.tab[aria-selected="true"] { background: var(--seg-on); color: var(--teal-ink); box-shadow: 0 1px 2px rgba(32, 60, 61, .14), inset 0 0 0 1px var(--glass-edge); }
+.tab[aria-selected="true"] { background: var(--seg-on); color: var(--teal-ink); box-shadow: 0 1px 2px color-mix(in srgb, var(--shadow-color) 14%, transparent), inset 0 0 0 1px var(--glass-edge); }
 .tab:focus-visible { box-shadow: var(--focus-ring); }
 .panel { flex: 1; min-height: 0; overflow: auto; padding: 14px 16px 20px; overscroll-behavior: contain; }
 .scope { display: grid; gap: 1px; margin-bottom: 12px; padding: 10px 12px; border-radius: 10px; background: var(--surface-2); }

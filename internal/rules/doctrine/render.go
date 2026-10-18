@@ -16,6 +16,7 @@ import (
 
 	"gopkg.in/yaml.v3"
 
+	"github.com/inspr-at/paimos/internal/markdownsource"
 	"github.com/inspr-at/paimos/internal/rulesimport"
 )
 
@@ -334,23 +335,14 @@ type anchorLine struct {
 func headingAnchors(lines []string) []anchorLine {
 	var out []anchorLine
 	seen := map[string]int{}
-	fence := ""
+	code := markdownsource.CodeLines(strings.Join(lines, ""))
 	for i, raw := range lines {
+		if code[i] {
+			continue
+		}
 		line := strings.TrimRight(raw, "\r\n")
 		trim := strings.TrimLeft(line, " ")
 		if len(line)-len(trim) > 3 {
-			continue
-		}
-		if strings.HasPrefix(trim, "```") || strings.HasPrefix(trim, "~~~") {
-			marker := trim[:3]
-			if fence == "" {
-				fence = marker
-			} else if fence == marker {
-				fence = ""
-			}
-			continue
-		}
-		if fence != "" {
 			continue
 		}
 		level := len(trim) - len(strings.TrimLeft(trim, "#"))

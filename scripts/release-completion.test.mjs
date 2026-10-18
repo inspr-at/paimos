@@ -127,7 +127,9 @@ test('missing release is planned read-only; opt-in creates a draft and all nine 
   const f = fixture();
   assert.equal(complete(release, f.dir, {}, f.run).status, 'planned');
   assert.deepEqual(writes(f), []);
-  assert.equal(complete(release, f.dir, { write: true }, f.run).status, 'complete');
+  assert.equal(complete(release, f.dir, { write: true, runtimeAMD64: digest, runtimeARM64: digest }, f.run).status, 'complete');
+  assert.equal(f.state.release.body.split('\n').filter(line => line.startsWith('Digest: ')).length, 1);
+  for (const arch of ['amd64', 'arm64']) assert.ok(f.state.release.body.includes(`Runtime closure linux/${arch}: ${digest}`));
   const create = writes(f)[0];
   for (const flag of ['--draft', '--verify-tag', '--target', source, '--notes-file']) assert.ok(create.includes(flag));
   assert.equal(writes(f).filter(call => call[2] === 'upload').length, 9);
@@ -185,11 +187,11 @@ for (const name of STATIC_BINARIES) {
   });
 }
 
-test('all six existing static assets byte-match and completion only adds missing assets', () => {
+test('all four existing static assets byte-match and completion only adds missing assets', () => {
   const f = fixture(STATIC_BINARIES);
-  assert.equal(STATIC_BINARIES.length, 6);
+  assert.equal(STATIC_BINARIES.length, 4);
   assert.equal(complete(release, f.dir, { write: true }, f.run).status, 'complete');
-  assert.equal(writes(f).length, 3);
+  assert.equal(writes(f).length, 5);
   assert.ok(writes(f).every(call => !STATIC_BINARIES.includes(call[4].split('/').at(-1))));
 });
 

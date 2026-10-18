@@ -1,0 +1,11 @@
+{
+  "_license": "SPDX-License-Identifier: AGPL-3.0-only",
+  "project_filtered": {
+    "GET /api/features": true
+  },
+  "routes": {
+    "GET /api/features": "nodes.read",
+    "GET /api/settings/features": "settings.manage",
+    "PUT /api/settings/features/{key}": "settings.manage"
+  }
+}

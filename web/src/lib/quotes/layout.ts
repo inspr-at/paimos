@@ -1,7 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import type { QuotePosition } from './types'
 export const PAGE_MM = { width: 210, height: 297, marginTop: 20, marginRight: 21, marginBottom: 20, marginLeft: 21 } as const
-export const CONTENT_HEIGHT_MM = PAGE_MM.height - PAGE_MM.marginTop - PAGE_MM.marginBottom - 12
 export interface PagePlan { kind: 'cover' | 'sections' | 'positions'; heading?: 'terms' | 'positions'; sectionIds: string[]; positionIds: string[]; acceptance: boolean }
 export interface PaginationResult { ready: boolean; overflow: string | null; pages: PagePlan[] }
 export const decimalCents = (cents: number): string => {

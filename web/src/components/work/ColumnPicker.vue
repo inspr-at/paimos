@@ -11,9 +11,11 @@ import AppIcon from '../AppIcon.vue'
 const props = withDefaults(defineProps<{
   order: T[]; visible: T[]; customised: boolean
   notes?: Partial<Record<string, string>>
+  reserveNotes?: boolean
   labels?: Partial<Record<string, string>>; pinned?: T[]; resetLabel?: string; resetTip?: string; note?: string | null
 }>(), { labels: undefined, pinned: undefined, resetLabel: 'Automatic', resetTip: 'Columns follow the width again', note: 'Drag a header edge to resize a column; double-click it to fit.' })
 const emit = defineEmits<{ change: [order: T[], visible: T[]]; reset: [] }>()
+const root = ref<HTMLElement>()
 const pins = computed<T[]>(() => props.pinned ?? (PINNED as unknown as T[]))
 const label = (id: T) => props.labels?.[id] ?? COLUMN_BY_ID.get(id as unknown as ColumnId)?.label ?? id
 const free = computed(() => props.order.filter(id => !pins.value.includes(id)))
@@ -34,7 +36,7 @@ function step(id: T, delta: -1 | 1) {
   ;[list[index], list[to]] = [list[to]!, list[index]!]
   emit('change', [...pins.value, ...list], props.visible.filter(x => !pins.value.includes(x)))
   // Moving the row in the DOM drops focus; put it back as soon as the list re-renders.
-  void nextTick(() => document.querySelector<HTMLElement>(`[data-column-row="${id}"]`)?.focus())
+  void nextTick(() => root.value?.querySelector<HTMLElement>(`[data-column-row="${id}"]`)?.focus())
 }
 function keydown(event: KeyboardEvent, id: T) {
   if (event.altKey && (event.key === 'ArrowUp' || event.key === 'ArrowDown')) { event.preventDefault(); step(id, event.key === 'ArrowUp' ? -1 : 1) }
@@ -50,7 +52,7 @@ function drop(target: T) {
 </script>
 
 <template>
-  <div class="columns">
+  <div ref="root" class="columns">
     <div class="head">
       <p class="eyebrow">Columns</p>
       <button v-if="customised" type="button" class="reset" :data-tip="resetTip" @click="emit('reset')">{{ resetLabel }}</button>
@@ -63,7 +65,7 @@ function drop(target: T) {
         <span class="pin-note">Always</span>
       </li>
       <li
-        v-for="(id, index) in free" :key="id" class="row" :class="{ off: !shown.has(id), dragging: dragging === id, over: over === id, noted: !!notes?.[id] }" draggable="true"
+        v-for="(id, index) in free" :key="id" class="row" :class="{ off: !shown.has(id), dragging: dragging === id, over: over === id, noted: !reserveNotes && !!notes?.[id] }" draggable="true"
         @dragstart="dragging = id" @dragend="dragging = null; over = null" @dragover.prevent="over = id" @dragleave="over = over === id ? null : over" @drop.prevent="drop(id)"
       >
         <label class="row-label">
@@ -78,9 +80,12 @@ function drop(target: T) {
           <button type="button" class="icon-btn sm flat" :aria-label="`Move ${label(id)} down`" :disabled="index === free.length - 1" tabindex="-1" @click="step(id, 1)"><AppIcon name="chevron" :size="13" /></button>
         </span>
         <span class="grip" aria-hidden="true" />
-        <p v-if="notes?.[id]" :id="`${hint}-${id}`" class="col-note">{{ notes[id] }}</p>
+        <p v-if="!reserveNotes && notes?.[id]" :id="`${hint}-${id}`" class="col-note">{{ notes[id] }}</p>
       </li>
     </ul>
+    <div v-if="reserveNotes" class="notes" aria-live="polite">
+      <p v-for="(note, id) in notes" :id="`${hint}-${id}`" :key="id" class="col-note">{{ note }}</p>
+    </div>
     <p :id="hint" class="sr-only">Alt and the arrow keys move the column.</p>
     <p v-if="note" class="fine">{{ note }}</p>
   </div>
@@ -88,7 +93,7 @@ function drop(target: T) {
 
 <style scoped>
 .columns { display: grid; gap: 6px; }
-.head { display: flex; align-items: center; justify-content: space-between; }
+.head { display: flex; align-items: center; justify-content: space-between; min-height: 24px; }
 .head .eyebrow { margin: 0; }
 .reset { height: 24px; padding: 0 8px; border: 0; border-radius: 999px; background: transparent; color: var(--teal-ink); font-size: 12px; font-weight: 600; }
 .reset:hover { background: var(--row-hover); }
@@ -118,4 +123,6 @@ function drop(target: T) {
 .row.noted { flex-wrap: wrap; height: auto; min-height: 32px; padding-top: 6px; padding-bottom: 6px; }
 .row.noted .row-label { height: 20px; }
 .col-note { flex-basis: 100%; margin: 1px 0 0 25px; font-size: 11.5px; line-height: 1.35; color: var(--ink-3); }
+.notes { height: 44px; overflow: auto; padding: 4px 8px; }
+.notes .col-note { margin: 0; }
 </style>

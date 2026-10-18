@@ -16,6 +16,32 @@ import (
 	"github.com/inspr-at/paimos/internal/reviewgate"
 )
 
+func TestReviewPromptRejectsLegacyProviderLabel(t *testing.T) {
+	r, order, profile := reviewPromptFixture(t)
+	if err := os.WriteFile(filepath.Join(r.dir, "change.txt"), []byte("review this change\n"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	r.run("add", "change.txt")
+	r.run("commit", "-m", "change fixture")
+	order.Review.HeadSHA = workspaceHEAD(t.Context(), r.dir)
+	// Both the binding and label agree; the provider binding contradicts them.
+	profile.Harness, profile.Model = "grok", "grok-4.7"
+	order.Review.AuthorFamily = "xai"
+	if prompt, err := reviewPrompt(t.Context(), r.dir, order, profile); !errors.Is(err, errReviewContext) || prompt != "" {
+		t.Fatal("review prompt accepted spoofed independence")
+	}
+}
+
+func TestGrokStartRejectsLegacyProviderLabel(t *testing.T) {
+	for _, family := range []string{"anthropic", "openai", "unknown", ""} {
+		r := StartRequest{Profile: Profile{Harness: Grok, Model: grokModel, Effort: grokEffort, Family: family}, AccountKey: "fixture"}
+		p, err := NewGrokAdapter().Start(t.Context(), r, func(AdapterEvent) { t.Error("unexpected adapter event") })
+		if p != nil || err == nil || err.Error() != "native Grok profile or account unavailable" {
+			t.Errorf("family %q reached native account lookup: %v", family, err)
+		}
+	}
+}
+
 func TestReviewPromptUsesExactDiffAndFamily(t *testing.T) {
 	r := newLaunchedRepo(t)
 	r.run("remote", "add", "origin", "https://github.com/example/review-fixture.git")
@@ -28,17 +54,17 @@ func TestReviewPromptUsesExactDiffAndFamily(t *testing.T) {
 	head := workspaceHEAD(t.Context(), r.dir)
 	family, profile := "anthropic", "review-profile"
 	order := WorkOrder{Kind: "review", Review: &reviewgate.Binding{TicketSnapshot: "Ticket: test the tenant boundary", Repository: "example/review-fixture", BaseSHA: base, HeadSHA: head, AuthorFamily: "openai", ReviewerFamily: &family, ProfileID: &profile}}
-	prompt, err := reviewPrompt(t.Context(), r.dir, order, Profile{ID: profile, Family: family})
+	prompt, err := reviewPrompt(t.Context(), r.dir, order, Profile{ID: profile, Family: family, Harness: "claude", Model: "review-model"})
 	if err != nil || !strings.Contains(prompt, "+package main") || !strings.Contains(prompt, base+".."+head) || !strings.Contains(prompt, "tenant boundary") {
 		t.Fatal("review context was not bound to ticket and exact diff")
 	}
 	order.Review.AuthorFamily = family
-	if _, err := reviewPrompt(t.Context(), r.dir, order, Profile{ID: profile, Family: family}); !errors.Is(err, errReviewContext) {
+	if _, err := reviewPrompt(t.Context(), r.dir, order, Profile{ID: profile, Family: family, Harness: "claude", Model: "review-model"}); !errors.Is(err, errReviewContext) {
 		t.Fatal("author reviewed itself")
 	}
 	order.Review.AuthorFamily = "openai"
 	order.Review.Repository = "another/repository"
-	if _, err := reviewPrompt(t.Context(), r.dir, order, Profile{ID: profile, Family: family}); err == nil {
+	if _, err := reviewPrompt(t.Context(), r.dir, order, Profile{ID: profile, Family: family, Harness: "claude", Model: "review-model"}); err == nil {
 		t.Fatal("wrong repository reviewed")
 	}
 	order.Review.Repository = "example/review-fixture"
@@ -48,7 +74,7 @@ func TestReviewPromptUsesExactDiffAndFamily(t *testing.T) {
 	r.run("add", "test.env.key")
 	r.run("commit", "-m", "credential path fixture")
 	order.Review.HeadSHA = workspaceHEAD(t.Context(), r.dir)
-	if _, err := reviewPrompt(t.Context(), r.dir, order, Profile{ID: profile, Family: family}); err == nil {
+	if _, err := reviewPrompt(t.Context(), r.dir, order, Profile{ID: profile, Family: family, Harness: "claude", Model: "review-model"}); err == nil {
 		t.Fatal("credential path entered review prompt")
 	}
 }
@@ -64,7 +90,7 @@ func reviewPromptFixture(t *testing.T) (*launchedRepo, WorkOrder, Profile) {
 		BaseSHA:        workspaceHEAD(t.Context(), r.dir),
 		AuthorFamily:   "openai", ReviewerFamily: &family, ProfileID: &profile,
 	}}
-	return r, order, Profile{ID: profile, Family: family}
+	return r, order, Profile{ID: profile, Family: family, Harness: "claude", Model: "review-model"}
 }
 
 func TestMutationReplaceRefHidesSealedTree(t *testing.T) {

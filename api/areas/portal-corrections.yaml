@@ -1,0 +1,25 @@
+# SPDX-License-Identifier: AGPL-3.0-only
+# aeon:owner internal/portal
+paths:
+  /portal/corrections/{correctionId}/close:
+    post:
+      operationId: closePortalCorrection
+      summary: Close a pending factual correction
+      description: settings.manage, people only. Closing does not change the comparison cell.
+      security: [{session: []}]
+      parameters: [{name: correctionId, in: path, required: true, schema: {type: string, format: uuid}}]
+      requestBody: {required: false, content: {application/json: {schema: {type: object, additionalProperties: false}}}}
+      responses:
+        '428': {$ref: '#/components/responses/OwnerWorkstationStepUpRequired'}
+        '200': {description: Closed, content: {application/json: {schema: {$ref: '#/components/schemas/PortalClosed'}}}}
+        '401': {$ref: '#/components/responses/Error'}
+        '403': {$ref: '#/components/responses/Error'}
+        '404': {$ref: '#/components/responses/Error'}
+components:
+  schemas:
+    PortalClosed:
+      type: object
+      additionalProperties: false
+      required: [closed]
+      properties:
+        closed: {const: true}

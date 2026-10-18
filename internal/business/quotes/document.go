@@ -18,72 +18,15 @@ import (
 	"unicode/utf8"
 
 	"github.com/jackc/pgx/v5"
+
+	"github.com/inspr-at/paimos/internal/business/quotedocument"
 )
 
-type textMark struct {
-	Start  int  `json:"start"`
-	End    int  `json:"end"`
-	Bold   bool `json:"bold,omitempty"`
-	Italic bool `json:"italic,omitempty"`
-}
-type textNode struct {
-	ID           string     `json:"id"`
-	Kind         string     `json:"kind"`
-	Text         string     `json:"text"`
-	Depth        int        `json:"depth,omitempty"`
-	Marker       string     `json:"marker,omitempty"`
-	Numbering    string     `json:"numbering,omitempty"`
-	ListStart    int        `json:"list_start,omitempty"`
-	ListContinue bool       `json:"list_continue,omitempty"`
-	SectionBound bool       `json:"section_bound,omitempty"`
-	Glyph        string     `json:"glyph,omitempty"`
-	MarkerXMM    string     `json:"marker_x_mm,omitempty"`
-	MarkerYMM    string     `json:"marker_y_mm,omitempty"`
-	TextStartMM  string     `json:"text_start_mm,omitempty"`
-	Marks        []textMark `json:"marks,omitempty"`
-}
-type documentSection struct {
-	ID              string     `json:"id"`
-	Heading         string     `json:"heading"`
-	Body            string     `json:"body"`
-	Nodes           []textNode `json:"nodes"`
-	NumberingStyle  string     `json:"numbering_style,omitempty"`
-	PageBreakBefore *bool      `json:"page_break_before,omitempty"`
-	KeepTogether    *bool      `json:"keep_together,omitempty"`
-	SpacingBeforeMM string     `json:"spacing_before_mm,omitempty"`
-	SpacingAfterMM  string     `json:"spacing_after_mm,omitempty"`
-}
-type documentPosition struct {
-	ID             string `json:"id"`
-	PricingSource  string `json:"pricing_source"`
-	ShortText      string `json:"short_text"`
-	LongText       string `json:"long_text"`
-	Quantity       string `json:"quantity"`
-	UnitLabel      string `json:"unit_label"`
-	UnitPriceCents int64  `json:"unit_price_cents"`
-	TotalCents     int64  `json:"total_cents"`
-	CostUnitNodeID string `json:"cost_unit_node_id,omitempty"`
-	RateUnit       string `json:"rate_unit,omitempty"`
-	Currency       string `json:"currency"`
-}
-type quoteDocument struct {
-	SchemaVersion        int                      `json:"schema_version"`
-	MinimumWriterVersion int                      `json:"minimum_writer_version"`
-	Title                string                   `json:"title"`
-	Subtitle             string                   `json:"subtitle"`
-	ProjectRef           string                   `json:"project_ref"`
-	OfferDate            string                   `json:"offer_date"`
-	ValidUntil           string                   `json:"valid_until"`
-	Currency             string                   `json:"currency"`
-	Sender               json.RawMessage          `json:"sender"`
-	Recipient            json.RawMessage          `json:"recipient"`
-	Legal                json.RawMessage          `json:"legal"`
-	Layout               json.RawMessage          `json:"layout"`
-	Profile              *documentProfileSnapshot `json:"profile,omitempty"`
-	Sections             []documentSection        `json:"sections"`
-	Positions            []documentPosition       `json:"positions"`
-	NetTotalCents        int64                    `json:"net_total_cents"`
-}
+type textMark = quotedocument.TextMark
+type textNode = quotedocument.TextNode
+type documentSection = quotedocument.Section
+type documentPosition = quotedocument.Position
+type quoteDocument = quotedocument.Document
 
 func newID() (string, error) {
 	var b [16]byte

@@ -143,22 +143,35 @@ func BindLegacyTx(ctx context.Context, tx interface {
 // New creates a migrated database. On failure the database and role are dropped.
 // The caller must Close a successful handle.
 func New(ctx context.Context) (opened *DB, err error) {
-	return newDatabase(ctx, true)
+	return newDatabase(ctx, true, nil)
+}
+
+// Clone copies a migrated, seeded fixture into an isolated database with its
+// own restricted app role. Close the source's pools before cloning and keep
+// the source database until all clones are created. No migrations or seeds
+// are replayed, and ownership is transferred just as for New's empty template.
+func Clone(ctx context.Context, source *DB) (*DB, error) {
+	if source == nil || source.Name == "" || source.maint == "" {
+		return nil, fmt.Errorf("clone requires a database from New")
+	}
+	return newDatabase(ctx, true, source)
 }
 
 // NewUnmigrated creates the same database, role and extension without applying
 // migrations. Migration tests use it to seed data between historical files.
 func NewUnmigrated(ctx context.Context) (opened *DB, err error) {
-	return newDatabase(ctx, false)
+	return newDatabase(ctx, false, nil)
 }
 
-func newDatabase(ctx context.Context, migrate bool) (opened *DB, err error) {
+func newDatabase(ctx context.Context, migrate bool, template *DB) (opened *DB, err error) {
 	base, maint, err := maintenanceURL()
 	if err != nil {
 		return nil, err
 	}
-	var template *DB
-	if migrate {
+	if template != nil && template.maint != maint {
+		return nil, fmt.Errorf("clone maintenance database differs from source")
+	}
+	if migrate && template == nil {
 		template, err = migratedTemplate(ctx, maint)
 		if err != nil {
 			return nil, err
@@ -247,6 +260,7 @@ func (d *DB) Close() error {
 
 func (d *DB) close() error {
 	if d.App != nil {
+		db.CloseNotificationConnections(d.App)
 		d.App.Close()
 	}
 	if d.Admin != nil {
@@ -341,6 +355,9 @@ func openApp(ctx context.Context, base *url.URL, dbName, role, password string, 
 	if !migrated {
 		cfg.MaxConns = 4
 	}
+	if _, err := db.ConfigurePool(cfg); err != nil {
+		return nil, err
+	}
 	pool, err := pgxpool.NewWithConfig(ctx, cfg)
 	if err != nil {
 		return nil, fmt.Errorf("connect app role: %w", err)
@@ -405,4 +422,32 @@ func randomIdent(prefix string) string {
 		panic("dbtest: crypto/rand failed: " + err.Error())
 	}
 	return prefix + hex.EncodeToString(b[:])
+}
+
+// KeyPerson gives fixture keys an explicit person creator. Prefer the fixture's
+// existing workspace owner; an otherwise personless fixture gets its own owner.
+func KeyPerson(t testing.TB, pool *pgxpool.Pool, tenantID string) string {
+	t.Helper()
+	var id string
+	err := db.InTenant(Seed(t.Context()), pool, tenantID, func(tx pgx.Tx) error {
+		err := tx.QueryRow(t.Context(), `SELECT p.id::text FROM principals p
+   JOIN role_bindings b ON b.tenant_id=p.tenant_id AND b.principal_id=p.id AND b.scope_type='workspace'
+   JOIN roles r ON r.tenant_id=b.tenant_id AND r.id=b.role_id
+   WHERE p.tenant_id=$1::uuid AND p.kind='person' AND p.status='active' AND r.key IN ('owner','admin')
+   ORDER BY (r.key='owner') DESC,p.created_at,p.id LIMIT 1`, tenantID).Scan(&id)
+		if err == nil {
+			return nil
+		}
+		if !errors.Is(err, pgx.ErrNoRows) {
+			return err
+		}
+		if err := tx.QueryRow(t.Context(), `INSERT INTO principals(tenant_id,kind,name,roles) VALUES($1,'person','Key fixture owner','{super_admin}') RETURNING id::text`, tenantID).Scan(&id); err != nil {
+			return err
+		}
+		return BindLegacyTx(t.Context(), tx, tenantID, id)
+	})
+	if err != nil {
+		t.Fatalf("key fixture person: %v", err)
+	}
+	return id
 }

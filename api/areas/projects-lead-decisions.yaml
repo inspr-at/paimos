@@ -1,0 +1,25 @@
+# SPDX-License-Identifier: AGPL-3.0-only
+paths:
+  /projects/{projectId}/lead-decisions:
+    parameters:
+      - {name: projectId, in: path, required: true, schema: {type: string, format: uuid}}
+    get:
+      operationId: listLeadDecisions
+      description: Project-visible, prompt-free reports from coordinator generations, oldest first. Replays immutable evidence rather than reevaluating current policy or gates. No account identities, quota values, prompts or execution authority. Uses the existing append-only event log; history survives generation stop/archive. Reports do not prove a launch or a review verdict.
+      parameters:
+        - {name: after, in: query, schema: {type: integer, minimum: 0}, description: Exclusive tenant-local event ID cursor.}
+        - {name: limit, in: query, schema: {type: integer, minimum: 1, maximum: 200, default: 50}}
+        - {name: session_id, in: query, schema: {type: string, format: uuid}}
+      responses:
+        '200': {description: Bounded decision history, content: {application/json: {schema: {$ref: '#/components/schemas/LeadDecisionPage'}}}}
+        '400': {description: Invalid query}
+        '403': {description: Missing project read permission}
+        '404': {description: Project is not visible}
+components:
+  schemas:
+    LeadDecisionPage:
+      type: object
+      required: [items, next_after]
+      properties:
+        items: {type: array, maxItems: 200, items: {$ref: '#/components/schemas/LeadDecision'}}
+        next_after: {type: [integer, 'null'], minimum: 1}

@@ -12,6 +12,7 @@ import (
 	"strings"
 	"sync"
 	"sync/atomic"
+	"time"
 
 	"github.com/jackc/pgx/v5/pgxpool"
 
@@ -31,9 +32,12 @@ type PublicModule interface {
 
 // Server holds what every module needs.
 type Server struct {
-	Mux        *http.ServeMux
-	Pool       *pgxpool.Pool
-	Middleware []func(http.Handler) http.Handler // applied outermost-first to /api
+	Mux  *http.ServeMux
+	Pool *pgxpool.Pool
+	// Middleware applies outermost-first to /api. The first middleware performs
+	// authentication and authorization under the admission deadline; remaining
+	// middleware runs with the handler lifetime and authenticated context.
+	Middleware []func(http.Handler) http.Handler
 	Modules    []Module
 	// Web is the SPA filesystem (AEON_WEB_DIR or the webembed dist).
 	// Nil serves a placeholder page.
@@ -50,15 +54,24 @@ type Server struct {
 	// documents, including documents that later navigate to the journey in
 	// Vue. Empty preserves the default policy everywhere.
 	AithemaOrigin string
+	// AttachmentSandboxOrigin is validated by attachments.NewSandbox. Only
+	// application documents may embed it; public portal policy stays unchanged.
+	AttachmentSandboxOrigin string
 
 	// serving is set when the process is in http.Server.Serve.
 	// draining is set on SIGTERM before Shutdown. Readiness is serving and
 	// not draining; liveness (GET /api/health) ignores both.
 	serving  atomic.Bool
 	draining atomic.Bool
-	// readyProbe overrides the readiness database ping. Nil uses Pool.Ping.
+	// readyProbe overrides the readiness database ping. Nil uses db.Probe.
 	// Tests inject it; production leaves it nil.
 	readyProbe func(context.Context) error
+	// AuthProbe exercises shared authentication reads without minting credentials
+	// or renewing activity. It shares readiness's 500ms total budget.
+	AuthProbe func(context.Context) error
+	authReady authReadiness
+	readyNow  func() time.Time
+	Metrics   TransportMetrics
 
 	once    sync.Once
 	handler http.Handler
@@ -104,12 +117,19 @@ func (s *Server) build() {
 	s.Mux.HandleFunc("/api", handleNotFound)
 
 	var api http.Handler = s.Mux
-	for i := len(s.Middleware) - 1; i >= 0; i-- {
+	for i := len(s.Middleware) - 1; i > 0; i-- {
 		api = s.Middleware[i](api)
 	}
+	// Restore the handler lifetime before response middleware captures the
+	// request for post-mutation reads such as the event-position watermark.
+	api = handlerBudgetMiddleware(api)
+	if len(s.Middleware) > 0 {
+		api = s.Middleware[0](api)
+	}
 	api = readStatementTimeoutMiddleware(api)
+	api = requestBudgetMiddleware(api)
 	api = routePatternMiddleware(s.Mux, api)
-	api = commonMiddleware(api)
+	api = requestIDMiddlewareWithMetrics(recoverMiddleware(securityMiddleware(api)), &s.Metrics)
 
 	publicMux := http.NewServeMux()
 	publicMounted := false
@@ -129,12 +149,21 @@ func (s *Server) build() {
 	root.Handle("/from-classic/api/", commonMiddleware(http.HandlerFunc(s.handleClassicAPIGone)))
 	// Exact files only. A /portal/ subtree would take the Vue catalog page off the SPA.
 	// The catalog and roadmap HTML patterns are the public declarations for those pages.
-	spa := commonMiddleware(spaHandler(s.Web, s.brand()))
+	view := attachmentViewPolicy(s.AttachmentSandboxOrigin, spaHandler(s.Web, s.brand()))
 	if s.AithemaOrigin != "" {
-		spa = commonMiddleware(aithemaViewPolicy(s.AithemaOrigin, spaHandler(s.Web, s.brand())))
+		view = aithemaViewPolicy(s.AithemaOrigin, view)
 	}
+	spa := commonMiddleware(view)
 	if publicMounted {
 		root.Handle("GET /aithema/preview/{design_rev}", commonMiddleware(publicMux))
+		// AEON-1441: START's form POST. Public and cookie-free: it never
+		// passes the API middleware, so no session is read or renewed here.
+		root.Handle("POST /import/project-draft", commonMiddleware(publicMux))
+		root.Handle("GET /portal/{tenantSlug}/products/{productSlug}/llms.txt", commonMiddleware(publicMux))
+		root.Handle("GET /portal/{tenantSlug}/products/{productSlug}/catalog.json", commonMiddleware(publicMux))
+		root.Handle("GET /portal/{tenantSlug}/products/{productSlug}/roadmap.json", commonMiddleware(publicMux))
+		root.Handle("GET /portal/{tenantSlug}/products/{productSlug}/roadmap", spa)
+		root.Handle("GET /portal/{tenantSlug}/products/{productSlug}", spa)
 		root.Handle("GET /portal/{tenantSlug}/llms.txt", commonMiddleware(publicMux))
 		root.Handle("GET /portal/{tenantSlug}/catalog.json", commonMiddleware(publicMux))
 		root.Handle("GET /portal/{tenantSlug}/roadmap.json", commonMiddleware(publicMux))

@@ -1,9 +1,9 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import { inflateSync } from 'node:zlib'
-import { mkdirSync } from 'node:fs'
 import { test, expect, type Page } from '@playwright/test'
+import { me } from './work-fixtures'
+import { headerStorageKey } from '../src/lib/projectHeader'
 import { mockTicketGraph, ticketGraphWorld } from './ticket-graph-fixtures'
-import { journeyWorld } from './journey-fixtures'
 import type { TicketGraphLink } from '../src/lib/ticketGraph'
 
 test.use({
@@ -13,8 +13,39 @@ test.use({
 })
 test.setTimeout(60_000)
 
+// The graph composition was designed for the roomy header; the default is now Compact.
+async function mockHeaderGraph(page: Page, world = ticketGraphWorld()) {
+  await page.addInitScript(({ key }) => localStorage.setItem(key, JSON.stringify({ density: 'comfortable', roomy: 'comfortable' })), { key: headerStorageKey('t1', me.id) })
+  const mocked = await mockTicketGraph(page, world)
+  // The header reads Queue independently. A real-server 404 used to insert
+  // Queue unavailable during the geometry/pinned-frame checks (AEON-1261).
+  await page.route('**/api/queue?*', route => route.fulfill({ json: { items: [], count: 0, manual_order: false, capacity: { queued_hours: 0, parallel_runs: 1, work_hours: 0, warning: false } } }))
+  return mocked
+}
+
 const surface = (page: Page) => page.locator('.header-glimpse-canvas')
 const ready = (page: Page) => expect(surface(page)).toHaveAttribute('data-ready', 'true', { timeout: 20_000 })
+// setViewportSize resolves before the page has the new size. With the glimpse
+// running on CI's software GL, window.innerWidth kept the old width for 2.7–3 s
+// in nightly runs and past 5 s on PR shards; the glimpse then cleared within
+// 6 ms. Wait until the page reports the size; the reaction keeps its budget.
+async function resizeSeen(page: Page, size: { width: number; height: number }) {
+  await page.setViewportSize(size)
+  await expect.poll(() => page.evaluate(() => window.innerWidth), { timeout: 20_000 }).toBe(size.width)
+}
+// Keep the individual signal regressions independent of the task fallback.
+// Holding timeout deliveries leaves their chosen viewport/frame signal as the
+// only recovery path, including callbacks queued before the hold begins.
+async function holdTimeoutsWhile(page: Page, key: string, field?: string) {
+  await page.addInitScript(({ key, field }) => {
+    const timeout = window.setTimeout.bind(window)
+    window.setTimeout = (handler, delay, ...args) => timeout(typeof handler === 'function' ? (...values: unknown[]) => {
+      const state = (window as unknown as Record<string, unknown>)[key]
+      const holding = field ? (state as Record<string, unknown> | undefined)?.[field] : state
+      if (holding !== true) handler(...values)
+    } : handler, delay, ...args)
+  }, { key, field })
+}
 // Fixed 60fps steps, released after layout, so the contrast shot pauses on one
 // orbit angle. 17ms stays above the renderer's frame gate. Do not relax 0.78.
 const GLIMPSE_PIN_FRAMES = 192
@@ -29,14 +60,17 @@ async function releasePinnedGlimpse(page: Page) {
   await expect(surface(page)).toHaveAttribute('data-glimpse-pin', String(GLIMPSE_PIN_FRAMES), { timeout: 20_000 })
 }
 
-const protectedSelectors = ['.title-line > *', '.description', '.head-stats', '.project-tabs', '.view-bar .view-tab', '.view-bar .tab', '.view-bar .changes', '.toolbar-wrap']
+const protectedSelectors = ['.title-line > *', '.description', '.head-stats .stat', '.head-stats .q-warn', '.head-stats .head-work', '.head-stats .group-count', '.head-stats .status-count', '.header-activity > *', '.project-tabs', '.project-navigation a', '.project-navigation button', '.project-navigation label', '.view-bar .view-tab', '.view-bar .tab', '.view-bar .changes', '.toolbar-wrap']
 async function protectedBoxes(page: Page) {
   return page.locator(protectedSelectors.join(', ')).evaluateAll(elements => elements.filter(el => el.getClientRects().length).map(el => {
     const box = el.getBoundingClientRect()
     return { x: box.x, y: box.y, width: box.width, height: box.height }
-  }))
+  }).filter(box => box.width > 0 && box.height > 0))
 }
 async function expectClearOfText(page: Page) {
+  // setViewportSize resolves before the browser dispatches resize. Require a
+  // measurement of this viewport, rather than accepting the previous frame.
+  await expect(page.locator('.glimpse-col')).toHaveAttribute('data-measured-viewport', String(page.viewportSize()!.width))
   await expect(page.locator('.glimpse-col')).toHaveAttribute('data-measured', 'true')
   await expect(page.locator('.glimpse-canvas')).toBeVisible()
   const region = (await page.locator('.glimpse-canvas').boundingBox())!
@@ -48,15 +82,21 @@ async function expectClearOfText(page: Page) {
   expect(Math.abs(region.y - main.y)).toBeLessThan(2)
   expect(Math.abs(region.y + region.height - toolbar.y)).toBeLessThan(1)
   const controls = (await page.locator('.glimpse-controls').boundingBox())!
+  const spot = await page.locator('.glimpse-col').getAttribute('data-spot')
   for (const box of await protectedBoxes(page)) {
     const overlap = controls.x < box.x + box.width && controls.x + controls.width > box.x && controls.y < box.y + box.height && controls.y + controls.height > box.y
-    expect(overlap, 'hover controls stay clear of text and toolbar').toBe(false)
+    expect(overlap, `hover controls stay clear of text and toolbar: ${JSON.stringify({ controls, box, spot, viewport: page.viewportSize() })}`).toBe(false)
   }
 }
 
 function sized(count: number, withLinks: boolean) {
   const world = ticketGraphWorld()
-  world.graph.nodes = world.graph.nodes.slice(0, count).map(node => ({ ...node, status: 'backlog', status_category: 'open' }))
+  world.graph.nodes = world.graph.nodes.slice(0, count).map(node => ({ ...node, type: 'ticket', status: 'backlog', status_category: 'open' }))
+  for (const node of world.graph.nodes) {
+    const work = world.work.nodes.find(item => item.id === node.id)!
+    work.kind_slug = 'ticket'
+    work.state = 'backlog'
+  }
   const ids = new Set(world.graph.nodes.map(node => node.id))
   const linked = world.graph.links.filter(link => ids.has(link.source) && ids.has(link.target))
   const links: TicketGraphLink[] = withLinks ? (linked.length ? linked : [{ source: world.graph.nodes[0].id, target: world.graph.nodes[1].id, kind: 'relates' }]) : []
@@ -111,7 +151,7 @@ function eightUnlinkedWhenFiltered() {
 }
 
 test('a wide project with tickets and a link shows a labelless 60fps glimpse', async ({ page }) => {
-  await mockTicketGraph(page)
+  await mockHeaderGraph(page)
   await page.goto('/p/PHAROS/tickets')
   await ready(page)
   await expect(surface(page)).toHaveAttribute('data-fps', '60')
@@ -133,7 +173,7 @@ test('a wide project with tickets and a link shows a labelless 60fps glimpse', a
 test('the glimpse follows the viewer’s Off motion preference without adding labels', async ({ page }) => {
   const world = ticketGraphWorld()
   world.work.preferences['graph-motion'] = { pace: 'off' }
-  await mockTicketGraph(page, world)
+  await mockHeaderGraph(page, world)
   await page.goto('/p/PHAROS/tickets')
   await ready(page)
   await expect(surface(page)).toHaveAttribute('data-orbit-seconds', '0')
@@ -142,7 +182,7 @@ test('the glimpse follows the viewer’s Off motion preference without adding la
 })
 
 test('hover shows Open graph and Pause; clicking the glimpse opens the graph', async ({ page }) => {
-  await mockTicketGraph(page)
+  await mockHeaderGraph(page)
   await page.goto('/p/PHAROS/tickets')
   await ready(page)
   const controls = page.locator('.glimpse-controls')
@@ -169,7 +209,7 @@ test('the glimpse waits until the page is idle', async ({ page }) => {
       for (const cb of pending.splice(0)) cb({ didTimeout: false, timeRemaining: () => 30 } as IdleDeadline)
     }
   })
-  await mockTicketGraph(page)
+  await mockHeaderGraph(page)
   await page.goto('/p/PHAROS/tickets')
   await expect(page.getByRole('heading', { name: 'Pharos', exact: true })).toBeVisible()
   await expect(surface(page)).toHaveCount(0)
@@ -178,7 +218,7 @@ test('the glimpse waits until the page is idle', async ({ page }) => {
 })
 
 test('narrow viewports and small or unlinked graphs stay empty', async ({ page }) => {
-  await mockTicketGraph(page, sized(7, true))
+  await mockHeaderGraph(page, sized(7, true))
   await page.goto('/p/PHAROS/tickets')
   await expect(page.getByRole('heading', { name: 'Pharos', exact: true })).toBeVisible()
   await expect.poll(() => page.locator('[data-header-glimpse]').getAttribute('data-header-glimpse')).toBe('off')
@@ -186,7 +226,7 @@ test('narrow viewports and small or unlinked graphs stay empty', async ({ page }
 })
 
 test('eight tickets without a link stay empty', async ({ page }) => {
-  const { calls } = await mockTicketGraph(page, sized(8, false))
+  const { calls } = await mockHeaderGraph(page, sized(8, false))
   await page.goto('/p/PHAROS/tickets')
   await expect.poll(() => calls.length).toBeGreaterThan(0)
   await page.waitForTimeout(400)
@@ -197,13 +237,13 @@ test('eight visible tickets with exactly one edge show the glimpse', async ({ pa
   const world = eightWithOneEdge()
   expect(world.graph.nodes).toHaveLength(8)
   expect(world.graph.links).toHaveLength(1)
-  await mockTicketGraph(page, world)
+  await mockHeaderGraph(page, world)
   await page.goto('/p/PHAROS/tickets')
   await expect(page.locator('[data-header-glimpse="on"]')).toHaveAttribute('data-shown', '8', { timeout: 20_000 })
 })
 
 test('a priority filter that leaves seven of those tickets hides the glimpse', async ({ page }) => {
-  const { calls } = await mockTicketGraph(page, eightWithOneEdge())
+  const { calls } = await mockHeaderGraph(page, eightWithOneEdge())
   await page.goto('/p/PHAROS/tickets')
   await expect(page.locator('[data-header-glimpse="on"]')).toHaveAttribute('data-shown', '8', { timeout: 20_000 })
   const before = calls.length
@@ -219,7 +259,7 @@ test('a priority filter that keeps eight tickets but no link hides the glimpse',
   const world = eightUnlinkedWhenFiltered()
   expect(world.graph.nodes.filter(node => node.priority === 'high')).toHaveLength(8)
   expect(world.graph.links).toHaveLength(1)
-  const { calls } = await mockTicketGraph(page, world)
+  const { calls } = await mockHeaderGraph(page, world)
   await page.goto('/p/PHAROS/tickets?priority=high')
   await expect(page.getByRole('heading', { name: 'Pharos', exact: true })).toBeVisible()
   await expect.poll(() => calls.length).toBeGreaterThan(0)
@@ -230,20 +270,345 @@ test('a priority filter that keeps eight tickets but no link hides the glimpse',
 
 test('eight linked tickets appear once the viewport reaches 1280', async ({ page }) => {
   await page.setViewportSize({ width: 1279, height: 900 })
-  await mockTicketGraph(page, sized(8, true))
+  await mockHeaderGraph(page, sized(8, true))
   await page.goto('/p/PHAROS/tickets')
   await expect(page.locator('[data-header-glimpse="off"]')).toBeAttached()
   await expect(surface(page)).toHaveCount(0)
   await page.setViewportSize({ width: 1280, height: 900 })
   await ready(page)
-  await page.setViewportSize({ width: 390, height: 844 })
+  await resizeSeen(page, { width: 390, height: 844 })
   await expect(page.locator('[data-header-glimpse="on"]')).toHaveCount(0)
+})
+
+// The mounted min-width list can miss `change` while the WebGL loop is running.
+// Shrinking must still clear the glimpse. This listener swallow is the regression
+// for that miss: the layout width is the only signal left.
+test('a dropped wide-media change still hides the glimpse below 1280', async ({ page }) => {
+  await page.addInitScript(() => {
+    const original = window.matchMedia.bind(window)
+    window.matchMedia = (query: string) => {
+      const list = original(query)
+      if (query === '(min-width: 1280px)') {
+        const ignore = () => {}
+        Object.defineProperty(list, 'addEventListener', { configurable: true, value: ignore })
+        Object.defineProperty(list, 'removeEventListener', { configurable: true, value: ignore })
+      }
+      return list
+    }
+  })
+  await page.setViewportSize({ width: 1600, height: 900 })
+  await mockHeaderGraph(page, sized(8, true))
+  await page.goto('/p/PHAROS/tickets')
+  await ready(page)
+  await resizeSeen(page, { width: 390, height: 844 })
+  await expect(page.locator('[data-header-glimpse="on"]')).toHaveCount(0)
+})
+
+// Risk: software GL delays the next animation frame after innerWidth changes.
+// With the other viewport notifications lost, a frame-based fallback cannot
+// clear the decoration. The visual viewport delivery must work independently.
+test('AEON-1337: a visual viewport resize clears the glimpse before the next animation frame', async ({ page }) => {
+  await holdTimeoutsWhile(page, '__aeonViewportFrameHold', 'holding')
+  await page.addInitScript(() => {
+    const state = { holding: false, framesHeld: 0, rootsDropped: 0, visualResizes: 0 }
+    ;(window as unknown as { __aeonViewportFrameHold: typeof state }).__aeonViewportFrameHold = state
+    const frame = window.requestAnimationFrame.bind(window)
+    window.requestAnimationFrame = callback => frame(time => {
+      if (state.holding) { state.framesHeld++; return }
+      callback(time)
+    })
+    window.addEventListener('resize', event => { if (state.holding) event.stopImmediatePropagation() }, { capture: true })
+    const media = window.matchMedia.bind(window)
+    window.matchMedia = query => {
+      const list = media(query)
+      if (query === '(min-width: 1280px)') list.addEventListener('change', event => { if (state.holding) event.stopImmediatePropagation() }, { capture: true })
+      return list
+    }
+    const Observer = window.ResizeObserver
+    window.ResizeObserver = class extends Observer {
+      constructor(callback: ResizeObserverCallback) {
+        super((entries, observer) => {
+          const delivered = entries.filter(entry => {
+            if (!state.holding || entry.target !== document.documentElement) return true
+            state.rootsDropped++
+            return false
+          })
+          if (delivered.length) callback(delivered, observer)
+        })
+      }
+    }
+    window.visualViewport!.addEventListener('resize', () => { if (state.holding) state.visualResizes++ })
+  })
+  await page.setViewportSize({ width: 1279, height: 900 })
+  await mockHeaderGraph(page, sized(8, true))
+  await page.goto('/p/PHAROS/tickets')
+  await expect(page.locator('[data-header-glimpse="off"]')).toBeAttached()
+  await page.setViewportSize({ width: 1280, height: 900 })
+  await ready(page)
+  await page.evaluate(() => { (window as unknown as { __aeonViewportFrameHold: { holding: boolean } }).__aeonViewportFrameHold.holding = true })
+  await expect.poll(() => page.evaluate(() => (window as unknown as { __aeonViewportFrameHold: { framesHeld: number } }).__aeonViewportFrameHold.framesHeld > 0)).toBe(true)
+  await resizeSeen(page, { width: 390, height: 844 })
+  await expect.poll(() => page.evaluate(() => {
+    const state = (window as unknown as { __aeonViewportFrameHold: { framesHeld: number; rootsDropped: number; visualResizes: number } }).__aeonViewportFrameHold
+    return {
+      width: document.documentElement.getBoundingClientRect().width,
+      frameHeld: state.framesHeld > 0,
+      rootDropped: state.rootsDropped > 0,
+      visualDelivered: state.visualResizes > 0,
+    }
+  })).toEqual({ width: 390, frameHeld: true, rootDropped: true, visualDelivered: true })
+  await expect(page.locator('[data-header-glimpse="on"]')).toHaveCount(0)
+  await expect(page.locator('[data-header-glimpse="off"]')).toBeAttached()
+})
+
+// Risk: software-rendered frames stop during a shrink, so the paint sampler
+// cannot recover missed window/media/root notifications. The independent
+// visual-viewport event must clear an already painted glimpse without a frame.
+test('AEON-1414: a visual viewport shrink clears the glimpse while frames and other resize notifications are held', async ({ page }) => {
+  await holdTimeoutsWhile(page, '__aeonHeldViewport', 'holding')
+  await page.addInitScript(() => {
+    const state = { holding: false, visualWidths: [] as number[] }
+    ;(window as unknown as { __aeonHeldViewport: typeof state }).__aeonHeldViewport = state
+    const frame = window.requestAnimationFrame.bind(window)
+    window.requestAnimationFrame = callback => frame(time => { if (!state.holding) callback(time) })
+    window.addEventListener('resize', event => { if (state.holding) event.stopImmediatePropagation() }, { capture: true })
+    const media = window.matchMedia.bind(window)
+    window.matchMedia = query => {
+      const list = media(query)
+      if (query === '(min-width: 1280px)') list.addEventListener('change', event => { if (state.holding) event.stopImmediatePropagation() }, { capture: true })
+      return list
+    }
+    const Observer = window.ResizeObserver
+    window.ResizeObserver = class extends Observer {
+      constructor(callback: ResizeObserverCallback) {
+        super((entries, observer) => {
+          const delivered = entries.filter(entry => !state.holding || entry.target !== document.documentElement)
+          if (delivered.length) callback(delivered, observer)
+        })
+      }
+    }
+    window.visualViewport?.addEventListener('resize', () => {
+      if (state.holding) state.visualWidths.push(window.visualViewport!.width)
+    })
+  })
+  await mockHeaderGraph(page, sized(8, true))
+  await page.goto('/p/PHAROS/tickets')
+  await ready(page)
+  await expect(page.locator('[data-header-glimpse="on"]')).toBeAttached()
+  await page.evaluate(() => { (window as unknown as { __aeonHeldViewport: { holding: boolean } }).__aeonHeldViewport.holding = true })
+  await resizeSeen(page, { width: 390, height: 844 })
+  await expect.poll(() => page.evaluate(() => ({
+    layout: document.documentElement.getBoundingClientRect().width,
+    visual: (window as unknown as { __aeonHeldViewport: { visualWidths: number[] } }).__aeonHeldViewport.visualWidths.at(-1),
+  }))).toEqual({ layout: 390, visual: 390 })
+  await expect(page.locator('[data-header-glimpse="on"]')).toHaveCount(0)
+  await expect(page.locator('[data-header-glimpse="off"]')).toBeAttached()
+})
+
+// Risk: software GL stalls animation frames at the same time as the viewport
+// notifications. Advance an injected clock with every other recovery path
+// held, so a task must clear the mounted glimpse after the real layout shrinks.
+test('AEON-1414: a shrink clears the glimpse while viewport notifications and animation frames are stalled', async ({ page }) => {
+  await page.clock.install({ time: new Date('2026-10-18T03:00:00Z') })
+  await page.addInitScript(() => {
+    const state = { holding: false, framesHeld: 0, rootsDropped: 0 }
+    ;(window as unknown as { __aeonViewportStall: typeof state }).__aeonViewportStall = state
+    const frame = window.requestAnimationFrame.bind(window)
+    window.requestAnimationFrame = callback => frame(time => {
+      if (state.holding) { state.framesHeld++; return }
+      callback(time)
+    })
+    window.addEventListener('resize', event => { if (state.holding) event.stopImmediatePropagation() }, { capture: true })
+    window.visualViewport?.addEventListener('resize', event => { if (state.holding) event.stopImmediatePropagation() }, { capture: true })
+    const media = window.matchMedia.bind(window)
+    window.matchMedia = query => {
+      const list = media(query)
+      if (query === '(min-width: 1280px)') list.addEventListener('change', event => { if (state.holding) event.stopImmediatePropagation() }, { capture: true })
+      return list
+    }
+    const Observer = window.ResizeObserver
+    window.ResizeObserver = class extends Observer {
+      constructor(callback: ResizeObserverCallback) {
+        super((entries, observer) => {
+          const delivered = entries.filter(entry => {
+            if (!state.holding || entry.target !== document.documentElement) return true
+            state.rootsDropped++
+            return false
+          })
+          if (delivered.length) callback(delivered, observer)
+        })
+      }
+    }
+  })
+  await page.setViewportSize({ width: 1279, height: 900 })
+  await mockHeaderGraph(page, sized(8, true))
+  await page.goto('/p/PHAROS/tickets')
+  await expect(page.locator('[data-header-glimpse="off"]')).toBeAttached()
+  await expect(surface(page)).toHaveCount(0)
+  await resizeSeen(page, { width: 1280, height: 900 })
+  await ready(page)
+  await page.clock.pauseAt(new Date(await page.evaluate(() => Date.now()) + 1000))
+  await page.evaluate(() => { (window as unknown as { __aeonViewportStall: { holding: boolean } }).__aeonViewportStall.holding = true })
+  await resizeSeen(page, { width: 390, height: 844 })
+  await page.clock.runFor(1000)
+  await expect.poll(() => page.evaluate(() => {
+    const state = (window as unknown as { __aeonViewportStall: { framesHeld: number; rootsDropped: number } }).__aeonViewportStall
+    return { layout: document.documentElement.getBoundingClientRect().width, framesHeld: state.framesHeld > 0, rootsDropped: state.rootsDropped > 0 }
+  })).toEqual({ layout: 390, framesHeld: true, rootsDropped: true })
+  await expect(page.locator('[data-header-glimpse="on"]')).toHaveCount(0)
+  await expect(page.locator('[data-header-glimpse="off"]')).toBeAttached()
+})
+
+// Risk: the software-rendered canvas outlives the last viewport notification.
+// Drop the root observer as well as resize/media events after a ready wide
+// frame. Real layout still shrinks, so painting must follow it without a timer.
+test('AEON-1472: an active glimpse stops after all viewport notifications are dropped', async ({ page }) => {
+  await holdTimeoutsWhile(page, '__aeonViewportDrops', 'dropping')
+  await page.addInitScript(() => {
+    const state = { dropping: false, rootDrops: 0 }
+    ;(window as unknown as { __aeonViewportDrops: typeof state }).__aeonViewportDrops = state
+    window.addEventListener('resize', event => { if (state.dropping) event.stopImmediatePropagation() }, { capture: true })
+    window.visualViewport?.addEventListener('resize', event => { if (state.dropping) event.stopImmediatePropagation() }, { capture: true })
+    const matchMedia = window.matchMedia.bind(window)
+    window.matchMedia = query => {
+      const list = matchMedia(query)
+      if (query === '(min-width: 1280px)') list.addEventListener('change', event => { if (state.dropping) event.stopImmediatePropagation() }, { capture: true })
+      return list
+    }
+    const NativeObserver = window.ResizeObserver
+    window.ResizeObserver = class extends NativeObserver {
+      constructor(callback: ResizeObserverCallback) {
+        super((entries, observer) => {
+          const delivered = entries.filter(entry => {
+            if (!state.dropping || entry.target !== document.documentElement) return true
+            state.rootDrops++
+            return false
+          })
+          if (delivered.length) callback(delivered, observer)
+        })
+      }
+    }
+  })
+  await mockHeaderGraph(page, sized(8, true))
+  await page.goto('/p/PHAROS/tickets')
+  await ready(page)
+  // Drain the existing two-frame follow-up before removing the next signals.
+  await page.evaluate(() => new Promise<void>(resolve => requestAnimationFrame(() => requestAnimationFrame(() => requestAnimationFrame(() => {
+    (window as unknown as { __aeonViewportDrops: { dropping: boolean } }).__aeonViewportDrops.dropping = true
+    resolve()
+  })))))
+  await resizeSeen(page, { width: 390, height: 844 })
+  await expect.poll(() => page.evaluate(() => ({
+    layout: document.documentElement.getBoundingClientRect().width,
+    dropped: (window as unknown as { __aeonViewportDrops: { rootDrops: number } }).__aeonViewportDrops.rootDrops > 0,
+  }))).toEqual({ layout: 390, dropped: true })
+  await expect(page.locator('[data-header-glimpse="on"]')).toHaveCount(0)
+  await expect(page.locator('[data-header-glimpse="off"]')).toBeAttached()
+})
+
+// 835d2134: 1279 → 1280 → 390 left the painted glimpse on. Resize, the media
+// change and the document-element observer can all stay silent together while
+// the canvas paints. The paint frame is the read that must still clear it.
+test('AEON-1477 a painted glimpse hides below 1280 when resize, media and the document observer stay silent', async ({ page }) => {
+  await holdTimeoutsWhile(page, '__aeonDropViewportSignals')
+  await page.addInitScript(() => {
+    const dropping = () => (window as unknown as { __aeonDropViewportSignals?: boolean }).__aeonDropViewportSignals === true
+    window.addEventListener('resize', event => { if (dropping()) event.stopImmediatePropagation() }, { capture: true })
+    window.visualViewport?.addEventListener('resize', event => { if (dropping()) event.stopImmediatePropagation() }, { capture: true })
+    const originalMedia = window.matchMedia.bind(window)
+    window.matchMedia = (query: string) => {
+      const list = originalMedia(query)
+      if (query === '(min-width: 1280px)') list.addEventListener('change', event => { if (dropping()) event.stopImmediatePropagation() }, { capture: true })
+      return list
+    }
+    const Original = window.ResizeObserver
+    window.ResizeObserver = class extends Original {
+      constructor(callback: ResizeObserverCallback) {
+        super((entries, observer) => {
+          if (dropping() && entries.every(entry => entry.target === document.documentElement)) return
+          callback(entries, observer)
+        })
+      }
+    }
+  })
+  await page.setViewportSize({ width: 1600, height: 900 })
+  await mockHeaderGraph(page, sized(8, true))
+  await page.goto('/p/PHAROS/tickets')
+  await ready(page)
+  await page.evaluate(() => { (window as unknown as { __aeonDropViewportSignals?: boolean }).__aeonDropViewportSignals = true })
+  await page.setViewportSize({ width: 390, height: 844 })
+  await expect.poll(() => page.evaluate(() => [window.innerWidth, window.matchMedia('(min-width: 1280px)').matches])).toEqual([390, false])
+  await expect(page.locator('[data-header-glimpse="on"]')).toHaveCount(0)
+  await expect(page.locator('[data-header-glimpse="off"]')).toBeAttached()
+})
+
+// The PR shard has shrunk 1280 → 390 without a usable resize or wide-media
+// change for the header (AEON-1410 CI). Drop both for the shrink only: the
+// layout box is the one signal left, and it must still clear the glimpse.
+test('a shrink that delivers neither resize nor the wide-media change still hides the glimpse below 1280', async ({ page }) => {
+  await page.addInitScript(() => {
+    const dropping = () => (window as unknown as { __aeonDropViewportSignals?: boolean }).__aeonDropViewportSignals === true
+    // Registered before the app, so stopping here stops every later listener.
+    window.addEventListener('resize', event => { if (dropping()) event.stopImmediatePropagation() }, { capture: true })
+    const original = window.matchMedia.bind(window)
+    window.matchMedia = (query: string) => {
+      const list = original(query)
+      if (query === '(min-width: 1280px)') list.addEventListener('change', event => { if (dropping()) event.stopImmediatePropagation() }, { capture: true })
+      return list
+    }
+  })
+  await page.setViewportSize({ width: 1600, height: 900 })
+  await mockHeaderGraph(page, sized(8, true))
+  await page.goto('/p/PHAROS/tickets')
+  await ready(page)
+  await page.evaluate(() => { (window as unknown as { __aeonDropViewportSignals?: boolean }).__aeonDropViewportSignals = true })
+  await resizeSeen(page, { width: 390, height: 844 })
+  // The layout really moved, and the header still holds the glimpse slot:
+  // the off marker proves a decision, not an unmounted header.
+  await expect.poll(() => page.evaluate(() => [window.innerWidth, window.matchMedia('(min-width: 1280px)').matches])).toEqual([390, false])
+  await expect(page.locator('[data-header-glimpse="on"]')).toHaveCount(0)
+  await expect(page.locator('[data-header-glimpse="off"]')).toBeAttached()
+})
+
+// Risk: the root observer fires while both window/media hints still describe
+// the earlier wide viewport. Hold those hints and drop their events so only
+// real layout can end painting; no sleep or renderer timing decides the test.
+test('AEON-1471: a narrow root clears the glimpse while window and media hints stay wide', async ({ page }) => {
+  await page.addInitScript(() => {
+    const holding = () => (window as unknown as { __aeonHoldWideHints?: boolean }).__aeonHoldWideHints === true
+    window.addEventListener('resize', event => { if (holding()) event.stopImmediatePropagation() }, { capture: true })
+    const original = window.matchMedia.bind(window)
+    window.matchMedia = (query: string) => {
+      const list = original(query)
+      if (query === '(min-width: 1280px)') {
+        Object.defineProperty(list, 'matches', { configurable: true, get: () => holding() || original(query).matches })
+        list.addEventListener('change', event => { if (holding()) event.stopImmediatePropagation() }, { capture: true })
+      }
+      return list
+    }
+  })
+  await page.setViewportSize({ width: 1280, height: 900 })
+  await mockHeaderGraph(page, sized(8, true))
+  await page.goto('/p/PHAROS/tickets')
+  await ready(page)
+  await page.evaluate(() => {
+    (window as unknown as { __aeonHoldWideHints?: boolean }).__aeonHoldWideHints = true
+    Object.defineProperty(window, 'innerWidth', { configurable: true, value: 1280 })
+  })
+  await page.setViewportSize({ width: 390, height: 844 })
+  await expect.poll(() => page.evaluate(() => ({
+    window: window.innerWidth,
+    media: window.matchMedia('(min-width: 1280px)').matches,
+    layout: document.documentElement.getBoundingClientRect().width,
+  }))).toEqual({ window: 1280, media: true, layout: 390 })
+  await expect(page.locator('[data-header-glimpse="on"]')).toHaveCount(0)
+  await expect(page.locator('[data-header-glimpse="off"]')).toBeAttached()
 })
 
 test.describe('reduced motion', () => {
   test.use({ reducedMotion: 'reduce' })
   test('shows nothing', async ({ page }) => {
-    await mockTicketGraph(page)
+    await mockHeaderGraph(page)
     await page.goto('/p/PHAROS/tickets')
     await expect(page.locator('[data-header-glimpse="off"]')).toBeAttached()
     await page.waitForTimeout(1600)
@@ -251,22 +616,37 @@ test.describe('reduced motion', () => {
   })
 })
 
-test('the Display switch hides the glimpse and is remembered', async ({ page }) => {
-  const world = await mockTicketGraph(page)
+// Absence only counts once the developer choice has been read and rendered.
+async function gotoSettled(page: Page, path: string) {
+  const read = page.waitForResponse(response => new URL(response.url()).pathname === '/api/preferences/developer-ui')
+  await page.goto(path)
+  await read
+  await expect(page.getByRole('heading', { name: 'Pharos', exact: true })).toBeVisible()
+  await page.evaluate(() => new Promise<void>(resolve => requestAnimationFrame(() => requestAnimationFrame(() => resolve()))))
+}
+
+test('the glimpse is off unless the developer setting turns it on, even after an earlier Display choice', async ({ page }) => {
+  const world = ticketGraphWorld()
+  delete world.work.preferences['developer-ui']
+  world.work.preferences['list:display'] = { headerGraph: true }
+  await mockHeaderGraph(page, world)
+  await gotoSettled(page, '/p/PHAROS/tickets')
+  await expect(page.locator('[data-header-glimpse]')).toHaveCount(0)
+  await page.getByRole('button', { name: /^Display:/ }).click()
+  await expect(page.getByRole('checkbox', { name: 'Graph in project header' })).toHaveCount(0)
+  await page.keyboard.press('Escape')
+  await page.goto('/settings/developer')
+  const toggle = page.getByRole('switch', { name: 'Graph in project header', exact: true })
+  await expect(toggle).not.toBeChecked()
+  await toggle.check()
+  await expect.poll(() => (world.work.preferences['developer-ui'] as { show_header_graph?: boolean } | undefined)?.show_header_graph).toBe(true)
   await page.goto('/p/PHAROS/tickets')
   await ready(page)
-  await page.getByRole('button', { name: /^Display:/ }).click()
-  const toggle = page.getByRole('checkbox', { name: 'Graph in project header' })
-  await expect(toggle).toBeChecked()
-  await toggle.uncheck()
-  await expect(page.locator('[data-header-glimpse="on"]')).toHaveCount(0)
-  await expect.poll(() => (world.work.preferences['list:display'] as { headerGraph?: boolean } | undefined)?.headerGraph).toBe(false)
-  await page.reload()
-  await expect(page.getByRole('heading', { name: 'Pharos', exact: true })).toBeVisible()
-  await expect(page.locator('[data-header-glimpse="on"]')).toHaveCount(0)
-  await page.getByRole('button', { name: /^Display:/ }).click()
-  await page.getByRole('checkbox', { name: 'Graph in project header' }).check()
-  await ready(page)
+  await page.goto('/settings/developer')
+  await page.getByRole('switch', { name: 'Graph in project header', exact: true }).uncheck()
+  await expect.poll(() => (world.work.preferences['developer-ui'] as { show_header_graph?: boolean } | undefined)?.show_header_graph).toBe(false)
+  await gotoSettled(page, '/p/PHAROS/tickets')
+  await expect(page.locator('[data-header-glimpse]')).toHaveCount(0)
 })
 
 test('leaving the project releases the WebGL context', async ({ page }) => {
@@ -281,7 +661,7 @@ test('leaving the project releases the WebGL context', async ({ page }) => {
       return ctx
     } as typeof proto.getContext
   })
-  await mockTicketGraph(page)
+  await mockHeaderGraph(page)
   await page.goto('/p/PHAROS/tickets')
   await ready(page)
   await expect.poll(() => page.evaluate(() => (window as unknown as { __aeonLiveGL: Set<unknown> }).__aeonLiveGL.size)).toBeGreaterThan(0)
@@ -295,8 +675,7 @@ test('long title and description stay separate from the glimpse while resizing',
   const world = ticketGraphWorld(), project = world.work.projects[0]
   project.title = 'Pharos fleet management and operator workspace for every environment'
   project.description = 'Fleet management, service health, deployment history and host access across every environment in the INSPR family.'
-  await mockTicketGraph(page, world)
-  await page.route('**/api/projects/p-pharos/journey', route => route.fulfill({ json: journeyWorld('plan').journey }))
+  await mockHeaderGraph(page, world)
   await page.goto('/p/PHAROS/tickets')
   await ready(page)
   for (const width of [1600, 1280, 1600]) {
@@ -312,8 +691,7 @@ test('the 2D fallback also frames the dense core with faded edges', async ({ pag
       return type.includes('webgl') ? null : original.call(this, type, attributes)
     } as typeof original
   })
-  await mockTicketGraph(page)
-  await page.route('**/api/projects/p-pharos/journey', route => route.fulfill({ json: journeyWorld('plan').journey }))
+  await mockHeaderGraph(page)
   await page.goto('/p/PHAROS/tickets')
   await ready(page)
   await expect(surface(page)).toHaveAttribute('data-dimension', '2d')
@@ -434,33 +812,28 @@ async function expectSoftFittedGraph(page: Page, checkExtent = false) {
 for (const scheme of ['light', 'dark'] as const) {
   test.describe(`header shots ${scheme}`, () => {
     test.use({ colorScheme: scheme })
-    for (const width of [1600, 1280, 390]) test(`keeps AA contrast at ${width}`, async ({ page }) => {
+    for (const width of [1600, 1280, 390]) test(`keeps AA contrast at ${width}`, async ({ page }, testInfo) => {
       const errors: string[] = []
       page.on('pageerror', error => errors.push(error.message))
-      const world = await mockTicketGraph(page)
-      world.work.preferences['developer-ui'] = { show_flow_controls: true }
-      await page.route('**/api/projects/p-pharos/journey', route => route.fulfill({ json: journeyWorld('plan').journey }))
-      const dir = `../.agent-shots/${process.env.HG2_SHOT_PASS ?? 'pass-1'}`
-      mkdirSync(dir, { recursive: true })
+      const world = await mockHeaderGraph(page)
       if (width >= 1280) await page.addInitScript(`window.__aeonGlimpsePin = { frames: ${GLIMPSE_PIN_FRAMES} }`)
       await page.setViewportSize({ width, height: width === 390 ? 844 : 1000 })
       await page.goto('/p/PHAROS/tickets')
       if (width >= 1280) await ready(page)
       else await expect(page.getByRole('heading', { name: 'Pharos', exact: true })).toBeVisible()
-      await expect(page.locator('.journey-chip')).toBeVisible()
       if (width >= 1280) await releasePinnedGlimpse(page)
       if (width >= 1280) {
         await expectClearOfText(page)
         await expect(surface(page)).toHaveAttribute('data-dimension', '3d')
         await expect(page.locator('.glimpse-canvas')).toHaveCSS('opacity', scheme === 'light' ? '0.35' : '0.3')
       }
-      await page.screenshot({ path: `${dir}/header-${width}-${scheme}.png` })
+      await page.screenshot({ path: testInfo.outputPath(`header-${width}-${scheme}.png`) })
       if (width >= 1280) {
         await expectSoftFittedGraph(page, true)
         await page.locator('.project-head').hover()
-        await page.screenshot({ path: `${dir}/header-${width}-${scheme}-hover.png` })
+        await page.screenshot({ path: testInfo.outputPath(`header-${width}-${scheme}-hover.png`) })
       }
-      for (const selector of ['#project-title', '.description', '.stat b']) {
+      for (const selector of ['#project-title', '.description', '.group-count b']) {
         expect(await textContrast(page, selector), `${selector} ${width} ${scheme}`).toBeGreaterThanOrEqual(4.5)
       }
       expect(errors).toEqual([])

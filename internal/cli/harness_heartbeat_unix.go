@@ -154,13 +154,17 @@ func (h *heartbeatHold) release() {
 }
 
 func (h *heartbeatHold) openLock() (*os.File, error) {
-	if h == nil || h.dir == nil {
+	return h.openNamedLock("heartbeat.lock")
+}
+
+func (h *heartbeatHold) openNamedLock(name string) (*os.File, error) {
+	if h == nil || h.dir == nil || (name != "heartbeat.lock" && name != "subagent.lifecycle.lock") {
 		return nil, errHeartbeatState
 	}
-	fd, err := unix.Openat(int(h.dir.Fd()), "heartbeat.lock", unix.O_RDWR|unix.O_CREAT|unix.O_EXCL|unix.O_NOFOLLOW|unix.O_CLOEXEC, 0o600)
+	fd, err := unix.Openat(int(h.dir.Fd()), name, unix.O_RDWR|unix.O_CREAT|unix.O_EXCL|unix.O_NOFOLLOW|unix.O_CLOEXEC, 0o600)
 	created := err == nil
 	if errors.Is(err, unix.EEXIST) {
-		fd, err = unix.Openat(int(h.dir.Fd()), "heartbeat.lock", unix.O_RDWR|unix.O_NOFOLLOW|unix.O_CLOEXEC, 0)
+		fd, err = unix.Openat(int(h.dir.Fd()), name, unix.O_RDWR|unix.O_NOFOLLOW|unix.O_CLOEXEC, 0)
 	}
 	if err != nil {
 		return nil, err
@@ -174,7 +178,7 @@ func (h *heartbeatHold) openLock() (*os.File, error) {
 		unix.Close(fd)
 		return nil, errHeartbeatState
 	}
-	return os.NewFile(uintptr(fd), "heartbeat.lock"), nil
+	return os.NewFile(uintptr(fd), name), nil
 }
 
 func (h *heartbeatHold) readFile(name string, max int) ([]byte, error) {

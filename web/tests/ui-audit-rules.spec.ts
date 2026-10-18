@@ -2,7 +2,6 @@
 import { test, expect } from '@playwright/test'
 import { domAudit, installLayoutShiftAudit, armLayoutShiftAudit, readLayoutShiftAudit, expectedMockConsole, decorativeVersionContrast } from './ui-audit-rules'
 import { fixtures, mockWork } from './work-fixtures'
-import { journeyWorld, mockJourney } from './journey-fixtures'
 
 test.use({ viewport: { width: 390, height: 700 } })
 
@@ -93,23 +92,21 @@ test('known fixture responses and decorative labelled versions are filtered prec
 test('layout shift audit arms after navigation and resets startup movement', async ({ page }) => {
   await page.addInitScript(installLayoutShiftAudit)
   await page.goto('/')
+  // Fonts and the first painted frame are startup movement. Arm only once they
+  // have settled, so a late observer delivery cannot look like a shift after the reset.
+  await page.evaluate(async () => {
+    await document.fonts.ready
+    await new Promise<void>(resolve => requestAnimationFrame(() => requestAnimationFrame(() => resolve())))
+  })
   await page.evaluate(() => { (window as unknown as { auditShift: number }).auditShift = 0.5 })
   await page.evaluate(armLayoutShiftAudit)
-  expect(await page.evaluate(() => (window as unknown as { auditShift: number; auditShiftArmed: boolean }).auditShift)).toBe(0)
-  expect(await page.evaluate(() => (window as unknown as { auditShiftArmed: boolean }).auditShiftArmed)).toBe(true)
+  const armed = await page.evaluate(() => {
+    const audit = window as unknown as { auditShift: number; auditShiftArmed: boolean; auditShiftSources: string[] }
+    return { score: audit.auditShift, armed: audit.auditShiftArmed, sources: audit.auditShiftSources }
+  })
+  expect(armed.sources, armed.sources.join(' | ')).toEqual([])
+  expect(armed.score).toBe(0)
+  expect(armed.armed).toBe(true)
   expect(await page.evaluate(readLayoutShiftAudit)).toEqual({ score: 0, sources: [] })
   expect(await page.evaluate(() => (window as unknown as { auditShiftArmed: boolean }).auditShiftArmed)).toBe(false)
-})
-
-test('the journey keeps its lower decision card out of the loading reflow', async ({ page }) => {
-  await mockWork(page, fixtures())
-  await mockJourney(page, journeyWorld('plan'))
-  let release: () => void = () => {}
-  const pending = new Promise<void>(resolve => { release = resolve })
-  await page.route('**/api/projects/p-pharos/releases/r-2/walker', async route => { await pending; await route.fallback() })
-  await page.goto('/p/PHAROS?view=journey')
-  await expect(page.getByRole('navigation', { name: 'Project journey' })).toBeVisible()
-  await expect(page.locator('.j-grid > .j-col')).toHaveCount(1)
-  release()
-  await expect(page.locator('.j-grid > .j-col')).toHaveCount(2)
 })

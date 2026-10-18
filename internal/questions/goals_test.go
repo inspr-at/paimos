@@ -1,0 +1,115 @@
+// SPDX-License-Identifier: AGPL-3.0-only
+package questions
+
+import (
+	"encoding/json"
+	"testing"
+
+	"github.com/inspr-at/paimos/internal/db"
+	"github.com/inspr-at/paimos/internal/dbtest"
+	goalapi "github.com/inspr-at/paimos/internal/goals"
+	"github.com/inspr-at/paimos/internal/tenant"
+	"github.com/jackc/pgx/v5"
+)
+
+// Risk: a merged Desk question erases another asker's goal association.
+func TestGoalLinksSurviveQuestionMerge(t *testing.T) {
+	f := newFixture(t)
+	goals := []string{uid(), uid(), uid()}
+	err := db.InTenant(dbtest.Seed(t.Context()), f.d.App, f.person.TenantID, func(tx pgx.Tx) error {
+		if _, err := tx.Exec(t.Context(), `INSERT INTO node_kinds(tenant_id,slug,label,short_prefix,icon) VALUES($1,'goal','Goal','GOAL','goal')`, f.person.TenantID); err != nil {
+			return err
+		}
+		for i, id := range goals {
+			parent := f.project
+			if i == 2 {
+				parent = f.hidden
+			}
+			if _, err := tx.Exec(t.Context(), `INSERT INTO nodes(tenant_id,id,kind_id,key,title,parent_id) SELECT $1,$2,k.id,aeon_next_node_key($1,k.short_prefix),'Goal',$3 FROM node_kinds k WHERE k.tenant_id=$1 AND k.slug='goal'`, f.person.TenantID, id, parent); err != nil {
+				return err
+			}
+		}
+		return nil
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	first := input()
+	first.GoalID = goals[0]
+	first.TicketID = f.ticket
+	q := f.ask(t, first)
+	second := first
+	second.RequestID = uid()
+	second.GoalID = goals[1]
+	merged := question(t, request(t.Context(), f.mux, f.otherAgent, "POST", "/api/projects/"+f.project+"/questions", second), 201)
+	if q.ID != merged.ID {
+		t.Fatal("goal association prevented otherwise equivalent asks merging")
+	}
+	third := first
+	third.RequestID = uid()
+	f.ask(t, third)
+	var count int
+	err = db.InTenant(tenant.WithPrincipal(t.Context(), f.agent), f.d.App, f.agent.TenantID, func(tx pgx.Tx) error {
+		return tx.QueryRow(t.Context(), `SELECT count(*) FROM node_relations WHERE source_node_id=$1 AND type='asks_for'`, f.ticket).Scan(&count)
+	})
+	if err != nil || count != 2 {
+		t.Fatalf("retained/deduped links %d %v", count, err)
+	}
+	goalsAPI := goalapi.New(f.d.App)
+	goalsAPI.Mount(f.mux)
+	for _, id := range goals[:2] {
+		rec := request(t.Context(), f.mux, f.agent, "GET", "/api/goals/"+id, nil)
+		var g goalapi.GoalView
+		if rec.Code != 200 || json.Unmarshal(rec.Body.Bytes(), &g) != nil || g.Waits.Count != 1 || len(g.Waits.QuestionIDs) != 1 || g.Waits.QuestionIDs[0] != q.ID {
+			t.Fatalf("merged ask did not count once on its associated goal: %d %s", rec.Code, rec.Body)
+		}
+	}
+	hidden := first
+	hidden.RequestID = uid()
+	hidden.GoalID = goals[2]
+	rec := request(t.Context(), f.mux, f.agent, "POST", "/api/projects/"+f.project+"/questions", hidden)
+	if rec.Code != 404 {
+		t.Fatalf("hidden goal %d %s", rec.Code, rec.Body)
+	}
+	if _, err := f.d.Admin.Exec(t.Context(), `UPDATE nodes SET parent_id=$3 WHERE tenant_id=$1 AND id=$2`, f.person.TenantID, goals[0], f.hidden); err != nil {
+		t.Fatal(err)
+	}
+	read := question(t, request(t.Context(), f.mux, f.agent, "GET", "/api/questions/"+q.ID, nil), 200)
+	if read.Input.GoalID != "" || read.Askers[0].Input.GoalID != "" {
+		t.Fatal("question replay exposed a goal that became hidden")
+	}
+	page := request(t.Context(), f.mux, f.agent, "GET", "/api/goals?project="+f.project, nil)
+	var list goalapi.GoalList
+	if page.Code != 200 || json.Unmarshal(page.Body.Bytes(), &list) != nil {
+		t.Fatalf("goal waits page %d %s", page.Code, page.Body)
+	}
+	found := false
+	for _, g := range list.Items {
+		if g.ID == goals[0] {
+			t.Fatal("goal waits page exposed a hidden association")
+		}
+		if g.ID == goals[1] {
+			found = true
+			if g.Waits.Count != 1 || len(g.Waits.QuestionIDs) != 1 || g.Waits.QuestionIDs[0] != q.ID {
+				t.Fatalf("page lost visible waits: %+v", g.Waits)
+			}
+		}
+	}
+	if !found {
+		t.Fatal("page omitted the visible associated goal")
+	}
+
+	restricted := f.otherAgent
+	restricted.Scopes = []string{"questions.ask", "questions.read"}
+	projection := question(t, request(t.Context(), f.mux, restricted, "GET", "/api/questions/"+q.ID, nil), 200)
+	if projection.Input.GoalID != "" || projection.Askers[0].Input.GoalID != "" {
+		t.Fatal("question read bypassed goal nodes.read key ceiling")
+	}
+	denied := second
+	denied.RequestID = uid()
+	response := request(t.Context(), f.mux, restricted, "POST", "/api/projects/"+f.project+"/questions", denied)
+	if response.Code != 404 {
+		t.Fatalf("goal association bypassed nodes.read: %d %s", response.Code, response.Body)
+	}
+
+}

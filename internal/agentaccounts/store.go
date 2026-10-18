@@ -7,8 +7,10 @@ import (
 	"errors"
 	"math"
 	"net/http"
+	"strconv"
 	"time"
 
+	"github.com/inspr-at/paimos/internal/accountuse"
 	"github.com/jackc/pgx/v5"
 
 	"github.com/inspr-at/paimos/internal/agentpairing"
@@ -60,19 +62,52 @@ func listAccounts(ctx context.Context, tx pgx.Tx) ([]Account, error) {
 // queryAccounts with retired lists every account, for a daemon reconciling
 // its own registrations.
 func queryAccounts(ctx context.Context, tx pgx.Tx, retired bool) ([]Account, error) {
-	rows, err := tx.Query(ctx, `
+	return queryAccountsLimit(ctx, tx, retired, 0)
+}
+
+func queryAccountsLimit(ctx context.Context, tx pgx.Tx, retired bool, bound int) ([]Account, error) {
+	return queryAccountsInputs(ctx, tx, retired, bound, accountuse.ContextLabels, nil)
+}
+
+func queryCapacityAccounts(ctx context.Context, tx pgx.Tx, retired bool, related ...[]string) ([]Account, error) {
+	var ids []string
+	if len(related) > 0 {
+		ids = related[0]
+	}
+	return queryAccountsInputs(ctx, tx, retired, maxWaitAccounts, capacityContextLabels, ids)
+}
+
+func queryAccountsInputs(ctx context.Context, tx pgx.Tx, retired bool, bound int, labels func(context.Context, pgx.Tx, []string) (map[string][]accountuse.ContextLabel, error), related []string) ([]Account, error) {
+	predicate := `$1 OR NOT ` + retiredSQL
+	if related != nil {
+		predicate = `(` + predicate + `)`
+	}
+	query := `
 		SELECT id::text, account_key, harness, daemon_id, label, max_parallel_runs,
 		       registered_by_principal_id::text, state, last_probe_at, last_probe_ok,
 		       last_daemon_generation, created_at, plan, host_label, allowed_model_profile_ids::text[], reading_support, quota_fingerprint, statusline_enabled, provider, model, model_status, model_data_note, openrouter_credits, COALESCE(group_id::text,''), quota_pool_fingerprint, billing_mode
 		FROM agent_accounts
-		WHERE $1 OR NOT `+retiredSQL+`
-		ORDER BY created_at, id`, retired)
+		WHERE ` + predicate
+	args := []any{retired}
+	if related != nil {
+		query += ` AND (id=ANY($2::uuid[]) OR EXISTS(SELECT 1 FROM agent_accounts own WHERE own.id=ANY($2::uuid[]) AND own.quota_pool_fingerprint<>'' AND own.harness=agent_accounts.harness AND own.quota_pool_fingerprint=agent_accounts.quota_pool_fingerprint))`
+		args = append(args, related)
+	}
+	query += ` ORDER BY created_at, id`
+	if bound > 0 {
+		query += ` LIMIT $` + strconv.Itoa(len(args)+1)
+		args = append(args, bound+1)
+	}
+	rows, err := tx.Query(ctx, query, args...)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
 	out := []Account{}
 	for rows.Next() {
+		if bound > 0 && len(out) == bound {
+			return nil, queueSnapshotOverflow("account")
+		}
 		account, err := scanAccount(rows)
 		if err != nil {
 			return nil, err
@@ -82,8 +117,25 @@ func queryAccounts(ctx context.Context, tx pgx.Tx, retired bool) ([]Account, err
 	if err := rows.Err(); err != nil {
 		return nil, err
 	}
+	ids := make([]string, len(out))
+	for i, a := range out {
+		ids[i] = a.ID
+	}
+	contexts, err := labels(ctx, tx, ids)
+	if err != nil {
+		return nil, err
+	}
+	for i := range out {
+		out[i].Contexts = contexts[out[i].ID]
+	}
+	if bound > 0 {
+		return attachWindowsLimit(ctx, tx, out, maxWaitWindows)
+	}
 	return attachWindows(ctx, tx, out)
 }
+
+// loadAccount reads one account. Tests replace it to inject lookup failures.
+var loadAccount = getAccount
 
 func getAccount(ctx context.Context, tx pgx.Tx, id string) (Account, error) {
 	row := tx.QueryRow(ctx, `
@@ -114,10 +166,18 @@ func scanAccount(row scanner) (Account, error) {
 }
 
 func attachWindows(ctx context.Context, tx pgx.Tx, accounts []Account) ([]Account, error) {
+	return attachWindowsLimit(ctx, tx, accounts, 0)
+}
+
+func attachWindowsLimit(ctx context.Context, tx pgx.Tx, accounts []Account, bound int) ([]Account, error) {
 	if len(accounts) == 0 {
 		return accounts, nil
 	}
-	rows, err := tx.Query(ctx, `
+	ids := make([]string, 0, len(accounts))
+	for _, a := range accounts {
+		ids = append(ids, a.ID)
+	}
+	query := `
 		SELECT w.id::text, w.account_id::text, w.starts_at, w.ends_at, w.unit,
 		       w.allowance, w.used, w.reserved, w.pace_model, w.burst_ratio::float8,
 		       NOT EXISTS (
@@ -129,14 +189,25 @@ func attachWindows(ctx context.Context, tx pgx.Tx, accounts []Account) ([]Accoun
 		             AND r.state = 'settled' AND r.actual_units = 0
 		       ) AS provisional, w.capacity_read_at, w.capacity_allowed, COALESCE(w.capacity_kind,''), w.capacity_bucket, w.capacity_retired, w.capacity_refresh_run::text, COALESCE(w.capacity_source,'')
 		FROM account_allowance_windows w
-		WHERE NOT w.pairing_verification AND NOT w.capacity_retired AND w.removed_at IS NULL
-		ORDER BY w.account_id, w.starts_at, w.id`)
+		WHERE w.account_id=ANY($1::uuid[]) AND NOT w.pairing_verification AND NOT w.capacity_retired AND w.removed_at IS NULL
+		ORDER BY w.account_id, w.starts_at, w.id`
+	args := []any{ids}
+	if bound > 0 {
+		query += ` LIMIT $2`
+		args = append(args, bound+1)
+	}
+	rows, err := tx.Query(ctx, query, args...)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
 	byAccount := map[string][]Window{}
+	count := 0
 	for rows.Next() {
+		if bound > 0 && count == bound {
+			return nil, queueSnapshotOverflow("window")
+		}
+		count++
 		var w Window
 		if err := rows.Scan(&w.ID, &w.AccountID, &w.StartsAt, &w.EndsAt, &w.Unit, &w.Allowance, &w.Used, &w.Reserved, &w.PaceModel, &w.BurstRatio, &w.Provisional, &w.capacityReadAt, &w.capacityAllowed, &w.capacityKind, &w.capacityBucket, &w.capacityRetired, &w.capacityRefreshRun, &w.capacitySource); err != nil {
 			return nil, err
@@ -151,10 +222,48 @@ func attachWindows(ctx context.Context, tx pgx.Tx, accounts []Account) ([]Accoun
 	if err := rows.Err(); err != nil {
 		return nil, err
 	}
+	metadata, err := tx.Query(ctx, `SELECT a.id::text, NOT EXISTS(SELECT 1 FROM agent_pairing_enrollments WHERE account_id=a.id AND (ongoing_approved_at IS NULL OR state<>'connected')),a.owner_person_id::text,COALESCE(p.name,''),a.linked_at,a.link_revision,a.share_usage,COALESCE(a.usage_probe_enabled AND a.usage_probe_revision=a.link_revision AND a.owner_person_id IS NOT NULL,false),a.usage_budget,
+ (SELECT e.evidence FROM agent_account_residency_evidence e WHERE e.tenant_id=a.tenant_id AND e.account_id=a.id AND e.binding=`+residencyBindingSQL+`)
+ FROM agent_accounts a LEFT JOIN principals p ON p.tenant_id=a.tenant_id AND p.id=a.owner_person_id WHERE a.id=ANY($1::uuid[])`, ids)
+	if err != nil {
+		return nil, err
+	}
+	byID := make(map[string]int, len(accounts))
 	for i := range accounts {
-		if err := tx.QueryRow(ctx, `SELECT NOT EXISTS(SELECT 1 FROM agent_pairing_enrollments WHERE account_id=$1 AND (ongoing_approved_at IS NULL OR state<>'connected')),a.owner_person_id::text,COALESCE(p.name,''),a.linked_at,a.link_revision FROM agent_accounts a LEFT JOIN principals p ON p.tenant_id=a.tenant_id AND p.id=a.owner_person_id WHERE a.id=$1`, accounts[i].ID).Scan(&accounts[i].OngoingUseApproved, &accounts[i].OwnerPersonID, &accounts[i].OwnerPersonName, &accounts[i].LinkedAt, &accounts[i].LinkRevision); err != nil {
+		byID[accounts[i].ID] = i
+	}
+	for metadata.Next() {
+		var id string
+		var a Account
+		if err := metadata.Scan(&id, &a.OngoingUseApproved, &a.OwnerPersonID, &a.OwnerPersonName, &a.LinkedAt, &a.LinkRevision, &a.ShareUsage, &a.UsageProbeEnabled, &a.UsageBudget, &a.residencyEvidence); err != nil {
+			metadata.Close()
 			return nil, err
 		}
+		i, ok := byID[id]
+		if !ok {
+			metadata.Close()
+			return nil, pgx.ErrNoRows
+		}
+		accounts[i].OngoingUseApproved = a.OngoingUseApproved
+		accounts[i].OwnerPersonID = a.OwnerPersonID
+		accounts[i].OwnerPersonName = a.OwnerPersonName
+		accounts[i].LinkedAt = a.LinkedAt
+		accounts[i].LinkRevision = a.LinkRevision
+		accounts[i].ShareUsage = a.ShareUsage
+		accounts[i].UsageProbeEnabled = a.UsageProbeEnabled
+		accounts[i].UsageBudget = a.UsageBudget
+		accounts[i].residencyEvidence = a.residencyEvidence
+		delete(byID, id)
+	}
+	metadata.Close()
+	if err := metadata.Err(); err != nil {
+		return nil, err
+	}
+	if len(byID) != 0 {
+		return nil, pgx.ErrNoRows
+	}
+	for i := range accounts {
+
 		if ws := byAccount[accounts[i].ID]; ws != nil {
 			accounts[i].Windows = ws
 		} else {
@@ -168,12 +277,29 @@ func attachWindows(ctx context.Context, tx pgx.Tx, accounts []Account) ([]Accoun
 }
 
 func occupancy(ctx context.Context, tx pgx.Tx) (map[string]int, error) {
+	return occupancyExcept(ctx, tx, "")
+}
+
+func occupancyExcept(ctx context.Context, tx pgx.Tx, runID string) (map[string]int, error) {
+	return occupancyExceptNative(ctx, tx, runID, "")
+}
+
+// Native roots hold capacity until verified release, including idle writers and
+// obsolete daemon generations. The two exclusions are separate identities:
+// a worker retry excludes its run; a root claim retry excludes only its root.
+func occupancyExceptNative(ctx context.Context, tx pgx.Tx, runID, ownedSessionID string) (map[string]int, error) {
+	// A lifecycle release clears the ticket hold, not the process's slot.
+	// Only authenticated exit telemetry clears exit_unconfirmed.
 	rows, err := tx.Query(ctx, `
-		SELECT account_id::text, count(*)
-		FROM agent_runs
-		WHERE account_id IS NOT NULL
-		  AND status IN ('queued', 'starting', 'running', 'waiting')
-		GROUP BY account_id`)
+		SELECT account_id::text, count(*) FROM (
+		  SELECT account_id FROM agent_runs
+		  WHERE account_id IS NOT NULL AND id::text<>$1
+		    AND (status IN ('queued', 'starting', 'running', 'waiting')
+		      OR trace->'work_lifecycle_release'->>'exit_unconfirmed'='true')
+		  UNION ALL
+		  SELECT account_id FROM native_session_roots
+		  WHERE run_id IS NULL AND released_at IS NULL AND owned_session_id::text<>$2
+		) holds GROUP BY account_id`, runID, ownedSessionID)
 	if err != nil {
 		return nil, err
 	}
@@ -281,7 +407,19 @@ func isNoRows(err error) bool {
 	return errors.Is(err, pgx.ErrNoRows)
 }
 
+// accountNotFound maps a missing account to 404. Any other lookup error,
+// including a database outage, stays a server error.
+func accountNotFound(err error) error {
+	if isNoRows(err) {
+		return fail(404, "account not found")
+	}
+	return err
+}
+
 type probeWrite struct {
+	observedAt        *time.Time          // Batch-only health timestamp; never decode authority from HTTP.
+	MeasurementOnly   bool                `json:"measurement_only,omitempty"`
+	Readiness         *ReadinessReport    `json:"readiness,omitempty"`
 	OpenRouterCredits *openrouter.Credits `json:"openrouter_credits"`
 	DaemonID          string              `json:"daemon_id"`
 	DaemonGeneration  string              `json:"daemon_generation"`
@@ -291,6 +429,10 @@ type probeWrite struct {
 	// command confirmed a sign-out for this account, else unavailable.
 	Failure string `json:"failure,omitempty"`
 }
+
+// A restart heartbeat can commit while the obsolete check result is rejected.
+// The HTTP wrapper must report that partial result after the transaction commits.
+type probeHeartbeatCommitted struct{ error }
 
 func reportProbe(ctx context.Context, tx pgx.Tx, p tenant.Principal, accountID string, in probeWrite) (Account, error) {
 	if !uuidRE.MatchString(accountID) {
@@ -337,29 +479,139 @@ func reportProbe(ctx context.Context, tx pgx.Tx, p tenant.Principal, accountID s
 	if err != nil {
 		return Account{}, err
 	}
+	observedAt := now
+	if in.observedAt != nil {
+		observedAt = *in.observedAt
+		if observedAt.Before(now.Add(-ProbeFreshness)) || observedAt.After(now.Add(time.Minute)) || before.LastProbeAt != nil && observedAt.Before(*before.LastProbeAt) {
+			return Account{}, fail(http.StatusConflict, "stale account probe observation")
+		}
+		if observedAt.After(now) {
+			observedAt = now
+		}
+	}
 	if in.OpenRouterCredits != nil && (before.Provider != "openrouter" || !in.OpenRouterCredits.Valid() || in.OpenRouterCredits.ObservedAt.After(now.Add(time.Minute))) {
 		return Account{}, fail(400, "invalid OpenRouter credits")
 	}
 	if before.DaemonID != daemonID {
 		return Account{}, fail(http.StatusForbidden, "daemon does not match account")
 	}
-	if _, err := tx.Exec(ctx, `
+	if report := in.Readiness; !in.MeasurementOnly && report != nil && uuidRE.MatchString(report.CheckID) &&
+		report.BindingRevision != nil && *report.BindingRevision == before.LinkRevision &&
+		checkResultOK(report.Result) && len(report.Facts) <= 32 && (report.Result == "success" || len(report.Facts) == 0) &&
+		before.daemonGeneration != nil && *before.daemonGeneration != generation {
+		c, err := scanCheck(tx.QueryRow(ctx, `SELECT `+checkColumns+` FROM account_readiness_checks WHERE id=$1 AND account_id=$2`, report.CheckID, accountID))
+		if err != nil && !isNoRows(err) {
+			return Account{}, err
+		}
+		// Only a currently pending check may announce the restart. Replaying a
+		// receipt from an older generation cannot move the heartbeat backwards.
+		if err == nil && c.State == "pending" && c.BindingRevision == before.LinkRevision &&
+			c.DaemonGeneration != nil && *c.DaemonGeneration == *before.daemonGeneration && now.Before(c.ExpiresAt) {
+			if _, err := tx.Exec(ctx, `UPDATE agent_accounts SET last_probe_at=$2,last_probe_ok=$3,last_probe_failure=$4,last_daemon_generation=$5 WHERE id=$1`, accountID, now, in.Available, failure, generation); err != nil {
+				return Account{}, err
+			}
+			after, err := getAccount(ctx, tx, accountID)
+			if err != nil {
+				return Account{}, err
+			}
+			if err := learnOnline(ctx, tx, after, now); err != nil {
+				return Account{}, err
+			}
+			// The heartbeat commits even though the old check's facts do not.
+			// Evaluate only the already accepted measurements, before events take
+			// the counter lock, just as for an ordinary successful probe.
+			notices, err := prepareQuotaWarnings(ctx, tx, p, after, now)
+			if err != nil {
+				return Account{}, err
+			}
+			system, err := quotaSystemActor(ctx, tx, p.TenantID, len(notices) > 0)
+			if err != nil {
+				return Account{}, err
+			}
+			if err := writeEvent(ctx, tx, p, evProbed, before, after); err != nil {
+				return Account{}, err
+			}
+			if err := flushQuotaNotices(ctx, tx, system, notices); err != nil {
+				return Account{}, err
+			}
+			return after, &probeHeartbeatCommitted{&httpError{status: 409, code: "stale_binding", msg: "check belongs to previous daemon generation; heartbeat recorded, check facts discarded"}}
+		}
+	}
+	if err := ensureLocalReadinessResource(ctx, tx, p, before); err != nil {
+		return Account{}, err
+	}
+	if err := reconcileReadinessResources(ctx, tx, before); err != nil {
+		return Account{}, err
+	}
+	if c := before.OpenRouterCredits; c != nil && c.Remaining != nil {
+		resource, err := localReadinessResource(ctx, tx, before)
+		if err != nil {
+			return Account{}, err
+		}
+		if err := storeReadinessFact(tenant.WithPrincipal(ctx, p), tx, before, ReadinessFactWrite{ResourceID: resource, WindowKey: "key_cap", Source: "provider", ObservedAt: c.ObservedAt, ReadingAt: &c.ObservedAt, Remaining: c.Remaining, CreditState: "unknown"}, now); err != nil {
+			return Account{}, err
+		}
+	}
+	if c := in.OpenRouterCredits; c != nil && c.Remaining != nil {
+		resource, err := localReadinessResource(ctx, tx, before)
+		if err != nil {
+			return Account{}, err
+		}
+		if err := storeReadinessFact(tenant.WithPrincipal(ctx, p), tx, before, ReadinessFactWrite{ResourceID: resource, WindowKey: "key_cap", Source: "provider", ObservedAt: c.ObservedAt, ReadingAt: &c.ObservedAt, Remaining: c.Remaining, CreditState: "unknown"}, now); err != nil {
+			return Account{}, err
+		}
+	}
+	if in.Readiness != nil {
+		if in.MeasurementOnly && (before.daemonGeneration == nil || *before.daemonGeneration != generation) {
+			return Account{}, fail(409, "readiness daemon generation changed")
+		}
+		if in.Readiness.CheckID != "" && before.daemonGeneration != nil && *before.daemonGeneration != generation {
+			return Account{}, fail(409, "readiness daemon generation changed")
+		}
+		if err := completeReadinessReport(tenant.WithPrincipal(ctx, p), tx, before, generation, *in.Readiness, now); err != nil {
+			return Account{}, err
+		}
+	} else if !in.MeasurementOnly && in.Available && before.Harness == "pi" && in.OpenRouterCredits != nil {
+		legacy := before
+		legacy.OpenRouterCredits = in.OpenRouterCredits
+		if err := storeLegacyKeyFact(tenant.WithPrincipal(ctx, p), tx, legacy, now); err != nil {
+			return Account{}, err
+		}
+	}
+	if in.MeasurementOnly {
+		// This row lock is shared with ordinary health probes. A measurement,
+		// including delayed replay, has no authority to change their result.
+		if _, err := tx.Exec(ctx, `UPDATE agent_accounts SET last_daemon_generation=$2 WHERE id=$1::uuid`, accountID, generation); err != nil {
+			return Account{}, err
+		}
+	} else if _, err := tx.Exec(ctx, `
 		UPDATE agent_accounts
 		SET last_probe_at = $7, last_probe_ok = $2, last_daemon_generation = $3, host_label = CASE WHEN host_label = '' THEN COALESCE($4, '') ELSE host_label END,
 		    last_probe_failure = $5, openrouter_credits=$6
-		WHERE id = $1::uuid`, accountID, in.Available, generation, in.HostLabel, failure, in.OpenRouterCredits, now); err != nil {
+		WHERE id = $1::uuid`, accountID, in.Available, generation, in.HostLabel, failure, in.OpenRouterCredits, observedAt); err != nil {
 		return Account{}, err
 	}
 	after, err := getAccount(ctx, tx, accountID)
 	if err != nil {
 		return Account{}, err
 	}
-	if after.LastProbeAt != nil {
+	if !in.MeasurementOnly && after.LastProbeAt != nil {
 		if err := learnOnline(ctx, tx, after, *after.LastProbeAt); err != nil {
 			return Account{}, err
 		}
 	}
+	notices, err := prepareQuotaWarnings(ctx, tx, p, after, now)
+	if err != nil {
+		return Account{}, err
+	}
+	system, err := quotaSystemActor(ctx, tx, p.TenantID, len(notices) > 0)
+	if err != nil {
+		return Account{}, err
+	}
 	if err := writeEvent(ctx, tx, p, evProbed, before, after); err != nil {
+		return Account{}, err
+	}
+	if err := flushQuotaNotices(ctx, tx, system, notices); err != nil {
 		return Account{}, err
 	}
 	return after, nil
@@ -510,13 +762,23 @@ func archiveAccount(ctx context.Context, tx pgx.Tx, p tenant.Principal, accountI
 	if archived {
 		return before, nil
 	}
+	// Check before DisconnectAccount can revoke enrollment or final-report
+	// authority. A native root is an owned writer even when no worker run exists.
+	roots, err := NativeRootCountTx(ctx, tx, accountID, "", "")
+	if err != nil {
+		return Account{}, err
+	}
+	if roots > 0 {
+		return Account{}, &httpError{status: http.StatusConflict, msg: "a native session is still using this account", code: "account_busy"}
+	}
 	if err := agentpairing.DisconnectAccount(ctx, tx, p, accountID); errors.Is(err, agentpairing.ErrActiveRuns) {
 		return Account{}, &httpError{status: http.StatusConflict, msg: "a run is still working on this account", code: "account_busy"}
 	} else if err != nil {
 		return Account{}, err
 	}
 	var active bool
-	if err := tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM agent_runs WHERE account_id = $1::uuid AND status IN ('starting','running','waiting'))`, accountID).Scan(&active); err != nil {
+	if err := tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM agent_runs WHERE account_id = $1::uuid AND (status IN ('starting','running','waiting')
+  OR trace->'work_lifecycle_release'->>'exit_unconfirmed'='true'))`, accountID).Scan(&active); err != nil {
 		return Account{}, err
 	}
 	if active {

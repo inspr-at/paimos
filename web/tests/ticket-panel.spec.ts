@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import { test, expect, type Page } from '@playwright/test'
 import { fixtures, me, mockWork, watchErrors, type Call } from './work-fixtures'
+import { expectStableControls } from './helpers/stable'
 
 // setSystemTime lets time flow (setFixedTime would freeze Vue's event timestamps).
 test.beforeEach(async ({ page }) => { await page.clock.setSystemTime(new Date('2026-09-23T12:00:00Z')) })
@@ -146,11 +147,13 @@ test('an epic lists its tickets with progress and adds new ones inline', async (
   const input = children.getByLabel('New ticket title')
   await input.fill('Add a Scaleway connector')
   await page.keyboard.press('Enter')
+  expect(writes(calls, 'POST')).toHaveLength(0)
+  await page.keyboard.press(`${mod}+Enter`)
   await expect(children.locator('.child-row')).toHaveCount(3)
   await expect(input).toHaveValue('')
   await expect(input).toBeFocused()
   const post = writes(calls, 'POST').find(call => call.path === '/api/nodes')!
-  expect(post.body).toEqual({ kind_id: 'k-ticket', title: 'Add a Scaleway connector', parent_id: 'n-epic', state: 'new', key_prefix: 'PHAROS' })
+  expect(post.body).toEqual({ kind_id: 'k-work', title: 'Add a Scaleway connector', parent_id: 'n-epic', state: 'new', key_prefix: 'PHAROS' })
   await expect(page.locator('tr.ticket-row').filter({ hasText: 'Add a Scaleway connector' })).toHaveCount(1)
   await children.locator('.child-row').first().click()
   await expect(page).toHaveURL('/p/PHAROS/PHAROS-11')
@@ -209,16 +212,16 @@ test('full page shows the same ticket in two columns; f and Back return to the p
   await expect(page).toHaveURL('/p/PHAROS/PHAROS-11')
 })
 
-test('move to another epic uses a searchable picker; delete asks and then leaves the list', async ({ page }) => {
+test('move to another parent uses a searchable picker; delete asks and then leaves the list', async ({ page }) => {
   const data = fixtures()
   data.nodes.push({ id: 'n-epic-2', key: 'PHAROS-20', kind_slug: 'epic', title: 'Oracle and Scaleway connectors', body: '', state: 'backlog', fields: {}, parent_id: 'p-pharos', project: 'p-pharos', created_at: hour(100), updated_at: hour(50) })
   const calls = await mockWork(page, data)
   await page.goto('/p/PHAROS/PHAROS-14')
   const ws = panel(page)
   await ws.getByRole('button', { name: 'More actions' }).click()
-  await page.getByRole('menuitem', { name: 'Move to another epic…' }).click()
-  await page.getByLabel('Find an epic').fill('oracle')
-  await expect(page.getByRole('listbox', { name: 'Epics' }).getByRole('option')).toHaveCount(1)
+  await page.getByRole('menuitem', { name: 'Move to another parent…' }).click()
+  await page.getByLabel('Find a parent').fill('oracle')
+  await expect(page.getByRole('listbox', { name: 'Parents' }).getByRole('option')).toHaveCount(1)
   await page.keyboard.press('Enter')
   await expect(ws.getByRole('button', { name: /PHAROS-20/ })).toBeVisible()
   const move = calls.find(call => call.path.endsWith('/move'))!
@@ -235,7 +238,7 @@ test('move to another epic uses a searchable picker; delete asks and then leaves
   expect(calls.some(call => call.method === 'DELETE' && call.path === '/api/nodes/n-4')).toBe(true)
 })
 
-test('n opens a quick-create row; Enter creates and keeps going; Esc closes', async ({ page }) => {
+test('n opens a quick-create row; Cmd/Ctrl+Enter creates and keeps going; Esc leaves the field then closes', async ({ page }) => {
   const calls = await mockWork(page, fixtures())
   await page.goto('/p/PHAROS')
   await expect(page.locator('tr.ticket-row:not(.ghost)')).toHaveCount(5)
@@ -252,11 +255,16 @@ test('n opens a quick-create row; Enter creates and keeps going; Esc closes', as
   await page.getByRole('menuitemradio', { name: 'High' }).click()
   await title.focus()
   await page.keyboard.press('Enter')
+  expect(writes(calls, 'POST')).toHaveLength(0)
+  await page.keyboard.press(`${mod}+Enter`)
   await expect(page.locator('tr.ticket-row').filter({ hasText: 'Hetzner snapshot retention' })).toHaveCount(1)
   await expect(title).toHaveValue('')
   await expect(title).toBeFocused()
-  expect(writes(calls, 'POST')[0].body).toEqual({ kind_id: 'k-ticket', title: 'Hetzner snapshot retention', state: 'new', fields: { priority: 'high' }, parent_id: 'p-pharos', key_prefix: 'PHAROS' })
+  expect(writes(calls, 'POST')[0].body).toEqual({ kind_id: 'k-work', title: 'Hetzner snapshot retention', state: 'new', fields: { priority: 'high' }, parent_id: 'p-pharos', key_prefix: 'PHAROS' })
   await expect(page.getByText(/Created PHAROS-\d+/)).toBeVisible()
+  await page.keyboard.press('Escape')
+  await expect(title).not.toBeFocused()
+  await expect(title).toBeVisible()
   await page.keyboard.press('Escape')
   await expect(title).toHaveCount(0)
 })
@@ -292,23 +300,42 @@ test('unsaved edits are guarded when moving to another ticket', async ({ page })
   await expect(page).toHaveURL('/p/PHAROS/PHAROS-13')
 })
 
-test('task lists hang: wrapped lines align with the first line, not under the box', async ({ page }) => {
-  await page.setViewportSize({ width: 1100, height: 800 })
-  const data = fixtures()
-  data.nodes.find(n => n.id === 'n-1')!.fields.acceptance_criteria = '- [x] ' + 'A long criterion that wraps across several lines in the side panel so the hanging indent shows. '.repeat(3)
-  await mockWork(page, data)
-  await page.goto('/p/PHAROS/PHAROS-11')
-  const item = panel(page).getByRole('region', { name: 'Acceptance criteria' }).locator('.task-list-item')
-  const lines = await item.evaluate(li => {
-    const range = document.createRange(); range.selectNodeContents(li)
-    const rects = [...range.getClientRects()].filter(rect => rect.width > 20)
-    const box = li.querySelector('.task-box')!.getBoundingClientRect()
-    return { first: Math.round(rects[0].left), last: Math.round(rects[rects.length - 1].left), count: new Set(rects.map(rect => Math.round(rect.top))).size, boxRight: box.right, boxCentre: box.top + box.height / 2, lineCentre: rects[0].top + rects[0].height / 2 }
-  })
-  expect(lines.count).toBeGreaterThan(2)
-  expect(lines.last).toBe(lines.first)
-  expect(lines.boxRight).toBeLessThan(lines.first)
-  expect(Math.abs(lines.boxCentre - lines.lineCentre)).toBeLessThanOrEqual(2)
+test('the first edit shows Unsaved in place, and the editing header fits the dock', async ({ page }) => {
+  // Risk (AEON-1198 CI, Linux fonts at 1024): Unsaved appeared with the first
+  // change and pushed Save past a tight dock header that folding could not
+  // absorb. Font widths move that band, so sweep the dock width as well.
+  const errors = watchErrors(page)
+  await mockWork(page, fixtures())
+  await page.setViewportSize({ width: 1440, height: 900 })
+  await page.goto('/p/PHAROS/PHAROS-12')
+  const ws = panel(page)
+  await ws.getByRole('button', { name: 'Edit', exact: true }).click()
+  const title = ws.getByRole('form', { name: 'Edit PHAROS-12' }).getByLabel('Title')
+  const original = await title.inputValue()
+  const header = ws.locator('.panel-bar-main')
+  const unsaved = header.getByText('Unsaved', { exact: true })
+  const controls = { cancel: header.getByRole('button', { name: 'Cancel', exact: true }), save: header.getByRole('button', { name: 'Save', exact: true }) }
+  const firstChange = (name: string) => ({ name, run: async () => {
+    await title.fill(`${original} again`)
+    await expect(unsaved).toBeVisible()
+  } })
+  const reset = async () => {
+    await title.fill(original)
+    await expect(unsaved).toBeHidden()
+  }
+  for (let width = 380; width <= 640; width += 4) {
+    await page.evaluate(width => document.documentElement.style.setProperty('--panel-user-w', `${width}px`), width)
+    await reset()
+    await expectStableControls({ controls, interactions: [firstChange(`first change in a ${width}px dock`)] })
+  }
+  // The default docks must also fit their editing header with Unsaved shown.
+  await page.evaluate(() => document.documentElement.style.removeProperty('--panel-user-w'))
+  for (const width of [1024, 1440]) {
+    await page.setViewportSize({ width, height: 900 })
+    await reset()
+    await expectStableControls({ controls, scrollAreas: { header }, interactions: [firstChange(`first change in the default ${width} dock`)] })
+  }
+  expect(errors).toEqual([])
 })
 
 test('the panel counts the whole list and next loads the following page', async ({ page }) => {
@@ -348,14 +375,14 @@ test('Tab walks the panel in reading order; Esc closes a popover before the pane
   await expect(page).toHaveURL('/p/PHAROS/tickets')
 })
 
-test('quick create shows unset priority and epic as dimmed values', async ({ page }) => {
+test('quick create shows unset priority and parent as dimmed values', async ({ page }) => {
   await mockWork(page, fixtures())
   await page.goto('/p/PHAROS')
   await expect(page.locator('tr.ticket-row:not(.ghost)')).toHaveCount(5)
   await page.keyboard.press('n')
   await expect(page.getByRole('button', { name: 'Priority: No priority' })).toContainText('No priority')
-  await expect(page.getByRole('button', { name: 'Epic: none' })).toContainText('No epic')
-  expect(await page.getByRole('button', { name: 'Epic: none' }).locator('.chip-text').evaluate(el => el.classList.contains('unset'))).toBe(true)
+  await expect(page.getByRole('button', { name: 'Parent: none' })).toContainText('No parent')
+  expect(await page.getByRole('button', { name: 'Parent: none' }).locator('.chip-text').evaluate(el => el.classList.contains('unset'))).toBe(true)
 })
 
 test('a selected row hides its parent chip rather than clipping it under the row actions', async ({ page }) => {
@@ -395,3 +422,149 @@ for (const colorScheme of ['light', 'dark'] as const) {
 }
 
 void me
+
+function linkedKnowledge() {
+  const data = fixtures()
+  const ticket = data.nodes.find(node => node.key === 'PHAROS-11')!
+  data.nodes.unshift({ ...ticket, id: 'knowledge-18', key: 'GUI-18', kind_slug: 'guideline', title: 'Concept PHAROS-11 · Ein Arbeitsknoten mit langen deutschen Erklärungen', body: 'Search 11 also matches this knowledge entry.', fields: {} })
+  return data
+}
+
+function barrier() {
+  let release!: () => void
+  const until = new Promise<void>(resolve => { release = resolve })
+  return { until, release }
+}
+
+for (const first of ['lookup', 'list'] as const) {
+  test(`deep link wins over a knowledge peek with ${first} answering first`, async ({ page }) => {
+    const delayed = barrier()
+    const arrived = barrier()
+    const calls = await mockWork(page, linkedKnowledge(), {
+      hold: call => {
+        const lookup = call.path === '/api/nodes' && call.query.get('q') === 'PHAROS-11'
+        const list = call.path === '/api/nodes' && call.query.get('limit') === '200'
+        if (first === 'lookup' ? list : lookup) return { until: delayed.until, computed: arrived.release }
+      },
+    })
+    try {
+      await page.goto('/p/PHAROS/PHAROS-11?q=11&type=ticket&peek=GUI-18')
+      await arrived.until
+      const ws = panel(page)
+      if (first === 'list') await expect(page.locator('#row-n-1')).toBeVisible()
+      await expect(ws).toHaveCount(1)
+      await expect(ws.getByRole('button', { name: 'Copy PHAROS-11' })).toBeVisible()
+      await expect(ws.getByRole('heading', { name: 'Connect Hetzner Cloud for managed provisioning' })).toBeVisible()
+      delayed.release()
+      await expect(page.locator('#row-n-1')).toBeVisible()
+      await expect(page).toHaveURL('/p/PHAROS/PHAROS-11?q=11&type=ticket')
+      await expect(ws).toHaveCount(1)
+      await expect(ws).not.toContainText('GUI-18')
+      await ws.getByRole('heading', { name: 'Connect Hetzner Cloud for managed provisioning' }).click()
+      await ws.getByLabel('Title', { exact: true }).fill('The routed ticket was edited')
+      await page.keyboard.press('Enter')
+      await expect(ws.getByRole('heading', { name: 'The routed ticket was edited' })).toBeVisible()
+      expect(writes(calls).map(call => call.path)).toEqual(['/api/nodes/n-1'])
+    } finally { delayed.release() }
+  })
+}
+
+// Each of the 24 combinations owns a deadline and native test identity. The
+// aggregate exceeded 120 seconds with Linux fonts/retained traces; no control
+// or navigation assertion changes when the combinations are scheduled apart.
+for (const savedWidth of [null, 1000]) for (const colorScheme of ['light', 'dark'] as const) for (const search of [true, false]) for (const width of [1440, 1024, 390]) {
+  test(`the routed panel keeps usable list space and stable controls: ${savedWidth ? 'wide' : 'default'} ${search ? 'search' : 'plain'} ${colorScheme} ${width}`, async ({ page }, testInfo) => {
+    test.setTimeout(60_000)
+    const data = linkedKnowledge()
+    const title = 'Ein Arbeitsknoten: verlässliche Zuordnung und nachvollziehbare Änderungen im gesamten Projekt'
+    data.nodes.find(node => node.id === 'n-1')!.title = title
+    data.nodes.find(node => node.id === 'n-1')!.body += '\n\nFollow PHAROS-14.'
+    data.nodes.find(node => node.id === 'n-4')!.body = 'Continue to PHAROS-12.'
+    data.preferences.layout = savedWidth ? { panel: savedWidth } : {}
+    await mockWork(page, data)
+    await page.emulateMedia({ colorScheme })
+    await page.setViewportSize({ width, height: 900 })
+    await page.goto(`/p/PHAROS/PHAROS-11?${search ? 'q=11&' : ''}type=ticket&peek=GUI-18`)
+    const ws = panel(page)
+    await expect(ws).toHaveCount(1)
+    await expect(ws.getByRole('heading', { name: title })).toBeVisible()
+    if (width >= 1024) {
+      const grid = page.getByRole('grid', { name: 'Tickets' })
+      await expect(page.locator('#row-n-1')).toBeVisible()
+      const listBox = (await grid.boundingBox())!
+      const panelBox = (await ws.boundingBox())!
+      expect(listBox.width).toBeGreaterThan(400)
+      expect(listBox.x + listBox.width).toBeLessThanOrEqual(panelBox.x)
+    }
+    // Measure the rendered buttons, including crumbs that can overflow
+    // their shrinking nav. scrollWidth alone misses overlapping siblings.
+    const expectHeaderFits = async () => {
+      const geometry = await ws.locator('.panel-bar-main').evaluate(el => {
+        const frame = el.getBoundingClientRect()
+        const buttons = [...el.querySelectorAll('button')].map(button => {
+          const rect = button.getBoundingClientRect()
+          return { name: button.getAttribute('aria-label') ?? button.textContent?.trim(), left: rect.left, right: rect.right, top: rect.top, bottom: rect.bottom, width: rect.width, height: rect.height }
+        }).filter(button => button.width > 0 && button.height > 0)
+        return { left: frame.left, right: frame.right, buttons }
+      })
+      expect(geometry.buttons.length).toBeGreaterThan(0)
+      for (const [index, button] of geometry.buttons.entries()) {
+        expect(button.left, `${button.name} inside header`).toBeGreaterThanOrEqual(geometry.left - 0.5)
+        expect(button.right, `${button.name} inside header`).toBeLessThanOrEqual(geometry.right + 0.5)
+        for (const other of geometry.buttons.slice(index + 1)) {
+          if (Math.min(button.bottom, other.bottom) > Math.max(button.top, other.top)) {
+            const overlap = Math.min(button.right, other.right) - Math.max(button.left, other.left)
+            expect(overlap, `${button.name} overlaps ${other.name}`).toBeLessThanOrEqual(0.5)
+          }
+        }
+      }
+    }
+    await expectHeaderFits()
+    await expectStableControls({
+      controls: { close: ws.getByRole('button', { name: 'Close ticket details' }), edit: ws.getByRole('button', { name: 'Edit', exact: true }), more: ws.getByRole('button', { name: 'More actions' }) },
+      scrollAreas: { panel: ws },
+      interactions: [{ name: 'open and close actions', run: async () => {
+        await ws.getByRole('button', { name: 'More actions' }).click()
+        await expect(page.getByRole('menu')).toBeVisible()
+        await expect(page.getByRole('menuitem', { name: 'Open as full page' })).toBeVisible()
+        await expect(page.getByRole('menuitem', { name: 'Open in a new tab' })).toBeVisible()
+        await page.keyboard.press('Escape')
+        await expect(page.getByRole('menu')).toHaveCount(0)
+      } }, { name: 'follow a ticket link', run: async () => {
+        await ws.getByRole('region', { name: 'Description' }).getByRole('link', { name: 'PHAROS-14: Visual acceptance of the version pill', exact: true }).click()
+        await expect(ws.getByRole('button', { name: 'Copy PHAROS-14' })).toBeVisible()
+        await expect(ws.getByRole('heading', { name: 'Visual acceptance of the version pill' })).toBeVisible()
+        await expect(ws.getByRole('button', { name: 'Back to PHAROS-11', exact: true })).toBeVisible()
+        await expectHeaderFits()
+        await page.screenshot({ path: testInfo.outputPath('followed.png') })
+      } }, { name: 'follow another link and return through the trail', run: async () => {
+        // Back is present throughout these series steps; measure it too.
+        await expectStableControls({
+          controls: { back: ws.locator('.back-btn'), close: ws.getByRole('button', { name: 'Close ticket details' }), edit: ws.getByRole('button', { name: 'Edit', exact: true }), more: ws.getByRole('button', { name: 'More actions' }) },
+          scrollAreas: { panel: ws },
+          interactions: [{ name: 'follow a second ticket link', run: async () => {
+            await ws.getByRole('region', { name: 'Description' }).getByRole('link', { name: 'PHAROS-12: Add an Oracle Cloud connector', exact: true }).click()
+            await expect(ws.getByRole('button', { name: 'Copy PHAROS-12' })).toBeVisible()
+            await expect(ws.getByRole('heading', { name: 'Add an Oracle Cloud connector' })).toBeVisible()
+            await expect(ws.getByRole('button', { name: 'Back to PHAROS-14', exact: true })).toBeVisible()
+            await expectHeaderFits()
+          } }, { name: 'Back to the first followed ticket', run: async () => {
+            await ws.getByRole('button', { name: 'Back to PHAROS-14', exact: true }).click()
+            await expect(ws.getByRole('button', { name: 'Copy PHAROS-14' })).toBeVisible()
+            await expect(ws.getByRole('heading', { name: 'Visual acceptance of the version pill' })).toBeVisible()
+            await expect(ws.getByRole('button', { name: 'Back to PHAROS-11', exact: true })).toBeVisible()
+            await expectHeaderFits()
+          } }],
+        })
+      } }, { name: 'Back to the original routed ticket', run: async () => {
+        await ws.getByRole('button', { name: 'Back to PHAROS-11', exact: true }).click()
+        await expect(ws.getByRole('button', { name: 'Copy PHAROS-11' })).toBeVisible()
+        await expect(ws.getByRole('heading', { name: title })).toBeVisible()
+        await expect(ws.locator('.back-btn')).toHaveCount(0)
+        await expect(page).toHaveURL(`/p/PHAROS/PHAROS-11?${search ? 'q=11&' : ''}type=ticket`)
+        await expectHeaderFits()
+      } }],
+    })
+    await page.screenshot({ path: testInfo.outputPath('routed-panel.png') })
+  })
+}
