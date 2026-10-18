@@ -364,6 +364,8 @@
   "tests": [
     {"kind":"go","package":"cmd/aeon","name":"TestAgentProjectRoleFlags","tags":["delete-candidate"],"tier":"GATED-FULL"}
     ,
+    {"kind":"go","package":"cmd/aeon","name":"TestDSARRejectsDestructiveOrUnscopedCommands","tier":"ESSENTIAL"}
+    ,
     {"kind":"go","package":"cmd/aeon","name":"TestDefaultServerHasNoOutboundNetwork","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"cmd/aeon","name":"TestDemoCommandDispatchAndGuards","tier":"GATED-FULL"}
@@ -6395,6 +6397,18 @@
     {"kind":"go","package":"internal/deploytarget","name":"TestNormalizeDigestCoversTargetAndCanonicalHosts","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/deploytarget","name":"TestNormalizeRequiresDestinationAndChange","tier":"GATED-FULL"}
+    ,
+    {"kind":"go","package":"internal/dsar","name":"TestExecuteFailureEmitsNothing","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/dsar","name":"TestInventoryAndAdapters","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/dsar","name":"TestInventoryRejectsPersonalMetadata","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/dsar","name":"TestManualKitIsolationAliasesHoldsAndCommands","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/dsar","name":"TestMigratedInventoryGuard","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/dsar","name":"TestParseCommands","tier":"GATED-FULL"}
     ,
     {"kind":"go","package":"internal/dsar","name":"TestQuarantineInventoryParsesWithWorkflowColumn","tier":"ESSENTIAL"}
     ,
