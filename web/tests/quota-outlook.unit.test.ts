@@ -34,6 +34,8 @@ describe('the answer in words', () => {
     const old = structuredClone(group('fast', 'claude'))
     old.pool!.sampled_age_seconds = 3 * 3600
     expect(usageView('claude', old, outlooks.fast.anchor_hour, 'UTC')).toMatchObject({ stale: true, muted: '77 % of the pool used · 3 accounts · sampled 3 h ago' })
+    // More accounts than the outlook reads: said, never hidden.
+    expect(usageView('claude', group('fast', 'claude'), outlooks.fast.anchor_hour, 'UTC', [], 'ready', true).muted).toBe('77 % of the pool used · 3 accounts · not every account read · sampled 11:10')
     const learning = structuredClone(group('fast', 'claude'))
     Object.assign(learning, { verdict: 'unknown', current: null }); learning.pace.per_hour_24h = null; learning.headline = { ...learning.headline, kind: 'unknown', focus_at: null }
     expect(usageView('claude', learning, outlooks.fast.anchor_hour, 'UTC')).toMatchObject({ kind: 'unknown', verdict: 'Pace not measured yet', focus: null })

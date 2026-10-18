@@ -111,7 +111,7 @@ export const VERDICT_ICON: Record<UsageKind, string> = { fast: 'alert', slow: 'h
  * One harness's usage in words. Without its group the plan's accounts (known) decide: none means
  * no account; a harness that never reports quota says so at once; otherwise the read is pending.
  */
-export function usageView(harness: string, group: OutlookGroup | undefined, anchorHour: string | undefined, tz?: string, known: KnownAccount[] = [], read: 'loading' | 'ready' | 'error' = 'ready'): UsageView {
+export function usageView(harness: string, group: OutlookGroup | undefined, anchorHour: string | undefined, tz?: string, known: KnownAccount[] = [], read: 'loading' | 'ready' | 'error' = 'ready', truncated = false): UsageView {
   const name = HARNESS_NAME[harness] ?? harness
   const base: UsageView = { harness, name, kind: 'none', group: group ?? null, known, head: 'No accounts yet', short: 'No accounts yet', tip: '', muted: '', stale: false, verdict: '', paceLine: '', focus: null }
   if (!group || !group.accounts.length) {
@@ -128,7 +128,8 @@ export function usageView(harness: string, group: OutlookGroup | undefined, anch
   const pooled = `${pool.accounts} ${pool.accounts === 1 ? 'account' : 'accounts'}`
   const missing = group.accounts.filter(a => a.state === 'not_reported').length
   const stale = pool.sampled_age_seconds >= STALE_SECONDS
-  const muted = `${Math.round(pool.used_percent)} % of the pool used · ${pooled}${missing ? ` · ${missing} not reported` : ''} · sampled ${stale ? ago(pool.sampled_age_seconds) : hm(at(pool.sampled_at), tz)}`
+  // More accounts than the outlook reads are said, never hidden (AEON-574 rule 5).
+  const muted = `${Math.round(pool.used_percent)} % of the pool used · ${pooled}${missing ? ` · ${missing} not reported` : ''}${truncated ? ' · not every account read' : ''} · sampled ${stale ? ago(pool.sampled_age_seconds) : hm(at(pool.sampled_at), tz)}`
   const sus = group.pace.safe_per_hour, now = group.pace.per_hour_24h
   const paceLine = sus === null ? '' : `Sustainable: up to ${f1(sus)} %/h${now === null ? '' : ` (now ${f1(now)} %/h)`}`
   const focus = group.headline.focus_at && anchorHour ? (at(group.headline.focus_at) - at(anchorHour)) / HOUR_MS : null

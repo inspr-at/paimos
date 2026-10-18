@@ -216,8 +216,15 @@ func loadOutlookInputs(ctx context.Context, tx pgx.Tx, p tenant.Principal, now t
 	if err != nil {
 		return nil, false, err
 	}
+	// Private accounts' quota is never read, only their presence.
+	visible := []string{}
+	for _, id := range keptIDs {
+		if privacy[id] {
+			visible = append(visible, id)
+		}
+	}
 	latest := map[string][]quotaSample{}
-	rows, err := tx.Query(ctx, `SELECT id::text, quota_latest, link_revision FROM agent_accounts WHERE id = ANY($1::uuid[]) AND quota_latest IS NOT NULL`, keptIDs)
+	rows, err := tx.Query(ctx, `SELECT id::text, quota_latest, link_revision FROM agent_accounts WHERE id = ANY($1::uuid[]) AND quota_latest IS NOT NULL`, visible)
 	if err != nil {
 		return nil, false, err
 	}
@@ -245,10 +252,10 @@ func loadOutlookInputs(ctx context.Context, tx pgx.Tx, p tenant.Principal, now t
 	anchor := now.UTC().Truncate(time.Hour)
 	from := anchor.Add(-outlookWindow - time.Hour)
 	hourly := map[string][][]quotaSample{}
-	limit := len(keptIDs)*(int(outlookWindow/time.Hour)+2) + 1
+	limit := len(visible)*(int(outlookWindow/time.Hour)+2) + 1
 	rows, err = tx.Query(ctx, `SELECT h.account_id::text, h.samples FROM account_quota_hourly h
 	 JOIN agent_accounts a ON a.tenant_id=h.tenant_id AND a.id=h.account_id AND h.binding_revision=a.link_revision
-	 WHERE h.account_id = ANY($1::uuid[]) AND h.hour_at >= $2 AND h.hour_at <= $3 ORDER BY h.account_id, h.hour_at LIMIT $4`, keptIDs, from, anchor, limit)
+	 WHERE h.account_id = ANY($1::uuid[]) AND h.hour_at >= $2 AND h.hour_at <= $3 ORDER BY h.account_id, h.hour_at LIMIT $4`, visible, from, anchor, limit)
 	if err != nil {
 		return nil, false, err
 	}
@@ -325,13 +332,13 @@ func weeklySeries(latest []quotaSample, hours [][]quotaSample, now time.Time) []
 	if bucket == "" {
 		return nil
 	}
-	seen := map[time.Time]bool{}
+	seen := map[int64]bool{}
 	out := []weeklySample{}
 	add := func(v quotaSample) {
-		if v.WindowKind != "weekly" || v.Bucket != bucket || v.ReadAt.After(now) || seen[v.ReadAt] {
+		if v.WindowKind != "weekly" || v.Bucket != bucket || v.ReadAt.After(now) || seen[v.ReadAt.UnixNano()] {
 			return
 		}
-		seen[v.ReadAt] = true
+		seen[v.ReadAt.UnixNano()] = true
 		out = append(out, weeklySample{v.ReadAt.UTC(), v.UsedPercent, v.ResetsAt.UTC()})
 	}
 	for _, samples := range hours {

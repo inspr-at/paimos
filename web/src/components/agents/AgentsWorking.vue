@@ -130,7 +130,7 @@ onMounted(() => { releaseOutlook = outlook.use() })
 onBeforeUnmount(() => releaseOutlook?.())
 const tz = computed(() => snapshot.value?.daily_timezone)
 const usageState = computed(() => outlook.state)
-const usage = computed<Record<string, UsageView>>(() => Object.fromEntries(rows.value.map(r => [r.key, usageView(r.key, outlook.groups.get(r.key), outlook.data?.anchor_hour, tz.value, views.value[r.key]!.accounts, usageState.value)])))
+const usage = computed<Record<string, UsageView>>(() => Object.fromEntries(rows.value.map(r => [r.key, usageView(r.key, outlook.groups.get(r.key), outlook.data?.anchor_hour, tz.value, views.value[r.key]!.accounts, usageState.value, !!outlook.data?.truncated)])))
 /** The words a quota-reporting harness adds to its folded unit; nothing while loading or failed. */
 const usageTip = (key: string) => usageState.value === 'ready' && ['fast', 'slow', 'pace', 'unknown'].includes(usage.value[key]!.kind) ? usage.value[key]!.tip : ''
 const usageIcon = (key: string) => (VERDICT_ICON[usage.value[key]!.kind] || 'ring-dashed') as IconName
