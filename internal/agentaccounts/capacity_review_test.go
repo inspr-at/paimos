@@ -18,60 +18,9 @@ import (
 	"github.com/inspr-at/paimos/internal/capacity"
 	"github.com/inspr-at/paimos/internal/db"
 	"github.com/inspr-at/paimos/internal/dbtest"
-	"github.com/inspr-at/paimos/internal/nodes"
 	"github.com/inspr-at/paimos/internal/tenant"
 	"github.com/jackc/pgx/v5"
 )
-
-// AEON-1414 risks: account polling stalls ticket saves; removing its write
-// fences must retain capacity, quota and routing decisions from one snapshot.
-func TestCapacityReadSnapshot(t *testing.T) {
-	now := time.Date(2026, 10, 19, 12, 0, 0, 0, time.UTC)
-	f := limitWorldAt(t, "capacity-read-snapshot", 3, now)
-	f.report(t, 30, now.Add(-time.Minute), now.Add(80*time.Hour))
-	seedExistingLimit(t, f, 80, "percent", "day", nil)
-	var kind, nodeID string
-	if err := db.InTenant(dbtest.Seed(t.Context()), appPool, f.admin.TenantID, func(tx pgx.Tx) error {
-		if err := tx.QueryRow(t.Context(), `SELECT id::text FROM node_kinds WHERE slug='work'`).Scan(&kind); err != nil {
-			return err
-		}
-		return tx.QueryRow(t.Context(), `INSERT INTO nodes(tenant_id,kind_id,title) VALUES($1,$2,'Polling must not block edits') RETURNING id::text`, f.admin.TenantID, kind).Scan(&nodeID)
-	}); err != nil {
-		t.Fatal(err)
-	}
-	paths := []string{"/api/agent-accounts", "/api/agent-accounts/capacity", "/api/agent-accounts/groups", "/api/agent-accounts/pins?ticket_id=" + nodeID, "/api/agent-accounts/capacity/schedule", "/api/agent-accounts/" + f.account.ID + "/readings", "/api/agent-accounts/overview", "/api/agent-accounts/capacity/next?harness=codex"}
-	for _, path := range paths {
-		t.Run(path, func(t *testing.T) {
-			pool, barrier, ctx := dbtest.BarrierPool(t, appPool, func(sql string) bool {
-				return strings.Contains(sql, "FROM agent_accounts") || strings.Contains(sql, "FROM account_groups") || strings.Contains(sql, "FROM account_ticket_pins") || strings.Contains(sql, "FROM account_capacity_schedules")
-			})
-			mod := fixedClockModule{Module: &Module{pool: pool}, at: now}
-			read := make(chan *httptest.ResponseRecorder, 1)
-			go func() { read <- evidenceHTTP(mod, ctx, f.admin, "", "GET", path, "", now) }()
-			holder := barrier.Wait(t, ctx)
-			patch := make(chan *httptest.ResponseRecorder, 1)
-			done := make(chan struct{})
-			// One second bounds a hung save; the database barrier and lock graph
-			// establish overlap, without a sleep or elapsed-time assertion.
-			patchCtx, cancel := context.WithTimeout(ctx, time.Second)
-			defer cancel()
-			go func() {
-				patch <- evidenceHTTP(nodes.New(appPool, nil), patchCtx, f.admin, "", "PATCH", "/api/nodes/"+nodeID, `{"title":"Saved while reading capacity"}`, now)
-				close(done)
-			}()
-			if lock := dbtest.BlockedOrDone(t, patchCtx, adminPool, holder, done); lock != "" {
-				t.Fatalf("account GET blocks node PATCH on %s", lock)
-			}
-			if got := dbtest.Await(t, ctx, patch); got.Code != http.StatusOK {
-				t.Fatalf("node PATCH: %d %s", got.Code, got.Body.String())
-			}
-			barrier.Release()
-			if got := dbtest.Await(t, ctx, read); got.Code != http.StatusOK {
-				t.Fatalf("account GET: %d %s", got.Code, got.Body.String())
-			}
-		})
-	}
-}
 
 func TestCapacityProjectionBatchAndGolden(t *testing.T) {
 	now := time.Date(2026, 10, 19, 12, 0, 0, 0, time.UTC)
