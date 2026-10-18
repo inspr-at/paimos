@@ -168,14 +168,18 @@ func TestClaudeIdleCapabilityExactBinary(t *testing.T) {
 	t.Setenv("TMPDIR", privateCapacityHome(t))
 	home := privateCapacityHome(t)
 	path := filepath.Join(home, "fixture-claude")
+	node := filepath.Join(home, "fixture-node")
 	raw := []byte("#!/bin/sh\nexit 88\n")
 	_ = os.WriteFile(path, raw, 0700)
-	a := NewClaudeAdapter("/fixture/node", "/fixture/sdk", path, map[string]string{"a": home})
+	if err := os.WriteFile(node, raw, 0700); err != nil {
+		t.Fatal(err)
+	}
+	a := NewClaudeAdapter(node, "/fixture/sdk", path, map[string]string{"a": home})
 	if a.CanCaptureCapacity("a") || len(a.CaptureCapacity(t.Context(), "a")) != 0 {
 		t.Fatal("unsupported Claude captured")
 	}
 	calls := 0
-	a.usage = &claudeUsageCapability{binaryPath: path, binarySHA256: sha256Hex(raw), version: "fixture-1", capture: func(_ context.Context, _ string, environment []string) (json.RawMessage, error) {
+	a.usage = &claudeUsageCapability{binaryPath: path, binarySHA256: sha256Hex(raw), nodePath: node, nodeSHA256: sha256Hex(raw), startupHooks: true, inheritedConfig: true, termination: true, version: "fixture-1", capture: func(_ context.Context, _ string, environment []string) (json.RawMessage, error) {
 		calls++
 		if len(environment) != 8 {
 			t.Fatal("child env expanded")
