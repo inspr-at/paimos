@@ -21,10 +21,17 @@ async function setup(page: Page, admin = true) {
   })
   return { data, selected, bodies }
 }
+// AEON-1212 / #592 puts panel removal in More session actions.
+async function openPanelRemoval(page: Page) {
+  const panel = page.getByRole('complementary', { name: 'Session details' })
+  await panel.getByRole('button', { name: 'More session actions', exact: true }).click()
+  return page.getByRole('menuitem', { name: 'Remove ghost-worker', exact: true })
+}
+
 const row = (page: Page, id: string) => page.locator(`[data-row="s:${id}"]`)
 const confirm = (page: Page) => page.getByRole('dialog', { name: 'Remove ghost-worker?' })
 const historyButton = (page: Page) => page.getByRole('button', { name: 'Show history: every ended or removed session' })
-const shots = process.env.REMOVAL_SCREENSHOT_DIR
+const clearStaleButton = (page: Page) => page.getByRole('button', { name: /^Clear stale: \d+ without a heartbeat for 15 minutes$/ })
 // Live row removal: the quiet overflow button, then the menu item, then the one confirmation.
 async function removeFromRow(page: Page, id: string) {
   await row(page, id).hover()
@@ -36,10 +43,10 @@ test('row overflow removes a live session; History preserves it and survives ref
   const errors = watchErrors(page)
   const { selected, bodies } = await setup(page)
   await page.goto('/agents')
-  const summary = page.getByRole('group', { name: 'Live sessions' })
-  await expect(summary).toContainText('live')
+  const summary = page.getByRole('group', { name: 'Show sessions by state' })
+  await expect(summary).toContainText('working')
   const before = await summary.innerText()
-  // A live row carries no bin; the live line carries no removal.
+  // A live row carries no bin; the head counts carry no removal.
   await expect(row(page, selected.id).getByRole('button', { name: /^Remove / })).toHaveCount(0)
   await expect(summary.getByRole('button', { name: /^Remove / })).toHaveCount(0)
   await removeFromRow(page, selected.id)
@@ -75,9 +82,9 @@ test('overflow button is quiet until hover or focus and keeps the column width',
   await row(page, selected.id).hover()
   await expect(more).toHaveCSS('opacity', '1')
   const cell = await row(page, selected.id).locator('.c-actions').boundingBox()
-  const running = await row(page, selected.id).locator('.c-elapsed').boundingBox()
-  // The actions track keeps night/r1's fixed 76px.
-  expect(await page.locator('.sessions .table').evaluate(el => getComputedStyle(el).gridTemplateColumns.split(' ').at(-1))).toBe('76px')
+  const running = await row(page, selected.id).locator('.c-beat').boundingBox()
+  // AEON-524 (a14794341) reserves 108px for Resume, Remove and More.
+  expect(await page.locator('.sessions .table').evaluate(el => getComputedStyle(el).gridTemplateColumns.split(' ').at(-1))).toBe('108px')
   for (const button of await row(page, selected.id).locator('.c-actions button').all()) {
     const box = (await button.boundingBox())!
     expect(box.x).toBeGreaterThanOrEqual(running!.x + running!.width)
@@ -106,12 +113,12 @@ test('panel Remove sits with the controls, closes the panel after confirmation, 
   const { selected, bodies } = await setup(page)
   await page.goto(`/agents/${selected.id}`)
   const panel = page.getByRole('complementary', { name: 'Session details' })
-  const remove = panel.getByRole('button', { name: 'Remove ghost-worker' })
+  const remove = await openPanelRemoval(page)
   await expect(remove).toHaveText('Remove…')
   await remove.click()
   await confirm(page).getByRole('button', { name: 'Cancel' }).click()
   expect(bodies).toHaveLength(0)
-  await remove.click()
+  await (await openPanelRemoval(page)).click()
   await confirm(page).getByRole('button', { name: 'Remove', exact: true }).click()
   await expect(page).toHaveURL(/\/agents$/)
   await expect(panel).toHaveCount(0)
@@ -123,7 +130,7 @@ test('phones show the overflow button on every row; the live line carries no rem
   await page.goto('/agents')
   const more = row(page, selected.id).getByRole('button', { name: 'Actions for ghost-worker' })
   await expect(more).toHaveCSS('opacity', '1')
-  await expect(page.getByRole('group', { name: 'Live sessions' }).getByRole('button', { name: /Remove/ })).toHaveCount(0)
+  await expect(page.getByRole('group', { name: 'Show sessions by state' }).getByRole('button', { name: /Remove/ })).toHaveCount(0)
   await expect(more).toHaveCSS('width', '44px')
   await more.click()
   await page.getByRole('menuitem', { name: /^Remove/ }).click()
@@ -135,7 +142,7 @@ test('phones show the overflow button on every row; the live line carries no rem
 test('project member can remove without force permissions', async ({ page }) => {
   const { selected } = await setup(page, false)
   await page.goto(`/agents/${selected.id}`)
-  await expect(page.getByRole('complementary').getByRole('button', { name: 'Remove ghost-worker' })).toBeVisible()
+  await expect(await openPanelRemoval(page)).toBeVisible()
   await expect(page.getByRole('button', { name: 'Recover', exact: true })).toHaveCount(0)
 })
 
@@ -145,7 +152,7 @@ test('agents never receive Remove controls', async ({ page }) => {
   await page.goto(`/agents/${selected.id}`)
   await expect(page.getByRole('complementary', { name: 'Session details' })).toBeVisible()
   await expect(page.getByRole('button', { name: /^Remove / })).toHaveCount(0)
-  await expect(page.getByRole('button', { name: 'Clear stale' })).toHaveCount(0)
+  await expect(clearStaleButton(page)).toHaveCount(0)
   await row(page, selected.id).getByRole('button', { name: 'Actions for ghost-worker' }).click()
   await expect(page.getByRole('menuitem', { name: /^Remove/ })).toHaveCount(0)
   await page.keyboard.press('Escape')
@@ -182,51 +189,55 @@ test('Clear stale names the count, confirms once and repeats while the server re
     return route.fulfill({ json: { items, cutoff: new Date(Date.now() - 15 * 60_000).toISOString(), more: eligible.length > 1 } })
   })
   await page.goto('/agents')
-  await page.getByRole('button', { name: 'Clear stale', exact: true }).click()
+  // AEON-784 (5a904fbe4) includes the count and cutoff in the accessible name.
+  await expect(clearStaleButton(page)).toHaveAccessibleName(`Clear stale: ${stale.length} without a heartbeat for 15 minutes`)
+  await clearStaleButton(page).click()
   const dialog = page.getByRole('dialog', { name: `Remove ${stale.length} sessions without a heartbeat for 15 minutes?` })
   await expect(dialog).toContainText('Processes are not stopped; late heartbeats are ignored.')
   await dialog.getByRole('button', { name: 'Remove', exact: true }).click()
   await expect(row(page, selected.id)).toHaveCount(0)
-  await expect(page.getByRole('button', { name: 'Clear stale', exact: true })).toHaveCount(0)
+  await expect(clearStaleButton(page)).toHaveCount(0)
   expect(calls.length).toBe(stale.length)
   await historyButton(page).click()
   await expect(row(page, selected.id)).toBeVisible()
 })
 
 for (const theme of ['light', 'dark']) for (const width of [1600, 390]) {
-  test(`removal visual ${width} ${theme}`, async ({ page }) => {
+  test(`removal visual ${width} ${theme}`, async ({ page }, testInfo) => {
     const { data, selected } = await setup(page)
     await page.setViewportSize({ width, height: width === 390 ? 844 : 1000 })
     await page.emulateMedia({ colorScheme: theme as 'light' | 'dark' })
     await page.goto('/agents')
     await page.evaluate(theme => { document.documentElement.dataset.theme = theme }, theme)
     await expect(row(page, selected.id)).toBeVisible()
-    if (shots) await page.screenshot({ path: `${shots}/agents-${width}-${theme}.png`, fullPage: true })
+    await page.screenshot({ path: testInfo.outputPath(`agents-${width}-${theme}.png`), fullPage: true })
     if (width > 600) {
       // A managed row shows its two controls and the overflow on hover.
       const managed = data.sessions.find(s => s.management_mode === 'managed' && s.phase === 'working')!
       await row(page, managed.id).hover()
-      if (shots) await row(page, managed.id).screenshot({ path: `${shots}/row-hover-${width}-${theme}.png` })
+      await row(page, managed.id).screenshot({ path: testInfo.outputPath(`row-hover-${width}-${theme}.png`) })
     }
     await row(page, selected.id).scrollIntoViewIfNeeded()
     await row(page, selected.id).hover()
     await row(page, selected.id).getByRole('button', { name: 'Actions for ghost-worker' }).click()
     await expect(page.getByRole('menuitem', { name: /^Remove/ })).toBeVisible()
     expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true)
-    if (shots) await page.screenshot({ path: `${shots}/menu-${width}-${theme}.png` })
+    await page.screenshot({ path: testInfo.outputPath(`menu-${width}-${theme}.png`) })
     await page.getByRole('menuitem', { name: /^Remove/ }).click()
     await expect(confirm(page)).toBeVisible()
     expect(await confirm(page).evaluate(el => el.scrollWidth <= el.clientWidth)).toBe(true)
-    if (shots) await page.screenshot({ path: `${shots}/dialog-${width}-${theme}.png` })
+    await page.screenshot({ path: testInfo.outputPath(`dialog-${width}-${theme}.png`) })
     await page.keyboard.press('Escape')
-    await row(page, selected.id).click()
-    await expect(page.getByRole('complementary', { name: 'Session details' }).getByRole('button', { name: 'Remove ghost-worker' })).toBeVisible()
-    if (shots) await page.screenshot({ path: `${shots}/panel-${width}-${theme}.png` })
-    await page.getByRole('complementary', { name: 'Session details' }).getByRole('button', { name: 'Remove ghost-worker' }).click()
+    // AEON-1018 (0dd3a2fa2) exposes State/Execution controls below the identity.
+    // A row-centre click can hit one of those controls; its link opens details.
+    await row(page, selected.id).locator('.agent-link').click()
+    await expect(await openPanelRemoval(page)).toBeVisible()
+    await page.screenshot({ path: testInfo.outputPath(`panel-${width}-${theme}.png`) })
+    await page.getByRole('menuitem', { name: 'Remove ghost-worker', exact: true }).click()
     await confirm(page).getByRole('button', { name: 'Remove', exact: true }).click()
     await historyButton(page).click()
     await expect(row(page, selected.id)).toBeVisible()
-    if (shots) await page.locator('.sessions').screenshot({ path: `${shots}/removed-${width}-${theme}.png` })
+    await page.locator('.sessions').screenshot({ path: testInfo.outputPath(`removed-${width}-${theme}.png`) })
   })
 }
 

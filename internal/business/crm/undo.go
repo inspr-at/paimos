@@ -4,11 +4,12 @@ package crm
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"reflect"
-	"slices"
 
 	"github.com/jackc/pgx/v5"
 
+	"github.com/inspr-at/paimos/internal/authz"
 	"github.com/inspr-at/paimos/internal/events"
 	"github.com/inspr-at/paimos/internal/plugins"
 	"github.com/inspr-at/paimos/internal/plugins/fence"
@@ -42,18 +43,35 @@ func UndoHandlers(registries ...*plugins.Registry) map[string]events.UndoFunc {
 		EventCustomerVisibility: m.undoVisibility,
 	}
 }
-func (m *module) undoAuthority(ctx context.Context, tx pgx.Tx, p tenant.Principal, permission string) error {
+func (m *module) undoAuthority(ctx context.Context, tx pgx.Tx, p tenant.Principal, pluginPermission, permission string) error {
+	// Serialize with role/binding changes before consulting live authority and
+	// before taking plugin or CRM row locks. Legacy roles are not grants.
+	if _, err := tx.Exec(ctx, `SELECT id FROM tenants WHERE id=$1::uuid FOR NO KEY UPDATE`, p.TenantID); err != nil {
+		return err
+	}
 	var kind string
-	var roles []string
-	e := tx.QueryRow(ctx, `SELECT kind,roles FROM principals WHERE id=$1::uuid`, p.ID).Scan(&kind, &roles)
-	if e != nil || kind != "person" || !slices.Contains(roles, "admin") {
+	err := tx.QueryRow(ctx, `SELECT kind FROM principals WHERE id=$1::uuid`, p.ID).Scan(&kind)
+	if errors.Is(err, pgx.ErrNoRows) || err == nil && (kind != "person" || p.Kind != tenant.Person || p.KeyCreatorID != "") {
 		return events.ErrForbidden
 	}
-	if e = m.gate(ctx, tx, p.TenantID, permission); e != nil {
-		return events.ErrForbidden
+	if err != nil {
+		return err
+	}
+	if err := authz.RequireTx(ctx, tx, p, permission, authz.Scope{}); err != nil {
+		if errors.Is(err, authz.ErrForbidden) {
+			return events.ErrForbidden
+		}
+		return err
+	}
+	if err := m.gate(ctx, tx, p.TenantID, pluginPermission); err != nil {
+		if errors.Is(err, errClosed) {
+			return events.ErrForbidden
+		}
+		return err
 	}
 	return nil
 }
+
 func undoID(e events.Event) (string, error) {
 	if e.NodeID == nil {
 		return "", events.ErrConflict
@@ -84,7 +102,11 @@ func restoreCustomerFields(ctx context.Context, tx pgx.Tx, id string, c Customer
 }
 func (m *module) undoCustomer(ctx context.Context, tx pgx.Tx, p tenant.Principal, e events.Event) (events.Change, error) {
 	change := events.Change{Type: e.Type}
-	if err := m.undoAuthority(ctx, tx, p, fence.PermNodesContribute); err != nil {
+	permission := "crm.write"
+	if e.Type == "crm.customer_imported" || e.Type == "crm.note_rewrite_applied" {
+		permission = "crm.manage"
+	}
+	if err := m.undoAuthority(ctx, tx, p, fence.PermNodesContribute, permission); err != nil {
 		return change, err
 	}
 	id, err := undoID(e)
@@ -196,7 +218,7 @@ func restoreContactFields(ctx context.Context, tx pgx.Tx, id string, c ContactRe
 }
 func (m *module) undoContact(ctx context.Context, tx pgx.Tx, p tenant.Principal, e events.Event) (events.Change, error) {
 	change := events.Change{Type: e.Type}
-	if err := m.undoAuthority(ctx, tx, p, fence.PermNodesContribute); err != nil {
+	if err := m.undoAuthority(ctx, tx, p, fence.PermNodesContribute, "crm.write"); err != nil {
 		return change, err
 	}
 	id, err := undoID(e)
@@ -278,7 +300,7 @@ func (m *module) undoContact(ctx context.Context, tx pgx.Tx, p tenant.Principal,
 }
 func (m *module) undoPrimary(ctx context.Context, tx pgx.Tx, p tenant.Principal, e events.Event) (events.Change, error) {
 	change := events.Change{Type: e.Type}
-	if err := m.undoAuthority(ctx, tx, p, fence.PermNodesContribute); err != nil {
+	if err := m.undoAuthority(ctx, tx, p, fence.PermNodesContribute, "crm.write"); err != nil {
 		return change, err
 	}
 	id, err := undoID(e)
@@ -312,7 +334,7 @@ func (m *module) undoPrimary(ctx context.Context, tx pgx.Tx, p tenant.Principal,
 }
 func (m *module) undoNumber(ctx context.Context, tx pgx.Tx, p tenant.Principal, e events.Event) (events.Change, error) {
 	change := events.Change{Type: e.Type}
-	if err := m.undoAuthority(ctx, tx, p, fence.PermNodesContribute); err != nil {
+	if err := m.undoAuthority(ctx, tx, p, fence.PermNodesContribute, "crm.write"); err != nil {
 		return change, err
 	}
 	id, err := undoID(e)
@@ -386,6 +408,7 @@ func (m *module) undoNumber(ctx context.Context, tx pgx.Tx, p tenant.Principal, 
 	if err != nil {
 		return change, err
 	}
+	var changes []events.Change
 	for _, q := range quotes {
 		var draftRev int64
 		err = tx.QueryRow(ctx, `UPDATE quote_drafts SET document=jsonb_set(document,'{recipient,customer_no}',to_jsonb($1::text),true),draft_revision=draft_revision+1,updated_at=clock_timestamp(),updated_by_principal_id=$2::uuid WHERE quote_node_id=$3::uuid RETURNING draft_revision`, before.CustomerNo, p.ID, q.id).Scan(&draftRev)
@@ -395,7 +418,10 @@ func (m *module) undoNumber(ctx context.Context, tx pgx.Tx, p tenant.Principal, 
 		if _, err = tx.Exec(ctx, `UPDATE business_quotes SET revision=revision+1 WHERE quote_node_id=$1::uuid`, q.id); err != nil {
 			return change, err
 		}
-		if _, err = events.Append(ctx, tx, p, events.Change{NodeID: &q.id, Type: "quote.customer_number_changed", Before: map[string]any{"revision": q.revision}, After: map[string]any{"revision": q.revision + 1, "draft_revision": draftRev}}); err != nil {
+		changes = append(changes, events.Change{NodeID: &q.id, Type: "quote.customer_number_changed", Before: map[string]any{"revision": q.revision}, After: map[string]any{"revision": q.revision + 1, "draft_revision": draftRev}})
+	}
+	for _, item := range changes {
+		if _, err = events.Append(ctx, tx, p, item); err != nil {
 			return change, err
 		}
 	}
@@ -405,7 +431,7 @@ func (m *module) undoNumber(ctx context.Context, tx pgx.Tx, p tenant.Principal, 
 }
 func (m *module) undoProjectCustomer(ctx context.Context, tx pgx.Tx, p tenant.Principal, e events.Event) (events.Change, error) {
 	change := events.Change{Type: e.Type}
-	if err := m.undoAuthority(ctx, tx, p, fence.PermNodesContribute); err != nil {
+	if err := m.undoAuthority(ctx, tx, p, fence.PermNodesContribute, "crm.write"); err != nil {
 		return change, err
 	}
 	id, err := undoID(e)
@@ -461,7 +487,7 @@ func (m *module) undoProjectCustomer(ctx context.Context, tx pgx.Tx, p tenant.Pr
 }
 func (m *module) undoDocument(ctx context.Context, tx pgx.Tx, p tenant.Principal, e events.Event) (events.Change, error) {
 	change := events.Change{Type: e.Type}
-	if err := m.undoAuthority(ctx, tx, p, fence.PermNodesContribute); err != nil {
+	if err := m.undoAuthority(ctx, tx, p, fence.PermNodesContribute, "crm.write"); err != nil {
 		return change, err
 	}
 	expected, err := snapshotAs[DocumentMetadata](e.After)
@@ -502,7 +528,7 @@ func (m *module) undoDocument(ctx context.Context, tx pgx.Tx, p tenant.Principal
 }
 func (m *module) undoCooperation(ctx context.Context, tx pgx.Tx, p tenant.Principal, e events.Event) (events.Change, error) {
 	change := events.Change{Type: e.Type}
-	if err := m.undoAuthority(ctx, tx, p, fence.PermNodesContribute); err != nil {
+	if err := m.undoAuthority(ctx, tx, p, fence.PermNodesContribute, "crm.write"); err != nil {
 		return change, err
 	}
 	id, err := undoID(e)
@@ -554,7 +580,7 @@ func (m *module) undoCooperation(ctx context.Context, tx pgx.Tx, p tenant.Princi
 }
 func (m *module) undoDraft(ctx context.Context, tx pgx.Tx, p tenant.Principal, e events.Event) (events.Change, error) {
 	change := events.Change{Type: e.Type}
-	if err := m.undoAuthority(ctx, tx, p, fence.PermNodesContribute); err != nil {
+	if err := m.undoAuthority(ctx, tx, p, fence.PermNodesContribute, "crm.manage"); err != nil {
 		return change, err
 	}
 	id, err := undoID(e)
@@ -584,7 +610,7 @@ func (m *module) undoDraft(ctx context.Context, tx pgx.Tx, p tenant.Principal, e
 }
 func (m *module) undoProviderConfig(ctx context.Context, tx pgx.Tx, p tenant.Principal, e events.Event) (events.Change, error) {
 	change := events.Change{Type: e.Type}
-	if err := m.undoAuthority(ctx, tx, p, fence.PermIntegrationsCall); err != nil {
+	if err := m.undoAuthority(ctx, tx, p, fence.PermIntegrationsCall, "crm.manage"); err != nil {
 		return change, err
 	}
 	after, err := snapshotAs[providerConfig](e.After)
@@ -624,7 +650,7 @@ func (m *module) undoProviderConfig(ctx context.Context, tx pgx.Tx, p tenant.Pri
 }
 func (m *module) undoBinding(ctx context.Context, tx pgx.Tx, p tenant.Principal, e events.Event) (events.Change, error) {
 	change := events.Change{Type: e.Type}
-	if err := m.undoAuthority(ctx, tx, p, fence.PermStepsApply); err != nil {
+	if err := m.undoAuthority(ctx, tx, p, fence.PermStepsApply, "crm.manage"); err != nil {
 		return change, err
 	}
 	expected, err := snapshotAs[Binding](e.After)
@@ -632,7 +658,8 @@ func (m *module) undoBinding(ctx context.Context, tx pgx.Tx, p tenant.Principal,
 		return change, err
 	}
 	current, err := lockBinding(ctx, tx, p.TenantID, expected.ContactNodeID, expected.PrincipalID)
-	if err != nil || !matches(current, expected) {
+	if err != nil || current.PrincipalID != expected.PrincipalID || current.ContactNodeID != expected.ContactNodeID ||
+		current.BoundByPrincipalID != expected.BoundByPrincipalID || !current.BoundAt.Equal(expected.BoundAt) {
 		return change, events.ErrConflict
 	}
 	_, err = tx.Exec(ctx, `DELETE FROM crm_contact_principals WHERE contact_node_id=$1::uuid AND principal_id=$2::uuid`, expected.ContactNodeID, expected.PrincipalID)
@@ -648,7 +675,7 @@ func (m *module) undoBinding(ctx context.Context, tx pgx.Tx, p tenant.Principal,
 // nothing else changed it since (QL1/AEON-109).
 func (m *module) undoVisibility(ctx context.Context, tx pgx.Tx, p tenant.Principal, e events.Event) (events.Change, error) {
 	change := events.Change{Type: e.Type}
-	if err := m.undoAuthority(ctx, tx, p, fence.PermNodesContribute); err != nil {
+	if err := m.undoAuthority(ctx, tx, p, fence.PermNodesContribute, "crm.write"); err != nil {
 		return change, err
 	}
 	id, err := undoID(e)

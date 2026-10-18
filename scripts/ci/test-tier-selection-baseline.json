@@ -1,0 +1,667 @@
+{
+  "version": 1,
+  "ticket": "AEON-681",
+  "sourceCommit": "d6e22c76e64df0bcee6ed0ec2ff96de84c5e2b17",
+  "sourceMainCommit": "3ea1efea477c7d068c54974eeda74dc9e6c815fe",
+  "platform": "darwin",
+  "inventory": {
+    "go": {
+      "ESSENTIAL": 332,
+      "NIGHTLY": 3161,
+      "total": 3493,
+      "active": 3472
+    },
+    "web": {
+      "ESSENTIAL": 215,
+      "NIGHTLY": 4779,
+      "total": 4994,
+      "browser": 3434,
+      "unit": 1560
+    }
+  },
+  "scenarios": [
+    {
+      "label": "docs",
+      "event": "pull_request",
+      "paths": [
+        "README.md"
+      ],
+      "full": false,
+      "go": {
+        "ESSENTIAL": 332,
+        "NIGHTLY": 0
+      },
+      "browser": 60,
+      "unit": 155,
+      "goReason": "essential plus changed area and reverse dependencies",
+      "isolatedTimingCases": 4
+    },
+    {
+      "label": "one-package",
+      "event": "pull_request",
+      "paths": [
+        "internal/scopecode/code.go"
+      ],
+      "full": false,
+      "go": {
+        "ESSENTIAL": 332,
+        "NIGHTLY": 1
+      },
+      "browser": 60,
+      "unit": 155,
+      "goReason": "essential plus changed area; optional Go reverse dependencies exceed 300 extra cases (2921)",
+      "isolatedTimingCases": 4
+    },
+    {
+      "label": "uncertain",
+      "event": "pull_request",
+      "paths": [
+        "go.mod"
+      ],
+      "full": true,
+      "go": {
+        "ESSENTIAL": 332,
+        "NIGHTLY": 3157
+      },
+      "browser": 3434,
+      "unit": 1560,
+      "goReason": "full event or uncertain impact",
+      "isolatedTimingCases": 4
+    },
+    {
+      "label": "queue-docs",
+      "event": "merge_group",
+      "paths": [
+        "README.md"
+      ],
+      "full": false,
+      "go": {
+        "ESSENTIAL": 332,
+        "NIGHTLY": 0
+      },
+      "browser": 60,
+      "unit": 155,
+      "goReason": "essential plus changed area and reverse dependencies",
+      "isolatedTimingCases": 4
+    },
+    {
+      "label": "nightly",
+      "event": "schedule",
+      "paths": [],
+      "full": true,
+      "go": {
+        "ESSENTIAL": 332,
+        "NIGHTLY": 3157
+      },
+      "browser": 3434,
+      "unit": 1560,
+      "goReason": "full event or uncertain impact",
+      "isolatedTimingCases": 4
+    }
+  ],
+  "evidence": {
+    "go": "AST inventory, current-platform activity from go list; native all-package -list and full DB suite deferred to hosted CI after the approved remote runner refused on presence.",
+    "web": "Native Node/Vitest registration collection and exact Playwright list selection, including all 3434 full-suite browser IDs; browsers were not executed.",
+    "checks": {
+      "webBuild": "passed",
+      "webTypecheck": "passed",
+      "fullNodeUnit": {
+        "passed": 710
+      },
+      "fullVitestUnit": {
+        "passed": 850
+      },
+      "selectorRoutingReuse": {
+        "passed": 89
+      },
+      "webShardAndNativeSelection": {
+        "passed": 23
+      },
+      "browserSafety": {
+        "passed": 55,
+        "skipped": 4
+      },
+      "goPackages": "test-tier-go and ci-runner-guard passed; targeted ci-go-shards and releaseworkflow contracts passed"
+    },
+    "remote": "Presence guard refused: Mailina is the console user.",
+    "runnerMinutes": null,
+    "runnerMinutesNote": "Actions instrumentation records complete job durations. Local collection does not establish runner-minute savings."
+  },
+  "fixRound1": {
+    "sourceCommit": "f49a5216",
+    "reviewedCommit": "82c20cba",
+    "policy": "OPS #260 temporary demotion of one AEON-675, one AEON-676 and seven AEON-683 cases. All nine remain in changed-area and full/nightly selection, including five AEON-541 guards. No test bodies or assertions were weakened.",
+    "inventory": {
+      "go": {
+        "ESSENTIAL": 331,
+        "NIGHTLY": 3162,
+        "total": 3493,
+        "active": 3472
+      },
+      "web": {
+        "ESSENTIAL": 207,
+        "NIGHTLY": 4787,
+        "total": 4994,
+        "browser": 3434,
+        "unit": 1560
+      }
+    },
+    "scenarios": [
+      {
+        "label": "docs",
+        "event": "pull_request",
+        "paths": [
+          "README.md"
+        ],
+        "full": false,
+        "go": {
+          "ESSENTIAL": 331,
+          "NIGHTLY": 0
+        },
+        "browser": 52,
+        "unit": 155,
+        "goReason": "essential plus changed area and reverse dependencies",
+        "isolatedTimingCases": 4
+      },
+      {
+        "label": "one-package",
+        "event": "pull_request",
+        "paths": [
+          "internal/scopecode/code.go"
+        ],
+        "full": false,
+        "go": {
+          "ESSENTIAL": 331,
+          "NIGHTLY": 1
+        },
+        "browser": 52,
+        "unit": 155,
+        "goReason": "essential plus changed area; optional Go reverse dependencies exceed 300 extra cases (2922)",
+        "isolatedTimingCases": 4
+      },
+      {
+        "label": "uncertain",
+        "event": "pull_request",
+        "paths": [
+          "go.mod"
+        ],
+        "full": true,
+        "go": {
+          "ESSENTIAL": 331,
+          "NIGHTLY": 3158
+        },
+        "browser": 3434,
+        "unit": 1560,
+        "goReason": "full event or uncertain impact",
+        "isolatedTimingCases": 4
+      },
+      {
+        "label": "queue-docs",
+        "event": "merge_group",
+        "paths": [
+          "README.md"
+        ],
+        "full": false,
+        "go": {
+          "ESSENTIAL": 331,
+          "NIGHTLY": 0
+        },
+        "browser": 52,
+        "unit": 155,
+        "goReason": "essential plus changed area and reverse dependencies",
+        "isolatedTimingCases": 4
+      },
+      {
+        "label": "nightly",
+        "event": "schedule",
+        "paths": [],
+        "full": true,
+        "go": {
+          "ESSENTIAL": 331,
+          "NIGHTLY": 3158
+        },
+        "browser": 3434,
+        "unit": 1560,
+        "goReason": "full event or uncertain impact",
+        "isolatedTimingCases": 4
+      }
+    ],
+    "evidence": {
+      "regressionBefore": {
+        "commit": "82c20cba",
+        "failed": 6,
+        "note": "New regression tests against original core/diff, manifests and CI workflow fail with assertions, rather than import errors."
+      },
+      "regressionAfter": {
+        "tierAndExactSHAReusePassed": 83,
+        "webShardAndNativeSelectorsPassed": 23,
+        "finalTierValidationPassed": 22,
+        "goRunnerGuard": "passed (Go 1.26.8, GOMAXPROCS=2, -p 2)"
+      },
+      "collection": "Existing same-tree Go/Node/Vitest inventories reconciled to current manifests. Fresh native browser list checks verify the 52 essential and all 3434 full-suite registrations without opening browsers; native Node/Vitest selectors execute three representative units.",
+      "remoteGo": "remote-test.sh refused (exit 3): Mailina is the console user. No remote ref was pushed.",
+      "remoteBrowser": "Approved browser launcher refused (exit 3): OPS-247 bootstrap is pending. No SSH or browser launch.",
+      "pending": "Coordinator CI: affected releaseworkflow/test-tier-go packages, full native Go/database execution and hosted Linux Chromium execution. Heavy local suites remain prohibited. No origin push, deployment or merge/rebase onto #259.",
+      "runnerMinutes": null,
+      "runnerMinutesNote": "Hosted scheduling/runtime savings still require measurement; removing planner setup/full history is not a measured timing claim."
+    }
+  },
+  "mergeMain": {
+    "sourceMainSHA": "7ba4b51c621a7d53c9c4595cadda9a39180d9c7c",
+    "mergeCommit": "728388662b0a9d33980105ebf2bbf9c8617aadc1",
+    "reviewedBranchSHA": "1f4e4c6b5263f83b626164bb56a492a21afba174",
+    "goCases": 3526,
+    "newMainCasesClassifiedNightly": 33,
+    "browserCases": 3434,
+    "unitCases": 1560,
+    "retainedEssential": {
+      "go": 331,
+      "browser": 52,
+      "unit": 155
+    },
+    "checks": {
+      "sanitizedNodeTests": {
+        "passed": 157,
+        "failed": 0,
+        "files": [
+          "scripts/ci-pr-plan.test.mjs",
+          "scripts/ci-tree-reuse.test.mjs",
+          "scripts/ci-runner-route.test.mjs",
+          "scripts/test-tiers/test-tiers.test.mjs",
+          "scripts/check-migrations.test.mjs",
+          "web/scripts/ci-web-shard.test.mjs",
+          "web/scripts/aeon-676-ci.test.mjs"
+        ]
+      },
+      "sanitizedNativeSelectors": {
+        "passed": 2,
+        "failed": 0,
+        "file": "web/scripts/aeon-681-ci.test.mjs",
+        "browserLaunches": 0
+      },
+      "localGoRunnerGuard": {
+        "package": "./scripts/ci-runner-guard",
+        "passed": true
+      },
+      "migrationGuard": {
+        "passed": true,
+        "baseRef": "v261003095616.0.0",
+        "uniqueNumbers": 239
+      },
+      "automaticMergePreservation": {
+        "files": 40,
+        "identicalToMain": true
+      }
+    },
+    "remoteValidation": {
+      "attempted": true,
+      "started": false,
+      "exitCode": 3,
+      "reason": "Presence guard: Mailina is the console user",
+      "pendingGoPackages": [
+        "./scripts/releaseworkflow",
+        "./scripts/ci-go-shards",
+        "./scripts/test-tier-go",
+        "./internal/reportercontract",
+        "./internal/authz",
+        "./internal/db",
+        "./internal/chat",
+        "./internal/harness",
+        "./internal/inbox"
+      ],
+      "pendingRemoteNodeAndMigrationChecks": true,
+      "pendingOpenAPIChecks": true
+    },
+    "hostedCI": "Not run: no origin push authorized",
+    "noOriginPushOrDeploy": true
+  },
+  "fixRound2": {
+    "reviewedCommit": "d17be7aaa",
+    "implementationCommit": "1d57dd54b4fde08171e67b9671e3009cf38a6f38",
+    "mergeCommit": "3444c402591738fd6b6670c1a778e5a8d9cfa1ba",
+    "sourceMainSHA": "8be8b8681b8d33f82826021e1cde5dbe784e525b",
+    "policy": "Runtime-only reconciliation defaults new cases to NIGHTLY and drops stale rows with named, escaped Actions warnings. Stored manifests are unchanged. Invalid classifications, duplicate identities, browser launch configuration drift and known-flaky ESSENTIAL cases still fail. Dedicated scheduled-only strict maintenance reports classification work without gating PRs or full nightly execution. Native selectors compare reconciled identities and tiers rather than fixed manifest counts.",
+    "regressionBefore": {
+      "sourceCommit": "d17be7aaa",
+      "reconciliationTestsFailed": 2,
+      "reason": "Both final runtime-reconciliation tests fail with Unclassified test against the original core, not missing-import or setup errors.",
+      "nativeBrowserTestFailed": 1,
+      "nativeFailure": "Original browser selector assertion fails: 3439 collected registrations versus 3434 stored registrations; no browsers launched."
+    },
+    "checks": {
+      "ciSelectorPlannerReuseRouting": {
+        "passed": 112,
+        "failed": 0
+      },
+      "nativeSelectorsBeforeMainMerge": {
+        "passed": 2,
+        "failed": 0,
+        "browserLaunches": 0,
+        "representativeUnitsPassed": 3
+      },
+      "webCISetupAfterMainMerge": {
+        "command": "npm run ci:web:shard:test --prefix web",
+        "passed": 25,
+        "failed": 0,
+        "launchPolicyCheck": "passed",
+        "browserLaunches": 0
+      },
+      "normalWebCheckAfterMainMerge": {
+        "exitCode": 0,
+        "inventory": {
+          "ESSENTIAL": 207,
+          "NIGHTLY": 4799
+        },
+        "warnings": [
+          "Unclassified test (defaults to NIGHTLY; classify these): vitest:tests/project-related.unit.test.ts:a resolved old key PHAROS-14 follows the canonical record AEON-2 and retains Back history",
+          "Unclassified test (defaults to NIGHTLY; classify these): vitest:tests/project-related.unit.test.ts:a resolved old key AEON-1 follows the canonical record PHAROS-17 and retains Back history",
+          "Unclassified test (defaults to NIGHTLY; classify these): vitest:tests/project-related.unit.test.ts:a pending related lookup cannot navigate after the route changes",
+          "Unclassified test (defaults to NIGHTLY; classify these): vitest:tests/project-related.unit.test.ts:a pending related lookup cannot navigate after the person changes",
+          "Unclassified test (defaults to NIGHTLY; classify these): vitest:tests/ticket-peek.unit.test.ts:the route owns the panel even when a stale peek query survives navigation",
+          "Unclassified test (defaults to NIGHTLY; classify these): browser:tests/markdown-ticket-links.spec.ts:a plain click follows the routed ticket and a modified click opens the URL",
+          "Unclassified test (defaults to NIGHTLY; classify these): browser:tests/markdown-ticket-links.spec.ts:a moved Markdown key PHAROS-14 follows AEON-2 and Back restores the source",
+          "Unclassified test (defaults to NIGHTLY; classify these): browser:tests/markdown-ticket-links.spec.ts:a moved Markdown key AEON-1 follows PHAROS-17 and Back restores the source",
+          "Unclassified test (defaults to NIGHTLY; classify these): browser:tests/run-kinds.spec.ts:ended and lost-contact phone actions stay clear of Host in light",
+          "Unclassified test (defaults to NIGHTLY; classify these): browser:tests/run-kinds.spec.ts:ended and lost-contact phone actions stay clear of Host in dark",
+          "Unclassified test (defaults to NIGHTLY; classify these): browser:tests/ticket-panel.spec.ts:deep link wins over a knowledge peek with lookup answering first",
+          "Unclassified test (defaults to NIGHTLY; classify these): browser:tests/ticket-panel.spec.ts:deep link wins over a knowledge peek with list answering first",
+          "Unclassified test (defaults to NIGHTLY; classify these): browser:tests/ticket-panel.spec.ts:the routed panel keeps usable list space and stable controls",
+          "Stale manifest entry (dropped): browser:tests/markdown-ticket-links.spec.ts:a plain click opens the ticket peek and a modified click opens the URL"
+        ]
+      },
+      "strictWebCheckAfterMainMerge": {
+        "exitCode": 1,
+        "expectedFailure": true,
+        "report": [
+          "Tier manifest drift; classify these:",
+          "Unclassified test (defaults to NIGHTLY; classify these): vitest:tests/project-related.unit.test.ts:a resolved old key PHAROS-14 follows the canonical record AEON-2 and retains Back history",
+          "Unclassified test (defaults to NIGHTLY; classify these): vitest:tests/project-related.unit.test.ts:a resolved old key AEON-1 follows the canonical record PHAROS-17 and retains Back history",
+          "Unclassified test (defaults to NIGHTLY; classify these): vitest:tests/project-related.unit.test.ts:a pending related lookup cannot navigate after the route changes",
+          "Unclassified test (defaults to NIGHTLY; classify these): vitest:tests/project-related.unit.test.ts:a pending related lookup cannot navigate after the person changes",
+          "Unclassified test (defaults to NIGHTLY; classify these): vitest:tests/ticket-peek.unit.test.ts:the route owns the panel even when a stale peek query survives navigation",
+          "Unclassified test (defaults to NIGHTLY; classify these): browser:tests/markdown-ticket-links.spec.ts:a plain click follows the routed ticket and a modified click opens the URL",
+          "Unclassified test (defaults to NIGHTLY; classify these): browser:tests/markdown-ticket-links.spec.ts:a moved Markdown key PHAROS-14 follows AEON-2 and Back restores the source",
+          "Unclassified test (defaults to NIGHTLY; classify these): browser:tests/markdown-ticket-links.spec.ts:a moved Markdown key AEON-1 follows PHAROS-17 and Back restores the source",
+          "Unclassified test (defaults to NIGHTLY; classify these): browser:tests/run-kinds.spec.ts:ended and lost-contact phone actions stay clear of Host in light",
+          "Unclassified test (defaults to NIGHTLY; classify these): browser:tests/run-kinds.spec.ts:ended and lost-contact phone actions stay clear of Host in dark",
+          "Unclassified test (defaults to NIGHTLY; classify these): browser:tests/ticket-panel.spec.ts:deep link wins over a knowledge peek with lookup answering first",
+          "Unclassified test (defaults to NIGHTLY; classify these): browser:tests/ticket-panel.spec.ts:deep link wins over a knowledge peek with list answering first",
+          "Unclassified test (defaults to NIGHTLY; classify these): browser:tests/ticket-panel.spec.ts:the routed panel keeps usable list space and stable controls",
+          "Stale manifest entry (dropped): browser:tests/markdown-ticket-links.spec.ts:a plain click opens the ticket peek and a modified click opens the URL"
+        ],
+        "note": "Correctly reports the current classification drift; not a failed execution gate."
+      },
+      "localGo": {
+        "package": "./scripts/releaseworkflow",
+        "passed": true,
+        "goVersion": "1.26.8",
+        "GOMAXPROCS": 2,
+        "packageParallelism": 2
+      },
+      "mainMergePreservation": {
+        "conflicts": 0,
+        "filesFromMain": 3,
+        "filesIdenticalToMain": true
+      },
+      "diffWhitespace": "passed"
+    },
+    "remoteValidation": {
+      "goAttempts": 2,
+      "started": false,
+      "exitCode": 3,
+      "reason": "Presence guard: Mailina is the console user",
+      "requestedPackages": [
+        "./scripts/test-tier-go",
+        "./scripts/ci-go-shards",
+        "./scripts/releaseworkflow"
+      ],
+      "browserStarted": false,
+      "browserExitCode": 3,
+      "browserReason": "OPS-247 bootstrap and approved launcher pending; no SSH or browser installation attempted",
+      "pending": "Coordinator CI/offload: remaining Go packages, full web unit/build checks and hosted Linux Chromium execution. No broad local fallback and no origin push."
+    },
+    "approvedDesignConflicts": [],
+    "noOriginPushOrDeploy": true,
+    "reviewOwnership": "Consolidated gate remains with coordinator; no model CLIs or package review invoked.",
+    "newestMainMerge": {
+      "sourceMainSHA": "a352c5f2de47802a95f09e2a15e11157adeac4bb",
+      "mergeCommit": "4e30816545325a8cbd077c1a28235578ee049f54",
+      "conflicts": 0,
+      "changes": "AEON-593 deterministic regression updates; upstream Go, web source, browser/unit tests and QA evidence remain byte-identical to main. README automatically combines both changes.",
+      "upstreamFilesPreserved": true,
+      "goSourceCollection": {
+        "exitCode": 0,
+        "inventory": {
+          "ESSENTIAL": 331,
+          "NIGHTLY": 3202
+        },
+        "total": 3533,
+        "warnings": [
+          "Unclassified test (defaults to NIGHTLY; classify these): internal/agentd:TestIdleChildCleanupStopsAndJoinsItsOwnedChild",
+          "Unclassified test (defaults to NIGHTLY; classify these): internal/agentd:TestIdleChildDelayedCleanupNeverSignalsReleasedIdentity",
+          "Unclassified test (defaults to NIGHTLY; classify these): internal/capacity:TestRelease11OracleRetainsHistoricalValidation",
+          "Unclassified test (defaults to NIGHTLY; classify these): internal/importer:TestSourceDispatchDelayUsesInjectedClock",
+          "Unclassified test (defaults to NIGHTLY; classify these): internal/importer:TestSourceRequestCapRefillAndConcurrentDelay",
+          "Unclassified test (defaults to NIGHTLY; classify these): internal/rules/doctrine:TestControlledDoctrineGuardCounts",
+          "Unclassified test (defaults to NIGHTLY; classify these): internal/rules/doctrine:TestDefaultDoctrineGuardIgnoresUnrelatedCheckouts"
+        ],
+        "nativeGoTestBodiesExecuted": false
+      },
+      "normalWebCheck": {
+        "exitCode": 0,
+        "inventory": {
+          "ESSENTIAL": 207,
+          "NIGHTLY": 4803
+        },
+        "warningCount": 18,
+        "note": "Complete native Node/Vitest and Playwright registration collection; no browser launches. New upstream registrations default to NIGHTLY."
+      },
+      "pending": "Upstream AEON-593 behavioral suites were already merged by the coordinator; no broad local retest. Remote/hosted Go and browser validation remains unavailable under the documented guards."
+    }
+  },
+  "fixRound4": {
+    "recordedAt": "2026-10-04T11:33:57Z",
+    "ticket": "AEON-681",
+    "base": "d8e9906c4",
+    "implementationCommit": "aea1f536c31470c545b58a9ca8eade075d9f7887",
+    "sourceMainSHA": "c5266ee91ad608b291f08f2a1be8700d78c164c9",
+    "mainAlreadyMerged": true,
+    "policy": "Three explicit tiers. Full means ESSENTIAL + GATED-FULL for uncertain paths, missing impact, push, manual CI and --full. Schedule/--all means every current registration. Mapped PR/MQ changes retain ESSENTIAL plus the changed area. The existing browser gate comes from ci-web-shards.json; never-gated cases stay NIGHTLY, except already approved ESSENTIAL promotions. Runtime reconciliation, known-flaky ownership, inline aggregates, requiredJobs and exact-SHA reuse remain.",
+    "classification": {
+      "go": {
+        "inventory": {
+          "ESSENTIAL": 331,
+          "GATED-FULL": 3217,
+          "NIGHTLY": 0
+        },
+        "full": {
+          "ESSENTIAL": 331,
+          "GATED-FULL": 3217,
+          "NIGHTLY": 0
+        },
+        "nightly": {
+          "ESSENTIAL": 331,
+          "GATED-FULL": 3217,
+          "NIGHTLY": 0
+        },
+        "shardCoverage": "every selected key exactly once",
+        "essentialIdentitiesPreserved": true,
+        "existingAttributesAndTagsPreserved": true
+      },
+      "web": {
+        "inventory": {
+          "ESSENTIAL": 207,
+          "GATED-FULL": 2578,
+          "NIGHTLY": 2232
+        },
+        "full": {
+          "ESSENTIAL": 207,
+          "GATED-FULL": 2578,
+          "NIGHTLY": 0
+        },
+        "nightly": {
+          "ESSENTIAL": 207,
+          "GATED-FULL": 2578,
+          "NIGHTLY": 2232
+        },
+        "fullBrowserCases": 1216,
+        "shardCoverage": "every selected key exactly once",
+        "essentialIdentitiesPreserved": true,
+        "existingAttributesAndTagsPreserved": true
+      }
+    },
+    "currentMainRefresh": {
+      "go": {
+        "added": 21,
+        "staleDropped": []
+      },
+      "web": {
+        "added": 24,
+        "staleDropped": [
+          "browser:tests/markdown-ticket-links.spec.ts:a plain click opens the ticket peek and a modified click opens the URL"
+        ]
+      }
+    },
+    "regressionsAgainstBase": {
+      "javascript": {
+        "file": "scripts/test-tiers/test-tiers.test.mjs",
+        "pattern": "three-tier",
+        "tests": 5,
+        "failed": 5,
+        "failureKind": "All five assertion failures against isolated d8e9906c implementation, manifests and workflows; no setup or import failures."
+      },
+      "go": {
+        "file": "scripts/ci-runner-guard/main_test.go",
+        "test": "TestNightlyFullRequiresAllThreeTiers",
+        "failed": true,
+        "failureKind": "d8e9906c guard rejects the normalized --all nightly workflow: nightly-go-test must select every tier."
+      }
+    },
+    "validation": {
+      "selectorTests": {
+        "file": "scripts/test-tiers/test-tiers.test.mjs",
+        "passed": 33,
+        "failed": 0,
+        "skipped": 0
+      },
+      "nativeWebTests": {
+        "file": "web/scripts/aeon-681-ci.test.mjs",
+        "passed": 3,
+        "failed": 0,
+        "skipped": 0,
+        "browserLaunches": 0,
+        "note": "Native Node/Vitest selectors execute three requested cases (two ESSENTIAL, one GATED-FULL). Native Playwright --list proves ESSENTIAL, GATED-FULL and all-catalogue case lists exactly match collected registrations. CLI full/--all/scheduled planning checked end to end."
+      },
+      "go": {
+        "package": "./scripts/ci-runner-guard",
+        "passed": true,
+        "goVersion": "1.26.8",
+        "GOMAXPROCS": 2,
+        "packageParallelism": 2,
+        "note": "Includes repository workflow safety and four nightly downgrade regressions, including the isolated timing lane."
+      },
+      "inventory": "Fresh Go source and native web registration inventories reconcile strictly with no drift; no Go or browser test bodies run during collection.",
+      "preservation": "Every active preexisting identity, its test attributes and deletion tags preserved. ESSENTIAL identities unchanged. One stale, renamed browser registration replaced by its current names; no test source removed. ci.yml, ci-tree-reuse.mjs and known-flaky.json unchanged in this round.",
+      "diffWhitespace": "passed"
+    },
+    "remoteValidation": {
+      "goAttempts": 1,
+      "requestedCommit": "aea1f536c31470c545b58a9ca8eade075d9f7887",
+      "exitCode": 3,
+      "started": false,
+      "reason": "Approved remote-test.sh stopped because Colima is not running.",
+      "requestedPackages": [
+        "./scripts/test-tier-go",
+        "./scripts/ci-go-shards",
+        "./scripts/releaseworkflow",
+        "./scripts/ci-runner-guard"
+      ],
+      "runnerResidue": "Runner stopped after temporary ref/worktree creation, before its own cleanup. Coordinator may inspect its exact run refs/runs/aea1f536c3 and aeon-runs/aea1f536c3; no extra SSH or cleanup attempted outside the approved runner.",
+      "browserExitCode": 3,
+      "browserStarted": false,
+      "browserReason": "Approved playwright-remote.mjs refuses while OPS-247 bootstrap/launcher is pending.",
+      "pending": "Hosted Linux Chromium, broad Go/web unit/build execution remain coordinator CI work on the final SHA. No broad local fallback and no origin push."
+    },
+    "approvedDesignConflicts": [],
+    "noOriginPushOrDeploy": true,
+    "reviewOwnership": "Consolidated review remains with coordinator; no model CLI or package review run."
+  },
+  "fixRound5": {
+    "baseCommit": "af01d0f370322a11f55d76c5303fc339d12ef604",
+    "implementationCommit": "04e1bb30b28679720bb7e885443c0e040502834d",
+    "validatedSourceCommit": "a5c0c0c1aba9f56c87428ea9334b932008bb3143",
+    "mergedMainCommit": "7b8ebe30434be96b42eb351ca7c286e6393dca4d",
+    "hostedFailure": {
+      "runId": 37199246139,
+      "job": "web-setup",
+      "file": "web/scripts/aeon-676-ci.test.mjs",
+      "reason": "The existing full-nightly coverage assertion required --full after the approved three-tier design moved complete catalogue execution to --all. The other native selector and shard tests passed in that run; missing web-unit measurements were a downstream result of the setup failure."
+    },
+    "repair": "Keep the approved ESSENTIAL/GATED-FULL/NIGHTLY design and existing workflows. Require the exact --all shard invocation in nightly-web-shard itself, hosted execution, and failure propagation. No runtime or product behavior changed; no test skipped or coverage requirement loosened.",
+    "baselineRegression": {
+      "commit": "af01d0f370322a11f55d76c5303fc339d12ef604",
+      "file": "web/scripts/aeon-676-ci.test.mjs",
+      "exitCode": 1,
+      "reason": "Reproduced the hosted AssertionError requiring cli.mjs run web --full --shard before edits.",
+      "environment": "Empty inherited environment, temporary HOME, PATH=/usr/bin:/bin, absolute Node executable."
+    },
+    "validation": {
+      "webRegression": {
+        "file": "web/scripts/aeon-676-ci.test.mjs",
+        "passed": 2,
+        "failed": 0,
+        "skipped": 0,
+        "environment": "Empty inherited environment, temporary HOME, PATH=/usr/bin:/bin, absolute Node executable. Passed both before and after merging main."
+      },
+      "negativeMutations": [
+        {
+          "mutation": "gated-only",
+          "exitCode": 1,
+          "expectedAssertionFailure": true
+        },
+        {
+          "mutation": "implicit-selection",
+          "exitCode": 1,
+          "expectedAssertionFailure": true
+        },
+        {
+          "mutation": "comment-only",
+          "exitCode": 1,
+          "expectedAssertionFailure": true
+        }
+      ],
+      "mutationMethod": "Copied the test and only its required workflow/manifest inputs into isolated fixtures; ran the hosted/nightly contract test alone. Each downgraded nightly command failed the intended assertion. Product/workflow sources were never mutated.",
+      "shardManifest": {
+        "command": "node web/scripts/ci-web-shard.mjs --check",
+        "exitCode": 0,
+        "gatedSpecs": 54,
+        "ungatedSpecs": 166,
+        "shards": 12
+      },
+      "remoteGo": {
+        "runner": "coordinator remote-test.sh",
+        "sourceCommit": "a5c0c0c1aba9f56c87428ea9334b932008bb3143",
+        "exitCode": 0,
+        "packages": [
+          "./scripts/test-tier-go",
+          "./scripts/ci-go-shards",
+          "./scripts/releaseworkflow",
+          "./scripts/ci-runner-guard"
+        ],
+        "result": "All four packages passed; approved runner completed its temporary ref/worktree cleanup."
+      },
+      "browser": {
+        "command": "scripts/playwright-remote.mjs tests/clip-tip.spec.ts tests/aeon-632b-clip.spec.ts tests/key-trim.spec.ts tests/model-prefs.spec.ts",
+        "exitCode": 3,
+        "started": false,
+        "reason": "OPS-247 bootstrap and approved launcher pending; launcher refused before SSH or installation. No browser test bodies were edited in this repair."
+      },
+      "preservation": "Three-tier manifests, selection code, CI/nightly workflows and quarantine policy unchanged from af01d0f3. Main changes imported through a clean merge without manual edits.",
+      "diffWhitespace": "passed"
+    },
+    "pending": "Hosted full web-setup (including all web unit tests and native collection) and Linux Chromium need a coordinator CI run on the final branch SHA. No fresh hosted success is claimed and no broad local fallback was run.",
+    "approvedDesignConflicts": [],
+    "noOriginPushOrDeploy": true,
+    "reviewOwnership": "Coordinator owns consolidated QA; no model CLI, package review or ticket status change."
+  }
+}

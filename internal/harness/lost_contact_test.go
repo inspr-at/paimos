@@ -141,7 +141,7 @@ func TestLostContactThresholdIsTenantSetting(t *testing.T) {
 	}
 }
 
-func TestLostContactRevivesOnSameWorkerProof(t *testing.T) {
+func TestLostContactRevokesSameWorkerProofExceptStop(t *testing.T) {
 	f := fixture(t)
 	s := registerUnmanaged(t, f, false)
 	beat := map[string]any{"phase": "working", "activity": "busy", "activity_sequence": 1}
@@ -152,27 +152,23 @@ func TestLostContactRevivesOnSameWorkerProof(t *testing.T) {
 	}
 	// Another lease is still no proof; the generation stays closed.
 	expect(t, f.call(f.agent, "POST", s.path+"/heartbeat", beat, "wrong-lease-"+uid()), 403)
-	// Other worker writes do not revive; only a heartbeat does.
+	// AEON-1468: stopped_at revokes all ordinary worker calls, including a
+	// heartbeat from the original agent with its exact historical lease.
 	expect(t, f.call(f.agent, "POST", s.path+"/yield", map[string]any{}, s.lease), 403)
 	beat["activity_sequence"], beat["activity"] = 2, "idle"
-	w := f.call(f.agent, "POST", s.path+"/heartbeat", beat, s.lease)
-	expect(t, w, 200)
-	got := decode(t, w)
-	if got["phase"] != "working" || got["stopped_at"] != nil || got["stop_reason"] != nil || got["activity"] != "idle" {
-		t.Fatalf("not revived: %v", got)
+	expect(t, f.call(f.agent, "POST", s.path+"/heartbeat", beat, s.lease), 403)
+	if got := sessionState(t, f, s); got["stopped_at"] == nil || got["stop_reason"] != "heartbeat_lost" {
+		t.Fatal("historical lease reopened a stopped generation")
 	}
 	f.tx(t, f.person, func(tx pgx.Tx) error {
 		var count int
 		err := tx.QueryRow(t.Context(), `SELECT count(*) FROM events WHERE type='harness.revived' AND actor_principal_id=$1 AND after->>'id'=$2`, f.agent.ID, s.id).Scan(&count)
-		if err == nil && count != 1 {
-			t.Fatalf("revived events %d", count)
+		if err == nil && count != 0 {
+			t.Fatal("rejected heartbeat emitted revival")
 		}
 		return err
 	})
-	// Fresh again, so the next sweep leaves it alone.
-	if n := sweep(t, f); n != 0 {
-		t.Fatalf("revived session swept again: %d", n)
-	}
+
 	// A worker stop still ends it for good.
 	expect(t, f.call(f.agent, "POST", s.path+"/stop", map[string]any{"reason": "process_exited"}, s.lease), 200)
 	beat["activity_sequence"] = 3

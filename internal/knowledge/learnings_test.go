@@ -98,16 +98,16 @@ func splitSection(body, start, end string) (string, string, bool) {
 func TestMethodLearnings(t *testing.T) {
 	f := setup(t)
 	setFields(t, f, f.ticket, map[string]any{"tags": []any{"process-learning"}})
-	mention := addNode(t, f, "LEARN-1", "ticket", "Mention only", &f.project)
+	mention := addNode(t, f, "LEARN-1", "work", "Mention only", &f.project)
 	setBody(t, f, mention, "The notes mention process-learning without a tag.")
-	object := addNode(t, f, "LEARN-2", "ticket", "Ship the checklist", &f.project)
+	object := addNode(t, f, "LEARN-2", "work", "Ship the checklist", &f.project)
 	setFields(t, f, object, map[string]any{"tags": []any{map[string]any{"name": "Process-Learning", "color": "gray"}}})
 	task := addNode(t, f, "TASK-1", "task", "Rename the staging host", &f.project)
 	setFields(t, f, task, map[string]any{"tags": []any{"process-learning"}})
-	elsewhere := addNode(t, f, "OTH-9", "ticket", "Other project learning", &f.other)
+	elsewhere := addNode(t, f, "OTH-9", "work", "Other project learning", &f.other)
 	setFields(t, f, elsewhere, map[string]any{"tags": []any{"process-learning"}})
 	nested := addNode(t, f, "NEST-1", "project", "Nested", &f.project)
-	buried := addNode(t, f, "NEST-9", "ticket", "Buried learning", &nested)
+	buried := addNode(t, f, "NEST-9", "work", "Buried learning", &nested)
 	setFields(t, f, buried, map[string]any{"tags": []any{"process-learning"}})
 
 	renumber := addComment(t, f, f.ticket, "#process-learning Renumber at integration.")
@@ -129,7 +129,7 @@ func TestMethodLearnings(t *testing.T) {
 		t.Fatalf("foreign %s", w.Body.String())
 	}
 
-	page := listLearningsHTTP(t, f, f.a, f.project)
+	page := listLearningCandidates(t, f, f.a, f.project)
 	if page.Truncated {
 		t.Fatal("truncated")
 	}
@@ -164,20 +164,20 @@ func TestMethodLearnings(t *testing.T) {
 	if ids[projectCommentID].Href != "/p/PRJ-1" || ids[projectCommentID].Text != "Write the release note in the same turn" {
 		t.Fatalf("project comment %+v", ids[projectCommentID])
 	}
-	otherPage := listLearningsHTTP(t, f, f.a, f.other)
+	otherPage := listLearningCandidates(t, f, f.a, f.other)
 	if len(otherPage.Items) != 1 || otherPage.Items[0].Key != "OTH-9" {
 		t.Fatalf("other project %+v", otherPage.Items)
 	}
-	nestedPage := listLearningsHTTP(t, f, f.a, nested)
+	nestedPage := listLearningCandidates(t, f, f.a, nested)
 	if len(nestedPage.Items) != 1 || nestedPage.Items[0].Key != "NEST-9" {
 		t.Fatalf("nested %+v", nestedPage.Items)
 	}
 	onNested := addComment(t, f, nested, "#process-learning Keep this inside the nested project.")
 	nestedCommentID := commentLearningID(nested, onNested)
-	if hasLearning(listLearningsHTTP(t, f, f.a, f.project).Items, nestedCommentID) {
+	if hasLearning(listLearningCandidates(t, f, f.a, f.project).Items, nestedCommentID) {
 		t.Fatal("comment on a nested project listed under the parent")
 	}
-	nestedPage = listLearningsHTTP(t, f, f.a, nested)
+	nestedPage = listLearningCandidates(t, f, f.a, nested)
 	var nestedComment Learning
 	for _, item := range nestedPage.Items {
 		if item.ID == nestedCommentID {
@@ -212,7 +212,7 @@ func TestMethodLearnings(t *testing.T) {
 		t.Fatal(err)
 	}
 	dbtest.BindRole(t, f.db, f.a.TenantID, agent.ID, "owner")
-	agentPage := listLearningsHTTP(t, f, agent, f.project)
+	agentPage := listLearningCandidates(t, f, agent, f.project)
 	if !hasLearning(agentPage.Items, ticketID) {
 		t.Fatal("agent cannot see the candidate")
 	}
@@ -222,11 +222,11 @@ func TestMethodLearnings(t *testing.T) {
 		t.Fatalf("agent accept %s", w.Body.String())
 	}
 	w = call(t, f, agent, "POST", "/api/knowledge/learnings/"+ticketID+"/dismiss", map[string]any{})
-	expect(t, w, 403)
-	if code(t, w) != "person_required" {
+	expect(t, w, 400)
+	if code(t, w) != "invalid_request" {
 		t.Fatalf("agent dismiss %s", w.Body.String())
 	}
-	if !hasLearning(listLearningsHTTP(t, f, f.a, f.project).Items, ticketID) {
+	if !hasLearning(listLearningCandidates(t, f, f.a, f.project).Items, ticketID) {
 		t.Fatal("agent refusal removed the candidate")
 	}
 
@@ -251,7 +251,7 @@ func TestMethodLearnings(t *testing.T) {
 		t.Fatalf("stale %s", w.Body.String())
 	}
 	unchanged := decode[Entry](t, call(t, f, f.a, "GET", "/api/knowledge/"+runbook.ID, nil))
-	if unchanged.Body != runbook.Body || !hasLearning(listLearningsHTTP(t, f, f.a, f.project).Items, ticketID) {
+	if unchanged.Body != runbook.Body || !hasLearning(listLearningCandidates(t, f, f.a, f.project).Items, ticketID) {
 		t.Fatal("stale accept wrote")
 	}
 
@@ -274,7 +274,7 @@ func TestMethodLearnings(t *testing.T) {
 	if decisionOf(t, f, ticketID) != "accepted" {
 		t.Fatal("decision missing")
 	}
-	if hasLearning(listLearningsHTTP(t, f, f.a, f.project).Items, ticketID) {
+	if hasLearning(listLearningCandidates(t, f, f.a, f.project).Items, ticketID) {
 		t.Fatal("accepted learning still listed")
 	}
 	w = call(t, f, f.a, "POST", "/api/knowledge/learnings/"+ticketID+"/accept", map[string]any{"knowledge_id": runbook.ID})
@@ -294,7 +294,7 @@ func TestMethodLearnings(t *testing.T) {
 	otherEntry := createEntry(t, f, f.a, map[string]any{"project_id": f.other, "type": "runbook", "slug": "glint", "title": "Glint", "body": "There.\n"})
 	w = call(t, f, f.a, "POST", "/api/knowledge/learnings/"+objectID+"/accept", map[string]any{"knowledge_id": otherEntry.ID})
 	expect(t, w, 404)
-	if decisionOf(t, f, objectID) != "" || !hasLearning(listLearningsHTTP(t, f, f.a, f.project).Items, objectID) {
+	if decisionOf(t, f, objectID) != "" || !hasLearning(listLearningCandidates(t, f, f.a, f.project).Items, objectID) {
 		t.Fatal("cross-project accept wrote a decision")
 	}
 	glint := decode[Entry](t, call(t, f, f.a, "GET", "/api/knowledge/"+otherEntry.ID, nil))
@@ -305,7 +305,7 @@ func TestMethodLearnings(t *testing.T) {
 	w = call(t, f, agent, "POST", "/api/events/"+strconv.FormatInt(accepted.EventID, 10)+"/undo", nil)
 	expect(t, w, 403)
 	still := decode[Entry](t, call(t, f, f.a, "GET", "/api/knowledge/"+runbook.ID, nil))
-	if !strings.Contains(still.Body, accepted.Line) || hasLearning(listLearningsHTTP(t, f, f.a, f.project).Items, ticketID) {
+	if !strings.Contains(still.Body, accepted.Line) || hasLearning(listLearningCandidates(t, f, f.a, f.project).Items, ticketID) {
 		t.Fatal("agent undo changed the accept")
 	}
 	w = call(t, f, f.a, "POST", "/api/events/"+strconv.FormatInt(accepted.EventID, 10)+"/undo", nil)
@@ -314,7 +314,7 @@ func TestMethodLearnings(t *testing.T) {
 	if strings.Contains(restored.Body, accepted.Line) || restored.Body != runbook.Body {
 		t.Fatalf("undo body\n%s", restored.Body)
 	}
-	if !hasLearning(listLearningsHTTP(t, f, f.a, f.project).Items, ticketID) || decisionOf(t, f, ticketID) != "" {
+	if !hasLearning(listLearningCandidates(t, f, f.a, f.project).Items, ticketID) || decisionOf(t, f, ticketID) != "" {
 		t.Fatal("undo did not reopen the learning")
 	}
 
@@ -324,21 +324,33 @@ func TestMethodLearnings(t *testing.T) {
 	if dismissed.Decision != "dismissed" || dismissed.Entry != nil || eventType(t, f, dismissed.EventID) != evLearningDismissed {
 		t.Fatalf("dismiss %+v %s", dismissed, eventType(t, f, dismissed.EventID))
 	}
-	if hasLearning(listLearningsHTTP(t, f, f.a, f.project).Items, commentID) || decisionOf(t, f, commentID) != "dismissed" {
+	if hasLearning(listLearningCandidates(t, f, f.a, f.project).Items, commentID) || decisionOf(t, f, commentID) != "dismissed" {
 		t.Fatal("dismiss did not close the comment")
 	}
 	w = call(t, f, f.a, "POST", "/api/events/"+strconv.FormatInt(dismissed.EventID, 10)+"/undo", nil)
 	expect(t, w, 201)
-	if !hasLearning(listLearningsHTTP(t, f, f.a, f.project).Items, commentID) || decisionOf(t, f, commentID) != "" {
+	if !hasLearning(listLearningCandidates(t, f, f.a, f.project).Items, commentID) || decisionOf(t, f, commentID) != "" {
 		t.Fatal("undo dismiss did not reopen the comment")
 	}
 }
 
-func listLearningsHTTP(t *testing.T, f fixture, p tenant.Principal, project string) LearningPage {
+// Candidate projection shared by the agent inbox and analysis jobs. Keep
+// caller project RLS; person HTTP visibility has dedicated preparation tests.
+func listLearningCandidates(t *testing.T, f fixture, p tenant.Principal, project string) LearningPage {
 	t.Helper()
-	w := call(t, f, p, "GET", "/api/knowledge/learnings?project_id="+project, nil)
-	expect(t, w, 200)
-	page := decode[LearningPage](t, w)
+	var page LearningPage
+	ctx := tenant.WithPrincipal(t.Context(), p)
+	err := db.InTenant(ctx, f.db.App, p.TenantID, func(tx pgx.Tx) error {
+		var err error
+		page, err = listLearningPage(ctx, tx, p.TenantID, project, nil)
+		if err != nil {
+			return err
+		}
+		return attachRecommendations(ctx, tx, p.TenantID, project, page.Items)
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
 	if page.Items == nil {
 		t.Fatal("null items")
 	}
@@ -377,6 +389,14 @@ func addNode(t *testing.T, f fixture, key, kind, title string, parent *string) s
 	t.Helper()
 	var id string
 	err := db.InTenant(dbtest.Seed(t.Context()), f.db.App, f.a.TenantID, func(tx pgx.Tx) error {
+		// These two cases assert legacy per-kind classification. Define that
+		// tenant kind explicitly; ordinary work fixtures use the canonical kind.
+		if kind == "task" {
+			if _, err := tx.Exec(t.Context(), `INSERT INTO node_kinds(tenant_id,slug,label,short_prefix,icon,field_schema)
+			 VALUES($1,'task','Task','TSK','task','{"type":"object","issue_family":true}') ON CONFLICT (tenant_id,slug) DO NOTHING`, f.a.TenantID); err != nil {
+				return err
+			}
+		}
 		return tx.QueryRow(t.Context(), `INSERT INTO nodes(tenant_id,key,kind_id,title,parent_id)
 		  SELECT $1,$2,id,$3,$5::uuid FROM node_kinds WHERE tenant_id=$1 AND slug=$4 RETURNING id::text`, f.a.TenantID, key, title, kind, parent).Scan(&id)
 	})
@@ -476,7 +496,7 @@ func TestOpenLearningsSurviveDecidedWindow(t *testing.T) {
 			  SELECT $1, 'LD-'||g::text, k.id, 'Decided '||g::text, $2::uuid,
 			         '{"tags":["process-learning"]}'::jsonb, clock_timestamp()
 			  FROM generate_series(1, $3) AS g
-			  JOIN node_kinds k ON k.tenant_id=$1 AND k.slug='ticket'
+			  JOIN node_kinds k ON k.tenant_id=$1 AND k.slug='work'
 			  RETURNING id
 			), ev AS (
 			  INSERT INTO events (tenant_id, actor_principal_id, node_id, type, after)
@@ -494,7 +514,7 @@ func TestOpenLearningsSurviveDecidedWindow(t *testing.T) {
 			INSERT INTO nodes (tenant_id, key, kind_id, title, parent_id, fields, updated_at)
 			SELECT $1, 'OLD-1', k.id, 'The older ticket still open', $2::uuid,
 			       '{"tags":["process-learning"]}'::jsonb, clock_timestamp() - interval '40 days'
-			FROM node_kinds k WHERE k.tenant_id=$1 AND k.slug='ticket'`,
+			FROM node_kinds k WHERE k.tenant_id=$1 AND k.slug='work'`,
 			f.a.TenantID, f.project); err != nil {
 			return err
 		}
@@ -502,7 +522,7 @@ func TestOpenLearningsSurviveDecidedWindow(t *testing.T) {
 		if err := tx.QueryRow(t.Context(), `
 			INSERT INTO nodes (tenant_id, key, kind_id, title, parent_id)
 			SELECT $1, 'HOST-8', k.id, 'Comment host', $2::uuid
-			FROM node_kinds k WHERE k.tenant_id=$1 AND k.slug='ticket'
+			FROM node_kinds k WHERE k.tenant_id=$1 AND k.slug='work'
 			RETURNING id::text`, f.a.TenantID, f.project).Scan(&host); err != nil {
 			return err
 		}
@@ -547,7 +567,7 @@ func TestOpenLearningsSurviveDecidedWindow(t *testing.T) {
 	if decisions != 2*n {
 		t.Fatalf("decisions %d", decisions)
 	}
-	page := listLearningsHTTP(t, f, f.a, f.project)
+	page := listLearningCandidates(t, f, f.a, f.project)
 	if page.Truncated {
 		t.Fatal("truncated")
 	}
@@ -570,7 +590,7 @@ func TestLearningsProjectGrant(t *testing.T) {
 	setFields(t, f, f.ticket, map[string]any{"tags": []any{"process-learning"}})
 	ticketComment := addComment(t, f, f.ticket, "#process-learning Quote the ticket in the changelog.")
 	onProject := addComment(t, f, f.project, "#process-learning The project speaks for itself.")
-	elsewhere := addNode(t, f, "OTH-3", "ticket", "Other learning", &f.other)
+	elsewhere := addNode(t, f, "OTH-3", "work", "Other learning", &f.other)
 	setFields(t, f, elsewhere, map[string]any{"tags": []any{"process-learning"}})
 	nested := addNode(t, f, "NEST-1", "project", "Nested", &f.project)
 	onNested := addComment(t, f, nested, "#process-learning Stay with the nested project.")
@@ -596,7 +616,7 @@ func TestLearningsProjectGrant(t *testing.T) {
 		t.Fatal(err)
 	}
 	ticketID := nodeLearningID(f.ticket)
-	page := listLearningsHTTP(t, f, member, f.project)
+	page := listLearningCandidates(t, f, member, f.project)
 	if !hasLearning(page.Items, ticketID) || !hasLearning(page.Items, commentLearningID(f.ticket, ticketComment)) || !hasLearning(page.Items, commentLearningID(f.project, onProject)) {
 		t.Fatalf("own project %+v", page.Items)
 	}
@@ -652,7 +672,7 @@ func TestLearningsProjectGrant(t *testing.T) {
 	if err := authz.RequirePattern(guestCtx, listRoute, authz.Scope{AnyProject: true}); err != nil {
 		t.Fatal(err)
 	}
-	if !hasLearning(listLearningsHTTP(t, f, guest, f.project).Items, ticketID) {
+	if !hasLearning(listLearningCandidates(t, f, guest, f.project).Items, ticketID) {
 		t.Fatal("guest cannot list the project")
 	}
 	w = call(t, f, guest, "GET", "/api/knowledge/learnings?project_id="+f.other, nil)
@@ -697,7 +717,7 @@ func TestLearningsProjectSessionThroughAuth(t *testing.T) {
 	f := setup(t)
 	setFields(t, f, f.ticket, map[string]any{"tags": []any{"process-learning"}})
 	ticketComment := addComment(t, f, f.ticket, "#process-learning Quote the ticket in the changelog.")
-	elsewhere := addNode(t, f, "OTH-9", "ticket", "Other project learning", &f.other)
+	elsewhere := addNode(t, f, "OTH-9", "work", "Other project learning", &f.other)
 	setFields(t, f, elsewhere, map[string]any{"tags": []any{"process-learning"}})
 	otherComment := addComment(t, f, elsewhere, "#process-learning Stay in the other project.")
 
@@ -725,6 +745,10 @@ func TestLearningsProjectSessionThroughAuth(t *testing.T) {
 
 	expect(t, callSession(t, handler, "", "GET", "/api/knowledge/learnings?project_id="+f.project, nil), 401)
 
+	scout := scopedAgent(t, f, "Session lesson scout")
+	for _, id := range []string{ticketID, commentID} {
+		expect(t, call(t, f, scout, "PUT", recommendPath(id), map[string]any{"decision": "accept", "knowledge_id": entry.ID, "lesson": "Validate recovery before releasing.", "source_summary": "A recovery incident exposed missing validation."}), 200)
+	}
 	own := callSession(t, handler, cookie, "GET", "/api/knowledge/learnings?project_id="+f.project, nil)
 	expect(t, own, 200)
 	page := decode[LearningPage](t, own)

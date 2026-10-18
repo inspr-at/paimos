@@ -19,11 +19,13 @@ const router = useRouter()
 const menu = ref<InstanceType<typeof HeaderMenu>>()
 const busy = ref(false)
 // On the narrowest phones the header's moon steps aside for the breadcrumb; its
-// quick toggle then leads this sheet instead (AEON-312).
-const moonHidden = ref(false)
+// quick toggle then leads this sheet instead (AEON-312). The Desk preview's
+// chevron steps aside first; its entry then follows Personal settings (AEON-1214).
+const moonHidden = ref(false), deskHidden = ref(false)
 function opened() {
-  const moon = document.querySelector<HTMLElement>('.app-header .theme-btn')
-  moonHidden.value = !!moon && getComputedStyle(moon).display === 'none'
+  const hidden = (selector: string) => { const el = document.querySelector<HTMLElement>(selector); return !!el && getComputedStyle(el).display === 'none' }
+  moonHidden.value = hidden('.app-header .theme-btn')
+  deskHidden.value = hidden('.app-header .desk-more')
 }
 const error = ref('')
 const name = computed(() => session.identity ? accountName(session.identity) : '')
@@ -42,6 +44,8 @@ function themeKeys(event: KeyboardEvent) {
 }
 async function personal() { menu.value?.close(); await router.push('/settings/personal') }
 function releases() { menu.value?.close(); run({ name: 'releases' }) }
+// Focus goes back to the avatar first, so Escape in the preview returns there.
+function deskPreview() { menu.value?.close(true); run({ name: 'desk-preview' }) }
 async function signOut() {
   busy.value = true
   error.value = ''
@@ -71,6 +75,9 @@ async function signOut() {
       <AppIcon :name="dark ? 'sun' : 'moon'" /><span class="hm-text">{{ dark ? 'Switch to light theme' : 'Switch to dark theme' }}</span>
     </button>
     <button class="hm-item" type="button" role="menuitem" tabindex="-1" @click="personal"><AppIcon name="user" /><span class="hm-text">Personal settings</span></button>
+    <button v-if="deskHidden" class="hm-item quick-desk" type="button" role="menuitem" tabindex="-1" @click="deskPreview">
+      <AppIcon name="check" /><span class="hm-text">Preview the Decision Desk</span>
+    </button>
     <div class="theme-row" role="group" aria-labelledby="account-theme-label">
       <span id="account-theme-label" class="eyebrow">Theme</span>
       <div class="seg theme-seg" @keydown="themeKeys">

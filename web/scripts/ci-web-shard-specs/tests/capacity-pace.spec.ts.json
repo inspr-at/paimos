@@ -1,0 +1,22 @@
+{
+  "group": "remaining-ui",
+  "nightlyTiming": {
+    "seconds": 37.666,
+    "selectedTests": 15
+  },
+  "spec": {
+    "file": "tests/capacity-pace.spec.ts",
+    "listedTests": 13,
+    "tierTiming": {
+      "caseSeconds": {
+        "max": 7.138,
+        "median": 2.217,
+        "min": 1.821
+      },
+      "seconds": 37.666,
+      "selectedTests": 15
+    },
+    "weightSeconds": 39,
+    "weightSource": "AEON-1175 estimate: thirteen mocked Capacity and dial flows, six at three widths and two themes with the pacing editors"
+  }
+}

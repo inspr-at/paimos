@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/inspr-at/paimos/internal/db"
 )
@@ -63,6 +64,13 @@ func (m *Module) allow(ctx context.Context, tenantID, key string, limit int) (bo
 		return nil
 	})
 	return allowed, retryAfter, err
+}
+
+// AllowPublic counts one attempt for another public route in the same
+// zero-tenant sliding window, which RunLimitSweep expires (AEON-1441's START
+// handoff). The caller passes its own HMAC bucket key, never an address.
+func AllowPublic(ctx context.Context, pool *pgxpool.Pool, key string, limit int) (bool, int, error) {
+	return (&Module{pool: pool}).allow(ctx, zeroTenant, key, limit)
 }
 
 // ExpireLimits deletes portal limiter rows older than the sliding window.

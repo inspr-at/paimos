@@ -56,15 +56,17 @@ func ImportAttachmentDelta(ctx context.Context, pool *pgxpool.Pool, store attach
 			if err != nil {
 				return report, err
 			}
-			blob, putErr := store.Put(ctx, tenantID, body)
+			blob, putErr := store.Stage(ctx, tenantID, body)
 			closeErr := body.Close()
 			if putErr != nil {
 				return report, fmt.Errorf("store classic attachment %d: %w", classicID, putErr)
 			}
 			if closeErr != nil {
+				_ = blob.Close()
 				return report, closeErr
 			}
 			if blob.SHA256 == oldHash {
+				_ = blob.Close()
 				continue
 			}
 			updated := false
@@ -92,6 +94,9 @@ func ImportAttachmentDelta(ctx context.Context, pool *pgxpool.Pool, store attach
 				if currentHash == blob.SHA256 {
 					return nil
 				}
+				if err := attachments.Publish(ctx, tx, attachments.OwnerAttachment, blob); err != nil {
+					return err
+				}
 				if _, err := tx.Exec(ctx, `UPDATE attachments SET sha256=$3,content_type=$4,size=$5,width=$6,height=$7,updated_at=clock_timestamp() WHERE tenant_id=$1 AND id=$2`, tenantID, attachmentID, blob.SHA256, blob.ContentType, blob.Size, optionalDimension(blob.Width), optionalDimension(blob.Height)); err != nil {
 					return err
 				}
@@ -107,6 +112,7 @@ func ImportAttachmentDelta(ctx context.Context, pool *pgxpool.Pool, store attach
 				updated = err == nil
 				return err
 			})
+			_ = blob.Close()
 			if err != nil {
 				return report, err
 			}

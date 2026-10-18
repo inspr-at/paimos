@@ -97,8 +97,8 @@
     {
       "state": "cancelled",
       "label": "Cancelled",
-      "meaning": "Won’t be done (duplicate, obsolete, superseded); a reason is required",
-      "hint": "Won’t be done: duplicate, obsolete or superseded. Needs a reason",
+      "meaning": "Won’t be done separately (duplicate, obsolete, superseded, or merged into another ticket); a reason is required. For merged work, name the destination ticket in the reason.",
+      "hint": "Won’t be done separately: duplicate, obsolete, superseded or merged into another ticket. Needs a reason naming the destination ticket for merged work",
       "set_by": "Triage",
       "exit": true,
       "rules": []
@@ -116,6 +116,11 @@
   "queued": {
     "label": "Queued",
     "meaning": "Open or Blocked plus a place in the work queue (AEON-522); Blocked waits on its named blocker. When ready, the next free agent picks it up, then it becomes In progress automatically.",
+    "is_status": false
+  },
+  "recurring": {
+    "label": "Recurring",
+    "meaning": "The loop badge on a ticket's type icon means recurring work created this ticket. Its tooltip gives the schedule and occurrence number. The Recurring pill opens the source recurrence for people allowed to manage it; retired recurrences keep their existing tickets and markers. This is a marker, not a status.",
     "is_status": false
   },
   "autopilot": {

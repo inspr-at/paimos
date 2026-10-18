@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import type { Page } from '@playwright/test'
+import { mockAgentTheme } from './agent-theme-fixtures'
 import { fixtures, liveAgent, me, mockWork } from './work-fixtures'
 import { agentData, mockAgents } from './agents-fixtures'
 import { mockSettings, settingsData } from './settings-fixtures'
@@ -19,5 +20,6 @@ export async function mockIndicator(page: Page) {
   await mockSettings(page, settingsData())
   const agents = agentData({ me: me.id, now: indicatorNow.getTime(), projects: { aeon: 'p-aeon', pharos: 'p-pharos', pai: 'p-frozen' }, tickets: { fleet: 'n-1', restore: 'n-2', web: 'n-a1', release: 'n-5', approvals: 'n-6' } })
   await mockAgents(page, agents)
-  return { data, calls }
+  const theme = await mockAgentTheme(page)
+  return { data, calls, theme }
 }

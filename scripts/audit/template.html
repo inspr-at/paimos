@@ -1,0 +1,272 @@
+<!doctype html>
+<!-- SPDX-License-Identifier: AGPL-3.0-only -->
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>PAIMOS Code Audit</title>
+<style>
+/* Layout: one reading column (overview first, then rework groups that open into every finding, then coverage, tools, strengths, method). */
+:root {
+  --bg: #f4f6f6; --surface: #ffffff; --ink: #142120; --ink-2: #4b5b59; --ink-3: #7a8987; --line: #dbe2e1; --line-2: #c4cfcd;
+  --accent: #0d6b65; --accent-soft: #e2f0ee;
+  --crit: #b3123a; --crit-soft: #fbe6eb; --high: #c2410c; --high-soft: #fdeee4; --med: #a16207; --med-soft: #fbf3dd; --low: #52627a; --low-soft: #e9edf3;
+  --ok: #1d7a46; --ok-soft: #e3f3ea; --no: #6b7280; --no-soft: #eef0f2;
+  --display: "Arial Narrow", system-ui, sans-serif;
+  --body: system-ui, -apple-system, "Segoe UI", sans-serif;
+  --mono: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+}
+@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) {
+  --bg: #0e1413; --surface: #151d1c; --ink: #e4ecea; --ink-2: #a3b3b0; --ink-3: #74837f; --line: #25302e; --line-2: #34413f;
+  --accent: #5cc4b9; --accent-soft: #15302d;
+  --crit: #ff6b8b; --crit-soft: #3a1520; --high: #ff9a5c; --high-soft: #3a2014; --med: #e6b54a; --med-soft: #332810; --low: #9fb1cc; --low-soft: #1d2533;
+  --ok: #62cf8f; --ok-soft: #12301f; --no: #9aa3ad; --no-soft: #1f2428; color-scheme: dark } }
+:root[data-theme="dark"] {
+  --bg: #0e1413; --surface: #151d1c; --ink: #e4ecea; --ink-2: #a3b3b0; --ink-3: #74837f; --line: #25302e; --line-2: #34413f;
+  --accent: #5cc4b9; --accent-soft: #15302d;
+  --crit: #ff6b8b; --crit-soft: #3a1520; --high: #ff9a5c; --high-soft: #3a2014; --med: #e6b54a; --med-soft: #332810; --low: #9fb1cc; --low-soft: #1d2533;
+  --ok: #62cf8f; --ok-soft: #12301f; --no: #9aa3ad; --no-soft: #1f2428; color-scheme: dark }
+* { box-sizing: border-box; }
+body { background: var(--bg); color: var(--ink); font: 400 15px/1.55 var(--body); padding-inline: 16px; padding-block: 28px 64px; }
+.wrap { max-width: 980px; margin: 0 auto; display: grid; gap: 40px; }
+h1, h2, h3 { font-family: var(--display); text-wrap: balance; margin: 0; }
+h1 { font-size: 34px; line-height: 1.1; font-weight: 700; letter-spacing: -.01em; }
+h2 { font-size: 22px; line-height: 1.2; font-weight: 600; }
+h3 { font-size: 17px; line-height: 1.3; font-weight: 600; }
+p { margin: 0; }
+.eyebrow { font: 500 11.5px/1.4 var(--mono); letter-spacing: .08em; text-transform: uppercase; color: var(--ink-3); }
+.mono { font-family: var(--mono); font-size: 12.5px; }
+.muted { color: var(--ink-2); }
+a { color: var(--accent); }
+:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; border-radius: 4px; }
+header { display: grid; gap: 10px; }
+.meta { display: flex; flex-wrap: wrap; gap: 6px 18px; color: var(--ink-2); font-size: 13.5px; }
+.meta b { color: var(--ink); font-weight: 600; }
+.lede { max-width: 68ch; font-size: 16.5px; color: var(--ink); }
+section { display: grid; gap: 16px; min-width: 0; }
+.sec-head { display: grid; gap: 4px; }
+
+/* Overview */
+.overview { display: grid; grid-template-columns: repeat(auto-fit, minmax(210px, 1fr)); gap: 12px; }
+.panel { background: var(--surface); border: 1px solid var(--line); border-radius: 10px; padding: 16px; display: grid; gap: 8px; align-content: start; min-width: 0; }
+.big { font: 600 30px/1 var(--display); font-variant-numeric: tabular-nums; }
+.sevbar { display: flex; height: 10px; border-radius: 5px; overflow: hidden; background: var(--line); }
+.sevbar span { display: block; height: 100%; }
+.legend { display: flex; flex-wrap: wrap; gap: 4px 12px; font-size: 12.5px; color: var(--ink-2); font-variant-numeric: tabular-nums; }
+.dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; margin-right: 5px; vertical-align: 1px; }
+.tldr { padding: 4px 0; max-width: 72ch; display: grid; gap: 8px; }
+.tldr ul { margin: 0; padding-left: 18px; display: grid; gap: 4px; }
+
+/* Chips */
+.chip { display: inline-flex; align-items: center; gap: 4px; height: 21px; padding: 0 8px; border-radius: 999px; font: 500 11.5px/1 var(--mono); letter-spacing: .02em; white-space: nowrap; }
+.sev-critical { background: var(--crit-soft); color: var(--crit); }
+.sev-high { background: var(--high-soft); color: var(--high); }
+.sev-medium { background: var(--med-soft); color: var(--med); }
+.sev-low, .sev-info { background: var(--low-soft); color: var(--low); }
+.v-confirmed { background: var(--ok-soft); color: var(--ok); }
+.v-partly { background: var(--med-soft); color: var(--med); }
+.v-refuted { background: var(--no-soft); color: var(--no); }
+.tk-run { background: var(--accent-soft); color: var(--accent); }
+.tk-new { background: transparent; color: var(--ink-2); box-shadow: inset 0 0 0 1px var(--line-2); }
+
+/* Controls */
+.controls { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+.controls input[type="search"] { flex: 1 1 220px; min-width: 0; height: 34px; padding: 0 12px; border: 1px solid var(--line-2); border-radius: 8px; background: var(--surface); color: var(--ink); font: 400 14px var(--body); }
+.seg { display: inline-flex; gap: 2px; padding: 2px; border-radius: 9px; background: var(--surface); box-shadow: inset 0 0 0 1px var(--line); flex-wrap: wrap; }
+.seg button { height: 30px; padding: 0 11px; border: 0; border-radius: 7px; background: transparent; color: var(--ink-2); font: 500 13px var(--body); cursor: pointer; }
+.seg button[aria-pressed="true"] { background: var(--accent-soft); color: var(--accent); }
+.count { color: var(--ink-3); font-size: 13px; font-variant-numeric: tabular-nums; }
+
+/* Groups */
+.groups { display: grid; gap: 10px; }
+.group { background: var(--surface); border: 1px solid var(--line); border-radius: 10px; min-width: 0; }
+.group > summary { list-style: none; cursor: pointer; padding: 14px 16px; display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 6px 16px; align-items: start; }
+.group > summary::-webkit-details-marker { display: none; }
+.g-title { display: flex; gap: 10px; align-items: baseline; }
+.g-title .caret { flex: none; width: 10px; color: var(--ink-3); transition: transform .15s ease; font-size: 11px; }
+.group[open] .g-title .caret { transform: rotate(90deg); }
+.g-sum { grid-column: 1 / -1; color: var(--ink-2); font-size: 14px; max-width: 78ch; padding-left: 20px; }
+.g-side { display: flex; flex-wrap: wrap; gap: 6px; justify-content: flex-end; align-items: center; }
+.g-foot { grid-column: 1 / -1; padding-left: 20px; display: flex; flex-wrap: wrap; gap: 6px 14px; font-size: 12.5px; color: var(--ink-3); }
+.findings { border-top: 1px solid var(--line); display: grid; }
+.finding { padding: 14px 16px 16px 36px; display: grid; gap: 8px; border-top: 1px solid var(--line); min-width: 0; }
+.finding:first-child { border-top: 0; }
+.f-head { display: flex; flex-wrap: wrap; gap: 6px 8px; align-items: center; }
+.f-head h3 { flex: 1 1 320px; font-size: 15.5px; min-width: 0; }
+.f-id { font: 500 12px var(--mono); color: var(--ink-3); }
+.kv { display: grid; grid-template-columns: 112px minmax(0, 1fr); gap: 4px 14px; font-size: 14px; }
+.kv dt { color: var(--ink-3); font-size: 12.5px; padding-top: 2px; }
+.kv dd { margin: 0; min-width: 0; overflow-wrap: anywhere; }
+.locs { display: flex; flex-wrap: wrap; gap: 4px 10px; }
+.locs code { font: 400 12px var(--mono); color: var(--ink-2); overflow-wrap: anywhere; }
+.verify { color: var(--ink-2); }
+.empty { padding: 18px; color: var(--ink-2); }
+
+/* Tables */
+.tbl-wrap { overflow-x: auto; background: var(--surface); border: 1px solid var(--line); border-radius: 10px; }
+table { border-collapse: collapse; width: 100%; font-size: 13.5px; font-variant-numeric: tabular-nums; }
+th, td { text-align: left; padding: 9px 12px; border-top: 1px solid var(--line); vertical-align: top; }
+thead th { border-top: 0; font: 500 11.5px/1.3 var(--mono); letter-spacing: .06em; text-transform: uppercase; color: var(--ink-3); }
+td.num, th.num { text-align: right; white-space: nowrap; }
+.good { columns: 2 320px; column-gap: 28px; margin: 0; padding-left: 18px; }
+.good li { break-inside: avoid; margin-bottom: 8px; font-size: 14px; color: var(--ink-2); }
+.good li b { color: var(--ink); font-weight: 600; font-family: var(--mono); font-size: 11.5px; margin-right: 6px; }
+details.more > summary { cursor: pointer; color: var(--accent); font-size: 14px; margin-top: 4px; }
+.method { max-width: 72ch; display: grid; gap: 10px; color: var(--ink-2); }
+.method ol { margin: 0; padding-left: 20px; display: grid; gap: 4px; }
+@media (max-width: 600px) {
+  h1 { font-size: 27px; }
+  .kv { grid-template-columns: minmax(0, 1fr); }
+  .kv dt { padding-top: 6px; }
+  .finding { padding-left: 16px; }
+  .g-sum, .g-foot { padding-left: 0; }
+  .group > summary { grid-template-columns: minmax(0, 1fr); }
+  .g-side { justify-content: flex-start; }
+}
+@media (prefers-reduced-motion: reduce) { .g-title .caret { transition: none; } }
+</style></head><body>
+
+<div class="wrap">
+  <header>
+    <p class="eyebrow">Code health audit</p>
+    <h1>PAIMOS Code Audit</h1>
+    <div class="meta" id="meta"></div>
+    <p class="lede" id="lede"></p>
+  </header>
+
+  <section aria-labelledby="ov">
+    <div class="sec-head"><h2 id="ov">Overview</h2></div>
+    <div class="overview" id="overview"></div>
+    <div class="tldr" id="tldr"></div>
+  </section>
+
+  <section aria-labelledby="gr">
+    <div class="sec-head">
+      <h2 id="gr">Rework, by theme</h2>
+      <p class="muted">Each group is one proposed rework ticket. Open a group to see every finding with its location, why it matters, the proposed fix and independent verification.</p>
+    </div>
+    <div class="controls">
+      <input type="search" id="q" placeholder="Search findings, files, ids…" aria-label="Search findings">
+      <div class="seg" role="group" aria-label="Severity filter" id="sevseg"></div>
+      <div class="seg" role="group" aria-label="Expand or collapse"><button type="button" id="openall">Open all</button><button type="button" id="closeall">Close all</button></div>
+      <span class="count" id="count" aria-live="polite"></span>
+    </div>
+    <div class="groups" id="groups"></div>
+  </section>
+
+  <section aria-labelledby="cv">
+    <div class="sec-head"><h2 id="cv">Coverage</h2><p class="muted">Manifests list reviewed paths and classifications. The coverage command checks them against the selected snapshot and scope.</p></div>
+    <div class="tbl-wrap"><table id="covtbl"></table></div>
+    <p class="muted" id="covnote"></p>
+  </section>
+
+  <section aria-labelledby="tl">
+    <div class="sec-head"><h2 id="tl">Tool sweep</h2><p class="muted" id="toolnote"></p></div>
+    <div class="tbl-wrap"><table id="tooltbl"></table></div>
+  </section>
+
+  <section aria-labelledby="gd">
+    <div class="sec-head"><h2 id="gd">What is good</h2><p class="muted">Strengths the slices found while reading. Worth keeping as the pattern for the rework.</p></div>
+    <ul class="good" id="good"></ul>
+    <details class="more" id="goodmore"><summary>Show all strengths</summary><ul class="good" id="good2"></ul></details>
+  </section>
+
+  <section aria-labelledby="mt">
+    <div class="sec-head"><h2 id="mt">Method and limits</h2></div>
+    <div class="method" id="method"></div>
+  </section>
+</div>
+
+<script type="application/json" id="data">__DATA__</script>
+<script>
+(() => {
+  const A = JSON.parse(document.getElementById('data').textContent)
+  const $ = s => document.querySelector(s)
+  const esc = s => String(s ?? '').replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]))
+  const SEV = ['critical', 'high', 'medium', 'low', 'info']
+  const sevColor = { critical: 'var(--crit)', high: 'var(--high)', medium: 'var(--med)', low: 'var(--low)', info: 'var(--low)' }
+  const byId = Object.fromEntries(A.findings.map(f => [f.id, f]))
+  const counts = SEV.map(s => A.findings.filter(f => f.severity === s).length)
+  const total = A.findings.length
+  const verified = A.findings.filter(f => ['confirmed', 'partly'].includes(f.verdict)).length
+  const EFF = { S: 1, M: 3, L: 6 }
+
+  $('#meta').innerHTML = `<span>Snapshot <b class="mono">${esc(A.snapshot.slice(0, 12))}</b></span><span>Release <b>${esc(A.release || 'Unlabelled')}</b></span>`
+  $('#lede').textContent = `${A.cov.files.toLocaleString('en')} files and ${A.cov.lines.toLocaleString('en')} lines listed in ${Object.keys(A.coverage).length} manifests. ${verified} findings retained after verification; ${A.dropped.length} candidates dropped or awaiting verification. Manifest totals alone do not prove complete snapshot coverage; run the coverage check.`
+
+  const bar = SEV.map((s, i) => counts[i] ? `<span style="width:${(counts[i] / total * 100).toFixed(2)}%;background:${sevColor[s]}" title="${counts[i]} ${s}"></span>` : '').join('')
+  const leg = SEV.map((s, i) => `<span><i class="dot" style="background:${sevColor[s]}"></i>${counts[i]} ${s}</span>`).join('')
+  const runIds = A.groups.filter(g => g.tickets).length
+  $('#overview').innerHTML = `
+    <div class="panel"><span class="eyebrow">Findings</span><span class="big">${total}</span><span class="muted">${verified} retained after verification</span><div class="sevbar" aria-hidden="true">${bar}</div><div class="legend">${leg}</div></div>
+    <div class="panel"><span class="eyebrow">Read</span><span class="big">${A.cov.files.toLocaleString('en')}</span><span class="muted">files, ${A.cov.lines.toLocaleString('en')} lines listed in manifests</span></div>
+    <div class="panel"><span class="eyebrow">Verification</span><span class="big">${A.vstats.confirmed} <span style="font-size:15px;font-weight:500">confirmed</span></span><span class="muted">${A.vstats.partly} partly; ${A.dropped.length} dropped or awaiting verification</span></div>
+    <div class="panel"><span class="eyebrow">Rework</span><span class="big">${A.groups.length} <span style="font-size:15px;font-weight:500">themes</span></span><span class="muted">${runIds} groups linked to tickets</span></div>`
+  $('#tldr').innerHTML = `<span class="eyebrow">TL;DR</span><ul>${A.tldr.map(t => `<li>${esc(t)}</li>`).join('')}</ul>`
+
+  // Filters
+  let sevFilter = 'all', q = ''
+  const segs = [['all', 'All'], ['critical', 'Critical'], ['high', 'High'], ['medium', 'Medium'], ['low', 'Low'], ['info', 'Info']]
+  $('#sevseg').innerHTML = segs.map(([k, l]) => `<button type="button" data-sev="${k}" aria-pressed="${k === 'all'}">${l}</button>`).join('')
+  const match = f => (sevFilter === 'all' || f.severity === sevFilter) && (!q || JSON.stringify([f.id, f.title, f.locations, f.why_it_matters, f.fix, f.evidence, f.theme, f.area]).toLowerCase().includes(q))
+
+  const findingHTML = f => `<article class="finding" id="${esc(f.id)}">
+      <div class="f-head"><span class="f-id">${esc(f.id)}</span><span class="chip sev-${esc(f.severity)}">${esc(f.severity)}${f.filed_severity !== f.severity ? ` · was ${esc(f.filed_severity)}` : ''}</span><span class="chip v-${esc(f.verdict)}">${esc(f.verdict)}</span><h3>${esc(f.title)}</h3></div>
+      <dl class="kv">
+        <dt>Why it matters</dt><dd>${esc(f.why_it_matters)}</dd>
+        <dt>Fix</dt><dd>${esc(f.fix)}</dd>
+        <dt>Evidence</dt><dd>${esc(f.evidence)}</dd>
+        <dt>Where</dt><dd class="locs">${(f.locations || []).map(l => `<code>${esc(l)}</code>`).join('')}</dd>
+        <dt>Verified</dt><dd class="verify">${esc(f.verify_evidence)}${f.verify_note ? ` <br>${esc(f.verify_note)}` : ''}</dd>
+        <dt>Details</dt><dd class="muted">${esc(f.area)} · ${esc(f.category)} · effort ${esc(f.effort)} · confidence ${esc(f.confidence)}${(f.related_tickets || []).length ? ` · related ${f.related_tickets.map(esc).join(', ')}` : ''}</dd>
+      </dl></article>`
+
+  const openState = new Set()
+  function render() {
+    let shown = 0
+    $('#groups').innerHTML = A.groups.map(g => {
+      const fs = g.ids.filter(i => byId[i]).map(i => byId[i]).sort((a, b) => SEV.indexOf(a.severity) - SEV.indexOf(b.severity))
+      const vis = fs.filter(match)
+      shown += vis.length
+      if (!vis.length && (sevFilter !== 'all' || q)) return ''
+      const c = SEV.map(s => [s, fs.filter(f => f.severity === s).length]).filter(([, n]) => n)
+      const hours = fs.reduce((h, f) => h + (EFF[f.effort] || 3), 0)
+      const open = openState.has(g.key) || ((sevFilter !== 'all' || q) && vis.length)
+      return `<details class="group" data-key="${esc(g.key)}"${open ? ' open' : ''}>
+        <summary>
+          <span class="g-title"><span class="caret" aria-hidden="true"><svg viewBox="0 0 10 10" width="10" height="10" fill="currentColor"><path d="M3 1l5 4-5 4z"/></svg></span><h3>${esc(g.title)}</h3></span>
+          <span class="g-side">${c.map(([s, n]) => `<span class="chip sev-${s}">${n} ${s}</span>`).join('')}</span>
+          <p class="g-sum">${esc(g.summary)}</p>
+          <span class="g-foot"><span>${fs.length} findings</span><span>~${hours} agent-hours</span>${g.tickets ? `<span class="chip tk-run">${esc(g.tickets)}</span>` : '<span class="chip tk-new">proposed ticket</span>'}</span>
+        </summary>
+        <div class="findings">${vis.map(findingHTML).join('')}</div>
+      </details>`
+    }).join('') || '<p class="empty">No finding matches this filter.</p>'
+    $('#count').textContent = `${shown} of ${total} shown`
+  }
+  $('#sevseg').addEventListener('click', e => { const b = e.target.closest('[data-sev]'); if (!b) return; sevFilter = b.dataset.sev; for (const x of $('#sevseg').children) x.setAttribute('aria-pressed', String(x === b)); render() })
+  $('#q').addEventListener('input', e => { q = e.target.value.trim().toLowerCase(); render() })
+  $('#groups').addEventListener('toggle', e => { const d = e.target; if (d.dataset?.key) d.open ? openState.add(d.dataset.key) : openState.delete(d.dataset.key) }, true)
+  $('#openall').addEventListener('click', () => { A.groups.forEach(g => openState.add(g.key)); render() })
+  $('#closeall').addEventListener('click', () => { openState.clear(); render() })
+  render()
+  if (location.hash && document.getElementById(location.hash.slice(1))) { const el = document.getElementById(location.hash.slice(1)); el.closest('details')?.setAttribute('open', ''); el.scrollIntoView() }
+
+  // Coverage
+  const fsBy = s => A.findings.filter(f => f.slice === s)
+  $('#covtbl').innerHTML = `<thead><tr><th>Slice</th><th>Area</th><th class="num">Files</th><th class="num">Lines</th><th>Read as</th><th class="num">Findings</th></tr></thead><tbody>${Object.entries(A.coverage).map(([s, c]) => `<tr><td class="mono">${esc(s)}</td><td>${esc(A.areas[s])}</td><td class="num">${c.files.toLocaleString('en')}</td><td class="num">${c.lines.toLocaleString('en')}</td><td class="muted">${Object.entries(c.status).map(([k, n]) => `${n} ${esc(k)}`).join(' · ')}</td><td class="num">${fsBy(s).length}</td></tr>`).join('')}</tbody>`
+  $('#covnote').textContent = 'Not code: Markdown, fixtures and data files read for context. Vendored and generated files were listed but not reviewed line by line.'
+
+  // Tools
+  const ts = A.tool_themes
+  $('#toolnote').textContent = `${A.tool_stats.candidates.toLocaleString('en')} tool candidates supplied to this merge, after any explicit baseline comparison. The table includes dropped and unverified themes; only confirmed or partly confirmed findings appear in rework groups. Theme-level verification may be based on sampling.`
+  $('#tooltbl').innerHTML = `<thead><tr><th>Theme</th><th class="num">Candidates</th><th>Verdict</th><th>Why</th></tr></thead><tbody>${ts.map(t => `<tr><td class="mono">${esc(t.theme)}</td><td class="num">${t.candidates ?? '—'}</td><td><span class="chip v-${esc(t.verdict)}">${esc(t.verdict)}</span></td><td class="muted">${esc(t.note || t.evidence)}</td></tr>`).join('')}</tbody>`
+
+  // Good
+  const G = A.good, first = []
+  const seen = new Set()
+  for (const g of G) if (!seen.has(g.slice)) { seen.add(g.slice); first.push(g) }
+  const gli = g => `<li><b>${esc(g.slice)}</b>${esc(g.text)}</li>`
+  $('#good').innerHTML = first.map(gli).join('')
+  $('#good2').innerHTML = G.filter(g => !first.includes(g)).map(gli).join('')
+
+  $('#method').textContent = A.method
+})()
+</script>
+</body></html>

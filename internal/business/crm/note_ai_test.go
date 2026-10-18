@@ -7,9 +7,11 @@ import (
 	"net/http"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/jackc/pgx/v5"
 
+	"github.com/inspr-at/paimos/internal/capacity"
 	"github.com/inspr-at/paimos/internal/db"
 	"github.com/inspr-at/paimos/internal/dbtest"
 	"github.com/inspr-at/paimos/internal/events"
@@ -58,7 +60,31 @@ func routeNoteModel(t *testing.T, f fixture) string {
 			VALUES($1::uuid,'fake-scout','1','codex','openai','fake-model','medium','fast') RETURNING id::text`, f.admin.TenantID).Scan(&id); err != nil {
 			return err
 		}
-		_, err := tx.Exec(t.Context(), `INSERT INTO model_role_routes(tenant_id,role,priority,profile_id) VALUES($1::uuid,'scout',1,$2::uuid)`, f.admin.TenantID, id)
+		// Quick jobs needs a healthy account with room; a legacy ladder alone
+		// must never enable generation after the migration.
+		var runner, account string
+		if err := tx.QueryRow(t.Context(), `INSERT INTO principals(tenant_id,kind,name) VALUES($1,'agent','Note runner') RETURNING id::text`, f.admin.TenantID).Scan(&runner); err != nil {
+			return err
+		}
+		if _, err := tx.Exec(t.Context(), `INSERT INTO role_bindings(tenant_id,principal_id,role_id,scope_type) SELECT $1,$2,id,'workspace' FROM roles WHERE key='admin'`, f.admin.TenantID, runner); err != nil {
+			return err
+		}
+		var now time.Time
+		if err := tx.QueryRow(t.Context(), `SELECT now()`).Scan(&now); err != nil {
+			return err
+		}
+		if err := tx.QueryRow(t.Context(), `INSERT INTO agent_accounts(tenant_id,account_key,harness,daemon_id,registered_by_principal_id,label,state,last_probe_at,last_probe_ok,last_daemon_generation,capacity_owner)
+		 VALUES($1,'note-account','codex','note-host',$2,'Note account','available',$3,true,'note-generation',$4) RETURNING id::text`, f.admin.TenantID, runner, now, f.admin.ID).Scan(&account); err != nil {
+			return err
+		}
+		until := now.Add(time.Hour)
+		schedule := capacity.DefaultSchedule("UTC")
+		schedule.Override, schedule.OverrideUntil, schedule.Reserve = "sprint", &until, capacity.ReserveOff
+		raw, err := json.Marshal(schedule)
+		if err != nil {
+			return err
+		}
+		_, err = tx.Exec(t.Context(), `INSERT INTO account_capacity_schedules(tenant_id,principal_id,scope,scope_key,account_id,schedule) VALUES($1,$2,'account',$3::uuid::text,$3,$4)`, f.admin.TenantID, f.admin.ID, account, raw)
 		return err
 	})
 	if err != nil {

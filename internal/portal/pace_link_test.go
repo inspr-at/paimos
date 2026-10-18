@@ -241,6 +241,11 @@ func TestPortalPaceMigrationBackfillRejectsStaleHistory(t *testing.T) {
 				RETURNING id::text`, tenantID).Scan(&projectID); err != nil {
 				return err
 			}
+			if _, err := tx.Exec(ctx, `INSERT INTO nodes(tenant_id,key,kind_id,title,body,state)
+                SELECT $1::uuid,'PPR-1',k.id,'Harbour catalog','Public summary.','published'
+                FROM node_kinds k WHERE k.tenant_id=$1::uuid AND k.slug='portal_product'`, tenantID); err != nil {
+				return err
+			}
 			_, err := tx.Exec(ctx, `INSERT INTO portal_pace(tenant_id, project_node_id) VALUES ($1::uuid, $2::uuid)`, tenantID, projectID)
 			return err
 		})
@@ -253,7 +258,6 @@ func TestPortalPaceMigrationBackfillRejectsStaleHistory(t *testing.T) {
 	mux := http.NewServeMux()
 	m.Mount(mux)
 	f := &fixture{t: t, m: m, d: d, h: mux}
-	insertNode(t, d, tenantID, "PPR-1", "portal_product", "Harbour catalog", "Public summary.", "published", "", "{}")
 	admin := makePerson(t, d, tenantID, "Pace Before Admin", "admin")
 	setPortal(t, d, tenantID, true)
 

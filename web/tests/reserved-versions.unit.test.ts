@@ -42,15 +42,18 @@ it.each([null, {}, { show_reserved_versions: 'true' }, { show_reserved_versions:
 })
 
 it('saves each choice without discarding the other setting or unknown fields', async () => {
-  vi.mocked(readPreference).mockResolvedValue({ show_flow_controls: true, future_field: 'preserve' })
+  vi.mocked(readPreference).mockResolvedValue({ show_flow_controls: true, show_expert_start: true, future_field: 'preserve' })
   const prefs = settings()
   await prefs.setShowReservedVersions(true)
   expect(prefs.showReservedVersions.value).toBe(true)
-  expect(prefs.showFlowControls.value).toBe(true)
-  expect(writePreference).toHaveBeenLastCalledWith('developer-ui', { show_flow_controls: true, show_reserved_versions: true, future_field: 'preserve' })
-  await prefs.setShowFlowControls(false)
+  expect(prefs.showExpertStart.value).toBe(true)
+  expect(Object.hasOwn(prefs, 'showFlowControls')).toBe(false)
+  expect(Object.hasOwn(prefs, 'setShowFlowControls')).toBe(false)
+  expect(writePreference).toHaveBeenLastCalledWith('developer-ui', { show_flow_controls: true, show_expert_start: true, show_reserved_versions: true, future_field: 'preserve' })
+  await prefs.setShowExpertStart(false)
   expect(prefs.showReservedVersions.value).toBe(true)
-  expect(writePreference).toHaveBeenLastCalledWith('developer-ui', { show_flow_controls: false, show_reserved_versions: true, future_field: 'preserve' })
+  expect(prefs.showExpertStart.value).toBe(false)
+  expect(writePreference).toHaveBeenLastCalledWith('developer-ui', { show_flow_controls: true, show_expert_start: false, show_reserved_versions: true, future_field: 'preserve' })
 })
 
 it('waits for the initial read and a successful save before revealing reservations', async () => {
@@ -133,15 +136,19 @@ it('loads reservations for opt-in rows but never remembers withdrawn names from 
   const published = { ...release('261002120000.0.0', 'published'), codename: 'Published Name' }
   const reserved = { ...release('261002110000.0.0', 'reserved'), codename: 'Reserved Name' }
   const withdrawn = { ...release('261002100000.0.0', 'withdrawn'), codename: 'Withdrawn Name' }
-  const history = { schema: 'inspr.release-history.v1', current: running.version, releases: [published, reserved, withdrawn] }
+  const candidate = { ...release('261002130000.0.0', 'candidate'), codename: 'Candidate Name' }
+  const history = { schema: 'inspr.release-history.v1', current: running.version, releases: [published, reserved, withdrawn, candidate] }
   vi.mocked(api).mockImplementation(async () => new Response(JSON.stringify(history)))
-  expect((await getReleases()).releases).toEqual([published, reserved])
+  expect((await getReleases()).releases).toEqual([published, reserved, candidate])
   const store = useReleases()
   await store.load()
-  expect(store.history?.releases).toEqual([published, reserved])
+  expect(store.history?.releases).toEqual([published, reserved, candidate])
   expect(codenameOf(published.version)).toBe('Published Name')
   expect(codenameOf(reserved.version)).toBe('Reserved Name')
   expect(codenameOf(withdrawn.version)).toBe('')
+  expect(codenameOf(candidate.version)).toBe('Candidate Name')
+  vi.mocked(api).mockResolvedValue(new Response(JSON.stringify(candidate)))
+  expect(await getRelease(candidate.version)).toEqual(candidate)
 })
 
 it.each(['published', 'reserved', 'withdrawn'] as const)('detail reads retain published and reserved rows only (%s)', async state => {

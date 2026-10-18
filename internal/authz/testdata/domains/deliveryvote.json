@@ -1,0 +1,9 @@
+{
+  "_license": "SPDX-License-Identifier: AGPL-3.0-only",
+  "routes": {
+    "DELETE /api/harness-sessions/{sessionId}/delivery-rating": "nodes.read",
+    "GET /api/harness-sessions/{sessionId}/delivery-rating": "nodes.read",
+    "GET /api/nodes/{nodeId}/delivery-ratings": "nodes.read",
+    "PUT /api/harness-sessions/{sessionId}/delivery-rating": "nodes.read"
+  }
+}

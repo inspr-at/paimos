@@ -190,13 +190,13 @@ func (w *Worker) claim(ctx context.Context, tenantID string) ([]claimedWake, err
 			FROM inbox_wakes w
 			JOIN inbox_messages m ON m.tenant_id = w.tenant_id AND m.id = w.message_id
 			JOIN inbox_delivery_targets t ON t.tenant_id = w.tenant_id AND t.id = w.target_id
-			WHERE w.delivered_at IS NULL
+			WHERE m.chat_thread_id IS NULL AND w.delivered_at IS NULL
 			  AND w.attempts < $1
 			  AND w.next_attempt_at <= clock_timestamp()
 			  AND t.kind = 'webhook'
 			ORDER BY w.next_attempt_at, w.message_id, w.target_id
 			LIMIT $2
-			FOR UPDATE OF w, t SKIP LOCKED`, w.maxTries, w.batch)
+			FOR NO KEY UPDATE OF w, t SKIP LOCKED`, w.maxTries, w.batch)
 		if err != nil {
 			return err
 		}

@@ -1,0 +1,1448 @@
+{
+  "ticket": "AEON-678",
+  "scope": "Bounded coverage-preserving Go scheduling changes; no runner/workflow infrastructure, deletions, skipped assertions or tier moves.",
+  "baselineCommit": "0a2cccb5210d3e8bf86eca3ea3d2cbc99f70d6b3",
+  "method": "Download recent full first-attempt Go artifacts with gh run download RUN --pattern go-*-tier-measurements; parse JSONL terminal pass events. Rank 4699 observed top-level cases by mean of available observations across two runs; nested cases are not added to parent costs. Artifacts include all seven Go shards and timing lane, all exitCode=0, attempt=1, full=true. This is observed coverage, not an assertion of all-platform catalogue completeness.",
+  "ciRuns": [
+    {
+      "id": "38136617723",
+      "url": "https://github.com/inspr-at/paimos/actions/runs/38136617723",
+      "testedSha": "c30b456c60c269d6c594849cdbd6410ba553c718",
+      "attempt": "1",
+      "measurements": [
+        {
+          "job": "go-test-1",
+          "executionMinutes": 8.534948,
+          "exitCode": 0,
+          "attempt": "1",
+          "full": true,
+          "sha256": "9b1a5d2da32b152283fef22a18c714a5c0f365bd233fc3908218eb5d12f4b924"
+        },
+        {
+          "job": "go-test-2",
+          "executionMinutes": 8.030544,
+          "exitCode": 0,
+          "attempt": "1",
+          "full": true,
+          "sha256": "2e7fd3a536b8c6b34fbc1888e2c5b25716dabe417e359c78eef557d1997608e8"
+        },
+        {
+          "job": "go-test-3",
+          "executionMinutes": 8.535401,
+          "exitCode": 0,
+          "attempt": "1",
+          "full": true,
+          "sha256": "3478daa0522275a76a455e290ba1b91ade1e570e04d943155488e13edbb07b87"
+        },
+        {
+          "job": "go-test-4",
+          "executionMinutes": 7.649351,
+          "exitCode": 0,
+          "attempt": "1",
+          "full": true,
+          "sha256": "a2bf52e8e1a714142c558abef69f06778cb252beec16e3e820e0cc12fddb90ee"
+        },
+        {
+          "job": "go-test-5",
+          "executionMinutes": 9.457278,
+          "exitCode": 0,
+          "attempt": "1",
+          "full": true,
+          "sha256": "0626921fa97a4f20ae50ad1648a54b481af4dc36b0e4ed2d879781901ce149e9"
+        },
+        {
+          "job": "go-test-6",
+          "executionMinutes": 6.433122,
+          "exitCode": 0,
+          "attempt": "1",
+          "full": true,
+          "sha256": "d11a632074999534f1e221592edb68660e69e7997e8e7ac18c08b928a0db3090"
+        },
+        {
+          "job": "go-test-7",
+          "executionMinutes": 9.310578,
+          "exitCode": 0,
+          "attempt": "1",
+          "full": true,
+          "sha256": "98e04248e6432390e29c799b3dd27b3790b34879d1c45e8d7e8875a7cf252d38"
+        },
+        {
+          "job": "go-timing",
+          "executionMinutes": 2.860353,
+          "exitCode": 0,
+          "attempt": "1",
+          "full": true,
+          "sha256": "12ba18c4fdac2055a36f33bc317e072200cf57672f829da9fa7cf2d587dcb965"
+        }
+      ]
+    },
+    {
+      "id": "38136739195",
+      "url": "https://github.com/inspr-at/paimos/actions/runs/38136739195",
+      "testedSha": "e7f3275ffbc0410c3c47d5ed4ecb6f86133a3790",
+      "attempt": "1",
+      "measurements": [
+        {
+          "job": "go-test-1",
+          "executionMinutes": 5.493126,
+          "exitCode": 0,
+          "attempt": "1",
+          "full": true,
+          "sha256": "230be78507d32c8ac155e681ccbf82c460fac915b6c6be5e2f43cff38304bf5f"
+        },
+        {
+          "job": "go-test-2",
+          "executionMinutes": 4.56606,
+          "exitCode": 0,
+          "attempt": "1",
+          "full": true,
+          "sha256": "89364e82e7c4e08a9a54f72f7a5625e7ccaa25733ef338409de24a6de0d5abca"
+        },
+        {
+          "job": "go-test-3",
+          "executionMinutes": 10.196873,
+          "exitCode": 0,
+          "attempt": "1",
+          "full": true,
+          "sha256": "22a2b6cedb0fcc30f3277017d8d38b9000fd20a4e2e1069b39107ee1e4e319a4"
+        },
+        {
+          "job": "go-test-4",
+          "executionMinutes": 9.120936,
+          "exitCode": 0,
+          "attempt": "1",
+          "full": true,
+          "sha256": "4c62d74b58f1a3c614d230db726afd823d09b6d14234ed1a001efd88e15f9f17"
+        },
+        {
+          "job": "go-test-5",
+          "executionMinutes": 6.117366,
+          "exitCode": 0,
+          "attempt": "1",
+          "full": true,
+          "sha256": "7f7a7fd3d9f7a213ae584ee833aac180120537b3cc847ddc06e0c36e4fe00fff"
+        },
+        {
+          "job": "go-test-6",
+          "executionMinutes": 5.532947,
+          "exitCode": 0,
+          "attempt": "1",
+          "full": true,
+          "sha256": "8f2f213b92d4160cd7864acbbcd9671dc05884bad4e24deb30dfbcda4ed3030a"
+        },
+        {
+          "job": "go-test-7",
+          "executionMinutes": 11.039307,
+          "exitCode": 0,
+          "attempt": "1",
+          "full": true,
+          "sha256": "045757c0bf65267f20443d00c5c904cdefdf3538cc9c6b518c667688f82af868"
+        },
+        {
+          "job": "go-timing",
+          "executionMinutes": 2.106803,
+          "exitCode": 0,
+          "attempt": "1",
+          "full": true,
+          "sha256": "724386dcd4198d7a76c088f6ccae8df84a004be9d249a1878999fa216b23b32c"
+        }
+      ]
+    }
+  ],
+  "rankedSlowCases": [
+    {
+      "package": "internal/nodes",
+      "test": "TestList6000PerformanceWithStaleKindStatistics",
+      "tier": "GATED-FULL",
+      "meanSeconds": 41.525,
+      "samples": [
+        {
+          "run": "38136617723",
+          "seconds": 47.86,
+          "artifact": "go-timing-tier-measurements",
+          "file": "go-timing-internal-nodes.jsonl",
+          "sha256": "9387abe639f0979da1d33f665a3ffec8ae03338f9492ee3c2a8384e7e5cb82bd"
+        },
+        {
+          "run": "38136739195",
+          "seconds": 35.19,
+          "artifact": "go-timing-tier-measurements",
+          "file": "go-timing-internal-nodes.jsonl",
+          "sha256": "5bed1fe9dabb4aad441951776a381fe7a53baf5c13baa1fb23e61e80ecb2e8fb"
+        }
+      ],
+      "rank": 1,
+      "decision": "retain existing assertions and tier",
+      "evidenceNote": "Top-level terminal Elapsed from go test -json; includes fixture and cleanup time. Nested subtests are excluded from cost sums."
+    },
+    {
+      "package": "internal/nodes",
+      "test": "TestList6000Performance",
+      "tier": "GATED-FULL",
+      "meanSeconds": 40.94,
+      "samples": [
+        {
+          "run": "38136617723",
+          "seconds": 47.33,
+          "artifact": "go-timing-tier-measurements",
+          "file": "go-timing-internal-nodes.jsonl",
+          "sha256": "9387abe639f0979da1d33f665a3ffec8ae03338f9492ee3c2a8384e7e5cb82bd"
+        },
+        {
+          "run": "38136739195",
+          "seconds": 34.55,
+          "artifact": "go-timing-tier-measurements",
+          "file": "go-timing-internal-nodes.jsonl",
+          "sha256": "5bed1fe9dabb4aad441951776a381fe7a53baf5c13baa1fb23e61e80ecb2e8fb"
+        }
+      ],
+      "rank": 2,
+      "decision": "retain existing assertions and tier",
+      "evidenceNote": "Top-level terminal Elapsed from go test -json; includes fixture and cleanup time. Nested subtests are excluded from cost sums."
+    },
+    {
+      "package": "cmd/aeon-agentd",
+      "test": "TestPairedServeContinuesAfterAttachRegistrationRefusal",
+      "tier": "GATED-FULL",
+      "meanSeconds": 40.12,
+      "samples": [
+        {
+          "run": "38136617723",
+          "seconds": 40.11,
+          "artifact": "go-test-4-tier-measurements",
+          "file": "go-test-4-cmd-aeon-agentd.jsonl",
+          "sha256": "e4ffd578b6ca265ccd907f1ce3d35dcc6a247f6f325cbd3c8818adc9d22a9053"
+        },
+        {
+          "run": "38136739195",
+          "seconds": 40.13,
+          "artifact": "go-test-4-tier-measurements",
+          "file": "go-test-4-cmd-aeon-agentd.jsonl",
+          "sha256": "2287fe7c68f513d91a485457a255437b97dcffa9aba2fb84c0feefd013c72617"
+        }
+      ],
+      "rank": 3,
+      "decision": "retain existing assertions and tier",
+      "evidenceNote": "Top-level terminal Elapsed from go test -json; includes fixture and cleanup time. Nested subtests are excluded from cost sums."
+    },
+    {
+      "package": "internal/nodes",
+      "test": "TestList6000FiltersWithStaleKindStatistics",
+      "tier": "ESSENTIAL",
+      "meanSeconds": 38.07,
+      "samples": [
+        {
+          "run": "38136617723",
+          "seconds": 50.28,
+          "artifact": "go-test-1-tier-measurements",
+          "file": "go-test-1-internal-nodes.jsonl",
+          "sha256": "e726ac9364f1379198950a104d3a31d2ad38e639586a156f795cd9f96690ffa4"
+        },
+        {
+          "run": "38136739195",
+          "seconds": 25.86,
+          "artifact": "go-test-1-tier-measurements",
+          "file": "go-test-1-internal-nodes.jsonl",
+          "sha256": "6d9b696191ad2b51014fc81a9375f47c92e15a3c30a7fc68dcca40ec64121060"
+        }
+      ],
+      "rank": 4,
+      "decision": "retain existing assertions and tier",
+      "evidenceNote": "Top-level terminal Elapsed from go test -json; includes fixture and cleanup time. Nested subtests are excluded from cost sums."
+    },
+    {
+      "package": "internal/nodes",
+      "test": "TestList6000WithProjectVisibility",
+      "tier": "GATED-FULL",
+      "meanSeconds": 37.85,
+      "samples": [
+        {
+          "run": "38136617723",
+          "seconds": 48.52,
+          "artifact": "go-test-1-tier-measurements",
+          "file": "go-test-1-internal-nodes.jsonl",
+          "sha256": "e726ac9364f1379198950a104d3a31d2ad38e639586a156f795cd9f96690ffa4"
+        },
+        {
+          "run": "38136739195",
+          "seconds": 27.18,
+          "artifact": "go-test-1-tier-measurements",
+          "file": "go-test-1-internal-nodes.jsonl",
+          "sha256": "6d9b696191ad2b51014fc81a9375f47c92e15a3c30a7fc68dcca40ec64121060"
+        }
+      ],
+      "rank": 5,
+      "decision": "retain existing assertions and tier",
+      "evidenceNote": "Top-level terminal Elapsed from go test -json; includes fixture and cleanup time. Nested subtests are excluded from cost sums."
+    },
+    {
+      "package": "internal/nodes",
+      "test": "TestListWithoutStatistics",
+      "tier": "ESSENTIAL",
+      "meanSeconds": 34.78,
+      "samples": [
+        {
+          "run": "38136617723",
+          "seconds": 40.36,
+          "artifact": "go-test-2-tier-measurements",
+          "file": "go-test-2-internal-nodes.jsonl",
+          "sha256": "a45a37b5f5581cae8791425ed5c627c8225455175b85ab3ba92f18b8b96b6cfe"
+        },
+        {
+          "run": "38136739195",
+          "seconds": 29.2,
+          "artifact": "go-test-2-tier-measurements",
+          "file": "go-test-2-internal-nodes.jsonl",
+          "sha256": "207efb1b750d69e0eadd9acb8d2f769299cdff0c2b4027dcfeee564ca29b3b57"
+        }
+      ],
+      "rank": 6,
+      "decision": "retain existing assertions and tier",
+      "evidenceNote": "Top-level terminal Elapsed from go test -json; includes fixture and cleanup time. Nested subtests are excluded from cost sums."
+    },
+    {
+      "package": "internal/nodes",
+      "test": "TestList6000FiltersPerformance",
+      "tier": "GATED-FULL",
+      "meanSeconds": 34.615,
+      "samples": [
+        {
+          "run": "38136617723",
+          "seconds": 40.32,
+          "artifact": "go-timing-tier-measurements",
+          "file": "go-timing-internal-nodes.jsonl",
+          "sha256": "9387abe639f0979da1d33f665a3ffec8ae03338f9492ee3c2a8384e7e5cb82bd"
+        },
+        {
+          "run": "38136739195",
+          "seconds": 28.91,
+          "artifact": "go-timing-tier-measurements",
+          "file": "go-timing-internal-nodes.jsonl",
+          "sha256": "5bed1fe9dabb4aad441951776a381fe7a53baf5c13baa1fb23e61e80ecb2e8fb"
+        }
+      ],
+      "rank": 7,
+      "decision": "retain existing assertions and tier",
+      "evidenceNote": "Top-level terminal Elapsed from go test -json; includes fixture and cleanup time. Nested subtests are excluded from cost sums."
+    },
+    {
+      "package": "internal/search",
+      "test": "TestSearch6000WithProjectVisibility",
+      "tier": "GATED-FULL",
+      "meanSeconds": 30.16,
+      "samples": [
+        {
+          "run": "38136617723",
+          "seconds": 40.55,
+          "artifact": "go-test-5-tier-measurements",
+          "file": "go-test-5-internal-search.jsonl",
+          "sha256": "aec13f0b1a7de5bca94f9e4b6bfcf76721bf8b259ddf066c036f1e55f760b07c"
+        },
+        {
+          "run": "38136739195",
+          "seconds": 19.77,
+          "artifact": "go-test-5-tier-measurements",
+          "file": "go-test-5-internal-search.jsonl",
+          "sha256": "52dc78ace06b41758461a177d9620b4dd38fa9554c2fdc4e20763183006cd49a"
+        }
+      ],
+      "rank": 8,
+      "decision": "retain existing assertions and tier",
+      "evidenceNote": "Top-level terminal Elapsed from go test -json; includes fixture and cleanup time. Nested subtests are excluded from cost sums."
+    },
+    {
+      "package": "internal/usagedashboard",
+      "test": "TestCompletionCapSignalsTruncationWithoutSessionsInRange",
+      "tier": "GATED-FULL",
+      "meanSeconds": 30.15,
+      "samples": [
+        {
+          "run": "38136617723",
+          "seconds": 31.67,
+          "artifact": "go-test-3-tier-measurements",
+          "file": "go-test-3-internal-usagedashboard.jsonl",
+          "sha256": "f26bb9006c33ab106a77e7b93099a3030b2a18f1bb0d74f0125807ce463b5b5f"
+        },
+        {
+          "run": "38136739195",
+          "seconds": 28.63,
+          "artifact": "go-test-3-tier-measurements",
+          "file": "go-test-3-internal-usagedashboard.jsonl",
+          "sha256": "cc0296187af399ec63d07670be472331967e041eceb7566b64548c616f5452ca"
+        }
+      ],
+      "rank": 9,
+      "decision": "retain existing assertions and tier",
+      "evidenceNote": "Top-level terminal Elapsed from go test -json; includes fixture and cleanup time. Nested subtests are excluded from cost sums."
+    },
+    {
+      "package": "internal/relations",
+      "test": "TestCycleSearchBudgetFailsClosed",
+      "tier": "GATED-FULL",
+      "meanSeconds": 26.63,
+      "samples": [
+        {
+          "run": "38136617723",
+          "seconds": 27.11,
+          "artifact": "go-test-3-tier-measurements",
+          "file": "go-test-3-internal-relations.jsonl",
+          "sha256": "3ac7a555092765564ff5446dd2c5b5076dca2ffc6fa8e2bb35ebf86d2d1e7d82"
+        },
+        {
+          "run": "38136739195",
+          "seconds": 26.15,
+          "artifact": "go-test-3-tier-measurements",
+          "file": "go-test-3-internal-relations.jsonl",
+          "sha256": "aab7686988a3ebb95131b8dbbe8b6ac40ef1371ed3e84361458f8d97d9dc648a"
+        }
+      ],
+      "rank": 10,
+      "decision": "retain existing assertions and tier",
+      "evidenceNote": "Top-level terminal Elapsed from go test -json; includes fixture and cleanup time. Nested subtests are excluded from cost sums."
+    },
+    {
+      "package": "internal/db",
+      "test": "TestWorkNodesMigrationExactNumbers",
+      "tier": "GATED-FULL",
+      "meanSeconds": 25.77,
+      "samples": [
+        {
+          "run": "38136617723",
+          "seconds": 20.63,
+          "artifact": "go-test-7-tier-measurements",
+          "file": "go-test-7-internal-db.jsonl",
+          "sha256": "42678f82e8d5a138bfd2db6a3fabe9c67c4094e78c091caf65338d7adc34504f"
+        },
+        {
+          "run": "38136739195",
+          "seconds": 30.91,
+          "artifact": "go-test-7-tier-measurements",
+          "file": "go-test-7-internal-db.jsonl",
+          "sha256": "7bede572297febbf2f7458c9cc05129b9367f9cb2f7c7c5f254afb7051e98144"
+        }
+      ],
+      "rank": 11,
+      "decision": "retain existing assertions and tier",
+      "evidenceNote": "Top-level terminal Elapsed from go test -json; includes fixture and cleanup time. Nested subtests are excluded from cost sums."
+    },
+    {
+      "package": "internal/nodes",
+      "test": "TestListAssigneeSortProbesEachUnassignedRowOnce",
+      "tier": "GATED-FULL",
+      "meanSeconds": 22.315,
+      "samples": [
+        {
+          "run": "38136617723",
+          "seconds": 26.48,
+          "artifact": "go-test-2-tier-measurements",
+          "file": "go-test-2-internal-nodes.jsonl",
+          "sha256": "a45a37b5f5581cae8791425ed5c627c8225455175b85ab3ba92f18b8b96b6cfe"
+        },
+        {
+          "run": "38136739195",
+          "seconds": 18.15,
+          "artifact": "go-test-2-tier-measurements",
+          "file": "go-test-2-internal-nodes.jsonl",
+          "sha256": "207efb1b750d69e0eadd9acb8d2f769299cdff0c2b4027dcfeee564ca29b3b57"
+        }
+      ],
+      "rank": 12,
+      "decision": "retain existing assertions and tier",
+      "evidenceNote": "Top-level terminal Elapsed from go test -json; includes fixture and cleanup time. Nested subtests are excluded from cost sums."
+    },
+    {
+      "package": "internal/modelregistry",
+      "test": "TestEditorIdentityChangesBeforeMutationFence",
+      "tier": "GATED-FULL",
+      "meanSeconds": 18.435,
+      "samples": [
+        {
+          "run": "38136617723",
+          "seconds": 19.49,
+          "artifact": "go-test-6-tier-measurements",
+          "file": "go-test-6-internal-modelregistry.jsonl",
+          "sha256": "e81440a9fcde35b91ecc6f2683ac1bfa4b4848649ed34ec91211890f5bdaac9c"
+        },
+        {
+          "run": "38136739195",
+          "seconds": 17.38,
+          "artifact": "go-test-6-tier-measurements",
+          "file": "go-test-6-internal-modelregistry.jsonl",
+          "sha256": "b9df94fcdc14e761373fd6f929c4aea80a56e8104f2e4379c5df74a59d97f9e6"
+        }
+      ],
+      "rank": 13,
+      "decision": "retain existing assertions and tier",
+      "evidenceNote": "Top-level terminal Elapsed from go test -json; includes fixture and cleanup time. Nested subtests are excluded from cost sums."
+    },
+    {
+      "package": "internal/nodes",
+      "test": "TestListEstimateSortBoundedConcurrentMatchesBaseline",
+      "tier": "ESSENTIAL",
+      "meanSeconds": 18.31,
+      "samples": [
+        {
+          "run": "38136617723",
+          "seconds": 24.49,
+          "artifact": "go-test-1-tier-measurements",
+          "file": "go-test-1-internal-nodes.jsonl",
+          "sha256": "e726ac9364f1379198950a104d3a31d2ad38e639586a156f795cd9f96690ffa4"
+        },
+        {
+          "run": "38136739195",
+          "seconds": 12.13,
+          "artifact": "go-test-1-tier-measurements",
+          "file": "go-test-1-internal-nodes.jsonl",
+          "sha256": "6d9b696191ad2b51014fc81a9375f47c92e15a3c30a7fc68dcca40ec64121060"
+        }
+      ],
+      "rank": 14,
+      "decision": "retain existing assertions and tier",
+      "evidenceNote": "Top-level terminal Elapsed from go test -json; includes fixture and cleanup time. Nested subtests are excluded from cost sums."
+    },
+    {
+      "package": "internal/nodes",
+      "test": "TestWorkLifecycleLostContactBlocksOrdinaryWrites",
+      "tier": "GATED-FULL",
+      "meanSeconds": 16.055,
+      "samples": [
+        {
+          "run": "38136617723",
+          "seconds": 19.68,
+          "artifact": "go-test-1-tier-measurements",
+          "file": "go-test-1-internal-nodes.jsonl",
+          "sha256": "e726ac9364f1379198950a104d3a31d2ad38e639586a156f795cd9f96690ffa4"
+        },
+        {
+          "run": "38136739195",
+          "seconds": 12.43,
+          "artifact": "go-test-1-tier-measurements",
+          "file": "go-test-1-internal-nodes.jsonl",
+          "sha256": "6d9b696191ad2b51014fc81a9375f47c92e15a3c30a7fc68dcca40ec64121060"
+        }
+      ],
+      "rank": 15,
+      "decision": "retain existing assertions and tier",
+      "evidenceNote": "Top-level terminal Elapsed from go test -json; includes fixture and cleanup time. Nested subtests are excluded from cost sums."
+    },
+    {
+      "package": "internal/agentpairing",
+      "test": "TestAttachedDaemonAuthorityRecheckedInEveryTransaction",
+      "tier": "ESSENTIAL",
+      "meanSeconds": 15.9,
+      "samples": [
+        {
+          "run": "38136617723",
+          "seconds": 13.47,
+          "artifact": "go-test-3-tier-measurements",
+          "file": "go-test-3-internal-agentpairing.jsonl",
+          "sha256": "76bdf8f87e83d74b669772b25a459f550a3918ddc616759f5ebbce2bb4a03b5c"
+        },
+        {
+          "run": "38136739195",
+          "seconds": 18.33,
+          "artifact": "go-test-3-tier-measurements",
+          "file": "go-test-3-internal-agentpairing.jsonl",
+          "sha256": "5f133acfcd07dec86523f6ef25dcf3c4e6f4460aa735d286befc7541fd5d17ca"
+        }
+      ],
+      "rank": 16,
+      "decision": "retain existing assertions and tier",
+      "evidenceNote": "Top-level terminal Elapsed from go test -json; includes fixture and cleanup time. Nested subtests are excluded from cost sums."
+    },
+    {
+      "package": "internal/events",
+      "test": "TestSSEHeartbeatAndInvalidResume",
+      "tier": "GATED-FULL",
+      "meanSeconds": 15.385,
+      "samples": [
+        {
+          "run": "38136617723",
+          "seconds": 15.44,
+          "artifact": "go-test-6-tier-measurements",
+          "file": "go-test-6-internal-events.jsonl",
+          "sha256": "1de493fc939da000ae569f85d184d31c2c66e77557e962857d7f72292b39a5c7"
+        },
+        {
+          "run": "38136739195",
+          "seconds": 15.33,
+          "artifact": "go-test-6-tier-measurements",
+          "file": "go-test-6-internal-events.jsonl",
+          "sha256": "aa2f0ff1f428defd1d75005ff8b1c1cb7ade67b932092c59d35aa0bc7ff3bfac"
+        }
+      ],
+      "rank": 17,
+      "decision": "retain existing assertions and tier",
+      "evidenceNote": "Top-level terminal Elapsed from go test -json; includes fixture and cleanup time. Nested subtests are excluded from cost sums."
+    },
+    {
+      "package": "internal/events",
+      "test": "TestSSELivePingPreservesResumeAndTenantCounter",
+      "tier": "GATED-FULL",
+      "meanSeconds": 15.335,
+      "samples": [
+        {
+          "run": "38136617723",
+          "seconds": 15.36,
+          "artifact": "go-test-6-tier-measurements",
+          "file": "go-test-6-internal-events.jsonl",
+          "sha256": "1de493fc939da000ae569f85d184d31c2c66e77557e962857d7f72292b39a5c7"
+        },
+        {
+          "run": "38136739195",
+          "seconds": 15.31,
+          "artifact": "go-test-6-tier-measurements",
+          "file": "go-test-6-internal-events.jsonl",
+          "sha256": "aa2f0ff1f428defd1d75005ff8b1c1cb7ade67b932092c59d35aa0bc7ff3bfac"
+        }
+      ],
+      "rank": 18,
+      "decision": "retain existing assertions and tier",
+      "evidenceNote": "Top-level terminal Elapsed from go test -json; includes fixture and cleanup time. Nested subtests are excluded from cost sums."
+    },
+    {
+      "package": "internal/harness",
+      "test": "TestCoordinatorLargeHandover",
+      "tier": "GATED-FULL",
+      "meanSeconds": 14.63,
+      "samples": [
+        {
+          "run": "38136617723",
+          "seconds": 12.89,
+          "artifact": "go-test-4-tier-measurements",
+          "file": "go-test-4-internal-harness.jsonl",
+          "sha256": "dcd110581963f9834ae797b029a03efc1ae15b502bf05f36045bfc9acc8edea3"
+        },
+        {
+          "run": "38136739195",
+          "seconds": 16.37,
+          "artifact": "go-test-4-tier-measurements",
+          "file": "go-test-4-internal-harness.jsonl",
+          "sha256": "d68b42713be25d2d9880d5f9394c2cf6fd2709e8bb57c77f3eb72b97bc07a4e3"
+        }
+      ],
+      "rank": 19,
+      "decision": "parallelize isolated subcases; retain all cases and assertions",
+      "evidenceNote": "Top-level terminal Elapsed from go test -json; includes fixture and cleanup time. Nested subtests are excluded from cost sums."
+    },
+    {
+      "package": "internal/agentaccounts",
+      "test": "TestAdmissionNeverGrantsDuringUnexpiredDenial",
+      "tier": "GATED-FULL",
+      "meanSeconds": 14.01,
+      "samples": [
+        {
+          "run": "38136617723",
+          "seconds": 18.62,
+          "artifact": "go-test-5-tier-measurements",
+          "file": "go-test-5-internal-agentaccounts.jsonl",
+          "sha256": "09afa9759aca02763932daccccafdd5cec4a6fc41d01104975aaae3a9a55c776"
+        },
+        {
+          "run": "38136739195",
+          "seconds": 9.4,
+          "artifact": "go-test-5-tier-measurements",
+          "file": "go-test-5-internal-agentaccounts.jsonl",
+          "sha256": "0c07b479f6cbbd5d7cd239e9a826d83e7e8529f439e232893e876f543b4176ab"
+        }
+      ],
+      "rank": 20,
+      "decision": "retain existing assertions and tier",
+      "evidenceNote": "Top-level terminal Elapsed from go test -json; includes fixture and cleanup time. Nested subtests are excluded from cost sums."
+    },
+    {
+      "package": "internal/agentpairing",
+      "test": "TestAttachModesProtectionMatrix",
+      "tier": "GATED-FULL",
+      "meanSeconds": 13.495,
+      "samples": [
+        {
+          "run": "38136617723",
+          "seconds": 11.35,
+          "artifact": "go-test-3-tier-measurements",
+          "file": "go-test-3-internal-agentpairing.jsonl",
+          "sha256": "76bdf8f87e83d74b669772b25a459f550a3918ddc616759f5ebbce2bb4a03b5c"
+        },
+        {
+          "run": "38136739195",
+          "seconds": 15.64,
+          "artifact": "go-test-3-tier-measurements",
+          "file": "go-test-3-internal-agentpairing.jsonl",
+          "sha256": "5f133acfcd07dec86523f6ef25dcf3c4e6f4460aa735d286befc7541fd5d17ca"
+        }
+      ],
+      "rank": 21,
+      "decision": "retain existing assertions and tier",
+      "evidenceNote": "Top-level terminal Elapsed from go test -json; includes fixture and cleanup time. Nested subtests are excluded from cost sums."
+    },
+    {
+      "package": "internal/nodes",
+      "test": "TestListAssigneeSortStoppedOnlyProbesAtMostOnce",
+      "tier": "GATED-FULL",
+      "meanSeconds": 13.455,
+      "samples": [
+        {
+          "run": "38136617723",
+          "seconds": 16.96,
+          "artifact": "go-test-2-tier-measurements",
+          "file": "go-test-2-internal-nodes.jsonl",
+          "sha256": "a45a37b5f5581cae8791425ed5c627c8225455175b85ab3ba92f18b8b96b6cfe"
+        },
+        {
+          "run": "38136739195",
+          "seconds": 9.95,
+          "artifact": "go-test-2-tier-measurements",
+          "file": "go-test-2-internal-nodes.jsonl",
+          "sha256": "207efb1b750d69e0eadd9acb8d2f769299cdff0c2b4027dcfeee564ca29b3b57"
+        }
+      ],
+      "rank": 22,
+      "decision": "retain existing assertions and tier",
+      "evidenceNote": "Top-level terminal Elapsed from go test -json; includes fixture and cleanup time. Nested subtests are excluded from cost sums."
+    },
+    {
+      "package": "internal/knowledge",
+      "test": "TestGraphCaps",
+      "tier": "ESSENTIAL",
+      "meanSeconds": 12.63,
+      "samples": [
+        {
+          "run": "38136617723",
+          "seconds": 5.66,
+          "artifact": "go-test-7-tier-measurements",
+          "file": "go-test-7-internal-knowledge.jsonl",
+          "sha256": "199b1130feffd9ed54e0f65ed1734dc8a56a2fc3ccb1cdbb9e1d0829db1fdf63"
+        },
+        {
+          "run": "38136739195",
+          "seconds": 19.6,
+          "artifact": "go-test-7-tier-measurements",
+          "file": "go-test-7-internal-knowledge.jsonl",
+          "sha256": "a283e45ff9ff6f8f89d4909c4fecf113cf881d951389b30c5fbf522cd3bc3385"
+        }
+      ],
+      "rank": 23,
+      "decision": "retain existing assertions and tier",
+      "evidenceNote": "Top-level terminal Elapsed from go test -json; includes fixture and cleanup time. Nested subtests are excluded from cost sums."
+    },
+    {
+      "package": "internal/db",
+      "test": "TestWorkNodesMigrationBusyGuardAndAtomicRetry",
+      "tier": "GATED-FULL",
+      "meanSeconds": 12.115,
+      "samples": [
+        {
+          "run": "38136617723",
+          "seconds": 10.9,
+          "artifact": "go-test-7-tier-measurements",
+          "file": "go-test-7-internal-db.jsonl",
+          "sha256": "42678f82e8d5a138bfd2db6a3fabe9c67c4094e78c091caf65338d7adc34504f"
+        },
+        {
+          "run": "38136739195",
+          "seconds": 13.33,
+          "artifact": "go-test-7-tier-measurements",
+          "file": "go-test-7-internal-db.jsonl",
+          "sha256": "7bede572297febbf2f7458c9cc05129b9367f9cb2f7c7c5f254afb7051e98144"
+        }
+      ],
+      "rank": 24,
+      "decision": "retain existing assertions and tier",
+      "evidenceNote": "Top-level terminal Elapsed from go test -json; includes fixture and cleanup time. Nested subtests are excluded from cost sums."
+    },
+    {
+      "package": "internal/nodes",
+      "test": "TestTicketBenefitsCausalUndoCompletion",
+      "tier": "GATED-FULL",
+      "meanSeconds": 11.63,
+      "samples": [
+        {
+          "run": "38136617723",
+          "seconds": 14.36,
+          "artifact": "go-test-1-tier-measurements",
+          "file": "go-test-1-internal-nodes.jsonl",
+          "sha256": "e726ac9364f1379198950a104d3a31d2ad38e639586a156f795cd9f96690ffa4"
+        },
+        {
+          "run": "38136739195",
+          "seconds": 8.9,
+          "artifact": "go-test-1-tier-measurements",
+          "file": "go-test-1-internal-nodes.jsonl",
+          "sha256": "6d9b696191ad2b51014fc81a9375f47c92e15a3c30a7fc68dcca40ec64121060"
+        }
+      ],
+      "rank": 25,
+      "decision": "retain existing assertions and tier",
+      "evidenceNote": "Top-level terminal Elapsed from go test -json; includes fixture and cleanup time. Nested subtests are excluded from cost sums."
+    },
+    {
+      "package": "internal/activity",
+      "test": "TestTimelineAtImportScale",
+      "tier": "GATED-FULL",
+      "meanSeconds": 10.705,
+      "samples": [
+        {
+          "run": "38136617723",
+          "seconds": 10.74,
+          "artifact": "go-test-3-tier-measurements",
+          "file": "go-test-3-internal-activity.jsonl",
+          "sha256": "2242e4010721bdbea22e7d367b4dd9a5694f211e995efee365a43d0595fee571"
+        },
+        {
+          "run": "38136739195",
+          "seconds": 10.67,
+          "artifact": "go-test-3-tier-measurements",
+          "file": "go-test-3-internal-activity.jsonl",
+          "sha256": "b02555ddbf1101644ffd94638bc2c6ba58a0115d0a44b9e43b189ffb816bc3d0"
+        }
+      ],
+      "rank": 26,
+      "decision": "retain existing assertions and tier",
+      "evidenceNote": "Top-level terminal Elapsed from go test -json; includes fixture and cleanup time. Nested subtests are excluded from cost sums."
+    },
+    {
+      "package": "internal/agentpairing",
+      "test": "TestAttachedSessionValidityLockedThroughCommit",
+      "tier": "GATED-FULL",
+      "meanSeconds": 10.25,
+      "samples": [
+        {
+          "run": "38136617723",
+          "seconds": 8.7,
+          "artifact": "go-test-3-tier-measurements",
+          "file": "go-test-3-internal-agentpairing.jsonl",
+          "sha256": "76bdf8f87e83d74b669772b25a459f550a3918ddc616759f5ebbce2bb4a03b5c"
+        },
+        {
+          "run": "38136739195",
+          "seconds": 11.8,
+          "artifact": "go-test-3-tier-measurements",
+          "file": "go-test-3-internal-agentpairing.jsonl",
+          "sha256": "5f133acfcd07dec86523f6ef25dcf3c4e6f4460aa735d286befc7541fd5d17ca"
+        }
+      ],
+      "rank": 27,
+      "decision": "retain existing assertions and tier",
+      "evidenceNote": "Top-level terminal Elapsed from go test -json; includes fixture and cleanup time. Nested subtests are excluded from cost sums."
+    },
+    {
+      "package": "internal/modelregistry",
+      "test": "TestEditorIdentityChangeWaitsBehindFencedMutation",
+      "tier": "GATED-FULL",
+      "meanSeconds": 10.015,
+      "samples": [
+        {
+          "run": "38136617723",
+          "seconds": 10.77,
+          "artifact": "go-test-6-tier-measurements",
+          "file": "go-test-6-internal-modelregistry.jsonl",
+          "sha256": "e81440a9fcde35b91ecc6f2683ac1bfa4b4848649ed34ec91211890f5bdaac9c"
+        },
+        {
+          "run": "38136739195",
+          "seconds": 9.26,
+          "artifact": "go-test-6-tier-measurements",
+          "file": "go-test-6-internal-modelregistry.jsonl",
+          "sha256": "b9df94fcdc14e761373fd6f929c4aea80a56e8104f2e4379c5df74a59d97f9e6"
+        }
+      ],
+      "rank": 28,
+      "decision": "retain existing assertions and tier",
+      "evidenceNote": "Top-level terminal Elapsed from go test -json; includes fixture and cleanup time. Nested subtests are excluded from cost sums."
+    },
+    {
+      "package": "internal/modelregistry",
+      "test": "TestInvalidInitializerStructureDoesNotPrepareCatalog",
+      "tier": "GATED-FULL",
+      "meanSeconds": 9.755,
+      "samples": [
+        {
+          "run": "38136617723",
+          "seconds": 10.78,
+          "artifact": "go-test-6-tier-measurements",
+          "file": "go-test-6-internal-modelregistry.jsonl",
+          "sha256": "e81440a9fcde35b91ecc6f2683ac1bfa4b4848649ed34ec91211890f5bdaac9c"
+        },
+        {
+          "run": "38136739195",
+          "seconds": 8.73,
+          "artifact": "go-test-6-tier-measurements",
+          "file": "go-test-6-internal-modelregistry.jsonl",
+          "sha256": "b9df94fcdc14e761373fd6f929c4aea80a56e8104f2e4379c5df74a59d97f9e6"
+        }
+      ],
+      "rank": 29,
+      "decision": "retain existing assertions and tier",
+      "evidenceNote": "Top-level terminal Elapsed from go test -json; includes fixture and cleanup time. Nested subtests are excluded from cost sums."
+    },
+    {
+      "package": "cmd/aeon",
+      "test": "TestProjectAccessOverHTTP",
+      "tier": "GATED-FULL",
+      "meanSeconds": 9.58,
+      "samples": [
+        {
+          "run": "38136617723",
+          "seconds": 9.29,
+          "artifact": "go-test-3-tier-measurements",
+          "file": "go-test-3-cmd-aeon.jsonl",
+          "sha256": "e8e050185ac60d628c9a18bd35c9424b28e0bfa327036cf4073d5e74da3b42da"
+        },
+        {
+          "run": "38136739195",
+          "seconds": 9.87,
+          "artifact": "go-test-3-tier-measurements",
+          "file": "go-test-3-cmd-aeon.jsonl",
+          "sha256": "bc0bf97b5e7015b099fa630b2f3485eacfeb59db3ed51e0b19dc24c34855c2a4"
+        }
+      ],
+      "rank": 30,
+      "decision": "retain existing assertions and tier",
+      "evidenceNote": "Top-level terminal Elapsed from go test -json; includes fixture and cleanup time. Nested subtests are excluded from cost sums."
+    }
+  ],
+  "implementedChanges": [
+    {
+      "test": "internal/harness:TestCoordinatorLargeHandover",
+      "file": "internal/harness/large_handover_test.go",
+      "change": "t.Parallel at the start of each isolated subcase, bounded by the existing Go test parallel setting (2 in the tier runner)",
+      "retainedReplacement": "the same named test, every existing subcase, handler call and assertion at GATED-FULL",
+      "subcases": 6,
+      "risk": "R3/R5/R7: bounded coordinator succession, atomic adoption, idempotent replay, retained ended history and one adoption audit per child; registration/resume at 64/128, 1000 and 1001 children",
+      "ciMeanSeconds": 14.63,
+      "samples": [
+        {
+          "run": "38136617723",
+          "seconds": 12.89,
+          "artifact": "go-test-4-tier-measurements",
+          "file": "go-test-4-internal-harness.jsonl",
+          "sha256": "dcd110581963f9834ae797b029a03efc1ae15b502bf05f36045bfc9acc8edea3"
+        },
+        {
+          "run": "38136739195",
+          "seconds": 16.37,
+          "artifact": "go-test-4-tier-measurements",
+          "file": "go-test-4-internal-harness.jsonl",
+          "sha256": "d68b42713be25d2d9880d5f9394c2cf6fd2709e8bb57c77f3eb72b97bc07a4e3"
+        }
+      ],
+      "isolationEvidence": "fixtureWithKind allocates dbtest.Open(t), a fresh mux, random tenants/principals and per-subcase cleanup. No parent-owned fixture, environment changes, process globals or outbound servers. Parent remains serial, so its parallel children finish before other top-level tests touch shared test knobs."
+    },
+    {
+      "test": "internal/harness:TestCoordinatorHandover",
+      "file": "internal/harness/handover_test.go",
+      "change": "t.Parallel at the start of each isolated subcase, bounded by the existing Go test parallel setting (2 in the tier runner)",
+      "retainedReplacement": "the same named ESSENTIAL test, every existing subcase, handler call and assertion",
+      "subcases": 7,
+      "risk": "R3/R4/R7: stopped/lost/explicit succession, live ownership refusal, cross-principal isolation, cycle rollback, concurrent replay and retained ended children",
+      "ciMeanSeconds": 4.15,
+      "samples": [
+        {
+          "run": "38136617723",
+          "seconds": 3.86,
+          "artifact": "go-test-4-tier-measurements",
+          "file": "go-test-4-internal-harness.jsonl",
+          "sha256": "dcd110581963f9834ae797b029a03efc1ae15b502bf05f36045bfc9acc8edea3"
+        },
+        {
+          "run": "38136739195",
+          "seconds": 4.44,
+          "artifact": "go-test-4-tier-measurements",
+          "file": "go-test-4-internal-harness.jsonl",
+          "sha256": "d68b42713be25d2d9880d5f9394c2cf6fd2709e8bb57c77f3eb72b97bc07a4e3"
+        }
+      ],
+      "isolationEvidence": "fixtureWithKind allocates dbtest.Open(t), a fresh mux, random tenants/principals and per-subcase cleanup. No parent-owned fixture, environment changes, process globals or outbound servers. Parent remains serial, so its parallel children finish before other top-level tests touch shared test knobs."
+    }
+  ],
+  "redundancyReview": [
+    {
+      "rank": 1,
+      "cases": [
+        "internal/nodes:TestList6000Performance",
+        "internal/nodes:TestList6000PerformanceWithStaleKindStatistics"
+      ],
+      "finding": "Shared 6000-row helper repeats baseline API assertions, but stale node_kinds statistics plus the subtree plan bound protect an additional real regression. They also run in the dedicated timing lane. No deletion/consolidation/tier move.",
+      "retainedReplacement": "both existing named tests at GATED-FULL"
+    },
+    {
+      "rank": 2,
+      "cases": [
+        "internal/nodes:TestList6000FiltersPerformance",
+        "internal/nodes:TestList6000FiltersWithStaleKindStatistics"
+      ],
+      "finding": "Same filtered seed and common HTTP assertions; stale-statistics case also bounds node visits and remains ESSENTIAL while the ordinary performance case is GATED-FULL in timing. Do not merge their tier identities or share a database across processes.",
+      "retainedReplacement": "both existing named tests at their existing tiers"
+    },
+    {
+      "rank": 3,
+      "cases": [
+        "internal/events:TestSSEHeartbeatAndInvalidResume",
+        "internal/events:TestSSELivePingPreservesResumeAndTenantCounter"
+      ],
+      "finding": "Similar roughly 15-second waits do not establish duplicate coverage: invalid resume and live ping/counter preservation are distinct. Clock injection is a separate production change, outside this test-only reduction.",
+      "retainedReplacement": "both existing named tests at GATED-FULL"
+    },
+    {
+      "rank": 4,
+      "cases": [
+        "internal/harness:TestCoordinatorLargeHandover",
+        "internal/harness:TestCoordinatorHandover"
+      ],
+      "finding": "Large handover repeats lifecycle setup while ordinary handover tests authority, cycle and replay paths. Threshold/bounds coverage and authorization paths are distinct. Parallelize independent fixtures instead of deleting cases.",
+      "retainedReplacement": "TestCoordinatorHandover at ESSENTIAL and TestCoordinatorLargeHandover at GATED-FULL, with all 13 subcases"
+    }
+  ],
+  "excludedParallelization": [
+    {
+      "packages": [
+        "internal/nodes",
+        "internal/agentaccounts"
+      ],
+      "reason": "Package-global pools plus reset(TRUNCATE tenants CASCADE); parallel cases would delete each other's fixtures."
+    },
+    {
+      "package": "cmd/aeon-agentd",
+      "test": "TestPairedServeContinuesAfterAttachRegistrationRefusal",
+      "reason": "Mutates http.DefaultTransport and slog.Default; protects attach refusal, authenticated local control and polling after restart. Four refusal cases and two generations remain serial."
+    }
+  ],
+  "archive": {
+    "branch": "archive/test-reset-2026-10-04",
+    "sha": "e38ffa596c55b05b53e2d3c4b93115f9e5c09bab",
+    "retainAtLeastUntil": "2026-12-03T13:28:02Z",
+    "action": "existing archive left untouched; no new deletions"
+  },
+  "measurement": {
+    "command": "remote-test.sh WORKTREE -parallel 2 -json -count=1 -run TestCoordinator.*Handover ./internal/harness",
+    "runner": "mbp2606, approved remote-test lane; GOMAXPROCS=8, package build cap=6, test parallel cap=2. Same runner/flags/database bootstrap on both commits.",
+    "beforeCommit": "0a2cccb5210d3e8bf86eca3ea3d2cbc99f70d6b3",
+    "afterCommit": "18ad212f8b7c6ce9c4ea7e8e393c6b2cc3561ec2",
+    "before": {
+      "file": "before-remote-retry.jsonl",
+      "sha256": "0283bc843222bb8277b57d34078ed0294cd462d28f7571a1ed7e6b89cc1b7b99",
+      "packageElapsedSeconds": 13.539,
+      "matrixWallSeconds": {
+        "TestCoordinatorHandover": 4.846906,
+        "TestCoordinatorLargeHandover": 7.944078
+      },
+      "passedSubcases": [
+        "TestCoordinatorHandover/concurrent",
+        "TestCoordinatorHandover/cycle",
+        "TestCoordinatorHandover/different-principal",
+        "TestCoordinatorHandover/explicit",
+        "TestCoordinatorHandover/healthy",
+        "TestCoordinatorHandover/lost",
+        "TestCoordinatorHandover/stopped",
+        "TestCoordinatorLargeHandover/registration/1000",
+        "TestCoordinatorLargeHandover/registration/1001",
+        "TestCoordinatorLargeHandover/registration/64",
+        "TestCoordinatorLargeHandover/resume/1000",
+        "TestCoordinatorLargeHandover/resume/1001",
+        "TestCoordinatorLargeHandover/resume/128"
+      ],
+      "failedEvents": 0,
+      "skippedEvents": 0
+    },
+    "after": {
+      "file": "after-remote.jsonl",
+      "sha256": "d8d2b3f438eccf16250bcb5366c10326a59a0a459a2cc086d0de98afccd95621",
+      "packageElapsedSeconds": 10.411,
+      "matrixWallSeconds": {
+        "TestCoordinatorHandover": 3.823116,
+        "TestCoordinatorLargeHandover": 6.026836
+      },
+      "passedSubcases": [
+        "TestCoordinatorHandover/concurrent",
+        "TestCoordinatorHandover/cycle",
+        "TestCoordinatorHandover/different-principal",
+        "TestCoordinatorHandover/explicit",
+        "TestCoordinatorHandover/healthy",
+        "TestCoordinatorHandover/lost",
+        "TestCoordinatorHandover/stopped",
+        "TestCoordinatorLargeHandover/registration/1000",
+        "TestCoordinatorLargeHandover/registration/1001",
+        "TestCoordinatorLargeHandover/registration/64",
+        "TestCoordinatorLargeHandover/resume/1000",
+        "TestCoordinatorLargeHandover/resume/1001",
+        "TestCoordinatorLargeHandover/resume/128"
+      ],
+      "failedEvents": 0,
+      "skippedEvents": 0
+    },
+    "savedSeconds": 3.128,
+    "savedMinutes": 0.052133,
+    "percentReduction": 23.1,
+    "firstAttemptGreen": "Both actual targeted baseline and candidate executions returned exit 0, passed all identical 13 subcases, and reported no skips or failures. Earlier runner refusals and a command-quoting setup failure did not execute tests. This is the first-attempt evidence for the changed tests; broader validation setup failures and their successful retries are recorded separately.",
+    "limits": "One before/after pair in the remote test lane. Package elapsed excludes Go compilation/listing/workflow setup. This is not a measured CI end-to-end improvement; noise/load and Postgres/runner versions limit extrapolation. Parallel parent terminal Elapsed excludes child wait, so compare parent run-to-pass timestamps and package elapsed instead.",
+    "criticalPathLimit": "Both historical full runs had a different slowest Go shard (5 and 7). Reducing shard 4 alone is expected to save runner cost, not the full Go critical path in those snapshots. No end-to-end pipeline speedup is claimed."
+  },
+  "releaseGate": {
+    "crossFamilyReview": "coordinator-owned; not run by worker",
+    "sevenDayFollowUpOwner": "AEON coordinator (aeon-lead-claude)",
+    "sevenDayCheck": "Seven days after merge, compare equivalent hosted shard-4 full first attempts and failures; confirm all 13 handover subcases still execute and revert the scheduling change if it regresses reliability."
+  },
+  "minutesSavedPerShard": [
+    {
+      "job": "go-test-1",
+      "historicalMeanExecutionMinutes": 7.014037,
+      "estimatedSavedMinutes": 0,
+      "basis": "Apply observed package delta only to shard 4, which owned both tests in both full evidence runs. Other shards have no changed tests. Estimate only; coordinator must measure equivalent CI after merge."
+    },
+    {
+      "job": "go-test-2",
+      "historicalMeanExecutionMinutes": 6.298302,
+      "estimatedSavedMinutes": 0,
+      "basis": "Apply observed package delta only to shard 4, which owned both tests in both full evidence runs. Other shards have no changed tests. Estimate only; coordinator must measure equivalent CI after merge."
+    },
+    {
+      "job": "go-test-3",
+      "historicalMeanExecutionMinutes": 9.366137,
+      "estimatedSavedMinutes": 0,
+      "basis": "Apply observed package delta only to shard 4, which owned both tests in both full evidence runs. Other shards have no changed tests. Estimate only; coordinator must measure equivalent CI after merge."
+    },
+    {
+      "job": "go-test-4",
+      "historicalMeanExecutionMinutes": 8.385143,
+      "estimatedSavedMinutes": 0.052133,
+      "basis": "Apply observed package delta only to shard 4, which owned both tests in both full evidence runs. Other shards have no changed tests. Estimate only; coordinator must measure equivalent CI after merge."
+    },
+    {
+      "job": "go-test-5",
+      "historicalMeanExecutionMinutes": 7.787322,
+      "estimatedSavedMinutes": 0,
+      "basis": "Apply observed package delta only to shard 4, which owned both tests in both full evidence runs. Other shards have no changed tests. Estimate only; coordinator must measure equivalent CI after merge."
+    },
+    {
+      "job": "go-test-6",
+      "historicalMeanExecutionMinutes": 5.983035,
+      "estimatedSavedMinutes": 0,
+      "basis": "Apply observed package delta only to shard 4, which owned both tests in both full evidence runs. Other shards have no changed tests. Estimate only; coordinator must measure equivalent CI after merge."
+    },
+    {
+      "job": "go-test-7",
+      "historicalMeanExecutionMinutes": 10.174943,
+      "estimatedSavedMinutes": 0,
+      "basis": "Apply observed package delta only to shard 4, which owned both tests in both full evidence runs. Other shards have no changed tests. Estimate only; coordinator must measure equivalent CI after merge."
+    },
+    {
+      "job": "go-timing",
+      "estimatedSavedMinutes": 0,
+      "basis": "No timing-lane tests changed."
+    }
+  ],
+  "validation": {
+    "passed": "identical 13-subcase remote before/after execution and first-attempt-green equality",
+    "pending": [],
+    "raceShuffle": {
+      "command": "remote-test.sh WORKTREE -parallel 2 -race -shuffle=on -json -count=3 -run TestCoordinator.*Handover ./internal/harness",
+      "exitCode": 0,
+      "passedSubcases": 13,
+      "repetitionsEach": 3,
+      "failedEvents": 0,
+      "skippedEvents": 0,
+      "logSha256": "548c39fb27605fa81120d8bf2857e50f4c61f6c9e597bc5c0674d6d04b98368b"
+    },
+    "ciStaticFirstAttempt": {
+      "command": "ci-static-remote.sh (node scripts/ci-static.mjs --merge-main)",
+      "exitCode": 1,
+      "passedChecks": 39,
+      "timeouts": [
+        "go-tiers (180s)",
+        "web-tiers (120s)",
+        "web-classification (120s)"
+      ],
+      "skippedChecks": 0,
+      "elapsedSeconds": 254.08,
+      "logSha256": "a4fcfdb449d645c5d97188b639a7fffdae7eb4670174acf9e6b1bbe4f5271f66",
+      "status": "historical timeout failure, resolved by full retry with all 42 checks passing"
+    },
+    "fullHarnessFirstAttempt": {
+      "exitCode": 1,
+      "passedTopLevelTests": 273,
+      "failedTests": [
+        "TestAgentRecoveryOpenAPIContractsAgree"
+      ],
+      "reason": "Remote helper does not generate ignored api/openapi.yaml in a fresh HEAD checkout. Generated it in the assigned temporary worktree; subsequent contract tests passed. Full rerun prepares this prerequisite at startup.",
+      "packageElapsedSeconds": 368.781,
+      "logSha256": "5197df243c754cc69c7cf1fdc09a81b8b9f9bf8cd0f206f28f4dd5387a965ff6"
+    },
+    "fullHarnessLatePreparation": {
+      "exitCode": 1,
+      "packageElapsedSeconds": 208.252,
+      "reason": "Manual contract generation landed after the early contract test had already run. All 273 other top-level tests passed. Final setup generates immediately on the guarded runner checkout-ready signal.",
+      "logSha256": "63f15688be26a6fc2b927678e6579e91ce92ef2f61d9654f8050809264f6a3a0"
+    },
+    "fullHarness": {
+      "command": "remote-test.sh WORKTREE -parallel 2 -json -count=1 ./internal/harness (generate api/openapi.yaml immediately when assigned checkout is ready)",
+      "exitCode": 0,
+      "passedTopLevelTests": 274,
+      "skippedTests": [],
+      "failedEvents": 0,
+      "packageElapsedSeconds": 247.479,
+      "logSha256": "6fafd2d794290d44b5fcd7f9ec39c272b9f9e47b3cf1ffba12e1d0962b00d9f7"
+    },
+    "ciStatic": {
+      "command": "ci-static-remote.sh (node scripts/ci-static.mjs --merge-main)",
+      "exitCode": 0,
+      "passedChecks": 42,
+      "skippedChecks": 0,
+      "elapsedSeconds": 126.84,
+      "checks": [
+        "volatile-identity",
+        "public-names",
+        "go-vet",
+        "rules-bootstrap",
+        "test-tiers",
+        "go-tiers",
+        "go-shards-7",
+        "go-shards-4",
+        "release-metadata",
+        "release-rehearsal-tests",
+        "own-release-notes-tests",
+        "own-release-notes",
+        "release-tool-tests",
+        "live-policy-tests",
+        "cross-family-tests",
+        "release-pin-tests",
+        "audit-tests",
+        "audit-coverage",
+        "tracked-bytecode",
+        "ci-plan-tests",
+        "full-ui-qa-tests",
+        "releaseworkflow-tests",
+        "runner-route-tests",
+        "runner-guard-tests",
+        "runner-guard",
+        "docker-web-inputs",
+        "web-typecheck",
+        "web-lint",
+        "migration-tests",
+        "migrations",
+        "migration-splitter",
+        "migration-probe-tests",
+        "web-shard-spec-tests",
+        "web-shard-tests",
+        "openapi-properties",
+        "web-tiers",
+        "web-spec-inventory",
+        "web-browser-safety",
+        "openapi-sort",
+        "theme-colour-literals",
+        "apt-step-bounds",
+        "web-classification"
+      ],
+      "logSha256": "29407b05e02361efad4ac1a1aa0562c4f3d7e492b942a2b5304ba8eab103d76d"
+    }
+  },
+  "rankedOwnerLaunches": [
+    {
+      "package": "internal/agentpairing",
+      "job": "go-test-3",
+      "meanSeconds": 252.337,
+      "samples": [
+        {
+          "run": "38136617723",
+          "seconds": 216.424
+        },
+        {
+          "run": "38136739195",
+          "seconds": 288.251
+        }
+      ]
+    },
+    {
+      "package": "internal/nodes",
+      "job": "go-test-1",
+      "meanSeconds": 218.886,
+      "samples": [
+        {
+          "run": "38136617723",
+          "seconds": 277.199
+        },
+        {
+          "run": "38136739195",
+          "seconds": 160.572
+        }
+      ]
+    },
+    {
+      "package": "internal/harness",
+      "job": "go-test-4",
+      "meanSeconds": 214.202,
+      "samples": [
+        {
+          "run": "38136617723",
+          "seconds": 195.325
+        },
+        {
+          "run": "38136739195",
+          "seconds": 233.079
+        }
+      ]
+    },
+    {
+      "package": "internal/agentaccounts",
+      "job": "go-test-5",
+      "meanSeconds": 188.305,
+      "samples": [
+        {
+          "run": "38136617723",
+          "seconds": 231.603
+        },
+        {
+          "run": "38136739195",
+          "seconds": 145.008
+        }
+      ]
+    },
+    {
+      "package": "internal/db",
+      "job": "go-test-7",
+      "meanSeconds": 179.656,
+      "samples": [
+        {
+          "run": "38136617723",
+          "seconds": 158.108
+        },
+        {
+          "run": "38136739195",
+          "seconds": 201.204
+        }
+      ]
+    },
+    {
+      "package": "internal/nodes",
+      "job": "go-test-2",
+      "meanSeconds": 150.006,
+      "samples": [
+        {
+          "run": "38136617723",
+          "seconds": 179.29
+        },
+        {
+          "run": "38136739195",
+          "seconds": 120.723
+        }
+      ]
+    },
+    {
+      "package": "internal/agentruns",
+      "job": "go-test-7",
+      "meanSeconds": 146.966,
+      "samples": [
+        {
+          "run": "38136617723",
+          "seconds": 136.489
+        },
+        {
+          "run": "38136739195",
+          "seconds": 157.444
+        }
+      ]
+    },
+    {
+      "package": "internal/modelregistry",
+      "job": "go-test-6",
+      "meanSeconds": 144.416,
+      "samples": [
+        {
+          "run": "38136617723",
+          "seconds": 156.87
+        },
+        {
+          "run": "38136739195",
+          "seconds": 131.963
+        }
+      ]
+    },
+    {
+      "package": "internal/nodes",
+      "job": "go-timing",
+      "meanSeconds": 124.761,
+      "samples": [
+        {
+          "run": "38136617723",
+          "seconds": 144.16
+        },
+        {
+          "run": "38136739195",
+          "seconds": 105.362
+        }
+      ]
+    },
+    {
+      "package": "internal/auth",
+      "job": "go-test-5",
+      "meanSeconds": 92.043,
+      "samples": [
+        {
+          "run": "38136617723",
+          "seconds": 109.494
+        },
+        {
+          "run": "38136739195",
+          "seconds": 74.592
+        }
+      ]
+    },
+    {
+      "package": "internal/crossreview",
+      "job": "go-test-4",
+      "meanSeconds": 89.679,
+      "samples": [
+        {
+          "run": "38136617723",
+          "seconds": 79.577
+        },
+        {
+          "run": "38136739195",
+          "seconds": 99.781
+        }
+      ]
+    },
+    {
+      "package": "internal/statusautopilot",
+      "job": "go-test-2",
+      "meanSeconds": 65.278,
+      "samples": [
+        {
+          "run": "38136617723",
+          "seconds": 84.327
+        },
+        {
+          "run": "38136739195",
+          "seconds": 46.23
+        }
+      ]
+    }
+  ],
+  "catalogue": {
+    "manifest": "scripts/ci/go-test-tiers.json",
+    "action": "unchanged; no new/renamed/removed tests or tier moves, so no manifest rewrite",
+    "coverageProof": "before/after JSONL pass identities are identical for all 13 selected subcases; code diff only adds comments and two t.Parallel calls",
+    "parallelismCap": "existing tier runner fixes GOMAXPROCS=2; no Go runner or workflow changes"
+  },
+  "reproduce": [
+    "gh run download 38136617723 --pattern go-*-tier-measurements --dir tmp/aeon-678/ci-38136617723",
+    "gh run download 38136739195 --pattern go-*-tier-measurements --dir tmp/aeon-678/ci-38136739195",
+    "node api/generate.mjs --write",
+    "GOMAXPROCS=2 go test -p 2 -parallel 2 -count=1 -json -run '^TestCoordinator.*Handover$' ./internal/harness",
+    "GOMAXPROCS=2 go test -p 2 -parallel 2 -race -shuffle=on -count=3 -run '^TestCoordinator.*Handover$' ./internal/harness",
+    "node scripts/ci-static.mjs --merge-main"
+  ],
+  "reproduceNote": "Use the designated remote runner or the guarded local-heavy slot and an authorized test database. Quote shell patterns when invoking directly. Capture JSONL without exposing fixture values; compare parent run/pass timestamps or package elapsed after parallelization.",
+  "handoff": {
+    "originPush": false,
+    "deployment": false,
+    "review": "Normal cross-family PR review remains coordinator-owned; worker ran no model review.",
+    "sourceFilesChanged": [
+      "internal/harness/handover_test.go",
+      "internal/harness/large_handover_test.go"
+    ],
+    "sharedFilesChanged": [],
+    "newTests": 0,
+    "deletedTests": 0,
+    "tierMoves": 0
+  }
+}

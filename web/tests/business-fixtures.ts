@@ -25,7 +25,8 @@ const local = (day: string, time = '00:00') => new Date(`${day}T${time}:00+02:00
 export const WEEK38 = { starts_at: local('2026-09-14'), ends_at: local('2026-09-21') }
 export const WEEK39 = { starts_at: local('2026-09-21'), ends_at: local('2026-09-28') }
 
-export interface BusinessMockOptions { role?: 'admin' | 'member'; enabled?: string[]; approveConflict?: boolean; noDirectory?: boolean }
+// grant: a custom role, the role's permissions plus these.
+export interface BusinessMockOptions { role?: 'admin' | 'member'; grant?: string[]; enabled?: string[]; approveConflict?: boolean; noDirectory?: boolean }
 type Rate = { id: string; cost_unit_node_id: string; unit: string; currency: string; internal_amount: string; bill_amount: string; effective_from: string; effective_until: string | null; created_by_principal_id: string; created_at: string }
 type Period = { id: string; principal_id: string; starts_at: string; ends_at: string; state: 'open' | 'approved'; revision: number; approval: { approved_by_principal_id: string; entries_sha256: string; total_seconds: number; event_id: number } | null }
 type Entry = { id: string; period_id: string; principal_id: string; node_id: string; cost_unit_node_id: string; source: string; agent_run_id: string | null; started_at: string; ended_at: string; duration_seconds: number; rate_amount: string; currency: string; amount: string; note: string; updated_at: string }
@@ -99,6 +100,19 @@ export function businessData(options: BusinessMockOptions = {}) {
   return { plugins, units, rates, periods, entries, principals, kinds, meanwhile, events, counter: { next: 1 } }
 }
 export type BusinessData = ReturnType<typeof businessData>
+
+// Preserve the recent fixtures while adding an open period outside the server's
+// default one-year window, with entries that actually belong to that period.
+export function addHistoricalPeriod(data: BusinessData) {
+  const period = { ...data.periods[0], id: 'p-me-old', starts_at: local('2024-09-16'), ends_at: local('2024-09-23') }
+  data.periods.push(period)
+  for (const original of data.entries.filter(e => e.period_id === 'p-me-38')) {
+    const shift = (at: string) => at.replace('2026-09-15', '2024-09-17').replace('2026-09-17', '2024-09-19')
+    data.entries.push({ ...original, id: `${original.id}-old`, period_id: period.id, started_at: shift(original.started_at), ended_at: shift(original.ended_at), rate_amount: '90', amount: amountFor('90', original.duration_seconds) })
+  }
+  data.rates.find(r => r.id === 'r-3')!.effective_from = '2024-01-01'
+  return period
+}
 export interface BusinessCall { path: string; method: string; body: unknown; query: URLSearchParams }
 
 // Money fields go out as JSON number tokens.
@@ -112,6 +126,7 @@ export async function mockBusiness(page: Page, data: BusinessData, options: Busi
   await page.clock.setFixedTime(NOW)
   await page.addInitScript(() => { class Quiet { addEventListener() {} close() {} }; Object.assign(window, { EventSource: Quiet }) })
   const json = (route: Route, status: number, value: unknown, headers: Record<string, string> = {}) => route.fulfill({ status, contentType: 'application/json', body: exact(value), headers })
+  const granted = (permission: string) => mockEffectivePermissions(options.role ?? 'admin').workspace.permissions.includes(permission) || !!options.grant?.includes(permission)
   const handler = async (route: Route) => {
     const request = route.request(), url = new URL(request.url()), path = url.pathname, method = request.method(), q = url.searchParams
     let body: unknown = null
@@ -123,7 +138,11 @@ export async function mockBusiness(page: Page, data: BusinessData, options: Busi
     if (!known) return route.fallback()
     calls.push({ path, method, body, query: q })
     if (path === '/api/me') return route.fulfill({ json: { principal: { id: me.id, name: me.name, kind: 'person', roles: [options.role ?? 'admin'] }, tenant: { id: 't1', name: 'INSPR Studio' } } })
-    if (path === '/api/me/permissions') return route.fulfill({ json: mockEffectivePermissions(options.role ?? 'admin', q.get('project_id') ?? undefined) })
+    if (path === '/api/me/permissions') {
+      const effective = mockEffectivePermissions(options.role ?? 'admin', q.get('project_id') ?? undefined)
+      effective.workspace.permissions.push(...options.grant ?? [])
+      return route.fulfill({ json: effective })
+    }
     if (path === '/api/members') {
       if (options.noDirectory) return route.fulfill({ status: 403, json: { error: 'members unavailable' } })
       return route.fulfill({ json: {
@@ -135,7 +154,7 @@ export async function mockBusiness(page: Page, data: BusinessData, options: Busi
     if (path === '/api/plugins') return route.fulfill({ json: data.plugins })
     const install = /^\/api\/plugins\/([a-z_]+)\/installation$/.exec(path)
     if (install) {
-      if ((options.role ?? 'admin') !== 'admin') return route.fulfill({ status: 403, json: { error: 'admin required' } })
+      if (!granted('plugins.manage')) return route.fulfill({ status: 403, json: { error: 'admin required' } })
       const plugin = data.plugins.find(p => p.id === install[1])!
       const write = body as { manifest_digest_sha256: string; enabled: boolean; permissions: string[] }
       plugin.installation = { ...plugin.installation, ...write, updated_at: NOW.toISOString() }
@@ -175,7 +194,18 @@ export async function mockBusiness(page: Page, data: BusinessData, options: Busi
         return route.fulfill({ status: 201, json: period })
       }
       const who = q.get('principal_id')
-      return route.fulfill({ json: data.periods.filter(p => !who || p.principal_id === who) })
+      const defaultSince = new Date(NOW)
+      defaultSince.setUTCHours(0, 0, 0, 0)
+      defaultSince.setUTCFullYear(defaultSince.getUTCFullYear() - 1)
+      const since = Date.parse(q.get('since') ?? defaultSince.toISOString())
+      const until = q.has('until') ? Date.parse(q.get('until')!) : Infinity
+      const list = data.periods.filter(p => (!who || p.principal_id === who) && Date.parse(p.ends_at) >= since && Date.parse(p.starts_at) < until)
+        .sort((a, b) => b.starts_at.localeCompare(a.starts_at) || a.id.localeCompare(b.id))
+      const after = q.get('after_id')
+      const offset = after ? list.findIndex(p => p.id === after) + 1 : 0
+      const limit = Number(q.get('limit') ?? 100)
+      const items = list.slice(offset, offset + limit)
+      return route.fulfill({ json: items, headers: offset + limit < list.length ? { 'X-Next-Cursor': items.at(-1)!.id } : {} })
     }
     const approve = /^\/api\/time-periods\/([^/]+)\/approve$/.exec(path)
     if (approve) {

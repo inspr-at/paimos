@@ -154,7 +154,7 @@ const byScope = computed(() => {
           <details v-for="set in layer.sets" :key="set.name" class="set" :class="{ skip: set.action === 'skip' }">
             <summary>
               <BizIcon name="chevron-right" :size="13" class="chev" />
-              <span class="set-name">{{ set.name }}</span>
+              <span v-clip-tip="set.name" class="set-name">{{ set.name }}</span>
               <span class="set-counts">{{ counts(set) }}</span>
             </summary>
             <ul class="rules"><RuleItem v-for="rule in set.rules" :key="rule.identity" :set-name="set.name" :rule="rule" /></ul>
@@ -171,7 +171,7 @@ const byScope = computed(() => {
         <ul class="outcomes">
           <li v-for="result in group.results" :key="result.name" :class="result.status">
             <BizIcon :name="result.status === 'saved' || result.status === 'unchanged' ? 'check' : result.status === 'failed' ? 'close' : result.status === 'unknown' ? 'alert' : 'minus'" :size="14" />
-            <span class="set-name">{{ result.name }}</span>
+            <span v-clip-tip="result.name" class="set-name">{{ result.name }}</span>
             <span class="set-counts">{{ STATUS[result.status] }}<template v-if="result.reason">: {{ result.reason }}</template></span>
           </li>
         </ul>
@@ -240,6 +240,10 @@ const byScope = computed(() => {
 .tech summary::-webkit-details-marker { display: none; }
 .tech[open] .chev { transform: rotate(90deg); }
 .tech p { margin: 6px 0 0; color: var(--ink-2); font-size: 12px; overflow-wrap: anywhere; }
+@media (max-width: 720px) {
+  .set-name { white-space: normal; overflow-wrap: anywhere; display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; }
+  .set summary, .outcomes li { align-items: flex-start; padding-block: 6px; }
+}
 @media (max-width: 600px) {
   .set summary { flex-wrap: wrap; row-gap: 0; padding: 6px 8px; }
   .set-counts { margin-left: 21px; width: 100%; }

@@ -10,8 +10,7 @@ import (
 	"net/http"
 	"time"
 
-	"github.com/jackc/pgx/v5"
-
+	"github.com/inspr-at/paimos/internal/db"
 	"github.com/inspr-at/paimos/internal/tenant"
 )
 
@@ -28,6 +27,9 @@ func (m *module) stream(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
+	ctx, stop := m.listenContext(r.Context())
+	defer stop()
+	r = r.WithContext(ctx)
 	after := int64(0)
 	// ?after= opts into live mode (AEON-326): "latest" starts at the newest
 	// event instead of replaying the log, and every connection opens with a
@@ -54,24 +56,13 @@ func (m *module) stream(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
-	// LISTEN is session state, not a tenant data query. Do not hold a pool slot:
-	// even with many streams, replay and writers must still acquire connections.
-	connectCtx, cancel := context.WithTimeout(r.Context(), 10*time.Second)
-	conn, err := pgx.ConnectConfig(connectCtx, m.pool.Config().ConnConfig.Copy())
-	cancel()
+	// Subscribe before any boundary or replay read; one backend serves all streams.
+	conn, err := db.SubscribeNotifications(r.Context(), m.pool, "aeon_events", p.TenantID)
 	if err != nil {
 		failure(w, err)
 		return
 	}
-	defer func() {
-		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-		defer cancel()
-		_ = conn.Close(ctx)
-	}()
-	if _, err = conn.Exec(r.Context(), "LISTEN aeon_events"); err != nil {
-		failure(w, err)
-		return
-	}
+	defer func() { _ = conn.Close(context.Background()) }()
 	if live {
 		// Subscribed first, so nothing committed from here on is missed.
 		// Writers commit in ID order (they share the tenant counter).
@@ -180,4 +171,13 @@ func (m *module) stream(w http.ResponseWriter, r *http.Request) {
 			return
 		} // Client resumes from the last successfully sent ID.
 	}
+}
+
+// Bound each HTTP stream independently of the shared listener lifetime.
+func (m *module) listenContext(ctx context.Context) (context.Context, context.CancelFunc) {
+	timeout := m.listenTimeout
+	if timeout == nil {
+		timeout = context.WithTimeout
+	}
+	return timeout(ctx, db.ListenerMaxLifetime)
 }

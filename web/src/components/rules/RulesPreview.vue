@@ -4,6 +4,7 @@ import { computed, onMounted, ref, watch } from 'vue'
 import AppIcon from '../AppIcon.vue'
 import BizIcon from '../business/BizIcon.vue'
 import RulesDialog from './RulesDialog.vue'
+import HeadingIdentity from '../HeadingIdentity.vue'
 import {
   HARNESS_LABEL, HARNESSES, LAYER_LABEL, ROLE_LABEL, ROLES, RulesError, budgetParts, byteSize, explainRules, mergeQuery, orderPreviewAgents, previewDenial, previewOptionLabel, rulesMessage,
   type ExplainedRule, type ExplainedRules, type ExplainedSet, type HarnessName, type NamedAgent, type RoleName, type RuleScope,
@@ -121,8 +122,11 @@ watch([projectId, role, harness, agentId], load)
   <RulesDialog title="What agents receive" lede="Each rule next to its explanation. Only published rules count." size="sheet" @close="emit('close')">
     <div class="for">
       <span class="for-label">For</span>
-      <span class="for-value">{{ forLine }}</span>
-      <button type="button" class="btn sm ghost" :aria-expanded="choosing" data-autofocus @click="choosing = !choosing">{{ choosing ? 'Done' : 'Change' }}</button>
+      <HeadingIdentity :text="forLine" class="for-value" />
+      <button type="button" class="btn sm ghost" :aria-expanded="choosing" data-autofocus @click="choosing = !choosing">
+        <span :aria-hidden="choosing">Change</span>
+        <span :aria-hidden="!choosing">Done</span>
+      </button>
     </div>
     <div v-if="choosing" class="choose" role="group" aria-label="Preview for">
       <label>Project<select v-model="projectId" class="field"><option v-for="project in projects" :key="project.id" :value="project.id">{{ project.title }}</option></select></label>
@@ -195,16 +199,22 @@ watch([projectId, role, harness, agentId], load)
 </template>
 
 <style scoped>
-.for { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 10px; padding: 8px 8px 8px 12px; border-radius: 12px; background: var(--surface-2); }
+.for { display: flex; align-items: flex-start; gap: 6px 10px; padding: 8px 8px 8px 12px; border-radius: 12px; background: var(--surface-2); }
+/* Both labels size the same grid cell; only the active label is seen or read. */
+.for .btn { flex: none; display: inline-grid; justify-items: center; }
+.for .btn > span { grid-area: 1 / 1; }
+.for .btn > span[aria-hidden="true"] { visibility: hidden; }
 .for-label { color: var(--ink-3); font-size: 12.5px; font-weight: 600; }
-.for-value { flex: 1; min-width: 0; font-size: 13.5px; font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+/* Changing the preview identity must not displace its selectors or search. */
+.for-value { flex: 1; min-width: 0; height: 2lh; line-height: 1.45; font-size: 13.5px; font-weight: 600; white-space: normal; overflow-wrap: anywhere; overflow: hidden; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; }
+@media (pointer: coarse) { .for-value { line-height: max(1.45em, 22px); } }
 .choose { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; }
 .choose label { display: grid; gap: 4px; min-width: 0; color: var(--ink-2); font-size: 12px; font-weight: 650; }
 .choose option:disabled { color: var(--ink-3); }
 .tools { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; }
 .harness { display: inline-flex; align-items: center; gap: 2px; padding: 3px; border-radius: 10px; background: var(--surface-2); }
 .seg { display: inline-flex; align-items: center; justify-content: center; height: 28px; min-height: 0; margin: 0; padding: 0 12px; border: 0; border-radius: 7px; background: none; color: var(--ink-2); font: inherit; font-size: 13px; font-weight: 600; line-height: 1; cursor: pointer; }
-.seg[aria-checked="true"] { background: var(--surface); color: var(--ink); box-shadow: 0 0 0 1px var(--line), 0 1px 2px rgb(0 0 0 / .06); }
+.seg[aria-checked="true"] { background: var(--surface); color: var(--ink); box-shadow: 0 0 0 1px var(--line), 0 1px 2px color-mix(in srgb, var(--shadow-black) 6%, transparent); }
 .seg:focus-visible { outline: none; box-shadow: var(--focus-ring); }
 @media (hover: hover) { .seg[aria-checked="false"]:hover { color: var(--ink); } }
 .search { flex: 1 1 220px; display: flex; align-items: center; gap: 6px; min-width: 0; height: 34px; padding: 0 10px; border-radius: 10px; background: var(--surface); box-shadow: inset 0 0 0 1px var(--line-2); color: var(--ink-3); }
@@ -230,7 +240,7 @@ watch([projectId, role, harness, agentId], load)
 .group-cell { display: grid; gap: 2px; min-width: 0; }
 .group-title { display: flex; align-items: baseline; flex-wrap: wrap; gap: 4px 10px; min-width: 0; }
 .set-name { font-size: 14px; font-weight: 650; }
-.where { color: var(--ink-3); font-size: 12.5px; }
+.where { min-width: 0; overflow-wrap: anywhere; color: var(--ink-3); font-size: 12.5px; }
 .set-bytes { margin-left: auto; color: var(--ink-3); font-size: 12px; font-variant-numeric: tabular-nums; }
 .set-tldr { display: flex; align-items: baseline; gap: 8px; color: var(--ink-2); font-size: 13px; line-height: 1.45; }
 .row { padding-top: 8px; padding-bottom: 8px; align-items: start; }
@@ -252,7 +262,7 @@ watch([projectId, role, harness, agentId], load)
 .sr-only { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
 @media (max-width: 600px) {
   .choose { grid-template-columns: 1fr; }
-  .harness { width: 100%; }
+  .harness { width: 100%; box-sizing: border-box; flex-wrap: wrap; }
   .seg { flex: 1 1 0; padding: 0 6px; }
   .thead { display: none; }
   .row { grid-template-columns: minmax(0, 1fr); gap: 4px; }

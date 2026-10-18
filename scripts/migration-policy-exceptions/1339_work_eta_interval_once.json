@@ -1,0 +1,11 @@
+{
+  "schema": "aeon.migration-policy-exceptions.v1",
+  "exceptions": [
+    {
+      "file": "1339_work_eta_interval_once.sql",
+      "sha256": "fe7a590dc949ae8d3e8d56f1d3cd51723e1ed10456f1b784f469725be442a6c2",
+      "ticket": "AEON-1108",
+      "reason": "CREATE OR REPLACE FUNCTION is conservatively outside the expand-safe allowlist. The published aeon_leaf_eta(uuid) and aeon_work_aggregates(uuid[]) signatures, result columns, invoker rights, tenant/project RLS, statement clock, stale threshold comparisons, active/completed/archived/cancelled predicates, scope budgets and stored rows remain unchanged. One new interval-taking aeon_leaf_eta overload receives the statement-local interval from a materialized aggregate CTE, so aeon_eta_interval() runs once per aggregate instead of twice per leaf. TestWorkAggregatesETAIntervalOnceAndParity compares every field with the released 1230 SQL across five settings and counts interval calls. This exact-byte exception accompanies the reserved migration for coordinator review; no guard or CI pipeline changes."
+    }
+  ]
+}

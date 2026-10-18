@@ -1,0 +1,109 @@
+# SPDX-License-Identifier: AGPL-3.0-only
+# aeon:owner internal/journey
+paths:
+  /projects/{projectId}/journey:
+    get:
+      deprecated: true
+      operationId: getProjectJourney
+      summary: Read a project's derived journey
+      description: "The INSPR Flow is retired. This compatibility route returns 410 without reading or changing Flow data. Historic success schemas remain pinned for external clients."
+      security: *auth
+      parameters: [{name: projectId, in: path, required: true, schema: {type: string, format: uuid}}]
+      responses:
+        '410': {$ref: '#/components/responses/Error'}
+        '200': {description: Journey projection, headers: {Aeon-Contract: {$ref: '#/components/headers/JourneyContract'}}, content: {application/json: {schema: {$ref: '#/components/schemas/Journey'}}}}
+        '404': {$ref: '#/components/responses/Error'}
+  /projects/{projectId}/journey/actions:
+    post:
+      deprecated: true
+      operationId: advanceProjectJourney
+      summary: Apply the project's next action
+      description: "The INSPR Flow is retired. This compatibility route returns 410 without reading or changing Flow data. Historic success schemas remain pinned for external clients."
+      security: *auth
+      parameters: [{name: projectId, in: path, required: true, schema: {type: string, format: uuid}}]
+      requestBody: {required: true, content: {application/json: {schema: {$ref: '#/components/schemas/JourneyActionWrite'}}}}
+      responses:
+        '410': {$ref: '#/components/responses/Error'}
+        '200': {description: Updated journey, content: {application/json: {schema: {$ref: '#/components/schemas/Journey'}}}}
+        '403': {$ref: '#/components/responses/Error'}
+        '409': {$ref: '#/components/responses/Error'}
+  /projects/{projectId}/journey/profile:
+    put:
+      deprecated: true
+      operationId: setJourneyProfile
+      summary: Choose a journey profile
+      description: "The INSPR Flow is retired. This compatibility route returns 410 without reading or changing Flow data. Historic success schemas remain pinned for external clients."
+      security: [{session: []}]
+      parameters: [{name: projectId, in: path, required: true, schema: {type: string, format: uuid}}]
+      requestBody: {required: true, content: {application/json: {schema: {$ref: '#/components/schemas/JourneyProfileWrite'}}}}
+      responses:
+        '410': {$ref: '#/components/responses/Error'}
+        '200': {description: Journey projection, content: {application/json: {schema: {$ref: '#/components/schemas/Journey'}}}}
+        '409': {$ref: '#/components/responses/Error'}
+components:
+  headers:
+    JourneyContract: {description: Journey read response contract, schema: {type: string, enum: ['journey/1.4']}}
+  schemas:
+    Journey:
+      type: object
+      required: [project_node_id, project_key, tenant_slug, profile, revision, stage, stage_source, disposable, stages, next_action, requirements_revision, requirements_digest_sha256, requirements_approval_scope, launch_readiness]
+      properties:
+        project_node_id: {type: string, format: uuid, description: 'Project node id, read from the node. Not taken from the client.'}
+        project_key: {type: string, description: 'Route key used in /p/{project_key} links (e.g. PHAROS), read from the project node. Not a request field.'}
+        node_key: {type: string, pattern: '^[A-Z][A-Z0-9]{1,9}-[1-9][0-9]*$', description: 'Immutable key of the project node (nodes.key, e.g. PRJ-17). Not a request field.'}
+        tenant_slug: {type: string, minLength: 1, description: Slug of the tenant that owns the node. Not taken from the client.}
+        profile: {type: string, enum: [personal, professional, enterprise]}
+        revision: {type: integer, minimum: 1}
+        stage: {type: string, enum: [inspire, shape, requirements, plan, build, deploy, access, live]}
+        stage_source: {type: string, enum: [journey, derived], description: Whether stage selection uses recorded journey history or the imported-project data derivation}
+        imported: {type: boolean, description: 'True for a project imported from classic Paimos with its history; its stages before Plan were never recorded here'}
+        disposable: {type: boolean, description: 'True only after the development operator marks this project disposable; read-only and never inferred from gate state.'}
+        stages: {type: array, items: {$ref: '#/components/schemas/JourneyStage'}}
+        next_action: {$ref: '#/components/schemas/JourneyNextAction'}
+        requirements_revision: {type: integer, minimum: 0}
+        requirements_digest_sha256: {type: string, pattern: '^[0-9a-f]{64}$'}
+        requirements_approval_scope: {type: string, description: Exact approval scope for the current requirements revision and content digest}
+        launch_readiness: {$ref: '#/components/schemas/JourneyLaunchReadiness'}
+        current_release_id: {type: [string, 'null'], format: uuid}
+    JourneyActionWrite:
+      type: object
+      additionalProperties: false
+      required: [action, expected_revision, idempotency_key]
+      properties:
+        action: {type: string, enum: [confirm_brief, go, reduce_scope, park, drop, reopen, open_first_release, start_build, mark_candidate, approve_candidate, reject_candidate, approve_deploy, renew_candidate, renew_deploy, retry_deploy, approve_permit, renew_permit, plan_next_release]}
+        expected_revision: {type: integer, minimum: 1}
+        idempotency_key: {type: string, minLength: 1, maxLength: 128}
+        approval_request_id: {type: string, format: uuid}
+        release_id: {type: string, format: uuid}
+        reason: {type: string, maxLength: 2048}
+        ticket_node_ids: {type: array, minItems: 1, maxItems: 100, uniqueItems: true, items: {type: string, format: uuid}, description: Optional existing project tickets to add atomically with open_first_release or plan_next_release.}
+    JourneyLaunchReadiness:
+      type: object
+      required: [can_admit, reason]
+      properties:
+        can_admit: {type: boolean}
+        reason: {type: string, description: Current blocker or empty when admission can proceed}
+    JourneyProfileWrite:
+      type: object
+      additionalProperties: false
+      required: [profile, expected_revision]
+      properties:
+        profile: {type: string, enum: [personal, professional, enterprise]}
+        expected_revision: {type: integer, minimum: 1}
+    JourneyStage:
+      type: object
+      required: [key, state, gate_scope, gate_live, handoff_id, handoff_attempt, handoff_authority_epoch]
+      properties:
+        key: {type: string, enum: [inspire, shape, requirements, plan, build, deploy, access, live]}
+        state: {type: string, enum: [done, current, later, skipped, blocked]}
+        gate_scope: {type: string, description: 'Exact approval scope reported by this stage. Empty for Inspire and Live. Plan reports journey.build; Build reports journey.candidate even before its gate exists.'}
+        gate_approval_id: {type: [string, 'null'], format: uuid}
+        gate_live: {type: boolean, description: Whether any approval and grant for the stage gate are currently valid; false when no gate is recorded}
+        gate_offer_id: {type: string, format: uuid, description: 'Selected unconsumed request for this stage gate, when one exists; distinct from the standing gate_approval_id'}
+        gate_offer_state: {type: string, enum: [pending, approved_live, expired, revoked, rejected, grant_missing], description: 'Server-classified validity of gate_offer_id only; approved_live counts as a live unconsumed offer. gate_live separately describes the standing gate_approval_id'}
+        gate_offer_expires_at: {type: string, format: date-time, description: Effective deadline of the offer (the earlier of request and grant expiry); for a pending request this is its request expiry}
+        handoff_id: {type: [string, 'null'], format: uuid}
+        handoff_attempt: {type: [integer, 'null'], minimum: 1}
+        handoff_authority_epoch: {type: [integer, 'null'], minimum: 1}
+        target: {$ref: '#/components/schemas/DeployTarget', description: Recorded deployment target metadata}
+        target_digest_sha256: {type: string, pattern: '^[0-9a-f]{64}$', description: Informational target digest}

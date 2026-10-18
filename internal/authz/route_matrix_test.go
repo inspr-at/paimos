@@ -63,6 +63,10 @@ func TestEffectiveRouteMatrix(t *testing.T) {
 		allow       bool
 	}{
 		{"owner", "POST /api/nodes", true}, {"owner", "POST /api/roles", true},
+		{"owner", "POST /api/work-kinds", true}, {"admin", "POST /api/work-kinds", true},
+		{"member", "POST /api/work-kinds", false}, {"viewer", "POST /api/work-kinds", false},
+		{"member", "GET /api/model-preferences", true}, {"member", "GET /api/work-kinds", true},
+		{"admin", "POST /api/models/{id}/retire", true}, {"member", "POST /api/models/{id}/retire", false},
 		{"admin", "POST /api/roles", true}, {"admin", "POST /api/nodes", true},
 		{"member", "POST /api/nodes", true}, {"member", "POST /api/kinds", false},
 		{"member", "POST /api/roles", false}, {"member", "POST /api/approvals/{approvalId}/decision", true},
@@ -73,6 +77,11 @@ func TestEffectiveRouteMatrix(t *testing.T) {
 		{"customer", "POST /api/quotes/{quoteId}/versions/{version}/accept", true},
 		{"customer", "GET /api/quotes", false},
 		{"customer", "GET /api/me/profile", true},
+		// Queue entry requires node visibility; the handler separately fences
+		// write permission and receipt ownership inside the final transaction.
+		{"owner", "POST /api/queue/{nodeId}/undo", true},
+		{"member", "POST /api/queue/{nodeId}/undo", true},
+		{"customer", "POST /api/queue/{nodeId}/undo", false},
 	} {
 		check(tc.role, people[tc.role], tc.route, tc.allow)
 	}

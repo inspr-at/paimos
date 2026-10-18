@@ -47,3 +47,23 @@ func TestEntrypointAndEnvironment(t *testing.T) {
 		t.Fatal("empty PATH retained")
 	}
 }
+
+func TestMissingLauncherAndNodeErrorsPreservePaths(t *testing.T) {
+	root, err := filepath.EvalSymlinks(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	launcher := filepath.Join(root, "launcher")
+	_, err = NeedsNode(launcher)
+	if !errors.Is(err, ErrStart) || !errors.Is(err, os.ErrNotExist) || !strings.Contains(err.Error(), launcher) {
+		t.Fatal("missing launcher error lost path or cause", err)
+	}
+	if err := os.WriteFile(launcher, []byte("#!/usr/bin/env node\n"), 0700); err != nil {
+		t.Fatal(err)
+	}
+	node := filepath.Join(root, "node")
+	err = Validate(launcher, node)
+	if !errors.Is(err, ErrStart) || !errors.Is(err, os.ErrNotExist) || !strings.Contains(err.Error(), node) {
+		t.Fatal("missing interpreter error lost path or cause", err)
+	}
+}

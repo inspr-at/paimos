@@ -6,7 +6,10 @@
 # cannot be exercised by an isolated, disposable Postgres fixture.
 set -euo pipefail
 
-for tool in docker curl python3 openssl; do
+# OPS-287: GHCR mirror of the Docker Hub image; refresh with mirror-ci-images.yml
+pgvector_image="${PGVECTOR_IMAGE:-ghcr.io/inspr-at/paimos-ci/pgvector:0.8.6-pg18@sha256:2ba9ca5f2e7daa0f0e7723cba1ee9167bab54efd3640516a44ac1a928dd67e7a}"
+
+for tool in docker curl python3 openssl node; do
   command -v "$tool" >/dev/null || { echo "missing $tool" >&2; exit 1; }
 done
 
@@ -75,19 +78,43 @@ if [[ -n "${AEON_SMOKE_IMAGE:-}" ]]; then
   echo 'Using prebuilt release image for smoke gate'
 else
   echo 'Building release image for smoke gate'
-  docker build --build-arg "VERSION=${AEON_SMOKE_VERSION:-dev}" -t "$image" .
+  node scripts/assemble-image.mjs "$image"
 fi
-docker run --rm --entrypoint /bin/sh "$image" -c '
-  test -s /usr/share/doc/aeon/NOTICE &&
-  apk list --installed chromium | grep -Eq "^chromium-152[.]0[.]7977[.]82-r0 .*[(]BSD-3-Clause[)] \\[installed\\]$" &&
-  apk list --installed tini | grep -Eq "^tini-0[.]19[.]0-r3 .*[(]MIT[)] \\[installed\\]$"
+apk_pins="$(node --input-type=module -e '
+import { readFileSync } from "node:fs";
+import { parseRuntimeApkPins } from "./scripts/runtime-apk-pins.mjs";
+const pins = parseRuntimeApkPins(readFileSync("scripts/Dockerfile.runtime", "utf8"));
+process.stdout.write(pins.chromium.join(" ") + "\n" + pins.tini + "\n");
+')"
+chromium_allow="${apk_pins%%$'\n'*}"
+tini_pin="${apk_pins#*$'\n'}"
+tini_pin="${tini_pin%%$'\n'*}"
+case "$chromium_allow" in ''|*[!0-9.r\ -]*) echo 'refusing unsafe runtime APK allow-list' >&2; exit 1 ;; esac
+case "$tini_pin" in ''|*[!0-9.r-]*) echo 'refusing unsafe runtime APK allow-list' >&2; exit 1 ;; esac
+docker run --rm \
+  -e "AEON_CHROMIUM_ALLOW=$chromium_allow" \
+  -e "AEON_TINI_PIN=$tini_pin" \
+  --entrypoint /bin/sh \
+  "$image" -c '
+  set -eu
+  test -s /usr/share/doc/aeon/NOTICE
+  ver=$(tr -d "\n" < /etc/aeon-chromium-apk)
+  ok=0
+  for candidate in $AEON_CHROMIUM_ALLOW; do
+    if [ "$ver" = "$candidate" ]; then ok=1; fi
+  done
+  test "$ok" = 1
+  esc=$(printf "%s" "$ver" | sed "s/[.]/[.]/g")
+  apk list --installed chromium | grep -Eq "^chromium-${esc} .*[(]BSD-3-Clause[)] \\[installed\\]$"
+  tini_esc=$(printf "%s" "$AEON_TINI_PIN" | sed "s/[.]/[.]/g")
+  apk list --installed tini | grep -Eq "^tini-${tini_esc} .*[(]MIT[)] \\[installed\\]$"
 ' || { echo 'runtime quote dependency notice or license check failed' >&2; exit 1; }
 echo 'runtime: quote dependency pins, licenses and NOTICE OK'
 docker network create "$network" >/dev/null
 docker run -d --name "$db" --network "$network" \
   -e POSTGRES_USER=postgres -e POSTGRES_PASSWORD_FILE=/run/secrets/db-super \
   -v "$tmp/secrets:/run/secrets:ro" -v "$tmp/initdb:/docker-entrypoint-initdb.d:ro" \
-  pgvector/pgvector:0.8.6-pg18 >/dev/null
+  "$pgvector_image" >/dev/null
 ready=0
 for _ in {1..45}; do
   if docker exec "$db" pg_isready -h 127.0.0.1 -U postgres -d aeon >/dev/null 2>&1; then ready=1; break; fi
@@ -142,15 +169,23 @@ start_app() {
 start_app prod
 SMOKE_BASE="$base" python3 - <<'PY'
 import os
+import re
 import urllib.request
 u = os.environ['SMOKE_BASE']
-with urllib.request.urlopen(u + '/') as response:
-    assert response.status == 200
-    assert response.headers['Content-Security-Policy'] == "default-src 'self'; img-src 'self' blob: data:; object-src 'none'; base-uri 'self'; form-action 'self'; frame-ancestors 'none'"
-    assert response.headers['X-Content-Type-Options'] == 'nosniff'
-    assert response.headers['X-Frame-Options'] == 'DENY'
-    assert response.headers['Referrer-Policy'] == 'no-referrer'
-    assert b'<html' in response.read().lower()
+base_csp = "default-src 'self'; img-src 'self' blob: data:; object-src 'none'; base-uri 'self'; form-action 'self'; frame-ancestors 'none'"
+spa_csp = re.compile(re.escape(base_csp) + r"; script-src 'self' 'nonce-([A-Za-z0-9+/]{32})'; style-src 'self' 'nonce-\1'")
+nonces = set()
+for _ in range(2):
+    with urllib.request.urlopen(u + '/') as response:
+        assert response.status == 200
+        match = spa_csp.fullmatch(response.headers['Content-Security-Policy'])
+        assert match, 'unexpected SPA Content-Security-Policy'
+        assert match.group(1) not in nonces, 'SPA CSP nonce reused across requests'
+        nonces.add(match.group(1))
+        assert response.headers['X-Content-Type-Options'] == 'nosniff'
+        assert response.headers['X-Frame-Options'] == 'DENY'
+        assert response.headers['Referrer-Policy'] == 'no-referrer'
+        assert b'<html' in response.read().lower()
 print('prod: embedded web and security headers OK')
 PY
 docker container rm -f "$app" >/dev/null

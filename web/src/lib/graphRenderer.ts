@@ -4,7 +4,7 @@
 // No API, router, knowledge/ticket schema or session dependency belongs here.
 import type { ForceGraph3DInstance } from '3d-force-graph'
 import type ForceGraph2D from 'force-graph'
-import type { Group, MeshPhysicalMaterial, PerspectiveCamera, SphereGeometry } from 'three'
+import type { Group, Material, PerspectiveCamera, SphereGeometry } from 'three'
 import type { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js'
 import { graphOrbitPace, graphOrbitSeconds } from './graphOrbitState.ts'
 
@@ -73,6 +73,48 @@ export function cloudStride(count: number): number {
   while (count > 1 && gcd(stride, count) !== 1) stride++
   return stride
 }
+// Header shots count a pixel when any channel moves by more than this.
+export const GLIMPSE_SHOT_DELTA = 2
+// Unlit status colour at full coverage. Opacity 0.92 left the software-GL rim
+// one pixel short of the 1280 light shot (971 of 1214). Full coverage still
+// clears GLIMPSE_SHOT_DELTA through the light canvas opacity of 0.35.
+export const GLIMPSE_ORB_OPACITY = 1
+// One screen pixel past the layout radius. The header shot then counts the
+// antialiased rim without pulling the camera into the side fade.
+export const GLIMPSE_ORB_RIM = 1
+export const glimpseShotRadius = (radius: number) => radius + GLIMPSE_ORB_RIM
+
+export function parseCssColor(value: string): [number, number, number] | null {
+  const text = value.trim()
+  const hex = /^#([\da-f]{6})$/i.exec(text)
+  if (hex) {
+    const n = Number.parseInt(hex[1], 16)
+    return [(n >> 16) & 255, (n >> 8) & 255, n & 255]
+  }
+  const rgb = /^rgba?\(\s*([\d.]+)[,\s]+([\d.]+)[,\s]+([\d.]+)/i.exec(text)
+  if (!rgb) return null
+  const channels = [Number(rgb[1]), Number(rgb[2]), Number(rgb[3])]
+  return channels.every(channel => Number.isFinite(channel)) ? channels as [number, number, number] : null
+}
+
+export function glimpseOrbFinish(background: string): { unlit: boolean; opacity: number; glass: boolean } {
+  const ground = parseCssColor(background)
+  const lum = ground ? 0.2126 * ground[0] + 0.7152 * ground[1] + 0.0722 * ground[2] : 0
+  // An unparsed ground keeps the lit fallback. A parsed one paints an unlit
+  // disc: porcelain washes lit glass to white, and software GL drops that same
+  // glass on a dark header so the 1280 shot stops at 0.743 of the width.
+  // Dark still wears the shell; the disc, not the shell, has to clear the shot.
+  if (!ground) return { unlit: false, opacity: 0.86, glass: true }
+  return { unlit: true, opacity: GLIMPSE_ORB_OPACITY, glass: lum < 160 }
+}
+
+export function glimpseOrbDelta(color: string, background: string, canvasOpacity: number, coverage = 1): number {
+  const node = parseCssColor(color), ground = parseCssColor(background)
+  if (!node || !ground || !(coverage > 0)) return 0
+  const alpha = GLIMPSE_ORB_OPACITY * canvasOpacity * coverage
+  return Math.max(...node.map((channel, i) => Math.abs(channel - ground[i]) * alpha))
+}
+
 // A link is drawn only when both complete orbs fit inside the padded view.
 export function glimpsePointInside(x: number, y: number, radius: number, width: number, height: number): boolean {
   return Number.isFinite(x) && Number.isFinite(y) && x - radius >= 8 && y - radius >= 8 && x + radius <= width - 8 && y + radius <= height - 8
@@ -134,7 +176,7 @@ export async function createGraphRenderer(host: HTMLElement, dimension: GraphDim
   void import('./graphMotion.ts').then(mod => mod.ensureGraphMotion())
   let three: typeof import('three') | undefined, g3: Graph3D | undefined, g2: Graph2D | undefined
   let geometry: SphereGeometry | undefined
-  const materials = new Map<string, MeshPhysicalMaterial>()
+  const materials = new Map<string, Material>()
   const objects = new Map<string, Group>()
   let nodes: LayoutNode[] = [], links: LayoutEdge[] = [], labelOrder: LayoutNode[] = []
   let palette = graphPalette(nodes), disposed = false, paused = options.reduced
@@ -260,7 +302,7 @@ export async function createGraphRenderer(host: HTMLElement, dimension: GraphDim
     for (const n of nodes) {
       const depth = -new three.Vector3(n.x ?? 0, n.y ?? 0, n.z ?? 0).applyMatrix4(camera.matrixWorldInverse).z
       const object = objects.get(n.id)
-      if (object) { object.visible = depth > camera.near; object.scale.setScalar(glimpseRadius(n) * Math.max(0, depth) / (projection * graphRadius(n))) }
+      if (object) { object.visible = depth > camera.near; object.scale.setScalar(glimpseShotRadius(glimpseRadius(n)) * Math.max(0, depth) / (projection * graphRadius(n))) }
     }
   }
   function placeLabels(dt: number) {
@@ -365,11 +407,15 @@ export async function createGraphRenderer(host: HTMLElement, dimension: GraphDim
     options.motionState?.(phase)
   }
   function material(n: LayoutNode, shell: boolean) {
-    const key = `${shell ? 'shell' : color(n)}:${alpha(n)}`
+    const finish = glimpse ? glimpseOrbFinish(palette.background) : { unlit: false, opacity: 0.86, glass: true }
+    const flat = finish.unlit && !shell
+    const key = `${flat ? 'flat:' : ''}${shell ? 'shell' : color(n)}:${alpha(n)}`
     if (!materials.has(key)) {
-      const m = new three!.MeshPhysicalMaterial({ color: shell ? '#ffffff' : color(n), roughness: shell ? .08 : .28, metalness: 0,
-        clearcoat: 1, clearcoatRoughness: .06, transparent: true, opacity: alpha(n) * (shell ? .38 : .86), depthWrite: !shell,
-        emissive: shell ? '#ffffff' : color(n), emissiveIntensity: shell ? .08 : .09 })
+      const m = flat
+        ? new three!.MeshBasicMaterial({ color: color(n), transparent: true, opacity: alpha(n) * finish.opacity, depthWrite: true })
+        : new three!.MeshPhysicalMaterial({ color: shell ? '#ffffff' : color(n), roughness: shell ? .08 : .28, metalness: 0,
+          clearcoat: 1, clearcoatRoughness: .06, transparent: true, opacity: alpha(n) * (shell ? .38 : finish.opacity), depthWrite: !shell,
+          emissive: shell ? '#ffffff' : color(n), emissiveIntensity: shell ? .08 : .09 })
       if (shell) {
         // Fresnel transparency avoids transmission's extra full-scene render pass.
         m.onBeforeCompile = shader => { shader.fragmentShader = shader.fragmentShader.replace('#include <opaque_fragment>', 'diffuseColor.a *= 0.12 + 0.88 * pow(1.0 - abs(dot(normalize(normal), normalize(vViewPosition))), 2.0);\n#include <opaque_fragment>') }
@@ -384,14 +430,22 @@ export async function createGraphRenderer(host: HTMLElement, dimension: GraphDim
     for (const n of nodes) {
       const group = objects.get(n.id); if (!group) continue
       ;(group.children[0] as import('three').Mesh).material = material(n, false)
-      ;(group.children[1] as import('three').Mesh).material = material(n, true)
+      const shell = group.children[1] as import('three').Mesh | undefined
+      if (shell) shell.material = material(n, true)
     }
   }
   function draw2D(n: LayoutNode, ctx: CanvasRenderingContext2D, scale: number, picking?: string) {
-    const x = n.x ?? 0, y = n.y ?? 0, r = glimpse ? glimpseRadius(n) / scale : graphRadius(n)
+    const finish = glimpseOrbFinish(palette.background)
+    const x = n.x ?? 0, y = n.y ?? 0, r = glimpse ? glimpseShotRadius(glimpseRadius(n)) / scale : graphRadius(n)
     ctx.globalAlpha = picking ? 1 : alpha(n)
     ctx.beginPath(); ctx.arc(x, y, r, 0, Math.PI * 2)
     if (picking) { ctx.fillStyle = picking; ctx.fill(); return }
+    if (glimpse && finish.unlit && !finish.glass) {
+      ctx.globalAlpha = alpha(n) * finish.opacity
+      ctx.fillStyle = color(n); ctx.fill()
+      ctx.globalAlpha = 1
+      return
+    }
     const shell = ctx.createRadialGradient(x, y, r * .84, x, y, r)
     shell.addColorStop(0, '#ffffff08'); shell.addColorStop(.65, '#ffffff18'); shell.addColorStop(1, palette.dark ? '#ffffff60' : '#b9c8cc80')
     ctx.fillStyle = shell; ctx.fill()
@@ -402,6 +456,13 @@ export async function createGraphRenderer(host: HTMLElement, dimension: GraphDim
     ctx.fillStyle = highlight; ctx.fill()
     ctx.beginPath(); ctx.arc(x, y, r, 0, Math.PI * 2)
     ctx.lineWidth = .7 / scale; ctx.strokeStyle = palette.dark ? '#ffffff40' : '#b9c8cc70'; ctx.stroke()
+    // The glass ring above replaces only the lit core. On a dark glimpse the
+    // unlit disc is what the header shot counts, so it goes on last.
+    if (glimpse && finish.unlit) {
+      ctx.globalAlpha = alpha(n) * finish.opacity
+      ctx.beginPath(); ctx.arc(x, y, r, 0, Math.PI * 2)
+      ctx.fillStyle = color(n); ctx.fill()
+    }
     if (n.id === emphasis.selected) { ctx.beginPath(); ctx.arc(x, y, r + 3 / scale, 0, Math.PI * 2); ctx.strokeStyle = color(n); ctx.stroke() }
     ctx.globalAlpha = 1
   }
@@ -605,9 +666,12 @@ export async function createGraphRenderer(host: HTMLElement, dimension: GraphDim
       g3.lights([new three.AmbientLight('#ffffff', 1.25), key, rim])
       g3.showNavInfo(false).backgroundColor(sceneColor()).nodeThreeObject(n => {
         const group = new three!.Group(), radius = graphRadius(n)
-        const core = new three!.Mesh(geometry, material(n, false)); core.scale.setScalar(radius * .88)
-        const shell = new three!.Mesh(geometry, material(n, true)); shell.scale.setScalar(radius)
-        group.add(core, shell); objects.set(n.id, group)
+        const finish = glimpse ? glimpseOrbFinish(palette.background) : { unlit: false, opacity: 0.86, glass: true }
+        const core = new three!.Mesh(geometry, material(n, false)); core.scale.setScalar(radius * (finish.unlit ? 1 : .88))
+        group.add(core)
+        // White glass disappears on porcelain and hides the outer orbs from the header shot.
+        if (finish.glass) { const shell = new three!.Mesh(geometry, material(n, true)); shell.scale.setScalar(radius); group.add(shell) }
+        objects.set(n.id, group)
         return group
       }).linkOpacity(1).linkWidth(l => glimpse ? 0 : l.width ?? .55)
       const controls = g3.controls() as OrbitControls
@@ -685,7 +749,7 @@ export async function createGraphRenderer(host: HTMLElement, dimension: GraphDim
       const radius = 55 + Math.sqrt(nodes.length) * 3
       // The backdrop spans the whole header, including the masked text islands.
       // Spread anchors to the content edges instead of the old middle column.
-      const aspect = Math.max(1.4, Math.min(12, graph.width() / Math.max(1, graph.height()) * 1.65))
+      const aspect = Math.max(1.4, Math.min(16, graph.width() / Math.max(1, graph.height()) * 1.65))
       nodes.forEach((n, i) => {
         const index = (i * anchorStride) % nodes.length
         const y = 1 - 2 * (index + .5) / nodes.length, angle = i * Math.PI * (3 - Math.sqrt(5))
@@ -771,6 +835,7 @@ export async function createGraphRenderer(host: HTMLElement, dimension: GraphDim
         // Same pose the glimpse camera is created with, so the scripted orbit does not
         // depend on how many real frames ran before the test released the pin.
         if (g3) g3.cameraPosition({ x: 90, y: 150, z: 750 }, { x: 0, y: 0, z: 0 }, 0)
+        fitOnSettle = false
         // The engine also stops on a wall-clock cooldown. A pinned run must stop on tick count alone.
         sim?.cooldownTime(3_600_000)
         sim?.d3ReheatSimulation()
@@ -779,6 +844,11 @@ export async function createGraphRenderer(host: HTMLElement, dimension: GraphDim
         pending = false
         pinned = true
         sim?.cooldownTicks(0)
+        // The fixed camera reset above discards the initial fit. Frame and
+        // paint the final tick positions explicitly instead of relying on an
+        // engine-stop callback that may have already consumed fitOnSettle.
+        fit()
+        sizeGlimpseOrbs(); clearGlimpse(); graph.resumeAnimation(); graph.pauseAnimation()
         host.dataset.glimpsePin = String(frames)
         motion(true)
       }

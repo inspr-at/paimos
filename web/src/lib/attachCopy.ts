@@ -1,8 +1,9 @@
 // SPDX-License-Identifier: AGPL-3.0-only
+import { displayLanguage } from './displayLanguage.ts'
 // Pairing belongs to a computer; linking belongs to one running session.
-// Follow the browser language, as other bilingual public copy does. No storage.
+// Copy follows the app language, independently of browser region preferences.
 export function attachCopy(product: string, locale = typeof navigator === 'undefined' ? 'en' : navigator.language) {
-  return locale.toLowerCase().startsWith('de') ? {
+  return displayLanguage(locale) === 'de' ? {
     computerPaired: 'Computer gekoppelt',
     sessionUnlinked: 'Diese Sitzung ist noch nicht verknüpft',
     sessionLinked: 'Diese Sitzung ist verknüpft',

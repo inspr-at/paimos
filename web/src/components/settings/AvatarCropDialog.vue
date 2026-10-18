@@ -135,8 +135,8 @@ onBeforeUnmount(() => { ++saveGeneration; upload?.abort(); URL.revokeObjectURL(u
         <button type="button" class="icon-btn flat sm" aria-label="Cancel" @click="cancel"><AppIcon name="close" :size="14" /></button>
       </header>
       <div class="foot">
-        <button type="button" class="btn" @click="cancel">{{ progress !== null ? 'Stop' : 'Cancel' }}<KeyCap k="Esc" /></button>
-        <button type="button" class="btn primary" :disabled="!view || !!failed || progress !== null" @click="save"><AppIcon name="check" :size="14" />{{ progress !== null ? 'Saving…' : 'Save photo' }}<KeyCap k="mod" /><KeyCap k="enter" /></button>
+        <button type="button" class="btn" @click="cancel"><span class="btn-label"><span>{{ progress !== null ? 'Stop' : 'Cancel' }}</span><span aria-hidden="true">Cancel</span></span><KeyCap k="Esc" /></button>
+        <button type="button" class="btn primary" :disabled="!view || !!failed || progress !== null" @click="save"><AppIcon name="check" :size="14" /><span class="btn-label"><span>{{ progress !== null ? 'Saving…' : 'Save photo' }}</span><span aria-hidden="true">Save photo</span></span><KeyCap k="mod" /><KeyCap k="enter" /></button>
       </div>
       <p v-if="failed" class="problem" role="alert"><AppIcon name="alert" :size="14" />{{ failed }}</p>
       <div v-else class="body">
@@ -181,14 +181,14 @@ onBeforeUnmount(() => { ++saveGeneration; upload?.abort(); URL.revokeObjectURL(u
 </template>
 
 <style scoped>
-.crop-dialog { width: min(660px, calc(100vw - 24px)); max-width: none; max-height: calc(100dvh - 24px); margin: 24px auto 0; inset-block-start: 0; padding: 0; border: 0; background: transparent; color: var(--ink); overflow: visible; }
+.crop-dialog { width: min(var(--dialog-l), calc(100vw - 24px)); max-width: none; max-height: calc(100dvh - 24px); margin: 24px auto 0; inset-block-start: 0; padding: 0; border: 0; background: transparent; color: var(--ink); overflow: visible; }
 .crop-dialog::backdrop { background: var(--scrim); }
 .card { display: grid; gap: 14px; max-height: calc(100dvh - 24px); overflow: auto; padding: 18px 20px; border-radius: var(--radius); border: 1px solid var(--glass-edge); background: var(--surface-raised); box-shadow: var(--shadow-pop), var(--shadow); }
 .head { display: flex; align-items: center; justify-content: space-between; }
 .head h2 { font-size: 17px; }
 .body { display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 24px; align-items: start; }
 .left { display: grid; gap: 10px; justify-items: center; max-width: 320px; }
-.stage { position: relative; overflow: hidden; border-radius: 14px; background: #0c1a1c; cursor: grab; touch-action: none; user-select: none; outline: none; }
+.stage { position: relative; overflow: hidden; border-radius: 14px; background: var(--media-stage); cursor: grab; touch-action: none; user-select: none; outline: none; }
 .stage:active { cursor: grabbing; }
 .stage:focus-visible { box-shadow: var(--focus-ring); }
 .photo { position: absolute; top: 0; left: 0; max-width: none; transform-origin: 0 0; pointer-events: none; }
@@ -212,8 +212,7 @@ onBeforeUnmount(() => { ++saveGeneration; upload?.abort(); URL.revokeObjectURL(u
 .problem { display: flex; align-items: flex-start; gap: 8px; padding: 10px 12px; border-radius: 10px; background: var(--danger-bg); color: var(--ink); font-size: 13px; }
 .problem svg { margin-top: 2px; color: var(--danger); }
 .foot { display: flex; justify-content: flex-end; gap: 8px; }
-.foot .btn { width: 110px; flex: none; }
-.foot .primary { width: 170px; }
+.foot .btn { flex: none; }
 .status-line { min-height: 20px; font-size: 12px; color: var(--ink-2); }
 .progress { display: flex; align-items: center; gap: 8px; min-width: 180px; font-size: 12px; color: var(--ink-2); }
 .progress .bar { flex: 1; }

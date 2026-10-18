@@ -1,0 +1,233 @@
+// SPDX-License-Identifier: AGPL-3.0-only
+package auth
+
+import (
+	"encoding/json"
+	"net/http"
+	"net/http/httptest"
+	"strings"
+	"testing"
+
+	"github.com/inspr-at/paimos/internal/dbtest"
+	"github.com/inspr-at/paimos/internal/harness"
+	"github.com/inspr-at/paimos/internal/httpapi"
+	"github.com/inspr-at/paimos/internal/modelregistry"
+	"github.com/inspr-at/paimos/internal/tenant"
+	"github.com/jackc/pgx/v5"
+)
+
+func TestLeadSettingsAgentRoutesReadOnly(t *testing.T) {
+	project := "/api/projects/aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa/lead-settings"
+	for _, tc := range []struct{ method, path, scope string }{
+		{"GET", project, "nodes.read"}, {"HEAD", project, "nodes.read"},
+		{"PUT", project, ""}, {"DELETE", project, ""}, {"POST", project, ""},
+		{"GET", project + "/extra", ""}, {"GET", "/api/projects/bad/lead-settings", ""},
+		{"GET", "/api/settings/lead-policy", ""}, {"PUT", "/api/settings/lead-policy", ""},
+	} {
+		scope, allowed := coreAgentScope(httptest.NewRequest(tc.method, tc.path, nil))
+		if scope != tc.scope || allowed != (tc.scope != "") {
+			t.Fatalf("%s %s: scope %q allowed %v", tc.method, tc.path, scope, allowed)
+		}
+	}
+}
+
+// Use the real handlers behind production pattern resolution, authentication
+// and authorization: direct handler calls cannot detect undeclared routes.
+func TestLeadSettingsProductionMiddleware(t *testing.T) {
+	reset(t)
+	m := newMod(t, Config{})
+	handler := (&httpapi.Server{
+		Pool: appPool, Modules: []httpapi.Module{m, modelregistry.New(appPool)},
+		Middleware: []func(http.Handler) http.Handler{m.Middleware},
+	}).Handler()
+	tid := insertTenant(t, "lead-middleware", "Lead middleware")
+	var project, hidden string
+	if err := testInTenant(t.Context(), appPool, tid, func(tx pgx.Tx) error {
+		for i, id := range []*string{&project, &hidden} {
+			if err := tx.QueryRow(t.Context(), `INSERT INTO nodes(tenant_id,kind_id,key,title,state)
+				SELECT $1,id,$2,'Lead middleware','active' FROM node_kinds WHERE slug='project' RETURNING id::text`, tid, []string{"LEAD-1", "LEAD-2"}[i]).Scan(id); err != nil {
+				return err
+			}
+		}
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+	session := func(name, role string, projectOnly bool) (string, tenant.Principal) {
+		t.Helper()
+		id, identity := signinPerson(t, tid, name, name, name+"@example.com", name+"@example.com", "guest")
+		if projectOnly {
+			if err := testInTenant(t.Context(), appPool, tid, func(tx pgx.Tx) error {
+				_, err := tx.Exec(t.Context(), `INSERT INTO role_bindings(tenant_id,principal_id,role_id,scope_type,scope_id)
+					SELECT $1,$2,id,'project',$3 FROM roles WHERE key=$4`, tid, id, project, role)
+				return err
+			}); err != nil {
+				t.Fatal(err)
+			}
+		} else {
+			dbtest.BindRole(t, testDB, tid, id, role)
+		}
+		token, err := m.startSession(t.Context(), identity, tid, id)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return token, tenant.Principal{TenantID: tid, ID: id, Kind: tenant.Person}
+	}
+	owner, creator := session("owner", "admin", false)
+	manager, _ := session("manager", "admin", true)
+	member, _ := session("member", "member", false)
+	key, err := m.createAgentKey(t.Context(), creator, "lead-reader", "", []string{"nodes.read"}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if key.CreatedByPrincipalID == nil || *key.CreatedByPrincipalID != creator.ID {
+		t.Fatal("lead reader key must retain its person owner")
+	}
+	request := func(t *testing.T, method, path, body, token string, agent bool, want int) []byte {
+		t.Helper()
+		r := httptest.NewRequest(method, path, strings.NewReader(body))
+		if agent {
+			r.Header.Set("Authorization", "Bearer "+token)
+		} else if token != "" {
+			r.AddCookie(&http.Cookie{Name: sessionCookieName, Value: token})
+		}
+		w := httptest.NewRecorder()
+		handler.ServeHTTP(w, r)
+		if w.Code != want {
+			t.Fatalf("%s %s: got %d, want %d: %s", method, path, w.Code, want, w.Body.Bytes())
+		}
+		return w.Body.Bytes()
+	}
+	const workspace = "/api/settings/lead-policy"
+	path := "/api/projects/" + project + "/lead-settings"
+	for _, tc := range []struct{ method, suffix, body string }{
+		{"GET", "", ""}, {"PUT", "", `{"revision":0,"overrides":{}}`}, {"DELETE", "?revision=0", ""},
+	} {
+		for _, target := range []string{workspace, path} {
+			request(t, tc.method, target+tc.suffix, tc.body, "", false, 401)
+		}
+		request(t, tc.method, workspace+tc.suffix, tc.body, manager, false, 403)
+		request(t, tc.method, workspace+tc.suffix, tc.body, member, false, 403)
+		request(t, tc.method, workspace+tc.suffix, tc.body, key.Token, true, 403)
+		if tc.method != "GET" {
+			request(t, tc.method, path+tc.suffix, tc.body, member, false, 403)
+			request(t, tc.method, path+tc.suffix, tc.body, key.Token, true, 403)
+		}
+	}
+	for _, tc := range []struct{ name, path, token string }{
+		{"workspace", workspace, owner}, {"project", path, manager},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			request(t, "GET", tc.path, "", tc.token, false, 200)
+			for _, change := range []struct {
+				method, suffix, body string
+				revision             int64
+			}{
+				{"PUT", "", `{"revision":0,"overrides":{"bucket":"complex"}}`, 1},
+				{"DELETE", "?revision=1", "", 2},
+			} {
+				var saved modelregistry.LeadSettings
+				if err := json.Unmarshal(request(t, change.method, tc.path+change.suffix, change.body, tc.token, false, 200), &saved); err != nil {
+					t.Fatal(err)
+				}
+				if saved.Revision != change.revision {
+					t.Fatalf("mutation did not commit: %+v", saved)
+				}
+			}
+		})
+	}
+	for _, reader := range []struct {
+		token string
+		agent bool
+	}{{member, false}, {key.Token, true}} {
+		var view modelregistry.LeadSettings
+		if err := json.Unmarshal(request(t, "GET", path, "", reader.token, reader.agent, 200), &view); err != nil {
+			t.Fatal(err)
+		}
+		if !view.DetailsRedacted || view.Overrides != nil || view.ModelSelector != nil || view.Revision != 2 {
+			t.Fatalf("nonowner view not redacted: %+v", view)
+		}
+	}
+	request(t, "GET", "/api/projects/"+hidden+"/lead-settings", "", manager, false, 403)
+	var settings, changes int
+	if err := adminPool.QueryRow(t.Context(), `SELECT (SELECT count(*) FROM project_lead_settings WHERE tenant_id=$1),
+		(SELECT count(*) FROM events WHERE tenant_id=$1 AND type='lead.settings_changed')`, tid).Scan(&settings, &changes); err != nil {
+		t.Fatal(err)
+	}
+	if settings != 2 || changes != 4 {
+		t.Fatalf("denied requests changed settings/history: rows=%d events=%d", settings, changes)
+	}
+}
+
+// Risk: a daemon route works on a bare mux but production auth rejects every key.
+func TestLeadRuntimeProductionMiddleware(t *testing.T) {
+	t.Run("route_ceiling", func(t *testing.T) {
+		// The outer ceiling admits only the declared daemon routes and preserves
+		// malformed-id, unknown-subpath and method denials.
+		base := "/api/projects/aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa/lead-runtime"
+		for _, route := range []struct{ method, path, scope string }{
+			{"GET", base, "harness.worker"}, {"HEAD", base, "harness.worker"},
+			{"POST", base + "/claim", "harness.worker"}, {"POST", base + "/report", "harness.worker"},
+			{"POST", base, ""}, {"PUT", base, ""}, {"DELETE", base, ""},
+			{"GET", base + "/claim", ""}, {"GET", base + "/report", ""},
+			{"PUT", base + "/claim", ""}, {"DELETE", base + "/report", ""},
+			{"POST", base + "/claim/extra", ""}, {"POST", base + "/extra", ""},
+			{"GET", "/api/projects/bad/lead-runtime", ""},
+			{"POST", "/api/projects/bad/lead-runtime/claim", ""},
+			{"POST", "/api/projects/bad/lead-runtime/report", ""},
+		} {
+			scope, allowed := coreAgentScope(httptest.NewRequest(route.method, route.path, nil))
+			if scope != route.scope || allowed != (route.scope != "") {
+				t.Fatalf("%s %s: scope %q allowed %v; want %q", route.method, route.path, scope, allowed, route.scope)
+			}
+		}
+	})
+	t.Run("middleware", func(t *testing.T) {
+		reset(t)
+		m := newMod(t, Config{})
+		handler := (&httpapi.Server{Pool: appPool, Modules: []httpapi.Module{m, harness.New(appPool)}, Middleware: []func(http.Handler) http.Handler{m.Middleware}}).Handler()
+		tid := insertTenant(t, "lead-runtime-middleware", "Lead runtime")
+		owner, _ := signinPerson(t, tid, "runtime-owner", "runtime-owner", "runtime@example.com", "runtime@example.com", "admin")
+		dbtest.BindRole(t, testDB, tid, owner, "admin")
+		creator := tenant.Principal{TenantID: tid, ID: owner, Kind: tenant.Person}
+		key, err := m.createAgentKey(t.Context(), creator, "runtime-daemon", "", []string{"harness.worker"}, nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		reader, err := m.createAgentKey(t.Context(), creator, "runtime-reader", "", []string{"nodes.read"}, nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var project string
+		if err := testInTenant(t.Context(), appPool, tid, func(tx pgx.Tx) error {
+			return tx.QueryRow(t.Context(), `INSERT INTO nodes(tenant_id,kind_id,key,title,state) SELECT $1,id,'RUNTIME-1','Runtime','active' FROM node_kinds WHERE slug='project' RETURNING id::text`, tid).Scan(&project)
+		}); err != nil {
+			t.Fatal(err)
+		}
+		path := "/api/projects/" + project + "/lead-runtime"
+		for _, route := range []struct {
+			method, suffix string
+			want           int
+		}{
+			{"GET", "", 200}, {"POST", "/claim", 400}, {"POST", "/report", 400},
+		} {
+			for _, caller := range []struct {
+				token string
+				want  int
+			}{{key.Token, route.want}, {reader.Token, 403}, {"", 401}} {
+				r := httptest.NewRequest(route.method, path+route.suffix, strings.NewReader(`{}`))
+				if caller.token != "" {
+					r.Header.Set("Authorization", "Bearer "+caller.token)
+				}
+				w := httptest.NewRecorder()
+				handler.ServeHTTP(w, r)
+				if w.Code != caller.want {
+					t.Fatalf("%s %s: got %d want %d: %s", route.method, route.suffix, w.Code, caller.want, w.Body.String())
+				}
+				if w.Code == 200 && !strings.Contains(w.Body.String(), `"reason":"lead_consent_missing"`) {
+					t.Fatal(w.Body.String())
+				}
+			}
+		}
+	})
+}

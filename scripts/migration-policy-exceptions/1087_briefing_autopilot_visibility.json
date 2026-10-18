@@ -1,0 +1,11 @@
+{
+  "schema": "aeon.migration-policy-exceptions.v1",
+  "exceptions": [
+    {
+      "file": "1087_briefing_autopilot_visibility.sql",
+      "sha256": "143a9d314cf8d237ae4bdea9c5f13f3f15d54d0827a81082630ffaca0da75c70",
+      "ticket": "AEON-454",
+      "reason": "Expand-only event visibility widening for two exact ticket-snapshot types: status_autopilot.changed and status_autopilot.skipped. All tenant, visible-node, referenced-node, own-event and workspace-only domain checks remain intact. ALTER POLICY is conservatively outside the classifier allowlist. This exact-byte exception is exposed in draft PR #122 for coordinator review; database regressions exercise actual publication and project-only reads while denying cross-project references, run telemetry and unknown autopilot types. Previous-binary migration compatibility runs in CI."
+    }
+  ]
+}

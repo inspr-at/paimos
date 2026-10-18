@@ -1,0 +1,76 @@
+# SPDX-License-Identifier: AGPL-3.0-only
+# aeon:owner internal/nodes
+paths:
+  /status/help:
+    get:
+      operationId: getStatusHelp
+      summary: The same status definitions and live workspace limits for people and agents
+      description: Read-only tenant metadata for authenticated agents and people with nodes.read permission. Agent keys need no scopes or role bindings; customer sessions without nodes.read are denied, and pairing lifecycle checks remain in place. Defaults are used while Status autopilot settings are absent. Optional project_id resolves its Inherit/On/Off override through the caller's project visibility; inaccessible projects return 404. Queued describes Open or Blocked in the work queue; it is not a stored status. Work merged into another ticket is cancelled with a reason naming the destination ticket; done describes completed work merged as code or a reviewed non-code result. No status values or write permissions are changed.
+      security: *auth
+      parameters:
+        - {name: project_id, in: query, schema: {type: string, format: uuid}}
+      responses:
+        '200': {description: 'Definitions, rules and effective settings', content: {application/json: {schema: {$ref: '#/components/schemas/StatusHelp'}}}}
+        '400': {description: Invalid project id}
+        '401': {$ref: '#/components/responses/Error'}
+        '403': {$ref: '#/components/responses/Error'}
+        '404': {description: Project is not visible}
+components:
+  schemas:
+    StatusHelp:
+      type: object
+      required: [definitions, queued, autopilot, triage, limits_source]
+      properties:
+        limits_source: {type: string, enum: [defaults, workspace]}
+        project_id: {type: string, format: uuid}
+        project_name: {type: string}
+        definitions:
+          type: array
+          items:
+            type: object
+            required: [state, label, meaning, hint, set_by, exit, rules]
+            properties:
+              state: {type: string}
+              label: {type: string}
+              meaning: {type: string}
+              hint: {type: string}
+              set_by: {type: string}
+              exit: {type: boolean}
+              rules: {type: array, items: {type: string}}
+        queued:
+          type: object
+          required: [label, meaning, is_status]
+          properties:
+            label: {type: string, const: Queued}
+            meaning: {type: string}
+            is_status: {type: boolean, const: false}
+        recurring:
+          type: object
+          description: The loop marker denotes occurrence tickets, not a ticket status.
+          required: [label, meaning, is_status]
+          properties:
+            label: {type: string, const: Recurring}
+            meaning: {type: string}
+            is_status: {type: boolean, const: false}
+        autopilot:
+          type: object
+          required: [enabled, effective_enabled, project_mode, rules]
+          properties:
+            enabled: {type: boolean, description: Workspace master switch}
+            effective_enabled: {type: boolean, description: Project mode overrides the workspace master}
+            project_mode: {type: string, enum: [inherit, on, off]}
+            rules:
+              type: object
+              additionalProperties:
+                type: object
+                required: [enabled]
+                properties:
+                  enabled: {type: boolean}
+                  days: {type: integer, minimum: 1, maximum: 365}
+        triage:
+          type: object
+          required: [mode, available]
+          description: Triage autopilot is a later package; its approved default is Apply. available=false marks the planned setting rather than claiming an active engine.
+          properties:
+            mode: {type: string, enum: [off, suggest, apply]}
+            available: {type: boolean}

@@ -55,6 +55,7 @@ type Module struct {
 	current    string
 	started    time.Time
 	tickets    TicketSource
+	pending    *pendingSource
 }
 
 // New serves the embedded history; current is the running version.
@@ -70,7 +71,7 @@ func New() (*Module, error) {
 // creates its module at startup, so that moment is when the running version went
 // live on this server.
 func NewWith(h History, current string) *Module {
-	return &Module{history: h, current: current, started: time.Now().UTC().Truncate(time.Second)}
+	return &Module{history: h, current: current, started: time.Now().UTC().Truncate(time.Second), pending: newPendingSource()}
 }
 
 // UseTickets classifies changes when the history is served. Call it before
@@ -88,6 +89,7 @@ var _ httpapi.Module = (*Module)(nil)
 // presentation writes PUT and DELETE /api/releases/{version}/presentation.
 func (m *Module) Mount(mux *http.ServeMux) {
 	mux.HandleFunc("GET /api/releases", m.list)
+	mux.HandleFunc("GET /api/releases/pending", m.pendingChanges)
 	mux.HandleFunc("GET /api/releases/{version}", m.one)
 	mux.HandleFunc("PUT /api/releases/{version}/presentation", m.putPresentation)
 	mux.HandleFunc("DELETE /api/releases/{version}/presentation", m.deletePresentation)

@@ -20,7 +20,7 @@ import (
 func TestNodeChangesNameProjectFieldsAndRevisionForVisibleNodesOnly(t *testing.T) {
 	owner := newPrincipal(t, "live-node-changes")
 	project := kindBySlug(t, owner, "project")
-	ticket := kindBySlug(t, owner, "ticket")
+	ticket := kindBySlug(t, owner, "work")
 	seen := mustNode(t, owner, `{"kind_id":"`+project.ID+`","title":"Seen"}`)
 	hidden := mustNode(t, owner, `{"kind_id":"`+project.ID+`","title":"Hidden"}`)
 	open := mustNode(t, owner, `{"kind_id":"`+ticket.ID+`","parent_id":"`+seen.ID+`","title":"Open","state":"new","fields":{"priority":"low"}}`)
@@ -94,7 +94,7 @@ func TestNodeChangesNameProjectFieldsAndRevisionForVisibleNodesOnly(t *testing.T
 func TestDeleteAnswersTheRevisionOfItsEvent(t *testing.T) {
 	owner := newPrincipal(t, "live-delete-revision")
 	project := kindBySlug(t, owner, "project")
-	ticket := kindBySlug(t, owner, "ticket")
+	ticket := kindBySlug(t, owner, "work")
 	parent := mustNode(t, owner, `{"kind_id":"`+project.ID+`","title":"Project"}`)
 	node := mustNode(t, owner, `{"kind_id":"`+ticket.ID+`","parent_id":"`+parent.ID+`","title":"Doomed","state":"new"}`)
 	status, raw := call(t, &owner, http.MethodPatch, "/api/nodes/"+node.ID, `{"title":"Doomed, renamed"}`)

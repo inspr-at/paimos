@@ -8,15 +8,6 @@ import EffortMeter from '../src/components/work/EffortMeter.vue'
 import { DEFAULT_MODEL_DISPLAY, effortLevel, effortTip, fullModelName, modelCell, shownModelName, type PlanningRow } from '../src/lib/planning'
 
 describe('shared effort meter', () => {
-  it.each([0, 1, 2, 3, 4, 5])('fills level %i from the bottom using one level colour', async level => {
-    const svg = await renderToString(createSSRApp(EffortMeter, { level }))
-    expect(svg).toContain('width="6.5" height="12"')
-    expect(svg.match(/<rect /g)).toHaveLength(5)
-    expect(svg.match(/class="on"/g) ?? []).toHaveLength(level)
-    if (level) expect(svg).toContain(`--eff:var(--eff-${level})`)
-    const ys = [...svg.matchAll(/ y="([\d.]+)"/g)].map(m => Number(m[1]))
-    expect(ys).toEqual([10.25, 7.75, 5.25, 2.75, .25])
-  })
   it('hides unknown, invalid and disabled meters, including an explicitly reported zero', async () => {
     for (const level of [null, -1, 6, 1.5]) expect(await renderToString(createSSRApp(EffortMeter, { level }))).not.toContain('<svg')
     expect(await renderToString(createSSRApp(EffortMeter, { level: 0, enabled: false }))).not.toContain('<svg')
@@ -114,13 +105,16 @@ describe('per-person Display preference persistence', () => {
     })
     vi.stubGlobal('fetch', fetch)
     try {
+      const { setPreferenceOwner } = await import('../src/lib/preferences')
+      setPreferenceOwner({ tenant: { id: 'test-tenant' }, principal: { id: 'test-person' } })
       const { useModelDisplay } = await import('../src/lib/prefs')
       const prefs = useModelDisplay(); await prefs.ready
       expect(prefs.modelDisplay.value).toEqual(DEFAULT_MODEL_DISPLAY)
       prefs.set('effortMeter', false); prefs.set('modelNames', 'full'); prefs.set('modelVersion', 'hide')
       await vi.waitFor(() => expect(stored).toMatchObject({ density: 'compact', headerGraph: false, effortMeter: false, modelNames: 'full', modelVersion: 'hide' }))
-      expect(fetch.mock.calls.some(([path, init]) => String(path).includes('/preferences/list:display') && init?.method === 'PUT')).toBe(true)
+      expect(fetch.mock.calls.some(([path, init]) => decodeURIComponent(String(path)).includes('/preferences/list:display') && init?.method === 'PUT')).toBe(true)
       vi.resetModules()
+      ;(await import('../src/lib/preferences')).setPreferenceOwner({ tenant: { id: 'test-tenant' }, principal: { id: 'test-person' } })
       const reloaded = (await import('../src/lib/prefs')).useModelDisplay(); await reloaded.ready
       expect(reloaded.modelDisplay.value).toEqual({ effortMeter: false, modelNames: 'full', modelVersion: 'hide' })
     } finally { vi.unstubAllGlobals() }

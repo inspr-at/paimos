@@ -4,9 +4,7 @@ package cli
 
 import (
 	"fmt"
-	"io"
 	"net/http"
-	"os"
 	"strings"
 
 	"gopkg.in/yaml.v3"
@@ -52,9 +50,9 @@ func (rt *runtime) cmdApply() *Command {
 		var raw []byte
 		var err error
 		if path == "-" {
-			raw, err = io.ReadAll(io.LimitReader(rt.stdin, 8<<20+1))
+			raw, err = readBounded(rt.stdin, 8<<20)
 		} else {
-			raw, err = os.ReadFile(path)
+			raw, err = readBoundedFile(path, 8<<20)
 		}
 		if err != nil {
 			return rt.fail(err, "")
@@ -153,7 +151,8 @@ func (rt *runtime) cmdApply() *Command {
 				}
 			}
 			body["fields"] = fields
-			if err := rt.do(http.MethodPatch, "/api/nodes/"+n.ID, body, nil); err != nil {
+			if err := rt.patchNode(n, body, nil); err != nil {
+				fmt.Fprintf(rt.stderr, "plan stopped at %s; earlier successful changes remain applied\n", u.Ref)
 				return err
 			}
 		}

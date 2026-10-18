@@ -1,0 +1,76 @@
+# SPDX-License-Identifier: AGPL-3.0-only
+paths:
+components:
+  schemas:
+    RoutineProviderPrice:
+      type: object
+      additionalProperties: false
+      required: [provider, model, currency, source_digest, input_per_million, output_per_million, cache_read_per_million, cache_write_per_million, tool_per_unit]
+      description: 'Qualified immutable upper-bound price provenance, matched against the trusted local adapter. Token categories are disjoint; output includes reasoning. Tool units cover every additional fee. Subscription rates are zero and never become paid dollars.'
+      properties:
+        provider: {type: string, minLength: 1, maxLength: 128}
+        model: {type: string, minLength: 1, maxLength: 128}
+        currency: {type: string, const: USD}
+        source_digest: {type: string, pattern: '^[a-f0-9]{64}$'}
+        input_per_million: {type: integer, format: int64, minimum: 0}
+        output_per_million: {type: integer, format: int64, minimum: 0}
+        cache_read_per_million: {type: integer, format: int64, minimum: 0}
+        cache_write_per_million: {type: integer, format: int64, minimum: 0}
+        tool_per_unit: {type: integer, format: int64, minimum: 0}
+    RoutineProviderBudget:
+      type: object
+      additionalProperties: false
+      required: [capability, runtime_digest, tenant_id, principal_id, generation, model_profile_id, mode, grant, remaining, price, expires_at]
+      description: 'Authenticated transport seam for a held S09 actor envelope. Remaining excludes settled and unknown/in-flight calls and never exceeds the original maximum. Exact daemon generation, account, profile, runtime and price provenance must match. S11 owns authoritative issuance and final claim checks; this schema installs no endpoint or execution loop. Money and both require known paid API billing.'
+      properties:
+        capability: {type: string, const: routine_provider_budget_v1}
+        runtime_digest: {type: string, pattern: '^[a-f0-9]{64}$'}
+        tenant_id: {type: string, format: uuid}
+        principal_id: {type: string, format: uuid}
+        generation: {type: string, minLength: 1, maxLength: 128}
+        model_profile_id: {type: string, format: uuid}
+        mode: {type: string, enum: [off, tokens, money, both]}
+        grant: {$ref: '#/components/schemas/RoutineBudgetGrant'}
+        remaining: {$ref: '#/components/schemas/RoutineBudgetAmount'}
+        price: {$ref: '#/components/schemas/RoutineProviderPrice'}
+        expires_at: {type: string, format: date-time}
+    RoutineBudgetAmount:
+      type: object
+      additionalProperties: false
+      required: [tokens, paid_microusd, recovery_ms]
+      description: 'Checked integral resource amounts. Money is actual paid micro-USD, never subscription list price. Recovery milliseconds remain independent of token and money modes.'
+      properties:
+        tokens: {type: integer, format: int64, minimum: 0}
+        paid_microusd: {type: integer, format: int64, minimum: 0}
+        recovery_ms: {type: integer, format: int64, minimum: 0}
+    RoutineBudgetGrant:
+      type: object
+      required: [id, run_id, attempt_id, action_id, grant_key, agent_run_id, account_id, maximum, state, usage, billing_mode]
+      description: 'Internal broker receipt only. A subgrant consumes its parent allowance and creates no new run ceiling. Held or unknown root grants retain their process slot. This schema adds no public grant or launch endpoint.'
+      properties:
+        id: {type: string, format: uuid}
+        run_id: {type: string, format: uuid}
+        attempt_id: {type: string, format: uuid}
+        action_id: {type: string, format: uuid}
+        grant_key: {type: string, maxLength: 128}
+        parent_id: {type: string, format: uuid}
+        agent_run_id: {type: string, format: uuid}
+        account_id: {type: string, format: uuid}
+        maximum: {$ref: '#/components/schemas/RoutineBudgetAmount'}
+        state: {type: string, enum: [held, unknown, settled]}
+        usage: {$ref: '#/components/schemas/RoutineBudgetAmount'}
+        billing_mode: {type: string}
+    RoutineBudgetSettlement:
+      type: object
+      additionalProperties: false
+      required: [event_key, usage, usage_complete, tokens_known, paid_cost_known, exit_confirmed, proven_unused, evidence_digest]
+      description: 'Qualified adapter evidence. Unknown or partial usage and unknown process exit retain holds. A proven unused intent must demonstrably never have reached a provider or process. Replayed receipts settle once; changed receipts conflict.'
+      properties:
+        event_key: {type: string, maxLength: 128}
+        usage: {$ref: '#/components/schemas/RoutineBudgetAmount'}
+        usage_complete: {type: boolean}
+        tokens_known: {type: boolean}
+        paid_cost_known: {type: boolean}
+        exit_confirmed: {type: boolean}
+        proven_unused: {type: boolean}
+        evidence_digest: {type: string, pattern: '^[a-f0-9]{64}$'}

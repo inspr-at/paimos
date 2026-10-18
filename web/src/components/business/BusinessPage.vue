@@ -4,7 +4,9 @@ import { computed, onMounted } from 'vue'
 import { useRoute } from 'vue-router'
 import { useBusiness, type AreaId } from '../../stores/business'
 import { useSession } from '../../stores/session'
+import { settingsLink } from '../../lib/settings'
 import AppIcon, { type BizIconName as IconName } from './BizIcon.vue'
+import { SETUP_PLACE } from './areas'
 
 // The frame every Business page shares: eyebrow, title, one summary line, the
 // section tabs, and the closed state when the page's plugin is not enabled.
@@ -58,9 +60,10 @@ onMounted(() => { void business.loadPlugins() })
     <div v-else-if="closed" class="gate glass-card">
       <span class="gate-icon"><AppIcon name="lock" :size="18" /></span>
       <h2>{{ title }} is not enabled for this workspace</h2>
-      <p v-if="business.admin">You can enable it on the Business overview. Nothing changes for your projects until you do.</p>
+      <p v-if="business.admin">You can enable it in {{ SETUP_PLACE }}. Nothing changes for your projects until you do.</p>
       <p v-else>A workspace admin can enable it. Until then this page stays closed.</p>
-      <RouterLink class="btn" to="/business">{{ business.admin ? 'Open Business setup' : 'Business overview' }}</RouterLink>
+      <RouterLink v-if="business.admin" class="btn" :to="settingsLink('business', 'parts')">Set up in {{ SETUP_PLACE }}</RouterLink>
+      <RouterLink v-else class="btn" to="/business">Business overview</RouterLink>
     </div>
     <slot v-else />
   </section>
@@ -76,13 +79,13 @@ onMounted(() => { void business.loadPlugins() })
 @media (max-width: 600px) { .summary { min-height: 40px; } }
 .summary :deep(b) { color: var(--ink); font-weight: 600; font-variant-numeric: tabular-nums; }
 .head-actions { display: flex; align-items: center; gap: 8px; flex-shrink: 0; }
-.biz-tabs { display: flex; gap: 4px; margin: 0 0 18px; padding: 3px; width: max-content; max-width: 100%; overflow-x: auto; border-radius: 999px; background: var(--seg-bg); box-shadow: inset 0 1px 2px rgba(32, 60, 61, .08); scrollbar-width: none; }
+.biz-tabs { display: flex; gap: 4px; margin: 0 0 18px; padding: 3px; width: max-content; max-width: 100%; overflow-x: auto; border-radius: 999px; background: var(--seg-bg); box-shadow: inset 0 1px 2px color-mix(in srgb, var(--shadow-color) 8%, transparent); scrollbar-width: none; }
 .biz-tabs::-webkit-scrollbar { display: none; }
 .biz-tab { display: inline-flex; align-items: center; gap: 7px; flex-shrink: 0; height: 30px; padding: 0 14px 0 12px; border-radius: 999px; color: var(--ink-2); font-size: 13px; font-weight: 600; text-decoration: none; white-space: nowrap; }
 .biz-tab svg { color: var(--ink-3); }
 @media (hover: hover) { .biz-tab:hover { color: var(--teal-ink); background: var(--row-hover); } }
 .biz-tab:focus-visible { box-shadow: var(--focus-ring); }
-.biz-tab[aria-current="page"] { background: var(--seg-on); color: var(--teal-ink); box-shadow: 0 1px 2px rgba(32, 60, 61, .12), inset 0 0 0 1px var(--glass-edge); }
+.biz-tab[aria-current="page"] { background: var(--seg-on); color: var(--teal-ink); box-shadow: 0 1px 2px color-mix(in srgb, var(--shadow-color) 12%, transparent), inset 0 0 0 1px var(--glass-edge); }
 .biz-tab[aria-current="page"] svg { color: var(--teal); }
 .gate { display: grid; justify-items: center; gap: 8px; max-width: 560px; margin: 24px auto; padding: 44px 28px; text-align: center; }
 .gate h2 { font-size: 17px; }
@@ -106,9 +109,8 @@ onMounted(() => { void business.loadPlugins() })
   .head-actions { flex-wrap: wrap; }
 }
 @container biz-head (max-width: 560px) {
-  .biz-tabs { display: grid; grid-auto-flow: column; grid-auto-columns: minmax(0, 1fr); gap: 2px; width: auto; overflow: visible; border-radius: 16px; }
-  .biz-tab { flex-direction: column; justify-content: center; gap: 3px; height: 50px; padding: 0 2px; border-radius: 13px; font-size: 11px; }
-  .biz-tab span { max-width: 100%; overflow: hidden; text-overflow: ellipsis; }
+  .biz-tabs { flex-wrap: wrap; gap: 2px; width: auto; overflow: visible; border-radius: 16px; }
+  .biz-tab { flex: 1 0 max-content; flex-direction: column; justify-content: center; gap: 3px; height: 50px; padding: 0 2px; border-radius: 13px; font-size: 11px; }
 }
 @media (max-width: 720px) {
   .biz-page { padding: 14px 12px 20px; }
@@ -117,10 +119,10 @@ onMounted(() => { void business.loadPlugins() })
   .biz-tabs { width: auto; margin-bottom: 14px; }
   .biz-tab { height: 36px; }
 }
-/* Phones: every tab in one row, icon over label; nothing scrolls sideways or is cut. */
+/* Phones: icon over label, with intrinsic label room. Longer labels wrap the
+   tab row rather than clipping a name or scrolling the page sideways. */
 @media (max-width: 600px) {
-  .biz-tabs { display: grid; grid-auto-flow: column; grid-auto-columns: minmax(0, 1fr); gap: 2px; width: auto; overflow: visible; border-radius: 16px; }
-  .biz-tab { flex-direction: column; justify-content: center; gap: 3px; height: 50px; padding: 0 2px; border-radius: 13px; font-size: 11px; }
-  .biz-tab span { max-width: 100%; }
+  .biz-tabs { flex-wrap: wrap; gap: 2px; width: auto; overflow: visible; border-radius: 16px; }
+  .biz-tab { flex: 1 0 max-content; flex-direction: column; justify-content: center; gap: 3px; height: 50px; padding: 0 2px; border-radius: 13px; font-size: 11px; }
 }
 </style>

@@ -1,0 +1,93 @@
+# SPDX-License-Identifier: AGPL-3.0-only
+# aeon:owner internal/auth
+paths:
+  /v1/setup:
+    servers: [{url: 'http://agentd'}]
+    post:
+      operationId: advanceLocalAgentdEnrollment
+      summary: Advance enrollment through the running daemon's private Unix socket
+      description: 'Local only; never mounted on the Aeon HTTP server. Requires the private socket bearer token and an owned mode-0600 Unix socket. Serializes add-harness and request-bound polling with lifecycle reconciliation. Local candidate paths and identities remain on this computer. Each new login still needs separate person approval in Aeon. This route never installs, reloads, adopts or removes a service, and never upgrades a confirmation key.'
+      security: [{localAgentdToken: []}]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/LocalAgentdSetupRequest'}
+      responses:
+        '200':
+          description: 'Safe enrollment progress; no installation proof or runtime credential.'
+          content:
+            application/json:
+              schema: {type: object, required: [schema, stage, local_processes], additionalProperties: true}
+        '400': {description: 'Invalid or oversized request (maximum 64 KiB).'}
+        '401': {description: 'Private socket authentication required.'}
+        '409': {description: 'Enrollment refused; bounded diagnostic text states the reason.'}
+  /agentd/step-ups/{challenge_id}:
+    get:
+      operationId: getAgentdStepUp
+      summary: Fetch the original confirmation challenge through the paired daemon
+      description: >-
+        Requires the computer's exact paired runtime bearer key and lifecycle proof.
+        Agents pass only challenge_id to agentd. The daemon fetches this resource at
+        its pinned server origin and displays this server-generated summary; it must
+        never display a summary forwarded by the requesting agent. A sibling key,
+        another computer or tenant, an inactive pairing or a consumed, superseded,
+        expired or signer-mismatched challenge cannot retrieve it. No proof in URLs.
+        AEON-580 implements this endpoint; AEON-581 consumes it. The computer must
+        be the workstation bound to the challenged key, with a pinned confirmation
+        key. Never return nonce, digest or summary through the agent's 428 response.
+        The daemon shows summary verbatim and signs SHA-256(nonce || action_digest),
+        concatenating the two lowercase 64-character hex wire strings. The client
+        retries exactly once with Aeon-Step-Up: <challenge_id>.<base64 ASN.1 DER P-256 signature>.
+        The server must consume the proof atomically with the exact bound mutation.
+      security: [{agentKey: []}]
+      parameters:
+        - {name: challenge_id, in: path, required: true, schema: {type: string, format: uuid}}
+        - {name: Aeon-Computer-ID, in: header, required: true, schema: {type: string, format: uuid}}
+        - {name: Aeon-Device-Proof, in: header, required: true, schema: {type: string, pattern: '^[0-9a-f]{64}$'}, description: Pairing lifecycle secret retained by agentd; never forwarded to the requesting agent or logged.}
+      responses:
+        '200':
+          description: Original challenge for this computer; Cache-Control no-store
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: false
+                required: [summary, nonce, action_digest, expires_at, computer_id]
+                properties:
+                  summary: {type: string, minLength: 1, maxLength: 256, description: 'Server-authored action, escaped route, canonical query and stored target names including query-selected roles; at most 256 UTF-8 bytes, no control or format characters. Names and fields are never shortened or omitted to fit; an incomplete summary fails challenge creation with 400.'}
+                  nonce: {type: string, pattern: '^[0-9a-f]{64}$'}
+                  action_digest: {type: string, pattern: '^[0-9a-f]{64}$'}
+                  expires_at: {type: string, format: date-time}
+                  computer_id: {type: string, format: uuid}
+        '403': {description: Paired runtime and device proof required}
+        '404': {description: Challenge unavailable for this computer}
+        '410': {description: Challenge expired or already consumed}
+components:
+  securitySchemes:
+    localAgentdToken: {type: http, scheme: bearer, description: 'Owner-only local socket token; never an Aeon API key.'}
+  schemas:
+    LocalAgentdSetupRequest:
+      type: object
+      additionalProperties: false
+      required: [operation]
+      properties:
+        operation: {type: string, enum: [add_harness, step]}
+        request_id: {type: string, format: uuid, description: 'Required for step; must match the current pairing request.'}
+        candidates:
+          type: array
+          maxItems: 7
+          items:
+            type: object
+            required: [candidate, path, identity, version]
+            properties:
+              candidate: {$ref: '#/components/schemas/PairingAccountChoice'}
+              path: {type: string, maxLength: 4096}
+              home: {type: string, maxLength: 4096}
+              identity: {type: string, maxLength: 128}
+              version: {type: string, maxLength: 128}
+              grok: {type: object}
+              pi_node: {type: object}
+              node: {type: object}
+        node_path: {type: string, maxLength: 4096}
+        claude_sdk_path: {type: string, maxLength: 4096}

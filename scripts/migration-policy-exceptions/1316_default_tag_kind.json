@@ -1,0 +1,11 @@
+{
+  "schema": "aeon.migration-policy-exceptions.v1",
+  "exceptions": [
+    {
+      "file": "1316_default_tag_kind.sql",
+      "sha256": "7a08542e0e6370049df9f92e88f640aab83a6c267e0cf525795171e3039feb00",
+      "ticket": "AEON-826",
+      "reason": "Additive tag-kind seed and new-tenant trigger only. The conservative classifier rejects the procedural DO backfill and the DO token in ON CONFLICT DO NOTHING. Existing tag rows, node kind customizations, RLS and agent permissions remain untouched. Database acceptance coverage verifies missing-kind upgrades, fresh tenants, repeated initialization, custom-definition preservation and tenant separation. This exact-byte exception accompanies the reserved migration for coordinator review; no guard or CI pipeline changes."
+    }
+  ]
+}

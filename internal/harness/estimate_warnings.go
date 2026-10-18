@@ -55,7 +55,7 @@ func heartbeatEstimateWarnings(ctx context.Context, tx pgx.Tx, s Session, progre
 		var fields json.RawMessage
 		err := tx.QueryRow(ctx, `SELECT n.fields FROM nodes n
 			JOIN node_kinds k ON k.tenant_id=n.tenant_id AND k.id=n.kind_id
-			WHERE n.id=$1 AND n.project_id=$2 AND n.deleted_at IS NULL AND k.slug IN ('ticket','task')`, *s.TicketNodeID, s.ProjectID).Scan(&fields)
+			WHERE n.id=$1 AND n.project_id=$2 AND n.deleted_at IS NULL AND k.slug IN ('work','ticket','task')`, *s.TicketNodeID, s.ProjectID).Scan(&fields)
 		if err != nil && err != pgx.ErrNoRows {
 			return nil, err
 		}

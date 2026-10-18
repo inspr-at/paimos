@@ -141,7 +141,7 @@ func (m *Module) convertNode(ctx context.Context, p tenant.Principal, id, toKind
 				return err
 			}
 			node.Estimate = views[id]
-			return nil
+			return loadQueueProjection(ctx, tx, &node)
 		}
 		if !issueFamilyKind(currentKind) || !issueFamilyKind(target) {
 			return conflictCoded("kind is immutable", codeKindChangeNotAllowed)
@@ -235,7 +235,7 @@ func (m *Module) convertNode(ctx context.Context, p tenant.Principal, id, toKind
 			return err
 		}
 		node.Estimate = views[id]
-		return nil
+		return loadQueueProjection(ctx, tx, &node)
 	})
 	return node, err
 }
@@ -306,7 +306,7 @@ func offenders(children []kindOffender, allowed []string) []kindOffender {
 // fitKindFields keeps the fields the target schema allows. Fields it rejects as
 // undeclared are removed from the live node; the caller stores them in the
 // event's before snapshot. The kept object is accepted only by the same
-// schema.validate PATCH uses, including root constraints.
+// schema.Validate PATCH uses, including root constraints.
 func fitKindFields(schema *jsSchema, raw json.RawMessage) (stored json.RawMessage, dropped, violations []string, err error) {
 	if len(strings.TrimSpace(string(raw))) == 0 || string(raw) == "null" {
 		raw = json.RawMessage(`{}`)
@@ -320,10 +320,10 @@ func fitKindFields(schema *jsSchema, raw json.RawMessage) (stored json.RawMessag
 		return nil, nil, []string{"fields"}, nil
 	}
 	fitted := obj
-	if schema != nil && schema.additionalSet && !schema.additionalAllow && schema.additionalSchema == nil {
+	if schema != nil && schema.DisallowsUndeclared() {
 		fitted = map[string]any{}
 		for name, child := range obj {
-			if _, declared := schema.props[name]; declared {
+			if _, declared := schema.Properties()[name]; declared {
 				fitted[name] = child
 			} else {
 				dropped = append(dropped, name)
@@ -332,7 +332,7 @@ func fitKindFields(schema *jsSchema, raw json.RawMessage) (stored json.RawMessag
 		sort.Strings(dropped)
 	}
 	if schema != nil {
-		if valErr := schema.validate(fitted); valErr != nil {
+		if valErr := schema.Validate(fitted); valErr != nil {
 			return nil, dropped, violationNames(schema, fitted, valErr), nil
 		}
 	}
@@ -356,17 +356,17 @@ func violationNames(schema *jsSchema, obj map[string]any, valErr error) []string
 		seen[name] = true
 		names = append(names, name)
 	}
-	for _, name := range schema.required {
+	for _, name := range schema.Required() {
 		if _, ok := obj[name]; !ok {
 			add(name)
 		}
 	}
-	for name, sub := range schema.props {
+	for name, sub := range schema.Properties() {
 		child, ok := obj[name]
 		if !ok || sub == nil {
 			continue
 		}
-		if sub.validateAt("fields."+name, child) != nil {
+		if sub.ValidateAt("fields."+name, child) != nil {
 			add(name)
 		}
 	}

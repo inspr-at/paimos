@@ -2,15 +2,15 @@
 <script setup lang="ts">
 import '../../styles/crm.css'
 import { computed, nextTick, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue'
-import { onBeforeRouteLeave, useRoute, useRouter } from 'vue-router'
+import { onBeforeRouteLeave, onBeforeRouteUpdate, useRoute, useRouter } from 'vue-router'
 import {
-  addressLines, blankCustomer, deleteCustomer, draftOf, draftProblems, errorText, getCustomer, getRelated, listContacts, minorMoney, placeOf, sameDraft, setCustomerArchived, statusOf, telHref, undoLatest,
+  addressLines, blankCustomer, deleteCustomer, draftOf, draftProblems, errorText, getCustomer, getRelated, listContacts, minorMoney, placeOf, sameDraft, setCustomerArchived, statusOf, telHref, undoEvents,
   updateCustomer, websiteHost, writeOf, type Contact, type Customer, type CustomerDraft, type Related,
 } from '../../lib/crm'
 import { setPageTitle } from '../../lib/brand'
 import { confirmAction } from '../../lib/confirm'
 import { useSession } from '../../stores/session'
-import { toast } from '../../lib/toast'
+import { captureToastOwner, toast } from '../../lib/toast'
 import { useBusiness } from '../../stores/business'
 import { useCustomers } from '../../stores/customers'
 import AppIcon from '../../components/AppIcon.vue'
@@ -33,6 +33,13 @@ const route = useRoute()
 const router = useRouter()
 const business = useBusiness()
 const store = useCustomers()
+const session = useSession()
+const viewer = computed(() => session.identity ? `${session.identity.tenant.id}/${session.identity.principal.id}` : '')
+let generation = 0
+function capture() {
+  const targetId = id.value, owner = viewer.value, request = generation
+  return { id: targetId, current: () => request === generation && targetId === id.value && owner === viewer.value && !!owner && session.authenticationCurrent?.() !== false }
+}
 const id = computed(() => String(route.params.id ?? ''))
 const customer = ref<Customer | null>(null)
 const contacts = ref<Contact[] | null>(null)
@@ -54,34 +61,39 @@ function quoteCreated(quote: { quote_node_id: string; offer_no?: string }) {
 }
 const mac = /Mac|iPhone|iPad/.test(navigator.platform || navigator.userAgent)
 
-async function loadCustomer() {
+async function loadCustomer(action = capture()) {
   try {
-    const fresh = await getCustomer(id.value)
+    const fresh = await getCustomer(action.id)
+    if (!action.current()) return
     customer.value = fresh; store.upsert(fresh); state.value = 'ready'
     setPageTitle(fresh.name)
   } catch (e) {
-    if (statusOf(e) === 404) { state.value = 'missing'; store.remove(id.value); setPageTitle('Customer not found') }
+    if (!action.current()) return
+    if (statusOf(e) === 404) { state.value = 'missing'; store.remove(action.id); setPageTitle('Customer not found') }
     else if (!customer.value) { state.value = 'error'; loadError.value = errorText(e, 'This customer could not be loaded.') }
   }
 }
-async function loadContacts() {
-  try { contacts.value = await listContacts(id.value); contactsError.value = ''; for (const c of contacts.value) store.setContact(c.id, { name: c.name, email: c.email, role: c.role }) }
-  catch (e) { if (statusOf(e) !== 404) contactsError.value = errorText(e, 'Contacts could not be loaded.') }
+async function loadContacts(action = capture()) {
+  try { const found = await listContacts(action.id); if (!action.current()) return; contacts.value = found; contactsError.value = ''; for (const c of contacts.value) store.setContact(c.id, { name: c.name, email: c.email, role: c.role }) }
+  catch (e) { if (action.current() && statusOf(e) !== 404) contactsError.value = errorText(e, 'Contacts could not be loaded.') }
 }
-async function loadRelated() {
-  try { related.value = await getRelated(id.value); relatedError.value = '' }
-  catch (e) { if (statusOf(e) !== 404) relatedError.value = errorText(e, 'Projects, quotes and hours could not be loaded.') }
+async function loadRelated(action = capture()) {
+  try { const found = await getRelated(action.id); if (!action.current()) return; related.value = found; relatedError.value = '' }
+  catch (e) { if (action.current() && statusOf(e) !== 404) relatedError.value = errorText(e, 'Projects, quotes and hours could not be loaded.') }
 }
 async function load() {
+  generation++
+  const action = capture()
+  loadError.value = ''; contactsError.value = ''; relatedError.value = ''
   const known = store.items?.find(c => c.id === id.value)
   customer.value = known ?? null; contacts.value = null; related.value = null
   state.value = known ? 'ready' : 'loading'
   if (known) setPageTitle(known.name)
-  await Promise.all([loadCustomer(), loadContacts(), loadRelated()])
+  await Promise.all([loadCustomer(action), loadContacts(action), loadRelated(action)])
 }
 // A contact change moves the customer's revision (the primary contact), so both reload.
 async function contactsChanged() { await Promise.all([loadCustomer(), loadContacts()]) }
-function updated(next: Customer) { customer.value = next; store.upsert(next); setPageTitle(next.name) }
+function updated(next: Customer) { if (next.id !== id.value) return; customer.value = next; store.upsert(next); setPageTitle(next.name) }
 
 const primary = computed(() => contacts.value?.find(c => c.primary) ?? null)
 const rate = computed(() => customer.value ? minorMoney(customer.value.hourly_rate_minor, customer.value.currency) : '')
@@ -111,8 +123,8 @@ async function startEdit() {
   name?.focus(); name?.setSelectionRange(name.value.length, name.value.length)
 }
 async function save() {
-  const current = customer.value
-  if (!current || saving.value) return
+  const action = capture(), current = customer.value
+  if (!current || !action.current() || current.id !== action.id || saving.value) return
   touched.value = true
   if (Object.keys(problems.value).length) {
     await nextTick(); document.querySelector<HTMLInputElement>('.edit-card [aria-invalid="true"]')?.focus()
@@ -122,31 +134,35 @@ async function save() {
   saving.value = true
   try {
     const next = await updateCustomer(current.id, writeOf(draft, current), current.revision)
+    if (!action.current()) return
     updated(next)
     editing.value = false; conflict.value = false
     toast(`Saved ${next.name}.`, {
       timeout: 8000,
-      action: { label: 'Undo', run: () => { void undoLatest([{ node: next.id, types: ['crm.customer_updated'] }]).then(() => { void loadCustomer(); toast(`${next.name} is back as it was.`) }).catch(e => toast(errorText(e), { tone: 'error' })) } },
+      action: { label: 'Undo', run: () => { void undoEvents(next.event_ids).then(() => { if (!action.current()) return; void loadCustomer(); toast(`${next.name} is back as it was.`) }).catch(e => toast(errorText(e), { tone: 'error' })) } },
     })
     void nextTick(() => editButton.value?.focus({ preventScroll: true }))
   } catch (e) {
+    if (!action.current()) return
     if (statusOf(e) === 409 && !/not enabled/.test(errorText(e))) {
       // The newer version is loaded; the draft stays, and saving again replaces it.
       conflict.value = true
       await loadCustomer()
     } else toast(errorText(e, 'The customer was not saved.'), { tone: 'error' })
-  } finally { saving.value = false }
+  } finally { if (action.current()) saving.value = false }
 }
 async function cancel() {
   if (dirty.value && !(await confirmAction({ title: 'Discard your changes?', body: `Your edits to ${customer.value?.name ?? 'this customer'} have not been saved.`, confirmLabel: 'Discard', danger: true }))) return
   editing.value = false; conflict.value = false
   void nextTick(() => editButton.value?.focus({ preventScroll: true }))
 }
-onBeforeRouteLeave(async to => {
+async function confirmLeave(to: { path: string }) {
   if (to.path === '/signin' && useSession().requiresSignIn) return true
   if (!dirty.value) return true
   return confirmAction({ title: 'Leave without saving?', body: `Your edits to ${customer.value?.name ?? 'this customer'} have not been saved.`, confirmLabel: 'Leave', danger: true })
-})
+}
+onBeforeRouteLeave(confirmLeave)
+onBeforeRouteUpdate((to, from) => to.params.id === from.params.id || confirmLeave(to))
 function beforeUnload(event: BeforeUnloadEvent) { if (dirty.value) event.preventDefault() }
 
 // ---------- More: copy link, delete ----------
@@ -169,20 +185,23 @@ async function copyLink() {
 // Archiving keeps everything that depends on the customer and hides it from
 // lists and pickers; the toast undoes it.
 async function archive(archived: boolean) {
+  const action = capture()
   const c = customer.value
   moreAnchor.value = null
   if (!c) return
   try {
     const next = await setCustomerArchived(c.id, c.revision, archived)
+    if (!action.current()) return
     customer.value = next
     store.upsert(next)
     toast(archived ? `Archived ${c.name}. Its quotes, projects and hours stay; new quotes no longer offer it.` : `${c.name} is back in the list.`, {
       timeout: 8000,
-      action: { label: 'Undo', run: () => { void undoLatest([{ node: c.id, types: ['crm.customer_visibility_changed'] }]).then(() => { void loadCustomer(); void store.load(true) }).catch(e => toast(errorText(e), { tone: 'error' })) } },
+      action: { label: 'Undo', run: () => { void undoEvents(next.event_ids).then(() => { if (!action.current()) return; void loadCustomer(); void store.load(true) }).catch(e => toast(errorText(e), { tone: 'error' })) } },
     })
-  } catch (e) { toast(errorText(e, 'That did not work.'), { tone: 'error' }) }
+  } catch (e) { if (action.current()) toast(errorText(e, 'That did not work.'), { tone: 'error' }) }
 }
 async function remove() {
+  const action = capture(), samePerson = captureToastOwner()
   const c = customer.value
   moreAnchor.value = null
   if (!c) return
@@ -192,17 +211,18 @@ async function remove() {
     body: people.length ? `Its ${people.length === 1 ? 'contact goes' : `${people.length} contacts go`} with it. You can undo this right after.` : 'You can undo this right after.',
     confirmLabel: 'Delete customer', danger: true,
   })
-  if (!ok) return
+  if (!ok || !action.current()) return
   try {
-    await deleteCustomer(c.id)
+    const receipt = await deleteCustomer(c.id)
+    if (!action.current()) return
     store.remove(c.id)
     void router.push('/business/customers')
-    const steps = [{ node: c.id, types: ['crm.customer_deleted'] }, ...people.map(p => ({ node: p.id, types: ['crm.contact_deleted'] })), ...(c.primary_contact_node_id ? [{ node: c.id, types: ['crm.primary_contact_changed'] }] : [])]
     toast(`Deleted ${c.name}.`, {
       timeout: 8000,
-      action: { label: 'Undo', run: () => { void undoLatest(steps).then(() => { void store.load(true); toast(`${c.name} is back.`) }).catch(e => toast(errorText(e), { tone: 'error' })) } },
+      action: { label: 'Undo', run: () => { void undoEvents(receipt.event_ids).then(() => { if (!samePerson()) return; void store.load(true); toast(`${c.name} is back.`) }).catch(e => { if (samePerson()) toast(errorText(e), { tone: 'error' }) }) } },
     })
   } catch (e) {
+    if (!action.current()) return
     toast(statusOf(e) === 409 ? `${c.name} has projects or quotes, so it stays.` : errorText(e, 'The customer was not deleted.'), { tone: 'error' })
   }
 }
@@ -222,9 +242,9 @@ function keys(event: KeyboardEvent) {
   if (event.key === 'e' && admin.value && state.value === 'ready') { event.preventDefault(); void startEdit() }
 }
 onMounted(() => { window.addEventListener('keydown', keys); window.addEventListener('beforeunload', beforeUnload) })
-onBeforeUnmount(() => { window.removeEventListener('keydown', keys); window.removeEventListener('beforeunload', beforeUnload) })
+onBeforeUnmount(() => { generation++; window.removeEventListener('keydown', keys); window.removeEventListener('beforeunload', beforeUnload) })
 // Only this page's own route loads (leaving it clears the id before it unmounts).
-watch(id, value => { if (!value || !route.path.startsWith('/business/customers/')) return; editing.value = false; void load() }, { immediate: true })
+watch([id, viewer], ([value]) => { generation++; editing.value = false; saving.value = false; conflict.value = false; moreAnchor.value = null; if (!value || !viewer.value || !route.path.startsWith('/business/customers/')) { customer.value = null; contacts.value = null; related.value = null; return }; void load() }, { immediate: true, flush: 'sync' })
 </script>
 
 <template>
@@ -283,7 +303,7 @@ watch(id, value => { if (!value || !route.path.startsWith('/business/customers/'
     <!-- Edit mode: the whole customer as one form, one Save -->
     <form v-else-if="editing && customer" class="edit-card glass-card" :aria-label="`Edit ${customer.name}`" novalidate @submit.prevent="save">
       <p v-if="conflict" class="f-error" role="alert"><AppIcon name="alert" :size="14" /><span><strong>Changed elsewhere while you were editing.</strong> Your changes are kept below; saving again replaces the newer version.</span></p>
-      <CustomerForm :draft="draft" :problems="problems" :touched="touched" />
+      <CustomerForm :key="customer.id" :draft="draft" :problems="problems" :touched="touched" />
       <footer class="edit-foot">
         <p class="f-hint"><KeyCap k="mod" /><KeyCap k="enter" /> save · <kbd class="keycap">esc</kbd> cancel</p>
         <span v-if="dirty" class="unsaved">Unsaved</span>
@@ -329,9 +349,9 @@ watch(id, value => { if (!value || !route.path.startsWith('/business/customers/'
 
       <div class="layout">
         <div class="main-col">
-          <ContactList ref="contactList" :customer="customer" :contacts="contacts" :admin="admin" :error="contactsError" @changed="contactsChanged" />
-          <RelatedSection :related="related" :customer-id="id" :admin="admin" :error="relatedError" :can-quote="canQuote" @retry="loadRelated" @changed="loadRelated" @new-quote="newQuote" />
-          <NotesSection :customer="customer" :admin="admin" @updated="updated" @reload="loadCustomer" />
+          <ContactList :key="customer.id" ref="contactList" :customer="customer" :contacts="contacts" :admin="admin" :error="contactsError" @changed="contactsChanged" />
+          <RelatedSection :key="customer.id" :related="related" :customer-id="id" :admin="admin" :error="relatedError" :can-quote="canQuote" @retry="loadRelated" @changed="loadRelated" @new-quote="newQuote" />
+          <NotesSection :key="customer.id" :customer="customer" :admin="admin" @updated="updated" @reload="loadCustomer" />
         </div>
         <aside class="side-col" aria-label="Details">
           <section class="crm-card glass-card" aria-labelledby="about-title">
@@ -371,7 +391,7 @@ watch(id, value => { if (!value || !route.path.startsWith('/business/customers/'
               </div>
             </div>
           </section>
-          <IntegrationCard :admin="admin" :customer="customer" @synced="updated" />
+          <IntegrationCard :key="customer.id" :admin="admin" :customer="customer" @synced="updated" />
         </aside>
       </div>
     </template>
@@ -388,7 +408,7 @@ watch(id, value => { if (!value || !route.path.startsWith('/business/customers/'
 @media (max-width: 600px) { .back, .site { min-height: 44px; } }
 .site:hover { text-decoration: underline; }
 .summary-skeleton { display: inline-block; width: 240px; }
-.unsaved { font-size: 12px; font-weight: 600; color: var(--gold-ink); }
+.unsaved { font-size: 12px; font-weight: 600; color: var(--warn-ink); }
 .state { display: grid; justify-items: center; gap: 8px; max-width: 580px; margin: 12px auto 0; padding: 44px 28px; text-align: center; }
 .state h2 { font-size: 17px; }
 .state p { max-width: 46ch; font-size: 13.5px; color: var(--ink-2); }

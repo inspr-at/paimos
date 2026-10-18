@@ -176,7 +176,7 @@ func withProductNotes(h History, bundle ProductNotes) History {
 	}
 	h.Releases = append([]Release{}, h.Releases...)
 	for i, rel := range h.Releases {
-		if rel.State != StatePublished || HasSnapshot(rel) {
+		if (rel.State != StatePublished && rel.State != StateCandidate) || HasSnapshot(rel) {
 			continue
 		}
 		public, ok := bundle.Releases[rel.Version]
@@ -307,16 +307,21 @@ func applyClassification(notes *Notes, live map[string]TicketMeta) *Notes {
 
 func cloneNotes(n *Notes) *Notes {
 	c := *n
-	if n.Items != nil {
-		c.Items = append([]NoteItem(nil), n.Items...)
-	}
-	if n.PublicItems != nil {
-		c.PublicItems = append([]TicketNote(nil), n.PublicItems...)
-	}
-	if n.Gaps != nil {
-		c.Gaps = append([]string(nil), n.Gaps...)
-	}
+	c.Items = cloneKeepNil(n.Items)
+	c.PublicItems = cloneKeepNil(n.PublicItems)
+	c.Gaps = cloneKeepNil(n.Gaps)
 	return &c
+}
+
+// cloneKeepNil copies a slice. A nil slice stays nil so an absent historical
+// snapshot field remains null. An empty slice stays empty so JSON emits [].
+func cloneKeepNil[T any](in []T) []T {
+	if in == nil {
+		return nil
+	}
+	out := make([]T, len(in))
+	copy(out, in)
+	return out
 }
 
 // captureHasGroup reports a capture that already stored at least one group.

@@ -145,7 +145,7 @@ func seedAnalysisOutcomes(t *testing.T, f doctrineFixture, p tenant.Principal, p
 		}
 		for i := 0; i < 3; i++ {
 			var ticket, session, provenance string
-			if err := tx.QueryRow(t.Context(), `INSERT INTO nodes(tenant_id,kind_id,key,title,parent_id) SELECT $1,id,$2,'Outcome fixture',$3 FROM node_kinds WHERE tenant_id=$1 AND slug='ticket' RETURNING nodes.id::text`, p.TenantID, fmt.Sprintf("%s-%d", prefix, i+2), project).Scan(&ticket); err != nil {
+			if err := tx.QueryRow(t.Context(), `INSERT INTO nodes(tenant_id,kind_id,key,title,parent_id) SELECT $1,id,$2,'Outcome fixture',$3 FROM node_kinds WHERE tenant_id=$1 AND slug='work' RETURNING nodes.id::text`, p.TenantID, fmt.Sprintf("%s-%d", prefix, i+2), project).Scan(&ticket); err != nil {
 				return err
 			}
 			ids = append(ids, ticket)
@@ -436,7 +436,7 @@ func TestAnalysisCapsAndRuleDedupe(t *testing.T) {
 		t.Fatal(err)
 	}
 	first := finding{Pattern: "gate:validation", RulesVersion: "v1", Harness: "codex", TicketKind: "ticket", Count: 3, Status: "pending"}
-	src, in, ok := analysisTarget(layer, first)
+	src, in, ok := New(nil, Options{}).analysisTarget(layer, first)
 	if !ok {
 		t.Fatal("fixture mapping")
 	}

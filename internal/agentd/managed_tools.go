@@ -20,7 +20,9 @@ import (
 	"time"
 
 	"github.com/inspr-at/paimos/internal/agentactivity"
+	"github.com/inspr-at/paimos/internal/agentsetup"
 	"github.com/inspr-at/paimos/internal/deploytarget"
+	"github.com/inspr-at/paimos/internal/httpapi"
 	"github.com/inspr-at/paimos/internal/ownedprocess"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 )
@@ -41,17 +43,27 @@ func (s *managedToolServer) Close() error {
 }
 
 type toolBinding struct {
+	routine                               *agentsetup.RoutineGrant
+	browser                               BrowserCaptureRequester
+	resourceEnvironment                   []string
 	reportActivity                        func(string) (string, bool)
 	api                                   RunToolAPI
 	workOrderID, runID, workspace, branch string
 	active                                func() bool
-	replySender                           func(string) (string, bool)
+	replySender                           func(string) (InboxReplyTarget, bool)
 	requestDone                           func()
 }
 
 func startManagedTools(credential string, b toolBinding) (*managedToolServer, error) {
 	if credential == "" || b.api == nil || b.workOrderID == "" || b.runID == "" || b.workspace == "" || b.active == nil {
 		return nil, errors.New("managed tools are not bound")
+	}
+	if b.routine != nil {
+		grant := *b.routine
+		if grant.Validate() != nil || grant.AgentRunID != b.runID || b.branch != "routine/"+grant.LaunchID {
+			return nil, ErrRoutineToolsUnavailable
+		}
+		b.routine = &grant
 	}
 	listener, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
@@ -63,17 +75,19 @@ func startManagedTools(credential string, b toolBinding) (*managedToolServer, er
 	h := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		// A loopback bind alone does not prevent browser requests or DNS rebinding.
 		if r.Host != listener.Addr().String() || r.Header.Get("Origin") != "" ||
+			b.routine != nil && r.URL.Path != "/" ||
 			subtle.ConstantTimeCompare([]byte(strings.TrimPrefix(r.Header.Get("Authorization"), "Bearer ")), []byte(credential)) != 1 ||
 			!b.active() {
 			http.Error(w, "run capability unavailable", http.StatusForbidden)
 			return
 		}
-		r.Body = http.MaxBytesReader(w, r.Body, 64<<10)
+		r.Body = httpapi.RequestBodyReader(w, r, 64<<10)
 		mcpHandler.ServeHTTP(w, r)
 	})
-	httpServer := &http.Server{Handler: h, ReadHeaderTimeout: 5 * time.Second}
+	httpServer := &http.Server{Handler: httpapi.RequestBodyMiddleware(h), ReadHeaderTimeout: 5 * time.Second, ReadTimeout: 20 * time.Second, IdleTimeout: time.Minute}
 	out := &managedToolServer{listener: listener, server: httpServer,
-		tools: RunTools{URL: "http://" + listener.Addr().String(), Token: credential}}
+		tools: RunTools{URL: "http://" + listener.Addr().String(), Token: credential, Routine: b.routine != nil,
+			BrowserCaptureOnly: b.routine != nil && b.routine.RuntimeCapability == agentsetup.RoutineBrowserCapability}}
 	go func() { _ = httpServer.Serve(listener) }()
 	return out, nil
 }
@@ -119,6 +133,17 @@ type activityResult struct {
 }
 
 func addManagedTools(s *mcp.Server, b toolBinding) {
+	if b.routine != nil {
+		addBrowserCaptureTool(s, b)
+		if b.routine.RuntimeCapability == agentsetup.RoutineBrowserCapability {
+			return
+		}
+		// Outward catalogue/evaluation/spend tools belong to the broker, never
+		// the builder's legacy daemon API credential or prompt instructions.
+		addManagedFileTools(s, b)
+		addManagedTerminalTool(s, b)
+		return
+	}
 	if b.reportActivity != nil {
 		mcp.AddTool(s, &mcp.Tool{Name: "aeon_activity", Description: "Read the workspace activity mode. In agent_summary mode, optionally report what you are doing at a phase change. Off and tool_activity require no summary."}, func(_ context.Context, _ *mcp.CallToolRequest, in activityArgs) (*mcp.CallToolResult, activityResult, error) {
 			if !b.active() {
@@ -135,8 +160,6 @@ func addManagedTools(s *mcp.Server, b toolBinding) {
 	}
 
 	addManagedFileTools(s, b)
-	// Cache qualified library closures only for this managed run.
-	var libraries terminalLibraryCache
 	mcp.AddTool(s, &mcp.Tool{Name: "aeon_comment", Description: "Comment on the bound work order."},
 		func(ctx context.Context, _ *mcp.CallToolRequest, in commentArgs) (*mcp.CallToolResult, string, error) {
 			if !b.active() || len(in.Body) > 65536 || strings.TrimSpace(in.Body) == "" {
@@ -206,17 +229,26 @@ func addManagedTools(s *mcp.Server, b toolBinding) {
 				return nil, "", errors.New("inbox delivery is not bound")
 			}
 			sender, ok := b.replySender(in.MessageID)
-			if !ok || !uuidPattern.MatchString(sender) {
+			if !ok || !uuidPattern.MatchString(sender.PrincipalID) {
 				return nil, "", errors.New("inbox delivery is not bound")
 			}
 			return nil, "reply recorded", b.api.ReplyInbox(ctx, in.MessageID, sender, in.Body, in.IdempotencyKey)
 		})
-	mcp.AddTool(s, &mcp.Tool{Name: "aeon_terminal", Description: "Run an allowlisted test, build, or git operation in this run's workspace. No shell and no push."},
+	addManagedTerminalTool(s, b)
+}
+
+func addManagedTerminalTool(s *mcp.Server, b toolBinding) {
+	// Cache qualified library closures only for this managed run.
+	var libraries terminalLibraryCache
+	mcp.AddTool(s, &mcp.Tool{Name: "aeon_terminal", Description: "Run an allowlisted test, build, or git operation in this run's workspace. No shell and no push. Unqualified routine terminal isolation refuses before execution."},
 		func(ctx context.Context, _ *mcp.CallToolRequest, in terminalArgs) (*mcp.CallToolResult, string, error) {
 			if !b.active() {
 				return nil, "", ErrNotOwned
 			}
-			out, err := libraries.runTerminal(ctx, b.workspace, b.branch, in)
+			if b.routine != nil {
+				return nil, "", routineTerminalAllowed(in)
+			}
+			out, err := libraries.runTerminalWithResources(ctx, b.workspace, b.branch, in, b.resourceEnvironment)
 			return nil, out, err
 		})
 }
@@ -248,6 +280,10 @@ func runTerminal(ctx context.Context, workspace, branch string, in terminalArgs)
 }
 
 func (libraries *terminalLibraryCache) runTerminal(ctx context.Context, workspace, branch string, in terminalArgs) (string, error) {
+	return libraries.runTerminalWithResources(ctx, workspace, branch, in, nil)
+}
+
+func (libraries *terminalLibraryCache) runTerminalWithResources(ctx context.Context, workspace, branch string, in terminalArgs, resources []string) (string, error) {
 	if in.Directory != "" && in.Directory != "root" && in.Directory != "web" {
 		return "", errors.New("terminal directory denied")
 	}
@@ -301,7 +337,7 @@ func (libraries *terminalLibraryCache) runTerminal(ctx context.Context, workspac
 	if pathWithin(workspace, physicalHome) {
 		return "", errors.New("terminal workspace contains home")
 	}
-	tmp, err := os.MkdirTemp("", "aeon-terminal-")
+	tmp, err := os.MkdirTemp(routineTempRoot(resources), "aeon-terminal-")
 	if err != nil {
 		return "", err
 	}
@@ -401,8 +437,18 @@ func (libraries *terminalLibraryCache) runTerminal(ctx context.Context, workspac
 	if err != nil {
 		return "", err
 	}
-	profile := terminalSandboxProfile(physicalWorkspace, physicalTmp, readRoots, toolPaths, libraryPaths)
-	childEnv := terminalEnvironment(physicalTmp, moduleProxy, goRoot, toolPaths...)
+	sandboxTemporary := physicalTmp
+	if len(resources) > 0 {
+		sandboxTemporary = routineTempRoot(resources)
+	}
+	profile := terminalSandboxProfile(physicalWorkspace, sandboxTemporary, readRoots, toolPaths, libraryPaths)
+	if in.Command == "git" {
+		profile, err = terminalGitSandboxProfile(profile, physicalWorkspace, branch)
+		if err != nil {
+			return "", err
+		}
+	}
+	childEnv := routineResourceEnvironment(terminalEnvironment(physicalTmp, moduleProxy, goRoot, toolPaths...), resources)
 	// Even read-only Git queries can trigger repository-configured helpers.
 	// Keep branch/staging checks inside exactly the same sandbox as the command.
 	gitProbe := func(args ...string) ([]byte, error) {
@@ -777,6 +823,108 @@ func terminalSandboxProfile(workspace, tmp string, readRoots, toolPaths, library
 	}
 	profile += ` (allow file-write* (literal "/dev/null"))`
 	return profile
+}
+
+// Resolve only Git's bounded local pointer files, never run a host-side Git
+// discovery/helper. The reverse pointer proves this is the owned worktree's
+// private index/HEAD, not a caller-selected sibling. Common repository access
+// is limited to objects and this branch's refs/logs; no sibling checkout or
+// sibling worktrees metadata receives a recursive grant.
+func terminalGitSandboxProfile(profile, workspace, branch string) (string, error) {
+	denied := errors.New("linked worktree Git metadata unavailable")
+	pointer := filepath.Join(workspace, ".git")
+	info, err := os.Lstat(pointer)
+	if errors.Is(err, os.ErrNotExist) {
+		return profile, nil
+	}
+	if err != nil {
+		return "", denied
+	}
+	if info.IsDir() {
+		return profile, nil
+	} // Ordinary checkout: already fenced.
+	readPointer := func(path string) (string, error) {
+		root := filepath.Dir(path)
+		physical, err := filepath.EvalSymlinks(root)
+		if err != nil || physical != root {
+			return "", denied
+		}
+		file, err := openManagedFile(root, filepath.Base(path), false, false)
+		if err != nil {
+			return "", denied
+		}
+		defer file.Close()
+		if err := checkManagedRegular(file); err != nil {
+			return "", denied
+		}
+		out, err := io.ReadAll(io.LimitReader(file, 4097))
+		if err != nil || len(out) > 4096 || strings.ContainsAny(string(out), "\x00\r") {
+			return "", denied
+		}
+		return strings.TrimSuffix(string(out), "\n"), nil
+	}
+	data, err := readPointer(pointer)
+	if err != nil || !strings.HasPrefix(data, "gitdir: ") {
+		return "", denied
+	}
+	gitDir := strings.TrimPrefix(data, "gitdir: ")
+	if !filepath.IsAbs(gitDir) {
+		gitDir = filepath.Join(workspace, gitDir)
+	}
+	physical, err := filepath.EvalSymlinks(gitDir)
+	if err != nil || physical != filepath.Clean(gitDir) {
+		return "", denied
+	}
+	gitDir = physical
+	back, err := readPointer(filepath.Join(gitDir, "gitdir"))
+	if err != nil || back != pointer {
+		return "", denied
+	}
+	common, err := readPointer(filepath.Join(gitDir, "commondir"))
+	if err != nil {
+		return "", denied
+	}
+	if !filepath.IsAbs(common) {
+		common = filepath.Join(gitDir, common)
+	}
+	physical, err = filepath.EvalSymlinks(common)
+	if err != nil || physical != filepath.Clean(common) {
+		return "", denied
+	}
+	common = physical
+	if filepath.Dir(gitDir) != filepath.Join(common, "worktrees") {
+		return "", denied
+	}
+	if branch == "" || branch == "." || branch == ".." || filepath.Clean(branch) != branch || filepath.IsAbs(branch) || strings.HasPrefix(branch, "-") || strings.ContainsAny(branch, "\x00\r\n\\") {
+		return "", denied
+	}
+	ref := filepath.Join(common, "refs", "heads", branch)
+	if !pathWithin(filepath.Join(common, "refs", "heads"), ref) {
+		return "", denied
+	}
+	objects := filepath.Join(common, "objects")
+	if physical, err := filepath.EvalSymlinks(objects); err != nil || physical != objects {
+		return "", denied
+	}
+	profile += fmt.Sprintf(" (allow file-read* file-write* (subpath %q) (subpath %q))", gitDir, objects)
+	// Config is read-only; includes outside these grants remain inaccessible.
+	for _, path := range []string{filepath.Join(common, "config"), filepath.Join(common, "packed-refs"), filepath.Join(common, "shallow"), filepath.Join(common, "info", "attributes"), filepath.Join(common, "info", "exclude")} {
+		profile += fmt.Sprintf(" (allow file-read* (literal %q))", path)
+	}
+	for _, path := range []string{ref, filepath.Join(common, "logs", "refs", "heads", branch)} {
+		profile += fmt.Sprintf(" (allow file-read* file-write* (literal %q) (literal %q))", path, path+".lock")
+		for parent := filepath.Dir(path); pathWithin(common, parent); parent = filepath.Dir(parent) {
+			profile += fmt.Sprintf(" (allow file-read* file-write-create (literal %q))", parent)
+		}
+	}
+	// Git resolves these ancestor directories but may not read their contents.
+	for parent := filepath.Dir(gitDir); ; parent = filepath.Dir(parent) {
+		profile += fmt.Sprintf(" (allow file-read-metadata (literal %q))", parent)
+		if parent == "/" {
+			break
+		}
+	}
+	return profile, nil
 }
 
 func terminalEnvironment(tmp, moduleProxy, goRoot string, toolPaths ...string) []string {

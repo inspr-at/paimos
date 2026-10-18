@@ -1,0 +1,22 @@
+{
+  "group": "stable-controls",
+  "nightlyTiming": {
+    "seconds": 127.461,
+    "selectedTests": 32
+  },
+  "spec": {
+    "file": "tests/views-filters.spec.ts",
+    "listedTests": 32,
+    "tierTiming": {
+      "caseSeconds": {
+        "max": 12.106,
+        "median": 3.108,
+        "min": 2.022
+      },
+      "seconds": 127.461,
+      "selectedTests": 32
+    },
+    "weightSeconds": 42.152047,
+    "weightSource": "web-13"
+  }
+}

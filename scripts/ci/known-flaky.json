@@ -1,0 +1,41 @@
+{
+  "version": 1,
+  "entries": [
+    {
+      "key": "internal/importer:TestSourceRequestCapAndDelay",
+      "owner": "AEON-675"
+    },
+    {
+      "key": "browser:tests/clip-tip-touch.spec.ts:touch fix5: 1440px light › production table hold discloses without selection and the next tap opens the ticket",
+      "owner": "AEON-676"
+    },
+    {
+      "key": "browser:tests/no-shift-agents.spec.ts:approval choices, typing and failure keep the decision controls put at 1440",
+      "owner": "AEON-683"
+    },
+    {
+      "key": "browser:tests/no-shift.spec.ts:ticket relation popover keeps its selectors through result changes at 390",
+      "owner": "AEON-683"
+    },
+    {
+      "key": "browser:tests/no-shift-agents.spec.ts:approval choices, typing and failure keep the decision controls put at 390",
+      "owner": "AEON-683"
+    },
+    {
+      "key": "browser:tests/no-shift.spec.ts:stability guard allows scrolling but detects movement, resizing and overflow",
+      "owner": "AEON-683"
+    },
+    {
+      "key": "browser:tests/no-shift.spec.ts:stability guard rejects empty interactions and collapse during its animation wait",
+      "owner": "AEON-683"
+    },
+    {
+      "key": "browser:tests/views-filters.spec.ts:saving a view: named from its filters, shared, then the bar shows it and changes mark it until saved",
+      "owner": "AEON-683"
+    },
+    {
+      "key": "browser:tests/work-queue.spec.ts:failed writes preserve membership and viewer shortcuts cannot dispatch",
+      "owner": "AEON-683"
+    }
+  ]
+}

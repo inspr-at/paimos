@@ -109,7 +109,7 @@ func serveSettled(w http.ResponseWriter, r *http.Request, next http.Handler, poo
 		if err != nil {
 			break
 		}
-		answer = newBufferedResponse(w.Header())
+		answer = newBufferedResponse(w)
 		next.ServeHTTP(answer, r)
 		if answer.status < 200 || answer.status >= 300 {
 			break
@@ -135,16 +135,21 @@ func serveSettled(w http.ResponseWriter, r *http.Request, next http.Handler, poo
 
 // bufferedResponse holds a handler's answer until its position is known.
 type bufferedResponse struct {
+	writer http.ResponseWriter
 	header http.Header
 	status int
 	body   bytes.Buffer
 }
 
-func newBufferedResponse(initial http.Header) *bufferedResponse {
-	return &bufferedResponse{header: initial.Clone()}
+func newBufferedResponse(w http.ResponseWriter) *bufferedResponse {
+	return &bufferedResponse{writer: w, header: w.Header().Clone()}
 }
 
 func (b *bufferedResponse) Header() http.Header { return b.header }
+
+// Unwrap preserves connection deadlines through the buffer. Flush below stays
+// a no-op so ResponseController cannot emit an unsettled response early.
+func (b *bufferedResponse) Unwrap() http.ResponseWriter { return b.writer }
 
 func (b *bufferedResponse) WriteHeader(status int) {
 	if b.status == 0 {

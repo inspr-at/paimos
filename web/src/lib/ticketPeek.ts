@@ -34,7 +34,9 @@ export function provideTicketPeek() {
   let opener: HTMLElement | null = null
   let pushed = false
 
-  watch(() => (typeof route.query[PEEK_QUERY] === 'string' ? route.query[PEEK_QUERY] : ''), value => {
+  // A routed ticket owns the right edge. A stale peek must neither cover it
+  // with another record nor reserve a second panel's width in the shell.
+  watch(() => route.params.ticketKey ? '' : (typeof route.query[PEEK_QUERY] === 'string' ? route.query[PEEK_QUERY] : ''), value => {
     openKey.value = value ? normalKey(value) : null
     if (!openKey.value) pushed = false
   }, { immediate: true })

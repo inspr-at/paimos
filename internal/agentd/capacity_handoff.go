@@ -6,6 +6,21 @@ import "errors"
 // Server telemetry is not proof that a local child stopped. Require the local
 // terminal record and the same workspace/branch before a capacity continuation.
 func (s *Supervisor) validateCapacityHandoff(run Run, branch string) error {
+	workspace := s.workspace
+	s.mu.Lock()
+	previous := s.runs[run.RetryOfRunID]
+	s.mu.Unlock()
+	if previous != nil {
+		previous.mu.Lock()
+		if previous.record.RoutineWorkspace != nil {
+			workspace = previous.record.RoutineWorkspace.Path
+		}
+		previous.mu.Unlock()
+	}
+	return s.validateCapacityHandoffAt(run, workspace, branch)
+}
+
+func (s *Supervisor) validateCapacityHandoffAt(run Run, workspace, branch string) error {
 	s.mu.Lock()
 	previous := s.runs[run.RetryOfRunID]
 	s.mu.Unlock()
@@ -15,8 +30,11 @@ func (s *Supervisor) validateCapacityHandoff(run Run, branch string) error {
 	previous.mu.Lock()
 	defer previous.mu.Unlock()
 	r := previous.record
-	if r.WorkOrderID != run.WorkOrderID || r.TenantID != s.tenantID || r.PrincipalID != s.principalID || r.Workspace != s.workspace || r.LaunchBranch == "" || branch != r.LaunchBranch || r.State != "failed" || !noLocalProcess(r) {
+	if r.WorkOrderID != run.WorkOrderID || r.TenantID != s.tenantID || r.PrincipalID != s.principalID || r.Workspace != workspace || r.LaunchBranch == "" || branch != r.LaunchBranch || r.State != "failed" || !noLocalProcess(r) {
 		return errors.New("capacity handoff waits for the original workspace, branch and stopped process")
+	}
+	if r.RoutineWorkspace != nil && (r.RoutineWorkspace.Path != workspace || r.RoutineWorkspace.Branch != branch || !r.ExitObserved) {
+		return ErrProcessesUnconfirmed
 	}
 	return nil
 }

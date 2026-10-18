@@ -116,12 +116,15 @@ func TestDirectoryListsTenantPrincipalsForStaff(t *testing.T) {
 	}
 	install(tenants["dir-a"], true, plug.Manifest.DigestSHA256)
 	status, out := call(as("member", tenant.Person, "member"))
-	if status != 200 || len(out) != 4 {
+	if status != 200 || len(out) != 5 {
 		t.Fatalf("member list %d %+v", status, out)
 	}
 	// People first, then agents; names only from this tenant.
 	if out[0].Kind != "person" || out[3].Kind != "agent" || out[3].Name != "Nova" || len(out[3].Roles) != 0 {
 		t.Fatalf("order %+v", out)
+	}
+	if out[4].Kind != "agent" || out[4].Name != "System" || len(out[4].Roles) != 1 || out[4].Roles[0] != "system" {
+		t.Fatalf("bootstrap audit actor %+v", out[4])
 	}
 	for _, item := range out {
 		if item.ID == ids["other"] {

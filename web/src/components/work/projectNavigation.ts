@@ -4,10 +4,13 @@ import type { RouteLocationNormalizedLoaded } from 'vue-router'
 import type { IconName } from '../AppIcon.vue'
 
 export interface ProjectTab { id: string; label: string; icon: IconName }
+// One segment of a view switch (AEON-1453): a tab, a section or a .seg option.
+export interface ViewOption { id: string; label: string; icon?: IconName; tip?: string; ariaLabel?: string; disabled?: boolean; data?: Record<string, string> }
 export const PROJECT_SECTIONS = [
   { id: 'tickets', label: 'Tickets', icon: 'ticket' },
-  { id: 'journey', label: 'Journey', icon: 'journey' },
   { id: 'knowledge', label: 'Knowledge', icon: 'book' },
+  { id: 'delivery', label: 'Delivery', icon: 'gauge' },
+  { id: 'settings', label: 'Settings', icon: 'gear' },
 ] as const satisfies readonly ProjectTab[]
 export type ProjectSection = typeof PROJECT_SECTIONS[number]['id']
 
@@ -31,7 +34,14 @@ export const KNOWLEDGE_VIEWS = [
   { id: 'graph', label: 'Graph', icon: 'graph' },
 ] as const satisfies readonly ProjectTab[]
 
+// A bare /p/KEY (the Projects list, the command palette): the router canonicalised it to
+// the tickets, so this place may open the person's section instead (AEON-1453).
+export function bareProjectEntry(route: Pick<RouteLocationNormalizedLoaded, 'params' | 'redirectedFrom'>): boolean {
+  const from = route.redirectedFrom
+  return !!from && !!from.params.projectKey && from.params.projectKey === route.params.projectKey && !from.params.ticketKey
+    && !from.meta.projectSection && Object.keys(from.query).length === 0
+}
 export function projectSection(route: Pick<RouteLocationNormalizedLoaded, 'meta' | 'query'>): ProjectSection {
   const section = route.meta.projectSection ?? route.query.section
-  return section === 'knowledge' || section === 'journey' ? section : 'tickets'
+  return section === 'knowledge' || section === 'delivery' || section === 'settings' ? section : 'tickets'
 }

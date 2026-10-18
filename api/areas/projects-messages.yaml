@@ -1,0 +1,94 @@
+# SPDX-License-Identifier: AGPL-3.0-only
+# aeon:owner internal/inbox
+paths:
+  /projects/{projectId}/messages:
+    parameters:
+      - {name: projectId, in: path, required: true, schema: {type: string, format: uuid}}
+    post:
+      operationId: sendProjectMessage
+      description: Optional session bindings are additive; unbound sends preserve principal-inbox behavior. Session-bound messages never use principal-wide transport targets. A session-bound send addressed by the recipient principal and recipient_session_id is accepted with no registered target and is not given one. An unbound send still needs a target. A reply may omit a session binding. An explicit different generation is not found. A held action request is not a visible parent. An addressed person authenticated by session cookie, without Authorization or agent attribution, may answer it with inbox.manage, questions.read and questions.decide permission; this returns a pending Decision Desk answer. Every unauthorized or mismatched held reply uses the same not-found response as an unknown parent.
+      requestBody: {required: true, content: {application/json: {schema: {$ref: './openapi-messaging.yaml#/components/schemas/Send'}}}}
+      responses:
+        '201': {description: Durable message, content: {application/json: {schema: {$ref: '#/components/schemas/ProjectMessage'}}}}
+        '409': {description: Session ended or idempotency conflict}
+    get:
+      operationId: inspectProjectMessages
+      description: "People with inbox.manage may inspect the project including held messages. With session, people with harness.read in the accessible project may read that exact session thread, including its owner; held messages and attached volatile notes remain excluded. Non-admin reads require session and cannot select pending action requests. Ascending by sent event ID by default. In newest_first mode after is an exclusive upper bound; zero starts at the newest. Thread selects the root and all descendants of the supplied message's reply_to chain within this project. Resolution never releases or delivers a held message."
+      parameters:
+        - {name: session, in: query, schema: {type: string, format: uuid}, description: 'Exact sender or recipient session and unbound replies linked to its messages, in either direction. Other explicit generations and unrelated principal history are excluded. Omitting includes unbound history.'}
+        - {name: limit, in: query, schema: {type: integer, minimum: 1, maximum: 200, default: 10}}
+        - {name: after, in: query, schema: {type: integer, minimum: 0, default: 0}}
+        - {name: newest_first, in: query, schema: {type: boolean, default: false}}
+        - {name: address, in: query, schema: {type: string}, description: Recipient address (to is a compatibility alias)}
+        - {name: to, in: query, schema: {type: string}}
+        - {name: thread, in: query, schema: {type: string, format: uuid}}
+        - {name: pending, in: query, schema: {type: boolean, default: false}}
+      responses:
+        '200':
+          description: Project message page
+          headers:
+            Aeon-Event-Position: {$ref: '#/components/headers/EventPosition'}
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items, next_after, preamble]
+                properties:
+                  items: {type: array, items: {$ref: '#/components/schemas/ProjectMessage'}}
+                  next_after: {type: integer, format: int64}
+                  preamble: {type: string}
+        '400': {description: Invalid filter}
+        '403': {description: 'Person with inbox.manage or exact-session harness.read required'}
+        '404': {description: 'Project or session not found'}
+  /projects/{projectId}/messages/{messageId}/cancel:
+    post:
+      operationId: cancelSessionChatMessage
+      description: "P0 bridge to the chat-v1 cancel result. Authenticated person sender with current inbox.send and harness.read in the project; durable session-bound messages only. Serializes on the inbox message against hooks and daemon claims. A possible offer cannot be recalled and returns too_late. Cancellation preserves history and the accepted deadline, expires never-offered input and emits a content-free event. Native chat-v1 delivery remains reserved for R3."
+      parameters:
+        - {name: projectId, in: path, required: true, schema: {type: string, format: uuid}}
+        - {name: messageId, in: path, required: true, schema: {type: string, format: uuid}}
+      responses:
+        '200': {description: "Cancellation result", content: {application/json: {schema: {$ref: '#/components/schemas/ChatCancelResponse'}}}}
+        '404': {description: "Unknown or unauthorized message"}
+  /projects/{projectId}/messages/{messageId}/resolution:
+    parameters:
+      - {name: projectId, in: path, required: true, schema: {type: string, format: uuid}}
+      - {name: messageId, in: path, required: true, schema: {type: string, format: uuid}}
+    post:
+      operationId: resolveHeldMessage
+      description: Human admin or super_admin session only; Authorization headers and agent attribution are forbidden. Immutable event, serialized per tenant. Exact decision/note retries return the first result; divergent retries conflict. Note is retained only as a digest in the audit event. Message and delivery remain held; pending inspection omits the resolved item.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [decision]
+              properties:
+                decision: {type: string, enum: [resolved, dismissed]}
+                note: {type: string, maxLength: 8000, default: ''}
+      responses:
+        '200': {description: Resolution, content: {application/json: {schema: {$ref: '#/components/schemas/HeldMessageResolution'}}}}
+        '400': {description: Invalid request}
+        '401': {description: Authentication required}
+        '403': {description: Human administrator session required}
+        '404': {description: Project or message not found}
+        '409': {description: Message is not held or resolution differs}
+components:
+  schemas:
+    HeldMessageResolution:
+      type: object
+      required: [message_id, decision, created_at]
+      properties:
+        message_id: {type: string, format: uuid}
+        decision: {type: string, enum: [resolved, dismissed]}
+        created_at: {type: string, format: date-time}
+    ProjectMessage:
+      allOf:
+        - {$ref: './openapi-messaging.yaml#/components/schemas/Message'}
+        - type: object
+          required: [created_at, human_resolution_outcome]
+          properties:
+            created_at: {type: string, format: date-time}
+            human_resolution_outcome: {type: [string, 'null'], enum: [resolved, dismissed, null]}

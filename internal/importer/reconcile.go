@@ -14,12 +14,11 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/jackc/pgx/v5"
-	"github.com/jackc/pgx/v5/pgxpool"
-
 	"github.com/inspr-at/paimos/internal/attachments"
 	"github.com/inspr-at/paimos/internal/db"
 	"github.com/inspr-at/paimos/internal/tenantbootstrap"
+	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgxpool"
 )
 
 // ReconcileDifference names an imported classic record by its source ID.
@@ -171,11 +170,6 @@ func itemID(record Record, category string) (string, error) {
 		}
 	}
 	return "", fmt.Errorf("%s record lacks classic id", category)
-}
-
-func projectOf(issue Record) int64 {
-	id, _ := intField(issue, "project_id")
-	return id
 }
 
 // Reconcile reads a full classic snapshot and attachment bytes with GET only,
@@ -507,6 +501,11 @@ func readReconcileTarget(ctx context.Context, tx pgx.Tx, tenantID, sourceID, sel
 		if err != nil {
 			rows.Close()
 			return err
+		}
+		// Legacy work types are provenance, while the native projection uses
+		// work. Other kind changes remain visible reconciliation differences.
+		if n.Kind != "project" && canonicalType(stringField(Record(classic), "type")) != n.Kind {
+			hash += ":kind-projection-mismatch"
 		}
 		target.put(n.Project, category, strconv.FormatInt(n.ClassicID, 10), hash)
 	}

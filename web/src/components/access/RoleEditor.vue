@@ -266,7 +266,7 @@ onMounted(() => { if (!props.role) void nextTick(() => document.getElementById('
 .p-why svg { color: var(--ink-3); }
 .p-side { display: flex; align-items: center; gap: 6px; }
 .mark { display: grid; place-items: center; width: 20px; height: 20px; border-radius: 50%; }
-.mark.plus { background: rgba(47, 122, 90, .14); }
+.mark.plus { background: color-mix(in srgb, var(--ok) 14%, transparent); }
 .mark.minus { background: var(--danger-bg); }
 .empty { padding: 12px 0; font-size: 13px; color: var(--ink-3); }
 .savebar { position: sticky; bottom: calc(var(--footer-h, 40px) + 8px); z-index: 4; display: flex; align-items: center; justify-content: flex-end; gap: 8px; margin: 4px -8px 0; padding: 10px 10px 10px 16px; border-radius: 999px; border: 1px solid var(--glass-edge); background: var(--glass); box-shadow: var(--shadow-pop); -webkit-backdrop-filter: blur(18px) saturate(1.2); backdrop-filter: blur(18px) saturate(1.2); }

@@ -3,7 +3,7 @@
 import '../../styles/crm.css'
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useRouter } from 'vue-router'
-import { NO_FILTER, countryOf, customerActions, errorText, facetOf, filtered, matchesCustomer, setCustomerArchived, sortCustomers, undoLatest, type ColumnId, type Customer, type CustomerActionId, type SortKey } from '../../lib/crm'
+import { NO_FILTER, countryOf, customerActions, errorText, facetOf, filtered, matchesCustomer, setCustomerArchived, sortCustomers, undoEvents, type ColumnId, type Customer, type CustomerActionId, type SortKey } from '../../lib/crm'
 import { opensRowMenu, type RowMenuAnchor } from '../../lib/rowActions'
 import type { QuoteProjection } from '../../lib/quotes/lifecycle'
 import { usePreference } from '../../lib/preferences'
@@ -67,7 +67,7 @@ function created(c: Customer) {
   toast(`Added ${c.name}.`, {
     action: {
       label: 'Undo', run: () => {
-        void undoLatest([{ node: c.id, types: ['crm.customer_created'] }]).then(() => {
+        void undoEvents(c.event_ids).then(() => {
           store.remove(c.id)
           if (router.currentRoute.value.path === `/business/customers/${c.id}`) void router.replace('/business/customers')
           toast(`${c.name} is removed again.`)
@@ -112,11 +112,12 @@ async function act(c: Customer, id: CustomerActionId) {
     case 'archive': case 'restore': {
       const archiving = id === 'archive'
       try {
-        store.upsert(await setCustomerArchived(c.id, c.revision, archiving))
+        const saved = await setCustomerArchived(c.id, c.revision, archiving)
+        store.upsert(saved)
         toast(archiving ? `Archived ${c.name}. Its quotes, projects and hours stay; new quotes no longer offer it.` : `${c.name} is back in the list.`, {
           action: {
             label: 'Undo', run: () => {
-              void undoLatest([{ node: c.id, types: ['crm.customer_visibility_changed'] }]).then(() => store.load(true))
+              void undoEvents(saved.event_ids).then(() => store.load(true))
                 .catch(e => toast(errorText(e, 'Undo did not work.'), { tone: 'error' }))
             },
           },

@@ -16,7 +16,6 @@ func TestIssueRouteFlags(t *testing.T) {
 	isolate(t)
 	for _, args := range [][]string{
 		{"aeon", "issue", "update", "AEON-1", "--role", "gruntwork"},
-		{"aeon", "issue", "update", "AEON-1", "--area", "mobile"},
 		{"aeon", "issue", "update", "AEON-1", "--complexity", "XL"},
 		{"aeon", "issue", "update", "AEON-1", "--role", ""},
 	} {
@@ -87,6 +86,12 @@ func TestIssueRouteFlags(t *testing.T) {
 	var view issueView
 	if err := json.Unmarshal([]byte(out), &view); err != nil || view.RouteRole != "build" || view.Area != "backend" || view.Complexity != "M" {
 		t.Fatalf("json %s %v", out, err)
+	}
+	for _, area := range []string{"security", "firmware"} {
+		code, _, errOut = runCLI([]string{"aeon", "--config", filepath.Join(t.TempDir(), "missing"), "issue", "update", "AEON-1", "--area", area}, "")
+		if code != 0 || errOut != "" || wrote["area"] != area {
+			t.Fatalf("dynamic area %s was not forwarded: %d %s %#v", area, code, errOut, wrote)
+		}
 	}
 	code, _, errOut = runCLI([]string{"aeon", "--config", filepath.Join(t.TempDir(), "missing"), "issue", "update", "AEON-2", "--role", "scout"}, "")
 	if code != 2 || !strings.Contains(errOut, "tickets and tasks") || wrote["route_role"] != "build" {

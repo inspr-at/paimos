@@ -1,10 +1,10 @@
 <!-- SPDX-License-Identifier: AGPL-3.0-only -->
 <script setup lang="ts">
-import { computed, nextTick, ref } from 'vue'
+import { computed, nextTick, ref, watch } from 'vue'
 import { commentEditable, describeChange, parseWorkerMarker, shortRole, type TimelineEntry } from '../../lib/activity'
 import { brand } from '../../lib/brand'
 import { confirmAction } from '../../lib/confirm'
-import { absoluteTime, relativeTime } from '../../lib/work'
+import { absoluteTime, relativeTime, statusMeta } from '../../lib/work'
 import AppIcon from '../AppIcon.vue'
 import AutomaticChangeRow from './AutomaticChangeRow.vue'
 import MarkdownBody from '../MarkdownBody.vue'
@@ -16,7 +16,7 @@ import StatusIcon from './StatusIcon.vue'
 // field changes as one compact line per person and moment, agent work markers as
 // system lines that expand to the full marker.
 const props = defineProps<{
-  entries: TimelineEntry[]; loading: boolean; loadingOlder: boolean; hasOlder: boolean; error: string
+  recordId?: string; entries: TimelineEntry[]; loading: boolean; loadingOlder: boolean; hasOlder: boolean; error: string
   me: string | undefined; now: number; canWrite: boolean; canDelete: boolean
   edit: (id: string, body: string) => Promise<boolean>; remove: (id: string) => Promise<boolean>
 }>()
@@ -24,6 +24,9 @@ const emit = defineEmits<{ older: []; retry: [] }>()
 const editingId = ref<string | null>(null)
 const draft = ref('')
 const saving = ref(false)
+let generation = 0
+function discard() { generation++; editingId.value = null; draft.value = ''; saving.value = false }
+watch(() => props.recordId, discard, { flush: 'sync' })
 const expanded = ref(new Set<string>())
 const editor = ref<InstanceType<typeof MarkdownEditor>[]>()
 const historyOptions = [
@@ -66,8 +69,10 @@ async function startEdit(entry: Extract<TimelineEntry, { kind: 'comment' }>) {
 }
 async function saveEdit() {
   if (!editingId.value) return
+  const request = generation
   saving.value = true
   const ok = await props.edit(editingId.value, draft.value)
+  if (request !== generation) return
   saving.value = false
   if (ok) editingId.value = null
 }
@@ -79,7 +84,7 @@ async function removeComment(id: string) {
   if (await confirmAction({ title: 'Delete this comment?', body: 'It leaves the timeline for everyone. The audit log keeps a record.', confirmLabel: 'Delete comment', danger: true })) await props.remove(id)
 }
 function isDirty() { return editingId.value !== null }
-defineExpose({ isDirty })
+defineExpose({ isDirty, discard })
 </script>
 
 <template>
@@ -153,7 +158,11 @@ defineExpose({ isDirty })
           <span v-else class="node dot" :class="{ 'created-dot': entry.kind === 'created' }" aria-hidden="true" />
           <p class="change-line">
             <strong :data-tip="actorTip(entry)">{{ actorLabel(entry) }}</strong>
-            <template v-if="entry.kind === 'changes'">
+            <template v-if="entry.kind === 'entry'">
+              <template v-if="entry.change.type === 'refused'"> couldn’t move it to {{ statusMeta(entry.change.to_status).label }}: {{ entry.change.failed.join(', ') }}<span v-if="entry.change.count > 1"> · {{ entry.change.count }} attempts</span></template>
+              <template v-else> moved it to {{ statusMeta(entry.change.to_status).label }} anyway: “{{ entry.change.reason }}” · {{ entry.change.failed.join(', ') }} {{ entry.change.failed.length === 1 ? 'was' : 'were' }} missing</template>
+            </template>
+            <template v-else-if="entry.kind === 'changes'">
               <template v-for="(change, index) in changesOf(entry)" :key="change.field">
                 <span v-if="index > 0" class="sep">,</span>
                 {{ ' ' }}{{ describeChange(change).label }}

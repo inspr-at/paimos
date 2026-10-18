@@ -1,0 +1,30 @@
+# SPDX-License-Identifier: AGPL-3.0-only
+# aeon:owner internal/portal
+paths:
+  /portal/features/{featureId}:
+    patch:
+      operationId: editPortalFeature
+      summary: Edit a public feature
+      description: settings.manage, people only. Agents are refused. A declined feature needs a public reason. live_since is kept only while the feature is live, and decline_reason only while it is declined.
+      security: [{session: []}]
+      parameters: [{name: featureId, in: path, required: true, schema: {type: string, format: uuid}}]
+      requestBody: {required: true, content: {application/json: {schema: {$ref: '#/components/schemas/PortalFeatureEdit'}}}}
+      responses:
+        '428': {$ref: '#/components/responses/OwnerWorkstationStepUpRequired'}
+        '200': {description: Feature after the edit, content: {application/json: {schema: {$ref: '#/components/schemas/PortalModeration'}}}}
+        '400': {$ref: '#/components/responses/Error'}
+        '401': {$ref: '#/components/responses/Error'}
+        '403': {$ref: '#/components/responses/Error'}
+        '404': {$ref: '#/components/responses/Error'}
+components:
+  schemas:
+    PortalFeatureEdit:
+      type: object
+      additionalProperties: false
+      properties:
+        title: {type: string, minLength: 1, maxLength: 300}
+        summary: {type: string, maxLength: 4000}
+        status: {type: string, enum: [idea, reviewed, planned, in_progress, live, declined]}
+        legal_basis: {type: string, maxLength: 240}
+        decline_reason: {type: string, maxLength: 500}
+        live_since: {type: string, maxLength: 64}

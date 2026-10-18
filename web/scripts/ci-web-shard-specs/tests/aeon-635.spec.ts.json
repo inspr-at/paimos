@@ -1,0 +1,22 @@
+{
+  "group": "remaining-ui",
+  "nightlyTiming": {
+    "seconds": 219.024,
+    "selectedTests": 21
+  },
+  "spec": {
+    "file": "tests/aeon-635.spec.ts",
+    "listedTests": 21,
+    "tierTiming": {
+      "caseSeconds": {
+        "max": 31.673,
+        "median": 28.6315,
+        "min": 27.547
+      },
+      "seconds": 182.25,
+      "selectedTests": 6
+    },
+    "weightSeconds": 46.609756,
+    "weightSource": "unmeasured-test-rate"
+  }
+}

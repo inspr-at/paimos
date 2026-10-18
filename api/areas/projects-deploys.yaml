@@ -1,0 +1,68 @@
+# SPDX-License-Identifier: AGPL-3.0-only
+# aeon:owner internal/delivery
+paths:
+  /projects/{projectId}/deploys:
+    post:
+      operationId: recordProjectDeploy
+      description: 'Record a live check already performed by OPS. Requires project-scoped releases.deploy, the existing release deployment permission; recording grants no deployment or approval authority. The project delivery source supplies the repository. Verified merged deliveries whose merge commit is an ancestor of, or equal to, sha use the release publication transition to Delivered. Only Done work leaves are advanced; human checks, no-release-needed work, parents and other states are preserved. Delivered and Accepted remain unchanged. The immutable deploy record and ticket audit events commit together. Retries by project, environment and sha return the original record without repeating effects, even with a different version label. At most 1000 candidate tickets and 1000 distinct merge commits are verified, with a two-minute deadline; overflow, incomplete ancestry or a changed source fails atomically. Public GitHub repositories use bounded anonymous reads; a matching configured GitHub App supplies existing read-only authority for private repositories. No historical backfill is performed.'
+      security: [{session: []}, {agentKey: []}]
+      parameters:
+        - {name: projectId, in: path, required: true, schema: {type: string, format: uuid}}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/DeployRecordInput'
+      responses:
+        '200':
+          description: 'Committed deploy confirmation or its original idempotent result.'
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/DeployRecord'}
+        '400': {$ref: '#/components/responses/Error'}
+        '401': {$ref: '#/components/responses/Error'}
+        '403': {$ref: '#/components/responses/Error'}
+        '404': {$ref: '#/components/responses/Error'}
+        '409': {$ref: '#/components/responses/Error'}
+        '422':
+          description: 'Unknown deployed SHA or candidate inventory exceeds the atomic verification bound.'
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Error'}
+        '500': {$ref: '#/components/responses/Error'}
+        '502': {$ref: '#/components/responses/Error'}
+components:
+  schemas:
+    DeployRecordInput:
+      type: object
+      additionalProperties: false
+      required: [environment, sha]
+      properties:
+        environment: {type: string, minLength: 1, maxLength: 128, description: 'Deployment destination or environment name; trimmed, case-sensitive.'}
+        sha: {type: string, pattern: '^[a-fA-F0-9]{40}$', description: 'Full deployed Git commit SHA; normalized to lowercase.'}
+        version: {type: string, maxLength: 128, description: 'Optional release label, preserved without interpreting its version scheme.'}
+    DeployRecord:
+      type: object
+      additionalProperties: false
+      required: [event_id, project_id, environment, repository, sha, version, confirmed_at, confirmed_by, tickets]
+      properties:
+        event_id: {type: integer, format: int64, minimum: 1}
+        project_id: {type: string, format: uuid}
+        environment: {type: string}
+        repository: {type: string}
+        sha: {type: string}
+        version: {type: string}
+        confirmed_at: {type: string, format: date-time}
+        confirmed_by: {type: string, format: uuid, description: 'Authenticated principal who recorded the completed live check.'}
+        tickets:
+          type: array
+          maxItems: 1000
+          items:
+            type: object
+            additionalProperties: false
+            required: [node_id, result]
+            properties:
+              node_id: {type: string, format: uuid}
+              result: {type: string, enum: [delivered, unchanged, skipped]}
+              reason: {type: string}

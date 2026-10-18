@@ -42,7 +42,7 @@ func (l localPairing) client() (agentdwire.Client, error) {
 	return agentdwire.OpenClient(filepath.Join(l.root, "daemon"))
 }
 func localStatus(s agentd.LifecycleStatus) agentsetup.LocalStatus {
-	return agentsetup.LocalStatus{VerificationReasons: s.VerificationReasons, AccountStatuses: s.AccountStatuses, HarnessDetails: s.HarnessDetails, HarnessStatuses: s.HarnessStatuses, HarnessErrors: s.HarnessErrors, ProfilePermissions: s.ProfilePermissions, HarnessFailed: s.HarnessFailed, LoginRequired: s.LoginRequired, VerificationUnavailable: s.VerificationUnavailable, Ready: s.Ready, DaemonID: s.DaemonID, State: s.State, Active: s.ActiveRunIDs, Unconfirmed: s.UnconfirmedRunIDs, SettlementPending: s.SettlementPendingRunIDs, VerificationResults: s.VerificationResults, BlockedAccounts: append([]agentsetup.BlockedAccount(nil), s.BlockedAccounts...)}
+	return agentsetup.LocalStatus{AccountLogins: s.AccountLogins, VerificationReasons: s.VerificationReasons, AccountStatuses: s.AccountStatuses, HarnessDetails: s.HarnessDetails, HarnessStatuses: s.HarnessStatuses, HarnessErrors: s.HarnessErrors, ProfilePermissions: s.ProfilePermissions, HarnessFailed: s.HarnessFailed, LoginRequired: s.LoginRequired, VerificationUnavailable: s.VerificationUnavailable, Ready: s.Ready, DaemonID: s.DaemonID, State: s.State, Active: s.ActiveRunIDs, Unconfirmed: s.UnconfirmedRunIDs, SettlementPending: s.SettlementPendingRunIDs, VerificationResults: s.VerificationResults, BlockedAccounts: append([]agentsetup.BlockedAccount(nil), s.BlockedAccounts...)}
 }
 func (l localPairing) Status(ctx context.Context, account string) (agentsetup.LocalStatus, error) {
 	if l.supervisor != nil {
@@ -78,6 +78,15 @@ func (l localPairing) Fence(ctx context.Context, daemon, account string) (agents
 	}
 	if l.supervisor != nil {
 		s, e := l.supervisor.Drain(agentd.DrainRequest{DaemonID: daemon, AccountID: account})
+		if errors.Is(e, agentd.ErrScope) && account != "" {
+			// Historical tombstones need a durable fence even after their
+			// runtime binding disappears. Preserve actual process/settlement
+			// evidence; absence from the runtime is not proof of cleanup.
+			status := l.supervisor.Lifecycle(account)
+			if _, enrolled := status.AccountStatuses[account]; status.DaemonID == daemon && !enrolled {
+				return localStatus(status), nil
+			}
+		}
 		return localStatus(s), e
 	}
 	client, err := l.client()
@@ -124,9 +133,12 @@ func setupCommandInput(command string, args []string, in io.Reader, out io.Write
 	}
 	f := flag.NewFlagSet(command, flag.ContinueOnError)
 	f.SetOutput(io.Discard)
+	var instance string
 	var root, origin, tenantID, tenantSlug, workspace, computer, account, contextLabel, nodePath, sdkPath string
 	var harnesses stringsFlag
-	var jsonOutput, startService, once, yes bool
+	var jsonOutput, startService, once, yes, installHooks bool
+	var hookExecutable string
+	f.StringVar(&instance, "instance", "", "named pairing instance")
 	f.StringVar(&root, "state-root", "", "private pairing state directory")
 	f.StringVar(&origin, "url", "", "HTTPS Aeon instance origin")
 	f.StringVar(&tenantID, "tenant-id", "", "tenant UUID")
@@ -136,11 +148,13 @@ func setupCommandInput(command string, args []string, in io.Reader, out io.Write
 	var provider, openRouterFile string
 	f.StringVar(&provider, "provider", "", "pi provider ID; openrouter prompts for the key locally")
 	f.StringVar(&openRouterFile, "openrouter-env-file", "", "owner-selected private file containing OPENROUTER_API_KEY")
-	f.Var(&harnesses, "harness", "selected harness; repeat for another harness")
+	f.Var(&harnesses, "harness", "selected harness; repeat for another harness. Enroll each Claude login separately; every login needs person approval")
 	f.StringVar(&contextLabel, "account-context", "", "Expected account identity (pi: configured provider ID)")
 	f.StringVar(&account, "account-id", "", "remove only this enrolled account")
 	f.StringVar(&nodePath, "node-path", "", "pinned Node executable for npm harness launchers")
 	f.StringVar(&sdkPath, "claude-sdk-path", "", "pinned Claude Agent SDK module")
+	f.BoolVar(&installHooks, "install-user-hooks", false, "opt in to qualified user hook installation; grants no messaging permission")
+	f.StringVar(&hookExecutable, "hook-executable", "", "absolute Aeon CLI artifact for authenticated hook verification")
 	f.BoolVar(&jsonOutput, "json", false, "safe progress as JSON")
 	f.BoolVar(&startService, "start-service", false, "request user service installation after authenticated Connect approval")
 	f.BoolVar(&once, "once", false, "perform one resumable step")
@@ -155,7 +169,7 @@ func setupCommandInput(command string, args []string, in io.Reader, out io.Write
 		valid := true
 		f.Visit(func(v *flag.Flag) {
 			switch v.Name {
-			case "state-root", "harness", "node-path", "claude-sdk-path", "yes", "json":
+			case "state-root", "instance", "harness", "node-path", "claude-sdk-path", "yes", "json":
 			default:
 				valid = false
 			}
@@ -191,8 +205,11 @@ func setupCommandInput(command string, args []string, in io.Reader, out io.Write
 	if err != nil {
 		return err
 	}
+	if err := agentsetup.ValidateInstance(instance); err != nil {
+		return err
+	}
 	if root == "" {
-		root, err = agentsetup.DefaultStateRoot(platform.OS, home, os.Getenv("XDG_STATE_HOME"))
+		root, err = agentsetup.InstanceStateRoot(platform.OS, home, os.Getenv("XDG_STATE_HOME"), instance)
 		if err != nil {
 			return err
 		}
@@ -225,12 +242,26 @@ func setupCommandInput(command string, args []string, in io.Reader, out io.Write
 	}
 	// Read existing options before defaulting the workspace, so rerunning pair
 	// from another directory resumes the same approved request.
-	store, err := agentsetup.OpenStore(root, false)
+	openStore := func() (*agentsetup.Store, error) { return agentsetup.OpenStore(root, false) }
+	if command == "status" {
+		openStore = func() (*agentsetup.Store, error) { return agentsetup.OpenStoreReadOnly(root) }
+	}
+	store, err := openStore()
 	if err != nil && !(command == "setup" && errors.Is(err, os.ErrNotExist)) {
 		return err
 	}
-	manager := &agentsetup.ServiceManager{Platform: platform, Home: home, UID: os.Getuid(), Executable: executable, Systemctl: systemctl}
-	engine := &agentsetup.Engine{Store: store, Services: manager, Local: localPairing{root: root, readOnly: command == "status"}}
+	manager := &agentsetup.ServiceManager{Instance: instance, Platform: platform, Home: home, UID: os.Getuid(), Executable: executable, Systemctl: systemctl}
+	engine := &agentsetup.Engine{Store: store, Services: manager, Local: localPairing{root: root, readOnly: command == "status"}, InstallMethod: agentsetup.InstallMethod(executable, home)}
+	if instance != "" {
+		if platform.OS != "darwin" {
+			return agentsetup.ErrDeclarative
+		}
+		engine.PrepareLedger = func(ctx context.Context, c agentsetup.RuntimeConfig) error {
+			return prepareSharedPairing(ctx, *manager, root, c)
+		}
+	}
+	engine.LeaveLedger = func(ctx context.Context) error { return leaveSharedPairing(ctx, root) }
+	engine.Hooks = &agentsetup.HookInstaller{Enabled: installHooks, Executable: hookExecutable, Scope: "user"}
 	if command == "status" {
 		defer store.Close()
 		p, statusErr := engine.Status(context.Background())
@@ -294,6 +325,11 @@ func setupCommandInput(command string, args []string, in io.Reader, out io.Write
 		return err
 	}
 	engine.API = agentsetup.HTTPClient{Origin: origin}
+	if instance != "" && command == "setup" {
+		if err := checkSharedPairing(context.Background(), manager, root, origin, tenantID); err != nil {
+			return err
+		}
+	}
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 	if command == "repin" {
@@ -330,7 +366,7 @@ func setupCommandInput(command string, args []string, in io.Reader, out io.Write
 			}
 			if e != nil {
 				stage := "login_required"
-				if errors.Is(e, piprobe.ErrStart) || errors.Is(e, piprobe.ErrPrivateProfile) {
+				if errors.Is(e, piprobe.ErrStart) || errors.Is(e, piprobe.ErrPrivateProfile) || agentsetup.HarnessFailureReason(e) == "probe_failed" {
 					stage = "blocked"
 				}
 				_ = printSetupProgress(out, jsonOutput, agentsetup.Progress{Schema: "aeon.agent-setup.v1", Stage: stage, Action: e.Error()})
@@ -387,17 +423,48 @@ func setupCommandInput(command string, args []string, in io.Reader, out io.Write
 		computer, _ = os.Hostname()
 	}
 	var p agentsetup.Progress
-	switch command {
-	case "setup":
-		p, err = engine.Begin(ctx, agentsetup.Options{Origin: origin, TenantID: tenantID, TenantSlug: tenantSlug, Workspace: workspace, ComputerName: computer, Platform: platform, Candidates: candidates, StartService: startService, NodePath: nodePath, ClaudeSDKPath: sdkPath})
-	case "status":
-		p, err = engine.Status(ctx)
-	case "disconnect":
-		p, err = engine.Disconnect(ctx, account)
-	case "add-harness":
-		p, err = engine.AddHarness(ctx, candidates)
-	default:
-		return errors.New("unknown setup command")
+	var poller setupPoller = engine
+	var running *agentdwire.Client
+	if savedErr == nil && (command == "add-harness" || command == "setup") {
+		c, openErr := agentdwire.OpenClient(filepath.Join(root, "daemon"))
+		if openErr == nil {
+			running = &c
+		} else if !errors.Is(openErr, os.ErrNotExist) {
+			return openErr
+		}
+	}
+	if running != nil {
+		req := agentsetup.SetupRequest{Operation: "add_harness", NodePath: nodePath, ClaudeSDKPath: sdkPath}
+		for _, c := range candidates {
+			req.Candidates = append(req.Candidates, agentsetup.LocalCandidate{Candidate: c, Path: c.Path, Home: c.Home, Identity: c.Identity, Version: c.Version})
+		}
+		if command == "setup" {
+			status, statusErr := engine.Status(ctx)
+			if statusErr != nil {
+				return statusErr
+			}
+			req = agentsetup.SetupRequest{Operation: "step", RequestID: status.RequestID}
+		}
+		p, err = running.Setup(ctx, req)
+		poller = daemonSetupPoller{client: *running, requestID: p.RequestID}
+	} else {
+		switch command {
+		case "setup":
+			p, err = engine.Begin(ctx, agentsetup.Options{Origin: origin, TenantID: tenantID, TenantSlug: tenantSlug, Workspace: workspace, ComputerName: computer, Platform: platform, Candidates: candidates, StartService: startService, NodePath: nodePath, ClaudeSDKPath: sdkPath})
+		case "repair":
+			if !installHooks {
+				return errors.New("repair requires --install-user-hooks; messaging remains off")
+			}
+			p, err = engine.RepairHooks(ctx, false)
+		case "status":
+			p, err = engine.Status(ctx)
+		case "disconnect":
+			p, err = engine.Disconnect(ctx, account)
+		case "add-harness":
+			p, err = engine.AddHarness(ctx, candidates)
+		default:
+			return errors.New("unknown setup command")
+		}
 	}
 	store.Unlock()
 	if command == "status" && err == nil {
@@ -409,7 +476,7 @@ func setupCommandInput(command string, args []string, in io.Reader, out io.Write
 	if err != nil {
 		return err
 	}
-	p, err = pollSetupProgress(ctx, command, p, once, jsonOutput, out, engine, store.Unlock, waitSetupPoll)
+	p, err = pollSetupProgress(ctx, command, p, once, jsonOutput, out, poller, store.Unlock, waitSetupPoll)
 	if err != nil {
 		return err
 	}
@@ -452,7 +519,6 @@ func setupVersionStatus(ctx context.Context, api agentsetup.PairingAPI, origin s
 }
 
 type setupPoller interface {
-	Status(context.Context) (agentsetup.Progress, error)
 	Step(context.Context) (agentsetup.Progress, error)
 }
 
@@ -487,6 +553,15 @@ func pollSetupProgress(ctx context.Context, command string, p agentsetup.Progres
 		}
 	}
 	return p, nil
+}
+
+type daemonSetupPoller struct {
+	client    agentdwire.Client
+	requestID string
+}
+
+func (p daemonSetupPoller) Step(ctx context.Context) (agentsetup.Progress, error) {
+	return p.client.Step(ctx, p.requestID)
 }
 
 func setupNeedsPoll(command string, p agentsetup.Progress) bool {
@@ -542,17 +617,38 @@ func printSetupProgress(out io.Writer, jsonOutput bool, p agentsetup.Progress) e
 			return err
 		}
 	}
+	for _, c := range p.HookCapabilities {
+		state := "verified"
+		if !c.Verified {
+			state = "watch-only: " + c.Blocker
+		}
+		if _, err := fmt.Fprintf(out, "%s user hook: %s\n", c.Harness, state); err != nil {
+			return err
+		}
+	}
 	_, err := fmt.Fprintf(out, "%s: %s\n", p.Stage, p.Action)
 	if err != nil {
 		return err
 	}
-	// One line per harness that is not ready, then per blocked account; both
-	// use the shared reason codes and fix commands.
-	harnesses := make([]string, 0, len(p.HarnessDetails))
-	for harness, detail := range p.HarnessDetails {
-		if detail.State != "ready" {
-			harnesses = append(harnesses, harness)
+	if p.TouchIDConfirmation != "" {
+		confirmation := "Touch ID confirmation: " + p.TouchIDConfirmation
+		if p.TouchIDUpgradeCommand != "" {
+			confirmation += ": " + p.TouchIDUpgradeCommand
 		}
+		if _, err := fmt.Fprintln(out, confirmation); err != nil {
+			return err
+		}
+		if p.TouchIDUpgradeCommand != "" {
+			if _, err := fmt.Fprintln(out, "Use a new, empty state folder and approve in Aeon. Keep the old pairing until the new one is verified. Point the service at the new state root through its existing owner."); err != nil {
+				return err
+			}
+		}
+	}
+	// Include healthy harnesses and each approved account, so a successful
+	// probe cannot disappear behind an unrelated verification failure.
+	harnesses := make([]string, 0, len(p.HarnessDetails))
+	for harness := range p.HarnessDetails {
+		harnesses = append(harnesses, harness)
 	}
 	sort.Strings(harnesses)
 	for _, harness := range harnesses {
@@ -561,8 +657,68 @@ func printSetupProgress(out io.Writer, jsonOutput bool, p agentsetup.Progress) e
 		if detail.Reason != "" {
 			line += " reason " + detail.Reason
 		}
+		if detail.ReasonDetail != "" {
+			line += " detail " + detail.ReasonDetail
+		}
 		if detail.Fix.Command != "" {
 			line += " fix " + detail.Fix.Command
+		}
+		if _, err = fmt.Fprintln(out, line); err != nil {
+			return err
+		}
+		// A rotated profile may appear under several enrollments. Show its
+		// active login once, approved when it matches any connected enrollment.
+		logins := map[string]bool{}
+		for _, account := range p.Accounts {
+			if account.Harness == harness && account.State == "connected" {
+				if login, ok := p.AccountLogins[account.AccountID]; ok && login.ActiveIdentity != "" {
+					logins[login.ActiveIdentity] = logins[login.ActiveIdentity] || login.Approved
+				}
+			}
+		}
+		identities := make([]string, 0, len(logins))
+		for identity := range logins {
+			identities = append(identities, identity)
+		}
+		sort.Strings(identities)
+		for _, identity := range identities {
+			approval := "not approved on this computer; run aeon-agentd add-harness --harness " + harness
+			if logins[identity] {
+				approval = "approved on this computer"
+			}
+			if _, err = fmt.Fprintf(out, "harness %s active login %s: %s\n", harness, identity, approval); err != nil {
+				return err
+			}
+		}
+	}
+	accounts := append([]agentsetup.Enrollment(nil), p.Accounts...)
+	sort.Slice(accounts, func(i, j int) bool { return accounts[i].AccountID < accounts[j].AccountID })
+	for _, account := range accounts {
+		detail, ok := p.AccountStatuses[account.AccountID]
+		if !ok || account.State != "connected" {
+			detail = agentsetup.HarnessDetail{State: account.State}
+			if account.State == "connected" {
+				detail.State = "unconfirmed"
+			}
+		}
+		line := "account " + account.AccountID + " harness " + account.Harness + " " + detail.State
+		if agentsetup.ValidLoginLabel(account.Label) {
+			line += " login " + account.Label
+		}
+		if detail.Reason != "" {
+			line += " reason " + detail.Reason
+		}
+		if detail.ReasonDetail != "" {
+			line += " detail " + detail.ReasonDetail
+		}
+		if detail.Fix.Command != "" {
+			line += " fix " + detail.Fix.Command
+		}
+		if account.State == "connected" && detail.State == "ready" && account.VerificationState == "expired" && account.VerificationRunID != "" {
+			line += " verification expired — run verification again; run " + account.VerificationRunID
+			if account.Cleanup != "" {
+				line += "; local cleanup " + account.Cleanup
+			}
 		}
 		if _, err = fmt.Fprintln(out, line); err != nil {
 			return err

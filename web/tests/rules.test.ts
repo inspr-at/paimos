@@ -3,10 +3,10 @@ import assert from 'node:assert/strict'
 import { test } from 'node:test'
 import { RequestFailure } from '../src/lib/api.ts'
 import {
-  IMPORT_MAX_BYTES, RulesError, applyEnabled, blankRule, calendarVersion, copyName, diffRules, diffSet, duplicateRule, groupState, groupsState, hasMovable, heldIdentities,
-  identityFromText, layerInColumn, mergeQuery, parseDraftImport, publishBlock, replyUncertain, resetAvailability, resetRule, rulePayload, rulesEqual, tickTarget,
+  IMPORT_MAX_BYTES, RulesError, applyEnabled, blankRule, calendarVersion, copyName, diffRules, diffSet, duplicateRule, groupsState, hasMovable,
+  identityFromText, mergeQuery, parseDraftImport, publishBlock, replyUncertain, resetAvailability, resetRule, rulePayload, rulesEqual, tickTarget,
   runDraftImport, ruleSwitchLabel, scopeFor, touchRule, validVersion, validateDraft, validateRule, writeBlock, importWrites, draftImportProjects,
-  setState, projectedRules, projectedBytes, largestProjected,
+  setState, largestProjected,
   type AgentRule, type Caller, type ImportIO, type RuleScope, type RuleSet,
 } from '../src/lib/rules.ts'
 
@@ -34,29 +34,17 @@ test('calendar versions are UTC inspr-calendar-v2 coordinates', () => {
 test('locked rules and higher locks cannot be switched off', () => {
   const held = new Set(['keep-secrets'])
   const rules = [rule({ strength: 'locked' }), rule({ identity: 'local-copy', text: 'Local copy' }), rule({ identity: 'keep-secrets', text: 'Lower copy', enabled: true })]
-  assert.equal(groupState(rules, held), 'on')
+
   const off = applyEnabled(rules, false, held)
   assert.equal(off[0].enabled, true)
   assert.equal(off[1].enabled, false)
   assert.equal(off[2].enabled, true)
-  assert.equal(groupState(off, held), 'mixed')
+
   assert.equal(applyEnabled(off, true, held)[1].enabled, true)
   assert.equal(tickTarget('on'), false)
   assert.equal(tickTarget('mixed'), true)
   assert.equal(groupsState([{ rules, held }, { rules: [rule({ identity: 'other', enabled: false })], held: new Set() }]), 'mixed')
   assert.equal(hasMovable([{ rules: [rule({ strength: 'locked' })], held: new Set() }]), false)
-})
-
-test('a lower layer does not treat a higher locked identity as its own switch', () => {
-  const ctx = { projectId: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa', personId: '11111111-1111-4111-8111-111111111111', agentId: '', role: 'builder' as const, harness: 'cursor' as const, taskId: '' }
-  const sets = [
-    { scope: { layer: 'company' as const }, rules: [rule({ strength: 'locked' })] },
-    { scope: { layer: 'project' as const, project_id: ctx.projectId }, rules: [rule({ enabled: false })] },
-  ]
-  const held = heldIdentities(sets, ctx, 1)
-  assert.equal(held.has('keep-secrets'), true)
-  assert.equal(layerInColumn({ layer: 'project', project_id: ctx.projectId }, 'project', ctx, 'role'), true)
-  assert.equal(layerInColumn({ layer: 'project', project_id: 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb' }, 'project', ctx, 'role'), false)
 })
 
 test('permissions follow grants, never a bare membership', () => {
@@ -419,10 +407,7 @@ test('set state, projected merge and budget follow the server merge', () => {
     { id: 'p', scope: { layer: 'project', project_id: project } as RuleScope, rules: [rule({ identity: 'keep', text: 'Project loses.' }), rule({ identity: 'off', enabled: false }), rule({ identity: 'codex-only', roles: [], harnesses: ['codex'] })] },
     { id: 'x', scope: { layer: 'project', project_id: 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb' } as RuleScope, rules: [rule({ identity: 'elsewhere' })] },
   ]
-  const ctx = { projectId: project, personId: SELF, role: 'builder' as const, harness: 'claude-code' as const }
-  assert.deepEqual(projectedRules(sets, ctx).map(item => item.text), ['Company wins.'])
-  const bytes = (text: string) => new TextEncoder().encode(text).length
-  assert.equal(projectedBytes(sets, ctx), bytes('# Aeon session rules\n\n- [keep] Company wins.\n'))
+
   const largest = largestProjected(sets, project, SELF)
   assert.equal(largest.harness, 'codex')
   assert.equal(largest.bytes, new TextEncoder().encode('# Aeon session rules\n\n- [codex-only] Never print the environment.\n- [keep] Company wins.\n').length)
@@ -579,7 +564,7 @@ test('an explanation is one short English line, German optional', async () => {
 })
 
 test('the projected file counts each layer and finds the file furthest over a limit', async () => {
-  const { projectedUsage, budgetExcess, largestProjected, budgetParts, budgetLine, overBudget, MERGE_HEADING_BYTES, DEFAULT_BUDGET } = await import('../src/lib/rules.ts')
+  const { projectedUsage, budgetExcess, largestProjected, budgetParts, budgetLine, MERGE_HEADING_BYTES, DEFAULT_BUDGET } = await import('../src/lib/rules.ts')
   const company = { id: 'a', scope: { layer: 'company' as const }, rules: [rule({ identity: 'floor', text: 'Keep the floor.', strength: 'locked', roles: [], harnesses: [] })] }
   const project = { id: 'b', scope: { layer: 'project' as const, project_id: PROJECT }, rules: [rule({ identity: 'style', text: 'Use style.', roles: [], harnesses: [] }), rule({ identity: 'codex', text: 'Codex only rule.', roles: [], harnesses: ['codex'] })] }
   const ctx = { projectId: PROJECT, personId: ME, role: 'builder' as const, harness: 'claude-code' as const }
@@ -592,8 +577,9 @@ test('the projected file counts each layer and finds the file furthest over a li
   const worst = largestProjected([company, project], PROJECT, ME, new Date(), tight)
   assert.equal(worst.harness, 'codex')
   assert.ok(budgetExcess(worst.bytes, worst.usage, tight) > 0)
-  assert.ok(overBudget(worst.usage, worst.bytes, tight))
-  assert.equal(overBudget(usage, bytes, DEFAULT_BUDGET), false)
+  assert.equal(budgetParts(worst.usage, worst.bytes, tight).some(part => part.over), true)
+  assert.equal(budgetExcess(bytes, usage, DEFAULT_BUDGET), 0)
+  assert.equal(budgetParts(usage, bytes, DEFAULT_BUDGET).some(part => part.over), false)
   const parts = budgetParts({ company: 7100, project: 2300 }, 9422, { max_bytes: 12000, layer_max_bytes: { company: 8000 } })
   assert.deepEqual(parts.map(part => part.label), ['Company 7.1 of 8 kB', 'Project 2.3 kB', 'total 9.4 of 12 kB'])
   assert.equal(budgetLine({ company: 8100 }, 8200, { max_bytes: 12000, layer_max_bytes: { company: 8000 } }), 'Company 8.1 of 8 kB · total 8.2 of 12 kB')

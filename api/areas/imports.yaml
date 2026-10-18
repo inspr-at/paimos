@@ -1,0 +1,90 @@
+# SPDX-License-Identifier: AGPL-3.0-only
+# aeon:owner internal/imports
+paths:
+  /imports:
+    get:
+      operationId: listImports
+      description: Tenant administrator only; import source names and failure summaries are operator data.
+      security: *auth
+      parameters:
+        - {$ref: '#/components/parameters/Limit'}
+        - {$ref: '#/components/parameters/Cursor'}
+      responses:
+        '200':
+          $ref: '#/components/responses/Imports'
+  /imports/{importId}:
+    parameters: [{$ref: '#/components/parameters/ImportId'}]
+    get:
+      operationId: getImport
+      description: Tenant administrator only.
+      security: *auth
+      responses:
+        '200':
+          $ref: '#/components/responses/Import'
+        '404':
+          $ref: '#/components/responses/Error'
+components:
+  schemas:
+    ImportJob:
+      type: object
+      required: [id, status, source, processed_count, created_count, error_count, created_at]
+      properties:
+        id:
+          type: string
+          format: uuid
+        status:
+          type: string
+          enum: [queued, running, completed, failed, cancelled]
+        source:
+          type: string
+        processed_count:
+          type: integer
+          format: int64
+        created_count:
+          type: integer
+          format: int64
+        error_count:
+          type: integer
+          format: int64
+        failure_summary:
+          type: [string, 'null']
+        created_at:
+          type: string
+          format: date-time
+        started_at:
+          type: [string, 'null']
+          format: date-time
+        finished_at:
+          type: [string, 'null']
+          format: date-time
+    ImportPage:
+      type: object
+      required: [items, next_cursor]
+      properties:
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/ImportJob'
+        next_cursor:
+          type: [string, 'null']
+  parameters:
+    ImportId:
+      name: importId
+      in: path
+      required: true
+      schema:
+        type: string
+        format: uuid
+  responses:
+    Import:
+      description: Import job
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ImportJob'
+    Imports:
+      description: Import jobs
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ImportPage'

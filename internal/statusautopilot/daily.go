@@ -35,6 +35,9 @@ func (m *Module) RunTenant(ctx context.Context, tenantID string, now time.Time) 
 	}); err != nil {
 		return err
 	}
+	if err := m.publishGit(ctx, actor, now); err != nil {
+		return err
+	}
 	for {
 		count := 0
 		err := db.InTenant(ctx, m.pool, tenantID, func(tx pgx.Tx) error {
@@ -119,7 +122,7 @@ func (m *Module) RunTenant(ctx context.Context, tenantID string, now time.Time) 
 				after = nil
 			}
 			rows, err := tx.Query(ctx, `SELECT n.id::text FROM nodes n JOIN node_kinds k ON k.tenant_id=n.tenant_id AND k.id=n.kind_id
- WHERE k.slug='ticket' AND n.deleted_at IS NULL AND `+candidateStateSQL+` IN ('new','backlog','blocked','in_progress','inprogress','progress','active','done','delivered')
+ WHERE k.slug IN ('ticket','work') AND n.deleted_at IS NULL AND `+candidateStateSQL+` IN ('new','backlog','blocked','in_progress','inprogress','progress','active','done','delivered')
  AND ($1::uuid IS NULL OR n.id>$1) ORDER BY n.id LIMIT $2`, after, batchSize)
 			if err != nil {
 				return err
@@ -134,6 +137,13 @@ func (m *Module) RunTenant(ctx context.Context, tenantID string, now time.Time) 
 			}
 			overrides := map[string]Override{}
 			for _, c := range candidates {
+				parent, err := db.WorkStatusParentTx(ctx, tx, c.Node.ID)
+				if err != nil {
+					return err
+				}
+				if parent {
+					continue
+				}
 				effective := s
 				if c.Node.ProjectID != nil {
 					id := *c.Node.ProjectID

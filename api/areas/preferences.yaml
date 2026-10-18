@@ -1,0 +1,72 @@
+# SPDX-License-Identifier: AGPL-3.0-only
+# aeon:owner internal/views
+paths:
+  /preferences/{key}:
+    parameters:
+      - {name: key, in: path, required: true, schema: {type: string, pattern: '^[a-z][a-z0-9_.:-]{0,127}$'}}
+    get:
+      operationId: getPreference
+      description: >-
+        The calling person's own UI preference (for example list columns and
+        widths). A key never written returns value null. For agents.working,
+        read the canonical person's row, falling back to a linked alias's row
+        when absent; invalid or conflicting effective plans fail closed.
+      responses:
+        '200':
+          description: Preference
+          content: {application/json: {schema: {$ref: '#/components/schemas/Preference'}}}
+        '400': {description: Invalid key}
+        '401': {description: Authentication required}
+        '403': {description: Active person required for agents.working}
+        '500': {description: Invalid or conflicting stored plans or database operation failed}
+    put:
+      operationId: putPreference
+      description: >-
+        Replace the calling person's preference. The value is a JSON object of
+        at most 16 KiB. Private to the principal; no event is appended.
+        For agents.working, validate AgentsPlan or the legacy cap/view/area/model
+        shape (cap 1–12, optional). Preserve the legacy shape for existing UI
+        clients; its reservations do not become limits. Plan reads for enforcers
+        use GET /agents/plan. Agents cannot write this plan.
+        Plan writes belong to the active canonical person and reconcile existing
+        linked alias copies to the saved value; other preferences remain private
+        to the calling principal. For agents.working, optional expected_updated_at
+        is the exact updated_at from GET /agents/plan (null means no saved plan).
+        The check and save are atomic across linked aliases; a stale revision
+        returns 409 without changing the plan. Omission preserves legacy writes.
+        Daily settings are validated strictly; active Boost today must end at
+        the canonical person's next local midnight and requires account.manage
+        plus ownership and visible usage for every affected account. A write
+        omitting daily preserves existing daily settings for older dial clients.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [value]
+              properties:
+                value: {type: object}
+                expected_updated_at:
+                  type: [string, 'null']
+                  format: date-time
+                  description: 'Optional agents.working precondition; null requires an unset plan. Not accepted for other preferences.'
+      responses:
+        '200':
+          description: Stored preference
+          content: {application/json: {schema: {$ref: '#/components/schemas/Preference'}}}
+        '400': {description: Invalid key or value}
+        '401': {description: Authentication required}
+        '403': {description: Active person required for agents.working}
+        '409': {description: Agents plan changed since expected_updated_at; re-read before retrying}
+        '413': {description: Value too large}
+components:
+  schemas:
+    Preference:
+      type: object
+      required: [key, value, updated_at]
+      properties:
+        key: {type: string}
+        value: {type: [object, 'null']}
+        updated_at: {type: [string, 'null'], format: date-time}

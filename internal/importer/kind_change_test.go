@@ -47,11 +47,11 @@ func TestImportRefusesKindChange(t *testing.T) {
 		}
 		return
 	}
-	if kind, title, parent := read("KI-11"); kind != "ticket" || title != "Stay" || parent == "" {
+	if kind, title, parent := read("KI-11"); kind != "work" || title != "Stay" || parent == "" {
 		t.Fatalf("seed kind %s title %s parent %q", kind, title, parent)
 	}
 	beforeKind, beforeTitle, beforeParent := read("KI-11")
-	report, err := writer.Write(ctx, snap("epic", "Changed", "Updated", true), "kind-import")
+	report, err := writer.Write(ctx, snap("memory", "Changed", "Updated", true), "kind-import")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -59,14 +59,14 @@ func TestImportRefusesKindChange(t *testing.T) {
 		t.Fatalf("report updated %d conflicts %#v", report.Updated, report.Conflicts)
 	}
 	conflict := report.Conflicts[0]
-	if conflict.Reason != "kind_change_not_allowed" || conflict.Key != "KI-11" || conflict.CurrentKind != "ticket" || conflict.RequestedKind != "epic" || conflict.ClassicID != 11 {
+	if conflict.Reason != "kind_change_not_allowed" || conflict.Key != "KI-11" || conflict.CurrentKind != "work" || conflict.RequestedKind != "memory" || conflict.ClassicID != 11 {
 		t.Fatalf("conflict %#v", conflict)
 	}
 	kind, title, parent := read("KI-11")
 	if kind != beforeKind || title != beforeTitle || parent != beforeParent {
 		t.Fatalf("conflicted row changed from %s %s %s to %s %s %s", beforeKind, beforeTitle, beforeParent, kind, title, parent)
 	}
-	if kind, title, _ := read("KI-12"); kind != "ticket" || title != "Updated" {
+	if kind, title, _ := read("KI-12"); kind != "work" || title != "Updated" {
 		t.Fatalf("other row %s %s", kind, title)
 	}
 }
@@ -119,10 +119,10 @@ func TestImportKindConflictSkipsRelation(t *testing.T) {
 		return n
 	}
 	beforeKind, beforeTitle, beforeParent := read("KR-11")
-	if beforeKind != "ticket" || beforeTitle != "Stay" || beforeParent == "" || relations("KR-11") != 0 {
+	if beforeKind != "work" || beforeTitle != "Stay" || beforeParent == "" || relations("KR-11") != 0 {
 		t.Fatalf("seed %s %s parent %q relations %d", beforeKind, beforeTitle, beforeParent, relations("KR-11"))
 	}
-	second := base("epic", "Updated")
+	second := base("memory", "Updated")
 	second.Details = map[int64]Details{12: {Relations: []Record{
 		{"id": json.Number("90"), "source_id": json.Number("12"), "target_id": json.Number("11"), "type": "parent"},
 		{"id": json.Number("91"), "source_id": json.Number("12"), "target_id": json.Number("11"), "type": "blocks"},
@@ -136,14 +136,14 @@ func TestImportKindConflictSkipsRelation(t *testing.T) {
 		t.Fatalf("conflicts %#v", report.Conflicts)
 	}
 	conflict := report.Conflicts[0]
-	if conflict.Reason != "kind_change_not_allowed" || conflict.Key != "KR-11" || conflict.CurrentKind != "ticket" || conflict.RequestedKind != "epic" || conflict.ClassicID != 11 {
+	if conflict.Reason != "kind_change_not_allowed" || conflict.Key != "KR-11" || conflict.CurrentKind != "work" || conflict.RequestedKind != "memory" || conflict.ClassicID != 11 {
 		t.Fatalf("conflict %#v", conflict)
 	}
 	kind, title, parent := read("KR-11")
 	if kind != beforeKind || title != beforeTitle || parent != beforeParent || relations("KR-11") != 0 {
 		t.Fatalf("conflicted row changed from %s %s %s to %s %s %s relations %d", beforeKind, beforeTitle, beforeParent, kind, title, parent, relations("KR-11"))
 	}
-	if kind, title, _ := read("KR-12"); kind != "ticket" || title != "Updated" {
+	if kind, title, _ := read("KR-12"); kind != "work" || title != "Updated" {
 		t.Fatalf("other row %s %s", kind, title)
 	}
 	var kept int

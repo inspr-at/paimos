@@ -1,8 +1,10 @@
 // SPDX-License-Identifier: AGPL-3.0-only
+import { displayLanguage } from './displayLanguage.ts'
+import { api } from './api.ts'
+
 // The release history (schema inspr.release-history.v1, served by GET /api/releases)
 // and what the release sheet derives from it: days, change groups, stats, compare
 // ranges and search. Free of Vue for unit tests.
-import { api } from './api.ts'
 
 export type ChangeGroup = 'features' | 'fixes' | 'other'
 // group: the ticket's own features or fixes; older servers omit it.
@@ -11,7 +13,7 @@ export interface ReleaseChange { commit: string; subject: string; type: 'feat' |
 export interface ReleaseRun { name: string; url: string; status: string; conclusion: string }
 export interface ReleaseEvidence {
   source_commit: string; source_url: string; image: { reference: string; digest: string } | null
-  ci: ReleaseRun | null; release_run: ReleaseRun | null; release_url: string; unavailable: string[]
+  ci: ReleaseRun | null; release_run: ReleaseRun | null; release_url: string; pending?: string[]; unavailable: string[]
 }
 export interface ReleaseNoteItem { id: string; key: string; pill_en: string; pill_de: string; benefit_en: string; benefit_de: string; group?: ChangeGroup }
 export interface ReleaseNoteCorrection { version: string; key: string; snapshot_sha256: string; reason: string; group?: string; pill_en?: string; pill_de?: string; benefit_en?: string; benefit_de?: string }
@@ -26,7 +28,7 @@ export interface Release {
   // both languages. Absent on withdrawn attempts and reservations whose
   // sequence a published release took.
   codename?: string
-  version: string; tag: string; release_channel: string; release_sequence: number; state: 'published' | 'reserved' | 'withdrawn'
+  version: string; tag: string; release_channel: string; release_sequence: number; state: 'published' | 'reserved' | 'candidate' | 'withdrawn'
   reserved_at: string | null; tagged_at: string | null; published_at: string | null; headline: string
   tickets: string[]; changes: ReleaseChange[]; changes_omitted: number; evidence: ReleaseEvidence
 }
@@ -64,7 +66,7 @@ export async function getRelease(version: string): Promise<Release | null> {
     const response = await api(`/releases/${encodeURIComponent(version)}`)
     if (!response.ok) return null
     const release = await response.json() as Release
-    return release.state === 'published' || release.state === 'reserved' ? withPublicNoteItems(release) : null
+    return release.state === 'published' || release.state === 'reserved' || release.state === 'candidate' ? withPublicNoteItems(release) : null
   } catch { return null }
 }
 
@@ -266,7 +268,7 @@ export function hasUsableNotes(r: Pick<Release, 'notes'>): r is Pick<Release, 'n
 // The viewer's language. German locales use DE; everything else, including a
 // missing profile, uses EN.
 export function noteLocale(locale?: string | null): 'en' | 'de' {
-  return locale?.trim().toLowerCase().startsWith('de') ? 'de' : 'en'
+  return displayLanguage(locale, 'release-notes')
 }
 // The release history's own language and view, chosen in its header (AEON-323).
 // The address wins, then this person's last choice on this device, then the
@@ -284,20 +286,6 @@ export function releaseView(value: unknown): ReleaseView {
 }
 // Where a person's language choice is kept on this device.
 export const releaseLangKey = (principalId: string) => `aeon.release-history.lang.${principalId}`
-// Details: a short technical line for a list row, the first few commit subjects.
-export function technicalLine(r: Pick<Release, 'changes'>, limit = 3): string {
-  const seen = new Set<string>()
-  const parts: string[] = []
-  for (const c of r.changes) {
-    if (!changeGroup(c)) continue
-    const text = plainSubject(c.subject, c.tickets)
-    if (!text || seen.has(text)) continue
-    seen.add(text)
-    parts.push(text)
-    if (parts.length === limit) break
-  }
-  return parts.join(' · ')
-}
 export interface LocalizedNote { pill: string; benefit: string; pillLang: 'en' | 'de'; benefitLang: 'en' | 'de' }
 // One text in the chosen language; a missing one falls back to the other
 // language, never to an empty string while either has words. The lang tells
@@ -370,7 +358,6 @@ export function markParts(text: string, query?: string | null): { text: string; 
   if (at < text.length) out.push({ text: text.slice(at), hit: false })
   return out
 }
-export const HISTORICAL_TAG_FALLBACK = 'historical-tag-headline'
 export const WRITTEN_AFTER_LABEL = 'Notes written after release'
 export function writtenAfterLine(locale?: string | null) {
   return noteLocale(locale) === 'de' ? 'Notizen nach dem Release geschrieben' : WRITTEN_AFTER_LABEL
@@ -379,13 +366,6 @@ export function writtenAfterLine(locale?: string | null) {
 // when the notes are only the historical headline.
 export function writtenAfterRelease(r: Pick<Release, 'notes'>): boolean {
   return hasUsableNotes(r) && r.notes.written_after_release === true
-}
-// Tag headlines are only the fallback when member benefits were never captured.
-export function historicalTagFallback(r: Pick<Release, 'notes' | 'headline'>): boolean {
-  if (!r.headline.trim()) return false
-  if (hasUsableNotes(r)) return false
-  if (!r.notes) return true
-  return r.notes.fallback === HISTORICAL_TAG_FALLBACK || r.notes.source === 'unavailable'
 }
 // The sheet's empty and compare lines in the chosen language (AEON-323).
 export function releaseCopy(locale?: string | null) {
@@ -479,7 +459,7 @@ export function compare(releases: Release[], a: string, b: string) {
 export function naturalKey(a: string, b: string) { return a.localeCompare(b, 'en', { numeric: true }) }
 
 // ---------- Search and filters ----------
-export interface ReleaseFilter { q: string; features: boolean; fixes: boolean; tickets: boolean }
+export interface ReleaseFilter { q: string; features: boolean; fixes: boolean; other?: boolean; tickets?: boolean }
 export const ticketsOf = (r: Release) => [...new Set(hasUsableNotes(r) ? r.notes.items.map(item => item.key) : [...r.tickets, ...r.changes.flatMap(c => c.tickets)])].sort(naturalKey)
 // The filters follow the blocks the detail and the row counts show. Search
 // looks at the text the chosen language and view show (AEON-323): both views
@@ -490,6 +470,7 @@ export function matches(r: Release, f: ReleaseFilter, locale?: string | null, vi
   const presented = presentRelease(r, locale)
   if (f.features && !presented.features.length) return false
   if (f.fixes && !presented.fixes.length) return false
+  if (f.other && !presented.other.length) return false
   if (f.tickets && !ticketsOf(r).length) return false
   const q = f.q.trim().toLowerCase()
   if (!q) return true
@@ -530,8 +511,7 @@ export function evidenceSearch(r: Release): { texts: string[]; ids: string[] } {
 // Reservations remain loaded for statistics and deep links, but are opt-in in
 // the sheet. Withdrawn coordinates never belong to either visibility scope.
 export function visibleReleases(releases: readonly Release[], showReservedVersions = false): Release[] {
-  if (!showReservedVersions) return publishedReleases(releases)
-  return releases.filter(r => r.state === 'published' || r.state === 'reserved')
+  return releases.filter(r => r.state === 'published' || r.state === 'candidate' || (showReservedVersions && r.state === 'reserved'))
 }
 // Visible releases newer than the one the person last saw; nothing on a first visit.
 export function newSince(releases: Release[], lastSeen: string | null, showReservedVersions = false) {

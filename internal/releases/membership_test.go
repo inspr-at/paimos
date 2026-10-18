@@ -17,6 +17,9 @@ import (
 
 func (f *ticketFixture) existing(kind, parent, title, state string) string {
 	f.t.Helper()
+	if kind == "epic" || kind == "ticket" || kind == "task" {
+		kind = "work"
+	}
 	var id string
 	f.tx(func(tx pgx.Tx) error {
 		return tx.QueryRow(f.t.Context(), `INSERT INTO nodes(tenant_id,kind_id,key,parent_id,title,state) SELECT $1,id,aeon_next_node_key($1,short_prefix),$2,$3,$4 FROM node_kinds WHERE slug=$5 RETURNING nodes.id::text`, f.person.TenantID, parent, title, state, kind).Scan(&id)
@@ -56,7 +59,7 @@ func TestExistingTicketOptionsBulkAddAndUndo(t *testing.T) {
 	f := ticketSetup(t)
 	ids := []string{f.existing("ticket", f.project, "Alpha", "open"), f.existing("ticket", f.feature, "Beta", "open"), f.existing("ticket", f.project, "Gamma", "open")}
 	closed := f.existing("ticket", f.project, "Closed", "done")
-	task := f.existing("task", f.project, "Task", "open")
+	task := f.existing("memory", f.project, "Non-work", "open")
 	options := f.request(f.person, http.MethodGet, "/api/projects/"+f.project+"/releases/"+f.release+"/ticket-options?q=Alpha", "")
 	if options.Code != 200 {
 		t.Fatalf("options %d %s", options.Code, options.Body.String())
@@ -153,6 +156,246 @@ func TestExistingTicketMoveConfirmationAndProjectBoundary(t *testing.T) {
 	}
 	if w := f.request(f.other, http.MethodPost, f.membershipPath(), `{"expected_revision":1,"ticket_node_ids":["`+id+`"]}`); w.Code != 404 {
 		t.Fatalf("other tenant write %d %s", w.Code, w.Body.String())
+	}
+}
+
+func TestTicketOptionsHistoricalParentCanJoinNextRelease(t *testing.T) {
+	for _, tc := range []struct {
+		name                string
+		undo, backlogIntent bool
+	}{
+		{name: "future child follows current placement"},
+		{name: "Undo removes current placement", undo: true},
+		{name: "Undo restores explicit backlog intent", undo: true, backlogIntent: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			f := ticketSetup(t)
+			membershipOK(t, f.addExisting([]string{f.feature}, 1, false))
+			f.tx(func(tx pgx.Tx) error {
+				_, err := tx.Exec(t.Context(), `UPDATE journey_releases SET state='released',released_at=now() WHERE release_node_id=$1`, f.release)
+				return err
+			})
+			path := "/api/projects/" + f.project + "/releases/" + f.release + "/note-snapshot"
+			frozen := f.request(f.person, http.MethodGet, path, "")
+			if frozen.Code != 200 || !strings.Contains(frozen.Body.String(), f.feature) || !strings.Contains(frozen.Body.String(), `"frozen":true`) {
+				t.Fatalf("missing historical snapshot: %d %s", frozen.Code, frozen.Body.String())
+			}
+			var historical string
+			f.tx(func(tx pgx.Tx) error {
+				return tx.QueryRow(t.Context(), `SELECT to_jsonb(j)::text FROM journey_tickets j WHERE ticket_node_id=$1`, f.feature).Scan(&historical)
+			})
+			leaf := f.existing("work", f.feature, "New backlog leaf", "open")
+			if row := f.readMembership(leaf)[0]; row.ReleaseID != nil {
+				t.Fatalf("new leaf must begin in backlog: %+v", row)
+			}
+			var next string
+			f.tx(func(tx pgx.Tx) error {
+				if err := tx.QueryRow(t.Context(), `INSERT INTO nodes(tenant_id,kind_id,key,parent_id,title) SELECT $1,id,aeon_next_node_key($1,short_prefix),$2,'Next release' FROM node_kinds WHERE slug='release' RETURNING nodes.id::text`, f.person.TenantID, f.project).Scan(&next); err != nil {
+					return err
+				}
+				if _, err := tx.Exec(t.Context(), `INSERT INTO journey_releases(tenant_id,release_node_id,project_node_id,number) VALUES($1,$2,$3,2)`, f.person.TenantID, next, f.project); err != nil {
+					return err
+				}
+				_, err := tx.Exec(t.Context(), `UPDATE journey_projects SET current_release_node_id=$2 WHERE project_node_id=$1`, f.project, next)
+				return err
+			})
+			options := f.request(f.person, http.MethodGet, "/api/projects/"+f.project+"/releases/"+next+"/ticket-options", "")
+			var found optionsResult
+			if options.Code != 200 || json.Unmarshal(options.Body.Bytes(), &found) != nil {
+				t.Fatalf("options %d %s", options.Code, options.Body.String())
+			}
+			var parent *ticketOption
+			for i := range found.Tickets {
+				if found.Tickets[i].NodeID == f.feature {
+					parent = &found.Tickets[i]
+				}
+			}
+			if parent == nil || !parent.IsParent || parent.Availability != "addable" || parent.ReleaseID != nil || parent.ReleaseTitle != nil {
+				t.Fatalf("historical parent must be selectable from its current backlog leaves: %+v", parent)
+			}
+			if tc.backlogIntent {
+				f.tx(func(tx pgx.Tx) error {
+					_, err := tx.Exec(t.Context(), `INSERT INTO work_parent_releases(tenant_id,parent_node_id,project_node_id,release_node_id) VALUES($1,$2,$3,NULL)`, f.person.TenantID, f.feature, f.project)
+					return err
+				})
+			}
+			raw, _ := json.Marshal(membershipInput{Revision: found.Revision, IDs: []string{f.feature}})
+			result := membershipOK(t, f.request(f.person, http.MethodPost, "/api/projects/"+f.project+"/releases/"+next+"/membership", string(raw)))
+			if len(result.LeafIDs) != 1 || result.LeafIDs[0] != leaf || len(result.Walker.Tickets) != 1 || !result.Walker.Tickets[0].Included {
+				t.Fatalf("parent did not place exactly its current leaf: %+v", result)
+			}
+			f.tx(func(tx pgx.Tx) error {
+				var after string
+				if err := tx.QueryRow(t.Context(), `SELECT to_jsonb(j)::text FROM journey_tickets j WHERE ticket_node_id=$1`, f.feature).Scan(&after); err != nil {
+					return err
+				}
+				if after != historical {
+					t.Fatal("placing the current leaves changed historical membership")
+				}
+				return nil
+			})
+			if after := f.request(f.person, http.MethodGet, path, ""); after.Code != 200 || after.Body.String() != frozen.Body.String() {
+				t.Fatal("placing the current leaves changed the frozen snapshot")
+			}
+			// Use the real compensating endpoint before another write, or prove its
+			// revision fence rejects Undo after a newly inherited child changes scope.
+			events.New(f.db.App, events.WithUndoHandlers(UndoHandlers())).Mount(f.mux)
+			if tc.undo {
+				if w := f.request(f.person, http.MethodPost, fmt.Sprintf("/api/events/%d/undo", result.EventID), ""); w.Code != 201 {
+					t.Fatalf("undo historical parent placement: %d %s", w.Code, w.Body.String())
+				}
+				if row := f.readMembership(leaf)[0]; row.ReleaseID != nil {
+					t.Fatalf("Undo did not return the existing leaf to backlog: %+v", row)
+				}
+				f.tx(func(tx pgx.Tx) error {
+					var count, backlogCount int
+					if err := tx.QueryRow(t.Context(), `SELECT count(*),count(*) FILTER(WHERE release_node_id IS NULL) FROM work_parent_releases WHERE parent_node_id=$1`, f.feature).Scan(&count, &backlogCount); err != nil {
+						return err
+					}
+					want := 0
+					if tc.backlogIntent {
+						want = 1
+					}
+					if count != want || backlogCount != want {
+						t.Fatalf("Undo restored %d intents (%d backlog), want %d backlog intents", count, backlogCount, want)
+					}
+					return nil
+				})
+			}
+			fresh := f.existing("work", f.feature, "Future child", "open")
+			row := f.readMembership(fresh)[0]
+			if tc.undo {
+				if row.ReleaseID != nil || row.ReleaseCount != 0 {
+					t.Fatalf("future child inherited an undone placement: %+v", row)
+				}
+			} else {
+				if row.ReleaseID == nil || *row.ReleaseID != next || row.ReleaseCount != 1 {
+					t.Fatalf("future child did not inherit current parent placement: %+v", row)
+				}
+				if w := f.request(f.person, http.MethodPost, fmt.Sprintf("/api/events/%d/undo", result.EventID), ""); w.Code != 409 || !strings.Contains(w.Body.String(), events.ErrConflict.Error()) {
+					t.Fatalf("stale Undo after inherited child: %d %s", w.Code, w.Body.String())
+				}
+			}
+			f.tx(func(tx pgx.Tx) error {
+				var state string
+				var note *string
+				if err := tx.QueryRow(t.Context(), `SELECT state,fields->>'release_inheritance_note' FROM nodes WHERE id=$1`, fresh).Scan(&state, &note); err != nil {
+					return err
+				}
+				if tc.undo && !tc.backlogIntent {
+					if state != "backlog" || note == nil || *note != "parent_release_closed" {
+						t.Fatalf("without current intent the historical closed release must explain backlog: state=%s note=%v", state, note)
+					}
+				} else if state != "open" || note != nil {
+					t.Fatalf("current intent incorrectly inherited the historical closed-release note: state=%s note=%v", state, note)
+				}
+				var after string
+				if err := tx.QueryRow(t.Context(), `SELECT to_jsonb(j)::text FROM journey_tickets j WHERE ticket_node_id=$1`, f.feature).Scan(&after); err != nil {
+					return err
+				}
+				if after != historical {
+					t.Fatal("future-child inheritance or Undo changed historical membership")
+				}
+				return nil
+			})
+			if after := f.request(f.person, http.MethodGet, path, ""); after.Code != 200 || after.Body.String() != frozen.Body.String() {
+				t.Fatal("future-child inheritance or Undo changed the frozen snapshot")
+			}
+		})
+	}
+}
+
+func TestTicketOptionsParentMatchesCurrentLeaves(t *testing.T) {
+	for _, tc := range []struct {
+		name, source, availability string
+		backlog                    bool
+	}{
+		{"backlog", "", "addable", true},
+		{"included", "target", "included", false},
+		{"partly included", "target", "addable", true},
+		{"another planning release", "planning", "other_release", false},
+		{"partly in another release", "planning", "other_release", true},
+		{"released leaf", "released", "released", true},
+		{"superseded leaf", "superseded", "released", true},
+		{"active leaf", "building", "active_release", true},
+		{"deleted source", "deleted", "active_release", true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			f := ticketSetup(t)
+			nested := f.existing("work", f.feature, "Nested parent", "open")
+			a := f.existing("work", nested, "Nested leaf", "done")
+			b := f.existing("work", f.feature, "Sibling leaf", "open")
+			source := f.release
+			f.tx(func(tx pgx.Tx) error {
+				if tc.source != "" && tc.source != "target" {
+					if err := tx.QueryRow(t.Context(), `INSERT INTO nodes(tenant_id,kind_id,key,parent_id,title) SELECT $1,id,aeon_next_node_key($1,short_prefix),$2,'Source release' FROM node_kinds WHERE slug='release' RETURNING nodes.id::text`, f.person.TenantID, f.project).Scan(&source); err != nil {
+						return err
+					}
+					state := tc.source
+					if state == "deleted" {
+						state = "planning"
+					}
+					if _, err := tx.Exec(t.Context(), `INSERT INTO journey_releases(tenant_id,release_node_id,project_node_id,number,state,released_at) VALUES($1,$2,$3,2,$4,CASE WHEN $4 IN ('released','superseded') THEN now() END)`, f.person.TenantID, source, f.project, state); err != nil {
+						return err
+					}
+				}
+				if tc.source != "" {
+					ids := []string{a}
+					if !tc.backlog {
+						ids = append(ids, b)
+					}
+					for i, id := range ids {
+						if _, err := tx.Exec(t.Context(), `INSERT INTO journey_tickets(tenant_id,ticket_node_id,project_node_id,release_node_id,walker_position,source) VALUES($1,$2,$3,$4,$5,'manual')`, f.person.TenantID, id, f.project, source, i); err != nil {
+							return err
+						}
+					}
+				}
+				if tc.source == "deleted" {
+					_, err := tx.Exec(t.Context(), `UPDATE nodes SET deleted_at=now() WHERE id=$1`, source)
+					return err
+				}
+				return nil
+			})
+			w := f.request(f.person, http.MethodGet, "/api/projects/"+f.project+"/releases/"+f.release+"/ticket-options", "")
+			var options optionsResult
+			if w.Code != 200 || json.Unmarshal(w.Body.Bytes(), &options) != nil {
+				t.Fatalf("options %d %s", w.Code, w.Body.String())
+			}
+			seen := false
+			for _, option := range options.Tickets {
+				if option.NodeID != f.feature {
+					continue
+				}
+				seen = true
+				if !option.IsParent || option.Availability != tc.availability {
+					t.Fatalf("parent must reflect its current leaves: %+v", option)
+				}
+				if tc.backlog {
+					if option.ReleaseID != nil || option.ReleaseTitle != nil {
+						t.Fatalf("partial coverage must not claim a single release: %+v", option)
+					}
+				} else if option.ReleaseID == nil || *option.ReleaseID != source || option.ReleaseTitle == nil {
+					t.Fatalf("full coverage lost its release: %+v", option)
+				}
+			}
+			if !seen {
+				t.Fatal("parent absent from options")
+			}
+			w = f.addExisting([]string{f.feature}, int(options.Revision), false)
+			switch tc.availability {
+			case "other_release":
+				if w.Code != 409 || !strings.Contains(w.Body.String(), "confirm_move") {
+					t.Fatalf("expected confirmation: %d %s", w.Code, w.Body.String())
+				}
+				membershipOK(t, f.addExisting([]string{f.feature}, int(options.Revision), true))
+			case "released", "active_release":
+				if w.Code != 409 || (!strings.Contains(w.Body.String(), "cannot move") && !strings.Contains(w.Body.String(), "source release is unavailable")) {
+					t.Fatalf("expected source refusal: %d %s", w.Code, w.Body.String())
+				}
+			default:
+				membershipOK(t, w)
+			}
+		})
 	}
 }
 

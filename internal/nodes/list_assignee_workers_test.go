@@ -29,7 +29,7 @@ func TestListAssigneeSortUsesLiveWorkerName(t *testing.T) {
 	ada := addPrincipalIn(t, p.TenantID, "Ada")
 	nia := addPrincipalIn(t, p.TenantID, "Nia")
 	project := kindBySlug(t, p, "project")
-	ticket := kindBySlug(t, p, "ticket")
+	ticket := kindBySlug(t, p, "work")
 	root := mustNode(t, p, `{"kind_id":"`+project.ID+`","title":"Workers"}`)
 	create := func(key, title, assignee string) nodeJSON {
 		t.Helper()
@@ -92,7 +92,7 @@ func TestListAssigneeSortUsesLiveWorkerName(t *testing.T) {
 
 	keys := func(sort string) []string {
 		t.Helper()
-		status, body := call(t, &p, http.MethodGet, "/api/nodes?within="+root.ID+"&kind=ticket&sort="+sort, "")
+		status, body := call(t, &p, http.MethodGet, "/api/nodes?within="+root.ID+"&kind=work&sort="+sort, "")
 		page := decode[nodePage](t, status, body, http.StatusOK)
 		out := make([]string, 0, len(page.Items))
 		for _, item := range page.Items {
@@ -113,7 +113,7 @@ func TestListAssigneeSortUsesLiveWorkerName(t *testing.T) {
 			t.Fatalf("empty rows not last: %v", got)
 		}
 	}
-	plainPage := listPage(t, p, "/api/nodes?within="+root.ID+"&kind=ticket&sort=updated_at")
+	plainPage := listPage(t, p, "/api/nodes?within="+root.ID+"&kind=work&sort=updated_at")
 	for _, item := range plainPage.Items {
 		switch item.Key {
 		case "PAI-2":
@@ -126,8 +126,8 @@ func TestListAssigneeSortUsesLiveWorkerName(t *testing.T) {
 			}
 		}
 	}
-	sortedLead := leadOn(t, p, "/api/nodes?within="+root.ID+"&kind=ticket&sort=assignee", both.Key)
-	plainLead := leadOn(t, p, "/api/nodes?within="+root.ID+"&kind=ticket&sort=updated_at", both.Key)
+	sortedLead := leadOn(t, p, "/api/nodes?within="+root.ID+"&kind=work&sort=assignee", both.Key)
+	plainLead := leadOn(t, p, "/api/nodes?within="+root.ID+"&kind=work&sort=updated_at", both.Key)
 	if sortedLead == nil || plainLead == nil || sortedLead.Name != "Aaa" || sortedLead.Name != plainLead.Name || sortedLead.Key != plainLead.Key {
 		t.Fatalf("assigned lead sorted %#v plain %#v", sortedLead, plainLead)
 	}
@@ -171,7 +171,7 @@ func TestListAssigneeSortUsesLiveWorkerName(t *testing.T) {
 	if _, err := appPool.Exec(t.Context(), `ANALYZE nodes, harness_sessions`); err != nil {
 		t.Fatal(err)
 	}
-	q, err := parseListQuery(httptest.NewRequest(http.MethodGet, "/api/nodes?within="+root.ID+"&kind=ticket&sort=assignee&limit=50", nil))
+	q, err := parseListQuery(httptest.NewRequest(http.MethodGet, "/api/nodes?within="+root.ID+"&kind=work&sort=assignee&limit=50", nil))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -231,7 +231,7 @@ func TestListAssigneeSortUsesLiveWorkerName(t *testing.T) {
 func TestListAssigneeSortSkipsLiveLookupForStoredPeople(t *testing.T) {
 	p := newPrincipal(t, "assignee-stored-perf")
 	project := kindBySlug(t, p, "project")
-	ticket := kindBySlug(t, p, "ticket")
+	ticket := kindBySlug(t, p, "work")
 	root := mustNode(t, p, `{"kind_id":"`+project.ID+`","title":"Stored"}`)
 	sam := addPrincipalIn(t, p.TenantID, "Sam")
 	zed := insertNamedAgent(t, p.TenantID, "Zed")
@@ -267,7 +267,7 @@ func TestListAssigneeSortSkipsLiveLookupForStoredPeople(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	page := listPage(t, p, "/api/nodes?within="+root.ID+"&kind=ticket&sort=assignee&limit=50")
+	page := listPage(t, p, "/api/nodes?within="+root.ID+"&kind=work&sort=assignee&limit=50")
 	if len(page.Items) != 50 {
 		t.Fatalf("page %d", len(page.Items))
 	}
@@ -277,7 +277,7 @@ func TestListAssigneeSortSkipsLiveLookupForStoredPeople(t *testing.T) {
 		}
 	}
 	// "Zara" sorts after "Sam", so these two are the tail and still have a lead.
-	tail := listPage(t, p, "/api/nodes?within="+root.ID+"&kind=ticket&sort=-assignee&limit=2")
+	tail := listPage(t, p, "/api/nodes?within="+root.ID+"&kind=work&sort=-assignee&limit=2")
 	if len(tail.Items) != 2 {
 		t.Fatalf("tail %d", len(tail.Items))
 	}
@@ -287,7 +287,7 @@ func TestListAssigneeSortSkipsLiveLookupForStoredPeople(t *testing.T) {
 		}
 	}
 
-	q, err := parseListQuery(httptest.NewRequest(http.MethodGet, "/api/nodes?within="+root.ID+"&kind=ticket&sort=assignee&limit=50", nil))
+	q, err := parseListQuery(httptest.NewRequest(http.MethodGet, "/api/nodes?within="+root.ID+"&kind=work&sort=assignee&limit=50", nil))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -326,7 +326,7 @@ func TestListAssigneeSortSkipsLiveLookupForStoredPeople(t *testing.T) {
 func TestListAssigneeSortProbesEachUnassignedRowOnce(t *testing.T) {
 	p := newPrincipal(t, "assignee-probe-once")
 	project := kindBySlug(t, p, "project")
-	ticket := kindBySlug(t, p, "ticket")
+	ticket := kindBySlug(t, p, "work")
 	root := mustNode(t, p, `{"kind_id":"`+project.ID+`","title":"Probe once"}`)
 	sam := addPrincipalIn(t, p.TenantID, "Sam")
 	zed := insertNamedAgent(t, p.TenantID, "Zed")
@@ -354,7 +354,7 @@ func TestListAssigneeSortProbesEachUnassignedRowOnce(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	page := listPage(t, p, "/api/nodes?within="+root.ID+"&kind=ticket&sort=assignee&limit=20")
+	page := listPage(t, p, "/api/nodes?within="+root.ID+"&kind=work&sort=assignee&limit=20")
 	if len(page.Items) != 20 {
 		t.Fatalf("page %d", len(page.Items))
 	}
@@ -383,7 +383,7 @@ func TestListAssigneeSortProbesEachUnassignedRowOnce(t *testing.T) {
 	if _, err := appPool.Exec(t.Context(), `ANALYZE nodes, principals, harness_sessions`); err != nil {
 		t.Fatal(err)
 	}
-	mixed := listPage(t, p, "/api/nodes?within="+root.ID+"&kind=ticket&sort=assignee&limit=50")
+	mixed := listPage(t, p, "/api/nodes?within="+root.ID+"&kind=work&sort=assignee&limit=50")
 	if len(mixed.Items) != 50 {
 		t.Fatalf("mixed page %d", len(mixed.Items))
 	}
@@ -409,7 +409,7 @@ func TestListAssigneeSortProbesEachUnassignedRowOnce(t *testing.T) {
 func TestListAssigneeSortStoppedOnlyProbesAtMostOnce(t *testing.T) {
 	p := newPrincipal(t, "assignee-probe-stopped")
 	project := kindBySlug(t, p, "project")
-	ticket := kindBySlug(t, p, "ticket")
+	ticket := kindBySlug(t, p, "work")
 	root := mustNode(t, p, `{"kind_id":"`+project.ID+`","title":"Stopped probes"}`)
 	sam := addPrincipalIn(t, p.TenantID, "Sam")
 	zed := insertNamedAgent(t, p.TenantID, "Zed")
@@ -437,7 +437,7 @@ func TestListAssigneeSortStoppedOnlyProbesAtMostOnce(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	page := listPage(t, p, "/api/nodes?within="+root.ID+"&kind=ticket&sort=assignee&limit=20")
+	page := listPage(t, p, "/api/nodes?within="+root.ID+"&kind=work&sort=assignee&limit=20")
 	if len(page.Items) != 20 {
 		t.Fatalf("page %d", len(page.Items))
 	}
@@ -466,7 +466,7 @@ func TestListAssigneeSortStoppedOnlyProbesAtMostOnce(t *testing.T) {
 	if _, err := appPool.Exec(t.Context(), `ANALYZE nodes, principals, harness_sessions`); err != nil {
 		t.Fatal(err)
 	}
-	stored := listPage(t, p, "/api/nodes?within="+root.ID+"&kind=ticket&sort=assignee&limit=50")
+	stored := listPage(t, p, "/api/nodes?within="+root.ID+"&kind=work&sort=assignee&limit=50")
 	if len(stored.Items) != 50 {
 		t.Fatalf("stored page %d", len(stored.Items))
 	}
@@ -506,7 +506,7 @@ func explainAssigneeProbes(t *testing.T, p tenant.Principal, rootID string) (ind
 
 func explainAssigneeProbesAt(t *testing.T, p tenant.Principal, rootID string, anchor any) (indexLoops, seqLoops float64) {
 	t.Helper()
-	q, err := parseListQuery(httptest.NewRequest(http.MethodGet, "/api/nodes?within="+rootID+"&kind=ticket&sort=assignee&limit=50", nil))
+	q, err := parseListQuery(httptest.NewRequest(http.MethodGet, "/api/nodes?within="+rootID+"&kind=work&sort=assignee&limit=50", nil))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -574,7 +574,7 @@ func harnessProbeStats(planRaw string) (indexLoops, seqLoops float64, indexes []
 func TestListAssigneeSortUsesTheNameTheViewerSees(t *testing.T) {
 	p := newPrincipal(t, "assignee-redacted")
 	project := kindBySlug(t, p, "project")
-	ticketKind := kindBySlug(t, p, "ticket")
+	ticketKind := kindBySlug(t, p, "work")
 	root := mustNode(t, p, `{"kind_id":"`+project.ID+`","title":"Redacted"}`)
 	makeTicket := func(key string) nodeJSON {
 		t.Helper()
@@ -605,7 +605,7 @@ func TestListAssigneeSortUsesTheNameTheViewerSees(t *testing.T) {
 
 	keys := func(who tenant.Principal, sort string) []string {
 		t.Helper()
-		status, body := call(t, &who, http.MethodGet, "/api/nodes?within="+root.ID+"&kind=ticket&sort="+sort, "")
+		status, body := call(t, &who, http.MethodGet, "/api/nodes?within="+root.ID+"&kind=work&sort="+sort, "")
 		page := decode[nodePage](t, status, body, http.StatusOK)
 		out := make([]string, 0, len(page.Items))
 		for _, item := range page.Items {
@@ -641,7 +641,7 @@ func TestListAssigneeSortUsesTheNameTheViewerSees(t *testing.T) {
 func TestListAssigneeSortLeadsWithTheAttentionState(t *testing.T) {
 	p := newPrincipal(t, "assignee-lead")
 	project := kindBySlug(t, p, "project")
-	ticketKind := kindBySlug(t, p, "ticket")
+	ticketKind := kindBySlug(t, p, "work")
 	root := mustNode(t, p, `{"kind_id":"`+project.ID+`","title":"Leads"}`)
 	makeTicket := func(key string) nodeJSON {
 		t.Helper()
@@ -662,7 +662,7 @@ func TestListAssigneeSortLeadsWithTheAttentionState(t *testing.T) {
 
 	keys := func(sort string) []string {
 		t.Helper()
-		status, body := call(t, &p, http.MethodGet, "/api/nodes?within="+root.ID+"&kind=ticket&sort="+sort, "")
+		status, body := call(t, &p, http.MethodGet, "/api/nodes?within="+root.ID+"&kind=work&sort="+sort, "")
 		page := decode[nodePage](t, status, body, http.StatusOK)
 		out := make([]string, 0, len(page.Items))
 		for _, item := range page.Items {
@@ -703,7 +703,7 @@ func TestLeadMinutesFollowTheWebRules(t *testing.T) {
 func TestListLeadUsesTheViewerHeartbeatThresholds(t *testing.T) {
 	p := newPrincipal(t, "assignee-threshold")
 	project := kindBySlug(t, p, "project")
-	ticketKind := kindBySlug(t, p, "ticket")
+	ticketKind := kindBySlug(t, p, "work")
 	root := mustNode(t, p, `{"kind_id":"`+project.ID+`","title":"Thresholds"}`)
 	makeTicket := func(key string) nodeJSON {
 		t.Helper()
@@ -723,11 +723,11 @@ func TestListLeadUsesTheViewerHeartbeatThresholds(t *testing.T) {
 
 	keys := func(sort string) []string {
 		t.Helper()
-		return listKeys(t, p, "/api/nodes?within="+root.ID+"&kind=ticket&sort="+sort)
+		return listKeys(t, p, "/api/nodes?within="+root.ID+"&kind=work&sort="+sort)
 	}
 	lead := func() string {
 		t.Helper()
-		for _, item := range listPage(t, p, "/api/nodes?within="+root.ID+"&kind=ticket&sort=updated_at").Items {
+		for _, item := range listPage(t, p, "/api/nodes?within="+root.ID+"&kind=work&sort=updated_at").Items {
 			if item.Key == mix.Key && item.LeadWorker != nil {
 				return item.LeadWorker.Name
 			}
@@ -748,7 +748,7 @@ func TestListLeadUsesTheViewerHeartbeatThresholds(t *testing.T) {
 	if lead() != "Zed" {
 		t.Fatalf("3/20 lead %s", lead())
 	}
-	sorted := listPage(t, p, "/api/nodes?within="+root.ID+"&kind=ticket&sort=assignee")
+	sorted := listPage(t, p, "/api/nodes?within="+root.ID+"&kind=work&sort=assignee")
 	for _, item := range sorted.Items {
 		if item.Key == mix.Key && (item.LeadWorker == nil || item.LeadWorker.Name != "Zed") {
 			t.Fatalf("sorted lead %#v", item.LeadWorker)
@@ -763,7 +763,7 @@ func TestListLeadUsesTheViewerHeartbeatThresholds(t *testing.T) {
 func TestListLeadIgnoresReportedProgress(t *testing.T) {
 	p := newPrincipal(t, "assignee-full-progress")
 	project := kindBySlug(t, p, "project")
-	ticketKind := kindBySlug(t, p, "ticket")
+	ticketKind := kindBySlug(t, p, "work")
 	root := mustNode(t, p, `{"kind_id":"`+project.ID+`","title":"Full progress"}`)
 	makeTicket := func(key string) nodeJSON {
 		t.Helper()
@@ -816,7 +816,7 @@ func TestListLeadIgnoresReportedProgress(t *testing.T) {
 		t.Fatal(err)
 	}
 	want := map[string]string{silent.Key: "Silent", quiet.Key: "Quiet", approval.Key: "Needy"}
-	for _, item := range listPage(t, p, "/api/nodes?within="+root.ID+"&kind=ticket&sort=updated_at").Items {
+	for _, item := range listPage(t, p, "/api/nodes?within="+root.ID+"&kind=work&sort=updated_at").Items {
 		if item.LeadWorker == nil || item.LeadWorker.Name != want[item.Key] {
 			t.Fatalf("%s lead %#v, want %s", item.Key, item.LeadWorker, want[item.Key])
 		}
@@ -829,7 +829,7 @@ func TestListLeadIgnoresReportedProgress(t *testing.T) {
 func TestListLeadTieBreakIgnoresWithheldSessionIDs(t *testing.T) {
 	p := newPrincipal(t, "assignee-tie")
 	project := kindBySlug(t, p, "project")
-	ticketKind := kindBySlug(t, p, "ticket")
+	ticketKind := kindBySlug(t, p, "work")
 	root := mustNode(t, p, `{"kind_id":"`+project.ID+`","title":"Ties"}`)
 	makeTicket := func(key, assignee string) nodeJSON {
 		t.Helper()
@@ -855,7 +855,7 @@ func TestListLeadTieBreakIgnoresWithheldSessionIDs(t *testing.T) {
 	guest := insertPerson(t, p.TenantID, "Guest")
 	bindProjectRole(t, p.TenantID, guest.ID, "guest", root.ID)
 
-	path := "/api/nodes?within=" + root.ID + "&kind=ticket&sort="
+	path := "/api/nodes?within=" + root.ID + "&kind=work&sort="
 	adminAsc := listKeys(t, p, path+"assignee")
 	if strings.Join(adminAsc, ",") != "TIE-1,TIE-3,TIE-2,TIE-4" {
 		t.Fatalf("admin asc %v", adminAsc)
@@ -918,7 +918,7 @@ func TestListLeadTieBreakIgnoresWithheldSessionIDs(t *testing.T) {
 func TestListAssigneeSortPagesStably(t *testing.T) {
 	p := newPrincipal(t, "assignee-page")
 	project := kindBySlug(t, p, "project")
-	ticketKind := kindBySlug(t, p, "ticket")
+	ticketKind := kindBySlug(t, p, "work")
 	root := mustNode(t, p, `{"kind_id":"`+project.ID+`","title":"Pages"}`)
 	makeTicket := func(key, assignee string) nodeJSON {
 		t.Helper()
@@ -947,7 +947,7 @@ func TestListAssigneeSortPagesStably(t *testing.T) {
 		seen := map[string]bool{}
 		cursor := ""
 		for range 8 {
-			path := "/api/nodes?within=" + root.ID + "&kind=ticket&sort=" + url.QueryEscape(sort) + "&limit=2"
+			path := "/api/nodes?within=" + root.ID + "&kind=work&sort=" + url.QueryEscape(sort) + "&limit=2"
 			if cursor != "" {
 				path += "&cursor=" + url.QueryEscape(cursor)
 			}

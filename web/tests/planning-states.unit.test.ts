@@ -20,15 +20,15 @@ describe('server list payload planning hovers', () => {
     expect(r.planning!.tokens).toMatchObject({ spent: null, unreported: 1, sessions: 1, running: 1 })
     expect(tokensCell(r).tip).toBe('Usage not reported yet\n1 session running on Cursor grok-4.7')
     expect(tokensCell(serverRow('HOVER-2')).tip).toBe('Usage not reported yet')
-    expect(tokensCell(serverRow('HOVER-6')).tip).toBe('Estimated ~2.4M tokens · usage not reported yet\n1 session running on Cursor grok-4.7')
+    expect(tokensCell(serverRow('HOVER-6')).tip).toBe('Uncalibrated · insufficient model history (n=0)\n1 session running on Cursor grok-4.7')
   })
   it('has no cost lower bound until a list value is measured', () => {
     for (const key of ['HOVER-1', 'HOVER-2', 'HOVER-6']) {
       const r = serverRow(key)
       // HOVER-6's estimate has no priced/billed route; absent usage still
-      // contributes no billing mode and its empty hover has no lower bound.
+      // contributes no billing mode and its hover has no lower bound.
       expect(r.planning!.cost).toMatchObject({ list_spent: null, list_unpriced: key === 'HOVER-6', paid_unknown: key === 'HOVER-6', billing_modes: [] })
-      expect(listCostCell(r)).toMatchObject({ state: 'none', tip: 'Billing not reported yet' })
+      expect(listCostCell(r)).toMatchObject({ state: 'none', tip: key === 'HOVER-6' ? 'Uncalibrated · insufficient model history (n=0)' : 'Billing not reported yet' })
     }
   })
   it('counts only live sessions in the measured running line', () => {
@@ -173,7 +173,8 @@ describe('approved planning figure states', () => {
     delete r.planning!.tokens.calibration.any_route
     r.planning!.tokens.calibration.basis = 'default'
     r.planning!.tokens.calibration.tokens_per_hour = 5_000_000
-    expect(tokensCell(r).tip).toContain('0.48h at 5M/h: default 5M/h until 5 finished tickets on Codex sol')
+    expect(tokensCell(r).tip).toBe('Uncalibrated · insufficient model history (n=12)')
+    expect(tokensCell(r).estimated).toBe('')
     r.planning!.tokens.calibration.basis = 'median'
     r.planning!.tokens.calibration.tokens_per_hour = 800_000
     r.planning!.tokens.sessions = 1
@@ -280,7 +281,8 @@ describe('actual models and saved picker choices', () => {
     expect(filtersFromQuery({ cols: 'paid,tokens,list_cost' }).cols).toEqual(['list_cost', 'tokens'])
     expect(normalizeColumnIds(['paid', 'list_cost'])).toEqual(['list_cost'])
     expect(visibleColumns(2600, { phone: false, present: {} }).columns.some(c => c.id === 'tokens')).toBe(false)
-    expect(visibleColumns(390, { phone: true, prefs: saved }).columns.some(c => c.id === 'tokens')).toBe(false)
+    expect(visibleColumns(390, { phone: true, prefs: saved }).columns.map(c => c.id)).toEqual(drawn)
+    expect(visibleColumns(390, { phone: true, prefs: saved, costAllowed: false }).columns.map(c => c.id)).toEqual(['key', 'title', 'model', 'tokens'])
     expect(prefs.visible).toEqual(['model', 'paid', 'tokens'])
   })
 })

@@ -2,7 +2,6 @@
 // Read model for GET /plugins and the gates the shell displays.
 // A displayed "open" state is not authority: the server checks every action.
 
-import { onBeforeUnmount, onMounted, ref } from 'vue'
 import { api } from '../../lib/api.ts'
 import { pluginLabel, type BusinessArea } from './areas.ts'
 
@@ -95,21 +94,6 @@ export function statusLabel(state: AreaAvailability): string {
   }
 }
 
-export function pinAction(state: AreaAvailability): 'enable' | 'grant' | 'disable' | null {
-  switch (state.gate.state) {
-    case 'unpinned':
-    case 'disabled':
-    case 'digest_mismatch':
-      return 'enable'
-    case 'under_granted':
-      return 'grant'
-    case 'open':
-      return 'disable'
-    default:
-      return null
-  }
-}
-
 export function disablePermissions(item: BusinessPlugin): string[] {
   const allowed = new Set(item.permissions)
   return item.installation.permissions.filter(permission => allowed.has(permission))
@@ -143,31 +127,6 @@ export async function configurePlugin(pluginId: string, body: InstallationWrite)
     body: JSON.stringify(body),
   })
   if (!response.ok) throw new BusinessAPIError(response.status, await errorMessage(response))
-}
-
-export function useBusinessCatalog() {
-  const items = ref<BusinessPlugin[] | null>(null)
-  const error = ref('')
-  const busy = ref(false)
-  let generation = 0
-  async function refresh() {
-    const request = ++generation
-    busy.value = true
-    try {
-      const next = await listPlugins()
-      if (request !== generation) return
-      items.value = next
-      error.value = ''
-    } catch (cause) {
-      if (request !== generation) return
-      error.value = cause instanceof Error ? cause.message : 'Could not load plugins.'
-    } finally {
-      if (request === generation) busy.value = false
-    }
-  }
-  onMounted(() => { void refresh() })
-  onBeforeUnmount(() => { generation += 1 })
-  return { items, error, busy, refresh }
 }
 
 function reasonFor(gate: GateState, blockedBy: readonly string[]): string {

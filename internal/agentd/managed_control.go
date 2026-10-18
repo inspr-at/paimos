@@ -12,6 +12,7 @@ import (
 	"unicode/utf8"
 
 	"github.com/inspr-at/paimos/internal/rules"
+	"github.com/inspr-at/paimos/internal/servicetier"
 )
 
 const managedControlCapability = "managed_control_v1"
@@ -75,7 +76,8 @@ func (s *Supervisor) managedRules(ctx context.Context, entry *owned, run Run, pr
 
 // Local counters update before telemetry I/O, including before Start returns.
 // Reporting boundaries may overshoot the token limit; they are not a provider
-// billing cap. A single graceful stop is scheduled; failure escalates through
+// billing cap and cannot qualify RoutineBudgetAdapter. A single graceful stop
+// is scheduled; failure escalates through
 // Process.Stop, whose owned lifetime fences every process-group signal.
 func (s *Supervisor) observeBudget(entry *owned, ev AdapterEvent) {
 	entry.budgetMu.Lock()
@@ -174,10 +176,15 @@ func (entry *owned) budgetStopReason() string {
 // Setting values are a separate typed field; never interpreted as input text.
 var ErrSettingRejected = errors.New("harness rejected session setting")
 
-func isSetting(kind string) bool { return kind == "rename" || kind == "model" || kind == "effort" }
+func isSetting(kind string) bool {
+	return kind == "rename" || kind == "model" || kind == "effort" || kind == "tier"
+}
 func validSettingValue(kind, value string) bool {
 	if value == "" || strings.TrimSpace(value) != value || !utf8.ValidString(value) || utf8.RuneCountInString(value) > 128 || strings.ContainsFunc(value, unicode.IsControl) {
 		return false
+	}
+	if kind == "tier" {
+		return servicetier.Valid(value)
 	}
 	if kind != "effort" {
 		return true

@@ -16,6 +16,9 @@ import (
 )
 
 func TestStatusDefinitions(t *testing.T) {
+	if help := defaultStatusHelp(); help.Recurring.Label != "Recurring" || help.Recurring.IsStatus || !strings.Contains(help.Recurring.Meaning, "occurrence number") {
+		t.Fatalf("missing shared recurring marker definition: %+v", help.Recurring)
+	}
 	help := defaultStatusHelp()
 	want := []string{"new", "backlog", "open", "blocked", "in_progress", "qa", "done", "delivered", "accepted", "cancelled", "archived"}
 	states := []string{}
@@ -28,6 +31,9 @@ func TestStatusDefinitions(t *testing.T) {
 			if _, ok := help.Autopilot.Rules[key]; !ok {
 				t.Fatalf("missing rule %s", key)
 			}
+		}
+		if def.State == "cancelled" && (!strings.Contains(def.Meaning, "merged into another ticket") || !strings.Contains(def.Meaning, "destination ticket") || !strings.Contains(def.Hint, "destination ticket")) {
+			t.Fatalf("merged ticket cancellation is undefined: %+v", def)
 		}
 	}
 	if !reflect.DeepEqual(states, want) || help.Queued.IsStatus || !strings.Contains(help.Queued.Meaning, "Open or Blocked plus a place") || !strings.Contains(help.Queued.Meaning, "Blocked waits on its named blocker") || !strings.Contains(help.Queued.Meaning, "AEON-522") {

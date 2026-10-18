@@ -4,6 +4,7 @@ package fromclassic
 
 import (
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -17,11 +18,28 @@ import (
 )
 
 func TestResolveImportedLinksWithProjectVisibility(t *testing.T) {
-	d := dbtest.Open(t)
+	d, err := dbtest.NewUnmigrated(t.Context())
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		if err := d.Close(); err != nil {
+			t.Error(err)
+		}
+	})
+	boundary := errors.New("stop before work upgrade")
+	if err := db.MigrateWithHook(t.Context(), d.App, func(name string) error {
+		if name == "1215_one_work_kind.sql" {
+			return boundary
+		}
+		return nil
+	}); !errors.Is(err, boundary) {
+		t.Fatalf("legacy schema: %v", err)
+	}
 	const tenantID = "11111111-1111-4111-8111-111111111111"
 	var member, guest, project, hidden, customer string
 	ctx := dbtest.Seed(t.Context())
-	err := db.InTenant(ctx, d.App, tenantID, func(tx pgx.Tx) error {
+	err = db.InTenant(ctx, d.App, tenantID, func(tx pgx.Tx) error {
 		if _, err := tx.Exec(ctx, `INSERT INTO tenants(id,slug,name) VALUES($1::uuid,'classic','Classic')`, tenantID); err != nil {
 			return err
 		}
@@ -88,6 +106,21 @@ func TestResolveImportedLinksWithProjectVisibility(t *testing.T) {
 		t.Fatal(err)
 	}
 
+	if err := db.MigrateWithHook(t.Context(), d.App, nil); err != nil {
+		t.Fatal(err)
+	}
+	if err := db.InTenant(ctx, d.App, tenantID, func(tx pgx.Tx) error {
+		var kind string
+		if err := tx.QueryRow(ctx, `SELECT k.slug FROM nodes n JOIN node_kinds k ON k.tenant_id=n.tenant_id AND k.id=n.kind_id WHERE n.key='PAI-42'`).Scan(&kind); err != nil {
+			return err
+		}
+		if kind != "work" {
+			t.Fatalf("imported issue was not upgraded: %s", kind)
+		}
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
 	mux := http.NewServeMux()
 	New(d.App).Mount(mux)
 	call := func(p *tenant.Principal, classicPath string) (int, destination) {
@@ -137,5 +170,15 @@ func TestResolveImportedLinksWithProjectVisibility(t *testing.T) {
 	}
 	if status, _ := call(&memberPrincipal, "https://example.com/issues/42"); status != 400 {
 		t.Errorf("external URL: %d", status)
+	}
+	// Duplicate visible imported identities fail closed after kind migration too.
+	if err := db.InTenant(ctx, d.App, tenantID, func(tx pgx.Tx) error {
+		_, err := tx.Exec(ctx, `INSERT INTO nodes(tenant_id,key,kind_id,title,parent_id,fields) SELECT $1,'PAI-43',k.id,'Ambiguous import',$2,'{"classic":{"id":42}}' FROM node_kinds k WHERE k.slug='work'`, tenantID, project)
+		return err
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if status, got := call(&memberPrincipal, "/issues/42"); status != 200 || got.Path != "/" || got.Notice != movedNotice {
+		t.Fatalf("ambiguous upgraded issue resolved: %d %+v", status, got)
 	}
 }

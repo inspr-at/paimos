@@ -3,7 +3,7 @@
 package agentsetup
 
 import (
-	"errors"
+	"fmt"
 	"path/filepath"
 	"strings"
 )
@@ -13,8 +13,11 @@ import (
 // Nix executables remain physical so declarative ownership is still detected.
 func ServiceExecutable(executable, home string) (string, error) {
 	physical, err := filepath.EvalSymlinks(executable)
-	if err != nil || !filepath.IsAbs(physical) {
-		return "", ErrUnsafePath
+	if err != nil {
+		return "", fmt.Errorf("resolve service executable %s: %w: %w", executable, ErrUnsafePath, err)
+	}
+	if !filepath.IsAbs(physical) {
+		return "", fmt.Errorf("service executable %s: %w", executable, ErrUnsafePath)
 	}
 	if strings.HasPrefix(physical, "/nix/store/") {
 		return physical, nil
@@ -32,8 +35,11 @@ func ServiceExecutable(executable, home string) (string, error) {
 		return physical, nil
 	}
 	resolved, err := filepath.EvalSymlinks(stable)
-	if err != nil || resolved != physical {
-		return "", errors.New("stable aeon-agentd link is missing or points to another binary; repair the Homebrew or checksum installation before installing a service")
+	if err != nil {
+		return "", fmt.Errorf("resolve stable service executable %s for %s: %w; repair the Homebrew or checksum installation before installing a service", stable, physical, err)
+	}
+	if resolved != physical {
+		return "", fmt.Errorf("stable service executable %s points to %s, not running executable %s; repair the Homebrew or checksum installation before installing a service", stable, resolved, physical)
 	}
 	return stable, nil
 }

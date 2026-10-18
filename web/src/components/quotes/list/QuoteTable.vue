@@ -309,7 +309,7 @@ td.c-title { position: relative; }
 .archived-chip { flex: 0 0 auto; height: 18px; padding: 0 7px; border-radius: 999px; background: var(--surface-2); box-shadow: inset 0 0 0 1px var(--line-2); color: var(--ink-2); font: 600 10px/18px var(--mono); letter-spacing: .06em; text-transform: uppercase; font-variant-ligatures: none; }
 .text { overflow: hidden; text-overflow: ellipsis; color: var(--ink-2); }
 .day { color: var(--ink-2); font-variant-numeric: tabular-nums; }
-.day.soon { color: var(--gold-ink); font-weight: 600; }
+.day.soon { color: var(--warn-ink); font-weight: 600; }
 .day.past { color: var(--ink-3); text-decoration: line-through; text-decoration-color: var(--line-2); }
 .empty { color: var(--ink-3); font-size: 12.5px; }
 .mono { font-family: var(--mono); font-size: 12.5px; font-variant-numeric: tabular-nums; font-variant-ligatures: none; color: var(--ink); }

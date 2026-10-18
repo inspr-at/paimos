@@ -51,10 +51,11 @@ func TestOperatorCLIKeyCreateAndAccess(t *testing.T) {
 	}); err != nil {
 		t.Fatal(err)
 	}
+	creatorID := dbtest.KeyPerson(t, d.App, tid)
 	file := filepath.Join(t.TempDir(), "agent-key")
 	var stdout bytes.Buffer
 	badFile := filepath.Join(t.TempDir(), "invalid-key")
-	if err := agentKeyCommand([]string{"create", "--tenant", "ab1-cli", "--name", "invalid-worker", "--out-file", badFile, "--project", "JANUS-1", "--project-role", "owner"}, &stdout); err == nil {
+	if err := agentKeyCommand([]string{"create", "--tenant", "ab1-cli", "--creator-id", creatorID, "--name", "invalid-worker", "--out-file", badFile, "--project", "JANUS-1", "--project-role", "owner"}, &stdout); err == nil {
 		t.Fatal("workspace owner role accepted on project")
 	}
 	if _, err := os.Stat(badFile); !os.IsNotExist(err) {
@@ -62,14 +63,14 @@ func TestOperatorCLIKeyCreateAndAccess(t *testing.T) {
 	}
 	for _, role := range []string{"owner", "guest"} {
 		badFile = filepath.Join(t.TempDir(), "invalid-workspace-key")
-		if err := agentKeyCommand([]string{"create", "--tenant", "ab1-cli", "--name", "invalid-worker", "--out-file", badFile, "--workspace-role", role}, &stdout); err == nil {
+		if err := agentKeyCommand([]string{"create", "--tenant", "ab1-cli", "--creator-id", creatorID, "--name", "invalid-worker", "--out-file", badFile, "--workspace-role", role}, &stdout); err == nil {
 			t.Fatalf("workspace %s accepted", role)
 		}
 		if _, err := os.Stat(badFile); !os.IsNotExist(err) {
 			t.Fatalf("invalid workspace role created key file: %v", err)
 		}
 	}
-	if err := agentKeyCommand([]string{"create", "--tenant", "ab1-cli", "--name", "janus-worker", "--out-file", file, "--scopes", "nodes:read", "--workspace-role", "member", "--project", "JANUS-1", "--project-role", "guest"}, &stdout); err != nil {
+	if err := agentKeyCommand([]string{"create", "--tenant", "ab1-cli", "--creator-id", creatorID, "--name", "janus-worker", "--out-file", file, "--scopes", "nodes:read", "--workspace-role", "member", "--project", "JANUS-1", "--project-role", "guest"}, &stdout); err != nil {
 		t.Fatal(err)
 	}
 	var created struct {

@@ -118,7 +118,6 @@ export function distinctTickets(list: { release: Release; at: number }[]) {
 
 // ---------- The seven stats ----------
 export type StatKey = 'perweek' | 'features' | 'since' | 'median' | 'week' | 'streak' | 'busiest'
-export const STAT_KEYS: readonly StatKey[] = ['perweek', 'features', 'since', 'median', 'week', 'streak', 'busiest']
 // The data each stat's small visual draws; the card turns it into SVG.
 export type StatViz =
   | { kind: 'cumulative'; points: number[]; total: number; from: string; pace: string; aria: string }
@@ -201,7 +200,7 @@ export function releaseStats(releases: Release[], now: number): Stat[] {
   // 3. Since the last release
   const last = all[all.length - 1]!
   const sinceLast = Math.max(0, now - last.at)
-  const verb = last.release.state === 'reserved' ? 'reserved' : last.release.published_at ? 'published' : 'tagged'
+  const verb = last.release.state === 'reserved' || last.release.state === 'candidate' ? 'reserved' : last.release.published_at ? 'published' : 'tagged'
   const shown = Math.max(40 * HOUR, Math.min(14 * DAY, sinceLast + 4 * HOUR))
   const start = now - shown
   const lastBeforeWindow = last.at < start

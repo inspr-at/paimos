@@ -1,0 +1,296 @@
+// SPDX-License-Identifier: AGPL-3.0-only
+import { api, APIError, StaleRequestError } from './api.ts'
+import type { KeyTrimProposal } from './keyTrim'
+import type { Approval } from './agents'
+import type { DoctrineInboxItem } from './doctrine'
+import { sha256FirstByte } from './avatar.ts'
+import type { MethodLearning } from './knowledge'
+import type { StepupRequest } from './stepup'
+import type { PersonStep } from './personSteps'
+
+// P6 presentation model. Wire contracts live in decisionDeskApi.ts.
+export type DeskOutcome = 'once' | 'always' | 'requirement' | 'doctrine'
+export type DeskKind = 'question' | 'handover' | 'approval' | 'action' | 'rule' | 'tier' | 'key_trim' | 'stepup' | 'account_matrix' | 'lesson'
+// Outside the server option-ID alphabet, so an agent option cannot collide.
+export const CUSTOM_ANSWER = '@custom'
+export interface DeskChoice { id: string; title: string; description: string; answer: string; field?: boolean; unavailable?: string }
+export interface DeskDoctrineTarget { source_id: string; path: string; rule_key: string; rule_sha256: string; tldr_en?: string; tldr_de?: string }
+export interface DeskOutcomeAvailability { outcome: DeskOutcome; available: boolean; why: string; mapping_present?: boolean }
+export interface DeskEffectReview { kind: 'criterion' | 'doctrine'; ref: string; why: string }
+export interface DeskOutcomeEffect {
+  id: string; revision: number; kind: 'inbox' | 'comment' | 'outcome'; state: 'pending' | 'delivered' | 'failed' | 'replaced'; deliver_after: string
+  receipt_state?: 'queued' | 'handed_off' | 'failed'; receipt_failure?: string; error_code?: string; error_message?: string; effect_ref?: string; doctrine_state?: string
+  effect_data?: { retryable?: boolean; review_required?: DeskEffectReview[]; ticket_id?: string; criterion?: string; knowledge_id?: string; doctrine_id?: string; supersedes?: string; superseded_by?: string }
+}
+/** What the asking agent does meanwhile, as the question set it. */
+export type DeskMeanwhile = 'carries_on' | 'parked' | 'paused' | 'stopped'
+/** Who asked: the principal and, when known, the exact session; names resolve at render time. */
+export interface DeskAsker { principalId: string; sessionId?: string; name?: string }
+/** The answer's own delivery as the server reports it (AEON-1339; the read receipt follows with AEON-1340). */
+export type DeskDeliveryState = 'pending' | 'delivered' | 'failed'
+export interface DeskItem {
+  personStep?: PersonStep
+  personStepUndo?: { step: PersonStep; owner?: string; event?: number }
+  id: string; kind: DeskKind; projectId: string; projectName: string; projectKey?: string; ticketId?: string; ticketKey?: string
+  askers?: DeskAsker[]; meanwhileKind?: DeskMeanwhile; suggested?: DeskOutcome; suggestedBy?: 'agent' | 'ticket' | 'project'
+  decidedAt?: string; deliverAfter?: string; deliveryState?: DeskDeliveryState
+  title: string; context: string; findings: string; meanwhile: string; destination: string
+  choices: DeskChoice[]; recommended?: string; why: string; outcome: DeskOutcome; suggestion: string
+  revision: number; createdAt: string; expiresAt?: string; held: boolean; decided: boolean
+  answer?: string; optionId?: string; reason?: string; delivery?: string; fromRecord?: string
+  outcomes?: DeskOutcomeAvailability[]; doctrine?: DeskDoctrineTarget; outcomeEffects?: DeskOutcomeEffect[]
+  unavailable?: string; prUrl?: string; source?: string; linkOut?: string; keyTrim?: KeyTrimProposal; approval?: Approval; rule?: DoctrineInboxItem; stepup?: StepupRequest; lesson?: { learning: MethodLearning; outdated: boolean }; undoEvent?: number
+  /** A run-scoped approval's run, and the work order (ticket) it runs when a read named it (AEON-1339). */
+  runId?: string; workOrderId?: string
+}
+/** A run as the desk names it everywhere: the run-id convention of the agents pages, the full id in the tip. */
+export const runRef = (id: string) => `Run ${id.slice(0, 8)}`
+/** The asking agent as the memo names it: its session's name, harness mark and model. */
+export interface DeskWho { name: string; harness?: string; model?: string }
+/** The ticket an item is about, as one bounded lookup names it. */
+export interface DeskTicket { key: string; title: string }
+/** How the memo closed; after the last decision it names the item decided last. */
+export interface DeskClose { afterLast: boolean; last?: DeskItem; skipped?: boolean }
+export interface DeskDraft { optionId: string; answer: string; reason: string; outcome: DeskOutcome; dirty: boolean }
+export const outcomeLabels: Record<DeskOutcome, string> = { once: 'Once', always: 'Always', requirement: 'Requirement', doctrine: 'Doctrine' }
+export const kindLabels: Record<DeskKind, string> = { question: 'Question', handover: 'Handover question', approval: 'Approval', action: 'Action request', rule: 'Rule change', tier: 'Tier request', key_trim: 'Key trim approval', stepup: 'Step-up approval', account_matrix: 'Account matrix', lesson: 'Lesson to adopt' }
+export function draftFor(item: DeskItem): DeskDraft {
+  const protectedChoice = item.kind === 'approval' || item.kind === 'tier' || item.kind === 'key_trim' || item.kind === 'stepup'
+  return { optionId: item.optionId ?? (protectedChoice ? '' : item.recommended ?? item.choices[0]?.id ?? ''), answer: item.answer ?? '', reason: item.reason ?? '', outcome: initialOutcome(item), dirty: false }
+}
+/** A recorded answer stays. The draft never starts on an unavailable stamp: the
+ * suggestion, then the scope default, then the first usable stamp (AEON-1339). */
+export function initialOutcome(item: DeskItem): DeskOutcome {
+  if (item.decided || !outcomeUnavailable(item, item.outcome)) return item.outcome
+  const scope: DeskOutcome = item.ticketId || item.ticketKey ? 'once' : 'always'
+  const order: DeskOutcome[] = [scope, 'once', 'always', 'requirement', 'doctrine']
+  return order.find(outcome => !outcomeUnavailable(item, outcome)) ?? 'once'
+}
+/** Quiet hint when the asker's stamp cannot be selected. Empty when that stamp is usable. */
+export function suggestedUnavailableNote(item: DeskItem): string {
+  if (item.decided || (item.kind !== 'question' && item.kind !== 'handover')) return ''
+  if (!outcomeUnavailable(item, item.outcome) || item.outcome === 'once') return ''
+  return `Suggested: ${outcomeLabels[item.outcome]} · not available for this question`
+}
+const PLAIN_WHY: Record<string, (project: string) => string> = {
+  'Requirement needs a linked editable ticket.': () => 'Not available: this question has no ticket, so there are no acceptance criteria to add to.',
+  'The linked ticket is no longer editable.': () => 'Not available: the ticket can’t be edited any more.',
+  'Requirement needs text acceptance criteria; review the ticket\'s list or structured criteria first.': () => 'Not available: the ticket’s acceptance criteria aren’t plain text. Review them on the ticket first.',
+  'Doctrine needs an authorized source, rule and exact base mapping.': () => 'Not available: the agent didn’t name the rule this answer would change, so there is nothing to propose a change to.',
+  'Doctrine needs a confirmed source, rule and exact base mapping.': () => 'Not available: the agent didn’t name the rule this answer would change, so there is nothing to propose a change to.',
+  'This outcome requires knowledge.write permission.': project => `Not available: you can’t write decisions to ${project}’s Knowledge.`,
+  'This outcome requires nodes.write permission.': project => `Not available: you can’t edit tickets in ${project}.`,
+  'Doctrine requires workspace rules.write permission.': () => 'Not available: you can’t propose rule changes.',
+  'The doctrine inbox adapter is unavailable.': () => 'Not available: this server can’t propose rule changes yet.',
+  'Question decision permission is required.': project => `Not available: you can’t decide questions in ${project}.`,
+}
+/** The reason a stamp is off, in plain words for the memo (the server sentence stays the authority). */
+export function stampWhy(item: DeskItem, outcome: DeskOutcome): string {
+  const why = outcomeUnavailable(item, outcome)
+  if (!why) return ''
+  const plain = PLAIN_WHY[why]
+  if (plain) return plain(item.projectName)
+  if (why.endsWith('availability could not be confirmed.')) return `Couldn’t check whether ${outcomeLabels[outcome]} is available. Try again in a moment.`
+  return why
+}
+/** One line under the stamps: what the chosen stamp does with the answer. */
+export function stampDescription(item: DeskItem, outcome: DeskOutcome): string {
+  const project = item.projectId ? item.projectName : 'the workspace'
+  const base = {
+    once: 'For this question only. The agent gets it; it stays in Decided.',
+    always: `From now on. When an agent asks the same again, ${project} answers with this and does not ask you.`,
+    requirement: `Adds an acceptance criterion to ${item.ticketKey || 'the ticket'}.`,
+    doctrine: `Proposes a rule for ${project}; you approve it in Rules, as today.`,
+  }[outcome]
+  if (item.decided) return base
+  if (item.suggestedBy === 'agent' && item.suggested === outcome) return `${base} Suggested by the agent.`
+  if (item.suggestedBy !== 'agent' && item.suggested === outcome) return `${base} ${item.suggestedBy === 'ticket' ? 'Preselected: the question is about one ticket.' : `Preselected: the question applies across ${project}.`}`
+  return base
+}
+export function answerFor(item: DeskItem, draft: DeskDraft): string {
+  const choice = item.choices.find(option => option.id === draft.optionId)
+  return (choice?.field ? draft.answer : choice?.answer ?? draft.answer).trim()
+}
+export function outcomeUnavailable(item: DeskItem, outcome: DeskOutcome): string {
+  if (item.kind !== 'question' && item.kind !== 'handover') return 'This action uses its own protected decision flow.'
+  const capability = item.outcomes?.find(row => row.outcome === outcome)
+  // Older servers offered Once only. Publishing always needs a current server
+  // capability; the agent's suggested stamp is never authority.
+  if (!capability) return outcome === 'once' && !item.outcomes ? '' : `${outcomeLabels[outcome]} availability could not be confirmed.`
+  if (!capability.available) return capability.why || `${outcomeLabels[outcome]} is unavailable to this person.`
+  if (outcome === 'doctrine' && (!capability.mapping_present || !item.doctrine)) return 'Doctrine needs a confirmed source, rule and exact base mapping.'
+  return ''
+}
+/** IDs freeze at an explicit round boundary. Refresh only updates arrivals. */
+export function newRound(items: DeskItem[]): string[] { return items.map(item => item.id) }
+export function arrivals(items: DeskItem[], round: string[]): DeskItem[] {
+  const ids = new Set(round)
+  return items.filter(item => !ids.has(item.id) && !item.decided)
+}
+// AEON-1057: every item names its project. PAIMOS projects carry no colour of
+// their own, so a project gets a stable hue from its key: the project-group
+// marker hues, at one lightness per theme (--project-l / --project-c).
+const PROJECT_HUES = [190, 75, 290, 12, 150, 240, 45, 335]
+export interface DeskProject { id: string; key: string; name: string; href: string; hue: number | null }
+export function projectHue(key: string): number { return PROJECT_HUES[sha256FirstByte(key) % PROJECT_HUES.length]! }
+/** Workspace-wide items (no project, or no key to link to) stay neutral and unlinked. */
+export function deskProject(item: Pick<DeskItem, 'projectId' | 'projectName' | 'projectKey'>): DeskProject {
+  const key = item.projectId ? item.projectKey ?? '' : ''
+  return { id: item.projectId, key, name: item.projectName, href: key ? `/p/${encodeURIComponent(key)}` : '', hue: key ? projectHue(key) : null }
+}
+/** The project of the previously shown item, when it differs from this one. */
+export function projectSwitch(previous: DeskProject | undefined, current: DeskProject): DeskProject | undefined {
+  return previous && previous.id !== current.id ? previous : undefined
+}
+export function fieldTarget(target: EventTarget | null): target is HTMLElement {
+  return target instanceof HTMLElement && (!!target.closest('input, textarea, select, [contenteditable="true"], [role="textbox"]'))
+}
+export function macPlatform(platform: string): boolean { return /Mac|iPhone|iPad|iPod/i.test(platform) }
+export function submitModifier(event: Pick<KeyboardEvent, 'metaKey' | 'ctrlKey' | 'altKey' | 'shiftKey'>, mac: boolean): boolean {
+  return !event.altKey && !event.shiftKey && (mac ? event.metaKey && !event.ctrlKey : event.ctrlKey && !event.metaKey)
+}
+
+export interface DeskProjectionItem {
+  person_step?: PersonStep
+  id: string; kind: 'question' | 'approval' | 'action_request' | 'doctrine' | 'tier_request' | 'key_trim' | 'stepup' | 'account_matrix' | 'lesson' | 'routine_consent'; project_id?: string
+  revision: number; title: string; created_at: string; expires_at?: string; held: boolean; can_decide?: boolean; href: string; source: string
+}
+export interface DeskProjection {
+  items: DeskProjectionItem[]; counts: { open: number; held: number; chores: number; lessons?: Record<string, number> }
+  has_more: boolean; next_cursor?: string; as_of: string
+}
+
+export function deskItemID(item: Pick<DeskProjectionItem, 'kind' | 'id'>): string {
+  const prefix = { question: 'q', approval: 'a', action_request: 'm', doctrine: 'r', tier_request: 't', key_trim: 'k', stepup: 's', account_matrix: 'u', routine_consent: 'c', lesson: 'l' }[item.kind]
+  return `${prefix}:${item.id}`
+}
+// Link-out rows are decided on their own settings page, never in the memo.
+// Only the approved in-app settings paths are followed; anything else stays inert.
+export function deskLinkOut(item: Pick<DeskProjectionItem, 'kind' | 'href'>): string {
+  if (item.kind === 'routine_consent') return typeof item.href === 'string' && /^\/(?:p\/[A-Za-z0-9_-]{1,40}\/settings|settings\/(?:personal|routines))\?recurrence=[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}&consent=1$/.test(item.href) ? item.href : ''
+  return item.kind === 'account_matrix' && typeof item.href === 'string' && /^\/settings\/[a-z0-9-]{1,40}(#[a-z0-9-]{1,40})?$/.test(item.href) ? item.href : ''
+}
+// Compatibility links are data, never a selector or a destination to execute.
+export function deskLinkItem(value: unknown): string {
+  return typeof value === 'string' && /^[qamrtksl]:[a-zA-Z0-9][a-zA-Z0-9-]{0,79}$/.test(value) ? value : ''
+}
+
+export interface DeskSourceLine { text: string; retry: boolean }
+
+// Step-up warnings contain the word "approval", so that pattern is tested first.
+// A later generic approval match would mislabel a step-up failure as an approval failure.
+export function deskSourceLines(warnings: readonly string[], linkMissing = false): DeskSourceLine[] {
+  const lines = new Map<string, boolean>()
+  const failed = (text: string) => lines.set(text, true)
+  for (const warning of warnings) {
+    if (/could not be read|unavailable|could not be confirmed|could not be hydrated/i.test(warning) && !/limited|limit is|first \d|Only|outside this page|may be incomplete|more step-up/i.test(warning)) {
+      if (/step-up/i.test(warning)) failed('Some step-up approvals couldn’t be loaded')
+      else if (/^Approvals|approval/i.test(warning)) failed('Some approvals couldn’t be loaded')
+      else if (/Questions|question/i.test(warning)) failed(/More questions/.test(warning) ? 'More questions couldn’t be loaded' : 'Some questions couldn’t be loaded')
+      else if (/rule change/i.test(warning)) failed('Some rule changes couldn’t be loaded')
+      else if (/key trim/i.test(warning)) failed('Some key trims couldn’t be loaded')
+      else if (/action request/i.test(warning)) failed('Some action requests couldn’t be loaded')
+      else if (/tier/i.test(warning)) failed('Some tier requests couldn’t be loaded')
+      else if (/Project names/i.test(warning)) failed('Project names couldn’t be loaded')
+      else if (/desk could not be read/i.test(warning)) failed('The desk couldn’t be loaded')
+      else failed('Some items couldn’t be loaded')
+    } else lines.set(warning.replace(/\.$/, ''), false)
+  }
+  if (linkMissing) failed('This link’s item couldn’t be found')
+  return [...lines.entries()].map(([text, retry]) => ({ text, retry }))
+}
+
+// AEON-1406: the reads behind one desk read. A source that did not answer is
+// named here by loadDesk, so an empty Open tab never claims the desk is clear.
+export type DeskSource = 'desk' | 'projects' | 'questions' | 'approvals' | 'rules' | 'actions' | 'keyTrims' | 'stepups' | 'tiers' | 'lessons'
+const SOURCE_NAMES: Record<DeskSource, string> = { desk: 'The desk', projects: 'Projects', questions: 'Questions', approvals: 'Approvals', rules: 'Rule changes',
+  actions: 'Action requests', keyTrims: 'Key trims', stepups: 'Step-up approvals', tiers: 'Tier requests', lessons: 'Lessons' }
+export type DeskEmptyState = 'reading' | 'clear' | 'incomplete' | 'scoped'
+/** The Open tab with nothing to show: reading (D), all clear (A), a source
+ * did not answer (B) or a narrowed view (C). Null while rows are listed. */
+export function deskEmptyState(desk: { reading: boolean; open: number; scoped: boolean; unanswered: readonly DeskSource[]; failed: boolean }): DeskEmptyState | null {
+  if (desk.reading) return 'reading'
+  if (desk.open > 0) return null
+  if (desk.scoped) return 'scoped'
+  return desk.unanswered.length || desk.failed ? 'incomplete' : 'clear'
+}
+export function deskUnansweredLine(unanswered: readonly DeskSource[]): string {
+  const named = [...new Set(unanswered)]
+  const who = named.includes('desk') ? SOURCE_NAMES.desk : named.length === 1 ? SOURCE_NAMES[named[0]!] : 'Some sources'
+  return `${who} didn’t answer, so this may be incomplete`
+}
+
+// Cancellation discards a read; it says nothing about the desk's availability.
+export function deskReadAborted(cause: unknown, signal?: AbortSignal): boolean {
+  return !!signal?.aborted || cause instanceof StaleRequestError || cause instanceof APIError && cause.status === 499 || cause instanceof Error && cause.name === 'AbortError'
+}
+
+export function deskRefreshNotice(failures: number, failedSince: number | null, updatedAt: number | null, now: number): 'quiet' | 'escalated' | null {
+  if (updatedAt === null || failures < 2) return null
+  return failures >= 5 || failedSince !== null && now - failedSince > 60_000 ? 'escalated' : 'quiet'
+}
+
+// A decided lesson leaves the pending projection. Keep the row and the learning
+// this visit already confirmed, so Undo re-checks that same record. Omitting
+// the learning makes the decision look unauthorized the moment the list refreshes.
+export function retainDecidedLessons(previous: readonly DeskItem[], nextItems: DeskItem[], lessons: Map<string, MethodLearning>) {
+  const present = new Set(nextItems.map(item => item.id))
+  for (const item of previous) {
+    if (item.kind !== 'lesson' || !item.decided || present.has(item.id)) continue
+    nextItems.push(item)
+    present.add(item.id)
+    const learning = item.lesson?.learning
+    if (learning && !lessons.has(item.id)) lessons.set(item.id, learning)
+  }
+}
+
+export async function readDeskProjection(limit = 100, cursor?: string, signal?: AbortSignal): Promise<DeskProjection> {
+  if (!Number.isSafeInteger(limit) || limit < 1 || limit > 100 || (cursor?.length ?? 0) > 512) throw new Error('Invalid Decision Desk page.')
+  const params = new URLSearchParams({ limit: String(limit), ...(cursor ? { cursor } : {}) })
+  const response = await api(`/decision-desk/projection?${params}`, { signal })
+  if (!response.ok) throw new APIError(response.status, `Decision Desk could not be read (${response.status}).`)
+  // Bound bytes before decoding. The API timeout also covers its response body.
+  const maxBytes = 2 * 1024 * 1024
+  if (Number(response.headers.get('Content-Length')) > maxBytes) { await response.body?.cancel(); throw new Error('Decision Desk page is too large.') }
+  if (!response.body) throw new Error('Decision Desk returned an empty projection.')
+  const reader = response.body.getReader(), decoder = new TextDecoder()
+  let bytes = 0, body = ''
+  try {
+    for (;;) {
+      const chunk = await reader.read()
+      if (chunk.done) break
+      bytes += chunk.value.byteLength
+      if (bytes > maxBytes) { await reader.cancel(); throw new Error('Decision Desk page is too large.') }
+      body += decoder.decode(chunk.value, { stream: true })
+    }
+    body += decoder.decode()
+  } finally { reader.releaseLock() }
+  const page: DeskProjection = JSON.parse(body)
+  if (!Array.isArray(page.items) || page.items.length > limit || !page.counts ||
+    ![page.counts.open, page.counts.held, page.counts.chores].every(n => Number.isSafeInteger(n) && n >= 0) || typeof page.has_more !== 'boolean') {
+    throw new Error('Decision Desk returned an invalid projection. Try again.')
+  }
+  const lessons = page.counts.lessons
+  if (lessons !== undefined && (lessons === null || typeof lessons !== 'object' || Array.isArray(lessons) || Object.keys(lessons).length > 1000 || !Object.values(lessons).every(count => Number.isSafeInteger(count) && count >= 0))) throw new Error('Decision Desk returned invalid lesson totals.')
+  return page
+}
+
+// Preserve the server order. Bounded coverage and a changing queue are explicit;
+// a count never comes from this client-side list or from a page's item count.
+export async function loadDeskProjection(signal?: AbortSignal, read = readDeskProjection): Promise<DeskProjection & { truncated: boolean }> {
+  let page = await read(100, undefined, signal)
+  const first = page
+  const items: DeskProjectionItem[] = [], ids = new Set<string>(), cursors = new Set<string>()
+  for (let n = 0; n < 10; n++) {
+    for (const item of page.items) {
+      const key = `${item.kind}:${item.id}`
+      if (!ids.has(key)) { ids.add(key); items.push(item) }
+    }
+    if (!page.has_more) return { ...first, items, has_more: false, truncated: items.length !== first.counts.open }
+    if (!page.next_cursor || cursors.has(page.next_cursor)) throw new Error('Decision Desk pagination did not advance. Try again.')
+    if (n === 9) break
+    cursors.add(page.next_cursor)
+    page = await read(100, page.next_cursor, signal)
+  }
+  return { ...first, items, has_more: true, truncated: true }
+}

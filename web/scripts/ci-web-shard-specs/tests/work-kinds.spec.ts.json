@@ -1,0 +1,22 @@
+{
+  "group": "remaining-ui",
+  "nightlyTiming": {
+    "seconds": 41.152,
+    "selectedTests": 23
+  },
+  "spec": {
+    "file": "tests/work-kinds.spec.ts",
+    "listedTests": 22,
+    "tierTiming": {
+      "caseSeconds": {
+        "max": 3.874,
+        "median": 1.36,
+        "min": 1.049
+      },
+      "seconds": 41.152,
+      "selectedTests": 23
+    },
+    "weightSeconds": 22.1,
+    "weightSource": "AEON-997 fix2 local Chromium: 22 cases, one worker, wall 22.1 s"
+  }
+}

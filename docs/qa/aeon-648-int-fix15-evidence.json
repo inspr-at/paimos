@@ -1,0 +1,140 @@
+{
+  "ticket": "AEON-648",
+  "round": "int-fix15",
+  "recorded_at": "2026-10-04T22:03:56.646222+00:00",
+  "branch": "work/aeon-648-int",
+  "reviewed_commit": "5a10c47a240a84bacdc6f31a92786d2f54e00348",
+  "review": "review-int648r14.out",
+  "completion": "Authorized worktree verification finished. A concurrent LEAD-labelled reservation now records migration 1238, and its actual line/hash are attached. Its AEON-648 integration attribution differs from the review-requested AEON-655 attribution; exact remediation remains with the coordinator. No complete finding resolution or review pass is claimed.",
+  "findings": [
+    {
+      "severity": "P3",
+      "description": "Migration 1238 reservation was absent in review-int648r14; it is now recorded under a different ticket attribution.",
+      "status": "partially addressed: reservation recorded; requested AEON-655 attribution remains outstanding",
+      "resolved": false,
+      "owner": "coordinator / AEON-655",
+      "required_action": "Coordinator reconciles the existing LEAD reservation with the review-requested 1238 AEON-655 (work vocabulary) attribution and supplies its resulting actual line/hash. Do not append a duplicate reservation.",
+      "expected_line": "1238 AEON-655 (work vocabulary)",
+      "actual_line_number": 112,
+      "actual_line": "1238 AEON-648 integration (1238_work_vocabulary.sql; reserved by LEAD 2026-10-05 00:05 after gate int648r14 P3)",
+      "observed_ledger": {
+        "observed_at": "2026-10-04T22:03:56.646222+00:00",
+        "path": "/private/tmp/claude-501/-Users-markus-Code-aithema/af3ab8bf-63f6-4fb5-bccf-086eb11c043e/scratchpad/aeon/migration-ledger.txt",
+        "sha256": "8e9a29635d81d5ed5f09e8f12a2561885c0fde9525f4951a514386faf4ae8df6",
+        "line_count": 112,
+        "matching_lines": [
+          {
+            "line_number": 112,
+            "text": "1238 AEON-648 integration (1238_work_vocabulary.sql; reserved by LEAD 2026-10-05 00:05 after gate int648r14 P3)"
+          }
+        ],
+        "requested_attribution_matches": false
+      },
+      "migration": {
+        "path": "internal/db/migrations/1238_work_vocabulary.sql",
+        "sha256": "27eaf2c0851a1b633ae7f070a9f5283d3d1b7a3eace74a792bed4dace5c789c4",
+        "original_commit": "d15114c1a98d24c72448ee5caea712416bc6a7c9",
+        "original_commit_subject": "P0.7: unify work surfaces and validate vocabulary (AEON-655)",
+        "matches_original": true
+      },
+      "ownership_constraints": [
+        "worker-common.md: Work ONLY in your worktree and branch (named in your brief).",
+        "review-int648r14.out: Fix: coordinator records 1238 AEON-655 (work vocabulary) and supplies the actual line number and resulting SHA-256.",
+        "User: Preserve all safety and ownership constraints."
+      ],
+      "coordinator_handoff": {
+        "prior_proposal": "docs/qa/aeon-648-int-fix4-reservation.json",
+        "status": "stale precondition; not applied by worker",
+        "prior_precondition_ledger_sha256": "849007af43ae78c35d917d5ed4ff9399c5aee06a19cc70c7562497356e9b71c9",
+        "precondition_matches_current_ledger": false,
+        "instruction": "The former proposed append and predicted line/hash are no longer applicable. Preserve the existing LEAD entry; its owner must reconcile attribution in that entry and publish fresh actual evidence."
+      },
+      "worker_result": "The ledger changed between verification reads. A guard rejected the stale missing-reservation assumption before writing evidence. Fresh verification found exactly one reservation for migration 1238 at line 112. Recorded the observed entry/hash and original AEON-655 provenance without modifying the ledger or migration."
+    }
+  ],
+  "changes": {
+    "retained": "This fix15 evidence document only.",
+    "behavior_fixes": 0,
+    "new_migrations": 0,
+    "regression_requirement": "Review explicitly exempts this administrative correction from behavioral regression testing. Production, UI, tests, contracts, SQL, dependencies, CI and assertions are unchanged."
+  },
+  "validation": {
+    "origin_main": {
+      "live_sha": "a3ca8c475a94ce1de6da1398182abe3dfe98eb9f",
+      "verified_with": "git ls-remote origin refs/heads/main",
+      "is_ancestor": true,
+      "merge_required": false
+    },
+    "migration_guard": {
+      "result": "pass (fresh local static check)",
+      "command": "node scripts/check-migrations.mjs --base-ref v261003095616.0.0",
+      "exit_code": 0,
+      "unique_numbers": 258,
+      "main_sql_files_checked": 247,
+      "main_sql_unchanged": true,
+      "matching_exception_hashes": 25
+    },
+    "prior_artifacts": {
+      "result": "pass",
+      "verified_unique_hashes": 54,
+      "all_match": true,
+      "evidence_rounds": [3, 4, 5, 6, 7, 8]
+    },
+    "source_equivalence": {
+      "result": "pass",
+      "tested_commit": "920c6fed1a1c416b85444b5f50ff870d7e68e93b",
+      "comparison": "git diff --name-status 920c6fed1a1c416b85444b5f50ff870d7e68e93b 5a10c47a240a84bacdc6f31a92786d2f54e00348",
+      "only_differences": "Removal of the temporary .qa648fix8/web_test.go remote npm adapter and addition of fix8 through fix14 evidence documents.",
+      "production_tests_contracts_migrations_dependencies_ci_and_assertions_unchanged": true
+    },
+    "go_and_web": {
+      "result": "Prior remote passes retained; no new suite run in fix15.",
+      "evidence": "docs/qa/aeon-648-int-fix8-evidence.json",
+      "verified_summary": "web/test-results/aeon-648-int-fix8/logs/checks-summary.json",
+      "commit": "920c6fed1a1c416b85444b5f50ff870d7e68e93b",
+      "exit_code": 0,
+      "packages": {
+        "internal/releases": "pass",
+        "internal/db": "pass",
+        "internal/authz": "pass"
+      },
+      "build": "pass",
+      "lint": "pass",
+      "npm_run_test_unit": "pass",
+      "reason": "No affected Go package, web unit test or UI spec in this administrative-only round. Source equivalence and retained artifact hashes verified; passing suites are not repeated. No fresh remote or hosted CI pass is claimed. The user prohibits pushes; remote-test.sh transfers a temporary test ref and was not invoked."
+    },
+    "browser": {
+      "result": "pending; no browser or hosted CI pass claimed",
+      "owner": "coordinator / OPS-247",
+      "prior_launcher_result": "Remote browser lane unavailable: OPS-247 bootstrap and approved launcher are pending. Use draft PR hosted CI; no SSH, dependency or browser installation, or local fallback.",
+      "prior_launcher_exit_code": 3,
+      "requested_specs": [
+        "work-integration.spec.ts",
+        "morning-briefing.spec.ts",
+        "journey-imported.spec.ts",
+        "ticket-placement.spec.ts"
+      ],
+      "local_fallback": false
+    },
+    "read_only_verification": {
+      "path": "web/test-results/aeon-648-int-fix15/logs/read-only-verification.json",
+      "sha256": "a523a1c48bf755c0d8e2f2ba84e0cbcb351b86ba7735eb8f735b5a7823d1f790"
+    }
+  },
+  "safety": {
+    "any_push_in_fix15": false,
+    "deploy": false,
+    "production_access": false,
+    "shared_ledger_modified_by_worker": false,
+    "other_worktrees_modified": false,
+    "ticket_status_changed": false,
+    "historical_migrations_modified": false,
+    "credentials_read_or_displayed": false,
+    "subagents_or_model_reviews": false,
+    "generated_build_output_committed": false
+  },
+  "remaining": [
+    "Coordinator must reconcile the existing LEAD-labelled AEON-648 integration reservation with review-int648r14's requested AEON-655 attribution. Migration 1238 is no longer unreserved; no duplicate should be appended.",
+    "OPS-247 browser lane or coordinator-owned hosted CI must run the requested specs; this remains a residual check."
+  ]
+}

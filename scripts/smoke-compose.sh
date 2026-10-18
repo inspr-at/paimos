@@ -26,6 +26,28 @@ cleanup() {
 }
 trap cleanup EXIT
 
+# Check Docker's actual health state without inspecting container environments.
+assert_health() {
+  python3 - "$1" "$2" "${compose[@]}" <<'PY'
+import subprocess
+import sys
+import time
+
+service, expected, *compose = sys.argv[1:]
+deadline = time.monotonic() + 120
+while True:
+    result = subprocess.run(compose + ['ps', '--all', '--format', '{{.Health}}', service],
+                            check=True, capture_output=True, text=True, timeout=10)
+    health = result.stdout.strip()
+    if health == expected:
+        print(f'compose: {service} health is {expected}')
+        break
+    if time.monotonic() >= deadline:
+        raise AssertionError(f'{service} health is {health!r}, expected {expected}')
+    time.sleep(2)
+PY
+}
+
 sudo bash deploy/compose/prepare.sh "$AEON_DATA_DIR"
 if sudo bash deploy/compose/prepare.sh "$AEON_DATA_DIR"; then
   echo 'Preparation overwrote existing state' >&2
@@ -33,6 +55,20 @@ if sudo bash deploy/compose/prepare.sh "$AEON_DATA_DIR"; then
 fi
 
 "${compose[@]}" config --quiet
+# Exercise incomplete initialization before Aeon creates vector-dependent tables.
+"${compose[@]}" up -d --wait --wait-timeout 180 postgres
+"${compose[@]}" exec -T postgres psql -U postgres -d aeon -v ON_ERROR_STOP=1 -c 'DROP EXTENSION vector'
+assert_health postgres unhealthy
+"${compose[@]}" exec -T postgres psql -U postgres -d aeon -v ON_ERROR_STOP=1 -c 'CREATE EXTENSION vector'
+assert_health postgres healthy
+# Only this disposable CI database exists yet; FORCE closes any concurrent probe.
+"${compose[@]}" exec -T postgres psql -U postgres -d postgres -v ON_ERROR_STOP=1 -c 'DROP DATABASE aeon WITH (FORCE)'
+# This still succeeds: pg_isready alone does not establish database existence.
+"${compose[@]}" exec -T postgres pg_isready -h 127.0.0.1 -U postgres -d aeon
+assert_health postgres unhealthy
+"${compose[@]}" exec -T postgres psql -U postgres -d postgres -v ON_ERROR_STOP=1 -c 'CREATE DATABASE aeon OWNER aeon'
+"${compose[@]}" exec -T postgres psql -U postgres -d aeon -v ON_ERROR_STOP=1 -c 'CREATE EXTENSION vector'
+assert_health postgres healthy
 "${compose[@]}" up -d --wait --wait-timeout 180
 "${compose[@]}" exec -T aeon sh -c '
   test "$(id -u):$(id -g)" = 65532:65532
@@ -87,6 +123,32 @@ except urllib.error.HTTPError as response:
     assert set(query['scope'][0].split()) == {'openid', 'profile', 'email'}
 print('compose: health, embedded web and OIDC/PKCE sign-in redirect OK')
 PY
+
+# Liveness stays HTTP 200 during an outage; readiness and Docker health must fail.
+"${compose[@]}" stop postgres
+assert_health aeon unhealthy
+python3 - <<'PY'
+import json
+import urllib.error
+import urllib.request
+
+base = 'http://localhost:8080'
+with urllib.request.urlopen(base + '/api/health', timeout=10) as response:
+    assert response.status == 200
+    assert json.load(response) == {'status': 'ok', 'db': 'down'}
+try:
+    urllib.request.urlopen(base + '/api/ready', timeout=10)
+    raise AssertionError('readiness succeeded while Postgres was stopped')
+except urllib.error.HTTPError as response:
+    assert response.code == 503
+    body = json.load(response)
+    assert body.get('status') == 'unavailable'
+    assert body.get('reason') in {'database_unavailable', 'not_accepting'}
+    assert set(body) <= {'status', 'reason', 'pool', 'detail'}
+PY
+"${compose[@]}" start postgres
+assert_health postgres healthy
+assert_health aeon healthy
 
 # Recreate the app and restart the database without discarding persistent data.
 "${compose[@]}" stop aeon

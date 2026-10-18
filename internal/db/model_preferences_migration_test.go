@@ -50,7 +50,7 @@ func TestModelPreferencesMigrationSeedsEveryTenantUnderRLS(t *testing.T) {
 		}
 	})
 	var tenants []string
-	err = db.MigrateWithHook(t.Context(), d.App, func(name string) error {
+	err = migrateLegacyWorkWithHook(t, d, func(name string) error {
 		if name != "1104_work_kinds.sql" {
 			return nil
 		}

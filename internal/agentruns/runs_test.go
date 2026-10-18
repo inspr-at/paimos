@@ -21,6 +21,7 @@ import (
 	"github.com/inspr-at/paimos/internal/agentruns"
 	"github.com/inspr-at/paimos/internal/db"
 	"github.com/inspr-at/paimos/internal/dbtest"
+	"github.com/inspr-at/paimos/internal/events"
 	"github.com/inspr-at/paimos/internal/tenant"
 	"github.com/inspr-at/paimos/internal/workorders"
 )
@@ -67,6 +68,16 @@ func setup(t *testing.T) *fixture {
 	dbtest.BindRole(t, f.d, tid, f.person.ID, "admin")
 	dbtest.BindRole(t, f.d, tid, f.agent.ID, "member")
 	dbtest.BindRole(t, f.d, tid, f.other.ID, "member")
+	// AEON-1248 Q3: readiness is explicitly configured; no definition is free movement.
+	// Retain the queue tests' readiness risks with the original three checks.
+	f.tx(t, f.person, func(tx pgx.Tx) error {
+		var kind string
+		if err := tx.QueryRow(t.Context(), `INSERT INTO node_kinds(tenant_id,slug,label,short_prefix,icon) VALUES($1,'definition','Definition','DEF','list') RETURNING id::text`, tid).Scan(&kind); err != nil {
+			return err
+		}
+		_, err := tx.Exec(t.Context(), `INSERT INTO nodes(tenant_id,kind_id,key,title,fields) VALUES($1,$2,aeon_next_node_key($1,'DEF'),'Queue checks','{"checks":{"in_progress":[{"id":"estimate_set"},{"id":"acceptance_present"},{"id":"blocker_named"}]}}')`, tid, kind)
+		return err
+	})
 	f.profile = uuid()
 	f.tx(t, f.person, func(tx pgx.Tx) error {
 		_, err := tx.Exec(t.Context(), `INSERT INTO model_profiles(tenant_id,id,slug,version,harness,family,model,effort,tier) VALUES($1,$2,'test','1','codex','openai','requested-test-model','high','strong')`, tid, f.profile)
@@ -89,7 +100,7 @@ func (f *fixture) key(t *testing.T, p tenant.Principal, scopes []string) string 
 	secret := uuid()
 	sum := sha256.Sum256([]byte(secret))
 	f.tx(t, p, func(tx pgx.Tx) error {
-		_, err := tx.Exec(t.Context(), `INSERT INTO agent_keys(tenant_id,principal_id,name,prefix,hash,scopes) VALUES($1,$2,'test',$3,$4,$5)`, p.TenantID, p.ID, prefix, hex.EncodeToString(sum[:]), scopes)
+		_, err := tx.Exec(t.Context(), `INSERT INTO agent_keys(tenant_id,principal_id,name,prefix,hash,scopes,created_by_principal_id) VALUES($1,$2,'test',$3,$4,$5,(SELECT id FROM principals WHERE tenant_id=$1::uuid AND kind='person' ORDER BY created_at,id LIMIT 1))`, p.TenantID, p.ID, prefix, hex.EncodeToString(sum[:]), scopes)
 		return err
 	})
 	return "aeon_" + prefix + "_" + secret
@@ -164,6 +175,7 @@ func (f *fixture) reserve(t *testing.T, v agentruns.Run) []string {
 		}
 		return nil
 	})
+	roundTheClock(t, f, v.ID)
 	return []string{reservation}
 }
 func claimBody(ids []string) map[string]any {
@@ -373,7 +385,7 @@ func TestTelemetryFencesAndAtomicRollback(t *testing.T) {
 	}
 	original := f.mux
 	f.mux = http.NewServeMux()
-	agentruns.New(f.d.App, func(context.Context, pgx.Tx, tenant.Principal, agentruns.Run, agentruns.Telemetry) error {
+	agentruns.New(f.d.App, func(context.Context, pgx.Tx, tenant.Principal, agentruns.Run, agentruns.Telemetry, *[]events.Change) error {
 		return errors.New("settlement unavailable")
 	}).Mount(f.mux)
 	n := f.count(t, f.person, `SELECT count(*) FROM events`)
@@ -505,6 +517,12 @@ func TestClaimRejectsStaleProbeAndReplacedGeneration(t *testing.T) {
 
 func TestCreationRollsBackWhenEventCannotBeWritten(t *testing.T) {
 	f := setup(t)
+	// setup commits the queue definition and its key. The failed create must
+	// add nothing on top of that baseline.
+	baselines := map[string]int64{}
+	for _, table := range []string{"work_orders", "work_criteria", "nodes", "events", "node_key_counters"} {
+		baselines[table] = f.count(t, f.person, `SELECT count(*) FROM `+table)
+	}
 	err := db.InTenant(dbtest.Seed(t.Context()), f.d.Admin, f.person.TenantID, func(tx pgx.Tx) error {
 		_, err := tx.Exec(t.Context(), `CREATE FUNCTION reject_work_event() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN
 		 IF NEW.type='work_order.created' THEN RAISE EXCEPTION 'test event failure' USING ERRCODE='XX000'; END IF;
@@ -520,7 +538,7 @@ func TestCreationRollsBackWhenEventCannotBeWritten(t *testing.T) {
 	}
 	f.call(t, f.person, "POST", "/api/work-orders", map[string]any{"title": "Must roll back", "criteria": []string{"not persisted"}}, 500, nil)
 	for _, table := range []string{"work_orders", "work_criteria", "nodes", "events", "node_key_counters"} {
-		if f.count(t, f.person, `SELECT count(*) FROM `+table) != 0 {
+		if f.count(t, f.person, `SELECT count(*) FROM `+table) != baselines[table] {
 			t.Fatalf("%s survived failed event", table)
 		}
 	}
@@ -533,7 +551,7 @@ func TestTelemetryHookRunsOnceAndCountersCannotOverflow(t *testing.T) {
 	path := "/api/runs/" + v.ID + "/telemetry"
 	calls := 0
 	f.mux = http.NewServeMux()
-	agentruns.New(f.d.App, func(ctx context.Context, tx pgx.Tx, p tenant.Principal, run agentruns.Run, report agentruns.Telemetry) error {
+	agentruns.New(f.d.App, func(ctx context.Context, tx pgx.Tx, p tenant.Principal, run agentruns.Run, report agentruns.Telemetry, _ *[]events.Change) error {
 		calls++
 		var total int64
 		if err := tx.QueryRow(ctx, `SELECT cost_micros FROM agent_runs WHERE id=$1`, run.ID).Scan(&total); err != nil {

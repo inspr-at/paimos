@@ -48,8 +48,8 @@ test('list shows current metadata and detail supplies the change history', async
   await page.setViewportSize({ width: 1600, height: 1000 })
   await page.goto('/agents')
   const row = page.locator(`[data-row="s:${worker.id}"]`)
-  await expect(row.locator('.exec-model')).toHaveText('gpt-6-sol · xhigh')
-  await expect(row.locator('.exec-account')).toHaveText('Codex · Codex Pro')
+  await expect(row.locator('.exec-model')).toHaveText('GPT-6 Sol · xhigh')
+  await expect(row.locator('.exec-account')).toHaveText('Codex Pro')
   await expect(row.locator('.meta-change')).toHaveCount(0)
   expect(detail.requests).toBe(0)
   await page.goto(`/agents/${worker.id}`)
@@ -77,10 +77,14 @@ test('an open panel refreshes metadata history after a heartbeat without an acti
   history.push({ field: 'reasoning_effort', previous_value: 'xhigh', value: 'high', at: new Date(now + 10_001).toISOString() })
   expect(worker.activity_note).toBe(unchangedNote)
   await page.clock.runFor(20_100)
-  await expect(panel.getByRole('heading', { name: 'release worker', exact: true })).toBeVisible()
+  // AEON-1212 shows the ticket key as the panel name. The heartbeat refresh is
+  // the history and the model fact below.
+  expect(worker.ticket?.key).toBe('PHAROS-12')
+  await expect(panel.locator('h2.pane-title .name')).toHaveText('PHAROS-12')
   await expect(changes).toContainText('Model gpt-6-sol to gpt-6-astra')
   await expect(changes).toContainText('Effort xhigh to high')
-  await expect(panel.locator('.fact').filter({ has: page.locator('dt', { hasText: /^Model$/ }) })).toContainText('gpt-6-astra')
+  // AEON-1240 / #612 renders registry display names, while history retains raw values.
+  await expect(panel.locator('.fact').filter({ has: page.locator('dt', { hasText: /^Model$/ }) })).toContainText('GPT-6 Astra · high')
   expect(detail.requests).toBe(2)
   // An unchanged list poll must not add one detail request per clock tick/row.
   await page.clock.runFor(20_100)
@@ -93,7 +97,7 @@ for (const pass of [1, 2]) for (const theme of ['light', 'dark'] as const) for (
     await page.setViewportSize({ width, height: width === 390 ? 844 : 1000 })
     await page.goto('/agents')
     const row = page.locator(`[data-row="s:${worker.id}"]`)
-    await expect(row.locator('.exec-model')).toContainText('gpt-6-sol · xhigh')
+    await expect(row.locator('.exec-model')).toContainText('GPT-6 Sol · xhigh')
     expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true)
     const dir = resolve('..', '.agent-shots')
     mkdirSync(dir, { recursive: true })

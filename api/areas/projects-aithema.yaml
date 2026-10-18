@@ -1,0 +1,121 @@
+# SPDX-License-Identifier: AGPL-3.0-only
+# aeon:owner internal/aithema/host
+paths:
+  /projects/{projectId}/aithema/sessions:
+    parameters:
+      - {name: projectId, in: path, required: true, schema: {type: string, format: uuid}}
+    post:
+      operationId: aithemaSessionCreate
+      summary: Preallocate host authority and enqueue authenticated service session creation
+      security: [{session: []}]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [authorization, host_mode]
+              properties:
+                authorization: {$ref: '../internal/aithema/journal/contracts/authz-record.schema.json#/$defs/record'}
+                host_mode: {type: string, enum: [review, working_spec_only]}
+      responses:
+        '202':
+          description: Host allocates sid, tid, pid, epoch and settings digest. Poll/refresh tokens only after service creation callback succeeds.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/AithemaSessionTokens'}
+        '403': {description: Person project access and enabled installed plugin required}
+  /projects/{projectId}/aithema/sessions/{sid}/control:
+    parameters:
+      - {name: projectId, in: path, required: true, schema: {type: string, format: uuid}}
+      - {name: sid, in: path, required: true, schema: {type: string, format: uuid}}
+    post:
+      operationId: aithemaSessionControl
+      summary: Apply host suspend, resume or purge before enqueuing service callback
+      description: Exact retries are idempotent. Purge tombstones first. Callback retries are durable and bounded at six attempts; failed delivery is visible in callback status. Resume clears suspension and takes over the worker generation atomically.
+      security: [{session: []}]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [action, idempotency_key]
+              properties:
+                action: {type: string, enum: [suspend, resume, purge]}
+                idempotency_key: {type: string, format: uuid}
+      responses:
+        '202': {description: Host state committed and callback queued}
+        '409': {description: Revoked or idempotency conflict}
+  /projects/{projectId}/aithema/sessions/{sid}/host-event:
+    parameters:
+      - {name: projectId, in: path, required: true, schema: {type: string, format: uuid}}
+      - {name: sid, in: path, required: true, schema: {type: string, format: uuid}}
+    post:
+      operationId: aithemaHostEvent
+      summary: Enqueue a value-free host event notification
+      security: [{session: []}]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [event_id, idempotency_key]
+              properties:
+                event_id: {type: integer, minimum: 1, maximum: 9007199254740991}
+                idempotency_key: {type: string, format: uuid}
+      responses:
+        '202': {description: Authenticated host-event callback queued}
+  /projects/{projectId}/aithema/sessions/{sid}/proxy/{operation}:
+    parameters:
+      - {name: projectId, in: path, required: true, schema: {type: string, format: uuid}}
+      - {name: sid, in: path, required: true, schema: {type: string, format: uuid}}
+      - {name: operation, in: path, required: true, schema: {type: string, enum: [input, ws-ticket, inline]}}
+    post:
+      operationId: aithemaProxyPost
+      summary: Forward input or exchange a single-use inline ticket
+      security: [{session: []}]
+      description: Only named session operations are proxied. Same-origin requests, active requester, project permission and live host authority are required. The host supplies service authentication and freshly minted session credentials; cookies and agent keys are never forwarded.
+      responses:
+        '200': {description: Service response}
+        '403': {description: Origin or session authority denied}
+    get:
+      operationId: aithemaProxyInline
+      summary: Upgrade same-origin inline audio WebSocket
+      security: [{session: []}]
+      parameters:
+        - {name: ticket, in: query, required: true, schema: {type: string, maxLength: 4096}}
+      description: Requires person session, exact Origin, current authority and a service-issued single-use ticket. Only inline accepts GET. The proxy does not retry sockets or input.
+      responses:
+        '101': {description: WebSocket upgraded}
+        '403': {description: Origin or authority denied}
+  /projects/{projectId}/aithema/sessions/{sid}/tokens:
+    parameters:
+      - {name: projectId, in: path, required: true, schema: {type: string, format: uuid}}
+      - {name: sid, in: path, required: true, schema: {type: string, format: uuid}}
+    post:
+      operationId: aithemaTokensRefresh
+      summary: Recheck live host authority and mint a browser session token
+      security: [{session: []}]
+      responses:
+        '200':
+          description: Short-lived session token with audience aithema. Delegated host-audience tokens are delivered only server-to-server and never returned to a person session.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/AithemaSessionTokens'}
+        '409': {description: 'Revoked, suspended or creation pending'}
+components:
+  schemas:
+    AithemaSessionTokens:
+      type: object
+      required: [sid, worker_generation, auth_epoch]
+      properties:
+        sid: {type: string, format: uuid}
+        worker_generation: {type: integer, minimum: 1, maximum: 9007199254740991}
+        auth_epoch: {type: integer, minimum: 1, maximum: 9007199254740991}
+        callback_id: {type: string, format: uuid}
+        session_token: {type: string}

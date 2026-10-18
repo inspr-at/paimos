@@ -2,7 +2,7 @@
 import { test } from 'node:test'
 import { publishedReleases, withPublicNoteItems } from '../src/lib/releases.ts'
 import assert from 'node:assert/strict'
-import { compare, displayHeadline, displayText, evidenceSearch, groupByDay, groupChanges, hasUsableNotes, idMatches, isCalendarVersion, liveServer, localizedNote, localizedPresentation, matches, newSince, pickText, plainSubject, presentChanges, presentCompare, presentRelease, railLine, releaseCopy, releaseLang, releaseLangKey, releaseName, releaseNotice, releaseTitle, releaseView, span, technicalLine, ticketsOf, visibleReleases, WRITTEN_AFTER_LABEL, writtenAfterLine, type Release } from '../src/lib/releases.ts'
+import { compare, displayHeadline, displayText, evidenceSearch, groupByDay, groupChanges, hasUsableNotes, idMatches, isCalendarVersion, liveServer, localizedNote, localizedPresentation, matches, newSince, pickText, plainSubject, presentChanges, presentCompare, presentRelease, railLine, releaseCopy, releaseLang, releaseLangKey, releaseName, releaseNotice, releaseTitle, releaseView, span, ticketsOf, visibleReleases, WRITTEN_AFTER_LABEL, writtenAfterLine, type Release } from '../src/lib/releases.ts'
 
 const rel = (version: string, at: string, extra: Partial<Release> = {}): Release => ({
   version, tag: `v${version}`, release_channel: 'stable', release_sequence: 1, state: 'published', reserved_at: at, tagged_at: at, published_at: at,
@@ -321,10 +321,11 @@ test('reserved rows are opt-in without mutating loaded history; withdrawals are 
   const published = rel('3', '')
   const reserved = rel('2', '', { state: 'reserved' })
   const withdrawn = rel('2.5', '', { state: 'withdrawn', codename: 'Withdrawn Name' })
-  const releases = [published, reserved, withdrawn]
+  const candidate = rel('4', '', { state: 'candidate' })
+  const releases = [published, reserved, withdrawn, candidate]
   const before = structuredClone(releases)
-  assert.deepEqual(visibleReleases(releases), [published])
-  assert.deepEqual(visibleReleases(releases, true), [published, reserved])
+  assert.deepEqual(visibleReleases(releases), [published, candidate])
+  assert.deepEqual(visibleReleases(releases, true), [published, reserved, candidate])
   assert.deepEqual(releases, before)
 })
 
@@ -420,7 +421,7 @@ test('language and view: the address, then the remembered choice, then the profi
   assert.equal(releaseView('details'), 'details')
   assert.equal(releaseView('technical'), 'highlights')
   assert.equal(releaseLangKey('p-1'), 'aeon.release-history.lang.p-1')
-  assert.match(technicalLine(rel('1', '2026-09-29T12:00:00Z', { changes: [change('a'.repeat(40), 'feat', 'feat(AEON-1): phone state line'), change('b'.repeat(40), 'fix', 'fix: keep the cue')] })), /Phone state line · Keep the cue/)
+
   assert.equal(writtenAfterLine('de'), 'Notizen nach dem Release geschrieben')
   assert.equal(writtenAfterLine('en'), WRITTEN_AFTER_LABEL)
 })

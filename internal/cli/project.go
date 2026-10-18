@@ -21,9 +21,10 @@ type projectView struct {
 }
 
 func (rt *runtime) cmdProject() *Command {
-	return &Command{Name: "project", Short: "Projects", Use: "project <list|show|create|update|repos|releases|anchors|tags>", subs: []*Command{
-		rt.cmdProjectList(), rt.cmdProjectCreate(), rt.cmdProjectShow(), rt.cmdProjectUpdate(),
+	return &Command{Name: "project", Short: "Projects", Use: "project <list|show|create|update|repos|releases|anchors|tags|lead-settings|decisions>", subs: []*Command{
+		rt.cmdProjectLeadSettings(), rt.cmdProjectList(), rt.cmdProjectCreate(), rt.cmdProjectShow(), rt.cmdProjectUpdate(),
 		rt.cmdProjectResource("repos"), rt.cmdProjectResource("releases"), rt.cmdProjectResource("anchors"), rt.cmdProjectResource("tags"),
+		rt.cmdProjectDecisions(),
 	}}
 }
 

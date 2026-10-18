@@ -38,7 +38,7 @@ func TestPortalMarketAndPace(t *testing.T) {
 	wishFast := insertNode(t, d, tenantA, "PWS-1", "portal_wish", "A public wish", "Join without an account.", "published", product, "{}")
 	wishSlow := insertNode(t, d, tenantA, "PWS-2", "portal_wish", "SECRET-HIDDEN-WISH", "hidden body", "hidden", product, "{}")
 	wishLate := insertNode(t, d, tenantA, "PWS-3", "portal_wish", "Opened too late", "After live.", "published", product, "{}")
-	insertNode(t, d, tenantA, "TKT-9", "ticket", "SECRET-TICKET-PACE", "SECRET-TICKET-BODY", "open", "", "{}")
+	insertNode(t, d, tenantA, "TKT-9", "work", "SECRET-TICKET-PACE", "SECRET-TICKET-BODY", "open", "", "{}")
 	project := insertNode(t, d, tenantA, "PRJ-1", "project", "SECRET-PROJECT-NAME", "SECRET-PROJECT-BODY", "open", "", "{}")
 	rel1 := insertNode(t, d, tenantA, "REL-1", "release", "SECRET-RELEASE-TITLE", "notes", "open", "", "{}")
 	rel2 := insertNode(t, d, tenantA, "REL-2", "release", "SECRET-RELEASE-TITLE", "notes", "open", "", "{}")

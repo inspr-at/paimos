@@ -3,11 +3,13 @@ package importer
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"testing"
 	"time"
 
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgconn"
 
 	"github.com/inspr-at/paimos/internal/authz"
 	"github.com/inspr-at/paimos/internal/db"
@@ -87,6 +89,7 @@ func TestClassicImportWaitsForInviteLinkLock(t *testing.T) {
 	if count != 0 {
 		t.Fatal("import changed identities before acquiring invite/link lock")
 	}
+	assertImportAccessLock(t, ctx, d, tid)
 	if err := blocker.Commit(ctx); err != nil {
 		t.Fatal(err)
 	}
@@ -191,6 +194,7 @@ func TestPrincipalBackfillWaitsForInviteLinkLock(t *testing.T) {
 	if err := checkCandidates(blocker, 1); err != nil {
 		t.Fatalf("backfill changed candidate set under invite/link lock: %v", err)
 	}
+	assertImportAccessLock(t, ctx, d, tid)
 	if err := blocker.Commit(ctx); err != nil {
 		t.Fatal(err)
 	}
@@ -309,5 +313,22 @@ func TestClassicUsernameEmailAndCanonicalAssignments(t *testing.T) {
 	}
 	if report, err := BackfillPrincipals(t.Context(), d.App, tid); err != nil || report.Writes != 0 {
 		t.Fatalf("backfill replay %+v %v", report, err)
+	}
+}
+
+// While blocked on the alias lock, importer paths must already own the tenant
+// lock. Otherwise acceptance can own tenant and wait alias while import's
+// principal/event FK inserts own alias and wait tenant.
+func assertImportAccessLock(t *testing.T, ctx context.Context, d *dbtest.DB, tid string) {
+	t.Helper()
+	tx, err := d.Admin.Begin(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer tx.Rollback(context.Background())
+	_, err = tx.Exec(ctx, `SELECT id FROM tenants WHERE id=$1 FOR UPDATE NOWAIT`, tid)
+	var pe *pgconn.PgError
+	if !errors.As(err, &pe) || pe.Code != "55P03" {
+		t.Fatalf("tenant must precede alias lock: %v", err)
 	}
 }

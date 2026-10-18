@@ -28,6 +28,25 @@ const floorMarker = "FLOOR-LEAK-MARKER"
 const whyMarker = "WHY-LEAK-MARKER"
 const fixtureSession = "10000000-0000-4000-8000-000000000009"
 
+func TestRawReceiptDistinguishesEqualBasenames(t *testing.T) {
+	first := writeAgents(t, t.TempDir(), fixtureDoc())
+	second := writeAgents(t, t.TempDir(), strings.ReplaceAll(fixtureDoc(), fixtureText, "Keep another boundary."))
+	digest := fileSHA(t, first)
+	item := harness.ProvenanceItem{Kind: "agents", LogicalName: "AGENTS.md", HashKind: "content", ContentSHA256: &digest, ByteSize: sizePtr(int64(len(fixtureDoc())))}
+	report, err := Compare(context.Background(), Input{Context: rulesimport.ContextProject, Files: []string{first, second}, Provenance: provenanceJSON(t, item), ExpectedSessionID: fixtureSession})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(report.SuppliedInputs) != 2 {
+		t.Fatal("fixture must retain both inputs")
+	}
+	for _, input := range report.SuppliedInputs {
+		if input.RawReceipt != (input.RawSHA256 == digest) {
+			t.Fatalf("receipt crossed input identity: %+v", input)
+		}
+	}
+}
+
 func TestMissingPublicationReportsHashesWithoutSuccess(t *testing.T) {
 	path := writeAgents(t, t.TempDir(), fixtureDoc())
 	neighbor := filepath.Join(filepath.Dir(path), "id_rsa")

@@ -1,7 +1,7 @@
 <!-- SPDX-License-Identifier: AGPL-3.0-only -->
 <script setup lang="ts">
 import { computed, nextTick, reactive, ref } from 'vue'
-import { blankContact, contactWrite, createContact, deleteContact, errorText, makePrimary, telHref, undoLatest, updateContact, validEmail, type Contact, type ContactWrite, type Customer } from '../../lib/crm'
+import { blankContact, contactWrite, createContact, deleteContact, errorText, makePrimary, telHref, undoEvents, updateContact, validEmail, type Contact, type ContactWrite, type Customer } from '../../lib/crm'
 import { confirmAction } from '../../lib/confirm'
 import { toast } from '../../lib/toast'
 import AppIcon from '../AppIcon.vue'
@@ -36,9 +36,9 @@ function cancel() {
   editing.value = null
   void nextTick(() => (id && id !== 'new' ? root.value?.querySelector<HTMLElement>(`[data-contact="${id}"] .edit-contact`) : root.value?.querySelector<HTMLElement>('.add-contact'))?.focus())
 }
-const undoToast = (message: string, steps: { node: string; types: string[] }[], done: string) => toast(message, {
+const undoToast = (message: string, eventIds: readonly string[] | undefined, done: string) => toast(message, {
   timeout: 8000,
-  action: { label: 'Undo', run: () => { void undoLatest(steps).then(() => { emit('changed'); toast(done) }).catch(e => toast(errorText(e), { tone: 'error' })) } },
+  action: { label: 'Undo', run: () => { void undoEvents(eventIds).then(() => { emit('changed'); toast(done) }).catch(e => toast(errorText(e), { tone: 'error' })) } },
 })
 async function save() {
   touched.value = true
@@ -52,7 +52,7 @@ async function save() {
       editing.value = null
       emit('changed')
       undoToast(created.primary ? `Added ${created.name} as the primary contact.` : `Added ${created.name}.`,
-        created.primary ? [{ node: props.customer.id, types: ['crm.primary_contact_changed'] }, { node: created.id, types: ['crm.contact_created'] }] : [{ node: created.id, types: ['crm.contact_created'] }],
+        created.event_ids,
         `${created.name} is removed again.`)
     } else {
       const current = props.contacts?.find(c => c.id === editing.value)
@@ -60,16 +60,16 @@ async function save() {
       const updated = await updateContact(current.id, write, current.revision)
       editing.value = null
       emit('changed')
-      undoToast(`Saved ${updated.name}.`, [{ node: updated.id, types: ['crm.contact_updated'] }], `${current.name} is back as it was.`)
+      undoToast(`Saved ${updated.name}.`, updated.event_ids, `${current.name} is back as it was.`)
     }
   } catch (e) { formError.value = errorText(e, 'The contact was not saved.') }
   finally { busy.value = false }
 }
 async function primary(contact: Contact) {
   try {
-    await makePrimary(props.customer.id, contact.id, props.customer.revision)
+    const updated = await makePrimary(props.customer.id, contact.id, props.customer.revision)
     emit('changed')
-    undoToast(`${contact.name} is the primary contact now.`, [{ node: props.customer.id, types: ['crm.primary_contact_changed'] }], 'The earlier primary contact is back.')
+    undoToast(`${contact.name} is the primary contact now.`, updated.event_ids, 'The earlier primary contact is back.')
   } catch (e) { toast(errorText(e), { tone: 'error' }); emit('changed') }
 }
 async function remove(contact: Contact) {
@@ -81,10 +81,10 @@ async function remove(contact: Contact) {
   })
   if (!ok) return
   try {
-    await deleteContact(contact.id)
+    const receipt = await deleteContact(contact.id)
     emit('changed')
     undoToast(`Removed ${contact.name}.`,
-      contact.primary ? [{ node: contact.id, types: ['crm.contact_deleted'] }, { node: props.customer.id, types: ['crm.primary_contact_changed'] }] : [{ node: contact.id, types: ['crm.contact_deleted'] }],
+      receipt.event_ids,
       `${contact.name} is back.`)
   } catch (e) { toast(errorText(e), { tone: 'error' }) }
 }

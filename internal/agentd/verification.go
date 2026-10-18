@@ -16,6 +16,12 @@ import (
 const VerificationPurpose = "pairing_verification"
 const VerificationTask = "Reply exactly AEON_VERIFIED. Do not modify files, perform privileged actions, access external networks, or use external/MCP tools. Use the enforced read-only verification mode."
 
+func (s *Supervisor) verificationDiagnosticFor(run, account, purpose, stage, reason string) {
+	if purpose == VerificationPurpose && s.verificationDiagnostic != nil {
+		s.verificationDiagnostic(run, account, stage, reason)
+	}
+}
+
 var ErrVerificationUnavailable = errors.New("verification blocked: this adapter has no qualified harmless execution mode")
 
 // VerificationAdapter is an explicit execution capability, not a prompt hint.
@@ -66,6 +72,14 @@ func validExecutionMode(r Run, adapter Adapter) error {
 // approved account. Check immutable policy/capability before routing;
 // adapters still require the strict, routed binding in validExecutionMode.
 func validQueuedExecutionMode(r Run, adapter Adapter) error {
+	if r.RoutineBudget != nil {
+		if _, ok := adapter.(RoutineBudgetAdapter); !ok {
+			return ErrBudgetEnforcementUnavailable
+		}
+	}
+	if err := validRoutineToolMode(r, adapter); err != nil {
+		return err
+	}
 	if r.ReadOnlyReview {
 		a, ok := adapter.(VerificationAdapter)
 		if !ok || !a.VerificationSupported() {

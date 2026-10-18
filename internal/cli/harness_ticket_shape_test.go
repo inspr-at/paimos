@@ -12,20 +12,6 @@ import (
 	"testing"
 )
 
-func TestWorkShapeHelpListsRequiredValues(t *testing.T) {
-	isolate(t)
-	for _, cmd := range []string{"register", "run-heartbeat"} {
-		code, out, errOut := runCLI([]string{"aeon", "harness", cmd, "--help"}, "")
-		if code != 0 || errOut != "" {
-			t.Fatalf("%s help code %d err %q out %q", cmd, code, errOut, out)
-		}
-		line := flagHelpLine(out, "work-shape")
-		if !strings.Contains(line, "required") || !strings.Contains(line, "ship") || !strings.Contains(line, "scout") {
-			t.Fatalf("%s work-shape help %q", cmd, line)
-		}
-	}
-}
-
 func TestRegisterRejectsEpicTicket(t *testing.T) {
 	isolate(t)
 	const (
@@ -49,6 +35,8 @@ func TestRegisterRejectsEpicTicket(t *testing.T) {
 			}})
 		case r.Method == http.MethodGet && r.URL.Path == "/api/me":
 			w.Write([]byte(`{"principal":{"id":"p","name":"worker"}}`))
+		case r.Method == http.MethodGet && r.URL.Path == "/api/projects/lookup":
+			_ = json.NewEncoder(w).Encode(project)
 		case r.Method == http.MethodGet && r.URL.Path == "/api/nodes":
 			q := r.URL.Query()
 			switch {
@@ -105,14 +93,4 @@ func TestRegisterRejectsEpicTicket(t *testing.T) {
 	if code != 0 || posts != 2 || stderr != "" {
 		t.Fatalf("no ticket: exit %d stderr %q posts %d", code, stderr, posts)
 	}
-}
-
-func flagHelpLine(help, name string) string {
-	prefix := "--" + name
-	for _, line := range strings.Split(help, "\n") {
-		if strings.Contains(line, prefix+" ") || strings.HasSuffix(strings.TrimSpace(line), prefix) {
-			return line
-		}
-	}
-	return ""
 }

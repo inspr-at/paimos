@@ -1,0 +1,14 @@
+{
+  "_license": "SPDX-License-Identifier: AGPL-3.0-only",
+  "builtin_agent_exclusions": [
+    "events.subscribe"
+  ],
+  "words": {
+    "resources": {
+      "events": "history"
+    },
+    "special": {
+      "events.subscribe": "Subscribe to authorized changes"
+    }
+  }
+}

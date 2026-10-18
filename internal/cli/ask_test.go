@@ -111,6 +111,81 @@ func TestAskCLIAndMCPParity(t *testing.T) {
 		t.Fatal("invalid MCP ask reached HTTP")
 	}
 }
+func TestAskKeepWithoutMappingDowngradesToOnce(t *testing.T) {
+	isolate(t)
+	mapped := questions.Input{SuggestedOutcome: "doctrine", Doctrine: &questions.DoctrineTarget{SourceID: "b0000000-0000-4000-8000-000000000009", Path: "AGENTS.md", RuleKey: "work", RuleSHA: strings.Repeat("ab", 32)}}
+	if warning := adjustKeep(&mapped); warning != "" || mapped.SuggestedOutcome != "doctrine" {
+		t.Fatalf("mapped doctrine changed: %q %+v", warning, mapped.SuggestedOutcome)
+	}
+	withTicket := questions.Input{SuggestedOutcome: "requirement", TicketID: "a0000000-0000-4000-8000-000000000005"}
+	if warning := adjustKeep(&withTicket); warning != "" || withTicket.SuggestedOutcome != "requirement" {
+		t.Fatalf("linked requirement changed: %q", warning)
+	}
+	always := questions.Input{SuggestedOutcome: "always"}
+	if warning := adjustKeep(&always); warning != "" || always.SuggestedOutcome != "always" {
+		t.Fatal("always is a person permission, not an asker mapping")
+	}
+
+	const project = "a0000000-0000-4000-8000-000000000001"
+	const sessionID = "a0000000-0000-4000-8000-000000000002"
+	const ticketID = "a0000000-0000-4000-8000-000000000005"
+	var mu sync.Mutex
+	var inputs []questions.Input
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Header.Get("Authorization") != "Bearer "+testKey {
+			t.Error("missing configured authorization")
+			w.WriteHeader(401)
+			return
+		}
+		if r.Method != http.MethodPost || r.URL.Path != "/api/projects/"+project+"/questions" {
+			t.Errorf("unexpected request %s %s", r.Method, r.URL.Path)
+			w.WriteHeader(404)
+			return
+		}
+		var got questions.Input
+		if err := json.NewDecoder(r.Body).Decode(&got); err != nil {
+			t.Error(err)
+			return
+		}
+		mu.Lock()
+		inputs = append(inputs, got)
+		mu.Unlock()
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(201)
+		_ = json.NewEncoder(w).Encode(questions.Question{ID: "a0000000-0000-4000-8000-000000000004", ProjectID: project, State: "open", Revision: 1, SuggestedOutcome: got.SuggestedOutcome, Input: got, Pending: []questions.Pending{}})
+	}))
+	defer srv.Close()
+	t.Setenv("AEON_URL", srv.URL)
+	t.Setenv("AEON_API_KEY", testKey)
+	ask := func(requestID string, extra ...string) (int, string, string) {
+		args := []string{"aeon", "ask", "--project", project, "--session", sessionID, "--request-id", requestID, "Which option?", "--option", `["Local","Simple","Use local."]`}
+		args = append(args, extra...)
+		return runCLI(args, "")
+	}
+	code, _, errOut := ask("a0000000-0000-4000-8000-000000000011", "--keep", "doctrine")
+	if code != 0 || !strings.Contains(errOut, "Suggested: Doctrine · not available for this question; asking with Once.") || !strings.Contains(errOut, "Doctrine needs an authorized source, rule and exact base mapping.") {
+		t.Fatalf("doctrine keep: %d %s", code, errOut)
+	}
+	code, _, errOut = ask("a0000000-0000-4000-8000-000000000012", "--keep", "requirement")
+	if code != 0 || !strings.Contains(errOut, "Suggested: Requirement · not available for this question; asking with Once.") || !strings.Contains(errOut, "Requirement needs a linked editable ticket.") {
+		t.Fatalf("requirement keep: %d %s", code, errOut)
+	}
+	code, _, errOut = ask("a0000000-0000-4000-8000-000000000013", "--keep", "requirement", "--ticket", ticketID)
+	if code != 0 || strings.Contains(errOut, "not available") {
+		t.Fatalf("linked requirement refused: %d %s", code, errOut)
+	}
+	code, _, errOut = ask("a0000000-0000-4000-8000-000000000014", "--keep", "always")
+	if code != 0 || strings.Contains(errOut, "not available") {
+		t.Fatalf("always keep: %d %s", code, errOut)
+	}
+	mu.Lock()
+	got := append([]questions.Input(nil), inputs...)
+	mu.Unlock()
+	if len(got) != 4 || got[0].SuggestedOutcome != "once" || got[1].SuggestedOutcome != "once" || got[2].SuggestedOutcome != "requirement" || got[2].TicketID != ticketID || got[3].SuggestedOutcome != "always" {
+		t.Fatalf("posted suggestions: %+v", got)
+	}
+}
+
 func TestAskOptionAndContextBounds(t *testing.T) {
 	isolate(t)
 	for _, raw := range []string{`["one","two"]`, `{"id":"a","title":"X","description":"","answer":"Y","principal_id":"forged"}`, `{"id":"a"} {}`, `not json`} {
@@ -121,5 +196,47 @@ func TestAskOptionAndContextBounds(t *testing.T) {
 	code, _, errOut := runCLI([]string{"aeon", "ask", "--project", "AEON", "Question", "--option", `["A","B","C"]`, "--context-file", "-"}, strings.Repeat("x", 16001))
 	if code == 0 || !strings.Contains(errOut, "context exceeds") {
 		t.Fatal("context not bounded before network")
+	}
+}
+
+func TestQuestionStatusExplainsFailedEffectsAndPendingDoctrine(t *testing.T) {
+	out := &bytes.Buffer{}
+	rt := &runtime{stdout: out}
+	q := questions.Question{ID: "question", Answer: &questions.Answer{Outcome: "doctrine"}, Pending: []questions.Pending{{Kind: "outcome", State: "delivered", EffectRef: "draft-reference", DoctrineState: "pending"}}}
+	if err := rt.printQuestion(q); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(out.String(), "draft saved; waiting for a person") || strings.Contains(out.String(), "outcome: delivered") {
+		t.Fatalf("misleading doctrine result: %s", out)
+	}
+	out.Reset()
+	q.Pending = []questions.Pending{{Kind: "outcome", State: "failed", ErrorCode: "ticket_revision_conflict", ErrorMessage: "Review the changed ticket before deciding again."}}
+	if err := rt.printQuestion(q); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(out.String(), "failed: ticket_revision_conflict") || !strings.Contains(out.String(), "Review the changed ticket") {
+		t.Fatalf("missing failure explanation: %s", out)
+	}
+}
+
+func TestAskDisplaysReuseProvenance(t *testing.T) {
+	var out bytes.Buffer
+	rt := &runtime{stdout: &out}
+	q := questions.Question{ID: "question", State: "answered", Revision: 2,
+		Askers: []questions.Asker{{FromRecord: &questions.Reuse{Label: "From the record", DecisionID: "approved-decision", Revision: 2}}},
+		Answer: &questions.Answer{Answer: "Use local storage."}}
+	if err := rt.printQuestion(q); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(out.String(), "From the record: approved-decision (revision 2)") || !strings.Contains(out.String(), "answer: Use local storage.") {
+		t.Fatal("CLI omitted approved decision provenance/answer")
+	}
+	result, wire, err := questionToolResult(q)
+	if err != nil || result.IsError {
+		t.Fatal("MCP rejected reused Q&A", err)
+	}
+	data, err := json.Marshal(wire)
+	if err != nil || !strings.Contains(string(data), `"decision_id":"approved-decision"`) {
+		t.Fatal("MCP omitted structured provenance", err)
 	}
 }

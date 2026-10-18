@@ -59,6 +59,8 @@ operator's service configuration so future restart/upgrade commands use the
 same values and Compose project name (`aeon`). Do not put credentials into a
 database URL or a Compose environment variable.
 
+Set `AEON_CHAT_ENABLED=true` in the server container's environment to enable chat; unset or empty defaults to `false`, and only `true` or `false` are accepted.
+
 The GHCR image was checked anonymously on 2026-10-01: the pull-token request
 and manifest HEAD for `261001072608.0.0` both returned HTTP 200. No registry
 credentials were used and no visibility setting was changed. Registry access
@@ -76,13 +78,20 @@ dc config --quiet
 dc pull
 dc up -d --wait --wait-timeout 180
 curl --fail --silent --show-error http://127.0.0.1:8080/api/health
+curl --fail --silent --show-error http://127.0.0.1:8080/api/ready
 ```
 
-If you changed `AEON_HTTP_PORT`, use that port in the health request. The expected
-body is `{"status":"ok","db":"ok"}`. The server applies embedded database
-migrations automatically before listening. Postgres initialization creates the
-`aeon` database, a non-superuser `aeon` login, and the vector extension on the
-first start of an empty database volume. It does not rerun for an existing volume.
+If you changed `AEON_HTTP_PORT`, use that port in both requests. The expected
+health body is `{"status":"ok","db":"ok"}`; readiness returns
+`{"status":"ready"}`. Compose probes `/api/ready`, which returns HTTP 503 when
+the database cannot be reached or the app is not accepting requests. `/api/health`
+is a liveness report: it returns HTTP 200 even when its `db` field is `down`.
+The server applies embedded database migrations automatically before listening.
+Postgres initialization creates the `aeon` database, a non-superuser `aeon` login,
+and the vector extension on the first start of an empty database volume. It does
+not rerun for an existing volume.
+The Postgres healthcheck requires TCP acceptance, a query against the `aeon`
+database, and the installed `vector` extension.
 
 Preparation generates four independent 32-byte random hex secrets without
 printing them. `db-super` is for Postgres initialization and maintenance;
@@ -135,6 +144,89 @@ first matching OIDC sign-in creates the administrator. Add members through
 Aeon's membership/invitation controls. Keep `AEON_ENV=prod`; the development
 login is not an installation shortcut.
 
+## Keep worker credentials out of access logs
+
+Release 137 clients send one `Authorization` value,
+`Aeon-Worker <agent-key> <worker-lease>`. The same header carries the scoped
+agent key and the exact worker generation. Ordinary reverse proxies forward
+`Authorization` and redact it from access logs. The server accepts the
+deprecated `X-Aeon-Worker-Lease` beside `Authorization: Bearer <agent-key>` for
+this transition release and emits a warning containing only the header names.
+Upgrade the server before CLI and agentd. Do not put the lease in
+`Proxy-Authorization` or any other hop-by-hop header: Traefik and Caddy remove
+those before the request reaches Aeon.
+
+[Caddy redacts Authorization by default](https://caddyserver.com/docs/caddyfile/directives/log).
+Use an explicit log filter for the legacy header too; keep `log_credentials`
+disabled. No extra `header_up` is required for the worker scheme:
+
+```caddyfile
+work.example.org {
+    log {
+        format filter {
+            request>headers>Authorization delete
+            request>headers>X-Aeon-Worker-Lease delete
+        }
+    }
+    reverse_proxy 127.0.0.1:8080
+}
+```
+
+For [Traefik access logs](https://doc.traefik.io/traefik/reference/install-configuration/observability/logs-and-accesslogs/),
+merge this into the static configuration. Dropping all headers is the default
+here; explicit entries also protect them if other header logging is enabled.
+Traefik forwards `Authorization` on an ordinary HTTP router:
+
+```yaml
+accessLog:
+  format: json
+  fields:
+    headers:
+      defaultMode: drop
+      names:
+        Authorization: drop
+        X-Aeon-Worker-Lease: drop
+        Cookie: drop
+        Set-Cookie: drop
+```
+
+For [nginx access logs](https://nginx.org/en/docs/http/ngx_http_log_module.html),
+use an allowlisted format without request-header variables. Define the format in
+`http` and select it in the Aeon `server`. `proxy_pass_request_headers` already
+forwards `Authorization`; do not copy the lease into a separate header:
+
+```nginx
+# http context
+log_format aeon_safe '$remote_addr [$time_local] "$request_method $uri $server_protocol" '
+                     '$status $body_bytes_sent';
+
+# Aeon server context
+access_log /var/log/nginx/aeon-access.log aeon_safe;
+location / {
+    proxy_pass http://127.0.0.1:8080;
+    proxy_http_version 1.1;
+    proxy_set_header Host $host;
+    proxy_set_header X-Forwarded-Proto $scheme;
+    proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+    proxy_buffering off;
+    proxy_read_timeout 1h;
+}
+```
+
+Apply the policy to every proxy hop and log destination. Keep debug/request-body
+logging disabled for authenticated traffic. Verify log absence with synthetic
+credentials before upgrading clients; log filters do not remove values already
+written to historical logs.
+
+A lease has no independent wall-clock expiry, but ordinary worker proof is
+revoked as soon as `stopped_at` is set (including heartbeat-loss closure) or the
+generation is archived. A returning worker registers with a fresh lease rather
+than reviving a closed generation. Historical proof remains usable only for
+stop/exit confirmation and usage settlement, always alongside the same agent's
+live scoped API key. Archive also blocks usage settlement; confirmed exit is
+still reportable after archive. A log reader with only the lease cannot act as
+the agent. Key revocation also blocks worker calls.
+
 ## Back up, upgrade, and recover
 
 Back up the database, file directory, four secrets, and non-secret configuration
@@ -154,6 +246,19 @@ dc start aeon
 
 Check every command's exit status, and record the current image digest and configuration with the backup.
 Periodically restore into a separate recovery host to verify the backup.
+
+`paimos files verify --tenant SLUG` checks the tenant's shared blob store:
+attachments (including soft-deleted/history references), avatars and their undo
+history, confirmation receipts, and immutable quote profile assets used by
+frozen versions. `paimos files gc --tenant SLUG` is a dry run; `--apply` deletes
+only unreferenced files at least seven days old. Writers and cleanup serialize
+on the same tenant/hash database lock through reference commit or file unlink.
+Multi-file transactions reserve their complete blob set in tenant/hash order
+before publishing files or appending events, including all profiles in a
+showcase apply. The storage guard rejects new out-of-order or post-event locks.
+Upgrade every writer and operator CLI before using cleanup: older binaries do
+not participate in this protocol. Verify reports pre-existing missing or corrupt
+files; cleanup does not repair them.
 
 Before upgrading, read the target release notes, take a verified backup, and
 record the old pinned image. Update `AEON_IMAGE` to the new explicit version or
@@ -182,12 +287,43 @@ the host files directory is not writable by UID 65532. If health succeeds but
 sign-in fails, check issuer discovery, client ID, redirect URI, bootstrap email,
 and the externally visible public URL. Health does not test OIDC authentication.
 
+If first-run initialization fails, restarting Postgres can leave it accepting
+connections against a partially initialized volume. The healthcheck remains
+unhealthy if the `aeon` database or `vector` extension is missing. Fix the cause
+reported by initialization, stop the stack, and preserve the failed volume for
+inspection. Recreate the database volume only after confirming it contains no
+data to retain, then start against the fresh volume so initialization runs again.
+For an installation with existing data, use the verified backup/recovery procedure
+above instead of discarding its volume.
+
 The **Self-hosting compose** CI workflow boots this exact Compose stack in prod
 mode with a discovery-only mock OIDC container and the pinned published image.
-It checks database health, embedded web, the authorization-code/PKCE redirect,
-the non-superuser role, pgvector, UID/GID 65532, and files surviving app recreation
+It checks database health, rejection of missing database/extension states,
+app health during a database outage and recovery, embedded web, the
+authorization-code/PKCE redirect, the non-superuser role, pgvector, UID/GID 65532,
+and files surviving app recreation
 and a database restart. It runs for relevant guide/Compose/Dockerfile changes
 and weekly. The mock cannot issue tokens; full authentication remains covered
 by the auth package tests and must be verified with your own provider during
 installation. The release image workflow separately builds and tests candidate
 Dockerfiles. Do not add the CI-only Compose overlay to an actual installation.
+
+### Work-kind migration (AEON-649)
+
+Migration 1215 replaces the Epic, Ticket and Task kind definitions with Work.
+It preserves node keys/content and historical session/Decision Desk identities,
+but older binaries that expect the retired kinds are incompatible with the new
+database. This package is prepared as part of the work-node chain; the coordinator
+must complete the dependent runtime packages before deploying it. Derived
+status and workspace naming remain behind AEON-429.
+
+Before that rollout, publish release 122, drain the merge/work queues and stop
+writers. Verify an instance-specific pre-migration database/files backup on a
+separate recovery host before upgrading; do not restart writers between the
+verified backup and migration. The migration refuses schema conflicts or busy
+work parents and rolls back atomically. It reports tenant/node identifiers so
+schemas can be reconciled and agents can hand over gracefully before retrying.
+The local synthetic drill and its retained archive/evidence are documented in
+[the migration guide](../internal/db/migrations/README.md); they do not replace
+an installation-specific backup. Restore the verified pre-migration backup and
+its exact old binary to roll back. Node Undo cannot restore deleted kind definitions.

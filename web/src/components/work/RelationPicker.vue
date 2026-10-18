@@ -1,16 +1,18 @@
 <!-- SPDX-License-Identifier: AGPL-3.0-only -->
 <script setup lang="ts">
+import { vClipTip } from '../../directives/clipTip'
 import { computed, nextTick, onBeforeUnmount, ref, watch } from 'vue'
 import { listNodes, type ListItem, type WorkNode } from '../../lib/api'
 import { keyPrefixOf, keyQuery, ticketResults, type TicketResult } from '../../lib/palette'
 import { recents } from '../../lib/recents'
 import { choiceById, RELATION_CHOICES, type RelationChoice } from '../../lib/relations'
-import { searchWork, workKindMap } from '../../lib/ticketSearch'
+import { searchWork, workKindMap, WORK_KINDS } from '../../lib/ticketSearch'
 import type { RelatedNode, RelatedTicket } from '../../lib/useTicket'
 import { highlight } from '../../lib/work'
 import { useProjects } from '../../stores/projects'
 import AppIcon from '../AppIcon.vue'
 import FloatingPanel from './FloatingPanel.vue'
+import ReadName from '../ReadName.vue'
 import StatusIcon from './StatusIcon.vue'
 
 // Link the open ticket to another: choose how they relate, then find the other
@@ -88,7 +90,7 @@ onBeforeUnmount(() => { clearTimeout(timer); controller?.abort() })
 // A recent ticket carries no id: its key finds it.
 async function resolve(result: TicketResult): Promise<RelatedTicket | null> {
   if (!result.id.startsWith('recent-')) return { id: result.id, key: result.key, title: result.title, state: result.state }
-  const page = await listNodes({ q: result.key, kind: ['ticket', 'task', 'epic'], sort: 'key', limit: 5 })
+  const page = await listNodes({ q: result.key, kind: WORK_KINDS, sort: 'key', limit: 5 })
   const item = page.items.find(candidate => candidate.key === result.key)
   return item ? { id: item.id, key: item.key, title: item.title, state: item.state } : null
 }
@@ -156,26 +158,34 @@ let lastChoice = 'relates'
       <label class="search">
         <AppIcon name="search" :size="14" class="lead" />
         <input
-          ref="input" v-model="term" class="field" type="text" role="combobox" aria-controls="relation-options" aria-autocomplete="list" :aria-expanded="true"
+          ref="input" v-model="term" class="field" type="text" role="combobox" aria-controls="relation-results" aria-autocomplete="list" :aria-expanded="true"
           :aria-activedescendant="results.length ? `relation-option-${active}` : undefined" :aria-label="`Find the ticket ${subject} ${choice.label.toLowerCase()}`"
           placeholder="Find a ticket by key or title" autocomplete="off" spellcheck="false" data-autofocus @keydown="keydown"
         />
         <span v-if="loading || busy" class="spinner" aria-hidden="true" />
       </label>
       <p v-if="refusal" class="refusal" role="alert"><AppIcon name="alert" :size="14" /><span>{{ refusal }}</span></p>
-      <div id="relation-options" class="options" role="listbox" :aria-label="query ? 'Tickets found' : 'Recent tickets'" :class="{ stale: loading && !!results.length }">
+      <div id="relation-options" class="options" :class="{ stale: loading && !!results.length }">
         <p v-if="!query && results.length" class="group-label eyebrow" aria-hidden="true">Recent</p>
-        <div
-          v-for="(result, index) in results" :id="`relation-option-${index}`" :key="result.id" role="option" class="option"
-          :aria-selected="index === active" :aria-disabled="linkedKeys.has(result.key) || undefined"
-          @pointermove="active = index" @click="choose(result)"
-        >
-          <StatusIcon :state="result.state" :size="12" />
-          <span class="key"><template v-for="(part, i) in highlight(result.key, keyQuery(query) ? query : '')" :key="i"><mark v-if="part.match">{{ part.text }}</mark><template v-else>{{ part.text }}</template></template></span>
-          <span class="title"><template v-for="(part, i) in highlight(result.title, query)" :key="i"><mark v-if="part.match">{{ part.text }}</mark><template v-else>{{ part.text }}</template></template></span>
-          <span v-if="linkedKeys.has(result.key)" class="tag">Linked</span>
-          <span v-else-if="result.projectKey && result.projectKey !== projectKey" class="tag project">{{ result.projectKey }}</span>
-          <AppIcon v-if="index === active && !linkedKeys.has(result.key)" name="enter" :size="13" class="enter" />
+        <div id="relation-results" class="option-list" role="listbox" :aria-label="query ? 'Tickets found' : 'Recent tickets'">
+          <div v-for="(result, index) in results" :key="result.id" class="option-row" role="presentation">
+            <div
+              :id="`relation-option-${index}`" role="option" class="option"
+              :aria-selected="index === active" :aria-disabled="linkedKeys.has(result.key) || undefined"
+              :tabindex="index === active ? 0 : -1" @keydown.enter.prevent="choose(result)"
+              @pointermove="active = index" @click="choose(result)"
+            >
+              <StatusIcon :state="result.state" :size="12" />
+              <span class="key"><template v-for="(part, i) in highlight(result.key, keyQuery(query) ? query : '')" :key="i"><mark v-if="part.match">{{ part.text }}</mark><template v-else>{{ part.text }}</template></template></span>
+              <span v-clip-tip="result.title" class="title"><template v-for="(part, i) in highlight(result.title, query)" :key="i"><mark v-if="part.match">{{ part.text }}</mark><template v-else>{{ part.text }}</template></template></span>
+              <span v-if="linkedKeys.has(result.key)" class="tag">Linked</span>
+              <span v-else-if="result.projectKey && result.projectKey !== projectKey" class="tag project">{{ result.projectKey }}</span>
+              <AppIcon v-if="index === active && !linkedKeys.has(result.key)" name="enter" :size="13" class="enter" />
+            </div>
+          </div>
+        </div>
+        <div v-if="results.length" class="option-reads" role="group" aria-label="Read full ticket names">
+          <div v-for="result in results" :key="result.id" class="read-row"><ReadName :text="`${result.key} · ${result.title}`" /></div>
         </div>
         <p v-if="failed" class="note error" role="alert">{{ failed }}</p>
         <p v-else-if="query && !loading && !results.length && searched === query" class="note">Nothing matches “{{ query }}”. Try a key like {{ projectKey }}-12 or words from a title.</p>
@@ -194,10 +204,10 @@ let lastChoice = 'relates'
 .picker { display: grid; gap: 8px; padding: 4px 4px 2px; }
 .head { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; padding: 2px 4px 0; }
 .head .hint { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 12px; color: var(--ink-2); }
-.types { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 2px; padding: 3px; border-radius: 14px; background: var(--seg-bg); box-shadow: inset 0 1px 2px rgba(32, 60, 61, .08); }
+.types { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 2px; padding: 3px; border-radius: 14px; background: var(--seg-bg); box-shadow: inset 0 1px 2px color-mix(in srgb, var(--shadow-color) 8%, transparent); }
 .type { display: inline-flex; align-items: center; justify-content: center; min-width: 0; height: 28px; padding: 0 8px; border: 0; border-radius: 999px; background: transparent; color: var(--ink-2); font-size: 12.5px; font-weight: 600; white-space: nowrap; }
 @media (hover: hover) { .type:hover { color: var(--teal-ink); background: var(--row-hover); } }
-.type[aria-checked="true"] { background: var(--seg-on); color: var(--teal-ink); box-shadow: 0 1px 2px rgba(32, 60, 61, .12), inset 0 0 0 1px var(--glass-edge); }
+.type[aria-checked="true"] { background: var(--seg-on); color: var(--teal-ink); box-shadow: 0 1px 2px color-mix(in srgb, var(--shadow-color) 12%, transparent), inset 0 0 0 1px var(--glass-edge); }
 .type:focus-visible { box-shadow: var(--focus-ring); }
 .search { position: relative; display: flex; align-items: center; }
 .search .lead { position: absolute; left: 11px; color: var(--ink-3); pointer-events: none; }
@@ -207,10 +217,14 @@ let lastChoice = 'relates'
 .refusal { display: flex; align-items: flex-start; gap: 8px; padding: 8px 10px; border-radius: 10px; background: var(--danger-bg); box-shadow: inset 0 0 0 1px var(--danger-line); color: var(--danger); font-size: 12.5px; line-height: 1.45; }
 .refusal svg { flex-shrink: 0; margin-top: 2px; }
 .refusal span { color: var(--ink); }
-.options { display: grid; grid-template-columns: minmax(0, 1fr); gap: 1px; max-height: 300px; overflow: auto; transition: opacity .12s ease; }
+.options { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 1px; transition: opacity .12s ease; }
+.option-list, .option-reads { display: grid; gap: 1px; align-content: start; }
+.option-list { grid-column: 1; }.option-reads { grid-column: 2; }
+.option-row, .read-row { display: grid; min-height: 36px; }
+.options > .group-label, .options > .note { grid-column: 1 / -1; }
 .options.stale { opacity: .6; }
 .group-label { padding: 4px 8px 2px; }
-.option { display: flex; align-items: center; gap: 9px; min-height: 36px; padding: 0 10px; border-radius: 8px; color: var(--ink); font-size: 13px; cursor: pointer; }
+.option { display: flex; align-items: center; min-width: 0; gap: 9px; min-height: 36px; padding: 0 10px; border-radius: 8px; color: var(--ink); font-size: 13px; cursor: pointer; }
 .option[aria-selected="true"] { background: var(--row-selected); }
 .option[aria-disabled="true"] { cursor: default; }
 .option[aria-disabled="true"] .title, .option[aria-disabled="true"] .key { color: var(--ink-3); }
@@ -228,7 +242,13 @@ let lastChoice = 'relates'
 @media (max-width: 600px), (pointer: coarse) {
   .type { height: 40px; padding: 0 6px; font-size: 13px; }
   .search .field { height: 44px; font-size: 16px; }
-  .option { min-height: 44px; }
+  .option, .option-row, .read-row { min-height: 44px; }
   .foot { display: none; }
+}
+
+@media (max-width: 720px) {
+  .option, .option-row, .read-row { height: 52px; min-height: 52px; }
+  .title { line-height: 18px; }
+  .title { display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; white-space: normal; overflow-wrap: anywhere; }
 }
 </style>

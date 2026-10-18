@@ -1,0 +1,138 @@
+{
+  "ticket": "AEON-648",
+  "round": "int-fix25",
+  "recorded_at": "2026-10-05T05:47:04.417275+00:00",
+  "branch": "work/aeon-648-int",
+  "base_commit": "dbff2c410ca2a656620676447236c633c97b391b",
+  "review": "review-ci272e.out",
+  "summary": "Fixed the only actual shard-8 failure by scoping the Parent menu selector and matching its accessible name exactly. Both Parent and Parents / Leaves are intentional controls. Existing query, URL, result-set, saved-view, accessibility and geometry assertions are retained. Product source and migrations are unchanged.",
+  "ownership": {
+    "account": "PPM / INSPR / workstation-agents (agent)",
+    "attribution": "Coordinator recorded worker marker before dispatch per worker-common.md; verified selected account with paimos --instance ppm whoami. No tracker writes or status changes."
+  },
+  "main": {
+    "fetched": true,
+    "commit": "a3ca8c475a94ce1de6da1398182abe3dfe98eb9f",
+    "already_ancestor": true,
+    "pr_mergeable": "MERGEABLE",
+    "merge_required": false
+  },
+  "ci_provenance": {
+    "run": 37265580844,
+    "url": "https://github.com/inspr-at/paimos/actions/runs/37265580844",
+    "head_sha": "dbff2c410ca2a656620676447236c633c97b391b",
+    "merge_sha": "5915a3fe468470abf8d6954c61c4b7c5ac4e8270",
+    "attempts_inspected": [
+      1,
+      2,
+      4
+    ],
+    "result_per_attempt": "41 service-tier cases pass, 6 work-history cases pass, all selected layout cases pass; only views-filters.spec.ts:63 fails due to the ambiguous Parent locator. Each shard runs 91 selected cases, with 90 passing and 1 failing. No test retries.",
+    "note": "The review listed candidate failures by registration line; actual logs show no failure in the history, service-tier or view-layout registrations."
+  },
+  "findings": [
+    {
+      "registration": "views-filters.spec.ts:63",
+      "status": "fixed",
+      "cause": "Substring name Parent matches both Parent and Parents / Leaves.",
+      "change": "Use the existing Filter by menu locator with name Parent and exact:true. Retain all existing assertions and document the separate shape filter and saved-view query compatibility.",
+      "regression": "Original test reproduced the exact hosted strict-mode violation on unmodified dbff2c41; corrected full spec passes three times."
+    },
+    {
+      "registration": "views-filters.spec.ts:392",
+      "status": "verified passing; no change",
+      "evidence": "Hosted Linux baseline viewport cases pass in all three inspected attempts. All five viewport cases pass three times locally after the selector change."
+    },
+    {
+      "registration": "work-history-fix5.spec.ts:20",
+      "status": "verified passing; no change",
+      "evidence": "All six migrated-work history/review cases pass on hosted Linux in each of three inspected attempts at the same head."
+    },
+    {
+      "registration": "service-tier.spec.ts:138/258/324/397/429",
+      "status": "verified passing; no change",
+      "evidence": "All listed table-fit, stability, read-only, cost/history/estimate and delayed-evidence cases are among the 41 selected service-tier cases passing in each of three inspected hosted Linux attempts."
+    }
+  ],
+  "validation": {
+    "baseline": {
+      "commit": "dbff2c410ca2a656620676447236c633c97b391b",
+      "command": "PW_RETRIES=0 node ../scripts/playwright-safe.mjs -c playwright.ui.config.ts tests/views-filters.spec.ts --grep \"Shift F opens every filter:\" --workers=1",
+      "result": "1 failure for the same strict-mode violation; no tracked files changed before reproduction.",
+      "exit_code": 1,
+      "initial_collection_correction": "An initial anchored grep selected no tests; removed the anchor and reproduced the real failure. No assertion changed."
+    },
+    "browser": {
+      "file": "web/tests/views-filters.spec.ts",
+      "passed": 51,
+      "failed": 0,
+      "skipped": 0,
+      "cases": 17,
+      "repeat_each": 3,
+      "workers": 1,
+      "retries": 0,
+      "platform": "macOS, pinned Playwright Chromium headless shell",
+      "command": "PW_RETRIES=0 node ../scripts/playwright-safe.mjs -c playwright.ui.config.ts tests/views-filters.spec.ts --repeat-each=3 --workers=1 --retries=0",
+      "coverage": "Every existing filter/view case, light/dark axe scans, and 1920/1440/1280/1024/390px no-overflow geometry checks. Browser ownership cleanup reports after=0, remaining_processes=0."
+    },
+    "web_unit": {
+      "file": "web/tests/list-views.test.ts",
+      "passed": 9,
+      "failed": 0,
+      "skipped": 0,
+      "command": "node --test --test-concurrency=1 tests/list-views.test.ts"
+    },
+    "affected_inventory": {
+      "strict": true,
+      "browser": 17,
+      "node": 9,
+      "tiers": {
+        "ESSENTIAL": 0,
+        "GATED-FULL": 26,
+        "NIGHTLY": 0
+      },
+      "preserved_classifications": 7232
+    },
+    "ci_web_shard_check": {
+      "specs": 78,
+      "shards": 12,
+      "ungated": 166,
+      "weightSeconds": [
+        294.3,
+        290.88,
+        291.49,
+        292.72,
+        290.9,
+        291.78,
+        293.56,
+        293.22,
+        292.13,
+        292.09,
+        293.25,
+        291.58
+      ]
+    },
+    "git_diff_check": "pass",
+    "remote_browser": {
+      "result": "refused before SSH or source transfer",
+      "reason": "Approved scripts/playwright-remote.mjs has its OPS-247 bootstrap/launcher gate closed.",
+      "fallback": "worker-common.md permits only touched test files locally, one at a time. Ran one spec file with one worker, using the approved safety wrapper."
+    },
+    "remote_test_sh": "Not invoked: it performs a temporary git push, prohibited by the direct user instruction. No affected Go package exists in this test-only round. No alternate SSH lane or runner gate bypass.",
+    "hosted_ci": "Existing Linux attempts supply evidence for unchanged history/service-tier cases. Fresh final-commit hosted CI and remote/Linux three-repeat execution of the changed selector remain coordinator-owned after an authorized push; no fresh run is claimed.",
+    "full_suites": "No full Go/DB suite, full web unit suite, build/typecheck, or full repository browser suite was run; only the touched spec and focused unit file were executed."
+  },
+  "design_decisions": "Preserved Q16 workspace names/filters and intentional Parent versus Parents / Leaves controls. Existing saved-view epic query compatibility assertions remain. No new UI design or change to approved layout.",
+  "constraints": "Assigned worktree and existing branch only. No push, deploy, production mutation, secret/credential read, tracker mutation, migration/ledger/version change, model review gate, subagent, other model CLI, other-worktree edit, amendment or assertion relaxation.",
+  "logs_sha256": {
+    "affected-tiers.log": "3651f0a56476d1a38f819ff565969eae45327e16f4b6dc04fb270216c16d825f",
+    "after-browser.log": "fbe8165dcb00f94fd85c9c493d3ca0132592c2d8dbc94e176bd3302213bed3fb",
+    "baseline-browser.log": "32240e5fd4f620ff5ea22a6f961d89610247da424d86a7d1a3e9e1a480a58c65",
+    "ci-attempt1.log": "2254affcc9b8c34b2bc8d8c5dd0f122b81f8f4babeae03bb84757d898aaaafd6",
+    "ci-attempt2.log": "e01854cf0dbc29a55202b7dbd3d8b5de5a9c1ac6d8fe872c33b27b65c1131a8d",
+    "ci.log": "5699aa81a2c88de371b714359467d16abbfd7b63aa7a4cebf0d36b35c869a1cb",
+    "list-views-unit.log": "e27902a1403dd9d870f3caf52d817665708bd2a381908ac74d4c9c71a58ed580",
+    "remote-browser.log": "773e28199e77ad2bac9a833bff42ef9ee0e895acc3fd79d293ced00421a420e2",
+    "shards.log": "3d0ceba3b131c8554450efd8530332d1c2ef47911d7c0431977f783d42a2b86d"
+  }
+}

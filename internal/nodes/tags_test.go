@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"net/http"
 	"reflect"
+	"strings"
 	"testing"
 
 	"github.com/jackc/pgx/v5"
@@ -18,10 +19,48 @@ import (
 
 func createTestTag(t *testing.T, p tenant.Principal, name string) nodeJSON {
 	t.Helper()
-	status, body := call(t, &p, http.MethodPost, "/api/kinds", `{"slug":"tag","label":"Tag","short_prefix":"TAG","icon":"tag","field_schema":{}}`)
-	kind := decode[kindJSON](t, status, body, http.StatusCreated)
-	status, body = call(t, &p, http.MethodPost, "/api/nodes", fmt.Sprintf(`{"kind_id":%q,"title":%q,"fields":{"color":"blue"}}`, kind.ID, name))
+	kind := kindBySlug(t, p, "tag")
+	status, body := call(t, &p, http.MethodPost, "/api/nodes", fmt.Sprintf(`{"kind_id":%q,"title":%q,"fields":{"color":"blue"}}`, kind.ID, name))
 	return decode[nodeJSON](t, status, body, http.StatusCreated)
+}
+
+// Risk: agents must be able to create seeded tag nodes with existing authority,
+// while kind creation, key ceilings and tenant isolation retain their barriers.
+func testAgentCreatesSeededTagWithoutKindManagement(t *testing.T) {
+	admin := newPrincipal(t, "agent-tag-a")
+	other := addPrincipal(t, "agent-tag-b")
+	agent := addRolePrincipal(t, admin, "Tag worker", "admin", tenant.Agent, []string{"nodes.read", "nodes.write", "tags.manage"})
+	agent.KeyCreatorID = admin.ID
+	kind := kindBySlug(t, agent, "tag")
+	foreignKind := kindBySlug(t, other, "tag")
+	status, body := call(t, &agent, http.MethodPost, "/api/nodes", fmt.Sprintf(`{"kind_id":%q,"title":"Agent tag","fields":{"color":"green"}}`, kind.ID))
+	node := decode[nodeJSON](t, status, body, http.StatusCreated)
+	if node.KindID != kind.ID || node.Title != "Agent tag" || !strings.HasPrefix(node.Key, "TAG-") {
+		t.Fatalf("created tag: %+v", node)
+	}
+	// Even an agent with a full key ceiling cannot perform person-only kind creation.
+	agent.FullAccess = true
+	status, body = call(t, &agent, http.MethodPost, "/api/kinds", `{"slug":"agent_kind","label":"Agent kind","short_prefix":"AK","icon":"tag","field_schema":{}}`)
+	if status != http.StatusForbidden || !strings.Contains(string(body), "permission denied") {
+		t.Fatalf("agent kind creation: %d %s", status, body)
+	}
+	agent.FullAccess = false
+	status, body = call(t, &agent, http.MethodPost, "/api/nodes", fmt.Sprintf(`{"kind_id":%q,"title":"Foreign tag"}`, foreignKind.ID))
+	if status != http.StatusBadRequest || !strings.Contains(string(body), "kind not found") {
+		t.Fatalf("foreign tag kind: %d %s", status, body)
+	}
+	agent.Scopes = []string{"nodes.read", "tags.manage"}
+	status, body = call(t, &agent, http.MethodPost, "/api/nodes", fmt.Sprintf(`{"kind_id":%q,"title":"Without node write"}`, kind.ID))
+	if status != http.StatusForbidden || !strings.Contains(string(body), "permission denied") {
+		t.Fatalf("missing node authority: %d %s", status, body)
+	}
+	status, body = call(t, &agent, http.MethodGet, "/api/nodes?kind_id="+kind.ID, "")
+	page := decode[struct {
+		Items []nodeJSON `json:"items"`
+	}](t, status, body, http.StatusOK)
+	if len(page.Items) != 1 || page.Items[0].ID != node.ID {
+		t.Fatalf("tag nodes after rejected writes: %+v", page.Items)
+	}
 }
 
 func createTaggedNode(t *testing.T, p tenant.Principal, tags []string) nodeJSON {

@@ -12,8 +12,11 @@ import { fetchTicketGraph, type TicketGraph } from './ticketGraph.ts'
 // matches. No module or plugin wiring is required; both APIs already exist.
 export async function loadTicketGraphContext(projectId: string, filters: ListFilters, signal: AbortSignal): Promise<{ data: TicketGraph; visible: TicketGraph }> {
   signal = AbortSignal.any([signal, AbortSignal.timeout(20_000)])
-  const data = await fetchTicketGraph(projectId, filters.showClosed, signal)
-  if (!hasFilters(filters) || !data.nodes.length) return { data, visible: data }
+  // Graph categories are spelling-based; a kind can put Accepted in Open or
+  // QA in Done. Keep all topology and let the shared list policy decide Hide
+  // membership, including the default five choices and Reset.
+  const data = await fetchTicketGraph(projectId, true, signal)
+  if ((!hasFilters(filters) && filters.showClosed) || !data.nodes.length) return { data, visible: data }
   const remaining = new Set(data.nodes.map(node => node.id)), matches = new Set<string>()
   let cursor: string | undefined
   const seen = new Set<string>()
@@ -31,13 +34,46 @@ export async function loadTicketGraphContext(projectId: string, filters: ListFil
     truncated: data.truncated,
   } }
 }
-
-export const GLIMPSE_MIN_WIDTH = 1280
 export const GLIMPSE_MIN_TICKETS = 8
 export const GLIMPSE_MIN_LINKS = 1
+export const GLIMPSE_MIN_WIDTH = 1280
 
 export function headerGlimpseAllowed(input: { enabled: boolean; reduced: boolean; wide: boolean; tickets: number }): boolean {
   return input.enabled && input.wide && !input.reduced && input.tickets >= GLIMPSE_MIN_TICKETS
+}
+
+// A viewport override can drop the MediaQueryList change, and the list created
+// at mount can keep matches true after the layout shrinks. Stay wide only when
+// the live query and the layout width both clear the same threshold.
+export function headerGlimpseViewportWide(mediaMatches: boolean, innerWidth: number): boolean {
+  return mediaMatches === true && headerGlimpseWide(innerWidth)
+}
+
+export function headerGlimpseWide(layoutWidth: number): boolean {
+  return Number.isFinite(layoutWidth) && layoutWidth >= GLIMPSE_MIN_WIDTH
+}
+
+// Chromium drops the MediaQueryList change when Playwright shrinks the viewport
+// (setViewportSize 1280 → 390). A missing event must follow the layout width,
+// which still moved. A delivered change stays authoritative while innerWidth
+// catches up by one pixel, so a stale 1279 sample cannot undo a real widen.
+// A queued matches:true from that widen can arrive after the next shrink; a
+// layout that has already left the threshold (390, 1278) stays narrow.
+const GLIMPSE_WIDTH_CATCHUP = 1
+export function nextHeaderGlimpseWide(signal: { mediaMatches: boolean | null; layoutWidth: number }): boolean {
+  if (signal.mediaMatches === null) return headerGlimpseWide(signal.layoutWidth)
+  if (!signal.mediaMatches) return false
+  if (Number.isFinite(signal.layoutWidth) && signal.layoutWidth < GLIMPSE_MIN_WIDTH - GLIMPSE_WIDTH_CATCHUP) return false
+  return true
+}
+
+// While the canvas paints, Chromium can drop resize, the media change and the
+// document-element observer together (CI: 1279 → 1280 → 390 left the glimpse
+// on). A paint frame is the read that still runs. It may only clear, so a
+// one-pixel catch-up cannot undo a delivered widen and a stale matches:true
+// cannot turn the glimpse back on once the layout has left 1280.
+export function headerGlimpsePaintClears(wide: boolean, signal: { mediaMatches: boolean | null; layoutWidth: number }): boolean {
+  return wide && !nextHeaderGlimpseWide(signal)
 }
 
 export function headerGlimpseGraphReady(nodes: number, links: number): boolean {
@@ -49,21 +85,41 @@ export interface GlimpseBox { x: number; y: number; width: number; height: numbe
 // The backdrop spans the header; these measured islands stay completely clear,
 // including icons and controls beside the text. Resize and content observers
 // keep the mask current when a stage, saved view or docked panel changes shape.
-export const GLIMPSE_CLEAR_SELECTOR = '.title-line > *, .description, .head-stats, .project-tabs, .view-bar .view-tab, .view-bar .tab, .view-bar .changes, .toolbar-wrap'
+export const GLIMPSE_CLEAR_SELECTOR = '.title-line > *, .description, .head-stats .stat, .head-stats .q-warn, .head-stats .head-work, .head-stats .group-count, .head-stats .status-count, .header-activity > *, .project-tabs, .project-navigation a, .project-navigation button, .project-navigation label, .view-bar .view-tab, .view-bar .tab, .view-bar .changes, .toolbar-wrap'
 
 export function glimpseOverlaps(a: GlimpseBox, b: GlimpseBox, gap = 0): boolean {
   return a.x < b.x + b.width + gap && a.x + a.width + gap > b.x
     && a.y < b.y + b.height + gap && a.y + a.height + gap > b.y
 }
 
-export function glimpseControlSpot(width: number, height: number, boxes: GlimpseBox[], control: { width: number; height: number }): GlimpseBox | null {
+export function glimpseControlSpot(width: number, height: number, boxes: GlimpseBox[], control: { width: number; height: number }, gap = 10, inset = 12, step = 8): GlimpseBox | null {
   // Prefer the lower right, then search the rest of the free header. A small
   // dock can have no room: never place the controls over the project's text.
-  for (let y = height - control.height - 12; y >= 8; y -= 8) {
-    for (let x = width - control.width - 12; x >= 8; x -= 8) {
-      const spot = { x, y, ...control }
-      if (!boxes.some(box => glimpseOverlaps(spot, box, 10))) return spot
+  if (control.width <= 0 || control.height <= 0 || width <= 0 || height <= 0 || step <= 0) return null
+  const y0 = height - control.height - inset, x0 = width - control.width - inset
+  for (let y = y0; y >= 8; y -= step) {
+    for (let x = x0; x >= 8; x -= step) {
+      const spot = { x, y, width: control.width, height: control.height }
+      if (!boxes.some(box => glimpseOverlaps(spot, box, gap))) return spot
     }
+  }
+  return null
+}
+
+// The labelled cluster is about 280px. At 1280 the opening beside the project
+// key is narrower than that, and it often misses the 8px grid. An unplaced
+// bar keeps its static origin and covers the key. Try the coarse clear spot,
+// then any non-overlapping pixel, then the icon row, before giving up.
+export function glimpsePlaceControls(width: number, height: number, boxes: GlimpseBox[], sizes: { full: { width: number; height: number }; compact: { width: number; height: number } }): { spot: GlimpseBox; compact: boolean } | null {
+  const passes = [
+    { size: sizes.full, compact: false, gap: 10, inset: 12, step: 8 },
+    { size: sizes.full, compact: false, gap: 0, inset: 8, step: 1 },
+    { size: sizes.compact, compact: true, gap: 10, inset: 12, step: 8 },
+    { size: sizes.compact, compact: true, gap: 0, inset: 8, step: 1 },
+  ]
+  for (const pass of passes) {
+    const spot = glimpseControlSpot(width, height, boxes, pass.size, pass.gap, pass.inset, pass.step)
+    if (spot) return { spot, compact: pass.compact }
   }
   return null
 }

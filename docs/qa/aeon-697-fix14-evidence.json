@@ -1,0 +1,136 @@
+{
+  "ticket": "AEON-697",
+  "fix_round": 14,
+  "scope": "Verify the resolved PR #278 static merge conflict against current main; preserve attention behavior and test assertions.",
+  "review": {
+    "brief_filename": "review-review-static278.out.out",
+    "located_filename": "review-static278.out",
+    "finding": "HEAD could not merge with origin/main because web/scripts/ci-web-shard.test.mjs conflicted.",
+    "resolution_commit": "8a4db1d04b7a3423cf757bae4300dbf6aacfdf97",
+    "new_behavior_findings": 0
+  },
+  "ownership": {
+    "tracker": "ppm",
+    "account": "INSPR",
+    "branch": "work/aeon-697-set",
+    "worker_session": "95ce5b99-b2fb-455e-9a4e-49c7bd67d3d5",
+    "marker_recorded_before_edits": true,
+    "release_gates": "Coordinator owned; no worker model review, origin push, deploy, ticket status change or approval."
+  },
+  "source_commit": "8a4db1d04b7a3423cf757bae4300dbf6aacfdf97",
+  "main": "04962b5a01ff3fbd8a2fa964b41a1dd16120ee64",
+  "verification": {
+    "main_already_ancestor": true,
+    "go_registrations": 4049,
+    "registrations_missing_from_main_or_4cea8379": 0,
+    "attention_shard_guards": 3,
+    "shared_main_regression_preserved": true,
+    "assertions_removed_or_loosened": false,
+    "new_behavior_changes": false,
+    "new_regression_required": "No behavior fix in this round; existing regressions and exact classifications are retained.",
+    "merge_before": {
+      "command": "git merge-tree --write-tree --name-only 4cea8379 origin/main",
+      "exit_code": 1,
+      "conflicts": [
+        "scripts/ci/go-test-tiers.json",
+        "web/scripts/ci-web-shard.test.mjs"
+      ]
+    },
+    "merge_after": {
+      "command": "git merge-tree --write-tree HEAD origin/main",
+      "exit_code": 0,
+      "tree": "f97dafa2b01924e76d469983353ed102830def00",
+      "identical_to_head_tree": true
+    },
+    "main_refreshed_after_validation_wait": true
+  },
+  "validation": {
+    "static": {
+      "status": "reusing inherited same-worktree queued invocation to prevent duplicate same-SHA remote checkout use",
+      "command": "ci-static-locked.sh (remote node scripts/ci-static.mjs --merge-main)",
+      "log": "tmp/aeon-697-fix13-static.log",
+      "current_duplicate_cancelled_while_queued": true,
+      "inherited_process_untouched": true,
+      "application_and_head_frozen_while_waiting": true
+    },
+    "remote_go": {
+      "status": "passed",
+      "source_commit": "8a4db1d04b7a3423cf757bae4300dbf6aacfdf97",
+      "packages": [
+        "internal/statusautopilot",
+        "internal/releases",
+        "internal/authz",
+        "internal/events",
+        "internal/reportercontract"
+      ],
+      "command": "remote-test.sh <worktree> -count=1 <five affected packages>",
+      "launch_error": "A separately chained migration command lacked AEON_TEST_DATABASE_URL; retried as the first command with the runner environment, preserving all assertions."
+    },
+    "remote_web": {
+      "status": "94 of 96 passed initially; both timed-out accessibility cases passed on focused retry with all assertions and the 30-second budget unchanged",
+      "platform": "macOS bundled Chromium",
+      "workers": 1,
+      "attention_units_passed": 2,
+      "browser_cases_total": 96,
+      "specs": [
+        "tests/needs-attention.spec.ts",
+        "tests/shell.spec.ts",
+        "tests/views-filters.spec.ts"
+      ],
+      "linux_ci": "Not available via the approved remote runner; hosted Linux Chromium remains coordinator proof.",
+      "browser_cases_passed": 94,
+      "browser_cases_failed": 2,
+      "attention_cases_passed": 29,
+      "shell_cases_passed": 38,
+      "filter_cases_passed": 27,
+      "filter_cases_failed": 2,
+      "browser_failure_reason": "Both general filter accessibility cases reached the unchanged 30-second test timeout; no axe violation assertion failed.",
+      "supervision": {
+        "after": 0,
+        "remaining_processes": 0,
+        "peak": 5
+      }
+    },
+    "remote_migrations": {
+      "status": "passed",
+      "source_commit": "dc806f2a56",
+      "tests": [
+        "TestAttentionEventsMigrationUpgradeAndReapply",
+        "TestRunMeasurementUpgradeFromRelease122PreservesEvidence"
+      ],
+      "command": "remote-test.sh <worktree> -count=1 -run <both migration regressions> ./internal/db/...",
+      "exit_code": 0
+    },
+    "accessibility_retry": {
+      "status": "passed",
+      "max_load": 8,
+      "workers": 1,
+      "retries": 0,
+      "scope": "Only filters and views have no axe violations in light/dark; all assertions and 30-second budget unchanged.",
+      "passed": 2,
+      "exit_code": 0,
+      "remote_load": 7.42,
+      "supervision": {
+        "after": 0,
+        "remaining_processes": 0,
+        "peak": 5
+      }
+    }
+  },
+  "follow_ups": [
+    {
+      "item": "Hosted Linux Chromium proof",
+      "reason": "Approved offload runner is macOS; Linux CI remains coordinator owned."
+    },
+    {
+      "item": "Previous-round inherited full-suite failures",
+      "reason": "Unchanged work-node preservation fixtures do not account for additive usage_lead_session_id; restore drill expects Docker while approved runner uses native Postgres; timing fixtures mount WorkspaceSection after controls moved to AgentsSection. These full suites were not rerun for this evidence-only round.",
+      "previous_evidence": "tmp/aeon-697-fix13-evidence.json"
+    },
+    {
+      "item": "Shared static runner queue and checkout ownership",
+      "reason": "An inherited same-worktree invocation remained queued throughout this round. The offload helper names its checkout st-<HEAD>, allowing duplicate same-commit invocations to target one checkout when two slots are enabled. Cancelled only the new verified queued duplicate and retained the inherited owner; coordinator owns the shared helper and any cleanup of older jobs."
+    }
+  ],
+  "updated_at": "2026-10-06T12:06:23.343721+00:00"
+}

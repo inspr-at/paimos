@@ -11,15 +11,16 @@ import { run } from '../lib/commands'
 import { actionResults, assemble, keyPrefixOf, keyQuery, knowledgeResults, projectResults, recentResults, ticketResults, viewResults, type ActionResult, type Group, type Result, type TicketResult } from '../lib/palette'
 import { loadViews, viewsOf } from '../lib/savedViews'
 import { filtersFromView, filtersToQuery } from '../lib/ticketList'
-import { usePreference } from '../lib/preferences'
+import { savedViewId, useTicketListSwitch } from '../lib/ticketListSwitch'
 import { useSession } from '../stores/session'
 import { recents } from '../lib/recents'
 import { dark, toggleTheme } from '../lib/theme'
 import { toast } from '../lib/toast'
-import { highlight, statusMeta } from '../lib/work'
+import { highlight, statusMeta, ticketPath } from '../lib/work'
 import { useProjects } from '../stores/projects'
 import AppIcon, { type IconName } from './AppIcon.vue'
 import KeyCap from './KeyCap.vue'
+import { shortcutCaps, shortcutKeys } from '../lib/shortcuts'
 import BizIcon, { type BizIconName } from './business/BizIcon.vue'
 import { useBusiness } from '../stores/business'
 import StatusIcon from './work/StatusIcon.vue'
@@ -71,20 +72,20 @@ const actions = computed<ActionResult[]>(() => {
     if (!inKnowledge) out.push({ type: 'action', id: 'go-knowledge', label: 'Go to Knowledge', hint: `${here.title}: runbooks, guidelines, memory`, icon: 'book' })
     if (props.canWrite) out.push({ type: 'action', id: 'new-knowledge', label: `New knowledge entry in ${here.routeKey}`, hint: 'Runbook, guideline, memory and more', icon: 'plus', searchOnly: !inKnowledge })
   }
-  if (route.path !== '/') out.push({ type: 'action', id: 'go-projects', label: 'Go to Projects', icon: 'folder', keys: ['g', 'p'] })
-  if (!route.path.startsWith('/agents')) out.push({ type: 'action', id: 'go-agents', label: 'Go to Agents', hint: 'Sessions, approvals and pacing', icon: 'agent', keys: ['g', 'a'] })
+  if (route.path !== '/') out.push({ type: 'action', id: 'go-projects', label: 'Go to Projects', icon: 'folder', keys: shortcutKeys('places.projects').flatMap(binding => shortcutCaps(binding).flat()) })
+  if (!route.path.startsWith('/agents')) out.push({ type: 'action', id: 'go-agents', label: 'Go to Agents', hint: 'Sessions, approvals and pacing', icon: 'agent', keys: shortcutKeys('places.agents').flatMap(binding => shortcutCaps(binding).flat()) })
   // Business: log time (on the open ticket, when one is open) and the overview.
   if (business.open.hours && business.staff) {
     const ticket = typeof route.params.ticketKey === 'string' ? route.params.ticketKey.toUpperCase() : ''
     out.push({ type: 'action', id: 'log-time', label: ticket ? `Log time on ${ticket}` : 'Log time', hint: 'Hours this week', icon: 'clock', keys: route.path.startsWith('/business/hours') ? ['l'] : undefined })
   }
-  if (business.anyOpen && route.path !== '/business') out.push({ type: 'action', id: 'go-business', label: 'Go to Business', hint: 'Customers, quotes, hours and rates', icon: 'briefcase', keys: ['g', 'b'] })
+  if (business.anyOpen && route.path !== '/business') out.push({ type: 'action', id: 'go-business', label: 'Go to Business', hint: 'Customers, quotes, hours and rates', icon: 'briefcase', keys: shortcutKeys('places.business').flatMap(binding => shortcutCaps(binding).flat()) })
   if (!route.path.startsWith('/settings')) out.push({ type: 'action', id: 'settings', label: 'Settings', hint: 'Theme, greeting and keys', icon: 'gear' })
   // Each settings section is found by name ("workspace settings", "agent keys").
   for (const section of visibleSections(business.admin, permission => can(permission))) out.push({ type: 'action', id: `settings-${section.id}`, label: `${section.label} settings`, hint: section.summary, icon: 'gear', searchOnly: true })
   out.push({ type: 'action', id: 'theme', label: dark.value ? 'Switch to light theme' : 'Switch to dark theme', icon: dark.value ? 'sun' : 'moon' })
   out.push({ type: 'action', id: 'releases', label: 'Release history', hint: 'What changed, release by release', icon: 'history' })
-  out.push({ type: 'action', id: 'shortcuts', label: 'Keyboard shortcuts', icon: 'keyboard', keys: ['?'] })
+  out.push({ type: 'action', id: 'shortcuts', label: 'Keyboard shortcuts', icon: 'keyboard', keys: [...shortcutKeys('app.shortcuts')] })
   // Knowledge in every project: a search when something is typed, the page otherwise.
   const typed = query.value
   // Only when knowledge matched: an empty search keeps its honest "Nothing matches".
@@ -101,12 +102,13 @@ function projectFor(key: string) {
 // The saved views of the project in scope, by name.
 const session = useSession()
 const viewProject = computed(() => scopeProject.value ?? (scope.value ? undefined : routeProject.value))
-const viewPref = computed(() => viewProject.value ? usePreference<{ defaultView?: string | null }>(`list:${viewProject.value.id}`) : null)
+// The saved view the project opens with: its ticket list switch's default (AEON-1453).
+const viewSwitch = useTicketListSwitch(() => viewProject.value?.id)
 const views = computed(() => {
   const project = viewProject.value
   if (!project) return []
   const me = session.identity?.principal.id
-  const preferred = viewPref.value?.value.value?.defaultView ?? null
+  const preferred = savedViewId(viewSwitch.defaultId.value)
   return viewsOf(project.id).items.map(view => ({ id: view.id, name: view.name, shared: view.shared, mine: view.owner_principal_id === me, isDefault: view.id === preferred }))
 })
 const groups = computed<Group[]>(() => assemble(query.value, {
@@ -137,16 +139,16 @@ async function search() {
   const signal = controller.signal
   loading.value = true; failed.value = ''
   const within = scopeProject.value?.id
-  const key = keyQuery(q)
   try {
     if (gen !== searchGen) return
     if (!workKinds.value.size) workKinds.value = await workKindMap()
+    if (signal.aborted || gen !== searchGen) return
     // A key prefix ("PHAROS-29") is a key lookup; words also go to the hybrid search
     // (lib/ticketSearch, shared with the relation picker).
     const [work, knowledge] = await Promise.all([
       searchWork(q, { within, signal }),
-      // Knowledge reads titles, slugs and text; it never holds up the rest.
-      key ? Promise.resolve({ items: [] as KnowledgeItem[] }) : listKnowledge({ q, project_id: within, limit: 8 }, signal).catch(() => ({ items: [] as KnowledgeItem[] })),
+      // Knowledge also matches keys such as GUI-22 and RUN-40.
+      listKnowledge({ q, project_id: within, limit: 8 }, signal).catch(() => ({ items: [] as KnowledgeItem[] })),
     ])
     if (signal.aborted || gen !== searchGen) return
     listed.value = work.listed
@@ -164,6 +166,10 @@ async function search() {
 }
 watch([term, scope], () => {
   clearTimeout(timer)
+  // Invalidate immediately: an old response can finish during the debounce.
+  controller?.abort()
+  searchGen++
+  failed.value = ''
   if (!query.value) { void search(); active.value = 0; return }
   loading.value = true
   timer = setTimeout(() => void search(), 120)
@@ -187,7 +193,7 @@ function open() {
 function close() { controller?.abort(); dialog.value?.close(); opener?.focus({ preventScroll: true }) }
 function hrefOf(result: Result): string | null {
   if (result.type === 'project') return `/p/${encodeURIComponent(result.key)}`
-  if (result.type === 'ticket' && result.projectKey) return `/p/${encodeURIComponent(result.projectKey)}/${encodeURIComponent(result.key)}`
+  if (result.type === 'ticket' && result.projectKey) return ticketPath(result.projectKey, result.key)
   // Wide screens show the entry docked beside its project's list; narrower ones its own page.
   if (result.type === 'knowledge' && result.projectKey) return window.matchMedia(DOCK_MEDIA).matches ? dockPath(result.projectKey, result.kind, result.slug) : entryPath(result.projectKey, result.kind, result.slug)
   return null
@@ -383,7 +389,7 @@ const iconOf = (result: Result): BizIconName => result.type === 'action' ? resul
 .scope-in { font-size: 12px; color: var(--ink-2); }
 .scope-key { font: 600 11.5px/1 var(--mono); letter-spacing: .04em; font-variant-ligatures: none; }
 .scope-x { display: grid; place-items: center; width: 20px; height: 20px; padding: 0; border: 0; border-radius: 50%; background: transparent; color: var(--teal-ink); }
-.scope-x:hover { background: rgba(14, 111, 108, .12); }
+.scope-x:hover { background: color-mix(in srgb, var(--primary-line) 12%, transparent); }
 .scope-x:focus-visible { box-shadow: var(--focus-ring); }
 .esc { flex-shrink: 0; }
 .sheet { position: relative; }
@@ -401,7 +407,7 @@ const iconOf = (result: Result): BizIconName => result.type === 'action' ? resul
 .key { flex-shrink: 0; width: 96px; overflow: hidden; text-overflow: ellipsis; font: 500 11.5px/1 var(--mono); color: var(--ink-2); font-variant-ligatures: none; }
 .item.active .key { color: var(--teal-ink); }
 .kind { flex-shrink: 0; color: var(--ink-3); }
-.kind.epic { color: var(--gold); }
+.kind.epic { color: var(--kind-parent); }
 .title { flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .desc { flex: 1 1 0; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 12.5px; color: var(--ink-3); }
 .item.ticket .title, .item.knowledge .title { flex: 1 1 auto; }

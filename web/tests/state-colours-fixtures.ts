@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import type { Page } from '@playwright/test'
+import { mockAgentTheme } from './agent-theme-fixtures'
 import { fixtures, me, mockWork } from './work-fixtures'
 import { agentData, mockAgents } from './agents-fixtures'
 import { mockSettings, settingsData } from './settings-fixtures'
@@ -27,7 +28,8 @@ export async function mockStateColours(page: Page, theme: 'light' | 'dark' = 'li
       commits: [{ sha: 'abc1234', subject: 'Integrate session states' }],
       phase: state === 'stopped' ? 'stopped' : 'working', activity: state === 'throttled' ? 'throttled' : ['idle', 'stale'].includes(state) ? 'idle' : 'busy',
       heartbeat_at: state === 'awaiting' ? null : new Date(stateNow - (state === 'unresponsive' ? 600_000 : state === 'stale' ? 300_000 : 10_000)).toISOString(),
-      stopped_at: state === 'stopped' ? new Date(stateNow).toISOString() : null, stop_reason: state === 'problem' ? 'worker failed: exit 2' : state === 'stopped' ? 'process_exited' : null,
+      // Ended eleven minutes ago: past the 10 minutes an ended row keeps its place (AEON-1211), so it sits under Ended.
+      stopped_at: state === 'stopped' ? new Date(stateNow - 660_000).toISOString() : null, stop_reason: state === 'problem' ? 'worker failed: exit 2' : state === 'stopped' ? 'process_exited' : null,
       has_problem: state === 'problem', run_status: null, needs_attention: state === 'waiting', created_at: new Date(stateNow - (state === 'awaiting' ? 60_000 : 1200_000)).toISOString(),
     })
   }
@@ -43,5 +45,6 @@ export async function mockStateColours(page: Page, theme: 'light' | 'dark' = 'li
     at: new Date(stateNow).toISOString(), fresh_seconds: 120, truncated: false,
     items: agents.sessions.map(s => ({ ...s, session_id: s.id, principal_id: s.agent_principal_id, name: s.display_label, since: s.created_at, ticket: null })),
   } }))
-  return { data, agents }
+  const appearance = await mockAgentTheme(page)
+  return { data, agents, appearance }
 }

@@ -19,61 +19,66 @@ func noteFixture() NoteSnapshot {
 	return NoteSnapshot{Schema: SnapshotSchema, TenantID: "11111111-1111-4111-8111-111111111111", ProjectID: "22222222-2222-4222-8222-222222222222", ReleaseID: "33333333-3333-4333-8333-333333333333", Version: notesVersion, VersionScheme: "inspr-calendar-v2", Revision: 7, CapturedAt: at, MembershipSource: MembershipSource, FieldSource: FieldSource, Tickets: []NoteTicket{{ID: "44444444-4444-4444-8444-444444444444", Key: "TEST-7", Position: 2, UpdatedAt: &at, Fields: json.RawMessage(`{"pill_en":"Clear release notes","pill_de":"Verständliche Release Notes","benefit_en":"Tickets explain what you gain.","benefit_de":"Tickets erklären den Nutzen."}`)}}}
 }
 func TestNotesSnapshotLanguagesHiddenGapsAndDuplicates(t *testing.T) {
-	s := noteFixture()
-	original := s.Tickets[0]
-	hidden := original
-	hidden.ID = "55555555-5555-4555-8555-555555555555"
-	hidden.Key = "TEST-8"
-	hidden.Fields = json.RawMessage(strings.Replace(string(hidden.Fields), `{`, `{"hide_from_release_notes":true,`, 1))
-	missing := original
-	missing.ID = "66666666-6666-4666-8666-666666666666"
-	missing.Key = "TEST-9"
-	missing.Fields = json.RawMessage(`{"pill_en":"No translation"}`)
-	s.Tickets = append(s.Tickets, hidden, missing, original)
-	raw, _ := json.Marshal(s)
-	notes, err := NotesFromSnapshot(raw, notesVersion, "fixture")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(notes.Items) != 2 || notes.Hidden != 1 || len(notes.Gaps) != 1 || len(notes.SHA256) != 64 || notes.Items[0].BenefitDE != "Tickets erklären den Nutzen." || notes.Items[1].PillEN != "No translation" || notes.Fallback != "" {
-		t.Fatalf("notes: %+v", notes)
-	}
-	encoded, _ := json.Marshal(notes)
-	if strings.Contains(string(encoded), "TEST-8") {
-		t.Fatal("hidden ticket copied into notes")
-	}
-	unavailable := hidden
-	unavailable.ID = "77777777-7777-4777-8777-777777777777"
-	unavailable.Key = "TEST-10"
-	unavailable.Unavailable = "Member was deleted before capture."
-	s.Tickets = append(s.Tickets, unavailable)
-	raw, _ = json.Marshal(s)
-	notes, err = NotesFromSnapshot(raw, notesVersion, "fixture")
-	if err != nil || notes.Hidden != 2 || len(notes.Gaps) != 1 {
-		t.Fatalf("hidden unavailable: %+v %v", notes, err)
-	}
-	encoded, _ = json.Marshal(notes)
-	if strings.Contains(string(encoded), "TEST-10") {
-		t.Fatal("hidden deleted key copied into notes")
-	}
-	s.Tickets = s.Tickets[:len(s.Tickets)-1]
-	s.Tickets[len(s.Tickets)-1].Fields = json.RawMessage(`{}`)
-	raw, _ = json.Marshal(s)
-	if _, err := NotesFromSnapshot(raw, notesVersion, "fixture"); err == nil {
-		t.Fatal("conflicting duplicate accepted")
-	}
-	s = noteFixture()
-	s.Version = "260927120000.0.0"
-	raw, _ = json.Marshal(s)
-	if _, err := NotesFromSnapshot(raw, notesVersion, "fixture"); err == nil {
-		t.Fatal("wrong release accepted")
-	}
-	s = noteFixture()
-	s.Tickets = []NoteTicket{}
-	raw, _ = json.Marshal(s)
-	notes, err = NotesFromSnapshot(raw, notesVersion, "fixture")
-	if err != nil || len(notes.Items) != 0 || len(notes.Gaps) != 0 || notes.WrittenAfterRelease {
-		t.Fatal("known empty membership", notes, err)
+	for _, flag := range []string{"hide_from_release_notes", "no_release_needed"} {
+		t.Run(flag, func(t *testing.T) {
+			s := noteFixture()
+			original := s.Tickets[0]
+			hidden := original
+			hidden.ID = "55555555-5555-4555-8555-555555555555"
+			hidden.Key = "TEST-8"
+			hidden.Fields = json.RawMessage(strings.Replace(string(hidden.Fields), `{`, `{"`+flag+`":true,`, 1))
+			missing := original
+			missing.ID = "66666666-6666-4666-8666-666666666666"
+			missing.Key = "TEST-9"
+			missing.Fields = json.RawMessage(`{"pill_en":"No translation"}`)
+			s.Tickets = append(s.Tickets, hidden, missing, original)
+			raw, _ := json.Marshal(s)
+			notes, err := NotesFromSnapshot(raw, notesVersion, "fixture")
+			if err != nil {
+				t.Fatal(err)
+			}
+			if len(notes.Items) != 2 || notes.Hidden != 1 || len(notes.Gaps) != 1 || len(notes.SHA256) != 64 || notes.Items[0].BenefitDE != "Tickets erklären den Nutzen." || notes.Items[1].PillEN != "No translation" || notes.Fallback != "" {
+				t.Fatalf("notes: %+v", notes)
+			}
+			encoded, _ := json.Marshal(notes)
+			if strings.Contains(string(encoded), "TEST-8") {
+				t.Fatal("hidden ticket copied into notes")
+			}
+			unavailable := hidden
+			unavailable.ID = "77777777-7777-4777-8777-777777777777"
+			unavailable.Key = "TEST-10"
+			unavailable.Unavailable = "Member was deleted before capture."
+			s.Tickets = append(s.Tickets, unavailable)
+			raw, _ = json.Marshal(s)
+			notes, err = NotesFromSnapshot(raw, notesVersion, "fixture")
+			if err != nil || notes.Hidden != 2 || len(notes.Gaps) != 1 {
+				t.Fatalf("hidden unavailable: %+v %v", notes, err)
+			}
+			encoded, _ = json.Marshal(notes)
+			if strings.Contains(string(encoded), "TEST-10") {
+				t.Fatal("hidden deleted key copied into notes")
+			}
+			s.Tickets = s.Tickets[:len(s.Tickets)-1]
+			s.Tickets[len(s.Tickets)-1].Fields = json.RawMessage(`{}`)
+			raw, _ = json.Marshal(s)
+			if _, err := NotesFromSnapshot(raw, notesVersion, "fixture"); err == nil {
+				t.Fatal("conflicting duplicate accepted")
+			}
+			s = noteFixture()
+			s.Version = "260927120000.0.0"
+			raw, _ = json.Marshal(s)
+			if _, err := NotesFromSnapshot(raw, notesVersion, "fixture"); err == nil {
+				t.Fatal("wrong release accepted")
+			}
+			s = noteFixture()
+			s.Tickets = []NoteTicket{}
+			raw, _ = json.Marshal(s)
+			notes, err = NotesFromSnapshot(raw, notesVersion, "fixture")
+			if err != nil || len(notes.Items) != 0 || len(notes.Gaps) != 0 || notes.WrittenAfterRelease {
+				t.Fatal("known empty membership", notes, err)
+			}
+
+		})
 	}
 }
 func TestBackfilledSnapshotKeepsTheOriginalReleaseTime(t *testing.T) {

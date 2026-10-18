@@ -19,6 +19,7 @@ import (
 	"time"
 
 	"github.com/inspr-at/paimos/internal/agentd"
+	"github.com/inspr-at/paimos/internal/ownedprocess"
 )
 
 var localToolRE = regexp.MustCompile(`^[A-Za-z0-9_.*:-]+$`)
@@ -63,22 +64,50 @@ func (a *localClaudeAdapter) Probe(ctx context.Context, key string) bool {
 	}
 	probeCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
 	defer cancel()
-	cmd := exec.CommandContext(probeCtx, "claude", "auth", "status", "--json")
+	cmd := exec.Command("claude", "auth", "status", "--json")
 	if home := a.homes[key]; home != "" {
 		cmd.Env = localRunnerEnv(home)
 	}
-	raw, err := cmd.Output()
-	if err != nil || len(raw) > 64<<10 {
+	output := &localProbeOutput{}
+	cmd.Stdout, cmd.Stderr = output, io.Discard
+	if err := ownedprocess.Run(probeCtx, cmd); err != nil || output.overflow {
 		return false
 	}
 	var state struct {
 		LoggedIn bool `json:"loggedIn"`
 	}
-	return json.Unmarshal(raw, &state) == nil && state.LoggedIn
+	return json.Unmarshal(output.data, &state) == nil && state.LoggedIn
 }
 
-func (a *localClaudeAdapter) Start(_ context.Context, request agentd.StartRequest, _ func(agentd.AdapterEvent)) (agentd.Process, error) {
-	if !a.Probe(context.Background(), request.AccountKey) {
+type localProbeOutput struct {
+	data     []byte
+	overflow bool
+}
+
+func (b *localProbeOutput) Write(p []byte) (int, error) {
+	if len(p) > (64<<10)-len(b.data) {
+		b.overflow = true
+		return 0, errors.New("account probe output exceeds bound")
+	}
+	b.data = append(b.data, p...)
+	return len(p), nil
+}
+
+func (a *localClaudeAdapter) Start(parent context.Context, request agentd.StartRequest, _ func(agentd.AdapterEvent)) (agentd.Process, error) {
+	lifetime := request.Lifetime
+	if lifetime == nil {
+		lifetime = parent
+	}
+	ctx, cancel := context.WithTimeout(lifetime, a.maxRun)
+	stopStartup := context.AfterFunc(parent, cancel)
+	defer stopStartup()
+	started := false
+	defer func() {
+		if !started {
+			cancel()
+		}
+	}()
+	if !a.Probe(ctx, request.AccountKey) {
 		return nil, errors.New("Claude account unavailable")
 	}
 	if !a.opts.Yes {
@@ -88,7 +117,6 @@ func (a *localClaudeAdapter) Start(_ context.Context, request agentd.StartReques
 			return nil, errors.New("run declined")
 		}
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), a.maxRun)
 	var command *exec.Cmd
 	if strings.TrimSpace(a.opts.Exec) == "claude" {
 		argv := []string{"-p", "--verbose", "--output-format", "stream-json",
@@ -96,9 +124,9 @@ func (a *localClaudeAdapter) Start(_ context.Context, request agentd.StartReques
 		if a.opts.PermissionMode == "bypassPermissions" {
 			argv = append(argv, "--allow-dangerously-skip-permissions")
 		}
-		command = exec.CommandContext(ctx, "claude", argv...)
+		command = exec.Command("claude", argv...)
 	} else {
-		command = exec.CommandContext(ctx, "sh", "-c", a.opts.Exec)
+		command = exec.Command("sh", "-c", a.opts.Exec)
 	}
 	command.Dir = request.Workspace
 	command.Stdin = strings.NewReader(request.Prompt)
@@ -125,19 +153,23 @@ func (a *localClaudeAdapter) Start(_ context.Context, request agentd.StartReques
 		}
 		command.Env = append(command.Env, "PAIMOS_PROMPT_FILE="+promptFile)
 	}
-	proc := &localRunnerProcess{cmd: command, cancel: cancel, done: make(chan struct{}), promptFile: promptFile,
+	proc := &localRunnerProcess{cmd: command, ctx: ctx, cancel: cancel, done: make(chan struct{}), promptFile: promptFile,
 		testExec: a.opts.TestExec, workspace: request.Workspace, attachLogs: a.opts.AttachLogs,
 		stdout: a.stdout, stderr: a.stderr}
 	proc.lastActivity.Store(time.Now().UnixNano())
 	command.Stdout = &activityWriter{target: a.stdout, log: &proc.log, capture: a.opts.AttachLogs, activity: &proc.lastActivity}
 	command.Stderr = &activityWriter{target: a.stderr, log: &proc.log, capture: a.opts.AttachLogs, activity: &proc.lastActivity}
-	if err := command.Start(); err != nil {
+	owned, err := ownedprocess.Start(ctx, command)
+	if err != nil {
 		if promptFile != "" {
 			_ = os.Remove(promptFile)
 		}
 		cancel()
 		return nil, err
 	}
+	proc.owned = owned
+	started = true
+	go func() { proc.waitErr = proc.run(); close(proc.done) }()
 	if a.idle > 0 {
 		go proc.watchIdle(a.idle)
 	}
@@ -198,6 +230,9 @@ func (w *activityWriter) Write(p []byte) (int, error) {
 
 type localRunnerProcess struct {
 	cmd                             *exec.Cmd
+	owned                           *ownedprocess.Command
+	ctx                             context.Context
+	waitErr                         error
 	cancel                          context.CancelFunc
 	done                            chan struct{}
 	lastActivity                    atomic.Int64
@@ -210,23 +245,30 @@ type localRunnerProcess struct {
 func (p *localRunnerProcess) PID() int { return p.cmd.Process.Pid }
 
 func (p *localRunnerProcess) Wait() error {
-	defer close(p.done)
+	<-p.done
+	return p.waitErr
+}
+
+func (p *localRunnerProcess) run() error {
 	defer p.cancel()
 	defer func() {
 		if p.promptFile != "" {
 			_ = os.Remove(p.promptFile)
 		}
 	}()
-	if err := p.cmd.Wait(); err != nil {
+	if err := p.owned.Wait(); err != nil {
+		return err
+	}
+	if err := p.ctx.Err(); err != nil {
 		return err
 	}
 	if strings.TrimSpace(p.testExec) != "" {
-		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Minute)
+		ctx, cancel := context.WithTimeout(p.ctx, 30*time.Minute)
 		defer cancel()
-		cmd := exec.CommandContext(ctx, "sh", "-c", p.testExec)
+		cmd := exec.Command("sh", "-c", p.testExec)
 		cmd.Dir = p.workspace
 		cmd.Stdout, cmd.Stderr = p.stdout, p.stderr
-		if err := cmd.Run(); err != nil {
+		if err := ownedprocess.Run(ctx, cmd); err != nil {
 			return fmt.Errorf("tests failed: %w", err)
 		}
 	}
@@ -246,9 +288,17 @@ func (p *localRunnerProcess) Control(_ context.Context, _, _ string) error {
 	return agentd.ErrUnsupported
 }
 
-func (p *localRunnerProcess) Stop(_ context.Context) error {
+func (p *localRunnerProcess) Stop(ctx context.Context) error {
 	p.cancel()
-	return nil
+	select {
+	case <-p.done:
+		if errors.Is(p.waitErr, ownedprocess.ErrCleanupUnconfirmed) {
+			return ownedprocess.ErrCleanupUnconfirmed
+		}
+		return nil
+	case <-ctx.Done():
+		return ctx.Err()
+	}
 }
 
 func (p *localRunnerProcess) watchIdle(timeout time.Duration) {

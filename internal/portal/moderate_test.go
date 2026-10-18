@@ -30,7 +30,7 @@ func TestPortalModerationAuthorization(t *testing.T) {
 	feature := insertNode(t, d, tenantA, "PCF-1", "portal_feature", "Deadline radar", "A public summary", "planned", product, `{"internal_note":"SECRET-NOTE"}`)
 	wish := insertNode(t, d, tenantA, "PWS-1", "portal_wish", "Quiet wish", "A bell before opening.", "pending", product, "{}")
 	other := insertNode(t, d, tenantA, "PWS-2", "portal_wish", "Noisy wish", "Leave this one out.", "pending", product, "{}")
-	ticket := insertNode(t, d, tenantA, "TKT-1", "ticket", "Not a wish", "secret", "open", "", "{}")
+	ticket := insertNode(t, d, tenantA, "TKT-1", "work", "Not a wish", "secret", "open", "", "{}")
 	setPortal(t, d, tenantA, true)
 
 	publish := "/api/portal/wishes/" + wish + "/publish"

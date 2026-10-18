@@ -3,12 +3,14 @@ package agentaccounts
 
 import (
 	"encoding/json"
+	"strings"
 	"testing"
 	"time"
 
 	"github.com/inspr-at/paimos/internal/capacity"
 	"github.com/inspr-at/paimos/internal/db"
 	"github.com/inspr-at/paimos/internal/dbtest"
+	"github.com/inspr-at/paimos/internal/httpapi"
 	"github.com/inspr-at/paimos/internal/tenant"
 	"github.com/jackc/pgx/v5"
 )
@@ -22,6 +24,255 @@ func encoded(t *testing.T, v any) string {
 	return string(raw)
 }
 
+// seedExistingSchedule represents a schedule saved by a release before the
+// Sprint/Hold write retirement. Live save assertions use the HTTP handler.
+func seedExistingSchedule(t *testing.T, person tenant.Principal, in scheduleOverride) {
+	t.Helper()
+	key := ""
+	var account any
+	switch in.Scope {
+	case "pool":
+		key = in.Pool
+	case "group":
+		key = in.GroupID
+	case "account":
+		key, account = in.AccountID, in.AccountID
+	}
+	err := db.InTenant(dbtest.Seed(t.Context()), appPool, person.TenantID, func(tx pgx.Tx) error {
+		if in.Scope == "account" {
+			if _, err := tx.Exec(t.Context(), `UPDATE agent_accounts SET capacity_owner=COALESCE(capacity_owner,$2::uuid) WHERE id=$1`, key, person.ID); err != nil {
+				return err
+			}
+		}
+		_, err := tx.Exec(t.Context(), `INSERT INTO account_capacity_schedules(tenant_id,principal_id,scope,scope_key,account_id,schedule) VALUES($1,$2,$3,$4,$5,$6) ON CONFLICT(tenant_id,principal_id,scope,scope_key) DO UPDATE SET schedule=EXCLUDED.schedule`, person.TenantID, person.ID, in.Scope, key, account, encoded(t, in.Schedule))
+		return err
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+}
+
+func storedCapacitySchedule(t *testing.T, mod httpapi.Module, person tenant.Principal, target scheduleOverride) capacity.Schedule {
+	t.Helper()
+	var rows []scheduleOverride
+	callStatus(t, mod, &person, "", "GET", "/api/agent-accounts/capacity/schedule", "", 200, &rows)
+	for _, row := range rows {
+		if row.Scope == target.Scope && row.Pool == target.Pool && row.AccountID == target.AccountID && row.GroupID == target.GroupID {
+			return *row.Schedule
+		}
+	}
+	t.Fatalf("stored schedule missing: %+v", target)
+	return capacity.Schedule{}
+}
+
+// An account save can copy the resolved user, pool or group schedule, as the
+// Settings action to use suggested work hours does. Other scopes use their
+// own stored entry, as the pool Keep for you action does.
+func legacyScheduleTarget(t *testing.T, scope string) (limitFixture, scheduleOverride, scheduleOverride) {
+	t.Helper()
+	f := limitWorld(t, "legacy-schedule", 3)
+	source := scheduleOverride{Scope: strings.TrimPrefix(scope, "account-from-")}
+	switch source.Scope {
+	case "pool":
+		source.Pool = "codex"
+	case "group":
+		var group AccountGroup
+		callStatus(t, f.mod, &f.admin, "", "POST", "/api/agent-accounts/groups", encoded(t, map[string]any{
+			"harness": "codex", "name": "Legacy", "account_ids": []string{f.account.ID},
+		}), 201, &group)
+		source.GroupID = group.ID
+	case "account":
+		source.AccountID = f.account.ID
+	}
+	target := source
+	if source.Scope != "account" {
+		callStatus(t, f.mod, &f.admin, "", "PUT", "/api/agent-accounts/capacity/schedule", encoded(t, scheduleOverride{Scope: "account", AccountID: f.account.ID}), 204, nil)
+	}
+	if strings.HasPrefix(scope, "account-from-") {
+		target = scheduleOverride{Scope: "account", AccountID: f.account.ID}
+	}
+	return f, source, target
+}
+
+// AEON-1177 M1: saving reserve/work-hour changes may round-trip a legacy
+// override, but must keep its exact deadline, including an undated Hold.
+func TestRetiredCapacityOverridesRoundTripUnchanged(t *testing.T) {
+	now := time.Date(2026, 10, 11, 12, 0, 0, 0, time.UTC)
+	for _, scope := range []string{"user", "pool", "group", "account", "account-from-user", "account-from-pool", "account-from-group"} {
+		t.Run(scope, func(t *testing.T) {
+			f, source, target := legacyScheduleTarget(t, scope)
+			for _, kind := range []string{"sprint", "hold"} {
+				for _, dated := range []bool{true, false} {
+					s := capacity.DefaultSchedule("Europe/Vienna")
+					s.Override = kind
+					if dated {
+						until := now.Add(90 * time.Minute)
+						s.OverrideUntil = &until
+					}
+					source.Schedule = &s
+					seedExistingSchedule(t, f.admin, source)
+					next := s
+					next.Reserve, next.ReservePercent = capacity.ReserveFixed, 40
+					next.Week = capacity.Preset(5)
+					next.Week[0].Start, next.Week[0].End = 9, 17
+					target.Schedule = &next
+					status, raw := callAt(t, f.mod, &f.admin, "", "PUT", "/api/agent-accounts/capacity/schedule", encoded(t, target), now)
+					if status != 204 {
+						t.Fatalf("%s dated=%t round-trip: status %d: %s", kind, dated, status, raw)
+					}
+					if got := storedCapacitySchedule(t, f.mod, f.admin, target); encoded(t, got) != encoded(t, next) {
+						t.Fatalf("%s dated=%t changed deadline or lost edits: got %s, want %s", kind, dated, encoded(t, got), encoded(t, next))
+					}
+					if source.Scope != target.Scope {
+						if got := storedCapacitySchedule(t, f.mod, f.admin, source); encoded(t, got) != encoded(t, s) {
+							t.Fatal("account save changed its inherited source")
+						}
+						cleared := target
+						cleared.Schedule = nil
+						callStatus(t, f.mod, &f.admin, "", "PUT", "/api/agent-accounts/capacity/schedule", encoded(t, cleared), 204, nil)
+					}
+				}
+			}
+		})
+	}
+}
+
+// AEON-1177 M1: expired raw overrides returned by schedule resolution cannot
+// permanently block work-hour saves. Expiry includes the exact deadline.
+func TestRetiredCapacityOverridesDropExpiredOnSave(t *testing.T) {
+	now := time.Date(2026, 10, 11, 12, 0, 0, 0, time.UTC)
+	for _, scope := range []string{"user", "pool", "group", "account", "account-from-user", "account-from-pool", "account-from-group"} {
+		t.Run(scope, func(t *testing.T) {
+			f, source, target := legacyScheduleTarget(t, scope)
+			for _, kind := range []string{"sprint", "hold"} {
+				for _, elapsed := range []time.Duration{0, time.Hour} {
+					until := now.Add(-elapsed)
+					s := capacity.DefaultSchedule("Europe/Vienna")
+					s.Override, s.OverrideUntil = kind, &until
+					source.Schedule = &s
+					seedExistingSchedule(t, f.admin, source)
+					next := s
+					next.Week = capacity.Preset(5)
+					next.Week[0].Start, next.Week[0].End = 9, 17
+					target.Schedule = &next
+					status, raw := callAt(t, f.mod, &f.admin, "", "PUT", "/api/agent-accounts/capacity/schedule", encoded(t, target), now)
+					if status != 204 {
+						t.Fatalf("%s elapsed=%s expired save: status %d: %s", kind, elapsed, status, raw)
+					}
+					next.Override, next.OverrideUntil = "", nil
+					if got := storedCapacitySchedule(t, f.mod, f.admin, target); encoded(t, got) != encoded(t, next) {
+						t.Fatalf("expired override survived or lost work hours: got %s, want %s", encoded(t, got), encoded(t, next))
+					}
+					if source.Scope != target.Scope {
+						if got := storedCapacitySchedule(t, f.mod, f.admin, source); encoded(t, got) != encoded(t, s) {
+							t.Fatal("account save changed its expired inherited source")
+						}
+						cleared := target
+						cleared.Schedule = nil
+						callStatus(t, f.mod, &f.admin, "", "PUT", "/api/agent-accounts/capacity/schedule", encoded(t, cleared), 204, nil)
+					}
+				}
+			}
+		})
+	}
+}
+
+// AEON-1177: all schedule scopes reject creating or changing Sprint/Hold;
+// unchanged active overrides can round-trip, and ending one stays possible.
+func TestRetiredCapacityOverridesCanStillEnd(t *testing.T) {
+	f := limitWorld(t, "override-retired", 3)
+	path := "/api/agent-accounts/capacity/schedule"
+	var group AccountGroup
+	callStatus(t, f.mod, &f.admin, "", "POST", "/api/agent-accounts/groups", `{"harness":"codex","name":"Legacy"}`, 201, &group)
+	snapshot := func() string {
+		t.Helper()
+		var rows []scheduleOverride
+		callStatus(t, f.mod, &f.admin, "", "GET", path, "", 200, &rows)
+		return encoded(t, rows)
+	}
+	reject := func(in scheduleOverride) {
+		t.Helper()
+		before := snapshot()
+		var out struct{ Error, Code string }
+		callStatus(t, f.mod, &f.admin, "", "PUT", path, encoded(t, in), 400, &out)
+		if out.Code != "override_retired" || out.Error == "" {
+			t.Fatalf("%s %s: %+v", in.Scope, in.Schedule.Override, out)
+		}
+		if after := snapshot(); after != before {
+			t.Fatalf("rejected override changed schedules: %s -> %s", before, after)
+		}
+	}
+	for _, target := range []scheduleOverride{
+		{Scope: "user"}, {Scope: "pool", Pool: "codex"},
+		{Scope: "account", AccountID: f.account.ID}, {Scope: "group", GroupID: group.ID},
+	} {
+		for _, kind := range []string{"sprint", "hold"} {
+			s := capacity.DefaultSchedule("Europe/Vienna")
+			s.Override = kind
+			target.Schedule = &s
+			reject(target)
+			until := time.Now().UTC().Add(time.Hour).Truncate(time.Second)
+			s.OverrideUntil = &until
+			reject(target)
+			seedExistingSchedule(t, f.admin, target)
+			callStatus(t, f.mod, &f.admin, "", "PUT", path, encoded(t, target), 204, nil)
+			if got := storedCapacitySchedule(t, f.mod, f.admin, target); encoded(t, got) != encoded(t, s) {
+				t.Fatal("replay changed the existing override or deadline")
+			}
+			later := until.Add(time.Hour)
+			s.OverrideUntil = &later
+			reject(target) // extension also cannot change the stored deadline
+			earlier := until.Add(-time.Minute)
+			s.OverrideUntil = &earlier
+			reject(target)
+			s.OverrideUntil = nil
+			reject(target) // dropping the deadline would make it indefinite
+			s.OverrideUntil = &until
+			s.Override = "hold"
+			if kind == "hold" {
+				s.Override = "sprint"
+			}
+			reject(target)
+			s.Override = ""
+			callStatus(t, f.mod, &f.admin, "", "PUT", path, encoded(t, target), 204, nil)
+			var rows []scheduleOverride
+			callStatus(t, f.mod, &f.admin, "", "GET", path, "", 200, &rows)
+			found := false
+			for _, row := range rows {
+				if row.Scope == target.Scope && row.Pool == target.Pool && row.AccountID == target.AccountID && row.GroupID == target.GroupID {
+					found = true
+					if row.Schedule.Override != "" || row.Schedule.OverrideUntil != nil {
+						t.Fatalf("clear did not end override: %+v", row)
+					}
+				}
+			}
+			if !found {
+				t.Fatal("clear removed the base schedule")
+			}
+			s.Override, s.OverrideUntil = kind, &until
+			seedExistingSchedule(t, f.admin, target)
+			target.Schedule = nil
+			callStatus(t, f.mod, &f.admin, "", "PUT", path, encoded(t, target), 204, nil)
+			callStatus(t, f.mod, &f.admin, "", "GET", path, "", 200, &rows)
+			for _, row := range rows {
+				if row.Scope == target.Scope && row.Pool == target.Pool && row.AccountID == target.AccountID && row.GroupID == target.GroupID {
+					t.Fatal("null schedule did not remove legacy override")
+				}
+			}
+		}
+	}
+	s := capacity.DefaultSchedule("Europe/Vienna")
+	s.Override = "hold"
+	in := scheduleOverride{Scope: "user", Schedule: &s}
+	callStatus(t, f.mod, nil, "", "PUT", path, encoded(t, in), 401, nil)
+	callStatus(t, f.mod, &f.runner, f.token, "PUT", path, encoded(t, in), 403, nil)
+	// Away and ordinary schedules continue to use the existing validation.
+	s.Override = "away"
+	until := time.Now().UTC().Add(time.Hour)
+	s.OverrideUntil = &until
+	callStatus(t, f.mod, &f.admin, "", "PUT", path, encoded(t, in), 204, nil)
+}
+
 func TestCapacityIngestRouteResetAndRLS(t *testing.T) {
 	reset(t)
 	admin := makePrincipal(t, "capacity", "person", "Ada", []string{"admin"})
@@ -33,6 +284,7 @@ func TestCapacityIngestRouteResetAndRLS(t *testing.T) {
 	mod := accountsMod()
 	var account Account
 	callStatus(t, mod, &runner, token, "POST", "/api/agent-accounts", `{"account_key":"quota","harness":"codex","daemon_id":"daemon-a","label":"Codex","max_parallel_runs":2}`, 201, &account)
+	ownFixtureAccount(t, admin, &account)
 	callStatus(t, mod, &runner, token, "POST", "/api/agent-accounts/"+account.ID+"/probe", `{"daemon_id":"daemon-a","daemon_generation":"g1","available":true}`, 200, nil)
 	now := time.Now().UTC().Add(-time.Second).Truncate(time.Microsecond)
 	r := capacity.Reading{WindowKind: "5h", Bucket: "codex", WindowMinutes: 300, UsedPercent: 41.2, ResetsAt: now.Add(time.Hour), ReadAt: now, Source: "harness", Phase: "start"}
@@ -72,7 +324,7 @@ func TestCapacityIngestRouteResetAndRLS(t *testing.T) {
 	}
 	schedule := capacity.DefaultSchedule()
 	schedule.Override = "sprint"
-	callStatus(t, mod, &admin, "", "PUT", "/api/agent-accounts/capacity/schedule", encoded(t, scheduleOverride{"account", "", account.ID, &schedule, false, ""}), 204, nil)
+	seedExistingSchedule(t, admin, scheduleOverride{"account", "", account.ID, &schedule, false, ""})
 	run := insertRun(t, admin, runner, profile)
 	route := mustRoute(t, mod, runner, token, run, "daemon-a", []Account{account}, map[string]int64{"requests": 1})
 	if len(route.Reservations) != 1 || route.Reservations[0].Unit != "percent" {
@@ -160,8 +412,11 @@ func TestCapacityStaleManualOverrideAndSchedules(t *testing.T) {
 	foreign := makePrincipal(t, "schedule-other", "person", "Other", []string{"admin"})
 	token := issueKey(t, runner, []string{"account.manage", "account.probe"})
 	mod := accountsMod()
+	// Registration grants existing models, as the real enrollment path does.
+	codexProfile(t, admin)
 	var a Account
 	callStatus(t, mod, &runner, token, "POST", "/api/agent-accounts", `{"account_key":"quota","harness":"codex","daemon_id":"daemon-a","label":"Codex"}`, 201, &a)
+	ownFixtureAccount(t, admin, &a)
 	callStatus(t, mod, &runner, token, "POST", "/api/agent-accounts/"+a.ID+"/probe", `{"daemon_id":"daemon-a","daemon_generation":"g1","available":true}`, 200, nil)
 	// The stale reading stays dispatchable inside the default 08:00–22:00 band.
 	// A wall clock outside that band waits on the schedule instead.
@@ -221,7 +476,8 @@ func TestCapacityStaleManualOverrideAndSchedules(t *testing.T) {
 		}
 	}
 	check(admin, 6)
-	check(reader, 5)
+	// Other administrators receive a neutral, explicitly redacted schedule.
+	check(reader, 7)
 	save(admin, "account", "", a.ID, nil, 204)
 	check(admin, 4)
 	save(admin, "pool", "codex", "", nil, 204)
@@ -296,9 +552,15 @@ func testCapacityActiveWindowSelection(t *testing.T, now time.Time) {
 	if got := activeWindows([]Window{denied, manual}, now); len(got) != 0 {
 		t.Fatal("manual bypassed vendor denial")
 	}
-	denied.EndsAt = now
-	if got := activeWindows([]Window{denied, manual}, now); len(got) != 0 {
-		t.Fatal("reset bypassed fresh vendor denial")
+	expiredDenial := denied
+	expiredDenial.ID = "expired-weekly"
+	expiredDenial.capacityKind = "weekly"
+	expiredDenial.EndsAt = now
+	if got := activeWindows([]Window{expiredDenial, manual}, now); len(got) != 1 || got[0].ID != manual.ID {
+		t.Fatal("own reset retained an expired vendor denial", got)
+	}
+	if got := activeWindows([]Window{expiredDenial, fresh}, now); len(got) != 1 || got[0].ID != fresh.ID {
+		t.Fatal("expired denial masked the current reading", got)
 	}
 	// A manual window caps on top of the reading (AEON-384): both bind.
 	got := activeWindows([]Window{fresh, manual}, now)
@@ -318,6 +580,7 @@ func TestCapacityPacingAtNightAndDay(t *testing.T) {
 	mod := accountsMod()
 	var account Account
 	callStatus(t, mod, &runner, token, "POST", "/api/agent-accounts", `{"account_key":"clock","harness":"codex","daemon_id":"daemon-a","label":"Clock"}`, 201, &account)
+	ownFixtureAccount(t, admin, &account)
 	for _, date := range []struct {
 		month time.Month
 		day   int
@@ -375,7 +638,7 @@ func workDays(s capacity.Schedule) int {
 	return n
 }
 
-func TestCapacityEnforcesSchedulesSnapshotsAndSingleRefresh(t *testing.T) {
+func TestCapacityEnforcesSchedulesSnapshotsAndResourceStops(t *testing.T) {
 	reset(t)
 	admin := makePrincipal(t, "enforced-capacity", "person", "Ada", []string{"admin"})
 	runner := addPrincipal(t, admin.TenantID, "agent", "runner", nil)
@@ -384,6 +647,7 @@ func TestCapacityEnforcesSchedulesSnapshotsAndSingleRefresh(t *testing.T) {
 	mod := accountsMod()
 	var a Account
 	callStatus(t, mod, &runner, token, "POST", "/api/agent-accounts", `{"account_key":"quota","harness":"codex","daemon_id":"daemon-a","label":"Quota","max_parallel_runs":3}`, 201, &a)
+	ownFixtureAccount(t, admin, &a)
 	callStatus(t, mod, &runner, token, "POST", "/api/agent-accounts/"+a.ID+"/probe", `{"daemon_id":"daemon-a","daemon_generation":"g1","available":true}`, 200, nil)
 	path := "/api/agent-accounts/" + a.ID + "/readings"
 	report := func(rs ...capacity.Reading) {
@@ -402,7 +666,11 @@ func TestCapacityEnforcesSchedulesSnapshotsAndSingleRefresh(t *testing.T) {
 		if scope == "pool" {
 			pool, id = "codex", ""
 		}
-		callStatus(t, mod, &admin, "", "PUT", "/api/agent-accounts/capacity/schedule", encoded(t, scheduleOverride{scope, pool, id, &schedule, false, ""}), 204, nil)
+		if override != "" {
+			seedExistingSchedule(t, admin, scheduleOverride{scope, pool, id, &schedule, false, ""})
+		} else {
+			callStatus(t, mod, &admin, "", "PUT", "/api/agent-accounts/capacity/schedule", encoded(t, scheduleOverride{scope, pool, id, &schedule, false, ""}), 204, nil)
+		}
 	}
 	route := func(status int) string {
 		t.Helper()
@@ -445,27 +713,35 @@ func TestCapacityEnforcesSchedulesSnapshotsAndSingleRefresh(t *testing.T) {
 	route(409)
 	short.ReadAt = now.Add(200 * time.Millisecond)
 	report(short)
-	run = route(200)
-	release(run) // Missing weekly bucket no longer constrains this source.
+	route(409) // A missing weekly bucket cannot erase its full reading.
 	if n := scalar(t, admin, `SELECT count(*) FROM account_allowance_windows WHERE account_id=$1 AND capacity_retired`, a.ID); n != 1 {
 		t.Fatal("missing bucket not retired", n)
 	}
-	// Out-of-order history cannot resurrect a missing bucket.
+	// Out-of-order history cannot clear the still-full bucket.
 	weekly.ReadAt = now.Add(150 * time.Millisecond)
+	report(weekly)
+	route(409)
+	weekly.ReadAt = now.Add(250 * time.Millisecond)
+	weekly.UsedPercent = 10
 	report(weekly)
 	run = route(200)
 	release(run)
 	// Retire the short window and introduce an older observation from a different source.
-	// Its first refresh job is bounded to one reservation even with 3 parallel slots.
+	// Stale room creates no quota fence; only the actual three slots bind.
 	stale := short
 	stale.Source = "agentd"
 	stale.ReadAt = now.Add(-20 * time.Minute)
 	stale.Bucket = "refresh"
 	report(stale)
 	run = route(200)
+	other := route(200)
+	third := route(200)
 	route(409)
 	release(run)
-	route(409)
+	release(other)
+	release(third)
+	run = route(200)
+	release(run)
 	stale.ReadAt = now.Add(300 * time.Millisecond)
 	report(stale)
 	run = route(200)
@@ -533,7 +809,7 @@ func TestRoutingInheritsOwnerScheduleWithoutAccountOverride(t *testing.T) {
 	check("Pacific/Auckland", "")
 	user := capacity.DefaultSchedule("Europe/Vienna")
 	user.Override = "hold"
-	callStatus(t, mod, &person, "", "PUT", "/api/agent-accounts/capacity/schedule", encoded(t, scheduleOverride{"user", "", "", &user, false, ""}), 204, nil)
+	seedExistingSchedule(t, person, scheduleOverride{"user", "", "", &user, false, ""})
 	check("Europe/Vienna", "hold")
 	pool := capacity.DefaultSchedule("America/New_York")
 	callStatus(t, mod, &person, "", "PUT", "/api/agent-accounts/capacity/schedule", encoded(t, scheduleOverride{"pool", "codex", "", &pool, false, ""}), 204, nil)
@@ -545,7 +821,10 @@ func TestRoutingInheritsOwnerScheduleWithoutAccountOverride(t *testing.T) {
 	other := addPrincipal(t, person.TenantID, "person", "Other", []string{"admin"})
 	issueKey(t, runner, []string{"account.read"})
 	err = db.InTenant(dbtest.Seed(t.Context()), appPool, person.TenantID, func(tx pgx.Tx) error {
-		_, err := tx.Exec(t.Context(), `UPDATE agent_keys SET created_by_principal_id=$1 WHERE principal_id=$2 AND created_by_principal_id IS NULL`, other.ID, runner.ID)
+		tag, err := tx.Exec(t.Context(), `UPDATE agent_keys SET created_by_principal_id=$1 WHERE principal_id=$2 AND scopes=ARRAY['account.read']`, other.ID, runner.ID)
+		if err == nil && tag.RowsAffected() != 1 {
+			t.Fatalf("second creator assigned to %d keys, want 1", tag.RowsAffected())
+		}
 		return err
 	})
 	if err != nil {
@@ -553,12 +832,13 @@ func TestRoutingInheritsOwnerScheduleWithoutAccountOverride(t *testing.T) {
 	}
 	check("UTC", "")
 	// An explicitly saved owner remains authoritative even with multiple creators.
+	user.Override = ""
 	callStatus(t, mod, &person, "", "PUT", "/api/agent-accounts/capacity/schedule", encoded(t, scheduleOverride{"account", "", account.ID, &user, false, ""}), 204, nil)
 	callStatus(t, mod, &person, "", "PUT", "/api/agent-accounts/capacity/schedule", encoded(t, scheduleOverride{"account", "", account.ID, nil, false, ""}), 204, nil)
 	check("America/New_York", "")
 }
 
-func TestExpiredCapacityGetsOneProvisionalRefresh(t *testing.T) {
+func TestExpiredCapacityHasNoStartFence(t *testing.T) {
 	reset(t)
 	person := makePrincipal(t, "expired-capacity", "person", "Ada", []string{"admin"})
 	runner := addPrincipal(t, person.TenantID, "agent", "runner", nil)
@@ -567,6 +847,7 @@ func TestExpiredCapacityGetsOneProvisionalRefresh(t *testing.T) {
 	mod := accountsMod()
 	var a Account
 	callStatus(t, mod, &runner, token, "POST", "/api/agent-accounts", `{"account_key":"expired","harness":"codex","daemon_id":"daemon-a","label":"Expired","max_parallel_runs":3}`, 201, &a)
+	ownFixtureAccount(t, person, &a)
 	callStatus(t, mod, &runner, token, "POST", "/api/agent-accounts/"+a.ID+"/probe", `{"daemon_id":"daemon-a","daemon_generation":"g1","available":true}`, 200, nil)
 	s := capacity.DefaultSchedule()
 	s.Week = capacity.Preset(7)
@@ -587,7 +868,7 @@ func TestExpiredCapacityGetsOneProvisionalRefresh(t *testing.T) {
 	}
 	second := insertRun(t, person, runner, profile)
 	body := encoded(t, map[string]any{"run_id": second, "daemon_id": "daemon-a", "account_ids": []string{a.ID}, "estimated_units": map[string]int64{"requests": 1}})
-	callStatus(t, mod, &runner, token, "POST", "/api/agent-accounts/route", body, 409, nil)
+	callStatus(t, mod, &runner, token, "POST", "/api/agent-accounts/route", body, 200, nil)
 	reading.ReadAt = now
 	reading.ResetsAt = now.Add(time.Hour)
 	reading.UsedPercent = 1
@@ -603,6 +884,7 @@ func TestCapacityPreviewPacesDraftWithoutSaving(t *testing.T) {
 	mod := accountsMod()
 	var a Account
 	callStatus(t, mod, &runner, token, "POST", "/api/agent-accounts", `{"account_key":"quota","harness":"codex","daemon_id":"daemon-a","label":"Codex"}`, 201, &a)
+	ownFixtureAccount(t, admin, &a)
 	now := time.Now().UTC()
 	r := capacity.Reading{WindowKind: "weekly", WindowMinutes: 7 * 24 * 60, UsedPercent: 40, ResetsAt: now.Add(72 * time.Hour), ReadAt: now.Add(-time.Minute), Source: "harness"}
 	callStatus(t, mod, &runner, token, "POST", "/api/agent-accounts/"+a.ID+"/readings", encoded(t, readingsWrite{[]capacity.Reading{r}}), 204, nil)
@@ -611,7 +893,7 @@ func TestCapacityPreviewPacesDraftWithoutSaving(t *testing.T) {
 	callStatus(t, mod, &admin, "", "PUT", "/api/agent-accounts/capacity/schedule", encoded(t, scheduleOverride{"user", "", "", &saved, false, ""}), 204, nil)
 	hold := saved
 	hold.Override = "hold"
-	callStatus(t, mod, &admin, "", "PUT", "/api/agent-accounts/capacity/schedule", encoded(t, scheduleOverride{"pool", "codex", "", &hold, false, ""}), 204, nil)
+	seedExistingSchedule(t, admin, scheduleOverride{"pool", "codex", "", &hold, false, ""})
 
 	draft := capacity.DefaultSchedule("Europe/Vienna")
 	for i := range draft.Week {

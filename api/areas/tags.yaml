@@ -1,0 +1,39 @@
+# SPDX-License-Identifier: AGPL-3.0-only
+# aeon:owner internal/nodes
+paths:
+  /tags/{tagId}:
+    parameters:
+      - {name: tagId, in: path, required: true, schema: {type: string, format: uuid}}
+    patch:
+      operationId: updateTagAssignments
+      description: Atomically update a tag and replace its old name in every live assigned node in the tenant. Each changed node and the tag write an event in the same transaction.
+      security: *auth
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/TagPatch'}
+      responses:
+        '200': {$ref: '#/components/responses/Node'}
+        '400': {$ref: '#/components/responses/Error'}
+        '404': {$ref: '#/components/responses/Error'}
+        '409': {$ref: '#/components/responses/Error'}
+    delete:
+      operationId: deleteTagAssignments
+      description: Atomically remove a tag name from every live assigned node and soft-delete the tag. Each changed node and the tag write an event in the same transaction.
+      security: *auth
+      responses:
+        '204': {description: Tag deleted and assignments removed}
+        '400': {$ref: '#/components/responses/Error'}
+        '404': {$ref: '#/components/responses/Error'}
+        '409': {$ref: '#/components/responses/Error'}
+components:
+  schemas:
+    TagPatch:
+      type: object
+      minProperties: 1
+      additionalProperties: false
+      properties:
+        name: {type: string, minLength: 1}
+        color: {type: string, enum: [gray, slate, blue, indigo, purple, pink, red, orange, yellow, green, teal, cyan]}
+        description: {type: string}

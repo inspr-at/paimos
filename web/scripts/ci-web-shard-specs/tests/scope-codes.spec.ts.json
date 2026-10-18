@@ -1,0 +1,22 @@
+{
+  "group": "access-dialogs",
+  "nightlyTiming": {
+    "seconds": 40.911,
+    "selectedTests": 12
+  },
+  "spec": {
+    "file": "tests/scope-codes.spec.ts",
+    "listedTests": 12,
+    "tierTiming": {
+      "caseSeconds": {
+        "max": 4.431,
+        "median": 3.211,
+        "min": 2.603
+      },
+      "seconds": 40.911,
+      "selectedTests": 12
+    },
+    "weightSeconds": 31.83871,
+    "weightSource": "web-8"
+  }
+}

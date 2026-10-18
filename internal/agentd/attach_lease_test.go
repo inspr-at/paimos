@@ -42,7 +42,7 @@ func TestAttachModesIdentityAndLease(t *testing.T) {
 				m, err := NewAttachManager(AttachConfig{Origin: "https://paired.test", ComputerID: "11111111-1111-4111-8111-111111111111", Host: "fixture", Workspace: root, Executables: map[string]string{"codex": exe}, Exchange: func(_ context.Context, in attachwatch.DeviceRequest) (attachwatch.View, error) {
 					sent = append(sent, in)
 					if offline {
-						return attachwatch.View{}, errors.New("offline")
+						return attachwatch.View{}, ErrAttachExchange
 					}
 					state := "pending"
 					if in.Operation == "poll" {

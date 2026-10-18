@@ -20,6 +20,7 @@ const BaseURL = "https://openrouter.ai/api/v1"
 
 var ErrUnavailable = errors.New("OpenRouter check unavailable; retry locally")
 var ErrKey = errors.New("OpenRouter key was not accepted; check the key locally")
+var ErrProfile = errors.New("OpenRouter local profile unavailable")
 var slugRE = regexp.MustCompile(`^[a-zA-Z0-9][a-zA-Z0-9._-]*/[a-zA-Z0-9][a-zA-Z0-9._-]*(?::[a-zA-Z0-9][a-zA-Z0-9._-]*)?$`)
 var keyRE = regexp.MustCompile(`^[A-Za-z0-9_-]+$`)
 var nativeRE = regexp.MustCompile(`^[a-zA-Z0-9][a-zA-Z0-9._:/-]*$`)
@@ -88,6 +89,19 @@ type Credits struct {
 	Remaining  *float64  `json:"remaining"`
 }
 
+// KeyRemaining describes only the key cap. A declared zero cap cannot allow
+// work even when limit_remaining was omitted; a null cap leaves balance unknown.
+func (c Credits) KeyRemaining() *float64 {
+	if c.Limit == nil {
+		return nil
+	}
+	if *c.Limit == 0 {
+		zero := 0.0
+		return &zero
+	}
+	return c.Remaining
+}
+
 func (c Credits) Valid() bool {
 	if c.ObservedAt.IsZero() {
 		return false
@@ -100,7 +114,7 @@ func (c Credits) Valid() bool {
 	return true
 }
 func (c Client) CheckKey(ctx context.Context, key string) (*Credits, error) {
-	if len(key) < 8 || len(key) > 1024 || !keyRE.MatchString(key) {
+	if !ValidKey(key) {
 		return nil, ErrKey
 	}
 	var body struct {
@@ -117,11 +131,17 @@ func (c Client) CheckKey(ctx context.Context, key string) (*Credits, error) {
 		return nil, ErrUnavailable
 	}
 	out := &Credits{ObservedAt: time.Now().UTC(), Usage: body.Data.Usage, Limit: body.Data.Limit, Remaining: body.Data.Remaining}
+	// /key describes a key cap, never the account's total balance. A null cap
+	// has no measurable remaining credit, even if a stray field was returned.
+	out.Remaining = out.KeyRemaining()
 	if !out.Valid() {
 		return nil, ErrUnavailable
 	}
 	return out, nil
 }
+
+// ValidKey checks local syntax only; it makes no claim about provider acceptance.
+func ValidKey(key string) bool { return len(key) >= 8 && len(key) <= 1024 && keyRE.MatchString(key) }
 
 type Catalog struct {
 	Client  Client

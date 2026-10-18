@@ -1,16 +1,56 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // Ticket keys in the release history (AEON-173): real links to the ticket's own
-// page, a plain click opens the ticket in the app's side panel beside the
-// history, keys this workspace does not have stay plain text.
+// page, a plain click opens the ticket as an overlay on the release sheet
+// (AEON-1326: the article does not move), keys this workspace does not have
+// stay plain text.
 import { test, expect, type Page } from '@playwright/test'
 import AxeBuilder from '@axe-core/playwright'
 import { fixtures, mockWork, watchErrors } from './work-fixtures'
 import { mockReleases, releaseHistory } from './releases-fixtures'
+import { controlStability } from './control-stability'
 
 const sheet = (page: Page) => page.getByRole('dialog', { name: 'PAIMOS AEON releases' })
 const panel = (page: Page) => sheet(page).getByRole('complementary', { name: 'Ticket details' })
-const chips = (page: Page) => sheet(page).locator('.detail .tickets')
+const chips = (page: Page) => sheet(page).locator('.detail .changes')
 const TITLE = 'Connect Hetzner Cloud for managed provisioning'
+
+test('AEON-1195: focus during ticket lookup keeps the panel controls and resolves the ticket', async ({ page }, info) => {
+  const data = fixtures()
+  data.nodes.find(node => node.key === 'PHAROS-11')!.title = 'Verwaltete Bereitstellung mit Hetzner Cloud zuverlässig verbinden'
+  await mockWork(page, data)
+  const dock = page.getByRole('complementary', { name: 'Ticket details' })
+  for (const width of [390, 1024, 1440]) for (const colorScheme of ['light', 'dark'] as const) {
+    await page.setViewportSize({ width, height: 900 })
+    await page.emulateMedia({ colorScheme })
+    let release!: () => void
+    const held = new Promise<void>(done => { release = done })
+    let lookups = 0
+    const holdLookup = async (route: import('@playwright/test').Route) => {
+      lookups++
+      await held
+      await route.fallback()
+    }
+    await page.route('**/api/nodes/lookup**', holdLookup)
+    try {
+      await page.goto('/?peek=PHAROS-11')
+      await expect(dock.getByRole('status', { name: 'Loading ticket' })).toBeVisible()
+      await expect.poll(() => lookups).toBeGreaterThan(0)
+      const before = lookups
+      const guard = await controlStability(page, { close: dock.getByRole('button', { name: 'Close ticket details' }) })
+      await guard.check(async () => {
+        await page.evaluate(() => window.dispatchEvent(new Event('focus')))
+        await expect.poll(() => lookups).toBeGreaterThan(before)
+        await expect(dock.getByRole('status', { name: 'Loading ticket' })).toBeVisible()
+      })
+      release()
+      await expect(dock.getByRole('heading', { name: data.nodes.find(node => node.key === 'PHAROS-11')!.title })).toBeVisible()
+      await expect(dock.getByRole('heading', { name: 'This ticket could not be opened' })).toHaveCount(0)
+      await guard.check(async () => { await page.evaluate(() => window.dispatchEvent(new Event('focus'))) })
+      guard.done()
+      await dock.screenshot({ path: info.outputPath(`aeon-1195-ticket-focus-${width}-${colorScheme}.png`) })
+    } finally { release(); await page.unroute('**/api/nodes/lookup**', holdLookup) }
+  }
+})
 
 // The second release names AEON-74 (no such ticket here) and PHAROS-11 (a ticket here).
 async function open(page: Page, data = fixtures()) {
@@ -35,17 +75,32 @@ test('a ticket key opens the ticket beside the history, with one lookup for the 
   expect(lookups).toHaveLength(1)
   expect(lookups[0].query.get('keys')!.split(',').sort()).toEqual(['AEON-74', 'PHAROS-11'])
 
-  await chip.click()
-  await expect(panel(page).getByRole('heading', { name: TITLE })).toBeVisible()
+  // Opening the key can scroll the release. Measure like the stability guard
+  // so that scroll is not a move, and a real shrink still fails.
+  const article = sheet(page).locator('article.detail')
+  const guard = await controlStability(page, { releaseArticle: article })
+  await guard.check(async () => {
+    await chip.click()
+    await expect(panel(page).getByRole('heading', { name: TITLE })).toBeVisible()
+  })
+  guard.done()
   await expect(panel(page).getByRole('button', { name: /Status: In progress/ })).toBeVisible()
   await expect(chip).toHaveAttribute('aria-current', 'true')
-  // The history stays: same address, the list and the release beside the ticket.
+  // The history stays on the same address. The ticket overlays the release
+  // (AEON-1326): the article's box does not move, and the panel sits inside
+  // the sheet's right edge, over the article.
   await expect(page).toHaveURL(`/releases/${history.releases[1].version}`)
   await expect(sheet(page).getByRole('grid', { name: 'Releases, newest first' })).toBeVisible()
-  const detail = (await sheet(page).locator('.detail').boundingBox())!
+  const after = (await article.boundingBox())!
   const aside = (await panel(page).boundingBox())!
-  expect(aside.x).toBeGreaterThanOrEqual(detail.x + detail.width)
-  expect(aside.x + aside.width).toBeLessThanOrEqual(1440)
+  const frame = (await sheet(page).boundingBox())!
+  expect(aside.width).toBeGreaterThan(0)
+  expect(aside.x).toBeGreaterThanOrEqual(frame.x)
+  expect(aside.y).toBeGreaterThanOrEqual(frame.y)
+  expect(aside.x + aside.width).toBeLessThanOrEqual(frame.x + frame.width + 0.5)
+  expect(aside.y + aside.height).toBeLessThanOrEqual(frame.y + frame.height + 0.5)
+  expect(aside.x).toBeGreaterThan(after.x)
+  expect(aside.x).toBeLessThan(after.x + after.width - 1)
 
   // The panel's menus work inside the history (they live in its top layer).
   await panel(page).getByRole('button', { name: 'More actions' }).click()
@@ -74,8 +129,11 @@ test('a modified click keeps the link: the ticket opens in a new tab, not the pa
 test('keys this workspace does not have stay plain text', async ({ page }) => {
   const { history } = await open(page)
   const plain = chips(page).getByText('AEON-74', { exact: true })
-  await expect(plain).toHaveJSProperty('tagName', 'SPAN')
-  await expect(plain).toHaveAttribute('data-tip', 'AEON-74 is not a ticket in this AEON workspace')
+  await expect(plain).toHaveCount(2)
+  for (const key of await plain.all()) {
+    await expect(key).toHaveJSProperty('tagName', 'SPAN')
+    await expect(key).toHaveAttribute('data-tip', 'AEON-74 is not a ticket in this AEON workspace')
+  }
   await expect(sheet(page).locator('.changes').getByText('AEON-74', { exact: true }).first()).toHaveJSProperty('tagName', 'SPAN')
   // Another tracker's key (classic Paimos) likewise.
   await page.goto(`/releases/${history.releases[3].version}`)
@@ -129,7 +187,7 @@ test('a lost project access takes the link and the open ticket away at the next 
   await answerNothing(page)
   // Window focus asks for the same person's access again (as any navigation does).
   await page.evaluate(() => window.dispatchEvent(new Event('focus')))
-  await expect(chips(page).getByRole('link')).toHaveCount(0)
+  await expect(chips(page).locator('a.ticket-link')).toHaveCount(0)
   await expect(chips(page).getByText('PHAROS-11', { exact: true })).toHaveJSProperty('tagName', 'SPAN')
   await expect(panel(page).getByRole('heading', { name: 'This ticket could not be opened' })).toBeVisible()
   await expect(sheet(page).getByText(TITLE)).toHaveCount(0)
@@ -139,7 +197,7 @@ test('a lost project access takes the link and the open ticket away at the next 
 
 test('another person or workspace starts without the earlier answers', async ({ page }) => {
   const { calls, history } = await open(page)
-  await expect(chips(page).getByRole('link')).toHaveCount(1)
+  await expect(chips(page).locator('a.ticket-link')).toHaveCount(1)
   const asked = calls.filter(call => call.path === '/api/nodes/lookup' && call.query.has('keys')).length
   let lookups = 0
   await page.route('**/api/nodes/lookup**', route => { lookups++; return route.fulfill({ json: { items: [] } }) })
@@ -161,11 +219,14 @@ test('a ticket still on its way when the person or workspace changes never shows
   const { history } = await open(page)
   // The panel's request for the ticket is slow; the answer (for the former caller) comes last.
   let held = 0
+  let release!: () => void, completed!: () => void
+  const barrier = new Promise<void>(resolve => { release = resolve })
+  const finished = new Promise<void>(resolve => { completed = resolve })
   await page.route('**/api/nodes?*', async route => {
     if (!new URL(route.request().url()).searchParams.has('q')) return route.fallback()
     held++
-    await new Promise(resolve => setTimeout(resolve, 1500))
-    return route.fallback().catch(() => {})
+    await barrier
+    try { await route.fallback() } finally { completed() }
   })
   // Record the title if it is ever shown in a ticket panel, however briefly.
   await page.evaluate(title => {
@@ -180,12 +241,14 @@ test('a ticket still on its way when the person or workspace changes never shows
   // Now someone else, in another workspace that has no such ticket; a navigation refreshes the session.
   await answerNothing(page)
   await page.route('**/api/me', route => route.fulfill({ json: { principal: { id: '33333333-3333-4333-8333-333333333333', name: 'Ola Nordmann', kind: 'person', roles: ['member'] }, tenant: { id: 't2', name: 'Other Studio' } } }))
-  await sheet(page).getByRole('grid', { name: 'Releases, newest first' }).getByRole('row').nth(2).click()
-  await expect(page).toHaveURL(`/releases/${history.releases[2].version}`)
-  await expect(panel(page).getByRole('heading', { name: 'This ticket could not be opened' })).toBeVisible()
-  // The held answer lands after this; it must not show.
-  await page.waitForTimeout(2000)
-  await expect(panel(page).getByRole('heading', { name: 'This ticket could not be opened' })).toBeVisible()
+  try {
+    await sheet(page).getByRole('radio', { name: 'DE', exact: true }).click()
+    await expect(page).toHaveURL(`/releases/${history.releases[1].version}?release_lang=de`)
+    // Identity resets now close private ticket panels altogether. Require that
+    // stronger boundary before releasing the former person's held response.
+    await expect(panel(page)).toHaveCount(0)
+  } finally { release(); await finished }
+  await expect(panel(page)).toHaveCount(0)
   expect(await page.evaluate(() => (window as unknown as { staleShown: boolean }).staleShown)).toBe(false)
 })
 

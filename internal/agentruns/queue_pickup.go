@@ -3,13 +3,18 @@ package agentruns
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"net/http"
+	"strconv"
 	"time"
 
 	"github.com/inspr-at/paimos/internal/agentaccounts"
-	"github.com/inspr-at/paimos/internal/authz"
-	"github.com/inspr-at/paimos/internal/modelregistry"
+	"github.com/inspr-at/paimos/internal/agentpairing"
+	"github.com/inspr-at/paimos/internal/escalation"
+	"github.com/inspr-at/paimos/internal/events"
+	"github.com/inspr-at/paimos/internal/harness"
+	"github.com/inspr-at/paimos/internal/httpapi"
 	"github.com/inspr-at/paimos/internal/statusautopilot"
 	"github.com/inspr-at/paimos/internal/tenant"
 	"github.com/inspr-at/paimos/internal/workorders"
@@ -25,12 +30,29 @@ func (m *module) queueNext(r *http.Request, tx pgx.Tx, p tenant.Principal) (any,
 	if err := validateQueueTarget(in, true); err != nil {
 		return nil, err
 	}
+	if err := queueLock(r.Context(), tx); err != nil {
+		return nil, err
+	}
+	leadProject := ""
+	if session := r.Header.Get("X-Aeon-Lead-Session"); session != "" {
+		if !workorders.UUID(session) {
+			return nil, workorders.Fail(400, "invalid lead session")
+		}
+		if err := tx.QueryRow(r.Context(), `SELECT project_id::text FROM harness_sessions WHERE id=$1 AND agent_principal_id=$2`, session, p.ID).Scan(&leadProject); err != nil {
+			return nil, workorders.Fail(403, "owned lead session required")
+		}
+	}
 	if in.Agent != "" {
 		if err := queueValidateTarget(r.Context(), tx, in); err != nil {
 			return nil, err
 		}
 	}
-	entries, err := m.queueEntries(r.Context(), tx)
+	if leadProject != "" {
+		ctx, cancel := context.WithTimeout(r.Context(), 5*time.Second)
+		defer cancel()
+		r = r.WithContext(ctx)
+	}
+	entries, err := m.queueEntriesFor(r.Context(), tx, leadProject, "", leadProject != "")
 	if err != nil {
 		return nil, err
 	}
@@ -46,15 +68,76 @@ func (m *module) queueNext(r *http.Request, tx pgx.Tx, p tenant.Principal) (any,
 			ordered = append(ordered, e)
 		}
 	}
+	firstWait := ""
+	rememberWait := func(reason string) {
+		if firstWait == "" {
+			firstWait = reason
+		}
+	}
 	for _, e := range ordered {
+		if leadProject != "" && (e.ProjectID == nil || *e.ProjectID != leadProject) {
+			continue
+		}
+		// queueLock holds the tenant/tree access fence. Select only work this
+		// caller can dispatch; another project's lead intent is not a failure
+		// of the shared scan, even if its entry is blocked or not ready.
+		if leadProject == "" && e.ProjectID != nil {
+			var configured bool
+			if err := tx.QueryRow(r.Context(), `SELECT EXISTS(SELECT 1 FROM project_leads WHERE project_id=$1)`, *e.ProjectID).Scan(&configured); err != nil {
+				return nil, err
+			}
+			if configured {
+				continue
+			}
+		}
+		var leadBinding json.RawMessage
+		if e.ProjectID != nil {
+			if err := harness.RequireLeadDispatchTx(r.Context(), tx, r, p, *e.ProjectID, m.leadAdmission); err != nil {
+				return nil, err
+			}
+			if r.Header.Get("X-Aeon-Lead-Session") != "" {
+				var generation int64
+				generation, _ = strconv.ParseInt(r.Header.Get("X-Aeon-Lead-Generation"), 10, 64)
+				leadBinding, _ = json.Marshal(map[string]any{"session_id": r.Header.Get("X-Aeon-Lead-Session"), "generation": generation})
+			}
+		}
 		t, err := queueLoadTicket(r.Context(), tx, e.NodeID, true)
 		if err != nil {
 			return nil, err
 		}
-		if workqueue.State(t.State) == "blocked" || !readiness(t).Ready {
+		if err = queuePermission(r.Context(), tx, p, t.ProjectID, true); err != nil {
+			return nil, err
+		}
+		admission, err := workorders.OrderBuildAdmissionTx(r.Context(), tx, e.Run.OrderID)
+		if err != nil {
+			return nil, err
+		}
+		if err = workqueue.RequireBuildAdmissionTx(r.Context(), tx, p, t.ID, "", nil, &admission); err != nil {
+			var conflict *workqueue.BuildConflict
+			if errors.As(err, &conflict) {
+				reason := "build_in_flight"
+				if conflict.Reason == "built_unmerged" {
+					reason = "already_built_ship_it"
+				}
+				rememberWait(reason)
+				continue
+			}
+			return nil, err
+		}
+		ready, err := entryReadiness(r.Context(), tx, p, t)
+		if err != nil {
+			return nil, err
+		}
+		if workqueue.State(t.State) == "blocked" || !ready.Ready {
 			continue
 		}
-		if err = queuePermission(r.Context(), tx, p, t.ProjectID, true); err != nil {
+		// A queue entry cannot mint a retry lineage or an unbounded cost hold.
+		// Re-check already routed entries too, before the idempotent pickup return.
+		if err := escalation.CheckLaunchTx(r.Context(), tx, t.ID, "", "", nil); err != nil {
+			var refusal *workorders.Error
+			if errors.As(err, &refusal) && refusal.Status == 409 {
+				continue
+			}
 			return nil, err
 		}
 		target := in
@@ -64,7 +147,49 @@ func (m *module) queueNext(r *http.Request, tx pgx.Tx, p tenant.Principal) (any,
 				target.Profile = *e.Run.ProfileID
 			}
 		}
+		var routineTrace struct {
+			RunID string `json:"routine_run_id"`
+		}
+		if len(e.Run.Trace) > 262144 {
+			return nil, workorders.Fail(409, "routine_trace_unavailable")
+		}
+		if len(e.Run.Trace) > 0 {
+			if err = json.Unmarshal(e.Run.Trace, &routineTrace); err != nil {
+				return nil, err
+			}
+		}
+		routine := routineTrace.RunID
+		if routine != "" {
+			if !e.Queued.Targeted && (in.Agent != "" || in.Profile != "" || in.Account != nil) {
+				rememberWait("routine_registry_route_required")
+				continue
+			}
+			if m.routineQueue == nil {
+				rememberWait("routine_executor_unavailable")
+				continue
+			}
+			generation, _ := strconv.ParseInt(r.Header.Get("X-Aeon-Lead-Generation"), 10, 64)
+			out, err := m.routineQueue(r.Context(), tx, p.TenantID, routine, r.Header.Get("X-Aeon-Lead-Session"), generation)
+			if err != nil {
+				return nil, err
+			}
+			if !out.Routed {
+				rememberWait(out.WaitReason)
+				continue
+			}
+			entry, err := m.queueEntryFor(r.Context(), tx, e.NodeID, leadProject, true)
+			return map[string]any{"entry": entry}, err
+		}
 		if e.Run.QueueRoutedAt != nil {
+			var trace struct {
+				Lead json.RawMessage `json:"project_lead"`
+			}
+			_ = json.Unmarshal(e.Run.Trace, &trace)
+			if e.ProjectID != nil {
+				if err = harness.RequireAssignedLeadTx(r.Context(), tx, p, *e.ProjectID, trace.Lead); err != nil {
+					return nil, err
+				}
+			}
 			if target.Agent != "" && target.Agent != e.Run.AgentID || target.Profile != "" && (e.Run.ProfileID == nil || target.Profile != *e.Run.ProfileID) || target.Account != nil && (e.Run.RequestedAccountID == nil || *target.Account != *e.Run.RequestedAccountID) {
 				continue
 			}
@@ -78,80 +203,60 @@ func (m *module) queueNext(r *http.Request, tx pgx.Tx, p tenant.Principal) (any,
 			}
 			continue
 		}
-		if target.Profile == "" {
-			role, _ := t.Fields["route_role"].(string)
-			area, _ := t.Fields["area"].(string)
-			if role == "" {
-				role = "build"
-			}
-			if area == "" {
-				area = "backend"
-			}
-			if readiness(t).SecurityReviewRequired {
-				role = "build-hard"
-			}
-			route, err := modelregistry.ResolveTicketRoute(r.Context(), tx, role, area, time.Now().UTC())
+		if leadProject != "" {
+			reason, err := harness.LeadDispatchTurnTx(r.Context(), tx, p, leadProject, e.Run.ID, m.leadAdmission)
 			if err != nil {
 				return nil, err
 			}
-			if route == nil {
+			if reason == "work_not_eligible" {
 				continue
 			}
-			target.Profile = route.Profile.ID
+			if reason != "" {
+				return map[string]any{"entry": nil, "wait_reason": reason}, nil
+			}
 		}
-		candidates := []queueTarget{}
-		if target.Agent != "" {
-			candidates = append(candidates, target)
-		} else {
-			rows, err := tx.Query(r.Context(), `SELECT DISTINCT a.registered_by_principal_id::text FROM agent_accounts a JOIN model_profiles m ON m.tenant_id=a.tenant_id AND m.harness=a.harness
-    WHERE m.id=$1 AND m.enabled AND a.state='available' AND a.last_probe_ok AND a.last_probe_at>clock_timestamp()-interval '2 minutes'
-    AND (a.allowed_model_profile_ids IS NULL OR m.id=ANY(a.allowed_model_profile_ids)) ORDER BY 1`, target.Profile)
-			if err != nil {
-				return nil, err
-			}
-			for rows.Next() {
-				var agent string
-				if err = rows.Scan(&agent); err != nil {
-					rows.Close()
-					return nil, err
-				}
-				candidates = append(candidates, queueTarget{Agent: agent, Profile: target.Profile})
-			}
-			rows.Close()
-			if err = rows.Err(); err != nil {
-				return nil, err
-			}
+		fields, err := json.Marshal(t.Fields)
+		if err != nil {
+			return nil, err
+		}
+		project := ""
+		if t.ProjectID != nil {
+			project = *t.ProjectID
+		}
+		candidates, rawPlacement, err := workqueue.RouteCandidatesTx(r.Context(), tx, e.Run.ID, fields, project, readiness(t).SecurityReviewRequired, target)
+		if err != nil {
+			return nil, err
 		}
 		for _, candidate := range candidates {
-			picked, err := queueTryRoute(r.Context(), tx, p, t, e.Run, candidate)
+			picked, err := queueTryRoute(r.Context(), tx, p, t, e.Run, candidate, rawPlacement, leadBinding)
 			if err != nil {
 				return nil, err
 			}
 			if picked {
-				entry, err := m.queueEntry(r.Context(), tx, e.NodeID)
+				entry, err := m.queueEntryFor(r.Context(), tx, e.NodeID, leadProject, leadProject != "")
 				return map[string]any{"entry": entry}, err
 			}
 		}
 	}
+	if firstWait != "" {
+		return map[string]any{"entry": nil, "wait_reason": firstWait}, nil
+	}
 	return map[string]any{"entry": nil}, nil
 }
-func queueTryRoute(ctx context.Context, tx pgx.Tx, p tenant.Principal, t queueTicket, v Run, target queueTarget) (bool, error) {
-	// Live role check is separate from the daemon's key ceiling, which is
-	// authenticated again by reserve and claim. Never mint a runtime grant.
-	agent := tenant.Principal{TenantID: p.TenantID, ID: target.Agent, Kind: tenant.Agent, Scopes: []string{"run.claim"}}
+func queueTryRoute(ctx context.Context, tx pgx.Tx, p tenant.Principal, t queueTicket, v Run, target queueTarget, placement, lead json.RawMessage) (bool, error) {
+	return queueTryRouteWith(ctx, tx, p, t, v, target, placement, lead, nil)
+}
+
+// The callback completes routine admission, reservations and the durable launch
+// intent in the SAME savepoint, before the turn and audit event. Every refusal
+// rolls back the provisional worker/handoff; ordinary pickup has no callback.
+func queueTryRouteWith(ctx context.Context, tx pgx.Tx, p tenant.Principal, t queueTicket, v Run, target queueTarget, placement, lead json.RawMessage, finish RoutineRouteFinish, probe ...bool) (bool, error) {
 	project := ""
 	if t.ProjectID != nil {
 		project = *t.ProjectID
 	}
-	if err := authz.RequireTx(ctx, tx, agent, "run.claim", authz.Scope{ProjectID: project}); err != nil {
-		if errors.Is(err, authz.ErrForbidden) {
-			return false, nil
-		}
-		return false, err
-	}
-	var pending bool
-	err := tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM agent_runs r JOIN nodes n ON n.tenant_id=r.tenant_id AND n.id=r.queue_node_id WHERE r.id<>$1 AND r.agent_principal_id=$2 AND r.status='queued' AND r.queue_routed_at IS NOT NULL AND n.state='open' AND n.deleted_at IS NULL)`, v.ID, target.Agent).Scan(&pending)
-	if err != nil || pending {
+	ready, err := workqueue.RouteReadyTx(ctx, tx, p.TenantID, project, v.ID, target)
+	if err != nil || !ready {
 		return false, err
 	}
 	attempt, err := tx.Begin(ctx)
@@ -159,12 +264,22 @@ func queueTryRoute(ctx context.Context, tx pgx.Tx, p tenant.Principal, t queueTi
 		return false, err
 	}
 	defer func() { _ = attempt.Rollback(ctx) }()
+	admission, err := workorders.OrderBuildAdmissionTx(ctx, attempt, v.OrderID)
+	if err != nil {
+		return false, err
+	}
+	if err = workqueue.RequireBuildAdmissionTx(ctx, attempt, p, t.ID, "", nil, &admission); err != nil {
+		return false, err
+	}
+	if err = freezeHandoff(ctx, attempt, t, v, target.Agent, lead); err != nil {
+		return false, err
+	}
 	var model string
 	err = attempt.QueryRow(ctx, `SELECT model FROM model_profiles WHERE id=$1 AND enabled`, target.Profile).Scan(&model)
 	if err != nil {
 		return false, err
 	}
-	_, err = attempt.Exec(ctx, `UPDATE agent_runs SET agent_principal_id=$2,model_profile_id=$3,requested_model=$4,requested_account_id=$5 WHERE id=$1 AND status='queued'`, v.ID, target.Agent, target.Profile, model, target.Account)
+	_, err = attempt.Exec(ctx, `UPDATE agent_runs SET agent_principal_id=$2,model_profile_id=$3,requested_model=$4,requested_account_id=$5,trace=jsonb_set(coalesce(trace,'{}'::jsonb),'{work_placement}',$6::jsonb) WHERE id=$1 AND status='queued'`, v.ID, target.Agent, target.Profile, model, target.Account, placement)
 	if err != nil {
 		return false, err
 	}
@@ -175,16 +290,45 @@ func queueTryRoute(ctx context.Context, tx pgx.Tx, p tenant.Principal, t queueTi
 	if wait != nil {
 		return false, nil
 	}
+	if lead != nil {
+		if _, err = attempt.Exec(ctx, `UPDATE agent_runs SET trace=jsonb_set(coalesce(trace,'{}'::jsonb),'{project_lead}',$2::jsonb) WHERE id=$1`, v.ID, lead); err != nil {
+			return false, err
+		}
+	}
+	var pending []events.Change
+	if finish != nil {
+		if pending, err = finish(ctx, attempt, v, target); err != nil {
+			return false, err
+		}
+	}
+	if len(probe) > 0 && probe[0] {
+		// The caller's rollback-only eligibility probe has checked all final
+		// predicates. Leave turns and the event counter untouched.
+		return true, nil
+	}
 	_, err = attempt.Exec(ctx, `UPDATE agent_runs SET queue_routed_at=clock_timestamp() WHERE id=$1`, v.ID)
 	if err != nil {
 		return false, err
 	}
+	if lead != nil {
+		if err = harness.RecordLeadTurnTx(ctx, attempt, project); err != nil {
+			return false, err
+		}
+	}
+	for _, change := range pending {
+		if _, err = events.Append(ctx, attempt, p, change); err != nil {
+			return false, err
+		}
+	}
 	if err = workorders.Record(ctx, attempt, p, t.ID, "queue.routed", v, target); err != nil {
+		return false, err
+	}
+	if err = admission.Record(ctx, attempt, p, "", v.ID); err != nil {
 		return false, err
 	}
 	return true, attempt.Commit(ctx)
 }
-func queueClaimable(ctx context.Context, tx pgx.Tx, v Run) error {
+func queueClaimable(ctx context.Context, tx pgx.Tx, p tenant.Principal, v Run, admission ...*workorders.BuildAdmission) error {
 	if v.QueueNodeID == nil || v.Status != "queued" {
 		return nil
 	}
@@ -192,10 +336,17 @@ func queueClaimable(ctx context.Context, tx pgx.Tx, v Run) error {
 	if err != nil {
 		return err
 	}
+	if err = workqueue.RequireBuildAdmissionTx(ctx, tx, tenant.Principal{}, t.ID, "", nil, admission...); err != nil {
+		return err
+	}
 	if v.QueueTargetAgentID == nil && v.QueueRoutedAt == nil {
 		return workorders.Fail(409, "coordinator routing required")
 	}
-	if workqueue.State(t.State) != "open" || !readiness(t).Ready {
+	ready, err := entryReadiness(ctx, tx, p, t)
+	if err != nil {
+		return err
+	}
+	if workqueue.State(t.State) != "open" || !ready.Ready {
 		return workorders.Fail(409, "ticket is not ready for pickup")
 	}
 	var earlier bool
@@ -215,4 +366,267 @@ func queuePickup(ctx context.Context, tx pgx.Tx, p tenant.Principal, id, runID s
 		return err
 	}
 	return workorders.Record(ctx, tx, p, id, "queue.picked_up", map[string]string{"run_id": runID}, map[string]string{"state": "in_progress", "agent_principal_id": p.ID})
+}
+
+// RoutineQueueDispatcher is installed only by the server-owned executor. The
+// coordinator passes its observed lead identity; this callback independently
+// checks intent, live consent and admission before sharing the route write.
+type RoutineQueueDispatcher func(context.Context, pgx.Tx, string, string, string, int64) (RoutineQueueResult, error)
+type RoutineQueueResult struct {
+	RunID      string `json:"agent_run_id,omitempty"`
+	Routed     bool   `json:"routed"`
+	Replay     bool   `json:"replay"`
+	WaitReason string `json:"wait_reason,omitempty"`
+}
+type RoutineRouteFinish func(context.Context, pgx.Tx, Run, workqueue.RouteTarget) ([]events.Change, error)
+
+// EarlierReady is a rollback-only check of an earlier routine's full dispatch
+// predicates. Probe avoids recursion, queue-turn writes and audit events; it
+// never commits an assignment, hold or launch.
+type RoutineQueueOptions struct {
+	EarlierReady func(context.Context, pgx.Tx, string) (bool, error)
+	Probe        bool
+}
+
+func BindRoutineQueue(boundary httpapi.Module, dispatch RoutineQueueDispatcher) error {
+	m, ok := boundary.(*module)
+	if !ok || dispatch == nil {
+		return errors.New("routine queue dispatcher unavailable")
+	}
+	m.routineQueue = dispatch
+	return nil
+}
+
+// RouteRoutineQueueTx is one final write, entered under tenant/tree/pairing and
+// current lead authority. It shares readiness, manual/target order, fairness,
+// frozen handoff and queueTryRouteWith with human/coordinator pickup. The finish
+// callback supplies holds and outbox before any audit append. No launch occurs.
+func RouteRoutineQueueTx(ctx context.Context, tx pgx.Tx, p tenant.Principal, runID, role string, lead json.RawMessage, admission harness.LeadAdmission, finish RoutineRouteFinish, options ...RoutineQueueOptions) (RoutineQueueResult, error) {
+	var opts RoutineQueueOptions
+	if len(options) > 0 {
+		opts = options[0]
+	}
+	out := RoutineQueueResult{RunID: runID}
+	if finish == nil {
+		return out, workorders.Fail(409, "routine_executor_unavailable")
+	}
+	var bound bool
+	if err := tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM routine_runs WHERE agent_run_id=$1 AND execute_consent AND consent_revision=definition_revision)`, runID).Scan(&bound); err != nil {
+		return out, err
+	}
+	if !bound {
+		return out, workorders.Fail(409, "routine_intent_required")
+	}
+	var bounded bool
+	if err := tx.QueryRow(ctx, `SELECT coalesce(octet_length(trace::text),0)<=262144 FROM agent_runs WHERE id=$1`, runID).Scan(&bounded); err != nil {
+		return out, err
+	}
+	if !bounded {
+		return out, workorders.Fail(409, "routine_trace_unavailable")
+	}
+	v, err := load(ctx, tx, runID, false)
+	if err != nil {
+		return out, err
+	}
+	if v.QueueNodeID == nil || v.Status != "queued" {
+		return out, workorders.Fail(409, "routine_queue_unavailable")
+	}
+	if err = tx.QueryRow(ctx, `SELECT octet_length(title)+octet_length(body)+octet_length(fields::text)<=65536 FROM nodes WHERE id=$1`, *v.QueueNodeID).Scan(&bounded); err != nil {
+		return out, err
+	}
+	if !bounded {
+		return out, workorders.Fail(409, "preparation_fields_partial")
+	}
+	t, err := queueLoadTicket(ctx, tx, *v.QueueNodeID, true)
+	if err != nil {
+		return out, err
+	}
+	if t.ProjectID == nil {
+		return out, workorders.Fail(409, "routine_target_changed")
+	}
+	if err = queuePermission(ctx, tx, p, t.ProjectID, true); err != nil {
+		return out, err
+	}
+	if err = escalation.CheckLaunchTx(ctx, tx, t.ID, "", "", nil); err != nil {
+		return out, err
+	}
+	if v.QueueRoutedAt != nil {
+		var saved struct {
+			Lead json.RawMessage `json:"project_lead"`
+		}
+		if err = json.Unmarshal(v.Trace, &saved); err != nil {
+			return out, err
+		}
+		if err = harness.RequireAssignedLeadTx(ctx, tx, p, *t.ProjectID, saved.Lead); err != nil {
+			return out, err
+		}
+		out.Routed, out.Replay = true, true
+		return out, nil
+	}
+	ready, err := entryReadiness(ctx, tx, p, t)
+	if err != nil {
+		return out, err
+	}
+	if !ready.Ready || workqueue.State(t.State) != "open" {
+		return out, workorders.Fail(409, "work_not_eligible")
+	}
+	if err = requireWriterFree(ctx, tx, t.ID, v.ID, nil); err != nil {
+		return out, err
+	}
+	wait, err := workqueue.BlockingTx(ctx, tx, t.ID)
+	if err != nil {
+		return out, err
+	}
+	if wait != "" {
+		return out, workorders.Fail(409, wait)
+	}
+	// Load the same bounded project order as coordinator pickup. An eligible
+	// earlier leaf retains its turn even if it belongs to another routine.
+	if err = tx.QueryRow(ctx, workqueue.CTE+`SELECT coalesce(bool_and(octet_length(n.title)+octet_length(n.body)+octet_length(n.fields::text)<=65536 AND coalesce(octet_length(r.trace::text),0)<=262144),true)
+ FROM (SELECT id,queue_node_id FROM queue_ordered WHERE project_id=$1 ORDER BY queue_target_agent_id NULLS FIRST,queue_position LIMIT 201) q
+ JOIN nodes n ON n.tenant_id=current_setting('aeon.tenant_id')::uuid AND n.id=q.queue_node_id
+ JOIN agent_runs r ON r.tenant_id=n.tenant_id AND r.id=q.id`, *t.ProjectID).Scan(&bounded); err != nil {
+		return out, err
+	}
+	if !bounded {
+		return out, workorders.Fail(409, "queue_inputs_partial")
+	}
+	m := module{}
+	// Scheduler calls have no HTTP principal. Project the queue with the lead
+	// whose current authority was checked by the executor inside this write.
+	entries, err := m.queueEntriesFor(tenant.WithPrincipal(ctx, p), tx, *t.ProjectID, "", true)
+	if err != nil {
+		return out, err
+	}
+	ordered := []queueEntry{}
+	for _, e := range entries {
+		if e.Queued.Targeted {
+			ordered = append(ordered, e)
+		}
+	}
+	for _, e := range entries {
+		if !e.Queued.Targeted {
+			ordered = append(ordered, e)
+		}
+	}
+	found := false
+	for _, e := range ordered {
+		if e.Run.ID == v.ID {
+			found = true
+			break
+		}
+		if opts.Probe {
+			continue
+		}
+		var routine struct {
+			RunID string `json:"routine_run_id"`
+		}
+		if err := json.Unmarshal(e.Run.Trace, &routine); len(e.Run.Trace) > 0 && err != nil {
+			return out, err
+		}
+		if routine.RunID != "" {
+			// Route-readiness alone cannot establish routine consent, CI or
+			// budget authority. Only a complete rollback-only probe can keep
+			// this entry's turn ahead of later work.
+			if opts.EarlierReady == nil {
+				return out, workorders.Fail(409, "routine_executor_unavailable")
+			}
+			ready, err := opts.EarlierReady(ctx, tx, routine.RunID)
+			if err != nil {
+				return out, err
+			}
+			if ready {
+				return out, workorders.Fail(409, "queue_order_wait")
+			}
+			continue
+		}
+		earlier, err := queueLoadTicket(ctx, tx, e.NodeID, false)
+		if err != nil {
+			return out, err
+		}
+		reason, err := workqueue.BlockingTx(ctx, tx, e.NodeID)
+		if err != nil {
+			return out, err
+		}
+		if reason == "blocker_scan_partial" {
+			return out, workorders.Fail(409, reason)
+		}
+		if readiness(earlier).Ready && workqueue.State(earlier.State) == "open" && reason == "" {
+			fields, err := json.Marshal(earlier.Fields)
+			if err != nil {
+				return out, err
+			}
+			ready, err := workqueue.RunRouteReadyTx(ctx, tx, p.TenantID, *t.ProjectID, e.Run.ID, fields)
+			if err != nil {
+				return out, err
+			}
+			if ready {
+				return out, workorders.Fail(409, "queue_order_wait")
+			}
+		}
+	}
+	if !found {
+		return out, workorders.Fail(409, "routine_queue_unavailable")
+	}
+	wait, err = harness.LeadDispatchTurnTx(ctx, tx, p, *t.ProjectID, v.ID, admission)
+	if err != nil {
+		return out, err
+	}
+	if wait != "" {
+		return out, workorders.Fail(409, wait)
+	}
+	fields := make(map[string]any, len(t.Fields)+1)
+	for k, x := range t.Fields {
+		fields[k] = x
+	}
+	fields["route_role"] = role
+	raw, err := json.Marshal(fields)
+	if err != nil {
+		return out, err
+	}
+	target := queueTarget{}
+	if v.QueueTargetAgentID != nil {
+		target.Agent = *v.QueueTargetAgentID
+		if v.ProfileID != nil {
+			target.Profile = *v.ProfileID
+		}
+		target.Account = v.RequestedAccountID
+	}
+	candidates, placement, err := workqueue.RouteCandidatesTx(ctx, tx, v.ID, raw, *t.ProjectID, readiness(t).SecurityReviewRequired, target)
+	if err != nil {
+		return out, err
+	}
+	if len(candidates) > 32 {
+		return out, workorders.Fail(409, "routing_scan_partial")
+	}
+	out.WaitReason = "no_qualified_route"
+	for _, candidate := range candidates {
+		// An unattended wait cannot occupy a slot or advance a turn.
+		host, err := agentpairing.UnattendedForPrincipal(ctx, tx, candidate.Agent)
+		if err != nil {
+			return out, err
+		}
+		if host.Status != "ready" {
+			out.WaitReason = host.Reason
+			continue
+		}
+		picked, err := queueTryRouteWith(ctx, tx, p, t, v, candidate, placement, lead, finish, opts.Probe)
+		if err != nil {
+			// The shared registry may list another person's account first.
+			// Its rolled-back refusal must not hide a later owned route. Global
+			// consent, CI, budget and authority failures retain their reason.
+			var refusal *workorders.Error
+			if errors.As(err, &refusal) && refusal.Status == 409 && (refusal.Message == "routine_account_selection_required" || refusal.Message == "routine_account_unavailable" || refusal.Message == "routine_ledger_enrollment_required" || refusal.Message == "own_account_required" || refusal.Message == "owner_policy_mismatch" || refusal.Message == "execution_account_unqualified") {
+				out.WaitReason = refusal.Message
+				continue
+			}
+			return out, err
+		}
+		if picked {
+			out.Routed = true
+			out.WaitReason = ""
+			return out, nil
+		}
+	}
+	return out, nil
 }

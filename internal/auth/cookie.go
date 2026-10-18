@@ -27,12 +27,13 @@ var errBadCookie = errors.New("bad cookie")
 
 // oidcPayload is the short-lived login state: OAuth state, OIDC nonce and the PKCE verifier.
 type oidcPayload struct {
-	State    string `json:"s"`
-	Nonce    string `json:"n"`
-	Verifier string `json:"v"`
-	Tenant   string `json:"t"`
-	Invite   string `json:"i,omitempty"`
-	Exp      int64  `json:"e"`
+	StepUp   *stepupLogin `json:"stepup,omitempty"`
+	State    string       `json:"s"`
+	Nonce    string       `json:"n"`
+	Verifier string       `json:"v"`
+	Tenant   string       `json:"t"`
+	Invite   string       `json:"i,omitempty"`
+	Exp      int64        `json:"e"`
 }
 
 func (m *Module) secureCookies() bool { return !m.cfg.Dev() }

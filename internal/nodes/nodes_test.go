@@ -5,6 +5,7 @@ package nodes
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
@@ -17,9 +18,11 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 
+	"github.com/inspr-at/paimos/internal/authz"
 	"github.com/inspr-at/paimos/internal/db"
 	"github.com/inspr-at/paimos/internal/dbtest"
 	"github.com/inspr-at/paimos/internal/httpapi"
+	"github.com/inspr-at/paimos/internal/modelprefs"
 	"github.com/inspr-at/paimos/internal/tenant"
 )
 
@@ -33,8 +36,8 @@ var (
 
 func TestMain(m *testing.M) {
 	code := m.Run()
-	if testDB != nil {
-		if err := testDB.Close(); err != nil {
+	for _, d := range []*dbtest.DB{testDB, list6000Fixture.db} {
+		if err := d.Close(); err != nil {
 			fmt.Fprintf(os.Stderr, "dbtest cleanup: %v\n", err)
 			if code == 0 {
 				code = 1
@@ -88,6 +91,9 @@ func addPrincipal(t *testing.T, slug string) tenant.Principal {
 	}
 	var id string
 	err := db.InTenant(dbtest.Seed(t.Context()), appPool, tenantID, func(tx pgx.Tx) error {
+		if err := modelprefs.SeedKinds(t.Context(), tx, tenantID); err != nil {
+			return err
+		}
 		return tx.QueryRow(t.Context(), `
 			INSERT INTO principals (tenant_id, kind, name, roles)
 			VALUES ($1, 'person', $2, $3)
@@ -131,6 +137,7 @@ func call(t *testing.T, p *tenant.Principal, method, path, body string) (int, []
 }
 
 func TestSchemaAndTagMutationsRequirePersonAdmin(t *testing.T) {
+	t.Run("agent creates seeded tag without kind management", testAgentCreatesSeededTagWithoutKindManagement)
 	admin := newPrincipal(t, "schema-role-test")
 	makePerson := func(name, role string) tenant.Principal {
 		p := tenant.Principal{TenantID: admin.TenantID, Kind: tenant.Person, Name: name, Roles: []string{role}}
@@ -201,6 +208,17 @@ func kindBySlug(t *testing.T, p tenant.Principal, slug string) kindJSON {
 	return kindJSON{}
 }
 
+// Explicit tenant definitions for tests that need multiple distinct kinds.
+// Ordinary work fixtures use the seeded work kind; do not recreate retired
+// starter kinds globally, which would hide migration compatibility failures.
+func customKind(t *testing.T, p tenant.Principal, slug, icon string) kindJSON {
+	t.Helper()
+	status, body := call(t, &p, http.MethodPost, "/api/kinds", fmt.Sprintf(
+		`{"slug":%q,"label":%q,"short_prefix":%q,"icon":%q,"field_schema":{"type":"object","issue_family":true}}`,
+		slug, slug, strings.ToUpper(slug[:3]), icon))
+	return decode[kindJSON](t, status, body, http.StatusCreated)
+}
+
 type storedEvent struct {
 	Type   string
 	NodeID *string
@@ -245,12 +263,20 @@ func TestUnauthorized(t *testing.T) {
 
 func TestKindCRUD(t *testing.T) {
 	p := newPrincipal(t, "kinds")
+	baseline := len(tenantEvents(t, p.TenantID))
 	status, body := call(t, &p, http.MethodGet, "/api/kinds", "")
 	page := decode[struct {
 		Items []kindJSON `json:"items"`
 	}](t, status, body, http.StatusOK)
-	if len(page.Items) != 12 {
+	if len(page.Items) != 11 {
 		t.Fatalf("starter kinds: %d", len(page.Items))
+	}
+	seeded := map[string]bool{}
+	for _, kind := range page.Items {
+		seeded[kind.Slug] = true
+	}
+	if !seeded["work"] || !seeded["tag"] || seeded["ticket"] || seeded["epic"] || seeded["task"] {
+		t.Fatalf("starter kinds must contain work and tag without retired kinds: %v", seeded)
 	}
 	if page.Items[0].AllowedChildKinds != nil {
 		t.Fatalf("starter allowed children: %#v", page.Items[0].AllowedChildKinds)
@@ -290,7 +316,7 @@ func TestKindCRUD(t *testing.T) {
 	if status != http.StatusNotFound {
 		t.Fatalf("get deleted %d", status)
 	}
-	ev := tenantEvents(t, p.TenantID)
+	ev := tenantEvents(t, p.TenantID)[baseline:]
 	want := []string{evKindCreated, evKindUpdated, evKindDeleted}
 	if len(ev) != len(want) {
 		t.Fatalf("events %#v", ev)
@@ -307,6 +333,7 @@ func TestKindCRUD(t *testing.T) {
 
 func TestNodeKeysFieldsAndEvents(t *testing.T) {
 	p := newPrincipal(t, "nodes")
+	baseline := len(tenantEvents(t, p.TenantID))
 	project := kindBySlug(t, p, "project")
 	status, body := call(t, &p, http.MethodPost, "/api/nodes", `{
 		"kind_id":"`+project.ID+`","title":"Alpha","key":"PAI-123"
@@ -369,9 +396,20 @@ func TestNodeKeysFieldsAndEvents(t *testing.T) {
 		t.Fatalf("updated %#v", updated)
 	}
 
-	ev := tenantEvents(t, p.TenantID)
-	var created int
+	ev := tenantEvents(t, p.TenantID)[baseline:]
+	var created, mappings int
+	var system string
+	if err := adminPool.QueryRow(t.Context(), `SELECT id::text FROM principals WHERE tenant_id=$1 AND kind='agent' AND name='System' AND roles @> '{system}'`, p.TenantID).Scan(&system); err != nil {
+		t.Fatal(err)
+	}
 	for _, event := range ev {
+		if event.Type == "work_context.project_set" {
+			mappings++
+			if event.Actor != system || event.NodeID == nil || event.After == nil {
+				t.Fatalf("project mapping audit %#v", event)
+			}
+			continue
+		}
 		if event.Actor != p.ID {
 			t.Fatalf("actor %#v", event)
 		}
@@ -385,13 +423,16 @@ func TestNodeKeysFieldsAndEvents(t *testing.T) {
 	if created != 4 {
 		t.Fatalf("created events %d in %#v", created, ev)
 	}
+	if mappings != 3 {
+		t.Fatalf("project mapping events %d in %#v", mappings, ev)
+	}
 }
 
 func TestListCursorFiltersAndTree(t *testing.T) {
 	p := newPrincipal(t, "tree")
 	project := kindBySlug(t, p, "project")
-	epic := kindBySlug(t, p, "epic")
-	ticket := kindBySlug(t, p, "ticket")
+	epic := kindBySlug(t, p, "work")
+	ticket := kindBySlug(t, p, "work")
 	root := mustNode(t, p, `{"kind_id":"`+project.ID+`","title":"Root"}`)
 	other := mustNode(t, p, `{"kind_id":"`+project.ID+`","title":"Other"}`)
 	e2 := mustNode(t, p, `{"kind_id":"`+epic.ID+`","title":"E2","parent_id":"`+root.ID+`"}`)
@@ -458,8 +499,8 @@ func TestListCursorFiltersAndTree(t *testing.T) {
 func TestMoveDeleteAndNarrowedKind(t *testing.T) {
 	p := newPrincipal(t, "move")
 	project := kindBySlug(t, p, "project")
-	epic := kindBySlug(t, p, "epic")
-	ticket := kindBySlug(t, p, "ticket")
+	epic := kindBySlug(t, p, "work")
+	ticket := kindBySlug(t, p, "work")
 	root := mustNode(t, p, `{"kind_id":"`+project.ID+`","title":"Root"}`)
 	leaf := mustNode(t, p, `{"kind_id":"`+epic.ID+`","title":"Leaf","parent_id":"`+root.ID+`"}`)
 	child := mustNode(t, p, `{"kind_id":"`+ticket.ID+`","title":"Child","parent_id":"`+root.ID+`"}`)
@@ -555,6 +596,7 @@ func TestTenantIsolation(t *testing.T) {
 
 func TestWriterSeam(t *testing.T) {
 	p := newPrincipal(t, "writer")
+	baseline := len(tenantEvents(t, p.TenantID))
 	stub := &countingWriter{}
 	status, body := callAs(t, New(appPool, stub), &p, http.MethodPost, "/api/kinds", `{
 		"slug":"note","label":"Note","short_prefix":"NTE","icon":"note","field_schema":{}
@@ -565,7 +607,7 @@ func TestWriterSeam(t *testing.T) {
 	if stub.n != 1 {
 		t.Fatalf("writer calls %d", stub.n)
 	}
-	if ev := tenantEvents(t, p.TenantID); len(ev) != 0 {
+	if ev := tenantEvents(t, p.TenantID); len(ev) != baseline {
 		t.Fatalf("stub wrote rows %#v", ev)
 	}
 }
@@ -574,4 +616,76 @@ func mustNode(t *testing.T, p tenant.Principal, body string) nodeJSON {
 	t.Helper()
 	status, raw := call(t, &p, http.MethodPost, "/api/nodes", body)
 	return decode[nodeJSON](t, status, raw, http.StatusCreated)
+}
+
+func TestNodeAuthorizationErrorsPreserveHTTPFailures(t *testing.T) {
+	// Risk: transaction authorization denials become 500s, or their mapping
+	// hides unrelated typed, resource-limit or internal failures.
+	for _, tc := range []struct {
+		name          string
+		err           error
+		status        int
+		message, code string
+	}{
+		{"forbidden", authz.ErrForbidden, 403, "permission denied", "forbidden"},
+		{"wrapped forbidden", fmt.Errorf("project admin: %w", authz.ErrForbidden), 403, "permission denied", "forbidden"},
+		{"typed conflict", conflictCoded("reload first", "stale_revision"), 409, "reload first", "stale_revision"},
+		{"resource limit", context.DeadlineExceeded, 503, "Work aggregates exceeded a resource limit; narrow the scope or retry.", ""},
+		{"internal", errors.New("unexpected database failure"), 500, "internal", ""},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			w := httptest.NewRecorder()
+			writeErr(w, tc.err)
+			var body errorBody
+			if err := json.Unmarshal(w.Body.Bytes(), &body); err != nil {
+				t.Fatal(err)
+			}
+			if w.Code != tc.status || body.Error != tc.message || body.Code != tc.code || w.Header().Get("Cache-Control") != "no-store" {
+				t.Fatalf("wrong error response: status=%d body=%s headers=%v", w.Code, w.Body.String(), w.Header())
+			}
+		})
+	}
+}
+
+func TestProjectKeyConflictNamesHolderAndDeleteRequiresAdmin(t *testing.T) {
+	// Risk: duplicate ticket prefixes are created concurrently, deletion permits
+	// ordinary editors, or reserved keys leak across tenant boundaries.
+	p := newPrincipal(t, "project-lifecycle")
+	kind := kindBySlug(t, p, "project")
+	body := fmt.Sprintf(`{"kind_id":%q,"title":"Named project","fields":{"project_key":"UNIQ"}}`, kind.ID)
+	first := mustNode(t, p, body)
+	mod := New(appPool, nil)
+	status, raw := callAs(t, mod, &p, "POST", "/api/nodes", body)
+	if status != 409 || !strings.Contains(string(raw), "Named project") {
+		t.Fatalf("duplicate: %d %s", status, raw)
+	}
+	// The same prefix in another tenant is independent.
+	foreign := addPrincipal(t, "project-lifecycle-foreign")
+	mustNode(t, foreign, fmt.Sprintf(`{"kind_id":%q,"title":"Other tenant","fields":{"project_key":"UNIQ"}}`, kindBySlug(t, foreign, "project").ID))
+	if _, err := testDB.Admin.Exec(t.Context(), `UPDATE role_bindings SET role_id=(SELECT id FROM roles WHERE tenant_id=$1 AND key='member') WHERE tenant_id=$1 AND principal_id=$2`, p.TenantID, p.ID); err != nil {
+		t.Fatal(err)
+	}
+	status, raw = callAs(t, mod, &p, "PATCH", "/api/nodes/"+first.ID, `{"title":"Still editable"}`)
+	if status != 200 {
+		t.Fatalf("member edit: %d %s", status, raw)
+	}
+	status, raw = callAs(t, mod, &p, "DELETE", "/api/nodes/"+first.ID, "")
+	var refusal errorBody
+	if err := json.Unmarshal(raw, &refusal); err != nil {
+		t.Fatal(err)
+	}
+	if status != 403 || refusal.Code != "forbidden" {
+		t.Fatalf("member deleted project: %d %s", status, raw)
+	}
+	if _, err := testDB.Admin.Exec(t.Context(), `UPDATE role_bindings SET role_id=(SELECT id FROM roles WHERE tenant_id=$1 AND key='admin') WHERE tenant_id=$1 AND principal_id=$2`, p.TenantID, p.ID); err != nil {
+		t.Fatal(err)
+	}
+	status, raw = callAs(t, mod, &p, "DELETE", "/api/nodes/"+first.ID, "")
+	if status != 204 {
+		t.Fatalf("admin delete: %d %s", status, raw)
+	}
+	status, _ = callAs(t, mod, &p, "POST", "/api/nodes", body)
+	if status != 409 {
+		t.Fatal("deleted project's key was reused")
+	}
 }

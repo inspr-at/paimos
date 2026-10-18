@@ -155,7 +155,7 @@ func (t *attachTail) next() (string, error) {
 	return out.String(), nil
 }
 
-var attachSensitive = regexp.MustCompile(`(?i)(api[ _-]?key|access[ _-]?token|refresh[ _-]?token|authorization|bearer[ :]+|password|passwd|client[ _-]?secret|private[ _-]?key|device[ _-]?proof|lifecycle[ _-]?secret|aeon_[a-z0-9_]+|sk-[a-z0-9_-]+|gh[pousr]_[a-z0-9_]+|AKIA[A-Z0-9]+)`)
+var attachSensitive = regexp.MustCompile(`(?i)(x-aeon-worker-lease|worker[ _-]?lease|api[ _-]?key|access[ _-]?token|refresh[ _-]?token|authorization|bearer[ :]+|password|passwd|client[ _-]?secret|private[ _-]?key|device[ _-]?proof|lifecycle[ _-]?secret|aeon_[a-z0-9_]+|sk-[a-z0-9_-]+|gh[pousr]_[a-z0-9_]+|AKIA[A-Z0-9]+)`)
 var attachEnv = regexp.MustCompile(`(?:^|[^A-Za-z0-9_])[A-Z_][A-Z0-9_]*\s*=\s*\S`)
 var attachAssignment = regexp.MustCompile(`(?i)(?:^|[^A-Za-z0-9_])(?:secret|token)[\s"']*[:=]`)
 var attachURLUserinfo = regexp.MustCompile(`(?i)(?:[a-z][a-z0-9+.-]*:)?//[^\s/?#]*@`)

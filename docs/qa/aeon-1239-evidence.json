@@ -1,0 +1,2391 @@
+{
+  "ticket": "AEON-1239",
+  "branch": "work/aeon-1239-nightly",
+  "assigned_main": "a522053019c565c330bebd449cf19598bf73b2e6",
+  "nightly_run": {
+    "id": 38120878100,
+    "url": "https://github.com/inspr-at/paimos/actions/runs/38120878100",
+    "head": "dd9b5d660821a06f09347b56fe7b2caf81e93765",
+    "created_at": "2026-10-11T07:17:40Z",
+    "conclusion": "failure"
+  },
+  "ownership": {
+    "account": "ppm https://aeon.barta.cm; workstation-agents; INSPR verified before edits",
+    "session": "aeon-1239-nightly",
+    "coordinator_marker": "9f76b202-6ac2-41f7-a990-07151b760432",
+    "push_deploy_review": "No origin push, merge, deploy, review gate, other model CLI or delegation. Only brief-prescribed temporary test transport attempted. AEON-1238 files unchanged."
+  },
+  "coverage": {
+    "logged_failed_cases": 183,
+    "distinct_failed_specs": 45,
+    "triage_rows": 91,
+    "row_case_total": 183,
+    "basis": "Full gh run log includes cancelled shards; --log-failed alone omits them. All numbered failures captured before cancellations, not all selected/unrun cases.",
+    "classifications": {
+      "stale-spec": 78,
+      "real-regression": 13
+    },
+    "measurement": "Measurement artifact reports NIGHTLY 28 failed and coverage incomplete; do not equate that with the 183 failed cases printed across all shard logs.",
+    "missing_case_artifacts": [
+      "web-shard-5",
+      "web-shard-2",
+      "web-shard-6",
+      "web-shard-12",
+      "web-shard-7",
+      "web-shard-4",
+      "web-shard-3",
+      "web-shard-9",
+      "web-shard-10",
+      "web-shard-8"
+    ]
+  },
+  "historical_runs": [
+    {
+      "conclusion": "failure",
+      "createdAt": "2026-10-11T07:17:40Z",
+      "databaseId": 38120878100,
+      "headSha": "dd9b5d660821a06f09347b56fe7b2caf81e93765"
+    },
+    {
+      "conclusion": "failure",
+      "createdAt": "2026-10-10T07:15:08Z",
+      "databaseId": 38033780449,
+      "headSha": "a884b2d8ee937ad95e8cbbb787ebdc497d2dccf4"
+    },
+    {
+      "conclusion": "failure",
+      "createdAt": "2026-10-09T07:28:07Z",
+      "databaseId": 37899183578,
+      "headSha": "04739bc840ddaf785405ddd64a40e80671890fc1"
+    },
+    {
+      "conclusion": "failure",
+      "createdAt": "2026-10-08T07:29:49Z",
+      "databaseId": 37743779928,
+      "headSha": "108f1ddffcb2102a2fcca67913409ecb0e779146"
+    },
+    {
+      "conclusion": "failure",
+      "createdAt": "2026-10-07T07:18:46Z",
+      "databaseId": 37586549277,
+      "headSha": "aa576e0815c80a13cca63883eac722e899afc2e6"
+    },
+    {
+      "conclusion": "failure",
+      "createdAt": "2026-10-06T07:38:10Z",
+      "databaseId": 37430896382,
+      "headSha": "ce67524cf904525ead694170ba6c4d841a40687f"
+    },
+    {
+      "conclusion": "failure",
+      "createdAt": "2026-10-05T07:10:21Z",
+      "databaseId": 37276240667,
+      "headSha": "c4a7969a7722c6749969f04e35b37509e8f766a0"
+    }
+  ],
+  "jobs": [
+    {
+      "job": "nightly-go-static",
+      "conclusion": "success"
+    },
+    {
+      "job": "nightly-go-test (7)",
+      "conclusion": "success"
+    },
+    {
+      "job": "nightly-e2e",
+      "conclusion": "success"
+    },
+    {
+      "job": "nightly-release-check",
+      "conclusion": "success"
+    },
+    {
+      "job": "nightly-migration-compat",
+      "conclusion": "success"
+    },
+    {
+      "job": "nightly-go-test (4)",
+      "conclusion": "success"
+    },
+    {
+      "job": "nightly-go-timing",
+      "conclusion": "success"
+    },
+    {
+      "job": "nightly-go-test (3)",
+      "conclusion": "success"
+    },
+    {
+      "job": "nightly-go-test (6)",
+      "conclusion": "success"
+    },
+    {
+      "job": "nightly-go-test (2)",
+      "conclusion": "success"
+    },
+    {
+      "job": "nightly-go-test (5)",
+      "conclusion": "success"
+    },
+    {
+      "job": "nightly-web-setup",
+      "conclusion": "success"
+    },
+    {
+      "job": "nightly-go-test (1)",
+      "conclusion": "success"
+    },
+    {
+      "job": "nightly-tier-classification",
+      "conclusion": "success"
+    },
+    {
+      "job": "nightly-web-shard (5)",
+      "conclusion": "cancelled"
+    },
+    {
+      "job": "nightly-web-shard (2)",
+      "conclusion": "cancelled"
+    },
+    {
+      "job": "nightly-web-shard (6)",
+      "conclusion": "cancelled"
+    },
+    {
+      "job": "nightly-web-shard (12)",
+      "conclusion": "cancelled"
+    },
+    {
+      "job": "nightly-web-shard (1)",
+      "conclusion": "cancelled"
+    },
+    {
+      "job": "nightly-web-shard (11)",
+      "conclusion": "failure"
+    },
+    {
+      "job": "nightly-web-shard (7)",
+      "conclusion": "cancelled"
+    },
+    {
+      "job": "nightly-web-shard (4)",
+      "conclusion": "cancelled"
+    },
+    {
+      "job": "nightly-web-shard (3)",
+      "conclusion": "cancelled"
+    },
+    {
+      "job": "nightly-web-shard (9)",
+      "conclusion": "cancelled"
+    },
+    {
+      "job": "nightly-web-shard (10)",
+      "conclusion": "cancelled"
+    },
+    {
+      "job": "nightly-web-shard (8)",
+      "conclusion": "cancelled"
+    },
+    {
+      "job": "nightly-go",
+      "conclusion": "success"
+    },
+    {
+      "job": "nightly-web",
+      "conclusion": "failure"
+    },
+    {
+      "job": "nightly-tier-measurements",
+      "conclusion": "failure"
+    }
+  ],
+  "non_test_failures": [
+    {
+      "job": "nightly-web-shard (1-12 except 11)",
+      "failure": "Eleven shard jobs cancelled with the selected-case step unfinished. Entire-run coverage cannot be claimed.",
+      "main_commit_that_broke_it": null,
+      "owning_ticket": "LEAD CI capacity follow-up",
+      "stale-spec_or_real-regression": "real-regression",
+      "smallest_fix": "Resolve stale 30s wait failures, then measure shard workload before changing timeout or partitioning. Do not weaken or lengthen the workflow here."
+    },
+    {
+      "job": "nightly-web",
+      "failure": "Aggregate gate rejects unsuccessful/cancelled shards.",
+      "main_commit_that_broke_it": null,
+      "owning_ticket": "AEON-1239 and LEAD regressions",
+      "stale-spec_or_real-regression": "real-regression",
+      "smallest_fix": "Get every shard green; keep the aggregate gate."
+    },
+    {
+      "job": "nightly-tier-measurements",
+      "failure": "coverage=incomplete; missing_case_artifact for ten shards.",
+      "main_commit_that_broke_it": null,
+      "owning_ticket": "LEAD CI coverage follow-up",
+      "stale-spec_or_real-regression": "real-regression",
+      "smallest_fix": "Preserve honest measurement failure; recover per-case artifacts and complete shards rather than calling incomplete green."
+    }
+  ],
+  "triage_table_columns": [
+    "job",
+    "test/spec:line",
+    "failure",
+    "main_commit_that_broke_it",
+    "owning_ticket",
+    "stale-spec_or_real-regression",
+    "smallest_fix"
+  ],
+  "triage_table": [
+    {
+      "job": "nightly-web-shard (5)",
+      "test/spec:line": "web/tests/agent-pause.spec.ts:179",
+      "failure": "Error: expect(locator).toBeDisabled() failed\n\n    Locator:  getByRole('dialog', { name: 'Wind down', exact: true }).locator('button[type=submit]')\n    Expected: disabled\n    Received: enabled\n    Timeout:  5000ms",
+      "failed_cases": 1,
+      "cases": [
+        "wind-down previews only owned work and a reloaded all-computer report leaves new agents untouched"
+      ],
+      "assertion_locations": [
+        "web/tests/agent-pause.spec.ts:197:24"
+      ],
+      "main_commit_that_broke_it": "3f131b6e3",
+      "owning_ticket": "AEON-1239 (source AEON-1018 / AEON-783)",
+      "stale-spec_or_real-regression": "stale-spec",
+      "smallest_fix": "Hold every concurrent leaving-at GET until the ownership barrier releases; the new healthy handshake otherwise permits a second unheld response. Retain disabled-before-read and owned-only-after-read assertions.",
+      "disposition": "fixed locally; remote proof blocked by shared capacity"
+    },
+    {
+      "job": "nightly-web-shard (5)",
+      "test/spec:line": "web/tests/agent-pause.spec.ts:235",
+      "failure": "Error: pauseAll.y\n\n    expect(received).toBeLessThanOrEqual(expected)\n\n    Expected: <= 0.5\n    Received:    18.75\n\n       at control-stability.ts:27\n\n      25 |       const after = await measure()\n      26 |       for (const name of Object.keys(before)) for (const dimension of ['x', 'y', 'width', 'height'] as const) {\n    > 27 |         expect(Math.abs(after[name][dimension] - before[name][dimension]), `${name}.${dimension}`).toBeLessThanOrEqual(.5)\n         |                                                                                                    ^\n      28 |       }\n      29 |       expect(await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth), 'horizontal overflow').toBeLessThanOrEqual(1)\n      30 |     },\n        at Object.check (/home/runner/work/paimos/paimos/web/tests/control-stability.ts:27:100)\n        at /home/runner/work/paimos/paimos/web/tests/agent-pause.spec.ts:249:5",
+      "failed_cases": 1,
+      "cases": [
+        "AEON-783: chosen agents keeps Done in, By, Cancel and Submit still"
+      ],
+      "assertion_locations": [
+        "web/tests/control-stability.ts:27:100",
+        "web/tests/agent-pause.spec.ts:249:5"
+      ],
+      "main_commit_that_broke_it": null,
+      "suspected_commit": {
+        "path": "web/src/components/agents/WindDownControl.vue",
+        "last_source_change_at_nightly": "6e2f0595e AEON-783: merge origin/main; the footer's wind-down summary opens the head chip status",
+        "attribution": "suspected only; not a proven introducing commit or bisect"
+      },
+      "owning_ticket": "AEON-783 / LEAD new regression",
+      "stale-spec_or_real-regression": "real-regression",
+      "smallest_fix": "Chosen-agent form expansion moves Pause all by 18.75px. Keep the stability guard and fix the owning popover layout separately.",
+      "disposition": "evidence only; current reproduction pending"
+    },
+    {
+      "job": "nightly-web-shard (5)",
+      "test/spec:line": "web/tests/role-picker-layout.spec.ts:197",
+      "failure": "Error: expect(locator).toBeVisible() failed\n\n    Locator: locator('.floating[role=\"dialog\"]')\n    Expected: visible\n    Timeout: 5000ms\n    Error: element(s) not found",
+      "failed_cases": 2,
+      "cases": [
+        "epic floating choices scroll as one panel at 390 light",
+        "epic floating choices scroll as one panel at 390 dark"
+      ],
+      "assertion_locations": [
+        "web/tests/role-picker-layout.spec.ts:214:25"
+      ],
+      "main_commit_that_broke_it": "d15114c1a",
+      "owning_ticket": "AEON-1239 (source AEON-655 / AEON-624)",
+      "stale-spec_or_real-regression": "stale-spec",
+      "smallest_fix": "Phone Parent picker uses the shared AccessSheet, not FloatingPanel. Assert overflow:auto on .sheet-body and actual body scrolling for the long fixture; retain the list no-clipping assertion. Include the body and pinned Cancel in the stability guard and the body in horizontal-overflow checks; preserve viewport, disclosure and selection-event assertions.",
+      "source": "web/src/components/work/EpicPicker.vue",
+      "disposition": "fixed locally; remote proof blocked"
+    },
+    {
+      "job": "nightly-web-shard (2)",
+      "test/spec:line": "web/tests/done-gate.spec.ts:45",
+      "failure": "Error: EACCES: permission denied, mkdir '/private/tmp/claude-501/-Users-markus-Code-aeon/a4527da9-f872-45f5-a2f2-48dde0ce2ce5/scratchpad/shots/aeon-303/iter1'\n\n      57 |       await expect(dialog.locator('.count.off')).toHaveText('1 word of 2–4')\n      58 |       await expectLayout(page, width)\n    > 59 |       mkdirSync(shots, { recursive: true })\n         |       ^\n      60 |       await page.screenshot({ path: `${shots}/dialog-${width}-${theme}.png`, fullPage: false })\n      61 |       await dialog.getByRole('button', { name: 'Mark done' }).click()\n      62 |       await expect(dialog).toBeVisible()\n        at /home/runner/work/paimos/paimos/web/tests/done-gate.spec.ts:59:7",
+      "failed_cases": 4,
+      "cases": [
+        "one ticket asks before Done (1600 light)",
+        "one ticket asks before Done (390 light)",
+        "one ticket asks before Done (1600 dark)",
+        "one ticket asks before Done (390 dark)"
+      ],
+      "assertion_locations": [
+        "web/tests/done-gate.spec.ts:59:7"
+      ],
+      "main_commit_that_broke_it": "b245d054b",
+      "owning_ticket": "AEON-1239 (source AEON-521 / AEON-917)",
+      "stale-spec_or_real-regression": "stale-spec",
+      "smallest_fix": "Done is choice 7, keyboard cursor is separate from checkbox selection, and screenshots must use per-test outputPath.",
+      "source": "web/src/lib/work.ts",
+      "disposition": "fixed locally; remote proof blocked"
+    },
+    {
+      "job": "nightly-web-shard (2)",
+      "test/spec:line": "web/tests/done-gate.spec.ts:88",
+      "failure": "Error: expect(locator).toBeVisible() failed\n\n    Locator: getByRole('dialog', { name: 'Before it\\'s done: what does the user gain?' })\n    Expected: visible\n    Timeout: 5000ms\n    Error: element(s) not found",
+      "failed_cases": 4,
+      "cases": [
+        "bulk Done asks only for the ticket that is not ready (1600 light)",
+        "bulk Done asks only for the ticket that is not ready (390 light)",
+        "bulk Done asks only for the ticket that is not ready (1600 dark)",
+        "bulk Done asks only for the ticket that is not ready (390 dark)"
+      ],
+      "assertion_locations": [
+        "web/tests/done-gate.spec.ts:103:28"
+      ],
+      "main_commit_that_broke_it": "b245d054b",
+      "owning_ticket": "AEON-1239 (source AEON-521 / AEON-917)",
+      "stale-spec_or_real-regression": "stale-spec",
+      "smallest_fix": "Done is choice 7, keyboard cursor is separate from checkbox selection, and screenshots must use per-test outputPath.",
+      "source": "web/src/lib/work.ts",
+      "disposition": "fixed locally; remote proof blocked"
+    },
+    {
+      "job": "nightly-web-shard (2)",
+      "test/spec:line": "web/tests/done-gate.spec.ts:120",
+      "failure": "Error: expect(locator).toHaveAttribute(expected) failed\n\n    Locator:  getByRole('grid', { name: 'Tickets' }).locator('tr.ticket-row').filter({ has: locator('.key').filter({ hasText: /^PHAROS-11$/ }) })\n    Expected: \"true\"\n    Received: \"false\"\n    Timeout:  5000ms",
+      "failed_cases": 4,
+      "cases": [
+        "keyboard Done asks before the status changes (1600 light)",
+        "keyboard Done asks before the status changes (390 light)",
+        "keyboard Done asks before the status changes (1600 dark)",
+        "keyboard Done asks before the status changes (390 dark)"
+      ],
+      "assertion_locations": [
+        "web/tests/done-gate.spec.ts:127:44"
+      ],
+      "main_commit_that_broke_it": "b245d054b",
+      "owning_ticket": "AEON-1239 (source AEON-521 / AEON-917)",
+      "stale-spec_or_real-regression": "stale-spec",
+      "smallest_fix": "Done is choice 7, keyboard cursor is separate from checkbox selection, and screenshots must use per-test outputPath.",
+      "source": "web/src/lib/work.ts",
+      "disposition": "fixed locally; remote proof blocked"
+    },
+    {
+      "job": "nightly-web-shard (2)",
+      "test/spec:line": "web/tests/done-gate.spec.ts:224",
+      "failure": "Error: expect(locator).toBeVisible() failed\n\n    Locator: getByRole('dialog', { name: 'Before it\\'s done: what does the user gain?' }).getByText('1 of 2')\n    Expected: visible\n    Timeout: 5000ms\n    Error: element(s) not found",
+      "failed_cases": 2,
+      "cases": [
+        "bulk step-through ends with a summary (1600)",
+        "bulk step-through ends with a summary (390)"
+      ],
+      "assertion_locations": [
+        "web/tests/done-gate.spec.ts:239:46"
+      ],
+      "main_commit_that_broke_it": "b245d054b",
+      "owning_ticket": "AEON-1239 (source AEON-521 / AEON-917)",
+      "stale-spec_or_real-regression": "stale-spec",
+      "smallest_fix": "Done is choice 7, keyboard cursor is separate from checkbox selection, and screenshots must use per-test outputPath.",
+      "source": "web/src/lib/work.ts",
+      "disposition": "fixed locally; remote proof blocked"
+    },
+    {
+      "job": "nightly-web-shard (2)",
+      "test/spec:line": "web/tests/eta-column.spec.ts:29",
+      "failure": "Error: expect(received).toBe(expected) // Object.is equality\n\n    Expected: true\n    Received: false\n\n      58 |     const value = (await cell.locator('.eta-cell').boundingBox())!\n      59 |     expect(Math.abs(value.x + value.width - (headerBox.x + headerBox.width - 6))).toBeLessThan(3)\n    > 60 |     expect(await cell.evaluate(td => { const el = td.querySelector('.when > .shown') as HTMLElement; return el.scrollWidth <= el.clientWidth })).toBe(true)\n         |                                                                                                                                                  ^\n      61 |   }\n      62 |\n      63 |   await header.getByRole('button', { name: 'ETA' }).click()\n        at /home/runner/work/paimos/paimos/web/tests/eta-column.spec.ts:60:146",
+      "failed_cases": 1,
+      "cases": [
+        "the ETA column shows fresh, overdue and stale estimates under its header and stays empty when none was reported"
+      ],
+      "assertion_locations": [
+        "web/tests/eta-column.spec.ts:60:146"
+      ],
+      "main_commit_that_broke_it": null,
+      "suspected_commit": {
+        "path": "web/src/components/work/TicketTable.vue",
+        "last_source_change_at_nightly": "1fd486ce0 AEON-1148: use canonical attention links and model update rules",
+        "attribution": "suspected only; not a proven introducing commit or bisect"
+      },
+      "owning_ticket": "AEON-784 / LEAD new regression",
+      "stale-spec_or_real-regression": "real-regression",
+      "smallest_fix": "ETA .when > .shown clips, and the 1100px session grid clips. Preserve the actual geometry failures; investigate the column/card width constraints.",
+      "disposition": "evidence only; exact cause/introducing commit not proven; LEAD reproduces and tickets"
+    },
+    {
+      "job": "nightly-web-shard (2)",
+      "test/spec:line": "web/tests/eta-column.spec.ts:146",
+      "failure": "Error: expect(received).toBe(expected) // Object.is equality\n\n    Expected: true\n    Received: false\n\n      166 |       const fits = await sessionRow(page, n).evaluate(row => [...row.querySelectorAll<HTMLElement>(':scope > [role=\"gridcell\"]')].every(cell => cell.scrollWidth <= cell.clientWidth + 1)\n      167 |         && [...row.querySelectorAll<HTMLElement>('.when > .shown')].every(el => el.scrollWidth <= el.clientWidth))\n    > 168 |       expect(fits).toBe(true)\n          |                    ^\n      169 |     }\n      170 |     expect(await page.evaluate(() => document.documentElement.scrollWidth <= document.documentElement.clientWidth)).toBe(true)\n      171 |   })\n        at /home/runner/work/paimos/paimos/web/tests/eta-column.spec.ts:168:20",
+      "failed_cases": 1,
+      "cases": [
+        "the sessions table carries the bound ticket's estimate without overflowing its columns at 1100px"
+      ],
+      "assertion_locations": [
+        "web/tests/eta-column.spec.ts:168:20"
+      ],
+      "main_commit_that_broke_it": null,
+      "suspected_commit": {
+        "path": "web/src/components/work/TicketTable.vue",
+        "last_source_change_at_nightly": "1fd486ce0 AEON-1148: use canonical attention links and model update rules",
+        "attribution": "suspected only; not a proven introducing commit or bisect"
+      },
+      "owning_ticket": "AEON-784 / LEAD new regression",
+      "stale-spec_or_real-regression": "real-regression",
+      "smallest_fix": "ETA .when > .shown clips, and the 1100px session grid clips. Preserve the actual geometry failures; investigate the column/card width constraints.",
+      "disposition": "evidence only; exact cause/introducing commit not proven; LEAD reproduces and tickets"
+    },
+    {
+      "job": "nightly-web-shard (2)",
+      "test/spec:line": "web/tests/indicator-creative-gallery.spec.ts:93",
+      "failure": "Error: expect(locator).toHaveCSS(expected) failed\n\n    Locator:  getByTestId('probe-Orbit').locator('svg.agent-indicator-art').locator('.glint')\n    Expected: \"rgb(201, 162, 74)\"\n    Received: \"rgb(194, 136, 18)\"\n    Timeout:  5000ms",
+      "failed_cases": 1,
+      "cases": [
+        "only new event counters glint, including consecutive events; stale cancels"
+      ],
+      "assertion_locations": [
+        "web/tests/indicator-creative-gallery.spec.ts:104:25"
+      ],
+      "main_commit_that_broke_it": "8c11c3dff",
+      "owning_ticket": "AEON-1239 (source AEON-752)",
+      "stale-spec_or_real-regression": "stale-spec",
+      "smallest_fix": "Use the approved secondary-line token rather than the retired hard-coded gold; retain duration, single iteration and state/motion checks.",
+      "source": "web/src/components/indicators/Robot3.vue",
+      "disposition": "fixed locally; remote proof blocked"
+    },
+    {
+      "job": "nightly-web-shard (2)",
+      "test/spec:line": "web/tests/phone-select.spec.ts:11",
+      "failure": "Error: expect(locator).toBeVisible() failed\n\n    Locator: getByRole('dialog', { name: 'Release for 2 tickets' }).getByRole('option', { name: 'Release 2 In planning' })\n    Expected: visible\n    Timeout: 5000ms\n    Error: element(s) not found",
+      "failed_cases": 1,
+      "cases": [
+        "on a phone, select two tickets, open Add to release, then cancel"
+      ],
+      "assertion_locations": [
+        "web/tests/phone-select.spec.ts:37:79"
+      ],
+      "main_commit_that_broke_it": "7e729d603",
+      "owning_ticket": "AEON-1239 (source AEON-723)",
+      "stale-spec_or_real-regression": "stale-spec",
+      "smallest_fix": "Provide the native planning-release response using releaseWorld/mockReleases, retaining the two-ticket selection and sheet geometry.",
+      "source": "web/src/components/work/ReleasePicker.vue",
+      "disposition": "fixed locally; remote proof blocked"
+    },
+    {
+      "job": "nightly-web-shard (2)",
+      "test/spec:line": "web/tests/session-chat.spec.ts:159",
+      "failure": "Error: expect(received).toEqual(expected) // deep equality\n\n    - Expected  - 1\n    + Received  + 1\n\n      Object {\n        \"doc\": true,\n        \"inner\": true,\n    -   \"panel\": true,\n    +   \"panel\": false,\n      }\n\n      162 |     await page.goto(`/agents/${worker.id}`)\n      163 |     await expect(panelOf(page).getByRole('tab', { name: 'Overview' })).toHaveAttribute('aria-selected', 'true')\n    > 164 |     expect(await noHorizontalScroll(page)).toEqual({ doc: true, panel: true, inner: true })\n          |                                            ^\n      165 |     await messagesTab(page).click()\n      166 |     await expect(panelOf(page).getByText(longUrl.slice(0, 40), { exact: false }).first()).toBeVisible()\n      167 |     expect(await noHorizontalScroll(page)).toEqual({ doc: true, panel: true, inner: true })\n        at /home/runner/work/paimos/paimos/web/tests/session-chat.spec.ts:164:44",
+      "failed_cases": 1,
+      "cases": [
+        "430: no horizontal scroll with long URLs and IDs, in both tabs and while replying"
+      ],
+      "assertion_locations": [
+        "web/tests/session-chat.spec.ts:164:44"
+      ],
+      "main_commit_that_broke_it": null,
+      "suspected_commit": {
+        "path": "web/src/components/agents/SessionPanel.vue",
+        "last_source_change_at_nightly": "b84d022cd AEON-1062: polish from INSPR QA (computers plural, chat header, dark Stop, Models names)",
+        "attribution": "suspected only; not a proven introducing commit or bisect"
+      },
+      "owning_ticket": "AEON-1238 (panel overflow) / LEAD",
+      "stale-spec_or_real-regression": "real-regression",
+      "smallest_fix": "430px chat panel overflows horizontally by 4px. Keep the phone overflow check; owning panel fix needed.",
+      "disposition": "evidence only; same geometry family as session-requests"
+    },
+    {
+      "job": "nightly-web-shard (2)",
+      "test/spec:line": "web/tests/session-chat.spec.ts:390",
+      "failure": "Error: expect(received).toBe(expected) // Object.is equality\n\n    Expected: true\n    Received: false\n\n    Call Log:\n    - Timeout 5000ms exceeded while waiting on the predicate\n\n      399 |   // thread that already fits, so scrollTop stays 0 and no scroll event re-pins.\n      400 |   await expect.poll(() => localEvent(page, worker.id)).toBeGreaterThan(200)\n    > 401 |   await expect.poll(() => thread.evaluate(el => el.scrollTop === 0 && el.scrollHeight <= el.clientHeight)).toBe(true)\n          |                                                                                                            ^\n      402 |   await thread.evaluate(el => {\n      403 |     el.dispatchEvent(new WheelEvent('wheel', { bubbles: true, deltaY: -120 }))\n      404 |     const start = new Touch({ identifier: 1, target: el, clientX: 30, clientY: 200 })\n        at /home/runner/work/paimos/paimos/web/tests/session-chat.spec.ts:401:108",
+      "failed_cases": 1,
+      "cases": [
+        "an upward gesture on a thread that fits still follows the next post"
+      ],
+      "assertion_locations": [
+        "web/tests/session-chat.spec.ts:401:108"
+      ],
+      "main_commit_that_broke_it": "2c33f633d (queued-message composer consumes space)",
+      "owning_ticket": "AEON-1239 (source AEON-273 / AEON-977)",
+      "stale-spec_or_real-regression": "stale-spec",
+      "smallest_fix": "The fitting-thread gesture fixture included a very long URL. Seed two short posts for this specific fit precondition; keep all gestures, tall next post, latest-follow and read-marker checks. Long-token wrapping stays in its dedicated case.",
+      "disposition": "fixed locally; remote proof blocked"
+    },
+    {
+      "job": "nightly-web-shard (6)",
+      "test/spec:line": "web/tests/from-classic.spec.ts:29",
+      "failure": "Error: expect(locator).toContainText(expected) failed\n\n    Locator: locator('.toast')\n    Expected substring: \"That old link has moved\"\n    Error: strict mode violation: locator('.toast') resolved to 2 elements:",
+      "failed_cases": 1,
+      "cases": [
+        "known and unknown classic links resolve through the API"
+      ],
+      "assertion_locations": [],
+      "main_commit_that_broke_it": "f36956ec9",
+      "owning_ticket": "AEON-1239 (source AEON-785)",
+      "stale-spec_or_real-regression": "stale-spec",
+      "smallest_fix": "A global count announcement/toast adds another status. Scope the old-link notification by its own message.",
+      "source": "web/src/components/AppFooter.vue",
+      "disposition": "fixed locally; remote proof blocked"
+    },
+    {
+      "job": "nightly-web-shard (6)",
+      "test/spec:line": "web/tests/pi-openrouter.spec.ts:64",
+      "failure": "Error: expect(locator).toContainText(expected) failed\n\n    Locator: locator('.pi-model-caption')\n    Expected substring: \"stealth/space-bunny-alpha\"\n    Timeout: 5000ms\n    Error: element(s) not found",
+      "failed_cases": 4,
+      "cases": [
+        "pi Start pins the Settings model 1600 light",
+        "pi Start pins the Settings model 390 light",
+        "pi Start pins the Settings model 1600 dark",
+        "pi Start pins the Settings model 390 dark"
+      ],
+      "assertion_locations": [
+        "web/tests/pi-openrouter.spec.ts:68:51"
+      ],
+      "main_commit_that_broke_it": "276851ef1",
+      "owning_ticket": "AEON-1239 (source AEON-741)",
+      "stale-spec_or_real-regression": "stale-spec",
+      "smallest_fix": "Expert Start is under New / Start agent manually. Verify the Settings-pinned readonly model in its actual dialog and exact POST profile; the old page caption was retired.",
+      "source": "web/src/views/AgentsView.vue",
+      "disposition": "fixed locally; remote proof blocked"
+    },
+    {
+      "job": "nightly-web-shard (6)",
+      "test/spec:line": "web/tests/work-kinds.spec.ts:318",
+      "failure": "Error: expect(locator).toBeInViewport() failed\n\n    Locator:  getByRole('heading', { name: 'Situation limits' })\n    Expected: in viewport\n    Received: viewport ratio 0\n    Timeout:  5000ms",
+      "failed_cases": 1,
+      "cases": [
+        "the situations link on Models still lands on the limits, opening the fold"
+      ],
+      "assertion_locations": [
+        "web/tests/work-kinds.spec.ts:321:73"
+      ],
+      "main_commit_that_broke_it": null,
+      "suspected_commit": {
+        "path": "web/src/components/settings/KindsAdvanced.vue",
+        "last_source_change_at_nightly": "8086283e5 AEON-997: keep kind actions still and recover stale limits",
+        "attribution": "suspected only; no introducing commit proven"
+      },
+      "owning_ticket": "AEON-997 / LEAD new regression",
+      "stale-spec_or_real-regression": "real-regression",
+      "smallest_fix": "The #k-sits deep link opens the fold but leaves Situation limits outside the viewport. Investigate scrolling before the fold is rendered; keep deep-link arrival assertion.",
+      "disposition": "evidence only; exact cause/introducing commit not proven; LEAD reproduces and tickets"
+    },
+    {
+      "job": "nightly-web-shard (6)",
+      "test/spec:line": "web/tests/recurrence-marker.spec.ts:162",
+      "failure": "Error: expect(received).toBe(expected) // Object.is equality\n\n    Expected: 11\n    Received: 12\n\n      175 |     await expect(icon).toHaveAttribute('title', label)\n      176 |     const geometry = await icon.locator('.recurrence-dot').evaluate(el => ({ width: el.getBoundingClientRect().width, height: el.getBoundingClientRect().height, ring: getComputedStyle(el).boxShadow, gold: getComputedStyle(el).backgroundColor, token: getComputedStyle(document.documentElement).getPropertyValue('--marker').trim() }))\n    > 177 |     expect(geometry.width).toBe(11); expect(geometry.height).toBe(11); expect(geometry.ring).toContain('1.5px')\n          |                            ^\n      178 |     expect(geometry.gold).toBe(await page.evaluate(() => { const el = document.createElement('span'); el.style.color = 'var(--marker)'; document.body.append(el); const color = getComputedStyle(el).color; el.remove(); return color }))\n      179 |     mkdirSync(shots, { recursive: true })\n      180 |     await page.screenshot({ path: join(shots, `list-${width}-${theme}.png`) })\n        at /home/runner/work/paimos/paimos/web/tests/recurrence-marker.spec.ts:177:28",
+      "failed_cases": 6,
+      "cases": [
+        "option B has a stable 22 px slot and header at 390px in light",
+        "option B has a stable 22 px slot and header at 390px in dark",
+        "option B has a stable 22 px slot and header at 1024px in light",
+        "option B has a stable 22 px slot and header at 1024px in dark",
+        "option B has a stable 22 px slot and header at 1440px in light",
+        "option B has a stable 22 px slot and header at 1440px in dark"
+      ],
+      "assertion_locations": [
+        "web/tests/recurrence-marker.spec.ts:177:28"
+      ],
+      "main_commit_that_broke_it": "4a049ecad",
+      "owning_ticket": "AEON-1239 (source AEON-644 / AEON-637)",
+      "stale-spec_or_real-regression": "stale-spec",
+      "smallest_fix": "The approved marker is 12px in the unchanged 22px slot with a 1.5px ring. Retain colour, inset and column geometry checks.",
+      "source": "web/src/components/work/TicketTypeIcon.vue",
+      "disposition": "fixed locally; remote proof blocked"
+    },
+    {
+      "job": "nightly-web-shard (12)",
+      "test/spec:line": "web/tests/delivery-guarantee.spec.ts:108",
+      "failure": "Error: expect(locator).toHaveCount(expected) failed\n\n    Locator:  getByRole('complementary', { name: 'Session details' }).locator('.msg.mine')\n    Expected: 4\n    Received: 3\n    Timeout:  5000ms",
+      "failed_cases": 4,
+      "cases": [
+        "light 1600: own posts read Sent, Delivered, Read or Not delivered, live",
+        "light 390: own posts read Sent, Delivered, Read or Not delivered, live",
+        "dark 1600: own posts read Sent, Delivered, Read or Not delivered, live",
+        "dark 390: own posts read Sent, Delivered, Read or Not delivered, live"
+      ],
+      "assertion_locations": [
+        "web/tests/delivery-guarantee.spec.ts:114:26"
+      ],
+      "main_commit_that_broke_it": "2c33f633d",
+      "owning_ticket": "AEON-1239 (source AEON-977)",
+      "stale-spec_or_real-regression": "stale-spec",
+      "smallest_fix": "Sent work waiting for the turn is in the outbox queue. Assert three delivered-thread posts plus the fourth queued post, then four thread posts when its receipt advances. Preserve exact own-message receipt queries.",
+      "source": "web/src/components/agents/SessionChat.vue",
+      "disposition": "fixed locally; remote proof blocked"
+    },
+    {
+      "job": "nightly-web-shard (12)",
+      "test/spec:line": "web/tests/live-list.spec.ts:31",
+      "failure": "Error: expect(locator).toHaveText(expected) failed\n\n    Locator: locator('#row-n-4').locator('.live-label')\n    Expected: \"Closed\"\n    Timeout: 5000ms\n    Error: element(s) not found",
+      "failed_cases": 1,
+      "cases": [
+        "a ticket closed elsewhere dims in place, then leaves by itself when nothing is going on"
+      ],
+      "assertion_locations": [
+        "web/tests/live-list.spec.ts:39:46"
+      ],
+      "main_commit_that_broke_it": "f053c9b49",
+      "owning_ticket": "AEON-1239 (source AEON-326 / AEON-1018)",
+      "stale-spec_or_real-regression": "stale-spec",
+      "smallest_fix": "The SSE server fixture incorrectly shared one cursor between all subscribers in a page. Give each real Chromium EventSource connection a fixture id and its own cursor; preserve every spec assertion.",
+      "source": "web/tests/live-server.ts",
+      "disposition": "fixed locally; remote proof blocked"
+    },
+    {
+      "job": "nightly-web-shard (12)",
+      "test/spec:line": "web/tests/live-list.spec.ts:206",
+      "failure": "Error: expect(locator).toHaveText(expected) failed\n\n    Locator: locator('#row-n-2 .live-label')\n    Expected: \"Changed\"\n    Timeout: 5000ms\n    Error: element(s) not found",
+      "failed_cases": 1,
+      "cases": [
+        "Show leaves the row under an open editor as it was: saving still meets the change as a conflict"
+      ],
+      "assertion_locations": [
+        "web/tests/live-list.spec.ts:217:53"
+      ],
+      "main_commit_that_broke_it": "f053c9b49",
+      "owning_ticket": "AEON-1239 (source AEON-326 / AEON-1018)",
+      "stale-spec_or_real-regression": "stale-spec",
+      "smallest_fix": "The SSE server fixture incorrectly shared one cursor between all subscribers in a page. Give each real Chromium EventSource connection a fixture id and its own cursor; preserve every spec assertion.",
+      "source": "web/tests/live-server.ts",
+      "disposition": "fixed locally; remote proof blocked"
+    },
+    {
+      "job": "nightly-web-shard (12)",
+      "test/spec:line": "web/tests/live-list.spec.ts:232",
+      "failure": "Error: expect(received).toEqual(expected) // deep equality\n\n    - Expected  - 1\n    + Received  + 3\n\n    - Array []\n    + Array [\n    +   \"n-2,n-epic\",\n    + ]\n\n      251 |     await expect.poll(() => live.requests.filter(r => r.page === 'a').length).toBeGreaterThan(streams + 1)\n      252 |     await a.waitForTimeout(500)\n    > 253 |     expect(reads.slice(before)).toEqual([])\n          |                                 ^\n      254 |     await expect(said(a)).toHaveText('PHAROS-12 was updated elsewhere: title.')\n      255 |     expect(errorsA).toEqual([])\n      256 |   } finally { await close() }\n        at /home/runner/work/paimos/paimos/web/tests/live-list.spec.ts:253:33",
+      "failed_cases": 1,
+      "cases": [
+        "changes by the same person in another tab reach the list; the tab’s own changes need no read"
+      ],
+      "assertion_locations": [
+        "web/tests/live-list.spec.ts:253:33"
+      ],
+      "main_commit_that_broke_it": "f053c9b49",
+      "owning_ticket": "AEON-1239 (source AEON-326 / AEON-1018)",
+      "stale-spec_or_real-regression": "stale-spec",
+      "smallest_fix": "The SSE server fixture incorrectly shared one cursor between all subscribers in a page. Give each real Chromium EventSource connection a fixture id and its own cursor; preserve every spec assertion.",
+      "source": "web/tests/live-server.ts",
+      "disposition": "fixed locally; remote proof blocked"
+    },
+    {
+      "job": "nightly-web-shard (12)",
+      "test/spec:line": "web/tests/live-list.spec.ts:297",
+      "failure": "Error: expect(locator).toHaveText(expected) failed\n\n    Locator: locator('#row-n-4').locator('.live-label')\n    Expected: \"Deleted\"\n    Timeout: 5000ms\n    Error: element(s) not found",
+      "failed_cases": 1,
+      "cases": [
+        "on a phone the marked row, the pill and the deleted selection fit 390 px"
+      ],
+      "assertion_locations": [
+        "web/tests/live-list.spec.ts:305:48"
+      ],
+      "main_commit_that_broke_it": "f053c9b49",
+      "owning_ticket": "AEON-1239 (source AEON-326 / AEON-1018)",
+      "stale-spec_or_real-regression": "stale-spec",
+      "smallest_fix": "The SSE server fixture incorrectly shared one cursor between all subscribers in a page. Give each real Chromium EventSource connection a fixture id and its own cursor; preserve every spec assertion.",
+      "source": "web/tests/live-server.ts",
+      "disposition": "fixed locally; remote proof blocked"
+    },
+    {
+      "job": "nightly-web-shard (12)",
+      "test/spec:line": "web/tests/outline.spec.ts:65",
+      "failure": "Error: expect(locator).toHaveCount(expected) failed\n\n    Locator:  getByRole('complementary', { name: 'Ticket details' }).getByRole('region', { name: 'Tickets in this epic' }).locator('.child-row')\n    Expected: 1\n    Received: 0\n    Timeout:  5000ms",
+      "failed_cases": 1,
+      "cases": [
+        "a created child moved away remotely and back locally remains expandable after reload"
+      ],
+      "assertion_locations": [
+        "web/tests/outline.spec.ts:75:50"
+      ],
+      "main_commit_that_broke_it": "d15114c1a",
+      "owning_ticket": "AEON-1239 (source AEON-655 / AEON-917)",
+      "stale-spec_or_real-regression": "stale-spec",
+      "smallest_fix": "Use unified root kind/order, Parent labels, modifier submission, two-step Escape, separate cursor, explicit root drop and depth-relative phone inset. Target the Source that subscribes to node.updated; another screen subscriber must not overwrite the controllable work stream. Preserve held-page, revision, duplicate, move, deletion and geometry assertions.",
+      "source": "web/src/lib/useOutline.ts",
+      "disposition": "fixed locally; remote proof blocked"
+    },
+    {
+      "job": "nightly-web-shard (12)",
+      "test/spec:line": "web/tests/outline.spec.ts:99",
+      "failure": "Error: expect(locator).toHaveText(expected) failed\n\n    Locator: getByRole('treegrid', { name: 'Ticket outline' }).locator('tr.ticket-row:not(.ghost) .key')\n    Timeout: 5000ms\n    - Expected  - 1\n    + Received  + 1\n\n      Array [\n    +   \"PHAROS-14\",\n        \"PHAROS-10\",\n        \"PHAROS-30\",\n    -   \"PHAROS-14\",\n      ]",
+      "failed_cases": 1,
+      "cases": [
+        "the List | Outline switch keeps the view in the URL and the same toolbar"
+      ],
+      "assertion_locations": [
+        "web/tests/outline.spec.ts:107:28"
+      ],
+      "main_commit_that_broke_it": "d15114c1a",
+      "owning_ticket": "AEON-1239 (source AEON-655 / AEON-917)",
+      "stale-spec_or_real-regression": "stale-spec",
+      "smallest_fix": "Use unified root kind/order, Parent labels, modifier submission, two-step Escape, separate cursor, explicit root drop and depth-relative phone inset. Target the Source that subscribes to node.updated; another screen subscriber must not overwrite the controllable work stream. Preserve held-page, revision, duplicate, move, deletion and geometry assertions.",
+      "source": "web/src/lib/useOutline.ts",
+      "disposition": "fixed locally; remote proof blocked"
+    },
+    {
+      "job": "nightly-web-shard (12)",
+      "test/spec:line": "web/tests/outline.spec.ts:128",
+      "failure": "Error: expect(received).toEqual(expected) // deep equality\n\n    - Expected  - 2\n    + Received  + 1\n\n      Array [\n    -   \"epic\",\n    -   \"ticket,task\",\n    +   \"work,epic,ticket,task\",\n      ]\n\n      134 |   // With closed work shown the outline loads lazily: epics and loose work, then children on demand.\n      135 |   const roots = lists(calls).filter(call => call.query.get('parent_id') === 'p-pharos')\n    > 136 |   expect(roots.map(call => call.query.get('kind')).sort()).toEqual(['epic', 'ticket,task'])\n          |                                                            ^\n      137 |   await expect(row(page, 'PHAROS-10').locator('.epic-progress')).toHaveText('0/3')\n      138 |   await expect(row(page, 'PHAROS-30').locator('.epic-progress')).toHaveText('1/2')\n      139 |   // Chevrons only where there are children.\n        at /home/runner/work/paimos/paimos/web/tests/outline.spec.ts:136:60",
+      "failed_cases": 1,
+      "cases": [
+        "epics show subtree progress; children indent under their parents with guide lines"
+      ],
+      "assertion_locations": [
+        "web/tests/outline.spec.ts:136:60"
+      ],
+      "main_commit_that_broke_it": "d15114c1a",
+      "owning_ticket": "AEON-1239 (source AEON-655 / AEON-917)",
+      "stale-spec_or_real-regression": "stale-spec",
+      "smallest_fix": "Use unified root kind/order, Parent labels, modifier submission, two-step Escape, separate cursor, explicit root drop and depth-relative phone inset. Target the Source that subscribes to node.updated; another screen subscriber must not overwrite the controllable work stream. Preserve held-page, revision, duplicate, move, deletion and geometry assertions.",
+      "source": "web/src/lib/useOutline.ts",
+      "disposition": "fixed locally; remote proof blocked"
+    },
+    {
+      "job": "nightly-web-shard (12)",
+      "test/spec:line": "web/tests/outline.spec.ts:179",
+      "failure": "Error: expect(locator).toHaveAttribute(expected) failed\n\n    Locator:  getByRole('treegrid', { name: 'Ticket outline' }).locator('tr.ticket-row').filter({ has: locator('.key').filter({ hasText: /^PHAROS-10$/ }) })\n    Expected: \"true\"\n    Received: \"false\"\n    Timeout:  5000ms",
+      "failed_cases": 1,
+      "cases": [
+        "keyboard: arrows open and close, step in and out; Space toggles; Enter opens"
+      ],
+      "assertion_locations": [
+        "web/tests/outline.spec.ts:184:40"
+      ],
+      "main_commit_that_broke_it": "d15114c1a",
+      "owning_ticket": "AEON-1239 (source AEON-655 / AEON-917)",
+      "stale-spec_or_real-regression": "stale-spec",
+      "smallest_fix": "Use unified root kind/order, Parent labels, modifier submission, two-step Escape, separate cursor, explicit root drop and depth-relative phone inset. Target the Source that subscribes to node.updated; another screen subscriber must not overwrite the controllable work stream. Preserve held-page, revision, duplicate, move, deletion and geometry assertions.",
+      "source": "web/src/lib/useOutline.ts",
+      "disposition": "fixed locally; remote proof blocked"
+    },
+    {
+      "job": "nightly-web-shard (12)",
+      "test/spec:line": "web/tests/outline.spec.ts:209",
+      "failure": "Error: expect(locator).toHaveAttribute(expected) failed\n\n    Locator:  getByLabel('New ticket title')\n    Expected: \"Ticket in PHAROS-10\"\n    Received: \"Ticket title\"\n    Timeout:  5000ms",
+      "failed_cases": 1,
+      "cases": [
+        "n on an epic creates tickets inside it and stays open for the next"
+      ],
+      "assertion_locations": [
+        "web/tests/outline.spec.ts:217:23"
+      ],
+      "main_commit_that_broke_it": "d15114c1a",
+      "owning_ticket": "AEON-1239 (source AEON-655 / AEON-917)",
+      "stale-spec_or_real-regression": "stale-spec",
+      "smallest_fix": "Use unified root kind/order, Parent labels, modifier submission, two-step Escape, separate cursor, explicit root drop and depth-relative phone inset. Target the Source that subscribes to node.updated; another screen subscriber must not overwrite the controllable work stream. Preserve held-page, revision, duplicate, move, deletion and geometry assertions.",
+      "source": "web/src/lib/useOutline.ts",
+      "disposition": "fixed locally; remote proof blocked"
+    },
+    {
+      "job": "nightly-web-shard (12)",
+      "test/spec:line": "web/tests/outline.spec.ts:230",
+      "failure": "Error: expect(locator).toBeVisible() failed\n\n    Locator: getByText('PHAROS-14 moved out of its epic')\n    Expected: visible\n    Timeout: 5000ms\n    Error: element(s) not found",
+      "failed_cases": 1,
+      "cases": [
+        "dragging a ticket onto an epic moves it there, guarded against newer copies"
+      ],
+      "assertion_locations": [
+        "web/tests/outline.spec.ts:245:67"
+      ],
+      "main_commit_that_broke_it": "d15114c1a",
+      "owning_ticket": "AEON-1239 (source AEON-655 / AEON-917)",
+      "stale-spec_or_real-regression": "stale-spec",
+      "smallest_fix": "Use unified root kind/order, Parent labels, modifier submission, two-step Escape, separate cursor, explicit root drop and depth-relative phone inset. Target the Source that subscribes to node.updated; another screen subscriber must not overwrite the controllable work stream. Preserve held-page, revision, duplicate, move, deletion and geometry assertions.",
+      "source": "web/src/lib/useOutline.ts",
+      "disposition": "fixed locally; remote proof blocked"
+    },
+    {
+      "job": "nightly-web-shard (12)",
+      "test/spec:line": "web/tests/outline.spec.ts:316",
+      "failure": "Error: expect(received).toBe(expected) // Object.is equality\n\n    Expected: \"24px\"\n    Received: \"12px\"\n\n      328 |     const key = (await child.locator('.c-key').boundingBox())!, title = (await child.locator('.title-link').boundingBox())!\n      329 |     expect(title.y).toBeGreaterThan(key.y + key.height - 1)\n    > 330 |     expect(await child.evaluate(el => getComputedStyle(el).paddingLeft)).toBe('24px')\n          |                                                                          ^\n      331 |     await child.locator('.title-link').click()\n      332 |     await expect(page.getByRole('complementary', { name: 'Ticket details' })).toBeVisible()\n      333 |     expect(errors).toEqual([])\n        at /home/runner/work/paimos/paimos/web/tests/outline.spec.ts:330:74",
+      "failed_cases": 2,
+      "cases": [
+        "on a phone outline rows are two lines; the chevron expands and the row opens in light",
+        "on a phone outline rows are two lines; the chevron expands and the row opens in dark"
+      ],
+      "assertion_locations": [
+        "web/tests/outline.spec.ts:330:74"
+      ],
+      "main_commit_that_broke_it": "d15114c1a",
+      "owning_ticket": "AEON-1239 (source AEON-655 / AEON-917)",
+      "stale-spec_or_real-regression": "stale-spec",
+      "smallest_fix": "Use unified root kind/order, Parent labels, modifier submission, two-step Escape, separate cursor, explicit root drop and depth-relative phone inset. Target the Source that subscribes to node.updated; another screen subscriber must not overwrite the controllable work stream. Preserve held-page, revision, duplicate, move, deletion and geometry assertions.",
+      "source": "web/src/lib/useOutline.ts",
+      "disposition": "fixed locally; remote proof blocked"
+    },
+    {
+      "job": "nightly-web-shard (12)",
+      "test/spec:line": "web/tests/outline.spec.ts:372",
+      "failure": "Error: expect(locator).toContainText(expected) failed\n\n    Locator: getByRole('treegrid', { name: 'Ticket outline' }).locator('tr.ticket-row').filter({ has: locator('.key').filter({ hasText: /^PHAROS-11$/ }) })\n    Expected substring: \"Hetzner title changed live\"\n    Received string:    \"PHAROS-11Connect Hetzner Cloud for managed provisioningIn progressstaleHighMBMarkus Barta1h ago\"\n    Timeout: 5000ms",
+      "failed_cases": 2,
+      "cases": [
+        "AEON-385: live Outline patches fields and holds moves, additions and deletion until Show (light)",
+        "AEON-385: live Outline patches fields and holds moves, additions and deletion until Show (dark)"
+      ],
+      "assertion_locations": [
+        "web/tests/outline.spec.ts:384:36"
+      ],
+      "main_commit_that_broke_it": "d15114c1a",
+      "owning_ticket": "AEON-1239 (source AEON-655 / AEON-917)",
+      "stale-spec_or_real-regression": "stale-spec",
+      "smallest_fix": "Use unified root kind/order, Parent labels, modifier submission, two-step Escape, separate cursor, explicit root drop and depth-relative phone inset. Target the Source that subscribes to node.updated; another screen subscriber must not overwrite the controllable work stream. Preserve held-page, revision, duplicate, move, deletion and geometry assertions.",
+      "source": "web/src/lib/useOutline.ts",
+      "disposition": "fixed locally; remote proof blocked"
+    },
+    {
+      "job": "nightly-web-shard (12)",
+      "test/spec:line": "web/tests/outline.spec.ts:420",
+      "failure": "Error: expect(locator).toContainText(expected) failed\n\n    Locator: getByRole('treegrid', { name: 'Ticket outline' }).locator('tr.ticket-row').filter({ has: locator('.key').filter({ hasText: /^PHAROS-10$/ }) })\n    Expected substring: \"Ancestor renamed live\"\n    Received string:    \"PHAROS-10Guarded multi-cloud provisioning0/2BacklogstaleHigh—yesterday\"\n    Timeout: 5000ms",
+      "failed_cases": 1,
+      "cases": [
+        "AEON-385: filtered ancestor values and ancestry follow events without reloading"
+      ],
+      "assertion_locations": [
+        "web/tests/outline.spec.ts:430:37"
+      ],
+      "main_commit_that_broke_it": "d15114c1a",
+      "owning_ticket": "AEON-1239 (source AEON-655 / AEON-917)",
+      "stale-spec_or_real-regression": "stale-spec",
+      "smallest_fix": "Use unified root kind/order, Parent labels, modifier submission, two-step Escape, separate cursor, explicit root drop and depth-relative phone inset. Target the Source that subscribes to node.updated; another screen subscriber must not overwrite the controllable work stream. Preserve held-page, revision, duplicate, move, deletion and geometry assertions.",
+      "source": "web/src/lib/useOutline.ts",
+      "disposition": "fixed locally; remote proof blocked"
+    },
+    {
+      "job": "nightly-web-shard (12)",
+      "test/spec:line": "web/tests/outline.spec.ts:451",
+      "failure": "Error: expect(received).toBeGreaterThanOrEqual(expected)\n\n    Expected: >= 2\n    Received:    1\n\n    Call Log:\n    - Timeout 5000ms exceeded while waiting on the predicate\n\n      467 |     await outlineGap(page, true)\n      468 |     firstRelease()\n    > 469 |     await expect.poll(() => computed).toBeGreaterThanOrEqual(2)\n          |                                       ^\n      470 |     await expect(row(page, 'PHAROS-11')).toHaveCount(0)\n      471 |     retryRelease()\n      472 |     await expect(row(page, 'PHAROS-12')).toBeVisible()\n        at /home/runner/work/paimos/paimos/web/tests/outline.spec.ts:469:39",
+      "failed_cases": 1,
+      "cases": [
+        "AEON-385: a child page is distrusted at stream loss, before reconnect"
+      ],
+      "assertion_locations": [
+        "web/tests/outline.spec.ts:469:39"
+      ],
+      "main_commit_that_broke_it": "d15114c1a",
+      "owning_ticket": "AEON-1239 (source AEON-655 / AEON-917)",
+      "stale-spec_or_real-regression": "stale-spec",
+      "smallest_fix": "Use unified root kind/order, Parent labels, modifier submission, two-step Escape, separate cursor, explicit root drop and depth-relative phone inset. Target the Source that subscribes to node.updated; another screen subscriber must not overwrite the controllable work stream. Preserve held-page, revision, duplicate, move, deletion and geometry assertions.",
+      "source": "web/src/lib/useOutline.ts",
+      "disposition": "fixed locally; remote proof blocked"
+    },
+    {
+      "job": "nightly-web-shard (12)",
+      "test/spec:line": "web/tests/outline.spec.ts:478",
+      "failure": "Error: expect(received).toBe(expected) // Object.is equality\n\n    Expected: 1\n    Received: 0\n\n    Call Log:\n    - Timeout 5000ms exceeded while waiting on the predicate\n\n      491 |     hold = true\n      492 |     await outlineGap(page)\n    > 493 |     await expect.poll(() => computed).toBe(1)\n          |                                       ^\n      494 |     await row(page, 'PHAROS-11').dragTo(outline(page).locator('.outline-group'))\n      495 |     await expect(row(page, 'PHAROS-11')).toHaveAttribute('aria-level', '1')\n      496 |     await expect(row(page, 'PHAROS-10').locator('.twisty')).toHaveCount(0)\n        at /home/runner/work/paimos/paimos/web/tests/outline.spec.ts:493:39",
+      "failed_cases": 1,
+      "cases": [
+        "AEON-385: an old parent page cannot restore the count after moving its last child"
+      ],
+      "assertion_locations": [
+        "web/tests/outline.spec.ts:493:39"
+      ],
+      "main_commit_that_broke_it": "d15114c1a",
+      "owning_ticket": "AEON-1239 (source AEON-655 / AEON-917)",
+      "stale-spec_or_real-regression": "stale-spec",
+      "smallest_fix": "Use unified root kind/order, Parent labels, modifier submission, two-step Escape, separate cursor, explicit root drop and depth-relative phone inset. Target the Source that subscribes to node.updated; another screen subscriber must not overwrite the controllable work stream. Preserve held-page, revision, duplicate, move, deletion and geometry assertions.",
+      "source": "web/src/lib/useOutline.ts",
+      "disposition": "fixed locally; remote proof blocked"
+    },
+    {
+      "job": "nightly-web-shard (12)",
+      "test/spec:line": "web/tests/outline.spec.ts:505",
+      "failure": "Test timeout of 30000ms exceeded.\n\n    Error: locator.click: Test timeout of 30000ms exceeded.\n    Call log:\n      - waiting for getByRole('dialog', { name: 'Epic for 2 tickets' }).getByRole('option', { name: 'No epic' })\n\n\n      512 |   await row(page, 'PHAROS-10').getByRole('button', { name: 'Collapse PHAROS-10' }).click()\n      513 |   await page.getByRole('toolbar', { name: '2 selected tickets' }).getByRole('button', { name: 'Move' }).click()\n    > 514 |   await page.getByRole('dialog', { name: 'Epic for 2 tickets' }).getByRole('option', { name: 'No epic' }).click()\n          |                                                                                                           ^\n      515 |   for (const key of ['PHAROS-11', 'PHAROS-12']) await expect(row(page, key)).toHaveAttribute('aria-level', '1')\n      516 |   await expect(row(page, 'PHAROS-10').locator('.twisty')).toHaveCount(0)\n      517 |   expect(calls.find(call => call.path === '/api/nodes/bulk')?.body).toMatchObject({ parent_id: 'p-pharos', if_unmodified_since: revisions })\n        at /home/runner/work/paimos/paimos/web/tests/outline.spec.ts:514:107",
+      "failed_cases": 1,
+      "cases": [
+        "AEON-385: bulk move relocates lazy Outline rows immediately and sends displayed revisions"
+      ],
+      "assertion_locations": [
+        "web/tests/outline.spec.ts:514:107"
+      ],
+      "main_commit_that_broke_it": "d15114c1a",
+      "owning_ticket": "AEON-1239 (source AEON-655 / AEON-917)",
+      "stale-spec_or_real-regression": "stale-spec",
+      "smallest_fix": "Use unified root kind/order, Parent labels, modifier submission, two-step Escape, separate cursor, explicit root drop and depth-relative phone inset. Target the Source that subscribes to node.updated; another screen subscriber must not overwrite the controllable work stream. Preserve held-page, revision, duplicate, move, deletion and geometry assertions.",
+      "source": "web/src/lib/useOutline.ts",
+      "disposition": "fixed locally; remote proof blocked"
+    },
+    {
+      "job": "nightly-web-shard (12)",
+      "test/spec:line": "web/tests/outline.spec.ts:525",
+      "failure": "Error: expect(locator).toContainText(expected) failed\n\n    Locator: getByRole('treegrid', { name: 'Ticket outline' }).locator('tr.ticket-row').filter({ has: locator('.key').filter({ hasText: /^PHAROS-12$/ }) })\n    Expected substring: \"Cloud connector changed live\"\n    Received string:    \"PHAROS-12Add an Oracle Cloud connectorBacklogstaleMedium—3h ago\"\n    Timeout: 5000ms",
+      "failed_cases": 1,
+      "cases": [
+        "AEON-385: filtered field patches keep sibling order"
+      ],
+      "assertion_locations": [
+        "web/tests/outline.spec.ts:535:39"
+      ],
+      "main_commit_that_broke_it": "d15114c1a",
+      "owning_ticket": "AEON-1239 (source AEON-655 / AEON-917)",
+      "stale-spec_or_real-regression": "stale-spec",
+      "smallest_fix": "Use unified root kind/order, Parent labels, modifier submission, two-step Escape, separate cursor, explicit root drop and depth-relative phone inset. Target the Source that subscribes to node.updated; another screen subscriber must not overwrite the controllable work stream. Preserve held-page, revision, duplicate, move, deletion and geometry assertions.",
+      "source": "web/src/lib/useOutline.ts",
+      "disposition": "fixed locally; remote proof blocked"
+    },
+    {
+      "job": "nightly-web-shard (12)",
+      "test/spec:line": "web/tests/outline.spec.ts:542",
+      "failure": "Error: expect(locator).toHaveText(expected) failed\n\n    Locator: getByRole('treegrid', { name: 'Ticket outline' }).locator('tr.ticket-row').filter({ has: locator('.key').filter({ hasText: /^PHAROS-11$/ }) }).locator('.live-label')\n    Expected: \"Moved\"\n    Timeout: 5000ms\n    Error: element(s) not found",
+      "failed_cases": 2,
+      "cases": [
+        "AEON-385 fix1: expanding a destination before a remote move keeps one row through Show",
+        "AEON-385 fix1: expanding a destination after a remote move keeps one row through Show"
+      ],
+      "assertion_locations": [
+        "web/tests/outline.spec.ts:565:66"
+      ],
+      "main_commit_that_broke_it": "d15114c1a",
+      "owning_ticket": "AEON-1239 (source AEON-655 / AEON-917)",
+      "stale-spec_or_real-regression": "stale-spec",
+      "smallest_fix": "Use unified root kind/order, Parent labels, modifier submission, two-step Escape, separate cursor, explicit root drop and depth-relative phone inset. Target the Source that subscribes to node.updated; another screen subscriber must not overwrite the controllable work stream. Preserve held-page, revision, duplicate, move, deletion and geometry assertions.",
+      "source": "web/src/lib/useOutline.ts",
+      "disposition": "fixed locally; remote proof blocked"
+    },
+    {
+      "job": "nightly-web-shard (12)",
+      "test/spec:line": "web/tests/outline.spec.ts:588",
+      "failure": "Error: expect(locator).toHaveText(expected) failed\n\n    Locator: getByRole('treegrid', { name: 'Ticket outline' }).locator('tr.ticket-row').filter({ has: locator('.key').filter({ hasText: /^PHAROS-10$/ }) }).locator('.live-label')\n    Expected: \"Closed\"\n    Timeout: 5000ms\n    Error: element(s) not found",
+      "failed_cases": 1,
+      "cases": [
+        "AEON-385 fix1: a closed parent remains dimmed context and stays out of List matches"
+      ],
+      "assertion_locations": [
+        "web/tests/outline.spec.ts:598:60"
+      ],
+      "main_commit_that_broke_it": "d15114c1a",
+      "owning_ticket": "AEON-1239 (source AEON-655 / AEON-917)",
+      "stale-spec_or_real-regression": "stale-spec",
+      "smallest_fix": "Use unified root kind/order, Parent labels, modifier submission, two-step Escape, separate cursor, explicit root drop and depth-relative phone inset. Target the Source that subscribes to node.updated; another screen subscriber must not overwrite the controllable work stream. Preserve held-page, revision, duplicate, move, deletion and geometry assertions.",
+      "source": "web/src/lib/useOutline.ts",
+      "disposition": "fixed locally; remote proof blocked"
+    },
+    {
+      "job": "nightly-web-shard (12)",
+      "test/spec:line": "web/tests/outline.spec.ts:612",
+      "failure": "Error: expect(locator).toContainText(expected) failed\n\n    Locator: getByRole('treegrid', { name: 'Ticket outline' }).locator('tr.ticket-row').filter({ has: locator('.key').filter({ hasText: /^PHAROS-12$/ }) })\n    Expected substring: \"Cloud connector patched in place\"\n    Received string:    \"PHAROS-12Add an Oracle Cloud connector1BacklogstaleMedium—3h ago\"\n    Timeout: 5000ms",
+      "failed_cases": 2,
+      "cases": [
+        "AEON-385 fix1: Show keeps lazy siblings with field patches in place",
+        "AEON-385 fix1: Show keeps filtered siblings with field patches in place"
+      ],
+      "assertion_locations": [
+        "web/tests/outline.spec.ts:624:42"
+      ],
+      "main_commit_that_broke_it": "d15114c1a",
+      "owning_ticket": "AEON-1239 (source AEON-655 / AEON-917)",
+      "stale-spec_or_real-regression": "stale-spec",
+      "smallest_fix": "Use unified root kind/order, Parent labels, modifier submission, two-step Escape, separate cursor, explicit root drop and depth-relative phone inset. Target the Source that subscribes to node.updated; another screen subscriber must not overwrite the controllable work stream. Preserve held-page, revision, duplicate, move, deletion and geometry assertions.",
+      "source": "web/src/lib/useOutline.ts",
+      "disposition": "fixed locally; remote proof blocked"
+    },
+    {
+      "job": "nightly-web-shard (12)",
+      "test/spec:line": "web/tests/outline.spec.ts:643",
+      "failure": "Error: expect(locator).toBeVisible() failed\n\n    Locator: getByRole('button', { name: '1 update · Show' })\n    Expected: visible\n    Timeout: 5000ms\n    Error: element(s) not found",
+      "failed_cases": 2,
+      "cases": [
+        "AEON-385 fix1: the phone updates pill floats without shifting rows (light)",
+        "AEON-385 fix1: the phone updates pill floats without shifting rows (dark)"
+      ],
+      "assertion_locations": [
+        "web/tests/outline.spec.ts:656:24"
+      ],
+      "main_commit_that_broke_it": "d15114c1a",
+      "owning_ticket": "AEON-1239 (source AEON-655 / AEON-917)",
+      "stale-spec_or_real-regression": "stale-spec",
+      "smallest_fix": "Use unified root kind/order, Parent labels, modifier submission, two-step Escape, separate cursor, explicit root drop and depth-relative phone inset. Target the Source that subscribes to node.updated; another screen subscriber must not overwrite the controllable work stream. Preserve held-page, revision, duplicate, move, deletion and geometry assertions.",
+      "source": "web/src/lib/useOutline.ts",
+      "disposition": "fixed locally; remote proof blocked"
+    },
+    {
+      "job": "nightly-web-shard (12)",
+      "test/spec:line": "web/tests/outline.spec.ts:668",
+      "failure": "Error: expect(locator).toBeVisible() failed\n\n    Locator: getByRole('button', { name: '1 update · Show' })\n    Expected: visible\n    Timeout: 5000ms\n    Error: element(s) not found",
+      "failed_cases": 12,
+      "cases": [
+        "AEON-385 fix2: phone outline chip clears controls for viewer (light)",
+        "AEON-385 fix2: phone outline chip clears controls for viewer (dark)",
+        "AEON-385 fix2: phone outline chip clears controls for empty (light)",
+        "AEON-385 fix2: phone outline chip clears controls for empty (dark)",
+        "AEON-385 fix2: phone outline chip clears controls for selected (light)",
+        "AEON-385 fix2: phone outline chip clears controls for selected (dark)",
+        "AEON-385 fix2: phone list chip clears controls for viewer (light)",
+        "AEON-385 fix2: phone list chip clears controls for viewer (dark)",
+        "AEON-385 fix2: phone list chip clears controls for empty (light)",
+        "AEON-385 fix2: phone list chip clears controls for empty (dark)",
+        "AEON-385 fix2: phone list chip clears controls for selected (light)",
+        "AEON-385 fix2: phone list chip clears controls for selected (dark)"
+      ],
+      "assertion_locations": [
+        "web/tests/outline.spec.ts:692:24"
+      ],
+      "main_commit_that_broke_it": "d15114c1a",
+      "owning_ticket": "AEON-1239 (source AEON-655 / AEON-917)",
+      "stale-spec_or_real-regression": "stale-spec",
+      "smallest_fix": "Use unified root kind/order, Parent labels, modifier submission, two-step Escape, separate cursor, explicit root drop and depth-relative phone inset. Target the Source that subscribes to node.updated; another screen subscriber must not overwrite the controllable work stream. Preserve held-page, revision, duplicate, move, deletion and geometry assertions.",
+      "source": "web/src/lib/useOutline.ts",
+      "disposition": "fixed locally; remote proof blocked"
+    },
+    {
+      "job": "nightly-web-shard (1)",
+      "test/spec:line": "web/tests/a11y.spec.ts:202",
+      "failure": "Error: scrollable-region-focusable (serious): Scrollable region must have keyboard access\n        #v-8 — Element should have focusable content\n\n    expect(received).toEqual(expected) // deep equality\n\n    - Expected  - 1\n    + Received  + 4\n\n    - Array []\n    + Array [\n    +   \"scrollable-region-focusable (serious): Scrollable region must have keyboard access\n    +     #v-8 — Element should have focusable content\",\n    + ]\n\n      210 |       const results = await new AxeBuilder({ page }).withTags(['wcag2a', 'wcag2aa', 'wcag21a', 'wcag21aa']).exclude('.version-coordinate').exclude('.calendar-version').analyze()\n      211 |       const summary = results.violations.map(v => `${v.id} (${v.impact}): ${v.help}\\n${v.nodes.slice(0, 4).map(n => `    ${n.target.join(' ')} — ${n.failureSummary?.split('\\n').slice(1, 2).join(' ').trim()}`).join('\\n')}`)\n    > 212 |       expect(summary, summary.join('\\n')).toEqual([])\n          |                                           ^\n      213 |     })\n      214 |   }\n      215 | }\n        at /home/runner/work/paimos/paimos/web/tests/a11y.spec.ts:212:43",
+      "failed_cases": 8,
+      "cases": [
+        "axe: ticket full page in light",
+        "axe: agents session panel in light",
+        "axe: hours ticket picker in light",
+        "axe: agents approve in light",
+        "axe: ticket full page in dark",
+        "axe: agents session panel in dark",
+        "axe: hours ticket picker in dark",
+        "axe: agents approve in dark"
+      ],
+      "assertion_locations": [
+        "web/tests/a11y.spec.ts:212:43"
+      ],
+      "main_commit_that_broke_it": null,
+      "suspected_commit": {
+        "path": "web/src/components/agents/SessionPanel.vue",
+        "last_source_change_at_nightly": "b84d022cd AEON-1062: polish from INSPR QA (computers plural, chat header, dark Stop, Models names)",
+        "attribution": "suspected only; not a proven introducing commit or bisect"
+      },
+      "owning_ticket": "AEON-1189 / LEAD new regression",
+      "stale-spec_or_real-regression": "real-regression",
+      "smallest_fix": "Axe reports serious scrollable-region-focusable on the ticket panel. A scroll container lacks a keyboard focus target; retain all eight viewport/theme assertions.",
+      "disposition": "evidence only; exact cause/introducing commit not proven; LEAD reproduces and tickets"
+    },
+    {
+      "job": "nightly-web-shard (1)",
+      "test/spec:line": "web/tests/crm.spec.ts:628",
+      "failure": "Error: expect(received).toBe(expected) // Object.is equality\n\n    Expected: 2\n    Received: 3\n\n      637 |   await expect(line.locator('> *')).toHaveCount(3)\n      638 |   // The website wraps to a second line, which starts at the clipped edge: no dot leads it.\n    > 639 |   expect(await line.evaluate(list => new Set([...list.children].map(el => Math.round(el.getBoundingClientRect().top))).size)).toBe(2)\n          |                                                                                                                               ^\n      640 |   await expect(page.getByRole('region', { name: 'Projects, quotes and hours' }).getByText('Framework agreement')).toBeVisible()\n      641 |   await dotsNeverLead(page)\n      642 |   await expect(page.getByRole('region', { name: 'About' })).not.toContainText('ORG-1')\n        at /home/runner/work/paimos/paimos/web/tests/crm.spec.ts:639:127",
+      "failed_cases": 1,
+      "cases": [
+        "at 390 the meta line wraps without a separator at the start or end of a line; the internal key stays hidden"
+      ],
+      "assertion_locations": [
+        "web/tests/crm.spec.ts:639:127"
+      ],
+      "main_commit_that_broke_it": "d777aee46",
+      "owning_ticket": "AEON-1239 (source AEON-264)",
+      "stale-spec_or_real-regression": "stale-spec",
+      "smallest_fix": "Three metadata items can wrap to two or three lines with current typography. Require actual wrapping, no clipping, no leading/trailing dots and no internal key.",
+      "source": "web/src/views/business/CustomerView.vue",
+      "disposition": "fixed locally; remote proof blocked"
+    },
+    {
+      "job": "nightly-web-shard (1)",
+      "test/spec:line": "web/tests/indicator-gallery.spec.ts:38",
+      "failure": "Error: expect(locator).toHaveCSS(expected) failed\n\n    Locator: locator('[data-variant=\"3\"][data-state=\"working\"] [data-size=\"26\"] > svg').locator('.glint')\n    Expected: \"rgb(201, 162, 74)\"\n    Timeout: 5000ms\n    Error: element(s) not found",
+      "failed_cases": 1,
+      "cases": [
+        "events glint once, restart on new evidence, and never replay on mount or state changes"
+      ],
+      "assertion_locations": [
+        "web/tests/indicator-gallery.spec.ts:43:43"
+      ],
+      "main_commit_that_broke_it": "8c11c3dff",
+      "owning_ticket": "AEON-1239 (source AEON-752)",
+      "stale-spec_or_real-regression": "stale-spec",
+      "smallest_fix": "Use the actual secondary-line theme ink; pause the short CSS animation only during colour/restart assertions, then verify it ends.",
+      "source": "web/src/components/indicators/Robot3.vue",
+      "disposition": "fixed locally; remote proof blocked"
+    },
+    {
+      "job": "nightly-web-shard (1)",
+      "test/spec:line": "web/tests/live-panel.spec.ts:128",
+      "failure": "Error: expect(locator).toContainText(expected) failed\n\n    Locator: getByRole('complementary', { name: 'Ticket details' }).getByRole('alert')\n    Expected substring: \"PHAROS-14 is no longer here\"\n    Timeout: 5000ms\n    Error: element(s) not found",
+      "failed_cases": 1,
+      "cases": [
+        "a ticket deleted and restored elsewhere is here again"
+      ],
+      "assertion_locations": [
+        "web/tests/live-panel.spec.ts:137:42"
+      ],
+      "main_commit_that_broke_it": "f053c9b49",
+      "owning_ticket": "AEON-1239 (source AEON-326 / AEON-1018)",
+      "stale-spec_or_real-regression": "stale-spec",
+      "smallest_fix": "Same per-page SSE cursor defect can consume deletion/restore events in another subscriber. Keep independent native connections, and hold all connections at the initial-stream barrier. All panel assertions remain.",
+      "source": "web/tests/live-server.ts",
+      "disposition": "fixed locally; remote proof blocked"
+    },
+    {
+      "job": "nightly-web-shard (1)",
+      "test/spec:line": "web/tests/live-panel.spec.ts:150",
+      "failure": "Error: expect(locator).toHaveCount(expected) failed\n\n    Locator:  getByRole('complementary', { name: 'Ticket details' }).getByRole('alert')\n    Expected: 0\n    Received: 1\n    Timeout:  5000ms",
+      "failed_cases": 1,
+      "cases": [
+        "a DELETE answer that lands after the ticket was restored elsewhere keeps it open and listed"
+      ],
+      "assertion_locations": [
+        "web/tests/live-panel.spec.ts:169:41"
+      ],
+      "main_commit_that_broke_it": "f053c9b49",
+      "owning_ticket": "AEON-1239 (source AEON-326 / AEON-1018)",
+      "stale-spec_or_real-regression": "stale-spec",
+      "smallest_fix": "Same per-page SSE cursor defect can consume deletion/restore events in another subscriber. Keep independent native connections, and hold all connections at the initial-stream barrier. All panel assertions remain.",
+      "source": "web/tests/live-server.ts",
+      "disposition": "fixed locally; remote proof blocked"
+    },
+    {
+      "job": "nightly-web-shard (11)",
+      "test/spec:line": "web/tests/aeon-908-polish.spec.ts:136",
+      "failure": "Error: space above app footer\n\n    expect(received).toBeLessThanOrEqual(expected)\n\n    Expected: <= 944\n    Received:    955.625\n\n      182 |     if (width > 720) {\n      183 |       const box = await editor.boundingBox()\n    > 184 |       expect(box!.y + box!.height, 'space above app footer').toBeLessThanOrEqual(944)\n          |                                                              ^\n      185 |     }\n      186 |     await page.screenshot({ path: info.outputPath(`outside-hours-${width}-${theme}.png`), fullPage: true })\n      187 |     await editor.getByRole('button', { name: 'Cancel', exact: true }).click()\n        at /home/runner/work/paimos/paimos/web/tests/aeon-908-polish.spec.ts:184:62",
+      "failed_cases": 2,
+      "cases": [
+        "tree, hours spacing and light switch thumbs 1024 light",
+        "tree, hours spacing and light switch thumbs 1024 dark"
+      ],
+      "assertion_locations": [
+        "web/tests/aeon-908-polish.spec.ts:184:62"
+      ],
+      "main_commit_that_broke_it": null,
+      "suspected_commit": {
+        "path": "web/src/components/settings/CapacitySection.vue",
+        "last_source_change_at_nightly": "99e2f0be7 AEON-1171: counts stay steady between the parts; #when focuses the pacing editors without a wrapper",
+        "attribution": "suspected only; no introducing commit proven"
+      },
+      "owning_ticket": "AEON-1172 / LEAD new regression",
+      "stale-spec_or_real-regression": "real-regression",
+      "smallest_fix": "The Outside hours editor extends below the footer boundary (955.625 versus 944) in both themes. Preserve the usable-area assertion.",
+      "disposition": "evidence only; exact cause/introducing commit not proven; LEAD reproduces and tickets"
+    },
+    {
+      "job": "nightly-web-shard (11)",
+      "test/spec:line": "web/tests/delivery-rating.spec.ts:156",
+      "failure": "Error: EACCES: permission denied, mkdir '/private/tmp/claude-501/-Users-markus-Code-aeon/a4527da9-f872-45f5-a2f2-48dde0ce2ce5/scratchpad/shots/aeon-218'\n\n      155 |\n      156 | test('ticket rework fits 390 and 1600 in light and dark', async ({ browser }) => {\n    > 157 |   mkdirSync(shots, { recursive: true })\n          |   ^\n      158 |   for (const width of [1600, 390]) {\n      159 |     for (const theme of ['light', 'dark'] as const) {\n      160 |       await shot(browser, width, theme, async page => {\n        at /home/runner/work/paimos/paimos/web/tests/delivery-rating.spec.ts:157:3",
+      "failed_cases": 1,
+      "cases": [
+        "ticket rework fits 390 and 1600 in light and dark"
+      ],
+      "assertion_locations": [
+        "web/tests/delivery-rating.spec.ts:157:3"
+      ],
+      "main_commit_that_broke_it": "c44898c19",
+      "owning_ticket": "AEON-1239 (source AEON-301)",
+      "stale-spec_or_real-regression": "stale-spec",
+      "smallest_fix": "Replace a developer-only absolute screenshot folder with testInfo.outputPath; all outcome assertions remain.",
+      "source": "web/tests/delivery-rating.spec.ts",
+      "disposition": "fixed locally; remote proof blocked"
+    },
+    {
+      "job": "nightly-web-shard (11)",
+      "test/spec:line": "web/tests/delivery-rating.spec.ts:180",
+      "failure": "Error: EACCES: permission denied, mkdir '/private/tmp/claude-501/-Users-markus-Code-aeon/a4527da9-f872-45f5-a2f2-48dde0ce2ce5/scratchpad/shots/aeon-218'\n\n      179 |\n      180 | test('the session overview shows the same rework mark', async ({ browser }) => {\n    > 181 |   mkdirSync(shots, { recursive: true })\n          |   ^\n      182 |   for (const width of [1600, 390]) {\n      183 |     for (const theme of ['light', 'dark'] as const) {\n      184 |       await shot(browser, width, theme, async page => {\n        at /home/runner/work/paimos/paimos/web/tests/delivery-rating.spec.ts:181:3",
+      "failed_cases": 1,
+      "cases": [
+        "the session overview shows the same rework mark"
+      ],
+      "assertion_locations": [
+        "web/tests/delivery-rating.spec.ts:181:3"
+      ],
+      "main_commit_that_broke_it": "c44898c19",
+      "owning_ticket": "AEON-1239 (source AEON-301)",
+      "stale-spec_or_real-regression": "stale-spec",
+      "smallest_fix": "Replace a developer-only absolute screenshot folder with testInfo.outputPath; all outcome assertions remain.",
+      "source": "web/tests/delivery-rating.spec.ts",
+      "disposition": "fixed locally; remote proof blocked"
+    },
+    {
+      "job": "nightly-web-shard (11)",
+      "test/spec:line": "web/tests/delivery-rating.spec.ts:212",
+      "failure": "Error: EACCES: permission denied, mkdir '/private/tmp/claude-501/-Users-markus-Code-aeon/a4527da9-f872-45f5-a2f2-48dde0ce2ce5/scratchpad/shots/aeon-218'\n\n      211 |\n      212 | test('usage shows the rework rate by harness', async ({ browser }) => {\n    > 213 |   mkdirSync(shots, { recursive: true })\n          |   ^\n      214 |   const group = (label: string, exceptions: number, deliveries: number) => ({\n      215 |     label, votes: exceptions, average: null, exceptions, deliveries, rework_rate: `${exceptions}/${deliveries}`,\n      216 |   })\n        at /home/runner/work/paimos/paimos/web/tests/delivery-rating.spec.ts:213:3",
+      "failed_cases": 1,
+      "cases": [
+        "usage shows the rework rate by harness"
+      ],
+      "assertion_locations": [
+        "web/tests/delivery-rating.spec.ts:213:3"
+      ],
+      "main_commit_that_broke_it": "c44898c19",
+      "owning_ticket": "AEON-1239 (source AEON-301)",
+      "stale-spec_or_real-regression": "stale-spec",
+      "smallest_fix": "Replace a developer-only absolute screenshot folder with testInfo.outputPath; all outcome assertions remain.",
+      "source": "web/tests/delivery-rating.spec.ts",
+      "disposition": "fixed locally; remote proof blocked"
+    },
+    {
+      "job": "nightly-web-shard (11)",
+      "test/spec:line": "web/tests/deploy-target.spec.ts:63",
+      "failure": "Error: expect(locator).toBeVisible() failed\n\n    Locator: getByRole('region', { name: 'Needs you' }).getByText('app-01 · production', { exact: true }).first()\n    Expected: visible\n    Timeout: 5000ms\n    Error: element(s) not found",
+      "failed_cases": 1,
+      "cases": [
+        "Needs you names destinations and keeps target-less approvals usable"
+      ],
+      "assertion_locations": [
+        "web/tests/deploy-target.spec.ts:51:87",
+        "web/tests/deploy-target.spec.ts:64:3"
+      ],
+      "main_commit_that_broke_it": "fb56134ec / 7e729d603",
+      "owning_ticket": "AEON-723 / LEAD retirement",
+      "stale-spec_or_real-regression": "stale-spec",
+      "smallest_fix": "Route this journey.deploy fixture to retirement under AGENTS.md rule 12. Do not build, extend or fix retired Journey/stage behavior. Current native approval target facts are covered in decision-desk.spec.ts.",
+      "disposition": "retirement handoff; intentionally untouched under safety/scope rule"
+    },
+    {
+      "job": "nightly-web-shard (11)",
+      "test/spec:line": "web/tests/footer-summary.spec.ts:106",
+      "failure": "Error: expect(locator).toHaveAccessibleName(expected) failed\n\n    Locator:  locator('footer.app-footer .sum')\n    Expected: \"6 agents, 4 ask you. Go to the requests.\"\n    Received: \"6 agents, 1 asks you. Go to the request.\"\n    Timeout:  5000ms",
+      "failed_cases": 1,
+      "cases": [
+        "agents › say how many there are and the one exception, and the click goes to it"
+      ],
+      "assertion_locations": [
+        "web/tests/footer-summary.spec.ts:117:29"
+      ],
+      "main_commit_that_broke_it": "fb56134ec",
+      "owning_ticket": "AEON-1239 (source AEON-569 / AEON-785)",
+      "stale-spec_or_real-regression": "stale-spec",
+      "smallest_fix": "Inject the same fixed server clock as the browser so approvals do not expire in the mock; all four requests remain canonical, and clicking the summary routes to Decision Desk.",
+      "source": "web/src/views/AgentsView.vue",
+      "disposition": "fixed locally; remote proof blocked"
+    },
+    {
+      "job": "nightly-web-shard (11)",
+      "test/spec:line": "web/tests/live-agents.spec.ts:185",
+      "failure": "Error: expect(received).toBe(expected) // Object.is equality\n\n    Expected: 2\n    Received: 3\n\n    Call Log:\n    - Timeout 5000ms exceeded while waiting on the predicate\n\n      194 |   data.live.push(camy)\n      195 |   await page.clock.runFor(20_500)\n    > 196 |   await expect.poll(reads).toBe(2)\n          |                            ^\n      197 |   await expect(card(page, 'p-janus').locator('.live-chip')).toBeVisible()\n      198 |   // News settles for a moment before it is said.\n      199 |   await expect(news).toHaveText('')\n        at /home/runner/work/paimos/paimos/web/tests/live-agents.spec.ts:196:28",
+      "failed_cases": 1,
+      "cases": [
+        "working and lost-heartbeat agents: polls every 20 seconds and says what changed"
+      ],
+      "assertion_locations": [
+        "web/tests/live-agents.spec.ts:196:28"
+      ],
+      "main_commit_that_broke_it": "3f131b6e3",
+      "owning_ticket": "AEON-1239 (source AEON-1018)",
+      "stale-spec_or_real-regression": "stale-spec",
+      "smallest_fix": "The healthy stream handshake performs a catch-up read in addition to initial load. Establish that read with the injected clock, then retain exact subsequent poll, hidden-tab, heartbeat and glint checks.",
+      "source": "web/tests/work-fixtures.ts",
+      "disposition": "fixed locally; remote proof blocked"
+    },
+    {
+      "job": "nightly-web-shard (11)",
+      "test/spec:line": "web/tests/live-agents.spec.ts:399",
+      "failure": "Error: expect(received).toBe(expected) // Object.is equality\n\n    Expected: 2\n    Received: 3\n\n    Call Log:\n    - Timeout 5000ms exceeded while waiting on the predicate\n\n      404 |       await expect(bot.locator('.glint')).toHaveCount(0)\n      405 |       await page.clock.runFor(20_000)\n    > 406 |       await expect.poll(reads).toBe(2)\n          |                                ^\n      407 |       await expect(bot.locator('.glint')).toHaveCount(0)\n      408 |       data.live[0]!.heartbeat_at = '2026-09-23T12:00:10Z'\n      409 |       await page.clock.runFor(20_000)\n        at /home/runner/work/paimos/paimos/web/tests/live-agents.spec.ts:406:32",
+      "failed_cases": 2,
+      "cases": [
+        "event evidence (reduce) › a new activity entry glints once; heartbeats, ordinary polls and remounts do not",
+        "event evidence (no-preference) › a new activity entry glints once; heartbeats, ordinary polls and remounts do not"
+      ],
+      "assertion_locations": [
+        "web/tests/live-agents.spec.ts:406:32"
+      ],
+      "main_commit_that_broke_it": "3f131b6e3",
+      "owning_ticket": "AEON-1239 (source AEON-1018)",
+      "stale-spec_or_real-regression": "stale-spec",
+      "smallest_fix": "The healthy stream handshake performs a catch-up read in addition to initial load. Establish that read with the injected clock, then retain exact subsequent poll, hidden-tab, heartbeat and glint checks.",
+      "source": "web/tests/work-fixtures.ts",
+      "disposition": "fixed locally; remote proof blocked"
+    },
+    {
+      "job": "nightly-web-shard (11)",
+      "test/spec:line": "web/tests/session-attention.spec.ts:8",
+      "failure": "Error: expect(locator).toHaveCount(expected) failed\n\n    Locator:  getByText('Nothing waits on you')\n    Expected: 0\n    Received: 1\n    Timeout:  5000ms",
+      "failed_cases": 4,
+      "cases": [
+        "light 1440: shared replies leave five siblings working and Needs you empty",
+        "light 390: shared replies leave five siblings working and Needs you empty",
+        "dark 1440: shared replies leave five siblings working and Needs you empty",
+        "dark 390: shared replies leave five siblings working and Needs you empty"
+      ],
+      "assertion_locations": [
+        "web/tests/session-attention.spec.ts:26:58"
+      ],
+      "main_commit_that_broke_it": "fb56134ec",
+      "owning_ticket": "AEON-1239 (source AEON-569)",
+      "stale-spec_or_real-regression": "stale-spec",
+      "smallest_fix": "Empty canonical Decision Desk stays visible; inline Needs you is retired. Bind mock server time, preserve all five siblings, one bound approval and explicit false evidence; assert canonical link/count.",
+      "source": "web/src/views/AgentsView.vue",
+      "disposition": "fixed locally; remote proof blocked"
+    },
+    {
+      "job": "nightly-web-shard (11)",
+      "test/spec:line": "web/tests/session-requests.spec.ts:46",
+      "failure": "Error: expect(received).toBe(expected) // Object.is equality\n\n    Expected: true\n    Received: false\n\n      67 |     await expect(panel.locator('.fact').filter({ has: page.locator('dt', { hasText: 'Model' }) })).toContainText('Current model')\n      68 |     await requests.scrollIntoViewIfNeeded()\n    > 69 |     expect(await panel.evaluate(el => el.scrollWidth <= el.clientWidth)).toBe(true)\n         |                                                                          ^\n      70 |     expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true)\n      71 |     const dir = process.env.SESSION_REQUEST_SHOTS\n      72 |     if (dir) { mkdirSync(dir, { recursive: true }); await page.screenshot({ path: resolve(dir, `${theme}-${width}.png`), fullPage: true }) }\n        at /home/runner/work/paimos/paimos/web/tests/session-requests.spec.ts:69:74",
+      "failed_cases": 2,
+      "cases": [
+        "light 390: request stays pending until session completion",
+        "dark 390: request stays pending until session completion"
+      ],
+      "assertion_locations": [
+        "web/tests/session-requests.spec.ts:69:74"
+      ],
+      "main_commit_that_broke_it": null,
+      "suspected_commit": {
+        "path": "web/src/components/agents/SessionPanel.vue",
+        "last_source_change_at_nightly": "b84d022cd AEON-1062: polish from INSPR QA (computers plural, chat header, dark Stop, Models names)",
+        "attribution": "suspected only; not a proven introducing commit or bisect"
+      },
+      "owning_ticket": "AEON-1238 (panel overflow) / LEAD",
+      "stale-spec_or_real-regression": "real-regression",
+      "smallest_fix": "Phone session panel exceeds the viewport by 4px. Same geometry family as the AEON-1238 panel work; keep the overflow assertion.",
+      "disposition": "evidence only; exact cause/introducing commit not proven; LEAD reproduces and tickets"
+    },
+    {
+      "job": "nightly-web-shard (7)",
+      "test/spec:line": "web/tests/views-filters.spec.ts:269",
+      "failure": "Error: expect(locator).toHaveText(expected) failed\n\n    Locator: getByRole('grid', { name: 'Tickets' }).locator('.group-row .group-label')\n    Timeout: 5000ms\n    - Expected  - 1\n    + Received  + 1\n\n      Array [\n        \"Markus Barta\",\n    -   \"Mira Holm\",\n    +   \"Verantwortliche für mandantenübergreifende Berechtigungsverwaltung\",\n        \"Unassigned\",\n      ]",
+      "failed_cases": 1,
+      "cases": [
+        "grouping by assignee, priority and label counts its groups; groups collapse together"
+      ],
+      "assertion_locations": [
+        "web/tests/views-filters.spec.ts:280:63"
+      ],
+      "main_commit_that_broke_it": "911981a81",
+      "owning_ticket": "AEON-1239 (source AEON-639)",
+      "stale-spec_or_real-regression": "stale-spec",
+      "smallest_fix": "Clone exported people into each fixture: the German-name case mutated Mira for the next test. No assertion removed.",
+      "source": "web/tests/work-fixtures.ts",
+      "disposition": "fixed locally; remote proof blocked"
+    },
+    {
+      "job": "nightly-web-shard (7)",
+      "test/spec:line": "web/tests/agents-hierarchy.spec.ts:49",
+      "failure": "Error: expect(locator).toHaveAttribute(expected) failed\n\n    Locator: locator('.last-updated time')\n    Expected pattern: /T/\n    Timeout: 5000ms\n    Error: element(s) not found",
+      "failed_cases": 1,
+      "cases": [
+        "workers nest by session ID, display their label, harness and ticket, and expand with the keyboard"
+      ],
+      "assertion_locations": [
+        "web/tests/agents-hierarchy.spec.ts:65:52"
+      ],
+      "main_commit_that_broke_it": null,
+      "owning_ticket": "AEON-1238",
+      "stale-spec_or_real-regression": "stale-spec",
+      "smallest_fix": "Reserved for AEON-1238; do not edit this file.",
+      "disposition": "untouched, coordinator-owned",
+      "attribution_note": "AEON-780 removed head links; AEON-750 changed state marks; AEON-1238 owns detailed attribution and fixes."
+    },
+    {
+      "job": "nightly-web-shard (7)",
+      "test/spec:line": "web/tests/agents-hierarchy.spec.ts:87",
+      "failure": "Test timeout of 30000ms exceeded.\n\n    Error: locator.getAttribute: Test timeout of 30000ms exceeded.\n    Call log:\n      - waiting for locator('.last-updated time')\n\n\n      89 |   await page.goto('/agents')\n      90 |   await expect(row(page, child)).toBeVisible()\n    > 91 |   const stamp = await page.locator('.last-updated time').getAttribute('datetime')\n         |                                                          ^\n      92 |   await page.route('**/api/harness-sessions?*', route => route.fulfill({ status: 503, json: { error: 'temporarily unavailable' } }))\n      93 |   await signal(page, 'harness.registered')\n      94 |   await expect(page.locator('.freshness')).toContainText('Update delayed')\n        at /home/runner/work/paimos/paimos/web/tests/agents-hierarchy.spec.ts:91:58",
+      "failed_cases": 1,
+      "cases": [
+        "returning to a visible tab refreshes immediately and failed reads keep the last success visible"
+      ],
+      "assertion_locations": [
+        "web/tests/agents-hierarchy.spec.ts:91:58"
+      ],
+      "main_commit_that_broke_it": null,
+      "owning_ticket": "AEON-1238",
+      "stale-spec_or_real-regression": "stale-spec",
+      "smallest_fix": "Reserved for AEON-1238; do not edit this file.",
+      "disposition": "untouched, coordinator-owned",
+      "attribution_note": "AEON-780 removed head links; AEON-750 changed state marks; AEON-1238 owns detailed attribution and fixes."
+    },
+    {
+      "job": "nightly-web-shard (4)",
+      "test/spec:line": "web/tests/agents-harness-status.spec.ts:87",
+      "failure": "Error: expect(locator).toBeVisible() failed\n\n    Locator: getByRole('region', { name: 'Accounts and computers' }).getByRole('link', { name: /^Claude on studio: Last reported: / })\n    Expected: visible\n    Timeout: 5000ms\n    Error: element(s) not found",
+      "failed_cases": 1,
+      "cases": [
+        "offline and revoked computers do not present prior harness reports as live readiness"
+      ],
+      "assertion_locations": [
+        "web/tests/agents-harness-status.spec.ts:94:97"
+      ],
+      "main_commit_that_broke_it": "dbf44284b",
+      "owning_ticket": "AEON-1239 (source AEON-1160)",
+      "stale-spec_or_real-regression": "stale-spec",
+      "smallest_fix": "The harness is called Claude Code. Retain the offline Last reported and revoked computer checks.",
+      "source": "web/src/lib/agentRows.ts",
+      "disposition": "fixed locally; remote proof blocked"
+    },
+    {
+      "job": "nightly-web-shard (4)",
+      "test/spec:line": "web/tests/nav.spec.ts:18",
+      "failure": "Error: expect(locator).toHaveText(expected) failed\n\n    Locator: getByRole('navigation', { name: 'Places' }).getByRole('link')\n    Timeout: 5000ms\n    - Expected  - 0\n    + Received  + 1\n\n      Array [\n        \"Projects\",\n    +   \"Decision Desk?\",\n        \"Agents\",\n        \"Business\",\n      ]",
+      "failed_cases": 1,
+      "cases": [
+        "three places in order of use; the active one is highlighted and the breadcrumb continues from it"
+      ],
+      "assertion_locations": [
+        "web/tests/nav.spec.ts:22:48"
+      ],
+      "main_commit_that_broke_it": "fb56134ec (canonical Desk place added)",
+      "owning_ticket": "AEON-1214",
+      "stale-spec_or_real-regression": "stale-spec",
+      "smallest_fix": "Already updated on assigned main: Desk last, Business in the phone app menu, ordering/fit coverage.",
+      "disposition": "resolved on assigned main by 64d267958; no worker edit; live reproduction pending"
+    },
+    {
+      "job": "nightly-web-shard (4)",
+      "test/spec:line": "web/tests/nav.spec.ts:46",
+      "failure": "Error: expect(locator).toHaveText(expected) failed\n\n    Locator: getByRole('navigation', { name: 'Places' }).getByRole('link')\n    Timeout: 5000ms\n    - Expected  - 0\n    + Received  + 1\n\n      Array [\n        \"Projects\",\n    +   \"Decision Desk?\",\n        \"Agents\",\n      ]",
+      "failed_cases": 1,
+      "cases": [
+        "Business shows only while one of its parts is open"
+      ],
+      "assertion_locations": [
+        "web/tests/nav.spec.ts:50:48"
+      ],
+      "main_commit_that_broke_it": "fb56134ec (canonical Desk place added)",
+      "owning_ticket": "AEON-1214",
+      "stale-spec_or_real-regression": "stale-spec",
+      "smallest_fix": "Already updated on assigned main: Desk last, Business in the phone app menu, ordering/fit coverage.",
+      "disposition": "resolved on assigned main by 64d267958; no worker edit; live reproduction pending"
+    },
+    {
+      "job": "nightly-web-shard (4)",
+      "test/spec:line": "web/tests/nav.spec.ts:164",
+      "failure": "Error: /business/customers\n\n    /business/customers\n\n    expect(received).toEqual(expected) // deep equality\n\n    - Expected  - 1\n    + Received  + 3\n\n    - Array []\n    + Array [\n    +   \"SPAN\",\n    + ]\n\n    Call Log:\n    - Timeout 5000ms exceeded while waiting on the predicate\n\n      179 |       if (r.width <= 1 || r.height <= 1 || getComputedStyle(el).display === 'none') return false\n      180 |       return r.left < -0.5 || r.right > innerWidth + 0.5 || el.scrollWidth > el.clientWidth + 1\n    > 181 |     }).map(el => el.className || el.tagName)), { message: path }).toEqual([])\n          |                                                                   ^\n      182 |   }\n      183 | })\n      184 |\n        at /home/runner/work/paimos/paimos/web/tests/nav.spec.ts:181:67",
+      "failed_cases": 1,
+      "cases": [
+        "on phones the places are round buttons and nothing in the header is cut"
+      ],
+      "assertion_locations": [
+        "web/tests/nav.spec.ts:181:67"
+      ],
+      "main_commit_that_broke_it": "fb56134ec (canonical Desk place added)",
+      "owning_ticket": "AEON-1214",
+      "stale-spec_or_real-regression": "stale-spec",
+      "smallest_fix": "Already updated on assigned main: Desk last, Business in the phone app menu, ordering/fit coverage.",
+      "disposition": "resolved on assigned main by 64d267958; no worker edit; live reproduction pending"
+    },
+    {
+      "job": "nightly-web-shard (4)",
+      "test/spec:line": "web/tests/quote-public-page.spec.ts:182",
+      "failure": "Error: expect(received).toEqual(expected) // deep equality\n\n    - Expected  - 1\n    + Received  + 3\n\n    - Array []\n    + Array [\n    +   \"script-src-elem inline\",\n    + ]\n\n      189 |   await page.getByRole('button', { name: 'Angebot annehmen', exact: true }).click()\n      190 |   await expect(page.getByRole('heading', { name: 'Vielen Dank, Jana Hofer' })).toBeVisible()\n    > 191 |   expect(await violations(page)).toEqual([])\n          |                                  ^\n      192 | })\n      193 |\n      194 | test('content security: the Quotes list and a docked quote run under the production policy', async ({ page }) => {\n        at /home/runner/work/paimos/paimos/web/tests/quote-public-page.spec.ts:191:34",
+      "failed_cases": 1,
+      "cases": [
+        "content security: the public page runs under the strict public policy without a violation"
+      ],
+      "assertion_locations": [
+        "web/tests/quote-public-page.spec.ts:191:34"
+      ],
+      "main_commit_that_broke_it": "8765ffcdf",
+      "owning_ticket": "AEON-1239 (source AEON-749)",
+      "stale-spec_or_real-regression": "stale-spec",
+      "smallest_fix": "Vite serves the unreplaced theme nonce template. Reproduce production spa.go per-response nonce for only the theme bootstrap; preserve strict script policy and zero violations.",
+      "source": "web/index.html",
+      "disposition": "fixed locally; remote proof blocked"
+    },
+    {
+      "job": "nightly-web-shard (4)",
+      "test/spec:line": "web/tests/quote-public-page.spec.ts:194",
+      "failure": "Error: expect(received).toEqual(expected) // deep equality\n\n    - Expected  - 1\n    + Received  + 3\n\n    - Array []\n    + Array [\n    +   \"script-src-elem inline\",\n    + ]\n\n      202 |   await page.locator('.quote-dock').getByRole('button', { name: 'Details' }).click()\n      203 |   await expect(page.getByRole('heading', { name: 'Acceptance receipt' })).toBeVisible()\n    > 204 |   expect(await violations(page)).toEqual([])\n          |                                  ^\n      205 | })\n      206 |\n        at /home/runner/work/paimos/paimos/web/tests/quote-public-page.spec.ts:204:34",
+      "failed_cases": 1,
+      "cases": [
+        "content security: the Quotes list and a docked quote run under the production policy"
+      ],
+      "assertion_locations": [
+        "web/tests/quote-public-page.spec.ts:204:34"
+      ],
+      "main_commit_that_broke_it": "8765ffcdf",
+      "owning_ticket": "AEON-1239 (source AEON-749)",
+      "stale-spec_or_real-regression": "stale-spec",
+      "smallest_fix": "Vite serves the unreplaced theme nonce template. Reproduce production spa.go per-response nonce for only the theme bootstrap; preserve strict script policy and zero violations.",
+      "source": "web/index.html",
+      "disposition": "fixed locally; remote proof blocked"
+    },
+    {
+      "job": "nightly-web-shard (4)",
+      "test/spec:line": "web/tests/settings.spec.ts:315",
+      "failure": "Test timeout of 30000ms exceeded.\n\n    Error: page.goto: Test timeout of 30000ms exceeded.\n    Call log:\n      - navigating to \"http://127.0.0.1:5838/settings/access\", waiting until \"load\"\n\n\n      321 |       await page.addInitScript(value => localStorage.setItem('aeon-theme', value), theme)\n      322 |       for (const section of ['personal', 'theme', 'developer', 'workspace', 'vocabulary', 'kinds', 'access', 'agents', 'agent-rules', 'accounts', 'computers', 'capacity', 'autopilot', 'business', 'portal']) {\n    > 323 |         await page.goto(`/settings/${section}`)\n          |                    ^\n      324 |         const audience = section === 'kinds' ? page.locator('.kinds-section > .who') : page.locator('.body > .who')\n      325 |         await expect(audience).toBeVisible()\n      326 |         if (section === 'kinds') await expect(audience).toContainText('Admins define the kinds; you can read them.')\n        at /home/runner/work/paimos/paimos/web/tests/settings.spec.ts:323:20",
+      "failed_cases": 1,
+      "cases": [
+        "settings layout evidence in light and dark at phone, tablet and desktop sizes"
+      ],
+      "assertion_locations": [
+        "web/tests/settings.spec.ts:323:20"
+      ],
+      "main_commit_that_broke_it": "1e76f88e1",
+      "owning_ticket": "AEON-1239 (source AEON-1182 / AEON-636)",
+      "stale-spec_or_real-regression": "stale-spec",
+      "smallest_fix": "The existing evidence case navigates and screenshots 90 section/theme/width combinations. Give it 120s without dropping any matrix entry or fit check.",
+      "source": "web/tests/settings.spec.ts",
+      "disposition": "fixed locally; remote proof blocked"
+    },
+    {
+      "job": "nightly-web-shard (4)",
+      "test/spec:line": "web/tests/state-colours.spec.ts:52",
+      "failure": "Error: expect(received).toBeLessThanOrEqual(expected)\n\n    Expected: <= 196.703125\n    Received:    199.671875\n\n      65 |           const word = (await label.boundingBox())!\n      66 |           expect(word.x).toBeGreaterThanOrEqual(chip.x)\n    > 67 |           expect(word.x + word.width).toBeLessThanOrEqual(chip.x + chip.width)\n         |                                       ^\n      68 |           expect(chip.x + chip.width).toBeLessThanOrEqual(bounds.x + bounds.width)\n      69 |           expect(await label.evaluate(el => el.scrollWidth <= el.clientWidth)).toBe(true)\n      70 |         }\n        at /home/runner/work/paimos/paimos/web/tests/state-colours.spec.ts:67:39",
+      "failed_cases": 2,
+      "cases": [
+        "light: all state words fit narrow cards and phone list rows",
+        "dark: all state words fit narrow cards and phone list rows"
+      ],
+      "assertion_locations": [
+        "web/tests/state-colours.spec.ts:67:39"
+      ],
+      "main_commit_that_broke_it": null,
+      "owning_ticket": "AEON-1238",
+      "stale-spec_or_real-regression": "real-regression",
+      "smallest_fix": "Reserved for AEON-1238; do not edit this file.",
+      "disposition": "untouched, coordinator-owned",
+      "attribution_note": "AEON-780 removed head links; AEON-750 changed state marks; AEON-1238 owns detailed attribution and fixes."
+    },
+    {
+      "job": "nightly-web-shard (4)",
+      "test/spec:line": "web/tests/state-colours.spec.ts:77",
+      "failure": "Error: expect(locator).toHaveCSS(expected) failed\n\n    Locator: locator('[data-project-id=\"p-sc1-working\"] .agent-state-mark')\n    Expected: \"rgb(0, 117, 204)\"\n    Error: strict mode violation: locator('[data-project-id=\"p-sc1-working\"] .agent-state-mark') resolved to 2 elements:",
+      "failed_cases": 1,
+      "cases": [
+        "saved theme palette/opacity and personal heartbeat thresholds persist across every surface"
+      ],
+      "assertion_locations": [],
+      "main_commit_that_broke_it": null,
+      "owning_ticket": "AEON-1238",
+      "stale-spec_or_real-regression": "stale-spec",
+      "smallest_fix": "Reserved for AEON-1238; do not edit this file.",
+      "disposition": "untouched, coordinator-owned",
+      "attribution_note": "AEON-780 removed head links; AEON-750 changed state marks; AEON-1238 owns detailed attribution and fixes."
+    },
+    {
+      "job": "nightly-web-shard (3)",
+      "test/spec:line": "web/tests/agents.spec.ts:511",
+      "failure": "Error: expect(locator).toHaveCount(expected) failed\n\n    Locator:  locator('.head-links').getByRole('link', { name: 'Decision Desk', exact: true })\n    Expected: 1\n    Received: 0\n    Timeout:  5000ms",
+      "failed_cases": 2,
+      "cases": [
+        "on a phone the overview fits and a session opens full screen in light",
+        "on a phone the overview fits and a session opens full screen in dark"
+      ],
+      "assertion_locations": [
+        "web/tests/helpers/stable.ts:14:25",
+        "web/tests/helpers/stable.ts:52:84",
+        "web/tests/agents.spec.ts:526:11"
+      ],
+      "main_commit_that_broke_it": null,
+      "owning_ticket": "AEON-1238",
+      "stale-spec_or_real-regression": "stale-spec",
+      "smallest_fix": "Reserved for AEON-1238; do not edit this file.",
+      "disposition": "untouched, coordinator-owned",
+      "attribution_note": "AEON-780 removed head links; AEON-750 changed state marks; AEON-1238 owns detailed attribution and fixes."
+    },
+    {
+      "job": "nightly-web-shard (3)",
+      "test/spec:line": "web/tests/dialog-scale.spec.ts:167",
+      "failure": "Error: pick Incident: kind selector.y (102.515625 → 122.078125)\n\n    expect(received).toBeLessThanOrEqual(expected)\n\n    Expected: <= 0.5\n    Received:    19.5625\n\n       at helpers/stable.ts:59\n\n      57 |       const current = await box(locator), before = baseline.get(name)!\n      58 |       for (const axis of ['x', 'y', 'width', 'height'] as const) {\n    > 59 |         expect(Math.abs(current[axis] - before[axis]), `${interaction.name}: ${name}.${axis} (${before[axis]} → ${current[axis]})`).toBeLessThanOrEqual(0.5)\n         |                                                                                                                                     ^\n      60 |       }\n      61 |     }\n      62 |     await overflow(interaction.name)\n        at expectStableControls (/home/runner/work/paimos/paimos/web/tests/helpers/stable.ts:59:133)\n        at /home/runner/work/paimos/paimos/web/tests/dialog-scale.spec.ts:214:5",
+      "failed_cases": 2,
+      "cases": [
+        "work, business and settings dialogs keep their scale step at 390px light",
+        "work, business and settings dialogs keep their scale step at 390px dark"
+      ],
+      "assertion_locations": [
+        "web/tests/helpers/stable.ts:59:133",
+        "web/tests/dialog-scale.spec.ts:214:5"
+      ],
+      "main_commit_that_broke_it": null,
+      "suspected_commit": {
+        "path": "web/src/components/agents/PauseDialog.vue",
+        "last_source_change_at_nightly": "7179f8da4 AEON-730: one dialog size scale, compact actions and a calm Key ready",
+        "attribution": "suspected only; no introducing commit proven"
+      },
+      "owning_ticket": "AEON-741 / LEAD new regression",
+      "stale-spec_or_real-regression": "real-regression",
+      "smallest_fix": "Phone Incident selection moves a named selector by 19.5625px. Keep choice/action bounding-box assertions; move explanatory content away from controls in an owning follow-up.",
+      "disposition": "evidence only; exact cause/introducing commit not proven; LEAD reproduces and tickets"
+    },
+    {
+      "job": "nightly-web-shard (3)",
+      "test/spec:line": "web/tests/release-picker.spec.ts:235",
+      "failure": "Test timeout of 30000ms exceeded.\n\n    Error: locator.click: Test timeout of 30000ms exceeded.\n    Call log:\n      - waiting for getByRole('dialog', { name: 'Release for 2 tickets' }).getByRole('option', { name: /^Release 3/ })\n\n\n      253 |     }\n      254 |     await page.getByRole('toolbar', { name: /selected ticket/ }).getByRole('button', { name: 'Add to release' }).click()\n    > 255 |     await page.getByRole('dialog', { name: 'Release for 2 tickets' }).getByRole('option', { name: target === 'new' ? /^Release 3/ : /^Release 2/ }).click()\n          |                                                                                                                                                     ^\n      256 |     await expect(page.locator('.toast').filter({ hasText: 'released or active tickets cannot move' })).toBeVisible()\n      257 |     await expect(page.locator('.toast').filter({ hasText: /^Added / })).toHaveCount(0)\n      258 |     expect(calls.filter(call => call.method === 'POST' && call.path.endsWith(target === 'new' ? '/releases' : '/membership'))).toHaveLength(1)\n        at /home/runner/work/paimos/paimos/web/tests/release-picker.spec.ts:255:149",
+      "failed_cases": 2,
+      "cases": [
+        "new release rejects a released member and preserves the whole batch",
+        "new release rejects a building member and preserves the whole batch"
+      ],
+      "assertion_locations": [
+        "web/tests/release-picker.spec.ts:255:149"
+      ],
+      "main_commit_that_broke_it": "7e729d603",
+      "owning_ticket": "AEON-1239 (source AEON-723)",
+      "stale-spec_or_real-regression": "stale-spec",
+      "smallest_fix": "Native picker numbers every release, permits one active release and chooses the first planning release. Finish the predecessor on advance; expect Release 4 with the held third release; preserve rollback/replay/revision assertions and zero writes when an active release blocks creation.",
+      "source": "web/src/components/work/ReleasePicker.vue",
+      "disposition": "fixed locally; remote proof blocked"
+    },
+    {
+      "job": "nightly-web-shard (3)",
+      "test/spec:line": "web/tests/release-picker.spec.ts:405",
+      "failure": "Test timeout of 30000ms exceeded.\n\n    Error: locator.click: Test timeout of 30000ms exceeded.\n    Call log:\n      - waiting for getByRole('dialog', { name: 'Release for 1 ticket' }).getByRole('option', { name: /^Release 4/ })\n\n\n      420 |   const before = calls.filter(call => call.path.endsWith('/release-memberships')).length\n      421 |   await add.click()\n    > 422 |   await page.getByRole('dialog', { name: 'Release for 1 ticket' }).getByRole('option', { name: /^Release 4/ }).click()\n          |                                                                                                                ^\n      423 |   await expect(page.locator('.toast').filter({ hasText: 'Added 1 ticket to Release 3' })).toBeVisible()\n      424 |   await expect(page.locator('.toast').filter({ hasText: 'Release 4' })).toHaveCount(0)\n      425 |   const action = calls.filter(call => call.path.endsWith('/releases'))\n        at /home/runner/work/paimos/paimos/web/tests/release-picker.spec.ts:422:112",
+      "failed_cases": 1,
+      "cases": [
+        "a replay after the project moved on names the tickets’ release, not the later one"
+      ],
+      "assertion_locations": [
+        "web/tests/release-picker.spec.ts:422:112"
+      ],
+      "main_commit_that_broke_it": "7e729d603",
+      "owning_ticket": "AEON-1239 (source AEON-723)",
+      "stale-spec_or_real-regression": "stale-spec",
+      "smallest_fix": "Native picker numbers every release, permits one active release and chooses the first planning release. Finish the predecessor on advance; expect Release 4 with the held third release; preserve rollback/replay/revision assertions and zero writes when an active release blocks creation.",
+      "source": "web/src/components/work/ReleasePicker.vue",
+      "disposition": "fixed locally; remote proof blocked"
+    },
+    {
+      "job": "nightly-web-shard (3)",
+      "test/spec:line": "web/tests/release-picker.spec.ts:437",
+      "failure": "Test timeout of 30000ms exceeded.\n\n    Error: locator.click: Test timeout of 30000ms exceeded.\n    Call log:\n      - waiting for getByRole('dialog', { name: 'Release for 1 ticket' }).getByRole('option', { name: /^Release 4/ })\n\n\n      454 |   advanceCurrentRelease(world)\n      455 |   await add.click()\n    > 456 |   await page.getByRole('dialog', { name: 'Release for 1 ticket' }).getByRole('option', { name: /^Release 4/ }).click()\n          |                                                                                                                ^\n      457 |   await expect(page.locator('.toast').filter({ hasText: 'not all in one release' })).toBeVisible()\n      458 |   await expect(page.locator('.toast').filter({ hasText: /^Added / })).toHaveCount(0)\n      459 |   await expect(page.locator('.toast').filter({ hasText: 'Release 4' })).toHaveCount(0)\n        at /home/runner/work/paimos/paimos/web/tests/release-picker.spec.ts:456:112",
+      "failed_cases": 1,
+      "cases": [
+        "a replay does not invent a count when membership no longer matches"
+      ],
+      "assertion_locations": [
+        "web/tests/release-picker.spec.ts:456:112"
+      ],
+      "main_commit_that_broke_it": "7e729d603",
+      "owning_ticket": "AEON-1239 (source AEON-723)",
+      "stale-spec_or_real-regression": "stale-spec",
+      "smallest_fix": "Native picker numbers every release, permits one active release and chooses the first planning release. Finish the predecessor on advance; expect Release 4 with the held third release; preserve rollback/replay/revision assertions and zero writes when an active release blocks creation.",
+      "source": "web/src/components/work/ReleasePicker.vue",
+      "disposition": "fixed locally; remote proof blocked"
+    },
+    {
+      "job": "nightly-web-shard (3)",
+      "test/spec:line": "web/tests/release-picker.spec.ts:466",
+      "failure": "Test timeout of 30000ms exceeded.\n\n    Error: locator.click: Test timeout of 30000ms exceeded.\n    Call log:\n      - waiting for getByRole('dialog', { name: 'Release for 1 ticket' }).getByRole('option', { name: /^Release 4/ })\n\n\n      489 |   advanceCurrentRelease(world)\n      490 |   await add.click()\n    > 491 |   await page.getByRole('dialog', { name: 'Release for 1 ticket' }).getByRole('option', { name: /^Release 4/ }).click()\n          |                                                                                                                ^\n      492 |   await expect(page.locator('.toast').filter({ hasText: 'not all in one release' })).toBeVisible()\n      493 |   await expect(page.locator('.toast').filter({ hasText: /^Added / })).toHaveCount(0)\n      494 |   const actions = calls.filter(call => call.path.endsWith('/releases'))\n        at /home/runner/work/paimos/paimos/web/tests/release-picker.spec.ts:491:112",
+      "failed_cases": 1,
+      "cases": [
+        "parent replay with a backlog leaf does not claim full placement"
+      ],
+      "assertion_locations": [
+        "web/tests/release-picker.spec.ts:491:112"
+      ],
+      "main_commit_that_broke_it": "7e729d603",
+      "owning_ticket": "AEON-1239 (source AEON-723)",
+      "stale-spec_or_real-regression": "stale-spec",
+      "smallest_fix": "Native picker numbers every release, permits one active release and chooses the first planning release. Finish the predecessor on advance; expect Release 4 with the held third release; preserve rollback/replay/revision assertions and zero writes when an active release blocks creation.",
+      "source": "web/src/components/work/ReleasePicker.vue",
+      "disposition": "fixed locally; remote proof blocked"
+    },
+    {
+      "job": "nightly-web-shard (3)",
+      "test/spec:line": "web/tests/session-ended.spec.ts:10",
+      "failure": "Error: expect(locator).toHaveValue(expected) failed\n\n    Locator: getByRole('complementary', { name: 'Ticket details' }).getByLabel('Description, Markdown')\n    Expected: \"Written while the session ends.\"\n    Timeout: 5000ms\n    Error: element(s) not found",
+      "failed_cases": 2,
+      "cases": [
+        "at 1440px a save after the session ended keeps the draft and offers sign-in",
+        "at 390px a save after the session ended keeps the draft and offers sign-in"
+      ],
+      "assertion_locations": [
+        "web/tests/session-ended.spec.ts:25:24"
+      ],
+      "main_commit_that_broke_it": null,
+      "suspected_commit": {
+        "path": "web/src/lib/useTicket.ts",
+        "last_source_change_at_nightly": "311ca9bca AEON-648: integrate current work surfaces package",
+        "attribution": "suspected only; not a proven introducing commit or bisect"
+      },
+      "owning_ticket": "AEON-140 / LEAD new regression",
+      "stale-spec_or_real-regression": "real-regression",
+      "smallest_fix": "A failed PATCH after 401 displays the promise to retain the draft, but the description textarea disappears. Investigate authentication reset/unmount discarding editor state; retain the draft-preservation assertions.",
+      "disposition": "evidence only; exact cause/introducing commit not proven; LEAD reproduces and tickets"
+    },
+    {
+      "job": "nightly-web-shard (3)",
+      "test/spec:line": "web/tests/ticket-benefits.spec.ts:68",
+      "failure": "Error: expect(locator).toContainText(expected) failed\n\n    Locator: getByRole('grid', { name: 'Releases, newest first' }).getByRole('row').first()\n    Expected substring: \"AEON-75\"\n    Received string:    \"06:4757m agoLiveFull Fin00326·10·11 06:44:51261011064451.0.0\"\n    Timeout: 5000ms",
+      "failed_cases": 2,
+      "cases": [
+        "v1 history keeps chips, filters and visible changes without a tag title",
+        "regenerated missing-snapshot history keeps chips, filters and visible changes without a tag title"
+      ],
+      "assertion_locations": [
+        "web/tests/ticket-benefits.spec.ts:85:35"
+      ],
+      "main_commit_that_broke_it": "0a117aa6f / cb663f5ac",
+      "owning_ticket": "AEON-1239 (source AEON-430 / AEON-635)",
+      "stale-spec_or_real-regression": "stale-spec",
+      "smallest_fix": "Release rows show marketing codenames; membership keys remain in detail. Scroll the post-release hint into view before the full-visibility check. On phones reopen through the row name rather than its nested copy button, retaining the full notes, no-fallback, locale and overflow assertions.",
+      "source": "web/src/components/releases/ReleasesSheet.vue",
+      "disposition": "fixed locally; remote proof blocked"
+    },
+    {
+      "job": "nightly-web-shard (3)",
+      "test/spec:line": "web/tests/ticket-benefits.spec.ts:194",
+      "failure": "Error: expect(locator).toBeInViewport() failed\n\n    Locator:  locator('article.detail').getByRole('region', { name: 'Release notes' }).getByText('Notes written after release', { exact: true })\n    Expected: in viewport\n    Received: viewport ratio 0\n    Timeout:  5000ms",
+      "failed_cases": 2,
+      "cases": [
+        "backfilled notes say they were written after the release at 1600px",
+        "backfilled notes say they were written after the release at 390px"
+      ],
+      "assertion_locations": [
+        "web/tests/ticket-benefits.spec.ts:203:24"
+      ],
+      "main_commit_that_broke_it": "0a117aa6f / cb663f5ac",
+      "owning_ticket": "AEON-1239 (source AEON-430 / AEON-635)",
+      "stale-spec_or_real-regression": "stale-spec",
+      "smallest_fix": "Release rows show marketing codenames; membership keys remain in detail. Scroll the post-release hint into view before the full-visibility check. On phones reopen through the row name rather than its nested copy button, retaining the full notes, no-fallback, locale and overflow assertions.",
+      "source": "web/src/components/releases/ReleasesSheet.vue",
+      "disposition": "fixed locally; remote proof blocked"
+    },
+    {
+      "job": "nightly-web-shard (3)",
+      "test/spec:line": "web/tests/ticket-benefits.spec.ts:225",
+      "failure": "Error: expect(locator).toBeVisible() failed\n\n    Locator: getByRole('region', { name: 'Release notes' }).getByText('Internal changes only.', { exact: true })\n    Expected: visible\n    Timeout: 5000ms\n    Error: element(s) not found",
+      "failed_cases": 1,
+      "cases": [
+        "internal-only releases show no tag title and a quiet detail at 390px"
+      ],
+      "assertion_locations": [
+        "web/tests/ticket-benefits.spec.ts:251:82"
+      ],
+      "main_commit_that_broke_it": "0a117aa6f / cb663f5ac",
+      "owning_ticket": "AEON-1239 (source AEON-430 / AEON-635)",
+      "stale-spec_or_real-regression": "stale-spec",
+      "smallest_fix": "Release rows show marketing codenames; membership keys remain in detail. Scroll the post-release hint into view before the full-visibility check. On phones reopen through the row name rather than its nested copy button, retaining the full notes, no-fallback, locale and overflow assertions.",
+      "source": "web/src/components/releases/ReleasesSheet.vue",
+      "disposition": "fixed locally; remote proof blocked"
+    },
+    {
+      "job": "nightly-web-shard (9)",
+      "test/spec:line": "web/tests/decision-text.spec.ts:101",
+      "failure": "Error: expect(locator).toBeVisible() failed\n\n    Locator: locator('[data-row=\"a:a9000000-0000-4000-8000-000000000003\"]').locator('.reveal-text')\n    Expected: visible\n    Timeout: 5000ms\n    Error: element(s) not found",
+      "failed_cases": 6,
+      "cases": [
+        "reveal sizing 390 coarse light › approval and held controls fit both labels with disjoint stable targets",
+        "reveal sizing 390 coarse dark › approval and held controls fit both labels with disjoint stable targets",
+        "reveal sizing 1024 coarse light › approval and held controls fit both labels with disjoint stable targets",
+        "reveal sizing 1024 coarse dark › approval and held controls fit both labels with disjoint stable targets",
+        "reveal sizing 1440 fine light › approval and held controls fit both labels with disjoint stable targets",
+        "reveal sizing 1440 fine dark › approval and held controls fit both labels with disjoint stable targets"
+      ],
+      "assertion_locations": [
+        "web/tests/decision-text.spec.ts:112:30"
+      ],
+      "main_commit_that_broke_it": "fb56134ec",
+      "owning_ticket": "AEON-1239 (source AEON-569 / AEON-629 / AEON-1057)",
+      "stale-spec_or_real-regression": "stale-spec",
+      "smallest_fix": "Migrate retired inline reveal controls to canonical memo full source paragraphs, stable response choices, native reason input and disjoint touch/glyph action targets. Retain long German question/answer scrolling and native keys; traverse the new source-link tab stop, and count approval before question (2 -> 3 -> 2). No protected write occurs merely by selecting or typing.",
+      "source": "web/src/views/AgentsView.vue",
+      "disposition": "fixed locally; remote proof blocked"
+    },
+    {
+      "job": "nightly-web-shard (9)",
+      "test/spec:line": "web/tests/decision-text.spec.ts:132",
+      "failure": "Error: expect(locator).toBeFocused() failed\n\n    Locator:  locator('.memo-heading h2')\n    Expected: focused\n    Received: inactive\n    Timeout:  5000ms",
+      "failed_cases": 8,
+      "cases": [
+        "full Decision Desk context and stable series 390 light",
+        "full Decision Desk context and stable series 390 dark",
+        "full Decision Desk context and stable series 768 light",
+        "full Decision Desk context and stable series 768 dark",
+        "full Decision Desk context and stable series 1024 light",
+        "full Decision Desk context and stable series 1024 dark",
+        "full Decision Desk context and stable series 1440 light",
+        "full Decision Desk context and stable series 1440 dark"
+      ],
+      "assertion_locations": [
+        "web/tests/decision-text.spec.ts:145:27"
+      ],
+      "main_commit_that_broke_it": "fb56134ec",
+      "owning_ticket": "AEON-1239 (source AEON-569 / AEON-629 / AEON-1057)",
+      "stale-spec_or_real-regression": "stale-spec",
+      "smallest_fix": "Migrate retired inline reveal controls to canonical memo full source paragraphs, stable response choices, native reason input and disjoint touch/glyph action targets. Retain long German question/answer scrolling and native keys; traverse the new source-link tab stop, and count approval before question (2 -> 3 -> 2). No protected write occurs merely by selecting or typing.",
+      "source": "web/src/views/AgentsView.vue",
+      "disposition": "fixed locally; remote proof blocked"
+    },
+    {
+      "job": "nightly-web-shard (9)",
+      "test/spec:line": "web/tests/decision-text.spec.ts:178",
+      "failure": "Error: expect(locator).toBeVisible() failed\n\n    Locator: locator('[data-row=\"a:a9000000-0000-4000-8000-000000000003\"]').getByRole('button', { name: 'Show all', exact: true })\n    Expected: visible\n    Timeout: 5000ms\n    Error: element(s) not found",
+      "failed_cases": 8,
+      "cases": [
+        "approval and held request reveals 390 light",
+        "approval and held request reveals 390 dark",
+        "approval and held request reveals 768 light",
+        "approval and held request reveals 768 dark",
+        "approval and held request reveals 1024 light",
+        "approval and held request reveals 1024 dark",
+        "approval and held request reveals 1440 light",
+        "approval and held request reveals 1440 dark"
+      ],
+      "assertion_locations": [
+        "web/tests/decision-text.spec.ts:192:79"
+      ],
+      "main_commit_that_broke_it": "fb56134ec",
+      "owning_ticket": "AEON-1239 (source AEON-569 / AEON-629 / AEON-1057)",
+      "stale-spec_or_real-regression": "stale-spec",
+      "smallest_fix": "Migrate retired inline reveal controls to canonical memo full source paragraphs, stable response choices, native reason input and disjoint touch/glyph action targets. Retain long German question/answer scrolling and native keys; traverse the new source-link tab stop, and count approval before question (2 -> 3 -> 2). No protected write occurs merely by selecting or typing.",
+      "source": "web/src/views/AgentsView.vue",
+      "disposition": "fixed locally; remote proof blocked"
+    },
+    {
+      "job": "nightly-web-shard (10)",
+      "test/spec:line": "web/tests/aeon-635.spec.ts:132",
+      "failure": "Error: expect(locator).toHaveCount(expected) failed\n\n    Locator:  locator('dialog.releases').locator('.list-pane .result-count')\n    Expected: 0\n    Received: 1\n    Timeout:  5000ms",
+      "failed_cases": 6,
+      "cases": [
+        "approved releases keep their controls still at 390 light (AEON-635)",
+        "approved releases keep their controls still at 1024 light (AEON-635)",
+        "approved releases keep their controls still at 1440 light (AEON-635)",
+        "approved releases keep their controls still at 390 dark (AEON-635)",
+        "approved releases keep their controls still at 1024 dark (AEON-635)",
+        "approved releases keep their controls still at 1440 dark (AEON-635)"
+      ],
+      "assertion_locations": [
+        "web/tests/aeon-635.spec.ts:171:62"
+      ],
+      "main_commit_that_broke_it": "cb663f5ac",
+      "owning_ticket": "AEON-1239 (source AEON-635)",
+      "stale-spec_or_real-regression": "stale-spec",
+      "smallest_fix": "The published/reserved count remains for screen readers. Assert sr-only and its exact count rather than removing accessibility content.",
+      "source": "web/src/components/releases/ReleasesSheet.vue",
+      "disposition": "fixed locally; remote proof blocked"
+    },
+    {
+      "job": "nightly-web-shard (10)",
+      "test/spec:line": "web/tests/stability.spec.ts:78",
+      "failure": "Error: expect(locator).toBeVisible() failed\n\n    Locator: getByRole('list', { name: 'Requests waiting for you' })\n    Expected: visible\n    Timeout: 5000ms\n    Error: element(s) not found",
+      "failed_cases": 2,
+      "cases": [
+        "at 390px › the agents page holds still while its reads land",
+        "at 1440px › the agents page holds still while its reads land"
+      ],
+      "assertion_locations": [
+        "web/tests/stability.spec.ts:82:82"
+      ],
+      "main_commit_that_broke_it": "fb56134ec / 543895948 (legacy inline decision surface retired)",
+      "owning_ticket": "AEON-1165",
+      "stale-spec_or_real-regression": "stale-spec",
+      "smallest_fix": "Assigned main removed the obsolete unmounted-surface spec in cba3ef4bc; canonical memo/role stability checks remain.",
+      "disposition": "already retired on assigned main; do not restore"
+    },
+    {
+      "job": "nightly-web-shard (10)",
+      "test/spec:line": "web/tests/stability.spec.ts:86",
+      "failure": "Error: 0.003 sum loading [136,804,95,40]→[173,804,95,40], foot-r [277,804,107,40]→[352,804,32,40]\n    0.000 foot-c [97,804,247,40]→[93,804,251,40]\n    0.001 head-side [274,72,94,44]→[224,72,144,44]\n    0.162 fs glass-card acc-section [0,667,390,137]→[0,0,0,0]\n    0.001 rights [17,833,355,11]→[0,0,0,0]\n\n    expect(received).toBeLessThan(expected)\n\n    Expected: < 0.05\n    Received:   0.1667442306288476\n\n      53 | async function expectStill(page: Page) {\n      54 |   const { cls, shifts } = await settledShift(page)\n    > 55 |   expect(cls, shifts.join('\\n')).toBeLessThan(0.05)\n         |                                  ^\n      56 | }\n      57 | async function base(page: Page, theme: 'light' | 'dark' = 'light') {\n      58 |   await watchShifts(page)\n        at expectStill (/home/runner/work/paimos/paimos/web/tests/stability.spec.ts:55:34)\n        at /home/runner/work/paimos/paimos/web/tests/stability.spec.ts:101:9",
+      "failed_cases": 2,
+      "cases": [
+        "at 390px › an open session holds still while runs and messages land",
+        "at 1440px › an open session holds still while runs and messages land"
+      ],
+      "assertion_locations": [
+        "web/tests/stability.spec.ts:55:34",
+        "web/tests/stability.spec.ts:101:9"
+      ],
+      "main_commit_that_broke_it": "fb56134ec / 543895948 (legacy inline decision surface retired)",
+      "owning_ticket": "AEON-1165",
+      "stale-spec_or_real-regression": "stale-spec",
+      "smallest_fix": "Assigned main removed the obsolete unmounted-surface spec in cba3ef4bc; canonical memo/role stability checks remain.",
+      "disposition": "already retired on assigned main; do not restore"
+    },
+    {
+      "job": "nightly-web-shard (10)",
+      "test/spec:line": "web/tests/stability.spec.ts:139",
+      "failure": "Error: expect(locator).toBeVisible() failed\n\n    Locator: getByRole('list', { name: 'Requests waiting for you' })\n    Expected: visible\n    Timeout: 5000ms\n    Error: element(s) not found",
+      "failed_cases": 1,
+      "cases": [
+        "the approval queue never says nothing waits before it knows"
+      ],
+      "assertion_locations": [
+        "web/tests/stability.spec.ts:150:78"
+      ],
+      "main_commit_that_broke_it": "fb56134ec / 543895948 (legacy inline decision surface retired)",
+      "owning_ticket": "AEON-1165",
+      "stale-spec_or_real-regression": "stale-spec",
+      "smallest_fix": "Assigned main removed the obsolete unmounted-surface spec in cba3ef4bc; canonical memo/role stability checks remain.",
+      "disposition": "already retired on assigned main; do not restore"
+    },
+    {
+      "job": "nightly-web-shard (10)",
+      "test/spec:line": "web/tests/ticket-panel.spec.ts:434",
+      "failure": "Test timeout of 120000ms exceeded.\n\n    Error: locator.evaluate: Test timeout of 120000ms exceeded.\n    Call log:\n      - waiting for getByRole('complementary', { name: 'Ticket details' }).locator('.panel-bar-main')\n\n\n      462 |           // their shrinking nav. scrollWidth alone misses overlapping siblings.\n      463 |           const expectHeaderFits = async () => {\n    > 464 |             const geometry = await ws.locator('.panel-bar-main').evaluate(el => {\n          |                                                                  ^\n      465 |               const frame = el.getBoundingClientRect()\n      466 |               const buttons = [...el.querySelectorAll('button')].map(button => {\n      467 |                 const rect = button.getBoundingClientRect()\n        at expectHeaderFits (/home/runner/work/paimos/paimos/web/tests/ticket-panel.spec.ts:464:66)\n        at Object.run (/home/runner/work/paimos/paimos/web/tests/ticket-panel.spec.ts:512:25)\n        at expectStableControls (/home/runner/work/paimos/paimos/web/tests/helpers/stable.ts:55:5)\n        at Object.run (/home/runner/work/paimos/paimos/web/tests/ticket-panel.spec.ts:504:15)\n        at expectStableControls (/home/runner/work/paimos/paimos/web/tests/helpers/stable.ts:55:5)\n        at /home/runner/work/paimos/paimos/web/tests/ticket-panel.spec.ts:485:11",
+      "failed_cases": 1,
+      "cases": [
+        "the routed panel keeps usable list space and stable controls"
+      ],
+      "assertion_locations": [
+        "web/tests/ticket-panel.spec.ts:464:66",
+        "web/tests/ticket-panel.spec.ts:512:25",
+        "web/tests/helpers/stable.ts:55:5",
+        "web/tests/ticket-panel.spec.ts:504:15",
+        "web/tests/ticket-panel.spec.ts:485:11"
+      ],
+      "main_commit_that_broke_it": null,
+      "suspected_commit": {
+        "path": "web/src/components/work/TicketWorkspace.vue",
+        "last_source_change_at_nightly": "e5e4b3537 AEON-1091: accept marked content work without a software release",
+        "attribution": "suspected only; not a proven introducing commit or bisect"
+      },
+      "owning_ticket": "AEON-687 / LEAD new regression",
+      "stale-spec_or_real-regression": "real-regression",
+      "smallest_fix": "The compound routed-panel stability case times out waiting for .panel-bar-main during a followed-record step. A lost/rerouted panel or excessive case workload remains to reproduce; do not loosen its control-space assertions.",
+      "disposition": "evidence only; exact cause/introducing commit not proven; LEAD reproduces and tickets"
+    },
+    {
+      "job": "nightly-web-shard (8)",
+      "test/spec:line": "web/tests/accounts-quota-bar.spec.ts:178",
+      "failure": "Error: switch on screen after End now\n\n    expect(received).toBeLessThanOrEqual(expected)\n\n    Expected: <= 0.5\n    Received:    19\n\n      210 |         await expect(pane(page).locator('[data-quota-say]')).toHaveText('Agents may use 4 more percentage points today. They stop at today’s limit (62 %) first.')\n      211 |       })\n    > 212 |       expect(Math.abs(await onScreen() - seen), 'switch on screen after End now').toBeLessThanOrEqual(.5)\n          |                                                                                   ^\n      213 |       guard.done()\n      214 |       await limits.scrollIntoViewIfNeeded()\n      215 |       await page.screenshot({ path: info.outputPath(`accounts-limits-settled-${width}-${theme}.png`), fullPage: false })\n        at /home/runner/work/paimos/paimos/web/tests/accounts-quota-bar.spec.ts:212:83",
+      "failed_cases": 4,
+      "cases": [
+        "1440 light › accounts 1440 light: Remove and End now leave “Agents may use it” and everything below in place",
+        "1440 dark › accounts 1440 dark: Remove and End now leave “Agents may use it” and everything below in place",
+        "390 light › accounts 390 light: Remove and End now leave “Agents may use it” and everything below in place",
+        "390 dark › accounts 390 dark: Remove and End now leave “Agents may use it” and everything below in place"
+      ],
+      "assertion_locations": [
+        "web/tests/accounts-quota-bar.spec.ts:212:83"
+      ],
+      "main_commit_that_broke_it": null,
+      "suspected_commit": {
+        "path": "web/src/components/settings/AccountsPanel.vue",
+        "last_source_change_at_nightly": "d37d6d6bb AEON-1172: a reading goes stale two minutes after it was taken; End now and Remove keep their rows while the reads after them are out",
+        "attribution": "suspected only; not a proven introducing commit or bisect"
+      },
+      "owning_ticket": "AEON-1172 / LEAD new regression",
+      "stale-spec_or_real-regression": "real-regression",
+      "smallest_fix": "Ending a quota window shifts the usage-probe control by 19px in four variants. Preserve the +/-0.5px stability guard; inspect retained rows during refresh.",
+      "disposition": "evidence only; exact cause/introducing commit not proven; LEAD reproduces and tickets"
+    },
+    {
+      "job": "nightly-web-shard (8)",
+      "test/spec:line": "web/tests/agents-display.spec.ts:64",
+      "failure": "Error: expect(locator).toHaveText(expected) failed\n\n    Locator: locator('.live-total')\n    Expected: \"4 live\"\n    Timeout: 5000ms\n    Error: element(s) not found",
+      "failed_cases": 1,
+      "cases": [
+        "live families count all external workers, hide hundreds of ended siblings and retain counts when folded"
+      ],
+      "assertion_locations": [
+        "web/tests/agents-display.spec.ts:67:45"
+      ],
+      "main_commit_that_broke_it": null,
+      "owning_ticket": "AEON-1238",
+      "stale-spec_or_real-regression": "stale-spec",
+      "smallest_fix": "Reserved for AEON-1238; do not edit this file.",
+      "disposition": "untouched, coordinator-owned",
+      "attribution_note": "AEON-780 removed head links; AEON-750 changed state marks; AEON-1238 owns detailed attribution and fixes."
+    },
+    {
+      "job": "nightly-web-shard (8)",
+      "test/spec:line": "web/tests/agents-display.spec.ts:98",
+      "failure": "Error: expect(locator).toHaveText(expected) failed\n\n    Locator: locator('.live-total')\n    Expected: \"4 live\"\n    Timeout: 5000ms\n    Error: element(s) not found",
+      "failed_cases": 1,
+      "cases": [
+        "another person’s visible account never becomes your full account or your capacity"
+      ],
+      "assertion_locations": [
+        "web/tests/agents-display.spec.ts:102:45"
+      ],
+      "main_commit_that_broke_it": null,
+      "owning_ticket": "AEON-1238",
+      "stale-spec_or_real-regression": "stale-spec",
+      "smallest_fix": "Reserved for AEON-1238; do not edit this file.",
+      "disposition": "untouched, coordinator-owned",
+      "attribution_note": "AEON-780 removed head links; AEON-750 changed state marks; AEON-1238 owns detailed attribution and fixes."
+    },
+    {
+      "job": "nightly-web-shard (8)",
+      "test/spec:line": "web/tests/agents-display.spec.ts:215",
+      "failure": "Error: expect(locator).toHaveCount(expected) failed\n\n    Locator:  getByRole('complementary', { name: 'Session details' }).getByRole('tab', { name: 'Messages' })\n    Expected: 1\n    Received: 0\n    Timeout:  5000ms",
+      "failed_cases": 6,
+      "cases": [
+        "390 light: existing Agents layout shows the report source and stable capacity controls",
+        "390 dark: existing Agents layout shows the report source and stable capacity controls",
+        "1024 light: existing Agents layout shows the report source and stable capacity controls",
+        "1024 dark: existing Agents layout shows the report source and stable capacity controls",
+        "1440 light: existing Agents layout shows the report source and stable capacity controls",
+        "1440 dark: existing Agents layout shows the report source and stable capacity controls"
+      ],
+      "assertion_locations": [
+        "web/tests/helpers/stable.ts:14:25",
+        "web/tests/helpers/stable.ts:52:84",
+        "web/tests/agents-display.spec.ts:238:5"
+      ],
+      "main_commit_that_broke_it": null,
+      "owning_ticket": "AEON-1238",
+      "stale-spec_or_real-regression": "stale-spec",
+      "smallest_fix": "Reserved for AEON-1238; do not edit this file.",
+      "disposition": "untouched, coordinator-owned",
+      "attribution_note": "AEON-780 removed head links; AEON-750 changed state marks; AEON-1238 owns detailed attribution and fixes."
+    },
+    {
+      "job": "nightly-web-shard (8)",
+      "test/spec:line": "web/tests/bulk.spec.ts:19",
+      "failure": "Error: expect(locator).toHaveAccessibleName(expected) failed\n\n    Locator:  getByRole('toolbar', { name: /selected ticket/ })\n    Expected: \"3 selected tickets\"\n    Received: \"1 selected ticket\"\n    Timeout:  5000ms",
+      "failed_cases": 1,
+      "cases": [
+        "checkbox and Shift-click select a range; one status change for all of them, undone at once"
+      ],
+      "assertion_locations": [
+        "web/tests/bulk.spec.ts:28:31"
+      ],
+      "main_commit_that_broke_it": "22faa1842",
+      "owning_ticket": "AEON-1239 (source AEON-917)",
+      "stale-spec_or_real-regression": "stale-spec",
+      "smallest_fix": "Shift-click the title rather than the row centre, where a nested action can consume it. Keep exact range selection.",
+      "source": "web/src/components/work/TicketTable.vue",
+      "disposition": "fixed locally; remote proof blocked"
+    },
+    {
+      "job": "nightly-web-shard (8)",
+      "test/spec:line": "web/tests/project-sort.spec.ts:135",
+      "failure": "Error: expect(locator).toHaveText(expected) failed\n\n    Locator: locator('[aria-live=\"polite\"].sr-only')\n    Expected: \"Pharos moved to position 2 of 3\"\n    Error: strict mode violation: locator('[aria-live=\"polite\"].sr-only') resolved to 2 elements:",
+      "failed_cases": 1,
+      "cases": [
+        "Alt and the arrow keys move a card, announced; the card menu moves it too; the list moves with Alt up and down"
+      ],
+      "assertion_locations": [],
+      "main_commit_that_broke_it": "f36956ec9",
+      "owning_ticket": "AEON-1239 (source AEON-785)",
+      "stale-spec_or_real-regression": "stale-spec",
+      "smallest_fix": "Scope the Projects announcement rather than the global footer live region.",
+      "source": "web/src/components/AppFooter.vue",
+      "disposition": "fixed locally; remote proof blocked"
+    }
+  ],
+  "attribution_limits": "Known source commits explain stale contracts; several specs were inconsistent from their original introduction or Linux exposed an existing absolute-path defect. A recent source change is a suspect, not proof of causality. Null main_commit values deliberately mean no proven introducing commit; no bisect or fresh browser reproduction was possible while the approved runner refused capacity/ownership.",
+  "git_search_evidence": {
+    "done-gate": {
+      "command": "git log --format=%h %s -S 'done', 'delivered' a52205301 -- web/src/lib/work.ts",
+      "matches": [
+        "b245d054b AEON-521: status definitions, human checks and agent help",
+        "5b42312c4 U1+U2 round 2: docked panel, one baseline, in-flow footer, project sorting AEON-58",
+        "849070ef3 U1+U2: INSPR tokens, glass shell, projects page and ticket list AEON-58"
+      ],
+      "note": "internal"
+    },
+    "cursor": {
+      "command": "git log --format=%h %s -S aria-selected=\"selectable a52205301 -- web/src/components/work/TicketTable.vue",
+      "matches": [
+        "22faa1842 AEON-917: stabilize phone grid and add blocking acceptance guards"
+      ],
+      "note": "selection"
+    },
+    "secondary-ink": {
+      "command": "git log --format='%h %s' -S 'secondary-line' a52205301 -- web/src/components/indicators/Robot3.vue",
+      "matches": [
+        "8c11c3dff AEON-752: apply theme tokens across controls, highlights and recurring markers"
+      ]
+    },
+    "sse": {
+      "command": "git log --format=%h %s -S lastEventId ?? numeric a52205301 -- web/tests/live-server.ts",
+      "matches": [
+        "f053c9b49 P0.3: the project ticket list follows changes by others live (AEON-326)"
+      ],
+      "note": "fixture"
+    },
+    "handshake": {
+      "command": "git log --format=%h %s -S this.onopen?. a52205301 -- web/tests/work-fixtures.ts",
+      "matches": [
+        "3f131b6e3 AEON-1018: model a complete healthy stream handshake for HTTP scenarios"
+      ],
+      "note": "fixture"
+    },
+    "outline": {
+      "command": "git log --format=%h %s -S kind: ['work', 'epic', 'ticket', 'task'] a52205301 -- web/src/lib/useOutline.ts",
+      "matches": [
+        "d15114c1a P0.7: unify work surfaces and validate vocabulary (AEON-655)"
+      ],
+      "note": "roots"
+    },
+    "desk": {
+      "command": "git log --format=%h %s -S DecisionDeskPanel a52205301 -- web/src/views/AgentsView.vue",
+      "matches": [
+        "fb56134ec AEON-569: switch Agents decisions to the canonical Decision Desk"
+      ],
+      "note": "cutover"
+    },
+    "expert": {
+      "command": "git log --format=%h %s -S show_expert_start a52205301 -- web/src/lib/prefs.ts",
+      "matches": [],
+      "note": "manual"
+    },
+    "nonce": {
+      "command": "git log --format=%h %s -S aeon-theme-boot a52205301 -- web/index.html",
+      "matches": [
+        "8765ffcdf AEON-749: apply derived theme tokens and cache first-paint colours"
+      ],
+      "note": "CSP"
+    },
+    "release": {
+      "command": "git log --format=%h %s -S listPlanningReleases a52205301 -- web/src/components/work/ReleasePicker.vue",
+      "matches": [
+        "7e729d603 AEON-723: retire Flow stages and preserve native release planning"
+      ],
+      "note": "native"
+    },
+    "people": {
+      "command": "git log --format=%h %s -S Entwicklungszusammenarbeit a52205301 -- web/tests/views-filters.spec.ts",
+      "matches": [],
+      "note": "isolation"
+    },
+    "recurrence": {
+      "command": "git log --format=%h %s -S width: 12px a52205301 -- web/src/components/work/TicketTypeIcon.vue",
+      "matches": [
+        "4a049ecad AEON-644: apply saved themes before render and choose ink per fill"
+      ],
+      "note": "geometry"
+    },
+    "counts": {
+      "command": "git log --format=%h %s -S sr-only a52205301 -- web/src/views/ReleasesView.vue",
+      "matches": [],
+      "note": "accessible"
+    },
+    "live-region": {
+      "command": "git log --format=%h %s -S aria-live=\"polite\" a52205301 -- web/src/components/AppFooter.vue",
+      "matches": [
+        "f36956ec9 AEON-785: footer centre says what the screen shows (Agents, Tickets, Releases, Knowledge, Settings, Access)"
+      ],
+      "note": "footer"
+    },
+    "submission": {
+      "command": "git log --format=%h %s -S event.ctrlKey a52205301 -- web/src/components/work/QuickCreateRow.vue",
+      "matches": [
+        "d15114c1a P0.7: unify work surfaces and validate vocabulary (AEON-655)"
+      ],
+      "note": "keyboard"
+    },
+    "session-queue": {
+      "command": "git log --format=%h %s -S queue-item a52205301 -- web/src/components/agents/SessionChat.vue",
+      "matches": [
+        "2c33f633d AEON-977: show chat receipts and safely edit or cancel queued messages"
+      ],
+      "note": "delivery"
+    },
+    "phone-parent": {
+      "command": "git log --format=%h %s -S AccessSheet a52205301 -- web/src/components/work/EpicPicker.vue",
+      "matches": [
+        "d15114c1a P0.7: unify work surfaces and validate vocabulary (AEON-655)"
+      ],
+      "note": "sheet"
+    },
+    "retired": {
+      "command": "git log --format=%h %s -S NeedsYou a52205301 -- web/tests/stability.spec.ts",
+      "matches": [],
+      "note": "queue"
+    },
+    "nav": {
+      "command": "git log --format=%h %s -S name: 'Desk' a52205301 -- web/tests/nav.spec.ts",
+      "matches": [],
+      "note": "places"
+    },
+    "harness": {
+      "command": "git log --format='%h %s' -S 'Claude Code' a52205301 -- web/src/lib/agentState.ts",
+      "matches": [
+        "dbf44284b AEON-1160: call the claude harness Claude Code app-wide and register the W1 tests"
+      ]
+    },
+    "crm": {
+      "command": "git log --format=%h %s -S dot-list a52205301 -- web/src/components/business/CustomerHeader.vue",
+      "matches": [],
+      "note": "wrapping"
+    }
+  },
+  "changes": [
+    "web/tests/aeon-635.spec.ts",
+    "web/tests/agent-pause.spec.ts",
+    "web/tests/agents-harness-status.spec.ts",
+    "web/tests/bulk.spec.ts",
+    "web/tests/crm.spec.ts",
+    "web/tests/decision-text.spec.ts",
+    "web/tests/delivery-guarantee.spec.ts",
+    "web/tests/delivery-rating.spec.ts",
+    "web/tests/done-gate.spec.ts",
+    "web/tests/footer-summary.spec.ts",
+    "web/tests/from-classic.spec.ts",
+    "web/tests/indicator-creative-gallery.spec.ts",
+    "web/tests/indicator-gallery.spec.ts",
+    "web/tests/live-agents.spec.ts",
+    "web/tests/live-server.ts",
+    "web/tests/outline.spec.ts",
+    "web/tests/phone-select.spec.ts",
+    "web/tests/pi-openrouter.spec.ts",
+    "web/tests/project-sort.spec.ts",
+    "web/tests/quote-public-page.spec.ts",
+    "web/tests/recurrence-marker.spec.ts",
+    "web/tests/release-picker.spec.ts",
+    "web/tests/role-picker-layout.spec.ts",
+    "web/tests/session-attention.spec.ts",
+    "web/tests/session-chat.spec.ts",
+    "web/tests/settings.spec.ts",
+    "web/tests/ticket-benefits.spec.ts",
+    "web/tests/work-fixtures.ts",
+    "docs/qa/aeon-1239-evidence.json"
+  ],
+  "validation": [
+    {
+      "log": "tmp/aeon-1239/remote-batch-1.log",
+      "result": "browser suite did not run; ownership lock refused"
+    },
+    {
+      "log": "tmp/aeon-1239/remote-batch-2.log",
+      "result": "incomplete / capacity refused (exit 3)"
+    },
+    {
+      "log": "tmp/aeon-1239/remote-batch-3.log",
+      "result": "incomplete / capacity refused (exit 3)"
+    },
+    {
+      "log": "tmp/aeon-1239/remote-batch-4.log",
+      "result": "incomplete / capacity refused (exit 3)"
+    },
+    {
+      "log": "tmp/aeon-1239/remote-static.log",
+      "result": "incomplete / capacity refused (exit 3)"
+    },
+    {
+      "command": "git diff --check",
+      "result": "passed for every local change"
+    },
+    {
+      "command": "remote-spec.sh (five batches, <=6 specs each; --workers=1 imposed by runner)",
+      "result": "No passing browser proof yet. Capacity exit 3 repeatedly; the admitted attempt refused the existing browser PID ownership lock with exit 1. No lock removal, local browser fallback or custom remote transport."
+    },
+    {
+      "command": "ci-static-remote.sh",
+      "result": "incomplete: shared capacity refused (exit 3); not green"
+    },
+    {
+      "command": "remote-test.sh",
+      "result": "Not needed: no Go or backend changes. Nightly Go/static/e2e/release/migration jobs passed."
+    },
+    {
+      "command": "Node v24 stripTypeScriptTypes(mode=transform) + vm.SourceTextModule parse for each changed TypeScript file",
+      "result": "passed: 28 changed files parsed, no imports executed or tests run. Bounded syntax check only; not a typecheck or browser proof."
+    }
+  ],
+  "handoff": {
+    "validation_complete": false,
+    "next_owner": "LEAD",
+    "actions": [
+      "Run five prescribed remote-spec batches when capacity is free, plus ci-static-remote.sh; any genuine current failures stay blocking.",
+      "Reproduce and ticket real regression rows; suspect commits are not established causes.",
+      "AEON-1238 retains its four reserved specs and common phone panel overflow family.",
+      "Route deploy-target journey fixture to retirement rather than restore Flow/stage behavior.",
+      "No new/renamed tests or source files: tier manifests and audit slices unchanged. No application, API, migration, version or release metadata changes."
+    ],
+    "remote_spec_batches": [
+      {
+        "batch": 1,
+        "runner": "/Users/markus/.aeon/lead/aeon/remote-spec.sh",
+        "worktree": "/Users/markus/Code/aeon-worktrees/aeon-1239-nightly",
+        "quoted_spec_argument": "tests/from-classic.spec.ts tests/project-sort.spec.ts tests/aeon-635.spec.ts tests/done-gate.spec.ts tests/delivery-rating.spec.ts tests/bulk.spec.ts",
+        "grep": "",
+        "status": "not proven; capacity/ownership refusal"
+      },
+      {
+        "batch": 2,
+        "runner": "/Users/markus/.aeon/lead/aeon/remote-spec.sh",
+        "worktree": "/Users/markus/Code/aeon-worktrees/aeon-1239-nightly",
+        "quoted_spec_argument": "tests/outline.spec.ts tests/live-list.spec.ts tests/live-panel.spec.ts tests/release-picker.spec.ts tests/decision-text.spec.ts tests/session-attention.spec.ts",
+        "grep": "",
+        "status": "not proven; capacity/ownership refusal"
+      },
+      {
+        "batch": 3,
+        "runner": "/Users/markus/.aeon/lead/aeon/remote-spec.sh",
+        "worktree": "/Users/markus/Code/aeon-worktrees/aeon-1239-nightly",
+        "quoted_spec_argument": "tests/phone-select.spec.ts tests/pi-openrouter.spec.ts tests/quote-public-page.spec.ts tests/crm.spec.ts tests/footer-summary.spec.ts tests/live-agents.spec.ts",
+        "grep": "",
+        "status": "not proven; capacity/ownership refusal"
+      },
+      {
+        "batch": 4,
+        "runner": "/Users/markus/.aeon/lead/aeon/remote-spec.sh",
+        "worktree": "/Users/markus/Code/aeon-worktrees/aeon-1239-nightly",
+        "quoted_spec_argument": "tests/agents-harness-status.spec.ts tests/indicator-gallery.spec.ts tests/indicator-creative-gallery.spec.ts tests/recurrence-marker.spec.ts tests/settings.spec.ts tests/ticket-benefits.spec.ts",
+        "grep": "",
+        "status": "not proven; capacity/ownership refusal"
+      },
+      {
+        "batch": 5,
+        "runner": "/Users/markus/.aeon/lead/aeon/remote-spec.sh",
+        "worktree": "/Users/markus/Code/aeon-worktrees/aeon-1239-nightly",
+        "quoted_spec_argument": "tests/agent-pause.spec.ts tests/role-picker-layout.spec.ts tests/session-chat.spec.ts tests/delivery-guarantee.spec.ts tests/views-filters.spec.ts",
+        "grep": "",
+        "status": "not proven; capacity/ownership refusal"
+      }
+    ],
+    "mixed_regression_specs": [
+      "tests/agent-pause.spec.ts:235",
+      "tests/session-chat.spec.ts:159"
+    ],
+    "mixed_regression_note": "These specs keep genuine layout failures even after stale fixture cases are corrected. Do not claim whole-file green or weaken their remaining assertions to satisfy this ticket.",
+    "tracker_comment": "Posted on AEON-1239 as aeon-1239-nightly; no ticket status changes."
+  },
+  "log_integrity": {
+    "latest.log": "433f88e8127335a928d6a91a07e3396f4874cc9883ad3fb996eb85bf9c766a59",
+    "failures.json": "f935413f2a8ba324646645b2f8fbb6595826a08b6d43810187dda46fd7e2456e",
+    "2026-10-10-failed.log": "0cf388de4fb17f89e0f25131d46989957baf517e3e8b87fe0b6987836aa83ec8"
+  },
+  "code_commits": [
+    "f8a5f13ba AEON-1239: follow codename rows and reopen phone release details",
+    "cd51cea1d AEON-1239: hold concurrent ownership reads and follow memo tab order",
+    "7370ce657 AEON-1239: keep memo artifacts isolated and measure canonical actions",
+    "105454870 AEON-1239: bind the held Outline root page to unified work",
+    "dd60cbf28 AEON-1239: migrate nightly coverage to canonical work and decision flows",
+    "b9d66acab AEON-1239: align nightly specs with current controls and isolated artifacts"
+  ],
+  "fix_round_2": {
+    "reviewed_head": "ca18b021a",
+    "blocking_finding": "Medium: phone Parent picker spec incorrectly expects overflow:auto on .options instead of AccessSheet .sheet-body.",
+    "resolution": "Correct the existing two phone theme cases to assert the real scrolling container, retain unclipped list coverage, and measure the body and pinned Cancel during disclosure.",
+    "regression_cases": [
+      "epic floating choices scroll as one panel at 390 light",
+      "epic floating choices scroll as one panel at 390 dark"
+    ],
+    "baseline_attempts": [
+      {
+        "runner": "remote-spec.sh",
+        "spec": "tests/role-picker-layout.spec.ts",
+        "grep": "epic floating choices scroll as one panel at 390",
+        "head": "ca18b021a",
+        "exit_code": 3,
+        "reason": "shared remote capacity full"
+      },
+      {
+        "runner": "remote-spec.sh",
+        "spec": "tests/role-picker-layout.spec.ts",
+        "grep": "epic floating choices scroll as one panel at 390",
+        "head": "ca18b021a",
+        "exit_code": 3,
+        "reason": "shared remote capacity full"
+      },
+      {
+        "runner": "remote-spec.sh",
+        "spec": "tests/role-picker-layout.spec.ts",
+        "grep": "epic floating choices scroll as one panel at 390",
+        "head": "ca18b021a",
+        "exit_code": 3,
+        "reason": "host level refusal after waiting and retrying"
+      }
+    ],
+    "baseline_execution": "Incomplete: no browser tests executed. The reviewer identifies both phone theme failures; source inspection confirms .options leaves overflow visible and .sheet-body has overflow:auto. No executed fail-before proof is claimed.",
+    "main_conflict_check": {
+      "fetched_origin_main": "928157260227550bfbf00014f75196e584ba63a8",
+      "command": "git merge-tree --write-tree HEAD origin/main",
+      "exit_code": 0,
+      "result": "conflict-free; no merge required by fix brief"
+    },
+    "checks": [
+      {
+        "command": "Node v24 stripTypeScriptTypes + vm.SourceTextModule syntax parse of web/tests/role-picker-layout.spec.ts",
+        "result": "passed; syntax only, no imports executed"
+      },
+      {
+        "command": "git diff --check",
+        "result": "passed"
+      },
+      {
+        "command": "remote-test.sh / web unit tests",
+        "result": "not affected: this round changes an existing browser spec and evidence only; no Go, application or unit-test code changed"
+      },
+      {
+        "command": "Validate triage_table required fields and sum(failed_cases)",
+        "result": "passed: 91 rows, all seven required fields present, 183 cases; real-regression assertions and AEON-1238 files preserved"
+      }
+    ],
+    "post_fix_validation": [
+      {
+        "runner": "remote-spec.sh",
+        "spec": "tests/role-picker-layout.spec.ts",
+        "head": "136a1ec04",
+        "exit_code": 3,
+        "reason": "host level protocol refusal; no tests executed"
+      },
+      {
+        "runner": "ci-static-locked.sh",
+        "head": "136a1ec04",
+        "exit_code": 3,
+        "reason": "remote static paused by host level protocol; not green"
+      },
+      {
+        "runner": "remote-spec.sh",
+        "spec": "tests/role-picker-layout.spec.ts",
+        "head": "136a1ec04",
+        "exit_code": 3,
+        "reason": "retry after waiting: host level protocol refusal; no tests executed"
+      },
+      {
+        "runner": "ci-static-locked.sh",
+        "head": "136a1ec04",
+        "exit_code": 3,
+        "reason": "retry after waiting: remote static paused by host level protocol; not green"
+      }
+    ],
+    "ownership": "Same branch/worktree; AEON-1238 files and real-regression assertions untouched. No new/renamed tests, source files, manifests, production code, API, migrations, versions or release metadata. No origin push, deploy, review gate, model CLI or delegation.",
+    "code_commit": "136a1ec04 AEON-1239: check Parent phone scrolling on the shared sheet body",
+    "validation_complete": false,
+    "handoff": "LEAD runs remote-spec.sh for tests/role-picker-layout.spec.ts and ci-static-locked.sh when the guarded host is available, or hosted CI. Baseline ca18b021a browser proof is also unexecuted. Review explicitly treats browser/static execution as a hosted-CI residual; no pass claim and no guard bypass."
+  }
+}

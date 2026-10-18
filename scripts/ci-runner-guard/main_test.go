@@ -12,12 +12,69 @@ import (
 )
 
 func TestRepositoryWorkflows(t *testing.T) {
+	t.Run("CI accepts the retired comparison job's absence", func(t *testing.T) {
+		body, err := os.ReadFile("../../.github/workflows/ci.yml")
+		if err != nil {
+			t.Fatal(err)
+		}
+		var workflow map[string]any
+		if err := yaml.Unmarshal(body, &workflow); err != nil {
+			t.Fatal(err)
+		}
+		if _, exists := mapping(workflow["jobs"])["release-list-comparison"]; exists {
+			t.Fatal("AEON-679 retired the capture-only comparison job")
+		}
+		if err := checkCITriggersAndRequiredChecks(workflow); err != nil {
+			t.Fatalf("current CI without the retired comparison job must pass: %v", err)
+		}
+	})
 	problems, err := checkDirectory("../../.github/workflows")
 	if err != nil {
 		t.Fatal(err)
 	}
 	if len(problems) != 0 {
 		t.Fatal(strings.Join(problems, "\n"))
+	}
+}
+
+func TestTreeProofFailureCannotSkipRequiredChecks(t *testing.T) {
+	body, err := os.ReadFile("../../.github/workflows/ci.yml")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var workflow map[string]any
+	if err := yaml.Unmarshal(body, &workflow); err != nil {
+		t.Fatal(err)
+	}
+	if err := checkCITriggersAndRequiredChecks(workflow); err != nil {
+		t.Fatal(err)
+	}
+	for _, mutate := range []func(map[string]any){
+		func(jobs map[string]any) { delete(mapping(jobs["tree-reuse"]), "continue-on-error") },
+		func(jobs map[string]any) { mapping(jobs["tree-reuse"])["continue-on-error"] = false },
+		func(jobs map[string]any) { mapping(jobs["tree-reuse"])["timeout-minutes"] = 1 },
+		func(jobs map[string]any) { mapping(jobs["tree-reuse"])["if"] = "success()" },
+	} {
+		var changed map[string]any
+		if err := yaml.Unmarshal(body, &changed); err != nil {
+			t.Fatal(err)
+		}
+		mutate(mapping(changed["jobs"]))
+		if err := checkCITriggersAndRequiredChecks(changed); err == nil {
+			t.Fatal("proof failure could skip required checks but the guard accepted it")
+		}
+	}
+	for _, id := range []string{"go", "web", "release-check", "e2e", "migration-compat", "go-test", "go-static", "go-timing"} {
+		t.Run(id, func(t *testing.T) {
+			var changed map[string]any
+			if err := yaml.Unmarshal(body, &changed); err != nil {
+				t.Fatal(err)
+			}
+			mapping(mapping(changed["jobs"])[id])["if"] = "success()"
+			if err := checkCITriggersAndRequiredChecks(changed); err == nil {
+				t.Fatalf("%s may skip after proof failure", id)
+			}
+		})
 	}
 }
 
@@ -59,10 +116,65 @@ func TestFullUIQALabelOptInBoundary(t *testing.T) {
 	}
 }
 
+func TestNightlyFullCannotNarrowTiersOrAcquirePRRunnerAuthority(t *testing.T) {
+	body, err := os.ReadFile("../../.github/workflows/nightly-full.yml")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, mutation := range []struct{ old, new string }{
+		{"  schedule:", "  pull_request:\n  schedule:"},
+		{"run go --all --shard", "run go --shard"},
+		{"run web --all --unit", "run web --unit"},
+		{"run web --all --shard", "run web --shard"},
+		{"  nightly-go-test:\n", "  nightly-go-test:\n    if: false\n"},
+		{"  nightly-migration-compat:\n", "  nightly-migration-compat:\n    continue-on-error: true\n"},
+		{"    runs-on: ubuntu-latest", "    runs-on: mbp2606"},
+		{"  nightly-go:\n", "  go:\n"},
+	} {
+		changed := strings.Replace(string(body), mutation.old, mutation.new, 1)
+		if changed == string(body) {
+			t.Fatalf("mutation did not apply: %s", mutation.old)
+		}
+		problems, err := checkWorkflow("nightly-full.yml", []byte(changed))
+		if err != nil || len(problems) == 0 {
+			t.Fatalf("unsafe nightly accepted: %v %v", problems, err)
+		}
+	}
+}
+
+func TestNightlyFullRequiresAllThreeTiers(t *testing.T) {
+	body, err := os.ReadFile("../../.github/workflows/nightly-full.yml")
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Normalize the old two-tier fixture too: this must fail against d8e9906c's
+	// guard because --all is the only command that includes the nightly tier.
+	all := strings.ReplaceAll(string(body), "cli.mjs run go --full", "cli.mjs run go --all")
+	all = strings.ReplaceAll(all, "cli.mjs run web --full", "cli.mjs run web --all")
+	if problems, err := checkWorkflow("nightly-full.yml", []byte(all)); err != nil || len(problems) != 0 {
+		t.Fatalf("all three tiers must be accepted: %v %v", problems, err)
+	}
+	for _, command := range []string{"go --all --shard", "go --all --timing", "web --all --unit", "web --all --shard"} {
+		t.Run(command, func(t *testing.T) {
+			changed := strings.Replace(all, command, strings.Replace(command, "--all", "--full", 1), 1)
+			if changed == all {
+				t.Fatal("nightly command mutation did not apply")
+			}
+			problems, err := checkWorkflow("nightly-full.yml", []byte(changed))
+			if err != nil || !strings.Contains(fmt.Sprint(problems), "must select every tier") {
+				t.Fatalf("nightly must reject gated-full-only execution: %v %v", problems, err)
+			}
+		})
+	}
+}
+
 func TestGatePreviewDoesNotReportRequiredStatusOnPushOrDispatch(t *testing.T) {
 	body, err := os.ReadFile("../../.github/workflows/cross-family-preview.yml")
 	if err != nil {
 		t.Fatal(err)
+	}
+	if problems, err := checkWorkflow("cross-family-preview.yml", body); err != nil || len(problems) != 0 {
+		t.Fatalf("diagnostic preview with bootstrap skip must be accepted: %v %v", problems, err)
 	}
 	for _, changed := range []string{
 		strings.Replace(string(body), "  pull_request:", "  push:\n  pull_request:", 1),
@@ -100,9 +212,11 @@ func checkRunnerWorkflow(name string, body []byte) ([]string, error) {
 func TestUntrustedRunnerSelections(t *testing.T) {
 	for _, selection := range []string{
 		"mbp2606", "[self-hosted, Linux, ARM64, mbp2606]", "[ubuntu-latest, mbp2606]",
-		"mbp2606-push", "mbp2606-dispatch",
+		"mbp2606-push", "mbp2606-dispatch", "mbp2606-pr", "mbp2606-mq",
 		"[self-hosted, Linux, ARM64, mbp2606, mbp2606-push]",
 		"[self-hosted, Linux, ARM64, mbp2606, mbp2606-dispatch]",
+		"[self-hosted, Linux, ARM64, mbp2606, mbp2606-pr]",
+		"[self-hosted, Linux, ARM64, mbp2606, mbp2606-mq]",
 		"ubuntu-2mbp2606", "macos-15-mbp2606", "windows-2025-mbp2606",
 		"${{ needs.runner-route.outputs.runs_on }}", "${{ fromJSON(vars.RUNNER) }}",
 		"${{ github.event_name != 'pull_request' && 'mbp2606' || 'ubuntu-latest' }}",
@@ -222,7 +336,10 @@ func TestCanonicalEventGuard(t *testing.T) {
 	for _, replacement := range []string{
 		strings.Replace(body, `"workflow_dispatch"`, `"pull_request"`, 1),
 		strings.Replace(body, `"workflow_dispatch"`, `"merge_group"`, 1),
-		strings.Replace(body, "github.ref == 'refs/heads/main' && ", "", 1),
+		strings.Replace(body, "github.ref == 'refs/heads/main'", "true", 1),
+		strings.Replace(body, " && github.event.pull_request.head.repo.full_name == github.repository", "", 1),
+		strings.Replace(body, "github.event.pull_request.head.repo.full_name", "github.event.pull_request.base.repo.full_name", 1),
+		strings.Replace(body, "github.event_name == 'merge_group'", "true", 1),
 		strings.Replace(body, "needs.runner-route.outputs.run_attempt == github.run_attempt && ", "", 1),
 		strings.Replace(body, "outputs.run_attempt == github.run_attempt", "outputs.run_attempt != github.run_attempt", 1),
 		strings.Replace(body, "needs: runner-route", "needs: wrong-route", 1),
@@ -241,9 +358,11 @@ func TestRoutedShardMatrixGuard(t *testing.T) {
 	for _, selection := range []string{
 		routedGoShards,
 		strings.Replace(routedGoShards, "outputs.run_attempt == github.run_attempt && ", "", 1),
-		strings.Replace(routedGoShards, "github.ref == 'refs/heads/main' && ", "", 1),
+		strings.Replace(routedGoShards, "github.ref == 'refs/heads/main'", "true", 1),
+		strings.Replace(routedGoShards, " && github.event.pull_request.head.repo.full_name == github.repository", "", 1),
 		strings.Replace(routedGoShards, `"workflow_dispatch"`, `"pull_request"`, 1),
 		strings.Replace(routedGoShards, "outputs.runner_class == 'mbp2606' && ", "", 1),
+		strings.Replace(routedGoShards, "github.event_name == 'pull_request'", `contains(fromJSON('["pull_request","merge_group"]'), github.event_name)`, 1),
 		"[1, 2, 3, 4]",
 	} {
 		body := routedWorkflow("go-test", "    strategy:\n      matrix:\n        shard: "+selection+"\n")
@@ -337,4 +456,52 @@ func TestGuardDiscoversNewWorkflowsAndRejectsInvalidYAML(t *testing.T) {
 			t.Fatalf("opaque/privileged workflow accepted: %v %v", problems, err)
 		}
 	}
+}
+
+func TestMergeGroupProofGuardRejectsUntrustedInputs(t *testing.T) {
+	body, err := os.ReadFile("../../.github/workflows/ci.yml")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, mutate := range []func(map[string]any){
+		func(jobs map[string]any) { mapping(jobs["tree-reuse"])["if"] = "github.event_name == 'merge_group'" },
+		func(jobs map[string]any) {
+			steps := mapping(jobs["tree-reuse"])["steps"].([]any)
+			mapping(mapping(steps[0])["with"])["ref"] = "candidate"
+		},
+		func(jobs map[string]any) {
+			mapping(jobs["go"])["permissions"] = map[string]any{"contents": "write", "actions": "read"}
+		},
+		func(jobs map[string]any) {
+			steps := mapping(jobs["web"])["steps"].([]any)
+			mapping(steps[2])["continue-on-error"] = true
+		},
+		func(jobs map[string]any) {
+			steps := mapping(jobs["e2e"])["steps"].([]any)
+			mapping(mapping(steps[2])["env"])["CONFIRM_PR_RUN"] = "another-run"
+		},
+		func(jobs map[string]any) {
+			steps := mapping(jobs["release-check"])["steps"].([]any)
+			delete(mapping(mapping(steps[3])["env"]), "PR_CONFIRM_REUSE")
+		},
+		func(jobs map[string]any) { mapping(jobs["go-static"])["if"] = mapping(jobs["go-test"])["if"] },
+	} {
+		var workflow map[string]any
+		if err := yaml.Unmarshal(body, &workflow); err != nil {
+			t.Fatal(err)
+		}
+		mutate(mapping(workflow["jobs"]))
+		if err := checkCITriggersAndRequiredChecks(workflow); err == nil {
+			t.Fatal("unsafe MG proof workflow accepted")
+		}
+	}
+	var noFlag map[string]any
+	if err := yaml.Unmarshal(body, &noFlag); err != nil {
+		t.Fatal(err)
+	}
+	delete(noFlag, "env")
+	if err := checkCITriggersAndRequiredChecks(noFlag); err == nil {
+		t.Fatal("missing full-tier fallback flag accepted")
+	}
+
 }

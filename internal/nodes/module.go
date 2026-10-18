@@ -12,6 +12,7 @@ import (
 	"github.com/inspr-at/paimos/internal/authz"
 	"github.com/inspr-at/paimos/internal/db"
 	"github.com/inspr-at/paimos/internal/httpapi"
+	"github.com/inspr-at/paimos/internal/reportercontract"
 	"github.com/inspr-at/paimos/internal/tenant"
 )
 
@@ -19,6 +20,9 @@ import (
 type Module struct {
 	pool   *pgxpool.Pool
 	events Writer
+	// Pointer so a lifecycle Module copy shares one lock. A value field
+	// embeds sync.Mutex; copying it forks the lock around the same map.
+	figures *figuresCache
 }
 
 var _ httpapi.Module = (*Module)(nil)
@@ -33,12 +37,14 @@ func New(pool *pgxpool.Pool, events Writer) httpapi.Module {
 	if events == nil {
 		events = SQLWriter{}
 	}
-	return &Module{pool: pool, events: events}
+	return &Module{pool: pool, events: events, figures: &figuresCache{}}
 }
 
 // Mount registers kind and node routes. Paths are the full /api paths the
 // server mux expects.
 func (m *Module) Mount(mux *http.ServeMux) {
+	mux.HandleFunc("GET /api/settings/work-vocabulary", m.handleGetVocabulary)
+	mux.HandleFunc("PUT /api/settings/work-vocabulary", m.handlePutVocabulary)
 	mux.HandleFunc("GET /api/status/help", m.handleStatusHelp)
 	mux.HandleFunc("GET /api/kinds", m.handleListKinds)
 	mux.HandleFunc("POST /api/kinds", m.requirePermission("kinds.manage", m.handleCreateKind))
@@ -48,11 +54,34 @@ func (m *Module) Mount(mux *http.ServeMux) {
 
 	mux.HandleFunc("GET /api/nodes", m.handleListNodes)
 	mux.HandleFunc("GET /api/projects", m.handleListProjects)
+	mux.HandleFunc("GET /api/projects/lookup", m.handleLookupProject)
+	mux.HandleFunc("GET /api/projects/{projectId}/figures", m.handleProjectFigures)
 	mux.HandleFunc("POST /api/nodes", m.handleCreateNode)
 	mux.HandleFunc("POST /api/nodes/bulk", m.handleBulk)
 	mux.HandleFunc("GET /api/nodes/lookup", m.handleLookupNodes)
 	mux.HandleFunc("GET /api/nodes/tree", m.handleTree)
 	mux.HandleFunc("GET /api/node-keys/{key}", m.handleGetNodeByKey)
+	mux.HandleFunc("GET /api/nodes/{nodeId}/work-lifecycle", m.handleWorkLifecycle)
+	mux.HandleFunc("POST /api/nodes/{nodeId}/work-lifecycle", m.handleWorkLifecycle)
+	mux.HandleFunc("POST /api/nodes/{nodeId}/work-lifecycle/{actionId}/continue", m.handleWorkLifecycle)
+	mux.HandleFunc("DELETE /api/nodes/{nodeId}/work-lifecycle/{actionId}", m.handleWorkLifecycle)
+	mux.HandleFunc("POST /api/nodes/{nodeId}/entry-evidence", m.handleEntryEvidence)
+	mux.HandleFunc("GET /api/nodes/{nodeId}/person-step-owners", m.handlePersonStepOwners)
+	mux.HandleFunc("GET /api/nodes/{nodeId}/person-steps", m.handlePersonSteps)
+	mux.HandleFunc("PUT /api/nodes/{nodeId}/person-steps/{checkId}", m.handlePersonStepWrite)
+	mux.HandleFunc("PUT /api/nodes/{nodeId}/person-steps/{checkId}/owner", m.handlePersonStepWrite)
+	mux.HandleFunc("POST /api/nodes/{nodeId}/review-runs", reportercontract.WithHeader(reportercontract.ReviewRun, m.handleCreateReviewRun))
+	mux.HandleFunc("POST /api/review-runs/{runId}/credential", reportercontract.WithHeader(reportercontract.ReviewRun, m.handleClaimReviewRun))
+	mux.HandleFunc("POST /api/review-runs/{runId}/verdict", reportercontract.WithHeader(reportercontract.ReviewRun, m.handleSubmitReviewRun))
+	mux.HandleFunc("GET /api/nodes/{nodeId}/review-evidence", reportercontract.WithHeader(reportercontract.ReviewRun, m.handleReviewEvidenceProvenance))
+	mux.HandleFunc("GET /api/nodes/{nodeId}/entry-checks", m.handleEntryChecks)
+	mux.HandleFunc("PUT /api/nodes/{nodeId}/entry-checks/{checkId}", m.handleEntryTick)
+	mux.HandleFunc("GET /api/projects/{projectId}/definitions", m.handleDefinition)
+	mux.HandleFunc("PUT /api/projects/{projectId}/definitions", m.handleDefinition)
+	mux.HandleFunc("DELETE /api/projects/{projectId}/definitions", m.handleDefinition)
+	mux.HandleFunc("GET /api/projects/{projectId}/definitions/context", m.handleDefinition)
+	mux.HandleFunc("GET /api/settings/definitions", m.handleDefinition)
+	mux.HandleFunc("PUT /api/settings/definitions", m.handleDefinition)
 	mux.HandleFunc("GET /api/nodes/{nodeId}", m.handleGetNode)
 	mux.HandleFunc("PATCH /api/nodes/{nodeId}", m.handleUpdateNode)
 	mux.HandleFunc("DELETE /api/nodes/{nodeId}", m.handleDeleteNode)
@@ -84,9 +113,8 @@ func (m *Module) tx(ctx context.Context, tenantID string, fn func(context.Contex
 	})
 }
 
-// lockTree serializes tree edits for this tenant on the same advisory key the
-// node trigger uses, so position assignment and cycle checks cannot race.
+// lockTree serializes tree edits on the node trigger's advisory key. The
+// shared entry takes the FK-compatible tenant fence before tree and pairing.
 func lockTree(ctx context.Context, tx pgx.Tx) error {
-	_, err := tx.Exec(ctx, `SELECT pg_advisory_xact_lock(hashtextextended(current_setting('aeon.tenant_id', true), 0))`)
-	return err
+	return db.LockCurrentTree(ctx, tx)
 }

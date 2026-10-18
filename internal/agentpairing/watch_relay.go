@@ -83,7 +83,7 @@ func inertText(s string) bool {
 	return true
 }
 func (m *Module) watchAllowed(ctx context.Context, p tenant.Principal, project, session string) error {
-	if p.Kind != tenant.Person || !uuidRE.MatchString(project) || !uuidRE.MatchString(session) {
+	if (p.Kind != tenant.Person && !authz.OwnerWorkstation(p)) || !uuidRE.MatchString(project) || !uuidRE.MatchString(session) {
 		return fail(403, "forbidden", "person conversation permission required")
 	}
 	return db.InTenant(ctx, m.pool, p.TenantID, func(tx pgx.Tx) error {

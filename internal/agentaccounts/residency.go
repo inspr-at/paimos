@@ -5,12 +5,11 @@ import (
 	"context"
 	"github.com/inspr-at/paimos/internal/modelprefs"
 	"github.com/jackc/pgx/v5"
-	"slices"
 	"time"
 )
 
-// ResidencyClassifier is the evidence boundary supplied by AEON-473. No
-// classifier means any, regardless of vendor, harness or workstation label.
+// ResidencyClassifier is the evidence boundary. The default reads host-owned
+// evidence loaded with the account; callers may inject a classifier for tests.
 type ResidencyClassifier interface {
 	ResidencyClass(context.Context, pgx.Tx, Account, string) (class, evidenceRef string, expiresAt *time.Time, err error)
 }
@@ -22,7 +21,7 @@ func WithResidencyClassifier(ctx context.Context, c ResidencyClassifier) context
 func ResidencyClass(ctx context.Context, tx pgx.Tx, a Account, profileID string, now time.Time) (string, error) {
 	classifier, _ := ctx.Value(residencyKey{}).(ResidencyClassifier)
 	if classifier == nil {
-		return "any", nil
+		classifier = storedResidencyClassifier{now: now}
 	}
 	class, ref, expires, err := classifier.ResidencyClass(ctx, tx, a, profileID)
 	if err != nil {
@@ -81,10 +80,20 @@ func QualifyingAccountIDs(ctx context.Context, tx pgx.Tx, profileID, harness, pr
 	if err != nil {
 		return nil, err
 	}
-	accounts = applyFence(accounts, fences, projectID)
+	accounts, err = applyUse(ctx, tx, applyFence(accounts, fences, projectID), projectID)
+	if err != nil {
+		return nil, err
+	}
 	kept := []Account{}
 	for _, a := range accounts {
-		if a.Harness == harness && (a.AllowedProfileIDs == nil || slices.Contains(a.AllowedProfileIDs, profileID)) {
+		if a.Harness != harness {
+			continue
+		}
+		allowed, err := AccountAllowsProfile(ctx, tx, a, profileID)
+		if err != nil {
+			return nil, err
+		}
+		if allowed {
 			kept = append(kept, a)
 		}
 	}
@@ -104,4 +113,49 @@ func QualifyingAccountIDs(ctx context.Context, tx pgx.Tx, profileID, harness, pr
 		}
 	}
 	return ids, nil
+}
+
+// ResidencyProfileRouteCounts shares the same account read and harness fences
+// across picker choices. It is advisory evidence, never a reservation decision.
+func ResidencyProfileRouteCounts(ctx context.Context, tx pgx.Tx, profiles map[string]string, projectID, requirement string, now time.Time) (map[string]int, error) {
+	accounts, err := listAccounts(ctx, tx)
+	if err != nil {
+		return nil, err
+	}
+	counts := make(map[string]int, len(profiles))
+	byHarness := map[string][]Account{}
+	for profileID, harness := range profiles {
+		candidates, loaded := byHarness[harness]
+		if !loaded {
+			fs, err := loadFences(ctx, tx, harness)
+			if err != nil {
+				return nil, err
+			}
+			candidates, err = applyUse(ctx, tx, applyFence(accounts, fs, projectID), projectID)
+			if err != nil {
+				return nil, err
+			}
+			byHarness[harness] = candidates
+		}
+		for _, a := range candidates {
+			if a.Harness != harness {
+				continue
+			}
+			allowed, err := AccountAllowsProfile(ctx, tx, a, profileID)
+			if err != nil {
+				return nil, err
+			}
+			if !allowed {
+				continue
+			}
+			class, err := ResidencyClass(ctx, tx, a, profileID, now)
+			if err != nil {
+				return nil, err
+			}
+			if modelprefs.Strictness(class) >= modelprefs.Strictness(requirement) {
+				counts[profileID]++
+			}
+		}
+	}
+	return counts, nil
 }

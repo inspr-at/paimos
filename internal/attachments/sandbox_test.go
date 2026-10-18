@@ -10,6 +10,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"strings"
 	"sync"
 	"testing"
@@ -17,6 +18,8 @@ import (
 
 	"github.com/jackc/pgx/v5"
 
+	"github.com/inspr-at/paimos/internal/db"
+	"github.com/inspr-at/paimos/internal/dbtest"
 	"github.com/inspr-at/paimos/internal/tenant"
 )
 
@@ -103,12 +106,35 @@ func TestSandboxHostBoundary(t *testing.T) {
 }
 
 func TestHTMLStorageAndInertThumbnail(t *testing.T) {
+	d, p, node := setup(t)
 	s := Store{FilesDir: t.TempDir()}
-	tid := "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"
+	tid := p.TenantID
 	doc := `<html><head><title>Local fragment</title><script>fetch('http://169.254.169.254/');while(true){}</script><style>@import 'http://localhost/';</style></head><body><h1>Hello</h1><img src="http://10.0.0.1/"><svg onload="fetch('/api/me')"></svg><p>Inert text.</p></body></html>`
-	a, err := s.PutNamed(t.Context(), tid, strings.NewReader(doc), "fragment.html")
-	if err != nil || !isHTML(a.ContentType) || a.Image {
-		t.Fatalf("HTML storage failed: %v", err)
+	a, err := s.StageNamed(t.Context(), tid, strings.NewReader(doc), "fragment.html")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer a.Close()
+	for _, variant := range []string{"original", "thumb"} {
+		if f, err := s.Open(tid, a.SHA256, variant); err == nil {
+			f.Close()
+			t.Fatalf("HTML %s became visible before publication", variant)
+		} else if !os.IsNotExist(err) {
+			t.Fatal(err)
+		}
+	}
+	if !isHTML(a.ContentType) || a.Image {
+		t.Fatalf("HTML storage failed: %+v", a.Prepared)
+	}
+	err = db.InTenant(dbtest.Seed(t.Context()), d.App, tid, func(tx pgx.Tx) error {
+		if err := Publish(t.Context(), tx, OwnerAttachment, a); err != nil {
+			return err
+		}
+		_, err := tx.Exec(t.Context(), `INSERT INTO attachments(tenant_id,node_id,sha256,name,content_type,size,created_by) VALUES($1,$2,$3,'fragment.html',$4,$5,$6)`, tid, node, a.SHA256, a.ContentType, a.Size, p.ID)
+		return err
+	})
+	if err != nil {
+		t.Fatal(err)
 	}
 	f, err := s.Open(tid, a.SHA256, "original")
 	if err != nil {
@@ -141,16 +167,24 @@ func TestHTMLStorageAndInertThumbnail(t *testing.T) {
 	if !bytes.Equal(one, two) {
 		t.Fatal("active content affected thumbnail")
 	}
-	fragment, err := s.PutNamed(t.Context(), tid, strings.NewReader("<section>fragment</section>"), "fragment.HTML")
-	if err != nil || !isHTML(fragment.ContentType) {
+	fragment, err := s.StageNamed(t.Context(), tid, strings.NewReader("<section>fragment</section>"), "fragment.HTML")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer fragment.Close()
+	if !isHTML(fragment.ContentType) {
 		t.Fatal("named HTML fragment not accepted")
 	}
-	plain, err := s.PutNamed(t.Context(), tid, strings.NewReader("<section>fragment</section>"), "notes.txt")
-	if err != nil || isHTML(plain.ContentType) {
+	plain, err := s.StageNamed(t.Context(), tid, strings.NewReader("<section>fragment</section>"), "notes.txt")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer plain.Close()
+	if isHTML(plain.ContentType) {
 		t.Fatal("plain file promoted to HTML")
 	}
 	for _, body := range []string{"<!doctype html><html>\xff</html>", "<html>\x00</html>", `<?xml version="1.0"?><svg onload="alert(1)"/>`} {
-		if _, err := s.PutNamed(t.Context(), tid, strings.NewReader(body), "x.html"); err == nil {
+		if _, err := s.StageNamed(t.Context(), tid, strings.NewReader(body), "x.html"); err == nil {
 			t.Fatal("invalid UTF-8 or XML MIME accepted as HTML")
 		}
 	}
@@ -165,6 +199,21 @@ func TestHTMLStorageAndInertThumbnail(t *testing.T) {
 	}
 	if reader.n > 64<<10 {
 		t.Fatal("thumbnail read beyond input bound")
+	}
+	// Both parts of a committed HTML attachment survive the orphan grace age.
+	old := time.Now().Add(-8 * 24 * time.Hour)
+	for _, variant := range []string{"original", "thumb"} {
+		path, err := s.path(tid, a.SHA256, variant)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := os.Chtimes(path, old, old); err != nil {
+			t.Fatal(err)
+		}
+	}
+	report, err := GC(t.Context(), d.App, s, tid, true)
+	if err != nil || report.Candidates != 0 || report.Removed != 0 {
+		t.Fatalf("GC deleted live HTML bytes: %+v %v", report, err)
 	}
 }
 
@@ -332,12 +381,15 @@ func TestHTMLPreviewProjectIsolationAndRaces(t *testing.T) {
 		t.Fatal(err)
 	}
 	s := Store{FilesDir: t.TempDir()}
-	blob, err := s.Put(t.Context(), p.TenantID, strings.NewReader("<html>Bound content</html>"))
-	if err != nil {
-		t.Fatal(err)
-	}
 	var id string
-	if err := d.Admin.QueryRow(t.Context(), `INSERT INTO attachments(tenant_id,node_id,sha256,name,content_type,size,created_by) VALUES($1,$2,$3,'fragment.html',$4,$5,$6) RETURNING id::text`, p.TenantID, node, blob.SHA256, blob.ContentType, blob.Size, p.ID).Scan(&id); err != nil {
+	err := db.InTenant(dbtest.Seed(t.Context()), d.App, p.TenantID, func(tx pgx.Tx) error {
+		blob, err := s.Put(t.Context(), tx, p.TenantID, OwnerAttachment, strings.NewReader("<html>Bound content</html>"))
+		if err != nil {
+			return err
+		}
+		return tx.QueryRow(t.Context(), `INSERT INTO attachments(tenant_id,node_id,sha256,name,content_type,size,created_by) VALUES($1,$2,$3,'fragment.html',$4,$5,$6) RETURNING id::text`, p.TenantID, node, blob.SHA256, blob.ContentType, blob.Size, p.ID).Scan(&id)
+	})
+	if err != nil {
 		t.Fatal(err)
 	}
 	m := New(d.App, s)

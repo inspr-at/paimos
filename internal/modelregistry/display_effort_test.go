@@ -70,6 +70,9 @@ func TestStoredModelDisplayAndEffort(t *testing.T) {
 				t.Fatalf("stored effort: %+v", got)
 			}
 		}
+		if err := ensureCatalog(t.Context(), tx, p); err != nil {
+			return err
+		}
 		got, err := createProfile(t.Context(), tx, p, profileWrite{Slug: "explicit-opus", Version: "100", Harness: "claude", Family: "anthropic", Model: "opus", Effort: "high", Tier: "strong", Display: Display{DisplayName: "Claude Opus", ShortName: "Opus", ModelVersion: "5.5"}})
 		if err != nil {
 			return err

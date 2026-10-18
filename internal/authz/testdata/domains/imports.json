@@ -1,0 +1,46 @@
+{
+  "_license": "SPDX-License-Identifier: AGPL-3.0-only",
+  "builtin_roles": {
+    "admin": [
+      "imports.manage",
+      "imports.read"
+    ],
+    "owner": [
+      "imports.manage",
+      "imports.read"
+    ]
+  },
+  "registry": [
+    {
+      "agent_grantable": true,
+      "description": "Manage imports",
+      "grantable_at": [
+        "workspace"
+      ],
+      "group": "Imports",
+      "key": "imports.manage",
+      "owner_workstation_grantable": true,
+      "risk": "high"
+    },
+    {
+      "agent_grantable": true,
+      "description": "Read imports",
+      "grantable_at": [
+        "workspace"
+      ],
+      "group": "Imports",
+      "key": "imports.read",
+      "owner_workstation_grantable": true,
+      "risk": "low"
+    }
+  ],
+  "routes": {
+    "GET /api/imports": "imports.read",
+    "GET /api/imports/{importId}": "imports.read"
+  },
+  "words": {
+    "resources": {
+      "imports": "imports"
+    }
+  }
+}

@@ -14,6 +14,8 @@ func TestQueueReadiness(t *testing.T) {
 		blocker           bool
 		missing           []string
 	}{
+		{"work leaf", "work", "open", map[string]any{"estimate_hours": 2.0, "acceptance_criteria": "pass"}, false, []string{}},
+		{"work parent", "parent", "open", map[string]any{"estimate_hours": 2.0, "acceptance_criteria": "pass"}, false, []string{"status"}},
 		{"ready", "ticket", "Open", map[string]any{"estimate_hours": 2.0, "acceptance_criteria": "- [ ] tests pass"}, false, []string{}},
 		{"new", "task", "new", map[string]any{"estimate_hours": 0.5, "acceptance_criteria": []any{"test"}}, false, []string{}},
 		{"empty", "ticket", "backlog", map[string]any{}, false, []string{"estimate", "criteria"}},

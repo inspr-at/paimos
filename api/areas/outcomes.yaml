@@ -1,0 +1,113 @@
+# SPDX-License-Identifier: AGPL-3.0-only
+# aeon:owner internal/outcomes
+paths:
+  /outcomes:
+    get:
+      operationId: listOutcomes
+      summary: List objective outcome events
+      description: Returns append-only outcome events visible in the caller's projects. At least one of ticket_node_id, session_id, rules_version or a paired from/to range is required. from/to selects recorded timestamps in [from, to), spanning at most 366 days. cursor continues the same filters in descending timestamp/ID order. Filters combine. rules_version matches exactly and skips rows with no rules version. Ticket completion and release publication are included; they are recorded automatically.
+      security: *auth
+      parameters:
+        - {name: ticket_node_id, in: query, schema: {type: string}, description: Work or legacy Ticket node id or issue key; property name retained for compatibility}
+        - {name: session_id, in: query, schema: {type: string, format: uuid}}
+        - {name: outcome_id, in: query, schema: {type: string, format: uuid}, description: Exact source outcome within the other filters.}
+        - {name: rules_version, in: query, schema: {type: string, maxLength: 128}}
+        - {name: from, in: query, schema: {type: string, format: date-time}}
+        - {name: to, in: query, schema: {type: string, format: date-time}}
+        - {name: cursor, in: query, schema: {type: string, maxLength: 256}, description: Opaque continuation returned by this list; retain the same filters.}
+        - {name: limit, in: query, schema: {type: integer, minimum: 1, maximum: 100, default: 50}}
+      responses:
+        '200': {description: Newest outcomes first, content: {application/json: {schema: {$ref: '#/components/schemas/OutcomeList'}}}}
+        '400': {$ref: '#/components/responses/Error'}
+        '403': {$ref: '#/components/responses/Error'}
+        '404': {$ref: '#/components/responses/Error'}
+    post:
+      operationId: recordOutcome
+      summary: Record a review, fix round, CI result or revert
+      description: "Accepts Work and legacy Ticket nodes. Requires outcome.write in the ticket's project. Agents also need that scope on the key. Idempotency-Key replays the same outcome when the body matches and conflicts when it does not. Keys starting with auto: are reserved. ticket_done and released cannot be posted."
+      security: *auth
+      parameters:
+        - {name: Idempotency-Key, in: header, required: true, schema: {type: string, minLength: 8, maxLength: 200}}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/OutcomeRecord'}
+      responses:
+        '201': {description: Recorded, content: {application/json: {schema: {$ref: '#/components/schemas/OutcomeEvent'}}}}
+        '200': {description: Idempotent replay of the same outcome, content: {application/json: {schema: {$ref: '#/components/schemas/OutcomeEvent'}}}}
+        '400': {$ref: '#/components/responses/Error'}
+        '403': {$ref: '#/components/responses/Error'}
+        '404': {$ref: '#/components/responses/Error'}
+        '409': {$ref: '#/components/responses/Error'}
+  /outcomes/measurement:
+    get:
+      operationId: ticketWorkMeasurement
+      summary: Read bounded ticket work evidence
+      description: Requires outcome.read and harness.read in the current project. Project-only readers may read their authorized tickets; restricted source visibility leaves diff totals null. Counts are lifetime recorded completion, review and fix events (at most 10000); diff totals cover distinct commits with full 40-character hexadecimal IDs on currently bound sessions (at most 200 sessions and 10000 commits). Abbreviated or invalid IDs are excluded from the commit count and produce a commit_identity_incomplete gap with null diff totals. This live view does not certify contributor coverage or persist a completion receipt. Missing diff readings remain null. Gaps and truncation are explicit. Evidence from another project requires harness.read there too.
+      security: *auth
+      parameters:
+        - {name: ticket_node_id, in: query, required: true, schema: {type: string, maxLength: 128}, description: Ticket id or key}
+      responses:
+        '200': {description: Recorded evidence, content: {application/json: {schema: {$ref: '#/components/schemas/TicketWorkMeasurement'}}}}
+        '400': {$ref: '#/components/responses/Error'}
+        '403': {$ref: '#/components/responses/Error'}
+        '404': {$ref: '#/components/responses/Error'}
+components:
+  schemas:
+    OutcomeEvent:
+      type: object
+      required: [id, kind, ticket_node_id, ticket_key, project_id, source, payload, actor_principal_id, recorded_at, idempotency_key]
+      properties:
+        id: {type: string, format: uuid}
+        kind: {type: string, enum: [review_verdict, fix_round, ci_result, revert, ticket_done, released]}
+        ticket_node_id: {type: string, format: uuid}
+        ticket_key: {type: string}
+        project_id: {type: string, format: uuid}
+        session_id: {type: [string, "null"], format: uuid}
+        rules_version: {type: [string, "null"], description: Absent until a rules version is recorded.}
+        release_node_id: {type: [string, "null"], format: uuid}
+        release_key: {type: [string, "null"]}
+        release_title: {type: [string, "null"]}
+        source: {type: string, enum: [recorded, automatic]}
+        payload: {type: object, additionalProperties: true}
+        actor_principal_id: {type: string, format: uuid}
+        recorded_at: {type: string, format: date-time}
+        idempotency_key: {type: string}
+    OutcomeList:
+      type: object
+      additionalProperties: false
+      required: [outcomes]
+      properties:
+        next_cursor: {type: [string, 'null'], description: Continue with the same filters; null at the end.}
+        outcomes:
+          type: array
+          items: {$ref: '#/components/schemas/OutcomeEvent'}
+    OutcomeRecord:
+      type: object
+      additionalProperties: false
+      required: [kind, ticket, payload]
+      properties:
+        kind: {type: string, enum: [review_verdict, fix_round, ci_result, revert]}
+        ticket: {type: string, description: Work or legacy Ticket node id or issue key; property name retained for compatibility}
+        session_id: {type: [string, "null"], format: uuid}
+        rules_version: {type: [string, "null"], maxLength: 128, description: Optional until a rules version is recorded.}
+        payload:
+          type: object
+          additionalProperties: true
+          description: "review_verdict requires verdict ok or changes and may include reviewer_model, route, author_family, round, blocking_count, findings, findings_fingerprint (lowercase SHA-256 of canonical findings), review_id (work-order UUID), and summary. Escalation resolves on ok only when review_id identifies the latest verified exact-range cross-family review; an unbound reported ok never resets its attempt budget. Repeated fingerprints count only in distinct increasing rounds. fix_round requires round. ci_result requires result pass or fail, repo and number (the pull request) and may include name, attempt_id (UUID of a distinct CI execution), and summary. Stuck detection needs a named check and distinct attempt IDs; duplicate reports of one execution do not count twice. revert requires summary and may include target."
+    TicketWorkMeasurement:
+      type: object
+      required: [ticket_node_id, scope, completions, review_rounds, fix_rounds, commits, lines_added, lines_deleted, file_changes, gaps, truncated]
+      properties:
+        ticket_node_id: {type: string, format: uuid}
+        scope: {type: string, const: lifetime_events_and_current_bindings}
+        completions: {type: integer, minimum: 0}
+        review_rounds: {type: integer, minimum: 0, description: Number of recorded review verdict events; repeated round numbers remain separate evidence.}
+        fix_rounds: {type: integer, minimum: 0, description: Number of recorded fix-round events.}
+        commits: {type: integer, minimum: 0, description: Distinct canonical full commit IDs; unresolved identities are excluded and reported as gaps.}
+        lines_added: {type: [integer, 'null'], format: int64}
+        lines_deleted: {type: [integer, 'null'], format: int64}
+        file_changes: {type: [integer, 'null'], format: int64, description: Sum of files changed per distinct commit; not unique paths.}
+        gaps: {type: array, items: {type: string}}
+        truncated: {type: boolean, description: Counts are lower bounds and diff totals are null when the relevant bound is reached.}

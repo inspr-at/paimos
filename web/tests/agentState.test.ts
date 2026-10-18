@@ -2,8 +2,8 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import {
-  agentName, controlBlocked, cost, decidedApprovals, duration, expiresIn, groupSessions, heldRequests, needsYou,
-  pendingApprovals, riskFor, riskOf, runDuration, scopeLabel, sessionStatus, sessionForest, tokens,
+  agentName, controlBlocked, cost, decidedApprovals, duration, expiresIn, heldRequests, needsYou,
+  pendingApprovals, retriedBy, retriedStatus, riskFor, riskOf, runDuration, runFamily, scopeLabel, sessionStatus, sessionForest, tokens,
 } from '../src/lib/agentState.ts'
 import type { AgentRun, Approval, HarnessSession, ProjectMessage } from '../src/lib/agents.ts'
 
@@ -99,13 +99,9 @@ test('session states share words and shapes with project indicators', () => {
   assert.match(sessionStatus(session(), now, true).reasons![0]!.detail, /outstanding/)
 })
 
-test('heartbeat waiting has its own group while real requests still need a person', () => {
+test('fresh and overdue starting sessions keep their live status groups', () => {
   const fresh = session({ id: 'new', phase: 'starting', heartbeat_at: null, created_at: ago(0), needs_attention: false })
-  const overdue = session({ id: 'overdue', heartbeat_at: ago(4), needs_attention: false })
-  const request = session({ ...fresh, id: 'request', needs_attention: true })
-  const groups = groupSessions([fresh, overdue, request], now, () => false)
-  assert.deepEqual(groups.awaiting.map(view => view.session.id), ['overdue', 'new'])
-  assert.deepEqual(groups.needs.map(view => view.session.id), ['request'])
+
   assert.equal(sessionStatus(session({ ...fresh, heartbeat_at: ago(0) }), now).group, 'working')
   assert.equal(sessionStatus(session({ ...fresh, created_at: ago(10) }), now).group, 'unresponsive')
 })
@@ -120,28 +116,6 @@ test('only an exact run approval attributes person action to a session', () => {
   assert.equal(needsYou(s, [], [message({ sender_principal_id: 'a1', is_action_request: true })]), false)
   assert.equal(needsYou(s, [approval({ run_id: null, resource_kind: 'node', resource_id: 'n1' })], []), false)
   assert.equal(needsYou(session({ phase: 'stopped', stopped_at: ago(1) }), [approval()], []), false)
-})
-
-test('groups sort live sessions by start time and stopped ones by when they stopped', () => {
-  const groups = groupSessions([
-    session({ id: 'new', heartbeat_at: ago(1.5), created_at: ago(10) }), session({ id: 'old', heartbeat_at: ago(0.1), created_at: ago(80) }),
-    session({ id: 'stopA', phase: 'stopped', stopped_at: ago(60) }), session({ id: 'stopB', phase: 'stopped', stopped_at: ago(5) }),
-    session({ id: 'asks', agent_principal_id: 'a9' }),
-  ], now, s => s.agent_principal_id === 'a9')
-  assert.deepEqual(groups.working.map(e => e.session.id), ['old', 'new'])
-  assert.deepEqual(groups.stopped.map(e => e.session.id), ['stopB', 'stopA'])
-  assert.deepEqual(groups.needs.map(e => e.session.id), ['asks'])
-})
-
-test('a heartbeat never reorders a group; only start time and id do', () => {
-  const ids = ['c', 'a', 'd', 'b']
-  const base = ids.map((id, i) => session({ id, created_at: ago(i < 2 ? 50 : 40 - i) }))
-  const order = groupSessions(base, now, () => false).working.map(e => e.session.id)
-  assert.deepEqual(order, ['a', 'c', 'd', 'b'])
-  for (let round = 0; round < 25; round++) {
-    const beats = base.map((s, i) => ({ ...s, heartbeat_at: ago(((round * 7 + i * 13) % 17) / 10) }))
-    assert.deepEqual(groupSessions(beats.reverse(), now, () => false).working.map(e => e.session.id), order)
-  }
 })
 
 test('agent names come from the message address, else the host', () => {
@@ -220,6 +194,36 @@ test('a finished session sits with the ended ones; one that only went quiet at 1
   assert.deepEqual([failed.state, failed.group, failed.tone], ['problem', 'problem', 'problem'])
   const quiet = sessionStatus(session({ heartbeat_at: ago(12), progress_pct: 100 }), now)
   assert.deepEqual([quiet.state, quiet.group, quiet.tone], ['unresponsive', 'unresponsive', 'attention'])
-  const buckets = groupSessions([session({ id: 'a', phase: 'stopped', stopped_at: ago(2), stop_reason: 'process_exited', progress_pct: 100, finished: true }), session({ id: 'b', phase: 'stopped', stopped_at: ago(3), stop_reason: 'stopped', progress_pct: 100 })], now, () => false)
-  assert.deepEqual(buckets.stopped.map(entry => [entry.session.id, entry.status.state]), [['a', 'done'], ['b', 'stopped']])
+})
+
+// AEON-1285: a failed attempt retried in its run family (same ticket, owner and role; the label
+// but for its round) ends in favour of the retry. The real case: AEON-1280's gate r2 failed at start, r3 runs.
+test('a failed attempt with a newer attempt in its run family reads Ended and names the retry', () => {
+  for (const [a, b] of [['aeon1280-switch-script-gate-r2', 'aeon1280-switch-script-gate-r3'], ['build-fix4', 'build-fix5'], ['scout-2', 'scout-3'], ['review', 'review-r2']]) assert.equal(runFamily(a), runFamily(b), `${a} / ${b}`)
+  assert.notEqual(runFamily('aeon1280-switch-script-gate-r2'), runFamily('aeon1280-switch-script-check-r3'))
+  const failed = (fields: Partial<HarnessSession>) => session({ phase: 'stopped', stopped_at: ago(40), stop_reason: 'process_failed', created_at: ago(41), owner_principal_id: 'person', ...fields })
+  const view = (s: HarnessSession) => ({ session: s, status: sessionStatus(s, now), name: s.display_label ?? s.id })
+  const r2 = failed({ id: 'r2', display_label: 'aeon1280-switch-script-gate-r2' })
+  const r3 = session({ id: 'r3', display_label: 'aeon1280-switch-script-gate-r3', created_at: ago(30), owner_principal_id: 'person' })
+  const others = [
+    failed({ id: 'other-ticket', display_label: 'aeon1280-switch-script-gate-r1', ticket_node_id: 'n2' }),
+    failed({ id: 'other-owner', display_label: 'aeon1280-switch-script-gate-r1', owner_principal_id: 'someone-else' }),
+    failed({ id: 'other-role', display_label: 'aeon1280-switch-script-gate-r1', role: 'coordinator' }),
+    failed({ id: 'other-family', display_label: 'aeon1280-switch-script-check-r1' }),
+  ]
+  const views = [view(r3), ...others.map(view), view(r2), view(r2)]
+  assert.equal(views.find(v => v.session.id === 'r2')!.status.state, 'problem')
+  const retries = retriedBy(views)
+  // Only r2 folds, into r3; its duplicate copy changes nothing, and a different ticket, owner, role or family never folds.
+  assert.deepEqual([...retries].map(([id, retry]) => [id, retry.session.id]), [['r2', 'r3']])
+  const status = retriedStatus(r2, 'aeon1280-switch-script-gate-r3')
+  assert.deepEqual([status.state, status.group, status.label], ['stopped', 'stopped', 'Ended'])
+  assert.equal(status.reasons![0]!.detail, 'Retried as aeon1280-switch-script-gate-r3 · Process failed')
+  // The newest attempt failing too leaves it as the one problem; a live older attempt is never folded.
+  const r3failed = failed({ id: 'r3', display_label: 'aeon1280-switch-script-gate-r3', created_at: ago(30) })
+  assert.deepEqual([...retriedBy([view(r2), view(r3failed)]).keys()], ['r2'])
+  const live = session({ id: 'live', display_label: 'aeon1280-switch-script-gate-r2', created_at: ago(41), owner_principal_id: 'person' })
+  assert.equal(retriedBy([view(live), view(r3)]).size, 0)
+  // Without a ticket or a label there is no family to retry in.
+  assert.equal(retriedBy([view(failed({ id: 'x', display_label: 'gate-r2', ticket_node_id: null })), view(session({ id: 'y', display_label: 'gate-r3', ticket_node_id: null, created_at: ago(30), owner_principal_id: 'person' }))]).size, 0)
 })

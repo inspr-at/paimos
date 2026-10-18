@@ -11,9 +11,9 @@ import (
 	"github.com/jackc/pgx/v5"
 )
 
-// Match TestProjectAccessOverHTTP's startup seed: the first principal insert
-// owns the principal-link lock before its first node takes the tree lock.
-// The autopilot must not own tree while waiting to create its System actor.
+// The first principal insert owns the principal-link lock before its first
+// node takes the tree lock. The autopilot must resolve its System actor before
+// taking tree, even when that actor has already been created by bootstrap.
 func TestStartupPrincipalWriterDoesNotDeadlock(t *testing.T) {
 	d := dbtest.Open(t)
 	ctx, cancel := context.WithTimeout(dbtest.Seed(t.Context()), 10*time.Second)
@@ -30,8 +30,13 @@ func TestStartupPrincipalWriterDoesNotDeadlock(t *testing.T) {
 		if _, err := tx.Exec(ctx, `INSERT INTO principals(tenant_id,kind,name) VALUES($1,'person','Writer')`, tid); err != nil {
 			return err
 		}
+		// Pin the real actor-resolution lock behind this writer. The seed's
+		// System principal and its append-only events remain intact.
+		if _, err := tx.Exec(ctx, `SELECT pg_advisory_xact_lock(hashtextextended('aeon-system-actor:' || $1::text,0))`, tid); err != nil {
+			return err
+		}
 		go func() { done <- New(d.App).RunTenant(ctx, tid, time.Now().UTC()) }()
-		// Observe the real blocked actor creation, not a scheduler-dependent
+		// Observe the real blocked actor resolution, not a scheduler-dependent
 		// pause. pg_blocking_pids identifies this writer as the blocker.
 		for {
 			var blocked bool
@@ -52,7 +57,7 @@ func TestStartupPrincipalWriterDoesNotDeadlock(t *testing.T) {
 			return err
 		}
 		if !treeAvailable {
-			t.Error("autopilot owns tree while actor creation waits for the principal writer")
+			t.Error("autopilot owns tree while actor resolution waits for the principal writer")
 			return nil // release the writer so the background transaction can finish
 		}
 		_, err := tx.Exec(ctx, `INSERT INTO nodes(tenant_id,kind_id,key,title)

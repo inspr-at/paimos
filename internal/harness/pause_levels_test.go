@@ -12,9 +12,9 @@ import (
 	"github.com/jackc/pgx/v5"
 )
 
-func registerPauseWorker(t *testing.T, f *harnessFixture, caps []string) (string, string) {
+func registerPauseWorker(t *testing.T, f *harnessFixture, caps []string, parallelReason ...string) (string, string) {
 	t.Helper()
-	body := pauseRegistration(f)
+	body := pauseRegistration(f, parallelReason...)
 	body["advertised_capabilities"] = caps
 	w := f.call(f.person, "POST", "/api/projects/"+f.project+"/harness-sessions", body, "")
 	expect(t, w, 201)
@@ -41,7 +41,7 @@ func TestPauseLevelsDefaultAndCapabilityHonesty(t *testing.T) {
 	if deadline.Sub(at) != 3*time.Minute {
 		t.Fatal("quick pause limit is not three minutes")
 	}
-	path, _ = registerPauseWorker(t, f, []string{"owned_stop_v1"})
+	path, _ = registerPauseWorker(t, f, []string{"owned_stop_v1"}, "Compare simultaneous pause and owned-stop capabilities")
 	w = f.call(f.person, "GET", path, nil, "")
 	expect(t, w, 200)
 	out := decode(t, w)
@@ -79,8 +79,8 @@ func TestPauseLevelsDefaultAndCapabilityHonesty(t *testing.T) {
 func TestLeavingAtSchedulesCancelsAndPreservesPausedSessions(t *testing.T) {
 	f := fixture(t)
 	waiting, waitingLease := registerPauseWorker(t, f, []string{"pause"})
-	finishing, finishingLease := registerPauseWorker(t, f, []string{"pause"})
-	stopOnly, _ := registerPauseWorker(t, f, []string{"owned_stop_v1"})
+	finishing, finishingLease := registerPauseWorker(t, f, []string{"pause"}, "Compare waiting and finishing worker wind-down")
+	stopOnly, _ := registerPauseWorker(t, f, []string{"owned_stop_v1"}, "Compare simultaneous pause and owned-stop capabilities")
 	expect(t, f.call(f.agent, "POST", finishing+"/heartbeat", map[string]any{"phase": "working", "activity_sequence": 1, "eta_ready_at": time.Now().Add(5 * time.Minute).Format(time.RFC3339Nano)}, finishingLease), 200)
 	// Force sub-microsecond input so retry coverage does not depend on host clock
 	// precision (Darwin often supplies only microseconds, unlike Linux CI).
@@ -239,7 +239,7 @@ func TestLeavingDeadlineEscalatesStopsOnceAndIsAudited(t *testing.T) {
 
 func TestStopOnlyBatchSkipsCooperativeLevelsButAcceptsStopNow(t *testing.T) {
 	f := fixture(t)
-	_, _ = registerPauseWorker(t, f, []string{"owned_stop_v1"})
+	_, _ = registerPauseWorker(t, f, []string{"owned_stop_v1"}, "Compare simultaneous pause and owned-stop capabilities")
 	base := "/api/projects/" + f.project + "/harness-sessions/pause"
 	w := f.call(f.person, "POST", base, map[string]any{"level": "pause"}, "")
 	expect(t, w, http.StatusOK)
@@ -252,5 +252,40 @@ func TestStopOnlyBatchSkipsCooperativeLevelsButAcceptsStopNow(t *testing.T) {
 	out = decode(t, w)
 	if len(out["items"].([]any)) != 1 || len(out["skipped"].([]any)) != 0 {
 		t.Fatal(out)
+	}
+}
+
+func TestUnmanagedStopRequestSurvivesHeartbeatUntilWorkerReportsStop(t *testing.T) {
+	f := fixture(t)
+	path, lease := registerPauseWorker(t, f, []string{"status"})
+	request := f.call(f.person, "POST", path+"/pause", map[string]any{"level": "stop_now"}, "")
+	expect(t, request, 200)
+	out := decode(t, request)
+	if out["stopped_at"] != nil || out["pause"].(map[string]any)["stop_requested"] != true {
+		t.Fatal("request claimed stopped", out)
+	}
+	beat := f.call(f.agent, "POST", path+"/heartbeat", map[string]any{"phase": "working", "activity_sequence": 1}, lease)
+	expect(t, beat, 200)
+	out = decode(t, beat)
+	pause := out["pause"].(map[string]any)
+	if out["stopped_at"] != nil || pause["stop_requested"] != true || pause["deliver"] != true {
+		t.Fatal("heartbeat lost pending stop", out)
+	}
+	rejected := f.call(f.agent, "POST", path+"/stop", map[string]any{"reason": "stopped"}, "wrong-lease")
+	expect(t, rejected, 403)
+	if !strings.Contains(rejected.Body.String(), "harness worker proof rejected") {
+		t.Fatal("wrong rejection reason", rejected.Body.String())
+	}
+	stopped := f.call(f.agent, "POST", path+"/stop", map[string]any{"reason": "stopped"}, lease)
+	expect(t, stopped, 200)
+	out = decode(t, stopped)
+	if out["phase"] != "stopped" || out["stopped_at"] == nil || out["stop_reason"] != "stopped" {
+		t.Fatal("missing worker stop confirmation", out)
+	}
+	expect(t, f.call(f.agent, "POST", path+"/heartbeat", map[string]any{"phase": "working", "activity_sequence": 2}, lease), 403)
+	read := f.call(f.person, "GET", path, nil, "")
+	expect(t, read, 200)
+	if decode(t, read)["phase"] != "stopped" {
+		t.Fatal("heartbeat resurrected stopped session")
 	}
 }

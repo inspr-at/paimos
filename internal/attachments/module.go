@@ -70,6 +70,7 @@ func New(pool *pgxpool.Pool, store Store) *Module { return &Module{Pool: pool, S
 func (m *Module) Mount(mux *http.ServeMux) {
 	mux.HandleFunc("POST /api/nodes/{nodeId}/attachments", m.upload)
 	mux.HandleFunc("GET /api/nodes/{nodeId}/attachments", m.list)
+	mux.HandleFunc("GET /api/attachments/{id}", m.get)
 	mux.HandleFunc("PATCH /api/attachments/{id}", m.patch)
 	mux.HandleFunc("DELETE /api/attachments/{id}", m.remove)
 	mux.HandleFunc("GET /api/attachments/{id}/content", m.content)
@@ -88,7 +89,39 @@ func (m *Module) principal(w http.ResponseWriter, r *http.Request, permission st
 	}
 	return p, true
 }
+
+func (m *Module) get(w http.ResponseWriter, r *http.Request) {
+	p, ok := m.principal(w, r, "attachments.read")
+	if !ok {
+		return
+	}
+	id := r.PathValue("id")
+	if !uuid(id) {
+		apierr(w, bad(400, "invalid attachment id"))
+		return
+	}
+	var a Attachment
+	err := db.InTenant(r.Context(), m.Pool, p.TenantID, func(tx pgx.Tx) error {
+		if err := authz.RequireTx(r.Context(), tx, p, "attachments.read", authz.Scope{AnyProject: true}); err != nil {
+			return err
+		}
+		var err error
+		a, err = readAttachment(r.Context(), tx, p.TenantID, id)
+		return err
+	})
+	if err != nil {
+		apierr(w, err)
+		return
+	}
+	w.Header().Set("Cache-Control", "no-store, private")
+	httpapi.WriteJSON(w, http.StatusOK, a)
+}
+
 func apierr(w http.ResponseWriter, err error) {
+	if errors.Is(err, authz.ErrForbidden) {
+		httpapi.WriteError(w, 403, "permission denied")
+		return
+	}
 	if errors.Is(err, pgx.ErrNoRows) {
 		httpapi.WriteError(w, 404, "not found")
 		return
@@ -117,6 +150,29 @@ func liveNode(ctx context.Context, tx pgx.Tx, tenantID, nodeID string) error {
 		return pgx.ErrNoRows
 	}
 	return nil
+}
+
+func readAttachment(ctx context.Context, tx pgx.Tx, tenantID, id string) (Attachment, error) {
+	a, err := scan(tx.QueryRow(ctx, `SELECT `+columns+` FROM attachments WHERE tenant_id=$1 AND id=$2 AND deleted_at IS NULL`, tenantID, id))
+	if err == nil {
+		err = liveNode(ctx, tx, tenantID, a.NodeID)
+	}
+	return a, err
+}
+
+// requireNodeWrite runs after LockProjectWrite, in the transaction that
+// writes metadata and events. Resolve the current project rather than trusting
+// the earlier route scope: a node may have moved while the body was streaming.
+func requireNodeWrite(ctx context.Context, tx pgx.Tx, p tenant.Principal, nodeID, permission string) error {
+	var projectID *string
+	if err := tx.QueryRow(ctx, `SELECT project_id::text FROM nodes WHERE tenant_id=$1 AND id=$2 AND deleted_at IS NULL FOR UPDATE`, p.TenantID, nodeID).Scan(&projectID); err != nil {
+		return err
+	}
+	scope := authz.Scope{}
+	if projectID != nil {
+		scope.ProjectID = *projectID
+	}
+	return authz.RequireTx(ctx, tx, p, permission, scope)
 }
 func (m *Module) list(w http.ResponseWriter, r *http.Request) {
 	p, ok := m.principal(w, r, "attachments.read")
@@ -156,7 +212,7 @@ func (m *Module) list(w http.ResponseWriter, r *http.Request) {
 
 type pending struct {
 	name string
-	blob Prepared
+	blob *Staged
 }
 
 func cleanName(s string) string {
@@ -193,11 +249,22 @@ func (m *Module) upload(w http.ResponseWriter, r *http.Request) {
 		httpapi.WriteError(w, 400, "invalid node id")
 		return
 	}
+	// Stream uploads to disk under the shared size cap and two-minute deadline.
+	finishBody, err := httpapi.BeginRequestBodyStream(w, r, m.Store.limit()*20+(1<<20), httpapi.UploadBodyReadTimeout)
+	if err != nil {
+		apierr(w, uploadError(err))
+		return
+	}
+	defer finishBody(false)
 	var files []pending
+	defer func() {
+		for _, f := range files {
+			_ = f.blob.Close()
+		}
+	}()
 	caption := ""
 	ct, _, _ := mime.ParseMediaType(r.Header.Get("Content-Type"))
 	if ct == "multipart/form-data" {
-		r.Body = http.MaxBytesReader(w, r.Body, m.Store.limit()*20+(1<<20))
 		mr, err := r.MultipartReader()
 		if err != nil {
 			httpapi.WriteError(w, 400, "invalid multipart body")
@@ -228,7 +295,7 @@ func (m *Module) upload(w http.ResponseWriter, r *http.Request) {
 				apierr(w, bad(400, "too many files"))
 				return
 			}
-			blob, err := m.Store.PutNamed(r.Context(), p.TenantID, part, part.FileName())
+			blob, err := m.Store.StageNamed(r.Context(), p.TenantID, part, part.FileName())
 			if err != nil {
 				apierr(w, uploadError(err))
 				return
@@ -240,12 +307,13 @@ func (m *Module) upload(w http.ResponseWriter, r *http.Request) {
 			apierr(w, bad(415, "raw upload must be an image"))
 			return
 		}
-		blob, err := m.Store.Put(r.Context(), p.TenantID, r.Body)
+		blob, err := m.Store.Stage(r.Context(), p.TenantID, r.Body)
 		if err != nil {
 			apierr(w, uploadError(err))
 			return
 		}
 		if !blob.Image {
+			_ = blob.Close()
 			apierr(w, bad(415, "raw upload must be an image"))
 			return
 		}
@@ -260,9 +328,23 @@ func (m *Module) upload(w http.ResponseWriter, r *http.Request) {
 		apierr(w, bad(400, "caption too long"))
 		return
 	}
+	if err := finishBody(true); err != nil {
+		apierr(w, uploadError(err))
+		return
+	}
 	out := make([]Attachment, 0, len(files))
-	err := db.InTenant(r.Context(), m.Pool, p.TenantID, func(tx pgx.Tx) error {
-		if err := liveNode(r.Context(), tx, p.TenantID, nodeID); err != nil {
+	err = db.InTenant(r.Context(), m.Pool, p.TenantID, func(tx pgx.Tx) error {
+		if err := authz.LockProjectWrite(r.Context(), tx, p.TenantID); err != nil {
+			return err
+		}
+		if err := requireNodeWrite(r.Context(), tx, p, nodeID, "attachments.write"); err != nil {
+			return err
+		}
+		staged := make([]*Staged, 0, len(files))
+		for _, f := range files {
+			staged = append(staged, f.blob)
+		}
+		if err := Publish(r.Context(), tx, OwnerAttachment, staged...); err != nil {
 			return err
 		}
 		var pos int64
@@ -338,7 +420,7 @@ func (m *Module) patch(w http.ResponseWriter, r *http.Request) {
 		apierr(w, err)
 		return
 	}
-	b, err := io.ReadAll(http.MaxBytesReader(w, r.Body, 8192))
+	b, err := httpapi.ReadRequestBody(w, r, 8192, httpapi.DefaultBodyReadTimeout)
 	if err != nil {
 		apierr(w, bad(400, "invalid body"))
 		return
@@ -363,8 +445,14 @@ func (m *Module) patch(w http.ResponseWriter, r *http.Request) {
 	}
 	var out Attachment
 	err = db.InTenant(r.Context(), m.Pool, p.TenantID, func(tx pgx.Tx) error {
+		if err := authz.LockProjectWrite(r.Context(), tx, p.TenantID); err != nil {
+			return err
+		}
 		before, err := scan(tx.QueryRow(r.Context(), `SELECT `+columns+` FROM attachments WHERE tenant_id=$1 AND id=$2 AND deleted_at IS NULL FOR UPDATE`, p.TenantID, id))
 		if err != nil {
+			return err
+		}
+		if err := requireNodeWrite(r.Context(), tx, p, before.NodeID, "attachments.write"); err != nil {
 			return err
 		}
 		if cond != nil && !cond.Equal(before.UpdatedAt) {
@@ -405,8 +493,14 @@ func (m *Module) remove(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	err := db.InTenant(r.Context(), m.Pool, p.TenantID, func(tx pgx.Tx) error {
+		if err := authz.LockProjectWrite(r.Context(), tx, p.TenantID); err != nil {
+			return err
+		}
 		before, err := scan(tx.QueryRow(r.Context(), `SELECT `+columns+` FROM attachments WHERE tenant_id=$1 AND id=$2 AND deleted_at IS NULL FOR UPDATE`, p.TenantID, id))
 		if err != nil {
+			return err
+		}
+		if err := requireNodeWrite(r.Context(), tx, p, before.NodeID, "attachments.delete"); err != nil {
 			return err
 		}
 		after, err := scan(tx.QueryRow(r.Context(), `UPDATE attachments SET deleted_at=clock_timestamp(),updated_at=clock_timestamp() WHERE tenant_id=$1 AND id=$2 RETURNING `+columns, p.TenantID, id))

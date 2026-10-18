@@ -152,7 +152,8 @@ func TestHarnessRenameProducerEndToEnd(t *testing.T) {
 		t.Helper()
 		cmd := exec.Command(python, script, "run", "--aeon", wrapper, "--project", "AEON", "--session", w.id,
 			"--agent", "aeon-coordinator", "--worker-lease-file", lease, "--binding", binding, "--codex-index", index, "--once")
-		cmd.Env = []string{"PATH=" + os.Getenv("PATH"), "HOME=" + home, "AEON_RENAME_CLI_HELPER=1",
+		// Preserve race-detector settings even in this otherwise isolated helper.
+		cmd.Env = []string{"PATH=" + os.Getenv("PATH"), "HOME=" + home, "GORACE=" + os.Getenv("GORACE"), "AEON_RENAME_CLI_HELPER=1",
 			"AEON_URL=" + base, "AEON_API_KEY=" + token}
 		var stdout, stderr bytes.Buffer
 		cmd.Stdout, cmd.Stderr = &stdout, &stderr

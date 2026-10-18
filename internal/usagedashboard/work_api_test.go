@@ -5,6 +5,7 @@ package usagedashboard_test
 import (
 	"bytes"
 	"crypto/md5"
+	"encoding/json"
 	"testing"
 	"time"
 
@@ -73,6 +74,48 @@ func (w *world) setState(t *testing.T, p tenant.Principal, node, state string) {
 }
 
 func tm(v time.Time) *time.Time { return &v }
+
+func TestCompletionCapSignalsTruncationWithoutSessionsInRange(t *testing.T) {
+	w := newWorld(t)
+	project := w.project(t, w.home, "CAP-1", "Capped completions")
+	oldTicket := w.ticket(t, w.home, project, "OLD-1", "Earlier work")
+	old := time.Date(2026, 9, 9, 0, 0, 0, 0, time.UTC)
+	session := w.workSession(t, w.home, workSession{project: project, ticket: &oldTicket, harness: "codex", model: "test-model", at: old, stop: tm(old.Add(time.Hour))}, 1)
+	w.tx(t, w.home, func(tx pgx.Tx) error {
+		_, err := tx.Exec(t.Context(), `WITH tickets AS (
+		INSERT INTO nodes(tenant_id,key,kind_id,title,parent_id,state)
+		SELECT $1,'CAP-'||(i+1),k.id,'Completed',$2,'done' FROM generate_series(1,5001) i CROSS JOIN node_kinds k WHERE k.tenant_id=$1 AND k.slug='work' RETURNING id
+		) INSERT INTO outcome_events(tenant_id,kind,project_id,ticket_node_id,session_id,idempotency_key,actor_principal_id,source,payload,request_digest,recorded_at)
+		SELECT $1,'ticket_done',$2,id,$3,'cap:'||id,$4,'recorded','{}'::jsonb,decode(md5(id::text),'hex'),CASE WHEN row_number() OVER(ORDER BY id)=5001 THEN '2026-09-11T12:00:00Z'::timestamptz ELSE '2026-09-10T12:00:00Z'::timestamptz END FROM tickets`, w.home.TenantID, project, session, w.home.ID)
+		return err
+	})
+	code, page, body := w.get(t, w.home, "/api/usage/dashboard?from=2026-09-10&to=2026-09-12")
+	if code != 200 {
+		t.Fatalf("dashboard %d %s", code, body)
+	}
+	var wire struct {
+		Work struct {
+			Truncated bool `json:"truncated"`
+		} `json:"work"`
+	}
+	if err := json.Unmarshal([]byte(body), &wire); err != nil {
+		t.Fatal(err)
+	}
+	if page.Work.Sessions != 0 || page.Work.Done != 5000 || !page.Truncated || !wire.Work.Truncated {
+		t.Fatalf("silent completion cap: sessions=%d done=%d truncated=%t work.truncated=%t", page.Work.Sessions, page.Work.Done, page.Truncated, wire.Work.Truncated)
+	}
+	// The first day holds exactly the limit; the next day adds the sentinel.
+	code, page, body = w.get(t, w.home, "/api/usage/dashboard?from=2026-09-10&to=2026-09-11")
+	if code != 200 || page.Work.Done != 5000 || page.Truncated {
+		t.Fatalf("exact limit: %d %s", code, body)
+	}
+	if err := json.Unmarshal([]byte(body), &wire); err != nil {
+		t.Fatal(err)
+	}
+	if wire.Work.Truncated {
+		t.Fatal("exact completion limit is not truncated")
+	}
+}
 
 func TestDashboardWorkFromSessionsAndOutcomes(t *testing.T) {
 	w := newWorld(t)

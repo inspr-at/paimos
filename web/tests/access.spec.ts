@@ -350,7 +350,9 @@ test('agents: role and keys; a new key shows once; service principals are intern
   await expect(sheet.getByRole('checkbox', { name: /nodes\.read/ })).toBeChecked()
   // The deployer is a Viewer: a scope beyond that role is disabled, with the reason.
   await expect(sheet.getByRole('checkbox', { name: /nodes\.write/ })).toBeDisabled()
-  await expect(sheet.locator('.scope-row').filter({ hasText: 'nodes.write' })).toContainText('beyond pharos-deployer’s role (Viewer)')
+  const unavailable = sheet.locator('.scope-row').filter({ hasText: 'nodes.write' })
+  await expect(unavailable.locator('.scope-id')).toHaveText('nodes.write')
+  await expect(unavailable.locator('.unavailable')).toHaveText('beyond pharos-deployer’s role (Viewer)')
   await sheet.getByRole('checkbox', { name: /nodes\.read/ }).uncheck()
   await expect(sheet.getByRole('checkbox', { name: /nodes\.read/ })).not.toBeChecked()
   await sheet.getByRole('checkbox', { name: /nodes\.read/ }).check()
@@ -378,13 +380,13 @@ const LAPTOP_OLD = '99999999-9999-4999-8999-999999999993'
 async function withRetirable(page: Page, world: AccessWorld) {
   world.agents.push(
     { principal_id: RELIC, name: 'relic', workspace_role: null, last_seen_at: new Date(Date.parse('2026-09-20T12:00:00Z')).toISOString(), service: false },
-    { principal_id: LAPTOP, name: 'mbp2607', workspace_role: null, last_seen_at: new Date(Date.parse('2026-09-23T11:30:00Z')).toISOString(), service: false, connected_computer: true, paired_computer: true },
-    { principal_id: LAPTOP_OLD, name: 'mbp2607 old', workspace_role: null, last_seen_at: new Date(Date.parse('2026-09-21T12:00:00Z')).toISOString(), service: false, status: 'deactivated', paired_computer: true },
+    { principal_id: LAPTOP, name: 'build-7', workspace_role: null, last_seen_at: new Date(Date.parse('2026-09-23T11:30:00Z')).toISOString(), service: false, connected_computer: true, paired_computer: true },
+    { principal_id: LAPTOP_OLD, name: 'build-7 old', workspace_role: null, last_seen_at: new Date(Date.parse('2026-09-21T12:00:00Z')).toISOString(), service: false, status: 'deactivated', paired_computer: true },
   )
   world.keys.push(
     { id: 'k-relic', principal_id: RELIC, name: 'relic', prefix: 'r3lc', scopes: ['nodes.read'], created_at: '2026-09-01T00:00:00Z', expires_at: null, last_used_at: null, revoked_at: null },
-    { id: 'k-laptop', principal_id: LAPTOP, name: 'mbp2607', prefix: 'l4pt', scopes: ['nodes.read'], created_at: '2026-09-22T00:00:00Z', expires_at: null, last_used_at: null, revoked_at: null },
-    { id: 'k-old', principal_id: LAPTOP_OLD, name: 'mbp2607 old', prefix: 'o1d0', scopes: ['nodes.read'], created_at: '2026-09-10T00:00:00Z', expires_at: null, last_used_at: null, revoked_at: '2026-09-21T12:00:00Z' },
+    { id: 'k-laptop', principal_id: LAPTOP, name: 'build-7', prefix: 'l4pt', scopes: ['nodes.read'], created_at: '2026-09-22T00:00:00Z', expires_at: null, last_used_at: null, revoked_at: null },
+    { id: 'k-old', principal_id: LAPTOP_OLD, name: 'build-7 old', prefix: 'o1d0', scopes: ['nodes.read'], created_at: '2026-09-10T00:00:00Z', expires_at: null, last_used_at: null, revoked_at: '2026-09-21T12:00:00Z' },
   )
   await page.reload()
   await expect(page.getByRole('list', { name: 'Agents' })).toBeVisible()
@@ -398,7 +400,7 @@ test('agents: a person deactivates an agent (its keys go with it), it rests in a
   await expect(fold).toHaveAttribute('aria-expanded', 'false')
   await expect(fold).toContainText('1')
   await expect(page.getByRole('list', { name: 'Deactivated agents' })).toHaveCount(0)
-  await expect(agents.getByRole('listitem').filter({ hasText: 'mbp2607 old' })).toHaveCount(0)
+  await expect(agents.getByRole('listitem').filter({ hasText: 'build-7 old' })).toHaveCount(0)
 
   const relic = agents.getByRole('listitem').filter({ hasText: 'relic' })
   await expect(relic).toContainText('1 active key')
@@ -441,7 +443,7 @@ test('agents: a person deactivates an agent (its keys go with it), it rests in a
   await fold.click()
   const resting = page.getByRole('list', { name: 'Deactivated agents' })
   await expect(resting.getByRole('listitem')).toHaveCount(2)
-  await expect(resting).toContainText('mbp2607 old')
+  await expect(resting).toContainText('build-7 old')
   await resting.getByRole('button', { name: 'Reactivate relic' }).click()
   expect(calls(world, 'POST', new RegExp(`/members/${RELIC}/reactivate$`))).toHaveLength(1)
   await expect(page.getByText('relic is active again; add a new key to connect it')).toBeVisible()
@@ -453,12 +455,12 @@ test('agents: a connected computer is not deactivated here; a refusal from the s
   const world = await open(page, '/settings/access/agents')
   await withRetirable(page, world)
   const agents = page.getByRole('list', { name: 'Agents' })
-  await agents.getByRole('listitem').filter({ hasText: 'mbp2607' }).getByRole('button', { name: 'Actions for mbp2607' }).click()
+  await agents.getByRole('listitem').filter({ hasText: 'build-7' }).getByRole('button', { name: 'Actions for build-7' }).click()
   const item = page.getByRole('menuitem', { name: /Deactivate/ })
   await expect(item).toHaveAttribute('aria-disabled', 'true')
   await expect(item).toContainText('Disconnect it on the Agents page first')
   await page.keyboard.press('Escape')
-  await expect(agents.getByRole('button', { name: 'Actions for mbp2607' })).toBeFocused()
+  await expect(agents.getByRole('button', { name: 'Actions for build-7' })).toBeFocused()
   expect(calls(world, 'POST', /\/deactivate$/)).toHaveLength(0)
   // The server decides: an agent that became a connected computer meanwhile stays active, with the reason.
   world.agents.find(a => a.principal_id === RELIC)!.connected_computer = true
@@ -477,23 +479,23 @@ test('agents: reactivating a retired computer points to pairing afresh; no key i
   await page.reload()
   const agents = page.getByRole('list', { name: 'Agents' })
   await page.getByRole('button', { name: /^Deactivated/ }).click()
-  await page.getByRole('list', { name: 'Deactivated agents' }).getByRole('button', { name: 'Reactivate mbp2607 old' }).click()
+  await page.getByRole('list', { name: 'Deactivated agents' }).getByRole('button', { name: 'Reactivate build-7 old' }).click()
   expect(calls(world, 'POST', new RegExp(`/members/${LAPTOP_OLD}/reactivate$`))).toHaveLength(1)
-  const toast = page.getByText('mbp2607 old is active again; connect the computer afresh')
+  const toast = page.getByText('build-7 old is active again; connect the computer afresh')
   await expect(toast).toBeVisible()
   await expect(page.getByText(/add a new key/)).toHaveCount(0)
   // The reactivated identity has no keys and cannot get one: its panel offers pairing, not a key.
-  const old = agents.getByRole('listitem').filter({ hasText: 'mbp2607 old' })
+  const old = agents.getByRole('listitem').filter({ hasText: 'build-7 old' })
   await expect(old).toContainText('0 active keys')
   await old.getByRole('button', { name: '0 active keys' }).click()
   await expect(old.getByRole('button', { name: /Create first key|New key/ })).toHaveCount(0)
   await expect(old).toContainText('No key: a computer connects by pairing.')
   await expect(old.getByRole('link', { name: 'Connect a computer' })).toHaveAttribute('href', '/agents/register-agent')
   // Deactivating it again promises pairing afresh in the confirmation too, never a new key.
-  const trigger = old.getByRole('button', { name: 'Actions for mbp2607 old' })
+  const trigger = old.getByRole('button', { name: 'Actions for build-7 old' })
   await trigger.click()
   await page.getByRole('menuitem', { name: 'Deactivate…' }).click()
-  const confirm = page.getByRole('dialog', { name: 'Deactivate mbp2607 old?' })
+  const confirm = page.getByRole('dialog', { name: 'Deactivate build-7 old?' })
   await expect(confirm).toContainText('It has no active key to revoke.')
   await expect(confirm).toContainText('a computer takes no key, so you connect it afresh by pairing it')
   await expect(confirm).not.toContainText(/needs a new one|revoked keys stay revoked/)
@@ -501,7 +503,7 @@ test('agents: reactivating a retired computer points to pairing afresh; no key i
   await expect(trigger).toBeFocused()
   expect(calls(world, 'POST', new RegExp(`/members/${LAPTOP_OLD}/deactivate$`))).toHaveLength(0)
   // A connected computer never offers a key either, and nothing was issued.
-  const laptop = agents.getByRole('listitem').filter({ has: page.getByRole('button', { name: 'Actions for mbp2607', exact: true }) })
+  const laptop = agents.getByRole('listitem').filter({ has: page.getByRole('button', { name: 'Actions for build-7', exact: true }) })
   await laptop.getByRole('button', { name: '1 active key' }).click()
   await expect(laptop.getByRole('button', { name: /Create first key|New key/ })).toHaveCount(0)
   await expect(laptop.getByRole('link', { name: 'Connect a computer' })).toHaveCount(0)
@@ -517,7 +519,7 @@ test('agents: deactivating is person-only with Manage members: internal identiti
   await expect(page.getByRole('list', { name: 'Agents' })).toContainText('relic')
   await expect(page.getByRole('button', { name: /^Actions for/ })).toHaveCount(0)
   await page.getByRole('button', { name: /^Deactivated/ }).click()
-  await expect(page.getByRole('list', { name: 'Deactivated agents' })).toContainText('mbp2607 old')
+  await expect(page.getByRole('list', { name: 'Deactivated agents' })).toContainText('build-7 old')
   await expect(page.getByRole('button', { name: /^Reactivate/ })).toHaveCount(0)
   expect(calls(world, 'POST', /\/(de|re)activate$/)).toHaveLength(0)
 })
@@ -555,8 +557,8 @@ for (const colorScheme of ['light', 'dark'] as const) {
     expect(result.violations.filter(v => v.impact === 'serious' || v.impact === 'critical').map(v => `${v.id} ${v.nodes.map(n => n.target.join(' ')).join(', ')}`)).toEqual([])
     // A reactivated computer's panel offers pairing, not a key, and fits the phone too.
     await page.keyboard.press('Escape')
-    await page.getByRole('list', { name: 'Deactivated agents' }).getByRole('button', { name: 'Reactivate mbp2607 old' }).click()
-    const old = page.getByRole('list', { name: 'Agents' }).getByRole('listitem').filter({ hasText: 'mbp2607 old' })
+    await page.getByRole('list', { name: 'Deactivated agents' }).getByRole('button', { name: 'Reactivate build-7 old' }).click()
+    const old = page.getByRole('list', { name: 'Agents' }).getByRole('listitem').filter({ hasText: 'build-7 old' })
     await old.getByRole('button', { name: /active keys?$/ }).click()
     await expect(old.getByRole('link', { name: 'Connect a computer' })).toBeVisible()
     await page.waitForTimeout(100)
@@ -574,7 +576,7 @@ test('the access log reads as sentences and filters by kind, person and words', 
   await expect(page.locator('.event', { hasText: 'changed Jonas Weber’s role on Pharos from Member to Delivery lead' })).toBeVisible()
   await page.getByRole('button', { name: 'Invites' }).click()
   await expect(events).toHaveCount(3)
-  await page.getByRole('button', { name: 'Keys' }).click()
+  await page.getByRole('button', { name: 'Keys', exact: true }).click()
   await expect(events).toHaveCount(4)
   await page.getByRole('button', { name: 'Clear filters' }).click()
   await page.getByLabel('Changes by or about').selectOption({ label: 'Mira Holm' })

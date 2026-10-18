@@ -9,6 +9,13 @@
 // origin. Proposal-shaped input stays an unverified comparison. A logical
 // name or normalized line hash is not a raw match. None of this verifies
 // model load or obedience.
+// Receipts are assigned by raw digest and byte length; equal basenames never
+// share evidence for different file bytes.
+//
+// DeliveryReport compares complete active Markdown instruction blocks against
+// indexed doctrine source when available. Comments, quotations and code examples
+// establish neither rule delivery nor a session channel. Whitespace wrapping and
+// the session renderer's identity prefix are the supported normalizations.
 //
 // Compare does not wait, publish, read directories, or replace active
 // instruction files. Supplied merge metadata cannot prove publication or the

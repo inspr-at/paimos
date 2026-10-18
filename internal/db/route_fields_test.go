@@ -24,7 +24,7 @@ func TestTicketRouteMigrationPreservesCustomSchema(t *testing.T) {
 		}
 	})
 	var id string
-	err = db.MigrateWithHook(t.Context(), d.App, func(name string) error {
+	err = migrateLegacyWorkWithHook(t, d, func(name string) error {
 		if name != "0988_ticket_route_fields.sql" {
 			return nil
 		}
@@ -103,7 +103,7 @@ func TestTicketRouteMigrationPreservesCustomSchema(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := db.MigrateWithHook(t.Context(), d.App, nil); err != nil {
+	if err := migrateLegacyWorkWithHook(t, d, nil); err != nil {
 		t.Fatal("reapply:", err)
 	}
 }

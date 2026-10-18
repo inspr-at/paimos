@@ -9,35 +9,42 @@ import MarkdownEditor from './MarkdownEditor.vue'
 
 // One Markdown section of a ticket (Description, Acceptance criteria, Notes):
 // rendered by default, edited in place, conflicts keep the draft.
-const props = defineProps<{ title: string; value: string; editable: boolean; save: (value: string) => Promise<SaveResult>; emptyText?: string; attachmentId?: (file: File) => Promise<string | null> }>()
+const props = defineProps<{ recordId?: string; title: string; value: string; editable: boolean; save: (value: string) => Promise<SaveResult>; emptyText?: string; attachmentId?: (file: File) => Promise<string | null> }>()
 const emit = defineEmits<{ openAttachment: [id: string] }>()
 const editing = ref(false)
 const draft = ref('')
 const saving = ref(false)
 const conflict = ref(false)
 const editor = ref<InstanceType<typeof MarkdownEditor>>()
+let generation = 0
+let draftSave = props.save
+function discard() { generation++; editing.value = false; draft.value = ''; saving.value = false; conflict.value = false }
+watch(() => props.recordId, discard, { flush: 'sync' })
 const dirty = computed(() => editing.value && draft.value !== props.value)
 watch(() => props.value, () => { if (!editing.value) conflict.value = false })
 
 async function start() {
   if (!props.editable) return
+  draftSave = props.save
   draft.value = props.value; conflict.value = false; editing.value = true
   await nextTick(); editor.value?.focus()
 }
 async function commit() {
   if (saving.value) return
   if (draft.value === props.value && !conflict.value) { editing.value = false; return }
+  const request = generation
   saving.value = true
-  const result = await props.save(draft.value)
+  const result = await draftSave(draft.value)
+  if (request !== generation) return
   saving.value = false
   if (result === 'ok') { editing.value = false; conflict.value = false }
   else if (result === 'conflict') conflict.value = true
 }
 async function cancel() {
   if (dirty.value && !(await confirmAction({ title: `Discard your ${props.title.toLowerCase()} changes?`, body: 'Your edits have not been saved.', confirmLabel: 'Discard', danger: true }))) { editor.value?.focus(); return }
-  editing.value = false; conflict.value = false
+  discard()
 }
-defineExpose({ start, isDirty: () => dirty.value, editing })
+defineExpose({ start, isDirty: () => dirty.value, editing, discard })
 </script>
 
 <template>

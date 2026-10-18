@@ -1,0 +1,22 @@
+{
+  "group": "work-queue",
+  "nightlyTiming": {
+    "seconds": 160.822,
+    "selectedTests": 9
+  },
+  "spec": {
+    "file": "tests/definitions.spec.ts",
+    "listedTests": 9,
+    "tierTiming": {
+      "caseSeconds": {
+        "max": 41.524,
+        "median": 14.093,
+        "min": 2.265
+      },
+      "seconds": 160.822,
+      "selectedTests": 9
+    },
+    "weightSeconds": 120,
+    "weightSource": "AEON-1316 FIX4 estimate: original flows plus six verdict regressions at 390/1024/1440 in light/dark"
+  }
+}

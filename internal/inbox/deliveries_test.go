@@ -16,6 +16,10 @@ import (
 
 func TestMessagingAtomicRollbackAndProjectBoundary(t *testing.T) {
 	w, m, project, srv := messagingWorld(t)
+	var baseline int
+	if err := w.db.Admin.QueryRow(t.Context(), `SELECT count(*) FROM events`).Scan(&baseline); err != nil {
+		t.Fatal(err)
+	}
 	err := db.InTenant(dbtest.Seed(t.Context()), w.db.Admin, w.sender.TenantID, func(tx pgx.Tx) error {
 		_, err := tx.Exec(t.Context(), `CREATE FUNCTION p54_reject_delivery() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN RAISE EXCEPTION 'fixture rollback'; END $$; CREATE TRIGGER p54_reject BEFORE INSERT ON inbox_message_deliveries FOR EACH ROW EXECUTE FUNCTION p54_reject_delivery()`)
 		return err
@@ -34,7 +38,11 @@ func TestMessagingAtomicRollbackAndProjectBoundary(t *testing.T) {
 			if err := tx.QueryRow(t.Context(), "SELECT count(*) FROM "+table).Scan(&n); err != nil {
 				return err
 			}
-			if n != 0 {
+			want := 0
+			if table == "events" {
+				want = baseline
+			}
+			if n != want {
 				return fmt.Errorf("partial write in %s", table)
 			}
 		}

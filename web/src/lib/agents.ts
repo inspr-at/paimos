@@ -1,17 +1,20 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import type { DeployTarget } from './deployTarget'
+import { agentEventIdentity, type AgentEventIdentity } from './tierEvidenceLive.ts'
 import { watchStreamHealth } from './streamHealth.ts'
-// The agents workspace HTTP surface for a person's session: harness sessions and
-// their typed controls, runs, approvals, accounts with allowance windows, models
-// and project messages. Worker-only endpoints (heartbeat, drain, claim) are absent.
+import { eventNode, PROJECTION_EVENTS } from './agentProjection.ts'
 import { api, APIError } from './api.ts'
 import { stamp, tick } from './position.ts'
 import type { Admitted } from './ledger.ts'
 import { sendSessionControl, requestManagedSessionControl, readSessionControl, type AgentRunRow, type HarnessSessionRow } from './agentRows.ts'
 
+// The agents workspace HTTP surface for a person's session: harness sessions and
+// their typed controls, runs, approvals, accounts with allowance windows, models
+// and project messages. Worker-only endpoints (heartbeat, drain, claim) are absent.
+
 // Sessions and runs are fetched only by agentRows.ts and shown only after the ledger
 // admitted them (AEON-449): the types a component works with are the admitted ones.
-export type { Harness, MetadataChange, ProcessOwnership, NodeSummary, Paged, HarnessSessionRow, AgentRunRow } from './agentRows.ts'
+export type { AgentRunRow,Harness,HarnessSessionRow,MetadataChange,NodeSummary,Paged,ProcessOwnership } from './agentRows.ts'
 export type HarnessSession = Admitted<HarnessSessionRow>
 export type AgentRun = Admitted<AgentRunRow>
 export interface SessionChangeRequest {
@@ -35,6 +38,8 @@ export interface AllowanceWindow extends AllowanceWrite {
   set_by_you?: boolean
 }
 export interface AgentAccount {
+  usage_probe_enabled?: boolean
+  usage_budget?: import('./capacity').CapacityBudget
   owner_person_id?: string; owner_person_name?: string; linked_at?: string; link_revision?: number
   ongoing_use_approved?: boolean
   reading_support?: 'every_5_min' | 'first_run' | 'statusline' | 'none'; quota_fingerprint?: string; quota_pool_fingerprint?: string; statusline_enabled?: boolean
@@ -62,10 +67,15 @@ export interface Approval {
   target?: DeployTarget | null
   target_digest_sha256?: string
 }
-export interface ModelProfile { id: string; slug: string; harness: string; family: string; model: string; effort: string; tier: string; enabled: boolean }
-export interface ModelResolution { role: string; profile: ModelProfile | null; owner_required: boolean; source: string }
+// The registry also sends its display fields; the session list names models by them (AEON-1211).
+export interface ModelProfile { id: string; slug: string; harness: string; family: string; model: string; effort: string; tier: string; enabled: boolean; display_name?: string; short_name?: string; model_version?: string }
+
 export interface MessageTarget { id: string; principal_id: string; address: string; adapter: string; target_kind: string; maximum_level: string; role: string; enabled: boolean }
 export interface ProjectMessage {
+  optimistic?: boolean; send_failed?: boolean; client_id?: string; resend_of?: string; queue_pending?: boolean; cancelled?: boolean
+  // Chat-native messages (AEON-1071) live only in this chat thread; replies and
+  // read evidence for them use its routes. chat_seen: its read marker has them.
+  chat_thread?: string; chat_seen?: boolean
   recipient_session_id?: string; sender_session_id?: string; sender_label?: string; from?: string
   id: string; sender_principal_id: string; recipient_principal_id: string; to: string; body: string; reply_to?: string | null
   sent_event_id: number; is_action_request: boolean; expects_reply: boolean; delivery_level: 'simple' | 'steer'
@@ -74,7 +84,7 @@ export interface ProjectMessage {
 }
 export interface HeldResolution { message_id: string; decision: 'resolved' | 'dismissed'; created_at: string }
 export interface MessagePage { items: ProjectMessage[]; next_after: number; preamble?: string }
-export interface MessageSend { recipient_session_id?: string; sender_session_id?: string; to: string; body: string; idempotency_key: string; reply_to?: string; expects_reply: boolean; is_action_request: boolean; delivery_level: 'simple' | 'steer' }
+export interface MessageSend { resend_of?: string; recipient_session_id?: string; sender_session_id?: string; to: string; body: string; idempotency_key: string; reply_to?: string; expects_reply: boolean; is_action_request: boolean; delivery_level: 'simple' | 'steer' }
 
 async function request<T>(path: string, method = 'GET', body?: unknown): Promise<T> {
   const start = tick()
@@ -122,16 +132,6 @@ export const listApprovals = () => request<Approval[]>('/approvals?limit=200')
 export const decideApproval = (id: string, decision: 'approved' | 'denied', reason: string) => request<Approval>(`/approvals/${enc(id)}/decision`, 'POST', { decision, reason })
 export const revokeApproval = (id: string) => request<Approval>(`/approvals/${enc(id)}/revoke`, 'POST')
 export const listModels = () => request<ModelProfile[]>('/models')
-// Task-appropriate profile for a work role on one harness. A miss is "routing did not answer", not a guessed model.
-// The start cascade must not call this to fill models an account did not grant.
-export async function resolveModelRole(role: string, harness: string): Promise<ModelProfile | null> {
-  try {
-    const data = await request<ModelResolution>(`/models/resolve${query({ role, harness })}`)
-    return data?.profile?.id ? data.profile : null
-  } catch {
-    return null
-  }
-}
 export const listTargets = (projectId: string) => request<MessageTarget[]>(`/projects/${enc(projectId)}/message-targets`)
 export const listMessages = (projectId: string, params: { session?: string; newest_first?: boolean; pending?: boolean; address?: string; thread?: string; after?: number; limit?: number } = {}) =>
   request<MessagePage>(`/projects/${enc(projectId)}/messages${query({ limit: 200, newest_first: true, ...params })}`)
@@ -139,41 +139,68 @@ export const resolveMessage = (projectId: string, messageId: string, decision: H
   request<HeldResolution>(`/projects/${enc(projectId)}/messages/${enc(messageId)}/resolution`, 'POST', { decision, note })
 export const sendMessage = (projectId: string, body: MessageSend) => request<ProjectMessage>(`/projects/${enc(projectId)}/messages`, 'POST', body)
 // AEON-280: the sender's delivery progress per message (sender-only; others omitted).
-export interface MessageStatus { message_id: string; status: 'sent' | 'delivered' | 'read' | 'not_delivered'; reason?: string; delivered_at: string | null; read_at: string | null; deliver_by: string | null }
+export interface MessageStatus { cancelled?: boolean; message_id: string; status: 'sent' | 'delivered' | 'read' | 'not_delivered'; reason?: string; delivered_at: string | null; read_at: string | null; deliver_by: string | null }
+export interface ChatCancelResult { contract: 'chat-v1'; message_id: string; result: 'cancelled' | 'too_late' | 'uncertain'; receipt: { state: string } }
+export const cancelSessionMessage = (projectId: string, messageId: string) => request<ChatCancelResult>(`/projects/${enc(projectId)}/messages/${enc(messageId)}/cancel`, 'POST')
+// AEON-1071: the person's own chat thread whose current binding is this
+// session. 404 means no live stream for it (unbound, or chat is disabled).
+export async function chatThreadForSession(sessionId: string): Promise<{ status: number; thread?: string }> {
+  const response = await api(`/chat-sessions/${enc(sessionId)}/thread`)
+  if (!response.ok) return { status: response.status }
+  const body = await response.json().catch(() => null) as { conversation_id?: unknown } | null
+  return typeof body?.conversation_id === 'string' && body.conversation_id ? { status: 200, thread: body.conversation_id } : { status: 502 }
+}
+// The newest page of that chat thread. Chat-native finals live only here,
+// never in the project message list (AEON-1071).
+export interface ChatHistoryMessage { message_id: string; sent_event_position: string; body: string; reply_to?: string | null; sender_principal_id?: string; created_at?: string }
+export type ChatReadState = 'seen' | 'known_unread' | 'unknown' | 'neutral'
+export const chatThreadMessages = (threadId: string, limit = 50) => request<{ items: { message: ChatHistoryMessage; person_read_state?: ChatReadState }[] }>(`/chat-threads/${enc(threadId)}/messages?limit=${limit}`)
+// A person's input to the thread. A reply to a chat-native message must go
+// here: the project message route only knows project messages as parents.
+export interface ChatOutboxResult { contract: string; message: ChatHistoryMessage; receipt: { message_id: string; state: string } }
+export const sendChatMessage = (threadId: string, body: { client_message_id: string; body: string; reply_to?: string }) => request<ChatOutboxResult>(`/chat-threads/${enc(threadId)}/outbox`, 'POST', body)
+// Exactly the chat-native messages that were on screen; never a watermark.
+export const markChatSeen = (threadId: string, ids: string[]) => request<unknown>(`/chat-threads/${enc(threadId)}/read-marker`, 'PUT', { visible_message_ids: ids, migration_epoch: '0' })
 export const messageStatuses = (ids: string[]) => request<{ items: MessageStatus[] }>(`/inbox/message-status?ids=${ids.map(enc).join(',')}`)
 
 export const message = (error: unknown) => error instanceof Error ? error.message : 'Request failed. Please retry.'
 
-
 // Named server events that change what the agents workspace shows. They are wake
 // hints only: the caller re-reads the authorized projections. Heartbeats use the
 // periodic refresh; registration/stop and reconnect wake the consumer immediately.
-const HARNESS_EVENTS = ['registered', 'bound', 'yielded', 'stopped', 'removed', 'restored', 'revived', 'archived', 'metadata_changed', 'adopted', 'handed_over', 'stop_confirmed', 'control_requested', 'control_claimed', 'control_completed']
-const OTHER_EVENTS = ['approval.proposed', 'approval.approved', 'approval.denied', 'approval.revoked', 'run.created', 'run.claimed', 'run.telemetry', 'work_order.started', 'work_order.updated', 'inbox.compat_sent', 'inbox.delivery_queued', 'inbox.reply_obligation_closed', 'inbox.action_resolved']
+const HARNESS_EVENTS = ['registered', 'bound', 'yielded', 'stopped', 'removed', 'restored', 'revived', 'archived', 'metadata_changed', 'adopted', 'handed_over', 'stop_confirmed', 'control_requested', 'control_claimed', 'control_completed', 'pause_requested', 'pause_planned', 'paused', 'pause_interrupt_requested', 'pause_level_changed', 'pause_stop_requested', 'resume_requested', 'resumed', 'pause_cancelled', 'tier_requested', 'tier_declined', 'tier_reported', 'tier_changed', 'tier_cancelled', 'usage_reported']
+const OTHER_EVENTS = ['inbox.sent', 'harness.leaving_requested', 'harness.leaving_cancelled', 'approval.proposed', 'approval.approved', 'approval.denied', 'approval.revoked', 'run.created', 'run.claimed', 'run.telemetry', 'work_order.started', 'work_order.updated', 'inbox.compat_sent', 'inbox.delivery_queued', 'inbox.reply_obligation_closed', 'inbox.action_resolved', 'inbox.message_cancelled']
 // Delivery progress of sent messages (AEON-280). These only refresh message
 // status, never the whole workspace.
-export const DELIVERY_EVENTS = ['inbox.message_fetched', 'inbox.receipt_handed_off', 'inbox.receipt_failed', 'inbox.delivery_failed']
-export function subscribeAgents(changed: () => void, connection: (live: boolean) => void = () => {}, delivery: () => void = () => {}, telemetry = false, recover: () => void = changed): () => void {
+export const DELIVERY_EVENTS = ['inbox.message_fetched', 'inbox.receipt_handed_off', 'inbox.receipt_failed', 'inbox.delivery_failed', 'inbox.message_cancelled']
+// Lead, decision, queue, question and reparent events wake the shared Agents projection
+// (AEON-1210 G4; stores/agentProjection.ts), which batches them and rereads what changed.
+// Every agents subscription carries them; a reconnect wakes a full reread.
+const projectionWakes = new Set<(event?: string, node?: string | null) => void>()
+export function onProjectionWake(listener: (event?: string, node?: string | null) => void) { projectionWakes.add(listener); return () => { projectionWakes.delete(listener) } }
+const wakeProjection = (event?: string, node?: string | null) => projectionWakes.forEach(listener => listener(event, node))
+export function subscribeAgents(changed: (event?: string, identity?: AgentEventIdentity) => void, connection: (live: boolean) => void = () => {}, delivery: () => void = () => {}, telemetry = false, recover: () => void = changed): () => void {
   if (typeof EventSource === 'undefined') return () => {}
   let stream: EventSource
   let stopped = false
   const health = watchStreamHealth(() => {
     stream.close()
     connection(false)
-    recover(); delivery()
+    recover(); delivery(); wakeProjection()
     connect()
   })
   function connect() {
     const source = stream = new EventSource('/api/events/stream?after=latest')
-    const current = (run: () => void) => () => { if (!stopped && stream === source) { health.heard(); run() } }
-    source.onopen = current(() => { connection(true); changed(); delivery() })
+    const current = (run: (event: Event) => void) => (event: Event) => { if (!stopped && stream === source) { health.heard(); run(event) } }
+    source.onopen = current(() => { connection(true); changed(); delivery(); wakeProjection() })
     source.onerror = () => { if (!stopped && stream === source) connection(false) }
     source.addEventListener('stream.ping', current(() => {}))
     source.addEventListener('stream.ready', current(() => {}))
-    for (const name of [...HARNESS_EVENTS.map(kind => `harness.${kind}`), ...OTHER_EVENTS]) source.addEventListener(name, current(changed))
+    for (const name of [...HARNESS_EVENTS.map(kind => `harness.${kind}`), ...OTHER_EVENTS]) source.addEventListener(name, current(event => { const identity = agentEventIdentity((event as MessageEvent).data); if (identity) changed(name, identity); else changed(name) }))
     // Heartbeats prove liveness without invalidating the 20-second live feed poll.
     source.addEventListener('harness.heartbeat', current(() => { if (telemetry) changed() }))
     for (const name of DELIVERY_EVENTS) source.addEventListener(name, current(delivery))
+    for (const name of PROJECTION_EVENTS) source.addEventListener(name, current(event => wakeProjection(name, eventNode((event as MessageEvent).data))))
   }
   connect()
   return () => { stopped = true; health.stop(); stream.close() }
@@ -190,3 +217,9 @@ export function claudeStatuslineCopy(audience: AgentAccount['statusline_opt_in']
 export function putQuotaPool(account_ids: string[], quota_fingerprint: string, confirmed: boolean): Promise<void> {
   return request<void>('/agent-accounts/quota-pool', 'PUT', { account_ids, quota_fingerprint, confirmed })
 }
+
+export const readPauseDefault = () => request<{ default_level: import('./agentPause').PauseLevel }>('/me/agent-pause-settings')
+export const savePauseDefault = (default_level: import('./agentPause').PauseLevel) => request<{ default_level: import('./agentPause').PauseLevel }>('/me/agent-pause-settings', 'PUT', { default_level })
+export const readEstimateInterval = () => request<{ interval_minutes: number }>('/settings/eta-interval')
+
+export const setUsageProbe = (id: string, binding_revision: number, enabled: boolean) => request<void>(`/agent-accounts/${enc(id)}/usage-probe`, 'PUT', { binding_revision, enabled })

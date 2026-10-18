@@ -3,12 +3,14 @@
 // the B1 query semantics (within, kind, state, priority, assignee, q, hide_closed,
 // sort, facets, cursor paging) so specs can assert on real behaviour.
 import type { Page, Route } from '@playwright/test'
+import { hideChoice, hiddenStates } from '../src/lib/hideStates'
 import { deriveAgentState, normalizeAgentState, STATE_PRIORITY } from '../src/lib/agentSignals.ts'
 import { benefitIssues, completedTicketState } from '../src/lib/ticketBenefits.ts'
 import { leadWorkerKey, who, type LiveAgent } from '../src/lib/liveAgents.ts'
 import { mockEffectivePermissions } from './authz-fixtures'
 import { compareModelSort, planningSortValue, type PlanningColumn } from '../src/lib/planning.ts'
 import { defaultStatusHelp } from '../src/lib/statusDefinitions.ts'
+import { PORCELAIN } from '../src/lib/themeEngine.ts'
 
 export const me = { id: '11111111-1111-4111-8111-111111111111', name: 'Markus Barta' }
 const mira = { id: '22222222-2222-4222-8222-222222222222', name: 'Mira Holm' }
@@ -18,8 +20,12 @@ const forward = (previous: string, at: number) => new Date(Math.max(at, Date.par
 const ago = (hours: number) => new Date(now - hours * 3_600_000).toISOString()
 
 export interface MockNode {
+  queue_stale?: boolean
+  is_leaf?: boolean; depth?: number; level_name?: string; level_icon?: string; work_children_count?: number; status_derived?: boolean
   id: string; key: string; kind_slug: string; title: string; body: string; state: string
   human_check?: string | null
+  person_waiting?: { check_id: string; label: string; owner: { id: string; name: string } }[]
+  recurrence?: import('../src/lib/api').NodeRecurrence
   fields: Record<string, unknown>; parent_id: string | null; project: string
   created_at: string; updated_at: string
   estimate?: import('../src/lib/estimates').TicketEstimate
@@ -28,17 +34,26 @@ export interface MockNode {
 }
 export interface MockView {
   id: string; owner_principal_id: string; project_id: string | null; name: string; filters: Record<string, string>
-  sort: { field: string; direction: string }; sort_keys: string[]; group_by: string; columns: string[]; shared: boolean
+  sort: { field: string; direction: string }; sort_keys: string[]; group_by: string; mode: 'list' | 'outline' | 'graph'; columns: string[]; shared: boolean
   created_at: string; updated_at: string; deleted_at: string | null
 }
 // A saved view as the server stores it (ids are UUIDs, like the server's).
+// Normal views carry a column snapshot; columns: [] is an explicit legacy
+// fixture, soft-deleted by AEON-718 rather than offered in the view bar.
 export function mockView(partial: Partial<MockView> & Pick<MockView, 'id' | 'name'>): MockView {
   return {
-    owner_principal_id: me.id, project_id: 'p-pharos', filters: {}, sort: { field: 'position', direction: 'asc' }, sort_keys: [], group_by: 'none', columns: [], shared: false,
+    owner_principal_id: me.id, project_id: 'p-pharos', filters: {}, sort: { field: 'position', direction: 'asc' }, sort_keys: [], group_by: 'none', mode: 'list', columns: ['key', 'title', 'status', 'priority', 'updated'], shared: false,
     created_at: ago(24 * 3), updated_at: ago(24 * 3), deleted_at: null, ...partial,
   }
 }
 export interface MockOptions {
+  // AEON-1315's approved configurable replacement for the historical gate.
+  entryChecks?: boolean
+  // The two-browser SSE server needs actual network requests and reconnects.
+  nativeEvents?: boolean
+  // Kind-specific status buckets, as configured on the server. Omitted
+  // entries retain the normal spelling-based fallback.
+  workBuckets?: Record<string, Record<string, ReturnType<typeof workBucket>>>
   conflictAlways?: string
   delayChildren?: number
   readOnly?: boolean
@@ -48,6 +63,8 @@ export interface MockOptions {
   failPatch?: boolean
   conflictOn?: string
   bigProject?: number
+  // Cap an API page for pagination specs without generating hundreds of tickets.
+  listPageSize?: number
   failUpload?: boolean
   // The signed-in person is a workspace admin (shared project groups).
   admin?: boolean
@@ -78,7 +95,7 @@ export function fixtures(options: MockOptions = {}) {
     return full
   }
   const epic = add({ id: 'n-epic', key: 'PHAROS-10', kind_slug: 'epic', title: 'Guarded multi-cloud provisioning', state: 'backlog', project: 'p-pharos', fields: { priority: 'high' }, updated_at: ago(40) })
-  add({ id: 'n-1', key: 'PHAROS-11', kind_slug: 'ticket', title: 'Connect Hetzner Cloud for managed provisioning', state: 'in-progress', project: 'p-pharos', parent_id: epic.id, fields: { priority: 'high', assignee: me.id, release: { id: 5668, label: 'v4.7.8' }, tags: [{ id: 16, name: 'CUSTOMERPORTAL', color: 'blue' }, { id: 5, name: 'hsb8', color: 'green' }] }, updated_at: ago(1), body: '## Acceptance\n\n- [x] Token stored in the vault\n- [ ] Cleanup runs => nothing left behind\n\n`a => b`' })
+  add({ id: 'n-1', key: 'PHAROS-11', kind_slug: 'ticket', title: 'Connect Hetzner Cloud for managed provisioning', state: 'in-progress', project: 'p-pharos', parent_id: epic.id, fields: { priority: 'high', assignee: me.id, release: { id: 5668, label: 'v4.7.8' }, tags: [{ id: 16, name: 'CUSTOMERPORTAL', color: 'blue' }, { id: 5, name: 'worker-8', color: 'green' }] }, updated_at: ago(1), body: '## Acceptance\n\n- [x] Token stored in the vault\n- [ ] Cleanup runs => nothing left behind\n\n`a => b`' })
   const parentTicket = add({ id: 'n-2', key: 'PHAROS-12', kind_slug: 'ticket', title: 'Add an Oracle Cloud connector', state: 'backlog', project: 'p-pharos', parent_id: epic.id, fields: { priority: 'medium' }, updated_at: ago(3) })
   add({ id: 'n-3', key: 'PHAROS-13', kind_slug: 'task', title: 'Run the disposable Hetzner end-to-end check', state: 'qa', project: 'p-pharos', parent_id: parentTicket.id, fields: { priority: 'low', assignee: mira.id, tags: [{ id: 11, name: 'BUG', color: 'red' }] }, updated_at: ago(6) })
   add({ id: 'n-4', key: 'PHAROS-14', kind_slug: 'ticket', title: 'Visual acceptance of the version pill', state: 'new', project: 'p-pharos', fields: {}, updated_at: ago(12) })
@@ -122,7 +139,7 @@ export function fixtures(options: MockOptions = {}) {
   // U22 saved views and bulk batches (their before and after, for undo).
   const views: MockView[] = []
   const batches: { id: number; before: MockNode[]; after: MockNode[]; undone: boolean }[] = []
-  const people: { id: string; name: string; has_avatar?: boolean }[] = [me, mira]
+  const people: { id: string; name: string; has_avatar?: boolean }[] = [{ ...me }, { ...mira }]
   // Agents working right now (AEON-184): GET /api/harness-sessions/live items.
   const live: LiveAgentMock[] = []
   return { projects, nodes, people, activity, relations, attachments, preferences, events, views, batches, live, counter: { next: 100 } }
@@ -151,7 +168,7 @@ export interface Call { path: string; method: string; query: URLSearchParams; bo
 // hideLead: the caller cannot read harness sessions, so the server sends no
 // lead_worker (AEON-316 gates it on the same visibility as the live read).
 function item(node: MockNode, data: Fixtures, hideLead = false, usage = true) {
-  const kindIds: Record<string, string> = { epic: 'k-epic', ticket: 'k-ticket', task: 'k-task', project: 'k-project' }
+  const kindIds: Record<string, string> = { work: 'k-work', epic: 'k-epic', ticket: 'k-ticket', task: 'k-task', project: 'k-project' }
   const parent = node.parent_id ? data.nodes.find(n => n.id === node.parent_id) : undefined
   const project = data.projects.find(p => p.id === node.project)!
   // has_avatar as the server sends it (U27), when the spec gives it; absent,
@@ -160,6 +177,9 @@ function item(node: MockNode, data: Fixtures, hideLead = false, usage = true) {
   const assignee = person ? { id: person.id, name: person.name, ...(person.has_avatar === undefined ? {} : { has_avatar: person.has_avatar }) } : null
   const lead = hideLead ? undefined : leadOf(data, node)
   return {
+    queue_stale: node.queue_stale,
+    person_waiting: node.person_waiting ?? (node.human_check?.trim() && node.state === 'done' ? [{ check_id: 'human', label: node.human_check, owner: me }] : []),
+    ...(node.is_leaf === undefined ? {} : { is_leaf: node.is_leaf, depth: node.depth, level_name: node.level_name, level_icon: node.level_icon, work_children_count: node.work_children_count, status_derived: node.status_derived }),
     id: node.id, key: node.key, kind_id: kindIds[node.kind_slug], title: node.title, body: node.body, fields: node.fields, state: node.state, human_check: node.human_check ?? null,
     parent_id: node.parent_id, position: '0', created_at: node.created_at, updated_at: node.updated_at, deleted_at: null,
     kind_slug: node.kind_slug, kind_label: node.kind_slug[0].toUpperCase() + node.kind_slug.slice(1),
@@ -171,6 +191,7 @@ function item(node: MockNode, data: Fixtures, hideLead = false, usage = true) {
     // The server always states finished on an estimate; false unless a spec sets it.
     ...(node.eta ? { eta: { finished: false, ...node.eta } } : {}),
     ...(node.estimate ? { estimate: node.estimate } : {}),
+    ...(node.recurrence ? { recurrence: node.recurrence } : {}),
     ...(node.planning ? { planning: usage ? node.planning : { ...node.planning, cost: undefined } } : {}),
     ...(lead ? { lead_worker: { name: who(lead), key: leadWorkerKey(lead) } } : {}),
   }
@@ -194,7 +215,11 @@ function projectItem(project: Fixtures['projects'][number]) {
 const listParam = (query: URLSearchParams, name: string) => (query.get(name) ?? '').split(',').map(v => v.trim()).filter(Boolean)
 const normal = (state: string) => state.replace(/-/g, '_')
 // Same buckets as the project summary: a category is not modelled here.
-// Archived stays in the total only; every other non-closed state is open.
+// Archived has a separate count; every other non-closed state is open.
+function canonicalWorkStatus(state: string) {
+  const norm = state.trim().toLowerCase().replace(/[\s-]+/g, '_')
+  return ['active', 'inprogress'].includes(norm) ? 'in_progress' : norm === 'canceled' ? 'cancelled' : norm
+}
 function workBucket(state: string): 'open' | 'in_progress' | 'done' | 'cancelled' | 'archived' {
   const norm = state.trim().toLowerCase().replace(/[\s-]+/g, '_')
   if (norm === 'cancelled' || norm === 'canceled') return 'cancelled'
@@ -267,22 +292,147 @@ function shownAssignee(data: Fixtures, node: MockNode): string {
 }
 
 function completionRefusal(node: MockNode, nextState: string, fields: Record<string, unknown>): { error: string; code: string } | null {
-  if (node.kind_slug !== 'ticket' || completedTicketState(node.state) || !completedTicketState(nextState)) return null
+  if (!['work', 'ticket'].includes(node.kind_slug) || completedTicketState(node.state) || !completedTicketState(nextState)) return null
   const issues = benefitIssues(fields)
   if (!issues.length) return null
   return { error: `before done: ${issues.join('; ')}`, code: 'benefit_required' }
 }
 
 export async function mockWork(page: Page, data: Fixtures, options: MockOptions = {}) {
+  // These scenarios drive HTTP snapshots and polling explicitly. A real,
+  // unserved SSE connection would invalidate those reads nondeterministically.
+  if (!options.nativeEvents) await page.addInitScript(() => {
+    // Scenarios that install an event-driven stream keep their own transport,
+    // regardless of Playwright's unspecified init-script order.
+    if (window.EventSource.name !== 'EventSource') return
+    const streams: QuietStream[] = []
+    let automaticOpen = true
+    class QuietStream extends EventTarget {
+      onopen: ((event: Event) => void) | null = null
+      readonly id = streams.length + 1
+      closed = false
+      opened = false
+      private timer = setInterval(() => { if (this.opened && !this.closed) this.dispatchEvent(new Event('stream.ping')) }, 5_000)
+      constructor() {
+        super()
+        streams.push(this)
+        queueMicrotask(() => {
+          if (automaticOpen) this.open()
+        })
+      }
+      open() {
+        if (this.closed || this.opened) return
+        this.opened = true
+        this.onopen?.(new Event('open'))
+        this.dispatchEvent(new MessageEvent('stream.ready', { data: JSON.stringify({ after: 0, resumed: false }) }))
+      }
+      close() { this.closed = true; clearInterval(this.timer) }
+    }
+    Object.assign(window, { EventSource: QuietStream, fixtureQuietStreams: {
+      holdOpen() { automaticOpen = false },
+      open() { automaticOpen = true; streams.forEach(stream => stream.open()) },
+      active() { return streams.filter(stream => !stream.closed).map(stream => ({ id: stream.id, opened: stream.opened })) },
+    } })
+  })
   const calls: Call[] = []
+  const defaultTheme = { id: 'fixture-default-theme', tenant_id: 't1', name: 'Porcelain', scope: 'default', owner_principal_id: null, revision: 1, created_at: '', updated_at: '', values: structuredClone(PORCELAIN) }
   const started = Date.now()
+  const bucketOf = (node: MockNode) => options.workBuckets?.[node.kind_slug]?.[canonicalWorkStatus(node.state)] ?? workBucket(node.state)
+  // The list's filter semantics (B1), shared by GET /api/nodes and the view figures, which ignore Hide closed.
+  const matching = (query: URLSearchParams, hide = true): MockNode[] => {
+    const kinds = listParam(query, 'kind')
+    const parentFilter = query.get('parent_id')
+    const within = query.get('within'), states = listParam(query, 'state'), priorities = listParam(query, 'priority'), assignees = listParam(query, 'assignee'), q = (query.get('q') ?? '').toLowerCase()
+    // within: a project, or any node's subtree; parent_id: direct children only.
+    const inside = (n: MockNode) => {
+      if (!within) return true
+      if (data.projects.some(p => p.id === within)) return n.project === within
+      for (let parent = n.parent_id; parent; parent = data.nodes.find(x => x.id === parent)?.parent_id ?? null) if (parent === within) return true
+      return false
+    }
+    const tags = listParam(query, 'tag').map(v => v.toLowerCase()), epics = listParam(query, 'epic'), costs = listParam(query, 'cost_unit').map(v => v.toLowerCase()), releases = listParam(query, 'release').map(v => v.toLowerCase())
+    const dateField = query.get('date_field'), dateFrom = query.get('date_from'), dateTo = query.get('date_to')
+    const dateOf = (n: MockNode): number | null => {
+      const raw = dateField === 'created' ? n.created_at : dateField === 'updated' ? n.updated_at : dateField === 'start' ? n.fields.start_date : dateField === 'end' ? n.fields.end_date : n.fields.accepted_at
+      return typeof raw === 'string' && !Number.isNaN(Date.parse(raw)) ? Date.parse(raw) : null
+    }
+    // ids (AEON-326): only those nodes, every other filter still applied.
+    const onlyIds = listParam(query, 'ids')
+    // Shape is canonical even for old payloads that omit is_leaf. Count only
+    // work children, and retain explicit shape for fixtures with hidden work.
+    const workParents = new Set(data.nodes.filter(n => ['work', 'epic', 'ticket', 'task'].includes(n.kind_slug)).map(n => n.parent_id))
+    const levelOf = (n: MockNode) => (n.is_leaf ?? !workParents.has(n.id)) ? 'leaf' : String(n.depth ?? 1)
+    return data.nodes.filter(n => inside(n) && (!parentFilter || n.parent_id === parentFilter) && (!kinds.length || kinds.includes(n.kind_slug)))
+      .filter(n => passes(listParam(query, 'shape'), v => v === ((n.is_leaf ?? !workParents.has(n.id)) ? 'leaf' : 'parent')))
+      .filter(n => passes(listParam(query, 'depth'), v => v === String(n.depth ?? 1)))
+      // AEON-974: Type levels are the leaf, else a parent's depth.
+      .filter(n => passes(listParam(query, 'level'), v => v === levelOf(n)))
+      .filter(n => !onlyIds.length || onlyIds.includes(n.id))
+      .filter(n => passes(states, v => v === n.state))
+      .filter(n => passes(listParam(query, 'work_state'), v => v === canonicalWorkStatus(n.state)))
+      .filter(n => !listParam(query, 'work_bucket').length || listParam(query, 'work_bucket').includes(bucketOf(n)))
+      .filter(n => passes(listParam(query, 'human_check'), v => v === (n.human_check?.trim() ? 'pending' : 'none')))
+      .filter(n => passes(listParam(query, 'person_waiting'), v => { const steps = n.person_waiting ?? (n.human_check?.trim() && n.state === 'done' ? [{ owner: me }] : []); return v === 'mine' ? steps.some(step => step.owner.id === me.id) : v === (steps.length ? 'pending' : 'none') }))
+      .filter(n => passes(priorities, v => v === (typeof n.fields.priority === 'string' ? n.fields.priority : 'none')))
+      .filter(n => passes(assignees, v => v === (typeof n.fields.assignee === 'string' ? n.fields.assignee : 'none')))
+      .filter(n => passes(tags, v => v === 'none' ? !tagNames(n).length : tagNames(n).some(t => t.name.toLowerCase() === v)))
+      .filter(n => passes(epics, v => v === 'none' ? n.kind_slug !== 'epic' && !epicAbove(n, data) : epicAbove(n, data)?.id === v))
+      .filter(n => passes(costs, v => v === (costUnit(n).toLowerCase() || 'none')))
+      .filter(n => passes(releases, v => v === (release(n).toLowerCase() || 'none')))
+      .filter(n => !dateField || (dateOf(n) !== null && (!dateFrom || dateOf(n)! >= Date.parse(dateFrom)) && (!dateTo || dateOf(n)! < Date.parse(dateTo))))
+      .filter(n => !q || n.key.toLowerCase().includes(q) || n.title.toLowerCase().includes(q) || n.body.toLowerCase().includes(q))
+      .filter(n => {
+        if (!hide || query.get('hide_closed') !== 'true') return true
+        const choice = hideChoice(n.state, bucketOf(n))
+        return !choice || !hiddenStates(listParam(query, 'hide_states')).includes(choice)
+      })
+  }
   await page.route('**/api/**', async arrived => {
-    const request = arrived.request(), url = new URL(request.url()), path = url.pathname, method = request.method(), query = url.searchParams
+    const request = arrived.request(), url = new URL(request.url()), method = request.method(), query = url.searchParams
+    // Preferences use an encoded path segment; model the server's decoded key
+    // and keep Call.path consistent with the fixture's logical preference keys.
+    const path = url.pathname.startsWith('/api/preferences/')
+      ? `/api/preferences/${decodeURIComponent(url.pathname.slice('/api/preferences/'.length))}`
+      : url.pathname
     const held = options.hold?.({ path, method, query })
     const route = held ? heldRoute(arrived, held) : arrived
     let body: unknown = null
     try { body = request.postDataJSON() } catch { body = request.postData() }
     calls.push({ path, method, query, body, headers: request.headers() })
+    const personStepNode = /^\/api\/nodes\/([^/]+)\/person-steps$/.exec(path)
+    if (personStepNode && method === 'GET') {
+      const node = data.nodes.find(n => n.id === personStepNode[1]), completion = node?.fields.human_check_completed as { text?: string } | undefined
+      const label = node?.human_check ?? completion?.text
+      return route.fulfill({ json: { node_id: personStepNode[1], revision: node?.updated_at ?? '', steps: label && node ? [{ id: `human-${node.id}`, node_id: node.id, check_id: 'human', label, to_status: 'delivered', owner: me, checked: !node.human_check, active: !!node.human_check && node.state === 'done', can_tick: options.principalKind !== 'agent' && !options.readOnly, revision: node.updated_at, definition_id: null, definition_revision: null, created_at: node.created_at, ticket_key: node.key, ticket_title: node.title, project_id: node.project }] : [] } })
+    }
+    // AEON-1359: the lifeline and Delivery › Tickets (the AEON-1369 API). A node's lifeline is its current status since
+    // it was created, and no ticket finished a step yet, so both show their ready, empty state.
+    const lifelineNode = /^\/api\/nodes\/([^/]+)\/lifeline$/.exec(path)
+    if (lifelineNode && method === 'GET') {
+      const node = data.nodes.find(n => n.id === lifelineNode[1])
+      if (!node) return route.fulfill({ status: 404, json: { error: 'node not found' } })
+      const state = canonicalWorkStatus(node.state), closed = ['done', 'delivered', 'accepted', 'cancelled', 'archived'].includes(state)
+      return route.fulfill({ json: { node_id: node.id, generated_at: new Date().toISOString(), complete: true, inferred: false, gap_count: 0, initial_offset_seconds: 0,
+        visits: [{ status: state, from: node.created_at, to: closed ? node.created_at : null, seconds: closed ? 0 : Math.max(0, (Date.now() - Date.parse(node.created_at)) / 1000),
+          moved_by: { name: me.name, kind: 'person' }, next_status: null, ended_by: null, release: null, source: 'event', again: false, ongoing: !closed }] } })
+    }
+    const timingProject = /^\/api\/projects\/([^/]+)\/delivery\/tickets$/.exec(path)
+    if (timingProject && method === 'GET') {
+      const steps = ['created_to_live', 'new_to_picked_up', 'in_progress', 'qa_to_merged', 'done_to_live', 'live_to_accepted'].map(step => ({ step, n: 0, p50: null, p90: null, prev_n: 0, prev_p50: null, prev_p90: null }))
+      return route.fulfill({ json: { project_id: timingProject[1], generated_at: new Date().toISOString(), window: Number(query.get('window') ?? 90), final_status: 'delivered', steps, rework: 0,
+        coverage: { tickets: 0, complete: 0, inferred: 0, gaps: 0, since: null, partial: true }, buckets: [] } })
+    }
+    const entryNode = /^\/api\/nodes\/([^/]+)\/entry-checks$/.exec(path)
+    if (entryNode && method === 'GET') {
+      const node = data.nodes.find(n => n.id === entryNode[1])
+      const applicable = node?.fields.hide_from_release_notes !== true && node?.fields.no_release_needed !== true
+      const issues = benefitIssues(node?.fields ?? {})
+      const check = { id: 'release_copy_set', label: 'Release text set (EN + DE)', condition: 'release_notes', applicable, passed: !issues.length, reason: issues.join('; '), can_tick: false }
+      const blocks = ['in_progress', 'qa', 'done'].map(to_status => ({ to_status, checks: options.entryChecks && to_status === 'done' ? [check] : [], total: options.entryChecks && to_status === 'done' && applicable ? 1 : 0, passed: options.entryChecks && to_status === 'done' && applicable && check.passed ? 1 : 0 }))
+      return route.fulfill({ json: { node_id: entryNode[1], revision: node?.updated_at ?? '', definition: options.entryChecks ? { id: 'definition', revision: node?.created_at, source: 'project', checks: { done: [{ id: 'release_copy_set' }] } } : null, blocks, entries: [], latest_refusal: null } })
+    }
+    if (path === '/api/me/theme' && method === 'GET') return route.fulfill({ json: { theme: defaultTheme, default_theme_id: defaultTheme.id, selected_theme_id: null, revision: 0, fallback_notice: null } })
+    if (path === '/api/themes' && method === 'GET') return route.fulfill({ json: { items: [defaultTheme], next_cursor: null } })
     if (path === '/api/status/help' && method === 'GET') return route.fulfill({ json: defaultStatusHelp() })
     // ---------- Preferences ----------
     const prefPath = /^\/api\/preferences\/([^/]+)$/.exec(path)
@@ -356,7 +506,7 @@ export async function mockWork(page: Page, data: Fixtures, options: MockOptions 
     if (path === '/api/views' && method === 'POST') {
       const input = body as Partial<MockView>
       if (!input.name?.trim()) return route.fulfill({ status: 400, json: { error: 'name is required' } })
-      const view = mockView({ id: `00000000-0000-4000-8000-${String(data.counter.next++).padStart(12, '0')}`, name: input.name.trim(), project_id: input.project_id ?? null, filters: input.filters ?? {}, sort_keys: input.sort_keys ?? [], group_by: input.group_by ?? 'none', columns: input.columns ?? [], shared: !!input.shared, created_at: new Date(now + calls.length * 1000).toISOString(), updated_at: new Date(now + calls.length * 1000).toISOString() })
+      const view = mockView({ id: `00000000-0000-4000-8000-${String(data.counter.next++).padStart(12, '0')}`, name: input.name.trim(), project_id: input.project_id ?? null, filters: input.filters ?? {}, sort_keys: input.sort_keys ?? [], group_by: input.group_by ?? 'none', mode: input.mode ?? 'list', columns: input.columns ?? [], shared: !!input.shared, created_at: new Date(now + calls.length * 1000).toISOString(), updated_at: new Date(now + calls.length * 1000).toISOString() })
       data.views.push(view)
       return route.fulfill({ status: 201, json: view })
     }
@@ -385,7 +535,6 @@ export async function mockWork(page: Page, data: Fixtures, options: MockOptions 
         // Per-node preconditions (AEON-326): changed since the list showed it.
         const seen = input.if_unmodified_since?.[id]
         if (seen && Date.parse(seen) !== Date.parse(node.updated_at)) { skipped.push({ id, key: node.key, reason: 'changed since you loaded it', code: 'conflict' }); continue }
-        if (input.parent_id && node.kind_slug === 'task' && data.nodes.find(n => n.id === input.parent_id)?.kind_slug === 'epic') { skipped.push({ id, key: node.key, reason: 'a task cannot sit under an epic' }); continue }
         const old = JSON.parse(JSON.stringify(node)) as MockNode
         const fields = { ...node.fields }
         if ('priority' in input) fields.priority = input.priority
@@ -423,7 +572,8 @@ export async function mockWork(page: Page, data: Fixtures, options: MockOptions 
     }
     if (path === '/api/me/permissions') return route.fulfill({ json: mockEffectivePermissions(options.readOnly ? 'viewer' : options.admin ? 'admin' : 'member', query.get('project_id') ?? undefined) })
     if (path === '/api/me') return route.fulfill({ json: { principal: { id: me.id, name: me.name, kind: options.principalKind ?? 'person', roles: options.readOnly ? ['viewer'] : options.admin ? ['admin'] : ['member'] }, tenant: { id: 't1', name: 'INSPR Studio' } } })
-    if (path === '/api/kinds') return route.fulfill({ json: { items: ['epic', 'ticket', 'task', 'project'].map(slug => ({ id: `k-${slug}`, slug, label: slug[0].toUpperCase() + slug.slice(1), short_prefix: slug.slice(0, 3).toUpperCase(), icon: slug, allowed_child_kinds: null, field_schema: {} })) } })
+    if (path === '/api/settings/work-vocabulary') return route.fulfill({ json: { revision: 0, leaf: { name: '', icon: '' }, levels: [] } })
+    if (path === '/api/kinds') return route.fulfill({ json: { items: ['work', 'epic', 'ticket', 'task', 'project'].map(slug => ({ id: `k-${slug}`, slug, label: slug[0].toUpperCase() + slug.slice(1), short_prefix: slug.slice(0, 3).toUpperCase(), icon: slug, allowed_child_kinds: null, field_schema: {} })) } })
     // Relations (U27): the server's refusals, in its words, for the picker to show.
     if (path === '/api/relations' && method === 'POST') {
       if (options.readOnly) return route.fulfill({ status: 403, json: { code: 'forbidden', message: 'forbidden' } })
@@ -530,14 +680,28 @@ export async function mockWork(page: Page, data: Fixtures, options: MockOptions 
       if (options.failProjects) return route.fulfill({ status: 503, json: { error: 'Projects are resting' } })
       const archived = query.get('include_archived') === 'true'
       return route.fulfill({ json: { items: data.projects.filter(p => archived || p.state !== 'archived').map(p => {
-        const work = data.nodes.filter(n => n.project === p.id && ['ticket', 'task', 'epic'].includes(n.kind_slug))
-        const tally = { open: 0, in_progress: 0, done: 0, cancelled: 0 }
+        const work = data.nodes.filter(n => n.project === p.id && ['work', 'ticket', 'task', 'epic'].includes(n.kind_slug))
+        const tally = { open: 0, in_progress: 0, done: 0, cancelled: 0, archived: 0 }
+        const statusCounts = new Map<string, { state: string; bucket: ReturnType<typeof workBucket>; count: number }>()
         for (const node of work) {
-          const bucket = workBucket(node.state)
-          if (bucket !== 'archived') tally[bucket]++
+          const bucket = bucketOf(node)
+          tally[bucket]++
+          const state = canonicalWorkStatus(node.state)
+          const key = `${state}:${bucket}`, previous = statusCounts.get(key)
+          statusCounts.set(key, { state, bucket, count: (previous?.count ?? 0) + 1 })
         }
-        return { id: p.id, key: p.key, title: p.title, state: p.state, ...tally, total: work.length, last_activity: p.last, people: (p.id === 'p-pharos' ? [mira, me] : p.id === 'p-aeon' ? [me] : []).map(person => ({ ...data.people.find(x => x.id === person.id) ?? person, kind: 'person' })) }
+        const { archived: archivedCount, ...counts } = tally
+        return { id: p.id, key: p.key, title: p.title, state: p.state, ...counts, archived_count: archivedCount, status_counts: [...statusCounts.values()], status_counts_truncated: false, total: work.length, last_activity: p.last, people: (p.id === 'p-pharos' ? [mira, me] : p.id === 'p-aeon' ? [me] : []).map(person => ({ ...data.people.find(x => x.id === person.id) ?? person, kind: 'person' })) }
       }) } })
+    }
+    // ---------- View figures (AEON-1368): every matching row, Hide closed, sort and paging ignored ----------
+    const figuresFor = /^\/api\/projects\/([^/]+)\/figures$/.exec(path)
+    if (figuresFor && method === 'GET') {
+      if (!data.projects.some(p => p.id === figuresFor[1])) return route.fulfill({ status: 404, json: { error: 'project not found' } })
+      const within = new URLSearchParams(query)
+      if (!within.get('within')) within.set('within', figuresFor[1])
+      if (!within.get('kind')) within.set('kind', 'work,ticket,task,epic')
+      return route.fulfill({ json: mockFigures(data, figuresFor[1], matching(within, false), within, bucketOf) })
     }
     if (path === '/api/nodes' && method === 'GET') {
       const kinds = listParam(query, 'kind')
@@ -545,36 +709,9 @@ export async function mockWork(page: Page, data: Fixtures, options: MockOptions 
       if (options.failList) return route.fulfill({ status: 503, json: { error: 'The list is resting' } })
       if (options.delayList) await new Promise(resolve => setTimeout(resolve, options.delayList))
       if (options.delayChildren && query.get('parent_id') && !data.projects.some(p => p.id === query.get('parent_id'))) await new Promise(resolve => setTimeout(resolve, options.delayChildren))
-      const parentFilter = query.get('parent_id')
-      const within = query.get('within'), states = listParam(query, 'state'), priorities = listParam(query, 'priority'), assignees = listParam(query, 'assignee'), q = (query.get('q') ?? '').toLowerCase()
-      // within: a project, or any node's subtree; parent_id: direct children only.
-      const inside = (n: MockNode) => {
-        if (!within) return true
-        if (data.projects.some(p => p.id === within)) return n.project === within
-        for (let parent = n.parent_id; parent; parent = data.nodes.find(x => x.id === parent)?.parent_id ?? null) if (parent === within) return true
-        return false
-      }
-      const tags = listParam(query, 'tag').map(v => v.toLowerCase()), epics = listParam(query, 'epic'), costs = listParam(query, 'cost_unit').map(v => v.toLowerCase()), releases = listParam(query, 'release').map(v => v.toLowerCase())
-      const dateField = query.get('date_field'), dateFrom = query.get('date_from'), dateTo = query.get('date_to')
-      const dateOf = (n: MockNode): number | null => {
-        const raw = dateField === 'created' ? n.created_at : dateField === 'updated' ? n.updated_at : dateField === 'start' ? n.fields.start_date : dateField === 'end' ? n.fields.end_date : n.fields.accepted_at
-        return typeof raw === 'string' && !Number.isNaN(Date.parse(raw)) ? Date.parse(raw) : null
-      }
-      // ids (AEON-326): only those nodes, every other filter still applied.
-      const onlyIds = listParam(query, 'ids')
-      let rows = data.nodes.filter(n => inside(n) && (!parentFilter || n.parent_id === parentFilter) && (!kinds.length || kinds.includes(n.kind_slug)))
-        .filter(n => !onlyIds.length || onlyIds.includes(n.id))
-        .filter(n => passes(states, v => v === n.state))
-        .filter(n => passes(listParam(query, 'human_check'), v => v === (n.human_check?.trim() ? 'pending' : 'none')))
-        .filter(n => passes(priorities, v => v === (typeof n.fields.priority === 'string' ? n.fields.priority : 'none')))
-        .filter(n => passes(assignees, v => v === (typeof n.fields.assignee === 'string' ? n.fields.assignee : 'none')))
-        .filter(n => passes(tags, v => v === 'none' ? !tagNames(n).length : tagNames(n).some(t => t.name.toLowerCase() === v)))
-        .filter(n => passes(epics, v => v === 'none' ? n.kind_slug !== 'epic' && !epicAbove(n, data) : epicAbove(n, data)?.id === v))
-        .filter(n => passes(costs, v => v === (costUnit(n).toLowerCase() || 'none')))
-        .filter(n => passes(releases, v => v === (release(n).toLowerCase() || 'none')))
-        .filter(n => !dateField || (dateOf(n) !== null && (!dateFrom || dateOf(n)! >= Date.parse(dateFrom)) && (!dateTo || dateOf(n)! < Date.parse(dateTo))))
-        .filter(n => !q || n.key.toLowerCase().includes(q) || n.title.toLowerCase().includes(q) || n.body.toLowerCase().includes(q))
-        .filter(n => query.get('hide_closed') !== 'true' || !['done', 'cancelled', 'archived'].includes(workBucket(n.state)))
+      let rows = matching(query)
+      const workParents = new Set(data.nodes.filter(n => ['work', 'epic', 'ticket', 'task'].includes(n.kind_slug)).map(n => n.parent_id))
+      const levelOf = (n: MockNode) => (n.is_leaf ?? !workParents.has(n.id)) ? 'leaf' : String(n.depth ?? 1)
       const sort = (query.get('sort') ?? 'position').split(',')
       rows = [...rows].sort((a, b) => {
         for (const raw of sort) {
@@ -620,13 +757,14 @@ export async function mockWork(page: Page, data: Fixtures, options: MockOptions 
       for (const facet of listParam(query, 'facets')) {
         facets[facet] = {}
         for (const n of rows) {
-          const values = facet === 'human_check' ? [n.human_check?.trim() ? 'pending' : 'none'] : facet === 'tag' ? (tagNames(n).length ? tagNames(n).map(t => t.name) : ['none'])
+          const waiting = n.person_waiting ?? (n.human_check?.trim() && n.state === 'done' ? [{ owner: me }] : [])
+          const values = facet === 'person_waiting' ? (waiting.length ? ['pending', ...(waiting.some(step => step.owner.id === me.id) ? ['mine'] : [])] : ['none']) : facet === 'level' ? [levelOf(n)] : facet === 'human_check' ? [n.human_check?.trim() ? 'pending' : 'none'] : facet === 'tag' ? (tagNames(n).length ? tagNames(n).map(t => t.name) : ['none'])
             : facet === 'cost_unit' ? [costUnit(n) || 'none'] : facet === 'release' ? [release(n) || 'none']
             : [facet === 'state' ? n.state : facet === 'kind' ? n.kind_slug : facet === 'priority' ? (typeof n.fields.priority === 'string' ? n.fields.priority : 'none') : (typeof n.fields.assignee === 'string' ? n.fields.assignee : 'none')]
           for (const value of values) facets[facet][value] = (facets[facet][value] ?? 0) + 1
         }
       }
-      const limit = Number(query.get('limit') ?? 50), offset = Number((query.get('cursor') ?? 'o:0').slice(2))
+      const limit = Math.min(Number(query.get('limit') ?? 50), options.listPageSize ?? Infinity), offset = Number((query.get('cursor') ?? 'o:0').slice(2))
       const pageRows = rows.slice(offset, offset + limit)
       return route.fulfill({ json: { items: pageRows.map(n => item(n, data, options.liveStatus === 403, !options.readOnly && options.liveStatus !== 403)), next_cursor: offset + limit < rows.length ? `o:${offset + limit}` : null, ...(Object.keys(facets).length ? { facets } : {}) } })
     }
@@ -666,7 +804,7 @@ export async function mockWork(page: Page, data: Fixtures, options: MockOptions 
         if (options.conflictOn === id && !node.title.endsWith('(edited elsewhere)')) { node.updated_at = forward(node.updated_at, now + 30_000); node.title = `${node.title} (edited elsewhere)` }
         const expected = request.headers()['if-unmodified-since']
         if (expected && expected !== node.updated_at) return route.fulfill({ status: 412, json: { error: 'node has changed' } })
-        const patch = body as { state?: string; fields?: Record<string, unknown>; human_check?: string | null }
+        const patch = body as { state?: string; fields?: Record<string, unknown>; human_check?: string | null; override_reason?: string }
         if (options.principalKind === 'agent' && 'human_check' in patch) {
           if (patch.human_check === null && node.human_check) return route.fulfill({ status: 403, json: { error: 'only a person can mark a human check checked' } })
           if (patch.human_check && node.fields.human_check_completed) return route.fulfill({ status: 403, json: { error: 'only a person can undo a human check' } })
@@ -674,7 +812,11 @@ export async function mockWork(page: Page, data: Fixtures, options: MockOptions 
         const nextState = typeof patch.state === 'string' ? patch.state : node.state
         const nextFields = patch.fields && typeof patch.fields === 'object' && !Array.isArray(patch.fields) ? patch.fields : node.fields
         const refusal = completionRefusal(node, nextState, nextFields)
-        if (refusal) return route.fulfill({ status: 422, json: refusal })
+        if (options.entryChecks) {
+          if (refusal && nextFields.hide_from_release_notes !== true && nextFields.no_release_needed !== true && (options.principalKind === 'agent' || typeof patch.override_reason !== 'string' || !patch.override_reason.trim())) {
+            return route.fulfill({ status: 409, json: { error: 'entry_checks_failed', code: 'entry_checks_failed', to_status: 'done', failed: [{ id: 'release_copy_set', label: 'Release text set (EN + DE)', applicable: true, passed: false, reason: benefitIssues(nextFields).join('; '), can_tick: false }], override_allowed: options.principalKind !== 'agent' } })
+          }
+        } else if (refusal) return route.fulfill({ status: 422, json: refusal })
         if ('human_check' in patch) {
           if (patch.human_check === null && node.human_check) nextFields.human_check_completed = { text: node.human_check, by: me.id, at: new Date(now).toISOString() }
           else if (patch.human_check) delete nextFields.human_check_completed
@@ -718,6 +860,76 @@ function loopPath(relations: { source_node_id: string; target_node_id: string; t
 }
 
 // A route whose answer waits: computed now, fulfilled once the hold settles.
+// GET /api/projects/{id}/figures over the fixture (the AEON-1368 shape): leaves only, Closed out of the hours, parents never
+// counted twice. Fixtures have no event log, so "marks releases" means a ticket in the project is Delivered or Accepted.
+const FILTER_PARAMS = ['q', 'state', 'work_state', 'work_bucket', 'priority', 'assignee', 'tag', 'epic', 'cost_unit', 'release', 'human_check', 'shape', 'depth', 'level', 'date_field', 'ids', 'parent_id']
+function mockFigures(data: Fixtures, project: string, rows: MockNode[], query: URLSearchParams, bucketOf: (node: MockNode) => ReturnType<typeof workBucket>) {
+  const isWork = (n: MockNode) => ['work', 'ticket', 'task', 'epic'].includes(n.kind_slug)
+  const parents = new Set(data.nodes.filter(isWork).map(n => n.parent_id))
+  const isLeaf = (n: MockNode) => isWork(n) && (n.is_leaf ?? !parents.has(n.id))
+  const hoursOf = (n: MockNode) => typeof n.fields.estimate_hours === 'number' && n.fields.estimate_hours > 0 && n.fields.estimate_hours <= 200 ? n.fields.estimate_hours : null
+  const leaves = rows.filter(isLeaf)
+  const closed = (n: MockNode) => ['cancelled', 'archived'].includes(bucketOf(n))
+  const marks = data.nodes.some(n => n.project === project && ['delivered', 'accepted'].includes(canonicalWorkStatus(n.state)))
+  const group = () => ({ hours: 0, tickets: 0, statuses: {} as Record<string, number> })
+  const groups = { completed: group(), done_not_live: group(), in_progress: group(), open: group() }
+  let total = 0, without = 0, openEstimated = 0
+  const est: number[] = []
+  for (const n of leaves.filter(n => !closed(n))) {
+    const status = canonicalWorkStatus(n.state), bucket = bucketOf(n)
+    const g = bucket === 'done' ? (['delivered', 'accepted'].includes(status) || !marks ? groups.completed : groups.done_not_live) : bucket === 'in_progress' ? groups.in_progress : groups.open
+    g.tickets++; g.statuses[status] = (g.statuses[status] ?? 0) + 1
+    const h = hoursOf(n)
+    if (h == null) without++
+    else { g.hours += h; total += h; est.push(h); if (bucket === 'open' || bucket === 'in_progress') openEstimated++ }
+  }
+  const stats = (values: number[]) => {
+    const sorted = [...values].sort((a, b) => a - b), mid = Math.floor(sorted.length / 2)
+    return { count: values.length, total: values.reduce((a, b) => a + b, 0), median: sorted.length ? (sorted.length % 2 ? sorted[mid] : (sorted[mid - 1] + sorted[mid]) / 2) : null, average: values.length ? values.reduce((a, b) => a + b, 0) / values.length : null }
+  }
+  const counted = (label: (n: MockNode) => string, top = 0) => {
+    const counts = new Map<string, number>()
+    let missing = 0
+    for (const n of leaves) { const v = label(n); if (!v || v === 'none') missing++; else counts.set(v, (counts.get(v) ?? 0) + 1) }
+    const values = [...counts].sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0])).map(([value, count]) => ({ value, count, hours: 0 }))
+    const shown = top ? values.slice(0, top) : values
+    return { rows: leaves.length, included: leaves.length, without_value: missing, others: values.slice(shown.length).reduce((a, v) => a + v.count, 0), partial: false, values: shown }
+  }
+  const all = { rows: rows.length, included: rows.length, without_value: 0, others: 0, partial: false }
+  const dates = (field: 'created_at' | 'updated_at', staleDays: number) => {
+    const times = rows.map(n => Date.parse(n[field])).sort((a, b) => a - b)
+    const clock = Date.now()
+    return { ...all, from: times.length ? new Date(times[0]).toISOString() : undefined, to: times.length ? new Date(times[times.length - 1]).toISOString() : undefined,
+      median_age_seconds: stats(times.map(t => (clock - t) / 1000)).median ?? undefined,
+      stale: rows.filter(n => ['open', 'in_progress'].includes(bucketOf(n)) && clock - Date.parse(n[field]) >= staleDays * 86_400_000).length }
+  }
+  const keys = rows.map(n => n.key).sort((a, b) => Number(a.split('-').pop()) - Number(b.split('-').pop()))
+  const work = leaves.filter(n => !closed(n))
+  const narrowed = FILTER_PARAMS.some(name => (query.get(name) ?? '').trim() !== '')
+  return {
+    view_key: [...query].filter(([name]) => FILTER_PARAMS.includes(name)).map(([name, value]) => `${name}=${value}`).sort().join('&'), computed_at: new Date().toISOString(),
+    scope: { kind: narrowed ? 'this_view' : 'whole_project', rows: rows.length, parents: rows.length - leaves.length, leaves: leaves.length, project_leaves: data.nodes.filter(n => n.project === project && isLeaf(n)).length, closed: leaves.filter(closed).length },
+    marks_releases: marks, total_hours: total, approximate: total > 0, without_estimate: without, open_estimated_leaves: openEstimated, groups,
+    columns: {
+      key: { ...all, parents: rows.length - leaves.length, leaves: leaves.length, first_key: keys[0], last_key: keys[keys.length - 1] },
+      status: counted(n => canonicalWorkStatus(n.state)),
+      priority: counted(n => typeof n.fields.priority === 'string' ? n.fields.priority : ''),
+      assignee: { ...counted(n => personName(data, n.fields.assignee), 3), values: counted(n => personName(data, n.fields.assignee), 3).values.map(v => ({ ...v, kind: 'person' })) },
+      epic: counted(n => epicAbove(n, data)?.key ?? '', 2),
+      release: counted(release, 2),
+      suggested_release: counted(n => labelOf(n.fields.suggested_release), 2),
+      tag: counted(n => tagNames(n)[0]?.name ?? '', 5),
+      cost_unit: counted(costUnit, 3),
+      model: counted(() => '', 3),
+      estimate: { rows: leaves.length, included: work.length, without_value: without, others: 0, partial: false, numbers: stats(est) },
+      tokens: { rows: leaves.length, included: leaves.length, without_value: leaves.length, others: 0, partial: false, measured: stats([]), estimated: stats([]), typical: { count: 0, median: null, average: null, approximate: false } },
+      eta_ready: { rows: leaves.length, included: leaves.length, without_value: leaves.filter(n => !n.eta?.eta_ready_at).length, others: 0, partial: false, running: 0 },
+      progress: (() => { const readings = work.map(n => n.eta?.progress_pct).filter((v): v is number => typeof v === 'number'); return { rows: leaves.length, included: work.length, without_value: work.length - readings.length, others: 0, partial: false, numbers: stats(readings), reading_count: readings.length } })(),
+      created_at: dates('created_at', 14),
+      updated_at: dates('updated_at', 7),
+    },
+  }
+}
 function heldRoute(route: Route, held: { until: Promise<unknown>; computed?: () => void }): Route {
   return {
     request: () => route.request(),

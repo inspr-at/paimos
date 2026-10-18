@@ -43,12 +43,18 @@ const kind = computed(() => view.value?.text && (props.labelled || view.value.ki
 
 <style scoped>
 .eta-cell { display: inline-flex; align-items: center; gap: 6px; min-width: 0; max-width: 100%; color: var(--ink); font-size: 12.5px; line-height: 18px; font-variant-numeric: tabular-nums; white-space: nowrap; }
-.eta-cell.end { justify-content: flex-end; }
+/* End-aligned estimates take their text width, and may use the column's 8px
+   inset when the platform font is a few pixels wider than the content box.
+   The right edge stays on the header. Longer values still ellipsize and
+   remain readable in the tip. */
+.eta-cell.end { justify-content: flex-end; flex: 0 0 auto; width: max-content; max-width: calc(100% + 8px); }
 .main { display: inline-flex; align-items: center; gap: 5px; min-width: 0; }
+.eta-cell.end .main,
+.eta-cell.end .when { max-width: 100%; }
 .kind { flex: none; font-size: 11.5px; color: var(--ink-3); }
 .when { display: inline-grid; min-width: 0; }
 .when > span { grid-area: 1 / 1; overflow: hidden; text-overflow: ellipsis; }
-.eta-cell.end .when > span { text-align: right; }
+.eta-cell.end .when > span { width: max-content; max-width: 100%; min-width: 0; justify-self: end; text-align: right; }
 .hover { visibility: hidden; }
 .eta-cell:hover .when:has(.hover) .shown { visibility: hidden; }
 .eta-cell:hover .hover { visibility: visible; }

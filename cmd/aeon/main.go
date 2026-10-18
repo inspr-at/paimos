@@ -29,7 +29,14 @@ func main() {
 	if len(os.Args) > 1 && os.Args[1] == "serve" {
 		if err := serve(); err != nil {
 			fmt.Fprintln(os.Stderr, "serve:", err)
-			os.Exit(1)
+			os.Exit(serverErrorExitCode(err))
+		}
+		return
+	}
+	if len(os.Args) > 1 && os.Args[1] == "migrate" {
+		if err := migrateCommand(os.Args[2:], os.Stdout); err != nil {
+			fmt.Fprintln(os.Stderr, "migrate:", err)
+			os.Exit(serverErrorExitCode(err))
 		}
 		return
 	}
@@ -121,13 +128,6 @@ func main() {
 	if len(os.Args) > 1 && os.Args[1] == "tenant" {
 		if err := tenantCommand(os.Args[2:], os.Stdout); err != nil {
 			fmt.Fprintln(os.Stderr, "tenant:", err)
-			os.Exit(1)
-		}
-		return
-	}
-	if len(os.Args) > 1 && os.Args[1] == "journey" {
-		if err := journeyCommand(os.Args[2:], os.Stdout); err != nil {
-			fmt.Fprintln(os.Stderr, "journey:", err)
 			os.Exit(1)
 		}
 		return

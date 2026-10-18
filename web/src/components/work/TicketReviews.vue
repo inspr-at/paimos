@@ -2,7 +2,7 @@
 <script setup lang="ts">
 import AppIcon from '../AppIcon.vue'
 import { computed, onBeforeUnmount, ref, watch } from 'vue'
-import { can, onAccessChange } from '../../lib/authz'
+import { can, onAccessRevalidate } from '../../lib/authz'
 import { familyName, listReviews, requestReview, reviewLabel, reviewSkips, reviewUsage, type ReviewFamily, type ReviewRequest, type TicketReview } from '../../lib/reviews'
 
 const props = defineProps<{ nodeId: string; projectId: string }>()
@@ -49,7 +49,7 @@ function reset() {
 }
 watch(() => [props.nodeId, read.value], () => { reset(); void load() }, { immediate: true })
 const poll = setInterval(() => { if (reviews.value.some(r => ['queued', 'starting', 'running', 'waiting'].includes(r.status))) void load() }, 15_000)
-const stopAccess = onAccessChange(change => { if (change === 'reset') reset(); else void load() })
+const stopAccess = onAccessRevalidate({ reset, refresh: () => { void load() } })
 onBeforeUnmount(() => { disposed = true; generation++; abort?.abort(); submitAbort?.abort(); clearInterval(poll); stopAccess() })
 
 async function submit() {

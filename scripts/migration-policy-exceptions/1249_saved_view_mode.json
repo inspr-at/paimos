@@ -1,0 +1,11 @@
+{
+  "schema": "aeon.migration-policy-exceptions.v1",
+  "exceptions": [
+    {
+      "file": "1249_saved_view_mode.sql",
+      "sha256": "d8a3ce208229cd779c2cc740e5ddedfae51981ed66c3eccb83a51c75883f136a",
+      "ticket": "AEON-718",
+      "reason": "Markus explicitly decided to soft-delete legacy views with columns = '{}' on every instance, including PMA. The tenant-loop DO block is conservatively outside the expansion allowlist. Only live views with exactly empty columns are retired, with one complete view.deleted snapshot per view; rows and ids remain restorable. Re-running the data repair emits no duplicate deletion events. Mode is additive with list as its default. Exact bytes require the lead's consolidated review and release gates; this exception grants no push, merge or deployment authority."
+    }
+  ]
+}

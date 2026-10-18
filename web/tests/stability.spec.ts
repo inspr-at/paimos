@@ -25,15 +25,22 @@ const world = {
 // Sums every layout shift without recent input from the first paint on.
 async function watchShifts(page: Page) {
   await page.addInitScript(() => {
-    const w = window as unknown as { __cls: number; __shifts: string[] }
+    const w = window as unknown as { __cls: number; __shifts: string[]; __clsObserver?: PerformanceObserver }
+    // Repeated viewport/theme navigations retain init scripts. Install one
+    // observer per document so each shift contributes exactly once.
+    if (w.__clsObserver) return
     w.__cls = 0; w.__shifts = []
-    new PerformanceObserver(list => {
-      for (const entry of list.getEntries() as unknown as { value: number; hadRecentInput: boolean; sources?: { node: Node | null }[] }[]) {
+    w.__clsObserver = new PerformanceObserver(list => {
+      for (const entry of list.getEntries() as unknown as { value: number; hadRecentInput: boolean; sources?: { node: Node | null; previousRect: DOMRectReadOnly; currentRect: DOMRectReadOnly }[] }[]) {
         if (entry.hadRecentInput) continue
         w.__cls += entry.value
-        w.__shifts.push(`${entry.value.toFixed(3)} ${(entry.sources ?? []).map(s => (s.node as Element | null)?.className ?? '?').join(', ')}`)
+        w.__shifts.push(`${entry.value.toFixed(3)} ${(entry.sources ?? []).map(s => {
+          const rect = (r: DOMRectReadOnly) => [r.x, r.y, r.width, r.height].map(n => Math.round(n))
+          return `${(s.node as Element | null)?.className ?? '?'} ${JSON.stringify(rect(s.previousRect))}→${JSON.stringify(rect(s.currentRect))}`
+        }).join(', ')}`)
       }
-    }).observe({ type: 'layout-shift', buffered: true })
+    })
+    w.__clsObserver.observe({ type: 'layout-shift', buffered: true })
   })
 }
 async function settledShift(page: Page) {
@@ -44,9 +51,11 @@ async function expectStill(page: Page) {
   const { cls, shifts } = await settledShift(page)
   expect(cls, shifts.join('\n')).toBeLessThan(0.05)
 }
-async function base(page: Page) {
+async function base(page: Page, theme: 'light' | 'dark' = 'light') {
   await watchShifts(page)
-  await mockWork(page, fixtures())
+  const work = fixtures()
+  work.preferences.theme = { choice: theme }
+  await mockWork(page, work)
   await mockAgents(page, agentData(world))
   await mockSettings(page, settingsData({ photo: true }))
   await mockReleases(page, releaseHistory())
@@ -67,15 +76,31 @@ for (const width of [390, 1440]) {
       await base(page)
       await page.goto('/agents')
       await expect(page.locator('.agents-page [data-row^="s:"]').first()).toBeVisible()
-      await expect(page.getByRole('list', { name: 'Requests waiting for you' })).toBeVisible()
+      // AEON-569 / #458 and AEON-1209 / #586 route decisions to the Desk.
+      await expect(page.getByRole('link', { name: /Decision Desk/ }).first()).toBeVisible()
       await expectStill(page)
     })
 
     test('an open session holds still while runs and messages land', async ({ page }) => {
-      await base(page)
-      await page.goto('/agents/5e000000-0000-4000-8000-000000000001')
-      await expect(page.locator('.session-panel .facts')).toBeVisible()
-      await expectStill(page)
+      for (const sampleWidth of width === 390 ? [390, 1024] : [1440]) for (const theme of ['light', 'dark'] as const) {
+        await page.setViewportSize({ width: sampleWidth, height: sampleWidth === 390 ? 844 : 900 })
+        await base(page, theme)
+        let release!: () => void, started!: () => void
+        const held = new Promise<void>(resolve => { release = resolve })
+        const requested = new Promise<void>(resolve => { started = resolve })
+        await page.route('**/api/me/permissions?project_id=p-pharos', async route => { started(); await held; await route.fallback() })
+        await page.goto('/agents/5e000000-0000-4000-8000-000000000001')
+        await requested
+        // A slow project grant cannot paint a partial panel and add its actions later.
+        await expect(page.getByRole('complementary', { name: 'Session details' })).toHaveCount(0)
+        release()
+        await expect(page.locator('.session-panel .facts')).toBeVisible()
+        // AEON-1309 / #678 keeps the session's actions behind More session actions in the panel head.
+        await expect(page.getByRole('complementary', { name: 'Session details' }).getByRole('group', { name: 'Panel actions' })
+          .getByRole('button', { name: 'More session actions', exact: true })).toBeVisible()
+        await expectStill(page)
+        await page.screenshot({ path: test.info().outputPath(`session-loaded-${sampleWidth}-${theme}.png`) })
+      }
     })
 
     test('the profile loads in the shape of its form', async ({ page }) => {
@@ -113,14 +138,18 @@ for (const width of [390, 1440]) {
 
 test('the approval queue never says nothing waits before it knows', async ({ page }) => {
   await base(page)
-  let release!: () => void
+  let release!: () => void, arrived!: () => void
   const held = new Promise<void>(resolve => { release = resolve })
-  await page.route('**/api/approvals?**', async route => { await held; await route.fallback() })
+  const started = new Promise<void>(resolve => { arrived = resolve })
+  // AEON-569 / #458 and AEON-1209 / #586 expose the canonical Desk aggregate.
+  await page.route('**/api/decision-desk/projection?**', async route => { arrived(); await held; await route.fallback() })
   await page.goto('/agents')
-  // Needs you shows only once it knows something waits (AEON-299): no early card, no all-clear.
-  await expect(page.getByRole('heading', { name: 'Agents', level: 1 })).toBeVisible()
-  await expect(page.getByRole('region', { name: 'Needs you' })).toHaveCount(0)
-  await expect(page.getByText('Nothing waits on you')).toHaveCount(0)
-  release()
-  await expect(page.getByRole('list', { name: 'Requests waiting for you' })).toBeVisible()
+  const desk = page.getByRole('group', { name: 'Decision Desk', exact: true }).getByRole('link')
+  try {
+    await started
+    await expect(page.getByRole('heading', { name: 'Agents', level: 1 })).toBeVisible()
+    await expect(desk).toHaveAccessibleName('Decision Desk, count unavailable')
+    await expect(page.getByText('Nothing waits on you')).toHaveCount(0)
+  } finally { release() }
+  await expect(desk).toHaveAccessibleName('Decision Desk, 4 open')
 })

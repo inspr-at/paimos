@@ -4,10 +4,14 @@ package agentaccounts
 import (
 	"context"
 	"encoding/json"
+	"errors"
+	"fmt"
 	"io"
 	"math"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -18,6 +22,204 @@ import (
 	"github.com/inspr-at/paimos/internal/tenant"
 	"github.com/jackc/pgx/v5"
 )
+
+// Risk: response privacy must see uncommitted ownership changes inside an
+// atomic caller, without escaping its rollback or bypassing usage redaction.
+func TestAccountPrivacyInTransaction(t *testing.T) {
+	now := time.Date(2026, 10, 19, 12, 0, 0, 0, time.UTC)
+	f := limitWorldAt(t, "privacy-transaction", 1, now)
+	other := addPrincipal(t, f.admin.TenantID, "person", "New owner", []string{"admin"})
+	callStatus(t, f.mod, &f.admin, "", "POST", "/api/agent-accounts/"+f.account.ID+"/windows", windowBody(now, now.Add(time.Hour), "requests", 100, "unrestricted"), http.StatusCreated, nil)
+	beforeEvents := scalar(t, f.admin, `SELECT count(*) FROM events`)
+	mux := http.NewServeMux()
+	f.mod.Mount(mux)
+	rollback := errors.New("rollback privacy transaction")
+	err := db.InTransaction(t.Context(), appPool, func(ctx context.Context) error {
+		if err := db.InTenant(dbtest.Seed(ctx), appPool, f.admin.TenantID, func(tx pgx.Tx) error {
+			_, err := tx.Exec(ctx, `UPDATE agent_accounts SET owner_person_id=$2 WHERE id=$1`, f.account.ID, other.ID)
+			return err
+		}); err != nil {
+			return err
+		}
+		for _, reader := range []tenant.Principal{other, f.admin} {
+			r := httptest.NewRequest(http.MethodPatch, "/api/agent-accounts/"+f.account.ID, strings.NewReader(`{"state":"draining"}`)).WithContext(tenant.WithPrincipal(ctx, reader))
+			out := httptest.NewRecorder()
+			mux.ServeHTTP(out, r)
+			if out.Code != http.StatusOK {
+				return fmt.Errorf("transactional PATCH for %s: %d %s", reader.Name, out.Code, out.Body.String())
+			}
+			var got struct {
+				Account
+				DetailsRedacted bool `json:"details_redacted"`
+			}
+			if err := json.Unmarshal(out.Body.Bytes(), &got); err != nil {
+				return err
+			}
+			if got.ID != f.account.ID || got.State != "draining" || got.OwnerPersonID == nil || *got.OwnerPersonID != other.ID {
+				return fmt.Errorf("transactional response lost updated account: %+v", got)
+			}
+			redacted := reader.ID != other.ID
+			if got.DetailsRedacted != redacted || redacted && len(got.Windows) != 0 || !redacted && len(got.Windows) != 1 {
+				return fmt.Errorf("privacy used stale ownership for %s: redacted=%t windows=%d", reader.Name, got.DetailsRedacted, len(got.Windows))
+			}
+		}
+		return rollback
+	})
+	if !errors.Is(err, rollback) {
+		t.Fatalf("atomic privacy response: %v", err)
+	}
+	if err := db.InTenant(dbtest.Seed(t.Context()), appPool, f.admin.TenantID, func(tx pgx.Tx) error {
+		got, err := getAccount(t.Context(), tx, f.account.ID)
+		if err != nil {
+			return err
+		}
+		if got.State != f.account.State || got.OwnerPersonID == nil || *got.OwnerPersonID != f.admin.ID || len(got.Windows) != 1 {
+			return fmt.Errorf("privacy transaction escaped rollback: %+v", got)
+		}
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if after := scalar(t, f.admin, `SELECT count(*) FROM events`); after != beforeEvents {
+		t.Fatalf("privacy transaction retained events after rollback: before=%d after=%d", beforeEvents, after)
+	}
+}
+
+func TestCapacityProjectionBatchAndGolden(t *testing.T) {
+	now := time.Date(2026, 10, 19, 12, 0, 0, 0, time.UTC)
+	f := limitWorldAt(t, "capacity-batch", 3, now)
+	seed := func(a Account, index int) {
+		t.Helper()
+		f2 := f
+		f2.account = a
+		f2.report(t, 30, now.Add(-time.Minute), now.Add(time.Duration(80+index)*time.Hour))
+		unit := []string{"percent", "runs", "tokens", "requests", "cost_micros"}[index%5]
+		amount := int64(80)
+		if unit == "tokens" {
+			amount = 200_000
+		}
+		if unit == "cost_micros" {
+			amount = 2_000_000
+		}
+		seedExistingLimit(t, f2, amount, unit, "day", nil)
+	}
+	seed(f.account, 0)
+	project := func() ([]accountCapacity, dbtest.ReadWork) {
+		t.Helper()
+		var out []accountCapacity
+		var work dbtest.ReadWork
+		ctx := context.WithValue(tenant.WithPrincipal(t.Context(), f.admin), clockKey{}, now)
+		if err := db.InTenantReadSnapshot(ctx, appPool, f.admin.TenantID, func(tx pgx.Tx) error {
+			var err error
+			out, err = projectCapacity(ctx, dbtest.CountReads(tx, &work), f.admin.ID, nil, 0)
+			if err != nil {
+				return err
+			}
+			// Reservation readers are an independent oracle for the set-loaded
+			// projection: exercise each limit unit and every routing decision.
+			accounts, err := listAccounts(ctx, tx)
+			if err != nil {
+				return err
+			}
+			advice, err := routingAdvice(ctx, tx, accounts, "", runRow{Purpose: "managed"}, now)
+			if err != nil {
+				return err
+			}
+			for i, item := range out {
+				if encoded(t, item.Routing) != encoded(t, advice[item.AccountID]) {
+					t.Fatalf("batched routing differs from reservation readers: got %s want %s", encoded(t, item.Routing), encoded(t, advice[item.AccountID]))
+				}
+				limit, err := accountLimitUse(ctx, tx, accounts[i], now)
+				if err != nil {
+					return err
+				}
+				if encoded(t, item.Limit) != encoded(t, limit) {
+					t.Fatalf("batched %s limit differs: got %s want %s", limit.Unit, encoded(t, item.Limit), encoded(t, limit))
+				}
+				for _, window := range item.Windows {
+					pacing, known, err := readingPacing(ctx, tx, item.AccountID, window.Reading, now, item.Schedule)
+					if err != nil {
+						return err
+					}
+					if known != window.UsageTodayKnown || encoded(t, pacing) != encoded(t, window.Pacing) {
+						t.Fatal("batched pacing differs from reservation readers")
+					}
+				}
+			}
+			return nil
+		}); err != nil {
+			t.Fatal(err)
+		}
+		return out, work
+	}
+	one, small := project()
+	if len(one) != 1 || one[0].Routing == nil || one[0].Routing.Rank != 1 || one[0].Routing.AvailableSlots < 1 {
+		t.Fatalf("fixture must exercise live routing: %+v", one)
+	}
+	// Stable identities and audit timestamps leave every computed field in the
+	// golden, including pacing, limits, learning and routing advice.
+	one[0].AccountID = "account"
+	for i := range one[0].Contexts {
+		one[0].Contexts[i].ID = "context"
+	}
+	one[0].Limit.ID = "limit"
+	one[0].Limit.AccountID = "account"
+	one[0].Limit.CreatedAt = now
+	raw, err := json.MarshalIndent(one, "", "  ")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var canonical any
+	if err := json.Unmarshal(raw, &canonical); err != nil {
+		t.Fatal(err)
+	}
+	var normalize func(any) any
+	normalize = func(v any) any {
+		switch x := v.(type) {
+		case map[string]any:
+			for k, v := range x {
+				x[k] = normalize(v)
+			}
+		case []any:
+			for i, v := range x {
+				x[i] = normalize(v)
+			}
+		case string:
+			if at, err := time.Parse(time.RFC3339Nano, x); err == nil {
+				return at.UTC().Format(time.RFC3339Nano)
+			}
+		}
+		return v
+	}
+	raw, err = json.MarshalIndent(normalize(canonical), "", "  ")
+	if err != nil {
+		t.Fatal(err)
+	}
+	golden, err := os.ReadFile("testdata/capacity-projection.golden.json")
+	if err != nil || strings.TrimSpace(string(golden)) != string(raw) {
+		t.Errorf("capacity projection golden mismatch (%v):\n%s", err, raw)
+	}
+	for i := 1; i < 20; i++ {
+		var a Account
+		callStatus(t, f.mod, &f.runner, f.token, "POST", "/api/agent-accounts", fmt.Sprintf(`{"account_key":"batch-%d","harness":"codex","daemon_id":"daemon-a","label":"Batch","max_parallel_runs":3}`, i), 201, &a)
+		ownFixtureAccount(t, f.admin, &a)
+		callStatus(t, f.mod, &f.runner, f.token, "POST", "/api/agent-accounts/"+a.ID+"/probe", `{"daemon_id":"daemon-a","daemon_generation":"g1","available":true}`, 200, nil)
+		s := one[0].Schedule
+		seedExistingSchedule(t, f.admin, scheduleOverride{Scope: "account", AccountID: a.ID, Schedule: &s})
+		seed(a, i)
+	}
+	all, large := project()
+	if len(all) != 20 {
+		t.Fatalf("lost accounts: %d", len(all))
+	}
+	if large.Statements != small.Statements {
+		t.Errorf("capacity statements grew with accounts: 1=%d, 20=%d", small.Statements, large.Statements)
+	}
+	if large.Rows > 30*small.Rows+100 {
+		t.Errorf("capacity rows grew beyond account data: 1=%d, 20=%d", small.Rows, large.Rows)
+	}
+	t.Logf("capacity read work: 1=%+v 20=%+v", small, large)
+}
 
 // capacityWorld registers one account per harness with a fresh weekly reading.
 func capacityWorld(t *testing.T, slug string, harnesses ...string) (tenant.Principal, tenant.Principal, string, map[string]Account) {
@@ -32,6 +234,7 @@ func capacityWorld(t *testing.T, slug string, harnesses ...string) (tenant.Princ
 	for _, h := range harnesses {
 		var a Account
 		callStatus(t, mod, &runner, token, "POST", "/api/agent-accounts", `{"account_key":"`+h+`","harness":"`+h+`","daemon_id":"daemon-a","label":"`+h+`"}`, 201, &a)
+		ownFixtureAccount(t, admin, &a)
 		r := capacity.Reading{WindowKind: "weekly", WindowMinutes: 7 * 24 * 60, UsedPercent: 30, ResetsAt: now.Add(80 * time.Hour), ReadAt: now.Add(-time.Minute), Source: "harness"}
 		callStatus(t, mod, &runner, token, "POST", "/api/agent-accounts/"+a.ID+"/readings", encoded(t, readingsWrite{[]capacity.Reading{r}}), 204, nil)
 		out[h] = a
@@ -65,7 +268,7 @@ func TestCapacityPreviewMatchesSavedInheritance(t *testing.T) {
 	put(scheduleOverride{Scope: "pool", Pool: "grok", Schedule: &grok}, 204)
 	hold := user
 	hold.Override = "hold"
-	put(scheduleOverride{Scope: "pool", Pool: "codex", Schedule: &hold}, 204)
+	seedExistingSchedule(t, admin, scheduleOverride{Scope: "pool", Pool: "codex", Schedule: &hold})
 	// An ended Sprint left behind on a pool without accounts.
 	ended := user
 	ended.Override = "sprint"
@@ -110,9 +313,9 @@ func TestCapacityPreviewMatchesSavedInheritance(t *testing.T) {
 	put(scheduleOverride{Scope: "pool", Pool: "codex", Schedule: &draft, CarryOverrides: true}, 400)
 }
 
-// Review blocker 4: the Sprint end the UI promises is the server's limiting
-// reset, which includes the 5-hour window.
-func TestCapacityLimitingResetIsTheSprintEnd(t *testing.T) {
+// The limiting reset includes the 5-hour window; legacy Sprint end dates
+// survive unchanged round-trips and rejected deadline extensions.
+func TestCapacityLimitingResetPreservesExistingSprintEnd(t *testing.T) {
 	admin, runner, token, accounts := capacityWorld(t, "limiting", "claude")
 	mod := accountsMod()
 	now := time.Now().UTC()
@@ -127,11 +330,26 @@ func TestCapacityLimitingResetIsTheSprintEnd(t *testing.T) {
 	}
 	sprint := capacity.DefaultSchedule()
 	sprint.Override = "sprint"
+	sprint.OverrideUntil = limit
+	seedExistingSchedule(t, admin, scheduleOverride{Scope: "pool", Pool: "claude", Schedule: &sprint})
 	callStatus(t, mod, &admin, "", "PUT", "/api/agent-accounts/capacity/schedule", encoded(t, scheduleOverride{Scope: "pool", Pool: "claude", Schedule: &sprint}), 204, nil)
+	// Only new or changed overrides are retired (AEON-1177 M1). Keep the
+	// rejection assertion on an actual change, without changing the fixture.
+	extended := sprint
+	later := limit.Add(time.Hour)
+	extended.OverrideUntil = &later
+	var retired struct{ Error, Code string }
+	callStatus(t, mod, &admin, "", "PUT", "/api/agent-accounts/capacity/schedule", encoded(t, scheduleOverride{Scope: "pool", Pool: "claude", Schedule: &extended}), 400, &retired)
+	if retired.Code != "override_retired" || retired.Error == "" {
+		t.Fatalf("Sprint extension rejected for the wrong reason: %+v", retired)
+	}
 	var entries []scheduleOverride
 	callStatus(t, mod, &admin, "", "GET", "/api/agent-accounts/capacity/schedule", "", 200, &entries)
 	if len(entries) != 1 || entries[0].Schedule.OverrideUntil == nil || !entries[0].Schedule.OverrideUntil.Equal(*limit) {
 		t.Fatalf("Sprint end %+v differs from limiting reset %v", entries, limit)
+	}
+	if entries[0].Scope != "pool" || entries[0].Pool != "claude" || encoded(t, entries[0].Schedule) != encoded(t, sprint) {
+		t.Fatalf("Sprint replay or rejected extension changed the stored schedule: %+v", entries)
 	}
 }
 

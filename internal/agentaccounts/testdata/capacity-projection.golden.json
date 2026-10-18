@@ -1,0 +1,163 @@
+[
+  {
+    "account_id": "account",
+    "contexts": [
+      {
+        "id": "context",
+        "name": "Default"
+      }
+    ],
+    "cost_limit_supported": false,
+    "learning": {
+      "cost_micros": 0,
+      "limit_hits": 0,
+      "runs": 0,
+      "tokens": 0,
+      "windows": [
+        {
+          "bucket": "",
+          "run_count": 0,
+          "window_kind": "weekly",
+          "work_days": 0
+        }
+      ]
+    },
+    "limit": {
+      "account_id": "account",
+      "amount": 80,
+      "created_at": "2026-10-19T12:00:00Z",
+      "id": "limit",
+      "period": "day",
+      "period_end": "2026-10-19T22:00:00Z",
+      "unit": "percent",
+      "used": 0
+    },
+    "limiting_reset": "2026-10-22T20:00:00Z",
+    "ongoing_use_approved": true,
+    "routing": {
+      "available_slots": 3,
+      "cap_percent": 17.872340425531913,
+      "rank": 1,
+      "resets_at": "2026-10-22T20:00:00Z"
+    },
+    "schedule": {
+      "blocks": [
+        0.5,
+        0.5,
+        0.5,
+        0.5,
+        0.5,
+        0.5,
+        0.5,
+        0.5,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        0.5,
+        0.5
+      ],
+      "model": "daynight",
+      "night": {
+        "end": 8,
+        "k": 0.6,
+        "start": 22
+      },
+      "nights": false,
+      "off_days": "expire",
+      "reserve": "off",
+      "shifts": {
+        "early": 6,
+        "k": [
+          1,
+          1,
+          0.5
+        ],
+        "late": 14,
+        "night": 22
+      },
+      "timezone": "Europe/Vienna",
+      "week": [
+        {
+          "end": 24,
+          "on": true,
+          "start": 0
+        },
+        {
+          "end": 24,
+          "on": true,
+          "start": 0
+        },
+        {
+          "end": 24,
+          "on": true,
+          "start": 0
+        },
+        {
+          "end": 24,
+          "on": true,
+          "start": 0
+        },
+        {
+          "end": 24,
+          "on": true,
+          "start": 0
+        },
+        {
+          "end": 24,
+          "on": true,
+          "start": 0
+        },
+        {
+          "end": 24,
+          "on": true,
+          "start": 0
+        }
+      ]
+    },
+    "windows": [
+      {
+        "allowance": 100,
+        "freshness": "fresh",
+        "pacing": {
+          "ahead": false,
+          "allow_off": false,
+          "available_now_percent": 17.872340425531913,
+          "budget_percent": 17.872340425531913,
+          "finish": "2026-10-22T20:00:00Z",
+          "percent_per_hour": 0.875,
+          "period_end": "2026-10-19T22:00:00Z",
+          "period_start": "2026-10-18T22:00:00Z",
+          "reserve_effective_percent": 0,
+          "reserve_percent": 0,
+          "suggested_today_percent": 17.872340425531913,
+          "tonight_percent": 0,
+          "unused": false,
+          "usable_hours": 80,
+          "used_today_percent": 0
+        },
+        "reading": {
+          "read_at": "2026-10-19T11:59:00Z",
+          "resets_at": "2026-10-22T20:00:00Z",
+          "source": "harness",
+          "used_percent": 30,
+          "window_kind": "weekly",
+          "window_minutes": 10080
+        },
+        "remaining_percent": 70,
+        "starts_at": "2026-10-15T20:00:00Z",
+        "usage_today_known": false
+      }
+    ]
+  }
+]

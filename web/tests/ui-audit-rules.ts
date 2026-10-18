@@ -23,13 +23,16 @@ export function decorativeVersionContrast(selector: string, rule: string, labell
 }
 
 export function installLayoutShiftAudit(): void {
-  const audit = window as unknown as { auditShift: number; auditShiftArmed: boolean; auditShiftSources: string[] }
+  const audit = window as unknown as { auditShift: number; auditShiftArmed: boolean; auditShiftSources: string[]; auditShiftSince: number }
   audit.auditShift = 0
   audit.auditShiftArmed = false
   audit.auditShiftSources = []
+  // Entries that started before arm are startup movement. The observer can
+  // deliver them after arm (buffered: true); they must not count as a later shift.
+  audit.auditShiftSince = Number.POSITIVE_INFINITY
   new PerformanceObserver(list => {
     for (const entry of list.getEntries() as (PerformanceEntry & { value: number; hadRecentInput: boolean; sources?: { node?: Node; previousRect?: DOMRectReadOnly; currentRect?: DOMRectReadOnly }[] })[]) {
-      if (audit.auditShiftArmed && !entry.hadRecentInput) {
+      if (audit.auditShiftArmed && !entry.hadRecentInput && entry.startTime >= audit.auditShiftSince) {
         audit.auditShift += entry.value
         audit.auditShiftSources.push(`${entry.value.toFixed(4)}: ${entry.sources?.slice(0, 3).map(source => `${(source.node as Element | undefined)?.className || (source.node as Element | undefined)?.nodeName || '?'} ${Math.round(source.previousRect?.x ?? 0)},${Math.round(source.previousRect?.y ?? 0)} ${Math.round(source.previousRect?.width ?? 0)}×${Math.round(source.previousRect?.height ?? 0)}→${Math.round(source.currentRect?.x ?? 0)},${Math.round(source.currentRect?.y ?? 0)} ${Math.round(source.currentRect?.width ?? 0)}×${Math.round(source.currentRect?.height ?? 0)}`).join(', ')}`)
       }
@@ -38,9 +41,10 @@ export function installLayoutShiftAudit(): void {
 }
 
 export function armLayoutShiftAudit(): void {
-  const audit = window as unknown as { auditShift: number; auditShiftArmed: boolean; auditShiftSources: string[] }
+  const audit = window as unknown as { auditShift: number; auditShiftArmed: boolean; auditShiftSources: string[]; auditShiftSince: number }
   audit.auditShift = 0
   audit.auditShiftSources = []
+  audit.auditShiftSince = performance.now()
   audit.auditShiftArmed = true
 }
 

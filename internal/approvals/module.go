@@ -38,6 +38,7 @@ func New(pool *pgxpool.Pool) httpapi.Module {
 // Mount registers the approval routes on mux.
 func (m *Module) Mount(mux *http.ServeMux) {
 	mux.HandleFunc("GET /api/approvals", reportercontract.WithHeader(reportercontract.Approvals, m.handleList))
+	mux.HandleFunc("GET /api/approvals/{approvalId}", reportercontract.WithHeader(reportercontract.Approvals, m.handleGet))
 	mux.HandleFunc("POST /api/approvals", reportercontract.WithHeader(reportercontract.Approvals, m.handlePropose))
 	mux.HandleFunc("POST /api/approvals/{approvalId}/decision", reportercontract.WithHeader(reportercontract.Approvals, m.handleDecide))
 	mux.HandleFunc("POST /api/approvals/{approvalId}/revoke", reportercontract.WithHeader(reportercontract.Approvals, m.handleRevoke))
@@ -110,3 +111,6 @@ func mapDB(err error) error {
 	}
 	return err
 }
+
+// WriteDecisionError preserves the approval route's existing public error mapping.
+func WriteDecisionError(w http.ResponseWriter, err error) { writeResult(w, 0, nil, err) }

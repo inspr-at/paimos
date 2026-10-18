@@ -1,0 +1,11 @@
+{
+  "schema": "aeon.migration-policy-exceptions.v1",
+  "exceptions": [
+    {
+      "file": "1305_delivery_flow_step_keys.sql",
+      "sha256": "e501f7d79dab344335f63e2265accc1d7e609e7fe3400a40af04f1d167f007cf",
+      "ticket": "AEON-1022",
+      "reason": "Replace the step_key check of delivery_flow_steps with its strict superset so the Flow can record the release steps rehearsal and catalogue (Arion v5 WP1.10). The new list is the 23 keys of 1298 plus those two; the drop and the add run in one transaction, so no write is ever unchecked and every key a previous binary writes still passes. DROP CONSTRAINT is outside the expand-safe allowlist. Exact bytes require coordinator review and the previous-binary compatibility gate before merge or release. This worker records a review artifact and grants no acceptance, push or deployment authority."
+    }
+  ]
+}

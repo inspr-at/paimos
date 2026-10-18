@@ -5,8 +5,8 @@
 import { listNodes, searchNodes, type ListItem, type WorkNode } from './api'
 import { keyQuery } from './palette'
 import { kinds } from './useTicket'
-
-export const WORK_KINDS = ['ticket', 'task', 'epic']
+import { WORK_KINDS } from './workVocabulary'
+export { WORK_KINDS } from './workVocabulary'
 
 export async function searchWork(q: string, options: { within?: string; signal: AbortSignal }): Promise<{ listed: ListItem[]; hits: WorkNode[] }> {
   const key = keyQuery(q)

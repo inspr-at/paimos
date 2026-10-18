@@ -7,6 +7,8 @@ import { brand, setPageTitle } from '../lib/brand'
 import { TYPES, countBy, entryPath, filterItems, highlightWords, isKnowledgeType, kindToken, listKnowledge, sortItems, statusLabel, typeMeta, type KnowledgeItem, type KnowledgeStatus, type KnowledgeType } from '../lib/knowledge'
 import { absoluteTime, plural, relativeTime } from '../lib/work'
 import { useProjects } from '../stores/projects'
+import { knowledgeFooter } from '../lib/footerProviders'
+import { useFooterSummary } from '../lib/footerSummary'
 
 // Knowledge across every project: one search over titles, slugs and text, results
 // grouped by project (each group leads into that project's Knowledge tab), the
@@ -29,6 +31,8 @@ const PER_PROJECT = 6
 const q = computed(() => typeof route.query.q === 'string' ? route.query.q : '')
 const type = computed<KnowledgeType | ''>(() => isKnowledgeType(route.query.type) ? route.query.type : '')
 const archived = computed(() => route.query.archived === '1')
+// ?status=proposed shows only the entries waiting for a person (the footer's "to review").
+const proposedOnly = computed(() => route.query.status === 'proposed' && !archived.value)
 const expanded = ref(new Set<string>())
 const draft = ref(q.value)
 let timer: ReturnType<typeof setTimeout> | undefined
@@ -37,19 +41,21 @@ watch(q, value => { if (value !== draft.value.trim()) draft.value = value })
 watch(draft, value => { clearTimeout(timer); timer = setTimeout(() => { if (value.trim() !== q.value) setQuery({ q: value.trim() }) }, 180) })
 function setQuery(patch: Record<string, string>) {
   const next: Record<string, string> = {}
-  for (const [key, value] of Object.entries({ q: q.value, type: type.value, archived: archived.value ? '1' : '', ...patch })) if (value) next[key] = value
+  for (const [key, value] of Object.entries({ q: q.value, type: type.value, archived: archived.value ? '1' : '', status: proposedOnly.value ? 'proposed' : '', ...patch })) if (value) next[key] = value
   void router.replace({ path: '/knowledge', query: next })
 }
 
 async function load() {
   controller?.abort()
   const current = controller = new AbortController()
-  loading.value = true; error.value = ''
+  const query = q.value
+  loading.value = true
   try {
-    const page = await listKnowledge({ q: q.value, limit: 1000 }, current.signal)
+    const page = await listKnowledge({ q: query, limit: 1000 }, current.signal)
     if (current.signal.aborted) return
     items.value = page.items
-    searchedFor.value = q.value
+    searchedFor.value = query
+    error.value = ''
     loaded.value = true
     cursorId.value = null
   } catch (e) {
@@ -59,8 +65,9 @@ async function load() {
   }
 }
 watch(q, () => { expanded.value = new Set(); void load() }, { immediate: true })
+const stale = computed(() => loaded.value && (loading.value || !!error.value || searchedFor.value !== q.value))
 
-const statuses = computed<KnowledgeStatus[]>(() => archived.value ? [] : ['active', 'proposed'])
+const statuses = computed<KnowledgeStatus[]>(() => archived.value ? [] : proposedOnly.value ? ['proposed'] : ['active', 'proposed'])
 const counts = computed(() => countBy(filterItems(items.value, [], statuses.value)).type)
 const total = computed(() => filterItems(items.value, [], statuses.value).length)
 const visible = computed(() => filterItems(items.value, type.value ? [type.value] : [], statuses.value))
@@ -84,6 +91,14 @@ const groups = computed<ProjectGroup[]>(() => {
   return searchedFor.value ? out : out.sort((a, b) => Date.parse(b.items[0].updated_at) - Date.parse(a.items[0].updated_at))
 })
 const sequence = computed(() => groups.value.flatMap(group => group.shown))
+// The footer says what the list shows: entries, and the proposed ones to review (AEON-785).
+useFooterSummary(() => {
+  const act = { review: () => setQuery({ status: 'proposed' }) }
+  if (!loaded.value && error.value) return null
+  if (!loaded.value) return knowledgeFooter({ loaded: false, entries: 0, toReview: 0, updatedAt: null, now: now.value, act })
+  const updated = visible.value.reduce((latest, item) => Math.max(latest, Date.parse(item.updated_at) || 0), 0)
+  return knowledgeFooter({ loaded: true, entries: visible.value.length, toReview: visible.value.filter(item => item.status === 'proposed').length, updatedAt: updated || null, now: now.value, act })
+})
 const projectLink = (group: ProjectGroup) => ({ path: `/p/${encodeURIComponent(group.routeKey)}/knowledge`, query: type.value ? { type: type.value } : {} })
 const itemLink = (group: ProjectGroup, item: KnowledgeItem) => entryPath(group.routeKey, item.type, item.slug)
 
@@ -151,15 +166,20 @@ const listCommand = computed(() => `${brand.value.product.toLowerCase()} knowled
       </div>
     </div>
 
-    <div ref="listEl" class="kp-results" :class="{ stale: loading && loaded }" aria-live="polite">
+    <p v-if="proposedOnly" class="kp-review">
+      <span>Showing entries to review</span>
+      <button type="button" @click="setQuery({ status: '' })">All entries</button>
+    </p>
+
+    <div v-if="error" class="kp-state" role="alert">
+      <h2>{{ loaded ? 'Search could not be refreshed' : 'Knowledge could not be loaded' }}</h2>
+      <p>{{ error }}</p>
+      <button type="button" class="btn" :disabled="loading" @click="load()"><AppIcon name="refresh" :size="14" />Try again</button>
+    </div>
+    <p v-if="stale" class="kp-retained" role="status">{{ searchedFor ? `Previous results for “${searchedFor}”` : 'Previous results across all knowledge' }}.{{ loading ? ' Loading the requested search…' : ' The requested search has not completed.' }}</p>
+    <div v-if="loaded || !error" ref="listEl" class="kp-results" :class="{ stale }" aria-live="polite">
       <div v-if="!loaded && !error" class="kp-skeleton" role="status" aria-label="Loading knowledge">
         <div v-for="n in 3" :key="n" class="kp-group glass-card"><div class="kp-group-head"><span class="skeleton sk-badge" /><span class="skeleton sk-head" /></div><div v-for="m in 3" :key="m" class="sk-row"><span class="skeleton sk-title" :style="{ width: `${40 + (n * m * 11) % 36}%` }" /><span class="skeleton sk-line" /></div></div>
-      </div>
-      <div v-else-if="error && !loaded" class="kp-state glass-card" role="alert">
-        <span class="state-icon danger"><AppIcon name="alert" :size="18" /></span>
-        <h2>Knowledge could not be loaded</h2>
-        <p>{{ error }}</p>
-        <button type="button" class="btn" @click="load()"><AppIcon name="refresh" :size="14" />Try again</button>
       </div>
       <div v-else-if="!items.length && !searchedFor" class="kp-state glass-card">
         <span class="state-icon"><AppIcon name="book" :size="20" /></span>
@@ -183,7 +203,7 @@ const listCommand = computed(() => `${brand.value.product.toLowerCase()} knowled
         <section v-for="group in groups" :key="group.id" class="kp-group glass-card" :aria-labelledby="`kp-${group.id}`">
           <header class="kp-group-head">
             <span v-if="group.routeKey" class="key-badge">{{ group.routeKey }}</span>
-            <h2 :id="`kp-${group.id}`">{{ group.title }}</h2>
+            <h2 :id="`kp-${group.id}`" v-clip-tip="group.title">{{ group.title }}</h2>
             <span class="kp-count mono">{{ group.items.length }}</span>
             <span class="spacer" />
             <RouterLink v-if="group.routeKey" class="btn sm ghost kp-open" :to="projectLink(group)" :aria-label="`Open the knowledge of ${group.title}`"><span class="kp-open-label">Open its Knowledge</span><AppIcon name="arrow" :size="13" /></RouterLink>
@@ -193,12 +213,12 @@ const listCommand = computed(() => `${brand.value.product.toLowerCase()} knowled
               <RouterLink class="kp-row" :class="{ cursor: cursorId === item.id }" :to="itemLink(group, item)" :data-id="item.id" @focus="cursorId = item.id">
                 <span class="kp-kind-icon" :data-tip="typeMeta(item.type).label" :style="{ '--kind': `var(${kindToken(item.type)})` }"><AppIcon :name="typeMeta(item.type).icon" :size="14" /></span>
                 <span class="kp-text">
-                  <span class="kp-title"><template v-for="(part, i) in highlightWords(item.title, searchedFor)" :key="i"><mark v-if="part.match">{{ part.text }}</mark><template v-else>{{ part.text }}</template></template></span>
+                  <span v-clip-tip="`${item.title}\n${item.type}/${item.slug}`" class="kp-title"><template v-for="(part, i) in highlightWords(item.title, searchedFor)" :key="i"><mark v-if="part.match">{{ part.text }}</mark><template v-else>{{ part.text }}</template></template></span>
                   <span v-if="item.excerpt" class="kp-excerpt"><template v-for="(part, i) in highlightWords(item.excerpt, searchedFor)" :key="i"><mark v-if="part.match">{{ part.text }}</mark><template v-else>{{ part.text }}</template></template></span>
                 </span>
                 <span class="kp-meta">
                   <span v-if="item.status !== 'active'" class="k-status" :class="item.status">{{ statusLabel(item.status) }}</span>
-                  <span class="kp-slug mono"><span class="kp-type">{{ item.type }}/</span>{{ item.slug }}</span>
+                  <span v-clip-tip="`${item.title}\n${item.type}/${item.slug}`" class="kp-slug mono"><span class="kp-type">{{ item.type }}/</span>{{ item.slug }}</span>
                   <time class="kp-time mono" :datetime="item.updated_at" :data-tip="`Updated ${absoluteTime(item.updated_at)}`">{{ relativeTime(item.updated_at, { now }) }}</time>
                 </span>
               </RouterLink>
@@ -218,6 +238,10 @@ const listCommand = computed(() => `${brand.value.product.toLowerCase()} knowled
 .kp-lead { max-width: 760px; margin-top: 10px; font-size: 14px; line-height: 1.55; color: var(--ink-2); }
 .kp-lead code { padding: 1px 5px; border-radius: 5px; background: var(--code-bg); font-size: 12px; color: var(--ink); white-space: nowrap; }
 .kp-controls { display: grid; gap: 12px; margin: 22px 0 18px; }
+.kp-review { display: flex; align-items: center; justify-content: space-between; gap: 12px; min-height: 32px; margin: -6px 0 14px; font-size: 13px; color: var(--ink-2); }
+.kp-review button { min-height: 32px; padding: 0 2px; border: 0; background: transparent; color: var(--teal-ink); font: 600 13px/1 var(--font); cursor: pointer; }
+.kp-review button:focus-visible { outline: none; box-shadow: var(--focus-ring); }
+.kp-retained { margin: 12px 0; font-size: 13px; color: var(--ink-2); }
 .kp-search .field { height: 46px; padding-left: 40px; padding-right: 40px; border-radius: 14px; font-size: 15.5px; }
 .kp-search > svg { left: 14px; }
 .kp-search .field::-webkit-search-cancel-button { display: none; }
@@ -234,7 +258,7 @@ const listCommand = computed(() => `${brand.value.product.toLowerCase()} knowled
 .kp-kind.empty:not([aria-pressed="true"]) { color: var(--ink-3); }
 .kp-kind:focus-visible { box-shadow: var(--focus-ring); }
 .kp-archived { margin-left: auto; font-size: 12.5px; }
-.kp-results { display: grid; gap: 16px; }
+.kp-results { display: grid; grid-template-columns: minmax(0, 1fr); gap: 16px; }
 .kp-results.stale .kp-group { opacity: .62; }
 .kp-summary { font-size: 12px; color: var(--ink-3); }
 .kp-group { overflow: clip; }
@@ -256,12 +280,12 @@ li + li .kp-row::before { content: ''; position: absolute; top: 0; left: 50px; r
 .kp-text { display: grid; gap: 3px; flex: 1; min-width: 0; }
 .kp-title { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 14px; font-weight: 600; }
 .kp-excerpt { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 12.5px; color: var(--ink-2); }
-.kp-meta { display: flex; align-items: center; gap: 12px; flex-shrink: 0; }
+.kp-meta { display: flex; align-items: center; gap: 12px; flex-shrink: 0; min-width: 0; }
 .kp-slug { max-width: 260px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 11.5px; color: var(--ink-2); font-variant-ligatures: none; }
 .kp-type { color: var(--ink-3); }
 .kp-time { width: 64px; text-align: right; font-size: 12px; color: var(--ink-2); }
 .k-status { display: inline-flex; align-items: center; height: 20px; padding: 0 8px; border-radius: 999px; font: 600 10px/1 var(--mono); letter-spacing: .08em; text-transform: uppercase; font-variant-ligatures: none; }
-.k-status.proposed { background: var(--gold-wash); box-shadow: inset 0 0 0 1px rgba(214, 155, 49, .45); color: var(--gold-ink); }
+.k-status.proposed { background: var(--gold-wash); box-shadow: inset 0 0 0 1px var(--warn-line); color: var(--warn-ink); }
 .k-status.archived { background: var(--chip-bg); box-shadow: inset 0 0 0 1px var(--chip-line); color: var(--ink-2); }
 .kp-more { display: block; width: calc(100% - 12px); height: 36px; margin: 0 6px 6px; border: 0; border-radius: 9px; background: transparent; color: var(--teal-ink); font-size: 12.5px; font-weight: 600; }
 .kp-more:hover { background: var(--row-hover); }
@@ -284,6 +308,7 @@ li + li .kp-row::before { content: ''; position: absolute; top: 0; left: 50px; r
 .sk-line { width: 70%; height: 9px; }
 @media (max-width: 720px) {
   .knowledge-page { padding: 18px 12px 16px; }
+  .kp-review, .kp-review button { min-height: 44px; }
   .kp-lead code { white-space: normal; overflow-wrap: anywhere; }
   .kp-kinds { flex-wrap: nowrap; overflow-x: auto; margin: 0 -12px; padding: 2px 12px 4px; scrollbar-width: none; }
   .kp-kinds::-webkit-scrollbar { display: none; }
@@ -291,6 +316,9 @@ li + li .kp-row::before { content: ''; position: absolute; top: 0; left: 50px; r
   .kp-archived { flex-shrink: 0; margin-left: 6px; }
   .kp-row { flex-wrap: wrap; align-items: flex-start; gap: 6px 12px; padding: 11px 10px; }
   .kp-text { flex: 1 1 calc(100% - 42px); }
+  .kp-group-head { align-items: flex-start; }
+  .kp-group-head h2 { white-space: normal; overflow-wrap: anywhere; display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; }
+  .kp-title, .kp-slug { overflow-wrap: anywhere; }
   .kp-title, .kp-excerpt { white-space: normal; display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; line-clamp: 2; }
   .kp-meta { flex: 1 1 100%; padding-left: 42px; }
   .kp-slug { flex: 1; max-width: none; }

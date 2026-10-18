@@ -145,6 +145,7 @@ func (rt *runtime) cmdDoctor() *Command {
 			checks = append(checks, doctorCheck{Name: "schema", Status: "ok", Detail: fmt.Sprintf("version=%s kinds=%d", s.Version, len(s.Entities))})
 		}
 		checks = append(checks, rt.rulesChannelCheck(options))
+		checks = append(checks, rt.inboxDoctorCheck(inst.Name, inst.URL, me.Principal.ID))
 		return rt.renderDoctor(checks)
 	}}
 }

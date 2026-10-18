@@ -240,7 +240,6 @@ func Compare(ctx context.Context, in Input) (Report, error) {
 		return Report{}, err
 	}
 	report := newReport(in.Context, section, in.Files)
-	rawSet := map[string][]Supplied{}
 	for _, file := range proposal.Files {
 		item := Supplied{
 			Base: file.Base, Kind: file.Kind, Layer: string(file.Layer), Trust: string(file.Trust),
@@ -250,7 +249,6 @@ func Compare(ctx context.Context, in Input) (Report, error) {
 			item.HarnessLogicalName = logical
 		}
 		report.SuppliedInputs = append(report.SuppliedInputs, item)
-		rawSet[file.SHA256] = append(rawSet[file.SHA256], item)
 	}
 	slices.SortFunc(report.SuppliedInputs, func(a, b Supplied) int { return strings.Compare(a.Base+a.RawSHA256, b.Base+b.RawSHA256) })
 
@@ -341,16 +339,19 @@ func Compare(ctx context.Context, in Input) (Report, error) {
 			report.UnverifiedComparisons = append(report.UnverifiedComparisons, comparison)
 		}
 	}
-	received := map[string]bool{}
+	type rawIdentity struct {
+		digest string
+		size   int64
+	}
+	received := map[rawIdentity]bool{}
 	for _, receipt := range report.Receipts {
-		if receipt.RawBytesReceived {
-			for _, base := range receipt.SuppliedBases {
-				received[base] = true
-			}
+		if receipt.RawBytesReceived && receipt.ByteSize != nil {
+			received[rawIdentity{receipt.ContentSHA256, *receipt.ByteSize}] = true
 		}
 	}
 	for i := range report.SuppliedInputs {
-		report.SuppliedInputs[i].RawReceipt = received[report.SuppliedInputs[i].Base]
+		input := &report.SuppliedInputs[i]
+		input.RawReceipt = received[rawIdentity{input.RawSHA256, int64(input.Bytes)}]
 	}
 
 	report.Lineage = lineageView(groups, merge)

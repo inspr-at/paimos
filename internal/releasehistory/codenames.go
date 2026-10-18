@@ -20,7 +20,7 @@ func WithCodenames(h History) History {
 	out.Releases = make([]Release, len(h.Releases))
 	for i, r := range h.Releases {
 		r.Codename = ""
-		if r.ReleaseSequence > 0 && (r.State == StatePublished || (r.State == StateReserved && !published[r.ReleaseSequence])) {
+		if r.ReleaseSequence > 0 && (r.State == StatePublished || ((r.State == StateReserved || r.State == StateCandidate) && !published[r.ReleaseSequence])) {
 			r.Codename = codename.Codename(r.ReleaseSequence)
 		}
 		if r.State == StateWithdrawn {

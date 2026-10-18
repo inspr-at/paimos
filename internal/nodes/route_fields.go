@@ -4,19 +4,22 @@ package nodes
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"reflect"
+	"regexp"
 	"strings"
 	"time"
 
 	"github.com/inspr-at/paimos/internal/modelregistry"
 	"github.com/inspr-at/paimos/internal/tenant"
+	"github.com/jackc/pgx/v5"
 )
 
-// Route classification lives on tickets and tasks only. Other kinds may use
-// "area" for something else, so their fields are left untouched.
+// Route classification lives on work items and legacy tickets and tasks.
+// Other kinds may use "area" for something else, so their fields are untouched.
 func canonicalRouteFields(p tenant.Principal, kindSlug string, raw, before json.RawMessage) (json.RawMessage, error) {
-	if kindSlug != "ticket" && kindSlug != "task" {
+	if kindSlug != "work" && kindSlug != "ticket" && kindSlug != "task" {
 		return raw, nil
 	}
 	next, err := decodeRouteFields(raw)
@@ -74,8 +77,54 @@ type routeGroup struct {
 
 var routeGroups = []routeGroup{
 	{"route_role", "route_role_source", "route_role_by", "route_role_at", modelregistry.KnownRouteRole},
-	{"area", "area_source", "area_by", "area_at", modelregistry.KnownRouteArea},
+	{"area", "area_source", "area_by", "area_at", validAreaShape},
 	{"complexity", "complexity_source", "complexity_by", "complexity_at", func(s string) bool { return s == "S" || s == "M" || s == "L" }},
+}
+
+var areaShape = regexp.MustCompile(`^[a-z][a-z0-9-]{0,47}$`)
+
+func validAreaShape(s string) bool { return areaShape.MatchString(s) }
+
+// Validate a changed area inside the node mutation transaction. Unchanged
+// legacy or archived areas retain their provenance and remain editable.
+func canonicalTicketRouteFields(ctx context.Context, tx pgx.Tx, p tenant.Principal, kind string, parent *string, raw, before json.RawMessage) (json.RawMessage, error) {
+	out, err := canonicalRouteFields(p, kind, raw, before)
+	if err != nil || kind != "work" && kind != "ticket" && kind != "task" {
+		return out, err
+	}
+	next, err := decodeRouteFields(out)
+	if err != nil {
+		return nil, err
+	}
+	old, err := decodeRouteFields(before)
+	if err != nil {
+		return nil, err
+	}
+	same, err := sameRouteValue(next, old, "area")
+	if err != nil || same || next["area"] == nil {
+		return out, err
+	}
+	project, err := routeProject(ctx, tx, parent)
+	if err != nil {
+		return nil, err
+	}
+	known, err := modelregistry.KnownRouteArea(ctx, tx, next["area"].(string), project)
+	if err != nil {
+		return nil, err
+	}
+	if !known {
+		return nil, badRequest(routeValueError("area"))
+	}
+	return out, nil
+}
+
+func routeProject(ctx context.Context, tx pgx.Tx, parent *string) (string, error) {
+	if parent == nil {
+		return "", nil
+	}
+	var project string
+	err := tx.QueryRow(ctx, `SELECT coalesce(n.project_id::text, CASE WHEN k.slug='project' THEN n.id::text END,'') FROM nodes n JOIN node_kinds k ON k.tenant_id=n.tenant_id AND k.id=n.kind_id WHERE n.id=$1::uuid AND n.deleted_at IS NULL`, *parent).Scan(&project)
+	return project, err
 }
 
 func sameRouteValue(next, old map[string]any, key string) (bool, error) {
@@ -183,7 +232,7 @@ func routeValueError(key string) string {
 	if key == "complexity" {
 		return "complexity must be S, M, or L"
 	}
-	return "area must be backend, frontend, full-stack, infra, design, or docs"
+	return "area must be an active kind of work visible in this project"
 }
 
 func decodeRouteFields(raw json.RawMessage) (map[string]any, error) {

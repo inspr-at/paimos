@@ -1,0 +1,20 @@
+# SPDX-License-Identifier: AGPL-3.0-only
+# aeon:owner internal/tenantbrand
+paths:
+  /brand/logo/{variant}:
+    get:
+      operationId: getBrandLogo
+      description: The workspace's logo image, for any member, including one who holds only project bindings. Sent with X-Content-Type-Options nosniff and Content-Security-Policy default-src 'none'; sandbox. Immutable when v matches the stored hash.
+      parameters:
+        - {name: variant, in: path, required: true, schema: {type: string, enum: [light, dark]}}
+        - {name: v, in: query, required: false, schema: {type: string}, description: Hash prefix from TenantBrandLogo.url.}
+      responses:
+        '200':
+          description: Logo image
+          content:
+            image/png: {schema: {type: string, format: binary}}
+            image/webp: {schema: {type: string, format: binary}}
+            image/svg+xml: {schema: {type: string, format: binary}}
+        '304': {description: Not modified}
+        '404': {description: No logo}
+components:

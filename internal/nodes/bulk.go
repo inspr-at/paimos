@@ -62,13 +62,14 @@ func (t *bulkTag) UnmarshalJSON(raw []byte) error {
 }
 
 type bulkRequest struct {
-	IDs        []string        `json:"ids"`
-	State      *string         `json:"state"`
-	Priority   json.RawMessage `json:"priority"`
-	Assignee   json.RawMessage `json:"assignee"`
-	TagsAdd    []bulkTag       `json:"tags_add"`
-	TagsRemove []string        `json:"tags_remove"`
-	ParentID   *string         `json:"parent_id"`
+	IDs            []string        `json:"ids"`
+	State          *string         `json:"state"`
+	OverrideReason *string         `json:"override_reason"`
+	Priority       json.RawMessage `json:"priority"`
+	Assignee       json.RawMessage `json:"assignee"`
+	TagsAdd        []bulkTag       `json:"tags_add"`
+	TagsRemove     []string        `json:"tags_remove"`
+	ParentID       *string         `json:"parent_id"`
 	// Per node: the updated_at the caller last saw.
 	IfUnmodifiedSince map[string]string `json:"if_unmodified_since"`
 }
@@ -92,10 +93,12 @@ type bulkBatch struct {
 }
 
 type bulkSkip struct {
-	ID     string `json:"id"`
-	Key    string `json:"key,omitempty"`
-	Reason string `json:"reason"`
-	Code   string `json:"code,omitempty"`
+	ID       string                  `json:"id"`
+	Key      string                  `json:"key,omitempty"`
+	Reason   string                  `json:"reason"`
+	Code     string                  `json:"code,omitempty"`
+	ToStatus string                  `json:"to_status,omitempty"`
+	Failed   []workqueue.EntryResult `json:"failed,omitempty"`
 }
 
 type bulkResult struct {
@@ -139,6 +142,7 @@ func (m *Module) handleBulk(w http.ResponseWriter, r *http.Request) {
 type bulkPlan struct {
 	ids                    []string
 	state                  *string
+	overrideReason         *string
 	setPriority, setAssign bool
 	priority, assignee     *string
 	tagsAdd                []bulkTag
@@ -153,6 +157,7 @@ func (b bulkPlan) changesFields() bool {
 
 func parseBulk(in bulkRequest) (bulkPlan, error) {
 	var plan bulkPlan
+	plan.overrideReason = in.OverrideReason
 	if len(in.IDs) == 0 || len(in.IDs) > maxBulkNodes {
 		return plan, badRequest("ids must list 1 to 500 nodes")
 	}
@@ -334,6 +339,17 @@ func (m *Module) applyBulk(ctx context.Context, p tenant.Principal, plan bulkPla
 			}
 			plan.assignee = &canonical
 		}
+		if plan.state != nil {
+			// Entry checks may re-enter a builder fence. Acquire the whole batch
+			// in a stable order before node rows or any refusal/status event.
+			ids := append([]string(nil), plan.ids...)
+			sort.Strings(ids)
+			for _, id := range ids {
+				if _, err := tx.Exec(ctx, `SELECT pg_advisory_xact_lock(hashtextextended('aeon-builder:'||current_setting('aeon.tenant_id')||':'||$1::uuid::text,0))`, id); err != nil {
+					return err
+				}
+			}
+		}
 		targets, err := loadBulkTargets(ctx, tx, plan.ids)
 		if err != nil {
 			return err
@@ -405,17 +421,67 @@ func (m *Module) applyBulk(ctx context.Context, p tenant.Principal, plan bulkPla
 				}
 				fields = next
 			}
+			if plan.state != nil {
+				if err := requireLeafStatusWrite(ctx, tx, current.ID); err != nil {
+					if he, ok := err.(*httpError); ok && he.code == "parent_status_derived" {
+						result.Skipped = append(result.Skipped, bulkSkip{ID: current.ID, Key: current.Key, Reason: he.msg, Code: he.code})
+						continue
+					}
+					return err
+				}
+			}
 			state := current.State
 			if plan.state != nil {
 				state = *plan.state
 			}
-			if issues := ticketbenefits.Transition(target.kindSlug, current.State, state, fields); len(issues) > 0 {
+			issues, err := benefitTransition(ctx, tx, current.KindID, target.kindSlug, current.State, state, current.Fields, fields)
+			if err != nil {
+				if he, ok := err.(*httpError); ok && he.status == http.StatusUnprocessableEntity {
+					skip(he.msg)
+					continue
+				}
+				return err
+			}
+			if len(issues) > 0 {
 				result.Skipped = append(result.Skipped, bulkSkip{
 					ID: current.ID, Key: current.Key,
 					Reason: "before done: " + strings.Join(issues, "; "),
 					Code:   ticketbenefits.RequiredCode,
 				})
 				continue
+			}
+			var entry *workqueue.EntryRecord
+			if state != current.State {
+				t, err := workqueue.EntryTicketTx(ctx, tx, current.ID)
+				if err != nil {
+					return err
+				}
+				if err = authz.RequireTx(ctx, tx, p, "nodes.write", entryScope(t.ProjectID)); err != nil {
+					return err
+				}
+				t.Fields = workqueue.Fields(fields)
+				to, err := workqueue.EntryStatusTx(ctx, tx, current.KindID, state)
+				if err != nil {
+					return err
+				}
+				prior, err := workqueue.EntryStatusTx(ctx, tx, current.KindID, current.State)
+				if err != nil {
+					return err
+				}
+				if prior != to {
+					entry, err = workqueue.RequireEntryTx(ctx, tx, p, t, to, plan.overrideReason)
+				}
+				var failed *workqueue.EntryFailure
+				if errors.As(err, &failed) {
+					result.Skipped = append(result.Skipped, bulkSkip{ID: current.ID, Key: current.Key, Reason: entryFailedLabels(failed), Code: "entry_checks_failed", ToStatus: failed.ToStatus, Failed: failed.Failed})
+					if err = m.recordRefusal(ctx, tx, p, current.ID, failed); err != nil {
+						return err
+					}
+					continue
+				}
+				if err != nil {
+					return err
+				}
 			}
 			edit := state != current.State || !sameJSON(fields, current.Fields)
 			if !edit && !move {
@@ -435,7 +501,7 @@ func (m *Module) applyBulk(ctx context.Context, p tenant.Principal, plan bulkPla
 				if err != nil {
 					return dbErr("bulk update", err)
 				}
-				if err := m.record(ctx, tx, p.ID, &latest.ID, evNodeUpdated, current, latest); err != nil {
+				if err := m.recordNodeEntry(ctx, tx, p, evNodeUpdated, current, latest, entry); err != nil {
 					return err
 				}
 			}
@@ -472,6 +538,25 @@ func (m *Module) applyBulk(ctx context.Context, p tenant.Principal, plan bulkPla
 			return err
 		}
 		result.EventID = &e.ID
+		// Bulk answers feed the same row store as PATCH answers. Load both
+		// queue projections once for the bounded batch (at most maxBulkNodes),
+		// after every mutation. These reads acquire no locks after the counter.
+		ids := make([]string, len(result.Items))
+		for i := range result.Items {
+			ids[i] = result.Items[i].ID
+		}
+		queued, err := workqueue.Load(ctx, tx, ids)
+		if err != nil {
+			return err
+		}
+		stale, err := workqueue.Stale(ctx, tx, ids)
+		if err != nil {
+			return err
+		}
+		for i := range result.Items {
+			result.Items[i].Queued = queued[result.Items[i].ID]
+			result.Items[i].QueueStale = stale[result.Items[i].ID]
+		}
 		return nil
 	})
 	return result, err
@@ -623,8 +708,39 @@ func undoBulk(ctx context.Context, tx pgx.Tx, p tenant.Principal, e events.Event
 			return events.Change{}, events.ErrConflict
 		}
 		old := before.Items[i]
-		if len(ticketbenefits.Transition(kinds[now.ID], now.State, old.State, old.Fields)) > 0 {
+		issues, err := benefitTransition(ctx, tx, now.KindID, kinds[now.ID], now.State, old.State, now.Fields, old.Fields)
+		if err != nil {
+			if he, ok := err.(*httpError); ok && he.status == http.StatusUnprocessableEntity {
+				return events.Change{}, events.ErrConflict
+			}
+			return events.Change{}, err
+		}
+		if len(issues) > 0 {
 			return events.Change{}, events.ErrConflict
+		}
+		if old.State != now.State {
+			target, err := workqueue.EntryTicketTx(ctx, tx, now.ID)
+			if err != nil {
+				return events.Change{}, err
+			}
+			target.Fields = workqueue.Fields(old.Fields)
+			to, err := workqueue.EntryStatusTx(ctx, tx, now.KindID, old.State)
+			if err != nil {
+				return events.Change{}, err
+			}
+			prior, err := workqueue.EntryStatusTx(ctx, tx, now.KindID, now.State)
+			if err != nil {
+				return events.Change{}, err
+			}
+			if prior != to {
+				if _, err = workqueue.RequireEntryTx(ctx, tx, p, target, to, nil); err != nil {
+					var failed *workqueue.EntryFailure
+					if errors.As(err, &failed) {
+						return events.Change{}, events.ErrConflict
+					}
+					return events.Change{}, err
+				}
+			}
 		}
 		if old.State != now.State || !sameJSON(old.Fields, now.Fields) {
 			if err := authz.RequireInProjects(ctx, tx, p, "nodes.write", projects[now.ID]); err != nil {

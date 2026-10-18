@@ -14,8 +14,12 @@
     "test:remote": "node ../scripts/playwright-remote.mjs",
     "test:ui-shards": "node ../scripts/playwright-ui-shards-safe.mjs",
     "test:browser-safety": "node --test ../scripts/playwright-safe.test.mjs ../scripts/playwright-remote.test.mjs tests/playwright-policy.test.ts",
+    "ci:web:shard": "node scripts/ci-web-shard.mjs",
+    "ci:web:shard:check": "node scripts/ci-web-shard.mjs --check",
+    "ci:web:shard:test": "node --test --test-concurrency=1 scripts/ci-web-shard.test.mjs scripts/aeon-676-ci.test.mjs scripts/aeon-681-ci.test.mjs && npm run ci:web:shard:check",
     "audit:ui": "node ../scripts/ui-audit/run.mjs",
-    "test:unit": "node --experimental-strip-types --test $(ls tests/*.test.ts | grep -v '\\.unit\\.test\\.ts$') && vitest run .unit.test.ts",
+    "test:unit:core": "node --experimental-strip-types --test $(ls tests/*.test.ts | grep -v '\\.unit\\.test\\.ts$') && vitest run .unit.test.ts",
+    "test:unit": "npm run ci:web:shard:test && node --experimental-strip-types --test $(ls tests/*.test.ts | grep -v '\\.unit\\.test\\.ts$') && vitest run .unit.test.ts",
     "test:editor-unit": "vitest run tests/quote-editor.unit.test.ts",
     "e2e": "node ../scripts/playwright-safe.mjs"
   },

@@ -494,7 +494,10 @@ for (const [name, state, title] of LIVE_STATES) {
 test('Agents links to Connect your machine', async ({ page }) => {
   await mockWork(page, fixtures())
   await page.goto('/agents')
-  await expect(page.getByRole('link', { name: 'Connect your machine' })).toBeVisible()
+  // AEON-782: Accounts and computers is a status line; the entry is the New menu.
+  await page.getByRole('button', { name: /^New/ }).click()
+  await expect(page.getByRole('menuitem', { name: /Connect your machine/ })).toHaveAttribute('href', '/agents/register-agent')
+  await page.keyboard.press('Escape')
   await page.setViewportSize({ width: 390, height: 844 })
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true)
 })

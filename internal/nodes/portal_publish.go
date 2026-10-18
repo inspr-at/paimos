@@ -55,7 +55,13 @@ func portalModerator(ctx context.Context, tx pgx.Tx, p tenant.Principal) error {
 // delete portal catalog rows. The flag is set only after a person passes
 // settings.manage. Everyone else, including an agent whose scopes name that
 // permission, leaves it unset so the database trigger refuses the write.
+// Enter the canonical tree -> tenant fence before checking grants, including
+// callers that arm moderation before their own reentrant lockTree call. This
+// does not change grants: the write fence keeps concurrent tenant FKs compatible.
 func armPortalModeration(ctx context.Context, tx pgx.Tx, p tenant.Principal) error {
+	if err := authz.LockProjectWrite(ctx, tx, p.TenantID); err != nil {
+		return err
+	}
 	actor, err := principalForPortal(ctx, tx, p)
 	if err != nil {
 		if errors.Is(err, errPortalDenied) || errors.Is(err, pgx.ErrNoRows) {
@@ -108,6 +114,17 @@ func guardAppendedMutation(ctx context.Context, tx pgx.Tx, p tenant.Principal, c
 }
 
 func authorizePortalChange(ctx context.Context, tx pgx.Tx, p tenant.Principal, nodeID *string, eventType string, before, after json.RawMessage) error {
+	// Definition governance has one write API. Generic node, move, convert,
+	// bulk and undo writers cannot replace or delete its rules.
+	if nodeID != nil && strings.HasPrefix(eventType, "node.") {
+		var definition bool
+		if err := tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM nodes n JOIN node_kinds k ON k.tenant_id=n.tenant_id AND k.id=n.kind_id WHERE n.id=$1 AND k.slug='definition')`, *nodeID).Scan(&definition); err != nil {
+			return err
+		}
+		if definition {
+			return authz.ErrForbidden
+		}
+	}
 	needs, err := portalChangeNeedsModerator(ctx, tx, nodeID, eventType, before, after)
 	if err != nil || !needs {
 		return err

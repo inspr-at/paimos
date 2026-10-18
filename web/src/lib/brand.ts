@@ -31,4 +31,13 @@ export function setPageTitle(title: string) { page.value = title }
 // The page's own name (a customer's, say), for the breadcrumb.
 export const pageName = computed(() => page.value)
 export function setOverlayTitle(title: string) { overlay.value = title }
-watch([page, overlay, current], ([title, over, b]) => { const t = over || title; document.title = t ? `${t} · ${b.wordmark}` : b.wordmark }, { immediate: typeof document !== 'undefined' })
+// The Decision Desk count leads every title ("(3) "); a short notice may stand
+// in for the whole title for a moment (AEON-1473).
+const prefix = ref('')
+const notice = ref('')
+export function setTitlePrefix(value: string) { prefix.value = value }
+export function setTitleNotice(value: string) { notice.value = value }
+watch([page, overlay, current, prefix, notice], ([title, over, b, lead, note]) => {
+  const t = over || title
+  document.title = note || `${lead}${t ? `${t} · ${b.wordmark}` : b.wordmark}`
+}, { immediate: typeof document !== 'undefined' })

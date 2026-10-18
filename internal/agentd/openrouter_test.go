@@ -83,3 +83,64 @@ while IFS= read -r line; do :; done
 		t.Fatal("safe credits missing")
 	}
 }
+
+func TestPiKeyMeasurementFailuresKeepQualifiedExecutionHealth(t *testing.T) {
+	const fake = "synthetic-key-value"
+	for _, mode := range []string{"null_cap", "transport", "auth", "missing_profile"} {
+		t.Run(mode, func(t *testing.T) {
+			home := privateCapacityHome(t)
+			if mode != "missing_profile" {
+				store, err := agentsetup.OpenStore(home, false)
+				if err != nil {
+					t.Fatal(err)
+				}
+				if err := store.Write("auth.json", []byte(`{"openrouter":{"type":"api_key","key":"`+fake+`"}}`), true); err != nil {
+					t.Fatal(err)
+				}
+				store.Close()
+			}
+			calls := 0
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				calls++
+				if r.URL.Path != "/key" || r.Method != "GET" || r.Header.Get("Authorization") != "Bearer "+fake {
+					t.Error("unexpected provider endpoint")
+				}
+				switch mode {
+				case "null_cap":
+					fmt.Fprint(w, `{"data":{"limit":null,"usage":2,"limit_remaining":0,"private_label":"sentinel"}}`)
+				case "transport":
+					w.WriteHeader(503)
+				case "auth":
+					w.WriteHeader(401)
+				}
+			}))
+			defer server.Close()
+			path := filepath.Join(privateCapacityHome(t), "pi")
+			if err := os.WriteFile(path, []byte("#!/bin/sh\n[ \"$1\" = --version ] || exit 88\necho fixture\n"), 0700); err != nil {
+				t.Fatal(err)
+			}
+			a := NewPiAdapter(path, map[string]string{"local": home})
+			a.SetExpectedProviders(map[string]string{"local": "openrouter"})
+			a.OpenRouter = openrouter.Client{Base: server.URL}
+			available, err := a.ProbeStatus(t.Context(), "local")
+			if mode == "transport" || mode == "null_cap" {
+				if !available || err != nil {
+					t.Fatal("measurement failure prevented qualified work", err)
+				}
+			} else if available {
+				t.Fatal("missing profile or rejected key became usable")
+			}
+			capture := a.CaptureCapacityResult(t.Context(), "local")
+			want := map[string]string{"null_cap": "success", "transport": "protocol", "auth": "authentication_failed", "missing_profile": "launch_failed"}[mode]
+			if capture.Result != want {
+				t.Fatal("measurement cause lost", capture.Result, want)
+			}
+			if mode == "null_cap" && (capture.Credits == nil || capture.Credits.Remaining != nil) {
+				t.Fatal("null cap became balance")
+			}
+			if mode == "missing_profile" && calls != 0 {
+				t.Fatal("missing local binding called vendor")
+			}
+		})
+	}
+}

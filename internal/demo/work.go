@@ -11,8 +11,10 @@ import (
 
 	"github.com/inspr-at/paimos/internal/agentruns"
 	"github.com/inspr-at/paimos/internal/auth"
+	"github.com/inspr-at/paimos/internal/capacity"
 	"github.com/inspr-at/paimos/internal/modelregistry"
 	"github.com/inspr-at/paimos/internal/tenant"
+	"github.com/inspr-at/paimos/internal/workerlease"
 	"github.com/inspr-at/paimos/internal/workorders"
 )
 
@@ -42,14 +44,9 @@ func (s *seeder) agents() error {
 }
 
 func (s *seeder) agent(name string, scopes []string) (tenant.Principal, string, error) {
-	keyID, agentID, token, err := auth.OperatorCreateAgentKey(s.ctx, s.pool, s.tenantID, name, "", scopes, nil)
+	_, agentID, token, err := auth.OperatorCreateAgentKey(s.ctx, s.pool, s.tenantID, name, "", scopes, nil, s.admin.ID)
 	if err != nil {
 		return tenant.Principal{}, "", fmt.Errorf("agent %s: %w", name, err)
-	}
-	if name == "Lumen Scribe" {
-		if err := auth.OperatorGrantJourneyScopes(s.ctx, s.pool, s.tenantID, keyID, agentID); err != nil {
-			return tenant.Principal{}, "", err
-		}
 	}
 	return tenant.Principal{ID: agentID, TenantID: s.tenantID, Kind: tenant.Agent, Name: name}, token, nil
 }
@@ -64,6 +61,25 @@ func (s *seeder) work() error {
 	var profiles []modelregistry.Profile
 	if err := s.api.do(s.admin, "", http.MethodGet, "/api/models", nil, http.StatusOK, &profiles, nil); err != nil {
 		return fmt.Errorf("models: %w", err)
+	}
+	// A fresh registry advertises identities only. The demo owns its fictional
+	// history pins; registering them through the ordinary handler keeps the
+	// grants and events inside the seed transaction without inventing facts
+	// about a provider model. Existing configured registries retain their pins.
+	if len(profiles) == 0 {
+		for _, pin := range []struct{ harness, family string }{
+			{"codex", "openai"}, {"claude", "anthropic"}, {"grok", "xai"},
+		} {
+			var profile modelregistry.Profile
+			if err := s.api.do(s.admin, "", http.MethodPost, "/api/models", map[string]any{
+				"slug": "demo-" + pin.harness + "-fictional", "version": "1", "harness": pin.harness,
+				"family": pin.family, "model": "demo-" + pin.harness, "effort": "default", "tier": "standard",
+				"note": "Fictional demo history; no provider model or runner executed.",
+			}, http.StatusCreated, &profile, nil); err != nil {
+				return fmt.Errorf("fictional %s model: %w", pin.harness, err)
+			}
+			profiles = append(profiles, profile)
+		}
 	}
 	for _, work := range []demoWork{
 		{s.scribe, s.scribeKey, "codex", "lumen-scribe", "Lumen desk", s.lumenID, s.ids["LT-1"],
@@ -88,10 +104,11 @@ func (s *seeder) work() error {
 }
 
 func (s *seeder) demoProfile(profiles []modelregistry.Profile, harness string) (modelregistry.Profile, error) {
-	for _, profile := range profiles {
-		if profile.Enabled && profile.Harness == harness {
-			return profile, nil
-		}
+	// An explicit grant of an older profile also qualifies every newer
+	// registered version of that line. The fictional desk records one model
+	// and one effort, so pin the current version of the first enabled line.
+	if profile, ok := explicitDemoGrant(profiles, harness); ok {
+		return profile, nil
 	}
 	// The built-in xAI pins use Cursor. Reuse that registry pin's model,
 	// effort and version for a demo Grok enrollment, without inventing a
@@ -110,6 +127,64 @@ func (s *seeder) demoProfile(profiles []modelregistry.Profile, harness string) (
 		}
 	}
 	return modelregistry.Profile{}, fmt.Errorf("no enabled %s model profile", harness)
+}
+
+// explicitDemoGrant keeps the first enabled profile's harness, family, line
+// and effort, then moves to the newest enabled version of that line. The
+// same-version other efforts stay off the grant, matching
+// aeon_account_allows_profile: only a strictly newer version inherits a pin.
+func explicitDemoGrant(profiles []modelregistry.Profile, harness string) (modelregistry.Profile, bool) {
+	anchor := -1
+	for i, profile := range profiles {
+		if profile.Enabled && profile.Harness == harness {
+			anchor = i
+			break
+		}
+	}
+	if anchor < 0 {
+		return modelregistry.Profile{}, false
+	}
+	pin := profiles[anchor]
+	best := pin
+	for _, candidate := range profiles {
+		if !sameDemoLine(pin, candidate) {
+			continue
+		}
+		_, _, bestVersion := modelregistry.ProfileLine(best)
+		_, _, candidateVersion := modelregistry.ProfileLine(candidate)
+		if successorVersion(candidateVersion, bestVersion) {
+			best = candidate
+		}
+	}
+	_, _, bestVersion := modelregistry.ProfileLine(best)
+	for _, candidate := range profiles {
+		if !sameDemoLine(pin, candidate) || candidate.Effort != pin.Effort {
+			continue
+		}
+		_, _, candidateVersion := modelregistry.ProfileLine(candidate)
+		if modelregistry.CompareModelVersions(candidateVersion, bestVersion) == 0 {
+			return candidate, true
+		}
+	}
+	return best, true
+}
+
+func sameDemoLine(pin, candidate modelregistry.Profile) bool {
+	if !candidate.Enabled || candidate.Harness != pin.Harness || candidate.Family != pin.Family {
+		return false
+	}
+	_, pinLine, _ := modelregistry.ProfileLine(pin)
+	_, candidateLine, _ := modelregistry.ProfileLine(candidate)
+	return candidateLine == pinLine
+}
+
+// successorVersion follows aeon_model_version_newer: an empty version or an
+// alias pin has no newer successor, and an alias candidate outranks a number.
+func successorVersion(candidate, pinned string) bool {
+	if candidate == pinned || candidate == "" || pinned == "" || pinned == "alias" {
+		return false
+	}
+	return modelregistry.CompareModelVersions(candidate, pinned) > 0
 }
 
 func (s *seeder) completedWork(work demoWork, profile modelregistry.Profile) error {
@@ -147,6 +222,18 @@ func (s *seeder) completedWork(work demoWork, profile modelregistry.Profile) err
 		"allowed_model_profile_ids": []string{profile.ID},
 	}, http.StatusOK, nil, nil); err != nil {
 		return fmt.Errorf("account metadata: %w", err)
+	}
+	// The fictional screenshot desk has explicit all-day work hours. Its manual
+	// allowance cannot supply a vendor measurement or exempt it from schedules.
+	schedule := capacity.DefaultSchedule("UTC")
+	schedule.Reserve = capacity.ReserveOff
+	for i := range schedule.Week {
+		schedule.Week[i] = capacity.Day{On: true, Start: 0, End: 24}
+	}
+	if err := s.api.do(s.admin, "", http.MethodPut, "/api/agent-accounts/capacity/schedule", map[string]any{
+		"scope": "account", "account_id": account.ID, "schedule": schedule,
+	}, http.StatusNoContent, nil, nil); err != nil {
+		return fmt.Errorf("account schedule: %w", err)
 	}
 	if err := s.api.do(work.agent, work.key, http.MethodPost, "/api/agent-accounts/"+account.ID+"/probe", map[string]any{
 		"daemon_id": daemonID, "daemon_generation": generation, "available": true,
@@ -212,7 +299,7 @@ func (s *seeder) completedWork(work demoWork, profile modelregistry.Profile) err
 	// a version string. The provenance endpoint persists identities only.
 	instructions := work.instructions
 	digest := sha256.Sum256([]byte(instructions))
-	workerHeaders := map[string]string{"X-Aeon-Worker-Lease": lease}
+	workerHeaders := map[string]string{"Authorization": workerlease.Value(work.key, lease)}
 	if err := s.api.do(work.agent, work.key, http.MethodPost, path+"/provenance", map[string]any{
 		"items": []map[string]any{{
 			"kind": "skill", "logical_name": work.logicalName, "hash_kind": "content",

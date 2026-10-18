@@ -1,0 +1,22 @@
+{
+  "group": "footer",
+  "nightlyTiming": {
+    "seconds": 18.254,
+    "selectedTests": 15
+  },
+  "spec": {
+    "file": "tests/tenant-brand.spec.ts",
+    "listedTests": 15,
+    "tierTiming": {
+      "caseSeconds": {
+        "max": 3.073,
+        "median": 1.089,
+        "min": 0.001
+      },
+      "seconds": 18.254,
+      "selectedTests": 15
+    },
+    "weightSeconds": 10.487805,
+    "weightSource": "footer-ui-2"
+  }
+}

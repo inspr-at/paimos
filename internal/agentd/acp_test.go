@@ -74,13 +74,16 @@ func TestACPVendorFixture(t *testing.T) {
 	if name == OpenCode {
 		model = "ollama/qwen3-coder"
 	}
+	if name == Cursor {
+		model = "test-model"
+	}
 	send := func(v any) {
 		if enc.Encode(v) != nil {
 			os.Exit(9)
 		}
 	}
 	update := func(session, kind string) {
-		send(map[string]any{"jsonrpc": "2.0", "method": "session/update", "params": map[string]any{"sessionId": session, "update": map[string]any{"sessionUpdate": kind, "used": 999, "size": 1000, "cost": map[string]any{"amount": 0.00002, "currency": "USD"}}}})
+		send(map[string]any{"jsonrpc": "2.0", "method": "session/update", "params": map[string]any{"sessionId": session, "update": map[string]any{"sessionUpdate": kind, "content": map[string]string{"type": "text", "text": "fixture reply"}, "toolCallId": "call-1", "kind": "execute", "status": "in_progress", "used": 999, "size": 1000, "cost": map[string]any{"amount": 0.00002, "currency": "USD"}}}})
 	}
 	complete := func(id json.RawMessage, reason string) {
 		usage := map[string]any{"inputTokens": 15, "outputTokens": 4, "cachedReadTokens": 5, "thoughtTokens": 3, "totalTokens": 19}
@@ -119,7 +122,7 @@ func TestACPVendorFixture(t *testing.T) {
 			if scenario == "model-mismatch" {
 				current = "other-model"
 			}
-			result = map[string]any{"sessionId": "ses-fixture", "models": map[string]string{"currentModelId": current}}
+			result = map[string]any{"sessionId": "ses-fixture", "models": map[string]string{"currentModelId": current}, "modes": map[string]string{"currentModeId": "agent"}}
 		case "session/set_config_option":
 			value := model
 			if scenario == "model-mismatch" {
@@ -178,7 +181,7 @@ func acpFixturePath(t *testing.T, name, scenario string) string {
 		t.Fatal(err)
 	}
 	path := filepath.Join(root, "vendor")
-	script := fmt.Sprintf("#!/bin/sh\nif [ \"$1\" = --version ]; then printf '1.14.48\\n'; exit 0; fi\nAEON_ACP_FIXTURE=%s:%s exec %q -test.run=^TestACPVendorFixture$\n", name, scenario, exe)
+	script := fmt.Sprintf("#!/bin/sh\nif [ \"$1\" = --version ]; then printf '1.14.48\\n'; exit 0; fi\nif [ \"$1\" = status ]; then printf '%%s\\n' '{\"status\":\"authenticated\",\"isAuthenticated\":true,\"userInfo\":{\"userId\":\"42\"}}'; exit 0; fi\nAEON_ACP_FIXTURE=%s:%s exec %q -test.run=^TestACPVendorFixture$\n", name, scenario, exe)
 	if err := os.WriteFile(path, []byte(script), 0700); err != nil {
 		t.Fatal(err)
 	}

@@ -20,7 +20,7 @@ import (
 func TestProjectMoveAliasAndUndo(t *testing.T) {
 	p := newPrincipal(t, "project-move")
 	projectKind := kindBySlug(t, p, "project")
-	ticketKind := kindBySlug(t, p, "ticket")
+	ticketKind := kindBySlug(t, p, "work")
 	source := mustNode(t, p, `{"kind_id":"`+projectKind.ID+`","title":"Source","fields":{"project_key":"SRC"}}`)
 	target := mustNode(t, p, `{"kind_id":"`+projectKind.ID+`","title":"Target","fields":{"project_key":"DST"}}`)
 	issue := mustNode(t, p, `{"kind_id":"`+ticketKind.ID+`","title":"Move me","parent_id":"`+source.ID+`","key_prefix":"SRC"}`)
@@ -108,8 +108,8 @@ func TestProjectMoveAliasAndUndo(t *testing.T) {
 func TestProjectMoveRejectsNestedIssues(t *testing.T) {
 	p := newPrincipal(t, "project-move-children")
 	projectKind := kindBySlug(t, p, "project")
-	ticketKind := kindBySlug(t, p, "ticket")
-	taskKind := kindBySlug(t, p, "task")
+	ticketKind := kindBySlug(t, p, "work")
+	taskKind := kindBySlug(t, p, "work")
 	source := mustNode(t, p, `{"kind_id":"`+projectKind.ID+`","title":"Source","fields":{"project_key":"SRC"}}`)
 	target := mustNode(t, p, `{"kind_id":"`+projectKind.ID+`","title":"Target","fields":{"project_key":"DST"}}`)
 	issue := mustNode(t, p, `{"kind_id":"`+ticketKind.ID+`","title":"Parent","parent_id":"`+source.ID+`","key_prefix":"SRC"}`)

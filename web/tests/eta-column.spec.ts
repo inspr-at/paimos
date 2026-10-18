@@ -4,6 +4,7 @@ import { fixtures, me, mockWork } from './work-fixtures'
 import { agentData, mockAgents, type AgentWorld } from './agents-fixtures'
 import { mkdirSync } from 'node:fs'
 import { join } from 'node:path'
+import { expectStableControls } from './helpers/stable'
 
 const at = (minutes: number) => new Date(Date.now() + minutes * 60_000).toISOString()
 
@@ -57,7 +58,12 @@ test('the ETA column shows fresh, overdue and stale estimates under its header a
     const cell = row(page, key).locator('td.c-eta')
     const value = (await cell.locator('.eta-cell').boundingBox())!
     expect(Math.abs(value.x + value.width - (headerBox.x + headerBox.width - 6))).toBeLessThan(3)
-    expect(await cell.evaluate(td => { const el = td.querySelector('.when > .shown') as HTMLElement; return el.scrollWidth <= el.clientWidth })).toBe(true)
+    const label = await cell.evaluate(td => {
+      const el = td.querySelector('.when > .shown') as HTMLElement
+      return { text: el.textContent, width: el.clientWidth, contentWidth: el.scrollWidth, cellWidth: td.clientWidth }
+    })
+    expect(label.contentWidth <= label.width, `${key}: ${JSON.stringify(label)}`).toBe(true)
+    console.info(`ETA geometry ${key}: ${JSON.stringify(label)}`)
   }
 
   await header.getByRole('button', { name: 'ETA' }).click()
@@ -69,6 +75,45 @@ test('the ETA column shows fresh, overdue and stale estimates under its header a
   await expect(row(page, 'PHAROS-11').locator('.c-updated')).toBeHidden()
   await expect(row(page, 'PHAROS-14').locator('.c-updated')).toBeVisible()
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= document.documentElement.clientWidth)).toBe(true)
+  for (const width of [390, 1024, 1440]) for (const theme of ['light', 'dark'] as const) {
+    await page.setViewportSize({ width, height: 1000 })
+    await page.evaluate(theme => { document.documentElement.dataset.theme = theme }, theme)
+    for (const key of ['PHAROS-11', 'PHAROS-12', 'PHAROS-13']) {
+      const label = row(page, key).locator('.eta-cell .shown')
+      await expect(label).toBeVisible()
+      expect(await label.evaluate(element => element.scrollWidth <= element.clientWidth), `${width} ${theme} ${key}: complete ETA`).toBe(true)
+    }
+    await expectStableControls({
+      controls: { estimate: fresh, row: row(page, 'PHAROS-11'), key: row(page, 'PHAROS-11').locator('.key') },
+      interactions: [{ name: 'read the estimate tooltip', run: async () => { await fresh.hover(); await expect(page.locator('.tooltip')).toContainText('Estimated by Ada') } }],
+    })
+    await page.screenshot({ path: test.info().outputPath(`eta-${width}-${theme}.png`) })
+  }
+})
+
+// R18: platform font metrics can exceed the fitted ETA slot by a few pixels.
+// Keep the whole overdue estimate inside its cell and preserve hover geometry.
+test('AEON-1326: a wide-font overdue estimate stays whole inside its saved column', async ({ page }) => {
+  await pinClock(page)
+  await page.setViewportSize({ width: 1600, height: 900 })
+  const data = world()
+  data.preferences['list:p-pharos'] = { widths: { eta: 114 } }
+  await mockWork(page, data)
+  await page.goto('/p/PHAROS')
+  const overdue = row(page, 'PHAROS-12').locator('.eta-cell')
+  await expect(overdue.locator('.shown')).toHaveText('overdue 5 min')
+  // The bundled font makes the nightly Linux width reproducible on macOS too.
+  await page.addStyleTag({ content: '.eta-cell .when { font-family: "JetBrains Mono"; letter-spacing: .3px; }' })
+  await page.evaluate(() => document.fonts.ready)
+  const label = overdue.locator('.shown')
+  expect(await label.evaluate(element => element.scrollWidth <= element.clientWidth)).toBe(true)
+  const value = (await label.boundingBox())!, cell = (await row(page, 'PHAROS-12').locator('.c-eta').boundingBox())!
+  expect(value.x).toBeGreaterThanOrEqual(cell.x)
+  expect(value.x + value.width).toBeLessThanOrEqual(cell.x + cell.width)
+  await expectStableControls({
+    controls: { estimate: overdue, row: row(page, 'PHAROS-12'), header: page.getByRole('columnheader', { name: 'ETA' }) },
+    interactions: [{ name: 'read the overdue estimate', run: async () => { await overdue.hover(); await expect(page.locator('.tooltip')).toContainText('Estimated by Beau') } }],
+  })
 })
 
 test('with both forms chosen, the clock time shows on hover', async ({ page }) => {
@@ -142,8 +187,10 @@ for (const role of ['worker', 'coordinator'] as const) {
   })
 }
 
+// The approved rows (AEON-1211, design AEON-1196) carry no estimate: the details show it, and the
+// columns still fit at every width.
 for (const width of [1600, 1100, 390]) {
-  test(`the sessions table carries the bound ticket's estimate without overflowing its columns at ${width}px`, async ({ page }) => {
+  test(`the sessions table leaves the bound ticket's estimate to the details and fits its columns at ${width}px`, async ({ page }) => {
     await page.setViewportSize({ width, height: 900 })
     await mockWork(page, fixtures(), { admin: true })
     const data = agentData({ ...agentsWorld })
@@ -154,20 +201,28 @@ for (const width of [1600, 1100, 390]) {
     await mockAgents(page, data)
     await page.goto('/agents')
     await expect(page.getByRole('heading', { name: 'Agents', level: 1 })).toBeVisible()
-    await expect(sessionRow(page, 2).locator('.eta-cell .when')).toHaveText(/^~2\d min$/)
-    await expect(sessionRow(page, 3).locator('.eta-cell')).toHaveClass(/stale/)
-    await expect(sessionRow(page, 4).locator('.eta-cell')).toHaveClass(/overdue/)
-    await expect(sessionRow(page, 4).locator('.eta-cell .when')).toHaveText(/^overdue [45] min$/)
-    // Stopped sessions stay empty; working sessions without a time show a quiet hint.
-    await expect(page.locator('.row .eta-cell .when')).toHaveCount(3)
-    await expect(sessionRow(page, 1).locator('.eta-cell')).toHaveText('no ETA')
-    await expect(sessionRow(page, 7).locator('.eta-cell')).toHaveCount(0)
-    for (const n of [2, 3, 4]) {
-      const fits = await sessionRow(page, n).evaluate(row => [...row.querySelectorAll<HTMLElement>(':scope > [role="cell"]')].every(cell => cell.scrollWidth <= cell.clientWidth + 1)
-        && [...row.querySelectorAll<HTMLElement>('.when > .shown')].every(el => el.scrollWidth <= el.clientWidth))
+    await expect(sessionRow(page, 2)).toBeVisible()
+    await expect(page.locator('.sessions .row .eta-cell')).toHaveCount(0)
+    for (const n of [1, 2, 3, 4]) {
+      const fits = await sessionRow(page, n).evaluate(row => [...row.querySelectorAll<HTMLElement>(':scope > [role="gridcell"], :scope > .execution-host > [role="gridcell"]')].every(cell => cell.scrollWidth <= cell.clientWidth + 1))
       expect(fits).toBe(true)
     }
     expect(await page.evaluate(() => document.documentElement.scrollWidth <= document.documentElement.clientWidth)).toBe(true)
+    // The details carry the estimate: fresh, stale and overdue reports, a quiet hint, nothing once stopped.
+    const panel = page.getByRole('complementary', { name: 'Session details' })
+    const eta = panel.locator('.now-eta .eta-cell')
+    await page.goto('/agents/5e000000-0000-4000-8000-000000000002')
+    await expect(eta.locator('.when')).toHaveText(/^~2\d min$/)
+    await page.goto('/agents/5e000000-0000-4000-8000-000000000003')
+    await expect(eta).toHaveClass(/stale/)
+    await page.goto('/agents/5e000000-0000-4000-8000-000000000004')
+    await expect(eta).toHaveClass(/overdue/)
+    await expect(eta.locator('.when')).toHaveText(/^overdue [45] min$/)
+    await page.goto('/agents/5e000000-0000-4000-8000-000000000001')
+    await expect(eta).toHaveText('no ETA')
+    await page.goto('/agents/5e000000-0000-4000-8000-000000000007')
+    await expect(panel.locator('.now-block')).toBeVisible()
+    await expect(panel.locator('.now-eta')).toHaveCount(0)
   })
 }
 
@@ -203,10 +258,17 @@ for (const theme of ['light', 'dark'] as const) for (const width of [1600, 390])
     const shots = process.env.AEON_443_SHOTS
     if (shots) { mkdirSync(shots, { recursive: true }); await page.screenshot({ path: join(shots, `tickets-${width}-${theme}.png`), fullPage: true }) }
     await mockAgents(page, agentData({ ...agentsWorld }))
+    // The agents rows carry no estimate (AEON-1211); the details give the quiet hint, and nothing once stopped.
     await page.goto('/agents')
-    await expect(sessionRow(page, 1).locator('.eta-cell')).toHaveText('no ETA')
-    await expect(sessionRow(page, 7).locator('.eta-cell')).toHaveCount(0)
+    await expect(sessionRow(page, 1)).toBeVisible()
+    await expect(page.locator('.sessions .row .eta-cell')).toHaveCount(0)
     expect(await page.evaluate(() => document.documentElement.scrollWidth <= document.documentElement.clientWidth)).toBe(true)
     if (shots) { await sessionRow(page, 1).scrollIntoViewIfNeeded(); await page.screenshot({ path: join(shots, `agents-${width}-${theme}.png`) }) }
+    const panel = page.getByRole('complementary', { name: 'Session details' })
+    await page.goto('/agents/5e000000-0000-4000-8000-000000000001')
+    await expect(panel.locator('.now-eta .eta-cell')).toHaveText('no ETA')
+    await page.goto('/agents/5e000000-0000-4000-8000-000000000007')
+    await expect(panel.locator('.now-block')).toBeVisible()
+    await expect(panel.locator('.now-eta')).toHaveCount(0)
   })
 }

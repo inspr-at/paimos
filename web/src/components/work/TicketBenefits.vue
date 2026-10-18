@@ -1,16 +1,22 @@
 <!-- SPDX-License-Identifier: AGPL-3.0-only -->
 <script setup lang="ts">
 import { computed, useId } from 'vue'
-import { benefitIssues, pillWords } from '../../lib/ticketBenefits'
+import { benefitIssues, pillIssues, pillWords } from '../../lib/ticketBenefits'
 import AppIcon from '../AppIcon.vue'
+import ParentBenefitGeneration from './ParentBenefitGeneration.vue'
 
 // The plain-language user benefit (AEON-256): a 2–4 word pill and one or two
 // sentences, in English and German. Reading shows what is there, one line when
 // something is missing and, when the viewer may edit, the one action that fixes it.
-const props = defineProps<{ fields: Record<string, unknown>; editing?: boolean; disabled?: boolean; done?: boolean; editable?: boolean; notice?: string; invalidKey?: string }>()
-const emit = defineEmits<{ change: [key: string, value: string | boolean]; edit: [] }>()
+const props = defineProps<{ fields: Record<string, unknown>; parent?: boolean; nodeId?: string; editing?: boolean; disabled?: boolean; done?: boolean; editable?: boolean; notice?: string; invalidKey?: string }>()
+const emit = defineEmits<{ change: [key: string, value: string | boolean]; edit: []; generated: [] }>()
 const uid = useId()
 const issues = computed(() => benefitIssues(props.fields))
+const invalidPills = computed(() => pillIssues(props.fields))
+// Read and edit views mount separate instances. Keep the persisted ticket's
+// incomplete context until this editor closes, so correcting the draft never
+// removes a guidance line and moves the fields beneath it.
+const completedGapOnOpen = props.editing && props.done && !props.parent && issues.value.length > 0
 const languages = [
   { key: 'en', label: 'English', short: 'EN', pill: 'e.g. Hosts in minutes', benefit: 'What people gain, in one or two sentences.' },
   { key: 'de', label: 'Deutsch', short: 'DE', pill: 'z. B. Hosts in Minuten', benefit: 'Was Menschen gewinnen, neutral formuliert, ohne direkte Anrede.' },
@@ -18,10 +24,13 @@ const languages = [
 const text = (key: string) => typeof props.fields[key] === 'string' ? (props.fields[key] as string).trim() : ''
 const filled = computed(() => languages.filter(language => text(`pill_${language.key}`) || text(`benefit_${language.key}`)))
 const guidance = computed(() => {
-  if (!issues.value.length) return ''
+  if (props.editing) return props.done
+    ? `${completedGapOnOpen ? 'This completed ticket has incomplete benefit fields. ' : ''}Each non-empty pill needs 2–4 words to save. The project’s entry checks determine what is needed before Done.`
+    : 'Each non-empty pill needs 2–4 words to save. Before Done, the project’s entry checks determine whether both languages and benefits are required.'
+  if (props.parent || !issues.value.length) return ''
   return props.done
-    ? 'This completed ticket has incomplete benefit fields. Completing it again needs both languages.'
-    : 'Before Done: a 2–4 word pill and a plain benefit, in both languages.'
+    ? 'This completed ticket has incomplete benefit fields. The project’s entry checks determine what is needed before Done.'
+    : 'Before Done, the project’s entry checks determine whether release text is required: a 2–4 word pill and a plain benefit, in both languages.'
 })
 const raw = (key: string) => typeof props.fields[key] === 'string' ? props.fields[key] as string : ''
 const countLabel = (value: string) => { const n = pillWords(value); return n ? `${n} ${n === 1 ? 'word' : 'words'} of 2–4` : '2–4 words' }
@@ -31,27 +40,32 @@ const countLabel = (value: string) => { const n = pillWords(value); return n ? `
   <section class="benefits" :class="{ editing }" :aria-labelledby="`${uid}-title`">
     <header class="section-head">
       <h3 :id="`${uid}-title`" class="eyebrow">User benefit</h3>
-      <span v-if="!editing && fields.hide_from_release_notes === true" class="hidden-note"><AppIcon name="eye-off" :size="12" />Hidden from release notes</span>
+      <span v-if="!editing && fields.no_release_needed === true" class="hidden-note">No release needed</span>
+      <span v-else-if="!editing && fields.hide_from_release_notes === true" class="hidden-note"><AppIcon name="eye-off" :size="12" />Hidden from release notes</span>
     </header>
 
     <template v-if="editing">
+      <div class="release-controls">
+        <label v-if="!parent" class="release-control" data-tip="Content work uses the automatic acceptance delay after Done, unless there is an objection or human check. Omitted from release notes."><input type="checkbox" :checked="fields.no_release_needed === true" :disabled="disabled" @change="emit('change', 'no_release_needed', ($event.target as HTMLInputElement).checked)" />No release needed</label>
+        <label class="release-control" data-tip="Hidden tickets are exempt from the release-text entry check."><input type="checkbox" :checked="fields.hide_from_release_notes === true" :disabled="disabled" @change="emit('change', 'hide_from_release_notes', ($event.target as HTMLInputElement).checked)" />Hide from release notes</label>
+      </div>
       <p v-if="notice" :id="`${uid}-notice`" class="guidance" role="status">{{ notice }}</p>
       <p v-else-if="guidance" class="guidance" role="status">{{ guidance }}</p>
       <div class="languages">
         <div v-for="language in languages" :key="language.key" :lang="language.key" class="language-edit">
           <div class="label-row">
             <label :for="`${uid}-pill-${language.key}`">Pill · {{ language.label }}</label>
-            <span class="count" :class="{ off: pillWords(text(`pill_${language.key}`)) > 4 || pillWords(text(`pill_${language.key}`)) === 1 }" aria-hidden="true">{{ countLabel(text(`pill_${language.key}`)) }}</span>
+            <span :id="`${uid}-count-${language.key}`" class="count" :class="{ off: invalidPills.some(issue => issue.startsWith(`pill_${language.key} `)) }">{{ countLabel(text(`pill_${language.key}`)) }}</span>
           </div>
-          <input :id="`${uid}-pill-${language.key}`" class="field" :value="raw(`pill_${language.key}`)" :placeholder="language.pill" :disabled="disabled" :aria-invalid="invalidKey === `pill_${language.key}` ? 'true' : undefined" :aria-describedby="invalidKey === `pill_${language.key}` && notice ? `${uid}-notice` : undefined" @input="emit('change', `pill_${language.key}`, ($event.target as HTMLInputElement).value)" />
+          <input :id="`${uid}-pill-${language.key}`" class="field" :value="raw(`pill_${language.key}`)" :placeholder="language.pill" :disabled="disabled" :aria-invalid="invalidKey === `pill_${language.key}` || invalidPills.some(issue => issue.startsWith(`pill_${language.key} `)) ? 'true' : undefined" :aria-describedby="`${uid}-count-${language.key}${invalidKey === `pill_${language.key}` && notice ? ` ${uid}-notice` : ''}`" @input="emit('change', `pill_${language.key}`, ($event.target as HTMLInputElement).value)" />
           <label :for="`${uid}-benefit-${language.key}`">Benefit · {{ language.label }}</label>
           <textarea :id="`${uid}-benefit-${language.key}`" class="field" rows="3" :value="raw(`benefit_${language.key}`)" :placeholder="language.benefit" :disabled="disabled" :aria-invalid="invalidKey === `benefit_${language.key}` ? 'true' : undefined" :aria-describedby="invalidKey === `benefit_${language.key}` && notice ? `${uid}-notice` : undefined" @input="emit('change', `benefit_${language.key}`, ($event.target as HTMLTextAreaElement).value)" />
         </div>
       </div>
-      <label class="hide" data-tip="Hidden tickets still need both languages."><input type="checkbox" :checked="fields.hide_from_release_notes === true" :disabled="disabled" @change="emit('change', 'hide_from_release_notes', ($event.target as HTMLInputElement).checked)" />Hide from release notes</label>
     </template>
 
     <template v-else>
+      <ParentBenefitGeneration v-if="parent && nodeId" :node-id="nodeId" :editable="!!editable" @edit="emit('edit')" @generated="emit('generated')" />
       <dl v-if="filled.length" class="languages">
         <div v-for="language in filled" :key="language.key" :lang="language.key" class="language">
           <dt class="lang" :data-tip="language.label" :aria-label="language.label">{{ language.short }}</dt>
@@ -80,9 +94,9 @@ const countLabel = (value: string) => { const n = pillWords(value); return n ? `
 .lang { padding-top: 4px; font: 500 10px/1.5 var(--mono); letter-spacing: .12em; color: var(--ink-3); font-variant-ligatures: none; }
 .language dd { display: grid; justify-items: start; gap: 5px; min-width: 0; margin: 0; }
 .pill {
-  display: inline-flex; align-items: center; max-width: 100%; height: 24px; padding: 0 10px; border-radius: 999px;
+  display: inline-flex; align-items: center; max-width: 100%; min-height: 24px; padding: 0 10px; border-radius: 999px;
   background: var(--chip-teal-bg); box-shadow: inset 0 0 0 1px var(--chip-teal-line); color: var(--teal-ink);
-  font-size: 12.5px; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  font-size: 12.5px; font-weight: 600; white-space: normal; overflow-wrap: anywhere;
 }
 .benefit-text { margin: 0; font-size: 14px; line-height: 1.5; color: var(--ink); white-space: pre-wrap; overflow-wrap: anywhere; }
 .guidance { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 10px; margin: 0; font-size: 12.5px; line-height: 1.45; color: var(--ink-3); }
@@ -101,5 +115,8 @@ label { font-size: 12px; color: var(--ink-2); }
 .field { width: 100%; padding: 8px 10px; }
 .field[aria-invalid="true"] { box-shadow: 0 0 0 1px var(--warn); }
 textarea.field { height: auto; min-height: 68px; resize: vertical; line-height: 1.45; }
-.hide { display: inline-flex; align-items: center; gap: 8px; justify-self: start; margin-top: 2px; }
+.release-controls { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 16px; }
+.release-control { display: inline-flex; align-items: center; gap: 8px; min-height: 28px; cursor: pointer; }
+.release-control input { flex: none; margin: 0; }
+@media (pointer: coarse) { .release-control { min-height: 44px; } }
 </style>

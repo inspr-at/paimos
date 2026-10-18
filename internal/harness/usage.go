@@ -18,11 +18,95 @@ import (
 	"github.com/jackc/pgx/v5"
 
 	"github.com/inspr-at/paimos/internal/agentaccounts"
+	"github.com/inspr-at/paimos/internal/authz"
+	"github.com/inspr-at/paimos/internal/events"
+	"github.com/inspr-at/paimos/internal/modelregistry"
+	"github.com/inspr-at/paimos/internal/modelreport"
+	"github.com/inspr-at/paimos/internal/servicetier"
 	"github.com/inspr-at/paimos/internal/tenant"
+	"github.com/inspr-at/paimos/internal/workerlease"
 	"github.com/inspr-at/paimos/internal/workorders"
 )
 
 const maxUsageCount int64 = 1_000_000_000_000
+
+// RunUsage is a redacted measurement of one immutable managed run. Receipt
+// replay and successive cumulative snapshots never contribute extra rows.
+// Overlapping sessions cannot establish additive counters, so remain unknown.
+type RunUsage struct {
+	RunID                      string
+	Tokens, EstimatedAPIUSD    *string
+	KnownModels, UnknownModels int
+	Partial, Truncated         bool
+}
+
+// ReadRunUsageTx reads at most 200 runs and 200 current models per run. It
+// shares the caller's transaction/RLS snapshot and never exposes account data.
+// Estimated API list prices are not paid charges or subscription costs.
+func ReadRunUsageTx(ctx context.Context, tx pgx.Tx, p tenant.Principal, ids []string) ([]RunUsage, error) {
+	if len(ids) > 200 {
+		return nil, workorders.Fail(400, "run usage limit exceeded")
+	}
+	for _, id := range ids {
+		if !workorders.UUID(id) {
+			return nil, workorders.Fail(400, "invalid usage run")
+		}
+	}
+	allowed, err := authz.ProjectsTx(ctx, tx, p)
+	if err != nil {
+		return nil, err
+	}
+	rows, err := tx.Query(ctx, `SELECT r.id::text,n.project_id::text,s.projects,s.sessions,
+ CASE WHEN s.sessions=1 THEN u.tokens::text END,
+ CASE WHEN s.sessions=1 THEN u.estimate::text END,
+ coalesce(u.known,0),coalesce(u.unknown,0),coalesce(u.partial,true),coalesce(u.models>200,false)
+ FROM agent_runs r JOIN nodes n ON n.tenant_id=r.tenant_id AND n.id=r.work_order_id
+ LEFT JOIN LATERAL (SELECT count(*) AS sessions,min(id::text)::uuid AS id,array_agg(project_id::text) AS projects FROM
+  (SELECT id,project_id FROM harness_sessions WHERE tenant_id=r.tenant_id AND run_id=r.id ORDER BY created_at,id LIMIT 2) bounded) s ON true
+ LEFT JOIN LATERAL (SELECT count(*) AS models,
+  sum(input_tokens::numeric+output_tokens) FILTER(WHERE input_tokens IS NOT NULL AND output_tokens IS NOT NULL) AS tokens,
+  sum(estimated_cost_usd) FILTER(WHERE billing_mode='api') AS estimate,
+  count(*) FILTER(WHERE input_tokens IS NOT NULL AND output_tokens IS NOT NULL)::int AS known,
+  count(*) FILTER(WHERE input_tokens IS NULL OR output_tokens IS NULL)::int AS unknown,
+  bool_or(provisional OR input_tokens IS NULL OR output_tokens IS NULL OR billing_mode='unknown' OR (billing_mode='api' AND estimated_cost_usd IS NULL)) AS partial
+ FROM (SELECT input_tokens,output_tokens,provisional,billing_mode,estimated_cost_usd
+  FROM harness_session_usage WHERE tenant_id=r.tenant_id AND session_id=s.id ORDER BY model LIMIT 201) bounded) u ON s.sessions=1
+ WHERE r.id=ANY($1::uuid[]) ORDER BY r.id`, ids)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := []RunUsage{}
+	for rows.Next() {
+		var v RunUsage
+		var project string
+		var sourceProjects []string
+		var sessions int
+		if err := rows.Scan(&v.RunID, &project, &sourceProjects, &sessions, &v.Tokens, &v.EstimatedAPIUSD, &v.KnownModels, &v.UnknownModels, &v.Partial, &v.Truncated); err != nil {
+			return nil, err
+		}
+		if !allowed("harness.read", project) || !allowed("outcome.read", project) {
+			continue
+		}
+		visible := true
+		for _, source := range sourceProjects {
+			visible = visible && allowed("harness.read", source) && allowed("outcome.read", source)
+		}
+		if !visible {
+			continue
+		}
+		// Project-only readers cannot prove there is no hidden overlapping
+		// session. Retain their visible measurement with explicit coverage.
+		v.Partial = v.Partial || !allowed("harness.read", "") || !allowed("outcome.read", "")
+		if sessions != 1 || v.KnownModels+v.UnknownModels == 0 || v.Truncated {
+			v.Tokens, v.EstimatedAPIUSD = nil, nil
+			v.KnownModels, v.UnknownModels = 0, 1
+			v.Partial = true
+		}
+		out = append(out, v)
+	}
+	return out, rows.Err()
+}
 
 var usageModelRE = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._:/-]*$`)
 
@@ -30,27 +114,33 @@ var usageModelRE = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._:/-]*$`)
 // Null counters and costs are unknown; EstimatedCostUSD is never billed cost.
 // Aggregate consumers must not add overlapping managed-run telemetry to it.
 type SessionModelUsage struct {
-	SessionID         string    `json:"session_id"`
-	Model             string    `json:"model"`
-	Sequence          int64     `json:"sequence"`
-	InputTokens       *int64    `json:"input_tokens"`
-	OutputTokens      *int64    `json:"output_tokens"`
-	CachedInputTokens *int64    `json:"cached_input_tokens"`
-	ReasoningTokens   *int64    `json:"reasoning_tokens"`
-	Provisional       bool      `json:"provisional"`
-	PriceVersion      *int64    `json:"price_version"`
-	EstimatedCostUSD  *string   `json:"estimated_cost_usd"`
-	CostStatus        string    `json:"cost_status"`
-	Currency          string    `json:"currency"`
-	AccountID         *string   `json:"account_id"`
-	AccountLabel      *string   `json:"account_label"`
-	BillingMode       string    `json:"billing_mode"`
-	SubscriptionLabel *string   `json:"subscription_label"`
-	MetadataSource    string    `json:"metadata_source"`
-	ReportedAt        time.Time `json:"reported_at"`
+	AccountUse        string             `json:"account_use,omitempty"`
+	ModelTimeMS       *int64             `json:"model_time_ms,omitempty"`
+	ServiceTier       *string            `json:"service_tier"`
+	TierSegments      []TierUsageSegment `json:"tier_segments"`
+	SessionID         string             `json:"session_id"`
+	Model             string             `json:"model"`
+	Sequence          int64              `json:"sequence"`
+	InputTokens       *int64             `json:"input_tokens"`
+	OutputTokens      *int64             `json:"output_tokens"`
+	CachedInputTokens *int64             `json:"cached_input_tokens"`
+	ReasoningTokens   *int64             `json:"reasoning_tokens"`
+	Provisional       bool               `json:"provisional"`
+	PriceVersion      *int64             `json:"price_version"`
+	EstimatedCostUSD  *string            `json:"estimated_cost_usd"`
+	CostStatus        string             `json:"cost_status"`
+	Currency          string             `json:"currency"`
+	AccountID         *string            `json:"account_id"`
+	AccountLabel      *string            `json:"account_label"`
+	BillingMode       string             `json:"billing_mode"`
+	SubscriptionLabel *string            `json:"subscription_label"`
+	MetadataSource    string             `json:"metadata_source"`
+	ReportedAt        time.Time          `json:"reported_at"`
 }
 
 type usageReport struct {
+	ModelTimeMS       *int64  `json:"model_time_ms,omitempty"`
+	ServiceTier       *string `json:"service_tier,omitempty"`
 	ReportID          string  `json:"report_id"`
 	Model             string  `json:"model"`
 	Sequence          int64   `json:"sequence"`
@@ -86,10 +176,13 @@ func (in *usageReport) validate() error {
 	if !workorders.UUID(in.ReportID) || !validUsageModel(in.Model) || in.Sequence < 1 || in.Sequence > maxUsageCount || in.Provisional == nil {
 		return workorders.Fail(400, "invalid report identity, model, sequence or provisional flag")
 	}
+	if in.ServiceTier != nil && !servicetier.Valid(*in.ServiceTier) {
+		return workorders.Fail(400, "invalid usage tier")
+	}
 	in.ReportID = strings.ToLower(in.ReportID)
-	for _, count := range []*int64{in.InputTokens, in.OutputTokens, in.CachedInputTokens, in.ReasoningTokens} {
+	for _, count := range []*int64{in.InputTokens, in.OutputTokens, in.CachedInputTokens, in.ReasoningTokens, in.ModelTimeMS} {
 		if count != nil && (*count < 0 || *count > maxUsageCount) {
-			return workorders.Fail(400, "token count must be 0..1000000000000 or null")
+			return workorders.Fail(400, "usage count or model time must be 0..1000000000000 or null")
 		}
 	}
 	if in.InputTokens != nil && in.CachedInputTokens != nil && *in.CachedInputTokens > *in.InputTokens {
@@ -120,9 +213,9 @@ func (in *usageReport) validate() error {
 func (in usageReport) snapshot(sessionID string) SessionModelUsage {
 	return SessionModelUsage{SessionID: sessionID, Model: in.Model, Sequence: in.Sequence,
 		InputTokens: in.InputTokens, OutputTokens: in.OutputTokens, CachedInputTokens: in.CachedInputTokens,
-		ReasoningTokens: in.ReasoningTokens,
-		Provisional:     *in.Provisional || in.InputTokens == nil || in.OutputTokens == nil || in.CachedInputTokens == nil,
-		AccountID:       in.AccountID, AccountLabel: in.AccountLabel, BillingMode: in.BillingMode,
+		ReasoningTokens: in.ReasoningTokens, ModelTimeMS: in.ModelTimeMS,
+		Provisional: *in.Provisional || in.InputTokens == nil || in.OutputTokens == nil || in.CachedInputTokens == nil,
+		AccountID:   in.AccountID, AccountLabel: in.AccountLabel, BillingMode: in.BillingMode,
 		SubscriptionLabel: in.SubscriptionLabel, Currency: "USD", CostStatus: "unknown", MetadataSource: "reported"}
 }
 
@@ -134,7 +227,7 @@ func usageTransition(old, next SessionModelUsage) error {
 	if next.Sequence <= old.Sequence {
 		return workorders.Fail(409, "usage sequence must increase")
 	}
-	for _, counts := range [][2]*int64{{old.InputTokens, next.InputTokens}, {old.OutputTokens, next.OutputTokens}, {old.CachedInputTokens, next.CachedInputTokens}, {old.ReasoningTokens, next.ReasoningTokens}} {
+	for _, counts := range [][2]*int64{{old.ModelTimeMS, next.ModelTimeMS}, {old.InputTokens, next.InputTokens}, {old.OutputTokens, next.OutputTokens}, {old.CachedInputTokens, next.CachedInputTokens}, {old.ReasoningTokens, next.ReasoningTokens}} {
 		if counts[0] != nil && (counts[1] == nil || *counts[1] < *counts[0]) {
 			return workorders.Fail(409, "known cumulative tokens cannot decrease or become unknown")
 		}
@@ -144,22 +237,22 @@ func usageTransition(old, next SessionModelUsage) error {
 		return workorders.Fail(409, "cumulative uncached input cannot decrease")
 	}
 	if !old.Provisional && (next.Provisional ||
-		!sameUsageValue(old.InputTokens, next.InputTokens) || !sameUsageValue(old.OutputTokens, next.OutputTokens) ||
+		!sameUsageValue(old.ModelTimeMS, next.ModelTimeMS) || !sameUsageValue(old.InputTokens, next.InputTokens) || !sameUsageValue(old.OutputTokens, next.OutputTokens) ||
 		!sameUsageValue(old.CachedInputTokens, next.CachedInputTokens) || !sameUsageValue(old.ReasoningTokens, next.ReasoningTokens) ||
 		!sameUsageValue(old.AccountID, next.AccountID) ||
 		!sameUsageValue(old.AccountLabel, next.AccountLabel) || old.BillingMode != next.BillingMode ||
-		!sameUsageValue(old.SubscriptionLabel, next.SubscriptionLabel)) {
+		!sameUsageValue(old.SubscriptionLabel, next.SubscriptionLabel) || !sameUsageValue(old.ServiceTier, next.ServiceTier)) {
 		return workorders.Fail(409, "final usage counters and metadata are immutable")
 	}
 	return nil
 }
 
-const usageColumns = `session_id::text,model,sequence,input_tokens,output_tokens,cached_input_tokens,reasoning_tokens,provisional,price_version,estimated_cost_usd::text,account_id::text,account_label,billing_mode,subscription_label,reported_at`
+const usageColumns = `session_id::text,model,sequence,input_tokens,output_tokens,cached_input_tokens,reasoning_tokens,provisional,price_version,estimated_cost_usd::text,account_id::text,account_label,billing_mode,subscription_label,reported_at,service_tier,tier_segments,model_time_ms`
 
 func scanUsage(row pgx.Row) (SessionModelUsage, error) {
 	out := SessionModelUsage{Currency: "USD", CostStatus: "unknown", MetadataSource: "reported"}
 	err := row.Scan(&out.SessionID, &out.Model, &out.Sequence, &out.InputTokens, &out.OutputTokens, &out.CachedInputTokens, &out.ReasoningTokens,
-		&out.Provisional, &out.PriceVersion, &out.EstimatedCostUSD, &out.AccountID, &out.AccountLabel, &out.BillingMode, &out.SubscriptionLabel, &out.ReportedAt)
+		&out.Provisional, &out.PriceVersion, &out.EstimatedCostUSD, &out.AccountID, &out.AccountLabel, &out.BillingMode, &out.SubscriptionLabel, &out.ReportedAt, &out.ServiceTier, &out.TierSegments, &out.ModelTimeMS)
 	// Only api billing is priced. A stored estimate on a subscription or
 	// unknown row is historical: it is never returned, and its price version
 	// never pins a later api price.
@@ -190,7 +283,7 @@ func (m *Module) reportUsage(r *http.Request, tx pgx.Tx, p tenant.Principal) (an
 	if err != nil {
 		return nil, err
 	}
-	lease := r.Header.Get("X-Aeon-Worker-Lease")
+	lease := workerlease.Read(r)
 	if p.Kind != tenant.Agent || p.ID != s.AgentPrincipalID || len(lease) < 32 || len(lease) > 256 ||
 		subtle.ConstantTimeCompare(digest("lease", lease), s.leaseDigest) != 1 {
 		return nil, workorders.Fail(403, "harness worker proof rejected")
@@ -217,6 +310,9 @@ func (m *Module) reportUsage(r *http.Request, tx pgx.Tx, p tenant.Principal) (an
 			return nil, workorders.Fail(409, "report id already used with different payload")
 		}
 		out, err := loadUsage(ctx, tx, s.ID, in.Model)
+		if err == nil && s.Management == "unmanaged" {
+			out.AccountUse, err = sessionAccountUse(ctx, tx, s, out.AccountID)
+		}
 		return usageReportResult{Usage: out, Replayed: true}, err
 	}
 	if !errors.Is(err, pgx.ErrNoRows) {
@@ -227,6 +323,9 @@ func (m *Module) reportUsage(r *http.Request, tx pgx.Tx, p tenant.Principal) (an
 	var before any
 	if err != nil && !errors.Is(err, pgx.ErrNoRows) {
 		return nil, err
+	}
+	if segmentErr := usageTierSegments(s, old, &next, in.ServiceTier); segmentErr != nil {
+		return nil, segmentErr
 	}
 	if bindingErr := resolveUsageBilling(ctx, tx, s, old, &next); bindingErr != nil {
 		return nil, bindingErr
@@ -253,7 +352,7 @@ func (m *Module) reportUsage(r *http.Request, tx pgx.Tx, p tenant.Principal) (an
 		price, err := loadUsagePrice(ctx, tx, next.Model, next.PriceVersion)
 		if err == nil {
 			next.PriceVersion = &price.Version
-			next.EstimatedCostUSD = estimateUsageCost(next, price)
+			next.EstimatedCostUSD = estimateTierUsageCost(next, price)
 		} else if !errors.Is(err, pgx.ErrNoRows) {
 			return nil, err
 		}
@@ -262,14 +361,14 @@ func (m *Module) reportUsage(r *http.Request, tx pgx.Tx, p tenant.Principal) (an
 		next.EstimatedCostUSD = nil
 	}
 	out, err := scanUsage(tx.QueryRow(ctx, `INSERT INTO harness_session_usage
-        (tenant_id,session_id,model,sequence,input_tokens,output_tokens,cached_input_tokens,reasoning_tokens,provisional,price_version,estimated_cost_usd,account_id,account_label,billing_mode,subscription_label)
-        VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11::numeric,$12,$13,$14,$15)
+        (tenant_id,session_id,model,sequence,input_tokens,output_tokens,cached_input_tokens,reasoning_tokens,provisional,price_version,estimated_cost_usd,account_id,account_label,billing_mode,subscription_label,service_tier,tier_segments,model_time_ms)
+        VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11::numeric,$12,$13,$14,$15,$16,$17,$18)
         ON CONFLICT (tenant_id,session_id,model) DO UPDATE SET sequence=EXCLUDED.sequence,input_tokens=EXCLUDED.input_tokens,
         output_tokens=EXCLUDED.output_tokens,cached_input_tokens=EXCLUDED.cached_input_tokens,reasoning_tokens=EXCLUDED.reasoning_tokens,provisional=EXCLUDED.provisional,
         price_version=EXCLUDED.price_version,estimated_cost_usd=EXCLUDED.estimated_cost_usd,account_id=EXCLUDED.account_id,
-        account_label=EXCLUDED.account_label,billing_mode=EXCLUDED.billing_mode,subscription_label=EXCLUDED.subscription_label,reported_at=clock_timestamp()
+        account_label=EXCLUDED.account_label,billing_mode=EXCLUDED.billing_mode,subscription_label=EXCLUDED.subscription_label,service_tier=EXCLUDED.service_tier,tier_segments=EXCLUDED.tier_segments,model_time_ms=EXCLUDED.model_time_ms,reported_at=clock_timestamp()
         RETURNING `+usageColumns, p.TenantID, s.ID, next.Model, next.Sequence, next.InputTokens, next.OutputTokens, next.CachedInputTokens, next.ReasoningTokens,
-		next.Provisional, next.PriceVersion, next.EstimatedCostUSD, next.AccountID, next.AccountLabel, next.BillingMode, next.SubscriptionLabel))
+		next.Provisional, next.PriceVersion, next.EstimatedCostUSD, next.AccountID, next.AccountLabel, next.BillingMode, next.SubscriptionLabel, next.ServiceTier, next.TierSegments, next.ModelTimeMS))
 	if err != nil {
 		return nil, err
 	}
@@ -281,6 +380,35 @@ func (m *Module) reportUsage(r *http.Request, tx pgx.Tx, p tenant.Principal) (an
 		delta := *out.InputTokens + *out.OutputTokens - *old.InputTokens - *old.OutputTokens
 		if err := agentaccounts.ObserveSessionTokens(ctx, tx, p.ID, *out.AccountID, out.Model, delta, old.ReportedAt, out.ReportedAt); err != nil {
 			return nil, err
+		}
+	}
+	// Usage can contain several models, including historical data after stop.
+	// Only the live session's exact identity can supply health evidence.
+	if s.StoppedAt == nil && s.Model != nil && *s.Model == out.Model && s.ReasoningEffort != nil && modelreport.ValidTuple(out.Model, *s.ReasoningEffort) && out.OutputTokens != nil && *out.OutputTokens > 0 {
+		var enrolled bool
+		if err := tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM agent_accounts WHERE registered_by_principal_id=$1 AND harness=$2 AND state='available')`, p.ID, s.Harness).Scan(&enrolled); err != nil {
+			return nil, err
+		}
+		if enrolled {
+			evidence := modelregistry.Observation{ReportID: modelregistry.EvidenceID(s.ID + "/usage/" + in.ReportID), Harness: s.Harness, Model: out.Model, Effort: *s.ReasoningEffort, Status: "working"}
+			if err := modelregistry.ReportInSession(ctx, tx, p, s.Harness, s.ID, []modelregistry.Observation{evidence}); err != nil {
+				return nil, err
+			}
+		}
+	}
+	if s.Management == "unmanaged" {
+		out.AccountUse, err = sessionAccountUse(ctx, tx, s, out.AccountID)
+		if err != nil {
+			return nil, err
+		}
+		if out.AccountUse != "allowed" {
+			typeName := "account_use.unattributed"
+			if out.AccountUse == "outside_matrix" {
+				typeName = "account_use.outside_matrix"
+			}
+			if _, err := events.Append(ctx, tx, p, events.Change{NodeID: &s.ProjectID, Type: typeName, After: map[string]any{"session_id": s.ID, "account_id": out.AccountID, "attribution": out.AccountUse}}); err != nil {
+				return nil, err
+			}
 		}
 	}
 	return usageReportResult{Usage: out}, record(ctx, tx, p, s, "usage_reported", before, out)
@@ -306,6 +434,19 @@ func (m *Module) sessionUsage(r *http.Request, tx pgx.Tx, p tenant.Principal) (a
 			return nil, err
 		}
 		items = append(items, item)
+	}
+	err = rows.Err()
+	rows.Close()
+	if err != nil {
+		return nil, err
+	}
+	if s.Management == "unmanaged" {
+		for i := range items {
+			items[i].AccountUse, err = sessionAccountUse(r.Context(), tx, s, items[i].AccountID)
+			if err != nil {
+				return nil, err
+			}
+		}
 	}
 	return struct {
 		SessionID string              `json:"session_id"`

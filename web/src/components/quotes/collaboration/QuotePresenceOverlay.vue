@@ -49,7 +49,7 @@ watch(()=>props.root,observe);watch(()=>[props.presence,props.document,props.rev
 .mark{position:fixed;box-sizing:border-box;border-radius:5px;outline:1.5px solid var(--mark-color);outline-offset:3px}
 .mark.section{background:transparent}
 .mark.precise{width:2px;background:var(--mark-color);outline:0;border-radius:1px}
-.label{position:absolute;left:-3px;top:-25px;max-width:220px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;padding:3px 7px;border-radius:6px 6px 6px 2px;background:var(--mark-color);color:var(--presence-ink);font:650 11px/1.3 var(--font);box-shadow:0 1px 2px rgba(0,0,0,.12)}
+.label{position:absolute;left:-3px;top:-25px;max-width:220px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;padding:3px 7px;border-radius:6px 6px 6px 2px;background:var(--mark-color);color:var(--presence-ink);font:650 11px/1.3 var(--font);box-shadow:0 1px 2px color-mix(in srgb, var(--shadow-black) 12%, transparent)}
 .mark.precise .label{left:0;border-radius:6px 6px 6px 0}
 @media print{.quote-presence-overlays{display:none}}
 </style>

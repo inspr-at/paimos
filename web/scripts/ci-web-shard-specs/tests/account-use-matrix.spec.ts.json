@@ -1,0 +1,22 @@
+{
+  "group": "remaining-ui",
+  "nightlyTiming": {
+    "seconds": 45.26,
+    "selectedTests": 21
+  },
+  "spec": {
+    "file": "tests/account-use-matrix.spec.ts",
+    "listedTests": 13,
+    "tierTiming": {
+      "caseSeconds": {
+        "max": 5.812,
+        "median": 1.799,
+        "min": 0.034
+      },
+      "seconds": 45.26,
+      "selectedTests": 21
+    },
+    "weightSeconds": 40,
+    "weightSource": "AEON-1054 estimate: thirteen mocked matrix flows, one skipped evidence run"
+  }
+}

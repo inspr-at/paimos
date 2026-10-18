@@ -16,6 +16,7 @@ import (
 	"github.com/inspr-at/paimos/internal/db"
 	"github.com/inspr-at/paimos/internal/intake"
 	"github.com/inspr-at/paimos/internal/tenant"
+	"github.com/inspr-at/paimos/internal/workerlease"
 	"github.com/jackc/pgx/v5"
 )
 
@@ -179,11 +180,16 @@ func (m *Module) DelegatedIntake(w http.ResponseWriter, r *http.Request, next ht
 	}
 	scheme, raw, ok := strings.Cut(header, " ")
 	raw = strings.TrimSpace(raw)
-	if ok && strings.EqualFold(scheme, "Bearer") && strings.HasPrefix(raw, "aeon_") {
+	agentKey, malformed := workerlease.AgentToken(header)
+	if !malformed && strings.HasPrefix(agentKey, "aeon_") {
 		return false
 	}
 	if permission == "person-only" {
 		writeError(w, fail(403, "forbidden"))
+		return true
+	}
+	if malformed {
+		writeError(w, fail(401, "unauthorized"))
 		return true
 	}
 	if !ok || !strings.EqualFold(scheme, "Bearer") || len(r.Header.Values("Authorization")) != 1 || m.Keys == nil {

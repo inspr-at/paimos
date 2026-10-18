@@ -5,12 +5,16 @@ import { normaliseState, statusMeta, statusOptions } from '../../lib/work'
 import { getStatusHelp } from '../../lib/api'
 import { defaultStatusHelp, statusHint } from '../../lib/statusDefinitions'
 import { openStatusHelp } from '../../lib/statusHelp'
+import { entryMenuCount, type EntryChecks } from '../../lib/entryChecks'
+import { useEntryChecks } from '../../lib/useEntryChecks'
 import AppIcon from '../AppIcon.vue'
 import FloatingPanel from './FloatingPanel.vue'
 import StatusIcon from './StatusIcon.vue'
 
-const props = defineProps<{ anchor: HTMLElement | null; current: string; knownStates: string[]; ticketKey: string; projectId?: string }>()
-const emit = defineEmits<{ choose: [state: string]; close: [restoreFocus: boolean] }>()
+const props = defineProps<{ anchor: HTMLElement | null; current: string; knownStates: string[]; ticketKey: string; nodeId?: string; revision?: string; projectId?: string; derived?: boolean; childrenCount?: number }>()
+const emit = defineEmits<{ choose: [state: string, checks: EntryChecks | null]; close: [restoreFocus: boolean] }>()
+const checks = useEntryChecks(() => props.nodeId ? { id: props.nodeId, updated_at: props.revision ?? '' } : null)
+const count = (state: string) => entryMenuCount(checks.data.value, props.current, state)
 const list = ref<HTMLElement>()
 const options = computed(() => statusOptions(props.knownStates))
 const current = computed(() => normaliseState(props.current))
@@ -36,23 +40,25 @@ function move(event: KeyboardEvent) {
 </script>
 
 <template>
-  <FloatingPanel :anchor="anchor" :width="212" :tallest="480" :label="`Status of ${ticketKey}`" @close="restore => emit('close', restore)">
+  <FloatingPanel :anchor="anchor" :width="280" :tallest="480" :label="`Status of ${ticketKey}`" @close="restore => emit('close', restore)">
     <p class="menu-title eyebrow">Status</p>
-    <div ref="list" class="menu" role="menu" :aria-label="`Status of ${ticketKey}`" @keydown="move">
+    <p v-if="derived" class="menu-help" role="status">{{ childrenCount ? `Follows its ${childrenCount} children` : 'Follows its children' }}</p>
+    <div v-else ref="list" class="menu" role="menu" :aria-label="`Status of ${ticketKey}`" @keydown="move">
       <template v-for="(option, index) in options" :key="option.value">
       <span v-if="option.meta.key === 'cancelled'" class="menu-sep" role="separator" aria-label="Exits" />
-      <button type="button" role="menuitemradio" class="menu-item" :aria-checked="normaliseState(option.value) === current" :data-autofocus="normaliseState(option.value) === current ? '' : undefined" :data-tip="hint(option.value)" data-tip-side="end" :aria-describedby="`${id}-hint-${index}`" @click="emit('choose', option.value)">
+      <button type="button" role="menuitemradio" class="menu-item" :aria-checked="normaliseState(option.value) === current" :data-autofocus="normaliseState(option.value) === current ? '' : undefined" :data-tip="hint(option.value)" data-tip-side="end" :aria-describedby="`${id}-hint-${index}`" @click="emit('choose', option.value, checks.data.value)">
         <StatusIcon :state="option.value" />
         <span class="label">{{ option.meta.label }}</span>
+        <span v-if="count(option.value)" class="entry-count"><AppIcon v-if="count(option.value)?.overridden" name="skip" :size="12" />{{ count(option.value)?.text }}</span>
         <AppIcon v-if="normaliseState(option.value) === current" name="check" :size="14" class="tick" />
         <span v-else-if="index < 9" class="digit keycap" aria-hidden="true">{{ index + 1 }}</span>
       </button>
-      <span :id="`${id}-hint-${index}`" class="sr-only">{{ hint(option.value) }}</span>
       </template>
       <span class="menu-sep" role="separator" />
       <button type="button" role="menuitem" class="menu-item help-item" @click="showHelp"><AppIcon name="help" :size="14" /><span class="label">What do these mean?</span></button>
     </div>
-    <p class="menu-help"><AppIcon name="queue" :size="12" /><span><b>Queued</b> is Open with a place in the work queue. Pickup sets In progress; Blocked keeps the place and waits.</span></p>
+    <span v-for="(option, index) in options" :id="`${id}-hint-${index}`" :key="option.value" class="sr-only">{{ hint(option.value) }}</span>
+    <p v-if="!derived" class="menu-help"><AppIcon name="queue" :size="12" /><span><b>Queued</b> is Open with a place in the work queue. Pickup sets In progress; Blocked keeps the place and waits.</span></p>
   </FloatingPanel>
 </template>
 
@@ -70,6 +76,7 @@ function move(event: KeyboardEvent) {
 .help-item { color: var(--ink-2); }
 .help-item svg { color: var(--ink-3); }
 .help-item:hover svg, .help-item:focus-visible svg { color: var(--teal-ink); }
+.entry-count { display: inline-flex; align-items: center; gap: 4px; color: var(--ink-3); font-size: 11.5px; white-space: nowrap; }
 .tick { color: var(--teal); }
 .digit { opacity: 0; }
 .menu-item:hover .digit, .menu-item:focus-visible .digit { opacity: 1; }

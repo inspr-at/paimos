@@ -15,3 +15,7 @@ func removeSessionIndexForState(string) {}
 func stateDirSentLabel(string) string { return "" }
 
 func writeHookActivity(string, string, string) {}
+
+func lookupSessionIndexState(string) (string, string, string, sessionIndexResult) {
+	return "", "", "", sessionIndexAbsent
+}

@@ -3,7 +3,7 @@ import { execFileSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { readdirSync, readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
-import { pathToFileURL } from 'node:url';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 import { validCalendarVersion } from './verify-release.mjs';
 
 // Port internal/db/sqlsplit.go exactly: the runner removes comments (without
@@ -324,10 +324,58 @@ export function checkMigrations(files, published = new Map(), previousVersion = 
   return problems;
 }
 
+// The files are the only committed exception input. Assemble the same v1
+// manifest in memory, in migration order, for the existing validator and output.
+export function loadMigrationExceptions(directory = new URL('./migration-policy-exceptions/', import.meta.url)) {
+  const exceptions = [], seen = new Set();
+  for (const item of readdirSync(directory, {withFileTypes: true}).sort((a, b) => a.name < b.name ? -1 : a.name > b.name ? 1 : 0)) {
+    if (!item.isFile() || !/^\d{4}_[a-z0-9_]+\.json$/.test(item.name)) {
+      throw new Error(`${item.name}: expected one migration exception file NNNN_name.json`);
+    }
+    const manifest = JSON.parse(readFileSync(resolve(directory instanceof URL ? fileURLToPath(directory) : directory, item.name), 'utf8'));
+    if (!manifest || manifest.schema !== 'aeon.migration-policy-exceptions.v1' || !Array.isArray(manifest.exceptions) || manifest.exceptions.length !== 1) {
+      throw new Error(`${item.name}: invalid migration exception manifest; expected exactly one exception`);
+    }
+    const entry = manifest.exceptions[0];
+    if (seen.has(entry?.file)) throw new Error(`${entry.file}: duplicate migration exception`);
+    if (entry?.file !== item.name.replace(/\.json$/, '.sql')) {
+      throw new Error(`${item.name}: exception must name its matching migration filename`);
+    }
+    seen.add(entry.file);
+    exceptions.push(entry);
+  }
+  return {schema: 'aeon.migration-policy-exceptions.v1', exceptions};
+}
+
 export function publishedMigrations(ref, directory = 'internal/db/migrations') {
-  const names = execFileSync('git', ['ls-tree', '--name-only', `${ref}:${directory}`], { encoding: 'utf8' }).trim().split('\n').filter(name => name.endsWith('.sql'));
-  if (!names.length) throw new Error('Published release has no migrations');
-  return new Map(names.map(name => [name, execFileSync('git', ['show', `${ref}:${directory}/${name}`], { encoding: 'utf8', maxBuffer: 10 << 20 })]));
+  // Resolve the tree once, then read its immutable blobs in one bounded batch.
+  // Per-file git show made historical-policy tests launch thousands of processes.
+  const tree = execFileSync('git', ['ls-tree', '-z', `${ref}:${directory}`], {
+    encoding: 'utf8', timeout: 30_000, maxBuffer: 10 << 20,
+  });
+  const files = tree.split('\0').filter(entry => entry.endsWith('.sql')).map(entry => {
+    const match = /^\d+ blob ([a-f0-9]{40,64})\t(.+)$/s.exec(entry);
+    if (!match) throw new Error('Published migration must be a blob');
+    return { hash: match[1], name: match[2] };
+  });
+  if (!files.length) throw new Error('Published release has no migrations');
+  const blobs = execFileSync('git', ['cat-file', '--batch'], {
+    input: files.map(file => file.hash).join('\n') + '\n', timeout: 30_000, maxBuffer: 64 << 20,
+  });
+  let offset = 0;
+  const result = new Map();
+  for (const file of files) {
+    const end = blobs.indexOf(10, offset);
+    const header = end < 0 ? null : /^([a-f0-9]{40,64}) blob (\d+)$/.exec(blobs.subarray(offset, end).toString('ascii'));
+    const size = Number(header?.[2]);
+    if (!header || header[1] !== file.hash || !Number.isSafeInteger(size) || size > (10 << 20) || end + 1 + size >= blobs.length || blobs[end + 1 + size] !== 10) {
+      throw new Error('Invalid published migration blob batch');
+    }
+    result.set(file.name, blobs.subarray(end + 1, end + 1 + size).toString('utf8'));
+    offset = end + 2 + size;
+  }
+  if (offset !== blobs.length) throw new Error('Unexpected published migration blob data');
+  return result;
 }
 
 if (process.argv[1] && import.meta.url === pathToFileURL(resolve(process.argv[1])).href) {
@@ -337,7 +385,7 @@ if (process.argv[1] && import.meta.url === pathToFileURL(resolve(process.argv[1]
     const directory = 'internal/db/migrations';
     const files = new Map(readdirSync(directory).filter(name => name.endsWith('.sql')).sort().map(name => [name, readFileSync(`${directory}/${name}`, 'utf8')]));
     const baseline = JSON.parse(readFileSync(new URL('./migration-policy-baseline.json', import.meta.url), 'utf8'));
-    const exceptions = JSON.parse(readFileSync(new URL('./migration-policy-exceptions.json', import.meta.url), 'utf8'));
+    const exceptions = loadMigrationExceptions();
     const published = publishedMigrations(`refs/tags/${args[1]}`);
     const problems = checkMigrations(files, published, args[1].slice(1), {baseline, exceptions, previousTag: args[1]});
     if (problems.length) { console.error(problems.join('\n')); process.exitCode = 1; }

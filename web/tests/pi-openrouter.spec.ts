@@ -24,7 +24,9 @@ async function setup(page: Page, theme: 'light' | 'dark' = 'light', manage = tru
     await route.fulfill({ json: account })
   })
   await page.goto('/settings/accounts')
-  const row = page.locator('.account').filter({ hasText: 'OpenRouter on this Mac' })
+  // AEON-686: an account's logins and their settings live in its docked panel.
+  await page.locator(`.list-row[data-accounts~="${account.id}"]`).click()
+  const row = page.locator('section.pane .account').filter({ hasText: 'OpenRouter on this Mac' })
   await row.getByRole('button', { name: 'Details for OpenRouter on this Mac' }).click()
   await expect(row.getByLabel('Model OpenRouter')).toBeVisible()
   return { row, writes }
@@ -63,10 +65,10 @@ for (const theme of ['light', 'dark'] as const) for (const width of [1600, 390])
   await page.setViewportSize({ width, height: 1000 })
   const mock = await mockStartAgent(page, { catalog: 'pi-openrouter', theme })
   await page.goto('/agents')
-  await expect(page.locator('.pi-model-caption')).toContainText('stealth/space-bunny-alpha')
   const dir = process.env.AEON374_SHOTS
   if (dir) await page.screenshot({ path: join(dir, `agents-${width}-${theme}.png`), fullPage: true })
-  await page.locator('button.start-agent').click()
+  await page.getByRole('button', { name: 'New: start a lead, attach a session or connect a machine', exact: true }).click()
+  await page.getByRole('menuitem', { name: /^Start agent manually…/ }).click()
   const dialog = page.getByRole('dialog', { name: 'Start agent', exact: true })
   await dialog.getByRole('searchbox').fill('PHAROS-11')
   await dialog.getByRole('button', { name: /PHAROS-11 Connect Hetzner/ }).click()

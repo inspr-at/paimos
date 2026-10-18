@@ -222,6 +222,12 @@ func (job ProfileImporter) Run(ctx context.Context, tenantSlug string, apply boo
 			report.WouldWrite++
 			continue
 		}
+		var staged []*attachments.Staged
+		closeStaged := func() {
+			for _, blob := range staged {
+				_ = blob.Close()
+			}
+		}
 		if avatarPath != "" {
 			body, err := job.Source.avatar(ctx, avatarPath)
 			if err != nil {
@@ -242,12 +248,15 @@ func (job ProfileImporter) Run(ctx context.Context, tenantSlug string, apply boo
 				size = cfg.Height
 			}
 			crop := Crop{X: (cfg.Width - size) / 2, Y: (cfg.Height - size) / 2, Size: size}
-			original, hashes, err := storeAvatarData(ctx, job.Store, tenantID, body, crop)
+			staged, err = stageAvatarData(ctx, job.Store, tenantID, body, crop)
 			if err != nil {
 				return report, err
 			}
-			after.AvatarOriginalHash = original
-			after.AvatarHashes = hashes
+			after.AvatarOriginalHash = staged[0].SHA256
+			after.AvatarHashes = map[string]string{}
+			for i, size := range []int{32, 64, 128, 256} {
+				after.AvatarHashes[fmt.Sprint(size)] = staged[i+1].SHA256
+			}
 		}
 		// Serialize target writes, re-read and apply the classic snapshot only to
 		// fields present in the source. A replay with equal values appends no event.
@@ -265,6 +274,9 @@ func (job ProfileImporter) Run(ctx context.Context, tenantSlug string, apply boo
 				next.AvatarOriginalHash = after.AvatarOriginalHash
 				next.AvatarHashes = after.AvatarHashes
 			}
+			if err := attachments.Publish(ctx, tx, attachments.OwnerAvatar, staged...); err != nil {
+				return err
+			}
 			if same(current, next) {
 				return nil
 			}
@@ -274,6 +286,7 @@ func (job ProfileImporter) Run(ctx context.Context, tenantSlug string, apply boo
 			report.Written++
 			return nil
 		})
+		closeStaged()
 		if err != nil {
 			return report, err
 		}

@@ -1,21 +1,34 @@
 <!-- SPDX-License-Identifier: AGPL-3.0-only -->
 <script setup lang="ts">
 import { brand } from '../../lib/brand'
-import { computed, nextTick, onMounted, ref, watch, type Component } from 'vue'
+import { computed, defineAsyncComponent, nextTick, onMounted, ref, watch, type Component } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { can, permissionsRevoked } from '../../lib/authz'
 import { safeReturnPath } from '../../lib/signInReturn'
 import { useAccess } from '../../stores/access'
+import { useSession } from '../../stores/session'
+import { keyExpiry } from '../../lib/access'
+import { keyState } from '../../lib/settings'
+import { accessFooter } from '../../lib/footerProviders'
+import { useFooterSummary } from '../../lib/footerSummary'
 import AppIcon from '../AppIcon.vue'
+import ViewDefaultMenu from '../ViewDefaultMenu.vue'
+import { defaultTip, useViewSwitch, viewKey } from '../../lib/viewSwitch'
+import { useViewMenuTrigger } from '../../lib/viewMenuTrigger'
 import BizIcon, { type BizIconName } from '../business/BizIcon.vue'
-import AgentsTab from './AgentsTab.vue'
-import AuditTab from './AuditTab.vue'
-import InviteSheet, { type InvitePrefill } from './InviteSheet.vue'
-import InvitesTab from './InvitesTab.vue'
-import PeopleTab from './PeopleTab.vue'
-import PersonSheet from './PersonSheet.vue'
-import ProjectsTab from './ProjectsTab.vue'
-import RolesTab from './RolesTab.vue'
+import type { InvitePrefill } from './InviteSheet.vue'
+
+// One tab (and a sheet only when it opens). A static import of every tab made
+// the section chunk wait on a wide HTTP/1.1 burst; under Playwright's route
+// interception that burst finished after the 5s panel wait (AEON-1343).
+const PeopleTab = defineAsyncComponent(() => import('./PeopleTab.vue'))
+const InvitesTab = defineAsyncComponent(() => import('./InvitesTab.vue'))
+const RolesTab = defineAsyncComponent(() => import('./RolesTab.vue'))
+const ProjectsTab = defineAsyncComponent(() => import('./ProjectsTab.vue'))
+const AgentsTab = defineAsyncComponent(() => import('./AgentsTab.vue'))
+const AuditTab = defineAsyncComponent(() => import('./AuditTab.vue'))
+const PersonSheet = defineAsyncComponent(() => import('./PersonSheet.vue'))
+const InviteSheet = defineAsyncComponent(() => import('./InviteSheet.vue'))
 
 // Settings -> Access: who works here and what they may do. People, invites,
 // roles, project access, agents and the access log, each a tab you see when you
@@ -24,6 +37,7 @@ type Tab = 'people' | 'invites' | 'roles' | 'projects' | 'agents' | 'audit'
 const route = useRoute()
 const router = useRouter()
 const access = useAccess()
+const session = useSession()
 const TABS: { id: Tab; label: string; icon: BizIconName; permission: string; component: Component }[] = [
   { id: 'people', label: 'People', icon: 'users', permission: 'members.read', component: PeopleTab },
   { id: 'invites', label: 'Invites', icon: 'mail', permission: 'members.read', component: InvitesTab },
@@ -38,7 +52,19 @@ const tabs = ref(liveTabs.value)
 watch(liveTabs, now => { if (!permissionsRevoked()) tabs.value = now })
 const ended = computed(() => permissionsRevoked())
 function signIn() { window.open(`/signin?error=expired&return=${encodeURIComponent(safeReturnPath(route.fullPath))}`, '_blank', 'noopener') }
-const tab = computed<Tab>(() => { const wanted = route.params.tab as Tab | undefined; return tabs.value.some(t => t.id === wanted) ? wanted! : tabs.value[0]?.id ?? 'people' })
+// Which tab /settings/access opens with (AEON-1453): the person's default, else the tab
+// used last; /settings/access/<tab> wins once. The tabs keep their own look; right-click,
+// a long press or Shift+F10 on one opens its small menu.
+const tabSwitch = useViewSwitch({ key: viewKey('access'), options: () => tabs.value.map(t => t.id), fallback: () => tabs.value[0]?.id ?? 'people', link: () => route.params.tab })
+const tab = computed<Tab>(() => tabSwitch.current.value as Tab)
+// A bare address waits for that answer, so it never shows one tab and then another.
+const tabSettled = computed(() => !!tabSwitch.linked.value || tabSwitch.loaded.value)
+const tabMenu = ref<{ id: Tab; anchor: HTMLElement } | null>(null)
+const tabMenuFor = computed(() => tabMenu.value ? TABS.find(t => t.id === tabMenu.value!.id) ?? null : null)
+const trigger = useViewMenuTrigger((id, anchor) => { tabMenu.value = { id: id as Tab, anchor } })
+function closeTabMenu(restore: boolean) { const anchor = tabMenu.value?.anchor; tabMenu.value = null; if (restore && anchor?.isConnected) anchor.focus({ preventScroll: true }) }
+function setTabDefault(makeDefault: boolean) { const at = tabMenu.value; if (!at) return; tabSwitch.setDefault(makeDefault ? at.id : null); closeTabMenu(true) }
+function tabClick(event: MouseEvent, id: Tab) { if (trigger.heldClick(event)) return; tabSwitch.remember(id) }
 const current = computed(() => TABS.find(t => t.id === tab.value)!)
 const detail = computed(() => typeof route.params.id === 'string' ? route.params.id : '')
 const count = (id: Tab) => id === 'people' ? access.people.length : id === 'invites' ? access.invites.filter(i => i.status === 'pending').length
@@ -46,10 +72,12 @@ const count = (id: Tab) => id === 'people' ? access.people.length : id === 'invi
 const person = computed(() => tab.value === 'people' && detail.value ? access.person(detail.value) : undefined)
 const inviting = ref(false)
 const invitePrefill = ref<InvitePrefill | null>(null)
-function go(id: Tab) { return router.push(`/settings/access/${id}`) }
+function go(id: Tab) { tabSwitch.remember(id); return router.push(`/settings/access/${id}`) }
 // Arrow keys walk the tabs, as a tablist does.
 const tabBar = ref<HTMLElement>()
 function tabKeys(event: KeyboardEvent) {
+  const focused = (event.target as HTMLElement).closest<HTMLElement>('[data-view]')
+  if (focused?.dataset.view && trigger.keydown(event, focused.dataset.view, focused)) return
   if (event.key !== 'ArrowLeft' && event.key !== 'ArrowRight' && event.key !== 'Home' && event.key !== 'End') return
   event.preventDefault()
   const ids = tabs.value.map(t => t.id)
@@ -59,8 +87,28 @@ function tabKeys(event: KeyboardEvent) {
 }
 // The member data needs See members; with only the access log, none is asked for.
 const needsMembers = computed(() => can('members.read'))
-onMounted(() => { if (needsMembers.value) void access.load() })
+// Keys are read only for people who may see them; the footer counts what the Agents tab would list.
+const seesKeys = computed(() => session.identity?.principal.kind === 'person' && can('keys.manage') && needsMembers.value)
+// A failed key read leaves the last keys. The Agents tab is the place that says the read failed.
+function readKeys() { void access.loadKeys().catch(() => {}) }
+onMounted(() => { if (needsMembers.value) void access.load(); if (seesKeys.value) readKeys() })
 watch(needsMembers, yes => { if (yes) void access.load() })
+watch(seesKeys, yes => { if (yes) readKeys() })
+// The footer says who is here, how many agent keys, and the keys that expire soon (AEON-785).
+useFooterSummary(() => {
+  if (!session.identity || !needsMembers.value || (access.state === 'error' && !access.members)) return null
+  const agents = access.agents.filter(agent => !agent.service)
+  const keys = access.keys
+  const expiring = seesKeys.value && keys ? keys.filter(key => keyState(key) === 'active' && keyExpiry(key).soon && agents.some(agent => agent.principal_id === key.principal_id)).length : null
+  return accessFooter({
+    loaded: access.state === 'ready', people: access.people.length, keys: agents.reduce((total, agent) => total + agent.key_count, 0), expiring,
+    act: {
+      expiring: () => void router.push({ path: '/settings/access/agents', query: { expiring: '1' } }),
+      top: () => document.querySelector('main')?.scrollTo({ top: 0, behavior: window.matchMedia('(prefers-reduced-motion: reduce)').matches ? 'auto' : 'smooth' }),
+      invite: can('members.manage') ? () => { invitePrefill.value = null; inviting.value = true } : null,
+    },
+  })
+})
 </script>
 
 <template>
@@ -76,14 +124,18 @@ watch(needsMembers, yes => { if (yes) void access.load() })
       <p v-if="ended" class="set-note error ended" role="alert"><AppIcon name="alert" :size="14" /><span>Your session has ended, so nothing here can change. Sign in again in a new tab; what you typed and any link on screen stay here.</span><button type="button" class="btn sm" data-session-keep @click="signIn">Sign in again</button></p>
       <div ref="tabBar" class="tabs" :class="{ drilled: !!detail && (tab === 'roles' || tab === 'projects') }" role="tablist" aria-label="Access" @keydown="tabKeys">
         <RouterLink
-          v-for="t in tabs" :id="`access-tab-${t.id}`" :key="t.id" :to="`/settings/access/${t.id}`" class="tab" role="tab" :aria-selected="tab === t.id" :tabindex="tab === t.id ? 0 : -1"
-          :aria-controls="`access-panel-${t.id}`"
+          v-for="t in tabs" :id="`access-tab-${t.id}`" :key="t.id" :to="`/settings/access/${t.id}`" class="tab" role="tab" :aria-selected="tabSettled && tab === t.id" :tabindex="tab === t.id ? 0 : -1"
+          :aria-controls="`access-panel-${t.id}`" :data-view="t.id" :data-tip="t.id === tabSwitch.defaultId.value ? defaultTip(t.label) : undefined" :aria-description="t.id === tabSwitch.defaultId.value ? 'Opens here by default' : undefined"
+          @click.capture="tabClick($event, t.id)" @contextmenu="trigger.contextmenu($event, t.id)"
+          @pointerdown="trigger.pointerdown($event, t.id)" @pointermove="trigger.pointermove" @pointerup="trigger.pointerend" @pointercancel="trigger.pointerend"
         >
           <BizIcon :name="t.icon" :size="14" /><span>{{ t.label }}</span><span v-if="count(t.id) !== null && access.state === 'ready'" class="n mono">{{ count(t.id) }}</span>
+          <span v-if="t.id === tabSwitch.defaultId.value" class="view-pin" aria-hidden="true"><AppIcon name="pin" :size="10" /></span>
         </RouterLink>
       </div>
+      <ViewDefaultMenu v-if="tabMenu && tabMenuFor" :anchor="tabMenu.anchor" :label="tabMenuFor.label" :is-default="tabMenuFor.id === tabSwitch.defaultId.value" @set="setTabDefault" @close="closeTabMenu" />
       <div :id="`access-panel-${tab}`" class="panel" role="tabpanel" :aria-labelledby="`access-tab-${tab}`">
-        <div v-if="tab !== 'audit' && (access.state === 'loading' || access.state === 'idle')" class="set-skeleton" role="status" aria-label="Loading access"><span class="skeleton" /><span class="skeleton" /><span class="skeleton" /><span class="skeleton" /></div>
+        <div v-if="!tabSettled || (tab !== 'audit' && (access.state === 'loading' || access.state === 'idle'))" class="set-skeleton" role="status" aria-label="Loading access"><span class="skeleton" /><span class="skeleton" /><span class="skeleton" /><span class="skeleton" /></div>
         <p v-else-if="tab !== 'audit' && access.state === 'error'" class="set-note error" role="alert"><AppIcon name="alert" :size="14" />{{ access.error || 'Access could not be loaded.' }}<button type="button" class="btn sm" @click="access.load(true)">Try again</button></p>
         <component :is="current.component" v-else v-bind="tab === 'roles' || tab === 'projects' ? { detail } : {}" @invite="(prefill?: InvitePrefill) => { invitePrefill = prefill ?? null; inviting = true }" />
       </div>
@@ -103,13 +155,15 @@ h2 { font: 600 15px/1.35 var(--font); color: var(--ink); }
 .lead { margin-top: 2px; max-width: 72ch; font-size: 13px; line-height: 1.5; color: var(--ink-2); }
 .tabs { display: flex; gap: 2px; margin: 16px -4px 0; padding: 3px; border-radius: 12px; background: var(--seg-bg); overflow-x: auto; scrollbar-width: none; }
 .tabs::-webkit-scrollbar { display: none; }
-.tab { display: inline-flex; align-items: center; justify-content: center; gap: 7px; flex: 1 0 auto; height: 32px; padding: 0 12px; border-radius: 9px; color: var(--ink-2); font-size: 13px; font-weight: 600; text-decoration: none; white-space: nowrap; }
+.tab { position: relative; -webkit-touch-callout: none; display: inline-flex; align-items: center; justify-content: center; gap: 7px; flex: 1 0 auto; height: 32px; padding: 0 12px; border-radius: 9px; color: var(--ink-2); font-size: 13px; font-weight: 600; text-decoration: none; white-space: nowrap; }
 .tab svg { color: var(--ink-3); }
 @media (hover: hover) { .tab:hover { color: var(--ink); } }
 .tab[aria-selected="true"] { background: var(--seg-on); color: var(--ink); box-shadow: var(--shadow-btn); }
 .tab[aria-selected="true"] svg { color: var(--teal-ink); }
 .tab:focus-visible { box-shadow: var(--focus-ring); }
 .n { font-size: 11px; font-weight: 600; color: var(--ink-3); }
+/* The default tab's pin sits in its corner: marking one never moves a tab. */
+.view-pin { position: absolute; right: 2px; bottom: 1px; display: inline-grid; color: var(--ink-3); pointer-events: none; }
 .ended { margin-top: 14px; }
 .panel { display: grid; grid-template-columns: minmax(0, 1fr); margin-top: 16px; min-width: 0; }
 @media (max-width: 600px) {

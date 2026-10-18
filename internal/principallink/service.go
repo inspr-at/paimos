@@ -87,6 +87,9 @@ func (s *Service) change(ctx context.Context, slug, from, to string) (Result, er
 		return result, err
 	}
 	err = db.InTenant(ctx, s.pool, tid, func(tx pgx.Tx) error {
+		if err := apply.Lock(ctx, tx, tid); err != nil {
+			return err
+		}
 		actor, err := operator(ctx, tx, tid)
 		if err != nil {
 			return err

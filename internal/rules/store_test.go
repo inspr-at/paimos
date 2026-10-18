@@ -3,6 +3,7 @@ package rules
 
 import (
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -12,6 +13,7 @@ import (
 	"github.com/inspr-at/paimos/internal/dbtest"
 	"github.com/inspr-at/paimos/internal/tenant"
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgconn"
 )
 
 func TestStoreAuthorizationHistoryAndGenericNodeGuards(t *testing.T) {
@@ -134,11 +136,12 @@ func TestStoreAuthorizationHistoryAndGenericNodeGuards(t *testing.T) {
 
 	// Generic nodes cannot forge the reserved storage envelope to bypass publish.
 	err = db.InTenant(tenant.WithPrincipal(t.Context(), admin), d.App, tid, func(tx pgx.Tx) error {
-		_, e := tx.Exec(t.Context(), `INSERT INTO nodes(tenant_id,kind_id,key,title,fields) SELECT $1,id,'FORGE-1','forged','{"_aeon_rule_resource":"version"}'::jsonb FROM node_kinds WHERE tenant_id=$1 AND slug='ticket'`, tid)
+		_, e := tx.Exec(t.Context(), `INSERT INTO nodes(tenant_id,kind_id,key,title,fields) SELECT $1,id,'FORGE-1','forged','{"_aeon_rule_resource":"version"}'::jsonb FROM node_kinds WHERE tenant_id=$1 AND slug='work'`, tid)
 		return e
 	})
-	if err == nil {
-		t.Fatal("generic node forged rule snapshot")
+	var envelopeError *pgconn.PgError
+	if !errors.As(err, &envelopeError) || envelopeError.Code != "42501" || envelopeError.Message != "reserved rule storage envelope" {
+		t.Fatalf("generic rule forgery must fail at the storage envelope guard: %v", err)
 	}
 	var projectID, foreignProject string
 	err = db.InTenant(dbtest.Seed(t.Context()), d.App, tid, func(tx pgx.Tx) error {

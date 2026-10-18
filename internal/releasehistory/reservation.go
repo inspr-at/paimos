@@ -56,12 +56,13 @@ func PublishedOnly(h History) History {
 }
 
 // PublicHistory retains reservations for opt-in history rows, deep links and
-// statistics. Withdrawn attempts remain exclusively in the offline manifest.
+// statistics, and rehearsal candidates. Withdrawn attempts remain exclusively
+// in the offline manifest.
 func PublicHistory(h History) History {
 	out := h
 	out.Releases = []Release{}
 	for _, r := range h.Releases {
-		if r.State == StatePublished || r.State == StateReserved {
+		if r.State == StatePublished || r.State == StateReserved || r.State == StateCandidate {
 			out.Releases = append(out.Releases, r)
 		}
 	}

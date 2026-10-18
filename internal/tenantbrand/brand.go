@@ -19,9 +19,7 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
-	"encoding/json"
 	"errors"
-	"io"
 	"net/http"
 	"strings"
 	"time"
@@ -134,15 +132,30 @@ func (m *Module) settings(write bool, fn func(*http.Request, pgx.Tx, tenant.Prin
 			httpapi.WriteError(w, http.StatusUnauthorized, "unauthorized")
 			return
 		}
-		if p.Kind != tenant.Person {
+		if p.Kind != tenant.Person && !authz.OwnerWorkstation(p) {
 			httpapi.WriteError(w, http.StatusForbidden, "person required")
 			return
 		}
 		if write {
-			r.Body = http.MaxBytesReader(w, r.Body, MaxLogoBytes)
+			if err := httpapi.BufferRequestBody(w, r, MaxLogoBytes); err != nil {
+				var tooBig *http.MaxBytesError
+				if errors.As(err, &tooBig) {
+					writeFailure(w, failure{http.StatusRequestEntityTooLarge, codeLogoTooLarge, "the logo exceeds 256 KB"})
+				} else {
+					httpapi.WriteError(w, http.StatusBadRequest, "request body could not be read within limits")
+				}
+				return
+			}
 		}
 		var out any
 		err := db.InTenant(r.Context(), m.pool, p.TenantID, func(tx pgx.Tx) error {
+			if write {
+				// A brand may not have a row yet; all name and logo variants
+				// share this fence so event preimages reflect the last commit.
+				if _, err := tx.Exec(r.Context(), `SELECT pg_advisory_xact_lock(hashtextextended($1,0))`, p.TenantID+":tenant-brand"); err != nil {
+					return err
+				}
+			}
 			if err := authz.RequireTx(r.Context(), tx, p, "settings.manage", authz.Scope{}); err != nil {
 				return err
 			}
@@ -183,7 +196,7 @@ func (m *Module) putName(r *http.Request, tx pgx.Tx, p tenant.Principal) (any, e
 	var in struct {
 		ShortName *string `json:"short_name"`
 	}
-	dec := json.NewDecoder(r.Body)
+	dec := httpapi.NewRequestDecoder(nil, r, 1<<20)
 	dec.DisallowUnknownFields()
 	if err := dec.Decode(&in); err != nil || in.ShortName == nil {
 		return nil, fail(http.StatusBadRequest, "expected {\"short_name\": \"…\"}")
@@ -223,7 +236,7 @@ func (m *Module) putLogo(r *http.Request, tx pgx.Tx, p tenant.Principal) (any, e
 	if err != nil {
 		return nil, err
 	}
-	body, err := io.ReadAll(r.Body)
+	body, err := httpapi.ReadRequestBody(nil, r, 1<<20, httpapi.DefaultBodyReadTimeout)
 	if err != nil {
 		return nil, err
 	}

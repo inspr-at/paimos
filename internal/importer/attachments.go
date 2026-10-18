@@ -78,7 +78,7 @@ func ImportAttachments(ctx context.Context, pool *pgxpool.Pool, store attachment
 			if err != nil {
 				return created, err
 			}
-			blob, putErr := store.Put(ctx, tenantID, body)
+			blob, putErr := store.Stage(ctx, tenantID, body)
 			closeErr := body.Close()
 			if errors.Is(putErr, attachments.ErrUnsupportedType) {
 				slog.Warn("classic attachment type not accepted; skipped", "attachment", attachmentID, "issue", issueID, "error", putErr)
@@ -88,6 +88,7 @@ func ImportAttachments(ctx context.Context, pool *pgxpool.Pool, store attachment
 				return created, fmt.Errorf("store attachment %d: %w", attachmentID, putErr)
 			}
 			if closeErr != nil {
+				_ = blob.Close()
 				return created, closeErr
 			}
 			inserted := false
@@ -101,6 +102,9 @@ func ImportAttachments(ctx context.Context, pool *pgxpool.Pool, store attachment
 				}
 				if exists {
 					return nil
+				}
+				if err := attachments.Publish(ctx, tx, attachments.OwnerAttachment, blob); err != nil {
+					return err
 				}
 				var position int64
 				if err := tx.QueryRow(ctx, `SELECT coalesce(ceil(max(position)),0)::bigint+1 FROM attachments WHERE tenant_id=$1 AND node_id=$2`, tenantID, nodeID).Scan(&position); err != nil {
@@ -117,6 +121,7 @@ func ImportAttachments(ctx context.Context, pool *pgxpool.Pool, store attachment
 				}
 				return err
 			})
+			_ = blob.Close()
 			if err != nil {
 				return created, fmt.Errorf("attach classic %d: %w", attachmentID, err)
 			}

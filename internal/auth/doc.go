@@ -3,9 +3,18 @@
 // Package auth authenticates people and agent keys. The middleware applies an
 // outer, deny-by-default key-scope ceiling before any module handler runs.
 // Module handlers still check principal kind, resource ownership and live grants.
-// GET /api/me emits Aeon-Contract: me/1.0 without changing the strict JSON
+// GET /api/me emits Aeon-Contract: me/1.4 without changing the strict JSON
 // body. Additive optional response fields require a minor bump; breaking
 // changes require a major bump. internal/reportercontract pins its schema.
+// AEON-991: agent_keys.full_access is a nullable boolean (NULL means false).
+// Full-access keys resolve the live agent-grantable catalog in memory, and
+// retain live role/creator/project ceilings. New full-access keys store no
+// scope list. Migration 1292 marks every non-revoked key named exactly
+// workstation-agents on an active ordinary agent, across all tenants; no preset
+// marker exists. It preserves historical scopes for old-release rollback and
+// never changes owner-workstation designation. A 403 caused by a missing key
+// scope on a full-access agent-grantable route is a product bug to file on the
+// tracker; agents must not ask the person to extend or replace the key.
 // Scope management rechecks keys.manage under the tenant/key lock. A confirmed
 // role_extension additionally requires roles.manage, the current custom agent
 // workspace role and permissions held by editor and original creator. Role and
@@ -60,12 +69,54 @@
 //	/api/projects/{id}/intake: intake.read or intake.write.
 //	/api/stage-handoffs, /api/projects/{id}/baseline-batches:
 //	  stage.<op>; the handler rechecks the exact operation and grant.
-//	/api/agent-accounts, GET /api/me: account.manage.
+//	/api/agent-accounts: account.manage.
+//	GET /api/me and /api/status/help: authenticated, no key scope required.
+//	  Status help reads tenant metadata; project overrides retain visibility checks.
 //	/api/time-entries, /api/time-periods, /api/nodes/{id}/time-totals:
 //	  hours.read or hours.write.
 //
 // Every other API path returns 403 to an authenticated agent key, including
 // business/customer/admin and public-capability paths when a key is presented.
-// Empty scope lists grant nothing. Anonymous public calls retain their normal
-// behavior. Person sessions are governed by role and module checks.
+// Empty scope lists grant only self identity and status help reads. Anonymous
+// public calls retain their normal behavior. Person sessions are governed by
+// role and module checks.
+// AEON-580 adds one explicitly Owner-marked workstation key per tenant. It
+// remains an agent, bound to a connected redeemed computer and its pinned P-256
+// key. Ordinary keys and all person-only rules above remain unchanged unless
+// their permission is in authz.OwnerWorkstationPermission. Marking never grants
+// a role or scopes. Ownership transfer, customer portal authority and decisions
+// on the same agent's approvals remain unavailable. A mark generation fences
+// in-flight requests across unmark/re-mark; all handler transactions recheck the
+// current key, pairing, role and creator under the tenant fence.
+//
+// High-risk writes return 428 with only code, challenge_id and expires_at for a
+// two-minute, single-use challenge. The proof
+// is standard-base64 ASN.1 ECDSA P-256/SHA-256 over the UTF-8 concatenation of the
+// nonce and action_digest hex strings, passed as Aeon-Step-Up: id.signature.
+// The digest binds tenant/key/agent/computer, method, URI/query, body hash and
+// conditional headers. One pending challenge per key bounds storage. Access
+// audit events record admission/denial, not a claim that the mutation succeeded.
+// Client/device prompting belongs to AEON-581; the backend never accepts boolean
+// consent, a request-supplied public key or person impersonation. Agentd fetches
+// the stored server summary/nonce/digest through GET /api/agentd/step-ups/{id}
+// using its exact paired runtime key plus Aeon-Computer-ID and Aeon-Device-Proof.
+// The requesting agent passes only the challenge ID to agentd; its forwarded
+// summary is never trusted for the Touch ID prompt. The server summary uses a
+// fixed action template, method, escaped route, canonical query, conditional
+// headers and stored member/key/role/project names identified by the route or
+// role-deletion reassignment query. Repeated query values retain their order.
+// Labels are quoted and stripped of control/format characters. A summary that
+// cannot fit completely in the daemon's 256 UTF-8 byte limit fails with 400;
+// no name or field is shortened or omitted to fit. Reactivation and project
+// member replacement require step-up, like deactivation and workspace roles.
+// Mark/unmark locks pairing, tree, tenant, sorted computers, then key; event is last.
+//
+// DSAR (AEON-490): agent_keys.owner_workstation/workstation_generation are
+// metadata; workstation_computer_id is a personal device link, located by
+// (tenant_id,principal_id,id). owner_workstation_challenges is tenant scoped;
+// key_id/principal_id/computer_id are personal links, nonce is a short-lived
+// secret, summary is personal data (may include stored target names), and
+// public_key/action_digest/id/expires_at are security metadata. No body,
+// signature, Touch ID biometric or submitted prose is retained. Audit events
+// use the existing append-only events retention and principal locator.
 package auth

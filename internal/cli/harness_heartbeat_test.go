@@ -19,6 +19,7 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -34,10 +35,309 @@ type hbCall struct {
 	body   map[string]any
 }
 
+// Risk: an automatic retry grants authority to an unselected session, or
+// replays the ordinary claim after it committed and changes lead admission.
+func TestHeartbeatAutomaticallyClaimsOnlyConfirmedOwnLead(t *testing.T) {
+	for _, tc := range []struct {
+		name      string
+		claims    int
+		claimed   bool
+		refreshed bool
+		note      string
+	}{
+		{name: "confirmed", claims: 1, claimed: true},
+		{name: "unconfirmed", note: "Waiting for a person"},
+		{name: "another session"},
+		{name: "another project", note: "Adoption unverified"},
+		{name: "zero revision", note: "Waiting for a person"},
+		{name: "ordinary start"},
+		{name: "no lead intent"},
+		{name: "paused selection", note: "Session ineligible"},
+		{name: "existing generation"},
+		{name: "worker"},
+		{name: "child coordinator"},
+		{name: "CLI 129 reference mismatch", note: "Reference mismatch"},
+		{name: "legacy native state", claims: 1, claimed: true},
+		{name: "legacy source mismatch", note: "Reference mismatch"},
+		{name: "missing registered reference", note: "Reference mismatch"},
+		{name: "revision race", claims: 2, claimed: true, refreshed: true},
+		{name: "second revision race", claims: 2, refreshed: true, note: "Claim conflicted again"},
+		{name: "cancel during claim", claims: 1, refreshed: true, note: "Waiting for a person"},
+		{name: "reselect during claim", claims: 1, refreshed: true, note: "Lead selection changed"},
+		{name: "eligibility conflict", claims: 1, refreshed: true, note: "Session ineligible"},
+		{name: "proof refused", claims: 1, note: "original account"},
+		{name: "lost claim response", claims: 1, claimed: true},
+		{name: "wrong claim receipt", claims: 1, note: "Claim result unverified"},
+		{name: "paired binding refused", claims: 1, claimed: true},
+		{name: "missing heartbeat identity"},
+		{name: "pending stop"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			own, other := transcriptSessionID, "88888888-8888-4888-8888-888888888888"
+			lead := harness.Lead{ProjectID: transcriptProjectID, SessionID: &own, Revision: 7, State: "waiting_for_room", Reason: "adoption_pending", ProcessActive: true}
+			o := heartbeatTestOptions(t.TempDir())
+			o.ProjectID, o.Role, o.Management = transcriptProjectID, "coordinator", "managed"
+			o.SourceSession = "11111111-1111-4111-8111-111111111111"
+			ref := heartbeatRegistrationRef(o, "")
+			source := o.SourceSession
+			switch tc.name {
+			case "unconfirmed":
+				lead.Reason = "awaiting_generation"
+			case "ordinary start":
+				lead.SessionID, lead.Reason = nil, "awaiting_generation"
+			case "no lead intent":
+				lead.SessionID, lead.Reason, lead.State, lead.Revision = nil, "", "none", 0
+			case "paused selection":
+				lead.State = "paused"
+			case "another session":
+				lead.SessionID = &other
+			case "another project":
+				lead.ProjectID = other
+			case "zero revision":
+				lead.Revision = 0
+			case "existing generation":
+				lead.Generation, lead.State, lead.Reason = 1, "working", ""
+			case "worker":
+				o.Role = "worker"
+			case "child coordinator":
+				o.Parent = other
+			case "CLI 129 reference mismatch":
+				ref = strings.Repeat("fallback-", 5)
+			case "legacy native state":
+				ref = ""
+			case "legacy source mismatch":
+				ref, source = "", other
+			case "missing registered reference":
+				ref, o.SourceSession = "", ""
+			case "paired binding refused":
+				o.Management = "unmanaged"
+			}
+			hold, err := openHeartbeatHold(o.StateDir)
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer hold.release()
+			lease := strings.Repeat("private-fixture-lease-", 3)
+			if err := hold.writeFile("lease.key", []byte(lease+"\n")); err != nil {
+				t.Fatal(err)
+			}
+			if err := hold.writeFile("index.source", []byte(source+"\n")); err != nil {
+				t.Fatal(err)
+			}
+			session := heartbeatSession{id: own, lease: lease, hold: hold, disk: heartbeatDisk{ProjectID: transcriptProjectID, RegisteredRef: ref, ActivityMode: "agent_summary"}}
+			if err := saveHeartbeatSession(&session); err != nil {
+				t.Fatal(err)
+			}
+			var calls []hbCall
+			claims := 0
+			srv := hbServer(t, &calls, func(r *http.Request, body map[string]any, w http.ResponseWriter) bool {
+				path := "/api/projects/" + transcriptProjectID + "/lead"
+				switch {
+				case r.Method == http.MethodGet && r.URL.Path == path:
+					_ = json.NewEncoder(w).Encode(lead)
+					return true
+				case r.Method == http.MethodPost && r.URL.Path == path+"/claim":
+					claims++
+					if r.Header.Get("Authorization") != workerAuthorization(testKey, lease) || receivedWorkerLease(r) != lease || body["session_id"] != own || body["expected_revision"] != float64(lead.Revision) || len(body) != 2 {
+						t.Error("claim did not retain its own exact authority, selection and current lead revision")
+					}
+					// Establish ordering through the accepted beat and the saved
+					// intent, rather than a sleep or an elapsed-time assertion.
+					saved, ok, err := loadHeartbeatSession(&hold)
+					if err != nil || !ok || saved.disk.LeadAdoption == nil || len(saved.disk.LeadAdoption.Attempts) != claims || saved.disk.LeadAdoption.Attempts[claims-1].Revision != lead.Revision || saved.disk.LeadAdoption.Attempts[claims-1].Result != "Awaiting claim result" || len(hbWhere(calls, "POST", "/heartbeat")) == 0 {
+						t.Error("claim was sent before its accepted heartbeat and durable attempt")
+					}
+					conflict := tc.name == "second revision race" || claims == 1 && (tc.name == "revision race" || tc.name == "cancel during claim" || tc.name == "reselect during claim" || tc.name == "eligibility conflict")
+					if conflict {
+						if tc.name != "eligibility conflict" {
+							lead.Revision++
+						}
+						if tc.name == "cancel during claim" {
+							lead.SessionID, lead.Reason = nil, "selection_cleared"
+						} else if tc.name == "reselect during claim" {
+							lead.SessionID = &other
+						}
+						w.WriteHeader(http.StatusConflict)
+						_, _ = w.Write([]byte(`{"error":"private upstream conflict"}`))
+						return true
+					}
+					if tc.name == "proof refused" {
+						w.WriteHeader(http.StatusForbidden)
+						_ = json.NewEncoder(w).Encode(map[string]string{"error": "raw_refusal " + ref + " " + lease})
+						return true
+					}
+					result := lead
+					result.Revision++
+					result.Generation, result.State, result.Reason = 1, "working", ""
+					if tc.name == "wrong claim receipt" {
+						result.SessionID = &other
+					} else {
+						lead = result
+					}
+					if tc.name == "lost claim response" {
+						w.WriteHeader(http.StatusBadGateway)
+						_, _ = w.Write([]byte(`{"error":"response lost after commit"}`))
+					} else {
+						_ = json.NewEncoder(w).Encode(result)
+					}
+					return true
+				case r.Method == http.MethodPost && strings.HasSuffix(r.URL.Path, "/heartbeat"):
+					if doing, ok := body["doing"].(string); ok && len([]rune(doing)) > 60 {
+						t.Error("adoption reason exceeded the visible activity summary limit")
+						w.WriteHeader(http.StatusBadRequest)
+						return true
+					}
+					response := map[string]any{"id": own, "phase": "working", "agent_activity_mode": "agent_summary"}
+					if tc.name == "missing heartbeat identity" {
+						delete(response, "id")
+					} else if tc.name == "pending stop" {
+						response["pause"] = &harness.Pause{StopRequested: true}
+					}
+					_ = json.NewEncoder(w).Encode(response)
+					return true
+				case r.Method == http.MethodGet && r.URL.Path == harnessPath(transcriptProjectID, own):
+					_ = json.NewEncoder(w).Encode(map[string]any{"id": own, "project_id": transcriptProjectID, "harness": o.Harness, "role": "coordinator"})
+					return true
+				}
+				return false
+			})
+			defer srv.Close()
+			rt, stdout, stderr := heartbeatRuntime(t, srv)
+			for beat := 0; beat < 3; beat++ {
+				err := rt.heartbeatBeat(t.Context(), o, heartbeatDeps{}, &session)
+				if tc.name == "paired binding refused" {
+					if err == nil || !strings.Contains(err.Error(), "paired reconnect binding was refused") {
+						t.Fatal("optional binding failure was not reported")
+					}
+				} else if err != nil {
+					t.Fatalf("adoption prevented ordinary heartbeat reporting: %v", err)
+				}
+				// Reopen the persisted helper state after every beat. This also
+				// proves attempts survive an optional binding error and restart.
+				loaded, ok, err := loadHeartbeatSession(&hold)
+				if err != nil || !ok {
+					t.Fatal("could not reload helper state")
+				}
+				if tc.name != "worker" && tc.name != "child coordinator" && tc.name != "another session" && tc.name != "existing generation" && tc.name != "missing heartbeat identity" && tc.name != "pending stop" {
+					session = loaded
+				}
+			}
+			if claims != tc.claims {
+				t.Fatalf("claim count %d, want %d", claims, tc.claims)
+			}
+			journal := session.disk.LeadAdoption
+			if tc.claims > 0 && (journal == nil || len(journal.Attempts) != tc.claims || journal.Claimed != tc.claimed || journal.Refreshed != tc.refreshed) {
+				t.Fatal("saved attempt journal did not retain the bounded claim outcome")
+			}
+			if tc.note != "" && (journal == nil || !strings.Contains(journal.Note, tc.note)) {
+				t.Fatal("missing human-readable adoption reason and fix")
+			}
+			if (tc.name == "ordinary start" || tc.name == "no lead intent") && journal != nil {
+				t.Fatal("automatic adoption overwrote activity without an adoption intent")
+			}
+			beats := hbWhere(calls, "POST", "/heartbeat")
+			if len(beats) < 3 || tc.note != "" && !strings.Contains(fmt.Sprint(beats[len(beats)-1].body["activity_note"]), tc.note) {
+				t.Fatal("existing heartbeat status did not show the failure while reporting continued")
+			}
+			public := stdout.String() + stderr.String()
+			for _, beat := range beats {
+				raw, _ := json.Marshal(beat.body)
+				public += string(raw)
+			}
+			if strings.Contains(public, lease) || ref != "" && strings.Contains(public, ref) || strings.Contains(public, "raw_refusal") {
+				t.Fatal("private proof or upstream refusal escaped into heartbeat status")
+			}
+			if session.disk.Closed || session.disk.Terminal {
+				t.Fatal("optional adoption changed the helper's lifetime")
+			}
+		})
+	}
+}
+
+// R10/AEON-1107: an optional list/status 503 must not suppress an owned
+// liveness POST through either exact lookup or an explicit known project ID.
+func TestHeartbeatKnownProjectBypassesProjection(t *testing.T) {
+	var calls []hbCall
+	base := heartbeatFixture(t, &calls, "", "")
+	defer base.Close()
+	var blockedQueries []string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/api/nodes" || r.Method == "GET" && strings.Contains(r.URL.Path, "/harness-sessions/") {
+			blockedQueries = append(blockedQueries, r.URL.RequestURI())
+			w.WriteHeader(http.StatusServiceUnavailable)
+			_, _ = io.WriteString(w, `{"error":"Work aggregates exceeded a resource limit; narrow the scope or retry."}`)
+			return
+		}
+		base.Config.Handler.ServeHTTP(w, r)
+	}))
+	defer srv.Close()
+	rt, _, _ := heartbeatRuntime(t, srv)
+	o := heartbeatTestOptions(t.TempDir())
+	// Match the one-shot harness below; the shared fixture defaults to Claude.
+	o.Harness = "codex"
+	session := heartbeatSession{id: transcriptSessionID, lease: "known-project-lease-00000000000001"}
+	if _, err := rt.projectNodeCtx(t.Context(), o.Project); heartbeatStatus(err) != 503 {
+		t.Fatalf("legacy lookup did not reproduce the list 503: %v", err)
+	}
+	if len(blockedQueries) != 1 || !strings.Contains(blockedQueries[0], "kind_id=project-kind") || !strings.Contains(blockedQueries[0], "limit=200") || len(hbWhere(calls, "POST", "/heartbeat")) != 0 {
+		t.Fatalf("unexpected failing reporter chain: queries=%v calls=%v", blockedQueries, calls)
+	}
+	if err := rt.heartbeatBeat(t.Context(), o, heartbeatDeps{}, &session); err != nil {
+		t.Fatalf("exact project lookup still depended on read projections: %v", err)
+	}
+	o.ProjectID = transcriptProjectID
+	if err := rt.heartbeatBeat(t.Context(), o, heartbeatDeps{}, &session); err != nil {
+		t.Fatal(err)
+	}
+	// Cancellation and a changed target remain refusals even with a known ID.
+	canceled, cancel := context.WithCancel(t.Context())
+	cancel()
+	if err := rt.heartbeatBeat(canceled, o, heartbeatDeps{}, &session); !errors.Is(err, context.Canceled) {
+		t.Fatalf("known project hid cancellation: %v", err)
+	}
+	o.ProjectID = transcriptEntryID
+	if err := rt.heartbeatBeat(t.Context(), o, heartbeatDeps{}, &session); err == nil || !strings.Contains(err.Error(), "differs from this generation") {
+		t.Fatalf("known project changed the generation target: %v", err)
+	}
+	o.ProjectID = "invalid"
+	if err := rt.heartbeatBeat(t.Context(), o, heartbeatDeps{}, &session); err == nil || !strings.Contains(err.Error(), "must be a UUID") {
+		t.Fatalf("invalid project UUID reached the API: %v", err)
+	}
+	leaseFile := filepath.Join(t.TempDir(), "worker-proof")
+	if err := os.WriteFile(leaseFile, []byte(session.lease), 0600); err != nil {
+		t.Fatal(err)
+	}
+	args := []string{"aeon", "harness", "heartbeat", "--project", "AEON", "--session", transcriptSessionID,
+		"--agent", "worker", "--worker-lease-file", leaseFile, "--activity-sequence", "1"}
+	if code, _, stderr := runCLI(args, ""); code == 0 || !strings.Contains(stderr, "api 503: Work aggregates exceeded") {
+		t.Fatalf("one-shot without known harness did not reproduce the status 503: code=%d %s", code, stderr)
+	}
+	args = append(args, "--harness", "codex")
+	if code, _, stderr := runCLI(args, ""); code != 0 {
+		t.Fatalf("one-shot exact lookup still depended on read projections: code=%d %s", code, stderr)
+	}
+	args = append(args, "--project-id", transcriptProjectID)
+	if code, _, stderr := runCLI(args, ""); code != 0 {
+		t.Fatalf("known one-shot project still depended on read projections: code=%d %s", code, stderr)
+	}
+	beats := hbWhere(calls, "POST", "/heartbeat")
+	if len(blockedQueries) != 2 || len(beats) != 4 || len(hbWhere(calls, "GET", "/projects/lookup")) != 3 {
+		t.Fatalf("reporter did extra projection work or lost a beat: queries=%v beats=%v", blockedQueries, beats)
+	}
+	for _, beat := range beats {
+		if beat.path != harnessPath(transcriptProjectID, transcriptSessionID)+"/heartbeat" || beat.lease != session.lease || beat.body["max_session_file_bytes"] != float64(rules.SessionFileLimit("codex")) {
+			t.Fatalf("known reporter bypassed ownership or sent wrong client limit: queries=%v beats=%v", blockedQueries, beats)
+		}
+	}
+}
+
 func heartbeatFixture(t *testing.T, calls *[]hbCall, status, inbox string) *httptest.Server {
 	t.Helper()
+	var mu sync.Mutex
 	project := map[string]any{"id": transcriptProjectID, "key": "PRJ-1", "kind_id": "project-kind", "title": "AEON", "fields": map[string]any{"project_key": "AEON"}}
 	return httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		mu.Lock()
+		defer mu.Unlock()
 		t.Helper()
 		var body map[string]any
 		raw, err := io.ReadAll(io.LimitReader(r.Body, 1<<20))
@@ -49,11 +349,13 @@ func heartbeatFixture(t *testing.T, calls *[]hbCall, status, inbox string) *http
 				t.Errorf("decode %s %s: %v", r.Method, r.URL.Path, err)
 			}
 		}
-		*calls = append(*calls, hbCall{method: r.Method, path: r.URL.Path, lease: r.Header.Get("X-Aeon-Worker-Lease"), query: r.URL.RawQuery, body: body})
+		*calls = append(*calls, hbCall{method: r.Method, path: r.URL.Path, lease: receivedWorkerLease(r), query: r.URL.RawQuery, body: body})
 		w.Header().Set("Content-Type", "application/json")
 		switch {
 		case r.Method == http.MethodGet && r.URL.Path == "/api/kinds":
 			_, _ = w.Write([]byte(`{"items":[{"id":"project-kind","slug":"project"}]}`))
+		case r.Method == http.MethodGet && r.URL.Path == "/api/projects/lookup":
+			_ = json.NewEncoder(w).Encode(project)
 		case r.Method == http.MethodGet && r.URL.Path == "/api/nodes":
 			_ = json.NewEncoder(w).Encode(map[string]any{"items": []any{project}})
 		case r.Method == http.MethodGet && r.URL.Path == "/api/models":
@@ -284,6 +586,9 @@ func testCoordinatorHeartbeatRetriesActiveGeneration(t *testing.T, message strin
 	rt, stdout, stderr := heartbeatRuntime(t, srv)
 	o := heartbeatTestOptions(t.TempDir())
 	o.Role, o.SourceSession, o.Interval = "coordinator", transcriptSessionID, 50
+	// A successful native registration must retain a verifiable live owner
+	// so its inbox index can be published and the diagnostic can report clear.
+	o.OwnerPID = os.Getpid()
 	err := rt.runHeartbeat(context.Background(), o, heartbeatDeps{
 		alive: func(int) bool { return true },
 		wait: func(_ context.Context, pid int, interval time.Duration) error {
@@ -326,8 +631,23 @@ func testCoordinatorHeartbeatRetriesActiveGeneration(t *testing.T, message strin
 	if regs[0].body["harness_session_ref"] != "claude:"+transcriptSessionID {
 		t.Fatal("retry lost the native coordinator reference")
 	}
-	if len(hbWhere(calls, http.MethodPost, "/heartbeat")) != 1 || len(hbWhere(calls, http.MethodPost, "/stop")) != 1 {
+	beats := hbWhere(calls, http.MethodPost, "/heartbeat")
+	var liveness, diagnostics []hbCall
+	for _, beat := range beats {
+		if beat.body["inbox_binding_report"] == true {
+			diagnostics = append(diagnostics, beat)
+		} else {
+			liveness = append(liveness, beat)
+		}
+	}
+	if len(liveness) != 1 || len(diagnostics) != 1 || len(beats) != 2 || len(hbWhere(calls, http.MethodPost, "/stop")) != 1 {
 		t.Fatal("successful retry did not enter the normal heartbeat/stop lifecycle")
+	}
+	if beats[0].body["inbox_binding_report"] == true || diagnostics[0].path != liveness[0].path || diagnostics[0].lease != liveness[0].lease || diagnostics[0].body["activity_sequence"] != liveness[0].body["activity_sequence"] || diagnostics[0].body["phase"] != liveness[0].body["phase"] || diagnostics[0].body["activity"] != liveness[0].body["activity"] {
+		t.Fatal("binding report did not follow the accepted heartbeat's exact worker identity")
+	}
+	if code, exists := diagnostics[0].body["inbox_binding_error"]; !exists || code != nil {
+		t.Fatalf("successful source registration did not report a clear binding diagnostic: %v (present %t)", code, exists)
 	}
 	wantLog := strings.Repeat("heartbeat: predecessor generation is still active; retrying registration in 50s\n", 3)
 	if stderr.String() != wantLog || stdout.Len() != 0 {
@@ -670,14 +990,15 @@ func TestRunHeartbeatMissingNameSource(t *testing.T) {
 	if _, ok := beats[0].body["display_label"]; ok {
 		t.Fatal("missing name source sent a label")
 	}
-	if beats[0].body["model"] != "claude-test" {
-		t.Fatalf("model %#v", beats[0].body["model"])
+	reg := hbWhere(calls, http.MethodPost, "/harness-sessions")
+	if reg[0].body["model"] != "claude-test" || beats[0].body["model"] != nil {
+		t.Fatalf("initial model should be registration only: %#v / %#v", reg[0].body, beats[0].body)
 	}
 	if _, ok := beats[0].body["account_label"]; ok {
 		t.Fatal("unknown account label was sent")
 	}
-	if beats[0].body["reasoning_effort"] != "high" {
-		t.Fatalf("effort %#v", beats[0].body["reasoning_effort"])
+	if reg[0].body["reasoning_effort"] != "high" || beats[0].body["reasoning_effort"] != nil {
+		t.Fatalf("initial effort should be registration only: %#v / %#v", reg[0].body, beats[0].body)
 	}
 }
 
@@ -794,18 +1115,18 @@ func TestHeartbeatNameSources(t *testing.T) {
 	if err := os.WriteFile(index, []byte(raw), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	label, ok := codexSessionLabel(index, id)
+	label, ok := readCodexSessionLabel(context.Background(), index, id)
 	if !ok || label != "Second" {
 		t.Fatalf("codex label %q %v", label, ok)
 	}
-	if _, ok := codexSessionLabel(filepath.Join(dir, "missing.jsonl"), id); ok {
+	if _, ok := readCodexSessionLabel(context.Background(), filepath.Join(dir, "missing.jsonl"), id); ok {
 		t.Fatal("missing codex index returned a label")
 	}
 	blank := filepath.Join(dir, "blank.jsonl")
 	if err := os.WriteFile(blank, []byte(`{"id":"`+id+`","thread_name":"Named"}`+"\n"+`{"id":"`+id+`","thread_name":""}`+"\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	if _, ok := codexSessionLabel(blank, id); ok {
+	if _, ok := readCodexSessionLabel(context.Background(), blank, id); ok {
 		t.Fatal("blank current name was treated as a label")
 	}
 
@@ -819,11 +1140,11 @@ func TestHeartbeatNameSources(t *testing.T) {
 	if err := os.WriteFile(transcript, []byte(claude), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	got, ok := claudeSessionLabel(heartbeatOptions{ClaudeProjects: projects}, id)
+	got, ok := readClaudeSessionLabel(context.Background(), heartbeatOptions{ClaudeProjects: projects}, id)
 	if !ok || got != "Mine" {
 		t.Fatalf("claude title %q %v", got, ok)
 	}
-	if _, ok := claudeSessionLabel(heartbeatOptions{ClaudeProjects: filepath.Join(dir, "absent")}, id); ok {
+	if _, ok := readClaudeSessionLabel(context.Background(), heartbeatOptions{ClaudeProjects: filepath.Join(dir, "absent")}, id); ok {
 		t.Fatal("missing claude projects returned a label")
 	}
 }
@@ -900,7 +1221,7 @@ func hbServer(t *testing.T, calls *[]hbCall, handle func(r *http.Request, body m
 				t.Errorf("decode %s %s: %v", r.Method, r.URL.Path, err)
 			}
 		}
-		*calls = append(*calls, hbCall{method: r.Method, path: r.URL.Path, lease: r.Header.Get("X-Aeon-Worker-Lease"), query: r.URL.RawQuery, body: body})
+		*calls = append(*calls, hbCall{method: r.Method, path: r.URL.Path, lease: receivedWorkerLease(r), query: r.URL.RawQuery, body: body})
 		w.Header().Set("Content-Type", "application/json")
 		if handle != nil && handle(r, body, w) {
 			return
@@ -908,6 +1229,8 @@ func hbServer(t *testing.T, calls *[]hbCall, handle func(r *http.Request, body m
 		switch {
 		case r.Method == http.MethodGet && r.URL.Path == "/api/kinds":
 			_, _ = w.Write([]byte(`{"items":[{"id":"project-kind","slug":"project"}]}`))
+		case r.Method == http.MethodGet && r.URL.Path == "/api/projects/lookup":
+			_ = json.NewEncoder(w).Encode(project)
 		case r.Method == http.MethodGet && r.URL.Path == "/api/nodes":
 			_ = json.NewEncoder(w).Encode(map[string]any{"items": []any{project}})
 		case r.Method == http.MethodGet && r.URL.Path == "/api/models":
@@ -962,8 +1285,8 @@ func TestRunHeartbeatTerminalStatusExits(t *testing.T) {
 			if len(hbWhere(calls, http.MethodPost, "/stop")) != 0 {
 				t.Fatal("terminal generation was stopped again")
 			}
-			if strings.Contains(stderr.String(), "will not resume") {
-				t.Fatalf("first run explained a closed generation: %s", stderr.String())
+			if !strings.Contains(stderr.String(), "will not resume") {
+				t.Fatalf("first run did not report the closed generation: %s", stderr.String())
 			}
 			before := len(calls)
 			err = rt.runHeartbeat(context.Background(), heartbeatTestOptions(dir), heartbeatDeps{alive: func(int) bool { return true }})
@@ -1611,25 +1934,54 @@ func TestRunHeartbeatFinalUsageFlush(t *testing.T) {
 }
 
 func TestRunHeartbeatCommitCursorDoesNotStarve(t *testing.T) {
-	repo, _ := gitRepo(t)
+	// Keep the fixture independent of the host's Git configuration and clock.
+	// In particular, no background maintenance may outlive its temporary repo.
+	t.Setenv("GIT_CONFIG_GLOBAL", os.DevNull)
+	t.Setenv("GIT_CONFIG_COUNT", "2")
+	t.Setenv("GIT_CONFIG_KEY_0", "gc.auto")
+	t.Setenv("GIT_CONFIG_VALUE_0", "0")
+	t.Setenv("GIT_CONFIG_KEY_1", "maintenance.auto")
+	t.Setenv("GIT_CONFIG_VALUE_1", "false")
+	started := time.Date(2026, time.January, 1, 0, 0, 0, 0, time.UTC)
+	commitDate := started.Add(time.Second).Format(time.RFC3339)
+	t.Setenv("GIT_AUTHOR_DATE", commitDate)
+	t.Setenv("GIT_COMMITTER_DATE", commitDate)
+	repo, base := gitRepo(t)
+	branch := strings.TrimSpace(gitCmd(t, repo, "symbolic-ref", "HEAD"))
+	for i := 1; i <= 21; i++ {
+		gitCommit(t, repo, fmt.Sprintf("c%02d", i))
+	}
+	tip := strings.TrimSpace(gitCmd(t, repo, "rev-parse", "HEAD"))
+	gitCmd(t, repo, "update-ref", "-m", "fixture: hide history", branch, base, tip)
+	// Retain the real oldest-first Git walk and reflog attribution, but inject
+	// its time cutoff rather than depending on registration's wall clock.
+	disk := heartbeatDisk{
+		BoundWorktree: repo,
+		BoundBranch:   strings.TrimPrefix(branch, "refs/heads/"),
+		StartRev:      base,
+		StartedUnix:   started.Unix(),
+	}
 	var calls []hbCall
 	srv := heartbeatFixture(t, &calls, "", "")
 	defer srv.Close()
 	rt, _, stderr := heartbeatRuntime(t, srv)
 	opts := heartbeatTestOptions(t.TempDir())
 	opts.Worktree = repo
-	made := false
 	beats := 0
 	err := rt.runHeartbeat(context.Background(), opts, heartbeatDeps{
 		alive: func(int) bool { return true },
 		label: func() (string, bool) { return "worker", true },
+		commits: func(worktree, since string) ([]heartbeatCommit, error) {
+			disk.CommitCursor = since
+			batch, _ := localHeartbeatCommits(context.Background(), worktree, &disk)
+			return batch, nil
+		},
 		wait: func(context.Context, int, time.Duration) error {
 			beats++
-			if beats == 1 && !made {
-				for i := 1; i <= 21; i++ {
-					gitCommit(t, repo, fmt.Sprintf("c%02d", i))
-				}
-				made = true
+			if beats == 1 {
+				// The wait callback is a synchronous barrier: all objects and
+				// reflog entries exist before the next beat can read them.
+				gitCmd(t, repo, "update-ref", "-m", "fixture: expose history", branch, tip, base)
 			}
 			if beats >= 3 {
 				return errOwnerExited
@@ -1644,6 +1996,9 @@ func TestRunHeartbeatCommitCursorDoesNotStarve(t *testing.T) {
 	if len(heartbeats) != 3 {
 		t.Fatalf("beats %d", len(heartbeats))
 	}
+	if _, ok := heartbeats[0].body["commits"]; ok {
+		t.Fatal("history was sent before the wait barrier exposed it")
+	}
 	first := commitSubjects(t, heartbeats[1].body["commits"])
 	second := commitSubjects(t, heartbeats[2].body["commits"])
 	if len(first) != 20 || first[0] != "c01" || first[19] != "c20" {
@@ -1652,9 +2007,9 @@ func TestRunHeartbeatCommitCursorDoesNotStarve(t *testing.T) {
 	if len(second) != 1 || second[0] != "c21" {
 		t.Fatalf("second batch %v", second)
 	}
-	for _, subject := range first {
-		if subject == "c21" {
-			t.Fatal("later commit was sent before the cursor advanced")
+	for i, subject := range first {
+		if want := fmt.Sprintf("c%02d", i+1); subject != want {
+			t.Fatalf("first batch commit %d: got %q, want %q", i, subject, want)
 		}
 	}
 }
@@ -1929,10 +2284,15 @@ func TestReadLimitedLineHonorsCancelAndBudget(t *testing.T) {
 
 func TestHeartbeatBeatLookupHonorsCancellation(t *testing.T) {
 	var calls []hbCall
-	slow := false
+	var block atomic.Bool
+	entered := make(chan struct{})
+	released := make(chan struct{})
 	srv := hbServer(t, &calls, func(r *http.Request, _ map[string]any, w http.ResponseWriter) bool {
-		if slow && r.URL.Path == "/api/nodes" {
-			time.Sleep(250 * time.Millisecond)
+		if block.Load() && r.URL.Path == "/api/projects/lookup" {
+			close(entered)
+			<-r.Context().Done()
+			close(released)
+			return true
 		}
 		return false
 	})
@@ -1944,18 +2304,26 @@ func TestHeartbeatBeatLookupHonorsCancellation(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer session.hold.release()
-	slow = true
-	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Millisecond)
+	block.Store(true)
+	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	started := time.Now()
-	err = rt.heartbeatBeat(ctx, opts, heartbeatDeps{}, &session)
-	elapsed := time.Since(started)
-	if err == nil {
-		t.Fatal("deadline did not return an error")
+	done := make(chan error, 1)
+	go func() { done <- rt.heartbeatBeat(ctx, opts, heartbeatDeps{}, &session) }()
+	select {
+	case <-entered:
+	case <-time.After(10 * time.Second):
+		t.Fatal("lookup did not reach the cancellation barrier")
 	}
-	if elapsed > 150*time.Millisecond {
-		t.Fatalf("20 ms cancellation took %v in project lookup", elapsed)
+	cancel()
+	select {
+	case err := <-done:
+		if err == nil || !strings.Contains(err.Error(), "context canceled") {
+			t.Fatalf("canceled lookup returned %v", err)
+		}
+	case <-time.After(10 * time.Second):
+		t.Fatal("canceled beat did not return")
 	}
+	<-released
 }
 
 func TestFinalUsageDrainsBacklog(t *testing.T) {
@@ -2147,7 +2515,7 @@ func TestClaudeTitleSkipsOversizedLine(t *testing.T) {
 			if err := os.WriteFile(transcript, []byte(body.String()), 0o600); err != nil {
 				t.Fatal(err)
 			}
-			got, ok := claudeSessionLabel(heartbeatOptions{ClaudeProjects: projects}, id)
+			got, ok := readClaudeSessionLabel(context.Background(), heartbeatOptions{ClaudeProjects: projects}, id)
 			if !ok || got != "After" {
 				t.Fatalf("title %q ok %v", got, ok)
 			}
@@ -2538,4 +2906,46 @@ func commitSubjects(t *testing.T, raw any) []string {
 		out = append(out, subject)
 	}
 	return out
+}
+
+// Test adapters keep single-window cases on the live stateful scanner without
+// shipping an extra scanner entry point.
+func scanUsageWindow(ctx context.Context, path, fallback string, offset, maxBytes int64, recent []string, discarding bool) (map[string]usageSum, int64, []string, bool, error) {
+	return scanUsageWindowSource(ctx, path, fallback, offset, maxBytes, recent, discarding, "claude")
+}
+
+// scanUsageWindowSource scans one window with a fresh Codex cursor. It is the
+// single-window form; the heartbeat uses scanUsageWindowState so the Codex
+// model and baseline carry over between beats.
+func scanUsageWindowSource(ctx context.Context, path, fallback string, offset, maxBytes int64, recent []string, discarding bool, source string) (map[string]usageSum, int64, []string, bool, error) {
+	sums, next, ring, disc, _, err := scanUsageWindowState(ctx, path, fallback, offset, maxBytes, recent, discarding, source, nil)
+	return sums, next, ring, disc, err
+}
+
+func workerAuthorization(key, lease string) string {
+	return "Aeon-Worker " + key + " " + lease
+}
+
+// Every client fixture also rejects a separate proof header. The lease travels
+// inside Authorization, which a reverse proxy forwards and redacts.
+func receivedWorkerLease(r *http.Request) string {
+	if len(r.Header.Values("X-Aeon-Worker-Lease")) != 0 || len(r.Header.Values("Proxy-Authorization")) != 0 {
+		return "invalid separate worker header"
+	}
+	values := r.Header.Values("Authorization")
+	if len(values) != 1 {
+		if len(values) == 0 {
+			return ""
+		}
+		return "invalid duplicate authorization"
+	}
+	scheme, rest, ok := strings.Cut(values[0], " ")
+	if !ok || !strings.EqualFold(scheme, "Aeon-Worker") {
+		return ""
+	}
+	_, lease, ok := strings.Cut(rest, " ")
+	if !ok || strings.Contains(lease, " ") {
+		return "invalid worker scheme"
+	}
+	return lease
 }

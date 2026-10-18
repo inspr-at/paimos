@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // Dev-only Vite entry: /tests/indicator-controls.html (not a production input).
 // Ring modes and inner-icon sizes for all nine renderers at their real 20, 26
-// and 64 px sizes, plus LiveBot rows that read one mocked account preference
+// and 64 px sizes, plus LiveBot rows that read one mocked saved agent theme
 // (?ring=&size=&palette=&theme=). No real API, account or live telemetry.
 import { createApp, h, ref, type Component } from 'vue'
 import LiveBot from '../src/components/projects/LiveBot.vue'
@@ -15,7 +15,9 @@ import Orbit from '../src/components/indicators/Orbit.vue'
 import Quill from '../src/components/indicators/Quill.vue'
 import Sprite from '../src/components/indicators/Sprite.vue'
 import { ICON_SIZE, indicatorArtScale, indicatorRing, indicatorVariants, type AgentIndicatorStyle, type IndicatorRing } from '../src/lib/indicatorVariants'
-import type { AgentState } from '../src/lib/agentSignals'
+import { normalizeAgentIndicator } from '../src/lib/agentIndicator'
+import { installAgentTheme } from '../src/lib/agentTheme'
+import { normalizeAgentState, type AgentState } from '../src/lib/agentSignals'
 import '../src/styles/base.css'
 import '../src/styles/tokens.css'
 
@@ -24,6 +26,15 @@ document.documentElement.dataset.theme = params.get('theme') === 'dark' ? 'dark'
 const account: Record<string, unknown> = { style: 'robot-1', hovering: params.get('hovering') === '1' }
 if (params.has('ring')) account.ring = params.get('ring')
 if (params.has('size')) account.size = Number(params.get('size'))
+// Isolated previews seed the same shared appearance that the Theme API restores
+// in the app. Legacy preferences no longer override a bound viewer's theme.
+const indicator = normalizeAgentIndicator(account)
+const appearance = normalizeAgentState({ palette: params.get('palette') ?? 'standard', dimInactive: true, inactiveOpacity: 55 })
+installAgentTheme({
+  avatar: indicator.style, ring: indicator.ring ?? null, size: indicator.size ?? null,
+  hover: indicator.hovering, palette: appearance.palette,
+  dim_inactive: appearance.dimInactive, inactive_opacity: appearance.inactiveOpacity,
+})
 window.fetch = async input => new Response(JSON.stringify({ value: String(input).endsWith('agent-state')
   ? { palette: params.get('palette') ?? 'standard', dimInactive: true, inactiveOpacity: 55 }
   : account }), { headers: { 'Content-Type': 'application/json' } })

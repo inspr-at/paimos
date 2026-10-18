@@ -1,0 +1,78 @@
+{
+  "_license": "SPDX-License-Identifier: AGPL-3.0-only",
+  "builtin_roles": {
+    "admin": [
+      "attachments.delete",
+      "attachments.read",
+      "attachments.write"
+    ],
+    "guest": [
+      "attachments.read"
+    ],
+    "member": [
+      "attachments.delete",
+      "attachments.read",
+      "attachments.write"
+    ],
+    "owner": [
+      "attachments.delete",
+      "attachments.read",
+      "attachments.write"
+    ],
+    "viewer": [
+      "attachments.read"
+    ]
+  },
+  "registry": [
+    {
+      "agent_grantable": true,
+      "description": "Delete attachments",
+      "grantable_at": [
+        "workspace",
+        "project"
+      ],
+      "group": "Attachments",
+      "key": "attachments.delete",
+      "owner_workstation_grantable": true,
+      "risk": "high"
+    },
+    {
+      "agent_grantable": true,
+      "description": "Read attachments",
+      "grantable_at": [
+        "workspace",
+        "project"
+      ],
+      "group": "Attachments",
+      "key": "attachments.read",
+      "owner_workstation_grantable": true,
+      "risk": "low"
+    },
+    {
+      "agent_grantable": true,
+      "description": "Write attachments",
+      "grantable_at": [
+        "workspace",
+        "project"
+      ],
+      "group": "Attachments",
+      "key": "attachments.write",
+      "owner_workstation_grantable": true,
+      "risk": "medium"
+    }
+  ],
+  "routes": {
+    "DELETE /api/attachments/{id}": "attachments.delete",
+    "GET /api/attachments/{id}": "attachments.read",
+    "GET /api/attachments/{id}/content": "attachments.read",
+    "GET /api/nodes/{nodeId}/attachments": "attachments.read",
+    "PATCH /api/attachments/{id}": "attachments.write",
+    "POST /api/attachments/{id}/preview": "attachments.read",
+    "POST /api/nodes/{nodeId}/attachments": "attachments.write"
+  },
+  "words": {
+    "resources": {
+      "attachments": "attachments"
+    }
+  }
+}

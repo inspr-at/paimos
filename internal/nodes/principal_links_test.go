@@ -15,7 +15,7 @@ import (
 
 func TestLinkedAssigneesListFacetsPickerAndWrites(t *testing.T) {
 	p := newPrincipal(t, "linked-assignees")
-	kind := kindBySlug(t, p, "ticket")
+	kind := kindBySlug(t, p, "work")
 	var alias string
 	if err := db.InTenant(dbtest.Seed(t.Context()), appPool, p.TenantID, func(tx pgx.Tx) error {
 		var identity string

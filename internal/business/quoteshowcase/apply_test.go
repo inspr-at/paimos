@@ -434,7 +434,7 @@ func assertShowcaseRolledBack(t *testing.T, database *dbtest.DB, tenantID string
 		if err := tx.QueryRow(ctx, `SELECT count(*) FROM quote_document_profiles WHERE name='ACME English'`).Scan(&english); err != nil {
 			return err
 		}
-		return tx.QueryRow(ctx, `SELECT count(*) FROM events WHERE type='principal.created'`).Scan(&created)
+		return tx.QueryRow(ctx, `SELECT count(*) FROM events WHERE type='principal.created' AND after->>'kind'='person'`).Scan(&created)
 	})
 	if err != nil || quotesN != 0 || orgs != 0 || people != 0 || english != 0 || created != 0 {
 		t.Fatalf("rolled back quotes=%d orgs=%d people=%d profile=%d created=%d err=%v", quotesN, orgs, people, english, created, err)

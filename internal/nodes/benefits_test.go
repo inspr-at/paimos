@@ -2,6 +2,7 @@
 package nodes
 
 import (
+	"encoding/json"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
@@ -14,17 +15,161 @@ import (
 	"github.com/inspr-at/paimos/internal/dbtest"
 	"github.com/inspr-at/paimos/internal/events"
 	"github.com/inspr-at/paimos/internal/tenant"
-	"github.com/inspr-at/paimos/internal/ticketbenefits"
 	"github.com/jackc/pgx/v5"
 )
 
+// Markus approved Q1 (AEON-1248, 2026-10-13): release copy is a
+// configurable, overridable check and hidden tickets are exempt. Keep these
+// existing gate/undo risks covered using an explicit workspace definition.
+func benefitPrincipal(t *testing.T, slug string) tenant.Principal {
+	t.Helper()
+	p := newPrincipal(t, slug)
+	code, raw := call(t, &p, "PUT", "/api/settings/definitions", `{"expected_revision":null,"checks":{"done":[{"id":"release_copy_set"}]}}`)
+	if code != 200 {
+		t.Fatalf("definition fixture: %d %s", code, raw)
+	}
+	return p
+}
+
 const benefitFields = `{"pill_en":"Clear release notes","pill_de":"Verständliche Release Notes","benefit_en":"Tickets explain the benefit.","benefit_de":"Tickets erklären den Nutzen."}`
 
+// Risk: accepting invalid pills strands delivered work at the completion gate.
+func testTicketPillsValidatedAtWriteTime(t *testing.T) {
+	p := benefitPrincipal(t, "pill-writes")
+	k := kindBySlug(t, p, "work")
+	n := mustNode(t, p, fmt.Sprintf(`{"kind_id":%q,"title":"Valid draft","fields":%s}`, k.ID, benefitFields))
+	snapshot := func() json.RawMessage {
+		t.Helper()
+		var raw json.RawMessage
+		if err := db.InTenant(dbtest.Seed(t.Context()), appPool, p.TenantID, func(tx pgx.Tx) error {
+			return tx.QueryRow(t.Context(), `SELECT jsonb_build_object('nodes',(SELECT jsonb_agg(to_jsonb(n) ORDER BY id) FROM nodes n),'events',(SELECT jsonb_agg(to_jsonb(e) ORDER BY id) FROM events e))`).Scan(&raw)
+		}); err != nil {
+			t.Fatal(err)
+		}
+		return raw
+	}
+	for _, key := range []string{"pill_en", "pill_de"} {
+		for _, value := range []string{"Word", "One two three four five"} {
+			for _, method := range []string{http.MethodPost, http.MethodPatch} {
+				t.Run(key+"/"+value+"/"+method, func(t *testing.T) {
+					var fields map[string]any
+					if err := json.Unmarshal([]byte(benefitFields), &fields); err != nil {
+						t.Fatal(err)
+					}
+					fields[key] = value
+					body := map[string]any{"fields": fields}
+					path := "/api/nodes/" + n.ID
+					if method == http.MethodPost {
+						path = "/api/nodes"
+						body["kind_id"] = k.ID
+						body["title"] = "Invalid draft"
+					}
+					rawBody, _ := json.Marshal(body)
+					before := snapshot()
+					code, raw := call(t, &p, method, path, string(rawBody))
+					if code != http.StatusUnprocessableEntity || !strings.Contains(string(raw), key+" must contain 2–4 words") {
+						t.Fatalf("invalid pill accepted: %d %s", code, raw)
+					}
+					if !sameJSON(before, snapshot()) {
+						t.Fatal("rejected write changed nodes or audit events")
+					}
+				})
+			}
+		}
+		for _, value := range []string{"One two", "One two three", "One two three four", "One\u00a0two"} {
+			fields, _ := json.Marshal(map[string]string{key: value})
+			created := mustNode(t, p, fmt.Sprintf(`{"kind_id":%q,"title":"Optional benefits","fields":%s}`, k.ID, fields))
+			code, raw := call(t, &p, http.MethodPatch, "/api/nodes/"+created.ID, fmt.Sprintf(`{"fields":%s}`, fields))
+			decode[nodeJSON](t, code, raw, http.StatusOK)
+		}
+	}
+	// Old open data must still fail status-only writes and completion, rather
+	// than bypassing the validator because the request does not include fields.
+	if err := db.InTenant(dbtest.Seed(t.Context()), appPool, p.TenantID, func(tx pgx.Tx) error {
+		_, err := tx.Exec(t.Context(), `UPDATE nodes SET fields=jsonb_set(fields,'{pill_en}','"One two three four five"') WHERE id=$1`, n.ID)
+		return err
+	}); err != nil {
+		t.Fatal(err)
+	}
+	for _, state := range []string{"in_progress", "done", "accepted", "delivered"} {
+		before := snapshot()
+		code, raw := call(t, &p, http.MethodPatch, "/api/nodes/"+n.ID, fmt.Sprintf(`{"state":%q}`, state))
+		if code != http.StatusUnprocessableEntity || !strings.Contains(string(raw), "pill_en must contain 2–4 words") {
+			t.Fatalf("status bypass: %d %s", code, raw)
+		}
+		if !sameJSON(before, snapshot()) {
+			t.Fatal("rejected transition changed nodes or audit events")
+		}
+	}
+	before := snapshot()
+	code, raw := call(t, &p, http.MethodPost, "/api/nodes/bulk", fmt.Sprintf(`{"ids":[%q],"state":"in_progress"}`, n.ID))
+	result := decode[bulkResult](t, code, raw, http.StatusOK)
+	if len(result.Items) != 0 || len(result.Skipped) != 1 || result.Skipped[0].ID != n.ID || result.Skipped[0].Reason != "pill_en must contain 2–4 words" {
+		t.Fatalf("bulk must report invalid pills as skipped: %s", raw)
+	}
+	if !sameJSON(before, snapshot()) {
+		t.Fatal("skipped bulk transition changed nodes or audit events")
+	}
+}
+
+// Risk: legacy invalid pills block cancellation, including deferred lifecycle
+// cancellation, even though the action does not change release-note pills.
+func testTicketPillsDoNotBlockCancellationAndArchival(t *testing.T) {
+	for _, state := range []string{"cancelled", "archived", "custom-cancel", "custom-archive"} {
+		for _, method := range []string{http.MethodPatch, http.MethodPost} {
+			t.Run(state+"/"+method, func(t *testing.T) {
+				p := benefitPrincipal(t, "pill-cancel")
+				k := kindBySlug(t, p, "work")
+				n := mustNode(t, p, fmt.Sprintf(`{"kind_id":%q,"title":"Legacy pills","fields":%s}`, k.ID, benefitFields))
+				legacyFields := json.RawMessage(`{"pill_en":"One two three four five","pill_de":"Wort","benefit_en":"Tickets explain the benefit.","benefit_de":"Tickets erklären den Nutzen."}`)
+				if err := db.InTenant(dbtest.Seed(t.Context()), appPool, p.TenantID, func(tx pgx.Tx) error {
+					if _, err := tx.Exec(t.Context(), `UPDATE node_kinds SET field_schema=jsonb_set(field_schema,'{states}','[{"state":"custom-cancel","category":"cancelled"},{"state":"custom-archive","category":"archived"}]') WHERE id=$1`, k.ID); err != nil {
+						return err
+					}
+					_, err := tx.Exec(t.Context(), `UPDATE nodes SET fields=$2::jsonb WHERE id=$1`, n.ID, string(legacyFields))
+					return err
+				}); err != nil {
+					t.Fatal(err)
+				}
+				// A terminal state must not allow writing a new invalid pill.
+				code, raw := call(t, &p, http.MethodPatch, "/api/nodes/"+n.ID, fmt.Sprintf(`{"state":%q,"fields":{"pill_en":"Changed"}}`, state))
+				if code != http.StatusUnprocessableEntity || !strings.Contains(string(raw), "pill_en must contain 2–4 words") {
+					t.Fatalf("terminal state accepted a changed invalid pill: %d %s", code, raw)
+				}
+				if unchanged := currentWorkTest(t, p, n.ID); unchanged.State != n.State || !sameJSON(unchanged.Fields, legacyFields) {
+					t.Fatal("rejected pill edit changed the legacy ticket", unchanged)
+				}
+				path := "/api/nodes/" + n.ID
+				body := fmt.Sprintf(`{"state":%q}`, state)
+				if method == http.MethodPost {
+					path = "/api/nodes/bulk"
+					body = fmt.Sprintf(`{"ids":[%q],"state":%q}`, n.ID, state)
+				}
+				code, raw = call(t, &p, method, path, body)
+				if method == http.MethodPost {
+					result := decode[bulkResult](t, code, raw, http.StatusOK)
+					if len(result.Items) != 1 || len(result.Skipped) != 0 || len(result.Unchanged) != 0 {
+						t.Fatalf("bulk terminal transition did not change the ticket: %s", raw)
+					}
+				} else {
+					decode[nodeJSON](t, code, raw, http.StatusOK)
+				}
+				if terminal := currentWorkTest(t, p, n.ID); terminal.State != state || !sameJSON(terminal.Fields, legacyFields) {
+					t.Fatal("terminal transition changed pills or did not persist its state", terminal)
+				}
+			})
+		}
+	}
+}
+
 func TestTicketBenefitsCreationCompletionAndHistory(t *testing.T) {
-	for _, state := range []string{"done", "accepted", "delivered"} {
+	testTicketPillsValidatedAtWriteTime(t)
+	t.Run("legacy-terminal-pills", testTicketPillsDoNotBlockCancellationAndArchival)
+	for _, state := range []string{"done", "accepted", "delivered", "custom-complete", " CUSTOM--COMPLETE "} {
 		t.Run(state, func(t *testing.T) {
-			p := newPrincipal(t, "benefits")
-			k := kindBySlug(t, p, "ticket")
+			p := benefitPrincipal(t, "benefits")
+			k := kindBySlug(t, p, "work")
+			setBenefitStateCatalog(t, p.TenantID, k.ID)
 			for _, key := range []string{"pill_en", "pill_de", "benefit_en", "benefit_de", "hide_from_release_notes"} {
 				if !strings.Contains(string(k.FieldSchema), key) {
 					t.Fatalf("seed missing %s", key)
@@ -35,13 +180,23 @@ func TestTicketBenefitsCreationCompletionAndHistory(t *testing.T) {
 				t.Fatalf("warnings: %v", n.Warnings)
 			}
 			for _, fields := range []string{`{}`, `{"hide_from_release_notes":true}`, `{"pill_en":"Too short"}`} {
+				if fields == `{"hide_from_release_notes":true}` {
+					code, raw := call(t, &p, "PATCH", "/api/nodes/"+n.ID, fmt.Sprintf(`{"state":%q,"fields":%s}`, state, fields))
+					hidden := decode[nodeJSON](t, code, raw, 200)
+					if hidden.State != state {
+						t.Fatal("hidden tickets need no filler release text")
+					}
+					code, raw = call(t, &p, "PATCH", "/api/nodes/"+n.ID, fmt.Sprintf(`{"state":%q,"fields":{}}`, n.State))
+					n = decode[nodeJSON](t, code, raw, 200)
+					continue
+				}
 				code, raw := call(t, &p, "PATCH", "/api/nodes/"+n.ID, fmt.Sprintf(`{"state":%q,"fields":%s}`, state, fields))
-				if code != 422 || !strings.Contains(string(raw), `"error":"before done:`) || !strings.Contains(string(raw), "benefit_de") || !strings.Contains(string(raw), `"code":"benefit_required"`) {
+				if code != 409 || !strings.Contains(string(raw), `"error":"entry_checks_failed"`) || !strings.Contains(string(raw), "benefit_de") || !strings.Contains(string(raw), `"code":"entry_checks_failed"`) {
 					t.Fatalf("gate: %d %s", code, raw)
 				}
 			}
 			code, raw := call(t, &p, "PATCH", "/api/nodes/"+n.ID, fmt.Sprintf(`{"state":%q}`, state))
-			if code != 422 || !strings.Contains(string(raw), `"code":"benefit_required"`) || !strings.Contains(string(raw), "benefit_de") {
+			if code != 409 || !strings.Contains(string(raw), `"code":"entry_checks_failed"`) || !strings.Contains(string(raw), "benefit_de") {
 				t.Fatalf("state-only patch: %d %s", code, raw)
 			}
 			code, raw = call(t, &p, "GET", "/api/nodes/"+n.ID, "")
@@ -49,7 +204,7 @@ func TestTicketBenefitsCreationCompletionAndHistory(t *testing.T) {
 				t.Fatal("rejected completion changed draft", unchanged)
 			}
 			code, raw = call(t, &p, "POST", "/api/nodes", fmt.Sprintf(`{"kind_id":%q,"title":"Bypass","state":%q}`, k.ID, state))
-			if code != 422 || !strings.Contains(string(raw), `"code":"benefit_required"`) || !strings.Contains(string(raw), "benefit_de") {
+			if code != 409 || !strings.Contains(string(raw), `"code":"entry_checks_failed"`) || !strings.Contains(string(raw), "benefit_de") {
 				t.Fatalf("create completed: %d %s", code, raw)
 			}
 			created := mustNode(t, p, fmt.Sprintf(`{"kind_id":%q,"title":"Complete at creation","state":%q,"fields":%s}`, k.ID, state, benefitFields))
@@ -63,7 +218,7 @@ func TestTicketBenefitsCreationCompletionAndHistory(t *testing.T) {
 			// Already-completed imports/history are not retroactively blocked or translated.
 			code, raw = call(t, &p, "PATCH", "/api/nodes/"+n.ID, `{"fields":{},"title":"Historical edit"}`)
 			decode[nodeJSON](t, code, raw, 200)
-			for _, after := range []string{"done", "accepted", "delivered"} {
+			for _, after := range []string{"done", "accepted", "delivered", "custom-complete", " CUSTOM--COMPLETE "} {
 				code, raw = call(t, &p, "PATCH", "/api/nodes/"+n.ID, fmt.Sprintf(`{"state":%q,"title":"Completed historical edit"}`, after))
 				historical := decode[nodeJSON](t, code, raw, 200)
 				if historical.State != after || historical.Title != "Completed historical edit" || string(historical.Fields) != "{}" {
@@ -73,7 +228,7 @@ func TestTicketBenefitsCreationCompletionAndHistory(t *testing.T) {
 			code, raw = call(t, &p, "PATCH", "/api/nodes/"+n.ID, `{"state":"open"}`)
 			decode[nodeJSON](t, code, raw, 200)
 			code, raw = call(t, &p, "PATCH", "/api/nodes/"+n.ID, fmt.Sprintf(`{"state":%q}`, state))
-			if code != 422 || !strings.Contains(string(raw), `"code":"benefit_required"`) {
+			if code != 409 || !strings.Contains(string(raw), `"code":"entry_checks_failed"`) {
 				t.Fatalf("reopened: %d %s", code, raw)
 			}
 			other := addPrincipal(t, "other-benefits")
@@ -85,10 +240,11 @@ func TestTicketBenefitsCreationCompletionAndHistory(t *testing.T) {
 	}
 }
 func TestTicketBenefitsBulkAndUndo(t *testing.T) {
-	for _, state := range []string{"done", "accepted", "delivered"} {
+	for _, state := range []string{"done", "accepted", "delivered", "custom-complete", "CUSTOM--COMPLETE"} {
 		t.Run(state, func(t *testing.T) {
-			p := newPrincipal(t, "benefits-bulk")
-			k := kindBySlug(t, p, "ticket")
+			p := benefitPrincipal(t, "benefits-bulk")
+			k := kindBySlug(t, p, "work")
+			setBenefitStateCatalog(t, p.TenantID, k.ID)
 			pk := kindBySlug(t, p, "project")
 			a := mustNode(t, p, `{"kind_id":"`+pk.ID+`","title":"One"}`)
 			b := mustNode(t, p, `{"kind_id":"`+pk.ID+`","title":"Two"}`)
@@ -96,7 +252,7 @@ func TestTicketBenefitsBulkAndUndo(t *testing.T) {
 			ready := mustNode(t, p, `{"kind_id":"`+k.ID+`","parent_id":"`+b.ID+`","title":"Ready","fields":`+benefitFields+`}`)
 			code, raw := call(t, &p, "POST", "/api/nodes/bulk", fmt.Sprintf(`{"ids":[%q,%q],"state":%q}`, missing.ID, ready.ID, state))
 			result := decode[bulkResult](t, code, raw, 200)
-			if len(result.Items) != 1 || result.Items[0].ID != ready.ID || result.Items[0].State != state || len(result.Skipped) != 1 || result.Skipped[0].ID != missing.ID || !strings.Contains(result.Skipped[0].Reason, "benefit_de") || result.Skipped[0].Code != ticketbenefits.RequiredCode {
+			if len(result.Items) != 1 || result.Items[0].ID != ready.ID || result.Items[0].State != state || len(result.Skipped) != 1 || result.Skipped[0].ID != missing.ID || !strings.Contains(result.Skipped[0].Reason, "benefit_de") || result.Skipped[0].Code != "entry_checks_failed" {
 				t.Fatalf("bulk: %s", raw)
 			}
 			// Seed historical data; all tested changes and reversals go through HTTP.
@@ -140,9 +296,62 @@ func TestTicketBenefitsBulkAndUndo(t *testing.T) {
 		})
 	}
 }
+
+func TestWorkBenefitsCausalUndoRejectsIncompleteCompletion(t *testing.T) {
+	for _, state := range []string{"done", "custom-complete"} {
+		for _, fields := range []string{`{}`, `{"pill_en":"Clear release notes","pill_de":"Verständliche Release Notes","benefit_en":"Tickets explain the benefit."}`} {
+			for _, method := range []string{"GET", "POST"} {
+				t.Run(fmt.Sprintf("%s/%s/%s", state, fields, method), func(t *testing.T) {
+					p := benefitPrincipal(t, "benefits-causal-undo")
+					k := kindBySlug(t, p, "work")
+					setBenefitStateCatalog(t, p.TenantID, k.ID)
+					parent := workNodeTest(t, p, "", "open")
+					enableWorkStatusTest(t, p)
+					child := workNodeTest(t, p, parent.ID, state)
+					// Historical completed leaves remain editable without benefits.
+					code, raw := call(t, &p, "PATCH", "/api/nodes/"+child.ID, fmt.Sprintf(`{"fields":%s}`, fields))
+					decode[nodeJSON](t, code, raw, http.StatusOK)
+					// The current leaf has valid benefits; Undo must validate the
+					// historical fields it would restore, rather than these fields.
+					code, raw = call(t, &p, "PATCH", "/api/nodes/"+child.ID, `{"state":"open","fields":`+benefitFields+`}`)
+					decode[nodeJSON](t, code, raw, http.StatusOK)
+					id, cause := lastDerivedTest(t, p, parent.ID)
+					if currentWorkTest(t, p, parent.ID).State != "open" || currentWorkTest(t, p, child.ID).State != "open" {
+						t.Fatal("fixture did not reopen the leaf and derive its parent")
+					}
+					// Capture complete rows (including benefit jobs and revisions)
+					// plus the audit log, so a rejection cannot partially mutate them.
+					snapshot := func() (json.RawMessage, json.RawMessage) {
+						t.Helper()
+						var nodes, audit json.RawMessage
+						if err := db.InTenant(dbtest.Seed(t.Context()), appPool, p.TenantID, func(tx pgx.Tx) error {
+							if err := tx.QueryRow(t.Context(), `SELECT jsonb_agg(to_jsonb(n) ORDER BY id) FROM nodes n WHERE id=ANY($1::uuid[])`, []string{parent.ID, child.ID}).Scan(&nodes); err != nil {
+								return err
+							}
+							return tx.QueryRow(t.Context(), `SELECT jsonb_agg(to_jsonb(e) ORDER BY id) FROM events e`).Scan(&audit)
+						}); err != nil {
+							t.Fatal(err)
+						}
+						return nodes, audit
+					}
+					beforeNodes, beforeAudit := snapshot()
+					code, raw = causalCallTest(t, p, method, id, fmt.Sprintf(`{"confirmed_cause_event_id":%d}`, cause))
+					if code != http.StatusConflict || !strings.Contains(string(raw), `"code":"conflict"`) || !strings.Contains(string(raw), events.ErrConflict.Error()) {
+						t.Errorf("incomplete completion must reject causal Undo: %d %s", code, raw)
+					}
+					afterNodes, afterAudit := snapshot()
+					if !sameJSON(beforeNodes, afterNodes) || !sameJSON(beforeAudit, afterAudit) {
+						t.Error("rejected causal Undo changed the leaf, parent, benefit job, revision or audit log")
+					}
+				})
+			}
+		}
+	}
+}
+
 func TestTicketBenefitsConcurrentFieldsAndCompletion(t *testing.T) {
-	p := newPrincipal(t, "benefits-race")
-	k := kindBySlug(t, p, "ticket")
+	p := benefitPrincipal(t, "benefits-race")
+	k := kindBySlug(t, p, "work")
 	n := mustNode(t, p, `{"kind_id":"`+k.ID+`","title":"Race","fields":`+benefitFields+`}`)
 	mux := http.NewServeMux()
 	New(appPool, nil).Mount(mux)
@@ -171,5 +380,178 @@ func TestTicketBenefitsConcurrentFieldsAndCompletion(t *testing.T) {
 	}
 	if counts[200] != 1 || counts[412] != 1 {
 		t.Fatal(counts)
+	}
+}
+
+// The same catalog drives parent derivation and successful leaf completion.
+func setBenefitStateCatalog(t *testing.T, tenantID, kindID string) {
+	t.Helper()
+	if err := db.InTenant(dbtest.Seed(t.Context()), appPool, tenantID, func(tx pgx.Tx) error {
+		_, err := tx.Exec(t.Context(), `UPDATE node_kinds SET field_schema=jsonb_set(field_schema,'{states}', '[{"state":"custom-complete","category":"done"},{"state":"done","category":"done"}]') WHERE id=$1`, kindID)
+		return err
+	}); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestBenefitCompletionCategoryOverridesLiteralNames(t *testing.T) {
+	p := benefitPrincipal(t, "benefit-overrides")
+	k := kindBySlug(t, p, "work")
+	if err := db.InTenant(dbtest.Seed(t.Context()), appPool, p.TenantID, func(tx pgx.Tx) error {
+		_, err := tx.Exec(t.Context(), `UPDATE node_kinds SET field_schema=jsonb_set(field_schema,'{states}','[{"state":"done","category":"open"},{"state":"ready","category":"done"}]') WHERE id=$1`, k.ID)
+		return err
+	}); err != nil {
+		t.Fatal(err)
+	}
+	// A configured Open category on a literal completion name is not completion.
+	n := mustNode(t, p, fmt.Sprintf(`{"kind_id":%q,"title":"Open category","state":"done"}`, k.ID))
+	code, raw := call(t, &p, "PATCH", "/api/nodes/"+n.ID, `{"state":"ready"}`)
+	if code != 409 || !strings.Contains(string(raw), `"code":"entry_checks_failed"`) {
+		t.Fatalf("category override bypassed leaf gate: %d %s", code, raw)
+	}
+}
+
+func TestTicketBenefitsCausalUndoCompletion(t *testing.T) {
+	for _, state := range []string{"done", "accepted", "delivered", "custom-complete", " CUSTOM--COMPLETE "} {
+		for _, method := range []string{http.MethodGet, http.MethodPost} {
+			for _, complete := range []bool{false, true} {
+				t.Run(fmt.Sprintf("%s/%s/benefits=%t", state, method, complete), func(t *testing.T) {
+					p := benefitPrincipal(t, "causal-benefits")
+					k := kindBySlug(t, p, "work")
+					setBenefitStateCatalog(t, p.TenantID, k.ID)
+					parent := workNodeTest(t, p, "", "open")
+					child := workNodeTest(t, p, parent.ID, "open")
+					parentState := "done"
+					if state == "accepted" || state == "delivered" {
+						parentState = state
+					}
+					fields := "{}"
+					if complete {
+						fields = benefitFields
+					}
+					// Seed historical completion before enabling derivation. Reopening
+					// and both Undo routes then use the actual HTTP write path.
+					if err := db.InTenant(dbtest.Seed(t.Context()), appPool, p.TenantID, func(tx pgx.Tx) error {
+						if _, err := tx.Exec(t.Context(), `UPDATE nodes SET state=$2,fields=$3::jsonb WHERE id=$1`, child.ID, state, fields); err != nil {
+							return err
+						}
+						_, err := tx.Exec(t.Context(), `UPDATE nodes SET state=$2 WHERE id=$1`, parent.ID, parentState)
+						return err
+					}); err != nil {
+						t.Fatal(err)
+					}
+					enableWorkStatusTest(t, p)
+					if currentWorkTest(t, p, parent.ID).State != parentState {
+						t.Fatal("historical fixture lost its completed parent state")
+					}
+					// The restored snapshot, rather than the fields currently on
+					// screen, must decide whether re-entering Done is allowed.
+					reopenedFields := benefitFields
+					if complete {
+						reopenedFields = "{}"
+					}
+					code, raw := call(t, &p, http.MethodPatch, "/api/nodes/"+child.ID, fmt.Sprintf(`{"state":"open","fields":%s}`, reopenedFields))
+					decode[nodeJSON](t, code, raw, http.StatusOK)
+					id, cause := lastDerivedTest(t, p, parent.ID)
+					beforeChild := currentWorkTest(t, p, child.ID)
+					beforeParent := currentWorkTest(t, p, parent.ID)
+					countEvents := func() int {
+						t.Helper()
+						var count int
+						if err := db.InTenant(dbtest.Seed(t.Context()), appPool, p.TenantID, func(tx pgx.Tx) error {
+							return tx.QueryRow(t.Context(), `SELECT count(*) FROM events`).Scan(&count)
+						}); err != nil {
+							t.Fatal(err)
+						}
+						return count
+					}
+					beforeEvents := countEvents()
+					code, raw = causalCallTest(t, p, method, id, fmt.Sprintf(`{"confirmed_cause_event_id":%d}`, cause))
+					want := http.StatusConflict
+					if complete {
+						want = http.StatusOK
+						if method == http.MethodPost {
+							want = http.StatusCreated
+						}
+					}
+					if code != want || !complete && !strings.Contains(string(raw), `"code":"conflict"`) {
+						t.Fatalf("causal completion gate: %d want %d: %s", code, want, raw)
+					}
+					if !complete || method == http.MethodGet {
+						for _, before := range []nodeJSON{beforeChild, beforeParent} {
+							after := currentWorkTest(t, p, before.ID)
+							if after.State != before.State || !after.UpdatedAt.Equal(before.UpdatedAt) || !reflectJSONEqual(after.Fields, before.Fields) {
+								t.Fatal("refused Undo or preview changed child/parent", after)
+							}
+						}
+						if countEvents() != beforeEvents {
+							t.Fatal("refused Undo or preview appended events")
+						}
+					} else {
+						restored := currentWorkTest(t, p, child.ID)
+						var restoredFields, expectedFields map[string]any
+						if err := json.Unmarshal(restored.Fields, &restoredFields); err != nil {
+							t.Fatal(err)
+						}
+						if err := json.Unmarshal([]byte(fields), &expectedFields); err != nil {
+							t.Fatal(err)
+						}
+						if restored.State != state || !reflectJSONEqual(restoredFields, expectedFields) || currentWorkTest(t, p, parent.ID).State != parentState || countEvents() <= beforeEvents {
+							t.Fatal("valid causal completion did not restore child and derive parent", restored)
+						}
+					}
+				})
+			}
+		}
+	}
+}
+
+// Risk: the mark is lost on an API round trip or malformed input changes policy.
+func TestNoReleaseNeededAPIRoundTrip(t *testing.T) {
+	p := benefitPrincipal(t, "content-work")
+	k := kindBySlug(t, p, "work")
+	fields := strings.TrimSuffix(benefitFields, "}") + `,"no_release_needed":true,"hide_from_release_notes":false,"notes":"Keep this"}`
+	n := mustNode(t, p, fmt.Sprintf(`{"kind_id":%q,"title":"Scene edit","fields":%s}`, k.ID, fields))
+	check := func(raw []byte, want bool) {
+		t.Helper()
+		var got map[string]any
+		if err := json.Unmarshal(raw, &got); err != nil {
+			t.Fatal(err)
+		}
+		if got["no_release_needed"] != want || got["hide_from_release_notes"] != false || got["notes"] != "Keep this" {
+			t.Fatalf("fields lost: %s", raw)
+		}
+	}
+	code, raw := call(t, &p, "GET", "/api/nodes/"+n.ID, "")
+	check(decode[nodeJSON](t, code, raw, 200).Fields, true)
+	for _, bad := range []string{`null`, `"true"`, `1`} {
+		code, raw := call(t, &p, "PATCH", "/api/nodes/"+n.ID, `{"fields":{"no_release_needed":`+bad+`}}`)
+		if code != 422 || !strings.Contains(string(raw), "no_release_needed must be a boolean") {
+			t.Fatalf("bad mark: %d %s", code, raw)
+		}
+	}
+	fields = strings.Replace(fields, `"no_release_needed":true`, `"no_release_needed":false`, 1)
+	code, raw = call(t, &p, "PATCH", "/api/nodes/"+n.ID, `{"fields":`+fields+`}`)
+	check(decode[nodeJSON](t, code, raw, 200).Fields, false)
+	code, raw = call(t, &p, "GET", "/api/nodes/"+n.ID, "")
+	check(decode[nodeJSON](t, code, raw, 200).Fields, false)
+	if err := db.InTenant(dbtest.Seed(t.Context()), appPool, p.TenantID, func(tx pgx.Tx) error {
+		_, err := tx.Exec(t.Context(), `UPDATE nodes SET status_autopilot='{"missed_release":true}'::jsonb WHERE id=$1`, n.ID)
+		return err
+	}); err != nil {
+		t.Fatal(err)
+	}
+	fields = strings.Replace(fields, `"no_release_needed":false`, `"no_release_needed":true`, 1)
+	code, raw = call(t, &p, "PATCH", "/api/nodes/"+n.ID, `{"fields":`+fields+`}`)
+	marked := decode[nodeJSON](t, code, raw, 200)
+	check(marked.Fields, true)
+	var response struct {
+		Marks map[string]bool `json:"status_autopilot"`
+	}
+	if err := json.Unmarshal(raw, &response); err != nil {
+		t.Fatal(err)
+	}
+	if response.Marks["missed_release"] {
+		t.Fatal("content kept an obsolete missed-release flag")
 	}
 }

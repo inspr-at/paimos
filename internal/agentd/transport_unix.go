@@ -4,9 +4,11 @@
 package agentd
 
 import (
+	"context"
 	"crypto/subtle"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"net"
 	"net/http"
@@ -16,6 +18,10 @@ import (
 	"time"
 
 	"github.com/inspr-at/paimos/internal/agentsetup"
+	"github.com/inspr-at/paimos/internal/client"
+	"github.com/inspr-at/paimos/internal/hookbinding"
+	"github.com/inspr-at/paimos/internal/hooknote"
+	"github.com/inspr-at/paimos/internal/httpapi"
 )
 
 // LocalServer exposes fenced local control through an owner-only Unix socket.
@@ -29,9 +35,15 @@ type LocalServer struct {
 	release   func()
 	closeOnce sync.Once
 	closeErr  error
+	hooks     *hooknote.Server
 }
 
-func ServeLocal(s *Supervisor, socket string, attachments ...*AttachManager) (*LocalServer, error) {
+func ServeLocal(s *Supervisor, socket string, attachments ...*AttachManager) (_ *LocalServer, resultErr error) {
+	defer func() {
+		if resultErr != nil {
+			resultErr = fmt.Errorf("start local socket %s: %w", socket, resultErr)
+		}
+	}()
 	if s == nil || !filepath.IsAbs(socket) {
 		return nil, errors.New("invalid local socket")
 	}
@@ -39,16 +51,32 @@ func ServeLocal(s *Supervisor, socket string, attachments ...*AttachManager) (*L
 	if err != nil {
 		return nil, err
 	}
-	lock, err := dir.LockSocket(filepath.Base(socket))
+	// The short socket fallback can live outside daemon state. Retain a
+	// separate descriptor so hook cleanup also survives Supervisor.Close.
+	peer := dir
+	if s.state != nil && s.state.Path() != dir.Path() {
+		peer, err = agentsetup.OpenStore(s.state.Path(), false)
+		if err != nil {
+			dir.Close()
+			return nil, err
+		}
+	}
+	closeDirectories := func() {
+		if peer != dir {
+			_ = peer.Close()
+		}
+		_ = dir.Close()
+	}
+	lock, err := dir.LockSocket(filepath.Base(socket), peer)
 	if err != nil {
-		dir.Close()
+		closeDirectories()
 		return nil, err
 	}
 	complete := false
 	var info, tokenInfo os.FileInfo
 	var listener net.Listener
 	cleanup := func() error {
-		return dir.CleanupSocket(filepath.Base(socket), lock, info, tokenInfo)
+		return dir.CleanupSocket(filepath.Base(socket), lock, info, tokenInfo, peer)
 	}
 	defer func() {
 		if !complete {
@@ -57,7 +85,7 @@ func ServeLocal(s *Supervisor, socket string, attachments ...*AttachManager) (*L
 			}
 			_ = cleanup()
 			lock.Close()
-			dir.Close()
+			closeDirectories()
 		}
 	}()
 	if _, err := os.Lstat(socket); err == nil {
@@ -72,23 +100,23 @@ func ServeLocal(s *Supervisor, socket string, attachments ...*AttachManager) (*L
 	tokenFile := socket + ".token"
 	f, err := os.OpenFile(tokenFile, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0600)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("create socket token %s: %w", tokenFile, err)
 	}
 	tokenInfo, err = f.Stat()
 	if err != nil {
 		_ = f.Close()
-		return nil, err
+		return nil, fmt.Errorf("stat socket token %s: %w", tokenFile, err)
 	}
 	if _, err = f.WriteString(token); err != nil {
 		_ = f.Close()
-		return nil, err
+		return nil, fmt.Errorf("write socket token %s: %w", tokenFile, err)
 	}
 	if err = f.Sync(); err != nil {
 		_ = f.Close()
-		return nil, err
+		return nil, fmt.Errorf("sync socket token %s: %w", tokenFile, err)
 	}
 	if err = f.Close(); err != nil {
-		return nil, err
+		return nil, fmt.Errorf("close socket token %s: %w", tokenFile, err)
 	}
 	listener, err = net.Listen("unix", socket)
 	if err != nil {
@@ -102,23 +130,61 @@ func ServeLocal(s *Supervisor, socket string, attachments ...*AttachManager) (*L
 	if err != nil {
 		return nil, err
 	}
+	hooks := hooknote.NewServer()
 	mux := http.NewServeMux()
+	mux.HandleFunc("POST /v1/native-sessions/start", serveNativeStart(s, func(r *http.Request) bool { return authorized(r, token) }))
+	mux.Handle("POST /v1/inbox-hook", hooks)
+	mux.HandleFunc("POST /v1/setup", func(w http.ResponseWriter, r *http.Request) {
+		if !authorized(r, token) {
+			http.Error(w, "unauthorized", 401)
+			return
+		}
+		d := httpapi.NewRequestDecoder(w, r, 64<<10)
+		d.DisallowUnknownFields()
+		var req agentsetup.SetupRequest
+		if d.Decode(&req) != nil || d.Decode(&struct{}{}) != io.EOF {
+			rejectBoundedBody(w, r, "invalid local enrollment request")
+			return
+		}
+		s.mu.Lock()
+		setup := s.setup
+		s.mu.Unlock()
+		if setup == nil {
+			http.Error(w, "running daemon cannot advance enrollment; update agentd through its service owner", 409)
+			return
+		}
+		ctx, cancel := context.WithTimeout(r.Context(), 15*time.Second)
+		defer cancel()
+		out, err := setup(ctx, req)
+		if err != nil {
+			http.Error(w, err.Error(), 409)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		w.Header().Set("Cache-Control", "no-store")
+		_ = json.NewEncoder(w).Encode(out)
+	})
+	if s.stepUps != nil {
+		mux.HandleFunc("GET /v1/step-up", func(w http.ResponseWriter, r *http.Request) { s.stepUps.serve(w, r, token) })
+		mux.HandleFunc("POST /v1/step-up", func(w http.ResponseWriter, r *http.Request) { s.stepUps.serve(w, r, token) })
+	}
 	mux.HandleFunc("POST /v1/account-link", func(w http.ResponseWriter, r *http.Request) {
 		if !authorized(r, token) {
 			http.Error(w, "unauthorized", 401)
 			return
 		}
-		r.Body = http.MaxBytesReader(w, r.Body, 4096)
-		d := json.NewDecoder(r.Body)
+		d := httpapi.NewRequestDecoder(w, r, 4096)
 		d.DisallowUnknownFields()
 		var req AccountLinkRequest
 		if d.Decode(&req) != nil || d.Decode(&struct{}{}) != io.EOF {
-			http.Error(w, "invalid account link", 400)
+			rejectBoundedBody(w, r, "invalid account link")
 			return
 		}
-		out, err := s.AccountLink(r.Context(), req)
+		ctx, cancel := context.WithTimeout(r.Context(), 15*time.Second)
+		defer cancel()
+		out, err := s.AccountLink(ctx, req)
 		if err != nil {
-			http.Error(w, "account linking unavailable", 409)
+			http.Error(w, err.Error(), 409)
 			return
 		}
 		w.Header().Set("Content-Type", "application/json")
@@ -130,12 +196,11 @@ func ServeLocal(s *Supervisor, socket string, attachments ...*AttachManager) (*L
 			http.Error(w, "unauthorized", 401)
 			return
 		}
-		r.Body = http.MaxBytesReader(w, r.Body, 8192)
-		d := json.NewDecoder(r.Body)
+		d := httpapi.NewRequestDecoder(w, r, 8192)
 		d.DisallowUnknownFields()
 		var req StatuslineRequest
 		if d.Decode(&req) != nil || d.Decode(&struct{}{}) != io.EOF {
-			http.Error(w, "invalid statusline", 400)
+			rejectBoundedBody(w, r, "invalid statusline")
 			return
 		}
 		out, err := s.ReportStatusline(r.Context(), req, time.Now().UTC())
@@ -147,6 +212,76 @@ func ServeLocal(s *Supervisor, socket string, attachments ...*AttachManager) (*L
 		_ = json.NewEncoder(w).Encode(out)
 	})
 	if len(attachments) == 1 && attachments[0] != nil {
+
+		s.recoveryMu.Lock()
+		s.attachedHookVerifier = attachments[0]
+		s.recoveryMu.Unlock()
+		mux.HandleFunc("POST /v1/attached-hook", func(w http.ResponseWriter, r *http.Request) {
+			if !authorized(r, token) {
+				http.Error(w, "unauthorized", 403)
+				return
+			}
+			// Binding reporting is not watch consent. Require the unchanged
+			// kernel peer; no browser, TTY or user-supplied helper PID grants it.
+			peer, ok := r.Context().Value(attachPeerKey{}).(attachObservation)
+			if !ok {
+				http.Error(w, "kernel peer required", 403)
+				return
+			}
+			d := httpapi.NewRequestDecoder(w, r, 4096)
+			d.DisallowUnknownFields()
+			var in AttachedHookRequest
+			if d.Decode(&in) != nil || d.Decode(&struct{}{}) != io.EOF {
+				rejectBoundedBody(w, r, "invalid hook binding")
+				return
+			}
+			ctx, cancel := context.WithTimeout(r.Context(), 10*time.Second)
+			defer cancel()
+
+			if in.Operation != "" {
+				out, err := s.serviceAttachedHook(ctx, peer, in)
+				if err != nil {
+					code := 409
+					if errors.Is(err, ErrNotOwned) {
+						code = 404
+					}
+					http.Error(w, "attached hook unavailable", code)
+					return
+				}
+				w.Header().Set("Content-Type", "application/json")
+				w.Header().Set("Cache-Control", "no-store")
+				_ = json.NewEncoder(w).Encode(out)
+				return
+			}
+			if err := s.bindAttachedHook(ctx, peer, in); err != nil {
+				code := "daemon_refused"
+				var refusal *hookbinding.Refusal
+				var status *client.StatusError
+				switch {
+				case errors.As(err, &refusal):
+					code = refusal.Code
+				case errors.Is(err, ErrNotOwned):
+					code = "process_unverified"
+				case errors.Is(err, ErrGeneration):
+					code = "generation_mismatch"
+				case errors.As(err, &status):
+					if status.Status == 403 && status.Message == "harness worker proof rejected" {
+						code = "worker_proof_rejected"
+					}
+					if status.Status == 403 && status.Message == "active paired hook daemon required" {
+						code = "pairing_unavailable"
+					}
+				}
+				w.Header().Set("Content-Type", "application/json")
+				w.Header().Set("Cache-Control", "no-store")
+				w.WriteHeader(http.StatusConflict)
+				_ = json.NewEncoder(w).Encode(hookbinding.Refusal{Code: code})
+				return
+			}
+			w.Header().Set("Content-Type", "application/json")
+			w.Header().Set("Cache-Control", "no-store")
+			_, _ = w.Write([]byte("{}"))
+		})
 		mux.HandleFunc("POST /v1/attach", func(w http.ResponseWriter, r *http.Request) { attachments[0].serve(w, r, token) })
 	}
 	mux.HandleFunc("GET /v1/account-environment", func(w http.ResponseWriter, r *http.Request) {
@@ -170,6 +305,9 @@ func ServeLocal(s *Supervisor, socket string, attachments ...*AttachManager) (*L
 		}
 		w.Header().Set("Content-Type", "application/json")
 		status := s.Lifecycle(r.URL.Query().Get("account_id"))
+		if r.URL.Query().Get("include_logins") != "1" {
+			status.AccountLogins = nil
+		}
 		if r.URL.Query().Get("include_readiness") != "1" {
 			status.AccountStatuses, status.VerificationReasons = nil, nil
 		}
@@ -183,22 +321,58 @@ func ServeLocal(s *Supervisor, socket string, attachments ...*AttachManager) (*L
 			http.Error(w, "unauthorized", http.StatusUnauthorized)
 			return
 		}
-		r.Body = http.MaxBytesReader(w, r.Body, 4096)
-		d := json.NewDecoder(r.Body)
+		d := httpapi.NewRequestDecoder(w, r, 4096)
 		d.DisallowUnknownFields()
 		var req DrainRequest
 		if d.Decode(&req) != nil || d.Decode(&struct{}{}) != io.EOF {
-			http.Error(w, "invalid drain", http.StatusBadRequest)
+			rejectBoundedBody(w, r, "invalid drain")
 			return
 		}
 		status, err := s.Drain(req)
 		status.AccountStatuses, status.VerificationReasons = nil, nil
+		status.AccountLogins = nil
 		if err != nil {
 			http.Error(w, "drain rejected", http.StatusConflict)
 			return
 		}
 		w.Header().Set("Content-Type", "application/json")
 		_ = json.NewEncoder(w).Encode(status)
+	})
+	mux.HandleFunc("POST /v1/ledger/import", func(w http.ResponseWriter, r *http.Request) {
+		if !authorized(r, token) {
+			http.Error(w, "unauthorized", http.StatusUnauthorized)
+			return
+		}
+		d := httpapi.NewRequestDecoder(w, r, 8192)
+		d.DisallowUnknownFields()
+		var config LedgerConfig
+		if d.Decode(&config) != nil || d.Decode(&struct{}{}) != io.EOF {
+			rejectBoundedBody(w, r, "invalid ledger handover")
+			return
+		}
+		if err := s.EnableLedger(r.Context(), config); err != nil {
+			http.Error(w, "ledger handover unconfirmed", 409)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]bool{"imported": true})
+	})
+	mux.HandleFunc("POST /v1/ledger/leave", func(w http.ResponseWriter, r *http.Request) {
+		if !authorized(r, token) {
+			http.Error(w, "unauthorized", 401)
+			return
+		}
+		raw, err := httpapi.ReadRequestBody(w, r, 2, httpapi.DefaultBodyReadTimeout)
+		if err != nil || len(raw) != 0 {
+			rejectBoundedBody(w, r, "invalid ledger leave")
+			return
+		}
+		if err := s.LeaveLedger(r.Context()); err != nil {
+			http.Error(w, "ledger leave unconfirmed", 409)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]bool{"left": true})
 	})
 	mux.HandleFunc("GET /v1/status", func(w http.ResponseWriter, r *http.Request) {
 		if !authorized(r, token) {
@@ -213,12 +387,11 @@ func ServeLocal(s *Supervisor, socket string, attachments ...*AttachManager) (*L
 			http.Error(w, "unauthorized", http.StatusUnauthorized)
 			return
 		}
-		r.Body = http.MaxBytesReader(w, r.Body, 70<<10)
-		decoder := json.NewDecoder(r.Body)
+		decoder := httpapi.NewRequestDecoder(w, r, 70<<10)
 		decoder.DisallowUnknownFields()
 		var req ControlRequest
 		if decoder.Decode(&req) != nil || decoder.Decode(&struct{}{}) != io.EOF || req.RunID != r.PathValue("runID") {
-			http.Error(w, "invalid control", http.StatusBadRequest)
+			rejectBoundedBody(w, r, "invalid control")
 			return
 		}
 		receipt, err := s.Control(r.Context(), req)
@@ -229,15 +402,44 @@ func ServeLocal(s *Supervisor, socket string, attachments ...*AttachManager) (*L
 		w.Header().Set("Content-Type", "application/json")
 		_ = json.NewEncoder(w).Encode(receipt)
 	})
-	server := &http.Server{Handler: mux, ReadHeaderTimeout: 5 * time.Second, ConnContext: attachConnContext}
-	local := &LocalServer{Server: server, Listener: listener, Socket: socket, TokenFile: tokenFile, cleanup: cleanup}
+	server := &http.Server{Handler: httpapi.RequestBodyMiddleware(mux), ReadHeaderTimeout: 5 * time.Second, ReadTimeout: 20 * time.Second, ConnContext: localConnContext}
+	local := &LocalServer{Server: server, Listener: listener, Socket: socket, TokenFile: tokenFile, cleanup: cleanup, hooks: hooks}
 	local.release = func() {
 		_ = lock.Close()
-		_ = dir.Close()
+		closeDirectories()
 	}
 	go func() { _ = server.Serve(listener) }()
 	complete = true
 	return local, nil
+}
+
+func localConnContext(ctx context.Context, c net.Conn) context.Context {
+	return hooknote.Annotate(attachConnContext(ctx, c), c)
+}
+
+// SetHookPeer installs the attached-note source. The socket token is not
+// consulted for this route. A nil source stays unavailable and releases nothing.
+func (l *LocalServer) SetHookPeer(src hooknote.NoteSource, grants *hooknote.Registry) {
+	if l == nil || l.hooks == nil {
+		return
+	}
+	l.hooks.Set(src, grants)
+}
+
+// SetSetupHandler is controller wiring, not enrollment authority. Every call
+// still validates the paired computer and obtains its person-gated approval.
+func (s *Supervisor) SetSetupHandler(setup func(context.Context, agentsetup.SetupRequest) (agentsetup.Progress, error)) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.setup = setup
+}
+
+// rejectBoundedBody keeps the socket route's 400. An oversized control, ledger
+// or enrollment body is invalid input for that route, not a transport 413.
+// A timed-out read still becomes 408 through the body-status writer.
+func rejectBoundedBody(w http.ResponseWriter, r *http.Request, message string) {
+	httpapi.RetainClassifiedBodyStatus(r)
+	http.Error(w, message, http.StatusBadRequest)
 }
 
 func authorized(r *http.Request, token string) bool {
@@ -256,12 +458,19 @@ func (l *LocalServer) Close() error {
 		if l.release != nil {
 			defer l.release()
 		}
-		l.closeErr = l.Server.Close()
-		// Serve runs in a goroutine and may not have registered the listener
-		// with http.Server yet when startup is immediately followed by Close.
-		_ = l.Listener.Close()
+		// Unlink the socket, token and our own hook pin before the listener
+		// closes. A SIGKILL during drain then cannot leave them behind.
+		// Server.Close closes the listener, so cleanup has to come first.
 		if l.cleanup != nil {
-			l.closeErr = errors.Join(l.closeErr, l.cleanup())
+			l.closeErr = l.cleanup()
+		}
+		if l.Server != nil {
+			l.closeErr = errors.Join(l.closeErr, l.Server.Close())
+		}
+		// Serve may not have registered the listener with http.Server yet
+		// when startup is immediately followed by Close.
+		if l.Listener != nil {
+			_ = l.Listener.Close()
 		}
 	})
 	return l.closeErr

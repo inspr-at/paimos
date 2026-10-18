@@ -1,0 +1,50 @@
+{
+  "_license": "SPDX-License-Identifier: AGPL-3.0-only",
+  "builtin_roles": {
+    "admin": [
+      "project_groups.read",
+      "project_groups.write"
+    ],
+    "member": [
+      "project_groups.read"
+    ],
+    "owner": [
+      "project_groups.read",
+      "project_groups.write"
+    ],
+    "viewer": [
+      "project_groups.read"
+    ]
+  },
+  "registry": [
+    {
+      "agent_grantable": true,
+      "description": "Read project groups",
+      "grantable_at": [
+        "workspace",
+        "project"
+      ],
+      "group": "Project Groups",
+      "key": "project_groups.read",
+      "owner_workstation_grantable": true,
+      "risk": "low"
+    },
+    {
+      "agent_grantable": true,
+      "description": "Write project groups",
+      "grantable_at": [
+        "workspace",
+        "project"
+      ],
+      "group": "Project Groups",
+      "key": "project_groups.write",
+      "owner_workstation_grantable": true,
+      "risk": "medium"
+    }
+  ],
+  "words": {
+    "resources": {
+      "project_groups": "project groups"
+    }
+  }
+}

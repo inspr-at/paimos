@@ -1,0 +1,739 @@
+// SPDX-License-Identifier: AGPL-3.0-only
+package harness_test
+
+import (
+	"bytes"
+	"encoding/json"
+	"github.com/inspr-at/paimos/internal/agentruns"
+	"github.com/inspr-at/paimos/internal/auth"
+	"github.com/inspr-at/paimos/internal/escalation"
+	"github.com/inspr-at/paimos/internal/events"
+	"github.com/inspr-at/paimos/internal/inbox"
+	"gopkg.in/yaml.v3"
+	"net/http"
+	"net/http/httptest"
+	"os"
+	"reflect"
+	"strings"
+	"testing"
+	"time"
+
+	"github.com/inspr-at/paimos/internal/dbtest"
+	"github.com/inspr-at/paimos/internal/ownedprocess"
+	"github.com/jackc/pgx/v5"
+)
+
+type recoveryAgentFixture struct {
+	f                                                     *harnessFixture
+	path, session, run, lease, profile, account, keyOwner string
+	identity                                              ownedprocess.Identity
+}
+
+func recoveryAgent(t *testing.T) recoveryAgentFixture {
+	t.Helper()
+	f := fixture(t)
+	// Requester revocation must not also revoke the daemon's key authority.
+	// Keep the person owning the paired key separate from the recovery requester.
+	keyOwner := uid()
+	// The shared handler fixture does not encode its tenant in the key prefix.
+	// Use its synthetic secret with a routable prefix for real auth middleware.
+	parts := strings.SplitN(strings.TrimPrefix(f.key, "aeon_"), "_", 2)
+	prefix := strings.ReplaceAll(f.agent.TenantID, "-", "") + strings.Repeat("7", 16)
+	f.tx(t, f.agent, func(tx pgx.Tx) error {
+		if _, err := tx.Exec(t.Context(), `INSERT INTO principals(tenant_id,id,kind,name) VALUES($1,$2,'person','Recovery key owner')`, f.agent.TenantID, keyOwner); err != nil {
+			return err
+		}
+		_, err := tx.Exec(t.Context(), `UPDATE agent_keys SET prefix=$1,created_by_principal_id=$3 WHERE id=$2`, prefix, f.agent.AuthKeyID, keyOwner)
+		return err
+	})
+	dbtest.BindRole(t, f.db, f.agent.TenantID, keyOwner, "admin")
+	f.key = "aeon_" + prefix + "_" + parts[1]
+	order, run := stateRun(t, f, f.project, "running", "REC-10")
+	v := recoveryAgentFixture{f: f, run: run, lease: "fixture-recovery-lease-000000000000001", profile: uid(), account: uid(), keyOwner: keyOwner, identity: ownedprocess.Identity{DaemonID: "fixture", Generation: strings.Repeat("a", 32), ProcessID: strings.Repeat("b", 32), RootPID: 1234, GroupID: 1234, StartedAt: time.Now().UTC().Truncate(time.Second)}}
+	f.tx(t, f.person, func(tx pgx.Tx) error {
+		if _, err := tx.Exec(t.Context(), `INSERT INTO model_profiles(tenant_id,id,slug,version,harness,family,model,effort,tier) VALUES($1,$2,'recovery-model','1','claude','anthropic','fixture-model','high','standard')`, f.person.TenantID, v.profile); err != nil {
+			return err
+		}
+		if _, err := tx.Exec(t.Context(), `INSERT INTO agent_accounts(tenant_id,id,account_key,harness,daemon_id,registered_by_principal_id,label) VALUES($1,$2,'recovery-fixture','claude','fixture',$3,'Recovery account')`, f.person.TenantID, v.account, f.agent.ID); err != nil {
+			return err
+		}
+		if _, err := tx.Exec(t.Context(), `UPDATE work_orders SET status='running',assignee_principal_id=$2 WHERE node_id=$1`, order, f.agent.ID); err != nil {
+			return err
+		}
+		if _, err := tx.Exec(t.Context(), `UPDATE agent_runs SET daemon_id=$2,daemon_generation=$3,account_id=$4,model_profile_id=$5 WHERE id=$1`, run, v.identity.DaemonID, v.identity.Generation, v.account, v.profile); err != nil {
+			return err
+		}
+		req, computer := uid(), uid()
+		if _, err := tx.Exec(t.Context(), `INSERT INTO agent_pairing_requests(tenant_id,id,user_code,device_hash,runtime_hash,lifecycle_hash,details,request_digest,state,approved_by) VALUES($1,$2,'731000001',$3,$4,$5,'{}','fixture','redeemed',$6)`, f.person.TenantID, req, strings.Repeat("1", 64), strings.Repeat("2", 64), strings.Repeat("3", 64), keyOwner); err != nil {
+			return err
+		}
+		_, err := tx.Exec(t.Context(), `INSERT INTO agent_pairing_computers(tenant_id,id,request_id,principal_id,key_id,daemon_id,lifecycle_hash,last_seen_at) SELECT $1,$2,$3,$4,id,'fixture',$5,clock_timestamp() FROM agent_keys WHERE principal_id=$4 LIMIT 1`, f.person.TenantID, computer, req, f.agent.ID, strings.Repeat("3", 64))
+		return err
+	})
+	base := "/api/projects/" + f.project + "/harness-sessions"
+	w := f.call(f.person, "POST", base, map[string]any{"agent_principal_id": f.agent.ID, "harness": "claude", "host": "fixture", "harness_session_ref": "fixture-recovery-reference-00000001", "worker_lease": v.lease, "management_mode": "managed", "role": "worker", "run_id": run, "work_order_id": order, "ticket_node_id": order, "work_shape": "ship", "model": "fixture-model", "reasoning_effort": "high", "advertised_capabilities": []string{"managed_control_v1", "session_recovery_v1", "stop", "inbox"}}, "")
+	expect(t, w, 201)
+	v.session = decode(t, w)["id"].(string)
+	v.path = base + "/" + v.session
+	expect(t, f.call(f.agent, "POST", v.path+"/heartbeat", map[string]any{"phase": "working", "activity_sequence": 1, "process_ownership": v.identity}, v.lease), 200)
+	f.tx(t, f.person, func(tx pgx.Tx) error {
+		_, err := tx.Exec(t.Context(), `UPDATE harness_sessions SET heartbeat_at=clock_timestamp()-interval '3 minutes' WHERE id=$1`, v.session)
+		return err
+	})
+	return v
+}
+func (v recoveryAgentFixture) request(t *testing.T) map[string]any {
+	t.Helper()
+	w := v.f.call(v.f.person, "GET", v.path+"/recover-agent", nil, "")
+	expect(t, w, 200)
+	d := decode(t, w)
+	if d["action"] != "restart" || d["cause"] != "heartbeat_overdue" {
+		t.Fatalf("diagnosis=%v", d)
+	}
+	return map[string]any{"request_id": uid(), "expected_revision": d["observed_revision"], "action": "restart"}
+}
+
+func TestQueuedAgentDiagnosisUsesOnlyItsRunAccountAndFreshPairedHost(t *testing.T) {
+	v := recoveryAgent(t)
+	f := v.f
+	f.tx(t, f.person, func(tx pgx.Tx) error {
+		if _, err := tx.Exec(t.Context(), `UPDATE harness_sessions SET process_ownership=NULL,heartbeat_at=NULL WHERE id=$1`, v.session); err != nil {
+			return err
+		}
+		if _, err := tx.Exec(t.Context(), `UPDATE agent_runs SET status='queued',account_id=NULL,requested_account_id=$2,started_at=NULL WHERE id=$1`, v.run, v.account); err != nil {
+			return err
+		}
+		if _, err := tx.Exec(t.Context(), `UPDATE agent_pairing_computers SET display_name='fixture-computer' WHERE principal_id=$1`, f.agent.ID); err != nil {
+			return err
+		}
+		if _, err := tx.Exec(t.Context(), `UPDATE agent_accounts SET last_probe_at=clock_timestamp(),last_probe_ok=false,last_probe_failure='auth_failed',last_daemon_generation=$3,allowed_model_profile_ids=ARRAY[$2::uuid] WHERE id=$1`, v.account, v.profile, v.identity.Generation); err != nil {
+			return err
+		}
+		if _, err := tx.Exec(t.Context(), `INSERT INTO account_use_cells(tenant_id,account_id,context_id,source,set_by)
+ SELECT $1,$2,id,'person',$3 FROM work_contexts WHERE kind='default' ON CONFLICT DO NOTHING`, f.person.TenantID, v.account, f.person.ID); err != nil {
+			return err
+		}
+		// Other harness/account failures must not be attributed to this run.
+		_, err := tx.Exec(t.Context(), `INSERT INTO agent_accounts(tenant_id,id,account_key,harness,daemon_id,registered_by_principal_id,label,last_probe_at,last_probe_ok,last_probe_failure,last_daemon_generation) VALUES($1,$2,'other-codex','codex','fixture',$3,'Other account',clock_timestamp(),false,'unavailable',$4)`, f.person.TenantID, uid(), f.agent.ID, v.identity.Generation)
+		return err
+	})
+	for _, tc := range []struct {
+		probeOK                bool
+		failure, cause, detail string
+	}{
+		{false, "auth_failed", "login_required", "Claude needs signing in on fixture-computer."},
+		{false, "unavailable", "probe_failed", "Claude availability could not be confirmed on fixture-computer."},
+	} {
+		f.tx(t, f.person, func(tx pgx.Tx) error {
+			_, err := tx.Exec(t.Context(), `UPDATE agent_accounts SET last_probe_ok=$2,last_probe_failure=$3 WHERE id=$1`, v.account, tc.probeOK, tc.failure)
+			return err
+		})
+		w := f.call(f.person, "GET", v.path+"/recover-agent", nil, "")
+		expect(t, w, 200)
+		got := decode(t, w)
+		if got["cause"] != tc.cause || got["detail"] != tc.detail || got["action"] != "" {
+			t.Fatalf("queued registration lost actual account blocker: %v", got)
+		}
+	}
+	f.tx(t, f.person, func(tx pgx.Tx) error {
+		_, err := tx.Exec(t.Context(), `UPDATE agent_pairing_computers SET last_seen_at=clock_timestamp()-interval '3 minutes' WHERE principal_id=$1`, f.agent.ID)
+		return err
+	})
+	w := f.call(f.person, "GET", v.path+"/recover-agent", nil, "")
+	expect(t, w, 200)
+	if got := decode(t, w); got["cause"] != "host_not_reporting" || got["action"] != "" {
+		t.Fatalf("stale host advice guessed live sign-in: %v", got)
+	}
+}
+
+// Exercise the real bearer authentication, paired-resource ceiling and route
+// declarations as well as the handler; injecting a principal would miss them.
+func (v recoveryAgentFixture) runtimeCall(t *testing.T, path string, body any, lease ...string) *httptest.ResponseRecorder {
+	t.Helper()
+	module, err := auth.New(auth.Config{SessionKey: bytes.Repeat([]byte{1}, 32)}, v.f.db.App)
+	if err != nil {
+		t.Fatal(err)
+	}
+	raw, _ := json.Marshal(body)
+	r := httptest.NewRequest(http.MethodPost, path, bytes.NewReader(raw))
+	r.Header.Set("Authorization", "Bearer "+v.f.key)
+	if len(lease) > 0 {
+		r.Header.Set("X-Aeon-Worker-Lease", lease[0])
+	}
+	_, r.Pattern = v.f.mux.Handler(r)
+	w := httptest.NewRecorder()
+	module.Middleware(v.f.mux).ServeHTTP(w, r)
+	return w
+}
+func (v recoveryAgentFixture) claim(t *testing.T) []map[string]any {
+	t.Helper()
+	w := v.runtimeCall(t, "/api/harness-recoveries/claim", map[string]any{"daemon_id": v.identity.DaemonID, "generation": v.identity.Generation})
+	expect(t, w, 200)
+	var out []map[string]any
+	if err := json.Unmarshal(w.Body.Bytes(), &out); err != nil {
+		t.Fatal(err)
+	}
+	return out
+}
+
+func (v recoveryAgentFixture) refuseRevokedKeyOwner(t *testing.T, path string, body any) {
+	t.Helper()
+	dbtest.BindRole(t, v.f.db, v.f.person.TenantID, v.keyOwner, "viewer")
+	w := v.runtimeCall(t, path, body)
+	expect(t, w, 403)
+	if decode(t, w)["reason_code"] != "missing_role_permission" {
+		t.Fatal("key owner revocation failed for a different reason")
+	}
+	dbtest.BindRole(t, v.f.db, v.f.person.TenantID, v.keyOwner, "admin")
+}
+
+func (v recoveryAgentFixture) expectRejectedRecovery(t *testing.T, id, reason string) {
+	t.Helper()
+	v.f.tx(t, v.f.person, func(tx pgx.Tx) error {
+		var state, outcome, auditReason string
+		if err := tx.QueryRow(t.Context(), `SELECT q.state,coalesce(q.outcome,''),
+		 coalesce((SELECT e.after->>'reason' FROM events e
+		 WHERE e.type='harness.agent_recovery_rejected' AND e.after->>'id'=q.id::text
+		 ORDER BY e.id DESC LIMIT 1),'') FROM harness_recoveries q WHERE q.id=$1`, id).Scan(&state, &outcome, &auditReason); err != nil {
+			return err
+		}
+		if state != "completed" || outcome != "rejected" || auditReason != reason {
+			t.Fatalf("recovery state=%q outcome=%q reason=%q, want completed/rejected/%s", state, outcome, auditReason, reason)
+		}
+		return nil
+	})
+}
+
+func TestAgentRecoveryRequestAuthorityAndSingleClaim(t *testing.T) {
+	v := recoveryAgent(t)
+	f := v.f
+	body := v.request(t)
+	expect(t, f.call(f.agent, "POST", v.path+"/recover-agent", body, v.lease), 403)
+	dbtest.BindRole(t, f.db, f.foreign.TenantID, f.foreign.ID, "admin")
+	expect(t, f.call(f.foreign, "POST", v.path+"/recover-agent", body, ""), 404)
+	expect(t, f.call(f.person, "POST", v.path+"/recover-agent", body, ""), 201)
+	expect(t, f.call(f.person, "POST", v.path+"/recover-agent", body, ""), 201)
+	different := v.request(t)
+	expect(t, f.call(f.person, "POST", v.path+"/recover-agent", different, ""), 409)
+	body["action"] = "reconnect"
+	expect(t, f.call(f.person, "POST", v.path+"/recover-agent", body, ""), 409)
+	body["action"] = "restart"
+	expect(t, f.call(f.agent, "POST", "/api/harness-recoveries/claim", map[string]any{"daemon_id": "other", "generation": v.identity.Generation}, v.lease), 403)
+	if got := v.claim(t); len(got) != 1 || got[0]["id"] != body["request_id"] {
+		t.Fatalf("claim=%v", got)
+	}
+	if got := v.claim(t); len(got) != 0 {
+		t.Fatal("uncertain claim was reoffered")
+	}
+	completion := map[string]any{"daemon_id": v.identity.DaemonID, "generation": v.identity.Generation, "outcome": "exited"}
+	endpoint := "/api/harness-recoveries/" + body["request_id"].(string) + "/complete"
+	expect(t, v.runtimeCall(t, endpoint, completion), 409) // no exit evidence
+	completion["outcome"] = "rejected"
+	expect(t, v.runtimeCall(t, endpoint, completion), 200)
+	expect(t, v.runtimeCall(t, endpoint, completion), 200)
+	completion["outcome"] = "exited"
+	expect(t, v.runtimeCall(t, endpoint, completion), 409)
+}
+
+func TestAgentRecoveryRestartQueuesOneBoundContinuation(t *testing.T) {
+	v := recoveryAgent(t)
+	f := v.f
+	agentruns.New(f.db.App).Mount(f.mux)
+	f.tx(t, f.person, func(tx pgx.Tx) error {
+		_, err := tx.Exec(t.Context(), `UPDATE harness_sessions SET display_label='Keep this name',service_tier='fast',continuation_handover='{"handover":{"state":"Existing recovery work is committed","next_steps":["Finish validation"],"open_questions":[],"worktree_state":"Keep local changes"}}' WHERE id=$1`, v.session)
+		return err
+	})
+	body := v.request(t)
+	expect(t, f.call(f.person, "POST", v.path+"/recover-agent", body, ""), 201)
+	v.claim(t)
+	// An explicit stop and terminal run settlement model the daemon's verified
+	// Wait result. Silence and run status alone are tested as insufficient above.
+	expect(t, f.call(f.agent, "POST", v.path+"/stop", map[string]any{"reason": "stopped"}, v.lease), 200)
+	f.tx(t, f.person, func(tx pgx.Tx) error {
+		_, err := tx.Exec(t.Context(), `UPDATE agent_runs SET status='cancelled',started_at=clock_timestamp()-interval '1 minute',ended_at=clock_timestamp() WHERE id=$1`, v.run)
+		return err
+	})
+	endpoint := "/api/harness-recoveries/" + body["request_id"].(string) + "/complete"
+	completion := map[string]any{"daemon_id": v.identity.DaemonID, "generation": v.identity.Generation, "outcome": "exited"}
+	w := v.runtimeCall(t, endpoint, completion)
+	expect(t, w, 200)
+	q := decode(t, w)
+	if q["next_run_id"] != nil {
+		f.tx(t, f.person, func(tx pgx.Tx) error {
+			_, err := tx.Exec(t.Context(), `UPDATE harness_sessions SET display_label='Changed old label',service_tier='default',continuation_handover=NULL WHERE id=$1`, v.session)
+			return err
+		})
+		next := f.call(f.person, "GET", "/api/runs/"+q["next_run_id"].(string), nil, "")
+		expect(t, next, 200)
+		run := decode(t, next)
+		if run["recovery_service_tier"] != "fast" || run["recovery_display_label"] != "Keep this name" || !strings.Contains(run["recovery_brief"].(string), "Existing recovery work is committed") {
+			t.Fatal("continuation lost handover/name/tier")
+		}
+	}
+	if q["outcome"] != "continuation_queued" || q["next_run_id"] == nil {
+		t.Fatalf("completion=%v", q)
+	}
+	d := f.call(f.person, "GET", v.path+"/recover-agent", nil, "")
+	expect(t, d, 200)
+	if diagnosis := decode(t, d); diagnosis["action"] != "" || diagnosis["cause"] != "continuation_queued" {
+		t.Fatal("old session offers another continuation")
+	}
+	expect(t, f.call(f.person, "POST", v.path+"/recover-agent", map[string]any{"request_id": uid(), "expected_revision": decode(t, d)["observed_revision"], "action": "restart"}, ""), 409)
+	w = v.runtimeCall(t, endpoint, completion)
+	expect(t, w, 200)
+	if decode(t, w)["next_run_id"] != q["next_run_id"] {
+		t.Fatal("completion retry created a different run")
+	}
+	f.tx(t, f.person, func(tx pgx.Tx) error {
+		var count int
+		var account, profile string
+		if err := tx.QueryRow(t.Context(), `SELECT count(*),min(requested_account_id::text),min(model_profile_id::text) FROM agent_runs WHERE retry_of_run_id=$1`, v.run).Scan(&count, &account, &profile); err != nil {
+			return err
+		}
+		if count != 1 || account != v.account || profile != v.profile {
+			t.Fatalf("continuation lost binding: count=%d account=%s profile=%s", count, account, profile)
+		}
+		return nil
+	})
+}
+
+func TestAgentRecoveryRevocationExpiryAndObservationFence(t *testing.T) {
+	v := recoveryAgent(t)
+	f := v.f
+	body := v.request(t)
+	expect(t, f.call(f.person, "POST", v.path+"/recover-agent", body, ""), 201)
+	v.refuseRevokedKeyOwner(t, "/api/harness-recoveries/claim", map[string]any{"daemon_id": v.identity.DaemonID, "generation": v.identity.Generation})
+	dbtest.BindRole(t, f.db, f.person.TenantID, f.person.ID, "viewer")
+	if got := v.claim(t); len(got) != 0 {
+		t.Fatal("revoked requester reached daemon")
+	}
+	v.expectRejectedRecovery(t, body["request_id"].(string), "authorization_revoked")
+	dbtest.BindRole(t, f.db, f.person.TenantID, f.person.ID, "admin")
+	body = v.request(t)
+	expect(t, f.call(f.person, "POST", v.path+"/recover-agent", body, ""), 201)
+	f.tx(t, f.person, func(tx pgx.Tx) error {
+		_, err := tx.Exec(t.Context(), `UPDATE harness_sessions SET revision=revision+1 WHERE id=$1`, v.session)
+		return err
+	})
+	if got := v.claim(t); len(got) != 0 {
+		t.Fatal("changed observation reached daemon")
+	}
+	v.expectRejectedRecovery(t, body["request_id"].(string), "observation_changed")
+	body = v.request(t)
+	expect(t, f.call(f.person, "POST", v.path+"/recover-agent", body, ""), 201)
+	v.claim(t)
+	endpoint := "/api/harness-recoveries/" + body["request_id"].(string) + "/complete"
+	completion := map[string]any{"daemon_id": v.identity.DaemonID, "generation": v.identity.Generation, "outcome": "rejected"}
+	v.refuseRevokedKeyOwner(t, endpoint, completion)
+	dbtest.BindRole(t, f.db, f.person.TenantID, f.person.ID, "viewer")
+	denied := v.runtimeCall(t, endpoint, completion)
+	expect(t, denied, 403)
+	if decode(t, denied)["reason_code"] != "missing_role_permission" {
+		t.Fatal("requester revocation failed for a different reason")
+	}
+	dbtest.BindRole(t, f.db, f.person.TenantID, f.person.ID, "admin")
+	f.tx(t, f.person, func(tx pgx.Tx) error {
+		_, err := tx.Exec(t.Context(), `UPDATE harness_recoveries SET expires_at=clock_timestamp()-interval '1 second' WHERE id=$1`, body["request_id"])
+		return err
+	})
+	w := f.call(f.person, "GET", v.path+"/recover-agent/"+body["request_id"].(string), nil, "")
+	expect(t, w, 200)
+	if q := decode(t, w); q["state"] != "expired" || q["outcome"] != "unconfirmed" {
+		t.Fatalf("expired claim=%v", q)
+	}
+}
+
+func TestAgentRecoveryOpenAPIContractsAgree(t *testing.T) {
+	read := func(path string) map[string]any {
+		t.Helper()
+		raw, err := os.ReadFile(path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var doc map[string]any
+		if err = yaml.Unmarshal(raw, &doc); err != nil {
+			t.Fatal(err)
+		}
+		return doc
+	}
+	api, module := read("../../api/openapi.yaml"), read("openapi.yaml")
+	for _, path := range []string{"/projects/{projectId}/harness-sessions/{sessionId}/recover-agent", "/projects/{projectId}/harness-sessions/{sessionId}/recover-agent/{requestId}", "/harness-recoveries/claim", "/harness-recoveries/{requestId}/complete"} {
+		want := api["paths"].(map[string]any)[path]
+		got := module["paths"].(map[string]any)["/api"+path]
+		if want == nil || !reflect.DeepEqual(want, got) {
+			t.Fatalf("recovery contract diverges: %s", path)
+		}
+	}
+	for _, name := range []string{"AgentRecoveryDiagnosis", "AgentRecoveryReceipt", "HarnessProcessOwnership"} {
+		want := api["components"].(map[string]any)["schemas"].(map[string]any)[name]
+		got := module["components"].(map[string]any)["schemas"].(map[string]any)[name]
+		if want == nil || !reflect.DeepEqual(want, got) {
+			t.Fatalf("recovery schema diverges: %s", name)
+		}
+	}
+}
+
+func TestAttachedAgentRecoveryRequiresPairedHookAndCurrentAuthority(t *testing.T) {
+	v := recoveryAgent(t)
+	f := v.f
+	dbtest.BindRole(t, f.db, f.foreign.TenantID, f.foreign.ID, "admin")
+	inbox.New(f.db.App).Mount(f.mux)
+	f.tx(t, f.person, func(tx pgx.Tx) error {
+		_, err := tx.Exec(t.Context(), `UPDATE harness_sessions SET management='unmanaged',run_id=NULL,capabilities=ARRAY['inbox','status'],process_ownership=NULL,process_observed_at=NULL WHERE id=$1`, v.session)
+		return err
+	})
+	beat := map[string]any{"phase": "working", "activity_sequence": 2, "attached_hook": true, "process_ownership": v.identity}
+	expect(t, v.runtimeCall(t, v.path+"/heartbeat", beat, v.lease), 200)
+	expect(t, f.call(f.agent, "POST", v.path+"/heartbeat", beat, "wrong-lease"), 403)
+	wrong := v.identity
+	wrong.DaemonID = "unpaired"
+	beat["process_ownership"] = wrong
+	expect(t, f.call(f.agent, "POST", v.path+"/heartbeat", beat, v.lease), 403)
+	beat["process_ownership"] = v.identity
+	expect(t, v.runtimeCall(t, v.path+"/heartbeat", beat, v.lease), 200)
+	d := f.call(f.person, "GET", v.path+"/recover-agent", nil, "")
+	expect(t, d, 200)
+	diagnosis := decode(t, d)
+	if diagnosis["action"] != "reconnect" || diagnosis["cause"] != "inbox_not_listening" {
+		t.Fatalf("attached diagnosis=%v", diagnosis)
+	}
+	body := map[string]any{"request_id": uid(), "expected_revision": diagnosis["observed_revision"], "action": "restart"}
+	expect(t, f.call(f.person, "POST", v.path+"/recover-agent", body, ""), 409)
+	body["action"] = "reconnect"
+	expect(t, f.call(f.agent, "POST", v.path+"/recover-agent", body, v.lease), 403)
+	expect(t, f.call(f.foreign, "POST", v.path+"/recover-agent", body, ""), 404)
+	expect(t, f.call(f.person, "POST", v.path+"/recover-agent", body, ""), 201)
+	v.refuseRevokedKeyOwner(t, "/api/harness-recoveries/claim", map[string]any{"daemon_id": v.identity.DaemonID, "generation": v.identity.Generation})
+	dbtest.BindRole(t, f.db, f.person.TenantID, f.person.ID, "viewer")
+	if len(v.claim(t)) != 0 {
+		t.Fatal("revoked attached recovery reached daemon")
+	}
+	v.expectRejectedRecovery(t, body["request_id"].(string), "authorization_revoked")
+	dbtest.BindRole(t, f.db, f.person.TenantID, f.person.ID, "admin")
+	body["request_id"] = uid()
+	expect(t, f.call(f.person, "POST", v.path+"/recover-agent", body, ""), 201)
+	claimed := v.claim(t)
+	if len(claimed) != 1 || claimed[0]["run_id"] != nil {
+		t.Fatalf("attached claim=%v", claimed)
+	}
+	endpoint := "/api/harness-recoveries/" + body["request_id"].(string) + "/complete"
+	completion := map[string]any{"daemon_id": v.identity.DaemonID, "generation": v.identity.Generation, "outcome": "reconnected"}
+	expect(t, v.runtimeCall(t, endpoint, completion), 409)
+	expect(t, v.runtimeCall(t, v.path+"/heartbeat", beat, v.lease), 200)
+	// The paired hook uses the existing session-scoped replayable drain.
+	messageID := uid()
+	for _, id := range []string{uid(), messageID} {
+		f.tx(t, f.person, func(tx pgx.Tx) error {
+			var target any
+			if id == messageID {
+				target = v.session
+			}
+			event, err := events.Append(t.Context(), tx, f.person, events.Change{Type: "inbox.sent", After: map[string]any{"id": id}})
+			if err != nil {
+				return err
+			}
+			if _, err = tx.Exec(t.Context(), `INSERT INTO inbox_messages(tenant_id,id,sender_principal_id,recipient_principal_id,sent_event_id,body,idempotency_key,recipient_session_id) VALUES($1,$2,$3,$4,$5,'attached fixture message',$6,$7)`, f.person.TenantID, id, f.person.ID, f.agent.ID, event.ID, uid(), target); err != nil {
+				return err
+			}
+			if id == messageID {
+				_, err = tx.Exec(t.Context(), `INSERT INTO inbox_receipts(tenant_id,message_id,state,deliver_by) VALUES($1,$2,'queued',clock_timestamp()+interval '5 minutes')`, f.person.TenantID, id)
+			}
+			return err
+		})
+	}
+	var deliveryID any
+	var delivery map[string]any
+	for round := 0; round < 2; round++ {
+		drain := v.runtimeCall(t, v.path+"/drain", map[string]any{}, v.lease)
+		expect(t, drain, 200)
+		var deliveries []map[string]any
+		if err := json.Unmarshal(drain.Body.Bytes(), &deliveries); err != nil || len(deliveries) != 1 || deliveries[0]["message_id"] != messageID {
+			t.Fatal("attached drain consumed a broadcast or lost its exact message")
+		}
+		if round == 0 {
+			deliveryID = deliveries[0]["delivery_id"]
+		} else if deliveryID != deliveries[0]["delivery_id"] {
+			t.Fatal("reconnect did not preserve the replayable delivery")
+		}
+		delivery = deliveries[0]
+	}
+	f.tx(t, f.person, func(tx pgx.Tx) error {
+		var acked bool
+		if err := tx.QueryRow(t.Context(), `SELECT acked_at IS NOT NULL FROM inbox_messages WHERE id=$1`, messageID).Scan(&acked); err != nil {
+			return err
+		}
+		if acked {
+			t.Fatal("reconnect acknowledged a message before foreground handoff")
+		}
+		return nil
+	})
+	// AEON-660: the verified attached hook must finish the durable lease it
+	// drained. Until foreground handoff, replay remains the same lease; after
+	// completion it must not block later drains or consume the broadcast.
+	handoff := map[string]any{"delivery_id": deliveryID, "cursor": delivery["cursor"], "outcome": "handed_off"}
+	expect(t, v.runtimeCall(t, v.path+"/complete-delivery", handoff, "wrong-lease"), 403)
+	w := v.runtimeCall(t, v.path+"/complete-delivery", handoff, v.lease)
+	expect(t, w, 200)
+	completed := decode(t, w)
+	if completed["delivery_id"] != deliveryID || completed["cursor"] != delivery["cursor"] || completed["completed_at"] == nil {
+		t.Fatalf("attached durable completion=%v", completed)
+	}
+	w = v.runtimeCall(t, v.path+"/complete-delivery", handoff, v.lease)
+	expect(t, w, 200)
+	if got := decode(t, w); got["completed_at"] != completed["completed_at"] {
+		t.Fatal("attached durable retry changed completion evidence")
+	}
+	w = v.runtimeCall(t, v.path+"/drain", map[string]any{}, v.lease)
+	expect(t, w, 200)
+	var remaining []map[string]any
+	if err := json.Unmarshal(w.Body.Bytes(), &remaining); err != nil || remaining == nil || len(remaining) != 0 {
+		t.Fatalf("completed attached durable lease replayed or consumed broadcast: %s", w.Body.String())
+	}
+	f.tx(t, f.person, func(tx pgx.Tx) error {
+		var acked, finished, released bool
+		var mode, receipt string
+		if err := tx.QueryRow(t.Context(), `SELECT m.acked_at IS NOT NULL,d.completed_at IS NOT NULL,d.released_at IS NOT NULL,d.mode,r.state
+			FROM inbox_messages m JOIN harness_deliveries d ON d.message_id=m.id JOIN inbox_receipts r ON r.message_id=m.id
+			WHERE m.id=$1 AND d.id=$2`, messageID, deliveryID).Scan(&acked, &finished, &released, &mode, &receipt); err != nil {
+			return err
+		}
+		if !acked || !finished || released || mode != "managed" || receipt != "handed_off" {
+			t.Fatalf("attached durable result: acked=%t completed=%t released=%t mode=%s receipt=%s", acked, finished, released, mode, receipt)
+		}
+		return nil
+	})
+	v.refuseRevokedKeyOwner(t, endpoint, completion)
+	dbtest.BindRole(t, f.db, f.person.TenantID, f.person.ID, "viewer")
+	denied := v.runtimeCall(t, endpoint, completion)
+	expect(t, denied, 403)
+	if decode(t, denied)["reason_code"] != "missing_role_permission" {
+		t.Fatal("requester revocation failed for a different reason")
+	}
+	dbtest.BindRole(t, f.db, f.person.TenantID, f.person.ID, "admin")
+	w = v.runtimeCall(t, endpoint, completion)
+	expect(t, w, 200)
+	if got := decode(t, w); got["outcome"] != "reconnected" || got["next_run_id"] != nil {
+		t.Fatalf("attached completion=%v", got)
+	}
+	expect(t, v.runtimeCall(t, endpoint, completion), 200)
+}
+
+func TestAgentRecoveryBudgetRejectionCommitsDecisionWithoutContinuation(t *testing.T) {
+	v := recoveryAgent(t)
+	f := v.f
+	body := v.request(t)
+	expect(t, f.call(f.person, "POST", v.path+"/recover-agent", body, ""), 201)
+	v.claim(t)
+	expect(t, f.call(f.agent, "POST", v.path+"/stop", map[string]any{"reason": "stopped"}, v.lease), 200)
+	var order string
+	f.tx(t, f.person, func(tx pgx.Tx) error {
+		if _, err := tx.Exec(t.Context(), `UPDATE agent_runs SET status='cancelled',started_at=clock_timestamp()-interval '1 minute',ended_at=clock_timestamp() WHERE id=$1`, v.run); err != nil {
+			return err
+		}
+		if err := tx.QueryRow(t.Context(), `SELECT work_order_id::text FROM harness_sessions WHERE id=$1`, v.session).Scan(&order); err != nil {
+			return err
+		}
+		if _, err := tx.Exec(t.Context(), `UPDATE nodes SET parent_id=$2 WHERE id=$1`, order, f.ticket); err != nil {
+			return err
+		}
+		if _, err := tx.Exec(t.Context(), `UPDATE work_orders SET max_cost_micros=1000000 WHERE node_id=$1`, order); err != nil {
+			return err
+		}
+		state, err := json.Marshal(escalation.State{EpisodeID: f.ticket, Status: "stuck", Reason: "failed_fix_rounds", Revision: 1, Attempts: escalation.MaxAttempts, HeldCost: 100, MaxAttempts: escalation.MaxAttempts, MaxCost: escalation.MaxCostMicros, OriginalProfile: v.profile})
+		if err != nil {
+			return err
+		}
+		_, err = tx.Exec(t.Context(), `INSERT INTO work_escalations(tenant_id,ticket_node_id,project_id,state) VALUES($1,$2,$3,$4)`, f.person.TenantID, f.ticket, f.project, state)
+		return err
+	})
+	endpoint := "/api/harness-recoveries/" + body["request_id"].(string) + "/complete"
+	completion := map[string]any{"daemon_id": v.identity.DaemonID, "generation": v.identity.Generation, "outcome": "exited"}
+	w := v.runtimeCall(t, endpoint, completion)
+	expect(t, w, 409)
+	var failure struct{ Error string }
+	if err := json.Unmarshal(w.Body.Bytes(), &failure); err != nil {
+		t.Fatal(err)
+	}
+	const want = "finite escalation cost and attempt budget required; work awaits a Decision Desk decision"
+	if failure.Error != want {
+		t.Fatalf("rejection=%s", w.Body.String())
+	}
+	f.tx(t, f.person, func(tx pgx.Tx) error {
+		var status, reason, question string
+		var pending bool
+		if err := tx.QueryRow(t.Context(), `SELECT state->>'status',state->>'reason',coalesce(state->>'question_id',''),coalesce((state->>'question_pending')::boolean,false) FROM work_escalations WHERE ticket_node_id=$1`, f.ticket).Scan(&status, &reason, &question, &pending); err != nil {
+			return err
+		}
+		if status != "awaiting_decision" || reason != "escalation_budget_unavailable" || question == "" || pending {
+			t.Fatalf("decision status=%s reason=%s question=%s pending=%t", status, reason, question, pending)
+		}
+		var runs int
+		if err := tx.QueryRow(t.Context(), `SELECT count(*) FROM agent_runs WHERE retry_of_run_id=$1`, v.run).Scan(&runs); err != nil {
+			return err
+		}
+		if runs != 0 {
+			t.Fatalf("budget refusal created %d continuations", runs)
+		}
+		var state, outcome, completionText string
+		var noNext bool
+		if err := tx.QueryRow(t.Context(), `SELECT state,outcome,completion,next_run_id IS NULL FROM harness_recoveries WHERE id=$1`, body["request_id"]).Scan(&state, &outcome, &completionText, &noNext); err != nil {
+			return err
+		}
+		if state != "completed" || outcome != "rejected" || completionText != "exited" || !noNext {
+			t.Fatalf("recovery state=%s outcome=%s completion=%s noNext=%t", state, outcome, completionText, noNext)
+		}
+		return nil
+	})
+	w = v.runtimeCall(t, endpoint, completion)
+	expect(t, w, 200)
+	if got := decode(t, w); got["outcome"] != "rejected" || got["next_run_id"] != nil {
+		t.Fatalf("retry=%v", got)
+	}
+	f.tx(t, f.person, func(tx pgx.Tx) error {
+		var runs int
+		if err := tx.QueryRow(t.Context(), `SELECT count(*) FROM agent_runs WHERE retry_of_run_id=$1`, v.run).Scan(&runs); err != nil {
+			return err
+		}
+		if runs != 0 {
+			t.Fatalf("completion retry created %d continuations", runs)
+		}
+		return nil
+	})
+}
+
+// Risk: a later binding report must replace a stored refusal or reported clear,
+// without renewing the heartbeat or losing the previous reason in the audit.
+func TestAEON1254BindingReportsPersistRefusalTransitions(t *testing.T) {
+	for _, tc := range []struct {
+		name   string
+		before any
+	}{
+		{"reason_changes", "hook_cli_mismatch"},
+		{"failure_after_clear", nil},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			f := fixture(t)
+			lease := "fixture-binding-transition-lease-00000001"
+			base := "/api/projects/" + f.project + "/harness-sessions"
+			w := f.call(f.agent, "POST", base, map[string]any{"agent_principal_id": f.agent.ID, "harness": "claude", "host": "fixture", "harness_session_ref": "fixture-binding-transition-000001", "worker_lease": lease, "management_mode": "unmanaged", "role": "worker", "advertised_capabilities": []string{"inbox"}}, "")
+			expect(t, w, 201)
+			id := decode(t, w)["id"].(string)
+			path := base + "/" + id
+			beat := map[string]any{"phase": "working", "activity": "busy", "activity_sequence": 1, "inbox_binding_error": tc.before, "max_session_file_bytes": 512000, "rules_client_version": "261005070923.0.0"}
+			expect(t, f.call(f.agent, "POST", path+"/heartbeat", beat, lease), 200)
+			w = f.call(f.person, "GET", path, nil, "")
+			expect(t, w, 200)
+			if got, exists := decode(t, w)["inbox_binding_error"]; !exists || got != tc.before {
+				t.Fatalf("initial refusal = %v (present %t), want %v", got, exists, tc.before)
+			}
+			var beforeEvidence []byte
+			var beforeEvents int
+			f.tx(t, f.person, func(tx pgx.Tx) error {
+				if err := tx.QueryRow(t.Context(), `SELECT to_jsonb(s)-'inbox_binding_error'-'row_version' FROM harness_sessions s WHERE id=$1`, id).Scan(&beforeEvidence); err != nil {
+					return err
+				}
+				return tx.QueryRow(t.Context(), `SELECT count(*) FROM events WHERE type='harness.heartbeat' AND after->>'id'=$1`, id).Scan(&beforeEvents)
+			})
+			const next = "principal_mismatch"
+			report := map[string]any{"phase": "working", "activity": "busy", "activity_sequence": 1, "inbox_binding_report": true, "inbox_binding_error": next}
+			w = f.call(f.agent, "POST", path+"/heartbeat", report, lease)
+			expect(t, w, 200)
+			if got := decode(t, w)["inbox_binding_error"]; got != next {
+				t.Errorf("report refusal = %v, want %s", got, next)
+			}
+			// A separate read must observe the committed report, not a mutated
+			// in-memory session returned by the write request.
+			w = f.call(f.person, "GET", path, nil, "")
+			expect(t, w, 200)
+			if got := decode(t, w)["inbox_binding_error"]; got != next {
+				t.Errorf("persisted refusal = %v, want %s", got, next)
+			}
+			f.tx(t, f.person, func(tx pgx.Tx) error {
+				var afterEvidence []byte
+				if err := tx.QueryRow(t.Context(), `SELECT to_jsonb(s)-'inbox_binding_error'-'row_version' FROM harness_sessions s WHERE id=$1`, id).Scan(&afterEvidence); err != nil {
+					return err
+				}
+				if !bytes.Equal(beforeEvidence, afterEvidence) {
+					t.Error("binding report changed session state beyond its diagnostic")
+				}
+				var afterEvents int
+				if err := tx.QueryRow(t.Context(), `SELECT count(*) FROM events WHERE type='harness.heartbeat' AND after->>'id'=$1`, id).Scan(&afterEvents); err != nil {
+					return err
+				}
+				if afterEvents != beforeEvents+1 {
+					t.Errorf("binding report added %d audit events, want 1", afterEvents-beforeEvents)
+				}
+				var before, after []byte
+				if err := tx.QueryRow(t.Context(), `SELECT before->'inbox_binding_error',after->'inbox_binding_error' FROM events WHERE type='harness.heartbeat' AND after->>'id'=$1 ORDER BY id DESC LIMIT 1`, id).Scan(&before, &after); err != nil {
+					return err
+				}
+				wantBefore, _ := json.Marshal(tc.before)
+				wantAfter, _ := json.Marshal(next)
+				if !bytes.Equal(before, wantBefore) || !bytes.Equal(after, wantAfter) {
+					t.Errorf("audit refusal %s -> %s, want %s -> %s", before, after, wantBefore, wantAfter)
+				}
+				return nil
+			})
+		})
+	}
+}
+
+func TestAEON1254BindingDiagnosticRequiresCurrentWorkerAndClears(t *testing.T) {
+	f := fixture(t)
+	lease := "fixture-binding-worker-lease-000000000001"
+	base := "/api/projects/" + f.project + "/harness-sessions"
+	w := f.call(f.agent, "POST", base, map[string]any{"agent_principal_id": f.agent.ID, "harness": "claude", "host": "fixture", "harness_session_ref": "fixture-binding-source-000001", "worker_lease": lease, "management_mode": "unmanaged", "role": "worker", "advertised_capabilities": []string{"inbox"}}, "")
+	expect(t, w, 201)
+	path := base + "/" + decode(t, w)["id"].(string) + "/heartbeat"
+	beat := map[string]any{"phase": "working", "activity": "busy", "activity_sequence": 1, "inbox_binding_error": "hook_cli_mismatch", "max_session_file_bytes": 512000, "rules_client_version": "261005070923.0.0"}
+	expect(t, f.call(f.agent, "POST", path, beat, "wrong-lease"), 403)
+	w = f.call(f.agent, "POST", path, beat, lease)
+	expect(t, w, 200)
+	if decode(t, w)["inbox_binding_error"] != "hook_cli_mismatch" {
+		t.Fatal("worker refusal was not projected")
+	}
+	beat["inbox_binding_error"] = "private-canary-error-body"
+	expect(t, f.call(f.agent, "POST", path, beat, lease), 400)
+	delete(beat, "inbox_binding_error")
+	w = f.call(f.agent, "POST", path, beat, lease)
+	expect(t, w, 200)
+	if decode(t, w)["inbox_binding_error"] != "hook_cli_mismatch" {
+		t.Fatal("older writer cleared the refusal")
+	}
+	var beforeAt, beforeVersion string
+	var beforeGrace, beforeMaximum int
+	readEvidence := func() (string, string, int, int) {
+		var at, version string
+		var grace, maximum int
+		f.tx(t, f.person, func(tx pgx.Tx) error {
+			return tx.QueryRow(t.Context(), `SELECT heartbeat_at::text,coalesce(rules_client_version,''),missing_progress_beats,coalesce(max_session_file_bytes,0) FROM harness_sessions WHERE id=$1`, strings.TrimSuffix(strings.TrimPrefix(path, base+"/"), "/heartbeat")).Scan(&at, &version, &grace, &maximum)
+		})
+		return at, version, grace, maximum
+	}
+	beforeAt, beforeVersion, beforeGrace, beforeMaximum = readEvidence()
+	report := map[string]any{"phase": "working", "activity": "busy", "activity_sequence": 1, "inbox_binding_report": true, "inbox_binding_error": nil}
+	w = f.call(f.agent, "POST", path, report, lease)
+	expect(t, w, 200)
+	afterAt, afterVersion, afterGrace, afterMaximum := readEvidence()
+	if beforeMaximum != 512000 || beforeVersion != "261005070923.0.0" || beforeAt != afterAt || beforeVersion != afterVersion || beforeGrace != afterGrace || beforeMaximum != afterMaximum {
+		t.Fatal("binding metadata changed liveness, grace period or client capability")
+	}
+	report["activity_sequence"] = 2
+	expect(t, f.call(f.agent, "POST", path, report, lease), 409)
+	beat["inbox_binding_error"] = nil
+	w = f.call(f.agent, "POST", path, beat, lease)
+	expect(t, w, 200)
+	if value, exists := decode(t, w)["inbox_binding_error"]; !exists || value != nil {
+		t.Fatal("successful binding did not clear the refusal")
+	}
+	// The daemon's foreign principal cannot gain worker authority from a lease.
+	other := uid()
+	f.addAgent(t, other, "Paired daemon fixture")
+	foreignSession := f.registerSession(t, other, "worker", "", "foreign-worker-ref-00000001", lease)
+	foreignPath := base + "/" + foreignSession + "/heartbeat"
+	w = f.call(f.agent, "POST", foreignPath, beat, lease)
+	expect(t, w, 403)
+	if !strings.Contains(w.Body.String(), "harness worker proof rejected") {
+		t.Fatal("test failed for a different refusal reason")
+	}
+}

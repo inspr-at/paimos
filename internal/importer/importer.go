@@ -129,7 +129,14 @@ func Analyze(s Snapshot) Report {
 }
 
 func jsonValue(v any) ([]byte, error) { return json.Marshal(v) }
-func canonicalType(t string) string   { return strings.ReplaceAll(t, "-", "_") }
+func canonicalType(t string) string {
+	switch t {
+	case "epic", "ticket", "task":
+		return "work"
+	default:
+		return strings.ReplaceAll(t, "-", "_")
+	}
+}
 
 func decodeExactJSON(raw []byte, out any) error {
 	decoder := json.NewDecoder(bytes.NewReader(raw))

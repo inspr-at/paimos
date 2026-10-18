@@ -1,0 +1,22 @@
+{
+  "group": "remaining-ui",
+  "nightlyTiming": {
+    "seconds": 40.631,
+    "selectedTests": 12
+  },
+  "spec": {
+    "file": "tests/dead-screens.spec.ts",
+    "listedTests": 12,
+    "tierTiming": {
+      "caseSeconds": {
+        "max": 4.275,
+        "median": 3.317,
+        "min": 2.848
+      },
+      "seconds": 40.631,
+      "selectedTests": 12
+    },
+    "weightSeconds": 30,
+    "weightSource": "unmeasured-estimate"
+  }
+}

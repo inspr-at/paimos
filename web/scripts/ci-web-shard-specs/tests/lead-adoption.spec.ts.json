@@ -1,0 +1,22 @@
+{
+  "group": "lead-flow",
+  "nightlyTiming": {
+    "seconds": 71.973,
+    "selectedTests": 10
+  },
+  "spec": {
+    "file": "tests/lead-adoption.spec.ts",
+    "listedTests": 10,
+    "tierTiming": {
+      "caseSeconds": {
+        "max": 11.281,
+        "median": 7.722,
+        "min": 2.186
+      },
+      "seconds": 71.973,
+      "selectedTests": 10
+    },
+    "weightSeconds": 24,
+    "weightSource": "local-targeted-run"
+  }
+}

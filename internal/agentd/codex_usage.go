@@ -21,6 +21,7 @@ func (p *codexProcess) notification(raw json.RawMessage) {
 	if p.sealed || p.abandoned.Load() {
 		return
 	}
+	p.observeCodexChat(raw)
 	method, _, model := eventProbe(raw)
 	if method == "account/rateLimits/updated" || method == "rateLimits/updated" {
 		p.emitCapacity(raw, "update")
@@ -112,6 +113,10 @@ func (p *codexProcess) notification(raw json.RawMessage) {
 		// keeps its existing independent thread cumulative delta settlement.
 		if p.usage != nil {
 			if report, err := p.usage.Observe(raw); err == nil && report != nil {
+				report.ServiceTier = p.serviceTier
+				if report.ServiceTier == "" {
+					report.ServiceTier = "default"
+				}
 				ev := AdapterEvent{SessionUsage: report}
 				// Only an exact, parser-validated usage model is vendor evidence.
 				// Arbitrary model-like text on other notifications is not metadata.
@@ -297,6 +302,7 @@ func (p *codexProcess) startTurn(ctx context.Context, r StartRequest) error {
 		return errors.New("Codex turn start failed")
 	}
 	p.turnID, p.acknowledged = turn, true
+	p.flushCodexChat(turn)
 	if p.pendingLimit != nil && p.pendingLimitTurn == turn {
 		p.emitVendorLimit(p.pendingLimit)
 	}
@@ -366,6 +372,7 @@ func (p *codexProcess) sealUsage(clean bool) {
 		return
 	}
 	p.sealed = true
+	p.chatPending, p.chatCandidate = nil, pendingCodexChat{}
 	if p.idleTimer != nil {
 		p.idleTimer.Stop()
 	}
@@ -373,6 +380,10 @@ func (p *codexProcess) sealUsage(clean bool) {
 	p.invalid = p.invalid || !clean
 	if p.usage != nil {
 		for _, report := range p.usage.Finish(clean) {
+			report.ServiceTier = p.serviceTier
+			if report.ServiceTier == "" {
+				report.ServiceTier = "default"
+			}
 			p.observe(AdapterEvent{SessionUsage: &report})
 		}
 	}

@@ -24,65 +24,130 @@ import (
 	"github.com/inspr-at/paimos/internal/agentsecurity"
 	"github.com/inspr-at/paimos/internal/agentsetup"
 	"github.com/inspr-at/paimos/internal/attachwatch"
+	"github.com/inspr-at/paimos/internal/client"
 	"golang.org/x/term"
 )
 
 func pairedAttach(root string, c agentsetup.RuntimeConfig, remote *agentd.Remote) (*agentd.AttachManager, error) {
+	cfg, err := pairedAttachConfig(root, c, remote, nil)
+	if err != nil {
+		return nil, err
+	}
+	return agentd.NewAttachManager(cfg)
+}
+
+// Build the same registration and exchange callbacks used by paired serve.
+func pairedAttachConfig(root string, c agentsetup.RuntimeConfig, remote *agentd.Remote, clock agentd.AttachRetryClock) (agentd.AttachConfig, error) {
+	return pairedAttachConfigWithProof(c, remote, clock, func() (string, string, error) {
+		host, proof, err := agentsetup.ReadAttachProof(root, c)
+		return host, string(proof), err
+	})
+}
+
+func pairedAttachConfigWithProof(c agentsetup.RuntimeConfig, remote *agentd.Remote, clock agentd.AttachRetryClock, readProof func() (string, string, error)) (agentd.AttachConfig, error) {
 	// Startup cannot grandfather a fallback whose provenance is unavailable.
 	// Drop it without disabling signed images or other healthy installations.
 	c.AttachIdentities = startupAttachIdentities(c)
 	// Freeze the paired origin even if a caller supplied a differently configured
 	// remote; never follow a redirect carrying registration or poll authority.
 	if remote == nil || remote.Client == nil || remote.Client.HTTP == nil {
-		return nil, errors.New("paired transport unavailable")
+		return agentd.AttachConfig{}, errors.New("paired transport unavailable")
 	}
 	pairedClient := *remote.Client
 	pairedClient.BaseURL = c.Origin
 	pairedHTTP := *remote.Client.HTTP
 	pairedHTTP.CheckRedirect = func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }
 	pairedClient.HTTP = &pairedHTTP
-	host, proof, err := agentsetup.ReadAttachProof(root, c)
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+	defer cancel()
+	authority := newAttachProofReader(readProof)
+	// One bounded startup read supplies both host and registration authority.
+	// Its proof is consumed below; later recovery always reads fresh state.
+	host, startupProof, err := authority.read(ctx)
 	if err != nil {
-		return nil, err
+		return agentd.AttachConfig{}, err
 	}
 	paths := map[string]string{}
 	for _, a := range c.Accounts {
 		paths[a.Harness] = a.Path
 	}
-	// Generated once per daemon start; captured only by the exchange closure.
+	// Generated once per daemon start; retained only by transport callbacks.
 	// Never add this key to RuntimeConfig, setup stores, local replies or logs.
 	var key [32]byte
 	if _, err = rand.Read(key[:]); err != nil {
-		return nil, errors.New("cannot create watch poll key")
+		return agentd.AttachConfig{}, errors.New("cannot create watch poll key")
 	}
 	pollKey := hex.EncodeToString(key[:])
 	clear(key[:])
-	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
-	defer cancel()
-	var registered attachwatch.View
-	registration := map[string]any{"attach_protocol": attachwatch.Protocol, "local_consent_proof_version": attachwatch.LocalConsentProofVersion, "operation": "register", "computer_id": c.ComputerID, "device_proof": string(proof), "poll_key": pollKey, "local_auth_capability": agentd.CurrentLocalAuthCapability()}
-	if err = pairedClient.Do(ctx, "POST", "/api/agent-pairing/attach", registration, &registered); err != nil {
-		return nil, fmt.Errorf("paired instance refused attach registration: %w", err)
+	capability := agentd.CurrentLocalAuthCapability()
+	registration := func(ctx context.Context) (map[string]any, error) {
+		proof := startupProof
+		startupProof = ""
+		if proof == "" {
+			var err error
+			_, proof, err = authority.read(ctx)
+			if err != nil {
+				return nil, err
+			}
+		}
+		return map[string]any{"attach_protocol": attachwatch.Protocol, "local_consent_proof_version": attachwatch.LocalConsentProofVersion, "operation": "register", "computer_id": c.ComputerID, "device_proof": proof, "poll_key": pollKey, "local_auth_capability": capability}, nil
 	}
-	if registered.State != "registered" {
-		return nil, &agentd.AttachLocalError{Code: "attach_version_mismatch", Hint: "paired instance refused attach registration; update agentd and Aeon"}
+	transport, err := pairedAttachTransport(ctx, &pairedClient, registration, pollKey, clock)
+	if err != nil {
+		return agentd.AttachConfig{}, err
 	}
-	if registered.LocalConsentProofVersion != attachwatch.LocalConsentProofVersion {
-		return nil, &agentd.AttachLocalError{Code: "attach_version_mismatch", Hint: "paired instance lacks local consent proof v2; upgrade Aeon and paimos-agentd, then restart; existing pairing keys remain valid"}
-	}
-	return agentd.NewAttachManager(agentd.AttachConfig{Origin: c.Origin, ComputerID: c.ComputerID, Host: host, Workspace: c.Workspace, Executables: paths, Identities: c.AttachIdentities,
+	return agentd.AttachConfig{Origin: c.Origin, ComputerID: c.ComputerID, Host: host, Workspace: c.Workspace, Executables: paths, Identities: c.AttachIdentities,
 		LocalSigner: func(ctx context.Context, consent, nonce, reason string) (string, error) {
 			if c.LocalAuthKeyID == "" {
 				return "", agentsecurity.ErrUnavailable
 			}
 			return agentsecurity.DefaultSigner().Sign(ctx, c.LocalAuthKeyID, attachwatch.LocalConsentHash(consent, nonce, reason), reason)
 		},
-		Exchange: func(ctx context.Context, in attachwatch.DeviceRequest) (attachwatch.View, error) {
-			in.PollKey = pollKey
-			var out attachwatch.View
-			err := pairedClient.Do(ctx, "POST", "/api/agent-pairing/attach", in, &out)
-			return out, err
-		}})
+		Exchange: transport.Exchange}, nil
+}
+
+func pairedAttachTransport(ctx context.Context, c *client.Client, registration func(context.Context) (map[string]any, error), pollKey string, clock agentd.AttachRetryClock) (*agentd.AttachTransport, error) {
+	register := func(ctx context.Context) error {
+		body, err := registration(ctx)
+		if err != nil {
+			return err
+		}
+		var registered attachwatch.View
+		if err := c.Do(ctx, "POST", "/api/agent-pairing/attach", body, &registered); err != nil {
+			return fmt.Errorf("paired instance refused attach registration: %w", attachExchangeFailure(err))
+		}
+		if registered.State != "registered" {
+			return &agentd.AttachLocalError{Code: "attach_version_mismatch", Hint: "paired instance refused attach registration; update agentd and Aeon"}
+		}
+		if registered.LocalConsentProofVersion != attachwatch.LocalConsentProofVersion {
+			return &agentd.AttachLocalError{Code: "attach_version_mismatch", Hint: "paired instance lacks local consent proof v2; upgrade Aeon and paimos-agentd, then restart; existing pairing keys remain valid"}
+		}
+		return nil
+	}
+	if err := register(ctx); err != nil {
+		return nil, err
+	}
+	return agentd.NewAttachTransport(func(ctx context.Context, in attachwatch.DeviceRequest) (attachwatch.View, error) {
+		in.PollKey = pollKey
+		return pairedAttachExchange(ctx, c, in)
+	}, register, clock), nil
+}
+
+func pairedAttachExchange(ctx context.Context, c *client.Client, in attachwatch.DeviceRequest) (attachwatch.View, error) {
+	var out attachwatch.View
+	err := c.Do(ctx, "POST", "/api/agent-pairing/attach", in, &out)
+	return out, attachExchangeFailure(err)
+}
+
+// Only errors from the remote Do call receive the exchange marker. Preserve
+// HTTP refusals so they keep their specific fixed repair hints.
+func attachExchangeFailure(err error) error {
+	var status *client.StatusError
+	var local *agentd.AttachLocalError
+	if err == nil || errors.Is(err, agentd.ErrAttachExchange) || errors.As(err, &status) || errors.As(err, &local) {
+		return err
+	}
+	return fmt.Errorf("%w: %w", agentd.ErrAttachExchange, err)
 }
 
 func startupAttachIdentities(c agentsetup.RuntimeConfig) map[string]agentsetup.AttachIdentity {

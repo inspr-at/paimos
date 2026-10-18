@@ -188,7 +188,7 @@ const showRework = computed(() => groups.value.rows.some(g => rework(g)))
     <template v-if="visible && work">
       <p v-if="visible.truncated" class="notice">
         <AppIcon name="alert" :size="16" />
-        <span>This range has more sessions than one read holds, so the figures cover the first 5,000.</span>
+        <span>This range exceeds the 5,000-session or completion limit. Some totals are partial.</span>
       </p>
       <p v-if="!work.sessions" class="quiet-line">No agent sessions in the last {{ days }} days.</p>
       <template v-else>

@@ -6,29 +6,120 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 	"time"
 
 	"github.com/inspr-at/paimos/internal/agentpairing"
 	"github.com/inspr-at/paimos/internal/agentsetup"
+	"github.com/inspr-at/paimos/internal/httpapi"
 )
 
 // handlerTransport keeps the production HTTPS origin while exercising the real
 // HTTP client, auth middleware, pairing handlers, and disposable database.
 type handlerTransport struct{ handler http.Handler }
 
-func (x handlerTransport) RoundTrip(r *http.Request) (*http.Response, error) {
+func (x handlerTransport) RoundTrip(r *http.Request) (response *http.Response, err error) {
 	if r.URL.Scheme != "https" || r.URL.Host != "pairing.test" {
 		return nil, errors.New("unexpected pairing destination")
 	}
+	// net/http normally catches this sentinel and aborts the connection. A
+	// direct handler call needs the same boundary: discard the partial reply,
+	// preserve client cancellation, and let unrelated panics propagate.
+	defer func() {
+		if rec := recover(); rec != nil {
+			if rec != http.ErrAbortHandler {
+				panic(rec)
+			}
+			response = nil
+			err = r.Context().Err()
+			if err == nil {
+				err = io.ErrUnexpectedEOF
+			}
+		}
+	}()
 	w := httptest.NewRecorder()
 	x.handler.ServeHTTP(w, r)
 	return w.Result(), nil
+}
+
+// AEON-1228 risk: a watch cancelled after its headers were committed asks
+// net/http to abort the connection. The in-process transport must report that
+// as a failed client request rather than panic in the supervisor's goroutine.
+func TestHandlerTransportReportsAbortedResponses(t *testing.T) {
+	unexpectedPanic := errors.New("unexpected handler panic")
+	for _, mode := range []string{"cancel after headers", "abort", "unrelated panic", "healthy"} {
+		t.Run(mode, func(t *testing.T) {
+			ctx, cancel := context.WithCancel(t.Context())
+			defer cancel()
+			var handler http.Handler = http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				switch mode {
+				case "cancel after headers":
+					w.WriteHeader(http.StatusOK)
+					_, _ = io.WriteString(w, "incomplete")
+					cancel()
+				case "abort":
+					w.WriteHeader(http.StatusOK)
+					_, _ = io.WriteString(w, "incomplete")
+					panic(http.ErrAbortHandler)
+				case "unrelated panic":
+					panic(unexpectedPanic)
+				case "healthy":
+					w.WriteHeader(http.StatusCreated)
+					_, _ = io.WriteString(w, "complete")
+				}
+			})
+			if mode == "cancel after headers" {
+				mux := http.NewServeMux()
+				mux.Handle("GET /api/transport-probe", handler)
+				handler = (&httpapi.Server{Mux: mux}).Handler()
+			}
+			r, err := http.NewRequestWithContext(ctx, http.MethodGet, "https://pairing.test/api/transport-probe", nil)
+			if err != nil {
+				t.Fatal(err)
+			}
+			client := &http.Client{Transport: handlerTransport{handler}}
+			var response *http.Response
+			var recovered any
+			func() {
+				defer func() { recovered = recover() }()
+				response, err = client.Do(r)
+			}()
+			if mode == "unrelated panic" {
+				if recovered != unexpectedPanic {
+					t.Fatalf("unrelated handler panic was swallowed: %v", recovered)
+				}
+				return
+			}
+			if recovered != nil {
+				t.Fatalf("connection abort escaped the transport: %v", recovered)
+			}
+			if mode != "healthy" {
+				want := error(io.ErrUnexpectedEOF)
+				if mode == "cancel after headers" {
+					want = context.Canceled
+				}
+				if response != nil || !errors.Is(err, want) {
+					t.Fatalf("aborted response=%v error=%v, want no response and %v", response, err, want)
+				}
+				return
+			}
+			if err != nil || response == nil {
+				t.Fatalf("healthy response=%v error=%v", response, err)
+			}
+			defer response.Body.Close()
+			body, err := io.ReadAll(response.Body)
+			if err != nil || response.StatusCode != http.StatusCreated || string(body) != "complete" {
+				t.Fatalf("healthy status=%d body=%q error=%v", response.StatusCode, body, err)
+			}
+		})
+	}
 }
 
 type localSetupExecutor struct{ executable string }
@@ -155,7 +246,8 @@ func TestLocalSetupHTTPPairingAddHarnessAndSelectiveDrain(t *testing.T) {
 		Now:      func() time.Time { return now },
 	}
 	// Use a qualified verification harness; no vendor process is launched by this fixture.
-	o := agentsetup.Options{Origin: origin, ComputerName: "integration computer", Workspace: workspace, Platform: agentsetup.Platform{OS: "darwin", Arch: "arm64"}, Candidates: []agentsetup.Candidate{setupAccount(t, f, "claude", home)}, NodePath: nodePath, ClaudeSDKPath: sdkEntry}
+	// Hook reports describe the running OS, so the request must use that OS too.
+	o := agentsetup.Options{Origin: origin, ComputerName: "integration computer", Workspace: workspace, Platform: agentsetup.Platform{OS: runtime.GOOS, Arch: runtime.GOARCH}, Candidates: []agentsetup.Candidate{setupAccount(t, f, "claude", home)}, NodePath: nodePath, ClaudeSDKPath: sdkEntry}
 	p, err := e.Begin(t.Context(), o)
 	if err != nil || p.Stage != "awaiting_approval" || p.UserCode == "" {
 		t.Fatalf("initial code request: stage=%s err=%v", p.Stage, err)
@@ -184,6 +276,9 @@ func TestLocalSetupHTTPPairingAddHarnessAndSelectiveDrain(t *testing.T) {
 	assertNoRuntimeKey(t, string(key), p)
 	var initial agentpairing.View
 	decodeResult(t, f.call("GET", "/api/agent-pairing/computers/"+config.ComputerID, nil, true, "", 200), &initial)
+	if initial.Platform != runtime.GOOS || len(initial.HookCapabilities) != 1 || initial.HookCapabilities[0].OS != initial.Platform || initial.HookCapabilities[0].Verified || initial.HookCapabilities[0].Blocker != "feature_disabled" {
+		t.Fatal("setup reported the wrong platform or enabled hooks", initial.HookCapabilities)
+	}
 	if len(initial.Enrollments) != 1 || initial.Enrollments[0].VerificationRunID == nil {
 		t.Fatal("approved verification run missing")
 	}
@@ -264,5 +359,95 @@ func TestLocalSetupHTTPPairingAddHarnessAndSelectiveDrain(t *testing.T) {
 	}
 	if _, _, err = agentsetup.ReadRuntime(store.Path()); err == nil {
 		t.Fatal("disconnected computer retained runtime authority")
+	}
+}
+
+func TestLocalSetupHTTPHookReportsSurviveSameHarnessReenrollmentAndFences(t *testing.T) {
+	f := newFixture(t)
+	home := physicalSetupTemp(t)
+	store, err := agentsetup.OpenStore(filepath.Join(home, "setup-state"), true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = store.Close() })
+	executable := filepath.Join(home, "agentd-fixture")
+	if err := os.WriteFile(executable, []byte("fixture"), 0700); err != nil {
+		t.Fatal(err)
+	}
+	local := &localSetupDaemon{root: store.Path(), active: map[string]bool{}, fenced: map[string]bool{}}
+	now := time.Now().UTC()
+	e := &agentsetup.Engine{
+		Store: store, API: agentsetup.HTTPClient{Origin: origin, HTTP: &http.Client{Transport: handlerTransport{f.h}}}, Local: local,
+		Services: &agentsetup.ServiceManager{Platform: agentsetup.Platform{OS: "darwin", Arch: "arm64"}, Home: home, UID: os.Getuid(), Executable: executable, Executor: localSetupExecutor{executable}},
+		Now:      func() time.Time { return now },
+	}
+	first := setupAccount(t, f, "codex", home)
+	options := agentsetup.Options{Origin: origin, ComputerName: "hook integration fixture", Workspace: physicalSetupTemp(t), Platform: agentsetup.Platform{OS: runtime.GOOS, Arch: runtime.GOARCH}, Candidates: []agentsetup.Candidate{first}}
+	p, err := e.Begin(t.Context(), options)
+	if err != nil || p.Stage != "awaiting_approval" {
+		t.Fatalf("initial pairing request: stage=%s err=%v", p.Stage, err)
+	}
+	approve := func(p agentsetup.Progress, connected int) agentsetup.Progress {
+		t.Helper()
+		var review agentpairing.View
+		decodeResult(t, f.call("POST", "/api/agent-pairing/lookup", map[string]string{"user_code": p.UserCode}, true, "", 200), &review)
+		if len(review.Requested) != 1 || review.Requested[0].Harness != "codex" {
+			t.Fatal("person review lost exact requested account")
+		}
+		decodeResult(t, f.call("POST", "/api/agent-pairing/requests/"+p.RequestID+"/approve", map[string]any{"request_digest": review.Digest, "verification": "connect_only", "selected_account_keys": []string{review.Requested[0].AccountKey}}, true, "", 200), &review)
+		now = now.Add(time.Minute)
+		p, err := e.Step(t.Context())
+		if err != nil || p.Stage != "connected" {
+			t.Fatalf("same-harness pairing failed reconciliation: stage=%s err=%v", p.Stage, err)
+		}
+		for i := 0; i < 2; i++ {
+			if err := e.SyncFences(t.Context()); err != nil {
+				t.Fatalf("persisted hook reports broke fence synchronization: %v", err)
+			}
+		}
+		var computer agentpairing.View
+		decodeResult(t, f.call("GET", "/api/agent-pairing/computers/"+p.ComputerID, nil, true, "", 200), &computer)
+		if len(computer.HookCapabilities) != 1 || computer.HookCapabilities[0].Harness != "codex" || computer.HookCapabilities[0].Version != first.Version || computer.HookCapabilities[0].Verified || computer.HookCapabilities[0].Blocker != "feature_disabled" {
+			t.Fatal("server did not retain one conservative harness report", computer.HookCapabilities)
+		}
+		config, _, err := agentsetup.ReadRuntime(store.Path())
+		if err != nil || len(config.Accounts) != connected {
+			t.Fatalf("wrong number of connected runtime accounts: %d want %d, err=%v", len(config.Accounts), connected, err)
+		}
+		return p
+	}
+	p = approve(p, 1)
+	initial, key, err := agentsetup.ReadRuntime(store.Path())
+	if err != nil {
+		t.Fatal(err)
+	}
+	second := first
+	second.Label, second.Identity = "second codex account", "second@example.test"
+	p, err = e.AddHarness(t.Context(), []agentsetup.Candidate{second})
+	if err != nil || p.Stage != "awaiting_approval" {
+		t.Fatalf("second account request: stage=%s err=%v", p.Stage, err)
+	}
+	p = approve(p, 2)
+	if _, err := e.Disconnect(t.Context(), initial.Accounts[0].AccountID); err != nil {
+		t.Fatal(err)
+	}
+	p, err = e.AddHarness(t.Context(), []agentsetup.Candidate{first})
+	if err != nil || p.Stage != "awaiting_approval" {
+		t.Fatalf("re-enrollment request: stage=%s err=%v", p.Stage, err)
+	}
+	p = approve(p, 2)
+	final, sameKey, err := agentsetup.ReadRuntime(store.Path())
+	if err != nil || final.ComputerID != initial.ComputerID || string(sameKey) != string(key) {
+		t.Fatal("re-enrollment changed shared computer authority", err)
+	}
+	assertNoRuntimeKey(t, string(key), p)
+	// A server-side account revocation must still reach the local dispatch fence
+	// after re-enrollment; a successful HTTP call alone does not prove that.
+	var computer agentpairing.View
+	decodeResult(t, f.call("GET", "/api/agent-pairing/computers/"+final.ComputerID, nil, true, "", 200), &computer)
+	account := final.Accounts[0].AccountID
+	f.call("POST", "/api/agent-pairing/computers/"+final.ComputerID+"/enrollments/"+account+"/disconnect", map[string]any{"mode": "revoke_now", "expected_revision": computer.Revision}, true, "", 200)
+	if err := e.SyncFences(t.Context()); err != nil || !local.fenced[account] {
+		t.Fatal("re-enrollment prevented actual revoked-account fence synchronization", err)
 	}
 }

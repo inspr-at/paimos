@@ -40,7 +40,7 @@ withDefaults(defineProps<{
 <style scoped>
 .gauge { position: relative; height: 14px; min-width: 0; }
 .gauge.used { transform: scaleX(-1); }
-.track { position: absolute; inset: 3px 0; border-radius: 999px; background: var(--track); overflow: hidden; box-shadow: inset 0 1px 2px rgba(32, 60, 61, .08); }
+.track { position: absolute; inset: 3px 0; border-radius: 999px; background: var(--track); overflow: hidden; box-shadow: inset 0 1px 2px color-mix(in srgb, var(--shadow-color) 8%, transparent); }
 .track i { position: absolute; top: 0; bottom: 0; }
 .g-later { background: color-mix(in srgb, var(--teal) 32%, transparent); }
 .g-yours { background: radial-gradient(circle, color-mix(in srgb, var(--ink-3) 75%, transparent) 0 .8px, transparent 1.2px) 0 0 / 4px 4px, color-mix(in srgb, var(--ink-3) 16%, transparent); }
@@ -48,7 +48,7 @@ withDefaults(defineProps<{
 .g-spent { background: repeating-linear-gradient(135deg, color-mix(in srgb, var(--teal) 55%, transparent) 0 1.5px, transparent 1.5px 4.5px); }
 .ahead .g-spent { background: repeating-linear-gradient(135deg, color-mix(in srgb, var(--gold) 75%, transparent) 0 1.5px, transparent 1.5px 4.5px); }
 .g-tick { position: absolute; top: 0; width: 2px; height: 14px; margin-left: -1px; border-radius: 2px; background: var(--ink); box-shadow: 0 0 0 1.5px var(--surface-raised); }
-.ahead .g-tick { background: var(--gold-ink); }
+.ahead .g-tick { background: var(--warn-ink); }
 .dim .g-later, .frozen .g-later { background: color-mix(in srgb, var(--ink-3) 30%, transparent); }
 .estimated .g-later, .estimated .g-today { background: repeating-linear-gradient(135deg, color-mix(in srgb, var(--teal) 65%, transparent) 0 2px, color-mix(in srgb, var(--teal) 18%, transparent) 2px 5px); }
 .gauge.frozen { opacity: .6; }

@@ -52,7 +52,9 @@ function keys(event: KeyboardEvent) {
   <QueueReadyPanel v-if="fixing" :row="row" :project-id="projectId" :anchor="anchor" @close="restore => emit('close', restore)" />
   <FloatingPanel v-else :anchor="anchor" :width="372" :tallest="580" :label="`Assignee of ${row.key}`" @close="restore => emit('close', restore)">
     <p class="menu-title eyebrow">Assignee · {{ row.key }}</p>
+      <input v-model="query" type="search" class="field am-search" aria-label="Find assignee" placeholder="Find a person…" :data-autofocus="!allowed ? '' : undefined" :disabled="!canAssign" @keydown.enter.stop.prevent="() => { if (canAssign && people.length === 1) emit('choose', people[0]!.value) }" />
     <div class="menu" role="menu" :aria-label="`Assignee of ${row.key}`" @keydown="keys">
+      <template v-if="row.is_leaf !== false">
       <button v-if="allowed && eligible && gaps.length" type="button" class="am-notready" @click="fixing = true"><AppIcon name="alert" :size="13" /><span>Not ready: {{ gaps.join(', ') }}</span><b>Fix</b></button>
       <button type="button" role="menuitemradio" class="menu-item am-item am-queue" :aria-checked="!!entry && !entry.target_agent_id" :disabled="!allowed || !eligible || queue.busy" @click="add()"><AppIcon name="queue" :size="14" /><span class="am-body"><b>Queue: next free agent</b><small>{{ !eligible ? 'Takes New, Open, Backlog or Blocked tickets' : 'Default: priority first, then first come' }}</small></span><AppIcon v-if="entry && !entry.target_agent_id" name="check" :size="14" /></button>
       <p v-if="entry" class="am-note">Choosing another route replaces its current queue place.</p>
@@ -61,8 +63,8 @@ function keys(event: KeyboardEvent) {
       <button v-for="target in targets" :key="`${target.agent_id}:${target.account_id}:${target.profile_id}`" type="button" role="menuitemradio" class="menu-item am-item" :aria-checked="entry?.target_agent_id === target.agent_id && entry?.model_profile_id === target.profile_id" :disabled="!allowed || !eligible || loading || gaps.length > 0 || queue.busy" @click="add(target)">
         <AppIcon name="agent" :size="15" /><span class="am-body"><span class="am-l1"><b>{{ target.name }}</b><QueueModel :model="target.model" :effort="target.effort" /></span><small>{{ target.account }} · <span :class="{ 'am-free': target.available }">{{ target.available ? 'Free now' : 'Waiting for capacity' }}</span> · {{ target.matches_preference ? 'Matches the preference' : 'Differs from the model preference' }}</small></span><span :class="target.available ? 'am-go' : 'am-wait'">{{ target.available ? 'Start now' : `#1 for ${target.name}` }}</span>
       </button>
+      </template>
       <p class="am-sec mono-label" role="presentation">People</p>
-      <input v-model="query" type="search" class="field am-search" aria-label="Find assignee" placeholder="Find a person…" :data-autofocus="!allowed ? '' : undefined" :disabled="!canAssign" @keydown.enter.stop.prevent="() => { if (canAssign && people.length === 1) emit('choose', people[0]!.value) }" />
       <button v-for="person in people" :key="person.value" type="button" role="menuitemradio" class="menu-item" :disabled="!canAssign" :aria-checked="(row.assignee?.id ?? '') === person.value" @click="emit('choose', person.value)"><PersonAvatar v-if="person.value" :id="person.value" :name="person.label" :size="18" /><AppIcon v-else name="user" :size="14" /><span class="label">{{ person.label }}</span><AppIcon v-if="(row.assignee?.id ?? '') === person.value" name="check" :size="14" /></button>
     </div>
   </FloatingPanel>

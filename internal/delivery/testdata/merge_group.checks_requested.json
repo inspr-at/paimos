@@ -1,0 +1,23 @@
+{
+  "installation": {
+    "id": 456
+  },
+  "repository": {
+    "id": 1,
+    "name": "delivery",
+    "full_name": "example/delivery",
+    "default_branch": "main",
+    "private": true
+  },
+  "sender": {
+    "login": "github-merge-queue[bot]",
+    "type": "Bot"
+  },
+  "action": "checks_requested",
+  "merge_group": {
+    "head_sha": "cccccccccccccccccccccccccccccccccccccccc",
+    "base_sha": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "head_ref": "refs/heads/gh-readonly-queue/main/pr-7-group",
+    "base_ref": "refs/heads/main"
+  }
+}

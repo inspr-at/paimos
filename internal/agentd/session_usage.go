@@ -34,6 +34,7 @@ func (r *Remote) ReportSessionUsage(ctx context.Context, s HarnessSession, repor
 // A new daemon never resumes a previous generation's capture.
 type sessionUsageReporter struct {
 	billing, accountID, plan string
+	flushMu                  sync.Mutex
 	mu                       sync.Mutex
 	api                      sessionUsageAPI
 	session                  HarnessSession
@@ -98,7 +99,7 @@ func (r *sessionUsageReporter) submit(report sessionusage.UsageReport) {
 	// The parser supplies only counters/model/finality. Never forward arbitrary
 	// adapter billing metadata, costs or vendor/source identifiers. Billing comes
 	// only from the verified account probe or server-selected account settings.
-	report = sessionusage.UsageReport{Model: report.Model, InputTokens: cloneCount(report.InputTokens),
+	report = sessionusage.UsageReport{ServiceTier: report.ServiceTier, Model: report.Model, InputTokens: cloneCount(report.InputTokens),
 		OutputTokens: cloneCount(report.OutputTokens), CachedInputTokens: cloneCount(report.CachedInputTokens),
 		ReasoningTokens: cloneCount(report.ReasoningTokens), Provisional: report.Provisional, BillingMode: sessionusage.BillingMode(r.billing)}
 	if r.accountID != "" {
@@ -144,6 +145,8 @@ func cloneCount(n *int64) *int64 {
 
 // flush has one owner: the background loop, then finish after joining it.
 func (r *sessionUsageReporter) flush(ctx context.Context) error {
+	r.flushMu.Lock()
+	defer r.flushMu.Unlock()
 	for {
 		if err := ctx.Err(); err != nil {
 			return err

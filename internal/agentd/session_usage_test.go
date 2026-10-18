@@ -69,7 +69,7 @@ func TestSessionUsageRetryExactReceiptAndFinalSettlement(t *testing.T) {
 			var bodies []string
 			first := make(chan struct{})
 			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
-				if req.Method != "POST" || req.URL.Path != harnessPath(syntheticSession)+"/usage" || req.Header.Get("X-Aeon-Worker-Lease") != syntheticSession.Lease || req.Header.Get("Authorization") != "Bearer synthetic-key" {
+				if req.Method != "POST" || req.URL.Path != harnessPath(syntheticSession)+"/usage" || receivedWorkerLease(req) != syntheticSession.Lease || req.Header.Get("Authorization") != workerAuthorization("synthetic-key", syntheticSession.Lease) {
 					t.Error("wrong endpoint or worker binding")
 				}
 				b, _ := io.ReadAll(req.Body)
@@ -394,7 +394,7 @@ func TestSupervisorUsageArchiveDetachesWithoutStoppingRun(t *testing.T) {
 		api.mu.Lock()
 		lease := api.harnessRegistration.Lease
 		api.mu.Unlock()
-		if r.Header.Get("X-Aeon-Worker-Lease") != lease {
+		if receivedWorkerLease(r) != lease {
 			t.Error("lease mismatch")
 		}
 		enteredOnce.Do(func() { close(entered) })

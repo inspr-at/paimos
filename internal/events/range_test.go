@@ -6,7 +6,6 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"net/url"
-	"strings"
 	"testing"
 	"time"
 
@@ -16,8 +15,9 @@ import (
 	"github.com/jackc/pgx/v5"
 )
 
-func TestEventBriefingRange(t *testing.T) {
+func TestEventTimestampRange(t *testing.T) {
 	d, a, b := fixture(t)
+	base := logPosition(t, d, a)
 	start := time.Date(2026, 9, 30, 8, 0, 0, 0, time.UTC)
 	end := start.Add(24 * time.Hour)
 	err := db.InTenant(dbtest.Seed(t.Context()), d.App, a.TenantID, func(tx pgx.Tx) error {
@@ -35,11 +35,11 @@ func TestEventBriefingRange(t *testing.T) {
 	appendEvents(t, d, b, 1)
 	m := New(d.App).(*module)
 	got, err := m.read(t.Context(), a, "", 0, 1, eventRange{from: &start, to: &end})
-	if err != nil || len(got.Items) != 1 || got.Items[0].ID != 2 || got.NextAfter == nil {
+	if err != nil || len(got.Items) != 1 || got.Items[0].ID != base+2 || got.NextAfter == nil {
 		t.Fatalf("first page %+v %v", got, err)
 	}
 	next, err := m.read(t.Context(), a, "", *got.NextAfter, 1, eventRange{from: &start, to: &end})
-	if err != nil || len(next.Items) != 1 || next.Items[0].ID != 3 || next.NextAfter != nil {
+	if err != nil || len(next.Items) != 1 || next.Items[0].ID != base+3 || next.NextAfter != nil {
 		t.Fatalf("next page %+v %v", next, err)
 	}
 	// Type filters never change cursor semantics or return unrelated snapshots.
@@ -68,9 +68,10 @@ func TestEventBriefingRange(t *testing.T) {
 
 // These assertions exercise the HTTP contract, including timestamp/ID order
 // differing from append order. The legacy ID stream remains unchanged.
-func TestBriefingSnapshotAndTimeCursorRegression(t *testing.T) {
+func TestEventTimeRangeCursorRegression(t *testing.T) {
 	d, p, _ := fixture(t)
-	now := time.Now().UTC()
+	base := logPosition(t, d, p)
+	now := time.Date(2026, 10, 1, 8, 0, 0, 0, time.UTC)
 	ats := []time.Time{now.Add(-time.Hour), now.Add(-3 * time.Hour), now.Add(-time.Hour)}
 	if err := db.InTenant(dbtest.Seed(t.Context()), d.App, p.TenantID, func(tx pgx.Tx) error {
 		for _, at := range ats {
@@ -90,7 +91,7 @@ func TestBriefingSnapshotAndTimeCursorRegression(t *testing.T) {
 		w := httptest.NewRecorder()
 		m.list(w, req)
 		if w.Code != 200 {
-			t.Fatalf("snapshot HTTP %d: %s", w.Code, w.Body.String())
+			t.Fatalf("time range HTTP %d: %s", w.Code, w.Body.String())
 		}
 		var got map[string]json.RawMessage
 		if err := json.Unmarshal(w.Body.Bytes(), &got); err != nil {
@@ -98,20 +99,15 @@ func TestBriefingSnapshotAndTimeCursorRegression(t *testing.T) {
 		}
 		return got
 	}
-	first := call("briefing=true&type=test.changed&limit=1")
-	var window struct {
-		From, To      time.Time
-		First, Capped bool
-	}
-	if err := json.Unmarshal(first["window"], &window); err != nil {
-		t.Fatalf("no database window: %v", err)
-	}
-	if !window.First || window.To.Before(now) || window.To.After(time.Now().Add(time.Second)) || window.To.Sub(window.From) != 24*time.Hour {
-		t.Fatalf("invalid window %+v", window)
+	from, to := now.Add(-24*time.Hour), now
+	bounds := "from=" + url.QueryEscape(from.Format(time.RFC3339Nano)) + "&to=" + url.QueryEscape(to.Format(time.RFC3339Nano))
+	first := call(bounds + "&order=time&type=test.changed&limit=1")
+	if _, ok := first["window"]; ok {
+		t.Fatal("time range returned a retired snapshot window")
 	}
 	var rows []Event
 	_ = json.Unmarshal(first["items"], &rows)
-	if len(rows) != 1 || rows[0].ID != 2 {
+	if len(rows) != 1 || rows[0].ID != base+2 {
 		t.Fatalf("not timestamp ordered: %+v", rows)
 	}
 	ids := []int64{rows[0].ID}
@@ -122,117 +118,34 @@ func TestBriefingSnapshotAndTimeCursorRegression(t *testing.T) {
 		if cursor == "" {
 			t.Fatal("missing time cursor")
 		}
-		page = call("from=" + url.QueryEscape(window.From.Format(time.RFC3339Nano)) + "&to=" + url.QueryEscape(window.To.Format(time.RFC3339Nano)) + "&cursor=" + url.QueryEscape(cursor) + "&type=test.changed&limit=1")
+		page = call(bounds + "&cursor=" + url.QueryEscape(cursor) + "&type=test.changed&limit=1")
 		_ = json.Unmarshal(page["items"], &rows)
 		if len(rows) != 1 {
 			t.Fatal("lost page")
 		}
 		ids = append(ids, rows[0].ID)
 	}
-	if ids[0] != 2 || ids[1] != 1 || ids[2] != 3 {
+	if ids[0] != base+2 || ids[1] != base+1 || ids[2] != base+3 {
 		t.Fatalf("skipped or repeated timestamp tie: %v", ids)
 	}
-	// Saved cutoffs come from PostgreSQL, which stores microsecond timestamps.
-	future := now.Add(2 * time.Hour).Truncate(time.Microsecond)
-	got := call("briefing=true&since=" + url.QueryEscape(future.Format(time.RFC3339Nano)))
-	if err := json.Unmarshal(got["window"], &window); err != nil {
-		t.Fatal(err)
-	}
-	if window.First || !window.From.Equal(future) || !window.To.Equal(future) {
-		t.Fatalf("backward clock replay: %+v", window)
+	// An explicit empty time range stays empty.
+	got := call("order=time&from=" + url.QueryEscape(to.Format(time.RFC3339Nano)) + "&to=" + url.QueryEscape(to.Format(time.RFC3339Nano)))
+	if err := json.Unmarshal(got["items"], &rows); err != nil || len(rows) != 0 {
+		t.Fatalf("empty time range: %s, %v", got["items"], err)
 	}
 }
 
-func TestBriefingClockWindowCapUsesElapsedDaysRegression(t *testing.T) {
-	d, p, _ := fixture(t)
-	old := time.Now().Add(-400 * 24 * time.Hour)
-	m := New(d.App).(*module)
-	got, err := m.read(t.Context(), p, "", 0, 50, eventRange{briefing: true, since: &old})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if got.Window == nil || got.Window.First || !got.Window.Capped || got.Window.To.Sub(got.Window.From) != 366*24*time.Hour {
-		t.Fatalf("wrong elapsed-day cap: %+v", got.Window)
-	}
-}
-
-func TestBriefingStatementCutoffDoesNotConsumeLaterSnapshotCommits(t *testing.T) {
-	d, p, _ := fixture(t)
-	visible := appendEvents(t, d, p, 1)[0]
-	ctx := t.Context()
-	blocker, err := d.Admin.Acquire(ctx)
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer blocker.Release()
-	const lock = 45402
-	if _, err := blocker.Exec(ctx, `SELECT pg_advisory_lock($1)`, lock); err != nil {
-		t.Fatal(err)
-	}
-	defer func() { _, _ = blocker.Exec(ctx, `SELECT pg_advisory_unlock($1)`, lock) }()
-
-	// Delay only the clock CTE's evaluation, after its statement snapshot has
-	// been acquired. The rest is the exact first-page production statement.
-	query := strings.Replace(briefingWindowSQL, " AS at)", " AS at FROM pg_advisory_xact_lock($5))", 1)
-	if query == briefingWindowSQL {
-		t.Fatal("clock barrier was not installed")
-	}
-	var window briefingWindow
-	var body []byte
-	pid := make(chan int32, 1)
-	done := make(chan error, 1)
-	go func() {
-		done <- db.InTenant(tenant.WithPrincipal(ctx, p), d.App, p.TenantID, func(tx pgx.Tx) error {
-			var id int32
-			if err := tx.QueryRow(ctx, `SELECT pg_backend_pid()`).Scan(&id); err != nil {
-				return err
-			}
-			pid <- id
-			return tx.QueryRow(ctx, query, p.TenantID, nil, []string{"test.changed"}, 51, lock).Scan(&window.From, &window.To, &window.First, &window.Capped, &body)
-		})
-	}()
-	var reader int32
-	select {
-	case reader = <-pid:
-	case err := <-done:
-		t.Fatalf("reader failed before barrier: %v", err)
-	case <-time.After(5 * time.Second):
-		t.Fatal("reader did not start")
-	}
-	deadline := time.Now().Add(5 * time.Second)
-	for {
-		var blocked bool
-		if err := d.Admin.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM pg_locks WHERE pid=$1 AND locktype='advisory' AND NOT granted)`, reader).Scan(&blocked); err != nil {
-			t.Fatal(err)
+func TestEventListRejectsRetiredWindowParameters(t *testing.T) {
+	m := New(nil).(*module)
+	p := tenant.Principal{ID: "00000000-0000-4000-8000-000000000001", TenantID: "00000000-0000-4000-8000-000000000002", Kind: tenant.Person}
+	for _, query := range []string{"briefing=true", "briefing=false", "since=2026-10-01T08:00:00Z", "briefing=true&since=2026-10-01T08:00:00Z"} {
+		r := httptest.NewRequest(http.MethodGet, "/api/events?"+query, nil)
+		r = r.WithContext(tenant.WithPrincipal(r.Context(), p))
+		w := httptest.NewRecorder()
+		m.list(w, r)
+		var body struct{ Code, Message string }
+		if err := json.Unmarshal(w.Body.Bytes(), &body); err != nil || w.Code != http.StatusBadRequest || body.Code != "invalid_request" || body.Message != "briefing and since are no longer supported; use from/to" {
+			t.Fatalf("retired query %s: %d %s (%v)", query, w.Code, w.Body, err)
 		}
-		if blocked {
-			break
-		}
-		if time.Now().After(deadline) {
-			t.Fatal("reader did not acquire its snapshot before the clock barrier")
-		}
-		time.Sleep(5 * time.Millisecond)
-	}
-	late := appendEvents(t, d, p, 1)[0]
-	if _, err := blocker.Exec(ctx, `SELECT pg_advisory_unlock($1)`, lock); err != nil {
-		t.Fatal(err)
-	}
-	if err := <-done; err != nil {
-		t.Fatal(err)
-	}
-	var items []Event
-	if err := json.Unmarshal(body, &items); err != nil {
-		t.Fatal(err)
-	}
-	if len(items) != 1 || items[0].ID != visible.ID || !visible.At.Before(window.To) {
-		t.Fatalf("snapshot-visible row missing from window: %+v %+v", window, items)
-	}
-	if late.At.Before(window.To) {
-		t.Fatal("cutoff consumed the row committed after the statement snapshot")
-	}
-	// Saving this cutoff must leave the concurrent commit for the next visit.
-	next, err := New(d.App).(*module).read(ctx, p, "", 0, 50, eventRange{briefing: true, since: &window.To, types: []string{"test.changed"}})
-	if err != nil || len(next.Items) != 1 || next.Items[0].ID != late.ID {
-		t.Fatalf("next visit skipped concurrent commit: %+v %v", next, err)
 	}
 }

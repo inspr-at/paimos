@@ -1,0 +1,22 @@
+{
+  "group": "model-settings",
+  "nightlyTiming": {
+    "seconds": 26.6,
+    "selectedTests": 6
+  },
+  "spec": {
+    "file": "tests/account-resets.spec.ts",
+    "listedTests": 6,
+    "tierTiming": {
+      "caseSeconds": {
+        "max": 5.703,
+        "median": 4.228,
+        "min": 3.877
+      },
+      "seconds": 26.6,
+      "selectedTests": 6
+    },
+    "weightSeconds": 12,
+    "weightSource": "local-single-worker-AEON-1037-6.2s-plus-margin"
+  }
+}

@@ -77,7 +77,8 @@ func TestAccountSignalsOwnershipTenantKeyAndConsent(t *testing.T) {
 			got = account
 		}
 	}
-	if got.QuotaFingerprint != strings.Repeat("a", 64) || !got.StatuslineEnabled || got.StatuslineOptIn != "workspace" {
+	// Workspace intervention permits consent management, not quota disclosure.
+	if got.QuotaFingerprint != "" || !got.StatuslineEnabled || got.StatuslineOptIn != "workspace" {
 		t.Fatal("account projection lost signal")
 	}
 	clerk := addPrincipal(t, admin.TenantID, "person", "clerk", nil)

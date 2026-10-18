@@ -1,0 +1,12 @@
+{
+  "_license": "SPDX-License-Identifier: AGPL-3.0-only",
+  "routes": {
+    "GET /api/work-orders": "work_orders.read",
+    "GET /api/work-orders/{workOrderId}": "work_orders.read",
+    "PATCH /api/work-orders/{workOrderId}": "work_orders.write",
+    "POST /api/work-orders": "work_orders.write",
+    "POST /api/work-orders/{workOrderId}/criteria/{criterionId}/check": "work_orders.write",
+    "POST /api/work-orders/{workOrderId}/evidence": "work_orders.write",
+    "POST /api/work-orders/{workOrderId}/runs": "run.create"
+  }
+}

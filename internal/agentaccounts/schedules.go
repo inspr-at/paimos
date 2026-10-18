@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/inspr-at/paimos/internal/capacity"
+	"github.com/inspr-at/paimos/internal/httpapi"
 	"github.com/jackc/pgx/v5"
 )
 
@@ -30,6 +31,9 @@ type scheduleEntry struct {
 }
 
 func loadScheduleEntries(ctx context.Context, tx pgx.Tx, person string) ([]scheduleEntry, error) {
+	if s := projectionInputs(tx); s != nil {
+		return s.entries[person], nil
+	}
 	rows, err := tx.Query(ctx, `SELECT scope,scope_key,schedule FROM account_capacity_schedules WHERE principal_id=$1 ORDER BY scope,scope_key`, person)
 	if err != nil {
 		return nil, err
@@ -51,6 +55,9 @@ func loadScheduleEntries(ctx context.Context, tx pgx.Tx, person string) ([]sched
 }
 
 func personDefaultSchedule(ctx context.Context, tx pgx.Tx, person string) (capacity.Schedule, error) {
+	if s := projectionInputs(tx); s != nil {
+		return s.defaults[person], nil
+	}
 	var zone string
 	err := tx.QueryRow(ctx, `SELECT timezone FROM personal_profiles WHERE principal_id=$1`, person).Scan(&zone)
 	if err != nil && !isNoRows(err) {
@@ -310,36 +317,18 @@ func previewSteps(start, reset time.Time) int {
 // stops waiting at the deadline either way (408), so a stalled upload costs
 // neither a preview slot nor the caller's time.
 func readBodyBy(ctx context.Context, w http.ResponseWriter, r *http.Request) ([]byte, error) {
-	if deadline, ok := ctx.Deadline(); ok {
-		_ = http.NewResponseController(w).SetReadDeadline(deadline)
+	raw, err := httpapi.ReadRequestBody(w, r.WithContext(ctx), 1<<20, 10*time.Second)
+	if err == nil {
+		return raw, nil
 	}
-	body := http.MaxBytesReader(w, r.Body, 1<<20)
-	type result struct {
-		raw []byte
-		err error
+	var tooLarge *http.MaxBytesError
+	if errors.As(err, &tooLarge) {
+		return nil, fail(http.StatusRequestEntityTooLarge, "request body too large")
 	}
-	done := make(chan result, 1)
-	go func() {
-		raw, err := io.ReadAll(body)
-		done <- result{raw, err}
-	}()
-	select {
-	case got := <-done:
-		if got.err != nil {
-			var tooLarge *http.MaxBytesError
-			if errors.As(got.err, &tooLarge) {
-				return nil, fail(http.StatusRequestEntityTooLarge, "request body too large")
-			}
-			return nil, fail(http.StatusRequestTimeout, "the preview request did not arrive in time")
-		}
-		return got.raw, nil
-	case <-ctx.Done():
-		_ = r.Body.Close()
-		if errors.Is(context.Cause(ctx), context.DeadlineExceeded) {
-			return nil, fail(http.StatusRequestTimeout, "the preview request did not arrive in time")
-		}
+	if errors.Is(context.Cause(ctx), context.Canceled) {
 		return nil, fail(http.StatusRequestTimeout, "the preview request was cancelled")
 	}
+	return nil, fail(http.StatusRequestTimeout, "the preview request did not arrive in time")
 }
 
 // decodeStrict is decodeJSON for a body already read: one JSON value, no unknown fields.

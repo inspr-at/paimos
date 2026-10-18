@@ -1,0 +1,22 @@
+{
+  "group": "remaining-ui",
+  "nightlyTiming": {
+    "seconds": 8.702,
+    "selectedTests": 8
+  },
+  "spec": {
+    "file": "tests/settings-computers-table.spec.ts",
+    "listedTests": 8,
+    "tierTiming": {
+      "caseSeconds": {
+        "max": 1.419,
+        "median": 1.184,
+        "min": 0.034
+      },
+      "seconds": 8.702,
+      "selectedTests": 8
+    },
+    "weightSeconds": 24,
+    "weightSource": "AEON-1174 estimate: seven mocked flows, one skipped evidence run"
+  }
+}

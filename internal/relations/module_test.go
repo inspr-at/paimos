@@ -22,11 +22,12 @@ import (
 )
 
 type fixture struct {
-	db      *dbtest.DB
-	handler http.Handler
-	a, b    tenant.Principal
-	nodes   []string
-	foreign string
+	db         *dbtest.DB
+	handler    http.Handler
+	a, b       tenant.Principal
+	nodes      []string
+	foreign    string
+	eventStart int64
 }
 
 func setup(t *testing.T) fixture {
@@ -51,7 +52,7 @@ func setup(t *testing.T) fixture {
 			for j := 1; j <= 3; j++ {
 				var id string
 				if err := tx.QueryRow(t.Context(), `INSERT INTO nodes(tenant_id,key,kind_id,title)
-     SELECT $1,$2,id,'Node' FROM node_kinds WHERE tenant_id=$1 AND slug='task' RETURNING id::text`, p.TenantID, fmt.Sprintf("TSK-%d", j)).Scan(&id); err != nil {
+     SELECT $1,$2,id,'Node' FROM node_kinds WHERE tenant_id=$1 AND slug='work' RETURNING id::text`, p.TenantID, fmt.Sprintf("TSK-%d", j)).Scan(&id); err != nil {
 					return err
 				}
 				if i == 0 {
@@ -67,6 +68,9 @@ func setup(t *testing.T) fixture {
 		}
 	}
 	dbtest.BindLegacy(t, d, f.a.TenantID, f.a.ID)
+	if err := d.Admin.QueryRow(t.Context(), `SELECT coalesce(max(id),0) FROM events WHERE tenant_id=$1`, f.a.TenantID).Scan(&f.eventStart); err != nil {
+		t.Fatal(err)
+	}
 	f.handler = (&httpapi.Server{Pool: d.App, Modules: []httpapi.Module{New(d.App), events.New(d.App, UndoOption())}}).Handler()
 	return f
 }
@@ -101,13 +105,17 @@ func create(t *testing.T, f fixture, source, target, typ string) Relation {
 
 func logEvents(t *testing.T, f fixture) []events.Event {
 	t.Helper()
-	w := request(f.handler, f.a, "GET", "/api/events", "")
+	w := request(f.handler, f.a, "GET", fmt.Sprintf("/api/events?after=%d", f.eventStart), "")
 	expect(t, w, 200)
 	var result struct{ Items []events.Event }
 	if err := json.Unmarshal(w.Body.Bytes(), &result); err != nil {
 		t.Fatal(err)
 	}
 	return result.Items
+}
+
+func undoPath(f fixture, offset int64) string {
+	return fmt.Sprintf("/api/events/%d/undo", f.eventStart+offset)
 }
 
 func TestRelationsCRUDAndTenantIsolation(t *testing.T) {
@@ -127,7 +135,7 @@ func TestRelationsCRUDAndTenantIsolation(t *testing.T) {
 		t.Fatalf("events %d want 6", len(ev))
 	}
 	for i, e := range ev {
-		if e.ID != int64(i+1) || e.Type != "relation.created" || string(e.Before) != "null" || e.ActorPrincipalID != f.a.ID {
+		if e.ID != f.eventStart+int64(i+1) || e.Type != "relation.created" || string(e.Before) != "null" || e.ActorPrincipalID != f.a.ID {
 			t.Fatalf("bad event %+v", e)
 		}
 	}
@@ -151,13 +159,21 @@ func TestRelationsCRUDAndTenantIsolation(t *testing.T) {
 	if !strings.Contains(w.Body.String(), `"items":[]`) {
 		t.Fatal("cross-tenant relations leaked")
 	}
-	w = request(f.handler, f.b, "GET", "/api/events", "")
+	w = request(f.handler, f.b, "GET", "/api/events?node_id="+f.nodes[0], "")
 	expect(t, w, 200)
 	if !strings.Contains(w.Body.String(), `"items":[]`) {
 		t.Fatal("cross-tenant events leaked")
 	}
 	expect(t, request(f.handler, f.b, "DELETE", "/api/relations/"+first.ID, ""), 404)
-	expect(t, request(f.handler, f.b, "POST", "/api/events/1/undo", ""), 404)
+	// The unprivileged foreign agent is denied before event lookup. A qualified
+	// foreign person then proves tenant-isolated lookup after admission.
+	expect(t, request(f.handler, f.b, "POST", undoPath(f, 1), ""), 403)
+	foreignPerson := tenant.Principal{TenantID: f.b.TenantID, Kind: tenant.Person}
+	if err := f.db.Admin.QueryRow(t.Context(), `INSERT INTO principals(tenant_id,kind,name) VALUES($1,'person','Foreign undo reader') RETURNING id::text`, foreignPerson.TenantID).Scan(&foreignPerson.ID); err != nil {
+		t.Fatal(err)
+	}
+	dbtest.BindRole(t, f.db, foreignPerson.TenantID, foreignPerson.ID, "member")
+	expect(t, request(f.handler, foreignPerson, "POST", undoPath(f, 1), ""), 404)
 	expect(t, request(f.handler, f.a, "POST", "/api/relations", fmt.Sprintf(`{"source_node_id":%q,"target_node_id":%q,"type":"blocks"}`, f.nodes[0], f.foreign)), 404)
 	expect(t, request(f.handler, f.a, "DELETE", "/api/relations/"+first.ID, ""), 204)
 	expect(t, request(f.handler, f.a, "DELETE", "/api/relations/"+first.ID, ""), 404)
@@ -282,10 +298,10 @@ func TestPaginationValidationAndAtomicity(t *testing.T) {
 	for _, body := range []string{"null", "[]", "{}", `{"source_node_id":1}`, `{} {}`, fmt.Sprintf(`{"source_node_id":%q,"target_node_id":%q,"type":"blocks"}`, f.nodes[0], f.nodes[0]), fmt.Sprintf(`{"source_node_id":%q,"target_node_id":%q,"type":"unknown"}`, f.nodes[0], f.nodes[1])} {
 		expect(t, request(f.handler, f.a, "POST", "/api/relations", body), 400)
 	}
-	for _, route := range []struct{ method, path string }{{"GET", "/api/relations"}, {"POST", "/api/relations"}, {"DELETE", "/api/relations/id"}, {"GET", "/api/events"}, {"GET", "/api/events/stream"}, {"POST", "/api/events/1/undo"}} {
+	for _, route := range []struct{ method, path string }{{"GET", "/api/relations"}, {"POST", "/api/relations"}, {"DELETE", "/api/relations/id"}, {"GET", "/api/events"}, {"GET", "/api/events/stream"}, {"POST", undoPath(f, 1)}} {
 		expect(t, request(f.handler, tenant.Principal{}, route.method, route.path, ""), 401)
 	}
-	w := request(f.handler, f.a, "GET", "/api/events?limit=2", "")
+	w := request(f.handler, f.a, "GET", fmt.Sprintf("/api/events?after=%d&limit=2", f.eventStart), "")
 	expect(t, w, 200)
 	var ep struct {
 		Items []events.Event `json:"items"`
@@ -294,15 +310,15 @@ func TestPaginationValidationAndAtomicity(t *testing.T) {
 	if err := json.Unmarshal(w.Body.Bytes(), &ep); err != nil {
 		t.Fatal(err)
 	}
-	if len(ep.Items) != 2 || ep.Next == nil || *ep.Next != 2 {
+	if len(ep.Items) != 2 || ep.Next == nil || *ep.Next != f.eventStart+2 {
 		t.Fatalf("bad event page %+v", ep)
 	}
-	w = request(f.handler, f.a, "GET", "/api/events?after=2&limit=2", "")
+	w = request(f.handler, f.a, "GET", fmt.Sprintf("/api/events?after=%d&limit=2", *ep.Next), "")
 	expect(t, w, 200)
 	if err := json.Unmarshal(w.Body.Bytes(), &ep); err != nil {
 		t.Fatal(err)
 	}
-	if len(ep.Items) != 1 || ep.Items[0].ID != 3 || ep.Next != nil {
+	if len(ep.Items) != 1 || ep.Items[0].ID != f.eventStart+3 || ep.Next != nil {
 		t.Fatalf("bad last page %+v", ep)
 	}
 	w = request(f.handler, f.a, "GET", "/api/events?node_id="+f.nodes[2], "")
@@ -349,9 +365,9 @@ func TestUndoAuthorizationRestorationAndConflicts(t *testing.T) {
 	}
 	// The agent sees the event (ADR-003 P2) but may not undo another's change.
 	dbtest.BindRole(t, f.db, f.a.TenantID, other.ID, "member")
-	expect(t, request(f.handler, other, "POST", "/api/events/1/undo", ""), 403)
+	expect(t, request(f.handler, other, "POST", undoPath(f, 1), ""), 403)
 	other.Roles = []string{"admin"}
-	expect(t, request(f.handler, other, "POST", "/api/events/1/undo", ""), 403)
+	expect(t, request(f.handler, other, "POST", undoPath(f, 1), ""), 403)
 	other.Kind = tenant.Person
 	err = db.InTenant(dbtest.Seed(t.Context()), f.db.App, f.a.TenantID, func(tx pgx.Tx) error {
 		return tx.QueryRow(t.Context(), `INSERT INTO principals(tenant_id,kind,name) VALUES($1,'person','Decider') RETURNING id::text`, f.a.TenantID).Scan(&other.ID)
@@ -362,18 +378,18 @@ func TestUndoAuthorizationRestorationAndConflicts(t *testing.T) {
 	if _, err := f.db.Admin.Exec(t.Context(), `INSERT INTO role_bindings(tenant_id,principal_id,role_id,scope_type) SELECT $1::uuid,$2::uuid,id,'workspace' FROM roles WHERE tenant_id=$1::uuid AND key='admin'`, f.a.TenantID, other.ID); err != nil {
 		t.Fatal(err)
 	}
-	expect(t, request(f.handler, other, "POST", "/api/events/1/undo", ""), 201)
+	expect(t, request(f.handler, other, "POST", undoPath(f, 1), ""), 201)
 	ev := logEvents(t, f)
-	if len(ev) != 2 || ev[1].UndoOf == nil || *ev[1].UndoOf != 1 || ev[1].ActorPrincipalID != other.ID || string(ev[1].After) != "null" || !bytes.Equal(ev[1].Before, ev[0].After) {
+	if len(ev) != 2 || ev[1].UndoOf == nil || *ev[1].UndoOf != ev[0].ID || ev[1].ActorPrincipalID != other.ID || string(ev[1].After) != "null" || !bytes.Equal(ev[1].Before, ev[0].After) {
 		t.Fatalf("bad compensation %+v", ev)
 	}
 	expect(t, request(f.handler, f.a, "DELETE", "/api/relations/"+first.ID, ""), 404)
-	expect(t, request(f.handler, f.a, "POST", "/api/events/1/undo", ""), 409)
-	expect(t, request(f.handler, other, "POST", "/api/events/2/undo", ""), 409)
+	expect(t, request(f.handler, f.a, "POST", undoPath(f, 1), ""), 409)
+	expect(t, request(f.handler, other, "POST", undoPath(f, 2), ""), 409)
 	second := create(t, f, f.nodes[0], f.nodes[1], "blocks")
 	expect(t, request(f.handler, f.a, "DELETE", "/api/relations/"+second.ID, ""), 204)
-	expect(t, request(f.handler, f.a, "POST", "/api/events/3/undo", ""), 409) // Already deleted.
-	expect(t, request(f.handler, f.a, "POST", "/api/events/4/undo", ""), 201)
+	expect(t, request(f.handler, f.a, "POST", undoPath(f, 3), ""), 409) // Already deleted.
+	expect(t, request(f.handler, f.a, "POST", undoPath(f, 4), ""), 201)
 	w := request(f.handler, f.a, "GET", "/api/relations?node_id="+f.nodes[0], "")
 	expect(t, w, 200)
 	var result page
@@ -383,12 +399,12 @@ func TestUndoAuthorizationRestorationAndConflicts(t *testing.T) {
 	if len(result.Items) != 1 || result.Items[0] != second {
 		t.Fatal("undo did not restore exact snapshot")
 	}
-	expect(t, request(f.handler, f.a, "POST", "/api/events/4/undo", ""), 409)
-	expect(t, request(f.handler, f.a, "POST", "/api/events/999/undo", ""), 404)
+	expect(t, request(f.handler, f.a, "POST", undoPath(f, 4), ""), 409)
+	expect(t, request(f.handler, f.a, "POST", undoPath(f, 999), ""), 404)
 	// Once a different relation occupies the original tuple, restoration conflicts.
 	expect(t, request(f.handler, f.a, "DELETE", "/api/relations/"+second.ID, ""), 204)
 	third := create(t, f, f.nodes[0], f.nodes[1], "blocks")
-	expect(t, request(f.handler, f.a, "POST", "/api/events/6/undo", ""), 409)
+	expect(t, request(f.handler, f.a, "POST", undoPath(f, 6), ""), 409)
 	expect(t, request(f.handler, f.a, "DELETE", "/api/relations/"+third.ID, ""), 204)
 	err = db.InTenant(dbtest.Seed(t.Context()), f.db.App, f.a.TenantID, func(tx pgx.Tx) error {
 		_, err := tx.Exec(t.Context(), `UPDATE nodes SET deleted_at=now() WHERE id=$1`, f.nodes[1])
@@ -397,7 +413,7 @@ func TestUndoAuthorizationRestorationAndConflicts(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	expect(t, request(f.handler, f.a, "POST", "/api/events/8/undo", ""), 409)
+	expect(t, request(f.handler, f.a, "POST", undoPath(f, 8), ""), 409)
 	if len(logEvents(t, f)) != 8 {
 		t.Fatal("failed undo appended an event")
 	}
@@ -410,7 +426,7 @@ func TestConcurrentUndoExactlyOnce(t *testing.T) {
 	start := make(chan struct{})
 	var wg sync.WaitGroup
 	for range 2 {
-		wg.Go(func() { <-start; statuses <- request(f.handler, f.a, "POST", "/api/events/1/undo", "").Code })
+		wg.Go(func() { <-start; statuses <- request(f.handler, f.a, "POST", undoPath(f, 1), "").Code })
 	}
 	close(start)
 	wg.Wait()

@@ -27,7 +27,7 @@ func TestRoadmapPublicationMigrationPreservesCustomSchema(t *testing.T) {
 	const ticketSchema = `{"type":"object","additionalProperties":false,"required":["custom"],"properties":{"custom":{"type":"string","description":"tenant note"},"legacy_score":{"type":"integer","minimum":0}}}`
 	const taskSchema = `{"type":"object","additionalProperties":false,"properties":{"task_note":{"type":"string"}}}`
 	var id string
-	err = db.MigrateWithHook(t.Context(), d.App, func(name string) error {
+	err = migrateLegacyWorkWithHook(t, d, func(name string) error {
 		if name != "1048_roadmap_publication.sql" {
 			return nil
 		}
@@ -139,7 +139,7 @@ func TestRoadmapPublicationMigrationPreservesCustomSchema(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := db.MigrateWithHook(t.Context(), d.App, nil); err != nil {
+	if err := migrateLegacyWorkWithHook(t, d, nil); err != nil {
 		t.Fatal("reapply:", err)
 	}
 }

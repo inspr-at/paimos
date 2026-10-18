@@ -19,20 +19,22 @@ import (
 
 func TestConvertIssueKindMatrix(t *testing.T) {
 	p := newPrincipal(t, "kind-convert")
+	customKind(t, p, "initiative", "epic")
+	customKind(t, p, "chore", "task")
 	project := kindBySlug(t, p, "project")
 	root := mustNode(t, p, `{"kind_id":"`+project.ID+`","title":"Convert project","state":"active"}`)
 	for _, pair := range [][2]string{
-		{"ticket", "epic"},
-		{"epic", "ticket"},
-		{"task", "ticket"},
-		{"ticket", "task"},
-		{"task", "epic"},
-		{"epic", "task"},
+		{"work", "initiative"},
+		{"initiative", "work"},
+		{"chore", "work"},
+		{"work", "chore"},
+		{"chore", "initiative"},
+		{"initiative", "chore"},
 	} {
 		t.Run(pair[0]+" to "+pair[1], func(t *testing.T) {
 			from := kindBySlug(t, p, pair[0])
 			fields := `{}`
-			if pair[0] == "ticket" {
+			if pair[0] == "work" {
 				fields = benefitFields
 			}
 			node := mustNode(t, p, `{"kind_id":"`+from.ID+`","parent_id":"`+root.ID+`","title":"Convertible","fields":`+fields+`}`)
@@ -42,7 +44,7 @@ func TestConvertIssueKindMatrix(t *testing.T) {
 			if got.KindID != want.ID || got.ID != node.ID || got.Key != node.Key || got.Title != node.Title {
 				t.Fatalf("converted %#v key %s", got, node.Key)
 			}
-			if pair[0] == "ticket" && !strings.Contains(string(got.Fields), "pill_en") {
+			if pair[0] == "work" && !strings.Contains(string(got.Fields), "pill_en") {
 				t.Fatalf("fields dropped: %s", got.Fields)
 			}
 		})
@@ -51,17 +53,19 @@ func TestConvertIssueKindMatrix(t *testing.T) {
 
 func TestConvertRefusesChildrenParentFieldsAgentsAndOtherTenants(t *testing.T) {
 	p := newPrincipal(t, "kind-convert-block")
+	customKind(t, p, "initiative", "epic")
+	customKind(t, p, "chore", "task")
 	projectKind := kindBySlug(t, p, "project")
-	ticketKind := kindBySlug(t, p, "ticket")
-	epicKind := kindBySlug(t, p, "epic")
+	ticketKind := kindBySlug(t, p, "work")
+	epicKind := kindBySlug(t, p, "initiative")
 	root := mustNode(t, p, `{"kind_id":"`+projectKind.ID+`","title":"Block project","state":"active"}`)
 	epic := mustNode(t, p, `{"kind_id":"`+epicKind.ID+`","parent_id":"`+root.ID+`","title":"Parent epic"}`)
 	child := mustNode(t, p, `{"kind_id":"`+ticketKind.ID+`","parent_id":"`+epic.ID+`","title":"Child ticket","fields":`+benefitFields+`}`)
-	status, raw := call(t, &p, http.MethodPatch, "/api/kinds/"+ticketKind.ID, `{"allowed_child_kinds":["task"]}`)
+	status, raw := call(t, &p, http.MethodPatch, "/api/kinds/"+ticketKind.ID, `{"allowed_child_kinds":["chore"]}`)
 	if status != http.StatusOK {
 		t.Fatalf("restrict ticket children: %d %s", status, raw)
 	}
-	status, raw = call(t, &p, http.MethodPost, "/api/nodes/"+epic.ID+"/convert", `{"to_kind":"ticket"}`)
+	status, raw = call(t, &p, http.MethodPost, "/api/nodes/"+epic.ID+"/convert", `{"to_kind":"work"}`)
 	if status != http.StatusConflict || !strings.Contains(string(raw), codeKindConversionBlocked) || !strings.Contains(string(raw), child.Key) {
 		t.Fatalf("child mismatch: %d %s", status, raw)
 	}
@@ -72,7 +76,7 @@ func TestConvertRefusesChildrenParentFieldsAgentsAndOtherTenants(t *testing.T) {
 	if err := json.Unmarshal(raw, &blocked); err != nil {
 		t.Fatal(err)
 	}
-	if len(blocked.Children) != 1 || blocked.Children[0].Key != child.Key || blocked.Children[0].Kind != "ticket" {
+	if len(blocked.Children) != 1 || blocked.Children[0].Key != child.Key || blocked.Children[0].Kind != "work" {
 		t.Fatalf("children %#v", blocked.Children)
 	}
 	still, _ := getNode(t, p, epic.ID)
@@ -80,13 +84,13 @@ func TestConvertRefusesChildrenParentFieldsAgentsAndOtherTenants(t *testing.T) {
 		t.Fatal("blocked convert wrote the kind")
 	}
 
-	status, raw = call(t, &p, http.MethodPatch, "/api/kinds/"+projectKind.ID, `{"allowed_child_kinds":["ticket","task"]}`)
+	status, raw = call(t, &p, http.MethodPatch, "/api/kinds/"+projectKind.ID, `{"allowed_child_kinds":["work","chore"]}`)
 	if status != http.StatusOK {
 		t.Fatalf("restrict project children: %d %s", status, raw)
 	}
 	loose := mustNode(t, p, `{"kind_id":"`+ticketKind.ID+`","parent_id":"`+root.ID+`","title":"Under project","fields":`+benefitFields+`}`)
-	status, raw = call(t, &p, http.MethodPost, "/api/nodes/"+loose.ID+"/convert", `{"to_kind":"epic"}`)
-	if status != http.StatusConflict || !strings.Contains(string(raw), codeKindConversionBlocked) || !strings.Contains(string(raw), "parent does not allow epic") {
+	status, raw = call(t, &p, http.MethodPost, "/api/nodes/"+loose.ID+"/convert", `{"to_kind":"initiative"}`)
+	if status != http.StatusConflict || !strings.Contains(string(raw), codeKindConversionBlocked) || !strings.Contains(string(raw), "parent does not allow initiative") {
 		t.Fatalf("parent mismatch: %d %s", status, raw)
 	}
 
@@ -99,7 +103,7 @@ func TestConvertRefusesChildrenParentFieldsAgentsAndOtherTenants(t *testing.T) {
 	if status != http.StatusOK {
 		t.Fatalf("restore project children: %d %s", status, raw)
 	}
-	status, raw = call(t, &p, http.MethodPost, "/api/nodes/"+needy.ID+"/convert", `{"to_kind":"epic"}`)
+	status, raw = call(t, &p, http.MethodPost, "/api/nodes/"+needy.ID+"/convert", `{"to_kind":"initiative"}`)
 	if status != http.StatusConflict || !strings.Contains(string(raw), `"points"`) || strings.Contains(string(raw), "pill_en") {
 		t.Fatalf("field mismatch: %d %s", status, raw)
 	}
@@ -110,7 +114,7 @@ func TestConvertRefusesChildrenParentFieldsAgentsAndOtherTenants(t *testing.T) {
 
 	agent := estimateAgent(t, p)
 	before := kindChangedCount(t, p.TenantID)
-	status, raw = call(t, &agent, http.MethodPost, "/api/nodes/"+loose.ID+"/convert", `{"to_kind":"task"}`)
+	status, raw = call(t, &agent, http.MethodPost, "/api/nodes/"+loose.ID+"/convert", `{"to_kind":"chore"}`)
 	if status != http.StatusForbidden {
 		t.Fatalf("agent: %d %s", status, raw)
 	}
@@ -119,7 +123,7 @@ func TestConvertRefusesChildrenParentFieldsAgentsAndOtherTenants(t *testing.T) {
 	}
 
 	other := addPrincipal(t, "kind-convert-other")
-	status, raw = call(t, &other, http.MethodPost, "/api/nodes/"+loose.ID+"/convert", `{"to_kind":"task"}`)
+	status, raw = call(t, &other, http.MethodPost, "/api/nodes/"+loose.ID+"/convert", `{"to_kind":"chore"}`)
 	if status != http.StatusNotFound {
 		t.Fatalf("other tenant: %d %s", status, raw)
 	}
@@ -127,7 +131,7 @@ func TestConvertRefusesChildrenParentFieldsAgentsAndOtherTenants(t *testing.T) {
 		t.Fatal("other tenant wrote an event")
 	}
 
-	status, raw = call(t, &p, http.MethodPost, "/api/nodes/"+root.ID+"/convert", `{"to_kind":"ticket"}`)
+	status, raw = call(t, &p, http.MethodPost, "/api/nodes/"+root.ID+"/convert", `{"to_kind":"work"}`)
 	if status != http.StatusConflict || !strings.Contains(string(raw), codeKindChangeNotAllowed) {
 		t.Fatalf("project convert: %d %s", status, raw)
 	}
@@ -135,7 +139,7 @@ func TestConvertRefusesChildrenParentFieldsAgentsAndOtherTenants(t *testing.T) {
 	if status != http.StatusConflict || !strings.Contains(string(raw), codeKindChangeNotAllowed) {
 		t.Fatalf("to project: %d %s", status, raw)
 	}
-	status, raw = call(t, &p, http.MethodPost, "/api/nodes/"+loose.ID+"/convert", `{"to_kind":"ticket"}`)
+	status, raw = call(t, &p, http.MethodPost, "/api/nodes/"+loose.ID+"/convert", `{"to_kind":"work"}`)
 	if status != http.StatusOK {
 		t.Fatalf("same kind: %d %s", status, raw)
 	}
@@ -146,8 +150,10 @@ func TestConvertRefusesChildrenParentFieldsAgentsAndOtherTenants(t *testing.T) {
 
 func TestConvertWritesOneEventAndUndo(t *testing.T) {
 	p := newPrincipal(t, "kind-convert-event")
+	customKind(t, p, "initiative", "epic")
+	customKind(t, p, "chore", "task")
 	project := kindBySlug(t, p, "project")
-	ticketKind := kindBySlug(t, p, "ticket")
+	ticketKind := kindBySlug(t, p, "work")
 	root := mustNode(t, p, `{"kind_id":"`+project.ID+`","title":"Event project","state":"active"}`)
 	ticket := mustNode(t, p, `{"kind_id":"`+ticketKind.ID+`","parent_id":"`+root.ID+`","title":"Audited","fields":`+benefitFields+`}`)
 	other := mustNode(t, p, `{"kind_id":"`+ticketKind.ID+`","parent_id":"`+root.ID+`","title":"Related","fields":`+benefitFields+`}`)
@@ -161,7 +167,7 @@ func TestConvertWritesOneEventAndUndo(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	status, raw := call(t, &p, http.MethodPost, "/api/nodes/"+ticket.ID+"/convert", `{"to_kind":"epic"}`)
+	status, raw := call(t, &p, http.MethodPost, "/api/nodes/"+ticket.ID+"/convert", `{"to_kind":"initiative"}`)
 	got := decode[nodeJSON](t, status, raw, http.StatusOK)
 	if got.Key != ticket.Key || got.ID != ticket.ID || !strings.Contains(string(got.Fields), "pill_en") || !strings.Contains(string(got.Fields), `"scratch":"keep"`) && !strings.Contains(string(got.Fields), `"scratch": "keep"`) {
 		t.Fatalf("kept fields: %s", got.Fields)
@@ -170,7 +176,7 @@ func TestConvertWritesOneEventAndUndo(t *testing.T) {
 		t.Fatal("relation was dropped")
 	}
 	meta, after := kindChangedEvent(t, p.TenantID)
-	if meta["from"] != "ticket" || meta["to"] != "epic" || meta["by"] != p.ID {
+	if meta["from"] != "work" || meta["to"] != "initiative" || meta["by"] != p.ID {
 		t.Fatalf("metadata %#v", meta)
 	}
 	if !strings.Contains(after, "pill_en") || !strings.Contains(after, "scratch") {
@@ -191,7 +197,7 @@ func TestConvertWritesOneEventAndUndo(t *testing.T) {
 		t.Fatalf("undo restore: kind %s fields %s", restored.KindID, restored.Fields)
 	}
 
-	status, raw = call(t, &p, http.MethodPost, "/api/nodes/"+ticket.ID+"/convert", `{"to_kind":"epic"}`)
+	status, raw = call(t, &p, http.MethodPost, "/api/nodes/"+ticket.ID+"/convert", `{"to_kind":"initiative"}`)
 	if status != http.StatusOK {
 		t.Fatalf("convert again: %d %s", status, raw)
 	}
@@ -212,16 +218,18 @@ func TestConvertWritesOneEventAndUndo(t *testing.T) {
 
 func TestConvertDropsFieldsOutsideAClosedSchema(t *testing.T) {
 	p := newPrincipal(t, "kind-convert-fields")
+	customKind(t, p, "initiative", "epic")
+	customKind(t, p, "chore", "task")
 	project := kindBySlug(t, p, "project")
-	ticketKind := kindBySlug(t, p, "ticket")
-	epicKind := kindBySlug(t, p, "epic")
+	ticketKind := kindBySlug(t, p, "work")
+	epicKind := kindBySlug(t, p, "initiative")
 	root := mustNode(t, p, `{"kind_id":"`+project.ID+`","title":"Field project","state":"active"}`)
 	status, raw := call(t, &p, http.MethodPatch, "/api/kinds/"+epicKind.ID, `{"field_schema":{"type":"object","additionalProperties":false,"properties":{"priority":{"type":"string"}}}}`)
 	if status != http.StatusOK {
 		t.Fatalf("epic schema: %d %s", status, raw)
 	}
 	node := mustNode(t, p, `{"kind_id":"`+ticketKind.ID+`","parent_id":"`+root.ID+`","title":"Carries extra","fields":{"priority":"high","scratch":"keep-me"}}`)
-	status, raw = call(t, &p, http.MethodPost, "/api/nodes/"+node.ID+"/convert", `{"to_kind":"epic"}`)
+	status, raw = call(t, &p, http.MethodPost, "/api/nodes/"+node.ID+"/convert", `{"to_kind":"initiative"}`)
 	got := decode[nodeJSON](t, status, raw, http.StatusOK)
 	if strings.Contains(string(got.Fields), `"scratch"`) || !strings.Contains(string(got.Fields), "high") || got.KindID != epicKind.ID {
 		t.Fatalf("live fields: %s", got.Fields)
@@ -242,7 +250,7 @@ func TestConvertDropsFieldsOutsideAClosedSchema(t *testing.T) {
 	}
 
 	kept := mustNode(t, p, `{"kind_id":"`+ticketKind.ID+`","parent_id":"`+root.ID+`","title":"Undo me","fields":{"priority":"high","scratch":"keep-me"}}`)
-	status, raw = call(t, &p, http.MethodPost, "/api/nodes/"+kept.ID+"/convert", `{"to_kind":"epic"}`)
+	status, raw = call(t, &p, http.MethodPost, "/api/nodes/"+kept.ID+"/convert", `{"to_kind":"initiative"}`)
 	if status != http.StatusOK {
 		t.Fatalf("convert for undo: %d %s", status, raw)
 	}
@@ -260,16 +268,18 @@ func TestConvertDropsFieldsOutsideAClosedSchema(t *testing.T) {
 
 func TestConvertValidatesRootSchemaConstraints(t *testing.T) {
 	p := newPrincipal(t, "kind-convert-root")
+	customKind(t, p, "initiative", "epic")
+	customKind(t, p, "chore", "task")
 	project := kindBySlug(t, p, "project")
-	ticketKind := kindBySlug(t, p, "ticket")
-	epicKind := kindBySlug(t, p, "epic")
+	ticketKind := kindBySlug(t, p, "work")
+	epicKind := kindBySlug(t, p, "initiative")
 	root := mustNode(t, p, `{"kind_id":"`+project.ID+`","title":"Root project","state":"active"}`)
 	status, raw := call(t, &p, http.MethodPatch, "/api/kinds/"+epicKind.ID, `{"field_schema":{"type":"object","minProperties":1,"properties":{"priority":{"type":"string"}}}}`)
 	if status != http.StatusOK {
 		t.Fatalf("min schema: %d %s", status, raw)
 	}
 	empty := mustNode(t, p, `{"kind_id":"`+ticketKind.ID+`","parent_id":"`+root.ID+`","title":"Empty","fields":{}}`)
-	status, raw = call(t, &p, http.MethodPost, "/api/nodes/"+empty.ID+"/convert", `{"to_kind":"epic"}`)
+	status, raw = call(t, &p, http.MethodPost, "/api/nodes/"+empty.ID+"/convert", `{"to_kind":"initiative"}`)
 	if status != http.StatusConflict || !strings.Contains(string(raw), "too few properties") || !strings.Contains(string(raw), codeKindConversionBlocked) {
 		t.Fatalf("minProperties: %d %s", status, raw)
 	}
@@ -283,7 +293,7 @@ func TestConvertValidatesRootSchemaConstraints(t *testing.T) {
 		t.Fatalf("const schema: %d %s", status, raw)
 	}
 	low := mustNode(t, p, `{"kind_id":"`+ticketKind.ID+`","parent_id":"`+root.ID+`","title":"Low","fields":{"priority":"low"}}`)
-	status, raw = call(t, &p, http.MethodPost, "/api/nodes/"+low.ID+"/convert", `{"to_kind":"epic"}`)
+	status, raw = call(t, &p, http.MethodPost, "/api/nodes/"+low.ID+"/convert", `{"to_kind":"initiative"}`)
 	if status != http.StatusConflict || !strings.Contains(string(raw), "const") {
 		t.Fatalf("const: %d %s", status, raw)
 	}
@@ -296,7 +306,7 @@ func TestConvertValidatesRootSchemaConstraints(t *testing.T) {
 func TestConvertCustomIssueFamily(t *testing.T) {
 	p := newPrincipal(t, "kind-convert-family")
 	project := kindBySlug(t, p, "project")
-	ticketKind := kindBySlug(t, p, "ticket")
+	ticketKind := kindBySlug(t, p, "work")
 	root := mustNode(t, p, `{"kind_id":"`+project.ID+`","title":"Family project","state":"active"}`)
 	status, raw := call(t, &p, http.MethodPost, "/api/kinds", `{
 		"slug":"story","label":"Story","short_prefix":"STY","icon":"book",

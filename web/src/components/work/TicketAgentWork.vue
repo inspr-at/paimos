@@ -1,7 +1,13 @@
 <!-- SPDX-License-Identifier: AGPL-3.0-only -->
 <script setup lang="ts">
 import { computed, onBeforeUnmount, ref, watch } from 'vue'
+import { kindLabel } from '../../lib/work'
+import { workNoun } from '../../lib/workVocabulary'
 import AppIcon from '../AppIcon.vue'
+import { useAgents } from '../../stores/agents'
+import SessionPauseActions from '../agents/SessionPauseActions.vue'
+import PauseEvidence from '../agents/PauseEvidence.vue'
+const agents = useAgents()
 import DeliveryRating from './DeliveryRating.vue'
 import { loadNodeRatings, type SessionRating } from '../../lib/deliveryRating'
 import {
@@ -13,7 +19,7 @@ import {
 // descendants. A session with several models is counted once. Missing tokens,
 // cost, model or effort are left out, never shown as zero. With no sessions the
 // section is not shown at all (unless the query was capped).
-const props = defineProps<{ nodeId: string; kind: string }>()
+const props = defineProps<{ nodeId: string; kind: string; levelName?: string }>()
 
 const report = ref<TicketAgentWork | null>(null)
 const ratings = ref(new Map<string, SessionRating>())
@@ -39,6 +45,8 @@ async function load(id: string) {
       loadNodeRatings(id, abort.signal),
     ])
     if (request === generation) {
+      if (!agents.loaded) await agents.loadAll()
+      if (request !== generation) return
       report.value = next
       const map = new Map<string, SessionRating>()
       for (const row of rated ?? []) map.set(row.session_id, row)
@@ -52,9 +60,10 @@ async function load(id: string) {
   }
 }
 
-const noun = computed(() => props.kind === 'epic' ? 'epic' : props.kind === 'task' ? 'task' : 'ticket')
+const noun = computed(() => workNoun(props.levelName || kindLabel(props.kind)))
 const rollup = computed(() => {
   if (!report.value?.includes_descendants || !report.value.sessions.length) return ''
+  if (props.kind === 'work') return `Totals include this ${noun.value} and its descendant leaves.`
   if (props.kind === 'epic') return 'Totals include this epic and the tickets and tasks under it.'
   if (props.kind === 'ticket') return 'Totals include this ticket and the tasks under it.'
   return 'Totals include this task and the work under it.'
@@ -164,6 +173,8 @@ function rowName(session: TicketAgentSession): string {
                 <span v-if="modelFigures(model)">{{ modelFigures(model) }}</span>
               </li>
             </ul>
+            <SessionPauseActions v-if="agents.sessionById(session.id)" :session="agents.sessionById(session.id)!" />
+            <PauseEvidence v-if="agents.sessionById(session.id)?.pause" :session="agents.sessionById(session.id)!" :now="agents.now" />
             <DeliveryRating v-if="session.phase === 'stopped' && ratings.get(session.id)" :session-id="session.id" :initial="ratings.get(session.id)" />
           </li>
         </ul>

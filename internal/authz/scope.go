@@ -20,102 +20,22 @@ import (
 // project row-level security or handler-level authorization confines to the
 // caller's visible projects (nodes, relations, events, knowledge, search,
 // views and approvals pinned to a project, live agent sessions),
-// workspace configuration every reader needs (kinds, the workspace logo that
-// /api/me links, read under tenant row-level security), or the caller's own
-// profile and preferences. Every other route without a project in its path is
-// authorized by the workspace binding alone, so a project-only principal never
-// reaches workspace-wide data such as members, quotes, CRM or hours.
-var ProjectFilteredRoutes = map[string]bool{
-	"GET /api/decision-desk":                      true,
-	"GET /api/journey/next-actions":               true,
-	"GET /api/queue":                              true,
-	"GET /api/me/host-labels":                     true,
-	"PUT /api/me/host-labels":                     true,
-	"GET /api/me/security/session-watching":       true,
-	"PUT /api/me/security/session-watching":       true,
-	"GET /api/approvals":                          true,
-	"GET /api/harness-sessions/live":              true,
-	"GET /api/me/agent-pause-settings":            true,
-	"PUT /api/me/agent-pause-settings":            true,
-	"GET /api/me/leaving-at":                      true,
-	"PUT /api/me/leaving-at":                      true,
-	"DELETE /api/me/leaving-at":                   true,
-	"POST /api/harness-sessions/pause":            true,
-	"POST /api/harness-sessions/resume":           true,
-	"GET /api/usage/dashboard":                    true,
-	"GET /api/settings/status-autopilot":          true,
-	"GET /api/status-autopilot/changes":           true,
-	"GET /api/status-autopilot/proposals":         true,
-	"GET /api/projects":                           true,
-	"GET /api/nodes":                              true,
-	"GET /api/outcomes":                           true,
-	"GET /api/nodes/lookup":                       true,
-	"GET /api/nodes/tree":                         true,
-	"GET /api/search":                             true,
-	"GET /api/events":                             true,
-	"GET /api/events/stream":                      true,
-	"GET /api/from-classic":                       true,
-	"GET /api/knowledge":                          true,
-	"GET /api/knowledge/graph":                    true,
-	"GET /api/knowledge/learnings":                true,
-	"GET /api/knowledge/resolve":                  true,
-	"GET /api/tickets/graph":                      true,
-	"GET /api/relations":                          true,
-	"GET /api/views":                              true,
-	"GET /api/views/{viewId}":                     true,
-	"GET /api/kinds":                              true,
-	"GET /api/status/help":                        true,
-	"GET /api/kinds/{kindId}":                     true,
-	"GET /api/me":                                 true,
-	"GET /api/brand/logo/{variant}":               true,
-	"GET /api/me/greeting":                        true,
-	"GET /api/me/profile":                         true,
-	"PATCH /api/me/profile":                       true,
-	"POST /api/me/avatar":                         true,
-	"DELETE /api/me/avatar":                       true,
-	"GET /api/me/permissions":                     true,
-	"GET /api/people/{principalId}/avatar/{size}": true,
-	"GET /api/preferences/{key}":                  true,
-	"PUT /api/preferences/{key}":                  true,
-}
+// workspace configuration every reader needs (kinds, work names and icons,
+// the workspace logo linked by /api/me, read under tenant row-level security),
+// or the caller's own profile and preferences. Every other route without a
+// project in its path is authorized by the workspace binding alone, so a
+// project-only principal never reaches workspace-wide data such as members,
+// quotes, CRM or hours.
+var ProjectFilteredRoutes = map[string]bool{}
 
 // ProjectDecidedRoutes create project data named in the request body. The
 // middleware lets a permission from any project binding through; the handler
 // then requires it in the target project (RequireTx with that project), inside
 // the transaction that writes. POST /api/nodes/bulk stays workspace-only.
-var ProjectDecidedRoutes = map[string]bool{
-	"POST /api/queue":                                true,
-	"POST /api/queue/reset":                          true,
-	"POST /api/queue/next":                           true,
-	"GET /api/rules/layers":                          true,
-	"POST /api/rules/layers":                         true,
-	"GET /api/rules/sets":                            true,
-	"POST /api/rules/sets":                           true,
-	"GET /api/rules/sets/{setId}":                    true,
-	"PUT /api/rules/sets/{setId}/draft":              true,
-	"POST /api/rules/sets/{setId}/publish":           true,
-	"POST /api/rules/sets/{setId}/restore":           true,
-	"GET /api/rules/sets/{setId}/versions":           true,
-	"GET /api/rules/sets/{setId}/versions/{version}": true,
-	"GET /api/rules/merged":                          true,
-	"GET /api/rules/channels":                        true,
-	"GET /api/rules/comparisons":                     true,
-	"POST /api/rules/comparisons":                    true,
-	"GET /api/rules/explained":                       true,
-	"PUT /api/rules/sets/{setId}/tldr":               true,
-	"GET /api/rules/budget":                          true,
-	"POST /api/rules/publish":                        true,
-	"POST /api/nodes":                                true,
-	"POST /api/outcomes":                             true,
-	"POST /api/relations":                            true,
-	"POST /api/knowledge":                            true,
-}
+var ProjectDecidedRoutes = map[string]bool{}
 
 // Product release notes are the same for everyone; they are not tenant data.
-var publicProductRoutes = map[string]bool{
-	"GET /api/releases":           true,
-	"GET /api/releases/{version}": true,
-}
+var publicProductRoutes = map[string]bool{}
 
 // Routes whose path names one node-scoped resource. The resource's project,
 // read under the caller's own visibility, is the scope of the decision.
@@ -123,13 +43,15 @@ var publicProductRoutes = map[string]bool{
 // session ids are a different resource and stay unresolved here.
 func routeTarget(pattern string, values map[string]string) (kind, id string) {
 	switch {
+	case values["recurrenceId"] != "":
+		return "recurrence", values["recurrenceId"]
 	case values["questionId"] != "":
 		return "node", values["questionId"]
 	case values["nodeId"] != "":
 		return "node", values["nodeId"]
 	case strings.HasPrefix(pattern, "GET /api/knowledge/{id}") || strings.HasPrefix(pattern, "PATCH /api/knowledge/{id}") || strings.HasPrefix(pattern, "DELETE /api/knowledge/{id}"):
 		return "node", values["id"]
-	case pattern == "POST /api/knowledge/learnings/{learningId}/accept" || pattern == "POST /api/knowledge/learnings/{learningId}/dismiss" || pattern == "POST /api/knowledge/learnings/{learningId}/draft":
+	case pattern == "POST /api/knowledge/learnings/{learningId}/accept" || pattern == "POST /api/knowledge/learnings/{learningId}/dismiss" || pattern == "POST /api/knowledge/learnings/{learningId}/draft" || pattern == "PUT /api/knowledge/learnings/{learningId}/recommendation":
 		// Accept and dismiss name the source item, not a project. The node's
 		// project_id is that item's project, including a project node itself.
 		nodeID, ok := learningSourceNode(values["learningId"])
@@ -143,7 +65,7 @@ func routeTarget(pattern string, values map[string]string) (kind, id string) {
 		return "relation", values["relationId"]
 	case values["eventId"] != "":
 		return "event", values["eventId"]
-	case pattern == "GET /api/inbox/messages/{messageId}/receipt":
+	case pattern == "GET /api/inbox/messages/{messageId}/receipt" || pattern == "POST /api/inbox/messages/{messageId}/cancel":
 		return "inbox_receipt", values["messageId"]
 	case strings.HasSuffix(pattern, " /api/node-keys/{key}"):
 		return "node_key", values["key"]
@@ -228,6 +150,11 @@ func targetProject(ctx context.Context, pool *pgxpool.Pool, kind, id string) (st
 	var query string
 	args := []any{id}
 	switch kind {
+	case "recurrence":
+		if !uuidPattern.MatchString(id) {
+			return "", nil
+		}
+		query = `SELECT project_id::text FROM recurrences WHERE id=$1::uuid`
 	case "node":
 		if !uuidPattern.MatchString(id) {
 			return "", nil
@@ -283,11 +210,14 @@ func targetProject(ctx context.Context, pool *pgxpool.Pool, kind, id string) (st
 	err := db.InTenant(ctx, pool, p.TenantID, func(tx pgx.Tx) error {
 		return tx.QueryRow(ctx, query, args...).Scan(&project)
 	})
-	if errors.Is(err, pgx.ErrNoRows) || project == nil {
+	if errors.Is(err, pgx.ErrNoRows) {
 		return "", nil
 	}
 	if err != nil {
 		return "", err
+	}
+	if project == nil {
+		return "", nil
 	}
 	return *project, nil
 }

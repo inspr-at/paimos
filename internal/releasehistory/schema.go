@@ -54,6 +54,7 @@ type Release struct {
 const (
 	StatePublished = "published"
 	StateReserved  = "reserved"
+	StateCandidate = "candidate"
 	StateWithdrawn = "withdrawn"
 )
 
@@ -83,6 +84,9 @@ type Evidence struct {
 	CI           *Run   `json:"ci"`
 	ReleaseRun   *Run   `json:"release_run"`
 	ReleaseURL   string `json:"release_url"`
+	// Pending names candidate evidence that a later tagged build can establish.
+	// Corresponding values remain empty or nil, never fabricated.
+	Pending []string `json:"pending,omitempty"`
 	// Unavailable lists, in plain words, what could not be established.
 	Unavailable []string `json:"unavailable"`
 }

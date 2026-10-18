@@ -1,0 +1,85 @@
+# SPDX-License-Identifier: AGPL-3.0-only
+# aeon:owner internal/auth
+paths:
+  /auth/callback:
+    get:
+      operationId: authCallback
+      summary: Finish sign-in and start a session
+      description: Resolve the tenant from signed state, then the OIDC issuer and subject to a person principal in that tenant; never choose a tenant by email alone.
+      security: []
+      parameters:
+        - {name: code, in: query, schema: {type: string}}
+        - {name: state, in: query, schema: {type: string}}
+        - {name: error, in: query, schema: {type: string}}
+      responses:
+        "302":
+          description: Session cookie set and redirect to the app on success; on failure redirect to /signin?error=denied|not_member|imported_account|unavailable|expired|failed. Provider text is never included. State/cookie/nonce failures use expired; access denial uses denied; missing membership uses not_member, or imported_account when a verified email matches an unlinked imported person in the signed tenant; provider availability failures use unavailable; other failures use failed.
+          headers:
+            Location:
+              schema: {type: string}
+            Set-Cookie:
+              schema: {type: string}
+  /auth/dev-login:
+    post:
+      operationId: authDevLogin
+      summary: Sign in by email when AEON_ENV=dev
+      description: Not mounted unless AEON_ENV=dev. Other environments respond 404. Email lookup prefers the canonical link target when persons share an email. Bootstrap admin matching, email lookup and dev identity subjects fold only ASCII letter case; Unicode characters remain distinct.
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [email]
+              properties:
+                email:
+                  type: string
+                  format: email
+      responses:
+        "200":
+          description: Session started
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Me"
+        "400":
+          description: Email missing or invalid
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "403":
+          description: Not a member of this workspace yet
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "404":
+          description: Dev login is disabled
+  /auth/login:
+    get:
+      operationId: authLogin
+      summary: Start the OIDC authorization-code flow with PKCE
+      description: The optional tenant slug is bound into signed OIDC state. A callback opens a session only for a principal explicitly mapped into that tenant.
+      security: []
+      parameters:
+        - {name: tenant, in: query, schema: {type: string, pattern: '^[a-z][a-z0-9-]*$'}}
+      responses:
+        "302":
+          description: Redirect to the identity provider
+        "500":
+          description: Sign-in is not available
+          content:
+            text/html:
+              schema:
+                type: string
+  /auth/logout:
+    post:
+      operationId: authLogout
+      summary: End the current session
+      security: []
+      responses:
+        "204":
+          description: Session deleted and cookie cleared
+components:

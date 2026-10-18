@@ -31,6 +31,7 @@ func (rt *runtime) harnessRun() *Command {
 			fs.string(&o.Label, "label", 0, "public session label")
 			fs.string(&o.Ticket, "ticket", 0, "ticket key")
 			fs.string(&role, "role", 0, "reviewer, fixer, worker or coordinator")
+			fs.string(&o.ParallelReason, "parallel-reason", 0, "explicit public reason for parallel work; requires person or coordinator authority")
 			fs.string(&o.Parent, "parent-session", 0, "lead session UUID")
 			fs.string(&o.Shape, "work-shape", 0, "ship or scout (reviewer defaults to scout)")
 			fs.string(&o.Model, "model", 0, "public model name")
@@ -96,7 +97,7 @@ func (rt *runtime) harnessRun() *Command {
 	}
 }
 
-func (rt *runtime) runHarnessCommand(ctx context.Context, o heartbeatOptions, args []string) error {
+func (rt *runtime) runHarnessCommand(ctx context.Context, o heartbeatOptions, args []string) (result error) {
 	if len(args) == 0 {
 		return usagef("command required after --")
 	}
@@ -120,7 +121,7 @@ func (rt *runtime) runHarnessCommand(ctx context.Context, o heartbeatOptions, ar
 	}
 	finish := func() error { return rt.finishHeartbeat(o, &session) }
 	if ctx.Err() != nil {
-		return errors.Join(&exitError{code: 143}, finish())
+		return errors.Join(&exitError{code: 143, msg: "harness run: interrupted before child launch"}, finish())
 	}
 	stopLink := rt.startAccountLink(ctx, o)
 	defer stopLink()
@@ -130,6 +131,17 @@ func (rt *runtime) runHarnessCommand(ctx context.Context, o heartbeatOptions, ar
 		session.stopReason = stopProcessFailed
 		return errors.Join(errors.New("owned process group unavailable"), finish())
 	}
+	restoreTerminal, err := prepareHarnessTerminal(cmd)
+	if err != nil {
+		session.stopReason = stopProcessFailed
+		return errors.Join(err, finish())
+	}
+	defer func() {
+		if err := restoreTerminal(); err != nil {
+			fmt.Fprintf(rt.stderr, "harness: terminal restoration failed: %v\n", err)
+			result = errors.Join(result, err)
+		}
+	}()
 	if err = cmd.Start(); err != nil {
 		session.stopReason = stopProcessFailed
 		return errors.Join(err, finish())
@@ -198,10 +210,10 @@ func (rt *runtime) runHarnessCommand(ctx context.Context, o heartbeatOptions, ar
 	session.stopReason = jobStopReason(ctx.Err() != nil || requestedStop, childErr)
 	beatErr = errors.Join(beatErr, finish())
 	if beatErr != nil {
-		fmt.Fprintf(rt.stderr, "harness: session cleanup needs recovery with run-heartbeat --state-dir %s\n", o.StateDir)
+		fmt.Fprintf(rt.stderr, "harness: session cleanup failed (API status %d); recover with run-heartbeat --state-dir %s\n", heartbeatStatus(beatErr), o.StateDir)
 	}
 	if ctx.Err() != nil {
-		return &exitError{code: 143}
+		return &exitError{code: 143, msg: "harness run: interrupted; child stopped"}
 	}
 	if childErr != nil {
 		var exit *exec.ExitError
@@ -210,7 +222,7 @@ func (rt *runtime) runHarnessCommand(ctx context.Context, o heartbeatOptions, ar
 			if code < 1 {
 				code = 1
 			}
-			return &exitError{code: code}
+			return &exitError{code: code, msg: fmt.Sprintf("harness run: child %s; check its output (interactive commands need a foreground terminal on stdin)", exit)}
 		}
 		return childErr
 	}

@@ -1,0 +1,22 @@
+{
+  "group": "decision-desk",
+  "nightlyTiming": {
+    "seconds": 42.455,
+    "selectedTests": 14
+  },
+  "spec": {
+    "file": "tests/decision-desk-project.spec.ts",
+    "listedTests": 14,
+    "tierTiming": {
+      "caseSeconds": {
+        "max": 4.992,
+        "median": 3.126,
+        "min": 0.43
+      },
+      "seconds": 42.455,
+      "selectedTests": 14
+    },
+    "weightSeconds": 40,
+    "weightSource": "AEON-1057 project and refresh regressions; conservative initial estimate"
+  }
+}

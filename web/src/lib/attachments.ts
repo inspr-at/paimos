@@ -13,7 +13,6 @@ export interface Attachment {
 }
 export const positionOf = (item: Pick<Attachment, 'position'>) => Number(item.position) || 0
 export const byPosition = (a: Attachment, b: Attachment) => positionOf(a) - positionOf(b) || a.id.localeCompare(b.id)
-export const creatorId = (item: Pick<Attachment, 'created_by'>) => typeof item.created_by === 'string' ? item.created_by : item.created_by?.id ?? ''
 export type Variant = 'thumb' | 'preview' | 'original'
 
 export const contentUrl = (id: string, variant: Variant = 'preview') => `/api/attachments/${encodeURIComponent(id)}/content?variant=${variant}`

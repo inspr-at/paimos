@@ -51,3 +51,10 @@ export function sessionMenu(view: SessionView, access: MenuAccess): SessionMenu 
   const note = live && s.management_mode === 'unmanaged' ? `Runs outside ${access.product} — stop it in its terminal` : ''
   return { control, other, remove: access.canRemove && !s.archived_at, note }
 }
+
+export function recoveryAction(session: HarnessSession, person: boolean, permitted: (permission: string, project?: string) => boolean) {
+  const diagnosis = session.agent_recovery
+  if (!person || !diagnosis || diagnosis.session_id !== session.id || session.archived_at || !permitted('harness.control', session.project_id)) return ''
+  if (diagnosis.action === 'restart' && !permitted('run.create', session.project_id)) return ''
+  return diagnosis.action
+}
