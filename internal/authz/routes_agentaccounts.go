@@ -22,6 +22,7 @@ func init() {
 		"GET /api/agent-accounts/overview":                               "account.read|account.overview.read",
 		"GET /api/agent-accounts/pins":                                   "account.read",
 		"GET /api/agent-accounts/posture":                                "account.read",
+		"GET /api/agent-accounts/quota-outlook":                          "account.read", // AEON-1497: people only; the handler refuses agents.
 		"GET /api/agent-accounts/quota-warnings":                         "account.read",
 		"GET /api/agent-accounts/readiness":                              "account.read",
 		"GET /api/agent-accounts/use":                                    "account.read|account.probe",
