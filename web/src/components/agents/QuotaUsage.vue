@@ -92,6 +92,7 @@ const accountsWord = computed(() => `${rows.value.length} ${rows.value.length ==
             <p v-if="quiet" class="ub-empty"><span class="ub-rule" aria-hidden="true" />{{ view.name }} doesn’t report quota. Burn appears once it does.</p>
             <template v-else-if="shown === 'loading'"><span class="skeleton sk-line" /><span class="skeleton sk-strip" /></template>
             <p v-else-if="shown === 'error'" class="ub-empty">No readings to draw.</p>
+            <p v-else-if="kind === 'held'" class="ub-empty">Held accounts don’t run, so there is no pace to draw.</p>
           </template>
         </div>
         <p class="ub-info" />
