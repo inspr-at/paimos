@@ -4,6 +4,7 @@ package agentaccounts
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"math"
@@ -21,6 +22,68 @@ import (
 	"github.com/inspr-at/paimos/internal/tenant"
 	"github.com/jackc/pgx/v5"
 )
+
+// Risk: response privacy must see uncommitted ownership changes inside an
+// atomic caller, without escaping its rollback or bypassing usage redaction.
+func TestAccountPrivacyInTransaction(t *testing.T) {
+	now := time.Date(2026, 10, 19, 12, 0, 0, 0, time.UTC)
+	f := limitWorldAt(t, "privacy-transaction", 1, now)
+	other := addPrincipal(t, f.admin.TenantID, "person", "New owner", []string{"admin"})
+	callStatus(t, f.mod, &f.admin, "", "POST", "/api/agent-accounts/"+f.account.ID+"/windows", windowBody(now, now.Add(time.Hour), "requests", 100, "unrestricted"), http.StatusCreated, nil)
+	beforeEvents := scalar(t, f.admin, `SELECT count(*) FROM events`)
+	mux := http.NewServeMux()
+	f.mod.Mount(mux)
+	rollback := errors.New("rollback privacy transaction")
+	err := db.InTransaction(t.Context(), appPool, func(ctx context.Context) error {
+		if err := db.InTenant(dbtest.Seed(ctx), appPool, f.admin.TenantID, func(tx pgx.Tx) error {
+			_, err := tx.Exec(ctx, `UPDATE agent_accounts SET owner_person_id=$2 WHERE id=$1`, f.account.ID, other.ID)
+			return err
+		}); err != nil {
+			return err
+		}
+		for _, reader := range []tenant.Principal{other, f.admin} {
+			r := httptest.NewRequest(http.MethodPatch, "/api/agent-accounts/"+f.account.ID, strings.NewReader(`{"state":"draining"}`)).WithContext(tenant.WithPrincipal(ctx, reader))
+			out := httptest.NewRecorder()
+			mux.ServeHTTP(out, r)
+			if out.Code != http.StatusOK {
+				return fmt.Errorf("transactional PATCH for %s: %d %s", reader.Name, out.Code, out.Body.String())
+			}
+			var got struct {
+				Account
+				DetailsRedacted bool `json:"details_redacted"`
+			}
+			if err := json.Unmarshal(out.Body.Bytes(), &got); err != nil {
+				return err
+			}
+			if got.ID != f.account.ID || got.State != "draining" || got.OwnerPersonID == nil || *got.OwnerPersonID != other.ID {
+				return fmt.Errorf("transactional response lost updated account: %+v", got)
+			}
+			redacted := reader.ID != other.ID
+			if got.DetailsRedacted != redacted || redacted && len(got.Windows) != 0 || !redacted && len(got.Windows) != 1 {
+				return fmt.Errorf("privacy used stale ownership for %s: redacted=%t windows=%d", reader.Name, got.DetailsRedacted, len(got.Windows))
+			}
+		}
+		return rollback
+	})
+	if !errors.Is(err, rollback) {
+		t.Fatalf("atomic privacy response: %v", err)
+	}
+	if err := db.InTenant(dbtest.Seed(t.Context()), appPool, f.admin.TenantID, func(tx pgx.Tx) error {
+		got, err := getAccount(t.Context(), tx, f.account.ID)
+		if err != nil {
+			return err
+		}
+		if got.State != f.account.State || got.OwnerPersonID == nil || *got.OwnerPersonID != f.admin.ID || len(got.Windows) != 1 {
+			return fmt.Errorf("privacy transaction escaped rollback: %+v", got)
+		}
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if after := scalar(t, f.admin, `SELECT count(*) FROM events`); after != beforeEvents {
+		t.Fatalf("privacy transaction retained events after rollback: before=%d after=%d", beforeEvents, after)
+	}
+}
 
 func TestCapacityProjectionBatchAndGolden(t *testing.T) {
 	now := time.Date(2026, 10, 19, 12, 0, 0, 0, time.UTC)
