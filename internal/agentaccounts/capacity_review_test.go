@@ -4,10 +4,12 @@ package agentaccounts
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"io"
 	"math"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"sync"
 	"testing"
 	"time"
@@ -15,9 +17,125 @@ import (
 	"github.com/inspr-at/paimos/internal/capacity"
 	"github.com/inspr-at/paimos/internal/db"
 	"github.com/inspr-at/paimos/internal/dbtest"
+	"github.com/inspr-at/paimos/internal/nodes"
 	"github.com/inspr-at/paimos/internal/tenant"
 	"github.com/jackc/pgx/v5"
 )
+
+// AEON-1414 risks: account polling stalls ticket saves; removing its write
+// fences must retain capacity, quota and routing decisions from one snapshot.
+func TestCapacityReadSnapshot(t *testing.T) {
+	now := time.Date(2026, 10, 19, 12, 0, 0, 0, time.UTC)
+	f := limitWorldAt(t, "capacity-read-snapshot", 3, now)
+	f.report(t, 30, now.Add(-time.Minute), now.Add(80*time.Hour))
+	seedExistingLimit(t, f, 80, "percent", "day", nil)
+	var kind, nodeID string
+	if err := db.InTenant(dbtest.Seed(t.Context()), appPool, f.admin.TenantID, func(tx pgx.Tx) error {
+		if err := tx.QueryRow(t.Context(), `SELECT id::text FROM node_kinds WHERE slug='work'`).Scan(&kind); err != nil {
+			return err
+		}
+		return tx.QueryRow(t.Context(), `INSERT INTO nodes(tenant_id,kind_id,title) VALUES($1,$2,'Polling must not block edits') RETURNING id::text`, f.admin.TenantID, kind).Scan(&nodeID)
+	}); err != nil {
+		t.Fatal(err)
+	}
+	paths := []string{"/api/agent-accounts", "/api/agent-accounts/capacity", "/api/agent-accounts/groups", "/api/agent-accounts/pins?ticket_id=" + nodeID, "/api/agent-accounts/capacity/schedule", "/api/agent-accounts/" + f.account.ID + "/readings", "/api/agent-accounts/overview", "/api/agent-accounts/capacity/next?harness=codex"}
+	for _, path := range paths {
+		t.Run(path, func(t *testing.T) {
+			pool, barrier, ctx := dbtest.BarrierPool(t, appPool, func(sql string) bool {
+				return strings.Contains(sql, "FROM agent_accounts") || strings.Contains(sql, "FROM account_groups") || strings.Contains(sql, "FROM account_ticket_pins") || strings.Contains(sql, "FROM account_capacity_schedules")
+			})
+			mod := fixedClockModule{Module: &Module{pool: pool}, at: now}
+			read := make(chan *httptest.ResponseRecorder, 1)
+			go func() { read <- evidenceHTTP(mod, ctx, f.admin, "", "GET", path, "", now) }()
+			holder := barrier.Wait(t, ctx)
+			patch := make(chan *httptest.ResponseRecorder, 1)
+			done := make(chan struct{})
+			// One second bounds a hung save; the database barrier and lock graph
+			// establish overlap, without a sleep or elapsed-time assertion.
+			patchCtx, cancel := context.WithTimeout(ctx, time.Second)
+			defer cancel()
+			go func() {
+				patch <- evidenceHTTP(nodes.New(appPool, nil), patchCtx, f.admin, "", "PATCH", "/api/nodes/"+nodeID, `{"title":"Saved while reading capacity"}`, now)
+				close(done)
+			}()
+			if lock := dbtest.BlockedOrDone(t, patchCtx, adminPool, holder, done); lock != "" {
+				t.Fatalf("account GET blocks node PATCH on %s", lock)
+			}
+			if got := dbtest.Await(t, ctx, patch); got.Code != http.StatusOK {
+				t.Fatalf("node PATCH: %d %s", got.Code, got.Body.String())
+			}
+			barrier.Release()
+			if got := dbtest.Await(t, ctx, read); got.Code != http.StatusOK {
+				t.Fatalf("account GET: %d %s", got.Code, got.Body.String())
+			}
+		})
+	}
+}
+
+func TestCapacityProjectionBatchAndGolden(t *testing.T) {
+	now := time.Date(2026, 10, 19, 12, 0, 0, 0, time.UTC)
+	f := limitWorldAt(t, "capacity-batch", 3, now)
+	seed := func(a Account, index int) {
+		t.Helper()
+		f2 := f
+		f2.account = a
+		f2.report(t, 30, now.Add(-time.Minute), now.Add(time.Duration(80+index)*time.Hour))
+		seedExistingLimit(t, f2, 80, "percent", "day", nil)
+	}
+	seed(f.account, 0)
+	project := func() ([]accountCapacity, dbtest.ReadWork) {
+		t.Helper()
+		var out []accountCapacity
+		var work dbtest.ReadWork
+		ctx := context.WithValue(tenant.WithPrincipal(t.Context(), f.admin), clockKey{}, now)
+		if err := db.InTenantReadSnapshot(ctx, appPool, f.admin.TenantID, func(tx pgx.Tx) error {
+			var err error
+			out, err = projectCapacity(ctx, dbtest.CountReads(tx, &work), f.admin.ID, nil, 0)
+			return err
+		}); err != nil {
+			t.Fatal(err)
+		}
+		return out, work
+	}
+	one, small := project()
+	if len(one) != 1 || one[0].Routing == nil || one[0].Routing.Rank != 1 || one[0].Routing.AvailableSlots < 1 {
+		t.Fatalf("fixture must exercise live routing: %+v", one)
+	}
+	// Stable identities and audit timestamps leave every computed field in the
+	// golden, including pacing, limits, learning and routing advice.
+	one[0].AccountID = "account"
+	one[0].Limit.ID = "limit"
+	one[0].Limit.AccountID = "account"
+	one[0].Limit.CreatedAt = now
+	raw, err := json.MarshalIndent(one, "", "  ")
+	if err != nil {
+		t.Fatal(err)
+	}
+	golden, err := os.ReadFile("testdata/capacity-projection.golden.json")
+	if err != nil || strings.TrimSpace(string(golden)) != string(raw) {
+		t.Errorf("capacity projection golden mismatch (%v):\n%s", err, raw)
+	}
+	for i := 1; i < 20; i++ {
+		var a Account
+		callStatus(t, f.mod, &f.runner, f.token, "POST", "/api/agent-accounts", fmt.Sprintf(`{"account_key":"batch-%d","harness":"codex","daemon_id":"daemon-a","label":"Batch","max_parallel_runs":3}`, i), 201, &a)
+		ownFixtureAccount(t, f.admin, &a)
+		callStatus(t, f.mod, &f.runner, f.token, "POST", "/api/agent-accounts/"+a.ID+"/probe", `{"daemon_id":"daemon-a","daemon_generation":"g1","available":true}`, 200, nil)
+		s := one[0].Schedule
+		seedExistingSchedule(t, f.admin, scheduleOverride{Scope: "account", AccountID: a.ID, Schedule: &s})
+		seed(a, i)
+	}
+	all, large := project()
+	if len(all) != 20 {
+		t.Fatalf("lost accounts: %d", len(all))
+	}
+	if large.Statements != small.Statements {
+		t.Errorf("capacity statements grew with accounts: 1=%d, 20=%d", small.Statements, large.Statements)
+	}
+	if large.Rows > 30*small.Rows+100 {
+		t.Errorf("capacity rows grew beyond account data: 1=%d, 20=%d", small.Rows, large.Rows)
+	}
+	t.Logf("capacity read work: 1=%+v 20=%+v", small, large)
+}
 
 // capacityWorld registers one account per harness with a fresh weekly reading.
 func capacityWorld(t *testing.T, slug string, harnesses ...string) (tenant.Principal, tenant.Principal, string, map[string]Account) {
