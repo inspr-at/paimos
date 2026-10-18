@@ -3,18 +3,23 @@
 // One item of an opened goal (AEON-1457 decision 6): state icon · keys · outcome
 // label (wraps) and its one live line · the agent badge in the goal's agent column ·
 // ETA. Done items keep their keys and label; a handed-over item names what was
-// handed over and, when the goal carries it, the detail.
+// handed over and, when the goal carries it, the detail. The live line is the
+// agent's note (AEON-1494 decision 5): a speech icon, at most two lines, closed by
+// its author and time ("· AEON-LEAD 18:52"); the whole note is a tip when clipped.
 import { computed } from 'vue'
 import { RouterLink } from 'vue-router'
 import AppIcon from '../AppIcon.vue'
 import LiveAgents from '../projects/LiveAgents.vue'
 import GoalEta from './GoalEta.vue'
 import GoalStateIcon from './GoalStateIcon.vue'
-import { STATE_LABEL, ticketHref, type GoalOutcome } from '../../lib/goals'
+import { vClipTip } from '../../lib/clipTip'
+import { noteByline, STATE_LABEL, ticketHref, type GoalOutcome } from '../../lib/goals'
 import type { LiveAgent } from '../../lib/liveAgents'
 
 const props = defineProps<{ item: GoalOutcome; goalId: string; agents: LiveAgent[]; project: { title: string; routeKey: string }; now: number; detail?: string }>()
 const done = computed(() => props.item.state === 'done' || props.item.handed_over)
+const note = computed(() => props.item.note.trim())
+const byline = computed(() => noteByline(props.item, props.now))
 </script>
 
 <template>
@@ -30,7 +35,12 @@ const done = computed(() => props.item.state === 'done' || props.item.handed_ove
         <RouterLink v-for="key in item.keys.slice(0, 2)" :key="key" :to="ticketHref(key)">{{ key }}</RouterLink>
         <span v-if="item.keys.length > 2" class="more" :data-tip="item.keys.slice(2).join(', ')" tabindex="0">+{{ item.keys.length - 2 }} more</span>
       </span>
-      <div class="i-main"><span class="i-label">{{ item.label }}</span><span v-if="item.note" class="i-live">{{ item.note }}</span></div>
+      <div class="i-main">
+        <span class="i-label">{{ item.label }}</span>
+        <span v-if="note" class="i-live is-note">
+          <AppIcon name="note" :size="12" /><span v-clip-tip="`${note} ${byline}`.trim()" class="t">{{ note }} <span v-if="byline" class="by">{{ byline }}</span></span>
+        </span>
+      </div>
       <div v-if="agents.length && !done" class="i-badge"><LiveAgents :agents="agents" :project="project" variant="row" /></div>
       <!-- Phones hide the key column. These links stay, so an item with no agent still opens its work. -->
       <nav v-if="item.keys.length" class="phone-tickets" :aria-label="`Tickets for ${item.label}`">
@@ -62,6 +72,11 @@ const done = computed(() => props.item.state === 'done' || props.item.handed_ove
 .i-label { font-size: 13.5px; font-weight: 500; line-height: 20px; color: var(--ink); text-wrap: pretty; overflow-wrap: anywhere; }
 .is-done .i-label { color: var(--ink-2); font-weight: 400; }
 .i-live { display: flex; align-items: center; gap: 6px; font-size: 12px; line-height: 17px; color: var(--ink-3); overflow-wrap: anywhere; }
+/* The agent's note: at most two balanced lines; the author and time close it and never break apart. */
+.i-live.is-note { align-items: flex-start; }
+.i-live.is-note svg { flex: none; margin-top: 2.5px; color: var(--ink-3); }
+.i-live.is-note .t { min-width: 0; max-height: 34px; overflow: hidden; color: var(--ink-2); text-wrap: balance; }
+.i-live.is-note .by { color: var(--ink-3); white-space: nowrap; }
 .i-detail { font-size: 12px; line-height: 1.4; color: var(--ink-3); }
 .handed .i-state { color: var(--ink-2); }
 @media (max-width: 1399px) {

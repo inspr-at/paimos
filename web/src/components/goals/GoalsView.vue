@@ -5,13 +5,17 @@
 // progress and ETAs line up from top to bottom. Header labels are the sort
 // controls (LANDS, by ETA, first). Goals open in place; the list never moves a
 // control under the pointer. Content comes from the server only: without goals
-// the view says so, it never shows examples.
+// the view says so, it never shows examples. AEON-1494: the workspace status note
+// leads the grid when an agent wrote one, and the card footer ends with the
+// freshness stamp (Live, or Reconnecting) beside the quiet projects.
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useRoute } from 'vue-router'
 import AppIcon from '../AppIcon.vue'
 import RowMenu from '../business/RowMenu.vue'
 import GoalRow from './GoalRow.vue'
 import GoalWaiting from './GoalWaiting.vue'
+import GoalStatusNote from './GoalStatusNote.vue'
+import GoalFreshness from './GoalFreshness.vue'
 import type { GoalsPage } from './goalsPage'
 import { useSession } from '../../stores/session'
 import { useLiveAgents } from '../../stores/liveAgents'
@@ -146,6 +150,7 @@ const canClear = computed(() => filtering.value)
     <template v-else>
       <p v-if="loaded && page.totalsPartial.value" class="partial-line" role="status">Counts omit oversized goals.</p>
       <div class="goal-grid">
+        <GoalStatusNote v-if="loaded && page.statusNote.value" :note="page.statusNote.value" :now="now" :folded="page.noteFolded.value" @fold="page.setNoteFolded" />
         <GoalWaiting v-if="person" :goals="goals" />
         <template v-if="!loaded">
           <ul class="sk-list" role="status" aria-label="Loading goals">
@@ -194,10 +199,13 @@ const canClear = computed(() => filtering.value)
         <button type="button" class="btn sm" :disabled="page.loadingMore.value" @click="page.loadMore()">{{ page.loadingMore.value ? 'Reading…' : 'Show more goals' }}</button>
       </p>
       <p v-if="page.error.value && loaded" class="more-line warn" role="status"><AppIcon name="alert" :size="13" />{{ page.error.value }}<button type="button" class="btn sm ghost" @click="page.read()">Try again</button></p>
-      <p v-if="loaded && quiet.count && goals.length" class="quiet-line">
-        <span>{{ plural(quiet.count, 'project') }} with nothing moving:</span>
-        <RouterLink v-for="key in quiet.keys" :key="key" class="pk mono" :to="`/p/${encodeURIComponent(key)}`">{{ key }}</RouterLink>
-      </p>
+      <div v-if="loaded && goals.length" class="card-foot">
+        <p v-if="quiet.count" class="quiet-line">
+          <span>{{ plural(quiet.count, 'project') }} with nothing moving:</span>
+          <RouterLink v-for="key in quiet.keys" :key="key" class="pk mono" :to="`/p/${encodeURIComponent(key)}`">{{ key }}</RouterLink>
+        </p>
+        <GoalFreshness :live="page.live.value" :eta-set-at="page.etaLastSetAt.value" :updated-at="page.updatedAt.value" :now="now" />
+      </div>
     </template>
     <RowMenu v-if="menu" :anchor="menu.anchor" :items="menuItems" :label="`Goal ${menu.goal.title}`" @select="menuAction" @close="closeMenu" />
   </div>
@@ -223,7 +231,9 @@ const canClear = computed(() => filtering.value)
 .head-expand .lbl > .off { visibility: hidden; }
 .head-expand:hover { background: var(--row-hover); color: var(--teal-ink); }
 .head-sort:focus-visible, .head-expand:focus-visible { outline: none; box-shadow: var(--focus-ring); }
-.quiet-line { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 8px; margin: 0; padding: 14px 20px 16px; border-top: 1px solid var(--line); font-size: 12.5px; color: var(--ink-3); }
+/* The card footer: projects with nothing moving, then the freshness stamp. */
+.card-foot { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 24px; padding: 14px 20px 16px; border-top: 1px solid var(--line); }
+.quiet-line { flex: 1 1 auto; min-width: 0; display: flex; flex-wrap: wrap; align-items: center; gap: 4px 8px; margin: 0; font-size: 12.5px; color: var(--ink-3); }
 .quiet-line .pk { font-size: 11.5px; font-weight: 500; letter-spacing: .02em; color: var(--ink-2); padding: 4px 2px; border-radius: 5px; text-decoration: none; }
 .quiet-line .pk:hover { color: var(--teal-ink); text-decoration: underline; text-underline-offset: 2px; }
 .partial-line { margin: 0; padding: 10px 20px 0; font-size: 12.5px; line-height: 1.4; color: var(--ink-3); }
@@ -254,7 +264,8 @@ const canClear = computed(() => filtering.value)
   .head-expand { display: inline-flex; min-height: 44px; padding: 0 14px 0 10px; font-size: 13px; }
   .goal-list { padding: 4px 0; }
   .partial-line { padding: 8px 14px 0; font-size: 13px; }
-  .quiet-line { padding: 10px 14px 12px; font-size: 13px; gap: 0 4px; }
+  .card-foot { display: block; padding: 10px 14px 12px; }
+  .quiet-line { font-size: 13px; gap: 0 4px; }
   .quiet-line > span { flex: 1 0 100%; padding: 6px 0 0; }
   .quiet-line .pk { display: inline-flex; align-items: center; justify-content: center; min-height: 44px; min-width: 44px; padding: 0 8px; }
   .state { padding: 44px 20px; }

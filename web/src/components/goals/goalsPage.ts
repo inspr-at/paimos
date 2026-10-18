@@ -5,7 +5,9 @@
 // search change the list, never the counts. Each read is bound to the person and
 // the query it was asked for: an answer for another person, an older query or an
 // older turn never reaches the screen. Progress series and creation times are read
-// per goal as rows need them, a few at a time.
+// per goal as rows need them, a few at a time. The event stream (AEON-1494) says
+// when goals, items or the workspace status note changed: the list is read again
+// at once, and its state is the footer's freshness stamp (Live or Reconnecting).
 import { computed, onScopeDispose, reactive, ref, shallowRef, watch, type Ref } from 'vue'
 import { useSession } from '../../stores/session'
 import { scopeOwner } from '../../lib/identityScope'
@@ -13,14 +15,17 @@ import { usePreference } from '../../lib/preferences'
 import { usePoller } from '../../lib/usePolledData'
 import { goalCreatedAt, goalMatches, goalSeries, itemMatches, listGoals, SORT_DIR, type Goal, type GoalCounts, type GoalList, type GoalSeries, type GoalSort, type StateFilter } from '../../lib/goals'
 import { isGoalRange, type GoalRange } from '../../lib/goalRate'
+import { openGoalsLive, type GoalsLiveState } from '../../lib/goalsLive'
 
 const LIST_POLL_MS = 60_000
 const SEARCH_SETTLE_MS = 250
 // A series is read again once the goal's progress changed, or after this long.
 const SERIES_FRESH_MS = 5 * 60_000
 const SERIES_PARALLEL = 3
+// Changes arrive in bursts (one write appends several events): one read per burst.
+const LIVE_SETTLE_MS = 400
 
-type GoalsPrefs = { range?: string; hideDone?: boolean }
+type GoalsPrefs = { range?: string; hideDone?: boolean; noteFolded?: boolean }
 export interface SeriesEntry { state: 'reading' | 'ready' | 'failed' | 'too_large'; series?: GoalSeries; createdAt: number | null; at: number; sign: string }
 
 // shown: the project groups the person hides take their goals with them.
@@ -39,6 +44,9 @@ export function useGoalsPage(options: { term: Ref<string>; active: () => boolean
   // One range for every chart, the one used last (the ViewSwitch rule).
   const range = computed<GoalRange>(() => isGoalRange(prefs.value.value?.range) ? prefs.value.value!.range as GoalRange : '24h')
   function setRange(value: GoalRange) { if (value !== range.value) void prefs.save({ ...(prefs.value.value ?? {}), range: value }, 0) }
+  // The status note folded to one line, remembered like the range (AEON-1494 decision 1).
+  const noteFolded = computed(() => prefs.value.value?.noteFolded === true)
+  function setNoteFolded(value: boolean) { if (value !== noteFolded.value) void prefs.save({ ...(prefs.value.value ?? {}), noteFolded: value }, 0) }
   function setSort(key: GoalSort, direction?: 'asc' | 'desc') {
     if (direction) { sort.value = key; dir.value = direction; return }
     if (sort.value === key) dir.value = dir.value === 'asc' ? 'desc' : 'asc'
@@ -50,6 +58,8 @@ export function useGoalsPage(options: { term: Ref<string>; active: () => boolean
   const error = ref('')
   const reading = ref(false)
   const loadingMore = ref(false)
+  // When this screen last received the list: the Reconnecting stamp's "last update".
+  const updatedAt = ref<number | null>(null)
   let turn = 0, shownQuery = ''
   // A list read retires pagination at once. The page still in flight must not
   // leave "Show more" disabled, and must not append onto the list that replaced it.
@@ -72,7 +82,7 @@ export function useGoalsPage(options: { term: Ref<string>; active: () => boolean
       // The same question never goes back to an older snapshot than the one on screen.
       const shown = list.value
       if (shown && asked === shownQuery && (answer.read_through < shown.read_through || (answer.read_through === shown.read_through && answer.generation < shown.generation))) return
-      list.value = answer; shownQuery = asked; error.value = ''
+      list.value = answer; shownQuery = asked; error.value = ''; updatedAt.value = Date.now()
     }, cause => {
       if (!current() || abort.signal.aborted) return
       error.value = cause instanceof Error ? cause.message : 'Goals could not be read.'
@@ -98,6 +108,23 @@ export function useGoalsPage(options: { term: Ref<string>; active: () => boolean
   watch([filter, sort, dir, hideDone], () => { clearTimeout(settle); void read() })
   const poller = usePoller(read, LIST_POLL_MS, { enabled: () => options.active() && !!owner.value })
   watch(() => options.active() && !!owner.value, on => { if (on) poller.start(true); else { poller.stop(); controller?.abort() } }, { immediate: true })
+
+  // ---------- Live ----------
+  const live = ref<GoalsLiveState>('off')
+  let stream: { close(): void } | undefined
+  let liveSettle: ReturnType<typeof setTimeout> | undefined
+  function stopLive() { clearTimeout(liveSettle); stream?.close(); stream = undefined; live.value = 'off' }
+  function startLive() {
+    stopLive()
+    stream = openGoalsLive({
+      state: value => { live.value = value },
+      changed: () => { clearTimeout(liveSettle); liveSettle = setTimeout(() => { void read() }, LIVE_SETTLE_MS) },
+    })
+  }
+  // The stream belongs to the person on screen: another person starts a new one.
+  watch([() => options.active(), owner], ([on, who]) => { if (on && who) startLive(); else stopLive() }, { immediate: true })
+  const statusNote = computed(() => list.value?.status_note ?? null)
+  const etaLastSetAt = computed(() => { const at = list.value?.eta_last_set_at ? Date.parse(list.value.eta_last_set_at) : NaN; return Number.isNaN(at) ? null : at })
 
   // ---------- Opening goals and charts ----------
   const open = reactive(new Set<string>())
@@ -179,16 +206,17 @@ export function useGoalsPage(options: { term: Ref<string>; active: () => boolean
   // Another person or workspace starts from nothing: no list, no open goals, no series.
   watch(owner, () => {
     turn++; controller?.abort(); retireSeries(); retirePagination()
-    list.value = null; error.value = ''; reading.value = false
+    list.value = null; error.value = ''; reading.value = false; updatedAt.value = null
     open.clear(); charts.clear(); folds.clear(); series.clear(); filter.value = 'all'
     if (options.active()) void read()
   }, { flush: 'sync' })
-  function stop() { poller.stop(); controller?.abort(); clearTimeout(settle); retireSeries(); retirePagination() }
+  function stop() { poller.stop(); controller?.abort(); clearTimeout(settle); stopLive(); retireSeries(); retirePagination() }
   // Leaving the page stops the reads; its watchers go with the page's scope.
   onScopeDispose(stop)
 
   return {
     filter, sort, dir, hideDone, setHideDone, range, setRange, setSort, list, goals, hiddenByGroups, error, reading, loaded, loadingMore, loadMore, read,
+    live, updatedAt, statusNote, etaLastSetAt, noteFolded, setNoteFolded,
     open, charts, folds, isOpen, allOpen, toggle, toggleAll, toggleFold, toggleChart, searchOpens, want, seriesFor, counts, totals, totalsPartial, stop,
   }
 }

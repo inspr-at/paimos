@@ -25,6 +25,7 @@ export type IconName =
   | 'telescope' | 'lightbulb' | 'triangle-alert' | 'siren' | 'flame' | 'shield-alert' | 'messages-square' | 'handshake' | 'megaphone'
   | 'gavel' | 'scale' | 'vote' | 'calendar-check' | 'timer' | 'hourglass' | 'trending-up' | 'sprout'
   | 'wait' | 'hand' | 'route' | 'park' | 'req' | 'skip'
+  | 'note' | 'reconnect'
 </script>
 <script setup lang="ts">
 withDefaults(defineProps<{ name: IconName; size?: number }>(), { size: 16 })
@@ -168,6 +169,8 @@ withDefaults(defineProps<{ name: IconName; size?: number }>(), { size: 16 })
     <template v-else-if="name === 'thumbs-down'"><path stroke-width="1.5" d="M11.3 9.4V1.7" /><path stroke-width="1.5" d="M6.1 12.2 6.8 9.4H2.9a1.3 1.3 0 0 1-1.2-1.7l1.5-5.2A1.3 1.3 0 0 1 4.4 1.4h8.8a1.3 1.3 0 0 1 1.3 1.3v5.4a1.3 1.3 0 0 1-1.3 1.3H11.3a1.3 1.3 0 0 0-1.2.8L8.2 14.5a2 2 0 0 1-2.1-2.3Z" /></template>
     <template v-else-if="name === 'help'"><circle cx="8" cy="8" r="6.2" /><path d="M6.2 6.3a1.9 1.9 0 0 1 3.7.5c0 1.3-1.9 1.6-1.9 2.8M8 11.4v.05" /></template>
     <path v-else-if="name === 'pulse'" d="M1.8 8.4h2.6l1.6-4 2.6 8 1.8-5.2.9 1.2h2.9" />
+    <template v-else-if="name === 'note'"><path d="M3.2 2.8h9.6c.7 0 1.2.5 1.2 1.2v6c0 .7-.5 1.2-1.2 1.2H7.6l-3 2.6v-2.6H3.2c-.7 0-1.2-.5-1.2-1.2V4c0-.7.5-1.2 1.2-1.2Z" /><path d="M5.2 6h5.6M5.2 8.4h3.6" /></template>
+    <template v-else-if="name === 'reconnect'"><path d="M13.2 6.4A5.4 5.4 0 0 0 3.5 4.5M2.8 9.6a5.4 5.4 0 0 0 9.7 1.9" /><path d="M3.1 1.9v2.9H6M12.9 14.1v-2.9H10" /></template>
     <path v-else-if="name === 'message'" d="M2.4 4.2c0-.9.7-1.6 1.6-1.6h8c.9 0 1.6.7 1.6 1.6v5.4c0 .9-.7 1.6-1.6 1.6H7l-3 2.4v-2.4a1.6 1.6 0 0 1-1.6-1.6Z" />
     <path v-else-if="name === 'bars'" d="M3 13.2V8.6M8 13.2V3M13 13.2V6.2" />
     <template v-else-if="name === 'flow'"><circle cx="3.4" cy="8" r="1.7" /><circle cx="12.6" cy="8" r="1.7" /><path d="M5.1 8h5.8M8 4.6V3M8 13v-1.6" /></template>

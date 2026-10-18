@@ -5,6 +5,8 @@
 // waits-on-you marker and LANDS — and, opened, its panel on a full tint: what's
 // missing as an ordered list, then its items (Moving, Queued with the first five
 // shown, Paused; Done folded into one line) and the "Handed over" line last.
+// AEON-1494: LANDS keeps a muted "~40 h left" line, and the Done fold says how
+// many finished today ("8 done · 7 today · show").
 import { computed } from 'vue'
 import { RouterLink } from 'vue-router'
 import AppIcon from '../AppIcon.vue'
@@ -14,7 +16,7 @@ import GoalProgress from './GoalProgress.vue'
 import GoalItem from './GoalItem.vue'
 import type { GoalsPage } from './goalsPage'
 import { vClipTip } from '../../lib/clipTip'
-import { itemGroups, itemMatches, QUEUE_SHOWN, STATE_LABEL, type Goal, type GoalOutcome } from '../../lib/goals'
+import { doneToday, hoursLeftLine, hoursLeftText, itemGroups, itemMatches, QUEUE_SHOWN, STATE_LABEL, type Goal, type GoalOutcome } from '../../lib/goals'
 import { averageRate, projectionText } from '../../lib/goalRate'
 import type { LiveAgent } from '../../lib/liveAgents'
 
@@ -45,6 +47,9 @@ const queuedFirst = computed(() => filtering.value ? groups.value.queued : group
 const queuedMore = computed(() => filtering.value ? 0 : Math.max(0, groups.value.queued.length - QUEUE_SHOWN))
 const queuedRest = computed(() => !filtering.value && folds.value.queued ? groups.value.queued.slice(QUEUE_SHOWN) : [])
 const doneShown = computed(() => filtering.value || folds.value.done ? groups.value.done : [])
+const today = computed(() => doneToday(groups.value.done, props.now))
+const left = computed(() => hoursLeftText(props.goal.progress, done.value))
+const leftLine = computed(() => hoursLeftLine(props.goal.progress, done.value))
 const stepsDone = computed(() => props.goal.steps.filter(step => step.state === 'done').length)
 const nextText = computed(() => props.goal.next_step?.text ?? '')
 const handedDetail = (item: GoalOutcome) => props.goal.handed_over?.outcome_id === item.id ? props.goal.handed_over.detail : ''
@@ -85,7 +90,7 @@ const deskLink = computed(() => props.goal.waits.question_ids[0] ? { path: '/dec
       <GoalProgress :goal="goal" :open="page.charts.has(goal.id)" :range="page.range.value" :entry="entry" :now="now" @toggle="page.toggleChart(goal.id)" @range="page.setRange" />
       <RouterLink v-if="goal.waits.count" class="waits mono" :to="deskLink" :data-tip="waitsLabel" :aria-label="waitsLabel"><AppIcon name="person-wait" :size="14" /><span>{{ goal.waits.count }}</span></RouterLink>
       <span v-else />
-      <GoalEta class="goal-eta" :goal-id="goal.id" :eta="goal.eta" :passed="goal.passed" :done="done" :now="now" :projection="projection" :items="goal.items" />
+      <GoalEta class="goal-eta" :goal-id="goal.id" :eta="goal.eta" :passed="goal.passed" :done="done" :now="now" :projection="projection" :items="goal.items" reserve-left :left="left" :left-line="leftLine" />
       <button type="button" class="icon-btn flat sm row-more" aria-haspopup="menu" :aria-expanded="menuOpen" :aria-label="`Actions for ${goal.title}`" @click="emit('menu', $event.currentTarget as HTMLElement)"><AppIcon name="more" :size="14" /></button>
     </div>
     <div :id="`body-${goal.id}`" class="goal-body" role="region" :aria-label="`${goal.title}, items`" :hidden="!open">
@@ -115,7 +120,7 @@ const deskLink = computed(() => props.goal.waits.question_ids[0] ? { path: '/dec
           <GoalItem v-for="item in groups.paused" :key="item.id" :item="item" :goal-id="goal.id" :agents="agentsOf(item.session_ids)" :project="project" :now="now" />
           <li v-if="groups.done.length && !filtering" class="fold-line">
             <button type="button" class="fold-btn" :aria-expanded="!!folds.done" data-nav @click="page.toggleFold(goal.id, 'done')">
-              <AppIcon name="chevron-right" :size="12" /><b>{{ groups.done.length }}</b> done<span class="act"><span :class="{ off: folds.done }">· show</span><span :class="{ off: !folds.done }">· hide</span></span>
+              <AppIcon name="chevron-right" :size="12" /><b>{{ groups.done.length }}</b> done<span v-if="today" class="today">· {{ today }} today</span><span class="act"><span :class="{ off: folds.done }">· show</span><span :class="{ off: !folds.done }">· hide</span></span>
             </button>
           </li>
           <GoalItem v-for="item in doneShown" :key="item.id" :item="item" :goal-id="goal.id" :agents="[]" :project="project" :now="now" />
@@ -187,6 +192,7 @@ const deskLink = computed(() => props.goal.waits.question_ids[0] ? { path: '/dec
 .fold-line { padding: 0; }
 .fold-btn { grid-column: 3 / -3; justify-self: start; display: inline-flex; align-items: center; gap: 6px; height: 30px; padding: 0 9px 0 6px; margin-left: -6px; border: 0; border-radius: 8px; background: transparent; color: var(--ink-3); font-size: 12.5px; }
 .fold-btn b { font-weight: 600; color: var(--ink-2); font-variant-numeric: tabular-nums; }
+.fold-btn .today { color: var(--ink-3); font-variant-numeric: tabular-nums; }
 /* "show" and "hide" share one box, so the button never changes width. */
 .fold-btn .act { display: inline-grid; color: var(--teal-ink); font-weight: 600; }
 .fold-btn .act > span { grid-area: 1 / 1; }
