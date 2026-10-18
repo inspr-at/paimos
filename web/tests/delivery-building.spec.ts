@@ -208,3 +208,40 @@ for (const width of [1440, 390] as const) {
     guard.done()
   })
 }
+
+test('Building it: the previous worst five stay closed until the new window answers', async ({ page }) => {
+  test.setTimeout(90_000)
+  await page.setViewportSize({ width: 1440, height: 1000 })
+  const work = fixtures()
+  work.preferences.theme = { choice: 'light' }
+  work.preferences['delivery:numbers'] = { level: 'simple', window: 7 }
+  await mockWork(page, work)
+  await mockDelivery(page, () => ({ status: 200, body: deliveryMetrics() }))
+  const held = gate()
+  let hold = false
+  await mockBuilding(page, async (projectId, window) => {
+    if (hold) await held.wait
+    const body = buildingAnswer(projectId, window)
+    if (window === 30) for (const metric of body.metrics) if (metric.worst[0]) metric.worst[0].key = 'AEON-930'
+    return { status: 200, body }
+  })
+  await page.goto('/p/AEON/delivery')
+  const head = section(page).getByTestId('delivery-building-head')
+  await expect(head).toHaveText('0 of 3 on target', { timeout: 15_000 })
+  await settled(page)
+  const rounds = trigger(page, 'Rounds per item')
+  await rounds.scrollIntoViewIfNeeded()
+  await expect(rounds).toBeEnabled()
+  hold = true
+  await page.getByRole('radiogroup', { name: 'Chart window' }).getByRole('radio', { name: '30 days' }).click()
+  await expect(rounds).toBeDisabled()
+  await expect(page.getByTestId('delivery-worst')).toHaveCount(0)
+  await expect(head).toHaveText('0 of 3 on target')
+  await rounds.click({ force: true })
+  await expect(page.getByTestId('delivery-worst')).toHaveCount(0)
+  hold = false
+  held.open()
+  await expect(rounds).toBeEnabled()
+  await rounds.click()
+  await expect(page.getByTestId('delivery-worst').getByRole('link').first()).toHaveAttribute('aria-label', /^AEON-930 /)
+})

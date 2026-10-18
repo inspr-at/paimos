@@ -54,6 +54,10 @@ func TestDeliveryBuildingEndpointReadsFlowUnderRLS(t *testing.T) {
 	}
 	rounds := buildingMetricOf(t, out, "rounds")
 	wantValue(t, "rounds", rounds.Current.Value, 2)
+	// Two rounds against the default 1.6 is close (1.25×). A saved target must be able to move this.
+	if rounds.Verdict.Level != "close" || rounds.Target == nil || rounds.Target.Value != 1.6 || rounds.Target.Source != "delivery_settings" {
+		t.Fatalf("default rounds verdict %+v target %+v", rounds.Verdict, rounds.Target)
+	}
 	if len(rounds.Worst) != 1 || rounds.Worst[0].NodeID != f.ticket || rounds.Worst[0].Key != "AEON-848" || !reflect.DeepEqual(rounds.Worst[0].Rounds, []string{roundChanges, roundPassed}) {
 		t.Fatalf("worst rounds %+v", rounds.Worst)
 	}
@@ -84,8 +88,49 @@ func TestDeliveryBuildingEndpointReadsFlowUnderRLS(t *testing.T) {
 		t.Fatalf("overrides view invented targets %+v", saved.Targets)
 	}
 
-	// Targets cannot be saved yet: a write that names them is refused, never silently dropped.
+	// A complete triple is saved. The workspace value replaces the defaults; the project value replaces the workspace.
+	targets := func(first, perItem, idle float64) map[string]any {
+		return map[string]any{"targets": map[string]float64{"first_try_rate": first, "rounds_per_item": perItem, "idle_p50_minutes": idle}}
+	}
+	f.call(t, f.person, "PUT", "/api/settings/delivery", targets(60, 2, 15), 200, nil)
+	f.call(t, f.person, "GET", path, nil, 200, &out)
+	rounds = buildingMetricOf(t, out, "rounds")
+	if rounds.Target == nil || rounds.Target.Value != 2 || rounds.Target.Source != "delivery_settings" || rounds.Verdict.Level != "on" || rounds.Verdict.Ratio == nil || *rounds.Verdict.Ratio != 1 {
+		t.Fatalf("workspace target did not move the verdict: %+v %+v", rounds.Target, rounds.Verdict)
+	}
+	f.call(t, f.person, "GET", "/api/projects/"+f.project+"/delivery-settings?view=overrides", nil, 200, &saved)
+	if saved.Targets != nil {
+		t.Fatalf("project overrides picked up the workspace targets %+v", saved.Targets)
+	}
+	f.call(t, f.person, "PUT", "/api/projects/"+f.project+"/delivery-settings", targets(60, 1, 15), 200, nil)
+	f.call(t, f.person, "GET", path, nil, 200, &out)
+	rounds = buildingMetricOf(t, out, "rounds")
+	if rounds.Target == nil || rounds.Target.Value != 1 || rounds.Verdict.Level != "far" || rounds.Verdict.Ratio == nil || *rounds.Verdict.Ratio != 2 {
+		t.Fatalf("project target did not replace the workspace target: %+v %+v", rounds.Target, rounds.Verdict)
+	}
+	f.call(t, f.person, "GET", "/api/projects/"+f.project+"/delivery-settings", nil, 200, &settings)
+	if settings.Targets == nil || settings.Targets.RoundsPerItem != 1 || settings.Targets.FirstTryRate != 60 || settings.Targets.IdleP50Minutes != 15 {
+		t.Fatalf("effective targets %+v", settings.Targets)
+	}
+	f.call(t, f.person, "GET", "/api/projects/"+f.project+"/delivery-settings?view=overrides", nil, 200, &saved)
+	if saved.Targets == nil || *saved.Targets != *settings.Targets {
+		t.Fatalf("saved overrides %+v", saved.Targets)
+	}
+	// A partial object and an out-of-range triple are refused and leave the stored target.
 	f.call(t, f.person, "PUT", "/api/projects/"+f.project+"/delivery-settings", map[string]any{"targets": map[string]float64{"first_try_rate": 80}}, 400, nil)
+	f.call(t, f.person, "PUT", "/api/projects/"+f.project+"/delivery-settings", targets(101, 1, 15), 400, nil)
+	f.call(t, f.person, "GET", path, nil, 200, &out)
+	rounds = buildingMetricOf(t, out, "rounds")
+	if rounds.Target == nil || rounds.Target.Value != 1 || rounds.Verdict.Level != "far" {
+		t.Fatalf("refused write changed the target: %+v %+v", rounds.Target, rounds.Verdict)
+	}
+	// A target of zero is on target for a measured zero, not a division by the target.
+	f.call(t, f.person, "PUT", "/api/projects/"+f.project+"/delivery-settings", targets(0, 1, 15), 200, nil)
+	f.call(t, f.person, "GET", path, nil, 200, &out)
+	first := buildingMetricOf(t, out, "first_try")
+	if first.Current.Value == nil || *first.Current.Value != 0 || first.Target == nil || first.Target.Value != 0 || first.Verdict.Level != "on" {
+		t.Fatalf("zero first-try target %+v verdict %+v", first.Target, first.Verdict)
+	}
 
 	// Another workspace does not see the project; a key without delivery.read is refused.
 	f.call(t, f.foreign, "GET", path, nil, 404, nil)

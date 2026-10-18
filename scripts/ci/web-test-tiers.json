@@ -8436,6 +8436,8 @@
     ,
     {"kind":"browser","file":"tests/delivery-building.spec.ts","name":"Building it: on a phone the worst five open as a bottom sheet with 44 px targets","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
+    {"kind":"browser","file":"tests/delivery-building.spec.ts","name":"Building it: the previous worst five stay closed until the new window answers","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
     {"kind":"browser","file":"tests/delivery-flow-lanes.spec.ts","name":"Flow lanes at 1440 dark en keep controls still","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
     {"kind":"browser","file":"tests/delivery-flow-lanes.spec.ts","name":"Flow lanes at 1440 light de keep controls still","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
@@ -18047,6 +18049,8 @@
     {"kind":"vitest","file":"tests/delivery-building.unit.test.ts","name":"AEON-1493: loading, a failed read and a window without rounds never show figures, and say so in the head line","tier":"ESSENTIAL"}
     ,
     {"kind":"vitest","file":"tests/delivery-building.unit.test.ts","name":"AEON-1493: the four tiles say the server's figures, changes and verdicts in Simple and Expert words","tier":"ESSENTIAL"}
+    ,
+    {"kind":"vitest","file":"tests/delivery-building.unit.test.ts","name":"AEON-1493: the previous worst five stay closed while a new window is loading","tier":"ESSENTIAL"}
     ,
     {"kind":"vitest","file":"tests/delivery-building.unit.test.ts","name":"AEON-1493: the summary card counts the Building it targets and names their gaps","tier":"ESSENTIAL"}
     ,

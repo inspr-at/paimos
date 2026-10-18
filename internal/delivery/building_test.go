@@ -2,6 +2,7 @@
 package delivery
 
 import (
+	"math"
 	"reflect"
 	"testing"
 	"time"
@@ -239,5 +240,126 @@ func TestDeliveryBuildingJudgements(t *testing.T) {
 	}
 	if v := buildingVerdictOf(f64(28), &buildingTarget{Value: 60, Direction: "min"}); v.Level != "far" {
 		t.Fatalf("first-try verdict %+v", v)
+	}
+}
+
+func buildingOutcomes(it buildingItem) []string {
+	out := []string{}
+	for _, r := range deriveBuilding(it).Rounds {
+		out = append(out, r.Outcome)
+	}
+	return out
+}
+
+func TestDeliveryBuildingIncompleteHistory(t *testing.T) {
+	// Risk: a lone fix round or a lone merge-forward round, with no recorded
+	// initial build, counts as a first try and invents a lead time.
+	since := at(8, 10, 0)
+	complete := buildingFixture()[0]
+	fixOnly := buildingItem{ID: "fix", Ticket: "tfix", Ref: "HRB-7", Title: "Fix only", Merged: at(17, 12, 0), Kind: "work", Priority: "low", Steps: []buildingStep{
+		{Key: "build", Kind: "rework", Actor: "agent", Outcome: "ok", Started: at(17, 9, 0), Ended: ended(at(17, 10, 0))},
+	}}
+	mergeOnly := buildingItem{ID: "mf", Ticket: "tmf", Ref: "HRB-8", Title: "Merge-forward only", Merged: at(16, 12, 0), Kind: "work", Priority: "medium", Steps: []buildingStep{
+		{Key: "merge_round", Kind: "rework", Actor: "person", Outcome: "ok", Started: at(16, 9, 0), Ended: ended(at(16, 10, 0))},
+	}}
+	fixThenBuild := buildingItem{ID: "late", Ticket: "tlate", Ref: "HRB-9", Title: "Fix then a build", Merged: at(15, 12, 0), Kind: "work", Steps: []buildingStep{
+		{Key: "build", Kind: "rework", Actor: "agent", Outcome: "ok", Started: at(15, 8, 0), Ended: ended(at(15, 9, 0))},
+		build(at(15, 10, 0), at(15, 11, 0), "agent", "ok"),
+	}}
+	out := aggregateBuilding("p", []buildingItem{fixOnly, mergeOnly, fixThenBuild, complete}, &since, buildingTargetDefaults(), timingFilter{Days: 7}, buildingNow)
+	first := buildingMetricOf(t, out, "first_try")
+	// Only the change that starts with its initial build is a sample, and it is a first try.
+	if first.Current.N != 1 || first.Current.Items != 1 || first.Current.Count != 1 || first.Current.Value == nil || *first.Current.Value != 100 {
+		t.Fatalf("incomplete history counted as a first try: %+v", first.Current)
+	}
+	if !reflect.DeepEqual(worstKeys(first), []string{}) {
+		t.Fatalf("first-try worst listed an incomplete history: %v", worstKeys(first))
+	}
+	lead := buildingMetricOf(t, out, "lead")
+	// HRB-1 starts at 10:00 and merges at 12:00. The others have no initial build to measure from.
+	if lead.Current.N != 1 || lead.Current.Value == nil || *lead.Current.Value != 120 || !reflect.DeepEqual(worstKeys(lead), []string{"HRB-1"}) {
+		t.Fatalf("lead invented from an incomplete history: %+v worst %v", lead.Current, worstKeys(lead))
+	}
+	// Recorded fix and merge-forward rounds still count as rounds and as idle waits.
+	rounds := buildingMetricOf(t, out, "rounds")
+	if rounds.Current.N != 4 || rounds.Current.Count != 5 {
+		t.Fatalf("rounds dropped a recorded round: %+v", rounds.Current)
+	}
+	idle := buildingMetricOf(t, out, "idle")
+	if idle.Current.Items != 4 {
+		t.Fatalf("idle dropped a round with a known end: %+v", idle.Current)
+	}
+	if facts := deriveBuilding(fixOnly); len(facts.Rounds) != 1 || facts.Rounds[0].Initial || facts.Rounds[0].MergeForward {
+		t.Fatalf("fix-only round looked like an initial build: %+v", facts.Rounds)
+	}
+	if facts := deriveBuilding(mergeOnly); len(facts.Rounds) != 1 || facts.Rounds[0].Initial || !facts.Rounds[0].MergeForward {
+		t.Fatalf("merge-forward-only round looked complete: %+v", facts.Rounds)
+	}
+	if facts := deriveBuilding(complete); len(facts.Rounds) != 1 || !facts.Rounds[0].Initial {
+		t.Fatalf("initial build lost its identity: %+v", facts.Rounds)
+	}
+}
+
+func TestDeliveryBuildingTargetBounds(t *testing.T) {
+	// Risk: a partial or unbounded targets write is stored as zero and moves a verdict.
+	p := func(v float64) *float64 { return &v }
+	in := func(first, rounds, idle float64) *buildingTargetsInput {
+		return &buildingTargetsInput{FirstTryRate: p(first), RoundsPerItem: p(rounds), IdleP50Minutes: p(idle)}
+	}
+	got, ok := buildingTargetsFrom(in(60, 1.6, 15))
+	if !ok || got != buildingTargetDefaults() {
+		t.Fatalf("defaults rejected: %+v %v", got, ok)
+	}
+	if _, ok = buildingTargetsFrom(in(0, 0, 0)); !ok {
+		t.Fatal("zero bounds rejected")
+	}
+	if _, ok = buildingTargetsFrom(in(100, 100, 10080)); !ok {
+		t.Fatal("upper bounds rejected")
+	}
+	for _, bad := range []*buildingTargetsInput{
+		nil,
+		{RoundsPerItem: p(1), IdleP50Minutes: p(15)},
+		in(-1, 1, 15), in(101, 1, 15), in(60, -0.1, 15), in(60, 101, 15), in(60, 1, -1), in(60, 1, 10081),
+		in(math.NaN(), 1, 15), in(math.Inf(1), 1, 15),
+	} {
+		if _, ok = buildingTargetsFrom(bad); ok {
+			t.Fatalf("accepted %+v", bad)
+		}
+	}
+}
+
+func TestDeliveryBuildingReviewAndChecksCombine(t *testing.T) {
+	// Risk: the latest signal wins across review, CI and the queue, so a green
+	// check erases a review that asked for changes, in either completion order.
+	tail := build(at(17, 11, 0), at(17, 11, 30), "agent", "ok")
+	base := build(at(17, 9, 0), at(17, 9, 30), "agent", "ok")
+	item := func(steps ...buildingStep) buildingItem {
+		return buildingItem{ID: "v", Ticket: "tv", Ref: "HRB-9", Title: "Verdict", Merged: at(17, 12, 0), Kind: "work", Steps: steps}
+	}
+	changesThenGreen := item(base, signal("review", "changes", at(17, 9, 40)), signal("ci", "green", at(17, 10, 0)), tail)
+	greenThenChanges := item(base, signal("ci", "green", at(17, 9, 40)), signal("review", "changes", at(17, 10, 0)), tail)
+	changesThenQueue := item(base, signal("review", "changes", at(17, 9, 40)), signal("queue", "green", at(17, 10, 0)), tail)
+	for _, it := range []buildingItem{changesThenGreen, greenThenChanges, changesThenQueue} {
+		if got := buildingOutcomes(it); len(got) != 2 || got[0] != roundChanges || got[1] != roundPassed {
+			t.Fatalf("unresolved changes became %v", got)
+		}
+	}
+	// A later review in the same round resolves the request. A later green check does not.
+	resolved := item(base, signal("review", "changes", at(17, 9, 40)), signal("ci", "green", at(17, 9, 50)), signal("review", "ok", at(17, 10, 0)), tail)
+	if got := buildingOutcomes(resolved); len(got) != 2 || got[0] != roundPassed {
+		t.Fatalf("a later review did not resolve the changes: %v", got)
+	}
+	// A passing review does not clear a red check, whichever finished last.
+	redThenReview := item(base, signal("ci", "red", at(17, 9, 40)), signal("review", "ok", at(17, 10, 0)), tail)
+	reviewThenRed := item(base, signal("review", "ok", at(17, 9, 40)), signal("ci", "red", at(17, 10, 0)), tail)
+	for _, it := range []buildingItem{redThenReview, reviewThenRed} {
+		if got := buildingOutcomes(it); len(got) != 2 || got[0] != roundFailed {
+			t.Fatalf("a red check was cleared by the review: %v", got)
+		}
+	}
+	// Within the checks, the later run stands: green after red is passed.
+	recovered := item(base, signal("ci", "red", at(17, 9, 40)), signal("ci", "green", at(17, 10, 0)), tail)
+	if got := buildingOutcomes(recovered); len(got) != 2 || got[0] != roundPassed {
+		t.Fatalf("a later green check did not resolve the red one: %v", got)
 	}
 }

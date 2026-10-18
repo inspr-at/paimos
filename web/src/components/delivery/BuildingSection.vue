@@ -29,7 +29,9 @@ const page = computed(() => deliveryText(props.lang))
 const uid = useId()
 const ready = computed(() => props.state === 'ready')
 // The worst five open once the window has items; loading, a failed read and no data leave the tiles closed.
-const canOpen = computed(() => ready.value && props.view.head.kind === 'ready')
+// A refresh keeps the previous answer on screen and marks it busy. That answer belongs to the query
+// that has left, so it stays closed until the matching answer lands.
+const canOpen = computed(() => ready.value && !props.busy && props.view.head.kind === 'ready')
 
 // ---------- Phones: Expert stacks Simple's essentials, decided by the section's own width ----------
 const root = ref<HTMLElement>()

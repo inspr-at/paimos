@@ -72,7 +72,11 @@ func (m *Module) getBuilding(w http.ResponseWriter, r *http.Request) {
 		if err != nil {
 			return err
 		}
-		out = aggregateBuilding(project, items, since, buildingTargetDefaults(), f, now)
+		targets, err := buildingTargetsTx(r.Context(), tx, &project)
+		if err != nil {
+			return err
+		}
+		out = aggregateBuilding(project, items, since, targets, f, now)
 		return r.Context().Err()
 	})
 	if err != nil {

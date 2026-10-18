@@ -18,9 +18,11 @@ import (
 // merged. A round is one builder pass: the first build, a fix round or a
 // merge-forward round. Builder steps that overlap in time are one round (a
 // work-queue round and the harness session of the same worker), and a
-// coordinator's instant claim joins the build it starts. Nothing is invented:
-// an item without a recorded round is not counted, a round whose end is
-// unknown has no idle sample, and a window without items has no value.
+// coordinator's instant claim joins the build it starts. A history that does
+// not start with the initial build is left out of first-try and lead: a lone
+// fix or merge-forward is not a first try and has no lead time. Nothing is
+// invented: an item without a recorded round is not counted, a round whose end
+// is unknown has no idle sample, and a window without items has no value.
 
 // BuildingTargets are the delivery settings' targets for Building it. Lead time
 // has none yet: it is watched.
@@ -30,10 +32,34 @@ type BuildingTargets struct {
 	IdleP50Minutes float64 `json:"idle_p50_minutes"`
 }
 
-// buildingTargetDefaults are the defaults of the delivery settings. They are
-// not editable yet; a saved value will override them per workspace or project.
+// buildingTargetDefaults apply when no scope has saved Building it targets.
 func buildingTargetDefaults() BuildingTargets {
 	return BuildingTargets{FirstTryRate: 60, RoundsPerItem: 1.6, IdleP50Minutes: 15}
+}
+
+// buildingTargetsInput is a write. A missing field stays nil so a partial
+// object is refused rather than stored as zero.
+type buildingTargetsInput struct {
+	FirstTryRate   *float64 `json:"first_try_rate"`
+	RoundsPerItem  *float64 `json:"rounds_per_item"`
+	IdleP50Minutes *float64 `json:"idle_p50_minutes"`
+}
+
+// buildingTargetsFrom accepts one complete triple inside the delivery bounds.
+// Nil means the caller omitted targets and inherits; it is not valid here.
+func buildingTargetsFrom(in *buildingTargetsInput) (BuildingTargets, bool) {
+	if in == nil || in.FirstTryRate == nil || in.RoundsPerItem == nil || in.IdleP50Minutes == nil {
+		return BuildingTargets{}, false
+	}
+	out := BuildingTargets{FirstTryRate: *in.FirstTryRate, RoundsPerItem: *in.RoundsPerItem, IdleP50Minutes: *in.IdleP50Minutes}
+	if !targetIn(out.FirstTryRate, 0, 100) || !targetIn(out.RoundsPerItem, 0, 100) || !targetIn(out.IdleP50Minutes, 0, 10080) {
+		return BuildingTargets{}, false
+	}
+	return out, true
+}
+
+func targetIn(v, min, max float64) bool {
+	return !math.IsNaN(v) && !math.IsInf(v, 0) && v >= min && v <= max
 }
 
 type buildingStep struct {
@@ -62,9 +88,12 @@ type buildingRound struct {
 	Start        time.Time
 	End          *time.Time
 	MergeForward bool
-	Instant      bool
-	Finished     bool
-	Outcome      string
+	// Initial is a first build (build/work), including one a coordinator's
+	// instant claim joined. A fix or a merge-forward round is not.
+	Initial  bool
+	Instant  bool
+	Finished bool
+	Outcome  string
 	// Worker is who built the round; a coordinator's instant claim is not.
 	Worker string
 }
@@ -80,6 +109,17 @@ type buildingFacts struct {
 
 func builderStep(s buildingStep) bool {
 	return (s.Key == "build" || s.Key == "merge_round") && (s.Kind == "work" || s.Kind == "rework") && (s.Actor == "agent" || s.Actor == "person")
+}
+
+// initialBuild is the first build of a change, not a fix and not a merge-forward.
+func initialBuild(s buildingStep) bool {
+	return s.Key == "build" && s.Kind == "work"
+}
+
+// historyComplete is a recorded history that starts at the initial build.
+// A lone fix or merge-forward round is not one, so first-try and lead withhold it.
+func historyComplete(rounds []buildingRound) bool {
+	return len(rounds) > 0 && rounds[0].Initial
 }
 
 // A signal judges a round: a gate verdict, or a check or merge-queue run that
@@ -145,6 +185,7 @@ func deriveBuilding(it buildingItem) buildingFacts {
 					last.End = &end
 				}
 				last.MergeForward = last.MergeForward && s.Key == "merge_round"
+				last.Initial = last.Initial || initialBuild(s)
 				last.Instant = last.Instant && instant
 				last.Finished = last.Finished || s.Outcome == "ok"
 				if last.Worker == "" && !instant {
@@ -153,7 +194,7 @@ func deriveBuilding(it buildingItem) buildingFacts {
 				continue
 			}
 		}
-		r := buildingRound{Start: s.Started, MergeForward: s.Key == "merge_round", Instant: instant, Finished: s.Outcome == "ok"}
+		r := buildingRound{Start: s.Started, MergeForward: s.Key == "merge_round", Initial: initialBuild(s), Instant: instant, Finished: s.Outcome == "ok"}
 		if !instant {
 			r.Worker = s.Actor
 		}
@@ -178,18 +219,18 @@ func deriveBuilding(it buildingItem) buildingFacts {
 		if i < last {
 			boundary = out.Rounds[i+1].Start
 		}
-		verdict := latestSignal(signals, r.Start, boundary)
+		verdict, judged := roundFromSignals(signals, r.Start, boundary)
 		switch {
 		case r.MergeForward:
 			r.Outcome = roundMergeForward
 		case i == last:
 			// The merge proves the last round passed its required checks.
 			r.Outcome = roundPassed
-		case verdict != nil && (verdict.Outcome == "ok" || verdict.Outcome == "green"):
-			r.Outcome = roundPassed
-		case verdict != nil && verdict.Outcome == "changes":
+		case verdict == roundChanges:
 			r.Outcome = roundChanges
-		case verdict != nil || !r.Finished:
+		case verdict == roundPassed:
+			r.Outcome = roundPassed
+		case judged || !r.Finished:
 			r.Outcome = roundFailed
 		default:
 			r.Outcome = roundNone
@@ -218,6 +259,43 @@ func deriveBuilding(it buildingItem) buildingFacts {
 		}
 	}
 	return out
+}
+
+// roundFromSignals keeps review and checks apart. Within one of them the later
+// verdict stands; a success in the other does not clear an unresolved negative.
+// Checks are CI and the merge queue. The last round is not judged here: the
+// merge proves it passed.
+func roundFromSignals(signals []buildingStep, from, to time.Time) (string, bool) {
+	var review, check *buildingStep
+	for i := range signals {
+		end := *signals[i].Ended
+		if !end.After(from) || end.After(to) {
+			continue
+		}
+		switch signals[i].Key {
+		case "review":
+			if review == nil || !end.Before(*review.Ended) {
+				review = &signals[i]
+			}
+		case "ci", "queue":
+			if check == nil || !end.Before(*check.Ended) {
+				check = &signals[i]
+			}
+		}
+	}
+	if review == nil && check == nil {
+		return "", false
+	}
+	if review != nil && review.Outcome == "changes" {
+		return roundChanges, true
+	}
+	if check != nil && check.Outcome == "red" {
+		return roundFailed, true
+	}
+	if review != nil && review.Outcome == "ok" || check != nil && check.Outcome == "green" {
+		return roundPassed, true
+	}
+	return roundFailed, true
 }
 
 // ---------- The response ----------
@@ -321,8 +399,13 @@ func measureOf(key string, samples []buildingSample) buildingMeasure {
 	m := buildingMeasure{}
 	switch key {
 	case "first_try":
-		m.N, m.Items = len(samples), len(samples)
+		// A fix or merge-forward with no recorded initial build is withheld, not a miss.
 		for _, s := range samples {
+			if !historyComplete(s.facts.Rounds) {
+				continue
+			}
+			m.N++
+			m.Items++
 			if len(s.facts.Rounds) == 1 {
 				m.Count++
 			}
@@ -357,7 +440,9 @@ func measureOf(key string, samples []buildingSample) buildingMeasure {
 	case "lead":
 		values := make([]float64, 0, len(samples))
 		for _, s := range samples {
-			values = append(values, s.facts.Lead)
+			if historyComplete(s.facts.Rounds) {
+				values = append(values, s.facts.Lead)
+			}
 		}
 		m.N, m.Items = len(values), len(values)
 		if m.N > 0 {
@@ -419,7 +504,7 @@ func worstOf(key string, samples []buildingSample) []buildingWorst {
 	switch key {
 	case "first_try":
 		for _, s := range samples {
-			if len(s.facts.Rounds) > 1 {
+			if historyComplete(s.facts.Rounds) && len(s.facts.Rounds) > 1 {
 				pool = append(pool, s)
 			}
 		}
@@ -439,7 +524,11 @@ func worstOf(key string, samples []buildingSample) []buildingWorst {
 			return longest
 		}
 	case "lead":
-		pool = append(pool, samples...)
+		for _, s := range samples {
+			if historyComplete(s.facts.Rounds) {
+				pool = append(pool, s)
+			}
+		}
 		value = func(s buildingSample) float64 { return s.facts.Lead }
 	}
 	sort.SliceStable(pool, func(i, j int) bool {

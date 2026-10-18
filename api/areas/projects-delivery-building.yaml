@@ -6,7 +6,7 @@ paths:
       - {name: projectId, in: path, required: true, schema: {type: string, format: uuid}}
     get:
       operationId: getProjectDeliveryBuilding
-      description: 'Delivery › Numbers › Building it (AEON-1493). Requires delivery.read on the project; an invisible project is absent (404). Computed from the Flow projection of the event log: builder steps (harness sessions and work-queue rounds), gate verdicts, check and merge-queue runs and the merge that ends a change. An item is a change linked to a ticket, counted in the window where it merged; items without a recorded round are counted apart in coverage.without_rounds and never as a first try. A round is one builder pass (first build, fix round or merge-forward round); overlapping builder steps are one round and a coordinator claim joins the build it starts. Idle is the time from the end of a round (its gate verdict or checks when later than the builder) to the next step: the next round, the merge enqueue, or the merge. Windows of 7, 30, 90, 180 and 365 whole UTC days end today and compare with the window just before. Targets come from the delivery settings; lead time has none. Durations are minutes; percentiles interpolate linearly. Reads have a five-second deadline and reject more than 5000 merged changes or 100000 steps with 503, without partial figures.'
+      description: 'Delivery › Numbers › Building it (AEON-1493). Requires delivery.read on the project; an invisible project is absent (404). Computed from the Flow projection of the event log: builder steps (harness sessions and work-queue rounds), gate verdicts, check and merge-queue runs and the merge that ends a change. An item is a change linked to a ticket, counted in the window where it merged; items without a recorded round are counted apart in coverage.without_rounds and never as a first try. A history that does not start with its initial build is withheld from the first-try rate and from lead time, and still counts for rounds, idle and coverage.items. A round is one builder pass (first build, fix round or merge-forward round); overlapping builder steps are one round and a coordinator claim joins the build it starts. Idle is the time from the end of a round (its gate verdict or checks when later than the builder) to the next step: the next round, the merge enqueue, or the merge. Windows of 7, 30, 90, 180 and 365 whole UTC days end today and compare with the window just before. Targets come from the saved delivery settings, a project value replacing the workspace value, or the defaults when none are saved; lead time has none. Durations are minutes; percentiles interpolate linearly. Reads have a five-second deadline and reject more than 5000 merged changes or 100000 steps with 503, without partial figures.'
       security: [{session: []}, {agentKey: []}]
       parameters:
         - {name: window, in: query, schema: {type: integer, enum: [7, 30, 90, 180, 365], default: 7}}
@@ -29,8 +29,8 @@ components:
       type: object
       required: [n, items, count, value, p50, p90, mean]
       properties:
-        n: {type: integer, minimum: 0, description: 'Samples: merged items, or waits for idle.'}
-        items: {type: integer, minimum: 0, description: 'Merged items behind the samples.'}
+        n: {type: integer, minimum: 0, description: 'Samples: merged items for rounds, waits for idle, and for first-try and lead only items whose history starts with the initial build.'}
+        items: {type: integer, minimum: 0, description: 'Merged items behind the samples. First-try and lead leave out a history that does not start with the initial build.'}
         count: {type: integer, minimum: 0, description: 'First try: items merged after one round. Rounds: all rounds of the items. Otherwise 0.'}
         value: {type: [number, 'null'], description: 'First try: percent of items. Rounds, idle and lead: p50. Null without samples.'}
         p50: {type: [number, 'null']}

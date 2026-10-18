@@ -15,7 +15,7 @@ paths:
         '403': {$ref: '#/components/responses/Error'}
     put:
       operationId: putProjectDeliverySettings
-      description: 'Sets required checks and deadline durations in minutes. Requires delivery.manage; empty project settings inherit tenant defaults. Does not change GitHub behaviour.'
+      description: 'Sets required checks, deadline durations in minutes and Building it targets. Requires delivery.manage. Omitted fields inherit; omitted targets inherit too, and a targets object replaces all three. Empty project settings inherit tenant defaults. Does not change GitHub behaviour.'
       parameters:
         - {name: If-Match, in: header, schema: {type: string, maxLength: 128}, description: 'Optional saved-values ETag; a stale value rejects the write with 412.'}
       security: [{session: []}, {agentKey: []}]

@@ -607,15 +607,14 @@ components:
             in_queue: {type: integer, minimum: 0, maximum: 10080}
             queue_failed: {type: integer, minimum: 0, maximum: 10080}
         targets:
-          type: object
-          readOnly: true
+          type: [object, 'null']
           additionalProperties: false
           required: [first_try_rate, rounds_per_item, idle_p50_minutes]
-          description: 'Effective targets of Delivery › Numbers › Building it, in effective responses only. They are the defaults until targets can be saved; a write that names them is rejected.'
+          description: 'Building it targets for this scope. Omitted or null inherits the parent scope, or the defaults when none is saved. A saved object replaces all three. An effective response carries the targets in force. view=overrides includes them only when this scope saved them.'
           properties:
-            first_try_rate: {type: number, description: 'Percent of merged items after one round, at least.'}
-            rounds_per_item: {type: number, description: 'Rounds per item at p50, at most.'}
-            idle_p50_minutes: {type: number, description: 'Idle minutes between rounds at p50, at most.'}
+            first_try_rate: {type: number, minimum: 0, maximum: 100, description: 'Percent of merged items after one round, at least.'}
+            rounds_per_item: {type: number, minimum: 0, maximum: 100, description: 'Rounds per item at p50, at most.'}
+            idle_p50_minutes: {type: number, minimum: 0, maximum: 10080, description: 'Idle minutes between rounds at p50, at most.'}
     DeliverySignals:
       type: object
       description: Counts from ticket events (review.verdict, review.round, gate.finding, gate.verdict, ci.failed, ci.failure, check.failed, undone events, change.reverted, node.reverted, delivery.reverted). Zero means none of that kind were recorded. AEON-286 outcome events will replace this source.

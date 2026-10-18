@@ -3,14 +3,20 @@
 // failed read looks measured; the head line or the summary card disagree with the tiles; the worst rows lose an
 // item's round marks; German loses a word of the approved copy.
 import { readFileSync } from 'node:fs'
+import { compileScript, parse } from '@vue/compiler-sfc'
+import ts from 'typescript'
+import * as Vue from 'vue'
 import { afterEach, expect, it, vi } from 'vitest'
 vi.mock('../src/lib/api.ts', () => ({ api: vi.fn(), APIError: class extends Error { constructor(public status: number, message: string) { super(message) } } }))
 import { api } from '../src/lib/api.ts'
 import { buildingView, hm, readDeliveryBuilding } from '../src/lib/deliveryBuilding'
 import { buildingText } from '../src/lib/deliveryBuildingText'
+import * as buildingTextMod from '../src/lib/deliveryBuildingText'
 import { simpleNumbersOf } from '../src/lib/deliverySimple'
 import { simpleText } from '../src/lib/deliverySimpleText'
+import * as simpleTextMod from '../src/lib/deliverySimpleText'
 import { deliveryText } from '../src/lib/deliveryNumbersText'
+import * as numbersText from '../src/lib/deliveryNumbersText'
 import type { DeliveryMetrics } from '../src/lib/deliveryNumbers'
 import { NO_FILTERS } from '../src/lib/statusTiming'
 import { buildingAnswer } from './delivery-building-fixtures'
@@ -174,4 +180,70 @@ it('AEON-1493: the tiles are the shipped SimpleTile and ExpertTile with the whol
   const panel = readFileSync(new URL('../src/components/delivery/WorstPanel.vue', import.meta.url), 'utf8')
   expect(panel).toContain(':sheet-below="760"')
   expect(panel).not.toMatch(/font-style:\s*italic/)
+})
+
+// Risk: a window change keeps the previous answer and its worst five. Opening them while the new
+// read is busy would show rows for the query that has left.
+it('AEON-1493: the previous worst five stay closed while a new window is loading', async () => {
+  vi.stubGlobal('ResizeObserver', class { observe() {} disconnect() {} })
+  type El = { tag: string; props: Record<string, unknown>; children: El[]; parent: El | null; text?: string }
+  const el = (tag: string): El => ({ tag, props: {}, children: [], parent: null })
+  const detach = (child: El) => { if (child.parent) child.parent.children.splice(child.parent.children.indexOf(child), 1); child.parent = null }
+  const renderer = Vue.createRenderer<El, El>({
+    createElement: el, createText: text => ({ ...el('#text'), text }), createComment: () => el('#comment'),
+    setText: (node, text) => { node.text = text }, setElementText: (node, text) => { node.children = [{ ...el('#text'), text, parent: node }] },
+    querySelector: () => el('body'), parentNode: node => node.parent, nextSibling: node => node.parent?.children[node.parent.children.indexOf(node) + 1] ?? null,
+    patchProp: (node, key, _old, value) => { node.props[key] = value }, remove: detach,
+    insert: (child, parent, anchor) => {
+      detach(child); child.parent = parent
+      const index = anchor ? parent.children.indexOf(anchor) : -1
+      if (index < 0) parent.children.push(child); else parent.children.splice(index, 0, child)
+    },
+  })
+  const all = (node: El): El[] => [node, ...node.children.flatMap(all)]
+  const host = { __esModule: true, default: { setup: (_props: unknown, ctx: { slots: Record<string, () => unknown> }) => () => Vue.h('div', [ctx.slots.trigger?.(), ctx.slots.foot?.()].filter(Boolean)) } }
+  const { descriptor } = parse(readFileSync(new URL('../src/components/delivery/BuildingSection.vue', import.meta.url), 'utf8'))
+  const { content } = compileScript(descriptor, { id: 'building-section-held', inlineTemplate: true, templateOptions: { compilerOptions: { hoistStatic: false } } })
+  const exports: { default?: Vue.Component } = {}
+  new Function('require', 'exports', ts.transpileModule(content, { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 } }).outputText)((id: string) => {
+    const modules: Record<string, unknown> = {
+      vue: Vue,
+      '../AppIcon.vue': { __esModule: true, default: { props: ['name', 'size'], setup: () => () => Vue.h('svg') } },
+      './ExpertTile.vue': host, './SimpleTile.vue': host, './TrendChart.vue': host, './WorstPanel.vue': host,
+      '../../directives/clipTip': { vClipTip: {} },
+      '../../lib/deliveryBuildingText': buildingTextMod,
+      '../../lib/deliveryNumbersText': numbersText,
+      '../../lib/deliverySimpleText': simpleTextMod,
+    }
+    if (!(id in modules)) throw new Error(`Unexpected dependency ${id}`)
+    return modules[id]
+  }, exports)
+  const view = buildingView(answer(), 7, 'ready', 'en')
+  const busy = Vue.ref(true)
+  const root = el('root')
+  const app = renderer.createApp({ setup: () => () => Vue.h(exports.default!, { view, state: 'ready', busy: busy.value, level: 'simple', window: 7, lang: 'en', routeKey: 'AEON' }) })
+  app.mount(root)
+  const buttons = () => all(root).filter(node => node.props['data-testid'] === 'delivery-building-open')
+  const click = (node: El) => {
+    const handler = node.props.onClick
+    if (typeof handler !== 'function') throw new Error(`open button has no click: ${Object.keys(node.props).join(',')}`)
+    handler({ currentTarget: { focus() {} }, detail: 1 })
+  }
+  try {
+    await Vue.nextTick()
+    expect(buttons().length).toBeGreaterThan(0)
+    expect(buttons().every(button => button.props.disabled === true)).toBe(true)
+    click(buttons()[0])
+    await Vue.nextTick()
+    expect(buttons().every(button => button.props['aria-expanded'] === false)).toBe(true)
+    busy.value = false
+    await Vue.nextTick()
+    expect(buttons().every(button => button.props.disabled === false)).toBe(true)
+    click(buttons()[0])
+    await Vue.nextTick()
+    expect(buttons()[0].props['aria-expanded']).toBe(true)
+  } finally {
+    app.unmount()
+    vi.unstubAllGlobals()
+  }
 })

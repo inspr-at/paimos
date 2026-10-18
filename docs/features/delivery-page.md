@@ -88,22 +88,26 @@ change. An item is a change linked to a ticket, counted in the window where it m
 round is one builder pass (the first build, a fix round or a merge-forward round). Builder
 steps that overlap are one round, and a coordinator's claim joins the build it starts.
 
-- **First-try rate**: the share of items merged after exactly one round. Target at least
-  60 %.
+- **First-try rate**: the share of items merged after exactly one round, among histories
+  that start with the initial build. A lone fix or merge-forward round is withheld, not
+  counted as a miss. Target at least 60 %.
 - **Rounds per item**: rounds until merged, p50 (Expert adds the mean and p90). Target
   at most 1.6.
 - **Idle between rounds**: from the end of a round (its gate verdict or checks when they
   came after the builder finished) to the next step (the next round, the merge enqueue,
   or the merge), p50 and p90 over every wait. Target p50 under 15 minutes.
-- **Lead time per item**: from the start of the first build to the merge, p50 and p90.
-  No target yet: watched.
+- **Lead time per item**: from the start of the first build to the merge, p50 and p90,
+  only when that first build was recorded. No target yet: watched.
 
 The targets are the delivery settings' Building it targets, returned as `targets` by
 the effective `GET /api/projects/{projectId}/delivery-settings` and
-`GET /api/settings/delivery`. They are the defaults above until targets can be saved; a
-settings write that names them is refused. Items without any recorded round are counted
-apart (`coverage.without_rounds`) and never as a first try; a round whose end is unknown
-has no idle sample; days before the first recorded round are "no data yet". The head says
+`GET /api/settings/delivery`. Nothing saved uses the defaults above. A workspace value
+replaces the defaults; a project value replaces the workspace value, all three fields
+together. Omitting `targets` on a write stores nothing for that scope and inherits
+again. `view=overrides` includes `targets` only when that scope saved them. Items
+without any recorded round are counted apart (`coverage.without_rounds`) and never as
+a first try; a round whose end is unknown has no idle sample; days before the first
+recorded round are "no data yet". The head says
 "N of 3 on target", the no-data sentence or "Not loaded · Retry" in one line, and the
 summary card's count and off-target line include the three targets.
 
