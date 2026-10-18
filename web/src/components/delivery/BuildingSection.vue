@@ -68,13 +68,13 @@ const label = (tile: BuildingTileView) => fill(t.value.open, { n: tile.simple.na
   <section v-if="level === 'simple' || narrow" class="s-sec bd" :class="{ 'bd-x': level === 'expert' }" :aria-labelledby="`${uid}-head`" data-testid="delivery-building">
     <div v-if="level === 'simple'" class="s-sec-head">
       <h3 :id="`${uid}-head`">{{ t.title }}</h3>
-      <span v-if="view.head.kind === 'error'" class="cnt bd-cnt err" role="alert">{{ view.head.text }}<button type="button" class="retry" @click="emit('retry')">{{ t.retry }}</button></span>
+      <span v-if="view.head.kind === 'error'" class="cnt bd-cnt err" role="alert" data-testid="delivery-building-head">{{ view.head.text }}<button type="button" class="retry" @click="emit('retry')">{{ t.retry }}</button></span>
       <span v-else v-clip-tip class="cnt bd-cnt" :class="{ quiet: view.head.kind === 'nodata' }" :role="view.head.kind === 'nodata' ? 'status' : undefined" :aria-hidden="view.head.kind === 'loading' || undefined" data-testid="delivery-building-head">{{ view.head.text }}</span>
       <p>{{ t.sub }}</p>
     </div>
     <div v-else class="tk-cap-row">
       <p :id="`${uid}-head`" v-clip-tip class="tiles-cap">{{ fill(t.cap, { w: window }) }}</p>
-      <span v-if="view.head.kind === 'error'" class="bd-cnt err" role="alert">{{ view.head.text }}<button type="button" class="retry" @click="emit('retry')">{{ t.retry }}</button></span>
+      <span v-if="view.head.kind === 'error'" class="bd-cnt err" role="alert" data-testid="delivery-building-head">{{ view.head.text }}<button type="button" class="retry" @click="emit('retry')">{{ t.retry }}</button></span>
       <span v-else class="bd-cnt" :class="{ quiet: view.head.kind === 'nodata' }" :role="view.head.kind === 'nodata' ? 'status' : undefined" :aria-hidden="view.head.kind === 'loading' || undefined" data-testid="delivery-building-head">{{ view.head.text }}</span>
     </div>
     <div class="s-grid" :class="{ busy }" role="list">
@@ -93,7 +93,7 @@ const label = (tile: BuildingTileView) => fill(t.value.open, { n: tile.simple.na
   <section v-else class="bd-x" :aria-labelledby="`${uid}-cap`" data-testid="delivery-building">
     <div class="tk-cap-row">
       <p :id="`${uid}-cap`" v-clip-tip class="tiles-cap">{{ fill(t.cap, { w: window }) }}</p>
-      <span v-if="view.head.kind === 'error'" class="bd-cnt err" role="alert">{{ view.head.text }}<button type="button" class="retry" @click="emit('retry')">{{ t.retry }}</button></span>
+      <span v-if="view.head.kind === 'error'" class="bd-cnt err" role="alert" data-testid="delivery-building-head">{{ view.head.text }}<button type="button" class="retry" @click="emit('retry')">{{ t.retry }}</button></span>
       <span v-else class="bd-cnt" :class="{ quiet: view.head.kind === 'nodata' }" :role="view.head.kind === 'nodata' ? 'status' : undefined" :aria-hidden="view.head.kind === 'loading' || undefined" data-testid="delivery-building-head">{{ view.head.text }}</span>
     </div>
     <div class="tiles bd" :class="{ busy }" role="list">

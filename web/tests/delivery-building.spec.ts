@@ -47,9 +47,10 @@ for (const width of [1440, 1024, 390] as const) {
       state.work.preferences.theme = { choice: theme }
       state.work.preferences['delivery:numbers'] = { level: 'simple', window: 7 }
       await page.goto('/p/AEON/delivery')
-      const head = section(page).getByTestId('delivery-building-head')
       // A cold dev server compiles the Delivery route on the first visit.
-      await expect(head).toHaveText('0 of 3 on target', { timeout: 45_000 })
+      await expect(page.getByTestId('delivery-simple')).toBeVisible({ timeout: 45_000 })
+      const head = section(page).getByTestId('delivery-building-head')
+      await expect(head).toHaveText('0 of 3 on target', { timeout: 15_000 })
       const tiles = section(page).getByRole('listitem')
       await expect(tiles).toHaveCount(4)
       await expect(tiles.getByRole('heading', { level: 4 })).toHaveText(['First-try rate', 'Rounds per item', 'Idle between rounds', 'Lead time per item'])
