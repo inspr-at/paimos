@@ -11,8 +11,10 @@ not evidence for enabling an area. No workflow or area is activated here.
 
 The initial implementation used unmerged `work/aeon-1336-ci-s4-affected`, commit
 `da9f418e756a5da7483103d7136b22d597d367dc`, as permitted by the brief. The
-merge-main round now includes `origin/main` at
-`17012e35a5f8ebd7b4451b801cfd442af7e95ff3`, which contains AEON-1336.
+first merge-main round included `origin/main` at
+`17012e35a5f8ebd7b4451b801cfd442af7e95ff3`, which contains AEON-1336. The
+current merge includes `351163633` and retains main's AEON-1337 S5 planning
+jobs. The candidate remains disabled.
 The decisions in AEON-1336's LEAD comment and AEON-1332/concept v2 are retained:
 unknown impact stays broad, the merge queue stays full, and narrowing needs
 zero misses on historical trees rather than a calendar wait.
@@ -314,3 +316,47 @@ pauses remote static checks. The required full
 `node scripts/ci-static.mjs --merge-main` remains unproven until an approved
 run or hosted CI. Worker status stays at 95; this is not a green static check.
 No guard bypass, push to origin, deployment, model CLI or review gate was run.
+
+### Lead scope correction and merge-main round (2026-10-18)
+
+Merge commit `2860dd070` merges `origin/main` at `351163633` with both parents
+retained. The lead override removes the previous round's product changes from
+this research ticket: `HeaderGlimpse.vue`, `header-glimpse.spec.ts` and its
+shard source are taken exactly from main. The obsolete AEON-1485 browser-tier
+row is removed with that test; every main tier row remains. The earlier CI fix
+section records historical validation, not a product change shipped by this
+branch.
+
+All 33 incoming files, including automatically merged account-capacity sources,
+fixtures and tier manifests, match main byte for byte. No migration changed or
+collided. The resulting branch differs from main only in the original six
+research paths. Main's AEON-1337 S5 planning jobs, workflows, rollout policy,
+product sources and browser specs are unchanged; every browser area remains
+`gated-full`, and the candidate is still offline and disabled. No R0 registry
+rows are added.
+
+Validation of merge `2860dd070` through the approved remote runners:
+
+- `remote-spec.sh`, `header-glimpse.spec.ts` and
+  `header-glimpse-context.spec.ts`: **35 passed** on mbp2606, including main's
+  stalled-frame and dropped-notification regressions. No product fix was
+  needed in this round.
+- `remote-test.sh`: `accountuse`, `agentaccounts`, `agentpairing` and
+  `reportercontract` all passed; migration, candidate and area tests:
+  **59 passed**, zero failed or skipped.
+- Migration guard with `--base-ref v261017115202.0.0`: passed, **362 unique
+  numbers**. The first invocation without that required argument returned
+  usage; the corrected invocation passed without source changes.
+- Historical replay `--check`: passed for all **294 proof rows**, retaining
+  ten diagnostic ownership misses and full-catalogue fallback for every row.
+  Canonical manifests `--check`: passed.
+- Complete selector/shard suites: **390 passed**, zero failed or skipped;
+  header Node units: **9 passed**; ownership audit: **33 passed**. The
+  corrected follow-up `remote-test.sh` run exited **0**.
+
+`ci-static-remote.sh` returned **exit 3 twice**: remote static checks are
+paused at night while mbp2606 is shared with the CI pool. The full required
+`node scripts/ci-static.mjs --merge-main` therefore remains unproven and worker
+status stays at **95**. No heavy local fallback or guard bypass was used.
+The coordinator's approved static run or PR CI must supply that remaining
+proof. No push to origin, deployment, model CLI call or review gate was run.
