@@ -17486,9 +17486,7 @@
     ,
     {"kind":"vitest","file":"tests/agents-daily-limits.unit.test.ts","name":"saving a daily setting > shows the new setting at once, ignores an unchanged one, and restores the confirmed settings when the write fails","tier":"ESSENTIAL"}
     ,
-    {"kind":"vitest","file":"tests/agents-daily-limits.unit.test.ts","name":"the numbers on the right > draws today’s bar teal to the share, gold over it and red past the limit, and the week when today is unknown","tier":"ESSENTIAL"}
-    ,
-    {"kind":"vitest","file":"tests/agents-daily-limits.unit.test.ts","name":"the numbers on the right > reads week used and left, then today’s points with the share, in the person’s words","tier":"ESSENTIAL"}
+    {"kind":"vitest","file":"tests/agents-daily-limits.unit.test.ts","name":"the numbers on the right > reads today’s points with the share, in the person’s words","tier":"ESSENTIAL"}
     ,
     {"kind":"vitest","file":"tests/agents-daily-limits.unit.test.ts","name":"the numbers on the right > shows vendor-reported resets only","tier":"ESSENTIAL"}
     ,
