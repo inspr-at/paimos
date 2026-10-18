@@ -50,9 +50,11 @@ Idle reports stay out of append-only reading history and do not add per-probe
 No vendor responses, account identities, paths, plans or credential material
 are stored in the new quota snapshots. Migration 1363 is expand-only, adds a
 nullable account snapshot and a FORCE RLS hourly table, and classifies both in
-the DSAR inventory. Existing history is neither backfilled nor deleted.
+the DSAR inventory. The adapter follows the account, keeps both JSON snapshots
+in review, exports only the hour boundary, and treats the binding revision as
+metadata. Existing history is neither backfilled nor deleted.
 
-Verification on 2026-10-18 used the approved mbp2606 runner. Full account,
+Verification on 2026-10-18 used the approved remote test runner. Full account,
 daemon, pairing and privacy suites passed on `8efda1236`; auth, reporter
 contract and DSAR suites passed on `b95bcc261` with their implementation
 unchanged afterward. The strict authorization policy fixture was updated for
