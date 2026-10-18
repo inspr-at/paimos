@@ -1348,7 +1348,7 @@ func (m *Module) bind(r *http.Request, tx pgx.Tx, p tenant.Principal) (any, erro
 	}
 	if !same(s.TicketNodeID, in.TicketNodeID) {
 		var reviewer bool
-		if err := tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM review_runs WHERE reviewer_session_id=$1)`, s.ID).Scan(&reviewer); err != nil {
+		if err := tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM review_runs WHERE ticket_node_id=$2 AND reviewer_session_id=$1)`, s.ID, s.TicketNodeID).Scan(&reviewer); err != nil {
 			return nil, err
 		}
 		if reviewer {

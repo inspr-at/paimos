@@ -88,6 +88,16 @@ revocation and service-principal restrictions. The CLI behavior test covers
 private credential handling, refusals, redirects and submission without an
 ordinary API key.
 
+`TestReadOnlyTicketAdmissionAndReviewerIdentity` and
+`TestReadOnlySessionLifecycleCannotBecomeBuilder` in
+`internal/harness/build_guard_test.go` cover read-only registration beside open
+deliveries, active builders and legacy scouts with delivery bindings; normal
+session reads and replay-safe ticket audit; real dispatcher-created review
+runs and credentials; binding/commit/promotion refusals and unchanged stored
+state; and paused resume. Both are ESSENTIAL. Restoring the original guard
+while retaining the admission test must fail with `409 built_unmerged` and
+`409 active_builder` instead of `201`.
+
 The negative control uses `internal/auth/testdata/review-legacy/overlay.json`
 with Go's `-overlay` flag to restore the original vulnerable evidence writer
 and consumer from test fixtures. Running `TestAuthenticatedReviewerRuns` with
