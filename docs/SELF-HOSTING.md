@@ -260,6 +260,11 @@ content. Audit failure releases no packet; the event records collection, not
 successful delivery. There is no self-service erasure or automatic retention.
 Use `--output PATH` for a new mode-0600 file in
 a private directory, and include retained copies and backups in the assessment.
+Schema classifications remain in `internal/dsar/inventory.json`; the offline
+kit's explicit projections, ownership chains, locators and hold assessments
+live in `internal/dsar/adapter_inventory.json`. Both inventories must track
+migrations. New columns stay under manual review unless an export projection
+has been explicitly approved; credential columns are never queried.
 
 `paimos files verify --tenant SLUG` checks the tenant's shared blob store:
 attachments (including soft-deleted/history references), avatars and their undo

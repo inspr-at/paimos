@@ -337,6 +337,9 @@ func TestManualKitIsolationAliasesHoldsAndCommands(t *testing.T) {
 	if report.Subject.ID != subject || len(report.Subject.Aliases) != 2 || report.DryRun {
 		t.Fatal("incorrect subject mapping")
 	}
+	if len(section(report, "aeon_required_capabilities").Records) != 0 {
+		t.Fatal("global deployment metadata entered a personal-data packet")
+	}
 	if len(section(report, "principals").Records) != 2 || len(section(report, "identities").Records) != 2 || len(section(report, "personal_profiles").Records) != 2 || len(section(report, "person_host_labels").Records) != 1 {
 		t.Fatal("aliases or private self data missing")
 	}
