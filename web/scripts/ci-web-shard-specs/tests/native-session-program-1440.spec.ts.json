@@ -1,7 +1,7 @@
 {
   "group": "stable-controls",
   "nightlyTiming": {
-    "seconds": 13.333333333333334,
+    "seconds": 40.68,
     "selectedTests": 2
   },
   "spec": {

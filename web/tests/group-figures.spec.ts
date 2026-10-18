@@ -4,8 +4,10 @@
 // "—" or 0 where nothing is to say, a figure in the grouped-by column), controls that move when figures land, on hover or
 // when the first cell swaps KEY for its controls, sorting by key that becomes unreachable, a group order that a header
 // click doesn't change or that "No …" groups break, and folds or group order lost on reload or in a saved view.
+// A long epic title must not consume the phone caption: the summary stays wide enough to read and to disclose.
 import { test, expect, type Locator, type Page } from '@playwright/test'
 import { fixtures, liveAgent, mockView, mockWork, watchErrors, type Fixtures } from './work-fixtures'
+import { expectStableControls } from './helpers/stable'
 
 test.beforeEach(async ({ page }) => { await page.clock.setSystemTime(new Date('2026-09-23T12:00:00Z')) })
 
@@ -57,6 +59,7 @@ async function open(page: Page, options: { width?: number; theme?: 'light' | 'da
   await options.routes?.(page)
   await page.goto(`/p/PHAROS${options.query ?? '?group=status'}`)
   await expect(rows(page).first()).toBeVisible()
+  await page.evaluate(() => document.fonts.ready)
   return { calls, errors, data: d }
 }
 const boxOf = (locator: Locator) => locator.evaluate(el => { const r = el.getBoundingClientRect(); return { x: r.x, y: r.y, width: r.width, height: r.height } })
@@ -330,21 +333,87 @@ test('AEON-1390 Display › Groups matches the header and a saved view keeps the
   await expect(groups.getByRole('radio', { name: 'Natural order' })).toHaveAttribute('aria-checked', 'true')
 })
 
-test('AEON-1388 phones: one muted line after the name, at most three facts in order, never wrapped; Display orders the groups', async ({ page }) => {
+test('AEON-1388 phones: one muted line after the name, at most three facts in order, never wrapped; Display orders the groups', async ({ page }, testInfo) => {
   await open(page, { width: 390 })
   const line = groupRow(page, 'In progress').locator('.group-facts')
   await expect(line).toHaveText('· 2 working · 2 stale · ~7.5h')
   const facts = await line.evaluate(el => el.textContent!.split('·').map(part => part.trim()).filter(Boolean))
   expect(facts.length).toBeLessThanOrEqual(3)
+  await groupRow(page, 'In progress').scrollIntoViewIfNeeded()
+  const crop = await boxOf(groupRow(page, 'In progress'))
+  await page.screenshot({ path: testInfo.outputPath('aeon-1486-group-390.png'), clip: { x: 0, y: Math.max(0, crop.y), width: 390, height: Math.min(crop.height, 844 - Math.max(0, crop.y)) } })
   const lineBox = await boxOf(line), label = await boxOf(groupRow(page, 'In progress').locator('.group-label'))
   expect(Math.abs(lineBox.y + lineBox.height / 2 - (label.y + label.height / 2)), 'the facts share the name’s line').toBeLessThanOrEqual(2)
+  expect(await groupRow(page, 'In progress').locator('.group-label').evaluate(el => el.clientWidth >= el.scrollWidth), 'the short group name stays readable beside the facts').toBe(true)
   expect(await line.evaluate(el => el.getClientRects().length)).toBe(1)
+  await expect(line).toHaveAttribute('data-tip', '· 2 working · 2 stale · ~7.5h')
+  await expectStableControls({
+    controls: {
+      row: groupRow(page, 'In progress'), label: groupRow(page, 'In progress').locator('.group-label'), facts: line,
+      fold: groupRow(page, 'In progress').locator('.group-toggle'), check: groupRow(page, 'In progress').locator('.group-check-target'),
+    },
+    interactions: [
+      { name: 'disclose all facts', run: async () => { await line.focus(); await expect(page.locator('.tooltip')).toContainText('2 working · 2 stale · ~7.5h') } },
+      { name: 'dismiss the disclosure', run: async () => { await page.keyboard.press('Escape'); await expect(page.locator('.tooltip')).toHaveCount(0) } },
+    ],
+    scrollAreas: { grid: grid(page) },
+  })
   await expect(grid(page).locator('.group-row td.group-fig')).toHaveCount(0)
   // No column headers on a phone: Filters › Display settings… › Groups is the way to order the groups.
   await page.getByRole('button', { name: 'Filters', exact: true }).click()
   await page.getByRole('dialog', { name: 'Filters', exact: true }).getByRole('button', { name: 'Display settings…', exact: true }).click()
   await display(page).getByRole('radiogroup', { name: 'Groups' }).getByRole('radio', { name: 'Reversed' }).click()
   await expect(labels(page)).toHaveText(['QA', 'In progress', 'Backlog', 'New'])
+})
+
+test('AEON-1486 phones: a long epic title keeps the summary visible, disclosed and still at 390 px', async ({ page }, testInfo) => {
+  const title = 'Guarded multi-cloud provisioning for every region and every account with a title long enough to consume a phone caption'
+  const summary = '· 2 working · 2 stale · ~10h'
+  const d = data()
+  d.nodes.find(n => n.id === 'n-epic')!.title = title
+  for (const id of ['n-7', 'n-8', 'n-9']) d.nodes.find(n => n.id === id)!.parent_id = 'n-epic'
+  await open(page, { width: 390, data: d, query: '?group=epic' })
+  const row = groupRow(page, title)
+  const line = row.locator('.group-facts')
+  const epic = row.locator('.group-epic')
+  const label = epic.locator('.group-label')
+  const key = epic.locator('.key')
+  await expect(line).toHaveText(summary)
+  await row.scrollIntoViewIfNeeded()
+  const seen = await line.evaluate(el => {
+    const box = el.getBoundingClientRect()
+    const visible = Math.min(window.innerWidth, box.right) - Math.max(0, box.left)
+    return { clientWidth: el.clientWidth, clientHeight: el.clientHeight, scrollWidth: el.scrollWidth, visible, rects: el.getClientRects().length }
+  })
+  expect(seen.clientHeight, 'the summary has a box').toBeGreaterThan(0)
+  expect(seen.clientWidth, 'the summary keeps a usable width beside the epic caption').toBeGreaterThanOrEqual(72)
+  expect(seen.visible, 'the summary is on screen').toBeGreaterThanOrEqual(72)
+  expect(seen.scrollWidth, 'the summary is clipped so the shared tip can disclose it').toBeGreaterThan(seen.clientWidth + 1)
+  expect(seen.rects, 'the summary stays on one line').toBe(1)
+  expect(await key.evaluate(el => el.clientWidth + 1 >= el.scrollWidth), 'the epic key stays readable inside the capped caption').toBe(true)
+  const titleMetrics = await label.evaluate(el => ({ client: el.clientWidth, scroll: el.scrollWidth, height: el.clientHeight }))
+  expect(titleMetrics.height, 'the epic title stays on the caption line').toBeGreaterThan(0)
+  expect(titleMetrics.client, 'the epic title keeps a visible slice').toBeGreaterThan(0)
+  expect(titleMetrics.scroll, 'the long epic title is bounded').toBeGreaterThan(titleMetrics.client + 1)
+  const lineBox = await boxOf(line), labelBox = await boxOf(label), epicBox = await boxOf(epic)
+  expect(Math.abs(lineBox.y + lineBox.height / 2 - (labelBox.y + labelBox.height / 2)), 'the summary shares the epic title’s line').toBeLessThanOrEqual(2)
+  expect(lineBox.x, 'the summary follows the epic caption').toBeGreaterThanOrEqual(epicBox.x + epicBox.width - 0.5)
+  expect(lineBox.x + lineBox.width, 'the summary stays inside the phone').toBeLessThanOrEqual(390.5)
+  await expect(line).toHaveAttribute('data-tip', summary)
+  await expect(label).toHaveAttribute('data-clip-tip', '')
+  const crop = await boxOf(row)
+  await page.screenshot({ path: testInfo.outputPath('aeon-1486-epic-390.png'), clip: { x: 0, y: Math.max(0, crop.y), width: 390, height: Math.min(crop.height, 844 - Math.max(0, crop.y)) } })
+  await expectStableControls({
+    controls: {
+      row, epic, label, key, facts: line,
+      fold: row.locator('.group-toggle'), check: row.locator('.group-check-target'),
+    },
+    interactions: [
+      { name: 'disclose the summary', run: async () => { await line.focus(); await expect(page.locator('.tooltip')).toContainText('2 working · 2 stale · ~10h') } },
+      { name: 'dismiss the disclosure', run: async () => { await page.keyboard.press('Escape'); await expect(page.locator('.tooltip')).toHaveCount(0) } },
+    ],
+    scrollAreas: { grid: grid(page) },
+  })
 })
 
 for (const width of [1440, 1024, 390]) {

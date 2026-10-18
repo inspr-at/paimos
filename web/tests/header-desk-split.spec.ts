@@ -597,14 +597,23 @@ for (const width of [1440, 390]) test(`the preview's controls stay put through r
       } },
       { name: 'a poll fails', run: async () => {
         control.failProjection = true
+        const response = page.waitForResponse(response => new URL(response.url()).pathname === '/api/decision-desk/projection' && response.status() === 403)
         await page.clock.runFor(30_000)
-        // One calm line with its action inline (AEON-1339), never the raw server sentence.
-        await expect(preview(page).getByRole('alert')).toContainText('Couldn’t load the desk')
-      } },
-      { name: 'Retry reads it again', run: async () => {
-        control.failProjection = false
-        await preview(page).getByRole('button', { name: 'Try again', exact: true }).click()
+        await response
+        // AEON-1477 retains the last good projection. The preview keeps its
+        // rows and count; the full Desk owns the quiet refresh hint and Retry.
         await expect(preview(page)).toContainText('5 things for you')
+        await expect(preview(page).locator('.dp-row')).toHaveCount(5)
+        await expect(preview(page).getByRole('alert')).toHaveCount(0)
+      } },
+      { name: 'the next poll retries the read', run: async () => {
+        control.failProjection = false
+        const response = page.waitForResponse(response => new URL(response.url()).pathname === '/api/decision-desk/projection' && response.status() === 200)
+        await page.clock.runFor(30_000)
+        await response
+        await expect(preview(page)).toContainText('5 things for you')
+        await expect(preview(page).locator('.dp-row')).toHaveCount(5)
+        await expect(preview(page).getByRole('alert')).toHaveCount(0)
       } },
     ],
     scrollAreas: { body },

@@ -233,12 +233,20 @@ func TestGoalClockBoundariesAndWatermarks(t *testing.T) {
 	if DeriveStall(1, since, fixedNow.Add(-time.Second)).Stalled || !DeriveStall(1, since, fixedNow).Stalled || DeriveStall(0, since, fixedNow).Stalled {
 		t.Fatal("stall boundary must be inclusive 4 hours and require Moving")
 	}
+	// Risk: a pgx timestamptz scan keeps the session zone while jsonb emits UTC.
+	// The same instant must not make list and detail disagree.
+	zoned := since.In(time.FixedZone("ci", 2*60*60))
+	utcStall, zonedStall := DeriveStall(1, since, fixedNow), DeriveStall(1, zoned, fixedNow)
+	raw, err := json.Marshal(zonedStall)
+	if err != nil || string(raw) != `{"stalled":true,"since":"2026-10-16T16:00:00Z"}` || !reflect.DeepEqual(utcStall, zonedStall) {
+		t.Fatalf("stall since must stay UTC across scan locations: %s %+v %+v %v", raw, utcStall, zonedStall, err)
+	}
 	old, current := (Watermark{ReadThrough: 41, Generation: 7}), (Watermark{ReadThrough: 41, Generation: 8})
 	if !old.OlderThan(current) || current.OlderThan(old) || current.OlderThan(current) || (Watermark{ReadThrough: 42, Generation: 1}).OlderThan(current) {
 		t.Fatal("watermark/generation ordering is wrong")
 	}
 	var ping map[string]any
-	raw, err := json.Marshal(ChangePing{GoalID: "goal", Watermark: current})
+	raw, err = json.Marshal(ChangePing{GoalID: "goal", Watermark: current})
 	if err != nil || json.Unmarshal(raw, &ping) != nil || len(ping) != 3 || ping["goal_id"] != "goal" || ping["read_through"] != float64(41) || ping["generation"] != float64(8) {
 		t.Fatalf("derived event must be a value-free three-field ping: %s %v", raw, err)
 	}

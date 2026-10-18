@@ -928,6 +928,7 @@ defineExpose({
                 <label v-if="selectable" class="group-check-target">
                   <input type="checkbox" class="group-check" :checked="groupChecked(entry.group)" :indeterminate="groupMixed(entry.group)" :disabled="selectionDisabled || !selectableRows(entry.group).length" :aria-label="german ? `Alle Vorschläge in ${groupName(entry.group)} auswählen` : `Select every loaded ticket in ${groupName(entry.group)}`" @change="selectGroup($event, entry.group)" />
                 </label>
+                <div class="group-caption">
                 <template v-if="entry.group.project">
                   <AppIcon v-if="entry.group.icon" :name="entry.group.icon as IconName" :size="14" class="group-icon" />
                   <span class="key">{{ entry.group.project.key }}</span>
@@ -948,11 +949,11 @@ defineExpose({
                   <AppIcon name="epic" :size="14" class="epic-glyph" />
                   <button v-if="groupEpicRow(entry.group)" :id="`row-${entry.group.epic.id}`" type="button" class="group-epic" :class="{ cursor: cursorId === entry.group.epic.id, open: openId === entry.group.epic.id }" @click="emit('cursor', entry.group.epic.id); emit('open', groupEpicRow(entry.group)!)">
                     <span class="key">{{ entry.group.epic.key }}</span>
-                    <span class="group-label">{{ entry.group.epic.title }}</span>
+                    <span v-clip-tip="entry.group.epic.title" class="group-label">{{ entry.group.epic.title }}</span>
                   </button>
                   <button v-else type="button" class="group-epic" @click="emit('openEpic', entry.group.epic)">
                     <span class="key">{{ entry.group.epic.key }}</span>
-                    <span class="group-label">{{ entry.group.epic.title }}</span>
+                    <span v-clip-tip="entry.group.epic.title" class="group-label">{{ entry.group.epic.title }}</span>
                   </button>
                   <StatusIcon v-if="groupEpicRow(entry.group)" :state="groupEpicRow(entry.group)!.state" :size="12" class="group-epic-status" />
                   <span class="group-count mono">{{ entry.group.total }}</span>
@@ -984,8 +985,9 @@ defineExpose({
                 <template v-if="groupFacts.get(entry.group.key)">
                   <!-- Stale after the name (AEON-1388 §1); a phone has one muted line of at most three facts instead (§2). -->
                   <span v-if="!phone && groupFacts.get(entry.group.key)!.stale" class="group-stale mono" data-tip="In progress, but nobody is working on it">· {{ groupFacts.get(entry.group.key)!.stale }} <span class="attn">stale</span></span>
-                  <span v-if="phone && groupFacts.get(entry.group.key)!.phone.length" class="group-facts mono"><template v-for="[value, word] in groupFacts.get(entry.group.key)!.phone" :key="word || value">{{ ` · ${value}${word ? ' ' : ''}` }}<span v-if="word" :class="{ attn: word === 'stale' }">{{ word }}</span></template></span>
+                  <span v-if="phone && groupFacts.get(entry.group.key)!.phone.length" v-clip-tip class="group-facts mono"><template v-for="[value, word] in groupFacts.get(entry.group.key)!.phone" :key="word || value">{{ ` · ${value}${word ? ' ' : ''}` }}<span v-if="word" :class="{ attn: word === 'stale' }">{{ word }}</span></template></span>
                 </template>
+                </div>
                 <span class="group-spacer" />
                 <span v-if="$slots['group-end']" class="group-end"><slot name="group-end" :group="entry.group" /></span>
               </div>
@@ -1610,6 +1612,7 @@ button.release-chip:focus-visible { box-shadow: var(--focus-ring); }
   .group-more .more-btn { min-height: 44px; }
 }
 .group-head { display: flex; align-items: center; gap: 8px; min-width: 0; }
+.group-caption { display: contents; }
 .group-toggle { flex: none; display: grid; place-items: center; width: 24px; height: 24px; padding: 0; border: 0; border-radius: 6px; background: transparent; color: var(--ink-3); }
 .group-toggle:hover { background: var(--row-hover); color: var(--ink); }
 .group-toggle:focus-visible, .group-epic:focus-visible { box-shadow: var(--focus-ring); }
@@ -1805,6 +1808,20 @@ button.release-chip:focus-visible { box-shadow: var(--focus-ring); }
   .group-row th { top: var(--toolbar-h, 0px); padding: 0 10px; height: auto; min-height: 44px; }
   .group-head { min-height: 44px; height: auto; flex-wrap: wrap; gap: 4px 8px; padding-block: 4px; }
   .group-head .group-label { flex: 1; }
+  /* Keep the name and its facts on one line beside the touch controls. The
+     shared clip tip discloses facts that do not fit, without hiding the name.
+     An epic title sits inside .group-epic, so the same cap has to bind that
+     caption. Facts keep a floor and can no longer shrink to zero when the
+     title’s content size would otherwise take the whole line. */
+  .group-caption { display: flex; align-items: center; flex: 1; min-width: 0; gap: 8px; }
+  .group-caption > .group-label,
+  .group-caption > .group-epic { flex: 0 1 auto; max-width: 40%; min-width: 0; }
+  .group-caption > .group-epic { overflow: hidden; }
+  .group-caption > .group-epic .key { flex: none; }
+  .group-caption > .group-epic .group-label { flex: 1 1 auto; min-width: 0; }
+  .group-caption > :not(.group-label, .group-facts, .group-epic) { flex: none; }
+  .group-caption .group-facts { flex: 1 1 0%; min-width: 4.5rem; overflow: hidden; text-overflow: ellipsis; }
+  .group-caption + .group-spacer { display: none; }
   .group-end { flex: 0 0 100%; justify-content: flex-end; padding-left: 44px; }
   .group-toggle, .group-check-target { width: 44px; height: 44px; }
   .group-more, .group-more td { display: block; }
