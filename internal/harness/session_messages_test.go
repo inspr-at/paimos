@@ -159,10 +159,15 @@ func TestDrainLeaseHoldsOffTheSweeper(t *testing.T) {
 	w := f.call(f.person, "POST", base, map[string]any{"agent_principal_id": f.agent.ID, "harness": "codex", "host": "test", "harness_session_ref": "ref-" + lease, "worker_lease": lease, "management_mode": "managed", "role": "worker", "advertised_capabilities": []string{"inbox"}}, "")
 	expect(t, w, 201)
 	id := decode(t, w)["id"].(string)
+	peer := uid()
+	f.tx(t, f.person, func(tx pgx.Tx) error {
+		_, err := tx.Exec(t.Context(), `INSERT INTO principals(tenant_id,id,kind,name) VALUES($1,$2,'agent','Peer sender')`, f.person.TenantID, peer)
+		return err
+	})
 	bound := func() string {
 		// Agent-authored messages retain terminal deadlines. Person chat now
 		// waits through a missed deadline (AEON-1487).
-		compat, message := attentionMessage(t, f, f.project, f.agent.ID, f.agent.ID, false)
+		compat, message := attentionMessage(t, f, f.project, peer, f.agent.ID, false)
 		f.tx(t, f.person, func(tx pgx.Tx) error {
 			if _, err := tx.Exec(t.Context(), `UPDATE inbox_compat_messages SET recipient_session_id=$2 WHERE id=$1`, compat, id); err != nil {
 				return err
@@ -223,7 +228,7 @@ func TestDrainLeaseHoldsOffTheSweeper(t *testing.T) {
 func TestSessionChatHookLeaseFencesDrain(t *testing.T) {
 	f := fixture(t)
 	inbox.New(f.db.App).Mount(f.mux)
-	base, lease := "/api/projects/"+f.project+"/harness-sessions", "chat-pickup-generation-lease"
+	base, lease := "/api/projects/"+f.project+"/harness-sessions", "chat-pickup-generation-lease-0000000001"
 	w := f.call(f.person, "POST", base, map[string]any{"agent_principal_id": f.agent.ID, "harness": "codex", "host": "test", "harness_session_ref": "ref-" + lease, "worker_lease": lease, "management_mode": "managed", "role": "worker", "advertised_capabilities": []string{"inbox"}}, "")
 	expect(t, w, 201)
 	id := decode(t, w)["id"].(string)
