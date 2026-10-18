@@ -26,7 +26,8 @@ const SweepInterval = 15 * time.Second
 
 const sweepBatch = 100
 
-// Sweeper enforces delivery deadlines and the adapter attempt cap (AEON-280).
+// Sweeper enforces delivery deadlines and the adapter attempt cap (AEON-280),
+// and notifies stalled person-to-session chat pickup (AEON-1487).
 // paimos serve runs it; only the process holding the advisory lock sweeps.
 type Sweeper struct {
 	pool     *pgxpool.Pool

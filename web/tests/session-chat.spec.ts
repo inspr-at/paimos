@@ -44,6 +44,7 @@ for (const width of [390, 1024, 1440]) for (const theme of ['light', 'dark'] as 
     await expect(panel.getByText('Not delivered', { exact: true })).toHaveCount(0)
     const guard = await controlStability(page, {
       frame: panel, composer: panel.getByRole('textbox', { name: 'Message to release-lead' }),
+      row: queue, notice: label,
       send: panel.getByRole('button', { name: /^(Send|After this turn)$/, exact: true }),
       edit: queue.getByRole('button', { name: 'Edit', exact: true }),
       cancel: queue.getByRole('button', { name: 'Cancel', exact: true }),
