@@ -49,7 +49,7 @@ export async function readDeliveryBuilding(projectId: string, window: number, fi
 }
 
 // ---------- Numbers in words ----------
-const NB = ' '
+const NB = '\u00a0'
 /** Minutes as the design says them: "22 min", "1 h 40 min", "31 h". */
 export function hm(minutes: number, lang: DeliveryLanguage): string {
   const m = Math.round(minutes)
@@ -247,13 +247,14 @@ export function buildingView(data: DeliveryBuilding | null, days: WindowDays, mo
     })
     return {
       key, simple, expert, chart: chartOf(metric, target, buckets, days, lang),
-      pp: has ? runs(w.pp, values) : [{ text: ready ? 'p50 · p90 –' : ' ' }],
+      pp: has ? runs(w.pp, values) : [{ text: ready ? 'p50 · p90 –' : NB }],
       worst: { rows: worst, title: text.wpTitle, sub: fill(text.wpSub, { n: w.name, w: days }) },
     }
   })
   const withTarget = tiles.filter(tile => tile.simple.hasTarget)
   let head: BuildingView['head']
-  if (mode === 'loading') head = { kind: 'loading', text: ' ' }
+  // A no-break space keeps the line's baseline while loading; a plain space would collapse and move the title.
+  if (mode === 'loading') head = { kind: 'loading', text: NB }
   else if (mode === 'error' || !data) head = { kind: 'error', text: text.err }
   else if (!data.coverage.items) head = { kind: 'nodata', text: text.noData }
   else head = { kind: 'ready', text: fill(text.onTarget, { k: withTarget.filter(tile => tile.simple.verdict.level === 'on').length, t: withTarget.length }) }

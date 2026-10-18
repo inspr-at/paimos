@@ -19,7 +19,9 @@ import { deliveryMetrics } from './delivery-numbers-fixtures'
 const NOW = Date.parse('2026-10-18T14:00:00Z')
 const answer = (options: Parameters<typeof buildingAnswer>[2] = {}) => buildingAnswer('p-aeon', 7, { now: NOW, ...options })
 const tile = (view: ReturnType<typeof buildingView>, key: string) => view.tiles.find(entry => entry.key === key)!
-const text = (parts: { text: string }[]) => parts.map(part => part.text).join('')
+// Durations and units are joined by no-break spaces; the expectations below are written with plain ones.
+const sp = (value: string) => value.replaceAll('\u00a0', ' ')
+const text = (parts: { text: string }[]) => sp(parts.map(part => part.text).join(''))
 afterEach(() => { vi.mocked(api).mockReset() })
 
 it('AEON-1493: the four tiles say the server\'s figures, changes and verdicts in Simple and Expert words', () => {
@@ -31,7 +33,7 @@ it('AEON-1493: the four tiles say the server\'s figures, changes and verdicts in
   const first = tile(view, 'first_try')
   expect(first.simple.value).toEqual([{ text: '29', unit: '%' }])
   expect(first.simple.verdict).toMatchObject({ level: 'far', word: 'Far off', gap: '29% vs. 60% wanted' })
-  expect(first.simple.trend).toEqual({ cls: 'worse', icon: 'arrow-down', text: 'Worse than the 7 days before (−5 pts)' })
+  expect({ ...first.simple.trend, text: sp(first.simple.trend.text) }).toEqual({ cls: 'worse', icon: 'arrow-down', text: 'Worse than the 7 days before (−5 pts)' })
   expect(first.simple.say).toBe('6 of 21 items passed on the first try.')
   expect(text(first.expert.lineA.parts)).toBe('6 of 21 merged after one round')
   expect(first.expert.lineA.parts.find(part => part.strong)?.text).toBe('6 of 21')
@@ -58,7 +60,7 @@ it('AEON-1493: the four tiles say the server\'s figures, changes and verdicts in
   expect(lead.simple.value).toEqual([{ text: '5', unit: 'h' }, { text: '10', unit: 'min' }])
   expect(lead.expert.value).toEqual({ main: '5', unit: 'h', more: { main: '10', unit: 'min' } })
   expect(lead.simple.verdict).toMatchObject({ level: 'none', word: 'No target yet', gap: 'watched', sep: ': ' })
-  expect(lead.simple.trend.text).toBe('Better than the 7 days before (−1 h 10 min)')
+  expect(sp(lead.simple.trend.text)).toBe('Better than the 7 days before (−1 h 10 min)')
   expect(lead.chart.panels[0].targets).toEqual([])
   expect(lead.simple.spark.target).toBeNull()
 })
@@ -69,8 +71,8 @@ it('AEON-1493: charts and small charts follow the server\'s buckets; days before
   expect(idle.chart.buckets.map(bucket => bucket.status)).toEqual(['no_data', 'no_data', 'no_data', 'partial', 'ok', 'ok', 'ok'])
   expect(idle.chart.buckets.at(-1)!.label).toBe('Today')
   expect(idle.chart.readouts[0]).toMatch(/· no data yet$/)
-  expect(idle.chart.readouts[4]).toMatch(/· p50 \d+ min · p90 1 h \d+ min · \d+ waits$/)
-  expect(idle.chart.panels[0].targets).toEqual([{ value: 15, label: 'Target < 15 min' }])
+  expect(sp(idle.chart.readouts[4])).toMatch(/· p50 \d+ min · p90 1 h \d+ min · \d+ waits$/)
+  expect(idle.chart.panels[0].targets.map(target => ({ ...target, label: sp(target.label) }))).toEqual([{ value: 15, label: 'Target < 15 min' }])
   expect(idle.simple.spark.values.slice(0, 3)).toEqual([null, null, null])
   // Lead time is drawn in hours; its small chart has no target zone.
   const lead = tile(view, 'lead')
@@ -111,9 +113,9 @@ it('AEON-1493: the worst rows keep every round mark, say them in words and link 
   expect(rows.map(row => [row.key, row.value])).toEqual([['AEON-418', '5 rounds'], ['AEON-402', '5 rounds'], ['AEON-431', '4 rounds'], ['AEON-397', '4 rounds'], ['AEON-425', '4 rounds']])
   expect(rows[0].rounds).toEqual(['failed', 'changes', 'merge_forward', 'changes', 'passed'])
   expect(rows[0].said).toBe('AEON-418 Chat composer keeps the draft on reload, 5 rounds. Rounds: failed, changes, merge-forward, changes, passed')
-  expect(tile(view, 'idle').worst.rows[0].value).toBe('idle 2 h 10 min')
+  expect(sp(tile(view, 'idle').worst.rows[0].value)).toBe('idle 2 h 10 min')
   expect(tile(view, 'idle').worst.rows[4].said).toContain('Rounds: no verdict recorded, passed')
-  expect(tile(view, 'lead').worst.rows[0].value).toBe('lead 31 h')
+  expect(sp(tile(view, 'lead').worst.rows[0].value)).toBe('lead 31 h')
   expect(tile(view, 'lead').worst).toMatchObject({ title: 'Worst in this window', sub: 'Lead time per item · last 7 days' })
 })
 
@@ -145,8 +147,8 @@ it('AEON-1493: German keeps the approved words, "Runde" among the explained ones
     expect(simpleText(lang).defs.map(([word]) => word)).toContain(term)
     expect(deliveryText(lang).defs.map(([word]) => word)).toContain(term)
   }
-  expect(hm(1860, 'de')).toBe('31 h')
-  expect(hm(100, 'en')).toBe('1 h 40 min')
+  expect(sp(hm(1860, 'de'))).toBe('31 h')
+  expect(sp(hm(100, 'en'))).toBe('1 h 40 min')
 })
 
 it('AEON-1493: an answer for another project or window is refused rather than shown', async () => {
