@@ -78,18 +78,22 @@ func queryCapacityAccounts(ctx context.Context, tx pgx.Tx, retired bool, related
 }
 
 func queryAccountsInputs(ctx context.Context, tx pgx.Tx, retired bool, bound int, labels func(context.Context, pgx.Tx, []string) (map[string][]accountuse.ContextLabel, error), related []string) ([]Account, error) {
+	predicate := `$1 OR NOT ` + retiredSQL
+	if related != nil {
+		predicate = `(` + predicate + `)`
+	}
 	query := `
 		SELECT id::text, account_key, harness, daemon_id, label, max_parallel_runs,
 		       registered_by_principal_id::text, state, last_probe_at, last_probe_ok,
 		       last_daemon_generation, created_at, plan, host_label, allowed_model_profile_ids::text[], reading_support, quota_fingerprint, statusline_enabled, provider, model, model_status, model_data_note, openrouter_credits, COALESCE(group_id::text,''), quota_pool_fingerprint, billing_mode
 		FROM agent_accounts
-		WHERE ($1 OR NOT ` + retiredSQL + `)`
+		WHERE ` + predicate
 	args := []any{retired}
 	if related != nil {
 		query += ` AND (id=ANY($2::uuid[]) OR EXISTS(SELECT 1 FROM agent_accounts own WHERE own.id=ANY($2::uuid[]) AND own.quota_pool_fingerprint<>'' AND own.harness=agent_accounts.harness AND own.quota_pool_fingerprint=agent_accounts.quota_pool_fingerprint))`
 		args = append(args, related)
 	}
-	query += ` ORDER BY created_at,id`
+	query += ` ORDER BY created_at, id`
 	if bound > 0 {
 		query += ` LIMIT $` + strconv.Itoa(len(args)+1)
 		args = append(args, bound+1)
