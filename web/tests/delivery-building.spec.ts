@@ -182,7 +182,8 @@ for (const width of [1440, 390] as const) {
     // Measured top-down, so the first name that moves says where a shift starts: above the section, its head, or a tile.
     const ticketsLearn = page.getByTestId('delivery-tickets').getByRole('button', { name: /^Learn: / }).first()
     const title = section(page).getByRole('heading', { name: 'Building it', level: 3 }), sub = section(page).getByText('From the first build to a change that passes its checks', { exact: false })
-    const guard = await controlStability(page, { ticketsLearn, title, sub, learnFirst, learnLead, below: learnBelow(page) })
+    const ticketsLastLearn = page.getByTestId('delivery-tickets').getByRole('button', { name: /^Learn: / }).last()
+    const guard = await controlStability(page, { ticketsLearn, ticketsLastLearn, title, sub, learnFirst, learnLead, below: learnBelow(page) })
     // Loading → a failed read: "Not loaded" with Retry in the head's own line.
     state.next = 'error'
     await guard.check(async () => {
