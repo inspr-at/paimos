@@ -78,10 +78,12 @@ export async function proposePin(env = process.env, options = {}, dependencies =
   const request = dependencies.request ?? github;
   const verify = dependencies.verify ?? verifyAttestation;
   const jwt = dependencies.jwt ?? appJWT;
-  const { version, digest, commit } = { version: env.VERSION, digest: env.DIGEST, commit: env.GITHUB_SHA };
+  const mainCompletion = env.GITHUB_EVENT_NAME === "workflow_dispatch" && env.GITHUB_REF === "refs/heads/main" &&
+    env.RELEASE_TAG === `v${env.VERSION}` && sha(env.RELEASE_SOURCE_SHA);
+  const { version, digest, commit } = { version: env.VERSION, digest: env.DIGEST, commit: mainCompletion ? env.RELEASE_SOURCE_SHA : env.GITHUB_SHA };
   const write = options.write === true;
-  if (env.GITHUB_REPOSITORY !== SOURCE || env.GITHUB_EVENT_NAME !== "push" ||
-      env.GITHUB_REF !== `refs/tags/v${version}` || !validCalendarVersion(version) ||
+  const tagPush = env.GITHUB_EVENT_NAME === "push" && env.GITHUB_REF === `refs/tags/v${version}`;
+  if (env.GITHUB_REPOSITORY !== SOURCE || (!tagPush && !mainCompletion) || !validCalendarVersion(version) ||
       !/^sha256:[a-f0-9]{64}$/.test(digest) || !sha(commit) || !env.GH_TOKEN) fail("invalid release invocation");
   if (write && (env.AEON_PIN_BOT_ENABLED !== "true" || options.pinFile)) fail("write mode requires the approved nixcfg review path and live base");
   if (env.INDEX_PUSHED_AT && !/^\d{4}-\d\d-\d\dT\d\d:\d\d:\d\dZ$/.test(env.INDEX_PUSHED_AT)) fail("invalid index push observation");
@@ -108,7 +110,8 @@ export async function proposePin(env = process.env, options = {}, dependencies =
   if (!ledgerBytes.equals(Buffer.from(ledgerText)) || blobSHA(ledgerText) !== ledger.sha) fail("withdrawal ledger blob mismatch");
   const policy = readPolicy(ledgerText);
   assertDeployable(version, digest, policy);
-  await verify(env);
+  // Bind the original tag's signer/source commit, never the dispatch tooling SHA.
+  await verify({ ...env, GITHUB_SHA: commit });
   const evidence = [
     `Verified index: ${IMAGE}@${digest}`,
     `Annotated tag: ${SOURCE}@refs/tags/${tagName}; commit ${commit} is on main.`,

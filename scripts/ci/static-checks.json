@@ -478,6 +478,21 @@
       "timeout_seconds": 120
     },
     {
+      "id": "release-completion-tests",
+      "command": "node --test scripts/release-completion.test.mjs scripts/release-retry.test.mjs",
+      "cwd": ".",
+      "ci": {
+        "job": "release-check-run",
+        "step": null,
+        "command": "node --test scripts/release-completion.test.mjs scripts/release-retry.test.mjs",
+        "cwd": "."
+      },
+      "needs": [
+        "node"
+      ],
+      "timeout_seconds": 120
+    },
+    {
       "id": "audit-tests",
       "command": "python3 -B -m unittest discover -s scripts/audit -p 'test_*.py'",
       "cwd": ".",

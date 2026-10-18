@@ -1200,6 +1200,7 @@ jobs:
       - run: node --test scripts/verify-live.test.mjs scripts/verify-live-policy.test.mjs
       - run: node --test scripts/cross-family-gate.test.mjs
       - run: node --test scripts/release-pin-pr.test.mjs
+      - run: node --test scripts/release-completion.test.mjs scripts/release-retry.test.mjs
       - name: Offline code-health audit toolkit and slice ownership
         run: |
           python3 -B -m unittest discover -s scripts/audit -p 'test_*.py'

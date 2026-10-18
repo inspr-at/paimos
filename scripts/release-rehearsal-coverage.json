@@ -3,7 +3,19 @@
     {
       "counterpart": "actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1",
       "mode": "action",
-      "sha256": "3ef4af68ef144f12dd555f182fb78c286413a5c20503a3491c8a1a7ea3554af7",
+      "sha256": "128c1ba6c34aa93fb0ead4cb752390dc263b2c3e2c5197da19b622d87479e58d",
+      "step": "actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1"
+    },
+    {
+      "counterpart": "actions/setup-node@820762786026740c76f36085b0efc47a31fe5020",
+      "mode": "action",
+      "sha256": "5736aa6690610fcc8c3329192c3e2207f9af5d25a72534844f912187f6057b3b",
+      "step": "actions/setup-node@820762786026740c76f36085b0efc47a31fe5020"
+    },
+    {
+      "counterpart": "actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1",
+      "mode": "action",
+      "sha256": "f072279b1f8807204a0c96e42cd61c94f974bcafee7f4a1a66356c485a71a1d5",
       "step": "actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1"
     },
     {
@@ -13,27 +25,27 @@
       "step": "actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e"
     },
     {
-      "counterpart": "actions/setup-node@820762786026740c76f36085b0efc47a31fe5020",
-      "mode": "action",
-      "sha256": "5736aa6690610fcc8c3329192c3e2207f9af5d25a72534844f912187f6057b3b",
-      "step": "actions/setup-node@820762786026740c76f36085b0efc47a31fe5020"
+      "counterpart": "TestDarwinRestoreGateRequiresExactReleaseVersion",
+      "mode": "test",
+      "sha256": "d4cdfbe3371be2981105af59eda4ab475607bbbd14bf29f286099ad11e467498",
+      "step": "Restore immutable darwin asset when present"
     },
     {
-      "counterpart": "TestRehearsalGateBeforeSideEffects",
+      "counterpart": "TestDarwinHookCLIIsSignedAndRehearsedBeforeAssembly",
       "mode": "test",
-      "sha256": "8c4f0c8432a530dd9f7f14c531a604ba92160da62c168d0bdb5da3255490c9fe",
-      "step": "Require exact-SHA release rehearsal"
+      "sha256": "87d431923e3fbb1dbdd697c90ef3a9769c522a2af94dd3e09de9412d7511d598",
+      "step": "Restore immutable darwin CLI asset when present"
     },
     {
       "counterpart": "agentd-rehearsal/Build darwin paimos-agentd with LocalAuthentication",
       "mode": "step",
-      "sha256": "7a71771e1831e359d536be9169c59e9cb341255b3e2781f5865f074e33b001e7",
+      "sha256": "dbd49db76fe027ded9646111f0d097e2b264bc73db449a7a5fb11de7c3ce989e",
       "step": "Build darwin paimos-agentd with LocalAuthentication"
     },
     {
       "counterpart": "Apple credentials and notarization stay in the tag-only signing environment; native unsigned build and signing-shell syntax run in rehearsal.",
       "mode": "disabled",
-      "sha256": "1b10677d1bb9571e494b495522c3aa19e0a1bdcedf2fc172cc00140214425307",
+      "sha256": "438d640c7a69914ce50a6a85545dee97e576857876c8c5de6f13b64569d47545",
       "step": "Sign and notarize paimos-agentd"
     },
     {
@@ -43,9 +55,21 @@
       "step": "Remove signing keychain and temp files"
     },
     {
+      "counterpart": "TestDarwinRestoreGateRequiresExactReleaseVersion",
+      "mode": "test",
+      "sha256": "18a3cb8ba6af7cce39f993452abd5f29eca141d3442fe326b6c97df57020957b",
+      "step": "Verify darwin signature"
+    },
+    {
+      "counterpart": "TestDarwinHookCLIIsSignedAndRehearsedBeforeAssembly",
+      "mode": "test",
+      "sha256": "3d66407d0791427b1edf348aad758076202f18825fb19d7b0b21ac76c9d0031e",
+      "step": "Verify darwin CLI signature and version"
+    },
+    {
       "counterpart": "actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02",
       "mode": "action",
-      "sha256": "bd3fbfe9ca7e09247d39292d3f75d9ad7e44557e9ecdfad1d881f32d8a6b208f",
+      "sha256": "3d6b97b229ac25ecc478683dd485efbec2b846d95ee45680a2604065d8779bf7",
       "step": "actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02"
     }
   ],
@@ -53,7 +77,7 @@
     {
       "counterpart": "actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1",
       "mode": "action",
-      "sha256": "69983d424f70d56e16aca2c5bc441464578ac832b548ce342069dd3e5a1ca9e1",
+      "sha256": "128c1ba6c34aa93fb0ead4cb752390dc263b2c3e2c5197da19b622d87479e58d",
       "step": "actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1"
     },
     {
@@ -61,6 +85,12 @@
       "mode": "action",
       "sha256": "5736aa6690610fcc8c3329192c3e2207f9af5d25a72534844f912187f6057b3b",
       "step": "actions/setup-node@820762786026740c76f36085b0efc47a31fe5020"
+    },
+    {
+      "counterpart": "actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1",
+      "mode": "action",
+      "sha256": "f072279b1f8807204a0c96e42cd61c94f974bcafee7f4a1a66356c485a71a1d5",
+      "step": "actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1"
     },
     {
       "counterpart": "actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e",
@@ -71,28 +101,23 @@
     {
       "counterpart": "actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093",
       "mode": "action",
-      "sha256": "bbafc41fb0115c9136d565595c7773919afd1a63bb2e892ae549f462f02072fb",
+      "sha256": "2dd0d50f94616bcce7463985727db767148988e7475a30c79ced6c70ac303fb5",
       "step": "actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093"
     },
     {
       "counterpart": "assets-rehearsal/Exact production assets assembly",
       "mode": "step",
-      "sha256": "8c90d8ea5147283e9bff25b8321cd0d597d7320342df7943be75a7b042364e1f",
+      "sha256": "0cfaee1d4795ec85c026868cb3c448658ce01bdcc770e9bcd0693685dd2bf44c",
       "step": "Build linux paimos-agentd and aeon-cli"
-    },
-    {
-      "counterpart": "TestImmutabilityGuardsFailClosed",
-      "mode": "test",
-      "sha256": "2ee606b9f9013db7ce7fea7d936e6d75de0cbf22ae1e73766f5978f2e0642ce1",
-      "step": "Reject an existing GitHub release"
     },
     {
       "counterpart": "assets-rehearsal/Exact production index, attestation and gh draft invocations",
       "mode": "step",
-      "sha256": "dd2becd66cb6a0682151720fa22ab3ac4e5ee14deefe3d0ca1641ae1982b69c7",
-      "step": "Create draft GitHub release with signed assets"
+      "sha256": "64098dad1de80f39d34c40ced247aaa8bef86c469de64112a6f7a8c24681a99a",
+      "step": "Complete draft with missing signed assets only"
     }
   ],
+  "completion": [],
   "image": [
     {
       "counterpart": "actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1",
@@ -177,12 +202,6 @@
       "mode": "test",
       "sha256": "0853eb42c3a4849c3934203ccd8dbfe14976141ec7d0eca191844d86eb348020",
       "step": "Record pushed digest"
-    },
-    {
-      "counterpart": "assets-rehearsal/Pin-bot dry-run with offline source and attestation inputs",
-      "mode": "step",
-      "sha256": "a6cd2a387d13eb46d1935abb76be0cd1af86a9dc3594376b15ae4a417fe9b2fc",
-      "step": "Propose verified nixcfg deployment pin"
     }
   ],
   "image-platform": [
@@ -395,6 +414,76 @@
       "mode": "action",
       "sha256": "1d99810496c7e3ff30e1389315ce822b68825c632ed91374bb4b084de513f15a",
       "step": "actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02"
+    }
+  ],
+  "pin": [
+    {
+      "counterpart": "actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1",
+      "mode": "action",
+      "sha256": "128c1ba6c34aa93fb0ead4cb752390dc263b2c3e2c5197da19b622d87479e58d",
+      "step": "actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1"
+    },
+    {
+      "counterpart": "actions/setup-node@820762786026740c76f36085b0efc47a31fe5020",
+      "mode": "action",
+      "sha256": "5736aa6690610fcc8c3329192c3e2207f9af5d25a72534844f912187f6057b3b",
+      "step": "actions/setup-node@820762786026740c76f36085b0efc47a31fe5020"
+    },
+    {
+      "counterpart": "docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069",
+      "mode": "action",
+      "sha256": "f1c421c866796120658fcc5886fcd38c9490f8f0c7b5c946c0fdb465fa72940e",
+      "step": "docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069"
+    },
+    {
+      "counterpart": "TestPinProposalFollowsVerificationWithoutWaitingForAssets",
+      "mode": "test",
+      "sha256": "750781cefb4249739c6028e24ae898b2d4b208843ef6a2ec241c368c465ab538",
+      "step": "Reverify index before pin proposal"
+    },
+    {
+      "counterpart": "TestPinProposalFollowsVerificationWithoutWaitingForAssets",
+      "mode": "test",
+      "sha256": "a30ed9b189baa430aef2acc96f3358797733111c1b3dc40917598c4d9d546dce",
+      "step": "Propose verified nixcfg deployment pin"
+    }
+  ],
+  "prepare": [
+    {
+      "counterpart": "actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1",
+      "mode": "action",
+      "sha256": "128c1ba6c34aa93fb0ead4cb752390dc263b2c3e2c5197da19b622d87479e58d",
+      "step": "actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1"
+    },
+    {
+      "counterpart": "actions/setup-node@820762786026740c76f36085b0efc47a31fe5020",
+      "mode": "action",
+      "sha256": "5736aa6690610fcc8c3329192c3e2207f9af5d25a72534844f912187f6057b3b",
+      "step": "actions/setup-node@820762786026740c76f36085b0efc47a31fe5020"
+    },
+    {
+      "counterpart": "docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069",
+      "mode": "action",
+      "sha256": "f1c421c866796120658fcc5886fcd38c9490f8f0c7b5c946c0fdb465fa72940e",
+      "step": "docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069"
+    },
+    {
+      "counterpart": "TestImageDoesNotWaitForClients",
+      "mode": "test",
+      "sha256": "a46c5cd1b23880e4fe2812a1f7b2587204e808f0ac0b6bcd5fc41d94f43a0dc3",
+      "step": "Verify existing index and tagged source"
+    },
+    {
+      "counterpart": "TestRehearsalGateBeforeSideEffects",
+      "mode": "test",
+      "sha256": "5a52ecc1de492d3744aae18b26a778419c73f91aea8b7af07ae7717cef23a38c",
+      "step": "Require exact-SHA release rehearsal"
+    },
+    {
+      "counterpart": "TestImageDoesNotWaitForClients",
+      "mode": "test",
+      "sha256": "e944af7ccb4b1ce2534251ab063f0aa9c7a94924dd7316ae1791e321bf8249a5",
+      "step": "Record completion provenance"
     }
   ]
 }

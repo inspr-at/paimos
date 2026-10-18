@@ -158,11 +158,31 @@ function onVisibility() { applyMotion() }
 function onResize() { followViewport(); scheduleMeasure() }
 // The observers above can all stay silent while the canvas is painting.
 // Keep reading until the paint ends, and only clear.
-function checkPaintedViewport() {
-  if (!mounted || !paint.value) return false
+function clearIfViewportLeftWide() {
+  if (!mounted || !wide.value) return
+  // Clear-only: a one-pixel catch-up (1279 with a delivered widen) stays wide.
+  // 390 and any layout that has left that pixel do not.
   const signal = { mediaMatches: window.matchMedia(wideMedia).matches, layoutWidth: viewportWidth() }
   if (headerGlimpsePaintClears(wide.value, signal)) wide.value = false
+}
+function checkPaintedViewport() {
+  if (!mounted || !paint.value) return false
+  clearIfViewportLeftWide()
   return true
+}
+// Paint restarts and the two-frame follow-up both drop the timeout chain while
+// software GL is still on the previous width (CI: innerWidth stays wide for
+// seconds, then updates with no new event). This interval is not tied to paint,
+// so a restart cannot postpone the clear past the shrink.
+let narrowWatch = 0
+function stopNarrowWatch() {
+  if (!narrowWatch) return
+  window.clearInterval(narrowWatch)
+  narrowWatch = 0
+}
+function ensureNarrowWatch() {
+  if (!mounted || narrowWatch || !wide.value) return
+  narrowWatch = window.setInterval(clearIfViewportLeftWide, 250)
 }
 function samplePaintedViewport() {
   paintSample = 0
@@ -236,6 +256,7 @@ watch(paint, value => {
   paintTask = 0
   if (value) startPaintSample()
 })
+watch(wide, value => { if (value) ensureNarrowWatch(); else stopNarrowWatch() })
 watch([allowed, idle, () => props.projectId, () => props.projectKey, () => JSON.stringify(filtersToQuery(filters.value))], () => { void load() })
 onMounted(() => {
   mounted = true
@@ -249,6 +270,7 @@ onMounted(() => {
   viewportWatch = new ResizeObserver(followViewport)
   viewportWatch.observe(document.documentElement)
   syncWide()
+  ensureNarrowWatch()
   const start = () => { if (mounted) idle.value = true }
   if (typeof window.requestIdleCallback === 'function') idleId = window.requestIdleCallback(start, { timeout: 1500 })
   else requestAnimationFrame(() => requestAnimationFrame(start))
@@ -265,6 +287,7 @@ onBeforeUnmount(() => {
   cancelAnimationFrame(viewportFrame)
   cancelAnimationFrame(paintSample)
   clearTimeout(paintTask)
+  stopNarrowWatch()
   viewportWatch?.disconnect()
   window.removeEventListener('resize', onResize)
   visualViewport?.removeEventListener('resize', onResize)

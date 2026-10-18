@@ -916,6 +916,27 @@ func TestFullFallbackPreservesPinnedMainJobs(t *testing.T) {
 				j = normalizeParallelWebSetup(t, jobs)
 			}
 			j = cloneStep(t, j)
+			if id == "release-check-run" {
+				// AEON-532 adds its exact completion/retry regression step. Prove
+				// that addition before comparing every remaining main job field.
+				var kept []any
+				found := 0
+				for _, value := range reuseSteps(j) {
+					step := treeMap(value)
+					if step["run"] == "node --test scripts/release-completion.test.mjs scripts/release-retry.test.mjs" {
+						if len(step) != 1 || len(kept) == 0 || treeMap(kept[len(kept)-1])["run"] != "node --test scripts/release-pin-pr.test.mjs" {
+							t.Fatal("completion regressions must run unconditionally after pin regressions")
+						}
+						found++
+						continue
+					}
+					kept = append(kept, value)
+				}
+				if found != 1 {
+					t.Fatal("completion regressions must run exactly once")
+				}
+				j["steps"] = kept
+			}
 			if id == "web-shard" {
 				// AEON-1336 supplies plans only to affected PR execution. Prove
 				// that exact binding before pinning every older full-run field.
