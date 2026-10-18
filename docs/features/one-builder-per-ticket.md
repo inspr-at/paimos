@@ -15,8 +15,11 @@ audit. The session keeps its original binding fields. Conflicting originating
 ticket bindings are refused. A standalone order uses an explicit ticket when
 one is supplied, otherwise it retains its own build slot.
 Attach consent authorizes observation of the process; it does not authorize
-parallel work. A refused activation creates no session or lease and retains
-the approval for a retry while it is still valid.
+parallel work. Activation stores the session as a clean scout and still
+occupies the builder slot through its attach binding until that session
+stops. A registered read-only scout, with no attach binding and no delivery
+binding, does not occupy the slot. A refused activation creates no session
+or lease and retains the approval for a retry while it is still valid.
 
 When the project has a repository linked through Delivery settings, an open
 linked pull request or a projected `work/<slug>` branch with unmerged commits

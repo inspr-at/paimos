@@ -6978,6 +6978,10 @@
     ,
     {"kind":"go","package":"internal/harness","name":"TestQuickPauseWaitsForUninterruptibleCommand","tier":"GATED-FULL"}
     ,
+    {"kind":"go","package":"internal/harness","name":"TestReadOnlySessionLifecycleCannotBecomeBuilder","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/harness","name":"TestReadOnlyTicketAdmissionAndReviewerIdentity","tier":"ESSENTIAL"}
+    ,
     {"kind":"go","package":"internal/harness","name":"TestRebindClearsEstimate","tier":"GATED-FULL"}
     ,
     {"kind":"go","package":"internal/harness","name":"TestReceiptOmitsSetsWhenALowerVersionSetLeavesTheBytesUnchanged","tier":"GATED-FULL"}

@@ -901,7 +901,7 @@ components:
         host: {type: string, minLength: 1, maxLength: 128}
         management_mode: {type: string, enum: [managed, unmanaged]}
         role: {type: string, enum: [coordinator, worker]}
-        work_shape: {type: string, enum: [unknown, ship, scout]}
+        work_shape: {type: string, enum: [unknown, ship, scout], description: "Scout sessions are permanently read-only and may register beside a builder or open delivery. They cannot bind branches, work orders or agent runs, report commits, or change to ship/unknown. Review approval still requires a dispatcher-created authenticated review run."}
         advertised_capabilities: {type: array, items: {type: string, enum: [inbox, pause, owned_stop_v1, status, steer, interrupt, stop, managed_control_v1, session_recovery_v1, rename, model, effort, service_tier_v1, chat]}}
         harness_session_ref: {type: string, minLength: 16, maxLength: 4096, writeOnly: true}
         vendor_session_ref:
