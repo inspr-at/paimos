@@ -139,7 +139,7 @@ export const resolveMessage = (projectId: string, messageId: string, decision: H
   request<HeldResolution>(`/projects/${enc(projectId)}/messages/${enc(messageId)}/resolution`, 'POST', { decision, note })
 export const sendMessage = (projectId: string, body: MessageSend) => request<ProjectMessage>(`/projects/${enc(projectId)}/messages`, 'POST', body)
 // AEON-280: the sender's delivery progress per message (sender-only; others omitted).
-export interface MessageStatus { cancelled?: boolean; message_id: string; status: 'sent' | 'delivered' | 'read' | 'not_delivered'; reason?: string; delivered_at: string | null; read_at: string | null; deliver_by: string | null }
+export interface MessageStatus { waiting_for_pickup?: boolean; pickup_stalled_at?: string; cancelled?: boolean; message_id: string; status: 'sent' | 'delivered' | 'read' | 'not_delivered'; reason?: string; delivered_at: string | null; read_at: string | null; deliver_by: string | null }
 export interface ChatCancelResult { contract: 'chat-v1'; message_id: string; result: 'cancelled' | 'too_late' | 'uncertain'; receipt: { state: string } }
 export const cancelSessionMessage = (projectId: string, messageId: string) => request<ChatCancelResult>(`/projects/${enc(projectId)}/messages/${enc(messageId)}/cancel`, 'POST')
 // AEON-1071: the person's own chat thread whose current binding is this
@@ -172,7 +172,7 @@ const HARNESS_EVENTS = ['registered', 'bound', 'yielded', 'stopped', 'removed', 
 const OTHER_EVENTS = ['inbox.sent', 'harness.leaving_requested', 'harness.leaving_cancelled', 'approval.proposed', 'approval.approved', 'approval.denied', 'approval.revoked', 'run.created', 'run.claimed', 'run.telemetry', 'work_order.started', 'work_order.updated', 'inbox.compat_sent', 'inbox.delivery_queued', 'inbox.reply_obligation_closed', 'inbox.action_resolved', 'inbox.message_cancelled']
 // Delivery progress of sent messages (AEON-280). These only refresh message
 // status, never the whole workspace.
-export const DELIVERY_EVENTS = ['inbox.message_fetched', 'inbox.receipt_handed_off', 'inbox.receipt_failed', 'inbox.delivery_failed', 'inbox.message_cancelled']
+export const DELIVERY_EVENTS = ['delivery.stall_alerted', 'inbox.message_fetched', 'inbox.receipt_handed_off', 'inbox.receipt_failed', 'inbox.delivery_failed', 'inbox.message_cancelled']
 // Lead, decision, queue, question and reparent events wake the shared Agents projection
 // (AEON-1210 G4; stores/agentProjection.ts), which batches them and rereads what changed.
 // Every agents subscription carries them; a reconnect wakes a full reread.

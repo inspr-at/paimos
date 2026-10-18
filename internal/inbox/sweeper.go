@@ -26,18 +26,20 @@ const SweepInterval = 15 * time.Second
 
 const sweepBatch = 100
 
-// Sweeper enforces delivery deadlines and the adapter attempt cap (AEON-280).
+// Sweeper enforces delivery deadlines and the adapter attempt cap (AEON-280),
+// and notifies stalled person-to-session chat pickup (AEON-1487).
 // paimos serve runs it; only the process holding the advisory lock sweeps.
 type Sweeper struct {
 	pool     *pgxpool.Pool
 	interval time.Duration
+	clock    func() time.Time
 	mu       sync.Mutex
 	// Tenants whose pre-AEON-280 receipts are healed; a one-time bounded job.
 	legacyHealed map[string]bool
 }
 
 func NewSweeper(pool *pgxpool.Pool) *Sweeper {
-	return &Sweeper{pool: pool, interval: SweepInterval, legacyHealed: map[string]bool{}}
+	return &Sweeper{pool: pool, interval: SweepInterval, clock: time.Now, legacyHealed: map[string]bool{}}
 }
 
 // Run sweeps now and then every interval until ctx ends.
@@ -137,6 +139,7 @@ func (s *Sweeper) SweepTenant(ctx context.Context, tenantID string) (int, error)
 		rows, err := tx.Query(ctx, `SELECT m.id::text,
  CASE WHEN rs.id IS NOT NULL AND (rs.stopped_at IS NOT NULL OR rs.archived_at IS NOT NULL) THEN 'session_ended'
       WHEN d.attempts >= $1 THEN 'attempts'
+      WHEN m.expires_at<=clock_timestamp() AND (`+personSessionChatSQL+`) THEN 'deadline'
       WHEN m.fetched_at IS NULL AND coalesce(d.attempts,0)=0 THEN 'no_listener'
       ELSE 'deadline' END
  FROM inbox_receipts r
@@ -147,6 +150,9 @@ func (s *Sweeper) SweepTenant(ctx context.Context, tenantID string) (int, error)
  WHERE m.content_mode='durable' AND m.chat_thread_id IS NULL AND r.state='queued' AND r.deliver_by IS NOT NULL AND m.acked_at IS NULL
    AND NOT (coalesce(d.attempts,0)<$1 AND coalesce(c.key_digest='desk/'||c.id::text,false)
      AND (rs.id IS NULL OR (rs.stopped_at IS NULL AND rs.archived_at IS NULL)))
+   AND NOT ((`+personSessionChatSQL+`) AND coalesce(d.attempts,0)<$1
+     AND (m.expires_at IS NULL OR m.expires_at>clock_timestamp())
+     AND rs.stopped_at IS NULL AND rs.archived_at IS NULL)
    AND NOT coalesce(d.state='pending' AND d.lease_until>clock_timestamp(),false)
    AND NOT EXISTS(SELECT 1 FROM harness_deliveries h WHERE h.message_id=m.id AND h.completed_at IS NULL AND h.released_at IS NULL AND h.leased_at>clock_timestamp()-interval '2 minutes')
    AND (r.deliver_by<=clock_timestamp()
@@ -191,6 +197,10 @@ func (s *Sweeper) SweepTenant(ctx context.Context, tenantID string) (int, error)
 		if done {
 			failed++
 		}
+	}
+	// A notice failure must not hold back terminal guarantees for other messages.
+	if err := s.sweepChatPickup(ctx, tenantID); err != nil && first == nil {
+		first = err
 	}
 	return failed, first
 }

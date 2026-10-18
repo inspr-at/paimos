@@ -673,6 +673,13 @@ export function tierWeights(manifest, rows) {
 export const fullWebShardCount = 17
 export const fullWebShards = Array.from({ length: fullWebShardCount }, (_, index) => index + 1)
 
+// Nightly catalogue width, shared by nightly-full.yml and its measurement
+// consumers. AEON-1522: 24 shards peak at 959s. The catalogue sums past
+// 25×900s, so a 25th shard still peaks above 900s. 26 shards keep the peak
+// at least 60 seconds under the 16-minute budget without changing timings.
+export const nightlyWebShardCount = 26
+export const nightlyWebShards = Array.from({ length: nightlyWebShardCount }, (_, index) => index + 1)
+
 // Fail when any projected shard crosses the budget. The plan itself still
 // returns fitsBudget false for an indivisible file, so callers can fail wide.
 export function assertWebShardBudget(plan) {

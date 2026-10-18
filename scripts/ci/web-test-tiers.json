@@ -13360,6 +13360,18 @@
     ,
     {"kind":"browser","file":"tests/session-chat.spec.ts","name":"AEON-1254 binding refusal en profile light 390: empty chat and queued delivery stay honest and stable","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
+    {"kind":"browser","file":"tests/session-chat.spec.ts","name":"AEON-1487 waiting chat dark 1024: stall notice keeps controls still","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/session-chat.spec.ts","name":"AEON-1487 waiting chat dark 1440: stall notice keeps controls still","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/session-chat.spec.ts","name":"AEON-1487 waiting chat dark 390: stall notice keeps controls still","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/session-chat.spec.ts","name":"AEON-1487 waiting chat light 1024: stall notice keeps controls still","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/session-chat.spec.ts","name":"AEON-1487 waiting chat light 1440: stall notice keeps controls still","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/session-chat.spec.ts","name":"AEON-1487 waiting chat light 390: stall notice keeps controls still","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
     {"kind":"browser","file":"tests/session-chat.spec.ts","name":"AEON-976 Stop: Esc leaves the field then interrupts with captured process ownership","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
     {"kind":"browser","file":"tests/session-chat.spec.ts","name":"AEON-976 history: more than 200 posts remain reachable and a late refresh retains the reader anchor","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}

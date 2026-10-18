@@ -88,7 +88,7 @@ func sweepNow(t *testing.T, w *world, tenantID string) int {
 }
 
 func TestSessionDeadlineDeliveredThenFailedLoudly(t *testing.T) {
-	w, m, project, srv := messagingWorld(t)
+	w, m, project, srv := messagingWorld(t, true)
 	get := func(principal, path string) (int, []byte) { return do(t, srv, principal, "GET", path, "", nil) }
 	session := messageTestSession(t, w, project, w.agent, "Deadline worker")
 	in := compatInput("codex:worker", "bound")
@@ -178,7 +178,7 @@ func TestSessionDeadlineDeliveredThenFailedLoudly(t *testing.T) {
 }
 
 func TestUnpulledMessageFailsNoListenerAndPeopleHaveNoDeadline(t *testing.T) {
-	w, m, project, srv := messagingWorld(t)
+	w, m, project, srv := messagingWorld(t, true)
 	session := messageTestSession(t, w, project, w.agent, "Quiet worker")
 	in := compatInput("codex:worker", "never-pulled")
 	in.RecipientSessionID = &session
@@ -194,7 +194,7 @@ func TestUnpulledMessageFailsNoListenerAndPeopleHaveNoDeadline(t *testing.T) {
 		t.Fatalf("notice %+v", n)
 	}
 	// A message to a person has no delivery path to guarantee.
-	status, body := do(t, srv, w.sender.ID, "POST", "/api/inbox/messages", sendJSON(w.recipient.ID, "to a person", "person", nil, nil), nil)
+	status, body := do(t, srv, w.admin.ID, "POST", "/api/inbox/messages", sendJSON(w.recipient.ID, "to a person", "person", nil, nil), nil)
 	if status != 201 {
 		t.Fatalf("send to person %d %s", status, body)
 	}
@@ -204,7 +204,7 @@ func TestUnpulledMessageFailsNoListenerAndPeopleHaveNoDeadline(t *testing.T) {
 		t.Fatalf("person message deadline %v", deadline)
 	}
 	// An agent's plain principal message takes the unbound default.
-	status, body = do(t, srv, w.sender.ID, "POST", "/api/inbox/messages", sendJSON(w.agent.ID, "to an agent", "agent", nil, nil), nil)
+	status, body = do(t, srv, w.admin.ID, "POST", "/api/inbox/messages", sendJSON(w.agent.ID, "to an agent", "agent", nil, nil), nil)
 	if status != 201 {
 		t.Fatalf("send to agent %d %s", status, body)
 	}
@@ -326,7 +326,7 @@ func TestAttemptCapAndSettings(t *testing.T) {
 		t.Fatalf("settings %d %s", status, body)
 	}
 	status, body := do(t, srv, w.admin.ID, "GET", "/api/settings/inbox-delivery", "", nil)
-	if got := mustJSON[DeliverySettings](t, body); status != 200 || got != (DeliverySettings{120, 900, 1}) {
+	if got := mustJSON[DeliverySettings](t, body); status != 200 || got != (DeliverySettings{120, 900, 1, 600}) {
 		t.Fatalf("settings read %d %+v", status, got)
 	}
 	if _, err := m.storeTarget(t.Context(), w.admin, project, targetInput{Address: "codex:worker", Adapter: "codex", Kind: "codex_thread", Ref: "thread-fixture", Role: "primary", MaximumLevel: "simple"}); err != nil {
@@ -431,7 +431,7 @@ func TestStreamCarriesSessionMessagesAndMarksListening(t *testing.T) {
 }
 
 func TestSweeperIsASingleRunner(t *testing.T) {
-	w, m, project, _ := messagingWorld(t)
+	w, m, project, _ := messagingWorld(t, true)
 	session := messageTestSession(t, w, project, w.agent, "Locked worker")
 	in := compatInput("codex:worker", "locked")
 	in.RecipientSessionID = &session
@@ -471,6 +471,7 @@ func TestExactSessionLeavesOutBroadcasts(t *testing.T) {
 	if status != 200 || len(mustJSON[Page](t, body).Items) != 4 {
 		t.Fatalf("default session pull changed: %d %s", status, body)
 	}
+	expireChatPickupLease(t, w, session)
 	status, body = do(t, srv, w.agent.ID, "GET", base+"&exact_session=true", "", nil)
 	page := mustJSON[Page](t, body)
 	if status != 200 || len(page.Items) != 1 || page.Items[0].ID != bound.ID {
@@ -481,6 +482,7 @@ func TestExactSessionLeavesOutBroadcasts(t *testing.T) {
 			t.Fatalf("%s: %d %s", bad, status, body)
 		}
 	}
+	expireChatPickupLease(t, w, session)
 	ctx, cancel := context.WithTimeout(t.Context(), 20*time.Second)
 	defer cancel()
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, srv.URL+"/api/inbox/stream?exact_session=true&session="+session, nil)
