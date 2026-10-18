@@ -161,6 +161,9 @@ func (rt *runtime) printIssue(v issueView) error {
 
 func (rt *runtime) printIssueList(items []issueView, total int) error {
 	if rt.jsonOut {
+		if items == nil {
+			items = []issueView{}
+		}
 		return rt.printJSON(map[string]any{"issues": items, "total": total})
 	}
 	if len(items) == 0 {
@@ -212,7 +215,7 @@ func (rt *runtime) listIssuesResult(project, status, typ, priority, assignee str
 	if err != nil {
 		return issueListResult{}, err
 	}
-	var matched []issueView
+	matched := []issueView{}
 	for _, n := range nodes {
 		slug := kinds.slug(n.KindID)
 		if typ == "" && !issueKinds[slug] {
