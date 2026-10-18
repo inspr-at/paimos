@@ -8,7 +8,7 @@
 import { computed, ref, watch } from 'vue'
 import { HARNESS_NAME } from '../../lib/capacity'
 import {
-  boostNumber, boostSummary, detailHeadline, makeBoost, needsAttention, paceSummary, pct, stateWords, storedPace, todayLine, typedPercent, typedPoints,
+  boostNumber, boostSummary, detailHeadline, makeBoost, needsAttention, paceSummary, pct, resetsLine, stateWords, storedPace, todayLine, typedPercent, typedPoints,
   type DailySettings, type DailyView, type EnteredAs,
 } from '../../lib/dailyLimits'
 import type { DialFold } from '../../lib/dialPrefs'
@@ -37,6 +37,8 @@ const settings = computed(() => props.view.settings)
 /** Today's points: the dt says "Today"; a state that needs attention keeps its words and icon. */
 const today = computed(() => todayLine(props.view).replace(/^Today: /, ''))
 const attention = computed(() => needsAttention(props.view))
+/** Vendor-reported reset credits, only when the vendor reports them. */
+const resets = computed(() => resetsLine(props.view.account, props.tz))
 const open = (fold: DialFold) => !props.ghost && (fold === 'pace' ? props.paceOpen : props.boostOpen)
 const change = (patch: Partial<DailySettings>) => emit('change', harness.value, { ...settings.value, ...patch })
 const id = (part: string) => props.ghost ? undefined : `dial-${harness.value}-${part}`
@@ -117,7 +119,7 @@ const paceHome = computed(() => `/settings/capacity#pace-${harness.value}`)
     <template v-else-if="view.kind !== 'none'">
       <dl class="cd-dl">
         <dt><span class="eyebrow">Today</span></dt>
-        <dd><p class="cd-line cd-td">{{ today }}<span v-if="attention" class="cap-st" :class="`st-${view.kind}`"><AppIcon :name="view.kind === 'at_limit' ? 'pause' : 'alert'" :size="13" /><span>{{ stateWords(view) }}</span></span></p></dd>
+        <dd><p class="cd-line cd-td">{{ today }}<span v-if="attention" class="cap-st" :class="`st-${view.kind}`"><AppIcon :name="view.kind === 'at_limit' ? 'pause' : 'alert'" :size="13" /><span>{{ stateWords(view) }}</span></span></p><p v-if="resets" class="cap-rs"><AppIcon name="refresh" :size="13" /><span>{{ resets }}</span></p></dd>
         <dt><button type="button" class="cd-fh" :aria-expanded="open('pace')" :aria-controls="id('pace')" :tabindex="tabbable()" @click="emit('fold', 'pace')"><AppIcon class="cap-chev" name="chevron-right" :size="12" /><span class="eyebrow">Pace</span></button></dt>
         <dd :class="{ open: open('pace') }">
           <p class="cd-sum" @click="emit('fold', 'pace')">{{ paceSummary(view) }}</p>
@@ -162,6 +164,8 @@ p { margin: 0; }
 .cap-st svg { flex: none; }
 .cap-st.st-over_pace { color: var(--cap-over-ink); }
 .cap-st.st-at_limit { color: var(--cap-lim-ink); }
+.cap-rs { display: flex; align-items: center; gap: 6px; margin-top: 2px; color: var(--ink-2); font-size: 12.5px; font-variant-numeric: tabular-nums; }
+.cap-rs svg { flex: none; color: var(--ink-3); }
 .cd-dl { display: grid; grid-template-columns: 128px minmax(0, 1fr); margin: 14px 0 0; border-top: 1px solid var(--line); }
 .cd-dl > dt, .cd-dl > dd { margin: 0; padding: 10px 0; border-bottom: 1px solid var(--line); }
 .cd-dl > dt:last-of-type, .cd-dl > dd:last-of-type { border-bottom: 0; }

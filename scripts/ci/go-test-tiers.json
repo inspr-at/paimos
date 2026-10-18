@@ -936,6 +936,12 @@
     ,
     {"kind":"go","package":"internal/agentaccounts","name":"TestQuotaHintsNeedPersonConfirmationForExactAccounts","tier":"GATED-FULL"}
     ,
+    {"kind":"go","package":"internal/agentaccounts","name":"TestQuotaOutlookReplayVerdicts","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/agentaccounts","name":"TestQuotaOutlookScopeAndTenant","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/agentaccounts","name":"TestQuotaOutlookWebFixtureIsCurrent","tier":"ESSENTIAL"}
+    ,
     {"kind":"go","package":"internal/agentaccounts","name":"TestQuotaWarningDedupeRecoveryAndReset","tier":"GATED-FULL"}
     ,
     {"kind":"go","package":"internal/agentaccounts","name":"TestQuotaWarningDelayedPoolReadingCannotUndoRecovery","tier":"GATED-FULL"}

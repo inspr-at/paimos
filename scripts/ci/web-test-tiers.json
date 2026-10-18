@@ -404,7 +404,7 @@
     ,
     "browser:tests/agents-dial-daily.spec.ts:AEON-1036: at the limit the flag is a gold pause mark and the unit says where new work goes"
     ,
-    "browser:tests/agents-dial-daily.spec.ts:AEON-1036: each row shows its usage lines and pace state in a fixed 88 px row"
+    "browser:tests/agents-dial-daily.spec.ts:AEON-1036: each row shows its running count, its usage line and only a pace state that needs attention, in a fixed 88 px row"
     ,
     "browser:tests/agents-dial-daily.spec.ts:AEON-1036: folded, the dial is one light control in the capacity row and flags only what needs attention"
     ,
@@ -412,7 +412,7 @@
     ,
     "browser:tests/agents-dial-daily.spec.ts:AEON-1036: the Accounts tile names what blocks a harness and offers Verify again in place, as Accounts and computers does"
     ,
-    "browser:tests/agents-dial-daily.spec.ts:AEON-1036: the detail reads week, today, the bar and the pace state, then lists the accounts read-only"
+    "browser:tests/agents-dial-daily.spec.ts:AEON-1036: the detail reads the usage first, then today, the pace state and the folds"
     ,
     "browser:tests/agents-dial-daily.spec.ts:AEON-1036: the dial and its detail pass axe, open with both folds and folded, in both themes"
     ,
@@ -6820,7 +6820,7 @@
     ,
     {"kind":"browser","file":"tests/agents-dial-daily.spec.ts","name":"AEON-1036: at the limit the flag is a gold pause mark and the unit says where new work goes","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
-    {"kind":"browser","file":"tests/agents-dial-daily.spec.ts","name":"AEON-1036: each row shows its usage lines and pace state in a fixed 88 px row","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    {"kind":"browser","file":"tests/agents-dial-daily.spec.ts","name":"AEON-1036: each row shows its running count, its usage line and only a pace state that needs attention, in a fixed 88 px row","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
     {"kind":"browser","file":"tests/agents-dial-daily.spec.ts","name":"AEON-1036: folded, the dial is one light control in the capacity row and flags only what needs attention","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
@@ -6828,7 +6828,7 @@
     ,
     {"kind":"browser","file":"tests/agents-dial-daily.spec.ts","name":"AEON-1036: the Accounts tile names what blocks a harness and offers Verify again in place, as Accounts and computers does","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
-    {"kind":"browser","file":"tests/agents-dial-daily.spec.ts","name":"AEON-1036: the detail reads week, today, the bar and the pace state, then lists the accounts read-only","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    {"kind":"browser","file":"tests/agents-dial-daily.spec.ts","name":"AEON-1036: the detail reads the usage first, then today, the pace state and the folds","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
     {"kind":"browser","file":"tests/agents-dial-daily.spec.ts","name":"AEON-1036: the dial and its detail pass axe, open with both folds and folded, in both themes","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
@@ -6873,6 +6873,18 @@
     {"kind":"browser","file":"tests/agents-dial-daily.spec.ts","name":"settings written from the detail › a changed plan revision is re-read and the edit is not forced over it","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
     {"kind":"browser","file":"tests/agents-dial-daily.spec.ts","name":"settings written from the detail › a failed write keeps the confirmed settings on screen and says so","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/agents-dial-usage.spec.ts","name":"AEON-1497 1024: the detail answers first, the chart follows the projection, and nothing moves","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/agents-dial-usage.spec.ts","name":"AEON-1497 1024: the folded dial's mini lines sit in the existing gaps (0 px), Claude and Codex only","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/agents-dial-usage.spec.ts","name":"AEON-1497 1440: the detail answers first, the chart follows the projection, and nothing moves","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/agents-dial-usage.spec.ts","name":"AEON-1497 1440: the folded dial's mini lines sit in the existing gaps (0 px), Claude and Codex only","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/agents-dial-usage.spec.ts","name":"AEON-1497 390: the detail answers first, the chart follows the projection, and nothing moves","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/agents-dial-usage.spec.ts","name":"AEON-1497: loading keeps the reserved heights, a failed read says so with Try again, stale readings say their age","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
     {"kind":"browser","file":"tests/agents-dial.spec.ts","name":"1024 dark wind: stepping, modes and folding keep every control put","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
@@ -19469,6 +19481,24 @@
     {"kind":"vitest","file":"tests/project-related.unit.test.ts","name":"a resolved old key AEON-1 follows the canonical record PHAROS-17 and retains Back history","tier":"GATED-FULL"}
     ,
     {"kind":"vitest","file":"tests/project-related.unit.test.ts","name":"a resolved old key PHAROS-14 follows the canonical record AEON-2 and retains Back history","tier":"GATED-FULL"}
+    ,
+    {"kind":"vitest","file":"tests/quota-outlook.unit.test.ts","name":"the answer in words > says what is missing instead of inventing it","tier":"ESSENTIAL"}
+    ,
+    {"kind":"vitest","file":"tests/quota-outlook.unit.test.ts","name":"the answer in words > the default range always reaches the moment the headline names","tier":"ESSENTIAL"}
+    ,
+    {"kind":"vitest","file":"tests/quota-outlook.unit.test.ts","name":"the answer in words > too fast names when the pool runs dry, how long, and which account refills it","tier":"ESSENTIAL"}
+    ,
+    {"kind":"vitest","file":"tests/quota-outlook.unit.test.ts","name":"the answer in words > too slow names the refill that wastes most; on pace names the next refill","tier":"ESSENTIAL"}
+    ,
+    {"kind":"vitest","file":"tests/quota-outlook.unit.test.ts","name":"the chart > labels the empty stretch under the axis and the refill above, never on top of each other","tier":"ESSENTIAL"}
+    ,
+    {"kind":"vitest","file":"tests/quota-outlook.unit.test.ts","name":"the chart > one hour in words: measured in the past, projected ahead","tier":"ESSENTIAL"}
+    ,
+    {"kind":"vitest","file":"tests/quota-outlook.unit.test.ts","name":"the chart > the folded mini line ends amber only when the pool runs dry before the refill","tier":"ESSENTIAL"}
+    ,
+    {"kind":"vitest","file":"tests/quota-outlook.unit.test.ts","name":"the subscriptions > an inactive login keeps its last reading and says its age","tier":"ESSENTIAL"}
+    ,
+    {"kind":"vitest","file":"tests/quota-outlook.unit.test.ts","name":"the subscriptions > each battery says what is left, when it refills and its own forecast; only the account that empties the pool warns","tier":"ESSENTIAL"}
     ,
     {"kind":"vitest","file":"tests/quote-editor.unit.test.ts","name":"QuoteEditor snapshots > hydrates nested reactive document data and preserves independent undo history","tier":"ESSENTIAL"}
     ,
