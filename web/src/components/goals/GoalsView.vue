@@ -7,7 +7,10 @@
 // control under the pointer. Content comes from the server only: without goals
 // the view says so, it never shows examples. AEON-1494: the workspace status note
 // leads the grid when an agent wrote one, and the card footer ends with the
-// freshness stamp (Live, or Reconnecting) beside the quiet projects.
+// freshness stamp (Live, or Reconnecting) beside the quiet projects. Addendum
+// (Tick's decisions B and C): an opened goal's items are one line with their live
+// line in the Moving → Progress span when the counts show and the goal column gives
+// their key and label at least 280 px; otherwise the label runs to the ETA.
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useRoute } from 'vue-router'
 import AppIcon from '../AppIcon.vue'
@@ -46,6 +49,27 @@ const agents = computed(() => {
 // Rows ask for their progress series as they appear (done goals say nothing).
 watch([goals, () => props.page.range.value], ([list]) => { for (const goal of list) if (!goal.done) props.page.want(goal) }, { immediate: true })
 watch(() => props.page.charts.size, () => { for (const goal of goals.value) if (props.page.charts.has(goal.id)) props.page.want(goal) })
+
+// ---------- Item rows: wide or stacked ----------
+// Decided when the goals arrive or the window resizes, never while someone works in the list.
+// The goal column is the grid's third track; items give 28 px of it to their icon slot.
+const grid = ref<HTMLElement>()
+const wideItems = ref(false)
+const WIDE_TRACKS = 11, ITEM_ICON_SLOT = 28, ITEM_TEXT_MIN = 280
+function measureItems() {
+  if (!grid.value) return
+  const tracks = getComputedStyle(grid.value).gridTemplateColumns.split(' ').map(parseFloat)
+  wideItems.value = tracks.length === WIDE_TRACKS && (tracks[2] ?? 0) - ITEM_ICON_SLOT >= ITEM_TEXT_MIN
+}
+let gridWidth = -1
+const resized = typeof ResizeObserver === 'undefined' ? null : new ResizeObserver(([entry]) => {
+  const width = entry?.contentRect.width ?? 0
+  if (width !== gridWidth) { gridWidth = width; measureItems() }
+})
+watch(grid, (el, old) => { if (old) resized?.unobserve(old); if (el) resized?.observe(el) })
+watch(() => loaded.value && goals.value.length > 0, has => { if (has) void nextTick(measureItems) }, { immediate: true })
+// The key badges change width once the mono font arrives.
+onMounted(() => { void document.fonts?.ready.then(measureItems) })
 
 // ---------- Header ----------
 const HEAD: { key: GoalSort; label: string; end?: boolean; stat?: boolean }[] = [
@@ -126,7 +150,7 @@ onMounted(() => {
   stopKeys.push(onAction('goals.next', () => step(1)))
   stopKeys.push(onAction('goals.prev', () => step(-1)))
 })
-onBeforeUnmount(() => { window.removeEventListener('keydown', searchKey, true); stopKeys.forEach(stop => stop()) })
+onBeforeUnmount(() => { window.removeEventListener('keydown', searchKey, true); stopKeys.forEach(stop => stop()); resized?.disconnect() })
 
 const quiet = computed(() => props.page.list.value?.quiet_projects ?? { count: 0, keys: [] })
 const more = computed(() => props.page.list.value?.next_cursor)
@@ -149,7 +173,7 @@ const canClear = computed(() => filtering.value)
     </div>
     <template v-else>
       <p v-if="loaded && page.totalsPartial.value" class="partial-line" role="status">Counts omit oversized goals.</p>
-      <div class="goal-grid">
+      <div ref="grid" class="goal-grid" :data-items="wideItems ? 'wide' : 'stacked'">
         <GoalStatusNote v-if="loaded && page.statusNote.value" :note="page.statusNote.value" :now="now" />
         <GoalWaiting v-if="person" :goals="goals" />
         <template v-if="!loaded">
@@ -183,7 +207,7 @@ const canClear = computed(() => filtering.value)
           <ul class="goal-list" :aria-busy="page.reading.value">
             <GoalRow
               v-for="goal in goals" :key="goal.id" :class="{ arrived: arrived === goal.id }" :goal="goal" :page="page" :now="now" :agents="agents" :term="term"
-              :menu-open="menu?.goal.id === goal.id" @menu="anchor => openMenu(goal, anchor)"
+              :menu-open="menu?.goal.id === goal.id" :wide-items="wideItems" @menu="anchor => openMenu(goal, anchor)"
             />
           </ul>
         </template>

@@ -5,10 +5,14 @@
 // more than its one line, or pushes anything but the list (and only on "more");
 // hours left that push the row; a dropped stream the footer never admits, or whose
 // label moves the footer; an item note without its author; "today" missing from
-// the Done fold; a goal showing another goal's percent. Screenshots go to each
-// test's output directory.
+// the Done fold; a goal showing another goal's percent. Addendum (Markus's item-row
+// feedback, Tick's decisions A–D): items that hug the left edge instead of nesting
+// under their goal, an empty Moving → Progress span on wide screens, titles squeezed
+// into a narrow column at 1024, goal names cut to one line, and any of it moving a
+// control when a goal opens or a live update lands. Screenshots go to each test's
+// output directory.
 import { test, expect, type Page, type Locator, type TestInfo } from '@playwright/test'
-import { fixtures, mockWork, watchErrors } from './work-fixtures'
+import { fixtures, liveAgent, mockWork, watchErrors } from './work-fixtures'
 import { controlStability } from './control-stability'
 
 test.use({ timezoneId: 'Europe/Vienna', locale: 'en-GB' })
@@ -264,5 +268,159 @@ for (const size of VIEWPORTS) {
     const waiting = page.getByRole('region', { name: 'Waiting on you' })
     await expect(waiting).toBeVisible()
     await shot(page, info, `goals-gaps-${size.width}-no-note`)
+  })
+}
+
+// ---------- Addendum: item rows nest under the goal and use the wide span (Tick's decisions A–D) ----------
+const LONG_GOAL = 'Release 136 · steady and complete, with the gatekeeper live and every review run authenticated'
+const LONG_ITEM = 'People see in one place what every session is doing, what it waits for and when it lands, without asking anyone for a status update first'
+const STEPS = [{ id: 'cut', text: 'Open: 135 tagged and nightly green', state: 'done' }, { id: 'chat', text: 'Chat fixes after their designs', state: 'now' }, { id: 'ci', text: 'CI targets met (S3–S5)', state: 'later' }]
+const NOTED = 'Agent reviews become authenticated'
+const NOTE = 'Hand-check of 5 review runs, then the gate goes live for every merge in the queue'
+const NOTE_LINE = `${NOTE} · AEON-LEAD 18:52`
+function nestedWorld() {
+  const w = world()
+  const release = w.goals[0]!
+  const items = release.items as ReturnType<typeof item>[]
+  // The noted item gets an agent and a note longer than its span; a second moving item has a long label and two tickets.
+  Object.assign(items[0]!, { session_ids: ['s-camy'], note: NOTE })
+  items.splice(1, 0, item(LONG_ITEM, 'moving', { keys: ['AEON-1402', 'AEON-1409'], eta: { source: 'agent', text: '~22:00', at: '2026-10-18T20:00:00Z', partial: false } }))
+  Object.assign(release, { title: LONG_GOAL, steps: STEPS, next_step: STEPS[1] })
+  w.data.live.push(liveAgent({ project_id: 'p-aeon', session_id: 's-camy', principal_id: '44444444-4444-4444-8444-444444444444', name: 'camy', harness: 'codex', ticket: { id: 'n-a1', key: 'AEON-1441', title: 'Agent reviews', project_id: 'p-aeon' }, since: iso(NOW - 30 * 60_000), heartbeat_at: iso(NOW - 30_000) }))
+  return w
+}
+// The grid's column tracks as [left, right] in viewport x.
+const columns = (page: Page) => page.locator('.goal-grid').evaluate(el => {
+  const style = getComputedStyle(el), gap = parseFloat(style.columnGap)
+  let x = el.getBoundingClientRect().left + parseFloat(style.paddingLeft)
+  return style.gridTemplateColumns.split(' ').map(parseFloat).map(width => { const track = [x, x + width] as const; x += width + gap; return track })
+})
+const lines = (locator: Locator) => locator.evaluate(el => Math.round(el.getBoundingClientRect().height / parseFloat(getComputedStyle(el).lineHeight)))
+const emitItems = (page: Page, id: number) => page.evaluate(id => (window as unknown as { goalStreams: { emit(type: string, id: number): void } }).goalStreams.emit('goal.items_changed', id), id)
+
+for (const size of [{ width: 1440, height: 900 }, { width: 1024, height: 800 }, { width: 900, height: 800 }, { width: 390, height: 844 }] as const) {
+  const wide = size.width >= 1200
+  const rows = phone(size.width) ? 'phones keep their stacked item rows with every ticket link'
+    : `items nest under their goal at the step icons' x, ${wide ? 'one line each with the live line in the Moving → Progress span' : 'labels run from the key to the ETA in at most two lines with the badge in the meta line'}`
+  test(`${size.width}: ${rows}; goal names wrap to two lines; opening and a live update move nothing`, async ({ page }, info) => {
+    await page.setViewportSize(size)
+    const errors = watchErrors(page)
+    const w = nestedWorld()
+    await openGoals(page, w)
+    await expect(page.locator('.goal-grid')).toHaveAttribute('data-items', wide ? 'wide' : 'stacked')
+    const release = page.locator('.goal[data-goal-id="g-r136"]'), other = page.locator('.goal[data-goal-id="g-r137"]')
+
+    // D: the long goal name wraps to two lines (the rest is its tip); "Next" stays one line.
+    const name = release.locator('.goal-name')
+    expect(await lines(name)).toBe(2)
+    expect(await name.evaluate(el => getComputedStyle(el).whiteSpace)).toBe('normal')
+    await expect(name).toHaveAttribute('data-tip', LONG_GOAL)
+    if (!phone(size.width)) {
+      expect(await release.locator('.goal-next .txt').evaluate(el => getComputedStyle(el).whiteSpace)).toBe('nowrap')
+      expect(await lines(release.locator('.goal-next'))).toBe(1)
+    }
+
+    // 0 px: opening the goal moves none of its controls, and no other goal's name sideways.
+    const controls: Record<string, Locator> = { toggle: release.locator('.goal-toggle'), name, filter: page.locator('.project-search') }
+    if (!phone(size.width)) Object.assign(controls, { eta: release.locator('.goal-eta'), lands: page.getByRole('button', { name: /^Sort by lands/ }) })
+    const guard = await controlStability(page, controls)
+    const across = async () => { const b = await box(other.locator('.goal-name')); return [b.x, b.width] }
+    const otherBefore = await across()
+    await guard.check(async () => { await release.locator('.goal-toggle').click(); await expect(release).toHaveAttribute('data-open', '1') })
+    const otherAfter = await across()
+    expect(Math.abs(otherAfter[0]! - otherBefore[0]!)).toBeLessThanOrEqual(.5)
+    expect(Math.abs(otherAfter[1]! - otherBefore[1]!)).toBeLessThanOrEqual(.5)
+
+    const items = release.locator('.item'), noted = release.locator('.item', { hasText: NOTED }), long = release.locator('.item', { hasText: LONG_ITEM.slice(0, 40) })
+    await expect(items).toHaveCount(3)
+    if (!phone(size.width)) {
+      const cols = await columns(page)
+      // A: every item's state icon at the step icons' x, inside the goal's column; the key follows it.
+      const step = await box(release.locator('.step .s-ic svg').first())
+      for (let i = 0; i < 3; i++) {
+        const icon = await box(items.nth(i).locator('.i-state > :first-child')), key = await box(items.nth(i).locator('.i-keys'))
+        expect(Math.abs(icon.x - step.x), `item ${i} icon x`).toBeLessThanOrEqual(1)
+        expect(icon.x, `item ${i} in the goal column`).toBeGreaterThanOrEqual(cols[2]![0] - .5)
+        expect(key.x, `item ${i} key after its icon`).toBeGreaterThan(icon.x + icon.width)
+      }
+      // One-ticket items start their labels at one x.
+      expect(Math.abs((await box(noted.locator('.i-label'))).x - (await box(items.nth(2).locator('.i-label'))).x)).toBeLessThanOrEqual(.5)
+      // The fold lines' chevrons centre on the same x.
+      const chevron = await box(release.locator('.fold-btn .f-ic svg').first())
+      expect(Math.abs(chevron.x + chevron.width / 2 - (step.x + step.width / 2))).toBeLessThanOrEqual(1)
+      // The second ticket is in the "+1" tip.
+      await expect(long.locator('.i-keys .more')).toHaveText('+1')
+      await expect(long.locator('.i-keys .more')).toHaveAttribute('data-tip', 'AEON-1409')
+
+      if (wide) {
+        // B: one line per item; the label keeps the goal column; the live line sits in Moving → Progress
+        // with its icon, its author and time readable, and the whole note in its tip.
+        for (let i = 0; i < 3; i++) {
+          const label = items.nth(i).locator('.i-label')
+          expect(await lines(label), `item ${i} one line`).toBe(1)
+          const b = await box(label)
+          expect(b.x + b.width).toBeLessThanOrEqual(cols[2]![1] + .5)
+        }
+        await expect(long.locator('.i-label')).toHaveAttribute('data-tip', LONG_ITEM)
+        const live = noted.locator(':scope > .i-live'), labelBox = await box(noted.locator('.i-label')), liveBox = await box(live)
+        await expect(live).toHaveText(NOTE_LINE)
+        await expect(live.locator('svg')).toBeVisible()
+        expect(liveBox.x).toBeGreaterThanOrEqual(cols[4]![0] - .5)
+        expect(liveBox.x + liveBox.width).toBeLessThanOrEqual(cols[7]![1] + .5)
+        expect(liveBox.height).toBeLessThanOrEqual(20.5)
+        expect(Math.abs(liveBox.y + liveBox.height / 2 - (labelBox.y + labelBox.height / 2))).toBeLessThanOrEqual(1.5)
+        const by = await box(live.locator('.by'))
+        expect(by.width).toBeGreaterThan(0)
+        expect(by.x + by.width).toBeLessThanOrEqual(cols[7]![1] + .5)
+        await expect(live.locator('.tx')).toHaveAttribute('data-tip', NOTE_LINE)
+        // The badge stays in the agent column, under the goal's own badge.
+        const goalBadge = await box(release.locator('.goal-row .agents .live-chip')), itemBadge = await box(noted.locator(':scope > .i-badge .live-chip'))
+        expect(Math.abs(goalBadge.x - itemBadge.x)).toBeLessThanOrEqual(.5)
+        expect(itemBadge.x).toBeGreaterThanOrEqual(cols[3]![0] - .5)
+        for (let i = 0; i < 3; i++) expect((await box(items.nth(i))).height, `item ${i} row`).toBeLessThanOrEqual(32.5)
+      } else {
+        // C: the label runs from the key to the ETA, at least 280 px wide and at most two lines.
+        for (let i = 0; i < 3; i++) {
+          const label = items.nth(i).locator('.i-label'), b = await box(label)
+          expect(b.width, `item ${i} label width`).toBeGreaterThanOrEqual(280)
+          expect(b.x + b.width, `item ${i} label reaches the ETA`).toBeGreaterThan(cols[3]![1])
+          expect(await lines(label), `item ${i} lines`).toBeLessThanOrEqual(2)
+        }
+        expect(await lines(long.locator('.i-label'))).toBe(2)
+        // The meta line under the label: the live line, then the badge's faces (no name).
+        const meta = noted.locator('.i-meta'), label = await box(noted.locator('.i-label'))
+        const live = await box(meta.locator('.i-live')), face = await box(meta.locator('.i-badge .live-chip'))
+        await expect(meta.locator('.i-live')).toHaveText(NOTE_LINE)
+        expect(live.y).toBeGreaterThanOrEqual(label.y + label.height - .5)
+        expect(Math.abs(live.x - label.x)).toBeLessThanOrEqual(.5)
+        expect(face.x).toBeGreaterThan(live.x + live.width)
+        await expect(meta.locator('.row-name')).toBeHidden()
+        await expect(noted.locator(':scope > .i-live, :scope > .i-badge')).toHaveCount(0)
+      }
+    } else {
+      // Phones keep their stacked rows and every ticket link; nothing overflows.
+      await expect(long.locator('.phone-tickets a')).toHaveCount(2)
+      await expect(noted.locator('.i-live')).toHaveText(NOTE_LINE)
+      const overflow = await page.evaluate(() => { const main = document.getElementById('main')!; return main.scrollWidth - main.clientWidth })
+      expect(overflow).toBeLessThanOrEqual(0)
+    }
+
+    // 0 px: a live update of the item's note moves none of the item controls or the next item.
+    const itemControls: Record<string, Locator> = { toggle: release.locator('.goal-toggle'), icon: noted.locator('.i-state'), label: noted.locator('.i-label'), next: long.locator('.i-label'), fold: release.locator('.fold-btn').first() }
+    if (!phone(size.width)) Object.assign(itemControls, { key: noted.locator('.i-keys a'), eta: noted.locator('.i-eta'), last: items.nth(2).locator('.i-state') })
+    const update = await controlStability(page, itemControls)
+    await update.check(async () => {
+      const before = w.reads
+      const outcome = (w.goals[0]!.items as ReturnType<typeof item>[])[0]! as Record<string, unknown>
+      outcome.note = 'The gate is live; watching the first twenty merges before the next step'
+      outcome.note_at = '2026-10-18T16:58:00Z'
+      await emitItems(page, 20)
+      await expect(noted.locator('.i-live .tx')).toHaveText('The gate is live; watching the first twenty merges before the next step')
+      expect(w.reads).toBeGreaterThan(before)
+    })
+    await shot(page, info, `goals-nest-${size.width}-light`)
+    await page.emulateMedia({ colorScheme: 'dark' })
+    await shot(page, info, `goals-nest-${size.width}-dark`)
+    expect(errors).toEqual([])
   })
 }
