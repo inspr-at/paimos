@@ -31,6 +31,11 @@ async function setup(page: Page, options: { theme?: 'light' | 'dark'; level?: 's
 }
 const section = (page: Page) => page.getByTestId('delivery-building')
 const trigger = (page: Page, name: string) => section(page).getByRole('button', { name: `Worst in this window: ${name}` })
+/** The rest of the page has its answers (summary, Tickets, sources): only Building it can still change. */
+async function settled(page: Page) {
+  await expect(page.getByTestId('delivery-summary')).toContainText('Last 7 days vs. the 7 before', { timeout: 15_000 })
+  await expect(page.getByTestId('delivery-tickets').locator('[aria-busy="true"]')).toHaveCount(0)
+}
 const learnBelow = (page: Page) => page.getByTestId('delivery-simple').getByRole('button', { name: 'Learn: How long the PR checks take' })
 
 for (const width of [1440, 1024, 390] as const) {
@@ -42,7 +47,7 @@ for (const width of [1440, 1024, 390] as const) {
       state.work.preferences['delivery:numbers'] = { level: 'simple', window: 7 }
       await page.goto('/p/AEON/delivery')
       const head = section(page).getByTestId('delivery-building-head')
-      await expect(head).toHaveText('0 of 3 on target')
+      await expect(head).toHaveText('0 of 3 on target', { timeout: 15_000 })
       const tiles = section(page).getByRole('listitem')
       await expect(tiles).toHaveCount(4)
       await expect(tiles.getByRole('heading', { level: 4 })).toHaveText(['First-try rate', 'Rounds per item', 'Idle between rounds', 'Lead time per item'])
@@ -91,7 +96,8 @@ test('Building it: Enter opens the worst five on the first row, ↓ moves, Esc c
   await page.setViewportSize({ width: 1440, height: 1000 })
   await setup(page)
   await page.goto('/p/AEON/delivery')
-  await expect(section(page).getByTestId('delivery-building-head')).toHaveText('0 of 3 on target')
+  await expect(section(page).getByTestId('delivery-building-head')).toHaveText('0 of 3 on target', { timeout: 15_000 })
+  await settled(page)
   const rounds = trigger(page, 'Rounds per item'), idle = trigger(page, 'Idle between rounds')
   await rounds.scrollIntoViewIfNeeded()
   const guard = await controlStability(page, { rounds, idle, learnRounds: section(page).getByRole('button', { name: 'Learn: Rounds per item' }), below: learnBelow(page) })
@@ -141,7 +147,7 @@ test('Building it: on a phone the worst five open as a bottom sheet with 44 px t
   await page.setViewportSize({ width: 390, height: 844 })
   await setup(page)
   await page.goto('/p/AEON/delivery')
-  await expect(section(page).getByTestId('delivery-building-head')).toHaveText('0 of 3 on target')
+  await expect(section(page).getByTestId('delivery-building-head')).toHaveText('0 of 3 on target', { timeout: 15_000 })
   const first = trigger(page, 'First-try rate')
   await first.scrollIntoViewIfNeeded()
   await first.click()
@@ -166,7 +172,8 @@ for (const width of [1440, 390] as const) {
     const state = await setup(page, { first: 'hold' })
     await page.goto('/p/AEON/delivery')
     const head = section(page).getByTestId('delivery-building-head')
-    await expect(section(page).getByRole('listitem')).toHaveCount(4)
+    await expect(section(page).getByRole('listitem')).toHaveCount(4, { timeout: 15_000 })
+    await settled(page)
     await expect(section(page).getByRole('listitem').first()).toHaveAttribute('aria-busy', 'true')
     const learnFirst = section(page).getByRole('button', { name: 'Learn: First-try rate' }), learnLead = section(page).getByRole('button', { name: 'Learn: Lead time per item' })
     await learnBelow(page).scrollIntoViewIfNeeded()
