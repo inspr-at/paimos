@@ -206,7 +206,7 @@ const onResize = () => place()
 watch(() => props.width, () => place(true))
 onMounted(async () => {
   await nextTick()
-  await makeRoom()
+  if (props.belowHeader) await makeRoom()
   if (unmounted) return
   place()
   document.addEventListener('pointerdown', outside, true)
