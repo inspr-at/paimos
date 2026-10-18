@@ -12930,9 +12930,9 @@
     ,
     {"kind":"browser","file":"tests/reserved-versions.spec.ts","name":"turning reservations off removes any reserved comparison endpoints","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
-    {"kind":"browser","file":"tests/reserved-versions.spec.ts","name":"withdrawn coordinates stay out of rows, details, names and statistics with opt-in false","tier":"ESSENTIAL"}
+    {"kind":"browser","file":"tests/reserved-versions.spec.ts","name":"withdrawn coordinates stay out of rows, details, names and statistics with opt-in false","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
-    {"kind":"browser","file":"tests/reserved-versions.spec.ts","name":"withdrawn coordinates stay out of rows, details, names and statistics with opt-in true","tier":"ESSENTIAL"}
+    {"kind":"browser","file":"tests/reserved-versions.spec.ts","name":"withdrawn coordinates stay out of rows, details, names and statistics with opt-in true","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
     {"kind":"browser","file":"tests/resilient-polling.spec.ts","name":"Agents retries a stalled session read and keeps the loaded table through three failed refreshes","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,

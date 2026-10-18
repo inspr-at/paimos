@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: AGPL-3.0-only
+import './release-withdrawals.test.mjs';
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
 import { spawnSync } from "node:child_process";
