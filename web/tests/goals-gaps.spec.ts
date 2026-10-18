@@ -161,8 +161,11 @@ for (const size of VIEWPORTS) {
     // 0 px: a live note change, hovering rows and a dropped stream move no control.
     // The note's line is measured too: a shorter note keeps its one reserved line.
     const controls: Record<string, Locator> = { line: note.locator('.n-body'), toggle: release.locator('.goal-toggle'), desk: page.getByRole('link', { name: /Open Desk/ }).first(), fresh }
-    if (!phone(size.width)) Object.assign(controls, { meta: note.locator('.n-meta'), eta: release.locator('.goal-eta') })
+    if (!phone(size.width)) Object.assign(controls, { eta: release.locator('.goal-eta') })
     const guard = await controlStability(page, controls)
+    // The byline is right-aligned and its age changes with the note: its right edge and line stay.
+    const byline = async () => { const b = await box(note.locator('.n-meta')); return { right: b.x + b.width, y: b.y } }
+    const bylineBefore = phone(size.width) ? null : await byline()
     await guard.check(async () => {
       const before = w.reads
       w.note = { text: 'Release 136 cut moved to Thursday.', by: 'p-lead', by_name: 'LEAD', set_at: iso(NOW - 60_000) }
@@ -173,6 +176,12 @@ for (const size of VIEWPORTS) {
       expect(await cut(note.locator('.n-text'))).toBe(false)
       expect(w.reads).toBeGreaterThan(before)
     })
+    if (bylineBefore) {
+      await expect(note.locator('.n-meta')).not.toHaveText('LEAD · 2 h ago')
+      const after = await byline()
+      expect(Math.abs(after.right - bylineBefore.right)).toBeLessThanOrEqual(0.5)
+      expect(Math.abs(after.y - bylineBefore.y)).toBeLessThanOrEqual(0.5)
+    }
     await guard.check(async () => { await release.locator('.goal-row').hover({ position: { x: 60, y: 20 } }); await page.locator('.goal[data-goal-id="g-r137"] .goal-row').hover({ position: { x: 60, y: 20 } }) })
     await guard.check(async () => {
       await page.evaluate(() => (window as unknown as { goalStreams: { drop(): void } }).goalStreams.drop())
