@@ -332,12 +332,17 @@ test('the ETA popover says who set it and what it was, where the pace lands it, 
   await expect(page.getByRole('tooltip').filter({ hasText: 'past' })).toContainText('30 min past · update pending')
   await page.mouse.move(10, 10)
   await passed.blur()
-  // At the bottom of the scroll area the popover flips above its ETA.
+  // At the bottom of the scroll area the popover flips above its ETA. The release opens too, so the list
+  // outgrows the window (one-line item rows are short) and the last ETA really sits at the bottom edge.
+  await release.locator('.goal-toggle').click()
+  await expect(release).toHaveAttribute('data-open', '1')
   const last = goalRow(page, 'g-hnet').locator('.goal-eta')
   await last.evaluate(el => el.scrollIntoView({ block: 'end' }))
   await last.hover()
   const flip = page.getByRole('tooltip')
   await expect(flip).toBeVisible()
+  const [lastBox, mainBox, flipBox] = [await box(last), await box(page.locator('#main')), await box(flip)]
+  expect(mainBox.bottom - lastBox.bottom, 'no room below the last ETA').toBeLessThan(flipBox.height)
   await expect(flip).toHaveAttribute('data-side', 'above')
   // Done goals and items have no popover; done never projects.
   await expect(flip).not.toContainText('At Ø')
