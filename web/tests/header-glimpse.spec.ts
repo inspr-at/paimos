@@ -347,6 +347,66 @@ test('AEON-1337: a visual viewport resize clears the glimpse before the next ani
   await expect(page.locator('[data-header-glimpse="off"]')).toBeAttached()
 })
 
+// Risk: software GL can hold animation frames while all viewport deliveries
+// are lost. Wait for the frame hold before shrinking, then prove the real
+// layout moved and every remaining notification was dropped.
+test('AEON-1485: a narrow viewport clears the glimpse with frames held and viewport notifications dropped', async ({ page }) => {
+  await page.addInitScript(() => {
+    const state = { holding: false, framesHeld: 0, rootDrops: 0, visualDrops: 0, windowDrops: 0 }
+    ;(window as unknown as { __aeonGlimpseStall: typeof state }).__aeonGlimpseStall = state
+    const frame = window.requestAnimationFrame.bind(window)
+    window.requestAnimationFrame = callback => frame(time => {
+      if (state.holding) { state.framesHeld++; return }
+      callback(time)
+    })
+    window.addEventListener('resize', event => {
+      if (state.holding) { state.windowDrops++; event.stopImmediatePropagation() }
+    }, { capture: true })
+    window.visualViewport!.addEventListener('resize', event => {
+      if (state.holding) { state.visualDrops++; event.stopImmediatePropagation() }
+    }, { capture: true })
+    const matchMedia = window.matchMedia.bind(window)
+    window.matchMedia = query => {
+      const list = matchMedia(query)
+      if (query === '(min-width: 1280px)') list.addEventListener('change', event => {
+        if (state.holding) event.stopImmediatePropagation()
+      }, { capture: true })
+      return list
+    }
+    const Observer = window.ResizeObserver
+    window.ResizeObserver = class extends Observer {
+      constructor(callback: ResizeObserverCallback) {
+        super((entries, observer) => {
+          const delivered = entries.filter(entry => {
+            if (!state.holding || entry.target !== document.documentElement) return true
+            state.rootDrops++
+            return false
+          })
+          if (delivered.length) callback(delivered, observer)
+        })
+      }
+    }
+  })
+  await mockHeaderGraph(page, sized(8, true))
+  await page.goto('/p/PHAROS/tickets')
+  await ready(page)
+  await page.evaluate(() => { (window as unknown as { __aeonGlimpseStall: { holding: boolean } }).__aeonGlimpseStall.holding = true })
+  await expect.poll(() => page.evaluate(() => (window as unknown as { __aeonGlimpseStall: { framesHeld: number } }).__aeonGlimpseStall.framesHeld > 0)).toBe(true)
+  await resizeSeen(page, { width: 390, height: 844 })
+  await expect.poll(() => page.evaluate(() => {
+    const state = (window as unknown as { __aeonGlimpseStall: { rootDrops: number; visualDrops: number; windowDrops: number } }).__aeonGlimpseStall
+    return {
+      layout: document.documentElement.getBoundingClientRect().width,
+      media: window.matchMedia('(min-width: 1280px)').matches,
+      rootDropped: state.rootDrops > 0,
+      visualDropped: state.visualDrops > 0,
+      windowDropped: state.windowDrops > 0,
+    }
+  })).toEqual({ layout: 390, media: false, rootDropped: true, visualDropped: true, windowDropped: true })
+  await expect(page.locator('[data-header-glimpse="on"]')).toHaveCount(0)
+  await expect(page.locator('[data-header-glimpse="off"]')).toBeAttached()
+})
+
 // Risk: the software-rendered canvas outlives the last viewport notification.
 // Drop the root observer as well as resize/media events after a ready wide
 // frame. Real layout still shrinks, so painting must follow it without a timer.

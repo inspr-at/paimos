@@ -6,7 +6,7 @@
   },
   "spec": {
     "file": "tests/header-glimpse.spec.ts",
-    "listedTests": 27,
+    "listedTests": 28,
     "tierTiming": {
       "caseSeconds": {
         "max": 36.992,
