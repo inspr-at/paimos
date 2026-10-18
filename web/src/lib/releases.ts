@@ -48,11 +48,6 @@ export async function getReleases(): Promise<ReleaseHistory> {
   return { ...body, releases: visibleReleases(body.releases, true).map(withPublicNoteItems) }
 }
 
-// Published-only projection for surfaces that describe shipped versions.
-export function publishedReleases(releases: readonly Release[]): Release[] {
-  return releases.filter(release => release.state === 'published')
-}
-
 // Product notes are portable: the wire shape never invents tenant ticket UUIDs.
 // Adapt them once to the sheet's existing snapshot renderer.
 export function withPublicNoteItems(release: Release): Release {
