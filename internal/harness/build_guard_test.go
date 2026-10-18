@@ -679,6 +679,20 @@ func TestReadOnlyTicketAdmissionAndReviewerIdentity(t *testing.T) {
 				 VALUES($1,$2,$3,$4,'owner/linked',42,'work/hts-2-built',repeat('b',40),'built',clock_timestamp(),'fixture',jsonb_build_object('open',true,'base_sha',repeat('a',40),'target_branch','main'),clock_timestamp())`, f.person.TenantID, uid(), f.project, f.ticket)
 				return err
 			})
+			// A reviewer has its own narrow role as well as a narrow key. The
+			// broad fixture member role intentionally counts as coordinator
+			// authority and must not be able to claim review credentials.
+			f.tx(t, f.person, func(tx pgx.Tx) error {
+				var role string
+				if err := tx.QueryRow(t.Context(), `INSERT INTO roles(tenant_id,key,name) VALUES($1,'read_only_reviewer','Read-only reviewer') RETURNING id::text`, f.person.TenantID).Scan(&role); err != nil {
+					return err
+				}
+				if _, err := tx.Exec(t.Context(), `INSERT INTO role_permissions(tenant_id,role_id,permission) SELECT $1,$2,unnest(ARRAY['nodes.read','harness.read','harness.write','harness.worker'])`, f.person.TenantID, role); err != nil {
+					return err
+				}
+				_, err := tx.Exec(t.Context(), `UPDATE role_bindings SET role_id=$2 WHERE principal_id=$1`, f.agent.ID, role)
+				return err
+			})
 			f.agent.KeyID = f.agent.AuthKeyID
 			f.agent.KeyCreatorID = f.person.ID
 			f.agent.Scopes = []string{"harness.worker", "harness.write", "nodes.read"}
