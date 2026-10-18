@@ -342,6 +342,7 @@ test('AEON-1472: an active glimpse stops after all viewport notifications are dr
     const state = { dropping: false, rootDrops: 0 }
     ;(window as unknown as { __aeonViewportDrops: typeof state }).__aeonViewportDrops = state
     window.addEventListener('resize', event => { if (state.dropping) event.stopImmediatePropagation() }, { capture: true })
+    window.visualViewport?.addEventListener('resize', event => { if (state.dropping) event.stopImmediatePropagation() }, { capture: true })
     const matchMedia = window.matchMedia.bind(window)
     window.matchMedia = query => {
       const list = matchMedia(query)
@@ -386,6 +387,7 @@ test('AEON-1477 a painted glimpse hides below 1280 when resize, media and the do
   await page.addInitScript(() => {
     const dropping = () => (window as unknown as { __aeonDropViewportSignals?: boolean }).__aeonDropViewportSignals === true
     window.addEventListener('resize', event => { if (dropping()) event.stopImmediatePropagation() }, { capture: true })
+    window.visualViewport?.addEventListener('resize', event => { if (dropping()) event.stopImmediatePropagation() }, { capture: true })
     const originalMedia = window.matchMedia.bind(window)
     window.matchMedia = (query: string) => {
       const list = originalMedia(query)
