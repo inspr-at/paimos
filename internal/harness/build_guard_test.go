@@ -647,7 +647,7 @@ func TestTicketBuiltUnmergedAdmissionUsesLinkedDeliveryAndMerge(t *testing.T) {
 // Risk: read-only work becomes invisible behind a delivery/build conflict, or
 // caller-supplied scout metadata substitutes for authenticated review authority.
 func TestReadOnlyTicketAdmissionAndReviewerIdentity(t *testing.T) {
-	for _, blocker := range []string{"delivery", "builder"} {
+	for _, blocker := range []string{"delivery", "builder", "legacy-scout-writer"} {
 		t.Run(blocker, func(t *testing.T) {
 			f := fixture(t)
 			nodes.New(f.db.App, nil).Mount(f.mux)
@@ -666,6 +666,11 @@ func TestReadOnlyTicketAdmissionAndReviewerIdentity(t *testing.T) {
 			f.tx(t, f.person, func(tx pgx.Tx) error {
 				if blocker == "delivery" {
 					if _, err := tx.Exec(t.Context(), `UPDATE harness_sessions SET stopped_at=clock_timestamp(),phase='stopped',stop_reason='process_exited' WHERE id=$1`, authorID); err != nil {
+						return err
+					}
+				}
+				if blocker == "legacy-scout-writer" {
+					if _, err := tx.Exec(t.Context(), `UPDATE harness_sessions SET work_shape='scout',branch='work/hts-2-built' WHERE id=$1`, authorID); err != nil {
 						return err
 					}
 				}
@@ -790,7 +795,7 @@ func TestReadOnlyTicketAdmissionAndReviewerIdentity(t *testing.T) {
 			}
 			submit(run.ID, verdict, 200)
 			reason := "built_unmerged"
-			if blocker == "builder" {
+			if blocker != "delivery" {
 				reason = "active_builder"
 			}
 			buildRefusal(t, f.call(f.agent, "POST", base, buildRegistration(f, "still a builder"), ""), reason)
