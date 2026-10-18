@@ -73,10 +73,11 @@ const badge = computed(() => props.agents.length > 0 && !done.value)
 .item:focus-visible { outline: none; box-shadow: none; }
 .item:focus-visible::before { box-shadow: var(--focus-ring); background: var(--row-hover); }
 /* A · Nested under the goal: the icon sits in the steps' 20 px icon slot, then the key, then the label.
-   Keys share one minimum width, so labels start at one x. */
+   Keys share one minimum width, so labels start at one x; a "+N" for more tickets sits under the key
+   (beside it on one-line rows). */
 .i-head { grid-column: 3 / -3; grid-row: 1; display: grid; grid-template-columns: 20px max-content minmax(0, 1fr); column-gap: 8px; align-items: start; min-width: 0; }
 .i-state { display: grid; place-items: center; height: 20px; }
-.i-keys { display: flex; align-items: baseline; gap: 6px; min-width: 9.2ch; font-size: 11.5px; font-weight: 500; line-height: 20px; letter-spacing: .01em; white-space: nowrap; }
+.i-keys { display: flex; flex-direction: column; align-items: flex-start; column-gap: 6px; min-width: 9.2ch; font-size: 11.5px; font-weight: 500; line-height: 20px; letter-spacing: .01em; white-space: nowrap; }
 .i-keys a { color: var(--ink-2); border-radius: 4px; text-decoration: none; }
 .i-keys a:hover { color: var(--teal-ink); text-decoration: underline; text-underline-offset: 2px; }
 .i-keys .more { color: var(--ink-3); border-radius: 4px; }
@@ -102,11 +103,13 @@ const badge = computed(() => props.agents.length > 0 && !done.value)
 .i-live .t { display: flex; align-items: baseline; gap: .3em; min-width: 0; color: var(--ink-2); }
 .i-live .tx { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .i-live .by { flex: none; color: var(--ink-3); white-space: nowrap; }
-.i-badge { min-width: 0; max-width: 100%; }
+/* A flex cell: the chip is no inline box, so it adds no line height of its own. */
+.i-badge { display: flex; align-items: center; min-width: 0; max-width: 100%; }
 .i-badge :deep(.row-name) { max-width: 14ch; }
 /* B · Wide: one line per item. The label keeps the goal column, the badge the agent column,
    and the live line takes the Moving → Progress span. */
 .wide > .i-head { grid-column: 3; }
+.wide .i-keys { flex-direction: row; align-items: baseline; }
 .wide.handed > .i-head { grid-column: 3 / -3; }
 .wide .i-label { display: block; -webkit-line-clamp: none; white-space: nowrap; text-overflow: ellipsis; }
 .wide > .i-live { grid-column: 5 / 9; grid-row: 1; line-height: 20px; }

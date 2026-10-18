@@ -388,6 +388,9 @@ for (const size of [{ width: 1440, height: 900 }, { width: 1024, height: 800 }, 
           expect(await lines(label), `item ${i} lines`).toBeLessThanOrEqual(2)
         }
         expect(await lines(long.locator('.i-label'))).toBe(2)
+        // Here "+1" sits under its key, so every label starts at one x.
+        expect(Math.abs((await box(long.locator('.i-label'))).x - (await box(noted.locator('.i-label'))).x)).toBeLessThanOrEqual(.5)
+        expect((await box(long.locator('.i-keys .more'))).y).toBeGreaterThan((await box(long.locator('.i-keys a'))).y)
         // The meta line under the label: the live line, then the badge's faces (no name).
         const meta = noted.locator('.i-meta'), label = await box(noted.locator('.i-label'))
         const live = await box(meta.locator('.i-live')), face = await box(meta.locator('.i-badge .live-chip'))
