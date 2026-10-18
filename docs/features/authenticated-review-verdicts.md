@@ -13,8 +13,10 @@ model and reasoning effort are captured from the reviewer session when the run
 is created and cannot be supplied in the verdict. Runs expire after 30 minutes.
 
 Reviewers first register through the normal harness path as `role=worker`,
-`work_shape=scout`. Scouts remain visible on their ticket alongside an active
-builder or open delivery without claiming a builder slot. The stored scout
+`work_shape=scout`. Registered scouts remain visible on their ticket alongside
+an active builder or open delivery without claiming a builder slot. An attached
+observation session is also stored as scout; its attach binding still occupies
+the slot, so consent does not run beside a builder. The stored scout
 classification cannot be removed by rebind, detach, heartbeat or paused resume.
 Branch, work-order and agent-run bindings and delivery commit reports are
 refused inside the mutation transaction. Each read-only admission has a
