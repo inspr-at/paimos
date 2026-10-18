@@ -105,7 +105,7 @@ func TestSessionChatQueuedPickupAndStall(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		if _, err := w.db.Admin.Exec(t.Context(), `UPDATE inbox_messages SET expires_at=clock_timestamp()-interval '1 second' WHERE id=$1::uuid`, msg.ID); err != nil {
+		if _, err := w.db.Admin.Exec(t.Context(), `UPDATE inbox_messages SET created_at=clock_timestamp()-interval '2 minutes',expires_at=clock_timestamp()-interval '1 minute' WHERE id=$1::uuid`, msg.ID); err != nil {
 			t.Fatal(err)
 		}
 		expireDeadline(t, w, msg.ID)
