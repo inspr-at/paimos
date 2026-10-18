@@ -43,6 +43,10 @@ for (const width of [390, 1024, 1440]) for (const theme of ['light', 'dark'] as 
     await expect(label).toHaveAttribute('data-tip', 'Waiting for the session to pick it up')
     await expect(queue.getByRole('button', { name: 'Retry', exact: true })).toHaveCount(0)
     await expect(panel.getByText('Not delivered', { exact: true })).toHaveCount(0)
+    const editBox = await queue.getByRole('button', { name: 'Edit', exact: true }).boundingBox()
+    const cancelBox = await queue.getByRole('button', { name: 'Cancel', exact: true }).boundingBox()
+    expect(editBox).not.toBeNull(); expect(cancelBox).not.toBeNull()
+    expect(Math.abs(editBox!.y - cancelBox!.y), 'queue actions share one row').toBeLessThanOrEqual(.5)
     const guard = await controlStability(page, {
       frame: panel, composer: panel.getByRole('textbox', { name: 'Message to release-lead' }),
       row: queue, notice: label,
