@@ -109,7 +109,7 @@ func TestManualKitIsolationAliasesHoldsAndCommands(t *testing.T) {
 			id          *string
 			key, parent string
 		}{{&visibleNode, "VN-1", visibleProject}, {&hiddenNode, "HN-1", hiddenProject}} {
-			if err := tx.QueryRow(ctx, `INSERT INTO nodes(tenant_id,kind_id,key,title,body,parent_id,fields) SELECT $1,id,$2,'private title',$3,$4,'{}' FROM node_kinds WHERE tenant_id=$1 AND slug='ticket' RETURNING id::text`, tid, p.key, "mentions subject@example.test plus PRIVATE_FREE_TEXT", p.parent).Scan(p.id); err != nil {
+			if err := tx.QueryRow(ctx, `INSERT INTO nodes(tenant_id,kind_id,key,title,body,parent_id,fields) SELECT $1,id,$2,'private title',$3,$4,'{}' FROM node_kinds WHERE tenant_id=$1 AND slug='work' RETURNING id::text`, tid, p.key, "mentions subject@example.test plus PRIVATE_FREE_TEXT", p.parent).Scan(p.id); err != nil {
 				return err
 			}
 		}
