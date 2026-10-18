@@ -8,6 +8,11 @@ the raw lane, spec list and Nix selection. The runner router and trusted reuse
 verifier continue to start independently. Their authority and checkout trust
 boundaries stay separate.
 
+The workflow guard requires the consolidated job's effective tier outputs and
+rejects raw classifier lanes, retired `tier-plan` references, or dependencies
+that couple planning and runner routing to reuse. Its mutation tests retain
+the full-execution, hosted timing, static-layout and required-check policies.
+
 The measured tuning decision is to retain `max_entries_to_build=6`. The live
 organization is on Enterprise with 500 standard hosted slots, and OPS-324
 already applied the queue's 6/6 settings on 2026-10-17. Admission and runner
