@@ -9194,6 +9194,8 @@
     ,
     {"kind":"browser","file":"tests/goals-gaps.spec.ts","name":"390: one line is reserved, only \"more\" pushes the list, \"less\" folds it back, a new note starts on one line, and #no-note renders nothing","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
+    {"kind":"browser","file":"tests/goals-gaps.spec.ts","name":"390: phones keep their stacked item rows with every ticket link; goal names wrap to two lines; opening and a live update move nothing","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
     {"kind":"browser","file":"tests/goals-gaps.spec.ts","name":"390: the status note keeps its reserve through a live update, hours left sit under LANDS, items carry their note and the Done fold counts today; a dropped stream says Reconnecting in place","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
     {"kind":"browser","file":"tests/goals-gaps.spec.ts","name":"900: items nest under their goal at the step icons' x, labels run from the key to the ETA in at most two lines with the badge in the meta line; goal names wrap to two lines; opening and a live update move nothing","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
