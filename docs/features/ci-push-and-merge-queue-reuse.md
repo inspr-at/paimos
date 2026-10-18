@@ -361,7 +361,8 @@ Reserved, never-published versions are hidden in the release history by default.
 workspace, including comparison choices and previous/next navigation. Statistics
 and result counts always include reservations; the footer's **N new** count
 includes only visible versions. A direct link still opens a hidden reservation
-with a quiet explanation of the setting.
+with a quiet explanation of the setting. Withdrawn coordinates are excluded
+from lists, details, names and statistics, including when the setting is on.
 
 Native intake drafts accept an optional Aithema `extensions` map and the
 original review snapshot as `document_bytes` alongside the required native

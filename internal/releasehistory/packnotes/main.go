@@ -36,6 +36,7 @@ func runWithArgs(args []string) error {
 	historic := flags.String("historic", "", "reviewed historic ticket export; freeze public fields for published Git membership")
 	snapshot := flags.String("snapshot", "", "one snapshot export for the reserved version")
 	reserve := flags.String("reserve", "", "explicitly freeze the preview for version.json's reserved coordinate")
+	reuseFrom := flags.String("reuse-from", "", "failed coordinate whose exact original historic export is reused")
 	tenant := flags.String("tenant", "", "expected source tenant UUID (required for exports)")
 	project := flags.String("project", "", "expected source AEON project UUID (required for exports)")
 	if err := flags.Parse(args); err != nil {
@@ -52,6 +53,9 @@ func runWithArgs(args []string) error {
 	}
 	if inputs > 0 && (*tenant == "" || *project == "") {
 		return fmt.Errorf("exports require -tenant UUID -project UUID")
+	}
+	if *reuseFrom != "" && (*historic == "" || *reserve == "") {
+		return fmt.Errorf("-reuse-from requires -historic and -reserve")
 	}
 	path := filepath.Join(*repo, releasehistory.ProductNotesPath)
 	bundle := releasehistory.EmptyProductNotes()
@@ -72,6 +76,12 @@ func runWithArgs(args []string) error {
 	if history.Product != bundle.Product {
 		return fmt.Errorf("this exporter is only for PAIMOS AEON")
 	}
+	failedVersions := map[string]bool{}
+	for _, rel := range history.Releases {
+		if rel.State != releasehistory.StatePublished {
+			failedVersions[rel.Version] = true
+		}
+	}
 	// Tagged snapshots already have an immutable version binding. Import their
 	// public fields only; historical tags and the raw files remain untouched.
 	if err := bundle.AddHistory(history); err != nil {
@@ -91,7 +101,23 @@ func runWithArgs(args []string) error {
 			if err != nil {
 				return err
 			}
-			if err := bundle.AddReserved(raw, reservation, *tenant, *project); err != nil {
+			add := func() error { return bundle.AddReserved(raw, reservation, *tenant, *project) }
+			if *reuseFrom != "" {
+				failed := false
+				for _, r := range history.Releases {
+					if r.State == releasehistory.StatePublished && r.ReleaseChannel == reservation.Channel && r.ReleaseSequence >= reservation.Sequence {
+						return fmt.Errorf("cannot reuse sequence %d in channel %s: published release %s has sequence %d", reservation.Sequence, reservation.Channel, r.Version, r.ReleaseSequence)
+					}
+					if r.Version == *reuseFrom && r.State != releasehistory.StatePublished {
+						failed = true
+					}
+				}
+				if !failed {
+					return fmt.Errorf("-reuse-from must name an explicitly unpublished or withdrawn coordinate")
+				}
+				add = func() error { return bundle.AddRereserved(raw, reservation, *reuseFrom, *tenant, *project) }
+			}
+			if err := add(); err != nil {
 				return err
 			}
 		} else {
@@ -118,11 +144,19 @@ func runWithArgs(args []string) error {
 		if err := releasehistory.HistoryBindingError(exported.TenantID, exported.ProjectID, *tenant, *project); err != nil {
 			return err
 		}
+		for _, rel := range exported.Releases {
+			if rel.State == releasehistory.StatePublished && failedVersions[rel.Version] {
+				return fmt.Errorf("history export cannot publish failed coordinate %s", rel.Version)
+			}
+		}
 		if err := bundle.AddHistory(exported.History); err != nil {
 			return err
 		}
 	}
 	add := func(path, version string, reserve bool) error {
+		if failedVersions[version] {
+			return fmt.Errorf("cannot capture failed coordinate %s", version)
+		}
 		raw, err := os.ReadFile(path)
 		if err != nil {
 			return err

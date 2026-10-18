@@ -35,6 +35,19 @@ func ReadNoteReservation(repo, version string, keys []string) (NoteReservation, 
 	if json.Unmarshal(raw, &head) != nil || head.Product != "PAIMOS AEON" || head.Version != version || !ValidVersion(version) || head.ReleaseChannel == "" || head.ReleaseSequence < 1 || head.VersionScheme != SchemeOf(version) || keys == nil {
 		return NoteReservation{}, fmt.Errorf("reserve must match version.json's product, version, scheme, channel and sequence; require an explicit ticket list")
 	}
+	if err := validateWithdrawals(head); err != nil {
+		return NoteReservation{}, err
+	}
+	for _, failed := range head.UnpublishedReservations {
+		if strings.TrimPrefix(failed, "v") == version {
+			return NoteReservation{}, fmt.Errorf("cannot capture an unpublished attempt")
+		}
+	}
+	for _, w := range head.WithdrawnReleases {
+		if w.Version == version {
+			return NoteReservation{}, fmt.Errorf("cannot capture a withdrawn attempt")
+		}
+	}
 	for _, key := range keys {
 		if ticketKey.FindString(key) != key || !strings.HasPrefix(key, "AEON-") {
 			return NoteReservation{}, fmt.Errorf("invalid reservation ticket key")
@@ -46,6 +59,32 @@ func ReadNoteReservation(repo, version string, keys []string) (NoteReservation, 
 	keys = append([]string{}, keys...)
 	slices.Sort(keys)
 	return NoteReservation{Version: version, Channel: head.ReleaseChannel, Sequence: head.ReleaseSequence, Tickets: keys}, nil
+}
+
+// AddRereserved uses the original export without observing live ticket fields
+// again. Its exact digest, scope, channel, sequence and public projection must
+// match the frozen failed attempt. Only the new coordinate changes.
+func (bundle *ProductNotes) AddRereserved(raw []byte, reservation NoteReservation, from, tenantID, projectID string) error {
+	if !ValidVersion(from) || reservation.Version <= from {
+		return fmt.Errorf("re-reservation requires a later coordinate")
+	}
+	old, ok := bundle.Releases[from]
+	sum := sha256.Sum256(raw)
+	if !ok || old.SHA256 != hex.EncodeToString(sum[:]) || old.ReleaseChannel != reservation.Channel || old.ReleaseSequence != reservation.Sequence {
+		return fmt.Errorf("original frozen export must match the reused sequence and channel")
+	}
+	source := reservation
+	source.Version = from
+	check := EmptyProductNotes()
+	if err := check.AddReserved(raw, source, tenantID, projectID); err != nil {
+		return err
+	}
+	a, _ := json.Marshal(old)
+	b, _ := json.Marshal(check.Releases[from])
+	if !bytes.Equal(a, b) {
+		return fmt.Errorf("original frozen public notes differ")
+	}
+	return bundle.Add(reservation.Version, old)
 }
 
 // AddReserved freezes only the selected release, from its own reviewed scope.

@@ -55,6 +55,7 @@ const (
 	StatePublished = "published"
 	StateReserved  = "reserved"
 	StateCandidate = "candidate"
+	StateWithdrawn = "withdrawn"
 )
 
 // Change is one commit of a release.
