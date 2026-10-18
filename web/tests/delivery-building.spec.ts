@@ -130,7 +130,8 @@ test('Building it: Enter opens the worst five on the first row, ↓ moves, Esc c
     await expect(panel).toContainText('idle 2 h 10 min')
   })
   await guard.check(async () => {
-    await page.mouse.click(8, 8)
+    // Outside: the next section's heading, which has no action of its own.
+    await page.getByRole('heading', { name: 'Making a change ready', level: 3 }).click({ position: { x: 4, y: 4 } })
     await expect(panel).toHaveCount(0)
   })
   guard.done()
