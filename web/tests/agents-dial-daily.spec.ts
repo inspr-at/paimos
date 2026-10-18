@@ -70,11 +70,14 @@ const chip = (page: Page, key: string) => control(page).locator(`.f-chip[data-ha
 const flag = (page: Page, key: string) => chip(page, key).locator('.cd-flag')
 /** The live detail on the right; the same-height copies laid under it for sizing have no data-detail. */
 const detail = (page: Page, key: string) => dial(page).locator(`[data-detail="${key}"]`)
+/** AEON-1497: the detail's usage is read; measure layouts only after it, as rows are reserved from the plan meanwhile. */
+const usageRead = (page: Page) => expect(body(page).locator('[data-detail] .ub')).toHaveAttribute('data-load', 'ready')
 const writes = (calls: { path: string; method: string }[]) => calls.filter(c => c.method !== 'GET' && /harness-sessions|\/controls|\/stop|\/interrupt|agent-accounts\/boost/.test(c.path))
 
 test('AEON-1036: folded, the dial is one light control in the capacity row and flags only what needs attention', async ({ page }) => {
   await page.setViewportSize({ width: 1440, height: 1000 })
-  const { backend } = await setup(page, { example: 'over', folded: true })
+  // The daily-limit words alone: no quota outlook (AEON-1497 adds its own words to the units).
+  const { backend } = await setup(page, { example: 'over', folded: true, outlook: 'error' })
   await page.goto('/agents')
   const accounts = page.locator('.cap-row .acc-chip')
   await expect(control(page).locator('.f-chip')).toHaveCount(3)
@@ -100,7 +103,7 @@ test('AEON-1036: folded, the dial is one light control in the capacity row and f
 
 test('AEON-1036: at the limit the flag is a gold pause mark and the unit says where new work goes', async ({ page }) => {
   await page.setViewportSize({ width: 1440, height: 1000 })
-  await setup(page, { example: 'limit', folded: true })
+  await setup(page, { example: 'limit', folded: true, outlook: 'error' })
   await page.goto('/agents')
   await expect(flag(page, 'claude')).toHaveClass(/st-at_limit/)
   await expect(chip(page, 'claude')).toHaveAccessibleName('Claude: at most 2, at today’s limit · Codex next')
@@ -112,7 +115,7 @@ test('AEON-1036: at the limit the flag is a gold pause mark and the unit says wh
 
 test('AEON-1036: a stale reading never claims the limit, although the server also refuses starts then', async ({ page }) => {
   await page.setViewportSize({ width: 1440, height: 1000 })
-  await setup(page, { example: 'stale', folded: true })
+  await setup(page, { example: 'stale', folded: true, outlook: 'error' })
   await page.goto('/agents')
   await expect(chip(page, 'claude')).toBeVisible()
   await expect(flag(page, 'claude').locator('svg')).toHaveCount(0)
@@ -546,6 +549,7 @@ for (const width of [1440, 1024, 400]) for (const theme of ['light', 'dark'] as 
     // AEON-1286's approved compact chrome starts phones folded; open the detail explicitly.
     if (width <= 720) { await expect(fold).toHaveAttribute('aria-expanded', 'false'); await fold.click() }
     await expect(row(page, 'claude')).toBeVisible()
+    await usageRead(page)
     mkdirSync(shots, { recursive: true })
     // The capture grows the viewport to the card; an element screenshot otherwise clips a long phone dial.
     const shoot = async (name: string) => {
@@ -661,6 +665,7 @@ for (const width of [1440, 390]) for (const theme of ['light', 'dark'] as const)
     // detail's card, while dial() intentionally searches both regions.
     const card = body(page), claude = detail(page, 'claude'), link = claude.locator('.cd-line').getByRole('link', { name: 'Settings › Models' })
     await expect(link).toBeVisible()
+    await usageRead(page)
     await expect(link).toHaveAttribute('href', '/settings/models')
     mkdirSync(d1Shots, { recursive: true })
     const bounds = (await card.boundingBox())!

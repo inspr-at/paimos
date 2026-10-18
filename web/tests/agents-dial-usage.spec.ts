@@ -11,7 +11,7 @@ import { agentData, mockAgents } from './agents-fixtures'
 import { capacityWorld } from './capacity-fixtures'
 import { mockEffectivePermissions } from './authz-fixtures'
 import { expectStableControls } from './helpers/stable'
-import { mockDailyPlan } from './agents-daily-fixtures'
+import { dailyPlan, mockDailyPlan } from './agents-daily-fixtures'
 import type { QuotaOutlook } from '../src/lib/quotaOutlook'
 import { OUTLOOK as scenarios } from './quota-outlook-fixtures'
 
@@ -36,6 +36,14 @@ async function setup(page: Page, options: Options = {}) {
     return route.fulfill({ json: answer })
   })
   await mockDailyPlan(page, { example: 'pace' })
+  // The plan's daily accounts are the outlook's accounts (one family, the person's own), so the rows
+  // reserved while the outlook is read are the rows it then fills.
+  const plan = dailyPlan({ example: 'pace' }) as ReturnType<typeof dailyPlan> & { daily_state: Record<string, { accounts: { account_id: string; label: string }[] }> }
+  for (const group of scenarios.fast.groups) {
+    const state = plan.daily_state[group.harness]
+    if (state) state.accounts = group.accounts.map((a, i) => ({ ...state.accounts[Math.min(i, state.accounts.length - 1)]!, account_id: a.account_id, label: a.label }))
+  }
+  await page.route('**/api/agents/plan', route => route.fulfill({ json: plan }))
   await page.route('**/api/queue', route => route.fulfill({ json: { items: [], manual_order: false, capacity: {} } }))
   const state = { outlook: options.outlook ?? scenarios.fast, reads: 0 }
   let open!: () => void
