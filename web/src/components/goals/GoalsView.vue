@@ -150,7 +150,7 @@ const canClear = computed(() => filtering.value)
     <template v-else>
       <p v-if="loaded && page.totalsPartial.value" class="partial-line" role="status">Counts omit oversized goals.</p>
       <div class="goal-grid">
-        <GoalStatusNote v-if="loaded && page.statusNote.value" :note="page.statusNote.value" :now="now" :folded="page.noteFolded.value" @fold="page.setNoteFolded" />
+        <GoalStatusNote v-if="loaded && page.statusNote.value" :note="page.statusNote.value" :now="now" />
         <GoalWaiting v-if="person" :goals="goals" />
         <template v-if="!loaded">
           <ul class="sk-list" role="status" aria-label="Loading goals">

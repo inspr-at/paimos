@@ -27,13 +27,12 @@ default, and `?view=goals` once.
   so neither a sort nor a view switch moves a control.
 - **The workspace status note** (AEON-1494) is one paragraph an agent writes for
   the workspace, between the toolbar and Waiting on you: no box, no tint, its author
-  and age on the right ("LEAD · 2 h ago"). It shows at most three lines, then
-  "… more", which expands it in place ("less" folds it back). The chevron folds it to
-  one line; the fold is kept in the `goals` preference, like the range. Three lines are
-  reserved (one when folded), so a new or shorter note never moves the list; only
-  "more" pushes what follows down, never the toolbar. Without a note nothing renders.
-  Only people and keys that read the whole workspace see it. Phones show one line and
-  "more"; opened, the whole note and its byline.
+  and age on the right ("LEAD · 2 h ago"). At every width it shows one line; a longer
+  note ends in "…" and "more", which expands it in place ("less" folds it back to its
+  line). Exactly one line is reserved, so a new or shorter note never moves the list;
+  only the person's "more" pushes what follows down, never the toolbar. A new note
+  starts on one line again. Without a note nothing renders. Only people and keys that
+  read the whole workspace see it. Phones keep the byline for the expanded note.
 - **Waiting on you** lists the person's live Decision Desk items from the same
   projection as the header badge: the count, at most three first lines
   (project key · question · goal, or the project when the question is not attached
@@ -43,7 +42,8 @@ default, and `?view=goals` once.
   click turns any order around. The server sorts and filters.
 - **A goal row** shows its project keys, kind (goal or release), name and "Next",
   one agent-badge column shared with its items (reserved when no one works), the three
-  counts, progress with "N of M done" (a pen marks a hand-set value), the waits-on-you
+  counts, progress with "N of M done" (the percent is the rollup over the goal's own
+  items; a hand-set value always shows a pen and the tip "Progress set by hand"), the waits-on-you
   marker and LANDS, the ETA its agent set. Under the ETA a muted line says the open
   estimate hours, "~40 h left" (the unfinished work leaves of unfinished items, each
   once, rounded to whole hours); the line is reserved while unknown, so nothing moves

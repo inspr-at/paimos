@@ -1,10 +1,12 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // AEON-1494: what Goals needs before In flight retires, to Tick's approved design
-// (build-notes decisions 1, 3, 4, 5 and 6). Risks: a status note that moves the
-// list when it arrives or changes, or ignores its fold; hours left that push the
-// row; a dropped stream the footer never admits, or whose label moves the footer;
-// an item note without its author; "today" missing from the Done fold; phones
-// that lose the one-line note. Screenshots go to each test's output directory.
+// (build-notes decisions 1, 3, 4, 5 and 6; the note per Tick's 10-18 amendment).
+// Risks: a status note that moves the list when it arrives or changes, reserves
+// more than its one line, or pushes anything but the list (and only on "more");
+// hours left that push the row; a dropped stream the footer never admits, or whose
+// label moves the footer; an item note without its author; "today" missing from
+// the Done fold; a goal showing another goal's percent. Screenshots go to each
+// test's output directory.
 import { test, expect, type Page, type Locator, type TestInfo } from '@playwright/test'
 import { fixtures, mockWork, watchErrors } from './work-fixtures'
 import { controlStability } from './control-stability'
@@ -28,10 +30,12 @@ function item(label: string, state: State, extra: Record<string, unknown> = {}) 
 function goal(id: string, title: string, items: ReturnType<typeof item>[], extra: Record<string, unknown> = {}) {
   const states = { moving: 0, queued: 0, paused: 0, done: 0 }
   for (const outcome of items) states[outcome.state as State]++
+  // Every item weighs the same here, so the rollup is the share of done items (never another goal's).
+  const pct = items.length ? Math.round(100 * states.done / items.length) : 0
   return {
     id, key: id.toUpperCase(), title, kind: 'release', project_id: 'p-aeon', workspace: false, expansion: 'full', counts: { outcomes: items.length, tickets: items.length },
     items, steps: [], next_step: null, projects: [{ id: 'p-aeon', key: 'AEON', name: 'Aeon', group_ids: [] }], waits: { count: 0, question_ids: [] },
-    progress: { pct: 31, computed_pct: 31, source: 'computed', basis: 'estimate', total: items.length, done: states.done, items_without_estimate: 0, items_partially_estimated: 0, remaining_hours: 0, remaining_unestimated: 0 },
+    progress: { pct, computed_pct: pct, source: 'computed', basis: 'estimate', total: items.length, done: states.done, items_without_estimate: 0, items_partially_estimated: 0, remaining_hours: 0, remaining_unestimated: 0 },
     eta: { source: 'none', partial: false }, passed: false, states, done: false, stall: { stalled: false, since: iso(NOW - HOUR) }, read_through: 10, generation: 1, ...extra,
   }
 }
@@ -115,6 +119,9 @@ async function openGoals(page: Page, w: World) {
 const box = (locator: Locator) => locator.evaluate(el => { const r = el.getBoundingClientRect(); return { x: r.x, y: r.y, width: r.width, height: r.height } })
 async function shot(page: Page, info: TestInfo, name: string) { await page.screenshot({ path: info.outputPath(`${name}.png`), fullPage: true }) }
 const phone = (width: number) => width <= 760
+// The line ends in "…": the text is cut by the box, not shortened in the DOM.
+const cut = (locator: Locator) => locator.evaluate(el => getComputedStyle(el).textOverflow === 'ellipsis' && el.scrollWidth > el.clientWidth)
+const emitNote = (page: Page, id: number) => page.evaluate(id => (window as unknown as { goalStreams: { emit(type: string, id: number): void } }).goalStreams.emit('goal.status_note_changed', id), id)
 
 for (const size of VIEWPORTS) {
   test(`${size.width}: the status note keeps its reserve through a live update, hours left sit under LANDS, items carry their note and the Done fold counts today; a dropped stream says Reconnecting in place`, async ({ page }, info) => {
@@ -124,19 +131,25 @@ for (const size of VIEWPORTS) {
     await openGoals(page, w)
     const note = page.locator('.ws-note'), release = page.locator('.goal[data-goal-id="g-r136"]')
     await expect(note).toBeVisible()
-    await expect(note.locator('.n-more')).toBeVisible()
+    // One line at every width, reserved and no more: the note cut with "…" and "more"; no fold chevron.
+    await expect(note.locator('.n-toggle')).toHaveCount(0)
+    await expect(note.locator('.n-more')).toHaveText('more')
+    expect((await box(note.locator('.n-more'))).height).toBeGreaterThan(0)
+    expect(Math.round((await box(note.locator('.n-body'))).height)).toBe(20)
+    await expect(note.locator('.n-text')).toHaveText(LONG_NOTE)
+    expect(await cut(note.locator('.n-text'))).toBe(true)
+    // Each goal's percent is its own items' rollup; neither is set by hand, so no pen.
+    await expect(release.locator('.pct')).toHaveText('50%')
+    await expect(page.locator('.goal[data-goal-id="g-r137"] .pct')).toHaveText('0%')
+    await expect(page.locator('.goal-progress .pct svg')).toHaveCount(0)
     if (phone(size.width)) {
-      // One line and "more"; no fold chevron and no byline on the line.
-      await expect(note.locator('.n-toggle')).toBeHidden()
+      // The byline waits for "more".
       await expect(note.locator('.n-meta')).toBeHidden()
-      expect((await box(note.locator('.n-more'))).height).toBeGreaterThan(0)
       expect((await box(note)).height).toBeGreaterThanOrEqual(44)
       await expect(release.locator('.goal-eta .left')).toBeHidden()
     } else {
-      // Three lines at most, ending in "… more"; the byline right.
-      expect(Math.round((await box(note.locator('.n-body'))).height)).toBe(60)
-      await expect(note.locator('.n-text')).toHaveText(/…$/)
       await expect(note.locator('.n-meta')).toHaveText('LEAD · 2 h ago')
+      await expect(page.locator('.goal[data-goal-id="g-r137"] .of')).toHaveText('0 of 1 done')
       await expect(release.locator('.goal-eta .left')).toHaveText('~40 h left')
       await expect(page.locator('.goal[data-goal-id="g-r137"] .goal-eta .left')).toHaveText('')
       await expect(release.locator('.goal-eta')).toHaveAccessibleName(/about 40 h left/)
@@ -146,14 +159,18 @@ for (const size of VIEWPORTS) {
     await expect(fresh.locator('.f-live')).toHaveText('Live · ETAs last set 18:41')
 
     // 0 px: a live note change, hovering rows and a dropped stream move no control.
-    const controls: Record<string, Locator> = { toggle: release.locator('.goal-toggle'), desk: page.getByRole('link', { name: /Open Desk/ }).first(), fresh }
-    if (!phone(size.width)) Object.assign(controls, { fold: note.locator('.n-toggle'), eta: release.locator('.goal-eta') })
+    // The note's line is measured too: a shorter note keeps its one reserved line.
+    const controls: Record<string, Locator> = { line: note.locator('.n-body'), toggle: release.locator('.goal-toggle'), desk: page.getByRole('link', { name: /Open Desk/ }).first(), fresh }
+    if (!phone(size.width)) Object.assign(controls, { meta: note.locator('.n-meta'), eta: release.locator('.goal-eta') })
     const guard = await controlStability(page, controls)
     await guard.check(async () => {
       const before = w.reads
       w.note = { text: 'Release 136 cut moved to Thursday.', by: 'p-lead', by_name: 'LEAD', set_at: iso(NOW - 60_000) }
-      await page.evaluate(() => (window as unknown as { goalStreams: { emit(type: string, id: number): void } }).goalStreams.emit('goal.status_note_changed', 11))
+      await emitNote(page, 11)
       await expect(note.locator('.n-text')).toHaveText('Release 136 cut moved to Thursday.')
+      // It fits its line: no "…", no "more".
+      await expect(note.locator('.n-more')).toHaveCount(0)
+      expect(await cut(note.locator('.n-text'))).toBe(false)
       expect(w.reads).toBeGreaterThan(before)
     })
     await guard.check(async () => { await release.locator('.goal-row').hover({ position: { x: 60, y: 20 } }); await page.locator('.goal[data-goal-id="g-r137"] .goal-row').hover({ position: { x: 60, y: 20 } }) })
@@ -185,38 +202,55 @@ for (const size of VIEWPORTS) {
     expect(errors).toEqual([])
   })
 
-  test(`${size.width}: #note-collapsed is remembered, "more" expands in place, and #no-note renders nothing`, async ({ page }, info) => {
+  test(`${size.width}: one line is reserved, only "more" pushes the list, "less" folds it back, a new note starts on one line, and #no-note renders nothing`, async ({ page }, info) => {
     await page.setViewportSize(size)
     const w = world()
     await openGoals(page, w)
-    const note = page.locator('.ws-note'), filter = page.locator('.project-search')
-    if (!phone(size.width)) {
-      // Fold to one line: the chevron, the byline and the toolbar stay put; the fold survives a reload.
-      const guard = await controlStability(page, { filter, fold: note.locator('.n-toggle'), meta: note.locator('.n-meta') })
-      await guard.check(async () => { await note.locator('.n-toggle').click(); await expect(note).toHaveAttribute('data-folded', '1') })
-      expect(Math.round((await box(note.locator('.n-body'))).height)).toBe(20)
-      await expect(note.locator('.n-more')).toHaveCount(0)
-      await expect(note.locator('.n-toggle')).toHaveAccessibleName('Show the status note')
-      await shot(page, info, `goals-gaps-${size.width}-note-collapsed`)
-      await page.reload()
-      await expect(page.locator('.ws-note')).toHaveAttribute('data-folded', '1')
-      await page.locator('.ws-note .n-toggle').click()
-      await expect(page.locator('.ws-note')).toHaveAttribute('data-folded', '0')
-    }
-    // "more" expands in place: it may push the list down, never the toolbar (nor, on wide screens, the chevron).
-    const above = await controlStability(page, phone(size.width) ? { filter } : { filter, fold: page.locator('.ws-note .n-toggle') })
+    const note = page.locator('.ws-note'), filter = page.locator('.project-search'), more = note.locator('.n-more')
+    const listTop = async () => (await box(page.locator('.goal[data-goal-id="g-r136"] .goal-toggle'))).y
+    const oneLine = await listTop()
+    await expect(note).toHaveAttribute('data-full', '0')
+    await shot(page, info, `goals-gaps-${size.width}-note-one-line`)
+
+    // "more" expands in place: the person's click may push the list down, never the toolbar (nor, on wide screens, the byline).
+    const above = await controlStability(page, phone(size.width) ? { filter } : { filter, meta: note.locator('.n-meta') })
     await above.check(async () => {
-      await page.locator('.ws-note .n-more').click()
-      await expect(page.locator('.ws-note')).toHaveAttribute('data-full', '1')
+      await more.click()
+      await expect(note).toHaveAttribute('data-full', '1')
     })
-    await expect(page.locator('.ws-note .n-text')).toHaveText(LONG_NOTE)
-    await expect(page.locator('.ws-note .n-more')).toHaveText('less')
-    if (phone(size.width)) await expect(page.locator('.ws-note .n-meta')).toHaveText('LEAD · 2 h ago')
+    // The whole note wraps over several lines, uncut.
+    await expect(note.locator('.n-text')).toHaveText(LONG_NOTE)
+    expect(await note.locator('.n-text').evaluate(el => getComputedStyle(el).whiteSpace)).toBe('normal')
+    expect((await box(note.locator('.n-text'))).height).toBeGreaterThan(40)
+    await expect(more).toHaveText('less')
+    await expect(more).toBeFocused()
+    expect((await box(note.locator('.n-body'))).height).toBeGreaterThan(40)
+    expect(await listTop()).toBeGreaterThan(oneLine + 20)
+    if (phone(size.width)) await expect(note.locator('.n-meta')).toHaveText('LEAD · 2 h ago')
     await shot(page, info, `goals-gaps-${size.width}-note-full`)
+
+    // "less" folds it back to its one line, and the list returns to where it was.
+    await above.check(async () => {
+      await more.click()
+      await expect(note).toHaveAttribute('data-full', '0')
+    })
+    await expect(more).toHaveText('more')
+    expect(Math.round((await box(note.locator('.n-body'))).height)).toBe(20)
+    expect(Math.abs(await listTop() - oneLine)).toBeLessThanOrEqual(0.5)
+
+    // A new note arriving while expanded starts on one line: "more" belonged to the note it was clicked for.
+    await more.click()
+    await expect(note).toHaveAttribute('data-full', '1')
+    w.note = { text: `${LONG_NOTE} Update: the cut moved to Thursday.`, by: 'p-lead', by_name: 'LEAD', set_at: iso(NOW - 60_000) }
+    await emitNote(page, 12)
+    await expect(note.locator('.n-text')).toHaveText(/Update: the cut moved to Thursday\.$/)
+    await expect(note).toHaveAttribute('data-full', '0')
+    await expect(more).toHaveText('more')
+    expect(Math.abs(await listTop() - oneLine)).toBeLessThanOrEqual(0.5)
 
     // No note: nothing renders, and Waiting on you follows the toolbar directly.
     w.note = null
-    await page.evaluate(() => (window as unknown as { goalStreams: { emit(type: string, id: number): void } }).goalStreams.emit('goal.status_note_changed', 12))
+    await emitNote(page, 13)
     await expect(page.locator('.ws-note')).toHaveCount(0)
     const waiting = page.getByRole('region', { name: 'Waiting on you' })
     await expect(waiting).toBeVisible()

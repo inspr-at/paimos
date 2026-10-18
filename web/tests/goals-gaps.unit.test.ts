@@ -2,7 +2,8 @@
 // AEON-1494: what Goals needs before In flight retires. Risks: hours left that
 // round a little work to nothing or hide work without an estimate; "today" read
 // in the wrong time zone; a note without its author and time; a stream drop the
-// footer never admits, or a goal change that waits for the next minute's read.
+// footer never admits, or a goal change that waits for the next minute's read;
+// a goal percent that is not its items' rollup, or a hand-set one without the pen.
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { createSSRApp, effectScope, nextTick, ref, type EffectScope } from 'vue'
 import { renderToString } from '@vue/server-renderer'
@@ -31,13 +32,14 @@ vi.mock('../src/lib/usePolledData', async importOriginal => {
   return { ...actual, usePoller: (run: () => Promise<unknown>) => ({ start(immediate = false) { if (immediate) void run() }, stop() {}, tick() {} }) }
 })
 
-import { agoText, doneToday, hoursLeftLine, hoursLeftText, noteByline } from '../src/lib/goals'
+import { agoText, doneToday, goalPercent, hoursLeftLine, hoursLeftText, noteByline } from '../src/lib/goals'
 import { openGoalsLive, type GoalsLiveSource, type GoalsLiveState } from '../src/lib/goalsLive'
 import { useSession } from '../src/stores/session'
 import { useGoalsPage } from '../src/components/goals/goalsPage'
 import GoalItem from '../src/components/goals/GoalItem.vue'
 import GoalRow from '../src/components/goals/GoalRow.vue'
 import GoalFreshness from '../src/components/goals/GoalFreshness.vue'
+import GoalProgress from '../src/components/goals/GoalProgress.vue'
 import GoalStatusNote from '../src/components/goals/GoalStatusNote.vue'
 import GoalsView from '../src/components/goals/GoalsView.vue'
 import type { GoalsPage } from '../src/components/goals/goalsPage'
@@ -277,24 +279,49 @@ describe('what the rows and the footer show', () => {
     expect(off).toMatch(/class="f-live" aria-hidden="true"/)
   })
 
-  it('the status note shows its author and age, folds to one line, and renders nothing without a note', async () => {
+  it('a goal’s percent comes from its items unless set by hand, and a hand-set percent always shows the pen and says so', async () => {
+    // Tick's early read: "0 of 1 done" beside 31 % and no pen. A computed goal shows its items' rollup,
+    // even if a stale percent rides along; only a hand-set percent shows its own value, with the pen.
+    const computed = { pct: 31, computed_pct: 0, source: 'computed', basis: 'count', total: 1, done: 0, items_without_estimate: 0, items_partially_estimated: 0 } as const
+    const hand = { ...computed, source: 'override', override_note: 'the baseline counts double' } as const
+    expect(goalPercent(computed)).toEqual({ pct: 0, byHand: false })
+    expect(goalPercent(hand)).toEqual({ pct: 31, byHand: true, tip: 'Progress set by hand · the baseline counts double' })
+    expect(goalPercent({ ...hand, override_note: undefined }).tip).toBe('Progress set by hand')
+    const pen = /<span class="pct"[^>]*><svg|<button type="button" class="pct"[^>]*><svg/
+    // Both forms: the bar (closed) and the chart that swaps in for it (open).
+    for (const open of [false, true]) {
+      const plain = bare(await html(GoalProgress, { goal: goal('g1', { progress: computed }), open, range: '24h', now: NOW }))
+      expect(plain).toMatch(/class="pct"[^>]*>0%</)
+      expect(plain).not.toMatch(pen)
+      expect(plain).not.toContain('set by hand')
+      const set = bare(await html(GoalProgress, { goal: goal('g1', { progress: hand }), open, range: '24h', now: NOW }))
+      expect(set).toMatch(pen)
+      expect(set).toMatch(/class="pct" data-tip="Progress set by hand · the baseline counts double"[^>]*>|data-tip="Progress set by hand · the baseline counts double"[^>]*class="pct"/)
+      expect(set).toMatch(/<\/svg>31%</)
+      if (!open) {
+        expect(plain).toContain('0 of 1 done')
+        expect(set).toContain('aria-label="g1, 31 percent done, set by hand. Show progress over time"')
+      } else expect(set).toContain('aria-label="31 percent, set by hand. Hide progress over time"')
+    }
+  })
+
+  it('the status note is one line with its author and age, without a fold chevron, and renders nothing without a note', async () => {
     const note = { text: 'Since this morning: 9 items merged.', by: 'p-lead', by_name: 'LEAD', set_at: new Date(Date.now() - 2 * HOUR).toISOString() }
-    const open = await html(GoalStatusNote, { note, now: Date.now(), folded: false })
-    expect(open).toContain('Since this morning: 9 items merged.')
-    expect(open).toContain('<span class="n-by"')
-    expect(open).toContain('LEAD</span> · 2 h ago')
-    expect(open).toContain('data-folded="0"')
-    expect(open).toContain('aria-label="Fold the status note to one line"')
-    const folded = await html(GoalStatusNote, { note, now: Date.now(), folded: true })
-    expect(folded).toContain('data-folded="1"')
-    expect(folded).toContain('aria-label="Show the status note"')
+    const shown = await html(GoalStatusNote, { note, now: Date.now() })
+    expect(shown).toContain('Since this morning: 9 items merged.')
+    expect(shown).toContain('<span class="n-by"')
+    expect(shown).toContain('LEAD</span> · 2 h ago')
+    expect(shown).toContain('data-full="0"')
+    // One line at every width: the separate fold chevron and its remembered fold are gone.
+    expect(shown).not.toContain('n-toggle')
+    expect(shown).not.toContain('data-folded')
 
     const view = (statusNote: typeof note | null) => ({
       counts: ref({ all: 1, moving: 1, queued: 0, paused: 0, done: 0 }), totalsPartial: ref(false), filter: ref('all'), hideDone: ref(true), allOpen: ref(false),
       setHideDone() {}, toggleAll() {}, goals: ref([goal('g1')]), list: ref(listed([goal('g1')])), loaded: ref(true), error: ref(''), reading: ref(false),
       loadingMore: ref(false), hiddenByGroups: ref(false), sort: ref('eta'), dir: ref('asc'), range: ref('24h'), setSort() {}, setRange() {}, loadMore() {}, read() {}, want() {},
       charts: new Set(), folds: new Map(), isOpen: () => false, searchOpens: () => false, seriesFor: () => undefined, toggle() {}, toggleChart() {}, toggleFold() {},
-      statusNote: ref(statusNote), noteFolded: ref(false), setNoteFolded() {}, live: ref('live'), etaLastSetAt: ref(null), updatedAt: ref(null),
+      statusNote: ref(statusNote), live: ref('live'), etaLastSetAt: ref(null), updatedAt: ref(null),
     }) as unknown as GoalsPage
     const withNote = await html(GoalsView, { page: view(note), term: '', now: Date.now(), hiddenGroups: false })
     expect(withNote.indexOf('class="ws-note"')).toBeGreaterThan(-1)

@@ -6580,6 +6580,8 @@
     ,
     {"kind":"go","package":"internal/goals","name":"TestGoalPauseUsesLatestStoppedSession","tier":"ESSENTIAL"}
     ,
+    {"kind":"go","package":"internal/goals","name":"TestGoalPercentComputedUnlessHandSet","tier":"ESSENTIAL"}
+    ,
     {"kind":"go","package":"internal/goals","name":"TestGoalProjectWriterUpdatesOnlyVisibleOutcomes","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/goals","name":"TestGoalReadGenerationOrdersReversedCompletion","tier":"ESSENTIAL"}

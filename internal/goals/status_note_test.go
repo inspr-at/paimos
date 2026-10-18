@@ -213,3 +213,69 @@ func TestGoalItemNoteHoursLeftMergedAndFreshness(t *testing.T) {
 		}
 	}
 }
+
+// Risk: a goal shows a percent that is not its own items' rollup (another
+// goal's, or one that ignores a finished item), or a hand-set percent that a
+// reader cannot tell from a computed one. Tick's early read of the Goals view
+// saw "0 of 1 done" beside 31 % and no pen.
+func TestGoalPercentComputedUnlessHandSet(t *testing.T) {
+	f := writerFixture(t)
+	a, b := "/api/goals/"+f.secondGoal, "/api/goals/"+f.emptyGoal
+	readWriteResult(t, apiRequest(t, f, "PATCH", a, "pct-items-a", `{"items":{"upsert":[{"ref":"a1","label":"A1","keys":["TKT-1"],"state":"done"},{"ref":"a2","label":"A2","keys":["TKT-1"],"state":"queued"}]}}`), 200)
+	readWriteResult(t, apiRequest(t, f, "PATCH", b, "pct-items-b", `{"items":{"upsert":[{"ref":"b1","label":"B1","keys":["TKT-1"],"state":"queued"}]}}`), 200)
+	// Detail and list must agree; the returned map holds each goal's progress.
+	read := func(stage string) map[string]GoalProgress {
+		t.Helper()
+		out := map[string]GoalProgress{}
+		for id, path := range map[string]string{f.secondGoal: a, f.emptyGoal: b} {
+			g := detail(t, apiRequest(t, f, "GET", path, "", ""))
+			if g.Progress == nil {
+				t.Fatalf("%s: goal %s without progress", stage, id)
+			}
+			out[id] = *g.Progress
+		}
+		listed := 0
+		for _, g := range goalList(t, apiRequest(t, f, "GET", "/api/goals", "", "")).Items {
+			if want, ok := out[g.ID]; ok {
+				listed++
+				if g.Progress == nil || !reflect.DeepEqual(*g.Progress, want) {
+					t.Fatalf("%s: list and detail disagree for %s: %+v vs %+v", stage, g.ID, g.Progress, want)
+				}
+			}
+		}
+		if listed != 2 {
+			t.Fatalf("%s: list carried %d of the 2 goals", stage, listed)
+		}
+		return out
+	}
+	computed := func(stage string, p GoalProgress, pct, done, total int) {
+		t.Helper()
+		if p.Source != "computed" || p.Pct != pct || p.ComputedPct != pct || p.Done != done || p.Total != total || p.OverrideBy != "" || p.OverrideNote != "" || p.OverrideAt != "" {
+			t.Fatalf("%s: want computed %d %% (%d of %d) without override fields, got %+v", stage, pct, done, total, p)
+		}
+	}
+	handSet := func(stage string, p GoalProgress, pct, computedPct int) {
+		t.Helper()
+		if p.Source != "override" || p.Pct != pct || p.ComputedPct != computedPct || p.OverrideBy != f.writer.ID || p.OverrideNote != "agreed at the cut" || p.OverrideAt == "" {
+			t.Fatalf("%s: want hand-set %d %% over computed %d %%, got %+v", stage, pct, computedPct, p)
+		}
+	}
+
+	got := read("computed")
+	computed("computed A", got[f.secondGoal], 50, 1, 2)
+	computed("computed B", got[f.emptyGoal], 0, 0, 1)
+
+	// Hand-set on B only: B says so and keeps tracking its items underneath; A is untouched.
+	readWriteResult(t, apiRequest(t, f, "PATCH", b, "pct-hand-b", `{"progress_override":{"pct":31,"note":"agreed at the cut"}}`), 200)
+	got = read("hand-set")
+	computed("hand-set A", got[f.secondGoal], 50, 1, 2)
+	handSet("hand-set B", got[f.emptyGoal], 31, 0)
+	readWriteResult(t, apiRequest(t, f, "PATCH", b, "pct-done-b", `{"items":{"upsert":[{"ref":"b1","state":"done"}]}}`), 200)
+	handSet("hand-set B, item done", read("hand-set, item done")[f.emptyGoal], 31, 100)
+
+	// Cleared: B's percent is its items' rollup again.
+	readWriteResult(t, apiRequest(t, f, "PATCH", b, "pct-clear-b", `{"progress_override":null}`), 200)
+	got = read("cleared")
+	computed("cleared A", got[f.secondGoal], 50, 1, 2)
+	computed("cleared B", got[f.emptyGoal], 100, 1, 1)
+}

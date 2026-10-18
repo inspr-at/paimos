@@ -154,6 +154,14 @@ export function itemMatches(item: GoalOutcome, needle: string): boolean {
 export const ticketHref = (key: string) => ticketPath(key.replace(/-\d+$/, ''), key)
 
 // ---------- AEON-1494: the gaps In flight closed ----------
+// A goal's percent: the rollup over its own items, unless a person set it by hand.
+// A hand-set percent always carries the pen and says so; nothing else does.
+export function goalPercent(progress: GoalProgress): { pct: number; byHand: boolean; tip?: string } {
+  const byHand = progress.source === 'override'
+  const value = byHand || !Number.isFinite(progress.computed_pct) ? progress.pct : progress.computed_pct
+  const pct = Math.max(0, Math.min(100, Math.round(value)))
+  return byHand ? { pct, byHand, tip: `Progress set by hand${progress.override_note ? ` · ${progress.override_note}` : ''}` } : { pct, byHand }
+}
 // "~40 h left": open estimate hours, whole hours (at least 1). Nothing while unknown or done.
 export function hoursLeftText(progress: GoalProgress | undefined, done: boolean): string {
   const hours = progress?.remaining_hours ?? 0

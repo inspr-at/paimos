@@ -214,7 +214,7 @@ describe('partial totals and phone tickets', () => {
       charts: new Set(), folds: new Map(), isOpen: () => false, searchOpens: () => false, seriesFor: () => undefined,
       toggle() {}, toggleChart() {}, toggleFold() {}, allOpen: ref(false),
       // AEON-1494: no status note, a live stream.
-      statusNote: ref(null), noteFolded: ref(false), setNoteFolded() {}, live: ref('live'), etaLastSetAt: ref(null), updatedAt: ref(null),
+      statusNote: ref(null), live: ref('live'), etaLastSetAt: ref(null), updatedAt: ref(null),
     })
     const viewHtml = await html(GoalsView, { page: view, term: '', now: 0, hiddenGroups: false })
     expect(viewHtml).toContain('Counts omit oversized goals.')

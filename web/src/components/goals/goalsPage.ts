@@ -26,7 +26,7 @@ const SERIES_PARALLEL = 3
 // window, and never more than one in flight, so a busy stream cannot starve the list.
 const LIVE_SETTLE_MS = 400
 
-type GoalsPrefs = { range?: string; hideDone?: boolean; noteFolded?: boolean }
+type GoalsPrefs = { range?: string; hideDone?: boolean }
 export interface SeriesEntry { state: 'reading' | 'ready' | 'failed' | 'too_large'; series?: GoalSeries; createdAt: number | null; at: number; sign: string }
 
 // shown: the project groups the person hides take their goals with them.
@@ -45,9 +45,6 @@ export function useGoalsPage(options: { term: Ref<string>; active: () => boolean
   // One range for every chart, the one used last (the ViewSwitch rule).
   const range = computed<GoalRange>(() => isGoalRange(prefs.value.value?.range) ? prefs.value.value!.range as GoalRange : '24h')
   function setRange(value: GoalRange) { if (value !== range.value) void prefs.save({ ...(prefs.value.value ?? {}), range: value }, 0) }
-  // The status note folded to one line, remembered like the range (AEON-1494 decision 1).
-  const noteFolded = computed(() => prefs.value.value?.noteFolded === true)
-  function setNoteFolded(value: boolean) { if (value !== noteFolded.value) void prefs.save({ ...(prefs.value.value ?? {}), noteFolded: value }, 0) }
   function setSort(key: GoalSort, direction?: 'asc' | 'desc') {
     if (direction) { sort.value = key; dir.value = direction; return }
     if (sort.value === key) dir.value = dir.value === 'asc' ? 'desc' : 'asc'
@@ -224,7 +221,7 @@ export function useGoalsPage(options: { term: Ref<string>; active: () => boolean
 
   return {
     filter, sort, dir, hideDone, setHideDone, range, setRange, setSort, list, goals, hiddenByGroups, error, reading, loaded, loadingMore, loadMore, read,
-    live, updatedAt, statusNote, etaLastSetAt, noteFolded, setNoteFolded,
+    live, updatedAt, statusNote, etaLastSetAt,
     open, charts, folds, isOpen, allOpen, toggle, toggleAll, toggleFold, toggleChart, searchOpens, want, seriesFor, counts, totals, totalsPartial, stop,
   }
 }
