@@ -27,8 +27,19 @@ const folded = computed(() => props.folded && !phone.value)
 const by = computed(() => props.note.by_name.trim() || 'An agent')
 const age = computed(() => agoText(props.note.set_at, props.now))
 
-// Three lines at most: drop words until the text and "… more" fit (the design's rule).
+// Three lines at most. The box itself is exactly 60 px (20 px folded), so the
+// list under it never moves. Linux draws the inline "more" button one pixel
+// past the line box; that pixel is measured, then clipped, and is not a fourth line.
 let turn = 0
+function contentHeight() {
+  const el = body.value
+  if (!el) return 0
+  const previous = el.style.height
+  el.style.height = 'auto'
+  const height = el.offsetHeight
+  el.style.height = previous
+  return height
+}
 async function fit() {
   const mine = ++turn, text = props.note.text
   shown.value = text
@@ -38,8 +49,8 @@ async function fit() {
   await nextTick()
   if (mine !== turn) return
   if (phone.value) { const el = textEl.value; more.value = !!el && el.scrollWidth > el.clientWidth + 1; return }
-  const limit = LINES * LINE + 1, height = () => body.value?.offsetHeight ?? 0
-  if (height() <= limit) return
+  const limit = LINES * LINE + 1, overflows = () => contentHeight() > limit
+  if (!overflows()) return
   more.value = true
   // Words, or characters for a note without spaces (a long link, say).
   const spaced = text.includes(' '), parts = spaced ? text.split(' ') : Array.from(text)
@@ -50,7 +61,7 @@ async function fit() {
     shown.value = cut(mid)
     await nextTick()
     if (mine !== turn) return
-    if (height() <= limit) lo = mid; else hi = mid - 1
+    if (overflows()) hi = mid - 1; else lo = mid
   }
   shown.value = cut(lo)
 }
@@ -99,9 +110,10 @@ function toggleMore() { full.value = !full.value }
 .n-toggle svg { transition: transform .15s ease; }
 .ws-note[data-folded="0"] .n-toggle svg { transform: rotate(90deg); }
 @media (prefers-reduced-motion: reduce) { .n-toggle svg { transition: none; } }
-.n-body { grid-column: 2 / -4; min-width: 0; max-width: 92ch; min-height: 60px; margin: 0; font-size: 13.5px; line-height: 20px; color: var(--ink-2); overflow-wrap: anywhere; }
-.ws-note[data-folded="1"] .n-body { min-height: 20px; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
-.n-more { position: relative; display: inline; margin: 0 -3px 0 4px; padding: 0 3px; border: 0; border-radius: 5px; background: transparent; color: var(--teal-ink); font-size: 13px; font-weight: 600; line-height: 20px; white-space: nowrap; }
+.n-body { grid-column: 2 / -4; min-width: 0; max-width: 92ch; height: 60px; margin: 0; overflow: hidden; font-size: 13.5px; line-height: 20px; color: var(--ink-2); overflow-wrap: anywhere; }
+.ws-note[data-folded="1"] .n-body { height: 20px; white-space: nowrap; text-overflow: ellipsis; }
+.ws-note[data-full="1"] .n-body { height: auto; overflow: visible; }
+.n-more { position: relative; display: inline-block; vertical-align: top; height: 20px; margin: 0 -3px 0 4px; padding: 0 3px; border: 0; border-radius: 5px; appearance: none; background: transparent; color: var(--teal-ink); font-size: 13px; font-weight: 600; line-height: 20px; white-space: nowrap; }
 @media (hover: hover) { .n-more:hover { background: var(--row-hover); } }
 .n-meta { grid-column: -4 / -1; justify-self: end; margin: 0; font-size: 12.5px; line-height: 20px; color: var(--ink-3); white-space: nowrap; }
 .n-by { font-weight: 600; color: var(--ink-2); }
@@ -114,9 +126,9 @@ function toggleMore() { full.value = !full.value }
 @media (max-width: 760px) {
   .ws-note { display: flex; align-items: center; margin: 0 -8px; padding: 4px 14px 2px; min-height: 44px; }
   .n-toggle, .n-meta { display: none; }
-  .n-body { flex: 1 1 auto; display: flex; align-items: baseline; gap: 8px; min-height: 0; max-width: none; font-size: 14px; }
+  .n-body { flex: 1 1 auto; display: flex; align-items: baseline; gap: 8px; height: auto; min-height: 0; max-width: none; overflow: visible; font-size: 14px; }
   .n-text { flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-  .n-more { flex: none; margin: 0 -3px 0 0; font-size: 14px; }
+  .n-more { flex: none; height: auto; margin: 0 -3px 0 0; font-size: 14px; }
   .ws-note[data-full="1"] { display: block; padding: 10px 14px; }
   .ws-note[data-full="1"] .n-body { display: block; line-height: 21px; }
   .ws-note[data-full="1"] .n-text { white-space: normal; }

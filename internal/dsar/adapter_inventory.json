@@ -128,6 +128,7 @@
   {"table":"events","export":"id type node_id at undo_of","review":"actor_principal_id before after metadata","secret":"","metadata":"tenant_id node_refs","subjects":"actor_principal_id","locator":"id node_id","hold":"audit-review"},
   {"table":"features","export":"","review":"key project_id enabled revision updated_at","secret":"","metadata":"tenant_id","subjects":"","locator":"project_id tenant_id","hold":"none"},
   {"table":"goal_event_refs","export":"","review":"at event_id node_id type","secret":"","metadata":"tenant_id","subjects":"","locator":"node_id event_id tenant_id","hold":"audit-review"},
+  {"table":"goal_status_notes","export":"","review":"body set_by","secret":"","metadata":"set_at tenant_id","subjects":"set_by","locator":"set_by tenant_id","hold":"none"},
   {"table":"goal_update_receipts","export":"","review":"actor_principal_id created_at event_id idempotency_key method request_sha256 response target_node_id","secret":"","metadata":"tenant_id","subjects":"actor_principal_id","locator":"event_id tenant_id","hold":"audit-review"},
   {"table":"greeting_history","export":"id principal_id greeting_id shown_at","review":"","secret":"","metadata":"tenant_id","subjects":"principal_id","locator":"id principal_id","hold":"none"},
   {"table":"harness_activity_notes","export":"id created_at","review":"note session_id","secret":"","metadata":"tenant_id","subjects":"","parent":{"table":"harness_sessions","local":"session_id","remote":"id"},"locator":"id session_id","hold":"none"},

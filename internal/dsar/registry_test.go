@@ -81,6 +81,12 @@ func TestInventoryAndAdapters(t *testing.T) {
 	if !contains(byTable["method_learning_decisions"].Review, "decided_by") || !contains(byTable["method_learning_decisions"].Subjects, "decided_by") {
 		t.Fatal("method learning decision actor is personal data")
 	}
+	// The workspace status note is personal free text written by one principal.
+	// Body stays on the review list (it can name other people); set_by is the subject.
+	notes := byTable["goal_status_notes"]
+	if !contains(notes.Review, "body") || contains(notes.Export, "body") || !contains(notes.Subjects, "set_by") || !contains(notes.Metadata, "tenant_id") || !contains(notes.Metadata, "set_at") {
+		t.Fatal("workspace status note needs its body reviewed and its author as the subject")
+	}
 	bad := append([]Domain{}, domains...)
 	bad[0].Export += " email"
 	bad[0].Secret += " email"
