@@ -682,7 +682,7 @@ func TestReadOnlyTicketAdmissionAndReviewerIdentity(t *testing.T) {
 			f.agent.KeyID = f.agent.AuthKeyID
 			f.agent.KeyCreatorID = f.person.ID
 			f.agent.Scopes = []string{"harness.worker", "harness.write", "nodes.read"}
-			var reviewerID string
+			var reviewerID, reviewerLease string
 			for _, label := range []string{"scout", "reviewer"} {
 				readOnly := buildRegistration(f, label)
 				readOnly["work_shape"] = "scout"
@@ -711,7 +711,7 @@ func TestReadOnlyTicketAdmissionAndReviewerIdentity(t *testing.T) {
 					return err
 				})
 				if label == "reviewer" {
-					reviewerID = id
+					reviewerID, reviewerLease = id, readOnly["worker_lease"].(string)
 				}
 			}
 			// The dispatcher binds the normally registered reviewer to the exact
@@ -757,12 +757,22 @@ func TestReadOnlyTicketAdmissionAndReviewerIdentity(t *testing.T) {
 			submit(run.ID, wrong, 409)
 			// A run-bound reviewer cannot detach/rebind the session to impersonate
 			// another ticket. Failure preserves the original session and audit.
+			otherTicket := uid()
+			f.tx(t, f.person, func(tx pgx.Tx) error {
+				_, err := tx.Exec(t.Context(), `INSERT INTO nodes(tenant_id,id,kind_id,key,title,parent_id) SELECT $1,$2,kind_id,'HTS-4','Other ticket',$3 FROM nodes WHERE id=$4`, f.person.TenantID, otherTicket, f.project, f.ticket)
+				return err
+			})
 			snapshot := readOnlyState(t, f)
-			binding := map[string]any{"expected_revision": 1, "ticket_node_id": nil, "work_shape": "unknown"}
+			binding := map[string]any{"expected_revision": 1, "ticket_node_id": otherTicket, "work_shape": "scout"}
 			denied := f.call(f.agent, "PATCH", base+"/"+reviewerID+"/binding", binding, "")
 			expect(t, denied, 409)
-			if readOnlyState(t, f) != snapshot {
-				t.Fatal("rejected reviewer identity substitution mutated state")
+			if !strings.Contains(denied.Body.String(), "authenticated reviewer session") || readOnlyState(t, f) != snapshot {
+				t.Fatal("rejected reviewer identity substitution mutated state or failed for another reason")
+			}
+			denied = f.call(f.agent, "POST", base+"/"+reviewerID+"/heartbeat", map[string]any{"phase": "working", "activity_sequence": 1, "branch": "work/hts-2-built"}, reviewerLease)
+			expect(t, denied, 409)
+			if !strings.Contains(denied.Body.String(), "read-only session") || readOnlyState(t, f) != snapshot {
+				t.Fatal("authenticated reviewer acquired delivery binding")
 			}
 			submit(run.ID, verdict, 200)
 			reason := "built_unmerged"
@@ -841,6 +851,18 @@ func TestReadOnlySessionLifecycleCannotBecomeBuilder(t *testing.T) {
 	// Read-only sessions do not occupy a builder slot even when first to arrive.
 	expect(t, f.call(f.agent, "POST", base, buildRegistration(f, "builder after scout"), ""), 201)
 	buildRefusal(t, f.call(f.agent, "POST", base, buildRegistration(f, "competing builder"), ""), "active_builder")
+	unbound := buildRegistration(f, "new scout binding")
+	delete(unbound, "ticket_node_id")
+	delete(unbound, "work_shape")
+	w = f.call(f.agent, "POST", base, unbound, "")
+	expect(t, w, 201)
+	unboundSession := decode(t, w)
+	binding := map[string]any{"expected_revision": unboundSession["revision"], "ticket_node_id": f.ticket, "work_shape": "scout"}
+	w = f.call(f.agent, "PATCH", base+"/"+unboundSession["id"].(string)+"/binding", binding, "")
+	expect(t, w, 200)
+	if decode(t, w)["work_shape"] != "scout" {
+		t.Fatal("rebind did not retain read-only restriction")
+	}
 	// Ordinary heartbeats remain usable; only delivery writes are restricted.
 	expect(t, f.call(f.agent, "POST", path+"/heartbeat", map[string]any{"phase": "working", "activity": "busy", "activity_sequence": 1}, lease), 200)
 	w = f.call(f.person, "POST", path+"/pause", map[string]any{}, "")
