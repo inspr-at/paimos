@@ -121,9 +121,11 @@ const label = (tile: BuildingTileView) => fill(t.value.open, { n: tile.simple.na
 .s-sec-head p { flex-basis: 100%; margin: 0; font-size: 12.5px; color: var(--ink-2); }
 /* The count, the no-data sentence and the failed read share one line of the same box: text, then Retry on that line,
    so the head never changes height or baseline between states (AEON-541). */
-.bd-cnt { display: block; flex: 0 1 auto; min-width: 0; min-height: 1lh; font-size: 12.5px; font-weight: 600; color: var(--ink-2); font-variant-numeric: tabular-nums; white-space: nowrap; overflow: clip; overflow-clip-margin: 14px; text-overflow: ellipsis; }
-/* The clip margin keeps Retry's 44 px touch area (its ::before) reachable above and below the line. */
-.bd-cnt .retry { margin-left: 6px; }
+.bd-cnt { display: block; flex: 0 1 auto; min-width: 0; min-height: 1lh; font-size: 12.5px; line-height: 1.5; font-weight: 600; color: var(--ink-2); font-variant-numeric: tabular-nums; white-space: nowrap; overflow: clip; overflow-clip-margin: 14px; text-overflow: ellipsis; }
+/* The clip margin keeps Retry's 44 px touch area (its ::before) reachable above and below the line. Retry sits on the
+   line's top rather than its baseline, so the button's own box never lifts the head's baseline (the spec measured
+   3.75 px when it did). */
+.bd-cnt .retry { margin-left: 6px; vertical-align: top; line-height: inherit; }
 .bd-cnt.quiet { font-weight: 500; }
 .bd-cnt.err { color: var(--danger); }
 .retry { position: relative; display: inline; height: auto; margin: 0; padding: 0; border: 0; background: none; color: var(--teal-ink); font: inherit; font-weight: 600; cursor: pointer; text-decoration: underline; text-underline-offset: 2px; }
