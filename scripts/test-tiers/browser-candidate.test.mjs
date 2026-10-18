@@ -29,6 +29,34 @@ const files = () => new Map([
 const select = (overrides = {}) => candidateSelection({ paths: [source], tests, graph: candidateGraph(files()),
   impact: 'on', experiment: true, ...overrides })
 const names = plan => plan.selected.map(row => row.name)
+const digest = source => createHash('sha256').update(source).digest('hex')
+const assertStaticResearchHashes = (implementation, read = file => readFileSync(new URL(file, import.meta.url))) => {
+  // The full offline replay still pins core.mjs; shared planner edits must not
+  // require replaying historical trees in every unrelated PR's static lane.
+  for (const file of ['browser-candidate.mjs', 'browser-candidate-replay.mjs']) assert.equal(digest(read(file)), implementation[file], file)
+}
+
+// Risk: pinning live planner sources in fixed static CI blocks unrelated changes;
+// the research modules must still match the measurement that reports their results.
+test('AEON-1485 static research pins tolerate live planner edits and reject research drift', () => {
+  const sources = new Map([
+    ['browser-candidate.mjs', 'candidate source'], ['browser-candidate-replay.mjs', 'replay source'], ['core.mjs', 'live planner source'],
+  ])
+  const implementation = Object.fromEntries([...sources].map(([file, source]) => [file, digest(source)]))
+  sources.set('core.mjs', sources.get('core.mjs') + '\n// unrelated planner edit\n')
+  const verify = () => assertStaticResearchHashes(implementation, file => sources.get(file))
+  assert.doesNotThrow(verify, 'live planner edits do not invalidate static research evidence')
+  for (const file of ['browser-candidate.mjs', 'browser-candidate-replay.mjs']) {
+    const original = sources.get(file)
+    sources.set(file, original + '\n// research edit\n')
+    const hashFailure = error => error.code === 'ERR_ASSERTION' && error.message.split('\n')[0] === file
+    assert.throws(verify, hashFailure)
+    sources.set(file, original)
+    const missingPin = { ...implementation }; delete missingPin[file]
+    assert.throws(() => assertStaticResearchHashes(missingPin, name => sources.get(name)), hashFailure)
+  }
+  assert.doesNotThrow(verify)
+})
 
 test('AEON-1485 import closure includes NIGHTLY direct, inline harness, route and fixture owners without selecting unrelated specs', () => {
   const graph = candidateGraph(files())
@@ -119,7 +147,5 @@ test('AEON-1485 published measurement accounts for every pinned proof row and ne
     assert.equal(summary.afterMisses, 0); assert.equal(summary.affectedCases, 0)
     assert.equal(summary.qualified, false, 'zero misses from full catalogue is not affected evidence')
   }
-  for (const [file, hash] of Object.entries(measurement.implementation_sha256)) {
-    assert.equal(createHash('sha256').update(readFileSync(new URL(file, import.meta.url))).digest('hex'), hash, file)
-  }
+  assertStaticResearchHashes(measurement.implementation_sha256)
 })
