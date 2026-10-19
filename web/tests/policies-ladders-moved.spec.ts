@@ -12,7 +12,8 @@ test('Policies links to Settings › Models and never calls the ladder endpoints
   const ladders = ladderRequests(page)
   await page.goto('/settings/policies')
   const root = page.locator('.policies')
-  await expect(root.locator('.settings-card')).toHaveCount(3)
+  // AEON-1317 adds the required workspace Definitions card after review.
+  await expect(root.locator('.settings-card')).toHaveCount(4)
   expect(ladders).toEqual([])
   // No ladder tab, edit, Save or Undo control remains anywhere on Policies.
   await expect(root.getByRole('tab')).toHaveCount(0)

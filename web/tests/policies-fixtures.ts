@@ -28,6 +28,10 @@ export async function mockPolicies(page: Page, theme: 'light' | 'dark', role: 'a
   const retired: string[] = []
   await page.route(/\/api\/(models\/routes|authz\/permissions)(\?|$)/, route => { retired.push(new URL(route.request().url()).pathname); return route.fulfill({ status: 410, json: { error: 'gone' } }) })
   await page.route(/\/api\/settings\/review-policy$/, route => route.fulfill({ json: reviewPolicy() }))
+  await page.route(/\/api\/settings\/definitions\/context$/, route => route.fulfill({ json: {
+    definition: { id: 'workspace-definition', revision: '2026-10-09T08:00:00Z', source: 'workspace', copied_from_revision: null, checks: {} },
+    can_manage: role === 'admin', admins: [{ id: 'policy-admin', name: 'Policy administrator' }], projects: [], differ_count: 0, uses_default: ['PHAROS'], next_cursor: null,
+  } }))
   return { retired }
 }
 
