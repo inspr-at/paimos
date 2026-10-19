@@ -480,7 +480,8 @@ test('approved queue surfaces in light/dark and narrow layouts, with accessible 
     // exercise the real phone density controls and restoration after folding.
     // The legacy header has no fold/density controls; its queue guard above
     // remains mandatory in either layout.
-    const fold = page.locator('.phone-header-fold')
+    // The project crumb's sheet holds the phone's fold (AEON-1459, D11).
+    const fold = page.locator('.app-header .crumb-sheet')
     if (await fold.count()) {
       for (const density of ['Comfortable', 'Compact']) {
         // AEON-1188: header density lives in the Display menu, linked from the Filters sheet.

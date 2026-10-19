@@ -121,14 +121,20 @@ const oneLine = (line: Locator) => line.evaluate(el => {
     .filter(child => { const r = child.getBoundingClientRect(); return r.height > 0 && (r.top < h.top - .5 || r.bottom > h.bottom + .5) })
     .map(child => child.className || child.tagName)
 })
-// Opaque: the same pixels whether what lies behind it is shown or hidden.
-async function opaque(page: Page, target: Locator) {
+// Opaque: the same pixels whether what lies behind it is shown or hidden. A mismatch keeps both shots.
+async function opaque(page: Page, target: Locator, info?: TestInfo, name = 'probe') {
   const clip = await box(target)
   const before = await page.screenshot({ clip, animations: 'disabled', caret: 'hide' })
   await page.addStyleTag({ content: '.sessions .table, .agents-page .layout { visibility: hidden !important; } /* aeon-1459-probe */' })
   const after = await page.screenshot({ clip, animations: 'disabled', caret: 'hide' })
   await page.evaluate(() => document.querySelectorAll('style').forEach(style => { if (style.textContent?.includes('aeon-1459-probe')) style.remove() }))
-  return before.equals(after)
+  const same = before.equals(after)
+  if (!same && info) {
+    await mkdir(info.outputPath('AEON-1459'), { recursive: true })
+    await writeFile(info.outputPath(`AEON-1459/opaque-${name}-shown.png`), before)
+    await writeFile(info.outputPath(`AEON-1459/opaque-${name}-hidden.png`), after)
+  }
+  return same
 }
 
 // ---------- C1 + C2: the Agents page at the top and while reading ----------
@@ -188,7 +194,7 @@ for (const { size, looks, rows, topMax, scrolled } of C1) for (const look of loo
       const stuck = await box(bar)
       const chrome = stuck.y + stuck.height
       c.is('chrome while reading', chrome, short(size) ? '44' : '88', Math.abs(chrome - (short(size) ? 44 : 88)) <= .5)
-      const barOpaque = await opaque(page, bar)
+      const barOpaque = await opaque(page, bar, info, 'toolbar')
       c.is('toolbar opaque over rows (pixels identical with the rows hidden)', barOpaque, 'true', barOpaque)
       if (short(size)) {
         await scrollTo(page, 60)
@@ -198,7 +204,7 @@ for (const { size, looks, rows, topMax, scrolled } of C1) for (const look of loo
         const sticky = (await box(bar)).y
         c.is('short landscape: toolbar sticks at the top', sticky, '0', Math.abs(sticky) <= .5)
       } else {
-        const headerOpaque = await opaque(page, header)
+        const headerOpaque = await opaque(page, header, info, 'header')
         c.is('header opaque (pixels identical with the page hidden)', headerOpaque, 'true', headerOpaque)
         const top = (await box(header)).y
         c.is('portrait: the header stays while reading', top, '0', Math.abs(top) <= .5)
@@ -491,7 +497,7 @@ for (const look of ['light', 'dark'] as const) test(`AEON-1459 C9 1440 ${look}: 
     const compactParts = await page.locator('.cap-line, .compact-status, .sessions .tb-more, [data-held-chip]').evaluateAll(els => els.filter(el => (el as HTMLElement).checkVisibility()).length)
     c.is('1440 shows no compact parts', compactParts, '0', compactParts === 0)
     await scrollTo(page, 400)
-    const barOpaque = await opaque(page, toolbar(page))
+    const barOpaque = await opaque(page, toolbar(page), info, 'toolbar-1440')
     c.is('1440 toolbar opaque over rows', barOpaque, 'true', barOpaque)
     await scrollTo(page, 0)
     await shot(page, info, size, look, 'desktop')

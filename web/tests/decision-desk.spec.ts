@@ -662,7 +662,8 @@ for (const width of [320, 1024]) for (const theme of ['light', 'dark'] as const)
         expect(box!.x + box!.width).toBeLessThanOrEqual(width)
         if (width === 320) expect(box!.width).toBeGreaterThanOrEqual(44)
       }
-      const fold = page.getByRole('button', { name: 'PHAROS: project header, expanded', exact: true })
+      // The project crumb opens the project's sheet on compact screens (AEON-1459, D11).
+      const fold = page.locator('.app-header .crumb-sheet')
       if (await fold.isVisible()) {
         const box = await fold.boundingBox(), search = await page.getByRole('button', { name: 'Search everything', exact: true }).boundingBox()
         expect(box && search).toBeTruthy()
