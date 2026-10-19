@@ -24,6 +24,7 @@ let unitOutput=''
 test.beforeAll(()=>{
   test.setTimeout(90_000)
   unitOutput=execFileSync(process.execPath,['node_modules/vitest/vitest.mjs','run','tests/definitions.unit.test.ts','--maxWorkers=1'],{encoding:'utf8',timeout:60_000,maxBuffer:1024*1024})
+  unitOutput+=execFileSync(process.execPath,['--test','tests/text-glyphs.test.ts'],{encoding:'utf8',timeout:60_000,maxBuffer:1024*1024})
 })
 type Check = {assert: string; width: number; theme: string; locale: string; passed: true; [key: string]: unknown}
 async function evidence(checks: Check[]) {
@@ -151,7 +152,9 @@ test('AEON-1317 default decisions preserve every row notice copy and focus in al
       expect(Math.max(...labels)-Math.min(...labels)).toBeLessThanOrEqual(1)
       record('desktop rows align through the action column; phone rows have natural heights without reserve copy; project keys never break',{alignmentPx:Math.max(...labels)-Math.min(...labels)})
       await shot(page,width,theme,'D3')
-      const allControls:Record<string,Locator>={notice}
+      // Undo for an ordinary row must replace its menu in the same action
+      // slot; a second phone action line would grow the measured row.
+      const allControls:Record<string,Locator>={notice,ordinaryAction:ordinary.locator('.dr-action')}
       for(let i=0;i<await rows.count();i++)allControls[`row${i}`]=rows.nth(i)
       const stable=await controlStability(page,allControls)
       await stable.check(async()=>{await ordinary.getByRole('button',{name:'More for Approved design attached'}).click();await page.getByRole('menuitem',{name:'Remove',exact:true}).click();await expect(ordinary).toContainText('Removed')})
