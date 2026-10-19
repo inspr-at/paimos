@@ -87,6 +87,7 @@ A pending or claimed lead launch intent refuses the start with “The project le
 is already starting this ticket. The run appears on the ticket in a moment.”
 An active run, including one still queued for its daemon, refuses another start
 with “A run is already active on this ticket. Open it from the ticket to follow
-or steer it.” The lead queue excludes that leaf and its final worker claim
-retains the `lead_writer_conflict` fence. Missing admission offers the next step:
+or steer it.” Lead pickup skips that leaf and routes the next eligible entry;
+its final worker claim retains the `lead_writer_conflict` fence. Missing
+admission offers the next step:
 “Automatic lead starts are off for now. Start the run yourself from the ticket.”

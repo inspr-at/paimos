@@ -401,12 +401,11 @@ func leadWorkerYieldConfirmedTx(ctx context.Context, tx pgx.Tx, l Lead) (bool, e
 // LeadDispatchTurnTx is scheduling advice under the final mutation fence,
 // after RequireLeadDispatchTx proves the current session and mandatory gates.
 // Idempotent already-routed assignments bypass turns, but never their fences.
+// A leaf held by another writer is left out of the snapshot, so pickup skips
+// it as work_not_eligible; RequireAssignedLeadStartTx refuses the final claim.
 func LeadDispatchTurnTx(ctx context.Context, tx pgx.Tx, p tenant.Principal, project, run string, admission LeadAdmission) (string, error) {
 	l, err := loadLead(ctx, tx, project, false)
 	if err != nil || l.State == "none" {
-		return "", err
-	}
-	if err = requireLeadWriterFreeTx(ctx, tx, run); err != nil {
 		return "", err
 	}
 	m := Module{leadAdmission: admission}
