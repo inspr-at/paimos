@@ -20,7 +20,7 @@ const lineStart = (text: string, line: number) => text.split('\n').slice(0, line
 // 200 characters with a line break, typed one key at a time.
 const TYPED = ('Probe the host again once the pin has moved and write the answer down.\nCompare it with the last release and say what changed in one plain sentence. ').repeat(2).slice(0, 200)
 
-interface Sample { before: number; during: number; after: number; topBefore: number; topDuring: number; topAfter: number; added: boolean; scroll: number; client: number; preview: number | null; caret: number; view: number }
+interface Sample { before: number; during: number; after: number; topBefore: number; topDuring: number; topAfter: number; added: boolean; scroll: number; client: number; preview: number | null; caret: number; lead: number; view: number }
 interface Probe { log: Sample[]; place(start: number, end: number, at: number): void; top(): number }
 type Win = Window & { aeon1532: Probe }
 
@@ -49,6 +49,14 @@ async function instrument(box: Locator) {
       twin.value = area.value.slice(0, index)
       return area.getBoundingClientRect().top + border + twin.scrollHeight - pad - area.scrollTop
     }
+    // The caret the browser scrolls into view spans the font's ascent and descent,
+    // centred in the line: the line box less its half-leading on each side.
+    const metrics = document.createElement('canvas').getContext('2d')!
+    const halfLeading = () => {
+      metrics.font = `${style.fontStyle} ${style.fontWeight} ${style.fontSize} ${style.fontFamily}`
+      const glyphs = metrics.measureText('M')
+      return (parseFloat(style.lineHeight) - glyphs.fontBoundingBoxAscent - glyphs.fontBoundingBoxDescent) / 2
+    }
     const view = () => scroller === document.scrollingElement ? { top: 0, bottom: innerHeight } : { top: scroller.getBoundingClientRect().top + scroller.clientTop, bottom: scroller.getBoundingClientRect().top + scroller.clientTop + scroller.clientHeight }
     const log: Sample[] = []
     let start = { height: 0, top: 0, length: 0 }
@@ -57,7 +65,7 @@ async function instrument(box: Locator) {
       const from = start, during = area.offsetHeight, topDuring = scroller.scrollTop, added = area.value.length >= from.length
       requestAnimationFrame(() => log.push({
         before: from.height, during, after: area.offsetHeight, topBefore: from.top, topDuring, topAfter: scroller.scrollTop, added,
-        scroll: area.scrollHeight, client: area.clientHeight, preview: preview?.offsetParent ? preview.offsetHeight : null, caret: lineBottom(area.selectionEnd), view: view().bottom,
+        scroll: area.scrollHeight, client: area.clientHeight, preview: preview?.offsetParent ? preview.offsetHeight : null, caret: lineBottom(area.selectionEnd), lead: halfLeading(), view: view().bottom,
       }))
     })
     ;(window as unknown as Win).aeon1532 = {
@@ -165,10 +173,14 @@ for (const { width, theme } of [{ width: 1440, theme: 'light' }, { width: 1440, 
     await guard.check(async () => {
       const run = await typeAt(page, box, (await box.inputValue()).length, (await box.inputValue()).length, .93, () => page.keyboard.type(TYPED))
       const up = worst(run.samples.map(s => s.topBefore - s.topAfter))
-      const hidden = worst(run.samples.map(s => s.caret - s.view))
+      // The browser's own caret-into-view (Tick spec v1 §3.3) brings the caret into
+      // view, not the line's leading below it; the app never scrolls on its own.
+      const hidden = worst(run.samples.map(s => s.caret - s.lead - s.view))
+      const lead = run.samples.map(s => s.lead)
       checks.add('end', 'textarea height never drops while adding text (px)', shrink(run.samples) <= .5, { shrinkPx: shrink(run.samples), inputs: run.samples.length })
       checks.add('end', 'page never scrolls up; only caret-into-view scrolls down', up <= .5 && run.end >= run.top - .5, { upPx: up, before: run.top, after: run.end })
-      checks.add('end', 'the caret line stays in view', hidden <= 1, { belowViewPx: hidden })
+      checks.add('end', 'the caret stays in view', hidden <= 1, { belowViewPx: hidden, lineBoxBelowViewPx: worst(run.samples.map(s => s.caret - s.view)) })
+      checks.add('end', 'half-leading measured from the font (0–3 px)', lead.every(value => value >= 0 && value <= 3), { halfLeadingPx: [Math.min(...lead), Math.max(...lead)] })
       if (split) {
         checks.add('end', 'textarea and preview heights equal ±1 px', unequal(run.samples) <= 1, { maxDiffPx: unequal(run.samples) })
         checks.add('end', 'textarea scrollHeight ≤ clientHeight', inner(run.samples) <= 0, { maxOverflowPx: inner(run.samples) })
