@@ -384,7 +384,8 @@ test('the Assignee column appears only when someone in the result is assigned', 
   await page.goto('/p/PHAROS?status=new')
   await expect(rows(page)).toHaveCount(1)
   await expect(page.getByRole('columnheader', { name: 'Assignee' })).toHaveCount(0)
-  await expect(rows(page).first().locator('td')).toHaveCount(5)
+  // Parent stays: the 30% default is the whole project, not this unassigned filter.
+  await expect(rows(page).first().locator('td')).toHaveCount(6)
 })
 
 test('project header shows the project summary counts, cancelled work out of scope', async ({ page }) => {
