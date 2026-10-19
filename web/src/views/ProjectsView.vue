@@ -162,6 +162,7 @@ function goalShown(goal: Goal) {
 // Group: Goals · Epics (AEON-1395): ?group= opens a group once, as ?view= opens a view.
 const goals = useGoalsPage({ term, active: () => view.value === 'goals', shown: goalShown, groups: { link: () => route.query.group } })
 const epics = computed(() => goals.group.value === 'epics')
+const searchLabel = computed(() => view.value !== 'goals' ? 'Filter projects' : epics.value ? 'Filter epics' : 'Filter goals')
 const GOAL_SORTS: { value: GoalSort; label: string; phrase: string; icon: IconName }[] = [
   { value: 'eta', label: 'ETA', phrase: 'ETA', icon: 'timer' },
   { value: 'name', label: 'Name', phrase: 'name', icon: 'sort-name' },
@@ -938,7 +939,7 @@ const archivedSelection = computed(() => selectedProjects.value.length > 0 && se
       <div class="projects-toolbar">
         <label class="search-field project-search">
           <AppIcon name="search" :size="14" />
-          <input ref="search" v-model="term" class="field" type="search" :placeholder="view === 'goals' ? 'Filter goals' : 'Filter projects'" :aria-label="view === 'goals' ? 'Filter goals' : 'Filter projects'" autocomplete="off" spellcheck="false" />
+          <input ref="search" v-model="term" class="field" type="search" :placeholder="searchLabel" :aria-label="searchLabel" autocomplete="off" spellcheck="false" />
           <kbd v-if="!term" class="keycap slash" aria-hidden="true">/</kbd>
         </label>
         <div v-if="view === 'goals'" class="chips goals-chips">
@@ -1032,7 +1033,7 @@ const archivedSelection = computed(() => selectedProjects.value.length > 0 && se
       <span class="kg"><kbd class="keycap">H</kbd>hide done</span>
       <span class="kg"><kbd class="keycap">E</kbd>expand all</span>
       <span class="kg"><kbd class="keycap">J</kbd><kbd class="keycap">K</kbd>move</span>
-      <span class="kg"><kbd class="keycap"><AppIcon name="enter" :size="10" /></kbd>fold goal</span>
+      <span class="kg"><kbd class="keycap"><AppIcon name="enter" :size="10" /></kbd>fold {{ epics ? 'epic' : 'goal' }}</span>
     </p>
 
     <FloatingPanel v-if="createAnchor" :anchor="createAnchor" :width="300" label="New group" @close="closeCreate">
