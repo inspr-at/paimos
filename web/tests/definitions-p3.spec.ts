@@ -118,6 +118,10 @@ test('AEON-1317 default decisions preserve every row notice copy and focus in al
       const allControls:Record<string,Locator>={notice}
       for(let i=0;i<await rows.count();i++)allControls[`row${i}`]=rows.nth(i)
       const stable=await controlStability(page,allControls)
+      await stable.check(async()=>{await ordinary.getByRole('button',{name:'More for Approved design attached'}).click();await page.getByRole('menuitem',{name:'Remove',exact:true}).click();await expect(ordinary).toContainText('Removed')})
+      await stable.check(async()=>{await ordinary.getByRole('button',{name:'Undo',exact:true}).click();await expect(ordinary).not.toContainText('Removed')})
+      expect(world.context.definition!.checks).toEqual(base)
+      record('P2 row menu removal and Undo preserve the row and stored copy during a waiting-change visit',{movementPx:0})
       for(const change of changes){
         const row=card.locator(`[data-check="${change.check_id}"]`),action=row.locator(`[data-decision="${choice}"]`),words=definitionDecisionWords(change,change.before??undefined)
         const firstNext=await card.locator('[data-waiting="true"]').evaluateAll((elements,id)=>{const index=elements.findIndex(el=>el.getAttribute('data-check')===id);return elements[(index+1)%elements.length]?.getAttribute('data-check')},change.check_id)

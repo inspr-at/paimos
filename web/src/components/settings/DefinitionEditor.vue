@@ -31,10 +31,20 @@ watch(() => props.pending, pending => {
   }
 }, {immediate:true})
 function pendingWords(id: string) { const change = originals.value[id]; return change ? definitionChangeWords(change, props.changedDate, language.value) : '' }
+function summaryOf(rule: DefinitionRule) {
+  if (language.value === 'en') return wordsOf(rule)
+  const name=(id?: string | null) => personOptions.value.find(person=>person.id===id)?.name ?? 'einer benannten Person'
+  return [definitionConditionWords(rule,'de'),rule.kinds?.length ? `Arten: ${rule.kinds.join(', ')}` : '',rule.labels?.length ? `Labels: ${rule.labels.join(', ')}` : '',manualRule(rule) ? rule.owner_id ? `Bestätigt von ${name(rule.owner_id)}` : `Bestätigt von der ticketverantwortlichen Person, sonst ${rule.fallback_owner_id ? name(rule.fallback_owner_id) : 'einem Projektadministrator'}` : ''].filter(Boolean).join(' · ')
+}
+function pendingSummary(id: string) {
+  const change=originals.value[id],item=visitRows.value?.find(row=>row.item.id===id)?.item
+  if (!change || !item) return ''
+  return change.kind === 'new' ? `${pendingWords(id)} · ${summaryOf(item)}` : `${summaryOf(item)} · ${pendingWords(id)}`
+}
 function decisionWords(id: string) { const change = originals.value[id]; return change ? definitionDecisionWords(change, visitRows.value?.find(row => row.item.id === id)?.item, language.value) : ['', ''] }
 function rowWords(item: DefinitionRule) {
-  if (waiting(item.id)) return pendingWords(item.id)
-  return decided.value[item.id] === 'removed' ? t('Removed','Entfernt') : decided.value[item.id] === 'left' ? t(`Left out for ${props.projectKey}`,`Für ${props.projectKey} weggelassen`) : decided.value[item.id] === 'added' ? t(`Added for ${props.projectKey}`,`Für ${props.projectKey} hinzugefügt`) : definitionConditionWords(item, language.value)
+  if (waiting(item.id)) return pendingSummary(item.id)
+  return decided.value[item.id] === 'removed' ? t('Removed','Entfernt') : decided.value[item.id] === 'left' ? t(`Left out for ${props.projectKey}`,`Für ${props.projectKey} weggelassen`) : decided.value[item.id] === 'added' ? `${summaryOf(item)} · ${t(`Added for ${props.projectKey}`,`Für ${props.projectKey} hinzugefügt`)}` : summaryOf(item)
 }
 async function focusWaiting(afterID?: string) {
   await nextTick()
@@ -55,6 +65,7 @@ function decide(id: string, choice: 'accept' | 'keep') {
 function undoDecision(id: string) {
   const slot = visitRows.value?.find(row => row.item.id === id)
   if (!slot) return
+  if (ghosts.value.some(ghost => ghost.item.id === id)) { undo(slot.block,slot.item); return }
   const next = cloneChecks(props.checks), index = visitRows.value!.filter(row => row.block === slot.block).indexOf(slot)
   ;(next[slot.block] ??= []).splice(Math.min(index,next[slot.block]?.length ?? 0),0,slot.item)
   change(next, () => { decided.value[id] = 'kept'; void nextTick(() => root.value?.querySelector<HTMLElement>(`[data-check="${id}"]`)?.focus({preventScroll:true})) })
@@ -84,8 +95,8 @@ watch(left, rows => {
 function rows(block: DefinitionStatus) {
   if (visitRows.value) {
     const all = DEFINITION_BLOCKS.flatMap(b => props.checks[b.id] ?? [])
-    const pinned = visitRows.value.filter(row => row.block === block).map(row => ({ item: all.find(item => item.id === row.item.id) ?? row.item, ghost: decided.value[row.item.id] === 'removed', height:0 }))
-    for (const item of props.checks[block] ?? []) if (!visitRows.value.some(row => row.item.id === item.id)) pinned.push({item,ghost:false,height:0})
+    const pinned = visitRows.value.filter(row => row.block === block && !restored.value.includes(row.item.id)).map(row => ({ item: all.find(item => item.id === row.item.id) ?? row.item, ghost: decided.value[row.item.id] === 'removed' || ghosts.value.some(ghost => ghost.item.id === row.item.id), height:0 }))
+    for (const item of props.checks[block] ?? []) if (!visitRows.value.some(row => row.item.id === item.id) && !restored.value.includes(item.id)) pinned.push({item,ghost:false,height:0})
     return pinned
   }
   const out = (props.checks[block] ?? []).filter(item => !restored.value.includes(item.id)).map(item => ({ item, ghost: false, height: 0 }))
@@ -162,8 +173,15 @@ function move(direction: number) {
   if (!target?.rule) return
   const next = cloneChecks(props.checks), list = next[target.block]!, index = list.findIndex(r => r.id === target.rule!.id), other = index + direction
   if (index < 0 || other < 0 || other >= list.length) return
+  const movingID=list[index]!.id, otherID=list[other]!.id
   ;[list[index], list[other]] = [list[other]!, list[index]!]
-  change(next, () => close())
+  change(next, () => {
+    if (visitRows.value) {
+      const from=visitRows.value.findIndex(row=>row.item.id===movingID),to=visitRows.value.findIndex(row=>row.item.id===otherID)
+      if (from>=0 && to>=0) [visitRows.value[from],visitRows.value[to]]=[visitRows.value[to]!,visitRows.value[from]!]
+    }
+    close()
+  })
 }
 function remove() {
   const target = panel.value
@@ -205,7 +223,7 @@ onBeforeUnmount(() => close(false))
         <li v-for="row in rows(block.id)" :key="row.item.id" class="dr" :class="{ ghost: row.ghost }" :style="row.height ? { height: `${row.height}px` } : undefined" :data-check="row.item.id" :data-waiting="!!waiting(row.item.id)" :tabindex="decisionVisit ? -1 : undefined">
           <AppIcon :name="ruleIcon(row.item)" :size="15" class="dr-ic" />
           <template v-if="decisionVisit">
-            <span class="dr-l"><b>{{ labelOf(row.item) }}</b><small class="decision-words"><span>{{ rowWords(row.item) }}</span><span aria-hidden="true" class="decision-space">{{ pendingWords(row.item.id) || definitionConditionWords(row.item,language) }}</span><span v-if="originals[row.item.id]?.current" aria-hidden="true" class="decision-space">{{ definitionConditionWords(originals[row.item.id]!.current!,language) }}</span></small></span>
+            <span class="dr-l"><b class="decision-words"><span>{{ labelOf(row.item) }}</span><span v-if="originals[row.item.id]?.current" aria-hidden="true" class="decision-space">{{ labelOf(originals[row.item.id]!.current!) }}</span></b><small class="decision-words"><span>{{ row.ghost ? t('Removed','Entfernt') : rowWords(row.item) }}</span><span aria-hidden="true" class="decision-space">{{ pendingSummary(row.item.id) || summaryOf(row.item) }}</span><span v-if="originals[row.item.id]?.current" aria-hidden="true" class="decision-space">{{ summaryOf(originals[row.item.id]!.current!) }}</span></small></span>
             <span class="decision-actions">
               <span v-if="originals[row.item.id]" class="decision-links" :class="{ resolved: !waiting(row.item.id) }" :aria-hidden="!waiting(row.item.id) || undefined">
                 <button v-if="editable" type="button" class="link-btn" data-decision="accept" :disabled="busy || !waiting(row.item.id)" :tabindex="waiting(row.item.id) ? 0 : -1" @click="decide(row.item.id,'accept')">{{ decisionWords(row.item.id)[0] }}</button><span v-if="editable" class="decision-last"><span aria-hidden="true">·</span><button type="button" class="link-btn" data-decision="keep" :disabled="busy || !waiting(row.item.id)" :tabindex="waiting(row.item.id) ? 0 : -1" @click="decide(row.item.id,'keep')">{{ decisionWords(row.item.id)[1] }}</button></span>

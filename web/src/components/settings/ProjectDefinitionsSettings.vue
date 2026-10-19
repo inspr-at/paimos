@@ -25,9 +25,10 @@ const t = (en: string, de: string) => language.value === 'de' ? de : en
 const props = defineProps<{ project: Project }>(), session = useSession(), scope = useIdentityScope(), reads = scope.lane()
 const context = ref<DefinitionContext | null>(null), loading = ref(true), busy = ref(false), error = ref(''), stale = ref(false), editorEpoch = ref(0)
 const editor = ref<InstanceType<typeof DefinitionEditor>>()
-const notice = ref<HTMLElement>(), noticeShown = ref(false), noticeReserve = ref('')
+const notice = ref<HTMLElement>(), noticeShown = ref(false), noticeInitialCount = ref(0)
 const pending = computed(() => context.value?.pending_changes ?? [])
 const changedDate = computed(() => definitionDate(context.value?.workspace_default?.revision ?? '', language.value))
+const noticeReserve = computed(() => definitionNotice(props.project.routeKey,noticeInitialCount.value,changedDate.value,language.value))
 const noticeText = computed(() => definitionNotice(props.project.routeKey,pending.value.length,changedDate.value,language.value))
 const copyDate = computed(() => context.value?.definition?.created_at ? definitionDate(context.value.definition.created_at,language.value) : '')
 const adminNames = computed(() => context.value?.admins?.map(person => person.name).join(', ') ?? '')
@@ -48,7 +49,7 @@ const originText = computed(() => {
   if (own.value && !context.value?.workspace_default) return `Made for ${props.project.routeKey}; there is no workspace default.`
   if (!own.value) return t(`Changes to Policies in Settings apply to ${props.project.routeKey} at once.`,`Änderungen an den Richtlinien in den Einstellungen gelten sofort für ${props.project.routeKey}.`)
   const provenance = copyDate.value ? t(`Copied from the workspace default on ${copyDate.value}. `,`Vom Workspace-Standard am ${copyDate.value} kopiert. `) : ''
- return provenance + (differenceCount.value ? t(`Differs in ${differenceCount.value} ${differenceCount.value === 1 ? 'place' : 'places'}, marked below.`,`Weicht an ${differenceCount.value} Stellen ab, unten markiert.`) : t('Same as the workspace default so far.','Bisher gleich wie der Workspace-Standard.'))
+ return provenance + (differenceCount.value ? t(`Differs in ${differenceCount.value}\u00a0${differenceCount.value === 1 ? 'place' : 'places'}, marked below.`,`Weicht an ${differenceCount.value}\u00a0Stellen ab, unten markiert.`) : t('Same as the workspace default so far.','Bisher gleich wie der Workspace-Standard.'))
 })
 const reset = ref<{ context: DefinitionContext; projectID: string; key: string; anchor: HTMLElement; lines: string[] } | null>(null), resetBody = ref<HTMLElement>()
 const register = useProjectSettingsOverlay()
@@ -68,7 +69,7 @@ function load() {
   loading.value = true; error.value = ''
   void reads.run(({ after, signal }) => after(readDefinitionContext(target, signal), value => {
     if (props.project.id !== target || value.project_id !== target) return
-    context.value = value; stale.value = false; editorEpoch.value++; noticeShown.value = !!value.pending_changes?.length; noticeReserve.value = noticeShown.value ? definitionNotice(props.project.routeKey,value.pending_changes!.length,definitionDate(value.workspace_default?.revision ?? '',language.value),language.value) : ''; landOnNotice()
+    context.value = value; stale.value = false; editorEpoch.value++; noticeShown.value = !!value.pending_changes?.length; noticeInitialCount.value = value.pending_changes?.length ?? 0; landOnNotice()
   }), { failed: problem => { failed(problem, target); stale.value = true }, settled: () => { loading.value = false } })
 }
 function save(next: DefinitionChecks, applied: () => void = () => {}) {
@@ -105,13 +106,13 @@ function confirmReset() {
   busy.value = true; error.value = ''
   void scope.run(({ after, signal }) => after(resetDefinition(action.projectID, action.context, signal), saved => {
     if (action.projectID !== props.project.id || reset.value !== action || context.value !== action.context) return
-    context.value = { ...action.context, definition: saved, copied_from_checks: null }; editorEpoch.value++
+    context.value = { ...action.context, definition: saved, copied_from_checks: null, pending_changes: [] }; editorEpoch.value++
     closeReset(); toast('The project follows the workspace default.', { key: `definitions/${action.projectID}` })
   }), { failed: problem => { failed(problem, action.projectID); if (problem instanceof APIError && [403,409].includes(problem.status)) stale.value = true }, settled: () => { busy.value = false } })
 }
 let stopLive: (() => void) | undefined
-watch([scope.owner, () => props.project.id], () => { stopLive?.(); scope.reset(); closeReset(false); context.value = null; busy.value = false; stale.value = false; noticeShown.value = false; noticeReserve.value = ''; if (scope.owner.value) { load(); stopLive=subscribeDefinitionChanges(() => { if (!own.value && !busy.value && !loading.value) load() }) } }, { immediate: true, flush: 'sync' })
-const stopAccess = onAccessRevalidate({ reset: () => { closeReset(false); context.value = null; busy.value = false; stale.value = true; noticeShown.value = false; noticeReserve.value = '' }, refresh: () => { if (!busy.value) load() } })
+watch([scope.owner, () => props.project.id], () => { stopLive?.(); scope.reset(); closeReset(false); context.value = null; busy.value = false; stale.value = false; noticeShown.value = false; noticeInitialCount.value = 0; if (scope.owner.value) { load(); stopLive=subscribeDefinitionChanges(() => { if (!own.value && !busy.value && !loading.value) load() }) } }, { immediate: true, flush: 'sync' })
+const stopAccess = onAccessRevalidate({ reset: () => { closeReset(false); context.value = null; busy.value = false; stale.value = true; noticeShown.value = false; noticeInitialCount.value = 0 }, refresh: () => { if (!busy.value) load() } })
 watch(mayManage, allowed => { if (!allowed && !error.value) closeReset(false) })
 onBeforeUnmount(() => { stopLive?.(); stopAccess(); closeReset(false) })
 </script>
