@@ -76,6 +76,9 @@ test('managed_control_v1 offers controls only when the server would accept them'
   // The run read fills in a status the session read does not carry.
   const fromRun = { ...view({ ...fresh.session, run_status: undefined }), run: { status: 'running' } as SessionView['run'] }
   assert.deepEqual(sessionMenu(fromRun, access).control, ['interrupt', 'stop', 'settings'])
+  // Idle and yielded omit Interrupt. Stop stays. The panel says why.
+  assert.deepEqual(sessionMenu(view({ ...fresh.session, activity: 'idle' }), access).control, ['stop', 'settings'])
+  assert.deepEqual(sessionMenu(view({ ...fresh.session, phase: 'yielded' }), access).control, ['stop', 'settings'])
 })
 
 test('a project-only harness.control grant offers controls in that project only', () => {

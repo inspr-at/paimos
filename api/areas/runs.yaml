@@ -92,6 +92,99 @@ paths:
         '403': {$ref: '#/components/responses/Error'}
         '409': {$ref: '#/components/responses/Error'}
         '410': {$ref: '#/components/responses/Error'}
+  /runs/daemon-waits:
+    get:
+      operationId: listRunDaemonWaits
+      description: "Read checkout-wait reasons for up to 50 runs. Requires run.read. A person in the tenant may read any existing run. An agent receives only runs it owns; other runs are omitted. reason is null when no checkout wait is recorded. The value is process memory, not a field of the run."
+      parameters:
+        - name: ids
+          in: query
+          required: true
+          schema: {type: string, minLength: 1, maxLength: 2048}
+          description: "Comma-separated run ids, at most 50 UUIDs."
+      responses:
+        '200':
+          description: "Checkout wait reasons."
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: false
+                required: [items]
+                properties:
+                  items:
+                    type: array
+                    maxItems: 50
+                    items:
+                      type: object
+                      additionalProperties: false
+                      required: [run_id, reason]
+                      properties:
+                        run_id: {type: string, format: uuid}
+                        reason:
+                          type: string
+                          nullable: true
+                          enum: [checkout_held_by_earlier_pairing]
+                          description: "checkout_held_by_earlier_pairing means this computer's checkout is still held by an earlier pairing. Null means no checkout wait is recorded."
+        '400': {$ref: '#/components/responses/Error'}
+  /runs/{runId}/daemon-wait:
+    get:
+      operationId: getRunDaemonWait
+      description: "Read one run's checkout-wait reason. Requires run.read. A person in the tenant may read any existing run. An agent who does not own the run receives 404. reason is null when no checkout wait is recorded. The value is process memory, not a field of the run."
+      parameters: [{name: runId, in: path, required: true, schema: {type: string, format: uuid}}]
+      responses:
+        '200':
+          description: "Checkout wait reason."
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: false
+                required: [reason]
+                properties:
+                  reason:
+                    type: string
+                    nullable: true
+                    enum: [checkout_held_by_earlier_pairing]
+                    description: "checkout_held_by_earlier_pairing means this computer's checkout is still held by an earlier pairing. Null means no checkout wait is recorded."
+        '404': {$ref: '#/components/responses/Error'}
+    put:
+      operationId: putRunDaemonWait
+      description: "Record or clear the checkout-wait reason for one run. Agent with run.claim only. reason checkout_held_by_earlier_pairing is accepted only while the run is queued. An empty reason clears the wait and is accepted after the run leaves the queue. Any other reason is rejected. The value is process memory, not a column on the run."
+      security: [{agentKey: []}]
+      parameters: [{name: runId, in: path, required: true, schema: {type: string, format: uuid}}]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [reason]
+              properties:
+                reason:
+                  type: string
+                  enum: ["", checkout_held_by_earlier_pairing]
+                  description: "checkout_held_by_earlier_pairing records the checkout sentence. An empty string clears it."
+      responses:
+        '200':
+          description: "Stored checkout wait reason."
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: false
+                required: [reason]
+                properties:
+                  reason:
+                    type: string
+                    nullable: true
+                    enum: [checkout_held_by_earlier_pairing]
+                    description: "The stored reason, or null after a clear."
+        '400': {$ref: '#/components/responses/Error'}
+        '403': {$ref: '#/components/responses/Error'}
+        '404': {$ref: '#/components/responses/Error'}
+        '409': {$ref: '#/components/responses/Error'}
   /runs/{runId}/handoff:
     get:
       operationId: getWorkerHandoff

@@ -6,7 +6,7 @@ import { can } from '../../lib/authz'
 import type { HarnessSession } from '../../lib/agents'
 import { readControlResponse, readManagedSettings, sendManagedControl } from '../../lib/agentRows'
 import { useVisualViewport } from '../../lib/visualViewport'
-import { managedControlSession, managedControlUnavailable } from '../../lib/managedControl'
+import { interruptHasStep, managedControlSession, managedControlUnavailable, noStepRunningText, nothingRunningText, sessionEndedText, sessionHasEnded, steerAppliedText } from '../../lib/managedControl'
 import { useAgents } from '../../stores/agents'
 import { useSession } from '../../stores/session'
 import AppIcon from '../AppIcon.vue'
@@ -48,6 +48,8 @@ let request: { request_id: string; kind: Kind; text?: string; value?: string; ex
 const available = computed(() => managedControlSession(props.session))
 // The same eligibility the row menu uses and the server enforces (AEON-291).
 const unavailable = computed(() => managedControlUnavailable(props.session, { now: props.now, grant: { person: auth.identity?.principal.kind === 'person', can }, runStatus: props.session.run_status !== undefined ? props.session.run_status : props.runStatus }))
+const interruptIdle = computed(() => !unavailable.value && !interruptHasStep(props.session))
+const sessionEnded = computed(() => sessionHasEnded(props.session))
 const waiting = computed(() => busy.value || uncertain.value || (!!result.value && result.value.state !== 'completed'))
 const canSteer = computed(() => !!draft.value.trim() && new TextEncoder().encode(draft.value).length <= 8192)
 const feedback = computed(() => {
@@ -58,8 +60,8 @@ const feedback = computed(() => {
   const name = c.kind === 'steer' ? 'Steer' : c.kind === 'interrupt' ? 'Interrupt' : c.kind === 'stop' ? 'Stop' : settingNames[c.kind]
   if (c.state !== 'completed') return `${name} pending · waiting for the daemon.`
   if (c.outcome === 'applied' && settings.includes(c.kind as Setting)) return `${name} applied${c.reason === 'setting_applied_next_turn' ? ' · takes effect next turn.' : '.'}`
-  if (c.outcome === 'applied') return c.kind === 'steer' ? (c.reason === 'queued_next_turn' ? 'Steer applied · queued for the next turn.' : 'Steer applied to the running turn.') : c.kind === 'stop' ? 'Stop applied · session exited.' : 'Interrupt applied · current turn interrupted.'
-  const reasons: Record<string, string> = { setting_rejected: `${name} rejected by the harness.`, setting_catalog_changed: 'Rejected · the account catalog changed.', authorization_expired: 'Expired before delivery.', authorization_revoked: 'Rejected · permission was revoked.', transient_input_unavailable: 'Rejected · the server lost the pending text.', budget_exhausted: 'Rejected · the run reached its budget.', outcome_unconfirmed: 'Outcome unconfirmed · the input will not be sent again.', child_unavailable: 'Rejected · the owned process is unavailable.', graceful_stop_timeout: 'Stop unconfirmed · the process may still be running.' }
+  if (c.outcome === 'applied') return c.kind === 'steer' ? steerAppliedText(c.reason) : c.kind === 'stop' ? 'Stop applied · session exited.' : 'Interrupt applied · current turn interrupted.'
+  const reasons: Record<string, string> = { setting_rejected: `${name} rejected by the harness.`, setting_catalog_changed: 'Rejected · the account catalog changed.', authorization_expired: 'Expired before delivery.', authorization_revoked: 'Rejected · permission was revoked.', transient_input_unavailable: 'Rejected · the server lost the pending text.', budget_exhausted: 'Rejected · the run reached its budget.', outcome_unconfirmed: 'Outcome unconfirmed · the input will not be sent again.', child_unavailable: 'Rejected · the owned process is unavailable.', graceful_stop_timeout: 'Stop unconfirmed · the process may still be running.', nothing_running: nothingRunningText, session_ended: sessionEndedText }
   return reasons[c.reason || ''] || `${name} rejected · refresh this session before trying again.`
 })
 async function json<T>(answer: Promise<Response>): Promise<T> {
@@ -105,7 +107,10 @@ watch(sheetOpen, async open => {
     dialog.querySelector<HTMLElement>('textarea, input, select')?.focus()
   } else if (!open && dialog.open) dialog.close()
 })
-function settingReason(kind: Setting | 'steer') { return unavailable.value || (waiting.value ? 'A control is pending.' : !available.value || !props.session.advertised_capabilities.includes(kind) ? 'This setting is not available for this session.' : '') }
+function settingReason(kind: Setting | 'steer') {
+  if (kind === 'steer' && sessionEnded.value) return sessionEndedText
+  return unavailable.value || (waiting.value ? 'A control is pending.' : !available.value || !props.session.advertised_capabilities.includes(kind) ? 'This setting is not available for this session.' : '')
+}
 function openSetting(kind: Setting, anchor: HTMLElement) { if (settingReason(kind)) return; editorAnchor.value = anchor; void editSetting(kind) }
 function openSteer(anchor: HTMLElement) { if (settingReason('steer')) return; editorAnchor.value = anchor; composing.value = true; editing.value = null }
 defineExpose({ interrupt: () => submit('interrupt'), stop: () => submit('stop'), openSetting, openSteer, settingReason, feedback, error, waiting })
@@ -127,7 +132,7 @@ async function check(turn = epoch) {
   } catch (e) { if (turn === epoch) { uncertain.value = true; error.value = e instanceof Error ? e.message : 'The result could not be checked.' } }
 }
 async function submit(kind: Kind) {
-  if (unavailable.value || waiting.value || !available.value || !props.session.advertised_capabilities.includes(kind) || (kind === 'steer' && !canSteer.value)) return
+  if (unavailable.value || waiting.value || !available.value || !props.session.advertised_capabilities.includes(kind) || (kind === 'steer' && !canSteer.value) || (kind === 'interrupt' && interruptIdle.value)) return
   if (settings.includes(kind as Setting) && !validValue.value) return
   request = { request_id: crypto.randomUUID(), kind, expected_ownership: { ...props.session.process_ownership! }, ...(kind === 'steer' ? { text: draft.value } : settings.includes(kind as Setting) ? { value: settingValue.value } : {}) }
   await sendRequest()
@@ -186,13 +191,13 @@ async function sendRequest() {
       <div class="control-row"><button type="submit" class="btn sm primary" :disabled="!validValue || waiting || loadingSettings || !!unavailable">Save {{ settingNames[editing].toLowerCase() }}</button><button type="button" class="btn sm ghost" :disabled="waiting" @click="editing = null">Cancel</button></div>
     </form>
     <div v-if="!overflow" class="control-row">
-      <button type="button" class="btn sm ghost" :disabled="!!unavailable || waiting || !session.advertised_capabilities.includes('steer')" @click="composing = !composing; editing = null"><AppIcon name="send" :size="14" /><span>Steer</span></button>
+      <button type="button" class="btn sm ghost" :disabled="!!unavailable || waiting || !session.advertised_capabilities.includes('steer')" :title="sessionEnded ? sessionEndedText : undefined" @click="composing = !composing; editing = null"><AppIcon name="send" :size="14" /><span>Steer</span></button>
       <button type="button" class="icon-btn flat more" aria-label="More session controls" aria-haspopup="menu" :aria-expanded="!!moreAnchor" :disabled="waiting" @click="toggleMore"><AppIcon name="more" :size="16" /></button>
     </div>
     <FloatingPanel v-if="moreAnchor" :anchor="moreAnchor" align="end" :width="288" label="More session actions" @close="closeMore">
       <div class="overflow-menu">
         <div class="overflow-list" role="menu" aria-label="More session actions" :aria-describedby="`${uid}-limits`" @click="closeIfItem">
-          <button v-if="!pausingSession(session) && session.advertised_capabilities.includes('interrupt')" type="button" role="menuitem" class="menu-item" :disabled="!!unavailable || waiting" @click="submit('interrupt')"><AppIcon name="interrupt" :size="16" /><span class="mi-text"><span>Interrupt this step</span><small>No handover; stays for your next message.</small></span></button>
+          <button v-if="!pausingSession(session) && session.advertised_capabilities.includes('interrupt')" type="button" role="menuitem" class="menu-item" :disabled="!!unavailable || waiting || interruptIdle" :title="interruptIdle ? noStepRunningText : undefined" @click="submit('interrupt')"><AppIcon name="interrupt" :size="16" /><span class="mi-text"><span>Interrupt this step</span><small>{{ interruptIdle ? noStepRunningText : 'No handover; stays for your next message.' }}</small></span></button>
           <template v-for="kind in settings" :key="kind">
             <button v-if="session.advertised_capabilities.includes(kind)" type="button" role="menuitem" class="menu-item" :disabled="!!unavailable || waiting" :aria-label="`Edit ${settingNames[kind].toLowerCase()}`" :title="currentSetting(kind)" @click="pickSetting(kind)">
               <AppIcon name="edit" :size="16" /><span class="mi-text"><span>{{ settingNames[kind] }}</span><small>{{ currentSetting(kind) || 'Set' }}</small></span>
@@ -203,7 +208,7 @@ async function sendRequest() {
         <p :id="`${uid}-limits`" class="menu-note">Tools stay bound to this run and its budget. Other processes running as the same OS user are outside this isolation boundary.</p>
       </div>
     </FloatingPanel>
-    <p v-if="unavailable && !overflow" class="hint">{{ unavailable }}</p>
+    <p v-if="unavailable && !overflow" class="hint">{{ sessionEnded ? sessionEndedText : unavailable }}</p>
     <form v-if="!overflow && !phone && composing" class="steer-form" @submit.prevent="submit('steer')">
       <label :for="`${uid}-steer`">What should change?</label>
       <textarea :id="`${uid}-steer`" v-model="draft" rows="3" maxlength="8192" :disabled="waiting" :aria-describedby="`${uid}-help`" placeholder="Describe the next step…" />

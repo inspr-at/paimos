@@ -16550,7 +16550,11 @@
     ,
     {"kind":"node","file":"tests/managed-control.test.ts","name":"each server prerequisite blocks on its own","tier":"ESSENTIAL"}
     ,
+    {"kind":"node","file":"tests/managed-control.test.ts","name":"interrupt waits for a running step and leaves stop available","tier":"ESSENTIAL"}
+    ,
     {"kind":"node","file":"tests/managed-control.test.ts","name":"reasons keep the panel wording","tier":"ESSENTIAL"}
+    ,
+    {"kind":"node","file":"tests/managed-control.test.ts","name":"steer starts a yielded step, queues a busy one, and stops when the session has ended","tier":"ESSENTIAL"}
     ,
     {"kind":"node","file":"tests/markdown-links.test.ts","name":"a bare https address is a link and trailing punctuation stays outside it","tier":"GATED-FULL"}
     ,
@@ -20431,6 +20435,8 @@
     {"kind":"vitest","file":"tests/start-agent.unit.test.ts","name":"honest launch state > recognizes a stale model-grant rejection and leaves other conflicts alone","tier":"GATED-FULL"}
     ,
     {"kind":"vitest","file":"tests/start-agent.unit.test.ts","name":"run now once > only sends the override when the person chooses it","tier":"GATED-FULL"}
+    ,
+    {"kind":"vitest","file":"tests/start-agent.unit.test.ts","name":"run now once > shows the checkout sentence while an earlier pairing still holds this computer","tier":"ESSENTIAL"}
     ,
     {"kind":"vitest","file":"tests/start-agent.unit.test.ts","name":"run now once > uses the server wait reason on a queued run","tier":"GATED-FULL"}
     ,

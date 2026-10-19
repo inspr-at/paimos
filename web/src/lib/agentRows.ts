@@ -90,6 +90,8 @@ export interface AgentRunRow {
   started_at?: string | null; ended_at?: string | null; created_at: string
   // The row's own revision; see HarnessSessionRow.
   row_version?: number
+  // Filled by this module from the daemon-wait endpoint. Not a column on the run.
+  daemon_wait_reason?: string | null
 }
 
 export interface RemoveSessionResult { session: Wire<HarnessSessionRow>; message: string; processes_signalled: false; process_state: 'unknown'; event_id?: number; undoable?: boolean }
@@ -155,10 +157,33 @@ export const getSession = async (projectId: string, sessionId: string, signal?: 
   const at = await call<HarnessSessionRow>(`/projects/${enc(projectId)}/harness-sessions/${enc(sessionId)}`, 'GET', undefined, signal)
   return rowOf(at.body, at)
 }
-export const listRuns = async (params: { session?: string; agent?: string; work_order?: string; cursor?: string; limit?: number } = {}) =>
-  pageOf(await call<Paged<AgentRunRow>>(`/runs${query({ limit: 50, ...params })}`))
+async function enrichDaemonWaits(rows: AgentRunRow[]): Promise<AgentRunRow[]> {
+  const ids = rows.filter(row => row.status === 'queued').map(row => row.id).slice(0, 50)
+  if (ids.length === 0) return rows
+  try {
+    const answer = await call<{ items: { run_id: string; reason: string | null }[] }>(`/runs/daemon-waits${query({ ids: ids.join(',') })}`)
+    const reasons = new Map(answer.body.items.map(item => [item.run_id, item.reason]))
+    return rows.map(row => {
+      if (row.status !== 'queued' || !reasons.has(row.id)) return row
+      return { ...row, daemon_wait_reason: reasons.get(row.id) ?? null }
+    })
+  } catch {
+    return rows
+  }
+}
+export const listRuns = async (params: { session?: string; agent?: string; work_order?: string; cursor?: string; limit?: number } = {}) => {
+  const at = await call<Paged<AgentRunRow>>(`/runs${query({ limit: 50, ...params })}`)
+  at.body.items = await enrichDaemonWaits(at.body.items)
+  return pageOf(at)
+}
 export const getRun = async (id: string) => {
   const at = await call<AgentRunRow>(`/runs/${enc(id)}`)
+  if (at.body.status === 'queued') {
+    try {
+      const wait = await call<{ reason: string | null }>(`/runs/${enc(id)}/daemon-wait`)
+      at.body = { ...at.body, daemon_wait_reason: wait.body.reason }
+    } catch { /* The run stays readable when the checkout sentence is unavailable. */ }
+  }
   return rowOf(at.body, at)
 }
 // The change requests (rename, model) a session's detail carries. Not a row: the session itself is not read here.

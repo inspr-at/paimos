@@ -96,6 +96,9 @@ export async function startAgent(selection: StartSelection, admission: RunAdmiss
 }
 
 export function launchState(run: AgentRun): { label: string; detail: string } {
+  if (run.status === 'queued' && run.daemon_wait_reason === 'checkout_held_by_earlier_pairing') {
+    return { label: 'Queued', detail: "This computer's checkout is still held by an earlier pairing. Release it in Settings › Computers." }
+  }
   if (run.status === 'queued' && run.wait) return { label: 'Waiting', detail: capacityWaitText(run.wait) }
   if (run.status === 'queued') return { label: 'Queued', detail: 'Waiting for the daemon to reserve an account and claim this run.' }
   if (run.status === 'starting' || run.status === 'running' || run.status === 'waiting') return { label: 'Claimed', detail: 'The daemon claimed the run. Its managed session appears when registration is reported.' }

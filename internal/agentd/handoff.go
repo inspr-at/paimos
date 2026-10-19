@@ -79,9 +79,11 @@ func (s *Supervisor) claimWorker(ctx context.Context, run Run, ids []string, pic
 
 // A checkout fence is independent of tenant, daemon and state-root selection.
 // The owner record survives a crash: releasing the OS lock is not exit proof.
-// Only the same local journal may recover it; Close clears it after confirmed
-// exit (or durable proof that no launch was attempted), never on an error path.
-// Caller holds dispatchMu throughout acquisition, claim and possible launch.
+// The same owner may rewrite it. An earlier pairing may take it only when that
+// pairing's journal on this computer proves every recorded run has exited.
+// Close clears it after confirmed exit (or durable proof that no launch was
+// attempted), never on an error path. Caller holds dispatchMu throughout
+// acquisition, claim and possible launch.
 func (s *Supervisor) acquireCheckout(runID string) error {
 	s.mu.Lock()
 	entries := make([]*owned, 0, len(s.runs))
@@ -122,12 +124,16 @@ func (s *Supervisor) acquireCheckout(runID string) error {
 	if len(owner) > 4096 {
 		return errors.New("checkout owner exceeds local bound")
 	}
-	previous, err := store.Read("owner.json", 4096)
+	raw, err := store.Read("owner.json", 4096)
 	if err != nil && !errors.Is(err, os.ErrNotExist) {
 		return fmt.Errorf("read checkout owner: %w", err)
 	}
-	if err == nil && string(previous) != "[]" && string(previous) != string(owner) {
-		return fmt.Errorf("checkout prior writer exit is unconfirmed: %w", ErrProcessesUnconfirmed)
+	var previous []byte
+	if err == nil {
+		previous = raw
+	}
+	if err := s.adoptEarlierCheckout(store, previous, owner); err != nil {
+		return err
 	}
 	if err := store.Write("owner.json", owner, false); err != nil {
 		return fmt.Errorf("persist checkout owner: %w", err)
