@@ -171,12 +171,15 @@ the sheet closes and the Display menu opens as a sheet, or, with the header
 collapsed, as the menu of the Display button beside New. Saved column
 visibility and order also apply to phone cards: optional values appear below
 Key and Title; Automatic restores the compact phone layout. Parent stays off the phone row.
-On desktop tables Title never goes under its 240 px minimum (AEON-1470): content-fitted
-widths give way first, then saved or dragged widths shrink in proportion (the saved
-values stay), then whole columns step aside in this order: Updated, Created, Estimate,
+On desktop tables from 721 px Title never goes under its 240 px minimum (AEON-1470): content-fitted
+widths give way first (a measured key always reads whole), then saved or dragged widths shrink in
+proportion (the saved values stay), then whole columns step aside in this order: Updated, Created, Estimate,
 Tokens, Cost, Suggested release, Model, ETA, Progress, Tags, Cost unit, Release, Parent,
-Assignee. Key, Title, Status, Priority and a column the list is sorted by stay. Only a
-resize changes the set, and a column comes back with 16 px to spare. Display keeps a
+Assignee. Key, Title, Status, Priority and a column the list is sorted by stay; when even they
+do not fit, the table scrolls inside its card. A narrower table beside a docked panel stays
+inside its card and Title gives way instead. Only a resize changes the set, and a column comes
+back with 16 px to spare. The Parent column shows the direct parent's kind icon and key, and its
+title from 200 px; very wide tables give it that width first. Display keeps a
 column that stepped aside ticked, with "hidden at this width" after its name; its sort
 stays in the sort choices. A group row's priority mix shows the most severe bucket and
 the rest as "+N" ("3 high +3") when the full mix does not fit its cell; the cell's tip
