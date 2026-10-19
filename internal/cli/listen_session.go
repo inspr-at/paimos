@@ -153,6 +153,9 @@ func (rt *runtime) doMessagingPoll(ctx context.Context, method, path string, des
 	if err != nil {
 		return err
 	}
+	if follow {
+		c = c.ForStream()
+	}
 	backoff := min(interval, 30*time.Second)
 	for {
 		if err := ctx.Err(); err != nil {

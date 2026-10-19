@@ -37,6 +37,8 @@ func runMessaging(args []string, stdin io.Reader, stdout, stderr io.Writer, deli
 	return 1
 }
 func (rt *runtime) executeMessaging(args []string) error {
+	stop := rt.armCommandSignals()
+	defer stop()
 	root := rt.root()
 	replacements := map[string]*Command{"tell": rt.cmdMessagingTell(), "listen": rt.cmdMessagingListen(), "message": rt.cmdMessaging()}
 	for i, cmd := range root.subs {

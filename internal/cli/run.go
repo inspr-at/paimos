@@ -80,6 +80,8 @@ type runtime struct {
 }
 
 func (rt *runtime) execute(args []string) error {
+	stop := rt.armCommandSignals()
+	defer stop()
 	rest := []string{}
 	if len(args) > 1 {
 		rest = args[1:]
@@ -136,6 +138,9 @@ func (rt *runtime) printJSON(v any) error {
 }
 
 func (rt *runtime) fail(err error, secrets ...string) error {
+	if rt.requestContext != nil && errors.Is(rt.requestContext.Err(), context.Canceled) && errors.Is(err, context.Canceled) {
+		return &exitError{code: 130, msg: "interrupted"}
+	}
 	message := err.Error()
 	exit := &exitError{code: 1}
 	var status *client.StatusError
@@ -302,7 +307,7 @@ func (rt *runtime) login(rawURL, name, keyFile string) error {
 	if err != nil {
 		return err
 	}
-	me, err := client.New(u, key).Me(context.Background())
+	me, err := client.New(u, key).Me(rt.context())
 	if err != nil {
 		return rt.fail(fmt.Errorf("login failed: %w", err), key)
 	}
@@ -407,7 +412,7 @@ func (rt *runtime) cmdWhoami(use string) *Command {
 		Short: "Show the acting principal (GET /api/me)",
 		Use:   use,
 		run: func(args []string) error {
-			return rt.whoami(context.Background())
+			return rt.whoami(rt.context())
 		},
 	}
 }

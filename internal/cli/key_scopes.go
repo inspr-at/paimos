@@ -3,11 +3,9 @@
 package cli
 
 import (
-	"context"
 	"fmt"
 	"net/http"
 	"strings"
-	"time"
 
 	"github.com/inspr-at/paimos/internal/client"
 )
@@ -79,8 +77,8 @@ func (rt *runtime) cmdKeys() *Command {
 						return usagef("invalid session cookie value")
 					}
 					c := client.New(baseURL, "")
-					c.HTTP = &http.Client{Timeout: 30 * time.Second, CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}
-					if err := c.DoWithHeaders(context.Background(), http.MethodPatch, path, body, &result, map[string]string{"Cookie": cookie.String(), "Origin": baseURL}); err != nil {
+					c.HTTP.CheckRedirect = func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }
+					if err := c.DoWithHeaders(rt.context(), http.MethodPatch, path, body, &result, map[string]string{"Cookie": cookie.String(), "Origin": baseURL}); err != nil {
 						return rt.fail(err, session)
 					}
 				}

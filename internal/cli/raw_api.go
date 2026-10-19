@@ -11,7 +11,6 @@ import (
 	"net/url"
 	"os"
 	"strings"
-	"time"
 
 	"github.com/inspr-at/paimos/internal/client"
 )
@@ -39,7 +38,7 @@ func (rt *runtime) rawResponse(method, path string, body []byte, contentType str
 		req.Header.Set("Content-Type", contentType)
 	}
 	req.Header.Set("Authorization", "Bearer "+inst.APIKey)
-	resp, err := (&http.Client{Timeout: 30 * time.Second}).Do(req)
+	resp, err := client.BoundedHTTP().Do(req)
 	if err != nil {
 		return nil, "", rt.fail(err, inst.APIKey)
 	}
