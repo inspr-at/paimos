@@ -249,7 +249,7 @@ for (const { size, looks, rows, topMax, scrolled } of C1) for (const look of loo
             filter: page.locator('.sessions .tb-filter'),
           },
           scrollAreas: { page: main(page) },
-          interactions: [working, waiting].flatMap(button => [
+          interactions: [{ button: working, state: 'working' }, { button: waiting, state: 'needs' }].flatMap(({ button, state }) => [
             { name: 'the title count filters Sessions', run: async () => {
               const name = await button.getAttribute('aria-label') ?? ''
               const n = Number(await button.locator('b').innerText())
@@ -259,6 +259,8 @@ for (const { size, looks, rows, topMax, scrolled } of C1) for (const look of loo
               await expect(matches).toHaveCount(n)
               const filtered = await matches.evaluateAll(els => els.map(el => el.getAttribute('data-row')))
               c.is(`${name}: filters the session rows`, filtered, `${n} matches, fewer than all ${allRows.length} rows`, filtered.length === n && filtered.length < allRows.length)
+              const wrongState = await matches.evaluateAll((els, state) => els.filter(el => !el.classList.contains(state)).map(el => el.getAttribute('data-row')), state)
+              c.is(`${name}: every match has the selected state`, wrongState, '[]', wrongState.length === 0)
             } },
             { name: 'the pressed title count restores all Sessions', run: async () => {
               await button.click()
