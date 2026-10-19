@@ -6,7 +6,7 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import type { ListQuery, ProjectFigures } from '../src/lib/api.ts'
-import { figuresCache, figuresLoader, groupCellText, groupParams, groupTipTitle, peopleText, phoneFacts, rowCount } from '../src/lib/groupFigures.ts'
+import { figuresCache, figuresLoader, groupCellText, groupParams, groupTipTitle, peopleText, phoneFacts, priorityMix, rowCount } from '../src/lib/groupFigures.ts'
 import { filtersFromQuery, groupRows, type RowGroup } from '../src/lib/ticketList.ts'
 import { validFigures } from '../src/lib/workFigures.ts'
 import { FIGURES_NOW, viewFigures, wholeFigures } from './work-figures-fixture.ts'
@@ -44,7 +44,7 @@ test('a group that has no exact query is not counted rather than counted wrong',
 test('cells say something or nothing: sums with the header’s marks, never "—" or 0', () => {
   const f = viewFigures()
   assert.equal(groupCellText('estimate', f, ctx), '~78h', 'leaves only, "~" on a sum of estimates')
-  assert.equal(groupCellText('priority', f, ctx), '64 high · 85 med · 17 low')
+  assert.equal(groupCellText('priority', f, ctx), '64\u00a0high\u00a0·\u00a085\u00a0med\u00a0·\u00a017\u00a0low')
   assert.equal(groupCellText('model', f, { ...ctx, modelName: id => id === 'claude-opus-5-5' ? 'Opus 5.5' : id }), 'Opus 5.5 ×70')
   assert.equal(groupCellText('tags', f, ctx), 'bug 19')
   assert.equal(groupCellText('status', f, ctx), '3 accepted · 3 open')
@@ -134,4 +134,19 @@ test('the loader counts each scope once, two at a time in order, lands cached sc
   await settle()
   assert.deepEqual(failed, ['a', 'c'])
   loader.stop()
+})
+
+// AEON-1470 F1. Risk: a compact mix that miscounts the other buckets, names a milder bucket than the most severe one
+// present, or lets a number part from its word (or "·" end a line).
+test('AEON-1470 the compact priority mix is the most severe bucket and the rest as "+N"', () => {
+  const f = viewFigures()
+  const mix = (counts: Record<string, number>) => priorityMix({ ...f, columns: { ...f.columns, priority: { ...f.columns.priority, values: Object.entries(counts).map(([value, count]) => ({ value, count, hours: 0 })) } } })
+  assert.deepEqual(mix({ high: 3, medium: 1, low: 2 }), { full: '3\u00a0high\u00a0·\u00a01\u00a0med\u00a0·\u00a02\u00a0low', compact: '3\u00a0high\u00a0+3' })
+  // The most severe bucket present leads; tickets without a priority are not in the mix.
+  assert.deepEqual(mix({ low: 2, medium: 4, none: 9 }), { full: '4\u00a0med\u00a0·\u00a02\u00a0low', compact: '4\u00a0med\u00a0+2' })
+  assert.deepEqual(mix({ low: 5 }), { full: '5\u00a0low', compact: '5\u00a0low' })
+  assert.equal(mix({ none: 3 }), null)
+  assert.equal(priorityMix(null), null)
+  // No breaking space anywhere: neither form can wrap.
+  for (const text of Object.values(mix({ high: 1200, medium: 3, low: 40 })!)) assert.doesNotMatch(text, / /)
 })

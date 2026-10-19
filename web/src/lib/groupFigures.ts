@@ -76,10 +76,7 @@ export function groupCellText(id: string, f: ProjectFigures | null, ctx: GroupCe
       const values = (c('status')?.values ?? []).filter(v => v.count > 0)
       return values.slice(0, 2).map(v => `${fmtInt(v.count)} ${statusWord(v.value)}`).join(' · ')
     }
-    case 'priority': {
-      const values = c('priority')?.values ?? []
-      return PRIORITY_WORDS.map(([value, word]) => [values.find(v => v.value === value)?.count ?? 0, word] as const).filter(([n]) => n > 0).map(([n, word]) => `${fmtInt(n)} ${word}`).join(' · ')
-    }
+    case 'priority': return priorityMix(f)?.full ?? ''
     case 'estimate': {
       const total = c('estimate')?.numbers?.total ?? 0
       return total > 0 ? `~${fmtHours(total)}` : ''
@@ -93,6 +90,25 @@ export function groupCellText(id: string, f: ProjectFigures | null, ctx: GroupCe
     default: return ''
   }
 }
+// The priority mix (AEON-1470 F1): "3 high · 1 med · 2 low" in full; when that does not fit the cell, the most severe
+// bucket and the tickets of the others as "+N": "3 high +3". Non-breaking spaces throughout, so a number never leaves
+// its word and "·" never ends or starts a line. null: no ticket of the group has a priority.
+const NBSP = '\u00a0'
+export function priorityMix(f: ProjectFigures | null): { full: string; compact: string } | null {
+  const values = f?.columns.priority?.values ?? []
+  const buckets = PRIORITY_WORDS.map(([value, word]) => [values.find(v => v.value === value)?.count ?? 0, word] as const).filter(([n]) => n > 0)
+  if (!buckets.length) return null
+  const [[top, word], ...rest] = buckets
+  const others = rest.reduce((sum, [n]) => sum + n, 0)
+  return {
+    full: buckets.map(([n, w]) => `${fmtInt(n)}${NBSP}${w}`).join(`${NBSP}·${NBSP}`),
+    compact: `${fmtInt(top)}${NBSP}${word}${others ? `${NBSP}+${fmtInt(others)}` : ''}`,
+  }
+}
+// The priority column's minimum in group summaries: room for a compact mix with two-digit counts ("12 med +34") in
+// the cells' 12 px type, inside the cell's 12 px padding on each side.
+export const MIX_PRIORITY_MIN = 96
+
 // The people assigned in the group ("2 people"), when no session is live. A tail beyond the top three may hold more.
 export function peopleText(f: ProjectFigures | null): string {
   const c = f?.columns.assignee

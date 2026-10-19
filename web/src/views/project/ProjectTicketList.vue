@@ -28,7 +28,7 @@ const bindTable = bindProjectRef(table)
     :outline="outlineActive ? outline.entries.value : null" :can-drag="outlineActive && writable" :prefs="tablePrefs" :cost-allowed="usageVisible"
     :selectable="selectable" :selected="selected" :picking="phonePicking" :can-assign-release="can('releases.write', project.id)" :native-releases="nativeReleases" @select="selectRow" @select-all="selectAll" :column-figures="columnFigures"
     :group-desc="!!filters.groupDesc" :group-figures="filters.group !== 'none' && !outlineActive ? groupFigures : null" @all-groups="setAllGroups" @flip-groups="flipGroups"
-    @layout="(visible, customised) => tableLayout = { visible, customised }" @widths="saveWidths"
+    @layout="(visible, customised, hidden) => tableLayout = { visible, customised, hidden }" @widths="saveWidths"
     @toggle-row="outline.toggle" @toggle-no-epic="outline.noEpicCollapsed.value = !outline.noEpicCollapsed.value"
     @more-children="id => id === project!.id ? outline.loadMoreRoot() : outline.loadChildren(id, true)" @move="moveRow"
     @open="openRow" @cursor="id => cursorId = id" @sort="sortBy" @status="(row, anchor) => openStatus(row, anchor, 'list')" @release="(row, anchor) => openRelease(anchor, [row.id])"

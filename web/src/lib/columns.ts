@@ -1,9 +1,10 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // Ticket list columns: which show at a given table width, in which order and how
-// wide. Without a saved choice the table fills its width: narrow tables drop
-// columns, wide ones (from ~1500px of table, about an 1800px screen) add Assignee,
-// Epic, Release and Tags (when some row has them), Estimate and Created. A saved
-// choice fixes order and visibility; narrow desktop tables scroll to keep it.
+// wide. Without a saved choice the table fills its width: wide ones (from ~1500px
+// of table, about an 1800px screen) add Assignee, Epic, Release and Tags (when
+// some row has them), Estimate and Created. A saved choice fixes order and which
+// columns are chosen. Title keeps its minimum at every desktop width (AEON-1470):
+// widths beside it give way first, then whole columns, least essential first.
 // On wide tables Title stops at ~960px and the spare width goes to the
 // text columns, so the metadata stays near the title. Free of Vue for unit tests.
 // Planning columns join Automatic when populated. Saved ticks always draw,
@@ -48,8 +49,13 @@ export const TITLE_TARGET = 960
 // Automatic wide columns keep Title at least this wide; otherwise they step aside.
 const TITLE_ROOM = 420
 const PHONE: ColumnId[] = ['key', 'title', 'status', 'priority', 'updated']
-// The order columns leave in when space runs out: the least essential first.
-const DROP_ORDER: ColumnId[] = ['suggested', 'list_cost', 'tokens', 'model', 'eta', 'progress', 'estimate', 'cost', 'tags', 'release', 'created', 'epic', 'assignee', 'updated', 'priority', 'status']
+// The order whole columns leave in when even their minimum widths leave Title
+// under its own (AEON-1470): the least essential first. Key, Title, Status and
+// Priority never leave.
+export const GIVE_WAY: ColumnId[] = ['updated', 'created', 'estimate', 'tokens', 'list_cost', 'paid', 'suggested', 'model', 'eta', 'progress', 'tags', 'cost', 'release', 'epic', 'assignee']
+// A column that left comes back only with this much to spare, so the set does
+// not flap while a window is resized across its threshold.
+export const RETURN_ROOM = 16
 // Columns only wide tables add on their own.
 const WIDE_EXTRAS: ColumnId[] = ['suggested', 'list_cost', 'tokens', 'model', 'estimate', 'tags', 'release', 'created', 'epic', 'assignee']
 // The text columns that take spare width on wide tables (their text gets room).
@@ -100,8 +106,37 @@ export function widthOf(id: string, prefs: ListPrefs | null | undefined, definit
   return typeof saved === 'number' && Number.isFinite(saved) ? Math.max(def.min, Math.min(def.max, Math.round(saved))) : def.width
 }
 
-// The columns to show, in order. `customised` is true when a saved choice applies.
-export function visibleColumns(tableWidth: number, options: { phone: boolean; present?: Present; prefs?: ListPrefs | null; costAllowed?: boolean }): { columns: ColumnDef<ColumnId>[]; customised: boolean } {
+// What the give-way measures besides the column definitions. mins: a host's own
+// minimum for a column (the ticket grid's first-cell slots, Title's extras);
+// reserve: the minimum width of host columns, which never leave; sorted: the
+// list's sort fields; previous: the columns this table left out last time.
+export interface ColumnFit { mins?: Partial<Record<string, number>>; reserve?: number; sorted?: readonly string[]; previous?: readonly string[] }
+
+// Whole columns leave, in GIVE_WAY order, only while the chosen ones do not fit
+// even at their minimum widths beside Title's minimum. Widths alone never decide
+// it (they give way first, in layoutWidths), so hover, live updates, more rows
+// or a folded group cannot change the set. A column the list is sorted by stays;
+// the next one leaves instead. One that left returns with RETURN_ROOM to spare.
+export function giveWay(ids: ColumnId[], tableWidth: number, fit: ColumnFit = {}): { ids: ColumnId[]; dropped: ColumnId[] } {
+  if (!(tableWidth > 0)) return { ids, dropped: [] }
+  const min = (id: ColumnId) => fit.mins?.[id] ?? COLUMN_BY_ID.get(id)!.min
+  const sorted = new Set(fit.sorted ?? [])
+  const keeps = (id: ColumnId) => { const sort = COLUMN_BY_ID.get(id)?.sort; return (!!sort && sorted.has(sort)) || (id === 'list_cost' && sorted.has('paid')) }
+  const candidates = GIVE_WAY.filter(id => ids.includes(id) && !keeps(id))
+  // need[k]: the width the chosen columns need with the first k candidates gone.
+  const need = [ids.reduce((sum, id) => sum + min(id), fit.reserve ?? 0)]
+  for (const id of candidates) need.push(need[need.length - 1] - min(id))
+  const fewest = (room: number) => { const k = need.findIndex(width => width <= room); return k === -1 ? candidates.length : k }
+  const previous = new Set(fit.previous ?? [])
+  const before = candidates.reduce((k, id, index) => previous.has(id) ? index + 1 : k, 0)
+  const k = Math.min(Math.max(before, fewest(tableWidth)), fewest(tableWidth - RETURN_ROOM))
+  const dropped = candidates.slice(0, k)
+  return { ids: ids.filter(id => !dropped.includes(id)), dropped }
+}
+
+// The columns to show, in order. `customised` is true when a saved choice applies;
+// `dropped` names chosen columns this width leaves out (Display keeps them ticked).
+export function visibleColumns(tableWidth: number, options: { phone: boolean; present?: Present; prefs?: ListPrefs | null; costAllowed?: boolean; fit?: ColumnFit }): { columns: ColumnDef<ColumnId>[]; customised: boolean; dropped: ColumnId[] } {
   if (options.phone && !options.prefs?.visible) {
     // Automatic phone cards keep their compact set. Saved choices below apply
     // to cards too; their optional cells grow downward instead of scrolling.
@@ -109,7 +144,7 @@ export function visibleColumns(tableWidth: number, options: { phone: boolean; pr
     if (options.present?.progress) phone.push('progress')
     if (options.present?.eta) phone.push('eta')
     if (options.present?.estimate) phone.push('estimate')
-    return { columns: phone.map(id => COLUMN_BY_ID.get(id)!), customised: false }
+    return { columns: phone.map(id => COLUMN_BY_ID.get(id)!), customised: false, dropped: [] }
   }
   const prefs = options.prefs
   const customised = !!prefs?.visible
@@ -122,13 +157,9 @@ export function visibleColumns(tableWidth: number, options: { phone: boolean; pr
     if (total(TITLE_ROOM) <= tableWidth || tableWidth <= 0) break
     ids = ids.filter(x => x !== id)
   }
-  // Whatever does not fit beside a readable title steps aside, least essential first.
-  const title = COLUMN_BY_ID.get('title')!.min
-  if (!customised) for (const id of DROP_ORDER) {
-    if (total(title) <= tableWidth || tableWidth <= 0) break
-    ids = ids.filter(x => x !== id)
-  }
-  return { columns: ids.map(id => COLUMN_BY_ID.get(id)!), customised }
+  // Phone cards grow downward; desktop columns give way beside Title's minimum.
+  const fit = options.phone ? { ids, dropped: [] } : giveWay(ids, tableWidth, options.fit)
+  return { columns: fit.ids.map(id => COLUMN_BY_ID.get(id)!), customised, dropped: fit.dropped }
 }
 
 const sumWidths = (widths: Partial<Record<string, number>>) => Object.values(widths).reduce<number>((sum, w) => sum + (w ?? 0), 0)
@@ -152,8 +183,8 @@ function besideTitle(ids: string[]): string[] {
 function sizedWidth(id: string, prefs: ListPrefs | null | undefined, live: Partial<Record<string, number>>): boolean {
   return live[id] !== undefined || Number.isFinite(prefs?.widths?.[id])
 }
-// Move flexible columns by `amount` px, never past min or max. Sized columns stay:
-// a width the person set is not spent to satisfy Title.
+// Move flexible columns by `amount` px, never past min or max, the column beside
+// Title first.
 function shiftColumns(ids: string[], out: Partial<Record<string, number>>, amount: number, dir: 'grow' | 'shrink', flexible: (id: string) => boolean, definitions: ReadonlyMap<string, ColumnDef>) {
   let left = Math.max(0, Math.round(amount))
   for (const id of besideTitle(ids)) {
@@ -164,6 +195,23 @@ function shiftColumns(ids: string[], out: Partial<Record<string, number>>, amoun
     left -= Math.abs(next - current)
     out[id] = next
   }
+}
+
+// Title never goes under its minimum while the columns beside it can give way
+// (AEON-1470): widths nobody set shrink first, the column beside Title first;
+// then saved or dragged widths shrink in proportion to their room above their
+// own minimum. The saved values stay as they are; only this layout narrows them.
+function keepTitleMin(ids: string[], out: Partial<Record<string, number>>, tableWidth: number, sized: (id: string) => boolean, definitions: ReadonlyMap<string, ColumnDef>) {
+  if (!(tableWidth > 0)) return
+  const room = tableWidth - definitions.get('title')!.min
+  if (sumWidths(out) - room > 0.5) shiftColumns(ids, out, sumWidths(out) - room, 'shrink', id => !sized(id), definitions)
+  const over = sumWidths(out) - room
+  if (over <= 0.5) return
+  const slack = ids.filter(id => id !== 'title' && sized(id)).map(id => [id, Math.max(0, out[id]! - definitions.get(id)!.min)] as const)
+  const total = slack.reduce((sum, [, value]) => sum + value, 0)
+  if (total <= 0) return
+  const share = Math.min(1, over / total)
+  for (const [id, value] of slack) out[id] = out[id]! - value * share
 }
 
 // How wide Title can be while every other column stays inside its min and max.
@@ -190,8 +238,7 @@ export function titleRoom(ids: string[], tableWidth: number, prefs?: ListPrefs |
 // saved title width, Title aims for TITLE_TARGET and spare width beyond that widens
 // Epic, Tags, Assignee and Release (not ones the person sized) up to their maximum,
 // in proportion to their normal width. What is still left goes back to Title.
-// A content fit that would leave Title under its minimum shrinks, nearest column
-// first, and never moves a saved or dragged width.
+// Whatever would leave Title under its minimum gives way in keepTitleMin.
 // A width the person gives Title is kept: the unsized columns beside it grow or
 // shrink, the next column first, and stop at their own min and max.
 export function layoutWidths(ids: string[], tableWidth: number, prefs?: ListPrefs | null, live: Partial<Record<string, number>> = {}, definitions: ReadonlyMap<string, ColumnDef> = COLUMN_BY_ID, automatic: Partial<Record<string, number>> = {}): Partial<Record<string, number>> {
@@ -204,18 +251,13 @@ export function layoutWidths(ids: string[], tableWidth: number, prefs?: ListPref
     const flexible = (id: string) => !sized(id)
     if (spare < -0.5) shiftColumns(ids, out, -spare, 'shrink', flexible, definitions)
     else if (spare > 0.5) shiftColumns(ids, out, spare, 'grow', flexible, definitions)
+    keepTitleMin(ids, out, tableWidth, sized, definitions)
     for (const id of Object.keys(out) as string[]) out[id] = Math.floor(out[id]!)
     return out
   }
-  const titleMin = definitions.get('title')!.min
-  // A content fit replaces the default visibleColumns budgeted beside Title.
-  // On a table that stays at the card width, give an unsized Title its minimum
-  // back from those fits, nearest column first. A saved or dragged width stays,
-  // and a fit that already leaves Title at least its minimum stays steady.
-  if (tableWidth > 0) {
-    const overflow = sumWidths(out) - (tableWidth - titleMin)
-    if (overflow > 0.5) shiftColumns(ids, out, overflow, 'shrink', id => !sized(id) && automatic[id] !== undefined, definitions)
-  }
+  // A content fit replaces the default width budgeted beside Title. A fit that
+  // already leaves Title at least its minimum stays steady.
+  keepTitleMin(ids, out, tableWidth, sized, definitions)
   const titleTarget = TITLE_TARGET
   let spare = tableWidth - sumWidths(out) - titleTarget
   // Loaded-content fits stay at the width just chosen, including a shrink that

@@ -298,6 +298,10 @@
     ,
     "browser:tests/aeon-1448-desk-tabrow.spec.ts:type-size shots › AEON-1448: 375 and 390, the round action beside the tabs"
     ,
+    "browser:tests/aeon-1470-list-titles.spec.ts:AEON-1470 S1 and S2: the 1388 set and every column at 1024 (light, dark) and 1440"
+    ,
+    "browser:tests/aeon-1470-list-titles.spec.ts:AEON-1470 S6: phone rows at 390 stay as they were (light, dark)"
+    ,
     "browser:tests/aeon-908-polish.spec.ts:tree, hours spacing and light switch thumbs 1024 dark"
     ,
     "browser:tests/aeon-908-polish.spec.ts:tree, hours spacing and light switch thumbs 1024 light"
@@ -6235,6 +6239,26 @@
     {"kind":"browser","file":"tests/aeon-1448-desk-tabrow.spec.ts","name":"touch › AEON-1448: the round action keeps a 44 px target and adds no height to the row","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
     {"kind":"browser","file":"tests/aeon-1448-desk-tabrow.spec.ts","name":"type-size shots › AEON-1448: 375 and 390, the round action beside the tabs","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/aeon-1470-list-titles.spec.ts","name":"AEON-1470 S1 and S2: the 1388 set and every column at 1024 (light, dark) and 1440","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/aeon-1470-list-titles.spec.ts","name":"AEON-1470 S5: Display keeps a dropped column ticked with \"hidden at this width\", and its sort stays offered","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/aeon-1470-list-titles.spec.ts","name":"AEON-1470 S6: phone rows at 390 stay as they were (light, dark)","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/aeon-1470-list-titles.spec.ts","name":"AEON-1470 Title keeps at least 240 px at table widths 760–1440 for the 1388 set, every column and wide saved widths","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/aeon-1470-list-titles.spec.ts","name":"AEON-1470 a column that left returns only with 16 px to spare: ±8 px around a threshold keeps the set","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/aeon-1470-list-titles.spec.ts","name":"AEON-1470 columns leave in the give-way order; sorted by Updated, Updated stays and the next one leaves instead","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/aeon-1470-list-titles.spec.ts","name":"AEON-1470 group row priority mix: compact \"3 high +3\" when the full mix does not fit, the full mix in its tip, never ellipsized","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/aeon-1470-list-titles.spec.ts","name":"AEON-1470 nothing moves on hover, a live status change, an open tip or a fold","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/aeon-1470-list-titles.spec.ts","name":"AEON-1470 the fold label is English like the rest of the list","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/aeon-1470-list-titles.spec.ts","name":"AEON-1470 the stale tag keeps 8 px to the next cell and never truncates; the group name ellipsizes first","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
     {"kind":"browser","file":"tests/aeon-1473-desk-tab.spec.ts","name":"16 px favicon › AEON-1473: the amber dot reads at 16 px on light and dark tab strips","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
@@ -16012,6 +16036,14 @@
     ,
     {"kind":"node","file":"tests/codenames.test.ts","name":"the release history fills the lookup, skipping releases without a name","tags":["delete-candidate"],"tier":"GATED-FULL"}
     ,
+    {"kind":"node","file":"tests/columns.test.ts","name":"AEON-1470 Title is never under 240 px at 760–1440 px, for the 1388 set, every column and wide saved widths","tier":"ESSENTIAL"}
+    ,
+    {"kind":"node","file":"tests/columns.test.ts","name":"AEON-1470 saved widths shrink in proportion, after the fits and never below their minimum","tier":"ESSENTIAL"}
+    ,
+    {"kind":"node","file":"tests/columns.test.ts","name":"AEON-1470 the set depends only on width, chosen columns, minimums and sort; a column that left returns with 16 px to spare","tier":"ESSENTIAL"}
+    ,
+    {"kind":"node","file":"tests/columns.test.ts","name":"AEON-1470 whole columns leave in the give-way order; Key, Title, Status, Priority and the sorted column stay","tier":"ESSENTIAL"}
+    ,
     {"kind":"node","file":"tests/columns.test.ts","name":"AEON-913: a loaded fit keeps the designed width until the value is wider","tier":"GATED-FULL"}
     ,
     {"kind":"node","file":"tests/columns.test.ts","name":"AEON-913: automatic fits give width back until Title keeps its minimum","tier":"GATED-FULL"}
@@ -16241,6 +16273,8 @@
     {"kind":"node","file":"tests/graph-renderer.test.ts","name":"smart labels try alternative positions and reject a fully occupied screen","tier":"GATED-FULL"}
     ,
     {"kind":"node","file":"tests/graph-renderer.test.ts","name":"the height fit ignores distant satellites without mutating the layout","tier":"GATED-FULL"}
+    ,
+    {"kind":"node","file":"tests/group-figures.test.ts","name":"AEON-1470 the compact priority mix is the most severe bucket and the rest as \"+N\"","tier":"ESSENTIAL"}
     ,
     {"kind":"node","file":"tests/group-figures.test.ts","name":"a group is the view narrowed to that group: its value replaces the view’s own, exclusions stay","tier":"ESSENTIAL"}
     ,

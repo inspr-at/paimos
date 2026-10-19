@@ -11,6 +11,8 @@ import AppIcon from '../AppIcon.vue'
 const props = withDefaults(defineProps<{
   order: T[]; visible: T[]; customised: boolean
   notes?: Partial<Record<string, string>>
+  // Ticked columns the list's width leaves out for now (AEON-1470): a muted note after the name.
+  hidden?: readonly string[]
   reserveNotes?: boolean
   labels?: Partial<Record<string, string>>; pinned?: T[]; resetLabel?: string; resetTip?: string; note?: string | null
 }>(), { labels: undefined, pinned: undefined, resetLabel: 'Automatic', resetTip: 'Columns follow the width again', note: 'Drag a header edge to resize a column; double-click it to fit.' })
@@ -20,6 +22,7 @@ const pins = computed<T[]>(() => props.pinned ?? (PINNED as unknown as T[]))
 const label = (id: T) => props.labels?.[id] ?? COLUMN_BY_ID.get(id as unknown as ColumnId)?.label ?? id
 const free = computed(() => props.order.filter(id => !pins.value.includes(id)))
 const shown = computed(() => new Set(props.visible))
+const away = computed(() => new Set(props.hidden ?? []))
 // Plain strings: a generic ref does not unwrap cleanly in the template.
 const dragging = ref<string | null>(null)
 const over = ref<string | null>(null)
@@ -65,7 +68,7 @@ function drop(target: T) {
         <span class="pin-note">Always</span>
       </li>
       <li
-        v-for="(id, index) in free" :key="id" class="row" :class="{ off: !shown.has(id), dragging: dragging === id, over: over === id, noted: !reserveNotes && !!notes?.[id] }" draggable="true"
+        v-for="(id, index) in free" :key="id" class="row" :class="{ off: !shown.has(id), dragging: dragging === id, over: over === id, noted: !reserveNotes && !!notes?.[id], 'away-row': away.has(id) && shown.has(id) }" draggable="true"
         @dragstart="dragging = id" @dragend="dragging = null; over = null" @dragover.prevent="over = id" @dragleave="over = over === id ? null : over" @drop.prevent="drop(id)"
       >
         <label class="row-label">
@@ -73,7 +76,8 @@ function drop(target: T) {
             type="checkbox" class="check" :checked="shown.has(id)" :data-column-row="id" :aria-describedby="notes?.[id] ? `${hint} ${hint}-${id}` : hint"
             @change="toggle(id)" @keydown="keydown($event, id)"
           />
-          <span class="name">{{ label(id) }}</span>
+          <span v-if="away.has(id) && shown.has(id)" class="name away"><span>{{ label(id) }}</span><span class="away-note">hidden at this width</span></span>
+          <span v-else class="name">{{ label(id) }}</span>
         </label>
         <span class="moves">
           <button type="button" class="icon-btn sm flat" :aria-label="`Move ${label(id)} up`" :disabled="index === 0" tabindex="-1" @click="step(id, -1)"><AppIcon name="chevron-up" :size="13" /></button>
@@ -114,6 +118,10 @@ function drop(target: T) {
 .check { width: 16px; height: 16px; margin: 0; accent-color: var(--teal); }
 .check:focus-visible { box-shadow: var(--focus-ring); border-radius: 4px; }
 .name { flex: 1; min-width: 0; }
+/* A ticked column the width leaves out: the note follows the name, and moves under it only when both do not fit. */
+.name.away { display: flex; flex-wrap: wrap; align-items: baseline; column-gap: 8px; }
+.away-note { font-size: 11.5px; color: var(--ink-3); white-space: nowrap; }
+.row.away-row { height: auto; min-height: 32px; padding-top: 6px; padding-bottom: 6px; }
 .pin-note { font-size: 11.5px; color: var(--ink-3); padding-right: 8px; }
 .moves { display: inline-flex; opacity: 0; }
 .row:hover .moves, .row:focus-within .moves { opacity: 1; }

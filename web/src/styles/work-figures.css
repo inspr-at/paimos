@@ -25,6 +25,8 @@
 .figure-tip .wf-foot.lines { white-space: normal; }
 .figure-tip .wf-foot .wf-fline { display: block; height: 18px; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
 .figure-tip .wf-ttl { font-weight: 650; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+/* A compact cell's whole text under the group's title (AEON-1470): one unbreakable line in tabular digits. */
+.figure-tip .wf-sum { margin-top: 2px; white-space: nowrap; font-variant-numeric: tabular-nums; }
 /* The work bar's counts: a small table, hours and tickets side by side. */
 .figure-tip .wf-tbl { display: grid; grid-template-columns: minmax(0, 1fr) repeat(4, auto); column-gap: 12px; align-items: center; font-variant-numeric: tabular-nums; }
 .figure-tip .wf-tbl > * { height: 20px; line-height: 20px; white-space: nowrap; }

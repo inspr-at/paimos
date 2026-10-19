@@ -43,7 +43,7 @@ const props = defineProps<{
   // The person's default of the shown switch (List, Outline, Graph or Entries, Graph), for its pin (AEON-1453).
   defaultView?: string | null
   // The table's columns for the Display menu's picker.
-  columns?: { order: ColumnId[]; visible: ColumnId[]; customised: boolean; notes?: Partial<Record<string, string>> } | null
+  columns?: { order: ColumnId[]; visible: ColumnId[]; customised: boolean; notes?: Partial<Record<string, string>>; hidden?: ColumnId[] } | null
   facetLoading?: boolean
   settingsTarget?: string
   projectHeader?: boolean

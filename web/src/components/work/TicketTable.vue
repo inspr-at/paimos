@@ -5,12 +5,12 @@ import { vClipTip } from '../../directives/clipTip'
 import { formatEstimate, estimateDisplay } from '../../lib/estimates'
 import { computed, getCurrentInstance, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import type { ListItem } from '../../lib/api'
-import { COLUMN_BY_ID, costUnitLabel, layoutWidths, loadedFitWidth, releaseLabel, tagList, titleRoom, visibleColumns, widthOf, withHostColumns, type ColumnDef, type ColumnId, type ListPrefs, type TagRef } from '../../lib/columns'
+import { COLUMN_BY_ID, costUnitLabel, layoutWidths, loadedFitWidth, releaseLabel, tagList, titleRoom, visibleColumns, withHostColumns, type ColumnDef, type ColumnId, type ListPrefs, type TagRef } from '../../lib/columns'
 import { releaseCell, type NativeReleaseView } from '../../lib/releaseMembership'
 import { agentKey, ticketWorkers, withServerLead, type LiveAgent } from '../../lib/liveAgents'
 import { useLiveAgents } from '../../stores/liveAgents'
 import { groupOrderTip, rowOrderTip, selectLoadedGroup, type GroupBy, type RowGroup, type EpicRef, type TicketRow } from '../../lib/ticketList'
-import { GROUP_COLUMN, groupCellText, groupTipTitle, peopleText, phoneFacts, rowCount } from '../../lib/groupFigures'
+import { GROUP_COLUMN, groupCellText, groupTipTitle, MIX_PRIORITY_MIN, peopleText, phoneFacts, priorityMix, rowCount } from '../../lib/groupFigures'
 import type { GroupFigureState } from '../../lib/useGroupFigures'
 import type { OutlineEntry, TreeMeta } from '../../lib/outline'
 import { isWorkParent, workIcon, workLabel } from '../../lib/workVocabulary'
@@ -133,8 +133,8 @@ const emit = defineEmits<{
   toggleNoEpic: []
   moreChildren: [parentId: string]
   move: [row: ListItem, epic: ListItem | null]
-  // Which columns show now (the Display menu lists them), and resized widths to save.
-  layout: [visible: ColumnId[], customised: boolean]
+  // Which columns show now (the Display menu lists them), the chosen ones this width leaves out, and widths to save.
+  layout: [visible: ColumnId[], customised: boolean, hidden: ColumnId[]]
   widths: [widths: Partial<Record<string, number>>]
   // toggle: one row on or off; range: from the last row chosen to this one.
   select: [row: ListItem, mode: 'toggle' | 'range']
@@ -270,7 +270,8 @@ const mac = /Mac|iPhone|iPad/.test(navigator.platform || navigator.userAgent)
 // pointer the three controls show in their slots instead. Only visibility changes; nothing moves.
 const foldSlot = computed(() => grouped.value && !!instance?.vnode.props?.onAllGroups)
 const anyOpen = computed(() => props.groups.some(group => !props.collapsed.has(group.key)))
-const foldLabel = computed(() => german.value ? (anyOpen.value ? 'Alle Gruppen zuklappen' : 'Alle Gruppen aufklappen') : (anyOpen.value ? 'Collapse all groups' : 'Expand all groups'))
+// One language with the rest of the list's copy (AEON-1470 F3).
+const foldLabel = computed(() => anyOpen.value ? 'Collapse all groups' : 'Expand all groups')
 // The slots' left edges in the cell: the chevron and checkbox right above the group rows' own (8 px in, 8 px apart), or
 // without groups the checkbox above the rows' checkboxes; the sort control follows. 24 px each, 44 px on a coarse pointer.
 const keySlots = computed(() => {
@@ -288,7 +289,7 @@ const GROUP_TIP = 'grp:'
 const figuresRow = computed(() => !!props.groupFigures && grouped.value && !phone.value)
 const progressLive = (row: ListItem) => { const progress = progressOf(row); return !!progress && !progress.stale && workersOf(row).length > 0 }
 const groupFacts = computed(() => {
-  const out = new Map<string, { cells: Record<string, string>; agents: LiveAgent[]; moreAgents: number; working: string; people: string; live: string; stale: string; phone: [string, string][] }>()
+  const out = new Map<string, { cells: Record<string, string>; mix: ReturnType<typeof priorityMix>; agents: LiveAgent[]; moreAgents: number; working: string; people: string; live: string; stale: string; phone: [string, string][] }>()
   if (!props.groupFigures || !grouped.value) return out
   const ctx = { now: props.now, grouped: groupedColumn.value, modelName: groupModelName.value }
   for (const group of props.groups) {
@@ -305,7 +306,7 @@ const groupFacts = computed(() => {
     const working = workingRows.length ? rowCount(workingRows.length, complete) : ''
     const stale = staleRows ? rowCount(staleRows, complete) : ''
     out.set(group.key, {
-      cells, agents: [...agents.values()].slice(0, 3), moreAgents: Math.max(0, agents.size - 3), working,
+      cells, mix: groupedColumn.value === 'priority' || !has('priority') ? null : priorityMix(figures), agents: [...agents.values()].slice(0, 3), moreAgents: Math.max(0, agents.size - 3), working,
       people: working ? '' : peopleText(figures), live: liveRows ? `${rowCount(liveRows, complete)} live` : '', stale,
       phone: phoneFacts({ working, stale, estimate: groupCellText('estimate', figures, { ...ctx, grouped: null }) }),
     })
@@ -320,8 +321,31 @@ const tipGroup = computed(() => {
   const group = props.groups.find(entry => entry.key === groupKey), column = columns.value.find(entry => entry.id === columnId)
   if (!group || !column) return null
   const state = props.groupFigures.get(group.key)
-  return { group, column, figures: state?.figures ?? null, failed: state?.failed ?? null, title: groupTipTitle(groupName(group), group.total) }
+  // A compact priority mix names the whole mix in its tip.
+  const mix = column.id === 'priority' ? groupFacts.value.get(group.key)?.mix : null
+  return { group, column, figures: state?.figures ?? null, failed: state?.failed ?? null, title: groupTipTitle(groupName(group), group.total), summary: mix && mixText(mix) !== mix.full ? mix.full : undefined }
 })
+// ---------- The group rows' priority mix (AEON-1470 F1): the full mix when it fits the cell, else "3 high +3" ----------
+// A hidden meter in the cells' own type measures each mix once (again after the web font lands). The room comes from
+// the column's width, so hover, tips, live updates and folding never switch the form; the cell never ellipsizes.
+const mixMeter = ref<HTMLElement>()
+const fontEpoch = ref(0)
+const mixWidths = new Map<string, number>()
+function mixWidth(text: string): number {
+  void fontEpoch.value
+  const meter = mixMeter.value
+  if (!meter) return 0
+  let measured = mixWidths.get(text)
+  if (measured === undefined) {
+    meter.textContent = text
+    measured = meter.getBoundingClientRect().width
+    mixWidths.set(text, measured)
+  }
+  return measured
+}
+// The cell's padding is 12 px on each side (.group-row td.group-fig).
+const mixRoom = computed(() => Math.max(0, (colWidth('priority') ?? 0) - 24))
+function mixText(mix: NonNullable<ReturnType<typeof priorityMix>>) { return Math.ceil(mixWidth(mix.full)) <= mixRoom.value ? mix.full : mix.compact }
 const tipWide = (id: string, figures: ProjectFigures | null) => { const def = figureColumn(id, figures); return def ? def.wide ? 'wide' : 'fig' : 'auto' }
 function groupCellEnter(event: PointerEvent, group: RowGroup, id: string) {
   if (event.pointerType === 'mouse' && figureColumn(id, props.groupFigures?.get(group.key)?.figures ?? null)) hoverFigureTip(event.currentTarget as HTMLElement, `${GROUP_TIP}${group.key}\u0000${id}`, 'above', GROUP_TIP)
@@ -336,22 +360,35 @@ function groupToggleClick(event: MouseEvent, key: string) {
   void toggleGroup(key)
 }
 
-const layout = computed(() => visibleColumns(width.value, { phone: phone.value, present: present.value, prefs: props.prefs, costAllowed: props.costAllowed ?? false }))
-const columns = computed(() => withHostColumns(layout.value.columns, props.extraColumns).map(def => ({
-  ...def,
-  // Only the default title renders the person-waiting slot (16px plus its 8px
-  // gap). Custom titles keep their own room, without clipping host actions.
-  // Also reserve the extra touch arrow/action reach (26px + 40px).
-  // Saved tablet layouts can scroll inside the card.
-  min: def.id === 'key' ? Math.max(def.min, keySlots.value.min) : def.min + (def.id === 'title' ? (instance?.slots['cell-title'] ? 0 : 24) + (coarse.value && !phone.value ? 66 : 0) : 0),
-  field: def.sort, cls: CLS[def.id as ColumnId] ?? 'c-host',
-})))
+// The grid's own minimum for a column. Key holds the first cell's slots. Only the default title renders the
+// person-waiting slot (16px plus its 8px gap); custom titles keep their own room, without clipping host actions.
+// Title also reserves the extra touch arrow/action reach (26px + 40px). Group summaries keep room for the compact
+// priority mix (AEON-1470).
+function gridMin(def: ColumnDef): number {
+  if (def.id === 'key') return Math.max(def.min, keySlots.value.min)
+  if (def.id === 'title') return def.min + (instance?.slots['cell-title'] ? 0 : 24) + (coarse.value && !phone.value ? 66 : 0)
+  if (def.id === 'priority' && figuresRow.value) return Math.max(def.min, MIX_PRIORITY_MIN)
+  return def.min
+}
+// Title keeps its minimum (AEON-1470): widths beside it give way first (layoutWidths), then whole columns
+// (visibleColumns), decided only by the table's width, the chosen columns, their minimums and the sort. The columns
+// left out last time come back with 16 px to spare, so the set does not flap while the window is resized.
+let droppedBefore: ColumnId[] = []
+const layout = computed(() => {
+  const mins: Partial<Record<string, number>> = {}
+  for (const def of COLUMN_BY_ID.values()) if (gridMin(def) !== def.min) mins[def.id] = gridMin(def)
+  const reserve = withHostColumns([], props.extraColumns).reduce((sum, def) => sum + def.min, 0)
+  const out = visibleColumns(width.value, { phone: phone.value, present: present.value, prefs: props.prefs, costAllowed: props.costAllowed ?? false, fit: { mins, reserve, sorted: props.sort.map(key => key.field), previous: droppedBefore } })
+  droppedBefore = out.dropped
+  return out
+})
+const columns = computed(() => withHostColumns(layout.value.columns, props.extraColumns).map(def => ({ ...def, min: gridMin(def), field: def.sort, cls: CLS[def.id as ColumnId] ?? 'c-host' })))
 const definitions = computed<ReadonlyMap<string, ColumnDef>>(() => new Map<string, ColumnDef>([...COLUMN_BY_ID, ...columns.value.map(def => [def.id, def] as const)]))
 const hostIds = computed(() => new Set(columns.value.filter(column => !COLUMN_BY_ID.has(column.id as ColumnId)).map(column => column.id)))
 const customised = computed(() => layout.value.customised || !!hostIds.value.size)
 const ids = computed(() => columns.value.map(column => column.id))
 const has = (id: string) => ids.value.includes(id)
-watch(ids, value => emit('layout', value.filter((id): id is ColumnId => COLUMN_BY_ID.has(id as ColumnId)), layout.value.customised), { immediate: true })
+watch([ids, () => layout.value.dropped.join(',')], ([value]) => emit('layout', value.filter((id): id is ColumnId => COLUMN_BY_ID.has(id as ColumnId)), layout.value.customised, layout.value.dropped), { immediate: true })
 // Live widths while dragging a column edge; saved when the drag ends.
 const measuring = ref(false)
 const autoWidths = ref<Partial<Record<string, number>>>({})
@@ -412,15 +449,11 @@ const dragWidths = ref<Partial<Record<string, number>>>({})
 // on wide tables, where the spare width widens the text columns instead). Dragging
 // Title's edge gives it a width of its own. The columns beside it move within their
 // min and max, so a fixed column never collapses.
-// Content fits can give room back before a custom table needs to scroll.
-// Budget them at the card width first; only saved/dragged widths and column
-// minima may force a wider table. Keep the measured key whole, as in normal
-// lists. Actions keep their minimum while the other text columns give way.
-const fittingWidths = computed(() => layoutWidths(ids.value, width.value, props.prefs, {
-  key: Number.isFinite(props.prefs?.widths?.key) ? widthOf('key', props.prefs, definitions.value) : autoWidths.value.key,
-  ...dragWidths.value,
-}, definitions.value, autoWidths.value))
-const layoutWidth = computed(() => customised.value ? Math.max(width.value, ids.value.reduce((sum, id) => sum + (id === 'title' ? definitions.value.get(id)!.min : fittingWidths.value[id] ?? widthOf(id, props.prefs, definitions.value)), 0)) : width.value)
+// Saved and dragged widths give way before Title goes under its minimum. Only when
+// even the columns' minimums do not fit (a narrow docked table with columns that
+// never leave) does the table grow past the card.
+const minTotal = computed(() => columns.value.reduce((sum, column) => sum + column.min, 0))
+const layoutWidth = computed(() => phone.value ? width.value : Math.max(width.value, minTotal.value))
 const widths = computed(() => layoutWidths(ids.value, layoutWidth.value, props.prefs, dragWidths.value, definitions.value, autoWidths.value))
 function colWidth(id: string) { return id === 'title' ? null : widths.value[id] ?? null }
 function nativeRelease(row: ListItem) {
@@ -431,7 +464,17 @@ const shownWidth = (id: string) => id === 'title' ? titleWidth.value : colWidth(
 function bounds(id: string) {
   if (id === 'title') return titleRoom(ids.value, layoutWidth.value, props.prefs, dragWidths.value, definitions.value)
   const def = definitions.value.get(id)!
-  return { min: def.min, max: def.max }
+  return { min: def.min, max: Math.max(def.min, Math.min(def.max, shownWidth(id) + growRoom(id))) }
+}
+// A column widens into Title's room above its minimum and the room of columns nobody sized. A drag never narrows
+// the other saved widths: they give way only to keep Title's minimum.
+function growRoom(id: string) {
+  let room = titleWidth.value - definitions.value.get('title')!.min
+  for (const other of ids.value) {
+    if (other === 'title' || other === id || dragWidths.value[other] !== undefined || Number.isFinite(props.prefs?.widths?.[other])) continue
+    room += Math.max(0, shownWidth(other) - definitions.value.get(other)!.min)
+  }
+  return Math.max(0, room)
 }
 function clampColumn(id: string, value: number) {
   const range = bounds(id)
@@ -449,6 +492,7 @@ onMounted(() => {
     fontRefitPending = true
     void document.fonts.ready.then(() => {
       if (!columnsAlive) return
+      mixWidths.clear(); fontEpoch.value++
       columnsSettled.value = false
       fontRefitPending = false
       fittedColumns.clear()
@@ -833,7 +877,7 @@ defineExpose({
 
 <template>
   <div ref="card" class="table-card" :data-columns-settled="columnsSettled ? '1' : '0'" :class="[density, { selectable, selecting, customised, overflowing: !phone && layoutWidth > width + 1 }]">
-    <table :style="!phone && customised ? { minWidth: `${layoutWidth}px` } : undefined" ref="grid" class="tickets" :class="{ outline: !!outline }" :role="outline ? 'treegrid' : 'grid'" :aria-label="label ?? (outline ? 'Ticket outline' : 'Tickets')" :aria-busy="loading" tabindex="0" :aria-activedescendant="cursorId ? `row-${cursorId}` : undefined" @focus="emit('gridFocus')">
+    <table :style="!phone && layoutWidth > width ? { minWidth: `${layoutWidth}px` } : undefined" ref="grid" class="tickets" :class="{ outline: !!outline }" :role="outline ? 'treegrid' : 'grid'" :aria-label="label ?? (outline ? 'Ticket outline' : 'Tickets')" :aria-busy="loading" tabindex="0" :aria-activedescendant="cursorId ? `row-${cursorId}` : undefined" @focus="emit('gridFocus')">
       <colgroup>
         <col v-for="column in columns" :key="column.id" :class="column.cls" :style="colWidth(column.id) ? { width: `${colWidth(column.id)}px` } : undefined" />
       </colgroup>
@@ -1003,6 +1047,7 @@ defineExpose({
                   </template>
                   <span v-else-if="column.id === 'assignee'" class="gf-text">{{ groupFacts.get(entry.group.key)?.people }}</span>
                   <span v-else-if="column.id === 'progress'" class="gf-text">{{ groupFacts.get(entry.group.key)?.live }}</span>
+                  <span v-else-if="column.id === 'priority' && groupFacts.get(entry.group.key)?.mix" class="gf-text gf-mix">{{ mixText(groupFacts.get(entry.group.key)!.mix!) }}</span>
                   <span v-else class="gf-text">{{ groupFacts.get(entry.group.key)?.cells[column.id] }}</span>
                 </div>
               </td>
@@ -1232,6 +1277,7 @@ defineExpose({
         </template>
       </tbody>
     </table>
+    <span v-if="figuresRow" ref="mixMeter" class="gf-meter" aria-hidden="true" />
     <FigureTip v-if="tipColumn && columnFigures" :width="tipWidth">
       <ColumnFigureTip
         :column-id="tipColumn.id" :label="tipColumn.label" :sortable="(!!tipColumn.field || groupsFlip(tipColumn.id)) && !sortDisabled" :hint="tipHint" :figures="columnFigures.figures" :failed="columnFigures.failed"
@@ -1240,7 +1286,7 @@ defineExpose({
     </FigureTip>
     <FigureTip v-else-if="tipGroup" :width="tipWide(tipGroup.column.id, tipGroup.figures)">
       <ColumnFigureTip
-        :column-id="tipGroup.column.id" :label="tipGroup.column.label" :sortable="false" :title="tipGroup.title" :figures="tipGroup.figures" :failed="tipGroup.failed"
+        :column-id="tipGroup.column.id" :label="tipGroup.column.label" :sortable="false" :title="tipGroup.title" :summary="tipGroup.summary" :figures="tipGroup.figures" :failed="tipGroup.failed"
         :hidden-rows="columnFigures?.hiddenRows ?? false" :now="now" :model-name="groupModelName"
       />
     </FigureTip>
@@ -1525,6 +1571,8 @@ td.c-title { position: relative; overflow: hidden; }
 
 .status-btn { display: inline-flex; align-items: center; gap: 8px; max-width: 100%; height: 26px; margin-left: -8px; padding: 0 8px; border: 0; border-radius: 999px; background: transparent; color: var(--ink); font-size: 13px; line-height: 18px; white-space: nowrap; }
 .status-btn span { overflow: hidden; text-overflow: ellipsis; }
+/* A narrow status column ellipsizes the label, so the stale hint stays inside the cell (AEON-1470 F2). */
+.c-status .status-btn { min-width: 0; }
 .status-btn .q-pos { flex: none; margin-left: -3px; }
 .status-btn:hover, .status-btn[aria-expanded="true"] { background: var(--chip-bg); box-shadow: inset 0 0 0 1px var(--chip-line); }
 .status-btn:active { background: var(--row-selected); }
@@ -1594,6 +1642,8 @@ button.release-chip:focus-visible { box-shadow: var(--focus-ring); }
 .gf-cell { display: flex; align-items: center; gap: 6px; min-width: 0; height: 35px; white-space: nowrap; color: var(--ink-3); font-size: 12px; line-height: 16px; font-variant-numeric: tabular-nums; }
 .group-fig.end .gf-cell { justify-content: flex-end; }
 .gf-text { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+/* Measures the priority mix in the cells' own type, out of the layout (AEON-1470). */
+.gf-meter { position: absolute; top: 0; left: 0; visibility: hidden; pointer-events: none; white-space: nowrap; font-size: 12px; line-height: 16px; font-variant-numeric: tabular-nums; }
 @media (hover: hover) { .group-row:hover .gf-cell, .group-row:hover .group-stale { color: var(--ink-2); } }
 .gf-agents { display: inline-flex; align-items: center; gap: 2px; flex: none; }
 .gf-more { margin-left: 2px; font: 500 11px/1 var(--mono); }

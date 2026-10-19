@@ -2,7 +2,7 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
-import { automaticColumns, COLUMN_BY_ID, layoutWidths, loadedFitWidth, orderOf, releaseLabel, tagList, TITLE_TARGET, titleRoom, visibleColumns, widthOf, withHostColumns, type ColumnDef, type ColumnId } from '../src/lib/columns.ts'
+import { automaticColumns, COLUMN_BY_ID, GIVE_WAY, layoutWidths, loadedFitWidth, orderOf, releaseLabel, RETURN_ROOM, tagList, TITLE_TARGET, titleRoom, visibleColumns, widthOf, withHostColumns, type ColumnDef, type ColumnFit, type ColumnId, type ListPrefs } from '../src/lib/columns.ts'
 import { groupRows, selectLoadedGroup, filtersFromQuery, filtersToQuery, type TicketRow } from '../src/lib/ticketList.ts'
 import { byPosition, positionBetween, positionOf, type Attachment } from '../src/lib/attachments.ts'
 
@@ -231,9 +231,10 @@ test('AEON-913: automatic fits give width back until Title keeps its minimum', (
   assert.equal(saved.updated, 176)
   assert.equal(saved.key, 200)
   assert.equal(titleOf(saved), titleMin)
+  // AEON-1470: a dragged width gives way too once the fits are at their minimum; Title keeps its own.
   const dragged = layoutWidths(['key', 'title', 'status', 'assignee'], table, null, { assignee: 800 }, COLUMN_BY_ID, { key: 84, status: 84 })
-  assert.deepEqual(dragged, { key: 84, status: 84, assignee: 800 })
-  assert.equal(titleOf(dragged), 32)
+  assert.deepEqual(dragged, { key: 84, status: 84, assignee: 592 })
+  assert.equal(titleOf(dragged), titleMin)
 })
 
 // The model column's designed 176px slot already holds its marks and name.
@@ -265,4 +266,105 @@ test('AEON-913: group selection caps loaded rows at 100 and preserves other grou
   assert.equal(next.has('row-99'), false)
   assert.deepEqual([...selectLoadedGroup(group, next, false)], ['other'])
   assert.deepEqual([...selected], ['other'])
+})
+
+// ---------- AEON-1470: Title keeps room at every desktop width ----------
+// Risk: Title squeezed under its 240 px minimum by saved, dragged or fitted widths or by too many columns; columns that
+// leave in the wrong order, take the sorted column with them, go below their minimum, flap at a threshold, or change
+// with anything but the width, the chosen columns and the sort. The ticket grid's own minimums: the first cell's slots
+// (108 px when grouped and selectable) and Title's person-waiting slot (240 + 24 px).
+const GRID_MINS = { key: 108, title: 264 }
+const GRID_DEFS = new Map<string, ColumnDef>([...COLUMN_BY_ID, ['key', { ...COLUMN_BY_ID.get('key')!, min: GRID_MINS.key }], ['title', { ...COLUMN_BY_ID.get('title')!, min: GRID_MINS.title }]])
+const SET_1388: ColumnId[] = ['status', 'priority', 'assignee', 'estimate', 'updated']
+const ALL: ColumnId[] = COLUMN_BY_ID.size ? [...COLUMN_BY_ID.keys()].filter(id => id !== 'key' && id !== 'title') : []
+const WIDE_SAVED = { status: 260, priority: 200, assignee: 320, estimate: 180, updated: 200, key: 300 }
+// The grid at one table width: which columns show, which left, every width, and Title's (the rest).
+function grid(width: number, visible: ColumnId[], options: { widths?: ListPrefs['widths']; fits?: Partial<Record<string, number>>; fit?: ColumnFit } = {}) {
+  const prefs: ListPrefs = { visible, widths: options.widths }
+  const out = visibleColumns(width, { phone: false, prefs, fit: { mins: GRID_MINS, ...options.fit } })
+  const ids = out.columns.map(column => column.id)
+  const widths = layoutWidths(ids, width, prefs, {}, GRID_DEFS, options.fits ?? {})
+  return { ids, dropped: out.dropped, widths, title: width - Object.values(widths).reduce<number>((sum, value) => sum + (value ?? 0), 0) }
+}
+
+test('AEON-1470 Title is never under 240 px at 760–1440 px, for the 1388 set, every column and wide saved widths', () => {
+  // Content fits as wide as their columns allow: the worst a loaded list can measure.
+  const fits = Object.fromEntries(ALL.map(id => [id, COLUMN_BY_ID.get(id)!.max]))
+  for (const width of [721, 760, 900, 1000, 1280, 1440]) {
+    for (const [name, visible, options] of [['1388 set', SET_1388, { fits }], ['all columns', ALL, { fits }], ['wide saved widths', SET_1388, { widths: WIDE_SAVED }], ['all, saved', ALL, { widths: WIDE_SAVED, fits }]] as const) {
+      const at = grid(width, [...visible], options)
+      assert.ok(at.title >= 240 && at.title >= GRID_MINS.title, `${name} at ${width}: title ${at.title}`)
+      // No column below its minimum, and the grid fills the table exactly.
+      for (const [id, value] of Object.entries(at.widths)) assert.ok(value! >= GRID_DEFS.get(id)!.min, `${name} at ${width}: ${id} ${value}`)
+      for (const id of ['key', 'title', 'status', 'priority'] as const) assert.ok(at.ids.includes(id), `${name} at ${width} keeps ${id}`)
+    }
+  }
+  // The saved widths themselves stay as they were; only the layout narrows them.
+  assert.deepEqual(WIDE_SAVED, { status: 260, priority: 200, assignee: 320, estimate: 180, updated: 200, key: 300 })
+  // 1440 px holds the 1388 set at its saved widths with room to spare: nothing gives way.
+  const roomy = grid(1440, SET_1388, { widths: { assignee: 300 } })
+  assert.equal(roomy.widths.assignee, 300)
+  assert.deepEqual(roomy.dropped, [])
+})
+
+test('AEON-1470 saved widths shrink in proportion, after the fits and never below their minimum', () => {
+  // 1000 px, 1388 set: fits give way first (nearest Title first), saved widths keep theirs while that is enough.
+  const mixed = grid(1000, SET_1388, { widths: { assignee: 300 }, fits: { key: 118, status: 138, priority: 112, estimate: 96, updated: 104 } })
+  assert.equal(mixed.widths.assignee, 300)
+  assert.equal(mixed.title, GRID_MINS.title)
+  // Every width saved wide: each gives up the same share of its room above its minimum.
+  const saved = grid(1000, SET_1388, { widths: WIDE_SAVED })
+  const share = (id: keyof typeof WIDE_SAVED) => (WIDE_SAVED[id] - saved.widths[id]!) / (WIDE_SAVED[id] - GRID_DEFS.get(id)!.min)
+  for (const id of ['status', 'priority', 'assignee', 'estimate', 'updated', 'key'] as const) assert.ok(Math.abs(share(id) - share('status')) < .02, `${id} ${share(id)}`)
+  assert.ok(saved.title >= GRID_MINS.title && saved.title <= GRID_MINS.title + 6, `title ${saved.title}`)
+})
+
+test('AEON-1470 whole columns leave in the give-way order; Key, Title, Status, Priority and the sorted column stay', () => {
+  assert.deepEqual(GIVE_WAY, ['updated', 'created', 'estimate', 'tokens', 'list_cost', 'paid', 'suggested', 'model', 'eta', 'progress', 'tags', 'cost', 'release', 'epic', 'assignee'])
+  // Every column chosen, the table narrowing a pixel at a time: each step adds the next column of the order, never another.
+  const left: ColumnId[] = []
+  for (let width = 2600; width >= 721; width--) {
+    const { dropped } = grid(width, ALL)
+    if (dropped.length !== left.length) { assert.deepEqual(dropped.slice(0, left.length), left, `at ${width}`); left.splice(0, left.length, ...dropped) }
+  }
+  assert.deepEqual(left, GIVE_WAY.filter(id => id !== 'paid').slice(0, left.length))
+  assert.ok(left.length >= 12, `left ${left.join()}`)
+  // 1000 px: the 1388 set fits at its minimums; every column leaves updated, created, estimate … until the rest fits.
+  assert.deepEqual(grid(1000, SET_1388).dropped, [])
+  assert.deepEqual(grid(1000, ALL).dropped, ['updated', 'created', 'estimate', 'tokens', 'list_cost', 'suggested', 'model', 'eta', 'progress', 'tags'])
+  // Sorted by Updated (also as a second key): Updated stays and the next one in the order leaves instead.
+  const sorted = grid(1000, ALL, { fit: { sorted: ['updated_at'] } })
+  assert.ok(sorted.ids.includes('updated'))
+  assert.deepEqual(sorted.dropped, ['created', 'estimate', 'tokens', 'list_cost', 'suggested', 'model', 'eta', 'progress', 'tags'])
+  assert.deepEqual(grid(1000, ALL, { fit: { sorted: ['state', 'updated_at'] } }).dropped, sorted.dropped)
+  assert.ok(grid(1000, SET_1388, { fit: { sorted: ['updated_at'] } }).ids.includes('updated'))
+  // A host column never leaves; its minimum is taken from the room.
+  assert.deepEqual(grid(1000, SET_1388, { fit: { reserve: 120 } }).dropped, [])
+  assert.deepEqual(grid(880, SET_1388, { fit: { reserve: 120 } }).dropped, ['updated'])
+})
+
+test('AEON-1470 the set depends only on width, chosen columns, minimums and sort; a column that left returns with 16 px to spare', () => {
+  // Widths never decide it: saved, dragged or fitted widths leave the same set.
+  for (const width of [760, 1000, 1280]) {
+    const plain = grid(width, ALL).ids
+    assert.deepEqual(grid(width, ALL, { widths: WIDE_SAVED }).ids, plain)
+    assert.deepEqual(grid(width, ALL, { fits: { assignee: 320, epic: 480, status: 260 } }).ids, plain)
+  }
+  // The 1388 set needs 108 + 264 + 84 + 72 + 96 + 72 + 80 = 776 px at its minimums.
+  const need = 776
+  assert.equal(RETURN_ROOM, 16)
+  assert.deepEqual(grid(need, SET_1388).dropped, [])
+  const out = grid(need - 1, SET_1388)
+  assert.deepEqual(out.dropped, ['updated'])
+  // Left out: ±8 px around that threshold keeps it out.
+  for (const width of [need - 1 - 8, need - 1 + 8]) assert.deepEqual(grid(width, SET_1388, { fit: { previous: out.dropped } }).dropped, ['updated'], `${width}`)
+  // It returns once 16 px are spare, and ±8 px around that threshold keeps it in.
+  const back = need + RETURN_ROOM
+  assert.deepEqual(grid(back - 1, SET_1388, { fit: { previous: out.dropped } }).dropped, ['updated'])
+  assert.deepEqual(grid(back, SET_1388, { fit: { previous: out.dropped } }).dropped, [])
+  for (const width of [back - 8, back + 8]) assert.deepEqual(grid(width, SET_1388, { fit: { previous: [] } }).dropped, [], `${width}`)
+  // Several columns come back one at a time as the width allows.
+  const narrow = grid(721, ALL)
+  const wider = grid(1000, ALL, { fit: { previous: narrow.dropped } })
+  assert.ok(wider.dropped.length < narrow.dropped.length && narrow.dropped.slice(0, wider.dropped.length).join() === wider.dropped.join())
 })
