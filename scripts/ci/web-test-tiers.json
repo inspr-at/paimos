@@ -6122,9 +6122,9 @@
     ,
     {"kind":"browser","file":"tests/aeon-1279-touch-scroll.spec.ts","name":"chat 390: a post that arrives while reading up the thread never moves the posts on screen or the sheet","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
-    {"kind":"browser","file":"tests/aeon-1279-touch-scroll.spec.ts","name":"dark 390: the footer folds away over the page; the page's scroller never changes size while scrolling","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    {"kind":"browser","file":"tests/aeon-1279-touch-scroll.spec.ts","name":"dark 390: no footer bar; the page's scroller never changes size while scrolling, and the last row reaches the foot","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
-    {"kind":"browser","file":"tests/aeon-1279-touch-scroll.spec.ts","name":"light 390: the footer folds away over the page; the page's scroller never changes size while scrolling","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    {"kind":"browser","file":"tests/aeon-1279-touch-scroll.spec.ts","name":"light 390: no footer bar; the page's scroller never changes size while scrolling, and the last row reaches the foot","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
     {"kind":"browser","file":"tests/aeon-1279-touch-scroll.spec.ts","name":"ticket list 390: a swipe never resizes the page; a ticket closed elsewhere leaves without moving the rows on screen","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
@@ -6164,11 +6164,11 @@
     ,
     {"kind":"browser","file":"tests/aeon-1286-phone-chrome.spec.ts","name":"AEON-1286 short landscape 844x340 dark: full-screen sheet, one head line, thread at least 60 %","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
-    {"kind":"browser","file":"tests/aeon-1286-phone-chrome.spec.ts","name":"AEON-1286 short landscape 844x340 dark: the footer folds away while reading the lists","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    {"kind":"browser","file":"tests/aeon-1286-phone-chrome.spec.ts","name":"AEON-1286 short landscape 844x340 dark: no footer bar over the lists; the scroller keeps its size while reading","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
     {"kind":"browser","file":"tests/aeon-1286-phone-chrome.spec.ts","name":"AEON-1286 short landscape 844x340 light: full-screen sheet, one head line, thread at least 60 %","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
-    {"kind":"browser","file":"tests/aeon-1286-phone-chrome.spec.ts","name":"AEON-1286 short landscape 844x340 light: the footer folds away while reading the lists","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    {"kind":"browser","file":"tests/aeon-1286-phone-chrome.spec.ts","name":"AEON-1286 short landscape 844x340 light: no footer bar over the lists; the scroller keeps its size while reading","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
     {"kind":"browser","file":"tests/aeon-1339-desk-polish.spec.ts","name":"Decide is never a silent no-op: it says why beside the button and moves focus to what is missing","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
@@ -9084,25 +9084,25 @@
     ,
     {"kind":"browser","file":"tests/first-run.spec.ts","name":"pairing retries only account approval after a partial save","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
-    {"kind":"browser","file":"tests/footer-release-pill.spec.ts","name":"flow is absent by default and a long codename cannot push the version off a phone","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    {"kind":"browser","file":"tests/footer-release-pill.spec.ts","name":"flow is absent by default and a long codename cannot push the version off the narrowest footer","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
     ,
     {"kind":"browser","file":"tests/footer-release-pill.spec.ts","name":"long names ellipsize at their cap with uncut descenders at 1440px","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
     ,
-    {"kind":"browser","file":"tests/footer-release-pill.spec.ts","name":"long names ellipsize at their cap with uncut descenders at 390px","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    {"kind":"browser","file":"tests/footer-release-pill.spec.ts","name":"long names ellipsize at their cap with uncut descenders at 720px","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    ,
+    {"kind":"browser","file":"tests/footer-release-pill.spec.ts","name":"new count takes room only while present at 1024","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
     ,
     {"kind":"browser","file":"tests/footer-release-pill.spec.ts","name":"new count takes room only while present at 1440","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
     ,
-    {"kind":"browser","file":"tests/footer-release-pill.spec.ts","name":"new count takes room only while present at 320","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
-    ,
-    {"kind":"browser","file":"tests/footer-release-pill.spec.ts","name":"new count takes room only while present at 390","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    {"kind":"browser","file":"tests/footer-release-pill.spec.ts","name":"new count takes room only while present at 720","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
     ,
     {"kind":"browser","file":"tests/footer-release-pill.spec.ts","name":"release pill and product mark at 1440 in dark","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
     ,
     {"kind":"browser","file":"tests/footer-release-pill.spec.ts","name":"release pill and product mark at 1440 in light","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
     ,
-    {"kind":"browser","file":"tests/footer-release-pill.spec.ts","name":"release pill and product mark at 390 in dark","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    {"kind":"browser","file":"tests/footer-release-pill.spec.ts","name":"release pill and product mark at 720 in dark","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
     ,
-    {"kind":"browser","file":"tests/footer-release-pill.spec.ts","name":"release pill and product mark at 390 in light","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    {"kind":"browser","file":"tests/footer-release-pill.spec.ts","name":"release pill and product mark at 720 in light","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
     ,
     {"kind":"browser","file":"tests/footer-release-pill.spec.ts","name":"release text fits and controls never move: 1440px, 100%, dark","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
     ,
@@ -9116,43 +9116,43 @@
     ,
     {"kind":"browser","file":"tests/footer-release-pill.spec.ts","name":"release text fits and controls never move: 1440px, 150%, light","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
     ,
-    {"kind":"browser","file":"tests/footer-release-pill.spec.ts","name":"release text fits and controls never move: 390px, 100%, dark","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    {"kind":"browser","file":"tests/footer-release-pill.spec.ts","name":"release text fits and controls never move: 720px, 100%, dark","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
     ,
-    {"kind":"browser","file":"tests/footer-release-pill.spec.ts","name":"release text fits and controls never move: 390px, 100%, light","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    {"kind":"browser","file":"tests/footer-release-pill.spec.ts","name":"release text fits and controls never move: 720px, 100%, light","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
     ,
-    {"kind":"browser","file":"tests/footer-release-pill.spec.ts","name":"release text fits and controls never move: 390px, 125%, dark","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    {"kind":"browser","file":"tests/footer-release-pill.spec.ts","name":"release text fits and controls never move: 720px, 125%, dark","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
     ,
-    {"kind":"browser","file":"tests/footer-release-pill.spec.ts","name":"release text fits and controls never move: 390px, 125%, light","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    {"kind":"browser","file":"tests/footer-release-pill.spec.ts","name":"release text fits and controls never move: 720px, 125%, light","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
     ,
-    {"kind":"browser","file":"tests/footer-release-pill.spec.ts","name":"release text fits and controls never move: 390px, 150%, dark","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    {"kind":"browser","file":"tests/footer-release-pill.spec.ts","name":"release text fits and controls never move: 720px, 150%, dark","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
     ,
-    {"kind":"browser","file":"tests/footer-release-pill.spec.ts","name":"release text fits and controls never move: 390px, 150%, light","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    {"kind":"browser","file":"tests/footer-release-pill.spec.ts","name":"release text fits and controls never move: 720px, 150%, light","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
     ,
     {"kind":"browser","file":"tests/footer-release-pill.spec.ts","name":"short pointer visits and touch do not open the hover card; keyboard focus is immediate","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    ,
+    {"kind":"browser","file":"tests/footer-release-pill.spec.ts","name":"signed-in loading keeps the release usable and the flow clear at 1024, failure","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    ,
+    {"kind":"browser","file":"tests/footer-release-pill.spec.ts","name":"signed-in loading keeps the release usable and the flow clear at 1024, success","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
     ,
     {"kind":"browser","file":"tests/footer-release-pill.spec.ts","name":"signed-in loading keeps the release usable and the flow clear at 1440, failure","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
     ,
     {"kind":"browser","file":"tests/footer-release-pill.spec.ts","name":"signed-in loading keeps the release usable and the flow clear at 1440, success","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
     ,
-    {"kind":"browser","file":"tests/footer-release-pill.spec.ts","name":"signed-in loading keeps the release usable and the flow clear at 320, failure","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    {"kind":"browser","file":"tests/footer-release-pill.spec.ts","name":"signed-in loading keeps the release usable and the flow clear at 720, failure","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
     ,
-    {"kind":"browser","file":"tests/footer-release-pill.spec.ts","name":"signed-in loading keeps the release usable and the flow clear at 320, success","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    {"kind":"browser","file":"tests/footer-release-pill.spec.ts","name":"signed-in loading keeps the release usable and the flow clear at 720, success","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
     ,
-    {"kind":"browser","file":"tests/footer-release-pill.spec.ts","name":"signed-in loading keeps the release usable and the flow clear at 390, failure","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    {"kind":"browser","file":"tests/footer-release-pill.spec.ts","name":"signed-out loading reserves the plain version at 1024, failure","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
     ,
-    {"kind":"browser","file":"tests/footer-release-pill.spec.ts","name":"signed-in loading keeps the release usable and the flow clear at 390, success","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    {"kind":"browser","file":"tests/footer-release-pill.spec.ts","name":"signed-out loading reserves the plain version at 1024, success","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
     ,
     {"kind":"browser","file":"tests/footer-release-pill.spec.ts","name":"signed-out loading reserves the plain version at 1440, failure","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
     ,
     {"kind":"browser","file":"tests/footer-release-pill.spec.ts","name":"signed-out loading reserves the plain version at 1440, success","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
     ,
-    {"kind":"browser","file":"tests/footer-release-pill.spec.ts","name":"signed-out loading reserves the plain version at 320, failure","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    {"kind":"browser","file":"tests/footer-release-pill.spec.ts","name":"signed-out loading reserves the plain version at 720, failure","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
     ,
-    {"kind":"browser","file":"tests/footer-release-pill.spec.ts","name":"signed-out loading reserves the plain version at 320, success","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
-    ,
-    {"kind":"browser","file":"tests/footer-release-pill.spec.ts","name":"signed-out loading reserves the plain version at 390, failure","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
-    ,
-    {"kind":"browser","file":"tests/footer-release-pill.spec.ts","name":"signed-out loading reserves the plain version at 390, success","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    {"kind":"browser","file":"tests/footer-release-pill.spec.ts","name":"signed-out loading reserves the plain version at 720, success","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
     ,
     {"kind":"browser","file":"tests/footer-release-pill.spec.ts","name":"the UI audit history selector opens a named release after history loads","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
     ,
@@ -9162,7 +9162,7 @@
     ,
     {"kind":"browser","file":"tests/footer-release-pill.spec.ts","name":"unknown count reserves no badge; failed versions still open history","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
     ,
-    {"kind":"browser","file":"tests/footer-summary.spec.ts","name":"a phone save does not move the release control","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    {"kind":"browser","file":"tests/footer-summary.spec.ts","name":"a phone save that fails is said over the page and retried from there","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
     {"kind":"browser","file":"tests/footer-summary.spec.ts","name":"a review filter stays through search and kind, and All entries clears it","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
@@ -9186,13 +9186,13 @@
     ,
     {"kind":"browser","file":"tests/footer-summary.spec.ts","name":"the summary sits between the mark and the release without touching either at 1440 in light","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
-    {"kind":"browser","file":"tests/footer-summary.spec.ts","name":"the summary sits between the mark and the release without touching either at 390 in dark","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    {"kind":"browser","file":"tests/footer-summary.spec.ts","name":"the summary sits between the mark and the release without touching either at 720 in dark","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
-    {"kind":"browser","file":"tests/footer-summary.spec.ts","name":"the summary sits between the mark and the release without touching either at 390 in light","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    {"kind":"browser","file":"tests/footer-summary.spec.ts","name":"the summary sits between the mark and the release without touching either at 720 in light","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
     {"kind":"browser","file":"tests/footer-summary.spec.ts","name":"tickets say count, agents and the blocked ones, and the click adds the filter (full at 1440)","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
-    {"kind":"browser","file":"tests/footer-summary.spec.ts","name":"tickets say count, agents and the blocked ones, and the click adds the filter (short at 390)","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    {"kind":"browser","file":"tests/footer-summary.spec.ts","name":"tickets say count, agents and the blocked ones, and the click adds the filter (short at 1024)","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
     {"kind":"browser","file":"tests/from-classic.spec.ts","name":"known and unknown classic links resolve through the API","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
@@ -9374,29 +9374,29 @@
     ,
     {"kind":"browser","file":"tests/header-desk-split.spec.ts","name":"at 420 light the header shows a key whole or not at all and fits the window (AEON-1240)","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
-    {"kind":"browser","file":"tests/header-desk-split.spec.ts","name":"at 601 dark the trail drops whole segments and never cuts a chip","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    {"kind":"browser","file":"tests/header-desk-split.spec.ts","name":"at 720 dark the trail drops whole segments and never cuts a chip","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
-    {"kind":"browser","file":"tests/header-desk-split.spec.ts","name":"at 601 light the trail drops whole segments and never cuts a chip","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
-    ,
-    {"kind":"browser","file":"tests/header-desk-split.spec.ts","name":"at 640 dark the trail drops whole segments and never cuts a chip","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
-    ,
-    {"kind":"browser","file":"tests/header-desk-split.spec.ts","name":"at 640 light the trail drops whole segments and never cuts a chip","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    {"kind":"browser","file":"tests/header-desk-split.spec.ts","name":"at 720 light the trail drops whole segments and never cuts a chip","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
     {"kind":"browser","file":"tests/header-desk-split.spec.ts","name":"at 721 dark the trail drops whole segments and never cuts a chip","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
     {"kind":"browser","file":"tests/header-desk-split.spec.ts","name":"at 721 light the trail drops whole segments and never cuts a chip","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
-    {"kind":"browser","file":"tests/header-desk-split.spec.ts","name":"from 601 to 1440 px the trail never cuts a chip and returns whole when the window widens","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    {"kind":"browser","file":"tests/header-desk-split.spec.ts","name":"at 768 dark the trail drops whole segments and never cuts a chip","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
-    {"kind":"browser","file":"tests/header-desk-split.spec.ts","name":"on a 375 px phone the chevron gives way to a ticket key and returns on the home page","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    {"kind":"browser","file":"tests/header-desk-split.spec.ts","name":"at 768 light the trail drops whole segments and never cuts a chip","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
-    {"kind":"browser","file":"tests/header-desk-split.spec.ts","name":"on a 390 px phone the chevron gives way to a ticket key and returns on the home page","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    {"kind":"browser","file":"tests/header-desk-split.spec.ts","name":"from 720 to 1440 px the trail never cuts a chip and returns whole when the window widens","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/header-desk-split.spec.ts","name":"on a 375 px phone the header has no chevron or moon, a ticket key stays whole, nothing runs past the edge","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/header-desk-split.spec.ts","name":"on a 390 px phone the header has no chevron or moon, a ticket key stays whole, nothing runs past the edge","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
     {"kind":"browser","file":"tests/header-desk-split.spec.ts","name":"on a project's tickets at 1024 the header fits the window and the search pill gives way last","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
-    {"kind":"browser","file":"tests/header-desk-split.spec.ts","name":"on a project's tickets at 601 the header fits the window and the search pill gives way last","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    {"kind":"browser","file":"tests/header-desk-split.spec.ts","name":"on a project's tickets at 640 the compact header fits the window","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
-    {"kind":"browser","file":"tests/header-desk-split.spec.ts","name":"on a project's tickets at 640 the header fits the window and the search pill gives way last","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    {"kind":"browser","file":"tests/header-desk-split.spec.ts","name":"on a project's tickets at 720 the header fits the window and the search pill gives way last","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
     {"kind":"browser","file":"tests/header-desk-split.spec.ts","name":"on a project's tickets at 721 the header fits the window and the search pill gives way last","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
@@ -9408,7 +9408,7 @@
     ,
     {"kind":"browser","file":"tests/header-desk-split.spec.ts","name":"on home at 375 px the preview is one entry away in the avatar sheet","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
-    {"kind":"browser","file":"tests/header-desk-split.spec.ts","name":"on home at 390 px the preview is on its chevron, not in the avatar sheet","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    {"kind":"browser","file":"tests/header-desk-split.spec.ts","name":"on home at 390 px the preview is one entry away in the avatar sheet","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
     {"kind":"browser","file":"tests/header-desk-split.spec.ts","name":"the Desk is the last place; its chevron previews the Desk without moving the header at 1024 dark","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
@@ -9528,33 +9528,33 @@
     ,
     {"kind":"browser","file":"tests/header-menus.spec.ts","name":"phone sheets › menus are bottom sheets with 44 px rows and no sideways scroll","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
     ,
-    {"kind":"browser","file":"tests/header-menus.spec.ts","name":"phones › 375 px, Business off, home: the key is whole and the moon shows whenever it fits","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    {"kind":"browser","file":"tests/header-menus.spec.ts","name":"phones › 375 px, Business off, home: the key is whole and the moon leads the avatar sheet","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
     ,
-    {"kind":"browser","file":"tests/header-menus.spec.ts","name":"phones › 375 px, Business off, ticket: the key is whole and the moon shows whenever it fits","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    {"kind":"browser","file":"tests/header-menus.spec.ts","name":"phones › 375 px, Business off, ticket: the key is whole and the moon leads the avatar sheet","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
     ,
-    {"kind":"browser","file":"tests/header-menus.spec.ts","name":"phones › 375 px, Business on, home: the key is whole and the moon shows whenever it fits","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    {"kind":"browser","file":"tests/header-menus.spec.ts","name":"phones › 375 px, Business on, home: the key is whole and the moon leads the avatar sheet","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
     ,
-    {"kind":"browser","file":"tests/header-menus.spec.ts","name":"phones › 375 px, Business on, ticket: the key is whole and the moon shows whenever it fits","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    {"kind":"browser","file":"tests/header-menus.spec.ts","name":"phones › 375 px, Business on, ticket: the key is whole and the moon leads the avatar sheet","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
     ,
-    {"kind":"browser","file":"tests/header-menus.spec.ts","name":"phones › 390 px, Business off, home: the key is whole and the moon shows whenever it fits","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    {"kind":"browser","file":"tests/header-menus.spec.ts","name":"phones › 390 px, Business off, home: the key is whole and the moon leads the avatar sheet","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
     ,
-    {"kind":"browser","file":"tests/header-menus.spec.ts","name":"phones › 390 px, Business off, ticket: the key is whole and the moon shows whenever it fits","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    {"kind":"browser","file":"tests/header-menus.spec.ts","name":"phones › 390 px, Business off, ticket: the key is whole and the moon leads the avatar sheet","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
     ,
-    {"kind":"browser","file":"tests/header-menus.spec.ts","name":"phones › 390 px, Business on, home: the key is whole and the moon shows whenever it fits","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    {"kind":"browser","file":"tests/header-menus.spec.ts","name":"phones › 390 px, Business on, home: the key is whole and the moon leads the avatar sheet","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
     ,
-    {"kind":"browser","file":"tests/header-menus.spec.ts","name":"phones › 390 px, Business on, ticket: the key is whole and the moon shows whenever it fits","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    {"kind":"browser","file":"tests/header-menus.spec.ts","name":"phones › 390 px, Business on, ticket: the key is whole and the moon leads the avatar sheet","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    ,
+    {"kind":"browser","file":"tests/header-menus.spec.ts","name":"phones › a late font keeps the ticket key whole on a phone","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    ,
+    {"kind":"browser","file":"tests/header-menus.spec.ts","name":"phones › on compact screens the moon stays in the avatar sheet on every page","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
     ,
     {"kind":"browser","file":"tests/header-menus.spec.ts","name":"phones › release history from the account menu stays on the list","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
     ,
-    {"kind":"browser","file":"tests/header-menus.spec.ts","name":"phones › the moon comes back when a late font leaves room for it","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
-    ,
-    {"kind":"browser","file":"tests/header-menus.spec.ts","name":"phones › the moon comes back when the page leaves room for it","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
-    ,
     {"kind":"browser","file":"tests/header-menus.spec.ts","name":"phones › the moon stays in the header at 1600 with three places","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
     ,
-    {"kind":"browser","file":"tests/header-menus.spec.ts","name":"phones › the moon stays in the header at 440","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    {"kind":"browser","file":"tests/header-menus.spec.ts","name":"phones › the moon stays in the header at 720","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
-    {"kind":"browser","file":"tests/header-menus.spec.ts","name":"phones › the moon stays in the header at 440 with three places","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    {"kind":"browser","file":"tests/header-menus.spec.ts","name":"phones › the moon stays in the header at 720 with three places","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
     ,
     {"kind":"browser","file":"tests/header-menus.spec.ts","name":"phones › with three places at 375 dark the ticket key stays whole and the moon leads the avatar sheet","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
     ,
@@ -11954,9 +11954,9 @@
     ,
     {"kind":"browser","file":"tests/project-header.spec.ts","name":"phone Graph retains header density in the Display sheet","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
-    {"kind":"browser","file":"tests/project-header.spec.ts","name":"phone fold touch target › the whole 44px phone fold target accepts taps in dark","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    {"kind":"browser","file":"tests/project-header.spec.ts","name":"phone project crumb touch target › the whole 44px project crumb target accepts taps in dark","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
-    {"kind":"browser","file":"tests/project-header.spec.ts","name":"phone fold touch target › the whole 44px phone fold target accepts taps in light","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    {"kind":"browser","file":"tests/project-header.spec.ts","name":"phone project crumb touch target › the whole 44px project crumb target accepts taps in light","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
     {"kind":"browser","file":"tests/project-header.spec.ts","name":"scrolling leaves density alone and section changes keep the view settings usable","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
@@ -12926,7 +12926,7 @@
     ,
     {"kind":"browser","file":"tests/releases.spec.ts","name":"nothing is clipped at 390: stat card and chart stacked, counts in notes, full headlines","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
     ,
-    {"kind":"browser","file":"tests/releases.spec.ts","name":"on phones the footer folds away reading down and returns on the way up","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    {"kind":"browser","file":"tests/releases.spec.ts","name":"on phones there is no footer bar and the page keeps its size while reading","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
     ,
     {"kind":"browser","file":"tests/releases.spec.ts","name":"release history renders CalVer2 history and CalVer3 versions as six-segment Pretty","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
     ,
