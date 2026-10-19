@@ -135,7 +135,7 @@ async function mockGoals(page: Page, w: World, options: { failList?: boolean } =
   })
   await page.route(/\/api\/decision-desk\/projection/, route => route.fulfill({ json: {
     items: w.desk.open ? [
-      { id: 'q-gate', kind: 'question', project_id: 'p-aeon', revision: 1, title: 'Which identity should agent reviews run as for the gatekeeper go-live?', created_at: iso(NOW - 3 * HOUR), held: true, href: '', source: '' },
+      { id: 'q-gate', kind: 'question', project_id: 'p-aeon', revision: 1, title: 'Which identity should agent reviews run as for the gatekeeper go-live?', created_at: iso(NOW - 3 * HOUR), held: true, href: '', source: '', ticket_key: 'AEON-1394' },
       { id: 'q-arp', kind: 'question', project_id: 'p-pharos', revision: 1, title: 'Allow privileged ARP through an Apple entitlement, or stay without it?', created_at: iso(NOW - 2 * HOUR), held: false, href: '', source: '' },
     ].slice(0, w.desk.open) : [],
     counts: { open: w.desk.open, held: w.desk.open ? 1 : 0, chores: 0 }, has_more: false, as_of: iso(NOW),
@@ -220,8 +220,15 @@ test('Waiting on you lists live Desk items; header labels sort with LANDS first;
   await expect(waiting.locator('.n-badge')).toHaveText('2')
   const rows = waiting.locator('.waiting-item')
   await expect(rows).toHaveCount(2)
-  await expect(rows.first()).toContainText('AEON')
+  await expect(rows.first().locator('.wkey')).toHaveText('AEON-1394')
+  const keyClip = await rows.first().locator('.wkey').evaluate(el => {
+    const style = getComputedStyle(el)
+    return { overflow: style.overflowX, ellipsis: style.textOverflow, nowrap: style.whiteSpace, max: style.maxWidth }
+  })
+  expect(keyClip).toMatchObject({ overflow: 'hidden', ellipsis: 'ellipsis', nowrap: 'nowrap' })
+  expect(keyClip.max).not.toBe('none')
   await expect(rows.first()).toContainText('Which identity should agent reviews run as')
+  await expect(rows.nth(1).locator('.wkey')).toHaveText('PHAROS')
   await expect(rows.first().locator('.wgoal')).toHaveText('Release 136 · steady and complete')
   await expect(rows.nth(1).locator('.wgoal')).toHaveText('Pharos')
   await expect(waiting.getByRole('link', { name: /Open Desk/ })).toHaveAttribute('href', '/decision-desk')
