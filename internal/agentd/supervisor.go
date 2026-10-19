@@ -56,7 +56,8 @@ type Config struct {
 	HeartbeatInterval time.Duration
 	MaxRunDuration    time.Duration
 	CapacityInterval  time.Duration
-	// Now supplies the capacity and pairing-recovery clocks; deadlines still use contexts.
+	// Now supplies the capacity, pairing-recovery and daemon-wait refresh
+	// clocks; deadlines still use contexts.
 	Now func() time.Time
 	// PollDiagnostic receives bounded cause codes on changes and 15-minute
 	// reminders only, never raw errors or bindings.
@@ -227,10 +228,10 @@ type Supervisor struct {
 	pollDiagnostic         func(string)
 	verificationDiagnostic func(string, string, string, string)
 	pollDiagnosticMu       sync.Mutex
-	pollDiagnosticLast     map[string]time.Time // Previous reason set and last emission, protected by pollDiagnosticMu.
-	daemonWaits            map[string]string    // Last reported checkout-wait reason per run. Protected by mu.
-	ledgerRouteUnconfirmed bool                 // Protected by mu; unresolved attempts retain their own holds.
-	ledgerReplayAfter      string               // Protected by dispatchMu; rotate bounded replay fairly.
+	pollDiagnosticLast     map[string]time.Time  // Previous reason set and last emission, protected by pollDiagnosticMu.
+	daemonWaits            map[string]daemonWait // Last reported checkout-wait reason per run. Protected by mu.
+	ledgerRouteUnconfirmed bool                  // Protected by mu; unresolved attempts retain their own holds.
+	ledgerReplayAfter      string                // Protected by dispatchMu; rotate bounded replay fairly.
 	loginRequired          map[string]bool
 	signInUnverified       map[string]bool
 	probeFailureReasons    map[string]string // Bounded local causes, protected by mu.
@@ -911,9 +912,19 @@ func (s *Supervisor) poll(ctx context.Context, dispatch, scanQueue bool, nonempt
 	return errors.Join(failures...)
 }
 
-// noteDaemonWait reports a checkout-wait reason at most once per distinct value.
-// An empty reason clears a reason this process reported. A failed report is not
-// remembered, so the next poll retries it. The API call is never made under s.mu.
+// daemonWaitRefresh re-sends a held checkout-wait reason. The server keeps it
+// in memory only, so a server restart shows the reason again within this bound.
+const daemonWaitRefresh = 2 * time.Minute
+
+type daemonWait struct {
+	reason string
+	at     time.Time
+}
+
+// noteDaemonWait reports a checkout-wait reason when it changes, and re-sends a
+// held reason every daemonWaitRefresh; the PUT is idempotent. An empty reason
+// clears a reason this process reported. A failed report is not remembered, so
+// the next poll retries it. The API call is never made under s.mu.
 func (s *Supervisor) noteDaemonWait(ctx context.Context, runID, reason string) {
 	reporter, ok := s.api.(interface {
 		ReportDaemonWait(context.Context, string, string) error
@@ -921,13 +932,17 @@ func (s *Supervisor) noteDaemonWait(ctx context.Context, runID, reason string) {
 	if !ok || runID == "" || (reason != "" && reason != CheckoutHeldCause) {
 		return
 	}
+	now := time.Now
+	if s.capacityNow != nil {
+		now = s.capacityNow
+	}
 	s.mu.Lock()
 	prev, seen := s.daemonWaits[runID]
-	if reason == "" && (!seen || prev == "") {
+	if reason == "" && !seen {
 		s.mu.Unlock()
 		return
 	}
-	if seen && prev == reason {
+	if seen && prev.reason == reason && now().Sub(prev.at) < daemonWaitRefresh {
 		s.mu.Unlock()
 		return
 	}
@@ -937,12 +952,12 @@ func (s *Supervisor) noteDaemonWait(ctx context.Context, runID, reason string) {
 	}
 	s.mu.Lock()
 	if s.daemonWaits == nil {
-		s.daemonWaits = map[string]string{}
+		s.daemonWaits = map[string]daemonWait{}
 	}
 	if reason == "" {
 		delete(s.daemonWaits, runID)
 	} else {
-		s.daemonWaits[runID] = reason
+		s.daemonWaits[runID] = daemonWait{reason: reason, at: now()}
 	}
 	s.mu.Unlock()
 }

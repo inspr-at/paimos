@@ -241,8 +241,10 @@ func writeHandoverAudit(store *agentsetup.Store, fromDaemon, fromState, toDaemon
 // HandoverCheckout reports pair-time fence state for one workspace. It takes
 // the fence only when an earlier owner's journal proves every recorded run has
 // exited, and it writes that audit before the owner swap. A free lock is not
-// proof. A busy lock stays held and writes nothing. Errors are unexpected; the
-// caller maps them to CheckoutStillHeldText.
+// proof. A busy lock stays held and writes nothing; it reports the earlier
+// pairing only when owner.json names one, since this pairing's own run also
+// holds the lock. Errors are unexpected; the caller maps them to
+// CheckoutStillHeldText.
 func HandoverCheckout(workspace, tenant, principal, daemon, statePath string) (string, error) {
 	if !validCheckoutIdentity(tenant, principal, daemon, statePath) {
 		return CheckoutStillHeldText, nil
@@ -256,11 +258,13 @@ func HandoverCheckout(workspace, tenant, principal, daemon, statePath string) (s
 		return CheckoutStillHeldText, nil
 	}
 	defer store.Close()
-	if err := store.Lock(); err != nil {
-		return CheckoutStillHeldText, nil
-	}
 	owner, err := json.Marshal([]string{tenant, principal, daemon, statePath})
 	if err != nil || len(owner) > 4096 {
+		return CheckoutStillHeldText, nil
+	}
+	if err := store.Lock(); errors.Is(err, agentsetup.ErrBusy) {
+		return busyCheckoutNotice(store, owner), nil
+	} else if err != nil {
 		return CheckoutStillHeldText, nil
 	}
 	raw, err := store.Read("owner.json", 4096)
@@ -289,4 +293,19 @@ func HandoverCheckout(workspace, tenant, principal, daemon, statePath string) (s
 		}
 		return CheckoutHandedOverText, nil
 	}
+}
+
+// busyCheckoutNotice names the holder of a busy fence without taking it.
+// Writes are atomic renames, so the unlocked read sees a whole record. Only a
+// well-formed earlier owner is reported; an empty, own, unreadable or malformed
+// record says nothing rather than blame an earlier pairing.
+func busyCheckoutNotice(store *agentsetup.Store, owner []byte) string {
+	raw, err := store.Read("owner.json", 4096)
+	if err != nil {
+		return ""
+	}
+	if kind, _, _ := classifyCheckoutOwner(raw, owner); kind == checkoutOwnerEarlier {
+		return CheckoutStillHeldText
+	}
+	return ""
 }

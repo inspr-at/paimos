@@ -21,7 +21,8 @@ import (
 const daemonWaitHeld = "checkout_held_by_earlier_pairing"
 
 // daemonWaitModule keeps checkout-wait sentences in process memory. The run
-// row is not modified. A restart drops the map; the daemon reports again.
+// row is not modified. A restart drops the map; the daemon re-sends a held
+// reason on its refresh schedule (agentd daemonWaitRefresh).
 type daemonWaitModule struct {
 	pool    *pgxpool.Pool
 	mu      sync.Mutex

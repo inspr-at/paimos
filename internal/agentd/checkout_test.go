@@ -6,11 +6,13 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/inspr-at/paimos/internal/agentsetup"
 	"github.com/inspr-at/paimos/internal/localjournal"
@@ -340,6 +342,83 @@ func TestHandoverCheckoutReportsPairTime(t *testing.T) {
 	}
 }
 
+func TestHandoverCheckoutBusySameOwnerSaysNothing(t *testing.T) {
+	root := physicalTemp(t)
+	workspace := filepath.Join(root, "work")
+	if err := os.Mkdir(workspace, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	nextState := filepath.Join(root, "next-state")
+	hold := func(t *testing.T) {
+		t.Helper()
+		store, err := agentsetup.OpenStore(filepath.Join(workspace, ".aeon-agentd"), false)
+		if err != nil {
+			t.Fatal(err)
+		}
+		t.Cleanup(func() {
+			store.Unlock()
+			_ = store.Close()
+		})
+		if err := store.Lock(); err != nil {
+			t.Fatal(err)
+		}
+	}
+	quiet := func(t *testing.T, before []byte) {
+		t.Helper()
+		notice, err := HandoverCheckout(workspace, "tenant", "agent", "daemon", nextState)
+		if err != nil || notice != "" {
+			t.Fatalf("busy own checkout %q %v", notice, err)
+		}
+		got, readErr := readCheckoutFile(t, workspace, "owner.json")
+		if before == nil {
+			if !errors.Is(readErr, os.ErrNotExist) {
+				t.Fatalf("busy empty checkout wrote owner %s %v", got, readErr)
+			}
+			return
+		}
+		if readErr != nil || string(got) != string(before) {
+			t.Fatalf("busy checkout rewrote owner %s %v", got, readErr)
+		}
+	}
+	t.Run("no record", func(t *testing.T) {
+		store, err := agentsetup.OpenStore(filepath.Join(workspace, ".aeon-agentd"), true)
+		if err != nil {
+			t.Fatal(err)
+		}
+		_ = store.Close()
+		hold(t)
+		quiet(t, nil)
+	})
+	t.Run("same owner", func(t *testing.T) {
+		owner := checkoutOwner(t, "tenant", "agent", "daemon", nextState)
+		writeCheckoutFile(t, workspace, "owner.json", owner)
+		hold(t)
+		quiet(t, owner)
+	})
+	t.Run("same owner spaced", func(t *testing.T) {
+		owner := []byte(fmt.Sprintf("[ \"tenant\" , \"agent\" , \"daemon\" , %q ]", nextState))
+		writeCheckoutFile(t, workspace, "owner.json", owner)
+		hold(t)
+		quiet(t, owner)
+	})
+	t.Run("empty record", func(t *testing.T) {
+		store, err := agentsetup.OpenStore(filepath.Join(workspace, ".aeon-agentd"), true)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := store.Lock(); err != nil {
+			t.Fatal(err)
+		}
+		if err := store.Write("owner.json", []byte("[]"), false); err != nil {
+			t.Fatal(err)
+		}
+		store.Unlock()
+		_ = store.Close()
+		hold(t)
+		quiet(t, []byte("[]"))
+	})
+}
+
 func TestCheckoutHeldWaitReportsOnce(t *testing.T) {
 	s, api, _ := testSupervisor(t)
 	prior := filepath.Join(physicalTemp(t), "earlier")
@@ -349,6 +428,8 @@ func TestCheckoutHeldWaitReportsOnce(t *testing.T) {
 	writeCheckoutFile(t, s.workspace, "owner.json", checkoutOwner(t, "old-tenant", "old-principal", "earlier", prior))
 	var diagnostics []string
 	s.pollDiagnostic = func(reason string) { diagnostics = append(diagnostics, reason) }
+	now := time.Date(2026, 10, 19, 12, 0, 0, 0, time.UTC)
+	s.capacityNow = func() time.Time { return now }
 	reporter := &waitReporter{fakeAPI: api, failFirst: true}
 	s.api = reporter
 	for range 3 {
@@ -380,6 +461,42 @@ func TestCheckoutHeldWaitReportsOnce(t *testing.T) {
 	if !found {
 		t.Fatalf("status diagnostics %v", s.Lifecycle("").Diagnostics)
 	}
+}
+
+func TestCheckoutHeldWaitReportsAgainAfterServerRestart(t *testing.T) {
+	s, api, _ := testSupervisor(t)
+	prior := filepath.Join(physicalTemp(t), "earlier")
+	if err := os.Mkdir(prior, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	writeCheckoutFile(t, s.workspace, "owner.json", checkoutOwner(t, "old-tenant", "old-principal", "earlier", prior))
+	now := time.Date(2026, 10, 19, 12, 0, 0, 0, time.UTC)
+	s.capacityNow = func() time.Time { return now }
+	reporter := &waitReporter{fakeAPI: api}
+	s.api = reporter
+	poll := func(wantCalls int, wantReasons ...string) {
+		t.Helper()
+		if err := s.PollOnce(context.Background()); errors.Is(err, errCheckoutHeldByEarlierPairing) || errors.Is(err, ErrProcessesUnconfirmed) {
+			t.Fatalf("poll published the checkout refusal: %v", err)
+		}
+		reporter.mu.Lock()
+		defer reporter.mu.Unlock()
+		if reporter.calls != wantCalls || strings.Join(reporter.reasons, ",") != strings.Join(wantReasons, ",") {
+			t.Fatalf("at %s reports calls=%d reasons=%v, want calls=%d reasons=%v", now.Format(time.TimeOnly), reporter.calls, reporter.reasons, wantCalls, wantReasons)
+		}
+	}
+	held := api.run.ID + "=" + CheckoutHeldCause
+	poll(1, held)
+	// A server restart drops its in-memory reasons; the daemon still holds its own.
+	reporter.mu.Lock()
+	reporter.reasons = nil
+	reporter.mu.Unlock()
+	now = now.Add(daemonWaitRefresh - time.Second)
+	poll(1)
+	now = now.Add(time.Second)
+	poll(2, held)
+	now = now.Add(daemonWaitRefresh - time.Second)
+	poll(2, held)
 }
 
 type waitReporter struct {
