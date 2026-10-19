@@ -41,16 +41,24 @@ function rememberLayout(fresh = false) {
   }
 }
 let layoutObserver: ResizeObserver | undefined
+let layoutFrame: number | undefined
+function refreshLayout() {
+  void nextTick(() => {
+    if (layoutFrame !== undefined) cancelAnimationFrame(layoutFrame)
+    layoutFrame = requestAnimationFrame(() => { layoutFrame = undefined; rememberLayout(true) })
+  })
+}
 onMounted(() => {
   let width = origin.value?.getBoundingClientRect().width
   layoutObserver = new ResizeObserver(([entry]) => {
     if (!entry || entry.contentRect.width === width) return
     width = entry.contentRect.width
-    rememberLayout(true)
+    refreshLayout()
   })
   if (origin.value) layoutObserver.observe(origin.value)
+  window.addEventListener('resize', refreshLayout)
 })
-watch(language, () => { void nextTick(() => rememberLayout(true)) })
+watch(language, refreshLayout)
 const pending = computed(() => context.value?.pending_changes ?? [])
 const changedDate = computed(() => definitionDate(context.value?.workspace_default?.revision ?? '', language.value))
 const noticeText = computed(() => definitionNotice(props.project.routeKey,pending.value.length,changedDate.value,language.value))
@@ -144,7 +152,7 @@ let stopLive: (() => void) | undefined
 watch([scope.owner, () => props.project.id], () => { stopLive?.(); scope.reset(); closeReset(false); context.value = null; busy.value = false; stale.value = false; noticeShown.value = false; noticeHeight.value = 0; originHeight.value = 0; if (scope.owner.value) { load(); stopLive=subscribeDefinitionChanges(() => { if (!own.value && !busy.value && !loading.value) load() }) } }, { immediate: true, flush: 'sync' })
 const stopAccess = onAccessRevalidate({ reset: () => { closeReset(false); context.value = null; busy.value = false; stale.value = true; noticeShown.value = false; noticeHeight.value = 0; originHeight.value = 0 }, refresh: () => { if (!busy.value) load() } })
 watch(mayManage, allowed => { if (!allowed && !error.value) closeReset(false) })
-onBeforeUnmount(() => { layoutObserver?.disconnect(); stopLive?.(); stopAccess(); closeReset(false) })
+onBeforeUnmount(() => { layoutObserver?.disconnect(); window.removeEventListener('resize', refreshLayout); if (layoutFrame !== undefined) cancelAnimationFrame(layoutFrame); stopLive?.(); stopAccess(); closeReset(false) })
 </script>
 
 <template>
