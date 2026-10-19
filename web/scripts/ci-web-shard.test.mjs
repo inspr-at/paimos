@@ -647,7 +647,7 @@ test('ungated groups stay declared and checked but only run with --all', () => {
   assert.ok(gated.some(spec => spec.file === projectDefinitions.file), 'Project Definitions must remain gated')
   // AEON-1317 adds workspace-default decisions after the same historical baseline.
   // AEON-1528 adds the resize, locale and post-decision remeasurement flow.
-  // Retain the original budget and charge only this complete-file measurement.
+  // Retain the original budget and charge only this complete-file scheduling cost.
   const definitionDecisions = real.groups.flatMap(group => group.specs).find(spec => spec.file === 'tests/definitions-p3.spec.ts')
   assert.ok(definitionDecisions && definitionDecisions.listedTests === 6, 'All six workspace definition decision and remeasurement flows must remain declared')
   const definitionCases = flattenBrowser(JSON.parse(command(process.execPath, ['node_modules/@playwright/test/cli.js', 'test',
@@ -664,7 +664,7 @@ test('ungated groups stay declared and checked but only run with --all', () => {
   assert.equal(gated.filter(spec => spec.file === definitionDecisions.file).length, 1, 'Workspace definition decisions must remain gated exactly once')
   const definitionTiming = real.nightlyTiming.files[definitionDecisions.file]
   assert.equal(definitionTiming?.selectedTests, definitionDecisions.listedTests, 'Workspace definition timing must cover the complete file')
-  assert.equal(definitionDecisions.weightSeconds, definitionTiming?.seconds, 'Charge the measured workspace definition scheduling cost')
+  assert.equal(definitionDecisions.weightSeconds, definitionTiming?.seconds, 'Charge the declared workspace definition scheduling cost')
   // AEON-1425 adds eight project-name wrap cases after the historical budget.
   // Leaving the file inside that budget packs the twelve shards to 301.322264s.
   // Keep the old budget and charge only this file's scheduling weight.
