@@ -6792,6 +6792,8 @@
     ,
     {"kind":"go","package":"internal/harness","name":"TestHeartbeatModelSwitchRequiresGenerationLease","tier":"GATED-FULL"}
     ,
+    {"kind":"go","package":"internal/harness","name":"TestHeartbeatOwnershipAndCapabilitiesWriteEvents","tier":"ESSENTIAL"}
+    ,
     {"kind":"go","package":"internal/harness","name":"TestHeartbeatQuietTicksUpdateRowAndSSEWithoutEvents","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/harness","name":"TestHeartbeatWarningSQLFailureDoesNotRollbackAcceptedBeat","tier":"GATED-FULL"}

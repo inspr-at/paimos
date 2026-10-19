@@ -4,9 +4,11 @@ package harness
 import (
 	"context"
 	"reflect"
+	"slices"
 	"time"
 
 	"github.com/inspr-at/paimos/internal/events"
+	"github.com/inspr-at/paimos/internal/ownedprocess"
 	"github.com/inspr-at/paimos/internal/tenant"
 	"github.com/jackc/pgx/v5"
 )
@@ -21,11 +23,15 @@ type heartbeatEventState struct {
 	account, version, brief        *string
 	worktree, branch, bindingError *string
 	commits                        []Commit
+	processOwnership               *ownedprocess.Identity
+	capabilities                   []string
 	ready, live                    *time.Time
 	progress                       *int
 }
 
 func heartbeatState(s Session) heartbeatEventState {
+	capabilities := append([]string(nil), s.Capabilities...)
+	slices.Sort(capabilities)
 	return heartbeatEventState{
 		phase: s.Phase, activity: s.Activity,
 		note: s.ActivityNote, doing: s.doing, toolActivity: s.toolActivity,
@@ -33,6 +39,7 @@ func heartbeatState(s Session) heartbeatEventState {
 		account: s.AccountLabel, version: s.HarnessVersion, brief: s.Brief,
 		worktree: s.Worktree, branch: s.Branch, bindingError: s.inboxBindingCode,
 		commits: s.Commits, ready: s.EtaReadyAt, live: s.EtaLiveAt, progress: s.ProgressPct,
+		processOwnership: s.ProcessOwnership, capabilities: capabilities,
 	}
 }
 
