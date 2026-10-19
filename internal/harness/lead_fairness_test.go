@@ -302,14 +302,56 @@ func TestLeadSchedulingBoundAndDependencies(t *testing.T) {
  FROM added CROSS JOIN agent_runs r WHERE r.id=$3`, f.person.TenantID, f.project, run)
 		return err
 	})
-	err := db.InTenant(tenant.WithPrincipal(t.Context(), f.agent), f.db.App, f.agent.TenantID, func(tx pgx.Tx) error {
+	// f59ad07e kept aeon_work_leaf and aeon_work_pending inside the same statement
+	// as LIMIT 201. Two hundred and one queued leaves then spent the 3s
+	// scheduling deadline before the bound could be returned. Overflow must be
+	// the explicit bound error, and that decision must not call either function.
+	trace := &leadSQLTrace{}
+	cfg := f.db.App.Config()
+	cfg.ConnConfig.Tracer = trace
+	pool, err := pgxpool.NewWithConfig(t.Context(), cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(pool.Close)
+	err = db.InTenant(tenant.WithPrincipal(t.Context(), f.agent), pool, f.agent.TenantID, func(tx pgx.Tx) error {
 		_, err := harness.LeadDispatchTurnTx(t.Context(), tx, f.agent, f.project, run, readyLeadChecks)
 		return err
 	})
 	if err == nil || err.Error() != "lead scheduling snapshot exceeds bound" {
 		t.Fatalf("partial snapshot authorized a turn: %v", err)
 	}
+	bounded := false
+	for _, query := range trace.sql {
+		if strings.Contains(query, "aeon_work_leaf") || strings.Contains(query, "aeon_work_pending") {
+			t.Fatalf("overflow evaluated volatile eligibility before the bound: %s", query)
+		}
+		if strings.Contains(query, "LIMIT 201") {
+			bounded = true
+		}
+	}
+	if !bounded {
+		t.Fatal("overflow did not read a bounded candidate snapshot")
+	}
+	var routed bool
+	f.tx(t, f.person, func(tx pgx.Tx) error {
+		return tx.QueryRow(t.Context(), `SELECT queue_routed_at IS NOT NULL FROM agent_runs WHERE id=$1`, run).Scan(&routed)
+	})
+	if routed {
+		t.Fatal("overflow routed the candidate")
+	}
 }
+
+type leadSQLTrace struct {
+	sql []string
+}
+
+func (b *leadSQLTrace) TraceQueryStart(ctx context.Context, _ *pgx.Conn, data pgx.TraceQueryStartData) context.Context {
+	b.sql = append(b.sql, data.SQL)
+	return ctx
+}
+
+func (b *leadSQLTrace) TraceQueryEnd(context.Context, *pgx.Conn, pgx.TraceQueryEndData) {}
 
 func TestLeadSingleDialProgressAfterWorkerYield(t *testing.T) {
 	admission := func(ctx context.Context, tx pgx.Tx, p tenant.Principal, owner string, s harness.Session) (harness.LeadChecks, error) {
