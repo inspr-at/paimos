@@ -52,6 +52,7 @@ func TestHeartbeatOwnershipAndCapabilitiesWriteEvents(t *testing.T) {
 		{"ownership and capability changed", nil, &owner, []string{"inbox"}, []string{"inbox", "attached_reconnect_v1"}, 1},
 		{"unchanged without ownership", nil, nil, []string{"inbox"}, []string{"inbox"}, 0},
 		{"unchanged with ownership", &owner, &sameOwner, []string{"inbox", "attached_reconnect_v1"}, []string{"inbox", "attached_reconnect_v1"}, 0},
+		{"capabilities reordered", &owner, &sameOwner, []string{"inbox", "attached_reconnect_v1"}, []string{"attached_reconnect_v1", "inbox"}, 0},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			before := Session{ID: project, ProjectID: project, AgentPrincipalID: p.ID, Phase: "working", Activity: "busy", ActivitySequence: 1, HeartbeatAt: &now, ProcessObservedAt: &now, ProcessOwnership: tc.beforeOwner, Capabilities: tc.beforeCaps}
