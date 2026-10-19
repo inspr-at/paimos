@@ -192,7 +192,7 @@ test('AEON-1401 lists, the status menu, the ticket header, Desk and activity rea
 
         // The ticket header and its activity line.
         await page.goto('/p/PHAROS/PHAROS-11')
-        await expect(page.locator('.field-pick .pick-value', { hasText: /^Building$/ }).first()).toBeVisible()
+        await expect(page.getByRole('button', { name: /^Status: Building\. Change status/ }).first()).toBeVisible()
         const activity = page.locator('section.activity').first()
         await expect(activity).toContainText('Building')
         expect(await visibleText(activity)).not.toContain('In progress')
