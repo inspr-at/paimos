@@ -283,10 +283,17 @@ test('an opened goal lists what’s missing, then Moving, Queued (five, then a f
   await expect(more).toHaveAttribute('aria-expanded', 'true')
   await done.click()
   await expect(labels).toHaveCount(13)
-  // One agent-badge column: the goal's badge and its item's badge start at the same x.
+  // One agent-badge column: the goal's badge starts it; an item's badge ends it, beside the item's live line (AEON-1494).
   const goalBadge = release.locator('.goal-row .agents .live-chip'), itemBadge = body.locator('.i-badge .live-chip').first()
   await expect(goalBadge).toBeVisible(); await expect(itemBadge).toBeVisible()
-  expect(Math.abs((await box(goalBadge)).x - (await box(itemBadge)).x)).toBeLessThanOrEqual(.5)
+  const agentColumn = await page.locator('.goal-grid').evaluate(el => {
+    const style = getComputedStyle(el), widths = style.gridTemplateColumns.split(' ').map(parseFloat), gap = parseFloat(style.columnGap)
+    const left = el.getBoundingClientRect().left + parseFloat(style.paddingLeft) + widths.slice(0, 3).reduce((sum, width) => sum + width + gap, 0)
+    return { left, right: left + widths[3]! }
+  })
+  expect(Math.abs((await box(goalBadge)).x - agentColumn.left)).toBeLessThanOrEqual(.5)
+  const item = await box(itemBadge)
+  expect(Math.abs(item.x + item.width - agentColumn.right)).toBeLessThanOrEqual(.5)
   await expect(body.locator('.item').first().locator('.i-live')).toHaveText('PR #707 · checks running')
   // The handed-over line closes the agents' part.
   const joed = goalRow(page, 'g-joed')
@@ -332,12 +339,17 @@ test('the ETA popover says who set it and what it was, where the pace lands it, 
   await expect(page.getByRole('tooltip').filter({ hasText: 'past' })).toContainText('30 min past · update pending')
   await page.mouse.move(10, 10)
   await passed.blur()
-  // At the bottom of the scroll area the popover flips above its ETA.
+  // At the bottom of the scroll area the popover flips above its ETA. The release opens too, so the list
+  // outgrows the window (one-line item rows are short) and the last ETA really sits at the bottom edge.
+  await release.locator('.goal-toggle').click()
+  await expect(release).toHaveAttribute('data-open', '1')
   const last = goalRow(page, 'g-hnet').locator('.goal-eta')
   await last.evaluate(el => el.scrollIntoView({ block: 'end' }))
   await last.hover()
   const flip = page.getByRole('tooltip')
   await expect(flip).toBeVisible()
+  const [lastBox, mainBox, flipBox] = [await box(last), await box(page.locator('#main')), await box(flip)]
+  expect(mainBox.bottom - lastBox.bottom, 'no room below the last ETA').toBeLessThan(flipBox.height)
   await expect(flip).toHaveAttribute('data-side', 'above')
   // Done goals and items have no popover; done never projects.
   await expect(flip).not.toContainText('At Ø')

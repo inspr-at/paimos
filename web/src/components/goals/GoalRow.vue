@@ -5,6 +5,10 @@
 // waits-on-you marker and LANDS — and, opened, its panel on a full tint: what's
 // missing as an ordered list, then its items (Moving, Queued with the first five
 // shown, Paused; Done folded into one line) and the "Handed over" line last.
+// AEON-1494: LANDS keeps a muted "~40 h left" line, and the Done fold says how
+// many finished today ("8 done · 7 today · show"). Addendum (Markus's feedback, Tick's
+// decisions A and D): items and fold lines nest under the goal's content column, and
+// the goal name wraps to two lines instead of ending in "…".
 import { computed } from 'vue'
 import { RouterLink } from 'vue-router'
 import AppIcon from '../AppIcon.vue'
@@ -14,11 +18,11 @@ import GoalProgress from './GoalProgress.vue'
 import GoalItem from './GoalItem.vue'
 import type { GoalsPage } from './goalsPage'
 import { vClipTip } from '../../lib/clipTip'
-import { itemGroups, itemMatches, QUEUE_SHOWN, STATE_LABEL, type Goal, type GoalOutcome } from '../../lib/goals'
+import { doneToday, hoursLeftLine, hoursLeftText, itemGroups, itemMatches, QUEUE_SHOWN, STATE_LABEL, type Goal, type GoalOutcome } from '../../lib/goals'
 import { averageRate, projectionText } from '../../lib/goalRate'
 import type { LiveAgent } from '../../lib/liveAgents'
 
-const props = defineProps<{ goal: Goal; page: GoalsPage; now: number; agents: ReadonlyMap<string, LiveAgent>; term: string; menuOpen: boolean }>()
+const props = defineProps<{ goal: Goal; page: GoalsPage; now: number; agents: ReadonlyMap<string, LiveAgent>; term: string; menuOpen: boolean; wideItems?: boolean }>()
 const emit = defineEmits<{ menu: [anchor: HTMLElement] }>()
 
 const open = computed(() => props.page.isOpen(props.goal))
@@ -45,6 +49,9 @@ const queuedFirst = computed(() => filtering.value ? groups.value.queued : group
 const queuedMore = computed(() => filtering.value ? 0 : Math.max(0, groups.value.queued.length - QUEUE_SHOWN))
 const queuedRest = computed(() => !filtering.value && folds.value.queued ? groups.value.queued.slice(QUEUE_SHOWN) : [])
 const doneShown = computed(() => filtering.value || folds.value.done ? groups.value.done : [])
+const today = computed(() => doneToday(groups.value.done, props.now))
+const left = computed(() => hoursLeftText(props.goal.progress, done.value))
+const leftLine = computed(() => hoursLeftLine(props.goal.progress, done.value))
 const stepsDone = computed(() => props.goal.steps.filter(step => step.state === 'done').length)
 const nextText = computed(() => props.goal.next_step?.text ?? '')
 const handedDetail = (item: GoalOutcome) => props.goal.handed_over?.outcome_id === item.id ? props.goal.handed_over.detail : ''
@@ -85,7 +92,7 @@ const deskLink = computed(() => props.goal.waits.question_ids[0] ? { path: '/dec
       <GoalProgress :goal="goal" :open="page.charts.has(goal.id)" :range="page.range.value" :entry="entry" :now="now" @toggle="page.toggleChart(goal.id)" @range="page.setRange" />
       <RouterLink v-if="goal.waits.count" class="waits mono" :to="deskLink" :data-tip="waitsLabel" :aria-label="waitsLabel"><AppIcon name="person-wait" :size="14" /><span>{{ goal.waits.count }}</span></RouterLink>
       <span v-else />
-      <GoalEta class="goal-eta" :goal-id="goal.id" :eta="goal.eta" :passed="goal.passed" :done="done" :now="now" :projection="projection" :items="goal.items" />
+      <GoalEta class="goal-eta" :goal-id="goal.id" :eta="goal.eta" :passed="goal.passed" :done="done" :now="now" :projection="projection" :items="goal.items" reserve-left :left="left" :left-line="leftLine" />
       <button type="button" class="icon-btn flat sm row-more" aria-haspopup="menu" :aria-expanded="menuOpen" :aria-label="`Actions for ${goal.title}`" @click="emit('menu', $event.currentTarget as HTMLElement)"><AppIcon name="more" :size="14" /></button>
     </div>
     <div :id="`body-${goal.id}`" class="goal-body" role="region" :aria-label="`${goal.title}, items`" :hidden="!open">
@@ -104,22 +111,22 @@ const deskLink = computed(() => props.goal.waits.question_ids[0] ? { path: '/dec
         </div>
         <p v-if="goal.expansion !== 'full'" class="too-large">This goal has too many items to list here.</p>
         <ul class="items">
-          <GoalItem v-for="item in [...groups.moving, ...queuedFirst]" :key="item.id" :item="item" :goal-id="goal.id" :agents="agentsOf(item.session_ids)" :project="project" :now="now" />
+          <GoalItem v-for="item in [...groups.moving, ...queuedFirst]" :key="item.id" :item="item" :goal-id="goal.id" :agents="agentsOf(item.session_ids)" :project="project" :now="now" :wide="wideItems" />
           <li v-if="queuedMore" class="fold-line">
             <button type="button" class="fold-btn" :aria-expanded="!!folds.queued" data-nav @click="page.toggleFold(goal.id, 'queued')">
-              <AppIcon name="chevron-right" :size="12" /><b>{{ queuedMore }}</b> more queued<span class="act"><span :class="{ off: folds.queued }">· show</span><span :class="{ off: !folds.queued }">· hide</span></span>
+              <span class="f-ic"><AppIcon name="chevron-right" :size="12" /></span><b>{{ queuedMore }}</b> more queued<span class="act"><span :class="{ off: folds.queued }">· show</span><span :class="{ off: !folds.queued }">· hide</span></span>
             </button>
           </li>
           <!-- Opening a fold shows its items below it, so the fold line never moves. -->
-          <GoalItem v-for="item in queuedRest" :key="item.id" :item="item" :goal-id="goal.id" :agents="agentsOf(item.session_ids)" :project="project" :now="now" />
-          <GoalItem v-for="item in groups.paused" :key="item.id" :item="item" :goal-id="goal.id" :agents="agentsOf(item.session_ids)" :project="project" :now="now" />
+          <GoalItem v-for="item in queuedRest" :key="item.id" :item="item" :goal-id="goal.id" :agents="agentsOf(item.session_ids)" :project="project" :now="now" :wide="wideItems" />
+          <GoalItem v-for="item in groups.paused" :key="item.id" :item="item" :goal-id="goal.id" :agents="agentsOf(item.session_ids)" :project="project" :now="now" :wide="wideItems" />
           <li v-if="groups.done.length && !filtering" class="fold-line">
             <button type="button" class="fold-btn" :aria-expanded="!!folds.done" data-nav @click="page.toggleFold(goal.id, 'done')">
-              <AppIcon name="chevron-right" :size="12" /><b>{{ groups.done.length }}</b> done<span class="act"><span :class="{ off: folds.done }">· show</span><span :class="{ off: !folds.done }">· hide</span></span>
+              <span class="f-ic"><AppIcon name="chevron-right" :size="12" /></span><b>{{ groups.done.length }}</b> done<span v-if="today" class="today">· {{ today }} today</span><span class="act"><span :class="{ off: folds.done }">· show</span><span :class="{ off: !folds.done }">· hide</span></span>
             </button>
           </li>
-          <GoalItem v-for="item in doneShown" :key="item.id" :item="item" :goal-id="goal.id" :agents="[]" :project="project" :now="now" />
-          <GoalItem v-for="item in groups.handed" :key="item.id" :item="item" :goal-id="goal.id" :agents="[]" :project="project" :now="now" :detail="handedDetail(item)" />
+          <GoalItem v-for="item in doneShown" :key="item.id" :item="item" :goal-id="goal.id" :agents="[]" :project="project" :now="now" :wide="wideItems" />
+          <GoalItem v-for="item in groups.handed" :key="item.id" :item="item" :goal-id="goal.id" :agents="[]" :project="project" :now="now" :wide="wideItems" :detail="handedDetail(item)" />
         </ul>
       </template>
     </div>
@@ -142,12 +149,13 @@ const deskLink = computed(() => props.goal.waits.question_ids[0] ? { path: '/dec
 .goal-toggle:focus-visible { outline: none; box-shadow: none; }
 .goal-toggle svg { transition: transform .15s ease; }
 .goal[data-open="1"] .goal-toggle svg { transform: rotate(90deg); }
-@media (prefers-reduced-motion: reduce) { .goal-toggle svg, .fold-btn svg { transition: none; } }
+@media (prefers-reduced-motion: reduce) { .goal-toggle svg, .fold-btn .f-ic svg { transition: none; } }
 .goal-keys { display: grid; gap: 4px; justify-items: start; align-self: center; }
 .goal-main { display: grid; gap: 3px; min-width: 0; }
-.goal-title { display: flex; align-items: center; gap: 8px; min-width: 0; font-size: 14px; line-height: 1.3; letter-spacing: -.005em; }
-.kind { flex: none; display: inline-grid; place-items: center; color: var(--ink-3); }
-.goal-name { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--ink); font-weight: 650; }
+.goal-title { display: flex; align-items: flex-start; gap: 8px; min-width: 0; font-size: 14px; line-height: 1.3; letter-spacing: -.005em; }
+.kind { flex: none; display: inline-grid; place-items: center; height: 1.3em; color: var(--ink-3); }
+/* D · The name wraps to two lines rather than ending in "…"; a longer one is clamped and its tip has all of it. */
+.goal-name { min-width: 0; display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; overflow: hidden; overflow-wrap: anywhere; color: var(--ink); font-weight: 650; }
 .goal-next { display: flex; align-items: baseline; gap: 6px; min-width: 0; font-size: 13px; line-height: 1.35; color: var(--ink-2); }
 .goal-next .lbl { flex: none; color: var(--ink-3); }
 .goal-next .txt { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
@@ -185,15 +193,19 @@ const deskLink = computed(() => props.goal.waits.question_ids[0] ? { path: '/dec
 .too-large { grid-column: 3 / -3; margin: 0 0 8px; font-size: 12.5px; color: var(--ink-3); }
 
 .fold-line { padding: 0; }
+/* A · The chevron sits in the items' 20 px icon slot, so it lines up with the step and item icons,
+   and the words start at the items' key. */
 .fold-btn { grid-column: 3 / -3; justify-self: start; display: inline-flex; align-items: center; gap: 6px; height: 30px; padding: 0 9px 0 6px; margin-left: -6px; border: 0; border-radius: 8px; background: transparent; color: var(--ink-3); font-size: 12.5px; }
+.fold-btn .f-ic { flex: none; display: inline-grid; place-items: center; width: 20px; margin-right: 2px; }
 .fold-btn b { font-weight: 600; color: var(--ink-2); font-variant-numeric: tabular-nums; }
+.fold-btn .today { color: var(--ink-3); font-variant-numeric: tabular-nums; }
 /* "show" and "hide" share one box, so the button never changes width. */
 .fold-btn .act { display: inline-grid; color: var(--teal-ink); font-weight: 600; }
 .fold-btn .act > span { grid-area: 1 / 1; }
 .fold-btn .act > .off { visibility: hidden; }
 .fold-btn:hover { background: var(--row-hover); color: var(--ink-2); }
-.fold-btn svg { transition: transform .15s ease; }
-.fold-btn[aria-expanded="true"] svg { transform: rotate(90deg); }
+.fold-btn .f-ic svg { transition: transform .15s ease; }
+.fold-btn[aria-expanded="true"] .f-ic svg { transform: rotate(90deg); }
 
 /* Tablet and small laptops: the badge keeps only its faces; below 1200 the counts step aside. */
 @media (max-width: 1399px) {
@@ -221,6 +233,7 @@ const deskLink = computed(() => props.goal.waits.question_ids[0] ? { path: '/dec
   .phone-next { display: block; margin: 0; padding: 0 0 6px; font-size: 13.5px; line-height: 1.4; color: var(--ink-2); }
   .phone-next .lbl { color: var(--ink-3); }
   .fold-btn { grid-column: 2 / -1; height: 44px; margin-left: -4px; font-size: 13px; }
+  .fold-btn .f-ic { width: auto; margin-right: 0; }
 }
 /* Touch: the agent chips keep their look and get a 44 px hit area. */
 @media (max-width: 760px), (pointer: coarse) {

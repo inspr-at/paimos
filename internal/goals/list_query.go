@@ -48,7 +48,7 @@ func listPageQuery() string {
  JOIN relation_targets n ON n.id=r.target_node_id
  ), work_roots AS MATERIALIZED (SELECT DISTINCT id FROM serves WHERE NOT deleted AND slug IN ('work','ticket','task','epic')),
  page_scope AS MATERIALIZED (SELECT * FROM aeon_work_scope(ARRAY(SELECT id FROM work_roots))),
- facts(root,id,done,hours,sessions,pr,review,paused,queued,blocked) AS MATERIALIZED (
+ facts(root,id,done,hours,sessions,pr,review,paused,queued,blocked,merged) AS MATERIALIZED (
  WITH scope AS MATERIALIZED (SELECT * FROM page_scope), ` + leafFactsProjectionSQL + `
  ), root_eta AS MATERIALIZED (` + eta.AggregateScopeSQL("page_scope") + `),
  badges AS MATERIALIZED (

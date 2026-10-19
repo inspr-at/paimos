@@ -31,6 +31,8 @@ func New(pool *pgxpool.Pool) *module { return &module{pool: pool, now: time.Now}
 func (m *module) Mount(mux *http.ServeMux) {
 	mux.HandleFunc("GET /api/goals/{goalId}/series", reportercontract.WithHeader(reportercontract.Goals, m.series))
 	mux.HandleFunc("GET /api/goals", reportercontract.WithHeader(reportercontract.Goals, m.list))
+	mux.HandleFunc("GET /api/goals/status-note", reportercontract.WithHeader(reportercontract.Goals, m.statusNote))
+	mux.HandleFunc("PATCH /api/goals/status-note", reportercontract.WithHeader(reportercontract.Goals, m.setStatusNote))
 	mux.HandleFunc("GET /api/goals/{goalId}", reportercontract.WithHeader(reportercontract.Goals, m.get))
 	mux.HandleFunc("GET /api/goals/{goalId}/history", reportercontract.WithHeader(reportercontract.Goals, m.history))
 	mux.HandleFunc("POST /api/goals", reportercontract.WithHeader(reportercontract.Goals, m.create))

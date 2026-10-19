@@ -5,6 +5,9 @@
 // flipping above when there is no room. A passed ETA (the server says so: more than
 // ten minutes and not done) shows a gold clock and "passed · update pending". The
 // goal's popover adds where the recent pace would land it; LANDS stays the agent's.
+// A goal row also keeps one muted line under the ETA for the open estimate hours,
+// "~40 h left" (AEON-1494 decision 3), reserved while unknown so nothing moves when
+// it arrives; the popover says it in words. Phones drop the line.
 import { computed, onBeforeUnmount, ref } from 'vue'
 import AppIcon from '../AppIcon.vue'
 import GoalTip, { type TipLine } from './GoalTip.vue'
@@ -13,7 +16,11 @@ import { useLiveAgents } from '../../stores/liveAgents'
 import { who as agentName } from '../../lib/liveAgents'
 import { etaChanges, etaText, goalHistory, passedMinutes, whenText, type GoalETA, type GoalOutcome, type EtaChange } from '../../lib/goals'
 
-const props = defineProps<{ goalId: string; outcomeId?: string; eta?: GoalETA; passed?: boolean; done?: boolean; now: number; projection?: string | null; items?: readonly GoalOutcome[] }>()
+const props = defineProps<{
+  goalId: string; outcomeId?: string; eta?: GoalETA; passed?: boolean; done?: boolean; now: number; projection?: string | null; items?: readonly GoalOutcome[]
+  // Goal rows: the reserved hours-left line and its popover sentence.
+  reserveLeft?: boolean; left?: string; leftLine?: TipLine | null
+}>()
 const session = useSession()
 const live = useLiveAgents()
 
@@ -21,7 +28,7 @@ const text = computed(() => etaText(props.eta, props.now))
 const passed = computed(() => !!props.passed && !props.done && !!text.value)
 const hasHistory = computed(() => props.eta?.source === 'agent' || props.eta?.source === 'worker')
 // The popover has something to say: a set ETA, or (for a goal) a projection.
-const opens = computed(() => !props.done && (!!text.value || !!props.projection))
+const opens = computed(() => !props.done && (!!text.value || !!props.projection || !!props.leftLine))
 
 // Names this browser already knows: you, or an agent at work right now. Otherwise the time alone.
 function name(id: string | undefined): string {
@@ -65,6 +72,7 @@ function linesFor(changes: EtaChange[]): TipLine[] {
     lines.push({ text: `${minutes < 90 ? `${minutes} min` : `${Math.round(minutes / 60)} h`} past · update pending`, attention: true })
   }
   if (props.projection) lines.push({ text: props.projection })
+  if (props.leftLine) lines.push(props.leftLine)
   return lines
 }
 
@@ -93,18 +101,21 @@ function focus(event: FocusEvent) { if ((event.target as HTMLElement).matches(':
 function tap(event: MouseEvent) { if (matchMedia('(hover: none)').matches) { event.stopPropagation(); if (shown.value) hide(); else show(0) } }
 function key(event: KeyboardEvent) { if (event.key === 'Escape' && shown.value) { event.preventDefault(); event.stopPropagation(); hide() } }
 onBeforeUnmount(hide)
-const label = computed(() => `${text.value || 'No ETA'}${passed.value ? ', passed, update pending' : ''}${opens.value ? '. ETA history' : ''}`)
+const left = computed(() => props.reserveLeft && !props.done ? props.left ?? '' : '')
+const label = computed(() => `${text.value || 'No ETA'}${passed.value ? ', passed, update pending' : ''}${left.value ? `, about ${left.value.replace(/^~/, '')}` : ''}${opens.value ? '. ETA history' : ''}`)
 </script>
 
 <template>
   <button
-    v-if="opens" ref="button" type="button" class="eta-btn" :class="{ passed }" :aria-label="label"
+    v-if="opens" ref="button" type="button" class="eta-btn" :class="{ passed, 'has-left': reserveLeft }" :aria-label="label"
     @pointerenter="enter" @pointerleave="hide" @focus="focus" @blur="hide" @click="tap" @keydown="key"
   >
     <span class="t"><AppIcon v-if="passed" name="clock" :size="13" />{{ text || '—' }}</span>
     <span v-if="passed" class="note">passed · update pending</span>
+    <span v-if="reserveLeft" class="left" :aria-hidden="left ? undefined : 'true'">{{ left }}</span>
     <GoalTip v-if="shown && button" :anchor="button" :lines="shown" prefer="below" align="end" />
   </button>
+  <span v-else-if="reserveLeft" class="eta-btn none has-left" :aria-label="text || 'No ETA'"><span class="t">{{ text || '—' }}</span><span class="left" aria-hidden="true" /></span>
   <span v-else class="eta-btn none" :aria-label="text || 'No ETA'">{{ text || '—' }}</span>
 </template>
 
@@ -115,9 +126,15 @@ const label = computed(() => `${text.value || 'No ETA'}${passed.value ? ', passe
 .eta-btn.passed { color: var(--warn-ink); }
 .eta-btn.passed .t { font-weight: 600; }
 .eta-btn.none { color: var(--ink-3); }
+/* Hours left: one muted line, always reserved on goal rows. With a passed ETA the cell
+   holds three lines (16 + 14 + 14 px) and still fits the 64 px row. */
+.eta-btn.has-left .t { line-height: 16px; }
+.eta-btn.has-left .note { line-height: 14px; }
+.eta-btn .left { min-height: 14px; font-size: 11.5px; line-height: 14px; color: var(--ink-3); white-space: nowrap; font-variant-numeric: tabular-nums; }
 button.eta-btn:hover { background: var(--row-hover); }
 .eta-btn:focus-visible { outline: none; box-shadow: var(--focus-ring); }
 @media (max-width: 760px) {
+  .eta-btn .left { display: none; }
   .eta-btn { position: relative; }
   .eta-btn::before { content: ''; position: absolute; top: 50%; left: 50%; width: max(100%, 44px); height: max(100%, 44px); transform: translate(-50%, -50%); }
   .eta-btn.none::before { display: none; }

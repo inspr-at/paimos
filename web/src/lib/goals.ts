@@ -18,11 +18,15 @@ export interface GoalOutcome {
   id: string; ref: string; label: string; note: string; position: number; keys: string[]
   state: GoalState; reason?: string; session_ids: string[]; eta: GoalETA; passed: boolean
   coverage: { estimated_leaves: number; total_leaves: number }; weight: number; handed_over: boolean
+  // AEON-1494: who last wrote the note and when; a done item's latest merge.
+  note_by?: string; note_by_name?: string; note_at?: string; merged_at?: string
 }
 export interface GoalProgress {
   pct: number; computed_pct: number; source: 'computed' | 'override'; basis: 'count' | 'estimate' | 'mixed'
   total: number; done: number; items_without_estimate: number; items_partially_estimated: number
   override_by?: string; override_at?: string; override_note?: string
+  // AEON-1494: open estimate hours and the open work without an estimate.
+  remaining_hours?: number; remaining_unestimated?: number
 }
 export interface GoalCounts { moving: number; queued: number; paused: number; done: number }
 export interface GoalProjectBadge { id: string; key: string; name: string; group_ids: string[] }
@@ -35,9 +39,12 @@ export interface Goal {
   handed_over?: { outcome_id: string; label: string; detail: string; at: string; by: string }
   read_through: number; generation: number
 }
+// The workspace status note (AEON-1494): one paragraph agents write for the workspace.
+export interface GoalStatusNote { text: string; by: string; by_name: string; set_at: string }
 export interface GoalList {
   items: Goal[]; totals: GoalCounts; totals_partial: boolean; quiet_projects: { count: number; keys: string[] }
   next_cursor?: string; truncated: boolean; read_through: number; generation: number
+  status_note?: GoalStatusNote; eta_last_set_at?: string
 }
 export interface GoalSeries { range: GoalRange; expansion: 'full' | 'too_large'; points?: (RatePoint & { basis: string; keys: string[] })[]; read_through: number; generation: number }
 export interface GoalEvent { id: number; actor_principal_id: string; node_id: string; type: string; before?: unknown; after?: unknown; at: string }
@@ -145,3 +152,48 @@ export function itemMatches(item: GoalOutcome, needle: string): boolean {
 }
 // A ticket key opens its ticket; its project's route key is the key's prefix.
 export const ticketHref = (key: string) => ticketPath(key.replace(/-\d+$/, ''), key)
+
+// ---------- AEON-1494: the gaps In flight closed ----------
+// A goal's percent: the rollup over its own items, unless a person set it by hand.
+// A hand-set percent always carries the pen and says so; nothing else does.
+export function goalPercent(progress: GoalProgress): { pct: number; byHand: boolean; tip?: string } {
+  const byHand = progress.source === 'override'
+  const value = byHand || !Number.isFinite(progress.computed_pct) ? progress.pct : progress.computed_pct
+  const pct = Math.max(0, Math.min(100, Math.round(value)))
+  return byHand ? { pct, byHand, tip: `Progress set by hand${progress.override_note ? ` · ${progress.override_note}` : ''}` } : { pct, byHand }
+}
+// "~40 h left": open estimate hours, whole hours (at least 1). Nothing while unknown or done.
+export function hoursLeftText(progress: GoalProgress | undefined, done: boolean): string {
+  const hours = progress?.remaining_hours ?? 0
+  return done || !(hours > 0) ? '' : `~${Math.max(1, Math.round(hours))} h left`
+}
+// The ETA popover's sentence for the same number, honest about work without an estimate.
+export function hoursLeftLine(progress: GoalProgress | undefined, done: boolean): { text: string; muted: string } | null {
+  if (!hoursLeftText(progress, done)) return null
+  const hours = Math.max(1, Math.round(progress!.remaining_hours!)), open = progress!.remaining_unestimated ?? 0
+  return { text: `About ${hours} agent ${hours === 1 ? 'hour' : 'hours'} of work left`, muted: open ? ` (estimates; ${open} open ${open === 1 ? 'ticket has' : 'tickets have'} none)` : ' (estimates)' }
+}
+// The Done fold's "· N today": done items whose latest merge falls on the viewer's day.
+export function doneToday(items: readonly GoalOutcome[], now: number, timeZone?: string): number {
+  const day = new Intl.DateTimeFormat('en-CA', { timeZone }).format(new Date(now))
+  return items.filter(item => {
+    const at = item.merged_at ? Date.parse(item.merged_at) : NaN
+    return !Number.isNaN(at) && at <= now && new Intl.DateTimeFormat('en-CA', { timeZone }).format(new Date(at)) === day
+  }).length
+}
+// "2 h ago" for the status note's byline.
+export function agoText(iso: string, now: number): string {
+  const at = Date.parse(iso)
+  if (Number.isNaN(at)) return ''
+  const minutes = Math.max(0, Math.round((now - at) / 60_000))
+  if (minutes < 1) return 'just now'
+  if (minutes < 60) return `${minutes} min ago`
+  const hours = Math.round(minutes / 60)
+  return hours < 48 ? `${hours} h ago` : `${Math.round(hours / 24)} d ago`
+}
+// An item note's closing words: "· AEON-LEAD 18:52" (only the time when the author is unknown).
+export function noteByline(item: Pick<GoalOutcome, 'note_by_name' | 'note_at'>, now: number, timeZone?: string): string {
+  const at = item.note_at ? Date.parse(item.note_at) : NaN
+  const parts = [item.note_by_name?.trim() ?? '', Number.isNaN(at) ? '' : whenText(at, now, timeZone)].filter(Boolean)
+  return parts.length ? `· ${parts.join(' ')}` : ''
+}

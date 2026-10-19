@@ -9,7 +9,7 @@ data is created. The tenant goal/outcome kinds are restored lazily on an
 authorized create or fresh update, including a release's first outcome.
 
 The contract is authored in `api/areas/goals.yaml` and served with
-`Aeon-Contract: goals/1.4`. It provides:
+`Aeon-Contract: goals/1.5`. It provides:
 
 - `POST /api/goals` for a goal title and optional project UUID.
 - `PATCH /api/goals/{key-or-id}` for ETA, steps, a flagged progress override,
@@ -19,6 +19,8 @@ The contract is authored in `api/areas/goals.yaml` and served with
 - `GET /api/goals/{key-or-id}/history` for descending event history. An
   `outcome` UUID keeps the same timeline after a move.
 - `GET /api/goals/{key-or-id}/series?range=24h|7d|30d` for recorded progress.
+- `GET` and `PATCH /api/goals/status-note` for the workspace status note
+  (AEON-1494).
 
 Writes require `nodes.write` in each affected goal's current scope. A required
 `Idempotency-Key` binds the tenant, actor, method, immutable target and canonical
@@ -96,3 +98,24 @@ require an explicit stable `--idempotency-key`. Update accepts bounded JSON via
 `--file PATH|-`, or `--eta`, `--eta-at` and `--progress N|clear`; `--dry-run`
 validates structural bounds and prints the request. The server checks relative
 ETA clock bounds for a fresh receipt. The UI belongs to AEON-1457.
+
+## Status note, item notes and the In-flight read model (AEON-1494)
+
+The workspace status note is one row per tenant (`goal_status_notes`, migration
+1362, tenant RLS): text (1–2000 characters), author and time. `PATCH
+/api/goals/status-note` takes `{"text": "…"}` or `{"text": null}` and the usual
+`Idempotency-Key`; it requires `nodes.write` in the workspace, rechecked under the
+tenant and tree fences before receipt replay. Repeating the current text changes
+nothing. Each change appends `goal.status_note_changed` (no node; before/after
+snapshots), which `topics=goals` subscribers and the event stream receive when they
+read the whole workspace. Reads need workspace `nodes.read`; `GET /api/goals`
+carries the note as `status_note` only for such readers.
+
+An outcome's `note` now records `note_by` and `note_at` when its text changes;
+reads add `note_by_name`. Null or blank text clears all three. Reads also add, per
+done item, `merged_at` (the latest `merged_at` a merge recorded on its done work
+leaves); per goal, `progress.remaining_hours` and `progress.remaining_unestimated`
+(the open leaves of unfinished items, each once); and on the list
+`eta_last_set_at`, the latest authored ETA over every goal and item the project/group
+filters match. The CLI adds `goal note --workspace [TEXT|--clear]` and
+`goal note GOAL --item REF (TEXT|--clear)`.

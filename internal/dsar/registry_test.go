@@ -91,6 +91,12 @@ func TestInventoryAndAdapters(t *testing.T) {
 	if !contains(byTable["agent_accounts"].Review, "quota_latest") || contains(byTable["agent_accounts"].Export, "quota_latest") || contains(byTable["agent_accounts"].Metadata, "quota_latest") || contains(byTable["agent_accounts"].Secret, "quota_latest") {
 		t.Fatal("latest quota snapshot must stay in review")
 	}
+	// The workspace status note is personal free text written by one principal.
+	// Body stays on the review list (it can name other people); set_by is the subject.
+	notes := byTable["goal_status_notes"]
+	if !contains(notes.Review, "body") || contains(notes.Export, "body") || !contains(notes.Subjects, "set_by") || !contains(notes.Metadata, "tenant_id") || !contains(notes.Metadata, "set_at") {
+		t.Fatal("workspace status note needs its body reviewed and its author as the subject")
+	}
 	bad := append([]Domain{}, domains...)
 	bad[0].Export += " email"
 	bad[0].Secret += " email"
