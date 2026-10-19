@@ -325,9 +325,9 @@ function modeKeys(event: KeyboardEvent, key: string) {
 /* A narrow row (phones): the control takes the full width and its units wrap; the live state ends the last line. */
 @container cap (max-width: 640px) {
   .cdial { flex: 1 1 100%; row-gap: 4px; padding: 4px 6px; border-radius: 22px; }
-  /* The live state always ends a second line on the right, loading or loaded. */
-  /* A 100% break inside the dial's border must not widen it: scrollWidth still counts the break. */
-  .cd-break { display: block; flex: 0 0 100%; width: 0; min-width: 0; max-width: 100%; height: 0; }
+  /* The live state always ends a second line on the right, loading or loaded.
+     width, not flex-basis: a percentage basis uses the border box and widens the dial. */
+  .cd-break { display: block; flex: none; width: 100%; height: 0; }
   .cd-live { margin-left: auto; }
   .cd-live-sk { display: flex; align-items: center; justify-content: flex-end; flex: 1 1 auto; height: 28px; }
   .cd-live-sk .skeleton { width: 150px; }

@@ -233,6 +233,10 @@ function place() {
    end has no room, both sit on the side that has it (data-side, set as the plate opens). */
 @container cap (max-width: 899px) {
   .du .pm, .du .pm:disabled { position: absolute; top: 50%; translate: 0 -50%; opacity: 0; pointer-events: none; }
+  /* A closed plate's −, + and shadow sit outside the unit. Left in the tree, the last
+     unit's + widens the dial's scrollWidth on a phone sheet. They return on hover, focus or open. */
+  .du:not(:hover, :focus-within, .open) .pm { display: none; }
+  .du:not(:hover, :focus-within, .open)::before { content: none; }
   .du .dec { left: calc(-1 * (var(--pm-w) + var(--pm-gap))); }
   .du .inc { right: calc(-1 * (var(--pm-w) + var(--pm-gap))); }
   .du[data-side="end"] .dec { left: calc(100% + var(--pm-gap)); }
