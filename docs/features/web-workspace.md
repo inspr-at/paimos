@@ -359,8 +359,9 @@ sign-in, and 404 screenshots in both themes at 1280×720 and 390×844 to
 `/tmp/aeon-p05-shots/`. Screenshots and browser test output are not committed.
 
 **Full UI QA** runs the complete `playwright.ui.config.ts` inventory in five
-hosted shards with one browser worker each and zero retries. It runs nightly on
-`main` at 02:37 UTC. To request a full QA, dispatch `full-ui-qa.yml` with an
+hosted shards plus the complete `playwright.perf.config.ts` inventory against a
+fresh production build. Every shard uses one browser worker and zero retries.
+It runs nightly on `main` at 02:37 UTC. To request a full QA, dispatch `full-ui-qa.yml` with an
 optional `ref` (branch, tag or commit; blank defaults to `main`), or add the
 `full-qa` label to a PR. Updates to a labeled PR run the suite again; unrelated
 label additions do not. PR runs test the merge commit. Every shard checks out

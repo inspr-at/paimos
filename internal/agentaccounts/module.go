@@ -43,6 +43,7 @@ func (m *Module) Mount(mux *http.ServeMux) {
 	handle("PUT /api/agent-accounts/{accountId}/residency-evidence", m.residencyEvidence)
 	handle("GET /api/agent-accounts/readiness", m.readinessList)
 	handle("GET /api/agent-accounts/quota-warnings", m.warningSessions)
+	handle("GET /api/agent-accounts/quota-outlook", m.quotaOutlook)
 	handle("GET /api/settings/quota-warnings", m.warningSettings)
 	handle("PUT /api/settings/quota-warnings", m.warningSettings)
 	handle("POST /api/agent-accounts/{accountId}/check", m.check)

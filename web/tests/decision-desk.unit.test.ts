@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import { afterEach, expect, it, vi } from 'vitest'
-import { answerFor, arrivals, CUSTOM_ANSWER, deskLinkItem, draftFor, macPlatform, newRound, outcomeUnavailable, submitModifier, type DeskDraft } from '../src/lib/decisionDesk'
+import { answerFor, arrivals, CUSTOM_ANSWER, deskLinkItem, deskListKey, draftFor, macPlatform, newRound, outcomeUnavailable, submitModifier, type DeskDraft, type DeskProjection } from '../src/lib/decisionDesk'
 import { commitDesk, emptySources, loadDesk, loadMoreQuestions, readQuestions, questionItem, approvalItem, actionItem, nativeTierAdapter, ruleItem, type DeskRead, type Question } from '../src/lib/decisionDeskApi'
 
 const question = (): Question => ({ id: 'q1', project_id: 'project', revision: 1, state: 'open', suggested_outcome: 'once', suggestion_reason: 'ticket_default',
@@ -12,6 +12,26 @@ function continuationRead(): DeskRead {
   return { items: [item], sources, warnings: [], hasMore: { open: true, answered: false },
     questionPositions: { open: { pages: 1, cursors: [] }, answered: undefined }, projectNames: new Map([['project', 'Aeon']]), nextKeyTrims: {} }
 }
+it('shows the ticket key on a Desk list and falls back to the project key', async () => {
+  expect(deskListKey({ ticket_key: ' AEON-1394 ' }, 'AEON')).toBe('AEON-1394')
+  expect(deskListKey({ ticketKey: 'AEON-1401' }, 'AEON')).toBe('AEON-1401')
+  expect(deskListKey({ ticket_key: '  ', ticketKey: null }, 'PHAROS')).toBe('PHAROS')
+  expect(deskListKey({}, 'PHAROS')).toBe('PHAROS')
+  expect(deskListKey({ ticket_key: null }, '')).toBe('')
+  const named: Question = { ...question(), id: 'q-named', input: { ...question().input, ticket_id: 'n-ticket' } }
+  vi.stubGlobal('fetch', vi.fn(async (url: string) => {
+    if (url === '/api/questions/q-named') return Response.json(named)
+    if (String(url).includes('/approvals')) return Response.json([])
+    return Response.json({ items: [], has_more: false })
+  }))
+  const projection: DeskProjection = { items: [
+    { id: 'q-named', kind: 'question', project_id: 'project', revision: 1, title: 'Which index?', created_at: '', held: true, href: '', source: '/api/questions/q-named', ticket_key: 'AEON-1394' },
+    { id: 'q-plain', kind: 'question', project_id: 'project', revision: 1, title: 'Later?', created_at: '', held: false, href: '', source: '/api/questions/q-plain' },
+  ], counts: { open: 2, held: 1, chores: 0 }, has_more: false, as_of: '' }
+  const result = await loadDesk(undefined, {}, projection)
+  expect(result.items.find(item => item.id === 'q:q-named')?.ticketKey).toBe('AEON-1394')
+  expect(result.items.find(item => item.id === 'q:q-plain')?.ticketKey).toBeUndefined()
+})
 const heldRequest = (id: string) => ({ id, sender_principal_id: 'agent', recipient_principal_id: 'person', to: 'person', body: 'Please steer', sent_event_id: 1,
   is_action_request: true, expects_reply: true, delivery_level: 'simple' as const, status: 'held' as const, reply_obligation: 'open' as const })
 it('keeps canonical membership and order when native history and Open pages continue', async () => {

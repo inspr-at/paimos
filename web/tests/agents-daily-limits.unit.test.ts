@@ -1,12 +1,12 @@
 // SPDX-License-Identifier: AGPL-3.0-only
-// AEON-1036: the daily limit's words, bar and writes. The risk these guard: the dial saying "on pace"
+// AEON-1036: the daily limit's words and writes. The risk these guard: the dial saying "on pace"
 // or "at the limit" for a reading it does not have, and a daily edit that rewrites the total or loses
 // another harness's settings.
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { effectScope, ref, type EffectScope } from 'vue'
 import type { PlanSnapshot } from '../src/lib/agentsWorking'
 import {
-  atLimitWords, boostNumber, chipTip, dailyBar, dailyOf, dailyView, detailHeadline, makeBoost, needsAttention, paceSummary, resetsLine, sameDaily, stateWords, todayLine, typedPercent, typedPoints, usageLine, weekParts,
+  atLimitWords, boostNumber, chipTip, dailyOf, dailyView, detailHeadline, makeBoost, needsAttention, paceSummary, resetsLine, sameDaily, stateWords, todayLine, typedPercent, typedPoints, usageLine,
   type DailyAccount, type DailySettings, type DailyState,
 } from '../src/lib/dailyLimits'
 import { DEFAULT_DIAL, readDialPrefs, selectedHarness, withDialDefaults } from '../src/lib/dialPrefs'
@@ -100,26 +100,11 @@ describe('what the dial may say about a daily reading', () => {
 })
 
 describe('the numbers on the right', () => {
-  it('reads week used and left, then today’s points with the share, in the person’s words', () => {
+  it('reads today’s points with the share, in the person’s words', () => {
     const v = view(state({ today_points_used: 7, today_points_allowed: 10 }))
-    expect(weekParts(v, 'UTC')).toEqual({ strong: '47 % used · 53 % left', rest: ' this week · resets Wed 14 Oct 17:00' })
     expect(todayLine(v)).toBe('Today: 7 of 10 percentage points used · 3 left today')
     expect(paceSummary(v)).toBe('Stay on pace · 10 percentage points a day')
-    expect(weekParts(view(state({}, [account({ used_pct: null })])), 'UTC').rest).toBe('This week: not measured right now')
     expect(todayLine(view(state({ today_points_used: null })))).toBe('Today: not measured yet')
-    const several = view(state({}, [account(), account({ account_id: 'a2', label: 'other' })]))
-    expect(weekParts(several, 'UTC').rest.startsWith(' on markus.barta this week')).toBe(true)
-  })
-  it('draws today’s bar teal to the share, gold over it and red past the limit, and the week when today is unknown', () => {
-    const on = dailyBar(view(state({ today_points_used: 7, today_points_allowed: 10 })))!
-    expect(on.mode).toBe('today'); expect(on.teal).toBeCloseTo(70); expect(on.gold).toBe(0); expect(on.red).toBe(0); expect(on.free).toBeCloseTo(30); expect(on.tick).toBeNull()
-    const over = dailyBar(view(state({ today_points_used: 14, today_points_allowed: 20, over_pace_points: 4 })))!
-    expect(over.teal).toBeCloseTo(50); expect(over.gold).toBeCloseTo(20); expect(over.free).toBeCloseTo(30); expect(over.tick).toEqual({ at: 50, label: 'pace 10' })
-    const past = dailyBar(view(state({ state: 'at_limit', today_points_used: 11, today_points_allowed: 10 }, [account({ used_pct: 51 })])))!
-    expect(past.teal + past.gold + past.red + past.free).toBeCloseTo(100); expect(past.red).toBeCloseTo(100 / 11); expect(past.free).toBe(0)
-    const week = dailyBar(view(state({ today_points_used: null })))!
-    expect(week).toMatchObject({ mode: 'week', teal: 47, free: 53 })
-    expect(dailyBar(view(state({}, [account({ used_pct: null })])))).toBeNull()
   })
   it('shows vendor-reported resets only', () => {
     expect(resetsLine(account({ resets: { count: 2, expires_at: ['2026-10-18T16:00:00Z', '2026-11-06T16:00:00Z'] } }), 'UTC')).toBe('2 resets · first expires Sun 18 Oct 16:00')
