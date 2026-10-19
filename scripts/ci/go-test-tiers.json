@@ -5860,6 +5860,8 @@
     ,
     {"kind":"go","package":"internal/db","name":"TestTagKindMigrationSeedsMissingAndPreservesCustomTenants","tier":"ESSENTIAL"}
     ,
+    {"kind":"go","package":"internal/db","name":"TestTelemetryRetentionMigrationRoleCanInstallPruneFlag","tier":"ESSENTIAL"}
+    ,
     {"kind":"go","package":"internal/db","name":"TestTenantGuardRefreshesVisibilityAfterRevocation","tier":"NIGHTLY"}
     ,
     {"kind":"go","package":"internal/db","name":"TestTicketBenefitMigrationPreservesHistoryAndCustomSchema","tier":"GATED-FULL"}
@@ -6555,6 +6557,8 @@
     {"kind":"go","package":"internal/events","name":"TestSummarizeNodeChanges","tags":["delete-candidate"],"tier":"GATED-FULL"}
     ,
     {"kind":"go","package":"internal/events","name":"TestTelemetryRetentionBatchedScopedAndIdempotent","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/events","name":"TestTelemetryRetentionPruneFlagDoesNotLeak","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/events","name":"TestTelemetryRetentionSkipsUndoAndKeepsAppendOnlyGuard","tier":"ESSENTIAL"}
     ,

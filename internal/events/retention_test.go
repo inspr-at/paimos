@@ -4,6 +4,7 @@ package events
 import (
 	"context"
 	"errors"
+	"strings"
 	"testing"
 	"time"
 
@@ -159,5 +160,116 @@ func TestTelemetryRetentionSkipsUndoAndKeepsAppendOnlyGuard(t *testing.T) {
 		if !errors.As(err, &pgErr) || pgErr.Code != "P0001" || pgErr.Message != "events are append-only" {
 			t.Fatalf("append-only guard failed for the wrong reason: %v", err)
 		}
+	}
+}
+
+// Risk: aeon_prune_telemetry leaves aeon.telemetry_prune on, so the same
+// service transaction can delete further telemetry after the bounded call.
+// The function also must not store that placeholder in proconfig: the
+// NOSUPERUSER migration role cannot set it (SQLSTATE 42501).
+func TestTelemetryRetentionPruneFlagDoesNotLeak(t *testing.T) {
+	d, a, _ := fixture(t)
+	old := time.Now().Add(-TelemetryRetention - time.Hour)
+	var first, second Event
+	err := db.InTenant(dbtest.Seed(t.Context()), d.App, a.TenantID, func(tx pgx.Tx) error {
+		var err error
+		first, err = Append(t.Context(), tx, a, Change{Type: "account.probed", After: map[string]bool{"ok": true}, At: &old})
+		if err != nil {
+			return err
+		}
+		second, err = Append(t.Context(), tx, a, Change{Type: "account.probed", After: map[string]bool{"ok": true}, At: &old})
+		return err
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	err = db.InTenant(db.AllProjects(t.Context(), "telemetry retention"), d.App, a.TenantID, func(tx pgx.Tx) error {
+		var configs []string
+		if err := tx.QueryRow(t.Context(), `SELECT coalesce(p.proconfig,'{}'::text[]) FROM pg_proc p JOIN pg_namespace n ON n.oid=p.pronamespace WHERE n.nspname='public' AND p.proname='aeon_prune_telemetry'`).Scan(&configs); err != nil {
+			return err
+		}
+		for _, item := range configs {
+			if strings.Contains(item, "aeon.telemetry_prune") {
+				t.Fatalf("function configuration stores the prune placeholder: %v", configs)
+			}
+		}
+		var before string
+		if err := tx.QueryRow(t.Context(), `SELECT coalesce(current_setting('aeon.telemetry_prune',true),'')`).Scan(&before); err != nil {
+			return err
+		}
+		if before == "on" {
+			t.Fatal("service transaction started with the prune flag set")
+		}
+		rows, err := tx.Query(t.Context(), `SELECT event_type,deleted,undo_protected FROM aeon_prune_telemetry($1,$2,1)`, a.TenantID, old.Add(time.Minute))
+		if err != nil {
+			return err
+		}
+		defer rows.Close()
+		var probes, beats int64
+		var protected bool
+		for rows.Next() {
+			var typ string
+			var count int64
+			var rowProtected bool
+			if err := rows.Scan(&typ, &count, &rowProtected); err != nil {
+				return err
+			}
+			protected = protected || rowProtected
+			switch typ {
+			case "account.probed":
+				probes = count
+			case "harness.heartbeat":
+				beats = count
+			default:
+				t.Fatalf("unexpected retention type %s", typ)
+			}
+		}
+		if err := rows.Err(); err != nil {
+			return err
+		}
+		if protected || probes != 1 || beats != 0 {
+			t.Fatalf("bounded prune = probes %d beats %d protected %v", probes, beats, protected)
+		}
+		var after string
+		if err := tx.QueryRow(t.Context(), `SELECT coalesce(current_setting('aeon.telemetry_prune',true),'')`).Scan(&after); err != nil {
+			return err
+		}
+		if after != before {
+			t.Fatalf("prune flag changed from %q to %q", before, after)
+		}
+		var gone, kept int
+		if err := tx.QueryRow(t.Context(), `SELECT count(*) FILTER (WHERE id=$2), count(*) FILTER (WHERE id=$3) FROM events WHERE tenant_id=$1`, a.TenantID, first.ID, second.ID).Scan(&gone, &kept); err != nil {
+			return err
+		}
+		if gone != 0 || kept != 1 {
+			t.Fatalf("batch did not keep the later row: deleted-present %d survivor %d", gone, kept)
+		}
+		// RLS may hide the row, or the append-only trigger may reject it. Either
+		// way the same transaction must not delete it. A leaked flag would.
+		if _, err := tx.Exec(t.Context(), `SAVEPOINT retention_probe`); err != nil {
+			return err
+		}
+		tag, delErr := tx.Exec(t.Context(), `DELETE FROM events WHERE tenant_id=$1 AND id=$2`, a.TenantID, second.ID)
+		if _, err := tx.Exec(t.Context(), `ROLLBACK TO SAVEPOINT retention_probe`); err != nil {
+			return err
+		}
+		if delErr != nil {
+			var pgErr *pgconn.PgError
+			if !errors.As(delErr, &pgErr) || pgErr.Code != "P0001" || pgErr.Message != "events are append-only" {
+				t.Fatalf("same-transaction delete failed for the wrong reason: %v", delErr)
+			}
+		} else if tag.RowsAffected() != 0 {
+			t.Fatal("telemetry delete succeeded after aeon_prune_telemetry returned")
+		}
+		if err := tx.QueryRow(t.Context(), `SELECT count(*) FROM events WHERE tenant_id=$1 AND id=$2`, a.TenantID, second.ID).Scan(&kept); err != nil {
+			return err
+		}
+		if kept != 1 {
+			t.Fatal("same-transaction delete removed telemetry after the retention call")
+		}
+		return nil
+	})
+	if err != nil {
+		t.Fatal(err)
 	}
 }
