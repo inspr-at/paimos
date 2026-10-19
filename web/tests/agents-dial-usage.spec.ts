@@ -112,10 +112,22 @@ for (const width of [1440, 1024, 390]) {
     await expect(acc.nth(0).locator('.ub-fc')).toHaveText('waits for refill')
     // The forecast never truncates ("empty ~Mon 20:20" whole); the account name yields first.
     await expectWhole(claude.locator('.ub-fc'))
-    // Evidence with the rows centred in the viewport, clear of the fixed app status bar.
+    // Evidence with the usage block (headline to rows) centred in the viewport, clear of the fixed app
+    // bars. Every scroller goes back afterwards, so the later steps (a hover tip among them) start unchanged.
     const rowsShot = async (name: string) => {
-      await claude.locator('.ub-list').evaluate(el => el.scrollIntoView({ block: 'center' }))
+      const list = claude.locator('.ub-list')
+      const saved = await list.evaluate(el => {
+        const offsets: [number, number][] = []
+        for (let p = el.parentElement; p; p = p.parentElement) offsets.push([p.scrollTop, p.scrollLeft])
+        const usage = el.closest('.ub') ?? el
+        usage.scrollIntoView({ block: 'center' })
+        return offsets
+      })
       await page.screenshot({ path: info.outputPath(`${width}-light-${name}-rows.png`), animations: 'disabled' })
+      await list.evaluate((el, offsets) => {
+        let i = 0
+        for (let p = el.parentElement; p; p = p.parentElement, i++) { p.scrollTop = offsets[i]![0]; p.scrollLeft = offsets[i]![1] }
+      }, saved)
     }
     await rowsShot('too-fast')
     await expect(claude.getByRole('link', { name: 'Accounts and limits Settings' })).toHaveAttribute('href', '/settings/accounts')
