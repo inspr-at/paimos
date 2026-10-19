@@ -18,9 +18,16 @@ const changes: DefinitionChange[] = [
   {check_id:'no_active_build',block:'in_progress',kind:'new',before:null,current:{id:'no_active_build'}},
 ]
 const copy = (checks: DefinitionChecks, source: 'project' | 'workspace' = 'project'): Definition => ({id:source === 'project' ? '13171317-1317-4317-8317-131713171317' : '00000000-0000-4000-8000-000000001317',revision:source === 'project' ? '2026-10-08T08:00:00Z' : '2026-10-09T08:00:00Z',created_at:'2026-10-08T08:00:00Z',source,copied_from_revision:source === 'project' ? '2026-10-07T08:00:00Z' : null,checks:structuredClone(checks)})
+// Run the affected unit file once inside the same guarded remote job, before
+// allocating a browser. The approved remote runner exposes Playwright only.
+let unitOutput=''
+test.beforeAll(()=>{
+  test.setTimeout(90_000)
+  unitOutput=execFileSync(process.execPath,['node_modules/vitest/vitest.mjs','run','tests/definitions.unit.test.ts','--maxWorkers=1'],{encoding:'utf8',timeout:60_000,maxBuffer:1024*1024})
+})
 type Check = {assert: string; width: number; theme: string; locale: string; passed: true; [key: string]: unknown}
 async function evidence(checks: Check[]) {
-  const body=JSON.stringify({ticket:'AEON-1317',head:execFileSync('git',['rev-parse','HEAD'],{encoding:'utf8'}).trim(),checks},null,2)
+  const body=JSON.stringify({ticket:'AEON-1317',head:execFileSync('git',['rev-parse','HEAD'],{encoding:'utf8'}).trim(),units:{file:'tests/definitions.unit.test.ts',output:unitOutput},checks},null,2)
   await writeFile(test.info().outputPath('checks.json'),body)
   // The guarded remote runner retrieves Markdown and PNG attachments.
   await writeFile(test.info().outputPath('checks.md'),body)
