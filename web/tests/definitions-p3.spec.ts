@@ -130,7 +130,7 @@ test('AEON-1317 default decisions preserve every row notice copy and focus in al
       await expect(notice).toContainText('3 changes wait');expect(world.context.definition!.checks).toEqual(base)
       await expect(card.locator('.origin')).toContainText('Copied from the workspace default on 8 Oct.')
       record('notice count equals waiting rows and copy retains enforced checks',{waiting:3})
-      const ordinary=card.locator('[data-check="design_attached"]'),start=await geometry(rows)
+      const ordinary=card.locator('[data-check="design_attached"]'),start=await geometry(rows),noticeStart=await geometry(notice)
       for(const row of await card.locator('[data-block="in_progress"] [data-check]').all())expect((await row.boundingBox())!.height).toBe((await ordinary.boundingBox())!.height)
       const labels=await rows.locator('.dr-l').evaluateAll(elements=>elements.map(el=>el.getBoundingClientRect().x))
       expect(Math.max(...labels)-Math.min(...labels)).toBeLessThanOrEqual(1)
@@ -150,6 +150,7 @@ test('AEON-1317 default decisions preserve every row notice copy and focus in al
         await expect(action).toHaveText(words[choice==='accept'?0:1])
         await stable.check(async()=>{await action.click();await expect(row).toHaveAttribute('data-waiting','false')})
         expect(await geometry(rows),'exactly zero movement of every row').toEqual(start)
+        expect(await geometry(notice),'exactly zero movement of the notice').toEqual(noticeStart)
         const body=world.writes.at(-1)!.body
         expect(body).toEqual({check_id:change.check_id,decision:choice,expected_revision:requestRevision,expected_workspace_revision:world.workspace.revision})
         const stored=blocks.flatMap(block=>world.context.definition!.checks[block]??[]).find(rule=>rule.id===change.check_id)
