@@ -568,7 +568,10 @@ func TestLeadPickupExcludesActivePersonRun(t *testing.T) {
 			_, err := tx.Exec(t.Context(), `UPDATE agent_runs SET status=$2 WHERE id=$1`, direct, state)
 			return err
 		})
+		// Pickup skips the held entry so later entries still route; the final
+		// claim refuses it.
 		for _, path := range []string{"pickup", "claim"} {
+			reason := ""
 			err := db.InTenant(dbtest.Seed(t.Context()), f.db.App, f.person.TenantID, func(tx pgx.Tx) error {
 				if err := db.LockCurrentTree(t.Context(), tx); err != nil {
 					return err
@@ -576,11 +579,12 @@ func TestLeadPickupExcludesActivePersonRun(t *testing.T) {
 				if path == "claim" {
 					return harness.RequireAssignedLeadStartTx(t.Context(), tx, f.agent, f.project, run, binding, readyLeadChecks)
 				}
-				_, err := harness.LeadDispatchTurnTx(t.Context(), tx, f.agent, f.project, run, readyLeadChecks)
+				var err error
+				reason, err = harness.LeadDispatchTurnTx(t.Context(), tx, f.agent, f.project, run, readyLeadChecks)
 				return err
 			})
-			if err == nil || err.Error() != "lead_writer_conflict" {
-				t.Fatalf("%s with %s person run: %v", path, state, err)
+			if path == "pickup" && (err != nil || reason != "work_not_eligible") || path == "claim" && (err == nil || err.Error() != "lead_writer_conflict") {
+				t.Fatalf("%s with %s person run: reason=%q err=%v", path, state, reason, err)
 			}
 		}
 	}

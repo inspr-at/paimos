@@ -2812,6 +2812,8 @@
     ,
     {"kind":"go","package":"internal/agentruns","name":"TestLeadPersonRunStartsAndRejectsOtherWriters","tier":"ESSENTIAL"}
     ,
+    {"kind":"go","package":"internal/agentruns","name":"TestLeadPickupSkipsLeafHeldByPersonRun","tier":"ESSENTIAL"}
+    ,
     {"kind":"go","package":"internal/agentruns","name":"TestLeadQueueDispatchAndWorkerGenerationFence","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/agentruns","name":"TestLeadQueueFairRoutingAndWorkerRestartPriority","tier":"ESSENTIAL"}

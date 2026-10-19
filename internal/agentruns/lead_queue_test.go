@@ -1353,3 +1353,61 @@ func TestLeadAbsentAdmissionOffersPersonNextStep(t *testing.T) {
 		t.Fatalf("missing admission bypassed or missing next step: %d %s", w.Code, w.Body.String())
 	}
 }
+
+// Risk: a direct person run waiting for its daemon holds one leaf. Lead pickup
+// must skip that entry and route the next one, not refuse the whole call.
+func TestLeadPickupSkipsLeafHeldByPersonRun(t *testing.T) {
+	f, coordinator, project, session, lease, next := leadQueueFixture(t)
+	held := f.ticket(t, "open", "high", nil)
+	o := f.order(t, nil)
+	f.tx(t, f.person, func(tx pgx.Tx) error {
+		if _, err := tx.Exec(t.Context(), `UPDATE nodes SET parent_id=$2 WHERE id=$1`, held, project); err != nil {
+			return err
+		}
+		_, err := tx.Exec(t.Context(), `UPDATE nodes SET parent_id=$2 WHERE id=$1`, o.NodeID, held)
+		return err
+	})
+	direct := f.run(t, o)
+	if direct.Status != "queued" || direct.QueueNodeID != nil {
+		t.Fatalf("fixture lacks a direct person run waiting for its daemon: %+v", direct)
+	}
+	first := f.addQueue(t, held, nil)
+	at := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
+	f.tx(t, f.person, func(tx pgx.Tx) error {
+		for i, run := range []string{first.Run.ID, next.Run.ID} {
+			if _, err := tx.Exec(t.Context(), `UPDATE agent_runs SET queue_at=$2,queue_rank=$3 WHERE id=$1`, run, at.Add(time.Duration(i)*time.Minute), i+1); err != nil {
+				return err
+			}
+		}
+		return nil
+	})
+	admission := func(ctx context.Context, tx pgx.Tx, _ tenant.Principal, _ string, _ harness.Session) (harness.LeadChecks, error) {
+		var now time.Time
+		err := tx.QueryRow(ctx, `SELECT clock_timestamp()`).Scan(&now)
+		g := harness.LeadGate{State: "available", CheckedAt: now}
+		return harness.LeadChecks{Dial: g, Harness: g, Account: g, Host: g}, err
+	}
+	f.mux = http.NewServeMux()
+	workorders.New(f.d.App).Mount(f.mux)
+	agentruns.NewWithLeadAdmission(f.d.App, admission).Mount(f.mux)
+	r := httptest.NewRequest("POST", "/api/queue/next", strings.NewReader(`{"agent_principal_id":"`+f.agent.ID+`","model_profile_id":"`+f.profile+`"}`)).WithContext(tenant.WithPrincipal(t.Context(), coordinator))
+	r.Header.Set("X-Aeon-Lead-Session", session)
+	r.Header.Set("X-Aeon-Lead-Generation", "1")
+	r.Header.Set("X-Aeon-Worker-Lease", lease)
+	w := httptest.NewRecorder()
+	f.mux.ServeHTTP(w, r)
+	var out struct {
+		Entry *qEntry `json:"entry"`
+	}
+	if w.Code != 200 || json.Unmarshal(w.Body.Bytes(), &out) != nil || out.Entry == nil || out.Entry.NodeID != next.NodeID {
+		t.Fatalf("held leaf stopped lead pickup: %d %s", w.Code, w.Body.String())
+	}
+	var heldRouted, nextRouted bool
+	var directStatus string
+	f.tx(t, f.person, func(tx pgx.Tx) error {
+		return tx.QueryRow(t.Context(), `SELECT (SELECT queue_routed_at IS NOT NULL FROM agent_runs WHERE id=$1),(SELECT queue_routed_at IS NOT NULL FROM agent_runs WHERE id=$2),(SELECT status FROM agent_runs WHERE id=$3)`, first.Run.ID, next.Run.ID, direct.ID).Scan(&heldRouted, &nextRouted, &directStatus)
+	})
+	if heldRouted || !nextRouted || directStatus != "queued" {
+		t.Fatalf("pickup routed held=%v next=%v; person run %s", heldRouted, nextRouted, directStatus)
+	}
+}
