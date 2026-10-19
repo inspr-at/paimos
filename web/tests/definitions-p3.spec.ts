@@ -292,7 +292,7 @@ test('AEON-1317 Desk opens waiting definitions and resolves only after the last 
     const row=page.getByTestId(`desk-row-d:${world.context.definition!.id}`)
     await expect(row).toContainText(definitionDeskWords(key,3))
     await row.getByRole('link',{name:'Open',exact:true}).click()
-    expect(new URL(page.url()).pathname).toBe(`/p/${encodeURIComponent(key)}/settings/definitions`)
+    await expect.poll(()=>new URL(page.url()).pathname).toBe(`/p/${encodeURIComponent(key)}/settings/definitions`)
     await expect(page.locator('#definition-changes')).toContainText(key)
     await expect(page.locator('[data-check="estimate_set"] [data-decision="accept"]')).toBeFocused()
     expect(errors).toEqual([])
