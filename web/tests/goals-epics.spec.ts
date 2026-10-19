@@ -116,6 +116,8 @@ const row = (page: Page, id: string) => page.locator(`.goal[data-goal-id="${id}"
 const phone = (width: number) => width <= 760
 const theme = (dark: boolean) => dark ? 'dark' : 'light'
 async function shot(page: Page, info: TestInfo, width: number, dark: boolean, state: string) {
+  // The shot starts at the page head, so the toolbar and the status note show above the list.
+  await page.evaluate(() => { document.getElementById('main')?.scrollTo(0, 0); window.scrollTo(0, 0) })
   await page.screenshot({ path: info.outputPath(`AEON-1395/aeon1395-${width}-${theme(dark)}-${state}.png`), fullPage: true })
 }
 // One JSON line per assert (width, theme, locale), read into checks.json for the evidence.
