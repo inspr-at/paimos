@@ -624,6 +624,8 @@ func TestEpicFix4PoolCapacityFollowsProjectMatrix(t *testing.T) {
 		if err := tx.QueryRow(t.Context(), `INSERT INTO nodes(tenant_id,kind_id,key,title) SELECT $1,k.id,aeon_next_node_key($1,k.short_prefix),'Other project' FROM node_kinds k WHERE k.tenant_id=$1 AND k.slug='project' RETURNING id::text`, f.writer.TenantID).Scan(&other); err != nil {
 			return err
 		}
+		// The reader sees the other project, so its entry is in the visible queue.
+		bindProjectRole(t, tx, f.writer.TenantID, f.reader.ID, other, "guest")
 		epic := epicFixtureNode(t, tx, f.writer.TenantID, "FX4-1", "Epic pool", "open", f.project, 1, nil)
 		pool := epicFixtureNode(t, tx, f.writer.TenantID, "FX4-2", "Untargeted pool", "open", epic, 1, map[string]any{"estimate_hours": 2})
 		ahead := epicFixtureNode(t, tx, f.writer.TenantID, "FX4-3", "Same project ahead", "blocked", f.project, 2, map[string]any{"estimate_hours": 40})
