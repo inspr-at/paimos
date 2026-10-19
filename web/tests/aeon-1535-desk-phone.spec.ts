@@ -19,11 +19,12 @@ const box = async (locator: Locator) => (await locator.boundingBox())!
 
 // P1: a question with a recommended option and every stamp available, asked across tickets (Tick's card: no ticket,
 // no background, the agent carries on). P2: the same question about AEON-1, whose Doctrine stamp is unavailable.
+// Asked a moment ago on the real clock the page also reads ("just now"); no fixed calendar instant.
 function question(state: 'P1' | 'P2'): Question {
-  const p1 = state === 'P1'
+  const p1 = state === 'P1', asked = new Date().toISOString()
   return {
     id: 'question-1', project_id: 'p-aeon', revision: 1, state: 'open', suggested_outcome: 'once', suggestion_reason: p1 ? 'project_default' : 'ticket_default',
-    created_at: '2026-10-19T12:00:00Z', updated_at: '2026-10-19T12:00:00Z',
+    created_at: asked, updated_at: asked,
     input: { request_id: 'question-1', question: QUESTION, context: p1 ? '' : 'The ticket asks for fast lookup without changing tenant isolation.', findings: '',
       options: [{ id: 'partial', title: 'Use the partial index', description: 'Keep the common path small.', answer: 'Use the partial index.' }, { id: 'full', title: 'Use a full index', description: 'Cover every row.', answer: 'Use a full index.' }],
       recommend: 'partial', why: 'It matches the query that runs most often.',
