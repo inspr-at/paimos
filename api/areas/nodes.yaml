@@ -16,6 +16,7 @@ paths:
       security: *auth
       parameters:
         - {name: shape, in: query, description: 'parent or leaf; supports ! exclusions', schema: {type: array, items: {type: string, enum: [parent, leaf, '!parent', '!leaf']}}}
+        - {name: rollups, in: query, description: 'omit skips work-scope aggregate rollups on a bounded page. The page still returns matching nodes. Absent or include keeps estimates and ETA.', schema: {type: string, enum: [include, omit]}}
         - {name: depth, in: query, description: 'Project-relative work levels; supports ! exclusions', schema: {type: array, items: {type: string}}}
         - {name: level, in: query, description: 'Work levels as the workspace vocabulary names them: leaf for work without work children, else the parent''s project-relative depth (1, 2, …). Repeatable or comma-separated, at most 33 values; supports ! exclusions. Combines with shape, depth and kind.', schema: {type: array, maxItems: 33, items: {type: string, pattern: '^!?(leaf|[1-9][0-9]{0,4})$'}}}
         - {name: kind_id, in: query, schema: {type: string, format: uuid}}

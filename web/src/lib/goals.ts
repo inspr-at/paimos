@@ -2,9 +2,11 @@
 // The Goals view's reads (AEON-1457) on the Goals API (AEON-1456, api/areas/goals.yaml):
 // the visible goals with their outcomes, a goal's ETA history and its progress
 // series, plus the words the view uses for them. Writes belong to agents.
+// AEON-1395: Group › Epics reads /goals/epics, the open epics in the same shape.
 import { api, APIError, getNode } from './api'
 import { ticketPath } from './work'
 import { statusName } from './statusNames'
+import type { DeliveryState } from './delivery'
 import { listDayMonth, listWeekday, type GoalRange, type RatePoint } from './goalRate'
 
 export type GoalState = 'moving' | 'queued' | 'paused' | 'done'
@@ -15,13 +17,16 @@ export type StateFilter = 'all' | GoalState
 export const STATE_FILTERS: readonly StateFilter[] = ['all', ...GOAL_STATES]
 
 export interface GoalStep { id: string; text: string; state: 'done' | 'now' | 'later' }
-export interface GoalETA { source: 'none' | 'agent' | 'worker' | 'outcomes'; text?: string; at?: string; by?: string; partial: boolean }
+// release (epics only): the target release, as its text ("137").
+export interface GoalETA { source: 'none' | 'agent' | 'worker' | 'outcomes' | 'release'; text?: string; at?: string; by?: string; partial: boolean }
 export interface GoalOutcome {
   id: string; ref: string; label: string; note: string; position: number; keys: string[]
   state: GoalState; reason?: string; session_ids: string[]; eta: GoalETA; passed: boolean
   coverage: { estimated_leaves: number; total_leaves: number }; weight: number; handed_over: boolean
   // AEON-1494: who last wrote the note and when; a done item's latest merge.
   note_by?: string; note_by_name?: string; note_at?: string; merged_at?: string
+  // AEON-1395 (epic items): all keys when keys holds the first 20, and the latest unmerged pull request.
+  keys_total?: number; delivery?: { state: DeliveryState; pull_request?: number }
 }
 export interface GoalProgress {
   pct: number; computed_pct: number; source: 'computed' | 'override'; basis: 'count' | 'estimate' | 'mixed'
@@ -33,7 +38,7 @@ export interface GoalProgress {
 export interface GoalCounts { moving: number; queued: number; paused: number; done: number }
 export interface GoalProjectBadge { id: string; key: string; name: string; group_ids: string[] }
 export interface Goal {
-  id: string; key: string; title: string; kind: 'goal' | 'release'; project_id: string | null; workspace: boolean
+  id: string; key: string; title: string; kind: 'goal' | 'release' | 'epic'; project_id: string | null; workspace: boolean
   expansion: 'full' | 'too_large'; counts: { outcomes: number; tickets: number }; items?: GoalOutcome[]
   steps: GoalStep[]; next_step: GoalStep | null; projects: GoalProjectBadge[]; waits: { count: number; question_ids: string[] }
   progress?: GoalProgress; eta?: GoalETA; passed?: boolean; states?: GoalCounts; done?: boolean
@@ -78,7 +83,12 @@ export function goalQuery(query: GoalQuery): string {
   if (query.cursor) params.set('cursor', query.cursor)
   return params.toString()
 }
-export const listGoals = (query: GoalQuery, signal?: AbortSignal) => read<GoalList>(`/goals?${goalQuery(query)}`, signal)
+// Group: Goals or Epics (AEON-1395). Epics are the open epics in the goal shape.
+export type GoalGroup = 'goals' | 'epics'
+export const GOAL_GROUPS: readonly GoalGroup[] = ['goals', 'epics']
+export const GROUP_LABEL: Record<GoalGroup, string> = { goals: 'Goals', epics: 'Epics' }
+export const isGoalGroup = (value: unknown): value is GoalGroup => value === 'goals' || value === 'epics'
+export const listGoals = (query: GoalQuery, signal?: AbortSignal, group: GoalGroup = 'goals') => read<GoalList>(`${group === 'epics' ? '/goals/epics' : '/goals'}?${goalQuery(query)}`, signal)
 export const goalSeries = (id: string, range: GoalRange, signal?: AbortSignal) => read<GoalSeries>(`/goals/${encodeURIComponent(id)}/series?range=${range}`, signal)
 export const goalHistory = (id: string, outcome?: string, signal?: AbortSignal) =>
   read<{ items: GoalEvent[]; next_cursor?: string }>(`/goals/${encodeURIComponent(id)}/history?limit=20${outcome ? `&outcome=${encodeURIComponent(outcome)}` : ''}`, signal)
@@ -164,6 +174,8 @@ export function goalPercent(progress: GoalProgress): { pct: number; byHand: bool
   const pct = Math.max(0, Math.min(100, Math.round(value)))
   return byHand ? { pct, byHand, tip: `Progress set by hand${progress.override_note ? ` · ${progress.override_note}` : ''}` } : { pct, byHand }
 }
+// Words that must not break apart ("~40 h left", "8 done", "· 7 today"): spaces become NBSP.
+export const nbsp = (text: string) => text.replace(/ /g, '\u00a0')
 // "~40 h left": open estimate hours, whole hours (at least 1). Nothing while unknown or done.
 export function hoursLeftText(progress: GoalProgress | undefined, done: boolean): string {
   const hours = progress?.remaining_hours ?? 0

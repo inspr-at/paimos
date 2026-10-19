@@ -90,7 +90,7 @@ func (rt *runtime) harnessRun() *Command {
 			if err := o.prepare(); err != nil {
 				return err
 			}
-			ctx, stop := signalContext()
+			ctx, stop := rt.claimSignals()
 			defer stop()
 			return rt.runHarnessCommand(ctx, o, args)
 		},

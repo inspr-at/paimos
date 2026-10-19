@@ -302,7 +302,7 @@ func loadOutlookInputs(ctx context.Context, tx pgx.Tx, p tenant.Principal, now t
 			return nil, false, err
 		}
 		in.Held = a.State != "available" || schedule.ActiveOverride(now) == "hold"
-		in.Samples = weeklySeries(latest[a.ID], hourly[a.ID], now)
+		in.Samples = weeklySeries(a.Harness, latest[a.ID], hourly[a.ID], now)
 		if n := len(in.Samples); n > 0 {
 			last := in.Samples[n-1]
 			in.Freshness = quotaSample{WindowKind: "weekly", UsedPercent: last.Used, ReadAt: last.ReadAt, ResetsAt: last.ResetAt}.reading().Freshness(now)
@@ -312,13 +312,13 @@ func loadOutlookInputs(ctx context.Context, tx pgx.Tx, p tenant.Principal, now t
 	return out, truncated, nil
 }
 
-// weeklySeries picks the account's binding weekly bucket (the most used one
-// that has not expired, as routing caps on it) and orders its readings.
-func weeklySeries(latest []quotaSample, hours [][]quotaSample, now time.Time) []weeklySample {
+// weeklySeries orders readings from one weekly bucket per account. Claude's
+// plan limit is seven_day; model and overage limits are separate counters.
+func weeklySeries(harness string, latest []quotaSample, hours [][]quotaSample, now time.Time) []weeklySample {
 	bucket, best := "", -1.0
 	var newest time.Time
 	for _, v := range latest {
-		if v.WindowKind != "weekly" {
+		if v.WindowKind != "weekly" || harness == "claude" && v.Bucket != "seven_day" {
 			continue
 		}
 		live := v.ResetsAt.After(now)
@@ -356,21 +356,26 @@ func weeklySeries(latest []quotaSample, hours [][]quotaSample, now time.Time) []
 	return out
 }
 
+// confirmedRefill requires a drop in measured use or a new window following
+// the previous reset. An elapsed or corrected reset time alone is not evidence.
+func confirmedRefill(prev, next weeklySample) bool {
+	return next.Used < prev.Used || !prev.ResetAt.IsZero() &&
+		!next.ReadAt.Before(prev.ResetAt) && next.ResetAt.After(prev.ResetAt)
+}
+
 // usedAt is the measured weekly use at t: the last reading at or before t.
-// ok is false before any reading, and false when that latest reading's window
-// has ended. The measurement is kept, but current headroom is unknown until a
-// later reading. A reset that a later reading follows still counts as a
-// completed refill (used 0), so the measured line keeps that step.
+// An expired reading retains its use but has unknown headroom, unless the
+// next reading confirms a refill at the scheduled reset.
 func usedAt(samples []weeklySample, t time.Time) (float64, bool) {
 	i := sort.Search(len(samples), func(i int) bool { return samples[i].ReadAt.After(t) }) - 1
 	if i < 0 {
 		return 0, false
 	}
 	if !samples[i].ResetAt.After(t) {
-		if i == len(samples)-1 {
-			return samples[i].Used, false
+		if i+1 < len(samples) && !samples[i+1].ReadAt.Before(samples[i].ResetAt) && confirmedRefill(samples[i], samples[i+1]) {
+			return 0, true
 		}
-		return 0, true
+		return samples[i].Used, false
 	}
 	return samples[i].Used, true
 }
@@ -378,10 +383,13 @@ func usedAt(samples []weeklySample, t time.Time) (float64, bool) {
 // consumed is the measured use between two instants: increases between
 // readings, and after a refill the next reading's use from zero.
 func consumed(samples []weeklySample, from, to time.Time) (float64, bool) {
-	prev, ok := usedAt(samples, from)
-	var prevReset time.Time
-	if i := sort.Search(len(samples), func(i int) bool { return samples[i].ReadAt.After(from) }) - 1; i >= 0 {
-		prevReset = samples[i].ResetAt
+	i := sort.Search(len(samples), func(i int) bool { return samples[i].ReadAt.After(from) }) - 1
+	var prev weeklySample
+	ok := i >= 0
+	if ok {
+		// Expiry makes headroom unknown, but the last actual reading still
+		// supplies the baseline for measuring the next counter increase.
+		prev = samples[i]
 	}
 	total := 0.0
 	for _, s := range samples {
@@ -389,17 +397,48 @@ func consumed(samples []weeklySample, from, to time.Time) (float64, bool) {
 			continue
 		}
 		if !ok {
-			prev, ok, prevReset = s.Used, true, s.ResetAt
+			prev, ok = s, true
 			continue
 		}
-		if !prevReset.IsZero() && !prevReset.After(s.ReadAt) {
+		if confirmedRefill(prev, s) {
 			total += s.Used
 		} else {
-			total += math.Max(0, s.Used-prev)
+			total += math.Max(0, s.Used-prev.Used)
 		}
-		prev, prevReset = s.Used, s.ResetAt
+		prev = s
 	}
 	return total, ok
+}
+
+// hourlyBurn spreads increases across gaps longer than an hour at their average
+// pace. Short gaps keep their measured booking; a confirmed refill starts at zero.
+func hourlyBurn(samples []weeklySample, from, to time.Time) float64 {
+	total := 0.0
+	for i := 1; i < len(samples); i++ {
+		prev, next := samples[i-1], samples[i]
+		fraction := 1.0
+		if gap := next.ReadAt.Sub(prev.ReadAt); gap > time.Hour {
+			start, end := prev.ReadAt, next.ReadAt
+			if start.Before(from) {
+				start = from
+			}
+			if end.After(to) {
+				end = to
+			}
+			if !end.After(start) {
+				continue
+			}
+			fraction = float64(end.Sub(start)) / float64(gap)
+		} else if !next.ReadAt.After(from) || next.ReadAt.After(to) {
+			continue
+		}
+		increase := math.Max(0, next.Used-prev.Used)
+		if confirmedRefill(prev, next) {
+			increase = next.Used
+		}
+		total += increase * fraction
+	}
+	return total
 }
 
 func ptrF(v float64) *float64 { return &v }
@@ -662,7 +701,7 @@ func buildGroup(harness string, inputs []outlookInput, now, anchor time.Time) ou
 		if hour.Known {
 			empty := true
 			for _, s := range runnable {
-				v, _ := consumed(s.samples, from, to)
+				v := hourlyBurn(s.samples, from, to)
 				hour.Burn[s.canonical] = math.Round(v*100) / 100
 				if u, ok := usedAt(s.samples, to); !ok || u < s.limit-1e-9 {
 					empty = false
@@ -686,8 +725,8 @@ func buildGroup(harness string, inputs []outlookInput, now, anchor time.Time) ou
 				continue
 			}
 			// A scheduled reset alone is not evidence that the vendor refilled.
-			// Require the next measurement to follow it in a new window.
-			if i+1 == len(s.samples) || s.samples[i+1].ReadAt.Before(r) || !s.samples[i+1].ResetAt.After(r) {
+			// Require the next measurement to follow it and confirm a refill.
+			if i+1 == len(s.samples) || s.samples[i+1].ReadAt.Before(r) || !confirmedRefill(sample, s.samples[i+1]) {
 				continue
 			}
 			dup := false

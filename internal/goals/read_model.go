@@ -80,6 +80,10 @@ type OutcomeView struct {
 	NoteAt     *time.Time `json:"note_at,omitempty"`
 	// A done item's latest merge, recorded on its work leaves by the merge.
 	MergedAt *time.Time `json:"merged_at,omitempty"`
+	// Epic items only (AEON-1395): how many keys the item has when keys holds
+	// only the first 20, and its latest unmerged pull request state.
+	KeysTotal int           `json:"keys_total,omitempty"`
+	Delivery  *EpicDelivery `json:"delivery,omitempty"`
 }
 type GoalView struct {
 	ID         string         `json:"id"`
@@ -109,6 +113,11 @@ type GoalView struct {
 	targets        []string
 	node           storedNode
 	budget         listBudget
+	// Extra words the list search matches (AEON-1395: an epic's own key),
+	// and an epic's holds and blockers for its "what's missing".
+	searchText string
+	holds      []epicHold
+	blockers   []epicBlocker
 }
 
 type leafFact struct {
