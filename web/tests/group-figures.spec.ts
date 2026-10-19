@@ -306,7 +306,19 @@ test('AEON-1390 the grouped-by column flips the group order; other columns sort 
   await estimate.hover()
   await expect(hint(page)).toContainText('Tickets in each group: highest estimate first')
   await expect(page.locator('.table-card')).toHaveAttribute('data-columns-settled', '1')
-  same(before, await boxes(watch))
+  const after = await boxes(watch)
+  const layout = await page.evaluate(() => {
+    const main = document.querySelector('main')
+    const card = document.querySelector('.table-card')
+    return {
+      cols: [...document.querySelectorAll('colgroup col')].map(col => `${col.className}:${(col as HTMLElement).style.width}`),
+      mainClient: main?.clientWidth, mainScroll: main?.scrollWidth,
+      scrollbar: main ? getComputedStyle(main).scrollbarWidth : '',
+      cardClient: card?.clientWidth,
+    }
+  })
+  expect(`${JSON.stringify(before)} => ${JSON.stringify(after)} ${JSON.stringify(layout)}`, 'column boxes').toBe('same')
+  same(before, after)
   // The same for status and assignee: Unassigned stays last when reversed.
   await page.goto('/p/PHAROS?group=assignee&group_order=reversed')
   await expect(labels(page)).toHaveText(['Mira Holm', 'Markus Barta', 'Unassigned'])
