@@ -32,7 +32,17 @@ async function evidence(checks: Check[]) {
   // The guarded remote runner retrieves Markdown and PNG attachments.
   await writeFile(test.info().outputPath('checks.md'),body)
 }
-async function shot(page: Page,width: number,theme: string,state: string){await page.screenshot({path:test.info().outputPath(`aeon1317-${width}-${theme}-${state}.png`),fullPage:true})}
+async function shot(page: Page,width: number,theme: string,state: string){
+  // The app scrolls main rather than the document. Capture the whole state,
+  // including the phone's decisions below the notice, then restore its scroll.
+  const viewport=page.viewportSize()!,layout=await page.evaluate(()=>{
+    const main=document.querySelector('main')!,rect=main.getBoundingClientRect()
+    return {height:Math.ceil(main.scrollHeight+rect.top+innerHeight-rect.bottom+2),top:main.scrollTop,x:scrollX,y:scrollY}
+  })
+  expect(layout.height,'bounded full-state evidence').toBeLessThanOrEqual(12_000)
+  try{await page.setViewportSize({width,height:Math.max(viewport.height,layout.height)});await page.screenshot({path:test.info().outputPath(`aeon1317-${width}-${theme}-${state}.png`),fullPage:true})}
+  finally{await page.setViewportSize(viewport);await page.evaluate(layout=>{document.querySelector('main')!.scrollTop=layout.top;window.scrollTo(layout.x,layout.y)},layout)}
+}
 function barrier(){let entered!:()=>void,release!:()=>void;const pending=new Promise<void>(resolve=>entered=resolve),until=new Promise<void>(resolve=>release=resolve);return {entered,release,pending,until}}
 async function navigate(page: Page,path: string){await page.evaluate(path=>(document.querySelector('#app') as unknown as {__vue_app__:{config:{globalProperties:{$router:{push(path:string):Promise<void>}}}}}).__vue_app__.config.globalProperties.$router.push(path),path)}
 
@@ -270,9 +280,9 @@ test('AEON-1317 failed stale and identity-bound decisions never claim success',a
   await page.setViewportSize({width:1440,height:1000})
   const {world,errors}=await setup(page,'light');await page.goto('/p/PRJ-26/settings/definitions')
   const action=page.locator('[data-check="estimate_set"] [data-decision="accept"]')
-  world.fail=true;await action.click();await expect(page.locator('.toast.error')).toContainText('Decision save unavailable');await expect(action).toBeEnabled();expect(world.context.pending_changes).toHaveLength(3);expect(world.context.definition!.checks).toEqual(base)
-  world.fail=false;world.workspace={...world.workspace,revision:'2026-10-10T08:00:00Z'};await action.click();await expect(page.locator('.toast.error')).toContainText('The definition or workspace default changed.');expect(world.context.pending_changes).toHaveLength(3)
-  world.context.workspace_default=world.workspace;await page.locator('.toast.error').getByRole('button',{name:'Reload',exact:true}).click();await expect(action).toBeEnabled()
+  world.fail=true;await action.click();await expect(page.locator('.toast.error').filter({hasText:'Decision save unavailable'})).toContainText('Decision save unavailable');await expect(action).toBeEnabled();expect(world.context.pending_changes).toHaveLength(3);expect(world.context.definition!.checks).toEqual(base)
+  world.fail=false;world.workspace={...world.workspace,revision:'2026-10-10T08:00:00Z'};await action.click();await expect(page.locator('.toast.error').filter({hasText:'The definition or workspace default changed.'})).toContainText('The definition or workspace default changed.');expect(world.context.pending_changes).toHaveLength(3)
+  world.context.workspace_default=world.workspace;await page.locator('.toast.error').filter({hasText:'The definition or workspace default changed.'}).getByRole('button',{name:'Reload',exact:true}).click();await expect(action).toBeEnabled()
   const hold=barrier();world.held=hold;await action.click();await hold.pending
   await navigate(page,'/p/PHAROS/settings/definitions');await expect(page.locator('#definition-changes')).toHaveCount(0);hold.release()
   await expect(page.locator('#definitions .origin')).toContainText('Uses the workspace default');await expect(page.getByText('Decision saved.',{exact:true})).toHaveCount(0)
@@ -281,11 +291,11 @@ test('AEON-1317 failed stale and identity-bound decisions never claim success',a
   const workspaceCard=page.locator('#definitions'),first=workspaceCard.locator('[data-check="estimate_set"]')
   await expect(first).toBeVisible();world.fail=true
   const stable=await controlStability(page,{first,head:workspaceCard.locator('[data-block="in_progress"] .db-head')})
-  await stable.check(async()=>{await first.getByRole('button',{name:'More for Estimate set'}).click();await page.getByRole('menuitem',{name:'Remove',exact:true}).click();await expect(page.locator('.toast.error')).toContainText('Default save unavailable')});stable.done()
+  await stable.check(async()=>{await first.getByRole('button',{name:'More for Estimate set'}).click();await page.getByRole('menuitem',{name:'Remove',exact:true}).click();await expect(page.locator('.toast.error').filter({hasText:'Default save unavailable'})).toContainText('Default save unavailable')});stable.done()
   await expect(first).not.toContainText('Removed');await page.getByRole('button',{name:'Close check editor',exact:true}).click()
   world.fail=false;world.summaryFail=true
   await workspaceCard.getByRole('button',{name:'Add check to Done'}).click();await page.getByRole('menuitem',{name:/^Shipped in a release/}).click()
-  await expect(workspaceCard.locator('[data-check="released"]')).toBeVisible();await expect(page.locator('.toast.error')).toContainText('Project differences unavailable')
+  await expect(workspaceCard.locator('[data-check="released"]')).toBeVisible();await expect(page.locator('.toast.error').filter({hasText:'Project differences unavailable'})).toContainText('Project differences unavailable')
   await expect(page.getByText('Workspace default saved.',{exact:true})).toHaveCount(0)
   expect(errors).toEqual([]);await evidence([{assert:'failed decisions retain copy and waiting rows; barrier-held results cannot cross project identity; failed and partial workspace saves report errors without shifting rows',width:page.viewportSize()!.width,theme:'light',locale:'en',passed:true}])
 })
