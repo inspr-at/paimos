@@ -53,15 +53,16 @@ func ownerSchedule(ctx context.Context, tx pgx.Tx, fn func(context.Context, pgx.
 	return reason, step.Commit(ctx)
 }
 
-// Reuse the queue's writer exclusion for direct person runs, including queued
-// runs that have not reached the daemon yet. Caller holds tenant/tree fences.
-// r is the candidate run and n its work leaf; no labels or missed heartbeat
-// release an unresolved writer.
+// A direct person run holds the leaf, including while it is still queued for
+// its daemon. Another queued lead entry is demand for the scheduling snapshot,
+// not a second writer. An unconfirmed exit or launch keeps requireWriterFree's
+// own refusal; this fence must not replace that error. Caller holds the
+// tenant/tree fences. r is the candidate run and n its work leaf. Labels and
+// a missed heartbeat do not release a live writer.
 const leadOtherWriterSQL = `SELECT 1 FROM agent_runs other
  JOIN nodes other_order ON other_order.tenant_id=other.tenant_id AND other_order.id=other.work_order_id
  WHERE other.id<>r.id AND (other.work_order_id=r.work_order_id OR other.queue_node_id=n.id OR other_order.parent_id=n.id)
- AND (other.status IN ('queued','starting','running','waiting') OR other.trace->'worker_assignment'->>'state' IN ('launch_unknown','launched')
- OR other.trace->'work_lifecycle_release'->>'exit_unconfirmed'='true')`
+ AND (other.status IN ('starting','running','waiting') OR (other.queue_node_id IS NULL AND other.status='queued'))`
 
 func requireLeadWriterFreeTx(ctx context.Context, tx pgx.Tx, run string) error {
 	var busy bool

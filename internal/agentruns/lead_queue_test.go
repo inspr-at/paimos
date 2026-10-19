@@ -1182,19 +1182,27 @@ func TestLeadPersonRunStartsAndRejectsOtherWriters(t *testing.T) {
 	if run.Purpose != "managed" || run.Status != "queued" || run.QueueNodeID != nil {
 		t.Fatalf("person did not create a direct managed run: %+v", run)
 	}
-	for _, state := range []string{"queued", "running"} {
-		if state == "running" {
-			ids := f.reserve(t, run)
-			f.call(t, f.agent, "POST", "/api/runs/"+run.ID+"/claim", claimBody(ids), 200, &run)
-			if run.Status != "running" {
-				t.Fatalf("person run was not claimed: %s", run.Status)
-			}
-		}
+	refuse := func(state string) {
+		t.Helper()
 		f.call(t, f.person, "POST", "/api/work-orders/"+o.NodeID+"/runs", body, 409, &failure)
 		if failure["error"] != "A run is already active on this ticket. Open it from the ticket to follow or steer it." {
 			t.Fatalf("second %s start refused for wrong reason: %v", state, failure)
 		}
 	}
+	// Claim parks the run at starting. The daemon's started report moves it to
+	// running. Both are live writers; neither is the claim response itself.
+	refuse("queued")
+	ids := f.reserve(t, run)
+	f.call(t, f.agent, "POST", "/api/runs/"+run.ID+"/claim", claimBody(ids), 200, &run)
+	if run.Status != "starting" || run.StartedAt == nil {
+		t.Fatalf("person run was not claimed: %s", run.Status)
+	}
+	refuse("starting")
+	f.call(t, f.agent, "POST", "/api/runs/"+run.ID+"/telemetry", map[string]any{"sequence": 1, "kind": "started", "cost_micros_delta": 40, "input_tokens_delta": 7, "effective_model": "vendor-model", "model_evidence": "vendor_reported"}, 200, &run)
+	if run.Status != "running" {
+		t.Fatalf("claimed person run did not reach running: %s", run.Status)
+	}
+	refuse("running")
 	// A second order on the same work leaf must not evade the writer fence.
 	other := f.order(t, nil)
 	f.tx(t, f.person, func(tx pgx.Tx) error {
