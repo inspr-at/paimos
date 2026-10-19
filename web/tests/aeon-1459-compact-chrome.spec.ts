@@ -11,6 +11,9 @@ import { mkdir, writeFile } from 'node:fs/promises'
 import { dirname } from 'node:path'
 import { fixtures, me, mockWork, watchErrors } from './work-fixtures'
 import { agentData, mockAgents, type AgentData } from './agents-fixtures'
+import { capacityWorld } from './capacity-fixtures'
+import { mockEffectivePermissions } from './authz-fixtures'
+import { mockReleases, presentedHistory } from './releases-fixtures'
 
 type Size = { width: number; height: number }
 type Look = 'light' | 'dark'
@@ -49,7 +52,9 @@ const inside = (b: Box, size: Size) => b.x >= -.5 && b.y >= -.5 && b.x + b.width
 const atFoot = (b: Box, size: Size) => b.x <= .5 && Math.abs(b.width - size.width) <= .5 && Math.abs(b.y + b.height - size.height) <= .5
 
 // ---------- The world: about 30 sessions in three project groups, as the design draws the list ----------
-async function agentsWorld(page: Page, size: Size, look: Look) {
+// A lead with its workers, and a named release. `accounts` adds readable accounts and computers (the
+// capacity line names them); 1440 keeps the world it was measured in on main.
+async function agentsWorld(page: Page, size: Size, look: Look, options: { accounts?: boolean; sessions?: number } = {}) {
   await page.setViewportSize(size)
   await page.emulateMedia({ colorScheme: look, reducedMotion: 'reduce' })
   await page.clock.install({ time: NOW })
@@ -59,13 +64,24 @@ async function agentsWorld(page: Page, size: Size, look: Look) {
   work.preferences['ui.agents.sections'] = { dial: false }
   await mockWork(page, work, { admin: true })
   const data = agentData({ now: NOW, me: me.id, projects: { pharos: 'p-pharos', aeon: 'p-aeon', pai: 'p-frozen' }, tickets: { fleet: 'n-1', restore: 'n-2', web: 'n-a1', release: 'n-5', approvals: 'n-6' }, nodes: {} })
-  const base = data.sessions[1]!
-  for (let n = 0; n < 24; n++) data.sessions.push({ ...base, id: `5e000000-0000-4000-8000-${String(100 + n).padStart(12, '0')}`, display_label: `worker-${n + 1}` } as typeof base)
-  await mockAgents(page, data)
-  return { work, data }
+  const base = data.sessions[1]!, lead = data.sessions[0]!.id
+  for (let n = 0; n < (options.sessions ?? 24); n++) data.sessions.push({ ...base, id: `5e000000-0000-4000-8000-${String(100 + n).padStart(12, '0')}`, display_label: `worker-${n + 1}`, parent_harness_session_id: n < 12 ? lead : null } as typeof base)
+  if (options.accounts) {
+    const capacity = capacityWorld()
+    data.accounts = (capacity.accounts as unknown as typeof data.accounts).map(account => ({ ...account, registered_by_principal_id: me.id }))
+    await mockAgents(page, data, { capacity })
+    await page.route('**/api/me/permissions*', route => {
+      const answer = mockEffectivePermissions('admin', new URL(route.request().url()).searchParams.get('project_id') ?? undefined)
+      answer.workspace.permissions.push('account.read', 'account.manage')
+      return route.fulfill({ json: answer })
+    })
+  } else await mockAgents(page, data)
+  const history = presentedHistory(NOW)
+  await mockReleases(page, history, { codename: 'Myriad Maser' })
+  return { work, data, history }
 }
-async function openAgents(page: Page, size: Size, look: Look) {
-  const world = await agentsWorld(page, size, look)
+async function openAgents(page: Page, size: Size, look: Look, options: { accounts?: boolean; sessions?: number } = {}) {
+  const world = await agentsWorld(page, size, look, options)
   await page.goto('/agents')
   await expect(page.locator(ROWS).nth(20)).toBeAttached()
   await page.evaluate(() => document.fonts.ready.then(() => undefined))
@@ -220,7 +236,8 @@ test('AEON-1459 C3 agents 390x664 light: search opens over the toolbar line and 
     await page.getByRole('button', { name: 'Cancel', exact: true }).click()
     await expect(page).not.toHaveURL(/q=/)
     await expect(field).toBeHidden()
-    c.is('Cancel clears the query', await field.inputValue(), '""', (await field.inputValue()) === '')
+    const value = await page.locator('#sessions-q').inputValue()
+    c.is('Cancel clears the query', value, '""', value === '')
     const closed = moved(before, await measure())
     c.is('search closes: movementPx of the toolbar and the first rows', closed, '0', closed <= .01)
     await expect(open).toBeFocused()
@@ -261,11 +278,13 @@ test('AEON-1459 C4 agents 390x664 light: the head ⋯ leads with Wind down, the 
 
 // ---------- C5: the capacity line and its sheet ----------
 for (const size of [PORTRAIT, LANDSCAPE]) test(`AEON-1459 C5 agents ${sizeName(size)} light: the capacity line opens the dial and the accounts as a sheet`, async ({ page }, info) => {
-  await openAgents(page, size, 'light')
+  await openAgents(page, size, 'light', { accounts: true })
   const c = checks(info, size, 'light')
   try {
     const line = page.locator('.agents-page .cap-line')
     await expect(line).toBeVisible()
+    // The accounts and computers read land after the dial's.
+    await expect(line).toContainText('computer')
     const text = (await line.innerText()).replace(/\s+/g, ' ').trim()
     c.is('capacity line copy', text, '"N agents · N running · N accounts · N computers"', /^\d+ agents? · \d+ running · \d+ accounts? · \d+ computers?$/.test(text))
     const raw = await line.locator('.cl-t').evaluate(el => el.textContent ?? '')
@@ -296,6 +315,7 @@ const arrive = (data: AgentData) => {
   for (let n = 0; n < 3; n++) data.sessions.push({ ...data.sessions[1]!, id: `5e000000-0000-4000-8000-${String(900 + n).padStart(12, '0')}`, display_label: `Arrival ${n + 1}`, run_id: null, ticket_node_id: null, ticket: null, created_at: new Date(NOW + (n + 1) * 1000).toISOString(), heartbeat_at: new Date(NOW + 1000).toISOString() } as typeof data.sessions[number])
 }
 test('AEON-1459 C6 agents 844x340 light: held changes float as a chip; the toolbar keeps its one 44 px line', async ({ page }, info) => {
+  test.setTimeout(60_000)
   const { data } = await openAgents(page, LANDSCAPE, 'light')
   const c = checks(info, LANDSCAPE, 'light')
   try {
@@ -319,8 +339,11 @@ test('AEON-1459 C6 agents 844x340 light: held changes float as a chip; the toolb
     const chipBox = await box(chip)
     c.is('chip inside the viewport, 44 px tall', chipBox, 'inside 844 × 340', inside(chipBox, LANDSCAPE) && chipBox.height >= 43.5)
     await shot(page, info, LANDSCAPE, 'light', 'held')
-    await chip.click()
+    // Show now applies the waiting rows at once (a keyboard press: the pointer stays on the list).
+    await chip.focus()
+    await page.keyboard.press('Enter')
     await expect(chip).toBeHidden()
+    await expect(page.locator(`.sessions [data-row="s:5e000000-0000-4000-8000-000000000900"]`)).toBeAttached()
   } finally { await c.write('c6-844x340-light') }
 })
 
@@ -384,61 +407,38 @@ test('AEON-1459 C8 agents 390x664 light: the avatar menu has the theme, What’s
 })
 
 // ---------- The scroller never resizes while a finger scrolls (H2) ----------
-type SwipeState = { started: boolean; down: number; ended: boolean; start: number; top: number }
-type SwipeWindow = { __swipe: SwipeState; __stopSwipe?: () => void; __heights: number[] }
-async function swipe(page: Page, cdp: CDPSession, at: { x: number; y: number }, dy: number) {
-  await main(page).evaluate(el => {
-    const win = window as unknown as SwipeWindow
-    win.__stopSwipe?.()
-    const listeners = new AbortController()
-    const state: SwipeState = { started: false, down: 0, ended: false, start: el.scrollTop, top: el.scrollTop }
-    Object.assign(win, { __swipe: state, __stopSwipe: () => listeners.abort() })
-    const options = { passive: true, signal: listeners.signal }
-    for (const type of ['touchstart', 'touchmove', 'touchend', 'touchcancel']) el.addEventListener(type, event => { if (!event.isTrusted) return; state.down = (event as TouchEvent).touches.length; if (type === 'touchstart') state.started = true }, options)
-    el.addEventListener('scroll', () => { state.top = el.scrollTop }, options)
-    el.addEventListener('scrollend', event => { if (event.isTrusted && event.target === el && state.started && state.down === 0 && el.scrollTop !== state.start) state.ended = true }, options)
-  })
-  const state = () => page.evaluate(() => (window as unknown as SwipeWindow).__swipe)
-  // The whole input history lies in the past and ends still, so the finger has no fling (as in AEON-1279).
-  const releasedAt = Date.now() / 1000, timestamp = releasedAt - .5
-  let down = false
-  try {
-    await cdp.send('Input.dispatchTouchEvent', { type: 'touchStart', timestamp, touchPoints: [{ ...at, id: 0 }] })
-    down = true
-    for (let step = 1; step <= 4; step++) await cdp.send('Input.dispatchTouchEvent', { type: 'touchMove', timestamp: timestamp + step * .016, touchPoints: [{ x: at.x, y: at.y + dy * step / 4, id: 0 }] })
-    await expect.poll(async () => { const s = await state(); return s.started && s.down === 1 && (s.top - s.start) * -Math.sign(dy) > 0 }, 'the touch moves the page with the finger down').toBe(true)
-    await cdp.send('Input.dispatchTouchEvent', { type: 'touchMove', timestamp: timestamp + .49, touchPoints: [{ x: at.x, y: at.y + dy, id: 0 }] })
-    await cdp.send('Input.dispatchTouchEvent', { type: 'touchEnd', timestamp: releasedAt, touchPoints: [] })
-    down = false
-    await expect.poll(state, 'the native scroll has finished').toMatchObject({ ended: true, down: 0 })
-    const done = await state()
-    return done.top - done.start
-  } finally {
-    if (down) await cdp.send('Input.dispatchTouchEvent', { type: 'touchCancel', timestamp: releasedAt, touchPoints: [] })
-    await page.evaluate(() => (window as unknown as SwipeWindow).__stopSwipe?.())
-  }
-}
+// Chromium's own touch scroll gestures (CDP), finger up the screen, until 2000 px have passed; every
+// scroll event records main's clientHeight.
+type HeightWindow = { __heights: number[] }
 async function touchPage(browser: Browser, size: Size) {
   const context = await browser.newContext({ viewport: size, hasTouch: true, isMobile: true })
   return { page: await context.newPage(), close: () => context.close() }
 }
 for (const size of [PORTRAIT, LANDSCAPE]) test(`AEON-1459 agents ${sizeName(size)} light: the scroller's height never changes across a 2000 px touch scroll`, async ({ browser }, info) => {
+  test.setTimeout(60_000)
   const { page, close } = await touchPage(browser, size)
   const c = checks(info, size, 'light')
   try {
-    await openAgents(page, size, 'light')
+    // A list long enough for 2000 px of reading on either screen.
+    await openAgents(page, size, 'light', { sessions: 70 })
     // WebKit (iPhone Safari) has no scroll anchoring.
     await page.addStyleTag({ content: '*, *::before, *::after { overflow-anchor: none !important; }' })
-    const cdp = await page.context().newCDPSession(page)
+    const cdp: CDPSession = await page.context().newCDPSession(page)
     await main(page).evaluate(el => {
-      const win = window as unknown as SwipeWindow
+      const win = window as unknown as HeightWindow
       win.__heights = [el.clientHeight]
       el.addEventListener('scroll', () => win.__heights.push(el.clientHeight), { passive: true })
     })
+    const start = await main(page).evaluate(el => el.scrollTop)
+    const x = Math.round(size.width / 2), y = Math.round(size.height * .75), distance = -Math.round(size.height * .5)
     let travelled = 0
-    const at = { x: Math.round(size.width / 2), y: Math.round(size.height * .8) }
-    for (let n = 0; n < 16 && travelled < 2000; n++) travelled += await swipe(page, cdp, at, -Math.round(size.height * .5))
-    const heights = await page.evaluate(() => (window as unknown as SwipeWindow).__heights)
+    for (let n = 0; n < 24 && travelled < 2000; n++) {
+      const before = await main(page).evaluate(el => el.scrollTop)
+      await cdp.send('Input.synthesizeScrollGesture', { x, y, yDistance: distance, gestureSourceType: 'touch', speed: 1200, preventFling: true })
+      await expect.poll(() => main(page).evaluate(el => el.scrollTop), 'the finger moves the page').toBeGreaterThan(before)
+      travelled = (await main(page).evaluate(el => el.scrollTop)) - start
+    }
+    const heights = await page.evaluate(() => (window as unknown as HeightWindow).__heights)
     c.is('touch scroll travelled', Math.round(travelled), '≥ 2000 px', travelled >= 2000)
     c.is('main clientHeight while scrolling', [...new Set(heights)], `one value (${heights[0]})`, new Set(heights).size === 1)
     const footers = await page.locator('footer.app-footer').count()

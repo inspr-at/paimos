@@ -10,6 +10,7 @@ import { join } from 'node:path'
 import { fixtures, me, mockWork, watchErrors } from './work-fixtures'
 import { mockPairing } from './agent-pairing-fixtures'
 import { agentData, mockAgents } from './agents-fixtures'
+import { showCapacityRow } from './helpers/compact'
 
 function computerReport() {
   return {
@@ -47,6 +48,8 @@ async function setup(page: Page, report: Report) {
 }
 async function open(page: Page) {
   await page.goto('/agents')
+  // Phones: the capacity row is in the capacity line's sheet (AEON-1459).
+  await showCapacityRow(page)
   await page.locator('.cap-row .acc-chip').click()
   await expect(line(page)).toBeVisible()
 }

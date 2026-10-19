@@ -1351,7 +1351,7 @@ function sessionLinkClick(event: MouseEvent, id: string) {
 /* The card head (AEON-1209, design AEON-1196): sticky inside the card, at the card's width, right
    under the app header. Sticking adds a hairline shadow only; its box and insides never change. */
 .th-stick { position: sticky; top: 0; z-index: 20; padding: 6px 8px 0; border-radius: var(--radius) var(--radius) 0 0; background: var(--chrome); transition: box-shadow .15s ease; }
-.th-stick.stuck { box-shadow: 0 8px 14px -12px var(--shadow-color), 0 1px 0 var(--line); }
+.th-stick.stuck { border-radius: 0; box-shadow: 0 8px 14px -12px var(--shadow-color), 0 1px 0 var(--line); }
 @media (prefers-reduced-motion: reduce) { .th-stick { transition: none; } }
 .tree-head { display: flex; align-items: center; flex-wrap: wrap; gap: 8px 10px; min-height: 52px; padding: 4px 10px 6px; }
 .sess-title { display: inline-flex; align-items: baseline; gap: 8px; margin: 0; color: var(--ink); font: 650 15px/1.3 var(--font); letter-spacing: -.005em; white-space: nowrap; }
@@ -1703,7 +1703,6 @@ function sessionLinkClick(event: MouseEvent, id: string) {
 .tb-ic, .sf-cancel, .fcount { display: none; }
 @media (max-width: 719px), (max-height: 500px) {
   .th-stick { padding: 0 4px; }
-  .th-stick.stuck { border-radius: 0; }
   .tree-head { position: relative; flex-wrap: nowrap; gap: 0; height: 44px; min-height: 44px; padding: 0 0 0 8px; }
   .sess-title { flex: none; }
   .fold-all-slot, .sort-tool, .head-tools, .pills-row, .thead { display: none; }

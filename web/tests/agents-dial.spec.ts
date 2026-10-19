@@ -144,6 +144,48 @@ for (const width of [390, 1024, 1440]) for (const theme of ['light', 'dark'] as 
     await page.goto('/agents')
     const card = dial(page), codex = card.locator('[data-key="codex"]'), fold = card.locator('.fs-tog')
     const more = totalMore(page), fewer = totalFewer(page)
+    if (width < 720) {
+      // AEON-1459 (R2.1): on phones the folded control is in the capacity line's sheet, and its full dial
+      // opens on the page behind it. The sheet's units and the page's rows each keep every control put.
+      const sheet = page.getByRole('dialog', { name: 'Capacity' })
+      await page.locator('.agents-page .cap-line').click()
+      await expect(fold).toHaveAttribute('aria-expanded', 'false')
+      await expect(card.locator('.f-num')).toHaveText(String(states[state].total))
+      const unitChip = control(page).locator('[data-harness="codex"]'), dec = unitChip.locator('.pm').first(), inc = unitChip.locator('.pm').last()
+      const step = async (button: typeof inc) => { await lift(page, 'codex', width); await button.click() }
+      await expectStableControls({
+        controls: { more, fewer, fold, dial: control(page).locator('[data-unit="total"]'), total: card.locator('.f-num'), chip: unitChip, claude: control(page).locator('[data-harness="claude"]'), accounts: page.locator('.cap-row .acc-chip') }, scrollAreas: { control: control(page) },
+        interactions: [
+          { name: 'cross total digit boundary', run: async () => { for (let n = states[state].total; n < 10; n++) { await lift(page, 'total', width); await more.click() } await expect(card.locator('.f-num')).toHaveText('10') } },
+          { name: 'lower ceiling', run: async () => { await lift(page, 'total', width); await fewer.click(); await expect(card.locator('.f-num')).toHaveText('9') } },
+          { name: 'compact plus', run: () => step(inc) }, { name: 'compact minus', run: () => step(dec) },
+          { name: 'folded draft starts in its value slot', run: () => unitChip.locator('.value').click() },
+          { name: 'typed zero gives off on blur', run: async () => { await unitChip.locator('input').fill('0'); await more.focus(); await expect(unitChip.locator('.f-n')).toHaveText('off') } },
+          { name: 'off plus gives one', run: async () => { await step(inc); await expect(unitChip.locator('.f-n')).toHaveText('1') } },
+        ],
+      })
+      await sheet.getByRole('button', { name: /The full dial/ }).click()
+      await expect(sheet).toHaveCount(0)
+      await expect(codex).toBeVisible()
+      await expectStableControls({
+        controls: { row: codex, selectors: codex.getByRole('radiogroup'), none: codex.getByRole('radio', { name: 'No limit', exact: true }), max: codex.getByRole('radio', { name: 'At most', exact: true }), off: codex.getByRole('radio', { name: 'Off', exact: true }), stepper: codex.locator('.f-pm'), minus: codex.locator('.pm').first(), plus: codex.locator('.pm').last(), value: codex.locator('.f-n'), mark: codex.locator('.f-mode') },
+        scrollAreas: { body: body(page), rows: card.locator('.rows') },
+        interactions: [
+          ...['Off', 'No limit', 'At most'].map(name => ({ name: `mode ${name}`, run: async () => { await codex.getByRole('radio', { name, exact: true }).click(); await expect(codex.getByRole('radio', { name, exact: true })).toHaveAttribute('aria-checked', 'true') } })),
+          { name: 'type a harness limit', run: async () => { await codex.locator('.value').click(); await expect(codex.locator('input')).toBeFocused() } },
+          { name: 'apply clamped ceiling', run: async () => { await codex.locator('input').fill('99'); await codex.locator('input').press('Enter'); await expect(codex.locator('.f-n')).toHaveText('30') } },
+          { name: 'Home sets off', run: async () => { await codex.locator('.pm').last().focus(); await codex.locator('.pm').last().press('Home'); await expect(codex.locator('.f-n')).toHaveText('off') } },
+          ...[1, 2, 3].map(n => ({ name: `expanded mark cycle ${n}`, run: () => codex.locator('.f-mode').click() })),
+          { name: 'return to at most', run: () => codex.getByRole('radio', { name: 'At most', exact: true }).click() },
+        ],
+      })
+      // A phone's fold lasts for the visit; the saved choice, shared across devices, stays as it was (AEON-1286).
+      expect(work.preferences['ui.agents.sections']).toMatchObject({ dial: true })
+      expect(await page.evaluate(() => document.documentElement.scrollWidth - innerWidth)).toBeLessThanOrEqual(1)
+      expect(calls.filter(c => c.method !== 'GET' && /harness-sessions|\/controls|\/stop|\/interrupt/.test(c.path))).toEqual([])
+      expect(errors).toEqual([])
+      return
+    }
     // AEON-1286: a page opened on a phone shows the sessions first, with the dial folded.
     if (width <= 720) { await expect(fold).toHaveAttribute('aria-expanded', 'false'); await fold.click() }
     await expect(codex).toBeVisible()

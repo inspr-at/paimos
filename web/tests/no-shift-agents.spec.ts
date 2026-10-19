@@ -21,9 +21,16 @@ for (const width of [1440, 1024, 390]) {
         const menu = page.getByRole('menu')
         // AEON-780/783: Pause all, Resume all and Wind down live in the Wind down popover, History in the Sessions head.
         // AEON-1209: "…" keeps five items; the Decision Desk is the app header's place.
-        await expect(menu.getByRole('menuitem')).toHaveText([/^Model preferences/, /^Usage/, /^Routines/, /^Agent keys/, /^Agent settings/])
-        await expect(header.getByRole('button', { name: 'Wind down', exact: true })).toBeVisible()
-        await expect(page.locator('.sessions .head-tools').getByRole('button', { name: /^Show history/ })).toBeVisible()
+        if (width < 720) {
+          // Phones (AEON-1459, R2.1): Wind down leads ⋯; History is in the Sessions toolbar's ⋯.
+          await expect(menu.getByRole('menuitem')).toHaveText([/^Wind down…/, /^Model preferences/, /^Usage/, /^Routines/, /^Agent keys/, /^Agent settings/])
+          await expect(header.getByRole('button', { name: 'Wind down', exact: true })).toBeHidden()
+          await expect(page.locator('.sessions').getByRole('button', { name: 'More list actions', exact: true })).toBeVisible()
+        } else {
+          await expect(menu.getByRole('menuitem')).toHaveText([/^Model preferences/, /^Usage/, /^Routines/, /^Agent keys/, /^Agent settings/])
+          await expect(header.getByRole('button', { name: 'Wind down', exact: true })).toBeVisible()
+          await expect(page.locator('.sessions .head-tools').getByRole('button', { name: /^Show history/ })).toBeVisible()
+        }
         await expect(page.locator('.places').getByRole('link', { name: /^Decision Desk/ })).toHaveAttribute('href', '/decision-desk')
       } }],
     })
@@ -127,8 +134,18 @@ for (const width of [1440, 1024, 390]) {
     const row = dial.locator('[data-key="codex"]')
     // Destination labels change with the current value; the stepper controls persist.
     const rowFewer = row.locator('.lim-step .pm').nth(0), rowMore = row.locator('.lim-step .pm').nth(1)
-    // AEON-1286: a page opened on a phone shows the sessions first, with the dial folded.
-    if (width <= 720) await page.locator('.cdial .fs-tog').click()
+    // AEON-1286: a page opened on a phone shows the sessions first, with the dial folded. On phones
+    // the total's stepper is in the capacity line's sheet and the full dial opens from it (AEON-1459).
+    if (width < 720) {
+      const sheet = page.getByRole('dialog', { name: 'Capacity' })
+      await page.locator('.agents-page .cap-line').click()
+      await expectStableControls({
+        controls: { more, fewer },
+        interactions: [...[fewer, fewer, more, more].map((button, i) => ({ name: `sheet total step ${i + 1}`, run: () => button.click() }))],
+      })
+      await sheet.getByRole('button', { name: /The full dial/ }).click()
+      await expect(sheet).toHaveCount(0)
+    } else if (width <= 720) await page.locator('.cdial .fs-tog').click()
     await expect(row).toBeVisible()
     await page.evaluate(() => document.fonts.ready)
     // The merged dial uses a separate explanation row and a container breakpoint.
@@ -144,6 +161,15 @@ for (const width of [1440, 1024, 390]) {
       expect(Math.abs(height - rowHeights[0]!)).toBeLessThanOrEqual(.5)
     }
     await expectDialRowsFitContent(body)
+    if (width < 720) {
+      await expectStableControls({
+        controls: { selector: row.getByRole('radiogroup'), row, rowMore, rowFewer },
+        scrollAreas: { rows: dial.locator('.rows') },
+        interactions: [...[rowMore, rowFewer].map((button, i) => ({ name: `${i ? 'fewer' : 'more'} on Codex`, run: async () => { await expect(button).toHaveAccessibleName(/^Codex:/); await button.click() } }))],
+      })
+      await expectDialRowsFitContent(body)
+      return
+    }
     await expectStableControls({
       controls: { more, fewer, selector: row.getByRole('radiogroup'), row, rowMore, rowFewer },
       scrollAreas: { rows: dial.locator('.rows') },
@@ -171,11 +197,15 @@ for (const width of [1440, 1024, 390]) {
     const more = dial.getByRole('button', { name: 'One agent more at once' })
     const fewer = dial.getByRole('button', { name: 'One agent fewer at once' })
     const row = dial.locator('[data-key="codex"]')
-    // AEON-1286: a page opened on a phone shows the sessions first, with the dial folded.
-    if (width <= 720) await page.locator('.cdial .fs-tog').click()
+    // AEON-1286: a page opened on a phone shows the sessions first, with the dial folded; on phones the
+    // capacity line's sheet opens the full dial, and the total's stepper stays in that sheet (AEON-1459).
+    if (width < 720) {
+      await page.locator('.agents-page .cap-line').click()
+      await page.getByRole('dialog', { name: 'Capacity' }).getByRole('button', { name: /The full dial/ }).click()
+    } else if (width <= 720) await page.locator('.cdial .fs-tog').click()
     await expect(row).toBeVisible()
     await expectStableControls({
-      controls: { more, fewer, selector: row.getByRole('radiogroup'), row },
+      controls: width < 720 ? { selector: row.getByRole('radiogroup'), row } : { more, fewer, selector: row.getByRole('radiogroup'), row },
       scrollAreas: { rows: dial.locator('.rows') },
       interactions: ['No limit', 'Off', 'At most'].map(name => ({ name, run: async () => { await row.getByRole('radio', { name, exact: true }).click(); await expect(row.getByRole('radio', { name, exact: true })).toHaveAttribute('aria-checked', 'true') } })),
     })
@@ -194,9 +224,12 @@ for (const width of [1440, 1024, 390]) {
     const lead = sessions.locator(`[data-row="s:${data.sessions[0]!.id}"]`)
     const worker = sessions.locator(`[data-row="s:${data.sessions[1]!.id}"]`)
     const fold = lead.locator('.tree-fold')
-    // Its name says Show history or Back to sessions; the same button is measured either way.
-    const history = sessions.locator('.head-tools button[aria-pressed]')
-    const search = sessions.getByRole('searchbox', { name: 'Search sessions in this list' })
+    // Its name says Show history or Back to sessions; the same button is measured either way. On phones
+    // History is in the toolbar's ⋯ and search opens over its line (AEON-1459): ⋯ and Search are measured.
+    const compact = width < 720
+    const history = compact ? sessions.getByRole('button', { name: 'More list actions', exact: true }) : sessions.locator('.head-tools button[aria-pressed]')
+    const search = compact ? sessions.getByRole('button', { name: 'Search sessions', exact: true }) : sessions.getByRole('searchbox', { name: 'Search sessions in this list' })
+    const toggleHistory = async () => { await history.click(); if (compact) await page.getByRole('menu', { name: 'More list actions' }).getByRole('menuitem', { name: /^(History|Back to sessions)/ }).click() }
     await expect(worker).toBeVisible()
     await expectStableControls({
       controls: { fold, more: lead.getByRole('button', { name: /^Actions for / }), glyph: lead.locator('.ava'), history, search },
@@ -213,8 +246,8 @@ for (const width of [1440, 1024, 390]) {
     await expectStableControls({
       controls: { history, search, filter: sessions.getByRole('button', { name: 'Filter', exact: true }) },
       interactions: [
-        { name: 'history on', run: async () => { await history.click(); await expect(title).toHaveText('History') } },
-        { name: 'history off', run: async () => { await sessions.getByRole('button', { name: 'Back to sessions' }).click(); await expect(title).toHaveText('Sessions') } },
+        { name: 'history on', run: async () => { await toggleHistory(); await expect(title).toHaveText('History') } },
+        { name: 'history off', run: async () => { if (compact) await toggleHistory(); else await sessions.getByRole('button', { name: 'Back to sessions' }).click(); await expect(title).toHaveText('Sessions') } },
       ],
     })
   })
@@ -226,6 +259,30 @@ for (const width of [1440, 1024, 390]) {
     await page.goto('/agents')
     await page.evaluate(value => { document.documentElement.dataset.theme = value }, theme)
     const sessions = page.locator('.sessions'), title = sessions.locator('#sessions-title')
+    if (width < 720) {
+      // Phones (AEON-1459, D3): History and Clear stale are in the toolbar's ⋯; the line's tools never move.
+      const more = sessions.getByRole('button', { name: 'More list actions', exact: true }), menu = page.getByRole('menu', { name: 'More list actions' })
+      await more.click()
+      await expect(menu.getByRole('menuitem', { name: /^Clear stale/ })).toContainText('1 without a heartbeat for 15')
+      await page.keyboard.press('Escape')
+      await expectStableControls({
+        controls: { more, search: sessions.getByRole('button', { name: 'Search sessions', exact: true }), filter: sessions.getByRole('button', { name: 'Filter', exact: true }), title },
+        scrollAreas: { sessions },
+        interactions: [
+          { name: 'History from ⋯ takes Clear stale out of ⋯', run: async () => {
+            await more.click(); await menu.getByRole('menuitem', { name: /^History/ }).click(); await expect(title).toHaveText('History')
+            await more.click(); await expect(menu.getByRole('menuitem', { name: /^Clear stale/ })).toHaveCount(0); await page.keyboard.press('Escape')
+            await page.screenshot({ path: info.outputPath(`history-${width}-${theme}.png`) })
+          } },
+          { name: 'Back to sessions brings it back', run: async () => {
+            await more.click(); await menu.getByRole('menuitem', { name: /^Back to sessions/ }).click(); await expect(title).toHaveText('Sessions')
+            await more.click(); await expect(menu.getByRole('menuitem', { name: /^Clear stale/ })).toBeVisible(); await page.keyboard.press('Escape')
+            await page.screenshot({ path: info.outputPath(`sessions-${width}-${theme}.png`) })
+          } },
+        ],
+      })
+      return
+    }
     const history = sessions.locator('.head-tools button[aria-pressed]')
     const stale = sessions.getByRole('button', { name: /^Clear stale:/ })
     await expect(stale).toBeVisible()

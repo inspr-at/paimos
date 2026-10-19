@@ -64,6 +64,31 @@ for (const width of [1440, 1024, 390]) for (const theme of ['light', 'dark'] as 
     expect(await order(page)).toEqual(['projects', 'agents', 'business', 'desk'])
     await expect(deskLink(page)).toHaveAccessibleName('Decision Desk, 5 open')
     await expect(deskLink(page)).toHaveAttribute('href', '/decision-desk')
+    if (width < 720) {
+      // AEON-1459 (D2): a compact header has no preview chevron; the Desk is one 44 px tap and the
+      // avatar sheet opens its preview, a bottom sheet with 44 px rows.
+      await expect(chevron(page)).toBeHidden()
+      const box = (await deskLink(page).boundingBox())!
+      expect(Math.round(box.width)).toBeGreaterThanOrEqual(44); expect(Math.round(box.height)).toBeGreaterThanOrEqual(44)
+      const dir = testInfo.outputPath('AEON-1214')
+      await mkdir(dir, { recursive: true })
+      await page.screenshot({ path: join(dir, `header-${width}-${theme}.png`), clip: { x: 0, y: 0, width, height: 120 } })
+      await page.getByRole('button', { name: /^Account for / }).click()
+      await page.getByRole('menu', { name: 'Account' }).getByRole('menuitem', { name: 'Preview the Decision Desk' }).click()
+      const firstRow = preview(page).getByRole('link', { name: /^Approval · nodes\.read, / })
+      await expect(preview(page)).toContainText('5 things for you')
+      await expect(firstRow).toBeFocused()
+      expect(await designGate(page, true)).toEqual({ edges: [], glyphs: [], german: [], small: [] })
+      await expect(page.locator('.hm-panel.desk-panel')).toHaveClass(/sheet/)
+      for (const row of await preview(page).getByRole('link').all()) expect((await row.boundingBox())!.height).toBeGreaterThanOrEqual(44)
+      expect(await page.locator('.hm-panel.desk-panel').evaluate(el => el.scrollWidth - el.clientWidth)).toBeLessThanOrEqual(1)
+      expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(width)
+      await page.screenshot({ path: join(dir, `preview-${width}-${theme}.png`) })
+      await firstRow.click()
+      await expect(page).toHaveURL('/decision-desk?from=preview&item=a:approval-1')
+      await expect(page.locator('.places .place.split')).toHaveClass(/active/)
+      return
+    }
     await expect(chevron(page)).toHaveAttribute('aria-haspopup', 'dialog')
     await expect(chevron(page)).toHaveAttribute('aria-expanded', 'false')
     if (width < 600) for (const target of [deskLink(page), chevron(page)]) {
@@ -184,7 +209,9 @@ test('the preview says when it shows part of the Desk, nothing, or could not rea
 
 // Measured, not guessed: on a phone the chevron steps aside before the moon when
 // the room runs out, so the ticket key stays whole (AEON-312); the Desk stays a tap away.
-for (const width of [375, 390]) test(`on a ${width} px phone the chevron gives way to a ticket key and returns on the home page`, async ({ page }) => {
+// AEON-1459 (D2): a compact header never carries the preview's chevron or the moon; a ticket key
+// keeps its room, and nothing runs past the header's edge, on a ticket and at home.
+for (const width of [375, 390]) test(`on a ${width} px phone the header has no chevron or moon, a ticket key stays whole, nothing runs past the edge`, async ({ page }) => {
   await page.setViewportSize({ width, height: 844 })
   await page.emulateMedia({ colorScheme: 'light' })
   await setup(page)
@@ -194,18 +221,11 @@ for (const width of [375, 390]) test(`on a ${width} px phone the chevron gives w
   await expect.poll(() => key.evaluate(el => el.scrollWidth <= el.clientWidth)).toBe(true)
   await expect(deskLink(page)).toBeVisible()
   await expect(chevron(page)).toBeHidden()
-  // It truly would not fit: the free room is less than its 44 px.
-  expect(await page.locator('.app-header .spacer').evaluate(el => el.getBoundingClientRect().width)).toBeLessThan(44)
   expect(await page.locator('.app-header').evaluate(el => el.scrollWidth - el.clientWidth)).toBeLessThanOrEqual(0)
   await places(page).getByRole('link', { name: 'Projects' }).click()
   await expect(page).toHaveURL('/')
-  await expect(page.getByRole('button', { name: 'Switch to dark theme' })).toBeVisible()
-  if (width === 390) {
-    await expect(chevron(page)).toBeVisible()
-    await chevron(page).click()
-    await expect(preview(page)).toContainText('5 things for you')
-  } else await expect(chevron(page)).toBeHidden()
-  // Whatever stays, nothing runs past the header's edge.
+  await expect(page.getByRole('button', { name: 'Switch to dark theme' })).toBeHidden()
+  await expect(chevron(page)).toBeHidden()
   const reach = await page.locator('.app-header').evaluate(header => {
     const end = header.getBoundingClientRect().right - parseFloat(getComputedStyle(header).paddingRight)
     return Math.max(...[...header.children].map(child => child.getBoundingClientRect().right)) - end
@@ -213,12 +233,29 @@ for (const width of [375, 390]) test(`on a ${width} px phone the chevron gives w
   expect(reach).toBeLessThanOrEqual(0.5)
 })
 
+// AEON-1459 (D1): from 600 to 719 px a project's tickets get the compact header too: one 44 px line, the
+// places as icons, no density switch and no chevron, and it fits the window.
+for (const width of [601, 640, 719]) test(`on a project's tickets at ${width} the compact header fits the window`, async ({ page }) => {
+  await page.setViewportSize({ width, height: 900 })
+  await page.emulateMedia({ colorScheme: 'light' })
+  await setup(page)
+  await page.goto('/p/PHAROS/tickets')
+  await expect(page.locator('.app-header .crumb-sheet')).toBeVisible()
+  await expect(page.locator('.app-header .app-density')).toBeHidden()
+  await expect(chevron(page)).toBeHidden()
+  expect(Math.round((await page.locator('.app-header').boundingBox())!.height)).toBe(44)
+  const search = (await page.getByRole('button', { name: 'Search everything' }).boundingBox())!
+  expect([Math.round(search.width), Math.round(search.height)]).toEqual([44, 44])
+  await expect.poll(() => page.evaluate(() => document.documentElement.scrollWidth - innerWidth)).toBeLessThanOrEqual(0)
+  expect(await page.locator('.app-header').evaluate(el => el.scrollWidth - el.clientWidth)).toBeLessThanOrEqual(0)
+})
+
 // AEON-1214 fix round 3: on tablets the split Desk is wider than a plain place, and
 // a project's tickets add the density switch (and here Business). Once the
 // breadcrumb has nothing left to give, the search pill yields the rest, its keys
 // first, and just above phone width the row's gaps tighten, so the header never
 // runs past the window. With room to spare the pill keeps its full width and keys.
-for (const width of [601, 640, 721, 768, 1024]) test(`on a project's tickets at ${width} the header fits the window and the search pill gives way last`, async ({ page }) => {
+for (const width of [720, 721, 768, 1024]) test(`on a project's tickets at ${width} the header fits the window and the search pill gives way last`, async ({ page }) => {
   await page.setViewportSize({ width, height: 900 })
   await page.emulateMedia({ colorScheme: 'light' })
   await setup(page)
@@ -359,7 +396,7 @@ const TRAILS = [
   { slug: 'ticket', path: '/p/PHAROS/PHAROS-11?view=full', ready: (page: Page) => expect(trailOf(page).locator('.crumb.current')).toHaveText('PHAROS-11') },
   { slug: 'profiles', path: '/settings/business/profiles', ready: (page: Page) => expect(trailOf(page)).toContainText('Document profiles') },
 ]
-for (const width of [601, 640, 721]) for (const theme of ['light', 'dark'] as const) {
+for (const width of [720, 721, 768]) for (const theme of ['light', 'dark'] as const) {
   test(`at ${width} ${theme} the trail drops whole segments and never cuts a chip`, async ({ page }, testInfo) => {
     await page.setViewportSize({ width, height: 900 })
     await setup(page, { theme })
@@ -383,8 +420,8 @@ for (const width of [601, 640, 721]) for (const theme of ['light', 'dark'] as co
 // Every width from just above phone width to a wide desktop, places labelled from
 // 1181 px: the trail never shows a cut chip, and it returns whole when the window
 // widens. What steps aside stays in the trail for screen readers, out of the tab order.
-test('from 601 to 1440 px the trail never cuts a chip and returns whole when the window widens', async ({ page }, testInfo) => {
-  // Two trails, every 7 px from 1440 down to 601, each settled on a rendering
+test('from 720 to 1440 px the trail never cuts a chip and returns whole when the window widens', async ({ page }, testInfo) => {
+  // Two trails, every 7 px from 1440 down to 720 (narrower is the compact header, AEON-1459), each settled on a rendering
   // update, then a refit at four widths. On the two-worker CI shard the 30s
   // default ran out during the reviewer's shot, after fonts had loaded
   // (PR 711, job 117000751930). 180s still only stops a hang. The assertions stay.
@@ -414,7 +451,7 @@ test('from 601 to 1440 px the trail never cuts a chip and returns whole when the
       }).observe(header)
     })
     const seen: string[] = []
-    for (let width = 1440; width >= 601; width -= 7) {
+    for (let width = 1440; width >= 720; width -= 7) {
       await page.setViewportSize({ width, height: 900 })
       await settle(page)
       const fit = await trailFit(page)
@@ -435,7 +472,7 @@ test('from 601 to 1440 px the trail never cuts a chip and returns whole when the
     // AEON-1446: at Tick's widths and the 887 flake's, a refit at the same width (a font
     // swap) moves nothing: the places, the Desk's chevron, Search, the avatar and the
     // page's crumb keep their boxes, and the trail keeps its parts.
-    for (const width of [1440, 1024, 887, 601]) {
+    for (const width of [1440, 1024, 887, 720]) {
       await page.setViewportSize({ width, height: 900 })
       await settle(page)
       const fit = await trailFit(page)
@@ -451,7 +488,7 @@ test('from 601 to 1440 px the trail never cuts a chip and returns whole when the
       await page.screenshot({ path: join(dir, `trail-${trail.slug}-${width}-light.png`), clip: { x: 0, y: 0, width, height: 64 } })
     }
     // Screen readers keep the whole trail at every width; what is out of sight is out of the tab order.
-    await page.setViewportSize({ width: 640, height: 900 })
+    await page.setViewportSize({ width: 720, height: 900 })
     await settle(page)
     const crumbs = page.getByRole('navigation', { name: 'Breadcrumb' })
     await expect(crumbs.getByRole('link', { name: 'PHAROS Pharos', exact: true })).toHaveAttribute('href', '/p/PHAROS')
@@ -532,7 +569,12 @@ for (const width of [320, 360, 390, 400, 420, 1024, 1440]) for (const theme of [
       if (width >= 390 && (target.slug === 'settings' || target.slug === 'delivery')) expect(fit.keys, where).toContain('PHAROS')
       // A key that left takes no room: with the trail empty, what stepped aside for it (the moon) comes back.
       if (fit.empty) expect(fit.away, where).not.toContain('moon')
-      if (width === 320 && (target.slug === 'settings' || target.slug === 'ticket')) expect(fit.empty, `${where}: the key left`).toBe(true)
+      // Under 360 px Settings is in the avatar menu (AEON-1459, R2.1): the gear leaves the header, and a project's
+      // crumb keeps its chevron with the key in its name.
+      if (width < 360) {
+        await expect(page.getByRole('button', { name: /^App and workspace/ })).toBeHidden()
+        if (target.slug === 'settings') { expect(fit.keys, where).toEqual([]); await expect(page.locator('.app-header .crumb-sheet')).toBeVisible() }
+      }
       const key = page.locator('.app-header .crumbs').locator('.key-badge, .mono-crumb').filter({ visible: true })
       const controls = { places: places(page), search: page.getByRole('button', { name: 'Search everything' }), account: page.locator('.app-header .account'), ...(fit.keys.length ? { key: key.first() } : {}) }
       await expectStableControls({ controls, interactions: [
@@ -583,7 +625,9 @@ for (const width of [1440, 390]) test(`the preview's controls stay put through r
   const firstRead = new Promise<void>(resolve => { release = resolve })
   await page.route('**/api/decision-desk/projection*', async route => { await firstRead; await route.fallback() })
   await page.goto('/')
-  await chevron(page).click()
+  // Compact headers open the preview from the avatar sheet (AEON-1459, D2).
+  if (width < 720) { await page.getByRole('button', { name: /^Account for / }).click(); await page.getByRole('menu', { name: 'Account' }).getByRole('menuitem', { name: 'Preview the Decision Desk' }).click() }
+  else await chevron(page).click()
   await expect(preview(page)).toContainText('Reading the Desk…')
   const heading = preview(page).getByRole('heading', { name: 'Decision Desk' })
   const go = preview(page).getByRole('link', { name: 'Open the Decision Desk' })
@@ -642,7 +686,8 @@ for (const width of [1440, 390]) test(`the preview's controls stay put through r
 
 // Where the chevron has stepped aside on a phone, the avatar sheet opens the
 // preview instead, and Escape returns to the avatar; where it fits, only the chevron does.
-for (const [width, where, path, away] of [[375, 'home', '/', true], [375, 'a ticket', '/p/PHAROS/PHAROS-11?view=full', true], [390, 'a ticket', '/p/PHAROS/PHAROS-11?view=full', true], [390, 'home', '/', false]] as const) {
+// AEON-1459 (D2): every compact header has the preview in the avatar sheet; 720 px and wider keep the chevron.
+for (const [width, where, path, away] of [[375, 'home', '/', true], [375, 'a ticket', '/p/PHAROS/PHAROS-11?view=full', true], [390, 'a ticket', '/p/PHAROS/PHAROS-11?view=full', true], [390, 'home', '/', true], [720, 'home', '/', false]] as const) {
   test(`on ${where} at ${width} px the preview is ${away ? 'one entry away in the avatar sheet' : 'on its chevron, not in the avatar sheet'}`, async ({ page }) => {
     await page.setViewportSize({ width, height: 844 })
     await page.emulateMedia({ colorScheme: 'light' })

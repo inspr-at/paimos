@@ -155,10 +155,14 @@ test('at 390 px the compact sort control orders by Ticket, reverses, and restore
   const start = [sid(3), sid(1), sid(2), sid(4)]
   await expect.poll(() => rowOrder(page)).toEqual(start)
   await expect(page.locator('.thead')).toBeHidden()
-  // The Sessions head's Display opens the same select and direction (AEON-784, AEON-1209).
-  const tool = page.locator('.sessions .sort-tool')
-  await expect(tool).toHaveAccessibleName(/^Display: sort sessions by State, ascending/)
-  await tool.click()
+  // On phones Display lives in the toolbar's ⋯ (AEON-1459, D3) and opens the same select and direction
+  // (AEON-784, AEON-1209); its line names the order.
+  const more = page.locator('.sessions').getByRole('button', { name: 'More list actions', exact: true })
+  const display = page.getByRole('menu', { name: 'More list actions' }).getByRole('menuitem', { name: /^Display…/ })
+  await expect(page.locator('.sessions .sort-tool')).toBeHidden()
+  await more.click()
+  await expect(display).toContainText('sort by state')
+  await display.click()
   const bar = page.getByRole('group', { name: 'Sort sessions' })
   const pick = bar.getByRole('combobox', { name: 'Sort' })
   await expect(pick).toHaveValue('state')
@@ -182,8 +186,9 @@ test('at 390 px the compact sort control orders by Ticket, reverses, and restore
 
   await page.keyboard.press('Escape')
   await expect(bar).toHaveCount(0)
-  await expect(tool).toHaveAccessibleName(/^Display: sort sessions by Beat, ascending/)
-  await tool.click()
+  await more.click()
+  await expect(display).toContainText('sort by beat')
+  await display.click()
   await page.getByRole('button', { name: 'Default order' }).click()
   await expect.poll(() => rowOrder(page)).toEqual(start)
   await expect(pick).toHaveValue('state')
