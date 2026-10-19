@@ -29,7 +29,7 @@ const LOCALE_NAME: Record<StatusLocale, [string, string]> = { en: ['English', 'E
 const drafts = reactive<StatusNameDrafts>({})
 const problems = ref(new Map<string, { code: 'too_long' | 'taken'; name: string }>())
 const busy = ref(false), footer = ref(''), failed = ref(false)
-let focused = '', again = false, savedTimer: ReturnType<typeof setTimeout> | undefined
+let focused = '', again = false, own = -1, savedTimer: ReturnType<typeof setTimeout> | undefined
 onBeforeUnmount(() => clearTimeout(savedTimer))
 
 // Drafts follow the saved names, except the field someone is typing in and a
@@ -41,8 +41,9 @@ function adopt(names: StatusNameMap, keep: (field: string) => boolean = held) {
     drafts[key] = { ...drafts[key], [locale]: names[key]?.[locale] ?? '' }
   }
 }
-watch(() => store.value, value => { if (!busy.value) adopt(value.names) }, { immediate: true })
-watch(scope.owner, () => { focused = ''; again = false; busy.value = false; footer.value = ''; failed.value = false; problems.value = new Map(); clearTimeout(savedTimer); adopt(store.value.names) }, { flush: 'sync' })
+// The card adopts its own saves itself (keeping edits made meanwhile); others' names arrive here.
+watch(() => store.value, value => { if (!busy.value && value.revision !== own) adopt(value.names) }, { immediate: true })
+watch(scope.owner, () => { focused = ''; again = false; own = -1; busy.value = false; footer.value = ''; failed.value = false; problems.value = new Map(); clearTimeout(savedTimer); adopt(store.value.names) }, { flush: 'sync' })
 
 const differs = (key: StatusNameKey) => STATUS_LOCALES.some(locale => !!renamedStatus(key, locale, cleanStatusNames(drafts)) || !!renamedStatus(key, locale, store.value.names))
 function problemText(key: StatusNameKey): string {
@@ -70,7 +71,8 @@ function commit(field: string) {
   if (!editable.value) return
   const found = statusNameProblems(drafts, field)
   problems.value = found
-  if (found.size) return
+  // Honest result: a refused name keeps every change on screen from saving.
+  if (found.size) { failed.value = true; footer.value = t('Not saved. Fix the marked name.', 'Nicht gespeichert. Bitte den markierten Namen ändern.'); return }
   const names = cleanStatusNames(drafts)
   if (same(names, store.value.names)) { adopt(store.value.names); return }
   void save(names)
@@ -100,7 +102,8 @@ async function save(names: StatusNameMap) {
         throw new Error(t('Not saved. Fix the marked name.', 'Nicht gespeichert. Bitte den markierten Namen ändern.'))
       }
       if (!response.ok) throw new Error(t('Status names were not saved. Try again.', 'Die Statusnamen wurden nicht gespeichert. Bitte erneut versuchen.'))
-      store.accept(readStatusNames(body))
+      const saved = readStatusNames(body); own = saved.revision
+      store.accept(saved)
       // Fields changed after this save was sent keep their drafts for the next save.
       const now = cleanStatusNames(drafts)
       adopt(store.value.names, field => { const [key, locale] = field.split('.') as [StatusNameKey, StatusLocale]; return held(field) || (now[key]?.[locale] ?? '') !== (names[key]?.[locale] ?? '') })
