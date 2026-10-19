@@ -1190,7 +1190,7 @@ a.res-key:hover { text-decoration: underline; }
     @keyframes stamp-slam-phone { 0% { transform: rotate(-3deg); } 40% { transform: rotate(0deg) translateY(-4px) scale(1.15); opacity: .7; } 72% { transform: rotate(-4deg) scale(.94); opacity: 1; background: color-mix(in srgb, var(--t) 22%, var(--paper)); } 100% { transform: rotate(-3deg) scale(1); background: color-mix(in srgb, var(--t) 14%, var(--paper)); } }
   }
   .memo-head > .memo-headtext { display: block; }
-  .memo-q { max-width: none; font-size: 22px; line-height: 28px; font-weight: 600; letter-spacing: -.01em; }
+  .memo-q { max-width: none; font-size: 22px; line-height: 28px; font-weight: 600; letter-spacing: -.01em; text-wrap: pretty; }
   .memo-headtext > .memo-meta { margin-top: 12px; }
   /* The mono-caps labels become icons that carry the label; the project link's own folder icon steps aside for its label's. */
   .memo-meta { gap: 4px 14px; font-size: 14px; line-height: 20px; color: var(--ink-2); }
