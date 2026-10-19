@@ -54,9 +54,11 @@ const change = (over: Partial<NodeChange> = {}): NodeChange =>
 const settle = async () => { for (let i = 0; i < 6; i++) await Promise.resolve(); await nextTick() }
 
 let scope: EffectScope | undefined
-function setup(fetchNode = vi.fn<(id: string) => Promise<WorkNode | null>>(), start: ListItem = item(), context: { onRemoved?: (item: ListItem) => void; open?: () => FakeSource | null; heartbeatMs?: number } = {}) {
+function setup(fetchNode = vi.fn<(id: string) => Promise<WorkNode | null>>(), start: ListItem = item(), context: { onRemoved?: (item: ListItem) => void; open?: () => FakeSource | null; heartbeatMs?: number; fetchAggregates?: (ids: string[]) => Promise<ListItem[]> } = {}) {
+  const fetchAggregate = async (id: string) => { const value = await fetchNode(id); return value ? { ...start, ...value } : null }
   const store = new LiveNodeStore({ open: context.open ?? (() => null), fetchNode, rows: rowStore, ...(context.heartbeatMs === undefined ? {} : { heartbeatMs: context.heartbeatMs }),
-    fetchAggregate: async id => { const value = await fetchNode(id); return value ? { ...start, ...value } : null },
+    fetchAggregate,
+    fetchAggregates: context.fetchAggregates ?? (async ids => (await Promise.all(ids.map(fetchAggregate))).filter(value => value !== null)),
   })
   const busy = ref(false)
   // The panel shows the row store's object for the node, as the workspace resolves it.
@@ -696,6 +698,41 @@ it('refetches an open parent once after a window of id-less heartbeat frames', a
     expect(h.target.estimate?.hours).toBe(8)
     expect(h.target.eta?.progress_pct).toBe(63)
     expect(h.target.updated_at).toBe(parent.updated_at)
+  } finally {
+    vi.useRealTimers()
+  }
+})
+
+// No list is open, so nothing else reads the leaf: the panel's cached copy
+// cannot tell ETA freshness or the lead worker, which a list read works out.
+it('refreshes a leaf panel without a list once per window of id-less heartbeat frames', async () => {
+  vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout', 'setInterval', 'clearInterval'] })
+  try {
+    const leaf = item({ eta: { finished: false, eta_ready_at: at(30), progress_pct: 25 }, lead_worker: { name: 'Worker', key: 's:worker' } })
+    const stale: ListItem = { ...leaf, eta: { finished: false, eta_ready_at: at(30), progress_pct: 25, eta_stale: true } }
+    const fresh: ListItem = { ...leaf, eta: { finished: false, eta_ready_at: at(50), progress_pct: 60, eta_stale: false }, lead_worker: { name: 'Second worker', key: 's:second' } }
+    api.getNode.mockResolvedValue(node())
+    const fetchNode = vi.fn<(id: string) => Promise<WorkNode | null>>()
+    const fetchAggregates = vi.fn<(ids: string[]) => Promise<ListItem[]>>().mockResolvedValueOnce([stale]).mockResolvedValueOnce([fresh])
+    const source = new FakeSource()
+    const h = setup(fetchNode, leaf, { open: () => source, heartbeatMs: 1_000, fetchAggregates })
+    await settle()
+    for (const [window, expected] of [stale, fresh].entries()) {
+      for (let tick = 0; tick < 3; tick++) source.emit('harness.heartbeat', {}, 40)
+      await vi.advanceTimersByTimeAsync(999)
+      expect(fetchAggregates).toHaveBeenCalledTimes(window)
+      await vi.advanceTimersByTimeAsync(1)
+      await settle()
+      expect(fetchAggregates).toHaveBeenCalledTimes(window + 1)
+      expect(fetchAggregates).toHaveBeenLastCalledWith(['n1'])
+      expect(h.target.eta).toEqual(expected.eta)
+      expect(h.target.lead_worker).toEqual(expected.lead_worker)
+      expect(h.target.updated_at).toBe(leaf.updated_at)
+    }
+    // The window is spent: nothing reads again until the next frame.
+    await vi.advanceTimersByTimeAsync(5_000)
+    expect(fetchAggregates).toHaveBeenCalledTimes(2)
+    expect(fetchNode).not.toHaveBeenCalled()
   } finally {
     vi.useRealTimers()
   }

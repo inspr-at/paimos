@@ -18794,6 +18794,8 @@
     ,
     {"kind":"vitest","file":"tests/live-nodes.unit.test.ts","name":"LiveNodeStore > pings keep a quiet stream alive without row reads; missing pings reconnect and resync at 45s","tier":"GATED-FULL"}
     ,
+    {"kind":"vitest","file":"tests/live-nodes.unit.test.ts","name":"LiveNodeStore > reads the session projections of every shown leaf in one list read per id-less heartbeat window","tier":"ESSENTIAL"}
+    ,
     {"kind":"vitest","file":"tests/live-nodes.unit.test.ts","name":"LiveNodeStore > refetches a changed node once for every view that shows it and tells the others","tier":"GATED-FULL"}
     ,
     {"kind":"vitest","file":"tests/live-nodes.unit.test.ts","name":"LiveNodeStore > refetches a kind conversion from the stream and updates its kind projection","tier":"GATED-FULL"}
@@ -18911,6 +18913,8 @@
     {"kind":"vitest","file":"tests/live-ticket.unit.test.ts","name":"parent detail aggregate freshness > refetches an open parent after node.updated on an unseen descendant","tier":"NIGHTLY"}
     ,
     {"kind":"vitest","file":"tests/live-ticket.unit.test.ts","name":"refetches an open parent once after a window of id-less heartbeat frames","tier":"ESSENTIAL"}
+    ,
+    {"kind":"vitest","file":"tests/live-ticket.unit.test.ts","name":"refreshes a leaf panel without a list once per window of id-less heartbeat frames","tier":"ESSENTIAL"}
     ,
     {"kind":"vitest","file":"tests/live-ticket.unit.test.ts","name":"review 326f: views ask the row store > #1 a first load on its way when the stream connects is read again; the deletion it missed stays out","tier":"GATED-FULL"}
     ,

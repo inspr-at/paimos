@@ -308,6 +308,26 @@ describe('LiveNodeStore', () => {
     release()
   })
 
+  // Quiet heartbeats (AEON-1354): the leaves a view shows share one list read.
+  it('reads the session projections of every shown leaf in one list read per id-less heartbeat window', async () => {
+    const leaf = (id: string, progress: number) => ({ ...node(id, '2026-09-29T10:00:00Z'), kind_slug: 'ticket', children_count: 0,
+      project: { id: 'A', key: 'A', title: 'A' }, eta: { finished: false, progress_pct: progress } } as ListItem)
+    const fetchAggregates = vi.fn(async (ids: string[]) => ids.map(id => leaf(id, 70)))
+    store = new LiveNodeStore({ open: url => new FakeSource(url) as never, fetchNode, fetchAggregates, heartbeatMs: 1000, rows })
+    const panel = view(['a', 'b'])
+    store.subscribe(panel.v)
+    latest().ready(40, false)
+    for (const id of ['a', 'b']) rows.adopt(leaf(id, 10), rows.mark(), { show: true })
+    const release = rows.hold(() => ['a', 'b'])
+    for (let tick = 0; tick < 3; tick++) latest().emit('harness.heartbeat', {})
+    await vi.advanceTimersByTimeAsync(1000)
+    expect(fetchAggregates).toHaveBeenCalledExactlyOnceWith(['a', 'b'])
+    expect(panel.calls.map(call => [call.id, (call.node as ListItem | null)?.eta?.progress_pct])).toEqual([['a', 70], ['b', 70]])
+    expect(rows.latest('a')?.updated_at).toBe('2026-09-29T10:00:00Z')
+    expect(fetchNode).not.toHaveBeenCalled()
+    release()
+  })
+
   it('refreshes both held projects after an uncached descendant moves without a status change', async () => {
     const parents = ['source', 'destination'].map(project => ({
       ...node(project + '-parent', '2026-09-29T10:00:00Z'), kind_slug: 'work', children_count: 2,
