@@ -3,12 +3,14 @@ package goals
 
 import (
 	"encoding/json"
+	"fmt"
 	"net/url"
 	"reflect"
 	"strings"
 	"testing"
 	"time"
 
+	"github.com/inspr-at/paimos/internal/authz"
 	"github.com/inspr-at/paimos/internal/db"
 	"github.com/inspr-at/paimos/internal/dbtest"
 	"github.com/inspr-at/paimos/internal/tenant"
@@ -125,17 +127,29 @@ func TestGoalEpicsAreasRollupAndMissingChecks(t *testing.T) {
 		if _, err := tx.Exec(t.Context(), `INSERT INTO harness_sessions(tenant_id,project_id,agent_principal_id,ticket_node_id,harness,host,management,role,work_shape,ref_digest,lease_digest,phase,activity_note) VALUES($1,$2,$3,$4,'codex','test','unmanaged','worker','ship',$5,$6,'working','Wiring the epics read')`, f.writer.TenantID, f.project, agent, live, []byte("epic-ref"), []byte("epic-lease")); err != nil {
 			return err
 		}
-		// The guest role has no harness.read. The live line stays visible only
-		// with that project permission; workspace admin would also see EPC-13.
+		// A principal has one binding per project, and the built-in guest role
+		// cannot gain harness.read. Replace that binding with the guest set
+		// plus harness.read. Workspace admin would also see EPC-13.
 		var role string
 		if err := tx.QueryRow(t.Context(), `INSERT INTO roles(tenant_id,key,name) VALUES($1,'epic_live_read','Epic live read') RETURNING id::text`, f.writer.TenantID).Scan(&role); err != nil {
 			return err
 		}
-		if _, err := tx.Exec(t.Context(), `INSERT INTO role_permissions(tenant_id,role_id,permission) VALUES($1,$2,'harness.read')`, f.writer.TenantID, role); err != nil {
+		perms, ok := authz.BuiltinPermissions("guest")
+		if !ok {
+			return fmt.Errorf("guest permissions")
+		}
+		granted := append(append([]string{}, perms...), "harness.read")
+		if _, err := tx.Exec(t.Context(), `INSERT INTO role_permissions(tenant_id,role_id,permission) SELECT $1,$2,unnest($3::text[])`, f.writer.TenantID, role, granted); err != nil {
 			return err
 		}
-		_, err := tx.Exec(t.Context(), `INSERT INTO role_bindings(tenant_id,principal_id,role_id,scope_type,scope_id) VALUES($1,$2,$3,'project',$4)`, f.writer.TenantID, f.reader.ID, role, f.project)
-		return err
+		tag, err := tx.Exec(t.Context(), `UPDATE role_bindings SET role_id=$3 WHERE tenant_id=$1 AND principal_id=$2 AND scope_type='project' AND scope_id=$4`, f.writer.TenantID, f.reader.ID, role, f.project)
+		if err != nil {
+			return err
+		}
+		if tag.RowsAffected() != 1 {
+			return fmt.Errorf("reader binding updated %d rows", tag.RowsAffected())
+		}
+		return nil
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -278,7 +292,7 @@ func seedReadyDefinition(t *testing.T, tx pgx.Tx, f storageFixture) error {
 	if err != nil {
 		return err
 	}
-	_, err = tx.Exec(t.Context(), `INSERT INTO nodes(tenant_id,kind_id,key,title,parent_id,fields) VALUES($1,$2,'DEF-FIX2','Definition',$3,$4::jsonb)`, f.writer.TenantID, kind, f.project, checks)
+	_, err = tx.Exec(t.Context(), `INSERT INTO nodes(tenant_id,kind_id,key,title,parent_id,fields) VALUES($1,$2,'DEF-2','Definition',$3,$4::jsonb)`, f.writer.TenantID, kind, f.project, checks)
 	return err
 }
 
@@ -296,7 +310,7 @@ func TestEpicFix2RedactsNotesAuthorDeliveryAndHolds(t *testing.T) {
 		if err := tx.QueryRow(t.Context(), `INSERT INTO principals(tenant_id,kind,name) VALUES($1,'agent','Worker') RETURNING id::text`, f.writer.TenantID).Scan(&worker); err != nil {
 			return err
 		}
-		if _, err := tx.Exec(t.Context(), `INSERT INTO harness_sessions(tenant_id,project_id,agent_principal_id,ticket_node_id,harness,host,management,role,work_shape,ref_digest,lease_digest,phase,activity_note) VALUES($1,$2,$3,$4,'codex','test','unmanaged','worker','ship',$5,$6,'working','Live note for the epic item')`, f.writer.TenantID, f.project, worker, live, []byte("fix2-ref"), []byte("fix2-lease")); err != nil {
+		if _, err := tx.Exec(t.Context(), `INSERT INTO harness_sessions(tenant_id,project_id,agent_principal_id,ticket_node_id,harness,host,management,role,work_shape,ref_digest,lease_digest,phase,activity_note,heartbeat_at) VALUES($1,$2,$3,$4,'codex','test','unmanaged','worker','ship',$5,$6,'working','Live note for the epic item',clock_timestamp())`, f.writer.TenantID, f.project, worker, live, []byte("fix2-ref"), []byte("fix2-lease")); err != nil {
 			return err
 		}
 		if _, err := tx.Exec(t.Context(), `INSERT INTO delivery_items(tenant_id,id,project_id,ticket_node_id,repository,pull_request,state,state_since,owner,held_reason,observation,updated_at) VALUES($1,gen_random_uuid(),$2,$3,'aeon',41,'held',now(),'worker','waiting on review','{}'::jsonb,now())`, f.writer.TenantID, f.project, live); err != nil {
@@ -418,11 +432,11 @@ func TestEpicFix2LandsUsesSuggestionAndQueue(t *testing.T) {
 			return err
 		}
 		epic := epicFixtureNode(t, tx, f.writer.TenantID, "LND-1", "Epic lands", "open", f.project, 1, map[string]any{"suggested_release": "Next"})
-		epicFixtureNode(t, tx, f.writer.TenantID, "LND-A", "Stored suggestion", "open", epic, 1, map[string]any{"suggested_release": "Next"})
-		queued := epicFixtureNode(t, tx, f.writer.TenantID, "LND-B", "Queued leaf", "open", epic, 2, map[string]any{"estimate_hours": 2})
-		epicFixtureNode(t, tx, f.writer.TenantID, "LND-C", "Target release", "open", epic, 3, map[string]any{"release": "137", "suggested_release": "Next"})
+		epicFixtureNode(t, tx, f.writer.TenantID, "LND-2", "Stored suggestion", "open", epic, 1, map[string]any{"suggested_release": "Next"})
+		queued := epicFixtureNode(t, tx, f.writer.TenantID, "LND-3", "Queued leaf", "open", epic, 2, map[string]any{"estimate_hours": 2})
+		epicFixtureNode(t, tx, f.writer.TenantID, "LND-4", "Target release", "open", epic, 3, map[string]any{"release": "137", "suggested_release": "Next"})
 		var order, runner string
-		if err := tx.QueryRow(t.Context(), `INSERT INTO nodes(tenant_id,kind_id,key,title,parent_id,project_id) SELECT $1,id,'LND-O','Queued order',$2,$3 FROM node_kinds WHERE tenant_id=$1 AND slug='work_order' RETURNING id::text`, f.writer.TenantID, queued, f.project).Scan(&order); err != nil {
+		if err := tx.QueryRow(t.Context(), `INSERT INTO nodes(tenant_id,kind_id,key,title,parent_id,project_id) SELECT $1,id,'LND-5','Queued order',$2,$3 FROM node_kinds WHERE tenant_id=$1 AND slug='work_order' RETURNING id::text`, f.writer.TenantID, queued, f.project).Scan(&order); err != nil {
 			return err
 		}
 		if _, err := tx.Exec(t.Context(), `INSERT INTO work_orders(tenant_id,node_id,requested_by_principal_id) VALUES($1,$2,$3)`, f.writer.TenantID, order, f.writer.ID); err != nil {
@@ -458,13 +472,13 @@ func TestEpicFix2LandsUsesSuggestionAndQueue(t *testing.T) {
 	if g.ETA == nil || g.ETA.Source != "release" || g.ETA.Text != "~ Next" {
 		t.Fatalf("epic lands %+v", g.ETA)
 	}
-	if a := epicItem(t, g, "LND-A"); a.ETA.Source != "release" || a.ETA.Text != "~ Next" {
+	if a := epicItem(t, g, "LND-2"); a.ETA.Source != "release" || a.ETA.Text != "~ Next" {
 		t.Fatalf("stored %+v", a.ETA)
 	}
-	if b := epicItem(t, g, "LND-B"); b.ETA.Source != "release" || b.ETA.Text != "~ Next" {
+	if b := epicItem(t, g, "LND-3"); b.ETA.Source != "release" || b.ETA.Text != "~ Next" {
 		t.Fatalf("queue %+v", b.ETA)
 	}
-	if c := epicItem(t, g, "LND-C"); c.ETA.Source != "release" || c.ETA.Text != "137" {
+	if c := epicItem(t, g, "LND-4"); c.ETA.Source != "release" || c.ETA.Text != "137" {
 		t.Fatalf("target %+v", c.ETA)
 	}
 	blind, code, body := epicListAs(t, f, m, narrow, "")
@@ -475,13 +489,13 @@ func TestEpicFix2LandsUsesSuggestionAndQueue(t *testing.T) {
 	if bg.ETA == nil || bg.ETA.Text != "~ Next" {
 		t.Fatalf("stored epic suggestion hidden %+v", bg.ETA)
 	}
-	if a := epicItem(t, bg, "LND-A"); a.ETA.Text != "~ Next" {
+	if a := epicItem(t, bg, "LND-2"); a.ETA.Text != "~ Next" {
 		t.Fatalf("stored item hidden %+v", a.ETA)
 	}
-	if b := epicItem(t, bg, "LND-B"); b.ETA.Source != "none" || b.ETA.Text != "" {
+	if b := epicItem(t, bg, "LND-3"); b.ETA.Source != "none" || b.ETA.Text != "" {
 		t.Fatalf("queue leaked without releases.read %+v", b.ETA)
 	}
-	if c := epicItem(t, bg, "LND-C"); c.ETA.Text != "137" {
+	if c := epicItem(t, bg, "LND-4"); c.ETA.Text != "137" {
 		t.Fatalf("target hidden %+v", c.ETA)
 	}
 }
