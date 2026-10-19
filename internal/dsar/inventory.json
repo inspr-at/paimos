@@ -959,6 +959,37 @@
       "table": "import_project_drafts"
     },
     {
+      "table": "import_project_retention",
+      "classification": "personal",
+      "columns": {
+        "tenant_id": "metadata",
+        "project_id": "metadata",
+        "source": "metadata",
+        "imported_at": "personal",
+        "engaged_at": "personal",
+        "engaged_by": "personal",
+        "last_checked_at": "metadata",
+        "deleted_at": "metadata"
+      },
+      "locator": {
+        "tenant_column": "tenant_id",
+        "person_column": "engaged_by"
+      }
+    },
+    {
+      "table": "import_retention_settings",
+      "classification": "metadata",
+      "columns": {
+        "tenant_id": "metadata",
+        "enabled": "metadata",
+        "dry_run": "metadata",
+        "revision": "metadata"
+      },
+      "locator": {
+        "tenant_column": "tenant_id"
+      }
+    },
+    {
       "classification": "personal",
       "columns": {
         "resend_of_id": "metadata"
