@@ -364,7 +364,7 @@ function sparseFigures(): ProjectFigures {
     tag: { ...c.tag, values: one('bug', 19), others: 0 }, cost_unit: { ...c.cost_unit, others: 0 },
   } }
 }
-const TOP_N: [string, number][] = [['Model', 3], ['Parent', 2], ['Release', 3], ['Suggested release', 3], ['Tags', 2], ['Cost unit', 3]]
+const TOP_N: [string, string, number][] = [['model', 'Model', 3], ['parent', 'Parent', 2], ['release', 'Release', 3], ['suggested', 'Suggested release', 3], ['tags', 'Tags', 2], ['cost', 'Cost unit', 3]]
 
 for (const width of [390, 1024, 1440]) for (const theme of ['light', 'dark']) {
   test(`AEON-1358 the Model popup names each model as its Model cells do (${width} ${theme})`, async ({ page }, info) => {
@@ -399,7 +399,11 @@ for (const width of [390, 1024, 1440]) for (const theme of ['light', 'dark']) {
       await expect(tip(page)).toHaveCount(0)
       return
     }
-    for (const [label, blanks] of TOP_N) {
+    for (const [id, label, blanks] of TOP_N) {
+      // Six optional columns cannot all fit beside Title at 1024 px. Keep the viewport and every popup assertion;
+      // choose the column being read so the give-way does not hide its header.
+      await page.goto(`/p/PHAROS?cols=${id}`)
+      await expect(bar(page)).toHaveAttribute('aria-busy', 'false')
       await hoverOpen(page, header(page, label))
       const lines = await lineTexts(page)
       expect(lines, `${label} keeps its four lines`).toHaveLength(4)
