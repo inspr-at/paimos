@@ -15,6 +15,8 @@ import KeyCap from '../KeyCap.vue'
 // Wind down as a head control (AEON-783, design AEON-721 d3): a ghost button at
 // rest with a popover form, a teal chip while a wind-down runs, and a status
 // popover with the per-computer plan. Pause all… / Resume all… live under "Right now".
+// Where focus goes back when the Wind down button is not shown (compact screens): the page's ⋯.
+const props = defineProps<{ fallbackFocus?: () => HTMLElement | null | undefined }>()
 const agents = useAgents(), capacity = useCapacity(), pause = useAgentPause(), session = useSession()
 const mac = /Mac|iPhone|iPad/.test(navigator.platform || navigator.userAgent)
 const PRESETS = [5, 15, 30, 60] as const
@@ -202,9 +204,17 @@ function line(s: HarnessSession) {
 }
 function toggleStatus() { panel.value === 'status' ? closePanel(true) : (panel.value = 'status') }
 async function cancel() {
+  const from = opener.value
   closePanel(false)
   await pause.cancelWindDown()
-  await nextTick(); if (!active.value) restButton.value?.focus({ preventScroll: true })
+  await nextTick(); if (!active.value) restFocus(from)
+}
+// Focus comes back to the Wind down button; where it is not shown (compact screens, AEON-1459), to whatever
+// opened the popover, or else the page's fallback (the head's ⋯).
+function restFocus(from: HTMLElement | null) {
+  const rest = restButton.value
+  const target = rest?.getClientRects().length ? rest : from?.isConnected ? from : props.fallbackFocus?.() ?? rest
+  target?.focus({ preventScroll: true })
 }
 function bulk(mode: 'pause-all' | 'resume-all') {
   const targets = mode === 'pause-all' ? canPause.value : canResume.value
@@ -216,7 +226,10 @@ function bulk(mode: 'pause-all' | 'resume-all') {
 function closePanel(restore: boolean) {
   const was = panel.value, from = opener.value
   panel.value = null; opener.value = null
-  if (restore && was) (from?.isConnected ? from : active.value ? chipButton.value : restButton.value)?.focus({ preventScroll: true })
+  if (!restore || !was) return
+  if (from?.isConnected) from.focus({ preventScroll: true })
+  else if (active.value) chipButton.value?.focus({ preventScroll: true })
+  else restFocus(null)
 }
 // On compact screens the head's ⋯ opens it (AEON-1459): it anchors there and focus returns there.
 const opener = ref<HTMLElement | null>(null)

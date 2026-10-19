@@ -82,6 +82,7 @@ const machineFacts = ref<AccountFacts | null>(null)
 const capOpen = ref(false), capMoved = ref(false)
 const capLine = ref<InstanceType<typeof CapacityLine>>()
 const dialControl = ref<InstanceType<typeof AgentsWorking>>()
+const moreAgent = ref<HTMLButtonElement>()
 function openCapacity() { capMoved.value = false; capOpen.value = true }
 // The dial and the chip move back to the page before the sheet goes, so nothing is ever unmounted.
 async function closeCapacity(restore: boolean) {
@@ -666,8 +667,8 @@ watch(sessionId, id => { if (id) { cursor.value = `s:${id}`; lastSession = id } 
       />
       <div class="head-side">
         <!-- Wind down · More · New, New last (AEON-1209). Wind down is a ghost button, then a teal chip while it runs (AEON-783). -->
-        <WindDownControl v-if="agents.loaded" ref="windDown" />
-        <button type="button" class="icon-btn flat more-agent" aria-label="More agent actions" aria-haspopup="menu" :aria-expanded="headerMenu?.type === 'more'" @click="headerAction('more', $event)"><AppIcon name="more" /></button>
+        <WindDownControl v-if="agents.loaded" ref="windDown" :fallback-focus="() => moreAgent" />
+        <button ref="moreAgent" type="button" class="icon-btn flat more-agent" aria-label="More agent actions" aria-haspopup="menu" :aria-expanded="headerMenu?.type === 'more'" @click="headerAction('more', $event)"><AppIcon name="more" /></button>
         <button v-if="showNew" type="button" class="btn primary add-agent" aria-label="New: start a lead, attach a session or connect a machine" aria-haspopup="menu" :aria-expanded="headerMenu?.type === 'add'" @click="headerAction('add', $event)"><AppIcon name="plus" :size="17" /></button>
       </div>
       <AttachApproval ref="attachDialog" hide-trigger :now="agents.now" @changed="(result, declined) => attachPending?.settle(result, declined)" />
