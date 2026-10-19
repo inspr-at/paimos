@@ -139,35 +139,10 @@ export function chipTip(v: DailyView, limitWords: string): string {
 /** The headline of the detail. */
 export const detailHeadline = (v: DailyView) => v.kind === 'no_limit' || v.kind === 'everything' ? `${name(v.harness)} · no daily limit` : v.limit !== null && v.kind !== 'unknown' ? `${name(v.harness)} · daily limit: up to ${pct(v.limit)} % used` : `${name(v.harness)} · daily limit`
 
-export interface DailyBar { mode: 'today' | 'week'; teal: number; gold: number; red: number; free: number; tick: { at: number; label: string } | null; label: string }
-/**
- * Today's bar runs from zero to today's allowance: teal up to today's share, gold
- * over it, red past the limit, then free. Without a reading from today it shows
- * the week's use instead.
- */
-export function dailyBar(v: DailyView): DailyBar | null {
-  if (v.used === null) return null
-  const week = (): DailyBar => ({ mode: 'week', teal: v.used!, gold: 0, red: 0, free: Math.max(0, 100 - v.used!), tick: null, label: `${pct(v.used!)} % of the window used` })
-  if (v.today === null || v.allowed === null || v.share === null) return week()
-  const scale = Math.max(v.allowed, v.today, 1), at = (n: number) => (n / scale) * 100
-  const tealPts = Math.min(v.today, v.share, v.allowed), goldPts = Math.max(0, Math.min(v.today, v.allowed) - Math.min(v.today, v.share))
-  const redPts = Math.max(0, v.today - v.allowed), freePts = Math.max(0, v.allowed - v.today)
-  return {
-    mode: 'today', teal: at(tealPts), gold: at(goldPts), red: at(redPts), free: at(freePts),
-    tick: v.share < v.allowed ? { at: at(v.share), label: `pace ${pct(v.share)}` } : null,
-    label: `Today: ${pct(v.today)} of ${pct(v.allowed)} percentage points used; ${pct(v.share)} is today’s share.`,
-  }
-}
 export function todayLine(v: DailyView): string {
   if (v.today === null) return 'Today: not measured yet'
   if (v.allowed === null || v.share === null) return `Today: ${points(v.today)} used`
   return `Today: ${pct(v.today)} of ${points(v.allowed)} used · ${pct(Math.max(0, v.allowed - v.today))} left today`
-}
-/** "47 % used · 53 % left" in strong type, then which account, this week and when it resets. */
-export function weekParts(v: DailyView, tz?: string): { strong: string; rest: string } {
-  if (v.used === null) return { strong: '', rest: 'This week: not measured right now' }
-  const who = v.accounts.length > 1 && v.account ? ` on ${v.account.label}` : ''
-  return { strong: `${pct(v.used)} % used · ${pct(v.left ?? 100 - v.used)} % left`, rest: `${who} this week${v.resetsAt ? ` · resets ${whenFull(v.resetsAt, tz)}` : ''}` }
 }
 
 export const paceSummary = (v: DailyView) => v.settings.pace.mode === 'everything' ? 'Use everything before the reset' : `Stay on pace · ${points(v.share ?? DEFAULT_DAILY_POINTS)} a day`
