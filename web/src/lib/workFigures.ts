@@ -76,6 +76,7 @@ export function validFigures(value: unknown): value is ProjectFigures {
   const obj = (o: unknown) => !!o && typeof o === 'object' && !Array.isArray(o)
   return obj(f) && obj(f!.scope) && obj(f!.groups) && obj(f!.columns) && num(f!.total_hours) && num(f!.without_estimate) && typeof f!.marks_releases === 'boolean'
     && ['whole_project', 'this_view'].includes(f!.scope.kind) && ['rows', 'leaves', 'project_leaves', 'closed'].every(k => num(f!.scope[k as keyof ProjectFigures['scope']]))
+    && (f!.scope.open_rows == null || num(f!.scope.open_rows)) && (f!.scope.open_with_parent == null || num(f!.scope.open_with_parent))
     && (['completed', 'done_not_live', 'in_progress', 'open'] as const).every(k => obj(f!.groups[k]) && num(f!.groups[k].hours) && num(f!.groups[k].tickets))
 }
 
@@ -172,9 +173,10 @@ export interface FigureLine { label: string; value: string; note?: string; head?
 export interface ColumnTip { lines: (FigureLine | null)[]; foot: string }
 export interface FigureColumn { key: string; lines: number; wide?: boolean }
 // The column definitions' figure shape: which server column feeds it and how many lines it always has. Title has none.
+// Parent reads the direct parents its cells show, never the epic above them (AEON-1470).
 export const FIGURE_COLUMNS: Record<ColumnId, FigureColumn | null> = {
   key: { key: 'key', lines: 3 }, title: null, status: { key: 'status', lines: 4, wide: true }, priority: { key: 'priority', lines: 4 },
-  assignee: { key: 'assignee', lines: 4, wide: true }, epic: { key: 'epic', lines: 4 }, release: { key: 'release', lines: 4 },
+  assignee: { key: 'assignee', lines: 4, wide: true }, parent: { key: 'parent', lines: 4 }, release: { key: 'release', lines: 4 },
   tags: { key: 'tag', lines: 4, wide: true }, cost: { key: 'cost_unit', lines: 4, wide: true }, estimate: { key: 'estimate', lines: 3 },
   model: { key: 'model', lines: 4, wide: true }, suggested: { key: 'suggested_release', lines: 4 }, tokens: { key: 'tokens', lines: 4 },
   list_cost: { key: 'cost', lines: 4 }, paid: { key: 'cost', lines: 4 }, created: { key: 'created_at', lines: 3 }, updated: { key: 'updated_at', lines: 3 },
@@ -282,8 +284,8 @@ export function columnTip(id: ColumnId, f: ProjectFigures, ctx: ColumnContext): 
       foot = leavesFoot(c.rows, without(t.withoutCostUnit, c.without_value))
       break
     }
-    case 'epic': case 'release': case 'suggested':
-      lines = [...top(2), others(), L(id === 'epic' ? t.lines.noEpic : id === 'release' ? t.lines.noRelease : t.lines.none, fmtInt(c.without_value), { sub: true })]
+    case 'parent': case 'release': case 'suggested':
+      lines = [...top(2), others(), L(id === 'parent' ? t.lines.noParent : id === 'release' ? t.lines.noRelease : t.lines.none, fmtInt(c.without_value), { sub: true })]
       foot = leavesFoot(c.rows)
       break
     case 'tags': {

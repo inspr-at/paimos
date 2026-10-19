@@ -48,7 +48,8 @@ for (const theme of ['light', 'dark']) for (const width of [390, 1024, 1440]) {
     parent.estimate = { hours: 32, planned_hours: 40, is_parent: true, estimated_children: 6, open_children: 9, leaf_count: 9, estimated_leaves: 6 }
     parent.eta = { finished: false, progress_pct: 63, leaf_count: 9, estimated_leaves: 6, progress_basis: 'estimate', open_leaves: 5, ready_leaves: 3, live_leaves: 0, ready_partial: true, eta_ready_at: '2026-10-04T11:00:00Z', ready_reported_at: '2026-10-04T09:59:00Z' }
     await mockWork(page, data)
-    await page.goto('/p/PHAROS')
+    // The docked panel narrows the list, and whole columns give way beside Title (AEON-1470); the sorted one stays.
+    await page.goto('/p/PHAROS?sort=estimate')
     const row = page.locator('tr.ticket-row:not(.ghost)').filter({ has: page.locator('.key', { hasText: /^PHAROS-11$/ }) })
     const estimate = row.locator('.c-estimate .mono')
     await expect(estimate).toHaveText(/~32h leaves.*~40h planned/)
@@ -150,7 +151,8 @@ for (const scenario of [
     parent.estimate = { hours: 32, planned_hours: 40, is_parent: true, estimated_children: scenario.estimated, open_children: 2, leaf_count: 2, estimated_leaves: scenario.estimated }
     parent.eta = { finished: false, progress_pct: scenario.progress, leaf_count: 2, estimated_leaves: scenario.estimated, progress_basis: 'estimate', open_leaves: 1, ready_leaves: scenario.partial ? 0 : 1, ready_partial: scenario.partial, eta_ready_at: '2026-10-04T12:00:00Z', ready_reported_at: '2026-10-04T08:00:00Z', ready_stale: true }
     await mockWork(page, data)
-    await page.goto('/p/PHAROS')
+    // The docked panel narrows the list, and whole columns give way beside Title (AEON-1470); the sorted one stays.
+    await page.goto('/p/PHAROS?sort=eta_ready')
     // Live updates connected: the footer says so; phones have no footer bar (AEON-1459), so read the same state.
     if (width < 720) await expect.poll(() => page.evaluate(async () => (await import('/src/lib/footerSummary.ts')).footerLive.value?.paused)).toBe(false)
     else await expect(page.locator('footer.app-footer .sum')).toHaveAttribute('data-conn', 'on')

@@ -304,6 +304,10 @@
     ,
     "browser:tests/aeon-1459-compact-chrome.spec.ts:AEON-1459 agents 844x501 light: a saved open dial opens beside its row"
     ,
+    "browser:tests/aeon-1470-list-titles.spec.ts:AEON-1470 S1 and S2: the 1388 set and every column at 1024 (light, dark) and 1440"
+    ,
+    "browser:tests/aeon-1470-list-titles.spec.ts:AEON-1470 S6: phone rows at 390 stay as they were (light, dark)"
+    ,
     "browser:tests/aeon-908-polish.spec.ts:tree, hours spacing and light switch thumbs 1024 dark"
     ,
     "browser:tests/aeon-908-polish.spec.ts:tree, hours spacing and light switch thumbs 1024 light"
@@ -6291,6 +6295,40 @@
     {"kind":"browser","file":"tests/aeon-1459-compact-chrome.spec.ts","name":"AEON-1459 agents 844x500 light: a saved open dial opens folded under the capacity line","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
     {"kind":"browser","file":"tests/aeon-1459-compact-chrome.spec.ts","name":"AEON-1459 agents 844x501 light: a saved open dial opens beside its row","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/aeon-1470-list-titles.spec.ts","name":"AEON-1470 Columns rows hold still while hidden notes come and go","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/aeon-1470-list-titles.spec.ts","name":"AEON-1470 Parent cell shows the kind icon and key, adds the title from 200 px, and has no chip","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/aeon-1470-list-titles.spec.ts","name":"AEON-1470 Parent keeps a saved Epic column and its width","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/aeon-1470-list-titles.spec.ts","name":"AEON-1470 Parent stays out of the Epic group and the outline, and the column toggle does not move the other columns","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/aeon-1470-list-titles.spec.ts","name":"AEON-1470 Parent turns on at 40 percent, stays off at 10 percent, and a live parent does not change the columns","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/aeon-1470-list-titles.spec.ts","name":"AEON-1470 S1 and S2: the 1388 set and every column at 1024 (light, dark) and 1440","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/aeon-1470-list-titles.spec.ts","name":"AEON-1470 S5: Display keeps a dropped column ticked with \"hidden at this width\", and its sort stays offered","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/aeon-1470-list-titles.spec.ts","name":"AEON-1470 S6: phone rows at 390 stay as they were (light, dark)","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/aeon-1470-list-titles.spec.ts","name":"AEON-1470 Title keeps at least 240 px at table widths 760–1440 for the 1388 set, every column and wide saved widths","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/aeon-1470-list-titles.spec.ts","name":"AEON-1470 a column that left returns only with 16 px to spare: ±8 px around a threshold keeps the set","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/aeon-1470-list-titles.spec.ts","name":"AEON-1470 a group of 50,000 tickets keeps its compact priority mix whole, in a column as wide as with three","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/aeon-1470-list-titles.spec.ts","name":"AEON-1470 columns leave in the give-way order; sorted by Updated, Updated stays and the next one leaves instead","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/aeon-1470-list-titles.spec.ts","name":"AEON-1470 group row priority mix: compact \"3 high +3\" when the full mix does not fit, the full mix in its tip, never ellipsized","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/aeon-1470-list-titles.spec.ts","name":"AEON-1470 nothing moves on hover, a live status change, an open tip or a fold","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/aeon-1470-list-titles.spec.ts","name":"AEON-1470 the Parent header counts the direct parents its cells show, with \"No parent\"","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/aeon-1470-list-titles.spec.ts","name":"AEON-1470 the fold label is English like the rest of the list","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/aeon-1470-list-titles.spec.ts","name":"AEON-1470 the stale tag keeps 8 px to the next cell and never truncates; the group name ellipsizes first","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
     {"kind":"browser","file":"tests/aeon-1473-desk-tab.spec.ts","name":"16 px favicon › AEON-1473: the amber dot reads at 16 px on light and dark tab strips","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
@@ -14708,7 +14746,7 @@
     ,
     {"kind":"browser","file":"tests/ticket-panel.spec.ts","name":"Tab walks the panel in reading order; Esc closes a popover before the panel","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
     ,
-    {"kind":"browser","file":"tests/ticket-panel.spec.ts","name":"a selected row hides its parent chip rather than clipping it under the row actions","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    {"kind":"browser","file":"tests/ticket-panel.spec.ts","name":"a selected row keeps its cursor and has no parent chip in the title","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
     ,
     {"kind":"browser","file":"tests/ticket-panel.spec.ts","name":"a ticket that no longer exists says so; read-only principals cannot edit","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
     ,
@@ -15050,7 +15088,7 @@
     ,
     {"kind":"browser","file":"tests/wide.spec.ts","name":"edit mode › the full page edits in a writing layout with a live preview","config":"playwright.ui.config.ts","project":"","tags":["delete-candidate"],"tier":"NIGHTLY"}
     ,
-    {"kind":"browser","file":"tests/wide.spec.ts","name":"wide lists › columns grow with the width: Epic, Release, Tags and Created join from about 1800px","config":"playwright.ui.config.ts","project":"","tags":["delete-candidate"],"tier":"NIGHTLY"}
+    {"kind":"browser","file":"tests/wide.spec.ts","name":"wide lists › columns grow with the width: Parent, Release, Tags and Created join from about 1800px","config":"playwright.ui.config.ts","project":"","tags":["delete-candidate"],"tier":"NIGHTLY"}
     ,
     {"kind":"browser","file":"tests/wide.spec.ts","name":"wide lists › columns resize by dragging the header edge and fit their content on double-click","config":"playwright.ui.config.ts","project":"","tags":["delete-candidate"],"tier":"NIGHTLY"}
     ,
@@ -16132,6 +16170,22 @@
     ,
     {"kind":"node","file":"tests/codenames.test.ts","name":"the release history fills the lookup, skipping releases without a name","tags":["delete-candidate"],"tier":"GATED-FULL"}
     ,
+    {"kind":"node","file":"tests/columns.test.ts","name":"AEON-1470 Automatic wide extras give way in the same pipeline: the sorted one stays, every one that leaves is reported, and returns with 16 px to spare","tier":"ESSENTIAL"}
+    ,
+    {"kind":"node","file":"tests/columns.test.ts","name":"AEON-1470 Parent migrates Epic, latches at 30 percent, and leaves phones, groups and the outline","tier":"ESSENTIAL"}
+    ,
+    {"kind":"node","file":"tests/columns.test.ts","name":"AEON-1470 Title is never under 240 px at 760–1440 px, for the 1388 set, every column and wide saved widths","tier":"ESSENTIAL"}
+    ,
+    {"kind":"node","file":"tests/columns.test.ts","name":"AEON-1470 saved widths shrink in proportion, after the fits and never below their minimum","tier":"ESSENTIAL"}
+    ,
+    {"kind":"node","file":"tests/columns.test.ts","name":"AEON-1470 the set depends only on width, chosen columns, minimums and sort; a column that left returns with 16 px to spare","tier":"ESSENTIAL"}
+    ,
+    {"kind":"node","file":"tests/columns.test.ts","name":"AEON-1470 whole columns leave in the give-way order; Key, Title, Status, Priority and the sorted column stay","tier":"ESSENTIAL"}
+    ,
+    {"kind":"node","file":"tests/columns.test.ts","name":"AEON-1470: a content-fitted Parent still grows once Title is at its target","tier":"ESSENTIAL"}
+    ,
+    {"kind":"node","file":"tests/columns.test.ts","name":"AEON-1470: a docked table stays inside its card; from 721 px the never-leaving minimums may scroll","tier":"ESSENTIAL"}
+    ,
     {"kind":"node","file":"tests/columns.test.ts","name":"AEON-913: a loaded fit keeps the designed width until the value is wider","tier":"GATED-FULL"}
     ,
     {"kind":"node","file":"tests/columns.test.ts","name":"AEON-913: automatic fits give width back until Title keeps its minimum","tier":"GATED-FULL"}
@@ -16361,6 +16415,10 @@
     {"kind":"node","file":"tests/graph-renderer.test.ts","name":"smart labels try alternative positions and reject a fully occupied screen","tier":"GATED-FULL"}
     ,
     {"kind":"node","file":"tests/graph-renderer.test.ts","name":"the height fit ignores distant satellites without mutating the layout","tier":"GATED-FULL"}
+    ,
+    {"kind":"node","file":"tests/group-figures.test.ts","name":"AEON-1470 a large compact mix counts in thousands, and the reserve samples cover every supported count","tier":"ESSENTIAL"}
+    ,
+    {"kind":"node","file":"tests/group-figures.test.ts","name":"AEON-1470 the compact priority mix is the most severe bucket and the rest as \"+N\"","tier":"ESSENTIAL"}
     ,
     {"kind":"node","file":"tests/group-figures.test.ts","name":"a group is the view narrowed to that group: its value replaces the view’s own, exclusions stay","tier":"ESSENTIAL"}
     ,
@@ -17277,6 +17335,8 @@
     {"kind":"node","file":"tests/work-aggregates.test.ts","name":"weighted 100% with an unestimated open leaf retains ETA and staleness in every mode","tier":"NIGHTLY"}
     ,
     {"kind":"node","file":"tests/work-aggregates.test.ts","name":"weighted progress rounded by the server to 100% retains ETA and staleness in every mode","tier":"NIGHTLY"}
+    ,
+    {"kind":"node","file":"tests/work-figures.test.ts","name":"AEON-1470 the Parent popup counts direct parents and says \"No parent\"; Epic counts stay the server's own","tier":"ESSENTIAL"}
     ,
     {"kind":"node","file":"tests/work-figures.test.ts","name":"Hide closed hides rows only when the view has rows in the hidden statuses","tier":"ESSENTIAL"}
     ,
@@ -24479,7 +24539,7 @@
       ,
       "tests/ticket-outcomes.unit.test.ts": {"seconds":0.486176,"selectedTests":1}
       ,
-      "tests/ticket-panel.spec.ts": {"caseSeconds":{"Tab walks the panel in reading order; Esc closes a popover before the panel":1.981,"a selected row hides its parent chip rather than clipping it under the row actions":1.732,"a ticket that no longer exists says so; read-only principals cannot edit":3.151,"a title conflict shows the newer title and keeps the draft":1.905,"an epic lists its tickets with progress and adds new ones inline":2.067,"comments by others or older than 15 minutes cannot be edited":1.752,"comments post with Cmd/Ctrl+Enter from c, and own comments can be edited and deleted":2.304,"deep link wins over a knowledge peek with list answering first":1.76,"deep link wins over a knowledge peek with lookup answering first":1.669,"description edits with preview, Cmd/Ctrl+Enter saves, Esc asks before discarding":2.342,"full page shows the same ticket in two columns; f and Back return to the panel":2.098,"move to another parent uses a searchable picker; delete asks and then leaves the list":2.184,"n opens a quick-create row; Cmd/Ctrl+Enter creates and keeps going; Esc leaves the field then closes":2.02,"on a phone the ticket is a full-screen sheet with wrapping chips and a bottom composer in dark":1.683,"on a phone the ticket is a full-screen sheet with wrapping chips and a bottom composer in light":1.65,"quick create shows unset priority and parent as dimmed values":1.866,"s, p and a open status, priority and assignee from the panel":2.177,"the first edit shows Unsaved in place, and the editing header fits the dock":17.038,"the panel counts the whole list and next loads the following page":3.647,"the panel shows title, properties, Markdown sections, relations and the timeline":2.086,"the routed panel keeps usable list space and stable controls":94.816,"titles edit inline on click, save with Enter under a precondition, and cancel with Esc":2.035,"unsaved edits are guarded when moving to another ticket":2.293},"seconds":156.256,"selectedTests":23}
+      "tests/ticket-panel.spec.ts": {"caseSeconds":{"Tab walks the panel in reading order; Esc closes a popover before the panel":1.981,"a selected row keeps its cursor and has no parent chip in the title":1.732,"a ticket that no longer exists says so; read-only principals cannot edit":3.151,"a title conflict shows the newer title and keeps the draft":1.905,"an epic lists its tickets with progress and adds new ones inline":2.067,"comments by others or older than 15 minutes cannot be edited":1.752,"comments post with Cmd/Ctrl+Enter from c, and own comments can be edited and deleted":2.304,"deep link wins over a knowledge peek with list answering first":1.76,"deep link wins over a knowledge peek with lookup answering first":1.669,"description edits with preview, Cmd/Ctrl+Enter saves, Esc asks before discarding":2.342,"full page shows the same ticket in two columns; f and Back return to the panel":2.098,"move to another parent uses a searchable picker; delete asks and then leaves the list":2.184,"n opens a quick-create row; Cmd/Ctrl+Enter creates and keeps going; Esc leaves the field then closes":2.02,"on a phone the ticket is a full-screen sheet with wrapping chips and a bottom composer in dark":1.683,"on a phone the ticket is a full-screen sheet with wrapping chips and a bottom composer in light":1.65,"quick create shows unset priority and parent as dimmed values":1.866,"s, p and a open status, priority and assignee from the panel":2.177,"the first edit shows Unsaved in place, and the editing header fits the dock":17.038,"the panel counts the whole list and next loads the following page":3.647,"the panel shows title, properties, Markdown sections, relations and the timeline":2.086,"the routed panel keeps usable list space and stable controls":94.816,"titles edit inline on click, save with Enter under a precondition, and cancel with Esc":2.035,"unsaved edits are guarded when moving to another ticket":2.293},"seconds":156.256,"selectedTests":23}
       ,
       "tests/ticket-peek.unit.test.ts": {"seconds":0.41792,"selectedTests":1}
       ,
