@@ -6,6 +6,7 @@ import { fixtures, me, mockWork } from './work-fixtures'
 import { agentData, mockAgents } from './agents-fixtures'
 import { ACCOUNTS, capacityWorld, NOW } from './capacity-fixtures'
 import { expectStableControls } from './helpers/stable'
+import { isCompact, showCapacityRow } from './helpers/compact'
 
 const id = (n: number) => `5e000000-0000-4000-8000-${String(n).padStart(12, '0')}`
 const row = (page: Page, n: number) => page.locator(`[data-row="s:${id(n)}"]`)
@@ -236,6 +237,8 @@ for (const width of [390, 1024, 1440]) for (const theme of ['light', 'dark'] as 
     // Rows (AEON-1211, design AEON-1196) leave the estimate to the details, checked below.
     await expect(row(page, 2)).toBeVisible()
     await expect(page.locator('.sessions .row .session-estimate')).toHaveCount(0)
+    // Phones: the capacity row is in the capacity line's sheet (AEON-1459).
+    await showCapacityRow(page)
     await expectStableControls({
       controls: { more: dial(page).getByRole('button', { name: 'One agent more at once' }), fewer: dial(page).getByRole('button', { name: 'One agent fewer at once' }), fold: dial(page).locator('.fs-tog') },
       scrollAreas: { dial: page.locator('.cdial'), page: page.locator('.agents-page') },
@@ -245,6 +248,7 @@ for (const width of [390, 1024, 1440]) for (const theme of ['light', 'dark'] as 
         await dial(page).getByRole('button', { name: 'One agent more at once' }).click(); await expect(dial(page).locator('.f-num')).toHaveText('21')
       } }],
     })
+    if (isCompact(page)) { await page.keyboard.press('Escape'); await expect(page.getByRole('dialog', { name: 'Capacity' })).toHaveCount(0) }
     if (shots) {
       mkdirSync(shots, { recursive: true })
       await page.screenshot({ path: join(shots, `agents-${width}-${theme}.png`) })

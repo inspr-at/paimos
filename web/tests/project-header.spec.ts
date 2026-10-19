@@ -2,6 +2,7 @@
 import { test, expect, type Locator, type Page } from '@playwright/test'
 import { fixtures, mockWork, mockView, me } from './work-fixtures'
 import { expectStableControls } from './helpers/stable'
+import { toggleProjectHead } from './helpers/compact'
 
 const errors = new WeakMap<Page, string[]>()
 test.beforeEach(async ({ page }) => {
@@ -11,7 +12,8 @@ test.beforeEach(async ({ page }) => {
 })
 test.afterEach(async ({ page }) => { expect(errors.get(page), 'no browser runtime errors').toEqual([]) })
 const search = (page: Page) => page.getByRole('searchbox', { name: 'Search tickets in this project' })
-const fold = (page: Page) => page.locator('.phone-header-fold')
+// Phones fold the project head from the project crumb's sheet (AEON-1459, D11); the crumb is its trigger.
+const fold = (page: Page) => page.locator('.app-header .crumb-sheet')
 const density = (page: Page, name: string) => page.getByRole('radio', { name: `${name} project header`, exact: true })
 async function settled(page: Page) { await page.evaluate(async () => { await document.fonts.ready; await new Promise<void>(resolve => requestAnimationFrame(() => requestAnimationFrame(() => resolve()))) }) }
 async function samples(controls: Record<string, Locator>) {
@@ -87,7 +89,7 @@ for (const width of [390, 1024, 1440]) {
       await settled(page); await noSideways(controls, before); if (width === 1024) await expect(toolbar.locator('.count')).toBeHidden()
       await capture(page, `${width}-${theme}-comfortable`)
       if (width === 390) {
-        await expectStableControls({ controls: { fold: fold(page), appbar: page.locator('.app-header') }, interactions: ['collapsed', 'comfortable', 'collapsed'].map(mode => ({ name: mode, run: async () => { await fold(page).click(); await expect(page.locator('.project-page')).toHaveClass(new RegExp(`header-${mode}`)) } })) })
+        await expectStableControls({ controls: { fold: fold(page), appbar: page.locator('.app-header') }, interactions: ['collapsed', 'comfortable', 'collapsed'].map(mode => ({ name: mode, run: async () => { await toggleProjectHead(page); await expect(page.locator('.project-page')).toHaveClass(new RegExp(`header-${mode}`)) } })) })
       } else await density(page, 'Collapsed').click()
       await expect(page.locator('#project-header-fold')).toBeHidden()
       await settled(page); await noSideways(controls, before); if (width === 1024) await expect(toolbar.locator('.count')).toBeHidden()
@@ -198,10 +200,10 @@ for (const dimension of ['assignee', 'epic'] as const) {
   })
 }
 
-test.describe('phone fold touch target', () => {
+test.describe('phone project crumb touch target', () => {
   test.use({ hasTouch: true, isMobile: true })
   for (const theme of ['light', 'dark']) {
-    test(`the whole 44px phone fold target accepts taps in ${theme}`, async ({ page }) => {
+    test(`the whole 44px project crumb target accepts taps in ${theme}`, async ({ page }) => {
       await page.setViewportSize({ width: 390, height: 900 })
       const data = fixtures()
       data.preferences.theme = { choice: theme }
@@ -217,13 +219,23 @@ test.describe('phone fold touch target', () => {
           expect(rect.height).toBeGreaterThanOrEqual(44)
           const point = { x: rect.x + rect.width / 2, y: rect.y + offset }
           expect(await button.evaluate((element, point) => element.contains(document.elementFromPoint(point.x, point.y)), point), 'the edge is hittable, not clipped by an ancestor').toBe(true)
+          // The crumb opens the project's sheet (AEON-1459, D11); Esc closes it again.
           await page.touchscreen.tap(point.x, point.y)
-          await expect(page.locator('.project-page')).toHaveClass(index === 0 ? /header-collapsed/ : /header-compact/)
+          await expect(page.getByRole('dialog', { name: /^PHAROS · / })).toBeVisible()
+          await page.keyboard.press('Escape')
+          await expect(page.getByRole('dialog', { name: /^PHAROS · / })).toHaveCount(0)
         } })),
       })
+      // Reached from the keyboard, so its focus ring shows.
       await button.focus()
+      await page.keyboard.press('Shift+Tab')
+      await page.keyboard.press('Tab')
       await expect(button).toBeFocused()
+      expect(await button.evaluate(element => element.matches(':focus-visible'))).toBe(true)
       expect(await button.evaluate(element => {
+        // The compact header's 44 px crumb fills its 44 px line (AEON-1459): its ring is drawn inside it.
+        const ring = getComputedStyle(element).boxShadow
+        if (ring !== 'none' && ring.includes('inset')) return true
         const rect = element.getBoundingClientRect()
         for (let ancestor = element.parentElement; ancestor; ancestor = ancestor.parentElement) {
           const style = getComputedStyle(ancestor)
@@ -232,7 +244,7 @@ test.describe('phone fold touch target', () => {
           if (clip.top > rect.top - 3 || clip.bottom < rect.bottom + 3 || clip.left > rect.left - 3 || clip.right < rect.right + 3) return false
         }
         return true
-      }), 'ancestors leave room for the keyboard focus ring').toBe(true)
+      }), 'the keyboard focus ring is inside the crumb, or its ancestors leave room for it').toBe(true)
     })
   }
 })

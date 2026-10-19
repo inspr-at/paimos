@@ -7,6 +7,7 @@ import { expect, test, type Page } from '@playwright/test'
 import { writeFile } from 'node:fs/promises'
 import { mockDecisionDesk } from './decision-desk-fixtures'
 import { expectStableControls } from './helpers/stable'
+import { openDeskPreview } from './helpers/compact'
 
 const heading = (page: Page) => page.getByTestId('desk-paper').getByRole('heading', { level: 2 })
 // One open question: approval decided, action merged into the question, rule proposed, the second question gone.
@@ -145,7 +146,7 @@ test('panel and preview rows name the kind and project, and link back', async ({
   await expect(panel.getByTestId('agents-desk-item-m:action-1')).toHaveText('Action request')
   await panel.screenshot({ path: testInfo.outputPath(`panel-${width}-${theme}.png`) })
   await page.goto('/agents')
-  await page.getByRole('button', { name: 'Preview the Decision Desk' }).click()
+  await openDeskPreview(page)
   const row = page.getByTestId('desk-preview-item-q:question-1')
   await expect(row).toHaveAttribute('href', '/decision-desk?from=preview&item=q:question-1')
   await expect(row.locator('.dp-ic.k-question')).toBeVisible()
@@ -160,7 +161,7 @@ test('panel and preview rows name the kind and project, and link back', async ({
   await page.setViewportSize({ width: 1440, height: 1000 })
   const world = await oneQuestion(page)
   await page.goto('/agents')
-  await page.getByRole('button', { name: 'Preview the Decision Desk' }).click()
+  await openDeskPreview(page)
   await page.getByTestId('desk-preview-item-q:question-1').click()
   await expect(page).toHaveURL('/decision-desk?from=preview&item=q:question-1')
   await expect(heading(page)).toHaveText('Which migration should carry the index?')

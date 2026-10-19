@@ -34,6 +34,15 @@ async function setup(page: Page, options: DailyPlanOptions & { open?: boolean; s
 }
 
 const capRow = (page: Page) => page.locator('.cap-row')
+// AEON-1459 (R2.1): on phones and short screens the capacity row lives in the capacity line's sheet.
+const compactSize = (page: Page) => { const size = page.viewportSize()!; return size.width < 720 || size.height <= 500 }
+async function showCapacity(page: Page) {
+  if (!compactSize(page)) return
+  await page.locator('.agents-page .cap-line').click()
+  await expect(page.getByRole('dialog', { name: 'Capacity' }).locator('.cap-row')).toBeVisible()
+}
+// Somewhere a tap closes a unit's plate without leaving its row: the page's title, or the sheet's.
+const quietSpot = (page: Page) => compactSize(page) ? page.locator('.cap-sheet .cs-title') : page.locator('h1')
 const unit = (page: Page, key: string) => page.locator(`.cdial [data-unit="${key}"]`)
 const stick = (page: Page) => page.locator('.sessions [data-stick]')
 // Layout positions of every visible element in a region (scroll-independent: main's scroll is added back).
@@ -169,6 +178,7 @@ for (const width of [1024, 768, 390]) test(`${width}: with all seven harnesses e
   await page.emulateMedia({ reducedMotion: 'reduce' })
   await setup(page, { limits: SEVEN })
   await page.goto('/agents')
+  await showCapacity(page)
   await expect(page.locator('.cdial .f-chip')).toHaveCount(7)
   const fit = await page.evaluate(() => {
     const row = document.querySelector('.cap-row')!, r = row.getBoundingClientRect(), d = document.querySelector('.cdial')!.getBoundingClientRect(), cs = getComputedStyle(row)
@@ -326,6 +336,27 @@ for (const width of [1440, 1024, 390]) test(`${width}: the head, the capacity ro
   const search = card.getByRole('searchbox', { name: 'Search sessions in this list' })
   const filter = card.getByRole('button', { name: 'Filter', exact: true }), display = card.getByRole('button', { name: /^Display: / })
   await expect(page.locator('.sessions .row[data-row]').nth(5)).toBeAttached()
+  if (compactSize(page)) {
+    // AEON-1459 (R2.1, D3): the title row, the capacity line and the toolbar's one line stay put through
+    // the search overlay, filters (counted on Filter, cleared in its menu), ⋯ › Display and the capacity sheet.
+    const searchButton = card.getByRole('button', { name: 'Search sessions', exact: true }), more = card.getByRole('button', { name: 'More list actions', exact: true })
+    const tools = card.getByRole('button', { name: /^Filter/ }), line = page.locator('.agents-page .cap-line'), sheet = page.getByRole('dialog', { name: 'Capacity' })
+    await expectStableControls({
+      controls: { more: head.getByRole('button', { name: 'More agent actions', exact: true }), add: head.getByRole('button', { name: /^New: / }), line, title: card.locator('#sessions-title'), searchButton, filter: tools, list: more },
+      scrollAreas: { main: page.locator('main') },
+      interactions: [
+        { name: 'search and type', run: async () => { await searchButton.click(); await search.fill('worker w1x'); await expect(page.locator('.sessions .fs-count')).toHaveText('1') } },
+        { name: 'cancel it', run: async () => { await card.getByRole('button', { name: 'Cancel', exact: true }).click(); await expect(search).toBeHidden(); await expect(page).not.toHaveURL(/q=/) } },
+        { name: 'pick a state', run: async () => { await tools.click(); await page.getByRole('menu', { name: 'Filter by' }).getByRole('menuitem', { name: 'State' }).click(); await page.getByRole('menuitemradio', { name: /Working/ }).click(); await expect(card.locator('.fcount')).toHaveText('1') } },
+        { name: 'clear all', run: async () => { await tools.click(); await page.getByRole('menu', { name: 'Filter by' }).getByRole('menuitem', { name: 'Clear all' }).click(); await expect(card.locator('.fcount')).toHaveCount(0) } },
+        { name: 'open Display', run: async () => { await more.click(); await page.getByRole('menu', { name: 'More list actions' }).getByRole('menuitem', { name: /^Display…/ }).click(); await expect(page.getByRole('dialog', { name: 'Display' })).toBeVisible() } },
+        { name: 'close Display', run: async () => { await page.keyboard.press('Escape'); await expect(page.getByRole('dialog', { name: 'Display' })).toHaveCount(0) } },
+        { name: 'open the capacity sheet', run: async () => { await line.click(); await expect(sheet.locator('.cdial')).toBeVisible() } },
+        { name: 'close it', run: async () => { await page.keyboard.press('Escape'); await expect(sheet).toHaveCount(0) } },
+      ],
+    })
+    return
+  }
   await expectStableControls({
     controls: {
       wind: head.getByRole('button', { name: 'Wind down' }), more: head.getByRole('button', { name: 'More agent actions', exact: true }), add: head.getByRole('button', { name: /^New: / }),
@@ -394,6 +425,25 @@ for (const width of [1440, 1024, 390]) for (const theme of ['light', 'dark'] as 
       await page.screenshot({ path: info.outputPath(`${width}-${theme}-${state}.png`) })
     }
     await gate('top')
+    if (compactSize(page)) {
+      // AEON-1459: the capacity row is in the capacity line's sheet; the list's tools are one line with ⋯.
+      const sheet = page.getByRole('dialog', { name: 'Capacity' })
+      await showCapacity(page); await gate('capacity')
+      await sheet.getByRole('button', { name: /The full dial/ }).click(); await expect(page.locator('.dial-card')).toBeVisible()
+      await gate('dial-open')
+      await showCapacity(page); await page.locator('.cdial .fs-tog').click(); await expect(page.locator('.dial-card')).toHaveCount(0)
+      await unit(page, 'claude').locator('.du-mark').hover(); await gate('unit-hover')
+      await capRow(page).locator('.acc-chip').click(); await expect(page.getByRole('dialog', { name: 'Accounts and computers' })).toBeVisible()
+      await gate('accounts'); await page.keyboard.press('Escape'); await page.keyboard.press('Escape'); await expect(sheet).toHaveCount(0)
+      await stick(page).getByRole('button', { name: /^Filter/ }).click(); await page.getByRole('menu', { name: 'Filter by' }).getByRole('menuitem', { name: 'State' }).click(); await expect(page.getByRole('menu', { name: 'Filter sessions by state' })).toBeVisible()
+      await gate('filter'); await page.getByRole('menuitemradio', { name: /Working/ }).click()
+      await expect(stick(page).locator('.fcount')).toHaveText('1'); await gate('pill')
+      await stick(page).getByRole('button', { name: 'More list actions', exact: true }).click(); await page.getByRole('menu', { name: 'More list actions' }).getByRole('menuitem', { name: /^Display…/ }).click(); await expect(page.getByRole('dialog', { name: 'Display' })).toBeVisible()
+      await gate('display'); await page.keyboard.press('Escape')
+      await page.locator('main').evaluate(el => { el.scrollTop = el.scrollHeight }); await expect(stick(page)).toHaveClass(/stuck/)
+      await gate('sticky')
+      return
+    }
     await page.locator('.cdial .fs-tog').click(); await expect(page.locator('.dial-card')).toBeVisible()
     await gate('dial-open')
     await page.locator('.cdial .fs-tog').click(); await expect(page.locator('.dial-card')).toHaveCount(0)
@@ -416,6 +466,7 @@ test.describe('phone', () => {
     await page.emulateMedia({ colorScheme: theme, reducedMotion: 'reduce' })
     await setup(page)
     await page.goto('/agents')
+    await showCapacity(page)
     await expect(unit(page, 'claude')).toBeVisible()
     const wide = await page.evaluate(() => { const m = document.querySelector('main')!; return { doc: document.documentElement.scrollWidth - innerWidth, main: m.scrollWidth - m.clientWidth } })
     expect(wide.doc).toBeLessThanOrEqual(0.5); expect(wide.main).toBeLessThanOrEqual(0.5)
@@ -451,6 +502,7 @@ test.describe('touch targets', () => {
     await page.emulateMedia({ reducedMotion: 'reduce' })
     await setup(page, seven ? { limits: SEVEN } : {})
     await page.goto('/agents')
+    await showCapacity(page)
     const keys = seven ? UNITS : ['total', 'codex', 'claude', 'cursor']
     await expect(unit(page, keys.at(-1)!)).toBeVisible()
     // Closed, each unit is one target (a tap opens its plate) and the fold keeps its own 44 px reach beside the total.
@@ -475,7 +527,7 @@ test.describe('touch targets', () => {
       await expect(unit(page, key)).toHaveClass(/\bopen\b/)
       expectReach(await reach(page, key, true), `${width} ${key}`, true)
       if (key === 'total' || key === 'grok') await page.screenshot({ path: info.outputPath(`${width}-${seven ? 'seven' : 'three'}-${key}-plate.png`) })
-      await page.locator('h1').tap()
+      await quietSpot(page).tap()
       await expect(unit(page, key)).not.toHaveClass(/\bopen\b/)
     }
     // A tap on the open plate's number types; a tap on its + steps once.
@@ -531,6 +583,7 @@ test(width === 1440 && theme === 'light' ? readStatesTitle : `${readStatesTitle}
   })
   failures.accounts = 500
   await page.goto('/agents')
+  await showCapacity(page)
   const chip = capRow(page).locator('.acc-chip')
   const pop = page.getByRole('dialog', { name: 'Accounts and computers' })
   const tile = (part: string) => pop.locator(`.tile-shell[data-part="${part}"]`)
@@ -620,6 +673,7 @@ test(width === 1440 && theme === 'light' ? readStatesTitle : `${readStatesTitle}
   for (const [source, part] of [['capacity', 'accounts'], ['computers', 'computers'], ['schedules', 'capacity']] as const) {
     failures[source] = 500
     await page.goto('/agents')
+    await showCapacity(page)
     await expect(chip).toHaveText('Accounts unreadable')
     await chip.click()
     await expect(tile(part)).toContainText(`Couldn't read ${part}`)

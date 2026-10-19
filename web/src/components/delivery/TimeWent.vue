@@ -34,6 +34,8 @@ h3 { margin: 0 0 8px; font: 650 14px/1.3 var(--font); color: var(--ink); }
 .went-head { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 10px; font-size: 13px; }
 .went-head b { font-weight: 650; color: var(--ink); }
 .mu { font-size: 12px; color: var(--ink-3); }
+/* The head note sits on washed canvas under the grain; --ink-3 is 4.49:1 on that patch. */
+.went-head .mu { color: var(--ink-2); }
 .went-bar { display: flex; gap: 2px; height: 12px; margin-top: 8px; border-radius: 6px; overflow: hidden; }
 .went-bar i, .went-parts i { display: block; height: 100%; }
 .went-parts i { display: inline-block; width: 10px; height: 10px; margin-right: 6px; border-radius: 3px; vertical-align: -1px; }

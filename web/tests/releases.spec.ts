@@ -47,20 +47,21 @@ test('the footer bar holds its own row: pages and docked panels end above it', a
   await expect(page.locator('footer.app-footer')).toContainText('PAIMOS AEON')
 })
 
-test('on phones the footer folds away reading down and returns on the way up', async ({ page }) => {
+// AEON-1459 (D5): phones have no footer bar; nothing folds away and the page's scroller keeps its size.
+test('on phones there is no footer bar and the page keeps its size while reading', async ({ page }) => {
   await page.setViewportSize({ width: 390, height: 844 })
   await setup(page, { bigProject: 30 })
   await page.goto('/p/AEON')
-  const footer = page.locator('footer.app-footer')
-  await expect(footer).toBeVisible()
-  expect((await footer.boundingBox())!.height).toBe(44)
+  await expect(page.locator('footer.app-footer')).toHaveCount(0)
   await expect.poll(() => page.locator('main').evaluate(el => el.scrollHeight - el.clientHeight)).toBeGreaterThan(600)
+  const height = await page.locator('main').evaluate(el => el.clientHeight)
   await page.mouse.move(195, 420)
   await page.mouse.wheel(0, 400)
-  await expect(footer).toHaveClass(/hidden/)
-  await page.waitForTimeout(350)
+  await expect.poll(() => page.locator('main').evaluate(el => el.scrollTop)).toBeGreaterThan(0)
+  expect(await page.locator('main').evaluate(el => el.clientHeight)).toBe(height)
   await page.mouse.wheel(0, -200)
-  await expect(footer).not.toHaveClass(/hidden/)
+  expect(await page.locator('main').evaluate(el => el.clientHeight)).toBe(height)
+  await expect(page.locator('footer.app-footer')).toHaveCount(0)
 })
 
 test('the mark in the release history goes home and leaves the history', async ({ page }) => {

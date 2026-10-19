@@ -260,6 +260,10 @@ function place() {
 @media (pointer: coarse) {
   @container cap (max-width: 899px) {
     .du:not(.open, :focus-within) .value-slot { pointer-events: none; }
+    /* A closed plate's −, + and shadow sit outside the unit. On a phone sheet the last
+       unit's + widens the dial. A mouse still measures those boxes while they are quiet. */
+    .du:not(:hover, :focus-within, .open) .pm { display: none; }
+    .du:not(:hover, :focus-within, .open)::before { content: none; }
   }
 }
 @media (prefers-reduced-motion: reduce) { .du .pm, .du::before { transition: none; } }

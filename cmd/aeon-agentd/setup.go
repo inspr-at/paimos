@@ -42,7 +42,15 @@ func (l localPairing) client() (agentdwire.Client, error) {
 	return agentdwire.OpenClient(filepath.Join(l.root, "daemon"))
 }
 func localStatus(s agentd.LifecycleStatus) agentsetup.LocalStatus {
-	return agentsetup.LocalStatus{AccountLogins: s.AccountLogins, VerificationReasons: s.VerificationReasons, AccountStatuses: s.AccountStatuses, HarnessDetails: s.HarnessDetails, HarnessStatuses: s.HarnessStatuses, HarnessErrors: s.HarnessErrors, ProfilePermissions: s.ProfilePermissions, HarnessFailed: s.HarnessFailed, LoginRequired: s.LoginRequired, VerificationUnavailable: s.VerificationUnavailable, Ready: s.Ready, DaemonID: s.DaemonID, State: s.State, Active: s.ActiveRunIDs, Unconfirmed: s.UnconfirmedRunIDs, SettlementPending: s.SettlementPendingRunIDs, VerificationResults: s.VerificationResults, BlockedAccounts: append([]agentsetup.BlockedAccount(nil), s.BlockedAccounts...)}
+	return agentsetup.LocalStatus{AccountLogins: s.AccountLogins, VerificationReasons: s.VerificationReasons, AccountStatuses: s.AccountStatuses, HarnessDetails: s.HarnessDetails, HarnessStatuses: s.HarnessStatuses, HarnessErrors: s.HarnessErrors, ProfilePermissions: s.ProfilePermissions, HarnessFailed: s.HarnessFailed, LoginRequired: s.LoginRequired, VerificationUnavailable: s.VerificationUnavailable, Ready: s.Ready, DaemonID: s.DaemonID, State: s.State, Active: s.ActiveRunIDs, Unconfirmed: s.UnconfirmedRunIDs, SettlementPending: s.SettlementPendingRunIDs, VerificationResults: s.VerificationResults, BlockedAccounts: append([]agentsetup.BlockedAccount(nil), s.BlockedAccounts...), Diagnostics: append([]string(nil), s.Diagnostics...)}
+}
+
+func checkoutHandover(workspace, tenant, principal, daemon, statePath string) string {
+	notice, err := agentd.HandoverCheckout(workspace, tenant, principal, daemon, statePath)
+	if err != nil {
+		return agentd.CheckoutStillHeldText
+	}
+	return notice
 }
 func (l localPairing) Status(ctx context.Context, account string) (agentsetup.LocalStatus, error) {
 	if l.supervisor != nil {
@@ -251,7 +259,7 @@ func setupCommandInput(command string, args []string, in io.Reader, out io.Write
 		return err
 	}
 	manager := &agentsetup.ServiceManager{Instance: instance, Platform: platform, Home: home, UID: os.Getuid(), Executable: executable, Systemctl: systemctl}
-	engine := &agentsetup.Engine{Store: store, Services: manager, Local: localPairing{root: root, readOnly: command == "status"}, InstallMethod: agentsetup.InstallMethod(executable, home)}
+	engine := &agentsetup.Engine{Store: store, Services: manager, Local: localPairing{root: root, readOnly: command == "status"}, InstallMethod: agentsetup.InstallMethod(executable, home), CheckoutHandover: checkoutHandover}
 	if instance != "" {
 		if platform.OS != "darwin" {
 			return agentsetup.ErrDeclarative
@@ -629,6 +637,11 @@ func printSetupProgress(out io.Writer, jsonOutput bool, p agentsetup.Progress) e
 	_, err := fmt.Fprintf(out, "%s: %s\n", p.Stage, p.Action)
 	if err != nil {
 		return err
+	}
+	if p.CheckoutNotice != "" {
+		if _, err := fmt.Fprintln(out, p.CheckoutNotice); err != nil {
+			return err
+		}
 	}
 	if p.TouchIDConfirmation != "" {
 		confirmation := "Touch ID confirmation: " + p.TouchIDConfirmation

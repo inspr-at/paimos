@@ -848,10 +848,11 @@ type claudeProcess struct {
 	managedPolicy bool
 	steerEnabled  bool
 	*wireProcess
-	assetDir  string
-	ready     chan error
-	controlMu sync.Mutex
-	controls  map[string]chan bool
+	assetDir       string
+	ready          chan error
+	controlMu      sync.Mutex
+	controls       map[string]chan bool
+	controlReasons map[string]string
 }
 
 type claudeReviewProcess struct{ *claudeProcess }
@@ -894,7 +895,12 @@ func (p *claudeProcess) controlCorrelated(ctx context.Context, op, text, correla
 	p.controlMu.Lock()
 	p.controls[correlation] = ch
 	p.controlMu.Unlock()
-	defer func() { p.controlMu.Lock(); delete(p.controls, correlation); p.controlMu.Unlock() }()
+	defer func() {
+		p.controlMu.Lock()
+		delete(p.controls, correlation)
+		delete(p.controlReasons, correlation)
+		p.controlMu.Unlock()
+	}()
 	frame := map[string]any{"op": op, "correlation_id": correlation}
 	if op == "inbox" {
 		frame["managed_policy"] = p.managedPolicy
@@ -910,13 +916,7 @@ func (p *claudeProcess) controlCorrelated(ctx context.Context, op, text, correla
 	}
 	select {
 	case ok := <-ch:
-		if ok {
-			return nil
-		}
-		if isSetting(op) {
-			return ErrSettingRejected
-		}
-		return errors.New("Claude bridge rejected control")
+		return p.controlResult(op, correlation, ok)
 	case <-ctx.Done():
 		return ctx.Err()
 	case <-p.readDone:
@@ -924,12 +924,52 @@ func (p *claudeProcess) controlCorrelated(ctx context.Context, op, text, correla
 		// Preserve its already-read receipt instead of racing it against EOF.
 		select {
 		case ok := <-ch:
-			if ok {
-				return nil
-			}
+			return p.controlResult(op, correlation, ok)
 		default:
 		}
 		return errors.New("Claude bridge closed")
+	}
+}
+
+func (p *claudeProcess) controlResult(op, correlation string, ok bool) error {
+	if ok {
+		return nil
+	}
+	if p.takeControlReason(correlation) == "not_running" {
+		return errNothingRunning
+	}
+	if isSetting(op) {
+		return ErrSettingRejected
+	}
+	return errors.New("Claude bridge rejected control")
+}
+
+func (p *claudeProcess) takeControlReason(correlation string) string {
+	p.controlMu.Lock()
+	defer p.controlMu.Unlock()
+	reason := p.controlReasons[correlation]
+	delete(p.controlReasons, correlation)
+	return reason
+}
+
+// deliverControl records a bridge receipt. not_running is kept beside the bool
+// channel so existing fixtures can still send true without a reason map.
+func (p *claudeProcess) deliverControl(correlation, kind, reason string) {
+	p.controlMu.Lock()
+	ch := p.controls[correlation]
+	if kind == "control_failed" && reason == "not_running" {
+		if p.controlReasons == nil {
+			p.controlReasons = map[string]string{}
+		}
+		p.controlReasons[correlation] = reason
+	}
+	p.controlMu.Unlock()
+	if ch == nil {
+		return
+	}
+	select {
+	case ch <- kind == "control_applied":
+	default:
 	}
 }
 func (a *ClaudeAdapter) Start(ctx context.Context, r StartRequest, observe func(AdapterEvent)) (Process, error) {
@@ -1158,15 +1198,7 @@ func (a *ClaudeAdapter) startBridge(ctx context.Context, r StartRequest, observe
 			}
 			observe(ev)
 		case "control_applied", "control_failed":
-			cp.controlMu.Lock()
-			ch := cp.controls[frame.CorrelationID]
-			cp.controlMu.Unlock()
-			if ch != nil {
-				select {
-				case ch <- frame.Kind == "control_applied":
-				default:
-				}
-			}
+			cp.deliverControl(frame.CorrelationID, frame.Kind, frame.Reason)
 		}
 	})
 	op, cancel := operationContext(ctx)

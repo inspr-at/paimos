@@ -60,13 +60,18 @@ async function setup(page: Page, theme: 'light' | 'dark' = 'light', headings = f
 const rows = (page: Page) => page.locator('.sessions .row[data-row]')
 const row = (page: Page, id: string) => page.locator(`.sessions [data-row="s:${id}"]`)
 const note = (page: Page) => page.locator('.sessions [data-held-note]')
+// AEON-1459 (D4): on phones and short screens held changes float as a chip, never a toolbar part.
+const compactSize = (page: Page) => { const size = page.viewportSize()!; return size.width < 720 || size.height <= 500 }
+const heldChip = (page: Page) => page.locator('[data-held-chip]')
+const held = (page: Page) => compactSize(page) ? heldChip(page) : note(page)
+const showNow = (page: Page) => compactSize(page) ? heldChip(page) : note(page).getByRole('button', { name: /Show now$/ })
 const showList = (page: Page) => page.locator('.sessions').evaluate(el => el.scrollIntoView({ block: 'start' }))
 const rowIds = (page: Page) => rows(page).evaluateAll(els => els.map(el => el.getAttribute('data-row')))
 // Every row on screen and the held note under the shared stability guard: fractional boxes in
 // scroll-container coordinates, ±0.5 px (docs/ui-conventions.md).
 async function rowGuard(page: Page) {
   const ids = (await rowIds(page)).map(String)
-  return controlStability(page, { note: note(page), ...Object.fromEntries(ids.map(id => [id, page.locator(`.sessions [data-row="${id}"]`)])) })
+  return controlStability(page, { ...(compactSize(page) ? {} : { note: note(page) }), ...Object.fromEntries(ids.map(id => [id, page.locator(`.sessions [data-row="${id}"]`)])) })
 }
 
 // The design check's probes (design/ag-approved/check.mjs), limited to the Sessions card.
@@ -624,7 +629,7 @@ for (const theme of ['light', 'dark'] as const) for (const width of [1440, 1024,
       else leads['p-pharos'] = { ...leads['p-pharos']!, state: 'starting', session_id: WORKER(70), revision: 2, generation: 2 }
       data.sessions[1]!.current_activity = { text: 'Live activity while headings wait', source: 'auto', at: new Date(NOW).toISOString() }
       await page.clock.runFor(21_000)
-      await expect(note(page), 'a heading-only change is counted').toContainText('1 change waits')
+      await expect(held(page), 'a heading-only change is counted').toContainText('1 change waits')
       await expect(time, 'time evidence updates during the hold').not.toHaveText(beforeTime)
       await expect(row(page, data.sessions[1]!.id).locator('.l2t')).toHaveText('Live activity while headings wait')
       expect(await headingRows(page), 'section and heading membership stay frozen').toEqual(before)
@@ -635,7 +640,7 @@ for (const theme of ['light', 'dark'] as const) for (const width of [1440, 1024,
     await page.screenshot({ path: info.outputPath(`held-${update}-${width}-${theme}.png`) })
     const newHeading = page.locator(update === 'queue' ? '.sessions .row.nolead[data-project="AHEAD"]' : '.sessions [data-row="l:p-pharos"]')
     await expect(newHeading).toHaveCount(0)
-    if (update === 'queue') await note(page).getByRole('button', { name: /Show now$/ }).click()
+    if (update === 'queue') await showNow(page).click()
     else {
       await page.mouse.move(700, 8)
       await page.clock.runFor(1400)
@@ -643,7 +648,8 @@ for (const theme of ['light', 'dark'] as const) for (const width of [1440, 1024,
       await page.clock.runFor(200)
     }
     await expect(newHeading, 'the allowed moment applies the heading').toBeVisible()
-    await expect(note(page)).toContainText('Live · updated')
+    if (compactSize(page)) await expect(heldChip(page), 'the chip leaves once nothing waits').toHaveCount(0)
+    else await expect(note(page)).toContainText('Live · updated')
     expect(errors).toEqual([])
   })
 }

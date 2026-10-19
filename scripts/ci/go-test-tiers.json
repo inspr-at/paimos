@@ -1190,6 +1190,8 @@
     ,
     {"kind":"go","package":"internal/agentd","name":"TestApprovedDeadlineDoesNotWaitForTelemetryLock","tier":"GATED-FULL"}
     ,
+    {"kind":"go","package":"internal/agentd","name":"TestArchivedHarnessClaimsNothing","tier":"ESSENTIAL"}
+    ,
     {"kind":"go","package":"internal/agentd","name":"TestArchivedWorkerResponseDetachesWithoutStoppingChild","tier":"GATED-FULL"}
     ,
     {"kind":"go","package":"internal/agentd","name":"TestAttachBearerAloneCannotJoin","tier":"GATED-FULL"}
@@ -1414,6 +1416,12 @@
     ,
     {"kind":"go","package":"internal/agentd","name":"TestChatSubscriberBoundAndCancellation","tier":"ESSENTIAL"}
     ,
+    {"kind":"go","package":"internal/agentd","name":"TestCheckoutHandoverProof","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/agentd","name":"TestCheckoutHeldWaitReportsAgainAfterServerRestart","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/agentd","name":"TestCheckoutHeldWaitReportsOnce","tier":"ESSENTIAL"}
+    ,
     {"kind":"go","package":"internal/agentd","name":"TestClaimLookupOutageRecoversOutsideQueuedFeed","tier":"GATED-FULL"}
     ,
     {"kind":"go","package":"internal/agentd","name":"TestClaimRejectedQueuedRetriesSameReservation","tier":"GATED-FULL"}
@@ -1465,6 +1473,8 @@
     {"kind":"go","package":"internal/agentd","name":"TestClaudeInboxPropagatesPolicy","tier":"GATED-FULL"}
     ,
     {"kind":"go","package":"internal/agentd","name":"TestClaudeNativeClosePreservesReceiptAtEOF","tier":"GATED-FULL"}
+    ,
+    {"kind":"go","package":"internal/agentd","name":"TestClaudeNotRunningBecomesNothingRunning","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/agentd","name":"TestClaudeProbeAcceptsApprovedHomebrewCLI","tier":"GATED-FULL"}
     ,
@@ -1668,6 +1678,10 @@
     ,
     {"kind":"go","package":"internal/agentd","name":"TestGrokVerificationPlatformGate","tier":"GATED-FULL"}
     ,
+    {"kind":"go","package":"internal/agentd","name":"TestHandoverCheckoutBusySameOwnerSaysNothing","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/agentd","name":"TestHandoverCheckoutReportsPairTime","tier":"ESSENTIAL"}
+    ,
     {"kind":"go","package":"internal/agentd","name":"TestHarnessCatalogRecordedFactsAndUnknown","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/agentd","name":"TestHarnessHintsDrainAndStopWithoutHeartbeatOrPoll","tier":"ESSENTIAL"}
@@ -1715,6 +1729,10 @@
     {"kind":"go","package":"internal/agentd","name":"TestInboxUnconfirmedDoesNotReinject","tier":"GATED-FULL"}
     ,
     {"kind":"go","package":"internal/agentd","name":"TestInstalledDaemonNamesMatchInstallerAndNixPackage","tier":"GATED-FULL"}
+    ,
+    {"kind":"go","package":"internal/agentd","name":"TestInterruptIdleRejectsWithoutCallingChild","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/agentd","name":"TestInterruptRaceMapsNothingRunning","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/agentd","name":"TestInvalidVerificationCannotBlockProbeAndRefusalRetries","tier":"GATED-FULL"}
     ,
@@ -2111,6 +2129,12 @@
     {"kind":"go","package":"internal/agentd","name":"TestStatuslineRateLimitAndAccountFence","tier":"GATED-FULL"}
     ,
     {"kind":"go","package":"internal/agentd","name":"TestStatuslineReportRequiresConsent","tier":"GATED-FULL"}
+    ,
+    {"kind":"go","package":"internal/agentd","name":"TestSteerMidTurnStaysQueued","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/agentd","name":"TestSteerOnEndedSessionRefuses","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/agentd","name":"TestSteerOnYieldedStartsNextTurn","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/agentd","name":"TestStepUpBadServerChallengesNeverPrompt","tier":"GATED-FULL"}
     ,
@@ -2805,6 +2829,8 @@
     {"kind":"go","package":"internal/agentruns","name":"TestConsecutiveVendorHandoffsPreserveRunGroupTarget","tier":"GATED-FULL"}
     ,
     {"kind":"go","package":"internal/agentruns","name":"TestCreationRollsBackWhenEventCannotBeWritten","tier":"GATED-FULL"}
+    ,
+    {"kind":"go","package":"internal/agentruns","name":"TestDaemonWaitReasonIsScopedMemory","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/agentruns","name":"TestDelegatedClaimNeedsLiveGrantAndKeyScope","tier":"ESSENTIAL"}
     ,

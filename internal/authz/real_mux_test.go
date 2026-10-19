@@ -102,7 +102,7 @@ func TestRealMuxRouteCoverage(t *testing.T) {
 		attachments.New(nil, attachments.Store{}), &greetings.Module{}, knowledge.New(nil),
 		projectgroups.New(nil), &releasehistory.Module{}, profile.New(nil, attachments.Store{}), themes.New(nil),
 		imports.New(nil), inbox.New(nil), chat.New(nil), messaging, harness.New(nil), nativesessions.NewDisabled(), rules.New(nil), doctrine.New(nil, doctrine.Options{}), ticketwork.New(nil), outcomes.New(nil), deliveryvote.New(nil), usagedashboard.New(nil), workorders.New(nil), crossreview.New(nil, nil), &delivery.Module{}, engineadmission.New(nil, nil),
-		agentruns.New(nil), agentpairing.New(nil, "https://pairing.test", "test"), approvals.New(nil), questions.New(nil), decisiondesk.New(nil), modelregistry.New(nil), agentaccounts.New(nil), accountuse.New(nil),
+		agentruns.New(nil), agentruns.NewDaemonWait(nil), agentpairing.New(nil, "https://pairing.test", "test"), approvals.New(nil), questions.New(nil), decisiondesk.New(nil), modelregistry.New(nil), agentaccounts.New(nil), accountuse.New(nil),
 		journey.New(nil), requirements.New(nil), releases.New(nil), goals.New(nil), recurrences.New(nil), routineactions.New(nil, nil), statusautopilot.New(nil), parentbenefits.New(nil, nil), intake.New(nil),
 		plugins.New(nil), stagehandoff.New(nil, nil), costunits.New(nil, nil), crm.New(nil, nil),
 		&quotes.Module{}, &collaboration.Module{}, &publicquotes.Module{}, &confirmation.Module{}, portal.New(nil, false, nil),

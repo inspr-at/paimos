@@ -393,6 +393,9 @@ func (e *Engine) connectionProgress(ctx context.Context, s *snapshot) Progress {
 	if e.Local != nil {
 		local, err := e.Local.Status(ctx, "")
 		if err == nil && local.DaemonID == v.DaemonID {
+			if len(local.Diagnostics) > 0 {
+				p.Diagnostics = append([]string(nil), local.Diagnostics...)
+			}
 			local = e.pinRenewalDetails(s, local)
 			accountReport := local.AccountStatuses != nil
 			local = enrollmentReadiness(v, local)

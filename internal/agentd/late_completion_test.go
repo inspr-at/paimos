@@ -39,7 +39,7 @@ func TestTerminalControlCompletionReleasesQueue(t *testing.T) {
 	a.mu.Lock()
 	completions := append([]string(nil), a.harnessCompletions...)
 	a.mu.Unlock()
-	if len(completions) != 1 || completions[0] != "next:applied:queued_next_turn" {
+	if len(completions) != 1 || completions[0] != "next:applied:started_next_turn" {
 		t.Fatalf("completions %v", completions)
 	}
 	if err := s.serviceHarness(t.Context(), e); err != nil {

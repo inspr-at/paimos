@@ -9,6 +9,7 @@ import { mockEffectivePermissions } from './authz-fixtures'
 import { defaultHostPolicy } from '../src/lib/hostCapacity'
 import type { PairingView } from '../src/lib/agentPairing'
 import { controlStability } from './control-stability'
+import { showCapacityRow } from './helpers/compact'
 
 test.use({ timezoneId: TZ })
 const run = 'b0000000-0000-4000-8000-000000000908'
@@ -71,7 +72,8 @@ for (const width of [1440, 1024, 390]) for (const theme of ['light', 'dark'] as 
       await route.fulfill({ json: { account_id: e.account_id, run_id: run } })
     })
     await page.goto('/agents')
-    // AEON-1209: Verify again lives in the accounts chip's popover.
+    // AEON-1209: Verify again lives in the accounts chip's popover. On a phone that chip is in the capacity sheet (AEON-1459).
+    await showCapacityRow(page)
     await page.locator('.cap-row .acc-chip').click()
     const section = page.getByRole('dialog', { name: 'Accounts and computers' })
     const verify = section.locator('.acc-fix .verify-button')
@@ -92,6 +94,7 @@ for (const width of [1440, 1024, 390]) for (const theme of ['light', 'dark'] as 
     // Closed and opened again, the popover still says what the check found.
     await page.keyboard.press('Escape')
     await expect(section).toHaveCount(0)
+    await showCapacityRow(page)
     await page.locator('.cap-row .acc-chip').click()
     await expect(section.locator('.verification-feedback')).toHaveText('Verification passed.')
     await page.screenshot({ path: info.outputPath(`agents-folded-result-${width}-${theme}.png`), fullPage: true })

@@ -506,6 +506,7 @@ func serveWithPool(ctx context.Context, cfg config.Config, ln net.Listener, pool
 			deliveryMod,
 			engineadmission.New(pool, engineadmission.AppReader{App: reviewApp}),
 			runMod,
+			agentruns.NewDaemonWait(pool),
 			approvals.New(pool),
 			phoneMod,
 			stepupMod,

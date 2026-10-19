@@ -576,9 +576,9 @@ const handleControlLine = (line) => {
           return;
         }
         // Ordinary inbox input cannot exercise managed recovery authority.
-        const steerActiveTurn = request.op === "steer" ||
-          (turnActive && request.managed_policy === false && request.steer_enabled === true &&
-           capabilities.includes("steer") && interruptReceipt);
+        const steerActiveTurn = turnActive && (request.op === "steer" ||
+          (request.managed_policy === false && request.steer_enabled === true &&
+           capabilities.includes("steer") && interruptReceipt));
         const uuid = randomUUID();
         controlUUID = uuid;
         const state = addCorrelation(uuid, correlationID);

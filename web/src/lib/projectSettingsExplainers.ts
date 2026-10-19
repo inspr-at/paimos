@@ -117,6 +117,27 @@ const EXPL = {
 export { EXPL as PROJECT_SETTINGS_EXPLAINERS };
 export type ProjectSettingsExplainerId = keyof typeof EXPL;
 
+// Definitions is independently bilingual; other settings retain their own
+// display policy. Keep the translated help within that surface.
+export const DEFINITION_EXPLAINERS_DE = {
+  definitions: { title: 'Definitionen',
+    what: 'Eine Definition enthält die Prüfungen vor einem Statuswechsel: Bereit vor In Arbeit, QA vor QA, Erledigt vor Erledigt. Für andere Status gibt es keine Prüfungen.',
+    effect: 'Ein Ticket in {K} kann zu In Arbeit wechseln, sobald seine Prüfungen bestanden sind, etwa eine Schätzung und beschriebene Abnahmekriterien. Die Zeile zum nächsten Status zeigt den Fortschritt, etwa „Bereit 1/2“.',
+    who: 'Administratoren legen den Workspace-Standard in den Einstellungen unter Richtlinien fest. Projektadministratoren können einem Projekt eine eigene Definition geben.' },
+  enforce: { title: 'Agenten und Personen',
+    what: 'Für Agenten und Personen gelten dieselben Prüfungen. Ein Agent wird bei einer fehlgeschlagenen Prüfung gestoppt; eine Person kann mit einer Begründung fortfahren.',
+    effect: 'Fehlt einem Ticket in {K} eine erforderliche Schätzung, verweigert PAIMOS den Start durch einen Agenten und nennt die fehlende Prüfung in der Aktivität. Eine Person kann „Trotzdem verschieben“ wählen und eine Begründung eingeben. Der Statuswechsel wird mit den fehlenden Prüfungen protokolliert.',
+    who: 'Personen mit dem Recht zum Statuswechsel können ein Ticket trotzdem verschieben.' },
+  copy: { title: 'Workspace-Standard oder dieses Projekt',
+    what: 'Ein Projekt folgt dem Workspace-Standard, bis es eine eigene Definition erhält. Danach behält es eine vollständige Kopie; es wird nichts zusammengeführt.',
+    effect: 'Solange {K} den Standard nutzt, gelten Workspace-Änderungen sofort. Nach „Für dieses Projekt ändern“ wird die Kopie von {K} bearbeitet; diese Seite zeigt die Abweichungen. Spätere Workspace-Änderungen lassen die Kopie unverändert. Zurücksetzen verwirft die Kopie; Tickets behalten ihren Status.',
+    who: 'Projektadministratoren ändern die Kopie ihres Projekts. Administratoren ändern den Workspace-Standard.' },
+  manual: { title: 'Prüfungen, die eine Person bestätigt',
+    what: 'Eine Freitext-Prüfung in einer Definition, etwa „Release-Notizen geprüft“. PAIMOS kann sie nicht prüfen; eine Person bestätigt sie für jedes Ticket.',
+    effect: 'Ein Ticket in {K} wartet auf die Bestätigung der zuständigen Person. Zuständig ist die dem Ticket zugewiesene Person, andernfalls ein derzeitiger Projektadministrator. Ein Agent kann die Prüfung lesen, aber nicht bestätigen.',
+    who: 'Projektadministratoren fügen Prüfungen hinzu. Nur die derzeit zuständige Person oder ein Projektadministrator darf sie bestätigen.' },
+};
+
 export interface ProjectSettingsExplainerContext {
   projectKey: string
   ticketNumber?: string

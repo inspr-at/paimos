@@ -8,12 +8,14 @@ import { getCurrentInstance, nextTick, onBeforeUnmount, onMounted, ref, watch } 
 // focus back to the trigger when it closes by keyboard. A menu closes on Tab;
 // a small form (`cycle`) keeps Tab among its own controls instead.
 // `phoneSheet`: on a portrait phone the menu opens as a sheet from the bottom edge, over a scrim,
-// its items in thumb reach (AEON-1286); elsewhere it stays anchored to its trigger.
+// its items in thumb reach (AEON-1286); elsewhere it stays anchored to its trigger. A swipe down
+// on the sheet closes it, as Esc does (AEON-1459), unless its content was scrolled.
 // `sheetBelow` is the widest viewport that still opens the phone sheet (Delivery's worst items use 760, AEON-1493).
 // `belowHeader`: flipped above its trigger, the panel stops 8 px below the app header instead of covering it. When it
 // fits on neither side, the page first scrolls the trigger to 16 px below the header (a jump with reduced motion), and
 // the panel then opens below it (Delivery's worst items, AEON-1493).
-const props = withDefaults(defineProps<{ anchor: HTMLElement | null; align?: 'start' | 'end'; width?: number; label: string; tallest?: number; cycle?: boolean; sheet?: boolean; compactSheet?: boolean; fieldEscape?: boolean; settingsKeys?: boolean; phoneSheet?: boolean; sheetBelow?: number; belowHeader?: boolean }>(), { align: 'start', width: 240, tallest: 420, cycle: false, sheet: false, fieldEscape: false, phoneSheet: false, sheetBelow: 720, belowHeader: false })
+// `fieldsOwnEscape`: a text field inside handles its own Escape (a stepper cancels its draft); the next Escape closes.
+const props = withDefaults(defineProps<{ anchor: HTMLElement | null; align?: 'start' | 'end'; width?: number; label: string; tallest?: number; cycle?: boolean; sheet?: boolean; compactSheet?: boolean; fieldEscape?: boolean; fieldsOwnEscape?: boolean; settingsKeys?: boolean; phoneSheet?: boolean; sheetBelow?: number; belowHeader?: boolean }>(), { align: 'start', width: 240, tallest: 420, cycle: false, sheet: false, fieldEscape: false, fieldsOwnEscape: false, phoneSheet: false, sheetBelow: 720, belowHeader: false })
 defineOptions({ inheritAttrs: false })
 const floatingID = `floating-${getCurrentInstance()!.uid}`
 const floatingOwner = (props.anchor instanceof Element ? props.anchor.closest<HTMLElement>('[data-floating-id]') : null)?.dataset.floatingId
@@ -152,7 +154,8 @@ function anchorShifted() {
 }
 let settleFrame = 0
 function scrolled(event: Event) {
-  if (panel.value?.contains(event.target as Node)) return
+  // A bottom sheet is not anchored to its trigger: the page scrolling behind it never closes it.
+  if (bottom.value || panel.value?.contains(event.target as Node)) return
   if (!anchorShifted()) return
   if (!(props.anchor instanceof HTMLElement)) { emit('close', false); return }
   if (settleFrame) return
@@ -167,14 +170,17 @@ function scrolled(event: Event) {
 const layer = (props.anchor instanceof Element ? props.anchor.closest<HTMLElement>('dialog[open]') : null) ?? 'body'
 // Escape closes the popover wherever focus is, before any page shortcut sees it;
 // another dialog open above the popover's own layer handles its Escape itself.
+// A child still open (focus may have stayed on its trigger here) closes first, on its own Escape.
+const openChild = () => [...document.querySelectorAll<HTMLElement>('[data-floating-owner]')].some(childOverlay)
 function escape(event: KeyboardEvent) {
-  if (childOverlay(document.activeElement)) return
+  if (childOverlay(document.activeElement) || openChild()) return
   if (event.key !== 'Escape' || [...document.querySelectorAll('dialog[open]')].some(dialog => dialog !== layer)) return
   // Names loaded after this panel mounts register their Escape listener later.
   // Let the open disclosure consume Escape before dismissing its menu.
   if (panel.value?.querySelector('.read-name-detail:popover-open')) return
   // A form: Escape first leaves a text field or select, the next press closes (AEON-541 keyboard rule).
   const field = event.target
+  if (props.fieldsOwnEscape && field instanceof HTMLElement && panel.value?.contains(field) && ['INPUT', 'TEXTAREA', 'SELECT'].includes(field.tagName)) return
   if (props.fieldEscape && field instanceof HTMLElement && panel.value?.contains(field) && (field.tagName === 'SELECT' || (field.tagName === 'INPUT' && !['checkbox', 'radio', 'button'].includes((field as HTMLInputElement).type)))) {
     event.preventDefault(); event.stopImmediatePropagation()
     field.blur(); panel.value.tabIndex = -1; panel.value.focus({ preventScroll: true })
@@ -201,6 +207,20 @@ function keydown(event: KeyboardEvent) {
   }
 }
 const onResize = () => place()
+// A swipe down on a bottom sheet closes it: mostly downward, 64 px or more, from content at its top.
+let swipe: { id: number; x: number; y: number } | null = null
+function swipeStart(event: TouchEvent) {
+  const touch = event.touches[0]
+  swipe = bottom.value && event.touches.length === 1 && touch && (panel.value?.scrollTop ?? 0) <= 0 ? { id: touch.identifier, x: touch.clientX, y: touch.clientY } : null
+}
+function swipeEnd(event: TouchEvent) {
+  const start = swipe
+  swipe = null
+  const touch = start ? [...event.changedTouches].find(item => item.identifier === start.id) : undefined
+  if (!start || !touch) return
+  const down = touch.clientY - start.y, across = Math.abs(touch.clientX - start.x)
+  if (down >= 64 && down > across * 1.5) emit('close', false)
+}
 // The collapsed Display menu widens after it counts columns. Place again once that
 // width arrives: the resize that caused the recount already placed the narrower menu.
 watch(() => props.width, () => place(true))
@@ -237,7 +257,7 @@ defineExpose({ place })
 <template>
   <Teleport :to="layer">
     <div v-if="bottom" ref="scrim" class="floating-scrim" aria-hidden="true" @click="emit('close', false)" />
-    <div ref="panel" v-bind="$attrs" :data-floating-id="floatingID" :data-floating-owner="floatingOwner" class="floating pop" :class="{ above, sheet, bottom, parked }" role="dialog" :aria-label="label" :style="{ transform: bottom ? 'none' : `translate(${x}px, ${y}px)`, width: sheet ? compactSheet ? `${compactWidth}px` : undefined : bottom ? '100%' : `${Math.min(width, 9999)}px`, height: placedHeight === undefined ? undefined : `${placedHeight}px`, boxSizing: 'border-box', maxHeight: `${maxHeight}px`, '--floating-max': `${maxHeight}px` }" @keydown="keydown">
+    <div ref="panel" v-bind="$attrs" :data-floating-id="floatingID" :data-floating-owner="floatingOwner" class="floating pop" :class="{ above, sheet, bottom, parked }" role="dialog" :aria-label="label" :style="{ transform: bottom ? 'none' : `translate(${x}px, ${y}px)`, width: sheet ? compactSheet ? `${compactWidth}px` : undefined : bottom ? '100%' : `${Math.min(width, 9999)}px`, height: placedHeight === undefined ? undefined : `${placedHeight}px`, boxSizing: 'border-box', maxHeight: `${maxHeight}px`, '--floating-max': `${maxHeight}px` }" @keydown="keydown" @touchstart.passive="swipeStart" @touchend.passive="swipeEnd" @touchcancel.passive="swipe = null">
       <slot />
     </div>
   </Teleport>
@@ -248,7 +268,7 @@ defineExpose({ place })
 .floating:focus { outline: none; }
 .floating.sheet { width: min(960px, max(480px, 64vw)); max-width: calc(100vw - 32px); overflow: hidden; }
 @media (max-width: 600px) { .floating.sheet { width: 100%; max-width: none; border-radius: 0; } }
-.floating.bottom { top: auto; bottom: 0; left: 0; max-width: none; padding: 8px 8px max(8px, env(safe-area-inset-bottom)); border-width: 1px 0 0; border-radius: 20px 20px 0 0; }
+.floating.bottom { top: auto; bottom: 0; left: 0; max-width: none; padding: 8px max(8px, env(safe-area-inset-right)) max(8px, env(safe-area-inset-bottom)) max(8px, env(safe-area-inset-left)); border-width: 1px 0 0; border-radius: 20px 20px 0 0; }
 .floating-scrim { position: fixed; inset: 0; z-index: 69; background: var(--scrim); }
 @media (prefers-reduced-motion: no-preference) {
   .floating { animation: pop-in .14s cubic-bezier(.2, .7, .2, 1); }

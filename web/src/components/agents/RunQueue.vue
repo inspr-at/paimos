@@ -137,7 +137,7 @@ defineExpose({ reveal })
           <span class="run-meta">
             <time class="run-when" :datetime="run.created_at">{{ relativeTime(run.created_at, { now: agents.now }) }}</time>
             <span v-if="run.requested_model" class="run-model mono">{{ run.requested_model }}</span>
-            <span class="run-state">{{ stateText(run) }}</span>
+            <span class="run-state" :title="run.daemon_wait_reason === 'checkout_held_by_earlier_pairing' ? launchState(run).detail : undefined">{{ stateText(run) }}</span>
           </span>
         </span>
         <span class="run-acts">

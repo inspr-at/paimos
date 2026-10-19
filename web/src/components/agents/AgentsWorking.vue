@@ -8,6 +8,7 @@
 import { computed, nextTick, onBeforeUnmount, onMounted, reactive, ref, useId, watch } from 'vue'
 import { accountRoomCopy, accountRoomWords, limitMode, liveCopy, modeLimit, nextLimitMode, noOwnTip, nowCopy, setLimit, statusCopy, stepLimit, stepTotal, waitingCopy, workingAccountRoom, workingRows, type HarnessLimit, type LimitMode } from '../../lib/agentsWorking'
 import { can } from '../../lib/authz'
+import { COMPACT_QUERY } from '../../lib/chrome'
 import { chipTip, dailyOf, dailyView, DEFAULT_DAILY_POINTS, needsAttention, stateWords, usageLine } from '../../lib/dailyLimits'
 import { selectedHarness } from '../../lib/dialPrefs'
 import { useAgentPlan } from '../../lib/useAgentPlan'
@@ -28,14 +29,18 @@ import WorkingStepper from './WorkingStepper.vue'
 
 // bodyTarget: where the unfolded body goes, under the capacity row; without one it stays in place.
 defineProps<{ bodyTarget?: string }>()
+// The capacity line on compact screens says the dial's total and what runs (AEON-1459).
+// `unfolded`: the chevron opened the body; the capacity sheet makes way for it (AEON-1459).
+const emit = defineEmits<{ summary: [summary: { total: number; running: number; known: boolean }]; unfolded: [] }>()
 const agents = useAgents(), capacity = useCapacity(), session = useSession(), sections = useSectionPrefs(), dialPrefs = useDialPrefs()
 const viewer = () => session.identity ? `${session.identity.tenant.id}:${session.identity.principal.id}` : ''
 const control = useAgentPlan(viewer, key => agents.models.find(m => m.id === key)?.harness)
 const { snapshot, plan, saving, waiting, interrupts, save, saveDaily, hold } = control
 // AEON-1286: a page opened on a compact screen shows the sessions first. There the dial's body
 // opens per visit from its toggle; the saved choice (shared across devices) belongs to wider
-// screens. Decided on opening, so a resize never folds what a person has open.
-const compact = window.matchMedia('(max-width: 720px), (max-height: 480px)').matches
+// screens. Decided on opening, so a resize never folds what a person has open. Compact is the
+// chrome's own rule (AEON-1459): where the capacity row folds into its line, the body folds too.
+const compact = window.matchMedia(COMPACT_QUERY).matches
 const compactOpen = ref(false)
 const folded = computed(() => compact ? !compactOpen.value : !sections.open.dial)
 function toggleSection() { if (compact) compactOpen.value = !compactOpen.value; else sections.toggle('dial') }
@@ -65,6 +70,7 @@ const run = computed(() => snapshot.value?.running_total ?? 0)
 const live = computed(() => liveCopy(total.value, run.value, roomNow.value, accountRoom.value.full))
 const status = computed(() => statusCopy(total.value, run.value, roomNow.value, accountRoom.value.full))
 const now = computed(() => nowCopy(total.value, run.value, roomNow.value))
+watch([total, run, () => !!(plan.value && snapshot.value)], ([t, r, known]) => emit('summary', { total: t, running: r, known }), { immediate: true })
 const waitingN = computed(() => waiting.value === null ? null : waiting.value.length)
 // "Nothing waiting" is said by the tile itself; only real waiting work, or an unknown queue, needs a reason.
 const waits = computed(() => plan.value && snapshot.value && (waitingN.value !== 0) ? waitingCopy(plan.value, snapshot.value, room.value, waiting.value, accountRoom.value.reasons) : '')
@@ -91,8 +97,11 @@ function toggleDial() {
   const key = folded.value ? selected.value : ''
   if (key) pick(key)
   toggleSection()
+  if (!folded.value) emit('unfolded')
   if (key) void nextTick(() => document.getElementById(bodyId)?.querySelector<HTMLElement>(`[data-sel="${key}"]`)?.focus({ preventScroll: true }))
 }
+// The capacity sheet's "The full dial" opens the body on the page (AEON-1459).
+defineExpose({ unfold: () => { if (folded.value) toggleDial(); else void nextTick(() => document.getElementById(bodyId)?.scrollIntoView({ block: 'start' })) } })
 // Touch: a tap on a unit's face opens it on its plate (a tight row); an outside tap or four
 // idle seconds close it, never while − or + is held.
 const openUnit = ref('')
@@ -385,8 +394,9 @@ function modeKeys(event: KeyboardEvent, key: string) {
 /* A narrow row (phones): the control takes the full width and its units wrap; the live state ends the last line. */
 @container cap (max-width: 640px) {
   .cdial { flex: 1 1 100%; row-gap: 4px; padding: 4px 6px; border-radius: 22px; }
-  /* The live state always ends a second line on the right, loading or loaded. */
-  .cd-break { display: block; flex: 0 0 100%; height: 0; }
+  /* The live state always ends a second line on the right, loading or loaded.
+     width, not flex-basis: a percentage basis uses the border box and widens the dial. */
+  .cd-break { display: block; flex: none; width: 100%; height: 0; }
   .cd-live { margin-left: auto; }
   .cd-live-sk { display: flex; align-items: center; justify-content: flex-end; flex: 1 1 auto; height: 28px; }
   .cd-live-sk .skeleton { width: 150px; }
