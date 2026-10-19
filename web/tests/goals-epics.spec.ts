@@ -288,7 +288,9 @@ for (const look of [{ width: 1440, height: 900, dark: false }, { width: 1440, he
     // Never: italics, coloured edge accents.
     const style = await epic.evaluate(el => { const s = getComputedStyle(el); return { left: s.borderLeftWidth, top: s.borderTopWidth } })
     expect(style).toEqual({ left: '0px', top: '0px' })
-    expect(await page.locator('.goal-grid').evaluate(grid => [...grid.querySelectorAll('*')].filter(el => getComputedStyle(el).fontStyle === 'italic').length)).toBe(0)
+    // Text set in italics (an empty decorative <i>, like the bar's fill, shows no text).
+    const italic = await page.locator('.goal-grid').evaluate(grid => [...grid.querySelectorAll('*')].filter(el => getComputedStyle(el).fontStyle === 'italic' && [...el.childNodes].some(n => n.nodeType === Node.TEXT_NODE && !!n.textContent?.trim())).map(el => el.textContent))
+    expect(italic).toEqual([])
     expect(errors).toEqual([])
   })
 }
