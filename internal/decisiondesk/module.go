@@ -37,6 +37,7 @@ type Item struct {
 	ID               string                 `json:"id"`
 	Kind             string                 `json:"kind"`
 	ProjectID        string                 `json:"project_id,omitempty"`
+	TicketKey        *string                `json:"ticket_key,omitempty"`
 	Revision         int64                  `json:"revision"`
 	Title            string                 `json:"title"`
 	CreatedAt        time.Time              `json:"created_at"`

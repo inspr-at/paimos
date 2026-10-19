@@ -64,6 +64,7 @@ components:
         id: {type: string, format: uuid}
         kind: {type: string, enum: [question, approval, action_request, doctrine, key_trim, stepup, tier_request, account_matrix, routine_consent, lesson, definition_change]}
         project_id: {type: string, format: uuid}
+        ticket_key: {type: string, description: "Live key of the ticket the question's ask named, in the same tenant and project. Omitted when that ask named no ticket or the ticket is gone."}
         revision: {type: integer, minimum: 0, description: "Native tier revisions can begin at zero; other source revisions begin at one."}
         title: {type: string}
         created_at: {type: string, format: date-time}

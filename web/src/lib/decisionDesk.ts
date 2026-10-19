@@ -139,6 +139,11 @@ export function deskProject(item: Pick<DeskItem, 'projectId' | 'projectName' | '
   const key = item.projectId ? item.projectKey ?? '' : ''
   return { id: item.projectId, key, name: item.projectName, href: key ? `/p/${encodeURIComponent(key)}` : '', hue: key ? projectHue(key) : null }
 }
+/** The key a Desk list shows. A question's ticket wins; the project key is the fallback. */
+export function deskListKey(item: { ticket_key?: string | null; ticketKey?: string | null }, projectKey = ''): string {
+  const ticket = (item.ticket_key ?? item.ticketKey ?? '').trim()
+  return ticket || projectKey
+}
 /** The project of the previously shown item, when it differs from this one. */
 export function projectSwitch(previous: DeskProject | undefined, current: DeskProject): DeskProject | undefined {
   return previous && previous.id !== current.id ? previous : undefined
@@ -154,7 +159,7 @@ export function submitModifier(event: Pick<KeyboardEvent, 'metaKey' | 'ctrlKey' 
 export interface DeskProjectionItem {
   definition_change?: {project_key: string; pending_count: number}
   person_step?: PersonStep
-  id: string; kind: 'question' | 'approval' | 'action_request' | 'doctrine' | 'tier_request' | 'key_trim' | 'stepup' | 'account_matrix' | 'lesson' | 'routine_consent' | 'definition_change'; project_id?: string
+  id: string; kind: 'question' | 'approval' | 'action_request' | 'doctrine' | 'tier_request' | 'key_trim' | 'stepup' | 'account_matrix' | 'lesson' | 'routine_consent' | 'definition_change'; project_id?: string; ticket_key?: string | null
   revision: number; title: string; created_at: string; expires_at?: string; held: boolean; can_decide?: boolean; href: string; source: string
 }
 export interface DeskProjection {

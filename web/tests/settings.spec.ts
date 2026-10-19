@@ -22,6 +22,53 @@ async function setup(page: Page, options: SettingsMockOptions & { role?: 'admin'
   return data
 }
 
+// Risk: a failed policy write claims live deletion is enabled, a stale revision
+// overwrites another admin, or feedback and translated copy move the controls.
+test('START retention settings keep controls stable and report failed saves', async ({ page }, testInfo) => {
+  await setup(page)
+  let policy = { enabled: true, dry_run: true, months: 12, revision: 0 }
+  let reject = false
+  const writes: unknown[] = []
+  await page.route('**/api/settings/import-retention', async route => {
+    if (route.request().method() === 'PUT') {
+      const body = route.request().postDataJSON()
+      writes.push(body)
+      if (reject) return route.fulfill({ status: 503, json: { error: 'unavailable' } })
+      if (body.expected_revision !== policy.revision) return route.fulfill({ status: 409, json: { error: 'conflict' } })
+      policy = { ...policy, enabled: body.enabled, dry_run: body.dry_run, revision: policy.revision + 1 }
+    }
+    return route.fulfill({ json: policy })
+  })
+  for (const width of [390, 1024, 1440]) for (const theme of ['light', 'dark']) {
+    await page.setViewportSize({ width, height: 1000 })
+    await page.goto('/settings/workspace#import-retention')
+    const card = page.locator('#import-retention')
+    const enabled = card.getByRole('checkbox').nth(0), dry = card.getByRole('checkbox').nth(1)
+    const save = card.getByRole('button').nth(0), reload = card.getByRole('button').nth(1)
+    await expect(save).toBeEnabled()
+    await page.evaluate(value => { document.documentElement.dataset.theme = value }, theme)
+    await save.evaluate(el => { el.textContent = 'Aufbewahrungseinstellungen speichern' })
+    await reload.evaluate(el => { el.textContent = 'Einstellungen erneut laden' })
+    const guard = await controlStability(page, { enabled, dry, save, reload })
+    await guard.check(async () => { await enabled.uncheck(); await dry.uncheck() })
+    reject = true
+    await guard.check(async () => { await save.click(); await expect(card.getByRole('alert')).toContainText('were not saved') })
+    expect(policy.dry_run).toBe(true)
+    reject = false
+    await guard.check(async () => { await save.click(); await expect(card.getByRole('status')).toContainText('saved') })
+    expect(policy.enabled).toBe(false); expect(policy.dry_run).toBe(false)
+    await guard.check(async () => { await enabled.check(); await dry.check(); await save.click(); await expect(card.getByRole('status')).toContainText('saved') })
+    expect(policy.enabled).toBe(true); expect(policy.dry_run).toBe(true)
+    policy.revision++ // Another administrator saves after this tab loaded.
+    await guard.check(async () => { await save.click(); await expect(card.getByRole('alert')).toContainText('Changed elsewhere') })
+    await expect(save).toBeDisabled()
+    await guard.check(async () => { await reload.click(); await expect(save).toBeEnabled() })
+    guard.done()
+    await card.screenshot({ path: testInfo.outputPath(`start-retention-${width}-${theme}.png`) })
+  }
+  expect(writes).toHaveLength(24)
+})
+
 test('the account menu opens Settings on Personal: theme, greeting and keys', async ({ page }) => {
   const errors = watchErrors(page)
   const data = await setup(page)

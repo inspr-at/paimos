@@ -578,3 +578,88 @@ func TestPreparedLessonProjectionVisibilityAndDecision(t *testing.T) {
 		t.Fatalf("dismissed lesson stayed open: %+v", settled)
 	}
 }
+
+// Risk: the Desk names a ticket the ask did not carry, drops the key the ask
+// named, or shows a key for a deleted, other-project, non-ticket, or malformed id.
+func TestQuestionTicketKeyFollowsAskAndStaysInsideTheProject(t *testing.T) {
+	f := setup(t)
+	var key string
+	if err := f.d.Admin.QueryRow(t.Context(), `SELECT key FROM nodes WHERE tenant_id=$1 AND id=$2 AND deleted_at IS NULL`, f.person.TenantID, f.ticket).Scan(&key); err != nil {
+		t.Fatal(err)
+	}
+	if key == "" {
+		t.Fatal("fixture ticket has no key")
+	}
+	var requestID string
+	if err := f.d.Admin.QueryRow(t.Context(), `SELECT gen_random_uuid()::text`).Scan(&requestID); err != nil {
+		t.Fatal(err)
+	}
+	linked := f.askInput(t, f.project, questions.Input{RequestID: requestID, Question: "Which gate stays?", Meanwhile: "carries_on", TicketID: f.ticket, Options: []questions.Option{{ID: "yes", Title: "Yes", Answer: "Proceed"}}})
+	plain := f.ask(t, f.project, "carries_on", nil)
+	approval := f.approval(t, f.ticket, time.Now().Add(time.Hour))
+	page := f.page(t, f.person, 100, nil)
+	got := map[string]Item{}
+	for _, item := range page.Items {
+		got[item.ID] = item
+	}
+	linkedItem, ok := got[linked.ID]
+	if !ok || linkedItem.Kind != "question" || linkedItem.TicketKey == nil || *linkedItem.TicketKey != key {
+		t.Fatalf("linked question key: %+v want %s", linkedItem, key)
+	}
+	raw, err := json.Marshal(linkedItem)
+	if err != nil || !bytes.Contains(raw, []byte(`"ticket_key":"`+key+`"`)) {
+		t.Fatalf("wire ticket key: %s %v", raw, err)
+	}
+	plainItem := got[plain.ID]
+	if plainItem.TicketKey != nil {
+		t.Fatalf("ask without a ticket named %q", *plainItem.TicketKey)
+	}
+	plainRaw, err := json.Marshal(plainItem)
+	if err != nil || bytes.Contains(plainRaw, []byte("ticket_key")) {
+		t.Fatalf("absent ticket key leaked: %s %v", plainRaw, err)
+	}
+	if got[approval].Kind != "approval" || got[approval].TicketKey != nil {
+		t.Fatalf("non-question named a ticket: %+v", got[approval])
+	}
+	setTicket := func(value string) {
+		t.Helper()
+		err := db.InTenant(dbtest.Seed(t.Context()), f.d.App, f.person.TenantID, func(tx pgx.Tx) error {
+			if _, err := tx.Exec(t.Context(), `SELECT set_config('aeon.desk_write','on',true)`); err != nil {
+				return err
+			}
+			_, err := tx.Exec(t.Context(), `UPDATE desk_questions SET input=jsonb_set(input,'{ticket_id}',to_jsonb($2::text)) WHERE node_id=$1`, linked.ID, value)
+			return err
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+	}
+	assertGone := func(why string) {
+		t.Helper()
+		item := Item{}
+		for _, row := range f.page(t, f.person, 100, nil).Items {
+			if row.ID == linked.ID {
+				item = row
+			}
+		}
+		if item.ID != linked.ID || item.TicketKey != nil {
+			t.Fatalf("%s: %+v", why, item)
+		}
+	}
+	setTicket("not-a-uuid")
+	assertGone("malformed ticket id aborted or leaked")
+	var foreign string
+	err = db.InTenant(dbtest.Seed(t.Context()), f.d.App, f.person.TenantID, func(tx pgx.Tx) error {
+		return tx.QueryRow(t.Context(), `INSERT INTO nodes(tenant_id,kind_id,key,title,parent_id) SELECT $1,k.id,aeon_next_node_key($1,k.short_prefix),'Elsewhere',nullif($2,'')::uuid FROM node_kinds k WHERE k.tenant_id=$1 AND k.slug='work' RETURNING id::text`, f.person.TenantID, f.otherProject).Scan(&foreign)
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	setTicket(foreign)
+	assertGone("other project ticket leaked")
+	setTicket(linked.ID)
+	assertGone("question node was treated as its ticket")
+	setTicket(f.ticket)
+	f.exec(t, `UPDATE nodes SET deleted_at=statement_timestamp() WHERE tenant_id=$1 AND id=$2`, f.person.TenantID, f.ticket)
+	assertGone("deleted ticket stayed visible")
+}
