@@ -2818,6 +2818,16 @@
     ,
     {"kind":"go","package":"internal/agentruns","name":"TestHeartbeatKeepsWaiting","tier":"GATED-FULL"}
     ,
+    {"kind":"go","package":"internal/agentruns","name":"TestLeadAbsentAdmissionOffersPersonNextStep","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/agentruns","name":"TestLeadPersonConcurrentStartsHaveOneWriter","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/agentruns","name":"TestLeadPersonRunRefusesPendingAndClaimedIntent","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/agentruns","name":"TestLeadPersonRunStartsAndRejectsOtherWriters","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/agentruns","name":"TestLeadPickupSkipsLeafHeldByPersonRun","tier":"ESSENTIAL"}
+    ,
     {"kind":"go","package":"internal/agentruns","name":"TestLeadQueueDispatchAndWorkerGenerationFence","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/agentruns","name":"TestLeadQueueFairRoutingAndWorkerRestartPriority","tier":"ESSENTIAL"}
@@ -6875,6 +6885,8 @@
     {"kind":"go","package":"internal/harness","name":"TestLeadFairTurnsAndUnavailableContender","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/harness","name":"TestLeadIdleYieldCountsUntilConfirmedExit","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/harness","name":"TestLeadPickupExcludesActivePersonRun","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/harness","name":"TestLeadRuntimeConsentAndAdoptionRemainLaunchBarriers","reason":"AEON-1190: lead consent, duplicate native launch and unknown process ownership boundary","tier":"ESSENTIAL"}
     ,
