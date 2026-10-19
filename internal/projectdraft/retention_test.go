@@ -10,6 +10,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/inspr-at/paimos/internal/attachments"
 	"github.com/inspr-at/paimos/internal/db"
 	"github.com/inspr-at/paimos/internal/events"
 	"github.com/inspr-at/paimos/internal/tenant"
@@ -30,7 +31,11 @@ func TestStartImportRetention(t *testing.T) {
 	now := time.Now().UTC().Truncate(time.Second)
 	old := now.AddDate(-1, 0, 0).Add(-time.Second)
 	makeProject := func(key string, at time.Time) string {
-		capability := f.handoff(t, handoffDoc())
+		doc := handoffDoc()
+		if key == "LIVE" {
+			doc["transcript"].([]any)[0].(map[string]any)["text"] = "Unique live transcript"
+		}
+		capability := f.handoff(t, doc)
 		body := createBody(f.a.ID, 0)
 		body["key"] = key
 		made := decodeBody[Created](t, expectStatus(t, f.call(t, f.a, http.MethodPost, "/api/import/project-draft/create", capability, body), http.StatusCreated))
@@ -58,6 +63,7 @@ func TestStartImportRetention(t *testing.T) {
 	edited := makeProject("EDIT", old)
 	created := makeProject("CREATE", old)
 	agentOnly := makeProject("AGENT", old)
+	related := makeProject("RELATED", old)
 	// Directly created projects have no source marker, even at the same age.
 	var ordinary string
 	if err := db.InTenant(ctx, f.d.App, f.tenant, func(tx pgx.Tx) error {
@@ -118,6 +124,19 @@ func TestStartImportRetention(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
+	// An inbound relation can name the other project's node as its event
+	// node_id. Its referenced imported child must still engage this project.
+	child := f.scalar(t, `SELECT id::text FROM nodes WHERE parent_id=$1 ORDER BY id LIMIT 1`, related)
+	if err := db.InTenant(ctx, f.d.App, f.tenant, func(tx pgx.Tx) error {
+		_, err := events.Append(ctx, tx, f.b, events.Change{NodeID: &ordinary, Type: "relation.created", After: map[string]any{"source_node_id": ordinary, "target_node_id": child}})
+		return err
+	}); err != nil {
+		t.Fatal(err)
+	}
+	// A non-owning ordinary link is removed without deleting its other project.
+	if _, err := f.d.Admin.Exec(ctx, `INSERT INTO node_relations(tenant_id,source_node_id,target_node_id,type) VALUES($1,$2,$3,'blocks')`, f.tenant, live, ordinary); err != nil {
+		t.Fatal(err)
+	}
 	write(commented, "comment.created", f.b)
 	write(edited, "node.updated", f.b)
 	write(created, "node.created", f.b)
@@ -157,6 +176,9 @@ func TestStartImportRetention(t *testing.T) {
 	if err != nil || result.Deleted != 0 || len(result.Candidates) != 0 {
 		t.Fatalf("disabled %+v, %v", result, err)
 	}
+	if report, err := attachments.Verify(ctx, f.d.App, f.files, f.tenant); err != nil || report.Checked != 2 || len(report.Issues) != 0 {
+		t.Fatalf("before retention file owners %+v, %v", report, err)
+	}
 	setPolicy(true, false)
 	expect(t, f.call(t, f.a, "PUT", path, "", map[string]any{"enabled": true, "dry_run": true, "expected_revision": 0}), 409)
 	result, err = f.m.RetainTenant(ctx, f.tenant, now)
@@ -173,7 +195,12 @@ func TestStartImportRetention(t *testing.T) {
 			t.Fatalf("deletion audit %s", got)
 		}
 	}
-	for _, id := range []string{young, explicit, commented, edited, created, ordinary, foreign} {
+	// Audit attachment snapshots no longer keep purged START bytes alive;
+	// the other projects' shared transcript is still a durable file owner.
+	if report, err := attachments.Verify(ctx, f.d.App, f.files, f.tenant); err != nil || report.Checked != 1 || len(report.Issues) != 0 {
+		t.Fatalf("after retention file owners %+v, %v", report, err)
+	}
+	for _, id := range []string{young, explicit, commented, edited, created, related, ordinary, foreign} {
 		if got := f.scalar(t, `SELECT count(*)::text FROM nodes WHERE id=$1`, id); got != "1" {
 			t.Fatalf("protected project %s removed", id)
 		}

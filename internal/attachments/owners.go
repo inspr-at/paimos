@@ -38,7 +38,9 @@ func blobOwners() []ownerSpec {
 		 UNION ALL SELECT s->>'sha256', coalesce(s->>'content_type','') LIKE 'image/%'
 		 FROM events e CROSS JOIN LATERAL (VALUES(e.before),(e.after)) snapshot(s)
 		 WHERE e.tenant_id=$1 AND e.type IN ('attachment.added','attachment.updated','attachment.removed')
-   AND EXISTS (SELECT 1 FROM nodes n WHERE n.tenant_id=e.tenant_id AND n.id=e.node_id)`,
+   AND NOT EXISTS (SELECT 1 FROM import_project_retention r
+    WHERE r.tenant_id=e.tenant_id AND r.source='start' AND r.deleted_at IS NOT NULL
+     AND r.deleted_node_ids @> ARRAY[e.node_id])`,
 			[]string{"internal/attachments/module.go:upload", "internal/attachments/import.go:AttachStagedTx", "internal/importer/attachments.go:ImportAttachments", "internal/importer/attachment_delta.go:ImportAttachmentDelta"}},
 		{OwnerAvatar, `WITH snapshots AS (
 		 SELECT jsonb_build_object('avatar_original_hash',avatar_original_hash,'avatar_hashes',avatar_hashes) AS s FROM personal_profiles WHERE tenant_id=$1

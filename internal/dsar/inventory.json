@@ -969,7 +969,8 @@
         "engaged_at": "personal",
         "engaged_by": "personal",
         "last_checked_at": "metadata",
-        "deleted_at": "metadata"
+        "deleted_at": "metadata",
+        "deleted_node_ids": "metadata"
       },
       "locator": {
         "tenant_column": "tenant_id",

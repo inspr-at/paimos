@@ -33,7 +33,8 @@ const retentionEligible = `r.source='start' AND r.deleted_at IS NULL AND r.engag
  AND NOT EXISTS (SELECT 1 FROM events e JOIN principals p ON p.tenant_id=e.tenant_id AND p.id=e.actor_principal_id
   WHERE e.tenant_id=r.tenant_id AND p.kind='person' AND e.metadata->>'imported_from' IS DISTINCT FROM 'start'
    AND (e.node_id=r.project_id OR e.node_refs @> ARRAY[r.project_id]
-    OR e.node_id IN (SELECT n.id FROM nodes n WHERE n.tenant_id=r.tenant_id AND n.project_id=r.project_id)))`
+    OR e.node_id IN (SELECT n.id FROM nodes n WHERE n.tenant_id=r.tenant_id AND n.project_id=r.project_id ORDER BY n.id LIMIT 1001)
+    OR e.node_refs && ARRAY(SELECT n.id FROM nodes n WHERE n.tenant_id=r.tenant_id AND n.project_id=r.project_id ORDER BY n.id LIMIT 1001)))`
 
 type RetentionCandidate struct {
 	ProjectID  string    `json:"project_id"`
@@ -166,7 +167,8 @@ func deleteImportedRecords(ctx context.Context, tx pgx.Tx, tenantID, projectID s
 	rows, err := tx.Query(ctx, `WITH RECURSIVE tree(id) AS (
 	 SELECT id FROM nodes WHERE id=$1::uuid UNION
 	 SELECT n.id FROM nodes n JOIN tree t ON n.parent_id=t.id
-	) SELECT n.id::text,n.project_id::text FROM tree t JOIN nodes n ON n.id=t.id LIMIT $2`, projectID, retentionRecords+1)
+	), bounded AS MATERIALIZED (SELECT id FROM tree LIMIT $2)
+ SELECT n.id::text,n.project_id::text FROM bounded t JOIN nodes n ON n.id=t.id`, projectID, retentionRecords+1)
 	if err != nil {
 		return err
 	}
@@ -227,6 +229,11 @@ func deleteImportedRecords(ctx context.Context, tx pgx.Tx, tenantID, projectID s
 		if _, err := tx.Exec(ctx, q, ids); err != nil {
 			return err
 		}
+	}
+	// Retain only the bounded deleted ids for positive, START-only file GC
+	// ownership release. Other historical attachment owners are unchanged.
+	if _, err := tx.Exec(ctx, `UPDATE import_project_retention SET deleted_node_ids=$2::uuid[] WHERE project_id=$1`, projectID, ids); err != nil {
+		return err
 	}
 	if err := attachments.LockBlobs(ctx, tx, tenantID, hashes...); err != nil {
 		return err

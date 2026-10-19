@@ -11,11 +11,14 @@ CREATE TABLE import_project_retention (
  engaged_by uuid,
  last_checked_at timestamptz,
  deleted_at timestamptz,
+ deleted_node_ids uuid[],
  PRIMARY KEY (tenant_id, project_id)
 );
 CREATE INDEX import_project_retention_due ON import_project_retention
  (tenant_id, last_checked_at NULLS FIRST, imported_at, project_id)
  WHERE source='start' AND engaged_at IS NULL AND deleted_at IS NULL;
+CREATE INDEX import_project_retention_deleted_nodes ON import_project_retention USING gin(deleted_node_ids)
+ WHERE deleted_at IS NOT NULL;
 ALTER TABLE import_project_retention ENABLE ROW LEVEL SECURITY;
 ALTER TABLE import_project_retention FORCE ROW LEVEL SECURITY;
 CREATE POLICY import_project_retention_tenant ON import_project_retention
