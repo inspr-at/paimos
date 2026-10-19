@@ -286,6 +286,70 @@ test('eight linked tickets appear once the viewport reaches 1280', async ({ page
   await expect(page.locator('[data-header-glimpse="on"]')).toHaveCount(0)
 })
 
+// Risk: a resize delivery has the new root width while window/media hints and
+// a geometry read still describe the previous frame. Retain the delivered
+// measurement; another stale read must not leave the painted graph mounted.
+test('AEON-1401: the delivered viewport width clears a glimpse while geometry and media reads stay wide', async ({ page }) => {
+  await page.addInitScript(() => {
+    const state = { holding: false, rootWidths: [] as number[], framesHeld: 0, tasksHeld: 0 }
+    ;(window as unknown as { __aeonDeliveredViewport: typeof state }).__aeonDeliveredViewport = state
+    const rect = Element.prototype.getBoundingClientRect
+    Element.prototype.getBoundingClientRect = function () {
+      const box = rect.call(this)
+      return state.holding && this === document.documentElement ? new DOMRect(box.x, box.y, 1280, box.height) : box
+    }
+    const media = window.matchMedia.bind(window)
+    window.matchMedia = query => {
+      const list = media(query)
+      if (query === '(min-width: 1280px)') {
+        Object.defineProperty(list, 'matches', { get: () => state.holding || media(query).matches })
+        list.addEventListener('change', event => { if (state.holding) event.stopImmediatePropagation() }, { capture: true })
+      }
+      return list
+    }
+    window.addEventListener('resize', event => { if (state.holding) event.stopImmediatePropagation() }, { capture: true })
+    window.visualViewport?.addEventListener('resize', event => { if (state.holding) event.stopImmediatePropagation() }, { capture: true })
+    const frame = window.requestAnimationFrame.bind(window)
+    window.requestAnimationFrame = callback => frame(time => {
+      if (state.holding) { state.framesHeld++; return }
+      callback(time)
+    })
+    const timeout = window.setTimeout.bind(window), interval = window.setInterval.bind(window)
+    const task = (handler: TimerHandler): TimerHandler => typeof handler === 'function' ? (...args: unknown[]) => {
+      if (state.holding) { state.tasksHeld++; return }
+      handler(...args)
+    } : handler
+    window.setTimeout = ((handler: TimerHandler, delay?: number, ...args: unknown[]) => timeout(task(handler), delay, ...args)) as typeof window.setTimeout
+    window.setInterval = ((handler: TimerHandler, delay?: number, ...args: unknown[]) => interval(task(handler), delay, ...args)) as typeof window.setInterval
+    const Observer = window.ResizeObserver
+    window.ResizeObserver = class extends Observer {
+      constructor(callback: ResizeObserverCallback) {
+        super((entries, observer) => {
+          for (const entry of entries) if (state.holding && entry.target === document.documentElement) state.rootWidths.push(entry.contentRect.width)
+          callback(entries, observer)
+        })
+      }
+    }
+  })
+  await page.setViewportSize({ width: 1280, height: 900 })
+  await mockHeaderGraph(page, sized(8, true))
+  await page.goto('/p/PHAROS/tickets')
+  await ready(page)
+  await page.evaluate(() => {
+    (window as unknown as { __aeonDeliveredViewport: { holding: boolean } }).__aeonDeliveredViewport.holding = true
+    Object.defineProperty(window, 'innerWidth', { configurable: true, value: 1280 })
+  })
+  await page.setViewportSize({ width: 390, height: 844 })
+  await expect.poll(() => page.evaluate(() => ({
+    window: window.innerWidth,
+    geometry: document.documentElement.getBoundingClientRect().width,
+    media: matchMedia('(min-width: 1280px)').matches,
+    delivered: (window as unknown as { __aeonDeliveredViewport: { rootWidths: number[] } }).__aeonDeliveredViewport.rootWidths.at(-1),
+  }))).toEqual({ window: 1280, geometry: 1280, media: true, delivered: 390 })
+  await expect(page.locator('[data-header-glimpse="on"]')).toHaveCount(0)
+  await expect(page.locator('[data-header-glimpse="off"]')).toBeAttached()
+})
+
 // PR shard: 1279 → 1280 → 390 left the painted glimpse on after innerWidth was
 // already 390. The paint sampler, the wide-only interval and a document-element
 // observer can all be gone together. The header's own box still changes size.

@@ -9508,6 +9508,8 @@
     ,
     {"kind":"browser","file":"tests/header-glimpse.spec.ts","name":"AEON-1337: a visual viewport resize clears the glimpse before the next animation frame","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
+    {"kind":"browser","file":"tests/header-glimpse.spec.ts","name":"AEON-1401: the delivered viewport width clears a glimpse while geometry and media reads stay wide","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
     {"kind":"browser","file":"tests/header-glimpse.spec.ts","name":"AEON-1414: a shrink clears the glimpse while viewport notifications and animation frames are stalled","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
     {"kind":"browser","file":"tests/header-glimpse.spec.ts","name":"AEON-1414: a visual viewport shrink clears the glimpse while frames and other resize notifications are held","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
