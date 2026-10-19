@@ -126,8 +126,14 @@ for (const width of [1440, 1024, 390]) {
       else { await claude.getByRole('button', { name }).click(); await expect(claude.locator('.ub-steps .ub-sv')).toHaveText(expected) }
     }
     const past = phone ? 1 : 3
+    // The data side may retain already public pool lines while concealing an
+    // enrollment. Tick's private slots must replace its details in place.
+    const privateOutlook = structuredClone(scenarios.fast)
+    Object.assign(privateOutlook.groups[0]!.accounts[1]!, { state: 'private', pooled: false, used_percent: null, limit_percent: null, resets_at: null, read_at: null, reading_age_seconds: null, forecast: null })
+    const privateAccount = acc.nth(1)
+    const privacyControls = { privateRow: privateAccount, name: privateAccount.locator('.ub-an'), battery: privateAccount.locator('.ub-bat'), refill: privateAccount.locator('.ub-rs'), forecast: privateAccount.locator('.ub-fc') }
     await expectStableControls({
-      controls,
+      controls: { ...controls, ...privacyControls },
       scrollAreas: { body: body(page) },
       interactions: [
         { name: 'one day more back', run: step('One day more back', [`${past + 1} d`, '2 d']) },
@@ -135,10 +141,55 @@ for (const width of [1440, 1024, 390]) {
         { name: 'two days ahead again', run: async () => { await step('One day more ahead', [`${past + 1} d`, '1 d'])(); await step('One day more ahead', [`${past + 1} d`, '2 d'])(); await expect(plot.locator('svg .cx-cur')).toHaveCount(1) } },
         { name: 'hover an hour', run: async () => { await plot.scrollIntoViewIfNeeded(); const b = (await plot.boundingBox())!; await page.mouse.move(b.x + b.width * 0.3, b.y + b.height / 2); await expect(claude.locator('.ub-info')).toContainText(/ · \d+ % left · .*measured/) } },
         { name: 'leave it', run: async () => { await page.mouse.move(1, 1); await expect(claude.locator('.ub-info')).toHaveText(/^Burn: 24 h pace/) } },
+        { name: 'an account becomes private without moving its slots', run: async () => {
+          const reads = state.reads; state.outlook = privateOutlook; await goOnline(page)
+          await expect.poll(() => state.reads).toBeGreaterThan(reads)
+          await expect(privateAccount.locator('.ub-an')).toHaveText('Private account')
+          await expect(privateAccount.locator('.ub-name')).not.toHaveAttribute('data-clip-tip', '')
+          await expect(privateAccount.locator('.ub-an svg')).toHaveCount(1)
+          await expect(privateAccount.locator('.ub-bat')).toHaveText('—')
+          await expect(privateAccount.locator('.ub-rs')).toHaveText('—')
+          await expect(privateAccount.locator('.ub-fc')).toHaveText('details hidden')
+          await expect(privateAccount.locator('.bat')).toHaveCount(0)
+          await expect(claude.locator('.ub-hd')).toHaveText('Claude lasts until Mon ~20:20, then 3 h without until another account refills at 22:59.')
+          await expect(claude.locator('.private-k')).toHaveText('private')
+          await expect(plot.locator('.cx-private')).toHaveCount(1)
+          await expect(claude).not.toContainText('account-b@')
+          await plot.focus(); await plot.press('Home'); await expect(claude.locator('.ub-info')).not.toContainText('account-b@'); await plot.blur()
+          for (const theme of ['light', 'dark'] as const) {
+            await page.emulateMedia({ colorScheme: theme, reducedMotion: 'reduce' })
+            await body(page).screenshot({ path: info.outputPath(`${width}-${theme}-private.png`), animations: 'disabled' })
+          }
+          await page.emulateMedia({ colorScheme: 'light', reducedMotion: 'reduce' })
+        } },
         { name: 'a live update turns the verdict', run: async () => { const reads = state.reads; state.outlook = scenarios.slow; await goOnline(page); await expect.poll(() => state.reads).toBeGreaterThan(reads); await expect(claude.locator('.ub-hd')).toHaveText('About 23 % will refill unused on Wed. There’s room for more work.'); await expect(row(page, 'claude').locator('.sub')).toHaveText('23 % unused at refill') } },
       ],
     })
     await body(page).screenshot({ path: info.outputPath(`${width}-light-too-slow.png`), animations: 'disabled' })
+    // An expired window has neither a measured refill marker nor a tooltip
+    // claiming that one happened. This is the Go-built response, not a mock
+    // with the troublesome events hand-removed.
+    state.outlook = scenarios.expired
+    await goOnline(page)
+    await expect(claude.locator('.ub-l2')).toContainText('Current headroom is unknown')
+    await expect(plot.locator('.cx-refill-t').filter({ hasText: 'refilled' })).toHaveCount(0)
+    await expect(plot.locator('.cx-past')).toHaveCount(1)
+    await plot.focus(); await plot.press('Home'); await plot.press('ArrowUp'); await plot.press('ArrowUp'); await plot.press('ArrowUp')
+    await expect(claude.locator('.ub-info')).not.toContainText('refilled')
+    await plot.blur()
+    // The fixed headline slot discloses a long sentence through the shared
+    // tooltip on both hover and keyboard focus, without enlarging its frame.
+    const long = structuredClone(scenarios.fast)
+    const longLabel = 'Abonnement für langlaufende Hintergrundaufgaben und gemeinsam genutzte Entwicklungsumgebungen '.repeat(3).trim()
+    long.groups[0]!.accounts[1]!.label = longLabel
+    state.outlook = long; await goOnline(page)
+    const headline = claude.locator('.ub-hd')
+    const full = `Claude lasts until Mon ~20:20, then 3 h without until ${longLabel} refills at 22:59.`
+    await expect(headline).toHaveText(full)
+    await expect(headline).toHaveAttribute('data-tip', full)
+    await headline.hover(); await expect(page.locator('.tooltip')).toHaveText(full)
+    await page.mouse.move(1, 1); await page.keyboard.press('Tab'); await headline.focus(); await expect(page.locator('.tooltip')).toHaveText(full)
+    await headline.blur()
     // Cursor reports no quota: a quiet chart sentence and dashed rings, never a curve.
     await row(page, 'cursor').locator('.nm').click()
     const cursor = detail(page, 'cursor')

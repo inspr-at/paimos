@@ -107,7 +107,13 @@ func quotaFixture() map[string]quotaOutlook {
 		}
 		return buildOutlook(all, now)
 	}
-	return map[string]quotaOutlook{"fast": build(fast, codex, cursor), "slow": build(slow, codex, cursor)}
+	// An elapsed reset has no measured refill until a later reading confirms it.
+	// The browser uses this real response to check both the line and its markers.
+	expired := []outlookInput{{ID: "expired", Label: "expired@", Harness: "claude", Limit: 100, Samples: []weeklySample{
+		{ReadAt: now.Add(-29 * time.Hour), Used: 20, ResetAt: now.Add(-2 * time.Hour)},
+		{ReadAt: now.Add(-5 * time.Hour), Used: 80, ResetAt: now.Add(-2 * time.Hour)},
+	}}}
+	return map[string]quotaOutlook{"fast": build(fast, codex, cursor), "slow": build(slow, codex, cursor), "expired": build(expired)}
 }
 
 // Risk: the browser spec draws a shape the server never sends. The fixture is
@@ -136,6 +142,9 @@ func TestQuotaOutlookWebFixtureIsCurrent(t *testing.T) {
 	}
 	if g := fixture["fast"].Groups[2]; g.Harness != "cursor" || g.State != "not_reported" {
 		t.Fatalf("cursor scenario: %s", g.State)
+	}
+	if g := fixture["expired"].Groups[0]; g.Pool != nil || len(g.PastRefills) != 0 {
+		t.Fatalf("expired evidence invented measured headroom or refills: %+v %+v", g.Pool, g.PastRefills)
 	}
 	current, err := os.ReadFile(quotaFixturePath)
 	if err != nil || !bytes.Equal(current, raw) {

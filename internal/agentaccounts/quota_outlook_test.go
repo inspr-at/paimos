@@ -322,6 +322,13 @@ func TestQuotaOutlookExpiredReadingDoesNotInventHeadroom(t *testing.T) {
 		t.Fatalf("a later reading still refills the measured line: %v %v", used, ok)
 	}
 	g := buildGroup("claude", []outlookInput{{ID: "a", Label: "a@", Harness: "claude", Limit: 100, Samples: samples}}, now, anchor)
+	if len(g.PastRefills) != 0 {
+		t.Fatalf("elapsed reset without a follow-up became a measured refill: %+v", g.PastRefills)
+	}
+	confirmed := buildGroup("claude", []outlookInput{{ID: "a", Label: "a@", Harness: "claude", Limit: 100, Samples: followed}}, now, anchor)
+	if len(confirmed.PastRefills) != 1 || !confirmed.PastRefills[0].At.Equal(reset) || confirmed.PastRefills[0].AccountID != "a" {
+		t.Fatalf("confirmed refill was lost: %+v", confirmed.PastRefills)
+	}
 	a := g.Accounts[0]
 	if a.UsedPercent == nil || *a.UsedPercent != 80 || a.Freshness != "expired" || a.Pooled || a.State == "full" || g.Pool != nil || g.State != "measured" {
 		t.Fatalf("expired reading invented headroom: %+v pool %+v state %s", a, g.Pool, g.State)
@@ -432,4 +439,31 @@ func TestQuotaOutlookRedactionWithholdsRevokedAggregates(t *testing.T) {
 	if gone.Accounts[0].UsedPercent != nil || gone.Accounts[1].UsedPercent != nil || gone.Pool != nil || gone.Current != nil {
 		t.Fatalf("fully revoked outlook still disclosed quota: pool %+v", gone.Pool)
 	}
+
+	t.Run("a surviving shared supply keeps its merged measurement", func(t *testing.T) {
+		reset := now.Add(40 * time.Hour)
+		g := buildGroup("claude", []outlookInput{
+			{ID: idA, Label: "available@", Harness: "claude", Limit: 100, PoolFingerprint: "shared", Samples: []weeklySample{{ReadAt: now.Add(-2 * time.Hour), Used: 20, ResetAt: reset}}},
+			{ID: idB, Label: "held@", Harness: "claude", Limit: 100, PoolFingerprint: "shared", Held: true, Samples: []weeklySample{{ReadAt: now.Add(-time.Hour), Used: 80, ResetAt: reset}}},
+			{ID: "independent", Label: "independent@", Harness: "claude", Limit: 100, Samples: []weeklySample{{ReadAt: now, Used: 40, ResetAt: reset}}},
+		}, now, now.Truncate(time.Hour))
+		if g.Pool == nil || g.Pool.Accounts != 2 || g.Pool.LeftPercent != 40 || !g.Accounts[0].Pooled || g.Accounts[1].Pooled {
+			t.Fatalf("fixture must pool the latest shared reading once: %+v %+v", g.Pool, g.Accounts)
+		}
+		raw, err := redactOutlook(outlookBody(t, now, g), accountprivacy.Policy{idA: true, idB: true})
+		if err != nil {
+			t.Fatal(err)
+		}
+		var out quotaOutlook
+		if err := json.Unmarshal(raw, &out); err != nil {
+			t.Fatal(err)
+		}
+		got := out.Groups[0]
+		if got.Pool == nil || got.Pool.Accounts != 1 || got.Pool.LeftPercent != 20 || got.Pool.UsedPercent != 80 || !got.Pool.SampledAt.Equal(now.Add(-time.Hour)) || got.Pool.SampledAgeSec != 3600 {
+			t.Fatalf("revoking the independent neighbor changed the surviving measurement: %+v", got.Pool)
+		}
+		if got.Accounts[2].State != "private" || got.Current != nil || got.Safe != nil || len(got.Projected) != 0 || got.Verdict != "unknown" {
+			t.Fatalf("revoked details or joint projection survived: %+v", got)
+		}
+	})
 }

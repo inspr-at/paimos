@@ -6,4 +6,4 @@
 import { readFileSync } from 'node:fs'
 import type { QuotaOutlook } from '../src/lib/quotaOutlook'
 
-export const OUTLOOK = JSON.parse(readFileSync(new URL('./fixtures/quota-outlook.json', import.meta.url), 'utf8')) as Record<'fast' | 'slow', QuotaOutlook>
+export const OUTLOOK = JSON.parse(readFileSync(new URL('./fixtures/quota-outlook.json', import.meta.url), 'utf8')) as Record<'fast' | 'slow' | 'expired', QuotaOutlook>

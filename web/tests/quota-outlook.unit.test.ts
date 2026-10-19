@@ -8,7 +8,7 @@ import { describe, expect, it } from 'vitest'
 import { accountRows, chartGeometry, chartModel, defaultRange, hourInfo, miniGeometry, usageView, type QuotaOutlook } from '../src/lib/quotaOutlook'
 import fixture from './fixtures/quota-outlook.json'
 
-const outlooks = fixture as unknown as Record<'fast' | 'slow', QuotaOutlook>
+const outlooks = fixture as unknown as Record<'fast' | 'slow' | 'expired', QuotaOutlook>
 const group = (scenario: 'fast' | 'slow', harness: string) => outlooks[scenario].groups.find(g => g.harness === harness)!
 const view = (scenario: 'fast' | 'slow', harness: string) => usageView(harness, group(scenario, harness), outlooks[scenario].anchor_hour, 'UTC')
 const measure = (text: string) => text.length * 6.2
@@ -79,6 +79,12 @@ describe('the subscriptions', () => {
     expect(slow[0]).toMatchObject({ forecast: '23 % unused', tone: 't-slow', stateWord: 'active' })
     expect(slow[2]).toMatchObject({ state: 'held', stateWord: 'held', stateIcon: 'lock', forecast: '' })
     expect(accountRows(group('fast', 'cursor'), 'UTC').every(r => r.left === null && r.state === 'not_reported')).toBe(true)
+    // A private row may arrive beside retained pool totals, but never names its
+    // enrollment or turns those totals into a per-account reading or forecast.
+    const privateGroup = structuredClone(group('fast', 'claude'))
+    privateGroup.accounts[1]!.state = 'private'
+    expect(accountRows(privateGroup, 'UTC')[1]).toMatchObject({ name: 'Private account', left: null, refills: '', forecast: 'details hidden', tone: 'quiet' })
+    expect(usageView('claude', privateGroup, outlooks.fast.anchor_hour, 'UTC').head).toBe('Claude lasts until Mon ~18:20, then 3 h without until another account refills at 20:59.')
   })
   it('an inactive login keeps its last reading and says its age', () => {
     const g = structuredClone(group('fast', 'codex'))
@@ -104,6 +110,12 @@ describe('the chart', () => {
     // Ahead 0 hides both projections and their markers.
     const none = chartGeometry(m, 640, 226, 3, 0, measure, 'UTC')
     expect([none.curPath, none.safePath, none.emptyText.length, none.markText.filter(t => t.text.endsWith('refills')).length]).toEqual(['', '', 0, 0])
+    // The server's expired-evidence response must not render a claimed refill.
+    const expired = outlooks.expired
+    const old = chartModel(expired.groups[0]!, expired.generated_at, expired.anchor_hour)
+    const oldGeo = chartGeometry(old, 640, 226, 3, 2, measure, 'UTC')
+    expect(oldGeo.refillMarks.filter(r => r.past)).toEqual([])
+    expect(oldGeo.markText.map(t => t.text).join(' ')).not.toContain('refilled')
   })
   it('one hour in words: measured in the past, projected ahead', () => {
     const geo = chartGeometry(m, 640, 226, 3, 2, measure, 'UTC')
@@ -111,6 +123,15 @@ describe('the chart', () => {
     expect(words(-5)).toMatch(/^Sun 06:00 · \d+ % left · [\d.]+ %\/h · measured · account-c@ [\d.]+$/)
     expect(words(10)).toMatch(/^Sun 21:00 · \d+ % left · [\d.]+ %\/h · projected/)
     expect(words(32)).toMatch(/^Mon 19:00 · 0 % left · empty · projected$/)
+    const hidden = structuredClone(g)
+    hidden.accounts[2]!.state = 'private'
+    const privateModel = chartModel(hidden, data.generated_at, data.anchor_hour)
+    const privateGeo = chartGeometry(privateModel, 640, 226, 3, 2, measure, 'UTC')
+    expect(privateGeo.privateBand).toMatchObject({ x: privateGeo.frame.L, w: 640 - privateGeo.frame.L })
+    expect(privateGeo.bars.some(b => b.i === 2)).toBe(false)
+    const privateWords = hourInfo(privateModel, privateGeo, -5, 'Claude', 'UTC').map(p => p.text).join('')
+    expect(privateWords).not.toContain('account-c@')
+    expect(privateWords).toContain('private')
   })
   it('the folded mini line ends amber only when the pool runs dry before the refill', () => {
     expect(miniGeometry(m, 40)).toMatchObject({ dry: true, w: 40, h: 14 })

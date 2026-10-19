@@ -192,6 +192,8 @@ func redactOutlookGroup(g *outlookGroup, policy accountprivacy.Policy, generated
 }
 
 func rebuiltOutlookPool(accounts []outlookAccount, generatedAt time.Time) *outlookPool {
+	// buildGroup puts the merged supply measurement on each pooled row;
+	// enrollment-local readings on non-carrying aliases never enter this mean.
 	left, n := 0.0, 0
 	sampled := time.Time{}
 	for _, a := range accounts {

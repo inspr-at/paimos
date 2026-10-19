@@ -75,6 +75,7 @@ const hatch = (i: number) => `${uid}-hp-${i}`
         </pattern>
         <pattern :id="`${uid}-off`" width="3.2" height="3.2" patternUnits="userSpaceOnUse" patternTransform="rotate(45)"><rect width="1.1" height="3.2" style="fill: var(--warn-ink)" /></pattern>
         <pattern :id="`${uid}-empty`" width="3.4" height="3.4" patternUnits="userSpaceOnUse" patternTransform="rotate(45)"><rect width="1.3" height="3.4" style="fill: var(--danger)" /></pattern>
+        <pattern :id="`${uid}-private`" width="5" height="5" patternUnits="userSpaceOnUse" patternTransform="rotate(45)"><rect width="1" height="5" style="fill: var(--ink-3); opacity: .4" /></pattern>
       </defs>
       <line v-for="(l, i) in geo.levels" :key="`l${i}`" :class="l.cls" :x1="l.x1" :x2="l.x2" :y1="l.y1" :y2="l.y2" />
       <text v-for="(t, i) in geo.levelText" :key="`lt${i}`" :class="t.cls" :x="t.x" :y="t.y" :text-anchor="t.anchor">{{ t.text }}</text>
@@ -84,6 +85,7 @@ const hatch = (i: number) => `${uid}-hp-${i}`
       <line v-if="geo.strip.sus" :class="geo.strip.sus.cls" :x1="geo.strip.sus.x1" :x2="geo.strip.sus.x2" :y1="geo.strip.sus.y1" :y2="geo.strip.sus.y2" />
       <text :class="geo.strip.label.cls" :x="geo.strip.label.x" :y="geo.strip.label.y" text-anchor="end">{{ geo.strip.label.text }}</text>
       <rect class="cx-hl" :class="{ on: cursor }" :x="cursor?.x ?? 0" :y="geo.frame.sTop" :width="cursor?.w ?? 0" :height="geo.frame.SH" />
+      <rect v-if="geo.privateBand" class="cx-private" :x="geo.privateBand.x" :y="geo.privateBand.y" :width="geo.privateBand.w" :height="geo.privateBand.h" :fill="`url(#${uid}-private)`" />
       <rect v-for="(b, i) in geo.bars" :key="`b${i}`" :x="b.x.toFixed(2)" :y="b.y.toFixed(2)" :width="b.w.toFixed(2)" :height="b.h.toFixed(2)" :fill="b.projected ? `url(#${hatch(b.i)})` : undefined" :style="b.projected ? undefined : { fill: model.shades[b.i] }" />
       <template v-for="(r, i) in geo.off" :key="`o${i}`"><rect class="cx-off-b" :x="r.x" :y="r.y" :width="r.w" :height="r.h" /><rect :x="r.x" :y="r.y" :width="r.w" :height="r.h" :fill="`url(#${uid}-off)`" /></template>
       <g :clip-path="`url(#${uid}-clip)`">

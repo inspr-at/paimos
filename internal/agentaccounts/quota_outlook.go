@@ -592,7 +592,22 @@ func buildGroup(harness string, inputs []outlookInput, now, anchor time.Time) ou
 	for _, s := range runnable {
 		if s.known {
 			knownSupplies = append(knownSupplies, s)
-			g.Accounts[s.canonical].Pooled = true
+			// The carrying row represents this supply, whose newest reading may
+			// come from a held alias. Keep the contribution and its timestamp on
+			// that row so response-time redaction can rebuild the same pool.
+			a := &g.Accounts[s.canonical]
+			a.Pooled = true
+			a.UsedPercent, a.ResetsAt, a.ReadAt = ptrF(round1(s.used)), ptrT(s.reset), ptrT(s.readAt)
+			age := int64(now.Sub(s.readAt) / time.Second)
+			if age < 0 {
+				age = 0
+			}
+			a.ReadingAgeSeconds = &age
+			a.Freshness = quotaSample{WindowKind: "weekly", UsedPercent: s.used, ReadAt: s.readAt, ResetsAt: s.reset}.reading().Freshness(now)
+			a.State = "ready"
+			if s.used >= s.limit-1e-9 {
+				a.State = "full"
+			}
 		}
 	}
 	// The pool is the mean of supplies whose headroom is known now. An expired
@@ -665,9 +680,14 @@ func buildGroup(harness string, inputs []outlookInput, now, anchor time.Time) ou
 	refills := map[string][]time.Time{}
 	for _, s := range runnable {
 		id := inputs[s.canonical].ID
-		for _, sample := range s.samples {
+		for i, sample := range s.samples {
 			r := sample.ResetAt
 			if r.Before(start) || r.After(now) {
+				continue
+			}
+			// A scheduled reset alone is not evidence that the vendor refilled.
+			// Require the next measurement to follow it in a new window.
+			if i+1 == len(s.samples) || s.samples[i+1].ReadAt.Before(r) || !s.samples[i+1].ResetAt.After(r) {
 				continue
 			}
 			dup := false

@@ -135,7 +135,10 @@ export function usageView(harness: string, group: OutlookGroup | undefined, anch
   const n = group.accounts.length, accounts = `${n} ${n === 1 ? 'account' : 'accounts'}`
   if (group.state === 'not_reported') return { ...base, kind: 'not_reported', head: 'Quota not reported', short: `Quota not reported · ${accounts}`, muted: accounts }
   if (group.state === 'held') return { ...base, kind: 'held', head: n === 1 ? 'The account is held.' : 'Every account is held.', short: 'all accounts held', tip: `${name}: every account is held`, muted: accounts }
-  const label = (id: string) => group.accounts.find(a => a.account_id === id)?.label ?? 'an account'
+  const label = (id: string) => {
+    const account = group.accounts.find(a => a.account_id === id)
+    return account?.state === 'private' ? 'another account' : account?.label ?? 'an account'
+  }
   const pool = group.pool
   const sampledAge = pool ? aged(pool.sampled_age_seconds, sinceMs) : 0
   const stale = !!pool && sampledAge >= STALE_SECONDS
@@ -198,8 +201,11 @@ export function accountRows(group: OutlookGroup | null, tz?: string, known: Know
   if (!group) return known.map((a, i) => ({ id: a.account_id, name: a.label, shade: shadeOf(known.length, i), state: 'not_reported', left: null, refills: '', forecast: '', tone: '', stateWord: '', stateIcon: '' }))
   const n = group.accounts.length
   return group.accounts.map((a, i) => {
-    const row: AccountRow = { id: a.account_id, name: a.label, shade: shadeOf(n, i), state: a.state, left: null, refills: '', forecast: '', tone: '', stateWord: '', stateIcon: '' }
-    if (a.state === 'not_reported' || a.state === 'private' || a.used_percent === null) return row
+    const row: AccountRow = { id: a.account_id, name: a.state === 'private' ? 'Private account' : a.label, shade: shadeOf(n, i), state: a.state, left: null, refills: '', forecast: '', tone: '', stateWord: '', stateIcon: '' }
+    // The API withholds private measurements; pool totals grant no authority
+    // to reconstruct an enrollment's battery, refill time or forecast.
+    if (a.state === 'private') return { ...row, forecast: 'details hidden', tone: 'quiet' }
+    if (a.state === 'not_reported' || a.used_percent === null) return row
     row.left = Math.max(0, Math.round(100 - a.used_percent))
     row.refills = a.resets_at ? `refills ${dayHm(at(a.resets_at), tz)}` : ''
     const f = a.forecast
@@ -223,6 +229,7 @@ export interface ChartLine { pts: [number, number][]; refills: { t: number; i: n
 export interface ChartBar { parts: number[]; flag: boolean }
 export interface ChartModel {
   anchor: number; nowH: number; names: string[]; shades: string[]
+  private: boolean[]
   past: Map<number, ChartBar>; future: Map<number, ChartBar>
   pastLine: [number, number][]; cur: ChartLine | null; safe: ChartLine | null
   pastRefills: { t: number; i: number }[]
@@ -239,7 +246,8 @@ export function chartModel(group: OutlookGroup, generatedAt: string, anchorHour:
   const bars = (hours: OutlookHour[], flag: (x: OutlookHour) => boolean) => new Map(hours.filter(x => x.known).map(x => [Math.round(h(x.hour_at)), { parts: x.burn, flag: flag(x) }]))
   const n = group.accounts.length
   return {
-    anchor, nowH: h(generatedAt), names: group.accounts.map(a => a.label), shades: group.accounts.map((_, i) => shadeOf(n, i)),
+    anchor, nowH: h(generatedAt), names: group.accounts.map(a => a.state === 'private' ? 'another account' : a.label), shades: group.accounts.map((_, i) => shadeOf(n, i)),
+    private: group.accounts.map(a => a.state === 'private'),
     past: bars(group.history, x => x.empty), future: bars(group.projected, x => x.empty),
     pastLine: group.past_line.map(p => [h(p.at), p.left_percent]), cur: line(group.current), safe: line(group.safe),
     pastRefills: group.past_refills.map(r => ({ t: h(r.at), i: index.get(r.account_id) ?? 0 })),
@@ -280,7 +288,7 @@ export interface SvgRect { x: number; y: number; w: number; h: number }
 export interface SvgBar extends SvgRect { i: number; projected: boolean }
 export interface ChartGeometry {
   frame: Frame; levels: SvgLine[]; levelText: SvgText[]; days: SvgLine[]; dayText: SvgText[]
-  strip: { base: SvgLine; sus: SvgLine | null; label: SvgText }; bars: SvgBar[]; off: SvgRect[]
+  strip: { base: SvgLine; sus: SvgLine | null; label: SvgText }; bars: SvgBar[]; off: SvgRect[]; privateBand: SvgRect | null
   area: string; pastPath: string; curPath: string; safePath: string
   empty: SvgRect[]; emptyText: SvgText[]; marks: (SvgLine & { kind: 'now' | 'refill' })[]; markText: SvgText[]; ends: SvgText[]
   smax: number; refillMarks: { h: number; name: string; past: boolean }[]
@@ -300,7 +308,7 @@ function midnights(anchor: number, start: number, end: number, tz?: string): num
 
 export function chartGeometry(m: ChartModel, W: number, H: number, past: number, ahead: number, measure: Measure, tz?: string): ChartGeometry {
   const f = frame(W, H, past, ahead), { L, T, y0, sTop, sBot, SH, start, end, pitch } = f
-  const out: ChartGeometry = { frame: f, levels: [], levelText: [], days: [], dayText: [], strip: { base: { x1: L, x2: W, y1: px(sBot), y2: px(sBot), cls: 'cx-sbase' }, sus: null, label: { x: L - 6, y: sTop + SH / 2 + 3.5, text: 'burn', cls: 'cx-gl', anchor: 'end' } }, bars: [], off: [], area: '', pastPath: '', curPath: '', safePath: '', empty: [], emptyText: [], marks: [], markText: [], ends: [], smax: 2, refillMarks: [] }
+  const out: ChartGeometry = { frame: f, levels: [], levelText: [], days: [], dayText: [], strip: { base: { x1: L, x2: W, y1: px(sBot), y2: px(sBot), cls: 'cx-sbase' }, sus: null, label: { x: L - 6, y: sTop + SH / 2 + 3.5, text: 'burn', cls: 'cx-gl', anchor: 'end' } }, bars: [], off: [], privateBand: m.private.some(Boolean) ? { x: L, y: sTop, w: W - L, h: SH } : null, area: '', pastPath: '', curPath: '', safePath: '', empty: [], emptyText: [], marks: [], markText: [], ends: [], smax: 2, refillMarks: [] }
   for (const v of [0, 50, 100]) {
     const y = px(yl(f, v))
     out.levels.push({ x1: L, x2: W, y1: y, y2: y, cls: v === 0 ? 'cx-base' : 'cx-grid' })
@@ -328,7 +336,7 @@ export function chartGeometry(m: ChartModel, W: number, H: number, past: number,
   const stack = (h: number, parts: number[], projected: boolean, from = 0) => {
     let acc = from
     parts.forEach((v, i) => {
-      if (v <= 0.001) return
+      if (m.private[i] || v <= 0.001) return
       const top = ys(Math.min(out.smax, acc + v)), hgt = ys(Math.min(out.smax, acc)) - top
       acc += v
       if (hgt <= 0) return
@@ -430,8 +438,8 @@ export function hourInfo(m: ChartModel, g: ChartGeometry, h: number, harnessName
   if (!p && !q) return [...parts, { text: ' · ' }, { text: 'not measured', quiet: true }]
   if ((p?.flag && !projected) || (q?.flag && projected)) return [...parts, { text: ` · ${projected ? 'empty' : `${harnessName} empty`}` }, { text: ' · ' }, kind]
   if (sum < 0.005) return [...parts, { text: ' · 0 %/h · ' }, kind]
-  const each = burn.map((v, i) => [v, m.names[i]!] as const).filter(([v]) => v >= 0.05).sort((a, b) => b[0] - a[0]).map(([v, nm]) => `${nm} ${f1(v)}`).join(' · ')
-  return [...parts, { text: ` · ${f1(sum)} %/h · ` }, kind, { text: each ? ` · ${each}` : '' }]
+  const each = burn.map((v, i) => [v, m.names[i]!, m.private[i]] as const).filter(([v, , hidden]) => !hidden && v >= 0.05).sort((a, b) => b[0] - a[0]).map(([v, nm]) => `${nm} ${f1(v)}`).join(' · ')
+  return [...parts, { text: ` · ${f1(sum)} %/h · ` }, kind, { text: each ? ` · ${each}` : '' }, ...(m.private.some(Boolean) ? [{ text: ' · private', quiet: true }] : [])]
 }
 
 // ---------- The folded dial's mini line (AEON-1497 addendum) ----------

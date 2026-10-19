@@ -5,6 +5,7 @@
 // quota left over time with the burn strip, and each subscription as a battery. The heights are
 // reserved, so loading, a refresh and every state keep the controls below in place (0 px).
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import { vClipTip } from '../../directives/clipTip'
 import { accountRows, chartModel, defaultRange, VERDICT_ICON, type OutlookGroup, type UsageView } from '../../lib/quotaOutlook'
 import type { IconName } from '../AppIcon.vue'
 import AppIcon from '../AppIcon.vue'
@@ -64,6 +65,8 @@ const verdictTone = computed(() => ({ fast: 't-fast', slow: 't-slow', pace: 't-p
 const chartCount = computed(() => { const n = group.value?.pool?.accounts ?? 0; return n === 2 ? 'both accounts' : n === 1 ? 'one account' : `all ${n} accounts` })
 const offShown = computed(() => !!model.value && [...model.value.past.values()].some(b => b.flag))
 const accountsWord = computed(() => `${rows.value.length} ${rows.value.length === 1 ? 'account' : 'accounts'}`)
+const publicRows = computed(() => rows.value.filter(r => r.state !== 'private'))
+const hasPrivate = computed(() => rows.value.some(r => r.state === 'private'))
 </script>
 
 <template>
@@ -74,7 +77,8 @@ const accountsWord = computed(() => `${rows.value.length} ${rows.value.length ==
     <div v-else-if="shown === 'loading'" class="ub-sum" aria-busy="true"><div class="ub-hd"><span class="sk2"><span class="skeleton" /><span class="skeleton" /></span><span class="sr-only">Reading usage…</span></div><p class="ub-l2"><span class="skeleton" /></p><div class="ub-v"><span class="skeleton" /></div></div>
     <div v-else-if="shown === 'error'" class="ub-sum"><div class="ub-hd"><p class="err" :role="ghost ? undefined : 'alert'"><AppIcon name="alert" :size="15" /><span>Usage couldn’t be read</span><span class="ub-of">·</span><button type="button" class="link-btn" :tabindex="tab" @click="emit('retry')">Try again</button></p></div><p class="ub-l2" /><div class="ub-v" /></div>
     <div v-else class="ub-sum">
-      <p class="ub-hd">{{ view.head }}</p>
+      <p v-if="!ghost" v-clip-tip="view.head" class="ub-hd">{{ view.head }}</p>
+      <p v-else class="ub-hd">{{ view.head }}</p>
       <p class="ub-l2" :class="{ stale: view.stale || failed }"><span>{{ view.muted }}</span><button v-if="failed" type="button" class="link-btn ub-retry" :tabindex="tab" @click="emit('retry')">Try again</button></p>
       <p class="ub-v"><AppIcon :class="verdictTone" :name="verdictIcon" :size="15" /><span class="vt"><b :class="verdictTone">{{ view.verdict }}</b><template v-if="view.paceLine"> · {{ view.paceLine }}</template></span></p>
     </div>
@@ -113,7 +117,8 @@ const accountsWord = computed(() => `${rows.value.length} ${rows.value.length ==
         <li><svg width="12" height="14" aria-hidden="true"><path d="M2 11h4V3h4" class="lg-step" /></svg>refill</li>
         <li><svg width="16" height="10" aria-hidden="true"><rect x="1" y="3" width="14" height="6" class="lg-empty" /><path d="M2 9l5-6M6 9l5-6M10 9l5-6" class="lg-empty-h" /></svg>empty</li>
         <li class="lg-br" aria-hidden="true" />
-        <li v-for="r in rows" :key="r.id" class="acc-k"><span class="ub-dot" :style="{ background: r.shade }" />{{ r.name }}</li>
+        <li v-for="r in publicRows" :key="r.id" class="acc-k"><span class="ub-dot" :style="{ background: r.shade }" />{{ r.name }}</li>
+        <li v-if="hasPrivate" class="acc-k private-k"><svg width="14" height="10" aria-hidden="true"><path d="M0 8l8-8M3 10L13 0M8 10l6-6" class="lg-private" /></svg>private</li>
         <li><svg width="14" height="10" aria-hidden="true"><rect x="1" y="0" width="12" height="10" rx="1.5" class="lg-proj" /><path d="M1 8l7-8M5 10l8-9" class="lg-proj-h" /></svg>projected</li>
         <li v-if="offShown"><svg width="16" height="10" aria-hidden="true"><rect x="1" y="3" width="14" height="6" class="lg-off" /><path d="M2 9l5-6M6 9l5-6M10 9l5-6" class="lg-off-h" /></svg>off</li>
       </ul>
@@ -123,16 +128,17 @@ const accountsWord = computed(() => `${rows.value.length} ${rows.value.length ==
       <button type="button" class="ub-acc-t" :aria-expanded="!ghost && listOpen" :aria-controls="id('list')" :tabindex="tab" @click="listOpen = !listOpen"><span><b>{{ accountsWord }}</b> · {{ listOpen && !ghost ? 'hide' : 'show' }}</span><AppIcon class="ic" name="chevron" :size="14" /></button>
       <ul :id="id('list')" class="ub-list" :class="{ folded: !listOpen || ghost }" aria-label="Subscriptions">
         <li v-for="r in rows" :key="r.id" class="ub-acc" :data-account="r.id">
-          <span class="ub-dot" :style="quiet || (r.state === 'not_reported' && !pending) ? undefined : { background: r.shade }" />
-          <span class="ub-an">{{ r.name }}</span>
+          <span class="ub-dot" :style="r.state !== 'private' && (quiet || (r.state === 'not_reported' && !pending)) ? undefined : { background: r.shade }" />
+          <span class="ub-an"><AppIcon v-if="r.state === 'private'" name="lock" :size="12" /><span v-if="!ghost" v-clip-tip class="ub-name">{{ r.name }}</span><span v-else class="ub-name">{{ r.name }}</span></span>
           <template v-if="pending && shown === 'loading'"><span class="ub-meta"><span class="skeleton" /><span class="skeleton" /><span class="skeleton" /></span><span class="skeleton" /></template>
           <span v-else-if="pending" class="ub-nr"><AppIcon name="ring-dashed" :size="12" />not read</span>
-          <span v-else-if="r.state === 'not_reported' || r.state === 'private'" class="ub-nr"><AppIcon name="ring-dashed" :size="12" />{{ r.state === 'private' ? 'Usage private' : 'Quota not reported' }}</span>
+          <span v-else-if="r.state === 'not_reported'" class="ub-nr"><AppIcon name="ring-dashed" :size="12" />Quota not reported</span>
           <template v-else>
             <span class="ub-meta">
-              <span class="ub-bat"><span class="bat" role="img" :aria-label="`${r.left} % left`"><i :style="{ width: `${r.left}%`, background: r.shade }" /></span><span><b>{{ r.left }} %</b> <span class="bl">left</span></span></span>
-              <span class="ub-rs">{{ r.refills }}</span>
-              <span class="ub-fc" :class="r.tone">{{ r.forecast }}</span>
+              <span v-if="r.state === 'private'" class="ub-bat quiet">—</span>
+              <span v-else class="ub-bat"><span class="bat" role="img" :aria-label="`${r.left} % left`"><i :style="{ width: `${r.left}%`, background: r.shade }" /></span><span><b>{{ r.left }} %</b> <span class="bl">left</span></span></span>
+              <span v-clip-tip="ghost ? '' : undefined" class="ub-rs" :class="{ quiet: r.state === 'private' }">{{ r.state === 'private' ? '—' : r.refills }}</span>
+              <span v-clip-tip="ghost ? '' : undefined" class="ub-fc" :class="r.tone">{{ r.forecast }}</span>
             </span>
             <span class="ub-st" :class="`s-${r.state}`"><AppIcon v-if="r.stateIcon" :name="r.stateIcon as IconName" :size="12" />{{ r.stateWord }}</span>
           </template>
@@ -211,11 +217,14 @@ p { margin: 0; }
 .lg-proj-h { fill: none; stroke: var(--ink-3); stroke-width: 1.2; }
 .lg-off { fill: color-mix(in srgb, var(--gold) 16%, transparent); }
 .lg-off-h { fill: none; stroke: var(--warn-ink); stroke-width: 1.1; }
+.lg-private { fill: none; stroke: var(--ink-3); stroke-width: 1; }
 .ub-dot { flex: none; width: 9px; height: 9px; border-radius: 50%; }
 .ub-list { display: grid; margin: 8px 0 0; padding: 0; list-style: none; border-top: 1px solid var(--line); }
-.ub-acc { display: grid; grid-template-columns: 9px minmax(76px, 1fr) 64px 104px 130px 54px; align-items: center; gap: 0 7px; height: 34px; border-bottom: 1px solid var(--line); color: var(--ink-2); font-size: 12px; font-variant-numeric: tabular-nums; }
+.ub-acc { display: grid; grid-template-columns: 9px minmax(18ch, 1fr) 64px 104px minmax(0, 130px) 54px; align-items: center; gap: 0 7px; height: 34px; border-bottom: 1px solid var(--line); color: var(--ink-2); font-size: 12px; font-variant-numeric: tabular-nums; }
 .ub-acc:last-child { border-bottom: 0; }
-.ub-an { min-width: 0; overflow: hidden; color: var(--ink); font-weight: 600; white-space: nowrap; text-overflow: ellipsis; }
+.ub-an { display: flex; align-items: center; gap: 5px; min-width: 0; color: var(--ink); font-weight: 600; }
+.ub-an > svg { flex: none; color: var(--ink-3); }
+.ub-name { min-width: 0; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
 .ub-bat { display: inline-flex; align-items: center; gap: 8px; white-space: nowrap; }
 .ub-bat .bl { color: var(--ink-3); }
 .ub-bat b { color: var(--ink); font-weight: 600; }
@@ -261,11 +270,12 @@ p { margin: 0; }
   .ub-acc-t:focus-visible { outline: none; box-shadow: var(--focus-ring); border-radius: 6px; }
   .ub-list { margin-top: 0; }
   .ub-list.folded { display: none; }
-  .ub-acc { grid-template-columns: 9px minmax(0, 1fr) auto; grid-template-areas: 'd n s' '. w w'; height: auto; padding: 8px 0; gap: 4px 10px; }
+  .ub-acc { grid-template-columns: 9px minmax(0, 1fr) 6.5ch; grid-template-areas: 'd n s' '. w w'; grid-template-rows: 18px auto; height: auto; padding: 8px 0; gap: 4px 10px; }
   .ub-acc > .ub-dot { grid-area: d; }
   .ub-acc > .ub-an { grid-area: n; }
   .ub-acc > .ub-st { grid-area: s; }
-  .ub-acc > .ub-meta { grid-area: w; display: flex; align-items: center; gap: 4px 12px; flex-wrap: wrap; color: var(--ink-2); }
+  .ub-acc > .ub-meta { grid-area: w; display: grid; grid-template-columns: minmax(0, .85fr) minmax(0, 1.15fr); grid-template-rows: 18px 18px; align-items: center; gap: 4px 12px; color: var(--ink-2); }
+  .ub-meta > .ub-fc { grid-column: 1 / -1; }
   .ub-acc > .ub-nr { grid-area: w; }
   .ub-link { min-height: 44px; margin-top: 0; }
   .ub-link .link-btn { min-height: 44px; display: inline-flex; align-items: center; }
