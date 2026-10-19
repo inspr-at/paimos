@@ -79,7 +79,7 @@ async function signOut() {
 <template>
   <HeaderMenu v-if="session.identity" id="account-menu" ref="menu" label="Account" :trigger-label="`Account for ${name}`" class="account" @open="opened" @close="error = ''">
     <template #trigger="{ phone }">
-      <Avatar :id="session.identity.principal.id" :name="name" :size="phone ? 36 : 28" />
+      <Avatar :id="session.identity.principal.id" :name="name" :size="compact ? 30 : phone ? 36 : 28" />
     </template>
     <div class="who" role="none">
       <Avatar :id="session.identity.principal.id" :name="name" :size="40" class="who-avatar" />

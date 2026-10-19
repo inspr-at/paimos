@@ -128,13 +128,27 @@ async function opaque(page: Page, target: Locator, info?: TestInfo, name = 'prob
   await page.addStyleTag({ content: '.sessions .table, .agents-page .layout { visibility: hidden !important; } /* aeon-1459-probe */' })
   const after = await page.screenshot({ clip, animations: 'disabled', caret: 'hide' })
   await page.evaluate(() => document.querySelectorAll('style').forEach(style => { if (style.textContent?.includes('aeon-1459-probe')) style.remove() }))
-  const same = before.equals(after)
-  if (!same && info) {
+  // Pixels that differ (any channel by more than 6 of 255; a 94 % bar over text changes about 12): rows behind a see-through bar
+  // change thousands of them; antialiasing noise between two shots of the same pixels changes a few.
+  const changed = before.equals(after) ? 0 : await page.evaluate(async ([a, b]) => {
+    const pixels = async (base64: string) => {
+      const bitmap = await createImageBitmap(await (await fetch(`data:image/png;base64,${base64}`)).blob())
+      const canvas = new OffscreenCanvas(bitmap.width, bitmap.height), ctx = canvas.getContext('2d')!
+      ctx.drawImage(bitmap, 0, 0)
+      return ctx.getImageData(0, 0, bitmap.width, bitmap.height).data
+    }
+    const [x, y] = await Promise.all([pixels(a!), pixels(b!)])
+    let count = 0
+    for (let i = 0; i < x.length; i += 4) if (Math.max(Math.abs(x[i]! - y[i]!), Math.abs(x[i + 1]! - y[i + 1]!), Math.abs(x[i + 2]! - y[i + 2]!)) > 6) count++
+    return count
+  }, [before.toString('base64'), after.toString('base64')] as const)
+  const same = changed <= Math.max(2, Math.round(clip.width * clip.height * .0005))
+  if (changed && info) {
     await mkdir(info.outputPath('AEON-1459'), { recursive: true })
     await writeFile(info.outputPath(`AEON-1459/opaque-${name}-shown.png`), before)
     await writeFile(info.outputPath(`AEON-1459/opaque-${name}-hidden.png`), after)
   }
-  return same
+  return { same, changed }
 }
 
 // ---------- C1 + C2: the Agents page at the top and while reading ----------
@@ -195,7 +209,7 @@ for (const { size, looks, rows, topMax, scrolled } of C1) for (const look of loo
       const chrome = stuck.y + stuck.height
       c.is('chrome while reading', chrome, short(size) ? '44' : '88', Math.abs(chrome - (short(size) ? 44 : 88)) <= .5)
       const barOpaque = await opaque(page, bar, info, 'toolbar')
-      c.is('toolbar opaque over rows (pixels identical with the rows hidden)', barOpaque, 'true', barOpaque)
+      c.is('toolbar opaque over rows (pixels changed when the rows behind are hidden)', barOpaque.changed, '≈ 0 (antialiasing only)', barOpaque.same)
       if (short(size)) {
         await scrollTo(page, 60)
         const top = await box(header)
@@ -205,7 +219,7 @@ for (const { size, looks, rows, topMax, scrolled } of C1) for (const look of loo
         c.is('short landscape: toolbar sticks at the top', sticky, '0', Math.abs(sticky) <= .5)
       } else {
         const headerOpaque = await opaque(page, header, info, 'header')
-        c.is('header opaque (pixels identical with the page hidden)', headerOpaque, 'true', headerOpaque)
+        c.is('header opaque (pixels changed when the page behind is hidden)', headerOpaque.changed, '≈ 0 (antialiasing only)', headerOpaque.same)
         const top = (await box(header)).y
         c.is('portrait: the header stays while reading', top, '0', Math.abs(top) <= .5)
       }
@@ -498,7 +512,7 @@ for (const look of ['light', 'dark'] as const) test(`AEON-1459 C9 1440 ${look}: 
     c.is('1440 shows no compact parts', compactParts, '0', compactParts === 0)
     await scrollTo(page, 400)
     const barOpaque = await opaque(page, toolbar(page), info, 'toolbar-1440')
-    c.is('1440 toolbar opaque over rows', barOpaque, 'true', barOpaque)
+    c.is('1440 toolbar opaque over rows (pixels changed when the rows behind are hidden)', barOpaque.changed, '≈ 0 (antialiasing only)', barOpaque.same)
     await scrollTo(page, 0)
     await shot(page, info, size, look, 'desktop')
   } finally { await c.write(`c9-1440-${look}`) }

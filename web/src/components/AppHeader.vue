@@ -602,7 +602,8 @@ onBeforeUnmount(() => { resized.disconnect(); crumbsChanged.disconnect(); narrow
   .search-pill { width: 44px; height: 44px; --pill-start: 0px; --pill-end: 0px; justify-content: center; border: 0; background: transparent; box-shadow: none; color: var(--ink-2); }
   .search-pill:hover { background: var(--row-hover); color: var(--ink); box-shadow: none; }
   .pill-text, .pill-keys { display: none; }
-  .app-header :deep(.header-btn) { width: 44px; height: 44px; }
+  .app-header :deep(.header-btn) { width: 44px; height: 44px; border: 0; border-radius: 999px; background: transparent; box-shadow: none; color: var(--ink-2); }
+  .app-header :deep(.header-btn:hover) { background: var(--row-hover); color: var(--ink); }
 }
 /* Portrait phones: Projects is home, so the mark steps aside for the places; Business lives in the app
    menu; the breadcrumb keeps only where you are, and the project's crumb only its key. */

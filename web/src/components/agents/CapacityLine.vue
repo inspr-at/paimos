@@ -38,6 +38,7 @@ defineExpose({ focus: () => trigger.value?.focus({ preventScroll: true }) })
 </script>
 
 <template>
+  <div class="cap-line-slot">
   <button
     ref="trigger" type="button" class="cap-line" aria-haspopup="dialog" :aria-expanded="open" :aria-label="label"
     data-tip="Agents at once, accounts and computers" @click="toggle"
@@ -58,13 +59,16 @@ defineExpose({ focus: () => trigger.value?.focus({ preventScroll: true }) })
         </button>
       </div>
   </FloatingPanel>
+  </div>
 </template>
 
 <style scoped>
+.cap-line-slot { display: none; min-width: 0; }
 .cap-line { display: none; }
 @media (max-width: 719px), (max-height: 500px) {
+  .cap-line-slot { display: flex; }
   .cap-line {
-    display: inline-flex; align-items: center; gap: 8px; min-width: 0; height: 44px; padding: 0 10px 0 14px; border: 1px solid var(--glass-edge); border-radius: 999px;
+    display: inline-flex; flex: 1 1 auto; max-width: 100%; align-items: center; gap: 8px; min-width: 0; height: 44px; padding: 0 10px 0 14px; border: 1px solid var(--glass-edge); border-radius: 999px;
     background: var(--btn-bg); box-shadow: var(--shadow-btn); color: var(--ink-2); font: 500 12.5px/1 var(--font); white-space: nowrap; cursor: pointer; font-variant-numeric: tabular-nums;
   }
   .cap-line:hover, .cap-line[aria-expanded="true"] { background: var(--btn-bg-hover); color: var(--ink); }
