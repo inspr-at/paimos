@@ -8,12 +8,12 @@ import { spawn, spawnSync, execFileSync } from 'node:child_process'
 import { once } from 'node:events'
 import { createHash } from 'node:crypto'
 import { fileURLToPath } from 'node:url'
-import { validate, select, shard, key, exactPattern, webGraph, counts, measuredWeights, uncertain, affectedRisk, impactRisk, machineryPattern, manifestPromotions, migrationObjects, consumers, consumerCaseBound, isDocsLike, browserDataInput, registryImpact, webShardPlan, fullGateTests, driftCases, browserScopeNoneAllowlist, fullWebShards, fullWebShardCount, nightlyWebShardCount, nightlyWebShards, assertWebShardBudget } from './core.mjs'
+import { validate, select, shard, key, exactPattern, webGraph, counts, measuredWeights, uncertain, affectedRisk, impactRisk, machineryPattern, manifestPromotions, migrationObjects, consumers, consumerCaseBound, isDocsLike, browserDataInput, registryImpact, webShardPlan, fullGateTests, driftCases, browserScopeNoneAllowlist, fullWebShards, fullWebShardCount, nightlyWebShardPlan, assertWebShardBudget } from './core.mjs'
 import { reportCases, goOutcomes, browserOutcomes } from './report.mjs'
 import { aggregate, jobMinutes, readReports } from './measure.mjs'
 import { checkFull } from './check-full.mjs'
 import { changedPaths, schedulingMode, schedulingDecision, trustedSchedulingDecision, main as tierPlanMain, effectiveLane, sourceTree, promotionsBetween, registryChangesBetween, sizeWebDecision } from './diff.mjs'
-import { runnerDecision, runnerSelection, browserRunnerIdentity, run } from './cli.mjs'
+import { runnerDecision, runnerSelection, browserRunnerIdentity, run, main as tierRunnerMain } from './cli.mjs'
 import { createGoRunner } from './go-runner.mjs'
 import { treeStamp, reuse, webStampEntries } from './collect.mjs'
 import { inputBounds, boundedText, inputMetadata, readInput } from './inputs.mjs'
@@ -2259,7 +2259,7 @@ test('serial tier weights rebalance the full browser shards without changing ful
   ]) {
     const selected=select(rows,options).tests.filter(row=>row.kind==='browser')
     const weights=tierWeights(manifest,selected)
-    const count=['schedule','workflow_dispatch'].includes(options.event)?nightlyWebShardCount:fullWebShardCount
+    const count=['schedule','workflow_dispatch'].includes(options.event)?nightlyWebShardPlan(selected,manifest).shards.length:fullWebShardCount
     const bins=Array.from({length:count},(_,i)=>shard(selected,i+1,count,weights))
     assert.deepEqual(bins.flat().map(key).sort(),selected.map(key).sort(),options.event)
     if(options.paths?.[0]==='.github/workflows/ci.yml'||options.event==='push') {
@@ -2271,12 +2271,13 @@ test('serial tier weights rebalance the full browser shards without changing ful
   }
 })
 
-test('AEON-1325 nightly shards retain every browser case and require all 27 measurements',()=>{
+test('AEON-1325 nightly shards retain every browser case and require every planned measurement',async t=>{
   const workflow=readFileSync(new URL('../../.github/workflows/nightly-full.yml',import.meta.url),'utf8')
   const job=workflow.slice(workflow.indexOf('\n  nightly-web-shard:'),workflow.indexOf('\n  # Preserve the ruleset'))
-  const indices=JSON.parse(/shard: (\[[^\n]+\])/.exec(job)[1])
-  assert.equal(nightlyWebShardCount,27)
-  assert.deepEqual(indices,nightlyWebShards)
+  assert.match(job,/shard: \$\{\{ fromJSON\(needs.nightly-web-setup.outputs.browser-shards\) \}\}/)
+  const setup=workflow.slice(workflow.indexOf('\n  nightly-web-setup:'),workflow.indexOf('\n  # Classification maintenance'))
+  assert.match(setup,/browser-shards: \$\{\{ steps.nightly-browser-plan.outputs.shards \}\}/)
+  assert.match(setup,/id: nightly-browser-plan\n        run: node scripts\/test-tiers\/cli.mjs nightly-web-plan/)
   assert.match(job,/run web --all --shard \$\{\{ matrix.shard \}\}\/\$\{\{ strategy.job-total \}\}/)
   const rows=JSON.parse(readFileSync(new URL('../ci/web-test-tiers.json',import.meta.url))).tests
   const selected=select(rows,{event:'schedule'}).tests.filter(row=>row.kind==='browser')
@@ -2284,6 +2285,14 @@ test('AEON-1325 nightly shards retain every browser case and require all 27 meas
   const declared=new Set(policy.groups.flatMap(group=>group.specs.map(spec=>spec.file)))
   for(const file of Object.keys(policy.nightlyTiming.files)) assert.ok(declared.has(file),`stale nightly timing: ${file}`)
   for(const file of new Set(selected.map(row=>row.file))) assert.ok(policy.nightlyTiming.files[file],`missing nightly timing: ${file}`)
+  const sizing=nightlyWebShardPlan(selected,policy),indices=sizing.shards
+  const output=resolve(mkdtempSync(resolve(tmpdir(),'aeon-1558-plan-')),'github-output')
+  t.after(()=>rmSync(resolve(output,'..'),{recursive:true,force:true}))
+  writeFileSync(output,'previous=value\n')
+  const logs=[]
+  assert.equal(await tierRunnerMain(['nightly-web-plan'],{inventory:{tests:selected},env:{GITHUB_OUTPUT:output},log:value=>logs.push(value)}),0)
+  assert.deepEqual(JSON.parse(logs[0]),sizing)
+  assert.equal(readFileSync(output,'utf8'),`previous=value\nshards=${JSON.stringify(indices)}\n`)
   const weights=nightlyWeights(policy,selected)
   const bins=indices.map(index=>shard(selected,index,indices.length,weights))
   assert.deepEqual(bins.flat().map(key).sort(),selected.map(key).sort())
@@ -2295,6 +2304,10 @@ test('AEON-1325 nightly shards retain every browser case and require all 27 meas
   }))
   const loads=bins.map(bin=>[...new Set(bin.map(row=>row.file))].reduce((n,file)=>n+weights[file],0))
   const peak=Math.max(...loads)
+  assert.equal(sizing.projectedMaxSeconds,peak)
+  assert.equal(sizing.targetSeconds,840)
+  assert.equal(sizing.budgetSeconds,16*60)
+  assert.ok(peak<=840,`Nightly plan must leave headroom: ${indices.length} shards peak at ${peak}s`)
   assert.ok(peak<=16*60,`Nightly estimates need four minutes under the 20-minute cap: ${peak}`)
   assert.ok(peak<=900,`Nightly estimates need a minute under the 16-minute budget: ${peak}`)
   const jobs=indices.map(index=>({name:`nightly-web-shard (${index})`,status:'completed',conclusion:'success',
@@ -2302,11 +2315,48 @@ test('AEON-1325 nightly shards retain every browser case and require all 27 meas
   const reports=bins.map((bin,i)=>reportCases(bin,bin.map(row=>({key:key(row),status:'passed',started:true})),600,`web-shard-${i+1}`))
   const complete=aggregate(reports,jobs)
   assert.equal(complete.coverage,'reported')
-  assert.equal(complete.measured.webRunnerMinutes,nightlyWebShardCount*10)
+  assert.equal(complete.measured.webRunnerMinutes,indices.length*10)
   assert.equal(Object.values(complete.classes).reduce((sum,tier)=>sum+tier.passed,0),selected.length)
   const missing=aggregate(reports.slice(0,-1),jobs)
   assert.equal(missing.coverage,'incomplete')
-  assert.deepEqual(missing.missingEvidence,[`web-shard-${nightlyWebShardCount}`])
+  assert.deepEqual(missing.missingEvidence,[`web-shard-${indices.length}`])
+})
+
+// Risk: a new browser spec must grow the nightly matrix rather than break PRs
+// through a fixed catalogue budget. Keep the real catalogue and a packing edge.
+test('AEON-1558 nightly planning fits an extra 60-second spec and grows for indivisible files',()=>{
+  const rows=JSON.parse(readFileSync(new URL('../ci/web-test-tiers.json',import.meta.url))).tests
+  const selected=select(rows,{event:'schedule'}).tests.filter(row=>row.kind==='browser')
+  const policy=loadWebPolicy(),file='tests/synthetic-nightly-headroom.spec.ts'
+  const extra={...selected[0],file,name:'extra minute',occurrence:undefined}
+  policy.groups[0].specs.push({file,weightSeconds:60,listedTests:1,tierTiming:{seconds:60,selectedTests:1}})
+  policy.nightlyTiming.files[file]={seconds:60,selectedTests:1}
+  const plan=nightlyWebShardPlan([...selected,extra],policy)
+  assert.ok(plan.projectedMaxSeconds<=840,`${plan.shards.length} shards peak at ${plan.projectedMaxSeconds}s with an extra minute`)
+  const bins=plan.shards.map(index=>shard([...selected,extra],index,plan.shards.length,nightlyWeights(policy,[...selected,extra])))
+  assert.deepEqual(bins.flat().map(key).sort(),[...selected,extra].map(key).sort())
+
+  const fixtureRows=[500,500,500,60].map((seconds,i)=>({kind:'browser',file:`tests/packing-${i}.spec.ts`,name:'case',seconds}))
+  const fixture={groups:[{specs:fixtureRows.map(row=>({file:row.file,weightSeconds:row.seconds}))}],
+    nightlyTiming:{files:Object.fromEntries(fixtureRows.map(row=>[row.file,{seconds:row.seconds,selectedTests:1}]))}}
+  const packed=nightlyWebShardPlan(fixtureRows,fixture)
+  assert.deepEqual(packed.shards,[1,2,3])
+  assert.equal(packed.projectedMaxSeconds,560)
+  assert.deepEqual(packed,nightlyWebShardPlan([...fixtureRows].reverse(),fixture))
+  assert.throws(()=>nightlyWebShardPlan([],fixture),/Nightly browser catalogue must not be empty/)
+  const missing=structuredClone(fixture)
+  delete missing.nightlyTiming.files[fixtureRows[0].file]
+  assert.throws(()=>nightlyWebShardPlan(fixtureRows,missing),/Missing nightly timing: tests\/packing-0/)
+  const heavy=structuredClone(fixture)
+  heavy.nightlyTiming.files[fixtureRows[0].file].seconds=841
+  assert.throws(()=>nightlyWebShardPlan(fixtureRows,heavy),/Nightly spec tests\/packing-0.spec.ts predicts 841.0s, over the 840s target; split the spec/)
+  const invalid=structuredClone(fixture)
+  invalid.nightlyTiming.files[fixtureRows[0].file].seconds=NaN
+  assert.throws(()=>nightlyWebShardPlan(fixtureRows,invalid),/Invalid nightly timing/)
+  const overflowing=Array.from({length:65},(_,i)=>({kind:'browser',file:`tests/capacity-${i}.spec.ts`,name:'case'}))
+  const capacity={groups:[{specs:overflowing.map(row=>({file:row.file,weightSeconds:840}))}],
+    nightlyTiming:{files:Object.fromEntries(overflowing.map(row=>[row.file,{seconds:840,selectedTests:1}]))}}
+  assert.throws(()=>nightlyWebShardPlan(overflowing,capacity),/needs more than 64 shards to meet the 840s target/)
 })
 
 test('hosted unit and Go weights preserve files/packages and every selected identity',()=>{

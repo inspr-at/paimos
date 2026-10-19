@@ -227,6 +227,7 @@ jobs:
     timeout-minutes: 20
     outputs:
       browser-cache-key: ${{ steps.web-cache-keys.outputs.browsers }}
+      browser-shards: ${{ steps.nightly-browser-plan.outputs.shards }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
@@ -260,6 +261,9 @@ jobs:
         run: node --test scripts/docker-web-inputs.test.mjs
       - name: Require every web case to be classified
         run: node scripts/test-tiers/cli.mjs check web --strict
+      - name: Plan nightly browser shards from catalogue weights
+        id: nightly-browser-plan
+        run: node scripts/test-tiers/cli.mjs nightly-web-plan
       - name: Install shells used by command round-trip unit tests
         timeout-minutes: 4
         run: bash "$GITHUB_WORKSPACE/scripts/ci/bounded-apt.sh" apt fish zsh
@@ -349,18 +353,14 @@ jobs:
     # AEON-1351: the UI step is 30 minutes. Shard 23 on run 38582896804
     # passed every case and still hit the old 20-minute step at 19.83 minutes.
     # The job stays at 40 minutes so a hung job is still caught. Dependency
-    # install keeps its own 13-minute step cap. AEON-1325 started at 24
-    # shards. AEON-1522: 26 shards. Twenty-five still peaks above 900s
-    # because the catalogue sums past 25 times the 900-second target.
-    # AEON-1401: 27 shards. Twenty-six peaked at 899.8s before its spec
-    # and at 900.8s with it.
-    # AEON-1327: run 38488051180 packed the earlier 24 near 15 minutes.
-    # PR lanes keep their budgets.
+    # install keeps its own 13-minute step cap. AEON-1558 sizes the matrix
+    # from nightlyTiming weights to a peak <= 840s, leaving two minutes under
+    # the 16-minute estimate budget. PR lanes keep their layouts and budgets.
     timeout-minutes: 40
     strategy:
       fail-fast: false
       matrix:
-        shard: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27]
+        shard: ${{ fromJSON(needs.nightly-web-setup.outputs.browser-shards) }}
     env:
       PW_RETRIES: '0'
     steps:
