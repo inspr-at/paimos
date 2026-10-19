@@ -11,7 +11,7 @@ export const DEFINITION_BLOCKS = [
 export type DefinitionStatus = typeof DEFINITION_BLOCKS[number]['id']
 export function definitionBlocks(language = 'en') {
   return DEFINITION_BLOCKS.map(block => language === 'de' ? { ...block, ...({
-    in_progress: { name: 'Bereit', to: 'In Arbeit' }, qa: { name: 'Qualitätsprüfung', to: 'Qualitätsprüfung' }, done: { name: 'Erledigt', to: 'Erledigt' },
+    in_progress: { name: 'Bereit', to: 'In Arbeit' }, qa: { name: 'QA', to: 'QA' }, done: { name: 'Erledigt', to: 'Erledigt' },
   }[block.id]) } : block)
 }
 export type DefinitionCondition = 'all' | 'ui' | 'code' | 'blocked' | 'release_notes' | 'releases'
@@ -35,7 +35,7 @@ export const DEFINITION_CATALOG: { id: string; en: string; de: string; condition
   { id: 'ci_green_latest_main', en: 'Full CI green on latest main', de: 'Volle CI grün auf aktuellem main', condition: 'code', block: 'qa', icon: 'workflow' },
   { id: 'review_ok_cross_family', en: 'Cross-family review ok', de: 'Review durch andere Modellfamilie ok', condition: 'code', block: 'qa', icon: 'shield' },
   { id: 'visual_ok', en: 'Visual check ok', de: 'Visuelle Prüfung ok', condition: 'ui', block: 'qa', icon: 'eye' },
-  { id: 'pills_benefits_set', en: 'Pills and benefits set', de: 'Pills und Nutzen beschrieben', condition: 'release_notes', block: 'done', icon: 'sentence' },
+  { id: 'pills_benefits_set', en: 'Pills and benefits set', de: 'Markierungen und Nutzen beschrieben', condition: 'release_notes', block: 'done', icon: 'sentence' },
   { id: 'release_copy_set', en: 'Release text set (EN + DE)', de: 'Release-Text gesetzt (EN + DE)', condition: 'release_notes', block: 'done', icon: 'sentence' },
   { id: 'merged', en: 'Merged to main', de: 'In main gemergt', condition: 'code', block: 'done', icon: 'merge' },
   { id: 'released', en: 'Shipped in a release', de: 'In einem Release ausgeliefert', condition: 'releases', block: 'done', icon: 'layers' },
@@ -86,7 +86,7 @@ export function ruleOwnerWords(rule: DefinitionRule, people: { id: string; name:
   return rule.owner_id ? `Ticked by ${name(rule.owner_id)}` : `Ticked by the ticket’s assignee, else ${rule.fallback_owner_id ? name(rule.fallback_owner_id) : 'a project admin'}`
 }
 export function ruleWords(rule: DefinitionRule, people: { id: string; name: string }[] = [], language = 'en'): string {
-  return [definitionConditionWords(rule, language), rule.kinds?.length ? `${language === 'de' ? 'Arten' : 'Kinds'}: ${rule.kinds.join(', ')}` : '', rule.labels?.length ? `Labels: ${rule.labels.join(', ')}` : '', manualRule(rule) ? ruleOwnerWords(rule, people, language) : ''].filter(Boolean).join(' · ')
+  return [definitionConditionWords(rule, language), rule.kinds?.length ? `${language === 'de' ? 'Arten' : 'Kinds'}: ${rule.kinds.join(', ')}` : '', rule.labels?.length ? `${language === 'de' ? 'Schlagwörter' : 'Labels'}: ${rule.labels.join(', ')}` : '', manualRule(rule) ? ruleOwnerWords(rule, people, language) : ''].filter(Boolean).join(' · ')
 }
 export const cloneChecks = (checks: DefinitionChecks = {}): DefinitionChecks => JSON.parse(JSON.stringify(checks))
 export const checkCount = (checks: DefinitionChecks = {}) => DEFINITION_BLOCKS.reduce((n, b) => n + (checks[b.id]?.length ?? 0), 0)

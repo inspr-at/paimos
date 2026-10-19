@@ -70,11 +70,15 @@ it('AEON-1317 binds decisions to both revisions and renders the complete bilingu
   expect(ruleLabel({id:'lesson_recorded'})).toBe('Lesson recorded')
   expect(ruleLabel({id:'lesson_recorded'},'de')).toBe('Lehre festgehalten')
   expect(ruleIcon({id:'lesson_recorded'})).toBe('book')
-  expect(definitionBlocks('de').map(block => [block.name,block.to])).toEqual([['Bereit','In Arbeit'],['Qualitätsprüfung','Qualitätsprüfung'],['Erledigt','Erledigt']])
+  expect(definitionBlocks('de').map(block => [block.name,block.to])).toEqual([['Bereit','In Arbeit'],['QA','QA'],['Erledigt','Erledigt']])
+  expect(DEFINITION_EXPLAINERS_DE.definitions.what).toBe('Eine Definition enthält die Prüfungen vor einem Statuswechsel: Bereit vor In Arbeit, QA vor QA, Erledigt vor Erledigt. Für andere Status gibt es keine Prüfungen.')
+  expect(ruleLabel({id:'pills_benefits_set'},'de')).toBe('Markierungen und Nutzen beschrieben')
+  expect(ruleLabel({id:'ci_green_latest_main'},'de')).toBe('Volle CI grün auf aktuellem main')
+  expect(ruleLabel({id:'merged'},'de')).toBe('In main gemergt')
   // Risk: translated navigation prose introduces a text icon and breaks the
   // global glyph guard. Name the settings location in plain German instead.
   expect(DEFINITION_EXPLAINERS_DE.definitions.who).toBe('Administratoren legen den Workspace-Standard in den Einstellungen unter Richtlinien fest. Projektadministratoren können einem Projekt eine eigene Definition geben.')
-  expect(ruleWords({id:'manual:check',label:'Prüfung',kinds:['work'],labels:['ui'],fallback_owner_id:'ada'},[{id:'ada',name:'Ada'}],'de')).toBe('Alle Tickets · Arten: work · Labels: ui · Bestätigt von der ticketverantwortlichen Person, sonst Ada')
+  expect(ruleWords({id:'manual:check',label:'Prüfung',kinds:['work'],labels:['ui'],fallback_owner_id:'ada'},[{id:'ada',name:'Ada'}],'de')).toBe('Alle Tickets · Arten: work · Schlagwörter: ui · Bestätigt von der ticketverantwortlichen Person, sonst Ada')
   expect(resetChanges({in_progress:[{id:'design_attached'},{id:'estimate_set',condition:'code'}]}, {in_progress:[{id:'estimate_set'},{id:'acceptance_present'}]}, 'de')).toEqual([
     'Entfällt: Freigegebenes Design angehängt.', 'Wird wieder aufgenommen: Abnahmekriterien beschrieben.', 'Verwendet die Workspace-Version: Schätzung gesetzt.',
   ])

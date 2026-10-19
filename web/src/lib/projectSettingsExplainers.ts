@@ -121,7 +121,7 @@ export type ProjectSettingsExplainerId = keyof typeof EXPL;
 // display policy. Keep the translated help within that surface.
 export const DEFINITION_EXPLAINERS_DE = {
   definitions: { title: 'Definitionen',
-    what: 'Eine Definition enthält die Prüfungen vor einem Statuswechsel: Bereit vor In Arbeit, Qualitätsprüfung vor Qualitätsprüfung, Erledigt vor Erledigt. Für andere Status gibt es keine Prüfungen.',
+    what: 'Eine Definition enthält die Prüfungen vor einem Statuswechsel: Bereit vor In Arbeit, QA vor QA, Erledigt vor Erledigt. Für andere Status gibt es keine Prüfungen.',
     effect: 'Ein Ticket in {K} kann zu In Arbeit wechseln, sobald seine Prüfungen bestanden sind, etwa eine Schätzung und beschriebene Abnahmekriterien. Die Zeile zum nächsten Status zeigt den Fortschritt, etwa „Bereit 1/2“.',
     who: 'Administratoren legen den Workspace-Standard in den Einstellungen unter Richtlinien fest. Projektadministratoren können einem Projekt eine eigene Definition geben.' },
   enforce: { title: 'Agenten und Personen',

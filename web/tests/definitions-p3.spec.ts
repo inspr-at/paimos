@@ -337,7 +337,7 @@ test('AEON-1317 German definitions copy covers every P3 string and singular noti
       await expect(card.locator('.origin')).toContainText('Vom Workspace-Standard am 8. Okt. kopiert.');snapshot.origin=await card.locator('.origin').innerText()
       for(const change of changes){const row=card.locator(`[data-check="${change.check_id}"]`);await expect(row).toContainText(definitionChangeWords(change,date,'de'));for(const word of definitionDecisionWords(change,change.before??undefined,'de'))await expect(row.getByRole('button',{name:word,exact:true})).toBeVisible();(snapshot.rows as unknown[]).push(await row.innerText())}
       await germanOnly(card)
-      for (const label of ['Bereit','Qualitätsprüfung','Erledigt']) await expect(card.locator('.db-head h3').filter({hasText:label}).first()).toBeVisible()
+      for (const label of ['Bereit','QA','Erledigt']) await expect(card.locator('.db-head h3').filter({hasText:label}).first()).toBeVisible()
       await card.getByRole('button',{name:'Prüfung zu Erledigt hinzufügen',exact:true}).click()
       const catalog=page.getByRole('dialog',{name:'Zu Erledigt hinzufügen',exact:true})
       for (const item of DEFINITION_CATALOG.filter(item=>!blocks.some(block=>world.context.definition!.checks[block]?.some(rule=>rule.id===item.id)))) await expect(catalog.getByRole('menuitem',{name:new RegExp(`^${item.de.replace(/[.*+?^${}()|[\]\\]/g,'\\$&')}`)})).toBeVisible()
