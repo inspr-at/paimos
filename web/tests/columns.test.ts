@@ -2,7 +2,7 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
-import { automaticColumns, COLUMN_BY_ID, GIVE_WAY, latchParentShare, layoutWidths, loadedFitWidth, normalizeColumnIds, orderOf, parentColumnDefault, releaseLabel, RETURN_ROOM, savedColumnWidth, tagList, TITLE_TARGET, titleRoom, visibleColumns, widthOf, withHostColumns, type ColumnDef, type ColumnFit, type ColumnId, type ListPrefs } from '../src/lib/columns.ts'
+import { automaticColumns, COLUMN_BY_ID, GIVE_WAY, latchParentShare, layoutTableWidth, layoutWidths, loadedFitWidth, normalizeColumnIds, orderOf, PARENT_TITLE_WIDTH, parentColumnDefault, releaseLabel, RETURN_ROOM, savedColumnWidth, tagList, TITLE_MIN_TABLE, TITLE_TARGET, titleRoom, visibleColumns, widthOf, withHostColumns, type ColumnDef, type ColumnFit, type ColumnId, type ListPrefs } from '../src/lib/columns.ts'
 import { groupRows, selectLoadedGroup, filtersFromQuery, filtersToQuery, type TicketRow } from '../src/lib/ticketList.ts'
 import { byPosition, positionBetween, positionOf, type Attachment } from '../src/lib/attachments.ts'
 
@@ -95,6 +95,50 @@ test('wide tables stop Title near 960px and give the spare width to the text col
   assert.equal(layoutWidths([...wide], 2000, { widths: { parent: 180, epic: 240 } }).parent, 180)
   // Live drag widths count as sized too.
   assert.equal(layoutWidths([...wide], 2000, null, { assignee: 180 }).assignee, 180)
+})
+
+// A content fit used to freeze Parent, so the title never appeared at 2800px.
+// The fit is the start, not a ceiling: spare beyond Title's target still widens it.
+test('AEON-1470: a content-fitted Parent still grows once Title is at its target', () => {
+  const ids = ['key', 'title', 'status', 'priority', 'assignee', 'parent', 'release', 'tags', 'estimate', 'suggested', 'created', 'updated'] as const
+  const fits: Partial<Record<string, number>> = {}
+  for (const id of ids) if (id !== 'title') fits[id] = COLUMN_BY_ID.get(id)!.width
+  const sum = (w: Partial<Record<string, number>>) => Object.values(w).reduce((total: number, value) => total + (value ?? 0), 0)
+  const narrow = layoutWidths([...ids], 2450, null, {}, COLUMN_BY_ID, fits)
+  assert.ok(narrow.parent! < PARENT_TITLE_WIDTH, `parent ${narrow.parent}`)
+  const wide = layoutWidths([...ids], 2690, null, {}, COLUMN_BY_ID, fits)
+  assert.ok(wide.parent! >= PARENT_TITLE_WIDTH, `parent ${wide.parent}`)
+  const title = 2690 - sum(wide)
+  assert.ok(title > 900 && title < 1140, `title ${title}`)
+  // Fits wider than the design (status +35 and the other measured columns)
+  // eat the surplus. The 2560px card stays under 200; the 2800px card still
+  // crosses it, and Title stays near its target.
+  const inflated: Partial<Record<string, number>> = {
+    ...fits, key: fits.key! + 20, status: fits.status! + 35, priority: fits.priority! + 15,
+    assignee: fits.assignee! + 20, release: fits.release! + 10, tags: fits.tags! + 40,
+    estimate: fits.estimate! + 10, suggested: fits.suggested! + 20, created: fits.created! + 12, updated: fits.updated! + 12,
+  }
+  const narrowScreen = layoutWidths([...ids], 2464, null, {}, COLUMN_BY_ID, inflated)
+  assert.ok(narrowScreen.parent! < PARENT_TITLE_WIDTH, `inflated 2464 parent ${narrowScreen.parent}`)
+  const wideScreen = layoutWidths([...ids], 2704, null, {}, COLUMN_BY_ID, inflated)
+  assert.ok(wideScreen.parent! >= PARENT_TITLE_WIDTH, `inflated 2704 parent ${wideScreen.parent}`)
+  const wideTitle = 2704 - sum(wideScreen)
+  assert.ok(wideTitle > 900 && wideTitle < 1140, `inflated title ${wideTitle}`)
+})
+
+// A docked panel leaves the list a narrow card; a table that grew to its
+// minimums slid under the panel. Wide tables still scroll rather than cut Title.
+test('AEON-1470: a docked table stays inside its card; from 721 px the never-leaving minimums may scroll', () => {
+  assert.equal(TITLE_MIN_TABLE, 721)
+  // The routed panel at 1000 px leaves about 466 px; key, Title, Status and Priority need more.
+  assert.equal(layoutTableWidth(466, 509), 466)
+  assert.equal(layoutTableWidth(720, 760), 720)
+  // Needs attention at 1024: a long key and four host columns that never leave.
+  assert.equal(layoutTableWidth(976, 1056), 1056)
+  assert.equal(layoutTableWidth(721, 760), 760)
+  assert.equal(layoutTableWidth(1200, 900), 1200)
+  // Phone cards always take the card's width.
+  assert.equal(layoutTableWidth(360, 509, true), 360)
 })
 
 test('an explicit title width resizes its neighbours and never collapses a fixed column', () => {

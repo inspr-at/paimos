@@ -43,6 +43,8 @@ const groupRow = (page: Page, label: string) => grid(page).locator('tr.group-row
 const groupCell = (page: Page, label: string, column: string) => groupRow(page, label).locator(`td[data-group-column="${column}"]`)
 const row = (page: Page, key: string) => rows(page).filter({ has: page.locator('.key', { hasText: new RegExp(`^${key}$`) }) })
 const display = (page: Page) => page.getByRole('dialog', { name: 'Display options' })
+// A Display column row, found from the menu itself: a `has` locator rooted at the dialog never matches inside the row.
+const columnRow = (menu: Locator, id: string) => menu.locator(`li.row:has(input[data-column-row="${id}"])`)
 const SET_1388: ColumnId[] = ['status', 'priority', 'assignee', 'estimate', 'updated']
 const ALL: ColumnId[] = [...COLUMN_BY_ID.keys()].filter(id => id !== 'key' && id !== 'title')
 const WIDE_SAVED = { status: 260, priority: 200, assignee: 320, estimate: 180, updated: 200, key: 300 }
@@ -388,7 +390,7 @@ test('AEON-1470 S5: Display keeps a dropped column ticked with "hidden at this w
     const box = menu.locator(`input[data-column-row="${id}"]`)
     if (!await box.count()) continue
     await expect(box).toBeChecked()
-    const note = menu.locator('li.row').filter({ has: box }).locator('.away-note')
+    const note = columnRow(menu, id).locator('.away-note')
     if (dropped.includes(id)) await expect(note).toHaveText('hidden at this width')
     else await expect(note).toHaveCount(0)
   }
@@ -399,7 +401,7 @@ test('AEON-1470 S5: Display keeps a dropped column ticked with "hidden at this w
   log.add({ assert: 'dropped column sorts stay in the sort choices', state: 'Display open', width: 1024, theme: 'light', value: dropped.filter(id => COLUMN_BY_ID.get(id)!.sort).map(id => SORT_LABELS[COLUMN_BY_ID.get(id)!.sort!]) })
   // The note never overflows its row.
   for (const id of dropped) {
-    const item = menu.locator('li.row').filter({ has: menu.locator(`input[data-column-row="${id}"]`) })
+    const item = columnRow(menu, id)
     expect(await item.evaluate(el => el.scrollWidth <= el.clientWidth + 1), id).toBe(true)
   }
   await page.screenshot({ path: testInfo.outputPath('aeon1470-1024-light-s5-display.png'), fullPage: false })
@@ -518,7 +520,7 @@ test('AEON-1470 Parent stays out of the Epic group and the outline, and the colu
   await page.getByRole('button', { name: /^Display/ }).click()
   const menu = display(page)
   await expect(menu.getByRole('radio', { name: 'Epic' })).toBeChecked()
-  const parentBox = menu.locator('li.row').filter({ has: menu.locator('input[data-column-row="parent"]') })
+  const parentBox = columnRow(menu, 'parent')
   await expect(parentBox.locator('.away-note')).toHaveCount(0)
   await parentBox.getByRole('checkbox', { name: 'Parent' }).check()
   await expect(parentHeader(page)).toHaveCount(0)

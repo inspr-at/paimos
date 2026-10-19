@@ -5,7 +5,7 @@ import { vClipTip } from '../../directives/clipTip'
 import { formatEstimate, estimateDisplay } from '../../lib/estimates'
 import { computed, getCurrentInstance, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import type { ListItem } from '../../lib/api'
-import { COLUMN_BY_ID, costUnitLabel, hasSavedWidth, layoutWidths, loadedFitWidth, releaseLabel, tagList, titleRoom, visibleColumns, withHostColumns, type ColumnDef, type ColumnId, type ListPrefs, type TagRef } from '../../lib/columns'
+import { COLUMN_BY_ID, costUnitLabel, hasSavedWidth, layoutTableWidth, layoutWidths, loadedFitWidth, PARENT_TITLE_WIDTH, releaseLabel, tagList, titleRoom, visibleColumns, withHostColumns, type ColumnDef, type ColumnId, type ListPrefs, type TagRef } from '../../lib/columns'
 import { releaseCell, type NativeReleaseView } from '../../lib/releaseMembership'
 import { agentKey, ticketWorkers, withServerLead, type LiveAgent } from '../../lib/liveAgents'
 import { useLiveAgents } from '../../stores/liveAgents'
@@ -363,12 +363,16 @@ function groupToggleClick(event: MouseEvent, key: string) {
   void toggleGroup(key)
 }
 
-// The grid's own minimum for a column. Key holds the first cell's slots. Only the default title renders the
+// Measured content widths, by column, from the first fit; and the widest key as measured (no design width).
+const autoWidths = ref<Partial<Record<string, number>>>({})
+const keyWhole = ref(0)
+// The grid's own minimum for a column. Key holds the first cell's slots, and a measured key reads whole (AEON-1379):
+// Title and whole columns give way before it, unless the person saved a key width. Only the default title renders the
 // person-waiting slot (16px plus its 8px gap); custom titles keep their own room, without clipping host actions.
 // Title also reserves the extra touch arrow/action reach (26px + 40px). Group summaries keep room for the compact
 // priority mix (AEON-1470).
 function gridMin(def: ColumnDef): number {
-  if (def.id === 'key') return Math.max(def.min, keySlots.value.min)
+  if (def.id === 'key') return Math.max(def.min, keySlots.value.min, hasSavedWidth('key', props.prefs) ? 0 : keyWhole.value)
   if (def.id === 'title') return def.min + (instance?.slots['cell-title'] ? 0 : 24) + (coarse.value && !phone.value ? 66 : 0)
   if (def.id === 'priority' && figuresRow.value) return Math.max(def.min, MIX_PRIORITY_MIN)
   return def.min
@@ -394,7 +398,6 @@ const has = (id: string) => ids.value.includes(id)
 watch([ids, () => layout.value.dropped.join(',')], ([value]) => emit('layout', value.filter((id): id is ColumnId => COLUMN_BY_ID.has(id as ColumnId)), layout.value.customised, layout.value.dropped), { immediate: true })
 // Live widths while dragging a column edge; saved when the drag ends.
 const measuring = ref(false)
-const autoWidths = ref<Partial<Record<string, number>>>({})
 const foldSpace = ref(0)
 // Stays false while a fit used the fallback face. font-display:swap can load
 // JetBrains Mono afterwards; the next navigation then measures the real face
@@ -432,19 +435,23 @@ async function fitLoaded() {
     return
   }
   const next = { ...autoWidths.value }
+  let whole = keyWhole.value
   for (const id of ids.value) {
     if (id === 'title' || hasSavedWidth(id, props.prefs) || dragWidths.value[id] !== undefined) continue
     if (fittedColumns.has(id)) continue
-    next[id] = loadedFitWidth(definitions.value.get(id)!, Math.max(next[id] ?? 0, fittedWidth(id)))
+    const fit = fittedWidth(id)
+    if (id === 'key') whole = Math.max(whole, fit)
+    next[id] = loadedFitWidth(definitions.value.get(id)!, Math.max(next[id] ?? 0, fit))
     fittedColumns.add(id)
   }
   autoWidths.value = next
+  keyWhole.value = whole
   measuring.value = false
   if (generation !== fitGeneration || !columnsAlive) return
   columnsSettled.value = columnsAreSettled()
 }
 watch(() => props.loading, (loading, wasLoading) => {
-  if (loading && !wasLoading) { autoWidths.value = {}; foldSpace.value = 0; fittedColumns.clear() }
+  if (loading && !wasLoading) { autoWidths.value = {}; keyWhole.value = 0; foldSpace.value = 0; fittedColumns.clear() }
 })
 watch(() => [props.loading, phone.value, props.projectId, [...props.rowsById.keys()].join(','), ids.value.join(','), props.outline], fitLoaded, { flush: 'post' })
 const dragWidths = ref<Partial<Record<string, number>>>({})
@@ -452,11 +459,11 @@ const dragWidths = ref<Partial<Record<string, number>>>({})
 // on wide tables, where the spare width widens the text columns instead). Dragging
 // Title's edge gives it a width of its own. The columns beside it move within their
 // min and max, so a fixed column never collapses.
-// Saved and dragged widths give way before Title goes under its minimum. Only when
-// even the columns' minimums do not fit (a narrow docked table with columns that
-// never leave) does the table grow past the card.
+// Saved and dragged widths give way before Title goes under its minimum, then
+// whole columns (AEON-1470). Only the minimums of columns that never leave can
+// make a wide table scroll; a docked one stays inside its card.
 const minTotal = computed(() => columns.value.reduce((sum, column) => sum + column.min, 0))
-const layoutWidth = computed(() => phone.value ? width.value : Math.max(width.value, minTotal.value))
+const layoutWidth = computed(() => layoutTableWidth(width.value, minTotal.value, phone.value))
 const widths = computed(() => layoutWidths(ids.value, layoutWidth.value, props.prefs, dragWidths.value, definitions.value, autoWidths.value))
 function colWidth(id: string) { return id === 'title' ? null : widths.value[id] ?? null }
 function nativeRelease(row: ListItem) {
@@ -571,6 +578,11 @@ function resetTitle() {
   delete next.title
   emit('widths', next)
 }
+// The status label ellipsizes so the stale hint stays inside the cell (AEON-1470 F2). Its button then reports the
+// clipped box, so add back what the label hides. Reads only: a fit stays one layout however many rows are loaded.
+function clippedLabel(child: HTMLElement) {
+  return [...child.querySelectorAll<HTMLElement>('.status-btn > span')].reduce((sum, span) => sum + Math.max(0, span.scrollWidth - span.clientWidth), 0)
+}
 // Fit: the widest content in the column (header included), within the column's bounds.
 function fittedWidth(id: string) {
   const def = definitions.value.get(id)!
@@ -581,7 +593,7 @@ function fittedWidth(id: string) {
     const content = cell.querySelector<HTMLElement>('.plan-figure, .plan-model') ?? cell
     const children = ([...content.children] as HTMLElement[]).filter(child => !child.classList.contains('sr-only'))
     const gap = parseFloat(getComputedStyle(content).columnGap) || 0
-    const inner = children.reduce((sum, child) => sum + Math.max(child.scrollWidth, child.getBoundingClientRect().width), 0) + gap * Math.max(0, children.length - 1)
+    const inner = children.reduce((sum, child) => sum + Math.max(child.scrollWidth, child.getBoundingClientRect().width) + clippedLabel(child), 0) + gap * Math.max(0, children.length - 1)
     const text = [...content.childNodes].filter(child => child.nodeType === Node.TEXT_NODE).map(child => child.textContent).join('')
     const range = document.createRange()
     range.selectNodeContents(content)
@@ -602,7 +614,7 @@ function autofit(id: string) {
   emit('widths', { ...(props.prefs?.widths ?? {}), [id]: next })
 }
 watch(() => props.prefs?.widths, () => { if (!resizing) dragWidths.value = {} })
-watch(() => props.projectId, () => { autoWidths.value = {}; dragWidths.value = {}; foldSpace.value = 0; fittedColumns.clear(); void fitLoaded() })
+watch(() => props.projectId, () => { autoWidths.value = {}; keyWhole.value = 0; dragWidths.value = {}; foldSpace.value = 0; fittedColumns.clear(); void fitLoaded() })
 function estimate(row: ListItem) { return estimateDisplay(row).text }
 // An epic with open children and no hours still has coverage to explain.
 function emptyEstimateTip(row: ListItem) {
@@ -703,7 +715,7 @@ function parentOf(row: ListItem) {
 function parentView(row: ListItem) {
   const parent = parentOf(row)
   if (!parent) return null
-  return { parent, icon: workIcon(parent), tip: `${kindLabel(parent.kind_slug)} ${parent.key}\n${parent.title}`, showTitle: (colWidth('parent') ?? 0) >= 200 }
+  return { parent, icon: workIcon(parent), tip: `${kindLabel(parent.kind_slug)} ${parent.key}\n${parent.title}`, showTitle: (colWidth('parent') ?? 0) >= PARENT_TITLE_WIDTH }
 }
 const TAG_SHOWN = 3
 function tagTip(tags: TagRef[]) { return tags.map(tag => tag.name).join(', ') }
@@ -877,7 +889,7 @@ defineExpose({
       <thead>
         <tr>
           <th
-            v-for="column in columns" :key="column.id" scope="col" :data-column-id="column.id" :class="[column.cls, { end: column.end, 'key-head': column.id === 'key' }]" :aria-sort="ariaSort(column.field)"
+            v-for="column in columns" :key="column.id" scope="col" :aria-label="column.label" :data-column-id="column.id" :class="[column.cls, { end: column.end, 'key-head': column.id === 'key' }]" :aria-sort="ariaSort(column.field)"
             :style="column.id === 'key' ? { '--slot': `${keySlots.size}px`, '--fold-x': `${keySlots.fold}px`, '--check-x': `${keySlots.check}px`, '--sort-x': `${keySlots.sort}px`, '--rest-x': selectable ? '36px' : '18px' } : undefined"
           >
             <!-- The first cell's slots (AEON-1388 §3): expand/collapse all above the group chevrons, select all above the group (or row) checkboxes. -->

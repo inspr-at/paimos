@@ -50,6 +50,11 @@ export const WIDE_TABLE = 1500
 export const TITLE_TARGET = 960
 // Automatic wide columns keep Title at least this wide; otherwise they step aside.
 const TITLE_ROOM = 420
+// Title's minimum holds from this table width (AEON-1470). A narrower desktop
+// table, with a docked panel beside it, stays inside its card instead.
+export const TITLE_MIN_TABLE = 721
+// Parent shows its title beside the key from this column width (AEON-1470).
+export const PARENT_TITLE_WIDTH = 200
 const PHONE: ColumnId[] = ['key', 'title', 'status', 'priority', 'updated']
 // The order whole columns leave in when even their minimum widths leave Title
 // under its own (AEON-1470): the least essential first. Key, Title, Status and
@@ -279,14 +284,23 @@ export function layoutWidths(ids: string[], tableWidth: number, prefs?: ListPref
     return out
   }
   // A content fit replaces the default width budgeted beside Title. A fit that
-  // already leaves Title at least its minimum stays steady.
+  // would leave Title under its minimum gives width back first.
   keepTitleMin(ids, out, tableWidth, sized, definitions)
   const titleTarget = TITLE_TARGET
   let spare = tableWidth - sumWidths(out) - titleTarget
-  // Loaded-content fits stay at the width just chosen, including a shrink that
-  // keeps Title at its minimum. An explicit Title resize may still move these
-  // unsaved widths, while the person's saved widths remain fixed.
-  const growing = GROWS.filter(id => ids.includes(id) && !sized(id) && automatic[id] === undefined)
+  // Spare beyond the target widens unsized text columns from the width they
+  // already have, including a content fit: a fit is the start, not a ceiling
+  // (AEON-1470). A saved or dragged width stays fixed. What is still left goes
+  // back to Title.
+  const growing = GROWS.filter(id => ids.includes(id) && !sized(id))
+  // Parent's title appears from PARENT_TITLE_WIDTH. Parent takes that step first
+  // when it uses at most half the spare (a 2800px screen at design widths);
+  // otherwise it shares in proportion like the others (a 2560px one).
+  const step = growing.includes('parent') ? PARENT_TITLE_WIDTH - out.parent! : 0
+  if (step > 0 && spare >= 2 * step) {
+    out.parent = PARENT_TITLE_WIDTH
+    spare -= step
+  }
   while (spare >= 1 && growing.length) {
     const weight = growing.reduce((sum, id) => sum + definitions.get(id)!.width, 0)
     let used = 0
@@ -302,6 +316,16 @@ export function layoutWidths(ids: string[], tableWidth: number, prefs?: ListPref
   }
   for (const id of Object.keys(out) as string[]) out[id] = Math.floor(out[id]!)
   return out
+}
+
+// The width the columns lay out in: the card's. Only when even the minimums of
+// the columns that never leave do not fit (a long key, host columns) does a
+// table of at least TITLE_MIN_TABLE px grow past its card and scroll, so Title
+// keeps its minimum. A narrower one, with a docked panel beside it, stays inside
+// its card and Title gives way instead, so the list never slides under the
+// panel (AEON-1470). Phone cards always take the card's width.
+export function layoutTableWidth(cardWidth: number, minimums: number, phone = false): number {
+  return phone || cardWidth < TITLE_MIN_TABLE ? cardWidth : Math.max(cardWidth, minimums)
 }
 
 // At least 30% of the open rows have a direct parent. Exactly 30% is on.

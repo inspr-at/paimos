@@ -56,8 +56,8 @@ test.describe('wide lists', () => {
     await page.mouse.move(box.x - 500, box.y + box.height / 2, { steps: 4 })
     await page.mouse.up()
     await expect.poll(async () => Math.round((await page.locator('thead th.c-title').boundingBox())!.width)).toBeLessThan(title.width - 150)
-    // Loaded-content fits stay still until an explicit Title resize returns enough
-    // spare width. Parent then grows past 260 and past the width it had.
+    // The width the Title resize returns widens the text columns beside it:
+    // Parent grows past 260 and past the width it had.
     await expect.poll(async () => (await page.locator('thead th.c-parent').boundingBox())!.width).toBeGreaterThan(260)
     expect((await page.locator('thead th.c-parent').boundingBox())!.width).toBeGreaterThan(parentBefore)
   })
