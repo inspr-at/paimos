@@ -123,7 +123,7 @@ export const DEFINITION_EXPLAINERS_DE = {
   definitions: { title: 'Definitionen',
     what: 'Eine Definition enthält die Prüfungen vor einem Statuswechsel: Bereit vor In Arbeit, Qualitätsprüfung vor Qualitätsprüfung, Erledigt vor Erledigt. Für andere Status gibt es keine Prüfungen.',
     effect: 'Ein Ticket in {K} kann zu In Arbeit wechseln, sobald seine Prüfungen bestanden sind, etwa eine Schätzung und beschriebene Abnahmekriterien. Die Zeile zum nächsten Status zeigt den Fortschritt, etwa „Bereit 1/2“.',
-    who: 'Administratoren legen den Workspace-Standard unter Einstellungen › Richtlinien fest. Projektadministratoren können einem Projekt eine eigene Definition geben.' },
+    who: 'Administratoren legen den Workspace-Standard in den Einstellungen unter Richtlinien fest. Projektadministratoren können einem Projekt eine eigene Definition geben.' },
   enforce: { title: 'Agenten und Personen',
     what: 'Für Agenten und Personen gelten dieselben Prüfungen. Ein Agent wird bei einer fehlgeschlagenen Prüfung gestoppt; eine Person kann mit einer Begründung fortfahren.',
     effect: 'Fehlt einem Ticket in {K} eine erforderliche Schätzung, verweigert PAIMOS den Start durch einen Agenten und nennt die fehlende Prüfung in der Aktivität. Eine Person kann „Trotzdem verschieben“ wählen und eine Begründung eingeben. Der Statuswechsel wird mit den fehlenden Prüfungen protokolliert.',

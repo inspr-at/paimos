@@ -5,6 +5,7 @@ import { decideDefinitionChange, definitionBlocks, definitionAdminNames, definit
 import { api } from '../src/lib/api'
 import { deskItemID, deskLinkOut } from '../src/lib/decisionDesk'
 import { displayLanguage } from '../src/lib/displayLanguage'
+import { DEFINITION_EXPLAINERS_DE } from '../src/lib/projectSettingsExplainers'
 
 // Risk: a full copy is misrepresented as a partial merge, later changes look
 // deliberate, or a reset confirmation omits a condition, owner or order change.
@@ -70,6 +71,9 @@ it('AEON-1317 binds decisions to both revisions and renders the complete bilingu
   expect(ruleLabel({id:'lesson_recorded'},'de')).toBe('Lehre festgehalten')
   expect(ruleIcon({id:'lesson_recorded'})).toBe('book')
   expect(definitionBlocks('de').map(block => [block.name,block.to])).toEqual([['Bereit','In Arbeit'],['Qualitätsprüfung','Qualitätsprüfung'],['Erledigt','Erledigt']])
+  // Risk: translated navigation prose introduces a text icon and breaks the
+  // global glyph guard. Name the settings location in plain German instead.
+  expect(DEFINITION_EXPLAINERS_DE.definitions.who).toBe('Administratoren legen den Workspace-Standard in den Einstellungen unter Richtlinien fest. Projektadministratoren können einem Projekt eine eigene Definition geben.')
   expect(ruleWords({id:'manual:check',label:'Prüfung',kinds:['work'],labels:['ui'],fallback_owner_id:'ada'},[{id:'ada',name:'Ada'}],'de')).toBe('Alle Tickets · Arten: work · Labels: ui · Bestätigt von der ticketverantwortlichen Person, sonst Ada')
   expect(resetChanges({in_progress:[{id:'design_attached'},{id:'estimate_set',condition:'code'}]}, {in_progress:[{id:'estimate_set'},{id:'acceptance_present'}]}, 'de')).toEqual([
     'Entfällt: Freigegebenes Design angehängt.', 'Wird wieder aufgenommen: Abnahmekriterien beschrieben.', 'Verwendet die Workspace-Version: Schätzung gesetzt.',
