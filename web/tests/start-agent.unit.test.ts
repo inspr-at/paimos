@@ -226,7 +226,7 @@ describe('run now once', () => {
     expect(launchState({ ...queued, wait: { code: 'vendor', run_now_allowed: false } })).toEqual({ label: 'Waiting', detail: 'Waiting for the vendor to allow work again' })
   })
   it('shows the checkout sentence while an earlier pairing still holds this computer', () => {
-    const detail = "This computer's checkout is still held by an earlier pairing. Release it in Settings › Computers."
+    const detail = "This computer's checkout is still held by an earlier pairing. Release it in Settings, under Computers."
     expect(launchState({ ...queued, daemon_wait_reason: 'checkout_held_by_earlier_pairing' })).toEqual({ label: 'Queued', detail })
     expect(launchState({ ...queued, daemon_wait_reason: 'checkout_held_by_earlier_pairing', wait: { code: 'vendor', run_now_allowed: false } })).toEqual({ label: 'Queued', detail })
   })
