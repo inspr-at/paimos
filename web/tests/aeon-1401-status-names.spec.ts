@@ -14,8 +14,8 @@ type Theme = 'light' | 'dark'
 interface Check { assert: string; width: number; theme: Theme; ok: boolean; detail?: string }
 const BUILDING = { in_progress: { en: 'Building', de: 'In Umsetzung' } }
 
-async function open(browser: Browser, testInfo: TestInfo, width: number, theme: Theme, data: Fixtures = fixtures()) {
-  const context = await browser.newContext({ baseURL: testInfo.project.use.baseURL, viewport: { width, height: width <= 600 ? 844 : 900 }, hasTouch: width <= 600, reducedMotion: 'reduce' })
+async function open(browser: Browser, testInfo: TestInfo, width: number, theme: Theme, data: Fixtures = fixtures(), height = width <= 600 ? 844 : 900) {
+  const context = await browser.newContext({ baseURL: testInfo.project.use.baseURL, viewport: { width, height }, hasTouch: width <= 600, reducedMotion: 'reduce' })
   const page = await context.newPage()
   data.preferences.theme = { choice: theme }
   const calls = await mockWork(page, data, { admin: true })
@@ -52,7 +52,8 @@ test('AEON-1401 the Status names card renames, refuses ambiguous names and keeps
   test.setTimeout(150_000)
   const checks: Check[] = []
   for (const [width, theme] of [[1440, 'light'], [1440, 'dark'], [390, 'light']] as const) {
-    const { context, page, calls, data } = await open(browser, testInfo, width, theme)
+    // Tall enough that the whole card is in the shot; the settings body scrolls on its own.
+    const { context, page, calls, data } = await open(browser, testInfo, width, theme, fixtures(), width <= 600 ? 2200 : 1500)
     try {
       await autopilotRoutes(page)
       await page.goto('/settings/autopilot')
@@ -185,8 +186,9 @@ test('AEON-1401 lists, the status menu, the ticket header, Desk and activity rea
         await building.click()
         await expect.poll(() => calls.filter(call => call.method === 'PATCH' && call.path === '/api/nodes/n-4').length).toBe(1)
         const patch = calls.find(call => call.method === 'PATCH' && call.path === '/api/nodes/n-4')!.body as { state?: string }
-        expect(patch.state).toBe('in_progress')
-        checks.push({ assert: 'Choosing “Building” stores the canonical in_progress (transitions unchanged)', width, theme, ok: true })
+        // The tenant's own canonical spelling (this fixture stores in-progress), never the display name.
+        expect(patch.state).toMatch(/^in[-_]progress$/)
+        checks.push({ assert: 'Choosing “Building” stores the canonical in-progress state (transitions unchanged)', width, theme, ok: true, detail: `PATCH state ${patch.state}` })
 
         // The ticket header and its activity line.
         await page.goto('/p/PHAROS/PHAROS-11')

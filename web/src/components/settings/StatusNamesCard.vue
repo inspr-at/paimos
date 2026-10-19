@@ -104,7 +104,7 @@ async function save(names: StatusNameMap) {
       // Fields changed after this save was sent keep their drafts for the next save.
       const now = cleanStatusNames(drafts)
       adopt(store.value.names, field => { const [key, locale] = field.split('.') as [StatusNameKey, StatusLocale]; return held(field) || (now[key]?.[locale] ?? '') !== (names[key]?.[locale] ?? '') })
-      markSaved(t('Saved. Everyone in this workspace reads the new names.', 'Gespeichert. Alle in diesem Workspace sehen die neuen Namen.'))
+      markSaved(t('Saved. Everyone sees the new names.', 'Gespeichert. Alle sehen die neuen Namen.'))
     }), { failed: cause => { failed.value = true; footer.value = cause instanceof Error ? cause.message : t('Status names were not saved. Try again.', 'Die Statusnamen wurden nicht gespeichert. Bitte erneut versuchen.') } })
   } finally {
     busy.value = false
@@ -148,7 +148,7 @@ const placeholder = (key: StatusNameKey, locale: StatusLocale) => BUILT_IN_STATU
 .sn { display: grid; grid-template-columns: 16px 140px minmax(0, 1fr) minmax(0, 1fr) 44px; column-gap: 12px; }
 .sn-head, .sn-row { display: grid; grid-template-columns: subgrid; grid-column: 1 / -1; align-items: center; }
 .sn-head { padding-bottom: 6px; font-size: 12px; color: var(--ink-3); }
-.sn-row { row-gap: 0; padding-top: 6px; border-top: 1px solid var(--line); }
+.sn-row { row-gap: 0; padding-top: 5px; border-top: 1px solid var(--line); }
 .sn-icon { display: grid; place-items: center; color: var(--ink-3); }
 .sn-canon { font-size: 13px; color: var(--ink-2); overflow-wrap: anywhere; }
 .sn-field { display: block; min-width: 0; }
@@ -158,11 +158,12 @@ const placeholder = (key: StatusNameKey, locale: StatusLocale) => BUILT_IN_STATU
 .sn-reset { display: grid; place-items: center; }
 .sn-reset .hidden { visibility: hidden; }
 /* The refusal has its own reserved line under the fields: it never pushes a row. */
-.sn-error { grid-column: 3 / 5; min-height: 18px; margin: 0; padding: 1px 0 3px; font-size: 12px; line-height: 14px; color: var(--danger); overflow-wrap: anywhere; }
+.sn-error { grid-column: 3 / 5; box-sizing: border-box; min-height: 17px; margin: 0; padding: 1px 0 2px; font-size: 12px; line-height: 14px; color: var(--danger); overflow-wrap: anywhere; }
 .sn-value { min-width: 0; min-height: 32px; display: flex; align-items: center; font-size: 13px; color: var(--ink); overflow-wrap: anywhere; }
 .sn-value.quiet { color: var(--ink-3); }
 .sn:not(.editable) .sn-row { padding-bottom: 6px; }
-.sn-foot { min-height: 18px; margin: 10px 0 0; padding-top: 10px; border-top: 1px solid var(--line); font-size: 12.5px; line-height: 18px; color: var(--ink-2); overflow-wrap: anywhere; }
+/* One reserved line for saved/failed (border + padding + 18 px), filled or empty. */
+.sn-foot { box-sizing: border-box; min-height: 29px; margin: 10px 0 0; padding-top: 10px; border-top: 1px solid var(--line); font-size: 12.5px; line-height: 18px; color: var(--ink-2); overflow-wrap: anywhere; }
 .sn-foot.error { color: var(--danger); }
 @media (max-width: 600px) {
   /* Phones: the built-in name, then the English field, then the German one. */
@@ -176,7 +177,8 @@ const placeholder = (key: StatusNameKey, locale: StatusLocale) => BUILT_IN_STATU
   .sn-locale { display: block; font-size: 12px; color: var(--ink-3); }
   .sn-field .field { height: 44px; font-size: 16px; }
   .sn-reset .icon-btn { width: 44px; height: 44px; }
-  .sn-error { grid-column: 1 / -1; }
+  /* A refusal quotes a name of up to 24 characters: two reserved lines at phone width. */
+  .sn-error { grid-column: 1 / -1; min-height: 31px; }
 }
 @media (pointer: coarse) { .sn-field .field { height: 44px; } .sn-reset .icon-btn { width: 44px; height: 44px; } }
 </style>
