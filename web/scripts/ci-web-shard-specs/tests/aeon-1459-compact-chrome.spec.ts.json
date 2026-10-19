@@ -6,7 +6,7 @@
   },
   "spec": {
     "file": "tests/aeon-1459-compact-chrome.spec.ts",
-    "listedTests": 25,
+    "listedTests": 26,
     "weightSeconds": 60,
     "weightSource": "remote-one-worker-AEON-1459-38s-plus-margin"
   }

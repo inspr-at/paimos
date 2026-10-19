@@ -14,6 +14,7 @@ import { agentData, mockAgents, type AgentData } from './agents-fixtures'
 import { capacityWorld } from './capacity-fixtures'
 import { mockEffectivePermissions } from './authz-fixtures'
 import { mockReleases, presentedHistory } from './releases-fixtures'
+import { expectStableControls } from './helpers/stable'
 
 type Size = { width: number; height: number }
 type Look = 'light' | 'dark'
@@ -28,18 +29,22 @@ const sizeName = (size: Size) => `${size.width}x${size.height}`
 const short = (size: Size) => size.height <= 500 && size.width >= 720
 
 // ---------- Evidence: every assert, with its size and theme ----------
-type Entry = { check: string; size: string; theme: Look; value: unknown; expected: string; pass: boolean }
+type Entry = { check: string; size: string; width: number; height: number; theme: Look; locale: string; value: unknown; expected: string; pass: boolean }
 function checks(info: TestInfo, size: Size, theme: Look) {
   const entries: Entry[] = []
   return {
     is(check: string, value: unknown, expected: string, pass: boolean) {
-      entries.push({ check, size: sizeName(size), theme, value, expected, pass })
+      entries.push({ check, size: sizeName(size), ...size, theme, locale: 'en-US', value, expected, pass })
       expect(pass, `${check} at ${sizeName(size)} ${theme}: ${JSON.stringify(value)}, expected ${expected}`).toBe(true)
     },
     async write(name: string) {
-      const path = info.outputPath(`AEON-1459/checks-${name}.md`)
+      const path = info.outputPath(`AEON-1459/checks-${name}.json`)
+      const json = JSON.stringify(entries, null, 2)
       await mkdir(dirname(path), { recursive: true })
-      await writeFile(path, ['```json', JSON.stringify(entries, null, 1), '```', ''].join('\n'))
+      await writeFile(path, `${json}\n`)
+      await info.attach(`checks-${name}`, { path, contentType: 'application/json' })
+      // remote-spec.sh collects PNG and Markdown; CI also retains the JSON attachment itself.
+      await writeFile(info.outputPath(`AEON-1459/checks-${name}.md`), ['```json', json, '```', ''].join('\n'))
     },
   }
 }
@@ -202,9 +207,13 @@ for (const { size, looks, rows, topMax, scrolled } of C1) for (const look of loo
       // C2: reading. The toolbar sticks; the chrome is 88 px in portrait and 44 px in short landscape.
       const base = Math.round(await toolbarOffset(page) + 320)
       const step = short(size) ? 12 : 14
-      const counts: number[] = []
-      for (const k of [0, 1, 2, 3]) { await scrollTo(page, base + k * step); counts.push(await fullyVisible(page)) }
-      c.is('fully visible rows at four scroll offsets', counts, `each ≥ ${rows}`, counts.every(n => n >= rows))
+      const counts: { scrollTop: number; toolbarTop: number; fullyVisibleRows: number }[] = []
+      for (const k of [0, 1, 2, 3]) {
+        await scrollTo(page, base + k * step)
+        counts.push({ scrollTop: await main(page).evaluate(el => el.scrollTop), toolbarTop: (await box(bar)).y, fullyVisibleRows: await fullyVisible(page) })
+      }
+      c.is('four distinct scroll offsets sampled', counts.map(sample => sample.scrollTop), 'four distinct offsets', new Set(counts.map(sample => sample.scrollTop)).size === 4)
+      c.is('fully visible rows at four scroll offsets', counts, `each ≥ ${rows}`, counts.every(sample => sample.fullyVisibleRows >= rows))
       const stuck = await box(bar)
       const chrome = stuck.y + stuck.height
       c.is('chrome while reading', chrome, short(size) ? '44' : '88', Math.abs(chrome - (short(size) ? 44 : 88)) <= .5)
@@ -224,6 +233,44 @@ for (const { size, looks, rows, topMax, scrolled } of C1) for (const look of loo
         c.is('portrait: the header stays while reading', top, '0', Math.abs(top) <= .5)
       }
       if (scrolled.includes(look)) await shot(page, info, size, look, 'scrolled')
+      if (size === PORTRAIT && look === 'light') {
+        await scrollTo(page, 0)
+        const head = page.locator('.agents-page .page-head')
+        const group = head.getByRole('group', { name: 'Show sessions by state' })
+        const working = group.getByRole('button', { name: /^\d+ working\./ })
+        const waiting = group.getByRole('button', { name: /^\d+ waiting\./ })
+        const allRows = await page.locator(ROWS).evaluateAll(els => els.map(el => el.getAttribute('data-row')))
+        const matches = page.locator(`${ROWS}:not(.filter-context)`)
+        await expectStableControls({
+          controls: {
+            title: head.getByRole('heading', { name: 'Agents', exact: true }), group, working, waiting,
+            more: head.getByRole('button', { name: 'More agent actions', exact: true }),
+            add: head.getByRole('button', { name: /^New: / }),
+            filter: page.locator('.sessions .tb-filter'),
+          },
+          scrollAreas: { page: main(page) },
+          interactions: [working, waiting].flatMap(button => [
+            { name: 'the title count filters Sessions', run: async () => {
+              const name = await button.getAttribute('aria-label') ?? ''
+              const n = Number(await button.locator('b').innerText())
+              c.is('title count is a labelled button with matches', { name, n }, 'a positive count and status words', n > 0 && /^\d+ (working|waiting)\./.test(name))
+              await button.click()
+              await expect(button).toHaveAttribute('aria-pressed', 'true')
+              await expect(matches).toHaveCount(n)
+              const filtered = await matches.evaluateAll(els => els.map(el => el.getAttribute('data-row')))
+              c.is(`${name}: filters the session rows`, filtered, `${n} matches, fewer than all ${allRows.length} rows`, filtered.length === n && filtered.length < allRows.length)
+            } },
+            { name: 'the pressed title count restores all Sessions', run: async () => {
+              await button.click()
+              await expect(button).toHaveAttribute('aria-pressed', 'false')
+              await expect(button).toBeFocused()
+              await expect(page.locator(ROWS)).toHaveCount(allRows.length)
+              const restored = await page.locator(ROWS).evaluateAll(els => els.map(el => el.getAttribute('data-row')))
+              c.is('the pressed title count restores every session', restored, JSON.stringify(allRows), JSON.stringify(restored) === JSON.stringify(allRows))
+            } },
+          ]),
+        })
+      }
       expect(errors).toEqual([])
     } finally { await c.write(`c1-${sizeName(size)}-${look}`) }
   })
@@ -334,10 +381,10 @@ for (const size of [PORTRAIT, LANDSCAPE]) test(`AEON-1459 C5 agents ${sizeName(s
 const arrive = (data: AgentData) => {
   for (let n = 0; n < 3; n++) data.sessions.push({ ...data.sessions[1]!, id: `5e000000-0000-4000-8000-${String(900 + n).padStart(12, '0')}`, display_label: `Arrival ${n + 1}`, run_id: null, ticket_node_id: null, ticket: null, created_at: new Date(NOW + (n + 1) * 1000).toISOString(), heartbeat_at: new Date(NOW + 1000).toISOString() } as typeof data.sessions[number])
 }
-test('AEON-1459 C6 agents 844x340 light: held changes float as a chip; the toolbar keeps its one 44 px line', async ({ page }, info) => {
+for (const size of [PORTRAIT, LANDSCAPE]) test(`AEON-1459 C6 agents ${sizeName(size)} light: held changes float as a chip; the toolbar keeps its one 44 px line`, async ({ page }, info) => {
   test.setTimeout(60_000)
-  const { data } = await openAgents(page, LANDSCAPE, 'light')
-  const c = checks(info, LANDSCAPE, 'light')
+  const { data } = await openAgents(page, size, 'light')
+  const c = checks(info, size, 'light')
   try {
     const bar = toolbar(page)
     // A mouse resting on the list holds changes (touch never does).
@@ -357,8 +404,8 @@ test('AEON-1459 C6 agents 844x340 light: held changes float as a chip; the toolb
     c.is('toolbar height unchanged with the chip', held.height, '44', Math.abs(held.height - before.height) <= .5 && Math.abs(held.height - 44) <= .5)
     c.is('toolbar did not move for the chip', held, JSON.stringify(before), Math.abs(held.y - before.y) <= .5 && Math.abs(held.x - before.x) <= .5)
     const chipBox = await box(chip)
-    c.is('chip inside the viewport, 44 px tall', chipBox, 'inside 844 × 340', inside(chipBox, LANDSCAPE) && chipBox.height >= 43.5)
-    await shot(page, info, LANDSCAPE, 'light', 'held')
+    c.is('chip inside the viewport, 44 px tall', chipBox, `inside ${sizeName(size)}`, inside(chipBox, size) && chipBox.height >= 43.5)
+    await shot(page, info, size, 'light', 'held')
     // The chip is the list's: moving the mouse onto it keeps the hold, and its click applies the rows at once.
     await chip.hover()
     await page.clock.runFor(2_000)
@@ -366,7 +413,7 @@ test('AEON-1459 C6 agents 844x340 light: held changes float as a chip; the toolb
     await chip.click()
     await expect(chip).toBeHidden()
     await expect(page.locator(`.sessions [data-row="s:5e000000-0000-4000-8000-000000000900"]`)).toBeAttached()
-  } finally { await c.write('c6-844x340-light') }
+  } finally { await c.write(`c6-${sizeName(size)}-light`) }
 })
 
 // ---------- C7: the project crumb opens the project's sheet ----------
@@ -548,7 +595,8 @@ for (const size of [PORTRAIT, LANDSCAPE]) test(`AEON-1459 agents ${sizeName(size
 })
 
 // ---------- C9: desktop 1440 keeps main's geometry (±1 px), light and dark ----------
-// Measured on main before this change (5aaf10ee4) with this world: boxes that no font can move.
+// Measured on main before this change (5aaf10ee4) with overlay scrollbars. Classic native
+// scrollbars reserve a gutter in main: only the flexible column shrinks; later columns shift left.
 const MAIN_1440: Record<string, Box> = {
   header: { x: 0, y: 0, width: 1440, height: 56 },
   'page head': { x: 28, y: 78, width: 1384, height: 48 },
@@ -581,8 +629,22 @@ for (const look of ['light', 'dark'] as const) test(`AEON-1459 C9 1440 ${look}: 
   await openAgents(page, size, look)
   const c = checks(info, size, look)
   try {
+    const scroll = await main(page).evaluate(el => {
+      const style = getComputedStyle(el)
+      const bar = getComputedStyle(el, '::-webkit-scrollbar')
+      return {
+        gutter: el.offsetWidth - el.clientWidth - parseFloat(style.borderLeftWidth) - parseFloat(style.borderRightWidth),
+        policy: style.scrollbarGutter, width: style.scrollbarWidth, pseudoWidth: bar.width, pseudoDisplay: bar.display,
+      }
+    })
+    c.is('1440 reserves the native scrollbar gutter', scroll, 'stable gutter, visible native scrollbar', scroll.policy === 'stable' && scroll.width !== 'none' && scroll.pseudoWidth !== '0px' && scroll.pseudoDisplay !== 'none')
     const now = await desktopGeometry(page)
-    for (const [name, expected] of Object.entries(MAIN_1440)) {
+    for (const [name, overlay] of Object.entries(MAIN_1440)) {
+      const expected = { ...overlay }
+      if (name !== 'header') {
+        if (/^column [2-6]$/.test(name)) expected.x -= scroll.gutter
+        else expected.width -= scroll.gutter
+      }
       const actual = now[name]
       const drift = actual ? Math.max(...(['x', 'y', 'width', 'height'] as const).map(key => Math.abs(actual[key] - expected[key]))) : Infinity
       c.is(`1440 ${name} vs main`, actual, `${JSON.stringify(expected)} ±1`, drift <= 1)

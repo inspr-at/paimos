@@ -251,12 +251,9 @@ watch(() => [route.path, route.params.projectKey, route.params.ticketKey, route.
 .app-shell { box-sizing: border-box; height: 100%; padding: 0 env(safe-area-inset-right) env(safe-area-inset-bottom) env(safe-area-inset-left); display: grid; grid-template-columns: minmax(0, 1fr); grid-template-rows: var(--header-h) minmax(0, 1fr) var(--footer-h); }
 .app-shell.bare { --footer-h: 0px; grid-template-rows: minmax(0, 1fr); }
 .app-shell.header-folded { grid-template-rows: minmax(0, 1fr) var(--footer-h); }
-/* The gutter is reserved so a scrollbar appearing as content loads never shifts the page sideways.
-   Linux light Chromium still gives that classic thin bar a 10 px layout width (dark and overlay bars take none),
-   which narrows the desktop page against the geometry measured with overlay scrollbars (AEON-1459 C9).
-   A zero-width bar keeps the reservation at zero on both, so the page does not shift and the width stays. */
-main { position: relative; min-height: 0; overflow: auto; scrollbar-gutter: stable; scrollbar-width: none; outline: none; scroll-padding-top: 96px; }
-main::-webkit-scrollbar { width: 0; height: 0; }
+/* Reserve the native scrollbar's gutter so content loading never shifts the page sideways.
+   Keep the scrollbar visible and draggable on platforms with classic scrollbars. */
+main { position: relative; min-height: 0; overflow: auto; scrollbar-gutter: stable; outline: none; scroll-padding-top: 96px; }
 /* The header's slot inside the page: empty and boxless until a short screen moves the header in. */
 .header-slot { display: contents; }
 /* Compact (AEON-1459, D1): a 44 px header row and no footer row; the scroller keeps one size while
