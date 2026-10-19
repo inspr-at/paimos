@@ -53,49 +53,203 @@ func ownerSchedule(ctx context.Context, tx pgx.Tx, fn func(context.Context, pgx.
 	return reason, step.Commit(ctx)
 }
 
-// Queue is the only work source. Read at most 201 small rows; overflow is an
-// explicit wait, never permission based on a partial scheduling snapshot.
-// Dependency blockers, incomplete criteria and changed/non-leaf work cannot
-// win a turn. Preserve manual/target order inside a project at actual pickup.
+// A direct person run holds the leaf, including while it is still queued for
+// its daemon. Another queued lead entry is demand for the scheduling snapshot,
+// not a second writer. An unconfirmed exit or launch keeps requireWriterFree's
+// own refusal; this fence must not replace that error. Caller holds the
+// tenant/tree fences. r is the candidate run and n its work leaf. Labels and
+// a missed heartbeat do not release a live writer.
+const leadOtherWriterSQL = `SELECT 1 FROM agent_runs other
+ JOIN nodes other_order ON other_order.tenant_id=other.tenant_id AND other_order.id=other.work_order_id
+ WHERE other.id<>r.id AND (other.work_order_id=r.work_order_id OR other.queue_node_id=n.id OR other_order.parent_id=n.id)
+ AND (other.status IN ('starting','running','waiting') OR (other.queue_node_id IS NULL AND other.status='queued'))`
+
+func requireLeadWriterFreeTx(ctx context.Context, tx pgx.Tx, run string) error {
+	var busy bool
+	err := tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM agent_runs r
+ JOIN nodes o ON o.tenant_id=r.tenant_id AND o.id=r.work_order_id
+ JOIN nodes n ON n.tenant_id=o.tenant_id AND n.id=coalesce(r.queue_node_id,o.parent_id)
+ WHERE r.id=$1 AND EXISTS(`+leadOtherWriterSQL+`))`, run).Scan(&busy)
+	if err != nil {
+		return err
+	}
+	if busy {
+		return workorders.Fail(409, "lead_writer_conflict")
+	}
+	return nil
+}
+
+// Queue is the only work source. Read at most 201 small candidate rows and
+// refuse before leaf, pending, writer or dependency work. Those predicates are
+// volatile per row; evaluating them to discover overflow exceeds the scheduling
+// deadline and must not authorize a turn from a partial snapshot. A complete
+// candidate set is then filtered. Dependency blockers, incomplete criteria and
+// changed or non-leaf work cannot win a turn. Preserve manual/target order
+// inside a project at actual pickup.
 func leadQueueDemand(ctx context.Context, tx pgx.Tx, owner string) ([]leadDemand, error) {
-	rows, err := tx.Query(ctx, `SELECT n.project_id::text,r.id::text,r.queue_at,
- (r.queue_routed_at IS NOT NULL),CASE WHEN octet_length(n.fields::text)<=65536 THEN n.fields END
+	staged, nodes, err := leadCandidateSnapshot(ctx, tx, owner)
+	if err != nil || len(staged) == 0 {
+		return staged, err
+	}
+	eligible, err := leadEligibleDemand(ctx, tx, staged, nodes)
+	if err != nil {
+		return nil, err
+	}
+	demands := []leadDemand{}
+	for _, d := range eligible {
+		if workqueue.Check("work", "open", "", "", workqueue.Fields(d.fields), false).Ready {
+			demands = append(demands, d)
+		}
+	}
+	return demands, nil
+}
+
+const leadCandidateSQL = `SELECT n.project_id::text,r.id::text,r.queue_at,
+ (r.queue_routed_at IS NOT NULL),CASE WHEN octet_length(n.fields::text)<=65536 THEN n.fields END,
+ n.id::text
  FROM agent_runs r JOIN nodes n ON n.tenant_id=r.tenant_id AND n.id=r.queue_node_id
  JOIN project_leads l ON l.tenant_id=n.tenant_id AND l.project_id=n.project_id
  JOIN nodes project ON project.tenant_id=l.tenant_id AND project.id=l.project_id
  WHERE l.owner_principal_id=$1 AND project.deleted_at IS NULL AND project.state NOT IN ('frozen','archived')
  AND r.status='queued' AND n.deleted_at IS NULL AND n.state='open'
  AND (r.queue_routed_at IS NULL OR (r.trace->'project_lead'->>'session_id'=l.session_id::text AND r.trace->'project_lead'->>'generation'=l.generation::text))
- AND aeon_work_leaf(n.id) AND aeon_work_pending(n.id) IS NULL
- AND NOT EXISTS(SELECT 1 FROM node_relations rel JOIN nodes blocker ON blocker.tenant_id=rel.tenant_id AND blocker.id=rel.source_node_id
- JOIN node_kinds k ON k.tenant_id=blocker.tenant_id AND k.id=blocker.kind_id
- WHERE rel.target_node_id=n.id AND rel.type='blocks' AND blocker.deleted_at IS NULL
- AND aeon_work_status_category(blocker.state,k.field_schema) NOT IN ('done','accepted','delivered','cancelled','archived'))
- ORDER BY r.queue_at,r.id LIMIT 201`, owner)
+ ORDER BY r.queue_at,r.id LIMIT 201`
+
+func leadCandidateSnapshot(ctx context.Context, tx pgx.Tx, owner string) ([]leadDemand, []string, error) {
+	rows, err := tx.Query(ctx, leadCandidateSQL, owner)
+	if err != nil {
+		return nil, nil, err
+	}
+	defer rows.Close()
+	staged := []leadDemand{}
+	nodes := []string{}
+	for rows.Next() {
+		var d leadDemand
+		var node string
+		if err = rows.Scan(&d.project, &d.run, &d.at, &d.routed, &d.fields, &node); err != nil {
+			return nil, nil, err
+		}
+		// Field overflow is reported for the row that carries it, including the
+		// row that would otherwise be the snapshot overflow.
+		if d.fields == nil {
+			return nil, nil, workorders.Fail(409, "lead scheduling fields exceed bound")
+		}
+		if len(staged) == maxLeadDemand {
+			return nil, nil, workorders.Fail(409, "lead scheduling snapshot exceeds bound")
+		}
+		staged = append(staged, d)
+		nodes = append(nodes, node)
+	}
+	if err = rows.Err(); err != nil {
+		return nil, nil, err
+	}
+	return staged, nodes, nil
+}
+
+// Leaf and pending widen visibility the way aeon_work_leaf and aeon_work_pending
+// do, once for the whole bounded set. Writer and dependency checks stay on the
+// caller's visibility: those predicates do not widen it.
+func leadEligibleDemand(ctx context.Context, tx pgx.Tx, staged []leadDemand, nodeIDs []string) ([]leadDemand, error) {
+	leaf := map[string]bool{}
+	pending := map[string]bool{}
+	err := withSchedulingSystem(ctx, tx, func() error {
+		var over bool
+		if err := tx.QueryRow(ctx, leadAncestryOverSQL, nodeIDs).Scan(&over); err != nil {
+			return err
+		}
+		if over {
+			return errors.New("work action ancestry exceeds scope budget")
+		}
+		var err error
+		if leaf, err = leadIDSet(ctx, tx, leadLeafSQL, nodeIDs); err != nil {
+			return err
+		}
+		pending, err = leadIDSet(ctx, tx, leadPendingSQL, nodeIDs)
+		return err
+	})
+	if err != nil {
+		return nil, err
+	}
+	runs := make([]string, len(staged))
+	for i := range staged {
+		runs[i] = staged[i].run
+	}
+	free, err := leadIDSet(ctx, tx, leadFreeRunSQL, runs)
+	if err != nil {
+		return nil, err
+	}
+	out := []leadDemand{}
+	for i, d := range staged {
+		if leaf[nodeIDs[i]] && !pending[nodeIDs[i]] && free[d.run] {
+			out = append(out, d)
+		}
+	}
+	return out, nil
+}
+
+func withSchedulingSystem(ctx context.Context, tx pgx.Tx, fn func() error) (err error) {
+	var prior string
+	if err = tx.QueryRow(ctx, `SELECT coalesce(current_setting('aeon.system',true),'')`).Scan(&prior); err != nil {
+		return err
+	}
+	if _, err = tx.Exec(ctx, `SELECT set_config('aeon.system','on',true)`); err != nil {
+		return err
+	}
+	defer func() {
+		if _, restoreErr := tx.Exec(ctx, `SELECT set_config('aeon.system',$1,true)`, prior); restoreErr != nil && err == nil {
+			err = restoreErr
+		}
+	}()
+	return fn()
+}
+
+func leadIDSet(ctx context.Context, tx pgx.Tx, query string, ids []string) (map[string]bool, error) {
+	rows, err := tx.Query(ctx, query, ids)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
-	demands := []leadDemand{}
-	count := 0
+	set := map[string]bool{}
 	for rows.Next() {
-		var d leadDemand
-		if err = rows.Scan(&d.project, &d.run, &d.at, &d.routed, &d.fields); err != nil {
+		var id string
+		if err = rows.Scan(&id); err != nil {
 			return nil, err
 		}
-		if d.fields == nil {
-			return nil, workorders.Fail(409, "lead scheduling fields exceed bound")
-		}
-		count++
-		if count > maxLeadDemand {
-			return nil, workorders.Fail(409, "lead scheduling snapshot exceeds bound")
-		}
-		if workqueue.Check("work", "open", "", "", workqueue.Fields(d.fields), false).Ready {
-			demands = append(demands, d)
-		}
+		set[id] = true
 	}
-	return demands, rows.Err()
+	return set, rows.Err()
 }
+
+const leadAncestryOverSQL = `WITH RECURSIVE chain AS (
+ SELECT id AS origin,id,parent_id,1 AS depth FROM nodes WHERE id=ANY($1::uuid[])
+ UNION ALL SELECT c.origin,p.id,p.parent_id,c.depth+1 FROM chain c
+ JOIN nodes p ON p.id=c.parent_id WHERE c.depth<50001
+) SELECT EXISTS(SELECT 1 FROM chain WHERE depth=50001)`
+
+const leadLeafSQL = `SELECT n.id::text FROM nodes n
+ JOIN node_kinds k ON k.tenant_id=n.tenant_id AND k.id=n.kind_id
+ WHERE n.id=ANY($1::uuid[]) AND n.deleted_at IS NULL AND k.slug='work'
+ AND NOT EXISTS(SELECT 1 FROM nodes c JOIN node_kinds ck ON ck.tenant_id=c.tenant_id AND ck.id=c.kind_id
+  WHERE c.parent_id=n.id AND c.deleted_at IS NULL AND ck.slug='work')`
+
+const leadPendingSQL = `WITH RECURSIVE chain AS (
+ SELECT id AS origin,id,parent_id,1 AS depth FROM nodes WHERE id=ANY($1::uuid[])
+ UNION ALL SELECT c.origin,p.id,p.parent_id,c.depth+1 FROM chain c
+ JOIN nodes p ON p.id=c.parent_id WHERE c.depth<50001
+) SELECT DISTINCT c.origin::text FROM chain c
+ JOIN work_lifecycle_actions a ON a.state='waiting' AND a.node_id=c.id
+ UNION SELECT n.id::text FROM nodes n WHERE n.id=ANY($1::uuid[]) AND EXISTS(
+  SELECT 1 FROM work_lifecycle_actions a WHERE a.state='waiting' AND EXISTS(
+   SELECT 1 FROM jsonb_array_elements(a.targets) t WHERE t->>'id'=n.id::text))`
+
+const leadFreeRunSQL = `SELECT r.id::text FROM agent_runs r
+ JOIN nodes n ON n.tenant_id=r.tenant_id AND n.id=r.queue_node_id
+ WHERE r.id=ANY($1::uuid[])
+ AND NOT EXISTS(` + leadOtherWriterSQL + `)
+ AND NOT EXISTS(SELECT 1 FROM node_relations rel JOIN nodes blocker ON blocker.tenant_id=rel.tenant_id AND blocker.id=rel.source_node_id
+ JOIN node_kinds k ON k.tenant_id=blocker.tenant_id AND k.id=blocker.kind_id
+ WHERE rel.target_node_id=n.id AND rel.type='blocks' AND blocker.deleted_at IS NULL
+ AND aeon_work_status_category(blocker.state,k.field_schema) NOT IN ('done','accepted','delivered','cancelled','archived'))`
 
 // Effective arrival is max(oldest eligible work, last successful route).
 // A successful route moves that project's next turn behind existing demand;
@@ -247,6 +401,8 @@ func leadWorkerYieldConfirmedTx(ctx context.Context, tx pgx.Tx, l Lead) (bool, e
 // LeadDispatchTurnTx is scheduling advice under the final mutation fence,
 // after RequireLeadDispatchTx proves the current session and mandatory gates.
 // Idempotent already-routed assignments bypass turns, but never their fences.
+// A leaf held by another writer is left out of the snapshot, so pickup skips
+// it as work_not_eligible; RequireAssignedLeadStartTx refuses the final claim.
 func LeadDispatchTurnTx(ctx context.Context, tx pgx.Tx, p tenant.Principal, project, run string, admission LeadAdmission) (string, error) {
 	l, err := loadLead(ctx, tx, project, false)
 	if err != nil || l.State == "none" {
