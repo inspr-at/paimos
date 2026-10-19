@@ -105,8 +105,8 @@ export function priorityMix(f: ProjectFigures | null): { full: string; compact: 
     compact: `${fmtInt(top)}${NBSP}${word}${others ? `${NBSP}+${fmtInt(others)}` : ''}`,
   }
 }
-// The priority column's minimum in group summaries: room for a compact mix with two-digit counts ("12 med +34") in
-// the cells' 12 px type, inside the cell's 12 px padding on each side.
+// The priority column's minimum in group summaries: room for a compact mix such as "12 high +34" in the cells' 12 px
+// system type, inside the cell's 12 px padding on each side. Rows at this width show the priority icon alone.
 export const MIX_PRIORITY_MIN = 96
 
 // The people assigned in the group ("2 people"), when no session is live. A tail beyond the top three may hold more.
