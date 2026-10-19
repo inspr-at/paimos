@@ -103,7 +103,8 @@ function watchNavigation() {
   navigationResize.observe(row)
 }
 onMounted(watchNavigation)
-watch(() => props.settingsTarget, () => void nextTick(watchNavigation))
+// A deferred Teleport assigns this ref after the parent's mounted hook.
+watch([settings, () => props.settingsTarget], () => void nextTick(watchNavigation), { flush: 'post' })
 onBeforeUnmount(() => navigationResize?.disconnect())
 // A narrow toolbar (docked panel, small window) gets a placeholder that fits.
 const narrow = ref(false)

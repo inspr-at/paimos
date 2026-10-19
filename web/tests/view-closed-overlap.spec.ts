@@ -101,7 +101,10 @@ async function stableToggle(page: Page) {
   // Sample every currently visible row action, including the clicked label,
   // the gear and saved-view links, while ignoring inert/overflowed content.
   const actions = navigation(page).locator('button, a, .closed-switch, .hide-control')
-  for (let i = 0; i < await actions.count(); i++) if (await actions.nth(i).isVisible()) controls[`row-${i}`] = actions.nth(i)
+  for (let i = 0; i < await actions.count(); i++) if (await actions.nth(i).isVisible()) {
+    await actions.nth(i).evaluate((el, index) => el.setAttribute('data-aeon1559-probe', String(index)), i)
+    controls[`row-${i}`] = navigation(page).locator(`[data-aeon1559-probe="${i}"]`)
+  }
   const boxes = async () => Object.fromEntries(await Promise.all(Object.entries(controls).map(async ([name, el]) => [name, await el.boundingBox()])))
   const before = await boxes()
   await expectStableControls({ controls, scrollAreas: { row: navigation(page) }, interactions: [false, true].map(hidden => ({ name: hidden ? 'hide closed' : 'show closed', run: async () => {
