@@ -32,20 +32,26 @@ var ErrPersonStepCoverage = errors.New("desk person-step coverage exceeds 1000 c
 var ErrCoverage = errors.New("desk project coverage exceeds 1000 projects")
 
 type Item struct {
-	PersonStep *workorders.PersonStep `json:"person_step,omitempty"`
-	ID         string                 `json:"id"`
-	Kind       string                 `json:"kind"`
-	ProjectID  string                 `json:"project_id,omitempty"`
-	Revision   int64                  `json:"revision"`
-	Title      string                 `json:"title"`
-	CreatedAt  time.Time              `json:"created_at"`
-	ExpiresAt  *time.Time             `json:"expires_at,omitempty"`
-	Held       bool                   `json:"held"`
-	CanDecide  bool                   `json:"can_decide"`
-	Href       string                 `json:"href"`
-	Source     string                 `json:"source"`
-	Bucket     int                    `json:"-"`
-	OrderAt    time.Time              `json:"-"`
+	DefinitionChange *DefinitionChangeItem  `json:"definition_change,omitempty"`
+	PersonStep       *workorders.PersonStep `json:"person_step,omitempty"`
+	ID               string                 `json:"id"`
+	Kind             string                 `json:"kind"`
+	ProjectID        string                 `json:"project_id,omitempty"`
+	Revision         int64                  `json:"revision"`
+	Title            string                 `json:"title"`
+	CreatedAt        time.Time              `json:"created_at"`
+	ExpiresAt        *time.Time             `json:"expires_at,omitempty"`
+	Held             bool                   `json:"held"`
+	CanDecide        bool                   `json:"can_decide"`
+	Href             string                 `json:"href"`
+	Source           string                 `json:"source"`
+	Bucket           int                    `json:"-"`
+	OrderAt          time.Time              `json:"-"`
+}
+
+type DefinitionChangeItem struct {
+	ProjectKey   string `json:"project_key"`
+	PendingCount int    `json:"pending_count"`
 }
 
 // PushEligible is evaluated again just before dispatch. Answered questions,
@@ -164,7 +170,7 @@ func validID(id string) bool {
 }
 
 func validKind(kind string) bool {
-	return kind == "question" || kind == "approval" || kind == "action_request" || kind == "doctrine" || kind == "key_trim" || kind == "stepup" || kind == "tier_request" || kind == "account_matrix" || kind == "routine_consent" || kind == "lesson"
+	return kind == "question" || kind == "approval" || kind == "action_request" || kind == "doctrine" || kind == "key_trim" || kind == "stepup" || kind == "tier_request" || kind == "account_matrix" || kind == "routine_consent" || kind == "lesson" || kind == "definition_change"
 }
 
 func (m *Module) Read(ctx context.Context, p tenant.Principal, limit int, after *cursor) (Page, error) {

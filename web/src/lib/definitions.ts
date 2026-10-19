@@ -11,8 +11,12 @@ export type DefinitionStatus = typeof DEFINITION_BLOCKS[number]['id']
 export type DefinitionCondition = 'all' | 'ui' | 'code' | 'blocked' | 'release_notes' | 'releases'
 export interface DefinitionRule { id: string; label?: string; label_de?: string; condition?: DefinitionCondition; kinds?: string[]; labels?: string[]; owner_id?: string | null; fallback_owner_id?: string | null }
 export type DefinitionChecks = Partial<Record<DefinitionStatus, DefinitionRule[]>>
-export interface Definition { id: string; revision: string; source: 'project' | 'workspace'; copied_from_revision: string | null; checks: DefinitionChecks }
-export interface DefinitionContext { project_id: string; definition: Definition | null; workspace_default: Definition | null; copied_from_checks: DefinitionChecks | null; can_manage: boolean }
+export interface Definition { id: string; revision: string; created_at?: string; source: 'project' | 'workspace'; copied_from_revision: string | null; checks: DefinitionChecks }
+export interface DefinitionChange { check_id: string; block: DefinitionStatus; kind: 'new' | 'changed' | 'removed'; before: DefinitionRule | null; current: DefinitionRule | null }
+export interface DefinitionAdmin { id: string; name: string }
+export interface DefinitionContext { project_id: string; definition: Definition | null; workspace_default: Definition | null; copied_from_checks: DefinitionChecks | null; can_manage: boolean; pending_changes?: DefinitionChange[]; admins?: DefinitionAdmin[] }
+export interface DefinitionProject { project_id: string; key: string; difference_count: number; pending_count: number }
+export interface WorkspaceDefinitionContext { definition: Definition | null; can_manage: boolean; admins: DefinitionAdmin[]; projects: DefinitionProject[]; differ_count: number; uses_default: string[]; next_cursor: string | null }
 export const DEFINITION_CATALOG: { id: string; en: string; de: string; condition: DefinitionCondition; block: DefinitionStatus; icon: IconName }[] = [
   { id: 'estimate_set', en: 'Estimate set', de: 'Schätzung gesetzt', condition: 'all', block: 'in_progress', icon: 'clock' },
   { id: 'acceptance_present', en: 'Acceptance criteria written', de: 'Abnahmekriterien beschrieben', condition: 'all', block: 'in_progress', icon: 'list' },
@@ -28,6 +32,32 @@ export const DEFINITION_CATALOG: { id: string; en: string; de: string; condition
   { id: 'released', en: 'Shipped in a release', de: 'In einem Release ausgeliefert', condition: 'releases', block: 'done', icon: 'layers' },
 ]
 export const DEFINITION_CONDITIONS: Record<DefinitionCondition, string> = { all: 'All tickets', ui: 'UI tickets', code: 'Code tickets', blocked: 'Blocked tickets', release_notes: 'Unless hidden from release notes', releases: 'If the project uses releases' }
+export const DEFINITION_CONDITIONS_DE: Record<DefinitionCondition, string> = { all: 'Alle Tickets', ui: 'UI-Tickets', code: 'Code-Tickets', blocked: 'Blockierte Tickets', release_notes: 'Sofern in Release-Notizen sichtbar', releases: 'Wenn das Projekt Releases nutzt' }
+export const definitionConditionWords = (rule: DefinitionRule, language = 'en') => (language === 'de' ? DEFINITION_CONDITIONS_DE : DEFINITION_CONDITIONS)[ruleCondition(rule)]
+export function definitionDate(value: string, language = 'en') {
+  const date = new Date(value)
+  return Number.isNaN(date.getTime()) ? '' : new Intl.DateTimeFormat(language === 'de' ? 'de-AT' : 'en-GB', {day:'numeric', month:'short', timeZone:'UTC'}).format(date).replace(/\s/g, '\u00a0')
+}
+export function definitionNotice(key: string, count: number, date: string, language = 'en') {
+  if (!count) return language === 'de' ? 'Alle Änderungen entschieden.' : 'All changes decided.'
+  return language === 'de' ? `Der Workspace-Standard wurde am ${date} geändert, nachdem ${key} ihn kopiert hat. ${count}\u00a0${count === 1 ? 'Änderung wartet' : 'Änderungen warten'} unten auf eine Entscheidung; bis dahin behält ${key} seine Kopie unverändert.`
+    : `The workspace default changed on ${date}, after ${key} copied it. ${count}\u00a0${count === 1 ? 'change waits' : 'changes wait'} for a decision below; until then ${key} keeps its copy as it is.`
+}
+export function definitionChangeWords(change: DefinitionChange, date: string, language = 'en') {
+  const de = language === 'de', condition = change.current ? definitionConditionWords(change.current, language) : ''
+  return change.kind === 'new' ? de ? `Neu im Workspace-Standard seit ${date}` : `New in the workspace default since ${date}`
+    : change.kind === 'removed' ? de ? `Seit ${date} nicht mehr im Workspace-Standard` : `Gone from the workspace default since ${date}`
+    : de ? `Der Workspace-Standard sagt jetzt ${condition} (seit ${date})` : `The workspace default now says ${condition} (since ${date})`
+}
+export function definitionDecisionWords(change: DefinitionChange, own: DefinitionRule | undefined, language = 'en'): [string, string] {
+  const de = language === 'de', condition = definitionConditionWords(own ?? change.before ?? change.current!, language)
+  return change.kind === 'new' ? de ? ['Hier übernehmen','Weglassen'] : ['Add here','Leave out']
+    : change.kind === 'removed' ? de ? ['Auch hier entfernen','Behalten'] : ['Remove here too','Keep it']
+    : de ? ['Auch hier übernehmen',`${condition} behalten`] : ['Use it here too',`Keep ${condition}`]
+}
+export function definitionDeskWords(key: string, count: number, language = 'en') {
+  return language === 'de' ? `${key}: ${count}\u00a0Änderungen am Workspace-Standard warten auf eine Entscheidung` : `${key}: ${count}\u00a0changes to the workspace default wait for a decision`
+}
 export const DEFINITION_CONDITION_OPTIONS = [
   { value: 'all', detail: 'Every ticket' },
   { value: 'code', detail: 'Tickets that change code' },
@@ -97,3 +127,6 @@ export function saveDefinition(id: string, checks: DefinitionChecks, context: De
   return request<Definition>(`/projects/${encodeURIComponent(id)}/definitions`, { method: 'PUT', signal, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ checks, expected_revision: own ? current.revision : null, copied_from_revision: own ? current.copied_from_revision : workspace?.revision ?? null, ...(!own ? { expected_workspace_revision: workspace?.revision ?? null } : {}) }) })
 }
 export const resetDefinition = (id: string, context: DefinitionContext, signal?: AbortSignal) => request<Definition | null>(`/projects/${encodeURIComponent(id)}/definitions`, { method: 'DELETE', signal, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ expected_revision: context.definition?.revision, expected_workspace_revision: context.workspace_default?.revision ?? null }) })
+export const decideDefinitionChange = (id: string, change: DefinitionChange, decision: 'accept' | 'keep', context: DefinitionContext, signal?: AbortSignal) => request<DefinitionContext>(`/projects/${encodeURIComponent(id)}/definitions/decisions`, {method:'POST', signal, headers:{'Content-Type':'application/json'}, body:JSON.stringify({expected_revision:context.definition?.revision, expected_workspace_revision:context.workspace_default?.revision, check_id:change.check_id, decision})})
+export const readWorkspaceDefinitionContext = (after?: string, signal?: AbortSignal) => request<WorkspaceDefinitionContext>(`/settings/definitions/context${after ? `?after=${encodeURIComponent(after)}` : ''}`, {signal})
+export const saveWorkspaceDefinition = (checks: DefinitionChecks, current: Definition | null, signal?: AbortSignal) => request<Definition>('/settings/definitions', {method:'PUT',signal,headers:{'Content-Type':'application/json'},body:JSON.stringify({checks,expected_revision:current?.id === '00000000-0000-0000-0000-000000000000' ? null : current?.revision ?? null})})

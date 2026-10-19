@@ -201,6 +201,44 @@ paths:
         '200': {description: 'Project definition editor context', content: {application/json: {schema: {$ref: '#/components/schemas/EntryDefinitionContext'}}}}
         '403': {$ref: '#/components/responses/Error'}
         '404': {$ref: '#/components/responses/Error'}
+  /projects/{projectId}/definitions/decisions:
+    post:
+      operationId: decideProjectEntryDefinitionChange
+      description: 'Decide one current workspace change for a project copy. Requires a person project admin, rechecked under the tenant/tree fence. Both displayed revisions must match. accept updates only this check; keep retains the enforced copy. Both acknowledge only this workspace change, leaving the original copy snapshot intact. A later change can wait again. Appends definition.change_decided.'
+      security: [{session: []}]
+      parameters: [{$ref: '#/components/parameters/EntryProjectId'}]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [expected_revision, expected_workspace_revision, check_id, decision]
+              properties:
+                expected_revision: {type: string, format: date-time}
+                expected_workspace_revision: {type: string, format: date-time}
+                check_id: {type: string, minLength: 1, maxLength: 80}
+                decision: {type: string, enum: [accept, keep]}
+      responses:
+        '200': {description: 'Current copy and remaining waiting changes', content: {application/json: {schema: {$ref: '#/components/schemas/EntryDefinitionContext'}}}}
+        '400': {$ref: '#/components/responses/Error'}
+        '403': {$ref: '#/components/responses/Error'}
+        '404': {$ref: '#/components/responses/Error'}
+        '409': {$ref: '#/components/responses/Error'}
+  /settings/definitions/context:
+    get:
+      operationId: getWorkspaceEntryDefinitionContext
+      description: 'Read the default, current workspace edit authority, administrator names, and visible projects that differ. Project rows use UUID keyset pagination. Counts and inherited project keys cover at most 1000 visible projects; greater coverage returns 422 instead of partial totals. A project copy is never merged with the default. Uses nodes.read at workspace scope and filters each project by current nodes.read.'
+      security: [{session: []}]
+      parameters:
+        - {name: after, in: query, schema: {type: string, format: uuid}}
+        - {name: limit, in: query, schema: {type: integer, minimum: 1, maximum: 100, default: 50}}
+      responses:
+        '200': {description: 'Workspace definition editor and bounded project differences', content: {application/json: {schema: {$ref: '#/components/schemas/WorkspaceEntryDefinitionContext'}}}}
+        '400': {$ref: '#/components/responses/Error'}
+        '403': {$ref: '#/components/responses/Error'}
+        '422': {$ref: '#/components/responses/Error'}
   /settings/definitions:
     get:
       operationId: getWorkspaceEntryDefinition
@@ -282,6 +320,44 @@ components:
         workspace_default: {oneOf: [{$ref: '#/components/schemas/EntryDefinition'}, {type: 'null'}]}
         copied_from_checks: {oneOf: [{$ref: '#/components/schemas/EntryDefinitionBlocks'}, {type: 'null'}], description: 'Checks retained by the server when this project copied the default; null for a definition created without a copy base.'}
         can_manage: {type: boolean, description: 'The current principal is a person project admin. The server rechecks this inside every write.'}
+        pending_changes: {type: array, maxItems: 192, items: {$ref: '#/components/schemas/EntryDefinitionChange'}, description: 'Unacknowledged changes since the copy or the last per-check decision. These do not alter enforcement.'}
+        admins: {type: array, maxItems: 100, items: {$ref: '#/components/schemas/EntryCheckPerson'}}
+    EntryCheckPerson:
+      type: object
+      required: [id, name]
+      properties:
+        id: {type: string, format: uuid}
+        name: {type: string}
+    EntryDefinitionChange:
+      type: object
+      required: [check_id, block, kind, before, current]
+      properties:
+        check_id: {type: string, maxLength: 80}
+        block: {type: string, enum: [in_progress, qa, done]}
+        kind: {type: string, enum: [new, changed, removed]}
+        before: {oneOf: [{$ref: '#/components/schemas/EntryCheckRule'}, {type: 'null'}]}
+        current: {oneOf: [{$ref: '#/components/schemas/EntryCheckRule'}, {type: 'null'}]}
+    WorkspaceEntryDefinitionContext:
+      type: object
+      required: [definition, can_manage, admins, projects, differ_count, uses_default, next_cursor]
+      properties:
+        definition: {oneOf: [{$ref: '#/components/schemas/EntryDefinition'}, {type: 'null'}]}
+        can_manage: {type: boolean}
+        admins: {type: array, maxItems: 100, items: {$ref: '#/components/schemas/EntryCheckPerson'}}
+        projects:
+          type: array
+          maxItems: 100
+          items:
+            type: object
+            required: [project_id, key, difference_count, pending_count]
+            properties:
+              project_id: {type: string, format: uuid}
+              key: {type: string}
+              difference_count: {type: integer, minimum: 1}
+              pending_count: {type: integer, minimum: 0}
+        differ_count: {type: integer, minimum: 0}
+        uses_default: {type: array, maxItems: 1000, items: {type: string}}
+        next_cursor: {type: [string, 'null'], format: uuid}
     EntryDefinitionBlocks:
       type: object
       additionalProperties: false
@@ -308,6 +384,7 @@ components:
         id: {type: string, format: uuid, description: 'The all-zero UUID identifies the built-in workspace default, which is not a saved node. Saving the first definition uses expected_revision null.'}
         revision: {type: string, format: date-time}
         source: {type: string, enum: [project, workspace]}
+        created_at: {type: string, format: date-time, description: 'Creation time of the saved definition node; the immutable copy date for a project. Absent for the built-in default.'}
         copied_from_revision: {type: [string, 'null'], format: date-time}
         checks: {$ref: '#/components/schemas/EntryDefinitionBlocks'}
     EntryCheckResult:

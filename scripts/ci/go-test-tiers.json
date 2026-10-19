@@ -8546,6 +8546,8 @@
     ,
     {"kind":"go","package":"internal/nodes","name":"TestConvertWritesOneEventAndUndo","tier":"GATED-FULL"}
     ,
+    {"kind":"go","package":"internal/nodes","name":"TestDefinitionDefaultChangesWaitForAuthorizedPerCheckDecisions","tier":"ESSENTIAL"}
+    ,
     {"kind":"go","package":"internal/nodes","name":"TestDeleteAnswersTheRevisionOfItsEvent","tier":"GATED-FULL"}
     ,
     {"kind":"go","package":"internal/nodes","name":"TestEntryChecksDefaultWithoutDefinition","tier":"ESSENTIAL"}

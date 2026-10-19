@@ -16,6 +16,8 @@ import { approvalItem, commitDesk, decisionPermission, emptySources, loadDesk, l
 import { phoneCapability } from '../lib/deskPhoneApproval'
 import { settledElsewhere } from '../lib/stepup'
 import { can, onAccessRevalidate } from '../lib/authz'
+import { useProfile } from '../stores/profile'
+import { definitionDeskWords } from '../lib/definitions'
 import { useSession } from '../stores/session'
 import { useAgents } from '../stores/agents'
 import type { KeyTrimCursors } from '../lib/keyTrim'
@@ -27,7 +29,9 @@ import { doctrineInbox, inboxChanged } from '../lib/doctrineInbox'
 import deskLight from '../assets/desk/desk-empty-light.webp'
 import deskDark from '../assets/desk/desk-empty-dark.webp'
 
-const session = useSession()
+const session = useSession(), profile = useProfile()
+const definitionLanguage = computed(() => profile.profile?.locale?.startsWith('de') ? 'de' : 'en')
+const titleOf = (item: DeskItem) => item.definitionChange ? definitionDeskWords(item.definitionChange.project_key,item.definitionChange.pending_count,definitionLanguage.value) : item.title
 const agents = useAgents()
 const desk = useDecisionDesk(), route = useRoute(), router = useRouter()
 const makeAdapters = () => ({ approvalRun: async (id: string) => {
@@ -205,7 +209,7 @@ function rowClick(event: MouseEvent, item: DeskItem) {
   else begin(item.id)
 }
 // An action request is titled by its kind; its message names the row.
-const rowName = (item: DeskItem) => item.kind === 'action' && item.context ? `${kindLabels.action}: ${item.context.slice(0, 200)}` : `${kindLabels[item.kind]}: ${item.title}`
+const rowName = (item: DeskItem) => item.kind === 'action' && item.context ? `${kindLabels.action}: ${item.context.slice(0, 200)}` : `${kindLabels[item.kind]}: ${titleOf(item)}`
 const recommends = (item: DeskItem) => item.recommended ? item.choices.find(choice => choice.id === item.recommended)?.title ?? '' : ''
 // Approve, Deny, Resolve and Dismiss open rev 11's inline reason form; they commit through the memo's path.
 const rowForm = ref<{ id: string; revision: number; mode: 'approve' | 'deny' | 'resolve' | 'dismiss'; reason: string; busy: boolean; error: string }>()
@@ -635,9 +639,9 @@ onBeforeUnmount(() => { alive = false; generation++; ticketTurn++; stopAccess();
               <li v-if="item.personStep"><PersonStepRequest :item="item" @settled="stepSettled" @busy="value => stepBusy(item.id, value)" /></li>
               <li v-else class="item desk-row" :class="{ blocks: item.held && (item.kind === 'question' || item.kind === 'handover'), high: !!item.approval && riskFor(item.approval) === 'high', open: rowForm?.id === item.id }" :data-testid="`desk-row-${item.id}`" @click="rowClick($event, item)">
               <component :is="item.linkOut ? RouterLink : 'button'" v-bind="item.linkOut ? { to: item.linkOut } : { type: 'button' }" class="row-open" :aria-label="rowName(item)" @click="item.linkOut || begin(item.id)" />
-              <span class="mark" :class="`k-${item.kind}`" aria-hidden="true"><AppIcon :name="KIND_ICON[item.kind]" :size="16" /></span>
+              <span class="mark" :class="`k-${item.kind}`" aria-hidden="true"><AppIcon :name="item.definitionChange ? 'history' : KIND_ICON[item.kind]" :size="16" /></span>
               <div class="body">
-                <p class="line1"><strong class="what"><span v-if="item.kind === 'lesson'">Lesson to adopt · </span>{{ item.title }}</strong><span class="meta"><time v-if="item.expiresAt" class="expiry" :class="{ soon: soon(item.expiresAt) }" :datetime="item.expiresAt">{{ expiry(item.expiresAt) }}</time><time v-else-if="item.createdAt" class="expiry" :datetime="item.createdAt">{{ ago(item.createdAt) }}</time><span v-if="item.approval" class="risk" :class="{ high: riskFor(item.approval) === 'high' }">{{ RISK_LABEL[riskFor(item.approval)] }}</span></span></p>
+                <p class="line1"><strong class="what"><span v-if="item.kind === 'lesson'">Lesson to adopt · </span>{{ titleOf(item) }}</strong><span class="meta"><time v-if="item.expiresAt" class="expiry" :class="{ soon: soon(item.expiresAt) }" :datetime="item.expiresAt">{{ expiry(item.expiresAt) }}</time><time v-else-if="item.createdAt" class="expiry" :datetime="item.createdAt">{{ ago(item.createdAt) }}</time><span v-if="item.approval" class="risk" :class="{ high: riskFor(item.approval) === 'high' }">{{ RISK_LABEL[riskFor(item.approval)] }}</span></span></p>
                 <p class="line2"><span v-if="who(item)" class="who" :data-tip="who(item)?.model || undefined"><HarnessMark v-if="who(item)?.harness" :harness="who(item)!.harness!" :size="14" /><span>{{ who(item)!.name }}</span></span><span class="phrase"><span v-if="item.kind === 'rule'" class="asks">{{ who(item) ? 'proposes' : 'An agent proposes' }} a rule change for</span><template v-else-if="item.kind === 'action'"><span class="asks">{{ who(item) ? 'to' : 'From an agent to' }}</span><span class="to">you</span><span class="asks">on</span></template><span v-else-if="who(item)" class="asks">on</span><span class="proj-quiet" data-testid="desk-row-project"><AppIcon name="folder" :size="13" />{{ item.projectName }}</span><template v-if="ticketOf(item)"><span class="res-key">{{ ticketOf(item)!.key }}</span><span v-if="ticketOf(item)!.title" class="res-title" :data-tip="ticketOf(item)!.title">{{ ticketOf(item)!.title }}</span></template><span v-if="item.runId" class="run-ref" :data-tip="`Run ${item.runId}`" data-testid="desk-row-run">{{ runRef(item.runId) }}</span></span></p>
                 <p v-if="item.approval?.resource_kind === 'tenant'" class="target">The whole workspace</p>
                 <p v-if="item.kind !== 'question' && item.kind !== 'handover' && item.context" class="why" :class="{ 'body-text': item.kind === 'action' }">{{ item.context }}</p>
@@ -652,7 +656,7 @@ onBeforeUnmount(() => { alive = false; generation++; ticketTurn++; stopAccess();
                 </form>
               </div>
               <div v-if="rowForm?.id !== item.id" class="row-actions" data-testid="desk-row-actions">
-                <RouterLink v-if="item.linkOut" class="btn sm approve-soft" :to="item.linkOut">Open in Settings</RouterLink>
+                <RouterLink v-if="item.linkOut" class="btn sm approve-soft" :to="item.linkOut">{{ item.definitionChange ? definitionLanguage === 'de' ? 'Öffnen' : 'Open' : 'Open in Settings' }}</RouterLink>
                 <template v-else-if="item.kind === 'approval' && allowed(item) && !item.unavailable"><button type="button" class="btn sm ghost" @click="openRowForm(item, 'deny')"><AppIcon name="close" :size="13" />Deny</button><button type="button" class="btn sm approve-soft" @click="openRowForm(item, 'approve')"><AppIcon name="check" :size="13" />Approve</button></template>
                 <template v-else-if="item.kind === 'action' && allowed(item) && !item.unavailable"><button type="button" class="btn sm ghost answer" @click="begin(item.id)"><AppIcon name="send" :size="13" />Answer…</button><button type="button" class="btn sm ghost" @click="openRowForm(item, 'dismiss')"><AppIcon name="close" :size="13" />Dismiss</button><button type="button" class="btn sm approve-soft" @click="openRowForm(item, 'resolve')"><AppIcon name="check" :size="13" />Resolve</button></template>
                 <button v-else type="button" class="btn sm approve-soft" @click="begin(item.id)">{{ item.kind === 'question' || item.kind === 'handover' ? 'Answer…' : 'Review…' }}</button>
@@ -668,7 +672,7 @@ onBeforeUnmount(() => { alive = false; generation++; ticketTurn++; stopAccess();
           <template v-for="item in visible" :key="item.id">
               <li v-if="item.personStep"><PersonStepRequest :item="item" @settled="stepSettled" @busy="value => stepBusy(item.id, value)" /></li>
               <li v-else class="dec desk-row" :data-testid="`desk-row-${item.id}`">
-            <component :is="item.linkOut ? RouterLink : 'button'" v-bind="item.linkOut ? { to: item.linkOut } : { type: 'button' }" class="row-open" :aria-label="`${kindLabels[item.kind]}: ${item.title}`" @click="item.linkOut || begin(item.id)" />
+            <component :is="item.linkOut ? RouterLink : 'button'" v-bind="item.linkOut ? { to: item.linkOut } : { type: 'button' }" class="row-open" :aria-label="`${kindLabels[item.kind]}: ${titleOf(item)}`" @click="item.linkOut || begin(item.id)" />
             <span class="mark" :class="outcomeOf(item).tone" aria-hidden="true"><AppIcon :name="outcomeOf(item).icon" :size="15" /></span>
             <span class="dec-text"><span class="dec-q">{{ item.title }}</span><span v-if="item.answer" class="dec-a">{{ item.answer }}</span><span class="dec-meta"><template v-if="who(item)"><span>{{ who(item)!.name }}</span><span>·</span></template><span class="proj-quiet"><AppIcon name="folder" :size="13" />{{ item.projectName }}</span><template v-if="ticketOf(item)"><span>·</span><span>{{ ticketOf(item)!.key }}</span></template><template v-if="item.runId"><span>·</span><span class="run-ref" :data-tip="`Run ${item.runId}`" data-testid="desk-row-run">{{ runRef(item.runId) }}</span></template><template v-if="item.decidedAt || item.createdAt"><span>·</span><span>decided {{ ago(item.decidedAt || item.createdAt) }}</span></template><template v-if="graceLeft(item)"><span>·</span><span>sends in <span class="n">{{ graceLeft(item) }}</span> s</span></template><template v-else-if="item.deliveryState === 'failed'"><span>·</span><span class="dl-bad">not delivered</span></template><template v-else-if="item.deliveryState"><span>·</span><span>waiting for it to read</span></template></span></span>
             <span class="dec-side"><span class="dec-out" :class="outcomeOf(item).tone"><AppIcon :name="outcomeOf(item).icon" :size="13" />{{ outcomeOf(item).word }}</span><button v-if="graceLeft(item)" type="button" class="btn sm ghost" @click="undoRow(item)"><AppIcon name="rollback" :size="13" />Undo</button></span>

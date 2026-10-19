@@ -1,12 +1,14 @@
 <!-- SPDX-License-Identifier: AGPL-3.0-only -->
 <script setup lang="ts">
-import { computed, onBeforeUnmount, ref, watch } from 'vue'
+import { computed, nextTick, onBeforeUnmount, ref, watch } from 'vue'
+import { useRoute } from 'vue-router'
+import { useProfile } from '../../stores/profile'
 import type { Project } from '../../stores/projects'
 import { useSession } from '../../stores/session'
 import { can, myProjectRole, myWorkspaceRole, onAccessRevalidate } from '../../lib/authz'
 import { useIdentityScope } from '../../lib/useIdentityScope'
 import { APIError } from '../../lib/api'
-import { checkCount, cloneChecks, definitionDiff, readDefinitionContext, resetChanges, resetDefinition, saveDefinition, type DefinitionChecks, type DefinitionContext } from '../../lib/definitions'
+import { checkCount, cloneChecks, decideDefinitionChange, definitionDate, definitionNotice, definitionDiff, readDefinitionContext, resetChanges, resetDefinition, saveDefinition, type DefinitionChange, type DefinitionChecks, type DefinitionContext } from '../../lib/definitions'
 import { useProjectSettingsOverlay } from '../../lib/projectSettings'
 import { claimSettingsPopover } from '../../lib/settingsOverlays'
 import { toast } from '../../lib/toast'
@@ -17,9 +19,19 @@ import SettingsCard from './SettingsCard.vue'
 import ProjectSettingsExplainer from './ProjectSettingsExplainer.vue'
 import DefinitionEditor from './DefinitionEditor.vue'
 
+const route = useRoute(), profile = useProfile()
+const language = computed(() => profile.profile?.locale?.startsWith('de') ? 'de' : 'en')
+const t = (en: string, de: string) => language.value === 'de' ? de : en
 const props = defineProps<{ project: Project }>(), session = useSession(), scope = useIdentityScope(), reads = scope.lane()
 const context = ref<DefinitionContext | null>(null), loading = ref(true), busy = ref(false), error = ref(''), stale = ref(false), editorEpoch = ref(0)
 const editor = ref<InstanceType<typeof DefinitionEditor>>()
+const notice = ref<HTMLElement>(), noticeShown = ref(false), noticeReserve = ref('')
+const pending = computed(() => context.value?.pending_changes ?? [])
+const changedDate = computed(() => definitionDate(context.value?.workspace_default?.revision ?? '', language.value))
+const noticeText = computed(() => definitionNotice(props.project.routeKey,pending.value.length,changedDate.value,language.value))
+const copyDate = computed(() => context.value?.definition?.created_at ? definitionDate(context.value.definition.created_at,language.value) : '')
+const adminNames = computed(() => context.value?.admins?.map(person => person.name).join(', ') ?? '')
+function landOnNotice() { if (route.query.definition_changes === '1' && pending.value.length) void nextTick(() => { notice.value?.scrollIntoView({block:'start'}); void editor.value?.focusWaiting() }) }
 const own = computed(() => context.value?.definition?.source === 'project')
 const checks = computed(() => context.value?.definition?.checks ?? {})
 const workspace = computed(() => context.value?.workspace_default?.checks ?? {})
@@ -28,14 +40,15 @@ const mayManage = computed(() => !!context.value?.can_manage && admin.value && !
 const diff = computed(() => own.value ? definitionDiff(checks.value, workspace.value, context.value?.copied_from_checks) : [])
 const differenceCount = computed(() => diff.value.filter(row => row.kind !== 'same').length)
 const empty = computed(() => !checkCount(checks.value))
-const originTitle = computed(() => !context.value ? 'Definitions' : own.value ? `${props.project.routeKey} has its own definition` : context.value.definition ? 'Uses the workspace default' : 'No definition yet')
+const originTitle = computed(() => !context.value ? 'Definitions' : own.value ? t(`${props.project.routeKey} has its own definition`,`${props.project.routeKey} hat eine eigene Definition`) : context.value.definition ? t('Uses the workspace default','Nutzt den Workspace-Standard') : t('No definition yet','Noch keine Definition'))
 const originText = computed(() => {
   if (loading.value) return 'Reading the definition…'
   if (!context.value) return 'The definition could not be read. Reload to try again.'
   if (empty.value) return own.value ? `No checks. Tickets in ${props.project.routeKey} move freely, for people and agents. Add one below.` : context.value.definition ? `The workspace default has no checks. Tickets in ${props.project.routeKey} move freely.` : `Tickets in ${props.project.routeKey} move freely, for people and agents. Add a check below.`
   if (own.value && !context.value?.workspace_default) return `Made for ${props.project.routeKey}; there is no workspace default.`
-  if (!own.value) return `Changes to Policies in Settings apply to ${props.project.routeKey} at once.`
-  return differenceCount.value ? `Differs in ${differenceCount.value} ${differenceCount.value === 1 ? 'place' : 'places'}, marked below.` : 'Same as the workspace default so far.'
+  if (!own.value) return t(`Changes to Policies in Settings apply to ${props.project.routeKey} at once.`,`Änderungen an den Richtlinien in den Einstellungen gelten sofort für ${props.project.routeKey}.`)
+  const provenance = copyDate.value ? t(`Copied from the workspace default on ${copyDate.value}. `,`Vom Workspace-Standard am ${copyDate.value} kopiert. `) : ''
+ return provenance + (differenceCount.value ? t(`Differs in ${differenceCount.value} ${differenceCount.value === 1 ? 'place' : 'places'}, marked below.`,`Weicht an ${differenceCount.value} Stellen ab, unten markiert.`) : t('Same as the workspace default so far.','Bisher gleich wie der Workspace-Standard.'))
 })
 const reset = ref<{ context: DefinitionContext; projectID: string; key: string; anchor: HTMLElement; lines: string[] } | null>(null), resetBody = ref<HTMLElement>()
 const register = useProjectSettingsOverlay()
@@ -55,7 +68,7 @@ function load() {
   loading.value = true; error.value = ''
   void reads.run(({ after, signal }) => after(readDefinitionContext(target, signal), value => {
     if (props.project.id !== target || value.project_id !== target) return
-    context.value = value; stale.value = false; editorEpoch.value++
+    context.value = value; stale.value = false; editorEpoch.value++; noticeShown.value = !!value.pending_changes?.length; noticeReserve.value = noticeShown.value ? definitionNotice(props.project.routeKey,value.pending_changes!.length,definitionDate(value.workspace_default?.revision ?? '',language.value),language.value) : ''; landOnNotice()
   }), { failed: problem => { failed(problem, target); stale.value = true }, settled: () => { loading.value = false } })
 }
 function save(next: DefinitionChecks, applied: () => void = () => {}) {
@@ -68,6 +81,16 @@ function save(next: DefinitionChecks, applied: () => void = () => {}) {
     context.value = { ...captured, definition: saved, copied_from_checks: wasOwn ? captured.copied_from_checks : cloneChecks(captured.workspace_default?.checks) }
     applied(); toast('Definition saved.', { key: `definitions/${target}` })
   }), { failed: problem => { failed(problem, target); if (problem instanceof APIError && [403,409].includes(problem.status)) stale.value = true }, settled: () => { busy.value = false } })
+}
+function decide(change: DefinitionChange, decision: 'accept' | 'keep', applied: () => void) {
+  const captured = context.value, target = props.project.id
+  if (!captured || !mayManage.value || busy.value || !captured.pending_changes?.some(row => row.check_id === change.check_id)) return
+  busy.value = true; error.value = ''
+  void scope.run(({after,signal}) => after(decideDefinitionChange(target,change,decision,captured,signal),saved => {
+    if (target !== props.project.id || context.value !== captured || saved.project_id !== target) return
+    context.value = saved; busy.value = false; applied()
+    toast(t('Decision saved.','Entscheidung gespeichert.'),{key:`definitions/${target}`})
+  }), {failed:problem => {failed(problem,target);if (problem instanceof APIError && [403,409].includes(problem.status)) stale.value=true},settled:() => {busy.value=false}})
 }
 function showReset(event: MouseEvent) {
   if (!context.value || !own.value || !mayManage.value || busy.value) return
@@ -86,23 +109,24 @@ function confirmReset() {
     closeReset(); toast('The project follows the workspace default.', { key: `definitions/${action.projectID}` })
   }), { failed: problem => { failed(problem, action.projectID); if (problem instanceof APIError && [403,409].includes(problem.status)) stale.value = true }, settled: () => { busy.value = false } })
 }
-watch([scope.owner, () => props.project.id], () => { scope.reset(); closeReset(false); context.value = null; busy.value = false; stale.value = false; if (scope.owner.value) load() }, { immediate: true, flush: 'sync' })
-const stopAccess = onAccessRevalidate({ reset: () => { closeReset(false); context.value = null; busy.value = false; stale.value = true }, refresh: () => { if (!busy.value) load() } })
+watch([scope.owner, () => props.project.id], () => { scope.reset(); closeReset(false); context.value = null; busy.value = false; stale.value = false; noticeShown.value = false; noticeReserve.value = ''; if (scope.owner.value) load() }, { immediate: true, flush: 'sync' })
+const stopAccess = onAccessRevalidate({ reset: () => { closeReset(false); context.value = null; busy.value = false; stale.value = true; noticeShown.value = false; noticeReserve.value = '' }, refresh: () => { if (!busy.value) load() } })
 watch(mayManage, allowed => { if (!allowed && !error.value) closeReset(false) })
 onBeforeUnmount(() => { stopAccess(); closeReset(false) })
 </script>
 
 <template>
-  <SettingsCard title="Definitions" icon="check" anchor="definitions" variant="project">
-    <template #lead>The checks a ticket must pass before it enters In progress, QA or Done. Other statuses have none.</template>
+  <SettingsCard :title="t('Definitions','Definitionen')" icon="check" anchor="definitions" variant="project">
+    <template #lead>{{ t('The checks a ticket must pass before it enters In progress, QA or Done. Other statuses have none.','Die Prüfungen vor dem Wechsel eines Tickets zu In progress, QA oder Done. Für andere Status gibt es keine.') }}</template>
     <template #aside><ProjectSettingsExplainer id="definitions" :project-key="project.routeKey" /></template>
-      <p v-if="context && (!admin || !context.can_manage)" class="lock-line"><AppIcon name="lock" :size="14" />Project admins change this project’s definition. These checks are read-only.</p>
-      <div class="origin" :aria-busy="loading || busy"><AppIcon :name="own ? 'copy' : 'folders'" :size="16" class="or-ic" /><div class="or-l"><b>{{ originTitle }}</b><small role="status">{{ originText }}</small><ProjectSettingsExplainer id="copy" label="Workspace default or this project" :project-key="project.routeKey" /></div><div class="or-r">
-        <div class="origin-action"><button v-if="mayManage && !own && context?.definition" type="button" class="btn sm" :disabled="busy" @click="save(cloneChecks(checks))"><AppIcon name="copy" :size="13" />Change for this project</button>
-        <button v-if="mayManage && own" type="button" class="link-btn" :disabled="busy" aria-haspopup="dialog" @click="showReset">{{ context?.workspace_default ? 'Reset to workspace default…' : 'Remove this definition…' }}</button></div>
-        <RouterLink class="link-btn" to="/settings/policies#definitions"><template v-if="own">Workspace default</template><template v-else>Settings <AppIcon name="chevron-right" :size="12" /> Policies</template><AppIcon name="chevron-right" :size="12" /></RouterLink>
+      <p v-if="context && (!admin || !context.can_manage)" class="lock-line"><AppIcon name="lock" :size="14" />{{ t(`Project admins change this project’s definition${adminNames ? `: ${adminNames}` : ''}. These checks are read-only.`,`Projektadministratoren ändern diese Definition${adminNames ? `: ${adminNames}` : ''}. Die Prüfungen sind schreibgeschützt.`) }}</p>
+      <div class="origin" :aria-busy="loading || busy"><AppIcon :name="own ? 'copy' : 'folders'" :size="16" class="or-ic" /><div class="or-l"><b>{{ originTitle }}</b><small role="status" :class="{ 'reserved-origin': noticeShown }"><span>{{ originText }}</span><span v-if="noticeShown" aria-hidden="true" class="notice-reserve">{{ t(`Copied from the workspace default on ${copyDate}. Differs in 192 places, marked below.`,`Vom Workspace-Standard am ${copyDate} kopiert. Weicht an 192 Stellen ab, unten markiert.`) }}</span></small><ProjectSettingsExplainer id="copy" label="Workspace default or this project" :project-key="project.routeKey" /></div><div class="or-r">
+        <div class="origin-action"><button v-if="mayManage && !own && context?.definition" type="button" class="btn sm" :disabled="busy" @click="save(cloneChecks(checks))"><AppIcon name="copy" :size="13" />{{ t('Change for this project','Für dieses Projekt ändern') }}</button>
+        <button v-if="mayManage && own" type="button" class="link-btn" :disabled="busy" aria-haspopup="dialog" @click="showReset">{{ context?.workspace_default ? t('Reset to workspace default…','Auf Workspace-Standard zurücksetzen…') : t('Remove this definition…','Diese Definition entfernen…') }}</button></div>
+        <RouterLink class="link-btn" to="/settings/policies#definitions"><template v-if="own">{{ t('Workspace default','Workspace-Standard') }}</template><template v-else>Settings <AppIcon name="chevron-right" :size="12" /> Policies</template><AppIcon name="chevron-right" :size="12" /></RouterLink>
       </div></div>
-      <DefinitionEditor v-if="context" ref="editor" :key="editorEpoch" :checks="checks" :workspace="workspace" :base="context.copied_from_checks" :project-key="project.routeKey" :own="own" :editable="mayManage && (own || !context.definition)" :busy="busy" :error="error" :people="project.people" @change="save" />
+      <p v-if="noticeShown" id="definition-changes" ref="notice" class="default-notice" role="status"><AppIcon name="history" :size="15" /><span class="notice-copy"><span>{{ noticeText }}</span><span class="notice-reserve" aria-hidden="true">{{ noticeReserve }}</span></span></p>
+      <DefinitionEditor v-if="context" ref="editor" :key="editorEpoch" :checks="checks" :workspace="workspace" :base="context.copied_from_checks" :project-key="project.routeKey" :own="own" :editable="mayManage && (own || !context.definition)" :busy="busy" :error="error" :people="project.people" :pending="pending" :changed-date="changedDate" @change="save" @decide="decide" />
     <FloatingPanel v-if="reset" :anchor="reset.anchor" :label="`Reset ${reset.key}’s definition`" :width="440" :tallest="650" sheet compact-sheet cycle settings-keys class="definition-reset" @close="closeReset">
       <div ref="resetBody" class="reset-dialog" tabindex="-1"><header><h3>{{ reset.context.workspace_default ? `Reset ${reset.key} to the workspace default?` : `Remove ${reset.key}’s definition?` }}</h3></header><div class="reset-content"><p>{{ reset.context.workspace_default ? `${reset.key} drops its own definition and follows the workspace default again.` : `There is no workspace default, so tickets in ${reset.key} move freely again.` }}</p><ul><li v-for="line in reset.lines" :key="line">{{ line }}</li></ul><p>Tickets keep their status; the new checks apply to their next move.</p></div><footer><p class="reset-feedback" role="status">{{ error }}</p><button type="button" class="btn" @click="closeReset()">Cancel</button><button type="button" class="btn primary" :disabled="busy || !mayManage" @click="confirmReset">{{ reset.context.workspace_default ? 'Reset' : 'Remove' }}<KeyCap k="mod" /><KeyCap k="enter" /></button></footer></div>
     </FloatingPanel>
@@ -115,4 +139,6 @@ onBeforeUnmount(() => { stopAccess(); closeReset(false) })
 @container project-settings-body (max-width: 600px) { .origin { grid-template-columns: 24px minmax(0,1fr); row-gap: 10px; }.or-l small { height: calc(3 * 1.55em); min-height: calc(3 * 1.55em); }.or-r { grid-column: 2; justify-items: start; grid-template-rows: 44px 44px; }.origin-action { height: 44px; justify-content: start; } }
 @media (max-width: 600px) { :global(.floating.definition-reset.sheet) { height: 100dvh; max-height: 100dvh !important; border-radius: 0; }.reset-dialog { height: 100%; }.reset-dialog header { padding-top: max(18px,env(safe-area-inset-top)); }.reset-content { flex: 1; }.reset-dialog footer { padding-bottom: max(14px,env(safe-area-inset-bottom)); }.reset-dialog footer .btn { flex: 1; } }
 @media (pointer: coarse), (max-width: 600px) { .link-btn, .origin .btn, .reset-dialog .btn { min-height: 44px; } }
+.default-notice { display: flex; align-items: start; gap: 10px; padding: 10px 2px 12px; font-size: 12.5px; line-height: 1.6; color: var(--ink-2); scroll-margin-top: 20px; }.default-notice > svg { flex: none; margin-top: 3px; color: var(--ink-3); }.notice-copy, .reserved-origin { display: grid; }.notice-copy > span, .reserved-origin > span { grid-area: 1 / 1; }.notice-reserve { visibility: hidden; pointer-events: none; user-select: none; }
+@container project-settings-body (max-width: 600px) { .or-l small.reserved-origin { height: auto; } }
 </style>

@@ -11,6 +11,7 @@ import (
 
 	"github.com/inspr-at/paimos/internal/authz"
 	"github.com/inspr-at/paimos/internal/tenant"
+	"github.com/inspr-at/paimos/internal/workorders"
 	"github.com/inspr-at/paimos/internal/workqueue"
 	"github.com/jackc/pgx/v5"
 )
@@ -255,6 +256,8 @@ type entryDefinitionContext struct {
 	Workspace  *workqueue.EntryDefinition       `json:"workspace_default"`
 	Base       map[string][]workqueue.EntryRule `json:"copied_from_checks"`
 	CanManage  bool                             `json:"can_manage"`
+	Pending    []workorders.DefinitionChange    `json:"pending_changes"`
+	Admins     []workorders.EntryPerson         `json:"admins"`
 }
 
 func entryCopyChecksTx(ctx context.Context, tx pgx.Tx, id string) (map[string][]workqueue.EntryRule, error) {
@@ -349,22 +352,9 @@ func (m *Module) handleDefinition(w http.ResponseWriter, r *http.Request) {
 				if err != nil {
 					return err
 				}
-				editor = &entryDefinitionContext{ProjectID: *project, Definition: current, Workspace: workspace}
-				if p.Kind == tenant.Person {
-					err := authz.RequireProjectAdminTx(ctx, tx, p, *project)
-					if err != nil && !errors.Is(err, authz.ErrForbidden) {
-						return err
-					}
-					editor.CanManage = err == nil
-				}
-				if current != nil && current.Source == "project" {
-					editor.Base, err = entryCopyChecksTx(ctx, tx, current.ID)
-					if err != nil {
-						return err
-					}
-					if editor.Base == nil && current.CopiedFrom != nil && workspace != nil && current.CopiedFrom.Equal(workspace.Revision) {
-						editor.Base = workspace.Checks
-					}
+				editor, err = definitionContextTx(ctx, tx, p, *project, current, workspace)
+				if err != nil {
+					return err
 				}
 			}
 			return nil
@@ -373,6 +363,7 @@ func (m *Module) handleDefinition(w http.ResponseWriter, r *http.Request) {
 			return conflict("definition has changed")
 		}
 		var baseChecks map[string][]workqueue.EntryRule
+		var reviewedChecks map[string][]workqueue.EntryRule
 		workspace, err := workqueue.EntryDefinitionTx(ctx, tx, nil, true)
 		if err != nil {
 			return err
@@ -397,6 +388,11 @@ func (m *Module) handleDefinition(w http.ResponseWriter, r *http.Request) {
 				return badRequest("copy base cannot change during an edit")
 			}
 			in.CopiedFrom = current.CopiedFrom
+			state, stateErr := workorders.DefinitionCopyStateTx(ctx, tx, current.ID)
+			if stateErr != nil {
+				return stateErr
+			}
+			reviewedChecks = state.Reviewed
 			baseChecks, err = entryCopyChecksTx(ctx, tx, current.ID)
 			if err != nil {
 				return err
@@ -409,6 +405,12 @@ func (m *Module) handleDefinition(w http.ResponseWriter, r *http.Request) {
 				return badRequest("copied_from_revision must name the current workspace default")
 			}
 			baseChecks = workspace.Checks
+		}
+		if project != nil && current == nil && workspace != nil {
+			reviewedChecks = workspace.Checks
+		}
+		if reviewedChecks == nil {
+			reviewedChecks = baseChecks
 		}
 		for _, rules := range in.Checks {
 			for _, rule := range rules {
@@ -435,26 +437,26 @@ func (m *Module) handleDefinition(w http.ResponseWriter, r *http.Request) {
 				}
 			}
 		}
-		fields := entryJSON(map[string]any{"checks": in.Checks, "copied_from_revision": in.CopiedFrom, "copied_from_checks": baseChecks})
+		fields := entryJSON(map[string]any{"checks": in.Checks, "copied_from_revision": in.CopiedFrom, "copied_from_checks": baseChecks, "reviewed_checks": reviewedChecks})
 		if len(fields) > 65536 {
 			return badRequest("definition and copy base exceed 64 KiB")
 		}
 		var id string
-		var revision time.Time
+		var revision, created time.Time
 		if current == nil {
 			var kind string
 			if err = tx.QueryRow(ctx, `INSERT INTO node_kinds(tenant_id,slug,label,short_prefix,icon,allowed_child_kinds) VALUES($1,'definition','Definition','DEF','list',ARRAY[]::text[]) ON CONFLICT(tenant_id,slug) DO UPDATE SET slug=EXCLUDED.slug RETURNING id::text`, p.TenantID).Scan(&kind); err != nil {
 				return err
 			}
-			err = tx.QueryRow(ctx, `INSERT INTO nodes(tenant_id,kind_id,key,title,parent_id,fields) VALUES($1,$2,aeon_next_node_key($1,'DEF'),'Entry checks',$3,$4::jsonb) RETURNING id::text,updated_at`, p.TenantID, kind, project, string(fields)).Scan(&id, &revision)
+			err = tx.QueryRow(ctx, `INSERT INTO nodes(tenant_id,kind_id,key,title,parent_id,fields) VALUES($1,$2,aeon_next_node_key($1,'DEF'),'Entry checks',$3,$4::jsonb) RETURNING id::text,updated_at,created_at`, p.TenantID, kind, project, string(fields)).Scan(&id, &revision, &created)
 		} else {
 			id = current.ID
-			err = tx.QueryRow(ctx, `UPDATE nodes SET fields=$2::jsonb,updated_at=greatest(clock_timestamp(),updated_at+interval '1 microsecond') WHERE id=$1 RETURNING updated_at`, id, string(fields)).Scan(&revision)
+			err = tx.QueryRow(ctx, `UPDATE nodes SET fields=$2::jsonb,updated_at=greatest(clock_timestamp(),updated_at+interval '1 microsecond') WHERE id=$1 RETURNING updated_at,created_at`, id, string(fields)).Scan(&revision, &created)
 		}
 		if err != nil {
 			return err
 		}
-		out = &workqueue.EntryDefinition{ID: id, Revision: revision, Source: "workspace", CopiedFrom: in.CopiedFrom, Checks: in.Checks}
+		out = &workqueue.EntryDefinition{ID: id, Revision: revision, CreatedAt: &created, Source: "workspace", CopiedFrom: in.CopiedFrom, Checks: in.Checks}
 		if project != nil {
 			out.Source = "project"
 		}
