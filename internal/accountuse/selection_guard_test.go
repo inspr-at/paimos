@@ -31,6 +31,7 @@ func TestAccountUseSelectionCallSiteGuard(t *testing.T) {
 		"internal/agentruns/review.go":                2,
 		"internal/agentruns/runs.go":                  3,
 		"internal/engineadmission/module.go":          1,
+		"internal/goals/epics.go":                     1, // AEON-1395: per-project pool count; selects no account
 		"internal/harness/session_requests.go":        1,
 		"internal/modelregistry/board_write.go":       1,
 		"internal/modelregistry/daily.go":             2,
@@ -93,6 +94,7 @@ func TestAccountUseSelectionCallSiteGuard(t *testing.T) {
 		"internal/agentaccounts/engine_admission.go": {"AllowedForProject("},
 		"internal/modelregistry/daily.go":            {"ProjectDailySnapshot(", "allDenied[harness]"},
 		"internal/engineadmission/module.go":         {"ProjectDailySnapshot(", "allDenied[in.Harness]"},
+		"internal/goals/epics.go":                    {"aeon_account_use_allowed_for_project(a.id,p.id)"},
 		"internal/harness/session_requests.go":       {"RequireProject("},
 		"internal/routineexec/dispatch.go":           {"aeon_account_use_allowed_for_project(", "accountuse.LockShared("},
 		// The continuation's compatibility selection delegates the project

@@ -4,6 +4,7 @@
 import { test, expect } from '@playwright/test'
 import { mockStateColours, stateNow } from './state-colours-fixtures'
 import { mockAgents } from './agents-fixtures'
+import { openDeskPreview } from './helpers/compact'
 
 for (const theme of ['light', 'dark'] as const) for (const width of [1440, 390]) {
   test(`${theme} ${width}: shared replies leave five siblings working and Needs you empty`, async ({ page }, testInfo) => {
@@ -69,7 +70,7 @@ for (const theme of ['light', 'dark'] as const) for (const width of [1440, 390])
     await page.goto('/agents')
     await expect(queue).toHaveCount(0)
     await expect(desk).toHaveAccessibleName('Decision Desk, 1 open')
-    await page.getByRole('button', { name: 'Preview the Decision Desk', exact: true }).click()
+    await openDeskPreview(page)
     await expect(page.getByTestId('desk-preview-item-a:bk5-approval')).toHaveAttribute('href', '/decision-desk?from=preview&item=a:bk5-approval')
     await page.keyboard.press('Escape')
     await page.locator('[data-row="s:bk5-worker-0"] .agent-link').click()

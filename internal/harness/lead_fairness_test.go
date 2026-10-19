@@ -302,14 +302,56 @@ func TestLeadSchedulingBoundAndDependencies(t *testing.T) {
  FROM added CROSS JOIN agent_runs r WHERE r.id=$3`, f.person.TenantID, f.project, run)
 		return err
 	})
-	err := db.InTenant(tenant.WithPrincipal(t.Context(), f.agent), f.db.App, f.agent.TenantID, func(tx pgx.Tx) error {
+	// f59ad07e kept aeon_work_leaf and aeon_work_pending inside the same statement
+	// as LIMIT 201. Two hundred and one queued leaves then spent the 3s
+	// scheduling deadline before the bound could be returned. Overflow must be
+	// the explicit bound error, and that decision must not call either function.
+	trace := &leadSQLTrace{}
+	cfg := f.db.App.Config()
+	cfg.ConnConfig.Tracer = trace
+	pool, err := pgxpool.NewWithConfig(t.Context(), cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(pool.Close)
+	err = db.InTenant(tenant.WithPrincipal(t.Context(), f.agent), pool, f.agent.TenantID, func(tx pgx.Tx) error {
 		_, err := harness.LeadDispatchTurnTx(t.Context(), tx, f.agent, f.project, run, readyLeadChecks)
 		return err
 	})
 	if err == nil || err.Error() != "lead scheduling snapshot exceeds bound" {
 		t.Fatalf("partial snapshot authorized a turn: %v", err)
 	}
+	bounded := false
+	for _, query := range trace.sql {
+		if strings.Contains(query, "aeon_work_leaf") || strings.Contains(query, "aeon_work_pending") {
+			t.Fatalf("overflow evaluated volatile eligibility before the bound: %s", query)
+		}
+		if strings.Contains(query, "LIMIT 201") {
+			bounded = true
+		}
+	}
+	if !bounded {
+		t.Fatal("overflow did not read a bounded candidate snapshot")
+	}
+	var routed bool
+	f.tx(t, f.person, func(tx pgx.Tx) error {
+		return tx.QueryRow(t.Context(), `SELECT queue_routed_at IS NOT NULL FROM agent_runs WHERE id=$1`, run).Scan(&routed)
+	})
+	if routed {
+		t.Fatal("overflow routed the candidate")
+	}
 }
+
+type leadSQLTrace struct {
+	sql []string
+}
+
+func (b *leadSQLTrace) TraceQueryStart(ctx context.Context, _ *pgx.Conn, data pgx.TraceQueryStartData) context.Context {
+	b.sql = append(b.sql, data.SQL)
+	return ctx
+}
+
+func (b *leadSQLTrace) TraceQueryEnd(context.Context, *pgx.Conn, pgx.TraceQueryEndData) {}
 
 func TestLeadSingleDialProgressAfterWorkerYield(t *testing.T) {
 	admission := func(ctx context.Context, tx pgx.Tx, p tenant.Principal, owner string, s harness.Session) (harness.LeadChecks, error) {
@@ -501,5 +543,63 @@ func TestLeadYieldRechecksAgentPermissionAfterFence(t *testing.T) {
 			t.Fatalf("revoked yield mutated state: revision=%d state=%s controls=%d", revision, state, controls)
 		}
 		return nil
+	})
+}
+
+// Risk: a direct person run is not a queue entry, but holds the leaf even while
+// queued. Exercise both scheduling and final daemon claim with live lead checks.
+func TestLeadPickupExcludesActivePersonRun(t *testing.T) {
+	f := projectLeadFixture(t, readyLeadChecks)
+	session, _, _ := fairWorking(t, f)
+	run := fairQueue(t, f, time.Now().UTC())
+	binding, _ := json.Marshal(map[string]any{"session_id": session, "generation": 1})
+	var direct, profile string
+	f.tx(t, f.person, func(tx pgx.Tx) error {
+		if err := tx.QueryRow(t.Context(), `INSERT INTO model_profiles(tenant_id,slug,version,harness,family,model,effort,tier) VALUES($1,'person-lead-test','1','codex','openai','fixture','high','strong') RETURNING id::text`, f.person.TenantID).Scan(&profile); err != nil {
+			return err
+		}
+		if _, err := tx.Exec(t.Context(), `UPDATE agent_runs SET agent_principal_id=$2,model_profile_id=$3,trace=jsonb_set(coalesce(trace,'{}'),'{project_lead}',$4::jsonb) WHERE id=$1`, run, f.agent.ID, profile, binding); err != nil {
+			return err
+		}
+		return tx.QueryRow(t.Context(), `INSERT INTO agent_runs(tenant_id,work_order_id,agent_principal_id,model_profile_id) SELECT tenant_id,work_order_id,$2,$3 FROM agent_runs WHERE id=$1 RETURNING id::text`, run, f.agent.ID, profile).Scan(&direct)
+	})
+	for _, state := range []string{"queued", "starting", "running", "waiting"} {
+		f.tx(t, f.person, func(tx pgx.Tx) error {
+			_, err := tx.Exec(t.Context(), `UPDATE agent_runs SET status=$2 WHERE id=$1`, direct, state)
+			return err
+		})
+		// Pickup skips the held entry so later entries still route; the final
+		// claim refuses it.
+		for _, path := range []string{"pickup", "claim"} {
+			reason := ""
+			err := db.InTenant(dbtest.Seed(t.Context()), f.db.App, f.person.TenantID, func(tx pgx.Tx) error {
+				if err := db.LockCurrentTree(t.Context(), tx); err != nil {
+					return err
+				}
+				if path == "claim" {
+					return harness.RequireAssignedLeadStartTx(t.Context(), tx, f.agent, f.project, run, binding, readyLeadChecks)
+				}
+				var err error
+				reason, err = harness.LeadDispatchTurnTx(t.Context(), tx, f.agent, f.project, run, readyLeadChecks)
+				return err
+			})
+			if path == "pickup" && (err != nil || reason != "work_not_eligible") || path == "claim" && (err == nil || err.Error() != "lead_writer_conflict") {
+				t.Fatalf("%s with %s person run: reason=%q err=%v", path, state, reason, err)
+			}
+		}
+	}
+	f.tx(t, f.person, func(tx pgx.Tx) error {
+		_, err := tx.Exec(t.Context(), `UPDATE agent_runs SET status='cancelled',ended_at=clock_timestamp() WHERE id=$1`, direct)
+		return err
+	})
+	f.tx(t, f.person, func(tx pgx.Tx) error {
+		if err := db.LockCurrentTree(t.Context(), tx); err != nil {
+			return err
+		}
+		reason, err := harness.LeadDispatchTurnTx(t.Context(), tx, f.agent, f.project, run, readyLeadChecks)
+		if err == nil && reason != "" {
+			t.Fatalf("confirmed cancelled run retained the leaf: %s", reason)
+		}
+		return err
 	})
 }

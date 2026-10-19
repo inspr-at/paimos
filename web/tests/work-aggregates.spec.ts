@@ -153,7 +153,9 @@ for (const scenario of [
     await mockWork(page, data)
     // The docked panel narrows the list, and whole columns give way beside Title (AEON-1470); the sorted one stays.
     await page.goto('/p/PHAROS?sort=eta_ready')
-    await expect(page.locator('footer.app-footer .sum')).toHaveAttribute('data-conn', 'on')
+    // Live updates connected: the footer says so; phones have no footer bar (AEON-1459), so read the same state.
+    if (width < 720) await expect.poll(() => page.evaluate(async () => (await import('/src/lib/footerSummary.ts')).footerLive.value?.paused)).toBe(false)
+    else await expect(page.locator('footer.app-footer .sum')).toHaveAttribute('data-conn', 'on')
     const row = page.locator('#row-n-1')
     const eta = row.locator('.eta-cell')
     const progress = row.locator('.progress-read')

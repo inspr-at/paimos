@@ -235,7 +235,11 @@ for (const theme of ['light', 'dark']) for (const width of [1600, 390]) {
     await page.screenshot({ path: testInfo.outputPath(`panel-${width}-${theme}.png`) })
     await page.getByRole('menuitem', { name: 'Remove ghost-worker', exact: true }).click()
     await confirm(page).getByRole('button', { name: 'Remove', exact: true }).click()
-    await historyButton(page).click()
+    // Phones keep History in the Sessions toolbar's ⋯ (AEON-1459, D3).
+    if (width < 720) {
+      await page.locator('.sessions').getByRole('button', { name: 'More list actions', exact: true }).click()
+      await page.getByRole('menu', { name: 'More list actions' }).getByRole('menuitem', { name: /^History/ }).click()
+    } else await historyButton(page).click()
     await expect(row(page, selected.id)).toBeVisible()
     await page.locator('.sessions').screenshot({ path: testInfo.outputPath(`removed-${width}-${theme}.png`) })
   })

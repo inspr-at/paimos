@@ -7,8 +7,6 @@ import (
 	"fmt"
 	"net/http"
 	"net/url"
-	"os"
-	"os/signal"
 	"strconv"
 	"strings"
 	"time"
@@ -260,9 +258,7 @@ func (rt *runtime) cmdMessagingListen() *Command {
 			return usagef("--deliver requires --as harness:agent and a registered local adapter")
 		}
 		if principalInbox {
-			ctx, stop := signal.NotifyContext(rt.context(), os.Interrupt)
-			defer stop()
-			return rt.listenPrincipalInbox(ctx, after, limit, follow, ack, interval)
+			return rt.listenPrincipalInbox(rt.context(), after, limit, follow, ack, interval)
 		}
 		projectID, err := rt.projectIdentityCtx(rt.context(), project)
 		if err != nil {
@@ -278,8 +274,7 @@ func (rt *runtime) cmdMessagingListen() *Command {
 		if deliver != "" {
 			return rt.listenMessagingDelivery(projectID, project, as, deliver, follow, interval)
 		}
-		ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt)
-		defer stop()
+		ctx := rt.context()
 		cursor := after
 		var wakeCursor int64
 		for {

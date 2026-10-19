@@ -13,6 +13,9 @@
 // column's end) and the live line takes Moving up to the ETA column (Tick, 10-18).
 // Otherwise the label runs from the key to the ETA (two lines at most) and the live
 // line and the badge's faces share one meta line under it.
+// AEON-1395 (an epic's item, a direct child): its keys are its own and its children's
+// ("+N" counts all of them), and with no agent note its live line is its latest
+// unmerged pull request ("#762 · In queue").
 import { computed } from 'vue'
 import { RouterLink } from 'vue-router'
 import AppIcon from '../AppIcon.vue'
@@ -20,17 +23,30 @@ import LiveAgents from '../projects/LiveAgents.vue'
 import GoalEta from './GoalEta.vue'
 import GoalStateIcon from './GoalStateIcon.vue'
 import { vClipTip } from '../../lib/clipTip'
-import { noteByline, STATE_LABEL, ticketHref, type GoalOutcome } from '../../lib/goals'
+import { nbsp, noteByline, STATE_LABEL, ticketHref, type GoalOutcome } from '../../lib/goals'
+import { stateLabel } from '../../lib/delivery'
 import type { LiveAgent } from '../../lib/liveAgents'
 
-const props = defineProps<{ item: GoalOutcome; goalId: string; agents: LiveAgent[]; project: { title: string; routeKey: string }; now: number; detail?: string; wide?: boolean }>()
+const props = defineProps<{ item: GoalOutcome; goalId: string; agents: LiveAgent[]; project: { title: string; routeKey: string }; now: number; detail?: string; wide?: boolean; epic?: boolean }>()
 const done = computed(() => props.item.state === 'done' || props.item.handed_over)
 const note = computed(() => props.item.note.trim())
+// The pull request line stands in for a note that is not there.
+const pr = computed(() => {
+  const delivery = props.item.delivery
+  if (note.value || done.value || !delivery) return ''
+  const state = stateLabel(delivery.state, 'en')
+  return nbsp(delivery.pull_request ? `#${delivery.pull_request} · ${state}` : state)
+})
+const keyCount = computed(() => Math.max(props.item.keys_total ?? 0, props.item.keys.length))
+const moreTip = computed(() => {
+  const rest = props.item.keys.slice(1).join(', '), hidden = keyCount.value - props.item.keys.length
+  return hidden > 0 ? `${rest} and ${hidden} more` : rest
+})
 const byline = computed(() => noteByline(props.item, props.now))
 const noteTip = computed(() => `${note.value} ${byline.value}`.trim())
 const badge = computed(() => props.agents.length > 0 && !done.value)
 // Wide rows only: something sits beside the label, so it stops at the agent column.
-const side = computed(() => !!props.wide && !props.item.handed_over && (!!note.value || badge.value))
+const side = computed(() => !!props.wide && !props.item.handed_over && (!!note.value || !!pr.value || badge.value))
 </script>
 
 <template>
@@ -45,14 +61,15 @@ const side = computed(() => !!props.wide && !props.item.handed_over && (!!note.v
         <span class="i-state" :data-tip="STATE_LABEL[item.state]"><GoalStateIcon :state="item.state" /><span class="sr-only">{{ STATE_LABEL[item.state] }}</span></span>
         <span class="i-keys mono">
           <RouterLink v-if="item.keys[0]" :to="ticketHref(item.keys[0])">{{ item.keys[0] }}</RouterLink>
-          <span v-if="item.keys.length > 1" class="more" :data-tip="item.keys.slice(1).join(', ')" tabindex="0">+{{ item.keys.length - 1 }}</span>
+          <span v-if="keyCount > 1" class="more" :data-tip="moreTip" tabindex="0">+{{ keyCount - 1 }}</span>
         </span>
         <div class="i-main">
           <span v-clip-tip class="i-label">{{ item.label }}</span>
-          <div v-if="!wide && (note || badge)" class="i-meta">
+          <div v-if="!wide && (note || pr || badge)" class="i-meta">
             <span v-if="note" class="i-live is-note">
               <AppIcon name="note" :size="12" /><span v-clip-tip="noteTip" class="t"><span v-clip-tip="noteTip" class="tx">{{ note }}</span> <span v-if="byline" class="by">{{ byline }}</span></span>
             </span>
+            <span v-else-if="pr" class="i-live is-pr"><AppIcon name="git-pull-request" :size="12" /><span class="t"><span v-clip-tip class="tx">{{ pr }}</span></span></span>
             <div v-if="badge" class="i-badge"><LiveAgents :agents="agents" :project="project" variant="row" /></div>
           </div>
         </div>
@@ -61,11 +78,12 @@ const side = computed(() => !!props.wide && !props.item.handed_over && (!!note.v
       <span v-if="wide && note" class="i-live is-note">
         <AppIcon name="note" :size="12" /><span class="t"><span v-clip-tip="noteTip" class="tx">{{ note }}</span> <span v-if="byline" class="by">{{ byline }}</span></span>
       </span>
+      <span v-else-if="wide && pr" class="i-live is-pr"><AppIcon name="git-pull-request" :size="12" /><span class="t"><span v-clip-tip class="tx">{{ pr }}</span></span></span>
       <!-- Phones hide the key column. These links stay, so an item with no agent still opens its work. -->
       <nav v-if="item.keys.length" class="phone-tickets" :aria-label="`Tickets for ${item.label}`">
         <RouterLink v-for="key in item.keys" :key="key" :to="ticketHref(key)">{{ key }}</RouterLink>
       </nav>
-      <GoalEta class="i-eta" :goal-id="goalId" :outcome-id="item.id" :eta="item.eta" :passed="item.passed" :done="done" :now="now" />
+      <GoalEta class="i-eta" :goal-id="goalId" :outcome-id="item.id" :eta="item.eta" :passed="item.passed" :done="done" :now="now" :history="!epic" />
     </template>
   </li>
 </template>

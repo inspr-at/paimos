@@ -36,6 +36,7 @@ function backend(options: { existing?: WorkOrder[]; runs?: AgentRun[]; failPatch
     if (url.pathname === '/api/nodes/ticket') return json(ticket)
     if (url.pathname === '/api/nodes') { expect(url.searchParams.get('parent_id')).toBe('ticket'); expect(url.searchParams.get('kind')).toBe('work_order'); return json({ items: orders.map(o => ({ id: o.node_id })), next_cursor: null }) }
     if (url.pathname === '/api/runs') { options.whileReadingRuns?.(); return json({ items: runs, next_cursor: null }) }
+    if (url.pathname === '/api/runs/daemon-waits') return json({ items: [] })
     if (url.pathname === '/api/work-orders' && method === 'POST') { orders.push({ ...order }); return json(order, 201) }
     if (url.pathname === '/api/work-orders/order') {
       if (method === 'PATCH') {
@@ -162,12 +163,21 @@ describe('Start Agent leaf selection', () => {
     const { state, listNodes } = dialogSetup()
     await state.open(); await flush()
     expect(state.tickets.value.map((item: WorkNode) => item.id)).toEqual(['ticket'])
-    expect(listNodes).toHaveBeenLastCalledWith({ kind: ['work'], shape: ['leaf'], q: '', limit: 30, sort: '-updated_at' })
+    expect(listNodes).toHaveBeenLastCalledWith({ kind: ['work'], shape: ['leaf'], q: '', limit: 30, sort: '-updated_at', rollups: 'omit' })
     listNodes.mockResolvedValueOnce({ items: [{ ...ticket, id: 'second-leaf' }, { ...ticket, id: 'second-parent', is_leaf: false }], next_cursor: null })
     await state.search(true)
-    expect(listNodes).toHaveBeenLastCalledWith({ kind: ['work'], shape: ['leaf'], q: '', limit: 30, sort: '-updated_at', cursor: 'next-page' })
+    expect(listNodes).toHaveBeenLastCalledWith({ kind: ['work'], shape: ['leaf'], q: '', limit: 30, sort: '-updated_at', rollups: 'omit', cursor: 'next-page' })
     expect(state.tickets.value.map((item: WorkNode) => item.id)).toEqual(['ticket', 'second-leaf'])
     expect(state.nextCursor.value).toBeNull()
+  })
+  it('tells the person to narrow a ticket search that hits the aggregate limit', async () => {
+    const { state, listNodes } = dialogSetup()
+    listNodes.mockRejectedValueOnce(new APIError(503, 'Work aggregates exceeded a resource limit; narrow the scope or retry.'))
+    await state.open(); await flush()
+    expect(state.searchError.value).toBe('Too many matches. Type more of the title or the key.')
+    listNodes.mockRejectedValueOnce(new Error('network down'))
+    await state.search()
+    expect(state.searchError.value).toBe('network down')
   })
   it('refuses non-leaf selection and initial targets while keeping confirmed leaves launchable', async () => {
     const { state, launch } = dialogSetup()
@@ -223,5 +233,10 @@ describe('run now once', () => {
   })
   it('uses the server wait reason on a queued run', () => {
     expect(launchState({ ...queued, wait: { code: 'vendor', run_now_allowed: false } })).toEqual({ label: 'Waiting', detail: 'Waiting for the vendor to allow work again' })
+  })
+  it('shows the checkout sentence while an earlier pairing still holds this computer', () => {
+    const detail = "This computer's checkout is still held by an earlier pairing. Release it in Settings › Computers."
+    expect(launchState({ ...queued, daemon_wait_reason: 'checkout_held_by_earlier_pairing' })).toEqual({ label: 'Queued', detail })
+    expect(launchState({ ...queued, daemon_wait_reason: 'checkout_held_by_earlier_pairing', wait: { code: 'vendor', run_now_allowed: false } })).toEqual({ label: 'Queued', detail })
   })
 })

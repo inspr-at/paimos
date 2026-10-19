@@ -3,11 +3,10 @@ package cli
 
 import (
 	"fmt"
-	"github.com/inspr-at/paimos/internal/client"
 	"net/http"
 	"os"
-	"time"
 
+	"github.com/inspr-at/paimos/internal/client"
 	"github.com/inspr-at/paimos/internal/reviewgate"
 )
 
@@ -99,7 +98,7 @@ func (rt *runtime) reviewRunCommand(submit bool) *Command {
 				// A capability never travels with the dispatcher's ordinary key,
 				// follows redirects, or enters CLI output or persistent config.
 				private := client.New(baseURL, "")
-				private.HTTP = &http.Client{Timeout: 30 * time.Second, CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}
+				private.HTTP.CheckRedirect = func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }
 				err = private.DoWithHeaders(rt.context(), http.MethodPost, "/api/review-runs/"+id+"/verdict", verdict, &out, map[string]string{reviewgate.CredentialHeader: token})
 				if err != nil {
 					return rt.fail(err, token)

@@ -167,13 +167,11 @@ export const settingsNeeds = ref(0)
 export const accountsNeeds = ref<Readonly<Record<'accounts' | 'computers' | 'capacity', number>> | null>(null)
 // where names the part the action opens, e.g. "Computers".
 export interface SettingsFooter { saving: boolean; failed: boolean; needs: number; where?: string; act: { retry: () => void; needs: () => void } }
-// Calm says nothing: the centre stays empty.
+// Calm says nothing: the centre stays empty. Saving and a failed save come and go;
+// compact screens have no footer release slot for them to rearrange (AEON-1459).
 export function settingsFooter(s: SettingsFooter): FooterSummary | null {
-  // Saving and a failed save come and go. The phone release stays as the summary
-  // underneath left it, including while needs you is waiting under the save line.
-  const phone = s.needs > 0
-  if (s.failed) return { ...build('attention', [exception('Not saved'), said(' · Try again')], [exception('Not saved')], 'Not saved. Save again.', s.act.retry), transient: true, phone }
-  if (s.saving) return { ...build('idle', [said('Saving…')], [said('Saving…')], 'Saving.'), transient: true, phone }
+  if (s.failed) return { ...build('attention', [exception('Not saved'), said(' · Try again')], [exception('Not saved')], 'Not saved. Save again.', s.act.retry), transient: true }
+  if (s.saving) return { ...build('idle', [said('Saving…')], [said('Saving…')], 'Saving.'), transient: true }
   if (s.needs) {
     const x = `${s.needs} ${s.needs === 1 ? 'needs' : 'need'} you`
     return build('attention', [exception(x)], [exception(x)], `${x}. Open ${s.where ?? 'Settings'} at Needs you.`, s.act.needs)

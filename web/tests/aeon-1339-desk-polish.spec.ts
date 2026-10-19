@@ -7,6 +7,7 @@ import { expect, test, type Page } from '@playwright/test'
 import { writeFile } from 'node:fs/promises'
 import { mockDecisionDesk } from './decision-desk-fixtures'
 import { expectStableControls } from './helpers/stable'
+import { openDeskPreview } from './helpers/compact'
 
 const heading = (page: Page) => page.getByTestId('desk-paper').getByRole('heading', { level: 2 })
 // One open question: approval decided, action merged into the question, rule proposed, the second question gone.
@@ -145,7 +146,7 @@ test('panel and preview rows name the kind and project, and link back', async ({
   await expect(panel.getByTestId('agents-desk-item-m:action-1')).toHaveText('Action request')
   await panel.screenshot({ path: testInfo.outputPath(`panel-${width}-${theme}.png`) })
   await page.goto('/agents')
-  await page.getByRole('button', { name: 'Preview the Decision Desk' }).click()
+  await openDeskPreview(page)
   const row = page.getByTestId('desk-preview-item-q:question-1')
   await expect(row).toHaveAttribute('href', '/decision-desk?from=preview&item=q:question-1')
   await expect(row.locator('.dp-ic.k-question')).toBeVisible()
@@ -160,7 +161,7 @@ test('panel and preview rows name the kind and project, and link back', async ({
   await page.setViewportSize({ width: 1440, height: 1000 })
   const world = await oneQuestion(page)
   await page.goto('/agents')
-  await page.getByRole('button', { name: 'Preview the Decision Desk' }).click()
+  await openDeskPreview(page)
   await page.getByTestId('desk-preview-item-q:question-1').click()
   await expect(page).toHaveURL('/decision-desk?from=preview&item=q:question-1')
   await expect(heading(page)).toHaveText('Which migration should carry the index?')
@@ -179,7 +180,13 @@ test('panel and preview rows name the kind and project, and link back', async ({
 test('fix round 4: stamp colours, ticket chips, one name, no raw ids, the narrow bar and the Decided filter', async ({ page }, testInfo) => {
   test.setTimeout(480_000)
   await test.step('outcome-coloured stamps, the memo ticket on rows, one name and no raw ids', async () => {
-    const tone = (id: string) => page.getByTestId(id).evaluate(element => getComputedStyle(element).borderTopColor)
+    // Wide desks ink the chosen chip's outline in its outcome's colour and the others in ink-3. Phone rows (AEON-1535)
+    // tint the chosen row and check it in its outcome's colour; the other rows show no check.
+    const tone = (id: string) => page.getByTestId(id).evaluate(element => {
+      if (!window.matchMedia('(max-width: 760px)').matches) return getComputedStyle(element).borderTopColor
+      const check = element.querySelector('.st-check')
+      return check && getComputedStyle(check).visibility === 'visible' ? getComputedStyle(check).color : 'no check'
+    })
     // A token as the memo resolves it, in the current theme.
     const token = (name: string) => page.evaluate(variable => {
       const probe = document.createElement('span'); probe.style.color = `var(${variable})`
@@ -220,13 +227,13 @@ test('fix round 4: stamp colours, ticket chips, one name, no raw ids, the narrow
       await expect(page.getByTestId('stamp-once')).toHaveAttribute('aria-checked', 'true')
       await expect(page.getByTestId('stamp-once')).toHaveClass(/\bt-ok\b/)
       await expect.poll(() => tone('stamp-once')).toBe(await token('--ok'))
-      await expect.poll(() => tone('stamp-always')).toBe(await token('--ink-3'))
+      await expect.poll(() => tone('stamp-always')).toBe(width > 760 ? await token('--ink-3') : 'no check')
       await expect(page.getByTestId('desk-stamp-desc')).toContainText('it stays in Decided. Suggested: Doctrine · not available for this question')
       await page.screenshot({ path: testInfo.outputPath(`fix4-stamp-once-${width}-${theme}.png`) })
       await page.getByTestId('stamp-always').click()
       await expect(page.getByTestId('stamp-always')).toHaveClass(/\bt-teal\b/)
       await expect.poll(() => tone('stamp-always')).toBe(await token('--teal-ink'))
-      await expect.poll(() => tone('stamp-once')).toBe(await token('--ink-3'))
+      await expect.poll(() => tone('stamp-once')).toBe(width > 760 ? await token('--ink-3') : 'no check')
       await page.getByTestId('stamp-requirement').click()
       await expect.poll(() => tone('stamp-requirement')).toBe(await token('--gold-ink'))
       await page.screenshot({ path: testInfo.outputPath(`fix4-stamp-requirement-${width}-${theme}.png`) })

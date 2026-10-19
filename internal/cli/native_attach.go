@@ -61,7 +61,7 @@ func (rt *runtime) cmdSessionAttach() *Command {
 			if control && !terminal.Interactive() {
 				return usagef("--control requires an interactive terminal")
 			}
-			ctx, cancel := signal.NotifyContext(rt.context(), os.Interrupt, syscall.SIGTERM, syscall.SIGHUP, syscall.SIGTSTP)
+			ctx, cancel := rt.claimSignals(syscall.SIGHUP, syscall.SIGTSTP)
 			defer cancel()
 			resizes := make(chan os.Signal, 1)
 			signal.Notify(resizes, syscall.SIGWINCH)

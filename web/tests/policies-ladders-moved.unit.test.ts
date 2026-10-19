@@ -7,12 +7,13 @@ import { afterEach, beforeEach, expect, test, vi } from 'vitest'
 import { createSSRApp, defineComponent } from 'vue'
 import { renderToString } from '@vue/server-renderer'
 import { createMemoryHistory, createRouter } from 'vue-router'
+import { createPinia } from 'pinia'
 
 const mocks = vi.hoisted(() => ({
   grants: new Set<string>(),
   requests: [] as { path: string; method: string }[],
 }))
-vi.mock('../src/stores/session', () => ({ useSession: () => ({ identity: { tenant: { id: 'tenant-1' }, principal: { id: 'person-1', kind: 'person' } } }) }))
+vi.mock('../src/stores/session', () => ({ useSession: () => ({ identity: { tenant: { id: 'tenant-1' }, principal: { id: 'person-1', kind: 'person' } }, authenticationCurrent: () => true }) }))
 vi.mock('../src/lib/authz', async original => ({
   ...await original<typeof import('../src/lib/authz')>(),
   can: (permission: string) => mocks.grants.has(permission),
@@ -22,7 +23,13 @@ vi.mock('../src/lib/authz', async original => ({
 }))
 vi.mock('../src/lib/api', async original => ({
   ...await original<typeof import('../src/lib/api')>(),
-  api: async (path: string, init?: RequestInit) => { mocks.requests.push({ path, method: init?.method ?? 'GET' }); return new Response('[]', { headers: { 'Content-Type': 'application/json' } }) },
+  api: async (path: string, init?: RequestInit) => {
+    mocks.requests.push({ path, method: init?.method ?? 'GET' })
+    const body = path === '/settings/definitions/context'
+      ? { definition: null, can_manage: false, admins: [], projects: [], differ_count: 0, uses_default: [], next_cursor: null }
+      : []
+    return new Response(JSON.stringify(body), { headers: { 'Content-Type': 'application/json' } })
+  },
 }))
 vi.mock('../src/components/settings/CrossFamilyReviewCard.vue', () => ({ default: defineComponent({ render: () => null }) }))
 
@@ -42,7 +49,7 @@ async function renderPolicies() {
   const router = createRouter({ history: createMemoryHistory(), routes: [{ path: '/:path(.*)*', component: defineComponent({ render: () => null }) }] })
   await router.push('/settings/policies'); await router.isReady()
   // main.ts registers v-clip-tip for the whole app; it adds nothing to server HTML.
-  const app = createSSRApp(PoliciesSection); app.use(router); app.directive('clip-tip', {})
+  const app = createSSRApp(PoliciesSection); app.use(createPinia()); app.use(router); app.directive('clip-tip', {})
   const html = await renderToString(app)
   // Let any request the setup started reach the transport (no timing sleep).
   for (let i = 0; i < 5; i++) await new Promise(resolve => setImmediate(resolve))
@@ -54,6 +61,8 @@ const modelsRuleLinks = (html: string) => (html.match(/<a\b[^>]*>/g) ?? []).filt
 
 test('Policies links to Settings › Models and requests no ladder endpoint', async () => {
   const html = await renderPolicies()
+  expect(html).toContain('workspace-definitions')
+  expect(mocks.requests).toContainEqual({ path: '/settings/definitions/context', method: 'GET' })
   expect(mocks.requests.filter(ladderEndpoint)).toEqual([])
   expect(mocks.requests.some(request => request.method === 'PUT')).toBe(false)
   expect(html).toMatch(/Which model runs is decided on <a[^>]*href="\/settings\/models"[^>]*>Models<\/a>\./)

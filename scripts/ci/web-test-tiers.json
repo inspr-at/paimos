@@ -280,7 +280,7 @@
     ,
     "browser:tests/aeon-1212-lead-panel.spec.ts:AEON-1212 fix2: unreadable and truncated live worker reads never render a complete empty inventory"
     ,
-    "browser:tests/aeon-1279-touch-scroll.spec.ts:dark 390: the footer folds away over the page; the page's scroller never changes size while scrolling"
+    "browser:tests/aeon-1279-touch-scroll.spec.ts:dark 390: no footer bar; the page's scroller never changes size while scrolling, and the last row reaches the foot"
     ,
     "browser:tests/aeon-1279-touch-scroll.spec.ts:ticket list 390: a swipe never resizes the page; a ticket closed elsewhere leaves without moving the rows on screen"
     ,
@@ -297,6 +297,12 @@
     "browser:tests/aeon-1439-panel-opening.spec.ts:AEON-1439: 390 light refreshes keep the chosen tab and write the opening line once"
     ,
     "browser:tests/aeon-1448-desk-tabrow.spec.ts:type-size shots › AEON-1448: 375 and 390, the round action beside the tabs"
+    ,
+    "browser:tests/aeon-1459-compact-chrome.spec.ts:AEON-1459 C8 agents 932x380 light: the avatar menu stays inside the window and scrolls to What’s new"
+    ,
+    "browser:tests/aeon-1459-compact-chrome.spec.ts:AEON-1459 agents 844x340 light: the scroller's height never changes across a 2000 px touch scroll"
+    ,
+    "browser:tests/aeon-1459-compact-chrome.spec.ts:AEON-1459 agents 844x501 light: a saved open dial opens beside its row"
     ,
     "browser:tests/aeon-1470-list-titles.spec.ts:AEON-1470 S1 and S2: the 1388 set and every column at 1024 (light, dark) and 1440"
     ,
@@ -760,7 +766,7 @@
     ,
     "browser:tests/features.spec.ts:project OFF overrides workspace ON and inherit restores it"
     ,
-    "browser:tests/footer-summary.spec.ts:a phone save does not move the release control"
+    "browser:tests/footer-summary.spec.ts:a phone save that fails is said over the page and retried from there"
     ,
     "browser:tests/footer-summary.spec.ts:a review filter stays through search and kind, and All entries clears it"
     ,
@@ -784,13 +790,13 @@
     ,
     "browser:tests/footer-summary.spec.ts:the summary sits between the mark and the release without touching either at 1440 in light"
     ,
-    "browser:tests/footer-summary.spec.ts:the summary sits between the mark and the release without touching either at 390 in dark"
+    "browser:tests/footer-summary.spec.ts:the summary sits between the mark and the release without touching either at 720 in dark"
     ,
-    "browser:tests/footer-summary.spec.ts:the summary sits between the mark and the release without touching either at 390 in light"
+    "browser:tests/footer-summary.spec.ts:the summary sits between the mark and the release without touching either at 720 in light"
     ,
     "browser:tests/footer-summary.spec.ts:tickets say count, agents and the blocked ones, and the click adds the filter (full at 1440)"
     ,
-    "browser:tests/footer-summary.spec.ts:tickets say count, agents and the blocked ones, and the click adds the filter (short at 390)"
+    "browser:tests/footer-summary.spec.ts:tickets say count, agents and the blocked ones, and the click adds the filter (short at 1024)"
     ,
     "browser:tests/goals-view.spec.ts:1024 dark: essentials stay, nothing overflows, axe is clean"
     ,
@@ -866,29 +872,29 @@
     ,
     "browser:tests/header-desk-split.spec.ts:at 420 light the header shows a key whole or not at all and fits the window (AEON-1240)"
     ,
-    "browser:tests/header-desk-split.spec.ts:at 601 dark the trail drops whole segments and never cuts a chip"
+    "browser:tests/header-desk-split.spec.ts:at 720 dark the trail drops whole segments and never cuts a chip"
     ,
-    "browser:tests/header-desk-split.spec.ts:at 601 light the trail drops whole segments and never cuts a chip"
-    ,
-    "browser:tests/header-desk-split.spec.ts:at 640 dark the trail drops whole segments and never cuts a chip"
-    ,
-    "browser:tests/header-desk-split.spec.ts:at 640 light the trail drops whole segments and never cuts a chip"
+    "browser:tests/header-desk-split.spec.ts:at 720 light the trail drops whole segments and never cuts a chip"
     ,
     "browser:tests/header-desk-split.spec.ts:at 721 dark the trail drops whole segments and never cuts a chip"
     ,
     "browser:tests/header-desk-split.spec.ts:at 721 light the trail drops whole segments and never cuts a chip"
     ,
+    "browser:tests/header-desk-split.spec.ts:at 768 dark the trail drops whole segments and never cuts a chip"
+    ,
+    "browser:tests/header-desk-split.spec.ts:at 768 light the trail drops whole segments and never cuts a chip"
+    ,
     "browser:tests/header-desk-split.spec.ts:from 601 to 1440 px the trail never cuts a chip and returns whole when the window widens"
     ,
-    "browser:tests/header-desk-split.spec.ts:on a 375 px phone the chevron gives way to a ticket key and returns on the home page"
+    "browser:tests/header-desk-split.spec.ts:on a 375 px phone the header has no chevron or moon, a ticket key stays whole, nothing runs past the edge"
     ,
-    "browser:tests/header-desk-split.spec.ts:on a 390 px phone the chevron gives way to a ticket key and returns on the home page"
+    "browser:tests/header-desk-split.spec.ts:on a 390 px phone the header has no chevron or moon, a ticket key stays whole, nothing runs past the edge"
     ,
     "browser:tests/header-desk-split.spec.ts:on a project's tickets at 1024 the header fits the window and the search pill gives way last"
     ,
-    "browser:tests/header-desk-split.spec.ts:on a project's tickets at 601 the header fits the window and the search pill gives way last"
+    "browser:tests/header-desk-split.spec.ts:on a project's tickets at 601 the compact header fits the window"
     ,
-    "browser:tests/header-desk-split.spec.ts:on a project's tickets at 640 the header fits the window and the search pill gives way last"
+    "browser:tests/header-desk-split.spec.ts:on a project's tickets at 640 the compact header fits the window"
     ,
     "browser:tests/header-desk-split.spec.ts:on a project's tickets at 721 the header fits the window and the search pill gives way last"
     ,
@@ -900,7 +906,7 @@
     ,
     "browser:tests/header-desk-split.spec.ts:on home at 375 px the preview is one entry away in the avatar sheet"
     ,
-    "browser:tests/header-desk-split.spec.ts:on home at 390 px the preview is on its chevron, not in the avatar sheet"
+    "browser:tests/header-desk-split.spec.ts:on home at 720 px the preview is on its chevron, not in the avatar sheet"
     ,
     "browser:tests/header-desk-split.spec.ts:the Desk is the last place; its chevron previews the Desk without moving the header at 1024 dark"
     ,
@@ -1068,9 +1074,9 @@
     ,
     "browser:tests/project-header.spec.ts:phone Graph retains header density in the Display sheet"
     ,
-    "browser:tests/project-header.spec.ts:phone fold touch target › the whole 44px phone fold target accepts taps in dark"
+    "browser:tests/project-header.spec.ts:phone project crumb touch target › the whole 44px project crumb target accepts taps in dark"
     ,
-    "browser:tests/project-header.spec.ts:phone fold touch target › the whole 44px phone fold target accepts taps in light"
+    "browser:tests/project-header.spec.ts:phone project crumb touch target › the whole 44px project crumb target accepts taps in light"
     ,
     "browser:tests/project-header.spec.ts:scrolling leaves density alone and section changes keep the view settings usable"
     ,
@@ -1947,8 +1953,6 @@
     "vitest:tests/footer-summary.unit.test.ts:what each screen says > counts a release as at risk only while it is on its way and a run failed"
     ,
     "vitest:tests/footer-summary.unit.test.ts:what each screen says > does not call idle, throttled, awaiting or a paused mix all working"
-    ,
-    "vitest:tests/footer-summary.unit.test.ts:what each screen says > keeps a transient settings line from taking the phone release slot"
     ,
     "vitest:tests/footer-summary.unit.test.ts:what each screen says > knowledge calm"
     ,
@@ -5692,7 +5696,7 @@
     ,
     {"kind":"browser","file":"tests/aeon-1028-projheader.spec.ts","name":"the ticket count › is gone from the toolbar in every header view at 1440px; the footer still says it","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
-    {"kind":"browser","file":"tests/aeon-1028-projheader.spec.ts","name":"the ticket count › is gone from the toolbar in every header view at 400px; the footer still says it","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    {"kind":"browser","file":"tests/aeon-1028-projheader.spec.ts","name":"the ticket count › is gone from the toolbar in every header view at 400px; the list’s end still says it","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
     {"kind":"browser","file":"tests/aeon-1042-headergraph.spec.ts","name":"header graph off by default, developer switch keeps the header still 1440 dark","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
@@ -6126,9 +6130,9 @@
     ,
     {"kind":"browser","file":"tests/aeon-1279-touch-scroll.spec.ts","name":"chat 390: a post that arrives while reading up the thread never moves the posts on screen or the sheet","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
-    {"kind":"browser","file":"tests/aeon-1279-touch-scroll.spec.ts","name":"dark 390: the footer folds away over the page; the page's scroller never changes size while scrolling","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    {"kind":"browser","file":"tests/aeon-1279-touch-scroll.spec.ts","name":"dark 390: no footer bar; the page's scroller never changes size while scrolling, and the last row reaches the foot","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
-    {"kind":"browser","file":"tests/aeon-1279-touch-scroll.spec.ts","name":"light 390: the footer folds away over the page; the page's scroller never changes size while scrolling","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    {"kind":"browser","file":"tests/aeon-1279-touch-scroll.spec.ts","name":"light 390: no footer bar; the page's scroller never changes size while scrolling, and the last row reaches the foot","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
     {"kind":"browser","file":"tests/aeon-1279-touch-scroll.spec.ts","name":"ticket list 390: a swipe never resizes the page; a ticket closed elsewhere leaves without moving the rows on screen","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
@@ -6168,11 +6172,11 @@
     ,
     {"kind":"browser","file":"tests/aeon-1286-phone-chrome.spec.ts","name":"AEON-1286 short landscape 844x340 dark: full-screen sheet, one head line, thread at least 60 %","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
-    {"kind":"browser","file":"tests/aeon-1286-phone-chrome.spec.ts","name":"AEON-1286 short landscape 844x340 dark: the footer folds away while reading the lists","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    {"kind":"browser","file":"tests/aeon-1286-phone-chrome.spec.ts","name":"AEON-1286 short landscape 844x340 dark: no footer bar over the lists; the scroller keeps its size while reading","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
     {"kind":"browser","file":"tests/aeon-1286-phone-chrome.spec.ts","name":"AEON-1286 short landscape 844x340 light: full-screen sheet, one head line, thread at least 60 %","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
-    {"kind":"browser","file":"tests/aeon-1286-phone-chrome.spec.ts","name":"AEON-1286 short landscape 844x340 light: the footer folds away while reading the lists","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    {"kind":"browser","file":"tests/aeon-1286-phone-chrome.spec.ts","name":"AEON-1286 short landscape 844x340 light: no footer bar over the lists; the scroller keeps its size while reading","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
     {"kind":"browser","file":"tests/aeon-1339-desk-polish.spec.ts","name":"Decide is never a silent no-op: it says why beside the button and moves focus to what is missing","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
@@ -6240,6 +6244,58 @@
     ,
     {"kind":"browser","file":"tests/aeon-1448-desk-tabrow.spec.ts","name":"type-size shots › AEON-1448: 375 and 390, the round action beside the tabs","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
+    {"kind":"browser","file":"tests/aeon-1459-compact-chrome.spec.ts","name":"AEON-1459 1024 dark: a tablet keeps the desktop header, toolbar and footer","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/aeon-1459-compact-chrome.spec.ts","name":"AEON-1459 1024 light: a tablet keeps the desktop header, toolbar and footer","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/aeon-1459-compact-chrome.spec.ts","name":"AEON-1459 C1/C2 agents 320x568 light: 44 px opaque header, one-line toolbar, no footer, rows first","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/aeon-1459-compact-chrome.spec.ts","name":"AEON-1459 C1/C2 agents 390x664 dark: 44 px opaque header, one-line toolbar, no footer, rows first","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/aeon-1459-compact-chrome.spec.ts","name":"AEON-1459 C1/C2 agents 390x664 light: 44 px opaque header, one-line toolbar, no footer, rows first","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/aeon-1459-compact-chrome.spec.ts","name":"AEON-1459 C1/C2 agents 844x340 dark: 44 px opaque header, one-line toolbar, no footer, rows first","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/aeon-1459-compact-chrome.spec.ts","name":"AEON-1459 C1/C2 agents 844x340 light: 44 px opaque header, one-line toolbar, no footer, rows first","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/aeon-1459-compact-chrome.spec.ts","name":"AEON-1459 C1/C2 agents 932x380 light: 44 px opaque header, one-line toolbar, no footer, rows first","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/aeon-1459-compact-chrome.spec.ts","name":"AEON-1459 C3 agents 390x664 light: search opens over the toolbar line and Cancel clears it, nothing moves","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/aeon-1459-compact-chrome.spec.ts","name":"AEON-1459 C4 agents 390x664 light: the head ⋯ leads with Wind down, the Sessions ⋯ holds the list tools","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/aeon-1459-compact-chrome.spec.ts","name":"AEON-1459 C5 agents 390x664 light: the capacity line opens the dial and the accounts as a sheet","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/aeon-1459-compact-chrome.spec.ts","name":"AEON-1459 C5 agents 844x340 light: the capacity line opens the dial and the accounts as a sheet","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/aeon-1459-compact-chrome.spec.ts","name":"AEON-1459 C6 agents 390x664 light: held changes float as a chip; the toolbar keeps its one 44 px line","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/aeon-1459-compact-chrome.spec.ts","name":"AEON-1459 C6 agents 844x340 light: held changes float as a chip; the toolbar keeps its one 44 px line","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/aeon-1459-compact-chrome.spec.ts","name":"AEON-1459 C7 project 390x664 light: the crumb opens the project's sheet","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/aeon-1459-compact-chrome.spec.ts","name":"AEON-1459 C7 project 844x340 light: the crumb opens the project's sheet","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/aeon-1459-compact-chrome.spec.ts","name":"AEON-1459 C8 agents 390x664 light: the avatar menu has the theme, What’s new with the release, and the foot","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/aeon-1459-compact-chrome.spec.ts","name":"AEON-1459 C8 agents 844x340 light: the avatar menu stays inside the window and scrolls to What’s new","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/aeon-1459-compact-chrome.spec.ts","name":"AEON-1459 C8 agents 932x380 light: the avatar menu stays inside the window and scrolls to What’s new","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/aeon-1459-compact-chrome.spec.ts","name":"AEON-1459 C9 1440 dark: header, page head, capacity row, toolbar and columns keep main's geometry","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/aeon-1459-compact-chrome.spec.ts","name":"AEON-1459 C9 1440 light: header, page head, capacity row, toolbar and columns keep main's geometry","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/aeon-1459-compact-chrome.spec.ts","name":"AEON-1459 agents 390x664 light: the scroller's height never changes across a 2000 px touch scroll","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/aeon-1459-compact-chrome.spec.ts","name":"AEON-1459 agents 844x340 light: the scroller's height never changes across a 2000 px touch scroll","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/aeon-1459-compact-chrome.spec.ts","name":"AEON-1459 agents 844x481 light: a saved open dial opens folded under the capacity line","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/aeon-1459-compact-chrome.spec.ts","name":"AEON-1459 agents 844x500 light: a saved open dial opens folded under the capacity line","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/aeon-1459-compact-chrome.spec.ts","name":"AEON-1459 agents 844x501 light: a saved open dial opens beside its row","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
     {"kind":"browser","file":"tests/aeon-1470-list-titles.spec.ts","name":"AEON-1470 Columns rows hold still while hidden notes come and go","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
     {"kind":"browser","file":"tests/aeon-1470-list-titles.spec.ts","name":"AEON-1470 Parent cell shows the kind icon and key, adds the title from 200 px, and has no chip","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
@@ -6287,6 +6343,14 @@
     {"kind":"browser","file":"tests/aeon-1473-desk-tab.spec.ts","name":"AEON-1473: every page leads with the badge’s count: none at 0, (1), (9), then (9+)","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
     {"kind":"browser","file":"tests/aeon-1473-desk-tab.spec.ts","name":"AEON-1473: reduced motion changes only the number, visible or in the background","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/aeon-1535-desk-phone.spec.ts","name":"AEON-1535 P1: the phone question card reads at 22 px and the four stamp rows are full width","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/aeon-1535-desk-phone.spec.ts","name":"AEON-1535 P2: an unavailable stamp row is disabled and reads its reason","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/aeon-1535-desk-phone.spec.ts","name":"AEON-1535 P4: the 1440 desk keeps its geometry","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/aeon-1535-desk-phone.spec.ts","name":"touch › AEON-1535 P3: O, A, R and D and a tap choose the right row, and choosing moves nothing","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
     {"kind":"browser","file":"tests/aeon-632b-clip-settings.spec.ts","name":"rules names 1024 dark","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
     ,
@@ -8428,6 +8492,18 @@
     ,
     {"kind":"browser","file":"tests/decision-text.spec.ts","name":"reveal sizing 390 coarse light › approval and held controls fit both labels with disjoint stable targets","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
+    {"kind":"browser","file":"tests/definitions-p3.spec.ts","name":"AEON-1317 Desk opens waiting definitions and resolves only after the last admin decision","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/definitions-p3.spec.ts","name":"AEON-1317 German definitions copy covers every P3 string and singular notices","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/definitions-p3.spec.ts","name":"AEON-1317 default decisions preserve every row notice copy and focus in all viewports","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/definitions-p3.spec.ts","name":"AEON-1317 failed stale and identity-bound decisions never claim success","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/definitions-p3.spec.ts","name":"AEON-1317 workspace defaults differences empty inherited and viewer match the approved states","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/definitions-p3.spec.ts","name":"AEON-1528 definitions remeasure resize locale and longer decisions without shifting unchanged content","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
     {"kind":"browser","file":"tests/definitions.spec.ts","name":"AEON-1316 FIX4 Add and row menus stay anchored at every width with the approved copy","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
     {"kind":"browser","file":"tests/definitions.spec.ts","name":"AEON-1316 FIX4 Applies to offers only All Code UI and keeps fixed conditions as text","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
@@ -9136,25 +9212,31 @@
     ,
     {"kind":"browser","file":"tests/first-run.spec.ts","name":"pairing retries only account approval after a partial save","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
-    {"kind":"browser","file":"tests/footer-release-pill.spec.ts","name":"flow is absent by default and a long codename cannot push the version off a phone","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    {"kind":"browser","file":"tests/footer-release-pill.spec.ts","name":"compact 320x568: the release is What's new in the avatar menu","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    ,
+    {"kind":"browser","file":"tests/footer-release-pill.spec.ts","name":"compact 390x844: the release is What's new in the avatar menu","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    ,
+    {"kind":"browser","file":"tests/footer-release-pill.spec.ts","name":"compact 844x340: the release is What's new in the avatar menu","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    ,
+    {"kind":"browser","file":"tests/footer-release-pill.spec.ts","name":"flow is absent by default and a long codename cannot push the version off the narrowest footer","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
     ,
     {"kind":"browser","file":"tests/footer-release-pill.spec.ts","name":"long names ellipsize at their cap with uncut descenders at 1440px","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
     ,
-    {"kind":"browser","file":"tests/footer-release-pill.spec.ts","name":"long names ellipsize at their cap with uncut descenders at 390px","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    {"kind":"browser","file":"tests/footer-release-pill.spec.ts","name":"long names ellipsize at their cap with uncut descenders at 720px","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    ,
+    {"kind":"browser","file":"tests/footer-release-pill.spec.ts","name":"new count takes room only while present at 1024","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
     ,
     {"kind":"browser","file":"tests/footer-release-pill.spec.ts","name":"new count takes room only while present at 1440","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
     ,
-    {"kind":"browser","file":"tests/footer-release-pill.spec.ts","name":"new count takes room only while present at 320","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
-    ,
-    {"kind":"browser","file":"tests/footer-release-pill.spec.ts","name":"new count takes room only while present at 390","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    {"kind":"browser","file":"tests/footer-release-pill.spec.ts","name":"new count takes room only while present at 720","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
     ,
     {"kind":"browser","file":"tests/footer-release-pill.spec.ts","name":"release pill and product mark at 1440 in dark","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
     ,
     {"kind":"browser","file":"tests/footer-release-pill.spec.ts","name":"release pill and product mark at 1440 in light","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
     ,
-    {"kind":"browser","file":"tests/footer-release-pill.spec.ts","name":"release pill and product mark at 390 in dark","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    {"kind":"browser","file":"tests/footer-release-pill.spec.ts","name":"release pill and product mark at 720 in dark","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
     ,
-    {"kind":"browser","file":"tests/footer-release-pill.spec.ts","name":"release pill and product mark at 390 in light","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    {"kind":"browser","file":"tests/footer-release-pill.spec.ts","name":"release pill and product mark at 720 in light","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
     ,
     {"kind":"browser","file":"tests/footer-release-pill.spec.ts","name":"release text fits and controls never move: 1440px, 100%, dark","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
     ,
@@ -9168,43 +9250,43 @@
     ,
     {"kind":"browser","file":"tests/footer-release-pill.spec.ts","name":"release text fits and controls never move: 1440px, 150%, light","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
     ,
-    {"kind":"browser","file":"tests/footer-release-pill.spec.ts","name":"release text fits and controls never move: 390px, 100%, dark","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    {"kind":"browser","file":"tests/footer-release-pill.spec.ts","name":"release text fits and controls never move: 720px, 100%, dark","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
     ,
-    {"kind":"browser","file":"tests/footer-release-pill.spec.ts","name":"release text fits and controls never move: 390px, 100%, light","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    {"kind":"browser","file":"tests/footer-release-pill.spec.ts","name":"release text fits and controls never move: 720px, 100%, light","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
     ,
-    {"kind":"browser","file":"tests/footer-release-pill.spec.ts","name":"release text fits and controls never move: 390px, 125%, dark","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    {"kind":"browser","file":"tests/footer-release-pill.spec.ts","name":"release text fits and controls never move: 720px, 125%, dark","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
     ,
-    {"kind":"browser","file":"tests/footer-release-pill.spec.ts","name":"release text fits and controls never move: 390px, 125%, light","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    {"kind":"browser","file":"tests/footer-release-pill.spec.ts","name":"release text fits and controls never move: 720px, 125%, light","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
     ,
-    {"kind":"browser","file":"tests/footer-release-pill.spec.ts","name":"release text fits and controls never move: 390px, 150%, dark","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    {"kind":"browser","file":"tests/footer-release-pill.spec.ts","name":"release text fits and controls never move: 720px, 150%, dark","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
     ,
-    {"kind":"browser","file":"tests/footer-release-pill.spec.ts","name":"release text fits and controls never move: 390px, 150%, light","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    {"kind":"browser","file":"tests/footer-release-pill.spec.ts","name":"release text fits and controls never move: 720px, 150%, light","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
     ,
     {"kind":"browser","file":"tests/footer-release-pill.spec.ts","name":"short pointer visits and touch do not open the hover card; keyboard focus is immediate","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    ,
+    {"kind":"browser","file":"tests/footer-release-pill.spec.ts","name":"signed-in loading keeps the release usable and the flow clear at 1024, failure","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    ,
+    {"kind":"browser","file":"tests/footer-release-pill.spec.ts","name":"signed-in loading keeps the release usable and the flow clear at 1024, success","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
     ,
     {"kind":"browser","file":"tests/footer-release-pill.spec.ts","name":"signed-in loading keeps the release usable and the flow clear at 1440, failure","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
     ,
     {"kind":"browser","file":"tests/footer-release-pill.spec.ts","name":"signed-in loading keeps the release usable and the flow clear at 1440, success","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
     ,
-    {"kind":"browser","file":"tests/footer-release-pill.spec.ts","name":"signed-in loading keeps the release usable and the flow clear at 320, failure","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    {"kind":"browser","file":"tests/footer-release-pill.spec.ts","name":"signed-in loading keeps the release usable and the flow clear at 720, failure","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
     ,
-    {"kind":"browser","file":"tests/footer-release-pill.spec.ts","name":"signed-in loading keeps the release usable and the flow clear at 320, success","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    {"kind":"browser","file":"tests/footer-release-pill.spec.ts","name":"signed-in loading keeps the release usable and the flow clear at 720, success","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
     ,
-    {"kind":"browser","file":"tests/footer-release-pill.spec.ts","name":"signed-in loading keeps the release usable and the flow clear at 390, failure","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    {"kind":"browser","file":"tests/footer-release-pill.spec.ts","name":"signed-out loading reserves the plain version at 1024, failure","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
     ,
-    {"kind":"browser","file":"tests/footer-release-pill.spec.ts","name":"signed-in loading keeps the release usable and the flow clear at 390, success","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    {"kind":"browser","file":"tests/footer-release-pill.spec.ts","name":"signed-out loading reserves the plain version at 1024, success","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
     ,
     {"kind":"browser","file":"tests/footer-release-pill.spec.ts","name":"signed-out loading reserves the plain version at 1440, failure","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
     ,
     {"kind":"browser","file":"tests/footer-release-pill.spec.ts","name":"signed-out loading reserves the plain version at 1440, success","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
     ,
-    {"kind":"browser","file":"tests/footer-release-pill.spec.ts","name":"signed-out loading reserves the plain version at 320, failure","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    {"kind":"browser","file":"tests/footer-release-pill.spec.ts","name":"signed-out loading reserves the plain version at 720, failure","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
     ,
-    {"kind":"browser","file":"tests/footer-release-pill.spec.ts","name":"signed-out loading reserves the plain version at 320, success","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
-    ,
-    {"kind":"browser","file":"tests/footer-release-pill.spec.ts","name":"signed-out loading reserves the plain version at 390, failure","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
-    ,
-    {"kind":"browser","file":"tests/footer-release-pill.spec.ts","name":"signed-out loading reserves the plain version at 390, success","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    {"kind":"browser","file":"tests/footer-release-pill.spec.ts","name":"signed-out loading reserves the plain version at 720, success","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
     ,
     {"kind":"browser","file":"tests/footer-release-pill.spec.ts","name":"the UI audit history selector opens a named release after history loads","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
     ,
@@ -9214,7 +9296,7 @@
     ,
     {"kind":"browser","file":"tests/footer-release-pill.spec.ts","name":"unknown count reserves no badge; failed versions still open history","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
     ,
-    {"kind":"browser","file":"tests/footer-summary.spec.ts","name":"a phone save does not move the release control","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    {"kind":"browser","file":"tests/footer-summary.spec.ts","name":"a phone save that fails is said over the page and retried from there","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
     {"kind":"browser","file":"tests/footer-summary.spec.ts","name":"a review filter stays through search and kind, and All entries clears it","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
@@ -9238,17 +9320,37 @@
     ,
     {"kind":"browser","file":"tests/footer-summary.spec.ts","name":"the summary sits between the mark and the release without touching either at 1440 in light","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
-    {"kind":"browser","file":"tests/footer-summary.spec.ts","name":"the summary sits between the mark and the release without touching either at 390 in dark","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    {"kind":"browser","file":"tests/footer-summary.spec.ts","name":"the summary sits between the mark and the release without touching either at 720 in dark","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
-    {"kind":"browser","file":"tests/footer-summary.spec.ts","name":"the summary sits between the mark and the release without touching either at 390 in light","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    {"kind":"browser","file":"tests/footer-summary.spec.ts","name":"the summary sits between the mark and the release without touching either at 720 in light","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
     {"kind":"browser","file":"tests/footer-summary.spec.ts","name":"tickets say count, agents and the blocked ones, and the click adds the filter (full at 1440)","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
-    {"kind":"browser","file":"tests/footer-summary.spec.ts","name":"tickets say count, agents and the blocked ones, and the click adds the filter (short at 390)","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    {"kind":"browser","file":"tests/footer-summary.spec.ts","name":"tickets say count, agents and the blocked ones, and the click adds the filter (short at 1024)","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
     {"kind":"browser","file":"tests/from-classic.spec.ts","name":"known and unknown classic links resolve through the API","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
     {"kind":"browser","file":"tests/from-classic.spec.ts","name":"sign-in returns to the classic resolver before opening its destination","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/goals-epics.spec.ts","name":" › E6 390 dark: phones keep the epic rows and their essentials, 44 px Group targets, no overflow","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/goals-epics.spec.ts","name":" › E6 390 light: phones keep the epic rows and their essentials, 44 px Group targets, no overflow","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/goals-epics.spec.ts","name":"E1/E2 1024 light: epics in the goal anatomy; an opened epic lists what's missing in Definitions order, then its items with live lines and folds","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/goals-epics.spec.ts","name":"E1/E2 1440 dark: epics in the goal anatomy; an opened epic lists what's missing in Definitions order, then its items with live lines and folds","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/goals-epics.spec.ts","name":"E1/E2 1440 light: epics in the goal anatomy; an opened epic lists what's missing in Definitions order, then its items with live lines and folds","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/goals-epics.spec.ts","name":"E3 1440: Display leads with Group: Goals · Epics, inside the viewport","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/goals-epics.spec.ts","name":"E4 1440: no open epics says so, without examples","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/goals-epics.spec.ts","name":"E5 1024: Goals → Epics → Goals moves no toolbar control, chip, Display trigger or header cell; GOAL and EPIC share one box","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/goals-epics.spec.ts","name":"E5 1440: Goals → Epics → Goals moves no toolbar control, chip, Display trigger or header cell; GOAL and EPIC share one box","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/goals-epics.spec.ts","name":"the group is kept per person across a reload; ?view=goals&group=epics opens it once and changes nothing","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
     {"kind":"browser","file":"tests/goals-gaps.spec.ts","name":"1024: items nest under their goal at the step icons' x, labels run from the key to the ETA in at most two lines with the badge in the meta line; goal names wrap to two lines; opening and a live update move nothing","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
@@ -9426,29 +9528,29 @@
     ,
     {"kind":"browser","file":"tests/header-desk-split.spec.ts","name":"at 420 light the header shows a key whole or not at all and fits the window (AEON-1240)","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
-    {"kind":"browser","file":"tests/header-desk-split.spec.ts","name":"at 601 dark the trail drops whole segments and never cuts a chip","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    {"kind":"browser","file":"tests/header-desk-split.spec.ts","name":"at 720 dark the trail drops whole segments and never cuts a chip","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
-    {"kind":"browser","file":"tests/header-desk-split.spec.ts","name":"at 601 light the trail drops whole segments and never cuts a chip","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
-    ,
-    {"kind":"browser","file":"tests/header-desk-split.spec.ts","name":"at 640 dark the trail drops whole segments and never cuts a chip","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
-    ,
-    {"kind":"browser","file":"tests/header-desk-split.spec.ts","name":"at 640 light the trail drops whole segments and never cuts a chip","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    {"kind":"browser","file":"tests/header-desk-split.spec.ts","name":"at 720 light the trail drops whole segments and never cuts a chip","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
     {"kind":"browser","file":"tests/header-desk-split.spec.ts","name":"at 721 dark the trail drops whole segments and never cuts a chip","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
     {"kind":"browser","file":"tests/header-desk-split.spec.ts","name":"at 721 light the trail drops whole segments and never cuts a chip","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
+    {"kind":"browser","file":"tests/header-desk-split.spec.ts","name":"at 768 dark the trail drops whole segments and never cuts a chip","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/header-desk-split.spec.ts","name":"at 768 light the trail drops whole segments and never cuts a chip","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
     {"kind":"browser","file":"tests/header-desk-split.spec.ts","name":"from 601 to 1440 px the trail never cuts a chip and returns whole when the window widens","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
-    {"kind":"browser","file":"tests/header-desk-split.spec.ts","name":"on a 375 px phone the chevron gives way to a ticket key and returns on the home page","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    {"kind":"browser","file":"tests/header-desk-split.spec.ts","name":"on a 375 px phone the header has no chevron or moon, a ticket key stays whole, nothing runs past the edge","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
-    {"kind":"browser","file":"tests/header-desk-split.spec.ts","name":"on a 390 px phone the chevron gives way to a ticket key and returns on the home page","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    {"kind":"browser","file":"tests/header-desk-split.spec.ts","name":"on a 390 px phone the header has no chevron or moon, a ticket key stays whole, nothing runs past the edge","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
     {"kind":"browser","file":"tests/header-desk-split.spec.ts","name":"on a project's tickets at 1024 the header fits the window and the search pill gives way last","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
-    {"kind":"browser","file":"tests/header-desk-split.spec.ts","name":"on a project's tickets at 601 the header fits the window and the search pill gives way last","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    {"kind":"browser","file":"tests/header-desk-split.spec.ts","name":"on a project's tickets at 601 the compact header fits the window","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
-    {"kind":"browser","file":"tests/header-desk-split.spec.ts","name":"on a project's tickets at 640 the header fits the window and the search pill gives way last","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    {"kind":"browser","file":"tests/header-desk-split.spec.ts","name":"on a project's tickets at 640 the compact header fits the window","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
     {"kind":"browser","file":"tests/header-desk-split.spec.ts","name":"on a project's tickets at 721 the header fits the window and the search pill gives way last","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
@@ -9460,7 +9562,7 @@
     ,
     {"kind":"browser","file":"tests/header-desk-split.spec.ts","name":"on home at 375 px the preview is one entry away in the avatar sheet","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
-    {"kind":"browser","file":"tests/header-desk-split.spec.ts","name":"on home at 390 px the preview is on its chevron, not in the avatar sheet","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    {"kind":"browser","file":"tests/header-desk-split.spec.ts","name":"on home at 720 px the preview is on its chevron, not in the avatar sheet","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
     {"kind":"browser","file":"tests/header-desk-split.spec.ts","name":"the Desk is the last place; its chevron previews the Desk without moving the header at 1024 dark","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
@@ -9582,33 +9684,33 @@
     ,
     {"kind":"browser","file":"tests/header-menus.spec.ts","name":"phone sheets › menus are bottom sheets with 44 px rows and no sideways scroll","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
     ,
-    {"kind":"browser","file":"tests/header-menus.spec.ts","name":"phones › 375 px, Business off, home: the key is whole and the moon shows whenever it fits","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    {"kind":"browser","file":"tests/header-menus.spec.ts","name":"phones › 375 px, Business off, home: the key is whole and the moon leads the avatar sheet","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
     ,
-    {"kind":"browser","file":"tests/header-menus.spec.ts","name":"phones › 375 px, Business off, ticket: the key is whole and the moon shows whenever it fits","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    {"kind":"browser","file":"tests/header-menus.spec.ts","name":"phones › 375 px, Business off, ticket: the key is whole and the moon leads the avatar sheet","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
     ,
-    {"kind":"browser","file":"tests/header-menus.spec.ts","name":"phones › 375 px, Business on, home: the key is whole and the moon shows whenever it fits","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    {"kind":"browser","file":"tests/header-menus.spec.ts","name":"phones › 375 px, Business on, home: the key is whole and the moon leads the avatar sheet","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
     ,
-    {"kind":"browser","file":"tests/header-menus.spec.ts","name":"phones › 375 px, Business on, ticket: the key is whole and the moon shows whenever it fits","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    {"kind":"browser","file":"tests/header-menus.spec.ts","name":"phones › 375 px, Business on, ticket: the key is whole and the moon leads the avatar sheet","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
     ,
-    {"kind":"browser","file":"tests/header-menus.spec.ts","name":"phones › 390 px, Business off, home: the key is whole and the moon shows whenever it fits","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    {"kind":"browser","file":"tests/header-menus.spec.ts","name":"phones › 390 px, Business off, home: the key is whole and the moon leads the avatar sheet","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
     ,
-    {"kind":"browser","file":"tests/header-menus.spec.ts","name":"phones › 390 px, Business off, ticket: the key is whole and the moon shows whenever it fits","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    {"kind":"browser","file":"tests/header-menus.spec.ts","name":"phones › 390 px, Business off, ticket: the key is whole and the moon leads the avatar sheet","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
     ,
-    {"kind":"browser","file":"tests/header-menus.spec.ts","name":"phones › 390 px, Business on, home: the key is whole and the moon shows whenever it fits","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    {"kind":"browser","file":"tests/header-menus.spec.ts","name":"phones › 390 px, Business on, home: the key is whole and the moon leads the avatar sheet","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
     ,
-    {"kind":"browser","file":"tests/header-menus.spec.ts","name":"phones › 390 px, Business on, ticket: the key is whole and the moon shows whenever it fits","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    {"kind":"browser","file":"tests/header-menus.spec.ts","name":"phones › 390 px, Business on, ticket: the key is whole and the moon leads the avatar sheet","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
     ,
-    {"kind":"browser","file":"tests/header-menus.spec.ts","name":"phones › release history from the account menu stays on the list","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    {"kind":"browser","file":"tests/header-menus.spec.ts","name":"phones › a late font keeps the ticket key whole on a phone","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
     ,
-    {"kind":"browser","file":"tests/header-menus.spec.ts","name":"phones › the moon comes back when a late font leaves room for it","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    {"kind":"browser","file":"tests/header-menus.spec.ts","name":"phones › on compact screens the moon stays in the avatar sheet on every page","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
     ,
-    {"kind":"browser","file":"tests/header-menus.spec.ts","name":"phones › the moon comes back when the page leaves room for it","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    {"kind":"browser","file":"tests/header-menus.spec.ts","name":"phones › release history from the app menu stays on the list","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
     ,
     {"kind":"browser","file":"tests/header-menus.spec.ts","name":"phones › the moon stays in the header at 1600 with three places","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
     ,
-    {"kind":"browser","file":"tests/header-menus.spec.ts","name":"phones › the moon stays in the header at 440","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    {"kind":"browser","file":"tests/header-menus.spec.ts","name":"phones › the moon stays in the header at 720","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
-    {"kind":"browser","file":"tests/header-menus.spec.ts","name":"phones › the moon stays in the header at 440 with three places","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    {"kind":"browser","file":"tests/header-menus.spec.ts","name":"phones › the moon stays in the header at 720 with three places","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
     ,
     {"kind":"browser","file":"tests/header-menus.spec.ts","name":"phones › with three places at 375 dark the ticket key stays whole and the moon leads the avatar sheet","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
     ,
@@ -9618,17 +9720,17 @@
     ,
     {"kind":"browser","file":"tests/header-menus.spec.ts","name":"phones › with three places at 390 light the ticket key stays whole and the moon leads the avatar sheet","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
     ,
-    {"kind":"browser","file":"tests/header-menus.spec.ts","name":"release history before the version has loaded › at 390 a footer click keeps the empty history when this build has none","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    {"kind":"browser","file":"tests/header-menus.spec.ts","name":"release history before the version has loaded › What’s new still opens the running release at 390","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
     ,
-    {"kind":"browser","file":"tests/header-menus.spec.ts","name":"release history before the version has loaded › at 390 a footer click keeps the error and retry when the history fails","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    {"kind":"browser","file":"tests/header-menus.spec.ts","name":"release history before the version has loaded › at 390 What’s new keeps the empty history when this build has none","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    ,
+    {"kind":"browser","file":"tests/header-menus.spec.ts","name":"release history before the version has loaded › at 390 What’s new keeps the error and retry when the history fails","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
     ,
     {"kind":"browser","file":"tests/header-menus.spec.ts","name":"release history before the version has loaded › header release history stays on the full list at 1440","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
     ,
     {"kind":"browser","file":"tests/header-menus.spec.ts","name":"release history before the version has loaded › header release history stays on the full list at 390","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
     ,
     {"kind":"browser","file":"tests/header-menus.spec.ts","name":"release history before the version has loaded › the footer pill still opens the running release at 1440","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
-    ,
-    {"kind":"browser","file":"tests/header-menus.spec.ts","name":"release history before the version has loaded › the footer pill still opens the running release at 390","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
     ,
     {"kind":"browser","file":"tests/header-menus.spec.ts","name":"screenshots › avatar 1600 dark","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
     ,
@@ -12008,9 +12110,9 @@
     ,
     {"kind":"browser","file":"tests/project-header.spec.ts","name":"phone Graph retains header density in the Display sheet","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
-    {"kind":"browser","file":"tests/project-header.spec.ts","name":"phone fold touch target › the whole 44px phone fold target accepts taps in dark","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    {"kind":"browser","file":"tests/project-header.spec.ts","name":"phone project crumb touch target › the whole 44px project crumb target accepts taps in dark","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
-    {"kind":"browser","file":"tests/project-header.spec.ts","name":"phone fold touch target › the whole 44px phone fold target accepts taps in light","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    {"kind":"browser","file":"tests/project-header.spec.ts","name":"phone project crumb touch target › the whole 44px project crumb target accepts taps in light","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
     {"kind":"browser","file":"tests/project-header.spec.ts","name":"scrolling leaves density alone and section changes keep the view settings usable","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
@@ -12980,7 +13082,7 @@
     ,
     {"kind":"browser","file":"tests/releases.spec.ts","name":"nothing is clipped at 390: stat card and chart stacked, counts in notes, full headlines","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
     ,
-    {"kind":"browser","file":"tests/releases.spec.ts","name":"on phones the footer folds away reading down and returns on the way up","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    {"kind":"browser","file":"tests/releases.spec.ts","name":"on phones there is no footer bar and the page keeps its size while reading","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
     ,
     {"kind":"browser","file":"tests/releases.spec.ts","name":"release history renders CalVer2 history and CalVer3 versions as six-segment Pretty","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
     ,
@@ -16568,7 +16670,11 @@
     ,
     {"kind":"node","file":"tests/managed-control.test.ts","name":"each server prerequisite blocks on its own","tier":"ESSENTIAL"}
     ,
+    {"kind":"node","file":"tests/managed-control.test.ts","name":"interrupt waits for a running step and leaves stop available","tier":"ESSENTIAL"}
+    ,
     {"kind":"node","file":"tests/managed-control.test.ts","name":"reasons keep the panel wording","tier":"ESSENTIAL"}
+    ,
+    {"kind":"node","file":"tests/managed-control.test.ts","name":"steer starts a yielded step, queues a busy one, and stops when the session has ended","tier":"ESSENTIAL"}
     ,
     {"kind":"node","file":"tests/markdown-links.test.ts","name":"a bare https address is a link and trailing punctuation stays outside it","tier":"GATED-FULL"}
     ,
@@ -18152,6 +18258,8 @@
     ,
     {"kind":"vitest","file":"tests/definitions.unit.test.ts","name":"AEON-1316 describes complete copies, conditions, owners and their retained base","tier":"ESSENTIAL"}
     ,
+    {"kind":"vitest","file":"tests/definitions.unit.test.ts","name":"AEON-1317 binds decisions to both revisions and renders the complete bilingual decision copy","tier":"ESSENTIAL"}
+    ,
     {"kind":"vitest","file":"tests/delivery-building.unit.test.ts","name":"AEON-1493: German keeps the approved words, \"Runde\" among the explained ones","tier":"ESSENTIAL"}
     ,
     {"kind":"vitest","file":"tests/delivery-building.unit.test.ts","name":"AEON-1493: an answer for another project or window is refused rather than shown","tier":"ESSENTIAL"}
@@ -18416,8 +18524,6 @@
     ,
     {"kind":"vitest","file":"tests/footer-summary.unit.test.ts","name":"what each screen says > does not call idle, throttled, awaiting or a paused mix all working","tier":"NIGHTLY"}
     ,
-    {"kind":"vitest","file":"tests/footer-summary.unit.test.ts","name":"what each screen says > keeps a transient settings line from taking the phone release slot","tier":"NIGHTLY"}
-    ,
     {"kind":"vitest","file":"tests/footer-summary.unit.test.ts","name":"what each screen says > knowledge calm","tier":"NIGHTLY"}
     ,
     {"kind":"vitest","file":"tests/footer-summary.unit.test.ts","name":"what each screen says > knowledge to review","tier":"NIGHTLY"}
@@ -18443,6 +18549,12 @@
     {"kind":"vitest","file":"tests/footer-summary.unit.test.ts","name":"what each screen says > tickets filtered to none","tier":"NIGHTLY"}
     ,
     {"kind":"vitest","file":"tests/footer-summary.unit.test.ts","name":"what each screen says > tickets with blocked","tier":"NIGHTLY"}
+    ,
+    {"kind":"vitest","file":"tests/goals-epics-fix2.unit.test.ts","name":"a group switch keeps the frame > keeps the status note and header while the rows are replaced, then shows an empty list","tier":"ESSENTIAL"}
+    ,
+    {"kind":"vitest","file":"tests/goals-epics-fix2.unit.test.ts","name":"epic live events > a goals stream ignores a heartbeat and a delivery state change; an epics stream re-reads on both","tier":"ESSENTIAL"}
+    ,
+    {"kind":"vitest","file":"tests/goals-epics-fix2.unit.test.ts","name":"the epics page re-reads on heartbeat and delivery state > epics re-read on those events and a goals page does not","tier":"ESSENTIAL"}
     ,
     {"kind":"vitest","file":"tests/goals-fix2.unit.test.ts","name":"goals pagination and charts stay current > a refresh during Show more clears the disabled state and a stale page cannot cancel the next one","tier":"ESSENTIAL"}
     ,
@@ -20436,11 +20548,15 @@
     ,
     {"kind":"vitest","file":"tests/start-agent.unit.test.ts","name":"Start Agent leaf selection > refuses non-leaf selection and initial targets while keeping confirmed leaves launchable","tier":"ESSENTIAL"}
     ,
+    {"kind":"vitest","file":"tests/start-agent.unit.test.ts","name":"Start Agent leaf selection > tells the person to narrow a ticket search that hits the aggregate limit","tier":"ESSENTIAL"}
+    ,
     {"kind":"vitest","file":"tests/start-agent.unit.test.ts","name":"honest launch state > never presents queued or claimed as a registered managed session","tier":"ESSENTIAL"}
     ,
     {"kind":"vitest","file":"tests/start-agent.unit.test.ts","name":"honest launch state > recognizes a stale model-grant rejection and leaves other conflicts alone","tier":"GATED-FULL"}
     ,
     {"kind":"vitest","file":"tests/start-agent.unit.test.ts","name":"run now once > only sends the override when the person chooses it","tier":"GATED-FULL"}
+    ,
+    {"kind":"vitest","file":"tests/start-agent.unit.test.ts","name":"run now once > shows the checkout sentence while an earlier pairing still holds this computer","tier":"ESSENTIAL"}
     ,
     {"kind":"vitest","file":"tests/start-agent.unit.test.ts","name":"run now once > uses the server wait reason on a queued run","tier":"GATED-FULL"}
     ,
@@ -24075,7 +24191,7 @@
       ,
       "tests/flow-pill.test.ts": {"seconds":0.233456,"selectedTests":5}
       ,
-      "tests/footer-release-pill.spec.ts": {"caseSeconds":{"flow is absent by default and a long codename cannot push the version off a phone":1.928,"long names ellipsize at their cap with uncut descenders at 1440px":2.105,"long names ellipsize at their cap with uncut descenders at 390px":1.962,"new count takes room only while present at 1440":1.876,"new count takes room only while present at 320":1.748,"new count takes room only while present at 390":1.756,"release pill and product mark at 1440 in dark":2.563,"release pill and product mark at 1440 in light":4.265,"release pill and product mark at 390 in dark":2.295,"release pill and product mark at 390 in light":2.389,"release text fits and controls never move: 1440px, 100%, dark":2.366,"release text fits and controls never move: 1440px, 100%, light":2.361,"release text fits and controls never move: 1440px, 125%, dark":2.417,"release text fits and controls never move: 1440px, 125%, light":2.473,"release text fits and controls never move: 1440px, 150%, dark":2.42,"release text fits and controls never move: 1440px, 150%, light":2.411,"release text fits and controls never move: 390px, 100%, dark":2.188,"release text fits and controls never move: 390px, 100%, light":2.227,"release text fits and controls never move: 390px, 125%, dark":2.297,"release text fits and controls never move: 390px, 125%, light":2.273,"release text fits and controls never move: 390px, 150%, dark":2.295,"release text fits and controls never move: 390px, 150%, light":2.242,"short pointer visits and touch do not open the hover card; keyboard focus is immediate":1.969,"signed-in loading keeps the release usable and the flow clear at 1440, failure":1.672,"signed-in loading keeps the release usable and the flow clear at 1440, success":2.111,"signed-in loading keeps the release usable and the flow clear at 320, failure":1.537,"signed-in loading keeps the release usable and the flow clear at 320, success":1.55,"signed-in loading keeps the release usable and the flow clear at 390, failure":1.567,"signed-in loading keeps the release usable and the flow clear at 390, success":1.533,"signed-out loading reserves the plain version at 1440, failure":1.023,"signed-out loading reserves the plain version at 1440, success":1.121,"signed-out loading reserves the plain version at 320, failure":1.008,"signed-out loading reserves the plain version at 320, success":1.035,"signed-out loading reserves the plain version at 390, failure":1.002,"signed-out loading reserves the plain version at 390, success":1.04,"the UI audit history selector opens a named release after history loads":3.995,"the UI audit history selector opens a nameless release after history loads":1.345,"the footer stays at rest even when motion is enabled":2.012,"unknown count reserves no badge; failed versions still open history":2.384},"seconds":78.761,"selectedTests":39}
+      "tests/footer-release-pill.spec.ts": {"caseSeconds":{"flow is absent by default and a long codename cannot push the version off the narrowest footer":1.928,"long names ellipsize at their cap with uncut descenders at 1440px":2.105,"long names ellipsize at their cap with uncut descenders at 720px":1.962,"new count takes room only while present at 1024":1.756,"new count takes room only while present at 1440":1.876,"new count takes room only while present at 720":1.748,"release pill and product mark at 1440 in dark":2.563,"release pill and product mark at 1440 in light":4.265,"release pill and product mark at 720 in dark":2.295,"release pill and product mark at 720 in light":2.389,"release text fits and controls never move: 1440px, 100%, dark":2.366,"release text fits and controls never move: 1440px, 100%, light":2.361,"release text fits and controls never move: 1440px, 125%, dark":2.417,"release text fits and controls never move: 1440px, 125%, light":2.473,"release text fits and controls never move: 1440px, 150%, dark":2.42,"release text fits and controls never move: 1440px, 150%, light":2.411,"release text fits and controls never move: 720px, 100%, dark":2.188,"release text fits and controls never move: 720px, 100%, light":2.227,"release text fits and controls never move: 720px, 125%, dark":2.297,"release text fits and controls never move: 720px, 125%, light":2.273,"release text fits and controls never move: 720px, 150%, dark":2.295,"release text fits and controls never move: 720px, 150%, light":2.242,"short pointer visits and touch do not open the hover card; keyboard focus is immediate":1.969,"signed-in loading keeps the release usable and the flow clear at 1024, failure":1.567,"signed-in loading keeps the release usable and the flow clear at 1024, success":1.533,"signed-in loading keeps the release usable and the flow clear at 1440, failure":1.672,"signed-in loading keeps the release usable and the flow clear at 1440, success":2.111,"signed-in loading keeps the release usable and the flow clear at 720, failure":1.537,"signed-in loading keeps the release usable and the flow clear at 720, success":1.55,"signed-out loading reserves the plain version at 1024, failure":1.002,"signed-out loading reserves the plain version at 1024, success":1.04,"signed-out loading reserves the plain version at 1440, failure":1.023,"signed-out loading reserves the plain version at 1440, success":1.121,"signed-out loading reserves the plain version at 720, failure":1.008,"signed-out loading reserves the plain version at 720, success":1.035,"the UI audit history selector opens a named release after history loads":3.995,"the UI audit history selector opens a nameless release after history loads":1.345,"the footer stays at rest even when motion is enabled":2.012,"unknown count reserves no badge; failed versions still open history":2.384},"seconds":78.761,"selectedTests":39}
       ,
       "tests/footer-release.unit.test.ts": {"seconds":0.499423,"selectedTests":7}
       ,
@@ -24087,7 +24203,7 @@
       ,
       "tests/header-glimpse.test.ts": {"seconds":0.26015,"selectedTests":5}
       ,
-      "tests/header-menus.spec.ts": {"caseSeconds":{"avatar menu › arrows walk the rows, left and right choose the theme":2.054,"avatar menu › me: personal settings, theme in sync with the moon, sign out and the version":3.984,"avatar menu › one menu at a time":1.49,"gear menu › a guest sees only the app: releases, shortcuts, help and status":1.389,"gear menu › a member has no workspace settings or keys, and connects a computer":1.42,"gear menu › an admin sees the workspace, agents, help and a healthy system":1.428,"gear menu › help shows what is new and sends feedback to the owner’s inbox":1.691,"gear menu › inbox hooks: the one command per harness, copyable, with the setup guide":1.539,"gear menu › keys walk the menu, Escape gives focus back to the gear":1.33,"gear menu › readiness that cannot be read is never Operational":2.469,"gear menu › status reads fresh on every open: a deploy since the page loaded shows, and the time ticks":1.524,"gear menu › the only owner is told feedback comes to them":1.387,"gear menu › the status says so in words when the server is not ready":1.256,"phone sheets › menus are bottom sheets with 44 px rows and no sideways scroll":1.239,"phones › 375 px, Business off, home: the key is whole and the moon shows whenever it fits":1.164,"phones › 375 px, Business off, ticket: the key is whole and the moon shows whenever it fits":1.501,"phones › 375 px, Business on, home: the key is whole and the moon shows whenever it fits":1.156,"phones › 375 px, Business on, ticket: the key is whole and the moon shows whenever it fits":1.501,"phones › 390 px, Business off, home: the key is whole and the moon shows whenever it fits":1.151,"phones › 390 px, Business off, ticket: the key is whole and the moon shows whenever it fits":1.539,"phones › 390 px, Business on, home: the key is whole and the moon shows whenever it fits":1.149,"phones › 390 px, Business on, ticket: the key is whole and the moon shows whenever it fits":1.504,"phones › release history from the account menu stays on the list":1.859,"phones › the moon comes back when a late font leaves room for it":1.548,"phones › the moon comes back when the page leaves room for it":1.537,"phones › the moon stays in the header at 1600 with three places":1.552,"phones › the moon stays in the header at 440":1.504,"phones › the moon stays in the header at 440 with three places":1.487,"phones › with three places at 375 dark the ticket key stays whole and the moon leads the avatar sheet":2.161,"phones › with three places at 375 light the ticket key stays whole and the moon leads the avatar sheet":2.155,"phones › with three places at 390 dark the ticket key stays whole and the moon leads the avatar sheet":2.144,"phones › with three places at 390 light the ticket key stays whole and the moon leads the avatar sheet":2.212,"release history before the version has loaded › at 390 a footer click keeps the empty history when this build has none":1.23,"release history before the version has loaded › at 390 a footer click keeps the error and retry when the history fails":1.254,"release history before the version has loaded › header release history stays on the full list at 1440":2.093,"release history before the version has loaded › header release history stays on the full list at 390":1.886,"release history before the version has loaded › the footer pill still opens the running release at 1440":2.23,"release history before the version has loaded › the footer pill still opens the running release at 390":1.913,"screenshots › avatar 1600 dark":0,"screenshots › avatar 1600 light":0,"screenshots › avatar 375 dark":0,"screenshots › avatar 375 light":0,"screenshots › avatar 390 dark":0,"screenshots › avatar 390 light":0,"screenshots › avatar-business 1600 dark":0,"screenshots › avatar-business 1600 light":0,"screenshots › avatar-business 375 dark":0,"screenshots › avatar-business 375 light":0,"screenshots › avatar-business 390 dark":0,"screenshots › avatar-business 390 light":0,"screenshots › gear-admin 1600 dark":0,"screenshots › gear-admin 1600 light":0,"screenshots › gear-admin 375 dark":0,"screenshots › gear-admin 375 light":0,"screenshots › gear-admin 390 dark":0,"screenshots › gear-admin 390 light":0,"screenshots › gear-guest 1600 dark":0,"screenshots › gear-guest 1600 light":0,"screenshots › gear-guest 375 dark":0,"screenshots › gear-guest 375 light":0,"screenshots › gear-guest 390 dark":0,"screenshots › gear-guest 390 light":0,"screenshots › gear-member 1600 dark":0,"screenshots › gear-member 1600 light":0,"screenshots › gear-member 375 dark":0,"screenshots › gear-member 375 light":0,"screenshots › gear-member 390 dark":0,"screenshots › gear-member 390 light":0,"screenshots › header 1600 dark":0,"screenshots › header 1600 light":0,"screenshots › header 375 dark":0,"screenshots › header 375 light":0,"screenshots › header 390 dark":0,"screenshots › header 390 light":0,"screenshots › help-member 1600 dark":0,"screenshots › help-member 1600 light":0,"screenshots › help-member 375 dark":0,"screenshots › help-member 375 light":0,"screenshots › help-member 390 dark":0,"screenshots › help-member 390 light":0,"screenshots › hooks-member 1600 dark":0,"screenshots › hooks-member 1600 light":0,"screenshots › hooks-member 375 dark":0,"screenshots › hooks-member 375 light":0,"screenshots › hooks-member 390 dark":0,"screenshots › hooks-member 390 light":0,"screenshots › ticket-header-business 1600 dark":0,"screenshots › ticket-header-business 1600 light":0,"screenshots › ticket-header-business 375 dark":0,"screenshots › ticket-header-business 375 light":0,"screenshots › ticket-header-business 390 dark":0,"screenshots › ticket-header-business 390 light":0},"seconds":63.63,"selectedTests":92}
+      "tests/header-menus.spec.ts": {"caseSeconds":{"avatar menu › arrows walk the rows, left and right choose the theme":2.054,"avatar menu › me: personal settings, theme in sync with the moon, sign out and the version":3.984,"avatar menu › one menu at a time":1.49,"gear menu › a guest sees only the app: releases, shortcuts, help and status":1.389,"gear menu › a member has no workspace settings or keys, and connects a computer":1.42,"gear menu › an admin sees the workspace, agents, help and a healthy system":1.428,"gear menu › help shows what is new and sends feedback to the owner’s inbox":1.691,"gear menu › inbox hooks: the one command per harness, copyable, with the setup guide":1.539,"gear menu › keys walk the menu, Escape gives focus back to the gear":1.33,"gear menu › readiness that cannot be read is never Operational":2.469,"gear menu › status reads fresh on every open: a deploy since the page loaded shows, and the time ticks":1.524,"gear menu › the only owner is told feedback comes to them":1.387,"gear menu › the status says so in words when the server is not ready":1.256,"phone sheets › menus are bottom sheets with 44 px rows and no sideways scroll":1.239,"phones › 375 px, Business off, home: the key is whole and the moon leads the avatar sheet":1.164,"phones › 375 px, Business off, ticket: the key is whole and the moon leads the avatar sheet":1.501,"phones › 375 px, Business on, home: the key is whole and the moon leads the avatar sheet":1.156,"phones › 375 px, Business on, ticket: the key is whole and the moon leads the avatar sheet":1.501,"phones › 390 px, Business off, home: the key is whole and the moon leads the avatar sheet":1.151,"phones › 390 px, Business off, ticket: the key is whole and the moon leads the avatar sheet":1.539,"phones › 390 px, Business on, home: the key is whole and the moon leads the avatar sheet":1.149,"phones › 390 px, Business on, ticket: the key is whole and the moon leads the avatar sheet":1.504,"phones › a late font keeps the ticket key whole on a phone":1.548,"phones › on compact screens the moon stays in the avatar sheet on every page":1.537,"phones › release history from the app menu stays on the list":1.859,"phones › the moon stays in the header at 1600 with three places":1.552,"phones › the moon stays in the header at 720":1.504,"phones › the moon stays in the header at 720 with three places":1.487,"phones › with three places at 375 dark the ticket key stays whole and the moon leads the avatar sheet":2.161,"phones › with three places at 375 light the ticket key stays whole and the moon leads the avatar sheet":2.155,"phones › with three places at 390 dark the ticket key stays whole and the moon leads the avatar sheet":2.144,"phones › with three places at 390 light the ticket key stays whole and the moon leads the avatar sheet":2.212,"release history before the version has loaded › What’s new still opens the running release at 390":1.913,"release history before the version has loaded › at 390 What’s new keeps the empty history when this build has none":1.23,"release history before the version has loaded › at 390 What’s new keeps the error and retry when the history fails":1.254,"release history before the version has loaded › header release history stays on the full list at 1440":2.093,"release history before the version has loaded › header release history stays on the full list at 390":1.886,"release history before the version has loaded › the footer pill still opens the running release at 1440":2.23,"screenshots › avatar 1600 dark":0,"screenshots › avatar 1600 light":0,"screenshots › avatar 375 dark":0,"screenshots › avatar 375 light":0,"screenshots › avatar 390 dark":0,"screenshots › avatar 390 light":0,"screenshots › avatar-business 1600 dark":0,"screenshots › avatar-business 1600 light":0,"screenshots › avatar-business 375 dark":0,"screenshots › avatar-business 375 light":0,"screenshots › avatar-business 390 dark":0,"screenshots › avatar-business 390 light":0,"screenshots › gear-admin 1600 dark":0,"screenshots › gear-admin 1600 light":0,"screenshots › gear-admin 375 dark":0,"screenshots › gear-admin 375 light":0,"screenshots › gear-admin 390 dark":0,"screenshots › gear-admin 390 light":0,"screenshots › gear-guest 1600 dark":0,"screenshots › gear-guest 1600 light":0,"screenshots › gear-guest 375 dark":0,"screenshots › gear-guest 375 light":0,"screenshots › gear-guest 390 dark":0,"screenshots › gear-guest 390 light":0,"screenshots › gear-member 1600 dark":0,"screenshots › gear-member 1600 light":0,"screenshots › gear-member 375 dark":0,"screenshots › gear-member 375 light":0,"screenshots › gear-member 390 dark":0,"screenshots › gear-member 390 light":0,"screenshots › header 1600 dark":0,"screenshots › header 1600 light":0,"screenshots › header 375 dark":0,"screenshots › header 375 light":0,"screenshots › header 390 dark":0,"screenshots › header 390 light":0,"screenshots › help-member 1600 dark":0,"screenshots › help-member 1600 light":0,"screenshots › help-member 375 dark":0,"screenshots › help-member 375 light":0,"screenshots › help-member 390 dark":0,"screenshots › help-member 390 light":0,"screenshots › hooks-member 1600 dark":0,"screenshots › hooks-member 1600 light":0,"screenshots › hooks-member 375 dark":0,"screenshots › hooks-member 375 light":0,"screenshots › hooks-member 390 dark":0,"screenshots › hooks-member 390 light":0,"screenshots › ticket-header-business 1600 dark":0,"screenshots › ticket-header-business 1600 light":0,"screenshots › ticket-header-business 375 dark":0,"screenshots › ticket-header-business 375 light":0,"screenshots › ticket-header-business 390 dark":0,"screenshots › ticket-header-business 390 light":0},"seconds":63.63,"selectedTests":92}
       ,
       "tests/header-menus.test.ts": {"seconds":0.239108,"selectedTests":3}
       ,
@@ -24309,7 +24425,7 @@
       ,
       "tests/releases-store.unit.test.ts": {"seconds":0.832555,"selectedTests":3}
       ,
-      "tests/releases.spec.ts": {"caseSeconds":{"a build without history says so":1.298,"a cancelled selection does not swallow the next visit to that release":1.638,"a first visit remembers the running version quietly":1.125,"a newer version on the server: a toast offers what is new and a reload":1.591,"a reserved version reads as reserved and never published":1.385,"compare follows Back, Forward and an in-app release link":1.76,"deep links open one release, and the address follows the selection":1.464,"evidence: runs, commit and digest with copy, the rollback target, and what is not known":1.587,"filters follow the feature and fix blocks, and still keep releases with tickets":1.84,"keys: j and k move, Enter opens, e shows evidence, ? lists keys, / searches, c compares, Esc steps back":1.963,"new since the last visit: a badge on the pill, highlighted releases, and the visit is remembered":1.55,"nothing is clipped at 390: stat card and chart stacked, counts in notes, full headlines":2.668,"on phones the footer folds away reading down and returns on the way up":1.917,"release history renders CalVer2 history and CalVer3 versions as six-segment Pretty":2.402,"rows show live and rollback badges, a warm new tint and a full selected ring":1.526,"the cadence shows each day’s count above its bar, every bar named for screen readers (AEON-488)":1.449,"the footer bar holds its own row: pages and docked panels end above it":1.6,"the mark in the release history goes home and leaves the history":2.443,"the palette and the account menu open the history too":1.816,"the running candidate shows frozen features and fixes with honest pending evidence":1.812,"the version pill opens the history over the page, and Esc brings the page back":2.285,"ticket keys link to the tickets this workspace has; others stay plain":1.517},"seconds":38.636,"selectedTests":22}
+      "tests/releases.spec.ts": {"caseSeconds":{"a build without history says so":1.298,"a cancelled selection does not swallow the next visit to that release":1.638,"a first visit remembers the running version quietly":1.125,"a newer version on the server: a toast offers what is new and a reload":1.591,"a reserved version reads as reserved and never published":1.385,"compare follows Back, Forward and an in-app release link":1.76,"deep links open one release, and the address follows the selection":1.464,"evidence: runs, commit and digest with copy, the rollback target, and what is not known":1.587,"filters follow the feature and fix blocks, and still keep releases with tickets":1.84,"keys: j and k move, Enter opens, e shows evidence, ? lists keys, / searches, c compares, Esc steps back":1.963,"new since the last visit: a badge on the pill, highlighted releases, and the visit is remembered":1.55,"nothing is clipped at 390: stat card and chart stacked, counts in notes, full headlines":2.668,"on phones there is no footer bar and the page keeps its size while reading":1.917,"release history renders CalVer2 history and CalVer3 versions as six-segment Pretty":2.402,"rows show live and rollback badges, a warm new tint and a full selected ring":1.526,"the cadence shows each day’s count above its bar, every bar named for screen readers (AEON-488)":1.449,"the footer bar holds its own row: pages and docked panels end above it":1.6,"the mark in the release history goes home and leaves the history":2.443,"the palette and the account menu open the history too":1.816,"the running candidate shows frozen features and fixes with honest pending evidence":1.812,"the version pill opens the history over the page, and Esc brings the page back":2.285,"ticket keys link to the tickets this workspace has; others stay plain":1.517},"seconds":38.636,"selectedTests":22}
       ,
       "tests/releases.test.ts": {"seconds":0.312406,"selectedTests":26}
       ,

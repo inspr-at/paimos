@@ -5,6 +5,7 @@ import { join } from 'node:path'
 import { expect, test, type Page } from '@playwright/test'
 import AxeBuilder from '@axe-core/playwright'
 import { expectStableControls } from './helpers/stable'
+import { toggleProjectHead } from './helpers/compact'
 import { fixtures, me, mockWork, watchErrors } from './work-fixtures'
 import { mockEffectivePermissions } from './authz-fixtures'
 import { readyGaps } from '../src/lib/workQueue'
@@ -480,7 +481,8 @@ test('approved queue surfaces in light/dark and narrow layouts, with accessible 
     // exercise the real phone density controls and restoration after folding.
     // The legacy header has no fold/density controls; its queue guard above
     // remains mandatory in either layout.
-    const fold = page.locator('.phone-header-fold')
+    // The project crumb's sheet holds the phone's fold (AEON-1459, D11).
+    const fold = page.locator('.app-header .crumb-sheet')
     if (await fold.count()) {
       for (const density of ['Comfortable', 'Compact']) {
         // AEON-1188: header density lives in the Display menu, linked from the Filters sheet.
@@ -506,8 +508,8 @@ test('approved queue surfaces in light/dark and narrow layouts, with accessible 
         await expectStableControls({
           controls: { fold, appbar: page.locator('.app-header') },
           interactions: [
-            { name: 'fold project header', run: async () => { await fold.click(); await expect(page.locator('#project-header-fold')).toBeHidden() } },
-            { name: `restore ${density} header`, run: async () => { await fold.click(); await expect(page.locator('.project-page')).toHaveClass(new RegExp(`header-${density.toLowerCase()}`)); await expect(opener).toBeVisible() } },
+            { name: 'fold project header', run: async () => { await toggleProjectHead(page); await expect(page.locator('#project-header-fold')).toBeHidden() } },
+            { name: `restore ${density} header`, run: async () => { await toggleProjectHead(page); await expect(page.locator('.project-page')).toHaveClass(new RegExp(`header-${density.toLowerCase()}`)); await expect(opener).toBeVisible() } },
           ],
         })
         await page.screenshot({ path: join(shots, `queue-phone-${theme}-${density.toLowerCase()}.png`) })

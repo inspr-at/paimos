@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"net/url"
 	"time"
 
 	"github.com/inspr-at/paimos/internal/approvals"
@@ -15,6 +16,7 @@ import (
 	"github.com/inspr-at/paimos/internal/recurrences"
 	"github.com/inspr-at/paimos/internal/stepup/server"
 	"github.com/inspr-at/paimos/internal/tenant"
+	"github.com/inspr-at/paimos/internal/workorders"
 	"github.com/jackc/pgx/v5"
 )
 
@@ -188,6 +190,10 @@ const visibleSQL = sourceSQL + `, routine_consents(id,kind,project_id,revision,t
 ), lessons(id,kind,project_id,revision,title,created_at,expires_at,held,source,ticket_key) AS (
  SELECT id,'lesson'::text,project_id,revision,title,created_at,NULL::timestamptz,false,source,NULL::text
  FROM jsonb_to_recordset($27::jsonb) AS r(id uuid,project_id uuid,revision bigint,title text,created_at timestamptz,source text)
+), definition_changes AS MATERIALIZED (
+ SELECT * FROM jsonb_to_recordset($29::jsonb) AS r(id uuid,project_id uuid,revision bigint,title text,created_at timestamptz,source text,project_key text,pending_count int)
+), definition_requests(id,kind,project_id,revision,title,created_at,expires_at,held,source,ticket_key) AS (
+ SELECT id,'definition_change'::text,project_id,revision,title,created_at,NULL::timestamptz,false,source,NULL::text FROM definition_changes
 ), person_candidates AS MATERIALIZED (
  SELECT n.id,n.project_id FROM jsonb_to_recordset($28::jsonb) AS c(id uuid,project_id uuid)
  JOIN nodes n ON n.tenant_id=$1 AND n.id=c.id AND n.project_id=c.project_id
@@ -203,7 +209,8 @@ const visibleSQL = sourceSQL + `, routine_consents(id,kind,project_id,revision,t
  '/api/nodes/'||(step->>'node_id')||'/person-steps/'||(step->>'check_id'),NULL::text
  FROM person_request_details
 ), visible AS MATERIALIZED (
- SELECT *,(SELECT step FROM person_request_details WHERE (step->>'id')::uuid=items.id AND items.kind='action_request') AS person_step,CASE WHEN held AND kind IN ('approval','stepup') THEN 0 WHEN held THEN 1 ELSE 2 END AS bucket,
+ SELECT *,(SELECT jsonb_build_object('project_key',project_key,'pending_count',pending_count) FROM definition_changes WHERE id=items.id AND items.kind='definition_change') AS definition_change,
+ (SELECT step FROM person_request_details WHERE (step->>'id')::uuid=items.id AND items.kind='action_request') AS person_step,CASE WHEN held AND kind IN ('approval','stepup') THEN 0 WHEN held THEN 1 ELSE 2 END AS bucket,
  CASE WHEN held AND kind IN ('approval','stepup') THEN expires_at ELSE created_at END AS order_at
  FROM (
  SELECT * FROM questions WHERE project_id=ANY($5::uuid[]) AND (NOT $16 OR project_id=ANY($20::uuid[]))
@@ -219,6 +226,7 @@ const visibleSQL = sourceSQL + `, routine_consents(id,kind,project_id,revision,t
  UNION ALL SELECT * FROM routine_consents
  UNION ALL SELECT * FROM lessons
  UNION ALL SELECT * FROM person_requests
+ UNION ALL SELECT * FROM definition_requests
  ) items
 ), totals AS (
  SELECT count(*)::int AS open,count(*) FILTER (WHERE held)::int AS held,
@@ -336,7 +344,11 @@ func readProjection(ctx context.Context, tx pgx.Tx, p tenant.Principal, limit in
 	if err != nil {
 		return page, err
 	}
-	err = tx.QueryRow(ctx, visibleSQL, p.TenantID, "", nil, p.ID, projects["questions.read"], projects["approvals.read"], projects["inbox.manage"], check("approvals.read", ""), check("rules.read", "") && check("rules.write", ""), after != nil, c.Bucket, c.At, c.ID, c.Kind, limit+1, eligibleOnly, unclaimedOnly, int(NearExpiry/time.Second), check("approvals.decide", ""), projects["questions.decide"], check("keys.manage", ""), stepupVisibility, projects["harness.control"], projects["harness.read"], check("account.use.manage", ""), consentSource, lessonSource, personCandidatesJSON).Scan(&page.AsOf, &page.Counts.Open, &page.Counts.Held, &page.Counts.Chores, &raw, &personCandidates)
+	definitionSource, err := definitionChangesTx(ctx, tx, p, projects["nodes.read"], eligibleOnly)
+	if err != nil {
+		return page, err
+	}
+	err = tx.QueryRow(ctx, visibleSQL, p.TenantID, "", nil, p.ID, projects["questions.read"], projects["approvals.read"], projects["inbox.manage"], check("approvals.read", ""), check("rules.read", "") && check("rules.write", ""), after != nil, c.Bucket, c.At, c.ID, c.Kind, limit+1, eligibleOnly, unclaimedOnly, int(NearExpiry/time.Second), check("approvals.decide", ""), projects["questions.decide"], check("keys.manage", ""), stepupVisibility, projects["harness.control"], projects["harness.read"], check("account.use.manage", ""), consentSource, lessonSource, personCandidatesJSON, definitionSource).Scan(&page.AsOf, &page.Counts.Open, &page.Counts.Held, &page.Counts.Chores, &raw, &personCandidates)
 	if err != nil {
 		return page, err
 	}
@@ -364,7 +376,7 @@ func readProjection(ctx context.Context, tx pgx.Tx, p tenant.Principal, limit in
 		}
 		prefix := map[string]string{"question": "q:", "approval": "a:", "action_request": "m:", "doctrine": "r:", "tier_request": "t:", "key_trim": "k:", "stepup": "s:", "lesson": "l:"}[i.Kind]
 		i.Href = "/decision-desk?item=" + prefix + i.ID
-		if i.Kind == "routine_consent" {
+		if i.Kind == "routine_consent" || i.Kind == "definition_change" {
 			i.Href = i.Source
 		}
 		if i.Kind == "account_matrix" {
@@ -403,7 +415,7 @@ func readProjection(ctx context.Context, tx pgx.Tx, p tenant.Principal, limit in
 			i.CanDecide = check("account.use.manage", "")
 		case "lesson":
 			i.CanDecide = check("knowledge.write", i.ProjectID)
-		case "routine_consent":
+		case "routine_consent", "definition_change":
 			i.CanDecide = true // Canonical owner and native policy checked before paging.
 		}
 		page.Items = append(page.Items, i)
@@ -417,6 +429,42 @@ func readProjection(ctx context.Context, tx pgx.Tx, p tenant.Principal, limit in
 		page.NextCursor = base64.RawURLEncoding.EncodeToString(b)
 	}
 	return page, nil
+}
+
+func definitionChangesTx(ctx context.Context, tx pgx.Tx, p tenant.Principal, ids []string, eligibleOnly bool) ([]byte, error) {
+	rows := []map[string]any{}
+	if eligibleOnly {
+		return json.Marshal(rows)
+	}
+	projects, err := workorders.DefinitionProjectsTx(ctx, tx, ids)
+	if err != nil {
+		return nil, err
+	}
+	workspace, err := workorders.EntryDefinitionTx(ctx, tx, nil, true)
+	if err != nil {
+		return nil, err
+	}
+	for _, project := range projects {
+		if project.Definition == nil {
+			continue
+		}
+		state := project.Copy.WithFallback(project.Definition, workspace)
+		pending := workorders.PendingDefinitionChanges(state.Reviewed, workspace.Checks)
+		if len(pending) == 0 {
+			continue
+		}
+		if err = authz.RequireProjectAdminTx(ctx, tx, p, project.ProjectID); errors.Is(err, authz.ErrForbidden) {
+			continue
+		} else if err != nil {
+			return nil, err
+		}
+		title := fmt.Sprintf("%s: %d changes to the workspace default wait for a decision", project.Key, len(pending))
+		if len(pending) == 1 {
+			title = fmt.Sprintf("%s: 1 change to the workspace default waits for a decision", project.Key)
+		}
+		rows = append(rows, map[string]any{"id": project.Definition.ID, "project_id": project.ProjectID, "revision": project.Definition.Revision.UnixMicro(), "title": title, "created_at": workspace.Revision, "source": "/p/" + url.PathEscape(project.Key) + "/settings/definitions?definition_changes=1#definition-changes", "project_key": project.Key, "pending_count": len(pending)})
+	}
+	return json.Marshal(rows)
 }
 
 // The query caps IDs before decoding/serialization. A project identity travels

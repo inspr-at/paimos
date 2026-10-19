@@ -23,6 +23,7 @@ type managedFake struct {
 	identity ownedprocess.Identity
 	observe  func(AdapterEvent)
 	fail     bool
+	reject   error
 	texts    []string
 	mu2      sync.Mutex
 }
@@ -34,9 +35,13 @@ func (p *managedFake) ForceStop(context.Context, ownedprocess.Identity, time.Tim
 func (p *managedFake) Control(_ context.Context, op, text string) error {
 	p.mu2.Lock()
 	p.texts = append(p.texts, text)
+	reject := p.reject
 	p.mu2.Unlock()
 	if p.observe != nil {
 		p.observe(AdapterEvent{Kind: "turn", TurnCountDelta: 1})
+	}
+	if reject != nil {
+		return reject
 	}
 	if p.fail {
 		return errors.New("fixture outcome lost")
@@ -192,8 +197,171 @@ func TestManagedControlCompletionRetryDoesNotRepeatAdapter(t *testing.T) {
 	if len(p.texts) != 1 {
 		t.Fatal("completion retry reinjected control")
 	}
-	if len(a.harnessCompletions) != 1 || a.harnessCompletions[0] != "queue-control:applied:queued_next_turn" {
+	if len(a.harnessCompletions) != 1 || a.harnessCompletions[0] != "queue-control:applied:started_next_turn" {
 		t.Fatal(a.harnessCompletions)
+	}
+}
+
+func managedControlIdentity(s *Supervisor, p *managedFake) (ownedprocess.Identity, time.Time) {
+	identity := p.identity
+	identity.DaemonID = s.daemonID
+	identity.Generation = s.generation
+	return identity, time.Now().Add(time.Minute)
+}
+
+func TestInterruptIdleRejectsWithoutCallingChild(t *testing.T) {
+	s, a, e, p := managedFixture(t)
+	identity, expiry := managedControlIdentity(s, p)
+	e.mu.Lock()
+	e.harness.Activity = "idle"
+	e.mu.Unlock()
+	a.harnessControls = []HarnessControl{{ID: "idle-interrupt", Kind: "interrupt", ExpectedOwnership: &identity, ExpiresAt: &expiry, deadline: expiry}}
+	if err := s.serviceHarness(t.Context(), e); err != nil {
+		t.Fatal(err)
+	}
+	p.mu2.Lock()
+	defer p.mu2.Unlock()
+	if len(p.texts) != 0 {
+		t.Fatalf("idle interrupt called the child: %v", p.texts)
+	}
+	if len(a.harnessCompletions) != 1 || a.harnessCompletions[0] != "idle-interrupt:rejected:nothing_running" {
+		t.Fatal(a.harnessCompletions)
+	}
+}
+
+func TestInterruptRaceMapsNothingRunning(t *testing.T) {
+	s, a, e, p := managedFixture(t)
+	identity, expiry := managedControlIdentity(s, p)
+	p.reject = errNothingRunning
+	a.harnessControls = []HarnessControl{{ID: "race-interrupt", Kind: "interrupt", ExpectedOwnership: &identity, ExpiresAt: &expiry, deadline: expiry}}
+	if err := s.serviceHarness(t.Context(), e); err != nil {
+		t.Fatal(err)
+	}
+	p.mu2.Lock()
+	defer p.mu2.Unlock()
+	if len(p.texts) != 1 {
+		t.Fatalf("race interrupt did not reach the child: %v", p.texts)
+	}
+	if len(a.harnessCompletions) != 1 || a.harnessCompletions[0] != "race-interrupt:rejected:nothing_running" {
+		t.Fatal(a.harnessCompletions)
+	}
+}
+
+func TestSteerOnYieldedStartsNextTurn(t *testing.T) {
+	s, a, e, p := managedFixture(t)
+	identity, expiry := managedControlIdentity(s, p)
+	e.mu.Lock()
+	e.harness.Activity = "idle"
+	e.mu.Unlock()
+	a.harnessControls = []HarnessControl{{ID: "yielded-steer", Kind: "steer", Text: "continue", ExpectedOwnership: &identity, ExpiresAt: &expiry, deadline: expiry}}
+	if err := s.serviceHarness(t.Context(), e); err != nil {
+		t.Fatal(err)
+	}
+	p.mu2.Lock()
+	defer p.mu2.Unlock()
+	if len(p.texts) != 1 || p.texts[0] != "continue" {
+		t.Fatalf("texts %v", p.texts)
+	}
+	if len(a.harnessCompletions) != 1 || a.harnessCompletions[0] != "yielded-steer:applied:started_next_turn" {
+		t.Fatal(a.harnessCompletions)
+	}
+}
+
+func TestSteerMidTurnStaysQueued(t *testing.T) {
+	s, a, e, p := managedFixture(t)
+	identity, expiry := managedControlIdentity(s, p)
+	e.mu.Lock()
+	e.harness.Activity = "busy"
+	e.mu.Unlock()
+	a.harnessControls = []HarnessControl{{ID: "busy-steer", Kind: "steer", Text: "later", ExpectedOwnership: &identity, ExpiresAt: &expiry, deadline: expiry}}
+	if err := s.serviceHarness(t.Context(), e); err != nil {
+		t.Fatal(err)
+	}
+	p.mu2.Lock()
+	defer p.mu2.Unlock()
+	if len(p.texts) != 1 || p.texts[0] != "later" {
+		t.Fatalf("texts %v", p.texts)
+	}
+	if len(a.harnessCompletions) != 1 || a.harnessCompletions[0] != "busy-steer:applied:queued_next_turn" {
+		t.Fatal(a.harnessCompletions)
+	}
+}
+
+func TestSteerOnEndedSessionRefuses(t *testing.T) {
+	t.Run("state", func(t *testing.T) {
+		s, a, e, p := managedFixture(t)
+		identity, expiry := managedControlIdentity(s, p)
+		e.mu.Lock()
+		e.record.State = "cancelled"
+		e.mu.Unlock()
+		a.harnessControls = []HarnessControl{
+			{ID: "ended-steer", Kind: "steer", Text: "do not send", ExpectedOwnership: &identity, ExpiresAt: &expiry, deadline: expiry},
+			{ID: "ended-interrupt", Kind: "interrupt", ExpectedOwnership: &identity, ExpiresAt: &expiry, deadline: expiry},
+		}
+		if err := s.serviceHarness(t.Context(), e); err != nil {
+			t.Fatal(err)
+		}
+		p.mu2.Lock()
+		defer p.mu2.Unlock()
+		if len(p.texts) != 0 {
+			t.Fatalf("ended session called the child: %v", p.texts)
+		}
+		if len(a.harnessCompletions) != 2 || a.harnessCompletions[0] != "ended-steer:rejected:session_ended" || a.harnessCompletions[1] != "ended-interrupt:rejected:child_unavailable" {
+			t.Fatal(a.harnessCompletions)
+		}
+	})
+	t.Run("process", func(t *testing.T) {
+		s, a, e, p := managedFixture(t)
+		identity, expiry := managedControlIdentity(s, p)
+		e.mu.Lock()
+		e.process = nil
+		e.mu.Unlock()
+		a.harnessControls = []HarnessControl{{ID: "gone-steer", Kind: "steer", Text: "do not send", ExpectedOwnership: &identity, ExpiresAt: &expiry, deadline: expiry}}
+		if err := s.serviceHarness(t.Context(), e); err != nil {
+			t.Fatal(err)
+		}
+		p.mu2.Lock()
+		defer p.mu2.Unlock()
+		if len(p.texts) != 0 || len(a.harnessCompletions) != 1 || a.harnessCompletions[0] != "gone-steer:rejected:session_ended" {
+			t.Fatalf("texts %v completions %v", p.texts, a.harnessCompletions)
+		}
+	})
+}
+
+func TestArchivedHarnessClaimsNothing(t *testing.T) {
+	s, a, e, p := managedFixture(t)
+	identity, expiry := managedControlIdentity(s, p)
+	e.mu.Lock()
+	e.harnessArchived = true
+	e.mu.Unlock()
+	a.harnessControls = []HarnessControl{{ID: "archived-steer", Kind: "steer", Text: "do not send", ExpectedOwnership: &identity, ExpiresAt: &expiry, deadline: expiry}}
+	if err := s.serviceHarness(t.Context(), e); err != nil {
+		t.Fatal(err)
+	}
+	a.mu.Lock()
+	unclaimed, completions := len(a.harnessControls), append([]string(nil), a.harnessCompletions...)
+	a.mu.Unlock()
+	p.mu2.Lock()
+	defer p.mu2.Unlock()
+	if unclaimed != 1 || len(completions) != 0 || len(p.texts) != 0 {
+		t.Fatalf("archived harness called revoked APIs: unclaimed=%d completions=%v texts=%v", unclaimed, completions, p.texts)
+	}
+}
+
+func TestClaudeNotRunningBecomesNothingRunning(t *testing.T) {
+	p := &claudeProcess{wireProcess: &wireProcess{readDone: make(chan struct{})}, controls: map[string]chan bool{}}
+	p.stdin = managedFixtureWriter(func(b []byte) (int, error) {
+		var frame struct {
+			ID string `json:"correlation_id"`
+		}
+		if err := json.Unmarshal(b, &frame); err != nil {
+			return 0, err
+		}
+		p.deliverControl(frame.ID, "control_failed", "not_running")
+		return len(b), nil
+	})
+	if err := p.Control(t.Context(), "interrupt", ""); !errors.Is(err, errNothingRunning) {
+		t.Fatal(err)
 	}
 }
 

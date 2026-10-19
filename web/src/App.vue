@@ -11,6 +11,7 @@ import DoneGateHost from './components/DoneGateHost.vue'
 import ToastHost from './components/ToastHost.vue'
 import TooltipHost from './components/TooltipHost.vue'
 import AppFooter from './components/AppFooter.vue'
+import CompactNotice from './components/CompactNotice.vue'
 import ErrorPage from './components/ErrorPage.vue'
 import StatusPage from './components/StatusPage.vue'
 import ShortcutSheet from './components/work/ShortcutSheet.vue'
@@ -27,7 +28,7 @@ import { brand } from './lib/brand'
 import { toast } from './lib/toast'
 import { getRelease, releaseTitle } from './lib/releases'
 import { updateToast } from './lib/codenames'
-import { headerFolded } from './lib/chrome'
+import { compactChrome, headerFolded, shortScreen } from './lib/chrome'
 import { usePoller } from './lib/usePolledData'
 import { sessionFreezeApplies } from './lib/agentPairing'
 import { useStatusMotion } from './lib/statusMotion'
@@ -177,26 +178,14 @@ watch(() => releases.available, async version => {
   })
 })
 
-// ---------- Footer: on phones it folds away while reading down and returns on the way up ----------
-const footerHidden = ref(false)
-// Short landscape phones too (AEON-1286): there the bar cost an eighth of the screen.
-const phoneQuery = window.matchMedia('(max-width: 600px), (max-height: 480px)')
-let lastTop = 0, travel = 0, settleUntil = 0
-function scrolled() {
-  const el = main.value
-  if (!el) return
-  const top = el.scrollTop
-  const delta = top - lastTop
-  lastTop = top
-  if (!phoneQuery.matches || Date.now() < settleUntil) return
-  // Near the end of the page the footer stays: it is where the page ends.
-  const nearEnd = el.scrollHeight - el.clientHeight - top < 48
-  travel = Math.sign(delta) === Math.sign(travel) ? travel + delta : delta
-  const next = nearEnd || top < 24 ? false : travel > 24 ? true : travel < -16 ? false : footerHidden.value
-  if (next !== footerHidden.value) { footerHidden.value = next; travel = 0; settleUntil = Date.now() + 260 }
-}
-watch(() => route.path, () => { footerHidden.value = false })
-phoneQuery.addEventListener('change', event => { if (!event.matches) footerHidden.value = false })
+// ---------- Compact chrome (AEON-1459, design AEON-1279 r2) ----------
+// Phones and short screens have no footer bar (D5): its summary is in the list toolbars' status
+// slot, its release in the avatar menu. The page's scroller never changes size while scrolling.
+// Short landscape (D7): the header is the page's first line and scrolls away with it; only the
+// list's toolbar sticks. The same header moves into the page (a teleport, so it keeps its state).
+const compact = compactChrome()
+const short = shortScreen()
+const headerInPage = computed(() => short.value && !bare.value && !folded.value)
 
 async function retry() {
   retrying.value = true
@@ -218,10 +207,13 @@ watch(() => [route.path, route.params.projectKey, route.params.ticketKey, route.
 
 <template>
   <EntryChecklistHost />
-  <div class="app-shell" :class="{ bare, 'footer-hidden': footerHidden && !bare, 'header-folded': folded }">
+  <div class="app-shell" :class="{ bare, 'header-folded': folded, 'header-in-page': headerInPage }">
     <a class="skip-link" href="#main">Skip to content</a>
-    <AppHeader v-if="!bare && !folded" />
-    <main id="main" ref="main" tabindex="-1" @scroll.passive="scrolled">
+    <Teleport defer to="#app-header-slot" :disabled="!headerInPage">
+      <AppHeader v-if="!bare && !folded" />
+    </Teleport>
+    <main id="main" ref="main" tabindex="-1">
+      <div id="app-header-slot" class="header-slot" />
       <div v-if="sessionEndedHere" class="session-ended" role="alert">
         <span>Your session has ended. Sign in again in a new tab; what you typed stays on this page.</span>
         <button type="button" class="btn sm" @click="signInAgain">Sign in</button>
@@ -237,8 +229,9 @@ watch(() => [route.path, route.params.projectKey, route.params.ticketKey, route.
         <RouterView v-else />
       </div>
     </main>
-    <!-- A row of the shell; on phones it lies over the page's end. Docked panels and toasts end above it. -->
-    <AppFooter v-if="!bare" :hidden="footerHidden" @releases="openRunningRelease" />
+    <!-- A row of the shell; docked panels and toasts end above it. Compact screens have none (AEON-1459). -->
+    <AppFooter v-if="!bare && !compact" @releases="openRunningRelease" />
+    <CompactNotice v-if="!bare && compact" />
     <ReleasesSheet v-if="releasesOpen" ref="releasesSheet" :target="releasesTarget" @select="selectRelease" @query="setReleasesQuery" @close="closeReleases" @home="goHome" @navigate="leaveReleasesFor" />
     <TicketPeekHost v-if="ticketPeek.openKey.value && !releasesOpen" :ref="ticketPeek.bind" :ticket-key="ticketPeek.openKey.value" :back-label="ticketPeek.backLabel.value" @close="ticketPeek.close()" />
     <LeadOverlays v-if="session.identity && !bare && !fatal" />
@@ -258,20 +251,20 @@ watch(() => [route.path, route.params.projectKey, route.params.ticketKey, route.
 .app-shell { box-sizing: border-box; height: 100%; padding: 0 env(safe-area-inset-right) env(safe-area-inset-bottom) env(safe-area-inset-left); display: grid; grid-template-columns: minmax(0, 1fr); grid-template-rows: var(--header-h) minmax(0, 1fr) var(--footer-h); }
 .app-shell.bare { --footer-h: 0px; grid-template-rows: minmax(0, 1fr); }
 .app-shell.header-folded { grid-template-rows: minmax(0, 1fr) var(--footer-h); }
-/* The gutter is reserved so a scrollbar appearing as content loads never shifts the page sideways. */
+/* Reserve the native scrollbar's gutter so content loading never shifts the page sideways.
+   Keep the scrollbar visible and draggable on platforms with classic scrollbars. */
 main { position: relative; min-height: 0; overflow: auto; scrollbar-gutter: stable; outline: none; scroll-padding-top: 96px; }
-/* Phones: the footer lies over the end of the page and slides away while reading down (AEON-1279).
-   The page keeps its size: a scroller that grew under momentum made the scroll run away. Its end
-   keeps the footer's room, so the last row still clears the footer when it shows.
-   Short landscape phones too (AEON-1286). */
-@media (max-width: 600px), (max-height: 480px) {
+/* The header's slot inside the page: empty and boxless until a short screen moves the header in. */
+.header-slot { display: contents; }
+/* Compact (AEON-1459, D1): a 44 px header row and no footer row; the scroller keeps one size while
+   scrolling. Focus and jumps clear the one sticky toolbar (44 px), not the desktop's taller heads. */
+@media (max-width: 719px), (max-height: 500px) {
   .app-shell { grid-template-rows: var(--header-h) minmax(0, 1fr); }
   .app-shell.header-folded { grid-template-rows: minmax(0, 1fr); }
-  /* The footer component has two roots (the bar and its hover card), so it carries no scope of ours. */
-  .app-shell > main, .app-shell > :deep(.app-footer) { grid-row: -2; grid-column: 1; }
-  .app-shell > :deep(.app-footer) { align-self: end; }
-  main { padding-bottom: var(--footer-h); scroll-padding-bottom: var(--footer-h); }
+  main { scroll-padding-top: 52px; }
 }
+/* Short landscape (D7): no header row; the header is the page's first line and scrolls away. */
+.app-shell.header-in-page { grid-template-rows: minmax(0, 1fr); }
 main:focus-visible { box-shadow: none; }
 .session-ended { position: sticky; top: 0; z-index: 50; display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 10px; padding: 10px 28px; background: var(--chip-teal-bg); box-shadow: inset 0 -1px 0 var(--line); font-size: 13px; }
 .page-flow { display: flex; flex-direction: column; min-height: 100%; }

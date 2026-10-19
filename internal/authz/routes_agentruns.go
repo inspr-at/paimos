@@ -11,9 +11,11 @@ func init() {
 		"GET /api/queue-snapshots/{snapshotId}":        "nodes.read",
 		"GET /api/queue/{nodeId}/readiness":            "nodes.read",
 		"GET /api/runs":                                "run.read",
+		"GET /api/runs/daemon-waits":                   "run.read",
 		"GET /api/runs/queued":                         "run.read",
 		"GET /api/runs/queued/notifications":           "run.read",
 		"GET /api/runs/{runId}":                        "run.read",
+		"GET /api/runs/{runId}/daemon-wait":            "run.read",
 		"GET /api/runs/{runId}/handoff":                "run.read",
 		"POST /api/queue":                              "nodes.read",
 		"POST /api/queue-snapshots/{snapshotId}/apply": "nodes.read",
@@ -26,6 +28,7 @@ func init() {
 		"POST /api/runs/{runId}/cancel":                "run.create", // Person-only, queued run; handler checks work-order edit access (AEON-402).
 		"POST /api/runs/{runId}/capacity-override":     "run.create", // Person-only, queued managed run; handler checks work-order edit access.
 		"POST /api/runs/{runId}/claim":                 "run.claim",
+		"PUT /api/runs/{runId}/daemon-wait":            "run.claim",
 		"POST /api/runs/{runId}/telemetry":             "run.telemetry",
 	})
 	registerDeclarations("agentruns", "project_filtered", ProjectFilteredRoutes, map[string]bool{

@@ -91,6 +91,33 @@ paths:
         '403': {$ref: '#/components/responses/Error'}
         '409': {$ref: '#/components/responses/Error'}
         '413': {$ref: '#/components/responses/Error'}
+  /goals/epics:
+    get:
+      operationId: listGoalEpics
+      summary: List open epics in the goal shape
+      description: "AEON-1395, Goals grouped by epics. An area is the topmost open parent work item in a visible project (no open work parent above it); its items are its direct children without Closed ones, and an item's keys are its own key followed by its children's. Takes the Goals list filters, sorts, page and cursor; cursors are bound to this grouping. Counts follow the children's status and live work: Moving is a live session, In progress or QA, or an open pull request or review; Done is Done, Delivered or Accepted; Paused is Backlog or paused on purpose; the rest is Queued. Progress is computed, never set by hand: completed estimate hours over all estimate hours of the epic's leaves (a parent's own estimate never counts), or completed leaves over all leaves while no leaf has an estimate. LANDS is the latest worker ETA over the open items, else the target release, else the suggested release (~ Next or Next +N from the work queue and release cadence, or the stored suggested release). Hide done keeps an open epic whose own status is open, with its failing checks. Notes and session ids need harness.read; an author name needs harness.read or members.read; a pull request state and a hold reason need delivery.read. Steps list what is missing: the epic's failing entry checks for its next status from the effective definition, in definition order, then held deliveries and blockers; no_active_build is not evaluated in this read. next_step is the first open item by ETA, else the first step. An epic with more than 200 items is counts-only with expansion too_large. Discovery is bounded to 1000 epics."
+      security: *auth
+      parameters:
+        - {name: project, in: query, schema: {type: string, maxLength: 64}}
+        - {name: group, in: query, schema: {type: string, maxLength: 64}, description: "Project group UUID or none"}
+        - {name: q, in: query, schema: {type: string, maxLength: 200}}
+        - {name: state, in: query, schema: {type: string, enum: [moving, queued, paused, done]}}
+        - {name: hide_done, in: query, schema: {type: boolean, default: false}}
+        - {name: sort, in: query, schema: {type: string, enum: [eta, name, progress, project, moving, queued, done], default: eta}}
+        - {name: dir, in: query, schema: {type: string, enum: [asc, desc]}}
+        - {name: cursor, in: query, schema: {type: string, maxLength: 4096}}
+        - {name: limit, in: query, schema: {type: integer, minimum: 1, maximum: 100, default: 50}}
+      responses:
+        '200':
+          description: "Visible open epics and full-filter totals over their items; totals_partial marks counts-only epics"
+          headers:
+            Aeon-Contract: {$ref: '#/components/headers/GoalsContract'}
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/EpicList'}
+        '400': {$ref: '#/components/responses/Error'}
+        '403': {$ref: '#/components/responses/Error'}
+        '413': {$ref: '#/components/responses/Error'}
   /goals/{goalId}:
     parameters:
       - {name: goalId, in: path, required: true, schema: {type: string, maxLength: 64}, description: "Goal key or UUID; release nodes are also goals"}
@@ -288,6 +315,11 @@ components:
     GoalStatusNote: {"type":"object","required":["text","by","by_name","set_at"],"properties":{"text":{"type":"string","minLength":1,"maxLength":2000},"by":{"type":"string","format":"uuid"},"by_name":{"type":"string"},"set_at":{"type":"string","format":"date-time"}},"description":"The workspace status note; only workspace readers receive it"}
     GoalStatusNoteRead: {"type":"object","required":["note","read_through","generation"],"properties":{"note":{"anyOf":[{"$ref":"#/components/schemas/GoalStatusNote"},{"type":"null"}]},"read_through":{"type":"integer","minimum":0,"format":"int64"},"generation":{"type":"integer","minimum":1,"format":"int64"}}}
     GoalStatusNoteWriteResult: {"type":"object","required":["changed","note","read_through","generation"],"properties":{"changed":{"type":"boolean"},"note":{"anyOf":[{"$ref":"#/components/schemas/GoalStatusNote"},{"type":"null"}]},"read_through":{"type":"integer","minimum":0,"format":"int64"},"generation":{"type":"integer","minimum":1,"format":"int64"}}}
+    EpicETA: {"type":"object","required":["source","partial"],"properties":{"source":{"type":"string","enum":["none","worker","outcomes","release"],"description":"worker is a live or ready ETA a worker reported; outcomes the latest over the open items; release the target or suggested release, in text"},"text":{"type":"string","maxLength":40},"at":{"type":"string","format":"date-time"},"by":{"type":"string"},"partial":{"type":"boolean","description":"Some open items have no ETA yet"}}}
+    EpicDelivery: {"type":"object","required":["state"],"properties":{"state":{"type":"string","enum":["built","reviewed","pushed","ci_green","in_queue","queue_failed","held"]},"pull_request":{"type":"integer","minimum":1}},"description":"The item's latest unmerged delivery, its live line when no agent wrote a note"}
+    EpicItem: {"type":"object","required":["id","ref","label","note","position","keys","state","session_ids","eta","passed","coverage","weight","handed_over"],"properties":{"id":{"type":"string","format":"uuid"},"ref":{"type":"string"},"label":{"type":"string"},"note":{"type":"string","description":"The working agent's activity note"},"position":{"type":"number"},"keys":{"type":"array","maxItems":20,"items":{"type":"string"}},"keys_total":{"type":"integer","minimum":21,"description":"All keys when keys holds only the first 20"},"state":{"type":"string","enum":["moving","queued","paused","done"]},"reason":{"type":"string"},"session_ids":{"type":"array","maxItems":200,"items":{"type":"string","format":"uuid"}},"eta":{"$ref":"#/components/schemas/EpicETA"},"passed":{"type":"boolean"},"coverage":{"$ref":"#/components/schemas/GoalCoverage"},"weight":{"type":"number","minimum":0},"handed_over":{"type":"boolean"},"note_by":{"type":"string","format":"uuid"},"note_by_name":{"type":"string"},"note_at":{"type":"string","format":"date-time"},"merged_at":{"type":"string","format":"date-time"},"delivery":{"$ref":"#/components/schemas/EpicDelivery"}}}
+    EpicDetail: {"type":"object","required":["id","key","title","kind","project_id","workspace","expansion","counts","steps","next_step","projects","waits","read_through","generation"],"properties":{"id":{"type":"string","format":"uuid"},"key":{"type":"string"},"title":{"type":"string"},"kind":{"type":"string","enum":["epic"]},"project_id":{"type":"string","format":"uuid"},"workspace":{"type":"boolean"},"expansion":{"type":"string","enum":["full","too_large"]},"counts":{"$ref":"#/components/schemas/GoalCounts"},"items":{"type":"array","maxItems":200,"items":{"$ref":"#/components/schemas/EpicItem"}},"steps":{"type":"array","maxItems":20,"items":{"$ref":"#/components/schemas/GoalStep"}},"next_step":{"anyOf":[{"$ref":"#/components/schemas/GoalStep"},{"type":"null"}]},"projects":{"type":"array","maxItems":1,"items":{"$ref":"#/components/schemas/GoalProjectBadge"}},"waits":{"$ref":"#/components/schemas/GoalWaits"},"progress":{"$ref":"#/components/schemas/GoalProgress"},"eta":{"$ref":"#/components/schemas/EpicETA"},"passed":{"type":"boolean"},"states":{"$ref":"#/components/schemas/GoalStateCounts"},"done":{"type":"boolean"},"read_through":{"type":"integer","minimum":0,"format":"int64"},"generation":{"type":"integer","minimum":1,"format":"int64"}}}
+    EpicList: {"type":"object","required":["items","totals","totals_partial","quiet_projects","truncated","read_through","generation"],"properties":{"items":{"type":"array","maxItems":100,"items":{"$ref":"#/components/schemas/EpicDetail"}},"totals":{"$ref":"#/components/schemas/GoalStateCounts"},"totals_partial":{"type":"boolean"},"quiet_projects":{"type":"object","required":["count","keys"],"properties":{"count":{"type":"integer","minimum":0},"keys":{"type":"array","maxItems":2000,"items":{"type":"string"}}}},"next_cursor":{"type":"string"},"truncated":{"type":"boolean"},"status_note":{"$ref":"#/components/schemas/GoalStatusNote"},"eta_last_set_at":{"type":"string","format":"date-time","description":"Latest worker ETA report over every epic the project/group filters match"},"read_through":{"type":"integer","minimum":0,"format":"int64"},"generation":{"type":"integer","minimum":1,"format":"int64"}}}
     GoalStatusNoteUpdate:
       type: object
       additionalProperties: false

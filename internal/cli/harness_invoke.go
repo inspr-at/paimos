@@ -61,7 +61,7 @@ func (rt *runtime) harnessInvoke() *Command {
 				}
 				argv = append(argv, "--", args[0])
 			}
-			ctx, cancel := signalContext()
+			ctx, cancel := rt.claimSignals()
 			defer cancel()
 			cmd := exec.Command(path, argv...)
 			cmd.Env = environment

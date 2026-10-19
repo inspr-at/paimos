@@ -20,6 +20,8 @@ const { appearance } = useAgentAppearance()
 import SessionAvatar from './SessionAvatar.vue'
 import HarnessOpener from './HarnessOpener.vue'
 import SessionsHeld from './SessionsHeld.vue'
+import CompactStatus from '../CompactStatus.vue'
+import { compactChrome } from '../../lib/chrome'
 import { currentActivity, currentStep, workerActivity } from './activity'
 import { timeShort, timeText, timeTip } from './sessionTime'
 import { inFrameOrder, lingers, movesAt, useSessionHold, type Heading, type Structure } from './sessionHold'
@@ -173,7 +175,9 @@ const structure: Structure<SessionView> = {
 }
 // What the person holds: Show now offers it. A swipe's own hold ends by itself before a finger
 // could reach Show now, so the note stays calm through it.
-const personHolds = computed(() => pointing.value || keyFocus.value || menuOpen.value)
+// The floating held chip (compact screens) is the list's too: pointing at it keeps holding (AEON-1459).
+const chipPointing = ref(false)
+const personHolds = computed(() => pointing.value || chipPointing.value || keyFocus.value || menuOpen.value)
 const hold = useSessionHold(() => liveViews.value, structure, () => !showRemoved.value && (personHolds.value || touching.value), undefined, {
   read: projectLayout,
   headings: layout => layout.headings,
@@ -798,13 +802,52 @@ function searchKey(event: KeyboardEvent) {
   if (event.key !== 'Escape' || event.isComposing) return
   event.preventDefault(); event.stopPropagation()
   if (draft.value) clearSearch()
+  else if (compact.value && searching.value) cancelSearch()
   else search.value?.blur()
 }
 function focusSearch() {
   if (!search.value) return false
+  if (compact.value && !searching.value) { void openSearch(true); return true }
   search.value.focus(); search.value.select()
   return true
 }
+// ---------- Compact (AEON-1459, design AEON-1279 r2 D3/D6) ----------
+// Phones and short screens: one opaque 44 px line, Sessions N · status · Search · Filter · ⋯. Search
+// opens over the line in the same box (nothing moves) and stays open while a query is set; Cancel
+// clears it. Display, Collapse all, Clear stale and History live in ⋯; no pills row, no column head.
+const compact = compactChrome()
+const searching = ref(!!props.query)
+const searchButton = ref<HTMLButtonElement>()
+watch(() => props.query, value => { if (value && compact.value) searching.value = true })
+async function openSearch(select = false) {
+  searching.value = true
+  await nextTick()
+  search.value?.focus()
+  if (select) search.value?.select()
+}
+function cancelSearch() {
+  clearTimeout(searchTimer)
+  draft.value = ''
+  if (props.query) emit('search', '')
+  searching.value = false
+  void nextTick(() => searchButton.value?.focus({ preventScroll: true }))
+}
+const filterCount = computed(() => Number(!!stateFilter.value) + activeFacets.value.length)
+const workingCount = computed(() => current.value.filter(view => matchesFilter(view, 'working')).length)
+const moreMenu = ref<HTMLElement | null>(null)
+function openMore(event: MouseEvent) { moreMenu.value = moreMenu.value ? null : event.currentTarget as HTMLElement }
+function moreDisplay() {
+  const anchor = moreMenu.value
+  moreMenu.value = null
+  if (anchor && sortable.value) sortMenu.value = anchor
+}
+function moreFold() { moreMenu.value = null; foldAll() }
+function moreStale() { moreMenu.value = null; hold.follow(stale.value.map(s => s.id)); removal.clearStale(stale.value) }
+function moreHistory() { moreMenu.value = null; toggleHistory() }
+const displayLine = computed(() => {
+  const by = SORTS.find(column => column.key === effectiveSort.value.key)?.label.toLowerCase() ?? ''
+  return `${displayWord.value ? `Group ${displayWord.value}` : 'Group by project'} · sort by ${by}`
+})
 // Filter (AEON-1210): the ticket list's "Filter by" menu with State (the head count's filter),
 // Project, Harness and Computer; each opens its own choices at the same place.
 type FilterView = 'by' | 'state' | FacetKey
@@ -827,7 +870,7 @@ function closeFilter(restore: boolean) {
   filterMenu.value = null
   if (restore) (anchor?.isConnected ? anchor : filterButton.value)?.focus()
 }
-watchEffect(() => { menuOpen.value = !!(menu.value || moveMenu.value || filterMenu.value || sortMenu.value) })
+watchEffect(() => { menuOpen.value = !!(menu.value || moveMenu.value || filterMenu.value || sortMenu.value || moreMenu.value) })
 const STATES = Object.keys(FILTER_LABEL) as HeadFilter[]
 const stateCount = (state: HeadFilter) => current.value.filter(view => matchesFilter(view, state)).length
 function pickState(state: HeadFilter) {
@@ -932,7 +975,7 @@ function sessionLinkClick(event: MouseEvent, id: string) {
           ><AppIcon :name="anyOpen ? 'collapse-all' : 'expand-all'" :size="15" /></button>
         </span>
         <div class="list-tools" role="group" aria-label="Filter this list">
-          <label class="search-field sess-search">
+          <label class="search-field sess-search" :class="{ open: searching }">
             <AppIcon name="search" :size="14" />
             <input
               id="sessions-q" ref="search" v-model="draft" class="field" type="search" placeholder="Search sessions" maxlength="200" autocomplete="off" spellcheck="false"
@@ -940,11 +983,16 @@ function sessionLinkClick(event: MouseEvent, id: string) {
             />
             <span v-if="!draft && searchCaps.length" class="sk-cap" aria-hidden="true"><KeyCap v-for="key in searchCaps" :key="key" :k="key" /></span>
             <button v-else type="button" class="clear-q" aria-label="Clear the search" @click="clearSearch"><AppIcon name="close" :size="12" /></button>
+            <button type="button" class="sf-cancel" @click.prevent="cancelSearch">Cancel</button>
           </label>
           <button
-            ref="filterButton" type="button" class="btn facet-btn tool-btn" :class="{ on: !!stateFilter || activeFacets.length > 0 }" aria-haspopup="menu" :aria-expanded="filterMenu?.anchor === filterButton"
-            aria-label="Filter" :aria-keyshortcuts="filterKeys.join(' ') || undefined" :data-tip="filterMenu ? undefined : ['Add a filter', shortcutHint('agents.filter.add')].filter(Boolean).join(' · ')" @click="openFilter"
-          ><AppIcon name="filter" :size="13" /><span class="bl">Filter</span></button>
+            ref="searchButton" type="button" class="tb-ic tb-search" aria-label="Search sessions" aria-controls="sessions-q" :aria-expanded="searching"
+            :aria-keyshortcuts="searchKeys.join(' ') || undefined" data-tip="Search this list" @click="openSearch()"
+          ><AppIcon name="search" :size="18" /></button>
+          <button
+            ref="filterButton" type="button" class="btn facet-btn tool-btn tb-filter" :class="{ on: !!stateFilter || activeFacets.length > 0 }" aria-haspopup="menu" :aria-expanded="filterMenu?.anchor === filterButton"
+            :aria-label="compact && filterCount ? `Filter: ${filterCount} on` : 'Filter'" :aria-keyshortcuts="filterKeys.join(' ') || undefined" :data-tip="filterMenu ? undefined : ['Add a filter', shortcutHint('agents.filter.add')].filter(Boolean).join(' · ')" @click="openFilter"
+          ><AppIcon name="filter" :size="13" /><span class="bl">Filter</span><span v-if="filterCount" class="fcount" aria-hidden="true">{{ filterCount }}</span></button>
           <button
             type="button" class="btn facet-btn tool-btn sort-tool" :class="{ on: !!sort || !!displayWord }" aria-haspopup="dialog" :aria-expanded="!!sortMenu" :aria-disabled="!sortable || undefined"
             :aria-label="`Display: ${displayWord ? `group ${displayWord}; ` : ''}sort sessions by ${SORTS.find(c => c.key === effectiveSort.key)?.label ?? ''}, ${dirWord}`" :data-tip="sortMenu ? undefined : sortable ? 'Group and sort' : 'Nothing to sort yet'"
@@ -952,8 +1000,10 @@ function sessionLinkClick(event: MouseEvent, id: string) {
           ><AppIcon name="sort" :size="13" /><span class="bl">Display</span><span v-if="displayWord" class="bl tool-value"> · {{ displayWord }}</span></button>
         </div>
         <span class="grow" />
+        <!-- Compact: the footer's summary, in the toolbar's status slot (AEON-1459, D3/D5). -->
+        <CompactStatus v-if="loaded && state === 'ready'" class="tb-status" :count="workingCount" word="working" mark="working" />
         <!-- Rows that wait to enter, leave or move while you point here (AEON-1211); otherwise how fresh the list is. -->
-        <SessionsHeld v-if="loaded && state === 'ready'" :pending="personHolds ? hold.pending.value : 0" :updated-at="agents.sessionsUpdatedAt" :now="now" :stale="listStale" @show-now="hold.showNow()" />
+        <SessionsHeld v-if="loaded && state === 'ready'" :pending="personHolds ? hold.pending.value : 0" :updated-at="agents.sessionsUpdatedAt" :now="now" :stale="listStale" @show-now="hold.showNow()" @point="chipPointing = $event" />
         <span v-if="loaded && state === 'ready'" class="head-tools">
           <button
             v-if="stale.length" type="button" class="btn sm ghost quiet-btn" :class="{ 'clear-stale-off': showRemoved }" :disabled="showRemoved || removal.busy.value" :aria-hidden="showRemoved || undefined"
@@ -965,6 +1015,10 @@ function sessionLinkClick(event: MouseEvent, id: string) {
             :aria-label="showRemoved ? 'Back to sessions' : 'Show history: every ended or removed session'" @click="toggleHistory"
           ><AppIcon :name="showRemoved ? 'arrow-left' : 'history'" :size="13" /><!-- Both words keep their room, so the toggle never changes width (AEON-541). --><span class="tool-label btn-label"><span :aria-hidden="showRemoved || undefined">History</span><span :aria-hidden="!showRemoved || undefined">Sessions</span></span></button>
         </span>
+        <button
+          v-if="loaded && state === 'ready'" type="button" class="tb-ic tb-more" aria-haspopup="menu" :aria-expanded="!!moreMenu" aria-label="More list actions"
+          data-tip="Display, collapse, clear stale, history" @click="openMore"
+        ><AppIcon name="more" :size="18" /></button>
       </div>
       <!-- Applied filters sit under the head and stick with it; the state filter is the head count's (AEON-780),
            then Project, Harness and Computer (AEON-1210). A pill reopens its choices; × removes it. -->
@@ -1213,6 +1267,20 @@ function sessionLinkClick(event: MouseEvent, id: string) {
           v-for="(item, index) in FILTER_BY" :key="item.view" type="button" role="menuitem" class="menu-item by-item" :data-autofocus="index === 0 ? '' : undefined" :data-by="item.view"
           @click="chooseFilter(item.view)"
         ><AppIcon :name="item.icon" :size="14" class="by-icon" /><span class="mi-text">{{ item.title }}</span><span v-if="onCount(item.view)" class="on-count mono">{{ onCount(item.view) }}</span><AppIcon name="chevron-right" :size="13" class="by-go" /></button>
+        <!-- Compact screens have no pills row: the filters clear here. -->
+        <template v-if="compact && (filterCount || terms.length)">
+          <hr class="menu-sep">
+          <button type="button" role="menuitem" class="menu-item by-item" @click="clearAll"><AppIcon name="close" :size="14" class="by-icon" /><span class="mi-text">Clear all</span></button>
+        </template>
+      </div>
+    </FloatingPanel>
+    <!-- Compact: the toolbar's ⋯ (AEON-1459, D3). -->
+    <FloatingPanel v-if="moreMenu" :anchor="moreMenu" align="end" :width="280" label="More list actions" phone-sheet :sheet-below="719" @close="restore => { const anchor = moreMenu; moreMenu = null; if (restore) anchor?.focus() }">
+      <div role="menu" aria-label="More list actions" @keydown="menuKeys">
+        <button type="button" role="menuitem" class="menu-item" data-autofocus :aria-disabled="!sortable || undefined" @click="sortable && moreDisplay()"><AppIcon name="sort" :size="16" /><span class="mi-text"><span>Display…</span><small>{{ sortable ? displayLine : 'Nothing to sort yet' }}</small></span></button>
+        <button v-if="foldAllShown" type="button" role="menuitem" class="menu-item" :aria-disabled="!!filtering || undefined" @click="!filtering && moreFold()"><AppIcon :name="anyOpen ? 'collapse-all' : 'expand-all'" :size="16" /><span class="mi-text"><span>{{ anyOpen ? 'Collapse all' : 'Expand all' }}</span><small>{{ filtering ? 'Folding waits while a filter is on' : 'Every project group' }}</small></span></button>
+        <button v-if="stale.length && !showRemoved" type="button" role="menuitem" class="menu-item" :aria-disabled="removal.busy.value || undefined" @click="!removal.busy.value && moreStale()"><AppIcon name="trash" :size="16" /><span class="mi-text"><span>Clear stale</span><small>{{ stale.length }} without a heartbeat for 15&nbsp;minutes</small></span></button>
+        <button type="button" role="menuitem" class="menu-item" @click="moreHistory"><AppIcon :name="showRemoved ? 'arrow-left' : 'history'" :size="16" /><span class="mi-text"><span>{{ showRemoved ? 'Back to sessions' : 'History' }}</span><small>{{ showRemoved ? 'The live list' : 'Every ended or removed session' }}</small></span></button>
       </div>
     </FloatingPanel>
     <SessionFacetMenu
@@ -1284,8 +1352,8 @@ function sessionLinkClick(event: MouseEvent, id: string) {
 .sessions.pane .thead { top: 0; }
 /* The card head (AEON-1209, design AEON-1196): sticky inside the card, at the card's width, right
    under the app header. Sticking adds a hairline shadow only; its box and insides never change. */
-.th-stick { position: sticky; top: 0; z-index: 20; padding: 6px 8px 0; border-radius: var(--radius) var(--radius) 0 0; background: color-mix(in srgb, var(--surface-raised) 94%, transparent); -webkit-backdrop-filter: blur(12px); backdrop-filter: blur(12px); transition: box-shadow .15s ease; }
-.th-stick.stuck { box-shadow: 0 8px 14px -12px var(--shadow-color), 0 1px 0 var(--line); }
+.th-stick { position: sticky; top: 0; z-index: 20; padding: 6px 8px 0; border-radius: var(--radius) var(--radius) 0 0; background: var(--chrome); transition: box-shadow .15s ease; }
+.th-stick.stuck { border-radius: 0; box-shadow: 0 8px 14px -12px var(--shadow-color), 0 1px 0 var(--line); }
 @media (prefers-reduced-motion: reduce) { .th-stick { transition: none; } }
 .tree-head { display: flex; align-items: center; flex-wrap: wrap; gap: 8px 10px; min-height: 52px; padding: 4px 10px 6px; }
 .sess-title { display: inline-flex; align-items: baseline; gap: 8px; margin: 0; color: var(--ink); font: 650 15px/1.3 var(--font); letter-spacing: -.005em; white-space: nowrap; }
@@ -1361,7 +1429,7 @@ function sessionLinkClick(event: MouseEvent, id: string) {
 /* Session · Time · Execution · Computer · Beat · actions (AEON-1211, design AEON-1196): the name takes the room. */
 .table { --tree-step: 28px; display: grid; grid-template-columns: minmax(200px, 1fr) 92px minmax(150px, 220px) 132px 80px 108px; padding: 0 0 8px; }
 .thead, .row, .group-row { display: grid; grid-template-columns: subgrid; grid-column: 1 / -1; align-items: center; column-gap: 0; }
-.thead { position: sticky; top: var(--stick-h, 0px); z-index: 19; height: 32px; padding: 0 12px; border-top: 1px solid var(--line); border-bottom: 1px solid var(--line); background: color-mix(in srgb, var(--surface-raised) 94%, transparent); -webkit-backdrop-filter: blur(12px); backdrop-filter: blur(12px); font: 500 10.5px/1 var(--mono); letter-spacing: .14em; text-transform: uppercase; color: var(--ink-3); font-variant-ligatures: none; white-space: nowrap; }
+.thead { position: sticky; top: var(--stick-h, 0px); z-index: 19; height: 32px; padding: 0 12px; border-top: 1px solid var(--line); border-bottom: 1px solid var(--line); background: var(--chrome); font: 500 10.5px/1 var(--mono); letter-spacing: .14em; text-transform: uppercase; color: var(--ink-3); font-variant-ligatures: none; white-space: nowrap; }
 .thead > span, .row > span, .execution-host > span { padding: 0 8px; min-width: 0; }
 .execution-host { display: contents; }
 .right { text-align: right; justify-content: flex-end; }
@@ -1569,12 +1637,12 @@ function sessionLinkClick(event: MouseEvent, id: string) {
   .group-row { display: flex; align-items: center; height: 26px; margin: 12px 8px 2px; padding: 0 8px; }
   /* Two 20 + 18 px lines (gap 2) beside the 30 px avatar put its centre, the fold's and the tree's
      joint 29 px below the row's top. */
-  .row { --tree-joint: 29px; display: grid; grid-template-columns: var(--fold) 30px minmax(0, 1fr) var(--row-action); column-gap: 8px; align-items: start; min-height: 0; margin: 0 6px; padding: 10px 0 10px calc(10px + var(--depth) * var(--tree-step)); }
+  .row { --row-pad: 10px; --tree-joint: calc(var(--row-pad) + 19px); display: grid; grid-template-columns: var(--fold) 30px minmax(0, 1fr) var(--row-action); column-gap: 8px; align-items: start; min-height: 0; margin: 0 6px; padding: var(--row-pad) 0 var(--row-pad) calc(10px + var(--depth) * var(--tree-step)); }
   .row > span { padding: 0; }
   .row > .c-agent { grid-column: 1 / 4; display: grid; grid-template-columns: subgrid; align-items: start; row-gap: 0; padding-block: 0; }
   .row.worker .c-agent { padding-left: 0; }
   /* The fold button is centred on the avatar's centre line. */
-  .tree-fold, .tree-fold-space { grid-column: 1; grid-row: 1; width: var(--fold); height: var(--fold); margin-top: calc(var(--tree-joint) - 10px - var(--fold) / 2); }
+  .tree-fold, .tree-fold-space { grid-column: 1; grid-row: 1; width: var(--fold); height: var(--fold); margin-top: calc(var(--tree-joint) - var(--row-pad) - var(--fold) / 2); }
   .agent-link { grid-column: 2 / -1; grid-row: 1; display: grid; grid-template-columns: subgrid; align-items: center; }
   .who { gap: 2px; }
   .l1 { gap: 6px; font-size: 14px; }
@@ -1595,7 +1663,7 @@ function sessionLinkClick(event: MouseEvent, id: string) {
   .c-agent > .q-l2 { grid-column: 3; grid-row: 2; justify-self: start; margin-top: 2px; }
   /* One slot stays reserved even while its menu trigger is hidden. Remove,
      Pause, Resume and Change tier stay available in that menu. */
-  .row > .c-actions { grid-column: 4; grid-row: 1; flex-direction: row; gap: 0; margin-top: calc(var(--tree-joint) - 10px - var(--row-action) / 2); padding: 0; }
+  .row > .c-actions { grid-column: 4; grid-row: 1; flex-direction: row; gap: 0; margin-top: calc(var(--tree-joint) - var(--row-pad) - var(--row-action) / 2); padding: 0; }
   .act, .c-actions > .pause-controls, .c-actions > .bin { display: none; }
   .row > .c-actions .more { width: var(--row-action); height: var(--row-action); opacity: 0; }
   .row:is(:hover, :focus-within) > .c-actions .more, .row > .c-actions .more[aria-expanded="true"] { opacity: 1; }
@@ -1630,14 +1698,61 @@ function sessionLinkClick(event: MouseEvent, id: string) {
 /* AEON-1286: short landscape phones give the height to the rows. The columns read on their own
    (sorting is in Display, as on phones), and a card wide enough keeps its tools on the title's
    line as 44 px icons whose names stay for screen readers. */
-@media (max-height: 480px) {
-  .thead { display: none; }
-  @container sessions (min-width: 641px) {
-    .tree-head { flex-wrap: nowrap; min-height: 48px; padding-block: 2px; }
-    .tool-btn { width: 44px; padding: 0; }
-    .tool-btn .bl { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
-    .head-tools .btn { min-width: 44px; justify-content: center; padding: 0; }
-    .head-tools .tool-label { display: none; }
+/* ---------- Compact (AEON-1459, design AEON-1279 r2 D3/D6): phones and short screens ----------
+   One opaque 44 px toolbar line: Sessions N · status · Search · Filter (icon and count) · ⋯. Search
+   opens over the line in the same box; Display, folding, Clear stale and History are in ⋯. No pills
+   row and no column head; the rows read on their own. */
+.tb-ic, .sf-cancel, .fcount { display: none; }
+@media (max-width: 719px), (max-height: 500px) {
+  /* A click scrolls the control into view. Clear the sticky toolbar, or the click lands on the bar. */
+  .row, .group-row { scroll-margin-top: 52px; scroll-margin-bottom: 16px; }
+  .th-stick { padding: 0 4px; }
+  .tree-head { position: relative; flex-wrap: nowrap; gap: 0; height: 44px; min-height: 44px; padding: 0 0 0 8px; }
+  .sess-title { flex: none; }
+  .fold-all-slot, .sort-tool, .head-tools, .pills-row, .thead { display: none; }
+  .list-tools { display: contents; }
+  .grow { order: 1; }
+  .tb-status { order: 2; }
+  .tb-search { order: 3; }
+  .tb-filter { order: 4; }
+  .tb-more { order: 6; }
+  .tb-ic { display: inline-grid; place-items: center; flex: none; width: 44px; height: 44px; padding: 0; border: 0; border-radius: 999px; background: transparent; color: var(--ink-2); }
+  @media (hover: hover) { .tb-ic:hover { background: var(--row-hover); color: var(--ink); } }
+  .tb-ic[aria-expanded="true"] { background: var(--row-hover); color: var(--ink); }
+  .tb-ic:focus-visible { outline: none; box-shadow: var(--focus-ring); }
+  .tool-btn.tb-filter { position: relative; display: inline-grid; place-items: center; flex: none; width: 44px; height: 44px; min-height: 44px; padding: 0; border: 0; border-radius: 999px; background: transparent; box-shadow: none; color: var(--ink-2); }
+  .tool-btn.tb-filter.on { color: var(--teal-ink); }
+  .tool-btn.tb-filter:focus-visible { box-shadow: var(--focus-ring); }
+  .tb-filter .bl { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
+  .tb-filter .fcount { position: absolute; top: 5px; right: 3px; display: inline-grid; place-items: center; min-width: 16px; height: 16px; padding: 0 4px; border-radius: 999px; background: var(--teal); color: var(--primary-on); font: 700 10px/16px var(--mono); box-shadow: 0 0 0 2px var(--chrome); }
+  /* Search opens over the toolbar line, in the same box: the field is 44 px with 16 px text (iOS does not zoom). */
+  .sess-search { display: none; }
+  .sess-search.open { position: absolute; inset: 0; z-index: 3; display: flex; align-items: center; gap: 4px; width: auto; padding: 0 0 0 4px; background: var(--chrome); }
+  .sess-search.open > svg { left: 20px; }
+  .sess-search.open .field { flex: 1 1 auto; min-width: 0; height: 44px; min-height: 44px; padding-left: 34px; padding-right: 36px; border: 5px solid var(--chrome); border-radius: 999px; background-color: var(--field-bg); box-shadow: inset 0 0 0 1px var(--line); font-size: 16px; }
+  .sess-search.open .sk-cap { display: none; }
+  .sess-search.open .clear-q { right: 84px; }
+  .sess-search.open .sf-cancel { display: inline-flex; align-items: center; flex: none; height: 44px; padding: 0 10px; border: 0; border-radius: 10px; background: transparent; color: var(--teal-ink); font: 600 14px/1 var(--font); cursor: pointer; }
+  .sf-cancel:focus-visible { outline: none; box-shadow: var(--focus-ring); }
+}
+/* Portrait phones: 56 px rows (two lines, the time at the line's end). */
+@media (max-width: 719px) {
+  .row { --row-pad: 8px; }
+}
+/* Short landscape (D6): Session · Time · Execution (the model only) · ⋯ in 48 px rows, no column head. */
+@media (max-height: 500px) and (min-width: 720px) {
+  @container sessions (min-width: 560px) {
+    .table { grid-template-columns: minmax(0, 1fr) 92px minmax(132px, 176px) 44px; }
+    .thead > .c-host, .execution-host > .c-host, .row > .c-beat, .thead > .c-beat, .exec-account { display: none; }
+    .row { --tree-joint: 24px; min-height: 48px; }
+    .row > .c-agent { padding-block: 4px; }
+    .who { gap: 1px; }
+    .l1 { height: 20px; }
+    .l2 { height: 17px; }
+    .row > .c-actions { padding: 0; }
+    .act, .c-actions > .pause-controls, .c-actions > .bin { display: none; }
+    .row > .c-actions .more { width: 44px; height: 44px; opacity: 1; }
+    .grp { padding: 2px 0; }
   }
 }
 </style>

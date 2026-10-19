@@ -9,13 +9,12 @@ import (
 	"io"
 	"net/http"
 	"net/url"
-	"os"
 	"os/exec"
-	"os/signal"
 	"strings"
 	"time"
 
 	"github.com/inspr-at/paimos/internal/inbox"
+	"github.com/inspr-at/paimos/internal/ownedprocess"
 	"github.com/inspr-at/paimos/internal/version"
 )
 
@@ -58,7 +57,7 @@ func canonicalMessagingAdapter(name string) string {
 
 func (rt *runtime) listenMessagingDelivery(project, projectKey, address, adapter string, follow bool, interval time.Duration) error {
 	adapter = canonicalMessagingAdapter(adapter)
-	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt)
+	ctx, stop := rt.claimSignals()
 	defer stop()
 	deliver := rt.messagingDeliverer
 	if deliver == nil {
@@ -222,9 +221,12 @@ func runLocalMessagingCommand(ctx context.Context, program string, args []string
 	if err != nil {
 		return fmt.Errorf("%s CLI unavailable", program)
 	}
-	cmd := exec.CommandContext(ctx, path, args...)
+	// Listeners own their shutdown (claimSignals), so the vendor CLI runs as an
+	// owned process group: cancellation also ends descendants that keep the
+	// output pipes open, instead of leaving the listener blocked in Wait.
+	cmd := exec.Command(path, args...)
 	cmd.Stdin, cmd.Stdout, cmd.Stderr = input, io.Discard, io.Discard
-	if err := cmd.Run(); err != nil {
+	if err := ownedprocess.Run(ctx, cmd); err != nil {
 		return fmt.Errorf("%s delivery failed", program)
 	}
 	return nil

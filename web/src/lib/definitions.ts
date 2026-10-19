@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import { api, APIError } from './api'
 import type { IconName } from '../components/AppIcon.vue'
+import { watchStreamHealth } from './streamHealth'
 
 export const DEFINITION_BLOCKS = [
   { id: 'in_progress', name: 'Ready', to: 'In progress' },
@@ -8,11 +9,23 @@ export const DEFINITION_BLOCKS = [
   { id: 'done', name: 'Done', to: 'Done' },
 ] as const
 export type DefinitionStatus = typeof DEFINITION_BLOCKS[number]['id']
+export function definitionBlocks(language = 'en') {
+  return DEFINITION_BLOCKS.map(block => language === 'de' ? { ...block, ...({
+    in_progress: { name: 'Bereit', to: 'In Arbeit' }, qa: { name: 'QA', to: 'QA' }, done: { name: 'Erledigt', to: 'Erledigt' },
+  }[block.id]) } : block)
+}
 export type DefinitionCondition = 'all' | 'ui' | 'code' | 'blocked' | 'release_notes' | 'releases'
 export interface DefinitionRule { id: string; label?: string; label_de?: string; condition?: DefinitionCondition; kinds?: string[]; labels?: string[]; owner_id?: string | null; fallback_owner_id?: string | null }
 export type DefinitionChecks = Partial<Record<DefinitionStatus, DefinitionRule[]>>
-export interface Definition { id: string; revision: string; source: 'project' | 'workspace'; copied_from_revision: string | null; checks: DefinitionChecks }
-export interface DefinitionContext { project_id: string; definition: Definition | null; workspace_default: Definition | null; copied_from_checks: DefinitionChecks | null; can_manage: boolean }
+export interface Definition { id: string; revision: string; created_at?: string; source: 'project' | 'workspace'; copied_from_revision: string | null; checks: DefinitionChecks }
+export interface DefinitionChange { check_id: string; block: DefinitionStatus; kind: 'new' | 'changed' | 'removed'; before: DefinitionRule | null; current: DefinitionRule | null }
+export interface DefinitionAdmin { id: string; name: string }
+export interface DefinitionContext { project_id: string; definition: Definition | null; workspace_default: Definition | null; copied_from_checks: DefinitionChecks | null; can_manage: boolean; pending_changes?: DefinitionChange[]; admins?: DefinitionAdmin[]; admins_more?: number }
+export interface DefinitionProject { project_id: string; key: string; difference_count: number; pending_count: number }
+export interface WorkspaceDefinitionContext { definition: Definition | null; can_manage: boolean; admins: DefinitionAdmin[]; admins_more?: number; projects: DefinitionProject[]; differ_count: number; uses_default: string[]; next_cursor: string | null }
+export function definitionAdminNames(admins: DefinitionAdmin[] = [], more = 0, language = 'en') {
+  return [admins.map(person => person.name).join(', '), more ? language === 'de' ? `und ${more} weitere` : `and ${more} more` : ''].filter(Boolean).join(' ')
+}
 export const DEFINITION_CATALOG: { id: string; en: string; de: string; condition: DefinitionCondition; block: DefinitionStatus; icon: IconName }[] = [
   { id: 'estimate_set', en: 'Estimate set', de: 'Schätzung gesetzt', condition: 'all', block: 'in_progress', icon: 'clock' },
   { id: 'acceptance_present', en: 'Acceptance criteria written', de: 'Abnahmekriterien beschrieben', condition: 'all', block: 'in_progress', icon: 'list' },
@@ -22,31 +35,58 @@ export const DEFINITION_CATALOG: { id: string; en: string; de: string; condition
   { id: 'ci_green_latest_main', en: 'Full CI green on latest main', de: 'Volle CI grün auf aktuellem main', condition: 'code', block: 'qa', icon: 'workflow' },
   { id: 'review_ok_cross_family', en: 'Cross-family review ok', de: 'Review durch andere Modellfamilie ok', condition: 'code', block: 'qa', icon: 'shield' },
   { id: 'visual_ok', en: 'Visual check ok', de: 'Visuelle Prüfung ok', condition: 'ui', block: 'qa', icon: 'eye' },
-  { id: 'pills_benefits_set', en: 'Pills and benefits set', de: 'Pills und Nutzen beschrieben', condition: 'release_notes', block: 'done', icon: 'sentence' },
+  { id: 'pills_benefits_set', en: 'Pills and benefits set', de: 'Markierungen und Nutzen beschrieben', condition: 'release_notes', block: 'done', icon: 'sentence' },
   { id: 'release_copy_set', en: 'Release text set (EN + DE)', de: 'Release-Text gesetzt (EN + DE)', condition: 'release_notes', block: 'done', icon: 'sentence' },
   { id: 'merged', en: 'Merged to main', de: 'In main gemergt', condition: 'code', block: 'done', icon: 'merge' },
   { id: 'released', en: 'Shipped in a release', de: 'In einem Release ausgeliefert', condition: 'releases', block: 'done', icon: 'layers' },
 ]
 export const DEFINITION_CONDITIONS: Record<DefinitionCondition, string> = { all: 'All tickets', ui: 'UI tickets', code: 'Code tickets', blocked: 'Blocked tickets', release_notes: 'Unless hidden from release notes', releases: 'If the project uses releases' }
+export const DEFINITION_CONDITIONS_DE: Record<DefinitionCondition, string> = { all: 'Alle Tickets', ui: 'UI-Tickets', code: 'Code-Tickets', blocked: 'Blockierte Tickets', release_notes: 'Sofern in Release-Notizen sichtbar', releases: 'Wenn das Projekt Releases nutzt' }
+export const definitionConditionWords = (rule: DefinitionRule, language = 'en') => (language === 'de' ? DEFINITION_CONDITIONS_DE : DEFINITION_CONDITIONS)[ruleCondition(rule)]
+export function definitionDate(value: string, language = 'en') {
+  const date = new Date(value)
+  return Number.isNaN(date.getTime()) ? '' : new Intl.DateTimeFormat(language === 'de' ? 'de-AT' : 'en-GB', {day:'numeric', month:'short', timeZone:'UTC'}).format(date).replace(/\s/g, '\u00a0')
+}
+export function definitionNotice(key: string, count: number, date: string, language = 'en') {
+  if (!count) return language === 'de' ? 'Alle Änderungen entschieden.' : 'All changes decided.'
+  return language === 'de' ? `Der Workspace-Standard wurde am ${date} geändert, nachdem ${key} ihn kopiert hat. ${count}\u00a0${count === 1 ? 'Änderung wartet' : 'Änderungen warten'} unten auf eine Entscheidung; bis dahin behält ${key} seine Kopie unverändert.`
+    : `The workspace default changed on ${date}, after ${key} copied it. ${count}\u00a0${count === 1 ? 'change waits' : 'changes wait'} for a decision below; until then ${key} keeps its copy as it is.`
+}
+export function definitionChangeWords(change: DefinitionChange, date: string, language = 'en', currentWords?: string) {
+  const de = language === 'de', condition = currentWords ?? (change.current ? definitionConditionWords(change.current, language) : '')
+  return change.kind === 'new' ? de ? `Neu im Workspace-Standard seit ${date}` : `New in the workspace default since ${date}`
+    : change.kind === 'removed' ? de ? `Seit ${date} nicht mehr im Workspace-Standard` : `Gone from the workspace default since ${date}`
+    : de ? `Der Workspace-Standard sagt jetzt ${condition} (seit ${date})` : `The workspace default now says ${condition} (since ${date})`
+}
+export function definitionDecisionWords(change: DefinitionChange, own: DefinitionRule | undefined, language = 'en'): [string, string] {
+  const de = language === 'de', condition = definitionConditionWords(own ?? change.before ?? change.current!, language)
+  return change.kind === 'new' ? de ? ['Hier übernehmen','Weglassen'] : ['Add here','Leave out']
+    : change.kind === 'removed' ? de ? ['Auch hier entfernen','Behalten'] : ['Remove here too','Keep it']
+    : de ? ['Auch hier übernehmen',`${condition} behalten`] : ['Use it here too',`Keep ${condition === 'All tickets' ? 'all tickets' : condition}`]
+}
+export function definitionDeskWords(key: string, count: number, language = 'en') {
+  return language === 'de' ? `${key}: ${count}\u00a0${count === 1 ? 'Änderung' : 'Änderungen'} am Workspace-Standard ${count === 1 ? 'wartet' : 'warten'} auf eine Entscheidung` : `${key}: ${count}\u00a0${count === 1 ? 'change' : 'changes'} to the workspace default ${count === 1 ? 'waits' : 'wait'} for a decision`
+}
 export const DEFINITION_CONDITION_OPTIONS = [
-  { value: 'all', detail: 'Every ticket' },
-  { value: 'code', detail: 'Tickets that change code' },
-  { value: 'ui', detail: 'Tickets labelled ui' },
+  { value: 'all', detail: 'Every ticket', detail_de: 'Jedes Ticket' },
+  { value: 'code', detail: 'Tickets that change code', detail_de: 'Tickets mit Codeänderungen' },
+  { value: 'ui', detail: 'Tickets labelled ui', detail_de: 'Tickets mit dem Label ui' },
 ] as const
 export const manualRule = (rule: DefinitionRule) => rule.id.startsWith('manual:')
-export const ruleIcon = (rule: DefinitionRule): IconName => manualRule(rule) ? 'person-check' : DEFINITION_CATALOG.find(c => c.id === rule.id)?.icon ?? 'list-checks'
+export const ruleIcon = (rule: DefinitionRule): IconName => manualRule(rule) ? 'person-check' : rule.id === 'lesson_recorded' ? 'book' : DEFINITION_CATALOG.find(c => c.id === rule.id)?.icon ?? 'list-checks'
 export function fixedRuleCondition(rule: DefinitionRule): DefinitionCondition | undefined {
   const condition = DEFINITION_CATALOG.find(c => c.id === rule.id)?.condition
   return condition && !DEFINITION_CONDITION_OPTIONS.some(option => option.value === condition) ? condition : undefined
 }
-export const ruleLabel = (rule: DefinitionRule, language = 'en') => (language === 'de' ? rule.label_de : rule.label) || (language === 'de' ? DEFINITION_CATALOG.find(c => c.id === rule.id)?.de : DEFINITION_CATALOG.find(c => c.id === rule.id)?.en) || rule.label || rule.id
+export const ruleLabel = (rule: DefinitionRule, language = 'en') => (language === 'de' ? rule.label_de : rule.label) || (language === 'de' ? DEFINITION_CATALOG.find(c => c.id === rule.id)?.de : DEFINITION_CATALOG.find(c => c.id === rule.id)?.en) || (rule.id === 'lesson_recorded' ? language === 'de' ? 'Lehre festgehalten' : 'Lesson recorded' : '') || rule.label || rule.id
 export const ruleCondition = (rule: DefinitionRule): DefinitionCondition => rule.condition || DEFINITION_CATALOG.find(c => c.id === rule.id)?.condition || 'all'
-export function ruleOwnerWords(rule: DefinitionRule, people: { id: string; name: string }[] = []): string {
-  const name = (id: string) => people.find(person => person.id === id)?.name ?? 'a named person'
+export function ruleOwnerWords(rule: DefinitionRule, people: { id: string; name: string }[] = [], language = 'en'): string {
+  const name = (id: string) => people.find(person => person.id === id)?.name ?? (language === 'de' ? 'einer benannten Person' : 'a named person')
+  if (language === 'de') return rule.owner_id ? `Bestätigt von ${name(rule.owner_id)}` : `Bestätigt von der ticketverantwortlichen Person, sonst ${rule.fallback_owner_id ? name(rule.fallback_owner_id) : 'einem Projektadministrator'}`
   return rule.owner_id ? `Ticked by ${name(rule.owner_id)}` : `Ticked by the ticket’s assignee, else ${rule.fallback_owner_id ? name(rule.fallback_owner_id) : 'a project admin'}`
 }
-export function ruleWords(rule: DefinitionRule, people: { id: string; name: string }[] = []): string {
-  return [DEFINITION_CONDITIONS[ruleCondition(rule)], rule.kinds?.length ? `Kinds: ${rule.kinds.join(', ')}` : '', rule.labels?.length ? `Labels: ${rule.labels.join(', ')}` : '', manualRule(rule) ? ruleOwnerWords(rule, people) : ''].filter(Boolean).join(' · ')
+export function ruleWords(rule: DefinitionRule, people: { id: string; name: string }[] = [], language = 'en'): string {
+  return [definitionConditionWords(rule, language), rule.kinds?.length ? `${language === 'de' ? 'Arten' : 'Kinds'}: ${rule.kinds.join(', ')}` : '', rule.labels?.length ? `${language === 'de' ? 'Schlagwörter' : 'Labels'}: ${rule.labels.join(', ')}` : '', manualRule(rule) ? ruleOwnerWords(rule, people, language) : ''].filter(Boolean).join(' · ')
 }
 export const cloneChecks = (checks: DefinitionChecks = {}): DefinitionChecks => JSON.parse(JSON.stringify(checks))
 export const checkCount = (checks: DefinitionChecks = {}) => DEFINITION_BLOCKS.reduce((n, b) => n + (checks[b.id]?.length ?? 0), 0)
@@ -72,18 +112,19 @@ export function definitionDiff(own: DefinitionChecks, workspace: DefinitionCheck
     ]
   })
 }
-export function resetChanges(own: DefinitionChecks, workspace: DefinitionChecks = {}): string[] {
+export function resetChanges(own: DefinitionChecks, workspace: DefinitionChecks = {}, language = 'en'): string[] {
   const diff = definitionDiff(own, workspace), lines: string[] = []
   for (const [kind, verb] of [['added', 'Dropped'], ['left', 'Comes back'], ['changed', 'Uses the workspace version']] as const) {
-    const names = diff.filter(r => r.kind === kind).map(r => ruleLabel(r.item))
-    if (names.length) lines.push(`${verb}: ${names.join(', ')}.`)
+    const names = diff.filter(r => r.kind === kind).map(r => ruleLabel(r.item, language))
+    const translated = { added: 'Entfällt', left: 'Wird wieder aufgenommen', changed: 'Verwendet die Workspace-Version' }[kind]
+    if (names.length) lines.push(`${language === 'de' ? translated : verb}: ${names.join(', ')}.`)
   }
   for (const block of DEFINITION_BLOCKS) {
     const shared = (own[block.id] ?? []).filter(r => workspace[block.id]?.some(d => d.id === r.id)).map(r => r.id)
     const order = (workspace[block.id] ?? []).filter(r => shared.includes(r.id)).map(r => r.id)
-    if (JSON.stringify(shared) !== JSON.stringify(order)) lines.push(`${block.name} returns to the workspace check order.`)
+    if (JSON.stringify(shared) !== JSON.stringify(order)) lines.push(language === 'de' ? `${definitionBlocks(language).find(b => b.id === block.id)!.name} übernimmt wieder die Reihenfolge des Workspace-Standards.` : `${block.name} returns to the workspace check order.`)
   }
-  if (!lines.length) lines.push('The checks stay the same; future workspace changes apply here at once.')
+  if (!lines.length) lines.push(language === 'de' ? 'Die Prüfungen bleiben gleich; künftige Workspace-Änderungen gelten hier sofort.' : 'The checks stay the same; future workspace changes apply here at once.')
   return lines
 }
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
@@ -97,3 +138,24 @@ export function saveDefinition(id: string, checks: DefinitionChecks, context: De
   return request<Definition>(`/projects/${encodeURIComponent(id)}/definitions`, { method: 'PUT', signal, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ checks, expected_revision: own ? current.revision : null, copied_from_revision: own ? current.copied_from_revision : workspace?.revision ?? null, ...(!own ? { expected_workspace_revision: workspace?.revision ?? null } : {}) }) })
 }
 export const resetDefinition = (id: string, context: DefinitionContext, signal?: AbortSignal) => request<Definition | null>(`/projects/${encodeURIComponent(id)}/definitions`, { method: 'DELETE', signal, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ expected_revision: context.definition?.revision, expected_workspace_revision: context.workspace_default?.revision ?? null }) })
+export const decideDefinitionChange = (id: string, change: DefinitionChange, decision: 'accept' | 'keep', context: DefinitionContext, signal?: AbortSignal) => request<DefinitionContext>(`/projects/${encodeURIComponent(id)}/definitions/decisions`, {method:'POST', signal, headers:{'Content-Type':'application/json'}, body:JSON.stringify({expected_revision:context.definition?.revision, expected_workspace_revision:context.workspace_default?.revision, check_id:change.check_id, decision})})
+export const readWorkspaceDefinitionContext = (after?: string, signal?: AbortSignal) => request<WorkspaceDefinitionContext>(`/settings/definitions/context${after ? `?after=${encodeURIComponent(after)}` : ''}`, {signal})
+export const saveWorkspaceDefinition = (checks: DefinitionChecks, current: Definition | null, signal?: AbortSignal) => request<Definition>('/settings/definitions', {method:'PUT',signal,headers:{'Content-Type':'application/json'},body:JSON.stringify({checks,expected_revision:current?.id === '00000000-0000-0000-0000-000000000000' ? null : current?.revision ?? null})})
+
+// Hints only: each consumer re-reads its authorized context. The connection is
+// owned and closed by the same person/tenant scope as that context.
+export const DEFINITION_EVENTS = ['definition.saved','definition.reset','definition.change_decided'] as const
+export function subscribeDefinitionChanges(changed: () => void) {
+  if (typeof EventSource === 'undefined') return () => {}
+  let stream: EventSource, stopped = false
+  const health = watchStreamHealth(() => { stream.close(); changed(); connect() })
+  function connect() {
+    const source = stream = new EventSource('/api/events/stream?after=latest')
+    const current = (run: () => void) => () => { if (!stopped && stream === source) { health.heard(); run() } }
+    source.onopen = current(changed)
+    for (const event of ['stream.ping','stream.ready']) source.addEventListener(event,current(() => {}))
+    for (const event of DEFINITION_EVENTS) source.addEventListener(event,current(changed))
+  }
+  connect()
+  return () => { stopped=true;health.stop();stream.close() }
+}

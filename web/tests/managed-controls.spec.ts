@@ -61,7 +61,7 @@ test('steer is session-bound, ephemeral input with a real queued receipt', async
   await openSteer(page)
   await editor(page, 'Steer').getByLabel('What should change?').fill('Run the focused fixtures next.')
   await editor(page, 'Steer').getByRole('button', { name: 'Send steer' }).click()
-  await expect(feedback(page)).toHaveText('Steer applied · queued for the next turn.')
+  await expect(feedback(page)).toHaveText('Queued for the next step')
   expect(requests).toHaveLength(1)
   // P0·3-c keeps the managed chat composer. The steer field is the ephemeral input, and its text does not remain there.
   await expect(editor(page, 'Steer').getByLabel('What should change?')).toHaveCount(0)
@@ -149,7 +149,7 @@ test('a lost steer response keeps the receipt and retry inside the phone sheet',
   await touch(sheet.getByRole('button', { name: 'Check result' }))
   await touch(sheet.getByRole('button', { name: 'Retry same request' }))
   await sheet.getByRole('button', { name: 'Check result' }).click()
-  await expect(sheet.getByRole('status')).toContainText('Steer applied')
+  await expect(sheet.getByRole('status')).toContainText('Queued for the next step')
   await expect(sheet.getByRole('button', { name: 'Check result' })).toHaveCount(0)
   expect(requests).toHaveLength(1)
 })

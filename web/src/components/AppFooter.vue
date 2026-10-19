@@ -3,7 +3,7 @@
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { brand } from '../lib/brand'
 import { footerReleaseContent } from '../lib/footerRelease'
-import { footerLive, footerSource, footerSummary, landed, PAUSED_FULL, PAUSED_SHORT, phoneRoom, pingGate, said, type FooterPart, type FooterSummary } from '../lib/footerSummary'
+import { footerLive, footerSource, footerSummary, landed, PAUSED_FULL, PAUSED_SHORT, pingGate, said, type FooterPart, type FooterSummary } from '../lib/footerSummary'
 import { codenameOf, releaseAria } from '../lib/codenames'
 import { useReleases } from '../stores/releases'
 import { useSession } from '../stores/session'
@@ -12,8 +12,8 @@ import AppIcon from './AppIcon.vue'
 import CalendarVersion from './CalendarVersion.vue'
 
 // The product mark stays left; the running release's name, Pretty version and
-// new count share the history control on the right.
-const props = defineProps<{ hidden?: boolean }>()
+// new count share the history control on the right. Wide screens only: phones and short
+// screens have no footer bar (AEON-1459); the release is in the avatar menu there.
 const emit = defineEmits<{ releases: [] }>()
 const releaseControl = ref<HTMLButtonElement>()
 const card = ref<HTMLElement>()
@@ -27,7 +27,7 @@ let cardFocused = false
 
 async function showCard() {
   clearTimeout(cardTimer)
-  if (props.hidden || !session.identity) return
+  if (!session.identity) return
   cardNow.value = Date.now()
   cardShown.value = true
   clearInterval(cardClock)
@@ -102,7 +102,7 @@ const sizingVersion = '260101000000.0.0'
 const codename = computed(() => version.value?.codename || codenameOf(value.value))
 const count = computed(() => session.identity ? releases.newCount : 0)
 const cardContent = computed(() => footerReleaseContent(value.value, version.value?.scheme, codename.value, count.value, releases.history?.releases.find(release => release.version === value.value), cardNow.value, version.failed))
-watch([() => props.hidden, () => session.identity], hideCard)
+watch(() => session.identity, hideCard)
 watch(cardContent, async () => { if (cardShown.value) { await nextTick(); positionCard() } })
 const label = computed(() => {
   const running = version.failed ? ', version unavailable' : value.value ? `, ${releaseAria(codename.value, value.value)}` : ''
@@ -112,7 +112,7 @@ const label = computed(() => {
 </script>
 
 <template>
-  <footer class="app-footer" :class="{ hidden, speaking: phoneRoom(summary) }" :inert="hidden || undefined">
+  <footer class="app-footer">
     <span class="footer-name"><span class="footer-wordmark">{{ brand.wordmark }}</span></span>
     <div class="foot-c">
       <component :is="summary.action && !paused ? 'button' : 'span'" v-if="summary" class="sum" :class="{ loading: summary.loading }" :type="summary.action && !paused ? 'button' : undefined"
@@ -233,25 +233,5 @@ button.sum:active { background: var(--row-selected); }
 .card-foot { display: flex; align-items: center; gap: 7px; margin-top: 10px; padding-top: 9px; border-top: 1px solid var(--line); font-size: 12px; color: var(--ink-3); }
 .card-new { margin-left: auto; color: var(--secondary-ink); font-weight: 600; white-space: nowrap; }
 .version-plain { position: relative; display: inline-flex; align-items: center; flex-shrink: 0; min-width: 112px; font-size: 12px; color: var(--ink); }
-@media (max-width: 600px) {
-  .app-footer { gap: 8px; padding: 0 12px; transition: transform .22s ease; }
-  .footer-name { flex: 0 1 auto; }
-  .foot-c { flex: 1 1 0; }
-  /* The pull toward the edge sits on the wrapper: a percentage max-width on the pill would resolve against its own size. */
-  .foot-r { flex: 0 0 auto; max-width: calc(100% - 8px); margin-right: -6px; }
-  /* With a summary in the middle the release keeps its name and new count; its time makes room (the design's phone footer). */
-  .app-footer.speaking .version-value, .app-footer.speaking .release-divider { display: none; }
-  .sum-skel { width: 64px; }
-  .sum { height: 44px; padding: 0 8px; }
-  .app-footer.hidden { transform: translateY(100%); }
-  .footer-name { font-size: 9px; letter-spacing: .18em; }
-  .version-pill { flex-shrink: 0; margin-right: 0; }
-  .pill-face { height: 32px; padding: 0 6px; }
-  .release-divider { margin: 0 7px; }
-  .footer-codename { max-width: 104px; font-size: 12px; }
-  .pill-version { font-size: 11.5px; }
-}
-/* Short landscape phones: the bar lies over the page and folds away while reading, as on portrait phones (AEON-1286). */
-@media (max-height: 480px) { .app-footer { transition: transform .22s ease; } .app-footer.hidden { transform: translateY(100%); } }
-@media (prefers-reduced-motion: reduce) { .app-footer, .pill-face { transition: none; } }
+@media (prefers-reduced-motion: reduce) { .pill-face { transition: none; } }
 </style>

@@ -464,6 +464,13 @@ async function fitLoaded() {
 watch(() => props.loading, (loading, wasLoading) => {
   if (loading && !wasLoading) { autoWidths.value = {}; keyWhole.value = 0; foldSpace.value = 0; fittedColumns.clear() }
 })
+// Selection follows permissions, so the key cell gains its checkbox after the first fit.
+// Refit then: a later reload must not be what widens the column (AEON-1390).
+watch(() => props.selectable, () => {
+  fittedColumns.delete('key')
+  columnsSettled.value = false
+  void fitLoaded()
+})
 watch(() => [props.loading, phone.value, props.projectId, [...props.rowsById.keys()].join(','), ids.value.join(','), props.outline], fitLoaded, { flush: 'post' })
 const dragWidths = ref<Partial<Record<string, number>>>({})
 // Every column but Title has a col width; Title takes the rest (about 960px at most
@@ -1700,7 +1707,8 @@ button.release-chip:focus-visible { box-shadow: var(--focus-ring); }
 .list-foot.end { font: 500 10.5px/1 var(--mono); letter-spacing: .14em; text-transform: uppercase; color: var(--ink-3); font-variant-ligatures: none; }
 .list-foot.error { color: var(--danger); }
 /* The toolbar carries the count on wider screens; phones end the list with it. */
-@media (min-width: 721px) { .list-foot.end.phone-only { display: none; } }
+/* The count at the list's end is for compact screens, which have no footer bar (AEON-1459, D1/D5). */
+@media (min-width: 720px) and (min-height: 501px) { .list-foot.end.phone-only { display: none; } }
 .spinner { width: 14px; height: 14px; border-radius: 50%; border: 1.8px solid var(--line-2); border-top-color: var(--teal); }
 @media (prefers-reduced-motion: no-preference) { .spinner { animation: spin .8s linear infinite; } @keyframes spin { to { transform: rotate(360deg); } } }
 

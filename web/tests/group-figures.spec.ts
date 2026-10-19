@@ -278,6 +278,9 @@ test('AEON-1390 the grouped-by column flips the group order; other columns sort 
   await expect(labels(page)).toHaveText(['High', 'Medium', 'Low', 'No priority'])
   const priority = head(page, 'priority').locator('.th-sort'), estimate = head(page, 'estimate').locator('.th-sort')
   const watch = { priority, estimate, status: head(page, 'status').locator('.th-sort'), key: keyHead(page) }
+  // The key column takes its content width, including the selection checkbox, once that fit has settled.
+  await expect(page.locator('.ticket-row .row-check').first()).toBeAttached()
+  await expect(page.locator('.table-card')).toHaveAttribute('data-columns-settled', '1')
   const before = await boxes(watch)
   await expect(priority.locator('.sort-mark.groups .group-mark')).toHaveCount(1)
   await priority.hover()
@@ -303,6 +306,7 @@ test('AEON-1390 the grouped-by column flips the group order; other columns sort 
   await page.mouse.move(5, 5)
   await estimate.hover()
   await expect(hint(page)).toContainText('Tickets in each group: highest estimate first')
+  await expect(page.locator('.table-card')).toHaveAttribute('data-columns-settled', '1')
   same(before, await boxes(watch))
   // The same for status and assignee: Unassigned stays last when reversed.
   await page.goto('/p/PHAROS?group=assignee&group_order=reversed')

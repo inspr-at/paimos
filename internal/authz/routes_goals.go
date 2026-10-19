@@ -4,6 +4,7 @@ package authz
 func init() {
 	registerRoutes("goals", map[string]string{
 		"GET /api/goals":                  "nodes.read",
+		"GET /api/goals/epics":            "nodes.read",
 		"GET /api/goals/{goalId}":         "nodes.read",
 		"GET /api/goals/{goalId}/history": "nodes.read",
 		"GET /api/goals/{goalId}/series":  "nodes.read",
@@ -14,6 +15,7 @@ func init() {
 	})
 	registerDeclarations("goals", "project_filtered", ProjectFilteredRoutes, map[string]bool{
 		"GET /api/goals":                  true,
+		"GET /api/goals/epics":            true,
 		"GET /api/goals/{goalId}":         true,
 		"GET /api/goals/{goalId}/history": true,
 		"GET /api/goals/{goalId}/series":  true,

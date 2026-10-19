@@ -147,6 +147,8 @@ type Progress struct {
 	ServerRevocation      string                   `json:"server_revocation,omitempty"`
 	Action                string                   `json:"action,omitempty"`
 	RetryAfterSeconds     int                      `json:"retry_after_seconds,omitempty"`
+	Diagnostics           []string                 `json:"diagnostics,omitempty"`
+	CheckoutNotice        string                   `json:"checkout_notice,omitempty"`
 }
 type LocalStatus struct {
 	AccountLogins                          map[string]AccountLogin
@@ -164,6 +166,7 @@ type LocalStatus struct {
 	Active, Unconfirmed, SettlementPending []string
 	VerificationResults                    map[string]string
 	BlockedAccounts                        []BlockedAccount
+	Diagnostics                            []string
 }
 
 // SavedOptions exposes only noncredential choices to resume the local command.
@@ -212,6 +215,9 @@ type Engine struct {
 	InstallMethod string
 	// PinDiscovery substitutes only local discovery in hermetic renewal tests.
 	PinDiscovery *Discovery
+	// CheckoutHandover runs only after a successful provision. Nil changes nothing.
+	// Status must not call it: a status poll does not take the checkout fence.
+	CheckoutHandover func(workspace, tenant, principal, daemon, statePath string) string
 }
 type Options struct {
 	Origin, TenantID, TenantSlug, ComputerName, Workspace string
@@ -776,9 +782,22 @@ func (e *Engine) provision(ctx context.Context, s *snapshot) (result Progress, r
 	if e.Local == nil {
 		p.Stage = "provisioning"
 		p.Action = "Start the approved daemon to verify connectivity."
-		return p, nil
+		return e.noteCheckout(p, s), nil
 	}
-	return e.connectionProgress(ctx, s), nil
+	return e.noteCheckout(e.connectionProgress(ctx, s), s), nil
+}
+
+// noteCheckout attaches the pair-time fence sentence after provision succeeds.
+// A nil hook, or a fence that is not held, leaves the progress unchanged.
+func (e *Engine) noteCheckout(p Progress, s *snapshot) Progress {
+	if e == nil || e.CheckoutHandover == nil || e.Store == nil || s == nil {
+		return p
+	}
+	notice := e.CheckoutHandover(s.Request.Workspace, s.View.TenantID, s.View.PrincipalID, s.View.DaemonID, filepath.Clean(filepath.Join(e.Store.Path(), "daemon")))
+	if notice != "" {
+		p.CheckoutNotice = notice
+	}
+	return p
 }
 
 func ReadRuntimeConfig(root string) (RuntimeConfig, error) {

@@ -6,6 +6,7 @@
 import { test, expect, type Page } from '@playwright/test'
 import { fixtures, mockWork } from './work-fixtures'
 import { expectStableControls } from './helpers/stable'
+import { toggleProjectHead } from './helpers/compact'
 
 const errors = new WeakMap<Page, string[]>()
 test.beforeEach(async ({ page }) => {
@@ -91,7 +92,8 @@ for (const width of [390, 768]) {
 
 test('with the header folded on a phone, the link opens the Display menu beside New', async ({ page }) => {
   await open(page, 390)
-  await page.locator('.phone-header-fold').click()
+  // The project crumb's sheet folds the project head on phones (AEON-1459, D11).
+  await toggleProjectHead(page)
   await expect(projectPage(page)).toHaveClass(/header-collapsed/)
   await filters(page).click()
   await link(page).click()

@@ -10,6 +10,7 @@ import { ACCOUNTS, capacityWorld, NOW } from './capacity-fixtures'
 import type { PairingView } from '../src/lib/agentPairing'
 import { mockEffectivePermissions } from './authz-fixtures'
 import { expectStableControls } from './helpers/stable'
+import { showCapacityRow } from './helpers/compact'
 import { mockDailyPlan, UNTIL, type DailyPlanOptions } from './agents-daily-fixtures'
 import { HARNESS_LABEL } from '../src/lib/agentState'
 import { OUTLOOK } from './quota-outlook-fixtures'
@@ -658,11 +659,14 @@ for (const width of [1440, 390]) for (const theme of ['light', 'dark'] as const)
     const errors = watchErrors(page)
     const { backend } = await setup(page, { example: 'limit', dial: { selected: 'claude' } })
     await page.goto('/agents')
-    // AEON-1286's approved compact chrome starts phones folded; open the detail explicitly.
-    if (width <= 720) {
+    // AEON-1286's approved compact chrome starts phones folded; open the detail explicitly. The folded
+    // control is in the capacity line's sheet, which makes way for the body (AEON-1459).
+    if (width < 720) {
+      await showCapacityRow(page)
       const fold = control(page).locator('.fs-tog')
       await expect(fold).toHaveAttribute('aria-expanded', 'false')
       await fold.click()
+      await expect(page.getByRole('dialog', { name: 'Capacity' })).toHaveCount(0)
     }
     // P1 separates the control from the unfolded card. AEON-1166 measures the
     // detail's card, while dial() intentionally searches both regions.
@@ -741,6 +745,9 @@ test.describe('phone', () => {
   test('AEON-1036: a tap lifts a unit onto its plate; every target reaches 44 px and the detail sits under the list', async ({ page }) => {
     await setup(page, { example: 'over', folded: true })
     await page.goto('/agents')
+    // AEON-1459 (R2.1): on a phone the folded control is in the capacity line's sheet.
+    await showCapacityRow(page)
+    const sheet = page.getByRole('dialog', { name: 'Capacity' })
     const card = dial(page)
     await expect(control(page).locator('.f-chip')).toHaveCount(3)
     // The units wrap inside the full-width control; the live state ends the last line on the right.
@@ -771,6 +778,8 @@ test.describe('phone', () => {
     await targets()
     await card.locator('.fs-tog').tap()
     await expect(card.locator('.fs-tog')).toHaveAttribute('aria-expanded', 'true')
+    // The sheet makes way for the body on the page.
+    await expect(sheet).toHaveCount(0)
     await expect(row(page, 'claude')).toHaveClass(/sel/)
     await targets()
     await row(page, 'claude').locator('.nm').tap()

@@ -863,7 +863,7 @@ func RequireRoutineLeadDispatchTx(ctx context.Context, tx pgx.Tx, tenantID, rout
 	m := Module{leadAdmission: admission}
 	reason, err := m.checkLeadAdmission(ctx, tx, p, owner, s)
 	if err == nil && reason != "" {
-		err = workorders.Fail(409, "lead admission wait: "+reason)
+		err = leadAdmissionWait(reason)
 	}
 	return p, err
 }
@@ -944,9 +944,17 @@ func RequireLeadDispatchTx(ctx context.Context, tx pgx.Tx, r *http.Request, p te
 		return err
 	}
 	if reason != "" {
-		return workorders.Fail(409, "lead admission wait: "+reason)
+		return leadAdmissionWait(reason)
 	}
 	return nil
+}
+
+func leadAdmissionWait(reason string) error {
+	message := "lead admission wait: " + reason
+	if reason == "admission_not_configured" {
+		message += ". Automatic lead starts are off for now. Start the run yourself from the ticket."
+	}
+	return workorders.Fail(409, message)
 }
 
 // RequireAssignedLeadTx rejects a queued assignment whose accepting lead has
@@ -996,6 +1004,9 @@ func RequireAssignedLeadStartTx(ctx context.Context, tx pgx.Tx, p tenant.Princip
 	}
 	l, err := loadLead(ctx, tx, projectID, true)
 	if err != nil || l.State == "none" {
+		return err
+	}
+	if err = requireLeadWriterFreeTx(ctx, tx, runID); err != nil {
 		return err
 	}
 	s := Session{ProjectID: projectID, RunID: &runID, OwnerPrincipalID: &l.owner}

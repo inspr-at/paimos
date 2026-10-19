@@ -205,7 +205,8 @@ func (rt *runtime) harnessDoCtx(ctx context.Context, method, path, lease string,
 			req.Header.Set(name, value)
 		}
 	}
-	hc := &http.Client{Timeout: 30 * time.Second, CheckRedirect: func(*http.Request, []*http.Request) error { return errors.New("harness request redirect refused") }}
+	hc := client.BoundedHTTP()
+	hc.CheckRedirect = func(*http.Request, []*http.Request) error { return errors.New("harness request redirect refused") }
 	res, err := hc.Do(req)
 	if err != nil {
 		return rt.fail(err, lease)

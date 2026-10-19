@@ -54,7 +54,7 @@ import { useAgentProjection } from '../../stores/agentProjection'
 import { useProjectLeads } from '../../stores/projectLeads'
 import { useAgentPause } from '../../stores/agentPause'
 import { useProjects } from '../../stores/projects'
-import { managedControlAllowed } from '../../lib/managedControl'
+import { interruptHasStep, managedControlAllowed, managedControlUnavailable, noStepRunningText } from '../../lib/managedControl'
 import { pausedSession } from '../../lib/agentPause'
 import { confirmAction } from '../../lib/confirm'
 import { toast } from '../../lib/toast'
@@ -588,7 +588,12 @@ const interruptReason = computed(() => {
   if (managed.value?.waiting) return 'A control is pending.'
   if (!row || !props.view) return 'No session is selected.'
   if (pausingSession(row)) return 'This session is handing over.'
-  if (managedControls.value) return managedControlAllowed(row, 'interrupt', managedAccess()) ? '' : 'This session cannot be interrupted now.'
+  if (managedControls.value) {
+    const access = managedAccess()
+    if (managedControlAllowed(row, 'interrupt', access)) return ''
+    if (!managedControlUnavailable(row, access) && !interruptHasStep(row)) return noStepRunningText
+    return 'This session cannot be interrupted now.'
+  }
   const reason = props.controlBlock(props.view, 'interrupt')
   if (reason) return reason
   return tab.value === 'chat' && !chat.value?.working ? 'This session has no active turn to interrupt.' : ''

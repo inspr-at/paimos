@@ -8,6 +8,7 @@ import { can } from '../../lib/authz'
 import { AGENT_ASKS, ASK_RISKS, askPreview, ELSEWHERE_RULES, ruleLink, type AskRisk } from '../../lib/policies'
 import AppIcon from '../AppIcon.vue'
 import CrossFamilyReviewCard from './CrossFamilyReviewCard.vue'
+import WorkspaceDefinitionsSettings from './WorkspaceDefinitionsSettings.vue'
 import SettingsCard from './SettingsCard.vue'
 
 // Settings remounts the section for another person, so open groups never carry over.
@@ -22,6 +23,7 @@ const rules = computed(() => ELSEWHERE_RULES.map(rule => ({ rule, to: ruleLink(r
   <div class="policies">
     <p class="intro"><AppIcon name="info" :size="14" /><span>Policies say who may do what. Which model runs is decided on <RouterLink class="quiet" to="/settings/models">Models</RouterLink>.</span></p>
     <CrossFamilyReviewCard />
+    <WorkspaceDefinitionsSettings />
     <SettingsCard title="What agents must ask you for" icon="key" anchor="agent-asks">
       <template #lead>Agent keys never carry these. When an agent needs one for a single action, it asks, and you approve on the Decision Desk. Each approval covers that one action, once.</template>
       <template v-if="desk" #aside><RouterLink class="btn sm desk" to="/decision-desk">Decision Desk<AppIcon name="chevron-right" :size="13" /></RouterLink></template>
