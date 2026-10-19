@@ -69,6 +69,10 @@ func New(o Options) *Module {
 
 // Mount adds the assistant's routes; both need a signed-in person.
 func (m *Module) Mount(mux *http.ServeMux) {
+	mux.HandleFunc("GET /api/settings/import-retention", m.retentionSettings)
+	mux.HandleFunc("PUT /api/settings/import-retention", m.retentionSettings)
+	mux.HandleFunc("GET /api/settings/import-retention/candidates", m.retentionCandidates)
+	mux.HandleFunc("POST /api/projects/{projectId}/import-retention/engage", m.engage)
 	mux.HandleFunc("GET /api/import/project-draft", m.read)
 	mux.HandleFunc("POST /api/import/project-draft/create", m.create)
 }

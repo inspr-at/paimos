@@ -20,7 +20,10 @@ import (
 
 var (
 	credentialRefPattern = regexp.MustCompile(`^[a-z0-9][a-z0-9-]{0,62}$`)
-	tokenPattern         = regexp.MustCompile(`^[A-Za-z0-9_.-]{8,255}$`)
+	// Installation tokens are opaque. The pattern keeps the charset and a
+	// minimum length. It does not cap length: credential files are read at
+	// most 4096 bytes, and the App mint response is bounded by maxTreeBody.
+	tokenPattern = regexp.MustCompile(`^[A-Za-z0-9_.-]{8,}$`)
 )
 
 // ErrCredential does not disclose whether a reference exists or why it was denied.
