@@ -1,0 +1,16 @@
+{
+  "group": "work-queue",
+  "nightlyTiming": {
+    "basis": "Guarded remote-spec.sh complete file: 5 passed (48.5s), supervisor wall 48.988s. Pre-merge measurement, not a nightly run.",
+    "runner": "mbp2606",
+    "seconds": 48.988,
+    "selectedTests": 5,
+    "sourceCommit": "4e37c18bbe5409655bda4b275311e16d4596be22"
+  },
+  "spec": {
+    "file": "tests/definitions-p3.spec.ts",
+    "listedTests": 5,
+    "weightSeconds": 48.988,
+    "weightSource": "AEON-1317: guarded mbp2606 single-worker complete file, 5 passed in 48.5s (supervisor wall 48.988s), source 4e37c18bb"
+  }
+}

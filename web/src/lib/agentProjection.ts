@@ -54,7 +54,9 @@ export const DECISION_EVENTS = ['node.lead_decision_recorded']
 export const QUEUE_EVENTS = ['queue.added', 'queue.add_undone', 'queue.removed', 'queue.moved', 'queue.reset', 'queue.routed', 'queue.picked_up', 'queue.estimate_applied', 'queue.snapshot_captured', 'queue.snapshot_applied', 'queue.snapshot_cancelled']
 export const QUESTION_EVENTS = ['question.asked', 'question.merged', 'question.reused', 'question.answered', 'question.corrected', 'question.outcome_applied']
 export const TREE_EVENTS = ['harness.reparented', 'harness.reparent_undone']
-export const PROJECTION_EVENTS = [...LEAD_EVENTS, ...DECISION_EVENTS, ...QUEUE_EVENTS, ...QUESTION_EVENTS, ...TREE_EVENTS]
+// Definition events wake the Desk without treating a definition node as a lead.
+export const DEFINITION_EVENTS = ['definition.saved', 'definition.reset', 'definition.change_decided']
+export const PROJECTION_EVENTS = [...LEAD_EVENTS, ...DECISION_EVENTS, ...QUEUE_EVENTS, ...QUESTION_EVENTS, ...TREE_EVENTS, ...DEFINITION_EVENTS]
 
 export interface Wake { all: boolean; leads: Set<string>; anyLead: boolean; decisions: Set<string>; queue: boolean; questions: boolean; trees: Set<string> }
 export const emptyWake = (): Wake => ({ all: false, leads: new Set(), anyLead: false, decisions: new Set(), queue: false, questions: false, trees: new Set() })
