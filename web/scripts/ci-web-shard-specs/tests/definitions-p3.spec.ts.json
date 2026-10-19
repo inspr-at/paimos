@@ -1,14 +1,16 @@
 {
   "group": "work-queue",
   "nightlyTiming": {
-    "basis": "AEON-1528 conservative six-case scheduling estimate: 60 seconds, rounded up from the prior five-case guarded mbp2606 supervisor wall of 48.988s scaled by 6/5. Complete six-case green measurement pending remote capacity; this is not a nightly measurement.",
-    "seconds": 60,
-    "selectedTests": 6
+    "basis": "Guarded remote-spec.sh complete file: 6 passed (47.9s), supervisor wall 48.288s. Includes Definitions units and global glyph preflight. This is not a nightly measurement.",
+    "runner": "mbp2606",
+    "seconds": 48.288,
+    "selectedTests": 6,
+    "sourceCommit": "16c44fcc46345fe27c4b2da99a1f6c72715ea9b8"
   },
   "spec": {
     "file": "tests/definitions-p3.spec.ts",
     "listedTests": 6,
-    "weightSeconds": 60,
-    "weightSource": "AEON-1528: conservative six-case estimate, 60s rounded up from the prior five-case guarded mbp2606 wall of 48.988s scaled by 6/5; complete-file measurement pending remote capacity"
+    "weightSeconds": 48.288,
+    "weightSource": "AEON-1528: guarded mbp2606 single-worker complete file, 6 passed in 47.9s (supervisor wall 48.288s), source 16c44fcc4"
   }
 }
