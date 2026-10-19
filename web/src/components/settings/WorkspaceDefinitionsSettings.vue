@@ -6,7 +6,7 @@ import { useProfile } from '../../stores/profile'
 import { can, onAccessRevalidate } from '../../lib/authz'
 import { useIdentityScope } from '../../lib/useIdentityScope'
 import { APIError } from '../../lib/api'
-import { checkCount, definitionDate, readWorkspaceDefinitionContext, saveWorkspaceDefinition, type DefinitionChecks, type WorkspaceDefinitionContext } from '../../lib/definitions'
+import { checkCount, definitionDate, readWorkspaceDefinitionContext, saveWorkspaceDefinition, subscribeDefinitionChanges, type DefinitionChecks, type WorkspaceDefinitionContext } from '../../lib/definitions'
 import { toast } from '../../lib/toast'
 import AppIcon from '../AppIcon.vue'
 import SettingsCard from './SettingsCard.vue'
@@ -14,6 +14,7 @@ import DefinitionEditor from './DefinitionEditor.vue'
 
 const session = useSession(), profile = useProfile(), scope = useIdentityScope(), reads = scope.lane()
 const context = ref<WorkspaceDefinitionContext | null>(null), busy = ref(false), loading = ref(true), error = ref(''), stale = ref(false), open = ref(false), moreBusy = ref(false)
+const editor=ref<InstanceType<typeof DefinitionEditor>>()
 const language = computed(() => profile.profile?.locale?.startsWith('de') ? 'de' : 'en')
 const t = (en: string, de: string) => language.value === 'de' ? de : en
 const editable = computed(() => !!context.value?.can_manage && session.identity?.principal.kind === 'person' && can('settings.manage') && !stale.value)
@@ -53,9 +54,10 @@ function more() {
     context.value={...saved,projects:[...captured.projects,...saved.projects]}
   }),{failed,settled:()=>{moreBusy.value=false}})
 }
-watch(scope.owner,()=>{scope.reset();context.value=null;busy.value=false;moreBusy.value=false;open.value=false;stale.value=false;if(scope.owner.value)load()},{immediate:true,flush:'sync'})
+let stopLive: (() => void) | undefined
+watch(scope.owner,()=>{stopLive?.();scope.reset();context.value=null;busy.value=false;moreBusy.value=false;open.value=false;stale.value=false;if(scope.owner.value){load();stopLive=subscribeDefinitionChanges(()=>{if(!busy.value&&!loading.value&&!editor.value?.formOpen)load()})}},{immediate:true,flush:'sync'})
 const stopAccess=onAccessRevalidate({reset:()=>{context.value=null;busy.value=false;stale.value=true;open.value=false},refresh:load})
-onBeforeUnmount(stopAccess)
+onBeforeUnmount(()=>{stopLive?.();stopAccess()})
 </script>
 
 <template>
@@ -65,7 +67,7 @@ onBeforeUnmount(stopAccess)
     <div class="origin" :aria-busy="loading || busy"><AppIcon :name="empty ? 'minus' : 'folders'" :size="16" /><div><b>{{ empty ? t('No workspace default','Kein Workspace-Standard') : t('The workspace default','Der Workspace-Standard') }}</b><p>{{ empty ? t('No workspace default. Tickets move freely in every project that has no definition of its own.','Kein Workspace-Standard. Tickets können in jedem Projekt ohne eigene Definition frei verschoben werden.') : t(`For every project without a definition of its own. Changed on ${definitionDate(context?.definition?.revision ?? '',language)}.`,`Für jedes Projekt ohne eigene Definition. Geändert am ${definitionDate(context?.definition?.revision ?? '',language)}.`) }}</p></div></div>
     <p v-if="error" class="error" role="alert">{{ error }} <button type="button" class="link-btn" :disabled="busy" @click="load">{{ t('Reload','Neu laden') }}</button></p>
     <p v-else-if="!context && loading" role="status">{{ t('Reading the definition…','Definition wird gelesen…') }}</p>
-    <DefinitionEditor v-if="context" :key="scope.owner.value" :checks="checks" project-key="Workspace" scope="workspace" :editable="editable" :busy="busy" :error="error" @change="save" />
+    <DefinitionEditor v-if="context" ref="editor" :key="scope.owner.value" :checks="checks" project-key="Workspace" scope="workspace" :editable="editable" :busy="busy" :error="error" @change="save" />
     <div v-if="context" class="differ">
       <p><AppIcon name="folder" :size="14" /><button type="button" class="link-btn differ-toggle" :aria-expanded="open" aria-controls="definition-project-differences" :disabled="loading || busy" @click="open=!open">{{ t(`${context.differ_count}\u00a0${context.differ_count === 1 ? 'project differs' : 'projects differ'}`,`${context.differ_count}\u00a0Projekte weichen ab`) }}<AppIcon name="chevron-right" :size="12" :class="{ expanded:open }" /></button><span v-if="context.uses_default.length">· {{ t(`${context.uses_default.join(', ')} ${context.uses_default.length === 1 ? 'uses' : 'use'} this default`,`${context.uses_default.join(', ')} ${context.uses_default.length === 1 ? 'nutzt' : 'nutzen'} diesen Standard`) }}</span></p>
       <ul v-if="open" id="definition-project-differences"><li v-for="project in context.projects" :key="project.project_id"><RouterLink :to="`/p/${encodeURIComponent(project.key)}/settings/definitions`"><b>{{ project.key }}</b><span>{{ project.pending_count ? t(`${project.pending_count}\u00a0${project.pending_count === 1 ? 'change waits' : 'changes wait'}`,`${project.pending_count}\u00a0${project.pending_count === 1 ? 'Änderung wartet' : 'Änderungen warten'}`) : t(`Differs in ${project.difference_count}\u00a0${project.difference_count === 1 ? 'place' : 'places'}`,`Weicht an ${project.difference_count}\u00a0Stellen ab`) }}</span><span class="open">{{ t('Open','Öffnen') }}<AppIcon name="chevron-right" :size="12" /></span></RouterLink></li><li v-if="context.next_cursor"><button type="button" class="link-btn" :disabled="moreBusy" @click="more">{{ t('More projects','Weitere Projekte') }}</button></li></ul>

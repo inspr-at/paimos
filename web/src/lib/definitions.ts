@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import { api, APIError } from './api'
 import type { IconName } from '../components/AppIcon.vue'
+import { watchStreamHealth } from './streamHealth'
 
 export const DEFINITION_BLOCKS = [
   { id: 'in_progress', name: 'Ready', to: 'In progress' },
@@ -130,3 +131,21 @@ export const resetDefinition = (id: string, context: DefinitionContext, signal?:
 export const decideDefinitionChange = (id: string, change: DefinitionChange, decision: 'accept' | 'keep', context: DefinitionContext, signal?: AbortSignal) => request<DefinitionContext>(`/projects/${encodeURIComponent(id)}/definitions/decisions`, {method:'POST', signal, headers:{'Content-Type':'application/json'}, body:JSON.stringify({expected_revision:context.definition?.revision, expected_workspace_revision:context.workspace_default?.revision, check_id:change.check_id, decision})})
 export const readWorkspaceDefinitionContext = (after?: string, signal?: AbortSignal) => request<WorkspaceDefinitionContext>(`/settings/definitions/context${after ? `?after=${encodeURIComponent(after)}` : ''}`, {signal})
 export const saveWorkspaceDefinition = (checks: DefinitionChecks, current: Definition | null, signal?: AbortSignal) => request<Definition>('/settings/definitions', {method:'PUT',signal,headers:{'Content-Type':'application/json'},body:JSON.stringify({checks,expected_revision:current?.id === '00000000-0000-0000-0000-000000000000' ? null : current?.revision ?? null})})
+
+// Hints only: each consumer re-reads its authorized context. The connection is
+// owned and closed by the same person/tenant scope as that context.
+export const DEFINITION_EVENTS = ['definition.saved','definition.reset','definition.change_decided'] as const
+export function subscribeDefinitionChanges(changed: () => void) {
+  if (typeof EventSource === 'undefined') return () => {}
+  let stream: EventSource, stopped = false
+  const health = watchStreamHealth(() => { stream.close(); changed(); connect() })
+  function connect() {
+    const source = stream = new EventSource('/api/events/stream?after=latest')
+    const current = (run: () => void) => () => { if (!stopped && stream === source) { health.heard(); run() } }
+    source.onopen = current(changed)
+    for (const event of ['stream.ping','stream.ready']) source.addEventListener(event,current(() => {}))
+    for (const event of DEFINITION_EVENTS) source.addEventListener(event,current(changed))
+  }
+  connect()
+  return () => { stopped=true;health.stop();stream.close() }
+}

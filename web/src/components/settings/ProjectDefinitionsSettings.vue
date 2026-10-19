@@ -8,7 +8,7 @@ import { useSession } from '../../stores/session'
 import { can, myProjectRole, myWorkspaceRole, onAccessRevalidate } from '../../lib/authz'
 import { useIdentityScope } from '../../lib/useIdentityScope'
 import { APIError } from '../../lib/api'
-import { checkCount, cloneChecks, decideDefinitionChange, definitionDate, definitionNotice, definitionDiff, readDefinitionContext, resetChanges, resetDefinition, saveDefinition, type DefinitionChange, type DefinitionChecks, type DefinitionContext } from '../../lib/definitions'
+import { checkCount, cloneChecks, decideDefinitionChange, definitionDate, definitionNotice, definitionDiff, readDefinitionContext, resetChanges, resetDefinition, saveDefinition, subscribeDefinitionChanges, type DefinitionChange, type DefinitionChecks, type DefinitionContext } from '../../lib/definitions'
 import { useProjectSettingsOverlay } from '../../lib/projectSettings'
 import { claimSettingsPopover } from '../../lib/settingsOverlays'
 import { toast } from '../../lib/toast'
@@ -109,10 +109,11 @@ function confirmReset() {
     closeReset(); toast('The project follows the workspace default.', { key: `definitions/${action.projectID}` })
   }), { failed: problem => { failed(problem, action.projectID); if (problem instanceof APIError && [403,409].includes(problem.status)) stale.value = true }, settled: () => { busy.value = false } })
 }
-watch([scope.owner, () => props.project.id], () => { scope.reset(); closeReset(false); context.value = null; busy.value = false; stale.value = false; noticeShown.value = false; noticeReserve.value = ''; if (scope.owner.value) load() }, { immediate: true, flush: 'sync' })
+let stopLive: (() => void) | undefined
+watch([scope.owner, () => props.project.id], () => { stopLive?.(); scope.reset(); closeReset(false); context.value = null; busy.value = false; stale.value = false; noticeShown.value = false; noticeReserve.value = ''; if (scope.owner.value) { load(); stopLive=subscribeDefinitionChanges(() => { if (!own.value && !busy.value && !loading.value) load() }) } }, { immediate: true, flush: 'sync' })
 const stopAccess = onAccessRevalidate({ reset: () => { closeReset(false); context.value = null; busy.value = false; stale.value = true; noticeShown.value = false; noticeReserve.value = '' }, refresh: () => { if (!busy.value) load() } })
 watch(mayManage, allowed => { if (!allowed && !error.value) closeReset(false) })
-onBeforeUnmount(() => { stopAccess(); closeReset(false) })
+onBeforeUnmount(() => { stopLive?.(); stopAccess(); closeReset(false) })
 </script>
 
 <template>

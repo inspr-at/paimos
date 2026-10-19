@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"net/url"
 	"time"
 
 	"github.com/inspr-at/paimos/internal/approvals"
@@ -450,7 +451,7 @@ func definitionChangesTx(ctx context.Context, tx pgx.Tx, p tenant.Principal, ids
 		if len(pending) == 0 {
 			continue
 		}
-		rows = append(rows, map[string]any{"id": project.Definition.ID, "project_id": project.ProjectID, "revision": project.Definition.Revision.UnixMicro(), "title": fmt.Sprintf("%s: %d changes to the workspace default wait for a decision", project.Key, len(pending)), "created_at": workspace.Revision, "source": "/p/" + project.Key + "/settings/definitions?definition_changes=1#definition-changes", "project_key": project.Key, "pending_count": len(pending)})
+		rows = append(rows, map[string]any{"id": project.Definition.ID, "project_id": project.ProjectID, "revision": project.Definition.Revision.UnixMicro(), "title": fmt.Sprintf("%s: %d changes to the workspace default wait for a decision", project.Key, len(pending)), "created_at": workspace.Revision, "source": "/p/" + url.PathEscape(project.Key) + "/settings/definitions?definition_changes=1#definition-changes", "project_key": project.Key, "pending_count": len(pending)})
 	}
 	return json.Marshal(rows)
 }

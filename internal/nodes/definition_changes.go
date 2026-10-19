@@ -219,7 +219,7 @@ func (m *Module) handleWorkspaceDefinitionContext(w http.ResponseWriter, r *http
 	}
 	after := r.URL.Query().Get("after")
 	if after != "" {
-		if _, ok = pathUUID(w, after, "invalid project cursor"); !ok {
+		if after, ok = pathUUID(w, after, "invalid project cursor"); !ok {
 			return
 		}
 	}

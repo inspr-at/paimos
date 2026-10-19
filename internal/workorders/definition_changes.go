@@ -200,7 +200,7 @@ func DefinitionProjectsTx(ctx context.Context, tx pgx.Tx, ids []string) ([]Defin
 	if len(ids) > 1000 {
 		return nil, Fail(422, "definition project coverage exceeds 1000 projects")
 	}
-	rows, err := tx.Query(ctx, `SELECT p.id::text,p.key,d.id::text,d.updated_at,d.created_at,d.fields
+	rows, err := tx.Query(ctx, `SELECT p.id::text,coalesce(nullif(btrim(p.fields->>'project_key'),''),nullif(btrim(p.fields#>>'{classic,key}'),''),p.key),d.id::text,d.updated_at,d.created_at,d.fields
 	 FROM nodes p JOIN node_kinds k ON k.tenant_id=p.tenant_id AND k.id=p.kind_id
 	 LEFT JOIN LATERAL (SELECT n.id,n.updated_at,n.created_at,n.fields FROM nodes n
 	 JOIN node_kinds dk ON dk.tenant_id=n.tenant_id AND dk.id=n.kind_id

@@ -3,7 +3,7 @@
 import { computed, nextTick, onBeforeUnmount, ref, useId, watch } from 'vue'
 import { DEFINITION_BLOCKS, DEFINITION_CATALOG, DEFINITION_CONDITIONS, DEFINITION_CONDITION_OPTIONS, definitionChangeWords, definitionDecisionWords, definitionConditionWords, checkCount, cloneChecks, definitionDiff, fixedRuleCondition, manualRule, ruleCondition, ruleIcon, ruleLabel, ruleOwnerWords, ruleWords, sameRule, type DefinitionChange, type DefinitionChecks, type DefinitionCondition, type DefinitionRule, type DefinitionStatus } from '../../lib/definitions'
 import { useProfile } from '../../stores/profile'
-import { claimSettingsPopover } from '../../lib/settingsOverlays'
+import { claimSettingsPopover, settingsSubmitKey } from '../../lib/settingsOverlays'
 import { useProjectSettingsOverlay } from '../../lib/projectSettings'
 import type { ProjectPerson } from '../../lib/api'
 import { vClipTip } from '../../directives/clipTip'
@@ -187,6 +187,9 @@ function addBack(block: DefinitionStatus, item: DefinitionRule, event: MouseEven
   change(next, () => { if (height) restoredHeights.value[item.id] = height; restored.value.push(item.id) })
 }
 function conditions() { if (panel.value) panel.value.kind = 'conditions' }
+function workspaceKeys(event: KeyboardEvent) {
+  if (props.scope === 'workspace' && settingsSubmitKey(event)) { event.preventDefault(); event.stopPropagation(); submit() }
+}
 function indexOfPanel() { return panel.value ? props.checks[panel.value.block]?.findIndex(r => r.id === panel.value?.rule?.id) ?? -1 : -1 }
 // A failed save stays readable in its footer even when a conflict disables
 // editing. Identity/access resets still unmount the editor and discard it.
@@ -227,7 +230,7 @@ onBeforeUnmount(() => close(false))
     </div>
     <p v-if="checkCount(checks)" class="enforce"><AppIcon name="shield" :size="14" /><span>{{ t('Agents can’t move a ticket until every check passes. People can move it anyway with a reason, and it’s logged.','Agenten können ein Ticket erst verschieben, wenn alle Prüfungen bestanden sind. Personen können es mit einer protokollierten Begründung trotzdem verschieben.') }} <ProjectSettingsExplainer id="enforce" :project-key="projectKey" /></span></p>
     <FloatingPanel v-if="panel" :key="panel.kind" :anchor="panel.anchor" :label="panelTitle" :width="380" :tallest="700" :sheet="panel.kind === 'manual' || panel.kind === 'conditions' || panel.kind === 'owner'" compact-sheet cycle field-escape settings-keys class="definition-pop" @close="close">
-      <div ref="panelBody" class="def-panel" :class="{ 'as-form': panel.kind !== 'add' && panel.kind !== 'menu' }" tabindex="-1">
+      <div ref="panelBody" class="def-panel" :class="{ 'as-form': panel.kind !== 'add' && panel.kind !== 'menu' }" tabindex="-1" @keydown="workspaceKeys">
         <header class="pop-head"><h3>{{ panelTitle }}</h3><button type="button" class="icon-btn sm" aria-label="Close check editor" @click="close()"><AppIcon name="close" :size="14" /></button></header>
         <div v-if="panel.kind === 'add'" role="menu" :aria-label="panelTitle" class="pop-body">
           <button v-for="item in catalog" :key="item.id" type="button" class="mi" role="menuitem" :disabled="busy" @click="add({ id: item.id, condition: item.condition })"><AppIcon :name="item.icon" :size="14" /><span><b>{{ item.en }}</b><small>{{ DEFINITION_CONDITIONS[item.condition] }}<template v-if="item.block !== panel.block"> · usually {{ DEFINITION_BLOCKS.find(block => block.id === item.block)?.name }}</template></small></span></button>

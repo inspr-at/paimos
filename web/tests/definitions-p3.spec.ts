@@ -34,6 +34,11 @@ async function setup(page: Page,theme: 'light' | 'dark',locale='en',viewer=false
   const settings=settingsData();settings.profile.locale=locale==='de'?'de-AT':'en-GB';await mockSettings(page,settings)
   const world={workspace:copy(newer,'workspace'),context:{project_id:'p-frozen',definition:copy(base),workspace_default:null,copied_from_checks:structuredClone(base),pending_changes:structuredClone(changes),can_manage:!viewer,admins:[{id:settings.profile.principal_id,name:'Markus Barta'}]} as DefinitionContext,writes:[] as {path:string;body:Record<string,unknown>}[],fail:false,held:null as ReturnType<typeof barrier>|null,summaryFail:false,readOnly:viewer}
   world.context.workspace_default=world.workspace
+  await page.addInitScript(() => {
+    const targets=new Set<EventTarget>(),add=EventTarget.prototype.addEventListener
+    EventTarget.prototype.addEventListener=function(type,...args){if(type==='definition.saved')targets.add(this);return add.call(this,type,...args)}
+    Object.assign(window,{definitionChanged:()=>{for(const target of targets)target.dispatchEvent(new MessageEvent('definition.saved',{data:'{}'}))}})
+  })
   const errors: string[]=[]
   page.on('pageerror',error=>errors.push(error.message))
   await page.route('**/api/**',async route=>{
@@ -169,7 +174,10 @@ test('AEON-1317 workspace defaults differences empty inherited and viewer match 
     expect(world.writes.at(-1)!.path).toBe('/api/settings/definitions')
     await navigate(page,'/p/PHAROS/settings/definitions');await expect(card.locator('[data-check="released"]')).toBeVisible()
     await expect(card.locator('.drs button')).toHaveCount(0)
-    record('D5 default edit applies immediately with read-only inherited rows');await shot(page,width,theme,'D5')
+    world.workspace={...world.workspace,checks:{...world.workspace.checks,done:[...(world.workspace.checks.done??[]),{id:'merged'}]},revision:'2026-10-10T08:00:00Z'};world.context.workspace_default=world.workspace
+    await page.evaluate(()=>(window as unknown as {definitionChanged:()=>void}).definitionChanged());await expect(card.locator('[data-check="merged"]')).toBeVisible()
+    expect(world.context.definition!.checks).toEqual(base)
+    record('D5 default edit applies immediately with read-only inherited rows, including a live edit while the page is open');await shot(page,width,theme,'D5')
     world.workspace={...world.workspace,checks:{}};await navigate(page,'/settings/policies#definitions')
     await expect(card).toContainText('No workspace default. Tickets move freely in every project that has no definition of its own.')
     await expect(card.locator('.enforce')).toHaveCount(0);record('D2 empty default has the catalog explanation and no enforcement claim');await shot(page,width,theme,'D2')
