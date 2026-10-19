@@ -559,7 +559,7 @@ func TestEpicFix3UntargetedLandsAndExpectedStart(t *testing.T) {
 		if _, err := tx.Exec(t.Context(), `INSERT INTO account_use_cells(tenant_id,account_id,context_id,source,set_by) SELECT $1,$2,c.id,'person',$3 FROM work_contexts c WHERE c.tenant_id=$1 AND c.kind<>'holding' AND c.archived_at IS NULL ON CONFLICT DO NOTHING`, f.writer.TenantID, account, f.writer.ID); err != nil {
 			return err
 		}
-		if _, err := tx.Exec(t.Context(), `INSERT INTO account_capacity_schedules(tenant_id,principal_id,scope,scope_key,account_id,schedule) VALUES($1,$2,'account',$3,$3,$4::jsonb)`, f.writer.TenantID, f.writer.ID, account, rawSchedule); err != nil {
+		if _, err := tx.Exec(t.Context(), `INSERT INTO account_capacity_schedules(tenant_id,principal_id,scope,scope_key,account_id,schedule) VALUES($1,$2,'account',$3::uuid::text,$3::uuid,$4::jsonb)`, f.writer.TenantID, f.writer.ID, account, rawSchedule); err != nil {
 			return err
 		}
 		queue := func(node, orderKey, age string, routed bool) error {
