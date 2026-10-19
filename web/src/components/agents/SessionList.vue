@@ -1722,7 +1722,7 @@ function sessionLinkClick(event: MouseEvent, id: string) {
   .tool-btn.tb-filter.on { color: var(--teal-ink); }
   .tool-btn.tb-filter:focus-visible { box-shadow: var(--focus-ring); }
   .tb-filter .bl { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
-  .tb-filter .fcount { position: absolute; top: 5px; right: 3px; display: inline-grid; place-items: center; min-width: 16px; height: 16px; padding: 0 4px; border-radius: 999px; background: var(--teal); color: var(--primary-on, #fff); font: 700 10px/16px var(--mono); box-shadow: 0 0 0 2px var(--chrome); }
+  .tb-filter .fcount { position: absolute; top: 5px; right: 3px; display: inline-grid; place-items: center; min-width: 16px; height: 16px; padding: 0 4px; border-radius: 999px; background: var(--teal); color: var(--primary-on); font: 700 10px/16px var(--mono); box-shadow: 0 0 0 2px var(--chrome); }
   /* Search opens over the toolbar line, in the same box: the field is 44 px with 16 px text (iOS does not zoom). */
   .sess-search { display: none; }
   .sess-search.open { position: absolute; inset: 0; z-index: 3; display: flex; align-items: center; gap: 4px; width: auto; padding: 0 0 0 4px; background: var(--chrome); }
