@@ -150,7 +150,8 @@ test.describe('shared view membership', () => {
       await expectStableControls({ controls: {
         done, reset, accepted: options.getByRole('checkbox', { name: 'Accepted', exact: true }),
         group: options.getByRole('group', { name: 'Finished' }), row: options.locator('.hide-option[data-state="done"]'),
-        ...(width === 390 ? { frame: panel, action: panel.locator('footer button') } : { hide: hide(page), gear: gear(page) }),
+        ...(width === 390 ? { frame: panel, action: panel.locator('footer button') }
+          : { hide: page.locator('.hide-control').locator('.closed-switch input:visible, .closed-pill:visible'), gear: gear(page) }),
       }, scrollAreas: { body: width === 390 ? panel.locator('.sheet-scroll') : panel }, interactions: [
         { name: 'include Done-bucket work', run: async () => {
           await done.uncheck()
@@ -333,23 +334,19 @@ async function stableToggle(page: Page) {
   if (form === 4) await page.keyboard.press('Escape')
 }
 
-for (const theme of ['light', 'dark']) {
-  test(`AEON-1559 navigation settings fit docked and undocked list widths in ${theme}`, async ({ page }, testInfo) => {
-    const checks = []
-    for (const pane of [false, true]) {
-      await setup(page, theme, pane)
-      for (const width of [1440, 1280, 1100, 1000, 900, 760]) {
-        await fitRow(page, width)
-        const result = await assertGeometry(page)
-        if (width === 1000) expect(result.step).toBeGreaterThanOrEqual(1)
-        if (width === 1000) expect(result.step).toBeLessThanOrEqual(2)
-        if (width === 760) expect(result.step).toBeGreaterThanOrEqual(3)
-        await stableToggle(page)
-        checks.push({ width, pane, theme, ...result, movementPx: 0 })
-        if ([1440, 1000, 760].includes(width)) await page.screenshot({ path: testInfo.outputPath(`aeon1559-${width}-${pane ? 'open' : 'closed'}-${theme}.png`) })
-      }
-    }
-    const json = JSON.stringify(checks, null, 2)
+// Keep each geometry scenario in its own timeout budget. The full matrix and
+// every control sample still run on slower CI Chromium workers.
+for (const theme of ['light', 'dark']) for (const pane of [false, true]) for (const width of [1440, 1280, 1100, 1000, 900, 760]) {
+  test(`AEON-1559 navigation settings fit ${width}px ${pane ? 'docked' : 'undocked'} in ${theme}`, async ({ page }, testInfo) => {
+    await setup(page, theme, pane)
+    await fitRow(page, width)
+    const result = await assertGeometry(page)
+    if (width === 1000) expect(result.step).toBeGreaterThanOrEqual(1)
+    if (width === 1000) expect(result.step).toBeLessThanOrEqual(2)
+    if (width === 760) expect(result.step).toBeGreaterThanOrEqual(3)
+    await stableToggle(page)
+    if ([1440, 1000, 760].includes(width)) await page.screenshot({ path: testInfo.outputPath(`aeon1559-${width}-${pane ? 'open' : 'closed'}-${theme}.png`) })
+    const json = JSON.stringify({ width, pane, theme, ...result, movementPx: 0 }, null, 2)
     await writeFile(testInfo.outputPath(`aeon1559-checks-${theme}.json`), json)
     await testInfo.attach(`aeon1559-checks-${theme}`, { body: json, contentType: 'application/json' })
     // The guarded remote runner returns Markdown as well as PNG artifacts.
@@ -357,11 +354,11 @@ for (const theme of ['light', 'dark']) {
   })
 }
 
-test('AEON-1559 all five forms have stable toggles and 16 px resize hysteresis', async ({ page }) => {
-  await setup(page)
-  // Each threshold has a 16px band [threshold, threshold + 16). Neither
-  // approach changes form within it: ±8px around its centre cannot flap.
-  for (const [index, threshold] of [1100, 960, 820, 720].entries()) {
+for (const [index, threshold] of [1100, 960, 820, 720].entries()) {
+  test(`AEON-1559 forms ${index} and ${index + 1} have stable toggles and 16 px resize hysteresis`, async ({ page }) => {
+    await setup(page)
+    // Each threshold has a 16px band [threshold, threshold + 16). Neither
+    // approach changes form within it: ±8px around its centre cannot flap.
     await fitRow(page, threshold + 40)
     await expect(settings(page)).toHaveAttribute('data-navigation-step', String(index))
     for (const width of [threshold + 16, threshold + 8, threshold, threshold + 8]) {
@@ -377,7 +374,10 @@ test('AEON-1559 all five forms have stable toggles and 16 px resize hysteresis',
     await stableToggle(page)
     await fitRow(page, threshold + 16)
     expect(await step(page)).toBe(index)
-  }
+  })
+}
+
+test('AEON-1559 geometry rejects the old teleported toolbar form', async ({ page }) => {
   // Negative control: remove the scoped navigation fix from the real
   // teleported DOM. The old toolbar/viewport rules must fail this same probe.
   await setup(page, 'light', true)
