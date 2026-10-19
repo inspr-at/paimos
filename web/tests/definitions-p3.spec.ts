@@ -304,11 +304,12 @@ test('AEON-1317 Desk opens waiting definitions and resolves only after the last 
 // Check the translated surface and its accessible names, keeping the surrounding
 // app's separately scoped display policy out of this assertion.
 async function germanOnly(surface: Locator) {
+  if (await surface.getAttribute('id') === 'definitions') await expect(surface.getByRole('heading',{name:'Definitionen',exact:true})).toBeVisible()
   const text = await surface.evaluate(el => [
     (el as HTMLElement).innerText,
     ...Array.from(el.querySelectorAll('[aria-label],[title],[placeholder]')).map(node => ['aria-label','title','placeholder'].map(key => node.getAttribute(key) ?? '').join(' ')),
   ].join(' '))
-  expect(text).not.toMatch(/\b(?:Add back|Show|Hide|Ready|Done|In progress|Workspace default|How this works|Reset|Cancel|Remove|Add check|More for|Free-text item|Move up|Move down|Applies to|Who ticks|All tickets|Code tickets|UI tickets|Every ticket|usually|Reading the definition|No checks|No definition yet|Definitions|What it is|What happens|Who sets it)\b/)
+  expect(text).not.toMatch(/\b(?:Add back|Added back|Added for|Changed for|Moved for|Show|Hide|Ready|Done|In progress|Workspace default|workspace default|How this works|Reset|Cancel|Remove|Removed|Save|Add|Add check|More for|Free-text item|Move up|Move down|Applies to|Who ticks|Ticked by|One named person|Choose a person|All tickets|Code tickets|UI tickets|Every ticket|usually|Reading the definition|No checks|No definition yet|Definitions|What it is|What happens|Who sets it|Dropped|Comes back|Uses the workspace version)\b/)
   expect(text).not.toMatch(/\b(?:du|dich|dir|dein|deine|deinen|deinem)\b/i)
 }
 async function switchDefinitionLocale(page: Page, locale: string) {
