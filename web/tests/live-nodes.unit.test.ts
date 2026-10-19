@@ -19,6 +19,9 @@ it('session lifecycle and telemetry hints invalidate both old and new bound tick
   for (const type of ['harness.registered', 'harness.stopped', 'harness.heartbeat', 'harness.metadata_changed']) {
     expect(parseNodeChanges(JSON.stringify({ id: 52, type, after: { ticket_node_id: 'new', project_id: 'p1' } }))).toHaveLength(1)
   }
+  // A quiet heartbeat (AEON-1354) is an id-less frame naming no ticket: the
+  // store batches it into a re-read of the shown rows instead (live-list tests).
+  expect(parseNodeChanges(JSON.stringify({}))).toEqual([])
   expect(parseNodeChanges(JSON.stringify({ id: 53, type: 'harness.control_requested', after: { ticket_node_id: 'new' } }))).toEqual([])
   expect(parseNodeChanges('{')).toEqual([])
 })

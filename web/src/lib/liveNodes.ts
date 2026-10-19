@@ -43,6 +43,14 @@ interface SourceLike {
 export const NODE_EVENTS = ['entry_check.ticked', 'node.entry_check_ticked', 'node.person_step_reassigned', 'status_autopilot.derived', 'status_autopilot.changed', 'status_autopilot.undone', 'import.node_updated', 'import.node_created', 'import.parent_changed', 'node.benefits_generated', 'node.created', 'node.updated', 'node.moved', 'node.kind_changed', 'node.project_moved', 'node.deleted', 'node.bulk_changed'] as const
 const CLOSED = 2
 
+// A heartbeat wake without an event: no id, nothing to resume from.
+function quietHeartbeat(data: string): boolean {
+  try {
+    const event = JSON.parse(data) as { id?: unknown } | null
+    return !!event && typeof event === 'object' && typeof event.id !== 'number'
+  } catch { return false }
+}
+
 // The node_changes of one stream event, in client shape.
 export function parseNodeChanges(data: string): NodeChange[] {
   let event: { id?: unknown; type?: unknown; actor_principal_id?: unknown; node_changes?: unknown; before?: unknown; after?: unknown }
@@ -121,6 +129,8 @@ export interface LiveOptions {
   retryMs?: readonly number[]
   // Waits before reading a node again after a failed read.
   refetchMs?: readonly number[]
+  // How long id-less heartbeat frames gather before one projection re-read.
+  heartbeatMs?: number
   // The causal row store the stream and its views share (the tab's by default).
   rows?: RowStore
 }
@@ -139,6 +149,7 @@ export class LiveNodeStore {
   // Shown nodes with a change not read yet (a read running or failed).
   private dirty = new Map<string, { change: NodeChange; attempts: number }>()
   private retryTimers = new Map<string, ReturnType<typeof setTimeout>>()
+  private heartbeatTimer: ReturnType<typeof setTimeout> | undefined
   private stateListeners = new Set<(state: LiveState) => void>()
   private health: ReturnType<typeof watchStreamHealth> | undefined
   private readonly options: Required<Omit<LiveOptions, 'rows'>>
@@ -154,6 +165,7 @@ export class LiveNodeStore {
       graceMs: 30_000,
       retryMs: [2_000, 5_000, 15_000, 30_000],
       refetchMs: [1_000, 3_000, 10_000, 30_000],
+      heartbeatMs: 10_000,
       ...rest,
     }
   }
@@ -259,7 +271,25 @@ export class LiveNodeStore {
   private receive(event: MessageEvent) {
     const id = Number(event.lastEventId)
     if (Number.isFinite(id) && id > 0) this.lastEventId = Math.max(this.lastEventId ?? 0, id)
+    if (event.type === 'harness.heartbeat' && quietHeartbeat(event.data)) { this.heartbeat(); return }
     for (const change of parseNodeChanges(event.data)) this.apply(change)
+  }
+  // A quiet heartbeat (AEON-1354) is a frame without id or session: it names
+  // no ticket. ETA staleness and the lead worker are worked out when a row is
+  // read, so such a tick can still change them. Ticks within one window make
+  // one hint per work row a view holds, the hints a heartbeat event with an id
+  // gives its ticket and the parents above it; lists batch them into one read.
+  private heartbeat() {
+    if (this.heartbeatTimer !== undefined) return
+    this.heartbeatTimer = setTimeout(() => {
+      this.heartbeatTimer = undefined
+      for (const row of this.rows.aggregateParents(null, true)) {
+        const parent = !!row.estimate?.is_parent || row.children_count > 0
+        this.applyOne({ eventId: 0, type: parent ? 'work.aggregates_changed' : 'harness.heartbeat', actorId: '', id: row.id,
+          projectId: row.project!.id, change: 'updated', revision: null,
+          fields: parent ? ['eta', 'lead_worker', 'estimate', 'planning', 'children_count'] : ['eta', 'lead_worker'] })
+      }
+    }, this.options.heartbeatMs)
   }
 
   // ---------- Changes ----------
@@ -381,6 +411,8 @@ export class LiveNodeStore {
   private forgetDirty() {
     for (const timer of this.retryTimers.values()) clearTimeout(timer)
     this.retryTimers.clear(); this.dirty.clear()
+    // A gap or a closed stream reads everything again or nothing at all.
+    clearTimeout(this.heartbeatTimer); this.heartbeatTimer = undefined
   }
   // A view can ask for any node (a list checking whether a new node matches).
   async fetch(id: string): Promise<WorkNode | null> {

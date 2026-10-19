@@ -46,14 +46,16 @@ class FakeSource {
   addEventListener(type: string, listener: (event: MessageEvent) => void) { this.listeners.set(type, [...(this.listeners.get(type) ?? []), listener]) }
   close() { this.readyState = 2 }
   ready(after: number) { for (const listener of this.listeners.get('stream.ready') ?? []) listener({ data: JSON.stringify({ after, resumed: false }), lastEventId: String(after) } as MessageEvent) }
+  // A frame without an id keeps the previous lastEventId, as EventSource does.
+  emit(type: string, data: unknown, lastEventId: number) { for (const listener of this.listeners.get(type) ?? []) listener({ type, data: JSON.stringify(data), lastEventId: String(lastEventId) } as MessageEvent) }
 }
 const change = (over: Partial<NodeChange> = {}): NodeChange =>
   ({ eventId: 1, type: 'node.updated', actorId: 'mira', id: 'n1', projectId: 'p-1', change: 'updated', fields: ['title'], revision: at(5), ...over })
 const settle = async () => { for (let i = 0; i < 6; i++) await Promise.resolve(); await nextTick() }
 
 let scope: EffectScope | undefined
-function setup(fetchNode = vi.fn<(id: string) => Promise<WorkNode | null>>(), start: ListItem = item(), context: { onRemoved?: (item: ListItem) => void; open?: () => FakeSource | null } = {}) {
-  const store = new LiveNodeStore({ open: context.open ?? (() => null), fetchNode, rows: rowStore,
+function setup(fetchNode = vi.fn<(id: string) => Promise<WorkNode | null>>(), start: ListItem = item(), context: { onRemoved?: (item: ListItem) => void; open?: () => FakeSource | null; heartbeatMs?: number } = {}) {
+  const store = new LiveNodeStore({ open: context.open ?? (() => null), fetchNode, rows: rowStore, ...(context.heartbeatMs === undefined ? {} : { heartbeatMs: context.heartbeatMs }),
     fetchAggregate: async id => { const value = await fetchNode(id); return value ? { ...start, ...value } : null },
   })
   const busy = ref(false)
@@ -673,6 +675,30 @@ describe('parent detail aggregate freshness', () => {
     expect(h.target.eta?.progress_pct).toBe(63)
     expect(h.target.updated_at).toBe(parent.updated_at)
   })
+})
+
+// Quiet heartbeats (AEON-1354) arrive as id-less frames naming no ticket.
+it('refetches an open parent once after a window of id-less heartbeat frames', async () => {
+  vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout', 'setInterval', 'clearInterval'] })
+  try {
+    const parent = item({ estimate: { hours: 2, is_parent: true }, eta: { finished: false, progress_pct: 25 } })
+    api.getNode.mockResolvedValue(node({ estimate: parent.estimate, eta: parent.eta }))
+    const fetchNode = vi.fn().mockResolvedValue(node({ estimate: { hours: 8, is_parent: true }, eta: { finished: false, progress_pct: 63 } }))
+    const source = new FakeSource()
+    const h = setup(fetchNode, parent, { open: () => source, heartbeatMs: 1_000 })
+    await settle()
+    for (let tick = 0; tick < 3; tick++) source.emit('harness.heartbeat', {}, 40)
+    await vi.advanceTimersByTimeAsync(999)
+    expect(fetchNode).not.toHaveBeenCalled()
+    await vi.advanceTimersByTimeAsync(1)
+    await settle()
+    expect(fetchNode).toHaveBeenCalledExactlyOnceWith('n1')
+    expect(h.target.estimate?.hours).toBe(8)
+    expect(h.target.eta?.progress_pct).toBe(63)
+    expect(h.target.updated_at).toBe(parent.updated_at)
+  } finally {
+    vi.useRealTimers()
+  }
 })
 
 it('discards a parent aggregate response overtaken by a second descendant hint', async () => {
