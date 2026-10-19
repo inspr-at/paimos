@@ -7,11 +7,11 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"os"
 	"os/exec"
-	"path/filepath"
 	"strings"
 	"sync"
 	"syscall"
@@ -19,53 +19,108 @@ import (
 	"time"
 )
 
+// Risk: an interrupt leaves a command that waits on the network running
+// silently instead of ending it with a clear error.
 func TestSignalEndsBlockedCommand(t *testing.T) {
 	if os.Getenv("AEON_SIGNAL_CHILD") == "1" {
 		runSignalChild()
 		return
 	}
-	ready := filepath.Join(t.TempDir(), "ready")
+	code, output := interruptChild(t, "TestSignalEndsBlockedCommand", "whoami")
+	if code != 130 || !strings.Contains(output, "interrupted") {
+		t.Fatalf("signal did not end the command: exit %d\n%s", code, output)
+	}
+}
+
+// Risk: an interrupted listen --follow ends with exit status 0 and no message,
+// so a wrapper cannot tell the interrupt from a clean finish.
+func TestSignalInterruptedListenerReportsInterrupt(t *testing.T) {
+	if os.Getenv("AEON_SIGNAL_CHILD") == "1" {
+		runSignalChild()
+		return
+	}
+	for _, mode := range []string{"listen-inbox", "listen-project"} {
+		t.Run(mode, func(t *testing.T) {
+			code, output := interruptChild(t, "TestSignalInterruptedListenerReportsInterrupt", mode)
+			if code != 130 || !strings.Contains(output, "aeon: interrupted") {
+				t.Fatalf("interrupted listener: exit %d\n%s", code, output)
+			}
+		})
+	}
+}
+
+// interruptChild reruns test in a child process that blocks one CLI command on
+// a fixture server, sends SIGINT once the server holds the request and returns
+// the exit status and combined output. The child reports readiness on fd 3.
+func interruptChild(t *testing.T, test, mode string) (int, string) {
+	t.Helper()
+	isolate(t)
+	t.Setenv("HOME", t.TempDir())
 	exe, err := os.Executable()
 	if err != nil {
 		t.Fatal(err)
 	}
-	cmd := exec.Command(exe, "-test.run=^TestSignalEndsBlockedCommand$", "-test.count=1", "-test.timeout=30s")
-	cmd.Env = append(os.Environ(), "AEON_SIGNAL_CHILD=1", "AEON_SIGNAL_READY="+ready)
+	readyR, readyW, err := os.Pipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer readyR.Close()
+	cmd := exec.Command(exe, "-test.run=^"+test+"$", "-test.count=1", "-test.timeout=30s")
+	cmd.Env = append(os.Environ(), "AEON_SIGNAL_CHILD=1", "AEON_SIGNAL_MODE="+mode)
+	cmd.ExtraFiles = []*os.File{readyW}
 	var output bytes.Buffer
 	cmd.Stdout = &output
 	cmd.Stderr = &output
 	if err := cmd.Start(); err != nil {
+		_ = readyW.Close()
 		t.Fatal(err)
 	}
+	_ = readyW.Close()
+	waited := make(chan error, 1)
+	go func() { waited <- cmd.Wait() }()
 	t.Cleanup(func() {
-		if cmd.Process != nil {
-			_ = cmd.Process.Kill()
-		}
+		_ = cmd.Process.Kill()
 	})
-	deadline := time.Now().Add(8 * time.Second)
-	for time.Now().Before(deadline) {
-		if _, err := os.Stat(ready); err == nil {
-			break
+	ready := make(chan error, 1)
+	go func() {
+		var marker [5]byte
+		_, err := io.ReadFull(readyR, marker[:])
+		if err == nil && string(marker[:]) != "ready" {
+			err = errors.New("unexpected readiness marker")
 		}
-		time.Sleep(20 * time.Millisecond)
-	}
-	if _, err := os.Stat(ready); err != nil {
-		t.Fatalf("blocked command never reached the request: %s", output.String())
+		ready <- err
+	}()
+	select {
+	case err := <-ready:
+		if err != nil {
+			_ = cmd.Process.Kill()
+			<-waited
+			t.Fatalf("command never reached the fixture request: %v\n%s", err, output.String())
+		}
+	case <-time.After(10 * time.Second):
+		_ = cmd.Process.Kill()
+		<-waited
+		t.Fatalf("command never reached the fixture request\n%s", output.String())
 	}
 	if err := cmd.Process.Signal(syscall.SIGINT); err != nil {
 		t.Fatal(err)
 	}
-	waited := make(chan error, 1)
-	go func() { waited <- cmd.Wait() }()
 	select {
 	case err := <-waited:
-		var exit *exec.ExitError
-		if !errors.As(err, &exit) || exit.ExitCode() != 130 || !strings.Contains(output.String(), "interrupted") {
-			t.Fatalf("signal did not end the command: %v\n%s", err, output.String())
+		if err == nil {
+			return 0, output.String()
 		}
-	case <-time.After(5 * time.Second):
-		t.Fatal("signal left the command running")
+		var exit *exec.ExitError
+		if !errors.As(err, &exit) {
+			t.Fatalf("child wait: %v\n%s", err, output.String())
+		}
+		return exit.ExitCode(), output.String()
+	case <-time.After(10 * time.Second):
+		_ = cmd.Process.Kill()
+		<-waited
+		t.Fatalf("signal left the command running\n%s", output.String())
 	}
+	return 0, ""
 }
 
 func TestSignalContextDoesNotPoisonTheNextCommand(t *testing.T) {
@@ -131,18 +186,43 @@ func TestSignalCancelReportsInterrupt(t *testing.T) {
 }
 
 func runSignalChild() {
-	ready := os.Getenv("AEON_SIGNAL_READY")
+	ready := os.NewFile(3, "ready")
 	var once sync.Once
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		once.Do(func() { _ = os.WriteFile(ready, []byte("1"), 0o600) })
+	hold := func(w http.ResponseWriter, r *http.Request) {
+		once.Do(func() {
+			_, _ = ready.Write([]byte("ready"))
+			_ = ready.Close()
+		})
 		<-r.Context().Done()
+	}
+	// whoami blocks on its first request; listeners resolve the project and
+	// caller first and block on the inbox long poll.
+	mode := os.Getenv("AEON_SIGNAL_MODE")
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		switch {
+		case mode == "listen-project" && r.URL.Path == "/api/projects/lookup":
+			_, _ = w.Write([]byte(`{"id":"` + transcriptProjectID + `"}`))
+		case mode == "listen-project" && r.URL.Path == "/api/me":
+			_, _ = w.Write([]byte(`{"principal":{"id":"` + transcriptProjectID + `","name":"worker"}}`))
+		case mode != "whoami" && r.URL.Path != "/api/inbox/messages":
+			http.NotFound(w, r)
+		default:
+			hold(w, r)
+		}
 	}))
 	defer srv.Close()
 	_ = os.Setenv("AEON_URL", srv.URL)
 	_ = os.Setenv("AEON_API_KEY", "fixture-signal-key")
-	_ = os.Unsetenv("AEON_API_KEY_FILE")
+	args := []string{"aeon", "whoami"}
+	switch mode {
+	case "listen-inbox":
+		args = []string{"aeon", "listen", "--inbox", "--follow"}
+	case "listen-project":
+		args = []string{"aeon", "listen", "--project", "AEON", "--follow"}
+	}
 	var stdout, stderr bytes.Buffer
-	code := runMessaging([]string{"aeon", "whoami"}, strings.NewReader(""), &stdout, &stderr, nil)
-	fmt.Fprint(os.Stderr, stderr.String())
+	code := RunMessaging(args, strings.NewReader(""), &stdout, &stderr)
+	fmt.Fprint(os.Stderr, stdout.String()+stderr.String())
 	os.Exit(code)
 }

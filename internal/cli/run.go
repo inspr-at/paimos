@@ -189,17 +189,22 @@ func (rt *runtime) fail(err error, secrets ...string) error {
 	return exit
 }
 
-// noteInterrupt reports a signalled cancellation that never reached fail.
-// A caller-canceled context stays a normal failure.
+// noteInterrupt reports a signalled cancellation that never reached fail,
+// including a command such as listen --follow that stops quietly with nil.
+// A caller-canceled context, a command's own exit status and unrelated
+// failures stay as they are.
 func (rt *runtime) noteInterrupt(err error) error {
-	if err == nil || !rt.commandInterrupted.Load() || !errors.Is(err, context.Canceled) {
+	if !rt.commandInterrupted.Load() {
 		return err
 	}
 	var exit *exitError
 	if errors.As(err, &exit) {
 		return err
 	}
-	return &exitError{code: 130, msg: "interrupted"}
+	if err == nil || errors.Is(err, context.Canceled) {
+		return &exitError{code: 130, msg: "interrupted"}
+	}
+	return err
 }
 
 func redact(msg, secret string) string {
@@ -473,8 +478,8 @@ func (rt *runtime) context() context.Context {
 	return context.Background()
 }
 
-// cloneRuntime shares the interrupt flag. Copying runtime by value is forbidden:
-// the flag is one atomic for the command and every runtime derived from it.
+// cloneRuntime shares the signal state. Copying runtime by value is forbidden:
+// the state is one set of atomics for the command and every runtime derived from it.
 func (rt *runtime) cloneRuntime() *runtime {
 	rt.commandInterrupted.ensure()
 	copy := *rt

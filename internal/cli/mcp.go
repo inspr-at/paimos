@@ -22,7 +22,7 @@ func (rt *runtime) cmdMCP() *Command {
 		Long:  "Exposes whoami, ask, ask_status and the issue, knowledge and search tools. Uses the same scoped API operations as the CLI.",
 		Use:   "mcp",
 		run: func(args []string) error {
-			ctx, stop := signalContext()
+			ctx, stop := rt.claimSignals()
 			defer stop()
 			return rt.mcpServer().Run(ctx, &mcp.StdioTransport{})
 		},

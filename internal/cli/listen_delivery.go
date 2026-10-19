@@ -9,9 +9,7 @@ import (
 	"io"
 	"net/http"
 	"net/url"
-	"os"
 	"os/exec"
-	"os/signal"
 	"strings"
 	"time"
 
@@ -58,7 +56,7 @@ func canonicalMessagingAdapter(name string) string {
 
 func (rt *runtime) listenMessagingDelivery(project, projectKey, address, adapter string, follow bool, interval time.Duration) error {
 	adapter = canonicalMessagingAdapter(adapter)
-	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt)
+	ctx, stop := rt.claimSignals()
 	defer stop()
 	deliver := rt.messagingDeliverer
 	if deliver == nil {

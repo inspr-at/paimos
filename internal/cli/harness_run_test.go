@@ -10,6 +10,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"syscall"
 	"testing"
@@ -263,6 +264,89 @@ func TestHarnessRunSIGTERM(t *testing.T) {
 	}
 	if stops := hbWhere(calls, http.MethodPost, "/stop"); len(stops) != 1 || stops[0].body["reason"] != "stopped" {
 		t.Fatal("SIGTERM did not stop session plainly")
+	}
+}
+
+// Risk: the command interrupt watchdog exits the wrapper before harness run
+// has force-stopped a child that ignores SIGTERM and closed its session, so the
+// child keeps running and the session stays open.
+func TestHarnessRunInterruptForceStopsStubbornChild(t *testing.T) {
+	if os.Getenv("AEON_TEST_HARNESS_STUBBORN") == "1" {
+		dir := os.Getenv("AEON_TEST_RUN_DIR")
+		code := Run([]string{"aeon", "harness", "run", "--project", "AEON", "--harness", "claude", "--interval", "1", "--state-dir", filepath.Join(dir, "state"), "--", "sh", "-c", `trap '' INT TERM; echo $$ > "$1"; printf ready; exec sleep 30`, "stubborn", filepath.Join(dir, "child.pid")}, os.Stdin, os.Stdout, os.Stderr)
+		os.Exit(code)
+	}
+	var calls []hbCall
+	srv := heartbeatFixture(t, &calls, "", "")
+	defer srv.Close()
+	_, _, _ = heartbeatRuntime(t, srv)
+	dir := t.TempDir()
+	cmd := exec.Command(os.Args[0], "-test.run=^TestHarnessRunInterruptForceStopsStubbornChild$", "-test.count=1")
+	cmd.Env = append(os.Environ(), "AEON_TEST_HARNESS_STUBBORN=1", "AEON_TEST_RUN_DIR="+dir)
+	readyR, readyW, err := os.Pipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer readyR.Close()
+	defer readyW.Close()
+	cmd.Stdout = readyW
+	// Do not capture or log inherited credentials or request proofs.
+	if err := cmd.Start(); err != nil {
+		t.Fatal(err)
+	}
+	_ = readyW.Close()
+	done := make(chan error, 1)
+	go func() { done <- cmd.Wait() }()
+	t.Cleanup(func() { _ = cmd.Process.Kill() })
+	ready := make(chan error, 1)
+	go func() {
+		var marker [5]byte
+		_, err := io.ReadFull(readyR, marker[:])
+		if err == nil && string(marker[:]) != "ready" {
+			err = errors.New("unexpected readiness marker")
+		}
+		ready <- err
+	}()
+	select {
+	case err := <-ready:
+		if err != nil {
+			t.Fatalf("command readiness: %v", err)
+		}
+	case <-time.After(10 * time.Second):
+		t.Fatal("command did not start")
+	}
+	// The child wrote its PID before the readiness marker.
+	raw, err := os.ReadFile(filepath.Join(dir, "child.pid"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	pid, err := strconv.Atoi(strings.TrimSpace(string(raw)))
+	if err != nil || pid <= 1 {
+		t.Fatalf("child pid %q: %v", raw, err)
+	}
+	t.Cleanup(func() { _ = syscall.Kill(pid, syscall.SIGKILL) })
+	if err := cmd.Process.Signal(syscall.SIGINT); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case err := <-done:
+		// 143 is harness run's own interrupt result after its child stopped;
+		// the watchdog's 130 would mean the wrapper left before cleanup.
+		var exit *exec.ExitError
+		if !errors.As(err, &exit) || exit.ExitCode() != 143 {
+			t.Fatalf("interrupt exit: %v", err)
+		}
+	case <-time.After(30 * time.Second):
+		t.Fatal("interrupt failed to settle")
+	}
+	if err := syscall.Kill(pid, 0); !errors.Is(err, syscall.ESRCH) {
+		t.Fatalf("child that ignores SIGTERM survived the wrapper: %v", err)
+	}
+	// Waiting for the child does not join this process's HTTP handlers. Close
+	// waits for them to finish before assertions read their recorded calls.
+	srv.Close()
+	if stops := hbWhere(calls, http.MethodPost, "/stop"); len(stops) != 1 || stops[0].body["reason"] != "stopped" {
+		t.Fatal("interrupt did not stop the session plainly")
 	}
 }
 

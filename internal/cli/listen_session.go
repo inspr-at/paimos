@@ -10,8 +10,6 @@ import (
 	"net"
 	"net/http"
 	"net/url"
-	"os"
-	"os/signal"
 	"strconv"
 	"strings"
 	"time"
@@ -23,7 +21,7 @@ import (
 // Session delivery never claims a principal-wide target: that target may belong
 // to a different generation. The operator supplies the exact local reference.
 func (rt *runtime) listenSessionDelivery(projectID, project, session, adapter, refFile, after string, limit int, follow bool, interval time.Duration) error {
-	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt)
+	ctx, stop := rt.claimSignals()
 	defer stop()
 	adapter = canonicalMessagingAdapter(adapter)
 	ref := ""
