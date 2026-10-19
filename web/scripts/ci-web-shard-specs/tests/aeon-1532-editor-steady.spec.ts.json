@@ -1,8 +1,11 @@
 {
   "group": "remaining-ui",
   "nightlyTiming": {
-    "seconds": 75,
-    "selectedTests": 7
+    "basis": "Guarded remote-spec.sh complete file: 7 passed (17.8s), supervisor wall 18.048s. Conservative scheduling estimate rounded up to 60s (over three times this run). Pre-merge mbp2606 measurement, not a hosted nightly run.",
+    "runner": "mbp2606",
+    "seconds": 60,
+    "selectedTests": 7,
+    "sourceCommit": "e20fc49aa337b74f54c42aef2e06a85f2200d30c"
   },
   "spec": {
     "file": "tests/aeon-1532-editor-steady.spec.ts",
