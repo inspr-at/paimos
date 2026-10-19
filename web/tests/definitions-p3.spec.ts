@@ -7,7 +7,7 @@ import { mockDecisionDesk } from './decision-desk-fixtures'
 import { mockEffectivePermissions } from './authz-fixtures'
 import { mockSettings, settingsData } from './settings-fixtures'
 import { reviewPolicy } from './policies-fixtures'
-import { definitionChangeWords, definitionDate, definitionDecisionWords, definitionDeskWords, definitionNotice, type Definition, type DefinitionChange, type DefinitionChecks, type DefinitionContext, type DefinitionStatus } from '../src/lib/definitions'
+import { definitionChangeWords, definitionDate, definitionDecisionWords, definitionDeskWords, definitionNotice, type Definition, type DefinitionChange, type DefinitionChecks, type DefinitionContext, type DefinitionRule, type DefinitionStatus } from '../src/lib/definitions'
 
 const blocks: DefinitionStatus[] = ['in_progress','qa','done']
 const base: DefinitionChecks = {in_progress:[{id:'estimate_set'},{id:'acceptance_present'},{id:'design_attached',condition:'ui'}],qa:[{id:'review_ok_cross_family',condition:'code'}],done:[{id:'release_copy_set'}]}
@@ -77,7 +77,9 @@ async function setup(page: Page,theme: 'light' | 'dark',locale='en',viewer=false
       const body=request.postDataJSON();world.writes.push({path,body})
       if(world.fail)return route.fulfill({status:503,json:{error:'Default save unavailable'}})
       if(body.expected_revision!==world.workspace.revision)return route.fulfill({status:409,json:{error:'stale workspace'}})
+      const addedRelease=!(world.workspace.checks.done??[]).some(rule=>rule.id==='released')&&(body.checks.done??[]).some((rule:DefinitionRule)=>rule.id==='released')
       world.workspace={...world.workspace,checks:body.checks,revision:new Date(Date.parse(world.workspace.revision)+1000).toISOString()};world.context.workspace_default=world.workspace
+      if(addedRelease)world.context.pending_changes!.push({check_id:'released',block:'done',kind:'new',before:null,current:{id:'released',condition:'releases'}})
       return route.fulfill({json:world.workspace})
     }
     if(/^\/api\/projects\/[^/]+\/definitions\/context$/.test(path)){
@@ -195,6 +197,7 @@ test('AEON-1317 workspace defaults differences empty inherited and viewer match 
     const add=card.getByRole('button',{name:'Add check to Done'});await add.click();await page.getByRole('menuitem',{name:/^Shipped in a release/}).click()
     await expect(card.locator('[data-check="released"]')).toBeVisible()
     expect(world.writes.at(-1)!.path).toBe('/api/settings/definitions')
+    await expect(list).toContainText('4 changes wait')
     await navigate(page,'/p/PHAROS/settings/definitions');await expect(card.locator('[data-check="released"]')).toBeVisible()
     await expect(card.locator('.drs button')).toHaveCount(0)
     world.workspace={...world.workspace,checks:{...world.workspace.checks,done:[...(world.workspace.checks.done??[]),{id:'merged'},{id:'lesson_recorded'}]},revision:'2026-10-10T08:00:00Z'};world.context.workspace_default=world.workspace
@@ -205,7 +208,7 @@ test('AEON-1317 workspace defaults differences empty inherited and viewer match 
     world.workspace={...world.workspace,checks:{}};await navigate(page,'/settings/policies#definitions')
     await expect(card).toContainText('No workspace default. Tickets move freely in every project that has no definition of its own.')
     await expect(card.locator('.enforce')).toHaveCount(0);record('D2 empty default has the catalog explanation and no enforcement claim');await shot(page,width,theme,'D2')
-    world.workspace=copy(newer,'workspace');world.context.workspace_default=world.workspace;world.readOnly=true;world.context.can_manage=false
+    world.workspace=copy(newer,'workspace');world.context.workspace_default=world.workspace;world.context.pending_changes=structuredClone(changes);world.readOnly=true;world.context.can_manage=false
     await page.goto('/p/PRJ-26/settings/definitions?as=mia')
     await expect(card.locator('[data-waiting="true"]')).toHaveCount(3)
     await expect(card.locator('[data-decision], .drs button')).toHaveCount(0)

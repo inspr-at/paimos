@@ -42,7 +42,7 @@ function save(next: DefinitionChecks, applied: () => void) {
     let savedContext: WorkspaceDefinitionContext | undefined
     await after(saveWorkspaceDefinition(next,captured.definition,signal),saved => {
       if (context.value !== captured) return
-      savedContext={...captured,definition:saved};context.value=savedContext;applied()
+      context.value={...captured,definition:saved};savedContext=context.value;applied()
     })
     if (!savedContext) return
     loading.value=true
