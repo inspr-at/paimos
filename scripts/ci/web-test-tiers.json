@@ -19538,6 +19538,8 @@
     ,
     {"kind":"vitest","file":"tests/quota-outlook-refresh.unit.test.ts","name":"a failed refresh keeps the snapshot and ages it from the reading","tier":"ESSENTIAL"}
     ,
+    {"kind":"vitest","file":"tests/quota-outlook.unit.test.ts","name":"no line break inside a number or a moment > joins units, percentages and weekday times with a no-break space in every branch","tier":"ESSENTIAL"}
+    ,
     {"kind":"vitest","file":"tests/quota-outlook.unit.test.ts","name":"the answer in words > before the outlook is read, the plan’s accounts decide: pending rows, or no quota for a harness that never reports it","tier":"ESSENTIAL"}
     ,
     {"kind":"vitest","file":"tests/quota-outlook.unit.test.ts","name":"the answer in words > says what is missing instead of inventing it","tier":"ESSENTIAL"}
