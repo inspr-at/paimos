@@ -11,7 +11,7 @@ import { listAttachments, type Attachment } from './attachments'
 import { loadTicketOutcomes, type OutcomeEvent } from './ticketOutcomes'
 import { decidePhone, phoneRequest, reviewPath, type PhoneReview } from './deskPhoneApproval'
 import { readTierResponse, decideTierResponse } from './agentRows'
-import { answerFor, CUSTOM_ANSWER, deskItemID, deskLinkOut, type DeskChoice, type DeskDraft, type DeskItem, type DeskOutcome, type DeskProjection, type DeskProjectionItem, type DeskOutcomeAvailability, type DeskDoctrineTarget, type DeskOutcomeEffect, type DeskSource, type DeskTicket } from './decisionDesk'
+import { answerFor, CUSTOM_ANSWER, deskItemID, deskLinkOut, deskListKey, type DeskChoice, type DeskDraft, type DeskItem, type DeskOutcome, type DeskProjection, type DeskProjectionItem, type DeskOutcomeAvailability, type DeskDoctrineTarget, type DeskOutcomeEffect, type DeskSource, type DeskTicket } from './decisionDesk'
 
 export interface QuestionInput {
   request_id: string; question: string; context?: string; findings?: string; options: DeskChoice[]
@@ -107,6 +107,11 @@ export function questionItem(question: Question, projectName: string): DeskItem 
     deliveryState: pending.some(effect => effect.state === 'failed' || effect.receipt_state === 'failed') ? 'failed'
       : pending.some(effect => effect.state === 'pending') ? 'pending' : pending.some(effect => effect.state === 'delivered') ? 'delivered' : undefined,
   }
+}
+function withListedTicket(item: DeskItem, row: DeskProjectionItem): DeskItem {
+  if (item.ticketKey?.trim()) return item
+  const ticket = deskListKey(row)
+  return ticket ? { ...item, ticketKey: ticket } : item
 }
 function base(id: string, kind: DeskItem['kind'], title: string, context: string, choices: DeskChoice[]): DeskItem {
   return { id, kind, title, context, choices, projectId: '', projectName: 'Workspace', findings: '', meanwhile: 'Waiting for a person.', destination: 'The native protected workflow.',
@@ -510,13 +515,13 @@ export async function loadDesk(pages = { open: 1, answered: 1 }, adapters: Prote
       if (row.person_step) return { ...base(id, 'action', row.title, '', []), personStep: { ...row.person_step, can_tick: row.can_decide === true }, projectId: row.project_id ?? '', projectName: name(row.project_id ?? ''), ticketId: row.person_step.node_id, ticketKey: row.person_step.ticket_key, revision: row.revision, createdAt: row.created_at, meanwhile: row.person_step.check_id === 'human' ? 'gates Delivered and Accepted' : `before ${row.person_step.to_status === 'in_progress' ? 'In progress' : row.person_step.to_status === 'done' ? 'Done' : 'QA'}`, source: row.source }
       if (linkOut) return { ...base(id, 'account_matrix', row.title, '', []), linkOut, revision: row.revision, createdAt: row.created_at, held: row.held, source: row.source,
         meanwhile: 'Confirm which accounts agents may use in Settings.', destination: 'Settings · Accounts', unavailable: row.can_decide === false ? 'This person may read this request but cannot decide it.' : undefined }
-      if (item && !item.decided) return { ...item, held: row.held, source: row.source,
+      if (item && !item.decided) return withListedTicket({ ...item, held: row.held, source: row.source,
         ...(row.kind === 'approval' && row.project_id ? { projectId: row.project_id, projectName: name(row.project_id) } : {}),
-        unavailable: row.can_decide === false ? 'This person may read this request but cannot decide it.' : item.unavailable }
+        unavailable: row.can_decide === false ? 'This person may read this request but cannot decide it.' : item.unavailable }, row)
       warnings.push('Some source details could not be confirmed. Retry remains available.')
-      return { ...base(id, row.kind === 'lesson' ? 'lesson' : row.kind === 'question' ? 'question' : row.kind === 'action_request' ? 'action' : row.kind === 'doctrine' ? 'rule' : row.kind === 'tier_request' ? 'tier' : row.kind === 'key_trim' ? 'key_trim' : row.kind === 'stepup' ? 'stepup' : row.kind === 'account_matrix' ? 'account_matrix' : 'approval', row.title, '', []),
+      return withListedTicket({ ...base(id, row.kind === 'lesson' ? 'lesson' : row.kind === 'question' ? 'question' : row.kind === 'action_request' ? 'action' : row.kind === 'doctrine' ? 'rule' : row.kind === 'tier_request' ? 'tier' : row.kind === 'key_trim' ? 'key_trim' : row.kind === 'stepup' ? 'stepup' : row.kind === 'account_matrix' ? 'account_matrix' : 'approval', row.title, '', []),
         projectId: row.project_id ?? '', projectName: row.project_id ? name(row.project_id) : 'Workspace', revision: row.revision, createdAt: row.created_at,
-        held: row.held, source: row.source, unavailable: 'Source details are unavailable or changed. Close and Retry before deciding.' }
+        held: row.held, source: row.source, unavailable: 'Source details are unavailable or changed. Close and Retry before deciding.' }, row)
     })
     // A missing or partial canonical desk is unanswered: zero listed rows then prove nothing (AEON-1406).
     if (!projection) { warnings.push('The canonical desk could not be read. Retry before deciding; the count is unknown.'); unanswered.add('desk') }

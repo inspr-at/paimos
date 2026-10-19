@@ -80,4 +80,18 @@ func TestCredentialsRequireTenantRepositoryGrant(t *testing.T) {
 		t.Fatal(err)
 	}
 	denied(ref, tenantA, privateRepo)
+	long := strings.Repeat("A1b_.-", 86) + "Z9xy"
+	if len(long) != 520 {
+		t.Fatalf("long token length %d", len(long))
+	}
+	if err := os.WriteFile(filepath.Join(dir, ref), []byte(long+"\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if token, err := c.Token(ref, tenantA, privateRepo); err != nil || token != long {
+		t.Fatal("a 520-character installation token was rejected")
+	}
+	if err := os.WriteFile(filepath.Join(dir, ref), []byte(strings.Repeat("a", 519)+"/\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	denied(ref, tenantA, privateRepo)
 }
