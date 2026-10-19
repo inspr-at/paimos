@@ -38,13 +38,3 @@ ALTER TABLE import_retention_settings FORCE ROW LEVEL SECURITY;
 CREATE POLICY import_retention_settings_tenant ON import_retention_settings
  USING (tenant_id = NULLIF(current_setting('aeon.tenant_id', true), '')::uuid)
  WITH CHECK (tenant_id = NULLIF(current_setting('aeon.tenant_id', true), '')::uuid);
-
--- The worker backfills old imports in bounded batches from this positive
--- event provenance, never titles, keys or mutable node fields.
-CREATE INDEX events_start_import_projects ON events(tenant_id,node_id)
- WHERE type='node.created' AND metadata->>'imported_from'='start';
-
--- Candidate checks read immutable event evidence under the tenant/tree fence;
--- they do not write engagement from an event trigger after the event counter.
-CREATE INDEX events_start_retention_refs ON events USING gin(node_refs)
- WHERE metadata->>'imported_from' IS DISTINCT FROM 'start';
