@@ -92,8 +92,12 @@ export function groupCellText(id: string, f: ProjectFigures | null, ctx: GroupCe
 }
 // The priority mix (AEON-1470 F1): "3 high · 1 med · 2 low" in full; when that does not fit the cell, the most severe
 // bucket and the tickets of the others as "+N": "3 high +3". Non-breaking spaces throughout, so a number never leaves
-// its word and "·" never ends or starts a line. null: no ticket of the group has a priority.
+// its word and "·" never ends or starts a line. null: no ticket of the group has a priority. The compact form counts
+// from 1,000 in thousands like the Tokens column ("25K high +25K"), so its widest case stays three characters a side;
+// the full form and its tip keep every digit.
 const NBSP = '\u00a0'
+const compactCount = (n: number) => n >= 1000 ? fmtTokens(n) : fmtInt(n)
+const compactMix = (top: string, word: string, others: string) => `${top}${NBSP}${word}${others ? `${NBSP}+${others}` : ''}`
 export function priorityMix(f: ProjectFigures | null): { full: string; compact: string } | null {
   const values = f?.columns.priority?.values ?? []
   const buckets = PRIORITY_WORDS.map(([value, word]) => [values.find(v => v.value === value)?.count ?? 0, word] as const).filter(([n]) => n > 0)
@@ -102,11 +106,18 @@ export function priorityMix(f: ProjectFigures | null): { full: string; compact: 
   const others = rest.reduce((sum, [n]) => sum + n, 0)
   return {
     full: buckets.map(([n, w]) => `${fmtInt(n)}${NBSP}${w}`).join(`${NBSP}·${NBSP}`),
-    compact: `${fmtInt(top)}${NBSP}${word}${others ? `${NBSP}+${fmtInt(others)}` : ''}`,
+    compact: compactMix(compactCount(top), word, others ? compactCount(others) : ''),
   }
 }
-// The priority column's minimum in group summaries: room for a compact mix such as "12 high +34" in the cells' 12 px
-// system type, inside the cell's 12 px padding on each side. Rows at this width show the priority icon alone.
+// The widest compact mixes the figures can produce. A group counts at most 50,000 tickets (the figures' bound), so each
+// side reads at most "999" or "50K"; in tabular digits "888" and "88K" are as wide as any. The priority column reserves
+// the widest of these, so no supported count ellipsizes and the reserve never follows live counts.
+export function widestCompactMixes(): string[] {
+  const sides = [compactCount(888), compactCount(88_000)]
+  return PRIORITY_WORDS.flatMap(([, word]) => sides.flatMap(top => sides.map(others => compactMix(top, word, others))))
+}
+// The priority column's least minimum in group summaries, before the cells' own type is measured, inside the cell's
+// 12 px padding on each side. Rows at this width show the priority icon alone.
 export const MIX_PRIORITY_MIN = 96
 
 // The people assigned in the group ("2 people"), when no session is live. A tail beyond the top three may hold more.

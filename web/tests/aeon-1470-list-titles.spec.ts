@@ -8,6 +8,7 @@ import { test, expect, type Locator, type Page, type TestInfo } from '@playwrigh
 import { writeFileSync } from 'node:fs'
 import { COLUMN_BY_ID, GIVE_WAY, RETURN_ROOM, type ColumnId } from '../src/lib/columns'
 import { SORT_LABELS } from '../src/lib/work'
+import { controlStability } from './control-stability'
 import { fixtures, liveAgent, mockWork, watchErrors, type Fixtures } from './work-fixtures'
 
 test.beforeEach(async ({ page }) => {
@@ -77,11 +78,12 @@ function data(prefs: Record<string, unknown>): Fixtures {
   return d
 }
 
-async function open(page: Page, options: { width?: number; theme?: 'light' | 'dark'; query?: string; prefs?: Record<string, unknown> } = {}) {
+async function open(page: Page, options: { width?: number; theme?: 'light' | 'dark'; query?: string; prefs?: Record<string, unknown>; edit?: (d: Fixtures) => void } = {}) {
   const width = options.width ?? 1024
   await page.setViewportSize({ width, height: width <= 600 ? 844 : 900 })
   const d = data(options.prefs ?? { visible: SET_1388 })
   d.preferences.theme = { choice: options.theme ?? 'light' }
+  options.edit?.(d)
   const errors = watchErrors(page)
   await mockWork(page, d)
   await page.route('**/api/queue?*', route => route.fulfill({ json: { items: [], manual_order: false, capacity: { queued_hours: 0, parallel_runs: 0, work_hours: 0, warning: false } } }))
@@ -259,6 +261,36 @@ test('AEON-1470 group row priority mix: compact "3 high +3" when the full mix do
   log.save()
 })
 
+// AEON-1470 (fix 7). Risk: a large group's compact mix ("25,000 high +25,000") outgrowing the priority cell and
+// ellipsizing, or the room it needs following the counts, so live figures would move the columns.
+test('AEON-1470 a group of 50,000 tickets keeps its compact priority mix whole, in a column as wide as with three', async ({ page }, testInfo) => {
+  const log = checks(testInfo)
+  await open(page)
+  const small = await headWidths(page)
+  const inProgress = (query: URLSearchParams) => query.getAll('work_state').flatMap(value => value.split(',')).includes('in_progress')
+  const { errors } = await open(page, { edit: d => { d.figuresHook = (figures, query) => {
+    if (inProgress(query)) figures.columns.priority = { ...figures.columns.priority, values: [{ value: 'high', count: 25_000, hours: 0 }, { value: 'low', count: 25_000, hours: 0 }] }
+  } } })
+  const cell = groupCell(page, 'In progress', 'priority'), text = cell.locator('.gf-text')
+  await expect(text).toHaveText(`25K${NBSP}high${NBSP}+25K`)
+  const fit = await text.evaluate(el => ({ scroll: el.scrollWidth, client: el.clientWidth }))
+  expect(fit.scroll).toBeLessThanOrEqual(fit.client)
+  log.add({ assert: 'priority cell scrollWidth ≤ clientWidth', state: 'In progress, 25,000 high and 25,000 low', width: 1024, tableWidth: await tableWidth(page), theme: 'light', value: fit })
+  // The reserve is the widest count the figures allow, never the counts on screen: every column keeps its width.
+  const large = await headWidths(page)
+  expect(Object.keys(large)).toEqual(Object.keys(small))
+  for (const id of Object.keys(small)) expect(Math.abs(large[id] - small[id]), id).toBeLessThanOrEqual(.5)
+  log.add({ assert: 'column widths independent of the counts', state: '3 vs 50,000 tickets', width: 1024, theme: 'light', value: { priority: [small.priority, large.priority] } })
+  // The tip names every count in full.
+  await page.mouse.move(5, 5)
+  await cell.locator('.gf-cell').hover()
+  const tip = page.locator('#figure-tip')
+  await expect(tip.locator('.wf-sum')).toHaveText(`25,000${NBSP}high${NBSP}·${NBSP}25,000${NBSP}low`)
+  await page.mouse.move(5, 5)
+  expect(errors).toEqual([])
+  log.save()
+})
+
 test('AEON-1470 the stale tag keeps 8 px to the next cell and never truncates; the group name ellipsizes first', async ({ page }, testInfo) => {
   const log = checks(testInfo)
   await open(page)
@@ -409,6 +441,51 @@ test('AEON-1470 S5: Display keeps a dropped column ticked with "hidden at this w
   log.save()
 })
 
+// AEON-1470 (fix 7). Risk: a "hidden at this width" note that gives its row another height or wraps under a long
+// name, so ticking, unticking or a column coming back moves the checkboxes below it (AEON-541).
+test('AEON-1470 Columns rows hold still while hidden notes come and go', async ({ page }, testInfo) => {
+  const log = checks(testInfo)
+  await open(page, { prefs: { visible: ALL }, query: '?group=status&sort=key' })
+  const shown = await shownIds(page)
+  const dropped = expectGiveWayOrder(ALL, shown)
+  // Suggested release is the longest name the width hides: name and note do not fit the row together.
+  expect(dropped).toContain('suggested')
+  await page.getByRole('button', { name: /^Display/ }).click()
+  const menu = display(page)
+  await expect(menu).toBeVisible()
+  const ids = await menu.locator('input[data-column-row]').evaluateAll(boxes => boxes.map(box => box.getAttribute('data-column-row')!))
+  const controls: Record<string, Locator> = {}
+  for (const id of ids) { controls[`check ${id}`] = menu.locator(`input[data-column-row="${id}"]`); controls[`row ${id}`] = columnRow(menu, id) }
+  const guard = await controlStability(page, controls)
+  const box = (id: string) => menu.locator(`input[data-column-row="${id}"]`)
+  const note = (id: string) => columnRow(menu, id).locator('.away-note')
+  await expect(note('suggested')).toHaveText('hidden at this width')
+  // Unticked, the note leaves; ticked again, it returns. Neither moves a row.
+  await guard.check(async () => { await box('suggested').uncheck(); await expect(note('suggested')).toHaveCount(0); await settled(page) })
+  await guard.check(async () => { await box('suggested').check(); await expect(note('suggested')).toHaveText('hidden at this width'); await settled(page) })
+  // Unticking two shown columns frees at least 168 px: the last hidden one (120 px at most) comes back with 16 px to
+  // spare and its note leaves in place; ticking them again hides it again.
+  const freed = ['cost', 'parent', 'assignee', 'release'].filter(id => shown.includes(id as ColumnId)).slice(0, 2)
+  expect(freed).toHaveLength(2)
+  const last = dropped[dropped.length - 1]
+  await guard.check(async () => { for (const id of freed) await box(id).uncheck(); await expect(note(last)).toHaveCount(0); await settled(page) })
+  await guard.check(async () => { for (const id of freed) await box(id).check(); await expect(note(last)).toHaveText('hidden at this width'); await settled(page) })
+  guard.done()
+  // The name gives way to the note on one line; its tip reads it whole.
+  const name = columnRow(menu, 'suggested').locator('.name-text')
+  const clipped = await name.evaluate(el => el.scrollWidth > el.clientWidth + 1)
+  if (clipped) await expect(name).toHaveAttribute('data-tip', 'Suggested release')
+  // A row with a hidden note is as tall as a plain one (rows with their own column note excepted).
+  const plain = await columnRow(menu, 'status').evaluate(el => el.getBoundingClientRect().height)
+  for (const id of dropped.filter(id => ids.includes(id))) {
+    const row = await columnRow(menu, id).evaluate(el => ({ height: el.getBoundingClientRect().height, noted: !!el.querySelector('.col-note') }))
+    if (!row.noted) expect(Math.abs(row.height - plain), id).toBeLessThanOrEqual(.5)
+  }
+  log.add({ assert: 'Columns rows and checkboxes move 0 px (±0.5) through ticks and returns', state: 'Display open, all columns', width: 1024, tableWidth: await tableWidth(page), theme: 'light', value: { dropped, toggled: ['suggested', ...freed], nameClipped: clipped } })
+  await page.screenshot({ path: testInfo.outputPath('aeon1470-1024-light-s5-display-rows.png'), fullPage: false })
+  log.save()
+})
+
 test('AEON-1470 S6: phone rows at 390 stay as they were (light, dark)', async ({ page }, testInfo) => {
   const log = checks(testInfo)
   for (const theme of ['light', 'dark'] as const) {
@@ -503,6 +580,30 @@ test('AEON-1470 Parent cell shows the kind icon and key, adds the title from 200
   await expect(page.locator('.parent-chip')).toHaveCount(0)
   await page.mouse.move(5, 5)
   await page.screenshot({ path: testInfo.outputPath('aeon1470-1440-dark-parent-on.png'), fullPage: false })
+})
+
+// AEON-1470 (fix 7). Risk: the Parent header counting each ticket's epic while its cells show the direct parent, so the
+// task PHAROS-13 under ticket PHAROS-12 adds to epic PHAROS-10 instead.
+test('AEON-1470 the Parent header counts the direct parents its cells show, with "No parent"', async ({ page }) => {
+  await page.setViewportSize({ width: 1440, height: 900 })
+  const d = fixtures()
+  d.preferences.theme = { choice: 'light' }
+  const landed = wholeShare(page, 6, 3)
+  await mockWork(page, d)
+  await page.goto('/p/PHAROS')
+  await landed
+  await expect(parentHeader(page)).toBeVisible()
+  await expect(row(page, 'PHAROS-13').locator('.parent-key')).toHaveText('PHAROS-12')
+  await page.mouse.move(5, 5)
+  await parentHeader(page).locator('.th-label').hover()
+  const tip = page.locator('#figure-tip')
+  await expect(tip).toBeVisible()
+  const lines = tip.locator('.wf-line:not([aria-hidden])')
+  await expect(lines.first()).toBeVisible()
+  const read = () => lines.evaluateAll(items => items.map(item => [item.firstElementChild?.textContent?.trim(), item.querySelector('.wf-v')?.textContent?.trim()]))
+  // Leaves: PHAROS-11 under the epic, PHAROS-13 under its ticket, three straight under the project.
+  expect(await read()).toEqual([['PHAROS-10', '1'], ['PHAROS-12', '1'], ['No parent', '3']])
+  await page.mouse.move(5, 5)
 })
 
 test('AEON-1470 Parent stays out of the Epic group and the outline, and the column toggle does not move the other columns', async ({ page }, testInfo) => {

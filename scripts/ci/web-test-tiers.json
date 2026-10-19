@@ -6240,6 +6240,8 @@
     ,
     {"kind":"browser","file":"tests/aeon-1448-desk-tabrow.spec.ts","name":"type-size shots › AEON-1448: 375 and 390, the round action beside the tabs","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
+    {"kind":"browser","file":"tests/aeon-1470-list-titles.spec.ts","name":"AEON-1470 Columns rows hold still while hidden notes come and go","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
     {"kind":"browser","file":"tests/aeon-1470-list-titles.spec.ts","name":"AEON-1470 Parent cell shows the kind icon and key, adds the title from 200 px, and has no chip","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
     {"kind":"browser","file":"tests/aeon-1470-list-titles.spec.ts","name":"AEON-1470 Parent keeps a saved Epic column and its width","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
@@ -6258,11 +6260,15 @@
     ,
     {"kind":"browser","file":"tests/aeon-1470-list-titles.spec.ts","name":"AEON-1470 a column that left returns only with 16 px to spare: ±8 px around a threshold keeps the set","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
+    {"kind":"browser","file":"tests/aeon-1470-list-titles.spec.ts","name":"AEON-1470 a group of 50,000 tickets keeps its compact priority mix whole, in a column as wide as with three","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
     {"kind":"browser","file":"tests/aeon-1470-list-titles.spec.ts","name":"AEON-1470 columns leave in the give-way order; sorted by Updated, Updated stays and the next one leaves instead","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
     {"kind":"browser","file":"tests/aeon-1470-list-titles.spec.ts","name":"AEON-1470 group row priority mix: compact \"3 high +3\" when the full mix does not fit, the full mix in its tip, never ellipsized","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
     {"kind":"browser","file":"tests/aeon-1470-list-titles.spec.ts","name":"AEON-1470 nothing moves on hover, a live status change, an open tip or a fold","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/aeon-1470-list-titles.spec.ts","name":"AEON-1470 the Parent header counts the direct parents its cells show, with \"No parent\"","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
     {"kind":"browser","file":"tests/aeon-1470-list-titles.spec.ts","name":"AEON-1470 the fold label is English like the rest of the list","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
@@ -16062,6 +16068,8 @@
     ,
     {"kind":"node","file":"tests/codenames.test.ts","name":"the release history fills the lookup, skipping releases without a name","tags":["delete-candidate"],"tier":"GATED-FULL"}
     ,
+    {"kind":"node","file":"tests/columns.test.ts","name":"AEON-1470 Automatic wide extras give way in the same pipeline: the sorted one stays, every one that leaves is reported, and returns with 16 px to spare","tier":"ESSENTIAL"}
+    ,
     {"kind":"node","file":"tests/columns.test.ts","name":"AEON-1470 Parent migrates Epic, latches at 30 percent, and leaves phones, groups and the outline","tier":"ESSENTIAL"}
     ,
     {"kind":"node","file":"tests/columns.test.ts","name":"AEON-1470 Title is never under 240 px at 760–1440 px, for the 1388 set, every column and wide saved widths","tier":"ESSENTIAL"}
@@ -16305,6 +16313,8 @@
     {"kind":"node","file":"tests/graph-renderer.test.ts","name":"smart labels try alternative positions and reject a fully occupied screen","tier":"GATED-FULL"}
     ,
     {"kind":"node","file":"tests/graph-renderer.test.ts","name":"the height fit ignores distant satellites without mutating the layout","tier":"GATED-FULL"}
+    ,
+    {"kind":"node","file":"tests/group-figures.test.ts","name":"AEON-1470 a large compact mix counts in thousands, and the reserve samples cover every supported count","tier":"ESSENTIAL"}
     ,
     {"kind":"node","file":"tests/group-figures.test.ts","name":"AEON-1470 the compact priority mix is the most severe bucket and the rest as \"+N\"","tier":"ESSENTIAL"}
     ,
@@ -17219,6 +17229,8 @@
     {"kind":"node","file":"tests/work-aggregates.test.ts","name":"weighted 100% with an unestimated open leaf retains ETA and staleness in every mode","tier":"NIGHTLY"}
     ,
     {"kind":"node","file":"tests/work-aggregates.test.ts","name":"weighted progress rounded by the server to 100% retains ETA and staleness in every mode","tier":"NIGHTLY"}
+    ,
+    {"kind":"node","file":"tests/work-figures.test.ts","name":"AEON-1470 the Parent popup counts direct parents and says \"No parent\"; Epic counts stay the server's own","tier":"ESSENTIAL"}
     ,
     {"kind":"node","file":"tests/work-figures.test.ts","name":"Hide closed hides rows only when the view has rows in the hidden statuses","tier":"ESSENTIAL"}
     ,

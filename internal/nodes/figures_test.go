@@ -69,6 +69,10 @@ func TestProjectFiguresScopeBucketsCacheAndIsolation(t *testing.T) {
 			t.Fatalf("%s: %+v", group, whole.Groups[group])
 		}
 	}
+	// Parent counts each leaf's direct parent; the project is no parent (AEON-1470).
+	if pc := whole.Columns["parent"]; pc == nil || len(pc.Values) != 1 || pc.Values[0].Value != parent.Key || pc.Values[0].Count != 2 || pc.WithoutValue != 7 || pc.Rows != 9 {
+		t.Fatalf("parent figures: %+v", whole.Columns["parent"])
+	}
 	if whole.Groups["in_progress"].Statuses["qa"] != 1 || whole.Columns["estimate"].Numbers.Total != whole.TotalHours || *whole.Columns["estimate"].Numbers.Median != 4.5 || whole.Columns["estimate"].Included != 7 || whole.Columns["tokens"].Included != 9 || whole.Columns["created_at"].Rows != 10 {
 		t.Fatalf("column scope differs: %+v", whole.Columns)
 	}
@@ -241,12 +245,19 @@ func TestFigureColumnsLeafPolicyAndUsage(t *testing.T) {
 	rows[1].parentKind = "epic"
 	rows[2].parentKind = "work"
 	rows[3].parentKind = "ticket"
+	// Parent counts the direct parent the list shows, Epic the nearest work or epic above (AEON-1470): tasks
+	// F-4 and F-5 sit under ticket T-1 in epic E-1. The project is no parent.
+	rows[1].parentKey, rows[1].ep = "E-1", "E-1"
+	rows[2].parentKey, rows[2].ep = "W-1", "W-1"
+	rows[3].parentKind, rows[3].parentKey, rows[3].ep = "ticket", "T-1", "E-1"
+	rows[4].parentKind, rows[4].parentKey, rows[4].ep = "ticket", "T-1", "E-1"
+	rows[5].parentKind, rows[5].parentKey = "project", "P-1"
 	out := &projectFigures{Scope: figureScope{Rows: len(rows)}, MarksReleases: true, Groups: map[string]*figureGroup{}, Columns: map[string]*columnFigure{}}
 	for _, group := range []string{"completed", "done_not_live", "in_progress", "open"} {
 		out.Groups[group] = &figureGroup{Statuses: map[string]int{}}
 	}
 	fillFigureColumns(out, rows, true, now)
-	if out.TotalHours != 14 || out.Scope.Parents != 1 || out.Scope.Leaves != 8 || out.Scope.Closed != 1 || out.Scope.OpenRows != 8 || out.Scope.OpenWithParent != 3 || out.Columns["estimate"].Numbers.Total != 14 || *out.Columns["progress"].WeightedPercent != 50 || out.Columns["progress"].Included != 7 {
+	if out.TotalHours != 14 || out.Scope.Parents != 1 || out.Scope.Leaves != 8 || out.Scope.Closed != 1 || out.Scope.OpenRows != 8 || out.Scope.OpenWithParent != 4 || out.Columns["estimate"].Numbers.Total != 14 || *out.Columns["progress"].WeightedPercent != 50 || out.Columns["progress"].Included != 7 {
 		t.Fatalf("leaf/closed policy: %+v", out)
 	}
 	if out.Columns["tokens"].Measured.Total != 700 || out.Columns["tokens"].Estimated.Count != 0 || !out.Columns["tokens"].Partial || out.Columns["tokens"].WithoutValue != 1 {
@@ -257,6 +268,16 @@ func TestFigureColumnsLeafPolicyAndUsage(t *testing.T) {
 	}
 	if *out.Columns["tokens"].Typical.Median != 100 || out.Columns["tokens"].Typical.Approximate || out.Columns["model"].Values[0].Value != "used-model" {
 		t.Fatal("displayed typical or actual model differs from list")
+	}
+	parent, epic := out.Columns["parent"], out.Columns["epic"]
+	if parent == nil || epic == nil {
+		t.Fatalf("parent and epic figures both present: %v %v", parent, epic)
+	}
+	if len(parent.Values) != 2 || parent.Values[0].Value != "T-1" || parent.Values[0].Count != 2 || parent.Values[1].Value != "E-1" || parent.Values[1].Count != 1 || parent.Others != 1 || parent.WithoutValue != 4 || parent.Rows != 8 {
+		t.Fatalf("parent counts direct parents: %+v %+v", parent, parent.Values)
+	}
+	if len(epic.Values) != 2 || epic.Values[0].Value != "E-1" || epic.Values[0].Count != 3 || epic.Values[1].Value != "W-1" || epic.Others != 0 || epic.WithoutValue != 4 {
+		t.Fatalf("epic keeps its ancestor counts: %+v %+v", epic, epic.Values)
 	}
 	if out.Columns["assignee"].Others != 4 || len(out.Columns["assignee"].Values) != 3 || out.Columns["assignee"].WithoutValue != 1 || out.Columns["tag"].Values[0].Count != 7 || *out.Columns["created_at"].Stale != 7 || *out.Columns["eta_ready"].Running != 7 {
 		t.Fatal("top-N, tag deduplication or dates incorrect")

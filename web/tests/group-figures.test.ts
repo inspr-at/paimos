@@ -6,7 +6,7 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import type { ListQuery, ProjectFigures } from '../src/lib/api.ts'
-import { figuresCache, figuresLoader, groupCellText, groupParams, groupTipTitle, peopleText, phoneFacts, priorityMix, rowCount } from '../src/lib/groupFigures.ts'
+import { figuresCache, figuresLoader, groupCellText, groupParams, groupTipTitle, peopleText, phoneFacts, priorityMix, rowCount, widestCompactMixes } from '../src/lib/groupFigures.ts'
 import { filtersFromQuery, groupRows, type RowGroup } from '../src/lib/ticketList.ts'
 import { validFigures } from '../src/lib/workFigures.ts'
 import { FIGURES_NOW, viewFigures, wholeFigures } from './work-figures-fixture.ts'
@@ -149,4 +149,26 @@ test('AEON-1470 the compact priority mix is the most severe bucket and the rest 
   assert.equal(priorityMix(null), null)
   // No breaking space anywhere: neither form can wrap.
   for (const text of Object.values(mix({ high: 1200, medium: 3, low: 40 })!)) assert.doesNotMatch(text, / /)
+})
+
+// AEON-1470 (fix 7). Risk: a large group's compact mix ("25,000 high +25,000") outgrowing the room the priority column
+// reserves, so the cell ellipsizes; or the reserve missing a form the figures can produce.
+test('AEON-1470 a large compact mix counts in thousands, and the reserve samples cover every supported count', () => {
+  const f = viewFigures()
+  const mix = (counts: Record<string, number>) => priorityMix({ ...f, columns: { ...f.columns, priority: { ...f.columns.priority, values: Object.entries(counts).map(([value, count]) => ({ value, count, hours: 0 })) } } })!
+  // A 50,000-ticket group: the full form keeps every digit (it shows only where it fits, and in the tip).
+  assert.deepEqual(mix({ high: 25_000, low: 25_000 }), { full: '25,000\u00a0high\u00a0·\u00a025,000\u00a0low', compact: '25K\u00a0high\u00a0+25K' })
+  assert.equal(mix({ medium: 999, low: 1_000 }).compact, '999\u00a0med\u00a0+1K')
+  assert.equal(mix({ high: 49_999, low: 1 }).compact, '50K\u00a0high\u00a0+1')
+  // Each side of every compact mix up to the 50,000-ticket bound is at most three characters, as wide as "888" or
+  // "88K" in tabular digits; the reserve measures exactly those, for every word.
+  const samples = widestCompactMixes()
+  assert.equal(samples.length, 12)
+  for (const word of ['high', 'med', 'low']) for (const sides of [['888', '888'], ['888', '88K'], ['88K', '888'], ['88K', '88K']]) {
+    assert.ok(samples.includes(`${sides[0]}\u00a0${word}\u00a0+${sides[1]}`), `${word} ${sides.join()}`)
+  }
+  for (const total of [1, 9, 999, 1_000, 1_499, 9_999, 25_000, 50_000]) for (const top of [1, Math.floor(total / 2), total]) {
+    const [first, , rest] = mix(top === total ? { high: total } : { high: top, low: total - top }).compact.split('\u00a0')
+    for (const side of [first, rest?.slice(1)].filter(Boolean)) assert.match(side!, /^(\d{1,3}|\d{1,2}K)$/, `${total}/${top}`)
+  }
 })

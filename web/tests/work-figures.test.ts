@@ -79,7 +79,7 @@ test('column popups have a fixed shape and the design\'s words', () => {
   // Reserved top-N lines without a value are blank, and Others shows only with a tail (Tick, fix round 6).
   assert.deepEqual(show('cost').lines, ['AIT core 412h · $1.9k', null, null, null])
   assert.deepEqual(show('suggested').lines, [null, null, null, 'None 166'])
-  assert.deepEqual(show('parent').lines, ['AIT-12 40', 'AIT-3 22', 'Others 9', 'No epic 95'])
+  assert.deepEqual(show('parent').lines, ['AIT-40 31', 'AIT-12 18', 'Others 27', 'No parent 90'])
   // With Hide closed hiding rows of the view, "shown" becomes "incl. hidden rows".
   assert.equal(show('estimate', { ...ctx, hiddenRows: true }).foot, '139 of 166 incl. hidden rows · closed left out')
   // The Estimate total is the header total.
@@ -91,14 +91,14 @@ test('top-N popups keep their lines reserved but blank, and name models as the M
   const figures = wholeFigures(), ctx = { hiddenRows: false, now: FIGURES_NOW }
   const sparse = { ...figures, columns: { ...figures.columns,
     model: { ...figures.columns.model, values: [{ value: 'gpt-6.1-sol', count: 4, hours: 0 }], others: 0 },
-    epic: { ...figures.columns.epic, values: [{ value: 'AIT-12', count: 3, hours: 0 }], others: 0 },
+    parent: { ...figures.columns.parent, values: [{ value: 'AIT-40', count: 3, hours: 0 }], others: 0 },
     release: { ...figures.columns.release, values: [], others: 0 },
     tag: { ...figures.columns.tag, values: [{ value: 'bug', count: 2, hours: 0 }], others: 0 },
     assignee: { ...figures.columns.assignee, values: [{ value: 'AIT lead', kind: 'agent' as const, count: 7, hours: 0 }], others: 0 },
   } }
   const lines = (id: Parameters<typeof columnTip>[0], context: Parameters<typeof columnTip>[2] = ctx) => columnTip(id, sparse, context)!.lines.map(l => l && [l.label, l.value, l.note ?? ''].filter(Boolean).join(' '))
   assert.deepEqual(lines('model'), ['gpt-6.1-sol 4', null, null, null])
-  assert.deepEqual(lines('parent'), ['AIT-12 3', null, null, 'No epic 95'])
+  assert.deepEqual(lines('parent'), ['AIT-40 3', null, null, 'No parent 90'])
   assert.deepEqual(lines('release'), [null, null, null, 'No release 58'])
   assert.deepEqual(lines('tags'), ['bug 2', null, null, 'Untagged 101'])
   assert.deepEqual(lines('assignee'), ['AIT lead 7 agent', null, null, null])
@@ -135,4 +135,20 @@ test('only a figures object counts as figures', () => {
   assert.equal(validFigures(null), false)
   assert.equal(validFigures({ ...wholeFigures(), groups: { completed: { hours: 1, tickets: 1, statuses: {} } } }), false)
   assert.equal(validFigures({ ...wholeFigures(), total_hours: 'many' }), false)
+})
+
+// AEON-1470 (fix 7). Risk: the Parent header counting each ticket's epic ancestor while its cells show the direct parent,
+// so a task under a ticket adds to the epic instead of the ticket on screen; or Parent quietly borrowing Epic's counts.
+test('AEON-1470 the Parent popup counts direct parents and says "No parent"; Epic counts stay the server\'s own', () => {
+  const figures = wholeFigures(), ctx = { hiddenRows: false, now: FIGURES_NOW }
+  assert.equal(FIGURE_COLUMNS.parent!.key, 'parent')
+  const tip = columnTip('parent', figures, ctx)!
+  assert.deepEqual(tip.lines.map(l => l && `${l.label} ${l.value}`), ['AIT-40 31', 'AIT-12 18', 'Others 27', 'No parent 90'])
+  // The epic column is still there, unchanged, and none of its counts reach the Parent popup.
+  assert.deepEqual(figures.columns.epic.values!.map(v => [v.value, v.count]), [['AIT-12', 40], ['AIT-3', 22]])
+  assert.ok(!tip.lines.some(l => l?.label === 'AIT-3'))
+  // A server without direct-parent figures gives Parent no popup rather than the epic counts.
+  const older = { ...figures.columns }
+  delete older.parent
+  assert.equal(columnTip('parent', { ...figures, columns: older }, ctx), null)
 })

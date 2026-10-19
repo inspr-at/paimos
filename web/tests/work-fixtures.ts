@@ -143,7 +143,11 @@ export function fixtures(options: MockOptions = {}) {
   const people: { id: string; name: string; has_avatar?: boolean }[] = [{ ...me }, { ...mira }]
   // Agents working right now (AEON-184): GET /api/harness-sessions/live items.
   const live: LiveAgentMock[] = []
-  return { projects, nodes, people, activity, relations, attachments, preferences, events, views, batches, live, counter: { next: 100 } }
+  return {
+    projects, nodes, people, activity, relations, attachments, preferences, events, views, batches, live, counter: { next: 100 },
+    // A spec may reshape one figures answer, e.g. counts beyond what the fixture's rows can hold (AEON-1470).
+    figuresHook: null as ((figures: ReturnType<typeof mockFigures>, query: URLSearchParams) => void) | null,
+  }
 }
 // A 1x1 PNG for every attachment variant.
 export const PNG = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==', 'base64')
@@ -705,7 +709,9 @@ export async function mockWork(page: Page, data: Fixtures, options: MockOptions 
       const within = new URLSearchParams(query)
       if (!within.get('within')) within.set('within', figuresFor[1])
       if (!within.get('kind')) within.set('kind', 'work,ticket,task,epic')
-      return route.fulfill({ json: mockFigures(data, figuresFor[1], matching(within, false), within, bucketOf) })
+      const figures = mockFigures(data, figuresFor[1], matching(within, false), within, bucketOf)
+      data.figuresHook?.(figures, within)
+      return route.fulfill({ json: figures })
     }
     if (path === '/api/nodes' && method === 'GET') {
       const kinds = listParam(query, 'kind')
@@ -924,6 +930,8 @@ function mockFigures(data: Fixtures, project: string, rows: MockNode[], query: U
       priority: counted(n => typeof n.fields.priority === 'string' ? n.fields.priority : ''),
       assignee: { ...counted(n => personName(data, n.fields.assignee), 3), values: counted(n => personName(data, n.fields.assignee), 3).values.map(v => ({ ...v, kind: 'person' })) },
       epic: counted(n => epicAbove(n, data)?.key ?? '', 2),
+      // The direct parent other than the project, as the Parent column shows it.
+      parent: counted(n => { const up = n.parent_id ? byId.get(n.parent_id) : undefined; return up && up.kind_slug !== 'project' ? up.key : '' }, 2),
       release: counted(release, 2),
       suggested_release: counted(n => labelOf(n.fields.suggested_release), 2),
       tag: counted(n => tagNames(n)[0]?.name ?? '', 5),

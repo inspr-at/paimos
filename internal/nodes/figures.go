@@ -227,6 +227,7 @@ type figureRow struct {
 	labels       map[string]any
 	ep           string
 	parentKind   string
+	parentKey    string
 	assignee     string
 	assigneeKind string
 	eta          *columnETA
@@ -334,7 +335,7 @@ func readFigureRows(ctx context.Context, tx pgx.Tx, q listQuery) ([]figureRow, e
  f.kind_slug IN ('work','ticket','task','epic') AND ` + figureLeafSQL("n.id") + `,
  ` + estimateHoursSQL("n.fields") + `::float8,
  CASE WHEN octet_length(n.fields::text)<=65536 THEN n.fields END,
- coalesce(ap.name,worker.shown_name,''),coalesce(ap.kind,'agent'),coalesce(epic.key,''),coalesce(pk.slug,'')
+ coalesce(ap.name,worker.shown_name,''),coalesce(ap.kind,'agent'),coalesce(epic.key,''),coalesce(pk.slug,''),coalesce(dpar.key,'')
  FROM filtered f JOIN nodes n ON n.id=f.id
  LEFT JOIN figure_states cfg ON cfg.kind_id=n.kind_id AND cfg.norm=` + workStateNormSQL("n.state") + `
  LEFT JOIN principals ap ON ap.id=f.assignee_id::uuid AND ap.tenant_id=n.tenant_id
@@ -365,7 +366,7 @@ func readFigureRows(ctx context.Context, tx pgx.Tx, q listQuery) ([]figureRow, e
 		var row figureRow
 		var raw []byte
 		var project *string
-		if err := result.Scan(&row.item.ID, &row.item.Key, &row.item.KindID, &row.item.KindSlug, &row.item.State, &row.item.CreatedAt, &row.item.UpdatedAt, &project, &row.status, &row.bucket, &row.leaf, &row.hours, &raw, &row.assignee, &row.assigneeKind, &row.ep, &row.parentKind); err != nil {
+		if err := result.Scan(&row.item.ID, &row.item.Key, &row.item.KindID, &row.item.KindSlug, &row.item.State, &row.item.CreatedAt, &row.item.UpdatedAt, &project, &row.status, &row.bucket, &row.leaf, &row.hours, &raw, &row.assignee, &row.assigneeKind, &row.ep, &row.parentKind, &row.parentKey); err != nil {
 			return nil, err
 		}
 		bytes += len(raw)

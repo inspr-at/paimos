@@ -83,7 +83,7 @@ components:
             open: {$ref: '#/components/schemas/WorkFigureGroup'}
         columns:
           type: object
-          description: "key, status, priority, assignee, epic, release, suggested_release, tag, cost_unit, model, estimate, tokens, cost, created_at, updated_at, eta_ready and progress. Title has no figures. Key and dates count all rows; other columns count leaves. Estimate and Progress exclude Closed; Tokens and Cost retain it. Cost is omitted without harness.read."
+          description: "key, status, priority, assignee, epic, parent, release, suggested_release, tag, cost_unit, model, estimate, tokens, cost, created_at, updated_at, eta_ready and progress. Epic counts each leaf's nearest work or epic ancestor; parent counts its direct parent other than the project. Title has no figures. Key and dates count all rows; other columns count leaves. Estimate and Progress exclude Closed; Tokens and Cost retain it. Cost is omitted without harness.read."
           additionalProperties: {$ref: '#/components/schemas/ColumnFigures'}
     WorkFigureGroup:
       type: object

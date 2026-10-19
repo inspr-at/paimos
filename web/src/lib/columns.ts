@@ -136,26 +136,46 @@ export function widthOf(id: string, prefs: ListPrefs | null | undefined, definit
 // list's sort fields; previous: the columns this table left out last time.
 export interface ColumnFit { mins?: Partial<Record<string, number>>; reserve?: number; sorted?: readonly string[]; previous?: readonly string[] }
 
-// Whole columns leave, in GIVE_WAY order, only while the chosen ones do not fit
-// even at their minimum widths beside Title's minimum. Widths alone never decide
-// it (they give way first, in layoutWidths), so hover, live updates, more rows
-// or a folded group cannot change the set. A column the list is sorted by stays;
-// the next one leaves instead. One that left returns with RETURN_ROOM to spare.
-export function giveWay(ids: ColumnId[], tableWidth: number, fit: ColumnFit = {}): { ids: ColumnId[]; dropped: ColumnId[] } {
+// How many of `candidates` leave, first ones first: the fewest whose leaving lets
+// `need` (shrinking by each one's `size`) fit `room`. Ones that left last time
+// stay out until they fit with RETURN_ROOM to spare.
+function leaving(candidates: ColumnId[], need: number, size: (id: ColumnId) => number, room: number, previous: ReadonlySet<string>): number {
+  const left = [need]
+  for (const id of candidates) left.push(left[left.length - 1] - size(id))
+  const fewest = (width: number) => { const k = left.findIndex(total => total <= width); return k === -1 ? candidates.length : k }
+  const before = candidates.findIndex(id => !previous.has(id))
+  return Math.min(Math.max(before === -1 ? candidates.length : before, fewest(room)), fewest(room - RETURN_ROOM))
+}
+
+// One give-way for every chosen column (AEON-1470). In Automatic, the columns a
+// wide table adds on its own (`automatic`: their designed widths) step aside
+// first, in WIDE_EXTRAS order, while Title would get less than TITLE_ROOM beside
+// them. Then whole columns leave, in GIVE_WAY order, only while the rest do not
+// fit even at their minimum widths beside Title's minimum. Widths alone never
+// decide it (they give way first, in layoutWidths), so hover, live updates, more
+// rows or a folded group cannot change the set. A column the list is sorted by
+// stays in both steps; the next one leaves instead. Every column that leaves is
+// in `dropped`, and returns with RETURN_ROOM to spare.
+export function giveWay(ids: ColumnId[], tableWidth: number, fit: ColumnFit = {}, automatic?: (id: ColumnId) => number): { ids: ColumnId[]; dropped: ColumnId[] } {
   if (!(tableWidth > 0)) return { ids, dropped: [] }
   const min = (id: ColumnId) => fit.mins?.[id] ?? COLUMN_BY_ID.get(id)!.min
   const sorted = new Set(fit.sorted ?? [])
   const keeps = (id: ColumnId) => { const sort = COLUMN_BY_ID.get(id)?.sort; return (!!sort && sorted.has(sort)) || (id === 'list_cost' && sorted.has('paid')) }
-  const candidates = GIVE_WAY.filter(id => ids.includes(id) && !keeps(id))
-  // need[k]: the width the chosen columns need with the first k candidates gone.
-  const need = [ids.reduce((sum, id) => sum + min(id), fit.reserve ?? 0)]
-  for (const id of candidates) need.push(need[need.length - 1] - min(id))
-  const fewest = (room: number) => { const k = need.findIndex(width => width <= room); return k === -1 ? candidates.length : k }
   const previous = new Set(fit.previous ?? [])
-  const before = candidates.reduce((k, id, index) => previous.has(id) ? index + 1 : k, 0)
-  const k = Math.min(Math.max(before, fewest(tableWidth)), fewest(tableWidth - RETURN_ROOM))
-  const dropped = candidates.slice(0, k)
-  return { ids: ids.filter(id => !dropped.includes(id)), dropped }
+  const dropped: ColumnId[] = []
+  let shown = ids
+  const leave = (candidates: ColumnId[], k: number) => {
+    dropped.push(...candidates.slice(0, k))
+    shown = shown.filter(id => !dropped.includes(id))
+  }
+  if (automatic) {
+    const designed = (id: ColumnId) => id === 'title' ? TITLE_ROOM : Math.max(automatic(id), min(id))
+    const extras = WIDE_EXTRAS.filter(id => shown.includes(id) && !keeps(id))
+    leave(extras, leaving(extras, shown.reduce((sum, id) => sum + designed(id), fit.reserve ?? 0), designed, tableWidth, previous))
+  }
+  const candidates = GIVE_WAY.filter(id => shown.includes(id) && !keeps(id))
+  leave(candidates, leaving(candidates, shown.reduce((sum, id) => sum + min(id), fit.reserve ?? 0), min, tableWidth, previous))
+  return { ids: shown, dropped }
 }
 
 // The columns to show, in order. `customised` is true when a saved choice applies;
@@ -178,15 +198,10 @@ export function visibleColumns(tableWidth: number, options: { phone: boolean; pr
   // it as the structure, so the column leaves before layout, saved ticks included.
   // That hide is not a width drop: the other columns stay as they were.
   if (options.phone || options.hideParent) chosen.delete('parent')
-  let ids = orderOf(prefs).filter(id => chosen.has(id))
-  const total = (title: number) => ids.reduce((sum, id) => sum + (id === 'title' ? title : widthOf(id, prefs)), 0)
-  // Columns a wide table adds on its own leave first when Title would get cramped.
-  if (!customised) for (const id of WIDE_EXTRAS) {
-    if (total(TITLE_ROOM) <= tableWidth || tableWidth <= 0) break
-    ids = ids.filter(x => x !== id)
-  }
-  // Phone cards grow downward; desktop columns give way beside Title's minimum.
-  const fit = options.phone ? { ids, dropped: [] } : giveWay(ids, tableWidth, options.fit)
+  const ids = orderOf(prefs).filter(id => chosen.has(id))
+  // Phone cards grow downward; desktop columns give way beside Title, the
+  // automatic wide extras first.
+  const fit = options.phone ? { ids, dropped: [] } : giveWay(ids, tableWidth, options.fit, customised ? undefined : id => widthOf(id, prefs))
   return { columns: fit.ids.map(id => COLUMN_BY_ID.get(id)!), customised, dropped: fit.dropped }
 }
 

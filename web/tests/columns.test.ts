@@ -417,6 +417,37 @@ test('AEON-1470 the set depends only on width, chosen columns, minimums and sort
   assert.ok(wider.dropped.length < narrow.dropped.length && narrow.dropped.slice(0, wider.dropped.length).join() === wider.dropped.join())
 })
 
+// AEON-1470 (fix 7). Risk: Automatic's wide extras stepping aside outside the give-way, so the column the list is sorted
+// by goes too, Display is never told what the width hides, and the set flaps at the extras' threshold.
+test('AEON-1470 Automatic wide extras give way in the same pipeline: the sorted one stays, every one that leaves is reported, and returns with 16 px to spare', () => {
+  const present = { assigned: true, parent: true, estimate: true, release: true, tags: true, model: true, tokens: true, list_cost: true, suggested: true, progress: true, eta: true }
+  const at = (width: number, fit: ColumnFit = {}, shown: typeof present | { assigned: true; estimate: true; release: true; tags: true } = present) => {
+    const out = visibleColumns(width, { phone: false, present: shown, costAllowed: true, fit: { mins: GRID_MINS, ...fit } })
+    return { ids: out.columns.map(column => column.id), dropped: out.dropped }
+  }
+  const chosen = [...automaticColumns(1800, present)].sort()
+  // 1800 px: every minimum fits beside Title's, yet Title keeps its automatic room; the extras leave in their order.
+  const plain = at(1800)
+  assert.deepEqual(plain.dropped, ['suggested', 'list_cost', 'tokens', 'model', 'estimate', 'tags'])
+  assert.deepEqual([...plain.ids, ...plain.dropped].sort(), chosen, 'every chosen column is either shown or reported')
+  // Sorted by Tokens: Tokens stays, the next extra leaves instead, and each hidden one is still reported.
+  const sorted = at(1800, { sorted: ['tokens'] })
+  assert.ok(sorted.ids.includes('tokens'), sorted.ids.join())
+  assert.deepEqual(sorted.dropped, ['suggested', 'list_cost', 'model', 'estimate', 'tags'])
+  assert.deepEqual([...sorted.ids, ...sorted.dropped].sort(), chosen)
+  // Legacy Paid sorts keep Cost the same way.
+  assert.ok(at(1800, { sorted: ['paid'] }).ids.includes('list_cost'))
+  // Estimate returns at 1560 px beside 420 px of Title; once it left, ±8 px around there keeps it out until 16 px spare.
+  const small = { assigned: true, estimate: true, release: true, tags: true } as const
+  assert.deepEqual(at(1559, {}, small).dropped, ['estimate'])
+  assert.deepEqual(at(1560, {}, small).dropped, [])
+  for (const width of [1552, 1568, 1575]) assert.deepEqual(at(width, { previous: ['estimate'] }, small).dropped, ['estimate'], `${width}`)
+  assert.deepEqual(at(1576, { previous: ['estimate'] }, small).dropped, [])
+  // A saved choice has no automatic extras: only the minimums decide, so 1800 px keeps every chosen column.
+  const saved = visibleColumns(1800, { phone: false, costAllowed: true, prefs: { visible: chosen.filter(id => id !== 'key' && id !== 'title') as ColumnId[] }, fit: { mins: GRID_MINS } })
+  assert.deepEqual(saved.dropped, [])
+})
+
 // AEON-1470 Parent: the direct parent is a column. Risk: a saved Epic choice lost or resized, the 30% default flipping
 // after the first reading, Parent crowding Title under 240 px, or Parent drawn on a phone, in a parent group, or in the outline.
 test('AEON-1470 Parent migrates Epic, latches at 30 percent, and leaves phones, groups and the outline', () => {

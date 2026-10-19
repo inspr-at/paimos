@@ -10,7 +10,7 @@ import { releaseCell, type NativeReleaseView } from '../../lib/releaseMembership
 import { agentKey, ticketWorkers, withServerLead, type LiveAgent } from '../../lib/liveAgents'
 import { useLiveAgents } from '../../stores/liveAgents'
 import { groupOrderTip, rowOrderTip, selectLoadedGroup, type GroupBy, type RowGroup, type EpicRef, type TicketRow } from '../../lib/ticketList'
-import { GROUP_COLUMN, groupCellText, groupTipTitle, MIX_PRIORITY_MIN, peopleText, phoneFacts, priorityMix, rowCount } from '../../lib/groupFigures'
+import { GROUP_COLUMN, groupCellText, groupTipTitle, MIX_PRIORITY_MIN, peopleText, phoneFacts, priorityMix, rowCount, widestCompactMixes } from '../../lib/groupFigures'
 import type { GroupFigureState } from '../../lib/useGroupFigures'
 import type { OutlineEntry, TreeMeta } from '../../lib/outline'
 import { isWorkParent, workIcon, workLabel } from '../../lib/workVocabulary'
@@ -329,25 +329,35 @@ const tipGroup = computed(() => {
   return { group, column, figures: state?.figures ?? null, failed: state?.failed ?? null, title: groupTipTitle(groupName(group), group.total), summary: mix && mixText(mix) !== mix.full ? mix.full : undefined }
 })
 // ---------- The group rows' priority mix (AEON-1470 F1): the full mix when it fits the cell, else "3 high +3" ----------
-// A hidden meter in the cells' own type measures each mix once (again after the web font lands). The room comes from
-// the column's width, so hover, tips, live updates and folding never switch the form; the cell never ellipsizes.
-const mixMeter = ref<HTMLElement>()
+// A hidden meter in the cells' own type (12 px, regular, tabular digits) measures each mix once, again after the web
+// font lands. It is made on first use, so the first layout already knows the reserve. The room comes from the column's
+// width, so hover, tips, live updates and folding never switch the form; the cell never ellipsizes.
 const fontEpoch = ref(0)
 const mixWidths = new Map<string, number>()
+let mixMeter: HTMLElement | null = null
 function mixWidth(text: string): number {
   void fontEpoch.value
-  const meter = mixMeter.value
-  if (!meter) return 0
+  if (typeof document === 'undefined') return 0
   let measured = mixWidths.get(text)
   if (measured === undefined) {
-    meter.textContent = text
-    measured = meter.getBoundingClientRect().width
+    if (!mixMeter) {
+      mixMeter = document.createElement('span')
+      mixMeter.setAttribute('aria-hidden', 'true')
+      mixMeter.style.cssText = 'position:absolute;top:0;left:0;visibility:hidden;pointer-events:none;white-space:nowrap;font-size:12px;font-weight:400;line-height:16px;font-variant-numeric:tabular-nums'
+      document.body.append(mixMeter)
+    }
+    mixMeter.textContent = text
+    measured = mixMeter.getBoundingClientRect().width
     mixWidths.set(text, measured)
   }
   return measured
 }
+onBeforeUnmount(() => { mixMeter?.remove(); mixMeter = null })
 // The cell's padding is 12 px on each side (.group-row td.group-fig).
-const mixRoom = computed(() => Math.max(0, (colWidth('priority') ?? 0) - 24))
+const MIX_PADDING = 24
+const mixRoom = computed(() => Math.max(0, (colWidth('priority') ?? 0) - MIX_PADDING))
+// The priority column keeps room for the widest compact mix any supported count makes, measured once (AEON-1470).
+const mixReserve = computed(() => figuresRow.value ? Math.ceil(Math.max(...widestCompactMixes().map(mixWidth))) + MIX_PADDING : 0)
 function mixText(mix: NonNullable<ReturnType<typeof priorityMix>>) { return Math.ceil(mixWidth(mix.full)) <= mixRoom.value ? mix.full : mix.compact }
 const tipWide = (id: string, figures: ProjectFigures | null) => { const def = figureColumn(id, figures); return def ? def.wide ? 'wide' : 'fig' : 'auto' }
 function groupCellEnter(event: PointerEvent, group: RowGroup, id: string) {
@@ -374,7 +384,7 @@ const keyWhole = ref(0)
 function gridMin(def: ColumnDef): number {
   if (def.id === 'key') return Math.max(def.min, keySlots.value.min, hasSavedWidth('key', props.prefs) ? 0 : keyWhole.value)
   if (def.id === 'title') return def.min + (instance?.slots['cell-title'] ? 0 : 24) + (coarse.value && !phone.value ? 66 : 0)
-  if (def.id === 'priority' && figuresRow.value) return Math.max(def.min, MIX_PRIORITY_MIN)
+  if (def.id === 'priority' && figuresRow.value) return Math.max(def.min, MIX_PRIORITY_MIN, mixReserve.value)
   return def.min
 }
 // Title keeps its minimum (AEON-1470): widths beside it give way first (layoutWidths), then whole columns
@@ -389,7 +399,8 @@ const layout = computed(() => {
   droppedBefore = out.dropped
   return out
 })
-const columns = computed(() => withHostColumns(layout.value.columns, props.extraColumns).map(def => ({ ...def, min: gridMin(def), field: def.sort, cls: CLS[def.id as ColumnId] ?? 'c-host' })))
+// A priority column that reserves the compact mix starts at least that wide.
+const columns = computed(() => withHostColumns(layout.value.columns, props.extraColumns).map(def => ({ ...def, min: gridMin(def), width: def.id === 'priority' ? Math.max(def.width, gridMin(def)) : def.width, field: def.sort, cls: CLS[def.id as ColumnId] ?? 'c-host' })))
 const definitions = computed<ReadonlyMap<string, ColumnDef>>(() => new Map<string, ColumnDef>([...COLUMN_BY_ID, ...columns.value.map(def => [def.id, def] as const)]))
 const hostIds = computed(() => new Set(columns.value.filter(column => !COLUMN_BY_ID.has(column.id as ColumnId)).map(column => column.id)))
 const customised = computed(() => layout.value.customised || !!hostIds.value.size)
@@ -1277,7 +1288,6 @@ defineExpose({
         </template>
       </tbody>
     </table>
-    <span v-if="figuresRow" ref="mixMeter" class="gf-meter" aria-hidden="true" />
     <FigureTip v-if="tipColumn && columnFigures" :width="tipWidth">
       <ColumnFigureTip
         :column-id="tipColumn.id" :label="tipColumn.label" :sortable="(!!tipColumn.field || groupsFlip(tipColumn.id)) && !sortDisabled" :hint="tipHint" :figures="columnFigures.figures" :failed="columnFigures.failed"
@@ -1635,8 +1645,6 @@ button.release-chip:focus-visible { box-shadow: var(--focus-ring); }
 .gf-cell { display: flex; align-items: center; gap: 6px; min-width: 0; height: 35px; white-space: nowrap; color: var(--ink-3); font-size: 12px; line-height: 16px; font-variant-numeric: tabular-nums; }
 .group-fig.end .gf-cell { justify-content: flex-end; }
 .gf-text { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
-/* Measures the priority mix in the cells' own type, out of the layout (AEON-1470). */
-.gf-meter { position: absolute; top: 0; left: 0; visibility: hidden; pointer-events: none; white-space: nowrap; font-size: 12px; line-height: 16px; font-variant-numeric: tabular-nums; }
 @media (hover: hover) { .group-row:hover .gf-cell, .group-row:hover .group-stale { color: var(--ink-2); } }
 .gf-agents { display: inline-flex; align-items: center; gap: 2px; flex: none; }
 .gf-more { margin-left: 2px; font: 500 11px/1 var(--mono); }

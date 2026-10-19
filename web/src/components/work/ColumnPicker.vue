@@ -3,6 +3,7 @@
 import { computed, nextTick, ref, useId } from 'vue'
 import { COLUMN_BY_ID, PINNED, type ColumnId } from '../../lib/columns'
 import AppIcon from '../AppIcon.vue'
+import { vClipTip } from '../../directives/clipTip'
 
 // Show, hide and reorder list columns: drag a row, or Alt+Up/Down on it. The
 // pinned columns always lead. Reset goes back to the list's own choice
@@ -68,7 +69,7 @@ function drop(target: T) {
         <span class="pin-note">Always</span>
       </li>
       <li
-        v-for="(id, index) in free" :key="id" class="row" :class="{ off: !shown.has(id), dragging: dragging === id, over: over === id, noted: !reserveNotes && !!notes?.[id], 'away-row': away.has(id) && shown.has(id) }" draggable="true"
+        v-for="(id, index) in free" :key="id" class="row" :class="{ off: !shown.has(id), dragging: dragging === id, over: over === id, noted: !reserveNotes && !!notes?.[id] }" draggable="true"
         @dragstart="dragging = id" @dragend="dragging = null; over = null" @dragover.prevent="over = id" @dragleave="over = over === id ? null : over" @drop.prevent="drop(id)"
       >
         <label class="row-label">
@@ -76,8 +77,7 @@ function drop(target: T) {
             type="checkbox" class="check" :checked="shown.has(id)" :data-column-row="id" :aria-describedby="notes?.[id] ? `${hint} ${hint}-${id}` : hint"
             @change="toggle(id)" @keydown="keydown($event, id)"
           />
-          <span v-if="away.has(id) && shown.has(id)" class="name away"><span>{{ label(id) }}</span><span class="away-note">hidden at this width</span></span>
-          <span v-else class="name">{{ label(id) }}</span>
+          <span class="name line"><span v-clip-tip="label(id)" class="name-text">{{ label(id) }}</span><span v-if="away.has(id) && shown.has(id)" class="away-note">hidden at this width</span></span>
         </label>
         <span class="moves">
           <button type="button" class="icon-btn sm flat" :aria-label="`Move ${label(id)} up`" :disabled="index === 0" tabindex="-1" @click="step(id, -1)"><AppIcon name="chevron-up" :size="13" /></button>
@@ -118,10 +118,11 @@ function drop(target: T) {
 .check { width: 16px; height: 16px; margin: 0; accent-color: var(--teal); }
 .check:focus-visible { box-shadow: var(--focus-ring); border-radius: 4px; }
 .name { flex: 1; min-width: 0; }
-/* A ticked column the width leaves out: the note follows the name, and moves under it only when both do not fit. */
-.name.away { display: flex; flex-wrap: wrap; align-items: baseline; column-gap: 8px; }
-.away-note { font-size: 11.5px; color: var(--ink-3); white-space: nowrap; }
-.row.away-row { height: auto; min-height: 32px; padding-top: 6px; padding-bottom: 6px; }
+/* A ticked column the width leaves out (AEON-1470): the note follows the name on the row's one line, so ticking,
+   unticking or a width change never moves a checkbox or a row. A long name gives way first; its tip reads it whole. */
+.name.line { display: flex; align-items: baseline; gap: 8px; white-space: nowrap; }
+.name-text { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+.away-note { flex: none; font-size: 11.5px; color: var(--ink-3); }
 .pin-note { font-size: 11.5px; color: var(--ink-3); padding-right: 8px; }
 .moves { display: inline-flex; opacity: 0; }
 .row:hover .moves, .row:focus-within .moves { opacity: 1; }

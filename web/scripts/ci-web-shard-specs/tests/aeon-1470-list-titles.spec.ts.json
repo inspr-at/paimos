@@ -6,7 +6,7 @@
   },
   "spec": {
     "file": "tests/aeon-1470-list-titles.spec.ts",
-    "listedTests": 14,
+    "listedTests": 17,
     "weightSeconds": 22.195122,
     "weightSource": "unmeasured-test-rate"
   }
