@@ -9,6 +9,9 @@
 // many finished today ("8 done · 7 today · show"). Addendum (Markus's feedback, Tick's
 // decisions A and D): items and fold lines nest under the goal's content column, and
 // the goal name wraps to two lines instead of ending in "…".
+// AEON-1395: an epic uses the same anatomy with the epic icon; its progress is the
+// computed leaf-hours bar (no chart, no pen), "what's missing" lists its failing
+// entry checks, and its counts and folds keep their words together (NBSP).
 import { computed } from 'vue'
 import { RouterLink } from 'vue-router'
 import AppIcon from '../AppIcon.vue'
@@ -18,7 +21,7 @@ import GoalProgress from './GoalProgress.vue'
 import GoalItem from './GoalItem.vue'
 import type { GoalsPage } from './goalsPage'
 import { vClipTip } from '../../lib/clipTip'
-import { doneToday, hoursLeftLine, hoursLeftText, itemGroups, itemMatches, QUEUE_SHOWN, STATE_LABEL, type Goal, type GoalOutcome } from '../../lib/goals'
+import { doneToday, hoursLeftLine, hoursLeftText, itemGroups, itemMatches, nbsp, QUEUE_SHOWN, STATE_LABEL, type Goal, type GoalOutcome } from '../../lib/goals'
 import { averageRate, projectionText } from '../../lib/goalRate'
 import type { LiveAgent } from '../../lib/liveAgents'
 
@@ -50,7 +53,13 @@ const queuedMore = computed(() => filtering.value ? 0 : Math.max(0, groups.value
 const queuedRest = computed(() => !filtering.value && folds.value.queued ? groups.value.queued.slice(QUEUE_SHOWN) : [])
 const doneShown = computed(() => filtering.value || folds.value.done ? groups.value.done : [])
 const today = computed(() => doneToday(groups.value.done, props.now))
-const left = computed(() => hoursLeftText(props.goal.progress, done.value))
+const epic = computed(() => props.goal.kind === 'epic')
+const kindName = computed(() => epic.value ? 'Epic' : props.goal.kind === 'release' ? 'Release' : 'Goal')
+const kindIcon = computed(() => epic.value ? 'epic' : props.goal.kind === 'release' ? 'rocket' : 'target')
+// Epic copy keeps its words together: "~40 h left", "8 done", "· 7 today" never break (Tick's copy rules).
+const sp = computed(() => epic.value ? '\u00a0' : ' ')
+const words = (text: string) => epic.value ? nbsp(text) : text
+const left = computed(() => words(hoursLeftText(props.goal.progress, done.value)))
 const leftLine = computed(() => hoursLeftLine(props.goal.progress, done.value))
 const stepsDone = computed(() => props.goal.steps.filter(step => step.state === 'done').length)
 const nextText = computed(() => props.goal.next_step?.text ?? '')
@@ -82,23 +91,24 @@ const deskLink = computed(() => props.goal.waits.question_ids[0] ? { path: '/dec
       <span class="goal-keys"><span v-for="badge in keys" :key="badge.id" class="key-badge" :data-tip="badge.name">{{ badge.key }}</span></span>
       <div class="goal-main">
         <div class="goal-title">
-          <span class="kind" role="img" :aria-label="goal.kind === 'release' ? 'Release' : 'Goal'" :data-tip="goal.kind === 'release' ? 'Release' : 'Goal'"><AppIcon :name="goal.kind === 'release' ? 'rocket' : 'target'" :size="14" /></span>
+          <span class="kind" role="img" :aria-label="kindName" :data-tip="kindName"><AppIcon :name="kindIcon" :size="14" /></span>
           <span :id="`gn-${goal.id}`" v-clip-tip class="goal-name">{{ goal.title }}</span>
         </div>
         <span v-if="!done && nextText" class="goal-next"><span class="lbl">Next</span><span v-clip-tip class="txt">{{ nextText }}</span></span>
       </div>
       <div class="agents"><LiveAgents v-if="goalAgents.length" :agents="goalAgents" :project="project" variant="row" /></div>
       <span v-for="state in (['moving', 'queued', 'done'] as const)" :key="state" class="stat" :data-unknown="states ? 0 : 1" :data-zero="states && states[state] === 0 ? 1 : 0" :aria-label="statLabel(states?.[state], state)">{{ states ? states[state] : '–' }}</span>
-      <GoalProgress :goal="goal" :open="page.charts.has(goal.id)" :range="page.range.value" :entry="entry" :now="now" @toggle="page.toggleChart(goal.id)" @range="page.setRange" />
+      <GoalProgress :goal="goal" :open="!epic && page.charts.has(goal.id)" :range="page.range.value" :entry="entry" :now="now" :chart="!epic" @toggle="page.toggleChart(goal.id)" @range="page.setRange" />
       <RouterLink v-if="goal.waits.count" class="waits mono" :to="deskLink" :data-tip="waitsLabel" :aria-label="waitsLabel"><AppIcon name="person-wait" :size="14" /><span>{{ goal.waits.count }}</span></RouterLink>
       <span v-else />
-      <GoalEta class="goal-eta" :goal-id="goal.id" :eta="goal.eta" :passed="goal.passed" :done="done" :now="now" :projection="projection" :items="goal.items" reserve-left :left="left" :left-line="leftLine" />
+      <GoalEta class="goal-eta" :goal-id="goal.id" :eta="goal.eta" :passed="goal.passed" :done="done" :now="now" :projection="projection" :items="goal.items" reserve-left :left="left" :left-line="leftLine" :history="!epic" />
       <button type="button" class="icon-btn flat sm row-more" aria-haspopup="menu" :aria-expanded="menuOpen" :aria-label="`Actions for ${goal.title}`" @click="emit('menu', $event.currentTarget as HTMLElement)"><AppIcon name="more" :size="14" /></button>
     </div>
     <div :id="`body-${goal.id}`" class="goal-body" role="region" :aria-label="`${goal.title}, items`" :hidden="!open">
       <template v-if="open">
         <div v-if="!filtering && goal.steps.length" class="steps">
-          <p class="steps-head">What’s missing<span class="sub">{{ stepsDone }} of {{ goal.steps.length }} steps done</span></p>
+          <!-- An epic lists only what is missing, so it has no tally of steps done. -->
+          <p class="steps-head">What’s missing<span v-if="!epic" class="sub">{{ stepsDone }} of {{ goal.steps.length }} steps done</span></p>
           <ol>
             <li v-for="step in goal.steps" :key="step.id" class="step" :class="step.state">
               <span class="s-ic">
@@ -111,21 +121,21 @@ const deskLink = computed(() => props.goal.waits.question_ids[0] ? { path: '/dec
         </div>
         <p v-if="goal.expansion !== 'full'" class="too-large">This goal has too many items to list here.</p>
         <ul class="items">
-          <GoalItem v-for="item in [...groups.moving, ...queuedFirst]" :key="item.id" :item="item" :goal-id="goal.id" :agents="agentsOf(item.session_ids)" :project="project" :now="now" :wide="wideItems" />
+          <GoalItem v-for="item in [...groups.moving, ...queuedFirst]" :key="item.id" :item="item" :goal-id="goal.id" :agents="agentsOf(item.session_ids)" :project="project" :now="now" :wide="wideItems" :epic="epic" />
           <li v-if="queuedMore" class="fold-line">
             <button type="button" class="fold-btn" :aria-expanded="!!folds.queued" data-nav @click="page.toggleFold(goal.id, 'queued')">
-              <span class="f-ic"><AppIcon name="chevron-right" :size="12" /></span><b>{{ queuedMore }}</b> more queued<span class="act"><span :class="{ off: folds.queued }">· show</span><span :class="{ off: !folds.queued }">· hide</span></span>
+              <span class="f-ic"><AppIcon name="chevron-right" :size="12" /></span><b>{{ queuedMore }}</b>{{ sp }}more{{ sp }}queued<span class="act"><span :class="{ off: folds.queued }">·{{ sp }}show</span><span :class="{ off: !folds.queued }">·{{ sp }}hide</span></span>
             </button>
           </li>
           <!-- Opening a fold shows its items below it, so the fold line never moves. -->
-          <GoalItem v-for="item in queuedRest" :key="item.id" :item="item" :goal-id="goal.id" :agents="agentsOf(item.session_ids)" :project="project" :now="now" :wide="wideItems" />
-          <GoalItem v-for="item in groups.paused" :key="item.id" :item="item" :goal-id="goal.id" :agents="agentsOf(item.session_ids)" :project="project" :now="now" :wide="wideItems" />
+          <GoalItem v-for="item in queuedRest" :key="item.id" :item="item" :goal-id="goal.id" :agents="agentsOf(item.session_ids)" :project="project" :now="now" :wide="wideItems" :epic="epic" />
+          <GoalItem v-for="item in groups.paused" :key="item.id" :item="item" :goal-id="goal.id" :agents="agentsOf(item.session_ids)" :project="project" :now="now" :wide="wideItems" :epic="epic" />
           <li v-if="groups.done.length && !filtering" class="fold-line">
             <button type="button" class="fold-btn" :aria-expanded="!!folds.done" data-nav @click="page.toggleFold(goal.id, 'done')">
-              <span class="f-ic"><AppIcon name="chevron-right" :size="12" /></span><b>{{ groups.done.length }}</b> done<span v-if="today" class="today">· {{ today }} today</span><span class="act"><span :class="{ off: folds.done }">· show</span><span :class="{ off: !folds.done }">· hide</span></span>
+              <span class="f-ic"><AppIcon name="chevron-right" :size="12" /></span><b>{{ groups.done.length }}</b>{{ sp }}done<span v-if="today" class="today">·{{ sp }}{{ today }}{{ sp }}today</span><span class="act"><span :class="{ off: folds.done }">·{{ sp }}show</span><span :class="{ off: !folds.done }">·{{ sp }}hide</span></span>
             </button>
           </li>
-          <GoalItem v-for="item in doneShown" :key="item.id" :item="item" :goal-id="goal.id" :agents="[]" :project="project" :now="now" :wide="wideItems" />
+          <GoalItem v-for="item in doneShown" :key="item.id" :item="item" :goal-id="goal.id" :agents="[]" :project="project" :now="now" :wide="wideItems" :epic="epic" />
           <GoalItem v-for="item in groups.handed" :key="item.id" :item="item" :goal-id="goal.id" :agents="[]" :project="project" :now="now" :wide="wideItems" :detail="handedDetail(item)" />
         </ul>
       </template>

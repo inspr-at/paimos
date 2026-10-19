@@ -11,6 +11,8 @@
 // (Tick's decisions B and C): an opened goal's items are one line with their live
 // line in the Moving → Progress span when the counts show and the goal column gives
 // their key and label at least 280 px; otherwise the label runs to the ETA.
+// AEON-1395: Group › Epics shows the open epics in the same grid and anatomy; the
+// GOAL/EPIC header label swaps inside one box, so a switch moves no header cell.
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useRoute } from 'vue-router'
 import AppIcon from '../AppIcon.vue'
@@ -37,6 +39,9 @@ const route = useRoute()
 const root = ref<HTMLElement>()
 
 const person = computed(() => session.identity?.principal.kind === 'person')
+// A page without a group (older callers) shows goals.
+const epics = computed(() => props.page.group?.value === 'epics')
+const noun = computed(() => epics.value ? 'epic' : 'goal')
 const goals = computed(() => props.page.goals.value)
 const loaded = computed(() => props.page.loaded.value)
 const filtering = computed(() => props.page.filter.value !== 'all' || !!props.term.trim())
@@ -81,6 +86,7 @@ const head = (key: GoalSort) => HEAD.find(h => h.key === key)!
 const sortState = (key: GoalSort) => props.page.sort.value === key ? props.page.dir.value : undefined
 // The label is the control: its name says the column and, when it sorts the list, which way.
 const sortLabel = (key: GoalSort, label: string) => `Sort by ${label.toLowerCase()}${sortState(key) ? `, now ${sortState(key) === 'asc' ? 'ascending' : 'descending'}` : ''}`
+const headLabel = (key: GoalSort) => key === 'name' && epics.value ? 'Epic' : head(key).label
 const allOpen = computed(() => props.page.allOpen.value)
 
 // ---------- Row menu ----------
@@ -89,11 +95,11 @@ const menuItems = computed<RowAction[]>(() => {
   const goal = menu.value?.goal
   if (!goal) return []
   const open = props.page.isOpen(goal)
-  return [
-    { id: 'fold', label: open ? 'Collapse' : 'Expand', icon: open ? 'collapse' : 'expand', group: 1 },
-    { id: 'chart', label: props.page.charts.has(goal.id) ? 'Hide progress over time' : 'Show progress over time', icon: 'trending-up', group: 1, reason: goal.expansion !== 'full' ? 'This goal is too large to chart.' : undefined },
-    { id: 'copy', label: 'Copy link', icon: 'link', group: 2 },
-  ]
+  const fold: RowAction = { id: 'fold', label: open ? 'Collapse' : 'Expand', icon: open ? 'collapse' : 'expand', group: 1 }
+  const copy: RowAction = { id: 'copy', label: 'Copy link', icon: 'link', group: 2 }
+  // Epics have no recorded progress over time to chart.
+  if (goal.kind === 'epic') return [fold, copy]
+  return [fold, { id: 'chart', label: props.page.charts.has(goal.id) ? 'Hide progress over time' : 'Show progress over time', icon: 'trending-up', group: 1, reason: goal.expansion !== 'full' ? 'This goal is too large to chart.' : undefined }, copy]
 })
 function openMenu(goal: Goal, anchor: HTMLElement) { menu.value = menu.value?.goal.id === goal.id ? null : { goal, anchor } }
 function closeMenu(restore: boolean) { const at = menu.value; menu.value = null; if (restore) at?.anchor.focus() }
@@ -104,7 +110,7 @@ async function menuAction(action: string) {
   if (action === 'fold') props.page.toggle(goal.id)
   else if (action === 'chart') props.page.toggleChart(goal.id)
   else if (action === 'copy') {
-    try { await navigator.clipboard.writeText(new URL(`/?view=goals&goal=${encodeURIComponent(goal.key)}`, location.origin).href); toast(`Copied the link to ${goal.title}`) }
+    try { await navigator.clipboard.writeText(new URL(`/?view=goals${goal.kind === 'epic' ? '&group=epics' : ''}&goal=${encodeURIComponent(goal.key)}`, location.origin).href); toast(`Copied the link to ${goal.title}`) }
     catch { toast('The link could not be copied.', { tone: 'error' }) }
   }
 }
@@ -154,12 +160,15 @@ onBeforeUnmount(() => { window.removeEventListener('keydown', searchKey, true); 
 
 const quiet = computed(() => props.page.list.value?.quiet_projects ?? { count: 0, keys: [] })
 const more = computed(() => props.page.list.value?.next_cursor)
-const emptyTitle = computed(() => props.term.trim() ? `No goal matches “${props.term.trim()}”` : props.hiddenGroups ? 'All goals are in hidden groups' : filtering.value ? 'Nothing here' : props.page.hideDone.value && props.page.counts.value.all > 0 && !props.page.totalsPartial.value ? 'Every goal is done' : 'No goals yet')
+const everyDone = computed(() => props.page.hideDone.value && props.page.counts.value.all > 0)
+const emptyTitle = computed(() => props.term.trim() ? `No ${noun.value} matches “${props.term.trim()}”` : props.hiddenGroups ? `All ${noun.value}s are in hidden groups` : filtering.value ? 'Nothing here'
+  : everyDone.value && !props.page.totalsPartial.value ? `Every ${noun.value} is done` : epics.value ? 'No open epics in these projects.' : 'No goals yet')
+// E4 (Tick's spec): no open epics says only that, without examples.
 const emptyText = computed(() => props.term.trim() ? 'Check the spelling, or search by project or ticket key.'
   : props.hiddenGroups ? 'Show a group from the chips above.'
-    : filtering.value ? 'No goal has items in this state. Try another state.'
-      : props.page.hideDone.value && props.page.counts.value.all > 0 ? 'Done goals are hidden. Show them with Hide done (H).'
-        : 'Goals appear here once agents or people set them up for a project or the workspace.')
+    : filtering.value ? `No ${noun.value} has items in this state. Try another state.`
+      : everyDone.value ? `Done ${noun.value}s are hidden. Show them with Hide done (H).`
+        : epics.value ? '' : 'Goals appear here once agents or people set them up for a project or the workspace.')
 const canClear = computed(() => filtering.value)
 </script>
 
@@ -167,17 +176,17 @@ const canClear = computed(() => filtering.value)
   <div ref="root" class="goals-view">
     <div v-if="page.error.value && !loaded" class="state" role="alert">
       <AppIcon name="alert" :size="20" />
-      <h2>Goals could not be loaded</h2>
+      <h2>{{ epics ? 'Epics' : 'Goals' }} could not be loaded</h2>
       <p>{{ page.error.value }}</p>
       <button class="btn" type="button" @click="page.read()"><AppIcon name="refresh" :size="14" />Try again</button>
     </div>
     <template v-else>
-      <p v-if="loaded && page.totalsPartial.value" class="partial-line" role="status">Counts omit oversized goals.</p>
+      <p v-if="loaded && page.totalsPartial.value" class="partial-line" role="status">Counts omit oversized {{ noun }}s.</p>
       <div ref="grid" class="goal-grid" :data-items="wideItems ? 'wide' : 'stacked'">
         <GoalStatusNote v-if="loaded && page.statusNote.value" :note="page.statusNote.value" :now="now" />
         <GoalWaiting v-if="person" :goals="goals" />
         <template v-if="!loaded">
-          <ul class="sk-list" role="status" aria-label="Loading goals">
+          <ul class="sk-list" role="status" :aria-label="`Loading ${noun}s`">
             <li v-for="n in 6" :key="n" class="sk-row"><span class="skeleton" /><span class="ln"><span class="skeleton" /><span class="skeleton" /></span><span class="skeleton" /><span class="skeleton" /></li>
           </ul>
         </template>
@@ -188,8 +197,8 @@ const canClear = computed(() => filtering.value)
               <span class="lbl"><span :class="{ off: allOpen }">Expand all</span><span :class="{ off: !allOpen }">Collapse all</span></span>
             </button>
             <span />
-            <button v-for="h in [head('project'), head('name')]" :key="h.key" type="button" class="head-sort" :data-sort-dir="sortState(h.key)" :aria-label="sortLabel(h.key, h.label)" @click="page.setSort(h.key)">
-              <span>{{ h.label }}</span><AppIcon :name="page.sort.value === h.key && page.dir.value === 'desc' ? 'arrow-down' : 'arrow-up'" :size="11" class="sort-ind" />
+            <button v-for="h in [head('project'), head('name')]" :key="h.key" type="button" class="head-sort" :data-head="h.key" :data-sort-dir="sortState(h.key)" :aria-label="sortLabel(h.key, headLabel(h.key))" @click="page.setSort(h.key)">
+              <span v-if="h.key === 'name'" class="swap"><span :class="{ off: epics }">Goal</span><span :class="{ off: !epics }">Epic</span></span><span v-else>{{ h.label }}</span><AppIcon :name="page.sort.value === h.key && page.dir.value === 'desc' ? 'arrow-down' : 'arrow-up'" :size="11" class="sort-ind" />
             </button>
             <span />
             <button v-for="h in [head('moving'), head('queued'), head('done')]" :key="h.key" type="button" class="head-sort end h-stat" :data-sort-dir="sortState(h.key)" :aria-label="sortLabel(h.key, h.label)" @click="page.setSort(h.key)">
@@ -213,14 +222,14 @@ const canClear = computed(() => filtering.value)
         </template>
       </div>
       <div v-if="loaded && !goals.length" class="state">
-        <AppIcon :name="hiddenGroups ? 'folder' : 'target'" :size="20" />
+        <AppIcon :name="hiddenGroups ? 'folder' : epics ? 'epic' : 'target'" :size="20" />
         <h2>{{ emptyTitle }}</h2>
-        <p>{{ emptyText }}</p>
+        <p v-if="emptyText">{{ emptyText }}</p>
         <button v-if="canClear" class="btn" type="button" @click="emit('clear')">Clear filter</button>
       </div>
       <p v-if="loaded && more" class="more-line">
-        <span>{{ page.list.value?.truncated ? 'More goals than one page holds.' : 'More goals follow.' }}</span>
-        <button type="button" class="btn sm" :disabled="page.loadingMore.value" @click="page.loadMore()">{{ page.loadingMore.value ? 'Reading…' : 'Show more goals' }}</button>
+        <span>{{ page.list.value?.truncated ? `More ${noun}s than one page holds.` : `More ${noun}s follow.` }}</span>
+        <button type="button" class="btn sm" :disabled="page.loadingMore.value" @click="page.loadMore()">{{ page.loadingMore.value ? 'Reading…' : `Show more ${noun}s` }}</button>
       </p>
       <p v-if="page.error.value && loaded" class="more-line warn" role="status"><AppIcon name="alert" :size="13" />{{ page.error.value }}<button type="button" class="btn sm ghost" @click="page.read()">Try again</button></p>
       <div v-if="loaded && goals.length" class="card-foot">
@@ -231,7 +240,7 @@ const canClear = computed(() => filtering.value)
         <GoalFreshness :live="page.live.value" :eta-set-at="page.etaLastSetAt.value" :updated-at="page.updatedAt.value" :now="now" />
       </div>
     </template>
-    <RowMenu v-if="menu" :anchor="menu.anchor" :items="menuItems" :label="`Goal ${menu.goal.title}`" @select="menuAction" @close="closeMenu" />
+    <RowMenu v-if="menu" :anchor="menu.anchor" :items="menuItems" :label="`${menu.goal.kind === 'epic' ? 'Epic' : 'Goal'} ${menu.goal.title}`" @select="menuAction" @close="closeMenu" />
   </div>
 </template>
 
@@ -244,6 +253,10 @@ const canClear = computed(() => filtering.value)
 .goal-head::after { content: ''; position: absolute; left: -20px; right: -20px; bottom: 0; height: 1px; background: var(--line); }
 .head-sort { display: inline-flex; align-items: center; gap: 4px; justify-self: start; height: 26px; padding: 0 6px; margin-left: -6px; border: 0; border-radius: 6px; background: transparent; font: 500 10.5px/1 var(--mono); letter-spacing: .14em; text-transform: uppercase; color: var(--ink-3); font-variant-ligatures: none; white-space: nowrap; }
 .head-sort .sort-ind { flex: none; opacity: 0; }
+/* GOAL and EPIC share one box (AEON-1395): switching the group never changes the cell's width. */
+.head-sort .swap { display: inline-grid; }
+.head-sort .swap > span { grid-area: 1 / 1; }
+.head-sort .swap > .off { visibility: hidden; }
 .head-sort[data-sort-dir] { color: var(--ink-2); }
 .head-sort[data-sort-dir] .sort-ind { opacity: 1; }
 .head-sort.end { justify-self: end; margin-left: 0; margin-right: -6px; }

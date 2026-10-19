@@ -9,6 +9,8 @@ import { watchStreamHealth } from './streamHealth'
 
 export type GoalsLiveState = 'off' | 'connecting' | 'live' | 'reconnecting'
 export const GOAL_STREAM_EVENTS = ['goal.created', 'goal.updated', 'goal.items_changed', 'goal.eta_changed', 'goal.passed_changed', 'goal.status_note_changed'] as const
+// Group › Epics (AEON-1395) follows the work itself: its items, statuses, ticks and merges.
+export const EPIC_STREAM_EVENTS = [...GOAL_STREAM_EVENTS, 'node.created', 'node.updated', 'node.deleted', 'node.moved', 'node.project_moved', 'node.bulk_changed', 'node.entry_check_ticked', 'entry_check.ticked', 'status_autopilot.changed', 'delivery.merge_done'] as const
 
 export interface GoalsLiveSource {
   readyState?: number
@@ -24,6 +26,8 @@ export interface GoalsLiveOptions {
   open?: (url: string) => GoalsLiveSource | null
   retryMs?: readonly number[]
   url?: string
+  // The event types that mean the list may be stale (default: the goal events).
+  events?: readonly string[]
 }
 const CLOSED = 2
 
@@ -64,7 +68,7 @@ export function openGoalsLive(options: GoalsLiveOptions): { close(): void } {
       if (!first && !resumed) options.changed()
     }))
     stream.addEventListener('stream.ping', mine(() => {}))
-    for (const type of GOAL_STREAM_EVENTS) stream.addEventListener(type, mine(event => {
+    for (const type of options.events ?? GOAL_STREAM_EVENTS) stream.addEventListener(type, mine(event => {
       const id = Number(event.lastEventId)
       if (Number.isFinite(id) && id > (last ?? 0)) last = id
       options.changed()

@@ -9198,6 +9198,26 @@
     ,
     {"kind":"browser","file":"tests/from-classic.spec.ts","name":"sign-in returns to the classic resolver before opening its destination","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
+    {"kind":"browser","file":"tests/goals-epics.spec.ts","name":" › E6 390 dark: phones keep the epic rows and their essentials, 44 px Group targets, no overflow","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/goals-epics.spec.ts","name":" › E6 390 light: phones keep the epic rows and their essentials, 44 px Group targets, no overflow","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/goals-epics.spec.ts","name":"E1/E2 1024 light: epics in the goal anatomy; an opened epic lists what's missing in Definitions order, then its items with live lines and folds","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/goals-epics.spec.ts","name":"E1/E2 1440 dark: epics in the goal anatomy; an opened epic lists what's missing in Definitions order, then its items with live lines and folds","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/goals-epics.spec.ts","name":"E1/E2 1440 light: epics in the goal anatomy; an opened epic lists what's missing in Definitions order, then its items with live lines and folds","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/goals-epics.spec.ts","name":"E3 1440: Display leads with Group: Goals · Epics, inside the viewport","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/goals-epics.spec.ts","name":"E4 1440: no open epics says so, without examples","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/goals-epics.spec.ts","name":"E5 1024: Goals → Epics → Goals moves no toolbar control, chip, Display trigger or header cell; GOAL and EPIC share one box","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/goals-epics.spec.ts","name":"E5 1440: Goals → Epics → Goals moves no toolbar control, chip, Display trigger or header cell; GOAL and EPIC share one box","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/goals-epics.spec.ts","name":"the group is kept per person across a reload; ?view=goals&group=epics opens it once and changes nothing","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
     {"kind":"browser","file":"tests/goals-gaps.spec.ts","name":"1024: items nest under their goal at the step icons' x, labels run from the key to the ETA in at most two lines with the badge in the meta line; goal names wrap to two lines; opening and a live update move nothing","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
     {"kind":"browser","file":"tests/goals-gaps.spec.ts","name":"1024: one line is reserved, only \"more\" pushes the list, \"less\" folds it back, a new note starts on one line, and #no-note renders nothing","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}

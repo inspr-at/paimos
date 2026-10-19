@@ -119,3 +119,42 @@ leaves); per goal, `progress.remaining_hours` and `progress.remaining_unestimate
 `eta_last_set_at`, the latest authored ETA over every goal and item the project/group
 filters match. The CLI adds `goal note --workspace [TEXT|--clear]` and
 `goal note GOAL --item REF (TEXT|--clear)`.
+
+## Group › Epics (AEON-1395)
+
+The Goals view on Projects has a Display › **Group: Goals · Epics** segment. The
+choice is kept per person in the `goals` preference; `?view=goals&group=epics`
+opens Epics for that visit without changing it. A switch replaces only the list;
+the toolbar, state chips, Display trigger and header cells stay where they are
+(the GOAL and EPIC labels share one box).
+
+Epics come from `GET /api/goals/epics`, which takes the Goals list filters, sorts,
+page and cursor (cursors are bound to their grouping) and returns open epics in
+the goal shape with `kind: epic`. The parameter `group` keeps its meaning as the
+project-group filter. An area is the topmost open parent work item in a visible
+project: an open work node with work children whose own parent is no open work
+item. Its items are its direct children without Closed ones; an item's `keys` are
+its own key and then its children's (`keys_total` when more than 20).
+
+- **Counts**: Moving is a live session, In progress or QA, or an open pull request
+  or review; Done is Done, Delivered or Accepted (or every leaf done); Paused is
+  Backlog or work paused on purpose; everything else is Queued.
+- **Progress** is computed, never set by hand: completed estimate hours over all
+  estimate hours of the epic's leaves, each leaf once. A parent's own estimate and
+  Closed leaves never count; without any estimate it is completed leaves over all
+  leaves. `remaining_hours` is the open leaves' estimate hours.
+- **LANDS** is the latest worker ETA over the open items, else the epic's target
+  release (`eta.source: release`). Items use their own worker ETA or release.
+- **Steps** are what is missing: the epic's failing entry checks for its next
+  status (Ready from Open/Backlog/Blocked, QA from In progress, Done from QA) from
+  the effective definition, in definition order and with their labels, then
+  deliveries on hold and blockers. `no_active_build` is not evaluated in this read
+  (it takes the builder fence of status and queue writes). No failing check means
+  no steps. `next_step` is the first open item by ETA, else the first step.
+- **Live line**: the working agent's activity note, else the item's latest
+  unmerged pull request (`delivery`).
+
+Epics have no progress series or ETA history; their bar is a plain bar. The view
+re-reads the list on work events (node, status and merge events) as well as on
+goal events. An epic with more than 200 items is counts-only with
+`expansion: too_large`; discovery is bounded to 1000 epics.

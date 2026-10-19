@@ -33,7 +33,7 @@ import NewProjectSheet from '../components/projects/NewProjectSheet.vue'
 import GoalsView from '../components/goals/GoalsView.vue'
 import GoalsToolbar from '../components/goals/GoalsToolbar.vue'
 import { useGoalsPage } from '../components/goals/goalsPage'
-import { SORT_DIR, type Goal, type GoalSort } from '../lib/goals'
+import { GOAL_GROUPS, GROUP_LABEL, SORT_DIR, type Goal, type GoalSort } from '../lib/goals'
 import { heldDraft, type HeldDraft } from '../lib/importDraft'
 
 // Each sort has its icon; the Display button shows the current one (AEON-174).
@@ -159,7 +159,9 @@ function goalShown(goal: Goal) {
   if (!goal.projects.length) return true
   return goal.projects.some(badge => { const project = store.byId(badge.id); return !project || !groups.hidden.has(groups.where(project)) })
 }
-const goals = useGoalsPage({ term, active: () => view.value === 'goals', shown: goalShown })
+// Group: Goals · Epics (AEON-1395): ?group= opens a group once, as ?view= opens a view.
+const goals = useGoalsPage({ term, active: () => view.value === 'goals', shown: goalShown, groups: { link: () => route.query.group } })
+const epics = computed(() => goals.group.value === 'epics')
 const GOAL_SORTS: { value: GoalSort; label: string; phrase: string; icon: IconName }[] = [
   { value: 'eta', label: 'ETA', phrase: 'ETA', icon: 'timer' },
   { value: 'name', label: 'Name', phrase: 'name', icon: 'sort-name' },
@@ -183,11 +185,12 @@ const phoneChange = () => { phone.value = phoneQuery.matches }
 phoneQuery.addEventListener('change', phoneChange)
 const goalSortHidden = computed(() => view.value === 'goals' && (phone.value || (statsNarrow.value && STAT_SORTS.has(goals.sort.value))))
 const display = computed(() => view.value === 'goals'
-  ? { icon: goalSortMeta.value.icon, phrase: goalSortMeta.value.phrase, on: !(goals.sort.value === 'eta' && goals.dir.value === 'asc'), tip: `Sorted by ${goalSortMeta.value.phrase} · sort` }
+  ? { icon: goalSortMeta.value.icon, phrase: goalSortMeta.value.phrase, on: epics.value || !(goals.sort.value === 'eta' && goals.dir.value === 'asc'), tip: `${epics.value ? 'Epics, s' : 'S'}orted by ${goalSortMeta.value.phrase} · sort` }
   : { icon: sortMeta.value.icon, phrase: sortMeta.value.phrase, on: sort.value !== 'activity', tip: `Sorted by ${sortMeta.value.phrase} · ${view.value === 'list' ? 'sort and columns' : 'sort'}` })
 const displayAria = computed(() => {
-  if (!goalSortHidden.value) return `Display, sorted by ${display.value.phrase}`
-  return `Display, sorted by ${goalSortMeta.value.phrase}, now ${goals.dir.value === 'asc' ? 'ascending' : 'descending'}`
+  const grouped = view.value === 'goals' && epics.value ? ', epics' : ''
+  if (!goalSortHidden.value) return `Display${grouped}, sorted by ${display.value.phrase}`
+  return `Display${grouped}, sorted by ${goalSortMeta.value.phrase}, now ${goals.dir.value === 'asc' ? 'ascending' : 'descending'}`
 })
 async function clearGoalFilters() { term.value = ''; goals.filter.value = 'all'; await nextTick(); search.value?.focus() }
 
@@ -957,8 +960,15 @@ const archivedSelection = computed(() => selectedProjects.value.length > 0 && se
         </span>
         <FloatingPanel v-if="displayAnchor" :anchor="displayAnchor" :width="290" :tallest="640" align="end" label="Display options" @close="closeDisplay">
           <div v-if="view === 'goals'" class="display-panel">
-            <p class="eyebrow">Sort goals by</p>
-            <div class="sort-grid" role="radiogroup" aria-label="Sort goals by">
+            <p class="eyebrow">Group</p>
+            <div class="sort-grid group-grid" role="radiogroup" aria-label="Group">
+              <button
+                v-for="value in GOAL_GROUPS" :key="value" type="button" role="radio" class="sort-option" :aria-checked="goals.group.value === value"
+                :data-group="value" @click="goals.setGroup(value)"
+              ><AppIcon :name="value === 'epics' ? 'epic' : 'target'" :size="14" /><span>{{ GROUP_LABEL[value] }}</span></button>
+            </div>
+            <p class="eyebrow">Sort {{ epics ? 'epics' : 'goals' }} by</p>
+            <div class="sort-grid" role="radiogroup" :aria-label="`Sort ${epics ? 'epics' : 'goals'} by`">
               <button
                 v-for="option in GOAL_SORTS" :key="option.value" type="button" role="radio" class="sort-option" :aria-checked="goals.sort.value === option.value"
                 :data-sort="option.value" :data-autofocus="goals.sort.value === option.value ? '' : undefined" @click="goals.setSort(option.value, SORT_DIR[option.value])"
@@ -1112,6 +1122,8 @@ const archivedSelection = computed(() => selectedProjects.value.length > 0 && se
 .sort-option[aria-checked="true"] svg { color: var(--teal-ink); }
 .sort-hint { padding: 0 2px; line-height: 1.45; }
 .sort-option:focus-visible { box-shadow: var(--focus-ring); }
+/* Group (AEON-1395): Goals · Epics, 44 px targets on touch. */
+@media (pointer: coarse) { .group-grid .sort-option { height: 44px; } }
 .section { margin-top: 6px; padding-top: 10px; border-top: 1px solid var(--line); }
 .fine { font-size: 12px; color: var(--ink-3); }
 .cards-area { margin-top: 22px; }

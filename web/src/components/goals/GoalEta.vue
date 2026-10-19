@@ -8,6 +8,8 @@
 // A goal row also keeps one muted line under the ETA for the open estimate hours,
 // "~40 h left" (AEON-1494 decision 3), reserved while unknown so nothing moves when
 // it arrives; the popover says it in words. Phones drop the line.
+// AEON-1395: epics have no ETA history of their own (history false); a target
+// release stands in as text when no worker reported an ETA.
 import { computed, onBeforeUnmount, ref } from 'vue'
 import AppIcon from '../AppIcon.vue'
 import GoalTip, { type TipLine } from './GoalTip.vue'
@@ -16,17 +18,19 @@ import { useLiveAgents } from '../../stores/liveAgents'
 import { who as agentName } from '../../lib/liveAgents'
 import { etaChanges, etaText, goalHistory, passedMinutes, whenText, type GoalETA, type GoalOutcome, type EtaChange } from '../../lib/goals'
 
-const props = defineProps<{
+const props = withDefaults(defineProps<{
   goalId: string; outcomeId?: string; eta?: GoalETA; passed?: boolean; done?: boolean; now: number; projection?: string | null; items?: readonly GoalOutcome[]
   // Goal rows: the reserved hours-left line and its popover sentence.
   reserveLeft?: boolean; left?: string; leftLine?: TipLine | null
-}>()
+  // Goals and their items read their ETA history; epics have none.
+  history?: boolean
+}>(), { history: true })
 const session = useSession()
 const live = useLiveAgents()
 
 const text = computed(() => etaText(props.eta, props.now))
 const passed = computed(() => !!props.passed && !props.done && !!text.value)
-const hasHistory = computed(() => props.eta?.source === 'agent' || props.eta?.source === 'worker')
+const hasHistory = computed(() => props.history !== false && (props.eta?.source === 'agent' || props.eta?.source === 'worker'))
 // The popover has something to say: a set ETA, or (for a goal) a projection.
 const opens = computed(() => !props.done && (!!text.value || !!props.projection || !!props.leftLine))
 
@@ -55,7 +59,9 @@ const same = (a: Pick<GoalETA, 'text' | 'at'> | null, b: GoalETA | undefined) =>
 function linesFor(changes: EtaChange[]): TipLine[] {
   const eta = props.eta, lines: TipLine[] = []
   if (eta && text.value) {
-    if (eta.source === 'outcomes') {
+    if (eta.source === 'release') {
+      lines.push({ text: 'target release' })
+    } else if (eta.source === 'outcomes') {
       const latest = (props.items ?? []).filter(item => item.state !== 'done' && item.eta.at === eta.at)[0]
       lines.push({ text: latest ? `from its items, latest: ${latest.label}` : 'from its items', muted: eta.partial ? ' · some items have no ETA yet' : undefined })
     } else {
