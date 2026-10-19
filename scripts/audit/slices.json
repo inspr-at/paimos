@@ -499,7 +499,8 @@
         "web/src/lib/viewMenuTrigger.ts",
         "web/src/lib/ticketListSwitch.ts",
         "web/tests/view-switch.unit.test.ts",
-        "web/tests/view-switch.spec.ts"
+        "web/tests/view-switch.spec.ts",
+        "web/tests/definitions-p3.spec.ts"
       ],
       "exclude": [
         "web/src/views/**",

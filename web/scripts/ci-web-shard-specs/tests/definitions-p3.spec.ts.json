@@ -1,0 +1,9 @@
+{
+  "group": "work-queue",
+  "spec": {
+    "file": "tests/definitions-p3.spec.ts",
+    "listedTests": 5,
+    "weightSeconds": 180,
+    "weightSource": "AEON-1317: six decisions, D1-D7, DE locale and all three viewports in light/dark"
+  }
+}
