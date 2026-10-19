@@ -170,8 +170,10 @@ function scrolled(event: Event) {
 const layer = (props.anchor instanceof Element ? props.anchor.closest<HTMLElement>('dialog[open]') : null) ?? 'body'
 // Escape closes the popover wherever focus is, before any page shortcut sees it;
 // another dialog open above the popover's own layer handles its Escape itself.
+// A child still open (focus may have stayed on its trigger here) closes first, on its own Escape.
+const openChild = () => [...document.querySelectorAll<HTMLElement>('[data-floating-owner]')].some(childOverlay)
 function escape(event: KeyboardEvent) {
-  if (childOverlay(document.activeElement)) return
+  if (childOverlay(document.activeElement) || openChild()) return
   if (event.key !== 'Escape' || [...document.querySelectorAll('dialog[open]')].some(dialog => dialog !== layer)) return
   // Names loaded after this panel mounts register their Escape listener later.
   // Let the open disclosure consume Escape before dismissing its menu.

@@ -5,6 +5,7 @@ import { join } from 'node:path'
 import { expect, test, type Page } from '@playwright/test'
 import AxeBuilder from '@axe-core/playwright'
 import { expectStableControls } from './helpers/stable'
+import { toggleProjectHead } from './helpers/compact'
 import { fixtures, me, mockWork, watchErrors } from './work-fixtures'
 import { mockEffectivePermissions } from './authz-fixtures'
 import { readyGaps } from '../src/lib/workQueue'
@@ -507,8 +508,8 @@ test('approved queue surfaces in light/dark and narrow layouts, with accessible 
         await expectStableControls({
           controls: { fold, appbar: page.locator('.app-header') },
           interactions: [
-            { name: 'fold project header', run: async () => { await fold.click(); await expect(page.locator('#project-header-fold')).toBeHidden() } },
-            { name: `restore ${density} header`, run: async () => { await fold.click(); await expect(page.locator('.project-page')).toHaveClass(new RegExp(`header-${density.toLowerCase()}`)); await expect(opener).toBeVisible() } },
+            { name: 'fold project header', run: async () => { await toggleProjectHead(page); await expect(page.locator('#project-header-fold')).toBeHidden() } },
+            { name: `restore ${density} header`, run: async () => { await toggleProjectHead(page); await expect(page.locator('.project-page')).toHaveClass(new RegExp(`header-${density.toLowerCase()}`)); await expect(opener).toBeVisible() } },
           ],
         })
         await page.screenshot({ path: join(shots, `queue-phone-${theme}-${density.toLowerCase()}.png`) })

@@ -7,6 +7,7 @@ import { agentData, mockAgents } from './agents-fixtures'
 import { capacityWorld, defaultSchedule, NOW } from './capacity-fixtures'
 import { mockEffectivePermissions } from './authz-fixtures'
 import { expectStableControls } from './helpers/stable'
+import { isCompact, showCapacityRow } from './helpers/compact'
 import type { PlanSnapshot } from '../src/lib/agentsWorking'
 import { SETTLE_MS } from '../src/lib/useAgentPlan'
 const shots = process.env.AEON_647_SHOTS ?? 'test-results/aeon-647'
@@ -421,13 +422,25 @@ for (const width of [1440, 390]) test(`all seven harnesses fit at ${width} and r
   const { work } = await setup(page, 'room', true)
   work.preferences['agents.working'] = { total: 1, limits: { codex: 30, claude: 30, cursor: 30, grok: 'no_limit', pi: 'off', gemini: 0, opencode: 3 } }
   await page.goto('/agents')
+  // AEON-1459 (R2.1): on phones the folded control is in the capacity line's sheet.
+  await showCapacityRow(page)
   const card = dial(page)
   await expect(card.locator('.f-chip')).toHaveCount(7)
   await expect(card.locator('[data-harness="codex"] .f-n')).toHaveText('30')
   await expect(card.locator('[data-harness="gemini"] .f-n')).toHaveText('0')
   expect(await control(page).evaluate(el => el.scrollWidth - el.clientWidth)).toBeLessThanOrEqual(1)
   expect(await page.locator('main').evaluate(el => el.scrollWidth - el.clientWidth)).toBeLessThanOrEqual(1)
-  await expectStableControls({ controls: { more: totalMore(page), fewer: totalFewer(page), fold: card.locator('.fs-tog') }, interactions: [{ name: 'unfold seven harnesses', run: () => card.locator('.fs-tog').click() }] })
+  if (isCompact(page)) {
+    const sheet = page.getByRole('dialog', { name: 'Capacity' })
+    expect(await sheet.evaluate(el => el.scrollWidth - el.clientWidth)).toBeLessThanOrEqual(1)
+    await page.keyboard.press('Escape')
+    await expect(sheet).toHaveCount(0)
+    // The sheet's chevron makes way for the body, which opens under the page head: the head stays put.
+    await expectStableControls({
+      controls: { capLine: page.locator('.agents-page .cap-line'), title: page.locator('#agents-title') },
+      interactions: [{ name: 'unfold seven harnesses from the sheet', run: async () => { await showCapacityRow(page); await card.locator('.fs-tog').click(); await expect(sheet).toHaveCount(0) } }],
+    })
+  } else await expectStableControls({ controls: { more: totalMore(page), fewer: totalFewer(page), fold: card.locator('.fs-tog') }, interactions: [{ name: 'unfold seven harnesses', run: () => card.locator('.fs-tog').click() }] })
   await expect(card.locator('.rows > li')).toHaveCount(7)
   await expect(card.locator('[data-key="claude"] .lim-num')).toHaveText('30')
   expect(await page.evaluate(() => document.documentElement.scrollWidth - innerWidth)).toBeLessThanOrEqual(1)
@@ -521,8 +534,12 @@ test.describe('phone touch targets', () => {
     const { work } = await setup(page, 'room', true)
     work.preferences['agents.working'] = { total: 8, limits: { codex: 4, claude: 'no_limit', cursor: 'off', grok: 2, pi: 'off', gemini: 'no_limit', opencode: 3 } }
     await page.goto('/agents')
+    // AEON-1459 (R2.1): on a phone the folded control is in the capacity line's sheet.
+    await showCapacityRow(page)
+    const sheet = page.getByRole('dialog', { name: 'Capacity' })
     const card = dial(page), chip = control(page).locator('[data-harness="codex"]'), fold = card.locator('.fs-tog')
     await expect(chip).toBeVisible()
+    await page.evaluate(() => document.fonts.ready)
     // Every target a finger can use reaches 44 px, its own box or its ::after reach; unseen − and + are no target.
     const targets = async () => {
       const small = await card.locator('button').evaluateAll(elements => elements.flatMap(el => {
@@ -541,7 +558,7 @@ test.describe('phone touch targets', () => {
     await expect(control(page).locator('.f-chip')).toHaveCount(7)
     await expectStableControls({
       controls: { fold, total: control(page).locator('[data-unit="total"]'), chip, live: card.locator('.f-live') },
-      scrollAreas: { control: control(page), main: page.locator('main') },
+      scrollAreas: { control: control(page), sheet },
       interactions: [
         // A tap on a unit's mark lifts it onto its plate with − and +; a tap on + steps it.
         { name: 'tap opens the plate', run: async () => { await chip.locator('.du-mark').tap(); await expect(chip).toHaveClass(/\bopen\b/) } },
@@ -552,10 +569,12 @@ test.describe('phone touch targets', () => {
     await targets()
     await fold.tap()
     await expect(fold).toHaveAttribute('aria-expanded', 'true')
+    // The sheet makes way for the body on the page; the fold and the total stay in the sheet.
+    await expect(sheet).toHaveCount(0)
     await expect(body(page).locator('.rows > li')).toHaveCount(7)
     await targets()
     await expectStableControls({
-      controls: { fold, more: totalMore(page), selectors: card.locator('[data-key="codex"] .seg'), plus: card.locator('[data-key="codex"] .pm').last(), row: card.locator('[data-key="codex"]') },
+      controls: { selectors: card.locator('[data-key="codex"] .seg'), plus: card.locator('[data-key="codex"] .pm').last(), row: card.locator('[data-key="codex"]') },
       scrollAreas: { body: body(page) },
       interactions: ['No limit', 'Off', 'At most'].map(name => ({ name: `touch mode ${name}`, run: () => card.locator('[data-key="codex"]').getByRole('radio', { name, exact: true }).tap() })),
     })

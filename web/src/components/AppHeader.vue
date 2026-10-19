@@ -602,6 +602,8 @@ onBeforeUnmount(() => { resized.disconnect(); crumbsChanged.disconnect(); narrow
   .search-pill { width: 44px; height: 44px; --pill-start: 0px; --pill-end: 0px; justify-content: center; border: 0; background: transparent; box-shadow: none; color: var(--ink-2); }
   .search-pill:hover { background: var(--row-hover); color: var(--ink); box-shadow: none; }
   .pill-text, .pill-keys { display: none; }
+  /* 44 px targets fill the 44 px line: the keyboard ring is drawn inside them, so nothing clips it. */
+  .crumb:focus-visible, .place:focus-visible, .place-main:focus-visible, .search-pill:focus-visible { box-shadow: inset var(--focus-ring); }
   .app-header :deep(.header-btn) { width: 44px; height: 44px; border: 0; border-radius: 999px; background: transparent; box-shadow: none; color: var(--ink-2); }
   .app-header :deep(.header-btn:hover) { background: var(--row-hover); color: var(--ink); }
 }

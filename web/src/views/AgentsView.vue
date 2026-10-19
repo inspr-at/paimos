@@ -95,6 +95,8 @@ async function fullDial() {
   await closeCapacity(false)
   dialControl.value?.unfold()
 }
+// The dial's own chevron in the sheet unfolds the body on the page behind it: the sheet makes way, as for the full dial.
+function dialUnfolded() { if (capOpen.value) void closeCapacity(false) }
 watch(compact, now => { if (!now && capOpen.value) void closeCapacity(false) })
 function windDownFromMenu() {
   const anchor = headerMenu.value?.anchor ?? null
@@ -710,7 +712,7 @@ watch(sessionId, id => { if (id) { cursor.value = `s:${id}`; lastSession = id } 
         <!-- On compact screens the capacity line's sheet borrows this row while it is open (AEON-1459): one dial, one writer. -->
         <Teleport :to="capMoved ? '#capacity-sheet-dial' : 'body'" :disabled="!capMoved">
           <div v-if="showSetup" class="cap-row" :class="{ 'in-sheet': capMoved }" role="group" aria-label="Capacity: what may run">
-            <AgentsWorking v-if="session.identity?.principal.kind === 'person'" ref="dialControl" body-target="#dial-body-host" @summary="dialFacts = $event" />
+            <AgentsWorking v-if="session.identity?.principal.kind === 'person'" ref="dialControl" body-target="#dial-body-host" @summary="dialFacts = $event" @unfolded="dialUnfolded" />
             <AccountsComputers :permissions="pairingAccess" :show-accounts="showCapacity" @summary="machineFacts = $event" />
           </div>
         </Teleport>

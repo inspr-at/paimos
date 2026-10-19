@@ -226,9 +226,16 @@ test.describe('phone project crumb touch target', () => {
           await expect(page.getByRole('dialog', { name: /^PHAROS · / })).toHaveCount(0)
         } })),
       })
+      // Reached from the keyboard, so its focus ring shows.
       await button.focus()
+      await page.keyboard.press('Shift+Tab')
+      await page.keyboard.press('Tab')
       await expect(button).toBeFocused()
+      expect(await button.evaluate(element => element.matches(':focus-visible'))).toBe(true)
       expect(await button.evaluate(element => {
+        // The compact header's 44 px crumb fills its 44 px line (AEON-1459): its ring is drawn inside it.
+        const ring = getComputedStyle(element).boxShadow
+        if (ring !== 'none' && ring.includes('inset')) return true
         const rect = element.getBoundingClientRect()
         for (let ancestor = element.parentElement; ancestor; ancestor = ancestor.parentElement) {
           const style = getComputedStyle(ancestor)
@@ -237,7 +244,7 @@ test.describe('phone project crumb touch target', () => {
           if (clip.top > rect.top - 3 || clip.bottom < rect.bottom + 3 || clip.left > rect.left - 3 || clip.right < rect.right + 3) return false
         }
         return true
-      }), 'ancestors leave room for the keyboard focus ring').toBe(true)
+      }), 'the keyboard focus ring is inside the crumb, or its ancestors leave room for it').toBe(true)
     })
   }
 })

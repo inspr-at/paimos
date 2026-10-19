@@ -5720,7 +5720,7 @@
     ,
     {"kind":"browser","file":"tests/aeon-1028-projheader.spec.ts","name":"the ticket count › is gone from the toolbar in every header view at 1440px; the footer still says it","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
-    {"kind":"browser","file":"tests/aeon-1028-projheader.spec.ts","name":"the ticket count › is gone from the toolbar in every header view at 400px; the footer still says it","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    {"kind":"browser","file":"tests/aeon-1028-projheader.spec.ts","name":"the ticket count › is gone from the toolbar in every header view at 400px; the list’s end still says it","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
     {"kind":"browser","file":"tests/aeon-1042-headergraph.spec.ts","name":"header graph off by default, developer switch keeps the header still 1440 dark","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,

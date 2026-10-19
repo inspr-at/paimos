@@ -26,7 +26,8 @@ import WorkingStepper from './WorkingStepper.vue'
 // bodyTarget: where the unfolded body goes, under the capacity row; without one it stays in place.
 defineProps<{ bodyTarget?: string }>()
 // The capacity line on compact screens says the dial's total and what runs (AEON-1459).
-const emit = defineEmits<{ summary: [summary: { total: number; running: number; known: boolean }] }>()
+// `unfolded`: the chevron opened the body; the capacity sheet makes way for it (AEON-1459).
+const emit = defineEmits<{ summary: [summary: { total: number; running: number; known: boolean }]; unfolded: [] }>()
 const agents = useAgents(), capacity = useCapacity(), session = useSession(), sections = useSectionPrefs(), dialPrefs = useDialPrefs()
 const viewer = () => session.identity ? `${session.identity.tenant.id}:${session.identity.principal.id}` : ''
 const control = useAgentPlan(viewer, key => agents.models.find(m => m.id === key)?.harness)
@@ -91,6 +92,7 @@ function toggleDial() {
   const key = folded.value ? selected.value : ''
   if (key) pick(key)
   toggleSection()
+  if (!folded.value) emit('unfolded')
   if (key) void nextTick(() => document.getElementById(bodyId)?.querySelector<HTMLElement>(`[data-sel="${key}"]`)?.focus({ preventScroll: true }))
 }
 // The capacity sheet's "The full dial" opens the body on the page (AEON-1459).
