@@ -3,7 +3,7 @@ import { execFileSync } from 'node:child_process'
 import { writeFile } from 'node:fs/promises'
 import { expect, test, type Browser, type Locator, type Page } from '@playwright/test'
 import { controlStability } from './control-stability'
-import { mockDecisionDesk } from './decision-desk-fixtures'
+import { fixtures, mockWork } from './work-fixtures'
 import { mockEffectivePermissions } from './authz-fixtures'
 import { mockSettings, settingsData } from './settings-fixtures'
 import { reviewPolicy } from './policies-fixtures'
@@ -48,7 +48,8 @@ function barrier(){let entered!:()=>void,release!:()=>void;const pending=new Pro
 async function navigate(page: Page,path: string){await page.evaluate(path=>(document.querySelector('#app') as unknown as {__vue_app__:{config:{globalProperties:{$router:{push(path:string):Promise<void>}}}}}).__vue_app__.config.globalProperties.$router.push(path),path)}
 
 async function setup(page: Page,theme: 'light' | 'dark',locale='en',viewer=false){
-  await mockDecisionDesk(page,{emptyDesk:true,theme})
+  const work=fixtures();work.preferences.theme={choice:theme};work.projects.find(project=>project.id==='p-aeon')!.title='Paimos Aeon'
+  await mockWork(page,work,{admin:!viewer,readOnly:viewer})
   const settings=settingsData();settings.profile.locale=locale==='de'?'de-AT':'en-GB';await mockSettings(page,settings)
   const world={workspace:copy(newer,'workspace'),context:{project_id:'p-frozen',definition:copy(base),workspace_default:null,copied_from_checks:structuredClone(base),pending_changes:structuredClone(changes),can_manage:!viewer,admins:[{id:settings.profile.principal_id,name:'Markus Barta'}]} as DefinitionContext,writes:[] as {path:string;body:Record<string,unknown>}[],fail:false,held:null as ReturnType<typeof barrier>|null,summaryFail:false,readOnly:viewer}
   world.context.workspace_default=world.workspace
@@ -61,6 +62,13 @@ async function setup(page: Page,theme: 'light' | 'dark',locale='en',viewer=false
   page.on('pageerror',error=>errors.push(error.message))
   await page.route('**/api/**',async route=>{
     const request=route.request(),url=new URL(request.url()),path=url.pathname
+    if(request.method()==='GET'){
+      if(path==='/api/decision-desk'||path==='/api/stepup-requests'||path==='/api/key-trim-proposals')return route.fulfill({json:{items:[],has_more:false}})
+      if(path==='/api/approvals')return route.fulfill({json:[]})
+      if(path==='/api/rules/doctrine/inbox')return route.fulfill({json:{items:[],pending:0}})
+      if(path==='/api/harness-sessions')return route.fulfill({json:{items:[],next_cursor:null}})
+      if(path.endsWith('/messages'))return route.fulfill({json:{items:[],next_after:0}})
+    }
     if(world.readOnly&&path==='/api/me')return route.fulfill({json:{principal:{id:'22222222-2222-4222-8222-222222222222',name:'Mia Weber',kind:'person',roles:['viewer']},tenant:{id:'t1',slug:'inspr',name:'INSPR'}}})
     if(world.readOnly&&path==='/api/me/profile')return route.fulfill({json:{...settings.profile,principal_id:'22222222-2222-4222-8222-222222222222',email:'mia@example.test',first_name:'Mia',last_name:'Weber',short_name:'mia',initials:'MW'}})
     if(path==='/api/me/permissions'){const permissions=mockEffectivePermissions(world.readOnly?'viewer':'admin',url.searchParams.get('project_id')??undefined);permissions.workspace.permissions.push('reviewpolicy.read',...(!world.readOnly?['reviewpolicy.manage']:[]));return route.fulfill({json:permissions})}

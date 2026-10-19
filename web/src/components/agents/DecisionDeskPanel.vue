@@ -26,7 +26,7 @@ const groups = computed(() => {
   ].filter(group => group.items.length)
 })
 // AEON-1339: the Desk row anatomy, compact: a kind mark per row, the title, the project with the Projects folder icon.
-const KIND_ICON: Record<DeskProjectionItem['kind'], IconName> = { question: 'help', approval: 'clock', action_request: 'send', doctrine: 'book', tier_request: 'gauge', key_trim: 'key', stepup: 'shield', account_matrix: 'users', routine_consent: 'repeat', lesson: 'book' }
+const KIND_ICON: Record<DeskProjectionItem['kind'], IconName> = { question: 'help', approval: 'clock', action_request: 'send', doctrine: 'book', tier_request: 'gauge', key_trim: 'key', stepup: 'shield', account_matrix: 'users', routine_consent: 'repeat', lesson: 'book', definition_change: 'history' }
 const now = computed(() => Date.parse(desk.projection?.as_of ?? '') || Date.now())
 // One name for action requests on the panel, the preview and the Desk (AEON-1339); the source title stays for other readers.
 const rowTitle = (item: DeskProjectionItem) => item.kind === 'action_request' ? 'Action request' : item.title
