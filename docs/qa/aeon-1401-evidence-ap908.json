@@ -1,0 +1,575 @@
+{
+  "ticket": "AEON-1401",
+  "round": "ap908 browser evidence",
+  "scope": "Run every changed spec on the gated source, save the Tick N1–N6 reference matrix, and record every pass line. Product or test changes only for a package-owned spec failure.",
+  "source_commit": "756ff82107d54b0acb26a3a54d272e15d5acd376",
+  "source_web_tree": "0f1a16e259143b51fbd79babae292ac0dfd529e8",
+  "generated_at": "2026-10-19T22:01:23.264254+00:00",
+  "ownership": {
+    "tracker": "ppm",
+    "principal": "workstation-agents",
+    "tenant": "INSPR",
+    "branch": "work/aeon-1401-status-names",
+    "worker_session": "1fc73c50-d598-49e4-9f2a-7b130581e273",
+    "worker_marker": "Coordinator-recorded builder marker verified on AEON-1401 before material work.",
+    "controls": "Coordinator owns ticket state, review gates and release. No model CLI, subagent, review gate, origin push or deployment. Only the prescribed guarded test runner performs its temporary test-host ref transport and cleanup."
+  },
+  "product_code_changed": false,
+  "test_code_changed": false,
+  "changed_specs": [
+    "web/tests/aeon-1401-status-names.spec.ts",
+    "web/tests/header-glimpse.spec.ts"
+  ],
+  "validation": {
+    "runner": "LEAD remote-spec.sh on mbp2606; bundled headless Chromium; one worker per run; no grep filter; no local browser bypass.",
+    "passed": 35,
+    "failed": 0,
+    "skipped": 0,
+    "runs": [
+      {
+        "spec": "web/tests/aeon-1401-status-names.spec.ts",
+        "command": "/Users/markus/.aeon/lead/aeon/remote-spec.sh <assigned-worktree> \"tests/aeon-1401-status-names.spec.ts --output=test-results/AEON-1401/ap908-status-names\" \"\" <assigned-worktree>/web/test-results/AEON-1401/ap908-status-names-remote",
+        "exit_code": 0,
+        "passed": 4,
+        "failed": 0,
+        "skipped": 0,
+        "test_lines": [
+          "[1/4] tests/aeon-1401-status-names.spec.ts:51:1 › AEON-1401 the Status names card renames, refuses ambiguous names and keeps its controls still",
+          "[2/4] tests/aeon-1401-status-names.spec.ts:135:1 › AEON-1401 lists, the status menu, the ticket header, Desk and activity read the workspace name; writes stay canonical",
+          "[3/4] tests/aeon-1401-status-names.spec.ts:210:1 › AEON-1401 a Decision Desk line reads the workspace name",
+          "[4/4] tests/aeon-1401-status-names.spec.ts:238:1 › AEON-1401 the public portal and roadmap read the workspace name per language"
+        ],
+        "pass_summary": "4 passed (10.6s)",
+        "owned_process_result": [
+          "AEON_PW_PROCESSES {\"before\":0,\"peak\":0,\"after\":0,\"remaining_processes\":0,\"wall_ms\":593,\"signal\":null}",
+          "AEON_PW_PROCESSES {\"before\":0,\"peak\":4,\"after\":0,\"remaining_processes\":0,\"wall_ms\":10855,\"signal\":null}",
+          "AEON_PW_PROCESSES {\"before\":0,\"peak\":0,\"after\":0,\"remaining_processes\":0,\"wall_ms\":249,\"signal\":null}"
+        ],
+        "log": "web/test-results/AEON-1401/ap908-status-names.log"
+      },
+      {
+        "spec": "web/tests/header-glimpse.spec.ts",
+        "command": "/Users/markus/.aeon/lead/aeon/remote-spec.sh <assigned-worktree> \"tests/header-glimpse.spec.ts --output=test-results/AEON-1401/ap908-header-glimpse\" \"\" <assigned-worktree>/web/test-results/AEON-1401/ap908-header-glimpse-remote",
+        "exit_code": 0,
+        "passed": 31,
+        "failed": 0,
+        "skipped": 0,
+        "test_lines": [
+          "[1/31] tests/header-glimpse.spec.ts:153:1 › a wide project with tickets and a link shows a labelless 60fps glimpse",
+          "[2/31] tests/header-glimpse.spec.ts:173:1 › the glimpse follows the viewer’s Off motion preference without adding labels",
+          "[3/31] tests/header-glimpse.spec.ts:184:1 › hover shows Open graph and Pause; clicking the glimpse opens the graph",
+          "[4/31] tests/header-glimpse.spec.ts:203:1 › the glimpse waits until the page is idle",
+          "[5/31] tests/header-glimpse.spec.ts:220:1 › narrow viewports and small or unlinked graphs stay empty",
+          "[6/31] tests/header-glimpse.spec.ts:228:1 › eight tickets without a link stay empty",
+          "[7/31] tests/header-glimpse.spec.ts:236:1 › eight visible tickets with exactly one edge show the glimpse",
+          "[8/31] tests/header-glimpse.spec.ts:245:1 › a priority filter that leaves seven of those tickets hides the glimpse",
+          "[9/31] tests/header-glimpse.spec.ts:258:1 › a priority filter that keeps eight tickets but no link hides the glimpse",
+          "[10/31] tests/header-glimpse.spec.ts:271:1 › eight linked tickets appear once the viewport reaches 1280",
+          "[11/31] tests/header-glimpse.spec.ts:292:1 › AEON-1401: the delivered viewport width clears a glimpse while geometry and media reads stay wide",
+          "[12/31] tests/header-glimpse.spec.ts:356:1 › AEON-1467: a painted glimpse hides below 1280 after the paint sampler and the document observer are gone",
+          "[13/31] tests/header-glimpse.spec.ts:430:1 › a dropped wide-media change still hides the glimpse below 1280",
+          "[14/31] tests/header-glimpse.spec.ts:454:1 › AEON-1337: a visual viewport resize clears the glimpse before the next animation frame",
+          "[15/31] tests/header-glimpse.spec.ts:511:1 › AEON-1414: a visual viewport shrink clears the glimpse while frames and other resize notifications are held",
+          "[16/31] tests/header-glimpse.spec.ts:555:1 › AEON-1414: a shrink clears the glimpse while viewport notifications and animation frames are stalled",
+          "[17/31] tests/header-glimpse.spec.ts:609:1 › AEON-1472: an active glimpse stops after all viewport notifications are dropped",
+          "[18/31] tests/header-glimpse.spec.ts:656:1 › AEON-1477 a painted glimpse hides below 1280 when resize, media and the document observer stay silent",
+          "[19/31] tests/header-glimpse.spec.ts:692:1 › a shrink that delivers neither resize nor the wide-media change still hides the glimpse below 1280",
+          "[20/31] tests/header-glimpse.spec.ts:720:1 › AEON-1471: a narrow root clears the glimpse while window and media hints stay wide",
+          "[21/31] tests/header-glimpse.spec.ts:754:3 › reduced motion › shows nothing",
+          "[22/31] tests/header-glimpse.spec.ts:772:1 › the glimpse is off unless the developer setting turns it on, even after an earlier Display choice",
+          "[23/31] tests/header-glimpse.spec.ts:796:1 › leaving the project releases the WebGL context",
+          "[24/31] tests/header-glimpse.spec.ts:818:1 › long title and description stay separate from the glimpse while resizing",
+          "[25/31] tests/header-glimpse.spec.ts:831:1 › the 2D fallback also frames the dense core with faded edges",
+          "[26/31] tests/header-glimpse.spec.ts:959:44 › header shots light › keeps AA contrast at 1600",
+          "[27/31] tests/header-glimpse.spec.ts:959:44 › header shots light › keeps AA contrast at 1280",
+          "[28/31] tests/header-glimpse.spec.ts:959:44 › header shots light › keeps AA contrast at 390",
+          "[29/31] tests/header-glimpse.spec.ts:959:44 › header shots dark › keeps AA contrast at 1600",
+          "[30/31] tests/header-glimpse.spec.ts:959:44 › header shots dark › keeps AA contrast at 1280",
+          "[31/31] tests/header-glimpse.spec.ts:959:44 › header shots dark › keeps AA contrast at 390"
+        ],
+        "pass_summary": "31 passed (1.4m)",
+        "owned_process_result": [
+          "AEON_PW_PROCESSES {\"before\":0,\"peak\":4,\"after\":0,\"remaining_processes\":0,\"wall_ms\":84787,\"signal\":null}",
+          "AEON_PW_PROCESSES {\"before\":0,\"peak\":0,\"after\":0,\"remaining_processes\":0,\"wall_ms\":292,\"signal\":null}"
+        ],
+        "log": "web/test-results/AEON-1401/ap908-header-glimpse.log"
+      }
+    ]
+  },
+  "screenshots": {
+    "directory": "web/test-results/AEON-1401/",
+    "name_pattern": "<state>-<width>-<light|dark>.png",
+    "tick_matrix_count": 11,
+    "header_reference_count": 10,
+    "total": 21,
+    "newer_than_source_commit": true,
+    "committed": false,
+    "tick_matrix": "N1: 1440 light/dark, 390 light. N2: 1440 light. N3: 1440 light/dark, 1024 light. N4: 1440 light. N5-desk and N5-activity: 1440 light. N6: 390 light.",
+    "capture_type": "N1 and N2 crop the complete status-name card; other reference states capture the page. Width in each name is the tested viewport, with actual image dimensions recorded below.",
+    "artifacts": [
+      {
+        "state": "N1",
+        "width": 1440,
+        "theme": "dark",
+        "file": "web/test-results/AEON-1401/ap908-status-names-remote/AEON-1401/ap908-status-names/aeon-chunks-ufUQO7/chunk-0/aeon-1401-status-names-AEO-020e2-nd-keeps-its-controls-still/aeon1401-1440-dark-N1.png",
+        "sha256": "3e4c46afa23924a4e41b0d8485ab8fbd9cdc533d5235a3ecc8184ee211fc4452",
+        "image_size": [
+          960,
+          841
+        ],
+        "captured_at": "2026-10-19T21:58:38.644588+00:00",
+        "handoff_file": "web/test-results/AEON-1401/N1-1440-dark.png"
+      },
+      {
+        "state": "N1",
+        "width": 1440,
+        "theme": "light",
+        "file": "web/test-results/AEON-1401/ap908-status-names-remote/AEON-1401/ap908-status-names/aeon-chunks-ufUQO7/chunk-0/aeon-1401-status-names-AEO-020e2-nd-keeps-its-controls-still/aeon1401-1440-light-N1.png",
+        "sha256": "3c139368fe2d928e65e462815a9f5148aa2ea94257d67cb5de7db31b7863242c",
+        "image_size": [
+          960,
+          841
+        ],
+        "captured_at": "2026-10-19T21:58:37.135604+00:00",
+        "handoff_file": "web/test-results/AEON-1401/N1-1440-light.png"
+      },
+      {
+        "state": "N2",
+        "width": 1440,
+        "theme": "light",
+        "file": "web/test-results/AEON-1401/ap908-status-names-remote/AEON-1401/ap908-status-names/aeon-chunks-ufUQO7/chunk-0/aeon-1401-status-names-AEO-020e2-nd-keeps-its-controls-still/aeon1401-1440-light-N2.png",
+        "sha256": "c85e5864581c192813b9bab4da8a8fb1637ed0e38da17572f11e19b821dfbf7e",
+        "image_size": [
+          960,
+          841
+        ],
+        "captured_at": "2026-10-19T21:58:38.092542+00:00",
+        "handoff_file": "web/test-results/AEON-1401/N2-1440-light.png"
+      },
+      {
+        "state": "N1",
+        "width": 390,
+        "theme": "light",
+        "file": "web/test-results/AEON-1401/ap908-status-names-remote/AEON-1401/ap908-status-names/aeon-chunks-ufUQO7/chunk-0/aeon-1401-status-names-AEO-020e2-nd-keeps-its-controls-still/aeon1401-390-light-N1.png",
+        "sha256": "c258d7caa58a36155e87a51309e069bc58fab5d58f77489fa832e6a49411c983",
+        "image_size": [
+          358,
+          2421
+        ],
+        "captured_at": "2026-10-19T21:58:39.086494+00:00",
+        "handoff_file": "web/test-results/AEON-1401/N1-390-light.png"
+      },
+      {
+        "state": "N3",
+        "width": 1024,
+        "theme": "light",
+        "file": "web/test-results/AEON-1401/ap908-status-names-remote/AEON-1401/ap908-status-names/aeon-chunks-ufUQO7/chunk-0/aeon-1401-status-names-AEO-169a5--name-writes-stay-canonical/aeon1401-1024-light-N3.png",
+        "sha256": "3da86f87eb58ebb7ecd404f3a3b53a0209d604fbb95d02b992f7c10060b34ade",
+        "image_size": [
+          1024,
+          900
+        ],
+        "captured_at": "2026-10-19T21:58:43.280142+00:00",
+        "handoff_file": "web/test-results/AEON-1401/N3-1024-light.png"
+      },
+      {
+        "state": "N3",
+        "width": 1440,
+        "theme": "dark",
+        "file": "web/test-results/AEON-1401/ap908-status-names-remote/AEON-1401/ap908-status-names/aeon-chunks-ufUQO7/chunk-0/aeon-1401-status-names-AEO-169a5--name-writes-stay-canonical/aeon1401-1440-dark-N3.png",
+        "sha256": "209fd8ec8361d27ddc83688d7ee2ec4b0ffb084e81e087aa2979fdd0b9ba0b0c",
+        "image_size": [
+          1440,
+          900
+        ],
+        "captured_at": "2026-10-19T21:58:42.738938+00:00",
+        "handoff_file": "web/test-results/AEON-1401/N3-1440-dark.png"
+      },
+      {
+        "state": "N3",
+        "width": 1440,
+        "theme": "light",
+        "file": "web/test-results/AEON-1401/ap908-status-names-remote/AEON-1401/ap908-status-names/aeon-chunks-ufUQO7/chunk-0/aeon-1401-status-names-AEO-169a5--name-writes-stay-canonical/aeon1401-1440-light-N3.png",
+        "sha256": "94f984606d0799bc0eeeaf34053f3f9086e550c0675d0bb8ffdb5267f42d0632",
+        "image_size": [
+          1440,
+          900
+        ],
+        "captured_at": "2026-10-19T21:58:40.256865+00:00",
+        "handoff_file": "web/test-results/AEON-1401/N3-1440-light.png"
+      },
+      {
+        "state": "N4",
+        "width": 1440,
+        "theme": "light",
+        "file": "web/test-results/AEON-1401/ap908-status-names-remote/AEON-1401/ap908-status-names/aeon-chunks-ufUQO7/chunk-0/aeon-1401-status-names-AEO-169a5--name-writes-stay-canonical/aeon1401-1440-light-N4.png",
+        "sha256": "bdebf2149fd9bee05c1be93d3caece2849330829bff8a5035ccc3a5ea8aaad37",
+        "image_size": [
+          1440,
+          900
+        ],
+        "captured_at": "2026-10-19T21:58:41.656139+00:00",
+        "handoff_file": "web/test-results/AEON-1401/N4-1440-light.png"
+      },
+      {
+        "state": "N5-activity",
+        "width": 1440,
+        "theme": "light",
+        "file": "web/test-results/AEON-1401/ap908-status-names-remote/AEON-1401/ap908-status-names/aeon-chunks-ufUQO7/chunk-0/aeon-1401-status-names-AEO-169a5--name-writes-stay-canonical/aeon1401-1440-light-N5-activity.png",
+        "sha256": "5fe32b262077e3c5d959f8458f990342decf74173fe89c268ce8bcf7ac7f46bd",
+        "image_size": [
+          1440,
+          900
+        ],
+        "captured_at": "2026-10-19T21:58:42.214109+00:00",
+        "handoff_file": "web/test-results/AEON-1401/N5-activity-1440-light.png"
+      },
+      {
+        "state": "N6",
+        "width": 390,
+        "theme": "light",
+        "file": "web/test-results/AEON-1401/ap908-status-names-remote/AEON-1401/ap908-status-names/aeon-chunks-ufUQO7/chunk-0/aeon-1401-status-names-AEO-169a5--name-writes-stay-canonical/aeon1401-390-light-N6.png",
+        "sha256": "e8326242f4b57a205d920ea56a34a172357e1b2b4bb1deb1e6a86e3b73d5ae75",
+        "image_size": [
+          390,
+          844
+        ],
+        "captured_at": "2026-10-19T21:58:43.780348+00:00",
+        "handoff_file": "web/test-results/AEON-1401/N6-390-light.png"
+      },
+      {
+        "state": "N5-desk",
+        "width": 1440,
+        "theme": "light",
+        "file": "web/test-results/AEON-1401/ap908-status-names-remote/AEON-1401/ap908-status-names/aeon-chunks-ufUQO7/chunk-0/aeon-1401-status-names-AEO-51bd2-ne-reads-the-workspace-name/aeon1401-1440-light-N5-desk.png",
+        "sha256": "f70a3aad7078085572bdb59bf234c29a11002bbcfc2e6ca3e6e43e23f4b94fbb",
+        "image_size": [
+          1440,
+          900
+        ],
+        "captured_at": "2026-10-19T21:58:44.321956+00:00",
+        "handoff_file": "web/test-results/AEON-1401/N5-desk-1440-light.png"
+      },
+      {
+        "state": "header-preview-hover",
+        "width": 1280,
+        "theme": "dark",
+        "file": "web/test-results/AEON-1401/ap908-header-glimpse-remote/AEON-1401/ap908-header-glimpse/aeon-chunks-0PHISn/chunk-0/header-glimpse-header-shots-dark-keeps-AA-contrast-at-1280/header-1280-dark-hover.png",
+        "sha256": "0a7c4724d9875c4ceec0ef16e904ce7f7407e05c51e88c5ddc97945b4603bb83",
+        "image_size": [
+          1280,
+          1000
+        ],
+        "captured_at": "2026-10-19T22:00:29.953438+00:00",
+        "handoff_file": "web/test-results/AEON-1401/header-preview-hover-1280-dark.png"
+      },
+      {
+        "state": "header-preview",
+        "width": 1280,
+        "theme": "dark",
+        "file": "web/test-results/AEON-1401/ap908-header-glimpse-remote/AEON-1401/ap908-header-glimpse/aeon-chunks-0PHISn/chunk-0/header-glimpse-header-shots-dark-keeps-AA-contrast-at-1280/header-1280-dark.png",
+        "sha256": "e38631fc693c9e9eca943c214214d3cb95a1c800ecaa3e2f89b3d2289dc11048",
+        "image_size": [
+          1280,
+          1000
+        ],
+        "captured_at": "2026-10-19T22:00:28.826538+00:00",
+        "handoff_file": "web/test-results/AEON-1401/header-preview-1280-dark.png"
+      },
+      {
+        "state": "header-preview-hover",
+        "width": 1600,
+        "theme": "dark",
+        "file": "web/test-results/AEON-1401/ap908-header-glimpse-remote/AEON-1401/ap908-header-glimpse/aeon-chunks-0PHISn/chunk-0/header-glimpse-header-shots-dark-keeps-AA-contrast-at-1600/header-1600-dark-hover.png",
+        "sha256": "19cd3048d580bb8d1f8e79cb17189bf1101f05cf5680b1b867a24fa94072ece8",
+        "image_size": [
+          1600,
+          1000
+        ],
+        "captured_at": "2026-10-19T22:00:22.540180+00:00",
+        "handoff_file": "web/test-results/AEON-1401/header-preview-hover-1600-dark.png"
+      },
+      {
+        "state": "header-preview",
+        "width": 1600,
+        "theme": "dark",
+        "file": "web/test-results/AEON-1401/ap908-header-glimpse-remote/AEON-1401/ap908-header-glimpse/aeon-chunks-0PHISn/chunk-0/header-glimpse-header-shots-dark-keeps-AA-contrast-at-1600/header-1600-dark.png",
+        "sha256": "afdb26996e3a56b000f93f26c9cd66df29deb4fd8da92ba564a3027d5999188a",
+        "image_size": [
+          1600,
+          1000
+        ],
+        "captured_at": "2026-10-19T22:00:21.090577+00:00",
+        "handoff_file": "web/test-results/AEON-1401/header-preview-1600-dark.png"
+      },
+      {
+        "state": "header-preview",
+        "width": 390,
+        "theme": "dark",
+        "file": "web/test-results/AEON-1401/ap908-header-glimpse-remote/AEON-1401/ap908-header-glimpse/aeon-chunks-0PHISn/chunk-0/header-glimpse-header-shots-dark-keeps-AA-contrast-at-390/header-390-dark.png",
+        "sha256": "15b0546f0531eca2e76b5089c5ac15e9f178a3f6f22fa3b989b53fe10f256739",
+        "image_size": [
+          390,
+          844
+        ],
+        "captured_at": "2026-10-19T22:00:30.566046+00:00",
+        "handoff_file": "web/test-results/AEON-1401/header-preview-390-dark.png"
+      },
+      {
+        "state": "header-preview-hover",
+        "width": 1280,
+        "theme": "light",
+        "file": "web/test-results/AEON-1401/ap908-header-glimpse-remote/AEON-1401/ap908-header-glimpse/aeon-chunks-0PHISn/chunk-0/header-glimpse-header-shots-light-keeps-AA-contrast-at-1280/header-1280-light-hover.png",
+        "sha256": "7979bbe9ef52b078e84c99d623c0d1a4d589e7131eec58f57debe23d68e58018",
+        "image_size": [
+          1280,
+          1000
+        ],
+        "captured_at": "2026-10-19T22:00:12.638247+00:00",
+        "handoff_file": "web/test-results/AEON-1401/header-preview-hover-1280-light.png"
+      },
+      {
+        "state": "header-preview",
+        "width": 1280,
+        "theme": "light",
+        "file": "web/test-results/AEON-1401/ap908-header-glimpse-remote/AEON-1401/ap908-header-glimpse/aeon-chunks-0PHISn/chunk-0/header-glimpse-header-shots-light-keeps-AA-contrast-at-1280/header-1280-light.png",
+        "sha256": "6af6218daf6920283022932f6cb7a07a0ec5cf181c539898540289aaf0654913",
+        "image_size": [
+          1280,
+          1000
+        ],
+        "captured_at": "2026-10-19T22:00:11.508766+00:00",
+        "handoff_file": "web/test-results/AEON-1401/header-preview-1280-light.png"
+      },
+      {
+        "state": "header-preview-hover",
+        "width": 1600,
+        "theme": "light",
+        "file": "web/test-results/AEON-1401/ap908-header-glimpse-remote/AEON-1401/ap908-header-glimpse/aeon-chunks-0PHISn/chunk-0/header-glimpse-header-shots-light-keeps-AA-contrast-at-1600/header-1600-light-hover.png",
+        "sha256": "32050c8abf6785f20f972d6cda85faea53f706883190fc25cd52ba1ed87c1ff1",
+        "image_size": [
+          1600,
+          1000
+        ],
+        "captured_at": "2026-10-19T22:00:07.289307+00:00",
+        "handoff_file": "web/test-results/AEON-1401/header-preview-hover-1600-light.png"
+      },
+      {
+        "state": "header-preview",
+        "width": 1600,
+        "theme": "light",
+        "file": "web/test-results/AEON-1401/ap908-header-glimpse-remote/AEON-1401/ap908-header-glimpse/aeon-chunks-0PHISn/chunk-0/header-glimpse-header-shots-light-keeps-AA-contrast-at-1600/header-1600-light.png",
+        "sha256": "8ef572f858b86426856f6f6bdc118a418d99fde3ad02e70311ad811369ca719a",
+        "image_size": [
+          1600,
+          1000
+        ],
+        "captured_at": "2026-10-19T22:00:05.755083+00:00",
+        "handoff_file": "web/test-results/AEON-1401/header-preview-1600-light.png"
+      },
+      {
+        "state": "header-preview",
+        "width": 390,
+        "theme": "light",
+        "file": "web/test-results/AEON-1401/ap908-header-glimpse-remote/AEON-1401/ap908-header-glimpse/aeon-chunks-0PHISn/chunk-0/header-glimpse-header-shots-light-keeps-AA-contrast-at-390/header-390-light.png",
+        "sha256": "a8092f283f0a796356099f1cc0009db46eb2fcd783116251c7aa00ef8d42dd77",
+        "image_size": [
+          390,
+          844
+        ],
+        "captured_at": "2026-10-19T22:00:13.297763+00:00",
+        "handoff_file": "web/test-results/AEON-1401/header-preview-390-light.png"
+      }
+    ],
+    "artifact_note": "The recorded digests and timestamps describe the initial captures retained at file. The final-HEAD replay refreshes handoff_file and writes its own digests and timestamps in ap908-final-evidence.json."
+  },
+  "static_validation": {
+    "source_commit": "756ff82107d54b0acb26a3a54d272e15d5acd376",
+    "read_only_ci_check_receipts": [
+      {
+        "name": "migration-compat",
+        "conclusion": "SUCCESS",
+        "url": "https://github.com/inspr-at/paimos/actions/runs/39323419349/job/118305556440"
+      },
+      {
+        "name": "go-timing",
+        "conclusion": "SUCCESS",
+        "url": "https://github.com/inspr-at/paimos/actions/runs/39323419349/job/118305797633"
+      },
+      {
+        "name": "go-static",
+        "conclusion": "SUCCESS",
+        "url": "https://github.com/inspr-at/paimos/actions/runs/39323419349/job/118305797474"
+      },
+      {
+        "name": "web-catalogue",
+        "conclusion": "SUCCESS",
+        "url": "https://github.com/inspr-at/paimos/actions/runs/39323419349/job/118305797453"
+      },
+      {
+        "name": "release-check-run",
+        "conclusion": "SUCCESS",
+        "url": "https://github.com/inspr-at/paimos/actions/runs/39323419349/job/118305797595"
+      },
+      {
+        "name": "release-check",
+        "conclusion": "SUCCESS",
+        "url": "https://github.com/inspr-at/paimos/actions/runs/39323419349/job/118306391386"
+      },
+      {
+        "name": "go",
+        "conclusion": "SUCCESS",
+        "url": "https://github.com/inspr-at/paimos/actions/runs/39323419349/job/118311674470"
+      },
+      {
+        "name": "web",
+        "conclusion": "SUCCESS",
+        "url": "https://github.com/inspr-at/paimos/actions/runs/39323419349/job/118315488815"
+      }
+    ],
+    "review_gates_run": false,
+    "verified_at": "2026-10-19T22:00:49.421161+00:00",
+    "local_only_supplements": [
+      {
+        "check": "theme-colour-literals",
+        "result": "PASS: Theme colour literals: 537 components checked"
+      },
+      {
+        "check": "apt-step-bounds",
+        "result": "PASS: 4 tests, zero failed/skipped"
+      }
+    ],
+    "static_attempt": {
+      "exit_code": 3,
+      "refusal": "remote static check paused at night (night protocol: mbp2606 is shared with the CI pool); rely on the PR's hosted CI static job",
+      "log": "web/test-results/AEON-1401/ap908-static.log"
+    },
+    "static_registry_ci_jobs": [
+      {
+        "job": "go-static",
+        "conclusion": "SUCCESS",
+        "checks": [
+          "volatile-identity",
+          "public-names",
+          "request-body-ownership",
+          "go-vet",
+          "rules-bootstrap",
+          "test-tiers",
+          "go-tiers",
+          "go-shards-7",
+          "go-shards-4"
+        ],
+        "urls": [
+          "https://github.com/inspr-at/paimos/actions/runs/39323419349/job/118305797474"
+        ]
+      },
+      {
+        "job": "release-check-run",
+        "conclusion": "SUCCESS",
+        "checks": [
+          "release-metadata",
+          "release-rehearsal-tests",
+          "own-release-notes-tests",
+          "own-release-notes",
+          "release-tool-tests",
+          "live-policy-tests",
+          "cross-family-tests",
+          "release-pin-tests",
+          "release-completion-tests",
+          "audit-tests",
+          "audit-coverage",
+          "tracked-bytecode",
+          "ci-plan-tests",
+          "full-ui-qa-tests",
+          "releaseworkflow-tests",
+          "runner-route-tests",
+          "runner-guard-tests",
+          "runner-guard",
+          "openapi-sort"
+        ],
+        "urls": [
+          "https://github.com/inspr-at/paimos/actions/runs/39323419349/job/118305797595"
+        ]
+      },
+      {
+        "job": "web-setup",
+        "conclusion": "SUCCESS",
+        "checks": [
+          "docker-web-inputs",
+          "web-typecheck",
+          "web-lint"
+        ],
+        "urls": [
+          "https://github.com/inspr-at/paimos/actions/runs/39323419349/job/118305797848"
+        ]
+      },
+      {
+        "job": "migration-compat",
+        "conclusion": "SUCCESS",
+        "checks": [
+          "migration-tests",
+          "migrations",
+          "migration-splitter",
+          "migration-probe-tests"
+        ],
+        "urls": [
+          "https://github.com/inspr-at/paimos/actions/runs/39323419349/job/118305556440"
+        ]
+      },
+      {
+        "job": "web-unit",
+        "conclusion": "SUCCESS",
+        "checks": [
+          "web-shard-spec-tests",
+          "web-shard-tests",
+          "web-tiers",
+          "web-spec-inventory",
+          "web-browser-safety"
+        ],
+        "urls": [
+          "https://github.com/inspr-at/paimos/actions/runs/39323419349/job/118306809227",
+          "https://github.com/inspr-at/paimos/actions/runs/39323419349/job/118306808833",
+          "https://github.com/inspr-at/paimos/actions/runs/39323419349/job/118306808883",
+          "https://github.com/inspr-at/paimos/actions/runs/39323419349/job/118306808815"
+        ]
+      },
+      {
+        "job": "go-test",
+        "conclusion": "SUCCESS",
+        "checks": [
+          "openapi-properties"
+        ],
+        "urls": [
+          "https://github.com/inspr-at/paimos/actions/runs/39323419349/job/118305797693",
+          "https://github.com/inspr-at/paimos/actions/runs/39323419349/job/118305797607",
+          "https://github.com/inspr-at/paimos/actions/runs/39323419349/job/118305797812",
+          "https://github.com/inspr-at/paimos/actions/runs/39323419349/job/118305797889",
+          "https://github.com/inspr-at/paimos/actions/runs/39323419349/job/118305797947",
+          "https://github.com/inspr-at/paimos/actions/runs/39323419349/job/118305797850",
+          "https://github.com/inspr-at/paimos/actions/runs/39323419349/job/118305797651"
+        ]
+      },
+      {
+        "job": "web-catalogue",
+        "conclusion": "SUCCESS",
+        "checks": [
+          "web-classification"
+        ],
+        "urls": [
+          "https://github.com/inspr-at/paimos/actions/runs/39323419349/job/118305797453"
+        ]
+      }
+    ],
+    "receipt_scope": "Read-only successful hosted-job receipts mapped to 42 registry checks on the tested source; both local-only guards also passed. The guarded ci-static invocation exited 3 and is not represented as exit 0."
+  },
+  "artifact_inspection": "Inspected fresh N1 dark, N2 validation, N3 dark list, N4 canonical-value tooltip and N6 phone list screenshots for the intended states. This is evidence collection; taste and review approval stay with the coordinator.",
+  "final_head_replay": {
+    "purpose": "Replay both complete changed specs after the evidence-only commit so screenshots are newer than the final handoff HEAD. No source or spec change is required.",
+    "manifest": "web/test-results/AEON-1401/ap908-final-evidence.json",
+    "logs": [
+      "web/test-results/AEON-1401/ap908-final-status-names.log",
+      "web/test-results/AEON-1401/ap908-final-header-glimpse.log"
+    ],
+    "includes": "Exact final HEAD, unchanged web tree, every pass line, runner exits, PNG paths, timestamps and SHA-256 digests. Screenshots and replay artifacts remain git-ignored."
+  }
+}
