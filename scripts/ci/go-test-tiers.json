@@ -936,6 +936,20 @@
     ,
     {"kind":"go","package":"internal/agentaccounts","name":"TestQuotaHintsNeedPersonConfirmationForExactAccounts","tier":"GATED-FULL"}
     ,
+    {"kind":"go","package":"internal/agentaccounts","name":"TestQuotaOutlookExpiredReadingDoesNotInventHeadroom","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/agentaccounts","name":"TestQuotaOutlookRedactionWithholdsRevokedAggregates","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/agentaccounts","name":"TestQuotaOutlookReplayVerdicts","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/agentaccounts","name":"TestQuotaOutlookRevocationBoundary","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/agentaccounts","name":"TestQuotaOutlookScopeAndTenant","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/agentaccounts","name":"TestQuotaOutlookSharedSubscriptionCountsOnce","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/agentaccounts","name":"TestQuotaOutlookWebFixtureIsCurrent","tier":"ESSENTIAL"}
+    ,
     {"kind":"go","package":"internal/agentaccounts","name":"TestQuotaWarningDedupeRecoveryAndReset","tier":"GATED-FULL"}
     ,
     {"kind":"go","package":"internal/agentaccounts","name":"TestQuotaWarningDelayedPoolReadingCannotUndoRecovery","tier":"GATED-FULL"}
@@ -5952,6 +5966,8 @@
     ,
     {"kind":"go","package":"internal/decisiondesk","name":"TestPushPolicyAndHTTPBounds","tier":"GATED-FULL"}
     ,
+    {"kind":"go","package":"internal/decisiondesk","name":"TestQuestionTicketKeyFollowsAskAndStaysInsideTheProject","tier":"ESSENTIAL"}
+    ,
     {"kind":"go","package":"internal/decisiondesk","name":"TestRevocationDecisionExpiryAndFinishedWork","tier":"GATED-FULL"}
     ,
     {"kind":"go","package":"internal/decisiondesk","name":"TestRoutineConsentProjectionMatchesNativePolicyAndPages","tier":"ESSENTIAL"}
@@ -6291,6 +6307,8 @@
     {"kind":"go","package":"internal/delivery","name":"TestDeployRecordFailsAtomicallyAndRechecksAuthority","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/delivery","name":"TestDeploymentAncestryRequiresRepositoryAndExactMergeBase","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/delivery","name":"TestDocumentedWebhookActions","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/delivery","name":"TestGitHubReaderConfirmsMissingPull","tier":"ESSENTIAL"}
     ,
@@ -10181,6 +10199,8 @@
     {"kind":"go","package":"internal/rules/doctrine","name":"TestDoctrineInboxPromotionNeedsTheTLDR","tier":"GATED-FULL"}
     ,
     {"kind":"go","package":"internal/rules/doctrine","name":"TestDoctrineInboxPromotionSurvivesALease","tier":"GATED-FULL"}
+    ,
+    {"kind":"go","package":"internal/rules/doctrine","name":"TestDoctrineInstallationTokenLength","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/rules/doctrine","name":"TestDoctrineLayerEndToEnd","tier":"GATED-FULL"}
     ,

@@ -454,9 +454,10 @@ func TestPublicationEventsProductHistoryAndNoDowntimeBurst(t *testing.T) {
 		t.Fatal("history repeat duplicated")
 	}
 	// Several explicit events accumulated during downtime coalesce to the newest.
+	// Event rows and publication payloads share the scheduler's injected clock.
 	f.tx(func(tx pgx.Tx) error {
 		for i := 3; i < 6; i++ {
-			if _, err := events.Append(t.Context(), tx, f.p, events.Change{NodeID: &f.project, Type: "release.published", After: Publication{ProjectID: f.project, Name: fmt.Sprintf("Release %d", i), Version: fmt.Sprintf("v%d", i), PublishedAt: f.now}}); err != nil {
+			if _, err := events.Append(t.Context(), tx, f.p, events.Change{NodeID: &f.project, Type: "release.published", After: Publication{ProjectID: f.project, Name: fmt.Sprintf("Release %d", i), Version: fmt.Sprintf("v%d", i), PublishedAt: f.now}, At: &f.now}); err != nil {
 				return err
 			}
 		}
@@ -867,6 +868,7 @@ func TestRecurrenceWriteLockOrderWithTreeWriters(t *testing.T) {
 	}
 }
 
+// Risk: a persistent bad row starves valid work or becomes invisible as wall time advances.
 func TestPersistentDueFailureDoesNotStarveTenant(t *testing.T) {
 	for _, failure := range []string{"invalid time cursor", "invalid publication", "queue rollback"} {
 		t.Run(failure, func(t *testing.T) {
@@ -902,14 +904,11 @@ func TestPersistentDueFailureDoesNotStarveTenant(t *testing.T) {
 						return err
 					}
 					good.ID = "10000000-0000-4000-8000-000000000020"
-					// A malformed payload has no published_at, so its due time is the
-					// event's own timestamp. Pin it to the injected clock: the database
-					// clock passed this fixed "now" on 2026-10-19 and hid the bad row.
-					badAt := f.now
-					if _, err := events.Append(t.Context(), tx, f.p, events.Change{NodeID: &bad.ProjectID, Type: "release.published", After: "invalid publication", At: &badAt}); err != nil {
+					// Keep even the malformed event due under the scheduler's injected clock.
+					if _, err := events.Append(t.Context(), tx, f.p, events.Change{NodeID: &bad.ProjectID, Type: "release.published", After: "invalid publication", At: &f.now}); err != nil {
 						return err
 					}
-					_, err := events.Append(t.Context(), tx, f.p, events.Change{NodeID: &good.ProjectID, Type: "release.published", After: Publication{ProjectID: good.ProjectID, PublishedAt: f.now, Name: "Release", Version: "261019120000.0.0"}})
+					_, err := events.Append(t.Context(), tx, f.p, events.Change{NodeID: &good.ProjectID, Type: "release.published", After: Publication{ProjectID: good.ProjectID, PublishedAt: f.now, Name: "Release", Version: "261019120000.0.0"}, At: &f.now})
 					return err
 				}
 				badAt := *bad.NextAt
