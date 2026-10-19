@@ -47,3 +47,25 @@ and the scheduled pass reports an error. Such projects require operator follow-u
 a failed or partial pass is never reported as a successful deletion.
 
 The settings UI reuses existing components; needs Opus design.
+
+Validation on 2026-10-19: remote Go suites for `internal/projectdraft`,
+`internal/attachments`, `internal/dsar`, `internal/db`, `internal/authz`,
+`internal/reportercontract` and `internal/agentpairing` passed. The Settings
+browser case passed at 390, 1024 and 1440 px in light and dark, including long
+German labels, failed saves, revision conflicts and measured control stability.
+Screenshots are under `web/test-results/remote/` as
+`start-retention-<width>-<theme>.png` (not committed). A scratch-branch negative
+control disabling person-activity detection failed for the intended reason:
+six candidates instead of two. The work branch retains the correct protection.
+Migration guard and ownership audit checks passed.
+
+Shared changes are limited to the additive import API contract, route fixture,
+two DSAR table policies in both inventories, two shared-fence caller entries,
+the two new test tier entries and the Settings shard count. Migrations
+1366–1368 were reserved in the coordinator ledger. The migration runner's
+concurrent-index parser now admits explicit GIN/B-tree methods, with its
+existing batch restrictions retained and tested. New source files are covered
+by the existing projectdraft and settings ownership slices.
+
+Final static verification ran through `ci-static-remote.sh` with
+`node scripts/ci-static.mjs --merge-main`: exit 0, 44 checks passed, no skips.
