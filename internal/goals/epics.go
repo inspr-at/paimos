@@ -1066,8 +1066,8 @@ func queueEligible(state string) bool {
 // estimate and an hour of review. The text keeps the closed ETA source
 // `release`. The wait is the canonical expected start when the queue has one,
 // otherwise the earlier estimates in the same partition. An untargeted pool
-// divides that sum by the parallel-run capacity and stays blank when the
-// capacity is unknown.
+// counts the leaf's own project, divides that sum by the parallel runs the
+// account-use matrix allows there, and stays blank when that capacity is unknown.
 func queueLandingText(state string, estimate, wait float64, waitOK bool, cadence releaseGap, now time.Time) string {
 	if !waitOK || estimate <= 0 || cadence.hours <= 0 || !queueEligible(state) {
 		return ""
@@ -1103,32 +1103,36 @@ func (d *epicPageData) queueLanding(project string, c epicChild, now time.Time) 
 	return queueLandingText(c.State, c.Estimate, wait.hours, wait.ok, d.cadence, now)
 }
 
-const queueLandingColumns = `SELECT q.queue_node_id::text, coalesce(q.queue_target_agent_id::text,''), q.queue_target_agent_id IS NOT NULL, q.queue_position,
+const queueLandingColumns = `SELECT q.queue_node_id::text, coalesce(q.queue_target_agent_id::text,''), coalesce(q.project_id::text,''), q.queue_target_agent_id IS NOT NULL, q.queue_position,
  CASE WHEN jsonb_typeof(q.fields->'estimate_hours')='number' THEN (q.fields->>'estimate_hours')::float8 ELSE 0 END
  FROM queue_heads q `
 
-// Same advisory total as the work-queue list with an empty project filter
-// (internal/agentruns/queue_list.go): fresh available accounts, one slot count
-// per harness and quota pool. The epic wait sums the whole untargeted
-// partition, so the divisor is that unfiltered total.
-const queueParallelSQL = `SELECT coalesce(sum(slots),0)::int FROM (
+// Same advisory total as the work-queue list for one project
+// (internal/agentruns/queue_list.go with project_id): fresh available accounts
+// the account-use matrix allows for that project, one slot count per harness
+// and quota pool. One row per requested project; a project without an allowed
+// account reads 0.
+const queueParallelSQL = `SELECT p.id::text, coalesce((SELECT sum(slots) FROM (
  SELECT max(a.max_parallel_runs) slots FROM agent_accounts a
  WHERE a.state='available' AND a.last_probe_ok AND a.last_probe_at>clock_timestamp()-interval '2 minutes'
- AND ($1='' OR aeon_account_use_allowed_for_project(a.id,NULLIF($1,'')::uuid))
+ AND aeon_account_use_allowed_for_project(a.id,p.id)
  AND EXISTS(SELECT 1 FROM model_profiles m WHERE m.enabled AND m.harness=a.harness AND aeon_account_allows_profile(a.harness,a.allowed_model_profile_ids,m.id))
- GROUP BY a.harness,coalesce(nullif(a.quota_pool_fingerprint,''),a.id::text)) pools`
+ GROUP BY a.harness,coalesce(nullif(a.quota_pool_fingerprint,''),a.id::text)) pools),0)::int
+ FROM unnest($1::uuid[]) p(id)`
 
 type queueLandingRow struct {
-	id, agent string
-	targeted  bool
-	position  int
-	hours     float64
+	id, agent, project string
+	targeted           bool
+	position           int
+	hours              float64
 }
 
 // attachQueueLanding reads the canonical queue ranking for leaves that still
 // have no worker ETA, target release or stored suggestion. Release cadence
 // needs releases.read. A canonical expected start wins over the estimate sum.
-// A truncated partition is ignored. Unknown parallel capacity stays blank.
+// The untargeted pool is read per project, like the Work list, so its divisor
+// is that project's allowed capacity. A truncated read is ignored. Unknown
+// parallel capacity stays blank.
 func (d *epicPageData) attachQueueLanding(ctx context.Context, tx pgx.Tx, nodes []epicNode, now time.Time, check authz.ProjectCheck) error {
 	ids := []string{}
 	for _, e := range nodes {
@@ -1192,7 +1196,7 @@ func (d *epicPageData) attachQueueLanding(ctx context.Context, tx pgx.Tx, nodes 
 	}
 	shared, sharedCut, err := readQueueLanding(ctx, tx, workqueue.CTE+queueLandingColumns+`
  WHERE q.queue_target_agent_id IS NULL
- AND EXISTS (SELECT 1 FROM queue_heads h WHERE h.queue_node_id = ANY($1::uuid[]) AND h.queue_target_agent_id IS NULL)
+ AND q.project_id IN (SELECT h.project_id FROM queue_heads h WHERE h.queue_node_id = ANY($1::uuid[]) AND h.queue_target_agent_id IS NULL)
  LIMIT 501`, ids)
 	if err != nil {
 		return err
@@ -1200,28 +1204,46 @@ func (d *epicPageData) attachQueueLanding(ctx context.Context, tx pgx.Tx, nodes 
 	if sharedCut {
 		return nil
 	}
-	needsCapacity := false
-	for _, row := range shared {
-		if want[row.id] && !expected[row.id] {
-			needsCapacity = true
-			break
+	pools := queuePartitions(shared, false)
+	projects := []string{}
+	for project, part := range pools {
+		for _, row := range part {
+			if want[row.id] && !expected[row.id] {
+				projects = append(projects, project)
+				break
+			}
 		}
 	}
-	if !needsCapacity {
+	if len(projects) == 0 {
 		return nil
 	}
-	var parallel int
-	if err := tx.QueryRow(ctx, queueParallelSQL, "").Scan(&parallel); err != nil {
+	parallel, err := readQueueParallel(ctx, tx, projects)
+	if err != nil {
 		return err
 	}
-	// No fresh parallel-run count: do not invent a clock for the general pool.
-	if parallel <= 0 {
-		return nil
-	}
-	for _, part := range queuePartitions(shared, false) {
-		d.scoreQueuePartition(part, want, expected, parallel)
+	for project, part := range pools {
+		// No fresh parallel-run count for the project: do not invent a clock.
+		d.scoreQueuePartition(part, want, expected, parallel[project])
 	}
 	return nil
+}
+
+func readQueueParallel(ctx context.Context, tx pgx.Tx, projects []string) (map[string]int, error) {
+	rows, err := tx.Query(ctx, queueParallelSQL, projects)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := map[string]int{}
+	for rows.Next() {
+		var project string
+		var slots int
+		if err := rows.Scan(&project, &slots); err != nil {
+			return nil, err
+		}
+		out[project] = slots
+	}
+	return out, rows.Err()
 }
 
 // loadEpicQueue reads workqueue.Load in bounded batches. WaitForRuns refuses
@@ -1254,7 +1276,7 @@ func readQueueLanding(ctx context.Context, tx pgx.Tx, query string, ids []string
 	found := []queueLandingRow{}
 	for rows.Next() {
 		var row queueLandingRow
-		if err := rows.Scan(&row.id, &row.agent, &row.targeted, &row.position, &row.hours); err != nil {
+		if err := rows.Scan(&row.id, &row.agent, &row.project, &row.targeted, &row.position, &row.hours); err != nil {
 			return nil, false, err
 		}
 		found = append(found, row)
@@ -1265,15 +1287,17 @@ func readQueueLanding(ctx context.Context, tx pgx.Tx, query string, ids []string
 	return found, len(found) > 500, nil
 }
 
+// queuePartitions keys a targeted queue by agent and the untargeted pool by
+// project. Rows without that key have no partition to rank in.
 func queuePartitions(rows []queueLandingRow, targeted bool) map[string][]queueLandingRow {
 	out := map[string][]queueLandingRow{}
 	for _, row := range rows {
-		if row.targeted != targeted || targeted && row.agent == "" {
-			continue
-		}
-		key := ""
+		key := row.project
 		if targeted {
 			key = row.agent
+		}
+		if row.targeted != targeted || key == "" {
+			continue
 		}
 		out[key] = append(out[key], row)
 	}

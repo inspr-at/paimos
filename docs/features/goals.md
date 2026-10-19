@@ -148,10 +148,13 @@ its own key and then its children's (`keys_total` when more than 20).
   else the suggested release. A suggestion is `~ Next` or `~ Next +N`: the stored
   suggested release, or, for a queued leaf the caller may read releases for, the
   visible queue wait plus the estimate and an hour of review placed on the release
-  cadence. There is no separate ETA source; both use `eta.source: release`. A
-  parent's own estimate is not a suggestion, and an item's suggestion does not
-  roll up onto the epic. The epic uses its own target release, then its own
-  stored suggestion, when no open item has a timed worker ETA.
+  cadence. In the shared pool the wait counts the leaf's own project and divides
+  by the parallel runs the account-use matrix allows there, like the Work list;
+  without that capacity it stays blank. There is no separate ETA source; both
+  use `eta.source: release`. A parent's own estimate is not a suggestion, and an
+  item's suggestion does not roll up onto the epic. The epic uses its own target
+  release, then its own stored suggestion, when no open item has a timed worker
+  ETA.
 - **Hide done** hides an epic only when the epic's own status is Done, Delivered
   or Accepted. An open epic whose children are all done stays listed and keeps
   its failing entry checks. `next_step` is the first open item by ETA, else the

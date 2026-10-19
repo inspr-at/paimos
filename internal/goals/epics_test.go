@@ -603,3 +603,105 @@ func TestEpicFix3UntargetedLandsAndExpectedStart(t *testing.T) {
 		t.Fatalf("untargeted pool %+v", b.ETA)
 	}
 }
+
+// Risk: the untargeted pool's divisor counts an account the account-use
+// matrix denies for the leaf's project, and its wait sums another project's
+// queue, so LANDS disagrees with the Work list's project view. Behind a 40h
+// item in the same project, the 2-slot allowed account lands the 2h leaf on
+// ~ Next +1. Adding the denied 8-slot account gives ~ Next; adding the other
+// project's 400h gives ~ Next +9; both together give ~ Next +2.
+func TestEpicFix4PoolCapacityFollowsProjectMatrix(t *testing.T) {
+	f := writerFixture(t)
+	var allowed, denied string
+	err := db.InTenant(dbtest.Seed(t.Context()), f.db.App, f.writer.TenantID, func(tx pgx.Tx) error {
+		if _, err := tx.Exec(t.Context(), `INSERT INTO node_kinds(tenant_id,slug,label,short_prefix,icon,allowed_child_kinds) VALUES($1,'work_order','Work order','WOR','work-order',ARRAY[]::text[]) ON CONFLICT(tenant_id,slug) DO NOTHING`, f.writer.TenantID); err != nil {
+			return err
+		}
+		if _, err := tx.Exec(t.Context(), `UPDATE node_kinds SET allowed_child_kinds=CASE WHEN allowed_child_kinds IS NULL OR 'work_order'=ANY(allowed_child_kinds) THEN allowed_child_kinds ELSE array_append(allowed_child_kinds,'work_order') END WHERE tenant_id=$1 AND slug='work'`, f.writer.TenantID); err != nil {
+			return err
+		}
+		var other string
+		if err := tx.QueryRow(t.Context(), `INSERT INTO nodes(tenant_id,kind_id,key,title) SELECT $1,k.id,aeon_next_node_key($1,k.short_prefix),'Other project' FROM node_kinds k WHERE k.tenant_id=$1 AND k.slug='project' RETURNING id::text`, f.writer.TenantID).Scan(&other); err != nil {
+			return err
+		}
+		epic := epicFixtureNode(t, tx, f.writer.TenantID, "FX4-1", "Epic pool", "open", f.project, 1, nil)
+		pool := epicFixtureNode(t, tx, f.writer.TenantID, "FX4-2", "Untargeted pool", "open", epic, 1, map[string]any{"estimate_hours": 2})
+		ahead := epicFixtureNode(t, tx, f.writer.TenantID, "FX4-3", "Same project ahead", "blocked", f.project, 2, map[string]any{"estimate_hours": 40})
+		elsewhere := epicFixtureNode(t, tx, f.writer.TenantID, "FX4-4", "Other project ahead", "blocked", other, 1, map[string]any{"estimate_hours": 400})
+		var runner string
+		if err := tx.QueryRow(t.Context(), `INSERT INTO principals(tenant_id,kind,name) VALUES($1,'agent','Pool runner') RETURNING id::text`, f.writer.TenantID).Scan(&runner); err != nil {
+			return err
+		}
+		if _, err := tx.Exec(t.Context(), `INSERT INTO model_profiles(tenant_id,slug,version,harness,family,model,effort,tier) VALUES($1,'fx4-codex','1','codex','openai','fx4-model','high','standard')`, f.writer.TenantID); err != nil {
+			return err
+		}
+		account := func(key string, slots int) (string, error) {
+			var id string
+			err := tx.QueryRow(t.Context(), `INSERT INTO agent_accounts(tenant_id,account_key,harness,daemon_id,registered_by_principal_id,label,max_parallel_runs,last_probe_at,last_probe_ok,last_daemon_generation,capacity_owner) VALUES($1,$2,'codex',$2,$3,$2,$4,clock_timestamp(),true,$2,$5) RETURNING id::text`, f.writer.TenantID, key, runner, slots, f.writer.ID).Scan(&id)
+			return id, err
+		}
+		var err error
+		if allowed, err = account("fx4allowed", 2); err != nil {
+			return err
+		}
+		if denied, err = account("fx4denied", 8); err != nil {
+			return err
+		}
+		if _, err := tx.Exec(t.Context(), `INSERT INTO account_use_cells(tenant_id,account_id,context_id,source,set_by) SELECT $1,$2,c.id,'person',$3 FROM work_contexts c WHERE c.tenant_id=$1 AND c.kind<>'holding' AND c.archived_at IS NULL ON CONFLICT DO NOTHING`, f.writer.TenantID, allowed, f.writer.ID); err != nil {
+			return err
+		}
+		// A saved denial activates the matrix for the tenant.
+		if _, err := tx.Exec(t.Context(), `DELETE FROM account_use_cells WHERE tenant_id=$1 AND account_id=$2`, f.writer.TenantID, denied); err != nil {
+			return err
+		}
+		queue := func(node, project, orderKey, age string) error {
+			var order string
+			if err := tx.QueryRow(t.Context(), `INSERT INTO nodes(tenant_id,kind_id,key,title,parent_id,project_id) SELECT $1,id,$2,'Queued order',$3,$4 FROM node_kinds WHERE tenant_id=$1 AND slug='work_order' RETURNING id::text`, f.writer.TenantID, orderKey, node, project).Scan(&order); err != nil {
+				return err
+			}
+			if _, err := tx.Exec(t.Context(), `INSERT INTO work_orders(tenant_id,node_id,requested_by_principal_id) VALUES($1,$2,$3)`, f.writer.TenantID, order, f.writer.ID); err != nil {
+				return err
+			}
+			_, err := tx.Exec(t.Context(), `INSERT INTO agent_runs(tenant_id,work_order_id,agent_principal_id,queue_node_id,queue_by_principal_id,queue_at,queue_security_review_required)
+ VALUES($1,$2,$3,$4,$5,clock_timestamp()-$6::interval,false)`, f.writer.TenantID, order, runner, node, f.writer.ID, age)
+			return err
+		}
+		if err := queue(ahead, f.project, "FX4-5", "4 hours"); err != nil {
+			return err
+		}
+		if err := queue(elsewhere, other, "FX4-6", "3 hours"); err != nil {
+			return err
+		}
+		return queue(pool, f.project, "FX4-7", "1 hours")
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	// The fixture must keep the matrix decision the assertion depends on.
+	err = db.InTenant(dbtest.Seed(t.Context()), f.db.App, f.writer.TenantID, func(tx pgx.Tx) error {
+		var enforced, allowsAllowed, allowsDenied bool
+		if err := tx.QueryRow(t.Context(), `SELECT (SELECT enforced_at IS NOT NULL FROM account_use_rules),aeon_account_use_allowed_for_project($1,$3),aeon_account_use_allowed_for_project($2,$3)`, allowed, denied, f.project).Scan(&enforced, &allowsAllowed, &allowsDenied); err != nil {
+			return err
+		}
+		if !enforced || !allowsAllowed || allowsDenied {
+			t.Fatalf("matrix fixture enforced=%v allowed=%v denied=%v", enforced, allowsAllowed, allowsDenied)
+		}
+		return nil
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	prev := epicReleaseCadence
+	epicReleaseCadence = func() (releaseGap, bool) {
+		return releaseGap{hours: 24, latest: apiClock.Add(-12 * time.Hour)}, true
+	}
+	t.Cleanup(func() { epicReleaseCadence = prev })
+	m := &module{f.db.App, func() time.Time { return apiClock }}
+	list, code, body := epicList(t, f, m, "")
+	if code != 200 {
+		t.Fatalf("epics %d %s", code, body)
+	}
+	if a := epicItem(t, epicByKey(t, list, "FX4-1"), "FX4-2"); a.ETA.Source != "release" || a.ETA.Text != "~ Next +1" {
+		t.Fatalf("project pool %+v", a.ETA)
+	}
+}

@@ -6566,6 +6566,8 @@
     ,
     {"kind":"go","package":"internal/goals","name":"TestEpicFix3UntargetedLandsAndExpectedStart","tier":"ESSENTIAL"}
     ,
+    {"kind":"go","package":"internal/goals","name":"TestEpicFix4PoolCapacityFollowsProjectMatrix","tier":"ESSENTIAL"}
+    ,
     {"kind":"go","package":"internal/goals","name":"TestEpicItemStateMapping","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/goals","name":"TestGoalAPIAtomicReceipts","tier":"ESSENTIAL"}
