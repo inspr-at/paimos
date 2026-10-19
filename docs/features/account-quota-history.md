@@ -46,7 +46,7 @@ Only current local subscription-resource facts contribute idle samples, so a
 shared resource does not attribute another login's probe to this account.
 Existing normalized run readings also populate the series; estimates do not.
 Idle reports stay out of append-only reading history and do not add per-probe
-`account.probed` events. Health probe telemetry is outside this ticket's scope.
+`account.probed` events. Health probes also retain their latest facts on the account row; account.probed is appended only for a visible availability, readiness, warning-level or error-class change (AEON-1354).
 No vendor responses, account identities, paths, plans or credential material
 are stored in the new quota snapshots. Migration 1363 is expand-only, adds a
 nullable account snapshot and a FORCE RLS hourly table, and classifies both in
@@ -67,3 +67,15 @@ The final guarded `ci-static --merge-main` run on `88c67ec4c` exited 0:
 44 checks passed with no optional skips, including migration, ownership,
 manifest and generated-contract checks. No origin push, deployment or model
 review gate was performed. Production idle qualification remains open.
+
+## Event telemetry retention (AEON-1354)
+
+Account probes and harness heartbeats retain current facts on their existing rows. Routine timestamps, sequence increments and changing quota percentages do not create before/after event rows. Visible readiness, availability, quota warning or error changes and real harness phase, activity, estimate or metadata changes still create event rows. Retention keeps only part of them beyond 14 days: heartbeat rows that change a session's phase, role, bound ticket, stop or archive stay indefinitely, because goal history replays them. Every `account.probed` row and every other heartbeat row, activity, estimate and metadata changes included, is deleted once it is older than 14 days. Harness activity and metadata histories keep their existing storage. Stall detection reads session heartbeat timestamps directly.
+
+Live-mode event streams receive a `harness.heartbeat` SSE wake hint after a committed quiet heartbeat, when the viewer may read that session. A hint has data `{}` and no event ID; it carries no session facts and advances no resume cursor. The live node store gathers hints for 10 seconds after the first one, then hints every work row a view holds, as a heartbeat event with an ID does for its ticket: ticket lists and the outline reread the ETA and lead worker of their rows in one batched list read, and an open parent ticket rereads its aggregate projection. `/agents` subscribes with `telemetry=false`, so there the hints only feed the stream-health watchdog; its freshness comes from the 20-second poll. Durable state-change events retain their existing shape.
+
+A server job runs on startup and daily. It deletes only `account.probed` events and quiet `harness.heartbeat` events, those whose before and after snapshots agree on session, phase, role, bound ticket, stop and archive, older than the fixed 14-day server retention. It works in batches of at most 500, with a 100 ms wait between batches and per-type counts in server logs, and removes each batch's goal history references before the events. One SQL rule decides eligibility for the batch selection, the delete policy, the append-only trigger and the partial index. The job checks tenant boundaries and skips a tenant if eligible telemetry participates in undo. Other event types remain indefinitely. The migration creates the narrow retention authority and a concurrent partial index; it performs no cleanup. The release flow takes a fresh backup before starting the new binary. No `VACUUM FULL` or table rewrite is used; ordinary autovacuum and subsequent writes can reuse space. OPS measures the post-release table size.
+
+Quiet probe/heartbeat streams now produce zero event rows per week unless their visible state changes. Applying the measured 88% telemetry share to the observed 411 thousand events/week suggests roughly 49 thousand other events/week, plus genuine state transitions, if that traffic mix persists. The historical quiet baseline was 1–4 thousand rows/week. These are estimates; production size and growth verification belongs to the release/OPS follow-up.
+
+Validation for AEON-1354: six named regressions are registered as ESSENTIAL, covering ordinary and restart probes, changed/quiet session heartbeats, real SSE delivery, commit/rollback notifications, bounded idempotent retention, undo protection and injected startup/daily scheduling. The database-free scheduling test passed and compiled `internal/events`; all 43 migration policy tests, 357 tier-tool tests and 33 ownership audit tests passed. Remote database suites and full static validation were refused for host capacity (first YELLOW/not GREEN, then 2/2 occupied remote slots); they remain required in PR CI. No production cleanup or size measurement has run in this worker.

@@ -19,6 +19,9 @@ it('session lifecycle and telemetry hints invalidate both old and new bound tick
   for (const type of ['harness.registered', 'harness.stopped', 'harness.heartbeat', 'harness.metadata_changed']) {
     expect(parseNodeChanges(JSON.stringify({ id: 52, type, after: { ticket_node_id: 'new', project_id: 'p1' } }))).toHaveLength(1)
   }
+  // A quiet heartbeat (AEON-1354) is an id-less frame naming no ticket: the
+  // store batches it into a re-read of the shown rows instead (live-list tests).
+  expect(parseNodeChanges(JSON.stringify({}))).toEqual([])
   expect(parseNodeChanges(JSON.stringify({ id: 53, type: 'harness.control_requested', after: { ticket_node_id: 'new' } }))).toEqual([])
   expect(parseNodeChanges('{')).toEqual([])
 })
@@ -301,6 +304,26 @@ describe('LiveNodeStore', () => {
     expect(panel.calls.find(call => call.id === 'parent')?.node).toMatchObject({
       updated_at: parent.updated_at, planning: { tokens: { spent: 250, running: 0 } },
     })
+    expect(fetchNode).not.toHaveBeenCalled()
+    release()
+  })
+
+  // Quiet heartbeats (AEON-1354): the leaves a view shows share one list read.
+  it('reads the session projections of every shown leaf in one list read per id-less heartbeat window', async () => {
+    const leaf = (id: string, progress: number) => ({ ...node(id, '2026-09-29T10:00:00Z'), kind_slug: 'ticket', children_count: 0,
+      project: { id: 'A', key: 'A', title: 'A' }, eta: { finished: false, progress_pct: progress } } as ListItem)
+    const fetchAggregates = vi.fn(async (ids: string[]) => ids.map(id => leaf(id, 70)))
+    store = new LiveNodeStore({ open: url => new FakeSource(url) as never, fetchNode, fetchAggregates, heartbeatMs: 1000, rows })
+    const panel = view(['a', 'b'])
+    store.subscribe(panel.v)
+    latest().ready(40, false)
+    for (const id of ['a', 'b']) rows.adopt(leaf(id, 10), rows.mark(), { show: true })
+    const release = rows.hold(() => ['a', 'b'])
+    for (let tick = 0; tick < 3; tick++) latest().emit('harness.heartbeat', {})
+    await vi.advanceTimersByTimeAsync(1000)
+    expect(fetchAggregates).toHaveBeenCalledExactlyOnceWith(['a', 'b'])
+    expect(panel.calls.map(call => [call.id, (call.node as ListItem | null)?.eta?.progress_pct])).toEqual([['a', 70], ['b', 70]])
+    expect(rows.latest('a')?.updated_at).toBe('2026-09-29T10:00:00Z')
     expect(fetchNode).not.toHaveBeenCalled()
     release()
   })

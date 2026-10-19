@@ -333,6 +333,7 @@ func serveWithPool(ctx context.Context, cfg config.Config, ln net.Listener, pool
 	startWorker(func() { inbox.NewWorker(pool, inbox.WorkerOptions{}).Run(workerCtx) })
 	// AEON-291: silent unmanaged sessions become "Lost contact" (one runner per tenant).
 	startWorker(func() { harness.RunLostContactSweeper(workerCtx, pool) })
+	startWorker(func() { events.RunTelemetryRetention(workerCtx, pool) })
 	startWorker(func() { nodes.RunWorkLifecycle(workerCtx, pool) })
 	modelMod := modelregistry.NewWithVault(pool, authCfg.SessionKey)
 	startWorker(func() { modelMod.Run(workerCtx) })

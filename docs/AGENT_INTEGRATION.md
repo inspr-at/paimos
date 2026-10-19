@@ -1192,7 +1192,7 @@ to bypass qualification. Live qualification remains a release-owned prerequisite
 Accepted normalized Claude/Codex observations now also feed a credential-free
 latest snapshot and one UTC hourly rollup per account through the existing
 account probe/readings paths. Measurement-only probes do not append
-`account.probed` telemetry. Original reading times survive replay; newer samples
+per-tick `account.probed` telemetry; visible state transitions still append an audit event. Original reading times survive replay; newer samples
 win per window/bucket, with harness authority on equal timestamps. The
 `GET /api/agent-accounts/{accountId}/quota-series` read provides bounded hourly
 pages and the last actual reading, including age and reset after inactivity.

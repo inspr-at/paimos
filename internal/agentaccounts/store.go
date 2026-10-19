@@ -7,6 +7,7 @@ import (
 	"errors"
 	"math"
 	"net/http"
+	"reflect"
 	"strconv"
 	"time"
 
@@ -495,6 +496,13 @@ func reportProbe(ctx context.Context, tx pgx.Tx, p tenant.Principal, accountID s
 	if before.DaemonID != daemonID {
 		return Account{}, fail(http.StatusForbidden, "daemon does not match account")
 	}
+	if err := ensureLocalReadinessResource(ctx, tx, p, before); err != nil {
+		return Account{}, err
+	}
+	oldState, err := probeEventState(ctx, tx, before, now)
+	if err != nil {
+		return Account{}, err
+	}
 	if report := in.Readiness; !in.MeasurementOnly && report != nil && uuidRE.MatchString(report.CheckID) &&
 		report.BindingRevision != nil && *report.BindingRevision == before.LinkRevision &&
 		checkResultOK(report.Result) && len(report.Facts) <= 32 && (report.Result == "success" || len(report.Facts) == 0) &&
@@ -528,7 +536,7 @@ func reportProbe(ctx context.Context, tx pgx.Tx, p tenant.Principal, accountID s
 			if err != nil {
 				return Account{}, err
 			}
-			if err := writeEvent(ctx, tx, p, evProbed, before, after); err != nil {
+			if err := recordProbeChange(ctx, tx, p, before, after, oldState, now); err != nil {
 				return Account{}, err
 			}
 			if err := flushQuotaNotices(ctx, tx, system, notices); err != nil {
@@ -536,9 +544,6 @@ func reportProbe(ctx context.Context, tx pgx.Tx, p tenant.Principal, accountID s
 			}
 			return after, &probeHeartbeatCommitted{&httpError{status: 409, code: "stale_binding", msg: "check belongs to previous daemon generation; heartbeat recorded, check facts discarded"}}
 		}
-	}
-	if err := ensureLocalReadinessResource(ctx, tx, p, before); err != nil {
-		return Account{}, err
 	}
 	if err := reconcileReadinessResources(ctx, tx, before); err != nil {
 		return Account{}, err
@@ -608,17 +613,63 @@ func reportProbe(ctx context.Context, tx pgx.Tx, p tenant.Principal, accountID s
 	if err != nil {
 		return Account{}, err
 	}
-	// Idle measurements retain their latest state and hourly quota rollup.
-	// They are telemetry, not a new audit event on every successful poll.
-	if !in.MeasurementOnly {
-		if err := writeEvent(ctx, tx, p, evProbed, before, after); err != nil {
-			return Account{}, err
-		}
+	if err := recordProbeChange(ctx, tx, p, before, after, oldState, now); err != nil {
+		return Account{}, err
 	}
 	if err := flushQuotaNotices(ctx, tx, system, notices); err != nil {
 		return Account{}, err
 	}
 	return after, nil
+}
+
+// Compare the advice people see, not reading timestamps, quota percentages or
+// daemon generations. Latest facts and hourly quota samples keep those details.
+type probeState struct {
+	Available                              bool
+	State, Readiness, CheckResult, Failure string
+	CanTry                                 bool
+	Reasons                                []string
+	Warnings, Errors                       map[string]string
+}
+
+func probeEventState(ctx context.Context, tx pgx.Tx, a Account, now time.Time) (probeState, error) {
+	r, err := loadReadiness(ctx, tx, a, now, 0)
+	if err != nil {
+		return probeState{}, err
+	}
+	s := probeState{Available: probeFresh(a, now), State: a.State, Readiness: r.State, CanTry: r.CanTry, Reasons: r.ReasonCodes, CheckResult: r.CheckResult, Warnings: map[string]string{}, Errors: map[string]string{}}
+	if err := tx.QueryRow(ctx, `SELECT last_probe_failure FROM agent_accounts WHERE id=$1`, a.ID).Scan(&s.Failure); err != nil {
+		return s, err
+	}
+	facts, err := loadReadinessFacts(ctx, tx, a, now)
+	if err != nil {
+		return s, err
+	}
+	settings, err := quotaWarningSettings(ctx, tx)
+	if err != nil {
+		return s, err
+	}
+	for _, f := range facts {
+		key := f.ResourceID + "/" + f.WindowKey
+		if level, _, _ := quotaWarningLevel(f, settings, now); level != "" {
+			s.Warnings[key] = level
+		}
+		if f.ReadingError != "" {
+			s.Errors[key] = f.ReadingError
+		}
+	}
+	return s, nil
+}
+
+func recordProbeChange(ctx context.Context, tx pgx.Tx, p tenant.Principal, before, after Account, old probeState, now time.Time) error {
+	next, err := probeEventState(ctx, tx, after, now)
+	if err != nil {
+		return err
+	}
+	if reflect.DeepEqual(old, next) {
+		return nil
+	}
+	return writeEvent(ctx, tx, p, evProbed, before, after)
 }
 
 func lockAccount(ctx context.Context, tx pgx.Tx, id string) (Account, error) {

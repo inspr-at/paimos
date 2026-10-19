@@ -18850,7 +18850,9 @@
     ,
     {"kind":"vitest","file":"tests/live-list.unit.test.ts","name":"useLiveList: field changes > a failed read keeps the rows waiting and reads them again after a growing wait","tier":"GATED-FULL"}
     ,
-    {"kind":"vitest","file":"tests/live-list.unit.test.ts","name":"useLiveList: field changes > a heartbeat read overtaken by a stop reads the same-revision projections again","tier":"GATED-FULL"}
+    {"kind":"vitest","file":"tests/live-list.unit.test.ts","name":"useLiveList: field changes > a heartbeat (event with an id) read overtaken by a stop reads the same-revision projections again","tier":"GATED-FULL"}
+    ,
+    {"kind":"vitest","file":"tests/live-list.unit.test.ts","name":"useLiveList: field changes > a heartbeat (id-less frame) read overtaken by a stop reads the same-revision projections again","tier":"GATED-FULL"}
     ,
     {"kind":"vitest","file":"tests/live-list.unit.test.ts","name":"useLiveList: field changes > a write of this tab whose answer lands after its event is still its own: nothing waits or is said","tier":"GATED-FULL"}
     ,
@@ -18863,6 +18865,8 @@
     {"kind":"vitest","file":"tests/live-list.unit.test.ts","name":"useLiveList: field changes > continues applying projections when the database counter rewinds during a busy read","tier":"GATED-FULL"}
     ,
     {"kind":"vitest","file":"tests/live-list.unit.test.ts","name":"useLiveList: field changes > follows the same person’s changes from another tab","tier":"GATED-FULL"}
+    ,
+    {"kind":"vitest","file":"tests/live-list.unit.test.ts","name":"useLiveList: field changes > id-less heartbeat frames make exactly one batched ETA and lead worker read of the shown rows","tier":"ESSENTIAL"}
     ,
     {"kind":"vitest","file":"tests/live-list.unit.test.ts","name":"useLiveList: field changes > leaves the changes this tab made to the code that made them","tier":"GATED-FULL"}
     ,
@@ -18961,6 +18965,8 @@
     {"kind":"vitest","file":"tests/live-nodes.unit.test.ts","name":"LiveNodeStore > opens one live stream for all views and asks them to refetch after connecting","tier":"GATED-FULL"}
     ,
     {"kind":"vitest","file":"tests/live-nodes.unit.test.ts","name":"LiveNodeStore > pings keep a quiet stream alive without row reads; missing pings reconnect and resync at 45s","tier":"GATED-FULL"}
+    ,
+    {"kind":"vitest","file":"tests/live-nodes.unit.test.ts","name":"LiveNodeStore > reads the session projections of every shown leaf in one list read per id-less heartbeat window","tier":"ESSENTIAL"}
     ,
     {"kind":"vitest","file":"tests/live-nodes.unit.test.ts","name":"LiveNodeStore > refetches a changed node once for every view that shows it and tells the others","tier":"GATED-FULL"}
     ,
@@ -19077,6 +19083,10 @@
     {"kind":"vitest","file":"tests/live-ticket.unit.test.ts","name":"parent detail aggregate freshness > refetches an open parent after harness.stopped on an unseen descendant","tier":"NIGHTLY"}
     ,
     {"kind":"vitest","file":"tests/live-ticket.unit.test.ts","name":"parent detail aggregate freshness > refetches an open parent after node.updated on an unseen descendant","tier":"NIGHTLY"}
+    ,
+    {"kind":"vitest","file":"tests/live-ticket.unit.test.ts","name":"refetches an open parent once after a window of id-less heartbeat frames","tier":"ESSENTIAL"}
+    ,
+    {"kind":"vitest","file":"tests/live-ticket.unit.test.ts","name":"refreshes a leaf panel without a list once per window of id-less heartbeat frames","tier":"ESSENTIAL"}
     ,
     {"kind":"vitest","file":"tests/live-ticket.unit.test.ts","name":"review 326f: views ask the row store > #1 a first load on its way when the stream connects is read again; the deletion it missed stays out","tier":"GATED-FULL"}
     ,
