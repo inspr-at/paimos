@@ -2296,8 +2296,13 @@ func (s *Supervisor) serviceHarnessWake(ctx context.Context, entry *owned, heart
 		}
 	}()
 	entry.mu.Lock()
-	running := entry.record.State == "running" && !entry.harnessArchived
+	archived := entry.harnessArchived
+	running := entry.record.State == "running" && !archived
 	entry.mu.Unlock()
+	if archived {
+		// An archived generation's harness APIs are revoked; never call them again.
+		return nil
+	}
 	if !running {
 		if claimControls {
 			controls, err := s.api.YieldHarness(ctx, entry.harness)

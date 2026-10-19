@@ -1176,6 +1176,8 @@
     ,
     {"kind":"go","package":"internal/agentd","name":"TestApprovedDeadlineDoesNotWaitForTelemetryLock","tier":"GATED-FULL"}
     ,
+    {"kind":"go","package":"internal/agentd","name":"TestArchivedHarnessClaimsNothing","tier":"ESSENTIAL"}
+    ,
     {"kind":"go","package":"internal/agentd","name":"TestArchivedWorkerResponseDetachesWithoutStoppingChild","tier":"GATED-FULL"}
     ,
     {"kind":"go","package":"internal/agentd","name":"TestAttachBearerAloneCannotJoin","tier":"GATED-FULL"}

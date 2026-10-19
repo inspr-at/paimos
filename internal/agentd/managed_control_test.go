@@ -328,6 +328,26 @@ func TestSteerOnEndedSessionRefuses(t *testing.T) {
 	})
 }
 
+func TestArchivedHarnessClaimsNothing(t *testing.T) {
+	s, a, e, p := managedFixture(t)
+	identity, expiry := managedControlIdentity(s, p)
+	e.mu.Lock()
+	e.harnessArchived = true
+	e.mu.Unlock()
+	a.harnessControls = []HarnessControl{{ID: "archived-steer", Kind: "steer", Text: "do not send", ExpectedOwnership: &identity, ExpiresAt: &expiry, deadline: expiry}}
+	if err := s.serviceHarness(t.Context(), e); err != nil {
+		t.Fatal(err)
+	}
+	a.mu.Lock()
+	unclaimed, completions := len(a.harnessControls), append([]string(nil), a.harnessCompletions...)
+	a.mu.Unlock()
+	p.mu2.Lock()
+	defer p.mu2.Unlock()
+	if unclaimed != 1 || len(completions) != 0 || len(p.texts) != 0 {
+		t.Fatalf("archived harness called revoked APIs: unclaimed=%d completions=%v texts=%v", unclaimed, completions, p.texts)
+	}
+}
+
 func TestClaudeNotRunningBecomesNothingRunning(t *testing.T) {
 	p := &claudeProcess{wireProcess: &wireProcess{readDone: make(chan struct{})}, controls: map[string]chan bool{}}
 	p.stdin = managedFixtureWriter(func(b []byte) (int, error) {
