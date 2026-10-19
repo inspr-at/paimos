@@ -20334,6 +20334,8 @@
     ,
     {"kind":"vitest","file":"tests/start-agent.unit.test.ts","name":"Start Agent leaf selection > refuses non-leaf selection and initial targets while keeping confirmed leaves launchable","tier":"ESSENTIAL"}
     ,
+    {"kind":"vitest","file":"tests/start-agent.unit.test.ts","name":"Start Agent leaf selection > tells the person to narrow a ticket search that hits the aggregate limit","tier":"ESSENTIAL"}
+    ,
     {"kind":"vitest","file":"tests/start-agent.unit.test.ts","name":"honest launch state > never presents queued or claimed as a registered managed session","tier":"ESSENTIAL"}
     ,
     {"kind":"vitest","file":"tests/start-agent.unit.test.ts","name":"honest launch state > recognizes a stale model-grant rejection and leaves other conflicts alone","tier":"GATED-FULL"}

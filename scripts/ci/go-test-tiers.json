@@ -8718,6 +8718,8 @@
     ,
     {"kind":"go","package":"internal/nodes","name":"TestPersonStepsOwnershipRoutingAndAudit","tier":"ESSENTIAL"}
     ,
+    {"kind":"go","package":"internal/nodes","name":"TestPickerSearchAnswersWithoutWorkAggregates","tier":"ESSENTIAL"}
+    ,
     {"kind":"go","package":"internal/nodes","name":"TestPlaceRanks","tags":["delete-candidate"],"tier":"GATED-FULL"}
     ,
     {"kind":"go","package":"internal/nodes","name":"TestPlainMoveTransfersDescendantJourneyTickets","tier":"GATED-FULL"}
@@ -8845,6 +8847,8 @@
     {"kind":"go","package":"internal/nodes","name":"TestScopedReadsIgnoreLargeSiblingTree","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/nodes","name":"TestServicePrincipalsCannotBeAssignees","tier":"GATED-FULL"}
+    ,
+    {"kind":"go","package":"internal/nodes","name":"TestShapeLeafExcludesHiddenChild","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/nodes","name":"TestSiblingPlacementOrdersPositionsNumerically","tier":"ESSENTIAL"}
     ,
