@@ -6,6 +6,12 @@ import { writeFile } from 'node:fs/promises'
 import { fixtures, mockWork } from './work-fixtures'
 import { expectStableControls } from './helpers/stable'
 
+const started = new WeakMap<Page, number>()
+test.beforeEach(async ({ page }) => { started.set(page, performance.now()) })
+test.afterEach(async ({ page }, testInfo) => {
+  await writeFile(testInfo.outputPath('aeon1559-timing.md'), JSON.stringify({ name: testInfo.title, status: testInfo.status, seconds: (performance.now() - started.get(page)!) / 1000 }) + '\n')
+})
+
 const navigation = (page: Page) => page.locator('.project-navigation')
 const settings = (page: Page) => page.locator('#project-view-settings .view-settings')
 const step = async (page: Page) => Number(await settings(page).getAttribute('data-navigation-step'))
@@ -67,9 +73,13 @@ async function geometry(page: Page) {
     const left = pseudo.left === 'auto' ? trackBox.width - parseFloat(pseudo.right) - knobWidth : parseFloat(pseudo.left)
     const knob = { x: trackBox.x + left + transform.m41, y: trackBox.y + parseFloat(pseudo.top) + transform.m42, width: knobWidth, height: knobHeight }
     const switchShown = visible(track)
+    const pill = group.querySelector('.closed-pill')!
+    const renderedStep = switchShown ? visible(group.querySelector('.display-label')!) ? 0 : 1
+      : visible(pill) ? visible(pill.querySelector('.hide-label-slot')!) ? 2 : 3 : 4
     const children = [...row.children].filter(visible).map(rect)
     return {
       step: Number(group.getAttribute('data-navigation-step')),
+      renderedStep,
       controls: controls.length,
       controlOverlaps: controls.flatMap((a, i) => controls.slice(i + 1).filter(b => intersects(a, b))),
       outside: controls.filter(r => r.x < frame.x || r.right > frame.right),
@@ -83,6 +93,7 @@ async function geometry(page: Page) {
 
 async function assertGeometry(page: Page) {
   const result = await geometry(page)
+  expect(result.renderedStep, 'rendered navigation form matches the measured step').toBe(result.step)
   expect(result.controls).toBeGreaterThan(0)
   expect(result.controlOverlaps).toEqual([])
   expect(result.outside).toEqual([])
@@ -164,6 +175,15 @@ test('AEON-1559 all five forms have stable toggles and 16 px resize hysteresis',
     await fitRow(page, threshold + 16)
     expect(await step(page)).toBe(index)
   }
+  // Negative control: remove the scoped navigation fix from the real
+  // teleported DOM. The old toolbar/viewport rules must fail this same probe.
+  await setup(page, 'light', true)
+  await fitRow(page, 760)
+  await assertGeometry(page)
+  await settings(page).evaluate(el => el.classList.remove('navigation-settings'))
+  try { await expect(assertGeometry(page)).rejects.toThrow(/rendered navigation form/) }
+  finally { await settings(page).evaluate(el => el.classList.add('navigation-settings')) }
+  await assertGeometry(page)
 })
 
 test('AEON-1559 non-teleported toolbar retains its 800 px container swap', async ({ page }) => {
