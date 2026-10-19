@@ -57,6 +57,13 @@ func (m *Module) privateResponse(next http.HandlerFunc) http.HandlerFunc {
 					if err != nil {
 						return err
 					}
+					// The outlook's pool, pace and projection are derived. The
+					// generic mask leaves them in place, so a revoke between the
+					// handler and this check would still publish private quota.
+					if strings.HasSuffix(r.URL.Path, "/quota-outlook") {
+						body, err = redactOutlook(body, policy)
+						return err
+					}
 					controls, err := accountprivacy.LoadControls(r.Context(), tx, p, ids)
 					if err != nil {
 						return err

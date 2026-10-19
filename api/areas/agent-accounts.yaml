@@ -250,6 +250,18 @@ paths:
         '400': {$ref: '#/components/responses/Error'}
         '403': {$ref: '#/components/responses/Error'}
         '409': {description: An account no longer reports the selected fingerprint or uses another harness}
+  /agent-accounts/quota-outlook:
+    get:
+      operationId: getQuotaOutlook
+      summary: "The person's quota outlook per harness for the Agents dial"
+      description: "AEON-1497. Person account.read only; agent keys are refused. Pools the caller's own accounts per harness from the hourly quota rollup (AEON-1499): used and left, measured burn per account and UTC hour for the last 7 days, the projection at the measured 24 h pace and at the safe pace for the next 7 days (replaying routing: the soonest-resetting usable account runs, an account is full at 100 minus its floor, held accounts never run and stay out of the pool), empty stretches, the verdict and per-account forecasts. Accounts without readings stay not_reported; owner sharing applies; nothing is extrapolated backwards."
+      security: [{session: []}]
+      tags: [Agents]
+      responses:
+        '200': {description: "One group per harness with owned accounts. Missing or private readings keep null numbers.", content: {application/json: {schema: {$ref: '#/components/schemas/QuotaOutlook'}}}}
+        '400': {description: "The route takes no query parameters."}
+        '403': {description: "Agents, or a person without account.read."}
+        '503': {description: "The account inventory or quota history exceeds its bound."}
   /agent-accounts/quota-warnings:
     get:
       summary: Affected active sessions with fresh measured low-quota warnings
@@ -830,6 +842,141 @@ paths:
         '422': {description: 'unsupported_limit_unit - this account does not report priced run usage.', content: {application/json: {schema: {type: object, required: [error, code], properties: {error: {type: string}, code: {type: string, const: unsupported_limit_unit}}}}}}
 components:
   schemas:
+    QuotaOutlookPoint:
+      type: object
+      additionalProperties: false
+      required: [at, left_percent]
+      properties:
+        at: {type: string, format: date-time}
+        left_percent: {type: number, minimum: 0, maximum: 100}
+    QuotaOutlookLine:
+      type: object
+      additionalProperties: false
+      required: [points, refills, empty]
+      properties:
+        points: {type: array, items: {$ref: '#/components/schemas/QuotaOutlookPoint'}}
+        refills:
+          type: array
+          items:
+            type: object
+            additionalProperties: false
+            required: [at, account_id, from_percent, to_percent]
+            properties:
+              at: {type: string, format: date-time}
+              account_id: {type: string, format: uuid}
+              from_percent: {type: number}
+              to_percent: {type: number}
+        empty:
+          type: array
+          description: "Stretches in which demand at this pace finds no usable account."
+          items:
+            type: object
+            additionalProperties: false
+            required: [from, to]
+            properties:
+              from: {type: string, format: date-time}
+              to: {type: string, format: date-time}
+    QuotaOutlookHour:
+      type: object
+      additionalProperties: false
+      required: [hour_at, known, empty, burn]
+      properties:
+        hour_at: {type: string, format: date-time}
+        known: {type: boolean, description: "False before every pooled account has a reading; burn is then zero, not measured zero."}
+        empty: {type: boolean, description: "Every pooled account was (or is projected to be) at its limit."}
+        burn: {type: array, description: "Percentage points per account in the group's account order.", items: {type: number, minimum: 0}}
+    QuotaOutlookAccount:
+      type: object
+      additionalProperties: false
+      required: [account_id, label, state, pooled, used_percent, limit_percent, resets_at, read_at, reading_age_seconds, freshness, forecast]
+      properties:
+        account_id: {type: string, format: uuid}
+        label: {type: string}
+        state: {type: string, enum: [active, ready, full, held, not_reported, private]}
+        pooled: {type: boolean}
+        used_percent: {type: [number, 'null']}
+        limit_percent: {type: [number, 'null'], description: "Full at this used percentage (100 minus the floor)."}
+        resets_at: {type: [string, 'null'], format: date-time, description: "The next weekly refill."}
+        read_at: {type: [string, 'null'], format: date-time}
+        reading_age_seconds: {type: [integer, 'null'], minimum: 0}
+        freshness: {type: string, enum: [fresh, aging, stale, expired, unknown]}
+        forecast:
+          oneOf:
+            - {type: 'null'}
+            - type: object
+              additionalProperties: false
+              required: [kind, at, refill_at, unused_percent]
+              properties:
+                kind: {type: string, enum: [waits, empties, used_up, unused, enough]}
+                at: {type: [string, 'null'], format: date-time}
+                refill_at: {type: [string, 'null'], format: date-time}
+                unused_percent: {type: [number, 'null']}
+    QuotaOutlookGroup:
+      type: object
+      additionalProperties: false
+      required: [harness, state, accounts, pool, pace, verdict, headline, history, past_line, past_refills, current, safe, projected]
+      properties:
+        harness: {type: string}
+        state: {type: string, enum: [measured, not_reported, held]}
+        accounts: {type: array, maxItems: 16, items: {$ref: '#/components/schemas/QuotaOutlookAccount'}}
+        pool:
+          oneOf:
+            - {type: 'null'}
+            - type: object
+              additionalProperties: false
+              required: [accounts, used_percent, left_percent, sampled_at, sampled_age_seconds]
+              properties:
+                accounts: {type: integer, minimum: 1}
+                used_percent: {type: number}
+                left_percent: {type: number}
+                sampled_at: {type: string, format: date-time}
+                sampled_age_seconds: {type: integer}
+        pace:
+          type: object
+          additionalProperties: false
+          required: [per_hour_24h, per_hour_6h, safe_per_hour, measured_hours]
+          properties:
+            per_hour_24h: {type: [number, 'null'], description: "Measured burn over the last 24 h (or the measured span when shorter, at least 1 h), percentage points of one account per hour."}
+            per_hour_6h: {type: [number, 'null']}
+            safe_per_hour: {type: [number, 'null'], description: "The highest pace at which the pool never runs empty in the next 7 days."}
+            measured_hours: {type: number}
+        verdict: {type: string, enum: [too_fast, too_slow, on_pace, unknown]}
+        headline:
+          type: object
+          additionalProperties: false
+          required: [kind, at, until, account_id, unused_percent, focus_at]
+          properties:
+            kind: {type: string, enum: [runs_dry, unused, enough, unknown, not_reported, held]}
+            at: {type: [string, 'null'], format: date-time}
+            until: {type: [string, 'null'], format: date-time}
+            account_id: {type: string}
+            unused_percent: {type: [number, 'null']}
+            focus_at: {type: [string, 'null'], format: date-time, description: "The moment the headline names; the dial's default range reaches it."}
+        history: {type: array, maxItems: 169, items: {$ref: '#/components/schemas/QuotaOutlookHour'}}
+        past_line: {type: array, items: {$ref: '#/components/schemas/QuotaOutlookPoint'}}
+        past_refills:
+          type: array
+          items:
+            type: object
+            additionalProperties: false
+            required: [at, account_id]
+            properties:
+              at: {type: string, format: date-time}
+              account_id: {type: string, format: uuid}
+        current: {oneOf: [{type: 'null'}, {$ref: '#/components/schemas/QuotaOutlookLine'}]}
+        safe: {oneOf: [{type: 'null'}, {$ref: '#/components/schemas/QuotaOutlookLine'}]}
+        projected: {type: array, maxItems: 168, items: {$ref: '#/components/schemas/QuotaOutlookHour'}}
+    QuotaOutlook:
+      type: object
+      additionalProperties: false
+      required: [generated_at, anchor_hour, history_hours, horizon_hours, truncated, groups]
+      properties:
+        generated_at: {type: string, format: date-time}
+        anchor_hour: {type: string, format: date-time, description: "The UTC hour containing generated_at; history and projected hours count from it."}
+        history_hours: {type: integer}
+        horizon_hours: {type: integer}
+        truncated: {type: boolean, description: "More than 64 owned accounts, or more than 16 in a harness; the rest are left out."}
+        groups: {type: array, items: {$ref: '#/components/schemas/QuotaOutlookGroup'}}
     AccountQuotaReading:
       type: object
       additionalProperties: false
