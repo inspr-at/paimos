@@ -30,7 +30,12 @@ test('Hide closed and status use the Tickets context and Open graph retains it',
   await page.locator('.project-head').hover()
   await page.getByRole('button', { name: 'Open graph', exact: true }).click()
   await expect(page).toHaveURL(/status=in_progress/)
-  await expect(page.locator('.ticket-graph-canvas')).toHaveAttribute('aria-label', /15 leaves · 5 parents ·/)
+  const graph = page.locator('.ticket-graph-canvas')
+  await expect(graph).toBeVisible()
+  // The canvas mounts before the graph topology and filtered membership load.
+  // Wait for that work to finish before checking the exact retained context.
+  await expect(page.locator('.tg-state')).toHaveCount(0, { timeout: 20_000 })
+  await expect(graph).toHaveAttribute('aria-label', /15 leaves · 5 parents ·/)
 })
 
 test('saved views, assignee, type, priority and server search determine the glimpse', async ({ page }) => {

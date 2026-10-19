@@ -11,10 +11,8 @@ import (
 	"net/http"
 	"net/url"
 	"os"
-	"os/signal"
 	"path/filepath"
 	"strings"
-	"syscall"
 	"time"
 
 	"github.com/inspr-at/paimos/internal/agentd"
@@ -185,7 +183,7 @@ func (rt *runtime) watchAgent(o runAgentOptions) error {
 	remote := agentd.NewRemote(inst.URL, inst.APIKey)
 	scoped := &projectRunAPI{API: remote, client: remote.Client, projectID: project.ID}
 	adapter := &localClaudeAdapter{opts: o, homes: homes, stdout: rt.stdout, stderr: rt.stderr, stdin: rt.stdin, projectID: project.ID, idle: idle, maxRun: maxRun}
-	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	ctx, stop := rt.claimSignals()
 	defer stop()
 	supervisor, err := agentd.NewSupervisor(ctx, agentd.Config{API: scoped, StateRoot: o.StateRoot, DaemonID: o.DaemonID,
 		Workspace: o.RepoRoot, Adapters: []agentd.Adapter{adapter}, Accounts: local,

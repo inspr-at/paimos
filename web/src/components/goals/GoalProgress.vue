@@ -7,6 +7,8 @@
 // "Ø 0.8 %/h · 24 h", a muted "no change · 24 h" when the pace is under 0.05 %/h,
 // or in gold that nothing moved for hours while items are moving (the server decides,
 // and that line wins); with the chart open the range switch leads it.
+// AEON-1395: an epic (chart false) has no recorded series: the bar is a plain bar in
+// the same footprint and the signal row stays reserved and empty.
 import { computed, nextTick, onBeforeUnmount, ref } from 'vue'
 import AppIcon from '../AppIcon.vue'
 import GoalTip from './GoalTip.vue'
@@ -15,7 +17,7 @@ import type { Goal } from '../../lib/goals'
 import { availablePoints, averageRate, chartShape, GOAL_RANGES, historySince, LONGEST_SIGNAL, pointText, RANGE_LABEL, signalText, stallText, CHART, type GoalRange } from '../../lib/goalRate'
 import { goalPercent, whenText } from '../../lib/goals'
 
-const props = defineProps<{ goal: Goal; open: boolean; range: GoalRange; entry?: SeriesEntry; now: number }>()
+const props = withDefaults(defineProps<{ goal: Goal; open: boolean; range: GoalRange; entry?: SeriesEntry; now: number; chart?: boolean }>(), { chart: true })
 const emit = defineEmits<{ toggle: []; range: [value: GoalRange] }>()
 
 const progress = computed(() => props.goal.progress)
@@ -32,9 +34,10 @@ const young = computed(() => createdAt.value !== null && createdAt.value > windo
 // A goal born inside the window with fewer than three values has no line to draw yet.
 const few = computed(() => young.value && (rate.value?.values ?? 0) < 3)
 
+const charted = computed(() => props.chart !== false)
 const stalled = computed(() => !done.value && !!props.goal.stall?.stalled)
 const signal = computed(() => {
-  if (done.value) return null
+  if (done.value || !charted.value) return null
   if (stalled.value) return { stall: true, text: stallText(Date.parse(props.goal.stall!.since), props.now), tip: `Last change ${whenText(Date.parse(props.goal.stall!.since), props.now)}` }
   return rate.value ? { stall: false, text: signalText(rate.value, props.range), tip: '' } : null
 })
@@ -121,7 +124,10 @@ const placeholder = computed(() => {
         <button type="button" class="pct" :data-tip="percent.tip" :aria-label="`${pct} percent${byHand}. Hide progress over time`" @click="close"><AppIcon v-if="percent.byHand" name="edit" :size="11" />{{ pct }}%</button>
       </template>
       <template v-else>
-        <button ref="bar" type="button" class="bar-btn" data-tip="Progress over time" :aria-expanded="false" :aria-controls="`chart-${goal.id}`" :aria-label="label" @click="openChart">
+        <span v-if="!charted" class="bar-btn plain">
+          <span class="bar" role="progressbar" aria-valuemin="0" aria-valuemax="100" :aria-valuenow="pct" :aria-label="`${goal.title} progress, ${pct} percent of its leaf hours done`"><i :style="{ width: `${pct}%` }" /></span>
+        </span>
+        <button v-else ref="bar" type="button" class="bar-btn" data-tip="Progress over time" :aria-expanded="false" :aria-controls="`chart-${goal.id}`" :aria-label="label" @click="openChart">
           <span class="bar" role="progressbar" aria-valuemin="0" aria-valuemax="100" :aria-valuenow="pct" :aria-label="`${goal.title} progress`"><i :style="{ width: `${pct}%` }" /></span>
         </button>
         <span class="pct" :data-tip="percent.tip"><AppIcon v-if="percent.byHand" name="edit" :size="11" />{{ pct }}%</span>
@@ -150,7 +156,8 @@ const placeholder = computed(() => {
 .pct svg { color: var(--ink-3); }
 button.pct { position: relative; padding: 0; border: 0; border-radius: 6px; background: transparent; font-family: inherit; cursor: pointer; }
 .bar-btn:focus-visible, button.pct:focus-visible { outline: none; box-shadow: var(--focus-ring); }
-@media (hover: hover) { .bar-btn:hover, button.pct:hover { background: var(--primary-tint); } }
+@media (hover: hover) { button.bar-btn:hover, button.pct:hover { background: var(--primary-tint); } }
+.bar-btn.plain { cursor: default; }
 .of { grid-column: 1 / -1; grid-row: 2; font-size: 12px; line-height: 15px; color: var(--ink-3); font-variant-numeric: tabular-nums; white-space: nowrap; }
 .of.wide { grid-row: 1 / 3; white-space: normal; }
 /* The signal row may run up to 72 px past the cell, into the free space under the waits column. */

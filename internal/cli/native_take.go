@@ -56,7 +56,7 @@ func (rt *runtime) cmdSessionTake() *Command {
 			if !handBack && !terminal.Interactive() {
 				return usagef("session take requires an interactive terminal")
 			}
-			ctx, cancel := signal.NotifyContext(rt.context(), os.Interrupt, syscall.SIGTERM, syscall.SIGHUP, syscall.SIGTSTP)
+			ctx, cancel := rt.claimSignals(syscall.SIGHUP, syscall.SIGTSTP)
 			defer cancel()
 			readCtx, finish := context.WithTimeout(ctx, nativecontract.LocalOperationSeconds*time.Second)
 			defer finish()

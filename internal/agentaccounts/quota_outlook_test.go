@@ -46,6 +46,166 @@ func near(t *testing.T, what string, got *time.Time, want time.Time) {
 // held accounts excluded) and pin the verdict, the moment the headline names,
 // the safe pace, refill order and the honest states for missing readings.
 func TestQuotaOutlookReplayVerdicts(t *testing.T) {
+	t.Run("sparse weekly readings spread burn across the gap", func(t *testing.T) {
+		// Risk: booking a 20-hour increase at the later reading fabricates
+		// an 84 %/h spike instead of the measured average of 4.2 %/h.
+		now := time.Date(2026, 10, 19, 10, 0, 0, 0, time.UTC)
+		start, reset := now.Add(-20*time.Hour), now.Add(24*time.Hour)
+		for _, tc := range []struct {
+			name     string
+			oldReset time.Time
+			perHour  float64
+		}{
+			{"same window", reset, 4.2},
+			{"confirmed refill counts from zero", now.Add(-10 * time.Hour), 4.7},
+		} {
+			t.Run(tc.name, func(t *testing.T) {
+				g := buildGroup("claude", []outlookInput{{ID: "a", Harness: "claude", Limit: 100, Samples: []weeklySample{
+					{ReadAt: start, Used: 10, ResetAt: tc.oldReset},
+					{ReadAt: now, Used: 94, ResetAt: reset},
+				}}}, now, now)
+				hours := 0
+				for _, hour := range g.History {
+					want := 0.0
+					if !hour.HourAt.Before(start) && hour.HourAt.Before(now) {
+						want = tc.perHour
+						hours++
+						if !hour.Known {
+							t.Fatalf("measured gap hour %v is unknown", hour.HourAt)
+						}
+					}
+					if math.Abs(hour.Burn[0]-want) > 1e-9 {
+						t.Errorf("burn at %v = %v, want %v %%/h", hour.HourAt, hour.Burn[0], want)
+					}
+				}
+				if hours != 20 {
+					t.Fatalf("checked %d gap hours, want 20", hours)
+				}
+			})
+		}
+	})
+	t.Run("weekly buckets and duplicate phases never become burn", func(t *testing.T) {
+		// Risk: the OPS-reported seven_day=78 / overage=0 phase rows
+		// alternate buckets and turn a repeated reading into weekly burn.
+		at := func(s string) time.Time {
+			v, err := time.Parse(time.RFC3339Nano, s)
+			if err != nil {
+				t.Fatal(err)
+			}
+			return v
+		}
+		start := at("2026-10-13T07:40:17.76Z")
+		end := at("2026-10-13T07:40:18.49Z")
+		reset := at("2026-10-15T23:00:00Z")
+		now := at("2026-10-13T10:00:00Z")
+		rows := []quotaSample{
+			{WindowKind: "5h", Bucket: "five_hour", UsedPercent: 31, ReadAt: start, ResetsAt: at("2026-10-13T09:50:00Z")},
+			{WindowKind: "weekly", Bucket: "seven_day", UsedPercent: 78, ReadAt: start, ResetsAt: reset},
+			{WindowKind: "5h", Bucket: "five_hour", UsedPercent: 31, ReadAt: end, ResetsAt: at("2026-10-13T09:50:00Z")}, // end
+			{WindowKind: "5h", Bucket: "five_hour", UsedPercent: 31, ReadAt: end, ResetsAt: at("2026-10-13T09:50:00Z")}, // update
+			{WindowKind: "weekly", Bucket: "seven_day", UsedPercent: 78, ReadAt: end, ResetsAt: reset},                  // end
+			{WindowKind: "weekly", Bucket: "seven_day", UsedPercent: 78, ReadAt: end, ResetsAt: reset},                  // update
+			{WindowKind: "weekly", Bucket: "seven_day_overage_included", ReadAt: end, ResetsAt: reset},                  // end
+			{WindowKind: "weekly", Bucket: "seven_day_overage_included", ReadAt: end, ResetsAt: reset},                  // update
+		}
+		check := func(t *testing.T, latest []quotaSample, hours [][]quotaSample) {
+			t.Helper()
+			samples := weeklySeries("claude", latest, hours, now)
+			if len(samples) != 2 || !samples[0].ReadAt.Equal(start) || !samples[1].ReadAt.Equal(end) || samples[0].Used != 78 || samples[1].Used != 78 {
+				t.Fatalf("weekly plan must retain exactly the two distinct readings: %+v", samples)
+			}
+			burn, ok := consumed(samples, start, now)
+			if !ok || burn != 0 {
+				t.Fatalf("repeated 78%% reading burned %v (known %v), want 0", burn, ok)
+			}
+			g := buildGroup("claude", []outlookInput{{ID: "98f770a1", Label: "agent.one@", Harness: "claude", Limit: 100, Samples: samples}}, now, now.Truncate(time.Hour))
+			if len(g.Accounts) != 1 || g.Accounts[0].UsedPercent == nil || *g.Accounts[0].UsedPercent != 78 {
+				t.Fatalf("weekly plan use lost: %+v", g.Accounts)
+			}
+			for _, hour := range g.History {
+				if hour.Burn[0] != 0 {
+					t.Fatalf("bogus hourly burn at %v: %v", hour.HourAt, hour.Burn)
+				}
+			}
+			t.Logf("OPS fixture: %g percentage points burned; UTC hour %s", burn, start.Truncate(time.Hour).Format(time.RFC3339))
+		}
+		t.Run("exact OPS rows", func(t *testing.T) { check(t, rows[2:], [][]quotaSample{rows}) })
+		t.Run("a higher overage or model bucket cannot replace the plan", func(t *testing.T) {
+			latest := append([]quotaSample{}, rows[2:]...)
+			latest = append(latest,
+				quotaSample{WindowKind: "weekly", Bucket: "seven_day_overage_included", UsedPercent: 99, ReadAt: end, ResetsAt: reset},
+				quotaSample{WindowKind: "weekly", Bucket: "seven_day_sonnet", UsedPercent: 100, ReadAt: end, ResetsAt: reset})
+			check(t, latest, [][]quotaSample{rows})
+		})
+		t.Run("missing plan stays missing", func(t *testing.T) {
+			if got := weeklySeries("claude", rows[6:], [][]quotaSample{rows}, now); len(got) != 0 {
+				t.Fatalf("overage substituted for absent weekly plan: %+v", got)
+			}
+		})
+	})
+	t.Run("refills need confirming readings across hours and accounts", func(t *testing.T) {
+		// Risk: an early resets_at fabricates a whole-window burn and a
+		// zero-use step; confirmed refills must still count use from zero.
+		now := time.Date(2026, 10, 14, 10, 0, 0, 0, time.UTC)
+		at := func(h int) time.Time { return now.Add(time.Duration(h) * time.Hour) }
+		for _, tc := range []struct {
+			name       string
+			used       float64
+			reset      time.Time
+			burn, step float64
+			confirmed  bool
+		}{
+			{"stale reset unchanged use", 94, at(-2), 0, 94, false},
+			{"stale reset actual increase", 96, at(-2), 2, 94, false},
+			{"drop confirms refill", 4, at(-2), 4, 0, true},
+			{"advanced window confirms refill", 96, at(166), 96, 0, true},
+		} {
+			t.Run(tc.name, func(t *testing.T) {
+				samples := []weeklySample{
+					{ReadAt: at(-3), Used: 94, ResetAt: at(-2)},
+					{ReadAt: at(-1), Used: tc.used, ResetAt: tc.reset},
+				}
+				if used, ok := usedAt(samples, at(-2)); used != tc.step || ok != tc.confirmed {
+					t.Errorf("reset-time measurement = %v, %v; want %v, %v", used, ok, tc.step, tc.confirmed)
+				}
+				for _, from := range []time.Time{at(-3), at(-2)} {
+					if burn, ok := consumed(samples, from, now); !ok || burn != tc.burn {
+						t.Errorf("burn from %v = %v, %v; want %v, true", from, burn, ok, tc.burn)
+					}
+				}
+				g := buildGroup("claude", []outlookInput{
+					{ID: "a", Label: "a@", Harness: "claude", Limit: 100, Samples: samples},
+					{ID: "b", Label: "b@", Harness: "claude", Limit: 100, Samples: []weeklySample{
+						{ReadAt: at(-3), Used: 10, ResetAt: at(40)},
+						{ReadAt: at(-2), Used: 12, ResetAt: at(40)},
+						{ReadAt: at(-1), Used: 15, ResetAt: at(40)},
+					}},
+				}, now, now)
+				wantRefills := 0
+				if tc.confirmed {
+					wantRefills = 1
+				}
+				if len(g.PastRefills) != wantRefills {
+					t.Errorf("refill markers = %+v, want %d", g.PastRefills, wantRefills)
+				}
+				var aBurn, bBurn float64
+				for _, hour := range g.History {
+					aBurn += hour.Burn[0]
+					bBurn += hour.Burn[1]
+				}
+				if aBurn != tc.burn || bBurn != 5 {
+					t.Errorf("hourly burns = %v, %v; want %v, 5", aBurn, bBurn, tc.burn)
+				}
+				if !tc.confirmed {
+					for _, point := range g.PastLine {
+						if point.LeftPercent > 48 {
+							t.Errorf("stale reset invented pooled headroom: %+v", point)
+						}
+					}
+				}
+			})
+		}
+	})
 	now := time.Date(2026, 10, 18, 11, 10, 0, 0, time.UTC)
 	anchor := now.Truncate(time.Hour)
 	at := func(h float64) time.Time { return now.Add(time.Duration(h * float64(time.Hour))) }

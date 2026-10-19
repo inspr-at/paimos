@@ -37,7 +37,8 @@ async function open(page: Page, theme: 'light' | 'dark', role: 'admin' | 'member
   page.on('pageerror', error => errors.push(String(error)))
   const mock = await mockPolicies(page, theme, role)
   await page.goto('/settings/policies')
-  await expect(page.locator('.policies .settings-card')).toHaveCount(3)
+  // AEON-1317 adds Definitions without changing the existing three cards.
+  await expect(page.locator('.policies .settings-card')).toHaveCount(4)
   await expect(page.locator('#cross-family-review .chosen li').first()).toContainText('OpenAI, xAI, Anthropic, Cursor, Google, local models')
   return { ...mock, errors }
 }
@@ -64,7 +65,7 @@ for (const width of [1440, 390]) for (const theme of ['light', 'dark'] as const)
       await expect(page.locator('.body > .who')).toHaveCount(0)
       await expect(root.getByRole('tab')).toHaveCount(0)
       await expect(page.locator('.settings-page dialog')).toHaveCount(0)
-      await expect(root.locator('.settings-card h2')).toHaveText(['Cross-family review', 'What agents must ask you for', 'Rules that live elsewhere'])
+      await expect(root.locator('.settings-card h2')).toHaveText(['Cross-family review', 'Definitions', 'What agents must ask you for', 'Rules that live elsewhere'])
       // agents.create is its own high-risk ask (AEON-1373). The folded head counts it
       // and names it; a stale "10" is the failure this assertion exists to catch.
       await expect(root.locator('.risk-head')).toHaveText([

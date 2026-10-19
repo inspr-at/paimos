@@ -210,7 +210,7 @@ func (rt *runtime) harnessRunHeartbeat() *Command {
 				return err
 			}
 			o.discoverReconnectSocket()
-			ctx, stop := signalContext()
+			ctx, stop := rt.claimSignals()
 			defer stop()
 			return rt.runHeartbeat(ctx, o, heartbeatDeps{})
 		},

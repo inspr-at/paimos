@@ -28,7 +28,7 @@ const items = computed(() => {
 const rows = computed(() => items.value.slice(0, 3).map((item: DeskProjectionItem) => {
   const project = item.project_id ? projects.byId(item.project_id) : undefined
   return {
-    id: deskItemID(item), key: deskListKey(item, project?.routeKey ?? ''),
+    definitionKey: item.definition_change?.project_key, id: deskItemID(item), key: deskListKey(item, project?.routeKey ?? ''),
     question: item.kind === 'action_request' ? 'Action request' : item.title,
     where: (item.kind === 'question' ? goalOf.value.get(item.id) : undefined) ?? project?.title ?? (item.project_id ? '' : 'Workspace'),
     to: deskLinkOut(item) || { path: '/decision-desk', query: { item: deskItemID(item) } },
@@ -65,7 +65,7 @@ const count = computed(() => desk.count)
       <li v-for="row in rows" :key="row.id">
         <RouterLink class="waiting-item" :to="row.to">
           <span v-clip-tip class="wkey mono">{{ row.key }}</span>
-          <span v-clip-tip class="wq">{{ row.question }}</span>
+          <span v-clip-tip class="wq"><template v-if="row.definitionKey"><span class="definition-project-key">{{ row.definitionKey }}</span>{{ row.question.slice(row.definitionKey.length) }}</template><template v-else>{{ row.question }}</template></span>
           <span class="wgoal">{{ row.where }}</span>
         </RouterLink>
       </li>
@@ -75,6 +75,7 @@ const count = computed(() => desk.count)
 </template>
 
 <style scoped>
+.definition-project-key { white-space: nowrap; overflow-wrap: normal; }
 .waiting, .waiting-head, .waiting-list, .waiting-list > li, .waiting-item { display: grid; grid-template-columns: subgrid; grid-column: 1 / -1; }
 .waiting-list { margin: 2px 0 0; padding: 0; list-style: none; }
 .waiting { position: relative; isolation: isolate; padding: 14px 0 12px; align-content: start; }

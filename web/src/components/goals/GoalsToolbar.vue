@@ -17,7 +17,10 @@ const counts = computed(() => props.page.counts.value)
 const allOpen = computed(() => props.page.allOpen.value)
 const label = (state: StateFilter) => state === 'all' ? 'All' : STATE_LABEL[state]
 const partial = computed(() => props.page.totalsPartial.value)
-const tip = (state: StateFilter, i: number) => `${state === 'all' ? 'All items' : STATE_LABEL[state]} · ${i + 1}${partial.value ? ' · counts omit oversized goals' : ''}`
+// AEON-1395: the same controls for epics (Group › Epics) say epics.
+// A page without a group (older callers) shows goals.
+const noun = computed(() => props.page.group?.value === 'epics' ? 'epics' : 'goals')
+const tip = (state: StateFilter, i: number) => `${state === 'all' ? 'All items' : STATE_LABEL[state]} · ${i + 1}${partial.value ? ` · counts omit oversized ${noun.value}` : ''}`
 const countLabel = (state: StateFilter) => `${label(state)}, ${counts.value[state]}${partial.value ? ', incomplete' : ''}`
 const moreAnchor = ref<HTMLElement | null>(null)
 function closeMore(restore: boolean) { const anchor = moreAnchor.value; moreAnchor.value = null; if (restore) anchor?.focus() }
@@ -27,7 +30,7 @@ function pick(state: StateFilter) { props.page.filter.value = state; closeMore(t
 <template>
   <template v-if="part === 'chips'">
     <span class="chips-sep" aria-hidden="true" />
-    <div class="seg state-seg" role="radiogroup" :aria-label="partial ? 'Show items. Counts omit oversized goals.' : 'Show items'">
+    <div class="seg state-seg" role="radiogroup" :aria-label="partial ? `Show items. Counts omit oversized ${noun}.` : 'Show items'">
       <button
         v-for="(state, i) in STATE_FILTERS" :key="state" type="button" role="radio" :data-state="state" :aria-checked="page.filter.value === state"
         :data-partial="partial ? 1 : 0" :data-zero="counts[state] ? 0 : 1" :data-tip="tip(state, i)" :aria-label="countLabel(state)" aria-keyshortcuts="1 2 3 4 5" @click="page.filter.value = state"
@@ -37,7 +40,7 @@ function pick(state: StateFilter) { props.page.filter.value = state; closeMore(t
     </div>
     <button
       type="button" class="icon-btn toggle-btn" :aria-pressed="page.hideDone.value" aria-label="Hide done" aria-keyshortcuts="h"
-      :data-tip="page.hideDone.value ? 'Done goals are hidden · H' : 'Hide done goals · H'" @click="page.setHideDone(!page.hideDone.value)"
+      :data-tip="page.hideDone.value ? `Done ${noun} are hidden · H` : `Hide done ${noun} · H`" @click="page.setHideDone(!page.hideDone.value)"
     ><AppIcon name="eye-off" :size="15" /></button>
     <button type="button" class="btn sm expand-btn" aria-keyshortcuts="e" :data-tip="`${allOpen ? 'Collapse all' : 'Expand all'} · E`" @click="page.toggleAll()">
       <AppIcon :name="allOpen ? 'collapse-all' : 'expand-all'" :size="14" />
@@ -51,7 +54,7 @@ function pick(state: StateFilter) { props.page.filter.value = state; closeMore(t
     ><AppIcon name="more" :size="16" /></button>
     <FloatingPanel v-if="moreAnchor" :anchor="moreAnchor" :width="300" align="end" label="Goal display" @close="closeMore">
       <div class="more-menu" role="menu" aria-label="Goal display">
-        <p v-if="partial" class="partial-note" role="status">Counts omit oversized goals.</p>
+        <p v-if="partial" class="partial-note" role="status">Counts omit oversized {{ noun }}.</p>
         <button v-for="state in STATE_FILTERS" :key="state" type="button" role="menuitemradio" class="menu-item" :aria-checked="page.filter.value === state" @click="pick(state)">
           <AppIcon v-if="state === 'all'" name="layers" :size="14" /><GoalStateIcon v-else :state="state" />
           <span>{{ label(state) }}</span><span class="mcount mono">{{ counts[state] }}</span>

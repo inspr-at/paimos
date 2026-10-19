@@ -55,6 +55,7 @@ func programName(argv0 string) string {
 
 type runtime struct {
 	requestContext     context.Context
+	commandInterrupted commandInterrupt // shared by derived runtimes; set only after SIGINT or SIGTERM, never for a caller-canceled context
 	program            string
 	stdin              io.Reader
 	stdout             io.Writer
@@ -80,6 +81,8 @@ type runtime struct {
 }
 
 func (rt *runtime) execute(args []string) error {
+	stop := rt.armCommandSignals()
+	defer stop()
 	rest := []string{}
 	if len(args) > 1 {
 		rest = args[1:]
@@ -109,9 +112,9 @@ func (rt *runtime) execute(args []string) error {
 		return usagef("%s requires a subcommand", cmd.Name)
 	}
 	if err := cmd.checkArgs(pos); err != nil {
-		return err
+		return rt.noteInterrupt(err)
 	}
-	return cmd.run(pos)
+	return rt.noteInterrupt(cmd.run(pos))
 }
 
 func (rt *runtime) printErr(ee *exitError) {
@@ -136,6 +139,9 @@ func (rt *runtime) printJSON(v any) error {
 }
 
 func (rt *runtime) fail(err error, secrets ...string) error {
+	if rt.commandInterrupted.Load() && errors.Is(err, context.Canceled) {
+		return &exitError{code: 130, msg: "interrupted"}
+	}
 	message := err.Error()
 	exit := &exitError{code: 1}
 	var status *client.StatusError
@@ -181,6 +187,24 @@ func (rt *runtime) fail(err error, secrets ...string) error {
 	}
 	exit.msg = message
 	return exit
+}
+
+// noteInterrupt reports a signalled cancellation that never reached fail,
+// including a command such as listen --follow that stops quietly with nil.
+// A caller-canceled context, a command's own exit status and unrelated
+// failures stay as they are.
+func (rt *runtime) noteInterrupt(err error) error {
+	if !rt.commandInterrupted.Load() {
+		return err
+	}
+	var exit *exitError
+	if errors.As(err, &exit) {
+		return err
+	}
+	if err == nil || errors.Is(err, context.Canceled) {
+		return &exitError{code: 130, msg: "interrupted"}
+	}
+	return err
 }
 
 func redact(msg, secret string) string {
@@ -302,7 +326,7 @@ func (rt *runtime) login(rawURL, name, keyFile string) error {
 	if err != nil {
 		return err
 	}
-	me, err := client.New(u, key).Me(context.Background())
+	me, err := client.New(u, key).Me(rt.context())
 	if err != nil {
 		return rt.fail(fmt.Errorf("login failed: %w", err), key)
 	}
@@ -407,7 +431,7 @@ func (rt *runtime) cmdWhoami(use string) *Command {
 		Short: "Show the acting principal (GET /api/me)",
 		Use:   use,
 		run: func(args []string) error {
-			return rt.whoami(context.Background())
+			return rt.whoami(rt.context())
 		},
 	}
 }
@@ -454,10 +478,18 @@ func (rt *runtime) context() context.Context {
 	return context.Background()
 }
 
+// cloneRuntime shares the signal state. Copying runtime by value is forbidden:
+// the state is one set of atomics for the command and every runtime derived from it.
+func (rt *runtime) cloneRuntime() *runtime {
+	rt.commandInterrupted.ensure()
+	copy := *rt
+	return &copy
+}
+
 // workRuntime isolates mutable caches and carries cancellation for one MCP call.
 func (rt *runtime) workRuntime(ctx context.Context) *runtime {
-	copy := *rt
+	copy := rt.cloneRuntime()
 	copy.requestContext = ctx
 	copy.kinds = nil
-	return &copy
+	return copy
 }

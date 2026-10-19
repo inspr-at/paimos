@@ -3,7 +3,6 @@
 package cli
 
 import (
-	"context"
 	"fmt"
 	"net/http"
 	"sort"
@@ -112,7 +111,7 @@ func (rt *runtime) cmdDoctor() *Command {
 			Status string `json:"status"`
 			DB     string `json:"db"`
 		}
-		if err := probe.Do(context.Background(), http.MethodGet, "/api/health", nil, &health); err != nil {
+		if err := probe.Do(rt.context(), http.MethodGet, "/api/health", nil, &health); err != nil {
 			checks = append(checks, doctorCheck{Name: "health", Status: "fail", Detail: err.Error()})
 			return rt.renderDoctor(checks)
 		}
@@ -121,7 +120,7 @@ func (rt *runtime) cmdDoctor() *Command {
 			return rt.renderDoctor(checks)
 		}
 		var v cliVersion
-		if err := probe.Do(context.Background(), http.MethodGet, "/api/version", nil, &v); err != nil {
+		if err := probe.Do(rt.context(), http.MethodGet, "/api/version", nil, &v); err != nil {
 			checks = append(checks, doctorCheck{Name: "health", Status: "fail", Detail: err.Error()})
 			return rt.renderDoctor(checks)
 		}
@@ -131,7 +130,7 @@ func (rt *runtime) cmdDoctor() *Command {
 		}
 		checks = append(checks, doctorCheck{Name: "health", Status: "ok", Detail: "service=" + brand + " version=" + v.Version})
 		// Use the same identity request as auth whoami, including its client.
-		me, err := client.New(inst.URL, inst.APIKey).Me(context.Background())
+		me, err := client.New(inst.URL, inst.APIKey).Me(rt.context())
 		if err != nil {
 			// Keep the server's scope id, label and code after redacting the credential.
 			checks = append(checks, doctorCheck{Name: "auth", Status: "fail", Detail: redact(err.Error(), inst.APIKey)})

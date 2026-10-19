@@ -80,6 +80,8 @@ func (m *Module) Mount(mux *http.ServeMux) {
 	mux.HandleFunc("PUT /api/projects/{projectId}/definitions", m.handleDefinition)
 	mux.HandleFunc("DELETE /api/projects/{projectId}/definitions", m.handleDefinition)
 	mux.HandleFunc("GET /api/projects/{projectId}/definitions/context", m.handleDefinition)
+	mux.HandleFunc("POST /api/projects/{projectId}/definitions/decisions", m.handleDefinitionDecision)
+	mux.HandleFunc("GET /api/settings/definitions/context", m.handleWorkspaceDefinitionContext)
 	mux.HandleFunc("GET /api/settings/definitions", m.handleDefinition)
 	mux.HandleFunc("PUT /api/settings/definitions", m.handleDefinition)
 	mux.HandleFunc("GET /api/nodes/{nodeId}", m.handleGetNode)

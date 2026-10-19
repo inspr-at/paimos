@@ -57,6 +57,8 @@ const mac = macPlatform(navigator.platform)
 const outcomes: DeskOutcome[] = ['once', 'always', 'requirement', 'doctrine']
 const outcomeKeys = ['O', 'A', 'R', 'D']
 const STAMP: Record<DeskOutcome, { icon: IconName; tone: string }> = { once: { icon: 'message', tone: 'ok' }, always: { icon: 'pin', tone: 'teal' }, requirement: { icon: 'req', tone: 'gold' }, doctrine: { icon: 'book', tone: 'red' } }
+// AEON-1535: a phone's stamp rows say in a few words what each stamp does; the full line is the row's description.
+const STAMP_WORDS: Record<Exclude<DeskOutcome, 'requirement'>, string> = { once: 'this question only', always: 'answer it from now on', doctrine: 'propose a rule' }
 interface MemoLine { tone: string; icon: IconName; bold: string; text?: string; grace?: number }
 interface LegendEntry { keys: string[]; or?: string[]; range?: [string, string]; text: string }
 const expired = ref(false), now = ref(Date.now())
@@ -84,6 +86,10 @@ const ticketRef = computed<DeskTicket | undefined>(() => {
   return props.ticket?.(row) ?? (row.ticketKey ? { key: row.ticketKey, title: '' } : undefined)
 })
 const suggestedNote = computed(() => item.value && question.value ? suggestedUnavailableNote(item.value) : '')
+// An unavailable stamp's row reads its reason instead.
+const stampWords = (row: DeskItem, outcome: DeskOutcome) => stampWhy(row, outcome) || (outcome === 'requirement' ? `add to ${ticketRef.value?.key || 'the ticket'}` : STAMP_WORDS[outcome])
+// Source only where no ticket names the origin. Phones show it on the answer line in the head (AEON-1535).
+const sourceShown = computed(() => { const row = item.value; return !!row?.source && !row.lesson && !row.approval && (!!row.rule || (!row.ticketId && !row.ticketKey)) })
 // Why Decide cannot decide yet, and what to focus. Empty when it can (Markus 10-14 09:57: never a silent no-op).
 const decideBlock = computed<{ why: string; focus: string }>(() => {
   const current = item.value, sent = draft.value
@@ -656,7 +662,7 @@ function fitLegend() {
 const lockedHeight = ref<number>()
 function measure() {
   drawSheet(); fitLegend()
-  narrow.value = window.matchMedia('(max-width: 688px)').matches
+  narrow.value = window.matchMedia('(max-width: 760px)').matches
   const paper = memo.value
   if (!lockedHeight.value && !narrow.value && paper && frame.value && paper.scrollHeight > paper.clientHeight + 1) lockedHeight.value = frame.value.getBoundingClientRect().height
 }
@@ -729,22 +735,23 @@ onBeforeUnmount(() => { window.removeEventListener('resize', resized); live = fa
             <p class="done-acts"><button v-if="doneSummary.grace" type="button" class="btn sm" data-testid="desk-undo" @pointerenter="holdClose = true" @pointerleave="holdClose = false" @focus="holdClose = true" @blur="holdClose = false" @click="changeDecision(doneSummary.grace.id)"><AppIcon name="rollback" :size="13" />Undo</button><button v-else-if="doneSummary.lesson" type="button" class="btn sm" data-testid="desk-undo" @pointerenter="holdClose = true" @pointerleave="holdClose = false" @focus="holdClose = true" @blur="holdClose = false" @click="undoLastLesson"><AppIcon name="rollback" :size="13" />Undo</button><span>The desk closes by itself.</span></p>
           </div>
           <template v-else-if="item && draft">
-            <header class="memo-head memo-heading">
+            <header class="memo-head memo-heading" :class="{ 'no-stamp': !!item.lesson }">
               <div class="stamp-slot" :style="{ visibility: item.lesson ? 'hidden' : undefined }" aria-live="polite">
                 <span class="stamp-big" :class="[`t-${impression?.tone ?? 'ink'}`, { empty: !impression, landed: decidedView && !!impression, slam }]" :aria-label="impression ? (decidedView ? `Stamped ${impression.word}` : `Will be stamped ${impression.word}`) : 'Not decided yet'" data-testid="desk-stamp">{{ impression?.word ?? 'Not decided' }}</span>
               </div>
               <div class="memo-headtext">
                 <h2 class="memo-q">{{ item.kind === 'action' && item.context && item.context.length <= 280 ? item.context : item.title }}</h2>
                 <dl class="memo-meta" data-testid="desk-project-line">
-                  <div v-if="project"><dt>Project</dt><dd><a v-if="project.href" class="proj-link" :href="project.href" target="_blank" rel="noopener" :data-tip="`Open ${project.name} in a new tab · key P`" data-testid="desk-project-link" ><AppIcon name="folder" :size="14" /><span>{{ project.name }}</span><AppIcon class="pj-open" name="external" :size="12" /></a><span v-else class="proj-quiet" data-testid="desk-project-link"><AppIcon name="folder" :size="13" />{{ project.name }}</span></dd></div>
-                  <div v-if="asker || item.askers?.length"><dt>From</dt><dd><span class="from-one" :data-tip="asker?.model ? `${asker.model}` : undefined" data-testid="desk-from"><HarnessMark v-if="asker?.harness" :harness="asker.harness" :size="14" />{{ askerName }}</span></dd></div>
-                  <div><dt>Re</dt><dd data-testid="desk-re"><template v-if="ticketRef"><RouterLink v-if="context.ticket" class="res-key" :to="`/work/${context.ticket.id}`">{{ ticketRef.key }}</RouterLink><span v-else class="res-key">{{ ticketRef.key }}</span><span v-if="ticketRef.title" class="re-title">{{ ticketRef.title }}</span></template><span v-else-if="item.ticketId || item.ticketKey" class="re-title faint">The ticket</span><span v-else-if="!item.runId" class="re-title">{{ item.kind === 'rule' ? item.rule?.heading || item.title : item.kind === 'stepup' || item.kind === 'key_trim' ? kindLabels[item.kind] : 'Across tickets' }}</span><template v-if="item.runId"><span class="run-ref" :data-tip="`Run ${item.runId}`" data-testid="desk-re-run">{{ runRef(item.runId) }}</span><span v-if="!ticketRef" class="re-title faint" data-testid="desk-re-run-ticket">{{ runPending?.(item) ? 'Reading its ticket…' : 'Ticket not resolved' }}</span></template></dd></div>
-                  <div v-if="item.createdAt"><dt>Received</dt><dd>{{ ago(item.createdAt) }}</dd></div>
+                  <div v-if="project"><dt><span class="mi" role="img" aria-label="Project"><AppIcon name="folder" :size="14" /></span><span class="mt">Project</span></dt><dd><a v-if="project.href" class="proj-link" :href="project.href" target="_blank" rel="noopener" :data-tip="`Open ${project.name} in a new tab · key P`" data-testid="desk-project-link" ><AppIcon name="folder" :size="14" /><span>{{ project.name }}</span><AppIcon class="pj-open" name="external" :size="12" /></a><span v-else class="proj-quiet" data-testid="desk-project-link"><AppIcon name="folder" :size="13" />{{ project.name }}</span></dd></div>
+                  <div v-if="asker || item.askers?.length"><dt><span class="mi" role="img" aria-label="From"><AppIcon name="user" :size="14" /></span><span class="mt">From</span></dt><dd><span class="from-one" :data-tip="asker?.model ? `${asker.model}` : undefined" data-testid="desk-from"><HarnessMark v-if="asker?.harness" :harness="asker.harness" :size="14" />{{ askerName }}</span></dd></div>
+                  <div><dt><span class="mi" role="img" aria-label="About"><AppIcon name="link" :size="14" /></span><span class="mt">Re</span></dt><dd data-testid="desk-re"><template v-if="ticketRef"><RouterLink v-if="context.ticket" class="res-key" :to="`/work/${context.ticket.id}`">{{ ticketRef.key }}</RouterLink><span v-else class="res-key">{{ ticketRef.key }}</span><span v-if="ticketRef.title" class="re-title">{{ ticketRef.title }}</span></template><span v-else-if="item.ticketId || item.ticketKey" class="re-title faint">The ticket</span><span v-else-if="!item.runId" class="re-title">{{ item.kind === 'rule' ? item.rule?.heading || item.title : item.kind === 'stepup' || item.kind === 'key_trim' ? kindLabels[item.kind] : 'Across tickets' }}</span><template v-if="item.runId"><span class="run-ref" :data-tip="`Run ${item.runId}`" data-testid="desk-re-run">{{ runRef(item.runId) }}</span><span v-if="!ticketRef" class="re-title faint" data-testid="desk-re-run-ticket">{{ runPending?.(item) ? 'Reading its ticket…' : 'Ticket not resolved' }}</span></template></dd></div>
+                  <div v-if="item.createdAt"><dt><span class="mi" role="img" aria-label="Received"><AppIcon name="clock" :size="14" /></span><span class="mt">Received</span></dt><dd>{{ ago(item.createdAt) }}</dd></div>
                 </dl>
               </div>
               <p v-if="deliveryLine" class="memo-line" :class="deliveryLine.tone" data-testid="desk-line"><AppIcon :name="deliveryLine.icon" :size="14" /><span class="lt"><b>{{ deliveryLine.bold }}</b><template v-if="deliveryLine.grace"><span class="sep">·</span>sends to {{ askerName }} in <span class="n">{{ deliveryLine.grace }}</span> s<span class="sep">·</span><button type="button" class="linkish" data-testid="desk-line-undo" @click="changeDecision()">Undo</button></template><template v-else-if="deliveryLine.text"><span class="sep">·</span>{{ deliveryLine.text }}</template></span></p>
               <p v-else-if="meanLine" class="memo-line" :class="meanLine.tone" data-testid="desk-line"><AppIcon :name="meanLine.icon" :size="14" /><span class="lt"><b>{{ meanLine.bold }}</b> {{ meanLine.text }}</span></p>
               <p v-else class="memo-line" data-testid="desk-line" />
+              <p v-if="question" class="memo-goes" data-testid="desk-answer-line">Answer goes to {{ askerName }}’s inbox<template v-if="(item.askers?.length ?? 0) > 1"> and {{ (item.askers?.length ?? 1) - 1 }} more agent{{ (item.askers?.length ?? 1) > 2 ? 's' : '' }} who asked the same</template><template v-if="ticketRef">, and as a comment on {{ ticketRef.key }}</template><template v-if="sourceShown && item.source"><span class="sep">·</span><a v-if="item.source.startsWith('/api/')" class="src-link" :href="item.source" target="_blank" rel="noopener noreferrer">Source <AppIcon name="external" :size="12" /></a><RouterLink v-else class="src-link" :to="item.source">Source <AppIcon name="external" :size="12" /></RouterLink></template></p>
             </header>
             <div class="memo-body" data-testid="desk-body">
               <section v-if="item.keyTrim" class="memo-answer key-trim-evidence" aria-label="Key trim evidence" data-testid="key-trim-evidence">
@@ -785,8 +792,9 @@ onBeforeUnmount(() => { window.removeEventListener('resize', resized); live = fa
                 <div v-if="question" class="stamps">
                   <h3 id="desk-h-stamp" class="eyebrow">Stamp it as</h3>
                   <div class="stamp-row" role="radiogroup" aria-labelledby="desk-h-stamp" data-testid="desk-stamps">
-                    <button v-for="(outcome, at) in outcomes" :key="outcome" type="button" class="stamp" :class="`t-${STAMP[outcome].tone}`" role="radio" :aria-checked="draft.outcome === outcome" :aria-disabled="stampWhy(item, outcome) || decidedView || !editable ? 'true' : undefined" :data-off="stampWhy(item, outcome) ? '' : undefined" :data-faded="decidedView && draft.outcome !== outcome && !stampWhy(item, outcome) ? '' : undefined" :tabindex="decidedView ? -1 : undefined" :aria-keyshortcuts="stampWhy(item, outcome) ? undefined : outcomeKeys[at]" :data-tip="stampWhy(item, outcome) || `${stampDescription({ ...item, suggested: undefined }, outcome)} · key ${outcomeKeys[at]}`" :data-testid="`stamp-${outcome}`" @click="stamp(outcome)"><AppIcon :name="STAMP[outcome].icon" :size="13" /><span v-if="stampWhy(item, outcome)">{{ outcomeLabels[outcome] }}</span><span v-else><u>{{ outcomeLabels[outcome].charAt(0) }}</u>{{ outcomeLabels[outcome].slice(1) }}</span></button>
+                    <button v-for="(outcome, at) in outcomes" :key="outcome" type="button" class="stamp" :class="`t-${STAMP[outcome].tone}`" role="radio" :aria-checked="draft.outcome === outcome" :aria-disabled="stampWhy(item, outcome) || decidedView || !editable ? 'true' : undefined" :data-off="stampWhy(item, outcome) ? '' : undefined" :data-faded="decidedView && draft.outcome !== outcome && !stampWhy(item, outcome) ? '' : undefined" :tabindex="decidedView ? -1 : undefined" :aria-keyshortcuts="stampWhy(item, outcome) ? undefined : outcomeKeys[at]" :data-tip="stampWhy(item, outcome) || `${stampDescription({ ...item, suggested: undefined }, outcome)} · key ${outcomeKeys[at]}`" :aria-describedby="`desk-stamp-about-${outcome}`" :data-testid="`stamp-${outcome}`" @click="stamp(outcome)"><AppIcon class="st-icon" :name="STAMP[outcome].icon" :size="13" /><span v-if="stampWhy(item, outcome)" class="st-label">{{ outcomeLabels[outcome] }}</span><span v-else class="st-label"><u>{{ outcomeLabels[outcome].charAt(0) }}</u>{{ outcomeLabels[outcome].slice(1) }}</span><span class="st-words" aria-hidden="true" :data-testid="`stamp-words-${outcome}`">{{ stampWords(item, outcome) }}</span><span class="st-check" aria-hidden="true"><AppIcon name="check" :size="16" /></span></button>
                   </div>
+                  <span v-for="outcome in outcomes" :id="`desk-stamp-about-${outcome}`" :key="`about-${outcome}`" hidden>{{ stampWhy(item, outcome) || stampDescription({ ...item, suggested: undefined }, outcome) }}</span>
                   <p class="stamp-desc" data-testid="desk-stamp-desc">{{ stampDescription(item, draft.outcome) }}<template v-if="suggestedNote && !decidedView">{{ ' ' }}<span class="sug-off" tabindex="0" :data-tip="stampWhy(item, item.suggested ?? item.outcome)" data-testid="desk-suggest-off">{{ suggestedNote }}</span></template></p>
                 </div>
                 <p v-if="noteField && !decidedView" class="ps"><label class="ps-label" for="desk-note">{{ noteField.label }}</label><span class="field-row"><input id="desk-note" v-model="draft.reason" data-field="reason" class="ul-field" :aria-label="noteField.aria" :maxlength="item.kind === 'lesson' ? 500 : 2000" :disabled="!editable" :placeholder="noteField.placeholder" enterkeyhint="done" autocomplete="off" @input="touch" @focus="editing = 'reason'" @blur="editing === 'reason' && (editing = '')" /><span class="field-hint" aria-hidden="true"><KeyCap k="enter" /> done</span></span></p>
@@ -836,7 +844,7 @@ onBeforeUnmount(() => { window.removeEventListener('resize', resized); live = fa
                   <p v-for="warning in context.warnings" :key="warning" class="context-warning">{{ warning }}</p>
                 </section>
                 <section v-if="context.related.length" class="m-sec"><h3 class="eyebrow">Related</h3><ul class="rel"><li v-for="related in context.related" :key="related.id"><p class="rel-top"><RouterLink :to="`/work/${related.id}`"><b>{{ related.key }}</b> {{ related.title }}</RouterLink></p></li></ul></section>
-                <section v-if="question" class="m-sec" data-testid="desk-answer-goes"><h3 class="eyebrow">The answer goes</h3><p>To {{ askerName }}’s inbox<template v-if="(item.askers?.length ?? 0) > 1"> and {{ (item.askers?.length ?? 1) - 1 }} more agent{{ (item.askers?.length ?? 1) > 2 ? 's' : '' }} who asked the same</template><template v-if="ticketRef"><br>Also as a comment on {{ ticketRef.key }}</template></p></section>
+                <section v-if="question" class="m-sec" data-phone-moved data-testid="desk-answer-goes"><h3 class="eyebrow">The answer goes</h3><p>To {{ askerName }}’s inbox<template v-if="(item.askers?.length ?? 0) > 1"> and {{ (item.askers?.length ?? 1) - 1 }} more agent{{ (item.askers?.length ?? 1) > 2 ? 's' : '' }} who asked the same</template><template v-if="ticketRef"><br>Also as a comment on {{ ticketRef.key }}</template></p></section>
                 <section v-if="item.kind === 'action'" class="m-sec"><h3 class="eyebrow">The reply goes</h3><p>To {{ askerName }}’s inbox, as a reply to its request.</p></section>
                 <section v-if="item.kind === 'approval'" class="m-sec"><h3 class="eyebrow">Afterwards</h3><p>Approvals land in Decided, where Revoke stays.</p></section>
                 <section v-if="item.kind === 'tier'" class="m-sec"><h3 class="eyebrow">Afterwards</h3><p>Applied at the next safe point of the session.</p></section>
@@ -852,7 +860,7 @@ onBeforeUnmount(() => { window.removeEventListener('resize', resized); live = fa
                   </div>
                 </section>
                 <section v-if="context.attachments.length" class="m-sec"><h3 class="eyebrow">Attachments · {{ context.attachments.length }}</h3><div class="thumbs"><button v-for="(attachment, at) in context.attachments" :key="attachment.id" type="button" class="thumb" :aria-label="`Open ${attachment.caption || attachment.name}`" @click="showAttachment(at)"><span class="thumb-img"><img v-if="hasThumbnail(attachment) && !brokenThumbs.has(attachment.id)" :src="contentUrl(attachment.id, 'thumb')" alt="" @error="brokenThumbs.add(attachment.id)" /><span v-else class="thumb-kind">{{ fileKind(attachment) }}</span></span><span class="thumb-name" :data-tip="attachment.caption || attachment.name">{{ attachment.caption || attachment.name }}</span></button></div></section>
-                <p v-if="item.source && !item.lesson && !item.approval && (!!item.rule || (!item.ticketId && !item.ticketKey))" class="m-sec"><a v-if="item.source.startsWith('/api/')" class="src-link" :href="item.source" target="_blank" rel="noopener noreferrer">Source <AppIcon name="external" :size="12" /></a><RouterLink v-else class="src-link" :to="item.source">Source <AppIcon name="external" :size="12" /></RouterLink></p>
+                <p v-if="sourceShown && item.source" class="m-sec" :data-phone-moved="question ? '' : undefined"><a v-if="item.source.startsWith('/api/')" class="src-link" :href="item.source" target="_blank" rel="noopener noreferrer">Source <AppIcon name="external" :size="12" /></a><RouterLink v-else class="src-link" :to="item.source">Source <AppIcon name="external" :size="12" /></RouterLink></p>
               </aside>
             </div>
           </template>
@@ -1081,7 +1089,9 @@ a.res-key:hover { text-decoration: underline; }
 .stamp[aria-checked="true"] { background: color-mix(in srgb, var(--t) 9%, transparent); }
 /* Outcome colours come after .stamp: the chosen stamp takes its outcome's colour (Once teal-green, Always teal, Requirement gold,
    Doctrine red) for outline, text and tint; the others stay ink-3 through the more specific rules above (AEON-1339). */
-.t-ok { --t: var(--ok); } .t-teal { --t: var(--teal-ink); } .t-gold { --t: var(--gold-ink); } .t-red { --t: var(--danger); } .t-ink { --t: var(--ink-2); }
+.t-ok { --t: var(--ok); --tone: var(--ok); } .t-teal { --t: var(--teal-ink); --tone: var(--teal-ink); } .t-gold { --t: var(--gold-ink); --tone: var(--gold-ink); } .t-red { --t: var(--danger); --tone: var(--danger); } .t-ink { --t: var(--ink-2); --tone: var(--ink-2); }
+/* Phone-only parts (AEON-1535): meta icons, the answer line in the head, a stamp row's words and check. */
+.memo-meta .mi, .memo-goes, .stamp .st-words, .stamp .st-check { display: none; }
 .stamp u { text-decoration-thickness: 1.5px; text-underline-offset: 3px; }
 /* An unavailable stamp is visibly disabled and still readable (3.4:1 light, 3.6:1 dark), with its reason. */
 .stamp[data-off] { --t: color-mix(in srgb, var(--ink-3) 80%, var(--paper)); opacity: 1; border-style: dashed; box-shadow: none; cursor: not-allowed; }
@@ -1144,8 +1154,9 @@ a.res-key:hover { text-decoration: underline; }
   :is(.linkish, .proj-link, .res-key, .tk-open, .keys-btn, .ft-pager, .desk-x, .desk-btn, .stamp) { position: relative; }
   :is(.linkish, .proj-link, .res-key, .tk-open, .keys-btn, .ft-pager, .desk-x, .desk-btn, .stamp)::before { content: ''; position: absolute; top: 50%; left: 50%; width: max(100%, 44px); height: max(100%, 44px); transform: translate(-50%, -50%); }
 }
-/* Narrow desks (a phone, a small window; the artifact's 640 px desk): one column, background first, actions in a bottom bar. */
-@media (max-width: 688px) {
+/* Narrow desks (a phone, a small window; the artifact's 640 px desk; the app's 760 px phone breakpoint since AEON-1535):
+   one column, background first, actions in a bottom bar. */
+@media (max-width: 760px) {
   /* Pattern B: the sheet takes the height it may use, so the bottom bar stays pinned whatever the memo holds. */
   .desk { height: calc(100dvh - 7vh - 16px); grid-template-columns: minmax(0, 1fr) auto; grid-template-rows: minmax(52px, auto) minmax(0, 1fr) auto; grid-template-areas: "tab x" "stack stack" "acts acts"; }
   /* The tab grows into the space before the close button: as wide as the round's longest label needs, at least 230 px. */
@@ -1165,15 +1176,55 @@ a.res-key:hover { text-decoration: underline; }
   .jr-kind { display: none; }
   .stack, .paper { flex: 1 1 auto; }
   .paper { padding: 0 18px 24px; }
-  .memo-head { display: block; padding-top: 20px; }
-  .memo-head > .stamp-slot { float: right; width: 120px; min-height: 56px; margin: -2px -6px 4px 10px; place-items: start end; padding-top: 2px; }
+  /* AEON-1535 (Tick's spec v1): the stamp preview takes the sheet's first line, right-aligned and 32 px high, so the title
+     gets the full width (the folder tab has no room beside key, kind and pager at 320–390 px). Then title, meta,
+     meanwhile and the answer line in Tick's rhythm: 12, 12, 8, 20 to the hairline, 16 to "Your decision". */
+  .memo-head { display: flex; flex-direction: column; padding: 12px 0 20px; }
+  .memo-head > .stamp-slot { display: flex; justify-content: flex-end; align-items: center; height: 32px; min-height: 0; margin: 0 0 8px; }
+  .memo-head.no-stamp > .stamp-slot { display: none; }
+  .stamp-big { box-sizing: border-box; height: 32px; padding: 0 10px; border-width: 2px; font-size: 11px; letter-spacing: .12em; transform: rotate(-3deg); }
+  .stamp-big.empty { font-size: 10.5px; }
+  /* A smaller slam that stays inside the sheet's top edge. */
+  @media (prefers-reduced-motion: no-preference) {
+    .stamp-big.slam { animation-name: stamp-slam-phone; }
+    @keyframes stamp-slam-phone { 0% { transform: rotate(-3deg); } 40% { transform: rotate(0deg) translateY(-4px) scale(1.15); opacity: .7; } 72% { transform: rotate(-4deg) scale(.94); opacity: 1; background: color-mix(in srgb, var(--t) 22%, var(--paper)); } 100% { transform: rotate(-3deg) scale(1); background: color-mix(in srgb, var(--t) 14%, var(--paper)); } }
+  }
   .memo-head > .memo-headtext { display: block; }
+  .memo-q { max-width: none; font-size: 22px; line-height: 28px; font-weight: 600; letter-spacing: -.01em; text-wrap: pretty; }
   .memo-headtext > .memo-meta { margin-top: 12px; }
-  .memo-head > .memo-line { clear: both; margin-top: 10px; min-height: 39px; }
-  .stamp-big { padding: 8px 10px; border-width: 2px; font-size: 11.5px; letter-spacing: .12em; }
-  .memo-q { font-size: 20px; }
-  .memo-body { grid-template-columns: minmax(0, 1fr); gap: 18px; }
+  /* The mono-caps labels become icons that carry the label; the project link's own folder icon steps aside for its label's. */
+  .memo-meta { gap: 4px 14px; font-size: 14px; line-height: 20px; color: var(--ink-2); }
+  .memo-meta > div { align-items: center; gap: 6px; }
+  .memo-meta dt { display: inline-grid; place-items: center; font: inherit; letter-spacing: 0; text-transform: none; }
+  .memo-meta .mt, .memo-meta .proj-link > svg:not(.pj-open), .memo-meta .proj-quiet > svg { display: none; }
+  .memo-meta .mi { display: inline-grid; place-items: center; color: var(--ink-3); }
+  .memo-meta dd, .memo-meta .proj-link, .memo-meta .proj-quiet, .memo-meta .re-title { color: var(--ink-2); }
+  .memo-head > .memo-line { margin-top: 12px; min-height: 22.5px; font-size: 15px; }
+  .memo-line > svg { margin-top: 4px; }
+  /* "The answer goes" and Source as one muted line, without an eyebrow or a divider above it. */
+  .memo-goes { display: block; margin: 8px 0 0; font-size: 14px; line-height: 20px; color: var(--ink-3); overflow-wrap: anywhere; }
+  .memo-goes .sep { margin: 0 6px; }
+  .memo-body { grid-template-columns: minmax(0, 1fr); gap: 16px; padding-top: 16px; }
   .margin { order: -1; padding: 0 0 16px; border-left: 0; border-bottom: 1px solid var(--paper-line); }
+  .margin > [data-phone-moved], .margin:not(:has(> :not([data-phone-moved]))) { display: none; }
+  /* "Stamp it as": four full-width rows in one outlined radio group. The check's place is kept on every row
+     and the chosen row is only tinted, so choosing moves nothing; no edge bar. */
+  .stamp-row { display: grid; gap: 0; border: 1px solid var(--paper-line); border-radius: 10px; }
+  .stamp { display: grid; grid-template-columns: 16px max-content minmax(0, 1fr) 16px; align-items: center; gap: 0 10px; width: 100%; height: auto; min-height: 52px; padding: 0 14px; border: 0; border-radius: 0; box-shadow: none; background: transparent; color: var(--ink); font: 600 15px/20px var(--font); letter-spacing: 0; text-transform: none; text-align: left; }
+  .stamp + .stamp { border-top: 1px solid var(--paper-line); }
+  .stamp:first-child { border-top-left-radius: 9px; border-top-right-radius: 9px; }
+  .stamp:last-child { border-bottom-left-radius: 9px; border-bottom-right-radius: 9px; }
+  .stamp:focus-visible { z-index: 1; }
+  .stamp .st-icon { width: 16px; height: 16px; color: var(--tone); }
+  .stamp .st-label { white-space: nowrap; }
+  .stamp u { text-decoration: none; }
+  .stamp .st-words { display: block; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 14px; font-weight: 450; color: var(--ink-3); }
+  .stamp .st-check { display: grid; place-items: center; visibility: hidden; color: var(--tone); }
+  .stamp[aria-checked="true"] { background: color-mix(in srgb, var(--tone) 12%, transparent); }
+  .stamp[aria-checked="true"] .st-check { visibility: visible; }
+  @media (hover: hover) { .stamp:hover:not([aria-disabled="true"]):not([aria-checked="true"]) { background: var(--row-hover); } }
+  .stamp[data-off] { color: var(--ink-3); cursor: not-allowed; }
+  .stamp[data-off] .st-icon { color: var(--ink-3); opacity: .7; }
   .stamp-desc { height: 60px; -webkit-line-clamp: 3; line-clamp: 3; }
   .desk-foot { display: none; }
   .choice > .field-row, .choice > .c-answer { padding-left: 10px; }

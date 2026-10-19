@@ -43,6 +43,8 @@ paths:
         Source ticket and definition events audit request creation; native tick and reassignment events audit resolution and routing.
         Person-step candidate coverage above 1000 tickets returns 422 before presenting any partial totals.
         The existing question-only decision-desk endpoint remains available.
+        Workspace definition changes are quiet project-settings links visible only to current person project admins with nodes.read.
+        The definition_change payload identifies the project key and waiting count. The source disappears when no changes wait.
       parameters:
         - {name: limit, in: query, schema: {type: integer, minimum: 1, maximum: 100, default: 50}}
         - {name: cursor, in: query, schema: {type: string, maxLength: 512}}
@@ -60,7 +62,7 @@ components:
       required: [id, kind, revision, title, created_at, held, href, source]
       properties:
         id: {type: string, format: uuid}
-        kind: {type: string, enum: [question, approval, action_request, doctrine, key_trim, stepup, tier_request, account_matrix, routine_consent, lesson]}
+        kind: {type: string, enum: [question, approval, action_request, doctrine, key_trim, stepup, tier_request, account_matrix, routine_consent, lesson, definition_change]}
         project_id: {type: string, format: uuid}
         ticket_key: {type: string, description: "Live key of the ticket the question's ask named, in the same tenant and project. Omitted when that ask named no ticket or the ticket is gone."}
         revision: {type: integer, minimum: 0, description: "Native tier revisions can begin at zero; other source revisions begin at one."}
@@ -72,6 +74,12 @@ components:
         href: {type: string, description: App review link to the exact source}
         source: {type: string, description: Authorized app route or API link to the exact source}
         person_step: {$ref: '#/components/schemas/PersonStep'}
+        definition_change:
+          type: object
+          required: [project_key, pending_count]
+          properties:
+            project_key: {type: string}
+            pending_count: {type: integer, minimum: 1, maximum: 192}
     DecisionDeskProjection:
       type: object
       required: [items, counts, has_more, as_of]

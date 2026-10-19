@@ -24,7 +24,7 @@ func (rt *runtime) cmdAsk() *Command {
 	return &Command{Name: "ask", Short: "Leave a durable question for a person", Use: `ask --project KEY [--ticket KEY] QUESTION --option '["Title","Description","Answer"]'`, minArgs: 1, maxArgs: 1,
 		Long: "Returns immediately with a durable question ID and comment destination. Repeat --option with JSON triples or objects {id,title,description,answer}. Triple IDs are 1 through 9. Retain --request-id for retries. No terminal question and no permission escalation.",
 		subs: []*Command{{Name: "status", Short: "Read a question and its delivery state", Use: "ask status <question-uuid>", minArgs: 1, maxArgs: 1, run: func(args []string) error {
-			q, err := rt.questionStatus(context.Background(), args[0])
+			q, err := rt.questionStatus(rt.context(), args[0])
 			if err != nil {
 				return err
 			}
@@ -98,7 +98,7 @@ func (rt *runtime) cmdAsk() *Command {
 					in.GoalID = node.ID
 				}
 			}
-			q, err := rt.sendQuestion(context.Background(), project, ticket, in)
+			q, err := rt.sendQuestion(rt.context(), project, ticket, in)
 			if err != nil {
 				return err
 			}

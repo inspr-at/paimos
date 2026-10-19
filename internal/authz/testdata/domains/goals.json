@@ -2,6 +2,7 @@
   "_license": "SPDX-License-Identifier: AGPL-3.0-only",
   "routes": {
     "GET /api/goals": "nodes.read",
+    "GET /api/goals/epics": "nodes.read",
     "GET /api/goals/{goalId}": "nodes.read",
     "GET /api/goals/{goalId}/history": "nodes.read",
     "GET /api/goals/{goalId}/series": "nodes.read",
@@ -12,6 +13,7 @@
   },
   "project_filtered": {
     "GET /api/goals": true,
+    "GET /api/goals/epics": true,
     "GET /api/goals/{goalId}": true,
     "GET /api/goals/{goalId}/history": true,
     "GET /api/goals/{goalId}/series": true

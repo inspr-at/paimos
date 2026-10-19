@@ -6264,6 +6264,14 @@
     ,
     {"kind":"browser","file":"tests/aeon-1532-editor-steady.spec.ts","name":"AEON-1532: typing in a 300-line knowledge entry at 390 light never shrinks the box or moves the page","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
+    {"kind":"browser","file":"tests/aeon-1535-desk-phone.spec.ts","name":"AEON-1535 P1: the phone question card reads at 22 px and the four stamp rows are full width","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/aeon-1535-desk-phone.spec.ts","name":"AEON-1535 P2: an unavailable stamp row is disabled and reads its reason","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/aeon-1535-desk-phone.spec.ts","name":"AEON-1535 P4: the 1440 desk keeps its geometry","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/aeon-1535-desk-phone.spec.ts","name":"touch › AEON-1535 P3: O, A, R and D and a tap choose the right row, and choosing moves nothing","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
     {"kind":"browser","file":"tests/aeon-632b-clip-settings.spec.ts","name":"rules names 1024 dark","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
     ,
     {"kind":"browser","file":"tests/aeon-632b-clip-settings.spec.ts","name":"rules names 1024 light","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
@@ -8404,6 +8412,16 @@
     ,
     {"kind":"browser","file":"tests/decision-text.spec.ts","name":"reveal sizing 390 coarse light › approval and held controls fit both labels with disjoint stable targets","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
+    {"kind":"browser","file":"tests/definitions-p3.spec.ts","name":"AEON-1317 Desk opens waiting definitions and resolves only after the last admin decision","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/definitions-p3.spec.ts","name":"AEON-1317 German definitions copy covers every P3 string and singular notices","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/definitions-p3.spec.ts","name":"AEON-1317 default decisions preserve every row notice copy and focus in all viewports","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/definitions-p3.spec.ts","name":"AEON-1317 failed stale and identity-bound decisions never claim success","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/definitions-p3.spec.ts","name":"AEON-1317 workspace defaults differences empty inherited and viewer match the approved states","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
     {"kind":"browser","file":"tests/definitions.spec.ts","name":"AEON-1316 FIX4 Add and row menus stay anchored at every width with the approved copy","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
     {"kind":"browser","file":"tests/definitions.spec.ts","name":"AEON-1316 FIX4 Applies to offers only All Code UI and keeps fixed conditions as text","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
@@ -9225,6 +9243,26 @@
     {"kind":"browser","file":"tests/from-classic.spec.ts","name":"known and unknown classic links resolve through the API","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
     {"kind":"browser","file":"tests/from-classic.spec.ts","name":"sign-in returns to the classic resolver before opening its destination","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/goals-epics.spec.ts","name":" › E6 390 dark: phones keep the epic rows and their essentials, 44 px Group targets, no overflow","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/goals-epics.spec.ts","name":" › E6 390 light: phones keep the epic rows and their essentials, 44 px Group targets, no overflow","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/goals-epics.spec.ts","name":"E1/E2 1024 light: epics in the goal anatomy; an opened epic lists what's missing in Definitions order, then its items with live lines and folds","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/goals-epics.spec.ts","name":"E1/E2 1440 dark: epics in the goal anatomy; an opened epic lists what's missing in Definitions order, then its items with live lines and folds","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/goals-epics.spec.ts","name":"E1/E2 1440 light: epics in the goal anatomy; an opened epic lists what's missing in Definitions order, then its items with live lines and folds","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/goals-epics.spec.ts","name":"E3 1440: Display leads with Group: Goals · Epics, inside the viewport","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/goals-epics.spec.ts","name":"E4 1440: no open epics says so, without examples","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/goals-epics.spec.ts","name":"E5 1024: Goals → Epics → Goals moves no toolbar control, chip, Display trigger or header cell; GOAL and EPIC share one box","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/goals-epics.spec.ts","name":"E5 1440: Goals → Epics → Goals moves no toolbar control, chip, Display trigger or header cell; GOAL and EPIC share one box","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/goals-epics.spec.ts","name":"the group is kept per person across a reload; ?view=goals&group=epics opens it once and changes nothing","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
     {"kind":"browser","file":"tests/goals-gaps.spec.ts","name":"1024: items nest under their goal at the step icons' x, labels run from the key to the ETA in at most two lines with the badge in the meta line; goal names wrap to two lines; opening and a live update move nothing","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
@@ -18106,6 +18144,8 @@
     ,
     {"kind":"vitest","file":"tests/definitions.unit.test.ts","name":"AEON-1316 describes complete copies, conditions, owners and their retained base","tier":"ESSENTIAL"}
     ,
+    {"kind":"vitest","file":"tests/definitions.unit.test.ts","name":"AEON-1317 binds decisions to both revisions and renders the complete bilingual decision copy","tier":"ESSENTIAL"}
+    ,
     {"kind":"vitest","file":"tests/delivery-building.unit.test.ts","name":"AEON-1493: German keeps the approved words, \"Runde\" among the explained ones","tier":"ESSENTIAL"}
     ,
     {"kind":"vitest","file":"tests/delivery-building.unit.test.ts","name":"AEON-1493: an answer for another project or window is refused rather than shown","tier":"ESSENTIAL"}
@@ -18397,6 +18437,12 @@
     {"kind":"vitest","file":"tests/footer-summary.unit.test.ts","name":"what each screen says > tickets filtered to none","tier":"NIGHTLY"}
     ,
     {"kind":"vitest","file":"tests/footer-summary.unit.test.ts","name":"what each screen says > tickets with blocked","tier":"NIGHTLY"}
+    ,
+    {"kind":"vitest","file":"tests/goals-epics-fix2.unit.test.ts","name":"a group switch keeps the frame > keeps the status note and header while the rows are replaced, then shows an empty list","tier":"ESSENTIAL"}
+    ,
+    {"kind":"vitest","file":"tests/goals-epics-fix2.unit.test.ts","name":"epic live events > a goals stream ignores a heartbeat and a delivery state change; an epics stream re-reads on both","tier":"ESSENTIAL"}
+    ,
+    {"kind":"vitest","file":"tests/goals-epics-fix2.unit.test.ts","name":"the epics page re-reads on heartbeat and delivery state > epics re-read on those events and a goals page does not","tier":"ESSENTIAL"}
     ,
     {"kind":"vitest","file":"tests/goals-fix2.unit.test.ts","name":"goals pagination and charts stay current > a refresh during Show more clears the disabled state and a stale page cannot cancel the next one","tier":"ESSENTIAL"}
     ,
@@ -20389,6 +20435,8 @@
     {"kind":"vitest","file":"tests/start-agent.unit.test.ts","name":"Start Agent leaf selection > rechecks leaf eligibility at submission before remembering an account or launching","tier":"ESSENTIAL"}
     ,
     {"kind":"vitest","file":"tests/start-agent.unit.test.ts","name":"Start Agent leaf selection > refuses non-leaf selection and initial targets while keeping confirmed leaves launchable","tier":"ESSENTIAL"}
+    ,
+    {"kind":"vitest","file":"tests/start-agent.unit.test.ts","name":"Start Agent leaf selection > tells the person to narrow a ticket search that hits the aggregate limit","tier":"ESSENTIAL"}
     ,
     {"kind":"vitest","file":"tests/start-agent.unit.test.ts","name":"honest launch state > never presents queued or claimed as a registered managed session","tier":"ESSENTIAL"}
     ,
