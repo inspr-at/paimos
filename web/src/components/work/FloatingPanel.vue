@@ -8,7 +8,8 @@ import { getCurrentInstance, nextTick, onBeforeUnmount, onMounted, ref, watch } 
 // focus back to the trigger when it closes by keyboard. A menu closes on Tab;
 // a small form (`cycle`) keeps Tab among its own controls instead.
 // `phoneSheet`: on a portrait phone the menu opens as a sheet from the bottom edge, over a scrim,
-// its items in thumb reach (AEON-1286); elsewhere it stays anchored to its trigger.
+// its items in thumb reach (AEON-1286); elsewhere it stays anchored to its trigger. A swipe down
+// on the sheet closes it, as Esc does (AEON-1459), unless its content was scrolled.
 // `sheetBelow` is the widest viewport that still opens the phone sheet (Delivery's worst items use 760, AEON-1493).
 // `belowHeader`: flipped above its trigger, the panel stops 8 px below the app header instead of covering it. When it
 // fits on neither side, the page first scrolls the trigger to 16 px below the header (a jump with reduced motion), and
@@ -201,6 +202,20 @@ function keydown(event: KeyboardEvent) {
   }
 }
 const onResize = () => place()
+// A swipe down on a bottom sheet closes it: mostly downward, 64 px or more, from content at its top.
+let swipe: { id: number; x: number; y: number } | null = null
+function swipeStart(event: TouchEvent) {
+  const touch = event.touches[0]
+  swipe = bottom.value && event.touches.length === 1 && touch && (panel.value?.scrollTop ?? 0) <= 0 ? { id: touch.identifier, x: touch.clientX, y: touch.clientY } : null
+}
+function swipeEnd(event: TouchEvent) {
+  const start = swipe
+  swipe = null
+  const touch = start ? [...event.changedTouches].find(item => item.identifier === start.id) : undefined
+  if (!start || !touch) return
+  const down = touch.clientY - start.y, across = Math.abs(touch.clientX - start.x)
+  if (down >= 64 && down > across * 1.5) emit('close', false)
+}
 // The collapsed Display menu widens after it counts columns. Place again once that
 // width arrives: the resize that caused the recount already placed the narrower menu.
 watch(() => props.width, () => place(true))
@@ -237,7 +252,7 @@ defineExpose({ place })
 <template>
   <Teleport :to="layer">
     <div v-if="bottom" ref="scrim" class="floating-scrim" aria-hidden="true" @click="emit('close', false)" />
-    <div ref="panel" v-bind="$attrs" :data-floating-id="floatingID" :data-floating-owner="floatingOwner" class="floating pop" :class="{ above, sheet, bottom, parked }" role="dialog" :aria-label="label" :style="{ transform: bottom ? 'none' : `translate(${x}px, ${y}px)`, width: sheet ? compactSheet ? `${compactWidth}px` : undefined : bottom ? '100%' : `${Math.min(width, 9999)}px`, height: placedHeight === undefined ? undefined : `${placedHeight}px`, boxSizing: 'border-box', maxHeight: `${maxHeight}px`, '--floating-max': `${maxHeight}px` }" @keydown="keydown">
+    <div ref="panel" v-bind="$attrs" :data-floating-id="floatingID" :data-floating-owner="floatingOwner" class="floating pop" :class="{ above, sheet, bottom, parked }" role="dialog" :aria-label="label" :style="{ transform: bottom ? 'none' : `translate(${x}px, ${y}px)`, width: sheet ? compactSheet ? `${compactWidth}px` : undefined : bottom ? '100%' : `${Math.min(width, 9999)}px`, height: placedHeight === undefined ? undefined : `${placedHeight}px`, boxSizing: 'border-box', maxHeight: `${maxHeight}px`, '--floating-max': `${maxHeight}px` }" @keydown="keydown" @touchstart.passive="swipeStart" @touchend.passive="swipeEnd" @touchcancel.passive="swipe = null">
       <slot />
     </div>
   </Teleport>
@@ -248,7 +263,7 @@ defineExpose({ place })
 .floating:focus { outline: none; }
 .floating.sheet { width: min(960px, max(480px, 64vw)); max-width: calc(100vw - 32px); overflow: hidden; }
 @media (max-width: 600px) { .floating.sheet { width: 100%; max-width: none; border-radius: 0; } }
-.floating.bottom { top: auto; bottom: 0; left: 0; max-width: none; padding: 8px 8px max(8px, env(safe-area-inset-bottom)); border-width: 1px 0 0; border-radius: 20px 20px 0 0; }
+.floating.bottom { top: auto; bottom: 0; left: 0; max-width: none; padding: 8px max(8px, env(safe-area-inset-right)) max(8px, env(safe-area-inset-bottom)) max(8px, env(safe-area-inset-left)); border-width: 1px 0 0; border-radius: 20px 20px 0 0; }
 .floating-scrim { position: fixed; inset: 0; z-index: 69; background: var(--scrim); }
 @media (prefers-reduced-motion: no-preference) {
   .floating { animation: pop-in .14s cubic-bezier(.2, .7, .2, 1); }

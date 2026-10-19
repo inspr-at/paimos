@@ -35,6 +35,8 @@ import HeaderDensitySwitch from './work/HeaderDensitySwitch.vue'
 import { projectSection } from './work/projectNavigation'
 import { headerShortcut } from '../lib/projectHeader'
 import { useProjectHeader } from '../lib/useProjectHeader'
+import { compactChrome } from '../lib/chrome'
+import ProjectSheet from './header/ProjectSheet.vue'
 
 const session = useSession()
 const projects = useProjects()
@@ -47,7 +49,15 @@ const profile = useProfile()
 const route = useRoute()
 const router = useRouter()
 const palette = ref<InstanceType<typeof CommandPalette>>()
-const { headerDensity, toggleHeader } = useProjectHeader()
+const { toggleHeader } = useProjectHeader()
+// AEON-1459 (design AEON-1279 r2, D2): phones and short screens get one 44 px opaque line. The theme's
+// quick toggle and the Desk preview step aside there (the avatar menu has both); the project crumb opens
+// the project's sheet (D11).
+const compact = compactChrome()
+const sheetFrom = ref<HTMLElement | null>(null)
+function toggleProjectSheet(event: MouseEvent) { sheetFrom.value = sheetFrom.value ? null : event.currentTarget as HTMLElement }
+function closeProjectSheet(restore: boolean) { const from = sheetFrom.value; sheetFrom.value = null; if (restore) from?.focus({ preventScroll: true }) }
+watch([() => route.params.projectKey, compact], () => { sheetFrom.value = null })
 const mac = /Mac|iPhone|iPad/.test(navigator.platform || navigator.userAgent)
 const headerTickets = computed(() => !!projectKey.value && projectSection(route) === 'tickets' && !fullTicket.value && route.query.panel !== 'full')
 function headerKeys(event: KeyboardEvent) {
@@ -151,27 +161,11 @@ watch(() => session.identity?.principal.id, id => {
   void agents.loadNeeds(true)
   void business.loadPlugins(true)
 }, { immediate: true })
-// Phones: when the breadcrumb's page (a ticket key) would otherwise clip, the
-// Desk preview's chevron steps aside first, then the moon (AEON-312, AEON-1214);
-// they come back, the moon first, as soon as the free room holds them. The
-// decision is measured, never guessed from the number of places: each step is
-// tried and measured before paint. The moon's quick toggle then leads the avatar
-// sheet; the Desk itself stays one tap away on its place. Half a pixel of
-// subpixel noise never sends either away, and neither returns into less room
-// than it needs, so the header never toggles at the same width.
+// Phones in portrait keep only where you are in the breadcrumb (AEON-1214); a key that cannot
+// show whole leaves the trail, measured before paint. On compact screens the Desk preview's
+// chevron and the moon are not in the header at all (AEON-1459): the avatar menu leads with both.
 const header = ref<HTMLElement>()
-const steps = computed(() => deskPreview.value ? ['desk', 'moon'] : ['moon'])
-const awaySteps = ref(0)
-const away = computed(() => steps.value.slice(0, awaySteps.value).join(' ') || undefined)
-const narrow = window.matchMedia('(max-width: 600px)')
-// How far the header's row runs past its end padding, or its page past the trail. What left the trail takes no room.
-function overflow(el: HTMLElement) {
-  const crumb = el.querySelector<HTMLElement>('.crumbs > .crumb.current:not([data-dropped])')
-  const trail = el.querySelector<HTMLElement>('.crumbs:not([data-empty])')
-  const end = el.getBoundingClientRect().right - (parseFloat(getComputedStyle(el).paddingRight) || 0)
-  const reach = Math.max(0, ...[...el.children].map(child => child.getBoundingClientRect().right))
-  return Math.max(reach - end, el.scrollWidth - el.clientWidth, trail ? trail.scrollWidth - trail.clientWidth : 0, crumb ? crumb.scrollWidth - crumb.clientWidth : 0)
-}
+const narrow = window.matchMedia('(max-width: 719px)')
 // Above phone width the trail drops whole segments, never a chip cut mid-way
 // (AEON-1214): a crumb leaves together with the separator that joins it, from the
 // start, so the page you are on goes last; with nothing whole left, the trail
@@ -271,12 +265,12 @@ function phoneCut(trail: HTMLElement): boolean {
   }
   return false
 }
-// The page names its project and its ticket, so a key that cannot show whole leaves the trail. The project fold keeps
-// its chevron, a full 44 px target; its key stays in its accessible name.
+// The page names its project and its ticket, so a key that cannot show whole leaves the trail. The project's sheet
+// trigger keeps its chevron, a full 44 px target; its key stays in its accessible name.
 function dropKeys(trail: HTMLElement) {
   const parts = [...trail.children].filter((part): part is HTMLElement => part instanceof HTMLElement && getComputedStyle(part).display !== 'none')
   for (const part of parts) {
-    if (part.matches('.phone-header-fold')) part.querySelectorAll<HTMLElement>('.key-badge').forEach(drop)
+    if (part.matches('.crumb-sheet')) part.querySelectorAll<HTMLElement>('.key-badge').forEach(drop)
     else drop(part)
   }
   if (parts.every(part => part.dataset.dropped !== undefined)) trail.dataset.empty = ''
@@ -284,32 +278,11 @@ function dropKeys(trail: HTMLElement) {
 function fitHeader() {
   const el = header.value
   if (!el) return
-  const order = steps.value
-  const show = (n: number) => { const value = order.slice(0, n).join(' '); if (value) el.dataset.away = value; else delete el.dataset.away }
   const trail = el.querySelector<HTMLElement>('.crumbs')
-  if (!narrow.matches) { show(0); awaySteps.value = 0; fitTrail(trail, true); return }
-  // Phones keep only where you are; the steps below keep it whole.
+  if (!narrow.matches) { fitTrail(trail, true); return }
+  // Phones keep only where you are; a key that would still be cut leaves the trail.
   fitTrail(trail, false)
-  const over = (n: number) => { show(n); return Math.max(overflow(el), trail && phoneCut(trail) ? 1 : 0) }
-  const settle = (from: number) => {
-    let n = Math.min(from, order.length)
-    if (over(n) > 0.5) { while (n < order.length && over(++n) > 0.5) { /* the next one steps aside too */ } }
-    else {
-      // Coming back needs the free room for its 44 px (the moon also its gap), within
-      // a tenth of a pixel: a crumb that would shrink by less never shows as overflow.
-      const spacer = el.querySelector<HTMLElement>('.spacer'), gap = parseFloat(getComputedStyle(el).columnGap) || 0
-      while (n > 0 && spacer && spacer.getBoundingClientRect().width - Math.max(0, overflow(el)) >= 44 + (order[n - 1] === 'moon' ? gap : 0) - 0.1) {
-        if (over(n - 1) > 0.5) break
-        n--
-      }
-    }
-    show(n)
-    return n
-  }
-  let n = settle(awaySteps.value)
-  // With everything aside a key still cut leaves the trail; what stepped aside for it comes back where it fits.
-  if (trail && phoneCut(trail)) { dropKeys(trail); n = settle(n) }
-  awaySteps.value = n
+  if (trail && phoneCut(trail)) dropKeys(trail)
 }
 let fitFrame = 0
 let fitGeneration = 0
@@ -352,7 +325,7 @@ const resized = new ResizeObserver(refit)
 const crumbsChanged = new MutationObserver(refit)
 // A web font swapping in changes the room without resizing the header.
 const fonts = 'fonts' in document ? document.fonts : undefined
-watch([() => route.fullPath, () => places.value.length, navReady, deskPreview], refit, { flush: 'post' })
+watch([() => route.fullPath, () => places.value.length, navReady, deskPreview, compact], refit, { flush: 'post' })
 onMounted(() => {
   if (header.value) { resized.observe(header.value); crumbsChanged.observe(header.value, { childList: true, subtree: true, characterData: true }) }
   narrow.addEventListener('change', refit)
@@ -368,7 +341,7 @@ onBeforeUnmount(() => { resized.disconnect(); crumbsChanged.disconnect(); narrow
 </script>
 
 <template>
-  <header ref="header" class="app-header" :data-away="away">
+  <header ref="header" class="app-header" :class="{ compact }">
     <RouterLink class="lockup" to="/" :aria-label="`${lockupName} home`" :class="{ compact: !!projectKey || !!pageTitle || !!settingsSection || businessCrumbs.length > 0, tenant: !!tenantMark, 'has-logo': !!tenantMark?.logo, squarish: !!tenantMark?.logo && tenantMark.logo.width <= tenantMark.logo.height * 1.5 }">
       <template v-if="tenantMark">
         <span v-if="tenantMark.logo" class="tenant-logo" :class="{ plate: tenantMark.plate }">
@@ -413,12 +386,13 @@ onBeforeUnmount(() => { resized.disconnect(); crumbsChanged.disconnect(); narrow
     <nav v-if="session.identity && !fatal && navReady && (projectKey || businessCrumbs.length || settingsSection || pageTitle || allKnowledge || allTickets)" class="crumbs" :class="{ lead: !activePlace }" aria-label="Breadcrumb">
       <template v-if="projectKey">
         <span class="sep" aria-hidden="true">/</span>
-        <button v-if="headerTickets" type="button" class="phone-header-fold" :aria-expanded="headerDensity !== 'collapsed'" aria-controls="project-header-fold"
-          :aria-label="`${project?.routeKey ?? projectKey}: project header, ${headerDensity === 'collapsed' ? 'collapsed' : 'expanded'}`"
-          :data-tip="headerDensity === 'collapsed' ? 'Show project header' : 'Hide project header'" @click="toggleHeader()">
-          <span class="key-badge">{{ project?.routeKey ?? projectKey.toUpperCase() }}</span><AppIcon :name="headerDensity === 'collapsed' ? 'chevron' : 'chevron-up'" :size="14" />
+        <!-- Compact screens (D11): the project's crumb opens its sheet: title, progress, sections and the lead. -->
+        <button v-if="compact" type="button" class="crumb crumb-sheet" :class="{ current: !fullTicket && !projectKnowledge }" aria-haspopup="dialog" :aria-expanded="!!sheetFrom"
+          :aria-label="`${project?.routeKey ?? projectKey.toUpperCase()}${project?.title ? ` · ${project.title}` : ''}: sections, progress and the project header`"
+          data-tip="Sections, progress, the project header" @click="toggleProjectSheet">
+          <span class="key-badge">{{ project?.routeKey ?? projectKey.toUpperCase() }}</span><span v-if="project?.title" class="crumb-name">{{ project.title }}</span><AppIcon name="chevron" :size="14" class="crumb-chev" />
         </button>
-        <RouterLink class="crumb project-crumb" :class="{ 'has-fold': headerTickets }" :to="`/p/${encodeURIComponent(project?.routeKey ?? projectKey)}`" :aria-current="fullTicket || projectKnowledge ? undefined : 'page'">
+        <RouterLink v-else class="crumb project-crumb" :to="`/p/${encodeURIComponent(project?.routeKey ?? projectKey)}`" :aria-current="fullTicket || projectKnowledge ? undefined : 'page'">
           <span class="key-badge">{{ project?.routeKey ?? projectKey.toUpperCase() }}</span>
           <span class="crumb-name">{{ project?.title ?? '' }}</span>
         </RouterLink>
@@ -478,6 +452,7 @@ onBeforeUnmount(() => { resized.disconnect(); crumbsChanged.disconnect(); narrow
     <AppMenu />
     <AccountMenu />
     <CommandPalette v-if="globalSearch" ref="palette" :can-write="writable" />
+    <ProjectSheet v-if="sheetFrom && project" :anchor="sheetFrom" :project="project" @close="closeProjectSheet" />
   </header>
 </template>
 
@@ -487,7 +462,6 @@ onBeforeUnmount(() => { resized.disconnect(); crumbsChanged.disconnect(); narrow
   background: var(--glass-2); border-bottom: 1px solid var(--glass-edge); box-shadow: 0 1px 0 var(--line);
   -webkit-backdrop-filter: blur(16px) saturate(1.2); backdrop-filter: blur(16px) saturate(1.2);
 }
-.phone-header-fold { display: none; }
 .lockup { display: inline-flex; align-items: center; gap: 10px; min-height: 40px; padding-right: 4px; color: var(--ink); flex-shrink: 0; border-radius: 10px; }
 .lockup:focus-visible { box-shadow: var(--focus-ring); }
 .mark-backing { display: grid; place-items: center; width: 32px; height: 32px; border-radius: 9px; background: var(--brand-plate); box-shadow: 0 0 0 1px var(--glass-rim); }
@@ -597,69 +571,65 @@ onBeforeUnmount(() => { resized.disconnect(); crumbsChanged.disconnect(); narrow
   .app-header { gap: 4px; }
   .search-pill { flex-shrink: 1; }
 }
-@media (max-width: 600px) {
-  .app-header { gap: 4px; padding: 0 10px; }
-  .app-density, .density-spacer { display: none; }
-  .app-header .crumbs > .phone-header-fold { display: inline-flex; align-items: center; justify-content: center; gap: 4px; height: 44px; min-inline-size: 44px; flex: none; padding: 0 4px; border: 0; border-radius: 8px; background: transparent; color: var(--ink-2); }
-  .phone-header-fold:focus-visible { box-shadow: var(--focus-ring); }
-  .crumbs > .project-crumb.has-fold { display: none; }
-  .lockup { min-height: 44px; min-width: 44px; justify-content: center; }
-  /* Signed in, the Projects place is home and the footer carries the name: the lockup steps aside for the places. */
-  .app-header:has(.places) .lockup { display: none; }
-  .lockup.compact .wordmark { display: none; }
-  .wordmark { font-size: 11.5px; letter-spacing: .22em; }
-  /* Phones show a workspace's logo only, and only a square one, where it fits beside the places. */
-  .lockup.tenant.has-logo .tenant-name { display: none; }
+/* ---------- Compact (AEON-1459, design AEON-1279 r2 D1/D2): phones and short screens ----------
+   One 44 px line, opaque, nothing wraps: the places as 44 px icons, the crumb, Search as an icon
+   that opens the palette, Settings and the avatar. The moon and the Desk preview step aside (the
+   avatar menu has both); the density switch belongs to wider screens. */
+@media (max-width: 719px), (max-height: 500px) {
+  .app-header { gap: 2px; padding: 0 4px; border-bottom: 0; background: var(--chrome); box-shadow: 0 1px 0 var(--line); -webkit-backdrop-filter: none; backdrop-filter: none; }
+  .app-density, .density-spacer, .theme-btn, .desk-more { display: none; }
+  .lockup { min-height: 44px; min-width: 44px; justify-content: center; padding: 0; }
+  .lockup .wordmark, .lockup.tenant.has-logo .tenant-name { display: none; }
   .tenant-logo.plate { padding: 0 4px; }
-  /* Phones: the places are round header buttons like search and the avatar. */
-  .places { gap: 2px; padding: 0; background: none; box-shadow: none; }
-  .place { width: 44px; height: 44px; }
-  /* The desk keeps its place on phones; Business remains in the app menu
-     and on g b, leaving the ticket key and touch targets their room. */
-  .place[data-place="business"] { display: none; }
-  .place:not(.active) { border: 1px solid var(--glass-edge); background: var(--btn-bg); box-shadow: var(--shadow-btn); }
-  .place.active { box-shadow: 0 1px 2px color-mix(in srgb, var(--shadow-color) 12%, transparent), inset 0 0 0 1px var(--chip-teal-line); }
-  .place .needs-badge { top: 2px; right: 0; }
-  /* The Desk's two halves are full 44 px targets; the outline is drawn inside, so it takes no room. */
-  .place.split { width: auto; }
-  .place.split:not(.active) { border: 0; box-shadow: inset 0 0 0 1px var(--glass-edge), var(--shadow-btn); }
-  .place-main { width: 44px; padding: 0; justify-content: center; }
-  .place.split .needs-badge { position: absolute; }
-  .places :deep(.place-more) { width: 44px; }
-  .places :deep(.place-more)::before { top: 12px; bottom: 12px; }
-  .app-header[data-away~="desk"] .desk-more { display: none; }
-  .app-header[data-away~="desk"] .place-main { border-radius: 999px; }
-  /* The breadcrumb keeps only where you are. */
-  .crumbs { gap: 6px; }
-  /* The fold button's full touch target and focus ring must clear its trail. */
-  .crumbs:has(> .phone-header-fold) { height: 44px; overflow: visible; }
-  .crumbs > :not(:last-child) { display: none; }
-  .crumbs.lead { padding-left: 2px; }
-  .crumb { height: 44px; margin: 0; padding: 0 4px; }
-  /* A long name ends in an ellipsis instead of a hard cut. */
-  .crumbs > .crumb.current { display: block; flex-shrink: 1; min-width: 0; max-width: 100%; overflow: hidden; text-overflow: ellipsis; line-height: 44px; }
-  .crumb-name { display: none; }
-  .crumb-long { display: none; }
-  .crumb-short { display: inline; }
-  .search-pill { width: 44px; height: 44px; --pill-start: 0px; --pill-end: 0px; justify-content: center; }
+  /* The places: flat 44 px icons; the active one is a raised disc inset in its target. */
+  .places { gap: 0; padding: 0; background: none; box-shadow: none; }
+  .place, .place-main { width: 44px; height: 44px; padding: 0; justify-content: center; border-radius: 999px; }
+  .place { isolation: isolate; }
+  .place.split { width: auto; padding: 0; background: none; box-shadow: none; }
+  .place.active { background: transparent; box-shadow: none; }
+  .place.active::before { content: ''; position: absolute; inset: 5px; z-index: -1; border-radius: 999px; background: var(--seg-on); box-shadow: 0 1px 2px color-mix(in srgb, var(--shadow-color) 12%, transparent), inset 0 0 0 1px var(--chip-teal-line); }
+  .place-text { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
+  .place .needs-badge, .place.split .needs-badge { position: absolute; top: 4px; right: 2px; min-width: 17px; height: 16px; margin: 0; padding: 0 4px; font-size: 10px; box-shadow: 0 0 0 2px var(--chrome); }
+  /* The crumb: the project's key (and its name on short landscape screens) opens its sheet. */
+  .crumbs { gap: 2px; height: 44px; }
+  .crumb { height: 44px; margin: 0; padding: 0 6px; }
+  .crumb-sheet { gap: 6px; border: 0; background: transparent; font: inherit; font-weight: 600; cursor: pointer; }
+  .crumb-sheet.current { cursor: pointer; }
+  .crumb-sheet:hover, .crumb-sheet[aria-expanded="true"] { color: var(--ink); background: var(--row-hover); }
+  .crumb-sheet .crumb-name { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .crumb-chev { flex: none; color: var(--ink-3); }
+  .crumbs > .crumb-sheet { flex-shrink: 1; min-width: 44px; overflow: hidden; }
+  .search-pill { width: 44px; height: 44px; --pill-start: 0px; --pill-end: 0px; justify-content: center; border: 0; background: transparent; box-shadow: none; color: var(--ink-2); }
+  .search-pill:hover { background: var(--row-hover); color: var(--ink); box-shadow: none; }
   .pill-text, .pill-keys { display: none; }
   .app-header :deep(.header-btn) { width: 44px; height: 44px; }
 }
-/* The narrowest phones: round buttons sit close, as the places do, so a ticket
-   key keeps its room. The moon steps aside only when measured room runs out. */
-@media (max-width: 430px) { .app-header { gap: 2px; padding: 0 8px; } }
-/* At the narrowest width the project fold keeps its full touch target; the
-   project name remains in its accessible label and the page header. */
-@media (max-width: 360px) {
-  .app-header { gap: 0; padding: 0 6px; }
-  .places { gap: 0; }
-  .app-header .crumbs > .phone-header-fold { min-inline-size: 44px; }
-  .phone-header-fold .key-badge { display: none; }
+/* Portrait phones: Projects is home, so the mark steps aside for the places; Business lives in the app
+   menu; the breadcrumb keeps only where you are, and the project's crumb only its key. */
+@media (max-width: 719px) {
+  .app-header:has(.places) .lockup { display: none; }
+  .place[data-place="business"] { display: none; }
+  .crumbs > :not(:last-child) { display: none; }
+  .crumbs.lead { padding-left: 2px; }
+  .crumb-sheet { padding: 0 4px 0 6px; }
+  .crumb-sheet .crumb-name { display: none; }
+  /* A long name ends in an ellipsis instead of a hard cut. */
+  .crumbs > .crumb.current:not(.crumb-sheet) { display: block; flex-shrink: 1; min-width: 0; max-width: 100%; overflow: hidden; text-overflow: ellipsis; line-height: 44px; }
+  .crumb-name { display: none; }
+  .crumb-long { display: none; }
+  .crumb-short { display: inline; }
 }
-@media (max-width: 600px) { .app-header[data-away~="moon"] .theme-btn { display: none; } }
 /* A square workspace logo leads the places at a place's root; wide logos and inner pages leave the room to them. */
-@media (min-width: 380px) and (max-width: 600px) {
+@media (min-width: 380px) and (max-width: 719px) {
   .app-header:has(.places) .lockup.tenant.squarish:not(.compact) { display: inline-flex; min-width: 40px; }
+}
+/* The narrowest phones (under 360 px): Settings moves into the avatar menu and the crumb keeps its
+   chevron (the project stays in its name); every target stays 44 px and nothing wraps. */
+@media (max-width: 359px) {
+  .app-header { gap: 0; }
+  .app-header :deep(.app-menu) { display: none; }
+  .crumb-sheet .key-badge { display: none; }
+  .crumbs > .crumb-sheet { min-width: 44px; justify-content: center; }
 }
 /* What the measured fit drops (fitTrail, AEON-1214) takes no room and stays for
    screen readers, like the folded Settings label. Last, so it wins. */

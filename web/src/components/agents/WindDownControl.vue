@@ -214,11 +214,13 @@ function bulk(mode: 'pause-all' | 'resume-all') {
   pause.open(mode, targets, anchor)
 }
 function closePanel(restore: boolean) {
-  const was = panel.value
-  panel.value = null
-  if (restore && was) (active.value ? chipButton.value : restButton.value)?.focus({ preventScroll: true })
+  const was = panel.value, from = opener.value
+  panel.value = null; opener.value = null
+  if (restore && was) (from?.isConnected ? from : active.value ? chipButton.value : restButton.value)?.focus({ preventScroll: true })
 }
-const anchor = computed(() => active.value ? chipButton.value ?? null : restButton.value ?? null)
+// On compact screens the head's ⋯ opens it (AEON-1459): it anchors there and focus returns there.
+const opener = ref<HTMLElement | null>(null)
+const anchor = computed(() => opener.value ?? (active.value ? chipButton.value ?? null : restButton.value ?? null))
 let labelsEpoch = 0
 async function loadLabels() {
   const turn = ++labelsEpoch
@@ -230,7 +232,12 @@ watch(() => `${session.identity?.tenant.id}:${session.identity?.principal.id}`, 
 // The chip replaces the button; a status popover for a wind-down that is gone closes.
 watch(active, now => { if (!now && panel.value === 'status') panel.value = null })
 onMounted(() => { void loadLabels(); void loadScope(); void pause.loadSettings(); void pause.refreshLeaving() })
-defineExpose({ open: openForm, openStatus: () => { chipButton.value?.scrollIntoView({ block: 'nearest' }); panel.value = 'status' } })
+defineExpose({
+  open: (from?: HTMLElement | null) => { opener.value = from ?? null; openForm() },
+  openStatus: (from?: HTMLElement | null) => { opener.value = from ?? null; if (!from) chipButton.value?.scrollIntoView({ block: 'nearest' }); panel.value = 'status' },
+  active,
+  visible,
+})
 </script>
 <template>
   <span v-if="visible" class="wind-down" :class="{ active }">

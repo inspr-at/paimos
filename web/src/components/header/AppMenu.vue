@@ -3,12 +3,12 @@
 // The gear menu is about the app and the workspace (AEON-312): workspace settings
 // for admins, connecting agents, the release history and shortcuts, help and
 // feedback, and whether the system is well. The avatar beside it is about me.
-import { computed, onBeforeUnmount, ref } from 'vue'
+import { computed, onBeforeUnmount, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { api } from '../../lib/api'
 import { codenameOf, releaseAria, rememberCodename } from '../../lib/codenames'
 import { can, myWorkspaceRole } from '../../lib/authz'
-import { run } from '../../lib/commands'
+import { command, consume, run } from '../../lib/commands'
 import { feedbackRecipient, sendFeedback, type FeedbackRecipient } from '../../lib/feedback'
 import { FEEDBACK_MAX, HOOK_COMMANDS, feedbackBody, hookDocsUrl, summarizeStatus, type SystemProbe } from '../../lib/headerMenus'
 import { displayHeadline, hasUsableNotes, localizedNote } from '../../lib/releases'
@@ -103,6 +103,8 @@ async function copyCommand(command: string, harness: string) {
 function go(path: string) { menu.value?.close(); void router.push(path) }
 function showReleases(at?: string) { menu.value?.close(); run(at ? { name: 'releases', version: at } : { name: 'releases' }) }
 function showShortcuts() { menu.value?.close(); run({ name: 'shortcuts' }) }
+// The narrowest phones have no gear in the header (AEON-1459): the avatar menu opens this one as a sheet.
+watch(command, value => { if (value?.command.name === 'app-menu') { consume(); void menu.value?.show() } })
 
 // ---------- Help & feedback ----------
 const latest = computed(() => {

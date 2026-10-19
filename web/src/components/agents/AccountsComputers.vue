@@ -26,6 +26,8 @@ import { signinKey, useVerification } from '../../lib/useVerification'
 // and Verify again, then three tiles that open Settings › Accounts, Computers and Capacity.
 const route = useRoute()
 const props = defineProps<{ permissions: PairingPermissions; showAccounts: boolean }>()
+// The capacity line on compact screens names how many accounts and computers there are (AEON-1459).
+const emit = defineEmits<{ summary: [summary: { accounts: number; computers: number; online: number; flag: string; known: boolean }] }>()
 const agents = useAgents(), capacity = useCapacity(), session = useSession()
 const mayManage = computed(() => session.identity?.principal.kind === 'person' && can('account.manage'))
 const identityKey = computed(() => `${session.identity?.tenant.id ?? ''}/${session.identity?.principal.id ?? ''}`)
@@ -88,6 +90,7 @@ const chipText = computed(() => chipState.value.state === 'error' ? 'Accounts un
   : chipState.value.state === 'forbidden' ? 'Accounts'
   : accounts.value.length ? glanceChipText(accounts.value.length, computers.value.length, props.showAccounts) : `No accounts yet${computers.value.length ? ` · ${computers.value.length} computers` : ''}`)
 const flag = computed(() => hasValues(chipState.value) ? glanceFlag(signins.value, openItems.value) : '')
+watch([() => accounts.value.length, () => computers.value.length, online, flag, () => hasValues(chipState.value)], ([count, machines, up, note, known]) => emit('summary', { accounts: count, computers: machines, online: up, flag: note, known }), { immediate: true })
 const chipTip = computed(() => chipState.value.state === 'error' ? chipState.value.reason
   : chipState.value.state === 'forbidden' ? `${forbiddenWords('accounts')}. ${chipState.value.reason}`
   : chipState.value.state === 'stale' ? `${chipText.value}${flag.value ? ` · ${flag.value}` : ''} · ${asOf(chipState.value)}${chipState.value.reason ? ` · ${chipState.value.reason}` : ''}`

@@ -34,6 +34,8 @@ import { FILTER_LABEL, matchesFilter, type HeadFilter } from '../components/agen
 import AccountsComputers from '../components/agents/AccountsComputers.vue'
 import { openModelPrefs } from '../lib/modelPrefsCommand'
 import AgentsWorking from '../components/agents/AgentsWorking.vue'
+import CapacityLine, { type AccountFacts, type CapacityFacts } from '../components/agents/CapacityLine.vue'
+import { compactChrome } from '../lib/chrome'
 import StartAgentDialog from '../components/agents/StartAgentDialog.vue'
 import { useAgentProjects } from '../components/agents/useAgentProjects'
 import { DEFAULT_GROUP, emptyFacets, facetParam, FACET_KEYS, parseFacet, parseGroup, sameFacets, type Facets, type GroupBy } from '../components/agents/sessionGroups'
@@ -70,6 +72,35 @@ function menuAction(action: () => void) {
   // Dialogs remember the durable header trigger, rather than a removed menu item.
   anchor?.focus({ preventScroll: true })
   action()
+}
+// ---------- Compact (AEON-1459, design AEON-1279 r2 R2.1) ----------
+// Phones and short screens: the counts join the title row, Wind down leads ⋯, and the dial and the
+// accounts chip fold into one capacity line whose sheet holds the page's own dial and accounts.
+const compact = compactChrome()
+const dialFacts = ref<CapacityFacts | null>(null)
+const machineFacts = ref<AccountFacts | null>(null)
+const capOpen = ref(false), capMoved = ref(false)
+const capLine = ref<InstanceType<typeof CapacityLine>>()
+const dialControl = ref<InstanceType<typeof AgentsWorking>>()
+function openCapacity() { capMoved.value = false; capOpen.value = true }
+// The dial and the chip move back to the page before the sheet goes, so nothing is ever unmounted.
+async function closeCapacity(restore: boolean) {
+  capMoved.value = false
+  await nextTick()
+  capOpen.value = false
+  if (restore) capLine.value?.focus()
+}
+async function fullDial() {
+  await closeCapacity(false)
+  dialControl.value?.unfold()
+}
+watch(compact, now => { if (!now && capOpen.value) void closeCapacity(false) })
+function windDownFromMenu() {
+  const anchor = headerMenu.value?.anchor ?? null
+  headerMenu.value = null
+  anchor?.focus({ preventScroll: true })
+  if (windDown.value?.active) windDown.value.openStatus(anchor)
+  else windDown.value?.open(anchor)
 }
 function menuKeys(event: KeyboardEvent) {
   if (!['ArrowDown', 'ArrowUp', 'Home', 'End'].includes(event.key)) return
@@ -168,7 +199,7 @@ const canStartLead = computed(() => mayStartLead.value && leadless.value.length 
 const leadlessNote = computed(() => !leadLaunchAvailable.value ? launchReason.value : leadless.value.length === 1 ? `${projects.byId(leadless.value[0]!)?.routeKey ?? 'One project'} has none. One per project.` : `${leadless.value.length} projects have none. One per project.`)
 const showNew = computed(() => manualStart.value || canStartLead.value || canAttach.value || showConnect.value)
 watch(() => `${session.identity?.tenant.id}/${session.identity?.principal.id}`, () => {
-  headerMenu.value = null; filter.value = null
+  headerMenu.value = null; filter.value = null; capMoved.value = false; capOpen.value = false
   if (query.value) setQuery('')
   if (FACET_KEYS.some(key => facets.value[key].length)) setFacets(emptyFacets())
   if (group.value !== DEFAULT_GROUP) setGroup(DEFAULT_GROUP)
@@ -628,6 +659,11 @@ watch(sessionId, id => { if (id) { cursor.value = `s:${id}`; lastSession = id } 
         <!-- No "Live" in the head; only a delay is worth saying, at the line end (AEON-785 moves freshness to the footer). -->
         <p v-if="stale" class="freshness" role="status" :data-tip="freshnessTip"><span class="live-mark" aria-hidden="true" />Update delayed</p>
       </HeadCounts>
+      <!-- Compact: the dial and the accounts chip as one line that opens their sheet (R2.1). -->
+      <CapacityLine
+        v-if="showSetup && compact" ref="capLine" class="head-cap" :dial="session.identity?.principal.kind === 'person' ? dialFacts : null" :machines="machineFacts" :show-accounts="showCapacity" :open="capOpen"
+        @open="openCapacity" @close="closeCapacity" @ready="capMoved = true" @full-dial="fullDial"
+      />
       <div class="head-side">
         <!-- Wind down · More · New, New last (AEON-1209). Wind down is a ghost button, then a teal chip while it runs (AEON-783). -->
         <WindDownControl v-if="agents.loaded" ref="windDown" />
@@ -649,6 +685,11 @@ watch(sessionId, id => { if (id) { cursor.value = `s:${id}`; lastSession = id } 
           <!-- Pause all, Resume all and Wind down live in the Wind down popover; History in the Sessions head (AEON-780).
                The Decision Desk is a place in the app header, not an item here (AEON-1209, AEON-1139). -->
           <template v-else>
+            <!-- Compact: the head has no room for Wind down; it leads this menu (R2.1). -->
+            <template v-if="compact && windDown?.visible">
+              <button role="menuitem" type="button" class="menu-item" data-autofocus @click="windDownFromMenu"><AppIcon name="pause" /><span>Wind down…<small>Finish what runs, start nothing new</small></span></button>
+              <div class="menu-sep" role="separator" />
+            </template>
             <button role="menuitem" type="button" class="menu-item" aria-label="Model preferences" @click="menuAction(() => openModelPrefs())"><AppIcon name="gear" /><span>Model preferences<small>Which models do which work.</small></span></button>
             <RouterLink role="menuitem" class="menu-item" to="/agents/usage" @click="headerMenu = null"><AppIcon name="pulse" /><span>Usage<small>Tokens and cost per agent, account and day.</small></span></RouterLink>
             <RouterLink role="menuitem" class="menu-item" to="/agents/routines" @click="headerMenu = null"><AppIcon name="repeat" /><span>Routines<small>Recurring work agents do by themselves.</small></span></RouterLink>
@@ -666,8 +707,11 @@ watch(sessionId, id => { if (id) { cursor.value = `s:${id}`; lastSession = id } 
       <div class="main-col">
         <!-- The capacity row: what may run. The folded dial, then the accounts chip; it scrolls with the page. -->
         <div v-if="showSetup" class="cap-row" role="group" aria-label="Capacity: what may run">
-          <AgentsWorking v-if="session.identity?.principal.kind === 'person'" body-target="#dial-body-host" />
-          <AccountsComputers :permissions="pairingAccess" :show-accounts="showCapacity" />
+          <!-- On compact screens the capacity line's sheet borrows these two while it is open (AEON-1459). -->
+          <Teleport :to="capMoved ? '#capacity-sheet-dial' : 'body'" :disabled="!capMoved">
+            <AgentsWorking v-if="session.identity?.principal.kind === 'person'" ref="dialControl" body-target="#dial-body-host" @summary="dialFacts = $event" />
+            <AccountsComputers :permissions="pairingAccess" :show-accounts="showCapacity" @summary="machineFacts = $event" />
+          </Teleport>
         </div>
         <div id="dial-body-host" class="dial-host" />
         <!-- AEON-1192: one Routines line while a routine waits for a person or failed. -->
@@ -787,16 +831,34 @@ watch(sessionId, id => { if (id) { cursor.value = `s:${id}`; lastSession = id } 
 .layout-error { position: absolute; right: 0; top: 58px; z-index: 26; padding: 6px 10px; background: var(--surface-raised); color: var(--danger); font-size: 12px; }
 @media (pointer: coarse) { .split .agents-divider::after { content: ''; position: absolute; inset: 0 -14px; } }
 @media (prefers-reduced-motion: reduce) { .agents-list-pane, .agents-divider { transition: none; } }
-@media (max-width: 720px) {
-  .agents-page { --page-x: 12px; padding: 16px var(--page-x) 20px; }
+/* ---------- Compact (AEON-1459, design AEON-1279 r2 R2.1): phones and short screens ----------
+   The title row carries the counts (their words in their names), then ⋯ and New; Wind down is in ⋯.
+   The capacity line takes its own line on portrait phones. Both scroll away before the toolbar sticks. */
+@media (max-width: 719px), (max-height: 500px) {
+  .agents-page { --page-x: 12px; --ctl-h: 44px; padding: 0 var(--page-x) 20px; }
   .hint { display: none; }
-  /* Phones: title and controls on line 1 (44 px), the counts on line 2. */
-  .page-head { gap: 2px 8px; }
-  .page-head h1 { font-size: 26px; }
-  .page-head .head-counts { order: 3; flex: 1 1 100%; }
+  .page-head { flex-wrap: wrap; gap: 0 6px; min-height: 44px; margin: 10px 0; }
+  .page-head h1 { order: 0; font-size: 24px; }
+  .page-head .head-counts { order: 1; flex: 0 1 auto; }
+  .head-side { order: 4; margin-left: auto; }
+  .head-cap { order: 5; flex: 1 1 100%; margin-top: 6px; }
   .add-agent, .more-agent { width: 44px; height: 44px; }
-  .head-side :deep(.wd-btn) { width: 44px; padding: 0; }
+  .head-side :deep(.wd-btn) { display: none; }
+  .cap-row { display: none; }
+  .agents-work { margin-top: 10px; }
   .header-menu .menu-item { min-height: 52px; }
   .freshness { height: 44px; }
+}
+/* Short landscape: the title, the counts, the capacity line and the actions share one 44 px line. */
+@media (max-height: 500px) and (min-width: 720px) {
+  .page-head { flex-wrap: nowrap; margin: 6px 0; }
+  .page-head h1 { font-size: 22px; }
+  .head-cap { order: 2; flex: 0 1 auto; min-width: 0; margin: 0 0 0 6px; }
+  .agents-work { margin-top: 6px; }
+}
+/* The narrowest phones: the title tightens; every target stays 44 px and nothing wraps. */
+@media (max-width: 359px) {
+  .page-head { gap: 0 4px; }
+  .page-head h1 { font-size: 20px; }
 }
 </style>

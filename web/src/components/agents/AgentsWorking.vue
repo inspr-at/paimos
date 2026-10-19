@@ -25,6 +25,8 @@ import WorkingStepper from './WorkingStepper.vue'
 
 // bodyTarget: where the unfolded body goes, under the capacity row; without one it stays in place.
 defineProps<{ bodyTarget?: string }>()
+// The capacity line on compact screens says the dial's total and what runs (AEON-1459).
+const emit = defineEmits<{ summary: [summary: { total: number; running: number; known: boolean }] }>()
 const agents = useAgents(), capacity = useCapacity(), session = useSession(), sections = useSectionPrefs(), dialPrefs = useDialPrefs()
 const viewer = () => session.identity ? `${session.identity.tenant.id}:${session.identity.principal.id}` : ''
 const control = useAgentPlan(viewer, key => agents.models.find(m => m.id === key)?.harness)
@@ -62,6 +64,7 @@ const run = computed(() => snapshot.value?.running_total ?? 0)
 const live = computed(() => liveCopy(total.value, run.value, roomNow.value, accountRoom.value.full))
 const status = computed(() => statusCopy(total.value, run.value, roomNow.value, accountRoom.value.full))
 const now = computed(() => nowCopy(total.value, run.value, roomNow.value))
+watch([total, run, () => !!(plan.value && snapshot.value)], ([t, r, known]) => emit('summary', { total: t, running: r, known }), { immediate: true })
 const waitingN = computed(() => waiting.value === null ? null : waiting.value.length)
 // "Nothing waiting" is said by the tile itself; only real waiting work, or an unknown queue, needs a reason.
 const waits = computed(() => plan.value && snapshot.value && (waitingN.value !== 0) ? waitingCopy(plan.value, snapshot.value, room.value, waiting.value, accountRoom.value.reasons) : '')
@@ -90,6 +93,8 @@ function toggleDial() {
   toggleSection()
   if (key) void nextTick(() => document.getElementById(bodyId)?.querySelector<HTMLElement>(`[data-sel="${key}"]`)?.focus({ preventScroll: true }))
 }
+// The capacity sheet's "The full dial" opens the body on the page (AEON-1459).
+defineExpose({ unfold: () => { if (folded.value) toggleDial(); else void nextTick(() => document.getElementById(bodyId)?.scrollIntoView({ block: 'start' })) } })
 // Touch: a tap on a unit's face opens it on its plate (a tight row); an outside tap or four
 // idle seconds close it, never while − or + is held.
 const openUnit = ref('')
