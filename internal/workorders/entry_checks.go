@@ -34,6 +34,7 @@ type EntryDefinition struct {
 	ID         string                 `json:"id"`
 	Revision   time.Time              `json:"revision"`
 	Source     string                 `json:"source"`
+	CreatedAt  *time.Time             `json:"created_at,omitempty"`
 	CopiedFrom *time.Time             `json:"copied_from_revision"`
 	Checks     map[string][]EntryRule `json:"checks"`
 }
@@ -150,7 +151,7 @@ func ValidateEntryRules(checks map[string][]EntryRule) error {
 // saved. Non-inheriting reads return only saved nodes for revision-checked writes.
 func EntryDefinitionTx(ctx context.Context, tx pgx.Tx, project *string, inherit bool) (*EntryDefinition, error) {
 	load := func(scope *string) (*EntryDefinition, error) {
-		rows, err := tx.Query(ctx, `SELECT n.id::text,n.updated_at,n.fields FROM nodes n JOIN node_kinds k ON k.tenant_id=n.tenant_id AND k.id=n.kind_id WHERE k.slug='definition' AND n.deleted_at IS NULL AND n.parent_id IS NOT DISTINCT FROM $1::uuid ORDER BY n.id LIMIT 2`, scope)
+		rows, err := tx.Query(ctx, `SELECT n.id::text,n.updated_at,n.created_at,n.fields FROM nodes n JOIN node_kinds k ON k.tenant_id=n.tenant_id AND k.id=n.kind_id WHERE k.slug='definition' AND n.deleted_at IS NULL AND n.parent_id IS NOT DISTINCT FROM $1::uuid ORDER BY n.id LIMIT 2`, scope)
 		if err != nil {
 			return nil, err
 		}
@@ -165,7 +166,7 @@ func EntryDefinitionTx(ctx context.Context, tx pgx.Tx, project *string, inherit 
 				d.Source = "project"
 			}
 			var raw []byte
-			if err = rows.Scan(&d.ID, &d.Revision, &raw); err != nil {
+			if err = rows.Scan(&d.ID, &d.Revision, &d.CreatedAt, &raw); err != nil {
 				return nil, err
 			}
 			if len(raw) > 65536 {

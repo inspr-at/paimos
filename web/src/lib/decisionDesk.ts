@@ -29,6 +29,7 @@ export interface DeskAsker { principalId: string; sessionId?: string; name?: str
 /** The answer's own delivery as the server reports it (AEON-1339; the read receipt follows with AEON-1340). */
 export type DeskDeliveryState = 'pending' | 'delivered' | 'failed'
 export interface DeskItem {
+  definitionChange?: {project_key: string; pending_count: number}
   personStep?: PersonStep
   personStepUndo?: { step: PersonStep; owner?: string; event?: number }
   id: string; kind: DeskKind; projectId: string; projectName: string; projectKey?: string; ticketId?: string; ticketKey?: string
@@ -156,8 +157,9 @@ export function submitModifier(event: Pick<KeyboardEvent, 'metaKey' | 'ctrlKey' 
 }
 
 export interface DeskProjectionItem {
+  definition_change?: {project_key: string; pending_count: number}
   person_step?: PersonStep
-  id: string; kind: 'question' | 'approval' | 'action_request' | 'doctrine' | 'tier_request' | 'key_trim' | 'stepup' | 'account_matrix' | 'lesson' | 'routine_consent'; project_id?: string; ticket_key?: string | null
+  id: string; kind: 'question' | 'approval' | 'action_request' | 'doctrine' | 'tier_request' | 'key_trim' | 'stepup' | 'account_matrix' | 'lesson' | 'routine_consent' | 'definition_change'; project_id?: string; ticket_key?: string | null
   revision: number; title: string; created_at: string; expires_at?: string; held: boolean; can_decide?: boolean; href: string; source: string
 }
 export interface DeskProjection {
@@ -166,12 +168,25 @@ export interface DeskProjection {
 }
 
 export function deskItemID(item: Pick<DeskProjectionItem, 'kind' | 'id'>): string {
-  const prefix = { question: 'q', approval: 'a', action_request: 'm', doctrine: 'r', tier_request: 't', key_trim: 'k', stepup: 's', account_matrix: 'u', routine_consent: 'c', lesson: 'l' }[item.kind]
+  const prefix = { question: 'q', approval: 'a', action_request: 'm', doctrine: 'r', tier_request: 't', key_trim: 'k', stepup: 's', account_matrix: 'u', routine_consent: 'c', lesson: 'l', definition_change: 'd' }[item.kind]
   return `${prefix}:${item.id}`
 }
 // Link-out rows are decided on their own settings page, never in the memo.
 // Only the approved in-app settings paths are followed; anything else stays inert.
 export function deskLinkOut(item: Pick<DeskProjectionItem, 'kind' | 'href'>): string {
+  if (item.kind === 'definition_change') {
+    if (typeof item.href !== 'string') return ''
+    // Go's url.PathEscape leaves + : @ & = $ unescaped, but escapes the
+    // slash and query/hash delimiters inside a key. Decode one segment only,
+    // then canonicalize it for Vue Router without ever following another path.
+    const match = /^\/p\/([A-Za-z0-9_.~!$&'()*+,;=:@%-]+)\/settings\/definitions\?definition_changes=1#definition-changes$/.exec(item.href)
+    if (!match) return ''
+    try {
+      const key = decodeURIComponent(match[1]!)
+      if (!key || key === '.' || key === '..') return ''
+      return `/p/${encodeURIComponent(key)}/settings/definitions?definition_changes=1#definition-changes`
+    } catch { return '' }
+  }
   if (item.kind === 'routine_consent') return typeof item.href === 'string' && /^\/(?:p\/[A-Za-z0-9_-]{1,40}\/settings|settings\/(?:personal|routines))\?recurrence=[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}&consent=1$/.test(item.href) ? item.href : ''
   return item.kind === 'account_matrix' && typeof item.href === 'string' && /^\/settings\/[a-z0-9-]{1,40}(#[a-z0-9-]{1,40})?$/.test(item.href) ? item.href : ''
 }
