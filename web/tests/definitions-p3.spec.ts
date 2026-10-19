@@ -35,6 +35,7 @@ async function evidence(checks: Check[]) {
 async function shot(page: Page,width: number,theme: string,state: string){
   // The app scrolls main rather than the document. Capture the whole state,
   // including the phone's decisions below the notice, then restore its scroll.
+  if(await page.locator('#cross-family-review').count())await expect(page.locator('#cross-family-review .chosen li').first()).toContainText('OpenAI, xAI, Anthropic, Cursor, Google, local models')
   const viewport=page.viewportSize()!,layout=await page.evaluate(()=>{
     const main=document.querySelector('main')!,rect=main.getBoundingClientRect()
     return {height:Math.ceil(main.scrollHeight+rect.top+innerHeight-rect.bottom+2),top:main.scrollTop,x:scrollX,y:scrollY}
@@ -60,7 +61,7 @@ async function setup(page: Page,theme: 'light' | 'dark',locale='en',viewer=false
   page.on('pageerror',error=>errors.push(error.message))
   await page.route('**/api/**',async route=>{
     const request=route.request(),url=new URL(request.url()),path=url.pathname
-    if(path==='/api/me/permissions')return route.fulfill({json:mockEffectivePermissions(world.readOnly?'viewer':'admin',url.searchParams.get('project_id')??undefined)})
+    if(path==='/api/me/permissions'){const permissions=mockEffectivePermissions(world.readOnly?'viewer':'admin',url.searchParams.get('project_id')??undefined);permissions.workspace.permissions.push('reviewpolicy.read',...(!world.readOnly?['reviewpolicy.manage']:[]));return route.fulfill({json:permissions})}
     if(path==='/api/preferences/theme')return route.fulfill({json:{key:'theme',value:{choice:theme}}})
     if(path==='/api/settings/review-policy')return route.fulfill({json:reviewPolicy()})
     if(path==='/api/decision-desk/projection'){
@@ -181,7 +182,7 @@ test('AEON-1317 workspace defaults differences empty inherited and viewer match 
   await matrix(browser,async(page,width,theme)=>{
     const {world,errors}=await setup(page,theme),record=(assert:string)=>checks.push({assert,width,theme,locale:'en',passed:true})
     await page.goto('/settings/policies#definitions');const card=page.locator('#definitions')
-    await expect(card.getByRole('heading',{name:'Definitions',exact:true})).toBeVisible()
+    await expect(card.getByRole('heading',{name:'Definitions',exact:true})).toBeVisible();await expect(page.locator('#cross-family-review .chosen li').first()).toContainText('OpenAI, xAI, Anthropic, Cursor, Google, local models')
     expect(await page.locator('#cross-family-review').evaluate((review)=>!!review.parentElement?.querySelector('#definitions')&&(review.compareDocumentPosition(review.parentElement!.querySelector('#definitions')!)&Node.DOCUMENT_POSITION_FOLLOWING)!==0)).toBe(true)
     const toggle=card.getByRole('button',{name:'3 projects differ',exact:true}),stable=await controlStability(page,{toggle,firstRow:card.locator('[data-check]').first()})
     await stable.check(()=>toggle.click());stable.done()
@@ -290,7 +291,7 @@ test('AEON-1317 failed stale and identity-bound decisions never claim success',a
   expect(world.writes.every(write=>write.path==='/api/projects/p-frozen/definitions/decisions')).toBe(true)
   await navigate(page,'/settings/policies#definitions')
   const workspaceCard=page.locator('#definitions'),first=workspaceCard.locator('[data-check="estimate_set"]')
-  await expect(first).toBeVisible();world.fail=true
+  await expect(first).toBeVisible();await expect(page.locator('#cross-family-review .chosen li').first()).toContainText('OpenAI, xAI, Anthropic, Cursor, Google, local models');world.fail=true
   const stable=await controlStability(page,{first,head:workspaceCard.locator('[data-block="in_progress"] .db-head')})
   await stable.check(async()=>{await first.getByRole('button',{name:'More for Estimate set'}).click();await page.getByRole('menuitem',{name:'Remove',exact:true}).click();await expect(page.locator('.toast.error').filter({hasText:'Default save unavailable'})).toContainText('Default save unavailable')});stable.done()
   await expect(first).not.toContainText('Removed');await page.getByRole('button',{name:'Close check editor',exact:true}).click()
