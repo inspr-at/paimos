@@ -353,12 +353,13 @@ for (const width of [390, 960, 1440]) for (const theme of ['light', 'dark']) {
 // popups; there the cases prove that no popup can open. The Model and Cost unit shots are for Tick's confirm.
 const lineTexts = (page: Page) => tip(page).locator('.wf-line').evaluateAll(rows => rows.map(row => ({ text: row.textContent!.replace(/\s+/g, ' ').trim(), height: row.getBoundingClientRect().height })))
 async function closeTip(page: Page) { await page.mouse.move(5, 5); await expect(tip(page)).toHaveCount(0) }
-// One value or none in each top-N column and nothing in the tail: Model, Epic, Release, Suggested, Tags and Cost unit.
+// One value or none in each top-N column and nothing in the tail: Model, Parent, Release, Suggested, Tags and Cost unit.
 function sparseFigures(): ProjectFigures {
   const whole = wholeFigures(), c = whole.columns
   const one = (value: string, count: number) => [{ value, count, hours: 0 }]
   return { ...whole, columns: { ...c,
     model: { ...c.model, values: one('gpt-6.1-sol', 41), others: 0 }, epic: { ...c.epic, values: one('AIT-12', 40), others: 0 },
+    parent: { ...c.parent, values: one('AIT-40', 31), others: 0 },
     release: { ...c.release, values: [], others: 0 }, suggested_release: { ...c.suggested_release, values: [], others: 0 },
     tag: { ...c.tag, values: one('bug', 19), others: 0 }, cost_unit: { ...c.cost_unit, others: 0 },
   } }

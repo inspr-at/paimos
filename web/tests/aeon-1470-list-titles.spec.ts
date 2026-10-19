@@ -165,12 +165,15 @@ test('AEON-1470 Title keeps at least 240 px at table widths 760–1440 for the 1
 
 test('AEON-1470 columns leave in the give-way order; sorted by Updated, Updated stays and the next one leaves instead', async ({ page }, testInfo) => {
   const log = checks(testInfo)
-  await open(page, { prefs: { visible: ALL } })
+  // A saved Key width keeps its minimum independent of the platform's key text measurement. Otherwise Linux's
+  // wider key can put the two sorts on opposite sides of a threshold (Updated and the next column differ in width).
+  const prefs = { visible: ALL, widths: { key: 118 } }
+  await open(page, { prefs })
   const plain = await shownIds(page)
   const dropped = expectGiveWayOrder(ALL, plain)
   expect(dropped[0]).toBe('updated')
   log.add({ assert: 'drop order', state: 'all columns, default sort', width: 1024, tableWidth: await tableWidth(page), theme: 'light', value: dropped })
-  await open(page, { prefs: { visible: ALL }, query: '?group=status&sort=-updated_at' })
+  await open(page, { prefs, query: '?group=status&sort=-updated_at' })
   await expect(grid(page).locator('thead th[data-column-id="updated"]')).toHaveAttribute('aria-sort', 'descending')
   const sorted = await shownIds(page)
   const droppedSorted = expectGiveWayOrder(ALL, sorted, ['updated'])
