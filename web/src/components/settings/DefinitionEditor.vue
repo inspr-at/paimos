@@ -71,10 +71,13 @@ async function focusWaiting(afterID?: string) {
   if (next) next.querySelector<HTMLElement>('[data-decision="accept"]')?.focus({preventScroll:true})
   else rows[index]?.focus({preventScroll:true})
 }
+function rowHeight(id: string) {
+  return Array.from(root.value?.querySelectorAll<HTMLElement>('[data-check]') ?? []).find(row => row.dataset.check === id)?.getBoundingClientRect().height
+}
 function decide(id: string, choice: 'accept' | 'keep') {
   const change = waiting(id)
   if (!change || !props.editable || props.busy) return
-  const height = Array.from(root.value?.querySelectorAll<HTMLElement>('[data-check]') ?? []).find(row => row.dataset.check === id)?.getBoundingClientRect().height
+  const height = rowHeight(id)
   emit('decide', change, choice, () => {
     if (height) decisionHeights.value[id] = height
     decided.value[id] = choice === 'keep' ? change.kind === 'new' ? 'left' : 'kept' : change.kind === 'removed' ? 'removed' : change.kind === 'new' ? 'added' : 'kept'
@@ -85,9 +88,10 @@ function undoDecision(id: string) {
   const slot = visitRows.value?.find(row => row.item.id === id)
   if (!slot) return
   if (ghosts.value.some(ghost => ghost.item.id === id)) { undo(slot.block,slot.item); return }
+  const height = rowHeight(id)
   const next = cloneChecks(props.checks), index = visitRows.value!.filter(row => row.block === slot.block).indexOf(slot)
   ;(next[slot.block] ??= []).splice(Math.min(index,next[slot.block]?.length ?? 0),0,slot.item)
-  change(next, () => { decided.value[id] = 'kept'; void nextTick(() => root.value?.querySelector<HTMLElement>(`[data-check="${id}"]`)?.focus({preventScroll:true})) })
+  change(next, () => { if (height) decisionHeights.value[id] = height; decided.value[id] = 'kept'; void nextTick(() => root.value?.querySelector<HTMLElement>(`[data-check="${id}"]`)?.focus({preventScroll:true})) })
 }
 type Panel = { kind: 'add' | 'menu' | 'conditions' | 'manual' | 'owner'; block: DefinitionStatus; rule?: DefinitionRule; anchor: HTMLElement }
 const panel = ref<Panel | null>(null), condition = ref<DefinitionCondition>('all'), kinds = ref(''), labels = ref(''), text = ref(''), owner = ref('')
