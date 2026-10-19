@@ -677,7 +677,9 @@ export const fullWebShards = Array.from({ length: fullWebShardCount }, (_, index
 // consumers. AEON-1522: 24 shards peak at 959s. The catalogue sums past
 // 25×900s, so a 25th shard still peaks above 900s. 26 shards keep the peak
 // at least 60 seconds under the 16-minute budget without changing timings.
-export const nightlyWebShardCount = 26
+// AEON-1401: the catalogue reached 23,364s on 26 shards (peak 899.8s), so
+// one more measured spec crossed 900s. 27 shards peak at 868.3s.
+export const nightlyWebShardCount = 27
 export const nightlyWebShards = Array.from({ length: nightlyWebShardCount }, (_, index) => index + 1)
 
 // Fail when any projected shard crosses the budget. The plan itself still

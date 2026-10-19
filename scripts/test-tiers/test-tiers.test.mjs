@@ -2271,11 +2271,11 @@ test('serial tier weights rebalance the full browser shards without changing ful
   }
 })
 
-test('AEON-1325 nightly shards retain every browser case and require all 26 measurements',()=>{
+test('AEON-1325 nightly shards retain every browser case and require all 27 measurements',()=>{
   const workflow=readFileSync(new URL('../../.github/workflows/nightly-full.yml',import.meta.url),'utf8')
   const job=workflow.slice(workflow.indexOf('\n  nightly-web-shard:'),workflow.indexOf('\n  # Preserve the ruleset'))
   const indices=JSON.parse(/shard: (\[[^\n]+\])/.exec(job)[1])
-  assert.equal(nightlyWebShardCount,26)
+  assert.equal(nightlyWebShardCount,27)
   assert.deepEqual(indices,nightlyWebShards)
   assert.match(job,/run web --all --shard \$\{\{ matrix.shard \}\}\/\$\{\{ strategy.job-total \}\}/)
   const rows=JSON.parse(readFileSync(new URL('../ci/web-test-tiers.json',import.meta.url))).tests

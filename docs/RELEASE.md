@@ -342,19 +342,21 @@ with zero timestamps report absent duration; executed jobs with invalid timestam
 still fail accounting. Spec-only reports explicitly use `untiered` coverage and
 claim no tier case passes; its native checks still block `web`.
 
-Nightly-full uses 26 hosted browser shards (AEON-1325, widened by AEON-1522),
-each selecting every tier with `scripts/test-tiers/cli.mjs run web --all
---shard i/26`. Catalogue packing uses `nightlyTiming` from hosted run
+Nightly-full uses 27 hosted browser shards (AEON-1325, widened by AEON-1522
+and AEON-1401), each selecting every tier with `scripts/test-tiers/cli.mjs run
+web --all --shard i/27`. Catalogue packing uses `nightlyTiming` from hosted run
 38488051180 (AEON-1327); that earlier 24-shard estimate peaked near 15
 minutes. AEON-1522 measured the current catalogue at 959.1 seconds on 24
 shards. Twenty-five shards still peak at 921.1 seconds, because the catalogue
-sums past 25 times 900 seconds. Twenty-six shards peak at 886.1 seconds, at
-least 60 seconds under the 16-minute budget. The 16-minute budget is
-unchanged. Browser execution uses a 30-minute step cap (AEON-1351: shard 23
+sums past 25 times 900 seconds. Twenty-six shards peaked at 886.1 seconds,
+at least 60 seconds under the 16-minute budget. By AEON-1401 the catalogue
+had grown to 899.8 seconds on twenty-six shards and crossed 900 seconds with
+one more spec; twenty-seven shards peak at 868.3 seconds. The 16-minute
+budget is unchanged. Browser execution uses a 30-minute step cap (AEON-1351: shard 23
 passed every case and still hit the old 20-minute step at 19.83 minutes). The
 job budget stays 40 minutes so a hung job is still caught; dependency
 installation keeps its own 13-minute step cap. The `nightly-web` aggregate
-requires setup and the entire shard matrix; tier accounting consumes all 26
+requires setup and the entire shard matrix; tier accounting consumes all 27
 shard measurements and rejects missing or interrupted evidence. PR and
 merge-group layouts use seventeen shards packed from `tierTiming` weights,
 inside the fifteen-minute planner budget. The
