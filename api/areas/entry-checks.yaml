@@ -204,7 +204,7 @@ paths:
   /projects/{projectId}/definitions/decisions:
     post:
       operationId: decideProjectEntryDefinitionChange
-      description: 'Decide one current workspace change for a project copy. Requires a person project admin, rechecked under the tenant/tree fence. Both displayed revisions must match. accept updates only this check; keep retains the enforced copy. Both acknowledge only this workspace change, leaving the original copy snapshot intact. A later change can wait again. Appends definition.change_decided.'
+      description: 'Decide one current workspace change for a project copy. Requires a person project admin, rechecked under the tenant/tree fence. Both displayed revisions must match. accept updates only this check; keep retains the enforced copy and its policy revision, including existing person ticks and owner assignments. Both acknowledge only this workspace change, leaving the original copy snapshot intact. A later change can wait again. Appends definition.change_decided.'
       security: [{session: []}]
       parameters: [{$ref: '#/components/parameters/EntryProjectId'}]
       requestBody:
@@ -230,7 +230,7 @@ paths:
     get:
       operationId: getWorkspaceEntryDefinitionContext
       description: 'Read the default, current workspace edit authority, administrator names, and visible projects that differ. Project rows use UUID keyset pagination. Counts and inherited project keys cover at most 1000 visible projects; greater coverage returns 422 instead of partial totals. A project copy is never merged with the default. Uses nodes.read at workspace scope and filters each project by current nodes.read.'
-      security: [{session: []}]
+      security: [{session: []}, {agentKey: []}]
       parameters:
         - {name: after, in: query, schema: {type: string, format: uuid}}
         - {name: limit, in: query, schema: {type: integer, minimum: 1, maximum: 100, default: 50}}

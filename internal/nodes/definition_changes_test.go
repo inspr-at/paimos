@@ -18,7 +18,7 @@ import (
 // stale decisions overwrite newer state, or the Desk discloses admin decisions.
 func TestDefinitionDefaultChangesWaitForAuthorizedPerCheckDecisions(t *testing.T) {
 	p := newPrincipal(t, "definition-changes")
-	base := map[string][]workqueue.EntryRule{"in_progress": {{ID: "estimate_set"}, {ID: "acceptance_present"}}}
+	base := map[string][]workqueue.EntryRule{"in_progress": {{ID: "estimate_set"}, {ID: "acceptance_present"}, {ID: "manual:review", Label: "Ready checked"}}}
 	send := func(who tenant.Principal, method, path string, body any, want int) []byte {
 		t.Helper()
 		text := ""
@@ -57,7 +57,7 @@ func TestDefinitionDefaultChangesWaitForAuthorizedPerCheckDecisions(t *testing.T
 		}
 	}
 	inherited := mustNode(t, p, fmt.Sprintf(`{"kind_id":%q,"title":"Inherits default"}`, kindBySlug(t, p, "project").ID))
-	updated := map[string][]workqueue.EntryRule{"in_progress": {{ID: "estimate_set", Condition: "ui"}, {ID: "no_active_build"}}}
+	updated := map[string][]workqueue.EntryRule{"in_progress": {{ID: "estimate_set", Condition: "ui"}, {ID: "no_active_build"}, {ID: "manual:review", Label: "Ready checked"}}}
 	if err := json.Unmarshal(send(p, "PUT", "/api/settings/definitions", map[string]any{"expected_revision": workspace.Revision, "checks": updated}, 200), &workspace); err != nil {
 		t.Fatal(err)
 	}
@@ -98,6 +98,10 @@ func TestDefinitionDefaultChangesWaitForAuthorizedPerCheckDecisions(t *testing.T
 			}
 			// Actual status enforcement still requires an estimate on this unlabelled ticket.
 			n := mustNode(t, p, fmt.Sprintf(`{"kind_id":%q,"parent_id":%q,"title":"No estimate","fields":{"acceptance_criteria":"Test the default copy"}}`, kindBySlug(t, p, "work").ID, scenario.project.ID))
+			var ticked workqueue.EntryChecks
+			if err := json.Unmarshal(send(p, "PUT", "/api/nodes/"+n.ID+"/entry-checks/manual:review", map[string]any{"expected_revision": n.UpdatedAt, "checked": true}, 200), &ticked); err != nil {
+				t.Fatal(err)
+			}
 			agent := estimateAgent(t, p)
 			code, raw := call(t, &agent, "PATCH", "/api/nodes/"+n.ID, `{"state":"in_progress"}`)
 			if code != 409 || !strings.Contains(string(raw), `"error":"entry_checks_failed"`) || !strings.Contains(string(raw), `"id":"estimate_set"`) {
@@ -137,6 +141,26 @@ func TestDefinitionDefaultChangesWaitForAuthorizedPerCheckDecisions(t *testing.T
 			if scenario.choice == "keep" && !reflect.DeepEqual(current.Definition.Checks, base) {
 				t.Fatalf("keep changed enforcement: %+v", current.Definition.Checks)
 			}
+			if scenario.choice == "keep" {
+				if !current.Definition.Revision.Equal(scenario.copy.Revision) {
+					t.Fatal("acknowledgement changed the enforced policy revision")
+				}
+				var preview workqueue.EntryChecks
+				if err := json.Unmarshal(send(p, "GET", "/api/nodes/"+n.ID+"/entry-checks", nil, 200), &preview); err != nil {
+					t.Fatal(err)
+				}
+				passed := false
+				for _, block := range preview.Blocks {
+					for _, rule := range block.Checks {
+						if rule.ID == "manual:review" {
+							passed = rule.Passed
+						}
+					}
+				}
+				if !passed {
+					t.Fatal("keeping the copy erased an existing person tick")
+				}
+			}
 			if scenario.choice == "accept" {
 				switch scenario.kind {
 				case "new":
@@ -151,6 +175,7 @@ func TestDefinitionDefaultChangesWaitForAuthorizedPerCheckDecisions(t *testing.T
 					if selected == nil || selected.Condition != "ui" {
 						t.Fatal("condition not applied")
 					}
+					send(p, "PUT", "/api/nodes/"+n.ID+"/entry-checks/manual:review", map[string]any{"expected_revision": ticked.Revision, "checked": true}, 200)
 					code, raw = call(t, &agent, "PATCH", "/api/nodes/"+n.ID, `{"state":"in_progress"}`)
 					if code != 200 {
 						t.Fatalf("accepted condition not enforced: %d %s", code, raw)

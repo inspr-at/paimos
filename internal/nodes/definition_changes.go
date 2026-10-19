@@ -174,7 +174,11 @@ func (m *Module) handleDefinitionDecision(w http.ResponseWriter, r *http.Request
 			return badRequest("definition and copy state exceed 64 KiB")
 		}
 		var revision time.Time
-		if err = tx.QueryRow(ctx, `UPDATE nodes SET fields=$2::jsonb,updated_at=greatest(clock_timestamp(),updated_at+interval '1 microsecond') WHERE id=$1 RETURNING updated_at`, current.ID, string(fields)).Scan(&revision); err != nil {
+		// Keeping a version acknowledges metadata only. Retain the enforced
+		// definition revision, so existing person ticks and owner assignments
+		// remain valid. The tree fence and pending-check check serialize repeats.
+		changed := !sameJSON(entryJSON(next), entryJSON(current.Checks))
+		if err = tx.QueryRow(ctx, `UPDATE nodes SET fields=$2::jsonb,updated_at=CASE WHEN $3 THEN greatest(clock_timestamp(),updated_at+interval '1 microsecond') ELSE updated_at END WHERE id=$1 RETURNING updated_at`, current.ID, string(fields), changed).Scan(&revision); err != nil {
 			return err
 		}
 		saved := *current

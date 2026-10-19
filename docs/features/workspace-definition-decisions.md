@@ -9,6 +9,8 @@ A later default change waits as one decision per added, changed or removed check
 Until a project administrator accepts it, the project's enforced checks stay as
 saved. Keeping a check acknowledges that version only; another default edit can
 wait again. The original copy snapshot and `created_at` copy date remain intact.
+Keeping a version also retains the enforced policy revision, so existing person
+ticks and step owner assignments remain valid.
 
 Project administrators see a quiet Decision Desk item linking to the notice in
 Project settings → Definitions. Viewers can read the notice and waiting checks.
