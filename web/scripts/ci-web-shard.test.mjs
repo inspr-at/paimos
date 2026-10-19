@@ -646,13 +646,25 @@ test('ungated groups stay declared and checked but only run with --all', () => {
   assert.ok(projectDefinitions && projectDefinitions.listedTests === 9, 'Project Definitions regressions must remain declared')
   assert.ok(gated.some(spec => spec.file === projectDefinitions.file), 'Project Definitions must remain gated')
   // AEON-1317 adds workspace-default decisions after the same historical baseline.
-  // Retain the original budget and charge only this complete-file measurement.
+  // AEON-1528 adds the resize, locale and post-decision remeasurement flow.
+  // Retain the original budget and charge only this complete-file scheduling cost.
   const definitionDecisions = real.groups.flatMap(group => group.specs).find(spec => spec.file === 'tests/definitions-p3.spec.ts')
-  assert.ok(definitionDecisions && definitionDecisions.listedTests === 5, 'All five workspace definition decision flows must remain declared')
+  assert.ok(definitionDecisions && definitionDecisions.listedTests === 6, 'All six workspace definition decision and remeasurement flows must remain declared')
+  const definitionCases = flattenBrowser(JSON.parse(command(process.execPath, ['node_modules/@playwright/test/cli.js', 'test',
+    '-c', 'playwright.ui.config.ts', definitionDecisions.file, '--list', '--reporter=json'], { cwd: webRoot })), 'playwright.ui.config.ts')
+  assert.deepEqual(definitionCases.map(row => row.name).sort(), [
+    'AEON-1317 Desk opens waiting definitions and resolves only after the last admin decision',
+    'AEON-1317 German definitions copy covers every P3 string and singular notices',
+    'AEON-1317 default decisions preserve every row notice copy and focus in all viewports',
+    'AEON-1317 failed stale and identity-bound decisions never claim success',
+    'AEON-1317 workspace defaults differences empty inherited and viewer match the approved states',
+    'AEON-1528 definitions remeasure resize locale and longer decisions without shifting unchanged content',
+  ].sort(), 'Native discovery must retain every workspace definition flow')
+  assert.equal(definitionDecisions.listedTests, definitionCases.length, 'Workspace definition declaration must match native discovery')
   assert.equal(gated.filter(spec => spec.file === definitionDecisions.file).length, 1, 'Workspace definition decisions must remain gated exactly once')
   const definitionTiming = real.nightlyTiming.files[definitionDecisions.file]
   assert.equal(definitionTiming?.selectedTests, definitionDecisions.listedTests, 'Workspace definition timing must cover the complete file')
-  assert.equal(definitionDecisions.weightSeconds, definitionTiming?.seconds, 'Charge the measured workspace definition scheduling cost')
+  assert.equal(definitionDecisions.weightSeconds, definitionTiming?.seconds, 'Charge the declared workspace definition scheduling cost')
   // AEON-1425 adds eight project-name wrap cases after the historical budget.
   // Leaving the file inside that budget packs the twelve shards to 301.322264s.
   // Keep the old budget and charge only this file's scheduling weight.

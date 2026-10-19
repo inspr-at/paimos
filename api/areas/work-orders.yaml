@@ -61,7 +61,7 @@ paths:
   /work-orders/{workOrderId}/runs:
     post:
       operationId: createAgentRun
-      description: Create a queued run against the remaining work-order budget. The agent daemon later claims it with a fenced generation.
+      description: "Create a queued run against the remaining work-order budget. The agent daemon later claims it with a fenced generation. In a configured lead project, only a person may create this run directly, and only when no pending or claimed lead launch intent or active run holds the work leaf. Conflicts return 409 with the holder and next step. Automatic lead admission remains disabled."
       security: *auth
       parameters: [{name: workOrderId, in: path, required: true, schema: {type: string, format: uuid}}]
       requestBody: {required: true, content: {application/json: {schema: {$ref: '#/components/schemas/RunCreate'}}}}
