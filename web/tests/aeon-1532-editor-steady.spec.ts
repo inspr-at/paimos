@@ -130,16 +130,18 @@ async function openEntry(page: Page, width: number, theme: 'light' | 'dark') {
   await expect(box).toHaveValue(LONG)
   await instrument(box)
   const above = { title: form.getByLabel('Title'), slug: form.getByLabel('Slug'), status: form.getByRole('radio', { name: 'Proposed' }), 'text label': page.locator('#e-body-label') }
-  return { form, box, above }
+  // `has` resolves inside each .md-editor, so it takes the page-rooted box, never `box` (which starts at the form).
+  const editor = form.locator('.md-editor', { has: page.getByRole('textbox', { name: 'Text, Markdown' }) })
+  return { form, box, editor, above }
 }
 
 for (const { width, theme } of [{ width: 1440, theme: 'light' }, { width: 1440, theme: 'dark' }, { width: 1024, theme: 'light' }, { width: 390, theme: 'light' }] as const) {
   test(`AEON-1532: typing in a 300-line knowledge entry at ${width} ${theme} never shrinks the box or moves the page`, async ({ page }) => {
     test.setTimeout(90_000)
     const errors = watchErrors(page)
-    const { box, above } = await openEntry(page, width, theme)
+    const { box, editor, above } = await openEntry(page, width, theme)
     const split = width >= 1100
-    const editor = page.locator('.md-editor').filter({ has: box })
+    await expect(editor).toHaveCount(1)
     if (split) await expect(editor).toHaveClass(/\bsplit\b/)
     else await expect(editor).not.toHaveClass(/\bsplit\b/)
     const checks = checker(width, theme)
@@ -212,6 +214,9 @@ test('AEON-1532: deleting 50 lines keeps the page where it is, in the middle and
 
 test('AEON-1532: the comment editor grows to its 560 px cap without ever collapsing', async ({ page }) => {
   test.setTimeout(90_000)
+  // The mock stamps new comments with its own clock (2026-09-23T12:00Z); the page
+  // runs on that clock too, so the comment is inside its 15-minute edit window.
+  await page.clock.setSystemTime(new Date('2026-09-23T12:00:00Z'))
   await page.setViewportSize({ width: 1440, height: 900 })
   await mockWork(page, fixtures())
   await page.goto('/p/PHAROS/PHAROS-13')
