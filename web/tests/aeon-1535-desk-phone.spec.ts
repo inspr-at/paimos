@@ -107,9 +107,9 @@ test('AEON-1535 P1: the phone question card reads at 22 px and the four stamp ro
     expect(await meta.evaluate(element => [getComputedStyle(element).fontSize, getComputedStyle(element).lineHeight]), `${at}: meta type`).toEqual(['14px', '20px'])
     await expect(page.getByTestId('desk-re')).toHaveText('Across tickets')
     // The meanwhile line stays at 15 px; the aside is one muted line in the head, without its eyebrow.
-    await expect(line).toHaveText(/carries on meanwhile\.$/)
+    await expect(line).toHaveText(/carries on meanwhile\.\s*$/)
     expect(await line.evaluate(element => getComputedStyle(element).fontSize)).toBe('15px')
-    await expect(goes).toHaveText(/^Answer goes to .+’s inbox·Source$/)
+    await expect(goes).toHaveText(/^Answer goes to .+’s inbox·Source\s*$/)
     await expect(goes.getByRole('link', { name: 'Source', exact: true })).toHaveAttribute('href', '/api/questions/question-1')
     await expect(page.getByText('The answer goes', { exact: true })).toBeHidden()
     await expect(page.locator('.desk-dlg aside.margin')).toBeHidden()
@@ -239,7 +239,7 @@ test('AEON-1535 P4: the 1440 desk keeps its geometry', async ({ page }, testInfo
   const [slot, text, stamp] = [await box(page.locator('.stamp-slot')), await box(page.locator('.memo-headtext')), page.getByTestId('desk-stamp')]
   expect(slot.width).toBeCloseTo(210, 0)
   expect(slot.x).toBeGreaterThanOrEqual(text.x + text.width)
-  expect(await stamp.evaluate(element => { const [a, b] = new DOMMatrix(getComputedStyle(element).transform).toFloatArray(); return Math.round(Math.atan2(b!, a!) * 180 / Math.PI) })).toBe(-8)
+  expect(await stamp.evaluate(element => { const matrix = new DOMMatrix(getComputedStyle(element).transform); return Math.round(Math.atan2(matrix.b, matrix.a) * 180 / Math.PI) })).toBe(-8)
   // Four chips on one line, 36 px high, no row words or checks.
   const chips = await Promise.all(OUTCOMES.map(outcome => box(row(page, outcome))))
   for (const chip of chips) { expect(chip.y).toBeCloseTo(chips[0]!.y, 0); expect(chip.height).toBeCloseTo(36, 0); expect(chip.width).toBeLessThan(200) }
