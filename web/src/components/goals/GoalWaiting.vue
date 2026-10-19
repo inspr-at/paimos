@@ -10,7 +10,7 @@ import AppIcon from '../AppIcon.vue'
 import { vClipTip } from '../../lib/clipTip'
 import { useDecisionDesk } from '../../stores/decisionDesk'
 import { useProjects } from '../../stores/projects'
-import { deskItemID, deskLinkOut, type DeskProjectionItem } from '../../lib/decisionDesk'
+import { deskItemID, deskLinkOut, deskListKey, type DeskProjectionItem } from '../../lib/decisionDesk'
 import type { Goal } from '../../lib/goals'
 
 const props = defineProps<{ goals: readonly Goal[] }>()
@@ -28,7 +28,7 @@ const items = computed(() => {
 const rows = computed(() => items.value.slice(0, 3).map((item: DeskProjectionItem) => {
   const project = item.project_id ? projects.byId(item.project_id) : undefined
   return {
-    id: deskItemID(item), key: project?.routeKey ?? '',
+    id: deskItemID(item), key: deskListKey(item, project?.routeKey ?? ''),
     question: item.kind === 'action_request' ? 'Action request' : item.title,
     where: (item.kind === 'question' ? goalOf.value.get(item.id) : undefined) ?? project?.title ?? (item.project_id ? '' : 'Workspace'),
     to: deskLinkOut(item) || { path: '/decision-desk', query: { item: deskItemID(item) } },
@@ -64,7 +64,7 @@ const count = computed(() => desk.count)
     <ul class="waiting-list">
       <li v-for="row in rows" :key="row.id">
         <RouterLink class="waiting-item" :to="row.to">
-          <span class="wkey mono">{{ row.key }}</span>
+          <span v-clip-tip class="wkey mono">{{ row.key }}</span>
           <span v-clip-tip class="wq">{{ row.question }}</span>
           <span class="wgoal">{{ row.where }}</span>
         </RouterLink>
@@ -91,7 +91,8 @@ const count = computed(() => desk.count)
 @media (hover: hover) { .waiting-item:hover::before { background: var(--row-hover); } }
 .waiting-item:focus-visible { outline: none; box-shadow: none; }
 .waiting-item:focus-visible::before { box-shadow: var(--focus-ring); }
-.wkey { position: relative; grid-column: 2; font-size: 11.5px; font-weight: 500; line-height: 1; color: var(--ink-2); }
+/* Column 2 is shared and sizes to content (AEON-541). A ticket key past a normal key clips here. */
+.wkey { position: relative; grid-column: 2; min-width: 0; max-width: 14ch; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 11.5px; font-weight: 500; line-height: 1; color: var(--ink-2); }
 .wq { position: relative; grid-column: 3 / -3; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 13.5px; font-weight: 500; }
 .wgoal { position: relative; grid-column: -3 / -2; justify-self: end; font-size: 12.5px; color: var(--ink-3); white-space: nowrap; }
 .w-more { display: none; }

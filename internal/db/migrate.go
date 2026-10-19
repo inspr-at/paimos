@@ -650,14 +650,15 @@ func backfillAccountModelSuccessors(ctx context.Context, tx pgx.Tx) error {
 
 // The first-line opt-out is deliberately narrow: exactly one CREATE [UNIQUE] INDEX
 // CONCURRENTLY with unqualified, lowercase identifiers. It is not a general
-// escape hatch for arbitrary nontransactional migration batches.
+// escape hatch for arbitrary nontransactional migration batches. Explicit
+// btree/gin methods support bounded audit lookups without blocking writers.
 func concurrentIndex(body string, stmts []string) (string, string, error) {
 	first, _, _ := strings.Cut(body, "\n")
 	if strings.TrimSuffix(first, "\r") != "-- aeon:no-transaction" {
 		return "", "", nil
 	}
 	if len(stmts) == 1 {
-		pattern := `^CREATE (?:UNIQUE )?INDEX CONCURRENTLY (?:IF NOT EXISTS )?([a-z_][a-z0-9_]*)\s+ON\s+([a-z_][a-z0-9_]*)\s*\(`
+		pattern := `^CREATE (?:UNIQUE )?INDEX CONCURRENTLY (?:IF NOT EXISTS )?([a-z_][a-z0-9_]*)\s+ON\s+([a-z_][a-z0-9_]*)(?:\s+USING\s+(?:btree|gin))?\s*\(`
 		if match := regexp.MustCompile(pattern).FindStringSubmatch(stmts[0]); match != nil {
 			return match[1], match[2], nil
 		}

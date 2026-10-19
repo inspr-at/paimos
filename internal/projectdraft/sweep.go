@@ -48,9 +48,15 @@ func (m *Module) Sweep(ctx context.Context) (int64, error) {
 func (m *Module) RunExpirySweep(ctx context.Context) {
 	ticker := time.NewTicker(sweepEvery)
 	defer ticker.Stop()
+	retentionCursor := ""
 	for {
 		if _, err := m.Sweep(ctx); err != nil && ctx.Err() == nil {
 			slog.Error("START handoff expiry sweep", "error_class", "database")
+		}
+		var err error
+		retentionCursor, err = m.sweepRetention(ctx, time.Now().UTC(), retentionCursor)
+		if err != nil && ctx.Err() == nil {
+			slog.Error("START project retention", "error_class", "database_or_protected_records")
 		}
 		select {
 		case <-ctx.Done():

@@ -215,6 +215,12 @@ func (m *Module) createTx(ctx context.Context, tx pgx.Tx, p tenant.Principal, di
 	if err != nil {
 		return Created{}, err
 	}
+	// Permanent positive source marker, before transcript blob locks and events.
+	// The draft itself expires and must never be retention provenance.
+	if _, err := tx.Exec(ctx, `INSERT INTO import_project_retention(tenant_id,project_id,source,imported_at)
+	 SELECT $1,id,'start',created_at FROM nodes WHERE id=$2`, p.TenantID, project.ProjectID); err != nil {
+		return Created{}, err
+	}
 	// Node rows (the entry) before blob locks (the transcript), counter last.
 	_, changes, err := knowledge.CreateImportedMemoryTx(ctx, tx, p, project.ProjectID, knowledgeSlug, words.entryTitle, knowledgeBody(payload, d.CreatedAt), in.Key, knowledgeMetadata(payload, d.CreatedAt))
 	if err != nil {

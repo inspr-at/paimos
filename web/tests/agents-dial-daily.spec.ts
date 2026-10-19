@@ -13,12 +13,13 @@ import { expectStableControls } from './helpers/stable'
 import { showCapacityRow } from './helpers/compact'
 import { mockDailyPlan, UNTIL, type DailyPlanOptions } from './agents-daily-fixtures'
 import { HARNESS_LABEL } from '../src/lib/agentState'
+import { OUTLOOK } from './quota-outlook-fixtures'
 
 const shots = process.env.AEON_1036_SHOTS ?? 'test-results/aeon-1036-capsdial'
 // The harness's name in the daily limit's words (AEON-1175): "Claude" until AEON-1160 names it "Claude Code";
 // both pass. The dial's row label stays the vendor's ("Open the dial at Claude").
 const CLAUDE = HARNESS_LABEL.claude!
-interface SetupOptions extends DailyPlanOptions { folded?: boolean; waiting?: number; dial?: Record<string, unknown>; room?: Record<string, number>; manage?: boolean; capacityEdit?: (capacity: ReturnType<typeof capacityWorld>) => void }
+interface SetupOptions extends DailyPlanOptions { folded?: boolean; waiting?: number; dial?: Record<string, unknown>; room?: Record<string, number>; manage?: boolean; capacityEdit?: (capacity: ReturnType<typeof capacityWorld>) => void; outlook?: 'fast' | 'error' }
 async function setup(page: Page, options: SetupOptions = {}) {
   await page.clock.setSystemTime(NOW)
   const work = fixtures()
@@ -49,6 +50,10 @@ async function setup(page: Page, options: SetupOptions = {}) {
       return { ...a, routing: slots ? { rank: 1, available_slots: slots } : { rank: 0, available_slots: 0, wait: { code: 'capacity', run_now_allowed: false } } }
     }) })
   })
+  // AEON-1497: the quota outlook the dial reads first, the Go projection's own fixture.
+  const outlook = structuredClone(OUTLOOK.fast)
+  outlook.groups = outlook.groups.filter(g => !options.without?.includes(g.harness))
+  await page.route('**/api/agent-accounts/quota-outlook', route => options.outlook === 'error' ? route.fulfill({ status: 500, json: { error: 'unavailable' } }) : route.fulfill({ json: outlook }))
   const waiting = options.waiting ?? 1
   const queue = Array.from({ length: waiting }, (_, i) => ({ node_id: `waiting-${i}`, key: `AEON-${i}`, title: 'Waiting work', state: 'open', priority: 'normal', estimate_hours: 1, queued: { model_profile_id: null, waiting: true, wait_reason: '' } }))
   await page.route('**/api/queue', route => route.fulfill({ json: { items: queue, manual_order: false, capacity: {} } }))
@@ -66,11 +71,14 @@ const chip = (page: Page, key: string) => control(page).locator(`.f-chip[data-ha
 const flag = (page: Page, key: string) => chip(page, key).locator('.cd-flag')
 /** The live detail on the right; the same-height copies laid under it for sizing have no data-detail. */
 const detail = (page: Page, key: string) => dial(page).locator(`[data-detail="${key}"]`)
+/** AEON-1497: the detail's usage is read; measure layouts only after it, as rows are reserved from the plan meanwhile. */
+const usageRead = (page: Page) => expect(body(page).locator('[data-detail] .ub')).toHaveAttribute('data-load', 'ready')
 const writes = (calls: { path: string; method: string }[]) => calls.filter(c => c.method !== 'GET' && /harness-sessions|\/controls|\/stop|\/interrupt|agent-accounts\/boost/.test(c.path))
 
 test('AEON-1036: folded, the dial is one light control in the capacity row and flags only what needs attention', async ({ page }) => {
   await page.setViewportSize({ width: 1440, height: 1000 })
-  const { backend } = await setup(page, { example: 'over', folded: true })
+  // The daily-limit words alone: no quota outlook (AEON-1497 adds its own words to the units).
+  const { backend } = await setup(page, { example: 'over', folded: true, outlook: 'error' })
   await page.goto('/agents')
   const accounts = page.locator('.cap-row .acc-chip')
   await expect(control(page).locator('.f-chip')).toHaveCount(3)
@@ -96,7 +104,7 @@ test('AEON-1036: folded, the dial is one light control in the capacity row and f
 
 test('AEON-1036: at the limit the flag is a gold pause mark and the unit says where new work goes', async ({ page }) => {
   await page.setViewportSize({ width: 1440, height: 1000 })
-  await setup(page, { example: 'limit', folded: true })
+  await setup(page, { example: 'limit', folded: true, outlook: 'error' })
   await page.goto('/agents')
   await expect(flag(page, 'claude')).toHaveClass(/st-at_limit/)
   await expect(chip(page, 'claude')).toHaveAccessibleName('Claude: at most 2, at today’s limit · Codex next')
@@ -108,7 +116,7 @@ test('AEON-1036: at the limit the flag is a gold pause mark and the unit says wh
 
 test('AEON-1036: a stale reading never claims the limit, although the server also refuses starts then', async ({ page }) => {
   await page.setViewportSize({ width: 1440, height: 1000 })
-  await setup(page, { example: 'stale', folded: true })
+  await setup(page, { example: 'stale', folded: true, outlook: 'error' })
   await page.goto('/agents')
   await expect(chip(page, 'claude')).toBeVisible()
   await expect(flag(page, 'claude').locator('svg')).toHaveCount(0)
@@ -256,39 +264,35 @@ test('AEON-1036: with nothing to flag it selects the first harness with a daily 
   await expect(dial(page).locator('.row.sel')).toHaveCount(1)
 })
 
-test('AEON-1036: the detail reads week, today, the bar and the pace state, then lists the accounts read-only', async ({ page }) => {
+// AEON-1497 (approved fuel gauge) replaced the week line, the bar and the account list with the
+// group's quota outlook; today's points, the state that needs attention and the folds follow it.
+test('AEON-1036: the detail reads the usage first, then today, the pace state and the folds', async ({ page }) => {
   await page.setViewportSize({ width: 1440, height: 1000 })
   await setup(page, { example: 'over', dial: { selected: 'claude' } })
   await page.goto('/agents')
   const claude = detail(page, 'claude')
   await expect(claude.getByRole('heading')).toHaveText(`${CLAUDE} · daily limit: up to 60 % used`)
-  await expect(claude).toContainText('54 % used · 46 % left this week · resets Thu 1 Oct 21:02')
-  await expect(claude).toContainText('Today: 14 of 20 percentage points used · 6 left today')
-  await expect(claude.getByRole('img', { name: 'Today: 14 of 20 percentage points used; 10 is today’s share.' })).toBeVisible()
-  await expect(claude.locator('.cb-gold')).toBeVisible()
-  await expect(claude.locator('.cb-tick')).toContainText('pace 10')
+  await expect(claude.locator('.ub-hd')).toHaveText('Claude lasts until Mon ~20:20, then 3 h without until account-b@ refills at 22:59.')
+  await expect(claude.locator('.cd-td')).toContainText('14 of 20 percentage points used · 6 left today')
   await expect(claude.locator('.cap-st')).toHaveText('4 percentage points over pace')
   await expect(claude).toContainText('Stay on pace · 10 percentage points a day')
   await expect(claude).toContainText('up to 60 % used · 40 % left')
-  await expect(claude.locator('.cd-acc1')).toHaveText('markus.barta')
   // Resets show only when the vendor reports them (over pace has none).
   await expect(claude.locator('.cap-rs')).toHaveCount(0)
+  // Settings › Accounts is one link; the accounts themselves are the usage list.
+  await expect(claude.getByRole('link', { name: 'Accounts and limits Settings' })).toHaveAttribute('href', '/settings/accounts')
+  await expect(claude.locator('.ub-acc')).toHaveCount(3)
   await row(page, 'codex').locator('.nm').click()
   const codex = detail(page, 'codex')
-  await expect(codex.locator('.cd-acc li')).toHaveCount(3)
-  await expect(codex.locator('.cd-acc li').nth(0)).toHaveText('agentone64 % used of 68 %floor 10 %')
-  await expect(codex.locator('.cd-acc li').nth(1)).toHaveText('markus22 % used of 30 %floor 20 %')
-  await expect(codex.locator('.cd-acc li.now')).toHaveText('agentone64 % used of 68 %floor 10 %')
-  // AEON-1176 P6 (in AEON-1209): Per-account settings opens the account in use.
-  await expect(codex.getByRole('link', { name: 'Per-account settings' })).toHaveAttribute('href', '/settings/accounts?account=d1000000-0000-4000-8000-000000000012')
-  await expect(codex.getByRole('link', { name: 'Add account' })).toHaveAttribute('href', '/settings/accounts#add-account')
+  await expect(codex.locator('.ub-acc')).toHaveCount(2)
+  await expect(codex.locator('.cd-td')).toContainText('6 of 10 percentage points used · 4 left today')
   // Billed by use: nothing to pace, and the words never call it "No limit" (the agent-count control already does).
   await row(page, 'cursor').locator('.nm').click()
   const cursor = detail(page, 'cursor')
-  await expect(cursor).toContainText('billed by use and have no allowance window')
+  await expect(cursor.locator('.ub-hd')).toHaveText('Quota not reported· 2 accounts')
   await expect(cursor).toContainText('the 12 at once and the account still cap it')
-  await expect(row(page, 'cursor').locator('.sub')).toContainText('no daily limit')
-  await expect(row(page, 'cursor').locator('.cap-stl')).toHaveText('Nothing to pace')
+  await expect(row(page, 'cursor').locator('.sub')).toHaveText('Quota not reported · 2 accounts')
+  await expect(row(page, 'cursor').locator('.cap-stl')).toHaveCount(0)
 })
 
 test('AEON-1036: vendor-reported resets are shown, and nothing else is claimed about them', async ({ page }) => {
@@ -299,17 +303,18 @@ test('AEON-1036: vendor-reported resets are shown, and nothing else is claimed a
   await expect(detail(page, 'claude').getByRole('button', { name: /reset/i })).toHaveCount(0)
 })
 
-test('AEON-1036: each row shows its usage lines and pace state in a fixed 88 px row', async ({ page }) => {
+test('AEON-1036: each row shows its running count, its usage line and only a pace state that needs attention, in a fixed 88 px row', async ({ page }) => {
   await page.setViewportSize({ width: 1440, height: 1000 })
   await setup(page, { example: 'limit' })
   await page.goto('/agents')
-  for (const [key, usage, pace] of [['codex', '6 running · ≤ 68 % used today', 'On pace'], ['claude', '2 running · ≤ 50 % used today', 'At today’s limit · Codex next'], ['cursor', '3 running · no daily limit', 'Nothing to pace']] as const) {
+  for (const [key, running, usage, pace] of [['codex', '6 running', 'enough until refill', null], ['claude', '2 running', 'lasts until Mon 20:20 · refill 22:59', 'At today’s limit · Codex next'], ['cursor', '3 running', 'Quota not reported · 2 accounts', null]] as const) {
+    await expect(row(page, key).locator('.nm-run')).toHaveText(running)
     await expect(row(page, key).locator('.sub')).toHaveText(usage)
-    await expect(row(page, key).locator('.cap-stl')).toHaveText(pace)
+    if (pace) await expect(row(page, key).locator('.cap-stl')).toHaveText(pace)
+    else await expect(row(page, key).locator('.cap-stl')).toHaveCount(0)
     expect((await row(page, key).boundingBox())!.height).toBe(88)
   }
   await expect(row(page, 'claude').locator('.cap-stl')).toHaveClass(/st-at_limit/)
-  await expect(row(page, 'codex').locator('.cap-stl')).toHaveClass(/st-on_pace/)
 })
 
 test.describe('settings written from the detail', () => {
@@ -349,8 +354,9 @@ test.describe('settings written from the detail', () => {
     expect(backend.puts[2]!.value.daily!.claude!.pace).toEqual({ mode: 'everything', points_per_day: null })
     await expect(claude).toContainText('Use everything before the reset')
     await expect(points).toBeDisabled()
-    await expect(row(page, 'claude').locator('.cap-stl')).toHaveText('Uses everything before the reset')
-    await expect(row(page, 'claude').locator('.sub')).toContainText('no daily limit')
+    // Nothing to pace is no state that needs attention: the row keeps its usage line, the detail names it.
+    await expect(row(page, 'claude').locator('.cap-stl')).toHaveCount(0)
+    await expect(claude.getByRole('heading')).toHaveText(`${CLAUDE} · no daily limit`)
   })
 
   test('Pace: a wrong number is said in place and nothing is written', async ({ page }) => {
@@ -444,10 +450,13 @@ test.describe('settings written from the detail', () => {
     await expect(claude.getByRole('radio', { name: 'Wait' })).toHaveCount(0)
     await expect(claude.locator('.cap-st')).toHaveText('At today’s limit · Codex next in the Models order')
     await expect(row(page, 'claude').locator('.cap-stl')).toHaveText('At today’s limit · Codex next')
-    // The line keeps the AEON-1030 place: after Boost today, before the account, one row as high as a folded setting.
-    expect((await claude.locator('.cd-dl > dt').allTextContents()).map(t => t.trim())).toEqual(['Pace', 'Boost today', 'At the limit', 'Account'])
-    const [boostRow, limitRow] = await Promise.all([claude.locator('.cd-dl > dd').nth(1).boundingBox(), claude.locator('.cd-dl > dd').nth(2).boundingBox()])
-    expect(Math.abs(limitRow!.height - boostRow!.height)).toBeLessThanOrEqual(0.5)
+    // The line keeps the AEON-1030 place: after Boost today, one row as high as a folded setting. AEON-1497's
+    // approved design starts the list with today's points; the accounts are the usage list above it.
+    expect((await claude.locator('.cd-dl > dt').allTextContents()).map(t => t.trim())).toEqual(['Today', 'Pace', 'Boost today', 'At the limit'])
+    // The last row has no hairline below it; compare the rows without their borders.
+    const inner = (n: number) => claude.locator('.cd-dl > dd').nth(n).evaluate(el => el.getBoundingClientRect().height - parseFloat(getComputedStyle(el).borderBottomWidth))
+    const [boostRow, limitRow] = await Promise.all([inner(2), inner(3)])
+    expect(Math.abs(limitRow - boostRow)).toBeLessThanOrEqual(0.5)
     expect(backend.puts).toEqual([])
     // A later edit still sends at_limit for the previous release: the ladder the server reported, never the old Wait.
     await claude.getByRole('radio', { name: 'Use everything before the reset' }).click()
@@ -489,14 +498,14 @@ test('AEON-1036: honest states: no reading is not on pace, and nothing is flagge
   await expect(chip(page, 'claude')).toBeVisible()
   await expect(control(page).locator('.cd-flag svg')).toHaveCount(0)
   await dial(page).locator('.fs-tog').click()
-  await expect(row(page, 'claude').locator('.cap-stl')).toHaveText('Usage not measured right now')
-  await expect(row(page, 'claude').locator('.sub')).toHaveText('2 running')
+  await expect(row(page, 'claude').locator('.cap-stl')).toHaveCount(0)
+  await expect(row(page, 'claude').locator('.nm-run')).toHaveText('2 running')
   await row(page, 'claude').locator('.nm').click()
   const claude = detail(page, 'claude')
-  await expect(claude).toContainText('This week: not measured right now')
-  await expect(claude).toContainText('Today: not measured yet')
-  await expect(claude.locator('.cap-st')).toHaveText('Usage not measured right now')
-  await expect(claude.locator('.cap-st')).toHaveClass(/st-unknown/)
+  await expect(claude.locator('.cd-td')).toHaveText('not measured yet')
+  // No reading is no state: nothing says on pace, over pace or at the limit.
+  await expect(claude.locator('.cap-st')).toHaveCount(0)
+  await expect(claude.getByRole('heading')).toHaveText(`${CLAUDE} · daily limit`)
 })
 
 test('AEON-1036: a harness with no account says so and links to add one', async ({ page }) => {
@@ -504,8 +513,9 @@ test('AEON-1036: a harness with no account says so and links to add one', async 
   await setup(page, { example: 'pace', without: ['claude'], dial: { selected: 'claude' } })
   await page.goto('/agents')
   await expect(detail(page, 'claude').getByRole('heading')).toHaveText('Claude · no account yet')
-  await expect(detail(page, 'claude').getByRole('link', { name: 'Add account' })).toHaveAttribute('href', '/settings/accounts#add-account')
-  await expect(row(page, 'claude').locator('.cap-stl')).toHaveText('No account to read')
+  await expect(detail(page, 'claude').getByRole('link', { name: 'Add an account' })).toHaveAttribute('href', '/settings/accounts#add-account')
+  await expect(row(page, 'claude').locator('.sub')).toHaveText('No accounts yet')
+  await expect(row(page, 'claude').locator('.cap-stl')).toHaveCount(0)
   await expect(control(page).locator('.cd-flag svg')).toHaveCount(0)
 })
 
@@ -515,7 +525,8 @@ test('AEON-1036: an older plan without daily fields still draws the dial', async
   await page.route('**/api/agents/plan', route => route.fulfill({ json: { total: 8, limits: { codex: 4 }, principal_id: me.id, running: { codex: 2 }, running_total: 2, source: 'plan', updated_at: null } }))
   await page.goto('/agents')
   await expect(dial(page).locator('.f-num')).toHaveText('8')
-  await expect(row(page, 'codex').locator('.cap-stl')).toHaveText('No account to read')
+  await expect(row(page, 'codex').locator('.cap-stl')).toHaveCount(0)
+  await expect(row(page, 'codex').locator('.sub')).toHaveText('enough until refill')
   await expect(dial(page).locator('.f-live')).toContainText('2 running')
 })
 
@@ -542,6 +553,7 @@ for (const width of [1440, 1024, 400]) for (const theme of ['light', 'dark'] as 
     // AEON-1286's approved compact chrome starts phones folded; open the detail explicitly.
     if (width <= 720) { await expect(fold).toHaveAttribute('aria-expanded', 'false'); await fold.click() }
     await expect(row(page, 'claude')).toBeVisible()
+    await usageRead(page)
     mkdirSync(shots, { recursive: true })
     // The capture grows the viewport to the card; an element screenshot otherwise clips a long phone dial.
     const shoot = async (name: string) => {
@@ -597,7 +609,7 @@ for (const width of [1440, 1024, 400]) for (const theme of ['light', 'dark'] as 
     const claude = detail(page, 'claude')
     const pace = claude.getByRole('button', { name: 'Pace' }), boost = claude.getByRole('button', { name: 'Boost today' })
     await expectStableControls({
-      controls: { ...head, claude: row(page, 'claude'), codex: row(page, 'codex'), cursor: row(page, 'cursor'), headline: claude.getByRole('heading'), bar: claude.getByRole('img'), pace },
+      controls: { ...head, claude: row(page, 'claude'), codex: row(page, 'codex'), cursor: row(page, 'cursor'), headline: claude.getByRole('heading'), answer: claude.locator('.ub-hd'), pace },
       scrollAreas: { body: body(page), rows: card.locator('.rows') },
       interactions: [
         { name: 'open Pace', run: async () => { await pace.click(); await expect(pace).toHaveAttribute('aria-expanded', 'true'); await expect(claude.getByLabel('Percentage points a day')).toBeVisible() } },
@@ -660,6 +672,7 @@ for (const width of [1440, 390]) for (const theme of ['light', 'dark'] as const)
     // detail's card, while dial() intentionally searches both regions.
     const card = body(page), claude = detail(page, 'claude'), link = claude.locator('.cd-line').getByRole('link', { name: 'Settings › Models' })
     await expect(link).toBeVisible()
+    await usageRead(page)
     await expect(link).toHaveAttribute('href', '/settings/models')
     mkdirSync(d1Shots, { recursive: true })
     const bounds = (await card.boundingBox())!

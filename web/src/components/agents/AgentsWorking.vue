@@ -12,16 +12,19 @@ import { COMPACT_QUERY } from '../../lib/chrome'
 import { chipTip, dailyOf, dailyView, DEFAULT_DAILY_POINTS, needsAttention, stateWords, usageLine } from '../../lib/dailyLimits'
 import { selectedHarness } from '../../lib/dialPrefs'
 import { useAgentPlan } from '../../lib/useAgentPlan'
+import { chartModel, miniGeometry, usageView, VERDICT_ICON, type MiniGeometry, type UsageView } from '../../lib/quotaOutlook'
 import { toast } from '../../lib/toast'
 import { useAgents } from '../../stores/agents'
 import { useCapacity } from '../../stores/capacity'
 import { useDialPrefs } from '../../stores/dialPrefs'
+import { useQuotaOutlook } from '../../stores/quotaOutlook'
 import { useSectionPrefs } from '../../stores/sectionPrefs'
 import { useSession } from '../../stores/session'
-import AppIcon from '../AppIcon.vue'
+import AppIcon, { type IconName } from '../AppIcon.vue'
 import DialDetail from './DialDetail.vue'
 import DialInfo from './DialInfo.vue'
 import HarnessMark from './HarnessMark.vue'
+import QuotaMini from './QuotaMini.vue'
 import WorkingStepper from './WorkingStepper.vue'
 
 // bodyTarget: where the unfolded body goes, under the capacity row; without one it stays in place.
@@ -129,6 +132,53 @@ function rowClick(event: MouseEvent, key: string) {
 }
 const rowWords = (key: string) => stateWords(views.value[key]!, true)
 
+// ---------- Usage per harness (AEON-1497): the quota outlook, read while the dial is shown ----------
+const outlook = useQuotaOutlook()
+let releaseOutlook: (() => void) | undefined
+onMounted(() => { releaseOutlook = outlook.use() })
+onBeforeUnmount(() => releaseOutlook?.())
+const tz = computed(() => snapshot.value?.daily_timezone)
+const usageState = computed(() => outlook.state)
+const usage = computed<Record<string, UsageView>>(() => Object.fromEntries(rows.value.map(r => [r.key, usageView(r.key, outlook.groups.get(r.key), outlook.data?.anchor_hour, tz.value, views.value[r.key]!.accounts, usageState.value, !!outlook.data?.truncated, outlook.since)])))
+/** The words a quota-reporting harness adds to its folded unit; nothing while loading or failed. */
+const usageTip = (key: string) => usageState.value === 'ready' && ['fast', 'slow', 'pace', 'unknown'].includes(usage.value[key]!.kind) ? usage.value[key]!.tip : ''
+const usageIcon = (key: string) => (VERDICT_ICON[usage.value[key]!.kind] || 'ring-dashed') as IconName
+const usageTone = (key: string) => ({ fast: 't-fast', slow: 't-slow', pace: 't-pace' } as Record<string, string>)[usage.value[key]!.kind] ?? 't-none'
+// The folded dial's mini lines sit over the empty gap after a count, measured once laid out;
+// below 1100 px they are hidden and the tooltip keeps the shipped words.
+const wideQuery = typeof matchMedia === 'function' ? matchMedia('(min-width: 1100px)') : null
+const wide = ref(!!wideQuery?.matches)
+const onWide = () => { wide.value = !!wideQuery?.matches }
+onMounted(() => wideQuery?.addEventListener('change', onWide))
+onBeforeUnmount(() => wideQuery?.removeEventListener('change', onWide))
+const dialEl = ref<HTMLElement>()
+const minis = ref<Record<string, { left: number; geo: MiniGeometry }>>({})
+function placeMinis() {
+  const out: Record<string, { left: number; geo: MiniGeometry }> = {}
+  const data = outlook.data, root = dialEl.value
+  // Only the folded dial (the addendum): open, the detail below says it all.
+  if (root && data && wide.value && folded.value && usageState.value === 'ready') {
+    for (const cell of root.querySelectorAll<HTMLElement>('.du-cell[data-cell]')) {
+      const key = cell.dataset.cell!, group = outlook.groups.get(key)
+      if (!usageTip(key) || !group?.pool) continue
+      const value = cell.querySelector('.value-slot'), flagIcon = cell.querySelector('.cd-flag svg')
+      const next = cell.nextElementSibling?.querySelector('.du-sep') ?? root.querySelector('.cd-live')
+      if (!value || !next) continue
+      const a = Math.max(value.getBoundingClientRect().right, flagIcon?.getBoundingClientRect().right ?? 0), b = next.getBoundingClientRect().left
+      const w = Math.min(48, Math.floor(b - a - 8))
+      if (w < 30 || b < a) continue
+      const geo = miniGeometry(chartModel(group, data.generated_at, data.anchor_hour), w)
+      if (geo) out[key] = { left: Math.round((a + (b - a - w) / 2 - cell.getBoundingClientRect().left) * 10) / 10, geo }
+    }
+  }
+  minis.value = out
+}
+let dialObserver: ResizeObserver | undefined
+onMounted(() => { if (typeof ResizeObserver === 'function') { dialObserver = new ResizeObserver(() => placeMinis()); watch(dialEl, (el, old) => { if (old) dialObserver?.unobserve(old); if (el) dialObserver?.observe(el) }, { immediate: true }) } })
+onBeforeUnmount(() => dialObserver?.disconnect())
+watch([() => outlook.data, wide, usageState, rows, folded], () => { void nextTick(placeMinis) })
+const unitName = (row: typeof rows.value[number]) => `${row.label}: ${row.summary}${attention(row.key) ? `, ${rowWords(row.key).replace(/^./, c => c.toLowerCase())}` : ''}${usageTip(row.key) ? ` · ${usageTip(row.key).replace(/^\S+:?\s/, '')}` : ''}`
+
 function changeTotal(delta: number) {
   if (plan.value) save(stepTotal(plan.value, delta))
 }
@@ -174,7 +224,7 @@ function modeKeys(event: KeyboardEvent, key: string) {
        row. Each unit (the total, then each harness) is bound by proximity, with no outline and
        no fill; its − and + keep their room and show on hover or focus. Unfolded, today's body
        opens as a card under the capacity row. -->
-  <div class="working dial cdial" :class="{ open: !folded, loading: !(plan && snapshot) }" role="group" aria-label="Agents at once" @pointerdown="armUnitClose">
+  <div ref="dialEl" class="working dial cdial" :class="{ open: !folded, loading: !(plan && snapshot) }" role="group" aria-label="Agents at once" @pointerdown="armUnitClose">
     <button type="button" class="fs-tog cdf" :aria-expanded="!folded" :aria-controls="bodyId" :aria-label="folded ? 'Unfold the dial: each harness, its daily limit and usage' : 'Fold the dial'" :data-tip="folded ? 'Unfold: each harness, its daily limit and usage' : 'Fold the dial'" @click="toggleDial"><AppIcon name="chevron-right" :size="13" /></button>
     <template v-if="plan && snapshot">
       <WorkingStepper unit total class="f-total" :class="{ open: openUnit === 'total' }" data-unit="total" role="group" :aria-label="`Agents at once: ${total}`" :value="total" :effective="total" :viewer="viewer()" :revision="snapshot.updated_at" :interrupt="interrupts" label="Agents at once" @step="changeTotal" @edit="editTotal" @hold="held" @face="tapUnit('total')">
@@ -190,17 +240,21 @@ function modeKeys(event: KeyboardEvent, key: string) {
       </WorkingStepper>
       <span class="f-chips" role="group" aria-label="Each harness">
         <!-- Each harness keeps its hairline before it, so a wrap never parts the two. -->
-        <span v-for="row in rows" :key="row.key" class="du-cell">
+        <span v-for="row in rows" :key="row.key" class="du-cell" :data-cell="row.key">
           <span class="du-sep" aria-hidden="true" />
           <WorkingStepper
-            unit class="f-chip" :class="[`is-${row.mode}`, { att: attention(row.key), open: openUnit === row.key }]" :data-harness="row.key" :data-unit="row.key" role="group" :aria-label="`${row.label}: ${row.summary}${attention(row.key) ? `, ${rowWords(row.key).replace(/^./, c => c.toLowerCase())}` : ''}`" :aria-describedby="`${infoId}-tip-${row.key}`"
+            unit class="f-chip" :class="[`is-${row.mode}`, { att: attention(row.key), open: openUnit === row.key }]" :data-harness="row.key" :data-unit="row.key" role="group" :aria-label="unitName(row)" :aria-describedby="`${infoId}-tip-${row.key}`"
             :value="row.limit" :effective="row.effective" :label="row.label" :viewer="viewer()" :revision="snapshot.updated_at" :interrupt="interrupts" @step="changeLimit(row.key, $event)" @edit="editLimit(row.key, $event)" @boundary="changeMode(row.key, $event)" @hold="held" @face="tapUnit(row.key)"
           >
-            <template #mark><span class="du-face" :data-tip="tipOf(row)"><HarnessMark :harness="row.key" :size="16" /></span></template>
+            <template #mark><span class="du-face" :data-tip="minis[row.key] ? undefined : tipOf(row)"><HarnessMark :harness="row.key" :size="16" /></span></template>
             <!-- The flag's room is always kept, so a state that comes or goes never moves a neighbour. -->
             <template #flag><span class="cd-flag" :class="attention(row.key) ? `st-${views[row.key]!.kind}` : ''"><AppIcon v-if="attention(row.key)" :name="flagIcon(row.key)" :size="12" /></span></template>
           </WorkingStepper>
           <span :id="`${infoId}-tip-${row.key}`" class="sr-only">{{ tipOf(row) }}</span>
+          <template v-if="minis[row.key]">
+            <QuotaMini :geo="minis[row.key]!.geo" :left="minis[row.key]!.left" :stale="usage[row.key]!.stale" />
+            <span class="du-tip" role="tooltip">{{ usageTip(row.key) }}</span>
+          </template>
         </span>
       </span>
       <span class="cd-break" aria-hidden="true" />
@@ -231,9 +285,16 @@ function modeKeys(event: KeyboardEvent, key: string) {
               <li v-for="row in rows" :key="row.key" class="row" :class="[`is-${row.mode}`, { sel: row.key === selected }]" :data-key="row.key" @click="rowClick($event, row.key)">
                 <button type="button" class="f-mode initial" :aria-label="cycleLabel(row)" :data-tip="cycleLabel(row)" @click="changeMode(row.key, nextMode(row.key))"><HarnessMark :harness="row.key" :size="22" /></button>
                 <button type="button" class="f-sel" :data-sel="row.key" :aria-pressed="row.key === selected" aria-controls="dial-detail" :data-tip="`${row.label}: ${row.sub}${usageLine(views[row.key]!) ? ` · ${usageLine(views[row.key]!)}` : ''}. ${rowWords(row.key)}.`">
-                  <span class="nm">{{ row.label }}</span>
-                  <span class="sub">{{ row.sub }}<template v-if="usageLine(views[row.key]!)"> · {{ usageLine(views[row.key]!) }}</template></span>
-                  <span class="cap-stl" :class="`st-${views[row.key]!.kind}`"><AppIcon v-if="['on_pace', 'everything'].includes(views[row.key]!.kind)" name="check" :size="12" /><AppIcon v-else-if="views[row.key]!.kind === 'over_pace'" name="alert" :size="12" /><AppIcon v-else-if="views[row.key]!.kind === 'at_limit'" name="pause" :size="12" /><span>{{ rowWords(row.key) }}</span></span>
+                  <span class="nm">{{ row.label }}<span class="nm-run">{{ row.sub }}</span></span>
+                  <!-- AEON-1497: the sub line is the group's usage in short; its state word carries an icon, never a fill. -->
+                  <span class="sub" :class="`u-${usage[row.key]!.kind}`">
+                    <template v-if="usage[row.key]!.kind === 'none'"><span class="quiet">No accounts yet</span></template>
+                    <template v-else-if="usage[row.key]!.kind === 'not_reported'"><span class="vw t-none"><AppIcon name="ring-dashed" :size="12" /></span><span>{{ usage[row.key]!.short }}</span></template>
+                    <template v-else-if="usage[row.key]!.kind === 'pending' && usageState !== 'error'"><span class="skeleton" aria-hidden="true" /><span class="sr-only">Reading usage…</span></template>
+                    <template v-else-if="usage[row.key]!.kind === 'pending'"><span class="quiet">Usage not read</span></template>
+                    <template v-else><span class="vw" :class="usageTone(row.key)" role="img" :aria-label="usage[row.key]!.verdict"><AppIcon :name="usageIcon(row.key)" :size="12" /></span><span>{{ usage[row.key]!.short }}</span></template>
+                  </span>
+                  <span v-if="attention(row.key)" class="cap-stl" :class="`st-${views[row.key]!.kind}`"><AppIcon v-if="views[row.key]!.kind === 'over_pace'" name="alert" :size="12" /><AppIcon v-else name="pause" :size="12" /><span>{{ rowWords(row.key) }}</span></span>
                 </button>
                 <div class="limit">
                   <div class="seg" role="radiogroup" :aria-label="`${row.label}: limit`" @keydown="modeKeys($event, row.key)">
@@ -252,10 +313,10 @@ function modeKeys(event: KeyboardEvent, key: string) {
           <div v-if="selectedRow" id="dial-detail" class="f-detail" role="region" :aria-label="`${selectedRow.label}: daily usage`">
             <!-- Every harness's detail, folds closed, is laid in the same cell unseen: the cell keeps the height of the tallest one; folds open downward only. -->
             <div class="f-stack">
-              <DialDetail v-for="row in rows" :key="`ghost-${row.key}`" ghost :view="views[row.key]!" :total="total" :default-points="defaultPoints" :tz="snapshot.daily_timezone" :until="snapshot.daily_until" :pace-open="false" :boost-open="false" :may-manage="mayManage" />
-              <DialDetail :key="selectedRow.key" :view="views[selectedRow.key]!" :total="total" :default-points="defaultPoints" :tz="snapshot.daily_timezone" :until="snapshot.daily_until"
+              <DialDetail v-for="row in rows" :key="`ghost-${row.key}`" ghost :view="views[row.key]!" :usage="usage[row.key]!" :usage-state="usageState" :usage-failed="outlook.failed" :usage-since="outlook.since" :total="total" :default-points="defaultPoints" :tz="snapshot.daily_timezone" :until="snapshot.daily_until" :pace-open="false" :boost-open="false" :may-manage="mayManage" />
+              <DialDetail :key="selectedRow.key" :view="views[selectedRow.key]!" :usage="usage[selectedRow.key]!" :usage-state="usageState" :usage-failed="outlook.failed" :usage-since="outlook.since" :generated-at="outlook.data?.generated_at" :anchor-hour="outlook.data?.anchor_hour" :total="total" :default-points="defaultPoints" :tz="snapshot.daily_timezone" :until="snapshot.daily_until"
                 :pace-open="dialPrefs.foldOpen(selectedRow.key, 'pace')" :boost-open="dialPrefs.foldOpen(selectedRow.key, 'boost')" :may-manage="mayManage"
-                @change="saveDaily" @fold="dialPrefs.toggleFold(selectedRow.key, $event)" />
+                @change="saveDaily" @fold="dialPrefs.toggleFold(selectedRow.key, $event)" @retry="outlook.refresh" />
             </div>
           </div>
         </div>
@@ -280,10 +341,16 @@ function modeKeys(event: KeyboardEvent, key: string) {
 @media (hover: hover) { .cdf:hover { background: var(--row-hover); color: var(--ink); } }
 .cdf:focus-visible, .cd-live:focus-visible { outline: none; box-shadow: var(--focus-ring); }
 .f-chips { display: contents; }
-.du-cell { display: inline-flex; align-items: center; flex: none; }
+.du-cell { position: relative; display: inline-flex; align-items: center; flex: none; }
 .du-sep { flex: none; width: 1px; height: 16px; margin: 0 8px; background: var(--line); }
 .du-face { display: inline-grid; place-items: center; color: var(--ink); }
 .f-chip.is-off .du-face { opacity: .6; }
+/* AEON-1497 addendum: while a unit shows its − and +, its mini line steps aside and an opaque tip says the same in words. */
+.f-chip:is(:hover, :focus-within) ~ .mini { opacity: 0; }
+.du-tip { position: absolute; z-index: 30; top: calc(100% + 10px); left: 0; padding: 6px 10px; border-radius: 8px; background: var(--tip-bg); color: var(--tip-ink); box-shadow: var(--shadow-pop); font: 500 12.5px/1.35 var(--font); white-space: nowrap; font-variant-numeric: tabular-nums; opacity: 0; pointer-events: none; transition: opacity .12s ease; }
+.f-chip:is(:hover, :focus-within) ~ .du-tip { opacity: 1; }
+@media (max-width: 1099px) { .du-tip { display: none; } }
+@media (prefers-reduced-motion: reduce) { .du-tip { transition: none; } }
 /* The flag (over pace, at the limit) follows the number, without a fill. */
 .cd-flag { position: relative; z-index: 3; display: inline-grid; place-items: center; flex: none; width: 12px; margin-left: 2px; }
 .cd-flag.st-at_limit { color: var(--gold); }
@@ -372,8 +439,20 @@ p { margin: 0; }
 .row.is-off .f-mode { color: var(--ink-3); opacity: .6; }
 .f-sel { display: grid; justify-items: start; gap: 2px; min-width: 0; width: calc(100% + 12px); margin: -6px -6px; padding: 6px 6px; box-sizing: border-box; border: 0; border-radius: 8px; background: transparent; color: inherit; font: inherit; text-align: left; cursor: pointer; }
 .f-sel:focus-visible { outline: none; box-shadow: var(--focus-ring); }
-.f-sel .nm { color: var(--ink); font: 650 14px/1.3 var(--font); }
-.f-sel .sub { max-width: 100%; overflow: hidden; color: var(--ink-3); font-size: 12.5px; line-height: 1.35; text-overflow: ellipsis; white-space: nowrap; font-variant-numeric: tabular-nums; }
+.f-sel .nm { display: flex; align-items: baseline; gap: 6px; max-width: 100%; color: var(--ink); font: 650 14px/1.3 var(--font); white-space: nowrap; }
+.f-sel .nm-run { min-width: 0; overflow: hidden; color: var(--ink-3); font-size: 12.5px; font-weight: 500; text-overflow: ellipsis; font-variant-numeric: tabular-nums; }
+/* AEON-1497: the usage summary; its state word carries an icon, never a fill. */
+.f-sel .sub { display: flex; align-items: center; gap: 0 5px; max-width: 100%; min-height: 18px; overflow: hidden; color: var(--ink-2); font-size: 12.5px; line-height: 1.35; white-space: nowrap; font-variant-numeric: tabular-nums; }
+.f-sel .sub > span { overflow: hidden; text-overflow: ellipsis; }
+/* A definite width: the line shrink-wraps its content, so a percentage would resolve to nothing. */
+.f-sel .sub .skeleton { flex: none; width: 168px; max-width: 100%; height: 10px; }
+.f-sel .sub .quiet { color: var(--ink-3); }
+.vw { display: inline-flex; align-items: center; gap: 4px; flex: none; }
+.vw svg { flex: none; }
+.t-fast { color: var(--warn-ink); }
+.t-slow { color: var(--verdict-slow); }
+.t-pace { color: var(--ok); }
+.t-none { color: var(--ink-3); }
 /* The pace state: on pace is a quiet check; over pace (gold) and at the limit (red) are full tints with an icon and words. */
 .cap-stl { display: inline-flex; align-items: center; gap: 5px; max-width: 100%; min-height: 22px; margin-top: 2px; padding: 0 8px 0 6px; border-radius: 999px; font-size: 12px; font-weight: 600; white-space: nowrap; }
 .cap-stl > span { overflow: hidden; text-overflow: ellipsis; }

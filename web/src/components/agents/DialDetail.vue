@@ -1,21 +1,28 @@
 <!-- SPDX-License-Identifier: AGPL-3.0-only -->
 <script setup lang="ts">
 // AEON-1036: the selected harness's usage on the right of the open dial. Reading
-// first (week used and left, today's points, the bar, the pace state), settings
-// second (Pace and Boost today as folds; at the limit it follows Settings › Models,
-// AEON-1166), accounts read-only. Folds open downward only, so nothing above them moves.
+// first, settings second (Pace and Boost today as folds; at the limit it follows
+// Settings › Models, AEON-1166). Folds open downward only, so nothing above them moves.
+// AEON-1497 (approved fuel gauge): the reading is the group's quota outlook: the headline,
+// quota left over time and each subscription; today's points follow as the first row.
 import { computed, ref, watch } from 'vue'
 import { HARNESS_NAME } from '../../lib/capacity'
 import {
-  boostNumber, boostSummary, dailyBar, detailHeadline, makeBoost, paceSummary, pct, resetsLine, stateWords, storedPace, todayLine, typedPercent, typedPoints, weekParts,
+  boostNumber, boostSummary, detailHeadline, makeBoost, needsAttention, paceSummary, pct, resetsLine, stateWords, storedPace, todayLine, typedPercent, typedPoints,
   type DailySettings, type DailyView, type EnteredAs,
 } from '../../lib/dailyLimits'
 import type { DialFold } from '../../lib/dialPrefs'
+import type { UsageView } from '../../lib/quotaOutlook'
 import AppIcon from '../AppIcon.vue'
 import HarnessMark from './HarnessMark.vue'
+import QuotaUsage from './QuotaUsage.vue'
 
 const props = defineProps<{
   view: DailyView; total: number; defaultPoints: number; tz?: string
+  /** AEON-1497: the group's quota outlook in words, its read state and its clock. */
+  usage: UsageView; usageState: 'loading' | 'ready' | 'error'; generatedAt?: string; anchorHour?: string
+  /** A failed refresh after a good read, and the time since the snapshot arrived, which ages it. Both copies get them, so the reserved height matches. */
+  usageFailed?: boolean; usageSince?: number
   /** The person's next local midnight: the end of a Boost today. */
   until?: string
   paceOpen: boolean; boostOpen: boolean
@@ -25,12 +32,14 @@ const props = defineProps<{
   ghost?: boolean
 }>()
 // A change names the harness it was made for, so a pick made meanwhile never takes it over.
-const emit = defineEmits<{ change: [harness: string, settings: DailySettings]; fold: [fold: DialFold] }>()
+const emit = defineEmits<{ change: [harness: string, settings: DailySettings]; fold: [fold: DialFold]; retry: [] }>()
 const harness = computed(() => props.view.harness)
 const name = computed(() => HARNESS_NAME[harness.value] ?? harness.value)
 const settings = computed(() => props.view.settings)
-const bar = computed(() => dailyBar(props.view))
-const week = computed(() => weekParts(props.view, props.tz))
+/** Today's points: the dt says "Today"; a state that needs attention keeps its words and icon. */
+const today = computed(() => todayLine(props.view).replace(/^Today: /, ''))
+const attention = computed(() => needsAttention(props.view))
+/** Vendor-reported reset credits, only when the vendor reports them. */
 const resets = computed(() => resetsLine(props.view.account, props.tz))
 const open = (fold: DialFold) => !props.ghost && (fold === 'pace' ? props.paceOpen : props.boostOpen)
 const change = (patch: Partial<DailySettings>) => emit('change', harness.value, { ...settings.value, ...patch })
@@ -94,50 +103,25 @@ function boostClear() { if (boost.value) change({ boost_today: null }) }
 
 // A new harness starts from its own drafts.
 watch(harness, () => { paceEditing.value = false; paceNote.value = ''; boostEditing.value = false; boostNote.value = ''; asLocal.value = 'used' })
-const SETTINGS = '/settings/accounts'
-const active = computed(() => props.view.account?.account_id)
 // Pace has its home in Settings › Capacity, at this harness's row; the inline edit writes the
-// same value (AEON-1176 P6, folded into AEON-1209). Per-account settings open the account in use.
+// same value (AEON-1176 P6, folded into AEON-1209).
 const paceHome = computed(() => `/settings/capacity#pace-${harness.value}`)
-const accountHome = computed(() => active.value ? `${SETTINGS}?${new URLSearchParams({ account: active.value })}` : SETTINGS)
 </script>
 
 <template>
   <div class="cd" :class="{ ghost }" :aria-hidden="ghost || undefined" :inert="ghost || undefined" :data-detail="ghost ? undefined : harness">
     <h3 class="cd-h"><HarnessMark :harness="harness" :size="16" /><span>{{ view.kind === 'none' ? `${name} · no account yet` : detailHeadline(view) }}</span></h3>
 
-    <template v-if="view.kind === 'none'">
-      <p class="cd-wk">No account of yours is linked to {{ name }} yet, so there is no daily limit to read or keep.</p>
-      <dl class="cd-dl">
-        <dt><span class="eyebrow">Account</span></dt>
-        <dd><RouterLink class="link-btn cd-add" :to="`${SETTINGS}#add-account`" :tabindex="tabbable()"><AppIcon name="plus" :size="11" />Add account</RouterLink></dd>
-      </dl>
-    </template>
-    <template v-else-if="view.kind === 'no_limit'">
-      <p class="cd-wk">{{ name }} accounts here are billed by use and have no allowance window, so there is nothing to keep a daily limit on.</p>
+    <QuotaUsage :view="usage" :state="usageState" :generated-at="generatedAt" :anchor-hour="anchorHour" :tz="tz" :failed="usageFailed" :since="usageSince" :ghost="ghost" @retry="emit('retry')" />
+    <template v-if="view.kind === 'no_limit'">
       <dl class="cd-dl">
         <dt><span class="eyebrow">At the limit</span></dt><dd class="cd-quiet">Nothing to reach; the {{ total }} at once and the account still cap it.</dd>
-        <dt><span class="eyebrow">{{ view.accounts.length > 1 ? 'Accounts' : 'Account' }}</span></dt>
-        <dd><span class="cd-acc1">{{ view.accounts.map(a => a.label).join(' · ') }}</span><RouterLink class="link-btn cd-add" :to="`${SETTINGS}#add-account`" :tabindex="tabbable()"><AppIcon name="plus" :size="11" />Add account</RouterLink></dd>
       </dl>
     </template>
-    <template v-else>
-      <div class="cd-read">
-        <p class="cd-wk"><b v-if="week.strong">{{ week.strong }}</b>{{ week.strong ? ' ' : '' }}{{ week.rest.trim() }}</p>
-        <p class="cd-td">{{ todayLine(view) }}</p>
-        <div v-if="bar" class="cap-bar" :class="{ 'has-tick': bar.tick }" role="img" :aria-label="bar.label">
-          <span v-if="bar.teal" class="cb-teal" :style="{ width: `${bar.teal}%` }" />
-          <span v-if="bar.gold" class="cb-gold" :style="{ width: `${bar.gold}%` }" />
-          <span v-if="bar.red" class="cb-red" :style="{ width: `${bar.red}%` }" />
-          <span v-if="bar.free" class="cb-free" :style="{ width: `${bar.free}%` }" />
-          <b v-if="bar.tick" class="cb-tick" :style="{ left: `${bar.tick.at}%` }"><span>{{ bar.tick.label }}</span></b>
-        </div>
-        <div v-else class="cap-bar cap-bar-none" aria-hidden="true" />
-        <p class="cap-st" :class="`st-${view.kind}`"><AppIcon :name="view.kind === 'over_pace' ? 'alert' : view.kind === 'at_limit' ? 'pause' : view.kind === 'unknown' ? 'info' : 'check'" :size="14" /><span>{{ stateWords(view) }}</span></p>
-        <p v-if="resets" class="cap-rs"><AppIcon name="refresh" :size="13" /><span>{{ resets }}</span></p>
-      </div>
-
+    <template v-else-if="view.kind !== 'none'">
       <dl class="cd-dl">
+        <dt><span class="eyebrow">Today</span></dt>
+        <dd><p class="cd-td">{{ today }}<span v-if="attention" class="cap-st" :class="`st-${view.kind}`"><AppIcon :name="view.kind === 'at_limit' ? 'pause' : 'alert'" :size="13" /><span>{{ stateWords(view) }}</span></span></p><p v-if="resets" class="cap-rs"><AppIcon name="refresh" :size="13" /><span>{{ resets }}</span></p></dd>
         <dt><button type="button" class="cd-fh" :aria-expanded="open('pace')" :aria-controls="id('pace')" :tabindex="tabbable()" @click="emit('fold', 'pace')"><AppIcon class="cap-chev" name="chevron-right" :size="12" /><span class="eyebrow">Pace</span></button></dt>
         <dd :class="{ open: open('pace') }">
           <p class="cd-sum" @click="emit('fold', 'pace')">{{ paceSummary(view) }}</p>
@@ -161,14 +145,6 @@ const accountHome = computed(() => active.value ? `${SETTINGS}?${new URLSearchPa
         <!-- AEON-1166: Models decides at the limit; its order continues, or waits where it ends in Wait. -->
         <dt><span class="eyebrow">At the limit</span></dt>
         <dd><p class="cd-line">Follows <RouterLink class="link-btn" to="/settings/models" :tabindex="tabbable()">Settings › Models</RouterLink></p></dd>
-        <dt><span class="eyebrow">{{ view.accounts.length > 1 ? 'Accounts' : 'Account' }}</span></dt>
-        <dd>
-          <ol v-if="view.accounts.length > 1" class="cd-acc">
-            <li v-for="a in view.accounts" :key="a.account_id" :class="{ now: a.account_id === active }"><span class="an">{{ a.label }}</span><span class="au">{{ a.details_redacted || a.used_pct === null ? 'usage private' : `${pct(a.used_pct)} % used${a.limit_used_pct !== null ? ` of ${pct(a.limit_used_pct)} %` : ''}` }}</span><span class="af">{{ a.floor_pct === null || a.details_redacted ? '' : `floor ${pct(a.floor_pct)} %` }}</span></li>
-          </ol>
-          <span v-else class="cd-acc1">{{ view.account?.label }}</span>
-          <p class="cd-links"><RouterLink v-if="view.accounts.length > 1" class="link-btn" :to="accountHome" :tabindex="tabbable()">Per-account settings</RouterLink><RouterLink class="link-btn cd-add" :to="`${SETTINGS}#add-account`" :tabindex="tabbable()"><AppIcon name="plus" :size="11" />Add account</RouterLink></p>
-        </dd>
       </dl>
     </template>
   </div>
@@ -184,33 +160,15 @@ p { margin: 0; }
 
 .cd-h { display: flex; align-items: center; gap: 9px; margin: 0; color: var(--ink); font: 650 16px/1.35 var(--font); }
 .cd-h :deep(.mark) { flex: none; }
-.cd-read { display: grid; gap: 7px; max-width: 540px; margin-top: 12px; }
-.cd-wk, .cd-td { color: var(--ink-2); font-size: 13.5px; line-height: 1.45; font-variant-numeric: tabular-nums; }
-.cd > .cd-wk { margin-top: 12px; max-width: 540px; }
-.cd-wk b { color: var(--ink); font-weight: 650; }
-/* Today's bar: teal up to today's share, gold over it, red past the limit; the hairline tick marks the pace. */
-.cap-bar { position: relative; display: flex; height: 10px; margin: 4px 0; border-radius: 5px; background: var(--line); }
-.cap-bar.has-tick { margin-bottom: 18px; }
-.cap-bar-none { background: var(--line); opacity: .6; }
-.cap-bar > span { height: 100%; }
-.cap-bar > span:first-child { border-radius: 5px 0 0 5px; }
-.cap-bar > span:last-of-type { border-radius: 0 5px 5px 0; }
-.cap-bar > span:only-of-type { border-radius: 5px; }
-.cb-teal { background: var(--teal); opacity: .8; }
-.cb-gold { background: var(--cap-over-fill); }
-.cb-red { background: var(--cap-lim-fill); }
-.cb-free { background: transparent; }
-.cb-tick { position: absolute; top: -3px; bottom: -3px; width: 1.5px; margin-left: -.75px; background: var(--ink-2); }
-.cb-tick span { position: absolute; top: 15px; left: 50%; transform: translateX(-50%); color: var(--ink-3); font-size: 11px; font-weight: 500; white-space: nowrap; }
-/* Over pace and at the limit: a full tint, an icon and words; never colour alone, never an edge bar. */
-.cap-st { display: inline-flex; align-items: center; gap: 6px; justify-self: start; min-height: 26px; padding: 0 10px 0 8px; border-radius: 999px; font-size: 12.5px; font-weight: 600; }
-.cap-st.st-on_pace, .cap-st.st-everything { padding-left: 0; color: var(--ok); }
-.cap-st.st-unknown { padding-left: 0; color: var(--ink-3); font-weight: 500; }
-.cap-st.st-over_pace { background: var(--cap-over-bg); color: var(--cap-over-ink); }
-.cap-st.st-at_limit { background: var(--cap-lim-bg); color: var(--cap-lim-ink); }
-.cap-rs { display: flex; align-items: center; gap: 6px; color: var(--ink-2); font-size: 12.5px; font-variant-numeric: tabular-nums; }
+/* Over pace and at the limit after today's points: an icon and words in the state's ink; never colour alone, never a fill or an edge bar. */
+.cap-st { display: inline-flex; align-items: center; gap: 5px; margin-left: 4px; font-size: 13px; font-weight: 600; }
+.cap-st::before { content: '·'; margin-right: 1px; color: var(--ink-3); font-weight: 400; }
+.cap-st svg { flex: none; }
+.cap-st.st-over_pace { color: var(--cap-over-ink); }
+.cap-st.st-at_limit { color: var(--cap-lim-ink); }
+.cap-rs { display: flex; align-items: center; gap: 6px; margin-top: 2px; color: var(--ink-2); font-size: 12.5px; font-variant-numeric: tabular-nums; }
 .cap-rs svg { flex: none; color: var(--ink-3); }
-.cd-dl { display: grid; grid-template-columns: 128px minmax(0, 1fr); margin: 16px 0 0; border-top: 1px solid var(--line); }
+.cd-dl { display: grid; grid-template-columns: 128px minmax(0, 1fr); margin: 14px 0 0; border-top: 1px solid var(--line); }
 .cd-dl > dt, .cd-dl > dd { margin: 0; padding: 10px 0; border-bottom: 1px solid var(--line); }
 .cd-dl > dt:last-of-type, .cd-dl > dd:last-of-type { border-bottom: 0; }
 .cd-dl > dt { display: flex; align-items: flex-start; padding-top: 16px; }
@@ -222,7 +180,8 @@ p { margin: 0; }
 .cd-fh[aria-expanded="true"] .cap-chev { transform: rotate(90deg); }
 .cd-sum { display: flex; align-items: center; min-height: 30px; color: var(--ink-2); font-size: 13.5px; text-align: left; cursor: pointer; font-variant-numeric: tabular-nums; }
 .cd-dl dd.open .cd-sum { color: var(--ink); font-weight: 600; }
-.cd-line { display: flex; align-items: center; flex-wrap: wrap; gap: 0 5px; min-height: 30px; color: var(--ink-2); font-size: 13.5px; }
+.cd-line, .cd-td { display: flex; align-items: center; flex-wrap: wrap; gap: 0 5px; min-height: 30px; color: var(--ink-2); font-size: 13.5px; }
+.cd-td { font-variant-numeric: tabular-nums; }
 .cd-fb { padding: 6px 0 4px; }
 .cap-opt { display: flex; align-items: center; gap: 8px; min-height: 30px; color: var(--ink); font-size: 13px; cursor: pointer; }
 .cap-opt input { accent-color: var(--teal); margin: 0; }
@@ -238,18 +197,6 @@ p { margin: 0; }
 .cap-note b { color: var(--ink); font-weight: 650; }
 .cap-note.failed { color: var(--danger); }
 .cd-quiet { color: var(--ink-3); font-size: 13px; }
-.cd-acc1 { color: var(--ink); font-size: 13.5px; font-weight: 600; }
-.cd-add { display: inline-flex; align-items: center; gap: 4px; margin-left: 14px; font-weight: 500; text-decoration: none; }
-.cd-acc1 + .cd-add, .cd-links .cd-add:first-child { margin-left: 0; }
-.cd-add:hover { text-decoration: underline; }
-.cd-acc { display: grid; gap: 2px; max-width: 420px; margin: 0; padding: 0; list-style: none; counter-reset: acc; }
-.cd-acc li { display: grid; grid-template-columns: 16px minmax(0, 1fr) auto auto; gap: 12px; align-items: baseline; padding: 4px 6px; border-radius: 8px; color: var(--ink-2); font-size: 12.5px; font-variant-numeric: tabular-nums; counter-increment: acc; }
-.cd-acc li::before { content: counter(acc); color: var(--ink-3); font-family: var(--mono); font-size: 11px; }
-.cd-acc li.now { background: var(--surface-sunken); }
-.cd-acc .an { overflow: hidden; color: var(--ink); font-weight: 600; text-overflow: ellipsis; white-space: nowrap; }
-.cd-acc .af { color: var(--ink-3); }
-.cd-links { display: flex; align-items: center; gap: 2px; margin-top: 8px; }
-.cd-links .link-btn:first-child { font-weight: 500; }
 @container working (max-width: 900px) {
   .cd-dl { grid-template-columns: minmax(0, 1fr); }
   .cd-dl > dt { padding: 10px 0 0; border-bottom: 0; }
@@ -265,9 +212,7 @@ p { margin: 0; }
   .cap-opt { min-height: 44px; }
   .cap-opt input { width: 20px; height: 20px; }
   .cap-pp .field.n, .cap-today .field.n { min-height: 44px; width: 7ch; min-width: 7ch; }
-  .cd-add, .cd-links .link-btn, .cap-note .link-btn, .cap-today .link-btn, .cap-def .link-btn, .cd-line .link-btn { min-height: 44px; min-width: 44px; display: inline-flex; align-items: center; }
-  .cd-acc li { grid-template-columns: 16px minmax(0, 1fr) auto; }
-  .cd-acc .af { grid-column: 2 / -1; }
+  .cap-note .link-btn, .cap-today .link-btn, .cap-def .link-btn, .cd-line .link-btn { min-height: 44px; min-width: 44px; display: inline-flex; align-items: center; }
 }
 @media (prefers-reduced-motion: reduce) { .cap-chev { transition: none; } }
 </style>
