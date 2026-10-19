@@ -65,14 +65,14 @@ func TestQuotaOutlookReplayVerdicts(t *testing.T) {
 			{WindowKind: "weekly", Bucket: "seven_day", UsedPercent: 78, ReadAt: start, ResetsAt: reset},
 			{WindowKind: "5h", Bucket: "five_hour", UsedPercent: 31, ReadAt: end, ResetsAt: at("2026-10-13T09:50:00Z")}, // end
 			{WindowKind: "5h", Bucket: "five_hour", UsedPercent: 31, ReadAt: end, ResetsAt: at("2026-10-13T09:50:00Z")}, // update
-			{WindowKind: "weekly", Bucket: "seven_day", UsedPercent: 78, ReadAt: end, ResetsAt: reset}, // end
-			{WindowKind: "weekly", Bucket: "seven_day", UsedPercent: 78, ReadAt: end, ResetsAt: reset}, // update
-			{WindowKind: "weekly", Bucket: "seven_day_overage_included", ReadAt: end, ResetsAt: reset}, // end
-			{WindowKind: "weekly", Bucket: "seven_day_overage_included", ReadAt: end, ResetsAt: reset}, // update
+			{WindowKind: "weekly", Bucket: "seven_day", UsedPercent: 78, ReadAt: end, ResetsAt: reset},                  // end
+			{WindowKind: "weekly", Bucket: "seven_day", UsedPercent: 78, ReadAt: end, ResetsAt: reset},                  // update
+			{WindowKind: "weekly", Bucket: "seven_day_overage_included", ReadAt: end, ResetsAt: reset},                  // end
+			{WindowKind: "weekly", Bucket: "seven_day_overage_included", ReadAt: end, ResetsAt: reset},                  // update
 		}
 		check := func(t *testing.T, latest []quotaSample, hours [][]quotaSample) {
 			t.Helper()
-			samples := weeklySeries(latest, hours, now)
+			samples := weeklySeries("claude", latest, hours, now)
 			if len(samples) != 2 || !samples[0].ReadAt.Equal(start) || !samples[1].ReadAt.Equal(end) || samples[0].Used != 78 || samples[1].Used != 78 {
 				t.Fatalf("weekly plan must retain exactly the two distinct readings: %+v", samples)
 			}
@@ -100,7 +100,7 @@ func TestQuotaOutlookReplayVerdicts(t *testing.T) {
 			check(t, latest, [][]quotaSample{rows})
 		})
 		t.Run("missing plan stays missing", func(t *testing.T) {
-			if got := weeklySeries(rows[6:], [][]quotaSample{rows}, now); len(got) != 0 {
+			if got := weeklySeries("claude", rows[6:], [][]quotaSample{rows}, now); len(got) != 0 {
 				t.Fatalf("overage substituted for absent weekly plan: %+v", got)
 			}
 		})
