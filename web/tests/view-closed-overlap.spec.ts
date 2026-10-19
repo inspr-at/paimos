@@ -201,7 +201,8 @@ for (const theme of ['light', 'dark']) test(`AEON-1559 phone and standard viewpo
     await page.setViewportSize({ width, height: 1000 })
     await settle(page)
     await expect(settings(page)).toBeVisible()
-    expect(await navigation(page).evaluate(el => el.scrollWidth - el.clientWidth)).toBeLessThanOrEqual(1)
+    const overflow = await navigation(page).evaluate(el => ({ extra: el.scrollWidth - el.clientWidth, width: el.clientWidth, children: [...el.children].map(child => ({ name: child.className, x: child.getBoundingClientRect().x - el.getBoundingClientRect().x, width: child.getBoundingClientRect().width, scroll: child.scrollWidth, css: getComputedStyle(child).cssText })) }))
+    expect(overflow.extra, JSON.stringify(overflow)).toBeLessThanOrEqual(1)
     if (width === 390) {
       expect(await step(page)).toBe(4)
       await settings(page).locator('.display-btn').click()
