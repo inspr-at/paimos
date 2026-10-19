@@ -448,13 +448,8 @@ func createRun(r *http.Request, tx pgx.Tx, p tenant.Principal, deferred *[]func(
 		}
 		// A pending demand has no agent_run_id yet: its routine pins the leaf.
 		// A claimed intent retains both bindings until its owned exit is proved.
-		var held bool
-		if err = tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM routine_launch_intents l
- JOIN routine_runs rr ON rr.tenant_id=l.tenant_id AND rr.id=l.routine_run_id
- LEFT JOIN agent_runs r ON r.tenant_id=l.tenant_id AND r.id=l.agent_run_id
- LEFT JOIN nodes n ON n.tenant_id=r.tenant_id AND n.id=r.work_order_id
- WHERE l.kind='lead' AND l.state IN ('pending','claimed')
- AND (rr.work_order_id=$1 OR rr.work_node_id=$2 OR r.work_order_id=$1 OR r.queue_node_id=$2 OR n.parent_id=$2))`, o.NodeID, ticket).Scan(&held); err != nil {
+		held, err := leadIntentHoldsWorkTx(ctx, tx, o.NodeID, *ticket)
+		if err != nil {
 			return nil, err
 		}
 		if held {
@@ -529,6 +524,33 @@ func createRun(r *http.Request, tx pgx.Tx, p tenant.Principal, deferred *[]func(
 	}
 	return v, event()
 }
+
+// A private routine's intent still holds work visible to another person.
+// The authorized caller holds tenant/tree and order locks. Widen only this
+// boolean read; the savepoint rollback restores all visibility before any
+// placement, insert or event. No private identity or routine content escapes.
+func leadIntentHoldsWorkTx(ctx context.Context, tx pgx.Tx, order, ticket string) (bool, error) {
+	step, err := tx.Begin(ctx)
+	if err != nil {
+		return false, err
+	}
+	defer step.Rollback(ctx)
+	if _, err = step.Exec(ctx, `SELECT set_config('aeon.visible_projects','*',true),set_config('aeon.system','on',true)`); err != nil {
+		return false, err
+	}
+	var held bool
+	err = step.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM routine_launch_intents l
+ JOIN routine_runs rr ON rr.tenant_id=l.tenant_id AND rr.id=l.routine_run_id
+ LEFT JOIN agent_runs r ON r.tenant_id=l.tenant_id AND r.id=l.agent_run_id
+ LEFT JOIN nodes n ON n.tenant_id=r.tenant_id AND n.id=r.work_order_id
+ WHERE l.kind='lead' AND l.state IN ('pending','claimed')
+ AND (rr.work_order_id=$1 OR rr.work_node_id=$2 OR r.work_order_id=$1 OR r.queue_node_id=$2 OR n.parent_id=$2))`, order, ticket).Scan(&held)
+	if err != nil {
+		return false, err
+	}
+	return held, step.Rollback(ctx)
+}
+
 func dispatchable(ctx context.Context, tx pgx.Tx, o workorders.Order) error {
 	if o.Status != "ready" && o.Status != "running" {
 		return workorders.Fail(409, "work order is not ready for dispatch")

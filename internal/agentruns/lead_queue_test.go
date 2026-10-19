@@ -1255,6 +1255,35 @@ func TestLeadPersonRunRefusesPendingAndClaimedIntent(t *testing.T) {
 			t.Fatal("refused start left a run")
 		}
 	}
+	// Output-project access does not reveal another person's private routine.
+	// Its hidden intent must still exclude a new writer on the visible leaf.
+	otherPerson := tenant.Principal{ID: uuid(), TenantID: f.person.TenantID, Kind: tenant.Person, BrowserSession: true}
+	f.tx(t, f.person, func(tx pgx.Tx) error {
+		if _, err := tx.Exec(t.Context(), `INSERT INTO principals(tenant_id,id,kind,name) VALUES($1,$2,'person','Other person')`, f.person.TenantID, otherPerson.ID); err != nil {
+			return err
+		}
+		if _, err := tx.Exec(t.Context(), `UPDATE recurrence_definitions SET scope_type='personal',scope_project_id=NULL WHERE recurrence_id=$1`, recurrence.ID); err != nil {
+			return err
+		}
+		if _, err := tx.Exec(t.Context(), `UPDATE recurrences SET definition_scope='personal' WHERE id=$1`, recurrence.ID); err != nil {
+			return err
+		}
+		_, err := tx.Exec(t.Context(), `UPDATE routine_runs SET scope_type='personal',scope_project_id=NULL WHERE id=$1`, occurrence.Run.ID)
+		return err
+	})
+	dbtest.BindRole(t, f.d, f.person.TenantID, otherPerson.ID, "admin")
+	f.call(t, otherPerson, "GET", "/api/recurrences/"+recurrence.ID, nil, 404, nil)
+	for _, state := range []string{"pending", "claimed"} {
+		f.tx(t, f.person, func(tx pgx.Tx) error {
+			_, err := tx.Exec(t.Context(), `UPDATE routine_launch_intents SET state=$2 WHERE id=$1`, intent, state)
+			return err
+		})
+		var failure map[string]any
+		f.call(t, otherPerson, "POST", "/api/work-orders/"+o.NodeID+"/runs", map[string]any{"agent_principal_id": f.agent.ID, "model_profile_id": f.profile}, 409, &failure)
+		if failure["error"] != "The project lead is already starting this ticket. The run appears on the ticket in a moment." {
+			t.Fatalf("hidden %s intent bypassed writer exclusion: %v", state, failure)
+		}
+	}
 	f.tx(t, f.person, func(tx pgx.Tx) error {
 		_, err := tx.Exec(t.Context(), `UPDATE routine_launch_intents SET state='exit_observed',exit_observed_at=clock_timestamp() WHERE id=$1`, intent)
 		return err
