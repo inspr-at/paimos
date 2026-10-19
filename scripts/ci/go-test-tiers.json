@@ -5476,6 +5476,8 @@
     ,
     {"kind":"go","package":"internal/cli","name":"TestWorkMCPCancelAndListBounds","tier":"ESSENTIAL"}
     ,
+    {"kind":"go","package":"internal/cli","name":"TestWorkRuntimeKeepsTheCommandInterrupt","tier":"ESSENTIAL"}
+    ,
     {"kind":"go","package":"internal/cli","name":"TestWorkTypeAliasesUseCanonicalIDAndExposeShape","tier":"NIGHTLY"}
     ,
     {"kind":"go","package":"internal/cli","name":"TestWriteRenderedAcceptsSymlinkWorkspaceRoot","tier":"GATED-FULL"}

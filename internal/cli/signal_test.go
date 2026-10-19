@@ -93,6 +93,29 @@ func TestCallerCancelIsNotAnInterrupt(t *testing.T) {
 	}
 }
 
+func TestWorkRuntimeKeepsTheCommandInterrupt(t *testing.T) {
+	rt := &runtime{program: "aeon", stdin: strings.NewReader(""), stdout: &bytes.Buffer{}, stderr: &bytes.Buffer{}}
+	work := rt.workRuntime(context.Background())
+	rt.commandInterrupted.Store(true)
+	err := work.fail(context.Canceled)
+	exit, ok := err.(*exitError)
+	if !ok || exit.code != 130 || err.Error() != "interrupted" {
+		t.Fatalf("derived runtime lost the command interrupt: %v", err)
+	}
+	err = rt.fail(context.Canceled)
+	exit, ok = err.(*exitError)
+	if !ok || exit.code != 130 || err.Error() != "interrupted" {
+		t.Fatalf("parent runtime lost the command interrupt: %v", err)
+	}
+	other := &runtime{program: "aeon", stdin: strings.NewReader(""), stdout: &bytes.Buffer{}, stderr: &bytes.Buffer{}}
+	quiet := other.workRuntime(context.Background())
+	err = quiet.fail(context.Canceled)
+	exit, ok = err.(*exitError)
+	if !ok || exit.code != 1 || !strings.Contains(err.Error(), "context canceled") || strings.Contains(err.Error(), "interrupted") {
+		t.Fatalf("derived runtime invented an interrupt: %v", err)
+	}
+}
+
 func TestSignalCancelReportsInterrupt(t *testing.T) {
 	rt := &runtime{program: "aeon", stdin: strings.NewReader(""), stdout: &bytes.Buffer{}, stderr: &bytes.Buffer{}}
 	rt.commandInterrupted.Store(true)

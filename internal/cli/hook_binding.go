@@ -170,7 +170,7 @@ func (rt *runtime) selectIndexedHook(ctx context.Context, vendor, session string
 	if rt.instance != "" && rt.instance != disk.HookInstance {
 		return false, &hookbinding.Refusal{Code: "hook_instance_mismatch"}
 	}
-	next := *rt
+	next := rt.cloneRuntime()
 	next.instance, next.configPath = disk.HookInstance, disk.HookConfig
 	api, err := next.api()
 	if err != nil {

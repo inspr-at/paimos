@@ -7,9 +7,33 @@ import (
 	"fmt"
 	"os"
 	"os/signal"
+	"sync/atomic"
 	"syscall"
 	"time"
 )
+
+// commandInterrupt is one command's signal flag. It lives behind a pointer so
+// a copied runtime shares the flag instead of copying an atomic value.
+type commandInterrupt struct {
+	flag *atomic.Bool
+}
+
+// ensure publishes the flag before a runtime is copied. The command goroutine
+// does this before it starts work that runs on other goroutines.
+func (c *commandInterrupt) ensure() {
+	if c.flag == nil {
+		c.flag = new(atomic.Bool)
+	}
+}
+
+func (c *commandInterrupt) Load() bool {
+	return c != nil && c.flag != nil && c.flag.Load()
+}
+
+func (c *commandInterrupt) Store(v bool) {
+	c.ensure()
+	c.flag.Store(v)
+}
 
 const commandInterruptGrace = 2 * time.Second
 

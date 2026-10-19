@@ -13,7 +13,6 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
-	"sync/atomic"
 
 	"golang.org/x/term"
 
@@ -56,7 +55,7 @@ func programName(argv0 string) string {
 
 type runtime struct {
 	requestContext     context.Context
-	commandInterrupted atomic.Bool // set only after SIGINT or SIGTERM, never for a caller-canceled context
+	commandInterrupted commandInterrupt // shared by derived runtimes; set only after SIGINT or SIGTERM, never for a caller-canceled context
 	program            string
 	stdin              io.Reader
 	stdout             io.Writer
@@ -474,10 +473,18 @@ func (rt *runtime) context() context.Context {
 	return context.Background()
 }
 
+// cloneRuntime shares the interrupt flag. Copying runtime by value is forbidden:
+// the flag is one atomic for the command and every runtime derived from it.
+func (rt *runtime) cloneRuntime() *runtime {
+	rt.commandInterrupted.ensure()
+	copy := *rt
+	return &copy
+}
+
 // workRuntime isolates mutable caches and carries cancellation for one MCP call.
 func (rt *runtime) workRuntime(ctx context.Context) *runtime {
-	copy := *rt
+	copy := rt.cloneRuntime()
 	copy.requestContext = ctx
 	copy.kinds = nil
-	return &copy
+	return copy
 }
