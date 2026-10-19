@@ -527,15 +527,22 @@ func TestEpicFix2LandingText(t *testing.T) {
 // divided; the divided wait is ~ Next +2.
 func TestEpicFix3UntargetedLandsAndExpectedStart(t *testing.T) {
 	f := writerFixture(t)
-	until := apiClock.Add(2000 * time.Hour)
-	schedule := capacity.DefaultSchedule()
-	schedule.Override = "hold"
-	schedule.OverrideUntil = &until
-	rawSchedule, err := json.Marshal(schedule)
-	if err != nil {
-		t.Fatal(err)
-	}
-	err = db.InTenant(dbtest.Seed(t.Context()), f.db.App, f.writer.TenantID, func(tx pgx.Tx) error {
+	// Admission checks the hold against database now(), so the epic clock, the
+	// hold deadline and the release cadence all derive from one database instant.
+	var clock time.Time
+	err := db.InTenant(dbtest.Seed(t.Context()), f.db.App, f.writer.TenantID, func(tx pgx.Tx) error {
+		if err := tx.QueryRow(t.Context(), `SELECT now()`).Scan(&clock); err != nil {
+			return err
+		}
+		clock = clock.UTC()
+		until := clock.Add(2000 * time.Hour)
+		schedule := capacity.DefaultSchedule()
+		schedule.Override = "hold"
+		schedule.OverrideUntil = &until
+		rawSchedule, err := json.Marshal(schedule)
+		if err != nil {
+			return err
+		}
 		if _, err := tx.Exec(t.Context(), `INSERT INTO node_kinds(tenant_id,slug,label,short_prefix,icon,allowed_child_kinds) VALUES($1,'work_order','Work order','WOR','work-order',ARRAY[]::text[]) ON CONFLICT(tenant_id,slug) DO NOTHING`, f.writer.TenantID); err != nil {
 			return err
 		}
@@ -587,10 +594,10 @@ func TestEpicFix3UntargetedLandsAndExpectedStart(t *testing.T) {
 	}
 	prev := epicReleaseCadence
 	epicReleaseCadence = func() (releaseGap, bool) {
-		return releaseGap{hours: 24, latest: apiClock.Add(-12 * time.Hour)}, true
+		return releaseGap{hours: 24, latest: clock.Add(-12 * time.Hour)}, true
 	}
 	t.Cleanup(func() { epicReleaseCadence = prev })
-	m := &module{f.db.App, func() time.Time { return apiClock }}
+	m := &module{f.db.App, func() time.Time { return clock }}
 	list, code, body := epicList(t, f, m, "")
 	if code != 200 {
 		t.Fatalf("epics %d %s", code, body)
