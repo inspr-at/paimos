@@ -846,8 +846,9 @@ watch(sessionId, id => { if (id) { cursor.value = `s:${id}`; lastSession = id } 
   .add-agent, .more-agent { width: 44px; height: 44px; }
   .head-side :deep(.wd-btn) { display: none; }
   .cap-row:not(.in-sheet) { display: none; }
-  /* In the capacity sheet the row is the sheet's body: the dial on its own line, the accounts chip under it. */
-  .cap-row.in-sheet { margin: 0; padding: 0; }
+  /* In the capacity sheet the row is the sheet's body: the dial on its own line, the accounts chip under it,
+     44 px controls, and room at both ends for the plates and the touch targets that reach past a unit. */
+  .cap-row.in-sheet { --ctl-h: 44px; --page-x: 12px; margin: 0; padding: 0 var(--page-x); }
   .agents-work { margin-top: 10px; }
   .header-menu .menu-item { min-height: 52px; }
   .freshness { height: 44px; }

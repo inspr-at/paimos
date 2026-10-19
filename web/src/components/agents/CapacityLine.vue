@@ -84,7 +84,7 @@ defineExpose({ focus: () => trigger.value?.focus({ preventScroll: true }) })
 .cs-title { flex: 1; margin: 0; font-size: 15px; outline: none; }
 .cs-head .btn { min-height: 44px; }
 /* The page's capacity row, moved in: its dial and accounts chip wrap here as on a phone. */
-.cs-dial { padding: 4px 6px; }
+.cs-dial { padding: 4px 0; }
 .cs-dial:empty { min-height: 44px; }
 .cs-sep { height: 1px; margin: 4px; border: 0; background: var(--line); }
 .cs-item { display: flex; align-items: center; gap: 10px; width: 100%; min-height: 52px; padding: 4px 10px; border: 0; border-radius: 8px; background: transparent; color: var(--ink); font: inherit; font-size: 14px; text-align: left; cursor: pointer; }

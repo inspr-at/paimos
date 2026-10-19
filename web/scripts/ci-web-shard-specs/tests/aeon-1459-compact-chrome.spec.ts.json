@@ -1,0 +1,13 @@
+{
+  "group": "remaining-ui",
+  "nightlyTiming": {
+    "seconds": 45,
+    "selectedTests": 18
+  },
+  "spec": {
+    "file": "tests/aeon-1459-compact-chrome.spec.ts",
+    "listedTests": 18,
+    "weightSeconds": 60,
+    "weightSource": "remote-one-worker-AEON-1459-38s-plus-margin"
+  }
+}

@@ -175,7 +175,9 @@ const structure: Structure<SessionView> = {
 }
 // What the person holds: Show now offers it. A swipe's own hold ends by itself before a finger
 // could reach Show now, so the note stays calm through it.
-const personHolds = computed(() => pointing.value || keyFocus.value || menuOpen.value)
+// The floating held chip (compact screens) is the list's too: pointing at it keeps holding (AEON-1459).
+const chipPointing = ref(false)
+const personHolds = computed(() => pointing.value || chipPointing.value || keyFocus.value || menuOpen.value)
 const hold = useSessionHold(() => liveViews.value, structure, () => !showRemoved.value && (personHolds.value || touching.value), undefined, {
   read: projectLayout,
   headings: layout => layout.headings,
@@ -1001,7 +1003,7 @@ function sessionLinkClick(event: MouseEvent, id: string) {
         <!-- Compact: the footer's summary, in the toolbar's status slot (AEON-1459, D3/D5). -->
         <CompactStatus v-if="loaded && state === 'ready'" class="tb-status" :count="workingCount" word="working" mark="working" />
         <!-- Rows that wait to enter, leave or move while you point here (AEON-1211); otherwise how fresh the list is. -->
-        <SessionsHeld v-if="loaded && state === 'ready'" :pending="personHolds ? hold.pending.value : 0" :updated-at="agents.sessionsUpdatedAt" :now="now" :stale="listStale" @show-now="hold.showNow()" />
+        <SessionsHeld v-if="loaded && state === 'ready'" :pending="personHolds ? hold.pending.value : 0" :updated-at="agents.sessionsUpdatedAt" :now="now" :stale="listStale" @show-now="hold.showNow()" @point="chipPointing = $event" />
         <span v-if="loaded && state === 'ready'" class="head-tools">
           <button
             v-if="stale.length" type="button" class="btn sm ghost quiet-btn" :class="{ 'clear-stale-off': showRemoved }" :disabled="showRemoved || removal.busy.value" :aria-hidden="showRemoved || undefined"

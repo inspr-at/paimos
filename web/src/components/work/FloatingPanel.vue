@@ -153,7 +153,8 @@ function anchorShifted() {
 }
 let settleFrame = 0
 function scrolled(event: Event) {
-  if (panel.value?.contains(event.target as Node)) return
+  // A bottom sheet is not anchored to its trigger: the page scrolling behind it never closes it.
+  if (bottom.value || panel.value?.contains(event.target as Node)) return
   if (!anchorShifted()) return
   if (!(props.anchor instanceof HTMLElement)) { emit('close', false); return }
   if (settleFrame) return

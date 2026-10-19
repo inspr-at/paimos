@@ -359,9 +359,11 @@ test('AEON-1459 C6 agents 844x340 light: held changes float as a chip; the toolb
     const chipBox = await box(chip)
     c.is('chip inside the viewport, 44 px tall', chipBox, 'inside 844 × 340', inside(chipBox, LANDSCAPE) && chipBox.height >= 43.5)
     await shot(page, info, LANDSCAPE, 'light', 'held')
-    // Show now applies the waiting rows at once (a keyboard press: the pointer stays on the list).
-    await chip.focus()
-    await page.keyboard.press('Enter')
+    // The chip is the list's: moving the mouse onto it keeps the hold, and its click applies the rows at once.
+    await chip.hover()
+    await page.clock.runFor(2_000)
+    await expect(chip, 'pointing at the chip keeps holding').toBeVisible()
+    await chip.click()
     await expect(chip).toBeHidden()
     await expect(page.locator(`.sessions [data-row="s:5e000000-0000-4000-8000-000000000900"]`)).toBeAttached()
   } finally { await c.write('c6-844x340-light') }

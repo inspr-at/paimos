@@ -420,8 +420,8 @@ for (const width of [720, 721, 768]) for (const theme of ['light', 'dark'] as co
 // Every width from just above phone width to a wide desktop, places labelled from
 // 1181 px: the trail never shows a cut chip, and it returns whole when the window
 // widens. What steps aside stays in the trail for screen readers, out of the tab order.
-test('from 720 to 1440 px the trail never cuts a chip and returns whole when the window widens', async ({ page }, testInfo) => {
-  // Two trails, every 7 px from 1440 down to 720 (narrower is the compact header, AEON-1459), each settled on a rendering
+test('from 601 to 1440 px the trail never cuts a chip and returns whole when the window widens', async ({ page }, testInfo) => {
+  // Two trails, every 7 px from 1440 down to 601 (under 720 the compact header, AEON-1459), each settled on a rendering
   // update, then a refit at four widths. On the two-worker CI shard the 30s
   // default ran out during the reviewer's shot, after fonts had loaded
   // (PR 711, job 117000751930). 180s still only stops a hang. The assertions stay.
@@ -451,7 +451,7 @@ test('from 720 to 1440 px the trail never cuts a chip and returns whole when the
       }).observe(header)
     })
     const seen: string[] = []
-    for (let width = 1440; width >= 720; width -= 7) {
+    for (let width = 1440; width >= 601; width -= 7) {
       await page.setViewportSize({ width, height: 900 })
       await settle(page)
       const fit = await trailFit(page)
@@ -472,14 +472,15 @@ test('from 720 to 1440 px the trail never cuts a chip and returns whole when the
     // AEON-1446: at Tick's widths and the 887 flake's, a refit at the same width (a font
     // swap) moves nothing: the places, the Desk's chevron, Search, the avatar and the
     // page's crumb keep their boxes, and the trail keeps its parts.
-    for (const width of [1440, 1024, 887, 720]) {
+    for (const width of [1440, 1024, 887, 601]) {
       await page.setViewportSize({ width, height: 900 })
       await settle(page)
       const fit = await trailFit(page)
       expect(fit.cut, `${trail.path} at ${width}: ${fit.parts.join(' ')}`).toEqual([])
       await expectStableControls({
         controls: {
-          places: places(page), chevron: chevron(page), search: page.getByRole('button', { name: 'Search everything' }),
+          // Compact headers (under 720 px, AEON-1459) have no preview chevron.
+          places: places(page), ...(width < 720 ? {} : { chevron: chevron(page) }), search: page.getByRole('button', { name: 'Search everything' }),
           account: page.locator('.app-header .account'), crumb: trailOf(page).locator('[aria-current="page"]'),
         },
         interactions: [{ name: 'a font swap refits the header', run: async () => { await page.evaluate(() => document.fonts.dispatchEvent(new Event('loadingdone'))); await settle(page) } }],
@@ -488,10 +489,11 @@ test('from 720 to 1440 px the trail never cuts a chip and returns whole when the
       await page.screenshot({ path: join(dir, `trail-${trail.slug}-${width}-light.png`), clip: { x: 0, y: 0, width, height: 64 } })
     }
     // Screen readers keep the whole trail at every width; what is out of sight is out of the tab order.
-    await page.setViewportSize({ width: 720, height: 900 })
+    await page.setViewportSize({ width: 640, height: 900 })
     await settle(page)
     const crumbs = page.getByRole('navigation', { name: 'Breadcrumb' })
-    await expect(crumbs.getByRole('link', { name: 'PHAROS Pharos', exact: true })).toHaveAttribute('href', '/p/PHAROS')
+    // The compact header's project crumb opens the project's sheet and names the project (AEON-1459, D11).
+    await expect(crumbs.locator('.crumb-sheet')).toHaveAccessibleName(/^PHAROS · Pharos: /)
     expect(await trailOf(page).evaluate(trail => [...trail.querySelectorAll<HTMLElement>('a[href], button')].filter(el => el.getBoundingClientRect().width <= 1 && el.tabIndex >= 0 && getComputedStyle(el).display !== 'none').length)).toBe(0)
   }
 })
