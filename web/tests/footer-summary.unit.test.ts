@@ -3,7 +3,7 @@
 import { effectScope, nextTick, ref } from 'vue'
 import { describe, expect, it } from 'vitest'
 import { accessFooter, agentsFooter, atRisk, knowledgeFooter, releasesFooter, settingsFooter, ticketsFooter, withAgentsIsPartial } from '../src/lib/footerProviders'
-import { footerSummary, landed, phoneRoom, pingGate, plain, useFooterSummary, type FooterSummary } from '../src/lib/footerSummary'
+import { footerSummary, landed, pingGate, plain, useFooterSummary, type FooterSummary } from '../src/lib/footerSummary'
 
 const noop = () => undefined
 const said = (summary: FooterSummary | null) => summary ? { tone: summary.tone, full: plain(summary.full), short: plain(summary.short), plainText: !summary.action } : null
@@ -52,18 +52,6 @@ describe('what each screen says', () => {
     expect(withAgentsIsPartial(true, 40, 40, false)).toBe(false)
     expect(withAgentsIsPartial(false, 20, 40, true)).toBe(false)
     expect(withAgentsIsPartial(true, 0, null, false)).toBe(true)
-  })
-
-  it('keeps a transient settings line from taking the phone release slot', () => {
-    const act = { retry: noop, needs: noop }
-    expect(phoneRoom(settingsFooter({ saving: true, failed: false, needs: 0, act }))).toBe(false)
-    expect(phoneRoom(settingsFooter({ saving: false, failed: true, needs: 0, act }))).toBe(false)
-    expect(phoneRoom(settingsFooter({ saving: false, failed: false, needs: 0, act }))).toBe(false)
-    expect(phoneRoom(settingsFooter({ saving: false, failed: false, needs: 2, act }))).toBe(true)
-    // Pending needs already hold the phone slot. Saving and the failure must keep it.
-    expect(phoneRoom(settingsFooter({ saving: true, failed: false, needs: 2, act }))).toBe(true)
-    expect(phoneRoom(settingsFooter({ saving: false, failed: true, needs: 2, act }))).toBe(true)
-    expect(phoneRoom(settingsFooter({ saving: true, failed: true, needs: 2, act }))).toBe(true)
   })
 
   it('says nothing when settings are calm, and a skeleton while a screen loads', () => {

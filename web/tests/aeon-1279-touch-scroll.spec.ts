@@ -1,7 +1,8 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // AEON-1279: phone portrait scrolling ran away. Risk: a live change lands while a finger
-// scrolls, or above the screen without anchoring, and the rows on screen jump; or the footer
-// folding away resizes the page's scroller while momentum runs. Real touch gestures come from
+// scrolls, or above the screen without anchoring, and the rows on screen jump; or the page's
+// scroller changes size while momentum runs (the footer that folded away did; phones have no
+// footer bar since AEON-1459). Real touch gestures come from
 // Chromium's CDP (Input.dispatchTouchEvent). WebKit has no scroll
 // anchoring, so every surface here runs with it off, as on an iPhone. Live changes arrive on
 // the page clock, never after a sleep; the first row on screen is measured before and after.
@@ -146,8 +147,9 @@ function arrive(data: AgentData) {
 const SESSION_ROWS = '.sessions .row[data-row]'
 const SESSION_HEADS = '.sessions .th-stick, .sessions .thead'
 const sessionRow = (ref: string) => `.sessions ${ref}`
-// The held note's Show now face (its unseen sizing twin carries .held-face too).
-const SHOW_NOW = '.sessions [data-held-note] button.held-face:not(.off)'
+// Show now: the held note's face on wider lists (its unseen sizing twin carries .held-face too), the
+// floating chip on phones (AEON-1459). Either one offered while a finger is down is the failure.
+const SHOW_NOW = '[data-held-chip], .sessions [data-held-note] button.held-face:not(.off)'
 const arrivalRow = (n: number) => sessionRow(`[data-row="s:${ARRIVALS[n]}"]`)
 async function openAgents(page: Page, theme: 'light' | 'dark' = 'light') {
   const data = await agentsPage(page, theme)
@@ -217,43 +219,26 @@ test('agents 390: a refresh after one 40 px swipe lands without moving the rows 
 })
 
 for (const theme of ['light', 'dark'] as const) {
-  test(`${theme} 390: the footer folds away over the page; the page's scroller never changes size while scrolling`, async ({ page }, info) => {
+  test(`${theme} 390: no footer bar; the page's scroller never changes size while scrolling, and the last row reaches the foot`, async ({ page }, info) => {
     const { cdp } = await openAgents(page, theme)
-    const footer = page.locator('.app-footer')
-    // Native scroll delivery runs outside the injected clock. Observe the setup jump's
-    // fold before advancing its cooldown, or a late scroll can start the cooldown only
-    // after runFor returns and swallow the reverse scroll (AEON-1477, CI on Linux).
-    await expect(footer).toHaveClass(/hidden/)
+    // AEON-1459 (D5): phones have no footer bar, so nothing folds away over the page.
+    await expect(page.locator('footer.app-footer')).toHaveCount(0)
     await page.clock.runFor(400)
-    // Reading mid-page with the footer showing: back up after the jump's cooldown.
-    await page.locator('main').evaluate(el => { el.scrollTop -= 80 })
     await watchTouch(page, SESSION_ROWS)
-    await expect(footer).not.toHaveClass(/hidden/)
-    await expect(footer).toBeInViewport()
-    // Showing it starts a 260 ms cooldown. Advance the injected clock before reversing again.
-    await page.clock.runFor(400)
     const before = await rectOf(page, 'main')
-    await page.screenshot({ path: info.outputPath(`agents-390-${theme}-footer-shown.png`) })
+    await page.screenshot({ path: info.outputPath(`agents-390-${theme}-reading.png`) })
     await swipe(page, cdp, { x: 195, y: 600 }, -200)
-    await expect(footer).toHaveClass(/hidden/)
-    await expect(footer).not.toBeInViewport()
-    const folded = await rectOf(page, 'main')
-    const { heights } = await touchLog(page)
-    note(info, `main ${before.height} px before, ${folded.height} px with the footer folded; heights seen while scrolling: ${[...new Set(heights)].join(', ')}`)
-    expect(folded, 'the scroller keeps its size when the footer folds away').toEqual(before)
-    expect([...new Set(heights)], 'the scroller never changes size while scrolling').toEqual([before.height])
-    await page.screenshot({ path: info.outputPath(`agents-390-${theme}-footer-folded.png`) })
-    // Back up a little: the footer returns over the page, and the page still keeps its size.
     await page.clock.runFor(400)
     await swipe(page, cdp, { x: 195, y: 300 }, 80)
-    await expect(footer).not.toHaveClass(/hidden/)
-    await expect(footer).toBeInViewport()
-    expect(await rectOf(page, 'main')).toEqual(before)
-    // At the very end the last row clears the footer.
+    const { heights } = await touchLog(page)
+    note(info, `main ${before.height} px; heights seen while scrolling: ${[...new Set(heights)].join(', ')}`)
+    expect([...new Set(heights)], 'the scroller never changes size while scrolling').toEqual([before.height])
+    expect(await rectOf(page, 'main'), 'the scroller keeps its box').toEqual(before)
+    // At the very end the last row reaches the screen's foot: no bar lies over it.
     await page.locator('main').evaluate(el => el.scrollTo({ top: el.scrollHeight }))
-    await expect(footer).toBeInViewport()
     const last = await page.locator(SESSION_ROWS).last().evaluate(el => el.getBoundingClientRect().bottom)
-    expect(last).toBeLessThanOrEqual((await footer.boundingBox())!.y + 0.5)
+    expect(last).toBeLessThanOrEqual(PHONE.height + 0.5)
+    expect(await page.evaluate(([x, y]) => !!document.elementFromPoint(x!, y!)?.closest('.sessions'), [195, Math.min(last, PHONE.height) - 2]), 'the last row is not covered').toBe(true)
   })
 }
 
@@ -283,7 +268,7 @@ test('ticket list 390: a swipe never resizes the page; a ticket closed elsewhere
     await watchTouch(phone, TICKET_ROWS, '.table-card')
     const before = await rectOf(phone, 'main')
     await swipe(phone, cdp, { x: 195, y: 600 }, -200)
-    await expect(phone.locator('.app-footer')).toHaveClass(/hidden/)
+    await expect(phone.locator('footer.app-footer'), 'phones have no footer bar (AEON-1459)').toHaveCount(0)
     const { heights } = await touchLog(phone)
     note(info, `main ${before.height} px; heights seen while scrolling: ${[...new Set(heights)].join(', ')}`)
     expect([...new Set(heights)], 'the scroller never changes size while scrolling').toEqual([before.height])

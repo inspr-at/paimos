@@ -302,9 +302,10 @@ for (const theme of ['light', 'dark'] as const) for (const width of [1600, 390])
     const main = (await page.locator('.main-col').boundingBox())!
     const layout = (await page.locator('.layout').boundingBox())!
     expect(Math.abs(main.width - layout.width)).toBeLessThan(2)
-    // Accounts sit above the sessions (AEON-299), as the capacity row's chip (AEON-1209); account management is in Settings.
+    // Accounts sit above the sessions (AEON-299), as the capacity row's chip (AEON-1209), on phones in the
+    // capacity line (AEON-1459); account management is in Settings.
     const sessions = (await page.locator('.sessions').boundingBox())!
-    const accounts = (await page.locator('.cap-row .acc-chip').boundingBox())!
+    const accounts = (await page.locator(width < 720 ? '.agents-page .cap-line' : '.cap-row .acc-chip').boundingBox())!
     expect(accounts.y + accounts.height).toBeLessThanOrEqual(sessions.y)
     await page.locator('h1').scrollIntoViewIfNeeded()
     await page.mouse.move(0, 0)

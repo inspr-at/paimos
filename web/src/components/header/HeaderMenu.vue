@@ -139,7 +139,8 @@ defineExpose({ close, focusFirst, open, show })
 <style scoped>
 .header-menu { position: relative; flex-shrink: 0; }
 .hm-trigger[aria-expanded="true"] { color: var(--teal-ink); background: var(--seg-on); box-shadow: 0 0 0 1px var(--chip-teal-line), var(--shadow-btn); }
-.hm-panel { position: absolute; right: 0; top: 44px; z-index: 30; width: min(320px, calc(100vw - 24px)); padding: 6px; }
+/* Never taller than the window under the header: a short landscape screen scrolls the menu, so its last item stays reachable (AEON-1459). */
+.hm-panel { position: absolute; right: 0; top: 44px; z-index: 30; width: min(320px, calc(100vw - 24px)); max-height: calc(100dvh - var(--header-h) - 12px); overflow-y: auto; overscroll-behavior: contain; padding: 6px; }
 .hm-panel.start { right: auto; left: 0; }
 @media (prefers-reduced-motion: no-preference) {
   .hm-panel { animation: hm-in .14s ease-out; transform-origin: top right; }

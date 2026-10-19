@@ -27,7 +27,9 @@ or a More item for it.
   [agents-daily-plan.md](agents-daily-plan.md)). A page opened on a phone or a
   short landscape screen starts with the dial folded, so the sessions come
   first; its toggle unfolds it for the visit, and the saved fold, shared across
-  devices, belongs to wider screens (AEON-1286).
+  devices, belongs to wider screens (AEON-1286). On phones and short screens the
+  dial and the accounts chip fold into one capacity line whose sheet holds them
+  (AEON-1459, see [compact-chrome.md](compact-chrome.md)).
 - On touch, −, the number and + are three separate 44 px targets that never
   overlap: − and + are 44 px wide, and the number's target takes in its mark.
   In a tight row a closed unit is one target, and a tap opens its plate.

@@ -3,6 +3,7 @@ import { mkdirSync } from 'node:fs'
 import { test, expect, type Page } from '@playwright/test'
 import { fixtures, mockWork } from './work-fixtures'
 import { expectStableControls } from './helpers/stable'
+import { toggleProjectHead } from './helpers/compact'
 
 const shots = 'test-results/aeon-645'
 const countRoot = (page: Page) => page.getByRole('group', { name: 'Filter tickets by status', exact: true })
@@ -93,7 +94,7 @@ for (const width of [390, 1024, 1440]) for (const theme of ['light', 'dark']) {
         ] })
     }
     await screenshot(page, `${width}-${theme}-comfortable`)
-    if (width === 390) await page.locator('.phone-header-fold').click(); else await density(page, 'Collapsed').click()
+    if (width === 390) await toggleProjectHead(page); else await density(page, 'Collapsed').click()
     await expect(countRoot(page)).toBeHidden()
     await screenshot(page, `${width}-${theme}-collapsed`)
     expect(probe.summaryRequests(), 'one summary, no per-status requests').toBe(1)

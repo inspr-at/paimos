@@ -49,16 +49,25 @@ const windButton = (page: Page) => head(page).getByRole('button', { name: 'Wind 
 const chipButton = (page: Page) => head(page).getByRole('button', { name: /^(Winding down|Wound down)/ })
 const formPopover = (page: Page) => page.getByRole('dialog', { name: 'Wind down', exact: true })
 const statusPopover = (page: Page) => page.getByRole('dialog', { name: 'Wind-down', exact: true })
-async function startWindDown(page: Page) { await windButton(page).click(); await formPopover(page).locator('button[type=submit]').click() }
+// Phones and short screens (AEON-1459, R2.1): Wind down leads the head's ⋯; the popover opens from there.
+const compactWidth = (width: number) => width < 720
+const moreButton = (page: Page) => head(page).getByRole('button', { name: 'More agent actions', exact: true })
+const windTrigger = (page: Page, width: number) => compactWidth(width) ? moreButton(page) : windButton(page)
+async function openWind(page: Page, width = 1440) {
+  if (!compactWidth(width)) { await windButton(page).click(); return }
+  await moreButton(page).click()
+  await page.getByRole('menuitem', { name: /^Wind down…/ }).click()
+}
+async function startWindDown(page: Page, width = 1440) { await openWind(page, width); await formPopover(page).locator('button[type=submit]').click() }
 for (const width of [1440, 390]) for (const theme of ['light', 'dark'] as const) {
   test(`${width} ${theme}: the Wind down popover keeps its controls still, starts, shows and cancels a wind-down`, async ({ page }) => {
     await page.setViewportSize({ width, height: 1000 }); await page.emulateMedia({ colorScheme: theme })
     const errors = watchErrors(page), mock = await setup(page)
     await page.goto('/agents')
-    const open = windButton(page); await expect(open).toBeVisible()
-    if (width === 390) { await expect(open.locator('.wl')).toBeHidden(); expect((await bounds(open)).width).toBeGreaterThanOrEqual(44); expect((await bounds(open)).height).toBeGreaterThanOrEqual(44) } else await expect(open.locator('.wl')).toBeVisible()
-    await open.click()
-    const pop = formPopover(page); await expect(pop).toBeVisible(); await expect(open).toHaveAttribute('aria-expanded', 'true')
+    const open = windTrigger(page, width); await expect(open).toBeVisible()
+    if (width === 390) { await expect(windButton(page)).toBeHidden(); expect((await bounds(open)).width).toBeGreaterThanOrEqual(44); expect((await bounds(open)).height).toBeGreaterThanOrEqual(44) } else await expect(open.locator('.wl')).toBeVisible()
+    await openWind(page, width)
+    const pop = formPopover(page); await expect(pop).toBeVisible(); if (!compactWidth(width)) await expect(open).toHaveAttribute('aria-expanded', 'true')
     const where = pop.getByLabel('Where'), by = pop.getByLabel('By', { exact: true }), seg = pop.getByRole('radiogroup', { name: 'Done in' }), go = pop.locator('button[type=submit]'), quit = pop.getByRole('button', { name: /^Cancel/ })
     await expect(where).toBeFocused()
     await expect(where.locator('option')).toHaveText(['All computers · 3 agents', 'Markus’s studio · 2 agents', 'Build machine · 1 agent', 'Chosen agents…'])
@@ -90,7 +99,7 @@ for (const width of [1440, 390]) for (const theme of ['light', 'dark'] as const)
     await by.focus(); await page.keyboard.press('Escape'); await expect(pop).toBeVisible(); await expect(by).not.toBeFocused()
     await where.selectOption({ label: 'Markus’s studio · 2 agents' }); await seg.getByRole('radio', { name: '30 min', exact: true }).click()
     await page.keyboard.press('Escape'); await page.keyboard.press('Escape'); await expect(pop).toHaveCount(0); await expect(open).toBeFocused()
-    await open.click(); await expect(where).toHaveValue('all')
+    await openWind(page, width); await expect(where).toHaveValue('all')
     await where.selectOption({ label: 'Markus’s studio · 2 agents' }); await seg.getByRole('radio', { name: '30 min', exact: true }).click()
     const expectedBy = await by.inputValue()
     await by.focus(); await page.keyboard.press('ControlOrMeta+Enter')
@@ -99,7 +108,7 @@ for (const width of [1440, 390]) for (const theme of ['light', 'dark'] as const)
     expect(Date.parse(String(mock.calls[0]?.body.deadline_at)) - await pageNow(page)).toBeGreaterThan(29 * 60_000)
     // The control becomes the chip; focus follows it.
     const chip = chipButton(page); await expect(chip).toBeVisible(); await expect(chip).toBeFocused()
-    await expect(chip).toContainText(`Winding down`); await expect(open).toHaveCount(0)
+    await expect(chip).toContainText(`Winding down`); await expect(windButton(page)).toHaveCount(0)
     if (width > 720) await expect(chip).toContainText(`· 2 left · by ${expectedBy}`)
     expect((await bounds(chip)).height).toBeGreaterThanOrEqual(width === 390 ? 44 : 30)
     await chip.click(); const status = statusPopover(page); await expect(status).toBeVisible()
@@ -110,14 +119,14 @@ for (const width of [1440, 390]) for (const theme of ['light', 'dark'] as const)
     // Cancel from the status popover withdraws, with Undo.
     await status.getByRole('button', { name: 'Cancel the wind-down', exact: true }).click()
     await expect.poll(() => mock.deletes).toEqual(['wind-request']); await expect(page.getByRole('button', { name: 'Undo', exact: true })).toBeVisible()
-    await expect(windButton(page)).toBeVisible(); await expect(windButton(page)).toBeFocused()
+    await expect(windTrigger(page, width)).toBeVisible(); await expect(windTrigger(page, width)).toBeFocused()
     // The remembered Where and Done in come back for this person.
-    await windButton(page).click(); await expect(where).toHaveValue('h:studio'); await expect(seg.getByRole('radio', { name: '30 min', exact: true })).toHaveAttribute('aria-checked', 'true')
+    await openWind(page, width); await expect(where).toHaveValue('h:studio'); await expect(seg.getByRole('radio', { name: '30 min', exact: true })).toHaveAttribute('aria-checked', 'true')
     await page.keyboard.press('Escape'); await page.keyboard.press('Escape'); await expect(pop).toHaveCount(0)
     // The × on the chip cancels in one step.
-    await startWindDown(page); await expect(chipButton(page)).toBeVisible()
+    await startWindDown(page, width); await expect(chipButton(page)).toBeVisible()
     await head(page).getByRole('button', { name: 'Cancel the wind-down', exact: true }).click()
-    await expect.poll(() => mock.deletes.length).toBe(2); await expect(windButton(page)).toBeFocused()
+    await expect.poll(() => mock.deletes.length).toBe(2); await expect(windTrigger(page, width)).toBeFocused()
     // Pause all… and Resume all… sit under "Right now" in the same popover.
     // A phone's compact rows keep only ⋯; Pause… is in its menu (AEON-1211).
     const pauseRow = async () => {
@@ -127,7 +136,7 @@ for (const width of [1440, 390]) for (const theme of ['light', 'dark'] as const)
     }
     if (width === 390) await expect(page.getByRole('button', { name: 'Actions for worker-1', exact: true })).toBeVisible()
     else await expect(page.getByRole('button', { name: 'Pause worker-1', exact: true })).toBeVisible()
-    await windButton(page).click(); const rightNow = formPopover(page)
+    await openWind(page, width); const rightNow = formPopover(page)
     await expect(rightNow.getByRole('button', { name: /^Resume all…/ })).toHaveAttribute('aria-disabled', 'true'); await expect(rightNow).toContainText('Nothing is paused.')
     await rightNow.getByRole('button', { name: /^Pause all…/ }).click(); await expect(rightNow).toHaveCount(0)
     const dialog = page.getByRole('dialog', { name: 'Pause all', exact: true }); await expect(dialog).toBeVisible()
@@ -247,9 +256,8 @@ test('AEON-783: chosen agents keeps Done in, By, Cancel and Submit still', async
   for (const width of [1440, 1024, 390]) for (const theme of ['light', 'dark'] as const) {
     await page.setViewportSize({ width, height: 1000 })
     await page.evaluate(theme => { document.documentElement.dataset.theme = theme }, theme)
-    const open = windButton(page)
     if (await formPopover(page).count()) await formPopover(page).getByRole('button', { name: /^Cancel/ }).click()
-    await open.click()
+    await openWind(page, width)
     const pop = formPopover(page)
     const where = pop.getByLabel('Where'), by = pop.getByLabel('By', { exact: true }), seg = pop.getByRole('radiogroup', { name: 'Done in' })
     const go = pop.locator('button[type=submit]'), quit = pop.getByRole('button', { name: /^Cancel/ })

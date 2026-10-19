@@ -467,8 +467,8 @@ test('AEON-1286 1024 sanity: the desktop head and its anchored menu keep their f
 })
 
 // Ticket list and agent view: rows first. A page opened on a phone folds the dial's body (its
-// saved fold belongs to wider screens), and on short landscape screens the footer lies over
-// the page and folds away while reading. Row counts are recorded as evidence for the hand-over.
+// saved fold belongs to wider screens). Phones and short screens have no footer bar at all
+// (AEON-1459, D5), so nothing lies over the rows. Row counts are recorded as evidence.
 const fullyVisible = (page: Page, rows: string) => page.evaluate(selector => [...document.querySelectorAll<HTMLElement>(selector)].filter(row => {
   const b = row.getBoundingClientRect(), x = b.left + Math.min(b.width / 2, 120)
   if (b.height === 0 || b.top < 0 || b.bottom > innerHeight) return false
@@ -496,6 +496,7 @@ for (const size of [{ width: 390, height: 664 }, { width: 320, height: 568 }]) {
     // The person's saved fold is open (as on the desktop); the phone still opens folded.
     work.preferences['ui.agents.sections'] = { dial: true }
     await page.goto('/agents')
+    // On phones the dial lives in the capacity line's sheet (AEON-1459, R2.1).
     const fold = page.locator('.cdial .fs-tog'), rows = page.locator('[data-row^="s:"]')
     await expect(rows.nth(5)).toBeAttached()
     await expect(fold).toHaveAttribute('aria-expanded', 'false')
@@ -507,35 +508,33 @@ for (const size of [{ width: 390, height: 664 }, { width: 320, height: 568 }]) {
     await readDown(page, 900)
     const reading = await fullyVisible(page, '[data-row^="s:"]')
     await page.screenshot({ path: info.outputPath(`AEON-1286/agents-reading-${size.width}x${size.height}.png`) })
-    // Its toggle unfolds the body for this visit; the saved choice stays as it was.
+    // The capacity sheet's "The full dial" unfolds the body for this visit; the saved choice stays as it was.
     await readDown(page, -5000)
-    await fold.click()
+    await page.locator('.agents-page .cap-line').click()
+    await page.getByRole('dialog', { name: 'Capacity' }).getByRole('button', { name: /The full dial/ }).click()
     await expect(page.locator('.dial-card')).toBeVisible()
+    await expect(fold).toHaveAttribute('aria-expanded', 'true')
     expect(work.preferences['ui.agents.sections']).toEqual({ dial: true })
     await report(info.outputPath(`AEON-1286/agents-rows-${size.width}x${size.height}.md`), [`agents ${size.width}x${size.height}: first session row at ${Math.round(firstRow.y)} px; ${atTop} rows fully on screen at the top, ${reading} while reading (baseline on main: first row ~1,940 px, 0 rows)`])
   })
 }
 
-for (const look of ['light', 'dark'] as const) test(`AEON-1286 short landscape ${LANDSCAPE.width}x${LANDSCAPE.height} ${look}: the footer folds away while reading the lists`, async ({ page }, info) => {
+for (const look of ['light', 'dark'] as const) test(`AEON-1286 short landscape ${LANDSCAPE.width}x${LANDSCAPE.height} ${look}: no footer bar over the lists; the scroller keeps its size while reading`, async ({ page }, info) => {
   await page.emulateMedia({ colorScheme: look, reducedMotion: 'reduce' })
   await listWorld(page, LANDSCAPE)
-  const footer = page.locator('.app-footer')
   const lines: string[] = []
   for (const [name, path, rows] of [['tickets', '/p/AEON', 'tr.ticket-row'], ['sessions', '/agents', '[data-row^="s:"]']] as const) {
     await page.goto(path)
     await expect(page.locator(rows).nth(5)).toBeAttached()
-    await expect(footer).not.toHaveClass(/hidden/)
-    // The footer lies over the page's end; the page keeps its room so the last row clears it.
-    expect(await page.locator('main').evaluate(main => parseFloat(getComputedStyle(main).paddingBottom))).toBeGreaterThan(0)
+    // AEON-1459 (D5): no footer bar on compact screens, so nothing covers the last rows and nothing folds away.
+    await expect(page.locator('footer.app-footer'), `${name}: no footer bar`).toHaveCount(0)
+    expect(await page.locator('main').evaluate(main => parseFloat(getComputedStyle(main).paddingBottom)), `${name}: no room kept for a footer`).toBe(0)
+    const height = await page.locator('main').evaluate(main => main.clientHeight)
+    expect(height, `${name}: the page's scroller reaches the screen's foot`).toBe(LANDSCAPE.height)
     await readDown(page, 400)
-    await expect(footer, `${name}: the footer folds away while reading down`).toHaveClass(/hidden/)
-    await expect.poll(() => footer.evaluate(el => el.getBoundingClientRect().top), `${name}: folded below the screen`).toBeGreaterThanOrEqual(LANDSCAPE.height - .5)
     const reading = await fullyVisible(page, rows)
+    expect(await page.locator('main').evaluate(main => main.clientHeight), `${name}: the scroller keeps its size while reading`).toBe(height)
     await page.screenshot({ path: info.outputPath(`AEON-1286/${name}-reading-${LANDSCAPE.width}-${look}.png`) })
-    // The footer settles for 260 ms after it moves; past that, reading back up brings it back.
-    await page.clock.runFor(300)
-    await readDown(page, -40)
-    await expect(footer, `${name}: reading back up brings it back`).not.toHaveClass(/hidden/)
     lines.push(`${name} ${LANDSCAPE.width}x${LANDSCAPE.height}: ${reading} rows fully on screen while reading`)
   }
   await report(info.outputPath(`AEON-1286/landscape-rows-${look}.md`), lines)

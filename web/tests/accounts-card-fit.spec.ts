@@ -11,6 +11,7 @@ import { agentData, mockAgents, type AgentWorld } from './agents-fixtures'
 import { NOW, TZ, capacityWorld, type CapacityWorld } from './capacity-fixtures'
 import { mockEffectivePermissions } from './authz-fixtures'
 import { fixtures, me, mockWork, watchErrors } from './work-fixtures'
+import { isCompact, showCapacityRow } from './helpers/compact'
 
 test.use({ timezoneId: TZ })
 const world: AgentWorld = {
@@ -127,6 +128,8 @@ test('the capacity row and the accounts popover fit every width, panel open and 
   // The popover with the long names stays inside the window at the edges of the layouts.
   for (const width of [390, 600, 720, 1100, 1440, 2560]) {
     await page.setViewportSize({ width, height: 900 })
+    // Phones: the capacity row is in the capacity line's sheet (AEON-1459).
+    await showCapacityRow(page)
     await chip.click()
     await expect(page.getByRole('dialog', { name: 'Accounts and computers' })).toBeVisible()
     const result = await fit(page)
@@ -134,6 +137,7 @@ test('the capacity row and the accounts popover fit every width, panel open and 
     if ((result.documentOver ?? 0) > 1) problems.push(`${width}px popover makes the document scroll by ${result.documentOver}px`)
     await page.keyboard.press('Escape')
     await expect(page.getByRole('dialog', { name: 'Accounts and computers' })).toHaveCount(0)
+    if (isCompact(page)) { await page.keyboard.press('Escape'); await expect(page.getByRole('dialog', { name: 'Capacity' })).toHaveCount(0) }
   }
   await page.goto('/agents/5e000000-0000-4000-8000-000000000001')
   await expect(page.getByRole('complementary', { name: 'Session details' })).toBeVisible()

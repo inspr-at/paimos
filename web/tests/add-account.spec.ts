@@ -5,6 +5,7 @@ import { agentData, mockAgents, type AgentWorld } from './agents-fixtures'
 import { capacityWorld, NOW, TZ } from './capacity-fixtures'
 import { expectStableControls } from './helpers/stable'
 import { fixtures, me, mockWork, watchErrors } from './work-fixtures'
+import { showCapacityRow } from './helpers/compact'
 
 test.use({ timezoneId: TZ })
 
@@ -260,6 +261,7 @@ test('the Agents page links to Settings; Add an account lives there and opens th
   await setup(page, { desk: true })
   await page.goto('/agents')
   // AEON-1209: the accounts chip's popover leads into Settings; adding an account is a Settings action.
+  await showCapacityRow(page)
   await page.locator('.cap-row .acc-chip').click()
   const cap = page.getByRole('dialog', { name: 'Accounts and computers' })
   await expect(cap.locator('.tile[data-part="accounts"]')).toHaveAttribute('href', '/settings/accounts')
@@ -287,6 +289,7 @@ test('without account.manage the action is gone and the hint stays', async ({ pa
   await expect(page.getByText(CREDENTIAL)).toBeVisible()
   await expect(page.getByRole('link', { name: CONNECT })).toHaveCount(0)
   await page.goto('/agents')
+  await showCapacityRow(page)
   await page.locator('.cap-row .acc-chip').click()
   const cap = page.getByRole('dialog', { name: 'Accounts and computers' })
   await expect(cap.getByRole('link', { name: 'Add an account' })).toHaveCount(0)
