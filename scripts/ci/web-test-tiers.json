@@ -18040,6 +18040,8 @@
     ,
     {"kind":"vitest","file":"tests/decision-desk.unit.test.ts","name":"sends a held reply to the principal UUID even without a sender session or target","tier":"GATED-FULL"}
     ,
+    {"kind":"vitest","file":"tests/decision-desk.unit.test.ts","name":"shows the ticket key on a Desk list and falls back to the project key","tier":"ESSENTIAL"}
+    ,
     {"kind":"vitest","file":"tests/decision-desk.unit.test.ts","name":"skips tier reads for sessions that do not advertise service_tier_v1","tier":"GATED-FULL"}
     ,
     {"kind":"vitest","file":"tests/decision-desk.unit.test.ts","name":"uses canonical membership and order while retaining decided approval history","tier":"ESSENTIAL"}

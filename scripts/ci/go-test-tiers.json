@@ -5942,6 +5942,8 @@
     ,
     {"kind":"go","package":"internal/decisiondesk","name":"TestPushPolicyAndHTTPBounds","tier":"GATED-FULL"}
     ,
+    {"kind":"go","package":"internal/decisiondesk","name":"TestQuestionTicketKeyFollowsAskAndStaysInsideTheProject","tier":"ESSENTIAL"}
+    ,
     {"kind":"go","package":"internal/decisiondesk","name":"TestRevocationDecisionExpiryAndFinishedWork","tier":"GATED-FULL"}
     ,
     {"kind":"go","package":"internal/decisiondesk","name":"TestRoutineConsentProjectionMatchesNativePolicyAndPages","tier":"ESSENTIAL"}
