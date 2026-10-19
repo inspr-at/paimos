@@ -298,6 +298,10 @@
     ,
     "browser:tests/aeon-1448-desk-tabrow.spec.ts:type-size shots › AEON-1448: 375 and 390, the round action beside the tabs"
     ,
+    "browser:tests/aeon-1459-compact-chrome.spec.ts:AEON-1459 1024 dark: a tablet keeps the desktop header, toolbar and footer"
+    ,
+    "browser:tests/aeon-1459-compact-chrome.spec.ts:AEON-1459 1024 light: a tablet keeps the desktop header, toolbar and footer"
+    ,
     "browser:tests/aeon-1459-compact-chrome.spec.ts:AEON-1459 C1/C2 agents 320x568 light: 44 px opaque header, one-line toolbar, no footer, rows first"
     ,
     "browser:tests/aeon-1459-compact-chrome.spec.ts:AEON-1459 C1/C2 agents 390x664 dark: 44 px opaque header, one-line toolbar, no footer, rows first"
@@ -6263,6 +6267,10 @@
     {"kind":"browser","file":"tests/aeon-1448-desk-tabrow.spec.ts","name":"touch › AEON-1448: the round action keeps a 44 px target and adds no height to the row","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
     {"kind":"browser","file":"tests/aeon-1448-desk-tabrow.spec.ts","name":"type-size shots › AEON-1448: 375 and 390, the round action beside the tabs","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/aeon-1459-compact-chrome.spec.ts","name":"AEON-1459 1024 dark: a tablet keeps the desktop header, toolbar and footer","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/aeon-1459-compact-chrome.spec.ts","name":"AEON-1459 1024 light: a tablet keeps the desktop header, toolbar and footer","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
     {"kind":"browser","file":"tests/aeon-1459-compact-chrome.spec.ts","name":"AEON-1459 C1/C2 agents 320x568 light: 44 px opaque header, one-line toolbar, no footer, rows first","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,

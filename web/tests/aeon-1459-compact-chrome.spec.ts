@@ -519,3 +519,21 @@ for (const look of ['light', 'dark'] as const) test(`AEON-1459 C9 1440 ${look}: 
     await shot(page, info, size, look, 'desktop')
   } finally { await c.write(`c9-1440-${look}`) }
 })
+
+// ---------- 1024: a tablet is wide and tall enough for the desktop chrome ----------
+for (const look of ['light', 'dark'] as const) test(`AEON-1459 1024 ${look}: a tablet keeps the desktop header, toolbar and footer`, async ({ page }, info) => {
+  const size = { width: 1024, height: 768 }
+  await openAgents(page, size, look)
+  const c = checks(info, size, look)
+  try {
+    const header = await box(page.locator('header.app-header'))
+    c.is('1024 header height', header.height, '56', Math.abs(header.height - 56) <= .5)
+    const footers = await page.locator('footer.app-footer').count()
+    c.is('1024 keeps the footer bar', footers, '1', footers === 1)
+    const compactParts = await page.locator('.cap-line, .compact-status, .sessions .tb-more, .app-header .crumb-sheet').evaluateAll(els => els.filter(el => (el as HTMLElement).checkVisibility()).length)
+    c.is('1024 shows no compact parts', compactParts, '0', compactParts === 0)
+    await expect(page.locator('.agents-page .cap-row')).toBeVisible()
+    await expect(page.getByRole('searchbox', { name: 'Search sessions in this list' })).toBeVisible()
+    await shot(page, info, size, look, 'tablet')
+  } finally { await c.write(`tablet-1024-${look}`) }
+})
