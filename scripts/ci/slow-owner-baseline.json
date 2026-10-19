@@ -265,6 +265,7 @@
     {"kind":"go","package":"internal/nodes","name":"TestSiblingPlacementOrdersPositionsNumerically","tier":"ESSENTIAL"},
     {"kind":"go","package":"internal/nodes","name":"TestProjectDefinitionsCopyEditAndReset","tier":"ESSENTIAL","active":true},
     {"kind":"go","package":"internal/nodes","name":"TestDefinitionDefaultChangesWaitForAuthorizedPerCheckDecisions","tier":"ESSENTIAL","active":true},
+    {"kind":"go","package":"internal/nodes","name":"TestStatusNamesRoundTripKeepCanonicalStates","tier":"ESSENTIAL","active":true},
     {"kind":"go","package":"internal/nodes","name":"TestEntryChecksLessonRecorded","tier":"ESSENTIAL"},
     {"kind":"go","package":"internal/nodes","name":"TestFigureColumnsLeafPolicyAndUsage","tier":"ESSENTIAL","active":true},
     {"kind":"go","package":"internal/nodes","name":"TestLifecycleModuleCopySharesFiguresLock","tier":"ESSENTIAL","active":true},

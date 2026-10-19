@@ -290,6 +290,8 @@
     ,
     "browser:tests/aeon-1285-agent-rows.spec.ts:light 390: stop reasons in words, Lead only for the claimed lead, a retried failure folds into Ended"
     ,
+    "browser:tests/aeon-1401-status-names.spec.ts:AEON-1401 a Decision Desk line reads the workspace name"
+    ,
     "browser:tests/aeon-1439-panel-opening.spec.ts:AEON-1439: 1440 dark refreshes keep the chosen tab and write the opening line once"
     ,
     "browser:tests/aeon-1439-panel-opening.spec.ts:AEON-1439: 390 dark refreshes keep the chosen tab and write the opening line once"
@@ -6179,6 +6181,14 @@
     {"kind":"browser","file":"tests/aeon-1339-desk-polish.spec.ts","name":"sheet outline at device scale factor 2 › one even hairline from tab to sheet","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
     {"kind":"browser","file":"tests/aeon-1339-desk-polish.spec.ts","name":"the memo matches the approved sheet and closes after the last decision","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/aeon-1401-status-names.spec.ts","name":"AEON-1401 a Decision Desk line reads the workspace name","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/aeon-1401-status-names.spec.ts","name":"AEON-1401 lists, the status menu, the ticket header, Desk and activity read the workspace name; writes stay canonical","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/aeon-1401-status-names.spec.ts","name":"AEON-1401 the Status names card renames, refuses ambiguous names and keeps its controls still","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/aeon-1401-status-names.spec.ts","name":"AEON-1401 the public portal and roadmap read the workspace name per language","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
     {"kind":"browser","file":"tests/aeon-1438-chat-thread.spec.ts","name":"AEON-1286 inline code keeps the line box at 390 light","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
@@ -17023,6 +17033,10 @@
     {"kind":"node","file":"tests/status-definitions.test.ts","name":"human-check filter preserves pending and exclusion choices in links, API and saved view state","tier":"GATED-FULL"}
     ,
     {"kind":"node","file":"tests/status-definitions.test.ts","name":"people, agents and menus share all approved states, definitions, rule defaults and exits","tier":"GATED-FULL"}
+    ,
+    {"kind":"node","file":"tests/status-names.test.ts","name":"statuses read as the workspace names them, per locale, with built-in fallback","tier":"ESSENTIAL"}
+    ,
+    {"kind":"node","file":"tests/status-names.test.ts","name":"the card refuses long names and names another status reads as","tier":"ESSENTIAL"}
     ,
     {"kind":"node","file":"tests/tenant-brand.test.ts","name":"SVG removal notice names attributes and follows the app language for German profiles","tier":"GATED-FULL"}
     ,
