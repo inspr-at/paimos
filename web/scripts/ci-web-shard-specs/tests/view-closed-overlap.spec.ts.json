@@ -1,8 +1,12 @@
 {
   "group": "remaining-ui",
+  "nightlyTiming": {
+    "seconds": 77.664,
+    "selectedTests": 6
+  },
   "spec": {
     "file": "tests/view-closed-overlap.spec.ts",
-    "weightSeconds": 100,
+    "weightSeconds": 80,
     "weightSource": "unmeasured-estimate"
   }
 }
