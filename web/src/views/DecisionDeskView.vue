@@ -18,6 +18,7 @@ import { settledElsewhere } from '../lib/stepup'
 import { can, onAccessRevalidate } from '../lib/authz'
 import { useProfile } from '../stores/profile'
 import { definitionDeskWords } from '../lib/definitions'
+import { displayLanguage } from '../lib/displayLanguage'
 import { useSession } from '../stores/session'
 import { useAgents } from '../stores/agents'
 import type { KeyTrimCursors } from '../lib/keyTrim'
@@ -30,7 +31,7 @@ import deskLight from '../assets/desk/desk-empty-light.webp'
 import deskDark from '../assets/desk/desk-empty-dark.webp'
 
 const session = useSession(), profile = useProfile()
-const definitionLanguage = computed(() => profile.profile?.locale?.startsWith('de') ? 'de' : 'en')
+const definitionLanguage = computed(() => displayLanguage(profile.profile?.locale, 'definitions'))
 const titleOf = (item: DeskItem) => item.definitionChange ? definitionDeskWords(item.definitionChange.project_key,item.definitionChange.pending_count,definitionLanguage.value) : item.title
 const agents = useAgents()
 const desk = useDecisionDesk(), route = useRoute(), router = useRouter()

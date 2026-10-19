@@ -3,6 +3,7 @@
 import { computed, nextTick, onBeforeUnmount, ref, watch } from 'vue'
 import { useRoute } from 'vue-router'
 import { useProfile } from '../../stores/profile'
+import { displayLanguage } from '../../lib/displayLanguage'
 import type { Project } from '../../stores/projects'
 import { useSession } from '../../stores/session'
 import { can, myProjectRole, myWorkspaceRole, onAccessRevalidate } from '../../lib/authz'
@@ -20,7 +21,7 @@ import ProjectSettingsExplainer from './ProjectSettingsExplainer.vue'
 import DefinitionEditor from './DefinitionEditor.vue'
 
 const route = useRoute(), profile = useProfile()
-const language = computed(() => profile.profile?.locale?.startsWith('de') ? 'de' : 'en')
+const language = computed(() => displayLanguage(profile.profile?.locale, 'definitions'))
 const t = (en: string, de: string) => language.value === 'de' ? de : en
 const props = defineProps<{ project: Project }>(), session = useSession(), scope = useIdentityScope(), reads = scope.lane()
 const context = ref<DefinitionContext | null>(null), loading = ref(true), busy = ref(false), error = ref(''), stale = ref(false), editorEpoch = ref(0)

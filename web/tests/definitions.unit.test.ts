@@ -4,6 +4,7 @@ vi.mock('../src/lib/api', () => ({ api: vi.fn(), APIError: class extends Error {
 import { decideDefinitionChange, definitionChangeWords, definitionDate, definitionDecisionWords, definitionDeskWords, definitionDiff, definitionNotice, resetChanges, ruleIcon, ruleLabel, ruleWords, sameRule, saveWorkspaceDefinition, type DefinitionChange, type DefinitionChecks, type DefinitionContext } from '../src/lib/definitions'
 import { api } from '../src/lib/api'
 import { deskItemID, deskLinkOut } from '../src/lib/decisionDesk'
+import { displayLanguage } from '../src/lib/displayLanguage'
 
 // Risk: a full copy is misrepresented as a partial merge, later changes look
 // deliberate, or a reset confirmation omits a condition, owner or order change.
@@ -29,6 +30,15 @@ it('AEON-1316 describes complete copies, conditions, owners and their retained b
 // Risk: a decision drops its displayed revision, accepts arbitrary link-out
 // destinations, or loses the exact German copy and nonbreaking date/count spaces.
 it('AEON-1317 binds decisions to both revisions and renders the complete bilingual decision copy', async () => {
+  // The approved Definitions catalog follows the profile through the shared
+  // policy, without switching the surrounding incomplete app into German.
+  for (const locale of ['de', 'de-AT', ' DE-de ']) {
+    const language = displayLanguage(locale, 'definitions')
+    expect(language).toBe('de')
+    expect(definitionNotice('PRJ-26', 0, '', language)).toBe('Alle Änderungen entschieden.')
+    expect(displayLanguage(locale)).toBe('en')
+  }
+  for (const locale of [undefined, null, '', 'en-GB', 'fr-FR']) expect(displayLanguage(locale, 'definitions')).toBe('en')
   const date = definitionDate('2026-10-09T08:00:00Z'), deDate = definitionDate('2026-10-09T08:00:00Z','de')
   expect(date).toBe('9\u00a0Oct'); expect(deDate).toBe('9.\u00a0Okt.')
   const changes: DefinitionChange[] = [

@@ -9,7 +9,9 @@ export type DisplayLanguage = 'en' | 'de'
 // The START handoff sheet is the same kind of surface (AEON-1441): both
 // languages are complete there, and it follows the handoff or the browser
 // before the draft is read. It does not switch the rest of the app.
-export function displayLanguage(preferredLocale?: string | null, surface: 'app' | 'release-notes' | 'start' = 'app'): DisplayLanguage {
-  if ((surface === 'release-notes' || surface === 'start') && preferredLocale?.trim().toLowerCase().startsWith('de')) return 'de'
+// Definitions has an approved bilingual copy catalog (AEON-1317), including
+// its workspace-change notices and Desk item; keep that choice scoped here.
+export function displayLanguage(preferredLocale?: string | null, surface: 'app' | 'release-notes' | 'start' | 'definitions' = 'app'): DisplayLanguage {
+  if ((surface === 'release-notes' || surface === 'start' || surface === 'definitions') && preferredLocale?.trim().toLowerCase().startsWith('de')) return 'de'
   return 'en'
 }
