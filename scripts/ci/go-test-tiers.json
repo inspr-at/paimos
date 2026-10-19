@@ -6556,6 +6556,14 @@
     ,
     {"kind":"go","package":"internal/fromclassic","name":"TestResolveImportedLinksWithProjectVisibility","tier":"ESSENTIAL"}
     ,
+    {"kind":"go","package":"internal/goals","name":"TestEpicFix2LandingText","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/goals","name":"TestEpicFix2LandsUsesSuggestionAndQueue","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/goals","name":"TestEpicFix2OpenEpicStaysWithItsChecks","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/goals","name":"TestEpicFix2RedactsNotesAuthorDeliveryAndHolds","tier":"ESSENTIAL"}
+    ,
     {"kind":"go","package":"internal/goals","name":"TestEpicItemStateMapping","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/goals","name":"TestGoalAPIAtomicReceipts","tier":"ESSENTIAL"}

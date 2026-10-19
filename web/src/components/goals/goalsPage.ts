@@ -11,8 +11,8 @@
 // AEON-1395: Group › Goals or Epics, for callers that offer it (groups). The person's
 // choice is kept with their Goals preferences; a link (?group=epics) wins until they
 // choose and changes nothing. Their first read waits for those preferences, so a
-// remembered group never shows the other list first. A switch replaces the list only,
-// and a read for the other group never lands.
+// remembered group never shows the other list first. A switch replaces the rows;
+// the frame (status note, header) stays, and a read for the other group never lands.
 import { computed, onScopeDispose, reactive, ref, shallowRef, watch, type Ref } from 'vue'
 import { useSession } from '../../stores/session'
 import { scopeOwner } from '../../lib/identityScope'
@@ -79,6 +79,8 @@ export function useGoalsPage(options: { term: Ref<string>; active: () => boolean
   const list = shallowRef<GoalList | null>(null)
   const error = ref('')
   const reading = ref(false)
+  // A group switch keeps the frame and clears the rows until the new list arrives.
+  const replacing = ref(false)
   const loadingMore = ref(false)
   // When this screen last received the list: the Reconnecting stamp's "last update".
   const updatedAt = ref<number | null>(null)
@@ -90,7 +92,7 @@ export function useGoalsPage(options: { term: Ref<string>; active: () => boolean
   const query = () => ({ group: group.value, q: options.term.value, state: filter.value === 'all' ? null : filter.value, hideDone: hideDone.value, sort: sort.value, dir: dir.value })
   function retirePagination() { pageToken++; loadingMore.value = false }
   function read(): Promise<void> {
-    if (!owner.value || !options.active() || !settled.value) return Promise.resolve()
+    if (!owner.value || !options.active() || !settled.value) { replacing.value = false; return Promise.resolve() }
     controller?.abort()
     const abort = new AbortController(); controller = abort
     retirePagination()
@@ -103,12 +105,13 @@ export function useGoalsPage(options: { term: Ref<string>; active: () => boolean
       reading.value = false
       // The same question never goes back to an older snapshot than the one on screen.
       const shown = list.value
-      if (shown && asked === shownQuery && (answer.read_through < shown.read_through || (answer.read_through === shown.read_through && answer.generation < shown.generation))) return
-      list.value = answer; shownQuery = asked; error.value = ''; updatedAt.value = Date.now()
+      if (shown && asked === shownQuery && (answer.read_through < shown.read_through || (answer.read_through === shown.read_through && answer.generation < shown.generation))) { replacing.value = false; return }
+      list.value = answer; shownQuery = asked; error.value = ''; updatedAt.value = Date.now(); replacing.value = false
     }, cause => {
       if (!current() || abort.signal.aborted) return
       error.value = cause instanceof Error ? cause.message : 'Goals could not be read.'
       reading.value = false
+      replacing.value = false
     })
   }
   // The next page joins the list; a newer read of the first page replaces it instead.
@@ -128,10 +131,12 @@ export function useGoalsPage(options: { term: Ref<string>; active: () => boolean
   let settle: ReturnType<typeof setTimeout> | undefined
   watch(options.term, () => { clearTimeout(settle); settle = setTimeout(() => { void read() }, SEARCH_SETTLE_MS) })
   watch([filter, sort, dir, hideDone], () => { clearTimeout(settle); void read() })
-  // Another group is another list: nothing of the old one stays on screen while it is read.
+  // Another group is another list: the rows are replaced, the frame (status note, header) stays.
   watch(group, () => {
     turn++; controller?.abort(); retirePagination(); clearTimeout(settle)
-    list.value = null; error.value = ''; reading.value = false
+    error.value = ''
+    const shown = list.value
+    if (shown) { replacing.value = true; list.value = { ...shown, items: [], next_cursor: undefined } }
     void read()
   })
   const poller = usePoller(read, LIST_POLL_MS, { enabled: () => options.active() && !!owner.value && settled.value })
@@ -243,7 +248,7 @@ export function useGoalsPage(options: { term: Ref<string>; active: () => boolean
   // Another person or workspace starts from nothing: no list, no open goals, no series.
   watch(owner, () => {
     turn++; controller?.abort(); retireSeries(); retirePagination()
-    list.value = null; error.value = ''; reading.value = false; updatedAt.value = null
+    list.value = null; error.value = ''; reading.value = false; replacing.value = false; updatedAt.value = null
     open.clear(); charts.clear(); folds.clear(); series.clear(); filter.value = 'all'; chosenGroup.value = null
     if (options.active()) void read()
   }, { flush: 'sync' })
@@ -253,7 +258,7 @@ export function useGoalsPage(options: { term: Ref<string>; active: () => boolean
 
   return {
     group, setGroup,
-    filter, sort, dir, hideDone, setHideDone, range, setRange, setSort, list, goals, hiddenByGroups, error, reading, loaded, loadingMore, loadMore, read,
+    filter, sort, dir, hideDone, setHideDone, range, setRange, setSort, list, goals, hiddenByGroups, error, reading, replacing, loaded, loadingMore, loadMore, read,
     live, updatedAt, statusNote, etaLastSetAt,
     open, charts, folds, isOpen, allOpen, toggle, toggleAll, toggleFold, toggleChart, searchOpens, want, seriesFor, counts, totals, totalsPartial, stop,
   }

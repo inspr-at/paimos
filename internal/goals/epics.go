@@ -16,8 +16,10 @@ import (
 
 	"github.com/inspr-at/paimos/internal/authz"
 	"github.com/inspr-at/paimos/internal/eta"
+	"github.com/inspr-at/paimos/internal/releasehistory"
 	"github.com/inspr-at/paimos/internal/tenant"
 	"github.com/inspr-at/paimos/internal/workorders"
+	"github.com/inspr-at/paimos/internal/workqueue"
 	"github.com/jackc/pgx/v5"
 )
 
@@ -29,8 +31,11 @@ import (
 // its children's. Nothing is hand-kept: counts follow the children's status
 // and live work, progress is the leaf-hours rollup (leaves only, a parent's
 // estimate never counts), LANDS is the latest worker ETA, else the target
-// release, and "what's missing" is the epic's failing entry checks for its
-// next status from the Definitions engine, then holds and blockers.
+// release, else the suggested release, and "what's missing" is the epic's
+// failing entry checks for its next status from the Definitions engine, then
+// holds and blockers. Notes and session ids need harness.read; the author's
+// name needs harness.read or members.read; a pull request and a hold need
+// delivery.read. An epic is done only when its own status is.
 const (
 	epicWorkKinds  = `('work','epic','ticket','task')`
 	epicClosed     = `('done','delivered','accepted','cancelled','archived')`
@@ -48,13 +53,15 @@ type epicNode struct {
 }
 
 type epicChild struct {
-	ID       string `json:"id"`
-	Key      string `json:"key"`
-	Title    string `json:"title"`
-	State    string `json:"state"`
-	Category string `json:"category"`
-	Position string `json:"position"`
-	Release  string `json:"release"`
+	ID        string  `json:"id"`
+	Key       string  `json:"key"`
+	Title     string  `json:"title"`
+	State     string  `json:"state"`
+	Category  string  `json:"category"`
+	Position  string  `json:"position"`
+	Release   string  `json:"release"`
+	Suggested string  `json:"suggested"`
+	Estimate  float64 `json:"estimate"`
 }
 
 type epicNote struct {
@@ -96,16 +103,22 @@ type epicPageData struct {
 	blockers   map[string][]epicBlocker
 	waits      map[string]Waits
 	badges     map[string]ProjectBadge
+	queue      map[string]queueWait
+	cadence    releaseGap
+	cadenceOK  bool
+	mayRelease map[string]bool
 }
 
 // The release label as the node list reads it: a string or {label|name},
 // also from the imported classic fields.
-func releaseLabelSQL(alias string) string {
+func fieldLabelSQL(alias, key string) string {
 	value := func(path string) string {
 		return `CASE jsonb_typeof(` + path + `) WHEN 'object' THEN coalesce(` + path + `->>'label',` + path + `->>'name') WHEN 'string' THEN ` + path + `#>>'{}' END`
 	}
-	return `left(btrim(coalesce(CASE WHEN ` + alias + `.fields ? 'release' THEN ` + value(`(`+alias+`.fields->'release')`) + ` ELSE ` + value(`(`+alias+`.fields->'classic'->'release')`) + ` END,'')),40)`
+	return `left(btrim(coalesce(CASE WHEN ` + alias + `.fields ? '` + key + `' THEN ` + value(`(`+alias+`.fields->'`+key+`')`) + ` ELSE ` + value(`(`+alias+`.fields->'classic'->'`+key+`')`) + ` END,'')),40)`
 }
+
+func releaseLabelSQL(alias string) string { return fieldLabelSQL(alias, "release") }
 
 const epicCandidateColumns = `n.id::text,n.key,n.title,coalesce(n.parent_id::text,''),coalesce(n.project_id::text,''),k.slug,n.position::text,n.fields,false,n.state,aeon_work_status_category(n.state,k.field_schema),n.created_at`
 
@@ -177,7 +190,7 @@ func epicPageQuery() string {
  WHERE n.kind_id=ANY(ARRAY(SELECT id FROM node_kinds WHERE slug='project')) AND k.slug='project' AND n.deleted_at IS NULL AND n.id IN (SELECT project_id FROM page)
  )
  SELECT 'count'::text AS section,c.epic::text AS id,to_jsonb(c.items) AS data FROM counts c
- UNION ALL SELECT 'child',c.epic::text,jsonb_build_object('id',c.id,'key',c.key,'title',c.title,'state',c.state,'category',c.category,'position',c.position::text,'release',` + releaseLabelSQL("c") + `) FROM kept c
+ UNION ALL SELECT 'child',c.epic::text,jsonb_build_object('id',c.id,'key',c.key,'title',c.title,'state',c.state,'category',c.category,'position',c.position::text,'release',` + releaseLabelSQL("c") + `,'suggested',` + fieldLabelSQL("c", "suggested_release") + `,'estimate',CASE WHEN jsonb_typeof(c.fields->'estimate_hours')='number' AND (c.fields->>'estimate_hours')::numeric>0 AND (c.fields->>'estimate_hours')::numeric<=200 THEN (c.fields->>'estimate_hours')::float8 ELSE 0 END) FROM kept c
  UNION ALL SELECT 'fact',f.id::text,to_jsonb(f)-'root' FROM (SELECT DISTINCT ON (id) * FROM facts ORDER BY id,root) f
  UNION ALL SELECT 'fact_roots',f.id::text,to_jsonb(array_agg(f.root ORDER BY f.root)) FROM facts f GROUP BY f.id
  UNION ALL SELECT 'root',s.root::text,to_jsonb(count(*)) FROM page_scope s GROUP BY s.root
@@ -247,10 +260,11 @@ func (m *module) epics(w http.ResponseWriter, r *http.Request) {
 				readable = append(readable, e)
 			}
 		}
-		views, err := readEpicList(ctx, tx, p, readable, now, w)
+		views, err := readEpicList(ctx, tx, p, readable, now, w, check)
 		if err != nil {
 			return err
 		}
+		redactEpicSecrets(views, check)
 		if err := finishList(ctx, tx, p, l, views, &out, w); err != nil {
 			return err
 		}
@@ -266,7 +280,7 @@ func (m *module) epics(w http.ResponseWriter, r *http.Request) {
 // readEpicList loads at most 100 epics per statement. A batch whose work
 // scope exceeds its budget is split; a single epic that still exceeds it
 // keeps its item count and becomes too_large, so siblings stay complete.
-func readEpicList(ctx context.Context, tx pgx.Tx, p tenant.Principal, nodes []epicNode, now time.Time, w Watermark) ([]GoalView, error) {
+func readEpicList(ctx context.Context, tx pgx.Tx, p tenant.Principal, nodes []epicNode, now time.Time, w Watermark, check authz.ProjectCheck) ([]GoalView, error) {
 	out := []GoalView{}
 	responseBytes := 0
 	var load func([]epicNode) error
@@ -275,7 +289,7 @@ func readEpicList(ctx context.Context, tx pgx.Tx, p tenant.Principal, nodes []ep
 		if err != nil {
 			return err
 		}
-		values, err := loadEpicPage(ctx, nested, p, nodes, now, w)
+		values, err := loadEpicPage(ctx, nested, p, nodes, now, w, check)
 		if err == nil {
 			if err := nested.Commit(ctx); err != nil {
 				return err
@@ -334,12 +348,12 @@ func baseEpic(e epicNode, w Watermark) (GoalView, error) {
 	return g, nil
 }
 
-func loadEpicPage(ctx context.Context, tx pgx.Tx, p tenant.Principal, nodes []epicNode, now time.Time, w Watermark) ([]GoalView, error) {
+func loadEpicPage(ctx context.Context, tx pgx.Tx, p tenant.Principal, nodes []epicNode, now time.Time, w Watermark, check authz.ProjectCheck) ([]GoalView, error) {
 	ids := make([]string, len(nodes))
 	for i, n := range nodes {
 		ids[i] = n.ID
 	}
-	d := epicPageData{items: map[string]int{}, children: map[string][]epicChild{}, leaves: map[string]leafFact{}, leafRoots: map[string][]string{}, rootPairs: map[string]int{}, etas: map[string]EffectiveETA{}, reported: map[string]time.Time{}, keys: map[string][]string{}, keysTotal: map[string]int{}, notes: map[string]epicNote{}, deliveries: map[string]EpicDelivery{}, holds: map[string][]epicHold{}, blockers: map[string][]epicBlocker{}, waits: map[string]Waits{}, badges: map[string]ProjectBadge{}}
+	d := epicPageData{items: map[string]int{}, children: map[string][]epicChild{}, leaves: map[string]leafFact{}, leafRoots: map[string][]string{}, rootPairs: map[string]int{}, etas: map[string]EffectiveETA{}, reported: map[string]time.Time{}, keys: map[string][]string{}, keysTotal: map[string]int{}, notes: map[string]epicNote{}, deliveries: map[string]EpicDelivery{}, holds: map[string][]epicHold{}, blockers: map[string][]epicBlocker{}, waits: map[string]Waits{}, badges: map[string]ProjectBadge{}, queue: map[string]queueWait{}, mayRelease: map[string]bool{}}
 	rows, err := tx.Query(ctx, epicPageQuery(), ids, now, p.Kind == tenant.Person, p.ID)
 	if err != nil {
 		return nil, err
@@ -371,6 +385,9 @@ func loadEpicPage(ctx context.Context, tx pgx.Tx, p tenant.Principal, nodes []ep
 	}
 	for _, list := range facts {
 		sort.Slice(list, func(i, j int) bool { return list[i].ID < list[j].ID })
+	}
+	if err := d.attachQueueLanding(ctx, tx, nodes, check); err != nil {
+		return nil, err
 	}
 	out := make([]GoalView, 0, len(nodes))
 	for _, e := range nodes {
@@ -630,10 +647,19 @@ func deriveEpic(g GoalView, e epicNode, d epicPageData, facts map[string][]leafF
 		if total := 1 + d.keysTotal[c.ID]; total > len(keys) {
 			item.KeysTotal = total
 		}
+		parent := d.keysTotal[c.ID] > 0
 		if value, ok := d.etas[c.ID]; ok && state.State != Done {
 			item.ETA = value
 		} else if c.Release != "" {
 			item.ETA = EffectiveETA{Source: "release", Text: c.Release}
+		} else if state.State != Done && !parent {
+			if text := suggestionText(c.Suggested); text != "" {
+				item.ETA = EffectiveETA{Source: "release", Text: text}
+			} else if text := d.queueLanding(e.Project, c, now); text != "" {
+				item.ETA = EffectiveETA{Source: "release", Text: text}
+			} else {
+				item.ETA = EffectiveETA{Source: "none"}
+			}
 		} else {
 			item.ETA = EffectiveETA{Source: "none"}
 		}
@@ -688,8 +714,11 @@ func deriveEpic(g GoalView, e epicNode, d epicPageData, facts map[string][]leafF
 	progress.Pct, progress.Basis = EpicProgress(all, doneLeaves)
 	progress.ComputedPct = progress.Pct
 	progress.RemainingHours, progress.RemainingUnestimated = remainingWork(open)
-	done := len(children) > 0 && states.Done == len(children)
-	// LANDS: the latest worker ETA over the open items, else the target release.
+	// Done follows the epic's own status. Every child being done does not hide
+	// an open epic, and does not drop its entry checks.
+	done := e.Category == "done" || e.Category == "delivered" || e.Category == "accepted"
+	// LANDS: the latest worker ETA over the open items, else the epic's target
+	// release, else its suggested release. Item text does not roll up.
 	value := EffectiveETA{Source: "none"}
 	for _, item := range g.Items {
 		if item.State == Done {
@@ -709,6 +738,8 @@ func deriveEpic(g GoalView, e epicNode, d epicPageData, facts map[string][]leafF
 		value = EffectiveETA{Source: "none"}
 		if label := strings.TrimSpace(fieldLabel(e.Fields, "release")); label != "" {
 			value = EffectiveETA{Source: "release", Text: label}
+		} else if text := suggestionText(fieldLabel(e.Fields, "suggested_release")); text != "" {
+			value = EffectiveETA{Source: "release", Text: text}
 		}
 	}
 	state := Queued
@@ -903,4 +934,259 @@ func blockerText(fields map[string]any) string {
 		}
 	}
 	return ""
+}
+
+// redactEpicSecrets applies the live-feed rule before search, author lookup
+// and step text. A missing permission drops the field; counts stay.
+func redactEpicSecrets(goals []GoalView, check authz.ProjectCheck) {
+	for i := range goals {
+		g := &goals[i]
+		project := ""
+		if g.ProjectID != nil {
+			project = *g.ProjectID
+		}
+		harness := check("harness.read", project)
+		named := harness || check("members.read", project)
+		if !harness {
+			for j := range g.Items {
+				g.Items[j].Note = ""
+				g.Items[j].NoteAt = nil
+				g.Items[j].SessionIDs = []string{}
+			}
+		}
+		if !named {
+			for j := range g.Items {
+				g.Items[j].NoteBy, g.Items[j].NoteByName, g.Items[j].ETA.By = "", "", ""
+			}
+			if g.ETA != nil {
+				g.ETA.By = ""
+			}
+		}
+		if !check("delivery.read", project) {
+			for j := range g.Items {
+				g.Items[j].Delivery = nil
+			}
+			g.holds = nil
+		}
+	}
+}
+
+// suggestionText is a suggested release as the Goals ETA shows it. The work
+// list draws the tilde beside the label; this text is the whole label.
+func suggestionText(label string) string {
+	label = strings.TrimSpace(label)
+	if label == "" || label == "—" {
+		return ""
+	}
+	if strings.HasPrefix(label, "~") {
+		return clip(label, 40)
+	}
+	return clip("~ "+label, 40)
+}
+
+type releaseGap struct {
+	hours  float64
+	latest time.Time
+}
+
+type queueWait struct {
+	hours float64
+	ok    bool
+}
+
+// epicReleaseCadence is the product release cadence. Tests replace it; the
+// embedded history is empty until a build writes it.
+var epicReleaseCadence = func() (releaseGap, bool) {
+	h, err := releasehistory.Embedded()
+	if err != nil {
+		return releaseGap{}, false
+	}
+	return cadenceFrom(h.Releases)
+}
+
+func cadenceFrom(releases []releasehistory.Release) (releaseGap, bool) {
+	seen := map[int64]bool{}
+	times := []time.Time{}
+	for _, r := range releases {
+		if r.State != releasehistory.StatePublished {
+			continue
+		}
+		at := r.PublishedAt
+		if at == nil {
+			at = r.TaggedAt
+		}
+		if at == nil {
+			continue
+		}
+		ms := at.UTC().UnixMilli()
+		if seen[ms] {
+			continue
+		}
+		seen[ms] = true
+		times = append(times, at.UTC())
+	}
+	sort.Slice(times, func(i, j int) bool { return times[i].After(times[j]) })
+	if len(times) > 10 {
+		times = times[:10]
+	}
+	if len(times) < 2 {
+		return releaseGap{}, false
+	}
+	gaps := make([]float64, len(times)-1)
+	for i := 1; i < len(times); i++ {
+		gaps[i-1] = times[i-1].Sub(times[i]).Hours()
+	}
+	sort.Float64s(gaps)
+	mid := len(gaps) / 2
+	hours := gaps[mid]
+	if len(gaps)%2 == 0 {
+		hours = (gaps[mid-1] + gaps[mid]) / 2
+	}
+	if hours <= 0 {
+		return releaseGap{}, false
+	}
+	return releaseGap{hours: hours, latest: times[0]}, true
+}
+
+func normaliseWorkState(state string) string {
+	state = strings.ToLower(strings.TrimSpace(state))
+	state = strings.ReplaceAll(state, " ", "_")
+	return strings.ReplaceAll(state, "-", "_")
+}
+
+func queueEligible(state string) bool {
+	switch normaliseWorkState(state) {
+	case "new", "open", "backlog":
+		return true
+	}
+	return false
+}
+
+// queueLandingText is the work list's suggested release for queued work when
+// no expected start is known: visible wait plus the estimate plus an hour of
+// review, placed on the release cadence. The text keeps the closed ETA source
+// `release`. An untargeted queue has no parallel-run count here, so it yields
+// nothing rather than a guessed clock.
+func queueLandingText(state string, estimate, wait float64, waitOK bool, cadence releaseGap, now time.Time) string {
+	if !waitOK || estimate <= 0 || cadence.hours <= 0 || !queueEligible(state) {
+		return ""
+	}
+	ready := now.Add(time.Duration((wait + estimate + 1) * float64(time.Hour)))
+	interval := time.Duration(cadence.hours * float64(time.Hour))
+	if interval <= 0 {
+		return ""
+	}
+	steps := int(math.Floor(float64(now.Sub(cadence.latest))/float64(interval))) + 1
+	if steps < 1 {
+		steps = 1
+	}
+	next := cadence.latest.Add(time.Duration(steps) * interval)
+	offset := int(math.Ceil(float64(ready.Sub(next)) / float64(interval)))
+	if offset < 0 {
+		offset = 0
+	}
+	if offset == 0 {
+		return "~ Next"
+	}
+	return "~ Next +" + strconv.Itoa(offset)
+}
+
+func (d *epicPageData) queueLanding(project string, c epicChild, now time.Time) string {
+	if !d.cadenceOK || !d.mayRelease[project] {
+		return ""
+	}
+	wait, ok := d.queue[c.ID]
+	if !ok {
+		return ""
+	}
+	return queueLandingText(c.State, c.Estimate, wait.hours, wait.ok, d.cadence, now)
+}
+
+// attachQueueLanding reads the canonical queue ranking for leaves that still
+// have no worker ETA, target release or stored suggestion. Release cadence
+// needs releases.read. A truncated partition is ignored.
+func (d *epicPageData) attachQueueLanding(ctx context.Context, tx pgx.Tx, nodes []epicNode, check authz.ProjectCheck) error {
+	ids := []string{}
+	for _, e := range nodes {
+		if !check("releases.read", e.Project) {
+			continue
+		}
+		d.mayRelease[e.Project] = true
+		for _, c := range d.children[e.ID] {
+			if c.Release != "" || strings.TrimSpace(c.Suggested) != "" || d.keysTotal[c.ID] > 0 || c.Estimate <= 0 || !queueEligible(c.State) {
+				continue
+			}
+			ids = append(ids, c.ID)
+		}
+	}
+	if len(ids) == 0 {
+		return nil
+	}
+	gap, ok := epicReleaseCadence()
+	if !ok {
+		return nil
+	}
+	d.cadence, d.cadenceOK = gap, true
+	rows, err := tx.Query(ctx, workqueue.CTE+`SELECT q.queue_node_id::text, coalesce(q.queue_target_agent_id::text,''), q.queue_target_agent_id IS NOT NULL, q.queue_position,
+ CASE WHEN jsonb_typeof(q.fields->'estimate_hours')='number' THEN (q.fields->>'estimate_hours')::float8 ELSE 0 END
+ FROM queue_heads q
+ WHERE q.queue_node_id = ANY($1::uuid[])
+ OR q.queue_target_agent_id IN (SELECT h.queue_target_agent_id FROM queue_heads h WHERE h.queue_node_id = ANY($1::uuid[]) AND h.queue_target_agent_id IS NOT NULL)
+ LIMIT 501`, ids)
+	if err != nil {
+		return err
+	}
+	defer rows.Close()
+	type qrow struct {
+		id, agent string
+		targeted  bool
+		position  int
+		hours     float64
+	}
+	found := []qrow{}
+	for rows.Next() {
+		var row qrow
+		if err := rows.Scan(&row.id, &row.agent, &row.targeted, &row.position, &row.hours); err != nil {
+			return err
+		}
+		found = append(found, row)
+	}
+	if err := rows.Err(); err != nil {
+		return err
+	}
+	// A truncated partition would invent a wait. Omit every suggestion.
+	if len(found) > 500 {
+		return nil
+	}
+	want := map[string]bool{}
+	for _, id := range ids {
+		want[id] = true
+	}
+	byAgent := map[string][]qrow{}
+	for _, row := range found {
+		if !row.targeted || row.agent == "" {
+			continue
+		}
+		byAgent[row.agent] = append(byAgent[row.agent], row)
+	}
+	for _, part := range byAgent {
+		sort.Slice(part, func(i, j int) bool { return part[i].position < part[j].position })
+		for i, row := range part {
+			if !want[row.id] {
+				continue
+			}
+			ok := true
+			var sum float64
+			for _, earlier := range part[:i] {
+				if earlier.hours <= 0 || math.IsNaN(earlier.hours) || math.IsInf(earlier.hours, 0) {
+					ok = false
+					break
+				}
+				sum += earlier.hours
+			}
+			// A targeted queue runs one at a time.
+			d.queue[row.id] = queueWait{hours: sum, ok: ok}
+		}
+	}
+	return nil
 }

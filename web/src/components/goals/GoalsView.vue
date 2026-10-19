@@ -41,6 +41,8 @@ const root = ref<HTMLElement>()
 const person = computed(() => session.identity?.principal.kind === 'person')
 // A page without a group (older callers) shows goals.
 const epics = computed(() => props.page.group?.value === 'epics')
+// A partial page (older callers, server-render fixtures) has no replacing flag.
+const replacing = computed(() => props.page.replacing?.value === true)
 const noun = computed(() => epics.value ? 'epic' : 'goal')
 const goals = computed(() => props.page.goals.value)
 const loaded = computed(() => props.page.loaded.value)
@@ -190,7 +192,7 @@ const canClear = computed(() => filtering.value)
             <li v-for="n in 6" :key="n" class="sk-row"><span class="skeleton" /><span class="ln"><span class="skeleton" /><span class="skeleton" /></span><span class="skeleton" /><span class="skeleton" /></li>
           </ul>
         </template>
-        <template v-else-if="goals.length">
+        <template v-else-if="goals.length || replacing">
           <div class="goal-head">
             <button type="button" class="head-expand" aria-keyshortcuts="e" @click="page.toggleAll()">
               <AppIcon :name="allOpen ? 'collapse-all' : 'expand-all'" :size="14" />
@@ -213,7 +215,10 @@ const canClear = computed(() => filtering.value)
             </button>
             <span />
           </div>
-          <ul class="goal-list" :aria-busy="page.reading.value">
+          <ul v-if="replacing" class="sk-list" role="status" aria-busy="true" :aria-label="`Loading ${noun}s`">
+            <li v-for="n in 6" :key="n" class="sk-row"><span class="skeleton" /><span class="ln"><span class="skeleton" /><span class="skeleton" /></span><span class="skeleton" /><span class="skeleton" /></li>
+          </ul>
+          <ul v-else class="goal-list" :aria-busy="page.reading.value">
             <GoalRow
               v-for="goal in goals" :key="goal.id" :class="{ arrived: arrived === goal.id }" :goal="goal" :page="page" :now="now" :agents="agents" :term="term"
               :menu-open="menu?.goal.id === goal.id" :wide-items="wideItems" @menu="anchor => openMenu(goal, anchor)"
@@ -221,7 +226,7 @@ const canClear = computed(() => filtering.value)
           </ul>
         </template>
       </div>
-      <div v-if="loaded && !goals.length" class="state">
+      <div v-if="loaded && !goals.length && !replacing" class="state">
         <AppIcon :name="hiddenGroups ? 'folder' : epics ? 'epic' : 'target'" :size="20" />
         <h2>{{ emptyTitle }}</h2>
         <p v-if="emptyText">{{ emptyText }}</p>
@@ -232,7 +237,7 @@ const canClear = computed(() => filtering.value)
         <button type="button" class="btn sm" :disabled="page.loadingMore.value" @click="page.loadMore()">{{ page.loadingMore.value ? 'Reading…' : `Show more ${noun}s` }}</button>
       </p>
       <p v-if="page.error.value && loaded" class="more-line warn" role="status"><AppIcon name="alert" :size="13" />{{ page.error.value }}<button type="button" class="btn sm ghost" @click="page.read()">Try again</button></p>
-      <div v-if="loaded && goals.length" class="card-foot">
+      <div v-if="loaded && (goals.length || replacing)" class="card-foot">
         <p v-if="quiet.count" class="quiet-line">
           <span>{{ plural(quiet.count, 'project') }} with nothing moving:</span>
           <RouterLink v-for="key in quiet.keys" :key="key" class="pk mono" :to="`/p/${encodeURIComponent(key)}`">{{ key }}</RouterLink>

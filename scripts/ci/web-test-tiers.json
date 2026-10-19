@@ -18386,6 +18386,12 @@
     ,
     {"kind":"vitest","file":"tests/footer-summary.unit.test.ts","name":"what each screen says > tickets with blocked","tier":"NIGHTLY"}
     ,
+    {"kind":"vitest","file":"tests/goals-epics-fix2.unit.test.ts","name":"a group switch keeps the frame > keeps the status note and header while the rows are replaced, then shows an empty list","tier":"ESSENTIAL"}
+    ,
+    {"kind":"vitest","file":"tests/goals-epics-fix2.unit.test.ts","name":"epic live events > a goals stream ignores a heartbeat and a delivery state change; an epics stream re-reads on both","tier":"ESSENTIAL"}
+    ,
+    {"kind":"vitest","file":"tests/goals-epics-fix2.unit.test.ts","name":"the epics page re-reads on heartbeat and delivery state > epics re-read on those events and a goals page does not","tier":"ESSENTIAL"}
+    ,
     {"kind":"vitest","file":"tests/goals-fix2.unit.test.ts","name":"goals pagination and charts stay current > a refresh during Show more clears the disabled state and a stale page cannot cancel the next one","tier":"ESSENTIAL"}
     ,
     {"kind":"vitest","file":"tests/goals-fix2.unit.test.ts","name":"goals pagination and charts stay current > an owner change frees chart slots and drops the previous person’s series","tier":"ESSENTIAL"}

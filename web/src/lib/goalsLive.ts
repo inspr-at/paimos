@@ -9,8 +9,10 @@ import { watchStreamHealth } from './streamHealth'
 
 export type GoalsLiveState = 'off' | 'connecting' | 'live' | 'reconnecting'
 export const GOAL_STREAM_EVENTS = ['goal.created', 'goal.updated', 'goal.items_changed', 'goal.eta_changed', 'goal.passed_changed', 'goal.status_note_changed'] as const
-// Group › Epics (AEON-1395) follows the work itself: its items, statuses, ticks and merges.
-export const EPIC_STREAM_EVENTS = [...GOAL_STREAM_EVENTS, 'node.created', 'node.updated', 'node.deleted', 'node.moved', 'node.project_moved', 'node.bulk_changed', 'node.entry_check_ticked', 'entry_check.ticked', 'status_autopilot.changed', 'delivery.merge_done'] as const
+// Group › Epics (AEON-1395) follows the work itself: its items, statuses, ticks,
+// merges, a worker heartbeat and a delivery changing state. Goal streams stay
+// on GOAL_STREAM_EVENTS; the server already filters who may see each event.
+export const EPIC_STREAM_EVENTS = [...GOAL_STREAM_EVENTS, 'node.created', 'node.updated', 'node.deleted', 'node.moved', 'node.project_moved', 'node.bulk_changed', 'node.entry_check_ticked', 'entry_check.ticked', 'status_autopilot.changed', 'delivery.merge_done', 'harness.heartbeat', 'delivery.state_changed'] as const
 
 export interface GoalsLiveSource {
   readyState?: number
