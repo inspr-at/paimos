@@ -20542,6 +20542,12 @@
     ,
     {"kind":"vitest","file":"tests/status-motion.unit.test.ts","name":"reduced motion skips every one-off","tier":"ESSENTIAL"}
     ,
+    {"kind":"vitest","file":"tests/status-names-card.unit.test.ts","name":"a conflict answered while the person changes keeps the next person’s refused draft","tier":"ESSENTIAL"}
+    ,
+    {"kind":"vitest","file":"tests/status-names-card.unit.test.ts","name":"a save answered while the person changes leaves the next person’s names and drafts alone","tier":"ESSENTIAL"}
+    ,
+    {"kind":"vitest","file":"tests/status-names-card.unit.test.ts","name":"the earlier person’s save ending never starts a second save beside the next person’s","tier":"ESSENTIAL"}
+    ,
     {"kind":"vitest","file":"tests/status-time.unit.test.ts","name":"bridges a day without a release, keeps a gap for no data yet, and says which is which","tier":"ESSENTIAL"}
     ,
     {"kind":"vitest","file":"tests/status-time.unit.test.ts","name":"crosses doing and done again after a reopen, and moves inside a group cross no gate","tier":"ESSENTIAL"}

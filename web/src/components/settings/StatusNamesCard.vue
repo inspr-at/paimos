@@ -29,7 +29,7 @@ const LOCALE_NAME: Record<StatusLocale, [string, string]> = { en: ['English', 'E
 const drafts = reactive<StatusNameDrafts>({})
 const problems = ref(new Map<string, { code: 'too_long' | 'taken'; name: string }>())
 const busy = ref(false), footer = ref(''), failed = ref(false)
-let focused = '', again = false, own = -1, savedTimer: ReturnType<typeof setTimeout> | undefined
+let focused = '', again = false, own = -1, epoch = 0, savedTimer: ReturnType<typeof setTimeout> | undefined
 onBeforeUnmount(() => clearTimeout(savedTimer))
 
 // Drafts follow the saved names, except the field someone is typing in and a
@@ -43,7 +43,7 @@ function adopt(names: StatusNameMap, keep: (field: string) => boolean = held) {
 }
 // The card adopts its own saves itself (keeping edits made meanwhile); others' names arrive here.
 watch(() => store.value, value => { if (!busy.value && value.revision !== own) adopt(value.names) }, { immediate: true })
-watch(scope.owner, () => { focused = ''; again = false; own = -1; busy.value = false; footer.value = ''; failed.value = false; problems.value = new Map(); clearTimeout(savedTimer); adopt(store.value.names) }, { flush: 'sync' })
+watch(scope.owner, () => { epoch++; focused = ''; again = false; own = -1; busy.value = false; footer.value = ''; failed.value = false; problems.value = new Map(); clearTimeout(savedTimer); adopt(store.value.names) }, { flush: 'sync' })
 
 const differs = (key: StatusNameKey) => STATUS_LOCALES.some(locale => !!renamedStatus(key, locale, cleanStatusNames(drafts)) || !!renamedStatus(key, locale, store.value.names))
 function problemText(key: StatusNameKey): string {
@@ -83,19 +83,22 @@ function reset(key: StatusNameKey) {
   commit('')
 }
 function markSaved(text: string) { footer.value = text; failed.value = false; clearTimeout(savedTimer); savedTimer = setTimeout(() => { if (!failed.value) footer.value = '' }, 4000) }
+type Answer = { response: Response; body: { error?: unknown; code?: unknown; fields?: unknown } }
+// The body is read before the checked continuation, so every change below lands in
+// the same turn as the check that this person and workspace are still on screen.
+const read = (response: Response): Promise<Answer> => response.json().catch(() => ({})).then(body => ({ response, body: body as Answer['body'] }))
 // One save at a time, under the revision on screen; a later edit saves after it.
 async function save(names: StatusNameMap) {
   if (busy.value) { again = true; return }
   busy.value = true; failed.value = false; clearTimeout(savedTimer); footer.value = t('Saving…', 'Wird gespeichert …')
-  const revision = store.value.revision
+  const revision = store.value.revision, mine = epoch
   try {
-    await scope.run(({ after, signal }) => after(api('/settings/status-names', { method: 'PUT', signal, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ revision, names }) }), async response => {
-      const body = await response.json().catch(() => ({})) as { error?: unknown; code?: unknown; fields?: unknown }
-      if (response.status === 409) {
-        await store.load(true)
+    await scope.run(({ after, signal }) => after(api('/settings/status-names', { method: 'PUT', signal, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ revision, names }) }).then(read), ({ response, body }) => {
+      // The reload after a conflict answers in its own checked turn.
+      if (response.status === 409) return after(store.load(true), () => {
         again = false; adopt(store.value.names, field => field === focused)
         throw new Error(t('Someone else changed the names meanwhile. Their names are shown; yours were not saved.', 'Jemand anderes hat die Namen inzwischen geändert. Deren Namen sind zu sehen; Ihre wurden nicht gespeichert.'))
-      }
+      })
       if (response.status === 400 && Array.isArray(body.fields) && typeof body.fields[0] === 'string' && (body.code === 'status_name_taken' || body.code === 'status_name_too_long')) {
         const field = body.fields[0].replace(/^names\./, ''), [key] = field.split('.') as [StatusNameKey]
         problems.value = new Map([[field, { code: body.code === 'status_name_taken' ? 'taken' : 'too_long', name: statusName(key, field.endsWith('.de') ? 'de' : 'en', names) }]])
@@ -110,8 +113,8 @@ async function save(names: StatusNameMap) {
       markSaved(t('Saved. Everyone sees the new names.', 'Gespeichert. Alle sehen die neuen Namen.'))
     }), { failed: cause => { failed.value = true; footer.value = cause instanceof Error ? cause.message : t('Status names were not saved. Try again.', 'Die Statusnamen wurden nicht gespeichert. Bitte erneut versuchen.') } })
   } finally {
-    busy.value = false
-    if (again) { again = false; commit('') }
+    // After a person or workspace change the card is theirs: this save's end touches nothing.
+    if (mine === epoch) { busy.value = false; if (again) { again = false; commit('') } }
   }
 }
 function keys(key: StatusNameKey, locale: StatusLocale, event: KeyboardEvent) {
