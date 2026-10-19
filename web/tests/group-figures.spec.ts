@@ -277,8 +277,8 @@ test('AEON-1390 the grouped-by column flips the group order; other columns sort 
   await expect(labels(page)).toHaveText(['High', 'Medium', 'Low', 'No priority'])
   const priority = head(page, 'priority').locator('.th-sort'), estimate = head(page, 'estimate').locator('.th-sort')
   const watch = { priority, estimate, status: head(page, 'status').locator('.th-sort'), key: keyHead(page) }
-  // The key column takes its content width once the real face has loaded (TicketTable fit). Measure
-  // after that settle, and again after the sorts, so a late fit is not read as the arrows moving.
+  // The key column takes its content width, including the selection checkbox, once that fit has settled.
+  await expect(page.locator('.ticket-row .row-check').first()).toBeAttached()
   await expect(page.locator('.table-card')).toHaveAttribute('data-columns-settled', '1')
   const before = await boxes(watch)
   await expect(priority.locator('.sort-mark.groups .group-mark')).toHaveCount(1)
@@ -306,19 +306,7 @@ test('AEON-1390 the grouped-by column flips the group order; other columns sort 
   await estimate.hover()
   await expect(hint(page)).toContainText('Tickets in each group: highest estimate first')
   await expect(page.locator('.table-card')).toHaveAttribute('data-columns-settled', '1')
-  const after = await boxes(watch)
-  const layout = await page.evaluate(() => {
-    const main = document.querySelector('main')
-    const card = document.querySelector('.table-card')
-    return {
-      cols: [...document.querySelectorAll('colgroup col')].map(col => `${col.className}:${(col as HTMLElement).style.width}`),
-      mainClient: main?.clientWidth, mainScroll: main?.scrollWidth,
-      scrollbar: main ? getComputedStyle(main).scrollbarWidth : '',
-      cardClient: card?.clientWidth,
-    }
-  })
-  expect(`${JSON.stringify(before)} => ${JSON.stringify(after)} ${JSON.stringify(layout)}`, 'column boxes').toBe('same')
-  same(before, after)
+  same(before, await boxes(watch))
   // The same for status and assignee: Unassigned stays last when reversed.
   await page.goto('/p/PHAROS?group=assignee&group_order=reversed')
   await expect(labels(page)).toHaveText(['Mira Holm', 'Markus Barta', 'Unassigned'])

@@ -406,6 +406,13 @@ async function fitLoaded() {
 watch(() => props.loading, (loading, wasLoading) => {
   if (loading && !wasLoading) { autoWidths.value = {}; foldSpace.value = 0; fittedColumns.clear() }
 })
+// Selection follows permissions, so the key cell gains its checkbox after the first fit.
+// Refit then: a later reload must not be what widens the column (AEON-1390).
+watch(() => props.selectable, () => {
+  fittedColumns.delete('key')
+  columnsSettled.value = false
+  void fitLoaded()
+})
 watch(() => [props.loading, phone.value, props.projectId, [...props.rowsById.keys()].join(','), ids.value.join(','), props.outline], fitLoaded, { flush: 'post' })
 const dragWidths = ref<Partial<Record<string, number>>>({})
 // Every column but Title has a col width; Title takes the rest (about 960px at most
