@@ -4,13 +4,16 @@ package harness_test
 import (
 	"bufio"
 	"context"
+	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"slices"
 	"strings"
 	"testing"
 	"time"
 
 	"github.com/inspr-at/paimos/internal/events"
+	"github.com/inspr-at/paimos/internal/harness"
 	"github.com/inspr-at/paimos/internal/tenant"
 	"github.com/jackc/pgx/v5"
 )
@@ -129,5 +132,78 @@ func TestHeartbeatQuietTicksUpdateRowAndSSEWithoutEvents(t *testing.T) {
 	expect(t, f.call(f.agent, "POST", s.path+"/heartbeat", beat, s.lease), 200)
 	if n := count(); n != 2 {
 		t.Fatalf("state replay appended event: %d", n)
+	}
+}
+
+// Risk: an otherwise quiet attached-hook heartbeat enables recovery without
+// an audit event, or observing the same owned process appends another event.
+func TestHeartbeatAttachedOwnershipAuditedOnce(t *testing.T) {
+	v := recoveryAgent(t)
+	f := v.f
+	f.tx(t, f.person, func(tx pgx.Tx) error {
+		_, err := tx.Exec(t.Context(), `UPDATE harness_sessions SET management='unmanaged',run_id=NULL,capabilities=ARRAY['inbox','status'],process_ownership=NULL,process_observed_at=NULL,heartbeat_at=clock_timestamp() WHERE id=$1`, v.session)
+		return err
+	})
+	count := func() int {
+		t.Helper()
+		var n int
+		f.tx(t, f.person, func(tx pgx.Tx) error {
+			return tx.QueryRow(t.Context(), `SELECT count(*) FROM events WHERE type='harness.heartbeat' AND after->>'id'=$1`, v.session).Scan(&n)
+		})
+		return n
+	}
+	baseline := count()
+	beat := map[string]any{"phase": "working", "activity_sequence": 2, "attached_hook": true, "process_ownership": v.identity}
+	expect(t, v.runtimeCall(t, v.path+"/heartbeat", beat, v.lease), 200)
+	if got := count() - baseline; got != 1 {
+		t.Fatalf("first attached ownership report wrote %d heartbeat events, want 1", got)
+	}
+	var beforeRaw, afterRaw []byte
+	f.tx(t, f.person, func(tx pgx.Tx) error {
+		return tx.QueryRow(t.Context(), `SELECT before,after FROM events WHERE type='harness.heartbeat' AND after->>'id'=$1 ORDER BY id DESC LIMIT 1`, v.session).Scan(&beforeRaw, &afterRaw)
+	})
+	var before, after harness.Session
+	if err := json.Unmarshal(beforeRaw, &before); err != nil {
+		t.Fatal(err)
+	}
+	if err := json.Unmarshal(afterRaw, &after); err != nil {
+		t.Fatal(err)
+	}
+	if before.ProcessOwnership != nil || slices.Contains(before.Capabilities, "attached_reconnect_v1") {
+		t.Fatal("audit event lost the state before ownership was established")
+	}
+	if after.ProcessOwnership == nil || *after.ProcessOwnership != v.identity || !slices.Contains(after.Capabilities, "attached_reconnect_v1") {
+		t.Fatal("audit event lost the verified process identity or recovery capability")
+	}
+	if before.Phase != after.Phase || before.Activity != after.Activity {
+		t.Fatal("fixture changed phase or activity while establishing ownership")
+	}
+	diagnosis := f.call(f.person, "GET", v.path+"/recover-agent", nil, "")
+	expect(t, diagnosis, 200)
+	if decode(t, diagnosis)["action"] != "reconnect" {
+		t.Fatal("verified attached ownership did not enable recovery")
+	}
+
+	// Age only the observation using the database clock, then prove the same
+	// report refreshes that row without allocating another audit event.
+	var observed time.Time
+	f.tx(t, f.person, func(tx pgx.Tx) error {
+		return tx.QueryRow(t.Context(), `UPDATE harness_sessions SET process_observed_at=clock_timestamp()-interval '1 minute' WHERE id=$1 RETURNING process_observed_at`, v.session).Scan(&observed)
+	})
+	for sequence := 3; sequence <= 4; sequence++ {
+		beat["activity_sequence"] = sequence
+		expect(t, v.runtimeCall(t, v.path+"/heartbeat", beat, v.lease), 200)
+		if got := count() - baseline; got != 1 {
+			t.Fatalf("repeated attached ownership report wrote %d total heartbeat events, want 1", got)
+		}
+	}
+	state := f.call(f.person, "GET", v.path, nil, "")
+	expect(t, state, 200)
+	var current harness.Session
+	if err := json.Unmarshal(state.Body.Bytes(), &current); err != nil {
+		t.Fatal(err)
+	}
+	if current.ProcessObservedAt == nil || !current.ProcessObservedAt.After(observed) || current.ActivitySequence != 4 {
+		t.Fatal("quiet ownership reports did not persist their latest observation and sequence")
 	}
 }

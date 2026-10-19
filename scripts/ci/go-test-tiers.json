@@ -6782,6 +6782,8 @@
     ,
     {"kind":"go","package":"internal/harness","name":"TestHarnessSessionMessagesNeverMoveToAnotherGeneration","tier":"GATED-FULL"}
     ,
+    {"kind":"go","package":"internal/harness","name":"TestHeartbeatAttachedOwnershipAuditedOnce","tier":"ESSENTIAL"}
+    ,
     {"kind":"go","package":"internal/harness","name":"TestHeartbeatCommitDiffValidationAndStorage","tier":"NIGHTLY"}
     ,
     {"kind":"go","package":"internal/harness","name":"TestHeartbeatEstimateWarningMatrix","tier":"GATED-FULL"}
