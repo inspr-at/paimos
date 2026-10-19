@@ -74,7 +74,7 @@ func (rt *runtime) executeMessaging(args []string) error {
 		return usagef("%s requires a subcommand", cmd.Name)
 	}
 	if err := cmd.checkArgs(pos); err != nil {
-		return err
+		return rt.noteInterrupt(err)
 	}
-	return cmd.run(pos)
+	return rt.noteInterrupt(cmd.run(pos))
 }

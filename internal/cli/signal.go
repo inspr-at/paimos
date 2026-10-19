@@ -20,27 +20,45 @@ func signalContext() (context.Context, context.CancelFunc) {
 // armCommandSignals cancels the request context on SIGINT and SIGTERM.
 // A command that ignores that context still exits after a short grace period
 // instead of waiting silently. Callers that already installed a context, including
-// tests, keep it.
+// tests, keep it: cancelling that context is the caller's cancellation, not a
+// user interrupt. The signal context is released when the command returns so
+// the next command on this runtime does not inherit a canceled context.
 func (rt *runtime) armCommandSignals() func() {
 	if rt.requestContext != nil {
 		return func() {}
 	}
-	ctx, cancel := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
+	ctx, cancel := context.WithCancel(context.Background())
 	rt.requestContext = ctx
+	rt.commandInterrupted.Store(false)
+	sigs := make(chan os.Signal, 1)
+	signal.Notify(sigs, syscall.SIGINT, syscall.SIGTERM)
 	finished := make(chan struct{})
+	done := make(chan struct{})
 	go func() {
-		<-ctx.Done()
-		timer := time.NewTimer(commandInterruptGrace)
+		defer close(done)
+		defer signal.Stop(sigs)
 		select {
+		case <-sigs:
+			rt.commandInterrupted.Store(true)
+			cancel()
+			timer := time.NewTimer(commandInterruptGrace)
+			select {
+			case <-finished:
+				timer.Stop()
+			case <-timer.C:
+				fmt.Fprintln(rt.stderr, rt.program+": interrupted")
+				os.Exit(130)
+			}
 		case <-finished:
-			timer.Stop()
-		case <-timer.C:
-			fmt.Fprintln(rt.stderr, rt.program+": interrupted")
-			os.Exit(130)
 		}
 	}()
 	return func() {
 		close(finished)
 		cancel()
+		<-done
+		rt.commandInterrupted.Store(false)
+		if rt.requestContext == ctx {
+			rt.requestContext = nil
+		}
 	}
 }

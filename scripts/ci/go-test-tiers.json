@@ -4630,6 +4630,8 @@
     ,
     {"kind":"go","package":"internal/cli","name":"TestCLIAdditionalRootTranscripts","tags":["delete-candidate"],"tier":"GATED-FULL"}
     ,
+    {"kind":"go","package":"internal/cli","name":"TestCallerCancelIsNotAnInterrupt","tier":"ESSENTIAL"}
+    ,
     {"kind":"go","package":"internal/cli","name":"TestCapacityEnvUsesOnlyAuthenticatedLocalSocket","tier":"GATED-FULL"}
     ,
     {"kind":"go","package":"internal/cli","name":"TestCapacityExportQuotesAndAllowlist","tier":"GATED-FULL"}
@@ -5393,6 +5395,10 @@
     {"kind":"go","package":"internal/cli","name":"TestSessionIndexTrustRejectsForeignAndLooseModes","tier":"GATED-FULL"}
     ,
     {"kind":"go","package":"internal/cli","name":"TestSessionIndexUsesLockedDirectoryAfterReplacement","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/cli","name":"TestSignalCancelReportsInterrupt","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/cli","name":"TestSignalContextDoesNotPoisonTheNextCommand","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/cli","name":"TestSignalEndsBlockedCommand","tier":"ESSENTIAL"}
     ,

@@ -78,11 +78,11 @@ func TestPickerSearchAnswersWithoutWorkAggregates(t *testing.T) {
 			return err
 		}
 		if err := tx.QueryRow(t.Context(), `INSERT INTO nodes (tenant_id,key,kind_id,title,state,parent_id,position,fields)
-            VALUES ($1,'PICK-PARENT',$2,'PICK parent','open',$3,0,'{}'::jsonb) RETURNING id::text`, p.TenantID, work.ID, project.ID).Scan(&parentID); err != nil {
+            VALUES ($1,'PICK-4098',$2,'PICK parent','open',$3,0,'{}'::jsonb) RETURNING id::text`, p.TenantID, work.ID, project.ID).Scan(&parentID); err != nil {
 			return err
 		}
 		return tx.QueryRow(t.Context(), `INSERT INTO nodes (tenant_id,key,kind_id,title,state,parent_id,position,fields)
-            VALUES ($1,'PICK-CHILD',$2,'PICK child','open',$3,0,'{}'::jsonb) RETURNING id::text`, p.TenantID, work.ID, parentID).Scan(&childID)
+            VALUES ($1,'PICK-4099',$2,'PICK child','open',$3,0,'{}'::jsonb) RETURNING id::text`, p.TenantID, work.ID, parentID).Scan(&childID)
 	})
 	if err != nil || len(ids) != leaves || parentID == "" || childID == "" {
 		t.Fatalf("seed %d ids: %v", len(ids), err)

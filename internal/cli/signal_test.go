@@ -4,6 +4,7 @@ package cli
 
 import (
 	"bytes"
+	"context"
 	"errors"
 	"fmt"
 	"net/http"
@@ -64,6 +65,45 @@ func TestSignalEndsBlockedCommand(t *testing.T) {
 		}
 	case <-time.After(5 * time.Second):
 		t.Fatal("signal left the command running")
+	}
+}
+
+func TestSignalContextDoesNotPoisonTheNextCommand(t *testing.T) {
+	var out, errBuf bytes.Buffer
+	rt := &runtime{program: "aeon", stdin: strings.NewReader(""), stdout: &out, stderr: &errBuf}
+	if err := rt.execute([]string{"aeon", "--version"}); err != nil {
+		t.Fatal(err)
+	}
+	if rt.requestContext != nil {
+		t.Fatal("finished command left its signal context installed")
+	}
+	if err := rt.execute([]string{"aeon", "--version"}); err != nil {
+		t.Fatalf("next command inherited a dead signal context: %v", err)
+	}
+}
+
+func TestCallerCancelIsNotAnInterrupt(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	rt := &runtime{program: "aeon", requestContext: ctx, stdin: strings.NewReader(""), stdout: &bytes.Buffer{}, stderr: &bytes.Buffer{}}
+	err := rt.fail(context.Canceled)
+	exit, ok := err.(*exitError)
+	if !ok || exit.code != 1 || !strings.Contains(err.Error(), "context canceled") || strings.Contains(err.Error(), "interrupted") {
+		t.Fatalf("caller cancellation reported as an interrupt: %v", err)
+	}
+}
+
+func TestSignalCancelReportsInterrupt(t *testing.T) {
+	rt := &runtime{program: "aeon", stdin: strings.NewReader(""), stdout: &bytes.Buffer{}, stderr: &bytes.Buffer{}}
+	rt.commandInterrupted.Store(true)
+	err := rt.fail(context.Canceled)
+	exit, ok := err.(*exitError)
+	if !ok || exit.code != 130 || err.Error() != "interrupted" {
+		t.Fatalf("signal cancellation: %v", err)
+	}
+	err = rt.fail(errors.New("api 500: unavailable"))
+	if !strings.Contains(err.Error(), "api 500:") || strings.Contains(err.Error(), "interrupted") {
+		t.Fatalf("unrelated failure became an interrupt: %v", err)
 	}
 }
 

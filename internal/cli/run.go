@@ -13,6 +13,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync/atomic"
 
 	"golang.org/x/term"
 
@@ -55,6 +56,7 @@ func programName(argv0 string) string {
 
 type runtime struct {
 	requestContext     context.Context
+	commandInterrupted atomic.Bool // set only after SIGINT or SIGTERM, never for a caller-canceled context
 	program            string
 	stdin              io.Reader
 	stdout             io.Writer
@@ -111,9 +113,9 @@ func (rt *runtime) execute(args []string) error {
 		return usagef("%s requires a subcommand", cmd.Name)
 	}
 	if err := cmd.checkArgs(pos); err != nil {
-		return err
+		return rt.noteInterrupt(err)
 	}
-	return cmd.run(pos)
+	return rt.noteInterrupt(cmd.run(pos))
 }
 
 func (rt *runtime) printErr(ee *exitError) {
@@ -138,7 +140,7 @@ func (rt *runtime) printJSON(v any) error {
 }
 
 func (rt *runtime) fail(err error, secrets ...string) error {
-	if rt.requestContext != nil && errors.Is(rt.requestContext.Err(), context.Canceled) && errors.Is(err, context.Canceled) {
+	if rt.commandInterrupted.Load() && errors.Is(err, context.Canceled) {
 		return &exitError{code: 130, msg: "interrupted"}
 	}
 	message := err.Error()
@@ -186,6 +188,19 @@ func (rt *runtime) fail(err error, secrets ...string) error {
 	}
 	exit.msg = message
 	return exit
+}
+
+// noteInterrupt reports a signalled cancellation that never reached fail.
+// A caller-canceled context stays a normal failure.
+func (rt *runtime) noteInterrupt(err error) error {
+	if err == nil || !rt.commandInterrupted.Load() || !errors.Is(err, context.Canceled) {
+		return err
+	}
+	var exit *exitError
+	if errors.As(err, &exit) {
+		return err
+	}
+	return &exitError{code: 130, msg: "interrupted"}
 }
 
 func redact(msg, secret string) string {
