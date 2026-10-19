@@ -180,9 +180,10 @@ test('AEON-1470 columns leave in the give-way order; sorted by Updated, Updated 
 test('AEON-1470 a column that left returns only with 16 px to spare: ±8 px around a threshold keeps the set', async ({ page }, testInfo) => {
   const log = checks(testInfo)
   await open(page)
-  // Narrow the table a pixel at a time until Updated leaves.
-  await tableAt(page, 820)
-  let width = 820
+  // Narrow the table a pixel at a time until Updated leaves. It starts out shown: the scan finds where it leaves.
+  await tableAt(page, 920)
+  expect(await shownIds(page)).toContain('updated')
+  let width = 920
   while ((await shownIds(page)).includes('updated')) { width--; await tableAt(page, width); expect(width).toBeGreaterThan(721) }
   const set = await shownIds(page)
   for (const step of [8, -8]) {
@@ -475,6 +476,8 @@ test('AEON-1470 Parent cell shows the kind icon and key, adds the title from 200
   expect((await page.locator('thead th.c-title').boundingBox())!.width).toBeGreaterThanOrEqual(240)
 
   await page.setViewportSize({ width: 1024, height: 900 })
+  // The resize observer and the render it triggers land before the second frame.
+  await settled(page)
   await expect(parentHeader(page)).toBeVisible()
   await expect(page.locator('.parent-chip')).toHaveCount(0)
   expect((await page.locator('thead th.c-title').boundingBox())!.width).toBeGreaterThanOrEqual(240)
