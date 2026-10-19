@@ -34,6 +34,7 @@ const (
 type readAppForge struct {
 	reader                                                           *fakeGitHub
 	minted, revoked, calls                                           int
+	token                                                            string
 	wrongRepo, extraPermission, wrongVisibility, missingInstallation bool
 }
 
@@ -89,9 +90,17 @@ func readAppModule(t *testing.T) (*Module, *readAppForge) {
 			if forge.wrongRepo {
 				repository = "someone/else"
 			}
-			send(map[string]any{"token": fixtureToken, "permissions": permissions, "repositories": []map[string]any{{"full_name": repository, "private": !forge.wrongVisibility}}})
+			token := fixtureToken
+			if forge.token != "" {
+				token = forge.token
+			}
+			send(map[string]any{"token": token, "permissions": permissions, "repositories": []map[string]any{{"full_name": repository, "private": !forge.wrongVisibility}}})
 		case "/installation/token":
-			if r.Method != http.MethodDelete || r.Header.Get("Authorization") != "Bearer "+fixtureToken || r.Context().Err() != nil {
+			token := fixtureToken
+			if forge.token != "" {
+				token = forge.token
+			}
+			if r.Method != http.MethodDelete || r.Header.Get("Authorization") != "Bearer "+token || r.Context().Err() != nil {
 				t.Fatal("token revocation lost its bounded independent context")
 			}
 			forge.revoked++
@@ -174,6 +183,54 @@ func TestDoctrineAppReadBoundary(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestDoctrineInstallationTokenLength(t *testing.T) {
+	// Risk: a long opaque installation token is rejected, or a token with a
+	// forbidden character is sent to the repository and then revoked.
+	long := strings.Repeat("A1b_.-", 86) + "Z9xy"
+	if len(long) != 520 {
+		t.Fatalf("long token length %d", len(long))
+	}
+	source := Source{Repository: privateRepository, Visibility: "private", Commit: privateSHA, Paths: DefaultPaths, CredentialRef: "github-app"}
+	t.Run("long token", func(t *testing.T) {
+		m, f := readAppModule(t)
+		f.token = long
+		f.reader.token = long
+		var logs bytes.Buffer
+		previous := slog.Default()
+		slog.SetDefault(slog.New(slog.NewTextHandler(&logs, nil)))
+		defer slog.SetDefault(previous)
+		files, _, corpus, err := m.fetch(t.Context(), credentialTenantA, source)
+		if err != nil || len(files) != 1 || len(corpus) == 0 {
+			t.Fatalf("long token fetch: files=%d corpus=%d err=%v", len(files), len(corpus), err)
+		}
+		if strings.Contains(logs.String(), long) {
+			t.Fatal("long installation token was logged")
+		}
+		if f.minted != 1 || f.revoked != 1 || !slices.Contains(f.reader.auth, "Bearer "+long) {
+			t.Fatalf("minted=%d revoked=%d forwarded=%v", f.minted, f.revoked, slices.Contains(f.reader.auth, "Bearer "+long))
+		}
+	})
+	t.Run("forbidden character", func(t *testing.T) {
+		bad := strings.Repeat("a", 519) + "/"
+		m, f := readAppModule(t)
+		f.token = bad
+		var logs bytes.Buffer
+		previous := slog.Default()
+		slog.SetDefault(slog.New(slog.NewTextHandler(&logs, nil)))
+		defer slog.SetDefault(previous)
+		_, _, _, err := m.fetch(t.Context(), credentialTenantA, source)
+		if err == nil || !strings.Contains(err.Error(), "invalid") {
+			t.Fatalf("forbidden token: %v", err)
+		}
+		if strings.Contains(err.Error(), bad) || strings.Contains(logs.String(), bad) {
+			t.Fatal("rejected token escaped through an error or log")
+		}
+		if f.minted != 1 || f.revoked != 0 || f.reader.calls != 0 {
+			t.Fatalf("minted=%d revoked=%d repo reads=%d", f.minted, f.revoked, f.reader.calls)
+		}
+	})
 }
 
 func mirrorFixture(t *testing.T, commit string) string {

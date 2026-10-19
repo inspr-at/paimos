@@ -280,6 +280,80 @@ test('eight linked tickets appear once the viewport reaches 1280', async ({ page
   await expect(page.locator('[data-header-glimpse="on"]')).toHaveCount(0)
 })
 
+// PR shard: 1279 → 1280 → 390 left the painted glimpse on after innerWidth was
+// already 390. The paint sampler, the wide-only interval and a document-element
+// observer can all be gone together. The header's own box still changes size.
+test('AEON-1467: a painted glimpse hides below 1280 after the paint sampler and the document observer are gone', async ({ page }) => {
+  await page.addInitScript(() => {
+    const state = { sealed: false, intervals: [] as number[], timeouts: [] as number[], frames: [] as number[], documentDrops: 0 }
+    ;(window as unknown as { __aeonGlimpseSeal: typeof state }).__aeonGlimpseSeal = state
+    const nativeInterval = window.setInterval.bind(window)
+    const nativeTimeout = window.setTimeout.bind(window)
+    const nativeFrame = window.requestAnimationFrame.bind(window)
+    window.setInterval = ((handler: TimerHandler, timeout?: number, ...args: unknown[]) => {
+      const id = nativeInterval(handler, timeout, ...args)
+      state.intervals.push(id as unknown as number)
+      return id
+    }) as typeof window.setInterval
+    window.setTimeout = ((handler: TimerHandler, timeout?: number, ...args: unknown[]) => {
+      const id = nativeTimeout(handler, timeout, ...args)
+      state.timeouts.push(id as unknown as number)
+      return id
+    }) as typeof window.setTimeout
+    window.requestAnimationFrame = callback => {
+      const id = nativeFrame(callback)
+      state.frames.push(id)
+      return id
+    }
+    window.addEventListener('resize', event => { if (state.sealed) event.stopImmediatePropagation() }, { capture: true })
+    window.visualViewport?.addEventListener('resize', event => { if (state.sealed) event.stopImmediatePropagation() }, { capture: true })
+    const media = window.matchMedia.bind(window)
+    window.matchMedia = query => {
+      const list = media(query)
+      if (query === '(min-width: 1280px)') list.addEventListener('change', event => { if (state.sealed) event.stopImmediatePropagation() }, { capture: true })
+      return list
+    }
+    const Observer = window.ResizeObserver
+    window.ResizeObserver = class extends Observer {
+      constructor(callback: ResizeObserverCallback) {
+        super((entries, observer) => {
+          if (!state.sealed) { callback(entries, observer); return }
+          const delivered = entries.filter(entry => {
+            if (entry.target !== document.documentElement) return true
+            state.documentDrops++
+            return false
+          })
+          if (delivered.length) callback(delivered, observer)
+        })
+      }
+    }
+  })
+  await page.setViewportSize({ width: 1280, height: 900 })
+  await mockHeaderGraph(page, sized(8, true))
+  await page.goto('/p/PHAROS/tickets')
+  await ready(page)
+  await page.evaluate(() => {
+    const state = (window as unknown as { __aeonGlimpseSeal: { sealed: boolean; intervals: number[]; timeouts: number[]; frames: number[] } }).__aeonGlimpseSeal
+    for (const id of state.intervals) window.clearInterval(id)
+    for (const id of state.timeouts) window.clearTimeout(id)
+    for (const id of state.frames) window.cancelAnimationFrame(id)
+    state.intervals.length = 0
+    state.timeouts.length = 0
+    state.frames.length = 0
+    state.sealed = true
+    window.requestAnimationFrame = () => 0
+    window.setTimeout = (() => 0) as typeof window.setTimeout
+    window.setInterval = (() => 0) as typeof window.setInterval
+  })
+  await resizeSeen(page, { width: 390, height: 844 })
+  await expect.poll(() => page.evaluate(() => ({
+    width: window.innerWidth,
+    layout: document.documentElement.getBoundingClientRect().width,
+  }))).toEqual({ width: 390, layout: 390 })
+  await expect(page.locator('[data-header-glimpse="on"]')).toHaveCount(0)
+  await expect(page.locator('[data-header-glimpse="off"]')).toBeAttached()
+})
+
 // The mounted min-width list can miss `change` while the WebGL loop is running.
 // Shrinking must still clear the glimpse. This listener swallow is the regression
 // for that miss: the layout width is the only signal left.

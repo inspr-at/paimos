@@ -83,6 +83,11 @@ func TestFullUIQALabelOptInBoundary(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	// d24cf2b6 rejected this file. Its guard still required the bare shard
+	// list, so the production performance row could not be required at all.
+	if problems, err := checkWorkflow("full-ui-qa.yml", body); err != nil || len(problems) != 0 {
+		t.Fatalf("five UI shards plus the production performance suite must be accepted: %v %v", problems, err)
+	}
 	for _, mutation := range []struct{ old, new string }{
 		{"    types: [opened, reopened, synchronize, labeled]", "    types: [opened, reopened, synchronize]"},
 		{"  schedule:", "  push:\n  schedule:"},
@@ -91,7 +96,7 @@ func TestFullUIQALabelOptInBoundary(t *testing.T) {
 		{"contents: read", "contents: write"},
 		{"    runs-on: ubuntu-latest", "    runs-on: mbp2606"},
 		{"      fail-fast: false", "      fail-fast: true"},
-		{"shard: [1, 2, 3, 4, 5]", "shard: [1, 2, 3, 4, 5, 6]"},
+		{"- { shard: 5, config: playwright.ui.config.ts, partition: 5/5 }", "- { shard: 5, config: playwright.ui.config.ts, partition: 5/5 }\n          - { shard: 6, config: playwright.ui.config.ts, partition: 6/6 }"},
 		{"always() && needs.qa-source.result != 'skipped'", "success()"},
 		{"    timeout-minutes: 90", "    permissions: {contents: write}\n    timeout-minutes: 90"},
 		{"    timeout-minutes: 90", "    environment: production\n    timeout-minutes: 90"},
@@ -106,6 +111,23 @@ func TestFullUIQALabelOptInBoundary(t *testing.T) {
 			problems, err := checkWorkflow("full-ui-qa.yml", []byte(changed))
 			if err != nil || len(problems) == 0 {
 				t.Fatalf("unsafe full UI QA accepted: %v %v", problems, err)
+			}
+		})
+	}
+	for _, mutation := range []struct{ name, old, new string }{
+		{"dropped UI shard", "          - { shard: 3, config: playwright.ui.config.ts, partition: 3/5 }\n", ""},
+		{"dropped performance suite", "          - { shard: performance, config: playwright.perf.config.ts, partition: 1/1 }\n", ""},
+		{"performance on the UI server", "config: playwright.perf.config.ts", "config: playwright.ui.config.ts"},
+	} {
+		t.Run(mutation.name, func(t *testing.T) {
+			changed := strings.Replace(string(body), mutation.old, mutation.new, 1)
+			if changed == string(body) {
+				t.Fatal("mutation did not change the workflow")
+			}
+			problems, err := checkWorkflow("full-ui-qa.yml", []byte(changed))
+			joined := strings.Join(problems, "\n")
+			if err != nil || !strings.Contains(joined, "all five shards") || !strings.Contains(joined, "production performance suite") {
+				t.Fatalf("narrowed full UI QA accepted: %v %v", problems, err)
 			}
 		})
 	}
