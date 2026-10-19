@@ -342,23 +342,30 @@ with zero timestamps report absent duration; executed jobs with invalid timestam
 still fail accounting. Spec-only reports explicitly use `untiered` coverage and
 claim no tier case passes; its native checks still block `web`.
 
-Nightly-full uses 26 hosted browser shards (AEON-1325, widened by AEON-1522),
-each selecting every tier with `scripts/test-tiers/cli.mjs run web --all
---shard i/26`. Catalogue packing uses `nightlyTiming` from hosted run
-38488051180 (AEON-1327); that earlier 24-shard estimate peaked near 15
-minutes. AEON-1522 measured the current catalogue at 959.1 seconds on 24
-shards. Twenty-five shards still peak at 921.1 seconds, because the catalogue
-sums past 25 times 900 seconds. Twenty-six shards peak at 886.1 seconds, at
-least 60 seconds under the 16-minute budget. The 16-minute budget is
-unchanged. Browser execution uses a 30-minute step cap (AEON-1351: shard 23
-passed every case and still hit the old 20-minute step at 19.83 minutes). The
-job budget stays 40 minutes so a hung job is still caught; dependency
-installation keeps its own 13-minute step cap. The `nightly-web` aggregate
-requires setup and the entire shard matrix; tier accounting consumes all 26
-shard measurements and rejects missing or interrupted evidence. PR and
-merge-group layouts use seventeen shards packed from `tierTiming` weights,
-inside the fifteen-minute planner budget. The
-twenty-minute job cap stays the hang guard.
+Nightly-full sizes its hosted browser matrix from the catalogue weights
+(AEON-1558). After strict classification, nightly setup runs
+`node scripts/test-tiers/cli.mjs nightly-web-plan` and publishes the shard list
+as `browser-shards`; the matrix consumes that output. The planner uses the same
+`nightlyWeights` and whole-spec packing as `run web --all --shard i/N`, starting
+at the total-weight lower bound and adding shards until the peak is at most
+840 seconds. Every browser case still runs exactly once and each spec stays
+on one shard. Every file requires nightly timing. A spec exceeding 840 seconds
+or a catalogue needing more than the tier runner's 64 shards fails planning with
+an actionable error instead of dropping cases. The 16-minute estimate budget
+is unchanged, with two minutes of planned headroom. Catalogue packing uses
+`nightlyTiming` from hosted run 38488051180 (AEON-1327).
+
+Browser execution uses a 30-minute step cap (AEON-1351: shard 23 passed every
+case and still hit the old 20-minute step at 19.83 minutes). The job budget
+stays 40 minutes so a hung job is still caught; dependency installation keeps
+its own 13-minute step cap. The `nightly-web` aggregate requires setup and the
+entire planned shard matrix; tier accounting consumes every shard measurement
+and rejects missing or interrupted evidence. The main ruleset requires only
+aggregate checks (`go`, `web`, `release-check`, `e2e`, `migration-compat`), so
+individual nightly shard names are not required-check identities. PR and
+merge-group layouts remain seventeen shards packed from `tierTiming` weights,
+inside the fifteen-minute planner budget. The twenty-minute job cap stays the
+hang guard.
 
 **Affected PR planning (OPS-257 / AEON-743):** `CI_AFFECTED_LANE` is a repository
 variable, default off. Only its exact value `on` enables new rules; unset, `off`
