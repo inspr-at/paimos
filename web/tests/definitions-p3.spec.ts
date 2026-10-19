@@ -61,6 +61,8 @@ async function setup(page: Page,theme: 'light' | 'dark',locale='en',viewer=false
   page.on('pageerror',error=>errors.push(error.message))
   await page.route('**/api/**',async route=>{
     const request=route.request(),url=new URL(request.url()),path=url.pathname
+    if(world.readOnly&&path==='/api/me')return route.fulfill({json:{principal:{id:'22222222-2222-4222-8222-222222222222',name:'Mia Weber',kind:'person',roles:['viewer']},tenant:{id:'t1',slug:'inspr',name:'INSPR'}}})
+    if(world.readOnly&&path==='/api/me/profile')return route.fulfill({json:{...settings.profile,principal_id:'22222222-2222-4222-8222-222222222222',email:'mia@example.test',first_name:'Mia',last_name:'Weber',short_name:'mia',initials:'MW'}})
     if(path==='/api/me/permissions'){const permissions=mockEffectivePermissions(world.readOnly?'viewer':'admin',url.searchParams.get('project_id')??undefined);permissions.workspace.permissions.push('reviewpolicy.read',...(!world.readOnly?['reviewpolicy.manage']:[]));return route.fulfill({json:permissions})}
     if(path==='/api/preferences/theme')return route.fulfill({json:{key:'theme',value:{choice:theme}}})
     if(path==='/api/settings/review-policy')return route.fulfill({json:reviewPolicy()})
