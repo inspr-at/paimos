@@ -8,14 +8,19 @@
 // per goal as rows need them, a few at a time. The event stream (AEON-1494) says
 // when goals, items or the workspace status note changed: the list is read again
 // at once, and its state is the footer's freshness stamp (Live or Reconnecting).
+// AEON-1395: Group › Goals or Epics, for callers that offer it (groups). The person's
+// choice is kept with their Goals preferences; a link (?group=epics) wins until they
+// choose and changes nothing. Their first read waits for those preferences, so a
+// remembered group never shows the other list first. A switch replaces the rows;
+// the frame (status note, header) stays, and a read for the other group never lands.
 import { computed, onScopeDispose, reactive, ref, shallowRef, watch, type Ref } from 'vue'
 import { useSession } from '../../stores/session'
 import { scopeOwner } from '../../lib/identityScope'
 import { usePreference } from '../../lib/preferences'
 import { usePoller } from '../../lib/usePolledData'
-import { goalCreatedAt, goalMatches, goalSeries, itemMatches, listGoals, SORT_DIR, type Goal, type GoalCounts, type GoalList, type GoalSeries, type GoalSort, type StateFilter } from '../../lib/goals'
+import { goalCreatedAt, goalMatches, goalSeries, isGoalGroup, itemMatches, listGoals, SORT_DIR, type Goal, type GoalCounts, type GoalGroup, type GoalList, type GoalSeries, type GoalSort, type StateFilter } from '../../lib/goals'
 import { isGoalRange, type GoalRange } from '../../lib/goalRate'
-import { openGoalsLive, type GoalsLiveState } from '../../lib/goalsLive'
+import { EPIC_STREAM_EVENTS, GOAL_STREAM_EVENTS, openGoalsLive, type GoalsLiveState } from '../../lib/goalsLive'
 
 const LIST_POLL_MS = 60_000
 const SEARCH_SETTLE_MS = 250
@@ -26,14 +31,33 @@ const SERIES_PARALLEL = 3
 // window, and never more than one in flight, so a busy stream cannot starve the list.
 const LIVE_SETTLE_MS = 400
 
-type GoalsPrefs = { range?: string; hideDone?: boolean }
+type GoalsPrefs = { range?: string; hideDone?: boolean; group?: string }
 export interface SeriesEntry { state: 'reading' | 'ready' | 'failed' | 'too_large'; series?: GoalSeries; createdAt: number | null; at: number; sign: string }
 
 // shown: the project groups the person hides take their goals with them.
-export function useGoalsPage(options: { term: Ref<string>; active: () => boolean; shown?: (goal: Goal) => boolean }) {
+// groups: the caller offers Group › Goals · Epics; link is the group a link asks for (?group=).
+export function useGoalsPage(options: { term: Ref<string>; active: () => boolean; shown?: (goal: Goal) => boolean; groups?: { link?: () => unknown } }) {
   const session = useSession()
   const owner = computed(() => scopeOwner(session.identity))
   const prefs = usePreference<GoalsPrefs>('goals')
+  // With groups, the person's preferences for this owner were read (or failed to) before the first read.
+  const settledFor = ref('')
+  watch(owner, who => {
+    settledFor.value = ''
+    if (who) void prefs.ready.then(() => { if (owner.value === who) settledFor.value = who })
+  }, { immediate: true })
+  const settled = computed(() => !options.groups || (!!owner.value && settledFor.value === owner.value))
+
+  // ---------- Group: Goals or Epics (AEON-1395) ----------
+  const linkedGroup = computed<GoalGroup | null>(() => { const value = options.groups?.link?.(); return isGoalGroup(value) ? value : null })
+  const chosenGroup = ref<GoalGroup | null>(null)
+  watch(linkedGroup, value => { if (value) chosenGroup.value = null })
+  const storedGroup = computed<GoalGroup>(() => isGoalGroup(prefs.value.value?.group) ? prefs.value.value!.group as GoalGroup : 'goals')
+  const group = computed<GoalGroup>(() => options.groups ? chosenGroup.value ?? linkedGroup.value ?? storedGroup.value : 'goals')
+  function setGroup(value: GoalGroup) {
+    chosenGroup.value = value
+    if (value !== storedGroup.value) void prefs.save({ ...(prefs.value.value ?? {}), group: value }, 0)
+  }
 
   // ---------- Toolbar state ----------
   const filter = ref<StateFilter>('all')
@@ -55,6 +79,8 @@ export function useGoalsPage(options: { term: Ref<string>; active: () => boolean
   const list = shallowRef<GoalList | null>(null)
   const error = ref('')
   const reading = ref(false)
+  // A group switch keeps the frame and clears the rows until the new list arrives.
+  const replacing = ref(false)
   const loadingMore = ref(false)
   // When this screen last received the list: the Reconnecting stamp's "last update".
   const updatedAt = ref<number | null>(null)
@@ -63,10 +89,10 @@ export function useGoalsPage(options: { term: Ref<string>; active: () => boolean
   // leave "Show more" disabled, and must not append onto the list that replaced it.
   let pageToken = 0
   let controller: AbortController | undefined
-  const query = () => ({ q: options.term.value, state: filter.value === 'all' ? null : filter.value, hideDone: hideDone.value, sort: sort.value, dir: dir.value })
+  const query = () => ({ group: group.value, q: options.term.value, state: filter.value === 'all' ? null : filter.value, hideDone: hideDone.value, sort: sort.value, dir: dir.value })
   function retirePagination() { pageToken++; loadingMore.value = false }
   function read(): Promise<void> {
-    if (!owner.value || !options.active()) return Promise.resolve()
+    if (!owner.value || !options.active() || !settled.value) { replacing.value = false; return Promise.resolve() }
     controller?.abort()
     const abort = new AbortController(); controller = abort
     retirePagination()
@@ -74,17 +100,18 @@ export function useGoalsPage(options: { term: Ref<string>; active: () => boolean
     reading.value = true
     // The answer counts only for the person, query and turn it was asked for.
     const current = () => mine === turn && who === owner.value
-    return listGoals(query(), abort.signal).then(answer => {
+    return listGoals(query(), abort.signal, group.value).then(answer => {
       if (!current()) return
       reading.value = false
       // The same question never goes back to an older snapshot than the one on screen.
       const shown = list.value
-      if (shown && asked === shownQuery && (answer.read_through < shown.read_through || (answer.read_through === shown.read_through && answer.generation < shown.generation))) return
-      list.value = answer; shownQuery = asked; error.value = ''; updatedAt.value = Date.now()
+      if (shown && asked === shownQuery && (answer.read_through < shown.read_through || (answer.read_through === shown.read_through && answer.generation < shown.generation))) { replacing.value = false; return }
+      list.value = answer; shownQuery = asked; error.value = ''; updatedAt.value = Date.now(); replacing.value = false
     }, cause => {
       if (!current() || abort.signal.aborted) return
       error.value = cause instanceof Error ? cause.message : 'Goals could not be read.'
       reading.value = false
+      replacing.value = false
     })
   }
   // The next page joins the list; a newer read of the first page replaces it instead.
@@ -93,7 +120,7 @@ export function useGoalsPage(options: { term: Ref<string>; active: () => boolean
     if (!page?.next_cursor || loadingMore.value || !owner.value) return Promise.resolve()
     const mine = turn, who = owner.value, token = pageToken
     loadingMore.value = true
-    return listGoals({ ...query(), cursor: page.next_cursor }).then(answer => {
+    return listGoals({ ...query(), cursor: page.next_cursor }, undefined, group.value).then(answer => {
       if (token !== pageToken || mine !== turn || who !== owner.value || list.value !== page) return
       const known = new Set(page.items.map(goal => goal.id))
       list.value = { ...answer, items: [...page.items, ...answer.items.filter(goal => !known.has(goal.id))] }
@@ -104,8 +131,16 @@ export function useGoalsPage(options: { term: Ref<string>; active: () => boolean
   let settle: ReturnType<typeof setTimeout> | undefined
   watch(options.term, () => { clearTimeout(settle); settle = setTimeout(() => { void read() }, SEARCH_SETTLE_MS) })
   watch([filter, sort, dir, hideDone], () => { clearTimeout(settle); void read() })
-  const poller = usePoller(read, LIST_POLL_MS, { enabled: () => options.active() && !!owner.value })
-  watch(() => options.active() && !!owner.value, on => { if (on) poller.start(true); else { poller.stop(); controller?.abort() } }, { immediate: true })
+  // Another group is another list: the rows are replaced, the frame (status note, header) stays.
+  watch(group, () => {
+    turn++; controller?.abort(); retirePagination(); clearTimeout(settle)
+    error.value = ''
+    const shown = list.value
+    if (shown) { replacing.value = true; list.value = { ...shown, items: [], next_cursor: undefined } }
+    void read()
+  })
+  const poller = usePoller(read, LIST_POLL_MS, { enabled: () => options.active() && !!owner.value && settled.value })
+  watch(() => options.active() && !!owner.value && settled.value, on => { if (on) poller.start(true); else { poller.stop(); controller?.abort() } }, { immediate: true })
 
   // ---------- Live ----------
   const live = ref<GoalsLiveState>('off')
@@ -122,12 +157,13 @@ export function useGoalsPage(options: { term: Ref<string>; active: () => boolean
   function startLive() {
     stopLive()
     stream = openGoalsLive({
+      events: group.value === 'epics' ? EPIC_STREAM_EVENTS : GOAL_STREAM_EVENTS,
       state: value => { live.value = value },
       changed: () => { if (liveSettle === undefined) liveSettle = setTimeout(() => { liveSettle = undefined; void liveRead() }, LIVE_SETTLE_MS) },
     })
   }
   // The stream belongs to the person on screen: another person starts a new one.
-  watch([() => options.active(), owner], ([on, who]) => { if (on && who) startLive(); else stopLive() }, { immediate: true })
+  watch([() => options.active(), owner, group], ([on, who]) => { if (on && who) startLive(); else stopLive() }, { immediate: true })
   const statusNote = computed(() => list.value?.status_note ?? null)
   const etaLastSetAt = computed(() => { const at = list.value?.eta_last_set_at ? Date.parse(list.value.eta_last_set_at) : NaN; return Number.isNaN(at) ? null : at })
 
@@ -172,7 +208,8 @@ export function useGoalsPage(options: { term: Ref<string>; active: () => boolean
   // Rows ask for their series; one is read again when the goal moved or it is old.
   // A "reading" entry with no flight and no queue slot was stranded by an older epoch, so it is asked again.
   function want(goal: Goal, value: GoalRange = range.value) {
-    if (goal.expansion !== 'full') return
+    // Epics have no recorded progress series.
+    if (goal.expansion !== 'full' || goal.kind === 'epic') return
     const key = seriesKey(goal.id, value), sign = signOf(goal), have = series.get(key)
     if (inflight.has(key) || queue.some(entry => entry.key === key)) return
     if (have && have.state !== 'reading' && have.sign === sign && Date.now() - have.at < SERIES_FRESH_MS) return
@@ -211,8 +248,8 @@ export function useGoalsPage(options: { term: Ref<string>; active: () => boolean
   // Another person or workspace starts from nothing: no list, no open goals, no series.
   watch(owner, () => {
     turn++; controller?.abort(); retireSeries(); retirePagination()
-    list.value = null; error.value = ''; reading.value = false; updatedAt.value = null
-    open.clear(); charts.clear(); folds.clear(); series.clear(); filter.value = 'all'
+    list.value = null; error.value = ''; reading.value = false; replacing.value = false; updatedAt.value = null
+    open.clear(); charts.clear(); folds.clear(); series.clear(); filter.value = 'all'; chosenGroup.value = null
     if (options.active()) void read()
   }, { flush: 'sync' })
   function stop() { poller.stop(); controller?.abort(); clearTimeout(settle); stopLive(); retireSeries(); retirePagination() }
@@ -220,7 +257,8 @@ export function useGoalsPage(options: { term: Ref<string>; active: () => boolean
   onScopeDispose(stop)
 
   return {
-    filter, sort, dir, hideDone, setHideDone, range, setRange, setSort, list, goals, hiddenByGroups, error, reading, loaded, loadingMore, loadMore, read,
+    group, setGroup,
+    filter, sort, dir, hideDone, setHideDone, range, setRange, setSort, list, goals, hiddenByGroups, error, reading, replacing, loaded, loadingMore, loadMore, read,
     live, updatedAt, statusNote, etaLastSetAt,
     open, charts, folds, isOpen, allOpen, toggle, toggleAll, toggleFold, toggleChart, searchOpens, want, seriesFor, counts, totals, totalsPartial, stop,
   }

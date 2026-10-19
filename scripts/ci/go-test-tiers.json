@@ -6574,6 +6574,20 @@
     ,
     {"kind":"go","package":"internal/fromclassic","name":"TestResolveImportedLinksWithProjectVisibility","tier":"ESSENTIAL"}
     ,
+    {"kind":"go","package":"internal/goals","name":"TestEpicFix2LandingText","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/goals","name":"TestEpicFix2LandsUsesSuggestionAndQueue","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/goals","name":"TestEpicFix2OpenEpicStaysWithItsChecks","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/goals","name":"TestEpicFix2RedactsNotesAuthorDeliveryAndHolds","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/goals","name":"TestEpicFix3UntargetedLandsAndExpectedStart","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/goals","name":"TestEpicFix4PoolCapacityFollowsProjectMatrix","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/goals","name":"TestEpicItemStateMapping","tier":"ESSENTIAL"}
+    ,
     {"kind":"go","package":"internal/goals","name":"TestGoalAPIAtomicReceipts","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/goals","name":"TestGoalAPICreateAndCurrentTarget","tier":"ESSENTIAL"}
@@ -6585,6 +6599,8 @@
     {"kind":"go","package":"internal/goals","name":"TestGoalAPIWriteTimeETAsAndHiddenPings","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/goals","name":"TestGoalClockBoundariesAndWatermarks","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/goals","name":"TestGoalEpicsAreasRollupAndMissingChecks","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/goals","name":"TestGoalEventReferenceUpgradePreservesHistory","tier":"ESSENTIAL"}
     ,
