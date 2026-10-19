@@ -456,6 +456,39 @@ paths:
         '400': {description: Rules must contain all seven keys; day limits are integers from 1 to 365}
         '403': {description: Person with workspace settings.manage required}
         '409': {description: Settings changed since they were read}
+  /settings/status-names:
+    get:
+      summary: Read the workspace's own names for its statuses
+      description: 'Requires nodes.read in the workspace or any bound project (AEON-1401). Display only: stored states, transitions, checks, the API, --json, webhooks and export keys keep the canonical values. Only renamed statuses appear; a missing locale reads as the built-in name.'
+      operationId: getStatusNames
+      security: [{session: []}, {agentKey: []}]
+      responses:
+        '200':
+          description: 'Names and revision; revision 0 means nothing was saved yet'
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/StatusNames'}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '403': {$ref: '#/components/responses/Forbidden'}
+    put:
+      summary: Replace the workspace's status names (person with settings.manage)
+      description: 'Names are trimmed; empty names and names equal to their own built-in are dropped. A name may not exceed 24 characters or match the name another status reads as in the same locale, built-in or renamed, ignoring case. Writes tenant.status_names_updated.'
+      operationId: putStatusNames
+      security: [{session: []}]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/StatusNames'}
+      responses:
+        '200':
+          description: 'Saved names with the new revision'
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/StatusNames'}
+        '400': {description: 'Invalid body, or a refused name: code status_name_unknown, status_name_invalid, status_name_too_long or status_name_taken, with fields naming names.<status>.<locale>'}
+        '403': {$ref: '#/components/responses/Forbidden'}
+        '409': {description: 'Status names changed since they were read; reload before saving'}
   /settings/work-vocabulary:
     get:
       summary: Read workspace work names and icons
@@ -587,6 +620,36 @@ components:
             done: {$ref: '#/components/schemas/StatusAutopilotRule', description: Merged but not released for 14 days to missed-release flag}
             publish: {$ref: '#/components/schemas/StatusAutopilotRule', description: On release publish to Delivered}
             accept: {$ref: '#/components/schemas/StatusAutopilotRule', description: Delivered 30 days without objection to Accepted}
+    StatusName:
+      type: object
+      additionalProperties: false
+      description: 'One status''s display names. An empty or missing locale reads as the built-in name.'
+      properties:
+        en: {type: string, maxLength: 24}
+        de: {type: string, maxLength: 24}
+    StatusNames:
+      type: object
+      additionalProperties: false
+      required: [revision, names]
+      properties:
+        revision: {type: integer, minimum: 0, description: 'The revision the write expects on PUT; the saved revision in responses.'}
+        names:
+          type: object
+          additionalProperties: false
+          description: 'Renamed statuses only, keyed by canonical status; queued is the work-queue place lists show like a status.'
+          properties:
+            new: {$ref: '#/components/schemas/StatusName'}
+            backlog: {$ref: '#/components/schemas/StatusName'}
+            open: {$ref: '#/components/schemas/StatusName'}
+            blocked: {$ref: '#/components/schemas/StatusName'}
+            in_progress: {$ref: '#/components/schemas/StatusName'}
+            qa: {$ref: '#/components/schemas/StatusName'}
+            done: {$ref: '#/components/schemas/StatusName'}
+            delivered: {$ref: '#/components/schemas/StatusName'}
+            accepted: {$ref: '#/components/schemas/StatusName'}
+            cancelled: {$ref: '#/components/schemas/StatusName'}
+            archived: {$ref: '#/components/schemas/StatusName'}
+            queued: {$ref: '#/components/schemas/StatusName'}
     WorkLevel:
       type: object
       additionalProperties: false
