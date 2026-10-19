@@ -228,6 +228,7 @@ type Supervisor struct {
 	verificationDiagnostic func(string, string, string, string)
 	pollDiagnosticMu       sync.Mutex
 	pollDiagnosticLast     map[string]time.Time // Previous reason set and last emission, protected by pollDiagnosticMu.
+	daemonWaits            map[string]string    // Last reported checkout-wait reason per run. Protected by mu.
 	ledgerRouteUnconfirmed bool                 // Protected by mu; unresolved attempts retain their own holds.
 	ledgerReplayAfter      string               // Protected by dispatchMu; rotate bounded replay fairly.
 	loginRequired          map[string]bool
@@ -891,15 +892,59 @@ func (s *Supervisor) poll(ctx context.Context, dispatch, scanQueue bool, nonempt
 		}
 		if run.AgentPrincipalID != s.principalID {
 			failures = append(failures, ErrScope)
+			s.noteDaemonWait(ctx, run.ID, "")
 			continue
 		}
-		if err := s.StartRun(ctx, run); err != nil && !errors.Is(err, ErrDraining) && !errors.Is(err, ErrHostCapacity) {
+		err := s.StartRun(ctx, run)
+		if errors.Is(err, errCheckoutHeldByEarlierPairing) {
+			diagnostic = CheckoutHeldCause
+			s.noteDaemonWait(ctx, run.ID, CheckoutHeldCause)
+			continue
+		}
+		s.noteDaemonWait(ctx, run.ID, "")
+		if err != nil && !errors.Is(err, ErrDraining) && !errors.Is(err, ErrHostCapacity) {
 			if !errors.Is(err, errAccountUnavailable) || !s.Lifecycle("").Ready {
 				failures = append(failures, err)
 			}
 		}
 	}
 	return errors.Join(failures...)
+}
+
+// noteDaemonWait reports a checkout-wait reason at most once per distinct value.
+// An empty reason clears a reason this process reported. A failed report is not
+// remembered, so the next poll retries it. The API call is never made under s.mu.
+func (s *Supervisor) noteDaemonWait(ctx context.Context, runID, reason string) {
+	reporter, ok := s.api.(interface {
+		ReportDaemonWait(context.Context, string, string) error
+	})
+	if !ok || runID == "" || (reason != "" && reason != CheckoutHeldCause) {
+		return
+	}
+	s.mu.Lock()
+	prev, seen := s.daemonWaits[runID]
+	if reason == "" && (!seen || prev == "") {
+		s.mu.Unlock()
+		return
+	}
+	if seen && prev == reason {
+		s.mu.Unlock()
+		return
+	}
+	s.mu.Unlock()
+	if err := reporter.ReportDaemonWait(ctx, runID, reason); err != nil {
+		return
+	}
+	s.mu.Lock()
+	if s.daemonWaits == nil {
+		s.daemonWaits = map[string]string{}
+	}
+	if reason == "" {
+		delete(s.daemonWaits, runID)
+	} else {
+		s.daemonWaits[runID] = reason
+	}
+	s.mu.Unlock()
 }
 
 func (s *Supervisor) reportPollDiagnostic(reason string) {

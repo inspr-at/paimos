@@ -32,6 +32,9 @@ type Config[T any] struct {
 	// record. Open validates the entire checkpoint and WAL before persisting
 	// the migrated state. Callers must serialize Open with their instance lock.
 	Migrations map[int]func(json.RawMessage) (T, error)
+	// ReadOnly opens an existing directory and replays it without creating
+	// directories or writing a checkpoint. A missing directory is os.ErrNotExist.
+	ReadOnly bool
 }
 
 // SchemaVersionError distinguishes an incompatible schema from damaged data.
@@ -72,6 +75,7 @@ type Journal[T any] struct {
 	validate       func(T) error
 	migrations     map[int]func(json.RawMessage) (T, error)
 	migrated       bool
+	readOnly       bool
 	records        map[string]T
 }
 
@@ -88,20 +92,33 @@ func Open[T any](config Config[T]) (*Journal[T], error) {
 		}
 		migrations[version] = migrate
 	}
-	if err := os.MkdirAll(config.Directory, 0o700); err != nil {
-		return nil, fmt.Errorf("create local journal state: %w", err)
-	}
-	info, err := os.Lstat(config.Directory)
-	if err != nil {
-		return nil, fmt.Errorf("stat local journal directory %s: %w", config.Directory, err)
-	}
-	if !info.IsDir() || info.Mode().Perm() != 0o700 {
-		return nil, fmt.Errorf("local journal directory %s has unsafe mode or type", config.Directory)
+	if config.ReadOnly {
+		info, err := os.Lstat(config.Directory)
+		if err != nil {
+			if errors.Is(err, os.ErrNotExist) {
+				return nil, err
+			}
+			return nil, fmt.Errorf("stat local journal directory %s: %w", config.Directory, err)
+		}
+		if !info.IsDir() || info.Mode()&os.ModeSymlink != 0 || info.Mode().Perm() != 0o700 {
+			return nil, fmt.Errorf("local journal directory %s has unsafe mode or type", config.Directory)
+		}
+	} else {
+		if err := os.MkdirAll(config.Directory, 0o700); err != nil {
+			return nil, fmt.Errorf("create local journal state: %w", err)
+		}
+		info, err := os.Lstat(config.Directory)
+		if err != nil {
+			return nil, fmt.Errorf("stat local journal directory %s: %w", config.Directory, err)
+		}
+		if !info.IsDir() || info.Mode().Perm() != 0o700 {
+			return nil, fmt.Errorf("local journal directory %s has unsafe mode or type", config.Directory)
+		}
 	}
 	j := &Journal[T]{dir: config.Directory, journalPath: filepath.Join(config.Directory, config.Prefix+".journal"),
 		checkpointPath: filepath.Join(config.Directory, config.Prefix+".checkpoint.json"), version: config.Version,
 		maxBytes: config.MaxBytes, maxRecords: config.MaxRecords, key: config.Key, validate: config.Validate,
-		records: map[string]T{}, migrations: migrations}
+		records: map[string]T{}, migrations: migrations, readOnly: config.ReadOnly}
 	if err := j.loadCheckpoint(); err != nil {
 		return nil, fmt.Errorf("load local journal checkpoint %s: %w", j.checkpointPath, err)
 	}
@@ -121,6 +138,13 @@ func (j *Journal[T]) loadCheckpoint() error {
 	}
 	if err != nil {
 		return err
+	}
+	return j.ingestCheckpoint(raw)
+}
+
+func (j *Journal[T]) ingestCheckpoint(raw []byte) error {
+	if int64(len(raw)) > j.maxBytes {
+		return errors.New("local journal checkpoint is corrupt or unsupported")
 	}
 	if _, err := j.schemaVersion(raw); err != nil {
 		return err
@@ -183,13 +207,30 @@ func (j *Journal[T]) decodeRecord(version int, raw json.RawMessage) (T, error) {
 func (j *Journal[T]) replay() error {
 	raw, err := readBounded(j.journalPath, j.maxBytes)
 	if errors.Is(err, os.ErrNotExist) {
-		if j.migrated {
+		if j.migrated && !j.readOnly {
 			return j.checkpoint()
 		}
 		return nil
 	}
 	if err != nil {
 		return err
+	}
+	replayed, repairTail, err := j.ingestJournal(raw)
+	if err != nil {
+		return err
+	}
+	if j.readOnly {
+		return nil
+	}
+	if replayed || repairTail || j.migrated {
+		return j.checkpoint()
+	}
+	return nil
+}
+
+func (j *Journal[T]) ingestJournal(raw []byte) (bool, bool, error) {
+	if int64(len(raw)) > j.maxBytes {
+		return false, false, errors.New("local journal is corrupt or exceeds its bound")
 	}
 	repairTail := len(raw) > 0 && raw[len(raw)-1] != '\n'
 	if repairTail {
@@ -199,7 +240,7 @@ func (j *Journal[T]) replay() error {
 		if _, err := j.schemaVersion(raw[boundary+1:]); err != nil {
 			var versionErr *SchemaVersionError
 			if errors.As(err, &versionErr) {
-				return err
+				return false, repairTail, err
 			}
 		}
 		if boundary >= 0 {
@@ -214,46 +255,71 @@ func (j *Journal[T]) replay() error {
 	for scanner.Scan() {
 		replayed = true
 		if _, err := j.schemaVersion(scanner.Bytes()); err != nil {
-			return err
+			return false, repairTail, err
 		}
 		var entry event[json.RawMessage]
 		if strictJSON(scanner.Bytes(), &entry) != nil {
-			return errors.New("local journal is corrupt or unsupported")
+			return false, repairTail, errors.New("local journal is corrupt or unsupported")
 		}
 		switch entry.Op {
 		case "put":
 			if entry.Record == nil || entry.Key != "" {
-				return errors.New("local journal is corrupt or unsupported")
+				return false, repairTail, errors.New("local journal is corrupt or unsupported")
 			}
 			record, err := j.decodeRecord(entry.Version, *entry.Record)
 			if err != nil {
-				return err
+				return false, repairTail, err
 			}
 			key, keyErr := j.key(record)
 			if keyErr != nil || j.validate(record) != nil {
-				return errors.New("local journal is corrupt or unsupported")
+				return false, repairTail, errors.New("local journal is corrupt or unsupported")
 			}
 			j.records[key] = record
 		case "delete":
 			if entry.Record != nil || entry.Key == "" {
-				return errors.New("local journal is corrupt or unsupported")
+				return false, repairTail, errors.New("local journal is corrupt or unsupported")
 			}
 			delete(j.records, entry.Key)
 		default:
-			return errors.New("local journal is corrupt or unsupported")
+			return false, repairTail, errors.New("local journal is corrupt or unsupported")
 		}
 	}
 	if scanner.Err() != nil || len(j.records) > j.maxRecords {
-		return errors.New("local journal is corrupt or exceeds its bound")
+		return false, repairTail, errors.New("local journal is corrupt or exceeds its bound")
 	}
-	if replayed || repairTail || j.migrated {
-		return j.checkpoint()
+	return replayed, repairTail, nil
+}
+
+// Decode replays checkpoint and journal bytes without touching the filesystem.
+// Empty or whitespace-only input is an absent file. A readable empty journal
+// is zero WAL entries. Decode never creates directories or writes checkpoints.
+func Decode[T any](config Config[T], checkpoint, journal []byte) ([]T, error) {
+	if config.Version < 1 || config.MaxBytes < 1024 || config.MaxRecords < 1 || config.Key == nil || config.Validate == nil {
+		return nil, errors.New("local journal configuration is invalid")
 	}
-	return nil
+	migrations := make(map[int]func(json.RawMessage) (T, error), len(config.Migrations))
+	for version, migrate := range config.Migrations {
+		if version < 1 || version >= config.Version || migrate == nil {
+			return nil, errors.New("local journal migration configuration is invalid")
+		}
+		migrations[version] = migrate
+	}
+	j := &Journal[T]{version: config.Version, maxBytes: config.MaxBytes, maxRecords: config.MaxRecords, key: config.Key, validate: config.Validate, records: map[string]T{}, migrations: migrations, readOnly: true}
+	if len(bytes.TrimSpace(checkpoint)) > 0 {
+		if err := j.ingestCheckpoint(checkpoint); err != nil {
+			return nil, err
+		}
+	}
+	if len(bytes.TrimSpace(journal)) > 0 {
+		if _, _, err := j.ingestJournal(journal); err != nil {
+			return nil, err
+		}
+	}
+	return j.Snapshot(), nil
 }
 
 func (j *Journal[T]) Put(record T) error {
-	if j == nil || j.validate(record) != nil {
+	if j == nil || j.readOnly || j.validate(record) != nil {
 		return errors.New("local journal record is invalid")
 	}
 	key, err := j.key(record)
@@ -281,7 +347,7 @@ func (j *Journal[T]) Put(record T) error {
 }
 
 func (j *Journal[T]) Delete(key string) error {
-	if j == nil || strings.TrimSpace(key) != key || key == "" {
+	if j == nil || j.readOnly || strings.TrimSpace(key) != key || key == "" {
 		return errors.New("local journal key is invalid")
 	}
 	j.mu.Lock()

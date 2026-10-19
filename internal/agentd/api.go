@@ -489,6 +489,15 @@ func (r *Remote) claim(ctx context.Context, runID, daemonID, generation string, 
 	return err
 }
 
+// ReportDaemonWait records or clears the checkout-wait sentence for one queued
+// run. An empty reason clears it. The server keeps the value in memory.
+func (r *Remote) ReportDaemonWait(ctx context.Context, runID, reason string) error {
+	if reason != "" && reason != CheckoutHeldCause {
+		return errors.New("daemon wait reason is invalid")
+	}
+	return r.Client.Do(ctx, "PUT", "/api/runs/"+url.PathEscape(runID)+"/daemon-wait", map[string]string{"reason": reason}, nil)
+}
+
 // ErrTelemetryProtocol means the server rejected the telemetry itself. It does
 // not include authentication, enrollment fences, or uncertain delivery errors.
 var ErrTelemetryProtocol = errors.New("telemetry protocol violation")

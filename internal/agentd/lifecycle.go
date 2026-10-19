@@ -48,6 +48,9 @@ type LifecycleStatus struct {
 	FencedAccountIDs        []string                            `json:"fenced_account_ids"`
 	AllFenced               bool                                `json:"all_fenced"`
 	VerificationResults     map[string]string                   `json:"verification_results"`
+	// Diagnostics lists the bounded poll causes last emitted for this daemon.
+	// Empty stays omitted so older status documents stay identical.
+	Diagnostics []string `json:"diagnostics,omitempty"`
 }
 
 func fenceName(account string) string {
@@ -336,7 +339,32 @@ func (s *Supervisor) lifecycleAt(accountID string, now time.Time) LifecycleStatu
 		}
 		return v.BlockedAccounts[i].AccountID < v.BlockedAccounts[j].AccountID
 	})
+	v.Diagnostics = s.currentDiagnostics()
 	return v
+}
+
+// currentDiagnostics copies the last emitted poll-cause set. It locks only
+// pollDiagnosticMu, so lifecycleAt must call it after releasing s.mu.
+func (s *Supervisor) currentDiagnostics() []string {
+	if s == nil {
+		return nil
+	}
+	s.pollDiagnosticMu.Lock()
+	defer s.pollDiagnosticMu.Unlock()
+	if len(s.pollDiagnosticLast) == 0 {
+		return nil
+	}
+	out := make([]string, 0, len(s.pollDiagnosticLast))
+	for reason := range s.pollDiagnosticLast {
+		if reason != "" {
+			out = append(out, reason)
+		}
+	}
+	if len(out) == 0 {
+		return nil
+	}
+	sort.Strings(out)
+	return out
 }
 
 // harnessAccountState is one account's contribution to its harness report.

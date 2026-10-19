@@ -665,7 +665,7 @@ func (p *pairedSetup) setup(ctx context.Context, req agentsetup.SetupRequest) (a
 		return agentsetup.Progress{}, err
 	}
 	defer store.Close()
-	e := &agentsetup.Engine{Store: store, API: agentsetup.HTTPClient{Origin: p.origin}, Local: localPairing{root: p.root, supervisor: p.supervisor}, RunningService: true, InstallMethod: installMethod()}
+	e := &agentsetup.Engine{Store: store, API: agentsetup.HTTPClient{Origin: p.origin}, Local: localPairing{root: p.root, supervisor: p.supervisor}, RunningService: true, InstallMethod: installMethod(), CheckoutHandover: checkoutHandover}
 	if req.Operation == "add_harness" {
 		// A socket caller can propose enrollment, but cannot assert sign-in or
 		// label another login as the one the person is about to approve.

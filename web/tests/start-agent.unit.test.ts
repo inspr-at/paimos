@@ -36,6 +36,7 @@ function backend(options: { existing?: WorkOrder[]; runs?: AgentRun[]; failPatch
     if (url.pathname === '/api/nodes/ticket') return json(ticket)
     if (url.pathname === '/api/nodes') { expect(url.searchParams.get('parent_id')).toBe('ticket'); expect(url.searchParams.get('kind')).toBe('work_order'); return json({ items: orders.map(o => ({ id: o.node_id })), next_cursor: null }) }
     if (url.pathname === '/api/runs') { options.whileReadingRuns?.(); return json({ items: runs, next_cursor: null }) }
+    if (url.pathname === '/api/runs/daemon-waits') return json({ items: [] })
     if (url.pathname === '/api/work-orders' && method === 'POST') { orders.push({ ...order }); return json(order, 201) }
     if (url.pathname === '/api/work-orders/order') {
       if (method === 'PATCH') {
@@ -223,5 +224,10 @@ describe('run now once', () => {
   })
   it('uses the server wait reason on a queued run', () => {
     expect(launchState({ ...queued, wait: { code: 'vendor', run_now_allowed: false } })).toEqual({ label: 'Waiting', detail: 'Waiting for the vendor to allow work again' })
+  })
+  it('shows the checkout sentence while an earlier pairing still holds this computer', () => {
+    const detail = "This computer's checkout is still held by an earlier pairing. Release it in Settings › Computers."
+    expect(launchState({ ...queued, daemon_wait_reason: 'checkout_held_by_earlier_pairing' })).toEqual({ label: 'Queued', detail })
+    expect(launchState({ ...queued, daemon_wait_reason: 'checkout_held_by_earlier_pairing', wait: { code: 'vendor', run_now_allowed: false } })).toEqual({ label: 'Queued', detail })
   })
 })

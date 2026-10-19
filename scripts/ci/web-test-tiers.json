@@ -20340,6 +20340,8 @@
     ,
     {"kind":"vitest","file":"tests/start-agent.unit.test.ts","name":"run now once > only sends the override when the person chooses it","tier":"GATED-FULL"}
     ,
+    {"kind":"vitest","file":"tests/start-agent.unit.test.ts","name":"run now once > shows the checkout sentence while an earlier pairing still holds this computer","tier":"ESSENTIAL"}
+    ,
     {"kind":"vitest","file":"tests/start-agent.unit.test.ts","name":"run now once > uses the server wait reason on a queued run","tier":"GATED-FULL"}
     ,
     {"kind":"vitest","file":"tests/start-agent.unit.test.ts","name":"work-order launch > copies ticket content and criteria, readies with revision, then queues the selected agent/profile","tier":"ESSENTIAL"}
