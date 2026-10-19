@@ -1,0 +1,8 @@
+{
+  "group": "remaining-ui",
+  "spec": {
+    "file": "tests/view-closed-overlap.spec.ts",
+    "weightSeconds": 100,
+    "weightSource": "unmeasured-estimate"
+  }
+}
