@@ -46,6 +46,17 @@ const row = (page: Page, key: string) => rows(page).filter({ has: page.locator('
 const display = (page: Page) => page.getByRole('dialog', { name: 'Display options' })
 // A Display column row, found from the menu itself: a `has` locator rooted at the dialog never matches inside the row.
 const columnRow = (menu: Locator, id: string) => menu.locator(`li.row:has(input[data-column-row="${id}"])`)
+async function expectColumnNamesFit(menu: Locator) {
+  const names = await menu.locator('.columns .name-text, .columns .row.pinned .name').evaluateAll(items => items.map(el => ({
+    name: el.textContent?.trim(), scrollWidth: el.scrollWidth, clientWidth: el.clientWidth,
+  })))
+  expect(names.length).toBeGreaterThan(0)
+  for (const item of names) {
+    expect(item.clientWidth, item.name).toBeGreaterThan(0)
+    expect(item.scrollWidth, item.name).toBeLessThanOrEqual(item.clientWidth)
+  }
+  return names
+}
 const SET_1388: ColumnId[] = ['status', 'priority', 'assignee', 'estimate', 'updated']
 const ALL: ColumnId[] = [...COLUMN_BY_ID.keys()].filter(id => id !== 'key' && id !== 'title')
 const WIDE_SAVED = { status: 260, priority: 200, assignee: 320, estimate: 180, updated: 200, key: 300 }
@@ -440,12 +451,14 @@ test('AEON-1470 S5: Display keeps a dropped column ticked with "hidden at this w
     const item = columnRow(menu, id)
     expect(await item.evaluate(el => el.scrollWidth <= el.clientWidth + 1), id).toBe(true)
   }
+  const names = await expectColumnNamesFit(menu)
+  log.add({ assert: 'every column name scrollWidth ≤ clientWidth', state: 'Display open', width: 1024, theme: 'light', value: names })
   await page.screenshot({ path: testInfo.outputPath('aeon1470-1024-light-s5-display.png'), fullPage: false })
   log.save()
 })
 
-// AEON-1470 (fix 7). Risk: a "hidden at this width" note that gives its row another height or wraps under a long
-// name, so ticking, unticking or a column coming back moves the checkboxes below it (AEON-541).
+// AEON-1470. Risk: a "hidden at this width" note truncates the column name or changes its row's height,
+// so ticking, unticking or a column coming back moves the checkboxes below it (AEON-541).
 test('AEON-1470 Columns rows hold still while hidden notes come and go', async ({ page }, testInfo) => {
   const log = checks(testInfo)
   await open(page, { prefs: { visible: ALL }, query: '?group=status&sort=key' })
@@ -469,9 +482,10 @@ test('AEON-1470 Columns rows hold still while hidden notes come and go', async (
   const box = (id: string) => menu.locator(`input[data-column-row="${id}"]`)
   const note = (id: string) => columnRow(menu, id).locator('.away-note')
   await expect(note('suggested')).toHaveText('hidden at this width')
+  await expectColumnNamesFit(menu)
   // Unticked, the note leaves; ticked again, it returns. Neither moves a row.
-  await guard.check(async () => { await box('suggested').uncheck(); await expect(note('suggested')).toHaveCount(0); await settled(page) })
-  await guard.check(async () => { await box('suggested').check(); await expect(note('suggested')).toHaveText('hidden at this width'); await settled(page) })
+  await guard.check(async () => { await box('suggested').uncheck(); await expect(note('suggested')).toHaveCount(0); await settled(page); await expectColumnNamesFit(menu) })
+  await guard.check(async () => { await box('suggested').check(); await expect(note('suggested')).toHaveText('hidden at this width'); await settled(page); await expectColumnNamesFit(menu) })
   // Unticking two shown columns frees at least 168 px: the last hidden one (120 px at most) comes back with 16 px to
   // spare and its note leaves in place; ticking them again hides it again.
   const freed = ['cost', 'parent', 'assignee', 'release'].filter(id => shown.includes(id as ColumnId)).slice(0, 2)
@@ -481,17 +495,22 @@ test('AEON-1470 Columns rows hold still while hidden notes come and go', async (
   await guard.check(async () => { for (const id of freed) await box(id).check(); await expect(note(last)).toHaveText('hidden at this width'); await settled(page) })
   guard.done()
   expect(await inside()).toEqual([])
-  // The name gives way to the note on one line; its tip reads it whole.
+  // The full name keeps its room; the 12 px muted note moves underneath when both do not fit side by side.
   const name = columnRow(menu, 'suggested').locator('.name-text')
-  const clipped = await name.evaluate(el => el.scrollWidth > el.clientWidth + 1)
-  if (clipped) await expect(name).toHaveAttribute('data-tip', 'Suggested release')
+  await expect(name).toHaveText('Suggested release')
+  const nameBox = await boxOf(name), noteBox = await boxOf(note('suggested'))
+  expect(noteBox.y).toBeGreaterThanOrEqual(nameBox.y + nameBox.height)
+  expect(Math.abs(noteBox.x - nameBox.x)).toBeLessThanOrEqual(.5)
+  await expect(note('suggested')).toHaveCSS('font-size', '12px')
+  const names = await expectColumnNamesFit(menu)
   // A row with a hidden note is as tall as a plain one (rows with their own column note excepted).
   const plain = await columnRow(menu, 'status').evaluate(el => el.getBoundingClientRect().height)
   for (const id of dropped.filter(id => ids.includes(id))) {
     const row = await columnRow(menu, id).evaluate(el => ({ height: el.getBoundingClientRect().height, noted: !!el.querySelector('.col-note') }))
     if (!row.noted) expect(Math.abs(row.height - plain), id).toBeLessThanOrEqual(.5)
   }
-  log.add({ assert: 'Columns rows and checkboxes move 0 px (±0.5) through ticks and returns', state: 'Display open, all columns', width: 1024, tableWidth: await tableWidth(page), theme: 'light', value: { dropped, toggled: ['suggested', ...freed], nameClipped: clipped } })
+  log.add({ assert: 'Columns rows and checkboxes move 0 px (±0.5) through ticks and returns', state: 'Display open, all columns', width: 1024, tableWidth: await tableWidth(page), theme: 'light', value: { dropped, toggled: ['suggested', ...freed], names } })
+  log.add({ assert: 'the 12 px note wraps below the full Suggested release name', state: 'Display open, all columns', width: 1024, theme: 'light', value: { nameBox, noteBox } })
   await page.screenshot({ path: testInfo.outputPath('aeon1470-1024-light-s5-display-rows.png'), fullPage: false })
   log.save()
 })

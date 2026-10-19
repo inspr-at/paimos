@@ -3,7 +3,6 @@
 import { computed, nextTick, ref, useId } from 'vue'
 import { COLUMN_BY_ID, PINNED, type ColumnId } from '../../lib/columns'
 import AppIcon from '../AppIcon.vue'
-import { vClipTip } from '../../directives/clipTip'
 
 // Show, hide and reorder list columns: drag a row, or Alt+Up/Down on it. The
 // pinned columns always lead. Reset goes back to the list's own choice
@@ -77,7 +76,7 @@ function drop(target: T) {
             type="checkbox" class="check" :checked="shown.has(id)" :data-column-row="id" :aria-describedby="notes?.[id] ? `${hint} ${hint}-${id}` : hint"
             @change="toggle(id)" @keydown="keydown($event, id)"
           />
-          <span class="name line"><span v-clip-tip="label(id)" class="name-text">{{ label(id) }}</span><span v-if="away.has(id) && shown.has(id)" class="away-note">hidden at this width</span></span>
+          <span class="name line"><span class="name-text">{{ label(id) }}</span><span v-if="away.has(id) && shown.has(id)" class="away-note">hidden at this width</span></span>
         </label>
         <span class="moves">
           <button type="button" class="icon-btn sm flat" :aria-label="`Move ${label(id)} up`" :disabled="index === 0" tabindex="-1" @click="step(id, -1)"><AppIcon name="chevron-up" :size="13" /></button>
@@ -96,7 +95,7 @@ function drop(target: T) {
 </template>
 
 <style scoped>
-/* One shrinkable track: a long name never widens the menu, it gives way inside its row. */
+/* One shrinkable track: names and notes wrap inside the menu. */
 .columns { display: grid; grid-template-columns: minmax(0, 1fr); gap: 6px; min-width: 0; }
 .head { display: flex; align-items: center; justify-content: space-between; min-height: 24px; }
 .head .eyebrow { margin: 0; }
@@ -119,11 +118,11 @@ function drop(target: T) {
 .check { width: 16px; height: 16px; margin: 0; accent-color: var(--teal); }
 .check:focus-visible { box-shadow: var(--focus-ring); border-radius: 4px; }
 .name { flex: 1; min-width: 0; }
-/* A ticked column the width leaves out (AEON-1470): the note follows the name on the row's one line, so ticking,
-   unticking or a width change never moves a checkbox or a row. A long name gives way first; its tip reads it whole. */
-.name.line { display: flex; align-items: baseline; gap: 8px; white-space: nowrap; }
-.name-text { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
-.away-note { flex: none; font-size: 11.5px; color: var(--ink-3); }
+/* Keep the full name: when the note cannot fit beside it, it starts underneath.
+   Two 16 px lines fit the existing row, so checkboxes and neighbouring rows stay put. */
+.name.line { display: flex; flex-wrap: wrap; align-items: baseline; column-gap: 8px; line-height: 16px; }
+.name-text { flex: none; max-width: 100%; overflow-wrap: anywhere; }
+.away-note { flex: none; font-size: 12px; color: var(--ink-3); white-space: nowrap; }
 .pin-note { font-size: 11.5px; color: var(--ink-3); padding-right: 8px; }
 .moves { display: inline-flex; opacity: 0; }
 .row:hover .moves, .row:focus-within .moves { opacity: 1; }
