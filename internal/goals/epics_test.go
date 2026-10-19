@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/inspr-at/paimos/internal/authz"
+	"github.com/inspr-at/paimos/internal/capacity"
 	"github.com/inspr-at/paimos/internal/db"
 	"github.com/inspr-at/paimos/internal/dbtest"
 	"github.com/inspr-at/paimos/internal/tenant"
@@ -514,5 +515,91 @@ func TestEpicFix2LandingText(t *testing.T) {
 	}
 	if got := queueLandingText("open", 2, 0, false, gap, now); got != "" {
 		t.Fatalf("unmeasured %q", got)
+	}
+}
+
+// Risk: an untargeted queued leaf with no release and no stored suggestion
+// shows no LANDS. The work list prefers the queue's expected start, and
+// otherwise divides earlier estimates by the parallel-run capacity. A stored
+// expected start 2000h after the epic clock is ~ Next +83. Behind a 65h
+// blocked item and that 2h leaf, two parallel runs land the next leaf on
+// ~ Next +1 only if the 2h is dropped, and on ~ Next +3 if the sum is not
+// divided; the divided wait is ~ Next +2.
+func TestEpicFix3UntargetedLandsAndExpectedStart(t *testing.T) {
+	f := writerFixture(t)
+	until := apiClock.Add(2000 * time.Hour)
+	schedule := capacity.DefaultSchedule()
+	schedule.Override = "hold"
+	schedule.OverrideUntil = &until
+	rawSchedule, err := json.Marshal(schedule)
+	if err != nil {
+		t.Fatal(err)
+	}
+	err = db.InTenant(dbtest.Seed(t.Context()), f.db.App, f.writer.TenantID, func(tx pgx.Tx) error {
+		if _, err := tx.Exec(t.Context(), `INSERT INTO node_kinds(tenant_id,slug,label,short_prefix,icon,allowed_child_kinds) VALUES($1,'work_order','Work order','WOR','work-order',ARRAY[]::text[]) ON CONFLICT(tenant_id,slug) DO NOTHING`, f.writer.TenantID); err != nil {
+			return err
+		}
+		if _, err := tx.Exec(t.Context(), `UPDATE node_kinds SET allowed_child_kinds=CASE WHEN allowed_child_kinds IS NULL OR 'work_order'=ANY(allowed_child_kinds) THEN allowed_child_kinds ELSE array_append(allowed_child_kinds,'work_order') END WHERE tenant_id=$1 AND slug='work'`, f.writer.TenantID); err != nil {
+			return err
+		}
+		epic := epicFixtureNode(t, tx, f.writer.TenantID, "FX3-1", "Epic pool", "open", f.project, 1, nil)
+		start := epicFixtureNode(t, tx, f.writer.TenantID, "FX3-2", "Expected start", "open", epic, 1, map[string]any{"estimate_hours": 2})
+		pool := epicFixtureNode(t, tx, f.writer.TenantID, "FX3-3", "Untargeted pool", "open", epic, 2, map[string]any{"estimate_hours": 2})
+		ahead := epicFixtureNode(t, tx, f.writer.TenantID, "FX3-4", "Blocked ahead", "blocked", f.project, 2, map[string]any{"estimate_hours": 65})
+		var runner, profile, account string
+		if err := tx.QueryRow(t.Context(), `INSERT INTO principals(tenant_id,kind,name) VALUES($1,'agent','Pool runner') RETURNING id::text`, f.writer.TenantID).Scan(&runner); err != nil {
+			return err
+		}
+		if err := tx.QueryRow(t.Context(), `INSERT INTO model_profiles(tenant_id,slug,version,harness,family,model,effort,tier) VALUES($1,'fx3-codex','1','codex','openai','fx3-model','high','standard') RETURNING id::text`, f.writer.TenantID).Scan(&profile); err != nil {
+			return err
+		}
+		if err := tx.QueryRow(t.Context(), `INSERT INTO agent_accounts(tenant_id,account_key,harness,daemon_id,registered_by_principal_id,label,max_parallel_runs,last_probe_at,last_probe_ok,last_daemon_generation,capacity_owner) VALUES($1,'fx3pool','codex','fx3-daemon',$2,'Pool',2,clock_timestamp(),true,'fx3-generation',$3) RETURNING id::text`, f.writer.TenantID, runner, f.writer.ID).Scan(&account); err != nil {
+			return err
+		}
+		if _, err := tx.Exec(t.Context(), `INSERT INTO account_use_cells(tenant_id,account_id,context_id,source,set_by) SELECT $1,$2,c.id,'person',$3 FROM work_contexts c WHERE c.tenant_id=$1 AND c.kind<>'holding' AND c.archived_at IS NULL ON CONFLICT DO NOTHING`, f.writer.TenantID, account, f.writer.ID); err != nil {
+			return err
+		}
+		if _, err := tx.Exec(t.Context(), `INSERT INTO account_capacity_schedules(tenant_id,principal_id,scope,scope_key,account_id,schedule) VALUES($1,$2,'account',$3,$3,$4::jsonb)`, f.writer.TenantID, f.writer.ID, account, rawSchedule); err != nil {
+			return err
+		}
+		queue := func(node, orderKey, age string, routed bool) error {
+			var order string
+			if err := tx.QueryRow(t.Context(), `INSERT INTO nodes(tenant_id,kind_id,key,title,parent_id,project_id) SELECT $1,id,$2,'Queued order',$3,$4 FROM node_kinds WHERE tenant_id=$1 AND slug='work_order' RETURNING id::text`, f.writer.TenantID, orderKey, node, f.project).Scan(&order); err != nil {
+				return err
+			}
+			if _, err := tx.Exec(t.Context(), `INSERT INTO work_orders(tenant_id,node_id,requested_by_principal_id) VALUES($1,$2,$3)`, f.writer.TenantID, order, f.writer.ID); err != nil {
+				return err
+			}
+			_, err := tx.Exec(t.Context(), `INSERT INTO agent_runs(tenant_id,work_order_id,agent_principal_id,model_profile_id,queue_node_id,queue_by_principal_id,queue_at,queue_routed_at,queue_security_review_required)
+ VALUES($1,$2,$3,CASE WHEN $4 THEN $5::uuid END,$6,$7,clock_timestamp()-$8::interval,CASE WHEN $4 THEN clock_timestamp() END,false)`, f.writer.TenantID, order, runner, routed, profile, node, f.writer.ID, age)
+			return err
+		}
+		if err := queue(ahead, "FX3-5", "3 hours", false); err != nil {
+			return err
+		}
+		if err := queue(start, "FX3-6", "2 hours", true); err != nil {
+			return err
+		}
+		return queue(pool, "FX3-7", "1 hours", false)
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	prev := epicReleaseCadence
+	epicReleaseCadence = func() (releaseGap, bool) {
+		return releaseGap{hours: 24, latest: apiClock.Add(-12 * time.Hour)}, true
+	}
+	t.Cleanup(func() { epicReleaseCadence = prev })
+	m := &module{f.db.App, func() time.Time { return apiClock }}
+	list, code, body := epicList(t, f, m, "")
+	if code != 200 {
+		t.Fatalf("epics %d %s", code, body)
+	}
+	g := epicByKey(t, list, "FX3-1")
+	if a := epicItem(t, g, "FX3-2"); a.ETA.Source != "release" || a.ETA.Text != "~ Next +83" {
+		t.Fatalf("expected start %+v", a.ETA)
+	}
+	if b := epicItem(t, g, "FX3-3"); b.ETA.Source != "release" || b.ETA.Text != "~ Next +2" {
+		t.Fatalf("untargeted pool %+v", b.ETA)
 	}
 }

@@ -386,7 +386,7 @@ func loadEpicPage(ctx context.Context, tx pgx.Tx, p tenant.Principal, nodes []ep
 	for _, list := range facts {
 		sort.Slice(list, func(i, j int) bool { return list[i].ID < list[j].ID })
 	}
-	if err := d.attachQueueLanding(ctx, tx, nodes, check); err != nil {
+	if err := d.attachQueueLanding(ctx, tx, nodes, now, check); err != nil {
 		return nil, err
 	}
 	out := make([]GoalView, 0, len(nodes))
@@ -1062,11 +1062,12 @@ func queueEligible(state string) bool {
 	return false
 }
 
-// queueLandingText is the work list's suggested release for queued work when
-// no expected start is known: visible wait plus the estimate plus an hour of
-// review, placed on the release cadence. The text keeps the closed ETA source
-// `release`. An untargeted queue has no parallel-run count here, so it yields
-// nothing rather than a guessed clock.
+// queueLandingText places queued work on the release cadence: the wait, the
+// estimate and an hour of review. The text keeps the closed ETA source
+// `release`. The wait is the canonical expected start when the queue has one,
+// otherwise the earlier estimates in the same partition. An untargeted pool
+// divides that sum by the parallel-run capacity and stays blank when the
+// capacity is unknown.
 func queueLandingText(state string, estimate, wait float64, waitOK bool, cadence releaseGap, now time.Time) string {
 	if !waitOK || estimate <= 0 || cadence.hours <= 0 || !queueEligible(state) {
 		return ""
@@ -1102,10 +1103,33 @@ func (d *epicPageData) queueLanding(project string, c epicChild, now time.Time) 
 	return queueLandingText(c.State, c.Estimate, wait.hours, wait.ok, d.cadence, now)
 }
 
+const queueLandingColumns = `SELECT q.queue_node_id::text, coalesce(q.queue_target_agent_id::text,''), q.queue_target_agent_id IS NOT NULL, q.queue_position,
+ CASE WHEN jsonb_typeof(q.fields->'estimate_hours')='number' THEN (q.fields->>'estimate_hours')::float8 ELSE 0 END
+ FROM queue_heads q `
+
+// Same advisory total as the work-queue list with an empty project filter
+// (internal/agentruns/queue_list.go): fresh available accounts, one slot count
+// per harness and quota pool. The epic wait sums the whole untargeted
+// partition, so the divisor is that unfiltered total.
+const queueParallelSQL = `SELECT coalesce(sum(slots),0)::int FROM (
+ SELECT max(a.max_parallel_runs) slots FROM agent_accounts a
+ WHERE a.state='available' AND a.last_probe_ok AND a.last_probe_at>clock_timestamp()-interval '2 minutes'
+ AND ($1='' OR aeon_account_use_allowed_for_project(a.id,NULLIF($1,'')::uuid))
+ AND EXISTS(SELECT 1 FROM model_profiles m WHERE m.enabled AND m.harness=a.harness AND aeon_account_allows_profile(a.harness,a.allowed_model_profile_ids,m.id))
+ GROUP BY a.harness,coalesce(nullif(a.quota_pool_fingerprint,''),a.id::text)) pools`
+
+type queueLandingRow struct {
+	id, agent string
+	targeted  bool
+	position  int
+	hours     float64
+}
+
 // attachQueueLanding reads the canonical queue ranking for leaves that still
 // have no worker ETA, target release or stored suggestion. Release cadence
-// needs releases.read. A truncated partition is ignored.
-func (d *epicPageData) attachQueueLanding(ctx context.Context, tx pgx.Tx, nodes []epicNode, check authz.ProjectCheck) error {
+// needs releases.read. A canonical expected start wins over the estimate sum.
+// A truncated partition is ignored. Unknown parallel capacity stays blank.
+func (d *epicPageData) attachQueueLanding(ctx context.Context, tx pgx.Tx, nodes []epicNode, now time.Time, check authz.ProjectCheck) error {
 	ids := []string{}
 	for _, e := range nodes {
 		if !check("releases.read", e.Project) {
@@ -1127,66 +1151,159 @@ func (d *epicPageData) attachQueueLanding(ctx context.Context, tx pgx.Tx, nodes 
 		return nil
 	}
 	d.cadence, d.cadenceOK = gap, true
-	rows, err := tx.Query(ctx, workqueue.CTE+`SELECT q.queue_node_id::text, coalesce(q.queue_target_agent_id::text,''), q.queue_target_agent_id IS NOT NULL, q.queue_position,
- CASE WHEN jsonb_typeof(q.fields->'estimate_hours')='number' THEN (q.fields->>'estimate_hours')::float8 ELSE 0 END
- FROM queue_heads q
- WHERE q.queue_node_id = ANY($1::uuid[])
- OR q.queue_target_agent_id IN (SELECT h.queue_target_agent_id FROM queue_heads h WHERE h.queue_node_id = ANY($1::uuid[]) AND h.queue_target_agent_id IS NOT NULL)
- LIMIT 501`, ids)
+	loaded, err := loadEpicQueue(ctx, tx, ids)
 	if err != nil {
 		return err
 	}
-	defer rows.Close()
-	type qrow struct {
-		id, agent string
-		targeted  bool
-		position  int
-		hours     float64
-	}
-	found := []qrow{}
-	for rows.Next() {
-		var row qrow
-		if err := rows.Scan(&row.id, &row.agent, &row.targeted, &row.position, &row.hours); err != nil {
-			return err
+	expected := map[string]bool{}
+	for _, id := range ids {
+		q := loaded[id]
+		if q == nil || q.ExpectedStart == nil {
+			continue
 		}
-		found = append(found, row)
-	}
-	if err := rows.Err(); err != nil {
-		return err
-	}
-	// A truncated partition would invent a wait. Omit every suggestion.
-	if len(found) > 500 {
-		return nil
+		hours := q.ExpectedStart.Sub(now).Hours()
+		if math.IsNaN(hours) || math.IsInf(hours, 0) {
+			continue
+		}
+		if hours < 0 {
+			hours = 0
+		}
+		d.queue[id] = queueWait{hours: hours, ok: true}
+		expected[id] = true
 	}
 	want := map[string]bool{}
 	for _, id := range ids {
 		want[id] = true
 	}
-	byAgent := map[string][]qrow{}
-	for _, row := range found {
-		if !row.targeted || row.agent == "" {
-			continue
-		}
-		byAgent[row.agent] = append(byAgent[row.agent], row)
+	// Targeted partitions stay on their own bound. Pulling the general pool
+	// into the same limit would drop a targeted suggestion when the pool is long.
+	targeted, truncated, err := readQueueLanding(ctx, tx, workqueue.CTE+queueLandingColumns+`
+ WHERE q.queue_target_agent_id IS NOT NULL
+ AND (q.queue_node_id = ANY($1::uuid[])
+  OR q.queue_target_agent_id IN (SELECT h.queue_target_agent_id FROM queue_heads h WHERE h.queue_node_id = ANY($1::uuid[]) AND h.queue_target_agent_id IS NOT NULL))
+ LIMIT 501`, ids)
+	if err != nil {
+		return err
 	}
-	for _, part := range byAgent {
-		sort.Slice(part, func(i, j int) bool { return part[i].position < part[j].position })
-		for i, row := range part {
-			if !want[row.id] {
-				continue
-			}
-			ok := true
-			var sum float64
-			for _, earlier := range part[:i] {
-				if earlier.hours <= 0 || math.IsNaN(earlier.hours) || math.IsInf(earlier.hours, 0) {
-					ok = false
-					break
-				}
-				sum += earlier.hours
-			}
-			// A targeted queue runs one at a time.
-			d.queue[row.id] = queueWait{hours: sum, ok: ok}
+	if !truncated {
+		for _, part := range queuePartitions(targeted, true) {
+			d.scoreQueuePartition(part, want, expected, 1)
 		}
+	}
+	shared, sharedCut, err := readQueueLanding(ctx, tx, workqueue.CTE+queueLandingColumns+`
+ WHERE q.queue_target_agent_id IS NULL
+ AND EXISTS (SELECT 1 FROM queue_heads h WHERE h.queue_node_id = ANY($1::uuid[]) AND h.queue_target_agent_id IS NULL)
+ LIMIT 501`, ids)
+	if err != nil {
+		return err
+	}
+	if sharedCut {
+		return nil
+	}
+	needsCapacity := false
+	for _, row := range shared {
+		if want[row.id] && !expected[row.id] {
+			needsCapacity = true
+			break
+		}
+	}
+	if !needsCapacity {
+		return nil
+	}
+	var parallel int
+	if err := tx.QueryRow(ctx, queueParallelSQL, "").Scan(&parallel); err != nil {
+		return err
+	}
+	// No fresh parallel-run count: do not invent a clock for the general pool.
+	if parallel <= 0 {
+		return nil
+	}
+	for _, part := range queuePartitions(shared, false) {
+		d.scoreQueuePartition(part, want, expected, parallel)
 	}
 	return nil
+}
+
+// loadEpicQueue reads workqueue.Load in bounded batches. WaitForRuns refuses
+// more than 4096 runs, and a page of epic leaves can be larger than that.
+func loadEpicQueue(ctx context.Context, tx pgx.Tx, ids []string) (map[string]*workqueue.Queued, error) {
+	out := map[string]*workqueue.Queued{}
+	const batch = 4096
+	for start := 0; start < len(ids); start += batch {
+		end := start + batch
+		if end > len(ids) {
+			end = len(ids)
+		}
+		part, err := workqueue.Load(ctx, tx, ids[start:end])
+		if err != nil {
+			return nil, err
+		}
+		for id, q := range part {
+			out[id] = q
+		}
+	}
+	return out, nil
+}
+
+func readQueueLanding(ctx context.Context, tx pgx.Tx, query string, ids []string) ([]queueLandingRow, bool, error) {
+	rows, err := tx.Query(ctx, query, ids)
+	if err != nil {
+		return nil, false, err
+	}
+	defer rows.Close()
+	found := []queueLandingRow{}
+	for rows.Next() {
+		var row queueLandingRow
+		if err := rows.Scan(&row.id, &row.agent, &row.targeted, &row.position, &row.hours); err != nil {
+			return nil, false, err
+		}
+		found = append(found, row)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, false, err
+	}
+	return found, len(found) > 500, nil
+}
+
+func queuePartitions(rows []queueLandingRow, targeted bool) map[string][]queueLandingRow {
+	out := map[string][]queueLandingRow{}
+	for _, row := range rows {
+		if row.targeted != targeted || targeted && row.agent == "" {
+			continue
+		}
+		key := ""
+		if targeted {
+			key = row.agent
+		}
+		out[key] = append(out[key], row)
+	}
+	return out
+}
+
+// scoreQueuePartition sums earlier estimates and divides by parallel runs.
+// parallel is 1 for a targeted agent. A non-positive count is not a guess.
+func (d *epicPageData) scoreQueuePartition(part []queueLandingRow, want, expected map[string]bool, parallel int) {
+	if parallel <= 0 {
+		return
+	}
+	sort.Slice(part, func(i, j int) bool { return part[i].position < part[j].position })
+	for i, row := range part {
+		if !want[row.id] || expected[row.id] {
+			continue
+		}
+		ok := true
+		var sum float64
+		for _, earlier := range part[:i] {
+			if earlier.hours <= 0 || math.IsNaN(earlier.hours) || math.IsInf(earlier.hours, 0) {
+				ok = false
+				break
+			}
+			sum += earlier.hours
+		}
+		if !ok {
+			d.queue[row.id] = queueWait{}
+			continue
+		}
+		d.queue[row.id] = queueWait{hours: sum / float64(parallel), ok: true}
+	}
 }
