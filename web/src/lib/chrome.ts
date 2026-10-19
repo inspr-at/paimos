@@ -29,5 +29,9 @@ function media(query: string): Ref<boolean> {
   return value
 }
 export const compactChrome = () => media(COMPACT_QUERY)
+// Under 380 px the toolbar's status slot steps aside (D3).
+export const statusSlotAside = () => media('(max-width: 379px)')
+// How many list toolbars show the footer's summary in their status slot right now.
+export const statusSlots = ref(0)
 export const shortScreen = () => media(SHORT_QUERY)
 export const narrowestPhone = () => media(NARROWEST_QUERY)

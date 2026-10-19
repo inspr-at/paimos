@@ -56,7 +56,9 @@ const compact = compactChrome(), narrowest = narrowestPhone()
 const version = useVersion(), history = useReleases()
 const running = computed(() => version.value?.version ?? '')
 const codename = computed(() => version.value?.codename || codenameOf(running.value))
-const whatsNewLabel = computed(() => `What’s new${running.value ? `, ${releaseAria(codename.value, running.value)}` : ''}`)
+// The footer's count of releases since the last visit comes along (null: it could not be read).
+const fresh = computed(() => session.identity ? history.newCount : 0)
+const whatsNewLabel = computed(() => `What’s new${running.value ? `, ${releaseAria(codename.value, running.value)}` : ''}${fresh.value ? `, ${fresh.value} new since your last visit` : ''}`)
 function whatsNew() { menu.value?.close(); run({ name: 'releases', version: history.current || 'current' }) }
 // The narrowest phones have no gear in the header: Settings and help opens from here.
 function appMenu() { menu.value?.close(); run({ name: 'app-menu' }) }
@@ -110,7 +112,7 @@ async function signOut() {
     <template v-if="compact">
       <button class="hm-item whats-new" type="button" role="menuitem" tabindex="-1" :aria-label="whatsNewLabel" @click="whatsNew">
         <AppIcon name="history" />
-        <span class="wn-text"><span class="wn-title">What’s new</span><span v-if="running" class="wn-release" aria-hidden="true"><span v-if="codename" lang="en">{{ codename }}</span><span class="nw"><template v-if="codename">&nbsp;·&nbsp;</template><CalendarVersion :value="running" :scheme="version.value?.scheme" rest /></span></span></span>
+        <span class="wn-text"><span class="wn-title">What’s new</span><span v-if="running" class="wn-release" aria-hidden="true"><span v-if="codename" lang="en">{{ codename }}</span><span class="nw"><template v-if="codename">&nbsp;·&nbsp;</template><CalendarVersion :value="running" :scheme="version.value?.scheme" rest /></span><span v-if="fresh" class="nw wn-new">&nbsp;·&nbsp;{{ fresh }}&nbsp;new</span></span></span>
       </button>
       <hr class="hm-sep" role="separator" />
       <p class="me-foot" role="none">{{ brand.wordmark }}</p>
@@ -156,5 +158,6 @@ async function signOut() {
 .wn-title { color: var(--ink); }
 .wn-release { color: var(--ink-2); font-size: 12px; overflow-wrap: anywhere; }
 .nw { white-space: nowrap; }
+.wn-new { color: var(--secondary-ink); font-weight: 600; }
 .me-foot { margin: 0; padding: 6px 10px 4px; font: 600 10px/16px var(--mono); letter-spacing: .24em; color: var(--ink-3); font-variant-ligatures: none; }
 </style>

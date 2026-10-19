@@ -11,6 +11,7 @@ import DoneGateHost from './components/DoneGateHost.vue'
 import ToastHost from './components/ToastHost.vue'
 import TooltipHost from './components/TooltipHost.vue'
 import AppFooter from './components/AppFooter.vue'
+import CompactNotice from './components/CompactNotice.vue'
 import ErrorPage from './components/ErrorPage.vue'
 import StatusPage from './components/StatusPage.vue'
 import ShortcutSheet from './components/work/ShortcutSheet.vue'
@@ -230,6 +231,7 @@ watch(() => [route.path, route.params.projectKey, route.params.ticketKey, route.
     </main>
     <!-- A row of the shell; docked panels and toasts end above it. Compact screens have none (AEON-1459). -->
     <AppFooter v-if="!bare && !compact" @releases="openRunningRelease" />
+    <CompactNotice v-if="!bare && compact" />
     <ReleasesSheet v-if="releasesOpen" ref="releasesSheet" :target="releasesTarget" @select="selectRelease" @query="setReleasesQuery" @close="closeReleases" @home="goHome" @navigate="leaveReleasesFor" />
     <TicketPeekHost v-if="ticketPeek.openKey.value && !releasesOpen" :ref="ticketPeek.bind" :ticket-key="ticketPeek.openKey.value" :back-label="ticketPeek.backLabel.value" @close="ticketPeek.close()" />
     <LeadOverlays v-if="session.identity && !bare && !fatal" />

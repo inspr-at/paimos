@@ -4,8 +4,9 @@
 // the footer's summary moved here when the footer bar went. The page's state mark and its count;
 // short landscape screens add the word; under 380 px it steps aside. The words, the footer's one
 // exception and whether updates arrive are in its accessible name and its tip.
-import { computed } from 'vue'
+import { computed, onBeforeUnmount, onMounted } from 'vue'
 import { useAgentAppearance } from '../lib/agentAppearance'
+import { statusSlots } from '../lib/chrome'
 import type { AgentState } from '../lib/agentSignals'
 import { footerLive, footerSummary } from '../lib/footerSummary'
 import AgentStateMark from './indicators/AgentStateMark.vue'
@@ -15,6 +16,8 @@ const { appearance } = useAgentAppearance()
 const paused = computed(() => !!footerLive.value?.paused)
 // The footer names one exception (a problem, a question); the count's own words come first.
 const exception = computed(() => (footerSummary.value?.full ?? []).filter(part => part.as === 'exception').map(part => part.text).join(', '))
+onMounted(() => { statusSlots.value++ })
+onBeforeUnmount(() => { statusSlots.value-- })
 const label = computed(() => `${[`${props.count} ${props.word}`, exception.value].filter(Boolean).join(', ')}. ${paused.value ? 'Updates paused, retrying' : 'Live'}`)
 </script>
 
