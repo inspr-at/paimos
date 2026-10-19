@@ -115,6 +115,7 @@ test('AEON-1317 default decisions preserve every row notice copy and focus in al
       const card=page.locator('#definitions'),notice=card.locator('#definition-changes'),rows=card.locator('.dblock [data-check]')
       await expect(rows).toHaveCount(6);await expect(card.locator('[data-waiting="true"]')).toHaveCount(3)
       await expect(notice).toContainText('3 changes wait');expect(world.context.definition!.checks).toEqual(base)
+      await expect(card.locator('.origin')).toContainText('Copied from the workspace default on 8 Oct.')
       record('notice count equals waiting rows and copy retains enforced checks',{waiting:3})
       const ordinary=card.locator('[data-check="design_attached"]'),start=await geometry(rows)
       for(const row of await card.locator('[data-block="in_progress"] [data-check]').all())expect((await row.boundingBox())!.height).toBe((await ordinary.boundingBox())!.height)
@@ -243,6 +244,7 @@ test('AEON-1317 German definitions copy covers every P3 string and singular noti
       const card=page.locator('#definitions'),date=definitionDate(world.workspace.revision,'de')
       await expect(card.locator('.notice-copy > span').first()).toHaveText(definitionNotice('PRJ-26',3,date,'de'))
       const snapshot:Record<string,unknown>={notice:await card.locator('.notice-copy > span').first().textContent(),rows:[]}
+      await expect(card.locator('.origin')).toContainText('Vom Workspace-Standard am 8. Okt. kopiert.');snapshot.origin=await card.locator('.origin').innerText()
       for(const change of changes){const row=card.locator(`[data-check="${change.check_id}"]`);await expect(row).toContainText(definitionChangeWords(change,date,'de'));for(const word of definitionDecisionWords(change,change.before??undefined,'de'))await expect(row.getByRole('button',{name:word,exact:true})).toBeVisible();(snapshot.rows as unknown[]).push(await row.innerText())}
       await shot(page,width,'light','D3-de')
       for(const id of ['estimate_set','acceptance_present']){await card.locator(`[data-check="${id}"] [data-decision="keep"]`).click();await expect(card.locator(`[data-check="${id}"]`)).toHaveAttribute('data-waiting','false')}

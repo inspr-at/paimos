@@ -30,7 +30,12 @@ watch(() => props.pending, pending => {
     if (!visitRows.value.some(row => row.item.id === change.check_id)) visitRows.value.push({block:change.block, item:change.before ?? change.current!})
   }
 }, {immediate:true})
-function pendingWords(id: string) { const change = originals.value[id]; return change ? definitionChangeWords(change, props.changedDate, language.value) : '' }
+function pendingWords(id: string) {
+  const change=originals.value[id],item=visitRows.value?.find(row=>row.item.id===id)?.item
+  const current=change?.current
+  const words=current ? `${item && labelOf(item)!==labelOf(current) ? `${labelOf(current)} · ` : ''}${summaryOf(current)}` : undefined
+  return change ? definitionChangeWords(change,props.changedDate,language.value,words) : ''
+}
 function summaryOf(rule: DefinitionRule) {
   if (language.value === 'en') return wordsOf(rule)
   const name=(id?: string | null) => personOptions.value.find(person=>person.id===id)?.name ?? 'einer benannten Person'

@@ -44,8 +44,8 @@ export function definitionNotice(key: string, count: number, date: string, langu
   return language === 'de' ? `Der Workspace-Standard wurde am ${date} geändert, nachdem ${key} ihn kopiert hat. ${count}\u00a0${count === 1 ? 'Änderung wartet' : 'Änderungen warten'} unten auf eine Entscheidung; bis dahin behält ${key} seine Kopie unverändert.`
     : `The workspace default changed on ${date}, after ${key} copied it. ${count}\u00a0${count === 1 ? 'change waits' : 'changes wait'} for a decision below; until then ${key} keeps its copy as it is.`
 }
-export function definitionChangeWords(change: DefinitionChange, date: string, language = 'en') {
-  const de = language === 'de', condition = change.current ? definitionConditionWords(change.current, language) : ''
+export function definitionChangeWords(change: DefinitionChange, date: string, language = 'en', currentWords?: string) {
+  const de = language === 'de', condition = currentWords ?? (change.current ? definitionConditionWords(change.current, language) : '')
   return change.kind === 'new' ? de ? `Neu im Workspace-Standard seit ${date}` : `New in the workspace default since ${date}`
     : change.kind === 'removed' ? de ? `Seit ${date} nicht mehr im Workspace-Standard` : `Gone from the workspace default since ${date}`
     : de ? `Der Workspace-Standard sagt jetzt ${condition} (seit ${date})` : `The workspace default now says ${condition} (since ${date})`

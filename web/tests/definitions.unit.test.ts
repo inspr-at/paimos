@@ -47,6 +47,7 @@ it('AEON-1317 binds decisions to both revisions and renders the complete bilingu
   expect(definitionNotice('PRJ-26',0,date)).toBe('All changes decided.')
   expect(definitionNotice('PRJ-26',0,deDate,'de')).toBe('Alle Änderungen entschieden.')
   expect(definitionDeskWords('PRJ-26',3,'de')).toBe('PRJ-26: 3\u00a0Änderungen am Workspace-Standard warten auf eine Entscheidung')
+  expect(definitionChangeWords(changes[1]!,date,'en','Code tickets · Kinds: work · Labels: security')).toBe('The workspace default now says Code tickets · Kinds: work · Labels: security (since 9\u00a0Oct)')
   const context: DefinitionContext = {project_id:'project-a',definition:{id:'copy',revision:'copy-revision',source:'project',copied_from_revision:'original-copy-revision',checks:{}},workspace_default:{id:'workspace',revision:'workspace-revision',source:'workspace',copied_from_revision:null,checks:{}},copied_from_checks:{},can_manage:true}
   vi.mocked(api).mockResolvedValue({ok:true,json:async () => context} as Response)
   await decideDefinitionChange('project-a',changes[0]!,'keep',context)
