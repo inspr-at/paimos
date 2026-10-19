@@ -6250,6 +6250,20 @@
     ,
     {"kind":"browser","file":"tests/aeon-1473-desk-tab.spec.ts","name":"AEON-1473: reduced motion changes only the number, visible or in the background","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
+    {"kind":"browser","file":"tests/aeon-1532-editor-steady.spec.ts","name":"AEON-1532: deleting 50 lines keeps the page where it is, in the middle and at the end","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/aeon-1532-editor-steady.spec.ts","name":"AEON-1532: the comment editor grows to its 560 px cap without ever collapsing","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/aeon-1532-editor-steady.spec.ts","name":"AEON-1532: the full ticket page writes the description in one row as tall as its preview","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/aeon-1532-editor-steady.spec.ts","name":"AEON-1532: typing in a 300-line knowledge entry at 1024 light never shrinks the box or moves the page","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/aeon-1532-editor-steady.spec.ts","name":"AEON-1532: typing in a 300-line knowledge entry at 1440 dark never shrinks the box or moves the page","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/aeon-1532-editor-steady.spec.ts","name":"AEON-1532: typing in a 300-line knowledge entry at 1440 light never shrinks the box or moves the page","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/aeon-1532-editor-steady.spec.ts","name":"AEON-1532: typing in a 300-line knowledge entry at 390 light never shrinks the box or moves the page","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
     {"kind":"browser","file":"tests/aeon-632b-clip-settings.spec.ts","name":"rules names 1024 dark","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
     ,
     {"kind":"browser","file":"tests/aeon-632b-clip-settings.spec.ts","name":"rules names 1024 light","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
