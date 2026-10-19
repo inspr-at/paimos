@@ -59,7 +59,7 @@ type epicChild struct {
 
 type epicNote struct {
 	Note string     `json:"note"`
-	By   string     `json:"by"`
+	By   string     `json:"author"`
 	At   *time.Time `json:"at"`
 }
 
@@ -146,7 +146,7 @@ func epicPageQuery() string {
  FROM nodes g JOIN node_kinds k ON k.tenant_id=g.tenant_id AND k.id=g.kind_id
  WHERE g.parent_id IN (SELECT id FROM kept) AND g.deleted_at IS NULL AND k.slug IN ` + epicWorkKinds + ` AND aeon_work_status_category(g.state,k.field_schema) NOT IN ('cancelled','archived')
  ), notes AS MATERIALIZED (
- SELECT DISTINCT ON (s.root) s.root AS child,h.activity_note AS note,h.agent_principal_id::text AS by,
+ SELECT DISTINCT ON (s.root) s.root AS child,h.activity_note AS note,h.agent_principal_id::text AS author,
  coalesce((SELECT a.created_at FROM harness_activity_notes a WHERE a.session_id=h.id ORDER BY a.id DESC LIMIT 1),h.heartbeat_at) AS at
  FROM page_scope s JOIN harness_sessions h ON h.ticket_node_id=s.id AND h.project_id=s.project_id
  WHERE s.is_leaf AND h.phase='working' AND h.stopped_at IS NULL AND h.archived_at IS NULL AND h.role IN ('worker','coordinator') AND h.activity_note IS NOT NULL
