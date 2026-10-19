@@ -18,6 +18,7 @@ import (
 	"github.com/inspr-at/paimos/internal/agentaccounts"
 	"github.com/inspr-at/paimos/internal/agentpairing"
 	"github.com/inspr-at/paimos/internal/agentsetup"
+	"github.com/inspr-at/paimos/internal/authz"
 	"github.com/inspr-at/paimos/internal/escalation"
 	"github.com/inspr-at/paimos/internal/events"
 	"github.com/inspr-at/paimos/internal/harness"
@@ -427,14 +428,51 @@ func createRun(r *http.Request, tx pgx.Tx, p tenant.Principal, deferred *[]func(
 			return nil, &modelprefs.ResidencyUnmet{}
 		}
 	}
-	// A configured project's build leaf can be dispatched only through its
-	// lead queue; direct creation must not bypass a durable writer assignment.
+	var ticket, project *string
+	if err := tx.QueryRow(ctx, `SELECT parent_id::text,project_id::text FROM nodes WHERE id=$1`, o.NodeID).Scan(&ticket, &project); err != nil {
+		return nil, err
+	}
+	// The caller holds the tenant/tree fence and order lock through insertion.
+	// Explicit person starts keep every existing permission and daemon check;
+	// agent keys must still use the lead's dispatch path.
 	var configured bool
 	if err = tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM nodes o JOIN nodes t ON t.id=o.parent_id JOIN project_leads l ON l.project_id=t.project_id WHERE o.id=$1)`, o.NodeID).Scan(&configured); err != nil {
 		return nil, err
 	}
 	if configured {
-		return nil, workorders.Fail(409, "configured project work requires lead queue dispatch")
+		if p.Kind != tenant.Person {
+			return nil, workorders.Fail(409, "configured project work requires lead queue dispatch")
+		}
+		if err = authz.RequireTx(ctx, tx, p, "run.create", authz.Scope{ProjectID: *project}); err != nil {
+			return nil, err
+		}
+		// A pending demand has no agent_run_id yet: its routine pins the leaf.
+		// A claimed intent retains both bindings until its owned exit is proved.
+		var held bool
+		if err = tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM routine_launch_intents l
+ JOIN routine_runs rr ON rr.tenant_id=l.tenant_id AND rr.id=l.routine_run_id
+ LEFT JOIN agent_runs r ON r.tenant_id=l.tenant_id AND r.id=l.agent_run_id
+ LEFT JOIN nodes n ON n.tenant_id=r.tenant_id AND n.id=r.work_order_id
+ WHERE l.kind='lead' AND l.state IN ('pending','claimed')
+ AND (rr.work_order_id=$1 OR rr.work_node_id=$2 OR r.work_order_id=$1 OR r.queue_node_id=$2 OR n.parent_id=$2))`, o.NodeID, ticket).Scan(&held); err != nil {
+			return nil, err
+		}
+		if held {
+			return nil, workorders.Fail(409, "The project lead is already starting this ticket. The run appears on the ticket in a moment.")
+		}
+		var active bool
+		if err = tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM agent_runs r JOIN nodes n ON n.tenant_id=r.tenant_id AND n.id=r.work_order_id
+ WHERE (r.work_order_id=$1 OR r.queue_node_id=$2 OR n.parent_id=$2)
+ AND (r.status IN ('queued','starting','running','waiting') OR r.trace->'worker_assignment'->>'state' IN ('launch_unknown','launched')
+ OR r.trace->'work_lifecycle_release'->>'exit_unconfirmed'='true'))`, o.NodeID, ticket).Scan(&active); err != nil {
+			return nil, err
+		}
+		if active {
+			return nil, workorders.Fail(409, "A run is already active on this ticket. Open it from the ticket to follow or steer it.")
+		}
+		if err = requireWriterFree(ctx, tx, *ticket, "", o.BuildDelivery); err != nil {
+			return nil, err
+		}
 	}
 	if in.Retry != nil {
 		var orderID, agentID string
@@ -445,10 +483,6 @@ func createRun(r *http.Request, tx pgx.Tx, p tenant.Principal, deferred *[]func(
 	}
 	var escalationTrace map[string]any
 	var placement *modelregistry.WorkPlacement
-	var ticket, project *string
-	if err := tx.QueryRow(ctx, `SELECT parent_id::text,project_id::text FROM nodes WHERE id=$1`, o.NodeID).Scan(&ticket, &project); err != nil {
-		return nil, err
-	}
 	if ticket != nil && project != nil {
 		state, err := escalation.LoadTx(ctx, tx, *ticket)
 		if err != nil {

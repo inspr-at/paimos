@@ -18,6 +18,7 @@ import (
 	"github.com/inspr-at/paimos/internal/authz"
 	"github.com/inspr-at/paimos/internal/dbtest"
 	"github.com/inspr-at/paimos/internal/harness"
+	"github.com/inspr-at/paimos/internal/recurrences"
 	"github.com/inspr-at/paimos/internal/tenant"
 	"github.com/inspr-at/paimos/internal/workorders"
 	"github.com/jackc/pgx/v5"
@@ -1145,4 +1146,173 @@ func TestLeadQueueFairRoutingBindsLeadDispatchCredential(t *testing.T) {
 		t.Fatalf("rebinding widened the restricted key: %s", body)
 	}
 	_ = revision
+}
+
+// Risk: direct starts in lead projects must retain person authority and exactly
+// one writer before daemon pickup, without enabling automatic lead admission.
+func personLeadOrder(t *testing.T) (*fixture, workorders.Order, string, string) {
+	t.Helper()
+	f := setup(t)
+	f.agent.Scopes = []string{"run.create", "run.claim", "run.read", "run.telemetry"}
+	o := f.order(t, nil)
+	leaf := bindOrderToWorkLeaf(t, f, o.NodeID)
+	project := uuid()
+	f.tx(t, f.person, func(tx pgx.Tx) error {
+		if _, err := tx.Exec(t.Context(), `INSERT INTO nodes(tenant_id,id,key,kind_id,title) SELECT $1,$2,'PERSON-1',id,'Person lead project' FROM node_kinds WHERE slug='project'`, f.person.TenantID, project); err != nil {
+			return err
+		}
+		if _, err := tx.Exec(t.Context(), `UPDATE nodes SET parent_id=$2 WHERE id=$1`, leaf, project); err != nil {
+			return err
+		}
+		_, err := tx.Exec(t.Context(), `INSERT INTO project_leads(tenant_id,project_id,owner_principal_id,state) VALUES($1,$2,$3,'waiting_for_room')`, f.person.TenantID, project, f.person.ID)
+		return err
+	})
+	return f, o, leaf, project
+}
+
+func TestLeadPersonRunStartsAndRejectsOtherWriters(t *testing.T) {
+	f, o, leaf, _ := personLeadOrder(t)
+	body := map[string]any{"agent_principal_id": f.agent.ID, "model_profile_id": f.profile}
+	var failure map[string]any
+	f.call(t, f.agent, "POST", "/api/work-orders/"+o.NodeID+"/runs", body, 409, &failure)
+	if failure["error"] != "configured project work requires lead queue dispatch" {
+		t.Fatalf("agent key refused for wrong reason: %v", failure)
+	}
+	run := f.run(t, o)
+	if run.Purpose != "managed" || run.Status != "queued" || run.QueueNodeID != nil {
+		t.Fatalf("person did not create a direct managed run: %+v", run)
+	}
+	for _, state := range []string{"queued", "running"} {
+		if state == "running" {
+			ids := f.reserve(t, run)
+			f.call(t, f.agent, "POST", "/api/runs/"+run.ID+"/claim", claimBody(ids), 200, &run)
+			if run.Status != "running" {
+				t.Fatalf("person run was not claimed: %s", run.Status)
+			}
+		}
+		f.call(t, f.person, "POST", "/api/work-orders/"+o.NodeID+"/runs", body, 409, &failure)
+		if failure["error"] != "A run is already active on this ticket. Open it from the ticket to follow or steer it." {
+			t.Fatalf("second %s start refused for wrong reason: %v", state, failure)
+		}
+	}
+	// A second order on the same work leaf must not evade the writer fence.
+	other := f.order(t, nil)
+	f.tx(t, f.person, func(tx pgx.Tx) error {
+		_, err := tx.Exec(t.Context(), `UPDATE nodes SET parent_id=$2 WHERE id=$1`, other.NodeID, leaf)
+		return err
+	})
+	f.call(t, f.person, "POST", "/api/work-orders/"+other.NodeID+"/runs", body, 409, &failure)
+	if failure["error"] != "A run is already active on this ticket. Open it from the ticket to follow or steer it." {
+		t.Fatalf("sibling order bypassed exclusion: %v", failure)
+	}
+	if got := f.count(t, f.person, `SELECT count(*) FROM agent_runs`); got != 1 {
+		t.Fatalf("refused starts left %d runs", got)
+	}
+}
+
+func TestLeadPersonRunRefusesPendingAndClaimedIntent(t *testing.T) {
+	f, o, _, project := personLeadOrder(t)
+	f.person.BrowserSession = true
+	recurrences.New(f.d.App).Mount(f.mux)
+	var kind string
+	f.tx(t, f.person, func(tx pgx.Tx) error {
+		if _, err := tx.Exec(t.Context(), `SELECT aeon_seed_work_kinds($1)`, f.person.TenantID); err != nil {
+			return err
+		}
+		return tx.QueryRow(t.Context(), `SELECT id::text FROM work_kinds WHERE slug='backend' AND project_id IS NULL`).Scan(&kind)
+	})
+	in := recurrences.Input{ProjectID: project, ParentID: project, Template: recurrences.Template{Title: "Lead intent", Criteria: []string{"Verify ownership"}, EstimateHours: 1, Priority: "high", Type: "ticket"}, Trigger: recurrences.Trigger{Kind: "time", RRULE: "FREQ=WEEKLY;BYDAY=MO", TimeOfDay: "09:00", Timezone: "UTC"}, OverlapPolicy: "create", CatchUpPolicy: "one", Definition: &recurrences.Definition{Scope: recurrences.DefinitionScope{Kind: "project", ProjectID: project}, OwnerPrincipalID: f.person.ID, Assignment: &recurrences.Assignment{Goal: "Test lead exclusion", Sources: []recurrences.SourceReference{}, Role: "build", WorkKindID: kind, AllowedActions: []string{"work.update"}, RuntimeRequirements: recurrences.RuntimeRequirements{NeedsNativeHost: true, RuntimeClass: "native_coding"}, Budget: recurrences.DefinitionBudget{Mode: "off"}}}}
+	var recurrence recurrences.Recurrence
+	f.call(t, f.person, "POST", "/api/recurrences", in, 201, &recurrence)
+	f.call(t, f.person, "POST", "/api/recurrences/"+recurrence.ID+"/resume", map[string]any{"expected_revision": recurrence.Revision}, 200, &recurrence)
+	var occurrence recurrences.Occurrence
+	f.call(t, f.person, "POST", "/api/recurrences/"+recurrence.ID+"/run-now", map[string]string{"idempotency_key": "lead-person-intent"}, 200, &occurrence)
+	if occurrence.Run == nil || occurrence.NodeID == nil {
+		t.Fatal("fixture lacks a durable routine work leaf")
+	}
+	if occurrence.Run.AgentRunID != nil {
+		f.call(t, f.person, "POST", "/api/runs/"+*occurrence.Run.AgentRunID+"/cancel", nil, 200, nil)
+	}
+	intent := uuid()
+	f.tx(t, f.person, func(tx pgx.Tx) error {
+		if _, err := tx.Exec(t.Context(), `UPDATE nodes SET parent_id=$2 WHERE id=$1`, o.NodeID, *occurrence.NodeID); err != nil {
+			return err
+		}
+		_, err := tx.Exec(t.Context(), `INSERT INTO routine_launch_intents(tenant_id,id,routine_run_id,project_id,owner_principal_id,worker_principal_id,kind,lead_generation,binding) VALUES($1,$2,$3,$4,$5,$6,'lead',0,'{}')`, f.person.TenantID, intent, occurrence.Run.ID, project, f.person.ID, f.agent.ID)
+		return err
+	})
+	for _, state := range []string{"pending", "claimed"} {
+		f.tx(t, f.person, func(tx pgx.Tx) error {
+			_, err := tx.Exec(t.Context(), `UPDATE routine_launch_intents SET state=$2 WHERE id=$1`, intent, state)
+			return err
+		})
+		var failure map[string]any
+		f.call(t, f.person, "POST", "/api/work-orders/"+o.NodeID+"/runs", map[string]any{"agent_principal_id": f.agent.ID, "model_profile_id": f.profile}, 409, &failure)
+		if failure["error"] != "The project lead is already starting this ticket. The run appears on the ticket in a moment." {
+			t.Fatalf("%s intent refused for wrong reason: %v", state, failure)
+		}
+		if f.count(t, f.person, `SELECT count(*) FROM agent_runs WHERE work_order_id=$1`, o.NodeID) != 0 {
+			t.Fatal("refused start left a run")
+		}
+	}
+	f.tx(t, f.person, func(tx pgx.Tx) error {
+		_, err := tx.Exec(t.Context(), `UPDATE routine_launch_intents SET state='exit_observed',exit_observed_at=clock_timestamp() WHERE id=$1`, intent)
+		return err
+	})
+	f.run(t, o)
+}
+
+func TestLeadPersonConcurrentStartsHaveOneWriter(t *testing.T) {
+	f, o, _, _ := personLeadOrder(t)
+	pool, barrier, ctx := dbtest.BarrierPool(t, f.d.App, func(query string) bool {
+		return strings.Contains(query, "SELECT EXISTS(SELECT 1 FROM agent_runs r JOIN nodes n")
+	})
+	ctx, cancel := context.WithCancel(ctx)
+	defer cancel()
+	mux := http.NewServeMux()
+	agentruns.New(pool).Mount(mux)
+	start := func() (*httptest.ResponseRecorder, <-chan struct{}) {
+		w, done := httptest.NewRecorder(), make(chan struct{})
+		r := httptest.NewRequest("POST", "/api/work-orders/"+o.NodeID+"/runs", strings.NewReader(`{"agent_principal_id":"`+f.agent.ID+`","model_profile_id":"`+f.profile+`"}`)).WithContext(tenant.WithPrincipal(ctx, f.person))
+		go func() { defer close(done); mux.ServeHTTP(w, r) }()
+		t.Cleanup(func() {
+			cancel()
+			barrier.Release()
+			cleanup, stop := context.WithTimeout(context.Background(), 5*time.Second)
+			defer stop()
+			dbtest.Await(t, cleanup, done)
+		})
+		return w, done
+	}
+	first, firstDone := start()
+	holder := barrier.Wait(t, ctx) // first start has checked the leaf is free
+	second, secondDone := start()
+	if lock := dbtest.BlockedOrDone(t, ctx, f.d.Admin, holder, secondDone); lock != "transactionid" {
+		t.Fatalf("second start did not contend on the tenant fence: %q", lock)
+	}
+	barrier.Release()
+	dbtest.Await(t, ctx, firstDone)
+	dbtest.Await(t, ctx, secondDone)
+	if first.Code != 201 || second.Code != 409 || !strings.Contains(second.Body.String(), "A run is already active on this ticket. Open it from the ticket to follow or steer it.") {
+		t.Fatalf("concurrent starts: first=%d %s; second=%d %s", first.Code, first.Body.String(), second.Code, second.Body.String())
+	}
+	if got := f.count(t, f.person, `SELECT count(*) FROM agent_runs WHERE work_order_id=$1`, o.NodeID); got != 1 {
+		t.Fatalf("concurrent starts left %d runs", got)
+	}
+	if got := f.count(t, f.person, `SELECT count(*) FROM events WHERE node_id=$1 AND type='run.created'`, o.NodeID); got != 1 {
+		t.Fatalf("concurrent starts recorded %d creation events", got)
+	}
+}
+
+func TestLeadAbsentAdmissionOffersPersonNextStep(t *testing.T) {
+	f, coordinator, _, session, lease, _ := leadQueueFixture(t)
+	r := httptest.NewRequest("POST", "/api/queue/next", strings.NewReader(`{}`)).WithContext(tenant.WithPrincipal(t.Context(), coordinator))
+	r.Header.Set("X-Aeon-Lead-Session", session)
+	r.Header.Set("X-Aeon-Lead-Generation", "1")
+	r.Header.Set("X-Aeon-Worker-Lease", lease)
+	w := httptest.NewRecorder()
+	f.mux.ServeHTTP(w, r)
+	if w.Code != 409 || !strings.Contains(w.Body.String(), "admission_not_configured. Automatic lead starts are off for now. Start the run yourself from the ticket.") {
+		t.Fatalf("missing admission bypassed or missing next step: %d %s", w.Code, w.Body.String())
+	}
 }

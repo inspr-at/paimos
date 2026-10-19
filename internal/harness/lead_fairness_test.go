@@ -503,3 +503,57 @@ func TestLeadYieldRechecksAgentPermissionAfterFence(t *testing.T) {
 		return nil
 	})
 }
+
+// Risk: a direct person run is not a queue entry, but holds the leaf even while
+// queued. Exercise both scheduling and final daemon claim with live lead checks.
+func TestLeadPickupExcludesActivePersonRun(t *testing.T) {
+	f := projectLeadFixture(t, readyLeadChecks)
+	session, _, _ := fairWorking(t, f)
+	run := fairQueue(t, f, time.Now().UTC())
+	binding, _ := json.Marshal(map[string]any{"session_id": session, "generation": 1})
+	var direct, profile string
+	f.tx(t, f.person, func(tx pgx.Tx) error {
+		if err := tx.QueryRow(t.Context(), `INSERT INTO model_profiles(tenant_id,slug,version,harness,family,model,effort,tier) VALUES($1,'person-lead-test','1','codex','openai','fixture','high','strong') RETURNING id::text`, f.person.TenantID).Scan(&profile); err != nil {
+			return err
+		}
+		if _, err := tx.Exec(t.Context(), `UPDATE agent_runs SET agent_principal_id=$2,model_profile_id=$3,trace=jsonb_set(coalesce(trace,'{}'),'{project_lead}',$4::jsonb) WHERE id=$1`, run, f.agent.ID, profile, binding); err != nil {
+			return err
+		}
+		return tx.QueryRow(t.Context(), `INSERT INTO agent_runs(tenant_id,work_order_id,agent_principal_id,model_profile_id) SELECT tenant_id,work_order_id,$2,$3 FROM agent_runs WHERE id=$1 RETURNING id::text`, run, f.agent.ID, profile).Scan(&direct)
+	})
+	for _, state := range []string{"queued", "starting", "running", "waiting"} {
+		f.tx(t, f.person, func(tx pgx.Tx) error {
+			_, err := tx.Exec(t.Context(), `UPDATE agent_runs SET status=$2 WHERE id=$1`, direct, state)
+			return err
+		})
+		for _, path := range []string{"pickup", "claim"} {
+			err := db.InTenant(dbtest.Seed(t.Context()), f.db.App, f.person.TenantID, func(tx pgx.Tx) error {
+				if err := db.LockCurrentTree(t.Context(), tx); err != nil {
+					return err
+				}
+				if path == "claim" {
+					return harness.RequireAssignedLeadStartTx(t.Context(), tx, f.agent, f.project, run, binding, readyLeadChecks)
+				}
+				_, err := harness.LeadDispatchTurnTx(t.Context(), tx, f.agent, f.project, run, readyLeadChecks)
+				return err
+			})
+			if err == nil || err.Error() != "lead_writer_conflict" {
+				t.Fatalf("%s with %s person run: %v", path, state, err)
+			}
+		}
+	}
+	f.tx(t, f.person, func(tx pgx.Tx) error {
+		_, err := tx.Exec(t.Context(), `UPDATE agent_runs SET status='cancelled',ended_at=clock_timestamp() WHERE id=$1`, direct)
+		return err
+	})
+	f.tx(t, f.person, func(tx pgx.Tx) error {
+		if err := db.LockCurrentTree(t.Context(), tx); err != nil {
+			return err
+		}
+		reason, err := harness.LeadDispatchTurnTx(t.Context(), tx, f.agent, f.project, run, readyLeadChecks)
+		if err == nil && reason != "" {
+			t.Fatalf("confirmed cancelled run retained the leaf: %s", reason)
+		}
+		return err
+	})
+}

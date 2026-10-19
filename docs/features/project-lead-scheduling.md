@@ -78,3 +78,15 @@ control or audit history and expose no private owner, dispatch binding or proof.
 The projection is advisory: every final write still checks current authority,
 revision/generation and exact process/lease identity under its existing fences,
 and live admission remains necessary before execution.
+
+A person with `run.create` can start a managed run directly from a ticket in a
+lead project (AEON-1506). Automatic lead admission remains off. The same
+transaction checks the work leaf and inserts the run under the existing
+tenant/tree and work-order fences. Agent keys still require lead queue dispatch.
+A pending or claimed lead launch intent refuses the start with “The project lead
+is already starting this ticket. The run appears on the ticket in a moment.”
+An active run, including one still queued for its daemon, refuses another start
+with “A run is already active on this ticket. Open it from the ticket to follow
+or steer it.” The lead queue excludes that leaf and its final worker claim
+retains the `lead_writer_conflict` fence. Missing admission offers the next step:
+“Automatic lead starts are off for now. Start the run yourself from the ticket.”

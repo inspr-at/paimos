@@ -53,6 +53,31 @@ func ownerSchedule(ctx context.Context, tx pgx.Tx, fn func(context.Context, pgx.
 	return reason, step.Commit(ctx)
 }
 
+// Reuse the queue's writer exclusion for direct person runs, including queued
+// runs that have not reached the daemon yet. Caller holds tenant/tree fences.
+// r is the candidate run and n its work leaf; no labels or missed heartbeat
+// release an unresolved writer.
+const leadOtherWriterSQL = `SELECT 1 FROM agent_runs other
+ JOIN nodes other_order ON other_order.tenant_id=other.tenant_id AND other_order.id=other.work_order_id
+ WHERE other.id<>r.id AND (other.work_order_id=r.work_order_id OR other.queue_node_id=n.id OR other_order.parent_id=n.id)
+ AND (other.status IN ('queued','starting','running','waiting') OR other.trace->'worker_assignment'->>'state' IN ('launch_unknown','launched')
+ OR other.trace->'work_lifecycle_release'->>'exit_unconfirmed'='true')`
+
+func requireLeadWriterFreeTx(ctx context.Context, tx pgx.Tx, run string) error {
+	var busy bool
+	err := tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM agent_runs r
+ JOIN nodes o ON o.tenant_id=r.tenant_id AND o.id=r.work_order_id
+ JOIN nodes n ON n.tenant_id=o.tenant_id AND n.id=coalesce(r.queue_node_id,o.parent_id)
+ WHERE r.id=$1 AND EXISTS(`+leadOtherWriterSQL+`))`, run).Scan(&busy)
+	if err != nil {
+		return err
+	}
+	if busy {
+		return workorders.Fail(409, "lead_writer_conflict")
+	}
+	return nil
+}
+
 // Queue is the only work source. Read at most 201 small rows; overflow is an
 // explicit wait, never permission based on a partial scheduling snapshot.
 // Dependency blockers, incomplete criteria and changed/non-leaf work cannot
@@ -67,6 +92,7 @@ func leadQueueDemand(ctx context.Context, tx pgx.Tx, owner string) ([]leadDemand
  AND r.status='queued' AND n.deleted_at IS NULL AND n.state='open'
  AND (r.queue_routed_at IS NULL OR (r.trace->'project_lead'->>'session_id'=l.session_id::text AND r.trace->'project_lead'->>'generation'=l.generation::text))
  AND aeon_work_leaf(n.id) AND aeon_work_pending(n.id) IS NULL
+ AND NOT EXISTS(`+leadOtherWriterSQL+`)
  AND NOT EXISTS(SELECT 1 FROM node_relations rel JOIN nodes blocker ON blocker.tenant_id=rel.tenant_id AND blocker.id=rel.source_node_id
  JOIN node_kinds k ON k.tenant_id=blocker.tenant_id AND k.id=blocker.kind_id
  WHERE rel.target_node_id=n.id AND rel.type='blocks' AND blocker.deleted_at IS NULL
@@ -250,6 +276,9 @@ func leadWorkerYieldConfirmedTx(ctx context.Context, tx pgx.Tx, l Lead) (bool, e
 func LeadDispatchTurnTx(ctx context.Context, tx pgx.Tx, p tenant.Principal, project, run string, admission LeadAdmission) (string, error) {
 	l, err := loadLead(ctx, tx, project, false)
 	if err != nil || l.State == "none" {
+		return "", err
+	}
+	if err = requireLeadWriterFreeTx(ctx, tx, run); err != nil {
 		return "", err
 	}
 	m := Module{leadAdmission: admission}
