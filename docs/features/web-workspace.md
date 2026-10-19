@@ -170,7 +170,17 @@ Filters sheet keeps filtering only and links there with **Display settings…**:
 the sheet closes and the Display menu opens as a sheet, or, with the header
 collapsed, as the menu of the Display button beside New. Saved column
 visibility and order also apply to phone cards: optional values appear below
-Key and Title; Automatic restores the compact phone layout. Attachment Compare reserves its opacity control slot
+Key and Title; Automatic restores the compact phone layout.
+On desktop tables Title never goes under its 240 px minimum (AEON-1470): content-fitted
+widths give way first, then saved or dragged widths shrink in proportion (the saved
+values stay), then whole columns step aside in this order: Updated, Created, Estimate,
+Tokens, Cost, Suggested release, Model, ETA, Progress, Tags, Cost unit, Release, Epic,
+Assignee. Key, Title, Status, Priority and a column the list is sorted by stay. Only a
+resize changes the set, and a column comes back with 16 px to spare. Display keeps a
+column that stepped aside ticked, with "hidden at this width" after its name; its sort
+stays in the sort choices. A group row's priority mix shows the most severe bucket and
+the rest as "+N" ("3 high +3") when the full mix does not fit its cell; the cell's tip
+names the full mix. Attachment Compare reserves its opacity control slot
 across Side by side, Slider and Onion skin so the mode buttons stay in place.
 Phone Compare and column reorder buttons have separate 44 px touch targets.
 Selection scroll clearance follows the measured bulk toolbar height, including
