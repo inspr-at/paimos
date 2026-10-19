@@ -1,16 +1,16 @@
 {
   "group": "remaining-ui",
   "nightlyTiming": {
-    "basis": "Guarded remote-spec.sh complete file: 7 passed (17.8s), supervisor wall 18.048s. Conservative scheduling estimate rounded up to 60s (over three times this run). Pre-merge mbp2606 measurement, not a hosted nightly run.",
+    "basis": "Guarded remote-spec.sh complete file: 8 passed (18.5s), supervisor wall 18.745s. Conservative scheduling estimate rounded up to 60s (over three times this run). Pre-merge mbp2606 measurement, not a hosted nightly run.",
     "runner": "mbp2606",
     "seconds": 60,
-    "selectedTests": 7,
-    "sourceCommit": "e20fc49aa337b74f54c42aef2e06a85f2200d30c"
+    "selectedTests": 8,
+    "sourceCommit": "6ebbd816b70521046a67bde9bb8415991db7b0a1"
   },
   "spec": {
     "file": "tests/aeon-1532-editor-steady.spec.ts",
-    "listedTests": 7,
-    "weightSeconds": 15.536585,
+    "listedTests": 8,
+    "weightSeconds": 17.756098,
     "weightSource": "unmeasured-test-rate"
   }
 }
