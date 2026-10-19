@@ -50,9 +50,13 @@ BEGIN
  IF NOT pg_try_advisory_xact_lock(hashtextextended('telemetry-retention:'||target_tenant::text,1354)) THEN
   RETURN; -- Another replica owns this batch.
  END IF;
- SELECT EXISTS(SELECT 1 FROM public.events e WHERE e.tenant_id=target_tenant
-  AND e.type IN ('account.probed','harness.heartbeat') AND e.at<cutoff
-  AND (e.undo_of IS NOT NULL OR EXISTS(SELECT 1 FROM public.events u WHERE u.tenant_id=e.tenant_id AND u.undo_of=e.id))) INTO protected;
+ -- Start at the indexed, normally empty undo set. Scanning every old tick
+ -- for each batch would turn the initial million-row cleanup quadratic.
+ SELECT EXISTS(SELECT 1 FROM public.events u LEFT JOIN public.events e
+  ON e.tenant_id=u.tenant_id AND e.id=u.undo_of
+  WHERE u.tenant_id=target_tenant AND u.undo_of IS NOT NULL
+  AND ((u.type IN ('account.probed','harness.heartbeat') AND u.at<cutoff)
+   OR (e.type IN ('account.probed','harness.heartbeat') AND e.at<cutoff))) INTO protected;
  IF protected THEN
   RETURN QUERY SELECT t,0::bigint,true FROM unnest(ARRAY['account.probed','harness.heartbeat']) t;
   RETURN;

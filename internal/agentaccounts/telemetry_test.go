@@ -2,6 +2,9 @@
 package agentaccounts
 
 import (
+	"encoding/json"
+	"fmt"
+	"strings"
 	"testing"
 	"time"
 
@@ -67,4 +70,33 @@ func TestProbeEventsOnlyForVisibleStateChanges(t *testing.T) {
 	report(11, 98, 1)
 	report(12, 99, 0)
 	report(13, 20, 1)
+	// A pending check from an old generation may commit a health heartbeat
+	// while rejecting stale facts. Exercise both the quiet and changed path.
+	for i, available := range []bool{true, false} {
+		at := now.Add(time.Duration(14+i*2) * time.Minute)
+		seed(t, f.admin, func(tx pgx.Tx) error {
+			_, err := tx.Exec(t.Context(), `UPDATE agent_accounts SET last_probe_at=$2,last_probe_ok=true,last_probe_failure='' WHERE id=$1`, f.account.ID, at)
+			return err
+		})
+		var check AccountCheck
+		status, raw := callAt(t, f.mod, &f.admin, "", "POST", strings.TrimSuffix(path, "/probe")+"/check", requestBody(fmt.Sprintf("restart-%d", i), 0), at)
+		if status != 202 || json.Unmarshal(raw, &check) != nil {
+			t.Fatalf("restart check: %d %s", status, raw)
+		}
+		in.MeasurementOnly = false
+		in.DaemonGeneration = fmt.Sprintf("g%d", i+2)
+		in.Available = available
+		in.Readiness = &ReadinessReport{CheckID: check.ID, BindingRevision: ptrRevision(0), Result: "success"}
+		before := count()
+		status, raw = callAt(t, f.mod, &f.runner, f.token, "POST", path, encoded(t, in), at.Add(time.Second))
+		var refusal struct {
+			Code string `json:"code"`
+		}
+		if status != 409 || json.Unmarshal(raw, &refusal) != nil || refusal.Code != "stale_binding" {
+			t.Fatalf("restart refusal: %d %s", status, raw)
+		}
+		if got := count() - before; got != int64(i) {
+			t.Fatalf("restart appended %d events, want %d", got, i)
+		}
+	}
 }

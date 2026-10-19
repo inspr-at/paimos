@@ -3,6 +3,7 @@ package events
 
 import (
 	"context"
+	"errors"
 	"testing"
 	"time"
 
@@ -10,6 +11,7 @@ import (
 	"github.com/inspr-at/paimos/internal/dbtest"
 	"github.com/inspr-at/paimos/internal/tenant"
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgconn"
 )
 
 // Risk: cleanup deletes user history, fresh telemetry or another tenant's rows,
@@ -40,6 +42,7 @@ func TestTelemetryRetentionBatchedScopedAndIdempotent(t *testing.T) {
 	}
 	for _, typ := range []string{"account.probed", "harness.heartbeat"} {
 		appendAt(a, typ, young)
+		appendAt(a, typ, now.Add(-TelemetryRetention))
 		appendAt(b, typ, old)
 	}
 	for _, typ := range []string{"node.updated", "harness.stopped", "account.updated"} {
@@ -65,24 +68,56 @@ func TestTelemetryRetentionBatchedScopedAndIdempotent(t *testing.T) {
 	if err := d.Admin.QueryRow(t.Context(), `SELECT count(*) FILTER(WHERE tenant_id=$1 AND type IN ('account.probed','harness.heartbeat')),count(*) FILTER(WHERE tenant_id=$2 AND type IN ('account.probed','harness.heartbeat')),count(*) FILTER(WHERE tenant_id=$1 AND type IN ('node.updated','harness.stopped','account.updated')) FROM events`, a.TenantID, b.TenantID).Scan(&left, &foreign, &unrelated); err != nil {
 		t.Fatal(err)
 	}
-	if left != 2 || foreign != 2 || unrelated != 3 {
+	if left != 4 || foreign != 2 || unrelated != 3 {
 		t.Fatalf("wrong survivors: %d/%d/%d", left, foreign, unrelated)
 	}
 	if e := appendAt(a, "account.probed", young); e.ID <= base {
 		t.Fatal("retention rewound event IDs")
 	}
-	if _, err := pruneTelemetryBatch(t.Context(), d.App, a.TenantID, now, 3); err == nil {
-		t.Fatal("accepted an unsafe age")
+	requireCode := func(err error, code string) {
+		t.Helper()
+		var pgErr *pgconn.PgError
+		if !errors.As(err, &pgErr) || pgErr.Code != code {
+			t.Fatalf("expected SQLSTATE %s, got %v", code, err)
+		}
 	}
-	if _, err := pruneTelemetryBatch(t.Context(), d.App, a.TenantID, old, 501); err == nil {
-		t.Fatal("accepted oversized batch")
-	}
-	err := db.InTenant(tenant.WithPrincipal(t.Context(), a), d.App, a.TenantID, func(tx pgx.Tx) error {
+	_, err := pruneTelemetryBatch(t.Context(), d.App, a.TenantID, now, 3)
+	requireCode(err, "22023")
+	_, err = pruneTelemetryBatch(t.Context(), d.App, a.TenantID, old, 501)
+	requireCode(err, "22023")
+	err = db.InTenant(tenant.WithPrincipal(t.Context(), a), d.App, a.TenantID, func(tx pgx.Tx) error {
 		_, err := tx.Exec(t.Context(), `SELECT * FROM aeon_prune_telemetry($1,$2,3)`, a.TenantID, old)
 		return err
 	})
-	if err == nil {
-		t.Fatal("request context acquired retention authority")
+	requireCode(err, "42501")
+}
+
+// Risk: retention runs only after the first day, uses a drifting per-batch
+// cutoff, or ignores cancellation. Inject the clock and cadence boundary.
+func TestTelemetryRetentionStartsImmediatelyAndRunsDaily(t *testing.T) {
+	now := time.Date(2026, 10, 19, 10, 0, 0, 0, time.UTC)
+	start := now
+	sweeps, waits := 0, 0
+	runTelemetryRetention(t.Context(), func(ctx context.Context, cutoff time.Time) {
+		if sweeps != waits || !cutoff.Equal(start.Add(time.Duration(sweeps)*24*time.Hour).Add(-TelemetryRetention)) {
+			t.Fatalf("wrong retention schedule: sweeps=%d waits=%d cutoff=%v", sweeps, waits, cutoff)
+		}
+		sweeps++
+	}, func(ctx context.Context, delay time.Duration) bool {
+		if delay != 24*time.Hour || sweeps != waits+1 {
+			t.Fatal("retention did not run before its daily wait")
+		}
+		waits++
+		now = now.Add(delay)
+		return waits < 2
+	}, func() time.Time { return now })
+	if sweeps != 2 || waits != 2 {
+		t.Fatalf("cadence did not stop: %d/%d", sweeps, waits)
+	}
+	ctx, cancel := context.WithCancel(t.Context())
+	cancel()
+	if waitTelemetry(ctx, time.Hour) {
+		t.Fatal("cancelled retention kept waiting")
 	}
 }
 
@@ -119,8 +154,10 @@ func TestTelemetryRetentionSkipsUndoAndKeepsAppendOnlyGuard(t *testing.T) {
 		t.Fatalf("protected telemetry lost: %d %v", n, err)
 	}
 	for _, query := range []string{`DELETE FROM events`, `UPDATE events SET type='test.changed'`} {
-		if _, err := d.Admin.Exec(context.Background(), query); err == nil {
-			t.Fatal("unguarded privileged mutation accepted")
+		_, err := d.Admin.Exec(t.Context(), query)
+		var pgErr *pgconn.PgError
+		if !errors.As(err, &pgErr) || pgErr.Code != "P0001" || pgErr.Message != "events are append-only" {
+			t.Fatalf("append-only guard failed for the wrong reason: %v", err)
 		}
 	}
 }

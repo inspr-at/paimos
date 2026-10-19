@@ -163,7 +163,7 @@ func (m *module) stream(w http.ResponseWriter, r *http.Request) {
 					HeartbeatSessionID string `json:"heartbeat_session_id"`
 				}
 				if json.Unmarshal([]byte(n.Payload), &hint) == nil && hint.TenantID == p.TenantID {
-					if validUUID(hint.HeartbeatSessionID) || db.IsResync(n) {
+					if live && (validUUID(hint.HeartbeatSessionID) || db.IsResync(n)) {
 						visible, err := m.heartbeatVisible(r.Context(), p, hint.HeartbeatSessionID)
 						if err != nil {
 							return

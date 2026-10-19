@@ -1,0 +1,11 @@
+{
+  "schema": "aeon.migration-policy-exceptions.v1",
+  "exceptions": [
+    {
+      "file": "1369_telemetry_retention.sql",
+      "sha256": "139add6f6945c6b0f8116102878b35e017a76f012180669d127e49b4a481fc26",
+      "ticket": "AEON-1354",
+      "reason": "The authorized telemetry retention requires a narrow exception to the released append-only trigger and a bounded DELETE helper, which are outside the expand-safe allowlist. No cleanup executes in this migration. Invoker rights, FORCE RLS, exact current-tenant service context, the two telemetry types, the minimum age of 14 days, a maximum batch of 500 and undo-reference checks constrain every delete. Other event and append-only table mutations remain rejected. The server runs cleanup after the release flow takes a fresh backup. This exact-byte artifact requires coordinator cross-family and release review; it grants no merge, push, deployment or release authority."
+    }
+  ]
+}

@@ -66,9 +66,13 @@ func pruneTelemetryBatch(ctx context.Context, pool *pgxpool.Pool, tenantID strin
 // flow must take its fresh backup before starting this binary. Deletes leave
 // space for ordinary autovacuum/reuse; no table rewrite is requested.
 func RunTelemetryRetention(ctx context.Context, pool *pgxpool.Pool) {
+	runTelemetryRetention(ctx, func(ctx context.Context, cutoff time.Time) { sweepTelemetry(ctx, pool, cutoff) }, waitTelemetry, time.Now)
+}
+
+func runTelemetryRetention(ctx context.Context, sweep func(context.Context, time.Time), wait func(context.Context, time.Duration) bool, now func() time.Time) {
 	for {
-		sweepTelemetry(ctx, pool, time.Now().Add(-TelemetryRetention))
-		if !waitTelemetry(ctx, telemetrySweepInterval) {
+		sweep(ctx, now().Add(-TelemetryRetention))
+		if !wait(ctx, telemetrySweepInterval) {
 			return
 		}
 	}

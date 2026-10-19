@@ -6500,6 +6500,8 @@
     ,
     {"kind":"go","package":"internal/events","name":"TestGoalsSubscriptionUsesOutcomeVisibility","tier":"ESSENTIAL"}
     ,
+    {"kind":"go","package":"internal/events","name":"TestHeartbeatFreshnessNotifyCommitWithoutEvent","tier":"ESSENTIAL"}
+    ,
     {"kind":"go","package":"internal/events","name":"TestImportParentChangeHintInHistoryAndStream","tier":"GATED-FULL"}
     ,
     {"kind":"go","package":"internal/events","name":"TestImportParentChangeSummarizesMembershipWithoutRevisionChange","tier":"GATED-FULL"}
@@ -6555,6 +6557,8 @@
     {"kind":"go","package":"internal/events","name":"TestTelemetryRetentionBatchedScopedAndIdempotent","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/events","name":"TestTelemetryRetentionSkipsUndoAndKeepsAppendOnlyGuard","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/events","name":"TestTelemetryRetentionStartsImmediatelyAndRunsDaily","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/events","name":"TestUUIDAndIDValidation","tier":"GATED-FULL"}
     ,
