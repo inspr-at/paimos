@@ -4,7 +4,7 @@ import { readFileSync, writeFileSync, mkdirSync, renameSync } from 'node:fs'
 import { resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { collectGo, collectWeb, collectNativeGo, command, root, web, evidence, saveJSON, saveManifest } from './collect.mjs'
-import { validate, select, shard, key, counts, exactPattern, webGraph, measuredWeights, knownFlakyOwners } from './core.mjs'
+import { validate, select, shard, key, counts, exactPattern, webGraph, measuredWeights, knownFlakyOwners, nightlyWebShardPlan } from './core.mjs'
 import { reportCases, goOutcomes, browserOutcomes } from './report.mjs'
 import { goFailures, nodeFailures, vitestFailures, outputTail, printFailures, printFlakeWarnings } from './failures.mjs'
 import { runPlaywright } from '../playwright-safe.mjs'
@@ -515,6 +515,20 @@ export function classify(flags, { collect = target, read = load, save = saveMani
 export async function main(args, dependencies={}) {
   if (args[0] === 'manifests') return manifestsMain(args.slice(1), root)
   if (args[0] === 'classify') return classify(args.slice(1), dependencies)
+  if (args[0] === 'nightly-web-plan') {
+    if (args.length !== 1) throw new Error('Usage: cli.mjs nightly-web-plan')
+    const inventory = dependencies.inventory ?? target('web', { browserOnly: true })
+    const manifest = load('web')
+    const rows = validate(manifest, [...inventory.tests.filter(row => row.kind === 'browser'),
+      ...manifest.tests.filter(row => row.kind !== 'browser')])
+    const selected = select(rows, { event: 'schedule', forceAll: true }).tests
+    const sizing = nightlyWebShardPlan(selected, loadBrowserPolicy())
+    const env = dependencies.env ?? process.env
+    if (env.GITHUB_OUTPUT) writeFileSync(env.GITHUB_OUTPUT, `shards=${JSON.stringify(sizing.shards)}\n`, { flag: 'a' })
+    const log = dependencies.log ?? console.log
+    log(JSON.stringify(sizing))
+    return 0
+  }
   const [mode,kind,...flags]=args
   if(!['go','web'].includes(kind)||!['collect','check','classify','plan','run'].includes(mode)) throw new Error('Usage: cli.mjs collect|check|classify|plan|run go|web [--full | --all] [--unit] [--shard i/N] [--paths JSON] [check: --strict]')
   const options={unit:false,full:false,all:false,job:`${kind}-tiers`}

@@ -4,7 +4,7 @@ import { dirname, extname, resolve, relative } from 'node:path'
 import { migrationObjects } from './migration.mjs'
 import { inputBounds, inputMetadata, readInput } from './inputs.mjs'
 import { browserImpact } from './browser-impact.mjs'
-import { validateManifest as validateBrowserPolicy } from '../../web/scripts/ci-web-shard.mjs'
+import { validateManifest as validateBrowserPolicy, nightlyWeights } from '../../web/scripts/ci-web-shard.mjs'
 import { browserAreaDecision, hasBrowserSource, loadBrowserAreas } from './browser-areas.mjs'
 import { fileURLToPath } from 'node:url'
 
@@ -673,12 +673,32 @@ export function tierWeights(manifest, rows) {
 export const fullWebShardCount = 17
 export const fullWebShards = Array.from({ length: fullWebShardCount }, (_, index) => index + 1)
 
-// Nightly catalogue width, shared by nightly-full.yml and its measurement
-// consumers. AEON-1522: 24 shards peak at 959s. The catalogue sums past
-// 25×900s, so a 25th shard still peaks above 900s. 26 shards keep the peak
-// at least 60 seconds under the 16-minute budget without changing timings.
-export const nightlyWebShardCount = 26
-export const nightlyWebShards = Array.from({ length: nightlyWebShardCount }, (_, index) => index + 1)
+// Size nightly independently of the PR layout, using the runner's catalogue
+// weights and whole-file packing. Leave two minutes under the 16-minute budget.
+// The tier runner supports at most 64 shards; indivisible files fail loudly.
+export function nightlyWebShardPlan(rows, policy) {
+  const selected = rows.filter(row => row.kind === 'browser')
+  const files = [...new Set(selected.map(row => row.file))]
+  if (!files.length) throw new Error('Nightly browser catalogue must not be empty')
+  for (const file of files) if (!policy.nightlyTiming?.files?.[file]) throw new Error(`Missing nightly timing: ${file}`)
+  const weights = nightlyWeights(policy, selected), targetSeconds = 840, budgetSeconds = 16 * 60
+  for (const file of files) {
+    if (!Number.isFinite(weights[file]) || weights[file] <= 0) throw new Error(`Invalid nightly shard weight: ${file}`)
+    if (weights[file] > targetSeconds) throw new Error(`Nightly spec ${file} predicts ${weights[file].toFixed(1)}s, over the ${targetSeconds}s target; split the spec before adding shards`)
+  }
+  let count = Math.ceil(files.reduce((sum, file) => sum + weights[file], 0) / targetSeconds)
+  for (; count <= Math.min(files.length, 64); count++) {
+    const projections = Array.from({ length: count }, (_, i) => {
+      const tests = shard(selected, i + 1, count, weights)
+      return { shard: i + 1, cases: tests.length,
+        seconds: [...new Set(tests.map(row => row.file))].reduce((sum, file) => sum + weights[file], 0) }
+    })
+    const projectedMaxSeconds = Math.max(...projections.map(bin => bin.seconds))
+    if (projectedMaxSeconds <= targetSeconds) return { shards: projections.map(bin => bin.shard), projections,
+      projectedMaxSeconds, targetSeconds, budgetSeconds }
+  }
+  throw new Error(`Nightly browser catalogue needs more than 64 shards to meet the ${targetSeconds}s target`)
+}
 
 // Fail when any projected shard crosses the budget. The plan itself still
 // returns fitsBudget false for an indivisible file, so callers can fail wide.
