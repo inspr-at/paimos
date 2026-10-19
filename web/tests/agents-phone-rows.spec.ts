@@ -129,10 +129,12 @@ for (const theme of ['light', 'dark'] as const) for (const width of [375, 390, 4
       expect(text.x).toBeGreaterThan(guide.x + 8)
     }
 
-    // Worker toggles and header actions: one line, 44 px targets.
+    // Worker toggles and the toolbar's tools (AEON-1459: Search, Filter and ⋯ on its one line): 44 px targets.
     for (const toggle of await row(page, 1).locator('.worker-toggle').all()) expect((await box(toggle)).height).toBeGreaterThanOrEqual(44)
     const heading = await box(page.locator('#sessions-title'))
-    for (const button of await page.locator('.sessions .head-tools button').all()) {
+    const tools = await page.locator('.sessions .tree-head :is(.tb-search, .tb-filter, .tb-more)').all()
+    expect(tools.length, 'Search, Filter and ⋯ on the toolbar line').toBe(3)
+    for (const button of tools) {
       const b = await box(button)
       expect(b.height).toBeGreaterThanOrEqual(44)
       expect(Math.abs(midY(b) - midY(heading))).toBeLessThanOrEqual(3)

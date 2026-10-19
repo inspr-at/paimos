@@ -50,7 +50,11 @@ for (const width of [1440, 390]) {
       expect(Math.abs((countBox.y + countBox.height / 2) - (moreBox.y + moreBox.height / 2))).toBeLessThan(4)
       await expect(count(page, 'waiting')).toBeVisible()
     } else {
-      expect(countBox.y).toBeGreaterThan(titleBox.y + titleBox.height - 1)
+      // Phones (AEON-1459, R2.1): the counts join the title row as icons and numbers; their words stay in their names.
+      expect(Math.abs((countBox.y + countBox.height / 2) - (titleBox.y + titleBox.height / 2)), 'the counts share the title row').toBeLessThan(4)
+      await expect(count(page, 'working').locator('.label')).toHaveCSS('position', 'absolute')
+      await expect(count(page, 'working')).toHaveAccessibleName(/^2 working\./)
+      expect(countBox.width).toBeGreaterThanOrEqual(44)
       expect(addBox.height).toBeGreaterThanOrEqual(44)
       expect(moreBox.width).toBeGreaterThanOrEqual(44)
       expect(countBox.height).toBeGreaterThanOrEqual(44)
@@ -59,6 +63,41 @@ for (const width of [1440, 390]) {
     }
     await expect(count(page, 'waiting')).toHaveAttribute('aria-disabled', 'true')
     const chip = page.locator('.sessions .filter-chip')
+    if (width <= 720) {
+      // Phones (AEON-1459, D3): no pills row; the Filter button counts the filter, and a pressed count clears it.
+      const filter = page.locator('.sessions .tb-filter')
+      await expectStableControls({
+        controls: { title, add, more, working: count(page, 'working'), problem: count(page, 'problem'), filter },
+        interactions: [
+          { name: 'filter to the problem', run: async () => {
+            await count(page, 'problem').click()
+            await expect(count(page, 'problem')).toHaveAttribute('aria-pressed', 'true')
+            await expect(filter.locator('.fcount')).toHaveText('1')
+            await expect(filter).toHaveAccessibleName('Filter: 1 on')
+            await expect(row(page, child)).toBeVisible()
+            await expect(row(page, lead)).toHaveClass(/filter-context/)
+            await expect(row(page, other)).toHaveCount(0)
+          } },
+          { name: 'Esc clears', run: async () => {
+            await page.keyboard.press('Escape')
+            await expect(filter.locator('.fcount')).toHaveCount(0)
+            await expect(row(page, other)).toBeVisible()
+            await expect(row(page, lead)).not.toHaveClass(/filter-context/)
+          } },
+          { name: 'the pressed count clears and keeps focus', run: async () => {
+            await count(page, 'working').click()
+            await expect(row(page, child)).toHaveCount(0)
+            await count(page, 'working').click()
+            await expect(count(page, 'working')).toHaveAttribute('aria-pressed', 'false')
+            await expect(count(page, 'working')).toBeFocused()
+            await expect(row(page, child)).toBeVisible()
+          } },
+        ],
+      })
+      await expect(chip).toHaveCount(0)
+      await page.screenshot({ path: testInfo.outputPath(`agents-head-${width}.png`) })
+      return
+    }
     await expectStableControls({
       controls: { title, add, more, working: count(page, 'working'), problem: count(page, 'problem') },
       interactions: [

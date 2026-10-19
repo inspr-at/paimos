@@ -49,10 +49,13 @@ function pick(filter: HeadFilter, n: number) {
 .count[aria-pressed="true"] { background: var(--row-selected); box-shadow: inset 0 0 0 1px var(--chip-teal-line); color: var(--teal-ink); }
 .count.hot[aria-pressed="true"] { background: color-mix(in srgb, var(--agent-state-color) 9%, transparent); box-shadow: inset 0 0 0 1.5px var(--agent-state-color); color: var(--ink); }
 .count:focus-visible, .count[aria-pressed="true"]:focus-visible { box-shadow: var(--focus-ring); }
-@media (max-width: 720px) {
-  /* Line 2 of the head: 44 px counts, zeros hidden unless one is the active filter. */
-  .head-counts { min-height: 44px; gap: 0 4px; }
-  .count { height: 44px; padding: 0 10px; }
+/* Compact (AEON-1459, design AEON-1279 r2 R2.1): on the title row, each count is its state mark and
+   number in a 44 px target; its words stay in its name. Zeros hide unless one is the active filter. */
+@media (max-width: 719px), (max-height: 500px) {
+  .head-counts { flex-wrap: nowrap; min-height: 44px; gap: 0 2px; }
+  .count { position: relative; justify-content: center; min-width: 44px; height: 44px; padding: 0 7px; gap: 5px; }
+  .count .label { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
   .count.zero:not([aria-pressed="true"]) { display: none; }
 }
+@media (max-width: 359px) { .head-counts { gap: 0; } .count { padding: 0 4px; gap: 4px; } }
 </style>

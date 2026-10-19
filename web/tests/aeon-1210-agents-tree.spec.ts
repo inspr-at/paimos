@@ -409,14 +409,27 @@ for (const width of [1440, 1024, 390]) for (const theme of ['light', 'dark'] as 
     await gate('groups')
     if (width === 390) await expect(leadRow(page).locator('.qchip.q-l2')).toBeVisible()
     else await expect(leadRow(page).locator('.qchip.q-l1')).toBeVisible()
-    await stick(page).getByRole('button', { name: 'Filter', exact: true }).click()
+    // Phones (AEON-1459, D3): no pills row (Filter counts what is on, its menu clears it); Display is in ⋯.
+    const compact = width < 720
+    await stick(page).getByRole('button', { name: /^Filter/ }).click()
     await expect(page.getByRole('menu', { name: 'Filter by' })).toBeVisible(); await gate('filter-by')
     await page.getByRole('menu', { name: 'Filter by' }).getByRole('menuitem', { name: 'Computer' }).click()
     await expect(page.getByRole('group', { name: 'Computer' })).toBeVisible(); await gate('filter-computer')
     await page.getByRole('group', { name: 'Computer' }).getByRole('checkbox').first().check()
-    await page.keyboard.press('Escape'); await expect(stick(page).locator('.pills-row')).toBeVisible(); await gate('pill')
-    await stick(page).locator('.pills-row').getByRole('button', { name: 'Clear all' }).click()
-    await stick(page).getByRole('button', { name: /^Display: / }).click(); await expect(page.getByRole('dialog', { name: 'Display' })).toBeVisible()
+    await page.keyboard.press('Escape')
+    if (compact) {
+      await expect(stick(page).locator('.fcount')).toHaveText('1'); await gate('pill')
+      await stick(page).getByRole('button', { name: 'Filter: 1 on', exact: true }).click()
+      await page.getByRole('menu', { name: 'Filter by' }).getByRole('menuitem', { name: 'Clear all' }).click()
+      await expect(stick(page).locator('.fcount')).toHaveCount(0)
+      await stick(page).getByRole('button', { name: 'More list actions', exact: true }).click()
+      await page.getByRole('menu', { name: 'More list actions' }).getByRole('menuitem', { name: /^Display…/ }).click()
+    } else {
+      await expect(stick(page).locator('.pills-row')).toBeVisible(); await gate('pill')
+      await stick(page).locator('.pills-row').getByRole('button', { name: 'Clear all' }).click()
+      await stick(page).getByRole('button', { name: /^Display: / }).click()
+    }
+    await expect(page.getByRole('dialog', { name: 'Display' })).toBeVisible()
     await gate('display'); await page.keyboard.press('Escape')
     await leadRow(page).locator('.tree-fold').click(); await expect(row(page, sid(2))).toHaveCount(0)
     await gate('folded')

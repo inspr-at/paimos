@@ -1,5 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
-// AEON-542: approved A Line, beside the opt-in project flow (AEON-515).
+// AEON-542: approved A Line, beside the opt-in project flow (AEON-515). Phones and short screens
+// have no footer bar (AEON-1459, D5): there the release is the avatar menu's What's new, tested
+// at the end; the footer's narrowest form is 720 px wide.
 import { mkdirSync } from 'node:fs'
 import { join } from 'node:path'
 import { expect, test, type Locator, type Page } from '@playwright/test'
@@ -37,7 +39,7 @@ async function insideFooter(page: Page) {
 }
 
 for (const colorScheme of ['light', 'dark'] as const) {
-  for (const width of [1440, 390]) {
+  for (const width of [1440, 720]) {
     test(`release pill and product mark at ${width} in ${colorScheme}`, async ({ page }) => {
       await page.setViewportSize({ width, height: width < 600 ? 844 : 900 })
       await page.emulateMedia({ colorScheme })
@@ -73,9 +75,9 @@ for (const colorScheme of ['light', 'dark'] as const) {
   }
 }
 
-test('flow is absent by default and a long codename cannot push the version off a phone', async ({ page }) => {
+test('flow is absent by default and a long codename cannot push the version off the narrowest footer', async ({ page }) => {
   await setup(page, { name: 'An exceptionally long release codename for a narrow screen' })
-  await page.setViewportSize({ width: 320, height: 844 })
+  await page.setViewportSize({ width: 720, height: 844 })
   await page.goto('/p/PHAROS')
   await expect(pill(page)).toBeVisible()
   await expect(page.locator('footer.app-footer .flow-slot')).toHaveCount(0)
@@ -113,7 +115,7 @@ test('the footer stays at rest even when motion is enabled', async ({ page }) =>
 
 // Hold /version until both footer sides and the project flow have settled.
 // Loading remains usable without reserving the eventual name or badge width.
-for (const width of [1440, 390, 320]) {
+for (const width of [1440, 1024, 720]) {
   for (const failed of [false, true]) {
     test(`signed-in loading keeps the release usable and the flow clear at ${width}, ${failed ? 'failure' : 'success'}`, async ({ page }) => {
       await page.setViewportSize({ width, height: 900 })
@@ -135,9 +137,7 @@ for (const width of [1440, 390, 320]) {
         await expect(pill(page).locator('.fallback')).toHaveText('Version unavailable')
         await expect(pill(page)).toHaveAccessibleName('Release history, version unavailable, 3 new since your last visit')
       } else {
-        // On a phone the screen's summary takes the middle and the release gives up its time, keeping name and count (AEON-785).
-        if (width <= 600) await expect(version(page)).toBeHidden()
-        else await expect(version(page)).toBeVisible()
+        await expect(version(page)).toBeVisible()
         await expect(pill(page).locator('.footer-codename')).toHaveText('An exceptionally long release codename')
         await expect(version(page)).not.toHaveAttribute('aria-hidden')
       }
@@ -178,7 +178,7 @@ for (const width of [1440, 390, 320]) {
 }
 
 // Natural widths follow actual data; empty/unknown counts reserve no room.
-for (const width of [1440, 390, 320]) {
+for (const width of [1440, 1024, 720]) {
   test(`new count takes room only while present at ${width}`, async ({ page }) => {
     await page.setViewportSize({ width, height: 900 })
     const history = await setup(page, { flow: true, fresh: true })
@@ -253,7 +253,7 @@ async function controlBoxes(page: Page) {
 }
 
 for (const colorScheme of ['light', 'dark'] as const) {
-  for (const width of [1440, 390]) {
+  for (const width of [1440, 720]) {
     for (const zoom of [1, 1.25, 1.5]) {
       test(`release text fits and controls never move: ${width}px, ${zoom * 100}%, ${colorScheme}`, async ({ page }) => {
         await page.setViewportSize({ width, height: 900 })
@@ -300,7 +300,7 @@ for (const colorScheme of ['light', 'dark'] as const) {
   }
 }
 
-for (const width of [1440, 390]) {
+for (const width of [1440, 720]) {
   test(`long names ellipsize at their cap with uncut descenders at ${width}px`, async ({ page }) => {
     await page.setViewportSize({ width, height: 900 })
     const name = 'Quietly Quarrelsome Quokka with gypqj descenders'
@@ -308,7 +308,7 @@ for (const width of [1440, 390]) {
     await page.goto('/')
     const label = pill(page).locator('.footer-codename')
     await expect(label).toHaveText(name)
-    await expect(label).toHaveCSS('max-width', width === 390 ? '104px' : '168px')
+    await expect(label).toHaveCSS('max-width', '168px')
     expect(await label.evaluate(el => el.scrollWidth)).toBeGreaterThan(await label.evaluate(el => el.clientWidth))
     await textFits(page)
     await pill(page).hover()
@@ -338,3 +338,45 @@ test('short pointer visits and touch do not open the hover card; keyboard focus 
   await page.keyboard.press('Tab')
   await expect(card).toHaveCount(0)
 })
+
+// AEON-1459 (D5): phones and short screens have no footer bar. The running release is the avatar
+// menu's What's new: its name, its calendar version and the new count, a long name wrapping whole,
+// the dot never at a line's edge; it opens the release the page runs.
+for (const size of [{ width: 390, height: 844 }, { width: 320, height: 568 }, { width: 844, height: 340 }]) {
+  test(`compact ${size.width}x${size.height}: the release is What's new in the avatar menu`, async ({ page }) => {
+    await page.setViewportSize(size)
+    const history = await setup(page, { fresh: true, name: 'An exceptionally long release codename for a narrow screen' })
+    await page.goto('/')
+    await expect(page.getByRole('list', { name: 'Projects' })).toBeVisible()
+    await expect(page.locator('footer.app-footer')).toHaveCount(0)
+    await page.getByRole('button', { name: /^Account for / }).click()
+    const news = page.getByRole('menu', { name: 'Account' }).getByRole('menuitem', { name: /^What’s new/ })
+    await expect(news).toHaveAccessibleName(`What’s new, An exceptionally long release codename for a narrow screen, version ${history.current}, 3 new since your last visit`)
+    await expect(news.locator('.wn-release')).toContainText('An exceptionally long release codename for a narrow screen')
+    await expect(news.locator('.calendar-version')).toContainText(/^\d\d·\d\d·\d\d \d\d:\d\d/)
+    await expect(news.locator('.wn-new')).toContainText('3\u00a0new')
+    await expect(page.locator('.me-foot')).toHaveText('PAIMOS AEON')
+    // Nothing leaves the menu; every line of the release starts and ends with a word, never with the dot.
+    const fits = await news.evaluate(item => {
+      const box = item.getBoundingClientRect(), lines: { middle: number; text: string }[] = []
+      const walker = document.createTreeWalker(item, NodeFilter.SHOW_TEXT)
+      for (let node = walker.nextNode(); node; node = walker.nextNode()) {
+        const text = node.textContent ?? ''
+        for (let i = 0; i < text.length; i++) {
+          const range = document.createRange(); range.setStart(node, i); range.setEnd(node, i + 1)
+          const rect = range.getBoundingClientRect()
+          if (!rect.width) continue
+          if (rect.left < box.left - .5 || rect.right > box.right + .5) return { inside: false, edges: '' }
+          const middle = (rect.top + rect.bottom) / 2
+          const line = lines.find(l => Math.abs(l.middle - middle) <= 6)
+          if (line) line.text += text[i]; else lines.push({ middle, text: text[i]! })
+        }
+      }
+      return { inside: true, edges: lines.map(line => line.text.trim()).filter(line => line.startsWith('·') || line.endsWith('·')).join(' | ') }
+    })
+    expect(fits).toEqual({ inside: true, edges: '' })
+    await news.click()
+    await expect(page.getByRole('dialog', { name: 'PAIMOS AEON releases' })).toBeVisible()
+    await expect(page).toHaveURL(new RegExp(`releases=${history.current}`))
+  })
+}

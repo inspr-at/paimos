@@ -2,15 +2,22 @@
 <script setup lang="ts">
 // The avatar menu is about me (AEON-312): who I am, my settings, my theme, signing
 // out, and a quiet line with the running version. The app and the workspace live
-// in the gear menu beside it.
+// in the gear menu beside it. Phones and short screens have no footer bar (AEON-1459):
+// the running release is "What's new" here, and the product's name is the menu's foot.
 import { computed, nextTick, ref } from 'vue'
 import { useRouter } from 'vue-router'
 import { accountEmail, accountName } from '../../lib/api'
+import { brand } from '../../lib/brand'
+import { compactChrome, narrowestPhone } from '../../lib/chrome'
+import { codenameOf, releaseAria } from '../../lib/codenames'
 import { run } from '../../lib/commands'
 import { dark, setTheme, themeChoice, toggleTheme, type ThemeChoice } from '../../lib/theme'
+import { useReleases } from '../../stores/releases'
 import { useSession } from '../../stores/session'
+import { useVersion } from '../../stores/version'
 import AppIcon from '../AppIcon.vue'
 import Avatar from '../Avatar.vue'
+import CalendarVersion from '../CalendarVersion.vue'
 import VersionDisplay from '../VersionDisplay.vue'
 import HeaderMenu from './HeaderMenu.vue'
 
@@ -44,6 +51,17 @@ function themeKeys(event: KeyboardEvent) {
 }
 async function personal() { menu.value?.close(); await router.push('/settings/personal') }
 function releases() { menu.value?.close(); run({ name: 'releases' }) }
+// Compact: the release the page runs, as the footer named it; it opens at that release.
+const compact = compactChrome(), narrowest = narrowestPhone()
+const version = useVersion(), history = useReleases()
+const running = computed(() => version.value?.version ?? '')
+const codename = computed(() => version.value?.codename || codenameOf(running.value))
+// The footer's count of releases since the last visit comes along (null: it could not be read).
+const fresh = computed(() => session.identity ? history.newCount : 0)
+const whatsNewLabel = computed(() => `What’s new${running.value ? `, ${releaseAria(codename.value, running.value)}` : ''}${fresh.value ? `, ${fresh.value} new since your last visit` : ''}`)
+function whatsNew() { menu.value?.close(); run({ name: 'releases', version: history.current || 'current' }) }
+// The narrowest phones have no gear in the header: Settings and help opens from here, and its Escape returns to the avatar.
+function appMenu() { menu.value?.close(true); run({ name: 'app-menu' }) }
 // Focus goes back to the avatar first, so Escape in the preview returns there.
 function deskPreview() { menu.value?.close(true); run({ name: 'desk-preview' }) }
 async function signOut() {
@@ -61,7 +79,7 @@ async function signOut() {
 <template>
   <HeaderMenu v-if="session.identity" id="account-menu" ref="menu" label="Account" :trigger-label="`Account for ${name}`" class="account" @open="opened" @close="error = ''">
     <template #trigger="{ phone }">
-      <Avatar :id="session.identity.principal.id" :name="name" :size="phone ? 36 : 28" />
+      <Avatar :id="session.identity.principal.id" :name="name" :size="compact ? 30 : phone ? 36 : 28" />
     </template>
     <div class="who" role="none">
       <Avatar :id="session.identity.principal.id" :name="name" :size="40" class="who-avatar" />
@@ -75,6 +93,7 @@ async function signOut() {
       <AppIcon :name="dark ? 'sun' : 'moon'" /><span class="hm-text">{{ dark ? 'Switch to light theme' : 'Switch to dark theme' }}</span>
     </button>
     <button class="hm-item" type="button" role="menuitem" tabindex="-1" @click="personal"><AppIcon name="user" /><span class="hm-text">Personal settings</span></button>
+    <button v-if="narrowest" class="hm-item quick-app" type="button" role="menuitem" tabindex="-1" @click="appMenu"><AppIcon name="gear" /><span class="hm-text">Settings and help</span></button>
     <button v-if="deskHidden" class="hm-item quick-desk" type="button" role="menuitem" tabindex="-1" @click="deskPreview">
       <AppIcon name="check" /><span class="hm-text">Preview the Decision Desk</span>
     </button>
@@ -90,7 +109,15 @@ async function signOut() {
     <hr class="hm-sep" role="separator" />
     <button class="hm-item" type="button" role="menuitem" tabindex="-1" :aria-disabled="busy || undefined" @click="!busy && signOut()"><AppIcon name="logout" /><span class="hm-text">{{ busy ? 'Signing out…' : 'Sign out' }}</span></button>
     <p v-if="error" class="error" role="alert">{{ error }}</p>
-    <div class="version-line" role="none">
+    <template v-if="compact">
+      <button class="hm-item whats-new" type="button" role="menuitem" tabindex="-1" :aria-label="whatsNewLabel" @click="whatsNew">
+        <AppIcon name="history" />
+        <span class="wn-text"><span class="wn-title">What’s new</span><span v-if="running" class="wn-release" aria-hidden="true"><span v-if="codename" lang="en">{{ codename }}</span><span class="nw"><template v-if="codename">&nbsp;·&nbsp;</template><CalendarVersion :value="running" :scheme="version.value?.scheme" rest /></span><span v-if="fresh" class="nw wn-new">&nbsp;·&nbsp;{{ fresh }}&nbsp;new</span></span></span>
+      </button>
+      <hr class="hm-sep" role="separator" />
+      <p class="me-foot" role="none">{{ brand.wordmark }}</p>
+    </template>
+    <div v-else class="version-line" role="none">
       <VersionDisplay menuitem class="version-copy" />
       <button class="version-link" type="button" role="menuitem" tabindex="-1" @click="releases">Release history</button>
     </div>
@@ -125,4 +152,12 @@ async function signOut() {
 @media (max-width: 600px), (pointer: coarse) {
   .theme-seg button { height: 44px; font-size: 13.5px; }
 }
+/* What's new: its label over the release's name and calendar version; the dot never ends a line. */
+.whats-new { min-height: 52px; padding-block: 6px; }
+.wn-text { display: grid; gap: 1px; min-width: 0; }
+.wn-title { color: var(--ink); }
+.wn-release { color: var(--ink-2); font-size: 12px; overflow-wrap: anywhere; }
+.nw { white-space: nowrap; }
+.wn-new { color: var(--secondary-ink); font-weight: 600; }
+.me-foot { margin: 0; padding: 6px 10px 4px; font: 600 10px/16px var(--mono); letter-spacing: .24em; color: var(--ink-3); font-variant-ligatures: none; }
 </style>

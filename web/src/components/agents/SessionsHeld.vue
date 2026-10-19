@@ -5,14 +5,23 @@
 // says, quietly, how fresh the list is. Both faces share one grid cell sized by an unseen held face,
 // so the note keeps its box whichever it shows and never moves a control in the head (AEON-541).
 // Narrower heads use shorter words; a phone keeps the mark and Show now, and the words stay for
-// screen readers.
-import { computed } from 'vue'
+// screen readers. Phones and short screens (AEON-1459, design AEON-1279 r2 D4) never give it a
+// toolbar line: while changes wait it floats over the list's foot, like Jump to live, and the
+// toolbar keeps its one 44 px line. Touch never holds, so there it comes from a mouse or keyboard.
+import { computed, onBeforeUnmount, watch } from 'vue'
 import AppIcon from '../AppIcon.vue'
 import { clockTime } from '../../lib/agentPause'
+import { compactChrome } from '../../lib/chrome'
 import { relativeTime } from '../../lib/work'
 const props = defineProps<{ pending: number; updatedAt: number | null; now: number; stale: boolean }>()
-const emit = defineEmits<{ showNow: [] }>()
+// The floating chip is part of the list: a mouse on it keeps holding, as on the list itself.
+const emit = defineEmits<{ showNow: []; point: [pointing: boolean] }>()
 const held = computed(() => props.pending > 0)
+const compact = compactChrome()
+function point(event: PointerEvent, on: boolean) { if (event.pointerType !== 'touch') emit('point', on) }
+// A chip that leaves under the pointer gets no pointerleave: it lets go when it goes.
+watch([held, compact], ([now, small]) => { if (!now || !small) emit('point', false) })
+onBeforeUnmount(() => emit('point', false))
 const count = computed(() => `${props.pending} ${props.pending === 1 ? 'change waits' : 'changes wait'}`)
 const ago = computed(() => {
   if (props.updatedAt === null) return ''
@@ -26,7 +35,15 @@ const tip = computed(() => held.value
 </script>
 
 <template>
-  <span class="held-note" :class="{ held }" :data-tip="tip" data-held-note>
+  <Teleport to="body" :disabled="!compact">
+    <template v-if="compact">
+      <span class="sr-only" role="status">{{ held ? `${count} while you point here` : '' }}</span>
+      <button v-if="held" type="button" class="held-float" data-held-chip :aria-label="`${count} while you point here. Show now`" @click="emit('showNow')" @pointerenter="point($event, true)" @pointerleave="point($event, false)">
+        <AppIcon name="hold" :size="14" /><span class="hf-n" aria-hidden="true"><b>{{ pending }}</b>&nbsp;{{ pending === 1 ? 'change waits' : 'changes wait' }}</span><span class="hf-go" aria-hidden="true">Show now</span>
+      </button>
+    </template>
+  </Teleport>
+  <span v-if="!compact" class="held-note" :class="{ held }" :data-tip="tip" data-held-note>
     <span class="sr-only" role="status">{{ held ? `${count} while you point here` : '' }}</span>
     <button
       type="button" class="face held-face" :class="{ off: !held }" :tabindex="held ? undefined : -1" :aria-hidden="held ? undefined : 'true'"
@@ -76,6 +93,12 @@ button.held-face:hover .show-now { text-decoration-color: currentColor; }
   .face { padding: 0 8px; }
   .words { display: none; }
 }
+/* The floating chip (compact screens): an overlay over the list's foot; nothing in the page moves for it. */
+.held-float { position: fixed; left: 50%; bottom: calc(14px + env(safe-area-inset-bottom)); z-index: 30; transform: translateX(-50%); display: inline-flex; align-items: center; gap: 8px; height: 44px; padding: 0 16px 0 14px; border: 1px solid var(--glass-edge); border-radius: 999px; background: var(--surface-raised); box-shadow: var(--shadow-pop); color: var(--ink); font: 500 13px/1 var(--font); white-space: nowrap; cursor: pointer; }
+.held-float > svg { flex: none; color: var(--queue-wait-ink); }
+.held-float .hf-n b { font-weight: 650; font-variant-numeric: tabular-nums; }
+.held-float .hf-go { color: var(--teal-ink); font-weight: 650; text-decoration: underline; text-decoration-color: color-mix(in srgb, currentColor 40%, transparent); text-underline-offset: 3px; }
+.held-float:focus-visible { outline: none; box-shadow: var(--shadow-pop), var(--focus-ring); }
 /* The narrowest phones: the mark and the count; the button's name still says Show now. */
 @container sessions (max-width: 360px) {
   .held-face .words { display: inline; }

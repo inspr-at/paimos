@@ -40,6 +40,28 @@ export function managedControlUnavailable(s: HarnessSession, access: ManagedAcce
   return ''
 }
 
+// Interrupt needs a step that is running. Yielded and idle have none. Missing
+// activity is not idle: a working session that has not reported it stays interruptible.
+export const noStepRunningText = 'No step is running'
+export const nothingRunningText = 'Nothing was running, so nothing was interrupted.'
+export const queuedNextStepText = 'Queued for the next step'
+export const startedNextStepText = 'Started the next step'
+export const sessionEndedText = 'This session has ended. Start a new run to continue.'
+
+export function sessionHasEnded(s: HarnessSession) {
+  return s.phase === 'stopped' || !!s.stopped_at || !!s.archived_at
+}
+
+export function steerAppliedText(reason: string | null) {
+  if (reason === 'queued_next_turn') return queuedNextStepText
+  if (reason === 'started_next_turn') return startedNextStepText
+  return 'Steer applied to the running turn.'
+}
+
+export function interruptHasStep(s: HarnessSession) {
+  return s.phase !== 'yielded' && s.activity !== 'idle'
+}
+
 // Exactly what POST /managed-controls accepts for this kind (quota aside).
 export const managedControlAllowed = (s: HarnessSession, kind: ManagedKind, access: ManagedAccess) =>
-  !managedControlUnavailable(s, access) && s.advertised_capabilities.includes(kind)
+  !managedControlUnavailable(s, access) && s.advertised_capabilities.includes(kind) && (kind !== 'interrupt' || interruptHasStep(s))

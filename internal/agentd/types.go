@@ -332,6 +332,9 @@ type GracefulProcess interface{ GracefulStop(context.Context) error }
 
 var ErrGracefulTimeout = errors.New("graceful stop timed out; process may still be running")
 
+// errNothingRunning is an interrupt that found no step. It is not an uncertain outcome.
+var errNothingRunning = errors.New("nothing was running")
+
 type Process interface {
 	PID() int
 	Wait() error

@@ -13,6 +13,7 @@ import { ACCOUNTS, NOW, TZ, capacityWorld, type CapacityOptions } from './capaci
 import { controlStability } from './control-stability'
 import type { PairingView } from '../src/lib/agentPairing'
 import { mockEffectivePermissions } from './authz-fixtures'
+import { showCapacityRow } from './helpers/compact'
 
 test.use({ timezoneId: TZ })
 const world: AgentWorld = {
@@ -72,6 +73,8 @@ const tile = (page: Page, part: string) => pop(page).locator(`.tile[data-part="$
 async function open(page: Page, url = '/agents') {
   await page.goto(url)
   await expect(page.getByRole('heading', { name: 'Agents', level: 1 })).toBeVisible()
+  // Phones: the capacity row is in the capacity line's sheet (AEON-1459).
+  await showCapacityRow(page)
   await expect(chip(page)).toBeVisible()
 }
 async function unfold(page: Page) {

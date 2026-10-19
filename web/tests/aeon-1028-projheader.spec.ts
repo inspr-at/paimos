@@ -8,6 +8,7 @@ import { mkdirSync } from 'node:fs'
 import { test, expect, type Locator, type Page } from '@playwright/test'
 import { fixtures, mockWork, mockView } from './work-fixtures'
 import { expectStableControls } from './helpers/stable'
+import { toggleProjectHead } from './helpers/compact'
 
 const shots = 'test-results/aeon-1028-projheader'
 const VIEW = '44444444-4444-4444-8444-444444444444'
@@ -60,9 +61,9 @@ async function open(page: Page, width: number, theme = 'light', height = 900, ur
   await expect(search(page)).toBeVisible()
   await settled(page)
 }
-// The phone folds the header with the crumb button; wider windows with the header switch.
+// The phone folds the header from the project crumb's sheet (AEON-1459, D11); wider windows with the header switch.
 async function fold(page: Page, width: number, to: 'collapsed' | 'compact' | 'comfortable' = 'collapsed') {
-  if (width <= 600) { if (await projectPage(page).evaluate((el, name) => el.classList.contains(`header-${name}`), to)) return; await page.locator('.phone-header-fold').click() }
+  if (width < 720) { if (await projectPage(page).evaluate((el, name) => el.classList.contains(`header-${name}`), to)) return; await toggleProjectHead(page) }
   else await density(page, to === 'collapsed' ? 'Collapsed' : to === 'compact' ? 'Compact' : 'Comfortable').click()
   await expect(projectPage(page)).toHaveClass(new RegExp(`header-${to}`))
   await settled(page)
@@ -123,13 +124,17 @@ test.describe('the All tickets pill', () => {
 
 test.describe('the ticket count', () => {
   for (const [width, modes] of [[1440, ['comfortable', 'compact', 'collapsed']], [400, ['compact', 'collapsed']]] as const) {
-    test(`is gone from the toolbar in every header view at ${width}px; the footer still says it`, async ({ page }) => {
+    // Compact screens have no footer bar (AEON-1459, D5): there the list's end says the count.
+    test(`is gone from the toolbar in every header view at ${width}px; ${width < 720 ? 'the list’s end' : 'the footer'} still says it`, async ({ page }) => {
       await open(page, width)
       for (const mode of modes) {
         await fold(page, width, mode)
         await expect(toolbar(page).locator('.count-live'), `${mode}: no count slot`).toHaveCount(0)
         await expect(toolbar(page), `${mode}: no count text`).not.toContainText(/\d+ tickets?/)
-        await expect(page.locator('footer.app-footer .sum'), `${mode}: the footer keeps the count`).toHaveAttribute('aria-label', /\d+ tickets?/)
+        if (width < 720) {
+          await expect(page.locator('footer.app-footer'), `${mode}: no footer bar`).toHaveCount(0)
+          await expect(page.locator('.list-foot.end'), `${mode}: the list's end keeps the count`).toHaveText(/^\d+ tickets?$/i)
+        } else await expect(page.locator('footer.app-footer .sum'), `${mode}: the footer keeps the count`).toHaveAttribute('aria-label', /\d+ tickets?/)
       }
     })
   }

@@ -29,7 +29,8 @@ const connectedStream = (page: Page) => page.addInitScript(() => {
 })
 const visibleText = (page: Page) => sum(page).locator(':scope > .full, :scope > .short').evaluateAll(parts => parts.filter(part => getComputedStyle(part).display !== 'none').map(part => part.textContent).join(''))
 
-for (const [width, form] of [[1440, 'full'], [390, 'short']] as const) {
+// Phones and short screens have no footer bar (AEON-1459); the short form is the narrow desktop's.
+for (const [width, form] of [[1440, 'full'], [1024, 'short']] as const) {
   test(`tickets say count, agents and the blocked ones, and the click adds the filter (${form} at ${width})`, async ({ page }, info) => {
     await page.setViewportSize({ width, height: 900 })
     const errors = watchErrors(page)
@@ -195,7 +196,9 @@ test('a review filter stays through search and kind, and All entries clears it',
   await expect(page.getByText('Showing entries to review')).toHaveCount(0)
 })
 
-test('a phone save does not move the release control', async ({ page }) => {
+// AEON-1459 (D5): phones have no footer bar. A failed save still says so, over the page's foot, and
+// retries from there; saving and the needs line stay quiet, so nothing floats over the page for them.
+test('a phone save that fails is said over the page and retried from there', async ({ page }) => {
   await page.setViewportSize({ width: 390, height: 800 })
   await mockWork(page, fixtures())
   let fail = true
@@ -209,68 +212,33 @@ test('a phone save does not move the release control', async ({ page }) => {
   })
   await page.goto('/settings/personal')
   await expect(page.getByRole('heading', { name: 'Settings', level: 1 })).toBeVisible()
-  const pill = page.locator('footer.app-footer .version-pill')
-  await expect(pill).toBeVisible()
-  const place = async () => {
-    const box = await pill.boundingBox()
-    expect(box).not.toBeNull()
-    return box!
-  }
-  const still = async (before: { x: number; width: number }) => {
-    const after = await place()
-    expect(Math.abs(after.x - before.x)).toBeLessThanOrEqual(0.5)
-    expect(Math.abs(after.width - before.width)).toBeLessThanOrEqual(0.5)
-  }
-  const resting = await place()
+  await expect(page.locator('footer.app-footer')).toHaveCount(0)
+  const notice = page.locator('.compact-notice')
   await page.evaluate(async () => { const { usePreference } = await import('/src/lib/preferences.ts'); usePreference('footer-summary-probe').save({ a: 1 }, 0) })
-  await expect(sum(page)).toContainText('Saving…')
   await expect.poll(() => pending.length).toBe(1)
-  await still(resting)
+  await expect(notice, 'saving floats nothing over the page').toHaveCount(0)
   pending.shift()?.()
-  await expect(sum(page)).toContainText('Not saved')
-  await still(resting)
+  await expect(notice).toContainText('Not saved · Try again')
+  await expect(notice).toHaveAccessibleName('Not saved. Save again.')
+  const box = (await notice.boundingBox())!
+  expect(box.height).toBeGreaterThanOrEqual(44)
+  expect(box.y + box.height).toBeLessThanOrEqual(800)
   fail = false
-  await sum(page).click()
+  await notice.click()
   await expect.poll(() => pending.length).toBe(1)
-  await still(resting)
   pending.shift()?.()
-  await expect(sum(page)).toHaveCount(0)
-  await still(resting)
-  // Pending needs already hide the version. The save must not bring it back.
+  await expect(notice).toHaveCount(0)
+  // Needs you is a line for the status slot of a list, never a floating one.
   await page.evaluate(async () => {
     const { settingsNeeds } = await import('/src/lib/footerProviders.ts')
     settingsNeeds.value = 2
   })
-  await expect(sum(page)).toContainText('2 need you')
-  const releaseHidden = async () => {
-    const displays = await page.locator('footer.app-footer .version-value, footer.app-footer .release-divider').evaluateAll(nodes => nodes.map(node => getComputedStyle(node).display))
-    expect(displays.length).toBeGreaterThan(0)
-    expect(displays.every(display => display === 'none')).toBe(true)
-  }
-  await releaseHidden()
-  const withNeeds = await place()
-  fail = true
-  await page.evaluate(async () => { const { usePreference } = await import('/src/lib/preferences.ts'); usePreference('footer-summary-probe').save({ a: 1 }, 0) })
-  await expect(sum(page)).toContainText('Saving…')
-  await expect.poll(() => pending.length).toBe(1)
-  await still(withNeeds)
-  await releaseHidden()
-  pending.shift()?.()
-  await expect(sum(page)).toContainText('Not saved')
-  await still(withNeeds)
-  await releaseHidden()
-  fail = false
-  await sum(page).click()
-  await expect.poll(() => pending.length).toBe(1)
-  await still(withNeeds)
-  await releaseHidden()
-  pending.shift()?.()
-  await expect(sum(page)).toContainText('2 need you')
-  await still(withNeeds)
-  await releaseHidden()
+  await expect.poll(() => page.evaluate(async () => (await import('/src/lib/footerSummary.ts')).footerSummary.value?.aria ?? '')).toMatch(/2 need you/)
+  await expect(notice).toHaveCount(0)
 })
 
-for (const width of [390, 1024, 1440]) for (const colorScheme of ['light', 'dark'] as const) {
+// The narrowest footer is 720 px wide: phones and short screens have none (AEON-1459).
+for (const width of [720, 1024, 1440]) for (const colorScheme of ['light', 'dark'] as const) {
   test(`the summary sits between the mark and the release without touching either at ${width} in ${colorScheme}`, async ({ page }, info) => {
     await page.setViewportSize({ width, height: 900 })
     await page.emulateMedia({ colorScheme })
@@ -284,9 +252,8 @@ for (const width of [390, 1024, 1440]) for (const colorScheme of ['light', 'dark
     const mark = await box('footer.app-footer .footer-wordmark'), centre = await box('footer.app-footer .sum'), release = await box('footer.app-footer .version-pill')
     expect(mark.x + mark.width).toBeLessThanOrEqual(centre.x + .5)
     expect(centre.x + centre.width).toBeLessThanOrEqual(release.x + .5)
-    // Phones keep a 44 px target; wider footers centre the summary on the page.
-    if (width <= 600) expect(centre.height).toBeGreaterThanOrEqual(44)
-    else expect(Math.abs(centre.x + centre.width / 2 - width / 2)).toBeLessThanOrEqual(width < 1100 ? 40 : 2)
+    // The footer centres the summary on the page.
+    expect(Math.abs(centre.x + centre.width / 2 - width / 2)).toBeLessThanOrEqual(width < 1100 ? 40 : 2)
     expect(await page.evaluate(() => document.documentElement.scrollWidth - innerWidth)).toBe(0)
     await page.screenshot({ path: info.outputPath(`footer-${width}-${colorScheme}.png`), clip: { x: 0, y: 900 - 56, width, height: 56 } })
   })

@@ -36,7 +36,7 @@ test('three places in order of use; the active one is highlighted and the breadc
   await expect(places(page).getByRole('link', { name: 'Projects' })).toHaveAttribute('aria-current', 'true')
   await expect(crumbs(page).getByRole('link', { name: 'PHAROS Pharos', exact: true })).toHaveAttribute('href', '/p/PHAROS')
   await expect(crumbs(page).getByRole('link', { name: 'PHAROS Pharos', exact: true })).toHaveText('PHAROSPharos')
-  await expect(crumbs(page).locator('.phone-header-fold')).toBeHidden()
+  await expect(crumbs(page).locator('.crumb-sheet')).toHaveCount(0)
 
   // Settings belongs to no place: none is highlighted, the breadcrumb starts at Settings.
   await page.goto('/settings/workspace')

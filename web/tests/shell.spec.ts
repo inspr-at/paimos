@@ -84,15 +84,22 @@ for (const viewport of [{ width: 1280, height: 720 }, { width: 390, height: 844 
         await page.goto(screen === '404' ? '/missing' : screen.startsWith('signin') ? '/signin' : '/')
         await expect(page.locator('h1')).toBeVisible()
         // Sign-in's card carries the copyable version; signed in, the footer bar's pill opens the release history.
+        // Phones have no footer bar (AEON-1459, D5): the avatar menu's What's new names the release there.
+        const phone = viewport.width < 720
         if (screen.startsWith('signin')) await expect(page.locator('footer [data-version-view="pretty"]')).toBeVisible()
-        else await expect(page.locator('footer.app-footer .version-pill .calendar-version[role="img"]')).toHaveAttribute('aria-label', versionName)
+        else if (phone) {
+          await expect(page.locator('footer.app-footer')).toHaveCount(0)
+          await page.getByRole('button', { name: /^Account for / }).click()
+          await expect(page.getByRole('menu', { name: 'Account' }).getByRole('menuitem', { name: /^What’s new/ }).locator('.calendar-version[role="img"]')).toHaveAttribute('aria-label', versionName)
+          await page.keyboard.press('Escape')
+        } else await expect(page.locator('footer.app-footer .version-pill .calendar-version[role="img"]')).toHaveAttribute('aria-label', versionName)
         // Skeleton rows overflow the shell; measure the loaded list, not the loading state.
         if (screen === 'home') await expect(page.getByRole('list', { name: 'Projects' }).getByRole('link')).toHaveCount(2)
         await page.evaluate(() => document.fonts.ready)
         await noOverflow(page)
         // Sign-in is a bare page: no header, the card carries brand, version and theme.
         if (screen.startsWith('signin')) await expect(page.locator('.app-header')).toHaveCount(0)
-        else expect(await page.locator('.app-header').evaluate(el => el.getBoundingClientRect().height)).toBe(56)
+        else expect(await page.locator('.app-header').evaluate(el => el.getBoundingClientRect().height)).toBe(viewport.width < 720 ? 44 : 56)
         // Phones get 44px touch targets; a desktop pointer works with the compact rail.
         const min = viewport.width < 600 ? 44 : 20
         // Visible controls can change as the shell settles. Snapshot their

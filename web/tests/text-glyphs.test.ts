@@ -19,6 +19,7 @@ const ENTITY = /&(larr|rarr|uarr|darr|harr|crarr|times|lsaquo|rsaquo|laquo|raquo
 // Deliberate exceptions, each with its reason.
 const ALLOW: { file: string; includes: string; why: string; exact?: boolean }[] = [
   // Frozen approved prose: exact whole lines, so extra icon glyphs still fail.
+  { file: 'lib/startAgent.ts', includes: 'return { label: \'Queued\', detail: "This computer\'s checkout is still held by an earlier pairing. Release it in Settings › Computers." }', exact: true, why: 'AEON-1513 Tick v1.1 requires this checkout explanation verbatim; Settings › Computers names the page in prose, not an icon' },
   { file: "components/settings/ProjectGeneralSettings.vue", includes: "<p class=\"foot\"><AppIcon name=\"external\" :size=\"13\" /><span>Kinds of work and vocabulary are the same in every project. <RouterLink class=\"link-btn quiet\" to=\"/settings/kinds\">Settings › Kinds of work <AppIcon name=\"chevron-right\" :size=\"12\" /></RouterLink></span></p>", exact: true, why: "approved AEON-1227 P1 breadcrumb names the global Kinds of work page; the adjacent chevron is SVG" },
   { file: "components/settings/ProjectSettings.vue", includes: "<SettingsCard v-else title=\"Work context\" icon=\"shield\" anchor=\"project-work-context\" variant=\"project\"><p class=\"owner-line\">Owners and admins choose where accounts may work in Settings › Accounts.</p><RouterLink class=\"link-btn quiet\" to=\"/settings/accounts\">Settings › Accounts <AppIcon name=\"chevron-right\" :size=\"12\" /></RouterLink></SettingsCard>", exact: true, why: "approved AEON-1227 P1 prose names the owner of a setting; navigation icons remain SVG" },
   { file: "components/settings/ProjectSettings.vue", includes: "<p>Model choice: <RouterLink to=\"/settings/models\">Settings › Models <AppIcon name=\"chevron-right\" :size=\"12\" /></RouterLink></p>", exact: true, why: "approved AEON-1227 P1 prose names the owner of a setting; navigation icons remain SVG" },
@@ -140,6 +141,7 @@ test('the guard catches what it is meant to catch', () => {
   for (const entry of ALLOW.filter(entry => entry.exact)) {
     assert.ok(problems(entry.includes).length > 0)
     assert.equal(allowedGlyphLine(entry.file, entry.includes), entry)
+    assert.equal(allowedGlyphLine(entry.file, `<button>✕</button>${entry.includes}`), undefined)
     assert.equal(allowedGlyphLine(entry.file, `${entry.includes}<button>✕</button>`), undefined)
     assert.equal(allowedGlyphLine('unapproved.vue', entry.includes), undefined)
   }
