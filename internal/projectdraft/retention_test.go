@@ -46,6 +46,9 @@ func TestStartImportRetention(t *testing.T) {
 		if _, err := f.d.Admin.Exec(ctx, `UPDATE import_project_retention SET imported_at=$2 WHERE project_id=$1`, project.ID, at); err != nil {
 			t.Fatal(err)
 		}
+		if _, err := f.d.Admin.Exec(ctx, `UPDATE nodes SET created_at=$2 WHERE id=$1`, project.ID, at); err != nil {
+			t.Fatal(err)
+		}
 		return project.ID
 	}
 	live := makeProject("LIVE", old)

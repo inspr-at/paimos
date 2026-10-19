@@ -9266,6 +9266,8 @@
     ,
     {"kind":"go","package":"internal/projectdraft","name":"TestParsePayloadV1","tier":"ESSENTIAL"}
     ,
+    {"kind":"go","package":"internal/projectdraft","name":"TestStartImportRetention","tier":"ESSENTIAL"}
+    ,
     {"kind":"go","package":"internal/projectgroups","name":"TestDeletedProjectsLeaveSharedGroups","tier":"GATED-FULL"}
     ,
     {"kind":"go","package":"internal/projectgroups","name":"TestPersonWriteRechecksRevokedPermission","tier":"ESSENTIAL"}
