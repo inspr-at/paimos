@@ -454,6 +454,12 @@ test('AEON-1470 Columns rows hold still while hidden notes come and go', async (
   const menu = display(page)
   await expect(menu).toBeVisible()
   const ids = await menu.locator('input[data-column-row]').evaluateAll(boxes => boxes.map(box => box.getAttribute('data-column-row')!))
+  // Every row, and the menu's other sections, stay inside the menu: a name and its note never widen it.
+  const inside = () => menu.evaluate(panel => {
+    const edge = panel.getBoundingClientRect().right
+    return [...panel.querySelectorAll('li.row, .section')].map(el => el.getBoundingClientRect().right - edge).filter(over => over > .5)
+  })
+  expect(await inside()).toEqual([])
   const controls: Record<string, Locator> = {}
   for (const id of ids) { controls[`check ${id}`] = menu.locator(`input[data-column-row="${id}"]`); controls[`row ${id}`] = columnRow(menu, id) }
   const guard = await controlStability(page, controls)
@@ -471,6 +477,7 @@ test('AEON-1470 Columns rows hold still while hidden notes come and go', async (
   await guard.check(async () => { for (const id of freed) await box(id).uncheck(); await expect(note(last)).toHaveCount(0); await settled(page) })
   await guard.check(async () => { for (const id of freed) await box(id).check(); await expect(note(last)).toHaveText('hidden at this width'); await settled(page) })
   guard.done()
+  expect(await inside()).toEqual([])
   // The name gives way to the note on one line; its tip reads it whole.
   const name = columnRow(menu, 'suggested').locator('.name-text')
   const clipped = await name.evaluate(el => el.scrollWidth > el.clientWidth + 1)

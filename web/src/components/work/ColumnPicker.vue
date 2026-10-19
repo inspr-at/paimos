@@ -96,14 +96,15 @@ function drop(target: T) {
 </template>
 
 <style scoped>
-.columns { display: grid; gap: 6px; }
+/* One shrinkable track: a long name never widens the menu, it gives way inside its row. */
+.columns { display: grid; grid-template-columns: minmax(0, 1fr); gap: 6px; min-width: 0; }
 .head { display: flex; align-items: center; justify-content: space-between; min-height: 24px; }
 .head .eyebrow { margin: 0; }
 .reset { height: 24px; padding: 0 8px; border: 0; border-radius: 999px; background: transparent; color: var(--teal-ink); font-size: 12px; font-weight: 600; }
 .reset:hover { background: var(--row-hover); }
 .reset:focus-visible { box-shadow: var(--focus-ring); }
 .auto-note { font-size: 11.5px; color: var(--ink-3); }
-.list { margin: 0; padding: 0; list-style: none; display: grid; gap: 1px; }
+.list { margin: 0; padding: 0; list-style: none; display: grid; grid-template-columns: minmax(0, 1fr); gap: 1px; }
 .row { display: flex; align-items: center; gap: 6px; height: 32px; padding: 0 4px 0 8px; border-radius: 8px; font-size: 13px; color: var(--ink); user-select: none; }
 .row:hover { background: var(--row-hover); }
 .row:focus-within { background: var(--row-selected); }
