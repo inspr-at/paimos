@@ -6464,6 +6464,8 @@
     ,
     {"kind":"go","package":"internal/events","name":"TestExactAPINodeChangesCompareNumbersExactly","tier":"GATED-FULL"}
     ,
+    {"kind":"go","package":"internal/events","name":"TestGoalsSubscriptionDeliversStatusNoteToWorkspaceReaders","tier":"ESSENTIAL"}
+    ,
     {"kind":"go","package":"internal/events","name":"TestGoalsSubscriptionUsesOutcomeVisibility","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/events","name":"TestImportParentChangeHintInHistoryAndStream","tier":"GATED-FULL"}
@@ -6562,6 +6564,8 @@
     ,
     {"kind":"go","package":"internal/goals","name":"TestGoalIdempotencyKeyGrammar","tier":"ESSENTIAL"}
     ,
+    {"kind":"go","package":"internal/goals","name":"TestGoalItemNoteHoursLeftMergedAndFreshness","tier":"ESSENTIAL"}
+    ,
     {"kind":"go","package":"internal/goals","name":"TestGoalKindSchemasAndNextStep","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/goals","name":"TestGoalLazyKindSeeding","tier":"ESSENTIAL"}
@@ -6582,6 +6586,8 @@
     ,
     {"kind":"go","package":"internal/goals","name":"TestGoalPauseUsesLatestStoppedSession","tier":"ESSENTIAL"}
     ,
+    {"kind":"go","package":"internal/goals","name":"TestGoalPercentComputedUnlessHandSet","tier":"ESSENTIAL"}
+    ,
     {"kind":"go","package":"internal/goals","name":"TestGoalProjectWriterUpdatesOnlyVisibleOutcomes","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/goals","name":"TestGoalReadGenerationOrdersReversedCompletion","tier":"ESSENTIAL"}
@@ -6601,6 +6607,8 @@
     {"kind":"go","package":"internal/goals","name":"TestGoalSeriesVisibilityAndFourHourStall","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/goals","name":"TestGoalStateWorkerWins","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/goals","name":"TestGoalStatusNoteWriteReadScopeAndTenant","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/goals","name":"TestGoalStorageIdentityAndReceipts","tier":"ESSENTIAL"}
     ,

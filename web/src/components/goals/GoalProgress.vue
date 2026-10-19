@@ -13,13 +13,15 @@ import GoalTip from './GoalTip.vue'
 import type { SeriesEntry } from './goalsPage'
 import type { Goal } from '../../lib/goals'
 import { availablePoints, averageRate, chartShape, GOAL_RANGES, historySince, LONGEST_SIGNAL, pointText, RANGE_LABEL, signalText, stallText, CHART, type GoalRange } from '../../lib/goalRate'
-import { whenText } from '../../lib/goals'
+import { goalPercent, whenText } from '../../lib/goals'
 
 const props = defineProps<{ goal: Goal; open: boolean; range: GoalRange; entry?: SeriesEntry; now: number }>()
 const emit = defineEmits<{ toggle: []; range: [value: GoalRange] }>()
 
 const progress = computed(() => props.goal.progress)
-const pct = computed(() => progress.value?.pct ?? 0)
+// Computed from the goal's items unless set by hand; a hand-set value shows the pen.
+const percent = computed(() => progress.value ? goalPercent(progress.value) : { pct: 0, byHand: false, tip: undefined })
+const pct = computed(() => percent.value.pct)
 const done = computed(() => !!props.goal.done)
 const ready = computed(() => props.entry?.state === 'ready' && props.entry.series?.range === props.range ? props.entry : null)
 const points = computed(() => ready.value?.series?.points ?? [])
@@ -81,7 +83,8 @@ function close() { leave(); emit('toggle'); void nextTick(() => bar.value?.focus
 function openChart() { emit('toggle'); void nextTick(() => chart.value?.focus({ preventScroll: true })) }
 onBeforeUnmount(leave)
 
-const label = computed(() => `${props.goal.title}, ${pct.value} percent done. Show progress over time`)
+const byHand = computed(() => percent.value.byHand ? ', set by hand' : '')
+const label = computed(() => `${props.goal.title}, ${pct.value} percent done${byHand.value}. Show progress over time`)
 const chartLabel = computed(() => few.value
   ? `${props.goal.title}: ${historySince(createdAt.value!, props.now).toLowerCase()}. Enter or Escape closes.`
   : `${props.goal.title}: progress over time, ${RANGE_LABEL[props.range]}. Arrow keys move between points, Enter or Escape closes.`)
@@ -115,13 +118,13 @@ const placeholder = computed(() => {
         <div v-else :id="`chart-${goal.id}`" ref="chart" class="nohist" tabindex="0" role="group" :aria-label="few ? chartLabel : placeholder" @keydown="chartKey" @click="close">
           {{ few ? historySince(createdAt!, now) : placeholder }}
         </div>
-        <button type="button" class="pct" :aria-label="`${pct} percent. Hide progress over time`" @click="close"><AppIcon v-if="progress.source === 'override'" name="edit" :size="11" />{{ pct }}%</button>
+        <button type="button" class="pct" :data-tip="percent.tip" :aria-label="`${pct} percent${byHand}. Hide progress over time`" @click="close"><AppIcon v-if="percent.byHand" name="edit" :size="11" />{{ pct }}%</button>
       </template>
       <template v-else>
         <button ref="bar" type="button" class="bar-btn" data-tip="Progress over time" :aria-expanded="false" :aria-controls="`chart-${goal.id}`" :aria-label="label" @click="openChart">
           <span class="bar" role="progressbar" aria-valuemin="0" aria-valuemax="100" :aria-valuenow="pct" :aria-label="`${goal.title} progress`"><i :style="{ width: `${pct}%` }" /></span>
         </button>
-        <span class="pct" :data-tip="progress.source === 'override' ? `Progress set by hand${progress.override_note ? ` · ${progress.override_note}` : ''}` : undefined"><AppIcon v-if="progress.source === 'override'" name="edit" :size="11" />{{ pct }}%</span>
+        <span class="pct" :data-tip="percent.tip"><AppIcon v-if="percent.byHand" name="edit" :size="11" />{{ pct }}%</span>
         <span class="of">{{ progress.done }} of {{ progress.total }} done</span>
       </template>
       <div class="sigrow">

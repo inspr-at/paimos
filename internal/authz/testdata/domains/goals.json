@@ -5,6 +5,8 @@
     "GET /api/goals/{goalId}": "nodes.read",
     "GET /api/goals/{goalId}/history": "nodes.read",
     "GET /api/goals/{goalId}/series": "nodes.read",
+    "GET /api/goals/status-note": "nodes.read",
+    "PATCH /api/goals/status-note": "nodes.write",
     "PATCH /api/goals/{goalId}": "nodes.write",
     "POST /api/goals": "nodes.write"
   },

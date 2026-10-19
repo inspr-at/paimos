@@ -27,6 +27,10 @@ type GoalList struct {
 	QuietProjects QuietProjects `json:"quiet_projects"`
 	NextCursor    string        `json:"next_cursor,omitempty"`
 	Truncated     bool          `json:"truncated"`
+	// AEON-1494: the workspace status note (workspace readers only) and the
+	// latest authored ETA over every goal the filters match, for freshness.
+	StatusNote   *StatusNote `json:"status_note,omitempty"`
+	ETALastSetAt *time.Time  `json:"eta_last_set_at,omitempty"`
 	Watermark
 }
 
@@ -131,7 +135,13 @@ func (m *module) list(w http.ResponseWriter, r *http.Request) {
 		}
 		candidates := []GoalView{}
 		movingProjects := map[string]bool{}
+		var etaSetAt time.Time
 		for _, g := range goals {
+			for _, at := range []time.Time{g.etaSetAt, fieldTime(g.node, "eta_set_at")} {
+				if at.After(etaSetAt) {
+					etaSetAt = at
+				}
+			}
 			if g.States == nil {
 				out.TotalsPartial = true
 			} else {
@@ -223,6 +233,15 @@ func (m *module) list(w http.ResponseWriter, r *http.Request) {
 			}
 			budget = nextBudget
 			out.Items = append(out.Items, g)
+		}
+		if !etaSetAt.IsZero() {
+			out.ETALastSetAt = &etaSetAt
+		}
+		if err := attachNoteAuthors(ctx, tx, out.Items); err != nil {
+			return err
+		}
+		if out.StatusNote, err = visibleStatusNote(ctx, tx, p); err != nil {
+			return err
 		}
 		projects, err := tx.Query(ctx, `SELECT n.id::text,coalesce(nullif(n.fields->>'project_key',''),n.key) FROM nodes n JOIN node_kinds k ON k.tenant_id=n.tenant_id AND k.id=n.kind_id WHERE n.kind_id=ANY(ARRAY(SELECT id FROM node_kinds WHERE slug='project')) AND k.slug='project' AND n.deleted_at IS NULL AND ($1='' OR n.id::text=$1 OR n.key=$1 OR n.fields->>'project_key'=$1) AND ($2='' OR EXISTS(SELECT 1 FROM project_group_members gm WHERE gm.project_id=n.id AND gm.group_id::text=$2) OR $2='none' AND NOT EXISTS(SELECT 1 FROM project_group_members gm WHERE gm.project_id=n.id)) ORDER BY n.id LIMIT 2001`, project, group)
 		if err != nil {

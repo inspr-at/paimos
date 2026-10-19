@@ -9180,6 +9180,26 @@
     ,
     {"kind":"browser","file":"tests/from-classic.spec.ts","name":"sign-in returns to the classic resolver before opening its destination","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
+    {"kind":"browser","file":"tests/goals-gaps.spec.ts","name":"1024: items nest under their goal at the step icons' x, labels run from the key to the ETA in at most two lines with the badge in the meta line; goal names wrap to two lines; opening and a live update move nothing","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/goals-gaps.spec.ts","name":"1024: one line is reserved, only \"more\" pushes the list, \"less\" folds it back, a new note starts on one line, and #no-note renders nothing","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/goals-gaps.spec.ts","name":"1024: the status note keeps its reserve through a live update, hours left sit under LANDS, items carry their note and the Done fold counts today; a dropped stream says Reconnecting in place","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/goals-gaps.spec.ts","name":"1440: items nest under their goal at the step icons' x, one line each with the live line in the Moving → Progress span; goal names wrap to two lines; opening and a live update move nothing","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/goals-gaps.spec.ts","name":"1440: one line is reserved, only \"more\" pushes the list, \"less\" folds it back, a new note starts on one line, and #no-note renders nothing","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/goals-gaps.spec.ts","name":"1440: the status note keeps its reserve through a live update, hours left sit under LANDS, items carry their note and the Done fold counts today; a dropped stream says Reconnecting in place","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/goals-gaps.spec.ts","name":"390: one line is reserved, only \"more\" pushes the list, \"less\" folds it back, a new note starts on one line, and #no-note renders nothing","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/goals-gaps.spec.ts","name":"390: phones keep their stacked item rows with every ticket link; goal names wrap to two lines; opening and a live update move nothing","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/goals-gaps.spec.ts","name":"390: the status note keeps its reserve through a live update, hours left sit under LANDS, items carry their note and the Done fold counts today; a dropped stream says Reconnecting in place","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/goals-gaps.spec.ts","name":"900: items nest under their goal at the step icons' x, labels run from the key to the ETA in at most two lines with the badge in the meta line; goal names wrap to two lines; opening and a live update move nothing","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
     {"kind":"browser","file":"tests/goals-view.spec.ts","name":"1024 dark: essentials stay, nothing overflows, axe is clean","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
     {"kind":"browser","file":"tests/goals-view.spec.ts","name":"1024 light: essentials stay, nothing overflows, axe is clean","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
@@ -18317,6 +18337,28 @@
     {"kind":"vitest","file":"tests/goals-fix2.unit.test.ts","name":"partial totals and phone tickets > a goal too large to expand shows unknown counts, and partial totals say so","tier":"ESSENTIAL"}
     ,
     {"kind":"vitest","file":"tests/goals-fix2.unit.test.ts","name":"partial totals and phone tickets > a phone item keeps a link for every ticket, including when no agent is on it","tier":"ESSENTIAL"}
+    ,
+    {"kind":"vitest","file":"tests/goals-gaps.unit.test.ts","name":"the live line > says Live once ready, re-reads on a goal change, says Reconnecting on a drop and re-reads after a gap only","tier":"ESSENTIAL"}
+    ,
+    {"kind":"vitest","file":"tests/goals-gaps.unit.test.ts","name":"the page reads again when goals change > a busy stream never starves the list: changes during a read cause one more read after it, not an abort","tier":"ESSENTIAL"}
+    ,
+    {"kind":"vitest","file":"tests/goals-gaps.unit.test.ts","name":"the page reads again when goals change > a goal event reads the list at once (one read per burst), and a drop shows Reconnecting","tier":"ESSENTIAL"}
+    ,
+    {"kind":"vitest","file":"tests/goals-gaps.unit.test.ts","name":"the words for hours left, today and notes > \"today\" is the viewer’s day: a merge at 23:10 UTC is today in Vienna, yesterday in UTC","tier":"ESSENTIAL"}
+    ,
+    {"kind":"vitest","file":"tests/goals-gaps.unit.test.ts","name":"the words for hours left, today and notes > hours left rounds to whole hours, never to nothing, and admits work without an estimate","tier":"ESSENTIAL"}
+    ,
+    {"kind":"vitest","file":"tests/goals-gaps.unit.test.ts","name":"the words for hours left, today and notes > the note byline names its author and time, and the status note its age","tier":"ESSENTIAL"}
+    ,
+    {"kind":"vitest","file":"tests/goals-gaps.unit.test.ts","name":"what the rows and the footer show > a goal row keeps a reserved hours-left line, and its Done fold counts today’s merges","tier":"ESSENTIAL"}
+    ,
+    {"kind":"vitest","file":"tests/goals-gaps.unit.test.ts","name":"what the rows and the footer show > a goal’s percent comes from its items unless set by hand, and a hand-set percent always shows the pen and says so","tier":"ESSENTIAL"}
+    ,
+    {"kind":"vitest","file":"tests/goals-gaps.unit.test.ts","name":"what the rows and the footer show > an item shows its agent note with a speech icon, its author and time; without a note no note line","tier":"ESSENTIAL"}
+    ,
+    {"kind":"vitest","file":"tests/goals-gaps.unit.test.ts","name":"what the rows and the footer show > the footer says Live with the last ETA time, or Reconnecting with the last update, in one slot","tier":"ESSENTIAL"}
+    ,
+    {"kind":"vitest","file":"tests/goals-gaps.unit.test.ts","name":"what the rows and the footer show > the status note is one line with its author and age, without a fold chevron, and renders nothing without a note","tier":"ESSENTIAL"}
     ,
     {"kind":"vitest","file":"tests/graph-focus.unit.test.ts","name":"contains a rejected exit and tolerates a missing exit API","tier":"GATED-FULL"}
     ,

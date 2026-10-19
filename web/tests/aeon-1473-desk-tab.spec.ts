@@ -235,6 +235,9 @@ for (const scale of [1, 2] as const) test.describe(`${16 * scale} px favicon`, (
       expect(near(sample.gap, sample.strip, 40), `${strip}: a gap separates the dot from the icon, got ${sample.gap}`).toBe(true)
     }
     // Evidence for the visual check: pinned (icon only) and normal tabs on both strips.
+    // Linux CI at device scale 1 timed out inside locator.screenshot's stability wait
+    // after the colour checks above had passed, then reported the node detached.
+    // A page clip skips that wait. A missing or zero-size board still fails here.
     await page.evaluate(({ href, strips, title }) => {
       const board = document.createElement('div')
       board.id = 'tab-strips'
@@ -254,7 +257,18 @@ for (const scale of [1, 2] as const) test.describe(`${16 * scale} px favicon`, (
       }
       document.body.append(board)
     }, { href, strips: STRIPS, title: await page.title() })
-    await page.locator('#tab-strips').screenshot({ path: testInfo.outputPath(`aeon-1473-tab-strips-${size}px.png`) })
+    const board = page.locator('#tab-strips')
+    await expect(board).toBeAttached()
+    await board.evaluate(node => Promise.all([...node.querySelectorAll('img')].map(img => img.decode())))
+    const box = await board.boundingBox()
+    expect(box?.width, 'the evidence board has width').toBeGreaterThan(0)
+    expect(box?.height, 'the evidence board has height').toBeGreaterThan(0)
+    await page.screenshot({
+      path: testInfo.outputPath(`aeon-1473-tab-strips-${size}px.png`),
+      animations: 'disabled',
+      clip: { x: box!.x, y: box!.y, width: box!.width, height: box!.height },
+    })
+    await expect(board).toBeAttached()
     expect(desk.reads).toBeGreaterThan(0)
   })
 })

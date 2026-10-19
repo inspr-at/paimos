@@ -17,6 +17,7 @@ import (
 var commandScopeRoutes = map[string][]string{
 	"goal create":   {"GET /api/nodes", "GET /api/kinds", "GET /api/node-keys/{key}", "POST /api/goals"},
 	"goal update":   {"PATCH /api/goals/{goalId}"},
+	"goal note":     {"GET /api/goals/status-note", "PATCH /api/goals/status-note", "PATCH /api/goals/{goalId}"},
 	"goal get":      {"GET /api/goals/{goalId}"},
 	"goal list":     {"GET /api/goals"},
 	"goal history":  {"GET /api/goals/{goalId}/history"},
