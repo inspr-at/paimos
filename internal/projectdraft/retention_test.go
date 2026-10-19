@@ -28,6 +28,13 @@ func TestStartImportRetention(t *testing.T) {
 	if _, err := f.d.Admin.Exec(ctx, `UPDATE role_bindings SET role_id=(SELECT id FROM roles WHERE tenant_id=$1 AND key='owner') WHERE tenant_id=$1 AND principal_id=$2`, f.tenant, f.a.ID); err != nil {
 		t.Fatal(err)
 	}
+	if _, err := f.d.Admin.Exec(ctx, `UPDATE role_bindings SET role_id=(SELECT id FROM roles WHERE tenant_id=$1 AND key='owner') WHERE tenant_id=$1 AND principal_id=$2`, f.foreign.TenantID, f.foreign.ID); err != nil {
+		t.Fatal(err)
+	}
+	off := decodeBody[RetentionSettings](t, expectOK(t, f.call(t, f.foreign, "GET", "/api/settings/import-retention", "", nil)))
+	if off.Enabled || !off.DryRun {
+		t.Fatalf("non-import tenant defaults %+v", off)
+	}
 	now := time.Now().UTC().Truncate(time.Second)
 	old := now.AddDate(-1, 0, 0).Add(-time.Second)
 	makeProject := func(key string, at time.Time) string {
@@ -83,6 +90,11 @@ func TestStartImportRetention(t *testing.T) {
 	}); err != nil {
 		t.Fatal(err)
 	}
+	foreignDefault := decodeBody[RetentionSettings](t, expectOK(t, f.call(t, f.foreign, "GET", "/api/settings/import-retention", "", nil)))
+	if !foreignDefault.Enabled || !foreignDefault.DryRun {
+		t.Fatalf("tenant receiving imports defaults %+v", foreignDefault)
+	}
+	expect(t, f.call(t, f.foreign, "PUT", "/api/settings/import-retention", "", map[string]any{"enabled": true, "dry_run": false, "expected_revision": 0}), 200)
 	if err := db.InTenant(ctx, f.d.App, f.tenant, func(tx pgx.Tx) error {
 		var count int
 		if err := tx.QueryRow(ctx, `SELECT count(*) FROM import_project_retention WHERE project_id=$1`, foreign).Scan(&count); err != nil {
