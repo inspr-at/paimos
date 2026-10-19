@@ -5,6 +5,7 @@ import { can, myWorkspaceRole, permissionsAvailable } from '../../lib/authz'
 import { canFeature } from '../../lib/features'
 import { useSession } from '../../stores/session'
 import BrandCard from './BrandCard.vue'
+import ImportRetentionCard from './ImportRetentionCard.vue'
 import ModelProviderCard from './ModelProviderCard.vue'
 import SettingsCard from './SettingsCard.vue'
 import FeatureFlagsCard from './FeatureFlagsCard.vue'
@@ -29,6 +30,7 @@ const role = computed(() => myWorkspaceRole()?.name ?? (permissionsAvailable() ?
     <SettingsCard v-if="can('nodes.read') && canFeature('workspace-summary')" title="Workspace summary" icon="folder" anchor="workspace-summary">
       <WorkspaceSummary />
     </SettingsCard>
+    <ImportRetentionCard v-if="can('settings.manage')" />
     <BrandCard v-if="can('settings.manage')" />
     <ModelProviderCard v-if="can('settings.manage')" />
   </div>

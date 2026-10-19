@@ -7,8 +7,12 @@ package authz
 // every node, knowledge and attachment guard still runs inside the write.
 func init() {
 	registerRoutes("projectdraft", map[string]string{
-		"GET /api/import/project-draft":         "nodes.write",
-		"POST /api/import/project-draft/create": "nodes.write",
-		"POST /import/project-draft":            PublicRoute,
+		"GET /api/settings/import-retention":                     "settings.manage",
+		"PUT /api/settings/import-retention":                     "settings.manage",
+		"GET /api/settings/import-retention/candidates":          "settings.manage",
+		"POST /api/projects/{projectId}/import-retention/engage": "nodes.write",
+		"GET /api/import/project-draft":                          "nodes.write",
+		"POST /api/import/project-draft/create":                  "nodes.write",
+		"POST /import/project-draft":                             PublicRoute,
 	})
 }

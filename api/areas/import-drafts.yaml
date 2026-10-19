@@ -65,8 +65,87 @@ paths:
         '409': {$ref: '#/components/responses/Error'}
         '413': {$ref: '#/components/responses/Error'}
         '422': {$ref: '#/components/responses/Error'}
+  /settings/import-retention:
+    get:
+      operationId: getImportRetention
+      summary: 'Read START project retention settings'
+      description: 'Person with settings.manage required. Defaults to enabled for the configured START tenant or a tenant with START projects, and dry_run true. The period is fixed at 12 calendar months; the action is deletion.'
+      responses:
+        '200': {description: 'Tenant retention settings.', content: {application/json: {schema: {$ref: '#/components/schemas/ImportRetentionSettings'}}}}
+        '403': {$ref: '#/components/responses/Error'}
+    put:
+      operationId: setImportRetention
+      summary: 'Set START project retention settings'
+      description: 'Person with settings.manage required, rechecked under the tenant/tree fence. Both toggles and expected_revision are required. Stale writes return 409. Changed settings append import_retention.settings_changed; unchanged settings append no event. Live mode permanently deletes unengaged START projects and their records; audit history is retained.'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [enabled, dry_run, expected_revision]
+              properties:
+                enabled: {type: boolean}
+                dry_run: {type: boolean}
+                expected_revision: {type: integer, minimum: 0}
+      responses:
+        '200': {description: 'Saved settings.', content: {application/json: {schema: {$ref: '#/components/schemas/ImportRetentionSettings'}}}}
+        '400': {$ref: '#/components/responses/Error'}
+        '403': {$ref: '#/components/responses/Error'}
+        '409': {$ref: '#/components/responses/Error'}
+  /settings/import-retention/candidates:
+    get:
+      operationId: previewImportRetention
+      summary: 'Preview projects due for START retention'
+      description: 'Read only, person with settings.manage required. Lists marked START projects at least 12 calendar months old without person engagement, even while the policy is disabled. Bounded keyset pagination; this preview never deletes or appends events. The job rechecks eligibility in its final transaction.'
+      parameters:
+        - {name: after, in: query, schema: {type: string, format: uuid}}
+        - {name: limit, in: query, schema: {type: integer, minimum: 1, maximum: 100, default: 20}}
+      responses:
+        '200':
+          description: 'A bounded candidate page.'
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items, next_cursor]
+                properties:
+                  items:
+                    type: array
+                    maxItems: 100
+                    items: {$ref: '#/components/schemas/ImportRetentionCandidate'}
+                  next_cursor: {type: [string, 'null'], format: uuid}
+        '400': {$ref: '#/components/responses/Error'}
+        '403': {$ref: '#/components/responses/Error'}
+  /projects/{projectId}/import-retention/engage:
+    parameters:
+      - {name: projectId, in: path, required: true, schema: {type: string, format: uuid}}
+    post:
+      operationId: engageImportedProject
+      summary: 'Keep a START project by marking it engaged'
+      description: 'Person with nodes.write on the current project required, rechecked under the tenant/tree fence. Engagement is permanent, as is any person-authored change after import. Initial import events and agent-authored changes do not engage it. Only projects with the START source marker are accepted. Repeating the request appends no additional event.'
+      responses:
+        '200': {description: 'Engaged.', content: {application/json: {schema: {type: object, required: [engaged], properties: {engaged: {type: boolean, const: true}}}}}}
+        '400': {$ref: '#/components/responses/Error'}
+        '403': {$ref: '#/components/responses/Error'}
+        '404': {$ref: '#/components/responses/Error'}
 components:
   schemas:
+    ImportRetentionSettings:
+      type: object
+      required: [enabled, dry_run, months, revision]
+      properties:
+        enabled: {type: boolean}
+        dry_run: {type: boolean}
+        months: {type: integer, const: 12}
+        revision: {type: integer, minimum: 0}
+    ImportRetentionCandidate:
+      type: object
+      required: [project_id, imported_at]
+      properties:
+        project_id: {type: string, format: uuid}
+        imported_at: {type: string, format: date-time}
     ProjectDraftPayloadV1:
       type: object
       additionalProperties: false

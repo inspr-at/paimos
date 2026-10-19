@@ -13924,6 +13924,8 @@
     ,
     {"kind":"browser","file":"tests/settings.spec.ts","name":"Business shows the parts and the stored quote settings; a deep link rings its card","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
     ,
+    {"kind":"browser","file":"tests/settings.spec.ts","name":"START retention settings keep controls stable and report failed saves","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
     {"kind":"browser","file":"tests/settings.spec.ts","name":"Vocabulary keeps ticket types and old Projects bookmarks","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
     ,
     {"kind":"browser","file":"tests/settings.spec.ts","name":"Workspace shows the workspace and role, with Brand and In-app AI","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
