@@ -102,12 +102,14 @@ function drop(event: DragEvent) {
   event.preventDefault(); event.stopPropagation()
   void addFiles(files)
 }
-// A new width or a late font rewraps the text: fit again.
+// A new width (a window resize, or the box's own scrollbar coming or going
+// after an edit) or a late font rewraps the text: fit again, shrinking only by
+// the slack below, as a delete does, so the scroller never clamps.
 let width = 0
 const resize = typeof ResizeObserver === 'undefined' ? null : new ResizeObserver(([entry]) => {
-  if (entry && entry.contentRect.width !== width) { width = entry.contentRect.width; fit() }
+  if (entry && entry.contentRect.width !== width) { width = entry.contentRect.width; fit(hold(false)) }
 })
-const refit = () => fit()
+const refit = () => fit(hold(false))
 onMounted(() => {
   fit()
   if (area.value) resize?.observe(area.value)

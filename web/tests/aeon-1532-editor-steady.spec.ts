@@ -3,8 +3,9 @@
 // type; in split view the text box is as tall as the preview.
 // Risk: the box collapses on every keystroke (its scroller clamps scrollTop and
 // the page jumps), the split box scrolls inside at 560 px while the preview grows
-// past it, deleting lines pulls the page up, or the comment and phone editors
-// lose their cap. Every input is sampled in the page itself: before the edit
+// past it, deleting lines pulls the page up, the comment and phone editors lose
+// their cap, or a refit after a delete (the box's scrollbar going, a late font)
+// shrinks a capped box and pulls its panel up. Every input is sampled in the page itself: before the edit
 // (beforeinput), right after it (input) and once its frame settled (rAF).
 import { test, expect, type Locator, type Page } from '@playwright/test'
 import { writeFile } from 'node:fs/promises'
@@ -224,8 +225,8 @@ test('AEON-1532: deleting 50 lines keeps the page where it is, in the middle and
   await checks.save('delete-1440-light')
 })
 
-test('AEON-1532: the comment editor grows to its 560 px cap without ever collapsing', async ({ page }) => {
-  test.setTimeout(90_000)
+// Posts a comment in the ticket panel and opens it for editing.
+async function editComment(page: Page) {
   // The mock stamps new comments with its own clock (2026-09-23T12:00Z); the page
   // runs on that clock too, so the comment is inside its 15-minute edit window.
   await page.clock.setSystemTime(new Date('2026-09-23T12:00:00Z'))
@@ -242,6 +243,12 @@ test('AEON-1532: the comment editor grows to its 560 px cap without ever collaps
   await comment.getByRole('button', { name: 'Edit comment' }).click()
   const box = ws.getByLabel('Comment, Markdown')
   await expect(box).toBeVisible()
+  return box
+}
+
+test('AEON-1532: the comment editor grows to its 560 px cap without ever collapsing', async ({ page }) => {
+  test.setTimeout(90_000)
+  const box = await editComment(page)
   await instrument(box)
   const checks = checker(1440, 'light')
   const keys = Array.from({ length: 32 }, (_, i) => `Follow-up ${i + 1}: the probe answered in time.\n`).join('')
@@ -271,4 +278,83 @@ test('AEON-1532: the full ticket page writes the description in one row as tall 
   checks.add('ticket', 'no 560 px cap and no inner scroll', run.samples.at(-1)!.after > 1000 && inner(run.samples) <= 0, { height: run.samples.at(-1)!.after, maxOverflowPx: inner(run.samples) })
   checks.add('ticket', 'page scrollTop unchanged (px)', moved(run.samples, run.top) <= .5, { movedPx: moved(run.samples, run.top) })
   await checks.save('ticket-1440-light')
+})
+
+// Classic scrollbars (Linux, Windows, macOS set to always show them) take width
+// from the box. A delete that takes a capped box back under its cap keeps it
+// tall while the panel sits at its end; then the box's scrollbar goes and the
+// text rewraps wider, and a late font rewraps it too. Neither refit may shrink
+// the box by more than the slack below, or the panel clamps its scrollTop.
+// Headless Chromium hides every scrollbar and macOS overlays them, so this
+// test launches its own browser that keeps scrollbars (a launch option cannot
+// change per test), and the box gets a classic 14 px one of its own.
+interface Edge { top: number; max: number; height: number; width: number; bar: number; overflow: number; inView: boolean }
+const edge = (box: Locator) => box.evaluate((node): Edge => {
+  const area = node as HTMLTextAreaElement, panel = (window as unknown as { aeon1532Panel: HTMLElement }).aeon1532Panel
+  const style = getComputedStyle(area), rect = area.getBoundingClientRect(), view = panel.getBoundingClientRect()
+  return {
+    top: panel.scrollTop, max: panel.scrollHeight - panel.clientHeight, height: area.offsetHeight, width: area.clientWidth,
+    bar: area.offsetWidth - area.clientWidth - parseFloat(style.borderLeftWidth) - parseFloat(style.borderRightWidth),
+    overflow: area.scrollHeight - area.clientHeight, inView: rect.top >= view.top + panel.clientTop && rect.bottom <= view.top + panel.clientTop + panel.clientHeight,
+  }
+})
+// Fills the box past its cap, scrolls the panel to its end, selects everything
+// after the first 8 lines and deletes it with one Backspace.
+async function deleteAtEnd(page: Page, box: Locator) {
+  await box.fill(Array.from({ length: 40 }, (_, i) => `Follow-up ${i + 1}: the probe answered in time.`).join('\n'))
+  await settle(page)
+  await box.evaluate(node => {
+    const area = node as HTMLTextAreaElement
+    const panel = (() => {
+      for (let parent = area.parentElement; parent; parent = parent.parentElement) {
+        const overflow = getComputedStyle(parent).overflowY
+        if ((overflow === 'auto' || overflow === 'scroll') && parent.scrollHeight > parent.clientHeight) return parent
+      }
+      return document.scrollingElement as HTMLElement
+    })()
+    ;(window as unknown as { aeon1532Panel: HTMLElement }).aeon1532Panel = panel
+    area.focus({ preventScroll: true })
+    area.setSelectionRange(area.value.split('\n').slice(0, 8).join('\n').length, area.value.length)
+    area.scrollTop = 0
+    panel.scrollTop = panel.scrollHeight
+  })
+  await settle(page)
+  const before = await edge(box)
+  await page.keyboard.press('Backspace')
+  await settle(page)
+  return { before, after: await edge(box) }
+}
+
+test('AEON-1532: deleting a capped comment back under its cap keeps the panel at its end when its scrollbar goes or a font arrives', async ({ playwright, baseURL }) => {
+  test.setTimeout(90_000)
+  const browser = await playwright.chromium.launch({ headless: true, args: ['--disable-gpu'], ignoreDefaultArgs: ['--hide-scrollbars'] })
+  try {
+    const page = await browser.newPage({ baseURL, reducedMotion: 'reduce' })
+    const errors = watchErrors(page)
+    const box = await editComment(page)
+    const checks = checker(1440, 'light')
+    const start = (state: string, { before }: { before: Edge }) => {
+      checks.add(state, 'panel scrolled to its end (no slack below)', before.top >= 1 && Math.abs(before.max - before.top) <= 1, { scrollTop: before.top, max: before.max })
+      checks.add(state, 'box at its 560 px cap, scrolling inside, fully in view', Math.abs(before.height - 560) <= .5 && before.overflow > 0 && before.inView, before)
+    }
+    const still = (state: string, check: string, from: Edge, to: Edge) => checks.add(state, check, Math.abs(to.top - from.top) <= .5 && to.height >= from.height - .5, { before: from, after: to })
+    // No scrollbar on the box: the delete keeps its width, so only the font refits.
+    const bar = await page.addStyleTag({ content: '.md-area { scrollbar-width: none; }' })
+    const font = await deleteAtEnd(page, box)
+    start('font', font)
+    checks.add('font', 'the delete took the text under the cap and kept the width', font.after.overflow <= 0 && Math.abs(font.before.bar) <= 1 && font.after.width === font.before.width, font.after)
+    still('font', 'panel scrollTop and box height unchanged after the delete', font.before, font.after)
+    await page.evaluate(() => document.fonts.dispatchEvent(new Event('loadingdone')))
+    await settle(page)
+    still('font', 'panel scrollTop and box height unchanged after a late font', font.after, await edge(box))
+    // A classic scrollbar: the delete removes it, the box widens and refits.
+    await bar.evaluate(node => { node.textContent = '.md-area { scrollbar-width: auto; scrollbar-color: auto; } .md-area::-webkit-scrollbar { width: 14px; } .md-area::-webkit-scrollbar-thumb { background: rgb(128 128 128 / .6); }' })
+    const scrollbar = await deleteAtEnd(page, box)
+    start('scrollbar', scrollbar)
+    checks.add('scrollbar', 'the scrollbar took width, then went with the overflow', scrollbar.before.bar >= 10 && Math.abs(scrollbar.after.bar) <= 1 && scrollbar.after.overflow <= 0 && scrollbar.after.width - scrollbar.before.width >= 10, { before: scrollbar.before, after: scrollbar.after })
+    still('scrollbar', 'panel scrollTop and box height unchanged once the box widened', scrollbar.before, scrollbar.after)
+    checks.add('page', 'no page errors', errors.length === 0, { errors })
+    await page.screenshot({ path: test.info().outputPath('aeon1532-1440-light-comment-scrollbar.png') })
+    await checks.save('comment-scrollbar-1440-light')
+  } finally { await browser.close() }
 })
