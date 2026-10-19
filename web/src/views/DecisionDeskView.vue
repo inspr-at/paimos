@@ -209,7 +209,7 @@ function rowClick(event: MouseEvent, item: DeskItem) {
   else begin(item.id)
 }
 // An action request is titled by its kind; its message names the row.
-const rowName = (item: DeskItem) => item.kind === 'action' && item.context ? `${kindLabels.action}: ${item.context.slice(0, 200)}` : `${kindLabels[item.kind]}: ${titleOf(item)}`
+const rowName = (item: DeskItem) => item.definitionChange ? titleOf(item) : item.kind === 'action' && item.context ? `${kindLabels.action}: ${item.context.slice(0, 200)}` : `${kindLabels[item.kind]}: ${titleOf(item)}`
 const recommends = (item: DeskItem) => item.recommended ? item.choices.find(choice => choice.id === item.recommended)?.title ?? '' : ''
 // Approve, Deny, Resolve and Dismiss open rev 11's inline reason form; they commit through the memo's path.
 const rowForm = ref<{ id: string; revision: number; mode: 'approve' | 'deny' | 'resolve' | 'dismiss'; reason: string; busy: boolean; error: string }>()

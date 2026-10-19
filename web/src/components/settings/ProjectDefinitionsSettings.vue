@@ -48,7 +48,7 @@ const originText = computed(() => {
   if (empty.value) return own.value ? `No checks. Tickets in ${props.project.routeKey} move freely, for people and agents. Add one below.` : context.value.definition ? `The workspace default has no checks. Tickets in ${props.project.routeKey} move freely.` : `Tickets in ${props.project.routeKey} move freely, for people and agents. Add a check below.`
   if (own.value && !context.value?.workspace_default) return `Made for ${props.project.routeKey}; there is no workspace default.`
   if (!own.value) return t(`Changes to Policies in Settings apply to ${props.project.routeKey} at once.`,`Änderungen an den Richtlinien in den Einstellungen gelten sofort für ${props.project.routeKey}.`)
-  const provenance = copyDate.value ? t(`Copied from the workspace default on ${copyDate.value}. `,`Vom Workspace-Standard am ${copyDate.value} kopiert. `) : ''
+  const provenance = copyDate.value ? context.value.definition?.copied_from_revision ? t(`Copied from the workspace default on ${copyDate.value}. `,`Vom Workspace-Standard am ${copyDate.value} kopiert. `) : t(`Made for ${props.project.routeKey} on ${copyDate.value}. `,`Für ${props.project.routeKey} am ${copyDate.value} erstellt. `) : ''
  return provenance + (differenceCount.value ? t(`Differs in ${differenceCount.value}\u00a0${differenceCount.value === 1 ? 'place' : 'places'}, marked below.`,`Weicht an ${differenceCount.value}\u00a0Stellen ab, unten markiert.`) : t('Same as the workspace default so far.','Bisher gleich wie der Workspace-Standard.'))
 })
 const reset = ref<{ context: DefinitionContext; projectID: string; key: string; anchor: HTMLElement; lines: string[] } | null>(null), resetBody = ref<HTMLElement>()
