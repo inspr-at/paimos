@@ -35,6 +35,27 @@ func TestHeartbeatQuietTicksUpdateRowAndSSEWithoutEvents(t *testing.T) {
 		t.Fatalf("phase change wrote %d events", n)
 	}
 	age(t, f, s.id, "2 minutes", false)
+	// What /agents and the live chips read: the session list, the live feed
+	// the chips poll (include_inactive) and the two-minute live window. All
+	// come from the session row, so a quiet tick must reach them without an event.
+	beatIn := func(endpoint, key string) *time.Time {
+		t.Helper()
+		w := f.call(f.person, "GET", endpoint, nil, "")
+		expect(t, w, 200)
+		for _, item := range decode(t, w)["items"].([]any) {
+			if row := item.(map[string]any); row[key] == s.id {
+				at, err := time.Parse(time.RFC3339Nano, row["heartbeat_at"].(string))
+				if err != nil {
+					t.Fatal(err)
+				}
+				return &at
+			}
+		}
+		return nil
+	}
+	if at := beatIn("/api/harness-sessions/live", "session_id"); at != nil {
+		t.Fatalf("aged session still in the live window: %v", at)
+	}
 	events.New(f.db.App).Mount(f.mux)
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		f.mux.ServeHTTP(w, r.WithContext(tenant.WithPrincipal(r.Context(), f.person)))
@@ -86,6 +107,15 @@ func TestHeartbeatQuietTicksUpdateRowAndSSEWithoutEvents(t *testing.T) {
 	resp.Body.Close()
 	if got := sessionState(t, f, s); got["heartbeat_at"] != decode(t, w)["heartbeat_at"] || got["activity_sequence"] != float64(2) {
 		t.Fatal("latest session facts were lost")
+	}
+	fresh, err := time.Parse(time.RFC3339Nano, decode(t, w)["heartbeat_at"].(string))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, read := range [][2]string{{"/api/harness-sessions", "id"}, {"/api/harness-sessions/live?include_inactive=true", "session_id"}, {"/api/harness-sessions/live", "session_id"}} {
+		if at := beatIn(read[0], read[1]); at == nil || !at.Equal(fresh) {
+			t.Fatalf("%s heartbeat %v, want %v", read[0], at, fresh)
+		}
 	}
 	if n := sweep(t, f); n != 0 {
 		t.Fatalf("fresh heartbeat was treated as silent: %d", n)
