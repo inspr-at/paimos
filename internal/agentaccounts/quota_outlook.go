@@ -410,6 +410,37 @@ func consumed(samples []weeklySample, from, to time.Time) (float64, bool) {
 	return total, ok
 }
 
+// hourlyBurn spreads increases across gaps longer than an hour at their average
+// pace. Short gaps keep their measured booking; a confirmed refill starts at zero.
+func hourlyBurn(samples []weeklySample, from, to time.Time) float64 {
+	total := 0.0
+	for i := 1; i < len(samples); i++ {
+		prev, next := samples[i-1], samples[i]
+		fraction := 1.0
+		if gap := next.ReadAt.Sub(prev.ReadAt); gap > time.Hour {
+			start, end := prev.ReadAt, next.ReadAt
+			if start.Before(from) {
+				start = from
+			}
+			if end.After(to) {
+				end = to
+			}
+			if !end.After(start) {
+				continue
+			}
+			fraction = float64(end.Sub(start)) / float64(gap)
+		} else if !next.ReadAt.After(from) || next.ReadAt.After(to) {
+			continue
+		}
+		increase := math.Max(0, next.Used-prev.Used)
+		if confirmedRefill(prev, next) {
+			increase = next.Used
+		}
+		total += increase * fraction
+	}
+	return total
+}
+
 func ptrF(v float64) *float64 { return &v }
 
 func ptrT(t time.Time) *time.Time { return &t }
@@ -670,7 +701,7 @@ func buildGroup(harness string, inputs []outlookInput, now, anchor time.Time) ou
 		if hour.Known {
 			empty := true
 			for _, s := range runnable {
-				v, _ := consumed(s.samples, from, to)
+				v := hourlyBurn(s.samples, from, to)
 				hour.Burn[s.canonical] = math.Round(v*100) / 100
 				if u, ok := usedAt(s.samples, to); !ok || u < s.limit-1e-9 {
 					empty = false
