@@ -2110,6 +2110,12 @@
     ,
     {"kind":"go","package":"internal/agentd","name":"TestStatuslineReportRequiresConsent","tier":"GATED-FULL"}
     ,
+    {"kind":"go","package":"internal/agentd","name":"TestSteerMidTurnStaysQueued","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/agentd","name":"TestSteerOnEndedSessionRefuses","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/agentd","name":"TestSteerOnYieldedStartsNextTurn","tier":"ESSENTIAL"}
+    ,
     {"kind":"go","package":"internal/agentd","name":"TestStepUpBadServerChallengesNeverPrompt","tier":"GATED-FULL"}
     ,
     {"kind":"go","package":"internal/agentd","name":"TestStepUpChangedPeerBeforeOrDuringPromptFailsClosed","tier":"GATED-FULL"}

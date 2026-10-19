@@ -3,7 +3,7 @@
 import assert from 'node:assert/strict'
 import { test } from 'node:test'
 import type { HarnessSession } from '../src/lib/agents.ts'
-import { controlPermitted, interruptHasStep, managedControlAllowed, managedControlUnavailable, noStepRunningText, nothingRunningText } from '../src/lib/managedControl.ts'
+import { controlPermitted, interruptHasStep, managedControlAllowed, managedControlUnavailable, noStepRunningText, nothingRunningText, queuedNextStepText, sessionEndedText, sessionHasEnded, startedNextStepText, steerAppliedText } from '../src/lib/managedControl.ts'
 
 const now = Date.parse('2026-09-29T09:00:00Z')
 const ago = (ms: number) => new Date(now - ms).toISOString()
@@ -65,6 +65,25 @@ test('interrupt waits for a running step and leaves stop available', () => {
   assert.equal(managedControlAllowed(session(), 'interrupt', access), true)
   assert.equal(managedControlAllowed(session({ activity: 'busy' }), 'interrupt', access), true)
   assert.equal(managedControlUnavailable(session({ phase: 'stopped', stopped_at: ago(0) }), access), 'This session has stopped.')
+})
+
+test('steer starts a yielded step, queues a busy one, and stops when the session has ended', () => {
+  assert.equal(steerAppliedText('queued_next_turn'), queuedNextStepText)
+  assert.equal(queuedNextStepText, 'Queued for the next step')
+  assert.equal(steerAppliedText('started_next_turn'), startedNextStepText)
+  assert.equal(startedNextStepText, 'Started the next step')
+  assert.equal(steerAppliedText('agentd_applied'), 'Steer applied to the running turn.')
+  assert.equal(sessionEndedText, 'This session has ended. Start a new run to continue.')
+  const yielded = session({ phase: 'yielded', activity: 'idle' })
+  assert.equal(sessionHasEnded(yielded), false)
+  assert.equal(managedControlAllowed(yielded, 'steer', access), true)
+  assert.equal(managedControlAllowed(yielded, 'stop', access), true)
+  assert.equal(managedControlAllowed(yielded, 'interrupt', access), false)
+  for (const ended of [session({ phase: 'stopped', stopped_at: ago(0) }), session({ archived_at: ago(0) }), session({ stopped_at: ago(0) })]) {
+    assert.equal(sessionHasEnded(ended), true)
+    assert.equal(managedControlUnavailable(ended, access), 'This session has stopped.')
+    assert.equal(managedControlAllowed(ended, 'steer', access), false)
+  }
 })
 
 test('reasons keep the panel wording', () => {

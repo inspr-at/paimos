@@ -982,7 +982,7 @@ components:
         state: {type: string, enum: [pending, claimed, completed]}
         sequence: {type: integer, format: int64}
         outcome: {type: [string, 'null'], enum: [applied, rejected, null]}
-        reason: {type: [string, 'null'], description: Content-free outcome. authorization_expired means expired before claim; outcome_unconfirmed means no safe retry. queued_next_turn acknowledges queued input rather than model obedience.}
+        reason: {type: [string, 'null'], description: Content-free outcome. authorization_expired means expired before claim; outcome_unconfirmed means no safe retry. queued_next_turn acknowledges queued input rather than model obedience. started_next_turn means the steer began the next step. nothing_running means an interrupt found no running step. session_ended means the process had already ended.}
         expected_ownership: {$ref: '#/components/schemas/HarnessProcessOwnership'}
         expires_at: {type: string, format: date-time}
         expires_in_ms:

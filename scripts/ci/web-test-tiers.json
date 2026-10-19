@@ -16498,6 +16498,8 @@
     ,
     {"kind":"node","file":"tests/managed-control.test.ts","name":"reasons keep the panel wording","tier":"ESSENTIAL"}
     ,
+    {"kind":"node","file":"tests/managed-control.test.ts","name":"steer starts a yielded step, queues a busy one, and stops when the session has ended","tier":"ESSENTIAL"}
+    ,
     {"kind":"node","file":"tests/markdown-links.test.ts","name":"a bare https address is a link and trailing punctuation stays outside it","tier":"GATED-FULL"}
     ,
     {"kind":"node","file":"tests/markdown-links.test.ts","name":"a key inside an address is part of the address","tier":"GATED-FULL"}

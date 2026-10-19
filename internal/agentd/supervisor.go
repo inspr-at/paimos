@@ -2284,6 +2284,28 @@ func (s *Supervisor) serviceHarnessWake(ctx context.Context, entry *owned, heart
 	running := entry.record.State == "running" && !entry.harnessArchived
 	entry.mu.Unlock()
 	if !running {
+		if claimControls {
+			controls, err := s.api.YieldHarness(ctx, entry.harness)
+			if err != nil {
+				return err
+			}
+			for _, control := range controls {
+				if !slices.ContainsFunc(entry.pending, func(pending HarnessControl) bool { return pending.ID == control.ID }) {
+					entry.pending = append(entry.pending, control)
+				}
+			}
+		}
+		for index := 0; index < len(entry.pending); {
+			control := entry.pending[index]
+			reason := "child_unavailable"
+			if control.Kind == "steer" {
+				reason = "session_ended"
+			}
+			if err := s.rejectHarnessControl(ctx, entry, control, reason); err != nil {
+				return err
+			}
+			entry.pending = append(entry.pending[:index], entry.pending[index+1:]...)
+		}
 		return nil
 	}
 	// Even failed/unconfirmed delivery must not suppress session liveness.
@@ -2330,9 +2352,17 @@ func (s *Supervisor) serviceHarnessWake(ctx context.Context, entry *owned, heart
 			}
 			entry.mu.Lock()
 			idle := entry.harness.Activity == "idle"
+			alive := entry.process != nil && entry.record.State == "running" && !entry.harnessArchived
 			entry.mu.Unlock()
 			if control.Kind == "interrupt" && idle {
 				if err := s.rejectHarnessControl(ctx, entry, control, "nothing_running"); err != nil {
+					return err
+				}
+				entry.pending = append(entry.pending[:index], entry.pending[index+1:]...)
+				continue
+			}
+			if control.Kind == "steer" && !alive {
+				if err := s.rejectHarnessControl(ctx, entry, control, "session_ended"); err != nil {
 					return err
 				}
 				entry.pending = append(entry.pending[:index], entry.pending[index+1:]...)
@@ -2379,7 +2409,11 @@ func (s *Supervisor) serviceHarnessWake(ctx context.Context, entry *owned, heart
 				case control.Kind == "model" || control.Kind == "rename":
 					reason = "setting_applied"
 				case control.Kind == "steer":
-					reason = "queued_next_turn"
+					if busy {
+						reason = "queued_next_turn"
+					} else {
+						reason = "started_next_turn"
+					}
 				case control.Kind == "interrupt":
 					reason = "native_interrupt_acknowledged"
 				case control.Kind == "stop":

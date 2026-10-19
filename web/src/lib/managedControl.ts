@@ -44,6 +44,19 @@ export function managedControlUnavailable(s: HarnessSession, access: ManagedAcce
 // activity is not idle: a working session that has not reported it stays interruptible.
 export const noStepRunningText = 'No step is running'
 export const nothingRunningText = 'Nothing was running, so nothing was interrupted.'
+export const queuedNextStepText = 'Queued for the next step'
+export const startedNextStepText = 'Started the next step'
+export const sessionEndedText = 'This session has ended. Start a new run to continue.'
+
+export function sessionHasEnded(s: HarnessSession) {
+  return s.phase === 'stopped' || !!s.stopped_at || !!s.archived_at
+}
+
+export function steerAppliedText(reason: string | null) {
+  if (reason === 'queued_next_turn') return queuedNextStepText
+  if (reason === 'started_next_turn') return startedNextStepText
+  return 'Steer applied to the running turn.'
+}
 
 export function interruptHasStep(s: HarnessSession) {
   return s.phase !== 'yielded' && s.activity !== 'idle'
