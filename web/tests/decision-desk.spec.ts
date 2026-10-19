@@ -618,7 +618,14 @@ for (const width of [1440, 1024, 390]) for (const theme of ['light', 'dark'] as 
     const briefingDesk = page.locator('.places').getByRole('link', { name: 'Decision Desk, 6 open', exact: true })
     await expect(briefingDesk).toBeVisible()
     await expect(page.getByRole('region', { name: 'Decision Desk', exact: true })).toHaveCount(0)
-    await expect(page.getByRole('button', { name: 'Wind down', exact: true })).toBeVisible()
+    if (width < 720) {
+      // AEON-1459 (R2.1): on phones Wind down leads the page head's ⋯ menu.
+      const more = page.getByRole('dialog', { name: 'More agent actions' })
+      await page.getByRole('button', { name: 'More agent actions', exact: true }).click()
+      await expect(more.getByRole('menuitem').first()).toHaveAccessibleName(/^Wind down…/)
+      await page.keyboard.press('Escape')
+      await expect(more).toHaveCount(0)
+    } else await expect(page.getByRole('button', { name: 'Wind down', exact: true })).toBeVisible()
     await expectStableControls({ controls: { desk: briefingDesk, header: page.locator('.places') }, interactions: [{ name: 'refresh the Desk count', run: async () => {
       await page.evaluate(() => window.dispatchEvent(new Event('focus')))
       await expect(briefingDesk).toBeVisible()
@@ -648,7 +655,9 @@ for (const width of [320, 1024]) for (const theme of ['light', 'dark'] as const)
     for (const path of ['/', '/tickets', '/p/PHAROS', '/p/PHAROS/PHAROS-11?view=full']) {
       await page.goto(path)
       const places = page.getByRole('navigation', { name: 'Places' })
-      const gear = page.getByRole('button', { name: /^App and workspace/ })
+      // Under 360 px the gear steps into the avatar menu as Settings and help (AEON-1459).
+      const narrowest = width < 360
+      const gear = page.getByRole('button', { name: /^App and workspace/ }), avatar = page.getByRole('button', { name: /^Account for / })
       await expect(places.getByRole('link', { name: /Decision Desk/ })).toBeVisible()
       await page.evaluate(() => document.fonts.ready)
       await expect.poll(() => page.evaluate(() => document.documentElement.scrollWidth - innerWidth)).toBe(0)
@@ -670,8 +679,13 @@ for (const width of [320, 1024]) for (const theme of ['light', 'dark'] as const)
         expect(box!.width).toBeGreaterThanOrEqual(44)
         expect(box!.x + box!.width, 'project fold must not overlap Search').toBeLessThanOrEqual(search!.x)
       }
-      await expectStableControls({ controls: { places, gear }, interactions: [
-        { name: 'open and close app menu', run: async () => { await gear.click(); await expect(page.getByRole('menu', { name: 'App and workspace' })).toBeVisible(); await page.keyboard.press('Escape'); await expect(gear).toBeFocused() } },
+      if (narrowest) await expect(gear).toBeHidden()
+      await expectStableControls({ controls: { places, ...(narrowest ? { avatar } : { gear }) }, interactions: [narrowest
+        ? { name: 'open and close app menu from the avatar', run: async () => {
+          await avatar.click(); await page.getByRole('menu', { name: 'Account' }).getByRole('menuitem', { name: 'Settings and help', exact: true }).click()
+          await expect(page.getByRole('menu', { name: 'App and workspace' })).toBeVisible(); await page.keyboard.press('Escape'); await expect(avatar).toBeFocused()
+        } }
+        : { name: 'open and close app menu', run: async () => { await gear.click(); await expect(page.getByRole('menu', { name: 'App and workspace' })).toBeVisible(); await page.keyboard.press('Escape'); await expect(gear).toBeFocused() } },
       ] })
       await page.screenshot({ path: testInfo.outputPath(`${path === '/' ? 'projects' : path.includes('view=full') ? 'ticket' : path.includes('/p/') ? 'project' : 'tickets'}-${width}-${theme}.png`) })
     }

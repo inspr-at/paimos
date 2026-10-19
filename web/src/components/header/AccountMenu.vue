@@ -60,8 +60,8 @@ const codename = computed(() => version.value?.codename || codenameOf(running.va
 const fresh = computed(() => session.identity ? history.newCount : 0)
 const whatsNewLabel = computed(() => `What’s new${running.value ? `, ${releaseAria(codename.value, running.value)}` : ''}${fresh.value ? `, ${fresh.value} new since your last visit` : ''}`)
 function whatsNew() { menu.value?.close(); run({ name: 'releases', version: history.current || 'current' }) }
-// The narrowest phones have no gear in the header: Settings and help opens from here.
-function appMenu() { menu.value?.close(); run({ name: 'app-menu' }) }
+// The narrowest phones have no gear in the header: Settings and help opens from here, and its Escape returns to the avatar.
+function appMenu() { menu.value?.close(true); run({ name: 'app-menu' }) }
 // Focus goes back to the avatar first, so Escape in the preview returns there.
 function deskPreview() { menu.value?.close(true); run({ name: 'desk-preview' }) }
 async function signOut() {
