@@ -10172,6 +10172,8 @@
     ,
     {"kind":"go","package":"internal/rules/doctrine","name":"TestDoctrineInboxPromotionSurvivesALease","tier":"GATED-FULL"}
     ,
+    {"kind":"go","package":"internal/rules/doctrine","name":"TestDoctrineInstallationTokenLength","tier":"ESSENTIAL"}
+    ,
     {"kind":"go","package":"internal/rules/doctrine","name":"TestDoctrineLayerEndToEnd","tier":"GATED-FULL"}
     ,
     {"kind":"go","package":"internal/rules/doctrine","name":"TestDoctrineMarkerAdvancePreservesSessionDelivery","tier":"ESSENTIAL"}

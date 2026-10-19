@@ -45,8 +45,10 @@ type Reader interface {
 }
 
 // GitHub uses the GitHub REST API. Token is resolved for this operation
-// through an operator-owned tenant/repository grant; it is sent only to api.github.com and
-// never logged, stored or put into an error.
+// through an operator-owned tenant/repository grant; it is sent only to
+// api.github.com and never logged, stored or put into an error. Installation
+// tokens are opaque and the token pattern does not cap their length: the
+// bounded mint response (maxTreeBody) is the cap.
 type GitHub struct {
 	Token    string
 	Client   *http.Client
