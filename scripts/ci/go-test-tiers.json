@@ -6298,6 +6298,8 @@
     ,
     {"kind":"go","package":"internal/delivery","name":"TestDeploymentAncestryRequiresRepositoryAndExactMergeBase","tier":"ESSENTIAL"}
     ,
+    {"kind":"go","package":"internal/delivery","name":"TestDocumentedWebhookActions","tier":"ESSENTIAL"}
+    ,
     {"kind":"go","package":"internal/delivery","name":"TestGitHubReaderConfirmsMissingPull","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/delivery","name":"TestGitHubReaderUsesReadOnlyScopesAndFreshQueueHead","tier":"ESSENTIAL"}
@@ -10185,6 +10187,8 @@
     {"kind":"go","package":"internal/rules/doctrine","name":"TestDoctrineInboxPromotionNeedsTheTLDR","tier":"GATED-FULL"}
     ,
     {"kind":"go","package":"internal/rules/doctrine","name":"TestDoctrineInboxPromotionSurvivesALease","tier":"GATED-FULL"}
+    ,
+    {"kind":"go","package":"internal/rules/doctrine","name":"TestDoctrineInstallationTokenLength","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/rules/doctrine","name":"TestDoctrineLayerEndToEnd","tier":"GATED-FULL"}
     ,

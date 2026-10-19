@@ -116,6 +116,21 @@ func (m *Module) receiveWebhook(w http.ResponseWriter, r *http.Request) {
 	}
 	ctx, cancel := context.WithTimeout(r.Context(), webhookAttemptTimeout)
 	defer cancel()
+	// Documented actions the audit does not use are acknowledged and stored as
+	// a finished receipt. They do not wake metric sources or run handlers.
+	if !handledWebhookAction(name, e.Action) {
+		if err = m.recordIgnoredWebhook(ctx, name, id, raw, e); err != nil {
+			status := http.StatusBadGateway
+			var refusal *apiError
+			if errors.As(err, &refusal) {
+				status = refusal.status
+			}
+			m.rejectWebhook(w, r, e.Action, "receipt", status, err)
+			return
+		}
+		w.WriteHeader(http.StatusNoContent)
+		return
+	}
 	if err = m.saveWebhook(ctx, name, id, raw, e); err != nil {
 		status := http.StatusBadGateway
 		var refusal *apiError
@@ -204,6 +219,40 @@ func (m *Module) saveWebhook(ctx context.Context, name, id string, raw []byte, e
 	})
 }
 
+// recordIgnoredWebhook keeps the delivery id so a redelivery does not start
+// work later. The receipt is finished immediately and does not update
+// delivery_metric_sources.
+func (m *Module) recordIgnoredWebhook(ctx context.Context, name, id string, raw []byte, e envelope) error {
+	return m.ingressTx(ctx, "ignored delivery receipt", func(tx pgx.Tx) error {
+		if err := db.LockTenant(ctx, tx, m.config.TenantID); err != nil {
+			return err
+		}
+		_, err := tx.Exec(ctx, `INSERT INTO delivery_webhook_receipts(tenant_id,delivery_id,repository,installation_id,event,action,payload_sha256,payload,received_at,next_attempt_at,finished_at,checkpoints,attempts)
+			VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$9,$9,jsonb_build_object('ignored','ignored'),0) ON CONFLICT(tenant_id,delivery_id) DO NOTHING`, m.config.TenantID, id, m.config.Repository, m.config.InstallationID, name, e.Action, digest(raw), raw, m.now())
+		if err != nil {
+			return err
+		}
+		var matches bool
+		if err = tx.QueryRow(ctx, `SELECT repository=$2 AND installation_id=$3 AND event=$4 AND action=$5 AND payload_sha256=$6 AND finished_at IS NOT NULL AND attempts=0 AND checkpoints=jsonb_build_object('ignored','ignored') FROM delivery_webhook_receipts WHERE delivery_id=$1`, id, m.config.Repository, m.config.InstallationID, name, e.Action, digest(raw)).Scan(&matches); err != nil {
+			return err
+		}
+		if !matches {
+			return fail(http.StatusConflict, "delivery identity conflict")
+		}
+		return nil
+	})
+}
+
+func (m *Module) finishIgnoredWebhook(ctx context.Context, id string) error {
+	return m.ingressTx(ctx, "ignored delivery receipt", func(tx pgx.Tx) error {
+		if err := db.LockTenant(ctx, tx, m.config.TenantID); err != nil {
+			return err
+		}
+		_, err := tx.Exec(ctx, `UPDATE delivery_webhook_receipts SET finished_at=coalesce(finished_at,$2), checkpoints=jsonb_set(checkpoints, ARRAY['ignored'], to_jsonb('ignored'::text)), last_step=NULL, last_error_class=NULL, permission_paused_at=NULL WHERE delivery_id=$1 AND finished_at IS NULL`, id, m.now())
+		return err
+	})
+}
+
 func webhookBackoff(attempt int64) time.Duration {
 	return webhookErrorBackoff(attempt, nil)
 }
@@ -260,6 +309,11 @@ func (m *Module) processWebhook(ctx context.Context, id string, immediate bool) 
 	var e envelope
 	if json.Unmarshal(receipt.raw, &e) != nil || e.Repository.Name != receipt.repository || strconv.FormatInt(e.Installation.ID, 10) != receipt.installation || e.Action != receipt.action || !validAction(receipt.event, receipt.action) {
 		return webhookClass("invalid_receipt")
+	}
+	// An unfinished ignored action must not take an attempt or run a handler.
+	// Normal ingress already stores these finished; this closes a retry.
+	if !handledWebhookAction(receipt.event, receipt.action) {
+		return m.finishIgnoredWebhook(ctx, receipt.id)
 	}
 	// Permission waits only retry notice routing, never GitHub. An authenticated
 	// redelivery of this exact payload explicitly resumes the unfinished step.
