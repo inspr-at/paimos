@@ -9,7 +9,7 @@
   },
   "spec": {
     "file": "tests/definitions-p3.spec.ts",
-    "listedTests": 5,
+    "listedTests": 6,
     "weightSeconds": 48.988,
     "weightSource": "AEON-1317: guarded mbp2606 single-worker complete file, 5 passed in 48.5s (supervisor wall 48.988s), source 4e37c18bb"
   }

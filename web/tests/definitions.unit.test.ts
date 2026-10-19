@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import { expect, it, vi } from 'vitest'
 vi.mock('../src/lib/api', () => ({ api: vi.fn(), APIError: class extends Error {} }))
-import { decideDefinitionChange, definitionAdminNames, definitionChangeWords, definitionDate, definitionDecisionWords, definitionDeskWords, definitionDiff, definitionNotice, resetChanges, ruleIcon, ruleLabel, ruleWords, sameRule, saveWorkspaceDefinition, type DefinitionChange, type DefinitionChecks, type DefinitionContext } from '../src/lib/definitions'
+import { decideDefinitionChange, definitionBlocks, definitionAdminNames, definitionChangeWords, definitionDate, definitionDecisionWords, definitionDeskWords, definitionDiff, definitionNotice, resetChanges, ruleIcon, ruleLabel, ruleWords, sameRule, saveWorkspaceDefinition, type DefinitionChange, type DefinitionChecks, type DefinitionContext } from '../src/lib/definitions'
 import { api } from '../src/lib/api'
 import { deskItemID, deskLinkOut } from '../src/lib/decisionDesk'
 import { displayLanguage } from '../src/lib/displayLanguage'
@@ -69,6 +69,13 @@ it('AEON-1317 binds decisions to both revisions and renders the complete bilingu
   expect(ruleLabel({id:'lesson_recorded'})).toBe('Lesson recorded')
   expect(ruleLabel({id:'lesson_recorded'},'de')).toBe('Lehre festgehalten')
   expect(ruleIcon({id:'lesson_recorded'})).toBe('book')
+  expect(definitionBlocks('de').map(block => [block.name,block.to])).toEqual([['Bereit','In Arbeit'],['Qualitätsprüfung','Qualitätsprüfung'],['Erledigt','Erledigt']])
+  expect(ruleWords({id:'manual:check',label:'Prüfung',kinds:['work'],labels:['ui'],fallback_owner_id:'ada'},[{id:'ada',name:'Ada'}],'de')).toBe('Alle Tickets · Arten: work · Labels: ui · Bestätigt von der ticketverantwortlichen Person, sonst Ada')
+  expect(resetChanges({in_progress:[{id:'design_attached'},{id:'estimate_set',condition:'code'}]}, {in_progress:[{id:'estimate_set'},{id:'acceptance_present'}]}, 'de')).toEqual([
+    'Entfällt: Freigegebenes Design angehängt.', 'Wird wieder aufgenommen: Abnahmekriterien beschrieben.', 'Verwendet die Workspace-Version: Schätzung gesetzt.',
+  ])
+  expect(resetChanges({}, {}, 'de')).toEqual(['Die Prüfungen bleiben gleich; künftige Workspace-Änderungen gelten hier sofort.'])
+  expect(resetChanges({in_progress:[{id:'acceptance_present'},{id:'estimate_set'}]}, {in_progress:[{id:'estimate_set'},{id:'acceptance_present'}]}, 'de')).toEqual(['Bereit übernimmt wieder die Reihenfolge des Workspace-Standards.'])
   expect(definitionChangeWords(changes[1]!,date,'en','Code tickets · Kinds: work · Labels: security')).toBe('The workspace default now says Code tickets · Kinds: work · Labels: security (since 9\u00a0Oct)')
   const context: DefinitionContext = {project_id:'project-a',definition:{id:'copy',revision:'copy-revision',source:'project',copied_from_revision:'original-copy-revision',checks:{}},workspace_default:{id:'workspace',revision:'workspace-revision',source:'workspace',copied_from_revision:null,checks:{}},copied_from_checks:{},can_manage:true}
   vi.mocked(api).mockResolvedValue({ok:true,json:async () => context} as Response)

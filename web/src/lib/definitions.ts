@@ -9,6 +9,11 @@ export const DEFINITION_BLOCKS = [
   { id: 'done', name: 'Done', to: 'Done' },
 ] as const
 export type DefinitionStatus = typeof DEFINITION_BLOCKS[number]['id']
+export function definitionBlocks(language = 'en') {
+  return DEFINITION_BLOCKS.map(block => language === 'de' ? { ...block, ...({
+    in_progress: { name: 'Bereit', to: 'In Arbeit' }, qa: { name: 'Qualitätsprüfung', to: 'Qualitätsprüfung' }, done: { name: 'Erledigt', to: 'Erledigt' },
+  }[block.id]) } : block)
+}
 export type DefinitionCondition = 'all' | 'ui' | 'code' | 'blocked' | 'release_notes' | 'releases'
 export interface DefinitionRule { id: string; label?: string; label_de?: string; condition?: DefinitionCondition; kinds?: string[]; labels?: string[]; owner_id?: string | null; fallback_owner_id?: string | null }
 export type DefinitionChecks = Partial<Record<DefinitionStatus, DefinitionRule[]>>
@@ -63,9 +68,9 @@ export function definitionDeskWords(key: string, count: number, language = 'en')
   return language === 'de' ? `${key}: ${count}\u00a0${count === 1 ? 'Änderung' : 'Änderungen'} am Workspace-Standard ${count === 1 ? 'wartet' : 'warten'} auf eine Entscheidung` : `${key}: ${count}\u00a0${count === 1 ? 'change' : 'changes'} to the workspace default ${count === 1 ? 'waits' : 'wait'} for a decision`
 }
 export const DEFINITION_CONDITION_OPTIONS = [
-  { value: 'all', detail: 'Every ticket' },
-  { value: 'code', detail: 'Tickets that change code' },
-  { value: 'ui', detail: 'Tickets labelled ui' },
+  { value: 'all', detail: 'Every ticket', detail_de: 'Jedes Ticket' },
+  { value: 'code', detail: 'Tickets that change code', detail_de: 'Tickets mit Codeänderungen' },
+  { value: 'ui', detail: 'Tickets labelled ui', detail_de: 'Tickets mit dem Label ui' },
 ] as const
 export const manualRule = (rule: DefinitionRule) => rule.id.startsWith('manual:')
 export const ruleIcon = (rule: DefinitionRule): IconName => manualRule(rule) ? 'person-check' : rule.id === 'lesson_recorded' ? 'book' : DEFINITION_CATALOG.find(c => c.id === rule.id)?.icon ?? 'list-checks'
@@ -75,12 +80,13 @@ export function fixedRuleCondition(rule: DefinitionRule): DefinitionCondition | 
 }
 export const ruleLabel = (rule: DefinitionRule, language = 'en') => (language === 'de' ? rule.label_de : rule.label) || (language === 'de' ? DEFINITION_CATALOG.find(c => c.id === rule.id)?.de : DEFINITION_CATALOG.find(c => c.id === rule.id)?.en) || (rule.id === 'lesson_recorded' ? language === 'de' ? 'Lehre festgehalten' : 'Lesson recorded' : '') || rule.label || rule.id
 export const ruleCondition = (rule: DefinitionRule): DefinitionCondition => rule.condition || DEFINITION_CATALOG.find(c => c.id === rule.id)?.condition || 'all'
-export function ruleOwnerWords(rule: DefinitionRule, people: { id: string; name: string }[] = []): string {
-  const name = (id: string) => people.find(person => person.id === id)?.name ?? 'a named person'
+export function ruleOwnerWords(rule: DefinitionRule, people: { id: string; name: string }[] = [], language = 'en'): string {
+  const name = (id: string) => people.find(person => person.id === id)?.name ?? (language === 'de' ? 'einer benannten Person' : 'a named person')
+  if (language === 'de') return rule.owner_id ? `Bestätigt von ${name(rule.owner_id)}` : `Bestätigt von der ticketverantwortlichen Person, sonst ${rule.fallback_owner_id ? name(rule.fallback_owner_id) : 'einem Projektadministrator'}`
   return rule.owner_id ? `Ticked by ${name(rule.owner_id)}` : `Ticked by the ticket’s assignee, else ${rule.fallback_owner_id ? name(rule.fallback_owner_id) : 'a project admin'}`
 }
-export function ruleWords(rule: DefinitionRule, people: { id: string; name: string }[] = []): string {
-  return [DEFINITION_CONDITIONS[ruleCondition(rule)], rule.kinds?.length ? `Kinds: ${rule.kinds.join(', ')}` : '', rule.labels?.length ? `Labels: ${rule.labels.join(', ')}` : '', manualRule(rule) ? ruleOwnerWords(rule, people) : ''].filter(Boolean).join(' · ')
+export function ruleWords(rule: DefinitionRule, people: { id: string; name: string }[] = [], language = 'en'): string {
+  return [definitionConditionWords(rule, language), rule.kinds?.length ? `${language === 'de' ? 'Arten' : 'Kinds'}: ${rule.kinds.join(', ')}` : '', rule.labels?.length ? `Labels: ${rule.labels.join(', ')}` : '', manualRule(rule) ? ruleOwnerWords(rule, people, language) : ''].filter(Boolean).join(' · ')
 }
 export const cloneChecks = (checks: DefinitionChecks = {}): DefinitionChecks => JSON.parse(JSON.stringify(checks))
 export const checkCount = (checks: DefinitionChecks = {}) => DEFINITION_BLOCKS.reduce((n, b) => n + (checks[b.id]?.length ?? 0), 0)
@@ -106,18 +112,19 @@ export function definitionDiff(own: DefinitionChecks, workspace: DefinitionCheck
     ]
   })
 }
-export function resetChanges(own: DefinitionChecks, workspace: DefinitionChecks = {}): string[] {
+export function resetChanges(own: DefinitionChecks, workspace: DefinitionChecks = {}, language = 'en'): string[] {
   const diff = definitionDiff(own, workspace), lines: string[] = []
   for (const [kind, verb] of [['added', 'Dropped'], ['left', 'Comes back'], ['changed', 'Uses the workspace version']] as const) {
-    const names = diff.filter(r => r.kind === kind).map(r => ruleLabel(r.item))
-    if (names.length) lines.push(`${verb}: ${names.join(', ')}.`)
+    const names = diff.filter(r => r.kind === kind).map(r => ruleLabel(r.item, language))
+    const translated = { added: 'Entfällt', left: 'Wird wieder aufgenommen', changed: 'Verwendet die Workspace-Version' }[kind]
+    if (names.length) lines.push(`${language === 'de' ? translated : verb}: ${names.join(', ')}.`)
   }
   for (const block of DEFINITION_BLOCKS) {
     const shared = (own[block.id] ?? []).filter(r => workspace[block.id]?.some(d => d.id === r.id)).map(r => r.id)
     const order = (workspace[block.id] ?? []).filter(r => shared.includes(r.id)).map(r => r.id)
-    if (JSON.stringify(shared) !== JSON.stringify(order)) lines.push(`${block.name} returns to the workspace check order.`)
+    if (JSON.stringify(shared) !== JSON.stringify(order)) lines.push(language === 'de' ? `${definitionBlocks(language).find(b => b.id === block.id)!.name} übernimmt wieder die Reihenfolge des Workspace-Standards.` : `${block.name} returns to the workspace check order.`)
   }
-  if (!lines.length) lines.push('The checks stay the same; future workspace changes apply here at once.')
+  if (!lines.length) lines.push(language === 'de' ? 'Die Prüfungen bleiben gleich; künftige Workspace-Änderungen gelten hier sofort.' : 'The checks stay the same; future workspace changes apply here at once.')
   return lines
 }
 async function request<T>(path: string, init?: RequestInit): Promise<T> {

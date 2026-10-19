@@ -5,14 +5,15 @@ import AppIcon from '../AppIcon.vue'
 import FloatingPanel from '../work/FloatingPanel.vue'
 import { claimSettingsPopover } from '../../lib/settingsOverlays'
 import { useProjectSettingsOverlay } from '../../lib/projectSettings'
-import { fillProjectSettingsExplainer, PROJECT_SETTINGS_EXPLAINERS, type ProjectSettingsExplainerContext, type ProjectSettingsExplainerId } from '../../lib/projectSettingsExplainers'
+import { DEFINITION_EXPLAINERS_DE, fillProjectSettingsExplainer, PROJECT_SETTINGS_EXPLAINERS, type ProjectSettingsExplainerContext, type ProjectSettingsExplainerId } from '../../lib/projectSettingsExplainers'
 
-const props = defineProps<ProjectSettingsExplainerContext & { id: ProjectSettingsExplainerId; label?: string }>()
+const props = defineProps<ProjectSettingsExplainerContext & { id: ProjectSettingsExplainerId; label?: string; language?: 'en' | 'de' }>()
+const t = (en: string, de: string) => props.language === 'de' ? de : en
 const button = ref<HTMLButtonElement>(), heading = ref<HTMLElement>(), content = ref<HTMLElement>()
 const open = ref(false), phone = ref(false), headingId = useId()
 const registerOverlay = useProjectSettingsOverlay()
 let release: (() => void) | undefined, unregister: (() => void) | undefined
-const text = computed(() => PROJECT_SETTINGS_EXPLAINERS[props.id])
+const text = computed(() => props.language === 'de' && props.id in DEFINITION_EXPLAINERS_DE ? DEFINITION_EXPLAINERS_DE[props.id as keyof typeof DEFINITION_EXPLAINERS_DE] : PROJECT_SETTINGS_EXPLAINERS[props.id])
 function fill(value: string): string {
   return fillProjectSettingsExplainer(value, props)
 }
@@ -34,14 +35,14 @@ onBeforeUnmount(() => close(false))
 </script>
 
 <template>
-  <button ref="button" type="button" class="how" :data-how="id" aria-haspopup="dialog" :aria-expanded="open" :aria-controls="open ? headingId : undefined" @click="show"><AppIcon name="info" :size="12" /><span>{{ label || 'How this works' }}</span></button>
+  <button ref="button" type="button" class="how" :data-how="id" aria-haspopup="dialog" :aria-expanded="open" :aria-controls="open ? headingId : undefined" @click="show"><AppIcon name="info" :size="12" /><span>{{ label || t('How this works','So funktioniert es') }}</span></button>
   <Teleport v-if="open && phone" to="body"><div class="explainer-scrim" aria-hidden="true" @click="close()" /></Teleport>
   <FloatingPanel v-if="open" :anchor="button ?? null" :width="400" :tallest="800" :label="text.title" cycle class="explainer project-settings-explainer" :class="{ 'as-sheet': phone }" @close="restore => close(restore)">
     <div ref="content" class="explainer-content" data-project-settings-overlay tabindex="-1">
-      <header class="ex-head"><h3 :id="headingId" ref="heading" tabindex="-1" data-autofocus>{{ text.title }}</h3><button type="button" class="icon-btn sm" aria-label="Close explanation" @click="close()"><AppIcon name="close" :size="14" /></button></header>
-      <section class="ex-s"><p class="ex-l">What it is</p><p>{{ fill(text.what) }}</p></section>
-      <section class="ex-s"><p class="ex-l">What happens</p><p>{{ fill(text.effect) }}</p></section>
-      <section class="ex-s"><p class="ex-l">Who sets it</p><p>{{ fill(text.who) }}</p></section>
+      <header class="ex-head"><h3 :id="headingId" ref="heading" tabindex="-1" data-autofocus>{{ text.title }}</h3><button type="button" class="icon-btn sm" :aria-label="t('Close explanation','Erklärung schließen')" @click="close()"><AppIcon name="close" :size="14" /></button></header>
+      <section class="ex-s"><p class="ex-l">{{ t('What it is','Was es ist') }}</p><p>{{ fill(text.what) }}</p></section>
+      <section class="ex-s"><p class="ex-l">{{ t('What happens','Was passiert') }}</p><p>{{ fill(text.effect) }}</p></section>
+      <section class="ex-s"><p class="ex-l">{{ t('Who sets it','Wer es festlegt') }}</p><p>{{ fill(text.who) }}</p></section>
       <p v-if="'where' in text && text.where" class="ex-where"><AppIcon name="eye" :size="13" /><span>{{ fill(text.where.label) }}</span></p>
     </div>
   </FloatingPanel>
