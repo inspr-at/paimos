@@ -12,6 +12,8 @@ const port = process.env.PLAYWRIGHT_PORT ?? String(derived)
 export default defineConfig({
   testDir: './tests',
   testMatch: '**/*.spec.ts',
+  // The performance config builds this head before applying cold-load throttling.
+  testIgnore: '**/performance.spec.ts',
   ...browserPolicy(process.env, 4, true),
   // AEON-410's one-worker shards must override policy after the spread.
   ...uiShardPolicy(process.env),
