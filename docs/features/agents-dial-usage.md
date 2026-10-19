@@ -71,7 +71,8 @@ the refilling account); the dial words them in the person's time zone.
 - A number keeps its unit ("3 h", "77 %", "2.2 %/h") and a weekday its time
   ("Mon ~20:20") on one line. In an account row the forecast always shows
   whole; the account name yields first and shows in full on hover or focus.
-  On phones the status column grows to fit "active" or a reading's age.
+  "Private account" is not cut: where the name column is too narrow for it
+  (a wide system font), it takes a second line inside the row. On phones the status column grows to fit "active" or a reading's age.
 - The folded lines show only at 1100 px and wider and only for harnesses with
   a measured pool; they sit over the existing gap after the count, so the
   control and its units keep their positions. Amber marks a line that runs
