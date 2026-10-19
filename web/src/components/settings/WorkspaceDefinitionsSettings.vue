@@ -21,8 +21,16 @@ const editable = computed(() => !!context.value?.can_manage && session.identity?
 const checks = computed(() => context.value?.definition?.checks ?? {})
 const admins = computed(() => context.value?.admins.map(person => person.name).join(', ') ?? '')
 const empty = computed(() => !checkCount(checks.value))
-function failed(problem: unknown) { error.value = problem instanceof APIError && problem.status === 409 ? t('The workspace default changed. Reload before trying again.','Der Workspace-Standard hat sich geändert. Vor einem erneuten Versuch neu laden.') : problem instanceof Error ? problem.message : t('The workspace default could not be read.','Der Workspace-Standard konnte nicht gelesen werden.'); if (problem instanceof APIError && [403,409].includes(problem.status)) stale.value = true }
+function failed(problem: unknown) {
+  error.value = problem instanceof APIError && problem.status === 409 ? t('The workspace default changed. Reload before trying again.','Der Workspace-Standard hat sich geändert. Vor einem erneuten Versuch neu laden.') : problem instanceof Error ? problem.message : t('The workspace default could not be read.','Der Workspace-Standard konnte nicht gelesen werden.')
+  if (problem instanceof APIError && [403,409].includes(problem.status)) stale.value = true
+  if (context.value && !editor.value?.formOpen) {
+    const owner=scope.owner.value
+    toast(error.value,{tone:'error',key:'definitions/workspace',action:{label:t('Reload','Neu laden'),run:()=>{if(scope.owner.value===owner&&!busy.value)load()}}})
+  }
+}
 function load() {
+  if (busy.value) return
   loading.value = true; error.value = ''
   void reads.run(({after,signal}) => after(readWorkspaceDefinitionContext(undefined,signal),saved => {context.value=saved;stale.value=false}),{failed,settled:()=>{loading.value=false}})
 }
@@ -65,7 +73,7 @@ onBeforeUnmount(()=>{stopLive?.();stopAccess()})
     <template #lead>{{ t('The checks a ticket must pass before it enters In progress, QA or Done. Other statuses have none.','Die Prüfungen vor dem Wechsel eines Tickets zu In progress, QA oder Done. Für andere Status gibt es keine.') }}</template>
     <p v-if="context && !editable" class="lock-line"><AppIcon name="lock" :size="14" />{{ t(`Admins change the workspace default${admins ? `: ${admins}` : ''}. These checks are read-only.`,`Administratoren ändern den Workspace-Standard${admins ? `: ${admins}` : ''}. Die Prüfungen sind schreibgeschützt.`) }}</p>
     <div class="origin" :aria-busy="loading || busy"><AppIcon :name="empty ? 'minus' : 'folders'" :size="16" /><div><b>{{ empty ? t('No workspace default','Kein Workspace-Standard') : t('The workspace default','Der Workspace-Standard') }}</b><p>{{ empty ? t('No workspace default. Tickets move freely in every project that has no definition of its own.','Kein Workspace-Standard. Tickets bewegen sich frei in jedem Projekt ohne eigene Definition.') : t(`For every project without a definition of its own. Changed on ${definitionDate(context?.definition?.revision ?? '',language)}.`,`Für jedes Projekt ohne eigene Definition. Geändert am ${definitionDate(context?.definition?.revision ?? '',language)}.`) }}</p></div></div>
-    <p v-if="error" class="error" role="alert">{{ error }} <button type="button" class="link-btn" :disabled="busy" @click="load">{{ t('Reload','Neu laden') }}</button></p>
+    <p v-if="!context && !loading && error" class="error" role="alert">{{ error }} <button type="button" class="link-btn" :disabled="busy" @click="load">{{ t('Reload','Neu laden') }}</button></p>
     <p v-else-if="!context && loading" role="status">{{ t('Reading the definition…','Definition wird gelesen…') }}</p>
     <DefinitionEditor v-if="context" ref="editor" :key="scope.owner.value" :checks="checks" project-key="Workspace" scope="workspace" :editable="editable" :busy="busy" :error="error" @change="save" />
     <div v-if="context" class="differ">

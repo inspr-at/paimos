@@ -268,5 +268,15 @@ test('AEON-1317 failed stale and identity-bound decisions never claim success',a
   await navigate(page,'/p/PHAROS/settings/definitions');await expect(page.locator('#definition-changes')).toHaveCount(0);hold.release()
   await expect(page.locator('#definitions .origin')).toContainText('Uses the workspace default');await expect(page.getByText('Decision saved.',{exact:true})).toHaveCount(0)
   expect(world.writes.every(write=>write.path==='/api/projects/p-frozen/definitions/decisions')).toBe(true)
-  expect(errors).toEqual([]);await evidence([{assert:'failed decisions retain copy and waiting rows; a barrier-held result cannot cross project identity',width:page.viewportSize()!.width,theme:'light',locale:'en',passed:true}])
+  await navigate(page,'/settings/policies#definitions')
+  const workspaceCard=page.locator('#definitions'),first=workspaceCard.locator('[data-check="estimate_set"]')
+  await expect(first).toBeVisible();world.fail=true
+  const stable=await controlStability(page,{first,head:workspaceCard.locator('[data-block="in_progress"] .db-head')})
+  await stable.check(async()=>{await first.getByRole('button',{name:'More for Estimate set'}).click();await page.getByRole('menuitem',{name:'Remove',exact:true}).click();await expect(page.locator('.toast.error')).toContainText('Default save unavailable')});stable.done()
+  await expect(first).not.toContainText('Removed');await page.getByRole('button',{name:'Close check editor',exact:true}).click()
+  world.fail=false;world.summaryFail=true
+  await workspaceCard.getByRole('button',{name:'Add check to Done'}).click();await page.getByRole('menuitem',{name:/^Shipped in a release/}).click()
+  await expect(workspaceCard.locator('[data-check="released"]')).toBeVisible();await expect(page.locator('.toast.error')).toContainText('Project differences unavailable')
+  await expect(page.getByText('Workspace default saved.',{exact:true})).toHaveCount(0)
+  expect(errors).toEqual([]);await evidence([{assert:'failed decisions retain copy and waiting rows; barrier-held results cannot cross project identity; failed and partial workspace saves report errors without shifting rows',width:page.viewportSize()!.width,theme:'light',locale:'en',passed:true}])
 })
