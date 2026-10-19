@@ -46,6 +46,44 @@ func near(t *testing.T, what string, got *time.Time, want time.Time) {
 // held accounts excluded) and pin the verdict, the moment the headline names,
 // the safe pace, refill order and the honest states for missing readings.
 func TestQuotaOutlookReplayVerdicts(t *testing.T) {
+	t.Run("sparse weekly readings spread burn across the gap", func(t *testing.T) {
+		// Risk: booking a 20-hour increase at the later reading fabricates
+		// an 84 %/h spike instead of the measured average of 4.2 %/h.
+		now := time.Date(2026, 10, 19, 10, 0, 0, 0, time.UTC)
+		start, reset := now.Add(-20*time.Hour), now.Add(24*time.Hour)
+		for _, tc := range []struct {
+			name     string
+			oldReset time.Time
+			perHour  float64
+		}{
+			{"same window", reset, 4.2},
+			{"confirmed refill counts from zero", now.Add(-10 * time.Hour), 4.7},
+		} {
+			t.Run(tc.name, func(t *testing.T) {
+				g := buildGroup("claude", []outlookInput{{ID: "a", Harness: "claude", Limit: 100, Samples: []weeklySample{
+					{ReadAt: start, Used: 10, ResetAt: tc.oldReset},
+					{ReadAt: now, Used: 94, ResetAt: reset},
+				}}}, now, now)
+				hours := 0
+				for _, hour := range g.History {
+					want := 0.0
+					if !hour.HourAt.Before(start) && hour.HourAt.Before(now) {
+						want = tc.perHour
+						hours++
+						if !hour.Known {
+							t.Fatalf("measured gap hour %v is unknown", hour.HourAt)
+						}
+					}
+					if math.Abs(hour.Burn[0]-want) > 1e-9 {
+						t.Errorf("burn at %v = %v, want %v %%/h", hour.HourAt, hour.Burn[0], want)
+					}
+				}
+				if hours != 20 {
+					t.Fatalf("checked %d gap hours, want 20", hours)
+				}
+			})
+		}
+	})
 	t.Run("weekly buckets and duplicate phases never become burn", func(t *testing.T) {
 		// Risk: the OPS-reported seven_day=78 / overage=0 phase rows
 		// alternate buckets and turn a repeated reading into weekly burn.
