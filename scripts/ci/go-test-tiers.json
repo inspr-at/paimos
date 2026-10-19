@@ -5402,6 +5402,8 @@
     ,
     {"kind":"go","package":"internal/cli","name":"TestSignalContextDoesNotPoisonTheNextCommand","tier":"ESSENTIAL"}
     ,
+    {"kind":"go","package":"internal/cli","name":"TestSignalDeliveryListenerEndsVendorDescendants","tier":"ESSENTIAL"}
+    ,
     {"kind":"go","package":"internal/cli","name":"TestSignalEndsBlockedCommand","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/cli","name":"TestSignalInterruptedListenerReportsInterrupt","tier":"ESSENTIAL"}

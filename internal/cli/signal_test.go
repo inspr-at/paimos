@@ -54,6 +54,13 @@ func TestSignalInterruptedListenerReportsInterrupt(t *testing.T) {
 // the exit status and combined output. The child reports readiness on fd 3.
 func interruptChild(t *testing.T, test, mode string) (int, string) {
 	t.Helper()
+	return interruptChildAfter(t, test, mode, nil, nil)
+}
+
+// interruptChildAfter is interruptChild with extra child environment. A non-nil
+// ready is the barrier before SIGINT instead of the child's fd 3 marker.
+func interruptChildAfter(t *testing.T, test, mode string, env []string, ready func(*testing.T)) (int, string) {
+	t.Helper()
 	isolate(t)
 	t.Setenv("HOME", t.TempDir())
 	exe, err := os.Executable()
@@ -66,8 +73,10 @@ func interruptChild(t *testing.T, test, mode string) (int, string) {
 	}
 	defer readyR.Close()
 	cmd := exec.Command(exe, "-test.run=^"+test+"$", "-test.count=1", "-test.timeout=30s")
-	cmd.Env = append(os.Environ(), "AEON_SIGNAL_CHILD=1", "AEON_SIGNAL_MODE="+mode)
-	cmd.ExtraFiles = []*os.File{readyW}
+	cmd.Env = append(append(os.Environ(), "AEON_SIGNAL_CHILD=1", "AEON_SIGNAL_MODE="+mode), env...)
+	if ready == nil {
+		cmd.ExtraFiles = []*os.File{readyW}
+	}
 	var output bytes.Buffer
 	cmd.Stdout = &output
 	cmd.Stderr = &output
@@ -81,26 +90,39 @@ func interruptChild(t *testing.T, test, mode string) (int, string) {
 	t.Cleanup(func() {
 		_ = cmd.Process.Kill()
 	})
-	ready := make(chan error, 1)
-	go func() {
-		var marker [5]byte
-		_, err := io.ReadFull(readyR, marker[:])
-		if err == nil && string(marker[:]) != "ready" {
-			err = errors.New("unexpected readiness marker")
-		}
-		ready <- err
-	}()
-	select {
-	case err := <-ready:
-		if err != nil {
+	if ready != nil {
+		reached := false
+		defer func() {
+			if !reached {
+				_ = cmd.Process.Kill()
+				<-waited
+				t.Logf("child output:\n%s", output.String())
+			}
+		}()
+		ready(t)
+		reached = true
+	} else {
+		marked := make(chan error, 1)
+		go func() {
+			var marker [5]byte
+			_, err := io.ReadFull(readyR, marker[:])
+			if err == nil && string(marker[:]) != "ready" {
+				err = errors.New("unexpected readiness marker")
+			}
+			marked <- err
+		}()
+		select {
+		case err := <-marked:
+			if err != nil {
+				_ = cmd.Process.Kill()
+				<-waited
+				t.Fatalf("command never reached the fixture request: %v\n%s", err, output.String())
+			}
+		case <-time.After(10 * time.Second):
 			_ = cmd.Process.Kill()
 			<-waited
-			t.Fatalf("command never reached the fixture request: %v\n%s", err, output.String())
+			t.Fatalf("command never reached the fixture request\n%s", output.String())
 		}
-	case <-time.After(10 * time.Second):
-		_ = cmd.Process.Kill()
-		<-waited
-		t.Fatalf("command never reached the fixture request\n%s", output.String())
 	}
 	if err := cmd.Process.Signal(syscall.SIGINT); err != nil {
 		t.Fatal(err)
