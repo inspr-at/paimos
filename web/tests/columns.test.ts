@@ -420,6 +420,15 @@ test('AEON-1470 the set depends only on width, chosen columns, minimums and sort
 // AEON-1470 (fix 7). Risk: Automatic's wide extras stepping aside outside the give-way, so the column the list is sorted
 // by goes too, Display is never told what the width hides, and the set flaps at the extras' threshold.
 test('AEON-1470 Automatic wide extras give way in the same pipeline: the sorted one stays, every one that leaves is reported, and returns with 16 px to spare', () => {
+  // The 420 px wide-table target must not hide Assignee on a narrower table:
+  // its widths can shrink and still leave Title at its minimum. This also
+  // restores Assignee after it stepped aside in the wide-table pipeline.
+  const narrowPresent = { assigned: true, parent: true }
+  for (const width of [976, 1100, 1184, 1440, 1499]) for (const previous of [[], ['assignee']]) {
+    const narrow = visibleColumns(width, { phone: false, present: narrowPresent, fit: { mins: GRID_MINS, previous } })
+    assert.deepEqual(narrow.columns.map(column => column.id), ['key', 'title', 'status', 'priority', 'assignee', 'parent', 'updated'], `${width}, previously hidden: ${previous}`)
+    assert.deepEqual(narrow.dropped, [])
+  }
   const present = { assigned: true, parent: true, estimate: true, release: true, tags: true, model: true, tokens: true, list_cost: true, suggested: true, progress: true, eta: true }
   const at = (width: number, fit: ColumnFit = {}, shown: typeof present | { assigned: true; estimate: true; release: true; tags: true } = present) => {
     const out = visibleColumns(width, { phone: false, present: shown, costAllowed: true, fit: { mins: GRID_MINS, ...fit } })

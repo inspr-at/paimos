@@ -200,8 +200,10 @@ export function visibleColumns(tableWidth: number, options: { phone: boolean; pr
   if (options.phone || options.hideParent) chosen.delete('parent')
   const ids = orderOf(prefs).filter(id => chosen.has(id))
   // Phone cards grow downward; desktop columns give way beside Title, the
-  // automatic wide extras first.
-  const fit = options.phone ? { ids, dropped: [] } : giveWay(ids, tableWidth, options.fit, customised ? undefined : id => widthOf(id, prefs))
+  // automatic wide extras first on wide tables only. Narrower automatic sets
+  // shrink their widths before hiding a column beside Title's minimum.
+  const automatic = !customised && tableWidth >= WIDE_TABLE ? (id: ColumnId) => widthOf(id, prefs) : undefined
+  const fit = options.phone ? { ids, dropped: [] } : giveWay(ids, tableWidth, options.fit, automatic)
   return { columns: fit.ids.map(id => COLUMN_BY_ID.get(id)!), customised, dropped: fit.dropped }
 }
 
