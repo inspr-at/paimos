@@ -44,7 +44,7 @@ const items = computed(() => {
 // The Desk returns to the page under the preview after the last decision of a round opened here.
 const shown = computed(() => items.value.slice(0, ROWS).map(item => ({
   // One name for action requests (AEON-1339): the kind is the title, so the detail does not repeat it.
-  key: deskItemID(item), held: item.held, title: item.kind === 'action_request' ? KIND.action_request : item.title, kind: item.kind, project: where(item),
+  key: deskItemID(item), held: item.held, definitionKey: item.definition_change?.project_key, title: item.kind === 'action_request' ? KIND.action_request : item.title, kind: item.kind, project: where(item),
   detail: [item.kind === 'action_request' ? '' : KIND[item.kind], relativeTime(item.created_at, { now: now.value })].filter(Boolean).join(' · '),
   to: deskLinkOut(item) || { path: '/decision-desk', query: { from: 'preview', item: deskItemID(item) } },
 })))
@@ -79,7 +79,7 @@ const partial = computed(() => desk.count !== null && shown.value.length < desk.
           <li v-for="row in group.rows" :key="row.key">
             <RouterLink class="dp-row" :to="row.to" :aria-label="`${row.title}, ${[row.project, row.detail].filter(Boolean).join(' · ')}`" :data-testid="`desk-preview-item-${row.key}`" @click="emit('navigate')">
               <span class="dp-ic" :class="[`k-${row.kind}`, { held: row.held }]"><AppIcon :name="KIND_ICON[row.kind]" :size="14" /></span>
-              <span class="dp-t"><b>{{ row.title }}</b><small><span v-if="row.project" class="dp-project"><AppIcon name="folder" :size="12" />{{ row.project }}</span><span v-if="row.project && row.detail"> · </span>{{ row.detail }}</small></span>
+              <span class="dp-t"><b><template v-if="row.definitionKey"><span class="definition-project-key">{{ row.definitionKey }}</span>{{ row.title.slice(row.definitionKey.length) }}</template><template v-else>{{ row.title }}</template></b><small><span v-if="row.project" class="dp-project"><AppIcon name="folder" :size="12" />{{ row.project }}</span><span v-if="row.project && row.detail"> · </span>{{ row.detail }}</small></span>
               <span class="dp-open" aria-hidden="true">Open</span>
             </RouterLink>
           </li>
@@ -96,6 +96,7 @@ const partial = computed(() => desk.count !== null && shown.value.length < desk.
 </template>
 
 <style scoped>
+.definition-project-key { white-space: nowrap; overflow-wrap: normal; }
 .dp { display: flex; flex: 1 1 auto; flex-direction: column; gap: 8px; min-height: 0; }
 .dp-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; min-height: 36px; padding: 0 6px; }
 .dp-title { display: flex; align-items: baseline; gap: 12px; min-width: 0; }

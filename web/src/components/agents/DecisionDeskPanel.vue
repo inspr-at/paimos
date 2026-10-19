@@ -49,7 +49,7 @@ const incomplete = computed(() => !!desk.projection && (desk.projection.has_more
         <li v-for="item in group.items" :key="deskItemID(item)" class="desk-line" :class="{ held: item.held }">
           <span class="mark" :class="`k-${item.kind}`" aria-hidden="true"><AppIcon :name="KIND_ICON[item.kind]" :size="15" /></span>
           <span class="dl-body">
-            <RouterLink :to="itemLink(item)" class="desk-item" :data-testid="`agents-desk-item-${deskItemID(item)}`">{{ rowTitle(item) }}</RouterLink>
+            <RouterLink :to="itemLink(item)" class="desk-item" :data-testid="`agents-desk-item-${deskItemID(item)}`"><template v-if="item.definition_change"><span class="definition-project-key">{{ item.definition_change.project_key }}</span>{{ rowTitle(item).slice(item.definition_change.project_key.length) }}</template><template v-else>{{ rowTitle(item) }}</template></RouterLink>
             <span class="dl-meta"><a v-if="item.project?.href" class="row-project" :href="item.project.href" target="_blank" rel="noopener" :data-tip="`Open ${item.project.name} in a new tab`" data-testid="agents-desk-project"><AppIcon name="folder" :size="13" /><span>{{ item.project.name }}</span></a><span v-else-if="item.project" class="row-project quiet"><AppIcon name="folder" :size="13" /><span>{{ item.project.name }}</span></span><span v-if="item.created_at" class="dl-age">{{ relativeTime(item.created_at, { now }) }}</span></span>
           </span>
         </li>
@@ -63,6 +63,7 @@ const incomplete = computed(() => !!desk.projection && (desk.projection.has_more
 </template>
 
 <style scoped>
+.definition-project-key { white-space: nowrap; overflow-wrap: normal; }
 .desk-panel { overflow: hidden; }.desk-panel.waiting { background: var(--gold-wash); }
 .card-head { display: flex; align-items: center; flex-wrap: wrap; gap: 10px; padding: 16px 20px; }h2 { margin: 0; font-size: 15px; font-weight: 600; }.desk-count { min-inline-size: 3ch; font: 600 12px var(--mono); font-variant-numeric: tabular-nums; }.card-head .btn { margin-left: auto; }
 .desk-group { border-top: 1px solid var(--line); }.group-title { display: flex; flex-wrap: wrap; gap: 8px 16px; margin: 0; padding: 12px 20px 6px; font-size: 12px; font-weight: 600; }.group-title small { font-size: 11px; font-weight: 400; color: var(--ink-3); }ul { list-style: none; padding: 0; margin: 0; }.desk-line { position: relative; display: grid; grid-template-columns: 28px minmax(0, 1fr); align-items: start; gap: 10px; min-height: 44px; padding: 10px 20px; color: var(--ink); font-size: 13px; overflow-wrap: anywhere; }.desk-line svg { flex: none; }.desk-line:hover { background: var(--row-hover); }

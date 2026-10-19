@@ -73,9 +73,12 @@ function failed(problem: unknown, target: string) {
 function load() {
   if (busy.value) return
   const target = props.project.id
+  rememberLayout()
   loading.value = true; error.value = ''
   void reads.run(({ after, signal }) => after(readDefinitionContext(target, signal), value => {
     if (props.project.id !== target || value.project_id !== target) return
+    const previous = context.value
+    if (previous && (previous.definition?.revision !== value.definition?.revision || previous.workspace_default?.revision !== value.workspace_default?.revision)) editorEpoch.value++
     context.value = value; stale.value = false; noticeShown.value ||= !!value.pending_changes?.length; void nextTick(rememberLayout); landOnNotice()
   }), { failed: problem => { failed(problem, target); stale.value = true }, settled: () => { loading.value = false } })
 }
@@ -83,6 +86,7 @@ function save(next: DefinitionChecks, applied: () => void = () => {}) {
   const captured = context.value, target = props.project.id
   if (!captured || !mayManage.value || busy.value) return
   const wasOwn = captured.definition?.source === 'project'
+  rememberLayout()
   busy.value = true; error.value = ''
   void scope.run(({ after, signal }) => after(saveDefinition(target, next, captured, signal), saved => {
     if (target !== props.project.id || context.value !== captured) return
@@ -93,6 +97,7 @@ function save(next: DefinitionChecks, applied: () => void = () => {}) {
 function decide(change: DefinitionChange, decision: 'accept' | 'keep', applied: () => void) {
   const captured = context.value, target = props.project.id
   if (!captured || !mayManage.value || busy.value || !captured.pending_changes?.some(row => row.check_id === change.check_id)) return
+  rememberLayout()
   busy.value = true; error.value = ''
   void scope.run(({after,signal}) => after(decideDefinitionChange(target,change,decision,captured,signal),saved => {
     if (target !== props.project.id || context.value !== captured || saved.project_id !== target) return
@@ -110,6 +115,7 @@ function showReset(event: MouseEvent) {
 function confirmReset() {
   const action = reset.value
   if (!action || !mayManage.value || busy.value || action.projectID !== props.project.id || action.context !== context.value) return
+  rememberLayout()
   busy.value = true; error.value = ''
   void scope.run(({ after, signal }) => after(resetDefinition(action.projectID, action.context, signal), saved => {
     if (action.projectID !== props.project.id || reset.value !== action || context.value !== action.context) return
@@ -137,7 +143,7 @@ onBeforeUnmount(() => { stopLive?.(); stopAccess(); closeReset(false) })
       <p v-if="noticeShown" id="definition-changes" ref="notice" class="default-notice" :style="noticeHeight ? { minHeight: `${noticeHeight}px` } : undefined" role="status"><AppIcon name="history" :size="15" /><span class="notice-copy"><span><template v-for="(part, index) in keyParts(noticeText)" :key="index"><span v-if="index" class="project-key">{{ project.routeKey }}</span>{{ part }}</template></span></span></p>
       <DefinitionEditor v-if="context" ref="editor" :key="editorEpoch" :checks="checks" :workspace="workspace" :base="context.copied_from_checks" :project-key="project.routeKey" :own="own" :editable="mayManage && (own || !context.definition)" :busy="busy" :error="error" :people="project.people" :pending="pending" :changed-date="changedDate" @change="save" @decide="decide" />
     <FloatingPanel v-if="reset" :anchor="reset.anchor" :label="`Reset ${reset.key}’s definition`" :width="440" :tallest="650" sheet compact-sheet cycle settings-keys class="definition-reset" @close="closeReset">
-      <div ref="resetBody" class="reset-dialog" tabindex="-1"><header><h3> <template v-if="reset.context.workspace_default">Reset <span class="project-key">{{ reset.key }}</span> to the workspace default?</template><template v-else>Remove <span class="project-key">{{ reset.key }}</span>’s definition?</template></h3></header><div class="reset-content"><p><template v-if="reset.context.workspace_default"><span class="project-key">{{ reset.key }}</span> drops its own definition and follows the workspace default again.</template><template v-else>There is no workspace default, so tickets in <span class="project-key">{{ reset.key }}</span> move freely again.</template></p><ul><li v-for="line in reset.lines" :key="line">{{ line }}</li></ul><p>Tickets keep their status; the new checks apply to their next move.</p></div><footer><p class="reset-feedback" role="status">{{ error }}</p><button type="button" class="btn" @click="closeReset()">Cancel</button><button type="button" class="btn primary" :disabled="busy || !mayManage" @click="confirmReset">{{ reset.context.workspace_default ? 'Reset' : 'Remove' }}<KeyCap k="mod" /><KeyCap k="enter" /></button></footer></div>
+      <div ref="resetBody" class="reset-dialog" tabindex="-1"><header><h3><template v-if="reset.context.workspace_default">Reset <span class="project-key">{{ reset.key }}</span> to the workspace default?</template><template v-else>Remove <span class="project-key">{{ reset.key }}</span>’s definition?</template></h3></header><div class="reset-content"><p><template v-if="reset.context.workspace_default"><span class="project-key">{{ reset.key }}</span> drops its own definition and follows the workspace default again.</template><template v-else>There is no workspace default, so tickets in <span class="project-key">{{ reset.key }}</span> move freely again.</template></p><ul><li v-for="line in reset.lines" :key="line">{{ line }}</li></ul><p>Tickets keep their status; the new checks apply to their next move.</p></div><footer><p class="reset-feedback" role="status">{{ error }}</p><button type="button" class="btn" @click="closeReset()">Cancel</button><button type="button" class="btn primary" :disabled="busy || !mayManage" @click="confirmReset">{{ reset.context.workspace_default ? 'Reset' : 'Remove' }}<KeyCap k="mod" /><KeyCap k="enter" /></button></footer></div>
     </FloatingPanel>
   </SettingsCard>
 </template>
@@ -149,5 +155,4 @@ onBeforeUnmount(() => { stopLive?.(); stopAccess(); closeReset(false) })
 @media (max-width: 600px) { :global(.floating.definition-reset.sheet) { height: 100dvh; max-height: 100dvh !important; border-radius: 0; }.reset-dialog { height: 100%; }.reset-dialog header { padding-top: max(18px,env(safe-area-inset-top)); }.reset-content { flex: 1; }.reset-dialog footer { padding-bottom: max(14px,env(safe-area-inset-bottom)); }.reset-dialog footer .btn { flex: 1; } }
 @media (pointer: coarse), (max-width: 600px) { .link-btn, .origin .btn, .reset-dialog .btn { min-height: 44px; } }
 .default-notice { display: flex; align-items: start; gap: 10px; padding: 10px 2px 12px; font-size: 12.5px; line-height: 1.6; color: var(--ink-2); scroll-margin-top: 20px; }.default-notice > svg { flex: none; margin-top: 3px; color: var(--ink-3); }.origin, .default-notice { box-sizing: border-box; }.project-key { white-space: nowrap; overflow-wrap: normal; }
-
 </style>
