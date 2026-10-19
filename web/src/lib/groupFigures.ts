@@ -13,7 +13,7 @@ import { normaliseState, statusMeta } from './work.ts'
 import { fmtFinish, fmtHours, fmtInt, fmtTokens } from './workFigures.ts'
 
 // The column each grouping fills: it stays empty in the group rows, and its header orders the groups (AEON-1390).
-export const GROUP_COLUMN: Partial<Record<GroupBy, ColumnId>> = { status: 'status', priority: 'priority', assignee: 'assignee', tag: 'tags', epic: 'epic' }
+export const GROUP_COLUMN: Partial<Record<GroupBy, ColumnId>> = { status: 'status', priority: 'priority', assignee: 'assignee', tag: 'tags', epic: 'parent' }
 
 // ---------- The view narrowed to one group ----------
 // Values of one filter are alternatives, so the group's value replaces the view's own included values of the same

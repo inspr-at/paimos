@@ -6240,6 +6240,14 @@
     ,
     {"kind":"browser","file":"tests/aeon-1448-desk-tabrow.spec.ts","name":"type-size shots › AEON-1448: 375 and 390, the round action beside the tabs","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
+    {"kind":"browser","file":"tests/aeon-1470-list-titles.spec.ts","name":"AEON-1470 Parent cell shows the kind icon and key, adds the title from 200 px, and has no chip","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/aeon-1470-list-titles.spec.ts","name":"AEON-1470 Parent keeps a saved Epic column and its width","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/aeon-1470-list-titles.spec.ts","name":"AEON-1470 Parent stays out of the Epic group and the outline, and the column toggle does not move the other columns","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/aeon-1470-list-titles.spec.ts","name":"AEON-1470 Parent turns on at 40 percent, stays off at 10 percent, and a live parent does not change the columns","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
     {"kind":"browser","file":"tests/aeon-1470-list-titles.spec.ts","name":"AEON-1470 S1 and S2: the 1388 set and every column at 1024 (light, dark) and 1440","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
     {"kind":"browser","file":"tests/aeon-1470-list-titles.spec.ts","name":"AEON-1470 S5: Display keeps a dropped column ticked with \"hidden at this width\", and its sort stays offered","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
@@ -16035,6 +16043,8 @@
     {"kind":"node","file":"tests/codenames.test.ts","name":"the accessible line is the name, then the version, and never a release number","tags":["delete-candidate"],"tier":"GATED-FULL"}
     ,
     {"kind":"node","file":"tests/codenames.test.ts","name":"the release history fills the lookup, skipping releases without a name","tags":["delete-candidate"],"tier":"GATED-FULL"}
+    ,
+    {"kind":"node","file":"tests/columns.test.ts","name":"AEON-1470 Parent migrates Epic, latches at 30 percent, and leaves phones, groups and the outline","tier":"ESSENTIAL"}
     ,
     {"kind":"node","file":"tests/columns.test.ts","name":"AEON-1470 Title is never under 240 px at 760–1440 px, for the 1388 set, every column and wide saved widths","tier":"ESSENTIAL"}
     ,

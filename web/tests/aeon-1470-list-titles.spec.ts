@@ -420,3 +420,177 @@ test('AEON-1470 S6: phone rows at 390 stay as they were (light, dark)', async ({
   }
   log.save()
 })
+
+// ---------- AEON-1470 Parent (spec v2) ----------
+const parentHeader = (page: Page) => page.getByRole('columnheader', { name: 'Parent', exact: true })
+function shareData(withParent: number): Fixtures {
+  const d = fixtures()
+  for (const node of d.nodes) if (node.project === 'p-pharos') node.parent_id = 'p-pharos'
+  for (let index = 0; index < 4; index++) d.nodes.push({
+    id: `n-share-${index}`, key: `PHAROS-${30 + index}`, kind_slug: 'ticket', title: `Share ticket ${index + 1}`,
+    state: 'in_progress', project: 'p-pharos', parent_id: 'p-pharos', body: '', fields: {},
+    created_at: '2026-09-01T10:00:00Z', updated_at: '2026-09-23T09:00:00Z',
+  })
+  const children = d.nodes.filter(node => node.project === 'p-pharos' && node.id !== 'n-epic' && node.state !== 'cancelled' && ['work', 'ticket', 'task', 'epic'].includes(node.kind_slug))
+  for (const node of children.slice(0, withParent)) node.parent_id = 'n-epic'
+  return d
+}
+async function wholeShare(page: Page, openRows: number, withParent: number) {
+  return page.waitForResponse(async response => {
+    if (!response.url().includes('/api/projects/p-pharos/figures') || !response.ok()) return false
+    const body = await response.json() as { scope?: { kind?: string; open_rows?: number; open_with_parent?: number } }
+    return body.scope?.kind === 'whole_project' && body.scope.open_rows === openRows && body.scope.open_with_parent === withParent
+  })
+}
+
+test('AEON-1470 Parent cell shows the kind icon and key, adds the title from 200 px, and has no chip', async ({ page }, testInfo) => {
+  await page.setViewportSize({ width: 1440, height: 900 })
+  const d = fixtures()
+  d.preferences.theme = { choice: 'light' }
+  const landed = wholeShare(page, 6, 3)
+  await mockWork(page, d)
+  await page.goto('/p/PHAROS')
+  await landed
+  await expect(rows(page)).toHaveCount(5)
+  await expect(parentHeader(page)).toBeVisible()
+  await expect(page.locator('.parent-chip')).toHaveCount(0)
+  const child = row(page, 'PHAROS-11')
+  await expect(child.locator('.parent-glyph')).toHaveAttribute('width', '12')
+  expect(await child.locator('.parent-glyph').innerHTML()).toContain('M9 1.8')
+  await expect(child.locator('.parent-key')).toHaveText('PHAROS-10')
+  await expect(child.locator('.parent-name')).toHaveCount(0)
+  await expect(child.locator('td.c-parent')).toHaveAttribute('data-tip', 'Epic PHAROS-10\nGuarded multi-cloud provisioning')
+  await expect(row(page, 'PHAROS-13').locator('.parent-key')).toHaveText('PHAROS-12')
+  expect(await row(page, 'PHAROS-13').locator('.parent-glyph').innerHTML()).toContain('<rect')
+  await expect(row(page, 'PHAROS-13').locator('td.c-parent')).toHaveAttribute('data-tip', 'Ticket PHAROS-12\nAdd an Oracle Cloud connector')
+  const top = row(page, 'PHAROS-14').locator('td.c-parent')
+  await expect(top.locator('.parent-cell')).toHaveCount(0)
+  await expect(top).not.toHaveAttribute('data-tip')
+  await expect(top).not.toContainText('—')
+  const paint = await child.locator('.parent-cell').evaluate(el => { const style = getComputedStyle(el); return { radius: style.borderRadius, background: style.backgroundColor } })
+  expect(paint.radius).toBe('0px')
+  expect(paint.background === 'transparent' || paint.background === 'rgba(0, 0, 0, 0)').toBe(true)
+  expect((await page.locator('thead th.c-title').boundingBox())!.width).toBeGreaterThanOrEqual(240)
+
+  await page.setViewportSize({ width: 1024, height: 900 })
+  await expect(parentHeader(page)).toBeVisible()
+  await expect(page.locator('.parent-chip')).toHaveCount(0)
+  expect((await page.locator('thead th.c-title').boundingBox())!.width).toBeGreaterThanOrEqual(240)
+  await page.mouse.move(5, 5)
+  await page.screenshot({ path: testInfo.outputPath('aeon1470-1024-light-parent-on.png'), fullPage: false })
+
+  d.preferences['list:p-pharos'] = { widths: { parent: 240 } }
+  await page.setViewportSize({ width: 1440, height: 900 })
+  await page.goto('/p/PHAROS')
+  await expect(rows(page)).toHaveCount(5)
+  await expect(parentHeader(page)).toBeVisible()
+  await expect(child.locator('.parent-name')).toHaveText('Guarded multi-cloud provisioning')
+  await expect(row(page, 'PHAROS-14').locator('.parent-name')).toHaveCount(0)
+  expect(Math.abs((await page.locator('thead th.c-parent').boundingBox())!.width - 240)).toBeLessThan(8)
+  expect((await page.locator('thead th.c-title').boundingBox())!.width).toBeGreaterThanOrEqual(240)
+  await page.mouse.move(5, 5)
+  await page.screenshot({ path: testInfo.outputPath('aeon1470-1440-light-parent-on.png'), fullPage: false })
+
+  d.preferences.theme = { choice: 'dark' }
+  await page.emulateMedia({ colorScheme: 'dark' })
+  await page.goto('/p/PHAROS')
+  await expect(child.locator('.parent-name')).toHaveText('Guarded multi-cloud provisioning')
+  await expect(page.locator('.parent-chip')).toHaveCount(0)
+  await page.mouse.move(5, 5)
+  await page.screenshot({ path: testInfo.outputPath('aeon1470-1440-dark-parent-on.png'), fullPage: false })
+})
+
+test('AEON-1470 Parent stays out of the Epic group and the outline, and the column toggle does not move the other columns', async ({ page }, testInfo) => {
+  await page.setViewportSize({ width: 1440, height: 900 })
+  const d = fixtures()
+  d.preferences.theme = { choice: 'light' }
+  const landed = wholeShare(page, 6, 3)
+  await mockWork(page, d)
+  await page.goto('/p/PHAROS?group=epic')
+  await landed
+  await expect(page.locator('tr.group-row').first()).toBeVisible()
+  await expect(parentHeader(page)).toHaveCount(0)
+  await expect(page.locator('.parent-chip')).toHaveCount(0)
+  const before = await shownIds(page)
+  expect(before).toEqual(['key', 'title', 'status', 'priority', 'assignee', 'updated'])
+  await page.mouse.move(5, 5)
+  await page.screenshot({ path: testInfo.outputPath('aeon1470-1440-light-parent-grouped.png'), fullPage: false })
+  await page.getByRole('button', { name: /^Display/ }).click()
+  const menu = display(page)
+  await expect(menu.getByRole('radio', { name: 'Epic' })).toBeChecked()
+  const parentBox = menu.locator('li.row').filter({ has: menu.locator('input[data-column-row="parent"]') })
+  await expect(parentBox.locator('.away-note')).toHaveCount(0)
+  await parentBox.getByRole('checkbox', { name: 'Parent' }).check()
+  await expect(parentHeader(page)).toHaveCount(0)
+  expect(await shownIds(page)).toEqual(before)
+  await expect(parentBox.locator('.away-note')).toHaveCount(0)
+  await page.keyboard.press('Escape')
+
+  await page.goto('/p/PHAROS?view=outline')
+  const outline = page.getByRole('treegrid', { name: 'Ticket outline' })
+  await expect(outline).toBeVisible()
+  await expect(outline.getByRole('columnheader', { name: 'Parent', exact: true })).toHaveCount(0)
+  const outlineIds = () => outline.locator('thead th').evaluateAll(cells => cells.map(cell => cell.getAttribute('data-column-id')))
+  const outlineBefore = await outlineIds()
+  expect(outlineBefore).not.toContain('parent')
+  await page.getByRole('button', { name: /^Display/ }).click()
+  await display(page).getByRole('checkbox', { name: 'Parent' }).click()
+  await expect(outline.getByRole('columnheader', { name: 'Parent', exact: true })).toHaveCount(0)
+  expect(await outlineIds()).toEqual(outlineBefore)
+})
+
+test('AEON-1470 Parent keeps a saved Epic column and its width', async ({ page }) => {
+  await page.setViewportSize({ width: 1440, height: 900 })
+  const d = shareData(1)
+  d.preferences['list:p-pharos'] = {
+    order: ['status', 'epic', 'assignee', 'updated'],
+    visible: ['status', 'priority', 'epic', 'assignee', 'updated'],
+    widths: { epic: 240 },
+  }
+  await mockWork(page, d)
+  await page.goto('/p/PHAROS')
+  await expect(rows(page).first()).toBeVisible()
+  await expect(parentHeader(page)).toBeVisible()
+  expect(await shownIds(page)).toEqual(['key', 'title', 'status', 'parent', 'assignee', 'updated', 'priority'])
+  expect(Math.abs((await page.locator('thead th.c-parent').boundingBox())!.width - 240)).toBeLessThan(8)
+  await expect(page.locator('.parent-chip')).toHaveCount(0)
+  const saved = d.preferences['list:p-pharos'] as { order?: string[]; visible?: string[]; widths?: Record<string, number> }
+  saved.widths = { parent: 200, epic: 240 }
+  await page.goto('/p/PHAROS')
+  await expect(parentHeader(page)).toBeVisible()
+  expect(Math.abs((await page.locator('thead th.c-parent').boundingBox())!.width - 200)).toBeLessThan(8)
+
+  await page.setViewportSize({ width: 390, height: 844 })
+  await page.goto('/p/PHAROS')
+  await expect(page.locator('tr.ticket-row:not(.ghost)').first()).toBeVisible()
+  await expect(page.locator('[data-column-id="parent"]')).toHaveCount(0)
+  await expect(page.locator('.parent-chip')).toHaveCount(0)
+})
+
+test('AEON-1470 Parent turns on at 40 percent, stays off at 10 percent, and a live parent does not change the columns', async ({ page }) => {
+  await page.setViewportSize({ width: 1440, height: 900 })
+  const on = shareData(4)
+  const onLanded = wholeShare(page, 10, 4)
+  await mockWork(page, on)
+  await page.goto('/p/PHAROS')
+  await onLanded
+  await expect(rows(page).first()).toBeVisible()
+  await expect(parentHeader(page)).toBeVisible()
+
+  const off = shareData(1)
+  const offLanded = wholeShare(page, 10, 1)
+  await mockWork(page, off)
+  await page.goto('/p/PHAROS')
+  await offLanded
+  await expect(rows(page).first()).toBeVisible()
+  const before = await shownIds(page)
+  expect(before).not.toContain('parent')
+  await expect(parentHeader(page)).toHaveCount(0)
+  const ticket = off.nodes.find(node => node.id === 'n-4')!
+  ticket.parent_id = 'n-epic'
+  ticket.updated_at = '2026-09-23T11:59:00Z'
+  for (const id of ['n-share-0', 'n-share-1']) off.nodes.find(node => node.id === id)!.parent_id = 'n-epic'
+  await page.evaluate(([at]) => (window as unknown as { aeon1470Emit: (type: string, data: unknown, id: number) => void }).aeon1470Emit('node.updated', { id: 41, type: 'node.updated', actor_principal_id: '99999999-9999-4999-8999-999999999999', node_changes: [{ id: 'n-4', project_id: 'p-pharos', change: 'updated', fields: ['parent_id'], revision: at }] }, 41), [ticket.updated_at])
+  await expect.poll(() => shownIds(page)).toEqual(before)
+  await expect(parentHeader(page)).toHaveCount(0)
+})

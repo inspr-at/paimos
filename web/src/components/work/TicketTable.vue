@@ -5,7 +5,7 @@ import { vClipTip } from '../../directives/clipTip'
 import { formatEstimate, estimateDisplay } from '../../lib/estimates'
 import { computed, getCurrentInstance, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import type { ListItem } from '../../lib/api'
-import { COLUMN_BY_ID, costUnitLabel, layoutWidths, loadedFitWidth, releaseLabel, tagList, titleRoom, visibleColumns, withHostColumns, type ColumnDef, type ColumnId, type ListPrefs, type TagRef } from '../../lib/columns'
+import { COLUMN_BY_ID, costUnitLabel, hasSavedWidth, layoutWidths, loadedFitWidth, releaseLabel, tagList, titleRoom, visibleColumns, withHostColumns, type ColumnDef, type ColumnId, type ListPrefs, type TagRef } from '../../lib/columns'
 import { releaseCell, type NativeReleaseView } from '../../lib/releaseMembership'
 import { agentKey, ticketWorkers, withServerLead, type LiveAgent } from '../../lib/liveAgents'
 import { useLiveAgents } from '../../stores/liveAgents'
@@ -110,6 +110,8 @@ const props = defineProps<{
   groupDesc?: boolean
   // Group summaries (AEON-1388): each group's figures, by group key. With them, a group row is a totals line.
   groupFigures?: ReadonlyMap<string, GroupFigureState> | null
+  // Parent joins Automatic when the project figures, read once, say at least 30% of open tickets have a parent.
+  parentDefault?: boolean
 }>()
 // Unfiltered loads hold the expected height (so nothing below jumps); 1..28 rows.
 const skeletonRows = computed(() => Math.max(1, Math.min(28, props.expectedRows ?? 14)))
@@ -156,7 +158,7 @@ const groupName = (group: RowGroup) => group.project?.key ?? group.epic?.key ?? 
 const moreLabel = (group: RowGroup) => german.value ? `50 weitere zeigen in ${groupName(group)}` : `Show 50 more in ${groupName(group)}`
 const shownLabel = (group: RowGroup) => german.value ? `${group.loaded ?? group.rows.length} von ${group.total} gezeigt` : `${group.loaded ?? group.rows.length} of ${group.total} shown`
 
-const CLS: Record<ColumnId, string> = { key: 'c-key', title: 'c-title', status: 'c-status', priority: 'c-prio', assignee: 'c-assignee', epic: 'c-epic', release: 'c-release', tags: 'c-tags', cost: 'c-cost', estimate: 'c-estimate', created: 'c-created', updated: 'c-updated', progress: 'c-progress', eta: 'c-eta', model: 'c-model', tokens: 'c-tokens', list_cost: 'c-list-cost', paid: 'c-paid', suggested: 'c-suggested' }
+const CLS: Record<ColumnId, string> = { key: 'c-key', title: 'c-title', status: 'c-status', priority: 'c-prio', assignee: 'c-assignee', parent: 'c-parent', release: 'c-release', tags: 'c-tags', cost: 'c-cost', estimate: 'c-estimate', created: 'c-created', updated: 'c-updated', progress: 'c-progress', eta: 'c-eta', model: 'c-model', tokens: 'c-tokens', list_cost: 'c-list-cost', paid: 'c-paid', suggested: 'c-suggested' }
 const isPlanning = (id: string): id is PlanningColumn => (PLANNING_COLUMNS as string[]).includes(id)
 // Planning cells are not Tab stops. The focused row carries their descriptions.
 function planningDescribedBy(row: ListItem): string {
@@ -198,6 +200,7 @@ const present = computed(() => {
     tags: rows.some(row => tagList(row.fields).length > 0),
     progress: listed.some(row => progressOf(row) != null),
     eta: listed.some(row => { const eta = etaFromTicket(row.eta); return !!eta?.ready || !!eta?.live || !!row.eta?.has_working_session }),
+    parent: !!props.parentDefault,
     ...planningPresent(rows),
   }
 })
@@ -378,7 +381,7 @@ const layout = computed(() => {
   const mins: Partial<Record<string, number>> = {}
   for (const def of COLUMN_BY_ID.values()) if (gridMin(def) !== def.min) mins[def.id] = gridMin(def)
   const reserve = withHostColumns([], props.extraColumns).reduce((sum, def) => sum + def.min, 0)
-  const out = visibleColumns(width.value, { phone: phone.value, present: present.value, prefs: props.prefs, costAllowed: props.costAllowed ?? false, fit: { mins, reserve, sorted: props.sort.map(key => key.field), previous: droppedBefore } })
+  const out = visibleColumns(width.value, { phone: phone.value, present: present.value, prefs: props.prefs, costAllowed: props.costAllowed ?? false, hideParent: props.group === 'epic' || props.outline != null, fit: { mins, reserve, sorted: props.sort.map(key => key.field), previous: droppedBefore } })
   droppedBefore = out.dropped
   return out
 })
@@ -412,7 +415,7 @@ async function fitLoaded() {
   if (phone.value) { measuring.value = false; columnsSettled.value = true; return }
   // Fit each column when it first appears. Loading or expanding more rows must
   // not move controls already on screen; explicit Fit still uses all loaded rows.
-  if (!ids.value.some(id => id !== 'title' && !Number.isFinite(props.prefs?.widths?.[id]) && dragWidths.value[id] === undefined && !fittedColumns.has(id))) {
+  if (!ids.value.some(id => id !== 'title' && !hasSavedWidth(id, props.prefs) && dragWidths.value[id] === undefined && !fittedColumns.has(id))) {
     measuring.value = false
     columnsSettled.value = columnsAreSettled()
     return
@@ -430,7 +433,7 @@ async function fitLoaded() {
   }
   const next = { ...autoWidths.value }
   for (const id of ids.value) {
-    if (id === 'title' || Number.isFinite(props.prefs?.widths?.[id]) || dragWidths.value[id] !== undefined) continue
+    if (id === 'title' || hasSavedWidth(id, props.prefs) || dragWidths.value[id] !== undefined) continue
     if (fittedColumns.has(id)) continue
     next[id] = loadedFitWidth(definitions.value.get(id)!, Math.max(next[id] ?? 0, fittedWidth(id)))
     fittedColumns.add(id)
@@ -471,7 +474,7 @@ function bounds(id: string) {
 function growRoom(id: string) {
   let room = titleWidth.value - definitions.value.get('title')!.min
   for (const other of ids.value) {
-    if (other === 'title' || other === id || dragWidths.value[other] !== undefined || Number.isFinite(props.prefs?.widths?.[other])) continue
+    if (other === 'title' || other === id || dragWidths.value[other] !== undefined || hasSavedWidth(other, props.prefs)) continue
     room += Math.max(0, shownWidth(other) - definitions.value.get(other)!.min)
   }
   return Math.max(0, room)
@@ -483,7 +486,7 @@ function clampColumn(id: string, value: number) {
 // A status column too narrow for icon, a few letters of the label and the stale hint shows the icon alone, its label in
 // the tip, so the hint stays inside the cell (AEON-1470 F2); like Priority below 100 px.
 const narrowStatus = computed(() => !phone.value && (colWidth('status') ?? 138) < 104)
-// Status, priority and epic line up in the quick-create row when they keep their default places.
+// Status and priority line up in the quick-create row when they keep their default places.
 const quickAligned = computed(() => ids.value[2] === 'status' && ids.value[3] === 'priority')
 const card = ref<HTMLElement>()
 let sizer: ResizeObserver | undefined
@@ -693,27 +696,14 @@ function href(row: { key: string; project_key?: string; project?: { key: string 
   return project ? ticketPath(project, row.key) : undefined
 }
 function parentOf(row: ListItem) {
-  // Direct parents only: an epic, or the ticket a task belongs to. The project itself is implied.
+  // Direct parents only, of any kind. The project itself is implied.
   if (!row.parent || row.parent.kind_slug === 'project') return null
   return row.parent
 }
-// The epic a row belongs to: its own, or for a task its ticket's. The server names
-// it; older servers leave it to the parent (or the parent's row, when loaded).
-function epicOf(row: ListItem): { id: string; key: string; title: string } | null {
-  if (row.epic !== undefined) return row.epic
+function parentView(row: ListItem) {
   const parent = parentOf(row)
   if (!parent) return null
-  if (parent.kind_slug === 'epic') return parent
-  const up = props.rowsById.get(parent.id)
-  if (up?.epic) return up.epic
-  return up?.parent?.kind_slug === 'epic' ? up.parent : null
-}
-// Chip beside the title: the direct parent, unless the Epic column (or epic
-// grouping) already says it. A task's ticket always shows here.
-function epicChip(row: ListItem) {
-  const parent = parentOf(row)
-  if (!parent) return null
-  return parent.kind_slug === 'epic' && (props.group === 'epic' || has('epic')) ? null : parent
+  return { parent, icon: workIcon(parent), tip: `${kindLabel(parent.kind_slug)} ${parent.key}\n${parent.title}`, showTitle: (colWidth('parent') ?? 0) >= 200 }
 }
 const TAG_SHOWN = 3
 function tagTip(tags: TagRef[]) { return tags.map(tag => tag.name).join(', ') }
@@ -1185,12 +1175,6 @@ defineExpose({
                 <a class="title-link" :href="href(entry.row)" tabindex="-1" @click="linkClick"><span v-clip-tip="entry.row.title" class="title-text"><template v-for="(part, i) in highlight(entry.row.title, query)" :key="i"><mark v-if="part.match">{{ part.text }}</mark><template v-else>{{ part.text }}</template></template></span></a>
                 <span v-if="liveLabels?.has(entry.row.id)" class="live-label">{{ liveLabels.get(entry.row.id) }}</span>
                 <span v-if="childCount(entry)" class="child-count mono" :data-tip="plural(childCount(entry), 'child item')">{{ childCount(entry) }}</span>
-                <span v-if="!entry.tree && epicChip(entry.row)" class="parent-chip" :class="{ epic: epicChip(entry.row)!.kind_slug === 'epic' }" :data-tip="`${kindLabel(epicChip(entry.row)!.kind_slug)} ${epicChip(entry.row)!.key}\n${epicChip(entry.row)!.title}`">
-                  <AppIcon v-if="epicChip(entry.row)!.kind_slug === 'epic'" name="epic" :size="10" />
-                  <AppIcon v-else name="ticket" :size="10" />
-                  <span v-if="epicChip(entry.row)!.kind_slug === 'epic'" class="parent-title">{{ epicChip(entry.row)!.title }}</span>
-                  <span v-else class="parent-title mono">{{ epicChip(entry.row)!.key }}</span>
-                </span>
                 <TicketWorkers v-if="!has('assignee') && assigneeWorkers(entry.row).length" class="title-workers" variant="cue" :workers="assigneeWorkers(entry.row)" :ticket-key="entry.row.key" :stale="liveStale" />
                 <span v-if="dropTarget === entry.row.id" class="drop-pill"><AppIcon name="arrow" :size="11" />Move into {{ entry.row.key }}</span>
                 <span v-else-if="entry.tree?.stats && entry.tree.stats.scope" class="epic-progress" :data-tip="`${entry.tree.stats.done} of ${entry.tree.stats.scope} done${entry.tree.stats.total - entry.tree.stats.scope ? ` · ${entry.tree.stats.total - entry.tree.stats.scope} cancelled` : ''}`">
@@ -1230,13 +1214,11 @@ defineExpose({
                 </button><TicketWorkers v-if="!queued(entry.row) && assigneeWorkers(entry.row).length" :workers="assigneeWorkers(entry.row)" :ticket-key="entry.row.key" :stale="liveStale" /></div>
               </td>
               <td v-else-if="column.id === 'suggested'" class="c-suggested" :data-column-id="column.id" :data-column-label="column.label"><div class="cell"><SuggestedReleaseCell v-if="projectOf(entry.row)" :row="entry.row" :project-id="projectOf(entry.row)!" :now="now" /></div></td>
-              <td v-else-if="column.id === 'epic'" class="c-epic" :data-column-id="column.id" :data-column-label="column.label">
-                <div class="cell">
-                  <span v-if="epicOf(entry.row)" class="epic-cell" :data-tip="`Epic ${epicOf(entry.row)!.key}\n${epicOf(entry.row)!.title}`">
-                    <AppIcon name="epic" :size="12" class="epic-glyph" />
-                    <span class="epic-name">{{ epicOf(entry.row)!.title }}</span>
-                  </span>
-                  <span v-else class="empty" aria-label="No epic">—</span>
+              <td v-else-if="column.id === 'parent'" class="c-parent" :data-column-id="column.id" :data-column-label="column.label" :data-tip="parentView(entry.row)?.tip">
+                <div v-if="parentView(entry.row)" class="cell parent-cell">
+                  <AppIcon :name="parentView(entry.row)!.icon" :size="12" class="parent-glyph" />
+                  <span class="parent-key">{{ parentView(entry.row)!.parent.key }}</span>
+                  <span v-if="parentView(entry.row)!.showTitle" v-clip-tip class="parent-name">{{ parentView(entry.row)!.parent.title }}</span>
                 </div>
               </td>
               <td v-else-if="column.id === 'release'" class="c-release" :data-column-id="column.id" :data-column-label="column.label">
@@ -1519,13 +1501,6 @@ tbody .ticket-row.top:first-child td { border-top: 0; }
 .ticket-row.epic .title-link { font-weight: 650; }
 .title-link:focus-visible { box-shadow: none; }
 .child-count { flex-shrink: 0; height: 17px; padding: 0 6px; border-radius: 999px; background: var(--chip-bg); box-shadow: inset 0 0 0 1px var(--chip-line); font-size: 10.5px; line-height: 17px; color: var(--ink-2); }
-/* Parent chips stay quiet: tint only, 12px, capped; the title keeps the space first. */
-.parent-chip { display: inline-flex; align-items: center; gap: 5px; flex: 0 3 auto; min-width: 0; max-width: 180px; height: 20px; padding: 0 8px; border-radius: 999px; background: var(--code-bg); color: var(--ink-3); font-size: 12px; line-height: 20px; }
-.parent-chip.epic { min-width: 64px; }
-.parent-chip:not(.epic) { flex-shrink: 0; }
-.parent-chip.epic svg { color: var(--kind-parent); opacity: .85; }
-.parent-chip .mono { font-size: 11px; }
-.parent-title { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 /* Row actions float over the end of the title cell instead of reserving space in every
    row; the title fades out beneath them, whatever the row tint underneath. */
 td.c-title { position: relative; overflow: hidden; }
@@ -1533,9 +1508,6 @@ td.c-title { position: relative; overflow: hidden; }
    The title link and phone title text retain their own clipping. */
 @media (max-width: 720px), (pointer: coarse) { td.c-title { overflow: visible; } }
 .row-actions { position: absolute; top: 50%; right: 8px; display: inline-flex; gap: 2px; transform: translateY(-50%); visibility: hidden; }
-/* The parent chip steps out entirely while row actions show, so it is never clipped. */
-@media (hover: hover) { .ticket-row:hover .parent-chip { opacity: 0; } }
-.ticket-row.cursor .parent-chip, td.c-title:focus-within .parent-chip { opacity: 0; }
 /* Hover actions float at the end of the title. Reserve their width on opening,
    so hovering or focusing the recurring marker never shrinks the title link (two 24px
    buttons, the 2px gap, and the 8px inset). With the cell's 12px padding that
@@ -1616,8 +1588,10 @@ td.c-title { position: relative; overflow: hidden; }
 .table-card:has(col.c-progress) .c-eta :deep(.pct) { display: none; }
 th.c-progress, th.c-eta, td.c-progress, td.c-eta, th.c-tokens, td.c-tokens, th.c-list-cost, td.c-list-cost, th.c-paid, td.c-paid { padding-left: 8px; padding-right: 8px; }
 th.c-progress .th-sort, th.c-eta .th-sort, th.c-tokens .th-sort, th.c-list-cost .th-sort, th.c-paid .th-sort { letter-spacing: .08em; }
-.epic-cell { display: inline-flex; align-items: center; gap: 6px; min-width: 0; color: var(--ink-2); font-size: 12.5px; }
-.epic-name { overflow: hidden; text-overflow: ellipsis; }
+.parent-cell { gap: 6px; max-width: 100%; color: var(--ink-2); }
+.parent-glyph { flex: none; color: var(--ink-3); }
+.parent-key { flex: none; font: 500 11.5px/18px var(--mono); letter-spacing: .01em; font-variant-ligatures: none; color: var(--ink-2); }
+.parent-name { min-width: 0; overflow: hidden; text-overflow: ellipsis; font-size: 12.5px; }
 .cost-cell { display: inline-flex; align-items: center; gap: 6px; min-width: 0; color: var(--ink-2); font-size: 12.5px; }
 .cost-glyph { flex-shrink: 0; color: var(--ink-3); }
 .cost-name { overflow: hidden; text-overflow: ellipsis; }
@@ -1717,9 +1691,6 @@ button.release-chip:focus-visible { box-shadow: var(--focus-ring); }
 @container tickets (max-width: 900px) { .epic-progress .bar { display: none; } .epic-progress { padding-left: 8px; } }
 /* Below ~820px Priority keeps only its icon (label in the tooltip); Status keeps its label. */
 @container tickets (max-width: 820px) { th.c-prio .th-sort { letter-spacing: .06em; } .prio-label { display: none; } }
-/* A narrow table (the docked panel beside it) drops the epic chip rather than cutting it to a stub. */
-@media (min-width: 721px) { @container tickets (max-width: 1040px) { .title-cell:has(.title-workers) .parent-chip.epic { display: none; } .parent-chip.epic { min-width: 96px; } } }
-
 .c-check { display: none; }
 .phone-check { display: none; }
 @media (max-width: 720px) {
@@ -1817,7 +1788,6 @@ button.release-chip:focus-visible { box-shadow: var(--focus-ring); }
   /* The whole card opens the ticket, so the title needs no padded reach of its own. */
   .title-link { flex: 1 1 calc(100% - 30px - var(--person-wait-room, 0px)); min-width: 0; white-space: normal; font-size: 14.5px; line-height: 1.35; }
   .title-text { display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; overflow-wrap: anywhere; }
-  .parent-chip { max-width: calc(100% - 22px); margin-left: 22px; }
   .child-count { display: none; }
   .row-actions { display: none; }
   .ticket-row .title-cell { -webkit-mask-image: none !important; mask-image: none !important; }
@@ -1910,7 +1880,7 @@ button.release-chip:focus-visible { box-shadow: var(--focus-ring); }
   .table-card.customised td.c-host[data-column-label] .cell { overflow: visible; }
   .table-card.customised .c-host[data-column-label]::before { white-space: normal; }
   .table-card.customised .c-prio .empty, .table-card.customised .prio-label { display: inline; }
-  .table-card.customised .cost-name, .table-card.customised .epic-name, .table-card.customised .person-name { white-space: normal; overflow-wrap: anywhere; }
+  .table-card.customised .cost-name, .table-card.customised .parent-name, .table-card.customised .person-name { white-space: normal; overflow-wrap: anywhere; }
   @media (pointer: coarse) {
     .table-card.customised .status-btn, .table-card.customised .assignee-btn, .table-card.customised button.release-chip { min-height: 44px; }
   }

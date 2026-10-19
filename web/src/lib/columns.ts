@@ -1,18 +1,20 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // Ticket list columns: which show at a given table width, in which order and how
 // wide. Without a saved choice the table fills its width: wide ones (from ~1500px
-// of table, about an 1800px screen) add Assignee, Epic, Release and Tags (when
-// some row has them), Estimate and Created. A saved choice fixes order and which
-// columns are chosen. Title keeps its minimum at every desktop width (AEON-1470):
-// widths beside it give way first, then whole columns, least essential first.
+// of table, about an 1800px screen) add Assignee, Parent (when enough open
+// tickets have one), Release and Tags (when some row has them), Estimate and
+// Created. A saved choice fixes order and which columns are chosen. Title keeps
+// its minimum at every desktop width (AEON-1470): widths beside it give way
+// first, then whole columns, least essential first.
 // On wide tables Title stops at ~960px and the spare width goes to the
 // text columns, so the metadata stays near the title. Free of Vue for unit tests.
 // Planning columns join Automatic when populated. Saved ticks always draw,
-// including empty cells. Legacy Paid choices map to Cost (AEON-511).
+// including empty cells. Legacy Paid choices map to Cost (AEON-511). Legacy Epic
+// choices map to Parent (AEON-1470).
 import type { SortField } from './work.ts'
 import { PLANNING_COLUMNS } from './planning.ts'
 
-export type ColumnId = 'key' | 'title' | 'status' | 'priority' | 'assignee' | 'epic' | 'release' | 'tags' | 'cost' | 'estimate' | 'model' | 'suggested' | 'tokens' | 'list_cost' | 'paid' | 'created' | 'updated' | 'progress' | 'eta'
+export type ColumnId = 'key' | 'title' | 'status' | 'priority' | 'assignee' | 'parent' | 'release' | 'tags' | 'cost' | 'estimate' | 'model' | 'suggested' | 'tokens' | 'list_cost' | 'paid' | 'created' | 'updated' | 'progress' | 'eta'
 export interface ColumnDef<Id extends string = string> { id: Id; label: string; sort: SortField | null; width: number; min: number; max: number; end?: boolean }
 // defaultView: the saved view this person opens the project with.
 export interface ListPrefs { order?: ColumnId[]; visible?: ColumnId[]; widths?: Partial<Record<string, number>>; defaultView?: string | null }
@@ -23,7 +25,7 @@ export const COLUMNS: ColumnDef<ColumnId>[] = [
   { id: 'status', label: 'Status', sort: 'state', width: 138, min: 84, max: 260 },
   { id: 'priority', label: 'Priority', sort: 'priority', width: 112, min: 72, max: 200 },
   { id: 'assignee', label: 'Assignee', sort: 'assignee', width: 156, min: 96, max: 320 },
-  { id: 'epic', label: 'Epic', sort: null, width: 220, min: 110, max: 480 },
+  { id: 'parent', label: 'Parent', sort: null, width: 160, min: 96, max: 360 },
   { id: 'release', label: 'Release', sort: null, width: 132, min: 84, max: 260 },
   { id: 'tags', label: 'Tags', sort: null, width: 180, min: 96, max: 420 },
   { id: 'cost', label: 'Cost unit', sort: null, width: 150, min: 96, max: 320 },
@@ -52,21 +54,23 @@ const PHONE: ColumnId[] = ['key', 'title', 'status', 'priority', 'updated']
 // The order whole columns leave in when even their minimum widths leave Title
 // under its own (AEON-1470): the least essential first. Key, Title, Status and
 // Priority never leave.
-export const GIVE_WAY: ColumnId[] = ['updated', 'created', 'estimate', 'tokens', 'list_cost', 'paid', 'suggested', 'model', 'eta', 'progress', 'tags', 'cost', 'release', 'epic', 'assignee']
+export const GIVE_WAY: ColumnId[] = ['updated', 'created', 'estimate', 'tokens', 'list_cost', 'paid', 'suggested', 'model', 'eta', 'progress', 'tags', 'cost', 'release', 'parent', 'assignee']
 // A column that left comes back only with this much to spare, so the set does
 // not flap while a window is resized across its threshold.
 export const RETURN_ROOM = 16
 // Columns only wide tables add on their own.
-const WIDE_EXTRAS: ColumnId[] = ['suggested', 'list_cost', 'tokens', 'model', 'estimate', 'tags', 'release', 'created', 'epic', 'assignee']
+const WIDE_EXTRAS: ColumnId[] = ['suggested', 'list_cost', 'tokens', 'model', 'estimate', 'tags', 'release', 'created', 'assignee']
 // The text columns that take spare width on wide tables (their text gets room).
-const GROWS: ColumnId[] = ['epic', 'tags', 'assignee', 'release', 'cost']
+const GROWS: ColumnId[] = ['parent', 'tags', 'assignee', 'release', 'cost']
 // Which optional values any loaded row has. `workers` is live ticket work with
 // no stored assignee; it earns the Assignee column the same way a person does.
-export interface Present { suggested?: boolean; assigned?: boolean; workers?: boolean; estimate?: boolean; release?: boolean; tags?: boolean; progress?: boolean; eta?: boolean; model?: boolean; tokens?: boolean; list_cost?: boolean; paid?: boolean }
+// `parent` is the caller's once-per-load decision (at least 30% of open tickets
+// have a direct parent). It is not inferred from the loaded page.
+export interface Present { suggested?: boolean; assigned?: boolean; workers?: boolean; parent?: boolean; estimate?: boolean; release?: boolean; tags?: boolean; progress?: boolean; eta?: boolean; model?: boolean; tokens?: boolean; list_cost?: boolean; paid?: boolean }
 
 /** Normalize saved preferences, shared links and saved views without mutating them. */
 export function normalizeColumnIds(ids: readonly unknown[]): ColumnId[] {
-  return [...new Set(ids.map(id => id === 'paid' ? 'list_cost' : id).filter((id): id is ColumnId => typeof id === 'string' && COLUMN_BY_ID.has(id as ColumnId)))]
+  return [...new Set(ids.map(id => id === 'paid' ? 'list_cost' : id === 'epic' ? 'parent' : id).filter((id): id is ColumnId => typeof id === 'string' && COLUMN_BY_ID.has(id as ColumnId)))]
 }
 /** Ticks represent the saved choice, even when the table is a phone card. */
 export function pickerColumns(prefs: ListPrefs | null | undefined, drawn: ColumnId[], costAllowed: boolean) {
@@ -80,30 +84,45 @@ export function orderOf(prefs: ListPrefs | null | undefined): ColumnId[] {
   return [...PINNED, ...new Set(valid), ...rest]
 }
 
-// Wide tables add Assignee, Epic and Created, and Release, Tags, Estimate and the
-// planning columns when some row has one; narrower ones show Assignee when
-// someone is assigned or a live worker is on a loaded ticket.
+// Wide tables add Assignee and Created, and Parent when the caller says enough
+// open tickets have one, and Release, Tags, Estimate and the planning columns
+// when some row has one. Narrower ones show Assignee when someone is assigned
+// or a live worker is on a loaded ticket, and Parent on that same signal, after
+// Assignee when it is there and after Priority otherwise.
 export function automaticColumns(tableWidth: number, present: Present = {}): ColumnId[] {
   const out: ColumnId[] = ['key', 'title', 'status', 'priority']
+  const parent: ColumnId[] = present.parent ? ['parent'] : []
   if (tableWidth >= WIDE_TABLE) {
     const optional: ColumnId[] = [...(present.release ? ['release' as const] : []), ...(present.tags ? ['tags' as const] : []), ...(present.estimate ? ['estimate' as const] : []),
       ...PLANNING_COLUMNS.filter(id => present[id]), ...(present.suggested ? ['suggested' as const] : [])]
-    const wide: ColumnId[] = [...out, 'assignee', 'epic', ...optional, 'created', 'updated']
+    const wide: ColumnId[] = [...out, 'assignee', ...parent, ...optional, 'created', 'updated']
     if (present.progress) wide.push('progress')
     if (present.eta) wide.push('eta')
     return wide
   }
   if (tableWidth > 900 && (present.assigned || present.workers)) out.push('assignee')
+  out.push(...parent)
   if (tableWidth > 740) out.push('updated')
   if (present.progress) out.push('progress')
   if (present.eta) out.push('eta')
   return out
 }
 
+// A saved width, including a legacy id. A direct id wins over Paid or Epic.
+export function savedColumnWidth(id: string, prefs: ListPrefs | null | undefined): number | undefined {
+  const widths = prefs?.widths
+  if (!widths) return undefined
+  const raw = widths[id] ?? (id === 'list_cost' ? widths.paid : id === 'parent' ? widths.epic : undefined)
+  return typeof raw === 'number' && Number.isFinite(raw) ? raw : undefined
+}
+export function hasSavedWidth(id: string, prefs: ListPrefs | null | undefined): boolean {
+  return savedColumnWidth(id, prefs) !== undefined
+}
+
 export function widthOf(id: string, prefs: ListPrefs | null | undefined, definitions: ReadonlyMap<string, ColumnDef> = COLUMN_BY_ID): number {
   const def = definitions.get(id)!
-  const saved = prefs?.widths?.[id] ?? (id === 'list_cost' ? prefs?.widths?.paid : undefined)
-  return typeof saved === 'number' && Number.isFinite(saved) ? Math.max(def.min, Math.min(def.max, Math.round(saved))) : def.width
+  const saved = savedColumnWidth(id, prefs)
+  return saved !== undefined ? Math.max(def.min, Math.min(def.max, Math.round(saved))) : def.width
 }
 
 // What the give-way measures besides the column definitions. mins: a host's own
@@ -136,7 +155,7 @@ export function giveWay(ids: ColumnId[], tableWidth: number, fit: ColumnFit = {}
 
 // The columns to show, in order. `customised` is true when a saved choice applies;
 // `dropped` names chosen columns this width leaves out (Display keeps them ticked).
-export function visibleColumns(tableWidth: number, options: { phone: boolean; present?: Present; prefs?: ListPrefs | null; costAllowed?: boolean; fit?: ColumnFit }): { columns: ColumnDef<ColumnId>[]; customised: boolean; dropped: ColumnId[] } {
+export function visibleColumns(tableWidth: number, options: { phone: boolean; present?: Present; prefs?: ListPrefs | null; costAllowed?: boolean; hideParent?: boolean; fit?: ColumnFit }): { columns: ColumnDef<ColumnId>[]; customised: boolean; dropped: ColumnId[] } {
   if (options.phone && !options.prefs?.visible) {
     // Automatic phone cards keep their compact set. Saved choices below apply
     // to cards too; their optional cells grow downward instead of scrolling.
@@ -150,6 +169,10 @@ export function visibleColumns(tableWidth: number, options: { phone: boolean; pr
   const customised = !!prefs?.visible
   const chosen = customised ? new Set<ColumnId>([...PINNED, ...normalizeColumnIds(prefs!.visible!)]) : new Set(automaticColumns(tableWidth, options.present))
   if (options.costAllowed === false) chosen.delete('list_cost')
+  // Phones never draw Parent. Grouping by parent and the outline already show
+  // it as the structure, so the column leaves before layout, saved ticks included.
+  // That hide is not a width drop: the other columns stay as they were.
+  if (options.phone || options.hideParent) chosen.delete('parent')
   let ids = orderOf(prefs).filter(id => chosen.has(id))
   const total = (title: number) => ids.reduce((sum, id) => sum + (id === 'title' ? title : widthOf(id, prefs)), 0)
   // Columns a wide table adds on its own leave first when Title would get cramped.
@@ -181,7 +204,7 @@ function besideTitle(ids: string[]): string[] {
   return [...after, ...before].filter(id => id !== 'title')
 }
 function sizedWidth(id: string, prefs: ListPrefs | null | undefined, live: Partial<Record<string, number>>): boolean {
-  return live[id] !== undefined || Number.isFinite(prefs?.widths?.[id])
+  return live[id] !== undefined || hasSavedWidth(id, prefs)
 }
 // Move flexible columns by `amount` px, never past min or max, the column beside
 // Title first.
@@ -236,14 +259,14 @@ export function titleRoom(ids: string[], tableWidth: number, prefs?: ListPrefs |
 
 // Widths for every visible column except Title (which takes the rest). Without a
 // saved title width, Title aims for TITLE_TARGET and spare width beyond that widens
-// Epic, Tags, Assignee and Release (not ones the person sized) up to their maximum,
+// Parent, Tags, Assignee and Release (not ones the person sized) up to their maximum,
 // in proportion to their normal width. What is still left goes back to Title.
 // Whatever would leave Title under its minimum gives way in keepTitleMin.
 // A width the person gives Title is kept: the unsized columns beside it grow or
 // shrink, the next column first, and stop at their own min and max.
 export function layoutWidths(ids: string[], tableWidth: number, prefs?: ListPrefs | null, live: Partial<Record<string, number>> = {}, definitions: ReadonlyMap<string, ColumnDef> = COLUMN_BY_ID, automatic: Partial<Record<string, number>> = {}): Partial<Record<string, number>> {
   const out: Partial<Record<string, number>> = {}
-  for (const id of ids) if (id !== 'title') out[id] = live[id] ?? (Number.isFinite(prefs?.widths?.[id]) ? widthOf(id, prefs, definitions) : automatic[id] ?? widthOf(id, prefs, definitions))
+  for (const id of ids) if (id !== 'title') out[id] = live[id] ?? (hasSavedWidth(id, prefs) ? widthOf(id, prefs, definitions) : automatic[id] ?? widthOf(id, prefs, definitions))
   const sized = (id: string) => sizedWidth(id, prefs, live)
   if (sized('title')) {
     const target = live.title ?? widthOf('title', prefs, definitions)
@@ -279,6 +302,19 @@ export function layoutWidths(ids: string[], tableWidth: number, prefs?: ListPref
   }
   for (const id of Object.keys(out) as string[]) out[id] = Math.floor(out[id]!)
   return out
+}
+
+// At least 30% of the open rows have a direct parent. Exactly 30% is on.
+export function parentColumnDefault(open: number, withParent: number): boolean {
+  if (!(open > 0) || !Number.isFinite(open) || !Number.isFinite(withParent)) return false
+  return withParent * 10 >= open * 3
+}
+// The first complete reading sticks for this load. Missing numbers do not latch,
+// and a later reading never replaces the first (AEON-1470).
+export function latchParentShare(previous: boolean | null, open?: number | null, withParent?: number | null): boolean | null {
+  if (previous !== null) return previous
+  if (typeof open !== 'number' || typeof withParent !== 'number' || !Number.isFinite(open) || !Number.isFinite(withParent)) return null
+  return parentColumnDefault(open, withParent)
 }
 
 // The release label and tags classic imports keep in the ticket's fields.

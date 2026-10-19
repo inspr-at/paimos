@@ -61,7 +61,7 @@ func TestProjectFiguresScopeBucketsCacheAndIsolation(t *testing.T) {
 		return decode[projectFigures](t, code, body, 200)
 	}
 	whole := get(p, "")
-	if whole.TotalHours != 27 || whole.WithoutEstimate != 1 || !whole.Approximate || whole.OpenEstimatedLeaves != 3 || !whole.MarksReleases || whole.Scope.Kind != "whole_project" || whole.Scope.Rows != 10 || whole.Scope.Parents != 1 || whole.Scope.Leaves != 9 || whole.Scope.ProjectLeaves != 9 || whole.Scope.Closed != 2 {
+	if whole.TotalHours != 27 || whole.WithoutEstimate != 1 || !whole.Approximate || whole.OpenEstimatedLeaves != 3 || !whole.MarksReleases || whole.Scope.Kind != "whole_project" || whole.Scope.Rows != 10 || whole.Scope.Parents != 1 || whole.Scope.Leaves != 9 || whole.Scope.ProjectLeaves != 9 || whole.Scope.Closed != 2 || whole.Scope.OpenRows != 8 || whole.Scope.OpenWithParent != 2 {
 		t.Fatalf("whole figures: %+v", whole)
 	}
 	for group, want := range map[string]float64{"completed": 13, "done_not_live": 5, "in_progress": 7, "open": 2} {
@@ -236,13 +236,17 @@ func TestFigureColumnsLeafPolicyAndUsage(t *testing.T) {
 		rows[i].plan.Models = []planningModel{{Model: "used-model"}}
 		rows[i].plan.Route = &planningRoute{Model: "planned-model"}
 	}
-	rows = append(rows, figureRow{item: listItem{nodeJSON: nodeJSON{Key: "F-9", CreatedAt: now, UpdatedAt: now}}, leaf: true, bucket: "cancelled", status: "cancelled", hours: ptr(200), labels: map[string]any{}, eta: &columnETA{Progress: &pct}})
+	rows = append(rows, figureRow{item: listItem{nodeJSON: nodeJSON{Key: "F-9", CreatedAt: now, UpdatedAt: now}}, leaf: true, bucket: "cancelled", status: "cancelled", hours: ptr(200), labels: map[string]any{}, eta: &columnETA{Progress: &pct}, parentKind: "epic"})
+	rows[0].parentKind = "project"
+	rows[1].parentKind = "epic"
+	rows[2].parentKind = "work"
+	rows[3].parentKind = "ticket"
 	out := &projectFigures{Scope: figureScope{Rows: len(rows)}, MarksReleases: true, Groups: map[string]*figureGroup{}, Columns: map[string]*columnFigure{}}
 	for _, group := range []string{"completed", "done_not_live", "in_progress", "open"} {
 		out.Groups[group] = &figureGroup{Statuses: map[string]int{}}
 	}
 	fillFigureColumns(out, rows, true, now)
-	if out.TotalHours != 14 || out.Scope.Parents != 1 || out.Scope.Leaves != 8 || out.Scope.Closed != 1 || out.Columns["estimate"].Numbers.Total != 14 || *out.Columns["progress"].WeightedPercent != 50 || out.Columns["progress"].Included != 7 {
+	if out.TotalHours != 14 || out.Scope.Parents != 1 || out.Scope.Leaves != 8 || out.Scope.Closed != 1 || out.Scope.OpenRows != 8 || out.Scope.OpenWithParent != 3 || out.Columns["estimate"].Numbers.Total != 14 || *out.Columns["progress"].WeightedPercent != 50 || out.Columns["progress"].Included != 7 {
 		t.Fatalf("leaf/closed policy: %+v", out)
 	}
 	if out.Columns["tokens"].Measured.Total != 700 || out.Columns["tokens"].Estimated.Count != 0 || !out.Columns["tokens"].Partial || out.Columns["tokens"].WithoutValue != 1 {

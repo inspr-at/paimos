@@ -79,7 +79,7 @@ test('column popups have a fixed shape and the design\'s words', () => {
   // Reserved top-N lines without a value are blank, and Others shows only with a tail (Tick, fix round 6).
   assert.deepEqual(show('cost').lines, ['AIT core 412h · $1.9k', null, null, null])
   assert.deepEqual(show('suggested').lines, [null, null, null, 'None 166'])
-  assert.deepEqual(show('epic').lines, ['AIT-12 40', 'AIT-3 22', 'Others 9', 'No epic 95'])
+  assert.deepEqual(show('parent').lines, ['AIT-12 40', 'AIT-3 22', 'Others 9', 'No epic 95'])
   // With Hide closed hiding rows of the view, "shown" becomes "incl. hidden rows".
   assert.equal(show('estimate', { ...ctx, hiddenRows: true }).foot, '139 of 166 incl. hidden rows · closed left out')
   // The Estimate total is the header total.
@@ -98,11 +98,11 @@ test('top-N popups keep their lines reserved but blank, and name models as the M
   } }
   const lines = (id: Parameters<typeof columnTip>[0], context: Parameters<typeof columnTip>[2] = ctx) => columnTip(id, sparse, context)!.lines.map(l => l && [l.label, l.value, l.note ?? ''].filter(Boolean).join(' '))
   assert.deepEqual(lines('model'), ['gpt-6.1-sol 4', null, null, null])
-  assert.deepEqual(lines('epic'), ['AIT-12 3', null, null, 'No epic 95'])
+  assert.deepEqual(lines('parent'), ['AIT-12 3', null, null, 'No epic 95'])
   assert.deepEqual(lines('release'), [null, null, null, 'No release 58'])
   assert.deepEqual(lines('tags'), ['bug 2', null, null, 'Untagged 101'])
   assert.deepEqual(lines('assignee'), ['AIT lead 7 agent', null, null, null])
-  for (const id of ['model', 'epic', 'release', 'suggested', 'tags', 'cost', 'assignee'] as const) {
+  for (const id of ['model', 'parent', 'release', 'suggested', 'tags', 'cost', 'assignee'] as const) {
     const shown = columnTip(id, sparse, ctx)!.lines.filter(l => l !== null).map(l => l!.label)
     assert.ok(!shown.includes('—') && !shown.includes('Others'), `${id} shows no placeholder and no empty Others`)
   }

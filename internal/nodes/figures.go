@@ -24,12 +24,14 @@ const maxFigureRows = 50000
 const figuresMaxAge = 30 * time.Second
 
 type figureScope struct {
-	Kind          string `json:"kind"`
-	Rows          int    `json:"rows"`
-	Parents       int    `json:"parents"`
-	Leaves        int    `json:"leaves"`
-	ProjectLeaves int    `json:"project_leaves"`
-	Closed        int    `json:"closed"`
+	Kind           string `json:"kind"`
+	Rows           int    `json:"rows"`
+	Parents        int    `json:"parents"`
+	Leaves         int    `json:"leaves"`
+	ProjectLeaves  int    `json:"project_leaves"`
+	Closed         int    `json:"closed"`
+	OpenRows       int    `json:"open_rows"`
+	OpenWithParent int    `json:"open_with_parent"`
 }
 
 type figureGroup struct {
@@ -224,6 +226,7 @@ type figureRow struct {
 	hours        *float64
 	labels       map[string]any
 	ep           string
+	parentKind   string
 	assignee     string
 	assigneeKind string
 	eta          *columnETA
@@ -331,7 +334,7 @@ func readFigureRows(ctx context.Context, tx pgx.Tx, q listQuery) ([]figureRow, e
  f.kind_slug IN ('work','ticket','task','epic') AND ` + figureLeafSQL("n.id") + `,
  ` + estimateHoursSQL("n.fields") + `::float8,
  CASE WHEN octet_length(n.fields::text)<=65536 THEN n.fields END,
- coalesce(ap.name,worker.shown_name,''),coalesce(ap.kind,'agent'),coalesce(epic.key,'')
+ coalesce(ap.name,worker.shown_name,''),coalesce(ap.kind,'agent'),coalesce(epic.key,''),coalesce(pk.slug,'')
  FROM filtered f JOIN nodes n ON n.id=f.id
  LEFT JOIN figure_states cfg ON cfg.kind_id=n.kind_id AND cfg.norm=` + workStateNormSQL("n.state") + `
  LEFT JOIN principals ap ON ap.id=f.assignee_id::uuid AND ap.tenant_id=n.tenant_id
@@ -344,6 +347,8 @@ func readFigureRows(ctx context.Context, tx pgx.Tx, q listQuery) ([]figureRow, e
  JOIN nodes par ON par.id=up.parent_id AND par.deleted_at IS NULL WHERE up.depth<32
  ) SELECT u.key FROM up u JOIN node_kinds ek ON ek.id=u.kind_id WHERE ek.slug IN ('work','epic') ORDER BY u.depth LIMIT 1
  ) epic ON true
+ LEFT JOIN nodes dpar ON dpar.id=n.parent_id AND dpar.deleted_at IS NULL
+ LEFT JOIN node_kinds pk ON pk.id=dpar.kind_id
  ORDER BY regexp_replace(n.key,'-[0-9]+$',''),substring(n.key from '-([0-9]+)$')::numeric,n.key,n.id
  LIMIT ` + fmt.Sprint(maxFigureRows+1)
 	result, err := tx.Query(ctx, sql, args...)
@@ -360,7 +365,7 @@ func readFigureRows(ctx context.Context, tx pgx.Tx, q listQuery) ([]figureRow, e
 		var row figureRow
 		var raw []byte
 		var project *string
-		if err := result.Scan(&row.item.ID, &row.item.Key, &row.item.KindID, &row.item.KindSlug, &row.item.State, &row.item.CreatedAt, &row.item.UpdatedAt, &project, &row.status, &row.bucket, &row.leaf, &row.hours, &raw, &row.assignee, &row.assigneeKind, &row.ep); err != nil {
+		if err := result.Scan(&row.item.ID, &row.item.Key, &row.item.KindID, &row.item.KindSlug, &row.item.State, &row.item.CreatedAt, &row.item.UpdatedAt, &project, &row.status, &row.bucket, &row.leaf, &row.hours, &raw, &row.assignee, &row.assigneeKind, &row.ep, &row.parentKind); err != nil {
 			return nil, err
 		}
 		bytes += len(raw)

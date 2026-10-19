@@ -363,7 +363,7 @@ function sparseFigures(): ProjectFigures {
     tag: { ...c.tag, values: one('bug', 19), others: 0 }, cost_unit: { ...c.cost_unit, others: 0 },
   } }
 }
-const TOP_N: [string, number][] = [['Model', 3], ['Epic', 2], ['Release', 3], ['Suggested release', 3], ['Tags', 2], ['Cost unit', 3]]
+const TOP_N: [string, number][] = [['Model', 3], ['Parent', 2], ['Release', 3], ['Suggested release', 3], ['Tags', 2], ['Cost unit', 3]]
 
 for (const width of [390, 1024, 1440]) for (const theme of ['light', 'dark']) {
   test(`AEON-1358 the Model popup names each model as its Model cells do (${width} ${theme})`, async ({ page }, info) => {

@@ -910,9 +910,13 @@ function mockFigures(data: Fixtures, project: string, rows: MockNode[], query: U
   const keys = rows.map(n => n.key).sort((a, b) => Number(a.split('-').pop()) - Number(b.split('-').pop()))
   const work = leaves.filter(n => !closed(n))
   const narrowed = FILTER_PARAMS.some(name => (query.get(name) ?? '').trim() !== '')
+  // Open rows are every non-closed work row, parents included. A direct parent counts only when that node exists and is not the project.
+  const byId = new Map(data.nodes.map(n => [n.id, n]))
+  const openRows = rows.filter(n => !closed(n))
+  const openWithParent = openRows.filter(n => { const parent = n.parent_id ? byId.get(n.parent_id) : undefined; return !!parent && parent.kind_slug !== 'project' }).length
   return {
     view_key: [...query].filter(([name]) => FILTER_PARAMS.includes(name)).map(([name, value]) => `${name}=${value}`).sort().join('&'), computed_at: new Date().toISOString(),
-    scope: { kind: narrowed ? 'this_view' : 'whole_project', rows: rows.length, parents: rows.length - leaves.length, leaves: leaves.length, project_leaves: data.nodes.filter(n => n.project === project && isLeaf(n)).length, closed: leaves.filter(closed).length },
+    scope: { kind: narrowed ? 'this_view' : 'whole_project', rows: rows.length, parents: rows.length - leaves.length, leaves: leaves.length, project_leaves: data.nodes.filter(n => n.project === project && isLeaf(n)).length, closed: leaves.filter(closed).length, open_rows: openRows.length, open_with_parent: openWithParent },
     marks_releases: marks, total_hours: total, approximate: total > 0, without_estimate: without, open_estimated_leaves: openEstimated, groups,
     columns: {
       key: { ...all, parents: rows.length - leaves.length, leaves: leaves.length, first_key: keys[0], last_key: keys[keys.length - 1] },

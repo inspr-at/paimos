@@ -11,27 +11,34 @@ const puts = (calls: Call[], key: string) => calls.filter(c => c.method === 'PUT
 const patches = (calls: Call[]) => calls.filter(c => c.method === 'PATCH' && c.path.startsWith('/api/nodes/'))
 
 test.describe('wide lists', () => {
-  test('columns grow with the width: Epic, Release, Tags and Created join from about 1800px', async ({ page }) => {
+  test('columns grow with the width: Parent, Release, Tags and Created join from about 1800px', async ({ page }) => {
     await page.setViewportSize({ width: 1440, height: 900 })
     await mockWork(page, fixtures())
     await page.goto('/p/PHAROS')
     await expect(rows(page)).toHaveCount(5)
-    await expect(headers(page)).toHaveText(['Key', 'Title', 'Status', 'Priority', 'Assignee', 'Updated'])
+    // Parent turns on once the whole-project figures say enough open tickets have one.
+    await expect(headers(page)).toHaveText(['Key', 'Title', 'Status', 'Priority', 'Assignee', 'Parent', 'Updated'])
     await page.setViewportSize({ width: 2560, height: 1440 })
-    await expect(headers(page)).toHaveText(['Key', 'Title', 'Status', 'Priority', 'Assignee', 'Epic', 'Release', 'Tags', 'Estimate', 'Suggested release', 'Created', 'Updated'])
+    await expect(headers(page)).toHaveText(['Key', 'Title', 'Status', 'Priority', 'Assignee', 'Parent', 'Release', 'Tags', 'Estimate', 'Suggested release', 'Created', 'Updated'])
     const row = (key: string) => rows(page).filter({ has: page.locator('.key', { hasText: new RegExp(`^${key}$`) }) })
-    await expect(row('PHAROS-11').locator('.c-epic')).toHaveText('Guarded multi-cloud provisioning')
+    await expect(row('PHAROS-11').locator('.c-parent .parent-key')).toHaveText('PHAROS-10')
+    // At 2560 Parent is still under 200 px, so the title stays in the tooltip.
+    await expect(row('PHAROS-11').locator('.c-parent .parent-name')).toHaveCount(0)
     await expect(row('PHAROS-11').locator('.c-release')).toHaveText('—')
     await expect(row('PHAROS-11').locator('.c-release')).not.toHaveText('v4.7.8')
     await expect(row('PHAROS-11').locator('.c-tags .tag-chip')).toHaveText(['CUSTOMERPORTAL', 'worker-8'])
-    // A task shows its ticket's epic in the column and its ticket as the chip by the title.
-    await expect(row('PHAROS-13').locator('.c-epic')).toHaveText('Guarded multi-cloud provisioning')
-    await expect(row('PHAROS-13').locator('.parent-chip')).toHaveText('PHAROS-12')
-    await expect(row('PHAROS-11').locator('.parent-chip')).toHaveCount(0)
-    await expect(row('PHAROS-14').locator('.c-epic')).toHaveText('—')
+    // A task's Parent cell is its direct parent, the ticket, not the epic above that ticket.
+    await expect(row('PHAROS-13').locator('.c-parent .parent-key')).toHaveText('PHAROS-12')
+    await expect(row('PHAROS-13').locator('.c-parent .parent-name')).toHaveCount(0)
+    await expect(page.locator('.parent-chip')).toHaveCount(0)
+    await expect(row('PHAROS-14').locator('.c-parent .parent-cell')).toHaveCount(0)
+    await expect(row('PHAROS-14').locator('.c-parent')).not.toContainText('—')
     // The additional planning columns take space too; at 2800px there is
     // enough room to exercise the original 960px Title target unchanged.
     await page.setViewportSize({ width: 2800, height: 1440 })
+    // Parent crosses 200 px here, so the title joins the key.
+    await expect(row('PHAROS-11').locator('.c-parent .parent-name')).toHaveText('Guarded multi-cloud provisioning')
+    await expect(row('PHAROS-13').locator('.c-parent .parent-name')).toHaveText('Add an Oracle Cloud connector')
     // Title stops near 960px; the spare width goes to the text columns beside it.
     const title = (await page.locator('thead th.c-title').boundingBox())!
     expect(title.width).toBeGreaterThan(900)
@@ -41,7 +48,7 @@ test.describe('wide lists', () => {
     expect(table.x).toBeGreaterThanOrEqual(46)
     expect(table.x + table.width).toBeGreaterThan(2800 - 70)
     // Title resizes too: its width becomes the target, and is saved.
-    const epicBefore = (await page.locator('thead th.c-epic').boundingBox())!.width
+    const parentBefore = (await page.locator('thead th.c-parent').boundingBox())!.width
     const handle = page.getByRole('separator', { name: 'Resize Title column' })
     const box = (await handle.boundingBox())!
     await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2)
@@ -50,9 +57,9 @@ test.describe('wide lists', () => {
     await page.mouse.up()
     await expect.poll(async () => Math.round((await page.locator('thead th.c-title').boundingBox())!.width)).toBeLessThan(title.width - 150)
     // Loaded-content fits stay still until an explicit Title resize returns enough
-    // spare width after Status, Priority and Assignee reach their maxima.
-    await expect.poll(async () => (await page.locator('thead th.c-epic').boundingBox())!.width).toBeGreaterThan(260)
-    expect((await page.locator('thead th.c-epic').boundingBox())!.width).toBeGreaterThan(epicBefore)
+    // spare width. Parent then grows past 260 and past the width it had.
+    await expect.poll(async () => (await page.locator('thead th.c-parent').boundingBox())!.width).toBeGreaterThan(260)
+    expect((await page.locator('thead th.c-parent').boundingBox())!.width).toBeGreaterThan(parentBefore)
   })
 
   test('the Display menu shows, hides and reorders columns, saved per project on the server', async ({ page }) => {
@@ -61,10 +68,12 @@ test.describe('wide lists', () => {
     const calls = await mockWork(page, data)
     await page.goto('/p/PHAROS')
     await expect(rows(page)).toHaveCount(5)
+    // Wait for Parent before the first saved choice, or that choice would omit it.
+    await expect(headers(page)).toHaveText(['Key', 'Title', 'Status', 'Priority', 'Assignee', 'Parent', 'Updated'])
     await page.getByRole('button', { name: /^Display/ }).click()
     const menu = page.getByRole('dialog', { name: 'Display options' })
     await menu.getByRole('checkbox', { name: 'Priority' }).uncheck()
-    await expect(headers(page)).toHaveText(['Key', 'Title', 'Status', 'Assignee', 'Updated'])
+    await expect(headers(page)).toHaveText(['Key', 'Title', 'Status', 'Assignee', 'Parent', 'Updated'])
     // Alt+Up moves Updated before Assignee (past the planning columns, AEON-329).
     await menu.getByRole('checkbox', { name: 'Updated' }).focus()
     const order = () => menu.getByRole('list', { name: 'Columns', exact: true }).getByRole('checkbox').evaluateAll(inputs => inputs.map(input => input.getAttribute('data-column-row') ?? input.getAttribute('aria-label')))
@@ -76,19 +85,19 @@ test.describe('wide lists', () => {
       await expect.poll(async () => (await order()).indexOf('updated')).toBe(from - i - 1)
       await expect(menu.getByRole('checkbox', { name: 'Updated', exact: true })).toBeFocused()
     }
-    await expect(headers(page)).toHaveText(['Key', 'Title', 'Status', 'Updated', 'Assignee'])
+    await expect(headers(page)).toHaveText(['Key', 'Title', 'Status', 'Updated', 'Assignee', 'Parent'])
     await menu.getByRole('checkbox', { name: 'Estimate' }).check()
-    await expect(headers(page)).toHaveText(['Key', 'Title', 'Status', 'Updated', 'Assignee', 'Estimate'])
+    await expect(headers(page)).toHaveText(['Key', 'Title', 'Status', 'Updated', 'Assignee', 'Parent', 'Estimate'])
     await expect.poll(() => puts(calls, 'list:p-pharos').length).toBeGreaterThan(0)
-    await expect.poll(() => (data.preferences['list:p-pharos'] as { visible?: string[] } | undefined)?.visible ?? []).toEqual(expect.arrayContaining(['status', 'updated', 'assignee', 'estimate']))
+    await expect.poll(() => (data.preferences['list:p-pharos'] as { visible?: string[] } | undefined)?.visible ?? []).toEqual(expect.arrayContaining(['status', 'updated', 'assignee', 'parent', 'estimate']))
     expect((data.preferences['list:p-pharos'] as { visible: string[] }).visible).not.toContain('priority')
     // A new visit reads the choice back.
     await page.reload()
     await expect(rows(page)).toHaveCount(5)
-    await expect(headers(page)).toHaveText(['Key', 'Title', 'Status', 'Updated', 'Assignee', 'Estimate'])
+    await expect(headers(page)).toHaveText(['Key', 'Title', 'Status', 'Updated', 'Assignee', 'Parent', 'Estimate'])
     await page.getByRole('button', { name: /^Display/ }).click()
     await page.getByRole('dialog', { name: 'Display options' }).getByRole('button', { name: 'Automatic' }).click()
-    await expect(headers(page)).toHaveText(['Key', 'Title', 'Status', 'Priority', 'Assignee', 'Updated'])
+    await expect(headers(page)).toHaveText(['Key', 'Title', 'Status', 'Priority', 'Assignee', 'Parent', 'Updated'])
   })
 
   test('columns resize by dragging the header edge and fit their content on double-click', async ({ page }) => {

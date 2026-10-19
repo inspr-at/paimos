@@ -170,11 +170,11 @@ Filters sheet keeps filtering only and links there with **Display settings…**:
 the sheet closes and the Display menu opens as a sheet, or, with the header
 collapsed, as the menu of the Display button beside New. Saved column
 visibility and order also apply to phone cards: optional values appear below
-Key and Title; Automatic restores the compact phone layout.
+Key and Title; Automatic restores the compact phone layout. Parent stays off the phone row.
 On desktop tables Title never goes under its 240 px minimum (AEON-1470): content-fitted
 widths give way first, then saved or dragged widths shrink in proportion (the saved
 values stay), then whole columns step aside in this order: Updated, Created, Estimate,
-Tokens, Cost, Suggested release, Model, ETA, Progress, Tags, Cost unit, Release, Epic,
+Tokens, Cost, Suggested release, Model, ETA, Progress, Tags, Cost unit, Release, Parent,
 Assignee. Key, Title, Status, Priority and a column the list is sorted by stay. Only a
 resize changes the set, and a column comes back with 16 px to spare. Display keeps a
 column that stepped aside ticked, with "hidden at this width" after its name; its sort

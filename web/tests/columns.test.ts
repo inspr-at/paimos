@@ -2,7 +2,7 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
-import { automaticColumns, COLUMN_BY_ID, GIVE_WAY, layoutWidths, loadedFitWidth, orderOf, releaseLabel, RETURN_ROOM, tagList, TITLE_TARGET, titleRoom, visibleColumns, widthOf, withHostColumns, type ColumnDef, type ColumnFit, type ColumnId, type ListPrefs } from '../src/lib/columns.ts'
+import { automaticColumns, COLUMN_BY_ID, GIVE_WAY, latchParentShare, layoutWidths, loadedFitWidth, normalizeColumnIds, orderOf, parentColumnDefault, releaseLabel, RETURN_ROOM, savedColumnWidth, tagList, TITLE_TARGET, titleRoom, visibleColumns, widthOf, withHostColumns, type ColumnDef, type ColumnFit, type ColumnId, type ListPrefs } from '../src/lib/columns.ts'
 import { groupRows, selectLoadedGroup, filtersFromQuery, filtersToQuery, type TicketRow } from '../src/lib/ticketList.ts'
 import { byPosition, positionBetween, positionOf, type Attachment } from '../src/lib/attachments.ts'
 
@@ -15,37 +15,38 @@ test('automatic columns follow the table width and the data', () => {
   assert.deepEqual(automaticColumns(1200, { workers: true }), ['key', 'title', 'status', 'priority', 'assignee', 'updated'])
   assert.deepEqual(automaticColumns(800, { workers: true }), ['key', 'title', 'status', 'priority', 'updated'])
   assert.deepEqual(automaticColumns(1200, {}), ['key', 'title', 'status', 'priority', 'updated'])
-  // Wide tables show Assignee even when nobody is assigned yet.
-  assert.deepEqual(automaticColumns(1600, {}), ['key', 'title', 'status', 'priority', 'assignee', 'epic', 'created', 'updated'])
-  assert.deepEqual(automaticColumns(1600, { assigned: true, estimate: true, release: true, tags: true }), ['key', 'title', 'status', 'priority', 'assignee', 'epic', 'release', 'tags', 'estimate', 'created', 'updated'])
+  // Wide tables show Assignee even when nobody is assigned yet. Parent joins only when the caller says so.
+  assert.deepEqual(automaticColumns(1600, {}), ['key', 'title', 'status', 'priority', 'assignee', 'created', 'updated'])
+  assert.deepEqual(automaticColumns(1600, { assigned: true, estimate: true, release: true, tags: true }), ['key', 'title', 'status', 'priority', 'assignee', 'release', 'tags', 'estimate', 'created', 'updated'])
+  assert.deepEqual(automaticColumns(1600, { parent: true }), ['key', 'title', 'status', 'priority', 'assignee', 'parent', 'created', 'updated'])
   // Wide extras step aside before Title gets cramped: 1500px cannot hold them all beside 420px of title.
   const present = { assigned: true, estimate: true, release: true, tags: true }
-  assert.deepEqual(ids(1500, { phone: false, present }), ['key', 'title', 'status', 'priority', 'assignee', 'epic', 'created', 'updated'])
-  assert.deepEqual(ids(1700, { phone: false, present }), ['key', 'title', 'status', 'priority', 'assignee', 'epic', 'release', 'tags', 'created', 'updated'])
-  assert.deepEqual(ids(2400, { phone: false, present }), ['key', 'title', 'status', 'priority', 'assignee', 'epic', 'release', 'tags', 'estimate', 'created', 'updated'])
+  assert.deepEqual(ids(1500, { phone: false, present }), ['key', 'title', 'status', 'priority', 'assignee', 'release', 'tags', 'created', 'updated'])
+  assert.deepEqual(ids(1700, { phone: false, present }), ['key', 'title', 'status', 'priority', 'assignee', 'release', 'tags', 'estimate', 'created', 'updated'])
+  assert.deepEqual(ids(2400, { phone: false, present }), ['key', 'title', 'status', 'priority', 'assignee', 'release', 'tags', 'estimate', 'created', 'updated'])
 })
 
 test('a saved choice fixes order and visibility across desktop and phone widths', () => {
-  const prefs = { order: ['updated', 'status', 'epic'] as const, visible: ['updated', 'status', 'epic', 'estimate'] as const }
-  const p = { order: [...prefs.order], visible: [...prefs.visible] }
-  assert.deepEqual(ids(2000, { phone: false, prefs: p }), ['key', 'title', 'updated', 'status', 'epic', 'estimate'])
+  // A saved Epic id is Parent. Phones still leave Parent out of the row.
+  const p = { order: ['updated', 'status', 'epic'] as unknown as ColumnId[], visible: ['updated', 'status', 'epic', 'estimate'] as unknown as ColumnId[] }
+  assert.deepEqual(ids(2000, { phone: false, prefs: p }), ['key', 'title', 'updated', 'status', 'parent', 'estimate'])
   // All saved columns remain drawn at narrower desktop widths.
-  assert.deepEqual(ids(900, { phone: false, prefs: p }), ['key', 'title', 'updated', 'status', 'epic', 'estimate'])
-  assert.deepEqual(ids(700, { phone: false, prefs: p }), ['key', 'title', 'updated', 'status', 'epic', 'estimate'])
+  assert.deepEqual(ids(900, { phone: false, prefs: p }), ['key', 'title', 'updated', 'status', 'parent', 'estimate'])
+  assert.deepEqual(ids(700, { phone: false, prefs: p }), ['key', 'title', 'updated', 'status', 'parent', 'estimate'])
   assert.equal(visibleColumns(2000, { phone: false, prefs: p }).customised, true)
-  assert.deepEqual(ids(390, { phone: true, prefs: p }), ['key', 'title', 'updated', 'status', 'epic', 'estimate'])
+  assert.deepEqual(ids(390, { phone: true, prefs: p }), ['key', 'title', 'updated', 'status', 'estimate'])
   assert.deepEqual(ids(390, { phone: true, present: { estimate: true } }), ['key', 'title', 'status', 'priority', 'updated', 'estimate'])
   assert.deepEqual(ids(390, { phone: true, present: { eta: true, estimate: true }, prefs: { visible: ['status'] } }), ['key', 'title', 'status'])
   // A saved choice that hides Assignee stays hidden when a live worker is present.
   assert.deepEqual(ids(1600, { phone: false, present: { workers: true }, prefs: { visible: ['status', 'updated'] } }), ['key', 'title', 'status', 'updated'])
-  assert.deepEqual(ids(390, { phone: true, present: { workers: true }, prefs: p }), ['key', 'title', 'updated', 'status', 'epic', 'estimate'])
+  assert.deepEqual(ids(390, { phone: true, present: { workers: true, parent: true }, prefs: p }), ['key', 'title', 'updated', 'status', 'estimate'])
 })
 
 test('order keeps Key and Title first and appends unknown or missing columns', () => {
   assert.deepEqual(orderOf({ order: ['title', 'created', 'bogus' as never, 'created'] }).slice(0, 4), ['key', 'title', 'created', 'status'])
   assert.equal(orderOf(null).length, 18)
-  assert.deepEqual(automaticColumns(1600, { eta: true }), ['key', 'title', 'status', 'priority', 'assignee', 'epic', 'created', 'updated', 'eta'])
-  assert.deepEqual(automaticColumns(1600, { eta: true, progress: true }), ['key', 'title', 'status', 'priority', 'assignee', 'epic', 'created', 'updated', 'progress', 'eta'])
+  assert.deepEqual(automaticColumns(1600, { eta: true }), ['key', 'title', 'status', 'priority', 'assignee', 'created', 'updated', 'eta'])
+  assert.deepEqual(automaticColumns(1600, { eta: true, progress: true }), ['key', 'title', 'status', 'priority', 'assignee', 'created', 'updated', 'progress', 'eta'])
   assert.deepEqual(automaticColumns(1200, { progress: true, eta: true }), ['key', 'title', 'status', 'priority', 'updated', 'progress', 'eta'])
   assert.deepEqual(ids(390, { phone: true, present: { eta: true } }), ['key', 'title', 'status', 'priority', 'updated', 'eta'])
   assert.deepEqual(ids(390, { phone: true, present: { eta: true, progress: true } }), ['key', 'title', 'status', 'priority', 'updated', 'progress', 'eta'])
@@ -70,25 +71,28 @@ test('widths clamp to each column’s bounds', () => {
 })
 
 test('wide tables stop Title near 960px and give the spare width to the text columns', () => {
-  const wide = ['key', 'title', 'status', 'priority', 'assignee', 'epic', 'created', 'updated'] as const
+  const wide = ['key', 'title', 'status', 'priority', 'assignee', 'parent', 'created', 'updated'] as const
   const sum = (w: Partial<Record<string, number>>) => Object.values(w).reduce((a: number, b) => a + (b ?? 0), 0)
   // Narrow: nothing grows, Title takes the rest.
-  assert.deepEqual(layoutWidths([...wide], 1400), { key: 118, status: 138, priority: 112, assignee: 156, epic: 220, created: 104, updated: 104 })
-  // 2460px: Epic and Assignee grow (up to their maximum), Title keeps about its target.
+  assert.deepEqual(layoutWidths([...wide], 1400), { key: 118, status: 138, priority: 112, assignee: 156, parent: 160, created: 104, updated: 104 })
+  // 2460px: Parent and Assignee reach their maximum. The spare that remains goes back to Title.
   const at2460 = layoutWidths([...wide], 2460)
   assert.equal(at2460.status, 138)
-  assert.equal(at2460.epic, 480)
+  assert.equal(at2460.parent, 360)
   assert.equal(at2460.assignee, 320)
-  const title = 2460 - sum(at2460)
-  assert.ok(title >= TITLE_TARGET && title < TITLE_TARGET + 140, `title ${title}`)
+  assert.equal(2460 - sum(at2460), 1204)
   // Between: growth is proportional and Title sits at the target.
   const at2000 = layoutWidths([...wide], 2000)
-  assert.ok(at2000.epic! > 220 && at2000.epic! < 480 && at2000.assignee! > 156 && at2000.assignee! < 320)
+  assert.ok(at2000.parent! > 160 && at2000.parent! < 360 && at2000.assignee! > 156 && at2000.assignee! < 320)
   assert.ok(Math.abs(2000 - sum(at2000) - TITLE_TARGET) <= 2)
-  // A width the person gave wins: Epic stays, Title's own width becomes its target.
-  const sized = layoutWidths([...wide], 2000, { widths: { epic: 200, title: 700 } })
-  assert.equal(sized.epic, 200)
+  // A width the person gave wins: Parent stays, Title's own width becomes its target.
+  const sized = layoutWidths([...wide], 2000, { widths: { parent: 200, title: 700 } })
+  assert.equal(sized.parent, 200)
   assert.ok(Math.abs(2000 - sum(sized) - 700) <= 2 || sized.assignee === 320)
+  // A saved Epic width is that Parent width, and it is not grown away.
+  assert.equal(layoutWidths([...wide], 2000, { widths: { epic: 240 } }).parent, 240)
+  assert.equal(savedColumnWidth('parent', { widths: { parent: 180, epic: 240 } }), 180)
+  assert.equal(layoutWidths([...wide], 2000, { widths: { parent: 180, epic: 240 } }).parent, 180)
   // Live drag widths count as sized too.
   assert.equal(layoutWidths([...wide], 2000, null, { assignee: 180 }).assignee, 180)
 })
@@ -142,7 +146,7 @@ test('attachment positions are decimal strings the server accepts', () => {
 
 test('planning joins Automatic when filled; saved ticks retain empty columns', () => {
   const all = { model: true, tokens: true, list_cost: true }
-  assert.deepEqual(automaticColumns(1600, all), ['key', 'title', 'status', 'priority', 'assignee', 'epic', 'model', 'tokens', 'list_cost', 'created', 'updated'])
+  assert.deepEqual(automaticColumns(1600, all), ['key', 'title', 'status', 'priority', 'assignee', 'model', 'tokens', 'list_cost', 'created', 'updated'])
   assert.deepEqual(automaticColumns(1200, all), ['key', 'title', 'status', 'priority', 'updated'])
   assert.deepEqual(orderOf(null).slice(9, 14), ['estimate', 'model', 'suggested', 'tokens', 'list_cost'])
   const prefs = { visible: ['status', 'tokens', 'list_cost', 'paid', 'model'] as ColumnId[] }
@@ -320,7 +324,7 @@ test('AEON-1470 saved widths shrink in proportion, after the fits and never belo
 })
 
 test('AEON-1470 whole columns leave in the give-way order; Key, Title, Status, Priority and the sorted column stay', () => {
-  assert.deepEqual(GIVE_WAY, ['updated', 'created', 'estimate', 'tokens', 'list_cost', 'paid', 'suggested', 'model', 'eta', 'progress', 'tags', 'cost', 'release', 'epic', 'assignee'])
+  assert.deepEqual(GIVE_WAY, ['updated', 'created', 'estimate', 'tokens', 'list_cost', 'paid', 'suggested', 'model', 'eta', 'progress', 'tags', 'cost', 'release', 'parent', 'assignee'])
   // Every column chosen, the table narrowing a pixel at a time: each step adds the next column of the order, never another.
   const left: ColumnId[] = []
   for (let width = 2600; width >= 721; width--) {
@@ -331,7 +335,7 @@ test('AEON-1470 whole columns leave in the give-way order; Key, Title, Status, P
   assert.ok(left.length >= 12, `left ${left.join()}`)
   // 1000 px: the 1388 set fits at its minimums; every column leaves updated, created, estimate … until the rest fits.
   assert.deepEqual(grid(1000, SET_1388).dropped, [])
-  assert.deepEqual(grid(1000, ALL).dropped, ['updated', 'created', 'estimate', 'tokens', 'list_cost', 'suggested', 'model', 'eta', 'progress', 'tags'])
+  assert.deepEqual(grid(1000, ALL).dropped, ['updated', 'created', 'estimate', 'tokens', 'list_cost', 'suggested', 'model', 'eta', 'progress'])
   // Sorted by Updated (also as a second key): Updated stays and the next one in the order leaves instead.
   const sorted = grid(1000, ALL, { fit: { sorted: ['updated_at'] } })
   assert.ok(sorted.ids.includes('updated'))
@@ -348,7 +352,7 @@ test('AEON-1470 the set depends only on width, chosen columns, minimums and sort
   for (const width of [760, 1000, 1280]) {
     const plain = grid(width, ALL).ids
     assert.deepEqual(grid(width, ALL, { widths: WIDE_SAVED }).ids, plain)
-    assert.deepEqual(grid(width, ALL, { fits: { assignee: 320, epic: 480, status: 260 } }).ids, plain)
+    assert.deepEqual(grid(width, ALL, { fits: { assignee: 320, parent: 360, status: 260 } }).ids, plain)
   }
   // The 1388 set needs 108 + 264 + 84 + 72 + 96 + 72 + 80 = 776 px at its minimums.
   const need = 776
@@ -367,4 +371,47 @@ test('AEON-1470 the set depends only on width, chosen columns, minimums and sort
   const narrow = grid(721, ALL)
   const wider = grid(1000, ALL, { fit: { previous: narrow.dropped } })
   assert.ok(wider.dropped.length < narrow.dropped.length && narrow.dropped.slice(0, wider.dropped.length).join() === wider.dropped.join())
+})
+
+// AEON-1470 Parent: the direct parent is a column. Risk: a saved Epic choice lost or resized, the 30% default flipping
+// after the first reading, Parent crowding Title under 240 px, or Parent drawn on a phone, in a parent group, or in the outline.
+test('AEON-1470 Parent migrates Epic, latches at 30 percent, and leaves phones, groups and the outline', () => {
+  const parent = COLUMN_BY_ID.get('parent')!
+  assert.equal(parent.label, 'Parent')
+  assert.deepEqual([parent.width, parent.min, parent.max], [160, 96, 360])
+  assert.equal(orderOf(null).length, 18)
+  assert.equal(orderOf(null)[orderOf(null).indexOf('assignee') + 1], 'parent')
+  assert.deepEqual(normalizeColumnIds(['epic', 'paid', 'epic', 'parent']), ['parent', 'list_cost'])
+  assert.equal(savedColumnWidth('parent', { widths: { epic: 240 } }), 240)
+  assert.equal(savedColumnWidth('parent', { widths: { parent: 200, epic: 240 } }), 200)
+  assert.equal(parentColumnDefault(10, 4), true)
+  assert.equal(parentColumnDefault(10, 3), true)
+  assert.equal(parentColumnDefault(10, 1), false)
+  assert.equal(parentColumnDefault(0, 0), false)
+  assert.equal(latchParentShare(null, undefined, undefined), null)
+  assert.equal(latchParentShare(null, 10, 4), true)
+  assert.equal(latchParentShare(null, 10, 1), false)
+  assert.equal(latchParentShare(true, 10, 1), true)
+  assert.equal(latchParentShare(false, 10, 4), false)
+  const on = ids(1440, { phone: false, present: { parent: true, assigned: true } })
+  const hidden = ids(1440, { phone: false, present: { parent: true, assigned: true }, hideParent: true })
+  assert.deepEqual(on, ['key', 'title', 'status', 'priority', 'assignee', 'parent', 'updated'])
+  assert.deepEqual(hidden, on.filter(id => id !== 'parent'))
+  const saved = { visible: ['status', 'priority', 'parent', 'assignee', 'updated'] as ColumnId[] }
+  const laid = visibleColumns(1200, { phone: false, prefs: saved, hideParent: true })
+  assert.deepEqual(laid.columns.map(column => column.id), ['key', 'title', 'status', 'priority', 'assignee', 'updated'])
+  assert.deepEqual(laid.dropped, [])
+  assert.deepEqual(ids(390, { phone: true, present: { parent: true }, prefs: { visible: ['epic', 'status'] as unknown as ColumnId[] } }), ['key', 'title', 'status'])
+  const at1024 = visibleColumns(1024, { phone: false, present: { parent: true, assigned: true }, fit: { mins: GRID_MINS } })
+  const shown = at1024.columns.map(column => column.id)
+  assert.ok(shown.includes('parent'))
+  const widths = layoutWidths(shown, 1024, null, {}, GRID_DEFS)
+  const title = 1024 - Object.values(widths).reduce<number>((sum, value) => sum + (value ?? 0), 0)
+  assert.ok(title >= 240, `title ${title}`)
+  const source = readFileSync(new URL('../src/components/work/TicketTable.vue', import.meta.url), 'utf8')
+  assert.doesNotMatch(source, /parent-chip/)
+  assert.match(source, /padding-right: 58px/)
+  assert.match(source, /\.parent-glyph \{[^}]*color: var\(--ink-3\)/)
+  assert.match(source, /\.parent-key \{[^}]*var\(--mono\)/)
+  assert.doesNotMatch(source, /\.c-parent \{[^}]*display:\s*none/)
 })

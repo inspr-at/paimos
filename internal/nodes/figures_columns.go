@@ -187,6 +187,14 @@ func fillFigureColumns(out *projectFigures, rows []figureRow, costVisible bool, 
 		if open && !row.item.UpdatedAt.After(now.AddDate(0, 0, -7)) {
 			staleUpdated++
 		}
+		// Open here is hide-closed's sense: not Cancelled or Archived, parents included.
+		// The direct parent counts only when it exists and is not the project.
+		if row.bucket != "cancelled" && row.bucket != "archived" {
+			out.Scope.OpenRows++
+			if row.parentKind != "" && row.parentKind != "project" {
+				out.Scope.OpenWithParent++
+			}
+		}
 		if !row.leaf {
 			continue
 		}
