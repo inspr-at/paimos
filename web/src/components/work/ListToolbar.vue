@@ -531,7 +531,7 @@ defineExpose({ focusSearch, openFilterMenu, openDisplay, input, closeOverlays })
 .navigation-settings[data-navigation-step="3"] .closed-pill { padding: 0; width: 28px; height: 28px; justify-content: center; }
 .navigation-settings[data-navigation-step="3"] .closed-pill :deep(.hide-label-slot) { display: none; }
 .navigation-settings[data-navigation-step="4"] .hide-control { display: none; }
-@media (pointer: coarse) {
+@media (max-width: 720px), (pointer: coarse) {
   .navigation-settings:not([data-navigation-step="0"]) .display-btn,
   .navigation-settings[data-navigation-step="3"] .closed-pill { width: 44px; height: 44px; }
 }
