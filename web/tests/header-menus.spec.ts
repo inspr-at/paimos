@@ -98,17 +98,39 @@ async function holdReleaseApis(page: Page, releases?: (route: Route) => Promise<
   return release
 }
 
+// The running release before its version is known: the footer's pill on wide screens; on compact ones, with no
+// footer bar (AEON-1459, D5), the avatar menu's What's new, which names no version until one is known.
+async function openRunningRelease(page: Page, width: number) {
+  if (width >= 720) {
+    const pill = page.locator('footer.app-footer .version-pill')
+    await expect(pill).toHaveAccessibleName('Release history')
+    await pill.click()
+    return
+  }
+  await expect(page.locator('footer.app-footer')).toHaveCount(0)
+  const menu = await openAccount(page)
+  const whatsNew = menu.getByRole('menuitem', { name: /^What’s new/ })
+  await expect(whatsNew).toHaveAccessibleName('What’s new')
+  await whatsNew.click()
+}
+// The gear's menu while /version is held: its status line waits for the version, the items do not.
+async function openHeldGear(page: Page) {
+  await gear(page).click()
+  const menu = page.getByRole('menu', { name: 'App and workspace' })
+  await expect(menu).toBeVisible()
+  return menu
+}
+
 test.describe('release history before the version has loaded', () => {
   for (const width of [1440, 390]) {
-    test(`the footer pill still opens the running release at ${width}`, async ({ page }) => {
+    // Compact screens have no footer bar (AEON-1459, D5): the avatar menu's What's new opens the running release there.
+    test(`${width < 720 ? 'What’s new' : 'the footer pill'} still opens the running release at ${width}`, async ({ page }) => {
       await page.setViewportSize({ width, height: width < 600 ? 844 : 900 })
       const state = await signIn(page, 'member')
       const release = await holdReleaseApis(page)
       await page.goto('/', { waitUntil: 'domcontentloaded' })
       await expect(page.getByRole('list', { name: 'Projects' })).toBeVisible()
-      const pill = page.locator('footer.app-footer .version-pill')
-      await expect(pill).toHaveAccessibleName('Release history')
-      await pill.click()
+      await openRunningRelease(page, width)
       await expect(page).toHaveURL(/[?&]releases=current(?:&|#|$)/)
       const history = page.getByRole('dialog', { name: 'PAIMOS AEON releases' })
       await expect(history).toBeVisible()
@@ -137,8 +159,9 @@ test.describe('release history before the version has loaded', () => {
       const release = await holdReleaseApis(page)
       await page.goto('/', { waitUntil: 'domcontentloaded' })
       await expect(page.getByRole('list', { name: 'Projects' })).toBeVisible()
-      const menu = await openAccount(page)
-      await menu.getByRole('menuitem', { name: 'Release history', exact: true }).click()
+      // On compact screens the account menu says What's new; the whole history is the gear's.
+      const menu = width < 720 ? await openHeldGear(page) : await openAccount(page)
+      await menu.getByRole('menuitem', width < 720 ? { name: /^Release history/ } : { name: 'Release history', exact: true }).click()
       await expect(page).toHaveURL(/[?&]releases=all(?:&|#|$)/)
       release()
       const history = await expectFullHistory(page)
@@ -146,15 +169,13 @@ test.describe('release history before the version has loaded', () => {
     })
   }
 
-  test('at 390 a footer click keeps the error and retry when the history fails', async ({ page }) => {
+  test('at 390 What’s new keeps the error and retry when the history fails', async ({ page }) => {
     await page.setViewportSize({ width: 390, height: 844 })
     await signIn(page, 'member')
     const release = await holdReleaseApis(page, route => route.fulfill({ status: 503, json: { error: 'The release history could not be loaded.' } }))
     await page.goto('/', { waitUntil: 'domcontentloaded' })
     await expect(page.getByRole('list', { name: 'Projects' })).toBeVisible()
-    const pill = page.locator('footer.app-footer .version-pill')
-    await expect(pill).toHaveAccessibleName('Release history')
-    await pill.click()
+    await openRunningRelease(page, 390)
     await expect(page).toHaveURL(/[?&]releases=current(?:&|#|$)/)
     release()
     const history = page.getByRole('dialog', { name: 'PAIMOS AEON releases' })
@@ -164,7 +185,7 @@ test.describe('release history before the version has loaded', () => {
     await expect(history.getByRole('button', { name: 'Try again' })).toBeVisible()
   })
 
-  test('at 390 a footer click keeps the empty history when this build has none', async ({ page }) => {
+  test('at 390 What’s new keeps the empty history when this build has none', async ({ page }) => {
     await page.setViewportSize({ width: 390, height: 844 })
     await signIn(page, 'member')
     const release = await holdReleaseApis(page, route => route.fulfill({
@@ -175,9 +196,7 @@ test.describe('release history before the version has loaded', () => {
     }))
     await page.goto('/', { waitUntil: 'domcontentloaded' })
     await expect(page.getByRole('list', { name: 'Projects' })).toBeVisible()
-    const pill = page.locator('footer.app-footer .version-pill')
-    await expect(pill).toHaveAccessibleName('Release history')
-    await pill.click()
+    await openRunningRelease(page, 390)
     await expect(page).toHaveURL(/[?&]releases=current(?:&|#|$)/)
     release()
     const history = page.getByRole('dialog', { name: 'PAIMOS AEON releases' })
@@ -399,12 +418,13 @@ test.describe('avatar menu', () => {
 })
 
 test.describe('phones', () => {
-  test('release history from the account menu stays on the list', async ({ page }) => {
+  // The account menu's What's new opens the running release (AEON-1459); the whole history opens from the gear.
+  test('release history from the app menu stays on the list', async ({ page }) => {
     await page.setViewportSize({ width: 390, height: 844 })
     await signIn(page, 'member')
     await home(page)
-    const menu = await openAccount(page)
-    await menu.getByRole('menuitem', { name: 'Release history', exact: true }).click()
+    const menu = await openGear(page)
+    await menu.getByRole('menuitem', { name: /^Release history/ }).click()
     const history = await expectFullHistory(page)
     await expect(history.locator('.shell')).not.toHaveClass(/show-detail/)
     await expect(history.getByRole('grid', { name: 'Releases, newest first' })).toBeVisible()

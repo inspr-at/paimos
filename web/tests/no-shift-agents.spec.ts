@@ -139,6 +139,9 @@ for (const width of [1440, 1024, 390]) {
     if (width < 720) {
       const sheet = page.getByRole('dialog', { name: 'Capacity' })
       await page.locator('.agents-page .cap-line').click()
+      await expect(sheet).toBeVisible()
+      // The sheet may be the first to show the mono face; its swap is the page loading, not a step.
+      await page.evaluate(() => document.fonts.ready)
       await expectStableControls({
         controls: { more, fewer },
         // A tight row lifts the unit onto its plate on hover first; then − and + are its own.

@@ -387,7 +387,7 @@ onBeforeUnmount(() => { resized.disconnect(); crumbsChanged.disconnect(); narrow
       <template v-if="projectKey">
         <span class="sep" aria-hidden="true">/</span>
         <!-- Compact screens (D11): the project's crumb opens its sheet: title, progress, sections and the lead. -->
-        <button v-if="compact" type="button" class="crumb crumb-sheet" :class="{ current: !fullTicket && !projectKnowledge }" aria-haspopup="dialog" :aria-expanded="!!sheetFrom"
+        <button v-if="compact" type="button" class="crumb crumb-sheet" :class="{ current: !fullTicket && !projectKnowledge }" :aria-current="fullTicket || projectKnowledge ? undefined : 'page'" aria-haspopup="dialog" :aria-expanded="!!sheetFrom"
           :aria-label="`${project?.routeKey ?? projectKey.toUpperCase()}${project?.title ? ` · ${project.title}` : ''}: sections, progress and the project header`"
           data-tip="Sections, progress, the project header" @click="toggleProjectSheet">
           <span class="key-badge">{{ project?.routeKey ?? projectKey.toUpperCase() }}</span><span v-if="project?.title" class="crumb-name">{{ project.title }}</span><AppIcon name="chevron" :size="14" class="crumb-chev" />
