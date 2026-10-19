@@ -82,6 +82,9 @@ it('a delayed delivery default never writes one person\'s choice into the next p
     '../../lib/statusTiming': statusTiming,
     '../../lib/useTicketTiming': { useTicketTiming: () => ({ data: ref(null), status: ref('loading'), busy: ref(false), final: ref(null), retry() {} }) },
     '../../lib/workFigures': { shortDay: () => '' },
+    // AEON-1493: Building it reads on its own; still loading here.
+    '../../lib/deliveryBuilding': { buildingView: () => ({ head: { kind: 'loading', text: '' }, tiles: [], summary: [] }) },
+    '../../lib/useDeliveryBuilding': { useDeliveryBuilding: () => ({ data: ref(null), status: ref('loading'), busy: ref(false), retry() {} }) },
   })
   stopped.push(made.stop)
   for (let turn = 0; turn < 8 && made.state.prefs.value.window !== 90; turn++) await flush()

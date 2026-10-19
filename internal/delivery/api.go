@@ -227,6 +227,18 @@ func projectSettings(ctx context.Context, tx pgx.Tx, id string) (*string, error)
 	err := tx.QueryRow(ctx, `SELECT n.id::text FROM nodes n JOIN node_kinds k ON k.id=n.kind_id WHERE n.id=$1 AND k.slug='project' AND n.deleted_at IS NULL`, id).Scan(&project)
 	return &project, err
 }
+
+// A targets object replaces all three fields. Omitted or null stores NULL and inherits.
+type settingsRequest struct {
+	Settings
+	Targets *buildingTargetsInput `json:"targets,omitempty"`
+}
+
+type settingsResponse struct {
+	Settings
+	Targets *BuildingTargets `json:"targets,omitempty"`
+}
+
 func (m *Module) settings(w http.ResponseWriter, r *http.Request) {
 	p, ok := principal(w, r)
 	if !ok {
@@ -237,24 +249,33 @@ func (m *Module) settings(w http.ResponseWriter, r *http.Request) {
 		respondError(w, fail(400, "invalid project"))
 		return
 	}
-	input := Settings{}
+	var input settingsRequest
 	write := r.Method == http.MethodPut
 	overrides := r.URL.Query().Get("view") == "overrides" && !write
 	if len(r.Header.Get("If-Match")) > 128 {
 		respondError(w, fail(400, "invalid delivery settings revision"))
 		return
 	}
+	var targetsJSON []byte
 	if write {
 		if err := decode(w, r, &input); err != nil {
 			respondError(w, err)
 			return
 		}
-		if err := validateSettings(input); err != nil {
+		if err := validateSettings(input.Settings); err != nil {
 			respondError(w, err)
 			return
 		}
+		if input.Targets != nil {
+			parsed, ok := buildingTargetsFrom(input.Targets)
+			if !ok {
+				respondError(w, fail(400, "invalid building targets"))
+				return
+			}
+			targetsJSON, _ = json.Marshal(parsed)
+		}
 	}
-	var out Settings
+	var out settingsResponse
 	var etag string
 	err := db.InTenant(r.Context(), m.pool, p.TenantID, func(tx pgx.Tx) error {
 		ctx := r.Context()
@@ -290,7 +311,7 @@ func (m *Module) settings(w http.ResponseWriter, r *http.Request) {
 				input.Deadlines = map[State]int{}
 			}
 			raw, _ := json.Marshal(input.Deadlines)
-			_, err = tx.Exec(ctx, `INSERT INTO delivery_settings(tenant_id,project_id,required_checks,deadlines,required_workflow) VALUES($1,$2,$3,$4,$5) ON CONFLICT(tenant_id,(coalesce(project_id,'00000000-0000-0000-0000-000000000000'::uuid))) DO UPDATE SET required_checks=EXCLUDED.required_checks,deadlines=EXCLUDED.deadlines,required_workflow=EXCLUDED.required_workflow,updated_at=clock_timestamp()`, p.TenantID, project, checks, raw, input.RequiredWorkflow)
+			_, err = tx.Exec(ctx, `INSERT INTO delivery_settings(tenant_id,project_id,required_checks,deadlines,required_workflow,building_targets) VALUES($1,$2,$3,$4,$5,$6) ON CONFLICT(tenant_id,(coalesce(project_id,'00000000-0000-0000-0000-000000000000'::uuid))) DO UPDATE SET required_checks=EXCLUDED.required_checks,deadlines=EXCLUDED.deadlines,required_workflow=EXCLUDED.required_workflow,building_targets=EXCLUDED.building_targets,updated_at=clock_timestamp()`, p.TenantID, project, checks, raw, input.RequiredWorkflow, targetsJSON)
 			if err != nil {
 				return err
 			}
@@ -301,10 +322,16 @@ func (m *Module) settings(w http.ResponseWriter, r *http.Request) {
 		}
 		etag = revision
 		if overrides {
-			out = stored
-			return nil
+			out.Settings = stored
+			out.Targets, err = storedBuildingTargetsTx(ctx, tx, project)
+			return err
 		}
-		out, err = settingsTx(ctx, tx, project)
+		out.Settings, err = settingsTx(ctx, tx, project)
+		if err != nil {
+			return err
+		}
+		targets, err := buildingTargetsTx(ctx, tx, project)
+		out.Targets = &targets
 		return err
 	})
 	if err != nil {

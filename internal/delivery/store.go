@@ -90,6 +90,46 @@ func storedSettingsTx(ctx context.Context, tx pgx.Tx, project *string) (Settings
 	}
 	return out, `"` + updated.UTC().Format(time.RFC3339Nano) + `"`, nil
 }
+
+// storedBuildingTargetsTx is this scope's saved triple. NULL and a missing row inherit.
+func storedBuildingTargetsTx(ctx context.Context, tx pgx.Tx, project *string) (*BuildingTargets, error) {
+	var raw []byte
+	err := tx.QueryRow(ctx, `SELECT building_targets FROM delivery_settings WHERE project_id IS NOT DISTINCT FROM $1::uuid`, project).Scan(&raw)
+	if errors.Is(err, pgx.ErrNoRows) || err == nil && len(raw) == 0 {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	var in buildingTargetsInput
+	if err = json.Unmarshal(raw, &in); err != nil {
+		return nil, err
+	}
+	out, ok := buildingTargetsFrom(&in)
+	if !ok {
+		return nil, errors.New("invalid stored building targets")
+	}
+	return &out, nil
+}
+
+// buildingTargetsTx resolves targets the way other delivery settings resolve:
+// the defaults, then a workspace triple, then a project triple that replaces it.
+func buildingTargetsTx(ctx context.Context, tx pgx.Tx, project *string) (BuildingTargets, error) {
+	out := buildingTargetDefaults()
+	for _, scope := range []*string{nil, project} {
+		saved, err := storedBuildingTargetsTx(ctx, tx, scope)
+		if err != nil {
+			return out, err
+		}
+		if saved != nil {
+			out = *saved
+		}
+		if project == nil {
+			break
+		}
+	}
+	return out, nil
+}
 func linkTx(ctx context.Context, tx pgx.Tx, o *Observation, title string) error {
 	var ticket string
 	var project *string

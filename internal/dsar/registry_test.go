@@ -163,3 +163,52 @@ func TestMigratedInventoryGuard(t *testing.T) {
 		t.Fatalf("new table did not fail guard: %v", err)
 	}
 }
+
+// Building it targets are three bounded numbers in a JSON column. JSON stays
+// with the other delivery settings in the review adapter, so a packet never
+// exports it. The classification registry keeps the column metadata: the
+// triple does not identify a person.
+func TestDeliverySettingsBuildingTargetsStayReview(t *testing.T) {
+	domains, err := Inventory()
+	if err != nil {
+		t.Fatal(err)
+	}
+	var settings Domain
+	var found bool
+	for _, d := range domains {
+		if d.Table == "delivery_settings" {
+			settings = d
+			found = true
+		}
+	}
+	if !found {
+		t.Fatal("delivery_settings adapter missing")
+	}
+	if !contains(settings.Review, "building_targets") || contains(settings.Export, "building_targets") || contains(settings.Metadata, "building_targets") || contains(settings.Secret, "building_targets") {
+		t.Fatalf("building_targets adapter = export %q review %q metadata %q secret %q", settings.Export, settings.Review, settings.Metadata, settings.Secret)
+	}
+	raw, err := os.ReadFile("inventory.json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var classified struct {
+		Tables []struct {
+			Table   string            `json:"table"`
+			Columns map[string]string `json:"columns"`
+		} `json:"tables"`
+	}
+	if err := json.Unmarshal(raw, &classified); err != nil {
+		t.Fatal(err)
+	}
+	var class string
+	var classifiedFound bool
+	for _, table := range classified.Tables {
+		if table.Table == "delivery_settings" {
+			class, classifiedFound = table.Columns["building_targets"]
+			break
+		}
+	}
+	if !classifiedFound || class != "metadata" {
+		t.Fatalf("building_targets classification = %q present=%v", class, classifiedFound)
+	}
+}

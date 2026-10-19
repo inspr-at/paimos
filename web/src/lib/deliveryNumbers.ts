@@ -178,7 +178,8 @@ export function deltaOf(def: TileDef, window: MetricWindow | null, direction: 'm
 export interface Part { text: string; strong?: boolean }
 export interface TileModel {
   def: TileDef; label: string; definition: string; reason: string | null; target: string; source: string
-  status: SampleStatus; value: { main: string; unit: string } | null
+  // `more` is a second part with its own unit ("5 h 10 min", Building it's durations).
+  status: SampleStatus; value: { main: string; unit: string; more?: { main: string; unit: string } } | null
   lineA: { parts: Part[]; mono: boolean; squares?: ('ok' | 'bad' | 'none' | 'nodata')[] }; lineB: string
   delta: Delta; partial: boolean; foot: string
 }
@@ -402,7 +403,7 @@ export interface ChartPanel {
 }
 export interface ChartModel {
   // 'tickets': Delivery › Tickets' Created → live (AEON-1359); `sparse` dots every point.
-  key: MetricTextKey | 'tickets'; kind: TileKind; sparse?: boolean; label: string; unit: string; buckets: ChartBucket[]; panels: ChartPanel[]
+  key: MetricTextKey | 'tickets' | `building-${string}`; kind: TileKind; sparse?: boolean; label: string; unit: string; buckets: ChartBucket[]; panels: ChartPanel[]
   readouts: string[]; foot: string; legend: 'two' | 'nightly' | null; nights: ('ok' | 'bad' | 'none' | 'nodata')[]
 }
 const values = (samples: Measured[], pick: (sample: Measured) => number | null) => samples.map(sample => sample.n > 0 ? pick(sample) : null)

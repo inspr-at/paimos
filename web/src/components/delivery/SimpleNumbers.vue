@@ -10,13 +10,14 @@ import SimpleTile from './SimpleTile.vue'
 import type { DeliveryLanguage } from '../../lib/delivery'
 import type { DeliveryMetrics, WindowDays } from '../../lib/deliveryNumbers'
 import { deliveryText } from '../../lib/deliveryNumbersText'
-import { simpleNumbersOf } from '../../lib/deliverySimple'
+import { simpleNumbersOf, type SimpleTileModel } from '../../lib/deliverySimple'
 import { simpleText } from '../../lib/deliverySimpleText'
 
-const props = defineProps<{ data: DeliveryMetrics | null; window: WindowDays; state: 'loading' | 'error' | 'ready'; noData: boolean; lang: DeliveryLanguage }>()
+// `extra`: Building it's tiles (AEON-1493) join the summary card's count and off-target line once read.
+const props = defineProps<{ data: DeliveryMetrics | null; window: WindowDays; state: 'loading' | 'error' | 'ready'; noData: boolean; lang: DeliveryLanguage; extra?: SimpleTileModel[] }>()
 const text = computed(() => simpleText(props.lang))
 const pageText = computed(() => deliveryText(props.lang))
-const page = computed(() => simpleNumbersOf(props.state === 'ready' ? props.data : null, props.window, props.state, props.noData, props.lang))
+const page = computed(() => simpleNumbersOf(props.state === 'ready' ? props.data : null, props.window, props.state, props.noData, props.lang, props.extra ?? []))
 // Leaving a ready summary keeps its box until the next ready paint, so Learn below does not jump.
 const summaryEl = ref<HTMLElement>()
 const summaryHold = ref(0)
@@ -59,6 +60,8 @@ const ICON = { on: 'v-on', close: 'v-close', far: 'v-far', none: 'v-none' } as c
 
     <!-- Delivery › Tickets (AEON-1359): the outer loop, first after the summary card. -->
     <slot name="tickets" />
+    <!-- Delivery › Building it (AEON-1493): the first section of the path, before making a change ready. -->
+    <slot name="building" />
 
     <section v-for="(section, index) in page.sections" :key="index" class="s-sec" :aria-labelledby="`s-sec-${index}`">
       <div class="s-sec-head">

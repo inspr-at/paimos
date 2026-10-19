@@ -725,6 +725,7 @@
     {
       "classification": "metadata",
       "columns": {
+        "building_targets": "metadata",
         "deadlines": "metadata",
         "project_id": "metadata",
         "required_checks": "metadata",

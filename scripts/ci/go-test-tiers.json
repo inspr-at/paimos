@@ -6012,6 +6012,20 @@
     ,
     {"kind":"go","package":"internal/delivery","name":"TestDeliveryBackfillSkipsConfirmedAbsentPreflight","tier":"ESSENTIAL"}
     ,
+    {"kind":"go","package":"internal/delivery","name":"TestDeliveryBuildingEndpointReadsFlowUnderRLS","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/delivery","name":"TestDeliveryBuildingFiltersAndEmptyWindow","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/delivery","name":"TestDeliveryBuildingIncompleteHistory","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/delivery","name":"TestDeliveryBuildingJudgements","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/delivery","name":"TestDeliveryBuildingReviewAndChecksCombine","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/delivery","name":"TestDeliveryBuildingRoundsAndWindows","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/delivery","name":"TestDeliveryBuildingTargetBounds","tier":"ESSENTIAL"}
+    ,
     {"kind":"go","package":"internal/delivery","name":"TestDeliveryChecksHistoryActionsReplacesOnlyItsStoredSuite","tier":"GATED-FULL"}
     ,
     {"kind":"go","package":"internal/delivery","name":"TestDeliveryChecksHistoryPersistsPacingAndUsesActionsAfterGrant","tier":"GATED-FULL"}
@@ -6403,6 +6417,8 @@
     {"kind":"go","package":"internal/deploytarget","name":"TestNormalizeDigestCoversTargetAndCanonicalHosts","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/deploytarget","name":"TestNormalizeRequiresDestinationAndChange","tier":"GATED-FULL"}
+    ,
+    {"kind":"go","package":"internal/dsar","name":"TestDeliverySettingsBuildingTargetsStayReview","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/dsar","name":"TestExecuteFailureEmitsNothing","tier":"ESSENTIAL"}
     ,

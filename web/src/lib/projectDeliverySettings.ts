@@ -8,7 +8,8 @@ export const DEADLINES = [
   ['ci_green', 'CI green, not queued'], ['in_queue', 'In the merge queue'], ['queue_failed', 'Failed in the queue'],
 ] as const
 export type Deadline = typeof DEADLINES[number][0]
-export interface DeliverySettings { required_workflow?: string; required_checks?: string[]; deadlines?: Partial<Record<Deadline, number>> }
+export interface BuildingTargets { first_try_rate: number; rounds_per_item: number; idle_p50_minutes: number }
+export interface DeliverySettings { required_workflow?: string; required_checks?: string[]; deadlines?: Partial<Record<Deadline, number>>; targets?: BuildingTargets }
 export interface SettingsSnapshot { effective: DeliverySettings; overrides: DeliverySettings; revision: string }
 export interface RepositoryInput { repository: string; ci_workflow: string; nightly_workflow: string; days: number }
 export interface HistoryPosition { state: 'running' | 'done'; since: string; phase: 'runs' | 'pulls' | 'jobs' | 'done'; day: string | null; runs: number; pulls: number; jobs?: number; truncated: boolean; retry_at?: string | null }

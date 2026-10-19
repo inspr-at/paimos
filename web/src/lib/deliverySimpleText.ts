@@ -38,6 +38,7 @@ const EN = {
   defsTitle: 'The technical words, explained simply',
   defs: [
     ['Steps of a ticket', `New ${TO} picked up: from created until work starts. In progress: all time in In progress, rework included. QA ${TO} merged: all time in QA. Done ${TO} live: from merge until a release with it is live. Live ${TO} accepted: from live until accepted.`],
+    ['Round', 'One pass of a change through the builder and the gate: the first build, a fix round after the gate asked for changes or the checks failed, or a merge-forward round that brings in the newest main. First try: merged after exactly one round.'],
     ['Went back from QA', 'The review asked for changes, so the ticket moved from QA back to In progress. Each ticket counts once per window.'],
     ['Median (p50)', 'The middle value: half were faster, half slower. A few extreme cases do not distort it. The steps’ medians do not add up to the total’s median.'],
     ['Slow tail (p90)', 'Nine in ten were faster. It shows how bad the bad cases are.'],
@@ -162,6 +163,7 @@ const DE: SimpleText = {
   defsTitle: 'Die Fachwörter, einfach erklärt',
   defs: [
     ['Schritte eines Tickets', `Neu ${TO} aufgenommen: vom Anlegen, bis die Arbeit beginnt. In Arbeit: alle Zeit in In Arbeit, Nacharbeit inklusive. QA ${TO} gemergt: alle Zeit in QA. Erledigt ${TO} live: vom Merge, bis ein Release damit live ist. Live ${TO} abgenommen: von live bis zur Abnahme.`],
+    ['Runde', 'Ein Durchgang einer Änderung durch Builder und Prüfung: der erste Build, eine Fix-Runde, nachdem die Prüfung Änderungen verlangte oder die Checks scheiterten, oder eine Runde, die den neuesten main nachzieht. Erster Anlauf: nach genau einer Runde gemergt.'],
     ['Aus QA zurück', 'Das Review verlangte Änderungen, also ging das Ticket von QA zurück in In Arbeit. Jedes Ticket zählt einmal pro Zeitraum.'],
     ['Median (p50)', 'Der mittlere Wert: Die Hälfte war schneller, die Hälfte langsamer. Ausreißer verzerren ihn nicht. Die Mediane der Schritte ergeben zusammen nicht den Median des Ganzen.'],
     ['Langsame Ausreißer (p90)', 'Neun von zehn waren schneller. Zeigt, wie schlimm die schlechten Fälle sind.'],

@@ -1,0 +1,112 @@
+# SPDX-License-Identifier: AGPL-3.0-only
+# aeon:owner internal/delivery
+paths:
+  /projects/{projectId}/delivery/building:
+    parameters:
+      - {name: projectId, in: path, required: true, schema: {type: string, format: uuid}}
+    get:
+      operationId: getProjectDeliveryBuilding
+      description: 'Delivery › Numbers › Building it (AEON-1493). Requires delivery.read on the project; an invisible project is absent (404). Computed from the Flow projection of the event log: builder steps (harness sessions and work-queue rounds), gate verdicts, check and merge-queue runs and the merge that ends a change. An item is a change linked to a ticket, counted in the window where it merged; items without a recorded round are counted apart in coverage.without_rounds and never as a first try. A history that does not start with its initial build is withheld from the first-try rate and from lead time, and still counts for rounds, idle and coverage.items. A round is one builder pass (first build, fix round or merge-forward round); overlapping builder steps are one round and a coordinator claim joins the build it starts. Idle is the time from the end of a round (its gate verdict or checks when later than the builder) to the next step: the next round, the merge enqueue, or the merge. Windows of 7, 30, 90, 180 and 365 whole UTC days end today and compare with the window just before. Targets come from the saved delivery settings, a project value replacing the workspace value, or the defaults when none are saved; lead time has none. Durations are minutes; percentiles interpolate linearly. Reads have a five-second deadline and reject more than 5000 merged changes or 100000 steps with 503, without partial figures.'
+      security: [{session: []}, {agentKey: []}]
+      parameters:
+        - {name: window, in: query, schema: {type: integer, enum: [7, 30, 90, 180, 365], default: 7}}
+        - {name: type, in: query, description: 'Work kind slug of the ticket, or bug/other by the bug tag for the generic work kind; all means no filter.', schema: {type: string, maxLength: 64}}
+        - {name: priority, in: query, schema: {type: string, enum: [all, high, medium, low]}}
+        - {name: worked_by, in: query, description: 'Kind of the principal that built the first round; a coordinator claim is not a build.', schema: {type: string, enum: [all, agent, person]}}
+      responses:
+        '200':
+          description: 'The four Building it numbers for the window and the window before.'
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/DeliveryBuilding'}
+        '400': {$ref: '#/components/responses/Error'}
+        '403': {$ref: '#/components/responses/Error'}
+        '404': {$ref: '#/components/responses/Error'}
+        '503': {$ref: '#/components/responses/Error'}
+components:
+  schemas:
+    DeliveryBuildingMeasure:
+      type: object
+      required: [n, items, count, value, p50, p90, mean]
+      properties:
+        n: {type: integer, minimum: 0, description: 'Samples: merged items for rounds, waits for idle, and for first-try and lead only items whose history starts with the initial build.'}
+        items: {type: integer, minimum: 0, description: 'Merged items behind the samples. First-try and lead leave out a history that does not start with the initial build.'}
+        count: {type: integer, minimum: 0, description: 'First try: items merged after one round. Rounds: all rounds of the items. Otherwise 0.'}
+        value: {type: [number, 'null'], description: 'First try: percent of items. Rounds, idle and lead: p50. Null without samples.'}
+        p50: {type: [number, 'null']}
+        p90: {type: [number, 'null']}
+        mean: {type: [number, 'null'], description: 'Rounds only: rounds per item on average.'}
+    DeliveryBuildingMetric:
+      type: object
+      required: [key, unit, better, target, current, previous, change, verdict, buckets, worst]
+      properties:
+        key: {type: string, enum: [first_try, rounds, idle, lead]}
+        unit: {type: string, enum: [percent, rounds, minutes]}
+        better: {type: string, enum: [higher, lower]}
+        target:
+          oneOf:
+            - type: object
+              required: [value, direction, source]
+              properties:
+                value: {type: number}
+                direction: {type: string, enum: [min, max], description: 'min: at least the value; max: at most the value.'}
+                source: {type: string, enum: [delivery_settings]}
+            - {type: 'null'}
+        current: {$ref: '#/components/schemas/DeliveryBuildingMeasure'}
+        previous: {$ref: '#/components/schemas/DeliveryBuildingMeasure'}
+        change:
+          type: object
+          required: [value, trend]
+          properties:
+            value: {type: [number, 'null'], description: 'Current minus previous value; null when either has no samples.'}
+            trend: {type: string, enum: [better, worse, same, none], description: 'Steady within 3 points for the share and within 10 % otherwise.'}
+        verdict:
+          type: object
+          required: [level, ratio]
+          properties:
+            level: {type: string, enum: [on, close, far, none], description: 'On target up to 1x the target, close up to 1.5x, far off beyond; none without a value or a target.'}
+            ratio: {type: [number, 'null']}
+        buckets:
+          type: array
+          maxItems: 54
+          items:
+            allOf:
+              - {$ref: '#/components/schemas/DeliveryBuildingMeasure'}
+              - type: object
+                required: [from, to, state]
+                properties:
+                  from: {type: string, format: date-time}
+                  to: {type: string, format: date-time}
+                  state: {type: string, enum: [observed, partial, no_data], description: 'no_data before the first recorded round; partial for the bucket it falls in.'}
+        worst:
+          type: array
+          maxItems: 5
+          items:
+            type: object
+            required: [node_id, key, title, value, rounds, more_rounds]
+            properties:
+              node_id: {type: string, format: uuid}
+              key: {type: string}
+              title: {type: string}
+              value: {type: number, description: 'Rounds for first try and rounds, the longest wait in minutes for idle, minutes for lead.'}
+              rounds:
+                type: array
+                maxItems: 20
+                items: {type: string, enum: [passed, changes, failed, merge_forward, none]}
+              more_rounds: {type: integer, minimum: 0}
+    DeliveryBuilding:
+      type: object
+      required: [project_id, generated_at, window, since, coverage, metrics]
+      properties:
+        project_id: {type: string, format: uuid}
+        generated_at: {type: string, format: date-time}
+        window: {type: integer}
+        since: {type: [string, 'null'], format: date-time, description: 'Start of the first recorded round of the project.'}
+        coverage:
+          type: object
+          required: [items, without_rounds, partial]
+          properties:
+            items: {type: integer, minimum: 0}
+            without_rounds: {type: integer, minimum: 0}
+            partial: {type: boolean}
+        metrics: {type: array, maxItems: 4, items: {$ref: '#/components/schemas/DeliveryBuildingMetric'}}

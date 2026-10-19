@@ -8422,6 +8422,24 @@
     ,
     {"kind":"browser","file":"tests/delivery-arion-v5.spec.ts","name":"the v5 readings sit in their tiles with exact counts and the plan’s targets","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
+    {"kind":"browser","file":"tests/delivery-building.spec.ts","name":"Building it at 1024, light and dark: four tiles, Simple and Expert, in the design's order","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/delivery-building.spec.ts","name":"Building it at 1440, 1024 and 768: the worst five never cover the app header","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/delivery-building.spec.ts","name":"Building it at 1440, light and dark: four tiles, Simple and Expert, in the design's order","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/delivery-building.spec.ts","name":"Building it at 1440: loading, a failed read, the retry and no data keep every control in place","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/delivery-building.spec.ts","name":"Building it at 390, light and dark: four tiles, Simple and Expert, in the design's order","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/delivery-building.spec.ts","name":"Building it at 390: loading, a failed read, the retry and no data keep every control in place","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/delivery-building.spec.ts","name":"Building it: Enter opens the worst five on the first row, ↓ moves, Esc closes and returns focus; nothing moves","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/delivery-building.spec.ts","name":"Building it: on a phone the worst five open as a bottom sheet with 44 px targets","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/delivery-building.spec.ts","name":"Building it: the previous worst five stay closed until the new window answers","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
     {"kind":"browser","file":"tests/delivery-flow-lanes.spec.ts","name":"Flow lanes at 1440 dark en keep controls still","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
     {"kind":"browser","file":"tests/delivery-flow-lanes.spec.ts","name":"Flow lanes at 1440 light de keep controls still","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
@@ -18055,6 +18073,24 @@
     {"kind":"vitest","file":"tests/decision-scroll.unit.test.ts","name":"retired Release Walker > is not opened by this scrolling suite","tags":["delete-candidate"],"tier":"GATED-FULL"}
     ,
     {"kind":"vitest","file":"tests/definitions.unit.test.ts","name":"AEON-1316 describes complete copies, conditions, owners and their retained base","tier":"ESSENTIAL"}
+    ,
+    {"kind":"vitest","file":"tests/delivery-building.unit.test.ts","name":"AEON-1493: German keeps the approved words, \"Runde\" among the explained ones","tier":"ESSENTIAL"}
+    ,
+    {"kind":"vitest","file":"tests/delivery-building.unit.test.ts","name":"AEON-1493: an answer for another project or window is refused rather than shown","tier":"ESSENTIAL"}
+    ,
+    {"kind":"vitest","file":"tests/delivery-building.unit.test.ts","name":"AEON-1493: charts and small charts follow the server's buckets; days before the first round are no data","tier":"ESSENTIAL"}
+    ,
+    {"kind":"vitest","file":"tests/delivery-building.unit.test.ts","name":"AEON-1493: loading, a failed read and a window without rounds never show figures, and say so in the head line","tier":"ESSENTIAL"}
+    ,
+    {"kind":"vitest","file":"tests/delivery-building.unit.test.ts","name":"AEON-1493: the four tiles say the server's figures, changes and verdicts in Simple and Expert words","tier":"ESSENTIAL"}
+    ,
+    {"kind":"vitest","file":"tests/delivery-building.unit.test.ts","name":"AEON-1493: the previous worst five stay closed while a new window is loading","tier":"ESSENTIAL"}
+    ,
+    {"kind":"vitest","file":"tests/delivery-building.unit.test.ts","name":"AEON-1493: the summary card counts the Building it targets and names their gaps","tier":"ESSENTIAL"}
+    ,
+    {"kind":"vitest","file":"tests/delivery-building.unit.test.ts","name":"AEON-1493: the tiles are the shipped SimpleTile and ExpertTile with the whole-tile trigger slots","tier":"ESSENTIAL"}
+    ,
+    {"kind":"vitest","file":"tests/delivery-building.unit.test.ts","name":"AEON-1493: the worst rows keep every round mark, say them in words and link the ticket key","tier":"ESSENTIAL"}
     ,
     {"kind":"vitest","file":"tests/delivery-flow-lanes.unit.test.ts","name":"Live opens at 45 min with now at 65 % (20 on a phone) and presets zoom around now while following","tier":"ESSENTIAL"}
     ,
