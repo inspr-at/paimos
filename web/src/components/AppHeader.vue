@@ -284,10 +284,13 @@ function clearAside(trail: HTMLElement) {
 }
 // Portrait clips every crumb but the current one (the CSS stand-in, not display:none,
 // so a screen reader still hears the project). Those controls leave the tab order.
+// Under 360 px the project sheet stays a real 44 px chevron even when a ticket follows
+// it, so that trigger stays in the tab order.
 function asideAncestors(trail: HTMLElement) {
   const parts = [...trail.children] as HTMLElement[]
   parts.forEach((part, index) => {
     if (index === parts.length - 1 || !part.matches('a[href], button')) return
+    if (part.matches('.crumb-sheet') && part.getBoundingClientRect().width > 1) return
     part.tabIndex = -1
     part.dataset.aside = ''
   })
@@ -663,6 +666,14 @@ onBeforeUnmount(() => { resized.disconnect(); crumbsChanged.disconnect(); narrow
 @media (max-width: 719px) {
   .app-header .crumbs > :not(:last-child) {
     position: absolute; width: 1px; min-width: 0; height: 1px; padding: 0; margin: 0; overflow: hidden; clip-path: inset(50%); white-space: nowrap; border: 0; pointer-events: none;
+  }
+}
+/* Under 360 px the sheet stays a 44 px chevron when a ticket follows it. The stand-in
+   above would leave a 1 px control. Other ancestors stay 1 px. Equal specificity, so this is last. */
+@media (max-width: 359px) {
+  .app-header .crumbs > .crumb-sheet {
+    position: static; width: auto; min-width: 44px; height: 44px; padding: 0 4px 0 6px; margin: 0;
+    overflow: hidden; clip-path: none; white-space: nowrap; border: 0; pointer-events: auto;
   }
 }
 </style>

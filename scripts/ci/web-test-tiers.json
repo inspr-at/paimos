@@ -1976,8 +1976,6 @@
     ,
     "vitest:tests/footer-summary.unit.test.ts:what each screen says > does not call idle, throttled, awaiting or a paused mix all working"
     ,
-    "vitest:tests/footer-summary.unit.test.ts:what each screen says > keeps a transient settings line from taking the phone release slot"
-    ,
     "vitest:tests/footer-summary.unit.test.ts:what each screen says > knowledge calm"
     ,
     "vitest:tests/footer-summary.unit.test.ts:what each screen says > knowledge to review"
@@ -18415,8 +18413,6 @@
     {"kind":"vitest","file":"tests/footer-summary.unit.test.ts","name":"what each screen says > counts a release as at risk only while it is on its way and a run failed","tier":"NIGHTLY"}
     ,
     {"kind":"vitest","file":"tests/footer-summary.unit.test.ts","name":"what each screen says > does not call idle, throttled, awaiting or a paused mix all working","tier":"NIGHTLY"}
-    ,
-    {"kind":"vitest","file":"tests/footer-summary.unit.test.ts","name":"what each screen says > keeps a transient settings line from taking the phone release slot","tier":"NIGHTLY"}
     ,
     {"kind":"vitest","file":"tests/footer-summary.unit.test.ts","name":"what each screen says > knowledge calm","tier":"NIGHTLY"}
     ,
