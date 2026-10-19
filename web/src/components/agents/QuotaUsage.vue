@@ -136,7 +136,7 @@ const hasPrivate = computed(() => rows.value.some(r => r.state === 'private'))
           <template v-else>
             <span class="ub-meta">
               <span v-if="r.state === 'private'" class="ub-bat quiet">—</span>
-              <span v-else class="ub-bat"><span class="bat" role="img" :aria-label="`${r.left} % left`"><i :style="{ width: `${r.left}%`, background: r.shade }" /></span><span><b>{{ r.left }} %</b> <span class="bl">left</span></span></span>
+              <span v-else class="ub-bat"><span class="bat" role="img" :aria-label="`${r.left} % left`"><i :style="{ width: `${r.left}%`, background: r.shade }" /></span><span><b>{{ r.left }}&nbsp;%</b> <span class="bl">left</span></span></span>
               <span v-clip-tip="ghost ? '' : undefined" class="ub-rs" :class="{ quiet: r.state === 'private' }">{{ r.state === 'private' ? '—' : r.refills }}</span>
               <span v-clip-tip="ghost ? '' : undefined" class="ub-fc" :class="r.tone">{{ r.forecast }}</span>
             </span>
@@ -220,7 +220,8 @@ p { margin: 0; }
 .lg-private { fill: none; stroke: var(--ink-3); stroke-width: 1; }
 .ub-dot { flex: none; width: 9px; height: 9px; border-radius: 50%; }
 .ub-list { display: grid; margin: 8px 0 0; padding: 0; list-style: none; border-top: 1px solid var(--line); }
-.ub-acc { display: grid; grid-template-columns: 9px minmax(18ch, 1fr) 64px 104px minmax(0, 130px) 54px; align-items: center; gap: 0 7px; height: 34px; border-bottom: 1px solid var(--line); color: var(--ink-2); font-size: 12px; font-variant-numeric: tabular-nums; }
+/* The name yields first (its clip-tip reads the rest); the forecast always shows whole. */
+.ub-acc { display: grid; grid-template-columns: 9px minmax(0, 1fr) 64px 104px minmax(16ch, max-content) 54px; align-items: center; gap: 0 7px; height: 34px; border-bottom: 1px solid var(--line); color: var(--ink-2); font-size: 12px; font-variant-numeric: tabular-nums; }
 .ub-acc:last-child { border-bottom: 0; }
 .ub-an { display: flex; align-items: center; gap: 5px; min-width: 0; color: var(--ink); font-weight: 600; }
 .ub-an > svg { flex: none; color: var(--ink-3); }
@@ -270,7 +271,7 @@ p { margin: 0; }
   .ub-acc-t:focus-visible { outline: none; box-shadow: var(--focus-ring); border-radius: 6px; }
   .ub-list { margin-top: 0; }
   .ub-list.folded { display: none; }
-  .ub-acc { grid-template-columns: 9px minmax(0, 1fr) 6.5ch; grid-template-areas: 'd n s' '. w w'; grid-template-rows: 18px auto; height: auto; padding: 8px 0; gap: 4px 10px; }
+  .ub-acc { grid-template-columns: 9px minmax(0, 1fr) minmax(6.5ch, max-content); grid-template-areas: 'd n s' '. w w'; grid-template-rows: 18px auto; height: auto; padding: 8px 0; gap: 4px 10px; }
   .ub-acc > .ub-dot { grid-area: d; }
   .ub-acc > .ub-an { grid-area: n; }
   .ub-acc > .ub-st { grid-area: s; }

@@ -5,7 +5,7 @@
 // missing readings read as present. The fixture is the Go projection's own output
 // (TestQuotaOutlookWebFixtureIsCurrent), so these words follow the server's numbers.
 import { describe, expect, it } from 'vitest'
-import { accountRows, chartGeometry, chartModel, defaultRange, hourInfo, miniGeometry, usageView, type QuotaOutlook } from '../src/lib/quotaOutlook'
+import { accountRows, ago, chartGeometry, chartModel, defaultRange, hourInfo, miniGeometry, usageView, type OutlookGroup, type QuotaOutlook } from '../src/lib/quotaOutlook'
 import fixture from './fixtures/quota-outlook.json'
 
 const outlooks = fixture as unknown as Record<'fast' | 'slow' | 'expired', QuotaOutlook>
@@ -17,25 +17,25 @@ describe('the answer in words', () => {
   it('too fast names when the pool runs dry, how long, and which account refills it', () => {
     const v = view('fast', 'claude')
     expect(v.kind).toBe('fast')
-    expect(v.head).toBe('Claude lasts until Mon ~18:20, then 3 h without until account-b@ refills at 20:59.')
-    expect(v.short).toBe('lasts until Mon 18:20 · refill 20:59')
-    expect(v.tip).toBe('Claude lasts until Mon 18:20 · refill 20:59')
-    expect(v.muted).toBe('77 % of the pool used · 3 accounts · sampled 11:10')
+    expect(v.head).toBe('Claude lasts until Mon\u00a0~18:20, then 3\u00a0h without until account-b@ refills at 20:59.')
+    expect(v.short).toBe('lasts until Mon\u00a018:20 · refill 20:59')
+    expect(v.tip).toBe('Claude lasts until Mon\u00a018:20 · refill 20:59')
+    expect(v.muted).toBe('77\u00a0% of the pool used · 3 accounts · sampled 11:10')
     expect(v.verdict).toBe('Too fast')
-    expect(v.paceLine).toBe('Sustainable: up to 2.0 %/h (now 2.2 %/h)')
+    expect(v.paceLine).toBe('Sustainable: up to 2.0\u00a0%/h (now 2.2\u00a0%/h)')
   })
   it('too slow names the refill that wastes most; on pace names the next refill', () => {
-    expect(view('slow', 'claude')).toMatchObject({ kind: 'slow', head: 'About 23 % will refill unused on Wed. There’s room for more work.', short: '23 % unused at refill', verdict: 'Too slow' })
-    expect(view('fast', 'codex')).toMatchObject({ kind: 'pace', head: 'Enough until the next refill (Tue 09:12).', short: 'enough until refill', tip: 'Codex has enough until the refill Tue 09:12' })
+    expect(view('slow', 'claude')).toMatchObject({ kind: 'slow', head: 'About 23\u00a0% will refill unused on Wed. There’s room for more work.', short: '23\u00a0% unused at refill', verdict: 'Too slow' })
+    expect(view('fast', 'codex')).toMatchObject({ kind: 'pace', head: 'Enough until the next refill (Tue\u00a009:12).', short: 'enough until refill', tip: 'Codex has enough until the refill Tue\u00a009:12' })
   })
   it('says what is missing instead of inventing it', () => {
     expect(view('fast', 'cursor')).toMatchObject({ kind: 'not_reported', head: 'Quota not reported', short: 'Quota not reported · 2 accounts', tip: '' })
     expect(usageView('grok', undefined, outlooks.fast.anchor_hour, 'UTC')).toMatchObject({ kind: 'none', head: 'No accounts yet', tip: '' })
     const old = structuredClone(group('fast', 'claude'))
     old.pool!.sampled_age_seconds = 3 * 3600
-    expect(usageView('claude', old, outlooks.fast.anchor_hour, 'UTC')).toMatchObject({ stale: true, muted: '77 % of the pool used · 3 accounts · sampled 3 h ago' })
+    expect(usageView('claude', old, outlooks.fast.anchor_hour, 'UTC')).toMatchObject({ stale: true, muted: '77\u00a0% of the pool used · 3 accounts · sampled 3\u00a0h ago' })
     // More accounts than the outlook reads: said, never hidden.
-    expect(usageView('claude', group('fast', 'claude'), outlooks.fast.anchor_hour, 'UTC', [], 'ready', true).muted).toBe('77 % of the pool used · 3 accounts · not every account read · sampled 11:10')
+    expect(usageView('claude', group('fast', 'claude'), outlooks.fast.anchor_hour, 'UTC', [], 'ready', true).muted).toBe('77\u00a0% of the pool used · 3 accounts · not every account read · sampled 11:10')
     const learning = structuredClone(group('fast', 'claude'))
     Object.assign(learning, { verdict: 'unknown', current: null }); learning.pace.per_hour_24h = null; learning.headline = { ...learning.headline, kind: 'unknown', focus_at: null }
     expect(usageView('claude', learning, outlooks.fast.anchor_hour, 'UTC')).toMatchObject({ kind: 'unknown', verdict: 'Pace not measured yet', focus: null })
@@ -45,7 +45,7 @@ describe('the answer in words', () => {
     expired.accounts[0]!.freshness = 'expired'
     expired.accounts[0]!.used_percent = 80
     const words = usageView('claude', expired, outlooks.fast.anchor_hour, 'UTC')
-    expect(words.head + words.short + words.muted + words.tip).not.toMatch(/100 %/)
+    expect(words.head + words.short + words.muted + words.tip).not.toMatch(/100\s%/)
     expect(words.muted.toLowerCase()).toContain('unknown')
   })
   it('before the outlook is read, the plan’s accounts decide: pending rows, or no quota for a harness that never reports it', () => {
@@ -71,12 +71,12 @@ describe('the subscriptions', () => {
   it('each battery says what is left, when it refills and its own forecast; only the account that empties the pool warns', () => {
     const rows = accountRows(group('fast', 'claude'), 'UTC')
     expect(rows.map(r => [r.name, r.left, r.refills, r.forecast, r.tone, r.stateWord])).toEqual([
-      ['account-a@', 0, 'refills Wed 18:59', 'waits for refill', 'quiet', ''],
-      ['account-b@', 0, 'refills Mon 20:59', 'waits for refill', 'quiet', ''],
-      ['account-c@', 69, 'refills Fri 00:59', 'empty ~Mon 18:20', 't-fast', 'active'],
+      ['account-a@', 0, 'refills Wed\u00a018:59', 'waits for refill', 'quiet', ''],
+      ['account-b@', 0, 'refills Mon\u00a020:59', 'waits for refill', 'quiet', ''],
+      ['account-c@', 69, 'refills Fri\u00a000:59', 'empty ~Mon\u00a018:20', 't-fast', 'active'],
     ])
     const slow = accountRows(group('slow', 'claude'), 'UTC')
-    expect(slow[0]).toMatchObject({ forecast: '23 % unused', tone: 't-slow', stateWord: 'active' })
+    expect(slow[0]).toMatchObject({ forecast: '23\u00a0% unused', tone: 't-slow', stateWord: 'active' })
     expect(slow[2]).toMatchObject({ state: 'held', stateWord: 'held', stateIcon: 'lock', forecast: '' })
     expect(accountRows(group('fast', 'cursor'), 'UTC').every(r => r.left === null && r.state === 'not_reported')).toBe(true)
     // A private row may arrive beside retained pool totals, but never names its
@@ -84,12 +84,44 @@ describe('the subscriptions', () => {
     const privateGroup = structuredClone(group('fast', 'claude'))
     privateGroup.accounts[1]!.state = 'private'
     expect(accountRows(privateGroup, 'UTC')[1]).toMatchObject({ name: 'Private account', left: null, refills: '', forecast: 'details hidden', tone: 'quiet' })
-    expect(usageView('claude', privateGroup, outlooks.fast.anchor_hour, 'UTC').head).toBe('Claude lasts until Mon ~18:20, then 3 h without until another account refills at 20:59.')
+    expect(usageView('claude', privateGroup, outlooks.fast.anchor_hour, 'UTC').head).toBe('Claude lasts until Mon\u00a0~18:20, then 3\u00a0h without until another account refills at 20:59.')
   })
   it('an inactive login keeps its last reading and says its age', () => {
     const g = structuredClone(group('fast', 'codex'))
     g.accounts[1]!.reading_age_seconds = 5 * 3600
-    expect(accountRows(g, 'UTC')[1]).toMatchObject({ left: 100, stateWord: '5 h ago' })
+    expect(accountRows(g, 'UTC')[1]).toMatchObject({ left: 100, stateWord: '5\u00a0h ago' })
+  })
+})
+
+describe('no line break inside a number or a moment', () => {
+  // A plain space may break ("then 3 / h without" on a phone). Every string the headline, the muted
+  // line, the verdict and the rows show joins a number to its unit and a weekday to its time.
+  const breakable = /\d (?:%|h\b|min\b|d\b|days\b)|\b(?:Mon|Tue|Wed|Thu|Fri|Sat|Sun) ~?\d/
+  const variant = (scenario: 'fast' | 'slow', harness: string, edit: (g: OutlookGroup) => void) => {
+    const g = structuredClone(group(scenario, harness)); edit(g)
+    return usageView(harness, g, outlooks[scenario].anchor_hour, 'UTC')
+  }
+  it('joins units, percentages and weekday times with a no-break space in every branch', () => {
+    const out = variant('fast', 'claude', g => { g.headline.at = g.pool!.sampled_at })
+    const endless = variant('fast', 'claude', g => { g.headline.until = null })
+    const minutes = variant('fast', 'claude', g => { g.headline.until = '2026-10-19T18:58:00Z' })
+    const week = variant('fast', 'codex', g => { g.headline.at = null })
+    const learning = variant('fast', 'claude', g => { g.verdict = 'unknown' })
+    const stale = variant('fast', 'claude', g => { g.pool!.sampled_age_seconds = 3 * 3600 })
+    expect(out.head).toBe('Claude is out of quota until account-b@ refills at Mon\u00a020:59.')
+    expect(endless.head).toBe('Claude lasts until Mon\u00a0~18:20; nothing refills within 7\u00a0days.')
+    expect(minutes.head).toBe('Claude lasts until Mon\u00a0~18:20, then 40\u00a0min without until account-b@ refills at 18:58.')
+    expect(week.head).toBe('Enough for the next 7\u00a0days.')
+    expect(learning.head).toBe('23\u00a0% of the pool left. The pace appears after an hour of readings.')
+    expect([ago(45 * 60), ago(3 * 86400)]).toEqual(['45\u00a0min ago', '3\u00a0d ago'])
+    const views = [out, endless, minutes, week, learning, stale, ...(['fast', 'slow'] as const).flatMap(s => ['claude', 'codex', 'cursor'].map(h => view(s, h)))]
+    const aged = structuredClone(group('fast', 'codex'))
+    aged.accounts[1]!.reading_age_seconds = 5 * 3600
+    const rows = [...accountRows(group('fast', 'claude'), 'UTC'), ...accountRows(group('slow', 'claude'), 'UTC'), ...accountRows(aged, 'UTC')]
+    const texts = [...views.flatMap(v => [v.head, v.muted, v.verdict, v.paceLine, v.short, v.tip]), ...rows.flatMap(r => [r.refills, r.forecast, r.stateWord])]
+    expect(texts.filter(t => breakable.test(t))).toEqual([])
+    // The sweep holds the joined forms, so an empty pass cannot hide a regression.
+    for (const joined of [/then 3\u00a0h without/, /2\.0\u00a0%\/h/, /77\u00a0% of the pool/, /empty ~Mon\u00a018:20/, /refills Fri\u00a000:59/, /23\u00a0% unused/, /5\u00a0h ago/]) expect(texts.some(t => joined.test(t)), String(joined)).toBe(true)
   })
 })
 

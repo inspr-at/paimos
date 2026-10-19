@@ -62,10 +62,10 @@ it('a failed refresh keeps the snapshot and ages it from the reading', async () 
   expect(store.data).not.toBeNull()
   expect(store.data!.groups[0]!.pool!.sampled_age_seconds).toBe(3600)
   const aged = usageView('claude', store.groups.get('claude'), store.data!.anchor_hour, 'UTC', [], 'ready', false, store.since)
-  expect(aged.muted).toContain('3 h ago')
+  expect(aged.muted).toContain('3\u00a0h ago')
   expect(aged.muted).not.toContain('10:10')
   expect(aged.stale).toBe(true)
-  expect(accountRows(store.groups.get('claude')!, 'UTC', [], store.since)[0]!.stateWord).toBe('3 h ago')
+  expect(accountRows(store.groups.get('claude')!, 'UTC', [], store.since)[0]!.stateWord).toBe('3\u00a0h ago')
 
   const app = Vue.createSSRApp({
     render: () => Vue.h(QuotaUsage, { view: aged, state: 'ready', failed: true, since: store.since, tz: 'UTC' }),
@@ -93,7 +93,7 @@ it('a client clock hours ahead of the server still reads the server’s age, and
   await store.refresh()
   expect(store.since).toBe(3_600_000)
   const aged = usageView('claude', store.groups.get('claude'), store.data!.anchor_hour, 'UTC', [], 'ready', false, store.since)
-  expect(aged.muted).toContain('2 h ago')
+  expect(aged.muted).toContain('2\u00a0h ago')
   expect(aged.stale).toBe(true)
-  expect(accountRows(store.groups.get('claude')!, 'UTC', [], store.since)[0]!.stateWord).toBe('2 h ago')
+  expect(accountRows(store.groups.get('claude')!, 'UTC', [], store.since)[0]!.stateWord).toBe('2\u00a0h ago')
 })

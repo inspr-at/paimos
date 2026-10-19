@@ -58,16 +58,22 @@ export function zoned(ms: number, tz?: string): Zoned {
 }
 export const hm = (ms: number, tz?: string) => { const z = zoned(ms, tz); return `${pad(z.h)}:${pad(z.mi)}` }
 export const dayName = (ms: number, tz?: string) => DAY[zoned(ms, tz).wd]!
-export const dayHm = (ms: number, tz?: string) => `${dayName(ms, tz)} ${hm(ms, tz)}`
+/**
+ * A no-break space: a number keeps its unit ("3 h", "77 %", "2.2 %/h") and a weekday its time
+ * ("Mon 20:20") on one line, in the headline, the muted line, the verdict and the rows.
+ */
+export const NBSP = '\u00a0'
+const pc = (n: number) => `${n}${NBSP}%`
+export const dayHm = (ms: number, tz?: string) => `${dayName(ms, tz)}${NBSP}${hm(ms, tz)}`
 const sameDay = (a: number, b: number, tz?: string) => { const x = zoned(a, tz), y = zoned(b, tz); return x.y === y.y && x.m === y.m && x.d === y.d }
 /** To ten minutes: a projected moment is never sharper than that. */
 export const round10 = (ms: number) => Math.round(ms / 600_000) * 600_000
 const at = (iso: string | null | undefined) => iso ? Date.parse(iso) : NaN
 export function ago(seconds: number): string {
   const minutes = Math.max(0, Math.round(seconds / 60))
-  if (minutes < 60) return `${minutes} min ago`
+  if (minutes < 60) return `${minutes}${NBSP}min ago`
   const hours = Math.round(minutes / 60)
-  return hours < 48 ? `${hours} h ago` : `${Math.round(hours / 24)} d ago`
+  return hours < 48 ? `${hours}${NBSP}h ago` : `${Math.round(hours / 24)}${NBSP}d ago`
 }
 /** A reading this old reads as its age, in muted ink. */
 export const STALE_SECONDS = 2 * 3600
@@ -83,11 +89,12 @@ function snapshotAt(group: OutlookGroup): number {
   return read ? at(read.read_at) + read.reading_age_seconds! * 1000 : Number.NaN
 }
 export const f1 = (n: number) => (Math.round(n * 10) / 10).toFixed(1)
+const perHour = (n: number) => `${f1(n)}${NBSP}%/h`
 function span(ms: number): string {
   const minutes = Math.round(ms / 60_000)
-  if (minutes < 60) return `${Math.max(10, Math.round(minutes / 10) * 10)} min`
+  if (minutes < 60) return `${Math.max(10, Math.round(minutes / 10) * 10)}${NBSP}min`
   const hours = Math.round(minutes / 60)
-  return hours < 48 ? `${hours} h` : `${Math.round(hours / 24)} d`
+  return hours < 48 ? `${hours}${NBSP}h` : `${Math.round(hours / 24)}${NBSP}d`
 }
 
 // ---------- The answer in words ----------
@@ -147,10 +154,10 @@ export function usageView(harness: string, group: OutlookGroup | undefined, anch
   // More accounts than the outlook reads are said, never hidden (AEON-574 rule 5).
   // No pool: the last reading expired, so there is no current headroom to claim.
   const muted = pool
-    ? `${Math.round(pool.used_percent)} % of the pool used · ${pooled}${missing ? ` · ${missing} not reported` : ''}${truncated ? ' · not every account read' : ''} · sampled ${stale ? ago(sampledAge) : hm(at(pool.sampled_at), tz)}`
+    ? `${pc(Math.round(pool.used_percent))} of the pool used · ${pooled}${missing ? ` · ${missing} not reported` : ''}${truncated ? ' · not every account read' : ''} · sampled ${stale ? ago(sampledAge) : hm(at(pool.sampled_at), tz)}`
     : 'Current headroom is unknown; the last reading expired.'
   const sus = group.pace.safe_per_hour, paceNow = group.pace.per_hour_24h
-  const paceLine = sus === null ? '' : `Sustainable: up to ${f1(sus)} %/h${paceNow === null ? '' : ` (now ${f1(paceNow)} %/h)`}`
+  const paceLine = sus === null ? '' : `Sustainable: up to ${perHour(sus)}${paceNow === null ? '' : ` (now ${perHour(paceNow)})`}`
   const focus = group.headline.focus_at && anchorHour ? (at(group.headline.focus_at) - at(anchorHour)) / HOUR_MS : null
   const view = { ...base, muted, stale, paceLine, focus }
   const h = group.headline
@@ -161,24 +168,24 @@ export function usageView(harness: string, group: OutlookGroup | undefined, anch
     const emptyNow = at(h.at) <= clockNow + 60_000
     let head: string, short: string
     if (emptyNow) {
-      head = refill ? `${name} is out of quota until ${label(h.account_id)} refills at ${dayHm(until, tz)}.` : `${name} is out of quota, and nothing refills within 7 days.`
+      head = refill ? `${name} is out of quota until ${label(h.account_id)} refills at ${dayHm(until, tz)}.` : `${name} is out of quota, and nothing refills within 7${NBSP}days.`
       short = refill ? `out of quota · refill ${dayHm(until, tz)}` : 'out of quota'
     } else {
-      head = refill ? `${name} lasts until ${dayName(from, tz)} ~${hm(from, tz)}, then ${span(until - from)} without until ${label(h.account_id)} refills at ${refill}.` : `${name} lasts until ${dayName(from, tz)} ~${hm(from, tz)}; nothing refills within 7 days.`
+      head = refill ? `${name} lasts until ${dayName(from, tz)}${NBSP}~${hm(from, tz)}, then ${span(until - from)} without until ${label(h.account_id)} refills at ${refill}.` : `${name} lasts until ${dayName(from, tz)}${NBSP}~${hm(from, tz)}; nothing refills within 7${NBSP}days.`
       short = `lasts until ${dayHm(from, tz)}${refill ? ` · refill ${refill}` : ''}`
     }
     return { ...view, kind: 'fast', head, short, tip: `${name} ${short}`, verdict: VERDICT_WORD.fast }
   }
   if (group.verdict === 'too_slow' && h.kind === 'unused' && h.at && h.unused_percent !== null) {
     const u = Math.round(h.unused_percent), day = dayName(at(h.at), tz)
-    return { ...view, kind: 'slow', head: `About ${u} % will refill unused on ${day}. There’s room for more work.`, short: `${u} % unused at refill`, tip: `${name}: about ${u} % refills unused on ${day}`, verdict: VERDICT_WORD.slow }
+    return { ...view, kind: 'slow', head: `About ${pc(u)} will refill unused on ${day}. There’s room for more work.`, short: `${pc(u)} unused at refill`, tip: `${name}: about ${pc(u)} refills unused on ${day}`, verdict: VERDICT_WORD.slow }
   }
   if (group.verdict === 'on_pace') {
     const next = h.at ? dayHm(at(h.at), tz) : ''
-    return { ...view, kind: 'pace', head: next ? `Enough until the next refill (${next}).` : 'Enough for the next 7 days.', short: 'enough until refill', tip: next ? `${name} has enough until the refill ${next}` : `${name} has enough for the next 7 days`, verdict: VERDICT_WORD.pace }
+    return { ...view, kind: 'pace', head: next ? `Enough until the next refill (${next}).` : `Enough for the next 7${NBSP}days.`, short: 'enough until refill', tip: next ? `${name} has enough until the refill ${next}` : `${name} has enough for the next 7${NBSP}days`, verdict: VERDICT_WORD.pace }
   }
   if (!pool) return { ...view, kind: 'unknown', head: 'Current headroom is unknown. The last reading expired.', short: 'last reading expired', tip: `${name}: the last reading expired`, verdict: VERDICT_WORD.unknown, focus: null }
-  return { ...view, kind: 'unknown', head: `${Math.round(pool.left_percent)} % of the pool left. The pace appears after an hour of readings.`, short: `${Math.round(pool.left_percent)} % left · pace not measured yet`, tip: `${name}: ${Math.round(pool.left_percent)} % left`, verdict: VERDICT_WORD.unknown, focus: null }
+  return { ...view, kind: 'unknown', head: `${pc(Math.round(pool.left_percent))} of the pool left. The pace appears after an hour of readings.`, short: `${pc(Math.round(pool.left_percent))} left · pace not measured yet`, tip: `${name}: ${pc(Math.round(pool.left_percent))} left`, verdict: VERDICT_WORD.unknown, focus: null }
 }
 
 /** The default range: 3 days back (1 on phones); ahead at least 2 days (1 on phones), extended to the headline's moment, at most 7. */
@@ -212,7 +219,7 @@ export function accountRows(group: OutlookGroup | null, tz?: string, known: Know
     if (f?.kind === 'waits') { row.forecast = 'waits for refill'; row.tone = 'quiet' }
     else if (f?.kind === 'empties' && f.at) { row.forecast = `empty ~${dayHm(round10(at(f.at)), tz)}`; row.tone = 't-fast' }
     else if (f?.kind === 'used_up' && f.at) row.forecast = `used up ~${dayHm(round10(at(f.at)), tz)}`
-    else if (f?.kind === 'unused' && f.unused_percent !== null) { row.forecast = `${Math.round(f.unused_percent)} % unused`; row.tone = f.unused_percent >= 20 ? 't-slow' : '' }
+    else if (f?.kind === 'unused' && f.unused_percent !== null) { row.forecast = `${pc(Math.round(f.unused_percent))} unused`; row.tone = f.unused_percent >= 20 ? 't-slow' : '' }
     else if (f?.kind === 'enough') { row.forecast = 'enough'; row.tone = 't-pace' }
     if (a.state === 'active') { row.stateWord = 'active'; row.stateIcon = 'pulse' }
     else if (a.state === 'held') { row.stateWord = 'held'; row.stateIcon = 'lock' }

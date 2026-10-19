@@ -5,7 +5,7 @@
 // not follow the server's projection, a default range that misses the headline's moment, and
 // anything that moves under the pointer (hover, a range step, a live update, loading → ready,
 // the mini lines appearing). The outlook is the Go projection's own fixture.
-import { test, expect, type Page, type Route } from '@playwright/test'
+import { test, expect, type Locator, type Page, type Route } from '@playwright/test'
 import { fixtures, me, mockWork, watchErrors } from './work-fixtures'
 import { agentData, mockAgents } from './agents-fixtures'
 import { capacityWorld } from './capacity-fixtures'
@@ -63,6 +63,10 @@ const detail = (page: Page, key: string) => body(page).locator(`[data-detail="${
 const cell = (page: Page, key: string) => control(page).locator(`.du-cell[data-cell="${key}"]`)
 /** A live update: the poller reads again when the browser comes back online. */
 const goOnline = (page: Page) => page.evaluate(() => window.dispatchEvent(new Event('online')))
+/** Every match shows its words whole: nothing clipped behind an ellipsis or spilled past its slot. */
+async function expectWhole(cells: Locator) {
+  for (const el of await cells.all()) expect(await el.evaluate(e => e.scrollWidth - e.clientWidth), `${await el.textContent()} is cut`).toBeLessThanOrEqual(0)
+}
 
 for (const width of [1440, 1024, 390]) {
   const phone = width < 720
@@ -106,6 +110,14 @@ for (const width of [1440, 1024, 390]) {
     await expect(acc.nth(2).locator('.ub-fc')).toHaveText('empty ~Mon 20:20')
     await expect(acc.nth(2).locator('.ub-st')).toHaveText('active')
     await expect(acc.nth(0).locator('.ub-fc')).toHaveText('waits for refill')
+    // The forecast never truncates ("empty ~Mon 20:20" whole); the account name yields first.
+    await expectWhole(claude.locator('.ub-fc'))
+    // Evidence with the rows centred in the viewport, clear of the fixed app status bar.
+    const rowsShot = async (name: string) => {
+      await claude.locator('.ub-list').evaluate(el => el.scrollIntoView({ block: 'center' }))
+      await page.screenshot({ path: info.outputPath(`${width}-light-${name}-rows.png`), animations: 'disabled' })
+    }
+    await rowsShot('too-fast')
     await expect(claude.getByRole('link', { name: 'Accounts and limits Settings' })).toHaveAttribute('href', '/settings/accounts')
     // The shipped folds follow.
     await expect(claude.getByRole('button', { name: 'Pace' })).toBeVisible()
@@ -151,6 +163,7 @@ for (const width of [1440, 1024, 390]) {
           await expect(privateAccount.locator('.ub-rs')).toHaveText('—')
           await expect(privateAccount.locator('.ub-fc')).toHaveText('details hidden')
           await expect(privateAccount.locator('.bat')).toHaveCount(0)
+          await expectWhole(claude.locator('.ub-fc'))
           await expect(claude.locator('.ub-hd')).toHaveText('Claude lasts until Mon ~20:20, then 3 h without until another account refills at 22:59.')
           await expect(claude.locator('.private-k')).toHaveText('private')
           await expect(plot.locator('.cx-private')).toHaveCount(1)
@@ -161,11 +174,23 @@ for (const width of [1440, 1024, 390]) {
             await body(page).screenshot({ path: info.outputPath(`${width}-${theme}-private.png`), animations: 'disabled' })
           }
           await page.emulateMedia({ colorScheme: 'light', reducedMotion: 'reduce' })
+          await rowsShot('private')
         } },
         { name: 'a live update turns the verdict', run: async () => { const reads = state.reads; state.outlook = scenarios.slow; await goOnline(page); await expect.poll(() => state.reads).toBeGreaterThan(reads); await expect(claude.locator('.ub-hd')).toHaveText('About 23 % will refill unused on Wed. There’s room for more work.'); await expect(row(page, 'claude').locator('.sub')).toHaveText('23 % unused at refill') } },
       ],
     })
     await body(page).screenshot({ path: info.outputPath(`${width}-light-too-slow.png`), animations: 'disabled' })
+    // A stale reading says its age in the muted line and in the row's status column.
+    const stale = structuredClone(scenarios.fast)
+    stale.groups[0]!.pool!.sampled_age_seconds = 3 * 3600
+    stale.groups[0]!.accounts[0]!.reading_age_seconds = 3 * 3600
+    state.outlook = stale; await goOnline(page)
+    await expect(claude.locator('.ub-l2')).toHaveText('77 % of the pool used · 3 accounts · sampled 3 h ago')
+    await expect(acc.locator('.ub-st')).toHaveText(['3 h ago', '', 'active'])
+    // On phones the status column grows with its words (at least 6.5ch), so an age or "active" never spills.
+    if (phone) await expectWhole(claude.locator('.ub-st'))
+    await expectWhole(claude.locator('.ub-fc'))
+    await rowsShot('stale')
     // An expired window has neither a measured refill marker nor a tooltip
     // claiming that one happened. This is the Go-built response, not a mock
     // with the troublesome events hand-removed.
@@ -184,7 +209,7 @@ for (const width of [1440, 1024, 390]) {
     long.groups[0]!.accounts[1]!.label = longLabel
     state.outlook = long; await goOnline(page)
     const headline = claude.locator('.ub-hd')
-    const full = `Claude lasts until Mon ~20:20, then 3 h without until ${longLabel} refills at 22:59.`
+    const full = `Claude lasts until Mon\u00a0~20:20, then 3\u00a0h without until ${longLabel} refills at 22:59.`
     await expect(headline).toHaveText(full)
     await expect(headline).toHaveAttribute('data-tip', full)
     await headline.hover(); await expect(page.locator('.tooltip')).toHaveText(full)
@@ -226,7 +251,7 @@ for (const width of [1440, 1024]) {
       interactions: [{ name: 'the outlook arrives', run: async () => {
         gate.release()
         if (width >= 1100) await expect(cell(page, 'claude').locator('.mini')).toBeVisible()
-        await expect(control(page).locator('[data-unit="claude"]')).toHaveAccessibleName(/lasts until Mon 20:20 · refill 22:59/)
+        await expect(control(page).locator('[data-unit="claude"]')).toHaveAccessibleName(/lasts until Mon\s20:20 · refill 22:59/)
       } }],
     })
     if (width >= 1100) {
