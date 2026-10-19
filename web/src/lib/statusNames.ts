@@ -56,7 +56,6 @@ export function statusNameKey(state: string): StatusNameKey | null {
   const key = normal === 'active' ? 'in_progress' : normal === 'canceled' ? 'cancelled' : normal
   return (STATUS_NAME_KEYS as readonly string[]).includes(key) ? key as StatusNameKey : null
 }
-export function builtInStatusName(key: StatusNameKey, locale: StatusLocale = 'en'): string { return BUILT_IN_STATUS_NAMES[key][locale] }
 /** The workspace's own name in a locale, or '' when the status keeps its built-in name there. */
 export function renamedStatus(key: StatusNameKey, locale: StatusLocale = 'en', names: StatusNameMap = STATUS_NAMES.names): string { return names[key]?.[locale] ?? '' }
 /** What a person reads for a status: the workspace's name, else the built-in one. */
