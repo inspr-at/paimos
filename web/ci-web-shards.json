@@ -896,7 +896,7 @@
     ,
     "AEON-1388: group-figures was not in hosted nightly run 38732586462. An mbp2606 one-worker run of its thirteen cases at f9993d151 took 16.7 seconds; nightlyTiming keeps that wall as a scheduling estimate, not a hosted measurement. PR packing stays on the unmeasured-test-rate weight."
     ,
-    "AEON-1401: aeon-1401-status-names has no hosted or mbp2606 run yet. Its 90-second nightlyTiming is a scheduling estimate for four cases (two of them loop over three or four browser contexts), to be replaced by the first measured wall. PR packing stays on the unmeasured-test-rate weight."
+    "AEON-1401: aeon-1401-status-names was not in a hosted nightly run yet. An mbp2606 one-worker run of its four cases took 10.7 seconds; nightlyTiming keeps that wall as a scheduling estimate, not a hosted measurement. PR packing stays on the unmeasured-test-rate weight."
   ]
   ,
   "nightlyTiming": {

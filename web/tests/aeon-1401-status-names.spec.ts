@@ -152,6 +152,9 @@ test('AEON-1401 lists, the status menu, the ticket header, Desk and activity rea
       const toolbar = page.getByRole('toolbar', { name: 'Ticket list controls' })
       if (width > 600) await expect(toolbar).toContainText('Building')
       expect(await visibleText(toolbar)).not.toContain('In progress')
+      // The project's figures bar names its in-progress bucket after the status.
+      const bar = page.locator('.work-bar').first()
+      if (await bar.isVisible()) expect(await visibleText(bar)).not.toContain('In progress')
       checks.push({ assert: 'DOM sweep (list, group header, filter chips): “Building”, no “In progress”', width, theme, ok: true })
       await shot(page, testInfo, width, theme, width === 390 ? 'N6' : 'N3')
 
