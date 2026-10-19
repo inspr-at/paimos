@@ -429,8 +429,25 @@ test('AEON-1459 C8 agents 390x664 light: the avatar menu has the theme, What’s
 })
 
 // ---------- The scroller never resizes while a finger scrolls (H2) ----------
-// Chromium's own touch scroll gestures (CDP), finger up the screen, until 2000 px have passed; every
-// scroll event records main's clientHeight.
+// A real touch sequence (CDP dispatchTouchEvent), finger up the screen, until 2000 px have passed; every
+// scroll event records main's clientHeight. synthesizeScrollGesture does not move main on Linux Chromium
+// (AEON-1279): the finger's own events do, and the height assertion is unchanged.
+async function finger(cdp: CDPSession, at: { x: number; y: number }, dy: number) {
+  const releasedAt = Date.now() / 1000
+  const timestamp = releasedAt - 0.5
+  let down = false
+  try {
+    await cdp.send('Input.dispatchTouchEvent', { type: 'touchStart', timestamp, touchPoints: [{ ...at, id: 0 }] })
+    down = true
+    for (let step = 1; step <= 8; step++) {
+      await cdp.send('Input.dispatchTouchEvent', { type: 'touchMove', timestamp: timestamp + step * 0.02, touchPoints: [{ x: at.x, y: at.y + dy * step / 8, id: 0 }] })
+    }
+    await cdp.send('Input.dispatchTouchEvent', { type: 'touchEnd', timestamp: releasedAt, touchPoints: [] })
+    down = false
+  } finally {
+    if (down) await cdp.send('Input.dispatchTouchEvent', { type: 'touchCancel', timestamp: releasedAt, touchPoints: [] })
+  }
+}
 type HeightWindow = { __heights: number[] }
 async function touchPage(browser: Browser, size: Size) {
   const context = await browser.newContext({ viewport: size, hasTouch: true, isMobile: true })
@@ -456,7 +473,7 @@ for (const size of [PORTRAIT, LANDSCAPE]) test(`AEON-1459 agents ${sizeName(size
     let travelled = 0
     for (let n = 0; n < 24 && travelled < 2000; n++) {
       const before = await main(page).evaluate(el => el.scrollTop)
-      await cdp.send('Input.synthesizeScrollGesture', { x, y, yDistance: distance, gestureSourceType: 'touch', speed: 1200, preventFling: true })
+      await finger(cdp, { x, y }, distance)
       await expect.poll(() => main(page).evaluate(el => el.scrollTop), 'the finger moves the page').toBeGreaterThan(before)
       travelled = (await main(page).evaluate(el => el.scrollTop)) - start
     }

@@ -268,21 +268,40 @@ function phoneCut(trail: HTMLElement): boolean {
 // The page names its project and its ticket, so a key that cannot show whole leaves the trail. The project's sheet
 // trigger keeps its chevron, a full 44 px target; its key stays in its accessible name.
 function dropKeys(trail: HTMLElement) {
-  const parts = [...trail.children].filter((part): part is HTMLElement => part instanceof HTMLElement && getComputedStyle(part).display !== 'none')
+  // A portrait ancestor is already a 1 px stand-in (it stays for its accessible name). It is not a key to cut.
+  const parts = [...trail.children].filter((part): part is HTMLElement => part instanceof HTMLElement && getComputedStyle(part).display !== 'none' && part.getBoundingClientRect().width > 1)
   for (const part of parts) {
     if (part.matches('.crumb-sheet')) part.querySelectorAll<HTMLElement>('.key-badge').forEach(drop)
     else drop(part)
   }
   if (parts.every(part => part.dataset.dropped !== undefined)) trail.dataset.empty = ''
 }
+function clearAside(trail: HTMLElement) {
+  for (const part of trail.querySelectorAll<HTMLElement>('[data-aside]')) {
+    part.removeAttribute('tabindex')
+    delete part.dataset.aside
+  }
+}
+// Portrait clips every crumb but the current one (the CSS stand-in, not display:none,
+// so a screen reader still hears the project). Those controls leave the tab order.
+function asideAncestors(trail: HTMLElement) {
+  const parts = [...trail.children] as HTMLElement[]
+  parts.forEach((part, index) => {
+    if (index === parts.length - 1 || !part.matches('a[href], button')) return
+    part.tabIndex = -1
+    part.dataset.aside = ''
+  })
+}
 function fitHeader() {
   const el = header.value
   if (!el) return
   const trail = el.querySelector<HTMLElement>('.crumbs')
+  if (trail) clearAside(trail)
   if (!narrow.matches) { fitTrail(trail, true); return }
   // Phones keep only where you are; a key that would still be cut leaves the trail.
   fitTrail(trail, false)
   if (trail && phoneCut(trail)) dropKeys(trail)
+  if (trail) asideAncestors(trail)
 }
 let fitFrame = 0
 let fitGeneration = 0
@@ -612,7 +631,7 @@ onBeforeUnmount(() => { resized.disconnect(); crumbsChanged.disconnect(); narrow
 @media (max-width: 719px) {
   .app-header:has(.places) .lockup { display: none; }
   .place[data-place="business"] { display: none; }
-  .crumbs > :not(:last-child) { display: none; }
+  /* Ancestors of the current crumb stay in the accessibility tree (D11). The 1 px stand-in is the last rule. */
   .crumbs.lead { padding-left: 2px; }
   .crumb-sheet { padding: 0 4px 0 6px; }
   .crumb-sheet .crumb-name { display: none; }
@@ -638,5 +657,12 @@ onBeforeUnmount(() => { resized.disconnect(); crumbsChanged.disconnect(); narrow
    screen readers, like the folded Settings label. Last, so it wins. */
 .app-header .crumbs [data-dropped], .app-header .crumbs[data-empty] {
   position: absolute; width: 1px; min-width: 0; height: 1px; padding: 0; margin: 0; overflow: hidden; clip-path: inset(50%); white-space: nowrap;
+}
+/* Portrait: the project crumb on a ticket (and every other ancestor) keeps its accessible name.
+   display:none would drop it. Same stand-in as a measured drop; script takes it out of the tab order. */
+@media (max-width: 719px) {
+  .app-header .crumbs > :not(:last-child) {
+    position: absolute; width: 1px; min-width: 0; height: 1px; padding: 0; margin: 0; overflow: hidden; clip-path: inset(50%); white-space: nowrap; border: 0; pointer-events: none;
+  }
 }
 </style>

@@ -321,7 +321,11 @@ for (const theme of ['light', 'dark'] as const) for (const width of [1600, 390])
       expect(box.width).toBeGreaterThanOrEqual(name === 'Dismiss' ? 44 : 40)
     }
     if (shots) await page.screenshot({ path: test.info().outputPath(`undo-${width}-${theme}.png`) })
-    await page.getByRole('button', { name: 'Show history: every ended or removed session' }).click()
+    if (width === 390) {
+      // Compact chrome keeps History in the list's ⋯ (AEON-1459, D3).
+      await page.getByRole('button', { name: 'More list actions', exact: true }).click()
+      await page.getByRole('menu', { name: 'More list actions' }).getByRole('menuitem', { name: /^History/ }).click()
+    } else await page.getByRole('button', { name: 'Show history: every ended or removed session' }).click()
     await expect(page.getByRole('heading', { name: 'History' })).toBeVisible()
     if (shots) { await page.getByRole('heading', { name: 'History' }).scrollIntoViewIfNeeded(); await page.screenshot({ path: test.info().outputPath(`history-${width}-${theme}.png`) }) }
     await page.goto(`/agents/${live.id}`)

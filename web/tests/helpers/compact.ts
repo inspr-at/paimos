@@ -11,6 +11,15 @@ export async function showCapacityRow(page: Page) {
   if (!await sheet.isVisible()) await page.locator('.agents-page .cap-line').click()
   await expect(sheet.locator('.cap-row')).toBeVisible()
 }
+// The Desk preview chevron steps aside on compact screens (D2). The avatar menu carries the same preview.
+export async function openDeskPreview(page: Page) {
+  if (isCompact(page)) {
+    await page.getByRole('button', { name: /^Account for / }).click()
+    await page.getByRole('menu', { name: 'Account' }).getByRole('menuitem', { name: 'Preview the Decision Desk' }).click()
+    return
+  }
+  await page.getByRole('button', { name: 'Preview the Decision Desk', exact: true }).click()
+}
 // The project crumb's sheet (D11) holds what the crumb's fold did on phones: whether the project head
 // shows above the ticket list. Ticks or clears it and closes the sheet again.
 export async function toggleProjectHead(page: Page) {

@@ -1704,6 +1704,8 @@ function sessionLinkClick(event: MouseEvent, id: string) {
    row and no column head; the rows read on their own. */
 .tb-ic, .sf-cancel, .fcount { display: none; }
 @media (max-width: 719px), (max-height: 500px) {
+  /* A click scrolls the control into view. Clear the sticky toolbar, or the click lands on the bar. */
+  .row, .group-row { scroll-margin-top: 52px; scroll-margin-bottom: 16px; }
   .th-stick { padding: 0 4px; }
   .tree-head { position: relative; flex-wrap: nowrap; gap: 0; height: 44px; min-height: 44px; padding: 0 0 0 8px; }
   .sess-title { flex: none; }
