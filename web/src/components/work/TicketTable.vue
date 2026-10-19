@@ -480,6 +480,9 @@ function clampColumn(id: string, value: number) {
   const range = bounds(id)
   return Math.max(range.min, Math.min(range.max, Math.round(value)))
 }
+// A status column too narrow for icon, a few letters of the label and the stale hint shows the icon alone, its label in
+// the tip, so the hint stays inside the cell (AEON-1470 F2); like Priority below 100 px.
+const narrowStatus = computed(() => !phone.value && (colWidth('status') ?? 138) < 104)
 // Status, priority and epic line up in the quick-create row when they keep their default places.
 const quickAligned = computed(() => ids.value[2] === 'status' && ids.value[3] === 'priority')
 const card = ref<HTMLElement>()
@@ -1203,8 +1206,11 @@ defineExpose({
             </td>
             <template v-for="column in columns.slice(2)" :key="column.id">
               <td v-if="hostIds.has(column.id)" class="c-host" :class="{ end: column.end }" :data-column-id="column.id" :data-column-label="column.label"><div class="cell"><slot :name="`cell-${column.id}`" :row="entry.row" /></div></td>
-              <td v-else-if="column.id === 'status'" class="c-status" :data-column-id="column.id" :data-column-label="column.label">
-                <div class="cell"><button type="button" class="status-btn" :aria-label="`Status: ${statusMeta(entry.row.state).label}${queued(entry.row) ? `, queued #${queued(entry.row)!.position}` : ''}. Change status of ${entry.row.key}`" aria-haspopup="menu" @click.stop="statusClick($event, entry.row)">
+              <td v-else-if="column.id === 'status'" class="c-status" :class="{ narrow: narrowStatus }" :data-column-id="column.id" :data-column-label="column.label">
+                <div class="cell"><button
+                  type="button" class="status-btn" :aria-label="`Status: ${statusMeta(entry.row.state).label}${queued(entry.row) ? `, queued #${queued(entry.row)!.position}` : ''}. Change status of ${entry.row.key}`" aria-haspopup="menu"
+                  :data-tip="narrowStatus ? `${statusMeta(entry.row.state).label}${queued(entry.row) ? ` · #${queued(entry.row)!.position}` : ''}` : undefined" @click.stop="statusClick($event, entry.row)"
+                >
                   <StatusIcon :state="entry.row.state" />
                   <span>{{ statusMeta(entry.row.state).label }}</span><span v-if="queued(entry.row)" class="q-pos">· #{{ queued(entry.row)!.position }}</span>
                 </button><QueueStaleHint :row="entry.row" /></div>
@@ -1571,8 +1577,9 @@ td.c-title { position: relative; overflow: hidden; }
 
 .status-btn { display: inline-flex; align-items: center; gap: 8px; max-width: 100%; height: 26px; margin-left: -8px; padding: 0 8px; border: 0; border-radius: 999px; background: transparent; color: var(--ink); font-size: 13px; line-height: 18px; white-space: nowrap; }
 .status-btn span { overflow: hidden; text-overflow: ellipsis; }
-/* A narrow status column ellipsizes the label, so the stale hint stays inside the cell (AEON-1470 F2). */
+/* The stale hint stays inside the status cell (AEON-1470 F2): the label ellipsizes, and a narrow column shows the icon alone. */
 .c-status .status-btn { min-width: 0; }
+@media (min-width: 721px) { .c-status.narrow .status-btn > span:not(.status-icon) { display: none; } }
 .status-btn .q-pos { flex: none; margin-left: -3px; }
 .status-btn:hover, .status-btn[aria-expanded="true"] { background: var(--chip-bg); box-shadow: inset 0 0 0 1px var(--chip-line); }
 .status-btn:active { background: var(--row-selected); }

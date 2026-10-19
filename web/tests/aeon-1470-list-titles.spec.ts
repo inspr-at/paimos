@@ -86,7 +86,8 @@ async function open(page: Page, options: { width?: number; theme?: 'light' | 'da
   await page.goto(`/p/PHAROS${options.query ?? '?group=status'}`)
   await expect(rows(page).first()).toBeVisible()
   await page.evaluate(() => document.fonts.ready)
-  if (width > 720) await expect(groupCell(page, 'In progress', 'estimate').locator('.gf-text')).toHaveText('~7.5h')
+  // Group figures have landed: Priority never steps aside, so some group's priority mix shows.
+  if (width > 720) await expect(grid(page).locator('tr.group-row td[data-group-column="priority"] .gf-text').filter({ hasText: /\S/ }).first()).toBeVisible()
   await settled(page)
   return { errors, data: d }
 }
@@ -272,6 +273,11 @@ test('AEON-1470 the stale tag keeps 8 px to the next cell and never truncates; t
   const rowGap = await gap(hint, row(page, 'PHAROS-17').locator('td.c-prio .cell'))
   expect(rowGap).toBeGreaterThanOrEqual(8)
   log.add({ assert: 'row stale hint right edge + 8 ≤ priority content', state: 'PHAROS-17 row', width: 1024, tableWidth: await tableWidth(page), theme: 'light', value: Math.round(rowGap * 10) / 10 })
+  // A status column too narrow for its label shows the icon alone and names the status in its tip; a wider one keeps the label.
+  const status = row(page, 'PHAROS-17').locator('td.c-status'), narrow = await status.evaluate(el => el.classList.contains('narrow'))
+  if (narrow) await expect(status.locator('.status-btn')).toHaveAttribute('data-tip', 'In progress')
+  else await expect(status.locator('.status-btn > span:not(.status-icon)').first()).toBeVisible()
+  log.add({ assert: 'status label readable (label or tip)', state: 'PHAROS-17 row', width: 1024, tableWidth: await tableWidth(page), theme: 'light', value: { narrow, width: Math.round((await boxOf(status)).width) } })
   await page.mouse.move(5, 5)
   const crop = await boxOf(head)
   await page.screenshot({ path: testInfo.outputPath('aeon1470-1024-light-s4-stale.png'), clip: { x: 0, y: Math.max(0, crop.y - 120), width: 1024, height: 300 } })
