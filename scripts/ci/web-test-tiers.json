@@ -326,9 +326,13 @@
     ,
     "browser:tests/aeon-1459-compact-chrome.spec.ts:AEON-1459 C8 agents 390x664 light: the avatar menu has the theme, What’s new with the release, and the foot"
     ,
+    "browser:tests/aeon-1459-compact-chrome.spec.ts:AEON-1459 C8 agents 932x380 light: the avatar menu stays inside the window and scrolls to What’s new"
+    ,
     "browser:tests/aeon-1459-compact-chrome.spec.ts:AEON-1459 C9 1440 dark: header, page head, capacity row, toolbar and columns keep main's geometry"
     ,
     "browser:tests/aeon-1459-compact-chrome.spec.ts:AEON-1459 agents 844x340 light: the scroller's height never changes across a 2000 px touch scroll"
+    ,
+    "browser:tests/aeon-1459-compact-chrome.spec.ts:AEON-1459 agents 844x501 light: a saved open dial opens beside its row"
     ,
     "browser:tests/aeon-908-polish.spec.ts:tree, hours spacing and light switch thumbs 1024 dark"
     ,
@@ -6298,6 +6302,10 @@
     ,
     {"kind":"browser","file":"tests/aeon-1459-compact-chrome.spec.ts","name":"AEON-1459 C8 agents 390x664 light: the avatar menu has the theme, What’s new with the release, and the foot","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
+    {"kind":"browser","file":"tests/aeon-1459-compact-chrome.spec.ts","name":"AEON-1459 C8 agents 844x340 light: the avatar menu stays inside the window and scrolls to What’s new","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/aeon-1459-compact-chrome.spec.ts","name":"AEON-1459 C8 agents 932x380 light: the avatar menu stays inside the window and scrolls to What’s new","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
     {"kind":"browser","file":"tests/aeon-1459-compact-chrome.spec.ts","name":"AEON-1459 C9 1440 dark: header, page head, capacity row, toolbar and columns keep main's geometry","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
     {"kind":"browser","file":"tests/aeon-1459-compact-chrome.spec.ts","name":"AEON-1459 C9 1440 light: header, page head, capacity row, toolbar and columns keep main's geometry","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
@@ -6305,6 +6313,12 @@
     {"kind":"browser","file":"tests/aeon-1459-compact-chrome.spec.ts","name":"AEON-1459 agents 390x664 light: the scroller's height never changes across a 2000 px touch scroll","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
     {"kind":"browser","file":"tests/aeon-1459-compact-chrome.spec.ts","name":"AEON-1459 agents 844x340 light: the scroller's height never changes across a 2000 px touch scroll","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/aeon-1459-compact-chrome.spec.ts","name":"AEON-1459 agents 844x481 light: a saved open dial opens folded under the capacity line","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/aeon-1459-compact-chrome.spec.ts","name":"AEON-1459 agents 844x500 light: a saved open dial opens folded under the capacity line","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/aeon-1459-compact-chrome.spec.ts","name":"AEON-1459 agents 844x501 light: a saved open dial opens beside its row","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
     {"kind":"browser","file":"tests/aeon-1473-desk-tab.spec.ts","name":"16 px favicon › AEON-1473: the amber dot reads at 16 px on light and dark tab strips","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,

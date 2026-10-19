@@ -428,6 +428,68 @@ test('AEON-1459 C8 agents 390x664 light: the avatar menu has the theme, What’s
   } finally { await c.write('c8-390x664-light') }
 })
 
+// Short landscape: the avatar menu is a popup under the 44 px header. It stays inside the window and
+// scrolls itself to What's new (the footer's release control on these screens); the page under it stays put.
+const within = (inner: Box, outer: Box) => inner.y >= outer.y - .5 && inner.y + inner.height <= outer.y + outer.height + .5
+for (const size of [LANDSCAPE, WIDE_LANDSCAPE]) test(`AEON-1459 C8 agents ${sizeName(size)} light: the avatar menu stays inside the window and scrolls to What’s new`, async ({ page }, info) => {
+  await openAgents(page, size, 'light')
+  const c = checks(info, size, 'light')
+  try {
+    const before = await main(page).evaluate(el => el.scrollTop)
+    await page.getByRole('button', { name: /^Account for / }).click()
+    const menu = page.getByRole('menu', { name: 'Account' })
+    await expect(menu).toBeVisible()
+    const menuBox = await box(menu)
+    c.is('avatar menu inside the viewport', menuBox, `inside ${sizeName(size)}`, inside(menuBox, size))
+    // End walks to the last item, What's new.
+    await page.keyboard.press('End')
+    const news = menu.getByRole('menuitem', { name: /^What’s new/ })
+    await expect(news).toBeFocused()
+    const newsBox = await box(news), held = await box(menu)
+    c.is('What’s new inside the menu and the viewport', { newsBox, held }, 'inside both', within(newsBox, held) && inside(newsBox, size))
+    c.is('the menu did not move', held, JSON.stringify(menuBox), Math.abs(held.y - menuBox.y) <= .5 && Math.abs(held.height - menuBox.height) <= .5)
+    const after = await main(page).evaluate(el => el.scrollTop)
+    c.is('the page did not scroll for the menu', after, String(before), after === before)
+    const hit = await news.evaluate(el => { const r = el.getBoundingClientRect(), top = document.elementFromPoint(r.left + r.width / 2, r.top + r.height / 2); return !!top && el.contains(top) })
+    c.is('What’s new is not covered', hit, 'true', hit)
+    await shot(page, info, size, 'light', 'avatar')
+    await page.keyboard.press('Enter')
+    await expect(page).toHaveURL(/releases=/)
+  } finally { await c.write(`c8-${sizeName(size)}-light`) }
+})
+
+// The dial's body folds wherever the capacity row folds into its line, 481 to 500 px high included: a saved
+// open dial opens on the sessions there, and its body opens for the visit only. Above 500 px the row and the
+// saved open body are on the page (the control: the fixture does open the body).
+for (const size of [{ width: 844, height: 481 }, { width: 844, height: 500 }, { width: 844, height: 501 }]) test(`AEON-1459 agents ${sizeName(size)} light: a saved open dial ${short(size) ? 'opens folded under the capacity line' : 'opens beside its row'}`, async ({ page }, info) => {
+  const { work } = await agentsWorld(page, size, 'light')
+  work.preferences['ui.agents.sections'] = { dial: true }
+  await page.goto('/agents')
+  await expect(page.locator(ROWS).nth(5)).toBeAttached()
+  const c = checks(info, size, 'light')
+  try {
+    const row = page.locator('.agents-page .cap-row'), body = page.locator('.dial-card'), fold = page.locator('.cdial .fs-tog')
+    if (!short(size)) {
+      await expect(row).toBeVisible()
+      await expect(body).toBeVisible()
+      return
+    }
+    const line = page.locator('.agents-page .cap-line')
+    // The dial has been read (its total is on the line), so an open body would be on the page by now.
+    await expect(line).toContainText(/\d+\sagents?/)
+    await expect(row).toBeHidden()
+    const cards = await body.count(), expanded = await fold.getAttribute('aria-expanded')
+    c.is('no dial body above Sessions', { cards, expanded }, '0 bodies, the fold closed', cards === 0 && expanded === 'false')
+    await shot(page, info, size, 'light', 'dial-folded')
+    await line.click()
+    await page.getByRole('dialog', { name: 'Capacity' }).getByRole('button', { name: /The full dial/ }).click()
+    await expect(body).toBeVisible()
+    await expect(fold).toHaveAttribute('aria-expanded', 'true')
+    const saved = work.preferences['ui.agents.sections']
+    c.is('the saved choice stays as it was', saved, '{"dial":true}', JSON.stringify(saved) === '{"dial":true}')
+  } finally { await c.write(`dial-${sizeName(size)}-light`) }
+})
+
 // ---------- The scroller never resizes while a finger scrolls (H2) ----------
 // A real touch sequence (CDP dispatchTouchEvent), finger up the screen, until 2000 px have passed; every
 // scroll event records main's clientHeight. synthesizeScrollGesture does not move main on Linux Chromium

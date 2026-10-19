@@ -8,6 +8,7 @@
 import { computed, nextTick, onBeforeUnmount, onMounted, reactive, ref, useId, watch } from 'vue'
 import { accountRoomCopy, accountRoomWords, limitMode, liveCopy, modeLimit, nextLimitMode, noOwnTip, nowCopy, setLimit, statusCopy, stepLimit, stepTotal, waitingCopy, workingAccountRoom, workingRows, type HarnessLimit, type LimitMode } from '../../lib/agentsWorking'
 import { can } from '../../lib/authz'
+import { COMPACT_QUERY } from '../../lib/chrome'
 import { chipTip, dailyOf, dailyView, DEFAULT_DAILY_POINTS, needsAttention, stateWords, usageLine } from '../../lib/dailyLimits'
 import { selectedHarness } from '../../lib/dialPrefs'
 import { useAgentPlan } from '../../lib/useAgentPlan'
@@ -34,8 +35,9 @@ const control = useAgentPlan(viewer, key => agents.models.find(m => m.id === key
 const { snapshot, plan, saving, waiting, interrupts, save, saveDaily, hold } = control
 // AEON-1286: a page opened on a compact screen shows the sessions first. There the dial's body
 // opens per visit from its toggle; the saved choice (shared across devices) belongs to wider
-// screens. Decided on opening, so a resize never folds what a person has open.
-const compact = window.matchMedia('(max-width: 720px), (max-height: 480px)').matches
+// screens. Decided on opening, so a resize never folds what a person has open. Compact is the
+// chrome's own rule (AEON-1459): where the capacity row folds into its line, the body folds too.
+const compact = window.matchMedia(COMPACT_QUERY).matches
 const compactOpen = ref(false)
 const folded = computed(() => compact ? !compactOpen.value : !sections.open.dial)
 function toggleSection() { if (compact) compactOpen.value = !compactOpen.value; else sections.toggle('dial') }
