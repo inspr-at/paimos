@@ -23,6 +23,7 @@ type managedFake struct {
 	identity ownedprocess.Identity
 	observe  func(AdapterEvent)
 	fail     bool
+	reject   error
 	texts    []string
 	mu2      sync.Mutex
 }
@@ -34,9 +35,13 @@ func (p *managedFake) ForceStop(context.Context, ownedprocess.Identity, time.Tim
 func (p *managedFake) Control(_ context.Context, op, text string) error {
 	p.mu2.Lock()
 	p.texts = append(p.texts, text)
+	reject := p.reject
 	p.mu2.Unlock()
 	if p.observe != nil {
 		p.observe(AdapterEvent{Kind: "turn", TurnCountDelta: 1})
+	}
+	if reject != nil {
+		return reject
 	}
 	if p.fail {
 		return errors.New("fixture outcome lost")
@@ -194,6 +199,68 @@ func TestManagedControlCompletionRetryDoesNotRepeatAdapter(t *testing.T) {
 	}
 	if len(a.harnessCompletions) != 1 || a.harnessCompletions[0] != "queue-control:applied:queued_next_turn" {
 		t.Fatal(a.harnessCompletions)
+	}
+}
+
+func managedControlIdentity(s *Supervisor, p *managedFake) (ownedprocess.Identity, time.Time) {
+	identity := p.identity
+	identity.DaemonID = s.daemonID
+	identity.Generation = s.generation
+	return identity, time.Now().Add(time.Minute)
+}
+
+func TestInterruptIdleRejectsWithoutCallingChild(t *testing.T) {
+	s, a, e, p := managedFixture(t)
+	identity, expiry := managedControlIdentity(s, p)
+	e.mu.Lock()
+	e.harness.Activity = "idle"
+	e.mu.Unlock()
+	a.harnessControls = []HarnessControl{{ID: "idle-interrupt", Kind: "interrupt", ExpectedOwnership: &identity, ExpiresAt: &expiry, deadline: expiry}}
+	if err := s.serviceHarness(t.Context(), e); err != nil {
+		t.Fatal(err)
+	}
+	p.mu2.Lock()
+	defer p.mu2.Unlock()
+	if len(p.texts) != 0 {
+		t.Fatalf("idle interrupt called the child: %v", p.texts)
+	}
+	if len(a.harnessCompletions) != 1 || a.harnessCompletions[0] != "idle-interrupt:rejected:nothing_running" {
+		t.Fatal(a.harnessCompletions)
+	}
+}
+
+func TestInterruptRaceMapsNothingRunning(t *testing.T) {
+	s, a, e, p := managedFixture(t)
+	identity, expiry := managedControlIdentity(s, p)
+	p.reject = errNothingRunning
+	a.harnessControls = []HarnessControl{{ID: "race-interrupt", Kind: "interrupt", ExpectedOwnership: &identity, ExpiresAt: &expiry, deadline: expiry}}
+	if err := s.serviceHarness(t.Context(), e); err != nil {
+		t.Fatal(err)
+	}
+	p.mu2.Lock()
+	defer p.mu2.Unlock()
+	if len(p.texts) != 1 {
+		t.Fatalf("race interrupt did not reach the child: %v", p.texts)
+	}
+	if len(a.harnessCompletions) != 1 || a.harnessCompletions[0] != "race-interrupt:rejected:nothing_running" {
+		t.Fatal(a.harnessCompletions)
+	}
+}
+
+func TestClaudeNotRunningBecomesNothingRunning(t *testing.T) {
+	p := &claudeProcess{wireProcess: &wireProcess{readDone: make(chan struct{})}, controls: map[string]chan bool{}}
+	p.stdin = managedFixtureWriter(func(b []byte) (int, error) {
+		var frame struct {
+			ID string `json:"correlation_id"`
+		}
+		if err := json.Unmarshal(b, &frame); err != nil {
+			return 0, err
+		}
+		p.deliverControl(frame.ID, "control_failed", "not_running")
+		return len(b), nil
+	})
+	if err := p.Control(t.Context(), "interrupt", ""); !errors.Is(err, errNothingRunning) {
+		t.Fatal(err)
 	}
 }
 

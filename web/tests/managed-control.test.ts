@@ -3,7 +3,7 @@
 import assert from 'node:assert/strict'
 import { test } from 'node:test'
 import type { HarnessSession } from '../src/lib/agents.ts'
-import { controlPermitted, managedControlAllowed, managedControlUnavailable } from '../src/lib/managedControl.ts'
+import { controlPermitted, interruptHasStep, managedControlAllowed, managedControlUnavailable, noStepRunningText, nothingRunningText } from '../src/lib/managedControl.ts'
 
 const now = Date.parse('2026-09-29T09:00:00Z')
 const ago = (ms: number) => new Date(now - ms).toISOString()
@@ -47,6 +47,24 @@ test('each server prerequisite blocks on its own', () => {
   // Interrupt without the interrupt capability, even when everything else holds.
   assert.equal(managedControlAllowed(session({ advertised_capabilities: ['stop', 'managed_control_v1'] }), 'interrupt', access), false)
   assert.equal(managedControlAllowed(session({ advertised_capabilities: ['stop', 'managed_control_v1'] }), 'stop', access), true)
+})
+
+test('interrupt waits for a running step and leaves stop available', () => {
+  assert.equal(noStepRunningText, 'No step is running')
+  assert.equal(nothingRunningText, 'Nothing was running, so nothing was interrupted.')
+  for (const fields of [{ activity: 'idle' as const }, { phase: 'yielded' as const, activity: 'busy' as const }, { phase: 'yielded' as const, activity: 'idle' as const }]) {
+    const s = session(fields)
+    assert.equal(interruptHasStep(s), false)
+    assert.equal(managedControlUnavailable(s, access), '')
+    assert.equal(managedControlAllowed(s, 'interrupt', access), false)
+    assert.equal(managedControlAllowed(s, 'stop', access), true)
+    assert.equal(managedControlAllowed(s, 'steer', access), true)
+  }
+  assert.equal(managedControlAllowed(session({ activity: 'throttled' }), 'interrupt', access), true)
+  assert.equal(session().activity, undefined)
+  assert.equal(managedControlAllowed(session(), 'interrupt', access), true)
+  assert.equal(managedControlAllowed(session({ activity: 'busy' }), 'interrupt', access), true)
+  assert.equal(managedControlUnavailable(session({ phase: 'stopped', stopped_at: ago(0) }), access), 'This session has stopped.')
 })
 
 test('reasons keep the panel wording', () => {

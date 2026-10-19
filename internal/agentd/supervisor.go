@@ -2328,6 +2328,16 @@ func (s *Supervisor) serviceHarnessWake(ctx context.Context, entry *owned, heart
 				index++
 				continue
 			}
+			entry.mu.Lock()
+			idle := entry.harness.Activity == "idle"
+			entry.mu.Unlock()
+			if control.Kind == "interrupt" && idle {
+				if err := s.rejectHarnessControl(ctx, entry, control, "nothing_running"); err != nil {
+					return err
+				}
+				entry.pending = append(entry.pending[:index], entry.pending[index+1:]...)
+				continue
+			}
 			outcome, reason := "applied", "agentd_applied"
 			stopNow := control.Kind == "stop" && control.RequestPayload != nil && control.RequestPayload.StopNow
 			operation := control.Kind
@@ -2358,6 +2368,8 @@ func (s *Supervisor) serviceHarnessWake(ctx context.Context, entry *owned, heart
 					outcome, reason, err = "rejected", "budget_exhausted", nil
 				case errors.Is(err, ErrSettingRejected):
 					outcome, reason, err = "rejected", "setting_rejected", nil
+				case errors.Is(err, errNothingRunning):
+					outcome, reason, err = "rejected", "nothing_running", nil
 				case err != nil:
 					outcome, reason, err = "rejected", "outcome_unconfirmed", nil
 				case control.Kind == "tier":
@@ -2495,6 +2507,17 @@ func (s *Supervisor) serviceHarnessWake(ctx context.Context, entry *owned, heart
 		}
 	}
 	return nil
+}
+
+// rejectHarnessControl settles a claimed control without calling the child.
+func (s *Supervisor) rejectHarnessControl(ctx context.Context, entry *owned, control HarnessControl, reason string) error {
+	if err := s.api.CompleteHarnessControl(ctx, entry.harness, control.ID, "rejected", reason); err != nil && !errors.Is(err, ErrControlTerminal) {
+		if !errors.Is(err, ErrHarnessArchived) && (entry.managedPolicy || control.Kind == "steer" || control.Kind == "stop" || control.Kind == "force_stop") {
+			return ErrControlUnconfirmed
+		}
+		return err
+	}
+	return s.forgetSettledControl(entry, control.ID)
 }
 
 // Drop replay receipts only after the server commits settlement. If its reply is

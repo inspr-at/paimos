@@ -1456,6 +1456,8 @@
     ,
     {"kind":"go","package":"internal/agentd","name":"TestClaudeNativeClosePreservesReceiptAtEOF","tier":"GATED-FULL"}
     ,
+    {"kind":"go","package":"internal/agentd","name":"TestClaudeNotRunningBecomesNothingRunning","tier":"ESSENTIAL"}
+    ,
     {"kind":"go","package":"internal/agentd","name":"TestClaudeProbeAcceptsApprovedHomebrewCLI","tier":"GATED-FULL"}
     ,
     {"kind":"go","package":"internal/agentd","name":"TestClaudeProfilePermissionReasonReachesStatusAndRecovers","tier":"GATED-FULL"}
@@ -1707,6 +1709,10 @@
     {"kind":"go","package":"internal/agentd","name":"TestInboxUnconfirmedDoesNotReinject","tier":"GATED-FULL"}
     ,
     {"kind":"go","package":"internal/agentd","name":"TestInstalledDaemonNamesMatchInstallerAndNixPackage","tier":"GATED-FULL"}
+    ,
+    {"kind":"go","package":"internal/agentd","name":"TestInterruptIdleRejectsWithoutCallingChild","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/agentd","name":"TestInterruptRaceMapsNothingRunning","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/agentd","name":"TestInvalidVerificationCannotBlockProbeAndRefusalRetries","tier":"GATED-FULL"}
     ,

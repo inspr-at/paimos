@@ -16494,6 +16494,8 @@
     ,
     {"kind":"node","file":"tests/managed-control.test.ts","name":"each server prerequisite blocks on its own","tier":"ESSENTIAL"}
     ,
+    {"kind":"node","file":"tests/managed-control.test.ts","name":"interrupt waits for a running step and leaves stop available","tier":"ESSENTIAL"}
+    ,
     {"kind":"node","file":"tests/managed-control.test.ts","name":"reasons keep the panel wording","tier":"ESSENTIAL"}
     ,
     {"kind":"node","file":"tests/markdown-links.test.ts","name":"a bare https address is a link and trailing punctuation stays outside it","tier":"GATED-FULL"}
