@@ -90,12 +90,19 @@ async function search(more = false) {
   const turn = ++searchGeneration
   searching.value = true; searchError.value = ''
   try {
-    const page = await listNodes({ kind: ['work'], shape: ['leaf'], q: query.value.trim(), limit: 30, sort: '-updated_at', ...(more && nextCursor.value ? { cursor: nextCursor.value } : {}) })
+    const page = await listNodes({ kind: ['work'], shape: ['leaf'], q: query.value.trim(), limit: 30, sort: '-updated_at', rollups: 'omit', ...(more && nextCursor.value ? { cursor: nextCursor.value } : {}) })
     if (turn !== searchGeneration || !visible.value) return
     const leaves = page.items.filter(item => item.is_leaf === true)
     tickets.value = more ? [...tickets.value, ...leaves] : leaves
     nextCursor.value = page.next_cursor
-  } catch (e) { if (turn === searchGeneration) { searchError.value = message(e); tickets.value = []; nextCursor.value = null } }
+  } catch (e) {
+    if (turn !== searchGeneration) return
+    searchError.value = e instanceof Error && e.message.includes('Work aggregates exceeded a resource limit; narrow the scope or retry.')
+      ? 'Too many matches. Type more of the title or the key.'
+      : message(e)
+    tickets.value = []
+    nextCursor.value = null
+  }
   finally { if (turn === searchGeneration) searching.value = false }
 }
 watch(query, () => { clearTimeout(searchTimer); searchTimer = setTimeout(() => void search(), 200) })

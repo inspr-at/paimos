@@ -3,7 +3,6 @@
 package cli
 
 import (
-	"context"
 	"errors"
 	"fmt"
 	"io"
@@ -170,7 +169,7 @@ func (rt *runtime) privateMessagingPost(path string, body, dest any) error {
 		return err
 	}
 	c.HTTP.CheckRedirect = func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }
-	if err := c.Do(context.Background(), http.MethodPost, path, body, dest); err != nil {
+	if err := c.Do(rt.context(), http.MethodPost, path, body, dest); err != nil {
 		return rt.fail(errors.New("target registration failed; private server details suppressed"), "")
 	}
 	return nil

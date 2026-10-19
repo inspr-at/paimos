@@ -10,6 +10,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
 	"net/url"
 	"strconv"
@@ -125,12 +126,77 @@ func waitWorkRead(ctx context.Context, delay time.Duration) error {
 	}
 }
 
+// Ordinary calls, including downloads and uploads, finish within this budget.
+// Listen long-polls wait 25s for headers, so the shared header budget stays above that.
+const (
+	httpTimeout         = 30 * time.Second
+	httpDialTimeout     = 10 * time.Second
+	httpTLSTimeout      = 10 * time.Second
+	httpHeaderTimeout   = 30 * time.Second
+	httpContinueTimeout = time.Second
+	streamHeaderTimeout = 60 * time.Second
+)
+
+// BoundedHTTP is the client for ordinary requests, downloads, and uploads.
+// The overall deadline covers the response body.
+func BoundedHTTP() *http.Client {
+	return &http.Client{Timeout: httpTimeout, Transport: httpTransport(httpHeaderTimeout)}
+}
+
+// StreamHTTP is the client for long-polls and other streams. The body stays
+// open until the caller cancels. Dial, TLS, and response headers stay bounded.
+func StreamHTTP() *http.Client {
+	return &http.Client{Transport: httpTransport(streamHeaderTimeout)}
+}
+
+func httpTransport(header time.Duration) *http.Transport {
+	dial := (&net.Dialer{Timeout: httpDialTimeout, KeepAlive: 30 * time.Second}).DialContext
+	base, ok := http.DefaultTransport.(*http.Transport)
+	if !ok {
+		return &http.Transport{
+			Proxy:                 http.ProxyFromEnvironment,
+			DialContext:           dial,
+			ForceAttemptHTTP2:     true,
+			TLSHandshakeTimeout:   httpTLSTimeout,
+			ResponseHeaderTimeout: header,
+			ExpectContinueTimeout: httpContinueTimeout,
+		}
+	}
+	t := base.Clone()
+	t.DialContext = dial
+	t.TLSHandshakeTimeout = httpTLSTimeout
+	t.ResponseHeaderTimeout = header
+	t.ExpectContinueTimeout = httpContinueTimeout
+	return t
+}
+
+// ForStream returns a client for one long-poll or stream. A caller-installed
+// RoundTripper is kept so tests can replace HTTP. The production transport
+// swaps to StreamHTTP without mutating the receiver.
+func (c *Client) ForStream() *Client {
+	next := *c
+	if c.HTTP != nil {
+		if _, prod := c.HTTP.Transport.(*http.Transport); c.HTTP.Transport != nil && !prod {
+			cloned := *c.HTTP
+			cloned.Timeout = 0
+			next.HTTP = &cloned
+			return &next
+		}
+	}
+	stream := StreamHTTP()
+	if c.HTTP != nil {
+		stream.CheckRedirect = c.HTTP.CheckRedirect
+	}
+	next.HTTP = stream
+	return &next
+}
+
 // New returns a client for baseURL. token is sent as a Bearer credential and is never logged.
 func New(baseURL, token string) *Client {
 	return &Client{
 		BaseURL: strings.TrimRight(strings.TrimSpace(baseURL), "/"),
 		Token:   token,
-		HTTP:    &http.Client{Timeout: 30 * time.Second},
+		HTTP:    BoundedHTTP(),
 	}
 }
 

@@ -170,6 +170,9 @@ type listQuery struct {
 	planPlanner *planner
 	// Internal opt-in stays out of the cursor fingerprint: results are equal.
 	boundedAggregates bool
+	// OmitRollups skips page work-scope totals. The cursor includes it because
+	// the payload changes. Row identity does not.
+	OmitRollups bool `json:"omit_rollups,omitempty"`
 }
 
 type boundedListAggregatesKey struct{}
@@ -314,6 +317,13 @@ func parseListQuery(r *http.Request) (listQuery, error) {
 	}
 	if len(out.Levels)+len(out.LevelsNot) > 33 {
 		return out, badRequest("too many levels")
+	}
+	switch v.Get("rollups") {
+	case "", "include":
+	case "omit":
+		out.OmitRollups = true
+	default:
+		return out, badRequest("invalid rollups")
 	}
 	if out.Kinds, out.KindsNot, err = negatedList(r, "kind", nil); err != nil {
 		return out, err
@@ -747,9 +757,13 @@ func (m *Module) listNodes(ctx context.Context, tenantID string, q listQuery) (n
 			for i := range page.Items {
 				ids[i] = page.Items[i].ID
 			}
-			estimates, views, err := loadWorkTotals(ctx, tx, ids)
-			if err != nil {
-				return err
+			var estimates map[string]*estimateView
+			var views map[string]eta.View
+			if !q.OmitRollups {
+				estimates, views, err = loadWorkTotals(ctx, tx, ids)
+				if err != nil {
+					return err
+				}
 			}
 			queued, err := workqueue.Load(ctx, tx, ids)
 			if err != nil {
@@ -1253,7 +1267,11 @@ func listFilterSQL(q listQuery, sortFields bool) (string, []any) {
 		p := arg(q.KindsNot)
 		conditions += " AND NOT (k.slug=ANY(" + p + "::text[]) OR (k.slug='work' AND " + p + "::text[] && ARRAY['epic','ticket','task']) OR n.kind_id::text=ANY(" + p + "::text[]))"
 	}
-	if len(q.Shapes)+len(q.ShapesNot)+len(q.Depths)+len(q.DepthsNot)+len(q.Levels)+len(q.LevelsNot) > 0 {
+	// Shape alone is one anti-join. Per-row aeon_work_shape walks ancestors and
+	// blows the list deadline on a broad picker query (AEON-1519). Depth and
+	// level still need that walk, so they keep it.
+	shapeOnly := len(q.Shapes)+len(q.ShapesNot) > 0 && len(q.Depths)+len(q.DepthsNot)+len(q.Levels)+len(q.LevelsNot) == 0
+	if !shapeOnly && len(q.Shapes)+len(q.ShapesNot)+len(q.Depths)+len(q.DepthsNot)+len(q.Levels)+len(q.LevelsNot) > 0 {
 		shape := `(SELECT CASE WHEN s.is_leaf THEN 'leaf' ELSE 'parent' END FROM aeon_work_shape(n.id) s)`
 		depth := `(SELECT s.depth::text FROM aeon_work_shape(n.id) s)`
 		level := `(SELECT ` + levelSQL + ` FROM aeon_work_shape(n.id) s)`
@@ -1321,7 +1339,7 @@ func listFilterSQL(q listQuery, sortFields bool) (string, []any) {
 	// estimate that every node has the same parent. Only the last row of a full
 	// page continues its siblings; every scoped node also starts its own children.
 	// The root has no paging parent, so siblings outside the scope stay excluded.
-	return `WITH RECURSIVE scope(id,parent_id,next_page) AS (
+	sql := `WITH RECURSIVE scope(id,parent_id,next_page) AS (
         SELECT n.id,NULL::uuid,false FROM unnest(ARRAY[` + scopeRoot + `]) seed(id) CROSS JOIN LATERAL (
             SELECT id,deleted_at FROM nodes WHERE tenant_id=current_setting('aeon.tenant_id')::uuid
                 AND id=seed.id ORDER BY id LIMIT 1
@@ -1355,7 +1373,31 @@ func listFilterSQL(q listQuery, sortFields bool) (string, []any) {
             OR EXISTS(SELECT 1 FROM node_key_aliases a WHERE a.tenant_id=n.tenant_id AND a.node_id=n.id
                 AND a.key ILIKE '%'||$6::text||'%'))
         AND (NOT $11::bool OR ` + closedPred + `)` + scopeCondition + conditions + `
-    )`, args
+    )`
+	if shapeOnly {
+		sql = strings.Replace(sql, ", filtered AS MATERIALIZED (", ", matched AS MATERIALIZED (", 1)
+		in := arg(array(q.Shapes))
+		out := arg(array(q.ShapesNot))
+		sql += `, leaf_flags AS MATERIALIZED (
+        SELECT id, is_leaf FROM aeon_work_leaf_flags(ARRAY(SELECT id FROM matched))
+    ), filtered AS (
+        SELECT m.* FROM matched m
+        LEFT JOIN leaf_flags lf ON lf.id = m.id
+        WHERE (cardinality(` + in + `::text[])=0 OR (
+            lf.is_leaf IS NOT NULL AND (
+                (lf.is_leaf AND 'leaf'=ANY(` + in + `::text[]))
+                OR (NOT lf.is_leaf AND 'parent'=ANY(` + in + `::text[]))
+            )
+        ))
+        AND (cardinality(` + out + `::text[])=0 OR (
+            lf.is_leaf IS NOT NULL AND NOT (
+                (lf.is_leaf AND 'leaf'=ANY(` + out + `::text[]))
+                OR (NOT lf.is_leaf AND 'parent'=ANY(` + out + `::text[]))
+            )
+        ))
+    )`
+	}
+	return sql, args
 }
 func listOrder(q listQuery) string {
 	parts := []string{}

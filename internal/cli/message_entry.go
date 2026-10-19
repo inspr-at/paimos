@@ -37,6 +37,8 @@ func runMessaging(args []string, stdin io.Reader, stdout, stderr io.Writer, deli
 	return 1
 }
 func (rt *runtime) executeMessaging(args []string) error {
+	stop := rt.armCommandSignals()
+	defer stop()
 	root := rt.root()
 	replacements := map[string]*Command{"tell": rt.cmdMessagingTell(), "listen": rt.cmdMessagingListen(), "message": rt.cmdMessaging()}
 	for i, cmd := range root.subs {
@@ -72,7 +74,7 @@ func (rt *runtime) executeMessaging(args []string) error {
 		return usagef("%s requires a subcommand", cmd.Name)
 	}
 	if err := cmd.checkArgs(pos); err != nil {
-		return err
+		return rt.noteInterrupt(err)
 	}
-	return cmd.run(pos)
+	return rt.noteInterrupt(cmd.run(pos))
 }
