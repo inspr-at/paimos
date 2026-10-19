@@ -105,10 +105,12 @@ function syncWide() {
 let viewportWatch: ResizeObserver | undefined, viewportFrame = 0, paintSample = 0, paintTask = 0
 function followViewport() {
   syncWide()
+  clearIfViewportLeftWide()
   if (viewportFrame) return
   let left = 2
   const tick = () => {
     syncWide()
+    clearIfViewportLeftWide()
     viewportFrame = --left > 0 ? requestAnimationFrame(tick) : 0
   }
   viewportFrame = requestAnimationFrame(tick)
@@ -172,8 +174,10 @@ function checkPaintedViewport() {
 }
 // Paint restarts and the two-frame follow-up both drop the timeout chain while
 // software GL is still on the previous width (CI: innerWidth stays wide for
-// seconds, then updates with no new event). This interval is not tied to paint,
-// so a restart cannot postpone the clear past the shrink.
+// seconds, then updates with no new event). A false flicker used to stop this
+// clock, and a later widen could not re-arm the dead id, so 1280 → 390 stayed
+// painted. The interval is not tied to paint or to wide. It stays armed from
+// mount until unmount; the clear itself no-ops while the viewport is still wide.
 let narrowWatch = 0
 function stopNarrowWatch() {
   if (!narrowWatch) return
@@ -181,8 +185,14 @@ function stopNarrowWatch() {
   narrowWatch = 0
 }
 function ensureNarrowWatch() {
-  if (!mounted || narrowWatch || !wide.value) return
+  if (!mounted || narrowWatch) return
   narrowWatch = window.setInterval(clearIfViewportLeftWide, 250)
+}
+function clearPaintTask() {
+  // setTimeout and setInterval share one id pool. A completed paint task can
+  // leave its id in paintTask after the interval has reused it.
+  if (paintTask && paintTask !== narrowWatch) clearTimeout(paintTask)
+  paintTask = 0
 }
 function samplePaintedViewport() {
   paintSample = 0
@@ -218,7 +228,9 @@ function watchHeader() {
   seeing = new IntersectionObserver(() => { syncOcclusion() }, { root: root instanceof HTMLElement ? root : null, threshold: 0 })
   seeing.observe(column.value!)
   if (root instanceof HTMLElement) { scrollRoot = root; root.addEventListener('scroll', syncOcclusion, { passive: true }) }
-  sizing = new ResizeObserver(scheduleMeasure)
+  // The header box moves when the viewport shrinks even if resize, the media
+  // change and the document-element observer stay silent while the canvas paints.
+  sizing = new ResizeObserver(() => { clearIfViewportLeftWide(); scheduleMeasure() })
   attachSizing()
   changes = new MutationObserver(records => {
     if (records.some(record => !column.value?.contains(record.target))) {
@@ -252,11 +264,10 @@ watch(paint, value => {
   emit('active', value)
   cancelAnimationFrame(paintSample)
   paintSample = 0
-  clearTimeout(paintTask)
-  paintTask = 0
+  clearPaintTask()
   if (value) startPaintSample()
 })
-watch(wide, value => { if (value) ensureNarrowWatch(); else stopNarrowWatch() })
+watch(wide, value => { if (value) ensureNarrowWatch() })
 watch([allowed, idle, () => props.projectId, () => props.projectKey, () => JSON.stringify(filtersToQuery(filters.value))], () => { void load() })
 onMounted(() => {
   mounted = true
@@ -269,6 +280,9 @@ onMounted(() => {
   visualViewport?.addEventListener('resize', onResize)
   viewportWatch = new ResizeObserver(followViewport)
   viewportWatch.observe(document.documentElement)
+  // A delivery that names only the document element can be dropped while the
+  // body box still changes with the viewport. Read that box too.
+  if (document.body) viewportWatch.observe(document.body)
   syncWide()
   ensureNarrowWatch()
   const start = () => { if (mounted) idle.value = true }
@@ -286,7 +300,7 @@ onBeforeUnmount(() => {
   cancelAnimationFrame(measureFrame)
   cancelAnimationFrame(viewportFrame)
   cancelAnimationFrame(paintSample)
-  clearTimeout(paintTask)
+  clearPaintTask()
   stopNarrowWatch()
   viewportWatch?.disconnect()
   window.removeEventListener('resize', onResize)

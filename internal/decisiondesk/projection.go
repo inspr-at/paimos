@@ -22,7 +22,7 @@ import (
 // boundary and source-request correlation. Fan-in contributes one question,
 // never one item per asker. No inbox reply or answer revision is a new notice.
 const sourceSQL = `WITH clock AS MATERIALIZED (SELECT statement_timestamp() AS at),
-questions(id,kind,project_id,revision,title,created_at,expires_at,held,source) AS (
+questions(id,kind,project_id,revision,title,created_at,expires_at,held,source,ticket_key) AS (
  SELECT q.node_id AS id,'question'::text AS kind,q.project_id AS project_id,q.revision,
  q.input->>'question' AS title,q.created_at,NULL::timestamptz AS expires_at,
  EXISTS(SELECT 1 FROM desk_askers a
@@ -39,12 +39,18 @@ questions(id,kind,project_id,revision,title,created_at,expires_at,held,source) A
     WHERE held.tenant_id=a.tenant_id AND held.project_id=a.project_id AND held.id=a.source_request_id AND held.is_action_request
     AND NOT EXISTS(SELECT 1 FROM events e WHERE e.tenant_id=held.tenant_id AND e.node_id=held.project_id
      AND e.type='inbox.action_resolved' AND e.after->>'message_id'=held.id::text)))) AS held,
- '/api/questions/'||q.node_id AS source
+ '/api/questions/'||q.node_id AS source,
+ (SELECT nullif(ticket.key,'') FROM nodes ticket
+  JOIN node_kinds tk ON tk.tenant_id=ticket.tenant_id AND tk.id=ticket.kind_id
+  WHERE ticket.tenant_id=q.tenant_id AND ticket.project_id=q.project_id AND ticket.deleted_at IS NULL
+  AND ticket.id=CASE WHEN q.input->>'ticket_id' ~* '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$' THEN (q.input->>'ticket_id')::uuid END
+  AND (tk.slug IN ('ticket','task','epic') OR tk.field_schema->>'issue_family'='true')
+  LIMIT 1) AS ticket_key
  FROM desk_questions q JOIN nodes n ON n.tenant_id=q.tenant_id AND n.id=q.node_id
  JOIN nodes project ON project.tenant_id=q.tenant_id AND project.id=q.project_id
  WHERE q.tenant_id=$1 AND q.state='open' AND n.deleted_at IS NULL AND project.deleted_at IS NULL
  AND ($2='' OR $2='question' AND q.node_id=$3::uuid)
-), approvals(id,kind,project_id,revision,title,created_at,expires_at,held,source) AS (
+), approvals(id,kind,project_id,revision,title,created_at,expires_at,held,source,ticket_key) AS (
  SELECT r.id,'approval'::text,coalesce(n.project_id,wn.project_id),1::bigint,
  CASE WHEN r.scope LIKE '%.routine\_%' ESCAPE '\' THEN 'Routine action approval' ELSE 'Approval · '||r.scope END,r.proposed_at,r.expires_at,
  (n.id IS NOT NULL AND n.deleted_at IS NULL AND coalesce(n.state,'') NOT IN ('done','delivered','cancelled','canceled','closed')
@@ -52,7 +58,7 @@ questions(id,kind,project_id,revision,title,created_at,expires_at,held,source) A
   AND (nk.slug IN ('ticket','task','epic','work_order') OR nk.field_schema->>'issue_family'='true'))
  OR (ar.id IS NOT NULL AND ar.status='waiting' AND aw.status NOT IN ('done','cancelled'))
  OR (rr.id IS NOT NULL AND rr.status='waiting' AND rw.status NOT IN ('done','cancelled') AND rn.deleted_at IS NULL) AS held,
- '/agents?needs=a:'||r.id
+ '/agents?needs=a:'||r.id,NULL::text
  FROM approval_requests r
  LEFT JOIN nodes n ON n.tenant_id=r.tenant_id AND n.id=r.resource_id AND r.resource_kind='node'
  LEFT JOIN node_kinds nk ON nk.tenant_id=n.tenant_id AND nk.id=n.kind_id
@@ -70,37 +76,37 @@ questions(id,kind,project_id,revision,title,created_at,expires_at,held,source) A
  AND (r.resource_kind='tenant' OR r.resource_kind='node' AND n.id IS NOT NULL AND n.deleted_at IS NULL
       OR r.resource_kind='run' AND ar.id IS NOT NULL AND wn.deleted_at IS NULL)
  AND (project.id IS NULL OR project.deleted_at IS NULL)
-), held_requests(id,kind,project_id,revision,title,created_at,expires_at,held,source) AS (
+), held_requests(id,kind,project_id,revision,title,created_at,expires_at,held,source,ticket_key) AS (
  SELECT m.id,'action_request'::text,m.project_id,1::bigint,'Human request · '||project.key,
- m.created_at,NULL::timestamptz,true,'/agents?needs=m:'||m.id
+ m.created_at,NULL::timestamptz,true,'/agents?needs=m:'||m.id,NULL::text
  FROM inbox_compat_messages m JOIN nodes project ON project.tenant_id=m.tenant_id AND project.id=m.project_id
  WHERE m.tenant_id=$1 AND ($2='' OR $2='action_request' AND m.id=$3::uuid) AND m.is_action_request AND project.deleted_at IS NULL
  AND NOT EXISTS(SELECT 1 FROM events e WHERE e.tenant_id=m.tenant_id AND e.type='inbox.action_resolved'
    AND e.node_id=m.project_id AND e.after->>'message_id'=m.id::text)
-), doctrine(id,kind,project_id,revision,title,created_at,expires_at,held,source) AS (
+), doctrine(id,kind,project_id,revision,title,created_at,expires_at,held,source,ticket_key) AS (
  SELECT p.id,'doctrine'::text,NULL::uuid,1::bigint,'Doctrine change'::text,p.created_at,
- NULL::timestamptz,false,'/settings/agent-rules#doctrine-inbox'
+ NULL::timestamptz,false,'/settings/agent-rules#doctrine-inbox',NULL::text
  FROM doctrine_proposals p
  WHERE p.tenant_id=$1 AND ($2='' OR $2='doctrine' AND p.id=$3::uuid) AND p.data->>'inbox'='true' AND p.data->>'state'='pending'
  AND coalesce((p.data->>'pr_number')::int,0)=0 AND p.created_at>(SELECT at FROM clock)-interval '30 days'
-), key_trims(id,kind,project_id,revision,title,created_at,expires_at,held,source) AS (
+), key_trims(id,kind,project_id,revision,title,created_at,expires_at,held,source,ticket_key) AS (
  SELECT t.id,'key_trim'::text,NULL::uuid,t.revision,'Trim key · '||k.name,t.created_at,t.expires_at,false,
- '/api/key-trim-proposals'
+ '/api/key-trim-proposals',NULL::text
  FROM key_trim_proposals t JOIN agent_keys k ON k.tenant_id=t.tenant_id AND k.id=t.key_id
  WHERE t.tenant_id=$1 AND t.state='pending' AND t.expires_at>(SELECT at FROM clock)
  AND k.revoked_at IS NULL AND (k.expires_at IS NULL OR k.expires_at>(SELECT at FROM clock))
  AND ($2='' OR $2='key_trim' AND t.id=$3::uuid)
-), stepups(id,kind,project_id,revision,title,created_at,expires_at,held,source) AS (
+), stepups(id,kind,project_id,revision,title,created_at,expires_at,held,source,ticket_key) AS (
  SELECT s.id,'stepup'::text,s.project_id,s.revision,'Step-up approval · '||s.permission,s.created_at,s.expires_at,true,
- '/api/stepup-requests'
+ '/api/stepup-requests',NULL::text
  FROM stepup_requests s LEFT JOIN nodes project ON project.tenant_id=s.tenant_id AND project.id=s.project_id
  WHERE s.tenant_id=$1 AND s.state='pending' AND s.expires_at>(SELECT at FROM clock)
  AND (s.project_id IS NULL OR project.id IS NOT NULL AND project.deleted_at IS NULL)
  AND ($2='' OR $2='stepup' AND s.id=$3::uuid)
-), tier_requests(id,kind,project_id,revision,title,created_at,expires_at,held,source) AS (
+), tier_requests(id,kind,project_id,revision,title,created_at,expires_at,held,source,ticket_key) AS (
  SELECT r.id,'tier_request'::text,s.project_id,s.service_tier_revision,
  'Tier request · '||r.tier,r.created_at,NULL::timestamptz,false,
- '/api/projects/'||s.project_id||'/harness-sessions/'||s.id||'/tier'
+ '/api/projects/'||s.project_id||'/harness-sessions/'||s.id||'/tier',NULL::text
  FROM harness_tier_requests r
  JOIN harness_sessions s ON s.tenant_id=r.tenant_id AND s.id=r.session_id
  JOIN nodes project ON project.tenant_id=s.tenant_id AND project.id=s.project_id
@@ -108,10 +114,10 @@ questions(id,kind,project_id,revision,title,created_at,expires_at,held,source) A
  AND s.stopped_at IS NULL AND s.archived_at IS NULL AND s.phase<>'stopping'
  AND s.management='managed' AND 'service_tier_v1'=ANY(s.capabilities)
  AND ($2='' OR $2='tier_request' AND r.id=$3::uuid)
-), account_matrix(id,kind,project_id,revision,title,created_at,expires_at,held,source) AS (
+), account_matrix(id,kind,project_id,revision,title,created_at,expires_at,held,source,ticket_key) AS (
  SELECT r.tenant_id,'account_matrix'::text,NULL::uuid,r.revision,'Looks right? · Account matrix'::text,
  coalesce((SELECT min(e.at) FROM events e WHERE e.type='account_use.migrated'), 'epoch'::timestamptz),
- NULL::timestamptz,false,'/api/account-use'
+ NULL::timestamptz,false,'/api/account-use',NULL::text
  FROM account_use_rules r WHERE r.tenant_id=$1 AND r.confirmation_required
  AND ($2='' OR $2='account_matrix' AND r.tenant_id=$3::uuid)
 )`
@@ -176,11 +182,11 @@ const personCandidateSQL = ` SELECT n.id::text,n.project_id::text FROM nodes n
      CASE WHEN assigned.after IS NULL AND rule->>'owner_id' IS NULL THEN (rule->>'fallback_owner_id')::uuid END)=$2::uuid))
  ORDER BY n.id LIMIT 1001`
 
-const visibleSQL = sourceSQL + `, routine_consents(id,kind,project_id,revision,title,created_at,expires_at,held,source) AS (
- SELECT id,'routine_consent'::text,project_id,revision,title,created_at,NULL::timestamptz,false,href
+const visibleSQL = sourceSQL + `, routine_consents(id,kind,project_id,revision,title,created_at,expires_at,held,source,ticket_key) AS (
+ SELECT id,'routine_consent'::text,project_id,revision,title,created_at,NULL::timestamptz,false,href,NULL::text
  FROM jsonb_to_recordset($26::jsonb) AS r(id uuid,project_id uuid,revision bigint,title text,created_at timestamptz,href text)
-), lessons(id,kind,project_id,revision,title,created_at,expires_at,held,source) AS (
- SELECT id,'lesson'::text,project_id,revision,title,created_at,NULL::timestamptz,false,source
+), lessons(id,kind,project_id,revision,title,created_at,expires_at,held,source,ticket_key) AS (
+ SELECT id,'lesson'::text,project_id,revision,title,created_at,NULL::timestamptz,false,source,NULL::text
  FROM jsonb_to_recordset($27::jsonb) AS r(id uuid,project_id uuid,revision bigint,title text,created_at timestamptz,source text)
 ), person_candidates AS MATERIALIZED (
  SELECT n.id,n.project_id FROM jsonb_to_recordset($28::jsonb) AS c(id uuid,project_id uuid)
@@ -190,11 +196,11 @@ const visibleSQL = sourceSQL + `, routine_consents(id,kind,project_id,revision,t
  SELECT n.project_id,step FROM person_candidates n
  CROSS JOIN LATERAL jsonb_array_elements(aeon_person_steps(n.id)) step
  WHERE step->>'active'='true' AND step->'owner'->>'id'=$4::uuid::text
-), person_requests(id,kind,project_id,revision,title,created_at,expires_at,held,source) AS (
+), person_requests(id,kind,project_id,revision,title,created_at,expires_at,held,source,ticket_key) AS (
  SELECT (step->>'id')::uuid,'action_request'::text,project_id,
  (extract(epoch FROM (step->>'revision')::timestamptz)*1000000)::bigint,
  'Confirm: '||(step->>'label'),(step->>'created_at')::timestamptz,NULL::timestamptz,false,
- '/api/nodes/'||(step->>'node_id')||'/person-steps/'||(step->>'check_id')
+ '/api/nodes/'||(step->>'node_id')||'/person-steps/'||(step->>'check_id'),NULL::text
  FROM person_request_details
 ), visible AS MATERIALIZED (
  SELECT *,(SELECT step FROM person_request_details WHERE (step->>'id')::uuid=items.id AND items.kind='action_request') AS person_step,CASE WHEN held AND kind IN ('approval','stepup') THEN 0 WHEN held THEN 1 ELSE 2 END AS bucket,

@@ -122,7 +122,19 @@ func authenticate(name, id, signature string, raw, secret []byte) (envelope, err
 	err = json.Unmarshal(raw, &e)
 	return e, err
 }
+
+// validAction accepts every documented action of a subscribed event. Actions the
+// delivery audit does not use are still acknowledged; receiveWebhook records
+// them as ignored and does not run handlers. handledWebhookAction is the set
+// that keeps its current processing. push and status have no action.
 func validAction(name, action string) bool {
+	if name == "status" || name == "push" {
+		return action == ""
+	}
+	return slices.Contains(documentedWebhookActions(name), action)
+}
+
+func handledWebhookAction(name, action string) bool {
 	switch name {
 	case "pull_request":
 		return slices.Contains([]string{"opened", "synchronize", "reopened", "edited", "closed", "enqueued", "dequeued"}, action)
@@ -136,6 +148,30 @@ func validAction(name, action string) bool {
 		return action == "requested" || action == "in_progress" || action == "completed"
 	}
 	return false
+}
+
+// documentedWebhookActions is the GitHub webhook payload action list for each
+// subscribed event (docs.github.com webhook events and payloads, 2026-10-19).
+func documentedWebhookActions(name string) []string {
+	switch name {
+	case "pull_request":
+		return []string{
+			"assigned", "auto_merge_disabled", "auto_merge_enabled", "closed",
+			"converted_to_draft", "demilestoned", "dequeued", "edited", "enqueued",
+			"labeled", "locked", "milestoned", "opened", "ready_for_review",
+			"reopened", "review_request_removed", "review_requested", "stacked",
+			"synchronize", "unassigned", "unlabeled", "unlocked",
+		}
+	case "check_run":
+		return []string{"completed", "created", "requested_action", "rerequested"}
+	case "check_suite":
+		return []string{"completed", "requested", "rerequested"}
+	case "merge_group":
+		return []string{"checks_requested", "destroyed"}
+	case "workflow_run":
+		return []string{"completed", "in_progress", "requested"}
+	}
+	return nil
 }
 
 // projectWebhook consumes a receipt that has already passed authentication and

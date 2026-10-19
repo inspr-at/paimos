@@ -66,8 +66,22 @@ test('full inventory runs in five hosted shards without retries, filters or secr
   assert.match(workflow, /permissions:\n  contents: read\n/)
   assert.doesNotMatch(workflow, /secrets\.|: write\b|pull_request_target:|self-hosted|continue-on-error|environment:/)
   assert.match(shard, /fail-fast: false/)
-  assert.match(shard, /shard: \[1, 2, 3, 4, 5\]/)
-  assert.match(shard, /npx playwright test -c playwright.ui.config.ts\n\s+--shard=\$\{\{ matrix.shard \}\}\/5 --workers=1 --retries=0 --forbid-only/)
+  const matrix = [...shard.matchAll(/- \{ shard: (\w+), config: ([\w.]+), partition: (\d+\/\d+) \}/g)]
+    .map(([, shard, config, partition]) => ({ shard, config, partition }))
+  assert.deepEqual(matrix, [
+    ...[1, 2, 3, 4, 5].map(n => ({ shard: String(n), config: 'playwright.ui.config.ts', partition: `${n}/5` })),
+    { shard: 'performance', config: 'playwright.perf.config.ts', partition: '1/1' },
+  ])
+  assert.match(shard, /npx playwright test -c \$\{\{ matrix.config \}\}\n\s+--shard=\$\{\{ matrix.partition \}\} --workers=1 --retries=0 --forbid-only/)
+  // The cold-load cases move to their production config, and remain required
+  // by this same aggregate. Neither inventory can silently drop them.
+  const ui = readFileSync(new URL('../web/playwright.ui.config.ts', import.meta.url), 'utf8')
+  const perf = readFileSync(new URL('../web/playwright.perf.config.ts', import.meta.url), 'utf8')
+  assert.match(ui, /testMatch: '\*\*\/\*.spec.ts'/)
+  assert.match(ui, /testIgnore: '\*\*\/performance.spec.ts'/)
+  assert.match(perf, /testMatch: '\*\*\/performance.spec.ts'/)
+  assert.match(perf, /command: 'npm run build && npm run preview /)
+  assert.match(perf, /reuseExistingServer: false/)
   assert.doesNotMatch(shard, /--(?:grep|project|only-changed|test-list|pass-with-no-tests)|tests\/.*\.spec\.ts/)
   assert.match(shard, /--trace=retain-on-failure --reporter=github,line,json/)
   assert.match(shard, /PLAYWRIGHT_JSON_OUTPUT_FILE: test-results\/full-ui-results.json/)
@@ -109,7 +123,7 @@ test('the checked-in aggregate shell fails closed for every non-success dependen
       const content = readFileSync(summary, 'utf8')
       assert.ok(content.includes('a'.repeat(40)))
       assert.ok(content.includes(`Source resolution: **${source}**`))
-      assert.ok(content.includes(`All five Playwright shards: **${shard}**`))
+      assert.ok(content.includes(`All five UI shards and the production performance suite: **${shard}**`))
     }
   }
 })
