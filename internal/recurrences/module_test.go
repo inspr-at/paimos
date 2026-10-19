@@ -902,10 +902,12 @@ func TestPersistentDueFailureDoesNotStarveTenant(t *testing.T) {
 						return err
 					}
 					good.ID = "10000000-0000-4000-8000-000000000020"
-					if _, err := events.Append(t.Context(), tx, f.p, events.Change{NodeID: &bad.ProjectID, Type: "release.published", After: "invalid publication"}); err != nil {
+					// Pin event times to the injected clock: the malformed payload has no
+					// published_at, so its due time falls back to the event's own time.
+					if _, err := events.Append(t.Context(), tx, f.p, events.Change{NodeID: &bad.ProjectID, Type: "release.published", After: "invalid publication", At: &f.now}); err != nil {
 						return err
 					}
-					_, err := events.Append(t.Context(), tx, f.p, events.Change{NodeID: &good.ProjectID, Type: "release.published", After: Publication{ProjectID: good.ProjectID, PublishedAt: f.now, Name: "Release", Version: "261019120000.0.0"}})
+					_, err := events.Append(t.Context(), tx, f.p, events.Change{NodeID: &good.ProjectID, Type: "release.published", After: Publication{ProjectID: good.ProjectID, PublishedAt: f.now, Name: "Release", Version: "261019120000.0.0"}, At: &f.now})
 					return err
 				}
 				badAt := *bad.NextAt
