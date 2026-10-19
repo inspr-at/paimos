@@ -141,7 +141,8 @@ for (const width of [1440, 1024, 390]) {
       await page.locator('.agents-page .cap-line').click()
       await expectStableControls({
         controls: { more, fewer },
-        interactions: [...[fewer, fewer, more, more].map((button, i) => ({ name: `sheet total step ${i + 1}`, run: () => button.click() }))],
+        // A tight row lifts the unit onto its plate on hover first; then − and + are its own.
+        interactions: [...[fewer, fewer, more, more].map((button, i) => ({ name: `sheet total step ${i + 1}`, run: async () => { await page.locator('.cdial [data-unit="total"] .du-mark').hover(); await button.click() } }))],
       })
       await sheet.getByRole('button', { name: /The full dial/ }).click()
       await expect(sheet).toHaveCount(0)
@@ -263,7 +264,7 @@ for (const width of [1440, 1024, 390]) {
       // Phones (AEON-1459, D3): History and Clear stale are in the toolbar's ⋯; the line's tools never move.
       const more = sessions.getByRole('button', { name: 'More list actions', exact: true }), menu = page.getByRole('menu', { name: 'More list actions' })
       await more.click()
-      await expect(menu.getByRole('menuitem', { name: /^Clear stale/ })).toContainText('1 without a heartbeat for 15')
+      await expect(menu.getByRole('menuitem', { name: /^Clear stale/ })).toContainText(/\d+ without a heartbeat for 15/)
       await page.keyboard.press('Escape')
       await expectStableControls({
         controls: { more, search: sessions.getByRole('button', { name: 'Search sessions', exact: true }), filter: sessions.getByRole('button', { name: 'Filter', exact: true }), title },

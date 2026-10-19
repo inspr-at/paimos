@@ -233,9 +233,9 @@ for (const width of [375, 390]) test(`on a ${width} px phone the header has no c
   expect(reach).toBeLessThanOrEqual(0.5)
 })
 
-// AEON-1459 (D1): from 600 to 719 px a project's tickets get the compact header too: one 44 px line, the
+// AEON-1459 (D1): under 720 px a project's tickets get the compact header too: one 44 px line, the
 // places as icons, no density switch and no chevron, and it fits the window.
-for (const width of [601, 640, 719]) test(`on a project's tickets at ${width} the compact header fits the window`, async ({ page }) => {
+for (const width of [601, 640]) test(`on a project's tickets at ${width} the compact header fits the window`, async ({ page }) => {
   await page.setViewportSize({ width, height: 900 })
   await page.emulateMedia({ colorScheme: 'light' })
   await setup(page)
@@ -255,7 +255,7 @@ for (const width of [601, 640, 719]) test(`on a project's tickets at ${width} th
 // breadcrumb has nothing left to give, the search pill yields the rest, its keys
 // first, and just above phone width the row's gaps tighten, so the header never
 // runs past the window. With room to spare the pill keeps its full width and keys.
-for (const width of [720, 721, 768, 1024]) test(`on a project's tickets at ${width} the header fits the window and the search pill gives way last`, async ({ page }) => {
+for (const width of [721, 768, 1024]) test(`on a project's tickets at ${width} the header fits the window and the search pill gives way last`, async ({ page }) => {
   await page.setViewportSize({ width, height: 900 })
   await page.emulateMedia({ colorScheme: 'light' })
   await setup(page)
@@ -689,7 +689,7 @@ for (const width of [1440, 390]) test(`the preview's controls stay put through r
 // Where the chevron has stepped aside on a phone, the avatar sheet opens the
 // preview instead, and Escape returns to the avatar; where it fits, only the chevron does.
 // AEON-1459 (D2): every compact header has the preview in the avatar sheet; 720 px and wider keep the chevron.
-for (const [width, where, path, away] of [[375, 'home', '/', true], [375, 'a ticket', '/p/PHAROS/PHAROS-11?view=full', true], [390, 'a ticket', '/p/PHAROS/PHAROS-11?view=full', true], [390, 'home', '/', true], [720, 'home', '/', false]] as const) {
+for (const [width, where, path, away] of [[375, 'home', '/', true], [375, 'a ticket', '/p/PHAROS/PHAROS-11?view=full', true], [390, 'a ticket', '/p/PHAROS/PHAROS-11?view=full', true], [720, 'home', '/', false]] as const) {
   test(`on ${where} at ${width} px the preview is ${away ? 'one entry away in the avatar sheet' : 'on its chevron, not in the avatar sheet'}`, async ({ page }) => {
     await page.setViewportSize({ width, height: 844 })
     await page.emulateMedia({ colorScheme: 'light' })

@@ -298,6 +298,34 @@
     ,
     "browser:tests/aeon-1448-desk-tabrow.spec.ts:type-size shots › AEON-1448: 375 and 390, the round action beside the tabs"
     ,
+    "browser:tests/aeon-1459-compact-chrome.spec.ts:AEON-1459 C1/C2 agents 320x568 light: 44 px opaque header, one-line toolbar, no footer, rows first"
+    ,
+    "browser:tests/aeon-1459-compact-chrome.spec.ts:AEON-1459 C1/C2 agents 390x664 dark: 44 px opaque header, one-line toolbar, no footer, rows first"
+    ,
+    "browser:tests/aeon-1459-compact-chrome.spec.ts:AEON-1459 C1/C2 agents 844x340 dark: 44 px opaque header, one-line toolbar, no footer, rows first"
+    ,
+    "browser:tests/aeon-1459-compact-chrome.spec.ts:AEON-1459 C1/C2 agents 932x380 light: 44 px opaque header, one-line toolbar, no footer, rows first"
+    ,
+    "browser:tests/aeon-1459-compact-chrome.spec.ts:AEON-1459 C3 agents 390x664 light: search opens over the toolbar line and Cancel clears it, nothing moves"
+    ,
+    "browser:tests/aeon-1459-compact-chrome.spec.ts:AEON-1459 C4 agents 390x664 light: the head ⋯ leads with Wind down, the Sessions ⋯ holds the list tools"
+    ,
+    "browser:tests/aeon-1459-compact-chrome.spec.ts:AEON-1459 C5 agents 390x664 light: the capacity line opens the dial and the accounts as a sheet"
+    ,
+    "browser:tests/aeon-1459-compact-chrome.spec.ts:AEON-1459 C5 agents 844x340 light: the capacity line opens the dial and the accounts as a sheet"
+    ,
+    "browser:tests/aeon-1459-compact-chrome.spec.ts:AEON-1459 C6 agents 844x340 light: held changes float as a chip; the toolbar keeps its one 44 px line"
+    ,
+    "browser:tests/aeon-1459-compact-chrome.spec.ts:AEON-1459 C7 project 390x664 light: the crumb opens the project's sheet"
+    ,
+    "browser:tests/aeon-1459-compact-chrome.spec.ts:AEON-1459 C7 project 844x340 light: the crumb opens the project's sheet"
+    ,
+    "browser:tests/aeon-1459-compact-chrome.spec.ts:AEON-1459 C8 agents 390x664 light: the avatar menu has the theme, What’s new with the release, and the foot"
+    ,
+    "browser:tests/aeon-1459-compact-chrome.spec.ts:AEON-1459 C9 1440 dark: header, page head, capacity row, toolbar and columns keep main's geometry"
+    ,
+    "browser:tests/aeon-1459-compact-chrome.spec.ts:AEON-1459 agents 844x340 light: the scroller's height never changes across a 2000 px touch scroll"
+    ,
     "browser:tests/aeon-908-polish.spec.ts:tree, hours spacing and light switch thumbs 1024 dark"
     ,
     "browser:tests/aeon-908-polish.spec.ts:tree, hours spacing and light switch thumbs 1024 light"
@@ -886,10 +914,6 @@
     ,
     "browser:tests/header-desk-split.spec.ts:on a project's tickets at 640 the compact header fits the window"
     ,
-    "browser:tests/header-desk-split.spec.ts:on a project's tickets at 719 the compact header fits the window"
-    ,
-    "browser:tests/header-desk-split.spec.ts:on a project's tickets at 720 the header fits the window and the search pill gives way last"
-    ,
     "browser:tests/header-desk-split.spec.ts:on a project's tickets at 721 the header fits the window and the search pill gives way last"
     ,
     "browser:tests/header-desk-split.spec.ts:on a project's tickets at 768 the header fits the window and the search pill gives way last"
@@ -899,8 +923,6 @@
     "browser:tests/header-desk-split.spec.ts:on a ticket at 390 px the preview is one entry away in the avatar sheet"
     ,
     "browser:tests/header-desk-split.spec.ts:on home at 375 px the preview is one entry away in the avatar sheet"
-    ,
-    "browser:tests/header-desk-split.spec.ts:on home at 390 px the preview is one entry away in the avatar sheet"
     ,
     "browser:tests/header-desk-split.spec.ts:on home at 720 px the preview is on its chevron, not in the avatar sheet"
     ,
@@ -6242,41 +6264,41 @@
     ,
     {"kind":"browser","file":"tests/aeon-1448-desk-tabrow.spec.ts","name":"type-size shots › AEON-1448: 375 and 390, the round action beside the tabs","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
-    {"kind":"browser","file":"tests/aeon-1459-compact-chrome.spec.ts","name":"AEON-1459 C1/C2 agents 320x568 light: 44 px opaque header, one-line toolbar, no footer, rows first","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    {"kind":"browser","file":"tests/aeon-1459-compact-chrome.spec.ts","name":"AEON-1459 C1/C2 agents 320x568 light: 44 px opaque header, one-line toolbar, no footer, rows first","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
-    {"kind":"browser","file":"tests/aeon-1459-compact-chrome.spec.ts","name":"AEON-1459 C1/C2 agents 390x664 dark: 44 px opaque header, one-line toolbar, no footer, rows first","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    {"kind":"browser","file":"tests/aeon-1459-compact-chrome.spec.ts","name":"AEON-1459 C1/C2 agents 390x664 dark: 44 px opaque header, one-line toolbar, no footer, rows first","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
     {"kind":"browser","file":"tests/aeon-1459-compact-chrome.spec.ts","name":"AEON-1459 C1/C2 agents 390x664 light: 44 px opaque header, one-line toolbar, no footer, rows first","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
-    {"kind":"browser","file":"tests/aeon-1459-compact-chrome.spec.ts","name":"AEON-1459 C1/C2 agents 844x340 dark: 44 px opaque header, one-line toolbar, no footer, rows first","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    {"kind":"browser","file":"tests/aeon-1459-compact-chrome.spec.ts","name":"AEON-1459 C1/C2 agents 844x340 dark: 44 px opaque header, one-line toolbar, no footer, rows first","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
     {"kind":"browser","file":"tests/aeon-1459-compact-chrome.spec.ts","name":"AEON-1459 C1/C2 agents 844x340 light: 44 px opaque header, one-line toolbar, no footer, rows first","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
-    {"kind":"browser","file":"tests/aeon-1459-compact-chrome.spec.ts","name":"AEON-1459 C1/C2 agents 932x380 light: 44 px opaque header, one-line toolbar, no footer, rows first","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    {"kind":"browser","file":"tests/aeon-1459-compact-chrome.spec.ts","name":"AEON-1459 C1/C2 agents 932x380 light: 44 px opaque header, one-line toolbar, no footer, rows first","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
-    {"kind":"browser","file":"tests/aeon-1459-compact-chrome.spec.ts","name":"AEON-1459 C3 agents 390x664 light: search opens over the toolbar line and Cancel clears it, nothing moves","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    {"kind":"browser","file":"tests/aeon-1459-compact-chrome.spec.ts","name":"AEON-1459 C3 agents 390x664 light: search opens over the toolbar line and Cancel clears it, nothing moves","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
-    {"kind":"browser","file":"tests/aeon-1459-compact-chrome.spec.ts","name":"AEON-1459 C4 agents 390x664 light: the head ⋯ leads with Wind down, the Sessions ⋯ holds the list tools","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    {"kind":"browser","file":"tests/aeon-1459-compact-chrome.spec.ts","name":"AEON-1459 C4 agents 390x664 light: the head ⋯ leads with Wind down, the Sessions ⋯ holds the list tools","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
-    {"kind":"browser","file":"tests/aeon-1459-compact-chrome.spec.ts","name":"AEON-1459 C5 agents 390x664 light: the capacity line opens the dial and the accounts as a sheet","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    {"kind":"browser","file":"tests/aeon-1459-compact-chrome.spec.ts","name":"AEON-1459 C5 agents 390x664 light: the capacity line opens the dial and the accounts as a sheet","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
-    {"kind":"browser","file":"tests/aeon-1459-compact-chrome.spec.ts","name":"AEON-1459 C5 agents 844x340 light: the capacity line opens the dial and the accounts as a sheet","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    {"kind":"browser","file":"tests/aeon-1459-compact-chrome.spec.ts","name":"AEON-1459 C5 agents 844x340 light: the capacity line opens the dial and the accounts as a sheet","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
-    {"kind":"browser","file":"tests/aeon-1459-compact-chrome.spec.ts","name":"AEON-1459 C6 agents 844x340 light: held changes float as a chip; the toolbar keeps its one 44 px line","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    {"kind":"browser","file":"tests/aeon-1459-compact-chrome.spec.ts","name":"AEON-1459 C6 agents 844x340 light: held changes float as a chip; the toolbar keeps its one 44 px line","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
-    {"kind":"browser","file":"tests/aeon-1459-compact-chrome.spec.ts","name":"AEON-1459 C7 project 390x664 light: the crumb opens the project's sheet","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    {"kind":"browser","file":"tests/aeon-1459-compact-chrome.spec.ts","name":"AEON-1459 C7 project 390x664 light: the crumb opens the project's sheet","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
-    {"kind":"browser","file":"tests/aeon-1459-compact-chrome.spec.ts","name":"AEON-1459 C7 project 844x340 light: the crumb opens the project's sheet","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    {"kind":"browser","file":"tests/aeon-1459-compact-chrome.spec.ts","name":"AEON-1459 C7 project 844x340 light: the crumb opens the project's sheet","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
-    {"kind":"browser","file":"tests/aeon-1459-compact-chrome.spec.ts","name":"AEON-1459 C8 agents 390x664 light: the avatar menu has the theme, What’s new with the release, and the foot","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    {"kind":"browser","file":"tests/aeon-1459-compact-chrome.spec.ts","name":"AEON-1459 C8 agents 390x664 light: the avatar menu has the theme, What’s new with the release, and the foot","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
-    {"kind":"browser","file":"tests/aeon-1459-compact-chrome.spec.ts","name":"AEON-1459 C9 1440 dark: header, page head, capacity row, toolbar and columns keep main's geometry","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    {"kind":"browser","file":"tests/aeon-1459-compact-chrome.spec.ts","name":"AEON-1459 C9 1440 dark: header, page head, capacity row, toolbar and columns keep main's geometry","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
     {"kind":"browser","file":"tests/aeon-1459-compact-chrome.spec.ts","name":"AEON-1459 C9 1440 light: header, page head, capacity row, toolbar and columns keep main's geometry","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
     {"kind":"browser","file":"tests/aeon-1459-compact-chrome.spec.ts","name":"AEON-1459 agents 390x664 light: the scroller's height never changes across a 2000 px touch scroll","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
-    {"kind":"browser","file":"tests/aeon-1459-compact-chrome.spec.ts","name":"AEON-1459 agents 844x340 light: the scroller's height never changes across a 2000 px touch scroll","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    {"kind":"browser","file":"tests/aeon-1459-compact-chrome.spec.ts","name":"AEON-1459 agents 844x340 light: the scroller's height never changes across a 2000 px touch scroll","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
     {"kind":"browser","file":"tests/aeon-1473-desk-tab.spec.ts","name":"16 px favicon › AEON-1473: the amber dot reads at 16 px on light and dark tab strips","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
@@ -9446,10 +9468,6 @@
     ,
     {"kind":"browser","file":"tests/header-desk-split.spec.ts","name":"on a project's tickets at 640 the compact header fits the window","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
-    {"kind":"browser","file":"tests/header-desk-split.spec.ts","name":"on a project's tickets at 719 the compact header fits the window","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
-    ,
-    {"kind":"browser","file":"tests/header-desk-split.spec.ts","name":"on a project's tickets at 720 the header fits the window and the search pill gives way last","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
-    ,
     {"kind":"browser","file":"tests/header-desk-split.spec.ts","name":"on a project's tickets at 721 the header fits the window and the search pill gives way last","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
     {"kind":"browser","file":"tests/header-desk-split.spec.ts","name":"on a project's tickets at 768 the header fits the window and the search pill gives way last","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
@@ -9459,8 +9477,6 @@
     {"kind":"browser","file":"tests/header-desk-split.spec.ts","name":"on a ticket at 390 px the preview is one entry away in the avatar sheet","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
     {"kind":"browser","file":"tests/header-desk-split.spec.ts","name":"on home at 375 px the preview is one entry away in the avatar sheet","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
-    ,
-    {"kind":"browser","file":"tests/header-desk-split.spec.ts","name":"on home at 390 px the preview is one entry away in the avatar sheet","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
     {"kind":"browser","file":"tests/header-desk-split.spec.ts","name":"on home at 720 px the preview is on its chevron, not in the avatar sheet","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,

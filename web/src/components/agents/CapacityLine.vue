@@ -49,7 +49,7 @@ defineExpose({ focus: () => trigger.value?.focus({ preventScroll: true }) })
     </span>
     <AppIcon name="chevron-right" :size="14" class="cl-go" />
   </button>
-  <FloatingPanel v-if="open" :anchor="trigger ?? null" align="start" :width="360" :tallest="600" label="Capacity" phone-sheet :sheet-below="719" cycle @close="emit('close', $event)">
+  <FloatingPanel v-if="open" :anchor="trigger ?? null" align="start" :width="360" :tallest="600" label="Capacity" phone-sheet :sheet-below="719" cycle fields-own-escape @close="emit('close', $event)">
       <div class="cap-sheet">
         <div class="cs-head"><h3 class="cs-title" tabindex="-1" data-autofocus>Capacity</h3><button type="button" class="btn sm primary" @click="emit('close', true)">Done</button></div>
         <div id="capacity-sheet-dial" ref="body" class="cs-dial" />

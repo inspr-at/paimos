@@ -14,7 +14,8 @@ import { getCurrentInstance, nextTick, onBeforeUnmount, onMounted, ref, watch } 
 // `belowHeader`: flipped above its trigger, the panel stops 8 px below the app header instead of covering it. When it
 // fits on neither side, the page first scrolls the trigger to 16 px below the header (a jump with reduced motion), and
 // the panel then opens below it (Delivery's worst items, AEON-1493).
-const props = withDefaults(defineProps<{ anchor: HTMLElement | null; align?: 'start' | 'end'; width?: number; label: string; tallest?: number; cycle?: boolean; sheet?: boolean; compactSheet?: boolean; fieldEscape?: boolean; settingsKeys?: boolean; phoneSheet?: boolean; sheetBelow?: number; belowHeader?: boolean }>(), { align: 'start', width: 240, tallest: 420, cycle: false, sheet: false, fieldEscape: false, phoneSheet: false, sheetBelow: 720, belowHeader: false })
+// `fieldsOwnEscape`: a text field inside handles its own Escape (a stepper cancels its draft); the next Escape closes.
+const props = withDefaults(defineProps<{ anchor: HTMLElement | null; align?: 'start' | 'end'; width?: number; label: string; tallest?: number; cycle?: boolean; sheet?: boolean; compactSheet?: boolean; fieldEscape?: boolean; fieldsOwnEscape?: boolean; settingsKeys?: boolean; phoneSheet?: boolean; sheetBelow?: number; belowHeader?: boolean }>(), { align: 'start', width: 240, tallest: 420, cycle: false, sheet: false, fieldEscape: false, fieldsOwnEscape: false, phoneSheet: false, sheetBelow: 720, belowHeader: false })
 defineOptions({ inheritAttrs: false })
 const floatingID = `floating-${getCurrentInstance()!.uid}`
 const floatingOwner = (props.anchor instanceof Element ? props.anchor.closest<HTMLElement>('[data-floating-id]') : null)?.dataset.floatingId
@@ -177,6 +178,7 @@ function escape(event: KeyboardEvent) {
   if (panel.value?.querySelector('.read-name-detail:popover-open')) return
   // A form: Escape first leaves a text field or select, the next press closes (AEON-541 keyboard rule).
   const field = event.target
+  if (props.fieldsOwnEscape && field instanceof HTMLElement && panel.value?.contains(field) && ['INPUT', 'TEXTAREA', 'SELECT'].includes(field.tagName)) return
   if (props.fieldEscape && field instanceof HTMLElement && panel.value?.contains(field) && (field.tagName === 'SELECT' || (field.tagName === 'INPUT' && !['checkbox', 'radio', 'button'].includes((field as HTMLInputElement).type)))) {
     event.preventDefault(); event.stopImmediatePropagation()
     field.blur(); panel.value.tabIndex = -1; panel.value.focus({ preventScroll: true })
