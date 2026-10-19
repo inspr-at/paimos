@@ -107,7 +107,8 @@ func TestActivityNotesValidationHistoryAndIsolation(t *testing.T) {
 		if err := tx.QueryRow(t.Context(), `SELECT count(*) FROM events WHERE type='harness.heartbeat'`).Scan(&count); err != nil {
 			return err
 		}
-		if count != 25 {
+		// AEON-1354: the unchanged Step 23 heartbeat is freshness only.
+		if count != 24 {
 			t.Fatalf("heartbeat events: %d", count)
 		}
 		return nil

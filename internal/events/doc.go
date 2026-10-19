@@ -8,7 +8,11 @@
 // outside the query pool; all durable replay runs through db.InTenant. Listener
 // gaps and bounded-mailbox overflow trigger durable rescan. The last subscriber
 // closes the backend; clients reconnect with Last-Event-ID. Database notifications
-// contain only a tenant and event ID.
+// contain only a tenant and event ID, or an opaque session ID for a committed
+// heartbeat freshness hint. Those hints produce id-less harness.heartbeat
+// frames with data {}, after checking current harness read access and session
+// RLS. Overflow/reconnect resync also refreshes readable sessions. Latest
+// heartbeat time comes from the session row; freshness hints are never replayed.
 // Live views open the stream with ?after=latest: it starts at the newest
 // event, and each connection first sends stream.ready naming its resume ID.
 // Reading attaches node_changes to node.* events (id, project, changed
@@ -34,6 +38,10 @@
 // open a second transaction for the event. Writer implements the same Append
 // method for dependency injection. Before/After must be full API snapshots;
 // nil means absent. The DB allocates ordered IDs and notifies on commit.
+// Account probes and harness heartbeats append only when visible state changes.
+// RunTelemetryRetention prunes only these two types older than the fixed 14-day
+// retention, at startup and daily, in bounded transactions separated by waits.
+// Undo-linked telemetry causes that tenant's cleanup to be skipped and logged.
 //
 // Undo is opt-in by stable event type via WithUndo. The owning package's
 // UndoFunc locks and authorizes its resource, rejects stale snapshots, restores

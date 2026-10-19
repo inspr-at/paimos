@@ -46,7 +46,7 @@ Only current local subscription-resource facts contribute idle samples, so a
 shared resource does not attribute another login's probe to this account.
 Existing normalized run readings also populate the series; estimates do not.
 Idle reports stay out of append-only reading history and do not add per-probe
-`account.probed` events. Health probe telemetry is outside this ticket's scope.
+`account.probed` events. Health probes also retain their latest facts on the account row; account.probed is appended only for a visible availability, readiness, warning-level or error-class change (AEON-1354).
 No vendor responses, account identities, paths, plans or credential material
 are stored in the new quota snapshots. Migration 1363 is expand-only, adds a
 nullable account snapshot and a FORCE RLS hourly table, and classifies both in
@@ -67,3 +67,13 @@ The final guarded `ci-static --merge-main` run on `88c67ec4c` exited 0:
 44 checks passed with no optional skips, including migration, ownership,
 manifest and generated-contract checks. No origin push, deployment or model
 review gate was performed. Production idle qualification remains open.
+
+## Event telemetry retention (AEON-1354)
+
+Account probes and harness heartbeats retain current facts on their existing rows. Routine timestamps, sequence increments and changing quota percentages do not create before/after event rows. Visible readiness, availability, quota warning or error changes and real harness phase, activity, estimate or metadata changes still appear in history and audit. Harness activity and metadata histories keep their existing storage. Stall detection reads session heartbeat timestamps directly.
+
+The agents live view continues to receive `harness.heartbeat` SSE wake hints after committed quiet heartbeats. A hint has data `{}` and no event ID; it carries no session facts, advances no resume cursor and causes authorized projections to be reread. Missed hints are covered by the existing periodic session refresh and listener resync. Durable state-change events retain their existing shape.
+
+A server job runs on startup and daily. It deletes only `account.probed` and `harness.heartbeat` events older than the fixed 14-day server retention, in batches of at most 500, with a 100 ms wait between batches and per-type counts in server logs. It checks tenant boundaries and skips a tenant if eligible telemetry participates in undo. Other event types remain indefinitely. The migration creates the narrow retention authority and a concurrent partial index; it performs no cleanup. The release flow takes a fresh backup before starting the new binary. No `VACUUM FULL` or table rewrite is used; ordinary autovacuum and subsequent writes can reuse space. OPS measures the post-release table size.
+
+Quiet probe/heartbeat streams now produce zero event rows per week unless their visible state changes. If other traffic stays at the measured pre-telemetry baseline, the expected total is about 1–4 thousand rows per week, plus genuine state transitions. This is an estimate; production size and growth verification belongs to the release/OPS follow-up.

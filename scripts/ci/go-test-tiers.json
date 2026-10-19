@@ -928,6 +928,8 @@
     ,
     {"kind":"go","package":"internal/agentaccounts","name":"TestProbeBatchIndependentObservationsAndRevocation","tier":"ESSENTIAL"}
     ,
+    {"kind":"go","package":"internal/agentaccounts","name":"TestProbeEventsOnlyForVisibleStateChanges","tier":"ESSENTIAL"}
+    ,
     {"kind":"go","package":"internal/agentaccounts","name":"TestProjectDailySnapshotCapsContract","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/agentaccounts","name":"TestProjectLookupPreservesQueryFailure","tier":"NIGHTLY"}
@@ -6550,6 +6552,10 @@
     ,
     {"kind":"go","package":"internal/events","name":"TestSummarizeNodeChanges","tags":["delete-candidate"],"tier":"GATED-FULL"}
     ,
+    {"kind":"go","package":"internal/events","name":"TestTelemetryRetentionBatchedScopedAndIdempotent","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/events","name":"TestTelemetryRetentionSkipsUndoAndKeepsAppendOnlyGuard","tier":"ESSENTIAL"}
+    ,
     {"kind":"go","package":"internal/events","name":"TestUUIDAndIDValidation","tier":"GATED-FULL"}
     ,
     {"kind":"go","package":"internal/events","name":"TestUndoAdapterRollbackAndUnknownType","tier":"GATED-FULL"}
@@ -6769,6 +6775,8 @@
     {"kind":"go","package":"internal/harness","name":"TestHeartbeatLabelAndMetadataHistory","tier":"GATED-FULL"}
     ,
     {"kind":"go","package":"internal/harness","name":"TestHeartbeatModelSwitchRequiresGenerationLease","tier":"GATED-FULL"}
+    ,
+    {"kind":"go","package":"internal/harness","name":"TestHeartbeatQuietTicksUpdateRowAndSSEWithoutEvents","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/harness","name":"TestHeartbeatWarningSQLFailureDoesNotRollbackAcceptedBeat","tier":"GATED-FULL"}
     ,

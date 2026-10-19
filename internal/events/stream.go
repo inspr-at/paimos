@@ -159,9 +159,19 @@ func (m *module) stream(w http.ResponseWriter, r *http.Request) {
 					break // Periodic durable replay also tolerates missed wakeups.
 				}
 				var hint struct {
-					TenantID string `json:"tenant_id"`
+					TenantID           string `json:"tenant_id"`
+					HeartbeatSessionID string `json:"heartbeat_session_id"`
 				}
 				if json.Unmarshal([]byte(n.Payload), &hint) == nil && hint.TenantID == p.TenantID {
+					if validUUID(hint.HeartbeatSessionID) || db.IsResync(n) {
+						visible, err := m.heartbeatVisible(r.Context(), p, hint.HeartbeatSessionID)
+						if err != nil {
+							return
+						}
+						if visible && flush("event: harness.heartbeat\ndata: {}\n\n") != nil {
+							return
+						}
+					}
 					break
 				}
 			}
