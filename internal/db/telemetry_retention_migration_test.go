@@ -27,3 +27,23 @@ func TestTelemetryRetentionMigrationRoleCanInstallPruneFlag(t *testing.T) {
 		t.Fatal("retention function does not restore the prune flag before returning")
 	}
 }
+
+// Risk: SELECT FOR UPDATE/SHARE applies UPDATE policies. events has none under
+// FORCE RLS, so a locking candidate scan matches no rows and every batch
+// deletes nothing while reporting success.
+func TestTelemetryRetentionCandidateScanTakesNoRowLock(t *testing.T) {
+	content, err := os.ReadFile("migrations/1369_telemetry_retention.sql")
+	if err != nil {
+		t.Fatal(err)
+	}
+	sql := string(content)
+	start := strings.Index(sql, "WITH candidates AS MATERIALIZED (")
+	end := strings.Index(sql, "), removed AS (")
+	if start < 0 || end < start {
+		t.Fatal("retention function no longer selects a bounded candidate batch")
+	}
+	if candidates := sql[start:end]; strings.Contains(candidates, " FOR UPDATE") || strings.Contains(candidates, " FOR SHARE") ||
+		strings.Contains(candidates, " FOR NO KEY UPDATE") || strings.Contains(candidates, " FOR KEY SHARE") {
+		t.Fatalf("candidate scan takes a row lock that RLS filters to zero rows on events:\n%s", candidates)
+	}
+}

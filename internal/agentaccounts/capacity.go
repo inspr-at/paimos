@@ -940,6 +940,11 @@ func readingPacing(ctx context.Context, tx pgx.Tx, id string, v capacity.Reading
 	start := v.StartsAt()
 	used, known := 0.0, false
 	if v.WindowKind == "fact" {
+		// A fact window opens at its reading. Whole-minute lengths can derive a
+		// later open, which Plan rejects as a future window.
+		if start.After(v.ReadAt) {
+			start = v.ReadAt
+		}
 		if !start.Before(period) {
 			used, known = v.UsedPercent, true
 		} else {

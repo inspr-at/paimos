@@ -62,10 +62,13 @@ BEGIN
   IF protected THEN
    RETURN QUERY SELECT t,0::bigint,true FROM unnest(ARRAY['account.probed','harness.heartbeat']) t;
   ELSE
+   -- No locking clause: SELECT FOR UPDATE applies UPDATE policies, and events
+   -- has none, so it matched nothing. The advisory lock serialises pruners;
+   -- the DELETE locks its own rows and the trigger rechecks each one.
    RETURN QUERY WITH candidates AS MATERIALIZED (
     SELECT e.tenant_id,e.id FROM public.events e WHERE e.tenant_id=target_tenant
      AND e.type IN ('account.probed','harness.heartbeat') AND e.at<cutoff AND e.undo_of IS NULL
-     ORDER BY e.at,e.id LIMIT batch_size FOR UPDATE SKIP LOCKED
+     ORDER BY e.at,e.id LIMIT batch_size
    ), removed AS (
     DELETE FROM public.events e USING candidates c WHERE e.tenant_id=c.tenant_id AND e.id=c.id
     RETURNING e.type

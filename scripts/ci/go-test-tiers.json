@@ -816,6 +816,8 @@
     ,
     {"kind":"go","package":"internal/agentaccounts","name":"TestFactOnlyReportsExhaustTheDailyShare","tier":"ESSENTIAL"}
     ,
+    {"kind":"go","package":"internal/agentaccounts","name":"TestFactWindowPacingOpensAtReading","tier":"ESSENTIAL"}
+    ,
     {"kind":"go","package":"internal/agentaccounts","name":"TestFiveHourFirstReadingNearUTCMidnightStaysEligible","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/agentaccounts","name":"TestFix2KnownKeyCapKeepsTotalBalanceUnknown","tier":"GATED-FULL"}
@@ -5859,6 +5861,8 @@
     {"kind":"go","package":"internal/db","name":"TestStepupMigrationExpansionRollbackAndLegacyKinds","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/db","name":"TestTagKindMigrationSeedsMissingAndPreservesCustomTenants","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/db","name":"TestTelemetryRetentionCandidateScanTakesNoRowLock","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/db","name":"TestTelemetryRetentionMigrationRoleCanInstallPruneFlag","tier":"ESSENTIAL"}
     ,

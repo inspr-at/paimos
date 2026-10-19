@@ -8,6 +8,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/inspr-at/paimos/internal/capacity"
 	"github.com/jackc/pgx/v5"
 )
 
@@ -99,4 +100,25 @@ func TestProbeEventsOnlyForVisibleStateChanges(t *testing.T) {
 			t.Fatalf("restart appended %d events, want %d", got, i)
 		}
 	}
+}
+
+// Risk: probe state comparison evaluates readiness, which paces fact windows.
+// A fact window opens at its second-precise reading; whole-minute lengths put
+// the derived open up to a minute later, after the reading and the current
+// time, so Plan rejected a future window and the probe returned 500.
+func TestFactWindowPacingOpensAtReading(t *testing.T) {
+	person, _, _, a := learningAccount(t, "codex")
+	readAt := time.Date(2026, 10, 2, 12, 0, 3, 0, time.UTC)
+	reset := readAt.Truncate(time.Hour).Add(time.Hour)
+	windows := []Window{{AccountID: a.ID, StartsAt: readAt, EndsAt: reset, Unit: "percent", Allowance: 100, Used: 92,
+		PaceModel: "unrestricted", capacityReadAt: &readAt, capacityAllowed: true, capacityKind: "fact", capacityBucket: "local:5h:", capacitySource: "agentd"}}
+	inLearning(t, person, func(tx pgx.Tx) error {
+		if err := applyCapacityPacing(t.Context(), tx, a, windows, readAt, capacity.DefaultSchedule()); err != nil {
+			t.Fatalf("fact window read at %s, resetting at %s: %v", readAt, reset, err)
+		}
+		if b := windows[0].capacityBudget; b == nil || *b < 0 || *b > 8 {
+			t.Fatalf("fact window budget %v, want within the 8%% left", b)
+		}
+		return nil
+	})
 }
