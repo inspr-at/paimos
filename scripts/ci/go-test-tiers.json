@@ -1402,6 +1402,8 @@
     ,
     {"kind":"go","package":"internal/agentd","name":"TestCheckoutHandoverProof","tier":"ESSENTIAL"}
     ,
+    {"kind":"go","package":"internal/agentd","name":"TestCheckoutHeldWaitReportsAgainAfterServerRestart","tier":"ESSENTIAL"}
+    ,
     {"kind":"go","package":"internal/agentd","name":"TestCheckoutHeldWaitReportsOnce","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/agentd","name":"TestClaimLookupOutageRecoversOutsideQueuedFeed","tier":"GATED-FULL"}
@@ -1659,6 +1661,8 @@
     {"kind":"go","package":"internal/agentd","name":"TestGrokStartRejectsLegacyProviderLabel","tier":"GATED-FULL"}
     ,
     {"kind":"go","package":"internal/agentd","name":"TestGrokVerificationPlatformGate","tier":"GATED-FULL"}
+    ,
+    {"kind":"go","package":"internal/agentd","name":"TestHandoverCheckoutBusySameOwnerSaysNothing","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/agentd","name":"TestHandoverCheckoutReportsPairTime","tier":"ESSENTIAL"}
     ,
