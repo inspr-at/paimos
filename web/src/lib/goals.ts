@@ -4,11 +4,13 @@
 // series, plus the words the view uses for them. Writes belong to agents.
 import { api, APIError, getNode } from './api'
 import { ticketPath } from './work'
+import { statusName } from './statusNames'
 import { listDayMonth, listWeekday, type GoalRange, type RatePoint } from './goalRate'
 
 export type GoalState = 'moving' | 'queued' | 'paused' | 'done'
 export const GOAL_STATES: readonly GoalState[] = ['moving', 'queued', 'paused', 'done']
-export const STATE_LABEL: Record<GoalState, string> = { moving: 'Moving', queued: 'Queued', paused: 'Paused', done: 'Done' }
+// Queued and Done read as the workspace names them (AEON-1401); Moving and Paused are goal words.
+export const STATE_LABEL: Record<GoalState, string> = { moving: 'Moving', get queued() { return statusName('queued') }, paused: 'Paused', get done() { return statusName('done') } }
 export type StateFilter = 'all' | GoalState
 export const STATE_FILTERS: readonly StateFilter[] = ['all', ...GOAL_STATES]
 

@@ -4,6 +4,7 @@ import { computed, nextTick, onBeforeUnmount, ref, watch } from 'vue'
 import { useRoute } from 'vue-router'
 import { useProfile } from '../../stores/profile'
 import { displayLanguage } from '../../lib/displayLanguage'
+import { statusName } from '../../lib/statusNames'
 import type { Project } from '../../stores/projects'
 import { useSession } from '../../stores/session'
 import { can, myProjectRole, myWorkspaceRole, onAccessRevalidate } from '../../lib/authz'
@@ -132,7 +133,7 @@ onBeforeUnmount(() => { stopLive?.(); stopAccess(); closeReset(false) })
 
 <template>
   <SettingsCard :title="t('Definitions','Definitionen')" icon="check" anchor="definitions" variant="project">
-    <template #lead>{{ t('The checks a ticket must pass before it enters In progress, QA or Done. Other statuses have none.','Die Prüfungen vor dem Wechsel eines Tickets zu In progress, QA oder Done. Für andere Status gibt es keine.') }}</template>
+    <template #lead>{{ t(`The checks a ticket must pass before it enters ${statusName('in_progress')}, ${statusName('qa')} or ${statusName('done')}. Other statuses have none.`,`Die Prüfungen vor dem Wechsel eines Tickets zu ${statusName('in_progress', 'de')}, ${statusName('qa', 'de')} oder ${statusName('done', 'de')}. Für andere Status gibt es keine.`) }}</template>
     <template #aside><ProjectSettingsExplainer id="definitions" :project-key="project.routeKey" /></template>
       <p v-if="context && (!admin || !context.can_manage)" class="lock-line"><AppIcon name="lock" :size="14" />{{ t(`Project admins change this project’s definition${adminNames ? `: ${adminNames}` : ''}. These checks are read-only.`,`Projektadministratoren ändern diese Definition${adminNames ? `: ${adminNames}` : ''}. Die Prüfungen sind schreibgeschützt.`) }}</p>
       <div ref="origin" class="origin" :style="originHeight ? { minHeight: `${originHeight}px` } : undefined" :aria-busy="loading || busy"><AppIcon :name="own ? 'copy' : 'folders'" :size="16" class="or-ic" /><div class="or-l"><b><template v-for="(part, index) in keyParts(originTitle)" :key="index"><span v-if="index" class="project-key">{{ project.routeKey }}</span>{{ part }}</template></b><small role="status"><template v-for="(part, index) in keyParts(originText)" :key="index"><span v-if="index" class="project-key">{{ project.routeKey }}</span>{{ part }}</template></small><ProjectSettingsExplainer id="copy" label="Workspace default or this project" :project-key="project.routeKey" /></div><div class="or-r">

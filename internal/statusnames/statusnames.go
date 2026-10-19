@@ -7,10 +7,15 @@
 package statusnames
 
 import (
+	"context"
+	"encoding/json"
+	"errors"
 	"fmt"
 	"strings"
 	"unicode"
 	"unicode/utf8"
+
+	"github.com/jackc/pgx/v5"
 )
 
 // MaxRunes bounds one display name, in characters after trimming.
@@ -88,6 +93,40 @@ func (n Names) Display(state, locale string) string {
 		return name
 	}
 	return builtIn[key].get(locale)
+}
+
+// Load reads the workspace's names in the caller's tenant transaction. No row
+// reads as no renames; revision 0 means nothing was ever saved.
+func Load(ctx context.Context, tx pgx.Tx) (int64, Names, error) {
+	var revision int64
+	var raw []byte
+	err := tx.QueryRow(ctx, `SELECT revision,names FROM status_names WHERE tenant_id=current_setting('aeon.tenant_id')::uuid`).Scan(&revision, &raw)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return 0, Names{}, nil
+	}
+	if err != nil {
+		return 0, nil, err
+	}
+	names := Names{}
+	if err := json.Unmarshal(raw, &names); err != nil {
+		return 0, nil, err
+	}
+	return revision, names, nil
+}
+
+// Only keeps the given statuses, for a page that names just those (the public
+// portal and roadmap show In progress). Nil when none of them is renamed.
+func (n Names) Only(keys ...string) Names {
+	var out Names
+	for _, key := range keys {
+		if name, ok := n[key]; ok {
+			if out == nil {
+				out = Names{}
+			}
+			out[key] = name
+		}
+	}
+	return out
 }
 
 // Error is a refused name, with the field it belongs to.

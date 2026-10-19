@@ -17,6 +17,7 @@ import (
 	"golang.org/x/term"
 
 	"github.com/inspr-at/paimos/internal/client"
+	"github.com/inspr-at/paimos/internal/statusnames"
 	"github.com/inspr-at/paimos/internal/version"
 )
 
@@ -67,6 +68,7 @@ type runtime struct {
 	help               bool
 	version            bool
 	kinds              *kindTable
+	names              *statusnames.Names // the workspace's status names, read once for human output
 	messagingDeliverer localDeliverer
 	personClient       *client.Client
 	// pairedHook is a test seam. Production leaves it nil and dials agentd.
@@ -459,5 +461,6 @@ func (rt *runtime) workRuntime(ctx context.Context) *runtime {
 	copy := *rt
 	copy.requestContext = ctx
 	copy.kinds = nil
+	copy.names = nil
 	return &copy
 }

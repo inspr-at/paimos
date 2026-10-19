@@ -3,6 +3,7 @@
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import type { AttentionBulkAction, AttentionBulkPreview } from '../../lib/attention'
 import { statusMeta } from '../../lib/work'
+import { statusName, statusNameKey } from '../../lib/statusNames'
 import FloatingPanel from './FloatingPanel.vue'
 import StatusIcon from './StatusIcon.vue'
 import AppIcon from '../AppIcon.vue'
@@ -18,7 +19,8 @@ const phone = ref(window.innerWidth <= 600)
 const resized = () => { phone.value = window.innerWidth <= 600 }
 onMounted(() => window.addEventListener('resize', resized))
 onBeforeUnmount(() => window.removeEventListener('resize', resized))
-const stateLabel = (state: string) => words(statusMeta(state).label, ({ new: 'Neu', backlog: 'Backlog', open: 'Offen', in_progress: 'In Arbeit', blocked: 'Blockiert', done: 'Erledigt', delivered: 'Ausgeliefert', accepted: 'Abgenommen', cancelled: 'Abgebrochen' } as Record<string, string>)[state] || statusMeta(state).label)
+// The workspace's names in the preview's language (AEON-1401), else the built-in ones.
+const stateLabel = (state: string) => { const key = statusNameKey(state); return key ? statusName(key, props.locale === 'de' ? 'de' : 'en') : statusMeta(state).label }
 function toggle(id: string, on: boolean) { if (on) excluded.value.delete(id); else excluded.value.add(id) }
 watch(count, value => {
   if (value) return

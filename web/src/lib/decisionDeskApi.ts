@@ -10,6 +10,7 @@ import { getDoctrineInbox, submitDoctrineInbox, dismissDoctrineInbox, type Doctr
 import { listAttachments, type Attachment } from './attachments'
 import { loadTicketOutcomes, type OutcomeEvent } from './ticketOutcomes'
 import { decidePhone, phoneRequest, reviewPath, type PhoneReview } from './deskPhoneApproval'
+import { statusName } from './statusNames'
 import { readTierResponse, decideTierResponse } from './agentRows'
 import { answerFor, CUSTOM_ANSWER, deskItemID, deskLinkOut, deskListKey, type DeskChoice, type DeskDraft, type DeskItem, type DeskOutcome, type DeskProjection, type DeskProjectionItem, type DeskOutcomeAvailability, type DeskDoctrineTarget, type DeskOutcomeEffect, type DeskSource, type DeskTicket } from './decisionDesk'
 
@@ -512,7 +513,7 @@ export async function loadDesk(pages = { open: 1, answered: 1 }, adapters: Prote
     }
     const open = (projection?.items ?? []).map(row => {
       const id = deskItemID(row), item = byID.get(id), linkOut = deskLinkOut(row)
-      if (row.person_step) return { ...base(id, 'action', row.title, '', []), personStep: { ...row.person_step, can_tick: row.can_decide === true }, projectId: row.project_id ?? '', projectName: name(row.project_id ?? ''), ticketId: row.person_step.node_id, ticketKey: row.person_step.ticket_key, revision: row.revision, createdAt: row.created_at, meanwhile: row.person_step.check_id === 'human' ? 'gates Delivered and Accepted' : `before ${row.person_step.to_status === 'in_progress' ? 'In progress' : row.person_step.to_status === 'done' ? 'Done' : 'QA'}`, source: row.source }
+      if (row.person_step) return { ...base(id, 'action', row.title, '', []), personStep: { ...row.person_step, can_tick: row.can_decide === true }, projectId: row.project_id ?? '', projectName: name(row.project_id ?? ''), ticketId: row.person_step.node_id, ticketKey: row.person_step.ticket_key, revision: row.revision, createdAt: row.created_at, meanwhile: row.person_step.check_id === 'human' ? `gates ${statusName('delivered')} and ${statusName('accepted')}` : `before ${statusName(row.person_step.to_status === 'in_progress' ? 'in_progress' : row.person_step.to_status === 'done' ? 'done' : 'qa')}`, source: row.source }
       if (row.kind === 'definition_change' && linkOut && row.definition_change && row.can_decide === true) return { ...base(id, 'account_matrix', row.title, '', []), linkOut, definitionChange:row.definition_change, projectId:row.project_id ?? '', projectName:name(row.project_id ?? ''), revision:row.revision, createdAt:row.created_at, held:false, source:row.source, meanwhile:'The project keeps its copy until a decision.', destination:'Project settings · Definitions' }
       if (linkOut) return { ...base(id, 'account_matrix', row.title, '', []), linkOut, revision: row.revision, createdAt: row.created_at, held: row.held, source: row.source,
         meanwhile: 'Confirm which accounts agents may use in Settings.', destination: 'Settings · Accounts', unavailable: row.can_decide === false ? 'This person may read this request but cannot decide it.' : undefined }

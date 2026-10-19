@@ -25,25 +25,6 @@ type statusNamesJSON struct {
 	Names    statusnames.Names `json:"names"`
 }
 
-// LoadStatusNames reads the workspace's status names in the caller's tenant
-// transaction. No row reads as no renames.
-func LoadStatusNames(ctx context.Context, tx pgx.Tx) (int64, statusnames.Names, error) {
-	var revision int64
-	var raw []byte
-	err := tx.QueryRow(ctx, `SELECT revision,names FROM status_names WHERE tenant_id=current_setting('aeon.tenant_id')::uuid`).Scan(&revision, &raw)
-	if errors.Is(err, pgx.ErrNoRows) {
-		return 0, statusnames.Names{}, nil
-	}
-	if err != nil {
-		return 0, nil, err
-	}
-	names := statusnames.Names{}
-	if err := json.Unmarshal(raw, &names); err != nil {
-		return 0, nil, err
-	}
-	return revision, names, nil
-}
-
 func (m *Module) handleGetStatusNames(w http.ResponseWriter, r *http.Request) {
 	p, ok := requirePrincipal(w, r)
 	if !ok {
@@ -52,7 +33,7 @@ func (m *Module) handleGetStatusNames(w http.ResponseWriter, r *http.Request) {
 	var out statusNamesJSON
 	err := m.tx(r.Context(), p.TenantID, func(ctx context.Context, tx pgx.Tx) error {
 		var err error
-		out.Revision, out.Names, err = LoadStatusNames(ctx, tx)
+		out.Revision, out.Names, err = statusnames.Load(ctx, tx)
 		return err
 	})
 	if err != nil {
@@ -112,7 +93,7 @@ func (m *Module) handlePutStatusNames(w http.ResponseWriter, r *http.Request) {
 		if err := authz.RequireTx(ctx, tx, p, "settings.manage", authz.Scope{}); err != nil {
 			return &httpError{status: http.StatusForbidden, msg: "permission denied"}
 		}
-		revision, prior, err := LoadStatusNames(ctx, tx)
+		revision, prior, err := statusnames.Load(ctx, tx)
 		if err != nil {
 			return err
 		}

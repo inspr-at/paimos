@@ -6,6 +6,7 @@ import { getStatusHelp } from '../../lib/api'
 import { defaultStatusHelp, statusHint } from '../../lib/statusDefinitions'
 import { openStatusHelp } from '../../lib/statusHelp'
 import { entryMenuCount, type EntryChecks } from '../../lib/entryChecks'
+import { statusName } from '../../lib/statusNames'
 import { useEntryChecks } from '../../lib/useEntryChecks'
 import AppIcon from '../AppIcon.vue'
 import FloatingPanel from './FloatingPanel.vue'
@@ -24,6 +25,8 @@ const controller = new AbortController()
 onMounted(() => { void getStatusHelp(props.projectId, controller.signal).then(value => { help.value = value }).catch(() => {}) })
 onBeforeUnmount(() => controller.abort())
 function hint(state: string) { return statusHint(help.value, statusMeta(state).key === 'progress' ? 'in_progress' : normaliseState(state)) }
+// A renamed status says what it stands for (AEON-1401): the stored, built-in name.
+function tip(state: string) { const meta = statusMeta(state); return meta.label === meta.builtIn ? hint(state) : `Stored as ${meta.builtIn}\n${hint(state)}` }
 function showHelp() { openStatusHelp(props.projectId, props.anchor); emit('close', false) }
 
 function move(event: KeyboardEvent) {
@@ -46,7 +49,7 @@ function move(event: KeyboardEvent) {
     <div v-else ref="list" class="menu" role="menu" :aria-label="`Status of ${ticketKey}`" @keydown="move">
       <template v-for="(option, index) in options" :key="option.value">
       <span v-if="option.meta.key === 'cancelled'" class="menu-sep" role="separator" aria-label="Exits" />
-      <button type="button" role="menuitemradio" class="menu-item" :aria-checked="normaliseState(option.value) === current" :data-autofocus="normaliseState(option.value) === current ? '' : undefined" :data-tip="hint(option.value)" data-tip-side="end" :aria-describedby="`${id}-hint-${index}`" @click="emit('choose', option.value, checks.data.value)">
+      <button type="button" role="menuitemradio" class="menu-item" :aria-checked="normaliseState(option.value) === current" :data-autofocus="normaliseState(option.value) === current ? '' : undefined" :data-tip="tip(option.value)" data-tip-side="end" :aria-describedby="`${id}-hint-${index}`" @click="emit('choose', option.value, checks.data.value)">
         <StatusIcon :state="option.value" />
         <span class="label">{{ option.meta.label }}</span>
         <span v-if="count(option.value)" class="entry-count"><AppIcon v-if="count(option.value)?.overridden" name="skip" :size="12" />{{ count(option.value)?.text }}</span>
@@ -57,8 +60,8 @@ function move(event: KeyboardEvent) {
       <span class="menu-sep" role="separator" />
       <button type="button" role="menuitem" class="menu-item help-item" @click="showHelp"><AppIcon name="help" :size="14" /><span class="label">What do these mean?</span></button>
     </div>
-    <span v-for="(option, index) in options" :id="`${id}-hint-${index}`" :key="option.value" class="sr-only">{{ hint(option.value) }}</span>
-    <p v-if="!derived" class="menu-help"><AppIcon name="queue" :size="12" /><span><b>Queued</b> is Open with a place in the work queue. Pickup sets In progress; Blocked keeps the place and waits.</span></p>
+    <span v-for="(option, index) in options" :id="`${id}-hint-${index}`" :key="option.value" class="sr-only">{{ tip(option.value) }}</span>
+    <p v-if="!derived" class="menu-help"><AppIcon name="queue" :size="12" /><span><b>{{ statusName('queued') }}</b> is {{ statusName('open') }} with a place in the work queue. Pickup sets {{ statusName('in_progress') }}; {{ statusName('blocked') }} keeps the place and waits.</span></p>
   </FloatingPanel>
 </template>
 
@@ -67,11 +70,12 @@ function move(event: KeyboardEvent) {
 .menu-help svg { flex: none; margin-top: 2px; color: var(--teal-ink); }
 .menu-title { padding: 6px 10px 4px; }
 .menu { display: grid; gap: 1px; }
-.menu-item { display: flex; align-items: center; gap: 10px; height: 32px; padding: 0 10px; border: 0; border-radius: 8px; background: transparent; color: var(--ink); font-size: 13.5px; text-align: left; }
+.menu-item { display: flex; align-items: center; gap: 10px; min-height: 32px; padding: 4px 10px; border: 0; border-radius: 8px; background: transparent; color: var(--ink); font-size: 13.5px; text-align: left; }
 .menu-item:hover { background: var(--row-hover); }
 .menu-item:focus-visible { background: var(--row-selected); box-shadow: inset 0 0 0 1px var(--glass-rim); }
 .menu-item:active { background: var(--row-selected); }
-.menu-item .label { flex: 1; }
+.menu-item .label { flex: 1; min-width: 0; overflow-wrap: anywhere; line-height: 1.3; display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; overflow: hidden; }
+/* A long workspace name wraps to two lines inside the menu's width (AEON-1401). */
 .menu-sep { height: 1px; margin: 4px 8px; background: var(--line); }
 .help-item { color: var(--ink-2); }
 .help-item svg { color: var(--ink-3); }
