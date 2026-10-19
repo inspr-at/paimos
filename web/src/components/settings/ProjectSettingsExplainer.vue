@@ -13,7 +13,9 @@ const button = ref<HTMLButtonElement>(), heading = ref<HTMLElement>(), content =
 const open = ref(false), phone = ref(false), headingId = useId()
 const registerOverlay = useProjectSettingsOverlay()
 let release: (() => void) | undefined, unregister: (() => void) | undefined
-const text = computed(() => props.language === 'de' && props.id in DEFINITION_EXPLAINERS_DE ? DEFINITION_EXPLAINERS_DE[props.id as keyof typeof DEFINITION_EXPLAINERS_DE] : PROJECT_SETTINGS_EXPLAINERS[props.id])
+// Retain the complete entry type, including optional reading locations, when
+// selecting from the German subset whose entries have no `where` property.
+const text = computed<(typeof PROJECT_SETTINGS_EXPLAINERS)[ProjectSettingsExplainerId]>(() => props.language === 'de' && props.id in DEFINITION_EXPLAINERS_DE ? DEFINITION_EXPLAINERS_DE[props.id as keyof typeof DEFINITION_EXPLAINERS_DE] : PROJECT_SETTINGS_EXPLAINERS[props.id])
 function fill(value: string): string {
   return fillProjectSettingsExplainer(value, props)
 }
