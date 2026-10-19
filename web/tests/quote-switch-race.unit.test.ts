@@ -75,6 +75,7 @@ function quoteRouter(): Router {
     './lib/projectSettings': sourceModule('lib/projectSettings.ts', {}),
     'vue-router': { createWebHistory: createMemoryHistory, createRouter: (options: Parameters<typeof createRouter>[0]) => createRouter({ ...options, routes: views(options.routes) }) },
     './lib/brand': { setPageTitle() {} }, './stores/projects': {}, './stores/session': { useSession: () => session }, './stores/workVocabulary': { useWorkVocabulary: () => ({ load: async () => {} }) },
+    './stores/statusNames': { useStatusNames: () => ({ load: async () => {} }) },
     './lib/api': { sessionEnded: {} }, './lib/authz': {}, './lib/toast': { toast }, './lib/confirm': { settleConfirm },
     './lib/attachLink': { hasAttachFragment: () => false, announceAttachCode() {}, dropAttachCode() {} }, './lib/importDraft': { carriesDraft: () => false }, './lib/identityScope': {}, './lib/signInReturn': { takeSignInReturn: () => '/' },
     './lib/knowledge': {}, './components/work/projectNavigation': {}, './lib/ticketPeek': {},
