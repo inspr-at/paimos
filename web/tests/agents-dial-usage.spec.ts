@@ -67,6 +67,12 @@ const goOnline = (page: Page) => page.evaluate(() => window.dispatchEvent(new Ev
 async function expectWhole(cells: Locator) {
   for (const el of await cells.all()) expect(await el.evaluate(e => e.scrollWidth - e.clientWidth), `${await el.textContent()} is cut`).toBeLessThanOrEqual(0)
 }
+/** The data side may retain already public pool lines while concealing an enrollment (account-b@). */
+function withPrivate(outlook: QuotaOutlook): QuotaOutlook {
+  const copy = structuredClone(outlook)
+  Object.assign(copy.groups[0]!.accounts[1]!, { state: 'private', pooled: false, used_percent: null, limit_percent: null, resets_at: null, read_at: null, reading_age_seconds: null, forecast: null })
+  return copy
+}
 
 for (const width of [1440, 1024, 390]) {
   const phone = width < 720
@@ -150,10 +156,8 @@ for (const width of [1440, 1024, 390]) {
       else { await claude.getByRole('button', { name }).click(); await expect(claude.locator('.ub-steps .ub-sv')).toHaveText(expected) }
     }
     const past = phone ? 1 : 3
-    // The data side may retain already public pool lines while concealing an
-    // enrollment. Tick's private slots must replace its details in place.
-    const privateOutlook = structuredClone(scenarios.fast)
-    Object.assign(privateOutlook.groups[0]!.accounts[1]!, { state: 'private', pooled: false, used_percent: null, limit_percent: null, resets_at: null, read_at: null, reading_age_seconds: null, forecast: null })
+    // Tick's private slots must replace the concealed enrollment's details in place.
+    const privateOutlook = withPrivate(scenarios.fast)
     const privateAccount = acc.nth(1)
     const privacyControls = { privateRow: privateAccount, name: privateAccount.locator('.ub-an'), battery: privateAccount.locator('.ub-bat'), refill: privateAccount.locator('.ub-rs'), forecast: privateAccount.locator('.ub-fc') }
     await expectStableControls({
@@ -247,6 +251,38 @@ for (const width of [1440, 1024, 390]) {
     expect(errors).toEqual([])
   })
 }
+
+// The name column yields first, so a narrower window or a wide system font (CI's DejaVu Sans at
+// 1440) leaves it narrower than "Private account". At 1400 that holds for every font: the phrase
+// then reads whole on two lines inside its row, and the row's slots stay where the address stood.
+test('AEON-1497 1400: a private account reads whole on a name column too narrow for one line, and nothing moves', async ({ page }, info) => {
+  await page.setViewportSize({ width: 1400, height: 1100 })
+  await page.emulateMedia({ colorScheme: 'light', reducedMotion: 'reduce' })
+  const errors = watchErrors(page)
+  const { state } = await setup(page)
+  await page.goto('/agents')
+  const claude = detail(page, 'claude')
+  const account = claude.locator('.ub-acc').nth(1)
+  await expect(account.locator('.ub-an')).toHaveText('account-b@')
+  await expectStableControls({
+    controls: { row: account, name: account.locator('.ub-an'), battery: account.locator('.ub-bat'), refill: account.locator('.ub-rs'), forecast: account.locator('.ub-fc'), status: account.locator('.ub-st'), next: claude.locator('.ub-acc').nth(2) },
+    scrollAreas: { body: body(page) },
+    interactions: [{ name: 'the account becomes private', run: async () => {
+      const reads = state.reads; state.outlook = withPrivate(scenarios.fast); await goOnline(page)
+      await expect.poll(() => state.reads).toBeGreaterThan(reads)
+      await expect(account.locator('.ub-an')).toHaveText('Private account')
+      await expect(account.locator('.ub-fc')).toHaveText('details hidden')
+    } }],
+  })
+  const name = account.locator('.ub-name')
+  await expect(name).not.toHaveAttribute('data-clip-tip', '')
+  expect(await name.evaluate(el => ({ x: el.scrollWidth - el.clientWidth, y: el.scrollHeight - el.clientHeight }))).toEqual({ x: 0, y: 0 })
+  // The precondition, so this cannot pass on a column wide enough for one line: the phrase runs on two.
+  expect(await name.evaluate(el => Math.round(el.getBoundingClientRect().height / parseFloat(getComputedStyle(el).lineHeight)))).toBe(2)
+  await expectWhole(claude.locator('.ub-fc'))
+  await claude.locator('.ub-list').screenshot({ path: info.outputPath('1400-light-private-rows.png'), animations: 'disabled' })
+  expect(errors).toEqual([])
+})
 
 for (const width of [1440, 1024]) {
   test(`AEON-1497 ${width}: the folded dial's mini lines sit in the existing gaps (0 px), Claude and Codex only`, async ({ page }, info) => {

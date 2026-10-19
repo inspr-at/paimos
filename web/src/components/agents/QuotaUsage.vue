@@ -129,7 +129,7 @@ const hasPrivate = computed(() => rows.value.some(r => r.state === 'private'))
       <ul :id="id('list')" class="ub-list" :class="{ folded: !listOpen || ghost }" aria-label="Subscriptions">
         <li v-for="r in rows" :key="r.id" class="ub-acc" :data-account="r.id">
           <span class="ub-dot" :style="r.state !== 'private' && (quiet || (r.state === 'not_reported' && !pending)) ? undefined : { background: r.shade }" />
-          <span class="ub-an"><AppIcon v-if="r.state === 'private'" name="lock" :size="12" /><span v-if="!ghost" v-clip-tip class="ub-name">{{ r.name }}</span><span v-else class="ub-name">{{ r.name }}</span></span>
+          <span class="ub-an" :class="{ priv: r.state === 'private' }"><AppIcon v-if="r.state === 'private'" name="lock" :size="12" /><span v-if="!ghost" v-clip-tip class="ub-name">{{ r.name }}</span><span v-else class="ub-name">{{ r.name }}</span></span>
           <template v-if="pending && shown === 'loading'"><span class="ub-meta"><span class="skeleton" /><span class="skeleton" /><span class="skeleton" /></span><span class="skeleton" /></template>
           <span v-else-if="pending" class="ub-nr"><AppIcon name="ring-dashed" :size="12" />not read</span>
           <span v-else-if="r.state === 'not_reported'" class="ub-nr"><AppIcon name="ring-dashed" :size="12" />Quota not reported</span>
@@ -223,7 +223,8 @@ p { margin: 0; }
 /* The name yields first (its clip-tip reads the rest); the forecast always shows whole. */
 .ub-acc { display: grid; grid-template-columns: 9px minmax(0, 1fr) 64px 104px minmax(16ch, max-content) 54px; align-items: center; gap: 0 7px; height: 34px; border-bottom: 1px solid var(--line); color: var(--ink-2); font-size: 12px; font-variant-numeric: tabular-nums; }
 .ub-acc:last-child { border-bottom: 0; }
-.ub-an { display: flex; align-items: center; gap: 5px; min-width: 0; color: var(--ink); font-weight: 600; }
+/* The name slot fills its row, so a one- or two-line name never moves it (0 px). */
+.ub-an { display: flex; align-self: stretch; align-items: center; gap: 5px; min-width: 0; color: var(--ink); font-weight: 600; }
 .ub-an > svg { flex: none; color: var(--ink-3); }
 .ub-name { min-width: 0; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
 .ub-bat { display: inline-flex; align-items: center; gap: 8px; white-space: nowrap; }
@@ -245,7 +246,9 @@ p { margin: 0; }
 .ub-acc .ub-nr { grid-column: 3 / -1; display: inline-flex; align-items: center; gap: 6px; color: var(--ink-3); }
 .ub-acc-t { display: none; }
 .ub-link { display: flex; align-items: center; min-height: 30px; margin-top: 6px; font-size: 13px; }
-@container working (min-width: 761px) { .ub-acc > .ub-meta { display: contents; } .ub-bat .bl { display: none; } .ub-list.folded { display: grid; } }
+/* "Private account" is a phrase, not an address: where the yielding name column is narrower than
+   it (a wide system font such as DejaVu Sans), it takes a second line inside the 34 px row rather than clip. */
+@container working (min-width: 761px) { .ub-acc > .ub-meta { display: contents; } .ub-bat .bl { display: none; } .ub-list.folded { display: grid; } .ub-an.priv .ub-name { white-space: normal; line-height: 15px; } }
 /* Phone: the answer, a compact chart with its range behind ⋯, the list folded to one line. */
 @container working (max-width: 760px) {
   .ub-sum { grid-template-rows: calc(3 * 23px) 20px 40px; }

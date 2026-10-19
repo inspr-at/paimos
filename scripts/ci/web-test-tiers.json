@@ -6878,6 +6878,8 @@
     ,
     {"kind":"browser","file":"tests/agents-dial-usage.spec.ts","name":"AEON-1497 1024: the folded dial's mini lines sit in the existing gaps (0 px), Claude and Codex only","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
+    {"kind":"browser","file":"tests/agents-dial-usage.spec.ts","name":"AEON-1497 1400: a private account reads whole on a name column too narrow for one line, and nothing moves","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
     {"kind":"browser","file":"tests/agents-dial-usage.spec.ts","name":"AEON-1497 1440: the detail answers first, the chart follows the projection, and nothing moves","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
     {"kind":"browser","file":"tests/agents-dial-usage.spec.ts","name":"AEON-1497 1440: the folded dial's mini lines sit in the existing gaps (0 px), Claude and Codex only","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
