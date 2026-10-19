@@ -50,7 +50,15 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        shard: [1, 2, 3, 4, 5]
+        include:
+          - { shard: 1, config: playwright.ui.config.ts, partition: 1/5 }
+          - { shard: 2, config: playwright.ui.config.ts, partition: 2/5 }
+          - { shard: 3, config: playwright.ui.config.ts, partition: 3/5 }
+          - { shard: 4, config: playwright.ui.config.ts, partition: 4/5 }
+          - { shard: 5, config: playwright.ui.config.ts, partition: 5/5 }
+          # Keep the complete inventory: cold loads need the production build,
+          # never the throttled development module graph (AEON-1527).
+          - { shard: performance, config: playwright.perf.config.ts, partition: 1/1 }
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
@@ -73,8 +81,8 @@ jobs:
         env:
           PLAYWRIGHT_JSON_OUTPUT_FILE: test-results/full-ui-results.json
         run: >-
-          npx playwright test -c playwright.ui.config.ts
-          --shard=${{ matrix.shard }}/5 --workers=1 --retries=0 --forbid-only
+          npx playwright test -c ${{ matrix.config }}
+          --shard=${{ matrix.partition }} --workers=1 --retries=0 --forbid-only
           --trace=retain-on-failure --reporter=github,line,json
       - name: Preserve shard results and failed browser traces
         if: always()
@@ -103,8 +111,8 @@ jobs:
             echo '## Full UI QA'
             printf 'Tested commit: `%s`\n\n' "$TESTED_SHA"
             printf 'Source resolution: **%s**\n\n' "$SOURCE_RESULT"
-            printf 'All five Playwright shards: **%s**\n\n' "$SHARD_RESULT"
-            echo 'One browser worker per shard; zero retries; complete playwright.ui.config.ts inventory.'
+            printf 'All five UI shards and the production performance suite: **%s**\n\n' "$SHARD_RESULT"
+            echo 'One browser worker per shard; zero retries; complete UI and performance inventories.'
             echo 'Per-shard JSON results and failed traces are attached as full-ui-qa artifacts.'
           } >> "$GITHUB_STEP_SUMMARY"
           test "$SOURCE_RESULT" = success
