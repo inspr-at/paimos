@@ -65,12 +65,12 @@ export const DEFINITION_CONDITION_OPTIONS = [
   { value: 'ui', detail: 'Tickets labelled ui' },
 ] as const
 export const manualRule = (rule: DefinitionRule) => rule.id.startsWith('manual:')
-export const ruleIcon = (rule: DefinitionRule): IconName => manualRule(rule) ? 'person-check' : DEFINITION_CATALOG.find(c => c.id === rule.id)?.icon ?? 'list-checks'
+export const ruleIcon = (rule: DefinitionRule): IconName => manualRule(rule) ? 'person-check' : rule.id === 'lesson_recorded' ? 'book' : DEFINITION_CATALOG.find(c => c.id === rule.id)?.icon ?? 'list-checks'
 export function fixedRuleCondition(rule: DefinitionRule): DefinitionCondition | undefined {
   const condition = DEFINITION_CATALOG.find(c => c.id === rule.id)?.condition
   return condition && !DEFINITION_CONDITION_OPTIONS.some(option => option.value === condition) ? condition : undefined
 }
-export const ruleLabel = (rule: DefinitionRule, language = 'en') => (language === 'de' ? rule.label_de : rule.label) || (language === 'de' ? DEFINITION_CATALOG.find(c => c.id === rule.id)?.de : DEFINITION_CATALOG.find(c => c.id === rule.id)?.en) || rule.label || rule.id
+export const ruleLabel = (rule: DefinitionRule, language = 'en') => (language === 'de' ? rule.label_de : rule.label) || (language === 'de' ? DEFINITION_CATALOG.find(c => c.id === rule.id)?.de : DEFINITION_CATALOG.find(c => c.id === rule.id)?.en) || (rule.id === 'lesson_recorded' ? language === 'de' ? 'Lehre festgehalten' : 'Lesson recorded' : '') || rule.label || rule.id
 export const ruleCondition = (rule: DefinitionRule): DefinitionCondition => rule.condition || DEFINITION_CATALOG.find(c => c.id === rule.id)?.condition || 'all'
 export function ruleOwnerWords(rule: DefinitionRule, people: { id: string; name: string }[] = []): string {
   const name = (id: string) => people.find(person => person.id === id)?.name ?? 'a named person'

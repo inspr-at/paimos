@@ -196,8 +196,9 @@ test('AEON-1317 workspace defaults differences empty inherited and viewer match 
     expect(world.writes.at(-1)!.path).toBe('/api/settings/definitions')
     await navigate(page,'/p/PHAROS/settings/definitions');await expect(card.locator('[data-check="released"]')).toBeVisible()
     await expect(card.locator('.drs button')).toHaveCount(0)
-    world.workspace={...world.workspace,checks:{...world.workspace.checks,done:[...(world.workspace.checks.done??[]),{id:'merged'}]},revision:'2026-10-10T08:00:00Z'};world.context.workspace_default=world.workspace
+    world.workspace={...world.workspace,checks:{...world.workspace.checks,done:[...(world.workspace.checks.done??[]),{id:'merged'},{id:'lesson_recorded'}]},revision:'2026-10-10T08:00:00Z'};world.context.workspace_default=world.workspace
     await page.evaluate(()=>(window as unknown as {definitionChanged:()=>void}).definitionChanged());await expect(card.locator('[data-check="merged"]')).toBeVisible()
+    await expect(card.locator('[data-check="lesson_recorded"]')).toContainText('Lesson recorded')
     expect(world.context.definition!.checks).toEqual(base)
     record('D5 default edit applies immediately with read-only inherited rows, including a live edit while the page is open');await shot(page,width,theme,'D5')
     world.workspace={...world.workspace,checks:{}};await navigate(page,'/settings/policies#definitions')

@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import { expect, it, vi } from 'vitest'
 vi.mock('../src/lib/api', () => ({ api: vi.fn(), APIError: class extends Error {} }))
-import { decideDefinitionChange, definitionChangeWords, definitionDate, definitionDecisionWords, definitionDeskWords, definitionDiff, definitionNotice, resetChanges, ruleWords, sameRule, saveWorkspaceDefinition, type DefinitionChange, type DefinitionChecks, type DefinitionContext } from '../src/lib/definitions'
+import { decideDefinitionChange, definitionChangeWords, definitionDate, definitionDecisionWords, definitionDeskWords, definitionDiff, definitionNotice, resetChanges, ruleIcon, ruleLabel, ruleWords, sameRule, saveWorkspaceDefinition, type DefinitionChange, type DefinitionChecks, type DefinitionContext } from '../src/lib/definitions'
 import { api } from '../src/lib/api'
 import { deskItemID, deskLinkOut } from '../src/lib/decisionDesk'
 
@@ -47,6 +47,11 @@ it('AEON-1317 binds decisions to both revisions and renders the complete bilingu
   expect(definitionNotice('PRJ-26',0,date)).toBe('All changes decided.')
   expect(definitionNotice('PRJ-26',0,deDate,'de')).toBe('Alle Änderungen entschieden.')
   expect(definitionDeskWords('PRJ-26',3,'de')).toBe('PRJ-26: 3\u00a0Änderungen am Workspace-Standard warten auf eine Entscheidung')
+  // The released built-in workspace policy also contains this check, although
+  // it is not an additional choice in the approved Add menu.
+  expect(ruleLabel({id:'lesson_recorded'})).toBe('Lesson recorded')
+  expect(ruleLabel({id:'lesson_recorded'},'de')).toBe('Lehre festgehalten')
+  expect(ruleIcon({id:'lesson_recorded'})).toBe('book')
   expect(definitionChangeWords(changes[1]!,date,'en','Code tickets · Kinds: work · Labels: security')).toBe('The workspace default now says Code tickets · Kinds: work · Labels: security (since 9\u00a0Oct)')
   const context: DefinitionContext = {project_id:'project-a',definition:{id:'copy',revision:'copy-revision',source:'project',copied_from_revision:'original-copy-revision',checks:{}},workspace_default:{id:'workspace',revision:'workspace-revision',source:'workspace',copied_from_revision:null,checks:{}},copied_from_checks:{},can_manage:true}
   vi.mocked(api).mockResolvedValue({ok:true,json:async () => context} as Response)
