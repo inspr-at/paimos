@@ -198,6 +198,13 @@ test('AEON-1317 workspace defaults differences empty inherited and viewer match 
     await expect(card.locator('[data-check="released"]')).toBeVisible()
     expect(world.writes.at(-1)!.path).toBe('/api/settings/definitions')
     await expect(list).toContainText('4 changes wait')
+    await card.locator('[data-check="estimate_set"]').getByRole('button',{name:'More for Estimate set'}).click();await page.getByRole('menuitem',{name:'Applies to…',exact:true}).click()
+    const form=page.getByRole('dialog',{name:'Estimate set applies to',exact:true}),all=form.getByRole('radio',{name:'All tickets',exact:true}),code=form.getByRole('radio',{name:'Code tickets',exact:true})
+    const formStable=await controlStability(page,{form,group:form.locator('fieldset'),all,code,save:form.getByRole('button',{name:/^Save/}),cancel:form.getByRole('button',{name:'Cancel',exact:true})})
+    await formStable.check(()=>all.check());await formStable.check(()=>code.check());formStable.done()
+    const mod=await page.evaluate(()=>/Mac|iPhone|iPad/.test(navigator.platform||navigator.userAgent)?'Meta':'Control')
+    await form.getByRole('textbox',{name:'Required labels (comma-separated)'}).press(`${mod}+Enter`);await expect(form).toHaveCount(0)
+    record('workspace conditions submit with the platform modifier and form controls remain stable')
     await navigate(page,'/p/PHAROS/settings/definitions');await expect(card.locator('[data-check="released"]')).toBeVisible()
     await expect(card.locator('.drs button')).toHaveCount(0)
     world.workspace={...world.workspace,checks:{...world.workspace.checks,done:[...(world.workspace.checks.done??[]),{id:'merged'},{id:'lesson_recorded'}]},revision:'2026-10-10T08:00:00Z'};world.context.workspace_default=world.workspace
