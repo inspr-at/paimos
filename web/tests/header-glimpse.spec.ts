@@ -269,14 +269,20 @@ test('a priority filter that keeps eight tickets but no link hides the glimpse',
 })
 
 test('eight linked tickets appear once the viewport reaches 1280', async ({ page }) => {
+  // Risk: CI's software GL can consume the assertion's wall-clock budget
+  // before the shrink's callbacks run. Drive the page clock explicitly so
+  // the viewport reaction is checked after one 250ms fallback delivery.
+  await page.clock.install()
   await page.setViewportSize({ width: 1279, height: 900 })
   await mockHeaderGraph(page, sized(8, true))
   await page.goto('/p/PHAROS/tickets')
   await expect(page.locator('[data-header-glimpse="off"]')).toBeAttached()
   await expect(surface(page)).toHaveCount(0)
-  await page.setViewportSize({ width: 1280, height: 900 })
+  await resizeSeen(page, { width: 1280, height: 900 })
   await ready(page)
+  await page.clock.pauseAt(new Date(await page.evaluate(() => Date.now()) + 1000))
   await resizeSeen(page, { width: 390, height: 844 })
+  await page.clock.runFor(250)
   await expect(page.locator('[data-header-glimpse="on"]')).toHaveCount(0)
 })
 
