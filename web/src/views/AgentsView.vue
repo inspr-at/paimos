@@ -706,13 +706,13 @@ watch(sessionId, id => { if (id) { cursor.value = `s:${id}`; lastSession = id } 
     <div class="layout">
       <div class="main-col">
         <!-- The capacity row: what may run. The folded dial, then the accounts chip; it scrolls with the page. -->
-        <div v-if="showSetup" class="cap-row" role="group" aria-label="Capacity: what may run">
-          <!-- On compact screens the capacity line's sheet borrows these two while it is open (AEON-1459). -->
-          <Teleport :to="capMoved ? '#capacity-sheet-dial' : 'body'" :disabled="!capMoved">
+        <!-- On compact screens the capacity line's sheet borrows this row while it is open (AEON-1459): one dial, one writer. -->
+        <Teleport :to="capMoved ? '#capacity-sheet-dial' : 'body'" :disabled="!capMoved">
+          <div v-if="showSetup" class="cap-row" :class="{ 'in-sheet': capMoved }" role="group" aria-label="Capacity: what may run">
             <AgentsWorking v-if="session.identity?.principal.kind === 'person'" ref="dialControl" body-target="#dial-body-host" @summary="dialFacts = $event" />
             <AccountsComputers :permissions="pairingAccess" :show-accounts="showCapacity" @summary="machineFacts = $event" />
-          </Teleport>
-        </div>
+          </div>
+        </Teleport>
         <div id="dial-body-host" class="dial-host" />
         <!-- AEON-1192: one Routines line while a routine waits for a person or failed. -->
         <RoutinesLine v-if="agents.loaded && session.identity?.principal.kind === 'person'" />
@@ -844,7 +844,9 @@ watch(sessionId, id => { if (id) { cursor.value = `s:${id}`; lastSession = id } 
   .head-cap { order: 5; flex: 1 1 100%; margin-top: 6px; }
   .add-agent, .more-agent { width: 44px; height: 44px; }
   .head-side :deep(.wd-btn) { display: none; }
-  .cap-row { display: none; }
+  .cap-row:not(.in-sheet) { display: none; }
+  /* In the capacity sheet the row is the sheet's body: the dial on its own line, the accounts chip under it. */
+  .cap-row.in-sheet { margin: 0; padding: 0; }
   .agents-work { margin-top: 10px; }
   .header-menu .menu-item { min-height: 52px; }
   .freshness { height: 44px; }

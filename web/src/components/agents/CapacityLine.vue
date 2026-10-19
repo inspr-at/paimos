@@ -51,7 +51,6 @@ defineExpose({ focus: () => trigger.value?.focus({ preventScroll: true }) })
   <FloatingPanel v-if="open" :anchor="trigger ?? null" align="start" :width="360" :tallest="600" label="Capacity" phone-sheet :sheet-below="719" cycle @close="emit('close', $event)">
       <div class="cap-sheet">
         <div class="cs-head"><h3 class="cs-title" tabindex="-1" data-autofocus>Capacity</h3><button type="button" class="btn sm primary" @click="emit('close', true)">Done</button></div>
-        <p class="eyebrow cs-eyebrow">Agents at once</p>
         <div id="capacity-sheet-dial" ref="body" class="cs-dial" />
         <hr class="cs-sep" role="separator" />
         <button type="button" class="cs-item" @click="emit('fullDial')">
@@ -80,9 +79,8 @@ defineExpose({ focus: () => trigger.value?.focus({ preventScroll: true }) })
 .cs-head { display: flex; align-items: center; gap: 8px; padding: 4px 4px 4px 10px; }
 .cs-title { flex: 1; margin: 0; font-size: 15px; outline: none; }
 .cs-head .btn { min-height: 44px; }
-.cs-eyebrow { margin: 6px 10px 0; }
-/* The page's dial control, moved in: its units wrap here as on a phone's capacity row. */
-.cs-dial { display: grid; gap: 8px; justify-items: start; padding: 4px 6px; container: cap / inline-size; }
+/* The page's capacity row, moved in: its dial and accounts chip wrap here as on a phone. */
+.cs-dial { padding: 4px 6px; }
 .cs-dial:empty { min-height: 44px; }
 .cs-sep { height: 1px; margin: 4px; border: 0; background: var(--line); }
 .cs-item { display: flex; align-items: center; gap: 10px; width: 100%; min-height: 52px; padding: 4px 10px; border: 0; border-radius: 8px; background: transparent; color: var(--ink); font: inherit; font-size: 14px; text-align: left; cursor: pointer; }
