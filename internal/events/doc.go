@@ -39,9 +39,12 @@
 // method for dependency injection. Before/After must be full API snapshots;
 // nil means absent. The DB allocates ordered IDs and notifies on commit.
 // Account probes and harness heartbeats append only when visible state changes.
-// RunTelemetryRetention prunes only these two types older than the fixed 14-day
-// retention, at startup and daily, in bounded transactions separated by waits.
-// Undo-linked telemetry causes that tenant's cleanup to be skipped and logged.
+// RunTelemetryRetention prunes account probes and quiet heartbeats older than
+// the fixed 14-day retention, at startup and daily, in bounded transactions
+// separated by waits. Heartbeats that changed a session's phase, role, bound
+// ticket, stop or archive stay: goal history replays them. Each batch removes
+// its goal history references first. Undo-linked telemetry causes that
+// tenant's cleanup to be skipped and logged.
 //
 // Undo is opt-in by stable event type via WithUndo. The owning package's
 // UndoFunc locks and authorizes its resource, rejects stale snapshots, restores

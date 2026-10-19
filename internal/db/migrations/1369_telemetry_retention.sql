@@ -4,12 +4,30 @@
 -- starting the server's bounded retention worker. All other events stay immutable.
 SET LOCAL lock_timeout = '5s';
 
+-- The one prune rule, shared by the policy, the trigger, the batch selection
+-- and the partial index (1370). Account probes are telemetry. A heartbeat is a
+-- quiet tick only when it left every fact goal history replays unchanged
+-- (internal/goals/series.go): session, phase, role, bound ticket, stop and
+-- archive. Phase changes, rebinds and stops stay in the log for good. The
+-- SQL-standard body binds its operators now, independent of search_path.
+CREATE FUNCTION aeon_telemetry_prunable(event_type text, event_before jsonb, event_after jsonb)
+RETURNS boolean LANGUAGE sql IMMUTABLE PARALLEL SAFE
+RETURN event_type = 'account.probed'
+ OR (event_type = 'harness.heartbeat' AND event_before IS NOT NULL AND event_after IS NOT NULL
+  AND event_before->'id' IS NOT DISTINCT FROM event_after->'id'
+  AND event_before->'phase' IS NOT DISTINCT FROM event_after->'phase'
+  AND event_before->'role' IS NOT DISTINCT FROM event_after->'role'
+  AND event_before->'ticket_node_id' IS NOT DISTINCT FROM event_after->'ticket_node_id'
+  AND event_before->'stopped_at' IS NOT DISTINCT FROM event_after->'stopped_at'
+  AND event_before->'stop_reason' IS NOT DISTINCT FROM event_after->'stop_reason'
+  AND event_before->'archived_at' IS NOT DISTINCT FROM event_after->'archived_at');
+
 CREATE POLICY events_telemetry_retention ON events FOR DELETE USING (
  tenant_id = nullif(current_setting('aeon.tenant_id',true),'')::uuid
  AND current_setting('aeon.system',true) = 'on'
  AND current_setting('aeon.telemetry_prune',true) = 'on'
  AND aeon_visible_all()
- AND type IN ('account.probed','harness.heartbeat')
+ AND aeon_telemetry_prunable(type,before,after)
  AND at < statement_timestamp() - interval '14 days'
  AND undo_of IS NULL
 );
@@ -21,7 +39,7 @@ BEGIN
   IF current_setting('aeon.telemetry_prune',true)='on'
    AND current_setting('aeon.system',true)='on' AND public.aeon_visible_all()
    AND OLD.tenant_id = nullif(current_setting('aeon.tenant_id',true),'')::uuid
-   AND OLD.type IN ('account.probed','harness.heartbeat')
+   AND public.aeon_telemetry_prunable(OLD.type,OLD.before,OLD.after)
    AND OLD.at < statement_timestamp() - interval '14 days' AND OLD.undo_of IS NULL
    AND NOT EXISTS(SELECT 1 FROM public.events u WHERE u.tenant_id=OLD.tenant_id AND u.undo_of=OLD.id)
   THEN RETURN OLD; END IF;
@@ -42,6 +60,7 @@ SET search_path = pg_catalog, public, pg_temp
 AS $$
 DECLARE
  protected boolean;
+ batch_ids bigint[];
  prior_prune text := current_setting('aeon.telemetry_prune',true);
 BEGIN
  PERFORM set_config('aeon.telemetry_prune','on',true);
@@ -57,20 +76,29 @@ BEGIN
   SELECT EXISTS(SELECT 1 FROM public.events u LEFT JOIN public.events e
    ON e.tenant_id=u.tenant_id AND e.id=u.undo_of
    WHERE u.tenant_id=target_tenant AND u.undo_of IS NOT NULL
-   AND ((u.type IN ('account.probed','harness.heartbeat') AND u.at<cutoff)
-    OR (e.type IN ('account.probed','harness.heartbeat') AND e.at<cutoff))) INTO protected;
+   AND ((public.aeon_telemetry_prunable(u.type,u.before,u.after) AND u.at<cutoff)
+    OR (public.aeon_telemetry_prunable(e.type,e.before,e.after) AND e.at<cutoff))) INTO protected;
   IF protected THEN
    RETURN QUERY SELECT t,0::bigint,true FROM unnest(ARRAY['account.probed','harness.heartbeat']) t;
   ELSE
    -- No locking clause: SELECT FOR UPDATE applies UPDATE policies, and events
    -- has none, so it matched nothing. The advisory lock serialises pruners;
    -- the DELETE locks its own rows and the trigger rechecks each one.
-   RETURN QUERY WITH candidates AS MATERIALIZED (
-    SELECT e.tenant_id,e.id FROM public.events e WHERE e.tenant_id=target_tenant
-     AND e.type IN ('account.probed','harness.heartbeat') AND e.at<cutoff AND e.undo_of IS NULL
+   SELECT coalesce(array_agg(c.id ORDER BY c.at,c.id),'{}') INTO batch_ids FROM (
+    SELECT e.id,e.at FROM public.events e WHERE e.tenant_id=target_tenant
+     AND public.aeon_telemetry_prunable(e.type,e.before,e.after) AND e.at<cutoff AND e.undo_of IS NULL
      ORDER BY e.at,e.id LIMIT batch_size
-   ), removed AS (
-    DELETE FROM public.events e USING candidates c WHERE e.tenant_id=c.tenant_id AND e.id=c.id
+   ) c;
+   -- Goal history references go first: their read policy hides a reference
+   -- once its event is gone, and a later delete could never reach it. 1361
+   -- derives every reference from the immutable node_refs and node_id, so the
+   -- primary key finds them without scanning the tenant's references.
+   DELETE FROM public.goal_event_refs r USING public.events e
+    CROSS JOIN LATERAL unnest(e.node_refs||ARRAY[e.node_id]) ref(node_id)
+    WHERE e.tenant_id=target_tenant AND e.id=ANY(batch_ids)
+     AND r.tenant_id=target_tenant AND r.node_id=ref.node_id AND r.event_id=e.id;
+   RETURN QUERY WITH removed AS (
+    DELETE FROM public.events e WHERE e.tenant_id=target_tenant AND e.id=ANY(batch_ids)
     RETURNING e.type
    ) SELECT t,count(r.type),false FROM unnest(ARRAY['account.probed','harness.heartbeat']) t
     LEFT JOIN removed r ON r.type=t GROUP BY t;

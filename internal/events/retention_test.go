@@ -26,7 +26,8 @@ func TestTelemetryRetentionBatchedScopedAndIdempotent(t *testing.T) {
 		var e Event
 		err := db.InTenant(dbtest.Seed(t.Context()), d.App, p.TenantID, func(tx pgx.Tx) error {
 			var err error
-			e, err = Append(t.Context(), tx, p, Change{Type: typ, After: map[string]string{"state": "ready"}, At: &at})
+			// Before equals after: a quiet tick, the only heartbeat retention removes.
+			e, err = Append(t.Context(), tx, p, Change{Type: typ, Before: map[string]string{"state": "ready"}, After: map[string]string{"state": "ready"}, At: &at})
 			return err
 		})
 		if err != nil {
@@ -135,7 +136,7 @@ func TestTelemetryRetentionSkipsUndoAndKeepsAppendOnlyGuard(t *testing.T) {
 		if err != nil {
 			return err
 		}
-		if _, err = Append(t.Context(), tx, a, Change{Type: "harness.heartbeat", After: map[string]bool{"ok": true}, At: &old}); err != nil {
+		if _, err = Append(t.Context(), tx, a, Change{Type: "harness.heartbeat", Before: map[string]bool{"ok": true}, After: map[string]bool{"ok": true}, At: &old}); err != nil {
 			return err
 		}
 		_, err = Append(t.Context(), tx, a, Change{Type: "test.undone", After: map[string]bool{"ok": true}, UndoOf: &target.ID})
@@ -273,3 +274,141 @@ func TestTelemetryRetentionPruneFlagDoesNotLeak(t *testing.T) {
 		t.Fatal(err)
 	}
 }
+
+// Risk: retention deletes a heartbeat that recorded a phase, ticket, stop or
+// archive change. Goal history replays those from the start of time, so only
+// quiet ticks may go. The policy and the trigger must hold the same rule as
+// the batch selection. Goal history references go with their events: their
+// read policy hides them once the events are gone, so nothing could reach
+// them later. Instants derive from the database clock the policy compares.
+func TestTelemetryRetentionPrunesOnlyQuietHeartbeats(t *testing.T) {
+	d, a, _ := fixture(t)
+	var now time.Time
+	if err := d.Admin.QueryRow(t.Context(), `SELECT statement_timestamp()`).Scan(&now); err != nil {
+		t.Fatal(err)
+	}
+	old := now.Add(-TelemetryRetention - time.Hour)
+	const project, ticket, other = "0b7f3c2e-1354-4a6d-9e21-5c8d7a6b4f01", "0b7f3c2e-1354-4a6d-9e21-5c8d7a6b4f02", "0b7f3c2e-1354-4a6d-9e21-5c8d7a6b4f03"
+	session := func(change map[string]any) map[string]any {
+		s := map[string]any{"id": "0b7f3c2e-1354-4a6d-9e21-5c8d7a6b4f10", "phase": "working", "role": "worker", "ticket_node_id": ticket,
+			"activity": "busy", "heartbeat_at": old.Add(-time.Minute), "stopped_at": nil, "stop_reason": nil, "archived_at": nil}
+		for key, value := range change {
+			s[key] = value
+		}
+		return s
+	}
+	beats := []struct {
+		name          string
+		before, after map[string]any
+		kept          bool
+	}{
+		{"quiet tick", session(nil), session(map[string]any{"activity": "testing", "heartbeat_at": old}), false},
+		{"phase change", session(map[string]any{"phase": "starting"}), session(nil), true},
+		{"ticket rebind", session(map[string]any{"ticket_node_id": other}), session(nil), true},
+		{"stop", session(nil), session(map[string]any{"stopped_at": old, "stop_reason": "done"}), true},
+		{"archive", session(nil), session(map[string]any{"archived_at": old}), true},
+		{"no before", nil, session(nil), true},
+	}
+	ids := make([]int64, len(beats))
+	err := db.InTenant(dbtest.Seed(t.Context()), d.App, a.TenantID, func(tx pgx.Tx) error {
+		for i, beat := range beats {
+			change := Change{NodeID: ptr(project), Type: "harness.heartbeat", After: beat.after, At: &old}
+			if beat.before != nil {
+				change.Before = beat.before
+			}
+			e, err := Append(t.Context(), tx, a, change)
+			if err != nil {
+				return err
+			}
+			ids[i] = e.ID
+		}
+		return nil
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	refs := func(id int64) int {
+		t.Helper()
+		var n int
+		if err := d.Admin.QueryRow(t.Context(), `SELECT count(*) FROM goal_event_refs WHERE tenant_id=$1 AND event_id=$2`, a.TenantID, id).Scan(&n); err != nil {
+			t.Fatal(err)
+		}
+		return n
+	}
+	for i, beat := range beats {
+		if refs(ids[i]) == 0 {
+			t.Fatalf("%s: fixture wrote no goal history reference", beat.name)
+		}
+	}
+	// The policy alone, under the prune flag, offers only the quiet tick.
+	rollback := errors.New("rollback")
+	err = db.InTenant(db.AllProjects(t.Context(), "telemetry retention"), d.App, a.TenantID, func(tx pgx.Tx) error {
+		if _, err := tx.Exec(t.Context(), `SELECT set_config('aeon.telemetry_prune','on',true)`); err != nil {
+			return err
+		}
+		rows, err := tx.Query(t.Context(), `DELETE FROM events WHERE tenant_id=$1 AND id=ANY($2) RETURNING id`, a.TenantID, ids)
+		if err != nil {
+			return err
+		}
+		deleted, err := pgx.CollectRows(rows, pgx.RowTo[int64])
+		if err != nil {
+			return err
+		}
+		if len(deleted) != 1 || deleted[0] != ids[0] {
+			t.Fatalf("policy offered %v, want only the quiet tick %d", deleted, ids[0])
+		}
+		return rollback
+	})
+	if !errors.Is(err, rollback) {
+		t.Fatal(err)
+	}
+	// The trigger alone, without RLS, still refuses every state change.
+	admin, err := d.Admin.Begin(t.Context())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer admin.Rollback(t.Context())
+	if _, err := admin.Exec(t.Context(), `SELECT set_config('aeon.tenant_id',$1,true),set_config('aeon.system','on',true),
+ set_config('aeon.visible_projects','*',true),set_config('aeon.telemetry_prune','on',true)`, a.TenantID); err != nil {
+		t.Fatal(err)
+	}
+	for i, beat := range beats {
+		if _, err := admin.Exec(t.Context(), `SAVEPOINT probe`); err != nil {
+			t.Fatal(err)
+		}
+		tag, delErr := admin.Exec(t.Context(), `DELETE FROM events WHERE tenant_id=$1 AND id=$2`, a.TenantID, ids[i])
+		var pgErr *pgconn.PgError
+		switch {
+		case beat.kept && (!errors.As(delErr, &pgErr) || pgErr.Code != "P0001" || pgErr.Message != "events are append-only"):
+			t.Fatalf("%s: trigger allowed or failed for the wrong reason: %v", beat.name, delErr)
+		case !beat.kept && (delErr != nil || tag.RowsAffected() != 1):
+			t.Fatalf("%s: trigger refused a quiet tick: %v", beat.name, delErr)
+		}
+		if _, err := admin.Exec(t.Context(), `ROLLBACK TO SAVEPOINT probe`); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := admin.Rollback(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []int64{1, 0} {
+		batch, err := pruneTelemetryBatch(t.Context(), d.App, a.TenantID, now.Add(-TelemetryRetention), telemetryBatchSize)
+		if err != nil || batch.protected || batch.heartbeats != want || batch.probes != 0 {
+			t.Fatalf("batch %+v %v, want %d heartbeats", batch, err, want)
+		}
+	}
+	for i, beat := range beats {
+		var present int
+		if err := d.Admin.QueryRow(t.Context(), `SELECT count(*) FROM events WHERE tenant_id=$1 AND id=$2`, a.TenantID, ids[i]).Scan(&present); err != nil {
+			t.Fatal(err)
+		}
+		if (present == 1) != beat.kept {
+			t.Fatalf("%s: present=%d kept=%v", beat.name, present, beat.kept)
+		}
+		if n := refs(ids[i]); (n > 0) != beat.kept {
+			t.Fatalf("%s: %d goal history references left, kept=%v", beat.name, n, beat.kept)
+		}
+	}
+}
+
+func ptr(s string) *string { return &s }

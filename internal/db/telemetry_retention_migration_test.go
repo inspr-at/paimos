@@ -37,13 +37,46 @@ func TestTelemetryRetentionCandidateScanTakesNoRowLock(t *testing.T) {
 		t.Fatal(err)
 	}
 	sql := string(content)
-	start := strings.Index(sql, "WITH candidates AS MATERIALIZED (")
-	end := strings.Index(sql, "), removed AS (")
+	start := strings.Index(sql, "INTO batch_ids FROM (")
+	end := strings.Index(sql, "ORDER BY e.at,e.id LIMIT batch_size")
 	if start < 0 || end < start {
 		t.Fatal("retention function no longer selects a bounded candidate batch")
 	}
 	if candidates := sql[start:end]; strings.Contains(candidates, " FOR UPDATE") || strings.Contains(candidates, " FOR SHARE") ||
 		strings.Contains(candidates, " FOR NO KEY UPDATE") || strings.Contains(candidates, " FOR KEY SHARE") {
 		t.Fatalf("candidate scan takes a row lock that RLS filters to zero rows on events:\n%s", candidates)
+	}
+}
+
+// Risk: the batch selection, the delete policy, the append-only trigger and
+// the partial index each carry their own copy of the prune rule. A copy that
+// still matches every old heartbeat deletes the phase changes goal history
+// replays; an index copy that differs from the selection stops matching it.
+func TestTelemetryRetentionSitesShareOnePruneRule(t *testing.T) {
+	read := func(name string) string {
+		t.Helper()
+		content, err := os.ReadFile("migrations/" + name)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return string(content)
+	}
+	sql, index := read("1369_telemetry_retention.sql"), read("1370_telemetry_retention_index.sql")
+	for site, want := range map[string]string{
+		"policy":    "AND aeon_telemetry_prunable(type,before,after)\n AND at < statement_timestamp()",
+		"trigger":   "AND public.aeon_telemetry_prunable(OLD.type,OLD.before,OLD.after)",
+		"selection": "AND public.aeon_telemetry_prunable(e.type,e.before,e.after) AND e.at<cutoff AND e.undo_of IS NULL",
+		"undo scan": "OR (public.aeon_telemetry_prunable(e.type,e.before,e.after) AND e.at<cutoff)",
+	} {
+		if !strings.Contains(sql, want) {
+			t.Errorf("%s does not apply the shared prune rule: missing %q", site, want)
+		}
+	}
+	if !strings.Contains(index, "WHERE aeon_telemetry_prunable(type,before,after);") {
+		t.Error("the partial index predicate is not the shared prune rule")
+	}
+	// The type list may name the result rows; it must never select rows again.
+	if n := strings.Count(sql, "IN ('account.probed','harness.heartbeat')"); n != 0 {
+		t.Errorf("%d separate type-only prune rules remain", n)
 	}
 }

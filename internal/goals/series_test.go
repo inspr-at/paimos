@@ -560,3 +560,121 @@ func TestGoalHistoryCancellationReturnsTooLarge(t *testing.T) {
 		t.Fatal(err)
 	}
 }
+
+// Risk: telemetry retention deletes the heartbeat that recorded a session
+// starting work. Registration stores "starting", so that heartbeat is the only
+// record of the working period. Without it a 30-day chart loses the period,
+// and every range replays the ticket as not moving until the next tick.
+// Instants derive from the database clock the retention policy compares.
+func TestGoalSeriesKeepsOldWorkingPeriodThroughTelemetryRetention(t *testing.T) {
+	f := writerFixture(t)
+	var now time.Time
+	if err := f.db.Admin.QueryRow(t.Context(), `SELECT statement_timestamp()`).Scan(&now); err != nil {
+		t.Fatal(err)
+	}
+	now = now.UTC()
+	day := 24 * time.Hour
+	seedRecordedGoal(t, f, now.Add(-25*day))
+	registered, working := now.Add(-20*day), now.Add(-20*day+time.Minute)
+	snapshot := func(phase string, beat time.Time, note string) map[string]any {
+		return map[string]any{"id": "6a1c0e2f-1354-4b8d-a7c3-2f9e5d4b3a01", "project_id": f.project, "ticket_node_id": f.ticket,
+			"role": "worker", "phase": phase, "activity_note": note, "heartbeat_at": beat, "stopped_at": nil, "stop_reason": nil, "archived_at": nil}
+	}
+	changes := []events.Change{
+		{Type: "harness.registered", After: snapshot("starting", registered, ""), At: &registered},
+		{Type: "harness.heartbeat", Before: snapshot("starting", registered, ""), After: snapshot("working", working, "started"), At: &working},
+	}
+	quiet := []int{}
+	previous := working
+	for _, at := range []time.Time{now.Add(-19 * day), now.Add(-18 * day), now.Add(-17 * day), now.Add(-16 * day), now.Add(-15 * day), now.Add(-time.Hour)} {
+		if at.Before(now.Add(-14 * day)) {
+			quiet = append(quiet, len(changes))
+		}
+		changes = append(changes, events.Change{Type: "harness.heartbeat", Before: snapshot("working", previous, "busy"), After: snapshot("working", at, "busy "+at.Format(time.RFC3339)), At: &at})
+		previous = at
+	}
+	ids := make([]int64, len(changes))
+	err := db.InTenant(dbtest.Seed(t.Context()), f.db.App, f.writer.TenantID, func(tx pgx.Tx) error {
+		for i, change := range changes {
+			change.NodeID = &f.project
+			e, err := events.Append(t.Context(), tx, f.writer, change)
+			if err != nil {
+				return err
+			}
+			ids[i] = e.ID
+		}
+		return nil
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	ticketRefs := func(id int64) int {
+		t.Helper()
+		var n int
+		if err := f.db.Admin.QueryRow(t.Context(), `SELECT count(*) FROM goal_event_refs WHERE tenant_id=$1 AND node_id=$2 AND event_id=$3`, f.writer.TenantID, f.ticket, id).Scan(&n); err != nil {
+			t.Fatal(err)
+		}
+		return n
+	}
+	series := func(span string) []SeriesPoint {
+		t.Helper()
+		r := goalRequest(t.Context(), &module{f.db.App, func() time.Time { return now }}, f.writer, "GET", "/api/goals/"+f.secondGoal+"/series?range="+span, "", "")
+		var s SeriesResult
+		if r.Code != 200 || json.Unmarshal(r.Body.Bytes(), &s) != nil || s.Expansion != "full" {
+			t.Fatalf("series %s %d %s", span, r.Code, r.Body)
+		}
+		return s.Points
+	}
+	// The ticket and its outcome start moving in the bucket of the working
+	// heartbeat and stay moving: no later bucket changes the ticket again.
+	requireWorkingPeriod := func(stage string, points []SeriesPoint, grain time.Duration) {
+		t.Helper()
+		started := false
+		for _, point := range points {
+			end := point.T.Add(grain)
+			switch {
+			case point.T.Before(working) && !end.Before(working):
+				started = slices.Contains(point.ChangedKeys, "TKT-1") && slices.Contains(point.ChangedKeys, "RECOUT-1")
+			case !point.T.Before(working) && slices.Contains(point.ChangedKeys, "TKT-1"):
+				t.Fatalf("%s: the ticket changed again at %v: %+v", stage, point.T, point.ChangedKeys)
+			}
+		}
+		if !started {
+			t.Fatalf("%s: no working period from %v in %+v", stage, working, points)
+		}
+	}
+	spans := map[string]time.Duration{"24h": time.Hour, "7d": 6 * time.Hour, "30d": day}
+	baseline := map[string][]SeriesPoint{}
+	for span := range spans {
+		baseline[span] = series(span)
+	}
+	requireWorkingPeriod("before retention", baseline["30d"], spans["30d"])
+	for _, i := range quiet {
+		if ticketRefs(ids[i]) == 0 {
+			t.Fatalf("quiet tick %d has no ticket reference to remove", ids[i])
+		}
+	}
+	err = db.InTenant(db.AllProjects(t.Context(), "telemetry retention"), f.db.App, f.writer.TenantID, func(tx pgx.Tx) error {
+		_, err := tx.Exec(t.Context(), `SELECT * FROM aeon_prune_telemetry($1,$2,500)`, f.writer.TenantID, now.Add(-14*day))
+		return err
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for i, id := range ids {
+		var present int
+		if err := f.db.Admin.QueryRow(t.Context(), `SELECT count(*) FROM events WHERE tenant_id=$1 AND id=$2`, f.writer.TenantID, id).Scan(&present); err != nil {
+			t.Fatal(err)
+		}
+		pruned := slices.Contains(quiet, i)
+		if (present == 0) != pruned || (ticketRefs(id) == 0) != pruned {
+			t.Fatalf("event %d (%s at %v): present=%d refs=%d, want pruned=%v", id, changes[i].Type, *changes[i].At, present, ticketRefs(id), pruned)
+		}
+	}
+	requireWorkingPeriod("after retention", series("30d"), spans["30d"])
+	for span := range spans {
+		if after := series(span); !reflect.DeepEqual(after, baseline[span]) {
+			t.Fatalf("%s history changed by retention:\nbefore %+v\nafter  %+v", span, baseline[span], after)
+		}
+	}
+}

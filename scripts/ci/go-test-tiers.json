@@ -5866,6 +5866,8 @@
     ,
     {"kind":"go","package":"internal/db","name":"TestTelemetryRetentionMigrationRoleCanInstallPruneFlag","tier":"ESSENTIAL"}
     ,
+    {"kind":"go","package":"internal/db","name":"TestTelemetryRetentionSitesShareOnePruneRule","tier":"ESSENTIAL"}
+    ,
     {"kind":"go","package":"internal/db","name":"TestTenantGuardRefreshesVisibilityAfterRevocation","tier":"NIGHTLY"}
     ,
     {"kind":"go","package":"internal/db","name":"TestTicketBenefitMigrationPreservesHistoryAndCustomSchema","tier":"GATED-FULL"}
@@ -6568,6 +6570,8 @@
     ,
     {"kind":"go","package":"internal/events","name":"TestTelemetryRetentionPruneFlagDoesNotLeak","tier":"ESSENTIAL"}
     ,
+    {"kind":"go","package":"internal/events","name":"TestTelemetryRetentionPrunesOnlyQuietHeartbeats","tier":"ESSENTIAL"}
+    ,
     {"kind":"go","package":"internal/events","name":"TestTelemetryRetentionSkipsUndoAndKeepsAppendOnlyGuard","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/events","name":"TestTelemetryRetentionStartsImmediatelyAndRunsDaily","tier":"ESSENTIAL"}
@@ -6653,6 +6657,8 @@
     {"kind":"go","package":"internal/goals","name":"TestGoalSeriesBulkUndoAndProjectSnapshots","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/goals","name":"TestGoalSeriesChangedKeysWithoutPercentageChange","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/goals","name":"TestGoalSeriesKeepsOldWorkingPeriodThroughTelemetryRetention","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/goals","name":"TestGoalSeriesPlannerAndMoveTimeline","tier":"ESSENTIAL"}
     ,
