@@ -1,6 +1,6 @@
 <!-- SPDX-License-Identifier: AGPL-3.0-only -->
 <script setup lang="ts">
-import { computed, nextTick, onBeforeUnmount, ref, useId, watch } from 'vue'
+import { computed, nextTick, onBeforeUnmount, onMounted, ref, useId, watch } from 'vue'
 import { DEFINITION_BLOCKS, DEFINITION_CATALOG, DEFINITION_CONDITIONS, DEFINITION_CONDITION_OPTIONS, definitionChangeWords, definitionDecisionWords, definitionConditionWords, checkCount, cloneChecks, definitionDiff, fixedRuleCondition, manualRule, ruleCondition, ruleIcon, ruleLabel, ruleOwnerWords, ruleWords, sameRule, type DefinitionChange, type DefinitionChecks, type DefinitionCondition, type DefinitionRule, type DefinitionStatus } from '../../lib/definitions'
 import { useProfile } from '../../stores/profile'
 import { displayLanguage } from '../../lib/displayLanguage'
@@ -18,6 +18,17 @@ const emit = defineEmits<{ change: [checks: DefinitionChecks, applied: () => voi
 const panelBody = ref<HTMLElement>(), uid = useId(), root = ref<HTMLElement>(), profile = useProfile()
 const language = computed(() => displayLanguage(profile.profile?.locale, 'definitions'))
 const t = (en: string, de: string) => language.value === 'de' ? de : en
+const keyParts = (text: string) => text.split(props.projectKey)
+const decisionHeights = ref<Record<string, number>>({})
+let rowObserver: ResizeObserver | undefined
+onMounted(() => {
+  let width = root.value?.getBoundingClientRect().width
+  rowObserver = new ResizeObserver(([entry]) => {
+    if (!entry || entry.contentRect.width === width) return
+    width = entry.contentRect.width; decisionHeights.value = {}
+  })
+  if (root.value) rowObserver.observe(root.value)
+})
 const labelOf = (rule: DefinitionRule) => ruleLabel(rule, language.value)
 const visitRows = ref<{block: DefinitionStatus; item: DefinitionRule}[] | null>(null)
 const originals = ref<Record<string, DefinitionChange>>({}), decided = ref<Record<string, 'added' | 'kept' | 'removed' | 'left'>>({})
@@ -63,7 +74,9 @@ async function focusWaiting(afterID?: string) {
 function decide(id: string, choice: 'accept' | 'keep') {
   const change = waiting(id)
   if (!change || !props.editable || props.busy) return
+  const height = Array.from(root.value?.querySelectorAll<HTMLElement>('[data-check]') ?? []).find(row => row.dataset.check === id)?.getBoundingClientRect().height
   emit('decide', change, choice, () => {
+    if (height) decisionHeights.value[id] = height
     decided.value[id] = choice === 'keep' ? change.kind === 'new' ? 'left' : 'kept' : change.kind === 'removed' ? 'removed' : change.kind === 'new' ? 'added' : 'kept'
     void focusWaiting(id)
   })
@@ -101,7 +114,7 @@ watch(left, rows => {
 function rows(block: DefinitionStatus) {
   if (visitRows.value) {
     const all = DEFINITION_BLOCKS.flatMap(b => props.checks[b.id] ?? [])
-    const pinned = visitRows.value.filter(row => row.block === block && !restored.value.includes(row.item.id)).map(row => ({ item: all.find(item => item.id === row.item.id) ?? row.item, ghost: decided.value[row.item.id] === 'removed' || ghosts.value.some(ghost => ghost.item.id === row.item.id), height:0 }))
+    const pinned = visitRows.value.filter(row => row.block === block && !restored.value.includes(row.item.id)).map(row => ({ item: all.find(item => item.id === row.item.id) ?? row.item, ghost: decided.value[row.item.id] === 'removed' || ghosts.value.some(ghost => ghost.item.id === row.item.id), height: decisionHeights.value[row.item.id] ?? ghosts.value.find(ghost => ghost.item.id === row.item.id)?.height ?? 0 }))
     for (const item of props.checks[block] ?? []) if (!visitRows.value.some(row => row.item.id === item.id) && !restored.value.includes(item.id)) pinned.push({item,ghost:false,height:0})
     return pinned
   }
@@ -218,7 +231,7 @@ function indexOfPanel() { return panel.value ? props.checks[panel.value.block]?.
 // A failed save stays readable in its footer even when a conflict disables
 // editing. Identity/access resets still unmount the editor and discard it.
 watch(() => props.editable, allowed => { if (!allowed && !props.error) close(false) })
-onBeforeUnmount(() => close(false))
+onBeforeUnmount(() => { rowObserver?.disconnect(); close(false) })
 </script>
 
 <template>
@@ -229,9 +242,9 @@ onBeforeUnmount(() => close(false))
         <li v-for="row in rows(block.id)" :key="row.item.id" class="dr" :class="{ ghost: row.ghost }" :style="row.height ? { height: `${row.height}px` } : undefined" :data-check="row.item.id" :data-waiting="!!waiting(row.item.id)" :tabindex="decisionVisit ? -1 : undefined">
           <AppIcon :name="ruleIcon(row.item)" :size="15" class="dr-ic" />
           <template v-if="decisionVisit">
-            <span class="dr-l"><b class="decision-words"><span>{{ labelOf(row.item) }}</span><span v-if="originals[row.item.id]?.current" aria-hidden="true" class="decision-space">{{ labelOf(originals[row.item.id]!.current!) }}</span></b><small class="decision-words"><span>{{ row.ghost ? t('Removed','Entfernt') : rowWords(row.item) }}</span><span aria-hidden="true" class="decision-space">{{ pendingSummary(row.item.id) || summaryOf(row.item) }}</span><span v-if="originals[row.item.id]?.current" aria-hidden="true" class="decision-space">{{ summaryOf(originals[row.item.id]!.current!) }}</span></small></span>
+            <span class="dr-l"><b>{{ labelOf(row.item) }}</b><small><template v-for="(part, index) in keyParts(row.ghost ? t('Removed','Entfernt') : rowWords(row.item))" :key="index"><span v-if="index" class="project-key">{{ projectKey }}</span>{{ part }}</template></small></span>
             <span class="decision-actions">
-              <span v-if="originals[row.item.id]" class="decision-links" :class="{ resolved: !waiting(row.item.id) }" :aria-hidden="!waiting(row.item.id) || undefined">
+              <span v-if="waiting(row.item.id)" class="decision-links">
                 <button v-if="editable" type="button" class="link-btn" data-decision="accept" :disabled="busy || !waiting(row.item.id)" :tabindex="waiting(row.item.id) ? 0 : -1" @click="decide(row.item.id,'accept')">{{ decisionWords(row.item.id)[0] }}</button><span v-if="editable" class="decision-last"><span aria-hidden="true">·</span><button type="button" class="link-btn" data-decision="keep" :disabled="busy || !waiting(row.item.id)" :tabindex="waiting(row.item.id) ? 0 : -1" @click="decide(row.item.id,'keep')">{{ decisionWords(row.item.id)[1] }}</button></span>
               </span>
               <button v-if="row.ghost && editable" type="button" class="link-btn decision-undo" :disabled="busy" @click="undoDecision(row.item.id)">{{ t('Undo','Rückgängig') }}</button>
@@ -239,18 +252,18 @@ onBeforeUnmount(() => close(false))
             <span class="dr-action dr-more-sp"><button v-if="editable && !waiting(row.item.id) && !row.ghost && decided[row.item.id] !== 'left'" type="button" class="icon-btn sm flat" :disabled="busy" :aria-label="`More for ${labelOf(row.item)}`" aria-haspopup="menu" @click="open('menu', block.id, $event, row.item)"><AppIcon name="more" :size="15" /></button></span>
           </template>
           <template v-else>
-          <span class="dr-l"><b>{{ labelOf(row.item) }}</b><small :class="{ 'owner-words': manualRule(row.item) && !row.ghost }"><span>{{ row.ghost ? t('Removed','Entfernt') : language === 'de' ? definitionConditionWords(row.item,language) : words(row.item, block.id) }}<span v-if="!row.ghost && note(row.item, block.id)" class="phone-note"> · {{ note(row.item, block.id) }}</span></span><template v-if="manualRule(row.item) && !row.ghost"><span v-for="summary in ownerSummaries(row.item, block.id)" :key="summary" class="owner-space" aria-hidden="true">{{ summary }}<span class="phone-note"> · {{ note(row.item, block.id) || `Changed for ${projectKey}` }}</span></span></template></small></span>
-          <span v-clip-tip="note(row.item, block.id)" class="dr-note" :class="{ 'owner-words': manualRule(row.item) }"><span>{{ row.ghost ? '' : note(row.item, block.id) }}</span><span v-if="manualRule(row.item)" class="owner-space" aria-hidden="true">Changed for {{ projectKey }}</span></span>
+          <span class="dr-l"><b>{{ labelOf(row.item) }}</b><small :class="{ 'owner-words': manualRule(row.item) && !row.ghost }"><span>{{ row.ghost ? t('Removed','Entfernt') : language === 'de' ? definitionConditionWords(row.item,language) : words(row.item, block.id) }}<span v-if="!row.ghost && note(row.item, block.id)" class="phone-note"> · <template v-for="(part, index) in keyParts(note(row.item, block.id))" :key="index"><span v-if="index" class="project-key">{{ projectKey }}</span>{{ part }}</template></span></span><template v-if="manualRule(row.item) && !row.ghost"><span v-for="summary in ownerSummaries(row.item, block.id)" :key="summary" class="owner-space" aria-hidden="true">{{ summary }}<span class="phone-note"> · <template v-for="(part, index) in keyParts(note(row.item, block.id) || `Changed for ${projectKey}`)" :key="index"><span v-if="index" class="project-key">{{ projectKey }}</span>{{ part }}</template></span></span></template></small></span>
+          <span v-clip-tip="note(row.item, block.id)" class="dr-note" :class="{ 'owner-words': manualRule(row.item) }"><span>{{ row.ghost ? '' : note(row.item, block.id) }}</span><span v-if="manualRule(row.item)" class="owner-space" aria-hidden="true">Changed for <span class="project-key">{{ projectKey }}</span></span></span>
           <span class="dr-action"><button v-if="row.ghost && editable" type="button" class="link-btn undo" :disabled="busy" @click="undo(block.id, row.item)">Undo</button>
           <button v-else-if="editable" type="button" class="icon-btn sm flat" :disabled="busy" :aria-label="`More for ${ruleLabel(row.item)}`" aria-haspopup="menu" @click="open('menu', block.id, $event, row.item)"><AppIcon name="more" :size="15" /></button></span>
           </template>
         </li>
-        <li v-for="row in tail(block.id)" :key="`left-${row.item.id}`" class="dr left" :data-left="row.item.id" :style="restoredHeights[row.item.id] ? { height: `${restoredHeights[row.item.id]}px` } : undefined"><AppIcon :name="ruleIcon(row.item)" :size="15" class="dr-ic" /><span class="dr-l"><b>{{ labelOf(row.item) }}</b><small>{{ restored.includes(row.item.id) ? `Added back to ${block.name}` : `In the workspace default · left out for ${projectKey}` }}</small></span><button v-if="editable" type="button" class="link-btn" :disabled="busy || restored.includes(row.item.id)" :style="restored.includes(row.item.id) ? { visibility: 'hidden' } : undefined" @click="addBack(block.id, row.item, $event)">Add back</button></li>
+        <li v-for="row in tail(block.id)" :key="`left-${row.item.id}`" class="dr left" :data-left="row.item.id" :style="restoredHeights[row.item.id] ? { height: `${restoredHeights[row.item.id]}px` } : undefined"><AppIcon :name="ruleIcon(row.item)" :size="15" class="dr-ic" /><span class="dr-l"><b>{{ labelOf(row.item) }}</b><small><template v-for="(part, index) in keyParts(restored.includes(row.item.id) ? `Added back to ${block.name}` : `In the workspace default · left out for ${projectKey}`)" :key="index"><span v-if="index" class="project-key">{{ projectKey }}</span>{{ part }}</template></small></span><button v-if="editable" type="button" class="link-btn" :disabled="busy || restored.includes(row.item.id)" :style="restored.includes(row.item.id) ? { visibility: 'hidden' } : undefined" @click="addBack(block.id, row.item, $event)">Add back</button></li>
         <li v-if="!rows(block.id).length && !tail(block.id).length" class="dr none"><AppIcon name="minus" :size="15" class="dr-ic" /><span class="dr-l"><b>{{ checks[block.id]?.length ? `${checks[block.id]!.length} ${checks[block.id]!.length === 1 ? 'check' : 'checks'}` : t('No checks','Keine Prüfungen') }}</b><small>{{ checks[block.id]?.length ? 'Added back below; these checks apply.' : t(`Tickets enter ${block.to} freely.`,`Tickets wechseln ohne Prüfung zu ${block.to}.`) }}</small></span></li>
       </ul>
     </section>
-    <div v-if="fold" class="lfold"><div class="dr fold-head"><AppIcon name="layers" :size="15" class="dr-ic" /><span class="dr-l"><b>{{ left.length }} checks from the workspace default are left out</b><small>They stay out of {{ projectKey }} until someone adds one back.</small></span><button type="button" class="link-btn" :aria-expanded="foldOpen" :aria-controls="`${uid}-fold`" @click="foldOpen = !foldOpen">{{ foldOpen ? 'Hide' : 'Show' }}</button></div>
-      <ul v-if="foldOpen" :id="`${uid}-fold`" class="drs"><li v-for="row in folded" :key="`${row.block}/${row.item.id}`" class="dr left" :data-fold-row="row.item.id" :style="restoredHeights[row.item.id] ? { height: `${restoredHeights[row.item.id]}px` } : undefined"><AppIcon :name="ruleIcon(row.item)" :size="15" class="dr-ic" /><span class="dr-l"><b>{{ labelOf(row.item) }}</b><small>{{ restored.includes(row.item.id) ? `Added back to ${DEFINITION_BLOCKS.find(b => b.id === row.block)?.name}` : `${DEFINITION_BLOCKS.find(b => b.id === row.block)?.name} · in the workspace default, left out for ${projectKey}` }}</small></span><button v-if="editable" type="button" class="link-btn" :disabled="busy || restored.includes(row.item.id)" :style="restored.includes(row.item.id) ? { visibility: 'hidden' } : undefined" @click="addBack(row.block, row.item, $event)">Add back</button></li></ul>
+    <div v-if="fold" class="lfold"><div class="dr fold-head"><AppIcon name="layers" :size="15" class="dr-ic" /><span class="dr-l"><b>{{ left.length }} checks from the workspace default are left out</b><small>They stay out of <span class="project-key">{{ projectKey }}</span> until someone adds one back.</small></span><button type="button" class="link-btn" :aria-expanded="foldOpen" :aria-controls="`${uid}-fold`" @click="foldOpen = !foldOpen">{{ foldOpen ? 'Hide' : 'Show' }}</button></div>
+      <ul v-if="foldOpen" :id="`${uid}-fold`" class="drs"><li v-for="row in folded" :key="`${row.block}/${row.item.id}`" class="dr left" :data-fold-row="row.item.id" :style="restoredHeights[row.item.id] ? { height: `${restoredHeights[row.item.id]}px` } : undefined"><AppIcon :name="ruleIcon(row.item)" :size="15" class="dr-ic" /><span class="dr-l"><b>{{ labelOf(row.item) }}</b><small><template v-for="(part, index) in keyParts(restored.includes(row.item.id) ? `Added back to ${DEFINITION_BLOCKS.find(b => b.id === row.block)?.name}` : `${DEFINITION_BLOCKS.find(b => b.id === row.block)?.name} · in the workspace default, left out for ${projectKey}`)" :key="index"><span v-if="index" class="project-key">{{ projectKey }}</span>{{ part }}</template></small></span><button v-if="editable" type="button" class="link-btn" :disabled="busy || restored.includes(row.item.id)" :style="restored.includes(row.item.id) ? { visibility: 'hidden' } : undefined" @click="addBack(row.block, row.item, $event)">Add back</button></li></ul>
     </div>
     <p v-if="checkCount(checks)" class="enforce"><AppIcon name="shield" :size="14" /><span>{{ t('Agents can’t move a ticket until every check passes. People can move it anyway with a reason, and it’s logged.','Agenten können ein Ticket erst verschieben, wenn alle Prüfungen bestanden sind. Personen können es mit einer protokollierten Begründung trotzdem verschieben.') }} <ProjectSettingsExplainer id="enforce" :project-key="projectKey" /></span></p>
     <FloatingPanel v-if="panel" :key="panel.kind" :anchor="panel.anchor" :label="panelTitle" :width="380" :tallest="700" :sheet="panel.kind === 'manual' || panel.kind === 'conditions' || panel.kind === 'owner'" compact-sheet cycle field-escape settings-keys class="definition-pop" @close="close">
@@ -287,11 +300,20 @@ onBeforeUnmount(() => close(false))
 @container project-settings-body (max-width: 600px) { .dr { grid-template-columns: 24px minmax(0,1fr) 44px; gap: 2px 8px; }.dr-note { display: none; }.phone-note { display: inline; }.dr > .dr-action { grid-column: 3; grid-row: 1; }.left, .fold-head { grid-template-columns: 24px minmax(0,1fr) auto; }.none { grid-template-columns: 24px minmax(0,1fr); }.db-head { min-height: 50px; }.db-head h3 > span { display: block; font-size: 12px; }.db-head .db-dot { display: none; } }
 @media (max-width: 600px) { :global(.floating.definition-pop.sheet) { height: 100dvh; max-height: 100dvh !important; border-radius: 0; }.def-panel.as-form { height: 100%; }.def-form { flex: 1; }.def-form .pop-body { flex: 1; align-content: start; }.pop-actions { padding-bottom: max(14px,env(safe-area-inset-bottom)); }.pop-actions .btn { flex: 1; }.pop-head { padding-top: max(12px,env(safe-area-inset-top)); } }
 @media (pointer: coarse), (max-width: 600px) { .add, .link-btn, .pop-actions .btn { min-height: 44px; }.dr .icon-btn, .pop-head .icon-btn { height: 44px; width: 44px; } }
-/* The visit keeps its row slots and all possible second-line copy. Equal
-   tracks give pending and ordinary rows the same height without clipping. */
-.decision-visit .dblock > .drs { display: grid; grid-auto-rows: 1fr; }
-.decision-words { display: grid; }.decision-words > span { grid-area: 1 / 1; }.decision-space { visibility: hidden; pointer-events: none; user-select: none; }
-.decision-actions { display: grid; justify-self: end; }.decision-actions > * { grid-area: 1 / 1; }.decision-links { display: inline-flex; align-items: center; gap: 8px; }.decision-last { display: inline-flex; align-items: center; gap: 8px; white-space: nowrap; }.decision-links.resolved { visibility: hidden; pointer-events: none; }.decision-undo { justify-self: end; }.decision-visit .dr:focus-visible { outline: 1px solid var(--teal-ink); outline-offset: -2px; }
+/* Reserve a real action column on desktop; the second line can use the
+   space beneath it. Phone rows size to their own content. Decisions retain
+   only the clicked row's measured height for the rest of this visit. */
+.project-key { white-space: nowrap; overflow-wrap: normal; }
+@media (min-width: 1024px) {
+  .decision-visit .dr { grid-template-columns: 28px minmax(0,1fr) minmax(26ch,auto) 44px; grid-template-rows: 32px auto; row-gap: 0; }
+  .decision-visit .dr-l { display: contents; }
+  .decision-visit .dr-l b { grid-column: 2; grid-row: 1; }
+  .decision-visit .dr-l small { grid-column: 2 / 4; grid-row: 2; }
+  .decision-visit .dr-ic { grid-row: 1 / 3; }
+  .decision-visit .decision-actions { grid-column: 3; grid-row: 1; min-inline-size: 26ch; }
+  .decision-visit .dr-action { grid-column: 4; grid-row: 1 / 3; }
+}
+.decision-actions { display: grid; justify-self: end; }.decision-actions > * { grid-area: 1 / 1; }.decision-links { display: inline-flex; flex-wrap: wrap; align-items: center; justify-content: end; gap: 0 8px; }.decision-last { display: inline-flex; align-items: center; gap: 8px; white-space: nowrap; }.decision-undo { justify-self: end; }.decision-visit .dr:focus-visible { outline: 1px solid var(--teal-ink); outline-offset: -2px; }
 @container project-settings-body (max-width: 600px) { .decision-visit .decision-actions { grid-column: 2 / -1; grid-row: 2; justify-self: start; }.decision-visit .decision-links .link-btn { min-height: 44px; }.decision-visit .dr { row-gap: 0; } }
-@media (max-width: 600px) { .decision-visit .decision-actions { grid-column: 2 / -1; grid-row: 2; justify-self: start; }.decision-visit .decision-links .link-btn { min-height: 44px; } }
+@media (max-width: 760px) { .decision-visit .decision-actions { grid-column: 2 / -1; grid-row: 2; justify-self: start; }.decision-visit .decision-links { justify-content: start; }.decision-visit .decision-links .link-btn { min-height: 44px; }.decision-visit .dr { grid-template-columns: 24px minmax(0,1fr) 44px; row-gap: 0; }.decision-visit .dr-action { grid-column: 3; grid-row: 1; }.decision-visit .dr-l { grid-column: 2; grid-row: 1; } }
 </style>

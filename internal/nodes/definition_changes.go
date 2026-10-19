@@ -5,6 +5,7 @@ import (
 	"context"
 	"errors"
 	"net/http"
+	"slices"
 	"strconv"
 	"time"
 
@@ -15,53 +16,53 @@ import (
 	"github.com/jackc/pgx/v5"
 )
 
-func definitionAdminsTx(ctx context.Context, tx pgx.Tx, p tenant.Principal, project *string) ([]workorders.EntryPerson, error) {
-	rows, err := tx.Query(ctx, `SELECT DISTINCT p.id::text,p.name FROM principals p
+func definitionAdminsTx(ctx context.Context, tx pgx.Tx, project *string) ([]workorders.EntryPerson, int, error) {
+	permission := "settings.manage"
+	if project != nil {
+		permission = "nodes.write"
+	}
+	// Resolve built-in permissions from the canonical registry, just as RequireTx
+	// does. Custom roles use role_permissions. This is one set read, not one
+	// authorization query for every name, and never truncates the context itself.
+	builtinRoles := []string{}
+	for _, role := range []string{"owner", "admin", "member", "viewer", "guest", "customer"} {
+		permissions, _ := authz.BuiltinPermissions(role)
+		if slices.Contains(permissions, permission) {
+			builtinRoles = append(builtinRoles, role)
+		}
+	}
+	rows, err := tx.Query(ctx, `WITH admins AS (SELECT DISTINCT p.id,p.name FROM principals p
 	 JOIN role_bindings b ON b.tenant_id=p.tenant_id AND b.principal_id=p.id
 	 JOIN roles r ON r.tenant_id=b.tenant_id AND r.id=b.role_id
-	 WHERE p.kind='person' AND p.status='active' AND
+	 WHERE p.kind='person' AND p.status='active' AND p.linked_to IS NULL AND NOT coalesce(p.messaging_only,false) AND
 	 (b.scope_type='workspace' AND r.key IN ('owner','admin') OR b.scope_type='project' AND b.scope_id=$1::uuid AND r.key='admin')
-	 ORDER BY p.id::text LIMIT 101`, project)
+	 AND EXISTS (SELECT 1 FROM role_bindings permitted
+	 JOIN roles pr ON pr.tenant_id=permitted.tenant_id AND pr.id=permitted.role_id
+	 WHERE permitted.tenant_id=p.tenant_id AND permitted.principal_id=p.id
+	 AND (permitted.scope_type='workspace' OR $1::uuid IS NOT NULL AND permitted.scope_type='project' AND permitted.scope_id=$1::uuid)
+	 AND (pr.builtin AND pr.key=ANY($2::text[]) OR NOT pr.builtin AND EXISTS
+	 (SELECT 1 FROM role_permissions rp WHERE rp.tenant_id=pr.tenant_id AND rp.role_id=pr.id AND rp.permission=$3))))
+	 SELECT id::text,name,count(*) OVER() FROM admins ORDER BY id::text LIMIT 100`, project, builtinRoles, permission)
 	if err != nil {
-		return nil, err
+		return nil, 0, err
 	}
+	defer rows.Close()
 	people := []workorders.EntryPerson{}
+	total := 0
 	for rows.Next() {
 		var person workorders.EntryPerson
-		if err = rows.Scan(&person.ID, &person.Name); err != nil {
-			rows.Close()
-			return nil, err
+		if err = rows.Scan(&person.ID, &person.Name, &total); err != nil {
+			return nil, 0, err
 		}
 		people = append(people, person)
 	}
-	rows.Close()
-	if err = rows.Err(); err != nil {
-		return nil, err
-	}
-	if len(people) > 100 {
-		return nil, &httpError{status: 422, msg: "definition administrator coverage exceeds 100 people"}
-	}
-	out := []workorders.EntryPerson{}
-	for _, person := range people {
-		candidate := tenant.Principal{ID: person.ID, TenantID: p.TenantID, Kind: tenant.Person}
-		if project == nil {
-			err = authz.RequireTx(ctx, tx, candidate, "settings.manage", authz.Scope{})
-		} else {
-			err = authz.RequireProjectAdminTx(ctx, tx, candidate, *project)
-		}
-		if err == nil {
-			out = append(out, person)
-		} else if !errors.Is(err, authz.ErrForbidden) {
-			return nil, err
-		}
-	}
-	return out, nil
+	return people, max(0, total-len(people)), rows.Err()
 }
 
 func definitionContextTx(ctx context.Context, tx pgx.Tx, p tenant.Principal, project string, current, workspace *workqueue.EntryDefinition) (*entryDefinitionContext, error) {
 	out := &entryDefinitionContext{ProjectID: project, Definition: current, Workspace: workspace, Pending: []workorders.DefinitionChange{}}
 	var err error
-	out.Admins, err = definitionAdminsTx(ctx, tx, p, &project)
+	out.Admins, out.AdminsMore, err = definitionAdminsTx(ctx, tx, &project)
 	if err != nil {
 		return nil, err
 	}
@@ -77,13 +78,8 @@ func definitionContextTx(ctx context.Context, tx pgx.Tx, p tenant.Principal, pro
 		if err != nil {
 			return nil, err
 		}
+		state = state.WithFallback(current, workspace)
 		out.Base = state.Base
-		if out.Base == nil && current.CopiedFrom != nil && workspace != nil && current.CopiedFrom.Equal(workspace.Revision) {
-			out.Base = workspace.Checks
-			if state.Reviewed == nil {
-				state.Reviewed = out.Base
-			}
-		}
 		if workspace != nil {
 			out.Pending = workorders.PendingDefinitionChanges(state.Reviewed, workspace.Checks)
 		}
@@ -150,6 +146,7 @@ func (m *Module) handleDefinitionDecision(w http.ResponseWriter, r *http.Request
 		if err != nil {
 			return err
 		}
+		state = state.WithFallback(current, workspace)
 		pending := workorders.PendingDefinitionChanges(state.Reviewed, workspace.Checks)
 		var selected *workorders.DefinitionChange
 		for i := range pending {
@@ -210,6 +207,7 @@ type workspaceDefinitionContext struct {
 	Definition  *workqueue.EntryDefinition `json:"definition"`
 	CanManage   bool                       `json:"can_manage"`
 	Admins      []workorders.EntryPerson   `json:"admins"`
+	AdminsMore  int                        `json:"admins_more"`
 	Projects    []definitionProjectSummary `json:"projects"`
 	DifferCount int                        `json:"differ_count"`
 	UsesDefault []string                   `json:"uses_default"`
@@ -251,7 +249,7 @@ func (m *Module) handleWorkspaceDefinitionContext(w http.ResponseWriter, r *http
 		if err != nil {
 			return err
 		}
-		out.Admins, err = definitionAdminsTx(ctx, tx, p, nil)
+		out.Admins, out.AdminsMore, err = definitionAdminsTx(ctx, tx, nil)
 		if err != nil {
 			return err
 		}
@@ -314,7 +312,8 @@ func (m *Module) handleWorkspaceDefinitionContext(w http.ResponseWriter, r *http
 				}
 				continue
 			}
-			pending := workorders.PendingDefinitionChanges(project.Copy.Reviewed, out.Definition.Checks)
+			state := project.Copy.WithFallback(project.Definition, out.Definition)
+			pending := workorders.PendingDefinitionChanges(state.Reviewed, out.Definition.Checks)
 			out.Projects = append(out.Projects, definitionProjectSummary{project.ProjectID, project.Key, differences, len(pending)})
 		}
 		return nil

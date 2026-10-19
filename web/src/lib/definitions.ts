@@ -15,9 +15,12 @@ export type DefinitionChecks = Partial<Record<DefinitionStatus, DefinitionRule[]
 export interface Definition { id: string; revision: string; created_at?: string; source: 'project' | 'workspace'; copied_from_revision: string | null; checks: DefinitionChecks }
 export interface DefinitionChange { check_id: string; block: DefinitionStatus; kind: 'new' | 'changed' | 'removed'; before: DefinitionRule | null; current: DefinitionRule | null }
 export interface DefinitionAdmin { id: string; name: string }
-export interface DefinitionContext { project_id: string; definition: Definition | null; workspace_default: Definition | null; copied_from_checks: DefinitionChecks | null; can_manage: boolean; pending_changes?: DefinitionChange[]; admins?: DefinitionAdmin[] }
+export interface DefinitionContext { project_id: string; definition: Definition | null; workspace_default: Definition | null; copied_from_checks: DefinitionChecks | null; can_manage: boolean; pending_changes?: DefinitionChange[]; admins?: DefinitionAdmin[]; admins_more?: number }
 export interface DefinitionProject { project_id: string; key: string; difference_count: number; pending_count: number }
-export interface WorkspaceDefinitionContext { definition: Definition | null; can_manage: boolean; admins: DefinitionAdmin[]; projects: DefinitionProject[]; differ_count: number; uses_default: string[]; next_cursor: string | null }
+export interface WorkspaceDefinitionContext { definition: Definition | null; can_manage: boolean; admins: DefinitionAdmin[]; admins_more?: number; projects: DefinitionProject[]; differ_count: number; uses_default: string[]; next_cursor: string | null }
+export function definitionAdminNames(admins: DefinitionAdmin[] = [], more = 0, language = 'en') {
+  return [admins.map(person => person.name).join(', '), more ? language === 'de' ? `und ${more} weitere` : `and ${more} more` : ''].filter(Boolean).join(' ')
+}
 export const DEFINITION_CATALOG: { id: string; en: string; de: string; condition: DefinitionCondition; block: DefinitionStatus; icon: IconName }[] = [
   { id: 'estimate_set', en: 'Estimate set', de: 'Schätzung gesetzt', condition: 'all', block: 'in_progress', icon: 'clock' },
   { id: 'acceptance_present', en: 'Acceptance criteria written', de: 'Abnahmekriterien beschrieben', condition: 'all', block: 'in_progress', icon: 'list' },
@@ -54,10 +57,10 @@ export function definitionDecisionWords(change: DefinitionChange, own: Definitio
   const de = language === 'de', condition = definitionConditionWords(own ?? change.before ?? change.current!, language)
   return change.kind === 'new' ? de ? ['Hier übernehmen','Weglassen'] : ['Add here','Leave out']
     : change.kind === 'removed' ? de ? ['Auch hier entfernen','Behalten'] : ['Remove here too','Keep it']
-    : de ? ['Auch hier übernehmen',`${condition} behalten`] : ['Use it here too',`Keep ${condition}`]
+    : de ? ['Auch hier übernehmen',`${condition} behalten`] : ['Use it here too',`Keep ${condition === 'All tickets' ? 'all tickets' : condition}`]
 }
 export function definitionDeskWords(key: string, count: number, language = 'en') {
-  return language === 'de' ? `${key}: ${count}\u00a0Änderungen am Workspace-Standard warten auf eine Entscheidung` : `${key}: ${count}\u00a0changes to the workspace default wait for a decision`
+  return language === 'de' ? `${key}: ${count}\u00a0${count === 1 ? 'Änderung' : 'Änderungen'} am Workspace-Standard ${count === 1 ? 'wartet' : 'warten'} auf eine Entscheidung` : `${key}: ${count}\u00a0${count === 1 ? 'change' : 'changes'} to the workspace default ${count === 1 ? 'waits' : 'wait'} for a decision`
 }
 export const DEFINITION_CONDITION_OPTIONS = [
   { value: 'all', detail: 'Every ticket' },

@@ -47,8 +47,9 @@ async function shot(page: Page,width: number,theme: string,state: string){
 function barrier(){let entered!:()=>void,release!:()=>void;const pending=new Promise<void>(resolve=>entered=resolve),until=new Promise<void>(resolve=>release=resolve);return {entered,release,pending,until}}
 async function navigate(page: Page,path: string){await page.evaluate(path=>(document.querySelector('#app') as unknown as {__vue_app__:{config:{globalProperties:{$router:{push(path:string):Promise<void>}}}}}).__vue_app__.config.globalProperties.$router.push(path),path)}
 
-async function setup(page: Page,theme: 'light' | 'dark',locale='en',viewer=false){
+async function setup(page: Page,theme: 'light' | 'dark',locale='en',viewer=false,projectKey='PRJ-26'){
   const work=fixtures();work.preferences.theme={choice:theme};work.projects.find(project=>project.id==='p-aeon')!.title='Paimos Aeon'
+  work.projects.find(project=>project.id==='p-frozen')!.key=projectKey
   await mockWork(page,work,{admin:!viewer,readOnly:viewer})
   const settings=settingsData();settings.profile.locale=locale==='de'?'de-AT':'en-GB';await mockSettings(page,settings)
   const world={workspace:copy(newer,'workspace'),context:{project_id:'p-frozen',definition:copy(base),workspace_default:null,copied_from_checks:structuredClone(base),pending_changes:structuredClone(changes),can_manage:!viewer,admins:[{id:settings.profile.principal_id,name:'Markus Barta'}]} as DefinitionContext,writes:[] as {path:string;body:Record<string,unknown>}[],fail:false,held:null as ReturnType<typeof barrier>|null,summaryFail:false,readOnly:viewer}
@@ -75,13 +76,14 @@ async function setup(page: Page,theme: 'light' | 'dark',locale='en',viewer=false
     if(path==='/api/preferences/theme')return route.fulfill({json:{key:'theme',value:{choice:theme}}})
     if(path==='/api/settings/review-policy')return route.fulfill({json:reviewPolicy()})
     if(path==='/api/decision-desk/projection'){
-      const count=world.context.pending_changes?.length??0,href='/p/PRJ-26/settings/definitions?definition_changes=1#definition-changes'
-      const items=count&&!world.readOnly?[{id:world.context.definition!.id,kind:'definition_change',project_id:'p-frozen',revision:1,title:definitionDeskWords('PRJ-26',count),created_at:world.workspace.revision,held:false,can_decide:true,href,source:href,definition_change:{project_key:'PRJ-26',pending_count:count}}]:[]
+      const escaped=encodeURIComponent(projectKey).replace(/%3A/g,':').replace(/%40/g,'@').replace(/%2B/g,'+').replace(/%26/g,'&').replace(/%3D/g,'=').replace(/%24/g,'$')
+      const count=world.context.pending_changes?.length??0,href=`/p/${escaped}/settings/definitions?definition_changes=1#definition-changes`
+      const items=count&&!world.readOnly?[{id:world.context.definition!.id,kind:'definition_change',project_id:'p-frozen',revision:1,title:definitionDeskWords(projectKey,count),created_at:world.workspace.revision,held:false,can_decide:true,href,source:href,definition_change:{project_key:projectKey,pending_count:count}}]:[]
       return route.fulfill({json:{items,counts:{open:items.length,held:0,chores:0},has_more:false,as_of:'2026-10-19T08:00:00Z'}})
     }
     if(path==='/api/settings/definitions/context'){
       if(world.summaryFail)return route.fulfill({status:503,json:{error:'Project differences unavailable'}})
-      return route.fulfill({json:{definition:world.workspace,can_manage:!world.readOnly,admins:world.context.admins,projects:[{project_id:'p-frozen',key:'PRJ-26',difference_count:3,pending_count:world.context.pending_changes?.length??0},{project_id:'p-aeon',key:'AEON',difference_count:2,pending_count:0},{project_id:'p-glint',key:'GLINT',difference_count:2,pending_count:0}],differ_count:3,uses_default:['PHAROS'],next_cursor:null}})
+      return route.fulfill({json:{definition:world.workspace,can_manage:!world.readOnly,admins:world.context.admins,admins_more:world.context.admins_more,projects:[{project_id:'p-frozen',key:projectKey,difference_count:3,pending_count:world.context.pending_changes?.length??0},{project_id:'p-aeon',key:'AEON',difference_count:2,pending_count:0},{project_id:'p-glint',key:'GLINT',difference_count:2,pending_count:0}],differ_count:3,uses_default:['PHAROS'],next_cursor:null}})
     }
     if(path==='/api/settings/definitions'&&request.method()==='PUT'){
       const body=request.postDataJSON();world.writes.push({path,body})
@@ -141,10 +143,13 @@ test('AEON-1317 default decisions preserve every row notice copy and focus in al
       await expect(card.locator('.origin')).toContainText('Copied from the workspace default on 8 Oct.')
       record('notice count equals waiting rows and copy retains enforced checks',{waiting:3})
       const ordinary=card.locator('[data-check="design_attached"]'),start=await geometry(rows),noticeStart=await geometry(notice)
-      for(const row of await card.locator('[data-block="in_progress"] [data-check]').all())expect((await row.boundingBox())!.height).toBe((await ordinary.boundingBox())!.height)
-      const labels=await rows.locator('.dr-l').evaluateAll(elements=>elements.map(el=>el.getBoundingClientRect().x))
+      if(width>=1024)for(const row of await card.locator('[data-block="in_progress"] [data-check]').all())expect(Math.abs((await row.boundingBox())!.height-(await ordinary.boundingBox())!.height)).toBeLessThanOrEqual(1)
+      if(width<=760){expect((await ordinary.boundingBox())!.height).toBeLessThan((await card.locator('[data-check="estimate_set"]').boundingBox())!.height);expect((await ordinary.boundingBox())!.height).toBeLessThanOrEqual(65)}
+      await expect(card.locator('.decision-space, .notice-reserve')).toHaveCount(0)
+      for(const key of await notice.locator('.project-key').all())expect(await key.evaluate(el=>el.getClientRects().length)).toBe(1)
+      const labels=await rows.locator('.dr-l > b').evaluateAll(elements=>elements.map(el=>el.getBoundingClientRect().x))
       expect(Math.max(...labels)-Math.min(...labels)).toBeLessThanOrEqual(1)
-      record('pending and ordinary row height and reserved-slot alignment',{alignmentPx:Math.max(...labels)-Math.min(...labels)})
+      record('desktop rows align through the action column; phone rows have natural heights without reserve copy; project keys never break',{alignmentPx:Math.max(...labels)-Math.min(...labels)})
       await shot(page,width,theme,'D3')
       const allControls:Record<string,Locator>={notice}
       for(let i=0;i<await rows.count();i++)allControls[`row${i}`]=rows.nth(i)
@@ -169,12 +174,18 @@ test('AEON-1317 default decisions preserve every row notice copy and focus in al
         else{expect(stored).toEqual(change.current);if(change.kind==='new')await expect(row).toContainText('Added for PRJ-26')}
         const remaining=world.context.pending_changes!.length
         await expect(card.locator('[data-waiting="true"]')).toHaveCount(remaining)
+        if(remaining===1)await expect(notice.locator('.notice-copy > span').first()).toContainText('1 change waits for a decision')
         if(remaining)await expect(card.locator(`[data-check="${firstNext}"] [data-decision="accept"]`)).toBeFocused()
         else await expect(row).toBeFocused()
         record(`decision ${change.kind} ${choice}: zero movement, unchanged height, stored copy and focus`,{movementPx:0,remaining})
       }
       stable.done();await expect(notice.locator('.notice-copy > span').first()).toHaveText('All changes decided.')
       record('last decision preserves the notice box and says All changes decided.',{movementPx:0})
+      const refreshed=page.waitForResponse(response=>response.url().endsWith('/api/projects/p-frozen/definitions/context'))
+      const refreshStable=await controlStability(page,{notice})
+      await refreshStable.check(async()=>{await page.evaluate(()=>window.dispatchEvent(new Event('focus')));await refreshed;await expect(notice.locator('.notice-copy > span').first()).toHaveText('All changes decided.')});refreshStable.done()
+      expect(await geometry(notice),'access revalidation retains the identical notice box').toEqual(noticeStart)
+      record('same-person access revalidation keeps All changes decided. and its identical box',{movementPx:0})
       await shot(page,width,theme,'D4')
       if(choice==='accept'){
         const removed=card.locator('[data-check="acceptance_present"]'),undoStable=await controlStability(page,allControls)
@@ -230,15 +241,18 @@ test('AEON-1317 workspace defaults differences empty inherited and viewer match 
     await page.goto('/p/PRJ-26/settings/definitions?as=mia')
     await expect(card.locator('[data-waiting="true"]')).toHaveCount(3)
     await expect(card.locator('[data-decision], .drs button')).toHaveCount(0)
-    await expect(card.locator('.lock-line')).toContainText('Markus Barta')
-    const starts=await card.locator('[data-check] .dr-l').evaluateAll(elements=>elements.map(el=>el.getBoundingClientRect().x))
+    world.context.admins_more=2
+    await page.evaluate(()=>window.dispatchEvent(new Event('focus')))
+    await expect(card.locator('.lock-line')).toContainText('Markus Barta and 2 more')
+    const starts=await card.locator('[data-check] .dr-l > b').evaluateAll(elements=>elements.map(el=>el.getBoundingClientRect().x))
     expect(Math.max(...starts)-Math.min(...starts)).toBeLessThanOrEqual(1)
     await expect(card.locator('[data-check] .dr-more-sp')).toHaveCount(6)
     record('D7 waiting notes remain, actions are absent and reserved slots align within one pixel');await shot(page,width,theme,'D7')
     const design=await card.locator('.default-notice').evaluate(el=>{const css=getComputedStyle(el);return {left:parseFloat(css.borderLeftWidth),top:parseFloat(css.borderTopWidth),shadow:css.boxShadow,italic:css.fontStyle,icons:el.querySelectorAll('svg').length}})
     expect(design).toEqual({left:0,top:0,shadow:'none',italic:'normal',icons:1});record('notice uses a history SVG and a plain rule line without coloured accents pills glows or italics')
     expect(errors).toEqual([])
-  });await evidence(checks)
+  })
+  await evidence(checks)
 })
 
 // Risk: the Desk leaks a project administration decision, its link misses the
@@ -257,12 +271,34 @@ test('AEON-1317 Desk opens waiting definitions and resolves only after the last 
     await expect(page.locator('#definition-changes')).toBeInViewport()
     await expect(page.locator('[data-check="estimate_set"] [data-decision="accept"]')).toBeFocused()
     checks.push({assert:'D6 admin item Open lands on the notice with the first waiting action focused',width,theme,locale:'en',passed:true})
-    for(const change of changes){await page.locator(`[data-check="${change.check_id}"] [data-decision="keep"]`).click();await expect(page.locator(`[data-check="${change.check_id}"]`)).toHaveAttribute('data-waiting','false')}
+    for(const change of changes){
+      await page.locator(`[data-check="${change.check_id}"] [data-decision="keep"]`).click();await expect(page.locator(`[data-check="${change.check_id}"]`)).toHaveAttribute('data-waiting','false')
+      if(world.context.pending_changes!.length===1){
+        await navigate(page,'/decision-desk');await expect(row).toContainText('PRJ-26: 1 change to the workspace default waits for a decision')
+        await row.getByRole('link',{name:'Open',exact:true}).click()
+      }
+    }
     await navigate(page,'/decision-desk');await expect(row).toHaveCount(0)
     checks.push({assert:'Desk resolves when no changes wait',width,theme,locale:'en',passed:true})
     world.readOnly=true;world.context.pending_changes=structuredClone(changes);await page.reload();await expect(row).toHaveCount(0)
     checks.push({assert:'Desk item is absent for a read-only project viewer',width,theme,locale:'en',passed:true});expect(errors).toEqual([])
-  });await evidence(checks)
+  })
+  // The server escapes one key segment with url.PathEscape. Such a key must
+  // survive client hydration and reach the same project's waiting notice.
+  const context=await browser.newContext({viewport:{width:1440,height:1000}}),page=await context.newPage(),key='PRJ Ü/26?@+&'
+  try{
+    const {world,errors}=await setup(page,'light','en',false,key)
+    await page.goto('/decision-desk')
+    const row=page.getByTestId(`desk-row-d:${world.context.definition!.id}`)
+    await expect(row).toContainText(definitionDeskWords(key,3))
+    await row.getByRole('link',{name:'Open',exact:true}).click()
+    expect(new URL(page.url()).pathname).toBe(`/p/${encodeURIComponent(key)}/settings/definitions`)
+    await expect(page.locator('#definition-changes')).toContainText(key)
+    await expect(page.locator('[data-check="estimate_set"] [data-decision="accept"]')).toBeFocused()
+    expect(errors).toEqual([])
+    checks.push({assert:'encoded non-ASCII and delimiter project keys retain their Desk item and open the same project notice',width:1440,theme:'light',locale:'en',passed:true})
+  }finally{await context.close()}
+  await evidence(checks)
 })
 
 // Risk: new German copy is missing from the actual UI, dates/counts break at a
@@ -291,6 +327,9 @@ test('AEON-1317 German definitions copy covers every P3 string and singular noti
       world.workspace={...world.workspace,checks:{}};await page.reload();await expect(card).toContainText('Kein Workspace-Standard. Tickets bewegen sich frei in jedem Projekt ohne eigene Definition.');snapshot.empty=await card.locator('.origin').innerText()
       await shot(page,width,'light','D2-de')
       await navigate(page,'/decision-desk');const row=page.getByTestId(`desk-row-d:${world.context.definition!.id}`);await expect(row).toContainText(definitionDeskWords('PRJ-26',3,'de'));await expect(row.getByRole('link',{name:'Öffnen',exact:true})).toBeVisible();snapshot.desk=await row.innerText();await shot(page,width,'light','D6-de')
+      world.context.pending_changes=structuredClone(changes.slice(0,1));await page.reload()
+      await expect(row).toContainText('PRJ-26: 1 Änderung am Workspace-Standard wartet auf eine Entscheidung')
+      snapshot.singularDesk=await row.innerText()
       expect(await page.evaluate(()=>document.documentElement.scrollWidth-document.documentElement.clientWidth)).toBeLessThanOrEqual(1)
       checks.push({assert:'all section 4 German strings render in the locale snapshot including singular plural dates and Desk Open',width,theme:'light',locale:'de',passed:true,snapshot});expect(errors).toEqual([])
     }finally{await context.close()}

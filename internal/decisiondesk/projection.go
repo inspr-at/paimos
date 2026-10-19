@@ -442,16 +442,21 @@ func definitionChangesTx(ctx context.Context, tx pgx.Tx, p tenant.Principal, ids
 		if project.Definition == nil {
 			continue
 		}
+		state := project.Copy.WithFallback(project.Definition, workspace)
+		pending := workorders.PendingDefinitionChanges(state.Reviewed, workspace.Checks)
+		if len(pending) == 0 {
+			continue
+		}
 		if err = authz.RequireProjectAdminTx(ctx, tx, p, project.ProjectID); errors.Is(err, authz.ErrForbidden) {
 			continue
 		} else if err != nil {
 			return nil, err
 		}
-		pending := workorders.PendingDefinitionChanges(project.Copy.Reviewed, workspace.Checks)
-		if len(pending) == 0 {
-			continue
+		title := fmt.Sprintf("%s: %d changes to the workspace default wait for a decision", project.Key, len(pending))
+		if len(pending) == 1 {
+			title = fmt.Sprintf("%s: 1 change to the workspace default waits for a decision", project.Key)
 		}
-		rows = append(rows, map[string]any{"id": project.Definition.ID, "project_id": project.ProjectID, "revision": project.Definition.Revision.UnixMicro(), "title": fmt.Sprintf("%s: %d changes to the workspace default wait for a decision", project.Key, len(pending)), "created_at": workspace.Revision, "source": "/p/" + url.PathEscape(project.Key) + "/settings/definitions?definition_changes=1#definition-changes", "project_key": project.Key, "pending_count": len(pending)})
+		rows = append(rows, map[string]any{"id": project.Definition.ID, "project_id": project.ProjectID, "revision": project.Definition.Revision.UnixMicro(), "title": title, "created_at": workspace.Revision, "source": "/p/" + url.PathEscape(project.Key) + "/settings/definitions?definition_changes=1#definition-changes", "project_key": project.Key, "pending_count": len(pending)})
 	}
 	return json.Marshal(rows)
 }

@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import { expect, it, vi } from 'vitest'
 vi.mock('../src/lib/api', () => ({ api: vi.fn(), APIError: class extends Error {} }))
-import { decideDefinitionChange, definitionChangeWords, definitionDate, definitionDecisionWords, definitionDeskWords, definitionDiff, definitionNotice, resetChanges, ruleIcon, ruleLabel, ruleWords, sameRule, saveWorkspaceDefinition, type DefinitionChange, type DefinitionChecks, type DefinitionContext } from '../src/lib/definitions'
+import { decideDefinitionChange, definitionAdminNames, definitionChangeWords, definitionDate, definitionDecisionWords, definitionDeskWords, definitionDiff, definitionNotice, resetChanges, ruleIcon, ruleLabel, ruleWords, sameRule, saveWorkspaceDefinition, type DefinitionChange, type DefinitionChecks, type DefinitionContext } from '../src/lib/definitions'
 import { api } from '../src/lib/api'
 import { deskItemID, deskLinkOut } from '../src/lib/decisionDesk'
 import { displayLanguage } from '../src/lib/displayLanguage'
@@ -52,11 +52,18 @@ it('AEON-1317 binds decisions to both revisions and renders the complete bilingu
     'Seit 9.\u00a0Okt. nicht mehr im Workspace-Standard',
   ])
   expect(changes.map(change => definitionDecisionWords(change,change.before ?? undefined,'de'))).toEqual([['Hier übernehmen','Weglassen'],['Auch hier übernehmen','Alle Tickets behalten'],['Auch hier entfernen','Behalten']])
+  expect(definitionDecisionWords(changes[1]!,changes[1]!.before!)).toEqual(['Use it here too','Keep all tickets'])
+  expect(definitionNotice('PRJ-26',1,date)).toContain('1\u00a0change waits for a decision')
   expect(definitionNotice('PRJ-26',1,deDate,'de')).toBe('Der Workspace-Standard wurde am 9.\u00a0Okt. geändert, nachdem PRJ-26 ihn kopiert hat. 1\u00a0Änderung wartet unten auf eine Entscheidung; bis dahin behält PRJ-26 seine Kopie unverändert.')
   expect(definitionNotice('PRJ-26',3,date)).toContain('3\u00a0changes wait')
   expect(definitionNotice('PRJ-26',0,date)).toBe('All changes decided.')
   expect(definitionNotice('PRJ-26',0,deDate,'de')).toBe('Alle Änderungen entschieden.')
   expect(definitionDeskWords('PRJ-26',3,'de')).toBe('PRJ-26: 3\u00a0Änderungen am Workspace-Standard warten auf eine Entscheidung')
+  expect(definitionDeskWords('PRJ-26',1)).toBe('PRJ-26: 1\u00a0change to the workspace default waits for a decision')
+  expect(definitionDeskWords('PRJ-26',1,'de')).toBe('PRJ-26: 1\u00a0Änderung am Workspace-Standard wartet auf eine Entscheidung')
+  expect(definitionAdminNames([{id:'ada',name:'Ada'}],2)).toBe('Ada and 2 more')
+  expect(definitionAdminNames([{id:'ada',name:'Ada'}],2,'de')).toBe('Ada und 2 weitere')
+  expect(definitionAdminNames()).toBe('')
   // The released built-in workspace policy also contains this check, although
   // it is not an additional choice in the approved Add menu.
   expect(ruleLabel({id:'lesson_recorded'})).toBe('Lesson recorded')
@@ -73,6 +80,11 @@ it('AEON-1317 binds decisions to both revisions and renders the complete bilingu
   expect(JSON.parse(vi.mocked(api).mock.calls.at(-1)![1]!.body as string).expected_revision).toBeNull()
   const target='/p/PRJ-26/settings/definitions?definition_changes=1#definition-changes'
   expect(deskLinkOut({kind:'definition_change',href:target})).toBe(target)
+  // These are url.PathEscape outputs, including characters Go leaves literal
+  // while encodeURIComponent escapes them. Delimiters remain inside one key.
+  for (const [escaped,key] of [['PRJ%20%C3%9C%2F26%3F@+&','PRJ Ü/26?@+&'],['A:B=C$D','A:B=C$D'],['A%23B%25C','A#B%C'],['%E6%97%A5%E6%9C%AC','日本']]) {
+    expect(deskLinkOut({kind:'definition_change',href:`/p/${escaped}/settings/definitions?definition_changes=1#definition-changes`})).toBe(`/p/${encodeURIComponent(key!)}/settings/definitions?definition_changes=1#definition-changes`)
+  }
   expect(deskItemID({kind:'definition_change',id:'copy-id'})).toBe('d:copy-id')
-  for (const href of ['https://example.com', '//example.com','/p/PRJ-26/settings/access', '/p/PRJ-26/settings/definitions?definition_changes=1#other']) expect(deskLinkOut({kind:'definition_change',href})).toBe('')
+  for (const href of ['https://example.com', '//example.com','/p/PRJ-26/settings/access', '/p/PRJ-26/settings/definitions?definition_changes=1#other', '/p/A/B/settings/definitions?definition_changes=1#definition-changes', '/p/%ZZ/settings/definitions?definition_changes=1#definition-changes', '/p/%2e%2e/settings/definitions?definition_changes=1#definition-changes']) expect(deskLinkOut({kind:'definition_change',href})).toBe('')
 })

@@ -4,6 +4,7 @@ package nodes
 import (
 	"encoding/json"
 	"fmt"
+	"net/url"
 	"reflect"
 	"strings"
 	"testing"
@@ -214,7 +215,9 @@ func TestDefinitionDefaultChangesWaitForAuthorizedPerCheckDecisions(t *testing.T
 	}
 	// A changed version of a kept check waits again; acknowledgements are per version.
 	updated["in_progress"][0].Condition = "code"
-	send(p, "PUT", "/api/settings/definitions", map[string]any{"expected_revision": workspace.Revision, "checks": updated}, 200)
+	if err := json.Unmarshal(send(p, "PUT", "/api/settings/definitions", map[string]any{"expected_revision": workspace.Revision, "checks": updated}, 200), &workspace); err != nil {
+		t.Fatal(err)
+	}
 	page, err := decisiondesk.New(appPool).Read(t.Context(), p, 100, nil)
 	if err != nil {
 		t.Fatal(err)
@@ -226,9 +229,117 @@ func TestDefinitionDefaultChangesWaitForAuthorizedPerCheckDecisions(t *testing.T
 			if item.DefinitionChange == nil || item.DefinitionChange.PendingCount != 1 || !item.CanDecide || !strings.HasSuffix(item.Href, "?definition_changes=1#definition-changes") {
 				t.Fatalf("bad Desk source: %+v", item)
 			}
+			if item.Title != item.DefinitionChange.ProjectKey+": 1 change to the workspace default waits for a decision" {
+				t.Fatalf("incorrect singular Desk title: %q", item.Title)
+			}
 		}
 	}
 	if count != 6 {
 		t.Fatalf("later default change did not reopen six admin decisions: %+v", page)
 	}
+
+	// Risk: older API-authored copies without snapshots invent new checks, or
+	// a recovered copy baseline differs between the page, differ list and Desk.
+	for _, recovered := range []bool{false, true} {
+		t.Run(fmt.Sprintf("missing snapshots/recovered=%t", recovered), func(t *testing.T) {
+			key := fmt.Sprintf("PRJ Ü/26?@+&-%t", recovered)
+			project := mustNode(t, p, fmt.Sprintf(`{"kind_id":%q,"title":"Legacy copy","fields":{"project_key":%q}}`, kindBySlug(t, p, "project").ID, key))
+			path := "/api/projects/" + project.ID + "/definitions"
+			var own workqueue.EntryDefinition
+			if err := json.Unmarshal(send(p, "PUT", path, map[string]any{"expected_revision": nil, "checks": base}, 200), &own); err != nil {
+				t.Fatal(err)
+			}
+			var copiedFrom any
+			if recovered {
+				copiedFrom = workspace.Revision
+			}
+			fields, err := json.Marshal(map[string]any{"checks": base, "copied_from_revision": copiedFrom, "copied_from_checks": nil, "reviewed_checks": nil})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if _, err := testDB.Admin.Exec(t.Context(), `UPDATE nodes SET fields=$3::jsonb WHERE tenant_id=$1 AND id=$2`, p.TenantID, own.ID, string(fields)); err != nil {
+				t.Fatal(err)
+			}
+			var context entryDefinitionContext
+			if err := json.Unmarshal(send(p, "GET", path+"/context", nil, 200), &context); err != nil {
+				t.Fatal(err)
+			}
+			wantPending := 3
+			if recovered {
+				wantPending = 0
+			}
+			if len(context.Pending) != wantPending {
+				t.Fatalf("missing snapshot fallback: got %+v, want %d changes", context.Pending, wantPending)
+			}
+			for _, change := range context.Pending {
+				if change.CheckID == "manual:review" || change.CheckID == "estimate_set" && change.Kind != "changed" {
+					t.Fatalf("known copy check incorrectly called new: %+v", change)
+				}
+			}
+			var summary workspaceDefinitionContext
+			if err := json.Unmarshal(send(p, "GET", "/api/settings/definitions/context", nil, 200), &summary); err != nil {
+				t.Fatal(err)
+			}
+			found := false
+			for _, row := range summary.Projects {
+				if row.ProjectID == project.ID {
+					found = true
+					if row.Pending != len(context.Pending) {
+						t.Fatalf("differ/page count mismatch: %+v versus %+v", row, context.Pending)
+					}
+				}
+			}
+			if !found {
+				t.Fatal("differ list lost a differing copy")
+			}
+			page, err := decisiondesk.New(appPool).Read(t.Context(), p, 100, nil)
+			if err != nil {
+				t.Fatal(err)
+			}
+			found = false
+			for _, item := range page.Items {
+				if item.Kind == "definition_change" && item.ProjectID == project.ID {
+					found = true
+					wantHref := "/p/" + url.PathEscape(key) + "/settings/definitions?definition_changes=1#definition-changes"
+					if item.DefinitionChange == nil || item.DefinitionChange.PendingCount != len(context.Pending) || item.Href != wantHref {
+						t.Fatalf("Desk/page count or escaped-key mismatch: %+v", item)
+					}
+				}
+			}
+			if found != (wantPending != 0) {
+				t.Fatalf("Desk waiting item present=%t, want pending=%d", found, wantPending)
+			}
+			if !recovered {
+				change := context.Pending[0]
+				if err := json.Unmarshal(send(p, "POST", path+"/decisions", map[string]any{"expected_revision": own.Revision, "expected_workspace_revision": workspace.Revision, "check_id": change.CheckID, "decision": "keep"}, 200), &context); err != nil {
+					t.Fatal(err)
+				}
+				if len(context.Pending) != wantPending-1 || !reflect.DeepEqual(context.Definition.Checks, base) {
+					t.Fatalf("legacy decision lost its baseline or changed enforcement: %+v", context)
+				}
+			}
+		})
+	}
+
+	// Risk: a large administrator roster turns the whole context GET into 422.
+	// Names stay bounded and explicitly counted; definitions and access still load.
+	t.Run("bounded administrator names", func(t *testing.T) {
+		if _, err := testDB.Admin.Exec(t.Context(), `WITH people AS (
+		 INSERT INTO principals(tenant_id,kind,name) SELECT $1,'person','Definition admin '||n FROM generate_series(1,101) n RETURNING id,tenant_id)
+		 INSERT INTO role_bindings(tenant_id,principal_id,role_id,scope_type)
+		 SELECT p.tenant_id,p.id,r.id,'workspace' FROM people p JOIN roles r ON r.tenant_id=p.tenant_id AND r.key='admin'`, p.TenantID); err != nil {
+			t.Fatal(err)
+		}
+		var context entryDefinitionContext
+		if err := json.Unmarshal(send(p, "GET", "/api/projects/"+cases[0].project.ID+"/definitions/context", nil, 200), &context); err != nil {
+			t.Fatal(err)
+		}
+		var summary workspaceDefinitionContext
+		if err := json.Unmarshal(send(p, "GET", "/api/settings/definitions/context", nil, 200), &summary); err != nil {
+			t.Fatal(err)
+		}
+		if len(context.Admins) != 100 || context.AdminsMore != 2 || !context.CanManage || context.Definition == nil || len(summary.Admins) != 100 || summary.AdminsMore != 2 || !summary.CanManage || summary.Definition == nil {
+			t.Fatalf("large roster broke a context or hid truncation: project=%+v workspace=%+v", context, summary)
+		}
+	})
 }

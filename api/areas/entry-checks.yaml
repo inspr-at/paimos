@@ -321,7 +321,8 @@ components:
         copied_from_checks: {oneOf: [{$ref: '#/components/schemas/EntryDefinitionBlocks'}, {type: 'null'}], description: 'Checks retained by the server when this project copied the default; null for a definition created without a copy base.'}
         can_manage: {type: boolean, description: 'The current principal is a person project admin. The server rechecks this inside every write.'}
         pending_changes: {type: array, maxItems: 192, items: {$ref: '#/components/schemas/EntryDefinitionChange'}, description: 'Unacknowledged changes since the copy or the last per-check decision. These do not alter enforcement.'}
-        admins: {type: array, maxItems: 100, items: {$ref: '#/components/schemas/EntryCheckPerson'}}
+        admins: {type: array, maxItems: 100, items: {$ref: '#/components/schemas/EntryCheckPerson'}, description: 'First 100 active administrators; additional names are counted in admins_more.'}
+        admins_more: {type: integer, minimum: 0, description: 'Number of additional active administrators omitted from the bounded names list.'}
     EntryCheckPerson:
       type: object
       required: [id, name]
@@ -343,7 +344,8 @@ components:
       properties:
         definition: {oneOf: [{$ref: '#/components/schemas/EntryDefinition'}, {type: 'null'}]}
         can_manage: {type: boolean}
-        admins: {type: array, maxItems: 100, items: {$ref: '#/components/schemas/EntryCheckPerson'}}
+        admins: {type: array, maxItems: 100, items: {$ref: '#/components/schemas/EntryCheckPerson'}, description: 'First 100 active administrators; additional names are counted in admins_more.'}
+        admins_more: {type: integer, minimum: 0, description: 'Number of additional active administrators omitted from the bounded names list.'}
         projects:
           type: array
           maxItems: 100

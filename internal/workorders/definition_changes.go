@@ -45,6 +45,26 @@ func DecodeDefinitionCopyState(raw []byte) (DefinitionCopyState, error) {
 	return state, nil
 }
 
+// WithFallback gives every reader and decision the same comparison baseline
+// for older definitions without stored snapshots. A matching copy revision
+// recovers the workspace snapshot; without provenance, only the enforced
+// project checks are known. Neither fallback changes enforcement.
+func (state DefinitionCopyState) WithFallback(current, workspace *EntryDefinition) DefinitionCopyState {
+	if current == nil || current.Source != "project" {
+		return state
+	}
+	if state.Base == nil && current.CopiedFrom != nil && workspace != nil && current.CopiedFrom.Equal(workspace.Revision) {
+		state.Base = workspace.Checks
+	}
+	if state.Reviewed == nil {
+		state.Reviewed = state.Base
+		if state.Reviewed == nil {
+			state.Reviewed = current.Checks
+		}
+	}
+	return state
+}
+
 type DefinitionChange struct {
 	CheckID string     `json:"check_id"`
 	Block   string     `json:"block"`

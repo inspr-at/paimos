@@ -258,6 +258,7 @@ type entryDefinitionContext struct {
 	CanManage  bool                             `json:"can_manage"`
 	Pending    []workorders.DefinitionChange    `json:"pending_changes"`
 	Admins     []workorders.EntryPerson         `json:"admins"`
+	AdminsMore int                              `json:"admins_more"`
 }
 
 func entryCopyChecksTx(ctx context.Context, tx pgx.Tx, id string) (map[string][]workqueue.EntryRule, error) {
@@ -392,6 +393,7 @@ func (m *Module) handleDefinition(w http.ResponseWriter, r *http.Request) {
 			if stateErr != nil {
 				return stateErr
 			}
+			state = state.WithFallback(current, workspace)
 			reviewedChecks = state.Reviewed
 			baseChecks, err = entryCopyChecksTx(ctx, tx, current.ID)
 			if err != nil {
