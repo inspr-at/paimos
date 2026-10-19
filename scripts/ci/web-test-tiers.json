@@ -9448,6 +9448,8 @@
     ,
     {"kind":"browser","file":"tests/header-glimpse.spec.ts","name":"AEON-1414: a visual viewport shrink clears the glimpse while frames and other resize notifications are held","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
+    {"kind":"browser","file":"tests/header-glimpse.spec.ts","name":"AEON-1467: a painted glimpse hides below 1280 after the paint sampler and the document observer are gone","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
     {"kind":"browser","file":"tests/header-glimpse.spec.ts","name":"AEON-1471: a narrow root clears the glimpse while window and media hints stay wide","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
     {"kind":"browser","file":"tests/header-glimpse.spec.ts","name":"AEON-1472: an active glimpse stops after all viewport notifications are dropped","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
