@@ -7,7 +7,7 @@ import { fixtures, mockWork } from './work-fixtures'
 import { mockEffectivePermissions } from './authz-fixtures'
 import { mockSettings, settingsData } from './settings-fixtures'
 import { reviewPolicy } from './policies-fixtures'
-import { definitionChangeWords, definitionDate, definitionDecisionWords, definitionDeskWords, definitionNotice, type Definition, type DefinitionChange, type DefinitionChecks, type DefinitionContext, type DefinitionRule, type DefinitionStatus } from '../src/lib/definitions'
+import { DEFINITION_CATALOG, definitionChangeWords, definitionDate, definitionDecisionWords, definitionDeskWords, definitionNotice, type Definition, type DefinitionChange, type DefinitionChecks, type DefinitionContext, type DefinitionRule, type DefinitionStatus } from '../src/lib/definitions'
 
 const blocks: DefinitionStatus[] = ['in_progress','qa','done']
 const base: DefinitionChecks = {in_progress:[{id:'estimate_set'},{id:'acceptance_present'},{id:'design_attached',condition:'ui'}],qa:[{id:'review_ok_cross_family',condition:'code'}],done:[{id:'release_copy_set'}]}
@@ -24,10 +24,11 @@ let unitOutput=''
 test.beforeAll(()=>{
   test.setTimeout(90_000)
   unitOutput=execFileSync(process.execPath,['node_modules/vitest/vitest.mjs','run','tests/definitions.unit.test.ts','--maxWorkers=1'],{encoding:'utf8',timeout:60_000,maxBuffer:1024*1024})
+  unitOutput+=execFileSync(process.execPath,['--test','tests/text-glyphs.test.ts'],{encoding:'utf8',timeout:60_000,maxBuffer:1024*1024})
 })
 type Check = {assert: string; width: number; theme: string; locale: string; passed: true; [key: string]: unknown}
 async function evidence(checks: Check[]) {
-  const body=JSON.stringify({ticket:'AEON-1317',head:execFileSync('git',['rev-parse','HEAD'],{encoding:'utf8'}).trim(),units:{file:'tests/definitions.unit.test.ts',output:unitOutput},checks},null,2)
+  const body=JSON.stringify({ticket:'AEON-1528',head:execFileSync('git',['rev-parse','HEAD'],{encoding:'utf8'}).trim(),units:{file:'tests/definitions.unit.test.ts',output:unitOutput},checks},null,2)
   await writeFile(test.info().outputPath('checks.json'),body)
   // The guarded remote runner retrieves Markdown and PNG attachments.
   await writeFile(test.info().outputPath('checks.md'),body)
@@ -41,7 +42,7 @@ async function shot(page: Page,width: number,theme: string,state: string){
     return {height:Math.ceil(main.scrollHeight+rect.top+innerHeight-rect.bottom+2),top:main.scrollTop,x:scrollX,y:scrollY}
   })
   expect(layout.height,'bounded full-state evidence').toBeLessThanOrEqual(12_000)
-  try{await page.setViewportSize({width,height:Math.max(viewport.height,layout.height)});await page.screenshot({path:test.info().outputPath(`aeon1317-${width}-${theme}-${state}.png`),fullPage:true})}
+  try{await page.setViewportSize({width,height:Math.max(viewport.height,layout.height)});await page.screenshot({path:test.info().outputPath(`aeon1528-${width}-${theme}-${state}.png`),fullPage:true})}
   finally{await page.setViewportSize(viewport);await page.evaluate(layout=>{document.querySelector('main')!.scrollTop=layout.top;window.scrollTo(layout.x,layout.y)},layout)}
 }
 function barrier(){let entered!:()=>void,release!:()=>void;const pending=new Promise<void>(resolve=>entered=resolve),until=new Promise<void>(resolve=>release=resolve);return {entered,release,pending,until}}
@@ -151,7 +152,9 @@ test('AEON-1317 default decisions preserve every row notice copy and focus in al
       expect(Math.max(...labels)-Math.min(...labels)).toBeLessThanOrEqual(1)
       record('desktop rows align through the action column; phone rows have natural heights without reserve copy; project keys never break',{alignmentPx:Math.max(...labels)-Math.min(...labels)})
       await shot(page,width,theme,'D3')
-      const allControls:Record<string,Locator>={notice}
+      // Undo for an ordinary row must replace its menu in the same action
+      // slot; a second phone action line would grow the measured row.
+      const allControls:Record<string,Locator>={notice,ordinaryAction:ordinary.locator('.dr-action')}
       for(let i=0;i<await rows.count();i++)allControls[`row${i}`]=rows.nth(i)
       const stable=await controlStability(page,allControls)
       await stable.check(async()=>{await ordinary.getByRole('button',{name:'More for Approved design attached'}).click();await page.getByRole('menuitem',{name:'Remove',exact:true}).click();await expect(ordinary).toContainText('Removed')})
@@ -301,6 +304,24 @@ test('AEON-1317 Desk opens waiting definitions and resolves only after the last 
   await evidence(checks)
 })
 
+// Check the translated surface and its accessible names, keeping the surrounding
+// app's separately scoped display policy out of this assertion.
+async function germanOnly(surface: Locator) {
+  if (await surface.getAttribute('id') === 'definitions') await expect(surface.getByRole('heading',{name:'Definitionen',exact:true})).toBeVisible()
+  const text = await surface.evaluate(el => [
+    (el as HTMLElement).innerText,
+    ...Array.from(el.querySelectorAll('[aria-label],[title],[placeholder]')).map(node => ['aria-label','title','placeholder'].map(key => node.getAttribute(key) ?? '').join(' ')),
+  ].join(' '))
+  expect(text).not.toMatch(/\b(?:Add back|Added back|Added for|Changed for|Moved for|Show|Hide|Ready|Done|In progress|Workspace default|workspace default|How this works|Reset|Cancel|Remove|Removed|Save|Add|Add check|More for|Free-text item|Move up|Move down|Applies to|Who ticks|Ticked by|One named person|Choose a person|All tickets|Code tickets|UI tickets|Every ticket|usually|Reading the definition|No checks|No definition yet|Definitions|What it is|What happens|Who sets it|Dropped|Comes back|Uses the workspace version)\b/)
+  expect(text).not.toMatch(/\b(?:du|dich|dir|dein|deine|deinen|deinem)\b/i)
+}
+async function switchDefinitionLocale(page: Page, locale: string) {
+  await page.evaluate(locale => {
+    const app = document.querySelector('#app') as unknown as {__vue_app__: {config: {globalProperties: {$pinia: {_s: Map<string, {profile: {locale: string}}>}}}}}
+    app.__vue_app__.config.globalProperties.$pinia._s.get('profile')!.profile.locale = locale
+  }, locale)
+}
+
 // Risk: new German copy is missing from the actual UI, dates/counts break at a
 // line edge, or long translated actions overflow the phone.
 test('AEON-1317 German definitions copy covers every P3 string and singular notices',async({browser})=>{
@@ -315,12 +336,52 @@ test('AEON-1317 German definitions copy covers every P3 string and singular noti
       const snapshot:Record<string,unknown>={notice:await card.locator('.notice-copy > span').first().textContent(),rows:[]}
       await expect(card.locator('.origin')).toContainText('Vom Workspace-Standard am 8. Okt. kopiert.');snapshot.origin=await card.locator('.origin').innerText()
       for(const change of changes){const row=card.locator(`[data-check="${change.check_id}"]`);await expect(row).toContainText(definitionChangeWords(change,date,'de'));for(const word of definitionDecisionWords(change,change.before??undefined,'de'))await expect(row.getByRole('button',{name:word,exact:true})).toBeVisible();(snapshot.rows as unknown[]).push(await row.innerText())}
+      await germanOnly(card)
+      for (const label of ['Bereit','QA','Erledigt']) await expect(card.locator('.db-head h3').filter({hasText:label}).first()).toBeVisible()
+      await card.getByRole('button',{name:'Prüfung zu Erledigt hinzufügen',exact:true}).click()
+      const catalog=page.getByRole('dialog',{name:'Zu Erledigt hinzufügen',exact:true})
+      for (const item of DEFINITION_CATALOG.filter(item=>!blocks.some(block=>world.context.definition!.checks[block]?.some(rule=>rule.id===item.id)))) await expect(catalog.getByRole('menuitem',{name:new RegExp(`^${item.de.replace(/[.*+?^${}()|[\]\\]/g,'\\$&')}`)})).toBeVisible()
+      await germanOnly(catalog)
+      await catalog.getByRole('menuitem',{name:/^Freitext-Prüfung/}).click()
+      const manual=page.getByRole('dialog',{name:'Freitext-Prüfung hinzufügen',exact:true})
+      await germanOnly(manual)
+      await manual.getByRole('button',{name:'Abbrechen',exact:true}).click()
+      await card.getByRole('button',{name:'Workspace-Standard oder dieses Projekt',exact:true}).click()
+      const explanation=page.getByRole('dialog',{name:'Workspace-Standard oder dieses Projekt',exact:true})
+      await germanOnly(explanation);await explanation.getByRole('button',{name:'Erklärung schließen',exact:true}).click()
       await shot(page,width,'light','D3-de')
       for(const id of ['estimate_set','acceptance_present']){await card.locator(`[data-check="${id}"] [data-decision="keep"]`).click();await expect(card.locator(`[data-check="${id}"]`)).toHaveAttribute('data-waiting','false')}
       await expect(card.locator('.notice-copy > span').first()).toHaveText(definitionNotice('PRJ-26',1,date,'de'))
       await card.locator('[data-check="no_active_build"] [data-decision="keep"]').click();await expect(card.locator('.notice-copy > span').first()).toHaveText('Alle Änderungen entschieden.')
       snapshot.decided=await card.locator('.notice-copy > span').first().textContent()
-      await navigate(page,'/settings/policies#definitions');await card.getByRole('button',{name:'3 Projekte weichen ab',exact:true}).click()
+      await germanOnly(card)
+      await card.locator('[data-check="estimate_set"]').getByRole('button',{name:'Mehr zu Schätzung gesetzt',exact:true}).click()
+      const menu=page.getByRole('dialog',{name:'Schätzung gesetzt',exact:true});await germanOnly(menu)
+      await menu.getByRole('menuitem',{name:'Gilt für…',exact:true}).click()
+      const conditions=page.getByRole('dialog',{name:'Schätzung gesetzt gilt für',exact:true});await germanOnly(conditions)
+      const all=conditions.getByRole('radio',{name:'Alle Tickets',exact:true}),code=conditions.getByRole('radio',{name:'Code-Tickets',exact:true})
+      const formStable=await controlStability(page,{all,code,group:conditions.locator('fieldset'),save:conditions.getByRole('button',{name:/^Speichern/}),cancel:conditions.getByRole('button',{name:'Abbrechen',exact:true})})
+      await formStable.check(()=>code.check());await formStable.check(()=>all.check());formStable.done()
+      await conditions.getByRole('button',{name:'Abbrechen',exact:true}).click()
+      await card.getByRole('button',{name:'Auf Workspace-Standard zurücksetzen…',exact:true}).click()
+      const reset=page.getByRole('dialog',{name:'Definition von PRJ-26 zurücksetzen',exact:true});await germanOnly(reset)
+      await expect(reset).toContainText('Tickets behalten ihren Status; die neuen Prüfungen gelten beim nächsten Statuswechsel.')
+      await reset.getByRole('button',{name:'Abbrechen',exact:true}).click()
+      // A deliberate omission renders the tail and folded Add back states.
+      world.context={...world.context,definition:copy({done:[{id:'manual:translation',label:'Freigabe geprüft'}]}),copied_from_checks:structuredClone(world.workspace.checks),pending_changes:[]}
+      await page.reload();await germanOnly(card)
+      const show=card.getByRole('button',{name:'Anzeigen',exact:true});await show.click();await germanOnly(card)
+      await expect(card.getByRole('button',{name:'Ausblenden',exact:true})).toBeVisible()
+      const restored=card.locator('[data-fold-row="estimate_set"]')
+      await restored.getByRole('button',{name:'Wieder hinzufügen',exact:true}).click();await expect(restored).toContainText('Wieder zu Bereit hinzugefügt');await germanOnly(card)
+      await card.locator('[data-check="manual:translation"]').getByRole('button',{name:'Mehr zu Freigabe geprüft',exact:true}).click()
+      await page.getByRole('menuitem',{name:/^Wer bestätigt diese Prüfung/}).click()
+      const owner=page.getByRole('dialog',{name:'Wer bestätigt diese Prüfung',exact:true});await germanOnly(owner)
+      await owner.getByRole('button',{name:'Abbrechen',exact:true}).click()
+      await shot(page,width,'light','P2-de')
+
+      world.context={...world.context,definition:copy(base),copied_from_checks:structuredClone(base),pending_changes:[]}
+      await navigate(page,'/settings/policies#definitions');await germanOnly(card);await card.getByRole('button',{name:'3 Projekte weichen ab',exact:true}).click()
       await expect(card).toContainText('PHAROS nutzt diesen Standard');await expect(card).toContainText('Weicht an 2 Stellen ab')
       world.context.pending_changes=structuredClone(changes);await page.reload();await card.getByRole('button',{name:'3 Projekte weichen ab',exact:true}).click();await expect(card).toContainText('3 Änderungen warten')
       world.context.pending_changes=structuredClone(changes.slice(0,2));await page.reload();await card.getByRole('button',{name:'3 Projekte weichen ab',exact:true}).click();await expect(card).toContainText('2 Änderungen warten');snapshot.differ=await card.locator('.differ').innerText();world.context.pending_changes=structuredClone(changes);await shot(page,width,'light','D1-de')
@@ -360,4 +421,65 @@ test('AEON-1317 failed stale and identity-bound decisions never claim success',a
   await expect(workspaceCard.locator('[data-check="released"]')).toBeVisible();await expect(page.locator('.toast.error').filter({hasText:'Project differences unavailable'})).toContainText('Project differences unavailable')
   await expect(page.getByText('Workspace default saved.',{exact:true})).toHaveCount(0)
   expect(errors).toEqual([]);await evidence([{assert:'failed decisions retain copy and waiting rows; barrier-held results cannot cross project identity; failed and partial workspace saves report errors without shifting rows',width:page.viewportSize()!.width,theme:'light',locale:'en',passed:true}])
+})
+
+
+// Risks NB3/NB4: stale phone/locale reservations leave excess space; longer
+// decided content overflows; unchanged saves move controls in later rows.
+test('AEON-1528 definitions remeasure resize locale and longer decisions without shifting unchanged content',async({page})=>{
+  test.setTimeout(90_000)
+  await page.setViewportSize({width:390,height:1000})
+  const {world,errors}=await setup(page,'light','de')
+  await page.goto('/p/PRJ-26/settings/definitions')
+  const card=page.locator('#definitions'),notice=card.locator('#definition-changes'),origin=card.locator('.origin')
+  await expect(notice).toContainText('3 Änderungen warten')
+  const height=(element:Locator)=>element.evaluate(el=>el.getBoundingClientRect().height)
+  const phone={notice:await height(notice),origin:await height(origin)}
+  await page.setViewportSize({width:1440,height:1000})
+  await expect.poll(()=>height(notice)).toBeLessThan(phone.notice)
+  await expect.poll(()=>height(origin)).toBeLessThan(phone.origin)
+  // Compare to natural height: clearing the stale min-height must have no
+  // effect after each fresh layout. This rejects a merely smaller old pin.
+  const fitsNatural=async(element:Locator)=>{
+    await expect.poll(()=>element.evaluate(el=>{const node=el as HTMLElement,before=node.getBoundingClientRect().height,style=node.style.minHeight;node.style.minHeight='';const natural=node.getBoundingClientRect().height;node.style.minHeight=style;return Math.abs(before-natural)})).toBeLessThanOrEqual(.5)
+  }
+  await fitsNatural(notice);await fitsNatural(origin)
+  await page.setViewportSize({width:390,height:1000})
+  await expect.poll(()=>height(notice)).toBeGreaterThanOrEqual(phone.notice-.5)
+  await fitsNatural(notice);await fitsNatural(origin)
+  const german=await height(notice)
+  await switchDefinitionLocale(page,'en-GB')
+  await expect(notice).toContainText('3 changes wait')
+  await fitsNatural(notice);await fitsNatural(origin)
+  expect(await height(notice)).toBeLessThanOrEqual(german)
+  // Shorter completion copy shrinks on a locale switch, while a decision
+  // itself keeps its notice and all later controls in the same place.
+  await page.setViewportSize({width:1440,height:1000})
+  await fitsNatural(notice);await fitsNatural(origin)
+  const unchanged=card.locator('[data-check="acceptance_present"]'),row=card.locator('[data-check="estimate_set"]')
+  const stable=await controlStability(page,{notice,origin,unchanged,next:unchanged.locator('[data-decision="accept"]'),row})
+  await stable.check(async()=>{await row.locator('[data-decision="keep"]').click();await expect(row).toHaveAttribute('data-waiting','false')});stable.done()
+  // A later rule edit during the same visit supplies a genuinely longer
+  // post-decision summary, without changing the row id or remounting it.
+  await row.getByRole('button',{name:'More for Estimate set',exact:true}).click();await page.getByRole('menuitem',{name:'Applies to…',exact:true}).click()
+  const form=page.getByRole('dialog',{name:'Estimate set applies to',exact:true}),longLabel=Array.from({length:16},(_,i)=>`security-policy-${i}-requires-a-reviewed-and-documented-result`).join(', ')
+  await form.getByRole('textbox',{name:'Required labels (comma-separated)',exact:true}).fill(longLabel)
+  const before=await height(row)
+  await form.getByRole('button',{name:/^Save/}).click();await expect(form).toHaveCount(0)
+  await expect(row).toContainText('security-policy-15-requires-a-reviewed-and-documented-result')
+  await expect.poll(()=>height(row)).toBeGreaterThan(before)
+  const contained=async()=>{
+    const overflow=await row.evaluate(el=>{const box=el.getBoundingClientRect();return Math.max(0,...Array.from(el.querySelectorAll('.dr-l > b,.dr-l > small,.decision-actions,.dr-action')).map(child=>child.getBoundingClientRect().bottom-box.bottom))})
+    expect(overflow).toBeLessThanOrEqual(.5)
+  }
+  await contained()
+  const repeat=await controlStability(page,{row,next:unchanged.locator('[data-decision="accept"]'),menu:row.getByRole('button',{name:'More for Estimate set',exact:true})})
+  await repeat.check(async()=>{await row.getByRole('button',{name:'More for Estimate set',exact:true}).click();await page.getByRole('menuitem',{name:'Applies to…',exact:true}).click();await page.getByRole('dialog',{name:'Estimate set applies to',exact:true}).getByRole('button',{name:/^Save/}).click();await expect(form).toHaveCount(0)});repeat.done()
+  await page.setViewportSize({width:390,height:1000});await fitsNatural(notice);await fitsNatural(origin);await contained()
+  await switchDefinitionLocale(page,'de-AT');await expect(card.getByRole('heading',{name:'Definitionen',exact:true})).toBeVisible();await fitsNatural(notice);await fitsNatural(origin);await contained()
+  for(const id of ['acceptance_present','no_active_build']){await card.locator(`[data-check="${id}"] [data-decision="keep"]`).click();await expect(card.locator(`[data-check="${id}"]`)).toHaveAttribute('data-waiting','false')}
+  const reserved=await height(notice);await switchDefinitionLocale(page,'en-GB');await expect(notice).toHaveText('All changes decided.');await fitsNatural(notice);expect(await height(notice)).toBeLessThan(reserved)
+  expect(world.context.definition!.checks.in_progress!.find(rule=>rule.id==='estimate_set')!.labels).toHaveLength(16)
+  expect(errors).toEqual([])
+  await evidence([{assert:'NB3 resize and locale shrink to natural height; NB4 longer decided text grows and stays contained; identical saves preserve controls',width:390,theme:'light',locale:'de/en',passed:true}])
 })

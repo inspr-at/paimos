@@ -8408,6 +8408,8 @@
     ,
     {"kind":"browser","file":"tests/definitions-p3.spec.ts","name":"AEON-1317 workspace defaults differences empty inherited and viewer match the approved states","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
+    {"kind":"browser","file":"tests/definitions-p3.spec.ts","name":"AEON-1528 definitions remeasure resize locale and longer decisions without shifting unchanged content","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
     {"kind":"browser","file":"tests/definitions.spec.ts","name":"AEON-1316 FIX4 Add and row menus stay anchored at every width with the approved copy","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
     {"kind":"browser","file":"tests/definitions.spec.ts","name":"AEON-1316 FIX4 Applies to offers only All Code UI and keeps fixed conditions as text","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
