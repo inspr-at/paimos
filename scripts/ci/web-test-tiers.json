@@ -9982,6 +9982,18 @@
     ,
     {"kind":"browser","file":"tests/headings.spec.ts","name":"touch full-text reveal › viewport-long description keeps touch scrolling (768 light)","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
+    {"kind":"browser","file":"tests/hide-states.spec.ts","name":"AEON-1559 all five forms have stable toggles and 16 px resize hysteresis","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/hide-states.spec.ts","name":"AEON-1559 navigation settings fit docked and undocked list widths in dark","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/hide-states.spec.ts","name":"AEON-1559 navigation settings fit docked and undocked list widths in light","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/hide-states.spec.ts","name":"AEON-1559 non-teleported toolbar retains its 800 px container swap","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/hide-states.spec.ts","name":"AEON-1559 phone and standard viewport evidence in dark","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/hide-states.spec.ts","name":"AEON-1559 phone and standard viewport evidence in light","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
     {"kind":"browser","file":"tests/hide-states.spec.ts","name":"Hide choices and stable controls at 1024px dark","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
     {"kind":"browser","file":"tests/hide-states.spec.ts","name":"Hide choices and stable controls at 1024px light","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
@@ -14945,18 +14957,6 @@
     {"kind":"browser","file":"tests/version-reveal.spec.ts","name":"unnamed footer release: hover and keyboard focus show seconds in the card; a click opens history","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
     ,
     {"kind":"browser","file":"tests/version-reveal.spec.ts","name":"unnamed release rows: only the version copy control reveals; the row still selects","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
-    ,
-    {"kind":"browser","file":"tests/view-closed-overlap.spec.ts","name":"AEON-1559 all five forms have stable toggles and 16 px resize hysteresis","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
-    ,
-    {"kind":"browser","file":"tests/view-closed-overlap.spec.ts","name":"AEON-1559 navigation settings fit docked and undocked list widths in dark","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
-    ,
-    {"kind":"browser","file":"tests/view-closed-overlap.spec.ts","name":"AEON-1559 navigation settings fit docked and undocked list widths in light","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
-    ,
-    {"kind":"browser","file":"tests/view-closed-overlap.spec.ts","name":"AEON-1559 non-teleported toolbar retains its 800 px container swap","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
-    ,
-    {"kind":"browser","file":"tests/view-closed-overlap.spec.ts","name":"AEON-1559 phone and standard viewport evidence in dark","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
-    ,
-    {"kind":"browser","file":"tests/view-closed-overlap.spec.ts","name":"AEON-1559 phone and standard viewport evidence in light","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
     {"kind":"browser","file":"tests/view-switch.spec.ts","name":"AEON-1453 Projects opens on the view used last or the default; the pin never moves a segment, and a link wins once","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
