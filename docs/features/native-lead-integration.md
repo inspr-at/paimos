@@ -249,8 +249,9 @@ pilot qualification are claimed.
 
 The migration guard passes for 375 migrations, including 1386/1387; its 43 tests,
 the 33 ownership-audit tests, all 358 tier-tool tests and generated OpenAPI
-parity pass. Guarded `ci-static-remote.sh` exits **3** with
-`remote static check paused at night (night protocol: mbp2606 is shared with the CI pool); rely on the PR's hosted CI static job`.
+parity pass. Guarded `ci-static-remote.sh` exits **3** with the night-protocol
+pause: remote static checks wait while the shared build machine serves the CI
+pool, and the refusal tells the worker to rely on the PR's hosted CI static job.
 Full static is therefore **unproven**, not green; no heavy local replacement was
 run. Earlier remote attempts caught test-fixture and import-cycle errors, which
 were corrected before the passing affected run.
