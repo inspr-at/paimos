@@ -5,6 +5,8 @@ package knowledge
 import (
 	"bytes"
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"net/http"
@@ -393,7 +395,11 @@ func (m *module) proposeLearning(ctx context.Context, p tenant.Principal, public
 		in.Operation = "add"
 		in.RuleSHA = ""
 		in.RuleKey = rule.Identity
-		in.Source = "<!-- aeon-rule: " + rule.Identity + " -->\n- " + rule.Text + "\n"
+		if len(in.RuleKey) > 64 {
+			sum := sha256.Sum256([]byte(publicID))
+			in.RuleKey = "learn." + hex.EncodeToString(sum[:20])
+		}
+		in.Source = "<!-- aeon-rule: " + in.RuleKey + " -->\n- " + rule.Text + "\n"
 		in.Why = rule.Why
 		if in.TLDR == nil {
 			in.TLDR = &doctrine.InboxTLDR{EN: clipBytes(rule.Text, 300)}

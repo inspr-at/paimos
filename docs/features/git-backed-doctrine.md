@@ -137,3 +137,21 @@ or invalidating the mirror hides cached content immediately.
 Tenant source management remains person-only; host default registration is the
 sole registration path that does not require a person. Publication and release
 authorities remain governed by the existing gates.
+
+## Adding a rule through the existing proposal path (AEON-1588)
+
+Both doctrine proposal inputs accept `operation: "add"` and `section`.
+Existing edits retain their current defaults and digest checks. An addition
+names a new explicit `rule_key` and has no `rule_sha256`. For an existing
+file, `section` is the indexed section key; for a new file it is the heading
+title. The new file must match that source's configured doctrine paths and
+must be recognised by the existing doctrine importer. Wildcards do not admit
+personal profiles unless the exact profile path is configured.
+
+An addition preserves every existing rule's source bytes and creates the
+matching TL;DR sidecar entry. Duplicate rule keys, stale main blobs, malformed
+sidecars, credentials and prohibited public/private quotations retain the
+existing refusals. Unconfigured repositories remain `unsupported_repository`;
+paths outside configured roots return `unsupported_path`. Agents submit to
+`POST /api/rules/doctrine/inbox`; only a person sends a waiting proposal to git.
+The existing independent gate, approval, merge and release path is unchanged.

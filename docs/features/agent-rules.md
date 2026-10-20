@@ -366,3 +366,51 @@ matching identities are inspected, including managed-session delivery. A batch
 loads the catalog once for its request; later requests recheck the grants.
 Channel reports include duplicates only from sets whose exact scope the caller
 may read, including the project permission and scoped ownership checks.
+
+## Exporting published database rules (AEON-1588)
+
+`GET /api/rules/export` and `aeon rules export --out NEW-DIRECTORY` export
+published node-authored rules without changing them. The endpoint uses the
+existing workspace `settings.manage` permission and preserves `rules.read`,
+project visibility and private ownership. It exports every published version
+visible to the caller; another person's private layers remain private, even
+from a workspace administrator. Unpublished draft text is excluded.
+
+The deterministic `aeon.rules-export.v1` bundle has one `layer-<uuid>.json` file
+per published layer and a manifest with layer/set/version ids, revisions,
+publication authors, original snapshot digests, and SHA-256 of each rule's
+text, why and details. Each layer file has its own SHA-256. With no `--out`, the
+CLI prints the bundle as JSON. A directory export creates private files and
+refuses existing destinations. An oversized export fails in full with
+`rules_export_too_large`; it never silently truncates. Its audit event retains
+only the layer count and bundle digest.
+
+Targets remain proposals: company rules point to the configured public
+doctrine repository, private-kernel origins to the configured private doctrine
+repository, and project rules to the project's repository `AGENTS.md` (the
+project id identifies the destination to resolve). Person, agent-role,
+named-agent and task targets are `needs decision`. The export never opens a PR
+or copies text to a repository.
+
+The tenant switch `rules.db_authoring` defaults to **on**, including a missing
+settings row or a null value. `GET /api/rules/authoring` reads it;
+`PUT /api/rules/authoring` with `{"db_authoring": false}` requires workspace
+`settings.manage`. The switch is stored alongside the existing rules budget
+without changing that budget. This feature does not turn it off anywhere.
+
+When off, layer/set creation, draft replacement, publish, restore, TL;DR writes
+and batch publish refuse with HTTP 409 `rules_db_authoring_disabled`, pointing
+to `/api/rules/doctrine/inbox`. Both CLI `--apply` commands also refuse an
+unchanged plan. The web editor becomes read-only and links “Propose a change”
+to the existing Doctrine entry. Reads, pinned sources, cache, receipts and
+managed delivery continue to use the same published content.
+
+A learning draft with no git destination receives that same refusal. To turn
+it into a waiting **add** proposal, the same learning draft endpoint accepts
+`doctrine: {request_id, source_id|repository, path, section, tldr?}` in place
+of `layer_id` and `set_id`. The destination is explicit because personal and
+project text must never silently be sent to public doctrine. Rule text and
+identity come from the learning; request replacement text is rejected. The
+existing knowledge and rules permissions and doctrine guards apply. The
+response identifies the waiting proposal; a person still opens its PR. No
+database rule draft is written or published, and no existing rules are deleted.

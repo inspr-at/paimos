@@ -405,7 +405,7 @@ func serveDraft(t *testing.T, current *DraftSet, puts *int) *client.Client {
 // Risk: an unchanged import must still refuse when database prose is retired.
 func TestImportApplyRefusesDisabledAuthoring(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "AGENTS.md")
-	if err := os.WriteFile(path, []byte("## Git\n- Keep commits small.\n"), 0600); err != nil {
+	if err := os.WriteFile(path, []byte("## Git\n- Keep commits small.\n  Why: easier review.\n"), 0600); err != nil {
 		t.Fatal(err)
 	}
 	proposal := mustBuild(t, Request{Context: ContextProject, Files: []string{path}})

@@ -51,6 +51,9 @@ func (m *Module) getAuthoring(r *http.Request, tx pgx.Tx, p tenant.Principal) (a
 	return authoringSetting{enabled, "/api/rules/doctrine/inbox"}, err
 }
 func (m *Module) putAuthoring(r *http.Request, tx pgx.Tx, p tenant.Principal) (any, error) {
+	if p.Kind != tenant.Person && !authz.OwnerWorkstation(p) {
+		return nil, authz.ErrForbidden
+	}
 	if err := authz.RequireTx(r.Context(), tx, p, "settings.manage", authz.Scope{}); err != nil {
 		return nil, err
 	}

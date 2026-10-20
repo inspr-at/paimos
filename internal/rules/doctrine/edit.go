@@ -82,7 +82,7 @@ func (in ProposalInput) validate() error {
 	if in.Operation != "add" && in.Section != "" {
 		return fail(400, "invalid_request", "section is only used by add proposals")
 	}
-	if in.Operation == "add" && (in.RuleSHA != "" || !regexp.MustCompile(`^[a-z][a-z0-9._-]{0,95}$`).MatchString(in.RuleKey) || strings.TrimSpace(in.Section) == "" || len(in.Section) > 200 || strings.ContainsAny(in.Section, "\r\n\x00#<>")) {
+	if in.Operation == "add" && (in.RuleSHA != "" || !regexp.MustCompile(`^[a-z][a-z0-9._-]{0,63}$`).MatchString(in.RuleKey) || strings.TrimSpace(in.Section) == "" || len(in.Section) > 200 || strings.ContainsAny(in.Section, "\r\n\x00#<>")) {
 		return fail(400, "invalid_request", "An addition needs a new explicit rule key and a section, with no existing rule digest.")
 	}
 	if !workorders.UUID(in.RequestID) || strings.ToLower(in.RequestID) != in.RequestID || !workorders.UUID(in.SourceID) || strings.ToLower(in.SourceID) != in.SourceID || (in.Operation != "add" && !digestPattern.MatchString(in.RuleSHA)) || len(in.Path) > 300 || len(in.RuleKey) > 200 || in.RuleKey == "" {

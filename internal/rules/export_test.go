@@ -29,6 +29,7 @@ func TestRulesExportAndAuthoringSwitch(t *testing.T) {
 	person := w.set(admin, w.layer(admin, Scope{Layer: "person", OwnerID: admin.ID}), "Person", testRule("person", "Explain the outcome first."))
 	hidden := w.set(colleague, w.layer(colleague, Scope{Layer: "person", OwnerID: colleague.ID}), "Private", testRule("hidden", "Never export this colleague preference."))
 	for _, s := range []Set{public, kernel, project, person} {
+		t.Logf("publishing fixture set %s", s.Name)
 		w.publish(admin, s, "260928120000.0.0")
 	}
 	w.publish(colleague, hidden, "260928120000.0.0")

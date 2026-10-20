@@ -32,7 +32,7 @@ type SectionKey = 'company' | 'project' | 'person' | 'agent'
 const session = useSession()
 const model = ref<Bundle[]>([])
 const loading = ref(true)
-const dbAuthoring = ref(false)
+const dbAuthoring = ref<boolean | null>(null)
 const authoringMessage = 'Database rules are read-only. Propose a change through Doctrine.'
 let loadSequence = 0
 const writeBlock = (...args: Parameters<typeof permissionWriteBlock>) => dbAuthoring.value ? permissionWriteBlock(...args) : authoringMessage
@@ -102,7 +102,7 @@ async function load(quiet = false) {
   const identity = `${tenantId.value}/${me.value}`
   const current = () => sequence === loadSequence && identity === `${tenantId.value}/${me.value}`
   if (!quiet) loading.value = true
-  dbAuthoring.value = false
+  dbAuthoring.value = null
   loadError.value = ''
   try {
     const response = await api('/rules/authoring')
@@ -141,7 +141,7 @@ function pickProject(prefer?: string) {
   const targeted = model.value.filter(bundle => bundle.layer.scope.layer === 'project' && bundle.sets.length).map(bundle => bundle.layer.scope.project_id!)
   projectId.value = targeted.find(id => projects.value.some(project => project.id === id)) ?? targeted[0] ?? projects.value[0]?.id ?? ''
 }
-watch(() => `${session.identity?.tenant.id}/${session.identity?.principal.id}`, () => { dbAuthoring.value = false; editing.value = null; adding.value = null; importOpen.value = false; publishTarget.value = null; model.value = []; if (session.identity) void load(true); else loadSequence++ })
+watch(() => `${session.identity?.tenant.id}/${session.identity?.principal.id}`, () => { dbAuthoring.value = null; editing.value = null; adding.value = null; importOpen.value = false; publishTarget.value = null; model.value = []; if (session.identity) void load(true); else loadSequence++ })
 
 // ---------- What applies, what waits ----------
 const allSets = computed(() => model.value.flatMap(bundle => bundle.sets.map(set => ({ bundle, set }))))
@@ -569,7 +569,7 @@ onMounted(() => {
         <button v-if="publishable.length" type="button" class="btn primary" @click="openPublish()"><BizIcon name="seal" :size="15" />Review and publish ({{ publishable.length }} {{ publishable.length === 1 ? 'set' : 'sets' }})</button>
       </div>
     </header>
-    <p v-if="!loading && !loadError && !dbAuthoring" role="status">Database rules are read-only. <a href="#doctrine-title">Propose a change</a></p>
+    <p v-if="!loading && !loadError && dbAuthoring === false" role="status">Database rules are read-only. <a href="#doctrine-title">Propose a change</a></p>
     <RulesComparisonPanel v-if="!loading && !empty && !loadError && projectId" :project-id="projectId" />
     <p v-if="publishNote" class="publish-note"><BizIcon name="lock" :size="13" />{{ publishNote }}</p>
 
