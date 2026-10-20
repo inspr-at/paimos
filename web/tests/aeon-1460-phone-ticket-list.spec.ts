@@ -1,16 +1,18 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // AEON-1460: controls must not move while a phone list is searched, filtered or updated.
 import { test, expect } from '@playwright/test'
-import { writeFile } from 'node:fs/promises'
+import { readFile, writeFile } from 'node:fs/promises'
 import { fixtures, mockWork } from './work-fixtures'
 
 test('AEON-1460 design truth and main geometry before the phone changes', async ({ page }, info) => {
   test.setTimeout(120_000)
   await page.setViewportSize({ width: 390, height: 664 })
-  await page.goto('/tests/fixtures/aeon-1460-design.html?v=tickets')
+  const html = await readFile(new URL('./fixtures/aeon-1460-design.html', import.meta.url), 'utf8')
+  await page.route('**/aeon1460-design?*', route => route.fulfill({ contentType: 'text/html; charset=utf-8', body: html }))
+  await page.goto('/aeon1460-design?v=tickets')
   await expect(page.locator('.tk-bar')).toBeVisible()
   await page.evaluate(() => document.fonts.ready)
-  const truth = await page.locator('.tk-bar, .tk-row').evaluateAll(items => items.slice(0, 4).map(el => {
+  const truth = await page.locator('.tk-bar, .t-row').evaluateAll(items => items.slice(0, 4).map(el => {
     const r = el.getBoundingClientRect()
     return { name: el.className, x: r.x, y: r.y, width: r.width, height: r.height }
   }))
