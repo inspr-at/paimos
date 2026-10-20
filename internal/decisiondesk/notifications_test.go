@@ -192,8 +192,17 @@ func TestHeldRequestCanonicalizationDoesNotRepeatNotice(t *testing.T) {
 	if before.Items[0].Title != "Human request · "+projectKey {
 		t.Fatalf("held request label lost project: %q", before.Items[0].Title)
 	}
-	// A second person can manage this source, but a browser notice still
-	// belongs only to the held message's actual recipient.
+	// A project member cannot manage an inbox source. This counterpart is a
+	// project admin, so decision authority is real while the browser notice
+	// still belongs only to the held message's actual recipient.
+	var admins int
+	if err := f.d.Admin.QueryRow(t.Context(), `WITH updated AS (
+		UPDATE role_bindings b SET role_id=r.id FROM roles r
+		WHERE b.tenant_id=$1 AND b.principal_id=$2 AND b.scope_type='project' AND b.scope_id=$3
+		AND r.tenant_id=b.tenant_id AND r.key='admin' RETURNING 1)
+		SELECT count(*) FROM updated`, f.person.TenantID, f.reader.ID, f.project).Scan(&admins); err != nil || admins != 1 {
+		t.Fatalf("project admin binding: %d %v", admins, err)
+	}
 	err := db.InTenant(db.AllProjects(t.Context(), "held browser recipient fixture"), f.d.App, f.person.TenantID, func(tx pgx.Tx) error {
 		allowed, err := CurrentTx(t.Context(), tx, f.reader, before.Items[0])
 		if err != nil {
@@ -395,7 +404,7 @@ func TestDeskPushRecipientsBurstAndGone(t *testing.T) {
 	for _, scenario := range []string{"single", "burst", "gone", "failed"} {
 		t.Run(scenario, func(t *testing.T) {
 			f := deskPushFixtureFor(t)
-			project, ticket := f.deskProject(t)
+			project, ticket, projectKey := f.deskProject(t)
 			enabled := f.deskSubscription(t, f.p, "enabled", true)
 			second := f.deskSubscription(t, f.p, "second", true)
 			f.deskSubscription(t, f.p, "disabled", false)
@@ -473,7 +482,7 @@ func TestDeskPushRecipientsBurstAndGone(t *testing.T) {
 					if push.fields["title"] != "3 decisions waiting" || push.fields["tag"] != "desk-summary" || push.fields["url"] != "/decision-desk" {
 						t.Fatalf("incorrect summary: %v", push.fields)
 					}
-				} else if push.fields["title"] != "PAIMOS · Decision waiting" || push.fields["body"] != "First question line · DESK" || push.fields["tag"] != "desk-question-"+q.ID || push.fields["url"] != "/decision-desk?item=q:"+q.ID {
+				} else if push.fields["title"] != "PAIMOS · Decision waiting" || push.fields["body"] != "First question line · "+projectKey || push.fields["tag"] != "desk-question-"+q.ID || push.fields["url"] != "/decision-desk?item=q:"+q.ID {
 					t.Fatalf("incorrect private payload: %v", push.fields)
 				}
 			}
@@ -526,17 +535,18 @@ func (f *deskPushFixture) deskSubscription(t *testing.T, p tenant.Principal, nam
 	return sub
 }
 
-func (f *deskPushFixture) deskProject(t *testing.T) (string, string) {
+func (f *deskPushFixture) deskProject(t *testing.T) (string, string, string) {
 	t.Helper()
 	questions.New(f.db.App).Mount(f.mux)
 	f.m.DeskPush = PushSource{}
 	f.agent.Scopes = []string{"questions.ask", "questions.read"}
-	var project, ticket string
+	var project, ticket, projectKey string
 	err := db.InTenant(dbtest.Seed(t.Context()), f.db.App, f.p.TenantID, func(tx pgx.Tx) error {
-		if err := tx.QueryRow(t.Context(), `INSERT INTO nodes(tenant_id,kind_id,key,title) SELECT $1,id,'DESK','Desk' FROM node_kinds WHERE tenant_id=$1 AND slug='project' RETURNING id::text`, f.p.TenantID).Scan(&project); err != nil {
+		// Node keys must match nodes_key_check (PREFIX-N). The push body uses that key.
+		if err := tx.QueryRow(t.Context(), `INSERT INTO nodes(tenant_id,kind_id,key,title) SELECT $1,k.id,aeon_next_node_key($1,k.short_prefix),'Desk' FROM node_kinds k WHERE k.tenant_id=$1 AND k.slug='project' RETURNING id::text, key`, f.p.TenantID).Scan(&project, &projectKey); err != nil {
 			return err
 		}
-		if err := tx.QueryRow(t.Context(), `INSERT INTO nodes(tenant_id,kind_id,key,title,parent_id) SELECT $1,id,'DESK-1','Waiting work',$2 FROM node_kinds WHERE tenant_id=$1 AND slug='work' RETURNING id::text`, f.p.TenantID, project).Scan(&ticket); err != nil {
+		if err := tx.QueryRow(t.Context(), `INSERT INTO nodes(tenant_id,kind_id,key,title,parent_id) SELECT $1,k.id,aeon_next_node_key($1,k.short_prefix),'Waiting work',$2 FROM node_kinds k WHERE k.tenant_id=$1 AND k.slug='work' RETURNING id::text`, f.p.TenantID, project).Scan(&ticket); err != nil {
 			return err
 		}
 		_, err := tx.Exec(t.Context(), `INSERT INTO project_leads(tenant_id,project_id,owner_principal_id,state) VALUES($1,$2,$3,'paused')`, f.p.TenantID, project, f.p.ID)
@@ -545,7 +555,7 @@ func (f *deskPushFixture) deskProject(t *testing.T) (string, string) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	return project, ticket
+	return project, ticket, projectKey
 }
 
 func (f *deskPushFixture) deskQuestion(t *testing.T, project, ticket, line string, at ...time.Time) questions.Question {
@@ -628,7 +638,7 @@ func TestDeskDeviceOptInOwnershipAndCap(t *testing.T) {
 // recovery channel stays untouched; only the actual committed question can send.
 func TestDeskQuestionCommittedEventWakesSender(t *testing.T) {
 	f := deskPushFixtureFor(t)
-	project, ticket := f.deskProject(t)
+	project, ticket, _ := f.deskProject(t)
 	f.deskSubscription(t, f.p, "event", true)
 	var now time.Time
 	if err := f.db.Admin.QueryRow(t.Context(), `SELECT clock_timestamp()+interval '1 hour'`).Scan(&now); err != nil {
