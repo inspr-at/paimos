@@ -268,8 +268,8 @@ describe('what the rows and the footer show', () => {
 
   it('the footer says Live with the last ETA time, or Reconnecting with the last update, in one slot', async () => {
     // Local midday on a fixed date. Thirty minutes earlier stays the same local
-    // day, so whenText is the clock only. A real Date.now() in the half hour
-    // after midnight UTC is the previous UTC day and whenText adds the weekday.
+    // day, so whenText is the clock only. Using the real clock in the half hour
+    // after local midnight puts the ETA on yesterday, and whenText adds the weekday.
     const midday = new Date(2026, 9, 17, 12, 0, 0, 0).getTime()
     vi.useFakeTimers({ toFake: ['Date'] })
     vi.setSystemTime(midday)
@@ -290,10 +290,7 @@ describe('what the rows and the footer show', () => {
     } finally {
       vi.useRealTimers()
     }
-  })
-
-  it('the footer at 00:10 UTC uses whenText, so a previous UTC day keeps its weekday', async () => {
-    // 00:10 UTC, ETA set thirty minutes earlier (23:40 UTC the day before).
+    // Regression: 00:10 UTC, ETA set thirty minutes earlier (23:40 UTC the day before).
     // whenText in UTC carries the weekday; the footer calls whenText in the
     // runtime zone, which may still be the same local day. Both must match.
     const now = Date.parse('2026-10-18T00:10:00Z')

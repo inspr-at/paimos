@@ -183,27 +183,6 @@ test('comments post with Cmd/Ctrl+Enter from c, and own comments can be edited a
   expect(calls.some(call => call.method === 'DELETE' && /\/comments\/\d+$/.test(call.path))).toBe(true)
 })
 
-test('c focuses the comment field once project commenting is allowed', async ({ page }) => {
-  // Project grants arrive after the heading. c during that gap must still land in the composer.
-  let release!: () => void
-  const held = new Promise<void>(resolve => { release = resolve })
-  await mockWork(page, fixtures())
-  await page.route('**/api/me/permissions?*', async route => {
-    await held
-    await route.fallback()
-  })
-  await page.goto('/p/PHAROS/PHAROS-13')
-  const ws = panel(page)
-  await expect(ws.getByRole('heading', { name: 'Run the disposable Hetzner end-to-end check' })).toBeVisible()
-  const composer = ws.getByLabel('Add a comment')
-  await expect(composer).toBeDisabled()
-  await page.keyboard.press('c')
-  await expect(composer).toBeDisabled()
-  release()
-  await expect(composer).toBeEnabled()
-  await expect(composer).toBeFocused()
-})
-
 test('comments by others or older than 15 minutes cannot be edited', async ({ page }) => {
   await mockWork(page, fixtures())
   await page.goto('/p/PHAROS/PHAROS-11')

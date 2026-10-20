@@ -10,20 +10,11 @@ const draft = defineModel<string>({ default: '' })
 const busy = ref(false)
 const focused = ref(false)
 let generation = 0
-// c can arrive while the field is still disabled. That request stays until the field can take it.
-let focusRequest = 0
-function discard() { focusRequest = 0; generation++; draft.value = ''; busy.value = false; focused.value = false }
+function discard() { generation++; draft.value = ''; busy.value = false; focused.value = false }
 watch(() => props.recordId, discard, { flush: 'sync' })
 const area = ref<HTMLTextAreaElement>()
 const open = computed(() => focused.value || !!draft.value)
 function grow() { const el = area.value; if (el) { el.style.height = 'auto'; el.style.height = `${Math.min(el.scrollHeight + 2, 240)}px` } }
-function fieldTaken(el: HTMLTextAreaElement) {
-  const active = document.activeElement
-  if (!(active instanceof HTMLElement) || active === el) return false
-  if (active.isContentEditable) return true
-  if (!(active instanceof HTMLInputElement || active instanceof HTMLTextAreaElement || active instanceof HTMLSelectElement)) return false
-  return !(active instanceof HTMLInputElement && ['checkbox', 'radio'].includes(active.type))
-}
 async function submit() {
   if (!draft.value.trim() || busy.value) return
   const request = generation
@@ -37,26 +28,7 @@ function keydown(event: KeyboardEvent) {
   if ((event.metaKey || event.ctrlKey) && event.key === 'Enter') { event.preventDefault(); void submit() }
   else if (event.key === 'Escape') { event.preventDefault(); event.stopPropagation(); area.value?.blur() }
 }
-async function applyFocus(request: number, deferred: boolean) {
-  const el = area.value
-  if (request !== focusRequest || !el || el.disabled) return
-  // A later click into another field wins. The request itself moves focus out of the list.
-  if (deferred && fieldTaken(el)) { focusRequest = 0; return }
-  el.focus()
-  await nextTick()
-  if (request !== focusRequest) return
-  // Opening the send row can drop the caret. Put it back once that row exists.
-  if (document.activeElement !== el) el.focus()
-  await nextTick()
-  if (request !== focusRequest || document.activeElement !== el) return
-  focusRequest = 0
-  grow()
-}
-async function focus() {
-  const request = ++focusRequest
-  await applyFocus(request, false)
-}
-watch(() => !!props.disabled || busy.value, blocked => { if (!blocked && focusRequest) void applyFocus(focusRequest, true) }, { flush: 'post' })
+async function focus() { area.value?.focus(); await nextTick(); grow() }
 defineExpose({ focus, isDirty: () => !!draft.value.trim(), discard })
 </script>
 
