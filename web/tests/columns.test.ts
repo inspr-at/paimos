@@ -2,7 +2,7 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
-import { agreedFrameWidth, automaticColumns, CARD_WIDTH_SAMPLE_CAP, cardWidthAfterSamples, COLUMN_BY_ID, GIVE_WAY, latchParentShare, layoutTableWidth, layoutWidths, loadedFitWidth, normalizeColumnIds, orderOf, PARENT_TITLE_WIDTH, parentColumnDefault, releaseLabel, RETURN_ROOM, savedColumnWidth, tagList, TITLE_MIN_TABLE, TITLE_TARGET, titleRoom, visibleColumns, widthOf, withHostColumns, type ColumnDef, type ColumnFit, type ColumnId, type ListPrefs } from '../src/lib/columns.ts'
+import { agreedFrameWidth, automaticColumns, CARD_WIDTH_SAMPLE_CAP, cardWidthAfterSamples, COLUMN_BY_ID, GIVE_WAY, latchParentShare, layoutTableWidth, layoutWidths, loadedFitWidth, nextMeasuredCardWidth, normalizeColumnIds, orderOf, PARENT_TITLE_WIDTH, parentColumnDefault, releaseLabel, RETURN_ROOM, savedColumnWidth, tagList, TITLE_MIN_TABLE, TITLE_TARGET, titleRoom, visibleColumns, widthOf, withHostColumns, type ColumnDef, type ColumnFit, type ColumnId, type ListPrefs } from '../src/lib/columns.ts'
 import { groupRows, selectLoadedGroup, filtersFromQuery, filtersToQuery, type TicketRow } from '../src/lib/ticketList.ts'
 import { byPosition, positionBetween, positionOf, type Attachment } from '../src/lib/attachments.ts'
 
@@ -417,7 +417,7 @@ test('AEON-1470 the set depends only on width, chosen columns, minimums and sort
   assert.ok(wider.dropped.length < narrow.dropped.length && narrow.dropped.slice(0, wider.dropped.length).join() === wider.dropped.join())
 })
 
-test('AEON-1569 a disagreeing frame pair cannot hide the wider card: later agreeing frames still adopt it', () => {
+test('AEON-1570 a growing card is adopted after a disagreeing frame pair, and a shrink ignores a later wide pair', () => {
   assert.equal(CARD_WIDTH_SAMPLE_CAP, 16)
   assert.equal(agreedFrameWidth(760, 792), null)
   assert.equal(agreedFrameWidth(null, 792), null)
@@ -428,16 +428,25 @@ test('AEON-1569 a disagreeing frame pair cannot hide the wider card: later agree
   assert.equal(agreedFrameWidth(700, 700), 700)
   assert.equal(agreedFrameWidth(700, 700.5), 700.5)
   assert.equal(agreedFrameWidth(700, 700.6), null)
-  assert.equal(cardWidthAfterSamples([]), null)
-  assert.equal(cardWidthAfterSamples([792]), null)
-  assert.equal(cardWidthAfterSamples([760, 792]), null)
-  assert.equal(cardWidthAfterSamples([700, 700]), 700)
+  assert.equal(cardWidthAfterSamples([], 760, true), null)
+  assert.equal(cardWidthAfterSamples([792], 760, true), null)
+  assert.equal(cardWidthAfterSamples([760, 792], 760, true), null)
+  assert.equal(cardWidthAfterSamples([700, 700], 760, false), 700)
   // The old settle inspected the first pair and gave up, which left Updated hidden after the card had grown.
-  assert.equal(cardWidthAfterSamples([760, 792, 792, 792]), 792)
-  assert.equal(cardWidthAfterSamples([760, 792, 791.4, 792]), null)
-  assert.equal(cardWidthAfterSamples([null, null, 792, 792]), 792)
+  assert.equal(cardWidthAfterSamples([760, 792, 792, 792], 760, true), 792)
+  assert.equal(cardWidthAfterSamples([760, 792, 791.4, 792], 760, true), null)
+  assert.equal(cardWidthAfterSamples([null, null, 792, 792], 760, true), 792)
   // The first agreement wins. A later pair does not replace it.
-  assert.equal(cardWidthAfterSamples([700, 700, 800, 800]), 700)
+  assert.equal(cardWidthAfterSamples([700, 700, 800, 800], 700, true), 700)
+  // A later wide pair during a shrink is the previous frame. The first agreeing pair still replaces a stale narrow box.
+  assert.equal(cardWidthAfterSamples([760, 792, 792, 792], 760, false), null)
+  assert.equal(cardWidthAfterSamples([1000, 1000], 760, false), 1000)
+  // A wider live card is this resize when the window grew, and ignored when it shrank.
+  assert.equal(nextMeasuredCardWidth(760, 792, true), 792)
+  assert.equal(nextMeasuredCardWidth(800, 900, false), 800)
+  assert.equal(nextMeasuredCardWidth(800, 780, false), 780)
+  assert.equal(nextMeasuredCardWidth(800, 780, true), 780)
+  assert.equal(nextMeasuredCardWidth(800, 0, true), 800)
 })
 
 // AEON-1470 (fix 7). Risk: Automatic's wide extras stepping aside outside the give-way, so the column the list is sorted

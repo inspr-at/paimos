@@ -5,7 +5,7 @@ import { vClipTip } from '../../directives/clipTip'
 import { formatEstimate, estimateDisplay } from '../../lib/estimates'
 import { computed, getCurrentInstance, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import type { ListItem } from '../../lib/api'
-import { CARD_WIDTH_SAMPLE_CAP, COLUMN_BY_ID, cardWidthAfterSamples, costUnitLabel, hasSavedWidth, layoutTableWidth, layoutWidths, loadedFitWidth, PARENT_TITLE_WIDTH, releaseLabel, tagList, titleRoom, visibleColumns, withHostColumns, type ColumnDef, type ColumnId, type ListPrefs, type TagRef } from '../../lib/columns'
+import { CARD_WIDTH_SAMPLE_CAP, COLUMN_BY_ID, cardWidthAfterSamples, costUnitLabel, hasSavedWidth, layoutTableWidth, layoutWidths, loadedFitWidth, nextMeasuredCardWidth, PARENT_TITLE_WIDTH, releaseLabel, tagList, titleRoom, visibleColumns, withHostColumns, type ColumnDef, type ColumnId, type ListPrefs, type TagRef } from '../../lib/columns'
 import { releaseCell, type NativeReleaseView } from '../../lib/releaseMembership'
 import { agentKey, ticketWorkers, withServerLead, type LiveAgent } from '../../lib/liveAgents'
 import { useLiveAgents } from '../../stores/liveAgents'
@@ -536,8 +536,9 @@ function measureWidth() {
 // frames then adopt the card, so a queued narrow sample cannot keep Updated
 // hidden after the card has grown, and one stale frame cannot undo the shrink.
 // One disagreeing pair is not a reason to keep the old width: later pairs are
-// read until one agrees. A newer measure bumps cardFrame and cancels this read.
-function settleCardWidth() {
+// read until one agrees. A later wider pair is kept only when the viewport
+// grew. A newer measure bumps cardFrame and cancels this read.
+function settleCardWidth(viewportGrew = false) {
   const frame = ++cardFrame
   const samples: (number | null)[] = []
   const take = () => {
@@ -545,7 +546,7 @@ function settleCardWidth() {
       if (frame !== cardFrame || !columnsAlive) return
       samples.push(readCardWidth())
       if (samples.length % 2 === 1) { take(); return }
-      const agreed = cardWidthAfterSamples(samples)
+      const agreed = cardWidthAfterSamples(samples, width.value, viewportGrew)
       if (agreed === null) {
         if (samples.length < CARD_WIDTH_SAMPLE_CAP) take()
         return
@@ -567,10 +568,14 @@ function applyCardSize(entries: ResizeObserverEntry[]) {
   else if (live > 0) width.value = live
   settleCardWidth()
 }
+let lastInner = window.innerWidth
 function measureSoon() {
+  const inner = window.innerWidth
+  const grew = inner > lastInner + 0.5
+  lastInner = inner
   const live = readCardWidth()
-  if (live !== null && live > 0 && live <= width.value + 0.5) width.value = live
-  settleCardWidth()
+  if (live !== null) width.value = nextMeasuredCardWidth(width.value, live, grew)
+  settleCardWidth(grew)
 }
 const phoneChange = () => { phone.value = phoneQuery.matches }
 const coarseChange = () => { coarse.value = coarseQuery.matches }

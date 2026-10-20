@@ -213,6 +213,7 @@ test('AEON-1470 columns leave in the give-way order; sorted by Updated, Updated 
 test('AEON-1470 a column that left returns only with 16 px to spare: ±8 px around a threshold keeps the set', async ({ page }, testInfo) => {
   const log = checks(testInfo)
   await open(page)
+  await expect(page.locator('.table-card')).toHaveAttribute('data-columns-settled', '1')
   // Narrow the table a pixel at a time until Updated leaves. It starts out shown: the scan finds where it leaves.
   await tableAt(page, 920)
   expect(await shownIds(page)).toContain('updated')
