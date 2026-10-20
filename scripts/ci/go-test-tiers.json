@@ -3612,6 +3612,8 @@
     ,
     {"kind":"go","package":"internal/approvals","name":"TestLiveGrantRejectsBadIDs","tier":"GATED-FULL"}
     ,
+    {"kind":"go","package":"internal/approvals","name":"TestNativeConsentRequiresCurrentPersonApproval","tier":"ESSENTIAL"}
+    ,
     {"kind":"go","package":"internal/approvals","name":"TestOptionalDeployTargetRoundTrip","tier":"GATED-FULL"}
     ,
     {"kind":"go","package":"internal/approvals","name":"TestProjectScopedApprovalNames","tier":"GATED-FULL"}
