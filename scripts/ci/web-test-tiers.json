@@ -6354,6 +6354,24 @@
     ,
     {"kind":"browser","file":"tests/aeon-1473-desk-tab.spec.ts","name":"AEON-1473: reduced motion changes only the number, visible or in the background","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
+    {"kind":"browser","file":"tests/aeon-1532-editor-steady.spec.ts","name":"AEON-1532: a queued narrow table resize preserves the columns after the table grows","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/aeon-1532-editor-steady.spec.ts","name":"AEON-1532: deleting 50 lines keeps the page where it is, in the middle and at the end","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/aeon-1532-editor-steady.spec.ts","name":"AEON-1532: deleting a capped comment back under its cap keeps the panel at its end when its scrollbar goes or a font arrives","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/aeon-1532-editor-steady.spec.ts","name":"AEON-1532: the comment editor grows to its 560 px cap without ever collapsing","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/aeon-1532-editor-steady.spec.ts","name":"AEON-1532: the full ticket page writes the description in one row as tall as its preview","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/aeon-1532-editor-steady.spec.ts","name":"AEON-1532: typing in a 300-line knowledge entry at 1024 light never shrinks the box or moves the page","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/aeon-1532-editor-steady.spec.ts","name":"AEON-1532: typing in a 300-line knowledge entry at 1440 dark never shrinks the box or moves the page","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/aeon-1532-editor-steady.spec.ts","name":"AEON-1532: typing in a 300-line knowledge entry at 1440 light never shrinks the box or moves the page","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/aeon-1532-editor-steady.spec.ts","name":"AEON-1532: typing in a 300-line knowledge entry at 390 light never shrinks the box or moves the page","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
     {"kind":"browser","file":"tests/aeon-1535-desk-phone.spec.ts","name":"AEON-1535 P1: the phone question card reads at 22 px and the four stamp rows are full width","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
     {"kind":"browser","file":"tests/aeon-1535-desk-phone.spec.ts","name":"AEON-1535 P2: an unavailable stamp row is disabled and reads its reason","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
