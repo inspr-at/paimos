@@ -63,6 +63,7 @@ test('AEON-1460 compact ticket list keeps controls still and all actions reachab
     for (const { size, themes } of matrix) for (const theme of themes) for (const locale of ['en-US', 'de-AT']) {
       const context = await browser.newContext({ viewport: size, locale, colorScheme: theme, reducedMotion: 'reduce', hasTouch: size.width < 1000, isMobile: size.width < 1000 })
       const page = await context.newPage()
+      page.setDefaultTimeout(10_000)
       const desktop = size.height > 500 && size.width >= 720
       const landscape = !desktop && size.width >= 720
       const name = `${size.width}x${size.height}-${theme}`
@@ -174,7 +175,7 @@ test('AEON-1460 compact ticket list keeps controls still and all actions reachab
           await display.locator('footer button').click()
           await more.click(); await page.getByRole('menuitem', { name: 'Select tickets', exact: true }).click()
           await page.locator('#row-n-1').click(); await expect(page.locator('#row-n-1 .phone-check')).toBeChecked()
-          await page.getByRole('toolbar', { name: /selected ticket/ }).getByRole('button', { name: /[Cc]ancel|[Cc]lear selection/ }).click()
+          await page.getByRole('toolbar', { name: /selected ticket/ }).getByRole('button', { name: 'Clear the selection', exact: true }).click()
           await expect(page.locator('#row-n-1 .phone-check')).toHaveCount(0)
           await more.click(); await page.getByRole('menuitemcheckbox', { name: 'Hide done', exact: true }).click()
           await expect(page.locator('#row-n-5')).toBeAttached()
