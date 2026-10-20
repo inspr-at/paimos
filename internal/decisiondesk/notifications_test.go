@@ -524,6 +524,169 @@ func TestDeskPushRecipientsBurstAndGone(t *testing.T) {
 	}
 }
 
+// Risk: items older than one burst window, or held before Desk was turned on,
+// each become their own notification. One pass must send one summary per
+// device once three are due, and a pre-opt-in backlog must never be replayed
+// item by item. One or two items created after opt-in stay individual.
+func TestDeskPushDueWindowsAndOptInBacklog(t *testing.T) {
+	for _, spec := range []struct {
+		name       string
+		items      int
+		afterOptIn bool
+		summary    bool
+		holdLast   bool
+	}{
+		{name: "recovery", items: 3, afterOptIn: true, summary: true},
+		{name: "pair", items: 2, afterOptIn: true, summary: false},
+		{name: "opt-in", items: 3, afterOptIn: false, summary: true},
+		{name: "opt-in-pair", items: 2, afterOptIn: false, summary: true},
+		{name: "open-window", items: 3, afterOptIn: true, summary: false, holdLast: true},
+	} {
+		t.Run(spec.name, func(t *testing.T) {
+			f := deskPushFixtureFor(t)
+			project, ticket, _ := f.deskProject(t)
+			f.deskSubscription(t, f.other, spec.name+"-other", true)
+			subscribe := func(name string) webpush.Subscription {
+				return f.deskSubscription(t, f.p, spec.name+"-"+name, true)
+			}
+			var enabled, second webpush.Subscription
+			if spec.afterOptIn {
+				enabled = subscribe("enabled")
+				second = subscribe("second")
+				f.deskSubscription(t, f.p, spec.name+"-disabled", false)
+			}
+			var base time.Time
+			if err := f.db.Admin.QueryRow(t.Context(), `SELECT clock_timestamp()`).Scan(&base); err != nil {
+				t.Fatal(err)
+			}
+			if spec.afterOptIn {
+				base = base.Add(time.Minute)
+			} else {
+				base = base.Add(-3 * time.Hour)
+			}
+			qs := make([]questions.Question, spec.items)
+			for i := range qs {
+				qs[i] = f.deskQuestion(t, project, ticket, fmt.Sprintf("Held item %d", i+1), base.Add(time.Duration(i)*90*time.Second))
+			}
+			if !spec.afterOptIn {
+				enabled = subscribe("enabled")
+				second = subscribe("second")
+				f.deskSubscription(t, f.p, spec.name+"-disabled", false)
+				var opted, refreshed time.Time
+				if err := f.db.Admin.QueryRow(t.Context(), `SELECT desk_enabled_at FROM phone_push_subscriptions WHERE endpoint_hash=$1`, deskPushDigest(enabled.Endpoint)).Scan(&opted); err != nil {
+					t.Fatal(err)
+				}
+				body := map[string]any{"endpoint": enabled.Endpoint, "keys": enabled.Keys, "desk_enabled": true}
+				deskPushStatus(t, f.call(t, f.p, "POST", "/api/me/phone-approvals/subscriptions", body, deskPushOrigin), 200)
+				if err := f.db.Admin.QueryRow(t.Context(), `SELECT desk_enabled_at FROM phone_push_subscriptions WHERE endpoint_hash=$1`, deskPushDigest(enabled.Endpoint)).Scan(&refreshed); err != nil || !opted.Equal(refreshed) {
+					t.Fatalf("refresh moved Desk opt-in: %v %v %v", opted, refreshed, err)
+				}
+			}
+			type pushed struct {
+				endpoint string
+				fields   map[string]string
+			}
+			var pushes []pushed
+			f.m.WithPushTransport(func(_ context.Context, b []byte, sub *webpush.Subscription, _ *webpush.Options) (*http.Response, error) {
+				fields := map[string]string{}
+				if err := json.Unmarshal(b, &fields); err != nil {
+					t.Fatal(err)
+				}
+				pushes = append(pushes, pushed{sub.Endpoint, fields})
+				return &http.Response{StatusCode: 201, Body: io.NopCloser(strings.NewReader(""))}, nil
+			})
+			now := qs[len(qs)-1].CreatedAt.Add(61 * time.Second)
+			if spec.holdLast {
+				now = qs[len(qs)-1].CreatedAt.Add(30 * time.Second)
+			}
+			f.m.WithDeskClock(func() time.Time { return now })
+			dispatch := func() {
+				t.Helper()
+				if err := f.m.Dispatch(t.Context()); err != nil {
+					t.Fatal(err)
+				}
+			}
+			dispatch()
+			wantDevices := map[string]bool{enabled.Endpoint: true, second.Endpoint: true}
+			due := spec.items
+			if spec.holdLast {
+				due = spec.items - 1
+			}
+			check := func(from int, covered []questions.Question, summary bool, title string) {
+				t.Helper()
+				n := len(covered)
+				if summary {
+					n = 1
+				}
+				seen := map[string]map[string]int{}
+				for _, push := range pushes[from:] {
+					if !wantDevices[push.endpoint] {
+						t.Fatalf("push escaped %s %v", push.endpoint, push.fields)
+					}
+					if seen[push.endpoint] == nil {
+						seen[push.endpoint] = map[string]int{}
+					}
+					seen[push.endpoint][push.fields["tag"]]++
+					if summary {
+						if push.fields["tag"] != "desk-summary" || push.fields["title"] != title || push.fields["url"] != "/decision-desk" || push.fields["body"] != "Open Decision Desk to review." {
+							t.Fatalf("backlog replayed: %v", push.fields)
+						}
+					} else if push.fields["tag"] == "desk-summary" || push.fields["title"] != "PAIMOS · Decision waiting" || !strings.HasPrefix(push.fields["url"], "/decision-desk?item=q:") {
+						t.Fatalf("pair collapsed into a summary: %v", push.fields)
+					}
+				}
+				if len(pushes)-from != len(wantDevices)*n || len(seen) != len(wantDevices) {
+					t.Fatalf("pushes=%d devices=%d, want %d on each of %d", len(pushes)-from, len(seen), n, len(wantDevices))
+				}
+				for endpoint, tags := range seen {
+					if summary {
+						if tags["desk-summary"] != 1 || len(tags) != 1 {
+							t.Fatalf("%s tags=%v", endpoint, tags)
+						}
+						continue
+					}
+					if len(tags) != len(covered) {
+						t.Fatalf("%s tags=%v", endpoint, tags)
+					}
+					for _, q := range covered {
+						if tags["desk-question-"+q.ID] != 1 {
+							t.Fatalf("%s missing %s in %v", endpoint, q.ID, tags)
+						}
+					}
+				}
+			}
+			title := fmt.Sprintf("%d decisions waiting", spec.items)
+			covered := qs
+			if spec.holdLast {
+				covered = qs[:due]
+			}
+			check(0, covered, spec.summary, title)
+			if spec.holdLast {
+				now = qs[len(qs)-1].CreatedAt.Add(61 * time.Second)
+				before := len(pushes)
+				dispatch()
+				check(before, qs[due:], false, "")
+			}
+			before := len(pushes)
+			dispatch()
+			if len(pushes) != before {
+				t.Fatal("a second scan repeated a claimed notice")
+			}
+			var claims, summarised, other int
+			if err := f.db.Admin.QueryRow(t.Context(), `SELECT count(*),count(*) FILTER(WHERE summarised_at IS NOT NULL),count(*) FILTER(WHERE recipient_id<>$1) FROM desk_notification_claims`, f.p.ID).Scan(&claims, &summarised, &other); err != nil {
+				t.Fatal(err)
+			}
+			wantSummarised := 0
+			if spec.summary {
+				wantSummarised = spec.items - 1
+			}
+			if claims != spec.items || summarised != wantSummarised || other != 0 {
+				t.Fatalf("claims=%d summarised=%d other=%d", claims, summarised, other)
+			}
+		})
+	}
+}
+
 func (f *deskPushFixture) deskSubscription(t *testing.T, p tenant.Principal, name string, enabled bool) webpush.Subscription {
 	t.Helper()
 	key, err := ecdh.P256().GenerateKey(rand.Reader)

@@ -1591,7 +1591,8 @@
     {
       "classification": "personal",
       "columns": {
-        "desk_enabled": "personal"
+        "desk_enabled": "personal",
+        "desk_enabled_at": "personal"
       },
       "locator": {
         "person_column": "person_id",

@@ -362,6 +362,7 @@ type deskNotice struct {
 	Kind, ID  string
 	Revision  int64
 	CreatedAt time.Time
+	backlog   bool // Created before this device's Desk opt-in. One summary, never a replay.
 }
 
 type deskBatch struct {
@@ -415,15 +416,22 @@ func (m *Module) dispatchDeskPerson(ctx context.Context, p tenant.Principal) err
 	var batches []deskBatch
 	err := db.InTenant(ctx, m.pool, p.TenantID, func(tx pgx.Tx) error {
 		devices := []delivery{}
-		rows, err := tx.Query(ctx, `SELECT id::text,subscription FROM phone_push_subscriptions WHERE person_id=$1 AND desk_enabled AND revoked_at IS NULL ORDER BY id LIMIT 8`, p.ID)
+		// The latest opt-in is the backlog cutoff. A newly enabled device must
+		// not replay every held item the older device has not claimed yet.
+		var optIn time.Time
+		rows, err := tx.Query(ctx, `SELECT id::text,subscription,desk_enabled_at FROM phone_push_subscriptions WHERE person_id=$1 AND desk_enabled AND revoked_at IS NULL ORDER BY id LIMIT 8`, p.ID)
 		if err != nil {
 			return err
 		}
 		for rows.Next() {
 			d := delivery{tenant: p.TenantID, person: p.ID}
-			if err = rows.Scan(&d.subscription, &d.encrypted); err != nil {
+			var enabledAt *time.Time
+			if err = rows.Scan(&d.subscription, &d.encrypted, &enabledAt); err != nil {
 				rows.Close()
 				return err
+			}
+			if enabledAt != nil && enabledAt.After(optIn) {
+				optIn = *enabledAt
 			}
 			devices = append(devices, d)
 		}
@@ -434,7 +442,7 @@ func (m *Module) dispatchDeskPerson(ctx context.Context, p tenant.Principal) err
 		}
 		eligible := []deskNotice{}
 		err = m.DeskPush.NoticesTx(ctx, tx, p, func(kind, id string, revision int64, created time.Time) {
-			eligible = append(eligible, deskNotice{kind, id, revision, created})
+			eligible = append(eligible, deskNotice{Kind: kind, ID: id, Revision: revision, CreatedAt: created})
 		})
 		if err != nil {
 			return err
@@ -451,6 +459,9 @@ func (m *Module) dispatchDeskPerson(ctx context.Context, p tenant.Principal) err
 		} else if err = tx.QueryRow(ctx, `SELECT clock_timestamp()`).Scan(&now); err != nil {
 			return err
 		}
+		// Every closed window in this pass is one batch. Separate windows must
+		// not each emit their own push after an outage or a late opt-in.
+		batch := deskBatch{p: p, devices: devices}
 		for len(eligible) > 0 {
 			end := eligible[0].CreatedAt.Add(time.Minute)
 			if now.Before(end) {
@@ -460,20 +471,23 @@ func (m *Module) dispatchDeskPerson(ctx context.Context, p tenant.Principal) err
 			for n < len(eligible) && !eligible[n].CreatedAt.After(end) {
 				n++
 			}
-			batch := deskBatch{p: p, devices: devices}
 			for _, item := range eligible[:n] {
 				claimed, err := m.DeskPush.ClaimTx(ctx, tx, p, item.Kind, item.ID, item.Revision)
 				if err != nil {
 					return err
 				}
-				if claimed {
-					batch.items = append(batch.items, item)
+				if !claimed {
+					continue
 				}
-			}
-			if len(batch.items) > 0 {
-				batches = append(batches, batch)
+				if !optIn.IsZero() && item.CreatedAt.Before(optIn) {
+					item.backlog = true
+				}
+				batch.items = append(batch.items, item)
 			}
 			eligible = eligible[n:]
+		}
+		if len(batch.items) > 0 {
+			batches = append(batches, batch)
 		}
 		return nil
 	})
@@ -491,6 +505,7 @@ func (m *Module) deliverDesk(ctx context.Context, batch deskBatch) error {
 	type outcome struct{ sent, failed, summarised bool }
 	results := make([]outcome, len(batch.items))
 	var deliveryErr error
+	var summarySent bool
 	for _, device := range batch.devices {
 		var encrypted []byte
 		var payloads [][]byte
@@ -540,8 +555,20 @@ func (m *Module) deliverDesk(ctx context.Context, batch deskBatch) error {
 			continue
 		}
 		summary := len(indices) >= 3
+		if !summary {
+			for _, i := range indices {
+				if batch.items[i].backlog {
+					summary = true
+					break
+				}
+			}
+		}
 		if summary {
-			payload, _ := json.Marshal(map[string]string{"title": fmt.Sprintf("%d decisions waiting", len(indices)), "body": "Open Decision Desk to review.", "tag": "desk-summary", "url": "/decision-desk"})
+			noun := "decisions"
+			if len(indices) == 1 {
+				noun = "decision"
+			}
+			payload, _ := json.Marshal(map[string]string{"title": fmt.Sprintf("%d %s waiting", len(indices), noun), "body": "Open Decision Desk to review.", "tag": "desk-summary", "url": "/decision-desk"})
 			payloads = [][]byte{payload}
 		}
 		for n, payload := range payloads {
@@ -561,6 +588,9 @@ func (m *Module) deliverDesk(ctx context.Context, batch deskBatch) error {
 			}
 			cancel()
 			success := sendErr == nil && status >= 200 && status < 300
+			if success && summary {
+				summarySent = true
+			}
 			if !success {
 				deliveryErr = errors.Join(deliveryErr, fmt.Errorf("desk push delivery failed (HTTP %d)", status))
 			}
@@ -587,7 +617,7 @@ func (m *Module) deliverDesk(ctx context.Context, batch deskBatch) error {
 		}
 	}
 	err := db.InTenant(ctx, m.pool, batch.p.TenantID, func(tx pgx.Tx) error {
-		sent, failed, summaries := 0, 0, 0
+		sent, failed := 0, 0
 		for i, item := range batch.items {
 			state := "skipped"
 			if results[i].failed {
@@ -602,16 +632,13 @@ func (m *Module) deliverDesk(ctx context.Context, batch deskBatch) error {
 			if results[i].sent {
 				sent++
 			}
-			if results[i].summarised {
-				summaries++
-			}
 			if err := m.DeskPush.FinishTx(ctx, tx, batch.p, item.Kind, item.ID, item.Revision, state); err != nil {
 				return err
 			}
 		}
 		// All claim writes precede the event counter. Partial delivery is explicit.
 		if sent > 0 {
-			return audit(ctx, tx, batch.p, "decision_desk.notified", map[string]any{"count": sent, "failed_count": failed, "summary": summaries > 0})
+			return audit(ctx, tx, batch.p, "decision_desk.notified", map[string]any{"count": sent, "failed_count": failed, "summary": summarySent})
 		}
 		return nil
 	})
