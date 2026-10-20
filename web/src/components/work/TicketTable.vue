@@ -547,13 +547,10 @@ onMounted(() => {
   if (card.value) {
     // The first fit happens before paint, so the columns never jump into place.
     measureWidth()
-    sizer = new ResizeObserver(([entry]) => {
-      // The viewport event may already have measured a narrower card. A queued
-      // delivery must not restore the preceding wide frame; conversely, its
-      // narrower sample wins while a geometry read still describes that frame.
-      measureWidth()
-      width.value = Math.min(width.value, entry.contentRect.width)
-    })
+    // Deliveries can describe either side of a viewport resize. Read the live
+    // card in both directions: a queued narrow sample must not hide a column
+    // that already has room to return, just as a wide one must not crowd Title.
+    sizer = new ResizeObserver(measureWidth)
     sizer.observe(card.value)
   }
   // A viewport can shrink before the card observer is delivered. Fit the loaded

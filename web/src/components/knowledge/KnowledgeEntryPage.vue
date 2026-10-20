@@ -953,8 +953,8 @@ a.link-row:focus-visible { box-shadow: var(--focus-ring); }
 .rename-title { font-size: 13px; font-weight: 650; color: var(--ink); }
 .e-rename p + p { margin-top: 3px; font-size: 12.5px; line-height: 1.55; color: var(--ink); }
 .e-details-grid { grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); }
-.e-edit-body { display: grid; gap: 8px; }
-.e-edit-body :deep(.split .md-area), .e-edit-body :deep(.split .md-preview) { min-height: 420px; }
+/* Split writing: text and preview share one row, at least 420 px tall (AEON-1532). */
+.e-edit-body { display: grid; gap: 8px; --md-min: 420px; }
 .edit-hint { display: flex; align-items: center; flex-wrap: wrap; gap: 4px; font-size: 12px; color: var(--ink-3); }
 .edit-hint .keycap { padding: 0 4px; }
 .e-conflict { display: grid; gap: 12px; padding: 14px 16px; border-radius: 14px; background: var(--gold-wash); box-shadow: inset 0 0 0 1px var(--warn-line); }
