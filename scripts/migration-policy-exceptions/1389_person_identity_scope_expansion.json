@@ -1,0 +1,11 @@
+{
+  "schema": "aeon.migration-policy-exceptions.v1",
+  "exceptions": [
+    {
+      "file": "1389_person_identity_scope_expansion.sql",
+      "sha256": "07494d86e4f989977c417bb3f9571d4c1a210173a1aeed524f4b8de90d8a42a7",
+      "ticket": "AEON-1585",
+      "reason": "The brief explicitly requires widening both role_bindings CHECK constraints to admit computer and node shapes while preserving every old workspace/project shape, principal_id NOT NULL and existing partial unique indexes. Catalog-resolved constraint replacement occurs atomically in the migration transaction; all new columns are nullable with tenant-scoped foreign keys, no backfill, trigger or old-writer restriction. Dynamic catalog lookup and DROP/ADD CHECK are outside the syntactic expand-safe allowlist. Exact bytes require coordinator cross-family review and previous-binary migration compatibility CI before merge or release; this artifact grants no push or deployment authority."
+    }
+  ]
+}

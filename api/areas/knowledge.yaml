@@ -571,8 +571,10 @@ components:
       type: object
       required: [id, decision, event_id]
       properties:
+        proposal_id: {type: string, format: uuid}
+        code: {type: string, description: "rules_db_authoring_disabled for a learning redirected to an add proposal"}
         id: {type: string}
-        decision: {type: string, enum: [accepted, dismissed, drafted]}
+        decision: {type: string, enum: [accepted, dismissed, drafted, proposed]}
         event_id: {type: integer, format: int64}
         knowledge_id: {type: string, format: uuid}
         heading: {type: string}
@@ -588,9 +590,20 @@ components:
         learning_text: {type: string, maxLength: 2000, description: "The learning's text as the person reviewed it; a learning that reads differently now is 409 learning_changed"}
     MethodLearningDraft:
       type: object
-      required: [layer_id, set_id]
+      oneOf:
+        - required: [layer_id, set_id]
+          not: {required: [doctrine]}
+        - required: [doctrine]
+          not:
+            anyOf:
+              - required: [layer_id]
+              - required: [set_id]
       additionalProperties: false
       properties:
+        doctrine:
+          allOf:
+            - {$ref: '#/components/schemas/MethodLearningDoctrineTarget'}
+          description: "Explicit add-proposal destination when rules.db_authoring is off. Source, rule key and operation come from the learning, never from replacement request text. No database rule draft is written; a person opens the PR from the existing doctrine inbox. Without a destination the legacy writer refuses with rules_db_authoring_disabled."
         layer_id: {type: string, format: uuid}
         set_id: {type: string, format: uuid}
         confirm_not_sensitive:
@@ -652,6 +665,27 @@ components:
         field: {type: string, enum: [text, title, lesson, reason, source_summary]}
         start: {type: integer, minimum: 0}
         end: {type: integer, minimum: 0}
+    MethodLearningDoctrineTarget:
+      type: object
+      additionalProperties: false
+      required: [request_id, path, section]
+      anyOf:
+        - required: [source_id]
+        - required: [repository]
+      properties:
+        request_id: {type: string, format: uuid}
+        source_id: {type: string, format: uuid}
+        repository: {type: string}
+        path: {type: string, maxLength: 300}
+        section: {type: string, maxLength: 200}
+        tldr:
+          type: object
+          additionalProperties: false
+          required: [en]
+          properties:
+            en: {type: string, maxLength: 300}
+            de: {type: string, maxLength: 300}
+
   responses:
 
     KnowledgeEntry:

@@ -22,16 +22,14 @@ func qualifyCodexFixture(t *testing.T, a *CodexAdapter) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	node := filepath.Join(privateCapacityHome(t), "node")
-	nodeRaw := []byte("#!/bin/sh\nexit 0\n")
-	if err := os.WriteFile(node, nodeRaw, 0700); err != nil {
-		t.Fatal(err)
-	}
-	a.Nodes = map[string]harnesslaunch.Node{}
-	for key := range a.Homes {
-		a.Nodes[key] = harnesslaunch.Node{Path: node, Version: "fixture"}
-	}
-	a.idleUsage = &codexIdleCapability{binaryPath: a.Path, binarySHA256: sha256Hex(raw), nodePath: node, nodeSHA256: sha256Hex(nodeRaw), version: "synthetic-fixture", startupHooks: true, inheritedConfig: true, termination: true}
+	qualifySyntheticCodexPin(a, fixtureCapacityPin(Codex, a.Path, raw, "synthetic-fixture"))
+}
+
+// Legacy protocol fixtures are shell scripts, so install their synthetic
+// qualification explicitly. The production loader accepts native files only.
+func qualifySyntheticCodexPin(a *CodexAdapter, pin *capacityPin) {
+	a.idleUsage = &codexIdleCapability{pin: pin, binaryPath: pin.Path, binarySHA256: pin.SHA256, version: pin.Version,
+		startupHooks: true, inheritedConfig: true, termination: true}
 }
 
 func TestCodexUnqualifiedIdleNeverExecutesStartupHook(t *testing.T) {
@@ -43,6 +41,7 @@ func TestCodexUnqualifiedIdleNeverExecutesStartupHook(t *testing.T) {
 		t.Fatal(err)
 	}
 	a := NewCodexAdapter(path, map[string]string{"local": home})
+	a.idleUsage = loadCodexCapacityPin(nil) // Explicitly unqualified, even after future OPS pins.
 	a.SetExpectedEmails(map[string]string{"local": "fixture@example.test"})
 	if got := a.CaptureCapacityResult(t.Context(), "local"); got.Result != "unsupported" || a.CanCaptureCapacity("local") {
 		t.Fatal("production capability was invented")
@@ -79,6 +78,10 @@ func TestFakeCodexIdleProcess(t *testing.T) {
 	if os.Getenv("AEON_FAKE_IDLE_CHECK") != "1" {
 		return
 	}
+	runFakeCodexIdleProcess()
+}
+
+func runFakeCodexIdleProcess() {
 	home := os.Getenv("CODEX_HOME")
 	if home == "" || os.Getenv("HOME") != home || os.Getenv("OPENAI_API_KEY") != "" || os.Getenv("NODE_OPTIONS") != "" || os.Getenv("NODE_PATH") != "" {
 		os.Exit(10)
@@ -115,28 +118,16 @@ func TestFakeCodexIdleProcess(t *testing.T) {
 	}
 	os.Exit(0)
 }
-func TestCodexIdleUsesPinnedNodeAndOnlyFourMethods(t *testing.T) {
+
+// Risk: an enrolled wrapper or Node intercepts the idle exchange, or loader
+// overrides reach the separately pinned native process.
+func TestCodexIdleUsesPinnedNativeAndOnlyFourMethods(t *testing.T) {
 	home := privateCapacityHome(t)
-	bin := privateCapacityHome(t)
-	nodeDir := privateCapacityHome(t)
-	exe, err := os.Executable()
-	if err != nil {
-		t.Fatal(err)
-	}
-	node := filepath.Join(nodeDir, "node")
-	nodeRaw := []byte(fmt.Sprintf("#!/bin/sh\nprintf selected > \"$CODEX_HOME/node-selected\"\nAEON_FAKE_IDLE_CHECK=1 exec %q -test.run=^TestFakeCodexIdleProcess$\n", exe))
-	if err := os.WriteFile(node, nodeRaw, 0700); err != nil {
-		t.Fatal(err)
-	}
-	path := filepath.Join(bin, "codex")
-	raw := []byte("#!/usr/bin/env node\n")
-	if err := os.WriteFile(path, raw, 0700); err != nil {
-		t.Fatal(err)
-	}
-	a := NewCodexAdapter(path, map[string]string{"local": home})
+	a := NewCodexAdapter(refusingCapacityExecutable(t, home, "wrapper"), map[string]string{"local": home})
+	a.Nodes = map[string]harnesslaunch.Node{"local": {Path: refusingCapacityExecutable(t, home, "node"), Version: "fixture"}}
 	a.SetExpectedEmails(map[string]string{"local": "fixture@example.test"})
-	a.Nodes = map[string]harnesslaunch.Node{"local": {Path: node, Version: "fixture"}}
-	a.idleUsage = &codexIdleCapability{binaryPath: path, binarySHA256: sha256Hex(raw), nodePath: node, nodeSHA256: sha256Hex(nodeRaw), version: "synthetic-fixture", startupHooks: true, inheritedConfig: true, termination: true}
+	pin := nativeCapacityFixture(t)
+	a.idleUsage = loadCodexCapacityPin([]capacityPin{pin})
 	t.Setenv("OPENAI_API_KEY", "synthetic-parent-key")
 	t.Setenv("NODE_OPTIONS", "synthetic-startup-hook")
 	t.Setenv("NODE_PATH", "synthetic-parent-tools")
@@ -148,10 +139,7 @@ func TestCodexIdleUsesPinnedNodeAndOnlyFourMethods(t *testing.T) {
 	if err != nil || string(trace) != "initialize\ninitialized\naccount/read\naccount/rateLimits/read\n" {
 		t.Fatal("unexpected protocol or prompt/thread/MCP call")
 	}
-	selected, err := os.ReadFile(filepath.Join(home, "node-selected"))
-	if err != nil || string(selected) != "selected" {
-		t.Fatal("pinned node omitted")
-	}
+	assertNativeCapacityLaunch(t, home, pin.Path)
 	a.Emails["local"] = "other@example.test"
 	got = a.CaptureCapacityResult(t.Context(), "local")
 	if got.Result != "identity_mismatch" || len(got.Readings) != 0 || got.CleanupUnconfirmed {

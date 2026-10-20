@@ -8,6 +8,7 @@ license metadata and the Alpine chromium package for their notices.
 Chromium (Alpine v3.24)
 The runtime installs the first exact package from the chromium allow-list in scripts/Dockerfile.runtime, newest first, and records that APK in the image evidence.
 License: BSD-3-Clause
+Source: https://chromium.googlesource.com/chromium/src/+/refs/tags/155.0.8059.84/LICENSE
 Source: https://chromium.googlesource.com/chromium/src/+/refs/tags/155.0.8059.39/LICENSE
 Source: https://chromium.googlesource.com/chromium/src/+/refs/tags/152.0.7977.82/LICENSE
 

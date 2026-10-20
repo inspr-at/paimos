@@ -5,7 +5,6 @@ package main
 import (
 	"bufio"
 	"context"
-	"encoding/json"
 	"errors"
 	"flag"
 	"fmt"
@@ -14,7 +13,6 @@ import (
 	"os/exec"
 	"os/signal"
 	"path/filepath"
-	"sort"
 	"strings"
 	"syscall"
 	"time"
@@ -478,14 +476,22 @@ func setupCommandInput(command string, args []string, in io.Reader, out io.Write
 	if command == "status" && err == nil {
 		p = setupVersionStatus(ctx, engine.API, origin, p)
 	}
-	if e := printSetupProgress(out, jsonOutput, p); e != nil {
+	// One view for the whole invocation: the code block and hook notices stay
+	// put while later polls rewrite a single waiting line or add a new fact.
+	view := newSetupProgressView(progressWriterTTY(out), time.Now)
+	if e := view.Print(out, jsonOutput, p); e != nil {
 		return e
 	}
 	if err != nil {
+		_ = view.Finish(out)
 		return err
 	}
-	p, err = pollSetupProgress(ctx, command, p, once, jsonOutput, out, poller, store.Unlock, waitSetupPoll)
+	p, err = pollSetupProgress(ctx, command, p, once, jsonOutput, out, poller, store.Unlock, waitSetupPoll, view)
 	if err != nil {
+		_ = view.Finish(out)
+		return err
+	}
+	if err = view.Finish(out); err != nil {
 		return err
 	}
 	if command == "setup" || command == "add-harness" {
@@ -541,7 +547,7 @@ func waitSetupPoll(ctx context.Context, delay time.Duration) error {
 	}
 }
 
-func pollSetupProgress(ctx context.Context, command string, p agentsetup.Progress, once, jsonOutput bool, out io.Writer, engine setupPoller, unlock func(), waitFor func(context.Context, time.Duration) error) (agentsetup.Progress, error) {
+func pollSetupProgress(ctx context.Context, command string, p agentsetup.Progress, once, jsonOutput bool, out io.Writer, engine setupPoller, unlock func(), waitFor func(context.Context, time.Duration) error, view *setupProgressView) (agentsetup.Progress, error) {
 	for !once && setupNeedsPoll(command, p) {
 		wait := 5 * time.Second
 		if p.RetryAfterSeconds > 5 {
@@ -553,7 +559,7 @@ func pollSetupProgress(ctx context.Context, command string, p agentsetup.Progres
 		var err error
 		p, err = engine.Step(ctx)
 		unlock()
-		if e := printSetupProgress(out, jsonOutput, p); e != nil {
+		if e := view.Print(out, jsonOutput, p); e != nil {
 			return p, e
 		}
 		if err != nil {
@@ -613,134 +619,5 @@ func claudeNodeOption(requested string, discovered, saved []agentsetup.Candidate
 }
 
 func printSetupProgress(out io.Writer, jsonOutput bool, p agentsetup.Progress) error {
-	if p.Schema == "" {
-		p.Schema = "aeon.agent-setup.v1"
-	}
-	if jsonOutput {
-		return json.NewEncoder(out).Encode(p)
-	}
-	if p.UserCode != "" {
-		_, err := fmt.Fprintf(out, "Pairing code: %s\nApprove at: %s\n", p.UserCode, p.VerificationURI)
-		if err != nil {
-			return err
-		}
-	}
-	for _, c := range p.HookCapabilities {
-		state := "verified"
-		if !c.Verified {
-			state = "watch-only: " + c.Blocker
-		}
-		if _, err := fmt.Fprintf(out, "%s user hook: %s\n", c.Harness, state); err != nil {
-			return err
-		}
-	}
-	_, err := fmt.Fprintf(out, "%s: %s\n", p.Stage, p.Action)
-	if err != nil {
-		return err
-	}
-	if p.CheckoutNotice != "" {
-		if _, err := fmt.Fprintln(out, p.CheckoutNotice); err != nil {
-			return err
-		}
-	}
-	if p.TouchIDConfirmation != "" {
-		confirmation := "Touch ID confirmation: " + p.TouchIDConfirmation
-		if p.TouchIDUpgradeCommand != "" {
-			confirmation += ": " + p.TouchIDUpgradeCommand
-		}
-		if _, err := fmt.Fprintln(out, confirmation); err != nil {
-			return err
-		}
-		if p.TouchIDUpgradeCommand != "" {
-			if _, err := fmt.Fprintln(out, "Use a new, empty state folder and approve in Aeon. Keep the old pairing until the new one is verified. Point the service at the new state root through its existing owner."); err != nil {
-				return err
-			}
-		}
-	}
-	// Include healthy harnesses and each approved account, so a successful
-	// probe cannot disappear behind an unrelated verification failure.
-	harnesses := make([]string, 0, len(p.HarnessDetails))
-	for harness := range p.HarnessDetails {
-		harnesses = append(harnesses, harness)
-	}
-	sort.Strings(harnesses)
-	for _, harness := range harnesses {
-		detail := p.HarnessDetails[harness]
-		line := "harness " + harness + " " + detail.State
-		if detail.Reason != "" {
-			line += " reason " + detail.Reason
-		}
-		if detail.ReasonDetail != "" {
-			line += " detail " + detail.ReasonDetail
-		}
-		if detail.Fix.Command != "" {
-			line += " fix " + detail.Fix.Command
-		}
-		if _, err = fmt.Fprintln(out, line); err != nil {
-			return err
-		}
-		// A rotated profile may appear under several enrollments. Show its
-		// active login once, approved when it matches any connected enrollment.
-		logins := map[string]bool{}
-		for _, account := range p.Accounts {
-			if account.Harness == harness && account.State == "connected" {
-				if login, ok := p.AccountLogins[account.AccountID]; ok && login.ActiveIdentity != "" {
-					logins[login.ActiveIdentity] = logins[login.ActiveIdentity] || login.Approved
-				}
-			}
-		}
-		identities := make([]string, 0, len(logins))
-		for identity := range logins {
-			identities = append(identities, identity)
-		}
-		sort.Strings(identities)
-		for _, identity := range identities {
-			approval := "not approved on this computer; run aeon-agentd add-harness --harness " + harness
-			if logins[identity] {
-				approval = "approved on this computer"
-			}
-			if _, err = fmt.Fprintf(out, "harness %s active login %s: %s\n", harness, identity, approval); err != nil {
-				return err
-			}
-		}
-	}
-	accounts := append([]agentsetup.Enrollment(nil), p.Accounts...)
-	sort.Slice(accounts, func(i, j int) bool { return accounts[i].AccountID < accounts[j].AccountID })
-	for _, account := range accounts {
-		detail, ok := p.AccountStatuses[account.AccountID]
-		if !ok || account.State != "connected" {
-			detail = agentsetup.HarnessDetail{State: account.State}
-			if account.State == "connected" {
-				detail.State = "unconfirmed"
-			}
-		}
-		line := "account " + account.AccountID + " harness " + account.Harness + " " + detail.State
-		if agentsetup.ValidLoginLabel(account.Label) {
-			line += " login " + account.Label
-		}
-		if detail.Reason != "" {
-			line += " reason " + detail.Reason
-		}
-		if detail.ReasonDetail != "" {
-			line += " detail " + detail.ReasonDetail
-		}
-		if detail.Fix.Command != "" {
-			line += " fix " + detail.Fix.Command
-		}
-		if account.State == "connected" && detail.State == "ready" && account.VerificationState == "expired" && account.VerificationRunID != "" {
-			line += " verification expired — run verification again; run " + account.VerificationRunID
-			if account.Cleanup != "" {
-				line += "; local cleanup " + account.Cleanup
-			}
-		}
-		if _, err = fmt.Fprintln(out, line); err != nil {
-			return err
-		}
-	}
-	for _, blocked := range p.BlockedAccounts {
-		if _, err = fmt.Fprintf(out, "blocked account %s harness %s reason %s fix %s\n", blocked.AccountID, blocked.Harness, blocked.Reason, blocked.Fix.Command); err != nil {
-			return err
-		}
-	}
-	return nil
+	return writeSetupProgressSnapshot(out, jsonOutput, p)
 }

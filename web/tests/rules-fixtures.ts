@@ -22,6 +22,7 @@ export interface RulesMock {
 }
 
 export interface RulesMockOptions {
+  dbAuthoring?: boolean
   kind?: 'person' | 'agent'; conflict?: boolean; publish?: boolean; draftFailAt?: number; draftFailStatus?: number; holdDraftFailure?: boolean; rejectNextDraft?: boolean; setAbortAt?: number; comparisons?: unknown[]; comparisonStatus?: number
   /** AEON-314: sets and rules carry explanations for people. */
   tldr?: boolean
@@ -109,6 +110,7 @@ export async function mockRules(page: Page, options: RulesMockOptions = {}): Pro
         invites: [], imported: [], owner_count: 1,
       } })
     }
+    if (path === '/api/rules/authoring') return route.fulfill({ json: { db_authoring: options.dbAuthoring ?? true, proposal_path: '/api/rules/doctrine/inbox' } })
     if (path === '/api/rules/layers' && method === 'GET') {
       return route.fulfill({ json: { layers: [
         { id: COMPANY, scope: { layer: 'company' } },

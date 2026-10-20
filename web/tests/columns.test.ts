@@ -2,7 +2,7 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
-import { agreedFrameWidth, automaticColumns, CARD_WIDTH_SAMPLE_CAP, cardWidthAfterSamples, COLUMN_BY_ID, GIVE_WAY, latchParentShare, layoutTableWidth, layoutWidths, loadedFitWidth, nextMeasuredCardWidth, normalizeColumnIds, orderOf, PARENT_TITLE_WIDTH, parentColumnDefault, releaseLabel, RETURN_ROOM, savedColumnWidth, tagList, TITLE_MIN_TABLE, TITLE_TARGET, titleRoom, visibleColumns, widthOf, withHostColumns, type ColumnDef, type ColumnFit, type ColumnId, type ListPrefs } from '../src/lib/columns.ts'
+import { adoptedCardWidth, agreedFrameWidth, automaticColumns, CARD_WIDTH_SAMPLE_CAP, cardWidthAfterSamples, COLUMN_BY_ID, GIVE_WAY, latchParentShare, layoutTableWidth, layoutWidths, loadedFitWidth, nextMeasuredCardWidth, normalizeColumnIds, orderOf, PARENT_TITLE_WIDTH, parentColumnDefault, releaseLabel, RETURN_ROOM, savedColumnWidth, tagList, TITLE_MIN_TABLE, TITLE_TARGET, titleRoom, visibleColumns, widthOf, withHostColumns, type ColumnDef, type ColumnFit, type ColumnId, type ListPrefs } from '../src/lib/columns.ts'
 import { groupRows, selectLoadedGroup, filtersFromQuery, filtersToQuery, type TicketRow } from '../src/lib/ticketList.ts'
 import { byPosition, positionBetween, positionOf, type Attachment } from '../src/lib/attachments.ts'
 
@@ -447,6 +447,23 @@ test('AEON-1570 a growing card is adopted after a disagreeing frame pair, and a 
   assert.equal(nextMeasuredCardWidth(800, 780, false), 780)
   assert.equal(nextMeasuredCardWidth(800, 780, true), 780)
   assert.equal(nextMeasuredCardWidth(800, 0, true), 800)
+})
+
+// AEON-1594. Risk: the first agreeing pair of a shrink is the previous wide frame. Adopting it lays that
+// column set into the card that has already narrowed, and a later column measures 0.
+test('AEON-1594 a shrink does not adopt a sample wider than the card now', () => {
+  assert.equal(adoptedCardWidth(null, 760, false), null)
+  assert.equal(adoptedCardWidth(0, 760, false), null)
+  assert.equal(adoptedCardWidth(1000, 760, false), null)
+  assert.equal(adoptedCardWidth(760.6, 760, false), null)
+  // The live card replaced a stale narrow box, including when the window itself did not grow.
+  assert.equal(adoptedCardWidth(1000, 1000, false), 1000)
+  assert.equal(adoptedCardWidth(760, 760, false), 760)
+  assert.equal(adoptedCardWidth(700, 760, false), 700)
+  assert.equal(adoptedCardWidth(760.4, 760, false), 760.4)
+  assert.equal(adoptedCardWidth(1000, null, false), 1000)
+  // A grow may adopt the wider pair while the content box is still the previous frame.
+  assert.equal(adoptedCardWidth(1000, 760, true), 1000)
 })
 
 // AEON-1470 (fix 7). Risk: Automatic's wide extras stepping aside outside the give-way, so the column the list is sorted

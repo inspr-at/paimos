@@ -11,15 +11,15 @@ import RulesImportDialog from './RulesImportDialog.vue'
 import RulesPreview from './RulesPreview.vue'
 import RulesPublishDialog, { type Budget, type PublishItem } from './RulesPublishDialog.vue'
 import DoctrineLayer from './DoctrineLayer.vue'
-import { accountName, getProjects } from '../../lib/api'
+import { api, accountName, getProjects } from '../../lib/api'
 import { can } from '../../lib/authz'
 import { getMembers } from '../../lib/access'
 import { toast } from '../../lib/toast'
 import { useSession } from '../../stores/session'
 import {
-  DEFAULT_BUDGET, MAX_RULES, ROLE_LABEL, ROLES, RulesError, applyEnabled, getBudget, saveTldrs, blankRule, copyName, createLayer, createSet, diffSet, duplicateRule, getVersion, groupsState, hasMovable, importBlock, largestProjected,
-  listLayers, listSets, publishBlock, publishSets, replyUncertain, rulesEqual, rulesMessage, saveDraft, scopeKey, scopeRank,
-  setState, validateDraft, writeBlock,
+  DEFAULT_BUDGET, MAX_RULES, ROLE_LABEL, ROLES, RulesError, applyEnabled, getBudget, saveTldrs, blankRule, copyName, createLayer, createSet, diffSet, duplicateRule, getVersion, groupsState, hasMovable, importBlock as permissionImportBlock, largestProjected,
+  listLayers, listSets, publishBlock as permissionPublishBlock, publishSets, replyUncertain, rulesEqual, rulesMessage, saveDraft, scopeKey, scopeRank,
+  setState, validateDraft, writeBlock as permissionWriteBlock,
   type AgentRule, type Caller, type CheckGroup, type RuleBudgetView, type CheckState, type ImportReport, type MergeInput, type NamedAgent, type RoleName, type RuleLayer, type RuleScope, type RuleSet, type RuleSnapshot, type SetState,
 } from '../../lib/rules'
 
@@ -32,6 +32,12 @@ type SectionKey = 'company' | 'project' | 'person' | 'agent'
 const session = useSession()
 const model = ref<Bundle[]>([])
 const loading = ref(true)
+const dbAuthoring = ref<boolean | null>(null)
+const authoringMessage = 'Database rules are read-only. Propose a change through Doctrine.'
+let loadSequence = 0
+const writeBlock = (...args: Parameters<typeof permissionWriteBlock>) => dbAuthoring.value ? permissionWriteBlock(...args) : authoringMessage
+const publishBlock = (...args: Parameters<typeof permissionPublishBlock>) => dbAuthoring.value ? permissionPublishBlock(...args) : authoringMessage
+const importBlock = (...args: Parameters<typeof permissionImportBlock>) => dbAuthoring.value ? permissionImportBlock(...args) : authoringMessage
 const loadError = ref('')
 const projects = ref<{ id: string; title: string }[]>([])
 const agents = ref<NamedAgent[]>([])
@@ -92,17 +98,29 @@ async function withLive(set: RuleSet): Promise<Working> {
   try { return { remote: set, live: await getVersion(set.id, set.published_version) } } catch { return { remote: set, live: null } }
 }
 async function load(quiet = false) {
+  const sequence = ++loadSequence
+  const identity = `${tenantId.value}/${me.value}`
+  const current = () => sequence === loadSequence && identity === `${tenantId.value}/${me.value}`
   if (!quiet) loading.value = true
+  dbAuthoring.value = null
   loadError.value = ''
   try {
+    const response = await api('/rules/authoring')
+    if (!response.ok) throw new Error('The rules authoring setting could not be loaded.')
+    const setting = await response.json() as { db_authoring?: boolean }
+    if (typeof setting.db_authoring !== 'boolean') throw new Error('Invalid rules authoring setting.')
     const { layers } = await listLayers()
-    model.value = await Promise.all(layers.map(async layer => {
+    const nextModel = await Promise.all(layers.map(async layer => {
       const { sets } = await listSets(layer.id)
       return { layer, sets: await Promise.all(sets.map(withLive)) }
     }))
+    if (!current()) return
+    dbAuthoring.value = setting.db_authoring
+    model.value = nextModel
+    if (!setting.db_authoring) { editing.value = null; adding.value = null; importOpen.value = false; publishTarget.value = null }
     rulesLoaded.value = true
     pickProject()
-  } catch (cause) { loadError.value = rulesMessage(cause) } finally { loading.value = false }
+  } catch (cause) { if (current()) loadError.value = rulesMessage(cause) } finally { if (current()) loading.value = false }
 }
 async function loadContext() {
   try {
@@ -123,7 +141,7 @@ function pickProject(prefer?: string) {
   const targeted = model.value.filter(bundle => bundle.layer.scope.layer === 'project' && bundle.sets.length).map(bundle => bundle.layer.scope.project_id!)
   projectId.value = targeted.find(id => projects.value.some(project => project.id === id)) ?? targeted[0] ?? projects.value[0]?.id ?? ''
 }
-watch(() => session.identity?.principal.id, () => { if (session.identity) void load(true) })
+watch(() => `${session.identity?.tenant.id}/${session.identity?.principal.id}`, () => { dbAuthoring.value = null; editing.value = null; adding.value = null; importOpen.value = false; publishTarget.value = null; model.value = []; if (session.identity) void load(true); else loadSequence++ })
 
 // ---------- What applies, what waits ----------
 const allSets = computed(() => model.value.flatMap(bundle => bundle.sets.map(set => ({ bundle, set }))))
@@ -483,7 +501,7 @@ const budget = computed<Budget | null>(() => {
 })
 async function confirmPublish(note: string) {
   const list = publishList.value
-  if (!list.length || publishing.value) return
+  if (!dbAuthoring.value || !list.length || publishing.value) return
   publishing.value = true
   publishError.value = ''
   try {
@@ -551,6 +569,7 @@ onMounted(() => {
         <button v-if="publishable.length" type="button" class="btn primary" @click="openPublish()"><BizIcon name="seal" :size="15" />Review and publish ({{ publishable.length }} {{ publishable.length === 1 ? 'set' : 'sets' }})</button>
       </div>
     </header>
+    <p v-if="!loading && !loadError && dbAuthoring === false" role="status">Database rules are read-only. <a href="#doctrine-title">Propose a change</a></p>
     <RulesComparisonPanel v-if="!loading && !empty && !loadError && projectId" :project-id="projectId" />
     <p v-if="publishNote" class="publish-note"><BizIcon name="lock" :size="13" />{{ publishNote }}</p>
 

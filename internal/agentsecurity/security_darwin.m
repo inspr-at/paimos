@@ -374,8 +374,9 @@ int aeon_enclave_create(const char *keyID, void **raw, int *size) {
   {
    CFErrorRef error = NULL;
    SecAccessControlRef access = SecAccessControlCreateWithFlags(kCFAllocatorDefault, kSecAttrAccessibleWhenUnlockedThisDeviceOnly, kSecAccessControlBiometryCurrentSet | kSecAccessControlPrivateKeyUsage, &error);
+   status = error ? (OSStatus)CFErrorGetCode(error) : errSecAuthFailed;
    if (error) { CFRelease(error); error = NULL; }
-   if (!access) return errSecAuthFailed;
+   if (!access) return status;
    // biometryCurrentSet is the enclave ACL. SecAccessControl cannot also pin
    // the daemon's designated requirement; generic passwords do that above.
    // The server binds the canonical reason into the signature hash.
@@ -386,15 +387,19 @@ int aeon_enclave_create(const char *keyID, void **raw, int *size) {
      (__bridge id)kSecAttrApplicationTag:query[(__bridge id)kSecAttrApplicationTag],
      (__bridge id)kSecAttrAccessControl:(__bridge id)access}};
    key = SecKeyCreateRandomKey((__bridge CFDictionaryRef)attrs, &error);
+   status = error ? (OSStatus)CFErrorGetCode(error) : errSecAuthFailed;
    CFRelease(access); if (error) CFRelease(error);
-   if (!key) return 1; // No Secure Enclave: pairing may still use Aeon approval.
+   // Only the biometric preflight above reports hardware unavailability (1).
+   // In particular, preserve errSecMissingEntitlement (-34018) before release.
+   if (!key) return status;
   }
   SecKeyRef pub = SecKeyCopyPublicKey(key); CFRelease(key);
   if (!pub) return errSecAuthFailed;
   CFErrorRef error = NULL;
   CFDataRef result = SecKeyCopyExternalRepresentation(pub, &error); CFRelease(pub);
+  status = error ? (OSStatus)CFErrorGetCode(error) : errSecAuthFailed;
   if (error) CFRelease(error);
-  if (!result) return errSecAuthFailed;
+  if (!result) return status;
   NSData *data = CFBridgingRelease(result); return copy_data(data, raw, size);
  }
 }

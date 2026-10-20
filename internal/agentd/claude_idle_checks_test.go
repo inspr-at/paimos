@@ -28,14 +28,15 @@ func TestClaudeIdleQualificationRefusesUnknownDigestAndBoundaries(t *testing.T) 
 			t.Fatal(err)
 		}
 	}
-	a := NewClaudeAdapter(node, "", path, map[string]string{"one": home})
+	a := NewClaudeAdapter(refusingCapacityExecutable(t, home, "node-wrapper"), "", refusingCapacityExecutable(t, home, "claude-wrapper"), map[string]string{"one": home})
 	calls := 0
 	secret := "sk-ant-synthetic-not-for-errors-1499"
 	c := claudeUsageCapability{binaryPath: path, binarySHA256: sha256Hex(raw), nodePath: node, nodeSHA256: sha256Hex(raw), version: "synthetic-fixture", startupHooks: true, inheritedConfig: true, termination: true,
-		capture: func(ctx context.Context, selected string, environment []string) (json.RawMessage, error) {
+		pin: fixtureCapacityPin(Claude, path, raw, "synthetic-fixture", capacityHelperPin{Name: "node", Path: node, SHA256: sha256Hex(raw)}),
+		capture: func(ctx context.Context, executable, selected string, environment []string) (json.RawMessage, error) {
 			calls++
-			if selected != home {
-				t.Fatal("cross-account profile")
+			if selected != home || executable != path {
+				t.Fatal("cross-account profile or wrong capacity executable")
 			}
 			if _, ok := ctx.Deadline(); !ok {
 				t.Fatal("unbounded capture")
@@ -63,7 +64,7 @@ func TestClaudeIdleQualificationRefusesUnknownDigestAndBoundaries(t *testing.T) 
 			case "no-entry":
 				a.usage = nil
 			case "version":
-				candidate.version = ""
+				candidate.version = "different-version"
 			case "executable":
 				candidate.binarySHA256 = strings.Repeat("0", 64)
 			case "interpreter":
@@ -92,7 +93,8 @@ func TestClaudeIdleQualificationRefusesUnknownDigestAndBoundaries(t *testing.T) 
 	if err != nil || strings.Contains(string(serialized), secret) {
 		t.Fatal("raw vendor fields escaped normalized capture")
 	}
-	c.capture = func(context.Context, string, []string) (json.RawMessage, error) {
+	assertNoCapacitySpawn(t, home)
+	c.capture = func(context.Context, string, string, []string) (json.RawMessage, error) {
 		return nil, errors.Join(ownedprocess.ErrCleanupUnconfirmed, errors.New(secret))
 	}
 	out = a.CaptureCapacityResult(t.Context(), "one")

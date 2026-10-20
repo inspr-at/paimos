@@ -55,6 +55,7 @@ func New(pool *pgxpool.Pool, publicURL, defaultTenant string, nixGuide ...*confi
 
 func (m *Module) Mount(mux *http.ServeMux) {
 	m.mountWatch(mux)
+	mux.HandleFunc("GET /api/agent-pairing/computers/inventory", m.person("account.manage", m.inventory))
 	mux.HandleFunc("PUT /api/agent-pairing/computers/{computerId}/name", m.person("account.manage", m.renameComputer))
 	mux.HandleFunc("POST /api/agent-pairing/accounts/sign-out", m.person("account.manage", m.signOutEverywhere))
 	mux.HandleFunc("PUT /api/agent-pairing/computers/{computerId}/capacity", m.person("account.manage", m.saveHostCapacity))

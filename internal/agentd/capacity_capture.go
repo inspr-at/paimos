@@ -9,7 +9,6 @@ import (
 
 	"github.com/inspr-at/paimos/internal/agentsetup"
 	"github.com/inspr-at/paimos/internal/capacity"
-	"github.com/inspr-at/paimos/internal/harnesslaunch"
 	"github.com/inspr-at/paimos/internal/openrouter"
 )
 
@@ -22,21 +21,21 @@ type CapacityCapture struct {
 	CleanupUnconfirmed bool
 }
 
-// No production entry is qualified. An exact binary, its pinned interpreter,
+// No production entry is qualified. An exact native binary and any helpers,
 // startup hooks, inherited config/tools and group termination must all have
 // release-owned evidence before an idle launch is enabled. A successful fake
 // exchange establishes protocol tests only (agentverification/capability.go).
 type codexIdleCapability struct {
+	pin                                                     *capacityPin
 	binaryPath, binarySHA256, nodePath, nodeSHA256, version string
 	startupHooks, inheritedConfig, termination              bool
 }
 
 func (a *CodexAdapter) CanCaptureCapacity(key string) bool {
 	c := a.idleUsage
-	node := a.Nodes[key].Path
 	if c == nil || c.version == "" || !c.startupHooks || !c.inheritedConfig || !c.termination ||
-		c.binaryPath != a.Path || c.nodePath != node || strings.TrimSpace(a.Emails[key]) == "" ||
-		!exactCapacityBinary(a.Path, c.binarySHA256) || !exactCapacityBinary(node, c.nodeSHA256) {
+		c.nodePath != "" || c.nodeSHA256 != "" || strings.TrimSpace(a.Emails[key]) == "" ||
+		!c.pin.matches(Codex, c.binaryPath, c.binarySHA256, c.version, "", "") {
 		return false
 	}
 	_, err := localHome(a.Homes, key)
@@ -51,12 +50,10 @@ func (a *CodexAdapter) CaptureCapacityResult(ctx context.Context, key string) Ca
 	if !a.CanCaptureCapacity(key) {
 		return CapacityCapture{Result: "unsupported"}
 	}
+	c := a.idleUsage
 	return a.captureCapacityResult(ctx, key, func(home string) (*wireProcess, error) {
-		if err := harnesslaunch.Validate(a.Path, a.Nodes[key].Path); err != nil {
-			return nil, err
-		}
-		environment := harnesslaunch.Environment(capacityEnvironment("CODEX_HOME", home, a.Path), a.Nodes[key].Path)
-		return launchWire(a.Path, []string{"app-server", "--listen", "stdio://"}, home, environment, "jsonrpc", func(AdapterEvent) {})
+		return launchWire(c.binaryPath, []string{"app-server", "--listen", "stdio://"}, home,
+			capacityEnvironment("CODEX_HOME", home, c.binaryPath), "jsonrpc", func(AdapterEvent) {})
 	})
 }
 

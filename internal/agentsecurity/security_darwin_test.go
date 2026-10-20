@@ -6,8 +6,35 @@ package agentsecurity
 import (
 	"context"
 	"errors"
+	"strconv"
+	"strings"
 	"testing"
 )
+
+// Risk: a signing defect is mistaken for missing hardware, or another native
+// failure loses the status needed to diagnose it and silently downgrades pairing.
+func TestEnclaveCreateErrorPreservesOSStatus(t *testing.T) {
+	for _, tc := range []struct {
+		status int
+		want   error
+	}{
+		{0, nil},
+		{1, ErrUnavailable},
+		{-34018, ErrMissingEntitlement},
+		{-25299, ErrExists},
+		{-25293, ErrDenied},
+		{-25308, ErrDenied},
+		{-50, ErrDenied},
+	} {
+		err := enclaveCreateError(tc.status)
+		if !errors.Is(err, tc.want) {
+			t.Fatalf("status %d: got %v, want %v", tc.status, err, tc.want)
+		}
+		if tc.status < 0 && (!strings.Contains(err.Error(), "OSStatus "+strconv.Itoa(tc.status)) || errors.Is(err, ErrUnavailable)) {
+			t.Fatalf("status %d lost its cause or became hardware unavailability: %v", tc.status, err)
+		}
+	}
+}
 
 func TestUnsignedDaemonCannotAccessKeychainOrEnclave(t *testing.T) {
 	// The unsigned test executable must fail before any Keychain or OS prompt.

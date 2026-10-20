@@ -443,7 +443,7 @@ func (m *Module) authenticateAgent(ctx context.Context, prefix, secret string) (
 	var p tenant.Principal
 	err := m.inTenant(ctx, m.pool, tenantID, func(tx pgx.Tx) error {
 		var principalID, gotTenant string
-		var creatorID *string
+		var creatorID, personID *string
 		var keyID string
 		var marked, fullAccess, renew bool
 		var computer *string
@@ -463,11 +463,11 @@ func (m *Module) authenticateAgent(ctx context.Context, prefix, secret string) (
 			  )`
 		hash := hashSecret(secret)
 		err := tx.QueryRow(ctx, `SELECT k.principal_id::text, k.tenant_id::text, k.scopes,
-			k.created_by_principal_id::text, k.id::text, k.owner_workstation,
+			k.created_by_principal_id::text, k.person_id::text, k.id::text, k.owner_workstation,
 			k.workstation_computer_id::text, k.workstation_generation, coalesce(k.full_access,false),
 			k.last_used_at IS NULL OR k.last_used_at <= clock_timestamp() - interval '1 minute'
 			FROM agent_keys k WHERE `+validKey,
-			prefix, hash).Scan(&principalID, &gotTenant, &scopes, &creatorID, &keyID, &marked, &computer, &generation, &fullAccess, &renew)
+			prefix, hash).Scan(&principalID, &gotTenant, &scopes, &creatorID, &personID, &keyID, &marked, &computer, &generation, &fullAccess, &renew)
 		if err != nil {
 			return err
 		}
@@ -499,6 +499,9 @@ func (m *Module) authenticateAgent(ctx context.Context, prefix, secret string) (
 		if computer != nil {
 			p.WorkstationComputerID = *computer
 		}
+		if personID != nil {
+			p.KeyPersonID = *personID
+		}
 		p.AuthKeyID = keyID
 		if creatorID != nil {
 			p.KeyCreatorID = *creatorID
@@ -518,6 +521,7 @@ func (m *Module) authenticateAgent(ctx context.Context, prefix, secret string) (
 }
 
 type keyRecord struct {
+	PersonID              *string
 	FullAccess            bool
 	CreatedByPrincipalID  *string
 	OwnerWorkstation      bool
@@ -859,7 +863,7 @@ func (m *Module) listAgentKeys(ctx context.Context, tenantID string) ([]keyRecor
 	var out []keyRecord
 	err := m.inTenant(ctx, m.pool, tenantID, func(tx pgx.Tx) error {
 		rows, err := tx.Query(ctx, `
-			SELECT id::text, principal_id::text, name, prefix, scopes, created_at, expires_at, last_used_at, revoked_at, owner_workstation, workstation_computer_id::text, created_by_principal_id::text, coalesce(full_access,false)
+			SELECT id::text, principal_id::text, name, prefix, scopes, created_at, expires_at, last_used_at, revoked_at, owner_workstation, workstation_computer_id::text, created_by_principal_id::text, person_id::text, coalesce(full_access,false)
 			FROM agent_keys
 			ORDER BY created_at DESC, id
 		`)
@@ -870,7 +874,7 @@ func (m *Module) listAgentKeys(ctx context.Context, tenantID string) ([]keyRecor
 		for rows.Next() {
 			var rec keyRecord
 			var scopes pgtype.FlatArray[string]
-			if err := rows.Scan(&rec.ID, &rec.PrincipalID, &rec.Name, &rec.Prefix, &scopes, &rec.CreatedAt, &rec.ExpiresAt, &rec.LastUsedAt, &rec.RevokedAt, &rec.OwnerWorkstation, &rec.WorkstationComputerID, &rec.CreatedByPrincipalID, &rec.FullAccess); err != nil {
+			if err := rows.Scan(&rec.ID, &rec.PrincipalID, &rec.Name, &rec.Prefix, &scopes, &rec.CreatedAt, &rec.ExpiresAt, &rec.LastUsedAt, &rec.RevokedAt, &rec.OwnerWorkstation, &rec.WorkstationComputerID, &rec.CreatedByPrincipalID, &rec.PersonID, &rec.FullAccess); err != nil {
 				return err
 			}
 			rec.Scopes = []string(scopes)
@@ -937,8 +941,8 @@ func (m *Module) revokeAgentKeyTx(ctx context.Context, tx pgx.Tx, p tenant.Princ
 
 func lockAgentKey(ctx context.Context, tx pgx.Tx, id string) (keyRecord, error) {
 	var rec keyRecord
-	err := tx.QueryRow(ctx, `SELECT id::text,principal_id::text,name,prefix,scopes,created_at,expires_at,last_used_at,revoked_at,owner_workstation,workstation_computer_id::text,created_by_principal_id::text,coalesce(full_access,false)
-		FROM agent_keys WHERE id=$1::uuid FOR UPDATE`, id).Scan(&rec.ID, &rec.PrincipalID, &rec.Name, &rec.Prefix, &rec.Scopes, &rec.CreatedAt, &rec.ExpiresAt, &rec.LastUsedAt, &rec.RevokedAt, &rec.OwnerWorkstation, &rec.WorkstationComputerID, &rec.CreatedByPrincipalID, &rec.FullAccess)
+	err := tx.QueryRow(ctx, `SELECT id::text,principal_id::text,name,prefix,scopes,created_at,expires_at,last_used_at,revoked_at,owner_workstation,workstation_computer_id::text,created_by_principal_id::text,person_id::text,coalesce(full_access,false)
+		FROM agent_keys WHERE id=$1::uuid FOR UPDATE`, id).Scan(&rec.ID, &rec.PrincipalID, &rec.Name, &rec.Prefix, &rec.Scopes, &rec.CreatedAt, &rec.ExpiresAt, &rec.LastUsedAt, &rec.RevokedAt, &rec.OwnerWorkstation, &rec.WorkstationComputerID, &rec.CreatedByPrincipalID, &rec.PersonID, &rec.FullAccess)
 	if errors.Is(err, pgx.ErrNoRows) {
 		err = errNotFound
 	}

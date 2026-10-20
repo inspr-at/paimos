@@ -9,6 +9,7 @@ import (
 )
 
 var ErrUnavailable = errors.New("Secure Enclave unavailable; use Aeon approval")
+var ErrMissingEntitlement = errors.New("Secure Enclave key creation requires the keychain entitlement")
 var ErrDenied = errors.New("signed daemon Keychain access denied")
 var ErrExists = errors.New("Keychain item already exists")
 
