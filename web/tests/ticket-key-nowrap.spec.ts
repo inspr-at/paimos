@@ -132,8 +132,15 @@ for (const width of [320, 360, 390, 1440]) {
 
     if (width === 320) {
       // Squeezed further, the date is next to give way. The key and the
-      // status icon stay whole, and nothing leaves the card.
-      await grid(page).evaluate(el => { (el.closest('.table-card') as HTMLElement).style.width = '228px' })
+      // status icon stay whole, and nothing leaves the card. The squeeze leaves the
+      // long key's date half its text on any platform font, never wider than 228px.
+      const longRow = rows(page).filter({ has: page.locator('.phone-meta .key', { hasText: /^PHAROS-14530$/ }) })
+      const squeezed = await longRow.evaluate(tr => {
+        const meta = tr.querySelector<HTMLElement>('.phone-meta')!, date = meta.querySelector<HTMLElement>('time')!
+        const needed = [...meta.children].reduce((sum, el) => sum + (el === date ? date.scrollWidth / 2 : el.getBoundingClientRect().width), 0)
+        return Math.floor(tr.closest('.table-card')!.getBoundingClientRect().width - (meta.clientWidth - needed))
+      })
+      await grid(page).evaluate((el, width) => { (el.closest('.table-card') as HTMLElement).style.width = `${width}px` }, Math.min(228, squeezed))
       let datesGivingWay = 0
       for (const row of await rows(page).all()) {
         const keyFit = await wholeKey(row.locator('.phone-meta .key'), 'tr')
