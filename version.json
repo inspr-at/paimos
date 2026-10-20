@@ -1,12 +1,12 @@
 {
   "product": "PAIMOS AEON",
   "version_scheme": "inspr-calver-3",
-  "version": "261017115202.0.0",
+  "version": "261020180411.0.0",
   "release_channel": "stable",
-  "release_sequence": 136,
-  "codename": "Aglow Apsis",
-  "reserved_at": "2026-10-17T11:52:02Z",
-  "ticket": "AEON-1475",
+  "release_sequence": 137,
+  "codename": "Busy Blip",
+  "reserved_at": "2026-10-20T18:04:11Z",
+  "ticket": "AEON-1579",
   "unpublished_reservations": [
     "260923134337.0.0",
     "260925231350.0.0",

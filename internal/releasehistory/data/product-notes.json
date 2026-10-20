@@ -7127,6 +7127,447 @@
           "group": "features"
         }
       ]
+    },
+    "261020180411.0.0": {
+      "release_channel": "stable",
+      "release_sequence": 137,
+      "snapshot_sha256": "7124911d432e7635a091dd394e48b97ff6a5964a0e13fcb4bbb4250fe3bdd365",
+      "captured_at": "2026-10-20T18:04:17Z",
+      "release_revision": 1,
+      "items": [
+        {
+          "key": "AEON-1036",
+          "pill_en": "Limits on the dial",
+          "pill_de": "Limits am Regler",
+          "benefit_en": "The agent dial brings together daily usage, limits and running counts, with expandable details about waits.",
+          "benefit_de": "Der Agentenregler bündelt Tagesnutzung, Limits und Laufzahlen; ausklappbare Details erklären Wartegründe.",
+          "group": "features"
+        },
+        {
+          "key": "AEON-1166",
+          "pill_en": "Dial follows Models",
+          "pill_de": "Regler folgt Modellen",
+          "benefit_en": "When a harness hits its limit, work simply continues with the next model in your order instead of a separate switch.",
+          "benefit_de": "Erreicht ein Harness sein Limit, geht die Arbeit einfach mit dem nächsten Modell der Reihenfolge weiter statt über einen eigenen Schalter.",
+          "group": "features"
+        },
+        {
+          "key": "AEON-1213",
+          "pill_en": "Smooth split view",
+          "pill_de": "Flüssige Teilansicht",
+          "benefit_en": "List and details share the screen smoothly at any width, with simple keys that work on German and English keyboards.",
+          "benefit_de": "Liste und Details teilen sich den Bildschirm flüssig bei jeder Breite, mit einfachen Tasten für deutsche und englische Tastaturen.",
+          "group": "features"
+        },
+        {
+          "key": "AEON-1286",
+          "pill_en": "Phone layout fits",
+          "pill_de": "Telefon-Layout passt",
+          "benefit_en": "On a phone the ticket list, agent view and chat show content instead of controls; the rest sits behind ⋯.",
+          "benefit_de": "Am Telefon zeigen Ticketliste, Agentenansicht und Chat Inhalte statt Bedienelementen; der Rest liegt hinter ⋯.",
+          "group": "features"
+        },
+        {
+          "key": "AEON-1301",
+          "pill_en": "Doctrine sync works",
+          "pill_de": "Doktrin-Abgleich funktioniert",
+          "benefit_en": "Doctrine fetches and proposals keep working with GitHub's longer installation tokens.",
+          "benefit_de": "Doktrin-Abrufe und -Vorschläge funktionieren auch mit den längeren Installations-Tokens von GitHub.",
+          "group": "fixes"
+        },
+        {
+          "key": "AEON-1317",
+          "pill_en": "Clear ready and done",
+          "pill_de": "Klare Bereit- und Fertig-Regeln",
+          "benefit_en": "Each project shows what a ticket needs before it is ready, in QA or done, and agents cannot skip a step.",
+          "benefit_de": "Jedes Projekt zeigt, was ein Ticket vor Bereit, QA oder Fertig braucht; Agenten können keinen Schritt überspringen.",
+          "group": "features"
+        },
+        {
+          "key": "AEON-1320",
+          "pill_en": "No refused webhooks",
+          "pill_de": "Keine abgelehnten Webhooks",
+          "benefit_en": "All GitHub check events are accepted, so no delivery shows as failed and no CI fact is lost.",
+          "benefit_de": "Alle GitHub-Check-Ereignisse werden angenommen; keine Zustellung scheitert, kein CI-Ergebnis geht verloren.",
+          "group": "features"
+        },
+        {
+          "key": "AEON-1336",
+          "pill_en": "Faster pull request checks",
+          "pill_de": "Schnellere PR-Prüfungen",
+          "benefit_en": "Pull requests are tested by real impact, so more run at once and merge sooner; main stays fully protected.",
+          "benefit_de": "Pull Requests werden nach echter Wirkung geprüft; mehr laufen gleichzeitig und werden früher gemergt; main bleibt voll geschützt.",
+          "group": "features"
+        },
+        {
+          "key": "AEON-1337",
+          "pill_en": "Faster pull request checks",
+          "pill_de": "Schnellere PR-Prüfungen",
+          "benefit_en": "Pull requests are tested by real impact, so more run at once and merge sooner; main stays fully protected.",
+          "benefit_de": "Pull Requests werden nach echter Wirkung geprüft; mehr laufen gleichzeitig und werden früher gemergt; main bleibt voll geschützt.",
+          "group": "features"
+        },
+        {
+          "key": "AEON-1339",
+          "pill_en": "Calmer Decision Desk",
+          "pill_de": "Ruhigerer Decision Desk",
+          "benefit_en": "Question and approval rounds on the Decision Desk close by themselves after the last decision; lesson memos stay open so they can be undone.",
+          "benefit_de": "Frage- und Freigaberunden im Decision Desk schließen nach der letzten Entscheidung von selbst; Lehren bleiben zum Zurücknehmen offen.",
+          "group": "features"
+        },
+        {
+          "key": "AEON-1354",
+          "pill_en": "Leaner event log",
+          "pill_de": "Schlankeres Ereignisprotokoll",
+          "benefit_en": "AEON's database stops growing by almost a gigabyte a week from machine heartbeats, so backups, releases and the server disk stay small and fast.",
+          "benefit_de": "Die AEON-Datenbank wächst nicht mehr fast ein Gigabyte pro Woche durch Maschinen-Heartbeats; Backups, Releases und die Server-Platte bleiben klein und schnell.",
+          "group": "features"
+        },
+        {
+          "key": "AEON-1388",
+          "pill_en": "Group totals visible",
+          "pill_de": "Gruppensummen sichtbar",
+          "benefit_en": "Grouped ticket lists show what each group holds, such as how many agents are working, hours and cost, without opening it. One click expands or collapses all groups.",
+          "benefit_de": "Gruppierte Ticketlisten zeigen, was jede Gruppe enthält, etwa wie viele Agenten arbeiten, Stunden und Kosten, ohne sie aufzuklappen. Ein Klick klappt alle Gruppen auf oder zu.",
+          "group": "features"
+        },
+        {
+          "key": "AEON-1390",
+          "pill_en": "Clear group sorting",
+          "pill_de": "Klare Gruppensortierung",
+          "benefit_en": "In grouped lists, the grouped-by column orders the groups and every other column sorts within them.",
+          "benefit_de": "In gruppierten Listen ordnet die Gruppierungsspalte die Gruppen, alle anderen Spalten sortieren innerhalb der Gruppen.",
+          "group": "features"
+        },
+        {
+          "key": "AEON-1394",
+          "pill_en": "Proven before enforced",
+          "pill_de": "Erst bewiesen, dann erzwungen",
+          "benefit_en": "The switch to PAIMOS admission is proven in shadow before it enforces anything.",
+          "benefit_de": "Der Wechsel zur PAIMOS-Zulassung ist im Schattenbetrieb bewiesen, bevor er etwas erzwingt.",
+          "group": "features"
+        },
+        {
+          "key": "AEON-1395",
+          "pill_en": "Progress at a glance",
+          "pill_de": "Fortschritt auf einen Blick",
+          "benefit_en": "One glance shows how far each area is, what is missing and when it lands.",
+          "benefit_de": "Ein Blick zeigt, wie weit jeder Bereich ist, was fehlt und wann er kommt.",
+          "group": "features"
+        },
+        {
+          "key": "AEON-1399",
+          "pill_en": "Reviews register normally",
+          "pill_de": "Prüfungen sichtbar",
+          "benefit_en": "Review and scout agents show up as sessions on tickets with an open delivery instead of running invisibly.",
+          "benefit_de": "Prüf- und Erkundungsagenten erscheinen auch bei Tickets mit offener Auslieferung als Sitzung, statt unsichtbar zu laufen.",
+          "group": "fixes"
+        },
+        {
+          "key": "AEON-1401",
+          "pill_en": "Your own status names",
+          "pill_de": "Eigene Statusnamen",
+          "benefit_en": "Teams can show statuses under their own names, such as 'Building' for In progress, while data and workflows stay unchanged.",
+          "benefit_de": "Teams können Status unter eigenen Namen anzeigen, etwa „Im Bau“ statt In Arbeit; Daten und Abläufe bleiben unverändert.",
+          "group": "features"
+        },
+        {
+          "key": "AEON-1405",
+          "pill_en": "Deploys count as delivered",
+          "pill_de": "Deployments gelten als geliefert",
+          "benefit_en": "A recorded deploy now moves the tickets it shipped to Delivered, not only a published release.",
+          "benefit_de": "Ein erfasstes Deployment setzt die damit ausgelieferten Tickets jetzt auf Geliefert, nicht nur eine veröffentlichte Version.",
+          "group": "features"
+        },
+        {
+          "key": "AEON-1414",
+          "pill_en": "Saving never blocked",
+          "pill_de": "Speichern nie blockiert",
+          "benefit_en": "Looking at agent accounts no longer blocks anyone from saving tickets.",
+          "benefit_de": "Das Ansehen von Agentenkonten blockiert niemanden mehr beim Speichern von Tickets.",
+          "group": "fixes"
+        },
+        {
+          "key": "AEON-1423",
+          "pill_en": "Honest empty lists",
+          "pill_de": "Ehrliche leere Listen",
+          "benefit_en": "Empty lists show as empty, and database problems show as errors instead of \"not found\".",
+          "benefit_de": "Leere Listen erscheinen leer, und Datenbankprobleme erscheinen als Fehler statt als „nicht gefunden“.",
+          "group": "fixes"
+        },
+        {
+          "key": "AEON-1424",
+          "pill_en": "Clean sign-out",
+          "pill_de": "Sauberes Abmelden",
+          "benefit_en": "After signing out, no old business lists come back into view.",
+          "benefit_de": "Nach dem Abmelden tauchen keine alten Geschäftslisten mehr auf.",
+          "group": "fixes"
+        },
+        {
+          "key": "AEON-1453",
+          "pill_en": "Views open your way",
+          "pill_de": "Ansichten wie gewohnt",
+          "benefit_en": "View switches remember the last choice or a chosen default across devices within a workspace. Direct links and session attention rules can choose another opening view.",
+          "benefit_de": "Ansichtsumschalter merken sich je Person und Arbeitsbereich die letzte Auswahl oder eine festgelegte Standardansicht geräteübergreifend. Direkte Links und Sitzungshinweise können die Startansicht vorgeben.",
+          "group": "features"
+        },
+        {
+          "key": "AEON-1457",
+          "pill_en": "Goals view",
+          "pill_de": "Neue Ziele-Ansicht",
+          "benefit_en": "One calm page shows every goal across projects: what moves, what waits on you, and when it lands.",
+          "benefit_de": "Eine ruhige Seite zeigt alle Ziele über Projekte hinweg: was läuft, was auf dich wartet und wann es fertig wird.",
+          "group": "features"
+        },
+        {
+          "key": "AEON-1459",
+          "pill_en": "Calmer agents list",
+          "pill_de": "Ruhigere Agentenliste",
+          "benefit_en": "On a phone, the agents list shows more sessions and less chrome.",
+          "benefit_de": "Auf dem Handy zeigt die Agentenliste mehr Sitzungen und weniger Bedienleisten.",
+          "group": "features"
+        },
+        {
+          "key": "AEON-1460",
+          "pill_en": "Denser ticket list",
+          "pill_de": "Kompaktere Ticketliste",
+          "benefit_en": "On a phone, more tickets fit on one screen without losing what matters.",
+          "benefit_de": "Auf dem Handy passen mehr Tickets auf einen Bildschirm, ohne dass Wichtiges verloren geht.",
+          "group": "features"
+        },
+        {
+          "key": "AEON-1467",
+          "pill_en": "Desk shows tickets",
+          "pill_de": "Desk zeigt Tickets",
+          "benefit_en": "Waiting-on-you items show the exact ticket they belong to, not just the project.",
+          "benefit_de": "Offene Fragen zeigen das genaue Ticket, zu dem sie gehören, nicht nur das Projekt.",
+          "group": "features"
+        },
+        {
+          "key": "AEON-1468",
+          "pill_en": "Safer worker sign-in",
+          "pill_de": "Sicherere Worker-Anmeldung",
+          "benefit_en": "The worker sign-in code now travels in a header that web proxies leave out of their logs.",
+          "benefit_de": "Der Anmeldecode der Worker steht nun in einem Header, den Web-Proxys nicht protokollieren.",
+          "group": "features"
+        },
+        {
+          "key": "AEON-1470",
+          "pill_en": "Titles keep room",
+          "pill_de": "Titel behalten Platz",
+          "benefit_en": "At narrower widths the ticket title keeps its space; less important columns step aside first and stay sortable.",
+          "benefit_de": "Bei schmaleren Breiten behält der Ticket-Titel seinen Platz; weniger wichtige Spalten weichen zuerst und bleiben sortierbar.",
+          "group": "features"
+        },
+        {
+          "key": "AEON-1471",
+          "pill_en": "Faster agent writes",
+          "pill_de": "Schnellere Agenten-Schreibzugriffe",
+          "benefit_en": "Agents that share one key no longer queue behind each other, so ppm stays responsive under load.",
+          "benefit_de": "Agenten mit demselben Schlüssel warten nicht mehr aufeinander, sodass ppm auch unter Last schnell reagiert.",
+          "group": "features"
+        },
+        {
+          "key": "AEON-1472",
+          "pill_en": "Flow shows deliveries",
+          "pill_de": "Flow zeigt Lieferungen",
+          "benefit_en": "Delivery › Flow fills from check suites and agent deliveries, and says which source is missing.",
+          "benefit_de": "Delivery › Flow füllt sich aus Check-Suites und Agentenlieferungen und nennt fehlende Quellen.",
+          "group": "features"
+        },
+        {
+          "key": "AEON-1473",
+          "pill_en": "Desk count in tab",
+          "pill_de": "Desk-Zahl im Tab",
+          "benefit_en": "The browser tab shows how many Decision Desk items wait, with a small badge on the tab icon.",
+          "benefit_de": "Der Browser-Tab zeigt, wie viele Decision-Desk-Einträge warten, mit einem kleinen Zeichen am Tab-Symbol.",
+          "group": "features"
+        },
+        {
+          "key": "AEON-1477",
+          "pill_en": "Steady Decision Desk",
+          "pill_de": "Ruhiger Decision Desk",
+          "benefit_en": "When a refresh fails, the Decision Desk keeps its items and shows a quiet retry hint instead of flipping to an error.",
+          "benefit_de": "Schlägt eine Aktualisierung fehl, behält der Decision Desk seine Einträge und zeigt einen ruhigen Hinweis statt einer Fehlerseite.",
+          "group": "features"
+        },
+        {
+          "key": "AEON-1478",
+          "pill_en": "Imported drafts expire",
+          "pill_de": "Importierte Entwürfe verfallen",
+          "benefit_en": "Projects created from a START import are deleted after 12 months without engagement, as the privacy notice promises.",
+          "benefit_de": "Aus einem START-Import angelegte Projekte werden nach 12 Monaten ohne Nutzung gelöscht, wie im Datenschutzhinweis versprochen.",
+          "group": "features"
+        },
+        {
+          "key": "AEON-1479",
+          "pill_en": "Cleaner app rollback",
+          "pill_de": "Sauberer App-Rückweg",
+          "benefit_en": "Stopping the Mac agent app now removes its leftovers, so going back to an older version needs no manual step.",
+          "benefit_de": "Beim Beenden entfernt die Mac-Agenten-App ihre Reste, sodass ein Wechsel zu einer älteren Version keinen Handgriff mehr braucht.",
+          "group": "features"
+        },
+        {
+          "key": "AEON-1481",
+          "pill_en": "Releases mark work delivered",
+          "pill_de": "Releases markieren Lieferungen",
+          "benefit_en": "Tickets in a published release move to Delivered, and to Accepted after one day without complaints.",
+          "benefit_de": "Tickets einer veröffentlichten Version wechseln zu Geliefert und nach einem Tag ohne Beanstandung zu Akzeptiert.",
+          "group": "fixes"
+        },
+        {
+          "key": "AEON-1482",
+          "pill_en": "Refusals name the reason",
+          "pill_de": "Ablehnungen nennen Grund",
+          "benefit_en": "When a status change is refused, the answer names each missing check and what to do about it.",
+          "benefit_de": "Wird ein Statuswechsel abgelehnt, nennt die Antwort jede fehlende Prüfung und was zu tun ist.",
+          "group": "fixes"
+        },
+        {
+          "key": "AEON-1487",
+          "pill_en": "Chat messages wait",
+          "pill_de": "Chat-Nachrichten warten",
+          "benefit_en": "A chat message to an agent session waits until the session picks it up instead of failing.",
+          "benefit_de": "Eine Chat-Nachricht an eine Agentensitzung wartet, bis die Sitzung sie abholt, statt zu scheitern.",
+          "group": "fixes"
+        },
+        {
+          "key": "AEON-1493",
+          "pill_en": "Delivery health numbers",
+          "pill_de": "Kennzahlen zur Lieferung",
+          "benefit_en": "Delivery shows how often work passes first time, how many rounds it takes and where it waits.",
+          "benefit_de": "Die Lieferung zeigt, wie oft Arbeit beim ersten Mal passt, wie viele Runden sie braucht und wo sie wartet.",
+          "group": "features"
+        },
+        {
+          "key": "AEON-1494",
+          "pill_en": "Goals replace In-flight",
+          "pill_de": "Ziele ersetzen In-flight",
+          "benefit_en": "The Goals view shows everything the separate progress page showed, including what waits on you.",
+          "benefit_de": "Die Zielansicht zeigt alles, was die separate Fortschrittsseite zeigte, auch was auf Sie wartet.",
+          "group": "features"
+        },
+        {
+          "key": "AEON-1497",
+          "pill_en": "See quota burn ahead",
+          "pill_de": "Kontingent-Verbrauch im Blick",
+          "benefit_en": "You see per account group how fast quota burns, when each subscription runs out or resets, and whether the pace wastes quota or will run dry.",
+          "benefit_de": "Pro Kontogruppe sieht man, wie schnell das Kontingent verbraucht wird, wann ein Abo leer ist oder zurückgesetzt wird und ob das Tempo Kontingent verschenkt oder zu früh aufbraucht.",
+          "group": "features"
+        },
+        {
+          "key": "AEON-1499",
+          "pill_en": "Quota for every account",
+          "pill_de": "Kontingent für alle Konten",
+          "benefit_en": "Every enrolled Claude and Codex account shows how much quota is used and when it resets, even when it is not running.",
+          "benefit_de": "Jedes verbundene Claude- und Codex-Konto zeigt verbrauchtes Kontingent und Rücksetzzeit, auch ohne laufende Arbeit.",
+          "group": "features"
+        },
+        {
+          "key": "AEON-1506",
+          "pill_en": "Agents in lead projects",
+          "pill_de": "Agenten in Lead-Projekten",
+          "benefit_en": "A person can now start a managed run on a ticket in a project with a lead; the lead's own queue never starts the same ticket twice.",
+          "benefit_de": "Ein verwalteter Lauf lässt sich jetzt auch in einem Projekt mit Lead für ein Ticket starten; die Warteschlange des Leads startet dasselbe Ticket nicht doppelt.",
+          "group": "fixes"
+        },
+        {
+          "key": "AEON-1513",
+          "pill_en": "Clear run waiting reason",
+          "pill_de": "Klarer Wartegrund",
+          "benefit_en": "A managed run that cannot start because an earlier pairing still holds the checkout now says so and names the fix, instead of waiting silently.",
+          "benefit_de": "Ein verwalteter Lauf, der wegen einer früheren Kopplung nicht starten kann, nennt jetzt den Grund und den nächsten Schritt, statt still zu warten.",
+          "group": "fixes"
+        },
+        {
+          "key": "AEON-1515",
+          "pill_en": "CLI never hangs",
+          "pill_de": "CLI hängt nie",
+          "benefit_en": "Every CLI request now has a time limit and ends with a clear error instead of hanging.",
+          "benefit_de": "Jede CLI-Anfrage hat jetzt ein Zeitlimit und endet mit einer klaren Fehlermeldung, statt zu hängen.",
+          "group": "fixes"
+        },
+        {
+          "key": "AEON-1517",
+          "pill_en": "Interrupt only when running",
+          "pill_de": "Unterbrechen nur bei Arbeit",
+          "benefit_en": "Interrupt is offered only while a step is running; on an idle session the panel explains that nothing is running.",
+          "benefit_de": "Unterbrechen wird nur angeboten, solange ein Schritt läuft; bei einer ruhenden Sitzung zeigt das Panel, dass nichts läuft.",
+          "group": "fixes"
+        },
+        {
+          "key": "AEON-1518",
+          "pill_en": "Steer starts next step",
+          "pill_de": "Lenken startet nächsten Schritt",
+          "benefit_en": "A steer sent to a session that has finished its task now starts the next step right away instead of waiting silently.",
+          "benefit_de": "Eine Lenkung an eine Sitzung, die ihre Aufgabe beendet hat, startet jetzt sofort den nächsten Schritt, statt still zu warten.",
+          "group": "fixes"
+        },
+        {
+          "key": "AEON-1519",
+          "pill_en": "Ticket search works again",
+          "pill_de": "Ticketsuche funktioniert wieder",
+          "benefit_en": "Searching for a ticket when starting an agent returns results again instead of a resource-limit error.",
+          "benefit_de": "Die Ticketsuche beim Start eines Agenten liefert wieder Ergebnisse statt eines Ressourcenfehlers.",
+          "group": "fixes"
+        },
+        {
+          "key": "AEON-1528",
+          "pill_en": "Definitions fully German",
+          "pill_de": "Definitionen ganz auf Deutsch",
+          "benefit_en": "The definitions settings read entirely in German when German is chosen, with no English leftovers.",
+          "benefit_de": "Die Definitions-Einstellungen erscheinen bei deutscher Sprache vollständig auf Deutsch, ohne englische Reste.",
+          "group": "features"
+        },
+        {
+          "key": "AEON-1532",
+          "pill_en": "Editor stays still",
+          "pill_de": "Editor bleibt ruhig",
+          "benefit_en": "While typing, the edit box no longer shrinks or makes the page jump; in split view it is as tall as the preview.",
+          "benefit_de": "Beim Tippen schrumpft das Eingabefeld nicht mehr und die Seite springt nicht; in der geteilten Ansicht ist es so hoch wie die Vorschau.",
+          "group": "fixes"
+        },
+        {
+          "key": "AEON-1534",
+          "pill_en": "Honest burn chart",
+          "pill_de": "Ehrliche Verbrauchskurve",
+          "benefit_en": "The usage burn chart no longer shows impossible one-hour spikes, so the real pace stays readable.",
+          "benefit_de": "Die Verbrauchskurve zeigt keine unmöglichen Ein-Stunden-Spitzen mehr; das tatsächliche Tempo bleibt lesbar.",
+          "group": "fixes"
+        },
+        {
+          "key": "AEON-1535",
+          "pill_en": "Clearer Desk on phones",
+          "pill_de": "Klarerer Desk am Handy",
+          "benefit_en": "On phones, Decision Desk questions read more easily and the stamp choices are four large, clear rows.",
+          "benefit_de": "Am Handy lesen sich Fragen im Decision Desk leichter, und die Stempel-Auswahl besteht aus vier großen, klaren Zeilen.",
+          "group": "features"
+        },
+        {
+          "key": "AEON-1559",
+          "pill_en": "Clean tab bar",
+          "pill_de": "Saubere Tab-Leiste",
+          "benefit_en": "The ticket toolbar stays clean and readable when the detail pane is open.",
+          "benefit_de": "Die Ticket-Werkzeugleiste bleibt auch bei offenem Detailbereich sauber lesbar.",
+          "group": "fixes"
+        },
+        {
+          "key": "AEON-385",
+          "pill_en": "Outline stays current",
+          "pill_de": "Gliederung bleibt aktuell",
+          "benefit_en": "Moved tickets appear in the right place and child counts stay correct. The outline follows live changes without a reload.",
+          "benefit_de": "Verschobene Tickets erscheinen am richtigen Ort, und die Anzahl der Untertickets bleibt korrekt. Die Gliederung folgt Live-Änderungen ohne Neuladen.",
+          "group": "fixes"
+        },
+        {
+          "key": "AEON-490",
+          "pill_en": "Export and erase people",
+          "pill_de": "Personen exportieren und löschen",
+          "benefit_en": "You can export or erase everything held about one person, and set how long personal data is kept.",
+          "benefit_de": "Sie können alle Daten einer Person exportieren oder löschen und festlegen, wie lange personenbezogene Daten bleiben.",
+          "group": "features"
+        }
+      ]
     }
   }
 }
