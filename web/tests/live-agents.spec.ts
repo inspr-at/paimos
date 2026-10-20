@@ -183,6 +183,9 @@ test('list rows carry a compact live chip: robots and the state word', async ({ 
 })
 
 test('working and lost-heartbeat agents: polls every 20 seconds and says what changed', async ({ page }) => {
+  // Installing the clock still lets wall time advance it. Pause before mounting
+  // so slow browser/HTTP assertions cannot add polls between our runFor steps.
+  await page.clock.pauseAt(new Date('2026-09-23T12:01:00Z'))
   const data = world('none')
   const calls = await cards(page, data)
   const reads = () => calls.filter(c => c.path === '/api/harness-sessions/live').length
