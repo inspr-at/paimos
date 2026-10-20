@@ -28,8 +28,13 @@ test('Hide closed and status use the Tickets context and Open graph retains it',
   await page.keyboard.press('Escape')
   await ready(page, 20)
   await page.locator('.project-head').hover()
+  // Graph is a lazy view: wait for its own topology read, rather than starting
+  // the canvas assertion while Vite is still serving the renderer's modules.
+  const graphLoaded = page.waitForResponse(response => new URL(response.url()).pathname === '/api/tickets/graph')
   await page.getByRole('button', { name: 'Open graph', exact: true }).click()
-  await expect(page).toHaveURL(/status=in_progress/)
+  await expect(page).toHaveURL(url => url.pathname === '/p/PHAROS/tickets'
+    && url.searchParams.get('view') === 'graph' && url.searchParams.get('status') === 'in_progress')
+  expect((await graphLoaded).status()).toBe(200)
   const graph = page.locator('.ticket-graph-canvas')
   await expect(graph).toBeVisible()
   // The canvas mounts before the graph topology and filtered membership load.

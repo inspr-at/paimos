@@ -10032,6 +10032,70 @@
     ,
     {"kind":"browser","file":"tests/headings.spec.ts","name":"touch full-text reveal › viewport-long description keeps touch scrolling (768 light)","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
+    {"kind":"browser","file":"tests/hide-states.spec.ts","name":"AEON-1559 forms 0 and 1 have stable toggles and 16 px resize hysteresis","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/hide-states.spec.ts","name":"AEON-1559 forms 1 and 2 have stable toggles and 16 px resize hysteresis","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/hide-states.spec.ts","name":"AEON-1559 forms 2 and 3 have stable toggles and 16 px resize hysteresis","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/hide-states.spec.ts","name":"AEON-1559 forms 3 and 4 have stable toggles and 16 px resize hysteresis","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/hide-states.spec.ts","name":"AEON-1559 geometry rejects the old teleported toolbar form","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/hide-states.spec.ts","name":"AEON-1559 navigation settings fit 1000px docked in dark","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/hide-states.spec.ts","name":"AEON-1559 navigation settings fit 1000px docked in light","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/hide-states.spec.ts","name":"AEON-1559 navigation settings fit 1000px undocked in dark","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/hide-states.spec.ts","name":"AEON-1559 navigation settings fit 1000px undocked in light","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/hide-states.spec.ts","name":"AEON-1559 navigation settings fit 1100px docked in dark","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/hide-states.spec.ts","name":"AEON-1559 navigation settings fit 1100px docked in light","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/hide-states.spec.ts","name":"AEON-1559 navigation settings fit 1100px undocked in dark","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/hide-states.spec.ts","name":"AEON-1559 navigation settings fit 1100px undocked in light","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/hide-states.spec.ts","name":"AEON-1559 navigation settings fit 1280px docked in dark","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/hide-states.spec.ts","name":"AEON-1559 navigation settings fit 1280px docked in light","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/hide-states.spec.ts","name":"AEON-1559 navigation settings fit 1280px undocked in dark","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/hide-states.spec.ts","name":"AEON-1559 navigation settings fit 1280px undocked in light","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/hide-states.spec.ts","name":"AEON-1559 navigation settings fit 1440px docked in dark","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/hide-states.spec.ts","name":"AEON-1559 navigation settings fit 1440px docked in light","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/hide-states.spec.ts","name":"AEON-1559 navigation settings fit 1440px undocked in dark","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/hide-states.spec.ts","name":"AEON-1559 navigation settings fit 1440px undocked in light","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/hide-states.spec.ts","name":"AEON-1559 navigation settings fit 760px docked in dark","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/hide-states.spec.ts","name":"AEON-1559 navigation settings fit 760px docked in light","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/hide-states.spec.ts","name":"AEON-1559 navigation settings fit 760px undocked in dark","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/hide-states.spec.ts","name":"AEON-1559 navigation settings fit 760px undocked in light","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/hide-states.spec.ts","name":"AEON-1559 navigation settings fit 900px docked in dark","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/hide-states.spec.ts","name":"AEON-1559 navigation settings fit 900px docked in light","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/hide-states.spec.ts","name":"AEON-1559 navigation settings fit 900px undocked in dark","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/hide-states.spec.ts","name":"AEON-1559 navigation settings fit 900px undocked in light","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/hide-states.spec.ts","name":"AEON-1559 non-teleported toolbar retains its 800 px container swap","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/hide-states.spec.ts","name":"AEON-1559 phone and standard viewport evidence in dark","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/hide-states.spec.ts","name":"AEON-1559 phone and standard viewport evidence in light","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
     {"kind":"browser","file":"tests/hide-states.spec.ts","name":"Hide choices and stable controls at 1024px dark","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
     {"kind":"browser","file":"tests/hide-states.spec.ts","name":"Hide choices and stable controls at 1024px light","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
