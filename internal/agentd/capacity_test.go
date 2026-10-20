@@ -143,7 +143,7 @@ func TestIdleCodexCaptureUsesSeparatePinnedExecutable(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	a.idleUsage = loadCodexCapacityPin([]capacityPin{*fixtureCapacityPin(Codex, vendor, vendorRaw, "synthetic-fixture")})
+	qualifySyntheticCodexPin(a, fixtureCapacityPin(Codex, vendor, vendorRaw, "synthetic-fixture"))
 	s, api, _ := testSupervisor(t)
 	reporter := &idleCapacityTestAPI{&capacityTestAPI{API: api}}
 	s.api, s.adapters[Codex] = reporter, a

@@ -84,7 +84,9 @@ func assertNativeCapacityLaunch(t *testing.T, home, path string) {
 	if !reflect.DeepEqual(got.Args, wantArgs) || !reflect.DeepEqual(got.Env, wantEnv) {
 		t.Fatal("capacity did not directly execute its pinned path/argv with exactly the minimal environment")
 	}
-	assertNoCapacitySpawn(t, home)
+	if _, err := os.Stat(filepath.Join(home, "unexpected-spawn")); !os.IsNotExist(err) {
+		t.Fatal("enrolled wrapper or Node was started", err)
+	}
 }
 
 func refusingCapacityExecutable(t *testing.T, home, name string) string {
@@ -99,8 +101,10 @@ func refusingCapacityExecutable(t *testing.T, home, name string) string {
 
 func assertNoCapacitySpawn(t *testing.T, home string) {
 	t.Helper()
-	if _, err := os.Stat(filepath.Join(home, "unexpected-spawn")); !os.IsNotExist(err) {
-		t.Fatal("unqualified executable or enrolled wrapper was started", err)
+	for _, name := range []string{"unexpected-spawn", "launch.json"} {
+		if _, err := os.Stat(filepath.Join(home, name)); !os.IsNotExist(err) {
+			t.Fatal("unqualified executable or enrolled wrapper was started", name, err)
+		}
 	}
 }
 
@@ -111,15 +115,15 @@ func TestCapacityPinsRejectUnqualifiedExecutables(t *testing.T) {
 	for _, boundary := range []string{"no-pin", "wrapper", "digest", "version", "native-node", "helper", "changed-file"} {
 		t.Run(boundary, func(t *testing.T) {
 			home := privateCapacityHome(t)
-			path := refusingCapacityExecutable(t, home, "capacity")
+			pin := nativeCapacityFixture(t)
+			path := pin.Path
 			raw, err := os.ReadFile(path)
 			if err != nil {
 				t.Fatal(err)
 			}
-			pin := fixtureCapacityPin(Codex, path, raw, "synthetic-1514")
 			a := NewCodexAdapter(refusingCapacityExecutable(t, home, "wrapper"), map[string]string{"one": home})
 			a.SetExpectedEmails(map[string]string{"one": "fixture@example.test"})
-			a.idleUsage = loadCodexCapacityPin([]capacityPin{*pin})
+			a.idleUsage = loadCodexCapacityPin([]capacityPin{pin})
 			if a.idleUsage == nil || !a.CanCaptureCapacity("one") {
 				t.Fatal("matching synthetic pin did not qualify")
 			}
@@ -150,6 +154,18 @@ func TestCapacityPinsRejectUnqualifiedExecutables(t *testing.T) {
 			assertNoCapacitySpawn(t, home)
 		})
 	}
+	t.Run("wrapper-entry", func(t *testing.T) {
+		home := privateCapacityHome(t)
+		path := refusingCapacityExecutable(t, home, "wrapper")
+		raw, err := os.ReadFile(path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if c := loadCodexCapacityPin([]capacityPin{*fixtureCapacityPin(Codex, path, raw, "synthetic-wrapper")}); c != nil {
+			t.Fatal("a script wrapper was accepted as the native capacity executable")
+		}
+		assertNoCapacitySpawn(t, home)
+	})
 }
 
 // Risk: loading the production table enables a harness accidentally or changes

@@ -22,10 +22,14 @@ func qualifyCodexFixture(t *testing.T, a *CodexAdapter) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	a.idleUsage = loadCodexCapacityPin([]capacityPin{*fixtureCapacityPin(Codex, a.Path, raw, "synthetic-fixture")})
-	if a.idleUsage == nil {
-		t.Fatal("synthetic fixture pin rejected")
-	}
+	qualifySyntheticCodexPin(a, fixtureCapacityPin(Codex, a.Path, raw, "synthetic-fixture"))
+}
+
+// Legacy protocol fixtures are shell scripts, so install their synthetic
+// qualification explicitly. The production loader accepts native files only.
+func qualifySyntheticCodexPin(a *CodexAdapter, pin *capacityPin) {
+	a.idleUsage = &codexIdleCapability{pin: pin, binaryPath: pin.Path, binarySHA256: pin.SHA256, version: pin.Version,
+		startupHooks: true, inheritedConfig: true, termination: true}
 }
 
 func TestCodexUnqualifiedIdleNeverExecutesStartupHook(t *testing.T) {

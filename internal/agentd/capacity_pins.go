@@ -1,6 +1,11 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 package agentd
 
+import (
+	"io"
+	"os"
+)
+
 // capacityPin is release-owned evidence for an executable and its idle exchange.
 // It is never populated from enrollment, environment variables or local config.
 // Version is the version qualified by OPS, bound to these exact bytes; checking
@@ -54,9 +59,33 @@ func loadCodexCapacityPin(pins []capacityPin) *codexIdleCapability {
 		// The approved Codex exchange always executes the native binary directly.
 		c := &codexIdleCapability{pin: &pin, binaryPath: pin.Path, binarySHA256: pin.SHA256, version: pin.Version,
 			startupHooks: true, inheritedConfig: true, termination: true}
-		if c.pin.matches(Codex, c.binaryPath, c.binarySHA256, c.version, "", "") {
+		if c.pin.matches(Codex, c.binaryPath, c.binarySHA256, c.version, "", "") && nativeCapacityExecutable(c.binaryPath) {
 			return c
 		}
 	}
 	return nil
+}
+
+// Reject script/JS launchers even if a proposed table entry points at one.
+// Only read a fixed header; qualification never runs a candidate executable.
+func nativeCapacityExecutable(path string) bool {
+	f, err := os.Open(path)
+	if err != nil {
+		return false
+	}
+	defer f.Close()
+	var magic [4]byte
+	if _, err := io.ReadFull(f, magic[:]); err != nil {
+		return false
+	}
+	switch magic {
+	case [4]byte{0x7f, 'E', 'L', 'F'},
+		[4]byte{0xfe, 0xed, 0xfa, 0xce}, [4]byte{0xce, 0xfa, 0xed, 0xfe},
+		[4]byte{0xfe, 0xed, 0xfa, 0xcf}, [4]byte{0xcf, 0xfa, 0xed, 0xfe},
+		[4]byte{0xca, 0xfe, 0xba, 0xbe}, [4]byte{0xbe, 0xba, 0xfe, 0xca},
+		[4]byte{0xca, 0xfe, 0xba, 0xbf}, [4]byte{0xbf, 0xba, 0xfe, 0xca}:
+		return true
+	default:
+		return false
+	}
 }
