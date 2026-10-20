@@ -158,6 +158,8 @@ func (c Candidate) Interpreter() harnesslaunch.Node {
 }
 
 type Discovery struct {
+	ClaudeHome    string // Explicit private Claude profile; never uploaded.
+	CodexHome     string // Explicit private Codex profile; never uploaded.
 	PiHome        string // Explicit private per-account pi profile; never uploaded.
 	Executor      Executor
 	LookPath      func(string) (string, error)
@@ -197,9 +199,15 @@ func (d Discovery) Detect(ctx context.Context, harness, accountContext string) (
 	case "codex":
 		authArgs = []string{"login", "status"}
 		c.Home = filepath.Join(d.Home, ".codex")
+		if d.CodexHome != "" {
+			c.Home = d.CodexHome
+		}
 	case "claude":
 		authArgs = []string{"auth", "status", "--json"}
 		c.Home = filepath.Join(d.Home, ".claude")
+		if d.ClaudeHome != "" {
+			c.Home = d.ClaudeHome
+		}
 	case "cursor":
 		name = "cursor-agent"
 		authArgs = []string{"status", "--format", "json"}
@@ -214,6 +222,11 @@ func (d Discovery) Detect(ctx context.Context, harness, accountContext string) (
 		}
 	default:
 		return c, errors.New("unsupported guided harness")
+	}
+	if harness == "claude" && d.ClaudeHome != "" || harness == "codex" && d.CodexHome != "" {
+		if err := ValidateHarnessHome(c.Home); err != nil {
+			return c, err
+		}
 	}
 	if d.LookPath == nil {
 		d.LookPath = exec.LookPath
@@ -244,6 +257,12 @@ func (d Discovery) Detect(ctx context.Context, harness, accountContext string) (
 		return c, err
 	}
 	childEnv := harnesslaunch.Environment(os.Environ(), c.Node.Path)
+	if harness == "claude" {
+		childEnv = claudeProbeEnvironment(c.Home, d.Home, c.Node.Path, physical)
+	}
+	if harness == "codex" {
+		childEnv = harnesslaunch.Environment(withHomeEnvironment("CODEX_HOME", c.Home), c.Node.Path)
+	}
 	if harness == "gemini" || harness == "opencode" {
 		childEnv = harnesslaunch.Environment([]string{"HOME=" + c.Home, "LANG=C", "LC_ALL=C"}, c.Node.Path)
 	}
@@ -265,11 +284,7 @@ func (d Discovery) Detect(ctx context.Context, harness, accountContext string) (
 			if err != nil {
 				return c, err
 			}
-			if harness == "gemini" || harness == "opencode" {
-				childEnv = harnesslaunch.Environment([]string{"HOME=" + c.Home, "LANG=C", "LC_ALL=C"}, c.Node.Path)
-			} else {
-				childEnv = harnesslaunch.Environment(os.Environ(), c.Node.Path)
-			}
+			childEnv = harnesslaunch.Environment(withHomeEnvironment("CODEX_HOME", c.Home), c.Node.Path)
 			versionCommand.Env = childEnv
 			raw, err = d.Executor.Run(ctx, versionCommand)
 		}
@@ -373,6 +388,9 @@ func (d Discovery) Detect(ctx context.Context, harness, accountContext string) (
 		}
 		c.Identity = a.Email
 		c.Label = a.Email
+		if accountContext != "" && !strings.EqualFold(accountContext, c.Identity) {
+			return c, errors.New("Claude signed-in identity differs from the selected account context")
+		}
 	case "cursor":
 		var a struct {
 			Status string `json:"status"`
@@ -393,6 +411,47 @@ func (d Discovery) Detect(ctx context.Context, harness, accountContext string) (
 	}
 	c.Login = "signed_in"
 	return c, nil
+}
+
+// ValidateHarnessHome never creates, repairs or reads the profile's contents.
+// The directory descriptor checks ownership, privacy and every physical ancestor.
+func ValidateHarnessHome(home string) error {
+	if len(home) > 4096 {
+		return errors.New("profile home path exceeds 4096 bytes")
+	}
+	profile, err := openDirectory(home, false, true)
+	if err != nil {
+		return fmt.Errorf("profile home must be an existing private, user-owned physical directory: %w", err)
+	}
+	return profile.Close()
+}
+
+func withHomeEnvironment(name, home string) []string {
+	prefix := name + "="
+	var result []string
+	for _, entry := range os.Environ() {
+		if !strings.HasPrefix(entry, prefix) {
+			result = append(result, entry)
+		}
+	}
+	return append(result, prefix+home)
+}
+
+// Match agentd.claudeEnvironment, including the default Keychain profile's
+// absence of CLAUDE_CONFIG_DIR and the small allowlist of login-session context.
+func claudeProbeEnvironment(home, userHome, nodePath, claudePath string) []string {
+	result := []string{"HOME=" + home, "CLAUDE_CONFIG_DIR=" + home}
+	if home == filepath.Join(userHome, ".claude") {
+		result = []string{"HOME=" + userHome}
+	}
+	for _, name := range []string{"USER", "LOGNAME", "TMPDIR"} {
+		if value := os.Getenv(name); value != "" {
+			result = append(result, name+"="+value)
+		}
+	}
+	return append(result,
+		"PATH="+strings.Join([]string{filepath.Dir(nodePath), filepath.Dir(claudePath), "/usr/bin", "/bin"}, string(os.PathListSeparator)),
+		"LANG=C", "LC_ALL=C")
 }
 
 // ResolveNode inspects the launcher and pins Node without executing package scripts.

@@ -844,7 +844,14 @@ func (s *Supervisor) poll(ctx context.Context, dispatch, scanQueue bool, nonempt
 		}
 		delete(s.accountLogins, account.ID)
 		if status.ActiveIdentity != "" && hold == "" && dependencyErr == nil && probeErr == nil {
-			s.accountLogins[account.ID] = agentsetup.AccountLogin{ActiveIdentity: status.ActiveIdentity, Approved: strings.EqualFold(status.ActiveIdentity, account.VerifiedIdentity)}
+			login := agentsetup.AccountLogin{ActiveIdentity: status.ActiveIdentity, Approved: strings.EqualFold(status.ActiveIdentity, account.VerifiedIdentity)}
+			switch adapter := s.adapters[account.Harness].(type) {
+			case *ClaudeAdapter:
+				login.Home = adapter.Homes[account.Key]
+			case *CodexAdapter:
+				login.Home = adapter.Homes[account.Key]
+			}
+			s.accountLogins[account.ID] = login
 		}
 		if !status.OK && hold == "" && dependencyErr == nil && probeErr == nil {
 			reason := "probe_failed"

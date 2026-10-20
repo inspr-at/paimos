@@ -56,3 +56,23 @@ func TestPairAndSetupRejectDeletedWorkingFolder(t *testing.T) {
 		t.Fatal("deleted folder wrote state", entries, readErr)
 	}
 }
+
+func TestHarnessHomeFlagRejectsAmbiguousOrUnsafeSelection(t *testing.T) {
+	for _, tc := range []struct {
+		command string
+		args    []string
+	}{
+		{"status", []string{"--harness", "claude", "--home", "/profile"}},
+		{"setup", []string{"--harness", "claude", "--home", "/profile"}},
+		{"add-harness", []string{"--home", "/profile"}},
+		{"add-harness", []string{"--harness", "pi", "--home", "/profile"}},
+		{"add-harness", []string{"--harness", "claude", "--harness", "codex", "--home", "/profile"}},
+		{"add-harness", []string{"--harness", "codex", "--home", ""}},
+		{"add-harness", []string{"--harness", "claude", "--home", "relative"}},
+	} {
+		var out bytes.Buffer
+		if err := setupCommand(tc.command, tc.args, &out); err == nil || (!strings.Contains(err.Error(), "--home requires") && !strings.Contains(err.Error(), "private, user-owned physical")) {
+			t.Fatalf("unsafe flag selection accepted: %s %v", tc.command, err)
+		}
+	}
+}

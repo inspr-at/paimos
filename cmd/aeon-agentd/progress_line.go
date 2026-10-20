@@ -8,6 +8,7 @@ import (
 	"io"
 	"os"
 	"sort"
+	"strings"
 	"time"
 
 	"github.com/inspr-at/paimos/internal/agentsetup"
@@ -322,27 +323,42 @@ func setupProgressPartsOf(p agentsetup.Progress) setupProgressParts {
 			line += " fix " + detail.Fix.Command
 		}
 		text.facts = append(text.facts, setupFact{key: harnessFactKey(harness), line: line})
-		// A rotated profile may appear under several enrollments. Show its
-		// active login once, approved when it matches any connected enrollment.
-		logins := map[string]bool{}
+		// A rotated profile may appear under several enrollments. Deduplicate
+		// within that home only; approval never carries to another home.
+		type profileLogin struct{ home, identity string }
+		logins := map[profileLogin]bool{}
 		for _, account := range p.Accounts {
 			if account.Harness == harness && account.State == "connected" {
 				if login, ok := p.AccountLogins[account.AccountID]; ok && login.ActiveIdentity != "" {
-					logins[login.ActiveIdentity] = logins[login.ActiveIdentity] || login.Approved
+					key := profileLogin{login.Home, login.ActiveIdentity}
+					logins[key] = logins[key] || login.Approved
 				}
 			}
 		}
-		identities := make([]string, 0, len(logins))
-		for identity := range logins {
-			identities = append(identities, identity)
+		profiles := make([]profileLogin, 0, len(logins))
+		for profile := range logins {
+			profiles = append(profiles, profile)
 		}
-		sort.Strings(identities)
-		for _, identity := range identities {
+		sort.Slice(profiles, func(i, j int) bool {
+			if profiles[i].home != profiles[j].home {
+				return profiles[i].home < profiles[j].home
+			}
+			return profiles[i].identity < profiles[j].identity
+		})
+		for _, profile := range profiles {
 			approval := "not approved on this computer; run aeon-agentd add-harness --harness " + harness
-			if logins[identity] {
+			if profile.home != "" {
+				approval += " --home '" + strings.ReplaceAll(profile.home, "'", "'\"'\"'") + "'"
+			}
+			if logins[profile] {
 				approval = "approved on this computer"
 			}
-			text.facts = append(text.facts, setupFact{key: loginFactKey(harness, identity), line: "harness " + harness + " active login " + identity + ": " + approval})
+			line := "harness " + harness
+			if profile.home != "" {
+				line += fmt.Sprintf(" home %q", profile.home)
+			}
+			line += " active login " + profile.identity + ": " + approval
+			text.facts = append(text.facts, setupFact{key: loginFactKey(harness, profile.home, profile.identity), line: line})
 		}
 	}
 	accounts := append([]agentsetup.Enrollment(nil), p.Accounts...)
@@ -358,6 +374,9 @@ func setupProgressPartsOf(p agentsetup.Progress) setupProgressParts {
 		line := "account " + account.AccountID + " harness " + account.Harness + " " + detail.State
 		if agentsetup.ValidLoginLabel(account.Label) {
 			line += " login " + account.Label
+		}
+		if login := p.AccountLogins[account.AccountID]; login.Home != "" {
+			line += fmt.Sprintf(" home %q", login.Home)
 		}
 		if detail.Reason != "" {
 			line += " reason " + detail.Reason
@@ -384,8 +403,8 @@ func setupProgressPartsOf(p agentsetup.Progress) setupProgressParts {
 
 func harnessFactKey(harness string) string { return "harness\x00" + harness }
 
-func loginFactKey(harness, identity string) string {
-	return "login\x00" + harness + "\x00" + identity
+func loginFactKey(harness, home, identity string) string {
+	return "login\x00" + harness + "\x00" + home + "\x00" + identity
 }
 
 func accountFactKey(id, harness string) string {

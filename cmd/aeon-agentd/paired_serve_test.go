@@ -874,3 +874,107 @@ func TestColdRevokedDaemonReconcilesWithoutRuntimeAuthentication(t *testing.T) {
 		})
 	}
 }
+
+// Risk: the daemon rechecks the default profile or trusts the CLI's stale
+// identity. Both request and recheck execute only temporary fake vendors.
+func TestRunningEnrollmentFencesTheCandidatesOwnHome(t *testing.T) {
+	for _, harness := range []string{"claude", "codex"} {
+		t.Run(harness, func(t *testing.T) {
+			e, pins := repinCommandFixture(t)
+			owner, err := filepath.EvalSymlinks(t.TempDir())
+			if err != nil {
+				t.Fatal(err)
+			}
+			t.Setenv("HOME", owner)
+			profile := filepath.Join(owner, harness+"-second")
+			if err := os.Mkdir(profile, 0700); err != nil {
+				t.Fatal(err)
+			}
+			identityFile := filepath.Join(profile, "active-login")
+			writeIdentity := func(identity string) {
+				t.Helper()
+				if err := os.WriteFile(identityFile, []byte(identity), 0600); err != nil {
+					t.Fatal(err)
+				}
+			}
+			writeIdentity("second@example.test")
+			bin := filepath.Join(owner, harness)
+			body := `#!/bin/sh
+home="$CODEX_HOME"
+if [ "${0##*/}" = claude ]; then home="$CLAUDE_CONFIG_DIR"; [ "$HOME" = "$home" ] || exit 9; fi
+identity=$(/bin/cat "$home/active-login") || exit 10
+case "$1" in
+--version) echo 1.2.3; exit 0;;
+auth) printf '{"loggedIn":true,"email":"%s","authMethod":"claude.ai"}\n' "$identity"; exit 0;;
+login) echo 'Logged in using ChatGPT'; exit 0;;
+app-server)
+while IFS= read -r line; do
+case "$line" in
+*'"id":1'*) printf '{"id":1,"result":{}}\n';;
+*'"id":2'*) printf '{"id":2,"result":{"account":{"type":"chatgpt","email":"%s"}}}\n' "$identity";;
+esac
+done;;
+*) exit 11;;
+esac
+`
+			if err := os.WriteFile(bin, []byte(body), 0700); err != nil {
+				t.Fatal(err)
+			}
+			d := agentsetup.Discovery{Home: owner, ClaudeHome: profile, CodexHome: profile,
+				LookPath: func(string) (string, error) { return bin, nil }}
+			c, err := d.Detect(t.Context(), harness, "")
+			if err != nil {
+				t.Fatal(err)
+			}
+			req := agentsetup.SetupRequest{Operation: "add_harness", Candidates: []agentsetup.LocalCandidate{{Candidate: c, Path: c.Path, Home: c.Home, Identity: c.Identity, Version: c.Version}}}
+			created := 0
+			server := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				if r.Method != http.MethodPost {
+					t.Error("unexpected method")
+					w.WriteHeader(400)
+					return
+				}
+				var requested agentsetup.DeviceRequest
+				if json.NewDecoder(r.Body).Decode(&requested) != nil || len(requested.Accounts) != 1 || requested.Accounts[0].Harness != harness || requested.Accounts[0].Label != "second@example.test" {
+					t.Error("wrong approval request")
+					w.WriteHeader(400)
+					return
+				}
+				created++
+				_ = json.NewEncoder(w).Encode(agentsetup.DeviceResponse{RequestID: requested.RequestID, TenantID: "11111111-1111-4111-8111-111111111111", Digest: agentsetup.Hash([]byte("details")), VerificationURI: "https://" + r.Host + "/agents/register-agent", UserCode: "123-456-789", State: "pending", ExpiresAt: time.Now().Add(time.Minute)})
+			}))
+			defer server.Close()
+			prior := http.DefaultTransport
+			http.DefaultTransport = server.Client().Transport
+			defer func() { http.DefaultTransport = prior }()
+			raw, err := e.Store.Read("pairing.json", 1<<20)
+			if err != nil {
+				t.Fatal(err)
+			}
+			var snapshot map[string]any
+			if err := json.Unmarshal(raw, &snapshot); err != nil {
+				t.Fatal(err)
+			}
+			snapshot["origin"], snapshot["node_path"], snapshot["claude_sdk_path"] = server.URL, pins.NodePath, pins.SDKPath
+			raw, _ = json.Marshal(snapshot)
+			if err := e.Store.Write("pairing.json", raw, false); err != nil {
+				t.Fatal(err)
+			}
+			if err := e.Store.Close(); err != nil {
+				t.Fatal(err)
+			}
+			lifecycle := &pairedSetup{root: e.Store.Path(), origin: server.URL, gate: make(chan struct{}, 1)}
+			writeIdentity("switched@example.test")
+			if _, err := lifecycle.setup(t.Context(), req); err == nil || !strings.Contains(err.Error(), "vendor login changed before enrollment") || created != 0 {
+				t.Fatalf("switched home reached approval: %v", err)
+			}
+			writeIdentity("second@example.test")
+			// The unchanged candidate passes the daemon handler and still requires
+			// a new person approval; this fixture provides no service manager.
+			p, err := lifecycle.setup(t.Context(), req)
+			if err != nil || p.Stage != "awaiting_approval" || created != 1 {
+				t.Fatalf("unchanged home rejected: %s %v", p.Stage, err)
+			}
+		})
+	}
+}

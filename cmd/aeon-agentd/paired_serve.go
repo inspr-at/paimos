@@ -688,14 +688,18 @@ func (p *pairedSetup) setup(ctx context.Context, req agentsetup.SetupRequest) (a
 			if len(local.Path) > 4096 || len(local.Home) > 4096 || !agentsetup.ValidLoginLabel(local.Identity) {
 				return agentsetup.Progress{}, errors.New("invalid local login binding")
 			}
-			d := agentsetup.Discovery{Home: home, PiHome: local.Home, NodePath: local.Candidate.Interpreter().Path, Workspace: saved.Workspace,
+			d := agentsetup.Discovery{Home: home, ClaudeHome: local.Home, CodexHome: local.Home, PiHome: local.Home, NodePath: local.Candidate.Interpreter().Path, Workspace: saved.Workspace,
 				LookPath: func(name string) (string, error) {
 					if name == "node" {
 						return exec.LookPath(name)
 					}
 					return local.Path, nil
 				}}
-			verified, err := d.Detect(ctx, local.Candidate.Harness, local.Identity)
+			expected := local.Identity
+			if local.Candidate.Harness == "claude" || local.Candidate.Harness == "codex" {
+				expected = "" // Compare below so a switched login has the enrollment-fence reason.
+			}
+			verified, err := d.Detect(ctx, local.Candidate.Harness, expected)
 			if err != nil {
 				return agentsetup.Progress{}, err
 			}

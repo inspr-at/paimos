@@ -482,6 +482,8 @@
     ,
     {"kind":"go","package":"cmd/aeon-agentd","name":"TestDisconnectPollsReconciliationUntilDrained","tier":"GATED-FULL"}
     ,
+    {"kind":"go","package":"cmd/aeon-agentd","name":"TestHarnessHomeFlagRejectsAmbiguousOrUnsafeSelection","tier":"ESSENTIAL"}
+    ,
     {"kind":"go","package":"cmd/aeon-agentd","name":"TestHistoricalFencePreservesUnconfirmedProcessEvidence","tier":"GATED-FULL"}
     ,
     {"kind":"go","package":"cmd/aeon-agentd","name":"TestLocalStatusPreservesHarnessDetails","tags":["delete-candidate"],"tier":"GATED-FULL"}
@@ -568,6 +570,8 @@
     ,
     {"kind":"go","package":"cmd/aeon-agentd","name":"TestRunningDaemonEnrollmentAndRelinkShareLifecycle","tier":"ESSENTIAL"}
     ,
+    {"kind":"go","package":"cmd/aeon-agentd","name":"TestRunningEnrollmentFencesTheCandidatesOwnHome","tier":"ESSENTIAL"}
+    ,
     {"kind":"go","package":"cmd/aeon-agentd","name":"TestRuntimeDriftKeepsSiblingPolling","tier":"GATED-FULL"}
     ,
     {"kind":"go","package":"cmd/aeon-agentd","name":"TestServeStartupLogsExactMissingFile","tags":["delete-candidate"],"tier":"GATED-FULL"}
@@ -579,6 +583,8 @@
     {"kind":"go","package":"cmd/aeon-agentd","name":"TestSharedLedgerCLIStatusAndRebuildKeepRemovedServiceMember","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"cmd/aeon-agentd","name":"TestStatusCommandDuringPairLockIsReadOnly","tier":"GATED-FULL"}
+    ,
+    {"kind":"go","package":"cmd/aeon-agentd","name":"TestStatusKeepsHarnessHomesAndApprovalsSeparate","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"cmd/aeon-agentd","name":"TestStatusListsEveryAccountIncludingReady","tags":["delete-candidate"],"tier":"GATED-FULL"}
     ,
@@ -1498,6 +1504,8 @@
     ,
     {"kind":"go","package":"internal/agentd","name":"TestClaudeRuntimeCloneSharesQuotaIdentity","tier":"GATED-FULL"}
     ,
+    {"kind":"go","package":"internal/agentd","name":"TestClaudeSeparateHomesKeepBothLoginsReadyAndFenceOnlyTheChangedHome","tier":"ESSENTIAL"}
+    ,
     {"kind":"go","package":"internal/agentd","name":"TestClaudeStartReresolvesStableLinksAndExecutesPhysicalPaths","tier":"GATED-FULL"}
     ,
     {"kind":"go","package":"internal/agentd","name":"TestClaudeStatuslineFollowsBinaryPath","tier":"GATED-FULL"}
@@ -1553,6 +1561,8 @@
     {"kind":"go","package":"internal/agentd","name":"TestCodexQuotaNeutralFallbackUsesOwnedFakeCLI","tier":"GATED-FULL"}
     ,
     {"kind":"go","package":"internal/agentd","name":"TestCodexRealMidrunLimitThroughAdapter","tier":"GATED-FULL"}
+    ,
+    {"kind":"go","package":"internal/agentd","name":"TestCodexSeparateHomesBindQuotaAndIdentityToEachProfile","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/agentd","name":"TestCodexShutdownCancelsIdleWait","tier":"GATED-FULL"}
     ,
@@ -3182,6 +3192,8 @@
     ,
     {"kind":"go","package":"internal/agentsetup","name":"TestHarnessDetailsSurviveSetupStatusAndReconcile","tags":["delete-candidate"],"tier":"GATED-FULL"}
     ,
+    {"kind":"go","package":"internal/agentsetup","name":"TestHarnessDiscoveryPinsExplicitPrivateHomes","tier":"ESSENTIAL"}
+    ,
     {"kind":"go","package":"internal/agentsetup","name":"TestHomebrewLayoutResolution","tier":"GATED-FULL"}
     ,
     {"kind":"go","package":"internal/agentsetup","name":"TestHomebrewOptSurvivesUnlinkedOrConflictingBin","tier":"GATED-FULL"}
@@ -3329,6 +3341,8 @@
     {"kind":"go","package":"internal/agentsetup","name":"TestSelectiveDisconnectKeepsSharedHookUntilLastAccountCleanup","tier":"GATED-FULL"}
     ,
     {"kind":"go","package":"internal/agentsetup","name":"TestSelectiveOfflineDisconnectPreservesSharedDaemonAndOtherAccount","tier":"GATED-FULL"}
+    ,
+    {"kind":"go","package":"internal/agentsetup","name":"TestSeparateHarnessHomesRequireTheirOwnApproval","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/agentsetup","name":"TestServerSelectedProfileKeepsEveryOtherChoiceBound","tier":"GATED-FULL"}
     ,
