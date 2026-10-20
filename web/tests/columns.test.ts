@@ -479,7 +479,7 @@ test('AEON-1570 a growing card is adopted after a disagreeing frame pair, and a 
   assert.match(table, /pendingViewportShrink\(inner, lastInner, viewportShrunk\)/)
   assert.match(table, /const shrunk = viewportShrunk\n  viewportShrunk = false/)
   assert.doesNotMatch(table, /viewportAnchor/)
-  assert.match(table, /if \(moved \|\| shrunk\) settleCardWidth\(grew, before\)/)
+  assert.match(table, /if \(moved \|\| shrunk\) \{\n {4}if \(cardWidthSettled\.value\) settleCardWidth\(grew, before\)/)
   // A wider live card is this resize when the window grew, and ignored when it shrank.
   assert.equal(nextMeasuredCardWidth(760, 792, true), 792)
   assert.equal(nextMeasuredCardWidth(800, 900, false), 800)

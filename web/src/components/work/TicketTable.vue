@@ -603,8 +603,12 @@ function applyCardSize(entries: ResizeObserverEntry[]) {
   if (moved) width.value = next
   // An unchanged delivery must not restart the frame sampler. Restarting it
   // on every notification keeps a frame loop alive while the header paints.
-  if (moved || shrunk) settleCardWidth(grew, before)
-  else if (!cardWidthSettled.value && cardFrame === 0) finishCardSettle(cardFrame)
+  // A settle already in flight has to finish: cancelling it on the observer
+  // delivery leaves the card epoch unsettled, and the list spec's clock never
+  // runs the replacement (AEON-1594).
+  if (moved || shrunk) {
+    if (cardWidthSettled.value) settleCardWidth(grew, before)
+  } else if (!cardWidthSettled.value && cardFrame === 0) finishCardSettle(cardFrame)
 }
 let lastInner = window.innerWidth
 let viewportShrunk = false
