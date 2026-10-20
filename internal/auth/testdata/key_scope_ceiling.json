@@ -92,18 +92,6 @@
     }
   ],
   "registry": [
-    {
-      "agent_grantable": false,
-      "description": "Start runs on a computer",
-      "grantable_at": [
-        "workspace",
-        "computer"
-      ],
-      "group": "Run",
-      "key": "run.start_on_computer",
-      "owner_workstation_grantable": false,
-      "risk": "high"
-    },
     {"key":"reviews.visual_approve","grantable_at":["workspace","project"],"agent_grantable":true,"owner_workstation_grantable":false},
     {"agent_grantable":true,"grantable_at":["workspace","project"],"key":"account.manage"},
     {"agent_grantable":true,"grantable_at":["workspace"],"key":"account.overview.read"},
@@ -246,6 +234,7 @@
     {"agent_grantable":true,"grantable_at":["workspace","project"],"key":"run.claim"},
     {"agent_grantable":true,"grantable_at":["workspace","project"],"key":"run.create"},
     {"agent_grantable":true,"grantable_at":["workspace","project"],"key":"run.read"},
+    {"agent_grantable":false,"grantable_at":["workspace","computer"],"key":"run.start_on_computer","owner_workstation_grantable":false},
     {"agent_grantable":true,"grantable_at":["workspace","project"],"key":"run.telemetry"},
     {"agent_grantable":true,"grantable_at":["workspace","project"],"key":"runs.claim"},
     {"agent_grantable":true,"grantable_at":["workspace","project"],"key":"runs.control"},
