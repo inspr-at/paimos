@@ -176,6 +176,14 @@ func (p *parser) scan() {
 }
 
 func (p *parser) noteID(n int, id, raw string) {
+	// A separated marker immediately before a new top-level rule belongs to
+	// that rule. Keep markers embedded in an existing rule's details unchanged.
+	if p.current != nil && id != "" && p.blanks > 0 && n < len(p.lines) {
+		next := listRE.FindStringSubmatch(p.lines[n])
+		if len(next) > 0 && len(next[1]) == 0 {
+			p.flush(n - 1)
+		}
+	}
 	if p.current != nil {
 		p.appendDetail(n, raw)
 		return

@@ -88,34 +88,35 @@ type RuntimeConfig struct {
 }
 
 type snapshot struct {
-	HookHome           string                `json:"hook_home,omitempty"`
-	HookCapabilities   []hookcap.Capability  `json:"hook_capabilities,omitempty"`
-	LocalAuthKeyID     string                `json:"local_auth_key_id,omitempty"`
-	BoundComputer      string                `json:"bound_computer_id,omitempty"`
-	BoundDaemon        string                `json:"bound_daemon_id,omitempty"`
-	BoundPrincipal     string                `json:"bound_principal_id,omitempty"`
-	Schema             string                `json:"schema"`
-	Origin             string                `json:"origin"`
-	Request            DeviceRequest         `json:"request"`
-	Device             secret                `json:"device_secret"`
-	Runtime            secret                `json:"runtime_secret"`
-	Lifecycle          secret                `json:"lifecycle_secret"`
-	LifecycleRequestID string                `json:"lifecycle_request_id"`
-	Response           DeviceResponse        `json:"response"`
-	View               View                  `json:"view"`
-	Candidates         []LocalCandidate      `json:"candidates"`
-	StartService       bool                  `json:"start_service"`
-	Service            *ServiceReceipt       `json:"service,omitempty"`
-	NodePath           string                `json:"node_path,omitempty"`
-	ClaudeSDKPath      string                `json:"claude_sdk_path,omitempty"`
-	ClaudeRepinID      string                `json:"claude_repin_id,omitempty"`
-	ClaudePinInfo      *ClaudeDependencyInfo `json:"claude_pin_info,omitempty"`
-	Phase              string                `json:"phase"`
-	DisconnectAll      bool                  `json:"disconnect_all"`
-	Removed            map[string]bool       `json:"removed"`
-	Cleaned            []string              `json:"cleaned"`
-	ComputerCleaned    bool                  `json:"computer_cleaned"`
-	NextPoll           time.Time             `json:"next_poll"`
+	HookHome                   string                `json:"hook_home,omitempty"`
+	HookCapabilities           []hookcap.Capability  `json:"hook_capabilities,omitempty"`
+	LocalAuthKeyID             string                `json:"local_auth_key_id,omitempty"`
+	LocalAuthUnavailableReason string                `json:"local_auth_unavailable_reason,omitempty"`
+	BoundComputer              string                `json:"bound_computer_id,omitempty"`
+	BoundDaemon                string                `json:"bound_daemon_id,omitempty"`
+	BoundPrincipal             string                `json:"bound_principal_id,omitempty"`
+	Schema                     string                `json:"schema"`
+	Origin                     string                `json:"origin"`
+	Request                    DeviceRequest         `json:"request"`
+	Device                     secret                `json:"device_secret"`
+	Runtime                    secret                `json:"runtime_secret"`
+	Lifecycle                  secret                `json:"lifecycle_secret"`
+	LifecycleRequestID         string                `json:"lifecycle_request_id"`
+	Response                   DeviceResponse        `json:"response"`
+	View                       View                  `json:"view"`
+	Candidates                 []LocalCandidate      `json:"candidates"`
+	StartService               bool                  `json:"start_service"`
+	Service                    *ServiceReceipt       `json:"service,omitempty"`
+	NodePath                   string                `json:"node_path,omitempty"`
+	ClaudeSDKPath              string                `json:"claude_sdk_path,omitempty"`
+	ClaudeRepinID              string                `json:"claude_repin_id,omitempty"`
+	ClaudePinInfo              *ClaudeDependencyInfo `json:"claude_pin_info,omitempty"`
+	Phase                      string                `json:"phase"`
+	DisconnectAll              bool                  `json:"disconnect_all"`
+	Removed                    map[string]bool       `json:"removed"`
+	Cleaned                    []string              `json:"cleaned"`
+	ComputerCleaned            bool                  `json:"computer_cleaned"`
+	NextPoll                   time.Time             `json:"next_poll"`
 	// Local approval and renewal metadata are never part of pairing telemetry.
 	CodexPins struct {
 		LauncherHashes map[string]string             `json:"launcher_hashes,omitempty"`
@@ -274,7 +275,9 @@ func (e *Engine) save(s *snapshot, first bool) error {
 func (e *Engine) progress(s *snapshot) Progress {
 	refreshHookCapabilities(s)
 	p := Progress{HookCapabilities: s.HookCapabilities, Schema: "aeon.agent-setup.v1", Stage: s.Phase, RequestID: s.Request.RequestID, ComputerID: s.View.ComputerID, Accounts: s.View.Enrollments, LocalProcesses: "unconfirmed"}
-	if s.View.ComputerID != "" {
+	if s.LocalAuthUnavailableReason == "missing_entitlement" {
+		p.TouchIDConfirmation = "Touch ID unavailable: this agentd build lacks the keychain entitlement (AEON-1504). Pairing again will not fix it; Aeon approval is used meanwhile."
+	} else if s.View.ComputerID != "" {
 		p.TouchIDConfirmation = "needs pairing upgrade"
 		if s.Request.Platform != "darwin" {
 			p.TouchIDConfirmation = "unsupported on this platform"
@@ -285,10 +288,10 @@ func (e *Engine) progress(s *snapshot) Progress {
 		} else if e.Store != nil {
 			p.TouchIDUpgradeCommand = "aeon-agentd pair --url " + touchIDQuote(s.Origin) + " --state-root " + touchIDQuote(e.Store.Path()+"-touch-id") + " --workspace " + touchIDQuote(s.Request.Workspace)
 		}
-		if s.DisconnectAll || s.ComputerCleaned || s.View.ComputerState == "revoked" {
-			p.TouchIDConfirmation = "unavailable (pairing disconnected)"
-			p.TouchIDUpgradeCommand = ""
-		}
+	}
+	if s.View.ComputerID != "" && (s.DisconnectAll || s.ComputerCleaned || s.View.ComputerState == "revoked") {
+		p.TouchIDConfirmation = "unavailable (pairing disconnected)"
+		p.TouchIDUpgradeCommand = ""
 	}
 	if s.Phase == "awaiting_approval" {
 		p.UserCode = s.Response.UserCode
@@ -461,8 +464,15 @@ func (e *Engine) Begin(ctx context.Context, o Options) (Progress, error) {
 		signer = agentsecurity.DefaultSigner()
 	}
 	publicKey, keyErr := signer.Create(ctx, Hash([]byte(e.Store.Path()))+"/"+id)
-	if keyErr != nil && !errors.Is(keyErr, agentsecurity.ErrUnavailable) {
-		return Progress{}, keyErr
+	if keyErr != nil {
+		switch {
+		case errors.Is(keyErr, agentsecurity.ErrMissingEntitlement):
+			s.LocalAuthUnavailableReason = "missing_entitlement"
+		case errors.Is(keyErr, agentsecurity.ErrUnavailable):
+		default:
+			return Progress{}, keyErr
+		}
+		publicKey = ""
 	}
 	if publicKey != "" && (o.Platform.OS != "darwin" || attachwatch.LocalAuthPublicKey(publicKey) == nil) {
 		return Progress{}, errors.New("invalid enclave public key")

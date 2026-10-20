@@ -1170,8 +1170,9 @@ The tag and rehearsal workflows pin Buildx `v0.37.1` and the docker-container bu
 
 `scripts/Dockerfile.runtime` pins the official Alpine 3.24 multi-platform index
 by digest (3.24.2 when observed on 2026-10-05). Chromium is an exact-version
-allow-list, newest first (AEON-1450: `155.0.8059.39-r0`, then
-`152.0.7977.82-r0`). Preparation installs the first version the index can
+allow-list, newest first (AEON-1450, AEON-1584: `155.0.8059.84-r0`, then
+`155.0.8059.39-r0`, then `152.0.7977.82-r0`; Alpine rotated 155.0.8059.39 out of
+its index on 2026-10-20). Preparation installs the first version the index can
 satisfy and fails when none match. tini stays exactly `0.19.0-r3`. A bump
 edits those exact `chromium=` arguments. Image evidence records the installed
 chromium APK. The

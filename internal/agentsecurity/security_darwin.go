@@ -121,6 +121,20 @@ func (keychainVault) Delete(id string) error {
 	}
 	return err
 }
+
+func enclaveCreateError(status int) error {
+	switch status {
+	case 0:
+		return nil
+	case 1:
+		return ErrUnavailable
+	case -34018: // errSecMissingEntitlement
+		return fmt.Errorf("create Secure Enclave key (OSStatus %d): %w", status, ErrMissingEntitlement)
+	default:
+		return fmt.Errorf("create Secure Enclave key (OSStatus %d): %w", status, nativeError(C.int(status)))
+	}
+}
+
 func (enclaveSigner) Create(ctx context.Context, id string) (string, error) {
 	if err := ctx.Err(); err != nil {
 		return "", err
@@ -130,10 +144,7 @@ func (enclaveSigner) Create(ctx context.Context, id string) (string, error) {
 	var raw unsafe.Pointer
 	var size C.int
 	status := C.aeon_enclave_create(key, &raw, &size)
-	if status == 1 {
-		return "", ErrUnavailable
-	}
-	if err := nativeError(status); err != nil {
+	if err := enclaveCreateError(int(status)); err != nil {
 		return "", err
 	}
 	defer C.free(raw)

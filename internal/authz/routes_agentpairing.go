@@ -5,6 +5,7 @@ package authz
 // Route and scope declarations for agentpairing.
 func init() {
 	registerRoutes("agentpairing", map[string]string{
+		"GET /api/agent-pairing/computers/inventory":                                        "account.manage",
 		"GET /api/agent-pairing/account-links":                                              "profile.write",
 		"GET /api/agent-pairing/attach/pending":                                             "account.manage",
 		"GET /api/agent-pairing/attach/{requestId}/messages":                                "account.manage",

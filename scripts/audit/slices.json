@@ -267,7 +267,9 @@
         "internal/cli/hook_binding_unix_test.go",
         "internal/cli/principal_inbox.go",
         "internal/cli/principal_inbox_test.go",
-        "internal/inbox/messaging_only_test.go"
+        "internal/inbox/messaging_only_test.go",
+        "internal/cli/rules_export.go",
+        "internal/cli/rules_export_test.go"
       ]
     },
     {
@@ -289,7 +291,11 @@
         "internal/embedding/**",
         "internal/search/**",
         "internal/greetings/**",
-        "internal/markdownsource/**"
+        "internal/markdownsource/**",
+        "internal/rules/authoring.go",
+        "internal/rules/export.go",
+        "internal/rules/export_test.go",
+        "internal/rules/doctrine/add_test.go"
       ]
     },
     {

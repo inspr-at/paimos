@@ -272,6 +272,7 @@ export async function mockRulesScale(page: Page, options: ScaleOptions = {}): Pr
       })
     }
     if (!path.startsWith('/api/rules')) return route.fallback()
+    if (path === '/api/rules/authoring') return fulfil(route, { db_authoring: true, proposal_path: '/api/rules/doctrine/inbox' })
     if (path === '/api/rules/layers' && method === 'GET') return fulfil(route, { layers })
     if (path === '/api/rules/layers' && method === 'POST') {
       const layer = { id: `c1000000-0000-4000-8000-${String(layers.length + 1).padStart(12, '0')}`, scope: body }

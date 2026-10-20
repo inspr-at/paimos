@@ -89,6 +89,7 @@ func billingFixture(t *testing.T, home string) *GrokAdapter {
 		}
 		return []capacity.Reading{{WindowKind: "weekly", WindowMinutes: 10080, UsedPercent: *v.Used, ResetsAt: now.Add(time.Hour)}}
 	}}
+	a.billing.pin = fixtureCapacityPin(Grok, path, []byte(script), "fixture-1")
 	return a
 }
 
@@ -122,8 +123,8 @@ func TestGrokBillingCapabilityFence(t *testing.T) {
 	}
 	b.BinaryPath = "/unverified-executable"
 	a.Bindings["a"] = b
-	if a.billingSupported("a") {
-		t.Fatal("capability crossed executable binding")
+	if !a.billingSupported("a") {
+		t.Fatal("enrolled wrapper path overrode the separate capacity pin")
 	}
 	if len(a.CaptureCapacity(t.Context(), "missing")) != 0 {
 		t.Fatal("unknown account accepted")

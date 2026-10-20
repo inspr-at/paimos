@@ -33,7 +33,10 @@ const (
 	evLearningDrafted   = "knowledge.learning_drafted"
 )
 
-type module struct{ pool *pgxpool.Pool }
+type module struct {
+	pool     *pgxpool.Pool
+	doctrine learningDoctrine
+}
 
 // New returns the /api/knowledge module. See the package doc for wiring.
 func New(pool *pgxpool.Pool) httpapi.Module { return &module{pool: pool} }

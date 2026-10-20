@@ -117,6 +117,13 @@ export function cardWidthCommit(agreed: number | null, onScreen: number, before:
   if (sampleCount < CARD_WIDTH_SAMPLE_CAP && Math.abs(agreed - before) <= 0.5) return null
   return agreed
 }
+
+/** Adopt `agreed` only when it still belongs to the card on screen. On a shrink, a pair wider than the card now is the previous frame: taking it lays the wide columns into the narrow card and a later column measures 0 (AEON-1594). A pair that matches the live card, or any pair while the viewport grew, still replaces a stale narrow box (AEON-1532). */
+export function adoptedCardWidth(agreed: number | null, live: number | null, viewportGrew: boolean): number | null {
+  if (agreed === null || !(agreed > 0)) return null
+  if (live === null || !(live > 0) || viewportGrew || agreed <= live + 0.5) return agreed
+  return null
+}
 // Columns only wide tables add on their own.
 const WIDE_EXTRAS: ColumnId[] = ['suggested', 'list_cost', 'tokens', 'model', 'estimate', 'tags', 'release', 'created', 'assignee']
 // The text columns that take spare width on wide tables (their text gets room).
