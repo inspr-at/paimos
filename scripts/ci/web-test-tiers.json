@@ -14848,6 +14848,8 @@
     ,
     {"kind":"browser","file":"tests/ticket-panel.spec.ts","name":"an epic lists its tickets with progress and adds new ones inline","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
     ,
+    {"kind":"browser","file":"tests/ticket-panel.spec.ts","name":"c focuses the comment field once project commenting is allowed","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
     {"kind":"browser","file":"tests/ticket-panel.spec.ts","name":"comments by others or older than 15 minutes cannot be edited","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
     ,
     {"kind":"browser","file":"tests/ticket-panel.spec.ts","name":"comments post with Cmd/Ctrl+Enter from c, and own comments can be edited and deleted","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
