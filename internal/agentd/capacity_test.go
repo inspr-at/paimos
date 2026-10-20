@@ -116,13 +116,12 @@ func TestCodexQuotaNeutralFallbackUsesOwnedFakeCLI(t *testing.T) {
 	}
 }
 
-// An npm launcher needs the enrolled interpreter even when quota capture runs
-// without a prompt. The fake interpreter has no dependency on host Node.
+// Enrollment probes use the wrapper; idle quota uses its separate executable.
 type idleCapacityTestAPI struct{ *capacityTestAPI }
 
 func (*idleCapacityTestAPI) Queued(context.Context) ([]Run, error) { return nil, nil }
 
-func TestIdleCodexCaptureUsesPinnedInterpreter(t *testing.T) {
+func TestIdleCodexCaptureUsesSeparatePinnedExecutable(t *testing.T) {
 	home := privateHome(t)
 	bin := privateHome(t)
 	node := filepath.Join(bin, "node")
@@ -140,7 +139,11 @@ func TestIdleCodexCaptureUsesPinnedInterpreter(t *testing.T) {
 	a.Nodes = map[string]harnesslaunch.Node{"local": {Path: node, Version: "1.0.0"}}
 	a.SetExpectedEmails(map[string]string{"local": "agent@example.test"})
 	// Qualify only this synthetic fixture; production idle capture stays gated.
-	a.idleUsage = &codexIdleCapability{binaryPath: launcher, binarySHA256: sha256Hex(launcherRaw), nodePath: node, nodeSHA256: sha256Hex(nodeRaw), version: "synthetic-fixture", startupHooks: true, inheritedConfig: true, termination: true}
+	vendorRaw, err := os.ReadFile(vendor)
+	if err != nil {
+		t.Fatal(err)
+	}
+	a.idleUsage = loadCodexCapacityPin([]capacityPin{*fixtureCapacityPin(Codex, vendor, vendorRaw, "synthetic-fixture")})
 	s, api, _ := testSupervisor(t)
 	reporter := &idleCapacityTestAPI{&capacityTestAPI{API: api}}
 	s.api, s.adapters[Codex] = reporter, a
