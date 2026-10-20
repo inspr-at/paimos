@@ -12,6 +12,7 @@ import (
 
 	"github.com/inspr-at/paimos/internal/authz"
 	"github.com/inspr-at/paimos/internal/db"
+	"github.com/inspr-at/paimos/internal/doctrinerepo"
 	"github.com/inspr-at/paimos/internal/httpapi"
 	"github.com/inspr-at/paimos/internal/tenant"
 	"github.com/inspr-at/paimos/internal/workorders"
@@ -21,14 +22,24 @@ import (
 )
 
 type Module struct {
-	pool *pgxpool.Pool
+	pool         *pgxpool.Pool
+	repositories doctrinerepo.Pair
 	// versionNow supplies the batch publication clock. Request and
 	// transaction deadlines always use the real clock.
 	versionNow func() time.Time
 }
 
 func New(pool *pgxpool.Pool) httpapi.Module {
-	return &Module{pool: pool, versionNow: time.Now}
+	return NewWithRepositories(pool, nil)
+}
+
+// NewWithRepositories keeps export destinations inside the deployment's doctrine boundary.
+func NewWithRepositories(pool *pgxpool.Pool, pair *doctrinerepo.Pair) httpapi.Module {
+	repositories := doctrinerepo.Default()
+	if pair != nil {
+		repositories = *pair
+	}
+	return &Module{pool: pool, versionNow: time.Now, repositories: repositories}
 }
 
 type endpoint func(*http.Request, pgx.Tx, tenant.Principal) (any, error)
@@ -49,6 +60,9 @@ func (m *Module) Mount(mux *http.ServeMux) {
 		handler             endpoint
 		unknown             string
 	}{
+		{"GET /api/rules/export", "settings.manage", m.export, ""},
+		{"GET /api/rules/authoring", "rules.read", m.getAuthoring, ""},
+		{"PUT /api/rules/authoring", "settings.manage", m.putAuthoring, unknownChange},
 		{"GET /api/rules/layers", "rules.read", m.layers, ""}, {"POST /api/rules/layers", "rules.write", m.createLayer, unknownLayer},
 		{"GET /api/rules/sets", "rules.read", m.sets, ""}, {"POST /api/rules/sets", "rules.write", m.createSet, unknownSet},
 		{"GET /api/rules/sets/{setId}", "rules.read", m.getSet, ""}, {"PUT /api/rules/sets/{setId}/draft", "rules.write", m.draft, unknownChange},
@@ -158,6 +172,11 @@ func (m *Module) endpoint(permission, unknown string, fn endpoint) http.HandlerF
 				}
 				if err = enterRules(r.Context(), tx, owner, agent); err != nil {
 					return err
+				}
+				if databaseWriter(r) {
+					if err = RequireDBAuthoring(r.Context(), tx); err != nil {
+						return err
+					}
 				}
 				if err = ensureKinds(r.Context(), tx, p); err != nil {
 					return err

@@ -61,6 +61,7 @@ type DraftTLDR struct {
 	Check bool   `json:"check,omitempty"`
 }
 type DraftSet struct {
+	DBAuthoring      *bool       `json:"db_authoring,omitempty"`
 	ID               string      `json:"id"`
 	LayerID          string      `json:"layer_id"`
 	Scope            DraftScope  `json:"scope"`
@@ -258,6 +259,9 @@ func ApplyDraft(ctx context.Context, c *client.Client, p Proposal, target Target
 	if err := api.Do(ctx, http.MethodGet, path, nil, &current); err != nil {
 		return DraftResult{}, safeDraftError(err)
 	}
+	if current.DBAuthoring != nil && !*current.DBAuthoring {
+		return DraftResult{}, draftRefusal("rules_db_authoring_disabled: Database rule authoring is disabled (rules.db_authoring). Propose through /api/rules/doctrine/inbox.")
+	}
 	if current.ID != target.SetID || current.Scope.Layer != p.Rules[0].Layer || !boundedLine(current.Name, 128, true) {
 		return DraftResult{}, draftRefusal("target set does not match the proposed layer or AR1 contract")
 	}
@@ -336,6 +340,9 @@ func sameDraftRules(a, b []DraftRule) bool {
 func safeDraftError(err error) error {
 	var status *client.StatusError
 	if errors.As(err, &status) {
+		if status.Status == http.StatusConflict && strings.Contains(status.Message, "rules_db_authoring_disabled") {
+			return draftRefusal("rules_db_authoring_disabled: Database rule authoring is disabled (rules.db_authoring). Propose through /api/rules/doctrine/inbox.")
+		}
 		// Do not echo a server body that could contain submitted private doctrine.
 		return &client.StatusError{Status: status.Status, Message: "draft request refused; local proposal retained, no automatic retry"}
 	}

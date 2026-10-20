@@ -27,7 +27,7 @@ func (rt *runtime) cmdRules() *Command {
 		Name:  "rules",
 		Short: "Compare loaded harness instructions with merged rules",
 		Use:   "rules compare --harness claude|codex --repo PATH --project KEY --role ROLE",
-		subs:  []*Command{rt.cmdRulesCompareLive()},
+		subs:  []*Command{rt.cmdRulesCompareLive(), rt.cmdRulesExport()},
 	}
 }
 

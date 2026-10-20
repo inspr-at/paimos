@@ -250,6 +250,7 @@ func (rt *runtime) root() *Command {
 		rt.cmdSearch("search"),
 		rt.cmdModel(),
 		rt.cmdCapacity(),
+		rt.cmdComputers(),
 		rt.cmdAgents(),
 		rt.cmdUse(),
 		rt.cmdOnboard(),

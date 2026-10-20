@@ -50,7 +50,7 @@ func (m *Module) CheckDeskTargetTx(ctx context.Context, tx pgx.Tx, actor tenant.
 	if len(m.guardMaster) < 32 {
 		return fail(503, "guard_unavailable", missingGuardReason)
 	}
-	if !digestPattern.MatchString(in.RuleSHA) || len(in.Path) > 300 || len(in.RuleKey) > 200 || in.RuleKey == "" {
+	if (in.Operation != "add" && !digestPattern.MatchString(in.RuleSHA)) || len(in.Path) > 300 || len(in.RuleKey) > 200 || in.RuleKey == "" {
 		return fail(422, "doctrine_mapping_required", "An indexed source, rule and exact base digest are required.")
 	}
 	source, err := inboxSource(ctx, tx, in)
@@ -67,6 +67,22 @@ func (m *Module) CheckDeskTargetTx(ctx context.Context, tx pgx.Tx, actor tenant.
 	}
 	files, err := cachedFiles(ctx, tx, source)
 	if err != nil {
+		return err
+	}
+	if in.Operation == "add" {
+		pin := ProposalInput{Operation: in.Operation, Section: in.Section, RequestID: in.RequestID, SourceID: source.ID, Path: in.Path, RuleKey: in.RuleKey, RuleSHA: in.RuleSHA, Source: in.Source, Explanation: in.Why}
+		if in.TLDR != nil {
+			pin.TLDR.EN, pin.TLDR.DE = in.TLDR.EN, in.TLDR.DE
+		}
+		if err := pin.validate(); err != nil {
+			return err
+		}
+		if _, _, _, err := m.editRuleViews(source, files, pin); err != nil {
+			return err
+		}
+		if m.repositories.IsPublic(source.Repository) {
+			_, err = m.privateGuard(ctx, tx, actor)
+		}
 		return err
 	}
 	file, rule, _, ok := locateRule(Render(source.Repository, source.Commit, source.Visibility == "private", files), in.Path, in.RuleKey, "", -1)
@@ -185,7 +201,7 @@ func (m *Module) recordInboxTx(ctx context.Context, tx pgx.Tx, actor tenant.Prin
 			return Proposal{}, nil, err
 		}
 	}
-	p := Proposal{ID: in.RequestID, SourceID: source.ID, Repository: source.Repository, Path: in.Path, RuleKey: in.RuleKey,
+	p := Proposal{Operation: in.Operation, Section: in.Section, ID: in.RequestID, SourceID: source.ID, Repository: source.Repository, Path: in.Path, RuleKey: in.RuleKey,
 		State: "pending", ProposedBy: actor.ID, Inbox: true, BaseRuleSHA: old.SHA256, ProposedSHA: next.SHA256, Ticket: in.Ticket,
 		ProposedTLDR: tldrDigest(pin.TLDR.EN, pin.TLDR.DE), RuleSet: rule.Set, RuleIndex: index, DeskQuestionID: deskQuestion, DeskAnswerID: deskAnswer, InboxDigest: requestDigest, InboxRequestDigest: inboxRequestDigest(in)}
 	current, err := getSource(ctx, tx, source.ID, false)
@@ -352,13 +368,17 @@ func (m *Module) prepareInboxTx(ctx context.Context, tx pgx.Tx, actor tenant.Pri
 		}
 	}
 	file, rule, index, ok := locateRule(Render(source.Repository, source.Commit, source.Visibility == "private", files), in.Path, in.RuleKey, "", -1)
-	if !ok || file.Problem != "" {
+	if in.Operation != "add" && (!ok || file.Problem != "") {
 		return nil, fail(409, "stale_rule", "That rule is not indexed at the pinned commit.")
 	}
 	if in.RuleSHA != "" && in.RuleSHA != rule.SHA256 {
 		return nil, fail(409, "stale_rule", "The rule changed at the pin; reload it before proposing.")
 	}
-	pin := ProposalInput{RequestID: in.RequestID, SourceID: source.ID, Path: in.Path, RuleKey: in.RuleKey, RuleSHA: rule.SHA256, Source: in.Source, Explanation: in.Why}
+	pin := ProposalInput{Operation: in.Operation, Section: in.Section, RequestID: in.RequestID, SourceID: source.ID, Path: in.Path, RuleKey: in.RuleKey, RuleSHA: rule.SHA256, Source: in.Source, Explanation: in.Why}
+	if in.Operation == "add" {
+		pin.RuleSHA = in.RuleSHA
+		index = -1
+	}
 	switch {
 	case in.TLDR != nil:
 		pin.TLDR.EN, pin.TLDR.DE = in.TLDR.EN, in.TLDR.DE
@@ -382,7 +402,11 @@ func (m *Module) prepareInboxTx(ctx context.Context, tx pgx.Tx, actor tenant.Pri
 	if next.SHA256 == old.SHA256 && rule.TLDR != nil && tldrDigest(rule.TLDR.EN, rule.TLDR.DE) == tldrDigest(pin.TLDR.EN, pin.TLDR.DE) {
 		return nil, fail(400, "no_change", "The proposal matches the pinned rule.")
 	}
-	exemptMain, err := m.checkPrivateQuotesTx(ctx, tx, actor, source, files, guard, pin.Source, pin.TLDR.EN, pin.TLDR.DE, pin.Explanation)
+	quoteTexts := []string{pin.Source, pin.TLDR.EN, pin.TLDR.DE, pin.Explanation}
+	if pin.Operation == "add" {
+		quoteTexts = append(quoteTexts, pin.RuleKey, pin.Path, pin.Section)
+	}
+	exemptMain, err := m.checkPrivateQuotesTx(ctx, tx, actor, source, files, guard, quoteTexts...)
 	if err != nil {
 		return nil, err
 	}
@@ -452,4 +476,18 @@ func (m *Module) verifyPreparedTx(ctx context.Context, tx pgx.Tx, actor tenant.P
 		}
 	}
 	return nil
+}
+
+// RecordLearningDraftTx records an addition through the ordinary inbox. The
+// caller owns the knowledge/access fence and appends these value-free events
+// only after its other mutations. It never opens a PR.
+func (m *Module) RecordLearningDraftTx(ctx context.Context, tx pgx.Tx, actor tenant.Principal, in InboxInput) (string, []events.Change, error) {
+	if !humanActor(actor) {
+		return "", nil, authz.ErrForbidden
+	}
+	if in.Operation != "add" {
+		return "", nil, fail(400, "invalid_request", "A learning proposal must add a rule.")
+	}
+	p, changes, err := m.recordInboxTx(ctx, tx, actor, in, "", "", "")
+	return p.ID, changes, err
 }

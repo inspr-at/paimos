@@ -55,6 +55,7 @@ type meJSON struct {
 }
 
 type agentKeyJSON struct {
+	PersonID              *string    `json:"person_id"`
 	FullAccess            bool       `json:"full_access"`
 	CreatedByPrincipalID  *string    `json:"created_by_principal_id"`
 	OwnerWorkstation      bool       `json:"owner_workstation"`
@@ -114,6 +115,7 @@ func keyJSON(rec keyRecord) agentKeyJSON {
 		scopes = []string{}
 	}
 	return agentKeyJSON{
+		PersonID:              rec.PersonID,
 		FullAccess:            rec.FullAccess,
 		CreatedByPrincipalID:  rec.CreatedByPrincipalID,
 		OwnerWorkstation:      rec.OwnerWorkstation,

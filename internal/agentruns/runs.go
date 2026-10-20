@@ -31,6 +31,7 @@ import (
 )
 
 type Run struct {
+	ActingPersonID            *string `json:"acting_person_id"`
 	RoutineLaunchID           *string `json:"routine_launch_id,omitempty"`
 	ReservationsSettled       *bool   `json:"reservations_settled,omitempty"`
 	RecoveryBrief             string  `json:"recovery_brief,omitempty"`
@@ -197,11 +198,11 @@ const columns = `id::text,work_order_id::text,agent_principal_id::text,model_pro
  EXISTS(SELECT 1 FROM work_orders review_order WHERE review_order.node_id=agent_runs.work_order_id AND review_order.kind='review'),row_version,queue_node_id::text,queue_target_agent_id::text,queue_routed_at,trace,waiting_ms,
  coalesce((SELECT q.handover FROM harness_recoveries q WHERE q.next_run_id=agent_runs.id),'null'::jsonb),
  coalesce((SELECT q.service_tier FROM harness_recoveries q WHERE q.next_run_id=agent_runs.id),''),
- (SELECT q.display_label FROM harness_recoveries q WHERE q.next_run_id=agent_runs.id),routine_launch_id::text`
+ (SELECT q.display_label FROM harness_recoveries q WHERE q.next_run_id=agent_runs.id),routine_launch_id::text,acting_person_id::text`
 
 func scan(row pgx.Row) (Run, error) {
 	var v Run
-	err := row.Scan(&v.ID, &v.OrderID, &v.AgentID, &v.ProfileID, &v.AccountID, &v.Status, &v.RequestedModel, &v.EffectiveModel, &v.ModelEvidence, &v.InputTokens, &v.OutputTokens, &v.CachedInputTokens, &v.ReasoningTokens, &v.Cost, &v.StartedAt, &v.EndedAt, &v.CreatedAt, &v.DaemonID, &v.Generation, &v.RequestedAccountID, &v.Purpose, &v.ActiveMS, &v.OutcomeDetail, &v.RetryOfRunID, &v.CapacityOverride, &v.CapacityHandoff, &v.VerificationReason, &v.ReadOnlyReview, &v.RowVersion, &v.QueueNodeID, &v.QueueTargetAgentID, &v.QueueRoutedAt, &v.Trace, &v.WaitingMS, &v.recoveryHandover, &v.RecoveryTier, &v.RecoveryLabel, &v.RoutineLaunchID)
+	err := row.Scan(&v.ID, &v.OrderID, &v.AgentID, &v.ProfileID, &v.AccountID, &v.Status, &v.RequestedModel, &v.EffectiveModel, &v.ModelEvidence, &v.InputTokens, &v.OutputTokens, &v.CachedInputTokens, &v.ReasoningTokens, &v.Cost, &v.StartedAt, &v.EndedAt, &v.CreatedAt, &v.DaemonID, &v.Generation, &v.RequestedAccountID, &v.Purpose, &v.ActiveMS, &v.OutcomeDetail, &v.RetryOfRunID, &v.CapacityOverride, &v.CapacityHandoff, &v.VerificationReason, &v.ReadOnlyReview, &v.RowVersion, &v.QueueNodeID, &v.QueueTargetAgentID, &v.QueueRoutedAt, &v.Trace, &v.WaitingMS, &v.recoveryHandover, &v.RecoveryTier, &v.RecoveryLabel, &v.RoutineLaunchID, &v.ActingPersonID)
 
 	var compact bytes.Buffer
 	if err == nil && json.Compact(&compact, v.recoveryHandover) == nil {
@@ -237,6 +238,40 @@ func load(ctx context.Context, tx pgx.Tx, id string, lock bool) (Run, error) {
 		q += ` FOR UPDATE`
 	}
 	return scan(tx.QueryRow(ctx, q, id))
+}
+
+// ErrActingPersonBinding refuses missing/non-person targets and attempts to
+// change an already bound run. It never falls back to requester or preferences.
+var ErrActingPersonBinding = errors.New("acting person binding refused")
+
+// SetActingPersonTx is the write-once seam for server admission writers. The
+// caller owns the transaction, holds tenant/tree and work-order fences in
+// admission lock order, and has rechecked launch authority with RequireTx in
+// this transaction before calling, before appending any events. This
+// helper grants no admission authority and is not exposed as an API operation.
+func SetActingPersonTx(ctx context.Context, tx pgx.Tx, tenantID, runID, personID string) error {
+	var current *string
+	if err := tx.QueryRow(ctx, `SELECT acting_person_id::text FROM agent_runs
+		WHERE tenant_id=$1 AND id=$2 FOR NO KEY UPDATE`, tenantID, runID).Scan(&current); err != nil {
+		return err
+	}
+	if current != nil {
+		if *current != personID {
+			return ErrActingPersonBinding
+		}
+		return nil
+	}
+	result, err := tx.Exec(ctx, `UPDATE agent_runs SET acting_person_id=$3
+		WHERE tenant_id=$1 AND id=$2 AND acting_person_id IS NULL
+		AND EXISTS (SELECT 1 FROM principals p WHERE p.tenant_id=$1 AND p.id=$3
+		 AND p.kind='person' AND p.status='active' AND p.linked_to IS NULL)`, tenantID, runID, personID)
+	if err != nil {
+		return err
+	}
+	if result.RowsAffected() != 1 {
+		return ErrActingPersonBinding
+	}
+	return nil
 }
 
 // Lock order: work_orders -> agent_runs -> account/reservation rows. All work
@@ -455,14 +490,29 @@ func createRun(r *http.Request, tx pgx.Tx, p tenant.Principal, deferred *[]func(
 		if held {
 			return nil, workorders.Fail(409, "The project lead is already starting this ticket. The run appears on the ticket in a moment.")
 		}
-		var active bool
-		if err = tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM agent_runs r JOIN nodes n ON n.tenant_id=r.tenant_id AND n.id=r.work_order_id
- WHERE (r.work_order_id=$1 OR r.queue_node_id=$2 OR n.parent_id=$2)
- AND (r.status IN ('queued','starting','running','waiting') OR r.trace->'worker_assignment'->>'state' IN ('launch_unknown','launched')
- OR r.trace->'work_lifecycle_release'->>'exit_unconfirmed'='true'))`, o.NodeID, ticket).Scan(&active); err != nil {
+		// An unrouted lead queue row is demand, not a writer: queued, a queue node
+		// set, and neither routed nor targeted. The daemon poll cannot claim it,
+		// including while lead admission is off. A daemon-claimable queue row, a
+		// live status, or a launched assignment still refuses. An unconfirmed
+		// launch or exit names itself; neither is described as an active run.
+		var block string
+		if err = tx.QueryRow(ctx, `SELECT CASE
+ WHEN COALESCE(bool_or(r.trace->'work_lifecycle_release'->>'exit_unconfirmed'='true'),false) THEN 'exit_unconfirmed'
+ WHEN COALESCE(bool_or(r.trace->'worker_assignment'->>'state'='launch_unknown'),false) THEN 'launch_unknown'
+ WHEN COALESCE(bool_or(r.status IN ('starting','running','waiting')
+  OR (r.status='queued' AND (r.queue_node_id IS NULL OR r.queue_routed_at IS NOT NULL OR r.queue_target_agent_id IS NOT NULL))
+  OR r.trace->'worker_assignment'->>'state'='launched'),false) THEN 'active'
+ ELSE '' END
+ FROM agent_runs r JOIN nodes n ON n.tenant_id=r.tenant_id AND n.id=r.work_order_id
+ WHERE r.work_order_id=$1 OR r.queue_node_id=$2 OR n.parent_id=$2`, o.NodeID, ticket).Scan(&block); err != nil {
 			return nil, err
 		}
-		if active {
+		switch block {
+		case "exit_unconfirmed":
+			return nil, workorders.Fail(409, "The previous writer's exit is unconfirmed. Open the ticket once that exit is confirmed.")
+		case "launch_unknown":
+			return nil, workorders.Fail(409, "The previous writer's launch outcome is unconfirmed. Open the ticket once that outcome is confirmed.")
+		case "active":
 			return nil, workorders.Fail(409, "A run is already active on this ticket. Open it from the ticket to follow or steer it.")
 		}
 		if err = requireWriterFree(ctx, tx, *ticket, "", o.BuildDelivery); err != nil {

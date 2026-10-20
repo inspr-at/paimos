@@ -103,27 +103,67 @@ async function open(page: Page, options: { width?: number; theme?: 'light' | 'da
   await page.evaluate(() => document.fonts.ready)
   // Group figures have landed: Priority never steps aside, so some group's priority mix shows.
   if (width > 720) await expect(grid(page).locator('tr.group-row td[data-group-column="priority"] .gf-text').filter({ hasText: /\S/ }).first()).toBeVisible()
-  await settled(page)
+  await columnsLaidOut(page, null)
   return { errors, data: d }
 }
 async function settled(page: Page) { await page.evaluate(() => new Promise<void>(resolve => requestAnimationFrame(() => requestAnimationFrame(() => resolve())))) }
+// The spec's clock stubs requestAnimationFrame, so a frame wait is not a paint. Poll the card's
+// own settled epoch (and reject a column that laid out at 0) until two reads agree. `epochBefore`
+// is the epoch from before this resize; null waits only for the current settle.
+async function columnsLaidOut(page: Page, epochBefore: string | null) {
+  let last = ''
+  let hits = 0
+  await expect.poll(async () => {
+    const snap = await page.evaluate(() => {
+      const card = document.querySelector('.table-card')
+      const thead = document.querySelector('.tickets thead')
+      const shown = !!thead && getComputedStyle(thead).display !== 'none'
+      const cells = [...document.querySelectorAll('.tickets thead th')]
+      const zero = shown && cells.some(cell => cell.getBoundingClientRect().width < 1)
+      return {
+        epoch: card?.getAttribute('data-card-epoch') ?? '',
+        settled: card?.getAttribute('data-card-width-settled') === '1' && card?.getAttribute('data-columns-settled') === '1',
+        zero,
+        ids: cells.map(cell => cell.getAttribute('data-column-id')).join(','),
+      }
+    })
+    const ready = snap.settled && !snap.zero && (epochBefore === null || snap.epoch !== epochBefore)
+    const sig = `${snap.epoch}|${snap.zero}|${snap.ids}`
+    if (ready && sig === last) hits++
+    else hits = 0
+    last = sig
+    if (hits >= 2) return 'stable'
+    if (!snap.settled) return 'settling'
+    if (snap.zero) return `zero ${snap.ids}`
+    return `epoch ${snap.epoch}`
+  }, { timeout: 8_000, intervals: [0, 0, 16, 32, 64, 100] }).toBe('stable')
+}
 type Box = { x: number; y: number; width: number; height: number }
 const boxOf = (locator: Locator) => locator.evaluate(el => { const r = el.getBoundingClientRect(); return { x: r.x, y: r.y, width: r.width, height: r.height } })
 const tableWidth = (page: Page) => page.locator('.table-card').evaluate(el => el.clientWidth)
 const shownIds = (page: Page) => grid(page).locator('thead th').evaluateAll(cells => cells.map(cell => cell.getAttribute('data-column-id') as ColumnId))
+// Read the column set only after the card width that produced it has settled.
+async function shownAfterCard(page: Page): Promise<ColumnId[]> {
+  await columnsLaidOut(page, null)
+  return shownIds(page)
+}
 const headWidths = (page: Page) => grid(page).locator('thead th').evaluateAll(cells => Object.fromEntries(cells.map(cell => [cell.getAttribute('data-column-id'), cell.getBoundingClientRect().width])))
-// Sets the viewport so the table is exactly `target` px wide (the page gutter grows with the window). The resize
-// observer and the render it triggers land before the second frame.
+// Sets the viewport so the table is exactly `target` px wide (the page gutter grows with the window). The next
+// card-width epoch is the layout those pixels belong to; the read waits for that, not for a timer.
 async function tableAt(page: Page, target: number) {
   let viewport = page.viewportSize()!.width + target - await tableWidth(page)
-  for (let step = 0; step < 4; step++) {
-    await page.setViewportSize({ width: viewport, height: 900 })
-    await settled(page)
-    const actual = await tableWidth(page)
+  let actual = await tableWidth(page)
+  for (let step = 0; step < 8; step++) {
+    const epoch = await page.locator('.table-card').getAttribute('data-card-epoch')
+    const same = viewport === page.viewportSize()!.width
+    if (!same) await page.setViewportSize({ width: viewport, height: 900 })
+    await columnsLaidOut(page, same ? null : epoch)
+    actual = await tableWidth(page)
     if (actual === target) break
     viewport += target - actual
   }
-  return { viewport, actual: await tableWidth(page) }
+  expect(actual, `table is ${target}px`).toBe(target)
+  return { viewport, actual }
 }
 
 // Every assert lands in a checks file with its width, theme and locale (Tick's evidence, AEON-1470 §8).
@@ -196,6 +236,7 @@ test('AEON-1470 columns leave in the give-way order; sorted by Updated, Updated 
 test('AEON-1470 a column that left returns only with 16 px to spare: ±8 px around a threshold keeps the set', async ({ page }, testInfo) => {
   const log = checks(testInfo)
   await open(page)
+  await expect(page.locator('.table-card')).toHaveAttribute('data-columns-settled', '1')
   // Narrow the table a pixel at a time until Updated leaves. It starts out shown: the scan finds where it leaves.
   await tableAt(page, 920)
   expect(await shownIds(page)).toContain('updated')
@@ -204,19 +245,19 @@ test('AEON-1470 a column that left returns only with 16 px to spare: ±8 px arou
   const set = await shownIds(page)
   for (const step of [8, -8]) {
     await tableAt(page, width + step)
-    expect(await shownIds(page), `left out at ${width + step}`).toEqual(set)
+    expect(await shownAfterCard(page), `left out at ${width + step}`).toEqual(set)
     log.add({ assert: 'hysteresis keeps the set', state: `Updated left at ${width}; ${step > 0 ? '+' : ''}${step} px`, width: page.viewportSize()!.width, tableWidth: width + step, theme: 'light', value: set })
   }
   // It returns with RETURN_ROOM to spare above the width it needs (width + 1), then holds ±8 px around that threshold.
   const back = width + 1 + RETURN_ROOM
   await tableAt(page, back - 1)
-  expect(await shownIds(page)).not.toContain('updated')
+  expect(await shownAfterCard(page)).not.toContain('updated')
   await tableAt(page, back)
-  const returned = await shownIds(page)
+  const returned = await shownAfterCard(page)
   expect(returned).toContain('updated')
   for (const step of [-8, 8]) {
     await tableAt(page, back + step)
-    expect(await shownIds(page), `back at ${back + step}`).toEqual(returned)
+    expect(await shownAfterCard(page), `back at ${back + step}`).toEqual(returned)
     log.add({ assert: 'hysteresis keeps the set', state: `Updated back at ${back}; ${step > 0 ? '+' : ''}${step} px`, width: page.viewportSize()!.width, tableWidth: back + step, theme: 'light', value: returned })
   }
   log.save()

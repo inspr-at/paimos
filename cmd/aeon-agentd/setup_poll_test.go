@@ -29,6 +29,10 @@ func (p *disconnectPoller) Status(context.Context) (agentsetup.Progress, error) 
 	p.statusCalls++
 	return agentsetup.Progress{}, errors.New("read-only status must not reconcile cleanup")
 }
+func plainProgressView() *setupProgressView {
+	return newSetupProgressView(false, func() time.Time { return time.Date(2026, 10, 18, 12, 24, 58, 0, time.UTC) })
+}
+
 func (p *disconnectPoller) Step(context.Context) (agentsetup.Progress, error) {
 	p.stepCalls++
 	if p.stepCalls == 1 {
@@ -50,7 +54,7 @@ func TestDisconnectPollsReconciliationUntilDrained(t *testing.T) {
 			waits = append(waits, delay)
 			return nil
 		}
-		p, err := pollSetupProgress(t.Context(), "disconnect", agentsetup.Progress{Stage: "draining"}, false, jsonOutput, &out, poller, func() { unlocks++ }, wait)
+		p, err := pollSetupProgress(t.Context(), "disconnect", agentsetup.Progress{Stage: "draining"}, false, jsonOutput, &out, poller, func() { unlocks++ }, wait, plainProgressView())
 		if err != nil || p.Stage != "disconnected" || p.ServerRevocation != "confirmed" || p.LocalProcesses != "drained" || poller.statusCalls != 0 || poller.stepCalls != 2 || unlocks != 2 {
 			t.Fatalf("disconnect polling failed: %v", err)
 		}
@@ -86,7 +90,7 @@ func TestDisconnectPollStopsForOnceTerminalErrorAndCancellation(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			poller := &disconnectPoller{}
 			wait := func(context.Context, time.Duration) error { t.Fatal("unexpected wait"); return nil }
-			p, err := pollSetupProgress(t.Context(), "disconnect", agentsetup.Progress{Stage: tc.stage}, tc.once, true, io.Discard, poller, func() { t.Fatal("unexpected unlock") }, wait)
+			p, err := pollSetupProgress(t.Context(), "disconnect", agentsetup.Progress{Stage: tc.stage}, tc.once, true, io.Discard, poller, func() { t.Fatal("unexpected unlock") }, wait, plainProgressView())
 			if err != nil || p.Stage != tc.stage || poller.statusCalls != 0 || poller.stepCalls != 0 {
 				t.Fatal("terminal or --once command polled")
 			}
@@ -94,14 +98,14 @@ func TestDisconnectPollStopsForOnceTerminalErrorAndCancellation(t *testing.T) {
 	}
 	poller := &disconnectPoller{err: errors.New("fixture offline")}
 	unlocks := 0
-	_, err := pollSetupProgress(t.Context(), "disconnect", agentsetup.Progress{Stage: "draining"}, false, false, io.Discard, poller, func() { unlocks++ }, func(context.Context, time.Duration) error { return nil })
+	_, err := pollSetupProgress(t.Context(), "disconnect", agentsetup.Progress{Stage: "draining"}, false, false, io.Discard, poller, func() { unlocks++ }, func(context.Context, time.Duration) error { return nil }, plainProgressView())
 	if !errors.Is(err, poller.err) || unlocks != 1 || poller.statusCalls != 0 || poller.stepCalls != 1 {
 		t.Fatal("poll error lost or lock retained")
 	}
 	ctx, cancel := context.WithCancel(t.Context())
 	cancel()
 	poller = &disconnectPoller{}
-	_, err = pollSetupProgress(ctx, "disconnect", agentsetup.Progress{Stage: "draining"}, false, false, io.Discard, poller, func() { t.Fatal("unexpected unlock") }, waitSetupPoll)
+	_, err = pollSetupProgress(ctx, "disconnect", agentsetup.Progress{Stage: "draining"}, false, false, io.Discard, poller, func() { t.Fatal("unexpected unlock") }, waitSetupPoll, plainProgressView())
 	if err == nil || !strings.Contains(err.Error(), "disconnect paused; rerun the same command") || poller.statusCalls != 0 {
 		t.Fatal("cancelled disconnect did not remain resumable")
 	}

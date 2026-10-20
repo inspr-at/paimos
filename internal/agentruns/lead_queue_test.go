@@ -1218,6 +1218,88 @@ func TestLeadPersonRunStartsAndRejectsOtherWriters(t *testing.T) {
 	}
 }
 
+// An unrouted lead queue row is demand. A person can start past it. A routed
+// or targeted queue row, a direct queued run, and a claimed or running writer
+// still refuse. An unconfirmed launch or exit names itself.
+func TestLeadPersonStartIgnoresUnroutedQueueRow(t *testing.T) {
+	f, o, leaf, _ := personLeadOrder(t)
+	body := map[string]any{"agent_principal_id": f.agent.ID, "model_profile_id": f.profile}
+	const (
+		active = "A run is already active on this ticket. Open it from the ticket to follow or steer it."
+		launch = "The previous writer's launch outcome is unconfirmed. Open the ticket once that outcome is confirmed."
+		exit   = "The previous writer's exit is unconfirmed. Open the ticket once that exit is confirmed."
+	)
+	var queued string
+	f.tx(t, f.person, func(tx pgx.Tx) error {
+		return tx.QueryRow(t.Context(), `INSERT INTO agent_runs(tenant_id,work_order_id,agent_principal_id,queue_node_id,queue_by_principal_id,queue_at,queue_security_review_required,trace)
+ VALUES($1,$2,$3,$4,$5,clock_timestamp(),false,'{}') RETURNING id::text`, f.person.TenantID, o.NodeID, f.agent.ID, leaf, f.person.ID).Scan(&queued)
+	})
+	refuse := func(want string) {
+		t.Helper()
+		var failure map[string]any
+		f.call(t, f.person, "POST", "/api/work-orders/"+o.NodeID+"/runs", body, 409, &failure)
+		if failure["error"] != want {
+			t.Fatalf("refusal=%v want=%s", failure["error"], want)
+		}
+	}
+	f.tx(t, f.person, func(tx pgx.Tx) error {
+		_, err := tx.Exec(t.Context(), `UPDATE agent_runs SET queue_target_agent_id=$2 WHERE id=$1`, queued, f.agent.ID)
+		return err
+	})
+	refuse(active)
+	f.tx(t, f.person, func(tx pgx.Tx) error {
+		_, err := tx.Exec(t.Context(), `UPDATE agent_runs SET queue_target_agent_id=NULL,queue_routed_at=clock_timestamp() WHERE id=$1`, queued)
+		return err
+	})
+	refuse(active)
+	f.tx(t, f.person, func(tx pgx.Tx) error {
+		_, err := tx.Exec(t.Context(), `UPDATE agent_runs SET queue_routed_at=NULL WHERE id=$1`, queued)
+		return err
+	})
+	run := f.run(t, o)
+	if run.Purpose != "managed" || run.Status != "queued" || run.QueueNodeID != nil {
+		t.Fatalf("person start did not pass the unrouted queue row: %+v", run)
+	}
+	if f.count(t, f.person, `SELECT count(*) FROM agent_runs WHERE id=$1 AND status='queued' AND queue_node_id=$2 AND queue_routed_at IS NULL AND queue_target_agent_id IS NULL`, queued, leaf) != 1 {
+		t.Fatal("person start consumed or routed the queue row")
+	}
+	refuse(active)
+	ids := f.reserve(t, run)
+	f.call(t, f.agent, "POST", "/api/runs/"+run.ID+"/claim", claimBody(ids), 200, &run)
+	if run.Status != "starting" {
+		t.Fatalf("person run was not claimed: %s", run.Status)
+	}
+	refuse(active)
+	// storeHandoff writes the whole worker_assignment object. jsonb_set does not
+	// create a missing parent, so a nested {worker_assignment,state} write leaves
+	// this starting run unchanged and the active sentence stays true.
+	f.tx(t, f.person, func(tx pgx.Tx) error {
+		_, err := tx.Exec(t.Context(), `UPDATE agent_runs SET trace=jsonb_set(coalesce(trace,'{}'::jsonb),'{worker_assignment}','{"state":"launch_unknown"}'::jsonb) WHERE id=$1`, run.ID)
+		return err
+	})
+	if f.count(t, f.person, `SELECT count(*) FROM agent_runs WHERE id=$1 AND status='starting' AND trace->'worker_assignment'->>'state'='launch_unknown'`, run.ID) != 1 {
+		t.Fatal("fixture did not keep a starting run at launch_unknown")
+	}
+	refuse(launch)
+	f.tx(t, f.person, func(tx pgx.Tx) error {
+		_, err := tx.Exec(t.Context(), `UPDATE agent_runs SET trace=trace-'worker_assignment' WHERE id=$1`, run.ID)
+		return err
+	})
+	f.call(t, f.agent, "POST", "/api/runs/"+run.ID+"/telemetry", map[string]any{"sequence": 1, "kind": "started", "cost_micros_delta": 40, "input_tokens_delta": 7, "effective_model": "vendor-model", "model_evidence": "vendor_reported"}, 200, &run)
+	if run.Status != "running" {
+		t.Fatalf("claimed person run did not reach running: %s", run.Status)
+	}
+	refuse(active)
+	f.tx(t, f.person, func(tx pgx.Tx) error {
+		_, err := tx.Exec(t.Context(), `UPDATE agent_runs SET status='ownership_lost',trace='{"work_lifecycle_release":{"exit_unconfirmed":true}}' WHERE id=$1`, run.ID)
+		return err
+	})
+	if f.count(t, f.person, `SELECT count(*) FROM agent_runs WHERE id=$1 AND status='ownership_lost' AND trace->'work_lifecycle_release'->>'exit_unconfirmed'='true'`, run.ID) != 1 {
+		t.Fatal("fixture did not record an unconfirmed exit")
+	}
+	refuse(exit)
+}
+
 func TestLeadPersonRunRefusesPendingAndClaimedIntent(t *testing.T) {
 	f, o, _, project := personLeadOrder(t)
 	f.person.BrowserSession = true
@@ -1302,7 +1384,7 @@ func TestLeadPersonRunRefusesPendingAndClaimedIntent(t *testing.T) {
 func TestLeadPersonConcurrentStartsHaveOneWriter(t *testing.T) {
 	f, o, _, _ := personLeadOrder(t)
 	pool, barrier, ctx := dbtest.BarrierPool(t, f.d.App, func(query string) bool {
-		return strings.Contains(query, "SELECT EXISTS(SELECT 1 FROM agent_runs r JOIN nodes n")
+		return strings.Contains(query, "FROM agent_runs r JOIN nodes n ON n.tenant_id=r.tenant_id AND n.id=r.work_order_id")
 	})
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()

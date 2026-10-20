@@ -179,7 +179,7 @@ func TestClaudeIdleCapabilityExactBinary(t *testing.T) {
 		t.Fatal("unsupported Claude captured")
 	}
 	calls := 0
-	a.usage = &claudeUsageCapability{binaryPath: path, binarySHA256: sha256Hex(raw), nodePath: node, nodeSHA256: sha256Hex(raw), startupHooks: true, inheritedConfig: true, termination: true, version: "fixture-1", capture: func(_ context.Context, _ string, environment []string) (json.RawMessage, error) {
+	a.usage = &claudeUsageCapability{binaryPath: path, binarySHA256: sha256Hex(raw), nodePath: node, nodeSHA256: sha256Hex(raw), startupHooks: true, inheritedConfig: true, termination: true, version: "fixture-1", capture: func(_ context.Context, _, _ string, environment []string) (json.RawMessage, error) {
 		calls++
 		if len(environment) != 8 {
 			t.Fatal("child env expanded")
@@ -188,6 +188,7 @@ func TestClaudeIdleCapabilityExactBinary(t *testing.T) {
 	}, decode: func(_ json.RawMessage, now time.Time) []capacity.Reading {
 		return []capacity.Reading{{WindowKind: "5h", WindowMinutes: 300, UsedPercent: 12, ResetsAt: now.Add(time.Hour)}}
 	}}
+	a.usage.pin = fixtureCapacityPin(Claude, path, raw, "fixture-1", capacityHelperPin{Name: "node", Path: node, SHA256: sha256Hex(raw)})
 	if len(a.CaptureCapacity(t.Context(), "a")) != 1 || calls != 1 {
 		t.Fatal("verified fixture did not capture")
 	}

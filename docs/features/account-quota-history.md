@@ -6,6 +6,71 @@ Claude 2.1.296 and codex-cli 0.162.1 remain unqualified: live quota-neutral
 startup, account identity, configuration/tool isolation and cleanup evidence
 was unavailable under the worker's prohibition on calling model CLIs.
 
+## Idle executable qualification and pins (AEON-1514)
+
+The reviewed table is `productionCapacityPins()` in
+`internal/agentd/capacity_pins.go`. It is empty in this release. Agentd loads
+Codex capabilities from it at adapter construction and verifies the physical
+path and SHA-256 again at use time, using the file's device, inode, size,
+modification time and change time to cache only unchanged bytes. Unknown
+paths, versions, digests and changed files retain `unsupported` and the
+existing fallback reason, without launching a process. Version is the OPS
+qualification label bound to the pinned bytes; no `--version` process is run
+to qualify an unknown executable.
+The startup loader also checks the native executable header and refuses
+script wrappers even when a proposed pin matches their bytes.
+
+The capacity executable is independent of the enrolled run/probe wrapper.
+For Codex it must be the physical native binary: agentd executes that path as
+`app-server --listen stdio://`, with no wrapper, `codex.js`, Node or
+`NODE_OPTIONS`. The child receives only its selected private `HOME` and
+`CODEX_HOME`, a bounded `PATH`, `LANG=C` and `LC_ALL=C`. Existing account
+identity checks, deadlines, owned process-group termination and cleanup fences
+still apply. Helpers are pinned only if the qualified exchange spawns them;
+native Codex has no Node helper. Claude/Grok capability checks also bind to
+their own executable pins. Claude still has no production idle
+exchange/decoder; adding a pin cannot supply that missing implementation.
+Pi's existing OpenRouter key-cap API is independent of this executable table.
+
+OPS performs live qualification only after AEON-1516's preconditions are met.
+The evidence must cover the exact version/path/bytes, the quota-neutral
+exchange and decoder, account identity, startup hooks, inherited
+configuration/tools, every spawned helper, and confirmed owned-group cleanup.
+Synthetic fixtures are protocol evidence only. No production digest was
+collected by this implementation.
+
+OPS hands over one entry per qualified executable in this exact Go format
+(placeholders below are not production values), together with the evidence
+reference:
+
+```go
+{Harness: Codex, Version: "<exact qualified version>",
+ Path: "<absolute physical native executable path>",
+ SHA256: "<64 lowercase hex characters>",
+ Helpers: []capacityHelperPin{}},
+```
+
+When an exchange needs helpers, each helper has
+`{Name: "<role>", Path: "<absolute physical executable path>", SHA256: "<64 lowercase hex characters>"}`;
+`Name: "node"` denotes a qualified interpreter for an exchange that needs one.
+The reviewed follow-up adds the evidence-backed entry to the checked-in
+table; there is no enrollment, environment or local-config enable switch.
+An executable update, path change, helper change or new version requires
+fresh qualification and a reviewed pin entry. The coordinator owns review,
+merge and release; OPS evidence alone does not alter a running daemon.
+
+AEON-1514 validation used synthetic executables only. The guarded remote runs
+passed `./internal/agentd/...` and `./cmd/aeon-agentd/...` on `7cfe473fa`;
+the focused pin/native-launch/startup-hook regressions passed on `960f1af93`
+after isolating the empty-table fixtures. The native launch, refusal and empty
+table regressions are ESSENTIAL. The existing S2 ownership glob covers both
+new Go files. Canonical manifest checks passed. The remote static runner twice
+exited 3 because the night protocol paused static checks; the required
+`ci-static --merge-main` remains for hosted PR CI. No production pin, vendor
+CLI call, origin push, deployment or model review was performed.
+
+## Quota-series API
+
 `GET /api/agent-accounts/{accountId}/quota-series` requires person
 `account.read`, or the registering agent's `account.probe`. Paired runtime keys
 remain limited to their own connected enrollment. Owner usage sharing applies

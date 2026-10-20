@@ -20,6 +20,8 @@ import (
 
 // Proposal holds references and workflow evidence, never proposed prose.
 type Proposal struct {
+	Operation        string    `json:"operation,omitempty"`
+	Section          string    `json:"section,omitempty"`
 	InboxDigest      string    `json:"inbox_digest,omitempty"`
 	DeskQuestionID   string    `json:"desk_question_id,omitempty"`
 	DeskAnswerID     string    `json:"desk_answer_id,omitempty"`
@@ -329,6 +331,7 @@ func (m *Module) proposeChange(parent context.Context, actor tenant.Principal, i
 		if p.BaseCommit != main {
 			return "", fail(409, "base_changed", "Main moved during an unfinished proposal. Inspect its branch before starting a new request.")
 		}
+		p.Operation, p.Section = in.Operation, in.Section
 		return "doctrine.proposed", g.preparePR(ctx, p, changed, in.Explanation)
 	})
 }
@@ -348,6 +351,9 @@ func (m *Module) preparePublication(ctx context.Context, actor tenant.Principal,
 		return nil, "", nil, err
 	}
 	quoteTexts := []string{in.Source, in.TLDR.EN, in.TLDR.DE, in.Explanation}
+	if in.Operation == "add" {
+		quoteTexts = append(quoteTexts, in.RuleKey, in.Section, in.Path)
+	}
 	exemptMain, err := m.checkPrivateQuotes(ctx, actor, source, files, guard, quoteTexts...)
 	if err != nil {
 		return nil, "", nil, err
