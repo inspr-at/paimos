@@ -17,6 +17,7 @@
     ]
   },
   "project_decided": {
+    "GET /api/rules/authoring": true,
     "GET /api/rules/budget": true,
     "GET /api/rules/channels": true,
     "GET /api/rules/comparisons": true,
@@ -75,10 +76,12 @@
     }
   ],
   "routes": {
+    "GET /api/rules/authoring": "rules.read",
     "GET /api/rules/budget": "rules.read",
     "GET /api/rules/channels": "rules.read",
     "GET /api/rules/comparisons": "rules.read",
     "GET /api/rules/explained": "rules.read",
+    "GET /api/rules/export": "settings.manage",
     "GET /api/rules/layers": "rules.read",
     "GET /api/rules/merged": "rules.read",
     "GET /api/rules/sets": "rules.read",
@@ -91,6 +94,7 @@
     "POST /api/rules/sets": "rules.write",
     "POST /api/rules/sets/{setId}/publish": "rules.publish",
     "POST /api/rules/sets/{setId}/restore": "rules.publish",
+    "PUT /api/rules/authoring": "settings.manage",
     "PUT /api/rules/budget": "settings.manage",
     "PUT /api/rules/sets/{setId}/draft": "rules.write",
     "PUT /api/rules/sets/{setId}/tldr": "rules.write"

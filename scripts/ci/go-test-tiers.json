@@ -5316,6 +5316,8 @@
     ,
     {"kind":"go","package":"internal/cli","name":"TestRulesCompareUploadsOmittedImport","tier":"GATED-FULL"}
     ,
+    {"kind":"go","package":"internal/cli","name":"TestRulesExportWritesPrivateBundleAndRejectsPaths","tier":"GATED-FULL"}
+    ,
     {"kind":"go","package":"internal/cli","name":"TestRulesHarnessRenderGolden","tier":"GATED-FULL"}
     ,
     {"kind":"go","package":"internal/cli","name":"TestRulesImportHTTPDraftMappingAndFailures","tier":"GATED-FULL"}
@@ -5347,6 +5349,8 @@
     {"kind":"go","package":"internal/cli","name":"TestRulesReceiveRetryBindsCheckpointAndOutput","tier":"GATED-FULL"}
     ,
     {"kind":"go","package":"internal/cli","name":"TestRulesRendererPreservesExactBytes","tier":"GATED-FULL"}
+    ,
+    {"kind":"go","package":"internal/cli","name":"TestRulesTLDRApplyRefusesDisabledAuthoring","tier":"GATED-FULL"}
     ,
     {"kind":"go","package":"internal/cli","name":"TestRulesTLDRDryRunApplyAndTemplate","tier":"GATED-FULL"}
     ,
@@ -6559,6 +6563,8 @@
     {"kind":"go","package":"internal/dsar","name":"TestParseCommands","tier":"GATED-FULL"}
     ,
     {"kind":"go","package":"internal/dsar","name":"TestQuarantineInventoryParsesWithWorkflowColumn","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/dsar","name":"TestRuleBudgetSettingsDBAuthoringStaysMetadata","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/embedding","name":"TestContentHashAndVector","tags":["delete-candidate"],"tier":"GATED-FULL"}
     ,
@@ -7870,7 +7876,11 @@
     ,
     {"kind":"go","package":"internal/knowledge","name":"TestKnowledgeUndoTenantBeforeSharedFencesWithWorkStatusOff","tier":"GATED-FULL"}
     ,
+    {"kind":"go","package":"internal/knowledge","name":"TestLearningDraftBecomesExplicitDoctrineAddition","tier":"GATED-FULL"}
+    ,
     {"kind":"go","package":"internal/knowledge","name":"TestLearningDraftProjectOnlyUndo","tier":"GATED-FULL"}
+    ,
+    {"kind":"go","package":"internal/knowledge","name":"TestLearningDraftRefusesDisabledAuthoring","tier":"GATED-FULL"}
     ,
     {"kind":"go","package":"internal/knowledge","name":"TestLearningDraftTenantBeforeAdvisory","tier":"NIGHTLY"}
     ,
@@ -10262,6 +10272,8 @@
     ,
     {"kind":"go","package":"internal/rules","name":"TestRulesDeadlineBoundsSaturatedPool","tier":"GATED-FULL"}
     ,
+    {"kind":"go","package":"internal/rules","name":"TestRulesExportAndAuthoringSwitch","tier":"GATED-FULL"}
+    ,
     {"kind":"go","package":"internal/rules","name":"TestRulesMutationTenantBeforeTree","tier":"NIGHTLY"}
     ,
     {"kind":"go","package":"internal/rules","name":"TestRulesPublishDoesNotDeadlockWithAForeignKeyReference","tier":"GATED-FULL"}
@@ -10317,6 +10329,10 @@
     {"kind":"go","package":"internal/rules/doctrine","name":"TestDefaultIgnorablesRemovedBeforeNormalization","tier":"GATED-FULL"}
     ,
     {"kind":"go","package":"internal/rules/doctrine","name":"TestDeploymentDoctrineRepositoryBoundary","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/rules/doctrine","name":"TestDoctrineAddInboxToPersonPR","tier":"GATED-FULL"}
+    ,
+    {"kind":"go","package":"internal/rules/doctrine","name":"TestDoctrineAddPreservesRulesAndBoundary","tier":"GATED-FULL"}
     ,
     {"kind":"go","package":"internal/rules/doctrine","name":"TestDoctrineAppReadBoundary","tier":"ESSENTIAL"}
     ,
@@ -10583,6 +10599,8 @@
     {"kind":"go","package":"internal/rulesimport","name":"TestHeadingsAlignIncludesEmptySection","tags":["delete-candidate"],"tier":"GATED-FULL"}
     ,
     {"kind":"go","package":"internal/rulesimport","name":"TestHeuristicIsNotPrecedence","tier":"GATED-FULL"}
+    ,
+    {"kind":"go","package":"internal/rulesimport","name":"TestImportApplyRefusesDisabledAuthoring","tier":"GATED-FULL"}
     ,
     {"kind":"go","package":"internal/rulesimport","name":"TestImportKeepsExplanations","tags":["delete-candidate"],"tier":"GATED-FULL"}
     ,

@@ -51,6 +51,9 @@ func PrepareWrite(ctx context.Context, tx pgx.Tx, p tenant.Principal) error {
 	if err = enterRules(ctx, tx, owner, agent); err != nil {
 		return err
 	}
+	if err = RequireDBAuthoring(ctx, tx); err != nil {
+		return err
+	}
 	return ensureKinds(ctx, tx, p)
 }
 
@@ -99,6 +102,9 @@ func RemoveLearningRule(ctx context.Context, tx pgx.Tx, p tenant.Principal, laye
 }
 
 func loadWritableSet(ctx context.Context, tx pgx.Tx, p tenant.Principal, layerID, setID, projectID string) (Set, error) {
+	if err := RequireDBAuthoring(ctx, tx); err != nil {
+		return Set{}, err
+	}
 	s, err := loadSet(ctx, tx, setID)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
