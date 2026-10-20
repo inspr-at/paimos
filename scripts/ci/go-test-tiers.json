@@ -3050,6 +3050,8 @@
     ,
     {"kind":"go","package":"internal/agentsecurity","name":"TestCancelledEnclaveOperationStopsBeforeNativeAccess","tier":"ESSENTIAL"}
     ,
+    {"kind":"go","package":"internal/agentsecurity","name":"TestEnclaveCreateErrorPreservesOSStatus","tier":"ESSENTIAL"}
+    ,
     {"kind":"go","package":"internal/agentsecurity","name":"TestEnclaveCreateRefusesAnExistingTag","tier":"GATED-FULL"}
     ,
     {"kind":"go","package":"internal/agentsecurity","name":"TestLocalSignReasonRejectsEmptyAndControlText","tier":"GATED-FULL"}
@@ -3205,6 +3207,8 @@
     {"kind":"go","package":"internal/agentsetup","name":"TestManagedPairingWaitsForPersonAndNeverControlsService","tier":"GATED-FULL"}
     ,
     {"kind":"go","package":"internal/agentsetup","name":"TestMigratedPairingFailsAtNamedFileWithoutVault","tier":"GATED-FULL"}
+    ,
+    {"kind":"go","package":"internal/agentsetup","name":"TestMissingEntitlementPairingKeepsCauseAndAeonApproval","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/agentsetup","name":"TestNpmDiscoveryPinsEveryLauncher","tier":"GATED-FULL"}
     ,
@@ -3429,6 +3433,8 @@
     {"kind":"go","package":"internal/agentsetup","name":"TestStoreRejectsLinksTraversalAndPublicState","tier":"GATED-FULL"}
     ,
     {"kind":"go","package":"internal/agentsetup","name":"TestSyncFencesAcceptsTombstoneAndChangedLiveLabels","tier":"GATED-FULL"}
+    ,
+    {"kind":"go","package":"internal/agentsetup","name":"TestTouchIDMissingEntitlementNeverOffersPairingUpgrade","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/agentsetup","name":"TestTouchIDStatusNamesPinAndExactPairingUpgrade","tier":"GATED-FULL"}
     ,

@@ -10,6 +10,7 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"os"
 	"path/filepath"
@@ -334,6 +335,51 @@ func (s *fixtureEnclave) Create(_ context.Context, id string) (string, error) {
 	return s.public, s.err
 }
 func (*fixtureEnclave) Sign(context.Context, string, []byte, string) (string, error) { return "", nil }
+
+// Risk: a build without the Keychain entitlement silently pairs without Touch ID,
+// then repeatedly advises re-pairing even though that cannot repair the build.
+func TestMissingEntitlementPairingKeepsCauseAndAeonApproval(t *testing.T) {
+	e, api, _, opts, _ := engineFixture(t)
+	signer := &fixtureEnclave{err: fmt.Errorf("create Secure Enclave key (OSStatus -34018): %w", agentsecurity.ErrMissingEntitlement)}
+	e.Enclave = signer
+	e.Store.vault = &memoryVault{values: map[string][]byte{}}
+	p, err := e.Begin(t.Context(), opts)
+	if err != nil || p.Stage != "awaiting_approval" || signer.id == "" || api.createCount != 1 || api.request.LocalAuthPublicKey != "" {
+		t.Fatalf("missing entitlement did not request Aeon approval: stage=%s, err=%v", p.Stage, err)
+	}
+	want := "Touch ID unavailable: this agentd build lacks the keychain entitlement (AEON-1504). Pairing again will not fix it; Aeon approval is used meanwhile."
+	if p.TouchIDConfirmation != want || p.TouchIDUpgradeCommand != "" {
+		t.Fatal("pairing hid the entitlement cause or advised an upgrade")
+	}
+	s, err := e.load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if s.LocalAuthUnavailableReason != "missing_entitlement" || s.LocalAuthKeyID != "" || s.Request.LocalAuthPublicKey != "" {
+		t.Fatal("persisted state lost the cause or claimed a local key")
+	}
+	if _, err := readRuntimeConfig(e.Store); !errors.Is(err, os.ErrNotExist) {
+		t.Fatal("missing entitlement bypassed person approval")
+	}
+	// Only an explicit approval permits provisioning; advance the fixture clock
+	// from the engine's own clock, beyond the pending poll, without sleeping.
+	api.approved = true
+	now := e.now().Add(time.Minute)
+	e.Now = func() time.Time { return now }
+	if p, err = e.Step(t.Context()); err != nil || p.Stage != "connected" {
+		t.Fatalf("Aeon-approved pairing did not complete: stage=%s, err=%v", p.Stage, err)
+	}
+	config, err := readRuntimeConfig(e.Store)
+	if err != nil || config.LocalAuthKeyID != "" {
+		t.Fatalf("approved runtime unavailable or claims a local key: %v", err)
+	}
+	if p, err = e.Status(t.Context()); err != nil || p.TouchIDConfirmation != want || p.TouchIDUpgradeCommand != "" {
+		t.Fatalf("status lost the saved cause or advised re-pairing: %v", err)
+	}
+	if p, err = e.Begin(t.Context(), opts); err != nil || api.createCount != 1 || p.TouchIDConfirmation != want || p.TouchIDUpgradeCommand != "" {
+		t.Fatalf("resuming pairing lost the diagnostic or created another request: %v", err)
+	}
+}
 
 func TestEnclaveCreationFailureCannotDowngradePairing(t *testing.T) {
 	for _, tc := range []struct {
