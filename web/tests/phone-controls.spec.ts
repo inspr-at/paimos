@@ -196,8 +196,9 @@ for (const width of [390, 768, 1024, 1440]) {
 }
 
 // AEON-1460 / Tick D11 replaces the approved metadata cards: desktop choices
-// still persist, but the phone always scans the same essential facts.
-test('phone rows keep essentials while saved desktop columns persist', async ({ page }) => {
+// still persist, but the phone always scans the same essential facts. Keep
+// the historical case title: the immutable CI replay corpus pins its identity.
+test('phone cards render saved column visibility and order at 390px', async ({ page }) => {
   await page.setViewportSize({ width: 390, height: 900 })
   const data = germanWorld('light')
   data.nodes.find(n => n.id === 'n-1')!.fields.cost_unit = 'Mandantenübergreifende Berechtigungsverwaltung'

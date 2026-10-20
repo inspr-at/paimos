@@ -1476,7 +1476,7 @@
     {
       "kind": "browser",
       "file": "tests/phone-controls.spec.ts",
-      "name": "phone rows keep essentials while saved desktop columns persist"
+      "name": "phone cards render saved column visibility and order at 390px"
     },
     {
       "kind": "browser",
