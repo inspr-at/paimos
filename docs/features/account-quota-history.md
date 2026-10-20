@@ -59,6 +59,16 @@ An executable update, path change, helper change or new version requires
 fresh qualification and a reviewed pin entry. The coordinator owns review,
 merge and release; OPS evidence alone does not alter a running daemon.
 
+AEON-1514 validation used synthetic executables only. The guarded remote runs
+passed `./internal/agentd/...` and `./cmd/aeon-agentd/...` on `7cfe473fa`;
+the focused pin/native-launch/startup-hook regressions passed on `960f1af93`
+after isolating the empty-table fixtures. The native launch, refusal and empty
+table regressions are ESSENTIAL. The existing S2 ownership glob covers both
+new Go files. Canonical manifest checks passed. The remote static runner twice
+exited 3 because the night protocol paused static checks; the required
+`ci-static --merge-main` remains for hosted PR CI. No production pin, vendor
+CLI call, origin push, deployment or model review was performed.
+
 ## Quota-series API
 
 `GET /api/agent-accounts/{accountId}/quota-series` requires person
