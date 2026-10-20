@@ -288,8 +288,13 @@ func TestWorkflowPolicyMutations(t *testing.T) {
 	add("completion-wrong-dependency", "release.yml", "opaque reusable workflow", func(w map[string]any) {
 		mapping(mapping(w["jobs"])["completion"])["needs"] = []any{"image-platform"}
 	})
-	add("completion-secrets-inherited", "release.yml", "opaque reusable workflow", func(w map[string]any) {
-		mapping(mapping(w["jobs"])["completion"])["secrets"] = "inherit"
+	// AEON-1584: the completion call must inherit secrets (release-signing's environment secrets reach the
+	// reusable workflow only that way); dropping it or replacing it with an explicit map stays rejected.
+	add("completion-secrets-dropped", "release.yml", "opaque reusable workflow", func(w map[string]any) {
+		delete(mapping(mapping(w["jobs"])["completion"]), "secrets")
+	})
+	add("completion-secrets-explicit-map", "release.yml", "opaque reusable workflow", func(w map[string]any) {
+		mapping(mapping(w["jobs"])["completion"])["secrets"] = map[string]any{"APPLE_TEAM_ID": "${{ secrets.APPLE_TEAM_ID }}"}
 	})
 	add("completion-opaque-nested-workflow", "release-completion.yml", "opaque reusable workflow", func(w map[string]any) {
 		mapping(w["jobs"])["nested"] = map[string]any{"uses": "./.github/workflows/release-completion.yml"}

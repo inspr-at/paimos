@@ -377,7 +377,10 @@ func checkRunnerJobs(name string, workflow map[string]any) []string {
 					"tag": "v${{ needs.image.outputs.version }}", "digest": "${{ needs.image.outputs.digest }}",
 					"index-pushed-at": "${{ needs.image.outputs.pushed_at }}",
 					"runtime-amd64":   "${{ needs.image.outputs.runtime_amd64 }}", "runtime-arm64": "${{ needs.image.outputs.runtime_arm64 }}",
-				}) && job["secrets"] == nil {
+				}) && job["secrets"] == "inherit" {
+				// secrets: inherit is required here and admitted only for this one reviewed call: the
+				// agentd-darwin job reads release-signing's environment secrets, which reach a reusable
+				// workflow only when the caller inherits (r137, AEON-1584; probe run 39487791686).
 				continue
 			}
 			// Only the hosted-only router has the other reviewed reuse boundary. Other
