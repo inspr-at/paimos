@@ -186,7 +186,12 @@ test('the row under an open editor keeps its revision: saving meets the change a
 
     await b.goto('/p/PHAROS/PHAROS-12')
     await expect(panel(b).getByRole('heading', { name: 'Add an Oracle Cloud connector' })).toBeVisible()
-    await b.keyboard.press('p')
+    // The heading can render before the project's permissions arrive. Bind
+    // the shortcut to B's enabled Priority control, outside any text field;
+    // an early one-shot key is ignored while that control is still disabled.
+    const priority = panel(b).getByRole('button', { name: /^Priority:/ })
+    await expect(priority).toBeEnabled()
+    await priority.press('p')
     await b.getByRole('menu', { name: 'Priority of PHAROS-12' }).getByRole('menuitemradio', { name: 'High' }).click()
     await expect(panel(b).getByRole('button', { name: /Priority: High/ })).toBeVisible()
 
@@ -197,6 +202,7 @@ test('the row under an open editor keeps its revision: saving meets the change a
     await wsA.locator('#edit-title').focus()
     await a.keyboard.press(`${mod}+Enter`)
     await expect(a.getByText('PHAROS-12 was changed elsewhere. The newer version is shown; your draft is kept.')).toBeVisible()
+    await expect(wsA.locator('#edit-title')).toHaveValue('Oracle connector, my wording')
     expect(data.nodes.find(n => n.id === 'n-2')!.title).toBe('Add an Oracle Cloud connector')
     expect(data.nodes.find(n => n.id === 'n-2')!.fields.priority).toBe('high')
     expect(errorsA).toEqual([])
