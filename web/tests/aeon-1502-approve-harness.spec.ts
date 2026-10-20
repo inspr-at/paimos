@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // AEON-1502 (Tick spec v1 §6): approving a harness or a first pairing is one
 // sentence plus Add or Deny; everything else sits behind Details.
-import { expect, test, type Locator, type Page, type TestInfo } from '@playwright/test'
+import { expect, test, type Browser, type Locator, type Page, type TestInfo } from '@playwright/test'
 import { mkdirSync, readdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { controlStability } from './control-stability'
@@ -99,6 +99,13 @@ async function shot(page: Page, testInfo: TestInfo, name: string) {
   await page.screenshot({ path: testInfo.outputPath(`aeon-1502-${name}.png`) })
 }
 
+// English on the test's page, German in a fresh context of its own: one case covers both languages.
+async function bothLanguages(browser: Browser, page: Page, run: (page: Page, language: Language) => Promise<void>) {
+  await run(page, 'en')
+  const context = await browser.newContext({ baseURL: test.info().project.use.baseURL, reducedMotion: 'reduce' })
+  try { await run(await context.newPage(), 'de') } finally { await context.close() }
+}
+
 /** Every part of the ask (title through the Details summary) lies inside the viewport, unscrolled. */
 async function fitsWithoutScrolling(page: Page, review: Locator) {
   return review.evaluate(card => {
@@ -179,8 +186,8 @@ for (const [language, theme] of [['en', 'light'], ['de', 'light'], ['de', 'dark'
   })
 }
 
-for (const language of ['en', 'de'] as const) {
-  test(`AEON-1502 several harnesses 1280x800 ${language}: one row per harness under the title`, async ({ page }, testInfo) => {
+test('AEON-1502 several harnesses 1280x800 en and de: one row per harness under the title', async ({ browser, page }, testInfo) => {
+  await bothLanguages(browser, page, async (page, language) => {
     const copy = COPY[language]
     const { review } = await open(page, language, addTwo)
     await expect(review.locator('[data-review-title]')).toHaveText(copy.addTwo)
@@ -192,8 +199,10 @@ for (const language of ['en', 'de'] as const) {
     await shot(page, testInfo, `add-two-${language}`)
     record(`several harnesses ${language}`, { viewport: '1280x800', fit })
   })
+})
 
-  test(`AEON-1502 first pairing 1280x800 ${language}: Pair or Deny with the harness checklist, today's payload`, async ({ page }, testInfo) => {
+test("AEON-1502 first pairing 1280x800 en and de: Pair or Deny with the harness checklist, today's payload", async ({ browser, page }, testInfo) => {
+  await bothLanguages(browser, page, async (page, language) => {
     const copy = COPY[language]
     const { calls, review } = await open(page, language)
     await expect(review.locator('[data-review-title]')).toHaveText(copy.pair)
@@ -217,8 +226,10 @@ for (const language of ['en', 'de'] as const) {
     // Today's default after connecting: agents may use both accounts.
     await expect.poll(() => calls.filter(call => call.path.endsWith('/capacity/approve')).length).toBe(2)
   })
+})
 
-  test(`AEON-1502 phone 390 ${language}: Add and Deny full width, 44 px, no overflow`, async ({ page }, testInfo) => {
+test('AEON-1502 phone 390 en and de: Add and Deny full width, 44 px, no overflow', async ({ browser, page }, testInfo) => {
+  await bothLanguages(browser, page, async (page, language) => {
     const copy = COPY[language]
     const { review } = await open(page, language, addOne, { width: 390, height: 844 })
     const add = review.getByRole('button', { name: copy.add, exact: true }), deny = review.getByRole('button', { name: copy.deny, exact: true })
@@ -238,8 +249,10 @@ for (const language of ['en', 'de'] as const) {
     expect(await overflowing(review)).toEqual([])
     record(`phone 390 ${language}`, { addAndDenyFullWidth: true, minHeight: 44, horizontalOverflow: 0 })
   })
+})
 
-  test(`AEON-1502 expired and denied 1280 ${language}: one sentence and today's command`, async ({ page }, testInfo) => {
+test("AEON-1502 expired and denied 1280 en and de: one sentence and today's command", async ({ browser, page }, testInfo) => {
+  await bothLanguages(browser, page, async (page, language) => {
     const copy = COPY[language]
     const expired = await open(page, language, { ...addOne, state: 'expired' })
     await expect(expired.review.locator('[data-review-title]')).toHaveText(copy.expired)
@@ -261,7 +274,7 @@ for (const language of ['en', 'de'] as const) {
     await shot(page, testInfo, `denied-${language}`)
     record(`expired and denied ${language}`, { expired: copy.expired, denied: copy.denied })
   })
-}
+})
 
 test('AEON-1502 a harness that is not signed in shows disabled and is never checked', async ({ page }) => {
   const { calls, review } = await open(page, 'en', {

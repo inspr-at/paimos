@@ -310,6 +310,22 @@
     ,
     "browser:tests/aeon-1470-list-titles.spec.ts:AEON-1470 S6: phone rows at 390 stay as they were (light, dark)"
     ,
+    "browser:tests/aeon-1502-approve-harness.spec.ts:AEON-1502 a harness that is not signed in shows disabled and is never checked"
+    ,
+    "browser:tests/aeon-1502-approve-harness.spec.ts:AEON-1502 add one harness 1280x800 de dark: one sentence, Add or Deny, today's payload"
+    ,
+    "browser:tests/aeon-1502-approve-harness.spec.ts:AEON-1502 add one harness 1280x800 de light: one sentence, Add or Deny, today's payload"
+    ,
+    "browser:tests/aeon-1502-approve-harness.spec.ts:AEON-1502 add one harness 1280x800 en light: one sentence, Add or Deny, today's payload"
+    ,
+    "browser:tests/aeon-1502-approve-harness.spec.ts:AEON-1502 expired and denied 1280 en and de: one sentence and today's command"
+    ,
+    "browser:tests/aeon-1502-approve-harness.spec.ts:AEON-1502 first pairing 1280x800 en and de: Pair or Deny with the harness checklist, today's payload"
+    ,
+    "browser:tests/aeon-1502-approve-harness.spec.ts:AEON-1502 phone 390 en and de: Add and Deny full width, 44 px, no overflow"
+    ,
+    "browser:tests/aeon-1502-approve-harness.spec.ts:AEON-1502 several harnesses 1280x800 en and de: one row per harness under the title"
+    ,
     "browser:tests/aeon-908-polish.spec.ts:tree, hours spacing and light switch thumbs 1024 dark"
     ,
     "browser:tests/aeon-908-polish.spec.ts:tree, hours spacing and light switch thumbs 1024 light"
@@ -6364,29 +6380,21 @@
     ,
     {"kind":"browser","file":"tests/aeon-1473-desk-tab.spec.ts","name":"AEON-1473: reduced motion changes only the number, visible or in the background","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
-    {"kind":"browser","file":"tests/aeon-1502-approve-harness.spec.ts","name":"AEON-1502 a harness that is not signed in shows disabled and is never checked","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    {"kind":"browser","file":"tests/aeon-1502-approve-harness.spec.ts","name":"AEON-1502 a harness that is not signed in shows disabled and is never checked","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
-    {"kind":"browser","file":"tests/aeon-1502-approve-harness.spec.ts","name":"AEON-1502 add one harness 1280x800 de dark: one sentence, Add or Deny, today's payload","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    {"kind":"browser","file":"tests/aeon-1502-approve-harness.spec.ts","name":"AEON-1502 add one harness 1280x800 de dark: one sentence, Add or Deny, today's payload","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
-    {"kind":"browser","file":"tests/aeon-1502-approve-harness.spec.ts","name":"AEON-1502 add one harness 1280x800 de light: one sentence, Add or Deny, today's payload","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    {"kind":"browser","file":"tests/aeon-1502-approve-harness.spec.ts","name":"AEON-1502 add one harness 1280x800 de light: one sentence, Add or Deny, today's payload","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
-    {"kind":"browser","file":"tests/aeon-1502-approve-harness.spec.ts","name":"AEON-1502 add one harness 1280x800 en light: one sentence, Add or Deny, today's payload","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    {"kind":"browser","file":"tests/aeon-1502-approve-harness.spec.ts","name":"AEON-1502 add one harness 1280x800 en light: one sentence, Add or Deny, today's payload","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
-    {"kind":"browser","file":"tests/aeon-1502-approve-harness.spec.ts","name":"AEON-1502 expired and denied 1280 de: one sentence and today's command","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    {"kind":"browser","file":"tests/aeon-1502-approve-harness.spec.ts","name":"AEON-1502 expired and denied 1280 en and de: one sentence and today's command","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
-    {"kind":"browser","file":"tests/aeon-1502-approve-harness.spec.ts","name":"AEON-1502 expired and denied 1280 en: one sentence and today's command","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    {"kind":"browser","file":"tests/aeon-1502-approve-harness.spec.ts","name":"AEON-1502 first pairing 1280x800 en and de: Pair or Deny with the harness checklist, today's payload","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
-    {"kind":"browser","file":"tests/aeon-1502-approve-harness.spec.ts","name":"AEON-1502 first pairing 1280x800 de: Pair or Deny with the harness checklist, today's payload","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    {"kind":"browser","file":"tests/aeon-1502-approve-harness.spec.ts","name":"AEON-1502 phone 390 en and de: Add and Deny full width, 44 px, no overflow","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
-    {"kind":"browser","file":"tests/aeon-1502-approve-harness.spec.ts","name":"AEON-1502 first pairing 1280x800 en: Pair or Deny with the harness checklist, today's payload","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
-    ,
-    {"kind":"browser","file":"tests/aeon-1502-approve-harness.spec.ts","name":"AEON-1502 phone 390 de: Add and Deny full width, 44 px, no overflow","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
-    ,
-    {"kind":"browser","file":"tests/aeon-1502-approve-harness.spec.ts","name":"AEON-1502 phone 390 en: Add and Deny full width, 44 px, no overflow","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
-    ,
-    {"kind":"browser","file":"tests/aeon-1502-approve-harness.spec.ts","name":"AEON-1502 several harnesses 1280x800 de: one row per harness under the title","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
-    ,
-    {"kind":"browser","file":"tests/aeon-1502-approve-harness.spec.ts","name":"AEON-1502 several harnesses 1280x800 en: one row per harness under the title","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    {"kind":"browser","file":"tests/aeon-1502-approve-harness.spec.ts","name":"AEON-1502 several harnesses 1280x800 en and de: one row per harness under the title","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
     {"kind":"browser","file":"tests/aeon-1532-editor-steady.spec.ts","name":"AEON-1532: a queued narrow table resize preserves the columns after the table grows","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,

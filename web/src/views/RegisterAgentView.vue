@@ -856,10 +856,11 @@ function enrollmentDetail(enrollment: PairingView['enrollments'][number]) {
 /* Details grows downward only: nothing above it moves when it opens. */
 .more { margin-top: 14px; padding-top: 12px; border-top: 1px solid var(--line); }
 .more > summary { min-height: 32px; cursor: pointer; color: var(--ink-2); font-size: 13.5px; font-weight: 600; }
-.rows { display: grid; grid-template-columns: fit-content(15rem) minmax(0, 1fr); column-gap: 20px; margin: 8px 0 0; }
+/* No column gap: each row's hairline runs unbroken across label and value. */
+.rows { display: grid; grid-template-columns: fit-content(15rem) minmax(0, 1fr); margin: 8px 0 0; }
 .rows :deep(.row) { display: contents; }
 .rows :deep(dt), .rows :deep(dd) { margin: 0; padding: 9px 0; border-top: 1px solid var(--line); font-size: 13.5px; line-height: 1.45; }
-.rows :deep(dt) { color: var(--ink-3); }
+.rows :deep(dt) { padding-right: 20px; color: var(--ink-3); }
 .rows :deep(dd) { min-width: 0; color: var(--ink); overflow-wrap: anywhere; }
 .rows .path { font: 12.5px/1.6 var(--mono); }
 .rows .field { height: 36px; max-width: 100%; }
@@ -903,6 +904,7 @@ function enrollmentDetail(enrollment: PairingView['enrollments'][number]) {
   .ask-head { flex-direction: column; gap: 8px; }
   .ask-head .btn { margin: 0 0 0 -11px; }
   .rows { grid-template-columns: minmax(0, 1fr); }
+  .rows :deep(dt) { padding-right: 0; }
   .rows :deep(dd) { padding-top: 0; border-top: 0; }
   .rows .field { width: 100%; }
   .review-head { flex-direction: column; gap: 8px; }
