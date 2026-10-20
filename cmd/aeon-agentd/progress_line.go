@@ -19,11 +19,19 @@ import (
 const progressSpinnerFrames = "⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏"
 const progressClearToEnd = "\r\x1b[K"
 
+// setupFact is one status line. An empty key is one-time text, deduplicated
+// for the whole invocation. A key is one mutable account or harness line,
+// compared only with the latest text for that account or harness.
+type setupFact struct {
+	key  string
+	line string
+}
+
 type setupProgressParts struct {
 	code  []string
 	hooks []string
 	stage string
-	facts []string
+	facts []setupFact
 }
 
 // setupProgressView is one command invocation. Tests inject the terminal
@@ -37,7 +45,8 @@ type setupProgressView struct {
 	stageLine string
 	codes     map[string]struct{}
 	hooks     map[string]struct{}
-	facts     map[string]struct{}
+	once      map[string]struct{}
+	latest    map[string]string
 }
 
 func newSetupProgressView(tty bool, now func() time.Time) *setupProgressView {
@@ -45,11 +54,12 @@ func newSetupProgressView(tty bool, now func() time.Time) *setupProgressView {
 		now = time.Now
 	}
 	return &setupProgressView{
-		tty:   tty,
-		now:   now,
-		codes: map[string]struct{}{},
-		hooks: map[string]struct{}{},
-		facts: map[string]struct{}{},
+		tty:    tty,
+		now:    now,
+		codes:  map[string]struct{}{},
+		hooks:  map[string]struct{}{},
+		once:   map[string]struct{}{},
+		latest: map[string]string{},
 	}
 }
 
@@ -106,13 +116,13 @@ func (v *setupProgressView) note(text setupProgressParts) {
 	remember(v.codes, text.code)
 	remember(v.hooks, text.hooks)
 	v.stageLine = text.stage
-	remember(v.facts, text.facts)
+	v.rememberFacts(text.facts)
 }
 
 func (v *setupProgressView) printDelta(out io.Writer, stage string, text setupProgressParts) error {
 	freshCode := unseen(v.codes, text.code)
 	freshHooks := unseen(v.hooks, text.hooks)
-	freshFacts := unseen(v.facts, text.facts)
+	freshFacts := v.freshFacts(text.facts)
 	stageNew := text.stage != v.stageLine
 	if len(freshCode)+len(freshHooks)+len(freshFacts) == 0 && !stageNew {
 		if v.tty && setupWaitLabel(stage) != "" {
@@ -165,6 +175,40 @@ func (v *setupProgressView) drawSpinner(out io.Writer, stage string) error {
 	return nil
 }
 
+func (v *setupProgressView) rememberFacts(facts []setupFact) {
+	for _, fact := range facts {
+		if fact.key == "" {
+			v.once[fact.line] = struct{}{}
+			continue
+		}
+		v.latest[fact.key] = fact.line
+	}
+}
+
+// freshFacts prints a mutable line when it differs from the latest line for
+// that account or harness. Remembering every earlier string would drop
+// ready → blocked → ready while another account keeps the poll alive.
+// One-time text stays suppressed for the rest of the invocation.
+func (v *setupProgressView) freshFacts(facts []setupFact) []string {
+	var fresh []string
+	for _, fact := range facts {
+		if fact.key == "" {
+			if _, seen := v.once[fact.line]; seen {
+				continue
+			}
+			v.once[fact.line] = struct{}{}
+			fresh = append(fresh, fact.line)
+			continue
+		}
+		if previous, seen := v.latest[fact.key]; seen && previous == fact.line {
+			continue
+		}
+		v.latest[fact.key] = fact.line
+		fresh = append(fresh, fact.line)
+	}
+	return fresh
+}
+
 func remember(seen map[string]struct{}, lines []string) {
 	for _, line := range lines {
 		seen[line] = struct{}{}
@@ -203,7 +247,15 @@ func writeSetupProgressText(out io.Writer, text setupProgressParts) error {
 	if err := writeLine(out, text.stage); err != nil {
 		return err
 	}
-	return writeLines(out, text.facts)
+	return writeLines(out, setupFactLines(text.facts))
+}
+
+func setupFactLines(facts []setupFact) []string {
+	lines := make([]string, len(facts))
+	for i, fact := range facts {
+		lines[i] = fact.line
+	}
+	return lines
 }
 
 func writeLines(out io.Writer, lines []string) error {
@@ -238,16 +290,16 @@ func setupProgressPartsOf(p agentsetup.Progress) setupProgressParts {
 	}
 	text.stage = p.Stage + ": " + p.Action
 	if p.CheckoutNotice != "" {
-		text.facts = append(text.facts, p.CheckoutNotice)
+		text.facts = append(text.facts, setupFact{line: p.CheckoutNotice})
 	}
 	if p.TouchIDConfirmation != "" {
 		confirmation := "Touch ID confirmation: " + p.TouchIDConfirmation
 		if p.TouchIDUpgradeCommand != "" {
 			confirmation += ": " + p.TouchIDUpgradeCommand
 		}
-		text.facts = append(text.facts, confirmation)
+		text.facts = append(text.facts, setupFact{line: confirmation})
 		if p.TouchIDUpgradeCommand != "" {
-			text.facts = append(text.facts, "Use a new, empty state folder and approve in Aeon. Keep the old pairing until the new one is verified. Point the service at the new state root through its existing owner.")
+			text.facts = append(text.facts, setupFact{line: "Use a new, empty state folder and approve in Aeon. Keep the old pairing until the new one is verified. Point the service at the new state root through its existing owner."})
 		}
 	}
 	// Include healthy harnesses and each approved account, so a successful
@@ -269,7 +321,7 @@ func setupProgressPartsOf(p agentsetup.Progress) setupProgressParts {
 		if detail.Fix.Command != "" {
 			line += " fix " + detail.Fix.Command
 		}
-		text.facts = append(text.facts, line)
+		text.facts = append(text.facts, setupFact{key: harnessFactKey(harness), line: line})
 		// A rotated profile may appear under several enrollments. Show its
 		// active login once, approved when it matches any connected enrollment.
 		logins := map[string]bool{}
@@ -290,7 +342,7 @@ func setupProgressPartsOf(p agentsetup.Progress) setupProgressParts {
 			if logins[identity] {
 				approval = "approved on this computer"
 			}
-			text.facts = append(text.facts, "harness "+harness+" active login "+identity+": "+approval)
+			text.facts = append(text.facts, setupFact{key: loginFactKey(harness, identity), line: "harness " + harness + " active login " + identity + ": " + approval})
 		}
 	}
 	accounts := append([]agentsetup.Enrollment(nil), p.Accounts...)
@@ -322,10 +374,24 @@ func setupProgressPartsOf(p agentsetup.Progress) setupProgressParts {
 				line += "; local cleanup " + account.Cleanup
 			}
 		}
-		text.facts = append(text.facts, line)
+		text.facts = append(text.facts, setupFact{key: accountFactKey(account.AccountID, account.Harness), line: line})
 	}
 	for _, blocked := range p.BlockedAccounts {
-		text.facts = append(text.facts, fmt.Sprintf("blocked account %s harness %s reason %s fix %s", blocked.AccountID, blocked.Harness, blocked.Reason, blocked.Fix.Command))
+		text.facts = append(text.facts, setupFact{key: blockedFactKey(blocked.AccountID, blocked.Harness), line: fmt.Sprintf("blocked account %s harness %s reason %s fix %s", blocked.AccountID, blocked.Harness, blocked.Reason, blocked.Fix.Command)})
 	}
 	return text
+}
+
+func harnessFactKey(harness string) string { return "harness\x00" + harness }
+
+func loginFactKey(harness, identity string) string {
+	return "login\x00" + harness + "\x00" + identity
+}
+
+func accountFactKey(id, harness string) string {
+	return "account\x00" + id + "\x00" + harness
+}
+
+func blockedFactKey(id, harness string) string {
+	return "blocked\x00" + id + "\x00" + harness
 }

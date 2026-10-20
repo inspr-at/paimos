@@ -252,4 +252,107 @@ func TestCalmPairOutputKeepsOneCodeBlockAndOneStatusLine(t *testing.T) {
 			t.Fatalf("changed account missing:\n%s", out.String())
 		}
 	})
+
+	// Risk: an invocation-wide fact set hides a return to earlier text.
+	// ready → blocked → ready must report the recovery while another account
+	// keeps the poll alive. Pairing text that comes back stays printed once.
+	t.Run("returning account", func(t *testing.T) {
+		const code = "123-456-789"
+		const uri = "https://pairing.example.test/agents/register-agent"
+		const notice = "checkout held by another pairing"
+		const upgrade = "aeon-agentd pair --url 'https://pairing.example.test' --state-root '/tmp/pair-touch-id' --workspace '/tmp/workspace'"
+		const instruction = "Use a new, empty state folder and approve in Aeon. Keep the old pairing until the new one is verified. Point the service at the new state root through its existing owner."
+		readyDetail := agentsetup.HarnessDetail{State: "ready"}
+		blockedDetail := agentsetup.HarnessDetail{State: "blocked", Reason: "pin_drifted", Fix: agentsetup.HarnessFix{Kind: "repin", Command: "aeon-agentd repin --harness claude"}}
+		snapshot := func(stage, action string, detail agentsetup.HarnessDetail, command, checkout string) agentsetup.Progress {
+			return agentsetup.Progress{
+				Stage: stage, Action: action, UserCode: code, VerificationURI: uri,
+				HookCapabilities:      []hookcap.Capability{{Harness: "claude", Blocker: "feature_disabled"}},
+				TouchIDConfirmation:   "needs pairing upgrade",
+				TouchIDUpgradeCommand: command,
+				CheckoutNotice:        checkout,
+				Accounts: []agentsetup.Enrollment{
+					{AccountID: "acct-a", Harness: "claude", State: "connected", Label: "a@example.test"},
+					{AccountID: "acct-b", Harness: "codex", State: "connected", Label: "b@example.test"},
+				},
+				AccountStatuses: map[string]agentsetup.HarnessDetail{"acct-a": detail, "acct-b": readyDetail},
+				HarnessDetails:  map[string]agentsetup.HarnessDetail{"claude": detail, "codex": readyDetail},
+				AccountLogins: map[string]agentsetup.AccountLogin{
+					"acct-a": {ActiveIdentity: "a@example.test", Approved: true},
+					"acct-b": {ActiveIdentity: "b@example.test", Approved: true},
+				},
+			}
+		}
+		initial := snapshot("provisioning", "Daemon connectivity is unconfirmed.", readyDetail, upgrade, notice)
+		blocked := snapshot("provisioning", "Daemon connectivity is unconfirmed.", blockedDetail, "", "")
+		recovered := snapshot("provisioning", "Daemon connectivity is unconfirmed.", readyDetail, upgrade, notice)
+		connected := snapshot("connected", "This computer is connected.", readyDetail, upgrade, notice)
+		steps := []agentsetup.Progress{blocked, blocked, recovered, recovered, connected}
+		readyAccount := "account acct-a harness claude ready login a@example.test"
+		blockedAccount := "account acct-a harness claude blocked login a@example.test reason pin_drifted fix aeon-agentd repin --harness claude"
+		readyHarness := "harness claude ready"
+		blockedHarness := "harness claude blocked reason pin_drifted fix aeon-agentd repin --harness claude"
+		for _, tty := range []bool{false, true} {
+			name := "plain"
+			if tty {
+				name = "tty"
+			}
+			t.Run(name, func(t *testing.T) {
+				text := runCalmPoll(t, tty, false, "setup", initial, steps, fixedProgressClock(start))
+				if !tty && (strings.Contains(text, "\r") || strings.Contains(text, "\x1b") || strings.Contains(text, "Waiting for")) {
+					t.Fatalf("non-TTY drew a spinner:\n%s", text)
+				}
+				if tty && !strings.Contains(text, "\r") {
+					t.Fatal("TTY did not rewrite the waiting line while the other account kept polling")
+				}
+				readyAt := calmRowPositions(text, readyAccount)
+				blockedAt := calmRowPositions(text, blockedAccount)
+				if len(readyAt) != 2 || len(blockedAt) != 1 || !(readyAt[0] < blockedAt[0] && blockedAt[0] < readyAt[1]) {
+					t.Fatalf("account recovery positions ready=%v blocked=%v\n%s", readyAt, blockedAt, text)
+				}
+				harnessReadyAt := calmRowPositions(text, readyHarness)
+				harnessBlockedAt := calmRowPositions(text, blockedHarness)
+				if len(harnessReadyAt) != 2 || len(harnessBlockedAt) != 1 || !(harnessReadyAt[0] < harnessBlockedAt[0] && harnessBlockedAt[0] < harnessReadyAt[1]) {
+					t.Fatalf("harness recovery positions ready=%v blocked=%v\n%s", harnessReadyAt, harnessBlockedAt, text)
+				}
+				once := []string{
+					"Pairing code: " + code,
+					"Approve at: " + uri,
+					"claude user hook: watch-only: feature_disabled",
+					"Touch ID confirmation: needs pairing upgrade: " + upgrade,
+					instruction,
+					notice,
+					"harness claude active login a@example.test: approved on this computer",
+					"harness codex ready",
+					"harness codex active login b@example.test: approved on this computer",
+					"account acct-b harness codex ready login b@example.test",
+					"provisioning: Daemon connectivity is unconfirmed.",
+					"connected: This computer is connected.",
+					"Touch ID confirmation: needs pairing upgrade",
+				}
+				for _, line := range once {
+					if at := calmRowPositions(text, line); len(at) != 1 {
+						t.Errorf("line %q count = %d", line, len(at))
+					}
+				}
+				other := calmRowPositions(text, "account acct-b harness codex ready login b@example.test")
+				connectedAt := calmRowPositions(text, "connected: This computer is connected.")
+				if len(other) != 1 || len(connectedAt) != 1 || other[0] > blockedAt[0] || connectedAt[0] < readyAt[1] {
+					t.Fatal("recovery was not kept while the other account continued polling")
+				}
+			})
+		}
+	})
+}
+
+func calmRowPositions(text, line string) []int {
+	cleaned := strings.ReplaceAll(text, "\x1b[K", "")
+	cleaned = strings.ReplaceAll(cleaned, "\r", "\n")
+	var at []int
+	for i, row := range strings.Split(cleaned, "\n") {
+		if row == line {
+			at = append(at, i)
+		}
+	}
+	return at
 }
