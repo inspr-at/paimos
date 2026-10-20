@@ -126,8 +126,11 @@ for (const width of [1600, 390] as const) {
         const eta = details.locator('.ws-eta')
         await expect(eta.locator('.pct')).toHaveText('45%')
         await expect(eta.locator('.eta-cell .when')).toBeVisible()
+        // The phone ticket sheet covers the list. Close it as a person would before opening the next row.
+        await details.getByRole('button', { name: 'Close ticket details', exact: true }).click()
+        await expect(details).toHaveCount(0)
         await row(page, 'PHAROS-13').locator('.title-link').click()
-        await expect(page.getByRole('complementary', { name: 'Ticket details' }).locator('.ws-eta .eta-cell')).toHaveClass(/stale/)
+        await expect(details.locator('.ws-eta .eta-cell')).toHaveClass(/stale/)
       } else {
         await expect(row(page, 'PHAROS-11').locator('.progress-read .pct')).toHaveText('45%')
         await expect(row(page, 'PHAROS-11').locator('.eta-cell .when')).toBeVisible()

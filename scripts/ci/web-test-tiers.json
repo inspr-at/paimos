@@ -6312,7 +6312,7 @@
     ,
     {"kind":"browser","file":"tests/aeon-1460-phone-ticket-list.spec.ts","name":"AEON-1460 compact rows retain the keyboard status action without a row status button","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
-    {"kind":"browser","file":"tests/aeon-1460-phone-ticket-list.spec.ts","name":"AEON-1460 compact ticket list keeps controls still and all actions reachable; desktop stays unchanged","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    {"kind":"browser","file":"tests/aeon-1460-phone-ticket-list.spec.ts","name":"AEON-1460 compact ticket list keeps controls still and all actions reachable; desktop stays unchanged","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
     {"kind":"browser","file":"tests/aeon-1460-phone-ticket-list.spec.ts","name":"AEON-1460 compact titles retain native links and keyboard full-text disclosure","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,

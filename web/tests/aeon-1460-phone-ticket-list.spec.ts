@@ -315,13 +315,16 @@ test('AEON-1460 compact titles retain native links and keyboard full-text disclo
       await page.keyboard.press('Escape')
     } },
     { name: 'a modified link click opens exactly one native tab', run: async () => {
-      const sourceURL = page.url()
+      const sourceURL = page.url(), link = page.locator('#row-n-1 .title-link')
+      // The row links to the ticket's canonical project route (PRJ-17 for Pharos).
+      const target = new URL((await link.getAttribute('href'))!, sourceURL).pathname
+      expect(target).toBe('/p/PRJ-17/PHAROS-11')
       const [tab] = await Promise.all([
         page.context().waitForEvent('page'),
-        page.locator('#row-n-1 .title-link').click({ modifiers: ['ControlOrMeta'] }),
+        link.click({ modifiers: ['ControlOrMeta'] }),
       ])
       await tab.waitForLoadState('domcontentloaded')
-      expect(new URL(tab.url()).pathname).toBe('/p/PHAROS/PHAROS-11')
+      expect(new URL(tab.url()).pathname).toBe(target)
       expect(page.context().pages()).toHaveLength(2)
       await tab.close()
       await expect(page).toHaveURL(sourceURL)

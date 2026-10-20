@@ -46,7 +46,8 @@ for (const width of [320, 360, 390, 1440]) {
           const fit = await row.evaluate(tr => {
             const right = (selector: string) => tr.querySelector(selector)?.getBoundingClientRect().right ?? 0
             const icon = tr.querySelector<HTMLElement>('.phone-state [role="img"]')
-            const glyph = icon?.querySelector('svg')?.getBoundingClientRect()
+            // In progress draws an HTML shape; every other status is an SVG. Both carry .status-icon.
+            const glyph = icon?.querySelector('.status-icon')?.getBoundingClientRect()
             const rowBox = tr.getBoundingClientRect()
             const date = tr.querySelector<HTMLElement>('.phone-meta time')
             return {
@@ -138,7 +139,7 @@ for (const width of [320, 360, 390, 1440]) {
         const keyFit = await wholeKey(row.locator('.phone-meta .key'), 'tr')
         expect(keyFit, `squeezed ${keyFit.why}`).toMatchObject({ lines: 1, clipped: false, inside: true })
         const fit = await row.evaluate(tr => {
-          const icon = tr.querySelector<HTMLElement>('.phone-state [role="img"] svg')!.getBoundingClientRect()
+          const icon = tr.querySelector<HTMLElement>('.phone-state [role="img"] .status-icon')!.getBoundingClientRect()
           const box = tr.querySelector<HTMLElement>('.phone-state')!.getBoundingClientRect()
           const date = tr.querySelector<HTMLElement>('.phone-meta time')!
           return {
