@@ -585,6 +585,9 @@ onMounted(() => {
   if (card.value) {
     // The first fit happens before paint, so the columns never jump into place.
     measureWidth()
+    // Deliveries can describe either side of a viewport resize. Read the live
+    // card in both directions: a queued narrow sample must not hide a column
+    // that already has room to return, just as a wide one must not crowd Title.
     sizer = new ResizeObserver(applyCardSize)
     sizer.observe(card.value)
   }
