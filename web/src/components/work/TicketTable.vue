@@ -5,7 +5,7 @@ import { vClipTip } from '../../directives/clipTip'
 import { formatEstimate, estimateDisplay } from '../../lib/estimates'
 import { computed, getCurrentInstance, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import type { ListItem } from '../../lib/api'
-import { CARD_WIDTH_SAMPLE_CAP, COLUMN_BY_ID, cardWidthAfterSamples, cardWidthCommit, costUnitLabel, hasSavedWidth, layoutTableWidth, layoutWidths, loadedFitWidth, nextMeasuredCardWidth, PARENT_TITLE_WIDTH, releaseLabel, tagList, titleRoom, visibleColumns, withHostColumns, type ColumnDef, type ColumnId, type ListPrefs, type TagRef } from '../../lib/columns'
+import { CARD_WIDTH_SAMPLE_CAP, COLUMN_BY_ID, cardWidthAfterSamples, cardWidthCommit, costUnitLabel, hasSavedWidth, layoutTableWidth, layoutWidths, loadedFitWidth, nextMeasuredCardWidth, observedCardWidth, PARENT_TITLE_WIDTH, releaseLabel, tagList, titleRoom, visibleColumns, withHostColumns, type ColumnDef, type ColumnId, type ListPrefs, type TagRef } from '../../lib/columns'
 import { beginTitlePress, claimTitleClick, openTitlePress, releaseTitlePress, type ListTitlePress } from '../../lib/listTitlePress'
 import { releaseCell, type NativeReleaseView } from '../../lib/releaseMembership'
 import { agentKey, ticketWorkers, withServerLead, type LiveAgent } from '../../lib/liveAgents'
@@ -535,13 +535,13 @@ function measureWidth() {
   const live = readCardWidth()
   if (live !== null && live > 0) width.value = live
 }
-// clientWidth during a viewport resize can still be the previous frame. One
+// clientWidth during a viewport shrink can still be the previous frame. One
 // such read lays the wide column set into the card that has already narrowed
-// and crushes the last column (AEON-1470), or keeps Updated hidden after the
-// card has grown. The content box is adopted at once. Later pairs replace a
-// stale agreeing pair (AEON-1419); a wider pair is kept only when the viewport
-// grew, so it cannot undo a shrink (AEON-1401). A newer measure bumps cardFrame
-// and cancels this read.
+// and crushes the last column (AEON-1470). A content box is that frame only
+// then. A queued delivery that disagrees with the live card is not the card:
+// a stale narrow one must not hide Updated (AEON-1532) and a stale wide one
+// must not crush Title (AEON-1401). Later pairs replace a stale agreeing pair
+// (AEON-1419). A newer measure bumps cardFrame and cancels this read.
 function settleCardWidth(viewportGrew = false, before = width.value) {
   const frame = ++cardFrame
   const origin = before
@@ -566,22 +566,29 @@ function applyCardSize(entries: ResizeObserverEntry[]) {
   const before = width.value
   const live = readCardWidth()
   if (live === null) return
-  // contentRect is the size that fired the observer. clientWidth can still be
-  // the previous frame in either direction.
-  let box = live
+  const shrunk = viewportShrunk
+  viewportShrunk = false
+  // The narrowest content box is the shrink hint. A wider one in the same
+  // delivery is a queued sample and must not replace the live card.
+  let box = 0
   for (const entry of entries) {
-    const width = entry.contentRect?.width
-    if (typeof width === 'number' && Number.isFinite(width) && width > 0) box = width
+    const sample = entry.contentRect?.width
+    if (typeof sample === 'number' && Number.isFinite(sample) && sample > 0) box = box === 0 ? sample : Math.min(box, sample)
   }
-  const next = Math.abs(box - before) > 0.5 ? box : live
+  const next = observedCardWidth(live, box, before, shrunk)
   const grew = next > before + 0.5
-  if (next > 0) width.value = next
-  settleCardWidth(grew, before)
+  const moved = Math.abs(next - before) > 0.5
+  if (moved) width.value = next
+  // An unchanged delivery must not restart the frame sampler. Restarting it
+  // on every notification keeps a frame loop alive while the header paints.
+  if (moved || shrunk) settleCardWidth(grew, before)
 }
 let lastInner = window.innerWidth
+let viewportShrunk = false
 function measureSoon() {
   const inner = window.innerWidth
   const grew = inner > lastInner + 0.5
+  viewportShrunk = inner < lastInner - 0.5
   lastInner = inner
   const before = width.value
   const live = readCardWidth()

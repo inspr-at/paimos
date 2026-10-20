@@ -73,6 +73,13 @@ export function agreedFrameWidth(mid: number | null, next: number | null): numbe
   return next
 }
 
+/** The card width to lay out from one observer delivery. `live` is the card's client width and `box` is the narrowest positive content box in that delivery. A narrower box is this frame only while the viewport shrank and the live read is still the previous width (AEON-1470). A box that disagrees after the live card has moved, or while the viewport did not shrink, is a queued delivery: a stale narrow one must not hide a column (AEON-1532) and a stale wide one must not crush Title (AEON-1401). */
+export function observedCardWidth(live: number, box: number, before: number, viewportShrunk: boolean): number {
+  if (!(live > 0)) return before
+  if (box > 0 && box < live - 0.5 && viewportShrunk && Math.abs(live - before) <= 0.5) return box
+  return live
+}
+
 /** The card width a resize sample should lay columns out in. A narrower live card is this frame. A wider one is the card when the viewport grew, and the previous frame when it shrank (AEON-1401). */
 export function nextMeasuredCardWidth(current: number, live: number, viewportGrew: boolean): number {
   if (!(live > 0)) return current

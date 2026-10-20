@@ -4,6 +4,7 @@ import { isTextClipped, vClipTip, type ClipTipValue } from '../src/lib/clipTip'
 import { reactive } from 'vue'
 import { setupSource } from './record-source'
 import { useReaderAnchor } from '../src/lib/readerAnchor'
+import * as listTitlePress from '../src/lib/listTitlePress'
 
 afterEach(() => { vi.useRealTimers(); vi.unstubAllGlobals() })
 
@@ -88,6 +89,7 @@ it('a phone selection hold suppresses only its own row and pointer click', () =>
       '../../lib/displayLanguage': {}, '../../directives/clipTip': {}, '../../lib/estimates': {},
       '../../lib/chrome': { compactChrome: () => ({ value: true }) },
       '../../lib/columns': { COLUMN_BY_ID: new Map(), visibleColumns: () => ({ columns: [], customised: false, dropped: [] }), withHostColumns: () => [], releaseLabel: () => '', tagList: () => [] },
+      '../../lib/listTitlePress': listTitlePress,
       '../../lib/releaseMembership': {}, '../../lib/liveAgents': { ticketWorkers: () => new Map() },
       '../../stores/liveAgents': { useLiveAgents: () => ({ forProject: () => [] }) },
       '../../lib/ticketList': {}, '../../lib/workVocabulary': {}, '../../lib/work': {},

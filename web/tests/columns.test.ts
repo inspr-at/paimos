@@ -2,7 +2,7 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
-import { agreedFrameWidth, automaticColumns, CARD_WIDTH_SAMPLE_CAP, cardWidthAfterSamples, cardWidthCommit, COLUMN_BY_ID, GIVE_WAY, latchParentShare, layoutTableWidth, layoutWidths, loadedFitWidth, nextMeasuredCardWidth, normalizeColumnIds, orderOf, PARENT_TITLE_WIDTH, parentColumnDefault, releaseLabel, RETURN_ROOM, savedColumnWidth, tagList, TITLE_MIN_TABLE, TITLE_TARGET, titleRoom, visibleColumns, widthOf, withHostColumns, type ColumnDef, type ColumnFit, type ColumnId, type ListPrefs } from '../src/lib/columns.ts'
+import { agreedFrameWidth, automaticColumns, CARD_WIDTH_SAMPLE_CAP, cardWidthAfterSamples, cardWidthCommit, COLUMN_BY_ID, GIVE_WAY, latchParentShare, layoutTableWidth, layoutWidths, loadedFitWidth, nextMeasuredCardWidth, normalizeColumnIds, observedCardWidth, orderOf, PARENT_TITLE_WIDTH, parentColumnDefault, releaseLabel, RETURN_ROOM, savedColumnWidth, tagList, TITLE_MIN_TABLE, TITLE_TARGET, titleRoom, visibleColumns, widthOf, withHostColumns, type ColumnDef, type ColumnFit, type ColumnId, type ListPrefs } from '../src/lib/columns.ts'
 import { groupRows, selectLoadedGroup, filtersFromQuery, filtersToQuery, type TicketRow } from '../src/lib/ticketList.ts'
 import { byPosition, positionBetween, positionOf, type Attachment } from '../src/lib/attachments.ts'
 
@@ -452,6 +452,21 @@ test('AEON-1570 a growing card is adopted after a disagreeing frame pair, and a 
   assert.equal(cardWidthCommit(700, 700, 700, true, 2), null)
   assert.equal(cardWidthCommit(700, 700, 700, true, CARD_WIDTH_SAMPLE_CAP), 700)
   assert.equal(cardWidthCommit(null, 760, 1000, false, 4), null)
+  // A queued content box is not the card. The old delivery adopted whichever box
+  // disagreed with the width already on screen, so a replayed 760 hid Updated
+  // after the card was 1000 (AEON-1532) and a replayed wide box crushed Title
+  // to 134 px after a shrink (AEON-1401). A narrower box is this frame only
+  // while the viewport shrank and clientWidth is still the previous paint.
+  assert.equal(observedCardWidth(1000, 760, 1000, false), 1000)
+  assert.equal(observedCardWidth(800, 1200, 800, false), 800)
+  assert.equal(observedCardWidth(800, 1200, 800, true), 800)
+  assert.equal(observedCardWidth(1200, 760, 1200, true), 760)
+  assert.equal(observedCardWidth(760, 760, 1200, true), 760)
+  assert.equal(observedCardWidth(1000, 760, 800, false), 1000)
+  assert.equal(observedCardWidth(0, 760, 1000, true), 1000)
+  const table = readFileSync(new URL('../src/components/work/TicketTable.vue', import.meta.url), 'utf8')
+  assert.match(table, /observedCardWidth\(live, box, before, shrunk\)/)
+  assert.match(table, /if \(moved \|\| shrunk\) settleCardWidth\(grew, before\)/)
   // A wider live card is this resize when the window grew, and ignored when it shrank.
   assert.equal(nextMeasuredCardWidth(760, 792, true), 792)
   assert.equal(nextMeasuredCardWidth(800, 900, false), 800)
