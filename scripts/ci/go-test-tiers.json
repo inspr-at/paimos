@@ -4114,6 +4114,8 @@
     ,
     {"kind":"go","package":"internal/authz","name":"TestOperatorWorkspaceBindingsUseHTTPStoreAndProtectOwner","tier":"GATED-FULL"}
     ,
+    {"kind":"go","package":"internal/authz","name":"TestPairedComputerInventoryRouteStaysAccountManage","tier":"ESSENTIAL"}
+    ,
     {"kind":"go","package":"internal/authz","name":"TestPersonIdentityScopeShapesAndGrantIsolation","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/authz","name":"TestPreviewDenialMessagesAndFlags","tier":"GATED-FULL"}
