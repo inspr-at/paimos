@@ -4060,6 +4060,8 @@
     ,
     {"kind":"go","package":"internal/authz","name":"TestAuditNewestWindowBeyondCap","tier":"NIGHTLY"}
     ,
+    {"kind":"go","package":"internal/authz","name":"TestAuthzInternalTestsDoNotImportTenantBootstrap","tier":"ESSENTIAL"}
+    ,
     {"kind":"go","package":"internal/authz","name":"TestBuiltinAgentExclusionsDefinition","tier":"GATED-FULL"}
     ,
     {"kind":"go","package":"internal/authz","name":"TestClassicInviteLinking","tier":"GATED-FULL"}

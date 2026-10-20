@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: AGPL-3.0-only
+
 package authz
 
 import (
@@ -8,7 +9,6 @@ import (
 	"github.com/inspr-at/paimos/internal/db"
 	"github.com/inspr-at/paimos/internal/dbtest"
 	"github.com/inspr-at/paimos/internal/tenant"
-	"github.com/inspr-at/paimos/internal/tenantbootstrap"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
 )
@@ -18,12 +18,16 @@ import (
 func TestPersonIdentityScopeShapesAndGrantIsolation(t *testing.T) {
 	d := dbtest.Open(t)
 	ctx := t.Context()
-	tid, err := tenantbootstrap.Create(ctx, d.App, "identity-scopes", "Identity scopes")
-	if err != nil {
+	// Direct insert, not tenantbootstrap: that package imports events, and
+	// events imports authz, so an internal test cannot import it.
+	var tid string
+	if err := db.InTenant(dbtest.Seed(ctx), d.App, "00000000-0000-0000-0000-000000000000", func(tx pgx.Tx) error {
+		return tx.QueryRow(ctx, `INSERT INTO tenants(slug,name) VALUES('identity-scopes','Identity scopes') RETURNING id::text`).Scan(&tid)
+	}); err != nil {
 		t.Fatal(err)
 	}
 	var person, agent, role, project, computer, request, key string
-	err = db.InTenant(dbtest.Seed(ctx), d.App, tid, func(tx pgx.Tx) error {
+	err := db.InTenant(dbtest.Seed(ctx), d.App, tid, func(tx pgx.Tx) error {
 		for _, v := range []struct {
 			kind string
 			id   *string
