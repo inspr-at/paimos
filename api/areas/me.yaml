@@ -225,7 +225,7 @@ paths:
   /me/phone-approvals/subscriptions:
     post:
       operationId: subscribePhoneApprovals
-      description: Person-scoped Web Push opt-in; allowlisted public push providers only.
+      description: "Person-scoped Web Push subscription. Optional desk_enabled sets this device’s Desk opt-in without requiring a phone passkey. Omitting it preserves Desk opt-in and requires a phone passkey, as before. Allowlisted public push providers only; at most eight active devices."
       security: [{session: []}]
       requestBody: {required: true, content: {application/json: {schema: {$ref: '#/components/schemas/PhonePushSubscription'}}}}
       responses:
@@ -494,6 +494,7 @@ components:
       required: [endpoint, keys]
       properties:
         endpoint: {type: string, format: uri, maxLength: 2048}
+        desk_enabled: {type: boolean, default: false, description: "Desk notices for this device. Explicit true or false permits subscription without a phone passkey. Omission preserves an existing flag; new devices default off."}
         keys:
           type: object
           additionalProperties: false
@@ -508,6 +509,7 @@ components:
         id: {type: string, format: uuid}
         created_at: {type: string, format: date-time}
         endpoint_hash: {type: string, pattern: '^[a-f0-9]{64}$', description: 'SHA-256 of the JSON-encoded endpoint; matches this browser without exposing the push address.'}
+        desk_enabled: {type: boolean, description: "Whether this device receives Desk notices. Independent of phone-approval preferences and passkeys."}
     ProfileValidationError:
       type: object
       required: [errors]

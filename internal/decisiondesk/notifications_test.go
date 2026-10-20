@@ -129,23 +129,23 @@ func TestNotificationPointersAndNormalBriefingItem(t *testing.T) {
 	}
 	item := page.Items[0]
 	item.Href = "/private-question-text"
-	item.Title = "private-question-text"
-	b, err := Payload(item)
+	item.Title = "First line\nprivate-question-text"
+	b, err := Payload(item, "AEON")
 	if err != nil {
 		t.Fatal(err)
 	}
-	if strings.Contains(string(b), "private-question-text") || strings.Contains(string(b), q.Input.Question) {
+	if strings.Contains(string(b), "private-question-text") {
 		t.Fatal("push retained private question text")
 	}
 	var fields map[string]any
 	if err = json.Unmarshal(b, &fields); err != nil {
 		t.Fatal(err)
 	}
-	if len(fields) != 4 || fields["url"] != "/decision-desk?item=q:"+q.ID || fields["item_id"] != q.ID {
+	if len(fields) != 4 || fields["url"] != "/decision-desk?item=q:"+q.ID || fields["body"] != "First line · AEON" || fields["title"] != "PAIMOS · Decision waiting" || fields["tag"] != "desk-question-"+q.ID {
 		t.Fatalf("incorrect pointer: %s", b)
 	}
 	item.Kind = "doctrine"
-	if _, err = Payload(item); err == nil {
+	if _, err = Payload(item, "AEON"); err == nil {
 		t.Fatal("doctrine toast also produced a push")
 	}
 }
@@ -249,5 +249,25 @@ func TestApprovalExpiryWarningAndProjectReferenceAreNotHeld(t *testing.T) {
 	f.exec(t, `UPDATE work_orders SET status='done' WHERE node_id=$1`, workOrder)
 	if won, err := f.claim(t, f.person, scheduled[0]); err != nil || won {
 		t.Fatal("finished work still claimed a held approval", err)
+	}
+}
+
+// Risk: a multiline question or a large project label exceeds Web Push limits
+// or leaks the second line and caller-controlled navigation into the payload.
+func TestDeskPayloadBoundsFirstLine(t *testing.T) {
+	item := Item{Kind: "question", ID: "11111111-1111-4111-8111-111111111111", Revision: 1, Title: strings.Repeat("<", 1000) + "\nprivate second line", Href: "https://attacker.example/"}
+	b, err := Payload(item, strings.Repeat("界", 1000))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(b) > 3000 || strings.Contains(string(b), "private") || strings.Contains(string(b), "attacker") {
+		t.Fatalf("unbounded/private payload: %d bytes", len(b))
+	}
+	var fields map[string]string
+	if err = json.Unmarshal(b, &fields); err != nil {
+		t.Fatal(err)
+	}
+	if len(fields) != 4 || fields["body"] != strings.Repeat("<", 240)+" · "+strings.Repeat("界", 26) {
+		t.Fatalf("wrong bounded body: %q", fields["body"])
 	}
 }

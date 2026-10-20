@@ -44,6 +44,7 @@ type Module struct {
 	origin  string
 	vault   cipher.AEAD
 	vapid   *webpush.Options
+	deskNow func() time.Time // Tests derive this clock from the fixture database.
 	send    func(context.Context, []byte, *webpush.Subscription, *webpush.Options) (*http.Response, error)
 	// Native step-up owns target authorization. The adapter is wired at startup
 	// without a package cycle; decisions remain on its protected native routes.

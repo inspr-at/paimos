@@ -5,12 +5,15 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"net/http"
+	"sort"
 	"time"
 
 	webpush "github.com/SherClockHolmes/webpush-go"
 	"github.com/inspr-at/paimos/internal/db"
+	"github.com/inspr-at/paimos/internal/decisiondesk"
 	"github.com/inspr-at/paimos/internal/tenant"
 	"github.com/jackc/pgx/v5"
 )
@@ -126,7 +129,7 @@ func (m *Module) listenPushConnection(ctx context.Context, wakes chan<- string) 
 		if err != nil && !errors.Is(err, pgx.ErrNoRows) {
 			return err
 		}
-		if typ == "approval.proposed" || typ == "harness.attach_requested" || typ == "stepup.pending" {
+		if typ == "approval.proposed" || typ == "harness.attach_requested" || typ == "stepup.pending" || typ == "question.asked" || typ == "inbox.compat_sent" {
 			wake(hint.Tenant)
 		}
 	}
@@ -161,6 +164,13 @@ func (m *Module) dispatch(ctx context.Context) error {
 	return nil
 }
 func (m *Module) dispatchTenant(ctx context.Context, tenantID string) error {
+	if m.vapid == nil {
+		return nil
+	}
+	return errors.Join(m.dispatchPhoneTenant(ctx, tenantID), m.dispatchDeskTenant(ctx, tenantID))
+}
+
+func (m *Module) dispatchPhoneTenant(ctx context.Context, tenantID string) error {
 	var jobs []delivery
 	err := db.InTenant(ctx, m.pool, tenantID, func(tx pgx.Tx) error {
 		rows, err := tx.Query(ctx, `SELECT p.id::text,p.roles,f.time_zone,f.quiet_start,f.quiet_end,f.escalation_minutes FROM phone_approval_preferences f JOIN principals p ON p.tenant_id=f.tenant_id AND p.id=f.person_id WHERE f.enabled AND p.kind='person' AND EXISTS(SELECT 1 FROM phone_passkeys k WHERE k.person_id=p.id AND k.revoked_at IS NULL) AND EXISTS(SELECT 1 FROM phone_push_subscriptions s WHERE s.person_id=p.id AND s.revoked_at IS NULL) ORDER BY p.id LIMIT 100`)
@@ -331,13 +341,251 @@ func (m *Module) deliver(ctx context.Context, d delivery) error {
 		}
 		p := tenant.Principal{ID: d.person, TenantID: d.tenant, Kind: tenant.Person}
 		if status == http.StatusGone || status == http.StatusNotFound {
-			if _, err = tx.Exec(ctx, `UPDATE phone_push_subscriptions SET revoked_at=now() WHERE id=$1 AND person_id=$2 AND revoked_at IS NULL`, d.subscription, d.person); err != nil {
-				return err
-			}
-			return audit(ctx, tx, p, "phone_approval.subscription_expired", map[string]string{"subscription_id": d.subscription})
+			return revokeExpiredSubscription(ctx, tx, p, d.subscription)
 		}
 		if success {
 			return audit(ctx, tx, p, "phone_approval.notified", map[string]string{"kind": d.kind, "request_id": d.request, "subscription_id": d.subscription})
+		}
+		return nil
+	})
+}
+
+// Reuse the phone sender's revocation and value-free audit for both channels.
+func revokeExpiredSubscription(ctx context.Context, tx pgx.Tx, p tenant.Principal, id string) error {
+	tag, err := tx.Exec(ctx, `UPDATE phone_push_subscriptions SET revoked_at=now() WHERE id=$1 AND person_id=$2 AND revoked_at IS NULL`, id, p.ID)
+	if err != nil || tag.RowsAffected() == 0 {
+		return err
+	}
+	return audit(ctx, tx, p, "phone_approval.subscription_expired", map[string]string{"subscription_id": id})
+}
+
+type deskBatch struct {
+	p       tenant.Principal
+	items   []decisiondesk.Item
+	devices []delivery
+}
+
+// Keyset pages bound recipient memory without starving people after the first
+// hundred. Each person has at most eight devices and one hundred source items.
+func (m *Module) dispatchDeskTenant(ctx context.Context, tenantID string) error {
+	ctx, cancel := context.WithTimeout(ctx, 2*time.Minute)
+	defer cancel()
+	after := "00000000-0000-0000-0000-000000000000"
+	for {
+		var people []tenant.Principal
+		err := db.InTenant(ctx, m.pool, tenantID, func(tx pgx.Tx) error {
+			rows, err := tx.Query(ctx, `SELECT p.id::text,p.roles FROM principals p WHERE p.tenant_id=$1 AND p.id>$2::uuid AND p.kind='person' AND p.status='active' AND p.linked_to IS NULL AND EXISTS(SELECT 1 FROM phone_push_subscriptions s WHERE s.tenant_id=p.tenant_id AND s.person_id=p.id AND s.desk_enabled AND s.revoked_at IS NULL) ORDER BY p.id LIMIT 100`, tenantID, after)
+			if err != nil {
+				return err
+			}
+			defer rows.Close()
+			for rows.Next() {
+				p := tenant.Principal{TenantID: tenantID, Kind: tenant.Person}
+				if err = rows.Scan(&p.ID, &p.Roles); err != nil {
+					return err
+				}
+				people = append(people, p)
+			}
+			return rows.Err()
+		})
+		if err != nil {
+			return err
+		}
+		for _, p := range people {
+			if err = m.dispatchDeskPerson(ctx, p); err != nil {
+				return err
+			}
+		}
+		if len(people) < 100 {
+			return nil
+		}
+		after = people[len(people)-1].ID
+	}
+}
+
+func (m *Module) dispatchDeskPerson(ctx context.Context, p tenant.Principal) error {
+	var batches []deskBatch
+	err := db.InTenant(ctx, m.pool, p.TenantID, func(tx pgx.Tx) error {
+		devices := []delivery{}
+		rows, err := tx.Query(ctx, `SELECT id::text,subscription FROM phone_push_subscriptions WHERE person_id=$1 AND desk_enabled AND revoked_at IS NULL ORDER BY id LIMIT 8`, p.ID)
+		if err != nil {
+			return err
+		}
+		for rows.Next() {
+			d := delivery{tenant: p.TenantID, person: p.ID}
+			if err = rows.Scan(&d.subscription, &d.encrypted); err != nil {
+				rows.Close()
+				return err
+			}
+			devices = append(devices, d)
+		}
+		err = rows.Err()
+		rows.Close()
+		if err != nil || len(devices) == 0 {
+			return err
+		}
+		eligible, err := decisiondesk.BrowserNoticesTx(ctx, tx, p)
+		if err != nil {
+			return err
+		}
+		sort.Slice(eligible, func(i, j int) bool {
+			if eligible[i].CreatedAt.Equal(eligible[j].CreatedAt) {
+				return eligible[i].ID < eligible[j].ID
+			}
+			return eligible[i].CreatedAt.Before(eligible[j].CreatedAt)
+		})
+		var now time.Time
+		if m.deskNow != nil {
+			now = m.deskNow()
+		} else if err = tx.QueryRow(ctx, `SELECT clock_timestamp()`).Scan(&now); err != nil {
+			return err
+		}
+		for len(eligible) > 0 {
+			end := eligible[0].CreatedAt.Add(time.Minute)
+			if now.Before(end) {
+				break
+			} // wait for arrivals in the entire burst window
+			n := 1
+			for n < len(eligible) && !eligible[n].CreatedAt.After(end) {
+				n++
+			}
+			batch := deskBatch{p: p, devices: devices}
+			for _, item := range eligible[:n] {
+				claimed, err := decisiondesk.ClaimBrowserTx(ctx, tx, p, item)
+				if err != nil {
+					return err
+				}
+				if claimed {
+					batch.items = append(batch.items, item)
+				}
+			}
+			if len(batch.items) > 0 {
+				batches = append(batches, batch)
+			}
+			eligible = eligible[n:]
+		}
+		return nil
+	})
+	if err != nil {
+		return err
+	}
+	var result error
+	for _, batch := range batches {
+		result = errors.Join(result, m.deliverDesk(ctx, batch))
+	}
+	return result
+}
+
+func (m *Module) deliverDesk(ctx context.Context, batch deskBatch) error {
+	success := true
+	sent := false
+	summarised := len(batch.items) >= 3
+	for _, d := range batch.devices {
+		var payload []byte
+		valid := false
+		err := db.InTenant(ctx, m.pool, batch.p.TenantID, func(tx pgx.Tx) error {
+			var active bool
+			if err := tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM phone_push_subscriptions s JOIN principals p ON p.tenant_id=s.tenant_id AND p.id=s.person_id WHERE s.id=$1 AND s.person_id=$2 AND s.desk_enabled AND s.revoked_at IS NULL AND p.kind='person' AND p.status='active' AND p.linked_to IS NULL)`, d.subscription, d.person).Scan(&active); err != nil || !active {
+				return err
+			}
+			for _, item := range batch.items {
+				b, ok, err := decisiondesk.BrowserPayloadTx(ctx, tx, batch.p, item)
+				if err != nil {
+					return err
+				}
+				if !ok {
+					return nil
+				}
+				payload = b
+			}
+			valid = true
+			return nil
+		})
+		if err != nil {
+			success = false
+			continue
+		}
+		if !valid {
+			continue
+		}
+		b, err := open(m.vault, d.encrypted, subscriptionAAD(d.tenant, d.person))
+		if err != nil {
+			success = false
+			continue
+		}
+		var sub webpush.Subscription
+		if json.Unmarshal(b, &sub) != nil || !validSubscription(sub) {
+			success = false
+			continue
+		}
+		payloads := [][]byte{payload}
+		if summarised {
+			payload, _ = json.Marshal(map[string]string{"title": fmt.Sprintf("%d decisions waiting", len(batch.items)), "body": "Open Decision Desk to review.", "tag": "desk-summary", "url": "/decision-desk"})
+			payloads = [][]byte{payload}
+		} else {
+			// Two items still get one notification apiece, on every opted-in device.
+			payloads = nil
+			err = db.InTenant(ctx, m.pool, batch.p.TenantID, func(tx pgx.Tx) error {
+				for _, item := range batch.items {
+					b, ok, err := decisiondesk.BrowserPayloadTx(ctx, tx, batch.p, item)
+					if err != nil {
+						return err
+					}
+					if !ok {
+						return errors.New("desk source changed")
+					}
+					payloads = append(payloads, b)
+				}
+				return nil
+			})
+			if err != nil {
+				success = false
+				continue
+			}
+		}
+		for _, payload := range payloads {
+			sendCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
+			response, sendErr := m.send(sendCtx, payload, &sub, m.vapid)
+			status := 0
+			if response != nil {
+				status = response.StatusCode
+				if response.Body != nil {
+					_, _ = io.Copy(io.Discard, io.LimitReader(response.Body, 4096))
+					_ = response.Body.Close()
+				}
+			}
+			cancel()
+			if sendErr != nil || status < 200 || status >= 300 {
+				success = false
+			} else {
+				sent = true
+			}
+			if status == http.StatusGone || status == http.StatusNotFound {
+				if err = db.InTenant(ctx, m.pool, batch.p.TenantID, func(tx pgx.Tx) error { return revokeExpiredSubscription(ctx, tx, batch.p, d.subscription) }); err != nil {
+					return err
+				}
+				break
+			}
+		}
+	}
+	return db.InTenant(ctx, m.pool, batch.p.TenantID, func(tx pgx.Tx) error {
+		for i, item := range batch.items {
+			state := "skipped"
+			if !success {
+				state = "failed"
+			} else if sent {
+				state = "sent"
+				if summarised && i > 0 {
+					state = "summarised"
+				}
+			}
+			if err := decisiondesk.FinishTx(ctx, tx, batch.p, item, state); err != nil {
+				return err
+			}
+		}
+		// Claim/source locks are finished before taking the event counter.
+		if sent && success {
+			return audit(ctx, tx, batch.p, "decision_desk.notified", map[string]any{"count": len(batch.items), "summary": summarised})
 		}
 		return nil
 	})
