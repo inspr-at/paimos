@@ -92,7 +92,10 @@ for (const width of [390, 1024, 1440]) for (const mode of ['light', 'dark'] as c
       if (width === 390) {
         await page.getByRole('menuitem', { name: /Switch to .* theme/ }).click()
         await page.keyboard.press('Escape')
-        await page.locator('#row-n-1 .title-link').click()
+        // The whole compact row opens its ticket. Tap its key line: under this spec's
+        // fixed clock Vue runs only the first handler a click reaches, and on the
+        // title that is the link's own (the row's opener runs on a real clock).
+        await page.locator('#row-n-1 .phone-meta').click()
         await expect(page.locator('.ticket-ws .recurring-pill-mark')).toBeVisible()
       }
     }

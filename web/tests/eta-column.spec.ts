@@ -79,6 +79,12 @@ test('the ETA column shows fresh, overdue and stale estimates under its header a
     await page.setViewportSize({ width, height: 1000 })
     await page.evaluate(theme => { document.documentElement.dataset.theme = theme }, theme)
     if (width === 390) {
+      // Each ticket names its own estimator; a stale report says how old it is instead.
+      const tips: Record<string, RegExp> = {
+        'PHAROS-11': /Estimated by Ada at \d{2}:\d{2}/,
+        'PHAROS-12': /Estimated by Beau at \d{2}:\d{2}/,
+        'PHAROS-13': /^Estimate from \d{2}:\d{2} by Cleo is 3\d min old\nReady at \d{2}:\d{2}/,
+      }
       for (const key of ['PHAROS-11', 'PHAROS-12', 'PHAROS-13']) {
         await expect(row(page, key).locator('.eta-cell')).toHaveCount(0)
         await row(page, key).locator('.title-link').click()
@@ -87,7 +93,7 @@ test('the ETA column shows fresh, overdue and stale estimates under its header a
         await expect(label).toBeVisible()
         expect(await label.evaluate(el => el.scrollWidth <= el.clientWidth), `${width} ${theme} ${key}: complete ETA in the ticket`).toBe(true)
         await expectStableControls({ controls: { eta, close: panel.getByRole('button', { name: 'Close ticket details', exact: true }) }, scrollAreas: { panel }, interactions: [
-          { name: 'read the ticket estimate', run: async () => { await eta.hover(); await expect(eta).toHaveAttribute('data-tip', /Estimated by/) } },
+          { name: 'read the ticket estimate', run: async () => { await eta.hover(); await expect(eta).toHaveAttribute('data-tip', tips[key]!) } },
         ] })
         await panel.getByRole('button', { name: 'Close ticket details', exact: true }).click()
       }

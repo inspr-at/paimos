@@ -755,7 +755,8 @@ defineExpose({
           <p v-if="item.kind_slug !== 'epic'" class="meta">Suggested release <SuggestedReleaseCell :row="item" :project-id="project.id" :now="now" :description-id="`drawer-suggested-${item.id}`" /></p>
           <RecurrenceProvenance v-if="item.recurrence" :key="item.id" :node-id="item.id" :recurrence="item.recurrence" @loaded="originLoaded" />
           <HumanCheck :item="item" :editable="editable" :save="saveHumanCheck" :names="names" />
-          <p v-if="eta" class="meta ws-eta"><span>Progress and ETA</span><EtaCell :eta="eta" :now="now" align="start" labelled :connection-stale="etaConnectionStale" /></p>
+          <!-- Phone rows carry no ETA (AEON-1460), so the ticket keeps the list's quiet missing-ETA hint. -->
+          <p v-if="eta" class="meta ws-eta"><span>Progress and ETA</span><EtaCell :eta="eta" :now="now" align="start" labelled :missing="!!item.eta?.has_working_session" :connection-stale="etaConnectionStale" /></p>
           <p class="meta" :class="{ 'only-narrow': mode === 'full' }">
             Updated <time :datetime="item.updated_at" :data-tip="absoluteTime(item.updated_at)">{{ relativeTime(item.updated_at, { now, long: true }) }}</time>
             · Created <time :datetime="item.created_at" :data-tip="absoluteTime(item.created_at)">{{ relativeTime(item.created_at, { now, long: true }) }}</time>
