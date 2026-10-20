@@ -387,8 +387,9 @@ only the layer count and bundle digest.
 
 Targets remain proposals: company rules point to the configured public
 doctrine repository, private-kernel origins to the configured private doctrine
-repository, and project rules to the project's repository `AGENTS.md` (the
-project id identifies the destination to resolve). Person, agent-role,
+repository, and project rules to the project's repository `AGENTS.md`. A linked delivery
+repository is included when its read permission permits it; otherwise the
+project id identifies the destination to resolve. Person, agent-role,
 named-agent and task targets are `needs decision`. The export never opens a PR
 or copies text to a repository.
 

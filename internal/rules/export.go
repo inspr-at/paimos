@@ -5,6 +5,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"sort"
@@ -161,6 +162,24 @@ func (m *Module) export(r *http.Request, tx pgx.Tx, p tenant.Principal) (any, er
 				return nil, err
 			}
 			layers[n.id] = &ExportLayer{ID: n.id, Scope: n.f.Scope, Authors: n.authors, Target: exportTarget(n.f.Scope, nil, m.repositories), Sets: []ExportSet{}}
+			if n.f.Scope.Layer == "project" {
+				// Resolve an existing project repository only with its own read authority.
+				// An unlinked/hidden destination remains an explicit project-id proposal.
+				access := authz.RequireTx(ctx, tx, p, "delivery.read", authz.Scope{ProjectID: n.f.Scope.ProjectID})
+				if access == nil {
+					var repository string
+					err := tx.QueryRow(ctx, `SELECT repository FROM delivery_metric_sources WHERE tenant_id=$1 AND project_id=$2`, p.TenantID, n.f.Scope.ProjectID).Scan(&repository)
+					if err != nil && !errors.Is(err, pgx.ErrNoRows) {
+						return nil, err
+					}
+					if err == nil {
+						layers[n.id].Target.Repository = repository
+					}
+				} else if !errors.Is(access, authz.ErrForbidden) {
+					return nil, access
+				}
+			}
+
 		}
 		if n.resource == "set" {
 			sets[n.id] = &ExportSet{ID: n.id, Revision: n.f.Revision, Authors: n.authors, PublishedVersion: n.f.PublishedVersion, Versions: []ExportVersion{}}
@@ -185,7 +204,11 @@ func (m *Module) export(r *http.Request, tx pgx.Tx, p tenant.Principal) (any, er
 		}
 		v := ExportVersion{ID: n.id, SetID: s.ID, Revision: snap.Revision, Authors: n.authors, Snapshot: snap, Texts: []ExportText{}}
 		for _, rule := range snap.Rules {
-			v.Texts = append(v.Texts, ExportText{Identity: rule.Identity, NodeID: ruleIDs[s.ID+"/"+rule.Identity], SHA256: exportSHA(rule.Text), WhySHA256: exportSHA(rule.Why), DetailsSHA256: exportSHA(rule.Details), Target: exportTarget(l.Scope, &rule, m.repositories)})
+			target := exportTarget(l.Scope, &rule, m.repositories)
+			if l.Scope.Layer == "project" {
+				target = l.Target
+			}
+			v.Texts = append(v.Texts, ExportText{Identity: rule.Identity, NodeID: ruleIDs[s.ID+"/"+rule.Identity], SHA256: exportSHA(rule.Text), WhySHA256: exportSHA(rule.Why), DetailsSHA256: exportSHA(rule.Details), Target: target})
 		}
 		s.Versions = append(s.Versions, v)
 	}

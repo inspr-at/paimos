@@ -22,14 +22,13 @@ func TestRulesExportAndAuthoringSwitch(t *testing.T) {
 	member := w.principal(tenant.Person, "member", "member")
 	company := w.layer(admin, Scope{Layer: "company"})
 	public := w.set(admin, company, "Company", lockedRule("company", "Use reviewed changes."))
-	privateRule := testRule("private-kernel", "Keep operator context private.")
-	privateRule.Source.Reference = "doctrine-private/docs/AGENTS-KERNEL.md"
-	kernel := w.set(admin, company, "Private kernel", privateRule)
+	privateRule := testRule("kernel", "Keep local context.")
+	privateRule.Source.Reference = "AGENTS-KERNEL-PRIVATE.md"
+	kernel := w.set(admin, company, "Operator", privateRule)
 	project := w.set(admin, w.layer(admin, Scope{Layer: "project", ProjectID: w.project}), "Project", testRule("project", "Use typed SQL."))
 	person := w.set(admin, w.layer(admin, Scope{Layer: "person", OwnerID: admin.ID}), "Person", testRule("person", "Explain the outcome first."))
 	hidden := w.set(colleague, w.layer(colleague, Scope{Layer: "person", OwnerID: colleague.ID}), "Private", testRule("hidden", "Never export this colleague preference."))
 	for _, s := range []Set{public, kernel, project, person} {
-		t.Logf("publishing fixture set %s", s.Name)
 		w.publish(admin, s, "260928120000.0.0")
 	}
 	w.publish(colleague, hidden, "260928120000.0.0")
@@ -42,6 +41,9 @@ func TestRulesExportAndAuthoringSwitch(t *testing.T) {
 	foreign := other.principal(tenant.Person, "foreign owner", "admin")
 	foreignSet := other.set(foreign, other.layer(foreign, Scope{Layer: "company"}), "Foreign", testRule("foreign", "Never export another tenant."))
 	other.publish(foreign, foreignSet, "260928120000.0.0")
+	if _, err := w.d.Admin.Exec(t.Context(), `INSERT INTO delivery_metric_sources(tenant_id,project_id,repository,ci_workflow,nightly_workflow,updated_at) VALUES($1,$2,'sample/project','ci.yml','nightly.yml',clock_timestamp())`, w.tid, w.project); err != nil {
+		t.Fatal(err)
+	}
 	w.call(member, "GET", "/api/rules/export", nil, 403)
 	first := w.call(admin, "GET", "/api/rules/export", nil, 200)
 	second := w.call(admin, "GET", "/api/rules/export", nil, 200)
@@ -86,6 +88,11 @@ func TestRulesExportAndAuthoringSwitch(t *testing.T) {
 					}
 				}
 			}
+		}
+	}
+	for _, l := range bundle.Manifest.Layers {
+		if l.Scope.Layer == "project" && (l.Target.Repository != "sample/project" || l.Target.Path != "AGENTS.md") {
+			t.Fatalf("project target not resolved: %+v", l.Target)
 		}
 	}
 	if versions != 5 || privateTargets != 1 || pending != 1 {
