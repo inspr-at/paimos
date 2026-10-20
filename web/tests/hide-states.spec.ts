@@ -77,11 +77,18 @@ for (const width of [390, 1024, 1440]) for (const theme of ['light', 'dark']) {
     await expect(row(page, 'PHAROS-33')).toBeVisible()
     expect(queries.some(query => query.get('hide_closed') === 'true' && query.get('hide_states') === 'accepted')).toBe(true)
     if (width !== 390) {
-      const step = Number(await page.locator('#project-view-settings .view-settings').getAttribute('data-navigation-step'))
+      const settings = page.locator('#project-view-settings .view-settings')
+      const step = Number(await settings.getAttribute('data-navigation-step'))
       const toggle = rowHide(page)
+      // A one-status custom set is the word Hide plus that status icon.
+      // The accessible name still spells the set. Step 3 hides the slot.
       await expect(toggle).toHaveAccessibleName(step >= 2 ? 'Hide Accepted tickets' : 'Hide Accepted')
-      if (step < 2) await expect(page.locator('.closed-switch .hide-label-slot > .label:not(.measure)')).toHaveText('Hide Accepted')
-      else if (step === 2) await expect(page.locator('.closed-pill .hide-label-slot > .label:not(.measure)')).toHaveText('Hide Accepted')
+      if (step < 3) {
+        const label = settings.locator(`${step >= 2 ? '.closed-pill' : '.closed-switch'} .hide-label-slot > .label:not(.measure)`)
+        await expect(label).toHaveText('Hide')
+        await expect(label.locator('[data-tip]')).toHaveCount(1)
+        await expect(label.locator('[data-tip="Accepted"]')).toBeVisible()
+      }
       await expect(gear(page)).toBeFocused()
     }
     await shot(page, `${width}-${theme}-accepted`)
