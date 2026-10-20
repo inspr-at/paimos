@@ -170,6 +170,7 @@ for (const width of [390, 768, 1024, 1440]) for (const theme of ['light', 'dark'
       }
     }
 
+    // Historical tier identity retained; D11 now requires one title line in a 56px row.
     test('ticket titles keep the existing two-line phone layout and reveal full desktop names', async ({ page }) => {
       const data = fixtures(); data.preferences.theme = { choice: theme }
       data.nodes.find(node => node.id === 'n-1')!.title = longName

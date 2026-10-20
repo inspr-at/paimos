@@ -207,6 +207,7 @@ for (const scenario of [
     await expect(plan).toBeVisible()
     await expect(panel.locator('.eta-cell .shown')).toHaveText(`~2 h${scenario.partial ? ' · partial' : ''}`)
     await expect(panel.locator('.eta-cell')).toHaveAttribute('data-tip', /work remains/)
+    await expect(panel.locator('.eta-cell')).not.toHaveAttribute('data-tip', /100% done/)
     const controls = { 'parent plan': plan, 'more actions': panel.getByRole('button', { name: 'More actions', exact: true }) }
     await expectStableControls({ controls, scrollAreas: { panel }, interactions: [{ name: 'read parent plan', run: async () => {
       await plan.hover()
