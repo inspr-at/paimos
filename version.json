@@ -1,17 +1,18 @@
 {
   "product": "PAIMOS AEON",
   "version_scheme": "inspr-calver-3",
-  "version": "261020180411.0.0",
+  "version": "261020201224.0.0",
   "release_channel": "stable",
   "release_sequence": 137,
   "codename": "Busy Blip",
-  "reserved_at": "2026-10-20T18:04:11Z",
+  "reserved_at": "2026-10-20T20:12:24Z",
   "ticket": "AEON-1579",
   "unpublished_reservations": [
     "260923134337.0.0",
     "260925231350.0.0",
     "261001230453.0.0",
-    "261013084255.0.0"
+    "261013084255.0.0",
+    "261020180411.0.0"
   ],
   "withdrawn_releases": [
     {
