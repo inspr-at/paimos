@@ -6846,6 +6846,10 @@
     ,
     {"kind":"go","package":"internal/harness","name":"TestAutomaticProvenanceFitsTheRulesBudget","tier":"GATED-FULL"}
     ,
+    {"kind":"go","package":"internal/harness","name":"TestComputerStartLeadRuntimeRechecksRunPerson","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/harness","name":"TestComputerStartRecoveryRechecksRunPerson","tier":"ESSENTIAL"}
+    ,
     {"kind":"go","package":"internal/harness","name":"TestControlEventBounds","tier":"GATED-FULL"}
     ,
     {"kind":"go","package":"internal/harness","name":"TestControlRelayUsesDatabaseBudgetAndMonotonicRetention","tier":"GATED-FULL"}
@@ -8659,6 +8663,8 @@
     {"kind":"go","package":"internal/nativesessions/receipts","name":"TestReceiptProjectionRejectsQueueAsDeliveryAndScopesPages","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/nativesessions/start","name":"TestStartRequiresDurableClaimAndLocalLaunchFence","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/nativesessions/store","name":"TestComputerStartNativeClaimRechecksAfterObservation","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/nativesessions/store","name":"TestCoordinatorClaimsReserveQuotaBudgets","tier":"ESSENTIAL"}
     ,

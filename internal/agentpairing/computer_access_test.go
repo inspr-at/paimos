@@ -3,7 +3,10 @@ package agentpairing_test
 
 import (
 	"errors"
+	"net/http"
+	"net/http/httptest"
 	"slices"
+	"strings"
 	"testing"
 
 	"github.com/inspr-at/paimos/internal/agentpairing"
@@ -86,6 +89,22 @@ func TestComputerStartAccessUsesPersonRoleBindingsAndAuditsChanges(t *testing.T)
 	}
 	can(person, *a.ComputerID, true)
 	can(person, *b.ComputerID, false)
+	// The existing role editor must continue refusing deletion/reassignment of
+	// a role used at an expanded scope; it must not silently rewrite that grant.
+	roles := http.NewServeMux()
+	authz.New(f.db.App).Mount(roles)
+	var replacement string
+	seed(func(tx pgx.Tx) error {
+		return tx.QueryRow(t.Context(), `SELECT id::text FROM roles WHERE key='admin'`).Scan(&replacement)
+	})
+	for _, suffix := range []string{"", "?reassign_to=" + replacement} {
+		r := httptest.NewRequest("DELETE", "/api/roles/"+role+suffix, nil).WithContext(tenant.WithPrincipal(t.Context(), admin))
+		w := httptest.NewRecorder()
+		roles.ServeHTTP(w, r)
+		if w.Code != 409 || !strings.Contains(w.Body.String(), "role_in_use") {
+			t.Fatalf("role deletion bypassed computer binding: %d %s", w.Code, w.Body.String())
+		}
+	}
 	// A role containing nodes.read grants no project when bound to a computer.
 	seed(func(tx pgx.Tx) error {
 		if err := authz.RequireTx(t.Context(), tx, person, "nodes.read", authz.Scope{ProjectID: *b.ComputerID}); !errors.Is(err, authz.ErrForbidden) {

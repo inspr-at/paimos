@@ -66,6 +66,9 @@ func (m *Module) computerAccess(w http.ResponseWriter, r *http.Request, p tenant
 		return err
 	})
 	if err != nil {
+		if errors.Is(err, authz.ErrForbidden) {
+			err = fail(403, "forbidden", "account.read required")
+		}
 		WriteError(w, err)
 		return
 	}
