@@ -2012,8 +2012,8 @@
     {
       "classification": "metadata",
       "columns": {
-        "tenant_id": "metadata",
-        "db_authoring": "metadata"
+        "db_authoring": "metadata",
+        "tenant_id": "metadata"
       },
       "locator": {
         "tenant_column": "tenant_id"
