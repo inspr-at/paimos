@@ -37,15 +37,26 @@ import (
 	"github.com/inspr-at/paimos/internal/tenant"
 )
 
+// DeskPushSource keeps the existing worker independent of the Desk projection
+// package (which already uses the phone module through step-up). Only scalar
+// source identities cross this boundary; private content is read at delivery.
+type DeskPushSource interface {
+	NoticesTx(context.Context, pgx.Tx, tenant.Principal, func(kind, id string, revision int64, created time.Time)) error
+	ClaimTx(context.Context, pgx.Tx, tenant.Principal, string, string, int64) (bool, error)
+	PayloadTx(context.Context, pgx.Tx, tenant.Principal, string, string, int64) ([]byte, bool, error)
+	FinishTx(context.Context, pgx.Tx, tenant.Principal, string, string, int64, string) error
+}
+
 type Module struct {
-	pool    *pgxpool.Pool
-	pairing *agentpairing.Module
-	wa      *webauthn.WebAuthn
-	origin  string
-	vault   cipher.AEAD
-	vapid   *webpush.Options
-	deskNow func() time.Time // Tests derive this clock from the fixture database.
-	send    func(context.Context, []byte, *webpush.Subscription, *webpush.Options) (*http.Response, error)
+	DeskPush DeskPushSource
+	pool     *pgxpool.Pool
+	pairing  *agentpairing.Module
+	wa       *webauthn.WebAuthn
+	origin   string
+	vault    cipher.AEAD
+	vapid    *webpush.Options
+	deskNow  func() time.Time // Tests derive this clock from the fixture database.
+	send     func(context.Context, []byte, *webpush.Subscription, *webpush.Options) (*http.Response, error)
 	// Native step-up owns target authorization. The adapter is wired at startup
 	// without a package cycle; decisions remain on its protected native routes.
 	StepUpReviewTx func(context.Context, pgx.Tx, tenant.Principal, string) (Review, error)
@@ -542,3 +553,14 @@ func open(a cipher.AEAD, b, aad []byte) ([]byte, error) {
 	}
 	return a.Open(nil, b[:a.NonceSize()], b[a.NonceSize():], aad)
 }
+
+// WithPushTransport installs a deployment-owned transport before starting Run.
+// The default remains the encrypted aes128gcm Web Push transport.
+func (m *Module) WithPushTransport(send func(context.Context, []byte, *webpush.Subscription, *webpush.Options) (*http.Response, error)) *Module {
+	m.send = send
+	return m
+}
+
+// WithDeskClock injects one clock for burst scheduling; production reads the
+// database clock. Configure before starting the worker.
+func (m *Module) WithDeskClock(now func() time.Time) *Module { m.deskNow = now; return m }

@@ -311,3 +311,27 @@ func BrowserNoticesTx(ctx context.Context, tx pgx.Tx, p tenant.Principal) ([]Ite
 	}
 	return nil, errors.New("desk notification coverage exceeds 1000 source items")
 }
+
+// PushSource adapts the projection to the existing phone push worker without a
+// dependency cycle. Startup assigns it to phoneapprovals.Module.DeskPush.
+type PushSource struct{}
+
+func (PushSource) NoticesTx(ctx context.Context, tx pgx.Tx, p tenant.Principal, visit func(kind, id string, revision int64, created time.Time)) error {
+	items, err := BrowserNoticesTx(ctx, tx, p)
+	if err != nil {
+		return err
+	}
+	for _, item := range items {
+		visit(item.Kind, item.ID, item.Revision, item.CreatedAt)
+	}
+	return nil
+}
+func (PushSource) ClaimTx(ctx context.Context, tx pgx.Tx, p tenant.Principal, kind, id string, revision int64) (bool, error) {
+	return ClaimBrowserTx(ctx, tx, p, Item{Kind: kind, ID: id, Revision: revision})
+}
+func (PushSource) PayloadTx(ctx context.Context, tx pgx.Tx, p tenant.Principal, kind, id string, revision int64) ([]byte, bool, error) {
+	return BrowserPayloadTx(ctx, tx, p, Item{Kind: kind, ID: id, Revision: revision})
+}
+func (PushSource) FinishTx(ctx context.Context, tx pgx.Tx, p tenant.Principal, kind, id string, revision int64, state string) error {
+	return FinishTx(ctx, tx, p, Item{Kind: kind, ID: id, Revision: revision}, state)
+}

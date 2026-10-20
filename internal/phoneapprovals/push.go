@@ -13,7 +13,6 @@ import (
 
 	webpush "github.com/SherClockHolmes/webpush-go"
 	"github.com/inspr-at/paimos/internal/db"
-	"github.com/inspr-at/paimos/internal/decisiondesk"
 	"github.com/inspr-at/paimos/internal/tenant"
 	"github.com/jackc/pgx/v5"
 )
@@ -359,15 +358,24 @@ func revokeExpiredSubscription(ctx context.Context, tx pgx.Tx, p tenant.Principa
 	return audit(ctx, tx, p, "phone_approval.subscription_expired", map[string]string{"subscription_id": id})
 }
 
+type deskNotice struct {
+	Kind, ID  string
+	Revision  int64
+	CreatedAt time.Time
+}
+
 type deskBatch struct {
 	p       tenant.Principal
-	items   []decisiondesk.Item
+	items   []deskNotice
 	devices []delivery
 }
 
 // Keyset pages bound recipient memory without starving people after the first
 // hundred. Each person has at most eight devices and one hundred source items.
 func (m *Module) dispatchDeskTenant(ctx context.Context, tenantID string) error {
+	if m.DeskPush == nil {
+		return nil
+	}
 	ctx, cancel := context.WithTimeout(ctx, 2*time.Minute)
 	defer cancel()
 	after := "00000000-0000-0000-0000-000000000000"
@@ -424,7 +432,10 @@ func (m *Module) dispatchDeskPerson(ctx context.Context, p tenant.Principal) err
 		if err != nil || len(devices) == 0 {
 			return err
 		}
-		eligible, err := decisiondesk.BrowserNoticesTx(ctx, tx, p)
+		eligible := []deskNotice{}
+		err = m.DeskPush.NoticesTx(ctx, tx, p, func(kind, id string, revision int64, created time.Time) {
+			eligible = append(eligible, deskNotice{kind, id, revision, created})
+		})
 		if err != nil {
 			return err
 		}
@@ -451,7 +462,7 @@ func (m *Module) dispatchDeskPerson(ctx context.Context, p tenant.Principal) err
 			}
 			batch := deskBatch{p: p, devices: devices}
 			for _, item := range eligible[:n] {
-				claimed, err := decisiondesk.ClaimBrowserTx(ctx, tx, p, item)
+				claimed, err := m.DeskPush.ClaimTx(ctx, tx, p, item.Kind, item.ID, item.Revision)
 				if err != nil {
 					return err
 				}
@@ -489,7 +500,7 @@ func (m *Module) deliverDesk(ctx context.Context, batch deskBatch) error {
 				return err
 			}
 			for _, item := range batch.items {
-				b, ok, err := decisiondesk.BrowserPayloadTx(ctx, tx, batch.p, item)
+				b, ok, err := m.DeskPush.PayloadTx(ctx, tx, batch.p, item.Kind, item.ID, item.Revision)
 				if err != nil {
 					return err
 				}
@@ -527,7 +538,7 @@ func (m *Module) deliverDesk(ctx context.Context, batch deskBatch) error {
 			payloads = nil
 			err = db.InTenant(ctx, m.pool, batch.p.TenantID, func(tx pgx.Tx) error {
 				for _, item := range batch.items {
-					b, ok, err := decisiondesk.BrowserPayloadTx(ctx, tx, batch.p, item)
+					b, ok, err := m.DeskPush.PayloadTx(ctx, tx, batch.p, item.Kind, item.ID, item.Revision)
 					if err != nil {
 						return err
 					}
@@ -579,7 +590,7 @@ func (m *Module) deliverDesk(ctx context.Context, batch deskBatch) error {
 					state = "summarised"
 				}
 			}
-			if err := decisiondesk.FinishTx(ctx, tx, batch.p, item, state); err != nil {
+			if err := m.DeskPush.FinishTx(ctx, tx, batch.p, item.Kind, item.ID, item.Revision, state); err != nil {
 				return err
 			}
 		}
@@ -589,4 +600,16 @@ func (m *Module) deliverDesk(ctx context.Context, batch deskBatch) error {
 		}
 		return nil
 	})
+}
+
+// Dispatch runs one bounded recovery scan using the same durable claims as Run.
+func (m *Module) Dispatch(ctx context.Context) error { return m.dispatch(ctx) }
+
+// RunWithTicks allows a host scheduler to supply recovery ticks while keeping
+// the committed-event listener. Tests use it without calendar sleeps.
+func (m *Module) RunWithTicks(ctx context.Context, ticks <-chan time.Time) {
+	if m.vapid == nil {
+		return
+	}
+	m.run(ctx, ticks, nil)
 }

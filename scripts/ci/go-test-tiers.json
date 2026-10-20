@@ -6020,7 +6020,13 @@
     ,
     {"kind":"go","package":"internal/decisiondesk","name":"TestCutoverLinksKeepSourceIdentity","tier":"ESSENTIAL"}
     ,
+    {"kind":"go","package":"internal/decisiondesk","name":"TestDeskDeviceOptInOwnershipAndCap","tier":"ESSENTIAL"}
+    ,
     {"kind":"go","package":"internal/decisiondesk","name":"TestDeskPayloadBoundsFirstLine","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/decisiondesk","name":"TestDeskPushRecipientsBurstAndGone","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/decisiondesk","name":"TestDeskQuestionCommittedEventWakesSender","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/decisiondesk","name":"TestHeldRequestCanonicalizationDoesNotRepeatNotice","tier":"GATED-FULL"}
     ,
@@ -9203,12 +9209,6 @@
     {"kind":"go","package":"internal/parentbenefits","name":"TestSummaryRejectsInvalidOrUnboundedModelOutput","tier":"GATED-FULL"}
     ,
     {"kind":"go","package":"internal/perf","name":"TestLocalEndpointsAtScale","tier":"GATED-FULL"}
-    ,
-    {"kind":"go","package":"internal/phoneapprovals","name":"TestDeskDeviceOptInOwnershipAndCap","tier":"ESSENTIAL"}
-    ,
-    {"kind":"go","package":"internal/phoneapprovals","name":"TestDeskPushRecipientsBurstAndGone","tier":"ESSENTIAL"}
-    ,
-    {"kind":"go","package":"internal/phoneapprovals","name":"TestDeskQuestionCommittedEventWakesSender","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/phoneapprovals","name":"TestPhoneDecisionCryptographyAndBinding","tier":"ESSENTIAL"}
     ,

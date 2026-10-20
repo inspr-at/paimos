@@ -3,10 +3,20 @@ package decisiondesk
 
 import (
 	"bytes"
+	"context"
+	"crypto/ecdh"
 	"crypto/rand"
 	"crypto/sha256"
+	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
+	"fmt"
+	webpush "github.com/SherClockHolmes/webpush-go"
+	"github.com/inspr-at/paimos/internal/authz"
+	"github.com/inspr-at/paimos/internal/events"
+	"github.com/inspr-at/paimos/internal/phoneapprovals"
+	"io"
+	"net/http"
 	"net/http/httptest"
 	"strings"
 	"sync"
@@ -269,5 +279,344 @@ func TestDeskPayloadBoundsFirstLine(t *testing.T) {
 	}
 	if len(fields) != 4 || fields["body"] != strings.Repeat("<", 240)+" · "+strings.Repeat("界", 26) {
 		t.Fatalf("wrong bounded body: %q", fields["body"])
+	}
+}
+
+const deskPushOrigin = "https://aeon.example"
+
+type deskPushFixture struct {
+	db              *dbtest.DB
+	m               *phoneapprovals.Module
+	mux             *http.ServeMux
+	p, other, agent tenant.Principal
+}
+
+func deskPushFixtureFor(t *testing.T) *deskPushFixture {
+	t.Helper()
+	base := setup(t)
+	dbtest.BindRole(t, base.d, base.person.TenantID, base.reader.ID, "admin")
+	f := &deskPushFixture{db: base.d, mux: http.NewServeMux(), p: base.person, other: base.reader, agent: base.agent}
+	f.m = phoneapprovals.New(f.db.App, nil, deskPushOrigin, make([]byte, 32), &webpush.Options{VAPIDPublicKey: "test-public"})
+	f.m.Mount(f.mux)
+	return f
+}
+func (f *deskPushFixture) exec(t *testing.T, sql string, args ...any) {
+	t.Helper()
+	if _, err := f.db.Admin.Exec(t.Context(), sql, args...); err != nil {
+		t.Fatal(err)
+	}
+}
+func (f *deskPushFixture) call(t *testing.T, p tenant.Principal, method, path string, body any, origin string) *httptest.ResponseRecorder {
+	t.Helper()
+	var reader io.Reader
+	if body != nil {
+		b, err := json.Marshal(body)
+		if err != nil {
+			t.Fatal(err)
+		}
+		reader = bytes.NewReader(b)
+	}
+	r := httptest.NewRequest(method, path, reader)
+	r.Header.Set("Origin", origin)
+	r = r.WithContext(authz.BindPool(tenant.WithPrincipal(t.Context(), p), f.db.App))
+	w := httptest.NewRecorder()
+	f.mux.ServeHTTP(w, r)
+	return w
+}
+func deskPushStatus(t *testing.T, w *httptest.ResponseRecorder, want int) {
+	t.Helper()
+	if w.Code != want {
+		t.Fatalf("status %d want %d: %s", w.Code, want, w.Body.String())
+	}
+}
+func deskPushDigest(s string) string {
+	b, _ := json.Marshal(s)
+	hash := sha256.Sum256(b)
+	return hex.EncodeToString(hash[:])
+}
+
+type deskPushBarrier struct {
+	PushSource
+	scanned chan<- struct{}
+}
+
+func (s deskPushBarrier) NoticesTx(ctx context.Context, tx pgx.Tx, p tenant.Principal, visit func(string, string, int64, time.Time)) error {
+	err := s.PushSource.NoticesTx(ctx, tx, p, visit)
+	select {
+	case s.scanned <- struct{}{}:
+	case <-ctx.Done():
+		return ctx.Err()
+	}
+	return err
+}
+
+// Risk: Desk text reaches another person or a device that did not opt in;
+// replicas repeat claims, and bursts arriving on separate scans stack notices.
+func TestDeskPushRecipientsBurstAndGone(t *testing.T) {
+	for _, scenario := range []string{"single", "burst", "gone", "failed"} {
+		t.Run(scenario, func(t *testing.T) {
+			f := deskPushFixtureFor(t)
+			project, ticket := f.deskProject(t)
+			enabled := f.deskSubscription(t, f.p, "enabled", true)
+			second := f.deskSubscription(t, f.p, "second", true)
+			f.deskSubscription(t, f.p, "disabled", false)
+			f.deskSubscription(t, f.other, "other-person", true)
+			// Desk delivery must work with no passkey and disabled phone preferences.
+			f.exec(t, `UPDATE phone_passkeys SET revoked_at=now() WHERE person_id=$1`, f.p.ID)
+			type pushed struct {
+				endpoint string
+				fields   map[string]string
+			}
+			var pushes []pushed
+			f.m.WithPushTransport(func(_ context.Context, b []byte, sub *webpush.Subscription, _ *webpush.Options) (*http.Response, error) {
+				fields := map[string]string{}
+				if err := json.Unmarshal(b, &fields); err != nil {
+					t.Fatal(err)
+				}
+				pushes = append(pushes, pushed{sub.Endpoint, fields})
+				code := 201
+				if scenario == "gone" && sub.Endpoint == enabled.Endpoint {
+					code = 410
+				}
+				if scenario == "failed" {
+					code = 503
+				}
+				return &http.Response{StatusCode: code, Body: io.NopCloser(strings.NewReader(""))}, nil
+			})
+			q := f.deskQuestion(t, project, ticket, "First question line\nprivate second line")
+			now := q.CreatedAt.Add(59 * time.Second)
+			f.m.WithDeskClock(func() time.Time { return now })
+			dispatch := func() {
+				t.Helper()
+				if err := f.m.Dispatch(t.Context()); err != nil {
+					t.Fatal(err)
+				}
+			}
+			dispatch()
+			if len(pushes) != 0 {
+				t.Fatal("notice escaped before the burst window closed")
+			}
+			count := 1
+			if scenario == "burst" {
+				f.deskQuestion(t, project, ticket, "Second question")
+				dispatch()
+				f.deskQuestion(t, project, ticket, "Third question")
+				dispatch()
+				if len(pushes) != 0 {
+					t.Fatal("separate event scans escaped burst buffering")
+				}
+				count = 3
+			}
+			now = q.CreatedAt.Add(61 * time.Second)
+			dispatch()
+			if len(pushes) != 2 {
+				t.Fatalf("got %d pushes, want one per opted-in device", len(pushes))
+			}
+			endpoints := map[string]bool{}
+			for _, push := range pushes {
+				endpoints[push.endpoint] = true
+				if push.endpoint != enabled.Endpoint && push.endpoint != second.Endpoint {
+					t.Fatal("push escaped the intended devices", push.endpoint)
+				}
+				if scenario == "burst" {
+					if push.fields["title"] != "3 decisions waiting" || push.fields["tag"] != "desk-summary" || push.fields["url"] != "/decision-desk" {
+						t.Fatalf("incorrect summary: %v", push.fields)
+					}
+				} else if push.fields["title"] != "PAIMOS · Decision waiting" || push.fields["body"] != "First question line · DESK" || push.fields["tag"] != "desk-question-"+q.ID || push.fields["url"] != "/decision-desk?item=q:"+q.ID {
+					t.Fatalf("incorrect private payload: %v", push.fields)
+				}
+			}
+			if !endpoints[enabled.Endpoint] || !endpoints[second.Endpoint] {
+				t.Fatal("device fanout lost a device")
+			}
+			// A second committed hint for the same item still cannot send again.
+			if err := db.InTenant(db.AllProjects(t.Context(), "duplicate Desk event"), f.db.App, f.p.TenantID, func(tx pgx.Tx) error {
+				_, err := events.Append(t.Context(), tx, f.agent, events.Change{Type: "question.asked", NodeID: &q.ID})
+				return err
+			}); err != nil {
+				t.Fatal(err)
+			}
+			dispatch()
+			if len(pushes) != 2 {
+				t.Fatal("duplicate event repeated a notice")
+			}
+			var claims, summaries, failed, other int
+			if err := f.db.Admin.QueryRow(t.Context(), `SELECT count(*),count(*) FILTER(WHERE summarised_at IS NOT NULL),count(*) FILTER(WHERE state='failed'),count(*) FILTER(WHERE recipient_id<>$1) FROM desk_notification_claims`, f.p.ID).Scan(&claims, &summaries, &failed, &other); err != nil {
+				t.Fatal(err)
+			}
+			if claims != count || other != 0 {
+				t.Fatalf("claims=%d other=%d", claims, other)
+			}
+			if scenario == "burst" && summaries != 2 {
+				t.Fatalf("summary evidence=%d", summaries)
+			}
+			if (scenario == "gone" || scenario == "failed") && failed != 1 {
+				t.Fatalf("failed delivery falsely reported sent: %d", failed)
+			}
+			if scenario == "gone" {
+				var revoked, audits int
+				if err := f.db.Admin.QueryRow(t.Context(), `SELECT (SELECT count(*) FROM phone_push_subscriptions WHERE endpoint_hash=$1 AND revoked_at IS NOT NULL),(SELECT count(*) FROM events WHERE type='phone_approval.subscription_expired' AND after->>'subscription_id'=(SELECT id::text FROM phone_push_subscriptions WHERE endpoint_hash=$1))`, deskPushDigest(enabled.Endpoint)).Scan(&revoked, &audits); err != nil || revoked != 1 || audits != 1 {
+					t.Fatalf("gone cleanup revoked=%d audits=%d: %v", revoked, audits, err)
+				}
+			}
+		})
+	}
+}
+
+func (f *deskPushFixture) deskSubscription(t *testing.T, p tenant.Principal, name string, enabled bool) webpush.Subscription {
+	t.Helper()
+	key, err := ecdh.P256().GenerateKey(rand.Reader)
+	if err != nil {
+		t.Fatal(err)
+	}
+	sub := webpush.Subscription{Endpoint: "https://web.push.apple.com/desk/" + name, Keys: webpush.Keys{P256dh: base64.RawURLEncoding.EncodeToString(key.PublicKey().Bytes()), Auth: base64.RawURLEncoding.EncodeToString(make([]byte, 16))}}
+	body := map[string]any{"endpoint": sub.Endpoint, "keys": sub.Keys, "desk_enabled": enabled}
+	deskPushStatus(t, f.call(t, p, "POST", "/api/me/phone-approvals/subscriptions", body, deskPushOrigin), 200)
+	return sub
+}
+
+func (f *deskPushFixture) deskProject(t *testing.T) (string, string) {
+	t.Helper()
+	questions.New(f.db.App).Mount(f.mux)
+	f.m.DeskPush = PushSource{}
+	f.agent.Scopes = []string{"questions.ask", "questions.read"}
+	var project, ticket string
+	err := db.InTenant(dbtest.Seed(t.Context()), f.db.App, f.p.TenantID, func(tx pgx.Tx) error {
+		if err := tx.QueryRow(t.Context(), `INSERT INTO nodes(tenant_id,kind_id,key,title) SELECT $1,id,'DESK','Desk' FROM node_kinds WHERE tenant_id=$1 AND slug='project' RETURNING id::text`, f.p.TenantID).Scan(&project); err != nil {
+			return err
+		}
+		if err := tx.QueryRow(t.Context(), `INSERT INTO nodes(tenant_id,kind_id,key,title,parent_id) SELECT $1,id,'DESK-1','Waiting work',$2 FROM node_kinds WHERE tenant_id=$1 AND slug='work' RETURNING id::text`, f.p.TenantID, project).Scan(&ticket); err != nil {
+			return err
+		}
+		_, err := tx.Exec(t.Context(), `INSERT INTO project_leads(tenant_id,project_id,owner_principal_id,state) VALUES($1,$2,$3,'paused')`, f.p.TenantID, project, f.p.ID)
+		return err
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	return project, ticket
+}
+
+func (f *deskPushFixture) deskQuestion(t *testing.T, project, ticket, line string) questions.Question {
+	t.Helper()
+	var request string
+	if err := f.db.Admin.QueryRow(t.Context(), `SELECT gen_random_uuid()::text`).Scan(&request); err != nil {
+		t.Fatal(err)
+	}
+	in := questions.Input{RequestID: request, Question: line, Context: "private context", Findings: "private findings", Meanwhile: "parked", BlockedNodeIDs: []string{ticket}, Options: []questions.Option{{ID: "yes", Title: "Yes", Answer: "Private answer"}}}
+	response := f.call(t, f.agent, "POST", "/api/projects/"+project+"/questions", in, "")
+	deskPushStatus(t, response, 201)
+	var q questions.Question
+	if err := json.Unmarshal(response.Body.Bytes(), &q); err != nil {
+		t.Fatal(err)
+	}
+	return q
+}
+
+// Risk: opt-in bypasses ownership, provider validation, the cap, or disables
+// phone registration's existing passkey requirement when no flag is supplied.
+func TestDeskDeviceOptInOwnershipAndCap(t *testing.T) {
+	f := deskPushFixtureFor(t)
+	f.exec(t, `UPDATE phone_passkeys SET revoked_at=now() WHERE person_id=$1`, f.p.ID)
+	sub := f.deskSubscription(t, f.p, "toggle", true)
+	deskPushStatus(t, f.call(t, f.p, "POST", "/api/me/phone-approvals/subscriptions", sub, deskPushOrigin), 409)
+	settings := f.call(t, f.p, "GET", "/api/me/phone-approvals", nil, "")
+	deskPushStatus(t, settings, 200)
+	var out struct {
+		Subscriptions []struct {
+			ID           string `json:"id"`
+			DeskEnabled  bool   `json:"desk_enabled"`
+			EndpointHash string `json:"endpoint_hash"`
+		} `json:"subscriptions"`
+	}
+	if err := json.Unmarshal(settings.Body.Bytes(), &out); err != nil {
+		t.Fatal(err)
+	}
+	if len(out.Subscriptions) != 1 || !out.Subscriptions[0].DeskEnabled || out.Subscriptions[0].EndpointHash != deskPushDigest(sub.Endpoint) || strings.Contains(settings.Body.String(), sub.Endpoint) {
+		t.Fatal("incorrect device list", settings.Body.String())
+	}
+	id := out.Subscriptions[0].ID
+	deskPushStatus(t, f.call(t, f.other, "DELETE", "/api/me/phone-approvals/subscriptions/"+id, nil, deskPushOrigin), 404)
+	body := map[string]any{"endpoint": sub.Endpoint, "keys": sub.Keys, "desk_enabled": false}
+	response := f.call(t, f.p, "POST", "/api/me/phone-approvals/subscriptions", body, deskPushOrigin)
+	deskPushStatus(t, response, 200)
+	if strings.Contains(response.Body.String(), `"desk_enabled":true`) {
+		t.Fatal("disable reported true")
+	}
+	deskPushStatus(t, f.call(t, f.other, "POST", "/api/me/phone-approvals/subscriptions", body, deskPushOrigin), 409)
+	deskPushStatus(t, f.call(t, f.p, "POST", "/api/me/phone-approvals/subscriptions", body, "https://attacker.example"), 403)
+	for n := 1; n < 8; n++ {
+		f.deskSubscription(t, f.p, fmt.Sprintf("cap-%d", n), true)
+	}
+	body["endpoint"] = "https://web.push.apple.com/desk/ninth"
+	deskPushStatus(t, f.call(t, f.p, "POST", "/api/me/phone-approvals/subscriptions", body, deskPushOrigin), 409)
+	body["endpoint"] = "https://attacker.example/desk"
+	deskPushStatus(t, f.call(t, f.p, "POST", "/api/me/phone-approvals/subscriptions", body, deskPushOrigin), 400)
+	deskPushStatus(t, f.call(t, f.p, "DELETE", "/api/me/phone-approvals/subscriptions/"+id, nil, deskPushOrigin), 204)
+	var revoked bool
+	if err := f.db.Admin.QueryRow(t.Context(), `SELECT revoked_at IS NOT NULL FROM phone_push_subscriptions WHERE id=$1`, id).Scan(&revoked); err != nil || !revoked {
+		t.Fatal("device not removed", err)
+	}
+}
+
+// Risk: question.asked never wakes the existing push listener. An injected
+// recovery channel stays untouched; only the actual committed question can send.
+func TestDeskQuestionCommittedEventWakesSender(t *testing.T) {
+	f := deskPushFixtureFor(t)
+	project, ticket := f.deskProject(t)
+	f.deskSubscription(t, f.p, "event", true)
+	var now time.Time
+	if err := f.db.Admin.QueryRow(t.Context(), `SELECT clock_timestamp()+interval '1 hour'`).Scan(&now); err != nil {
+		t.Fatal(err)
+	}
+	f.m.WithDeskClock(func() time.Time { return now })
+	sent := make(chan string, 8)
+	f.m.WithPushTransport(func(_ context.Context, b []byte, _ *webpush.Subscription, _ *webpush.Options) (*http.Response, error) {
+		var fields map[string]string
+		if err := json.Unmarshal(b, &fields); err != nil {
+			return nil, err
+		}
+		sent <- fields["url"]
+		return &http.Response{StatusCode: 201, Body: io.NopCloser(strings.NewReader(""))}, nil
+	})
+	ctx, cancel := context.WithCancel(t.Context())
+	ticks := make(chan time.Time)
+	scans, done := make(chan struct{}, 16), make(chan struct{})
+	f.m.DeskPush = deskPushBarrier{scanned: scans}
+	go func() { defer close(done); f.m.RunWithTicks(ctx, ticks) }()
+	t.Cleanup(func() {
+		cancel()
+		select {
+		case <-done:
+		case <-time.After(10 * time.Second):
+			t.Error("sender did not stop")
+		}
+	})
+	for n := 0; n < 2; n++ {
+		select {
+		case <-scans:
+		case <-time.After(10 * time.Second):
+			t.Fatal("listener did not subscribe")
+		}
+	}
+	q := f.deskQuestion(t, project, ticket, "Event question")
+	select {
+	case url := <-sent:
+		if url != "/decision-desk?item=q:"+q.ID {
+			t.Fatal("wrong item", url)
+		}
+	case <-time.After(10 * time.Second):
+		t.Fatal("question event did not wake sender")
+	}
+	cancel()
+	select {
+	case <-done:
+	case <-time.After(10 * time.Second):
+		t.Fatal("sender did not stop")
+	}
+	select {
+	case url := <-sent:
+		t.Fatal("repeated event push", url)
+	default:
 	}
 }
