@@ -464,6 +464,8 @@
     ,
     {"kind":"go","package":"cmd/aeon-agentd","name":"TestBrokenClaudeDependencyKeepsPollingAndRecovers","tier":"GATED-FULL"}
     ,
+    {"kind":"go","package":"cmd/aeon-agentd","name":"TestCalmPairOutputKeepsOneCodeBlockAndOneStatusLine","tier":"ESSENTIAL"}
+    ,
     {"kind":"go","package":"cmd/aeon-agentd","name":"TestCapacityCLI","tier":"GATED-FULL"}
     ,
     {"kind":"go","package":"cmd/aeon-agentd","name":"TestCodexRenewalAppliesDuringPendingClaudeRepin","tier":"GATED-FULL"}
