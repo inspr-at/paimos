@@ -288,7 +288,7 @@ function openDisplay() {
   const button = props.collapsedHeader ? collapsedDisplayButton.value : displayButton.value
   displayAnchor.value = (button?.offsetParent ? button : null) ?? filtersButton.value ?? root.value ?? null
 }
-defineExpose({ focusSearch, openFilterMenu, openDisplay, input, closeOverlays })
+defineExpose({ focusSearch, openFilterMenu, openDisplay, input: computed(() => compactList.value ? phoneTools.value?.input : input.value), closeOverlays })
 </script>
 
 <template>

@@ -17,6 +17,7 @@ const emit = defineEmits<{
   select: []; save: [anchor: HTMLElement]; copy: []; export: []
 }>()
 const input = ref<HTMLInputElement>()
+const searchOverlay = ref<HTMLElement>()
 const searching = ref(false)
 const menu = ref<{ kind: 'views' | 'more'; anchor: HTMLElement } | null>(null)
 const activeView = computed(() => props.views.find(view => view.id === props.filters.view))
@@ -54,7 +55,7 @@ function closeSearch() {
 const searchButton = ref<HTMLButtonElement>()
 function searchEscape(event: KeyboardEvent) {
   event.preventDefault()
-  if (event.target === input.value) input.value?.blur()
+  if (event.target === input.value) { input.value?.blur(); searchOverlay.value?.focus({ preventScroll: true }) }
   else closeSearch()
 }
 function menuKeys(event: KeyboardEvent) {
@@ -65,7 +66,7 @@ function menuKeys(event: KeyboardEvent) {
   event.preventDefault(); event.stopPropagation(); items[next]?.focus()
 }
 watch(() => [props.attentionHref, props.principalId], () => { close(); searching.value = false })
-defineExpose({ focusSearch, closeOverlays: () => { close(); searching.value = false } })
+defineExpose({ focusSearch, input, closeOverlays: () => { close(); searching.value = false } })
 </script>
 
 <template>
@@ -79,7 +80,7 @@ defineExpose({ focusSearch, closeOverlays: () => { close(); searching.value = fa
     <button type="button" class="phone-action phone-filter" :class="{ on: filterCount > 0 }" :aria-label="filterCount ? `Filter: ${filterCount} applied` : 'Filter tickets'" aria-haspopup="dialog" @click="close(); emit('filter')"><AppIcon name="filter" :size="16" /><span v-if="filterCount" class="filter-count" aria-hidden="true">{{ filterCount }}</span></button>
     <button type="button" class="phone-action phone-new" :aria-label="createLabel" @click="emit('create')"><AppIcon name="plus" :size="18" /></button>
     <button type="button" class="phone-action" aria-label="More view actions" aria-haspopup="menu" :aria-expanded="menu?.kind === 'more'" @click="open('more', $event.currentTarget as HTMLElement)"><AppIcon name="more" :size="18" /></button>
-    <div v-if="searching" class="phone-search" role="search" @keydown.esc.stop="searchEscape">
+    <div v-if="searching" ref="searchOverlay" class="phone-search" role="search" tabindex="-1" @keydown.esc.stop="searchEscape">
       <label class="search-field"><AppIcon name="search" :size="16" /><input ref="input" class="field" type="search" :value="query" placeholder="Search tickets" aria-label="Search tickets in this project" autocomplete="off" spellcheck="false" @input="emit('search', ($event.target as HTMLInputElement).value)" /></label>
       <button type="button" @click="closeSearch">Cancel</button>
     </div>
@@ -115,7 +116,7 @@ button, a { -webkit-tap-highlight-color: transparent; }
 .phone-view svg { flex: none; }
 .view-name { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .grow { flex: 0; }
-.phone-count { display: none; flex: none; min-width: 10ch; text-align: right; color: var(--ink-2); font-size: 12px; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.phone-count { display: none; flex: none; width: 24ch; text-align: right; color: var(--ink-2); font-size: 12px; font-variant-numeric: tabular-nums; white-space: nowrap; }
 @media (min-width: 720px) and (max-height: 500px) { .phone-count { display: block; margin-right: 8px; } }
 .phone-action.on { color: var(--teal-ink); }
 .phone-filter { position: relative; }
