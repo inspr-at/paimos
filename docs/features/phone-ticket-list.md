@@ -19,6 +19,7 @@ downloading a partial export. Spreadsheet formula prefixes are escaped.
 
 The project crumb opens its shared sheet. “Show the project head” discloses the
 project counts, sections and lead above the list for that visit, without changing
-the saved desktop header density. Outline and Graph keep their own controls.
+the saved desktop header density. Outline keeps its expand actions, and the view
+menu retains access to both Outline and Graph.
 Clipped titles retain full-text disclosure and native links; the status keyboard
 shortcut remains available when the compact row has no status button.

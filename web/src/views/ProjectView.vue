@@ -22,12 +22,12 @@ const { compactHeadShown } = useProjectHeader()
 provide(PROJECT_PAGE, page)
 const { project, projects, projectKey, ticketsHeader, headerDensity, ticketKey, fullView,
   knowledgeDocked, knowledgeEntryOpen, toolbarHeight, selectable, selected, liveActive, activeLive,
-  bulkHeight, knowledgeActive, settingsActive, deliveryActive, graphActive, viewMode } = page
+  bulkHeight, knowledgeActive, settingsActive, deliveryActive, graphActive } = page
 watch(() => project.value?.id, () => { compactHeadShown.value = false }, { immediate: true, flush: 'sync' })
 </script>
 
 <template>
-  <section class="project-page" :class="[ticketsHeader ? `header-${headerDensity}` : '', { 'compact-list': compact && ticketsHeader && viewMode === 'list', 'panel-open': (!!ticketKey && !fullView) || knowledgeDocked, 'ticket-dock': !!ticketKey && !fullView, 'full-view': fullView, 'knowledge-entry': knowledgeEntryOpen, 'knowledge-dock': knowledgeDocked }]" :style="{ '--toolbar-h': `${toolbarHeight}px` }" :aria-labelledby="project && !knowledgeEntryOpen ? 'project-title' : undefined">
+  <section class="project-page" :class="[ticketsHeader ? `header-${headerDensity}` : '', { 'compact-list': compact && ticketsHeader && !knowledgeActive && !settingsActive && !deliveryActive, 'panel-open': (!!ticketKey && !fullView) || knowledgeDocked, 'ticket-dock': !!ticketKey && !fullView, 'full-view': fullView, 'knowledge-entry': knowledgeEntryOpen, 'knowledge-dock': knowledgeDocked }]" :style="{ '--toolbar-h': `${toolbarHeight}px` }" :aria-labelledby="project && !knowledgeEntryOpen ? 'project-title' : undefined">
     <template v-if="project">
       <div v-show="!fullView && !knowledgeEntryOpen" class="list-view" :class="{ selecting: selectable && selected.size, 'has-live-updates': liveActive && activeLive.pill.value }" :style="{ '--live-obstacle-h': `${bulkHeight ? bulkHeight + 8 : 0}px` }">
       <div id="project-header-fold" v-show="!ticketsHeader || (compact ? compactHeadShown : headerDensity !== 'collapsed')" class="project-fold">

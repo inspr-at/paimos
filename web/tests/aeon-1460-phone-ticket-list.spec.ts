@@ -341,11 +341,21 @@ test('AEON-1460 choosing Outline retains its expand and status actions on phones
   await toolbar(page).getByRole('button', { name: /^View:/ }).click()
   await page.getByRole('menuitemradio', { name: 'Outline', exact: true }).click()
   const outline = page.getByRole('treegrid', { name: 'Ticket outline', exact: true })
-  const twisty = outline.locator('.twisty').first(), status = outline.locator('.status-btn').first()
-  await expect(page.locator('.table-card')).not.toHaveClass(/phone-rows/)
-  await expectStableControls({ controls: { twisty, status }, interactions: [
+  const twisty = outline.locator('.phone-fold').first(), row = twisty.locator('xpath=ancestor::tr')
+  await expect(page.locator('.table-card')).toHaveClass(/phone-rows/)
+  await expect(outline.locator('.status-btn, .c-prio, .c-estimate')).toHaveCount(0)
+  const target = await box(twisty)
+  expect(target.width).toBe(44); expect(target.height).toBe(44)
+  const hits = await twisty.evaluate(el => {
+    const b = el.getBoundingClientRect(), x = b.x + b.width / 2, y = b.y + b.height / 2
+    return [[-21.99, 0], [21.99, 0], [0, -21.99], [0, 21.99]].map(([dx, dy]) => el.contains(document.elementFromPoint(x + dx!, y + dy!)))
+  })
+  expect(hits).toEqual([true, true, true, true])
+  await expectStableControls({ controls: { row, twisty, title: row.locator('.title-link'), toolbar: toolbar(page) }, interactions: [
     { name: 'expand and collapse the parent', run: async () => { await twisty.click(); await expect(twisty).toHaveAttribute('aria-expanded', 'true'); await twisty.click(); await expect(twisty).toHaveAttribute('aria-expanded', 'false') } },
   ] })
+  await row.locator('.title-link').click()
+  await expect(page.getByRole('complementary', { name: 'Ticket details' }).getByRole('button', { name: /^Status:/ })).toBeVisible()
 })
 
 test('AEON-1460 compact rows retain the keyboard status action without a row status button', async ({ page }) => {

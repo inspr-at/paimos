@@ -93,7 +93,7 @@ const emit = defineEmits<{
   exportCSV: []
 }>()
 const compact = compactChrome()
-const compactList = computed(() => compact.value && props.projectHeader && props.view === 'list' && !props.attention)
+const compactList = computed(() => compact.value && props.projectHeader && props.view !== 'knowledge' && !props.attention)
 const phoneTools = ref<InstanceType<typeof PhoneTicketToolbar>>()
 
 const draft = ref(props.filters.q)

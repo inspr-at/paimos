@@ -1983,7 +1983,7 @@ button.release-chip:focus-visible { box-shadow: var(--focus-ring); }
 .phone-assignee { display: grid; place-items: center; width: 44px; height: 44px; margin: 0; border: 0; padding: 0; background: transparent; border-radius: 8px; }
 .phone-assignee:disabled { opacity: 1; }
 .phone-assignee:focus-visible, .phone-fold:focus-visible { box-shadow: var(--focus-ring); }
-.phone-rows .phone-check, .phone-fold { position: absolute; display: grid; place-items: center; left: -13px; top: -4px; width: 44px; height: 44px; padding: 0; border: 0; background: transparent; color: var(--ink-2); }
+.phone-rows .phone-check, .phone-fold { position: absolute; display: grid; place-items: center; left: -16px; top: -4px; width: 44px; height: 44px; padding: 0 0 0 4px; border: 0; background: transparent; color: var(--ink-2); }
 .phone-fold[aria-expanded="true"] svg { transform: rotate(90deg); }
 .phone-rows .ticket-row.dimmed :is(.phone-title-link, .phone-meta, .phone-owner, .phone-state) { opacity: .5; }
 .phone-rows .ghost td { display: none !important; }

@@ -228,8 +228,8 @@ for (const theme of ['light', 'dark'] as const) for (const width of [1600, 390])
       const choice = page.getByRole('menuitemradio', { name: 'Outline', exact: true })
       await choice.focus(); await choice.press('Enter')
       await expect(page).toHaveURL('/p/PHAROS/tickets?view=outline')
-      await expect(ticketViews(page).getByRole('tab', { name: 'Outline', exact: true })).toHaveAttribute('aria-selected', 'true')
-      await ticketViews(page).getByRole('tab', { name: 'Outline', exact: true }).focus()
+      await expect(views).toHaveAttribute('aria-expanded', 'false')
+      await views.focus()
     } else {
     await ticketViews(page).getByRole('tab', { name: 'List', exact: true }).focus()
     await page.keyboard.press('ArrowRight')
@@ -238,5 +238,6 @@ for (const theme of ['light', 'dark'] as const) for (const width of [1600, 390])
     }
     await page.keyboard.press('Enter') // Must not invoke the list's open-ticket shortcut.
     await expect(panel(page)).toHaveCount(0)
+    if (width === 390) { await expect(page.getByRole('menu', { name: 'Ticket views', exact: true })).toBeVisible(); await page.keyboard.press('Escape') }
   })
 }
