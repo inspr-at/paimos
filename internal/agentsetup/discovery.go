@@ -267,6 +267,11 @@ func (d Discovery) Detect(ctx context.Context, harness, accountContext string) (
 		childEnv = harnesslaunch.Environment([]string{"HOME=" + c.Home, "LANG=C", "LC_ALL=C"}, c.Node.Path)
 	}
 	versionCommand := Command{Path: physical, Args: []string{"--version"}, Env: childEnv, Dir: probeDir}
+	if harness == "claude" {
+		// Prove the launcher works with the service PATH before using the
+		// runtime auth environment. A colocated Node is not an interpreter pin.
+		versionCommand.Env = harnesslaunch.Environment(childEnv, c.Node.Path)
+	}
 	if harness == "pi" {
 		c.PiNode, c.Node = c.Node, harnesslaunch.Node{}
 		versionCommand.Env = piprobe.Environment(c.Home, c.PiNode.Path)
