@@ -408,7 +408,7 @@ defineExpose({ focusSearch, openFilterMenu, openDisplay, input: computed(() => c
     </FloatingPanel>
     <FloatingPanel
       v-if="displayAnchor" :anchor="displayAnchor" :width="collapsedMenu ? menuPanelWidth(menuColumns) : 320" :tallest="collapsedMenu || displaySheet ? 4000 : 760" align="end" label="Display options"
-      :cycle="collapsedMenu || displaySheet" :sheet="displaySheet" @close="closeDisplay"
+      :cycle="collapsedMenu || displaySheet" :sheet="displaySheet" :full-sheet="!!compactList" @close="closeDisplay"
     >
       <DisplayMenu :plain="!collapsedMenu" :anchor="displayAnchor" :sheet="displaySheet" @columns="count => menuColumns = count" @done="closeDisplay(true)">
         <template #nav><slot name="header-nav" :anchor="displayAnchor!" :close="closeDisplay" /></template>

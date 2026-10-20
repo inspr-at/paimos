@@ -152,7 +152,7 @@ test('AEON-1460 compact ticket list keeps controls still and all actions reachab
           { name: 'open/close overflow', run: async () => { await more.click(); const menu = page.getByRole('menu', { name: 'More view actions', exact: true }); await expect(menu).toBeVisible(); expect(await menu.locator('button').allTextContents()).toEqual(['Display…', 'Hide done', 'Select tickets', 'Save view as…', 'Copy link', 'Export CSV']); add('overflow inside viewport', await box(page.getByRole('dialog', { name: 'More view actions', exact: true })), 'inside viewport', inside(await box(page.getByRole('dialog', { name: 'More view actions', exact: true })), size), 'T4'); add('toolbar movementPx on overflow', delta(anchor, await box(bar)), '0', delta(anchor, await box(bar)) === 0, 'T4'); await shot('T4'); await page.keyboard.press('Escape') } },
         ] })
         add('toolbar movementPx after search/menu close', delta(anchor, await box(bar)), '0', delta(anchor, await box(bar)) === 0, 'T6')
-        if (size.width === 390 || size.width === 320) {
+        if (size.width === 390 || size.width === 320 || landscape) {
           const filter = bar.getByRole('button', { name: 'Filter tickets', exact: true })
           await filter.click()
           const sheet = page.getByRole('dialog', { name: 'Filters', exact: true })
