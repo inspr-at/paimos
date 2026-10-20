@@ -550,8 +550,15 @@ for (const width of [1440, 1024, 400]) for (const theme of ['light', 'dark'] as 
     const { calls, backend } = await setup(page, { example: 'over', dial: { selected: 'claude' } })
     await page.goto('/agents')
     const card = dial(page), fold = card.locator('.fs-tog'), toggle = card.locator('.f-live')
-    // AEON-1286's approved compact chrome starts phones folded; open the detail explicitly.
-    if (width <= 720) { await expect(fold).toHaveAttribute('aria-expanded', 'false'); await fold.click() }
+    // AEON-1286 starts phones folded. AEON-1459 puts that control in the capacity sheet,
+    // and unfolding closes the sheet so the body on the page can be used.
+    const phone = width < 720
+    if (phone) {
+      await showCapacityRow(page)
+      await expect(fold).toHaveAttribute('aria-expanded', 'false')
+      await fold.click()
+      await expect(page.getByRole('dialog', { name: 'Capacity' })).toHaveCount(0)
+    }
     await expect(row(page, 'claude')).toBeVisible()
     await usageRead(page)
     mkdirSync(shots, { recursive: true })
@@ -569,26 +576,61 @@ for (const width of [1440, 1024, 400]) for (const theme of ['light', 'dark'] as 
 
     // 1 · Fold and unfold, and the info area, keep the head still; the rows are below the area and move with it by design.
     const head: Record<string, Locator> = { more: more(page), fewer: fewer(page), fold, dial: control(page).locator('[data-unit="total"]'), toggle, chevron: toggle.locator('> svg') }
-    await expectStableControls({
-      controls: head,
-      scrollAreas: { control: control(page) },
-      interactions: [
-        { name: 'fold', run: async () => { await fold.click(); await expect(fold).toHaveAttribute('aria-expanded', 'false') } },
-        { name: 'unfold', run: async () => { await fold.click(); await expect(fold).toHaveAttribute('aria-expanded', 'true') } },
-        { name: 'open the info area', run: async () => { await toggle.click(); await expect(card.locator('.wh')).toBeVisible() } },
-        { name: 'close the info area', run: async () => { await toggle.click(); await expect(card.locator('.wh')).toBeHidden() } },
-        { name: 'fold with the info area open', run: async () => { await toggle.click(); await fold.click(); await expect(fold).toHaveAttribute('aria-expanded', 'false') } },
-        { name: 'unfold with the info area open', run: async () => { await fold.click(); await expect(fold).toHaveAttribute('aria-expanded', 'true') } },
-        { name: 'close the info area again', run: async () => { await toggle.click(); await expect(card.locator('.wh')).toBeHidden() } },
-      ],
-    })
-    await toggle.click()
-    await shoot('open-info-over-pace')
-    await toggle.click()
+    if (phone) {
+      // The head lives in the sheet. Folding leaves the sheet open, so those controls stay put.
+      // Unfolding dismisses the sheet on purpose: that move is not a sample.
+      await showCapacityRow(page)
+      const sheet = page.getByRole('dialog', { name: 'Capacity' })
+      const done = () => sheet.getByRole('button', { name: 'Done', exact: true })
+      await expectStableControls({
+        controls: head,
+        scrollAreas: { control: control(page) },
+        interactions: [
+          { name: 'open the info area', run: async () => { await toggle.click(); await expect(body(page).locator('.wh')).toBeVisible() } },
+          { name: 'close the info area', run: async () => { await toggle.click(); await expect(body(page).locator('.wh')).toBeHidden() } },
+          { name: 'fold', run: async () => { await fold.click(); await expect(fold).toHaveAttribute('aria-expanded', 'false'); await expect(sheet).toBeVisible(); await expect(body(page)).toHaveCount(0) } },
+        ],
+      })
+      await fold.click()
+      await expect(sheet).toHaveCount(0)
+      await expect(body(page)).toBeVisible()
+      await expect(fold).toHaveAttribute('aria-expanded', 'true')
+      await showCapacityRow(page)
+      await toggle.click()
+      await expect(body(page).locator('.wh')).toBeVisible()
+      await done().click()
+      await expect(sheet).toHaveCount(0)
+      await shoot('open-info-over-pace')
+      await showCapacityRow(page)
+      await toggle.click()
+      await expect(body(page).locator('.wh')).toBeHidden()
+      await done().click()
+      await expect(sheet).toHaveCount(0)
+    } else {
+      await expectStableControls({
+        controls: head,
+        scrollAreas: { control: control(page) },
+        interactions: [
+          { name: 'fold', run: async () => { await fold.click(); await expect(fold).toHaveAttribute('aria-expanded', 'false') } },
+          { name: 'unfold', run: async () => { await fold.click(); await expect(fold).toHaveAttribute('aria-expanded', 'true') } },
+          { name: 'open the info area', run: async () => { await toggle.click(); await expect(card.locator('.wh')).toBeVisible() } },
+          { name: 'close the info area', run: async () => { await toggle.click(); await expect(card.locator('.wh')).toBeHidden() } },
+          { name: 'fold with the info area open', run: async () => { await toggle.click(); await fold.click(); await expect(fold).toHaveAttribute('aria-expanded', 'false') } },
+          { name: 'unfold with the info area open', run: async () => { await fold.click(); await expect(fold).toHaveAttribute('aria-expanded', 'true') } },
+          { name: 'close the info area again', run: async () => { await toggle.click(); await expect(card.locator('.wh')).toBeHidden() } },
+        ],
+      })
+      await toggle.click()
+      await shoot('open-info-over-pace')
+      await toggle.click()
+    }
 
     // 2 · Picking a harness moves nothing: not the rows, not their selectors and steppers, not the frame of the detail.
     const keys = ['codex', 'claude', 'cursor'] as const
-    const controls: Record<string, Locator> = { ...head, frame: card.locator('#dial-detail') }
+    // On a phone the head is display:none once the sheet has made way for the body.
+    const controls: Record<string, Locator> = phone
+      ? { frame: body(page).locator('#dial-detail') }
+      : { ...head, frame: card.locator('#dial-detail') }
     for (const key of keys) Object.assign(controls, { [`${key} row`]: row(page, key), [`${key} choice`]: row(page, key).getByRole('radiogroup'), [`${key} pick`]: row(page, key).locator('.f-sel'), [`${key} mark`]: row(page, key).locator('.f-mode'), [`${key} step`]: row(page, key).locator('.f-pm') })
     const pick = (key: string) => async () => { await row(page, key).locator('.nm').click(); await expect(row(page, key)).toHaveClass(/sel/) }
     const mode = (name: string) => async () => { const radio = row(page, 'codex').getByRole('radio', { name, exact: true }); await radio.click(); await expect(radio).toHaveAttribute('aria-checked', 'true') }
@@ -608,8 +650,9 @@ for (const width of [1440, 1024, 400]) for (const theme of ['light', 'dark'] as 
     // 3 · Folds open downward only: what is above them, the head, the rows and the first fold header, stays.
     const claude = detail(page, 'claude')
     const pace = claude.getByRole('button', { name: 'Pace' }), boost = claude.getByRole('button', { name: 'Boost today' })
+    const above = { claude: row(page, 'claude'), codex: row(page, 'codex'), cursor: row(page, 'cursor'), headline: claude.getByRole('heading'), answer: claude.locator('.ub-hd'), pace }
     await expectStableControls({
-      controls: { ...head, claude: row(page, 'claude'), codex: row(page, 'codex'), cursor: row(page, 'cursor'), headline: claude.getByRole('heading'), answer: claude.locator('.ub-hd'), pace },
+      controls: phone ? above : { ...head, ...above },
       scrollAreas: { body: body(page), rows: card.locator('.rows') },
       interactions: [
         { name: 'open Pace', run: async () => { await pace.click(); await expect(pace).toHaveAttribute('aria-expanded', 'true'); await expect(claude.getByLabel('Percentage points a day')).toBeVisible() } },
@@ -626,8 +669,11 @@ for (const width of [1440, 1024, 400]) for (const theme of ['light', 'dark'] as 
     await shoot('cursor-no-daily-limit')
 
     // 4 · Folded: one row on a wide card, icons with counts on a phone.
+    // Folding from the open sheet keeps the chips in that sheet (AEON-1459).
+    if (phone) await showCapacityRow(page)
     await fold.click()
     await expect(fold).toHaveAttribute('aria-expanded', 'false')
+    if (phone) await expect(page.getByRole('dialog', { name: 'Capacity' })).toBeVisible()
     await shoot('folded-over-pace')
     // A tight row (under 900 px) lifts a unit onto its plate on hover; − and + then step it.
     const lift = async (key: string) => { if (width < 900) await chip(page, key).locator('.du-mark').hover() }

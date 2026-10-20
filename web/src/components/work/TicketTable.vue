@@ -517,10 +517,53 @@ const card = ref<HTMLElement>()
 let sizer: ResizeObserver | undefined
 const visualViewport = window.visualViewport
 let viewportSizing: AbortController | undefined
+function readCardWidth(): number | null {
+  const el = card.value
+  if (!el) return null
+  const box = getComputedStyle(el)
+  const padding = parseFloat(box.paddingLeft) + parseFloat(box.paddingRight)
+  return el.clientWidth - (Number.isFinite(padding) ? padding : 0)
+}
+let cardFrame = 0
 function measureWidth() {
-  if (!card.value) return
-  const box = getComputedStyle(card.value)
-  width.value = card.value.clientWidth - parseFloat(box.paddingLeft) - parseFloat(box.paddingRight)
+  const live = readCardWidth()
+  if (live !== null && live > 0) width.value = live
+}
+// clientWidth during a viewport resize can still be the previous frame. One
+// such read lays the wide column set into the card that has already narrowed
+// and crushes Title (AEON-1470). A narrower content box is that frame; a wider
+// one is a stale sample, so the live card wins (AEON-1401). Two agreeing
+// frames then adopt the card, so a queued narrow sample cannot keep Updated
+// hidden after the card has grown, and one stale frame cannot undo the shrink.
+function settleCardWidth() {
+  const frame = ++cardFrame
+  requestAnimationFrame(() => {
+    if (frame !== cardFrame || !columnsAlive) return
+    const mid = readCardWidth()
+    requestAnimationFrame(() => {
+      if (frame !== cardFrame || !columnsAlive) return
+      const next = readCardWidth()
+      if (mid === null || next === null || next <= 0 || Math.abs(next - mid) > 0.5) return
+      width.value = next
+    })
+  })
+}
+function applyCardSize(entries: ResizeObserverEntry[]) {
+  const live = readCardWidth()
+  if (live === null) return
+  let observed = live
+  for (const entry of entries) {
+    const box = entry.contentRect?.width
+    if (typeof box === 'number' && Number.isFinite(box) && box > 0) observed = Math.min(observed, box)
+  }
+  if (Math.abs(live - width.value) <= 0.5 && observed < live - 0.5) width.value = observed
+  else if (live > 0) width.value = live
+  settleCardWidth()
+}
+function measureSoon() {
+  const live = readCardWidth()
+  if (live !== null && live > 0 && live <= width.value + 0.5) width.value = live
+  settleCardWidth()
 }
 const phoneChange = () => { phone.value = phoneQuery.matches }
 const coarseChange = () => { coarse.value = coarseQuery.matches }
@@ -545,15 +588,15 @@ onMounted(() => {
     // Deliveries can describe either side of a viewport resize. Read the live
     // card in both directions: a queued narrow sample must not hide a column
     // that already has room to return, just as a wide one must not crowd Title.
-    sizer = new ResizeObserver(measureWidth)
+    sizer = new ResizeObserver(applyCardSize)
     sizer.observe(card.value)
   }
   // A viewport can shrink before the card observer is delivered. Fit the loaded
   // status names and Parent to the current card now, so their old widths cannot
   // consume Title's minimum in that frame (AEON-1401, AEON-1470).
   viewportSizing = new AbortController()
-  window.addEventListener('resize', measureWidth, { signal: viewportSizing.signal })
-  visualViewport?.addEventListener('resize', measureWidth, { signal: viewportSizing.signal })
+  window.addEventListener('resize', measureSoon, { signal: viewportSizing.signal })
+  visualViewport?.addEventListener('resize', measureSoon, { signal: viewportSizing.signal })
 })
 onBeforeUnmount(() => {
   columnsAlive = false; fitGeneration++

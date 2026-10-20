@@ -434,7 +434,8 @@ test.describe('collapsed header: the menu never scrolls', () => {
     }
     await swapUp('priority', 'Priority', 'button')
     await swapUp('assignee', 'Assignee', 'key')
-    await swapUp('epic', 'Epic', 'drag')
+    // Legacy Epic choices are Parent (AEON-1470). The slot swap is unchanged.
+    await swapUp('parent', 'Parent', 'drag')
     await expect(body).toHaveAttribute('data-split', '')
     await noScroll(page, 'after reordering split columns')
   })

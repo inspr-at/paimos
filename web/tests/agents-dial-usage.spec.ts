@@ -11,6 +11,7 @@ import { agentData, mockAgents } from './agents-fixtures'
 import { capacityWorld } from './capacity-fixtures'
 import { mockEffectivePermissions } from './authz-fixtures'
 import { expectStableControls } from './helpers/stable'
+import { showCapacityRow } from './helpers/compact'
 import { dailyPlan, mockDailyPlan } from './agents-daily-fixtures'
 import type { QuotaOutlook } from '../src/lib/quotaOutlook'
 import { OUTLOOK as scenarios } from './quota-outlook-fixtures'
@@ -83,7 +84,15 @@ for (const width of [1440, 1024, 390]) {
     const errors = watchErrors(page)
     const { state } = await setup(page)
     await page.goto('/agents')
-    if (phone) { await control(page).locator('.fs-tog').click() }
+    // AEON-1459: on a phone the fold control lives in the capacity sheet, which
+    // makes way for the body. A longer timeout does not show a display:none row.
+    if (phone) {
+      await showCapacityRow(page)
+      const fold = control(page).locator('.fs-tog')
+      await expect(fold).toHaveAttribute('aria-expanded', 'false')
+      await fold.click()
+      await expect(page.getByRole('dialog', { name: 'Capacity' })).toHaveCount(0)
+    }
     const claude = detail(page, 'claude')
     // The rows: the running count beside the name, the group's usage as the sub line with its state icon.
     await expect(row(page, 'claude').locator('.sub')).toHaveText(SHORT)

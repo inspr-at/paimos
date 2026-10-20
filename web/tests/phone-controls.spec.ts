@@ -84,8 +84,11 @@ for (const width of [390, 768, 1024, 1440]) {
         } })),
       })
       const columns = dialog.getByRole('list', { name: 'Columns', exact: true })
-      const checkbox = columns.getByRole('checkbox', { name: 'Cost unit', exact: true })
-      const columnRow = columns.locator('.row').filter({ has: page.getByRole('checkbox', { name: 'Cost unit', exact: true }) })
+      // The row stays reachable when its name also carries "hidden at this width".
+      const checkbox = dialog.locator('input[data-column-row="cost"]')
+      const columnRow = dialog.locator('li.row').filter({ has: checkbox })
+      await checkbox.scrollIntoViewIfNeeded()
+      await expect(checkbox).toHaveAccessibleName(/^Cost unit\b/)
       await expectStableControls({
         controls: { ...pinned, columns, columnRow, checkbox }, scrollAreas: { body: scroll },
         interactions: [{ name: 'show Cost unit', run: async () => {
@@ -142,7 +145,11 @@ for (const width of [390, 768, 1024, 1440]) {
         await inFrame(dialog.locator('footer button'), dialog)
         await capture(page, `display-${width}-${theme}`)
         await dialog.locator('footer button').click()
-        await expect(opener).toBeFocused()
+        // AEON-1559 keeps a Display button in sight, so closing returns there.
+        // Filters receives focus only when that button is not in the page.
+        const display = page.locator('#project-view-settings .display-btn')
+        const displayShown = await display.evaluate(el => el.offsetParent !== null).catch(() => false)
+        await expect(displayShown ? display : opener).toBeFocused()
       } else {
         await capture(page, `display-${width}-${theme}`)
         await page.keyboard.press('Escape')
