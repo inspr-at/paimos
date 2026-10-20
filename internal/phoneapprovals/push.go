@@ -362,7 +362,7 @@ type deskNotice struct {
 	Kind, ID  string
 	Revision  int64
 	CreatedAt time.Time
-	backlog   bool // Created before this device's Desk opt-in. One summary, never a replay.
+	backlog   bool // Created before the person's latest Desk opt-in. One summary, never a replay.
 }
 
 type deskBatch struct {
