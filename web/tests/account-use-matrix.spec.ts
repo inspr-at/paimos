@@ -504,9 +504,12 @@ test('the pairing review shows the rows the rule pre-fills', async ({ page }) =>
   await page.goto('/agents/register-agent')
   await page.getByLabel('Pairing code').fill('123-456-789')
   await page.getByRole('button', { name: 'Look up code' }).click()
-  const preview = page.getByRole('region', { name: 'Pairing review' }).locator('[data-pairing-use]')
-  await expect(preview).toContainText('New accounts: allow automatically.')
-  await expect(preview.locator('li')).toHaveText([/^Default\s*Allowed$/, /^Acme client work\s*Allowed$/, /^Beta\s*Never for new accounts$/])
+  // AEON-1502: one compact Details row names where the rule lets the new accounts work.
+  const review = page.getByRole('region', { name: 'Pairing review' })
+  await review.locator('details.more > summary').click()
+  const preview = review.locator('[data-pairing-use]')
+  await expect(preview.locator('dt')).toHaveText('Where accounts may work')
+  await expect(preview.locator('dd')).toHaveText('Default and Acme client work · change in Settings › Accounts')
   expect(w.writes).toEqual([])
 })
 
