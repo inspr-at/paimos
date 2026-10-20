@@ -516,6 +516,7 @@ const quickAligned = computed(() => ids.value[2] === 'status' && ids.value[3] ==
 const card = ref<HTMLElement>()
 let sizer: ResizeObserver | undefined
 const visualViewport = window.visualViewport
+let viewportSizing: AbortController | undefined
 function measureWidth() {
   if (!card.value) return
   const box = getComputedStyle(card.value)
@@ -546,13 +547,14 @@ onMounted(() => {
   // A viewport can shrink before the card observer is delivered. Fit the loaded
   // status names and Parent to the current card now, so their old widths cannot
   // consume Title's minimum in that frame (AEON-1401, AEON-1470).
-  window.addEventListener('resize', measureWidth)
-  visualViewport?.addEventListener('resize', measureWidth)
+  viewportSizing = new AbortController()
+  window.addEventListener('resize', measureWidth, { signal: viewportSizing.signal })
+  visualViewport?.addEventListener('resize', measureWidth, { signal: viewportSizing.signal })
 })
 onBeforeUnmount(() => {
   columnsAlive = false; fitGeneration++
   phoneQuery.removeEventListener('change', phoneChange); coarseQuery.removeEventListener('change', coarseChange)
-  window.removeEventListener('resize', measureWidth); visualViewport?.removeEventListener('resize', measureWidth)
+  viewportSizing?.abort()
   sizer?.disconnect()
 })
 // ---------- Column widths: drag a header edge; double-click fits, or resets Title ----------
