@@ -290,6 +290,8 @@
     ,
     "browser:tests/aeon-1285-agent-rows.spec.ts:light 390: stop reasons in words, Lead only for the claimed lead, a retried failure folds into Ended"
     ,
+    "browser:tests/aeon-1401-status-names.spec.ts:AEON-1401 a Decision Desk line reads the workspace name"
+    ,
     "browser:tests/aeon-1439-panel-opening.spec.ts:AEON-1439: 1440 dark refreshes keep the chosen tab and write the opening line once"
     ,
     "browser:tests/aeon-1439-panel-opening.spec.ts:AEON-1439: 390 dark refreshes keep the chosen tab and write the opening line once"
@@ -6188,6 +6190,14 @@
     ,
     {"kind":"browser","file":"tests/aeon-1339-desk-polish.spec.ts","name":"the memo matches the approved sheet and closes after the last decision","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
+    {"kind":"browser","file":"tests/aeon-1401-status-names.spec.ts","name":"AEON-1401 a Decision Desk line reads the workspace name","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/aeon-1401-status-names.spec.ts","name":"AEON-1401 lists, the status menu, the ticket header, Desk and activity read the workspace name; writes stay canonical","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/aeon-1401-status-names.spec.ts","name":"AEON-1401 the Status names card renames, refuses ambiguous names and keeps its controls still","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/aeon-1401-status-names.spec.ts","name":"AEON-1401 the public portal and roadmap read the workspace name per language","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
     {"kind":"browser","file":"tests/aeon-1438-chat-thread.spec.ts","name":"AEON-1286 inline code keeps the line box at 390 light","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
     {"kind":"browser","file":"tests/aeon-1438-chat-thread.spec.ts","name":"AEON-1438 Copy and Reply on demand 1024: hover and focus reveal them in the gap, nothing moves","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
@@ -9597,6 +9607,8 @@
     {"kind":"browser","file":"tests/header-glimpse-context.spec.ts","name":"scrolling the entire backdrop out of view pauses it and returning resumes it","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
     {"kind":"browser","file":"tests/header-glimpse.spec.ts","name":"AEON-1337: a visual viewport resize clears the glimpse before the next animation frame","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/header-glimpse.spec.ts","name":"AEON-1401: the delivered viewport width clears a glimpse while geometry and media reads stay wide","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
     {"kind":"browser","file":"tests/header-glimpse.spec.ts","name":"AEON-1414: a shrink clears the glimpse while viewport notifications and animation frames are stalled","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
@@ -17178,6 +17190,10 @@
     ,
     {"kind":"node","file":"tests/status-definitions.test.ts","name":"people, agents and menus share all approved states, definitions, rule defaults and exits","tier":"GATED-FULL"}
     ,
+    {"kind":"node","file":"tests/status-names.test.ts","name":"statuses read as the workspace names them, per locale, with built-in fallback","tier":"ESSENTIAL"}
+    ,
+    {"kind":"node","file":"tests/status-names.test.ts","name":"the card refuses long names and names another status reads as","tier":"ESSENTIAL"}
+    ,
     {"kind":"node","file":"tests/tenant-brand.test.ts","name":"SVG removal notice names attributes and follows the app language for German profiles","tier":"GATED-FULL"}
     ,
     {"kind":"node","file":"tests/tenant-brand.test.ts","name":"logos are fitted into the header slot at their own proportions","tier":"GATED-FULL"}
@@ -20595,6 +20611,12 @@
     {"kind":"vitest","file":"tests/status-motion.unit.test.ts","name":"every status but In progress has a one-off on its marks, with the design timings and cheap properties only","tier":"ESSENTIAL"}
     ,
     {"kind":"vitest","file":"tests/status-motion.unit.test.ts","name":"reduced motion skips every one-off","tier":"ESSENTIAL"}
+    ,
+    {"kind":"vitest","file":"tests/status-names-card.unit.test.ts","name":"a conflict answered while the person changes keeps the next person’s refused draft","tier":"ESSENTIAL"}
+    ,
+    {"kind":"vitest","file":"tests/status-names-card.unit.test.ts","name":"a save answered while the person changes leaves the next person’s names and drafts alone","tier":"ESSENTIAL"}
+    ,
+    {"kind":"vitest","file":"tests/status-names-card.unit.test.ts","name":"the earlier person’s save ending never starts a second save beside the next person’s","tier":"ESSENTIAL"}
     ,
     {"kind":"vitest","file":"tests/status-time.unit.test.ts","name":"bridges a day without a release, keeps a gap for no data yet, and says which is which","tier":"ESSENTIAL"}
     ,

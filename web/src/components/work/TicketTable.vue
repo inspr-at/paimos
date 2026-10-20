@@ -515,6 +515,13 @@ const narrowStatus = computed(() => !phone.value && (colWidth('status') ?? 138) 
 const quickAligned = computed(() => ids.value[2] === 'status' && ids.value[3] === 'priority')
 const card = ref<HTMLElement>()
 let sizer: ResizeObserver | undefined
+const visualViewport = window.visualViewport
+let viewportSizing: AbortController | undefined
+function measureWidth() {
+  if (!card.value) return
+  const box = getComputedStyle(card.value)
+  width.value = card.value.clientWidth - parseFloat(box.paddingLeft) - parseFloat(box.paddingRight)
+}
 const phoneChange = () => { phone.value = phoneQuery.matches }
 const coarseChange = () => { coarse.value = coarseQuery.matches }
 onMounted(() => {
@@ -534,12 +541,29 @@ onMounted(() => {
   coarseQuery.addEventListener('change', coarseChange)
   if (card.value) {
     // The first fit happens before paint, so the columns never jump into place.
-    const box = getComputedStyle(card.value)
-    width.value = card.value.clientWidth - parseFloat(box.paddingLeft) - parseFloat(box.paddingRight)
-    sizer = new ResizeObserver(([entry]) => { width.value = entry.contentRect.width }); sizer.observe(card.value)
+    measureWidth()
+    sizer = new ResizeObserver(([entry]) => {
+      // The viewport event may already have measured a narrower card. A queued
+      // delivery must not restore the preceding wide frame; conversely, its
+      // narrower sample wins while a geometry read still describes that frame.
+      measureWidth()
+      width.value = Math.min(width.value, entry.contentRect.width)
+    })
+    sizer.observe(card.value)
   }
+  // A viewport can shrink before the card observer is delivered. Fit the loaded
+  // status names and Parent to the current card now, so their old widths cannot
+  // consume Title's minimum in that frame (AEON-1401, AEON-1470).
+  viewportSizing = new AbortController()
+  window.addEventListener('resize', measureWidth, { signal: viewportSizing.signal })
+  visualViewport?.addEventListener('resize', measureWidth, { signal: viewportSizing.signal })
 })
-onBeforeUnmount(() => { columnsAlive = false; fitGeneration++; phoneQuery.removeEventListener('change', phoneChange); coarseQuery.removeEventListener('change', coarseChange); sizer?.disconnect() })
+onBeforeUnmount(() => {
+  columnsAlive = false; fitGeneration++
+  phoneQuery.removeEventListener('change', phoneChange); coarseQuery.removeEventListener('change', coarseChange)
+  viewportSizing?.abort()
+  sizer?.disconnect()
+})
 // ---------- Column widths: drag a header edge; double-click fits, or resets Title ----------
 let resizing: { id: string; startX: number; startWidth: number } | null = null
 // Two presses within 350ms on the same edge fit the column (pointerdown's

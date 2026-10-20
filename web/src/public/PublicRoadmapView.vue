@@ -21,6 +21,7 @@ interface RoadmapDocument {
   schema: string
   product: { key: string; title: string; summary: string } | null
   items: RoadmapItem[]
+  status_names?: { in_progress?: { en?: string; de?: string } }
 }
 
 const langKey = 'aeon.portal.roadmap.lang'
@@ -90,7 +91,8 @@ function statusLabel(status: string) {
   const german = lang.value === 'de'
   switch (status) {
     case 'in_progress':
-      return german ? 'In Arbeit' : 'In progress'
+      // The workspace's own words for In progress (AEON-1401), per language.
+      return doc.value?.status_names?.in_progress?.[lang.value] || (german ? 'In Arbeit' : 'In progress')
     case 'shipped':
       return german ? 'Geliefert' : 'Shipped'
     default:

@@ -11,6 +11,7 @@ import { useIdentityScope } from '../lib/useIdentityScope'
 import { useWorkspaceActivity } from '../lib/useWorkspaceActivity'
 import { automaticTarget } from '../lib/statusAutopilot'
 import { absoluteTime, statusMeta } from '../lib/work'
+import { statusName } from '../lib/statusNames'
 import type { ActivityView, WorkspaceActivityItem } from '../lib/workspaceActivity'
 
 const route = useRoute(), router = useRouter()
@@ -18,7 +19,8 @@ const views: { value: ActivityView; label: string; icon: IconName }[] = [
   { value: 'everything', label: 'Everything', icon: 'history' }, { value: 'automatic', label: 'Automatic changes', icon: 'sparkle' },
   { value: 'people', label: 'People', icon: 'users' }, { value: 'agents', label: 'Agents', icon: 'agent' },
 ]
-const rules = [ ['new', 'New to Triage list'], ['backlog', 'Backlog to Cancel suggested'], ['blocked', 'Blocked to Reminder'], ['progress', 'In progress to Open'], ['done', 'Done to Missed release'], ['publish', 'Done to Delivered'], ['accept', 'Delivered to Accepted'], ['work_parent', 'Work parent'] ]
+// Status words read as the workspace names them (AEON-1401).
+const rules = computed(() => [ ['new', `${statusName('new')} to Triage list`], ['backlog', `${statusName('backlog')} to Cancel suggested`], ['blocked', `${statusName('blocked')} to Reminder`], ['progress', `${statusName('in_progress')} to ${statusName('open')}`], ['done', `${statusName('done')} to Missed release`], ['publish', `${statusName('done')} to ${statusName('delivered')}`], ['accept', `${statusName('delivered')} to ${statusName('accepted')}`], ['work_parent', 'Work parent'] ])
 const queryValue = (key: string) => typeof route.query[key] === 'string' ? String(route.query[key]) : ''
 const view = computed<ActivityView>(() => views.find(v => v.value === queryValue('view'))?.value ?? 'everything')
 const filters = computed(() => ({ view: view.value, rule: queryValue('rule'), project_id: queryValue('project_id'), q: queryValue('q') }))

@@ -388,6 +388,12 @@ components:
         pace: {$ref: '#/components/schemas/PortalPublicPace'}
         release_history: {type: boolean, description: True only when the linked project publishes release notes. Omitted otherwise. Notes themselves stay on the releases document.}
         roadmap: {type: boolean, description: True only when at least one public roadmap item exists. Omitted otherwise. Items stay on the roadmap document.}
+        status_names:
+          type: object
+          additionalProperties: false
+          description: 'AEON-1401. The workspace''s own names for In progress, the one status the catalog and the roadmap name. Omitted while it keeps the built-in name.'
+          properties:
+            in_progress: {$ref: '#/components/schemas/StatusName'}
     PortalPublicCell:
       type: object
       additionalProperties: false
@@ -448,6 +454,12 @@ components:
         schema: {type: string, enum: [inspr.release-roadmap.v1]}
         product: {oneOf: [{type: 'null'}, {$ref: '#/components/schemas/PortalProduct'}]}
         items: {type: array, items: {$ref: '#/components/schemas/PortalPublicRoadmapItem'}}
+        status_names:
+          type: object
+          additionalProperties: false
+          description: 'AEON-1401. The workspace''s own names for In progress, the one status the catalog and the roadmap name. Omitted while it keeps the built-in name.'
+          properties:
+            in_progress: {$ref: '#/components/schemas/StatusName'}
     PortalPublicRoadmapItem:
       type: object
       additionalProperties: false

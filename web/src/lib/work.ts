@@ -1,12 +1,16 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // Pure helpers for the ticket list and project pages: product words, status and
-// priority semantics, time formatting, sorting and highlighting. No Vue here, so
-// tests/work.test.ts can run them under plain Node.
+// priority semantics, time formatting, sorting and highlighting. No components
+// here, so tests/work.test.ts can run them under plain Node; status labels read
+// the workspace's reactive status names (statusNames.ts, AEON-1401).
+import { statusName, type StatusNameKey } from './statusNames.ts'
 
 export type StatusKey = 'open' | 'new' | 'backlog' | 'blocked' | 'progress' | 'qa' | 'done' | 'delivered' | 'accepted' | 'cancelled' | 'archived' | 'other'
-export interface StatusMeta { key: StatusKey; label: string; closed: boolean; order: number }
+// label is what people read (the workspace's name for it, AEON-1401); builtIn is
+// the shipped name, which the stored state, the API and --json stand for.
+export interface StatusMeta { key: StatusKey; label: string; builtIn: string; closed: boolean; order: number }
 
-const STATUS: Record<Exclude<StatusKey, 'other'>, Omit<StatusMeta, 'key'>> = {
+const STATUS: Record<Exclude<StatusKey, 'other'>, Omit<StatusMeta, 'key' | 'builtIn'>> = {
   open: { label: 'Open', closed: false, order: 2 },
   new: { label: 'New', closed: false, order: 0 },
   backlog: { label: 'Backlog', closed: false, order: 1 },
@@ -35,8 +39,9 @@ export function statusMeta(state: string): StatusMeta {
   const key: StatusKey = normal === 'in_progress' || normal === 'active' ? 'progress'
     : normal === 'canceled' ? 'cancelled'
     : normal in STATUS ? normal as StatusKey : 'other'
-  if (key === 'other') return { key, label: sentenceCase(state), closed: false, order: 11 }
-  return { key, ...STATUS[key] }
+  if (key === 'other') { const label = sentenceCase(state); return { key, label, builtIn: label, closed: false, order: 11 } }
+  const meta = STATUS[key], name: StatusNameKey = key === 'progress' ? 'in_progress' : key
+  return { key, ...meta, label: statusName(name), builtIn: meta.label }
 }
 
 // States a person can set from the list, in workflow order. The in-progress value

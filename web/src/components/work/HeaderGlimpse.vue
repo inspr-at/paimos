@@ -21,6 +21,7 @@ const wideMedia = `(min-width: ${GLIMPSE_MIN_WIDTH}px)`
 const wideQuery = window.matchMedia(wideMedia)
 const reducedQuery = window.matchMedia('(prefers-reduced-motion: reduce)')
 const visualViewport = window.visualViewport
+let observedViewportWidth = Infinity
 const wide = ref(headerGlimpseViewportWide(wideQuery.matches, viewportWidth())), reduced = ref(reducedQuery.matches), idle = ref(false)
 const paint = ref(false), userPaused = ref(false), occluded = ref(false)
 const data = shallowRef<GraphData>({ nodes: [], links: [] })
@@ -91,7 +92,7 @@ function viewportWidth() {
   // ResizeObserver has a fresh layout even when Chromium's window width and
   // media-query hints still describe the preceding viewport. A narrow root
   // must clear the canvas in that delivery, including a queued wide change.
-  return Math.min(window.innerWidth, document.documentElement.getBoundingClientRect().width)
+  return Math.min(window.innerWidth, document.documentElement.getBoundingClientRect().width, observedViewportWidth)
 }
 // Re-read a fresh query. The list from setup can miss `change` while the
 // canvas is painting, and its matches flag can stay true after a shrink.
@@ -278,7 +279,14 @@ onMounted(() => {
   // Software GL can delay animation frames along with the layout viewport's
   // notifications. This independent delivery checks the same width gate now.
   visualViewport?.addEventListener('resize', onResize)
-  viewportWatch = new ResizeObserver(followViewport)
+  viewportWatch = new ResizeObserver(entries => {
+    // Keep the delivered layout sample: rereading window/media/geometry here
+    // can still return the preceding wide frame. Body-only deliveries must
+    // not overwrite the root's viewport width or revive a cleared glimpse.
+    const viewport = entries.find(entry => entry.target === document.documentElement)
+    if (viewport) observedViewportWidth = viewport.borderBoxSize[0]?.inlineSize ?? viewport.contentRect.width
+    followViewport()
+  })
   viewportWatch.observe(document.documentElement)
   // A delivery that names only the document element can be dropped while the
   // body box still changes with the viewport. Read that box too.

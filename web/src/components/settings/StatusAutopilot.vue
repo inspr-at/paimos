@@ -14,6 +14,8 @@ import TicketLink from '../releases/TicketLink.vue'
 import SettingsCard from './SettingsCard.vue'
 import NeedsYouList, { type NeedsYouItem } from './NeedsYouList.vue'
 import ChoicePicker from './ChoicePicker.vue'
+import StatusNamesCard from './StatusNamesCard.vue'
+import { statusName } from '../../lib/statusNames'
 const router = useRouter(), scope = useIdentityScope(() => can('settings.manage'))
 const reads = scope.lane(), pickerReads = scope.lane(), projectReads = scope.lane(), recentReads = scope.lane()
 const settings = ref<AutopilotSettings | null>(null), projects = ref<AutopilotProject[]>([]), changes = ref<AutomaticChange[]>([])
@@ -37,23 +39,24 @@ const explanations: Record<string, string> = {
 }
 const needs = computed<NeedsYouItem[]>(() => ATTENTION_KINDS.map(kind => {
   const count = attention.value?.counts[kind.id] ?? 0
-  const explanation = kind.id === 'missed' ? `Done for ${settings.value?.rules.done.days ?? 14}+ days and not in any release.` : explanations[kind.id]!
+  const explanation = kind.id === 'missed' ? `${statusName('done')} for ${settings.value?.rules.done.days ?? 14}+ days and not in any release.` : explanations[kind.id]!
   return { id: kind.id, name: count ? `${count.toLocaleString()} ${waitingNames[kind.id]![count === 1 ? 0 : 1]}` : waitingNames[kind.id]![2], count, detail: count ? explanation : `${explanation} None right now.`, icon: kind.id === 'cancel' ? 'close' : kind.icon, action: { label: 'Open' } }
 }))
 const heading = computed(() => { const count = attention.value?.total ?? 0; return count ? `${count.toLocaleString()} ${count === 1 ? 'ticket needs' : 'tickets need'} a person` : 'Nothing needs a person' })
 function openAttention(kind = '') { void router.push({ path: '/tickets', query: kind ? { kind } : {} }) }
 function failed(e: unknown) { error.value = e instanceof Error ? e.message : 'Autopilot could not be loaded or saved.'; toast(error.value, { tone: 'error' }) }
 function markSaved() { saved.value = true; clearTimeout(savedTimer); savedTimer = setTimeout(() => { saved.value = false }, 2000) }
-function syncDays() { errors.value = {}; draftDays.value = {}; for (const rule of rules) if (settings.value?.rules[rule.key].days !== undefined) draftDays.value[rule.key] = String(settings.value.rules[rule.key].days) }
-const rules: { key: RuleKey; from: string; fromLabel: string; to: string; toLabel: string; glyph?: IconName; label: string; aria?: string }[] = [
-  { key: 'new', from: 'new', fromLabel: 'New', to: 'triage_list', toLabel: 'Triage list', glyph: 'list', label: 'Listed for triage when untriaged for', aria: 'Days a ticket stays New before it is listed for triage' },
-  { key: 'backlog', from: 'backlog', fromLabel: 'Backlog', to: 'cancelled', toLabel: 'Cancel suggested', label: 'Cancel suggested when untouched for', aria: 'Days untouched in Backlog before Cancelled is suggested' },
-  { key: 'blocked', from: 'blocked', fromLabel: 'Blocked', to: 'reminder', toLabel: 'Reminder', glyph: 'clock', label: 'Reminder when blocked for', aria: 'Days blocked before a reminder' },
-  { key: 'progress', from: 'in_progress', fromLabel: 'In progress', to: 'open', toLabel: 'Open', label: 'Back to Open, with a comment, when no session, branch or PR for', aria: 'Days without a session, branch or PR before In progress goes back to Open' },
-  { key: 'done', from: 'done', fromLabel: 'Done', to: 'missed_release', toLabel: 'Done, but in no release', glyph: 'alert', label: 'Flagged when merged but not released for', aria: 'Days merged but not released before the missed release flag' },
-  { key: 'publish', from: 'done', fromLabel: 'Done', to: 'delivered', toLabel: 'Delivered', label: 'When a release with the ticket is published' },
-  { key: 'accept', from: 'delivered', fromLabel: 'Delivered', to: 'accepted', toLabel: 'Accepted', label: 'Accepted when delivered without objection for', aria: 'Days delivered without objection before Accepted' },
-]
+function syncDays() { errors.value = {}; draftDays.value = {}; for (const rule of rules.value) if (settings.value?.rules[rule.key].days !== undefined) draftDays.value[rule.key] = String(settings.value.rules[rule.key].days) }
+// Status words follow the workspace's names (AEON-1401); the rules stay on the canonical states.
+const rules = computed<{ key: RuleKey; from: string; fromLabel: string; to: string; toLabel: string; glyph?: IconName; label: string; aria?: string }[]>(() => [
+  { key: 'new', from: 'new', fromLabel: statusName('new'), to: 'triage_list', toLabel: 'Triage list', glyph: 'list', label: 'Listed for triage when untriaged for', aria: `Days a ticket stays ${statusName('new')} before it is listed for triage` },
+  { key: 'backlog', from: 'backlog', fromLabel: statusName('backlog'), to: 'cancelled', toLabel: 'Cancel suggested', label: 'Cancel suggested when untouched for', aria: `Days untouched in ${statusName('backlog')} before ${statusName('cancelled')} is suggested` },
+  { key: 'blocked', from: 'blocked', fromLabel: statusName('blocked'), to: 'reminder', toLabel: 'Reminder', glyph: 'clock', label: 'Reminder when blocked for', aria: 'Days blocked before a reminder' },
+  { key: 'progress', from: 'in_progress', fromLabel: statusName('in_progress'), to: 'open', toLabel: statusName('open'), label: `Back to ${statusName('open')}, with a comment, when no session, branch or PR for`, aria: `Days without a session, branch or PR before ${statusName('in_progress')} goes back to ${statusName('open')}` },
+  { key: 'done', from: 'done', fromLabel: statusName('done'), to: 'missed_release', toLabel: `${statusName('done')}, but in no release`, glyph: 'alert', label: 'Flagged when merged but not released for', aria: 'Days merged but not released before the missed release flag' },
+  { key: 'publish', from: 'done', fromLabel: statusName('done'), to: 'delivered', toLabel: statusName('delivered'), label: 'When a release with the ticket is published' },
+  { key: 'accept', from: 'delivered', fromLabel: statusName('delivered'), to: 'accepted', toLabel: statusName('accepted'), label: `${statusName('accepted')} when delivered without objection for`, aria: `Days delivered without objection before ${statusName('accepted')}` },
+])
 
 function load() {
   loading.value = true; error.value = ''
@@ -148,8 +151,9 @@ function chooseProject(id: string) { const project = pickerChoices.value.find(p 
       <NeedsYouList id="autopilot-suggestions" :items="needs" :heading="heading" show-calm @action="openAttention">
         <template #aside><span>Worked in Tickets, one line each</span><button type="button" class="btn sm" :disabled="!attention?.total" @click="openAttention()">Open all<AppIcon name="arrow" :size="13" /></button></template>
       </NeedsYouList>
+      <StatusNamesCard />
       <SettingsCard title="Status autopilot" icon="sparkle" anchor="status-autopilot">
-        <template #lead>Moves tickets on their own: Delivered when a release ships, Accepted {{ settings.rules.accept.days }} days later, back to Open when work stalls. Every change is logged with its reason and can be undone.</template>
+        <template #lead>Moves tickets on their own: {{ statusName('delivered') }} when a release ships, {{ statusName('accepted') }} {{ settings.rules.accept.days }} days later, back to {{ statusName('open') }} when work stalls. Every change is logged with its reason and can be undone.</template>
         <template #aside><label class="switch"><input type="checkbox" role="switch" aria-label="Status autopilot" :checked="intent?.master ?? settings.enabled" :disabled="pending || loading || !scope.owner.value" @change="toggleMaster" /><span class="master-state"><span v-for="word in ['On', 'Off', 'Suggest']" :key="word" :style="{ visibility: word === (settings.effective_mode === 'suggest' ? 'Suggest' : settings.effective_mode === 'off' ? 'Off' : settings.enabled ? 'On' : 'Off') ? 'visible' : 'hidden' }">{{ word }}</span></span></label></template>
         <p v-if="settings.suggest_until && settings.effective_mode === 'suggest'" class="set-note"><AppIcon name="info" :size="14" /><span>After this upgrade, proposed changes wait for review until {{ new Date(settings.suggest_until).toLocaleString() }}. Review them in Tickets under Needs attention, or enable automatic changes now.<button v-if="can('ownership.transfer')" type="button" class="btn sm" :disabled="pending || loading || !scope.owner.value || settings.server_mode !== 'on'" @click="save(settings, true)">Enable automatic changes</button></span></p>
         <p v-if="settings.server_mode && settings.server_mode !== 'on'" class="set-note"><AppIcon name="info" :size="14" /><span>{{ settings.server_mode === 'off' ? 'The server operator has paused status autopilot. Workspace and project settings cannot enable it.' : 'The server operator requires Suggest mode. Proposed changes wait for Apply or Dismiss.' }}</span></p>
@@ -161,7 +165,7 @@ function chooseProject(id: string) { const project = pickerChoices.value.find(p 
             <label class="switch"><input type="checkbox" role="switch" :aria-label="`${rule.fromLabel} to ${rule.toLabel}`" :checked="intent?.rule === rule.key ? intent.enabled : settings.rules[rule.key].enabled" :disabled="pending || loading || !scope.owner.value || !settings.enabled" @change="toggleRule(rule.key, $event)" /></label>
           </div>
         </div>
-        <p class="set-note"><svg v-if="settings.enabled" width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="6.2" cy="5.2" r="2.5" /><path d="M1.8 13.6c0-2.6 2-4.2 4.4-4.2 1 0 1.9.3 2.6.7" /><path d="m9.8 11.6 1.7 1.7 3-3.3" /></svg><AppIcon v-else name="info" :size="14" /><span class="note-words"><span :style="{ visibility: settings.enabled ? 'visible' : 'hidden' }" :aria-hidden="!settings.enabled">Tickets with a human check are skipped by the moves to Delivered and Accepted, with a comment, until someone marks them checked.</span><span :style="{ visibility: settings.enabled ? 'hidden' : 'visible' }" :aria-hidden="settings.enabled">Off: nothing moves on its own. Suggestions are still listed.</span></span></p>
+        <p class="set-note"><svg v-if="settings.enabled" width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="6.2" cy="5.2" r="2.5" /><path d="M1.8 13.6c0-2.6 2-4.2 4.4-4.2 1 0 1.9.3 2.6.7" /><path d="m9.8 11.6 1.7 1.7 3-3.3" /></svg><AppIcon v-else name="info" :size="14" /><span class="note-words"><span :style="{ visibility: settings.enabled ? 'visible' : 'hidden' }" :aria-hidden="!settings.enabled">Tickets with a human check are skipped by the moves to {{ statusName('delivered') }} and {{ statusName('accepted') }}, with a comment, until someone marks them checked.</span><span :style="{ visibility: settings.enabled ? 'hidden' : 'visible' }" :aria-hidden="settings.enabled">Off: nothing moves on its own. Suggestions are still listed.</span></span></p>
       </SettingsCard>
 
       <SettingsCard title="Project overrides" icon="folders" anchor="autopilot-projects">

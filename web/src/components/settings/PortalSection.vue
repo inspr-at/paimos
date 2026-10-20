@@ -9,12 +9,14 @@ import ReleaseName from '../ReleaseName.vue'
 import PortalMarket from './PortalMarket.vue'
 import PortalPace from './PortalPace.vue'
 import SettingsCard from './SettingsCard.vue'
+import { statusName } from '../../lib/statusNames'
 
 const FEATURE_STATUSES = [
   { id: 'idea', label: 'Idea' },
   { id: 'reviewed', label: 'Reviewed' },
   { id: 'planned', label: 'Planned' },
-  { id: 'in_progress', label: 'In progress' },
+  // The public portal shows the workspace's own words for In progress (AEON-1401).
+  { id: 'in_progress', get label() { return statusName('in_progress') } },
   { id: 'live', label: 'Live' },
   { id: 'declined', label: 'Declined' },
 ] as const

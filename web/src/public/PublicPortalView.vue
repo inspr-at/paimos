@@ -49,22 +49,24 @@ interface PortalDocument {
   pace?: PortalPace
   release_history?: boolean
   roadmap?: boolean
+  status_names?: { in_progress?: { en?: string; de?: string } }
 }
 
-const statusLabel: Record<string, string> = {
+// In progress reads as the workspace names it (AEON-1401); the other catalog words are the portal's own.
+const statusLabel = computed<Record<string, string>>(() => ({
   idea: 'Idea',
   reviewed: 'Reviewed',
   planned: 'Planned',
-  in_progress: 'In progress',
+  in_progress: doc.value?.status_names?.in_progress?.en || 'In progress',
   live: 'Live',
   declined: 'Declined',
-}
-const FILTERS = [
+}))
+const FILTERS = computed(() => [
   { id: 'live', label: 'Live' },
   { id: 'planned', label: 'Planned' },
-  { id: 'in_progress', label: 'In progress' },
+  { id: 'in_progress', label: statusLabel.value.in_progress },
   { id: 'declined', label: 'Declined' },
-] as const
+] as const)
 
 interface Participation {
   policy: 'disabled' | 'legacy' | 'registered'

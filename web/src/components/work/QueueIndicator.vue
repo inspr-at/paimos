@@ -2,6 +2,7 @@
 <script setup lang="ts">
 import { nextTick, onBeforeUnmount, onMounted, ref, useId } from 'vue'
 import type { QueuedTicket } from '../../lib/workQueue'
+import { statusName } from '../../lib/statusNames'
 import AppIcon from '../AppIcon.vue'
 import QueueDetails from './QueueDetails.vue'
 const props = defineProps<{ entry: QueuedTicket; manual?: boolean }>()
@@ -26,8 +27,8 @@ onBeforeUnmount(() => { hide(); parent?.removeEventListener('focus', focus); par
 void props
 </script>
 <template>
-  <span ref="trigger" class="q-ind" role="img" :aria-label="`${entry.waiting_reason ? 'Waiting' : 'Queued'} #${entry.position}`" :class="{ wait: entry.waiting_reason }" :aria-describedby="id" @pointerenter="hover" @pointerleave="hide" @focusin="show" @focusout="hide" @pointerdown="hide">
-    <AppIcon :name="entry.waiting_reason ? 'clock' : 'queue'" :size="entry.waiting_reason ? 12 : 13" /><b class="q-num">#{{ entry.position }}</b><span class="q-word">{{ entry.target_agent_id ? `for ${entry.expected_agent?.name ?? 'chosen agent'}` : entry.waiting_reason ? 'Waiting' : 'Queued' }}</span>
+  <span ref="trigger" class="q-ind" role="img" :aria-label="`${entry.waiting_reason ? 'Waiting' : statusName('queued')} #${entry.position}`" :class="{ wait: entry.waiting_reason }" :aria-describedby="id" @pointerenter="hover" @pointerleave="hide" @focusin="show" @focusout="hide" @pointerdown="hide">
+    <AppIcon :name="entry.waiting_reason ? 'clock' : 'queue'" :size="entry.waiting_reason ? 12 : 13" /><b class="q-num">#{{ entry.position }}</b><span class="q-word">{{ entry.target_agent_id ? `for ${entry.expected_agent?.name ?? 'chosen agent'}` : entry.waiting_reason ? 'Waiting' : statusName('queued') }}</span>
     <span :id="id" class="sr-only">Queued by {{ entry.by.name }} at {{ entry.at }}. {{ entry.waiting_reason }} Expected {{ entry.expected_agent?.name ?? 'next free agent' }}, {{ entry.expected_model }} {{ entry.expected_effort }}. {{ entry.expected_start ? `Starts ${entry.expected_start}` : 'No expected start yet' }}.</span>
   </span>
   <Teleport to="body"><div v-if="showing" ref="card" class="hcard pop" aria-hidden="true" :style="{ transform: `translate(${x}px, ${y}px)` }"><QueueDetails :entry="entry" :manual="manual" /></div></Teleport>

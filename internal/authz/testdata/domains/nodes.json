@@ -44,6 +44,7 @@
     "GET /api/projects/lookup": true,
     "GET /api/settings/definitions": true,
     "GET /api/settings/definitions/context": true,
+    "GET /api/settings/status-names": true,
     "GET /api/settings/work-vocabulary": true,
     "GET /api/status/help": true,
     "GET /api/tickets/graph": true,
@@ -147,6 +148,7 @@
     "GET /api/projects/{projectId}/figures": "nodes.read",
     "GET /api/settings/definitions": "nodes.read",
     "GET /api/settings/definitions/context": "nodes.read",
+    "GET /api/settings/status-names": "nodes.read",
     "GET /api/settings/work-vocabulary": "nodes.read",
     "GET /api/status/help": "nodes.read",
     "GET /api/tickets/graph": "nodes.read",
@@ -168,6 +170,7 @@
     "PUT /api/nodes/{nodeId}/person-steps/{checkId}/owner": "nodes.write",
     "PUT /api/projects/{projectId}/definitions": "nodes.write",
     "PUT /api/settings/definitions": "settings.manage",
+    "PUT /api/settings/status-names": "settings.manage",
     "PUT /api/settings/work-vocabulary": "settings.manage"
   },
   "words": {
