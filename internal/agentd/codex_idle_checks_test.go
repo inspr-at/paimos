@@ -41,6 +41,7 @@ func TestCodexUnqualifiedIdleNeverExecutesStartupHook(t *testing.T) {
 		t.Fatal(err)
 	}
 	a := NewCodexAdapter(path, map[string]string{"local": home})
+	a.idleUsage = loadCodexCapacityPin(nil) // Explicitly unqualified, even after future OPS pins.
 	a.SetExpectedEmails(map[string]string{"local": "fixture@example.test"})
 	if got := a.CaptureCapacityResult(t.Context(), "local"); got.Result != "unsupported" || a.CanCaptureCapacity("local") {
 		t.Fatal("production capability was invented")

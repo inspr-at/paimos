@@ -17,6 +17,8 @@ paths, versions, digests and changed files retain `unsupported` and the
 existing fallback reason, without launching a process. Version is the OPS
 qualification label bound to the pinned bytes; no `--version` process is run
 to qualify an unknown executable.
+The startup loader also checks the native executable header and refuses
+script wrappers even when a proposed pin matches their bytes.
 
 The capacity executable is independent of the enrolled run/probe wrapper.
 For Codex it must be the physical native binary: agentd executes that path as
@@ -56,6 +58,8 @@ table; there is no enrollment, environment or local-config enable switch.
 An executable update, path change, helper change or new version requires
 fresh qualification and a reviewed pin entry. The coordinator owns review,
 merge and release; OPS evidence alone does not alter a running daemon.
+
+## Quota-series API
 
 `GET /api/agent-accounts/{accountId}/quota-series` requires person
 `account.read`, or the registering agent's `account.probe`. Paired runtime keys

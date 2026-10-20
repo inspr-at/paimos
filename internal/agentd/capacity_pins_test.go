@@ -172,13 +172,13 @@ func TestCapacityPinsRejectUnqualifiedExecutables(t *testing.T) {
 // its published unsupported cause. Exercise the supervisor's real result path,
 // including harnesses without a CaptureCapacityResult method.
 func TestProductionCapacityPinsKeepUnsupportedResults(t *testing.T) {
-	if len(productionCapacityPins()) != 0 {
-		t.Fatal("production idle entries require separate OPS evidence")
-	}
 	home := privateCapacityHome(t)
 	path := refusingCapacityExecutable(t, home, "wrapper")
 	homes := map[string]string{"local": home}
 	codex := NewCodexAdapter(path, homes)
+	// Inject the empty table so later OPS pins cannot make a fixture run a
+	// vendor executable installed on the machine running the tests.
+	codex.idleUsage = loadCodexCapacityPin(nil)
 	codex.SetExpectedEmails(map[string]string{"local": "fixture@example.test"})
 	grok := NewGrokAdapter(map[string]GrokBinding{"local": {BinaryPath: path, PrincipalSHA256: "fixture"}})
 	grok.Homes = homes
