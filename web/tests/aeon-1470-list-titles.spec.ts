@@ -112,18 +112,48 @@ const boxOf = (locator: Locator) => locator.evaluate(el => { const r = el.getBou
 const tableWidth = (page: Page) => page.locator('.table-card').evaluate(el => el.clientWidth)
 const shownIds = (page: Page) => grid(page).locator('thead th').evaluateAll(cells => cells.map(cell => cell.getAttribute('data-column-id') as ColumnId))
 const headWidths = (page: Page) => grid(page).locator('thead th').evaluateAll(cells => Object.fromEntries(cells.map(cell => [cell.getAttribute('data-column-id'), cell.getBoundingClientRect().width])))
-// Sets the viewport so the table is exactly `target` px wide (the page gutter grows with the window). The resize
-// observer and the render it triggers land before the second frame.
+// Sets the viewport so the table is exactly `target` px wide (the page gutter grows with the window).
+// A viewport change can reach the card before Vue commits the column set: CI sampled the previous
+// header at the 16 px return and missed Updated, which was in the DOM by the failure snapshot.
+// Wait until the card is `target` wide and the header has held still, including a fit that follows.
 async function tableAt(page: Page, target: number) {
   let viewport = page.viewportSize()!.width + target - await tableWidth(page)
+  let actual = await tableWidth(page)
   for (let step = 0; step < 4; step++) {
     await page.setViewportSize({ width: viewport, height: 900 })
-    await settled(page)
-    const actual = await tableWidth(page)
+    actual = await page.locator('.table-card').evaluate(async (el, targetWidth) => {
+      const frame = () => new Promise<void>(resolve => requestAnimationFrame(() => resolve()))
+      let width = el.clientWidth
+      let last = ''
+      let stable = 0
+      for (let i = 0; i < 45; i++) {
+        await frame()
+        width = el.clientWidth
+        if (width !== targetWidth) {
+          last = ''
+          stable = 0
+          if (i >= 4) return width
+          continue
+        }
+        // Column choice follows the width Vue measured, which trails the card until the resize lands.
+        const layout = Number(el.getAttribute('data-layout-width'))
+        if (layout !== targetWidth) {
+          last = ''
+          stable = 0
+          continue
+        }
+        const ids = [...el.querySelectorAll('thead th')].map(th => th.getAttribute('data-column-id')).join(',')
+        const sig = `${width}:${layout}:${el.getAttribute('data-columns-settled')}:${ids}`
+        stable = sig === last ? stable + 1 : 0
+        last = sig
+        if (stable >= 3) return width
+      }
+      return width
+    }, target)
     if (actual === target) break
     viewport += target - actual
   }
-  return { viewport, actual: await tableWidth(page) }
+  return { viewport: page.viewportSize()!.width, actual }
 }
 
 // Every assert lands in a checks file with its width, theme and locale (Tick's evidence, AEON-1470 §8).
@@ -197,25 +227,29 @@ test('AEON-1470 a column that left returns only with 16 px to spare: ±8 px arou
   const log = checks(testInfo)
   await open(page)
   // Narrow the table a pixel at a time until Updated leaves. It starts out shown: the scan finds where it leaves.
-  await tableAt(page, 920)
+  expect((await tableAt(page, 920)).actual).toBe(920)
   expect(await shownIds(page)).toContain('updated')
   let width = 920
-  while ((await shownIds(page)).includes('updated')) { width--; await tableAt(page, width); expect(width).toBeGreaterThan(721) }
+  while ((await shownIds(page)).includes('updated')) {
+    width--
+    expect(width).toBeGreaterThan(721)
+    expect((await tableAt(page, width)).actual, `card at ${width}`).toBe(width)
+  }
   const set = await shownIds(page)
   for (const step of [8, -8]) {
-    await tableAt(page, width + step)
+    expect((await tableAt(page, width + step)).actual).toBe(width + step)
     expect(await shownIds(page), `left out at ${width + step}`).toEqual(set)
     log.add({ assert: 'hysteresis keeps the set', state: `Updated left at ${width}; ${step > 0 ? '+' : ''}${step} px`, width: page.viewportSize()!.width, tableWidth: width + step, theme: 'light', value: set })
   }
   // It returns with RETURN_ROOM to spare above the width it needs (width + 1), then holds ±8 px around that threshold.
   const back = width + 1 + RETURN_ROOM
-  await tableAt(page, back - 1)
+  expect((await tableAt(page, back - 1)).actual).toBe(back - 1)
   expect(await shownIds(page)).not.toContain('updated')
-  await tableAt(page, back)
+  expect((await tableAt(page, back)).actual).toBe(back)
   const returned = await shownIds(page)
   expect(returned).toContain('updated')
   for (const step of [-8, 8]) {
-    await tableAt(page, back + step)
+    expect((await tableAt(page, back + step)).actual).toBe(back + step)
     expect(await shownIds(page), `back at ${back + step}`).toEqual(returned)
     log.add({ assert: 'hysteresis keeps the set', state: `Updated back at ${back}; ${step > 0 ? '+' : ''}${step} px`, width: page.viewportSize()!.width, tableWidth: back + step, theme: 'light', value: returned })
   }
