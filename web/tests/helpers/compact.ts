@@ -21,13 +21,16 @@ export async function openDeskPreview(page: Page) {
   await page.getByRole('button', { name: 'Preview the Decision Desk', exact: true }).click()
 }
 // The project crumb's sheet (D11) holds what the crumb's fold did on phones: whether the project head
-// shows above the ticket list. Ticks or clears it and closes the sheet again.
+// shows above the ticket list. Ticks or clears it; the choice closes the sheet (AEON-1460),
+// so the sheet is reopened to read the flipped choice and closed again.
 export async function toggleProjectHead(page: Page) {
   const crumb = page.locator('.app-header .crumb-sheet')
   await crumb.click()
   const item = page.getByRole('menuitemcheckbox', { name: /^Show the project head/ })
   const before = await item.getAttribute('aria-checked')
   await item.click()
+  await expect(item).toHaveCount(0)
+  await crumb.click()
   await expect(item).not.toHaveAttribute('aria-checked', before ?? '')
   await page.keyboard.press('Escape')
   await expect(item).toHaveCount(0)
