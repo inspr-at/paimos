@@ -7,6 +7,7 @@ import AxeBuilder from '@axe-core/playwright'
 import { expectStableControls } from './helpers/stable'
 import { HOST_A, mockLeadFlow } from './lead-flow-fixtures'
 import { controlStability } from './control-stability'
+import { showProjectHead } from './work-fixtures'
 
 const band = (page: Page) => page.locator('section.lead')
 const panel = (page: Page) => page.getByRole('complementary', { name: 'Session details' })
@@ -95,7 +96,7 @@ for (const width of [1440, 390]) for (const look of ['light', 'dark'] as const) 
   test(`no lead: the band offers Start lead and the sheet requests one at ${width} ${look}`, async ({ page }, info) => {
     await page.setViewportSize({ width, height: width === 390 ? 844 : 1000 })
     const { state } = await mockLeadFlow(page, { lead: 'none' })
-    await page.goto('/p/PHAROS')
+    await page.goto('/p/PHAROS'); await showProjectHead(page)
     await theme(page, look)
     await expect(band(page).getByRole('heading', { name: 'No lead in PHAROS' })).toBeVisible()
     await expect(band(page)).toContainText('1 queued work item waits for one')
@@ -387,7 +388,7 @@ test('Agents page: the expert setting reveals Start agent manually', async ({ pa
 for (const look of ['light', 'dark'] as const) test(`phone: band, full-height panel and pinned sheet bar at 390 (${look})`, async ({ page }, info) => {
   await page.setViewportSize({ width: 390, height: 844 })
   await mockLeadFlow(page, { lead: 'working', question: true, longText: true })
-  await page.goto('/p/PHAROS')
+  await page.goto('/p/PHAROS'); await showProjectHead(page)
   await theme(page, look)
   await expect(band(page)).toContainText('Working')
   expect(await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth)).toBeLessThanOrEqual(1)
@@ -412,7 +413,7 @@ for (const look of ['light', 'dark'] as const) test(`phone: band, full-height pa
 for (const width of [1440, 400]) test(`AEON-1256: the lead card collapses to its header row and stays collapsed after a reload at ${width}`, async ({ page }) => {
   await page.setViewportSize({ width, height: width < 600 ? 844 : 1000 })
   const { data } = await mockLeadFlow(page, { lead: 'working', question: true })
-  await page.goto('/p/PHAROS')
+  await page.goto('/p/PHAROS'); await showProjectHead(page)
   const toggle = band(page).locator('[data-act="collapse"]'), head = band(page).locator('.lead-top')
   const pause = band(page).locator('[data-act="main"]'), menu = band(page).locator('[data-act="lead-menu"]'), name = band(page).getByRole('button', { name: /PHAROS lead: open details/ })
   const below = [band(page).getByRole('group', { name: 'Where the work is' }), band(page).locator('.lead-now').first(), band(page).locator('.asks'), band(page).locator('.lead-foot')]
@@ -439,7 +440,7 @@ for (const width of [1440, 400]) test(`AEON-1256: the lead card collapses to its
   expect(p.x + p.width, 'Pause… before the menu').toBeLessThanOrEqual(m.x + 0.5)
   if (width < 600) for (const [label, rect] of [['collapse', c], ['pause', p]] as const) expect(Math.min(rect.width, rect.height), `${label} is a 44 px target`).toBeGreaterThanOrEqual(44)
   await expect.poll(() => data.preferences['ui.project.lead-panel']).toEqual({ collapsed: true })
-  await page.reload()
+  await page.reload(); await showProjectHead(page)
   await expect(toggle).toHaveAttribute('aria-expanded', 'false')
   for (const part of below) await expect(part).toBeHidden()
   await toggle.click()
@@ -453,7 +454,7 @@ for (const width of [1440, 400]) test(`AEON-1256: the stations row has one heigh
   const lineOf = async (tab: Page, options: Parameters<typeof mockLeadFlow>[1]) => {
     await tab.setViewportSize({ width, height: width < 600 ? 844 : 1000 })
     await mockLeadFlow(tab, { lead: 'paused', ...options })
-    await tab.goto('/p/PHAROS')
+    await tab.goto('/p/PHAROS'); await showProjectHead(tab)
     const line = band(tab).getByRole('group', { name: 'Where the work is' })
     await expect(line).toBeVisible()
     return line

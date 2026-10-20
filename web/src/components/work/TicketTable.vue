@@ -1991,6 +1991,12 @@ button.release-chip:focus-visible { box-shadow: var(--focus-ring); }
 .phone-rows .outline-root-drop td { width: 100%; }
 .phone-fold[aria-expanded="true"] svg { transform: rotate(90deg); }
 .phone-rows .ticket-row.dimmed :is(.phone-title-link, .phone-meta, .phone-owner, .phone-state) { opacity: .5; }
+/* Outline depth stays visible: ten pixels and one guide per level, as before D11. */
+.table-card.phone-rows .tickets .ticket-row.tree-row {
+  padding-left: calc(10px + var(--depth, 0) * 10px);
+  background-image: repeating-linear-gradient(90deg, var(--line-2) 0 1px, transparent 1px 10px);
+  background-size: calc(var(--depth, 0) * 10px) 100%; background-position: 6px 0; background-repeat: no-repeat;
+}
 .phone-rows .ghost td { display: none !important; }
 .phone-rows .ghost td.c-title { display: block !important; grid-area: title; }
 .phone-rows .ghost td.c-key { display: block !important; grid-area: meta; }

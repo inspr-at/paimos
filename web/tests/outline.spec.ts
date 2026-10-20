@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import { test, expect, type Page } from '@playwright/test'
-import { fixtures, mockWork, watchErrors, type Call, type MockNode } from './work-fixtures'
+import { fixtures, mockWork, openListFilters, startTicketSelection, watchErrors, type Call, type MockNode } from './work-fixtures'
 import { openOne } from './live-server'
 
 // setSystemTime lets time flow (setFixedTime would freeze Vue's event timestamps).
@@ -334,8 +334,9 @@ for (const colorScheme of ['light', 'dark'] as const) {
     await epic.getByRole('button', { name: 'Expand PHAROS-10' }).click()
     await expect(page).toHaveURL('/p/PHAROS/tickets?view=outline&closed=1')
     const child = row(page, 'PHAROS-11')
-    const key = (await child.locator('.c-key').boundingBox())!, title = (await child.locator('.title-link').boundingBox())!
-    expect(title.y).toBeGreaterThan(key.y + key.height - 1)
+    // D11 (AEON-1460): the title leads; the key and update time form the second line.
+    const key = (await child.locator('.phone-meta .key').boundingBox())!, title = (await child.locator('.title-link').boundingBox())!
+    expect(key.y).toBeGreaterThan(title.y + title.height - 1)
     // Selection space shares the card inset; depth still adds ten pixels.
     const parentInset = await epic.evaluate(el => parseFloat(getComputedStyle(el).paddingLeft))
     expect(await child.evaluate(el => parseFloat(getComputedStyle(el).paddingLeft))).toBe(parentInset + 10)
@@ -717,7 +718,7 @@ for (const view of ['outline', 'list']) for (const audience of ['viewer', 'empty
     if (audience === 'empty') await expect(page.getByText('No tickets match these filters', { exact: true })).toBeVisible()
     else await expect(rows.first()).toBeVisible()
     if (audience === 'selected') {
-      await page.locator('.phone-pick').getByRole('button', { name: 'Select', exact: true }).click()
+      await startTicketSelection(page)
       await rows.first().getByRole('checkbox').check()
       await expect(page.locator('.bulk-bar')).toBeVisible()
     } else await expect(page.locator('.phone-pick')).toHaveCount(0)
@@ -750,11 +751,14 @@ for (const view of ['outline', 'list']) for (const audience of ['viewer', 'empty
       mkdirSync(process.env.OUTLINE_SHOTS_DIR, { recursive: true })
       await page.screenshot({ path: `${process.env.OUTLINE_SHOTS_DIR}/chip-${view}-${audience}-390-${scheme}.png` })
     }
-    const search = page.getByRole('searchbox', { name: 'Search tickets in this project' })
+    // D11 (AEON-1460): search opens over the compact toolbar line; Esc leaves the field, then closes it.
+    const bar = page.locator('.compact-ticket-toolbar'), search = bar.getByRole('searchbox', { name: 'Search tickets in this project' })
+    await bar.getByRole('button', { name: 'Search tickets', exact: true }).click()
     await search.click(); await expect(search).toBeFocused()
     await expect(pill).toBeVisible()
-    await page.getByRole('button', { name: 'Filters', exact: true }).click()
-    await expect(page.getByRole('dialog', { name: 'Filters', exact: true })).toBeVisible()
+    await page.keyboard.press('Escape'); await page.keyboard.press('Escape')
+    await expect(bar.getByRole('search')).toHaveCount(0)
+    await openListFilters(page)
     await page.keyboard.press('Escape')
     await page.getByRole('button', { name: 'New ticket', exact: true }).click()
     await expect(page.getByRole('textbox', { name: 'New ticket title', exact: true })).toBeFocused()

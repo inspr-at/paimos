@@ -6,7 +6,7 @@ import { expect, test, type Page } from '@playwright/test'
 import AxeBuilder from '@axe-core/playwright'
 import { expectStableControls } from './helpers/stable'
 import { toggleProjectHead } from './helpers/compact'
-import { fixtures, me, mockWork, watchErrors } from './work-fixtures'
+import { fixtures, me, mockWork, openListFilters, showProjectHead, watchErrors } from './work-fixtures'
 import { mockEffectivePermissions } from './authz-fixtures'
 import { readyGaps } from '../src/lib/workQueue'
 import type { QueueWireEntry } from '../src/lib/workQueue'
@@ -422,6 +422,8 @@ test('phone header retains the queue when the activity timestamp folds', async (
     await page.addStyleTag({ content: '@media (max-width:600px) { .header-activity { display:none } .project-page[class*="header-"] .head-flex { display:grid; grid-template-columns:minmax(0,1fr) auto; grid-template-areas:"title progress" "stats stats" "description description" } }' })
   }
   await page.setViewportSize({ width: 390, height: 844 })
+  // D11 (AEON-1460): a phone list starts with its project head in the crumb sheet.
+  await showProjectHead(page)
   const activity = page.locator('.header-activity')
   await expect(activity.locator(':scope > span')).toBeHidden()
   const opener = activity.getByRole('button', { name: /queued\. Open the work queue/ })
@@ -463,6 +465,8 @@ test('approved queue surfaces in light/dark and narrow layouts, with accessible 
     await expect(page.getByRole('complementary', { name: 'Ticket details' })).toHaveCount(0)
     await expect(page).toHaveURL(/\/p\/PHAROS\/tickets(?:\?|$)/)
     await page.setViewportSize({ width: 390, height: 844 })
+    // D11 (AEON-1460): a phone list starts with its project head in the crumb sheet.
+    await showProjectHead(page)
     await expect(page.locator('html')).toHaveJSProperty('scrollWidth', 390)
     const opener = page.getByRole('button', { name: /queued\. Open the work queue/ })
     const queue = page.getByRole('dialog', { name: 'Work queue', exact: true })
@@ -486,7 +490,7 @@ test('approved queue surfaces in light/dark and narrow layouts, with accessible 
     if (await fold.count()) {
       for (const density of ['Comfortable', 'Compact']) {
         // AEON-1188: header density lives in the Display menu, linked from the Filters sheet.
-        await page.getByRole('button', { name: 'Filters', exact: true }).click()
+        await openListFilters(page)
         await page.getByRole('dialog', { name: 'Filters', exact: true }).getByRole('button', { name: 'Display settings…', exact: true }).click()
         const sheet = page.getByRole('dialog', { name: 'Display options', exact: true })
         const group = sheet.getByRole('radiogroup', { name: 'Project header density', exact: true })
