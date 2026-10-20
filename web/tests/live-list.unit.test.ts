@@ -6,7 +6,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { effectScope, nextTick, ref, type EffectScope } from 'vue'
 import type { ListItem, ListPage, ListQuery } from '../src/lib/api'
-import { LiveNodeStore, type NodeChange } from '../src/lib/liveNodes'
+import { LiveNodeStore, type LiveOptions, type NodeChange } from '../src/lib/liveNodes'
 import { PENDING_CAP } from '../src/lib/liveUpdates'
 import { RowStore } from '../src/lib/rowStore'
 import { stamp } from '../src/lib/position'
@@ -40,6 +40,21 @@ function server(nodes: ListItem[]) {
   return { nodes, calls, fetchList }
 }
 
+// The tenant stream as the browser hands frames over. A frame without an id
+// keeps the previous lastEventId, as EventSource does.
+const HEARTBEAT_MS = 5_000
+class Stream {
+  readyState = 1
+  onerror: (() => void) | null = null
+  private listeners = new Map<string, ((event: MessageEvent) => void)[]>()
+  constructor(readonly url: string) {}
+  addEventListener(type: string, listener: (event: MessageEvent) => void) { this.listeners.set(type, [...(this.listeners.get(type) ?? []), listener]) }
+  close() { this.readyState = 2 }
+  emit(type: string, data: unknown, lastEventId: number) {
+    for (const listener of this.listeners.get(type) ?? []) listener({ type, data: JSON.stringify(data), lastEventId: String(lastEventId) } as MessageEvent)
+  }
+}
+
 interface Harness {
   live: LiveList; rows: ReturnType<typeof ref<ListItem[]>>; store: LiveNodeStore; nodes: RowStore; srv: ReturnType<typeof server>
   blockers: LiveListBlockers; loading: ReturnType<typeof ref<boolean>>; reads: ReturnType<typeof ref<ListRead | null>>
@@ -55,10 +70,10 @@ interface Harness {
   settle(): Promise<void>
 }
 let scope: EffectScope | undefined
-function setup(initial: ListItem[], query: Record<string, string> = {}, extra: ListItem[] = [], more: Partial<LiveListOptions> = {}): Harness {
+function setup(initial: ListItem[], query: Record<string, string> = {}, extra: ListItem[] = [], more: Partial<LiveListOptions> = {}, open: LiveOptions['open'] = () => null): Harness {
   const srv = server([...initial.map(row => structuredClone(row)), ...extra])
   const nodes = new RowStore()
-  const store = new LiveNodeStore({ open: () => null, rows: nodes })
+  const store = new LiveNodeStore({ open, rows: nodes, heartbeatMs: HEARTBEAT_MS })
   // The rows are the store's display objects, as useTicketList loads them.
   const loaded = nodes.mark()
   const rows = ref<ListItem[]>(initial.map(row => nodes.adopt(row, loaded, { show: true })!))
@@ -118,14 +133,22 @@ describe('useLiveList: field changes', () => {
     expect(h.rows.value[0]).toBe(row)
   })
 
-  it('a heartbeat read overtaken by a stop reads the same-revision projections again', async () => {
-    const h = setup([item('n1', { eta: { finished: false, eta_ready_at: at(0) }, lead_worker: { name: 'Worker', key: 's:worker' } })])
+  // Durable heartbeats carry an id and name their ticket; quiet ones (AEON-1354)
+  // are an id-less frame that the store spreads over the shown rows.
+  it.each(['event with an id', 'id-less frame'])('a heartbeat (%s) read overtaken by a stop reads the same-revision projections again', async shape => {
+    let stream: Stream | undefined
+    const h = setup([item('n1', { eta: { finished: false, eta_ready_at: at(0) }, lead_worker: { name: 'Worker', key: 's:worker' } })], {}, [], {}, url => (stream = new Stream(url)))
     const plain = h.srv.fetchList.getMockImplementation()!
     let release!: () => void
     const gate = new Promise<void>(resolve => { release = resolve })
     h.srv.fetchList.mockImplementationOnce(async query => { const page = await plain(query, 'matches'); await gate; return page })
-    h.send({ id: 'n1', type: 'harness.heartbeat', fields: ['eta', 'lead_worker'] })
-    await vi.advanceTimersByTimeAsync(BATCH_MS)
+    if (shape === 'id-less frame') {
+      stream!.emit('harness.heartbeat', {}, 1000)
+      await vi.advanceTimersByTimeAsync(HEARTBEAT_MS + BATCH_MS)
+    } else {
+      h.send({ id: 'n1', type: 'harness.heartbeat', fields: ['eta', 'lead_worker'] })
+      await vi.advanceTimersByTimeAsync(BATCH_MS)
+    }
     expect(h.srv.fetchList).toHaveBeenCalledTimes(1)
     h.srv.nodes[0].eta = { finished: true, progress_pct: 100 }
     h.srv.nodes[0].lead_worker = null
@@ -135,6 +158,38 @@ describe('useLiveList: field changes', () => {
     await h.settle()
     expect(h.rows.value[0].eta).toEqual({ finished: true, progress_pct: 100 })
     expect(h.rows.value[0].lead_worker).toBeNull()
+  })
+
+  it('id-less heartbeat frames make exactly one batched ETA and lead worker read of the shown rows', async () => {
+    let stream: Stream | undefined
+    const h = setup([
+      item('n1', { eta: { finished: false, eta_ready_at: at(0), progress_pct: 10 }, lead_worker: { name: 'Worker', key: 's:worker' } }),
+      item('n2', { eta: { finished: false, eta_ready_at: at(5), progress_pct: 20 }, lead_worker: null }),
+    ], {}, [], {}, url => (stream = new Stream(url)))
+    const [first, second] = h.rows.value!
+    const revisions = [first.updated_at, second.updated_at]
+    // Workers keep heartbeating without a new revision: the stale ETA flag and
+    // the lead worker are worked out when the list reads its rows.
+    Object.assign(h.srv.nodes[0], { eta: { finished: false, eta_ready_at: at(0), progress_pct: 10, eta_stale: true }, lead_worker: { name: 'Second worker', key: 's:second' } })
+    Object.assign(h.srv.nodes[1], { eta: { finished: false, eta_ready_at: at(5), progress_pct: 35 }, lead_worker: { name: 'New worker', key: 's:new' } })
+    for (let tick = 0; tick < 5; tick++) {
+      stream!.emit('harness.heartbeat', {}, 1000)
+      await vi.advanceTimersByTimeAsync(HEARTBEAT_MS / 10)
+    }
+    expect(h.srv.fetchList).not.toHaveBeenCalled()
+    await vi.advanceTimersByTimeAsync(HEARTBEAT_MS / 2 + BATCH_MS)
+    expect(h.srv.fetchList).toHaveBeenCalledTimes(1)
+    expect([...h.srv.calls[0].ids!].sort()).toEqual(['n1', 'n2'])
+    expect(first.eta).toEqual({ finished: false, eta_ready_at: at(0), progress_pct: 10, eta_stale: true })
+    expect(first.lead_worker).toEqual({ name: 'Second worker', key: 's:second' })
+    expect(second.eta).toEqual({ finished: false, eta_ready_at: at(5), progress_pct: 35 })
+    expect(second.lead_worker).toEqual({ name: 'New worker', key: 's:new' })
+    expect([first.updated_at, second.updated_at]).toEqual(revisions)
+    expect(h.rows.value).toEqual([first, second])
+    expect(h.live.message.value).toBe('')
+    // The window is spent: no further read until the next frame.
+    await vi.advanceTimersByTimeAsync(HEARTBEAT_MS * 3)
+    expect(h.srv.fetchList).toHaveBeenCalledTimes(1)
   })
 
   it('applies stop and ETA progress under continuous heartbeats and keeps exactly one follow-up batch', async () => {

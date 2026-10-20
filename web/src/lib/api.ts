@@ -321,7 +321,7 @@ export interface ColumnFigures {
 export interface WorkFigureGroup { hours: number; tickets: number; statuses: Record<string, number> }
 export interface ProjectFigures {
   view_key: string; computed_at: string
-  scope: { kind: 'whole_project' | 'this_view'; rows: number; parents: number; leaves: number; project_leaves: number; closed: number }
+  scope: { kind: 'whole_project' | 'this_view'; rows: number; parents: number; leaves: number; project_leaves: number; closed: number; open_rows?: number; open_with_parent?: number }
   marks_releases: boolean; total_hours: number; approximate: boolean; without_estimate: number; open_estimated_leaves: number
   groups: { completed: WorkFigureGroup; done_not_live: WorkFigureGroup; in_progress: WorkFigureGroup; open: WorkFigureGroup }
   columns: Record<string, ColumnFigures>

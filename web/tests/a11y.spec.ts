@@ -279,7 +279,7 @@ const wideScreens: [string, number, string, (page: Page) => Promise<void>][] = [
   ['column picker', 1440, '/p/PHAROS', async page => {
     await expect(page.locator('tr.ticket-row:not(.ghost)')).toHaveCount(5)
     await page.getByRole('button', { name: /^Display/ }).click()
-    await expect(page.getByRole('dialog', { name: 'Display options' }).getByRole('checkbox', { name: 'Epic' })).toBeVisible()
+    await expect(page.getByRole('dialog', { name: 'Display options' }).getByRole('checkbox', { name: 'Parent' })).toBeVisible()
   }],
   ['attachment viewer', 1440, '/p/PHAROS/PHAROS-11', async page => {
     await page.locator('.attachments .tile').first().click()

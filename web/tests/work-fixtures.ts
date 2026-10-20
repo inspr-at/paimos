@@ -145,7 +145,11 @@ export function fixtures(options: MockOptions = {}) {
   const live: LiveAgentMock[] = []
   // AEON-1401: the workspace's status names (GET/PUT /api/settings/status-names).
   const statusNames: { revision: number; names: Record<string, { en?: string; de?: string }> } = { revision: 0, names: {} }
-  return { projects, nodes, people, activity, relations, attachments, preferences, events, views, batches, live, statusNames, counter: { next: 100 } }
+  return {
+    projects, nodes, people, activity, relations, attachments, preferences, events, views, batches, live, statusNames, counter: { next: 100 },
+    // A spec may reshape one figures answer, e.g. counts beyond what the fixture's rows can hold (AEON-1470).
+    figuresHook: null as ((figures: ReturnType<typeof mockFigures>, query: URLSearchParams) => void) | null,
+  }
 }
 // A 1x1 PNG for every attachment variant.
 export const PNG = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==', 'base64')
@@ -717,7 +721,9 @@ export async function mockWork(page: Page, data: Fixtures, options: MockOptions 
       const within = new URLSearchParams(query)
       if (!within.get('within')) within.set('within', figuresFor[1])
       if (!within.get('kind')) within.set('kind', 'work,ticket,task,epic')
-      return route.fulfill({ json: mockFigures(data, figuresFor[1], matching(within, false), within, bucketOf) })
+      const figures = mockFigures(data, figuresFor[1], matching(within, false), within, bucketOf)
+      data.figuresHook?.(figures, within)
+      return route.fulfill({ json: figures })
     }
     if (path === '/api/nodes' && method === 'GET') {
       const kinds = listParam(query, 'kind')
@@ -922,9 +928,13 @@ function mockFigures(data: Fixtures, project: string, rows: MockNode[], query: U
   const keys = rows.map(n => n.key).sort((a, b) => Number(a.split('-').pop()) - Number(b.split('-').pop()))
   const work = leaves.filter(n => !closed(n))
   const narrowed = FILTER_PARAMS.some(name => (query.get(name) ?? '').trim() !== '')
+  // Open rows are every non-closed work row, parents included. A direct parent counts only when that node exists and is not the project.
+  const byId = new Map(data.nodes.map(n => [n.id, n]))
+  const openRows = rows.filter(n => !closed(n))
+  const openWithParent = openRows.filter(n => { const parent = n.parent_id ? byId.get(n.parent_id) : undefined; return !!parent && parent.kind_slug !== 'project' }).length
   return {
     view_key: [...query].filter(([name]) => FILTER_PARAMS.includes(name)).map(([name, value]) => `${name}=${value}`).sort().join('&'), computed_at: new Date().toISOString(),
-    scope: { kind: narrowed ? 'this_view' : 'whole_project', rows: rows.length, parents: rows.length - leaves.length, leaves: leaves.length, project_leaves: data.nodes.filter(n => n.project === project && isLeaf(n)).length, closed: leaves.filter(closed).length },
+    scope: { kind: narrowed ? 'this_view' : 'whole_project', rows: rows.length, parents: rows.length - leaves.length, leaves: leaves.length, project_leaves: data.nodes.filter(n => n.project === project && isLeaf(n)).length, closed: leaves.filter(closed).length, open_rows: openRows.length, open_with_parent: openWithParent },
     marks_releases: marks, total_hours: total, approximate: total > 0, without_estimate: without, open_estimated_leaves: openEstimated, groups,
     columns: {
       key: { ...all, parents: rows.length - leaves.length, leaves: leaves.length, first_key: keys[0], last_key: keys[keys.length - 1] },
@@ -932,6 +942,8 @@ function mockFigures(data: Fixtures, project: string, rows: MockNode[], query: U
       priority: counted(n => typeof n.fields.priority === 'string' ? n.fields.priority : ''),
       assignee: { ...counted(n => personName(data, n.fields.assignee), 3), values: counted(n => personName(data, n.fields.assignee), 3).values.map(v => ({ ...v, kind: 'person' })) },
       epic: counted(n => epicAbove(n, data)?.key ?? '', 2),
+      // The direct parent other than the project, as the Parent column shows it.
+      parent: counted(n => { const up = n.parent_id ? byId.get(n.parent_id) : undefined; return up && up.kind_slug !== 'project' ? up.key : '' }, 2),
       release: counted(release, 2),
       suggested_release: counted(n => labelOf(n.fields.suggested_release), 2),
       tag: counted(n => tagNames(n)[0]?.name ?? '', 5),

@@ -12,8 +12,9 @@ import MeasuredMark from './MeasuredMark.vue'
 import PriorityIcon from './PriorityIcon.vue'
 
 // hint replaces the plain sort hint (the group order and the order inside groups, AEON-1390); title names a group whose
-// own figures these are (AEON-1388), in place of the hint.
-const props = defineProps<{ columnId: string; label: string; sortable: boolean; figures: ProjectFigures | null; failed: string | null; hiddenRows: boolean; now: number; modelName?: (id: string) => string; hint?: string; title?: string }>()
+// own figures these are (AEON-1388), in place of the hint; summary is the cell's whole text when the cell shows a
+// compact form (the group row's priority mix, AEON-1470).
+const props = defineProps<{ columnId: string; label: string; sortable: boolean; figures: ProjectFigures | null; failed: string | null; hiddenRows: boolean; now: number; modelName?: (id: string) => string; hint?: string; title?: string; summary?: string }>()
 const text = workFiguresText()
 const def = computed(() => figureColumn(props.columnId, props.figures))
 const tip = computed(() => props.figures && def.value ? columnTip(props.columnId as ColumnId, props.figures, { hiddenRows: props.hiddenRows, now: props.now, text, modelName: props.modelName }) : null)
@@ -22,6 +23,7 @@ const hint = computed(() => props.hint ?? `${fill(text.sortBy, { column: props.l
 
 <template>
   <p v-if="title" class="wf-ttl">{{ title }}</p>
+  <p v-if="title && summary" class="wf-sum">{{ summary }}</p>
   <p v-else-if="sortable" class="wf-hint">{{ hint }}</p>
   <template v-if="def">
     <div v-if="sortable || title" class="wf-rule" aria-hidden="true" />

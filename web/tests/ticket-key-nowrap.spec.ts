@@ -128,7 +128,8 @@ for (const width of [320, 360, 390, 1440]) {
       await grid(page).evaluate(el => { (el.closest('.table-card') as HTMLElement).style.width = '' })
     }
 
-    await rows(page).filter({ hasText: 'PHAROS-10' }).locator('.title-link').click()
+    // By its own key: child rows name PHAROS-10 in their Parent cell too.
+    await rows(page).filter({ has: page.locator('.c-key .key', { hasText: /^PHAROS-10$/ }) }).locator('.title-link').click()
     const children = page.getByRole('complementary', { name: 'Ticket details' }).locator('.child-row')
     await expect(children).toHaveCount(2)
     await expect(children.locator('.key', { hasText: /^PHAROS-14530$/ })).toBeVisible()

@@ -44,6 +44,14 @@ interface SourceLike {
 export const NODE_EVENTS = ['entry_check.ticked', 'node.entry_check_ticked', 'node.person_step_reassigned', 'status_autopilot.derived', 'status_autopilot.changed', 'status_autopilot.undone', 'import.node_updated', 'import.node_created', 'import.parent_changed', 'node.benefits_generated', 'node.created', 'node.updated', 'node.moved', 'node.kind_changed', 'node.project_moved', 'node.deleted', 'node.bulk_changed'] as const
 const CLOSED = 2
 
+// A heartbeat wake without an event: no id, nothing to resume from.
+function quietHeartbeat(data: string): boolean {
+  try {
+    const event = JSON.parse(data) as { id?: unknown } | null
+    return !!event && typeof event === 'object' && typeof event.id !== 'number'
+  } catch { return false }
+}
+
 // The node_changes of one stream event, in client shape.
 export function parseNodeChanges(data: string): NodeChange[] {
   let event: { id?: unknown; type?: unknown; actor_principal_id?: unknown; node_changes?: unknown; before?: unknown; after?: unknown }
@@ -101,10 +109,24 @@ async function fetchLive(id: string): Promise<WorkNode | null> {
 const aggregateHint = (change: NodeChange) => change.fields.includes('person_waiting') || change.fields.includes('human_check') || change.type === 'work.aggregates_changed'
   || change.fields.includes('estimate') && change.fields.includes('planning')
 
+// ETA and the lead worker are worked out when a row is read in list shape
+// (AEON-1354): a hint the row store counts as projection news for a leaf
+// cannot be answered from the cached copy or a node read.
+const sessionHint = (change: NodeChange) => change.fields.some(field => field === 'eta' || field === 'lead_worker')
+// A list read takes at most this many ids.
+const SESSION_PAGE = 200
+
 async function fetchAggregate(id: string): Promise<ListItem | null> {
   try { return (await listNodes({ ids: [id], limit: 1 })).items[0] ?? null }
   catch (error) {
     if (error instanceof APIError && [403, 404, 410].includes(error.status)) return null
+    throw error
+  }
+}
+async function fetchAggregates(ids: string[]): Promise<ListItem[]> {
+  try { return (await listNodes({ ids, limit: ids.length })).items }
+  catch (error) {
+    if (error instanceof APIError && [403, 404, 410].includes(error.status)) return []
     throw error
   }
 }
@@ -116,12 +138,16 @@ export interface LiveOptions {
   fetchNode?: (id: string) => Promise<WorkNode | null>
   // Aggregates include ETA/planning projections absent from GET /nodes/:id.
   fetchAggregate?: (id: string) => Promise<ListItem | null>
+  // The same for the leaves whose session hints arrive together (at most 200 ids).
+  fetchAggregates?: (ids: string[]) => Promise<ListItem[]>
   // How long the stream stays open after the last view leaves (switching tickets).
   graceMs?: number
   // Waits before reopening a stream the browser gave up on.
   retryMs?: readonly number[]
   // Waits before reading a node again after a failed read.
   refetchMs?: readonly number[]
+  // How long id-less heartbeat frames gather before one projection re-read.
+  heartbeatMs?: number
   // The causal row store the stream and its views share (the tab's by default).
   rows?: RowStore
 }
@@ -140,6 +166,9 @@ export class LiveNodeStore {
   // Shown nodes with a change not read yet (a read running or failed).
   private dirty = new Map<string, { change: NodeChange; attempts: number }>()
   private retryTimers = new Map<string, ReturnType<typeof setTimeout>>()
+  private heartbeatTimer: ReturnType<typeof setTimeout> | undefined
+  // Leaf session reads started in one task, sent together as one list read.
+  private sessionBatch: { ids: Set<string>; read: Promise<Map<string, ListItem>> } | null = null
   private stateListeners = new Set<(state: LiveState) => void>()
   private health: ReturnType<typeof watchStreamHealth> | undefined
   private readonly options: Required<Omit<LiveOptions, 'rows'>>
@@ -152,9 +181,11 @@ export class LiveNodeStore {
       open: url => typeof EventSource === 'undefined' ? null : new EventSource(url) as unknown as SourceLike,
       fetchNode: fetchLive,
       fetchAggregate,
+      fetchAggregates,
       graceMs: 30_000,
       retryMs: [2_000, 5_000, 15_000, 30_000],
       refetchMs: [1_000, 3_000, 10_000, 30_000],
+      heartbeatMs: 10_000,
       ...rest,
     }
   }
@@ -265,7 +296,26 @@ export class LiveNodeStore {
   }
   private receive(event: MessageEvent) {
     this.noteEvent(event)
+    if (event.type === 'harness.heartbeat' && quietHeartbeat(event.data)) { this.heartbeat(); return }
     for (const change of parseNodeChanges(event.data)) this.apply(change)
+  }
+  // A quiet heartbeat (AEON-1354) is a frame without id or session: it names
+  // no ticket. ETA staleness and the lead worker are worked out when a row is
+  // read, so such a tick can still change them. Ticks within one window make
+  // one hint per work row a view holds, the hints a heartbeat event with an id
+  // gives its ticket and the parents above it; lists batch them into one read,
+  // and so does the store for the leaves a panel shows.
+  private heartbeat() {
+    if (this.heartbeatTimer !== undefined) return
+    this.heartbeatTimer = setTimeout(() => {
+      this.heartbeatTimer = undefined
+      for (const row of this.rows.aggregateParents(null, true)) {
+        const parent = !!row.estimate?.is_parent || row.children_count > 0
+        this.applyOne({ eventId: 0, type: parent ? 'work.aggregates_changed' : 'harness.heartbeat', actorId: '', id: row.id,
+          projectId: row.project!.id, change: 'updated', revision: null,
+          fields: parent ? ['eta', 'lead_worker', 'estimate', 'planning', 'children_count'] : ['eta', 'lead_worker'] })
+      }
+    }, this.options.heartbeatMs)
   }
 
   // ---------- Changes ----------
@@ -336,15 +386,15 @@ export class LiveNodeStore {
       if (!showing.length) { this.settled(id); return }
       if (this.rows.isDeleted(id)) { this.settled(id); return }
       const cached = this.rows.latest(id)
-      if (cached && !['status_autopilot.derived', 'import.parent_changed'].includes(dirty.change.type) && !aggregateHint(dirty.change) && this.rows.current(id) && compareRevision(cached.updated_at, dirty.change.revision) >= 0 && !this.rows.newer(id, cached.updated_at)) {
+      const aggregate = aggregateHint(dirty.change), session = !aggregate && sessionHint(dirty.change)
+      if (cached && !['status_autopilot.derived', 'import.parent_changed'].includes(dirty.change.type) && !aggregate && !session && this.rows.current(id) && compareRevision(cached.updated_at, dirty.change.revision) >= 0 && !this.rows.newer(id, cached.updated_at)) {
         this.settled(id)
         for (const view of showing) view.changed(dirty.change, cached)
         return
       }
       const sent = this.rows.mark()
-      const aggregate = aggregateHint(dirty.change)
       let node: WorkNode | ListItem | null
-      try { node = aggregate ? await this.options.fetchAggregate(id) : await this.options.fetchNode(id) }
+      try { node = aggregate ? await this.options.fetchAggregate(id) : session ? await this.readSession(id) : await this.options.fetchNode(id) }
       catch { this.retry(id); return }
       // Sent before a gap: the answer may predate a change the stream missed,
       // so the store does not take it. The resync reads what views show, and
@@ -353,11 +403,11 @@ export class LiveNodeStore {
       // News after the request was sent (not this answer's own): the answer
       // may speak for an older state.
       const news = this.rows.touchedSince(id, sent)
-      if (node && aggregate) this.rows.adopt(node as ListItem, sent)
+      if (node && (aggregate || session)) this.rows.adopt(node as ListItem, sent)
       else if (node) this.rows.adoptNode(node, sent)
       else this.rows.gone(id, sent)
       const change = this.dirty.get(id)?.change
-      const projectionChanged = change && (['status_autopilot.derived', 'import.parent_changed'].includes(change.type) || aggregateHint(change))
+      const projectionChanged = change && (['status_autopilot.derived', 'import.parent_changed'].includes(change.type) || aggregateHint(change) || sessionHint(change))
       if (news && (!node || this.rows.isDeleted(id) || this.rows.newer(id, node.updated_at) || projectionChanged)) continue
       if (!change) return
       this.settled(id)
@@ -365,6 +415,22 @@ export class LiveNodeStore {
       for (const view of this.showing(id)) view.changed(change, copy)
       return
     }
+  }
+  // A leaf's session projections, read with every other leaf whose read starts
+  // in the same task (a heartbeat window hints them all at once): one list
+  // read per page of ids, not one per leaf.
+  private readSession(id: string): Promise<ListItem | null> {
+    let batch = this.sessionBatch
+    if (!batch || batch.ids.size >= SESSION_PAGE) {
+      const ids = new Set<string>()
+      const read = Promise.resolve().then(async () => {
+        if (this.sessionBatch?.ids === ids) this.sessionBatch = null
+        return new Map((await this.options.fetchAggregates([...ids])).map(item => [item.id, item]))
+      })
+      batch = this.sessionBatch = { ids, read }
+    }
+    batch.ids.add(id)
+    return batch.read.then(found => found.get(id) ?? null)
   }
   // A failed read tries again after a growing wait, a few times; then the
   // node waits for its next change or a resumed stream.
@@ -387,6 +453,8 @@ export class LiveNodeStore {
   private forgetDirty() {
     for (const timer of this.retryTimers.values()) clearTimeout(timer)
     this.retryTimers.clear(); this.dirty.clear()
+    // A gap or a closed stream reads everything again or nothing at all.
+    clearTimeout(this.heartbeatTimer); this.heartbeatTimer = undefined
   }
   // A view can ask for any node (a list checking whether a new node matches).
   async fetch(id: string): Promise<WorkNode | null> {

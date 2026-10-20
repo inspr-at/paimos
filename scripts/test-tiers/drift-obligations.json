@@ -5049,11 +5049,11 @@
   "cost": {
     "driftBrowserFiles": 102,
     "recordedCases": 455,
-    "unresolvedRecordedCases": 24,
+    "unresolvedRecordedCases": 25,
     "missingFromCurrentManifest": 0,
     "nightlyCasesInDriftFiles": 1524,
     "gatedCasesAlreadyInFull": 209,
-    "fullExtraNightlyCases": 499,
+    "fullExtraNightlyCases": 502,
     "addedNightlySeconds": 2358,
     "evenSplitWallSeconds": 197,
     "projectedMaxShardSeconds": 1129,

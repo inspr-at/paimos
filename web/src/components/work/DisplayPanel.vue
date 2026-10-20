@@ -16,7 +16,7 @@ defineProps<{
   filters: ListFilters
   view: 'list' | 'outline'
   density: 'comfortable' | 'compact'
-  columns?: { order: ColumnId[]; visible: ColumnId[]; customised: boolean; notes?: Partial<Record<string, string>> } | null
+  columns?: { order: ColumnId[]; visible: ColumnId[]; customised: boolean; notes?: Partial<Record<string, string>>; hidden?: ColumnId[] } | null
   grouped?: boolean
   sheet?: boolean
   projectHeader?: boolean
@@ -87,7 +87,7 @@ const emit = defineEmits<{
       </div>
     </div>
     <HeaderRoomyChoice v-if="projectHeader" class="section" />
-    <ColumnPicker v-if="columns" class="section" :order="columns.order" :visible="columns.visible" :customised="columns.customised" :notes="columns.notes" :reserve-notes="sheet" @change="(order, visible) => emit('columns', order, visible)" @reset="emit('columnsReset')" />
+    <ColumnPicker v-if="columns" class="section" :order="columns.order" :visible="columns.visible" :customised="columns.customised" :notes="columns.notes" :hidden="columns.hidden" :reserve-notes="sheet" @change="(order, visible) => emit('columns', order, visible)" @reset="emit('columnsReset')" />
     <div class="section model-display">
       <div class="model-choice"><span>Effort meter</span><div class="seg" role="radiogroup" aria-label="Effort meter">
         <button v-for="on in [true, false]" :key="String(on)" type="button" role="radio" :aria-checked="modelDisplay.effortMeter === on" @click="setModelDisplay('effortMeter', on)">{{ on ? 'On' : 'Off' }}</button>

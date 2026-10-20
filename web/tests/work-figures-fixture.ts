@@ -34,6 +34,8 @@ export function wholeFigures(options: { marksReleases?: boolean } = {}): Project
       created_at: column(168, { from: '2026-09-07T08:00:00Z', to: at(-100), median_age_seconds: 5.7 * DAY, stale: 1 }),
       updated_at: column(168, { from: '2026-09-12T10:00:00Z', to: at(-8), median_age_seconds: 2.8 * DAY, stale: 0 }),
       epic: column(166, { values: [{ value: 'AIT-12', count: 40, hours: 0 }, { value: 'AIT-3', count: 22, hours: 0 }], others: 9, without_value: 95 }),
+      // Direct parents: a task under ticket AIT-40 counts there, not under the epic above it (AEON-1470).
+      parent: column(166, { values: [{ value: 'AIT-40', count: 31, hours: 0 }, { value: 'AIT-12', count: 18, hours: 0 }], others: 27, without_value: 90 }),
       release: column(166, { values: [{ value: '2026.10.7', count: 14, hours: 0 }, { value: '2026.10.6', count: 9, hours: 0 }], others: 85, without_value: 58 }),
       suggested_release: column(166, { values: [], without_value: 166 }),
       tag: column(166, { values: [{ value: 'bug', count: 19, hours: 0 }, { value: 'voice', count: 14, hours: 0 }, { value: 'ci', count: 9, hours: 0 }, { value: 'legal', count: 6, hours: 0 }, { value: 'process-learning', count: 5, hours: 0 }], others: 12, without_value: 101 }),

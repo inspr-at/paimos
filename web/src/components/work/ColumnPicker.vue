@@ -11,6 +11,8 @@ import AppIcon from '../AppIcon.vue'
 const props = withDefaults(defineProps<{
   order: T[]; visible: T[]; customised: boolean
   notes?: Partial<Record<string, string>>
+  // Ticked columns the list's width leaves out for now (AEON-1470): a muted note after the name.
+  hidden?: readonly string[]
   reserveNotes?: boolean
   labels?: Partial<Record<string, string>>; pinned?: T[]; resetLabel?: string; resetTip?: string; note?: string | null
 }>(), { labels: undefined, pinned: undefined, resetLabel: 'Automatic', resetTip: 'Columns follow the width again', note: 'Drag a header edge to resize a column; double-click it to fit.' })
@@ -20,6 +22,7 @@ const pins = computed<T[]>(() => props.pinned ?? (PINNED as unknown as T[]))
 const label = (id: T) => props.labels?.[id] ?? COLUMN_BY_ID.get(id as unknown as ColumnId)?.label ?? id
 const free = computed(() => props.order.filter(id => !pins.value.includes(id)))
 const shown = computed(() => new Set(props.visible))
+const away = computed(() => new Set(props.hidden ?? []))
 // Plain strings: a generic ref does not unwrap cleanly in the template.
 const dragging = ref<string | null>(null)
 const over = ref<string | null>(null)
@@ -73,7 +76,7 @@ function drop(target: T) {
             type="checkbox" class="check" :checked="shown.has(id)" :data-column-row="id" :aria-describedby="notes?.[id] ? `${hint} ${hint}-${id}` : hint"
             @change="toggle(id)" @keydown="keydown($event, id)"
           />
-          <span class="name">{{ label(id) }}</span>
+          <span class="name line"><span class="name-text">{{ label(id) }}</span><span v-if="away.has(id) && shown.has(id)" class="away-note">hidden at this width</span></span>
         </label>
         <span class="moves">
           <button type="button" class="icon-btn sm flat" :aria-label="`Move ${label(id)} up`" :disabled="index === 0" tabindex="-1" @click="step(id, -1)"><AppIcon name="chevron-up" :size="13" /></button>
@@ -92,14 +95,15 @@ function drop(target: T) {
 </template>
 
 <style scoped>
-.columns { display: grid; gap: 6px; }
+/* One shrinkable track: names and notes wrap inside the menu. */
+.columns { display: grid; grid-template-columns: minmax(0, 1fr); gap: 6px; min-width: 0; }
 .head { display: flex; align-items: center; justify-content: space-between; min-height: 24px; }
 .head .eyebrow { margin: 0; }
 .reset { height: 24px; padding: 0 8px; border: 0; border-radius: 999px; background: transparent; color: var(--teal-ink); font-size: 12px; font-weight: 600; }
 .reset:hover { background: var(--row-hover); }
 .reset:focus-visible { box-shadow: var(--focus-ring); }
 .auto-note { font-size: 11.5px; color: var(--ink-3); }
-.list { margin: 0; padding: 0; list-style: none; display: grid; gap: 1px; }
+.list { margin: 0; padding: 0; list-style: none; display: grid; grid-template-columns: minmax(0, 1fr); gap: 1px; }
 .row { display: flex; align-items: center; gap: 6px; height: 32px; padding: 0 4px 0 8px; border-radius: 8px; font-size: 13px; color: var(--ink); user-select: none; }
 .row:hover { background: var(--row-hover); }
 .row:focus-within { background: var(--row-selected); }
@@ -114,6 +118,11 @@ function drop(target: T) {
 .check { width: 16px; height: 16px; margin: 0; accent-color: var(--teal); }
 .check:focus-visible { box-shadow: var(--focus-ring); border-radius: 4px; }
 .name { flex: 1; min-width: 0; }
+/* Keep the full name: when the note cannot fit beside it, it starts underneath.
+   Two 16 px lines fit the existing row, so checkboxes and neighbouring rows stay put. */
+.name.line { display: flex; flex-wrap: wrap; align-items: baseline; column-gap: 8px; line-height: 16px; }
+.name-text { flex: none; max-width: 100%; overflow-wrap: anywhere; }
+.away-note { flex: none; font-size: 12px; color: var(--ink-3); white-space: nowrap; }
 .pin-note { font-size: 11.5px; color: var(--ink-3); padding-right: 8px; }
 .moves { display: inline-flex; opacity: 0; }
 .row:hover .moves, .row:focus-within .moves { opacity: 1; }

@@ -385,7 +385,7 @@ test('quick create shows unset priority and parent as dimmed values', async ({ p
   expect(await page.getByRole('button', { name: 'Parent: none' }).locator('.chip-text').evaluate(el => el.classList.contains('unset'))).toBe(true)
 })
 
-test('a selected row hides its parent chip rather than clipping it under the row actions', async ({ page }) => {
+test('a selected row keeps its cursor and has no parent chip in the title', async ({ page }) => {
   // The panel lookup wins the race with the list page. They resolve to the
   // same store object, so the later page must still establish the row cursor.
   await mockWork(page, fixtures(), { hold: call => call.method === 'GET' && call.path === '/api/nodes' && !call.query.get('q')
@@ -393,8 +393,7 @@ test('a selected row hides its parent chip rather than clipping it under the row
   await page.goto('/p/PHAROS/PHAROS-11')
   const row = page.locator('#row-n-1')
   await expect(row.locator('.row-actions')).toBeVisible()
-  await expect(row.locator('.parent-chip')).toHaveCSS('opacity', '0')
-  await expect(page.locator('#row-n-2 .parent-chip')).toHaveCSS('opacity', '1')
+  await expect(page.locator('.parent-chip')).toHaveCount(0)
 })
 
 for (const colorScheme of ['light', 'dark'] as const) {

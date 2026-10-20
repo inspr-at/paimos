@@ -84,7 +84,8 @@ test('AEON-1388 each group row carries its figures in its own columns: sums of i
   const progress = d.nodes.filter(n => n.project === 'p-pharos' && ['in-progress', 'in_progress'].includes(n.state))
   const sum = progress.reduce((total, n) => total + (typeof n.fields.estimate_hours === 'number' ? n.fields.estimate_hours : 0), 0)
   await expect(cell(page, 'In progress', 'estimate')).toHaveText(`~${sum}h`)
-  await expect(cell(page, 'In progress', 'priority')).toHaveText('3 high · 1 med')
+  // The full mix, or (AEON-1470) the most severe bucket and "+N" when the platform's type does not fit it in the cell.
+  await expect(cell(page, 'In progress', 'priority')).toHaveText(/^3\shigh(\s·\s1\smed|\s\+1)$/)
   // "N working" is the group's rows with a live session; their agents lead the cell.
   await expect(cell(page, 'In progress', 'assignee')).toHaveText('2 working')
   await expect(groupRow(page, 'In progress').locator('td[data-group-column="assignee"] .gf-agents > *')).toHaveCount(2)
@@ -100,7 +101,7 @@ test('AEON-1388 each group row carries its figures in its own columns: sums of i
   // The grouped-by column stays empty, and no group cell says "—" or 0.
   for (const label of ['New', 'Backlog', 'In progress', 'QA']) await expect(cell(page, label, 'status')).toHaveText('')
   const texts = await grid(page).locator('.group-row .gf-text').allTextContents()
-  expect(texts.filter(text => /^\s*(—|0)(\s|$)|\b0 (working|stale|high|med|low|people)/.test(text))).toEqual([])
+  expect(texts.filter(text => /^\s*(—|0)(\s|$)|\b0\s(working|stale|high|med|low|people)|\+0\b/.test(text))).toEqual([])
   // Each figure's tip is its column's figures for the group, titled with the group.
   await cell(page, 'In progress', 'estimate').hover()
   const tip = page.locator('#figure-tip')

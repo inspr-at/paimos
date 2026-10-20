@@ -65,6 +65,8 @@ components:
             leaves: {type: integer, description: "Matching leaves including Closed."}
             project_leaves: {type: integer, description: "All project work leaves including Closed, before view filters."}
             closed: {type: integer, description: "Matching Cancelled and Archived leaves."}
+            open_rows: {type: integer, description: "Work rows in scope that are not Cancelled or Archived, including parents."}
+            open_with_parent: {type: integer, description: "Of those open rows, how many have a direct parent that exists and is not the project."}
         marks_releases: {type: boolean, description: "A visible work item reached Delivered or Accepted in the project in the last 90 days. Otherwise Done is the final step and joins completed."}
         total_hours: {type: number, description: "Sum of valid positive leaf estimates at most 200 hours each; Closed and all parent hours excluded."}
         approximate: {type: boolean, description: "A nonzero total uses estimated hours and carries ~ in the UI; never put ~ on individual groups."}
@@ -81,7 +83,7 @@ components:
             open: {$ref: '#/components/schemas/WorkFigureGroup'}
         columns:
           type: object
-          description: "key, status, priority, assignee, epic, release, suggested_release, tag, cost_unit, model, estimate, tokens, cost, created_at, updated_at, eta_ready and progress. Title has no figures. Key and dates count all rows; other columns count leaves. Estimate and Progress exclude Closed; Tokens and Cost retain it. Cost is omitted without harness.read."
+          description: "key, status, priority, assignee, epic, parent, release, suggested_release, tag, cost_unit, model, estimate, tokens, cost, created_at, updated_at, eta_ready and progress. Epic counts each leaf's nearest work or epic ancestor; parent counts its direct parent other than the project. Title has no figures. Key and dates count all rows; other columns count leaves. Estimate and Progress exclude Closed; Tokens and Cost retain it. Cost is omitted without harness.read."
           additionalProperties: {$ref: '#/components/schemas/ColumnFigures'}
     WorkFigureGroup:
       type: object
