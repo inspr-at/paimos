@@ -276,10 +276,21 @@ test('docked, the header keeps a labelled Hide toggle and epic counts stay reada
   await page.setViewportSize({ width: 1280, height: 800 })
   const calls = await mockWork(page, tree())
   await page.goto('/p/PHAROS/PHAROS-14?view=outline')
-  const toggle = page.getByRole('checkbox', { name: 'Hide closed', exact: true })
+  // AEON-1559: a docked pane narrows the navigation row, so Hide may be the
+  // switch, the labelled pill, the icon pill, or the Display menu. The label
+  // is required wherever that ladder still draws one.
+  const settings = page.locator('#project-view-settings .view-settings')
+  await expect(settings).toBeVisible()
+  const step = Number(await settings.getAttribute('data-navigation-step'))
+  const openMenu = async () => { await settings.locator('.display-btn').click(); await expect(page.locator('.menu-switch input')).toBeVisible() }
+  if (step >= 4) await openMenu()
+  const toggle = step >= 4 ? page.locator('.menu-switch input') : step >= 2 ? settings.locator('.closed-pill') : settings.locator('.closed-switch input')
   await expect(toggle).toBeVisible()
-  await expect(toggle).toBeChecked()
-  await expect(page.locator('.closed-switch .hide-label-slot > .label:not(.measure)')).toHaveText('Hide closed')
+  if (step >= 2 && step < 4) await expect(toggle).toHaveAttribute('aria-pressed', 'true')
+  else await expect(toggle).toBeChecked()
+  const label = step >= 4 ? page.locator('.menu-switch .hide-label-slot > .label:not(.measure)') : step >= 2 ? settings.locator('.closed-pill .hide-label-slot > .label:not(.measure)') : settings.locator('.closed-switch .hide-label-slot > .label:not(.measure)')
+  if (step !== 3) await expect(label).toHaveText('Hide closed')
+  if (step >= 4) await page.keyboard.press('Escape')
   await expect(ticketViews(page).getByRole('tab', { name: 'Outline' })).toHaveAttribute('aria-selected', 'true')
   const toolbar = (await page.getByRole('toolbar', { name: 'Ticket list controls' }).boundingBox())!
   expect(toolbar.height).toBeLessThan(60)
@@ -288,9 +299,11 @@ test('docked, the header keeps a labelled Hide toggle and epic counts stay reada
   const actions = (await row(page, 'PHAROS-10').locator('.row-actions').boundingBox())!
   const numbers = (await count.boundingBox())!
   expect(numbers.x + numbers.width).toBeLessThanOrEqual(actions.x)
-  await toggle.uncheck()
+  if (step >= 4) await openMenu()
+  await toggle.click()
   await expect(page).toHaveURL(/closed=1/)
-  await expect(toggle).not.toBeChecked()
+  if (step >= 2 && step < 4) await expect(toggle).toHaveAttribute('aria-pressed', 'false')
+  else await expect(toggle).not.toBeChecked()
   await expect(row(page, 'PHAROS-15')).toBeVisible()
   void calls
 })

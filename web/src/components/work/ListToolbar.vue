@@ -196,8 +196,9 @@ const displayText = computed(() => props.view === 'outline' ? 'Display' : displa
 // The collapsed header's menu replaces the plain Display panel; the attention host keeps its own.
 const navigationMenu = computed(() => !!props.settingsTarget && navigationStep.value === 4)
 const collapsedMenu = computed(() => (!!props.collapsedHeader || navigationMenu.value) && !props.attention)
-// Opened away from its own buttons (the filter sheet's link), Display is a sheet of its own;
-// closing it, also by Expand or Collapse all, hands focus back to Filters.
+// Opened away from its own buttons (the filter sheet's link), Display is a sheet of its own.
+// Closing it, also by Expand or Collapse all, returns focus to that anchor: the Display
+// button when it is in sight, otherwise Filters.
 const detachedDisplay = computed(() => !!displayAnchor.value && displayAnchor.value !== displayButton.value && displayAnchor.value !== collapsedDisplayButton.value)
 const displaySheet = computed(() => detachedDisplay.value || (collapsedMenu.value && sheetMode.value))
 const displayOn = computed(() => props.view === 'list' && props.filters.group !== 'none')
@@ -403,7 +404,7 @@ defineExpose({ focusSearch, openFilterMenu, openDisplay, input, closeOverlays })
           :project-header="projectHeader" :sheet="displaySheet" :stable-sort="collapsedMenu"
           @group="value => emit('group', value)" @sort="keys => emit('sort', keys)" @density="value => emit('density', value)"
           @columns="(order, visible) => emit('columns', order, visible)" @columns-reset="emit('columnsReset')"
-          @expand-all="emit('expandAll'); closeDisplay(detachedDisplay)" @collapse-all="emit('collapseAll'); closeDisplay(detachedDisplay)"
+          @expand-all="emit('expandAll'); closeDisplay(true)" @collapse-all="emit('collapseAll'); closeDisplay(true)"
           @expand-groups="emit('expandGroups')" @collapse-groups="emit('collapseGroups')" @group-order="desc => emit('groupOrder', desc)"
         />
         <HeaderRoomyChoice v-else />
