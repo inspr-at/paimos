@@ -81,10 +81,15 @@ for (const width of [390, 1024, 1440]) for (const mode of ['light', 'dark'] as c
     const row = width === 390 ? page.locator('.ticket-ws .panel-bar') : page.locator('#row-n-1'), marker = page.locator('#row-n-1 .recurrence-dot, .ticket-ws .recurring-pill-mark')
     const modeControl = width === 390 ? page.getByRole('button', { name: /^Account for/ }) : page.getByRole('button', { name: /Switch to .* theme/ })
     async function toggleMode() {
+      // The phone ticket sheet covers the app header. Use its real Close
+      // action before changing appearance, then reopen the same ticket.
+      if (width === 390) await page.locator('.ticket-ws').getByRole('button', { name: 'Close ticket details', exact: true }).click()
       await modeControl.click()
       if (width === 390) {
         await page.getByRole('menuitem', { name: /Switch to .* theme/ }).click()
         await page.keyboard.press('Escape')
+        await page.locator('#row-n-1 .title-link').click()
+        await expect(page.locator('.ticket-ws .recurring-pill-mark')).toBeVisible()
       }
     }
     await expect(marker).toBeVisible()
@@ -109,7 +114,7 @@ for (const width of [390, 1024, 1440]) for (const mode of ['light', 'dark'] as c
     } }] })
     const button = page.getByRole('button', { name: 'New ticket', exact: true })
     expect(await button.evaluate(el => getComputedStyle(el).color)).toBe(cssRgb(inkOn(primaryFill)))
-    const mark = page.locator('.agent-state-mark').first()
+    const mark = page.locator(width === 390 ? '.ticket-ws .agent-state-mark' : '.agent-state-mark').first()
     await expect(mark).toBeVisible()
     await expect(mark).toHaveAttribute('data-mark', 'working')
     const stateFill = AGENT_PALETTES.find(p => p.id === 'tritan')![mode][0]!
