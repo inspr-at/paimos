@@ -5,7 +5,7 @@ import { vClipTip } from '../../directives/clipTip'
 import { formatEstimate, estimateDisplay } from '../../lib/estimates'
 import { computed, getCurrentInstance, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import type { ListItem } from '../../lib/api'
-import { CARD_WIDTH_SAMPLE_CAP, COLUMN_BY_ID, cardWidthAfterSamples, costUnitLabel, hasSavedWidth, layoutTableWidth, layoutWidths, loadedFitWidth, nextMeasuredCardWidth, PARENT_TITLE_WIDTH, releaseLabel, tagList, titleRoom, visibleColumns, withHostColumns, type ColumnDef, type ColumnId, type ListPrefs, type TagRef } from '../../lib/columns'
+import { adoptedCardWidth, CARD_WIDTH_SAMPLE_CAP, COLUMN_BY_ID, cardWidthAfterSamples, costUnitLabel, hasSavedWidth, layoutTableWidth, layoutWidths, loadedFitWidth, nextMeasuredCardWidth, PARENT_TITLE_WIDTH, releaseLabel, tagList, titleRoom, visibleColumns, withHostColumns, type ColumnDef, type ColumnId, type ListPrefs, type TagRef } from '../../lib/columns'
 import { releaseCell, type NativeReleaseView } from '../../lib/releaseMembership'
 import { agentKey, ticketWorkers, withServerLead, type LiveAgent } from '../../lib/liveAgents'
 import { useLiveAgents } from '../../stores/liveAgents'
@@ -530,6 +530,11 @@ function readCardWidth(): number | null {
   return el.clientWidth - (Number.isFinite(padding) ? padding : 0)
 }
 let cardFrame = 0
+// Bumped when a sample window finishes. Readers wait for the next epoch instead of a timer:
+// the list spec installs a clock that stubs requestAnimationFrame, so two of those frames are
+// not two paints (AEON-1594).
+const cardEpoch = ref(0)
+const cardWidthSettled = ref(false)
 function measureWidth() {
   const live = readCardWidth()
   if (live !== null && live > 0) width.value = live
@@ -543,20 +548,32 @@ function measureWidth() {
 // One disagreeing pair is not a reason to keep the old width: later pairs are
 // read until one agrees. A later wider pair is kept only when the viewport
 // grew. A newer measure bumps cardFrame and cancels this read.
+function finishCardSettle(frame: number) {
+  if (frame !== cardFrame || !columnsAlive) return
+  cardEpoch.value++
+  cardWidthSettled.value = true
+}
 function settleCardWidth(viewportGrew = false) {
   const frame = ++cardFrame
+  cardWidthSettled.value = false
   const samples: (number | null)[] = []
   const take = () => {
     requestAnimationFrame(() => {
       if (frame !== cardFrame || !columnsAlive) return
       samples.push(readCardWidth())
       if (samples.length % 2 === 1) { take(); return }
-      const agreed = cardWidthAfterSamples(samples, width.value, viewportGrew)
-      if (agreed === null) {
-        if (samples.length < CARD_WIDTH_SAMPLE_CAP) take()
+      const live = readCardWidth()
+      const chosen = adoptedCardWidth(cardWidthAfterSamples(samples, width.value, viewportGrew), live, viewportGrew)
+      if (chosen === null) {
+        if (samples.length < CARD_WIDTH_SAMPLE_CAP) { take(); return }
+        // The pairs never matched the card. Lay out in the box that is on screen,
+        // so a stale wide sample cannot leave a column at 0 inside the narrow card.
+        if (live !== null && live > 0) width.value = live
+        finishCardSettle(frame)
         return
       }
-      width.value = agreed
+      width.value = chosen
+      finishCardSettle(frame)
     })
   }
   take()
@@ -983,7 +1000,7 @@ defineExpose({
 </script>
 
 <template>
-  <div ref="card" class="table-card" :data-columns-settled="columnsSettled ? '1' : '0'" :class="[density, { selectable, selecting, customised: customised && !phoneRows, 'phone-rows': phoneRows, overflowing: !phone && layoutWidth > width + 1 }]">
+  <div ref="card" class="table-card" :data-columns-settled="columnsSettled ? '1' : '0'" :data-card-width-settled="cardWidthSettled ? '1' : '0'" :data-card-epoch="cardEpoch" :class="[density, { selectable, selecting, customised: customised && !phoneRows, 'phone-rows': phoneRows, overflowing: !phone && layoutWidth > width + 1 }]">
     <table :style="!phone && layoutWidth > width ? { minWidth: `${layoutWidth}px` } : undefined" ref="grid" class="tickets" :class="{ outline: !!outline }" :role="outline ? 'treegrid' : 'grid'" :aria-label="label ?? (outline ? 'Ticket outline' : 'Tickets')" :aria-busy="loading" tabindex="0" :aria-activedescendant="cursorId ? `row-${cursorId}` : undefined" @focus="emit('gridFocus')">
       <colgroup>
         <col v-for="column in columns" :key="column.id" :class="column.cls" :style="colWidth(column.id) ? { width: `${colWidth(column.id)}px` } : undefined" />
