@@ -4,6 +4,7 @@ import { test, expect, type Page } from '@playwright/test'
 import { fixtures, mockWork } from './work-fixtures'
 import { expectStableControls } from './helpers/stable'
 import { toggleProjectHead } from './helpers/compact'
+import { expectHideOn, navigationHide } from './helpers/navigationHide'
 
 const shots = 'test-results/aeon-645'
 const countRoot = (page: Page) => page.getByRole('group', { name: 'Filter tickets by status', exact: true })
@@ -12,6 +13,11 @@ const status = (page: Page, state: string) => countRoot(page).locator(`[data-sta
 const rows = (page: Page) => page.getByRole('grid', { name: 'Tickets' }).locator('tr.ticket-row:not(.ghost)')
 const row = (page: Page, key: string) => rows(page).filter({ has: page.locator('.key', { hasText: new RegExp(`^${key}$`) }) })
 const hide = (page: Page) => page.getByRole('checkbox', { name: 'Hide closed', exact: true })
+// The ladder's visible Hide control. A closed step-4 menu has no checkbox on the row.
+async function shownHide(page: Page) {
+  const found = await navigationHide(page)
+  return found.kind === 'menu' ? page.locator('#project-view-settings .display-btn') : found.control
+}
 const density = (page: Page, name: string) => page.getByRole('radio', { name: `${name} project header`, exact: true })
 async function settled(page: Page) { await page.evaluate(async () => { await document.fonts.ready; await new Promise<void>(resolve => requestAnimationFrame(() => requestAnimationFrame(() => resolve()))) }) }
 async function screenshot(page: Page, name: string) { for (const close of await page.locator('.toast-close').all()) await close.click(); await expect(page.locator('.toast')).toHaveCount(0); await settled(page); mkdirSync(shots, { recursive: true }); await page.screenshot({ path: `${shots}/${name}.png` }) }
@@ -85,12 +91,12 @@ for (const width of [390, 1024, 1440]) for (const theme of ['light', 'dark']) {
       }
       await expect(status(page, 'done')).toHaveClass(/is-hidden/)
       await expect(status(page, 'cancelled').locator('b')).toHaveText('2')
-      await expectStableControls({ controls: { ...controls, grid: countRoot(page), accepted: status(page, 'accepted'), cancelled: status(page, 'cancelled'), archived: status(page, 'archived'), hide: hide(page), display: page.locator('.project-navigation').getByRole('button', { name: 'Display: Display', exact: true }) },
+      await expectStableControls({ controls: { ...controls, grid: countRoot(page), accepted: status(page, 'accepted'), cancelled: status(page, 'cancelled'), archived: status(page, 'archived'), hide: await shownHide(page), display: page.locator('.project-navigation').getByRole('button', { name: 'Display: Display', exact: true }) },
         scrollAreas: { page: page.locator('.project-page') }, interactions: [
-          { name: 'Cancelled includes canceled', run: async () => { await status(page, 'cancelled').click(); await expect(rows(page)).toHaveCount(2); await expect(hide(page)).not.toBeChecked(); await expect(status(page, 'cancelled')).toHaveAttribute('aria-pressed', 'true') } },
+          { name: 'Cancelled includes canceled', run: async () => { await status(page, 'cancelled').click(); await expect(rows(page)).toHaveCount(2); await expectHideOn(page, false); await expect(status(page, 'cancelled')).toHaveAttribute('aria-pressed', 'true') } },
           { name: 'Accepted replaces selection', run: async () => { await status(page, 'accepted').click(); await expect(rows(page)).toHaveCount(1); await expect(row(page, 'PHAROS-31')).toBeVisible() } },
           { name: 'Archived', run: async () => { await status(page, 'archived').click(); await expect(row(page, 'PHAROS-32')).toBeVisible(); await expect(rows(page)).toHaveCount(1) } },
-          { name: 'clear with toolbar removal', run: async () => { await page.getByRole('button', { name: 'Remove Status filter' }).click(); await expect(hide(page)).toBeChecked(); await expect(page).not.toHaveURL(/status=/) } },
+          { name: 'clear with toolbar removal', run: async () => { await page.getByRole('button', { name: 'Remove Status filter' }).click(); await expectHideOn(page, true); await expect(page).not.toHaveURL(/status=/) } },
         ] })
     }
     await screenshot(page, `${width}-${theme}-comfortable`)
@@ -178,7 +184,7 @@ test('truncated summary keeps custom Done QA visible through reload and restores
 for (const width of [1024, 1440]) test(`live count digit growth stays still at ${width}px`, async ({ page }) => {
   await setup(page, width, 'light', 6); await roomy(page, width)
   await expect(group(page, 'in_progress').locator('b')).toHaveText('9')
-  await expectStableControls({ controls: { grid: countRoot(page), open: group(page, 'open'), doing: group(page, 'in_progress'), done: group(page, 'done'), qa: status(page, 'qa'), accepted: status(page, 'accepted'), hide: hide(page), new: page.getByRole('button', { name: 'New ticket', exact: true }) },
+  await expectStableControls({ controls: { grid: countRoot(page), open: group(page, 'open'), doing: group(page, 'in_progress'), done: group(page, 'done'), qa: status(page, 'qa'), accepted: status(page, 'accepted'), hide: await shownHide(page), new: page.getByRole('button', { name: 'New ticket', exact: true }) },
     scrollAreas: { page: page.locator('.project-page') }, interactions: [{ name: 'confirmed QA write refreshes 9 to 10', run: async () => {
       await row(page, 'PHAROS-14').locator('.status-btn').click()
       await page.getByRole('menuitemradio', { name: 'QA', exact: true }).click()

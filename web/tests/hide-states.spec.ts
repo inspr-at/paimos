@@ -10,6 +10,8 @@ const rows = (page: Page) => page.getByRole('grid', { name: 'Tickets' }).locator
 const row = (page: Page, key: string) => rows(page).filter({ has: page.locator('.key', { hasText: new RegExp(`^${key}$`) }) })
 const gear = (page: Page) => page.getByRole('button', { name: 'Choose what Hide hides', exact: true })
 const hide = (page: Page) => page.locator('.closed-switch input')
+// AEON-1559 hides the labelled switch once the navigation row takes the pill.
+const rowHide = (page: Page) => page.locator('#project-view-settings .closed-switch input:visible, #project-view-settings .closed-pill:visible')
 const chooser = (page: Page, width: number) => width === 390 ? page.getByRole('dialog', { name: 'Filters', exact: true }) : page.getByRole('dialog', { name: 'What Hide hides', exact: true })
 async function shot(page: Page, name: string) { await page.evaluate(() => document.fonts.ready); await page.screenshot({ path: test.info().outputPath(`${name}.png`) }) }
 async function setup(page: Page, width = 1440, theme = 'light') {
@@ -56,7 +58,7 @@ for (const width of [390, 1024, 1440]) for (const theme of ['light', 'dark']) {
       done: check('Done'), delivered: check('Delivered'), accepted: check('Accepted'), cancelled: check('Cancelled'), archived: check('Archived'),
       row: options.locator('.hide-option[data-state="cancelled"]'),
       ...(width === 390 ? { frame: panel, header: panel.locator('header'), action: panel.locator('footer button'), toggle: panel.locator('.switch input').first() }
-        : { hide: hide(page), label: page.locator('.closed-switch'), gear: gear(page), display: page.locator('.project-view-settings .display-btn'), search: page.getByRole('searchbox', { name: 'Search tickets in this project' }) }),
+        : { hide: rowHide(page), gear: gear(page), display: page.locator('.project-view-settings .display-btn'), search: page.getByRole('searchbox', { name: 'Search tickets in this project' }) }),
     }
     await expectStableControls({ controls, scrollAreas: width === 390 ? { body: panel.locator('.sheet-scroll') } : { body: panel, page: page.locator('.project-page') }, interactions: [
       { name: 'finished set', run: async () => { await check('Cancelled').uncheck(); await check('Archived').uncheck(); await expect(page).toHaveURL(/hide_states=done,delivered,accepted/); await expect(options.locator('.hide-result')).toHaveText('Hides 3 tickets now'); await shot(page, `${width}-${theme}-finished`) } },
@@ -74,7 +76,14 @@ for (const width of [390, 1024, 1440]) for (const theme of ['light', 'dark']) {
     await expect(row(page, 'PHAROS-31')).toHaveCount(0)
     await expect(row(page, 'PHAROS-33')).toBeVisible()
     expect(queries.some(query => query.get('hide_closed') === 'true' && query.get('hide_states') === 'accepted')).toBe(true)
-    if (width !== 390) { await expect(hide(page)).toHaveAccessibleName('Hide Accepted'); await expect(gear(page)).toBeFocused() }
+    if (width !== 390) {
+      const step = Number(await page.locator('#project-view-settings .view-settings').getAttribute('data-navigation-step'))
+      const toggle = rowHide(page)
+      await expect(toggle).toHaveAccessibleName(step >= 2 ? 'Hide Accepted tickets' : 'Hide Accepted')
+      if (step < 2) await expect(page.locator('.closed-switch .hide-label-slot > .label:not(.measure)')).toHaveText('Hide Accepted')
+      else if (step === 2) await expect(page.locator('.closed-pill .hide-label-slot > .label:not(.measure)')).toHaveText('Hide Accepted')
+      await expect(gear(page)).toBeFocused()
+    }
     await shot(page, `${width}-${theme}-accepted`)
     await page.reload(); await expect(row(page, 'PHAROS-15')).toBeVisible(); await expect(row(page, 'PHAROS-31')).toHaveCount(0)
     await open(page, width); await expect(chooser(page, width).getByRole('checkbox', { name: 'Accepted', exact: true })).toBeChecked()
