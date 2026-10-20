@@ -54,4 +54,5 @@ function submit() {
 .error { display: flex; align-items: center; gap: 6px; font-size: 12.5px; color: var(--danger); }
 .actions { display: flex; justify-content: flex-end; gap: 6px; }
 .actions .btn { gap: 6px; }
+@media (max-width: 719px), (max-height: 500px) { .actions .btn { min-width: 44px; min-height: 44px; } .check-row { min-height: 44px; } }
 </style>

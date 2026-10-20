@@ -150,9 +150,11 @@ header .btn { height: 44px; }
 .sheet-section :deep(.facet-options) { grid-template-columns: minmax(0, 1fr); }
 .sheet-section :deep(.facet-option) { min-height: 44px; }
 .sheet-section :deep(.facet-main) { font-size: 15px; }
+.sheet-section :deep(.not-btn) { width: 44px; height: 44px; margin-right: 0; }
+.sheet-card :deep(.hide-options .reset) { min-width: 44px; }
 .chip-grid { display: flex; flex-wrap: wrap; gap: 6px; padding: 0 8px; }
 .chip-grid.presets { margin-top: 8px; }
-.choice { height: 36px; padding: 0 14px; border: 0; border-radius: 999px; background: var(--chip-bg); box-shadow: inset 0 0 0 1px var(--chip-line); color: var(--ink-2); font-size: 14px; font-weight: 600; }
+.choice { min-width: 44px; height: 44px; padding: 0 14px; border: 0; border-radius: 8px; background: transparent; box-shadow: inset 0 0 0 1px var(--line); color: var(--ink-2); font-size: 14px; font-weight: 600; }
 .choice[aria-checked="true"], .choice[aria-pressed="true"] { background: var(--chip-teal-bg); box-shadow: inset 0 0 0 1px var(--chip-teal-line); color: var(--teal-ink); font-weight: 600; }
 .choice:focus-visible { box-shadow: var(--focus-ring); }
 footer { padding: 12px 16px calc(12px + env(safe-area-inset-bottom)); border-top: 1px solid var(--line); }
