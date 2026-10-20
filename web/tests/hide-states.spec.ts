@@ -46,6 +46,9 @@ async function close(page: Page, width: number) {
 }
 for (const width of [390, 1024, 1440]) for (const theme of ['light', 'dark']) {
   test(`Hide choices and stable controls at ${width}px ${theme}`, async ({ page }) => {
+    // CI Chromium finishes the same samples in 28.9–29.5s. The 30s default
+    // expires during reload, before the persisted-filter checks. 60s still bounds a hang.
+    test.setTimeout(60_000)
     const errors: string[] = []; page.on('pageerror', error => errors.push(error.message))
     const { queries } = await setup(page, width, theme)
     await expect(row(page, 'PHAROS-15')).toHaveCount(0)
@@ -66,10 +69,12 @@ for (const width of [390, 1024, 1440]) for (const theme of ['light', 'dark']) {
       { name: 'one status cannot be unchecked', run: async () => { await check('Delivered').uncheck(); await expect(check('Accepted')).toBeDisabled(); await expect(check('Accepted')).toBeChecked(); await expect(page).toHaveURL(/hide_states=accepted/) } },
       { name: 'reset', run: async () => { await options.getByRole('button', { name: 'Reset', exact: true }).click(); await expect(page).not.toHaveURL(/hide_states=/); await expect(options.locator('.hide-result')).toHaveText('Hides 6 tickets now') } },
     ] })
-    // Each individual interaction is guarded too, rather than only the final set.
-    for (const name of ['Done', 'Delivered', 'Accepted', 'Cancelled', 'Archived']) {
-      await expectStableControls({ controls, interactions: [{ name: `remove ${name}`, run: async () => { await check(name).uncheck(); await expect(check(name)).not.toBeChecked() } }, { name: `restore ${name}`, run: async () => { await check(name).check(); await expect(check(name)).toBeChecked() } }] })
-    }
+    // Each status toggle is guarded against one baseline. A fresh baseline per
+    // status would absorb drift and repeat the same twelve-control sample.
+    await expectStableControls({ controls, interactions: ['Done', 'Delivered', 'Accepted', 'Cancelled', 'Archived'].flatMap(name => [
+      { name: `remove ${name}`, run: async () => { await check(name).uncheck(); await expect(check(name)).not.toBeChecked() } },
+      { name: `restore ${name}`, run: async () => { await check(name).check(); await expect(check(name)).toBeChecked() } },
+    ]) })
     await check('Done').uncheck(); await check('Delivered').uncheck(); await check('Cancelled').uncheck(); await check('Archived').uncheck()
     await close(page, width)
     await expect(row(page, 'PHAROS-15')).toBeVisible()
