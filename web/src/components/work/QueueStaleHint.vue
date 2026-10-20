@@ -3,6 +3,7 @@
 import { watch } from 'vue'
 import type { ListItem } from '../../lib/api'
 import { statusMeta } from '../../lib/work'
+import { statusName } from '../../lib/statusNames'
 import { useWorkQueue } from '../../stores/workQueue'
 const props = defineProps<{ row: ListItem }>()
 const queue = useWorkQueue()
@@ -12,7 +13,7 @@ watch(() => [props.row.id, props.row.updated_at], () => {
 </script>
 <template>
   <!-- Reserve the hint's slot even while readiness arrives or status changes. -->
-  <span class="stale-hint" :class="{ shown: queue.stale(row) }" :aria-hidden="!queue.stale(row)" data-tip="In progress, but nobody is working on it. Queue it for the next free agent.">stale</span>
+  <span class="stale-hint" :class="{ shown: queue.stale(row) }" :aria-hidden="!queue.stale(row)" :data-tip="`${statusName('in_progress')}, but nobody is working on it. Queue it for the next free agent.`">stale</span>
 </template>
 <style scoped>
 .stale-hint { visibility: hidden; flex: none; color: var(--ink-3); font-size: 10px; margin-left: 5px; }

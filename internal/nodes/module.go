@@ -45,6 +45,8 @@ func New(pool *pgxpool.Pool, events Writer) httpapi.Module {
 func (m *Module) Mount(mux *http.ServeMux) {
 	mux.HandleFunc("GET /api/settings/work-vocabulary", m.handleGetVocabulary)
 	mux.HandleFunc("PUT /api/settings/work-vocabulary", m.handlePutVocabulary)
+	mux.HandleFunc("GET /api/settings/status-names", m.handleGetStatusNames)
+	mux.HandleFunc("PUT /api/settings/status-names", m.handlePutStatusNames)
 	mux.HandleFunc("GET /api/status/help", m.handleStatusHelp)
 	mux.HandleFunc("GET /api/kinds", m.handleListKinds)
 	mux.HandleFunc("POST /api/kinds", m.requirePermission("kinds.manage", m.handleCreateKind))

@@ -336,6 +336,8 @@
     ,
     "internal/rulesimport:TestCodeExamplesNeverBecomeRules"
     ,
+    "internal/statusnames:TestDisplayFallsBackPerLocale"
+    ,
     "internal/themes:TestAgentAppearanceAPIRoundTripAndBounds"
     ,
     "internal/themes:TestAppearanceMigrationKeepsCanonicalAppearanceWhileLinkedAndAliasesAfterUnlink"
@@ -5058,6 +5060,8 @@
     ,
     {"kind":"go","package":"internal/cli","name":"TestIssueSuggestionConfirmationDropsOnlyRequestedStamps","tier":"GATED-FULL"}
     ,
+    {"kind":"go","package":"internal/cli","name":"TestIssueTextUsesStatusNamesAndJSONStaysCanonical","tier":"ESSENTIAL"}
+    ,
     {"kind":"go","package":"internal/cli","name":"TestIssueUpdateRefusesKindChange","tier":"GATED-FULL"}
     ,
     {"kind":"go","package":"internal/cli","name":"TestIssueUpdateRefusesMissingRevision","tier":"GATED-FULL"}
@@ -8984,6 +8988,8 @@
     ,
     {"kind":"go","package":"internal/nodes","name":"TestStatusHelpLiveLimitsAndProjectOverrides","tags":["delete-candidate"],"tier":"GATED-FULL"}
     ,
+    {"kind":"go","package":"internal/nodes","name":"TestStatusNamesRoundTripKeepCanonicalStates","tier":"ESSENTIAL"}
+    ,
     {"kind":"go","package":"internal/nodes","name":"TestTagAssignmentMutationIsAtomicAndTenantScoped","tier":"GATED-FULL"}
     ,
     {"kind":"go","package":"internal/nodes","name":"TestTagMutationRollsBackAfterEventFailure","tier":"ESSENTIAL"}
@@ -10865,6 +10871,10 @@
     {"kind":"go","package":"internal/statusautopilot","name":"TestUpgradeSuggestsWithoutTicketMutationsUntilOwnerConfirms","tier":"GATED-FULL"}
     ,
     {"kind":"go","package":"internal/statusautopilot","name":"TestWorkspaceActivityPagingAndCurrentUndoAuthority","tier":"GATED-FULL"}
+    ,
+    {"kind":"go","package":"internal/statusnames","name":"TestDisplayFallsBackPerLocale","tier":"NIGHTLY"}
+    ,
+    {"kind":"go","package":"internal/statusnames","name":"TestNormalizeRefusesAmbiguousNamesPerLocale","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/stepup/server","name":"TestStepupApprovalRechecksAuthorityAfterFenceWait","tier":"ESSENTIAL"}
     ,

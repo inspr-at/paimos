@@ -12,6 +12,7 @@ import { compareRevision, type ChangeKind } from './liveUpdates'
 import { rowStore, type RowStore } from './rowStore'
 import { TICKET_SESSION_EVENTS } from './liveAgents'
 import { watchStreamHealth } from './streamHealth'
+import { STATUS_NAMES_EVENT, statusNamesChanged } from './statusNames'
 
 export interface NodeChange {
   eventId: number; type: string; actorId: string
@@ -230,6 +231,8 @@ export class LiveNodeStore {
     source.addEventListener('stream.ready', current(event => this.ready(event)))
     source.addEventListener('stream.ping', current(() => {}))
     for (const name of [...NODE_EVENTS, ...TICKET_SESSION_EVENTS, 'harness.usage_reported']) source.addEventListener(name, current(event => this.receive(event)))
+    // A workspace rename (AEON-1401) re-reads the names; open lists keep their widths.
+    source.addEventListener(STATUS_NAMES_EVENT, current(event => { this.noteEvent(event); statusNamesChanged() }))
     source.onerror = () => {
       if (this.source !== source) return
       // Distrust in-flight pages as soon as the stream is lost, including
@@ -287,9 +290,12 @@ export class LiveNodeStore {
     this.forgetDirty()
     for (const view of [...this.views]) view.resync?.(first ? 'initial' : 'gap')
   }
-  private receive(event: MessageEvent) {
+  private noteEvent(event: MessageEvent) {
     const id = Number(event.lastEventId)
     if (Number.isFinite(id) && id > 0) this.lastEventId = Math.max(this.lastEventId ?? 0, id)
+  }
+  private receive(event: MessageEvent) {
+    this.noteEvent(event)
     if (event.type === 'harness.heartbeat' && quietHeartbeat(event.data)) { this.heartbeat(); return }
     for (const change of parseNodeChanges(event.data)) this.apply(change)
   }

@@ -143,8 +143,10 @@ export function fixtures(options: MockOptions = {}) {
   const people: { id: string; name: string; has_avatar?: boolean }[] = [{ ...me }, { ...mira }]
   // Agents working right now (AEON-184): GET /api/harness-sessions/live items.
   const live: LiveAgentMock[] = []
+  // AEON-1401: the workspace's status names (GET/PUT /api/settings/status-names).
+  const statusNames: { revision: number; names: Record<string, { en?: string; de?: string }> } = { revision: 0, names: {} }
   return {
-    projects, nodes, people, activity, relations, attachments, preferences, events, views, batches, live, counter: { next: 100 },
+    projects, nodes, people, activity, relations, attachments, preferences, events, views, batches, live, statusNames, counter: { next: 100 },
     // A spec may reshape one figures answer, e.g. counts beyond what the fixture's rows can hold (AEON-1470).
     figuresHook: null as ((figures: ReturnType<typeof mockFigures>, query: URLSearchParams) => void) | null,
   }
@@ -337,6 +339,8 @@ export async function mockWork(page: Page, data: Fixtures, options: MockOptions 
       holdOpen() { automaticOpen = false },
       open() { automaticOpen = true; streams.forEach(stream => stream.open()) },
       active() { return streams.filter(stream => !stream.closed).map(stream => ({ id: stream.id, opened: stream.opened })) },
+      // A named event on every open stream, as the server sends it (AEON-1401 live renames).
+      emit(type: string, data: string, id: number) { streams.filter(stream => !stream.closed && stream.opened).forEach(stream => stream.dispatchEvent(new MessageEvent(type, { data, lastEventId: String(id) }))) },
     } })
   })
   const calls: Call[] = []
@@ -581,6 +585,14 @@ export async function mockWork(page: Page, data: Fixtures, options: MockOptions 
     if (path === '/api/me/permissions') return route.fulfill({ json: mockEffectivePermissions(options.readOnly ? 'viewer' : options.admin ? 'admin' : 'member', query.get('project_id') ?? undefined) })
     if (path === '/api/me') return route.fulfill({ json: { principal: { id: me.id, name: me.name, kind: options.principalKind ?? 'person', roles: options.readOnly ? ['viewer'] : options.admin ? ['admin'] : ['member'] }, tenant: { id: 't1', name: 'INSPR Studio' } } })
     if (path === '/api/settings/work-vocabulary') return route.fulfill({ json: { revision: 0, leaf: { name: '', icon: '' }, levels: [] } })
+    if (path === '/api/settings/status-names') {
+      if (method === 'PUT') {
+        const input = body as { revision: number; names: Record<string, { en?: string; de?: string }> }
+        if (input.revision !== data.statusNames.revision) return route.fulfill({ status: 409, json: { error: 'status names changed; reload before saving' } })
+        Object.assign(data.statusNames, { revision: data.statusNames.revision + 1, names: input.names })
+      }
+      return route.fulfill({ json: data.statusNames })
+    }
     if (path === '/api/kinds') return route.fulfill({ json: { items: ['work', 'epic', 'ticket', 'task', 'project'].map(slug => ({ id: `k-${slug}`, slug, label: slug[0].toUpperCase() + slug.slice(1), short_prefix: slug.slice(0, 3).toUpperCase(), icon: slug, allowed_child_kinds: null, field_schema: {} })) } })
     // Relations (U27): the server's refusals, in its words, for the picker to show.
     if (path === '/api/relations' && method === 'POST') {

@@ -97,6 +97,31 @@ const phoneTools = ref<InstanceType<typeof PhoneTicketToolbar>>()
 
 const draft = ref(props.filters.q)
 const root = ref<HTMLElement>()
+const settings = ref<HTMLElement>()
+// Teleported settings have left the toolbar's container. Only the navigation
+// row's width chooses their form; filtering and toggling cannot change it.
+const navigationStep = ref(0)
+const navigationBreaks = [1100, 960, 820, 720]
+let navigationResize: ResizeObserver | undefined
+function watchNavigation() {
+  navigationResize?.disconnect()
+  const row = props.settingsTarget ? settings.value?.closest<HTMLElement>('.project-navigation') : null
+  if (!row) return
+  let initial = true
+  navigationResize = new ResizeObserver(([entry]) => {
+    const width = entry.contentRect.width
+    let step = initial ? 0 : navigationStep.value
+    while (step < navigationBreaks.length && width < navigationBreaks[step]!) step++
+    while (step > 0 && width >= navigationBreaks[step - 1]! + 16) step--
+    initial = false
+    navigationStep.value = step
+  })
+  navigationResize.observe(row)
+}
+onMounted(watchNavigation)
+// A deferred Teleport assigns this ref after the parent's mounted hook.
+watch([settings, () => props.settingsTarget], () => void nextTick(watchNavigation), { flush: 'post' })
+onBeforeUnmount(() => navigationResize?.disconnect())
 // A narrow toolbar (docked panel, small window) gets a placeholder that fits.
 const narrow = ref(false)
 let resize: ResizeObserver | undefined
@@ -185,7 +210,8 @@ function displayPhrase(group: GroupBy) { return group === 'none' ? 'Display' : `
 const displayWords = GROUPS.map(option => displayPhrase(option.value))
 const displayText = computed(() => props.view === 'outline' ? 'Display' : displayPhrase(props.filters.group))
 // The collapsed header's menu replaces the plain Display panel; the attention host keeps its own.
-const collapsedMenu = computed(() => !!props.collapsedHeader && !props.attention)
+const navigationMenu = computed(() => !!props.settingsTarget && navigationStep.value === 4)
+const collapsedMenu = computed(() => (!!props.collapsedHeader || navigationMenu.value) && !props.attention)
 // Opened away from its own buttons (the filter sheet's link), Display is a sheet of its own;
 // closing it, also by Expand or Collapse all, hands focus back to Filters.
 const detachedDisplay = computed(() => !!displayAnchor.value && displayAnchor.value !== displayButton.value && displayAnchor.value !== collapsedDisplayButton.value)
@@ -193,6 +219,7 @@ const displaySheet = computed(() => detachedDisplay.value || (collapsedMenu.valu
 const displayOn = computed(() => props.view === 'list' && props.filters.group !== 'none')
 // Folding or unfolding the header moves the Display button: its popovers anchor to the old place.
 watch(() => props.collapsedHeader, () => { displayAnchor.value = null; hideAnchor.value = null })
+watch(navigationStep, () => { displayAnchor.value = null; hideAnchor.value = null })
 
 function title(dimension: Dimension) { return DIMENSION_BY_KEY.get(dimension)!.title }
 function openMenu(dimension: Dimension, anchor: HTMLElement) {
@@ -325,7 +352,7 @@ defineExpose({ focusSearch, openFilterMenu, openDisplay, input, closeOverlays })
     <span class="spacer" />
 
     <Teleport defer :to="settingsTarget ?? 'body'" :disabled="!settingsTarget">
-    <div class="view-settings">
+    <div ref="settings" class="view-settings" :class="{ 'navigation-settings': !!settingsTarget }" :data-navigation-step="settingsTarget ? navigationStep : undefined">
     <div v-if="!attention" class="hide-control">
     <label class="switch closed-switch" :data-tip="hideNames">
       <input type="checkbox" :aria-label="hideName === 'Hide' ? `Hide ${hideNames}` : hideName" :checked="!filters.showClosed" @change="emit('showClosed', !($event.target as HTMLInputElement).checked)" />
@@ -337,7 +364,7 @@ defineExpose({ focusSearch, openFilterMenu, openDisplay, input, closeOverlays })
     ><AppIcon :name="filters.showClosed ? 'eye' : 'eye-off'" :size="14" /><HideLabel :states="filters.hideStates" /></button>
     <button type="button" class="hide-gear" aria-label="Choose what Hide hides" data-tip="Choose what Hide hides" aria-haspopup="dialog" :aria-expanded="!!hideAnchor" @click="hideAnchor = hideAnchor ? null : ($event.currentTarget as HTMLElement)"><AppIcon name="gear" :size="14" /></button>
     </div>
-    <button v-if="!graph" ref="displayButton" type="button" class="btn sm display-btn" :class="{ on: displayOn }" aria-haspopup="dialog" :aria-expanded="!!displayAnchor" :aria-label="`Display: ${displayLabel}`" data-tip="Grouping, sort, row and header height, and columns" @click="displayAnchor = displayAnchor ? null : ($event.currentTarget as HTMLElement)">
+    <button v-if="!graph || navigationMenu" ref="displayButton" type="button" class="btn sm display-btn" :class="{ on: displayOn }" aria-haspopup="dialog" :aria-expanded="!!displayAnchor" :aria-label="`Display: ${displayLabel}`" data-tip="Grouping, sort, row and header height, and columns" @click="displayAnchor = displayAnchor ? null : ($event.currentTarget as HTMLElement)">
       <AppIcon name="layers" :size="13" /><span class="display-label">{{ attention ? attention.group === 'project' ? attentionWord('By project', 'Nach Projekt') : attention.group === 'kind' ? attentionWord('By kind', 'Nach Art') : attentionWord('Display', 'Anzeige') : displayText }}</span><AppIcon name="chevron" :size="12" class="facet-chevron" />
     </button>
 
@@ -509,6 +536,27 @@ defineExpose({ focusSearch, openFilterMenu, openDisplay, input, closeOverlays })
 .hide-gear:focus-visible { outline: 2px solid var(--teal); outline-offset: 1px; }
 @media (pointer: coarse) { .hide-gear { width: 44px; height: 44px; } .closed-switch, .closed-pill { min-height: 44px; } }
 .view-settings { display: flex; align-items: center; gap: 10px; flex: none; }
+/* Navigation forms deliberately override toolbar/container and viewport rules.
+   Neither a label nor a track may shrink, wrap or paint into its neighbour. */
+.view-settings.navigation-settings { display: flex; flex-wrap: nowrap; }
+.navigation-settings .closed-switch { display: inline-flex; gap: 6px; flex: none; }
+.navigation-settings .closed-switch input { flex: none; }
+.navigation-settings .closed-switch input:checked::after, .menu-switch input:checked::after { left: auto; right: 2px; transform: none; }
+.navigation-settings .closed-pill { display: none; flex: none; }
+.navigation-settings .display-btn { display: inline-flex; flex: none; }
+.navigation-settings .display-label { display: inline; white-space: nowrap; }
+.navigation-settings:not([data-navigation-step="0"]) .display-label,
+.navigation-settings:not([data-navigation-step="0"]) .display-btn .facet-chevron { display: none; }
+.navigation-settings:not([data-navigation-step="0"]) .display-btn { padding: 0; width: 28px; height: 28px; justify-content: center; }
+.navigation-settings:is([data-navigation-step="2"], [data-navigation-step="3"]) .closed-switch { display: none; }
+.navigation-settings:is([data-navigation-step="2"], [data-navigation-step="3"]) .closed-pill { display: inline-flex; }
+.navigation-settings[data-navigation-step="3"] .closed-pill { padding: 0; width: 28px; height: 28px; justify-content: center; }
+.navigation-settings[data-navigation-step="3"] .closed-pill :deep(.hide-label-slot) { display: none; }
+.navigation-settings[data-navigation-step="4"] .hide-control { display: none; }
+@media (max-width: 720px), (pointer: coarse) {
+  .navigation-settings:not([data-navigation-step="0"]) .display-btn,
+  .navigation-settings[data-navigation-step="3"] .closed-pill { width: 44px; height: 44px; }
+}
 .phone-break, .date-count { display: none; }
 @media (min-width: 601px) {
   @container toolbar (max-width: 1100px) {

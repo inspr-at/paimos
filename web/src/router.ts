@@ -6,6 +6,7 @@ import { setPageTitle } from './lib/brand'
 import { useProjects } from './stores/projects'
 import { useSession } from './stores/session'
 import { useWorkVocabulary } from './stores/workVocabulary'
+import { useStatusNames } from './stores/statusNames'
 import { sessionEnded } from './lib/api'
 import { can, ensurePermissions, permissionsRevoked } from './lib/authz'
 import { toast } from './lib/toast'
@@ -263,6 +264,13 @@ router.beforeEach(async (to, from) => {
       delete query.new
       return { path: to.path, query, hash: to.hash, replace: true }
     }
+  }
+  // The workspace's status names (AEON-1401) resolve before a page shows, so
+  // lists fit their columns to the names people read. A failed or slow read
+  // (bounded) keeps the built-in names; the next page reads again.
+  if (session.identity) {
+    await useStatusNames().load()
+    if (!session.identity || session.requiresSignIn) return signInAgain(to.fullPath)
   }
   // Resolve workspace names before project controls appear, so a late read
   // cannot change a type chip's width under the pointer.

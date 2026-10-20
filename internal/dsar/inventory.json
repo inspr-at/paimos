@@ -2010,6 +2010,19 @@
       "table": "routine_runs"
     },
     {
+      "classification": "metadata",
+      "columns": {
+        "names": "metadata",
+        "revision": "metadata",
+        "tenant_id": "metadata",
+        "updated_at": "metadata"
+      },
+      "locator": {
+        "tenant_column": "tenant_id"
+      },
+      "table": "status_names"
+    },
+    {
       "classification": "personal",
       "columns": {
         "after_hash": "metadata",

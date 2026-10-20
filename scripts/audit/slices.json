@@ -300,6 +300,7 @@
         "internal/nodes/**",
         "internal/fieldschema/**",
         "internal/workstate/**",
+        "internal/statusnames/**",
         "internal/business/**",
         "internal/importer/**",
         "internal/imports/**",

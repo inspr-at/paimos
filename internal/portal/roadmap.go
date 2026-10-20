@@ -13,6 +13,7 @@ import (
 
 	"github.com/jackc/pgx/v5"
 
+	"github.com/inspr-at/paimos/internal/statusnames"
 	"github.com/inspr-at/paimos/internal/ticketbenefits"
 )
 
@@ -39,6 +40,8 @@ type publicRoadmapDocument struct {
 	Schema  string              `json:"schema"`
 	Product *portalProduct      `json:"product"`
 	Items   []publicRoadmapItem `json:"items"`
+	// Optional: the workspace's own words for In progress (AEON-1401).
+	StatusNames statusnames.Names `json:"status_names,omitempty"`
 }
 
 type roadmapRow struct {

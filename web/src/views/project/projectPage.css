@@ -150,7 +150,7 @@
 /* AEON-639: header and view settings fold together; the independent toolbar
    retains the same width and horizontal layout in every density. */
 .project-page[class*="header-"] { padding-top: 12px; }
-:deep(.project-navigation) { display: flex; align-items: center; gap: 8px; min-width: 0; border-bottom: 1px solid var(--line); padding-bottom: 4px; }
+:deep(.project-navigation) { container: projectnav / inline-size; display: flex; align-items: center; gap: 8px; min-width: 0; border-bottom: 1px solid var(--line); padding-bottom: 4px; }
 :deep(.project-navigation .sections) { margin-top: 0; }
 :deep(.project-navigation .view-bar) { flex: 1; min-width: 0; padding: 0; }
 :deep(.nav-divider) { width: 1px; height: 20px; background: var(--line-2); flex: none; }
@@ -182,13 +182,17 @@
 .project-page.header-comfortable :deep(:where(.project-head) .head-work) { width: 100%; }
 .project-page.header-comfortable :deep(.project-navigation) { margin-top: 12px; min-height: 48px; padding-bottom: 6px; }
 @media (min-width: 601px) and (max-width: 1100px) {
-:deep(.project-navigation .sections button:not([aria-selected="true"]) .tab-label) { display: none; }
 .project-page.header-comfortable :deep(:where(.project-head) .head-work) { width: 100%; }
 .project-page[class*="header-"] :deep(:where(.project-head) .head-flex) { column-gap: 8px; }
 .project-page[class*="header-"] :deep(:where(.project-head) .stat-line) { gap: 8px; }
 }
-@media (max-width: 900px) {
-:deep(.project-view-settings) { display: none; } }
+@container projectnav (max-width: 1100px) {
+:deep(.project-navigation .sections button:not([aria-selected="true"]) .tab-label) { display: none; }
+}
+@container projectnav (max-width: 600px) {
+:deep(.project-navigation .attention-view-link span) { display: none; }
+:deep(.project-navigation .attention-view-link) { width: 44px; padding: 0; justify-content: center; }
+}
 @container projecthead (max-width: 760px) {
 .project-page[class*="header-"] :deep(:where(.project-head) .head-flex) { flex-direction: column; align-items: stretch; }
   /* Stacked: the name column is as tall as its content, in every density and with the panel open. */
@@ -217,7 +221,7 @@
 :deep(.project-navigation) { margin-top: 8px; min-height: 52px; gap: 6px; flex-wrap: wrap; }
 :deep(.attention-view-link) { flex: none; min-height: 44px; }
   /* Saved views keep their own scrollable row below the project navigation. */
-:deep(.project-navigation .view-bar) { flex-basis: 100%; }
+:deep(.project-navigation .view-bar) { flex-basis: 100%; order: 1; }
 :deep(.project-navigation .nav-divider) { display: none; }
 :deep(.project-navigation .sections button:not([aria-selected="true"])) { flex: none; width: 44px; padding: 0; }
 :deep(.project-navigation .sections button:not([aria-selected="true"]) .tab-label) { display: none; }

@@ -21,6 +21,7 @@ import (
 	"github.com/inspr-at/paimos/internal/db"
 	"github.com/inspr-at/paimos/internal/events"
 	"github.com/inspr-at/paimos/internal/httpapi"
+	"github.com/inspr-at/paimos/internal/statusnames"
 	"github.com/inspr-at/paimos/internal/tenant"
 	"github.com/jackc/pgx/v5"
 )
@@ -62,6 +63,9 @@ type portalDocument struct {
 	Pace            *portalPace           `json:"pace,omitempty"`
 	ReleaseHistory  bool                  `json:"release_history,omitempty"`
 	Roadmap         bool                  `json:"roadmap,omitempty"`
+	// The workspace's own words for In progress (AEON-1401), the one status the
+	// catalog and the roadmap name; absent while it keeps the built-in name.
+	StatusNames statusnames.Names `json:"status_names,omitempty"`
 }
 
 type voteResult struct {
@@ -145,6 +149,13 @@ func (m *Module) servePublic(w http.ResponseWriter, r *http.Request, kind string
 		// change must not pair one product's catalog with another's roadmap.
 		ctx = context.WithValue(ctx, productContextKey{}, loaded.productID)
 		doc = loaded
+		if doc.Product != nil {
+			_, names, namesErr := statusnames.Load(ctx, tx)
+			if namesErr != nil {
+				return namesErr
+			}
+			doc.StatusNames = names.Only("in_progress")
+		}
 		if doc.Product != nil && kind != publicReleasesKind {
 			roadmapItems, loadErr = loadPublicRoadmap(ctx, tx)
 			if loadErr != nil {
@@ -179,7 +190,7 @@ func (m *Module) servePublic(w http.ResponseWriter, r *http.Request, kind string
 			roadmapItems = []publicRoadmapItem{}
 		}
 		w.Header().Set("Cache-Control", roadmapCache)
-		write(w, http.StatusOK, publicRoadmapDocument{Schema: roadmapSchema, Product: doc.Product, Items: roadmapItems})
+		write(w, http.StatusOK, publicRoadmapDocument{Schema: roadmapSchema, Product: doc.Product, Items: roadmapItems, StatusNames: doc.StatusNames})
 	case publicReleasesKind:
 		write(w, http.StatusOK, publicReleasesDocument{Product: doc.Product, Releases: releases})
 	case publicLlms:

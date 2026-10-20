@@ -135,7 +135,7 @@ func (rt *runtime) printIssue(v issueView) error {
 	}
 	fmt.Fprintf(rt.stdout, "%s  %s\n", v.IssueKey, v.Title)
 	fmt.Fprintf(rt.stdout, "  type:     %s\n", v.Type)
-	fmt.Fprintf(rt.stdout, "  status:   %s\n", v.Status)
+	fmt.Fprintf(rt.stdout, "  status:   %s\n", rt.humanStatus(v.Status))
 	fmt.Fprintf(rt.stdout, "  priority: %s\n", v.Priority)
 	if v.NoReleaseNeeded {
 		fmt.Fprintln(rt.stdout, "  release:  no release needed")
@@ -172,7 +172,7 @@ func (rt *runtime) printIssueList(items []issueView, total int) error {
 	}
 	fmt.Fprintln(rt.stdout, "KEY           STATUS         PRIO   TITLE")
 	for _, item := range items {
-		fmt.Fprintf(rt.stdout, "%-13s %-14s %-6s %s\n", item.IssueKey, item.Status, item.Priority, clipRunes(item.Title, 60, "…"))
+		fmt.Fprintf(rt.stdout, "%-13s %-14s %-6s %s\n", item.IssueKey, rt.listStatus(item.Status), item.Priority, clipRunes(item.Title, 60, "…"))
 	}
 	if total > len(items) {
 		fmt.Fprintf(rt.stdout, "\n(showing %d of %d — use --limit / --offset for more)\n", len(items), total)

@@ -35,6 +35,7 @@ func init() {
 		"GET /api/projects":                                           "nodes.read",
 		"GET /api/projects/lookup":                                    "nodes.read",
 		"GET /api/projects/{projectId}/figures":                       "nodes.read",
+		"GET /api/settings/status-names":                              "nodes.read",
 		"GET /api/settings/work-vocabulary":                           "nodes.read",
 		"GET /api/status/help":                                        "nodes.read", // Authenticated agents have a read-only exception in RequirePattern.
 		"GET /api/tickets/graph":                                      "nodes.read",
@@ -49,6 +50,7 @@ func init() {
 		"POST /api/nodes/{nodeId}/project-move":                       "nodes.move",
 		"POST /api/nodes/{nodeId}/work-lifecycle":                     "nodes.write",
 		"POST /api/nodes/{nodeId}/work-lifecycle/{actionId}/continue": "nodes.write",
+		"PUT /api/settings/status-names":                              "settings.manage",
 		"PUT /api/settings/work-vocabulary":                           "settings.manage",
 	})
 	registerDeclarations("nodes", "project_filtered", ProjectFilteredRoutes, map[string]bool{
@@ -62,6 +64,7 @@ func init() {
 		"GET /api/nodes/tree":                   true,
 		"GET /api/projects":                     true,
 		"GET /api/projects/lookup":              true,
+		"GET /api/settings/status-names":        true,
 		"GET /api/settings/work-vocabulary":     true,
 		"GET /api/status/help":                  true,
 		"GET /api/tickets/graph":                true,

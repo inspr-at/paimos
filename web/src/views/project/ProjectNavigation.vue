@@ -16,7 +16,7 @@ const bindViewBar = bindProjectRef(viewBar)
 <template>
   <div class="project-navigation" :class="{ 'legacy-navigation': !ticketsHeader }">
     <ViewSwitch :options="projectSections" :selected="section" label="Project sections" look="sections" tips :default-id="sectionSwitch.defaultId.value" @select="setSection" @set-default="sectionSwitch.setDefault" />
-    <RouterLink v-if="ticketsHeader" class="attention-view-link" :to="{ path: '/tickets', query: { view: 'needs-attention', project_id: project.id } }"><AppIcon name="flag" :size="13" />Needs attention</RouterLink>
+    <RouterLink v-if="ticketsHeader" class="attention-view-link" aria-label="Needs attention" data-tip="Needs attention" :to="{ path: '/tickets', query: { view: 'needs-attention', project_id: project.id } }"><AppIcon name="flag" :size="13" /><span>Needs attention</span></RouterLink>
     <span v-if="ticketsHeader" class="nav-divider" aria-hidden="true" />
   <ViewBar
     v-if="ticketsHeader || showViewBar" :ref="bindViewBar" :views="views.items" :active-id="activeView?.id ?? null" :dirty="viewDirty" :default-id="defaultViewId" :can-save-new="canSaveView && !activeView"

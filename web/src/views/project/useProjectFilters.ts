@@ -7,6 +7,7 @@ import { selectionHiddenByPolicy, type HideState } from '../../lib/hideStates'
 import { groupStates, reconcileStatusHide, type HeaderStatusGroup } from '../../lib/projectStatusCounts'
 import { toast } from '../../lib/toast'
 import { settledNavigation } from '../../lib/navigation'
+import { statusName } from '../../lib/statusNames'
 import { clearedFilters, facetOptions, groupSortField, levelOf, toggleMembers, filtersToQuery, toggleIn, toggleOut, valueLabel, withGrouping, withRowSort, type DateFilter, type Dimension, type GroupBy, type ListFilters } from '../../lib/ticketList'
 import { cycleSort, type SortField, type SortKey } from '../../lib/work'
 import { PROJECT_SECTIONS, type ProjectSection } from '../../components/work/projectNavigation'
@@ -29,7 +30,7 @@ export function useProjectFilters(state: ProjectState, data: ReturnType<typeof u
       return facetOptions(dimension, counts, filters.value[dimension], list.names, undefined, { workName: vocabulary.leaf.name, vocabulary: vocabulary.value })
     }
     const result = facetOptions(dimension, list.counts(dimension), filters.value[dimension].filter(value => value !== 'queued' && value !== '!queued'), list.names, session.identity?.principal.id, { colors: list.colors, epics: list.epics.value, workName: vocabulary.leaf.name, vocabulary: vocabulary.value })
-    return dimension === 'status' ? [{ value: 'queued', label: 'Queued', count: queueSnapshot.value?.items.length ?? 0, hint: 'Open + a place' }, ...result] : result
+    return dimension === 'status' ? [{ value: 'queued', label: statusName('queued'), count: queueSnapshot.value?.items.length ?? 0, hint: `${statusName('open')} + a place` }, ...result] : result
   }
   function chipLabel(dimension: Dimension, value: string) {
     return valueLabel(dimension, value, { names: list.names, me: session.identity?.principal.id, epics: list.epics.value, workName: vocabulary.leaf.name, vocabulary: vocabulary.value })

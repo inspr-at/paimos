@@ -4,6 +4,7 @@ import { computed, nextTick, onBeforeUnmount, onMounted, ref, useId, watch } fro
 import { DEFINITION_BLOCKS, DEFINITION_CATALOG, DEFINITION_CONDITION_OPTIONS, definitionBlocks, definitionChangeWords, definitionDecisionWords, definitionConditionWords, checkCount, cloneChecks, definitionDiff, fixedRuleCondition, manualRule, ruleCondition, ruleIcon, ruleLabel, ruleOwnerWords, ruleWords, sameRule, type DefinitionChange, type DefinitionChecks, type DefinitionCondition, type DefinitionRule, type DefinitionStatus } from '../../lib/definitions'
 import { useProfile } from '../../stores/profile'
 import { displayLanguage } from '../../lib/displayLanguage'
+import { statusName } from '../../lib/statusNames'
 import { claimSettingsPopover, settingsSubmitKey } from '../../lib/settingsOverlays'
 import { useProjectSettingsOverlay } from '../../lib/projectSettings'
 import type { ProjectPerson } from '../../lib/api'
@@ -241,7 +242,7 @@ onBeforeUnmount(() => { rowObserver?.disconnect(); close(false) })
 <template>
   <div ref="root" class="definition-editor" :class="{ 'decision-visit': decisionVisit }" :data-scope="scope">
     <section v-for="block in blocks" :key="block.id" class="dblock" :aria-labelledby="`${uid}-${block.id}`" :data-block="block.id">
-      <header class="db-head"><h3 :id="`${uid}-${block.id}`">{{ block.name }} <span><span class="db-dot" aria-hidden="true">· </span>{{ t('to enter','vor') }} {{ block.to }}</span></h3><button v-if="editable" type="button" class="add" :disabled="busy || (checks[block.id]?.length ?? 0) >= 32" :aria-label="t(`Add check to ${block.name}`,`Prüfung zu ${block.name} hinzufügen`)" aria-haspopup="dialog" @click="open('add', block.id, $event)"><AppIcon name="plus" :size="13" />{{ t('Add check','Prüfung hinzufügen') }}</button></header>
+      <header class="db-head"><h3 :id="`${uid}-${block.id}`">{{ block.name }} <span><span class="db-dot" aria-hidden="true">· </span>{{ t('to enter','vor') }} {{ statusName(block.id, language) }}</span></h3><button v-if="editable" type="button" class="add" :disabled="busy || (checks[block.id]?.length ?? 0) >= 32" :aria-label="t(`Add check to ${block.name}`,`Prüfung zu ${block.name} hinzufügen`)" aria-haspopup="dialog" @click="open('add', block.id, $event)"><AppIcon name="plus" :size="13" />{{ t('Add check','Prüfung hinzufügen') }}</button></header>
       <ul class="drs">
         <li v-for="row in rows(block.id)" :key="row.item.id" class="dr" :class="{ ghost: row.ghost }" :style="row.height ? { minHeight: `${row.height}px` } : undefined" :data-check="row.item.id" :data-waiting="!!waiting(row.item.id)" :tabindex="decisionVisit ? -1 : undefined">
           <AppIcon :name="ruleIcon(row.item)" :size="15" class="dr-ic" />

@@ -335,6 +335,7 @@
   {"table":"status_autopilot_releases","export":"","review":"","secret":"","metadata":"tenant_id release_id","subjects":"","locator":"","hold":"none"},
   {"table":"status_autopilot_settings","export":"enabled revision","review":"rules","secret":"","metadata":"tenant_id","subjects":"","locator":"revision","hold":"none"},
   {"table":"status_autopilot_upgrade","export":"suggest_until confirmed_at","review":"","secret":"","metadata":"tenant_id","subjects":"","locator":"","hold":"none"},
+  {"table":"status_names","export":"","review":"revision names updated_at","secret":"","metadata":"tenant_id","subjects":"","locator":"tenant_id","hold":"none"},
   {"table":"stepup_requests","export":"","review":"after_hash after_value applied_at auth_time before_hash before_value created_at decided_at decided_by decision expires_at id method payload permission project_id request_digest requested_by revision state","secret":"session_id","metadata":"tenant_id","subjects":"decided_by requested_by","locator":"id project_id tenant_id","hold":"none"},
   {"table":"tenant_brand","export":"updated_at","review":"short_name updated_by_principal_id","secret":"","metadata":"tenant_id","subjects":"updated_by_principal_id","locator":"","hold":"none"},
   {"table":"tenant_brand_logos","export":"width height uploaded_at","review":"variant content_type content sha256 uploaded_by_principal_id","secret":"","metadata":"tenant_id","subjects":"uploaded_by_principal_id","locator":"","hold":"none"},
