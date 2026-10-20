@@ -1005,3 +1005,17 @@ export async function startTicketSelection(page: Page) {
     await page.getByRole('menuitem', { name: 'Select tickets', exact: true }).click()
   } else await page.getByRole('button', { name: 'Select', exact: true }).click()
 }
+
+export async function openTicketStatus(page: Page, key: string) {
+  const row = page.locator('tr.ticket-row').filter({ has: page.locator('.key', { hasText: new RegExp(`^${key}$`) }) })
+  await expect(row).toBeVisible()
+  if (await row.locator('.phone-state').count()) {
+    await row.locator('.title-link').click()
+    await page.getByRole('complementary', { name: 'Ticket details' }).getByRole('button', { name: /^Status:/ }).click()
+  } else await row.getByRole('button', { name: new RegExp(`Change status of ${key}`) }).click()
+}
+export async function expectTicketRowState(page: Page, key: string, state: string) {
+  const row = page.locator('tr.ticket-row').filter({ has: page.locator('.key', { hasText: new RegExp(`^${key}$`) }) })
+  if (await row.locator('.phone-state').count()) await expect(row.locator('.phone-state > [role="img"]')).toHaveAccessibleName(state)
+  else await expect(row.locator('.status-btn')).toHaveText(state)
+}

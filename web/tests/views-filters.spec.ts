@@ -6,7 +6,7 @@ import { test, expect, type Page } from '@playwright/test'
 import AxeBuilder from '@axe-core/playwright'
 import { controlStability } from './control-stability'
 import { mockTicketGraph, ticketGraphWorld } from './ticket-graph-fixtures'
-import { fixtures, me, mockView, mockWork, watchErrors, type Call, type Fixtures } from './work-fixtures'
+import { showProjectHead, fixtures, me, mockView, mockWork, watchErrors, type Call, type Fixtures } from './work-fixtures'
 
 test.beforeEach(async ({ page }) => { await page.clock.setSystemTime(new Date('2026-09-23T12:00:00Z')) })
 
@@ -548,7 +548,7 @@ for (const width of [390, 1024, 1440]) {
       await mockWork(page, data)
       await page.goto(`/p/PHAROS?assignee=${me.id}&status=!done&v=${MINE}`)
       await expect(rows(page).first()).toBeVisible()
-      await page.evaluate(() => document.fonts.ready)
+      await showProjectHead(page); await page.evaluate(() => document.fonts.ready)
       expect(await page.locator('#main').evaluate(el => el.scrollWidth <= el.clientWidth + 1)).toBe(true)
       const attention = page.getByRole('link', { name: 'Needs attention', exact: true })
       await expect(attention).toHaveAttribute('href', '/tickets?view=needs-attention&project_id=p-pharos')
@@ -584,7 +584,7 @@ test.describe('coarse-pointer project attention link', () => {
       await mockWork(page, data)
       await page.goto('/p/PHAROS')
       await expect(rows(page).first()).toBeVisible()
-      await page.evaluate(() => document.fonts.ready)
+      await showProjectHead(page); await page.evaluate(() => document.fonts.ready)
       expect(await page.evaluate(() => matchMedia('(pointer: coarse)').matches)).toBe(true)
       const attention = page.getByRole('link', { name: 'Needs attention', exact: true })
       const bounds = await attention.evaluate(el => {

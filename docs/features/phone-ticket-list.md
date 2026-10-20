@@ -16,3 +16,9 @@ More contains Display, Hide done, Select tickets, Save view as, Copy link and
 Export CSV. Filter and Display use full-width phone sheets. CSV includes every
 matching row up to 5,000 tickets; larger or failed reads produce an error without
 downloading a partial export. Spreadsheet formula prefixes are escaped.
+
+The project crumb opens its shared sheet. “Show the project head” discloses the
+project counts, sections and lead above the list for that visit, without changing
+the saved desktop header density. Outline and Graph keep their own controls.
+Clipped titles retain full-text disclosure and native links; the status keyboard
+shortcut remains available when the compact row has no status button.

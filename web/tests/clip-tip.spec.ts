@@ -184,7 +184,7 @@ for (const width of [390, 768, 1024, 1440]) for (const theme of ['light', 'dark'
       for (let i = 0; i < 8 && await grid.getAttribute('aria-activedescendant') !== 'row-n-1'; i++) await grid.press('ArrowDown')
       await expect(grid).toHaveAttribute('aria-activedescendant', 'row-n-1')
       await expect(page.locator('.tooltip')).toHaveText(longName)
-      if (width === 390) expect(await title.evaluate(el => getComputedStyle(el).webkitLineClamp)).toBe('2')
+      if (width === 390) { expect(await title.evaluate(el => getComputedStyle(el).whiteSpace)).toBe('nowrap'); expect((await page.locator('#row-n-1').boundingBox())!.height).toBe(56) }
       await noOverflow(page)
       await page.screenshot({ path: `${shots}/ticket-table-${width}-${theme}.png`, fullPage: true })
     })

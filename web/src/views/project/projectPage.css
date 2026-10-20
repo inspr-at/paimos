@@ -7,7 +7,6 @@
 /* Lists use the full width; the gutter grows with the screen. */
 .project-page { width: 100%; margin: 0; padding: 22px var(--gutter) 12px; }
 .project-page.compact-list { padding-top: 10px; }
-.compact-list .project-fold { display: none; }
 .project-page.compact-list :deep(.toolbar-wrap) { height: 44px; background: var(--chrome); -webkit-backdrop-filter: none; backdrop-filter: none; }
 .project-page.compact-list :deep(.toolbar-wrap.stuck) { background: var(--chrome); -webkit-backdrop-filter: none; backdrop-filter: none; }
 .project-page.compact-list :deep(.list-view > .hint) { display: none; }

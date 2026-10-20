@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import { test, expect, type Page } from '@playwright/test'
-import { fixtures, mockWork } from './work-fixtures'
+import { fixtures, mockWork, openListDisplay } from './work-fixtures'
 
 import { expectStableControls } from './helpers/stable'
 
@@ -151,7 +151,7 @@ for (const width of [1440, 1024]) {
     // Exercise wider text metrics and a classic scrollbar even on macOS, whose
     // default overlay scrollbar and system font leave more room than Linux CI.
     if (constrained) await page.addStyleTag({ content: '.display-panel { font-family: var(--mono); } .floating { scrollbar-gutter: stable; } .floating::-webkit-scrollbar { width: 15px; height: 15px; }' })
-    await page.getByRole('button', { name: /^Display:/ }).click()
+    await openListDisplay(page)
     const dialog = page.getByRole('dialog', { name: 'Display options', exact: true })
     const groups = dialog.getByRole('radiogroup', { name: 'Group by' })
     await expectStableControls({

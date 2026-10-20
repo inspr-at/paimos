@@ -5,7 +5,7 @@
 import { expect, test, type Page } from '@playwright/test'
 import { writeFileSync } from 'node:fs'
 import { execFileSync } from 'node:child_process'
-import { fixtures, mockWork, watchErrors } from './work-fixtures'
+import { fixtures, mockWork, watchErrors, showProjectHead } from './work-fixtures'
 import { mockEffectivePermissions } from './authz-fixtures'
 import { controlStability } from './control-stability'
 import { deliveryMetrics } from './delivery-numbers-fixtures'
@@ -332,7 +332,7 @@ for (const width of [1440, 1024, 400, 390]) for (const theme of ['light', 'dark'
     await captureProjectSettings(page, { path: testInfo.outputPath(`projects-row-menu-${width}-${theme}.png`), fullPage: true }, touchSession)
     await page.getByRole('menuitem', { name: 'Project settings', exact: true }).click(); await expect(page).toHaveURL('/p/AEON/settings')
     world.leadReason = true
-    await page.goto('/p/AEON/tickets'); await expect(page.locator('#lead-launch-reason-band .settings-link')).toBeVisible()
+    await page.goto('/p/AEON/tickets'); await showProjectHead(page); await expect(page.locator('#lead-launch-reason-band .settings-link')).toBeVisible()
     await expect(page.locator('#lead-launch-reason-band [data-launch-reason]')).toHaveText('Automatic launch is not enabled for this workspace yet.')
     await expect(page.locator('#lead-launch-reason-band .settings-link')).toHaveText('Settings Agents')
     await expect(page.locator('#lead-launch-reason-band .settings-link svg')).toHaveCount(2)

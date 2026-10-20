@@ -2,7 +2,7 @@
 import { mkdirSync } from 'node:fs'
 import { join } from 'node:path'
 import { test, expect, type Locator, type Page } from '@playwright/test'
-import { fixtures, mockWork, watchErrors } from './work-fixtures'
+import { fixtures, mockWork, watchErrors, showProjectHead } from './work-fixtures'
 import { accessWorld, mockAccess, COORDINATOR } from './access-fixtures'
 import { expectStableControls } from './helpers/stable'
 import type { FloatingList } from './helpers/floating-lists'
@@ -202,7 +202,7 @@ for (const theme of ['light', 'dark'] as const) for (const width of [1440, 1024,
     const epic = data.nodes.find(node => node.kind_slug === 'epic')!
     data.nodes.push(...Array.from({ length: 16 }, (_, index) => ({ ...epic, id: `extra-epic-${index}`, key: `PHAROS-${index + 100}`, title: `Projektübergreifende Entwicklungszusammenarbeit und Qualitätsverantwortung ${index + 1}`, state: 'open' })))
     await mockWork(page, data)
-    await page.goto('/p/PHAROS')
+    await page.goto('/p/PHAROS'); await showProjectHead(page)
     await expect(page.getByRole('heading', { name: 'Pharos', exact: true })).toBeVisible()
     await page.evaluate(async kind => {
       const path = '/tests/helpers/floating-lists.ts'
@@ -459,7 +459,7 @@ for (const width of [390, 1024, 1440]) for (const theme of ['light', 'dark'] as 
 
 test('facet search stays still when Clear appears and disappears', async ({ page }) => {
   await mockWork(page, fixtures())
-  await page.goto('/p/PHAROS')
+  await page.goto('/p/PHAROS'); await showProjectHead(page)
   await expect(page.getByRole('heading', { name: 'Pharos', exact: true })).toBeVisible()
   await page.evaluate(async () => {
     const { mountFloatingList } = await import(/* @vite-ignore */ '/tests/helpers/floating-lists.ts')
@@ -487,7 +487,7 @@ for (const theme of ['light', 'dark'] as const) for (const width of [1440, 1024,
     if (route.request().method() === 'PUT') { writes.push(route.request().postDataJSON()); return route.fulfill({ json: { host: registeredHost, label: registeredHost } }) }
     return route.fulfill({ json: [{ host: registeredHost, label: 'Entwicklungsarbeitsplatz' }] })
   })
-  await page.goto('/p/PHAROS')
+  await page.goto('/p/PHAROS'); await showProjectHead(page)
   await expect(page.getByRole('heading', { name: 'Pharos', exact: true })).toBeVisible()
   await page.evaluate(async host => {
     const { mountSessionHost } = await import(/* @vite-ignore */ '/tests/helpers/floating-lists.ts')

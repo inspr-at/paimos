@@ -276,15 +276,20 @@ test('AEON-1460 compact ticket list keeps controls still and all actions reachab
   }
 })
 
-// Regression on 94902251: the crumb's Show action changed a preference while
-// CSS kept the header hidden, and compact rows bypassed the title link/reader.
-test('AEON-1460 compact disclosures retain the project header, title link and outline actions', async ({ page }) => {
+// Each risk has an independent negative control on 94902251.
+async function compactScene(page: Page) {
   await page.setViewportSize({ width: 390, height: 844 })
   const data = fixtures()
   const title = 'Überprüfung der mandantenübergreifenden Berechtigungen und sämtlicher zuständiger Arbeitsbereiche'
   data.nodes.find(node => node.id === 'n-1')!.title = title
   await mockWork(page, data)
   await page.goto('/p/PHAROS?group=none')
+  await expect(page.locator('#row-n-1')).toBeVisible()
+  return title
+}
+
+test('AEON-1460 compact titles retain native links and keyboard full-text disclosure', async ({ page }) => {
+  const title = await compactScene(page)
   await expect(page.locator('#row-n-1 .title-text')).toHaveAttribute('data-tip', title)
   await expect(page.locator('#row-n-1 .title-link')).toHaveAttribute('href', /PHAROS-11/)
   const bar = toolbar(page), more = bar.getByRole('button', { name: 'More view actions' })
@@ -298,8 +303,13 @@ test('AEON-1460 compact disclosures retain the project header, title link and ou
       await page.keyboard.press('Escape')
     } },
   ] })
+})
+
+test('AEON-1460 compact project-head disclosure works without changing the desktop preference', async ({ page }) => {
+  await compactScene(page)
   await expect(page.locator('#project-header-fold')).toBeHidden()
-  const stored = await page.evaluate(() => localStorage.getItem('aeon:project-header:t1:11111111-1111-4111-8111-111111111111'))
+  const preference = () => page.evaluate(() => localStorage.getItem('aeon:project-header:t1:11111111-1111-4111-8111-111111111111'))
+  const stored = await preference()
   await showProjectHead(page)
   await expect(page.getByRole('heading', { name: 'Pharos', exact: true })).toBeVisible()
   await expect(page.locator('section.lead')).toBeVisible()
@@ -308,11 +318,34 @@ test('AEON-1460 compact disclosures retain the project header, title link and ou
   await expect(choice).toBeChecked()
   await choice.click()
   await expect(page.locator('#project-header-fold')).toBeHidden()
-  expect(await page.evaluate(() => localStorage.getItem('aeon:project-header:t1:11111111-1111-4111-8111-111111111111'))).toBe(stored)
-  await bar.getByRole('button', { name: /^View:/ }).click()
+  expect(await preference()).toBe(stored)
+  await showProjectHead(page)
+  await page.goto('/p/AEON')
+  await expect(page.locator('#row-n-a1')).toBeVisible()
+  await expect(page.locator('#project-header-fold')).toBeHidden()
+})
+
+test('AEON-1460 choosing Outline retains its expand and status actions on phones', async ({ page }) => {
+  await compactScene(page)
+  await toolbar(page).getByRole('button', { name: /^View:/ }).click()
   await page.getByRole('menuitemradio', { name: 'Outline', exact: true }).click()
   const outline = page.getByRole('treegrid', { name: 'Ticket outline', exact: true })
-  await expect(outline.locator('.twisty').first()).toBeVisible()
-  await expect(outline.locator('.status-btn').first()).toBeVisible()
+  const twisty = outline.locator('.twisty').first(), status = outline.locator('.status-btn').first()
   await expect(page.locator('.table-card')).not.toHaveClass(/phone-rows/)
+  await expectStableControls({ controls: { twisty, status }, interactions: [
+    { name: 'expand and collapse the parent', run: async () => { await twisty.click(); await expect(twisty).toHaveAttribute('aria-expanded', 'true'); await twisty.click(); await expect(twisty).toHaveAttribute('aria-expanded', 'false') } },
+  ] })
+})
+
+test('AEON-1460 compact rows retain the keyboard status action without a row status button', async ({ page }) => {
+  await compactScene(page)
+  const row = page.locator('#row-n-1'), bar = toolbar(page)
+  await expect(row.locator('.status-btn')).toHaveCount(0)
+  const grid = page.getByRole('grid', { name: 'Tickets', exact: true })
+  await grid.focus()
+  for (let i = 0; i < 12 && await grid.getAttribute('aria-activedescendant') !== 'row-n-1'; i++) await grid.press('ArrowDown')
+  await expect(grid).toHaveAttribute('aria-activedescendant', 'row-n-1')
+  await expectStableControls({ controls: { row, toolbar: bar }, interactions: [
+    { name: 'open and dismiss the status choices', run: async () => { await grid.press('s'); await expect(page.getByRole('menu', { name: 'Status of PHAROS-11', exact: true })).toBeVisible(); await page.keyboard.press('Escape'); await expect(page.getByRole('menu', { name: 'Status of PHAROS-11', exact: true })).toHaveCount(0) } },
+  ] })
 })

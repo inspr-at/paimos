@@ -3,7 +3,7 @@
 import { mkdirSync, readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { expect, test, type Page } from '@playwright/test'
-import { fixtures, mockWork, type Fixtures } from './work-fixtures'
+import { openListFilters, fixtures, mockWork, type Fixtures } from './work-fixtures'
 import type { TicketPlanning } from '../src/lib/planning'
 
 const shots = process.env.PLANNING_SHOTS ?? '../.agent-shots/planning'
@@ -383,7 +383,7 @@ test('planning fragment implementation in light and dark; phones retain the card
     await page.setViewportSize({ width: 390, height: 844 })
     for (const mode of ['saved', 'automatic']) {
       if (mode === 'automatic') {
-        await page.getByRole('button', { name: 'Filters', exact: true }).click()
+        await openListFilters(page)
         await page.getByRole('dialog', { name: 'Filters', exact: true }).getByRole('button', { name: 'Display settings…', exact: true }).click()
         const sheet = page.getByRole('dialog', { name: 'Display options', exact: true })
         await sheet.getByRole('button', { name: 'Automatic', exact: true }).click()
@@ -396,24 +396,12 @@ test('planning fragment implementation in light and dark; phones retain the card
       await expect(page.locator('.tickets thead')).toBeHidden()
       for (const card of await cards.all()) {
         await expect(card).toHaveCSS('display', 'grid')
-        await expect(card.locator('.c-key')).toBeVisible()
+        await expect(card.locator('.phone-meta .key')).toBeVisible()
         await expect(card.locator('.c-title')).toBeVisible()
-        if (mode === 'saved') {
-          // Saved planning columns remain visible metadata below the title,
-          // rather than turning the phone card into a scrolling desktop row.
-          await expect(card.locator('td[data-column-label]')).toHaveCount(5)
-          expect(await card.locator('td[data-column-label]').evaluateAll(cells => cells.map(cell => cell.getAttribute('data-column-label')))).toEqual(['Status', 'Estimate', 'Model', 'Tokens', 'Cost'])
-          const title = (await card.locator('.c-title').boundingBox())!
-          const frame = (await card.boundingBox())!
-          for (const cls of ['c-model', 'c-tokens', 'c-list-cost']) {
-            const cell = card.locator(`.${cls}`)
-            await expect(cell).toBeVisible()
-            const box = (await cell.boundingBox())!
-            expect(box.y).toBeGreaterThanOrEqual(title.y + title.height - .5)
-            expect(box.x).toBeGreaterThanOrEqual(frame.x)
-            expect(box.x + box.width).toBeLessThanOrEqual(frame.x + frame.width + .5)
-          }
-        }
+        // D11 ignores desktop metadata on both saved and automatic phone rows.
+        await expect(card.locator('td[data-column-label], .c-estimate, .c-model, .c-tokens, .c-list-cost')).toHaveCount(0)
+        await expect(card.locator('.phone-meta time')).toBeVisible()
+        expect((await card.boundingBox())!.height).toBe(56)
       }
       expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth + 1)).toBe(true)
       await page.screenshot({ path: join(shots, `planning-phone-${mode === 'saved' ? '' : 'automatic-'}${theme}.png`) })

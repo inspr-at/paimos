@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import { test, expect, type Page } from '@playwright/test'
 import { mockTicketGraph, ticketGraphWorld } from './ticket-graph-fixtures'
-import { me, mockView } from './work-fixtures'
+import { me, mockView, openListFilters } from './work-fixtures'
 import { headerStorageKey } from '../src/lib/projectHeader'
 
 test.use({ viewport: { width: 1600, height: 1000 }, launchOptions: { args: ['--use-gl=angle', '--use-angle=swiftshader', '--enable-unsafe-swiftshader'] } })
@@ -150,7 +150,7 @@ test('mobile filters contain only supported dimensions and Hide closed', async (
   await page.setViewportSize({ width: 390, height: 844 })
   await mockTicketGraph(page)
   await page.goto('/p/PHAROS/tickets?view=graph'); await ready(page)
-  await page.getByRole('button', { name: 'Filters', exact: true }).click()
+  await openListFilters(page)
   const sheet = page.getByRole('dialog', { name: 'Filters', exact: true })
   // AEON-1188: no Display section of its own, only the link to the Display menu.
   await expect(sheet.locator('.sheet-section > .eyebrow')).toHaveText(['Status', 'Priority', 'Type'])

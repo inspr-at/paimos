@@ -1,13 +1,14 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import { test, expect, type Page } from '@playwright/test'
 import { mkdirSync } from 'node:fs'
-import { fixtures, mockWork, watchErrors, liveAgent } from './work-fixtures'
+import { fixtures, mockWork, watchErrors, liveAgent, me } from './work-fixtures'
 import { expectStableControls } from './helpers/stable'
 import { colourContrast as contrastRatio, CARD_COLOURS, PORCELAIN, deriveDark, inkOn, roles } from '../src/lib/themeEngine'
 import { AGENT_PALETTES } from '../src/lib/agentPalettes'
 import type { ThemeValues } from '../src/lib/themes'
 const LIGHT_CARD = CARD_COLOURS.light, DARK_CARD = CARD_COLOURS.dark
 import { mockSettings, settingsData } from './settings-fixtures'
+import { agentData, mockAgents } from './agents-fixtures'
 
 let shotPath: (name: string) => string
 test.beforeEach(async ({}, testInfo) => { shotPath = name => testInfo.outputPath('aeon-644', name) })
@@ -37,7 +38,7 @@ async function modeChoice(page: Page, choice: 'light' | 'dark') {
   await page.evaluate(async choice => { const path = '/src/lib/theme.ts'; (await import(/* @vite-ignore */ path)).setTheme(choice, false) }, choice)
 }
 async function markerColours(page: Page) {
-  return page.locator('#row-n-1 .recurrence-dot').evaluate(el => ({ fill: getComputedStyle(el).backgroundColor, ink: getComputedStyle(el).color, width: el.getBoundingClientRect().width }))
+  return page.locator('#row-n-1 .recurrence-dot, .ticket-ws .recurring-pill-mark').evaluate(el => ({ fill: getComputedStyle(el).backgroundColor, ink: getComputedStyle(el).color, width: el.getBoundingClientRect().width }))
 }
 const cssRgb = (hex: string) => `rgb(${[1, 3, 5].map(i => parseInt(hex.slice(i, i + 2), 16)).join(', ')})`
 
@@ -72,8 +73,12 @@ for (const width of [390, 1024, 1440]) for (const mode of ['light', 'dark'] as c
     await page.emulateMedia({ colorScheme: mode })
     const errors = await setup(page), chosen = values()
     await page.route('**/api/me/theme', route => route.fulfill({ json: activeTheme(chosen) }))
-    await page.goto('/p/PHAROS?sort=key&group=none')
-    const row = page.locator('#row-n-1'), marker = row.locator('.recurrence-dot')
+    if (width === 390) {
+      const data = fixtures()
+      await mockAgents(page, agentData({ me: me.id, projects: { pharos: 'p-pharos', aeon: 'p-aeon', pai: 'p-frozen' }, tickets: { fleet: 'n-1', restore: 'n-2', web: 'n-a1', release: 'n-5', approvals: 'n-6' }, nodes: Object.fromEntries([...data.projects.map(p => [p.id, { key: p.key, title: p.title }]), ...data.nodes.map(n => [n.id, { key: n.key, title: n.title }])]) }))
+    }
+    await page.goto(width === 390 ? '/p/PHAROS/PHAROS-11' : '/p/PHAROS?sort=key&group=none')
+    const row = width === 390 ? page.locator('.ticket-ws .panel-bar') : page.locator('#row-n-1'), marker = page.locator('#row-n-1 .recurrence-dot, .ticket-ws .recurring-pill-mark')
     const modeControl = width === 390 ? page.getByRole('button', { name: /^Account for/ }) : page.getByRole('button', { name: /Switch to .* theme/ })
     async function toggleMode() {
       await modeControl.click()

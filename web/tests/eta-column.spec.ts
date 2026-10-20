@@ -69,15 +69,29 @@ test('the ETA column shows fresh, overdue and stale estimates under its header a
   await header.getByRole('button', { name: 'ETA' }).click()
   await expect.poll(() => sorts.some(sort => sort.split(',').includes('eta_ready'))).toBe(true)
 
-  // Phones show the estimate where Updated sits.
+  // D11 keeps the list's update time; estimates stay readable in the ticket.
   await page.setViewportSize({ width: 390, height: 844 })
-  await expect(row(page, 'PHAROS-11').locator('.c-eta .eta-cell')).toBeVisible()
-  await expect(row(page, 'PHAROS-11').locator('.c-updated')).toBeHidden()
-  await expect(row(page, 'PHAROS-14').locator('.c-updated')).toBeVisible()
+  await expect(row(page, 'PHAROS-11').locator('.c-eta, .c-updated')).toHaveCount(0)
+  await expect(row(page, 'PHAROS-11').locator('.phone-meta time')).toBeVisible()
+  await expect(row(page, 'PHAROS-14').locator('.phone-meta time')).toBeVisible()
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= document.documentElement.clientWidth)).toBe(true)
   for (const width of [390, 1024, 1440]) for (const theme of ['light', 'dark'] as const) {
     await page.setViewportSize({ width, height: 1000 })
     await page.evaluate(theme => { document.documentElement.dataset.theme = theme }, theme)
+    if (width === 390) {
+      for (const key of ['PHAROS-11', 'PHAROS-12', 'PHAROS-13']) {
+        await expect(row(page, key).locator('.eta-cell')).toHaveCount(0)
+        await row(page, key).locator('.title-link').click()
+        const panel = page.getByRole('complementary', { name: 'Ticket details' })
+        const eta = panel.locator('.eta-cell'), label = eta.locator('.shown')
+        await expect(label).toBeVisible()
+        expect(await label.evaluate(el => el.scrollWidth <= el.clientWidth), `${width} ${theme} ${key}: complete ETA in the ticket`).toBe(true)
+        await expectStableControls({ controls: { eta, close: panel.getByRole('button', { name: 'Close ticket details', exact: true }) }, scrollAreas: { panel }, interactions: [
+          { name: 'read the ticket estimate', run: async () => { await eta.hover(); await expect(eta).toHaveAttribute('data-tip', /Estimated by/) } },
+        ] })
+        await panel.getByRole('button', { name: 'Close ticket details', exact: true }).click()
+      }
+    } else {
     for (const key of ['PHAROS-11', 'PHAROS-12', 'PHAROS-13']) {
       const label = row(page, key).locator('.eta-cell .shown')
       await expect(label).toBeVisible()
@@ -87,6 +101,7 @@ test('the ETA column shows fresh, overdue and stale estimates under its header a
       controls: { estimate: fresh, row: row(page, 'PHAROS-11'), key: row(page, 'PHAROS-11').locator('.key') },
       interactions: [{ name: 'read the estimate tooltip', run: async () => { await fresh.hover(); await expect(page.locator('.tooltip')).toContainText('Estimated by Ada') } }],
     })
+    }
     await page.screenshot({ path: test.info().outputPath(`eta-${width}-${theme}.png`) })
   }
 })
@@ -249,11 +264,23 @@ for (const theme of ['light', 'dark'] as const) for (const width of [1600, 390])
     data.nodes.find(node => node.key === 'PHAROS-13')!.eta = { has_working_session: true, progress_pct: 0 }
     await mockWork(page, data, { admin: true })
     await page.goto('/p/PHAROS')
+    if (width === 390) {
+      for (const key of ['PHAROS-14', 'PHAROS-13']) {
+        await expect(row(page, key).locator('.eta-cell, .c-estimate')).toHaveCount(0)
+        await row(page, key).locator('.title-link').click()
+        const ticket = page.getByRole('complementary', { name: 'Ticket details' })
+        await expect(ticket.locator('.eta-cell')).toHaveText(key === 'PHAROS-14' ? 'no ETA' : /0%\s*no ETA/)
+        await expect(ticket.locator('.eta-cell')).toHaveAttribute('data-tip', /No ETA reported/)
+        await expect(ticket.locator('.eta-cell .sr-only')).toContainText('No ETA reported')
+        await ticket.getByRole('button', { name: 'Close ticket details', exact: true }).click()
+      }
+    } else {
     await expect(row(page, 'PHAROS-14').locator('.eta-cell')).toHaveText('no ETA')
     await expect(row(page, 'PHAROS-13').locator('.eta-cell')).toHaveText(/0%\s*no ETA/)
     await expect(row(page, 'PHAROS-13').locator('.eta-cell')).toHaveAttribute('data-tip', /0% done\nNo ETA reported/)
     await expect(row(page, 'PHAROS-13').locator('.eta-cell .sr-only')).toContainText('No ETA reported')
     if (width === 1600) await expect(row(page, 'PHAROS-14').locator('.c-estimate .empty')).toHaveAttribute('data-tip', 'No estimate yet')
+    }
     expect(await page.evaluate(() => document.documentElement.scrollWidth <= document.documentElement.clientWidth)).toBe(true)
     const shots = process.env.AEON_443_SHOTS
     if (shots) { mkdirSync(shots, { recursive: true }); await page.screenshot({ path: join(shots, `tickets-${width}-${theme}.png`), fullPage: true }) }

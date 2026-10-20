@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // PN1 / AEON-195: sections own view controls; old bookmarks and ticket links survive.
 import { test, expect, type Page } from '@playwright/test'
-import { fixtures, mockWork, watchErrors } from './work-fixtures'
+import { fixtures, mockWork, watchErrors, showProjectHead } from './work-fixtures'
 import { knowledgeWorld, mockKnowledge } from './knowledge-fixtures'
 
 test.use({ launchOptions: { args: ['--use-gl=angle', '--use-angle=swiftshader', '--enable-unsafe-swiftshader'] } })
@@ -28,7 +28,7 @@ test('section tabs separate Tickets and Knowledge views; each keeps its filters'
   test.setTimeout(90_000)
   await page.setViewportSize({ width: 1600, height: 1000 })
   const errors = await setup(page)
-  await page.goto('/p/PHAROS/tickets')
+  await page.goto('/p/PHAROS/tickets'); await showProjectHead(page)
   await expect(sections(page).getByRole('tab')).toHaveText(['Tickets', 'Knowledge', 'Settings'])
   await expect(ticketViews(page).getByRole('tab')).toHaveText(['List', 'Outline', 'Graph'])
   await expect(ticketViews(page).getByRole('tab', { name: 'List', exact: true })).toHaveAttribute('aria-selected', 'true')
@@ -112,7 +112,7 @@ for (const [section, view] of [['tickets', 'list'], ['tickets', 'outline'], ['kn
 test('an open ticket stays mounted as its background section changes', async ({ page }) => {
   await page.setViewportSize({ width: 1600, height: 1000 })
   await setup(page)
-  await page.goto('/p/PHAROS/tickets')
+  await page.goto('/p/PHAROS/tickets'); await showProjectHead(page)
   await page.locator('#row-n-1').click()
   await expect(panel(page)).toBeVisible()
   for (const section of ['Knowledge', 'Tickets']) {
@@ -186,7 +186,7 @@ for (const theme of ['light', 'dark'] as const) for (const width of [1600, 390])
     await page.emulateMedia({ colorScheme: theme })
     await setup(page)
     await page.route('**/api/preferences/theme', route => route.fulfill({ json: { key: 'theme', value: theme } }))
-    await page.goto('/p/PHAROS/tickets')
+    await page.goto('/p/PHAROS/tickets'); await showProjectHead(page)
     const tickets = sections(page).getByRole('tab', { name: 'Tickets', exact: true })
     await tickets.focus()
     await page.keyboard.press('ArrowRight')
@@ -222,10 +222,20 @@ for (const theme of ['light', 'dark'] as const) for (const width of [1600, 390])
       }
     }
     await sections(page).getByRole('tab', { name: 'Tickets', exact: true }).click()
+    if (width === 390) {
+      const views = page.getByRole('button', { name: /^View:/ })
+      await views.focus(); await views.press('Enter')
+      const choice = page.getByRole('menuitemradio', { name: 'Outline', exact: true })
+      await choice.focus(); await choice.press('Enter')
+      await expect(page).toHaveURL('/p/PHAROS/tickets?view=outline')
+      await expect(ticketViews(page).getByRole('tab', { name: 'Outline', exact: true })).toHaveAttribute('aria-selected', 'true')
+      await ticketViews(page).getByRole('tab', { name: 'Outline', exact: true }).focus()
+    } else {
     await ticketViews(page).getByRole('tab', { name: 'List', exact: true }).focus()
     await page.keyboard.press('ArrowRight')
     await expect(page).toHaveURL('/p/PHAROS/tickets?view=outline')
     await expect(ticketViews(page).getByRole('tab', { name: 'Outline', exact: true })).toBeFocused()
+    }
     await page.keyboard.press('Enter') // Must not invoke the list's open-ticket shortcut.
     await expect(panel(page)).toHaveCount(0)
   })

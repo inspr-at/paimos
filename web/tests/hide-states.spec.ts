@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import { test, expect, type Page, type Locator } from '@playwright/test'
 import { writeFile } from 'node:fs/promises'
-import { fixtures, mockView, mockWork } from './work-fixtures'
+import { fixtures, mockView, mockWork, openListFilters } from './work-fixtures'
 import { mockTicketGraph, ticketGraphWorld } from './ticket-graph-fixtures'
 import { expectStableControls } from './helpers/stable'
 
@@ -31,7 +31,7 @@ async function setup(page: Page, width = 1440, theme = 'light') {
   return { data, queries }
 }
 async function open(page: Page, width: number) {
-  if (width === 390) await page.getByRole('button', { name: 'Filters', exact: true }).click()
+  if (width === 390) await openListFilters(page)
   else await gear(page).click()
   const panel = chooser(page, width)
   await expect(panel.getByRole('heading', { name: 'What Hide hides', exact: true })).toBeVisible()

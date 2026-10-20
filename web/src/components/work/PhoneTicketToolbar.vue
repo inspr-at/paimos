@@ -138,5 +138,5 @@ button:focus-visible, a:focus-visible { outline: 2px solid var(--teal); outline-
 .check-slot { display: inline-grid; place-items: center; }
 .chosen { margin-left: auto; }
 .saved-name { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.divided { border-top: 1px solid var(--line) !important; }
+.phone-view-menu .divided { border-top: 1px solid var(--line); }
 </style>

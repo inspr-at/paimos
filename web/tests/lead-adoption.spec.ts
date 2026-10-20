@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: AGPL-3.0-only
+import { showProjectHead } from './work-fixtures'
 import { expect, test } from '@playwright/test'
 import { expectStableControls } from './helpers/stable'
 import { LEAD_AGENT, LEAD_SESSION, mockLeadFlow } from './lead-flow-fixtures'
@@ -21,7 +22,7 @@ for (const width of [1440, 1024, 400, 390]) for (const theme of ['light', 'dark'
       state.leads['p-pharos'] = { ...state.leads['p-pharos']!, project_id: 'p-pharos', revision: 1, generation: 0, session_id: body.session_id, state: 'waiting_for_room', reason: 'adoption_pending', process_active: true }
       return route.fulfill({ json: state.leads['p-pharos'] })
     })
-    await page.goto('/p/PHAROS')
+    await page.goto('/p/PHAROS'); await showProjectHead(page)
     await page.evaluate(value => { document.documentElement.dataset.theme = value }, theme)
     const card = page.locator('section.lead'), toggle = card.locator('[data-act="adopt-open"]')
     await expect(toggle).toBeVisible(); await toggle.click()
@@ -64,7 +65,7 @@ for (const width of [1440, 1024, 400, 390]) for (const theme of ['light', 'dark'
     // to the card and retain the existing session ID/context, queue and history.
     state.leads['p-pharos'] = { ...state.leads['p-pharos']!, revision: 2, generation: 1, state: 'working', reason: '' }
     data.live.push({ project_id: 'p-pharos', session_id: LEAD_SESSION, principal_id: LEAD_AGENT, name: 'AEON-LEAD', harness: 'codex', management_mode: 'unmanaged', role: 'coordinator', phase: 'working', activity: 'busy', ticket: null, since: new Date().toISOString(), heartbeat_at: new Date().toISOString(), finished: false })
-    await page.reload()
+    await page.reload(); await showProjectHead(page)
     await page.evaluate(value => { document.documentElement.dataset.theme = value }, theme)
     await expect(card).toContainText('Unmanaged: steering limited to messages and pause')
     await expect(card.getByRole('button', { name: 'Pause…', exact: true })).toBeVisible()
@@ -92,7 +93,7 @@ test('candidate errors and rejected confirmations remain visible with no false a
     if (new URL(route.request().url()).pathname.endsWith('/candidates')) return route.fulfill(unavailable ? { status: 503, json: { error: 'Running sessions unavailable' } } : { json: { items: [{ id: LEAD_SESSION, display_label: 'AEON-LEAD', host: 'build-7', harness: 'codex', management_mode: 'unmanaged', reported_at: new Date().toISOString() }], next_cursor: null } })
     return route.fulfill({ status: 409, json: { error: 'The selected coordinator is no longer reporting' } })
   })
-  await page.goto('/p/PHAROS')
+  await page.goto('/p/PHAROS'); await showProjectHead(page)
   const card = page.locator('section.lead')
   await card.getByRole('button', { name: 'Adopt a running session' }).click()
   await expect(card).toContainText('Running sessions unavailable')
@@ -122,7 +123,7 @@ test('cancelling an unclaimed adoption clears only the selection', async ({ page
     state.leads['p-pharos'] = { ...state.leads['p-pharos']!, project_id: 'p-pharos', revision: 1, generation: 0, session_id: body.session_id, state: 'waiting_for_room', reason: 'adoption_pending', process_active: true }
     return route.fulfill({ json: state.leads['p-pharos'] })
   })
-  await page.goto('/p/PHAROS')
+  await page.goto('/p/PHAROS'); await showProjectHead(page)
   const card = page.locator('section.lead')
   await card.getByRole('button', { name: 'Adopt a running session' }).click()
   await card.getByRole('radio').click()

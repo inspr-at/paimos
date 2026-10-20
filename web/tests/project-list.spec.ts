@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import { test, expect, type Page } from '@playwright/test'
-import { fixtures, mockWork, watchErrors, type Call } from './work-fixtures'
+import { fixtures, mockWork, watchErrors, type Call, showProjectHead } from './work-fixtures'
 
 // setSystemTime lets time flow (setFixedTime would freeze Vue's event timestamps).
 test.beforeEach(async ({ page }) => { await page.clock.setSystemTime(new Date('2026-09-23T12:00:00Z')) })
@@ -12,7 +12,7 @@ const lastList = (calls: Call[]) => calls.filter(call => call.path === '/api/nod
 
 test('AEON-1415: section owners mount the project page without a fatal setup error', async ({ page }) => {
   await mockWork(page, fixtures())
-  await page.goto('/p/PHAROS/tickets')
+  await page.goto('/p/PHAROS/tickets'); await showProjectHead(page)
   await expect(page.locator('#project-title, .status-page')).toBeVisible()
   expect(await page.locator('.status-details dd').allTextContents(), 'project setup must not reach the error boundary').toEqual([])
   await expect(page.getByRole('heading', { name: 'Pharos', level: 1 })).toBeVisible()
@@ -25,7 +25,7 @@ test('AEON-1415: inactive section tabs hide their labels at 1024 px and stay 44 
   const sections = page.getByRole('tablist', { name: 'Project sections' })
   const inactive = () => sections.locator('button[aria-selected="false"]')
   await page.setViewportSize({ width: 1024, height: 800 })
-  await page.goto('/p/PHAROS/tickets')
+  await page.goto('/p/PHAROS/tickets'); await showProjectHead(page)
   await expect(sections.getByRole('tab')).toHaveText(['Tickets', 'Knowledge', 'Settings'])
   const selected = sections.getByRole('tab', { name: 'Tickets', exact: true })
   await expect(selected).toHaveAttribute('aria-selected', 'true')
@@ -37,7 +37,7 @@ test('AEON-1415: inactive section tabs hide their labels at 1024 px and stay 44 
     await expect(label).toBeHidden()
     expect(await label.evaluate(el => getComputedStyle(el).display)).toBe('none')
   }
-  await page.setViewportSize({ width: 360, height: 800 })
+  await page.setViewportSize({ width: 360, height: 800 }); await showProjectHead(page)
   await expect(selected.locator('.tab-label')).toBeVisible()
   await expect.poll(async () => inactive().evaluateAll(tabs => tabs.map(tab => getComputedStyle(tab).width))).toEqual(['44px', '44px'])
   for (const tab of await inactive().all()) {
@@ -53,7 +53,7 @@ test('AEON-1415: inactive section tabs hide their labels at 1024 px and stay 44 
 test('the list asks for open work in the project and shows every column', async ({ page }) => {
   const errors = watchErrors(page)
   const calls = await mockWork(page, fixtures())
-  await page.goto('/p/PHAROS')
+  await page.goto('/p/PHAROS'); await showProjectHead(page)
   await expect(page.getByRole('heading', { name: 'Pharos', level: 1 })).toBeVisible()
   await expect(rows(page)).toHaveCount(5)
   const query = lastList(calls).query
@@ -81,7 +81,7 @@ test('the list asks for open work in the project and shows every column', async 
 
 test('header clicks sort ascending, descending, then off; shift adds a second key', async ({ page }) => {
   const calls = await mockWork(page, fixtures())
-  await page.goto('/p/PHAROS')
+  await page.goto('/p/PHAROS'); await showProjectHead(page)
   await expect(rows(page)).toHaveCount(5)
   const priority = page.getByRole('columnheader', { name: 'Priority' })
   await priority.getByRole('button').click()
@@ -103,7 +103,7 @@ test('header clicks sort ascending, descending, then off; shift adds a second ke
 
 test('facet menus filter with counts, show chips, and closed statuses reveal closed work', async ({ page }) => {
   const calls = await mockWork(page, fixtures())
-  await page.goto('/p/PHAROS')
+  await page.goto('/p/PHAROS'); await showProjectHead(page)
   await expect(rows(page)).toHaveCount(5)
   await page.getByRole('toolbar').getByRole('button', { name: 'Add a filter' }).click()
   await page.getByRole('menu', { name: 'Filter by' }).getByRole('menuitem', { name: 'Status', exact: true }).click()
@@ -144,7 +144,7 @@ test('facet menus filter with counts, show chips, and closed statuses reveal clo
 
 test('hide closed is on by default and can be turned off', async ({ page }) => {
   const calls = await mockWork(page, fixtures())
-  await page.goto('/p/PHAROS')
+  await page.goto('/p/PHAROS'); await showProjectHead(page)
   await expect(rows(page)).toHaveCount(5)
   await page.getByLabel('Hide closed', { exact: true }).uncheck()
   await expect(rows(page)).toHaveCount(7)
@@ -154,7 +154,7 @@ test('hide closed is on by default and can be turned off', async ({ page }) => {
 
 test('list search filters live, highlights matches, and / and Esc work', async ({ page }) => {
   const calls = await mockWork(page, fixtures())
-  await page.goto('/p/PHAROS')
+  await page.goto('/p/PHAROS'); await showProjectHead(page)
   await expect(rows(page)).toHaveCount(5)
   await page.keyboard.press('/')
   const search = page.getByLabel('Search tickets in this project')
@@ -171,7 +171,7 @@ test('list search filters live, highlights matches, and / and Esc work', async (
 
 test('grouping by status and by epic', async ({ page }) => {
   await mockWork(page, fixtures())
-  await page.goto('/p/PHAROS')
+  await page.goto('/p/PHAROS'); await showProjectHead(page)
   await expect(rows(page)).toHaveCount(5)
   await page.getByRole('button', { name: 'Display' }).click()
   await page.getByRole('dialog', { name: 'Display options' }).getByRole('radio', { name: 'Status' }).click()
@@ -188,7 +188,7 @@ test('grouping by status and by epic', async ({ page }) => {
 
 test('status changes are optimistic, confirmed by PATCH and can be undone', async ({ page }) => {
   const calls = await mockWork(page, fixtures())
-  await page.goto('/p/PHAROS')
+  await page.goto('/p/PHAROS'); await showProjectHead(page)
   await row(page, 'PHAROS-11').getByRole('button', { name: /Change status of PHAROS-11/ }).click()
   const menu = page.getByRole('menu', { name: 'Status of PHAROS-11' })
   await expect(menu.getByRole('menuitemradio', { name: 'In progress' })).toHaveAttribute('aria-checked', 'true')
@@ -205,7 +205,7 @@ test('status changes are optimistic, confirmed by PATCH and can be undone', asyn
 
 test('blocked is a status between backlog and in progress', async ({ page }) => {
   const calls = await mockWork(page, fixtures())
-  await page.goto('/p/PHAROS')
+  await page.goto('/p/PHAROS'); await showProjectHead(page)
   await row(page, 'PHAROS-14').getByRole('button', { name: /Change status of PHAROS-14/ }).click()
   const menu = page.getByRole('menu', { name: 'Status of PHAROS-14' })
   await expect(menu.getByRole('menuitemradio').locator('.label')).toHaveText(['New', 'Backlog', 'Open', 'Blocked', 'In progress', 'QA', 'Done', 'Delivered', 'Accepted', 'Cancelled', 'Archived'])
@@ -221,7 +221,7 @@ test('blocked is a status between backlog and in progress', async ({ page }) => 
 
 test('a status menu is keyboard driven with digits', async ({ page }) => {
   const calls = await mockWork(page, fixtures())
-  await page.goto('/p/PHAROS')
+  await page.goto('/p/PHAROS'); await showProjectHead(page)
   await row(page, 'PHAROS-14').getByRole('button', { name: /Change status of PHAROS-14/ }).click()
   await page.keyboard.press('ArrowDown')
   await expect(page.getByRole('menuitemradio', { name: 'Backlog' })).toBeFocused()
@@ -233,7 +233,7 @@ test('a status menu is keyboard driven with digits', async ({ page }) => {
 
 test('a status changed elsewhere is not overwritten', async ({ page }) => {
   const calls = await mockWork(page, fixtures(), { conflictOn: 'n-2' })
-  await page.goto('/p/PHAROS')
+  await page.goto('/p/PHAROS'); await showProjectHead(page)
   await row(page, 'PHAROS-12').getByRole('button', { name: /Change status of PHAROS-12/ }).click()
   await page.getByRole('menuitemradio', { name: 'QA' }).click()
   await expect(page.getByText('PHAROS-12 was changed elsewhere')).toBeVisible()
@@ -247,7 +247,7 @@ test('a status changed elsewhere is not overwritten', async ({ page }) => {
 
 test('a rejected status change rolls back and explains why', async ({ page }) => {
   await mockWork(page, fixtures(), { failPatch: true })
-  await page.goto('/p/PHAROS')
+  await page.goto('/p/PHAROS'); await showProjectHead(page)
   await row(page, 'PHAROS-13').getByRole('button', { name: /Change status of PHAROS-13/ }).click()
   await page.getByRole('menuitemradio', { name: 'Done' }).click()
   await expect(page.getByText('PHAROS-13 keeps its status: State is not allowed here')).toBeVisible()
@@ -256,7 +256,7 @@ test('a rejected status change rolls back and explains why', async ({ page }) =>
 
 test('keyboard opens the side panel; j and k follow; Esc and Back close it', async ({ page }) => {
   await mockWork(page, fixtures())
-  await page.goto('/p/PHAROS')
+  await page.goto('/p/PHAROS'); await showProjectHead(page)
   await expect(rows(page)).toHaveCount(5)
   await page.keyboard.press('j')
   await expect(row(page, 'PHAROS-11')).toHaveClass(/\bcursor\b/)
@@ -301,7 +301,7 @@ test('deep links open tickets outside the current list and render Markdown task 
 
 test('? opens the shortcut sheet', async ({ page }) => {
   await mockWork(page, fixtures())
-  await page.goto('/p/PHAROS')
+  await page.goto('/p/PHAROS'); await showProjectHead(page)
   await expect(rows(page)).toHaveCount(5)
   await page.keyboard.press('Shift+?')
   const sheet = page.getByRole('dialog', { name: 'Keyboard shortcuts' })
@@ -316,7 +316,7 @@ test('? opens the shortcut sheet', async ({ page }) => {
 
 test('long lists load 200 rows per page while scrolling', async ({ page }) => {
   const calls = await mockWork(page, fixtures({ bigProject: 450 }))
-  await page.goto('/p/AEON')
+  await page.goto('/p/AEON'); await showProjectHead(page)
   await expect(rows(page)).toHaveCount(200)
   await page.locator('main').evaluate(main => { main.scrollTop = main.scrollHeight })
   await expect(rows(page)).toHaveCount(400)
@@ -330,7 +330,7 @@ test('long lists load 200 rows per page while scrolling', async ({ page }) => {
 
 test('skeleton rows while loading, then an empty state that clears filters', async ({ page }) => {
   await mockWork(page, fixtures(), { delayList: 800 })
-  await page.goto('/p/PHAROS?q=nothing-matches')
+  await page.goto('/p/PHAROS?q=nothing-matches'); await showProjectHead(page)
   // A filtered load expects few rows, so the skeleton stays short.
   await expect(page.locator('.skeleton-body tr')).toHaveCount(8)
   await expect(page.getByRole('heading', { name: 'No tickets match these filters' })).toBeVisible()
@@ -340,7 +340,7 @@ test('skeleton rows while loading, then an empty state that clears filters', asy
 
 test('an unfiltered load holds about the height of the first page', async ({ page }) => {
   await mockWork(page, fixtures(), { delayList: 800 })
-  await page.goto('/p/PHAROS')
+  await page.goto('/p/PHAROS'); await showProjectHead(page)
   // The summary counts 3 open and 2 in progress for PHAROS; the closed ones stay hidden.
   await expect(page.locator('.skeleton-body tr')).toHaveCount(5)
   await expect(rows(page)).toHaveCount(5)
@@ -348,7 +348,7 @@ test('an unfiltered load holds about the height of the first page', async ({ pag
 
 test('load errors offer a retry', async ({ page }) => {
   await mockWork(page, fixtures(), { failList: true })
-  await page.goto('/p/PHAROS')
+  await page.goto('/p/PHAROS'); await showProjectHead(page)
   await expect(page.getByRole('heading', { name: 'Tickets could not be loaded' })).toBeVisible()
   await page.unroute('**/api/**')
   await mockWork(page, fixtures())
@@ -358,7 +358,7 @@ test('load errors offer a retry', async ({ page }) => {
 
 test('density switches between 36 and 30 pixel rows', async ({ page }) => {
   await mockWork(page, fixtures())
-  await page.goto('/p/PHAROS')
+  await page.goto('/p/PHAROS'); await showProjectHead(page)
   await expect(rows(page)).toHaveCount(5)
   expect((await rows(page).first().boundingBox())!.height).toBeCloseTo(36, 0)
   await page.getByRole('button', { name: 'Display' }).click()
@@ -368,7 +368,7 @@ test('density switches between 36 and 30 pixel rows', async ({ page }) => {
 
 test('every cell of a row shares one centre line', async ({ page }) => {
   await mockWork(page, fixtures())
-  await page.goto('/p/PHAROS')
+  await page.goto('/p/PHAROS'); await showProjectHead(page)
   await expect(rows(page)).toHaveCount(5)
   const centres = await row(page, 'PHAROS-11').evaluate(tr => ['.key', '.title-link', '.status-btn > span:not(.status-icon)', '.prio-label', '.person-name', 'time', '.kind-glyph', '.c-prio svg', '.c-status .status-icon'].map(selector => {
     const box = tr.querySelector(selector)!.getBoundingClientRect()
@@ -379,9 +379,9 @@ test('every cell of a row shares one centre line', async ({ page }) => {
 
 test('the Assignee column appears only when someone in the result is assigned', async ({ page }) => {
   await mockWork(page, fixtures())
-  await page.goto('/p/PHAROS')
+  await page.goto('/p/PHAROS'); await showProjectHead(page)
   await expect(page.getByRole('columnheader', { name: 'Assignee' })).toBeVisible()
-  await page.goto('/p/PHAROS?status=new')
+  await page.goto('/p/PHAROS?status=new'); await showProjectHead(page)
   await expect(rows(page)).toHaveCount(1)
   await expect(page.getByRole('columnheader', { name: 'Assignee' })).toHaveCount(0)
   // Parent stays: the 30% default is the whole project, not this unassigned filter.
@@ -390,7 +390,7 @@ test('the Assignee column appears only when someone in the result is assigned', 
 
 test('project header shows the project summary counts, cancelled work out of scope', async ({ page }) => {
   await mockWork(page, fixtures())
-  await page.goto('/p/PHAROS')
+  await page.goto('/p/PHAROS'); await showProjectHead(page)
   const stats = page.locator('.head-stats')
   await expect(stats.getByRole('button', { name: 'Filter open tickets: 3', exact: true })).toBeVisible()
   // "Doing" on screen; the full "in progress" for screen readers and in the tooltip.
@@ -427,7 +427,7 @@ test('wide screens dock the side panel beside the list; narrow ones overlay it',
 
 test('the footer bar is a row of the shell: rows scroll above it, never under it', async ({ page }) => {
   await mockWork(page, fixtures({ bigProject: 30 }))
-  await page.goto('/p/AEON')
+  await page.goto('/p/AEON'); await showProjectHead(page)
   await expect(rows(page)).toHaveCount(31)
   const footer = page.locator('footer.app-footer')
   await expect(footer).toBeVisible()
@@ -469,7 +469,7 @@ for (const colorScheme of ['light', 'dark'] as const) {
     await page.setViewportSize({ width: 390, height: 844 })
     await page.emulateMedia({ colorScheme })
     await mockWork(page, fixtures())
-    await page.goto('/p/PHAROS')
+    await page.goto('/p/PHAROS'); await showProjectHead(page)
     await expect(rows(page)).toHaveCount(5)
     expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true)
     const first = rows(page).first()

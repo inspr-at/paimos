@@ -5,7 +5,7 @@
 import { test, expect, type Page } from '@playwright/test'
 import { mkdir } from 'node:fs/promises'
 import { controlStability } from './control-stability'
-import { fixtures, mockView, mockWork, watchErrors, type Call } from './work-fixtures'
+import { fixtures, mockView, mockWork, watchErrors, type Call, openListFilters } from './work-fixtures'
 
 const shots = 'test-results/aeon-974-typefilter'
 const LEAF = 'Arbeitsschritt mit ausführlicher Beschreibung'
@@ -195,7 +195,7 @@ test('the Filters sheet shows its filters once their counts are in and keeps eve
   const counts = await heldLevelCounts(page)
   await page.goto('/p/PHAROS')
   await expect(rows(page).first()).toBeVisible()
-  await page.getByRole('button', { name: 'Filters', exact: true }).click()
+  await openListFilters(page)
   const sheet = page.getByRole('dialog', { name: 'Filters', exact: true })
   await expect.poll(() => counts.asked).toBe(true)
   await expect(sheet.getByText('Loading filters…')).toBeVisible()
@@ -221,7 +221,7 @@ test('with Type applied, the Filters sheet waits for its unfiltered counts; a la
   await page.goto('/p/PHAROS?type=leaf')
   await expect(rows(page).first()).toBeVisible()
   await expect.poll(() => counts.asked).toBe(true)
-  await page.getByRole('button', { name: 'Filters', exact: true }).click()
+  await openListFilters(page)
   const sheet = page.getByRole('dialog', { name: 'Filters', exact: true })
   // Story would join the Type section late and push Labels and Date down.
   await expect(sheet.getByText('Loading filters…')).toBeVisible()
@@ -308,7 +308,7 @@ for (const width of [390, 1024, 1440]) for (const theme of ['light', 'dark']) {
     await expect(rows(page).first()).toBeVisible()
     if (width <= 900) {
       // Phones and small tablets keep every filter in the Filters sheet.
-      await page.getByRole('button', { name: 'Filters', exact: true }).click()
+      await openListFilters(page)
       const sheet = page.getByRole('dialog', { name: 'Filters', exact: true })
       const type = sheet.locator('.sheet-section').filter({ has: page.locator('.eyebrow', { hasText: /^Type$/ }) })
       await type.scrollIntoViewIfNeeded()

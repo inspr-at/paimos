@@ -1205,9 +1205,9 @@ defineExpose({
               <td class="phone-state">
                 <button v-if="selectable && selecting" type="button" class="phone-check" role="checkbox" :aria-checked="!!selected?.has(entry.row.id)" :aria-label="`Select ${entry.row.key}`" :disabled="selectionDisabled || (rowSelectable ? !rowSelectable(entry.row) : false)" @click.stop="emit('select', entry.row, 'toggle')"><span class="mark"><AppIcon v-if="selected?.has(entry.row.id)" name="check" :size="13" /></span></button>
                 <button v-else-if="entry.tree?.hasChildren" type="button" class="phone-fold" :aria-expanded="entry.tree.expanded" :aria-label="`${entry.tree.expanded ? 'Collapse' : 'Expand'} ${entry.row.key}`" @click.stop="emit('toggleRow', entry.row.id)"><AppIcon name="chevron-right" :size="14" /></button>
-                <span v-else :aria-label="statusMeta(entry.row.state).label" role="img"><StatusIcon :state="entry.row.state" :size="16" /></span>
+                <span v-else :aria-label="statusMeta(entry.row.state).label" role="img" data-status-motion><StatusIcon :state="entry.row.state" :size="16" /></span>
               </td>
-              <td class="c-title phone-title" data-column-id="title"><span class="phone-title-link"><span v-clip-tip="entry.row.title" class="phone-title-text" tabindex="-1"><template v-for="(part, i) in highlight(entry.row.title, query)" :key="i"><mark v-if="part.match">{{ part.text }}</mark><template v-else>{{ part.text }}</template></template></span></span></td>
+              <td class="c-title phone-title" data-column-id="title"><a class="title-link phone-title-link" :href="href(entry.row)" tabindex="-1" @click="linkClick"><span v-clip-tip="entry.row.title" class="title-text phone-title-text"><template v-for="(part, i) in highlight(entry.row.title, query)" :key="i"><mark v-if="part.match">{{ part.text }}</mark><template v-else>{{ part.text }}</template></template></span></a></td>
               <td class="phone-meta"><span class="key">{{ entry.row.key }}</span><span class="phone-separator" aria-hidden="true">{{ '\u00a0·\u00a0' }}</span><time :datetime="entry.row.updated_at" :data-tip="absoluteTime(entry.row.updated_at)">{{ relativeTime(entry.row.updated_at, { now }).replace(/(\d)([mhd])\b/g, '$1\u00a0$2').replace(/(\d)\s+(?=\S)/g, '$1\u00a0') }}</time></td>
               <td class="phone-owner"><button type="button" class="assignee-btn phone-assignee" :disabled="!mayAssign(entry.row)" :aria-label="`Assignee: ${entry.row.assignee?.name ?? 'Unassigned'}. Change assignee of ${entry.row.key}`" aria-haspopup="menu" @click.stop="emit('assignee', entry.row, $event.currentTarget as HTMLElement)"><PersonAvatar v-if="entry.row.assignee" :id="entry.row.assignee.id" :name="entry.row.assignee.name" :size="24" /></button></td>
             </template>
@@ -1973,8 +1973,8 @@ button.release-chip:focus-visible { box-shadow: var(--focus-ring); }
 .phone-rows .ticket-row td::before { display: none !important; }
 .phone-rows .ticket-row .phone-state { position: relative; grid-area: state; align-self: start; height: 18px; padding-top: 2px !important; }
 .phone-rows .ticket-row .phone-title { grid-area: title; contain: inline-size; overflow: visible; }
-.phone-title-link { display: block; min-width: 0; color: var(--ink); font-size: 14.5px; line-height: 20px; }
-.phone-title-text { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.phone-rows .phone-title-link { display: block; min-width: 0; color: var(--ink); font-size: 14.5px; line-height: 20px; }
+.phone-rows .phone-title-text { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; -webkit-line-clamp: unset; }
 .phone-rows .ticket-row .phone-meta { grid-area: meta; display: flex !important; align-items: center; white-space: nowrap; line-height: 16px; color: var(--ink-3); font-size: 11.5px; }
 .phone-meta .key { color: var(--teal-ink); font-size: 11.5px; line-height: 16px; }
 .phone-meta time { font-size: 11.5px; font-variant-numeric: tabular-nums; }

@@ -8,7 +8,7 @@
 import { expect, test, type Page } from '@playwright/test'
 import { mkdirSync } from 'node:fs'
 import { openBoth, openOne } from './live-server'
-import { me } from './work-fixtures'
+import { me, startTicketSelection } from './work-fixtures'
 
 const shots = process.env.LIVE_SHOTS_DIR
 const panel = (page: Page) => page.getByRole('complementary', { name: 'Ticket details' })
@@ -333,7 +333,7 @@ test('on a phone the marked row, the pill and the deleted selection fit 390 px',
   for (const colorScheme of ['light', 'dark'] as const) {
     const { a, b, errorsA, close } = await openBoth(browser, '/p/PHAROS/tickets', { a: { width: 390, height: 844 }, colorScheme })
     try {
-      await a.getByRole('button', { name: 'Select' }).click()
+      await startTicketSelection(a)
       for (const key of ['PHAROS-11', 'PHAROS-14']) await a.getByRole('checkbox', { name: `Select ${key}` }).click()
       await deleteInPanel(b, 'PHAROS-14')
       const row = a.locator('#row-n-4')

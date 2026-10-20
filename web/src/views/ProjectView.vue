@@ -1,6 +1,6 @@
 <!-- SPDX-License-Identifier: AGPL-3.0-only -->
 <script setup lang="ts">
-import { provide } from 'vue'
+import { provide, watch } from 'vue'
 import AppIcon from '../components/AppIcon.vue'
 import LeadBand from '../components/lead/LeadBand.vue'
 import { run } from '../lib/commands'
@@ -14,20 +14,23 @@ import ProjectBulkBar from './project/ProjectBulkBar.vue'
 import ProjectDetailHost from './project/ProjectDetailHost.vue'
 import ProjectMenus from './project/ProjectMenus.vue'
 import { compactChrome } from '../lib/chrome'
+import { useProjectHeader } from '../lib/useProjectHeader'
 
 const page = useProjectPage()
 const compact = compactChrome()
+const { compactHeadShown } = useProjectHeader()
 provide(PROJECT_PAGE, page)
 const { project, projects, projectKey, ticketsHeader, headerDensity, ticketKey, fullView,
   knowledgeDocked, knowledgeEntryOpen, toolbarHeight, selectable, selected, liveActive, activeLive,
-  bulkHeight, knowledgeActive, settingsActive, deliveryActive, graphActive } = page
+  bulkHeight, knowledgeActive, settingsActive, deliveryActive, graphActive, viewMode } = page
+watch(() => project.value?.id, () => { compactHeadShown.value = false }, { immediate: true, flush: 'sync' })
 </script>
 
 <template>
-  <section class="project-page" :class="[ticketsHeader ? `header-${headerDensity}` : '', { 'compact-list': compact && ticketsHeader && !knowledgeActive && !settingsActive && !deliveryActive, 'panel-open': (!!ticketKey && !fullView) || knowledgeDocked, 'ticket-dock': !!ticketKey && !fullView, 'full-view': fullView, 'knowledge-entry': knowledgeEntryOpen, 'knowledge-dock': knowledgeDocked }]" :style="{ '--toolbar-h': `${toolbarHeight}px` }" :aria-labelledby="project && !knowledgeEntryOpen ? 'project-title' : undefined">
+  <section class="project-page" :class="[ticketsHeader ? `header-${headerDensity}` : '', { 'compact-list': compact && ticketsHeader && viewMode === 'list', 'panel-open': (!!ticketKey && !fullView) || knowledgeDocked, 'ticket-dock': !!ticketKey && !fullView, 'full-view': fullView, 'knowledge-entry': knowledgeEntryOpen, 'knowledge-dock': knowledgeDocked }]" :style="{ '--toolbar-h': `${toolbarHeight}px` }" :aria-labelledby="project && !knowledgeEntryOpen ? 'project-title' : undefined">
     <template v-if="project">
       <div v-show="!fullView && !knowledgeEntryOpen" class="list-view" :class="{ selecting: selectable && selected.size, 'has-live-updates': liveActive && activeLive.pill.value }" :style="{ '--live-obstacle-h': `${bulkHeight ? bulkHeight + 8 : 0}px` }">
-      <div id="project-header-fold" v-show="!ticketsHeader || headerDensity !== 'collapsed'" class="project-fold">
+      <div id="project-header-fold" v-show="!ticketsHeader || (compact && viewMode === 'list' ? compactHeadShown : headerDensity !== 'collapsed')" class="project-fold">
       <ProjectHeader :project="project" />
       <LeadBand :project-id="project.id" :project-key="project.routeKey" :route-key="project.routeKey" />
       <ProjectNavigation :project="project" />

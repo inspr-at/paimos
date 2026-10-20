@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: AGPL-3.0-only
+import { showProjectHead } from './work-fixtures'
 // Risk: confirmation moves actions or removes the wrong lead; failures must stay visible.
 import { expect, test } from '@playwright/test'
 import { expectStableControls } from './helpers/stable'
@@ -12,7 +13,7 @@ for (const width of [390, 1024, 1440]) for (const look of ['light', 'dark'] as c
     state.leads['p-pharos'] = { ...unstarted }
     for (const view of ['card', 'list']) {
       state.leads['p-pharos'] = { ...unstarted }
-      await page.goto(view === 'card' ? '/p/PHAROS' : '/agents')
+      await page.goto(view === 'card' ? '/p/PHAROS' : '/agents'); if (view === 'card') await showProjectHead(page)
       await page.evaluate(theme => { document.documentElement.dataset.theme = theme }, look)
       // AEON-1210: on Agents, a lead without a session heads its project's group in Sessions, its ⋯ on the row.
       const frame = view === 'card' ? page.locator('section.lead') : page.locator('.sessions .row.lead-row[data-project="PHAROS"]')
@@ -52,7 +53,7 @@ for (const width of [390, 1024, 1440]) for (const look of ['light', 'dark'] as c
 
 test('AEON-1040: a previously started lead has no Remove control', async ({ page }) => {
   await mockLeadFlow(page, { lead: 'paused', processActive: false })
-  await page.goto('/p/PHAROS')
+  await page.goto('/p/PHAROS'); await showProjectHead(page)
   await page.locator('section.lead [data-act="lead-menu"]').click()
   await expect(page.getByRole('button', { name: 'Open session', exact: true })).toBeVisible()
   await expect(page.getByRole('button', { name: 'Remove', exact: true })).toHaveCount(0)

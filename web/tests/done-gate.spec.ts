@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import { expect, test, type Page } from '@playwright/test'
-import { fixtures, me, mockWork, watchErrors, type Call } from './work-fixtures'
+import { fixtures, me, mockWork, watchErrors, type Call, expectTicketRowState, openTicketStatus } from './work-fixtures'
 
 // AEON-1315 lets the server decide entry requirements. These dialog cases keep
 // the historical benefit_required response to exercise its compatibility path:
@@ -49,7 +49,7 @@ for (const theme of ['light', 'dark'] as const) {
       await scene(page, theme, width)
       const calls = await mockWork(page, fixtures())
       await page.goto('/p/PHAROS')
-      await row(page, 'PHAROS-11').getByRole('button', { name: /Change status of PHAROS-11/ }).click()
+      await openTicketStatus(page, 'PHAROS-11')
       await page.getByRole('menuitemradio', { name: 'Done' }).click()
       const dialog = gate(page)
       await expect(dialog).toBeVisible()
@@ -117,7 +117,7 @@ for (const theme of ['light', 'dark'] as const) {
       if (width === 390) await page.keyboard.press('Escape')
       else await dialog.getByRole('button', { name: 'Not now' }).click()
       await expect(dialog).toHaveCount(0)
-      await expect(row(page, 'PHAROS-11').locator('.status-btn')).toHaveText('In progress')
+      await expectTicketRowState(page, 'PHAROS-11', 'In progress')
       await expect(row(page, 'PHAROS-12')).toHaveCount(0)
       await expect(row(page, 'PHAROS-13')).toHaveCount(0)
       await expect(page.getByText('before done:')).toHaveCount(0)
@@ -170,7 +170,7 @@ for (const width of [1600, 390] as const) {
     await scene(page, 'light', width)
     const calls = await mockWork(page, fixtures())
     await page.goto('/p/PHAROS')
-    await row(page, 'PHAROS-11').getByRole('button', { name: /Change status of PHAROS-11/ }).click()
+    await openTicketStatus(page, 'PHAROS-11')
     await page.getByRole('menuitemradio', { name: 'Done' }).click()
     const dialog = gate(page)
     await expect(dialog.getByRole('checkbox', { name: 'Hide from release notes' })).not.toBeChecked()
@@ -221,7 +221,7 @@ for (const width of [1600, 390] as const) {
       return route.fallback()
     })
     await page.goto('/p/PHAROS')
-    await row(page, 'PHAROS-11').getByRole('button', { name: /Change status of PHAROS-11/ }).click()
+    await openTicketStatus(page, 'PHAROS-11')
     await page.getByRole('menuitemradio', { name: 'Done' }).click()
     const dialog = gate(page)
     await dialog.getByLabel('Pill · English').fill(benefits.pill_en)
@@ -238,7 +238,7 @@ for (const width of [1600, 390] as const) {
     await expect(dialog.getByLabel('Benefit · English')).toHaveValue(benefits.benefit_en)
     await expect(dialog.getByLabel('Benefit · Deutsch')).toHaveValue(benefits.benefit_de)
     await expect(dialog.getByRole('checkbox', { name: 'Hide from release notes' })).toBeChecked()
-    await expect(row(page, 'PHAROS-11').locator('.status-btn')).toHaveText('In progress')
+    await expectTicketRowState(page, 'PHAROS-11', 'In progress')
     await dialog.getByRole('button', { name: 'Mark done' }).click()
     await expect(page.getByText('PHAROS-11 is now Done')).toBeVisible()
     const patches = calls.filter(call => call.method === 'PATCH' && call.path === '/api/nodes/n-1')
@@ -277,8 +277,8 @@ for (const width of [1600, 390] as const) {
     if (width === 390) await page.keyboard.press('Escape')
     else await dialog.getByRole('button', { name: 'Not now' }).click()
     await expect(page.getByText('1 done · 1 skipped (still New)')).toBeVisible()
-    await expect(row(page, 'PHAROS-11').locator('.status-btn')).toHaveText('Done')
-    await expect(row(page, 'PHAROS-14').locator('.status-btn')).toHaveText('New')
+    await expectTicketRowState(page, 'PHAROS-11', 'Done')
+    await expectTicketRowState(page, 'PHAROS-14', 'New')
     expect(errors).toEqual([])
   })
 

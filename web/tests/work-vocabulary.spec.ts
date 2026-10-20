@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import { test, expect, type Page } from '@playwright/test'
 import { mkdir } from 'node:fs/promises'
-import { fixtures, mockWork, watchErrors } from './work-fixtures'
+import { fixtures, mockWork, watchErrors, openListFilters } from './work-fixtures'
 import { mockBusiness, businessData } from './business-fixtures'
 import { mockSettings, settingsData } from './settings-fixtures'
 import { controlStability } from './control-stability'
@@ -114,7 +114,7 @@ for (const width of sizes) for (const theme of ['light', 'dark']) {
     await page.goto('/p/PHAROS/tickets?shape=leaf&depth=2&closed=1')
     await expect(page).toHaveURL(/shape=leaf/)
     if (width <= 720) {
-      await page.getByRole('button', { name: 'Filters', exact: true }).click()
+      await openListFilters(page)
       const sheet = page.getByRole('dialog', { name: 'Filters', exact: true })
       const choices = sheet.locator('.sheet-section').filter({ has: page.getByText('Parents / Leaves', { exact: true }) })
       const leaves = choices.getByRole('checkbox', { name: /Leaves/ })

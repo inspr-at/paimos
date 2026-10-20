@@ -101,7 +101,7 @@ export function useProjectKeyboard(state: ProjectState, data: ReturnType<typeof 
       case 'e': if (ticketKey.value) { event.preventDefault(); void panel.value?.startEdit() } break
       case 's':
         if (ticketKey.value) { event.preventDefault(); panel.value?.openStatus() }
-        else if (row) { const anchor = document.querySelector<HTMLElement>(`#row-${row.id} .status-btn`); if (anchor) { event.preventDefault(); openStatus(row, anchor, 'list') } }
+        else if (row) { const anchor = document.querySelector<HTMLElement>(`#row-${CSS.escape(row.id)} .status-btn, #row-${CSS.escape(row.id)} .phone-state`); if (anchor) { event.preventDefault(); openStatus(row, anchor, 'list') } }
         break
       case 'p': if (ticketKey.value) { event.preventDefault(); panel.value?.openPriority() } break
       case 'a': if (ticketKey.value) { event.preventDefault(); panel.value?.openAssignee() } else if (row) { const anchor = document.querySelector<HTMLElement>(`#row-${CSS.escape(row.id)} .assignee-btn`); if (anchor) { event.preventDefault(); openAssignee(row, anchor) } } break

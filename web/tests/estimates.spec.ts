@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import { expect, test, type Page } from '@playwright/test'
-import { fixtures, me, mockWork, watchErrors } from './work-fixtures'
+import { fixtures, me, mockWork, watchErrors, openListFilters } from './work-fixtures'
 
 function world(theme = 'light') {
   const data = fixtures()
@@ -19,7 +19,7 @@ const row = (page: Page, key: string) => page.locator('tr.ticket-row:not(.ghost)
 // Explicit saved columns show their empty values; Automatic retains the quiet
 // phone layout. Exercise both policies through the real column controls.
 async function automaticPhoneColumns(page: Page) {
-  await page.getByRole('button', { name: 'Filters', exact: true }).click()
+  await openListFilters(page)
   await page.getByRole('dialog', { name: 'Filters', exact: true }).getByRole('button', { name: 'Display settings…', exact: true }).click()
   const sheet = page.getByRole('dialog', { name: 'Display options', exact: true })
   await sheet.getByRole('button', { name: 'Automatic', exact: true }).click()
@@ -55,18 +55,13 @@ for (const theme of ['light', 'dark']) for (const width of [1600, 390]) {
     }
     if (width === 390) {
       const card = row(page, 'PHAROS-11')
-      const value = card.locator('.c-estimate .mono')
-      await expect(value).toBeVisible()
-      await expect(value).toHaveText('~2h est.')
-      await expect(card.locator('.c-updated')).toBeVisible()
-      await expect(row(page, 'PHAROS-10').locator('.c-estimate .mono')).toHaveText('~2.5h')
-      await expect(row(page, 'PHAROS-14').locator('.c-estimate .empty')).toHaveText('—')
-      await expect(row(page, 'PHAROS-14').locator('.c-estimate .mono')).toHaveCount(0)
+      // D11 keeps estimates in the ticket even when desktop columns are saved.
+      await expect(card.locator('.c-estimate, .c-updated')).toHaveCount(0)
+      await expect(card.locator('.phone-meta time')).toBeVisible()
+      expect((await card.boundingBox())!.height).toBe(56)
       await automaticPhoneColumns(page)
-      await expect(row(page, 'PHAROS-14').locator('.c-estimate')).toBeHidden()
-      const titleBox = await card.locator('.title-text').boundingBox()
-      const estimateBox = await value.boundingBox()
-      expect(titleBox && estimateBox && titleBox.x + titleBox.width <= estimateBox.x + 1).toBeTruthy()
+      await expect(card.locator('.c-estimate')).toHaveCount(0)
+      await expect(card.locator('.title-text')).toBeVisible()
     }
     await fits(page); await shot(page, `list-${width}-${theme}`)
     await row(page, 'PHAROS-11').locator('.title-text').click()
@@ -121,11 +116,13 @@ test('an epic with open children and no hours shows coverage on the empty estima
   await expect(empty).toHaveAttribute('data-tip', '0 of 3 open children estimated · agent hours')
   await expect(empty).toHaveAttribute('aria-label', '0 of 3 open children estimated · agent hours')
   await page.setViewportSize({ width: 390, height: 844 })
-  await expect(empty).toBeVisible()
-  await expect(empty).toHaveAttribute('aria-label', '0 of 3 open children estimated · agent hours')
+  await expect(row(page, 'PHAROS-10').locator('.c-estimate')).toHaveCount(0)
   await automaticPhoneColumns(page)
-  await expect(row(page, 'PHAROS-10').locator('.c-estimate')).toBeHidden()
-  await expect(row(page, 'PHAROS-11').locator('.c-estimate .mono')).toBeVisible()
+  await expect(row(page, 'PHAROS-11').locator('.c-estimate')).toHaveCount(0)
+  await row(page, 'PHAROS-10').locator('.title-link').click()
+  const estimate = panel(page).locator('.estimate-prop [data-tip]')
+  await expect(estimate).toBeVisible()
+  await expect(estimate).toHaveAttribute('data-tip', '0 of 3 open children estimated · agent hours')
   await fits(page)
 })
 

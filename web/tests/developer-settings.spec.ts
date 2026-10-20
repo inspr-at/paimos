@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import { test, expect } from '@playwright/test'
-import { fixtures, mockWork } from './work-fixtures'
+import { fixtures, mockWork, showProjectHead } from './work-fixtures'
 import { controlStability } from './control-stability'
 
 test('retired Flow bookmarks open tickets and saved opt-ins cannot revive it', async ({ page }) => {
@@ -23,7 +23,7 @@ for(const width of [390,1024,1440]) for(const theme of ['light','dark'] as const
   data.projects[0]!.description='Überprüfung der mandantenübergreifenden Berechtigungsverwaltung und außergewöhnlich langer Projektbeschreibungen mit nachvollziehbaren Änderungen für sämtliche verantwortlichen Personen und Agenten.'
   await mockWork(page,data)
   await page.route('**/api/queue?*',route=>route.fulfill({json:{items:[],manual_order:false,capacity:{queued_hours:0,parallel_runs:0,work_hours:0,warning:false}}}))
-  await page.goto('/p/PHAROS/tickets')
+  await page.goto('/p/PHAROS/tickets'); await showProjectHead(page)
   await expect(page.getByRole('tab',{name:'Tickets',exact:true})).toBeVisible()
   await expect(page.locator('#row-n-1')).toBeVisible()
   await page.evaluate(()=>document.fonts.ready)
