@@ -7,6 +7,7 @@ import { mkdir, readFile, writeFile } from 'node:fs/promises'
 import { dirname } from 'node:path'
 import { fixtures, mockWork, watchErrors, showProjectHead } from './work-fixtures'
 import { expectStableControls } from './helpers/stable'
+import { mockLeadFlow } from './lead-flow-fixtures'
 
 type Size = { width: number; height: number }
 type Theme = 'light' | 'dark'
@@ -277,12 +278,12 @@ test('AEON-1460 compact ticket list keeps controls still and all actions reachab
 })
 
 // Each risk has an independent negative control on 94902251.
-async function compactScene(page: Page) {
+async function compactScene(page: Page, withLead = false) {
   await page.setViewportSize({ width: 390, height: 844 })
-  const data = fixtures()
+  const data = withLead ? (await mockLeadFlow(page, { lead: 'none', queue: [] })).data : fixtures()
   const title = 'Überprüfung der mandantenübergreifenden Berechtigungen und sämtlicher zuständiger Arbeitsbereiche'
   data.nodes.find(node => node.id === 'n-1')!.title = title
-  await mockWork(page, data)
+  if (!withLead) await mockWork(page, data)
   await page.goto('/p/PHAROS?group=none')
   await expect(page.locator('#row-n-1')).toBeVisible()
   return title
@@ -303,20 +304,20 @@ test('AEON-1460 compact titles retain native links and keyboard full-text disclo
       await page.keyboard.press('Escape')
     } },
     { name: 'a modified link click opens exactly one native tab', run: async () => {
-      const popup = page.waitForEvent('popup')
+      const sourceURL = page.url(), popup = page.waitForEvent('popup')
       await page.locator('#row-n-1 .title-link').click({ modifiers: [process.platform === 'darwin' ? 'Meta' : 'Control'] })
       const tab = await popup
       await tab.waitForLoadState('domcontentloaded')
       expect(new URL(tab.url()).pathname).toBe('/p/PHAROS/PHAROS-11')
       expect(page.context().pages()).toHaveLength(2)
       await tab.close()
-      await expect(page).toHaveURL('/p/PHAROS/tickets?group=none')
+      await expect(page).toHaveURL(sourceURL)
     } },
   ] })
 })
 
 test('AEON-1460 compact project-head disclosure works without changing the desktop preference', async ({ page }) => {
-  await compactScene(page)
+  await compactScene(page, true)
   await expect(page.locator('#project-header-fold')).toBeHidden()
   const preference = () => page.evaluate(() => localStorage.getItem('aeon:project-header:t1:11111111-1111-4111-8111-111111111111'))
   const stored = await preference()
