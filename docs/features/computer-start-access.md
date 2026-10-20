@@ -45,3 +45,7 @@ This is dual-read groundwork: NULL acting people keep the previous claim
 behavior until S1-07. This feature does not fill `acting_person_id` or infer it
 from an approver, account owner or computer owner; S1-03 supplies that binding.
 There is no UI change in this package.
+
+Computer start access alone does not authorize an account, a model, a lead
+runtime resource or a native session grant. Those independent admission and
+transport checks still apply.
