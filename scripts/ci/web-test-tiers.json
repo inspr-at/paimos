@@ -16292,6 +16292,8 @@
     ,
     {"kind":"node","file":"tests/columns.test.ts","name":"AEON-1570 a growing card is adopted after a disagreeing frame pair, and a shrink ignores a later wide pair","tier":"ESSENTIAL"}
     ,
+    {"kind":"node","file":"tests/columns.test.ts","name":"AEON-1594 a shrink does not adopt a sample wider than the card now","tier":"ESSENTIAL"}
+    ,
     {"kind":"node","file":"tests/columns.test.ts","name":"AEON-913: a loaded fit keeps the designed width until the value is wider","tier":"GATED-FULL"}
     ,
     {"kind":"node","file":"tests/columns.test.ts","name":"AEON-913: automatic fits give width back until Title keeps its minimum","tier":"GATED-FULL"}
