@@ -17,9 +17,13 @@ import (
 func TestComputerStartLeadRuntimeRechecksRunPerson(t *testing.T) {
 	v := recoveryAgent(t)
 	f := v.f
+	f.agent.Scopes = append(f.agent.Scopes, "run.claim")
 	person, recurrence, routine, launchID := uid(), uid(), uid(), uid()
 	var computer string
 	f.tx(t, f.person, func(tx pgx.Tx) error {
+		if _, err := tx.Exec(t.Context(), `UPDATE agent_keys SET scopes=array_append(scopes,'run.claim') WHERE id=$1`, f.agent.AuthKeyID); err != nil {
+			return err
+		}
 		return tx.QueryRow(t.Context(), `SELECT id::text FROM agent_pairing_computers WHERE principal_id=$1`, f.agent.ID).Scan(&computer)
 	})
 	demand := agentsetup.LeadDemand{ID: launchID, ProjectID: f.project, RoutineRunID: routine, OwnerID: f.person.ID, Revision: 1}
