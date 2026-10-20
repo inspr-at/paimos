@@ -141,18 +141,23 @@ test('AEON-1401 lists, the status menu, the ticket header, Desk and activity rea
     data.nodes.find(node => node.id === 'n-4')!.state = 'open'
     const { context, page, calls } = await open(browser, testInfo, width, theme, data)
     try {
-      // A viewport resize can precede the card's ResizeObserver delivery. Hold
-      // that delivery explicitly, rather than relying on CI rendering speed.
+      // A viewport resize can precede the card's ResizeObserver delivery. Give
+      // it the preceding wide sample explicitly, without relying on CI speed.
       await page.addInitScript(() => {
-        const state = { holding: false, held: 0 }
+        const state = { holding: false, held: 0, width: 0 }
         Object.assign(window, { aeon1401CardResize: state })
         const Observer = window.ResizeObserver
         window.ResizeObserver = class extends Observer {
           constructor(callback: ResizeObserverCallback) {
             super((entries, observer) => {
-              const delivered = entries.filter(entry => {
-                if (state.holding && entry.target.classList.contains('table-card')) { state.held++; return false }
-                return true
+              const delivered = entries.map(entry => {
+                if (state.holding && entry.target.classList.contains('table-card')) {
+                  state.held++
+                  return new Proxy(entry, { get(target, key) {
+                    return key === 'contentRect' ? new DOMRect(0, 0, state.width, entry.contentRect.height) : Reflect.get(target, key, target)
+                  } })
+                }
+                return entry
               })
               if (delivered.length) callback(delivered, observer)
             })
@@ -178,19 +183,23 @@ test('AEON-1401 lists, the status menu, the ticket header, Desk and activity rea
 
       if (width === 1440 && theme === 'light') {
         // The status-name fit and Parent must give way beside Title during a
-        // 1440 -> 1024 resize, even while the card's size delivery is held.
+        // 1440 -> 1024 resize, even if the card delivers the old wide sample.
         await page.goto('/p/PHAROS')
         await expect(grid.locator('thead th.c-parent')).toBeVisible()
         await expect(grid.locator('tr.ticket-row')).toHaveCount(5)
         await expect(page.locator('.table-card')).toHaveAttribute('data-columns-settled', '1')
-        await page.evaluate(() => { (window as unknown as { aeon1401CardResize: { holding: boolean } }).aeon1401CardResize.holding = true })
+        await page.evaluate(() => {
+          const state = (window as unknown as { aeon1401CardResize: { holding: boolean; width: number } }).aeon1401CardResize
+          state.width = document.querySelector('.table-card')!.getBoundingClientRect().width
+          state.holding = true
+        })
         await page.setViewportSize({ width: 1024, height: 900 })
         await page.evaluate(() => new Promise<void>(resolve => requestAnimationFrame(() => requestAnimationFrame(() => resolve()))))
         expect(await page.evaluate(() => (window as unknown as { aeon1401CardResize: { held: number } }).aeon1401CardResize.held)).toBeGreaterThan(0)
         await expect(grid.locator('thead th.c-parent')).toBeVisible()
         expect((await grid.locator('thead th.c-title').boundingBox())!.width).toBeGreaterThanOrEqual(240)
         await shot(page, testInfo, 1024, theme, 'N3-parent-resize')
-        checks.push({ assert: 'Title keeps 240 px beside renamed statuses and Parent before the card resize delivery', width: 1024, theme, ok: true })
+        checks.push({ assert: 'Title keeps 240 px beside renamed statuses and Parent through a stale card resize delivery', width: 1024, theme, ok: true })
         await page.evaluate(() => { (window as unknown as { aeon1401CardResize: { holding: boolean } }).aeon1401CardResize.holding = false })
         await page.setViewportSize({ width: 1440, height: 900 })
         await page.goto('/p/PHAROS?group=status&status=in_progress,qa,open')
