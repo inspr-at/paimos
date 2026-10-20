@@ -134,7 +134,7 @@ test('every lead state keeps the primary action in one place and says what it ne
     ['waiting_for_room', 'dial_full', 'Open dial', 'Waiting for room · the dial is full'],
     ['waiting_for_room', 'host_unavailable', 'Check computers', 'host load can’t be read'],
     ['paused', 'process_stopped', 'Resume', 'Paused · handover saved'],
-    ['paused', 'admission_not_configured', 'Resume', 'Automatic lead starts are off for now. Start the run yourself from the ticket.'],
+    ['paused', 'admission_not_configured', 'Resume', 'Queued work stays queued until Resume runs the usual start checks.'],
     ['cannot_start', 'project_archived', '', 'This project is archived'],
   ] as const) {
     await page.unrouteAll({ behavior: 'wait' })

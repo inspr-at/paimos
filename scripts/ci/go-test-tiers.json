@@ -2858,6 +2858,8 @@
     ,
     {"kind":"go","package":"internal/agentruns","name":"TestLeadPersonRunStartsAndRejectsOtherWriters","tier":"ESSENTIAL"}
     ,
+    {"kind":"go","package":"internal/agentruns","name":"TestLeadPersonStartIgnoresUnroutedQueueRow","tier":"ESSENTIAL"}
+    ,
     {"kind":"go","package":"internal/agentruns","name":"TestLeadPickupSkipsLeafHeldByPersonRun","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/agentruns","name":"TestLeadQueueDispatchAndWorkerGenerationFence","tier":"ESSENTIAL"}
@@ -6951,6 +6953,8 @@
     {"kind":"go","package":"internal/harness","name":"TestLeadRuntimeConsentAndAdoptionRemainLaunchBarriers","reason":"AEON-1190: lead consent, duplicate native launch and unknown process ownership boundary","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/harness","name":"TestLeadSchedulingBoundAndDependencies","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/harness","name":"TestLeadSchedulingCapSkipsNonLeafQueue","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/harness","name":"TestLeadSingleDialProgressAfterWorkerYield","tier":"ESSENTIAL"}
     ,

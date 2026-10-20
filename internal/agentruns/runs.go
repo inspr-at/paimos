@@ -455,14 +455,29 @@ func createRun(r *http.Request, tx pgx.Tx, p tenant.Principal, deferred *[]func(
 		if held {
 			return nil, workorders.Fail(409, "The project lead is already starting this ticket. The run appears on the ticket in a moment.")
 		}
-		var active bool
-		if err = tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM agent_runs r JOIN nodes n ON n.tenant_id=r.tenant_id AND n.id=r.work_order_id
- WHERE (r.work_order_id=$1 OR r.queue_node_id=$2 OR n.parent_id=$2)
- AND (r.status IN ('queued','starting','running','waiting') OR r.trace->'worker_assignment'->>'state' IN ('launch_unknown','launched')
- OR r.trace->'work_lifecycle_release'->>'exit_unconfirmed'='true'))`, o.NodeID, ticket).Scan(&active); err != nil {
+		// An unrouted lead queue row is demand, not a writer: queued, a queue node
+		// set, and neither routed nor targeted. The daemon poll cannot claim it,
+		// including while lead admission is off. A daemon-claimable queue row, a
+		// live status, or a launched assignment still refuses. An unconfirmed
+		// launch or exit names itself; neither is described as an active run.
+		var block string
+		if err = tx.QueryRow(ctx, `SELECT CASE
+ WHEN COALESCE(bool_or(r.trace->'work_lifecycle_release'->>'exit_unconfirmed'='true'),false) THEN 'exit_unconfirmed'
+ WHEN COALESCE(bool_or(r.trace->'worker_assignment'->>'state'='launch_unknown'),false) THEN 'launch_unknown'
+ WHEN COALESCE(bool_or(r.status IN ('starting','running','waiting')
+  OR (r.status='queued' AND (r.queue_node_id IS NULL OR r.queue_routed_at IS NOT NULL OR r.queue_target_agent_id IS NOT NULL))
+  OR r.trace->'worker_assignment'->>'state'='launched'),false) THEN 'active'
+ ELSE '' END
+ FROM agent_runs r JOIN nodes n ON n.tenant_id=r.tenant_id AND n.id=r.work_order_id
+ WHERE r.work_order_id=$1 OR r.queue_node_id=$2 OR n.parent_id=$2`, o.NodeID, ticket).Scan(&block); err != nil {
 			return nil, err
 		}
-		if active {
+		switch block {
+		case "exit_unconfirmed":
+			return nil, workorders.Fail(409, "The previous writer's exit is unconfirmed. Open the ticket once that exit is confirmed.")
+		case "launch_unknown":
+			return nil, workorders.Fail(409, "The previous writer's launch outcome is unconfirmed. Open the ticket once that outcome is confirmed.")
+		case "active":
 			return nil, workorders.Fail(409, "A run is already active on this ticket. Open it from the ticket to follow or steer it.")
 		}
 		if err = requireWriterFree(ctx, tx, *ticket, "", o.BuildDelivery); err != nil {
