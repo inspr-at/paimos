@@ -38,6 +38,13 @@ func TestComputerStartCreationAndClaimUseCurrentPersonGrant(t *testing.T) {
 	if adminRun.ActingPersonID != nil {
 		t.Fatal("computer permission inferred an acting person")
 	}
+	otherOrder := f.order(t, nil)
+	f.tx(t, f.person, func(tx pgx.Tx) error {
+		_, err := tx.Exec(t.Context(), `UPDATE work_orders SET assignee_principal_id=$2 WHERE node_id=$1`, otherOrder.NodeID, f.other.ID)
+		return err
+	})
+	otherPath := "/api/work-orders/" + otherOrder.NodeID + "/runs"
+	f.call(t, f.person, "POST", otherPath, map[string]any{"agent_principal_id": f.other.ID, "model_profile_id": f.profile}, 201, nil)
 	dbtest.BindRole(t, f.d, f.person.TenantID, f.person.ID, "member")
 	path := "/api/work-orders/" + o.NodeID + "/runs"
 	body := map[string]any{"agent_principal_id": f.agent.ID, "model_profile_id": f.profile}
@@ -57,7 +64,7 @@ func TestComputerStartCreationAndClaimUseCurrentPersonGrant(t *testing.T) {
 	var created agentruns.Run
 	f.call(t, f.person, "POST", path, body, 201, &created)
 	body["agent_principal_id"] = f.other.ID
-	f.call(t, f.person, "POST", path, body, 403, nil)
+	f.call(t, f.person, "POST", otherPath, body, 403, nil)
 	for _, mode := range []string{"granted", "revoked", "other_computer", "legacy"} {
 		t.Run(mode, func(t *testing.T) {
 			grant(computers[0], true)
