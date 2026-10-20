@@ -321,6 +321,7 @@ components:
       required: [id, principal_id, name, prefix, scopes, created_at]
       properties:
         full_access: {type: boolean, description: "This authenticated key dynamically holds every current and future agent-grantable permission, subject to live role, creator, tenant and project ceilings. Person-only permissions remain excluded."}
+        person_id: {type: [string, 'null'], format: uuid, description: 'Explicit person binding; null for unbound keys. Issuer provenance does not select this person.'}
         created_by_principal_id: {type: [string, 'null'], format: uuid, description: Person owner; null for legacy creatorless keys}
         owner_workstation: {type: boolean}
         workstation_computer_id: {type: [string, 'null'], format: uuid}

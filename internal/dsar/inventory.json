@@ -152,7 +152,8 @@
     {
       "classification": "personal",
       "columns": {
-        "full_access": "metadata"
+        "full_access": "metadata",
+        "person_id": "personal"
       },
       "locator": {
         "person_column": "created_by_principal_id",
@@ -176,7 +177,8 @@
       "classification": "personal",
       "columns": {
         "routine_launch_id": "metadata",
-        "trace": "personal"
+        "trace": "personal",
+        "acting_person_id": "personal"
       },
       "locator": {
         "tenant_column": "tenant_id"
@@ -1711,6 +1713,17 @@
         "tenant_column": "tenant_id"
       },
       "table": "review_runs"
+    },
+    {
+      "classification": "personal",
+      "columns": {
+        "computer_id": "metadata"
+      },
+      "locator": {
+        "tenant_column": "tenant_id",
+        "person_column": "principal_id"
+      },
+      "table": "role_bindings"
     },
     {
       "classification": "personal",

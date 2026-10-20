@@ -420,6 +420,14 @@ func (m *Module) deleteRole(w http.ResponseWriter, r *http.Request) {
 			return errRoleInUse
 		}
 		if target != "" {
+			// Expanded scopes are not managed by the project/workspace editor.
+			var unsupported bool
+			if err := tx.QueryRow(r.Context(), `SELECT EXISTS(SELECT 1 FROM role_bindings WHERE role_id=$1::uuid AND scope_type NOT IN ('workspace','project'))`, id).Scan(&unsupported); err != nil {
+				return err
+			}
+			if unsupported {
+				return errRoleInUse
+			}
 			replacement, err := roleTx(r.Context(), tx, target)
 			if err != nil {
 				return err
@@ -432,7 +440,7 @@ func (m *Module) deleteRole(w http.ResponseWriter, r *http.Request) {
 					return err
 				}
 			}
-			rows, err := tx.Query(r.Context(), `SELECT id::text,principal_id::text,scope_type,scope_id::text FROM role_bindings WHERE role_id=$1::uuid`, id)
+			rows, err := tx.Query(r.Context(), `SELECT id::text,principal_id::text,scope_type,scope_id::text FROM role_bindings WHERE role_id=$1::uuid AND scope_type IN ('workspace','project')`, id)
 			if err != nil {
 				return err
 			}

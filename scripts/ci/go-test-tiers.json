@@ -2528,6 +2528,8 @@
     ,
     {"kind":"go","package":"internal/agentpairing","name":"TestComputerEnrollsTwoClaudeAndThreeCodexIsolatedAccounts","tier":"ESSENTIAL"}
     ,
+    {"kind":"go","package":"internal/agentpairing","name":"TestComputerInventoryReportsEvidenceWithoutAssigningOwner","tier":"ESSENTIAL"}
+    ,
     {"kind":"go","package":"internal/agentpairing","name":"TestComputerReadinessProjectsActualConfirmationPin","tier":"GATED-FULL"}
     ,
     {"kind":"go","package":"internal/agentpairing","name":"TestComputerReportsItsInstallMethod","tier":"GATED-FULL"}
@@ -2945,6 +2947,8 @@
     {"kind":"go","package":"internal/agentruns","name":"TestRoutineLaunchClaimReplayAndCurrentAuthority","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/agentruns","name":"TestRoutinePreparationPreservesAuthorityCriteriaAndPickup","tier":"GATED-FULL"}
+    ,
+    {"kind":"go","package":"internal/agentruns","name":"TestRunActingPersonIsExplicitAndWriteOnce","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/agentruns","name":"TestRunAndQueueAccountContextChecks","tier":"ESSENTIAL"}
     ,
@@ -3802,6 +3806,8 @@
     ,
     {"kind":"go","package":"internal/auth","name":"TestKeyExpiryAndAtomicRotation","tier":"GATED-FULL"}
     ,
+    {"kind":"go","package":"internal/auth","name":"TestKeyPersonBindingIsReadWithoutIssuerFallback","tier":"ESSENTIAL"}
+    ,
     {"kind":"go","package":"internal/auth","name":"TestKeyRotationAuthorizationAndRollback","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/auth","name":"TestKeyRotationConcurrentConfirmation","tier":"GATED-FULL"}
@@ -4105,6 +4111,8 @@
     {"kind":"go","package":"internal/authz","name":"TestOperatorProjectBindingsUseRLSStoreAndEvents","tier":"GATED-FULL"}
     ,
     {"kind":"go","package":"internal/authz","name":"TestOperatorWorkspaceBindingsUseHTTPStoreAndProtectOwner","tier":"GATED-FULL"}
+    ,
+    {"kind":"go","package":"internal/authz","name":"TestPersonIdentityScopeShapesAndGrantIsolation","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/authz","name":"TestPreviewDenialMessagesAndFlags","tier":"GATED-FULL"}
     ,
@@ -4761,6 +4769,8 @@
     {"kind":"go","package":"internal/cli","name":"TestCompatibilityVerbs","tags":["delete-candidate"],"tier":"GATED-FULL"}
     ,
     {"kind":"go","package":"internal/cli","name":"TestCompleteControlCLIOutcomes","tier":"GATED-FULL"}
+    ,
+    {"kind":"go","package":"internal/cli","name":"TestComputerInventoryCLIUsesSafeEvidenceProjection","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/cli","name":"TestCoordinatorHeartbeatRetriesActiveGeneration","tier":"GATED-FULL"}
     ,
@@ -5879,6 +5889,8 @@
     {"kind":"go","package":"internal/db","name":"TestOpenTurnsJITOffUnlessTheURLSetsIt","tier":"GATED-FULL"}
     ,
     {"kind":"go","package":"internal/db","name":"TestPairingReportAudienceMigrationBoundsLockWait","tier":"GATED-FULL"}
+    ,
+    {"kind":"go","package":"internal/db","name":"TestPersonIdentityMigrationDiscoversChecksAndPreservesOldWriters","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/db","name":"TestPoolAcquireErrorCounters","tier":"ESSENTIAL"}
     ,

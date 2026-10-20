@@ -371,6 +371,21 @@ paths:
         '200': {description: Detached; conversation access ends}
         '403': {description: Same-origin paired owner required}
 
+  /agent-pairing/computers/inventory:
+    get:
+      operationId: listPairedComputerInventory
+      summary: "List paired computer ownership evidence without assigning an owner"
+      parameters:
+        - {name: limit, in: query, schema: {type: integer, minimum: 1, maximum: 100, default: 50}}
+        - {name: cursor, in: query, schema: {type: string, format: uuid}}
+      responses:
+        '200':
+          description: "Bounded evidence page, including revoked and archived computers; continue with next_cursor"
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/PairedComputerInventory'}
+        '400': {description: "Invalid page size or cursor"}
+        '403': {description: "Signed-in person with workspace account.manage required"}
   /agent-pairing/computers:
     get:
       operationId: listPairedComputers
@@ -652,6 +667,46 @@ paths:
         '429': {description: Rate or attempt limit reached; honor Retry-After}
 components:
   schemas:
+    PairedComputerInventory:
+      type: object
+      additionalProperties: false
+      required: [computers, next_cursor]
+      properties:
+        computers: {type: array, maxItems: 100, items: {$ref: '#/components/schemas/PairedComputerEvidence'}}
+        next_cursor: {type: [string, 'null'], format: uuid}
+    PairedComputerEvidence:
+      type: object
+      additionalProperties: false
+      required: [computer_id, computer_name, state, owner, approved_by, workstation_owners, enrollments, enrollments_truncated]
+      properties:
+        computer_id: {type: string, format: uuid}
+        computer_name: {type: string, maxLength: 200}
+        state: {type: string, enum: [connected, draining, revoked]}
+        owner: {type: string, enum: [unconfirmed, ambiguous], description: "Evidence conflicts are ambiguous; consistent or absent evidence remains unconfirmed. This report never selects an owner or grants access."}
+        approved_by: {type: [string, 'null'], format: uuid}
+        workstation_owners:
+          type: array
+          maxItems: 1
+          items:
+            type: object
+            additionalProperties: false
+            required: [person_id, created_by_principal_id]
+            properties:
+              person_id: {type: [string, 'null'], format: uuid}
+              created_by_principal_id: {type: [string, 'null'], format: uuid}
+        enrollments:
+          type: array
+          maxItems: 100
+          items:
+            type: object
+            additionalProperties: false
+            required: [account_id, state, owner_person_id, approved_by]
+            properties:
+              account_id: {type: string, format: uuid}
+              state: {type: string, enum: [connected, draining, revoked]}
+              owner_person_id: {type: [string, 'null'], format: uuid}
+              approved_by: {type: [string, 'null'], format: uuid}
+        enrollments_truncated: {type: boolean, description: "More than 100 enrollments exist; the reported evidence is partial."}
     AccountLinkDeviceView:
       type: object
       additionalProperties: false

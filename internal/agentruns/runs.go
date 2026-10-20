@@ -31,6 +31,7 @@ import (
 )
 
 type Run struct {
+	ActingPersonID            *string `json:"acting_person_id"`
 	RoutineLaunchID           *string `json:"routine_launch_id,omitempty"`
 	ReservationsSettled       *bool   `json:"reservations_settled,omitempty"`
 	RecoveryBrief             string  `json:"recovery_brief,omitempty"`
@@ -197,11 +198,11 @@ const columns = `id::text,work_order_id::text,agent_principal_id::text,model_pro
  EXISTS(SELECT 1 FROM work_orders review_order WHERE review_order.node_id=agent_runs.work_order_id AND review_order.kind='review'),row_version,queue_node_id::text,queue_target_agent_id::text,queue_routed_at,trace,waiting_ms,
  coalesce((SELECT q.handover FROM harness_recoveries q WHERE q.next_run_id=agent_runs.id),'null'::jsonb),
  coalesce((SELECT q.service_tier FROM harness_recoveries q WHERE q.next_run_id=agent_runs.id),''),
- (SELECT q.display_label FROM harness_recoveries q WHERE q.next_run_id=agent_runs.id),routine_launch_id::text`
+ (SELECT q.display_label FROM harness_recoveries q WHERE q.next_run_id=agent_runs.id),routine_launch_id::text,acting_person_id::text`
 
 func scan(row pgx.Row) (Run, error) {
 	var v Run
-	err := row.Scan(&v.ID, &v.OrderID, &v.AgentID, &v.ProfileID, &v.AccountID, &v.Status, &v.RequestedModel, &v.EffectiveModel, &v.ModelEvidence, &v.InputTokens, &v.OutputTokens, &v.CachedInputTokens, &v.ReasoningTokens, &v.Cost, &v.StartedAt, &v.EndedAt, &v.CreatedAt, &v.DaemonID, &v.Generation, &v.RequestedAccountID, &v.Purpose, &v.ActiveMS, &v.OutcomeDetail, &v.RetryOfRunID, &v.CapacityOverride, &v.CapacityHandoff, &v.VerificationReason, &v.ReadOnlyReview, &v.RowVersion, &v.QueueNodeID, &v.QueueTargetAgentID, &v.QueueRoutedAt, &v.Trace, &v.WaitingMS, &v.recoveryHandover, &v.RecoveryTier, &v.RecoveryLabel, &v.RoutineLaunchID)
+	err := row.Scan(&v.ID, &v.OrderID, &v.AgentID, &v.ProfileID, &v.AccountID, &v.Status, &v.RequestedModel, &v.EffectiveModel, &v.ModelEvidence, &v.InputTokens, &v.OutputTokens, &v.CachedInputTokens, &v.ReasoningTokens, &v.Cost, &v.StartedAt, &v.EndedAt, &v.CreatedAt, &v.DaemonID, &v.Generation, &v.RequestedAccountID, &v.Purpose, &v.ActiveMS, &v.OutcomeDetail, &v.RetryOfRunID, &v.CapacityOverride, &v.CapacityHandoff, &v.VerificationReason, &v.ReadOnlyReview, &v.RowVersion, &v.QueueNodeID, &v.QueueTargetAgentID, &v.QueueRoutedAt, &v.Trace, &v.WaitingMS, &v.recoveryHandover, &v.RecoveryTier, &v.RecoveryLabel, &v.RoutineLaunchID, &v.ActingPersonID)
 
 	var compact bytes.Buffer
 	if err == nil && json.Compact(&compact, v.recoveryHandover) == nil {
@@ -237,6 +238,39 @@ func load(ctx context.Context, tx pgx.Tx, id string, lock bool) (Run, error) {
 		q += ` FOR UPDATE`
 	}
 	return scan(tx.QueryRow(ctx, q, id))
+}
+
+// ErrActingPersonBinding refuses missing/non-person targets and attempts to
+// change an already bound run. It never falls back to requester or preferences.
+var ErrActingPersonBinding = errors.New("acting person binding refused")
+
+// SetActingPersonTx is the write-once seam for server admission writers. The
+// caller owns the transaction, holds its tenant/access fence and has rechecked
+// current launch authority before calling, before appending any events. This
+// helper grants no admission authority and is not exposed as an API operation.
+func SetActingPersonTx(ctx context.Context, tx pgx.Tx, tenantID, runID, personID string) error {
+	var current *string
+	if err := tx.QueryRow(ctx, `SELECT acting_person_id::text FROM agent_runs
+		WHERE tenant_id=$1 AND id=$2 FOR NO KEY UPDATE`, tenantID, runID).Scan(&current); err != nil {
+		return err
+	}
+	if current != nil {
+		if *current != personID {
+			return ErrActingPersonBinding
+		}
+		return nil
+	}
+	result, err := tx.Exec(ctx, `UPDATE agent_runs SET acting_person_id=$3
+		WHERE tenant_id=$1 AND id=$2 AND acting_person_id IS NULL
+		AND EXISTS (SELECT 1 FROM principals p WHERE p.tenant_id=$1 AND p.id=$3
+		 AND p.kind='person' AND p.status='active' AND p.linked_to IS NULL)`, tenantID, runID, personID)
+	if err != nil {
+		return err
+	}
+	if result.RowsAffected() != 1 {
+		return ErrActingPersonBinding
+	}
+	return nil
 }
 
 // Lock order: work_orders -> agent_runs -> account/reservation rows. All work
