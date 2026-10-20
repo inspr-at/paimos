@@ -271,14 +271,21 @@ for (const theme of ['light', 'dark'] as const) for (const width of [1600, 390])
     await mockWork(page, data, { admin: true })
     await page.goto('/p/PHAROS')
     if (width === 390) {
+      // Compact rows carry no ETA (AEON-1460); the ticket keeps the same quiet hint, including for a
+      // working session that reported neither a time nor a percent (PHAROS-14).
       for (const key of ['PHAROS-14', 'PHAROS-13']) {
         await expect(row(page, key).locator('.eta-cell, .c-estimate')).toHaveCount(0)
         await row(page, key).locator('.title-link').click()
         const ticket = page.getByRole('complementary', { name: 'Ticket details' })
-        await expect(ticket.locator('.eta-cell')).toHaveText(key === 'PHAROS-14' ? 'no ETA' : /0%\s*no ETA/)
-        await expect(ticket.locator('.eta-cell')).toHaveAttribute('data-tip', /No ETA reported/)
-        await expect(ticket.locator('.eta-cell .sr-only')).toContainText('No ETA reported')
-        await ticket.getByRole('button', { name: 'Close ticket details', exact: true }).click()
+        const eta = ticket.locator('.ws-eta .eta-cell'), close = ticket.getByRole('button', { name: 'Close ticket details', exact: true })
+        await expect(eta).toHaveText(key === 'PHAROS-14' ? 'no ETA' : /0%\s*no ETA/)
+        await expect(eta).not.toHaveClass(/overdue|stale|done/)
+        await expect(eta).toHaveAttribute('data-tip', key === 'PHAROS-14' ? 'No ETA reported for this working session' : /0% done\nNo ETA reported/)
+        if (key === 'PHAROS-13') await expect(eta.locator('.sr-only')).toContainText('No ETA reported')
+        await expectStableControls({ controls: { eta, close }, scrollAreas: { ticket }, interactions: [
+          { name: 'read the missing-ETA hint', run: async () => { await eta.hover(); await expect(eta).toHaveAttribute('data-tip', /No ETA reported/) } },
+        ] })
+        await close.click()
       }
     } else {
     await expect(row(page, 'PHAROS-14').locator('.eta-cell')).toHaveText('no ETA')
