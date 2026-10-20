@@ -15,12 +15,12 @@ const StartOnComputer = "run.start_on_computer"
 // The subject predicate is the reader seam for additive group subjects in
 // S1-09. Until then only a person's own binding is a subject. Keep this shared
 // by the decision and the summary; computer/node bindings never enter readGrants.
-const computerStartBindingsSQL = `EXISTS (
- SELECT 1 FROM role_bindings b JOIN roles r ON r.tenant_id=b.tenant_id AND r.id=b.role_id
+const computerStartBindingsSQL = `SELECT r.id::text,r.key,r.name,b.scope_type
+ FROM role_bindings b JOIN roles r ON r.tenant_id=b.tenant_id AND r.id=b.role_id
  WHERE b.tenant_id=p.tenant_id AND b.principal_id=p.id
  AND (b.scope_type='workspace' OR b.scope_type='computer' AND b.computer_id=$2::uuid)
  AND ((r.builtin AND r.key=ANY($3::text[])) OR (NOT r.builtin AND EXISTS (
-  SELECT 1 FROM role_permissions rp WHERE rp.tenant_id=r.tenant_id AND rp.role_id=r.id AND rp.permission=$4))))`
+  SELECT 1 FROM role_permissions rp WHERE rp.tenant_id=r.tenant_id AND rp.role_id=r.id AND rp.permission=$4)))`
 
 func computerStartBuiltinRoles() []string {
 	roles := []string{}
@@ -44,7 +44,7 @@ func CanStartOnComputerTx(ctx context.Context, tx pgx.Tx, person tenant.Principa
 	err := tx.QueryRow(ctx, `SELECT EXISTS (SELECT 1 FROM principals p
  WHERE p.tenant_id=$1::uuid AND p.id=$5::uuid AND p.kind='person' AND p.status='active' AND p.linked_to IS NULL
  AND EXISTS (SELECT 1 FROM agent_pairing_computers c WHERE c.tenant_id=p.tenant_id AND c.id=$2::uuid)
- AND `+computerStartBindingsSQL+`)`, person.TenantID, computerID, computerStartBuiltinRoles(), StartOnComputer, person.ID).Scan(&allowed)
+ AND EXISTS (`+computerStartBindingsSQL+`))`, person.TenantID, computerID, computerStartBuiltinRoles(), StartOnComputer, person.ID).Scan(&allowed)
 	return allowed, err
 }
 
@@ -99,8 +99,10 @@ func RequireRunStartOnComputerTx(ctx context.Context, tx pgx.Tx, daemon tenant.P
 }
 
 type ComputerStartPerson struct {
-	PrincipalID string `json:"principal_id"`
-	Name        string `json:"name"`
+	PrincipalID string  `json:"principal_id"`
+	Name        string  `json:"name"`
+	ScopeType   string  `json:"scope_type"`
+	Role        RoleRef `json:"role"`
 }
 
 // ComputerStartPeopleTx uses the same subject/role reader as admission. The
@@ -110,9 +112,10 @@ func ComputerStartPeopleTx(ctx context.Context, tx pgx.Tx, tenantID, computerID,
 	if limit < 1 || limit > 100 {
 		return nil, nil, ErrForbidden
 	}
-	rows, err := tx.Query(ctx, `SELECT p.id::text,left(p.name,200) FROM principals p
+	rows, err := tx.Query(ctx, `SELECT p.id::text,left(p.name,200),effective.scope_type,effective.id,effective.key,effective.name FROM principals p
+ JOIN LATERAL (`+computerStartBindingsSQL+` ORDER BY (b.scope_type='workspace') DESC,b.id LIMIT 1) effective ON true
  WHERE p.tenant_id=$1::uuid AND p.kind='person' AND p.status='active' AND p.linked_to IS NULL
- AND ($5::uuid IS NULL OR p.id>$5::uuid) AND `+computerStartBindingsSQL+`
+ AND ($5::uuid IS NULL OR p.id>$5::uuid)
  AND NOT EXISTS (SELECT 1 FROM role_bindings wb JOIN roles wr ON wr.tenant_id=wb.tenant_id AND wr.id=wb.role_id
  WHERE wb.tenant_id=p.tenant_id AND wb.principal_id=p.id AND wb.scope_type='workspace' AND wr.builtin AND wr.key=ANY($3::text[]))
  ORDER BY p.id LIMIT $6`, tenantID, computerID, computerStartBuiltinRoles(), StartOnComputer, nilIfEmpty(cursor), limit+1)
@@ -123,7 +126,7 @@ func ComputerStartPeopleTx(ctx context.Context, tx pgx.Tx, tenantID, computerID,
 	people := []ComputerStartPerson{}
 	for rows.Next() {
 		var person ComputerStartPerson
-		if err := rows.Scan(&person.PrincipalID, &person.Name); err != nil {
+		if err := rows.Scan(&person.PrincipalID, &person.Name, &person.ScopeType, &person.Role.ID, &person.Role.Key, &person.Role.Name); err != nil {
 			return nil, nil, err
 		}
 		people = append(people, person)

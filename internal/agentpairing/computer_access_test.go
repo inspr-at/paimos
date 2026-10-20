@@ -66,6 +66,13 @@ func TestComputerStartAccessUsesPersonRoleBindingsAndAuditsChanges(t *testing.T)
 	can(tenant.Principal{ID: *a.PrincipalID, TenantID: f.tenantID, Kind: tenant.Agent}, *a.ComputerID, false)
 	seed(func(tx pgx.Tx) error {
 		var granted bool
+		var bindings int
+		if err := tx.QueryRow(t.Context(), `SELECT count(*) FROM role_bindings WHERE scope_type='computer'`).Scan(&bindings); err != nil {
+			return err
+		}
+		if bindings != 0 {
+			t.Fatal("pairing created a person or agent computer grant")
+		}
 		if err := tx.QueryRow(t.Context(), `SELECT EXISTS(SELECT 1 FROM role_bindings rb JOIN roles r ON r.tenant_id=rb.tenant_id AND r.id=rb.role_id JOIN role_permissions rp ON rp.tenant_id=r.tenant_id AND rp.role_id=r.id WHERE rb.principal_id=$1 AND r.key LIKE 'paired_%' AND rp.permission=$2)`, *a.PrincipalID, authz.StartOnComputer).Scan(&granted); err != nil {
 			return err
 		}
@@ -116,7 +123,7 @@ func TestComputerStartAccessUsesPersonRoleBindingsAndAuditsChanges(t *testing.T)
 	pagePath := path + "?limit=1"
 	for {
 		decodeResult(t, f.call("GET", pagePath, nil, true, "", 200), &summary)
-		if len(summary.People) != 1 || seen[summary.People[0].PrincipalID] {
+		if len(summary.People) != 1 || seen[summary.People[0].PrincipalID] || summary.People[0].Role.ID != role || summary.People[0].ScopeType != "computer" {
 			t.Fatalf("summary pagination: %+v", summary)
 		}
 		seen[summary.People[0].PrincipalID] = true

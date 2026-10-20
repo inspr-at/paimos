@@ -721,10 +721,12 @@ components:
           items:
             type: object
             additionalProperties: false
-            required: [principal_id, name]
+            required: [principal_id, name, scope_type, role]
             properties:
               principal_id: {type: string, format: uuid}
               name: {type: string, maxLength: 200}
+              scope_type: {type: string, enum: [workspace, computer], description: "Source of effective start access; workspace access cannot be revoked on this computer"}
+              role: {$ref: '#/components/schemas/RoleRef'}
         next_cursor: {type: [string, 'null'], format: uuid}
     ComputerAccessBinding:
       type: object

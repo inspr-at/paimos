@@ -18,6 +18,8 @@ The additive person-only API is:
   Returns `admins: true` and the other active people who can start, with a bounded
   `people` page and `next_cursor`. `limit` is 1–100 (default 50); `cursor` is the
   last principal UUID. Workspace Owner/Admin people are represented by Admins.
+  Each person includes the effective role and its `scope_type`, so inherited
+  workspace access can be distinguished from a removable computer grant.
 - `PUT /api/agent-pairing/computers/{computerId}/access/{principal_id}` with
   `{ "role_id": "…" }`. Uses the same `members.manage` guard as project access,
   at workspace scope, plus the actor's current start authority on this computer.

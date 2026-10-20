@@ -41,7 +41,8 @@ func TestComputerStartNativeClaimRechecksAfterObservation(t *testing.T) {
 					{`INSERT INTO work_orders(tenant_id,node_id,requested_by_principal_id,status) VALUES($1,$2,$3,'ready')`, []any{f.person.TenantID, order, f.person.ID}},
 					{`INSERT INTO agent_runs(tenant_id,id,work_order_id,agent_principal_id,model_profile_id,account_id) VALUES($1,$2,$3,$4,$5,$6)`, []any{f.person.TenantID, run, order, f.agent.ID, f.intent.ModelProfileID, f.intent.AccountID}},
 					{`INSERT INTO harness_sessions(tenant_id,id,project_id,agent_principal_id,harness,host,management,role,ref_digest,lease_digest,owner_principal_id) VALUES($1,$2,$3,$4,'claude','local','unmanaged','coordinator',$5,$6,$7)`, []any{f.person.TenantID, parent, f.project, f.agent.ID, ref[:], lease[:], f.person.ID}},
-					{`INSERT INTO account_reservations(tenant_id,run_id,window_id,reserved_units) SELECT $1,$2,id,100 FROM account_allowance_windows WHERE account_id=$3`, []any{f.person.TenantID, run, f.intent.AccountID}},
+					{`INSERT INTO account_allowance_windows(tenant_id,account_id,starts_at,ends_at,unit,allowance,reserved,pace_model) VALUES($1,$2,$3::timestamptz-interval '1 hour',$3::timestamptz+interval '1 hour','requests',8,1,'unrestricted')`, []any{f.person.TenantID, f.intent.AccountID, f.now}},
+					{`INSERT INTO account_reservations(tenant_id,run_id,window_id,reserved_units) SELECT $1,$2,id,1 FROM account_allowance_windows WHERE account_id=$3`, []any{f.person.TenantID, run, f.intent.AccountID}},
 				} {
 					if _, err := tx.Exec(t.Context(), q.sql, q.args...); err != nil {
 						return err
