@@ -7,6 +7,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/inspr-at/paimos/internal/agentsetup"
 	"github.com/inspr-at/paimos/internal/authz"
 	"github.com/jackc/pgx/v5"
 )
@@ -34,7 +35,7 @@ func TestComputerStartLeadRuntimeRechecksRunPerson(t *testing.T) {
 	}
 	f.tx(t, f.person, func(tx pgx.Tx) error {
 		for _, q := range []struct {
-			sql string
+			sql  string
 			args []any
 		}{
 			{`INSERT INTO principals(tenant_id,id,kind,name) VALUES($1,$2,'person','Lead run person')`, []any{f.person.TenantID, person}},
@@ -121,4 +122,3 @@ func TestComputerStartRecoveryRechecksRunPerson(t *testing.T) {
 		})
 	}
 }
-	"github.com/inspr-at/paimos/internal/agentsetup"
