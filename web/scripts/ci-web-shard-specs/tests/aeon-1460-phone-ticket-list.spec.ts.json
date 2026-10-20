@@ -1,0 +1,9 @@
+{
+  "group": "remaining-ui",
+  "spec": {
+    "file": "tests/aeon-1460-phone-ticket-list.spec.ts",
+    "listedTests": 1,
+    "weightSeconds": 120,
+    "weightSource": "unmeasured-test-rate"
+  }
+}

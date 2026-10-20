@@ -41,12 +41,14 @@ import type { ProjectFigures } from '../../lib/api'
 import FigureTip from './FigureTip.vue'
 import ColumnFigureTip from './ColumnFigureTip.vue'
 import LiveBot from '../projects/LiveBot.vue'
+import { compactChrome } from '../../lib/chrome'
 
 const NO_WORKERS: LiveAgent[] = []
 
 const props = defineProps<{
   // How many rows the first page will likely show, so the skeleton holds that height.
   expectedRows?: number
+  compactRows?: boolean
   groups: RowGroup[]
   group: GroupBy
   rowsById: Map<string, TicketRow>
@@ -169,7 +171,10 @@ function planningDescribedBy(row: ListItem): string {
 // every colspan matches the visible columns.
 const width = ref(1200)
 const phoneQuery = window.matchMedia('(max-width: 720px)')
-const phone = ref(phoneQuery.matches)
+const narrowPhone = ref(phoneQuery.matches)
+const compact = compactChrome()
+const phoneRows = computed(() => !!props.compactRows && compact.value)
+const phone = computed(() => phoneRows.value || narrowPhone.value)
 const coarseQuery = window.matchMedia('(pointer: coarse)')
 const coarse = ref(coarseQuery.matches)
 // One live feed for the whole list (AEON-233). Workers are matched to loaded rows;
@@ -515,7 +520,7 @@ const narrowStatus = computed(() => !phone.value && (colWidth('status') ?? 138) 
 const quickAligned = computed(() => ids.value[2] === 'status' && ids.value[3] === 'priority')
 const card = ref<HTMLElement>()
 let sizer: ResizeObserver | undefined
-const phoneChange = () => { phone.value = phoneQuery.matches }
+const phoneChange = () => { narrowPhone.value = phoneQuery.matches }
 const coarseChange = () => { coarse.value = coarseQuery.matches }
 onMounted(() => {
   phoneChange()
@@ -899,7 +904,7 @@ defineExpose({
 </script>
 
 <template>
-  <div ref="card" class="table-card" :data-columns-settled="columnsSettled ? '1' : '0'" :class="[density, { selectable, selecting, customised, overflowing: !phone && layoutWidth > width + 1 }]">
+  <div ref="card" class="table-card" :data-columns-settled="columnsSettled ? '1' : '0'" :class="[density, { selectable, selecting, customised, 'phone-rows': phoneRows, overflowing: !phone && layoutWidth > width + 1 }]">
     <table :style="!phone && layoutWidth > width ? { minWidth: `${layoutWidth}px` } : undefined" ref="grid" class="tickets" :class="{ outline: !!outline }" :role="outline ? 'treegrid' : 'grid'" :aria-label="label ?? (outline ? 'Ticket outline' : 'Tickets')" :aria-busy="loading" tabindex="0" :aria-activedescendant="cursorId ? `row-${cursorId}` : undefined" @focus="emit('gridFocus')">
       <colgroup>
         <col v-for="column in columns" :key="column.id" :class="column.cls" :style="colWidth(column.id) ? { width: `${colWidth(column.id)}px` } : undefined" />
@@ -1172,6 +1177,17 @@ defineExpose({
             @dragover="isWorkParent(entry.row) && entry.tree ? dragOver($event, entry.row) : undefined"
             @dragleave="dragLeave($event, entry.row.id)" @drop="isWorkParent(entry.row) && entry.tree ? drop($event, entry.row) : undefined"
           >
+            <template v-if="phoneRows">
+              <td class="phone-state">
+                <button v-if="selectable && selecting" type="button" class="phone-check" role="checkbox" :aria-checked="!!selected?.has(entry.row.id)" :aria-label="`Select ${entry.row.key}`" :disabled="selectionDisabled || (rowSelectable ? !rowSelectable(entry.row) : false)" @click.stop="emit('select', entry.row, 'toggle')"><span class="mark"><AppIcon v-if="selected?.has(entry.row.id)" name="check" :size="13" /></span></button>
+                <button v-else-if="entry.tree?.hasChildren" type="button" class="phone-fold" :aria-expanded="entry.tree.expanded" :aria-label="`${entry.tree.expanded ? 'Collapse' : 'Expand'} ${entry.row.key}`" @click.stop="emit('toggleRow', entry.row.id)"><AppIcon name="chevron-right" :size="14" /></button>
+                <span v-else :aria-label="statusMeta(entry.row.state).label" role="img"><StatusIcon :state="entry.row.state" :size="16" /></span>
+              </td>
+              <td class="c-title phone-title" data-column-id="title"><span class="phone-title-link"><span v-clip-tip="entry.row.title" class="phone-title-text"><template v-for="(part, i) in highlight(entry.row.title, query)" :key="i"><mark v-if="part.match">{{ part.text }}</mark><template v-else>{{ part.text }}</template></template></span></span></td>
+              <td class="phone-meta"><span class="key">{{ entry.row.key }}</span><span class="phone-separator" aria-hidden="true">{{ '\u00a0·\u00a0' }}</span><time :datetime="entry.row.updated_at" :data-tip="absoluteTime(entry.row.updated_at)">{{ relativeTime(entry.row.updated_at, { now }).replace(/(\d)\s+(?=\S)/g, '$1\u00a0') }}</time></td>
+              <td class="phone-owner"><button type="button" class="phone-assignee" :disabled="!mayAssign(entry.row)" :aria-label="`Assignee: ${entry.row.assignee?.name ?? 'Unassigned'}. Change assignee of ${entry.row.key}`" aria-haspopup="menu" @click.stop="emit('assignee', entry.row, $event.currentTarget as HTMLElement)"><PersonAvatar v-if="entry.row.assignee" :id="entry.row.assignee.id" :name="entry.row.assignee.name" :size="24" /></button></td>
+            </template>
+            <template v-else>
             <td v-if="phone && selectable" class="c-check" :aria-hidden="!selecting">
               <button
                 type="button" class="phone-check" :class="{ 'check-placeholder': !selecting }" :tabindex="selecting ? 0 : -1" role="checkbox" :aria-checked="!!selected?.has(entry.row.id)" :aria-label="`Select ${entry.row.key}`" :disabled="selectionDisabled || (rowSelectable ? !rowSelectable(entry.row) : false)"
@@ -1291,6 +1307,7 @@ defineExpose({
               <td v-else-if="column.id === 'eta'" class="c-eta" :data-column-id="column.id" :data-column-label="column.label"><div class="cell"><EtaCell :eta="etaFromTicket(entry.row.eta)" :now="now" :missing="!!entry.row.eta?.has_working_session" :connection-stale="liveStale" /></div></td>
               <td v-else-if="isPlanning(column.id)" :class="column.cls" :data-column-id="column.id" :data-column-label="column.label"><div class="cell"><PlanningCell :column="column.id" :row="entry.row" :row-id="entry.row.id" /></div></td>
             </template>
+            </template>
           </tr>
         </template>
       </tbody>
@@ -1339,7 +1356,7 @@ defineExpose({
     <div ref="sentinel" class="sentinel" aria-hidden="true" />
     <div v-if="loadingMore" class="list-foot" role="status"><span class="spinner" aria-hidden="true" />Loading more tickets…</div>
     <div v-else-if="moreError" class="list-foot error" role="alert">More tickets could not be loaded. <button type="button" class="btn sm" @click="emit('more')">Retry</button></div>
-    <div v-else-if="!loading && !error && total && !hasMore && entries.length" class="list-foot end phone-only">{{ plural(total, 'ticket') }}</div>
+    <div v-else-if="!loading && !error && total && !hasMore && entries.length" class="list-foot end phone-only">{{ phoneRows ? `${total}\u00a0tickets` : plural(total, 'ticket') }}</div>
     <div v-if="foldSpace" class="fold-space" :style="{ height: `${foldSpace}px` }" aria-hidden="true" />
   </div>
 </template>
@@ -1916,6 +1933,46 @@ button.release-chip:focus-visible { box-shadow: var(--focus-ring); }
 @media (min-width: 721px) {
   .table-card.overflowing { overflow-x: auto; overscroll-behavior-x: contain; }
   .table-card.overflowing thead th { top: 0; }
+}
+/* D11: the shared compact rule includes short landscape. Saved desktop columns
+   remain available in Display without adding metadata to the phone rows. */
+.table-card.phone-rows { overflow: visible; border-radius: 14px; }
+.phone-rows .tickets, .phone-rows .tickets tbody { display: block; }
+.phone-rows .tickets :is(thead, colgroup) { display: none; }
+.table-card.phone-rows .tickets .ticket-row {
+  display: grid; grid-template-columns: 18px minmax(0, 1fr) 44px;
+  grid-template-rows: 20px 16px; grid-template-areas: "state title owner" "state meta owner";
+  align-items: center; column-gap: 10px; row-gap: 2px; height: 56px;
+  padding: 8px 0 9px 10px; border-bottom: 1px solid var(--line); background-image: none;
+}
+.phone-rows .ticket-row td { display: block !important; min-width: 0; padding: 0 !important; border: 0; background: none !important; box-shadow: none !important; }
+.phone-rows .ticket-row td::before { display: none !important; }
+.phone-rows .ticket-row .phone-state { position: relative; grid-area: state; align-self: start; padding-top: 2px !important; }
+.phone-rows .ticket-row .phone-title { grid-area: title; contain: inline-size; overflow: visible; }
+.phone-title-link { display: block; min-width: 0; color: var(--ink); font-size: 14.5px; line-height: 20px; }
+.phone-title-text { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.phone-rows .ticket-row .phone-meta { grid-area: meta; display: flex !important; align-items: center; white-space: nowrap; line-height: 16px; color: var(--ink-3); font-size: 11.5px; }
+.phone-meta .key { color: var(--teal-ink); font-size: 11.5px; }
+.phone-meta time { font-size: 11.5px; font-variant-numeric: tabular-nums; }
+.phone-rows .ticket-row .phone-owner { grid-area: owner; align-self: center; }
+.phone-assignee { display: grid; place-items: center; width: 44px; height: 44px; border: 0; padding: 0; background: transparent; border-radius: 8px; }
+.phone-assignee:disabled { opacity: 1; }
+.phone-assignee:focus-visible, .phone-fold:focus-visible { box-shadow: var(--focus-ring); }
+.phone-rows .phone-check, .phone-fold { position: absolute; display: grid; place-items: center; left: -13px; top: -4px; width: 44px; height: 44px; padding: 0; border: 0; background: transparent; color: var(--ink-2); }
+.phone-fold[aria-expanded="true"] svg { transform: rotate(90deg); }
+.phone-rows .ticket-row.dimmed :is(.phone-title-link, .phone-meta, .phone-owner, .phone-state) { opacity: .5; }
+@media (min-width: 720px) and (max-height: 500px) {
+  .table-card.phone-rows .tickets .ticket-row {
+    grid-template-columns: 18px max-content minmax(0, 1fr) 44px max-content; grid-template-rows: 43px;
+    grid-template-areas: "state key title owner when"; height: 44px; padding: 0 10px; column-gap: 10px;
+  }
+  .phone-rows .ticket-row .phone-state { align-self: center; padding-top: 0 !important; }
+  .phone-rows .ticket-row .phone-meta { display: contents !important; }
+  .phone-meta .key { grid-area: key; font-size: 12px; }
+  .phone-meta .phone-separator { display: none; }
+  .phone-meta time { grid-area: when; font-size: 12px; text-align: right; }
+  .phone-rows .phone-check, .phone-fold { top: -14px; }
+  .phone-rows .list-foot.end.phone-only { display: none; }
 }
 .ticket-row.fit-row { position: absolute; visibility: hidden; pointer-events: none; inline-size: max-content; }
 </style>

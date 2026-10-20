@@ -24,6 +24,9 @@ import type { ColumnId } from '../../lib/columns'
 import { workNoun } from '../../lib/workVocabulary'
 import { useWorkVocabulary } from '../../stores/workVocabulary'
 import { ATTENTION_KINDS, type AttentionFacet, type AttentionFilters, type AttentionGrouping } from '../../lib/attention'
+import { compactChrome } from '../../lib/chrome'
+import type { SavedView } from '../../lib/api'
+import PhoneTicketToolbar from './PhoneTicketToolbar.vue'
 
 const vocabulary = useWorkVocabulary()
 const createLabel = computed(() => `New ${workNoun(vocabulary.leaf.name)}`)
@@ -47,6 +50,10 @@ const props = defineProps<{
   facetLoading?: boolean
   settingsTarget?: string
   projectHeader?: boolean
+  savedViews?: SavedView[]
+  selectable?: boolean
+  picking?: boolean
+  attentionHref?: string
   // The project header is collapsed: Display moves into the toolbar and carries what the header hid.
   collapsedHeader?: boolean
   attention?: { owner: string; filters: AttentionFilters; group: AttentionGrouping; facets: { projects: AttentionFacet[]; assignees: AttentionFacet[] }; truncated: boolean; locale: string }
@@ -77,7 +84,16 @@ const emit = defineEmits<{
   columnsReset: []
   attentionFilter: [field: keyof AttentionFilters, value: string]
   attentionGroup: [value: AttentionGrouping]
+  savedView: [id: string]
+  preset: [id: string]
+  selectTickets: []
+  saveView: [anchor: HTMLElement]
+  copyLink: []
+  exportCSV: []
 }>()
+const compact = compactChrome()
+const compactList = computed(() => compact.value && props.projectHeader && props.view !== 'knowledge' && !props.attention)
+const phoneTools = ref<InstanceType<typeof PhoneTicketToolbar>>()
 
 const draft = ref(props.filters.q)
 const root = ref<HTMLElement>()
@@ -225,8 +241,8 @@ function closeDate(restore: boolean) {
   dateAnchor.value = null
   if (restore) anchor?.focus()
 }
-function focusSearch() { input.value?.focus(); input.value?.select() }
-function openFilterMenu() { if (filterButton.value && filterButton.value.offsetParent) { open.value = null; menuAnchor.value = filterButton.value } else emit('openSheet') }
+function focusSearch() { if (compactList.value) { void phoneTools.value?.focusSearch(); return }; input.value?.focus(); input.value?.select() }
+function openFilterMenu() { if (compactList.value) emit('openSheet'); else if (filterButton.value && filterButton.value.offsetParent) { open.value = null; menuAnchor.value = filterButton.value } else emit('openSheet') }
 function clearSearch() { draft.value = ''; emit('search', ''); input.value?.focus() }
 function searchKey(event: KeyboardEvent) {
   if (event.key === 'Escape') {
@@ -236,7 +252,7 @@ function searchKey(event: KeyboardEvent) {
     else input.value?.blur()
   }
 }
-function closeOverlays() { closeAttention(false); closeDisplay(false) }
+function closeOverlays() { closeAttention(false); closeDisplay(false); phoneTools.value?.closeOverlays() }
 // The filter sheet's "Display settings…" (AEON-1188). Display opens under the Display button the
 // window shows; with none in sight (a phone or tablet under an unfolded header) it opens as a
 // sheet, and closing it hands focus back to Filters.
@@ -248,7 +264,11 @@ defineExpose({ focusSearch, openFilterMenu, openDisplay, input, closeOverlays })
 </script>
 
 <template>
-  <div ref="root" class="toolbar" :class="{ stuck, graph, attention: !!attention, knowledge: view === 'knowledge' }" role="toolbar" :aria-label="attention ? attentionWord('List controls', 'Listensteuerung') : view === 'knowledge' ? 'Knowledge controls' : 'Ticket list controls'">
+  <div ref="root" class="toolbar" :class="{ stuck, graph, attention: !!attention, knowledge: view === 'knowledge', 'compact-ticket-toolbar': compactList }" role="toolbar" :aria-label="attention ? attentionWord('List controls', 'Listensteuerung') : view === 'knowledge' ? 'Knowledge controls' : 'Ticket list controls'">
+    <PhoneTicketToolbar v-if="compactList" ref="phoneTools" :filters="filters" :query="draft" :view="view as TicketView" :views="savedViews ?? []" :total="total" :selectable="!!selectable" :picking="!!picking" :create-label="createLabel" :attention-href="attentionHref ?? '/tickets?view=needs-attention'"
+      @search="value => draft = value" @filter="emit('openSheet')" @create="emit('create')" @layout="value => emit('view', value)" @saved-view="id => emit('savedView', id)" @preset="id => emit('preset', id)"
+      @display="anchor => displayAnchor = anchor" @show-closed="value => emit('showClosed', value)" @select="emit('selectTickets')" @save="anchor => emit('saveView', anchor)" @copy="emit('copyLink')" @export="emit('exportCSV')" />
+    <template v-else>
     <ViewSwitch v-if="!attention" class="view-switch"
       :options="view === 'knowledge' ? KNOWLEDGE_VIEWS : TICKET_VIEWS"
       :selected="view === 'knowledge' ? knowledgeView ?? 'entries' : view"
@@ -338,6 +358,7 @@ defineExpose({ focusSearch, openFilterMenu, openDisplay, input, closeOverlays })
     </template>
     <!-- The Knowledge tab teleports its own controls here (KnowledgeTab.vue). -->
     <div v-else id="knowledge-controls" class="knowledge-controls" />
+    </template>
 
     <FloatingPanel v-if="attention && attentionMenu" :anchor="attentionMenu.anchor" :label="`${attentionFacets.find(facet => facet.field === attentionMenu!.field)!.label} filter`" @close="closeAttention">
       <div class="attention-menu" role="menu" :aria-label="`${attentionFacets.find(facet => facet.field === attentionMenu!.field)!.label} filter`" @keydown="attentionMenuKeys">
@@ -387,6 +408,7 @@ defineExpose({ focusSearch, openFilterMenu, openDisplay, input, closeOverlays })
 
 <style scoped>
 .toolbar { display: flex; align-items: center; flex-wrap: wrap; gap: 8px 10px; min-height: 52px; padding: 9px 0; }
+.toolbar:not(.knowledge).compact-ticket-toolbar { height: 44px; min-height: 44px; padding: 0; flex-wrap: nowrap; gap: 0; background: var(--chrome); }
 .list-search { width: 240px; min-width: 0; flex-shrink: 0; }
 .list-search .field { height: 32px; padding-right: 30px; font-size: 13.5px; }
 .list-search .field::-webkit-search-cancel-button { display: none; }

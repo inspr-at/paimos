@@ -3,6 +3,7 @@
 
 import ListToolbar from '../../components/work/ListToolbar.vue'
 import HeaderNavMenu from '../../components/work/HeaderNavMenu.vue'
+import { compactChrome } from '../../lib/chrome'
 import { toRefs } from 'vue'
 import type { Project } from '../../stores/projects'
 import { bindProjectRef, useProjectPageContext } from './context'
@@ -12,6 +13,8 @@ const { startCreate, toolbarColumns, saveColumns, resetColumns, list, outline, s
 const bindStickMark = bindProjectRef(stickMark)
 const bindToolbar = bindProjectRef(toolbar)
 const bindToolbarWrap = bindProjectRef(toolbarWrap)
+const compact = compactChrome()
+const page = useProjectPageContext()
 </script>
 
 <template>
@@ -27,6 +30,8 @@ const bindToolbarWrap = bindProjectRef(toolbarWrap)
       :default-view="viewMode === 'knowledge' ? knowledgeSwitch.defaultId.value : ticketSwitch.defaultId.value" @set-default="value => (viewMode === 'knowledge' ? knowledgeSwitch : ticketSwitch).setDefault(value)" @expand-all="outline.expandAll()" @collapse-all="outline.collapseAll()"
       @expand-groups="setAllGroups(true)" @collapse-groups="setAllGroups(false)" @group-order="setGroupOrder"
       :columns="toolbarColumns" @columns="saveColumns" @columns-reset="resetColumns"
+      :saved-views="views.items" :selectable="selectable" :picking="picking" :attention-href="`/tickets?view=needs-attention&project_id=${project.id}`"
+      @saved-view="openView" @preset="page.openPhonePreset" @select-tickets="picking ? clearSelection() : phonePicking = true" @save-view="startSave" @copy-link="page.copyListLink" @export-c-s-v="page.exportListCSV"
     >
       <!-- Collapsed header: the sections and saved views it hides, at the top of the Display menu. -->
       <template #header-nav="{ anchor, close }">
@@ -38,7 +43,7 @@ const bindToolbarWrap = bindProjectRef(toolbarWrap)
     />
       </template>
     </ListToolbar>
-    <div v-if="selectable && (sequence.length || picking)" class="phone-pick" :class="{ on: picking }">
+    <div v-if="!compact && selectable && (sequence.length || picking)" class="phone-pick" :class="{ on: picking }">
       <p v-if="picking" class="phone-pick-status">
     <span aria-live="polite"><b class="mono">{{ selected.size.toLocaleString('en-GB') }}</b> selected</span>
     <template v-if="selectedDeleted.length"><span class="dot" aria-hidden="true">·</span><span class="gone">{{ selectedDeleted.length.toLocaleString('en-GB') }} deleted</span></template>

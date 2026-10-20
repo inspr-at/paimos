@@ -4,9 +4,16 @@ import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import {
   apiParams, compareRows, dateBounds, dateLabel, effectiveSort, facetOptions, filtersFromQuery, filtersFromView, filtersToQuery, groupRows,
-  hasFilters, localInstant, sameListState, suggestName, toggleIn, toggleOut, valueLabel, valueState, viewShape,
+  hasFilters, localInstant, sameListState, suggestName, ticketCSV, toggleIn, toggleOut, valueLabel, valueState, viewShape,
 } from '../src/lib/ticketList.ts'
 import type { ListItem } from '../src/lib/api.ts'
+
+test('AEON-1460 CSV preserves quoted multiline titles and neutralizes spreadsheet formulas', () => {
+  const row = { key: 'WORK-1', title: '=SUM(1,2)\n"quoted"', state: 'open', assignee: { name: ' +formula' }, updated_at: '2026-09-23T12:00:00Z' } as ListItem
+  const csv = ticketCSV([row])
+  assert.equal(csv, '"Key","Title","Status","Assignee","Updated"\r\n"WORK-1","\'=SUM(1,2)\n""quoted""","Open","\' +formula","2026-09-23T12:00:00Z"\r\n')
+  assert.equal(ticketCSV([]), '"Key","Title","Status","Assignee","Updated"\r\n')
+})
 
 test('exclusions and every filter round-trip through the URL', () => {
   const query = { status: 'backlog,!done', tag: 'BUG,!docs', epic: 'e1,none', cost: 'Support', release: '!none', date: 'updated:7d', group: 'assignee', cols: 'status,bogus,key,updated', v: '11111111-aaaa-4aaa-8aaa-000000000001', type: '!epic,nope' }

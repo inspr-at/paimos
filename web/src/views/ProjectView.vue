@@ -13,8 +13,10 @@ import ProjectSections from './project/ProjectSections.vue'
 import ProjectBulkBar from './project/ProjectBulkBar.vue'
 import ProjectDetailHost from './project/ProjectDetailHost.vue'
 import ProjectMenus from './project/ProjectMenus.vue'
+import { compactChrome } from '../lib/chrome'
 
 const page = useProjectPage()
+const compact = compactChrome()
 provide(PROJECT_PAGE, page)
 const { project, projects, projectKey, ticketsHeader, headerDensity, ticketKey, fullView,
   knowledgeDocked, knowledgeEntryOpen, toolbarHeight, selectable, selected, liveActive, activeLive,
@@ -22,7 +24,7 @@ const { project, projects, projectKey, ticketsHeader, headerDensity, ticketKey, 
 </script>
 
 <template>
-  <section class="project-page" :class="[ticketsHeader ? `header-${headerDensity}` : '', { 'panel-open': (!!ticketKey && !fullView) || knowledgeDocked, 'ticket-dock': !!ticketKey && !fullView, 'full-view': fullView, 'knowledge-entry': knowledgeEntryOpen, 'knowledge-dock': knowledgeDocked }]" :style="{ '--toolbar-h': `${toolbarHeight}px` }" :aria-labelledby="project && !knowledgeEntryOpen ? 'project-title' : undefined">
+  <section class="project-page" :class="[ticketsHeader ? `header-${headerDensity}` : '', { 'compact-list': compact && ticketsHeader && !knowledgeActive && !settingsActive && !deliveryActive, 'panel-open': (!!ticketKey && !fullView) || knowledgeDocked, 'ticket-dock': !!ticketKey && !fullView, 'full-view': fullView, 'knowledge-entry': knowledgeEntryOpen, 'knowledge-dock': knowledgeDocked }]" :style="{ '--toolbar-h': `${toolbarHeight}px` }" :aria-labelledby="project && !knowledgeEntryOpen ? 'project-title' : undefined">
     <template v-if="project">
       <div v-show="!fullView && !knowledgeEntryOpen" class="list-view" :class="{ selecting: selectable && selected.size, 'has-live-updates': liveActive && activeLive.pill.value }" :style="{ '--live-obstacle-h': `${bulkHeight ? bulkHeight + 8 : 0}px` }">
       <div id="project-header-fold" v-show="!ticketsHeader || headerDensity !== 'collapsed'" class="project-fold">

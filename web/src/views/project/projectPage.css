@@ -6,6 +6,11 @@
 :deep(:where(.project-head) .head-edit) { width: 44px; height: 44px; } }
 /* Lists use the full width; the gutter grows with the screen. */
 .project-page { width: 100%; margin: 0; padding: 22px var(--gutter) 12px; }
+.project-page.compact-list { padding-top: 10px; }
+.compact-list .project-fold { display: none; }
+.project-page.compact-list :deep(.toolbar-wrap) { height: 44px; background: var(--chrome); -webkit-backdrop-filter: none; backdrop-filter: none; }
+.project-page.compact-list :deep(.toolbar-wrap.stuck) { background: var(--chrome); -webkit-backdrop-filter: none; backdrop-filter: none; }
+.project-page.compact-list :deep(.list-view > .hint) { display: none; }
 /* The header follows its own width, not the window's: a docked ticket panel can
    leave the list as narrow as a phone on a wide screen (AEON-140). */
 :deep(.attention-view-link) { display: inline-flex; align-items: center; gap: 6px; min-height: 36px; padding: 0 10px; font-size: 13px; color: var(--ink-2); text-decoration: none; }
