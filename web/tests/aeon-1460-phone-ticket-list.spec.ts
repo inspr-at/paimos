@@ -2,10 +2,10 @@
 // AEON-1460, Tick spec v1 / D11. Risks: compact chrome consumes the list; controls
 // move under a finger during search/filter/menu/live changes; saved desktop columns
 // leak into phone rows; overflow actions disappear; desktop column geometry drifts.
-import { test, expect, type Locator, type Page, type TestInfo } from '@playwright/test'
+import { test, expect, type Locator, type Page } from '@playwright/test'
 import { mkdir, writeFile } from 'node:fs/promises'
 import { dirname } from 'node:path'
-import { fixtures, me, mockWork, watchErrors } from './work-fixtures'
+import { fixtures, mockWork, watchErrors } from './work-fixtures'
 import { liveServer } from './live-server'
 import { expectStableControls } from './helpers/stable'
 
@@ -100,6 +100,7 @@ test('AEON-1460 compact ticket list keeps controls still and all actions reachab
           continue
         }
         const bar = toolbar(page), controls = bar.locator('.phone-ticket-tools > button')
+        await shot('T1')
         const barBox = await box(bar), rowBox = await box(rows(page).first())
         add('toolbar one opaque 44 px line', barBox.height, '44', barBox.height === 44)
         const names = await controls.evaluateAll(items => items.map(el => el.getAttribute('aria-label')))

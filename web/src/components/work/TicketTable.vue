@@ -1952,7 +1952,7 @@ button.release-chip:focus-visible { box-shadow: var(--focus-ring); }
 .phone-title-link { display: block; min-width: 0; color: var(--ink); font-size: 14.5px; line-height: 20px; }
 .phone-title-text { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .phone-rows .ticket-row .phone-meta { grid-area: meta; display: flex !important; align-items: center; white-space: nowrap; line-height: 16px; color: var(--ink-3); font-size: 11.5px; }
-.phone-meta .key { color: var(--teal-ink); font-size: 11.5px; }
+.phone-meta .key { color: var(--teal-ink); font-size: 11.5px; line-height: 16px; }
 .phone-meta time { font-size: 11.5px; font-variant-numeric: tabular-nums; }
 .phone-rows .ticket-row .phone-owner { grid-area: owner; align-self: center; }
 .phone-assignee { display: grid; place-items: center; width: 44px; height: 44px; border: 0; padding: 0; background: transparent; border-radius: 8px; }

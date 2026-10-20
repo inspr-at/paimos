@@ -11812,15 +11812,15 @@
     ,
     {"kind":"browser","file":"tests/phone-controls.spec.ts","name":"fix3: phone regressions › column reorder controls have separate 44px touch targets at 720px","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
-    {"kind":"browser","file":"tests/phone-controls.spec.ts","name":"fix3: phone regressions › customized selection keeps only two tracks with populated both","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    {"kind":"browser","file":"tests/phone-controls.spec.ts","name":"fix3: phone regressions › compact selection keeps essentials with populated both","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
-    {"kind":"browser","file":"tests/phone-controls.spec.ts","name":"fix3: phone regressions › customized selection keeps only two tracks with populated estimate","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    {"kind":"browser","file":"tests/phone-controls.spec.ts","name":"fix3: phone regressions › compact selection keeps essentials with populated estimate","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
-    {"kind":"browser","file":"tests/phone-controls.spec.ts","name":"fix3: phone regressions › customized selection keeps only two tracks with populated progress","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    {"kind":"browser","file":"tests/phone-controls.spec.ts","name":"fix3: phone regressions › compact selection keeps essentials with populated progress","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
     {"kind":"browser","file":"tests/phone-controls.spec.ts","name":"fix3: phone regressions › last ticket clears the measured nine-action toolbar without an updates chip","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
-    {"kind":"browser","file":"tests/phone-controls.spec.ts","name":"phone cards render saved column visibility and order at 390px","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    {"kind":"browser","file":"tests/phone-controls.spec.ts","name":"phone rows keep essentials while saved desktop columns persist","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
     {"kind":"browser","file":"tests/phone-controls.spec.ts","name":"select every paginated match without moving bulk actions at 390px","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
