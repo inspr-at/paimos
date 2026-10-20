@@ -14,6 +14,11 @@ import type { EntryBlock, EntryCheck } from '../src/lib/entryChecks'
 const shots = process.env.WORK_QUEUE_SHOTS ?? '../.agent-shots/queue'
 const now = '2026-10-01T18:00:00Z'
 const agent = '33333333-3333-4333-8333-333333333333', account = '44444444-4444-4444-8444-444444444444', profile = '55555555-5555-4555-8555-555555555555'
+// Resizing to a phone applies the compact list asynchronously; disclose its head only once it has.
+async function showPhoneHead(page: Page) {
+  await expect(page.locator('.project-page')).toHaveClass(/compact-list/)
+  await showProjectHead(page)
+}
 // D11 (AEON-1460): compact phone rows name their key in the metadata line instead of a copy button.
 const row = (page: Page, key: string) => page.locator('tr.ticket-row:not(.ghost)').filter({ has: page.getByRole('button', { name: `Copy ${key}`, exact: true }).or(page.locator('.phone-meta .key', { hasText: new RegExp(`^${key}$`) })) })
 async function world(page: Page, options: { viewer?: boolean; missing?: boolean; offset?: number; relationBlocker?: boolean; failRead?: boolean; noStart?: boolean; stale?: boolean; staleMissing?: boolean; longTitle?: boolean; assigned?: boolean; live?: boolean } = {}) {
@@ -201,7 +206,7 @@ for (const theme of ['light', 'dark']) for (const width of [390, 1024, 1440]) {
     await page.setViewportSize({ width, height: 1000 })
     await page.evaluate(value => { document.documentElement.dataset.theme = value }, theme)
     // D11 (AEON-1460): a phone list starts with its project head in the crumb sheet.
-    if (width === 390) await showProjectHead(page)
+    if (width === 390) await showPhoneHead(page)
     const opener = page.getByRole('button', { name: /queued\. Open the work queue/ })
     await opener.click()
     const panel = page.getByRole('dialog', { name: 'Work queue', exact: true })
@@ -393,7 +398,7 @@ for (const theme of ['light', 'dark']) for (const width of [390, 1024, 1440]) {
       const ticket = page.getByRole('complementary', { name: 'Ticket details' }), close = ticket.getByRole('button', { name: 'Close ticket details', exact: true })
       const open = async (key: string) => { await row(page, key).locator('.title-link').click(); await expect(ticket.getByRole('button', { name: `Copy ${key}`, exact: true })).toBeVisible(); return ticket.locator('.plan-rel') }
       await expect(row(page, 'PHAROS-15')).toBeVisible()
-      await expect(page.locator('.tickets .c-suggested')).toHaveCount(0)
+      await expect(page.locator('.tickets .ticket-row .c-suggested')).toHaveCount(0)
       const parentSuggestion = await open('PHAROS-15')
       await expect(parentSuggestion).toHaveText('—')
       await expect(parentSuggestion).toHaveAccessibleDescription('Releases are suggested for leaf work; a parent’s leaves can span releases')
@@ -473,7 +478,7 @@ test('phone header retains the queue when the activity timestamp folds', async (
   }
   await page.setViewportSize({ width: 390, height: 844 })
   // D11 (AEON-1460): a phone list starts with its project head in the crumb sheet.
-  await showProjectHead(page)
+  await showPhoneHead(page)
   const activity = page.locator('.header-activity')
   await expect(activity.locator(':scope > span')).toBeHidden()
   const opener = activity.getByRole('button', { name: /queued\. Open the work queue/ })
@@ -516,7 +521,7 @@ test('approved queue surfaces in light/dark and narrow layouts, with accessible 
     await expect(page).toHaveURL(/\/p\/PHAROS\/tickets(?:\?|$)/)
     await page.setViewportSize({ width: 390, height: 844 })
     // D11 (AEON-1460): a phone list starts with its project head in the crumb sheet.
-    await showProjectHead(page)
+    await showPhoneHead(page)
     await expect(page.locator('html')).toHaveJSProperty('scrollWidth', 390)
     const opener = page.getByRole('button', { name: /queued\. Open the work queue/ })
     const queue = page.getByRole('dialog', { name: 'Work queue', exact: true })
