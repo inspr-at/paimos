@@ -330,12 +330,29 @@ test('a live blocks relation satisfies readiness for the dot, Queue, bulk and St
 })
 test('a failed first queue read exposes its error and Retry before a snapshot exists', async ({ page }) => {
   const { state } = await world(page, { failRead: true })
+  // The list watches live agents and force-reloads the queue when they update.
+  // A disconnected event stream does that during this case. Once success is
+  // allowed, that reload removes Retry (it lives on the error) while Playwright
+  // is still waiting for the button to sit still, and the click never lands.
+  // Hold every list read from this point until the click has been delivered,
+  // then release the same read. The assertions are unchanged.
+  let releaseReads = () => {}
+  const readsHeld = new Promise<void>(resolve => { releaseReads = resolve })
+  let holdReads = false
+  await page.route(url => url.pathname === '/api/queue', async route => {
+    if (route.request().method() !== 'GET' || !holdReads) return route.fallback()
+    await readsHeld
+    return route.fallback()
+  })
+  holdReads = true
   await page.getByRole('button', { name: /Queue read failed/ }).click()
   const panel = page.getByRole('dialog', { name: 'Work queue', exact: true })
   await expect(panel.getByRole('alert')).toContainText('Queue read failed')
   await expect(panel.getByText('Loading the queue…', { exact: true })).toHaveCount(0)
   state.failRead = false
-  await panel.getByRole('button', { name: 'Retry', exact: true }).click()
+  try {
+    await panel.getByRole('button', { name: 'Retry', exact: true }).click()
+  } finally { releaseReads() }
   await expect(panel.getByRole('alert')).toHaveCount(0)
   await expect(panel.getByRole('list', { name: 'Queue for the next free agent' }).locator('li')).toHaveCount(2)
   await expect(page.getByRole('button', { name: /2 queued\. Open the work queue/ })).toBeVisible()
