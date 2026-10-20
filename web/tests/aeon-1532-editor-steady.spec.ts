@@ -13,6 +13,67 @@ import { fixtures, mockWork, watchErrors } from './work-fixtures'
 import { knowledgeWorld, mockKnowledge } from './knowledge-fixtures'
 import { controlStability } from './control-stability'
 
+// FIX5: the queue runs the list beside the editor changes. A stale narrow card
+// delivery must not overwrite the wider layout and leave Updated hidden.
+test('AEON-1532: a queued narrow table resize preserves the columns after the table grows', async ({ page }) => {
+  await page.addInitScript(() => {
+    const state = { capture: false, latest: 0, replay: null as (() => void) | null }
+    Object.assign(window, { aeon1532TableResize: state })
+    const Observer = window.ResizeObserver
+    window.ResizeObserver = class extends Observer {
+      constructor(callback: ResizeObserverCallback) {
+        super((entries, observer) => {
+          const card = entries.find(entry => entry.target.classList.contains('table-card'))
+          if (card) {
+            state.latest = card.contentRect.width
+            if (state.capture) state.replay = () => callback([card], observer)
+          }
+          callback(entries, observer)
+        })
+      }
+    }
+  })
+  await page.setViewportSize({ width: 1440, height: 900 })
+  const data = fixtures()
+  data.preferences['list:p-pharos'] = { visible: ['status', 'priority', 'assignee', 'estimate', 'updated'] }
+  await mockWork(page, data)
+  await page.goto('/p/PHAROS?group=status')
+  const table = page.getByRole('grid', { name: 'Tickets' }), card = page.locator('.table-card')
+  await expect(table.locator('tr.ticket-row').first()).toBeVisible()
+  await page.evaluate(() => document.fonts.ready)
+  await expect(card).toHaveAttribute('data-columns-settled', '1')
+  const state = () => page.evaluate(() => (window as unknown as { aeon1532TableResize: { latest: number; replay: unknown } }).aeon1532TableResize.latest)
+  await page.evaluate(() => { (window as unknown as { aeon1532TableResize: { capture: boolean } }).aeon1532TableResize.capture = true })
+  await card.evaluate(el => { el.style.boxSizing = 'content-box'; el.style.width = '760px' })
+  await expect.poll(state).toBe(760)
+  await page.evaluate(() => {
+    const state = (window as unknown as { aeon1532TableResize: { capture: boolean; replay: unknown } }).aeon1532TableResize
+    state.capture = false
+    if (!state.replay) throw new Error('No narrow card resize delivery was captured')
+  })
+  await card.evaluate(el => { el.style.width = '1000px' })
+  await expect.poll(state).toBe(1000)
+  const updated = table.locator('thead th[data-column-id="updated"]')
+  await expect(updated).toBeVisible()
+  await settle(page)
+  const guard = await controlStability(page, {
+    key: table.locator('thead th[data-column-id="key"]'),
+    title: table.locator('thead th[data-column-id="title"]'),
+    status: table.locator('thead th[data-column-id="status"]'),
+    updated,
+  })
+  await guard.check(async () => {
+    await page.evaluate(() => {
+      const replay = (window as unknown as { aeon1532TableResize: { replay: (() => void) | null } }).aeon1532TableResize.replay
+      if (!replay) throw new Error('No narrow card resize delivery was captured')
+      replay()
+    })
+    await settle(page)
+  })
+  guard.done()
+  expect(await card.evaluate(el => el.clientWidth)).toBe(1000)
+})
+
 const entry = '/p/PHAROS/knowledge/runbook/deploy-release'
 const mod = process.platform === 'darwin' ? 'Meta' : 'Control'
 // 300 lines: headings, blank lines and steps long enough to wrap in a column.
