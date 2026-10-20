@@ -80,15 +80,28 @@ export function nextMeasuredCardWidth(current: number, live: number, viewportGre
   return current
 }
 
-/** The first agreeing pair that is safe to adopt. The first pair replaces a stale narrow content box with the live card (AEON-1532). A later pair that is wider is adopted only when the viewport grew, so one disagreeing pair cannot keep a column hidden (AEON-1570) and a stale wide pair cannot undo a shrink (AEON-1401). */
+/** The latest agreeing pair that is safe to adopt. A stale first pair is the paint the resize left; the later agreement is the card (AEON-1419). The first pair still replaces a stale narrow box when nothing later agrees (AEON-1532). A later pair that is wider is adopted only when the viewport grew, so one disagreeing pair cannot keep a column hidden (AEON-1570) and a stale wide pair cannot undo a shrink (AEON-1401). A newest sample that has left that width means the card is still moving. */
 export function cardWidthAfterSamples(samples: readonly (number | null)[], current: number, viewportGrew: boolean): number | null {
+  let chosen: number | null = null
   for (let i = 0; i + 1 < samples.length; i += 2) {
     const width = agreedFrameWidth(samples[i] ?? null, samples[i + 1] ?? null)
     if (width === null) continue
     if (i > 0 && !viewportGrew && width > current + 0.5) continue
-    return width
+    chosen = width
   }
-  return null
+  if (chosen === null) return null
+  const newest = samples[samples.length - 1]
+  if (newest === null || Math.abs(newest - chosen) > 0.5) return null
+  return chosen
+}
+
+/** The width to put on screen, or null while another pair should be read. An agreement that is still the width this resize started from is the previous paint. A wider agreement while the viewport did not grow is that previous paint once a narrower card is already on screen. At the sample cap the last allowed agreement stands, and a card that has already left the start width never returns to it. */
+export function cardWidthCommit(agreed: number | null, onScreen: number, before: number, viewportGrew: boolean, sampleCount: number): number | null {
+  if (agreed === null) return null
+  if (!viewportGrew && agreed > onScreen + 0.5) return null
+  if (Math.abs(agreed - before) <= 0.5 && Math.abs(onScreen - before) > 0.5) return null
+  if (sampleCount < CARD_WIDTH_SAMPLE_CAP && Math.abs(agreed - before) <= 0.5) return null
+  return agreed
 }
 // Columns only wide tables add on their own.
 const WIDE_EXTRAS: ColumnId[] = ['suggested', 'list_cost', 'tokens', 'model', 'estimate', 'tags', 'release', 'created', 'assignee']

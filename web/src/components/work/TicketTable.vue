@@ -5,7 +5,8 @@ import { vClipTip } from '../../directives/clipTip'
 import { formatEstimate, estimateDisplay } from '../../lib/estimates'
 import { computed, getCurrentInstance, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import type { ListItem } from '../../lib/api'
-import { CARD_WIDTH_SAMPLE_CAP, COLUMN_BY_ID, cardWidthAfterSamples, costUnitLabel, hasSavedWidth, layoutTableWidth, layoutWidths, loadedFitWidth, nextMeasuredCardWidth, PARENT_TITLE_WIDTH, releaseLabel, tagList, titleRoom, visibleColumns, withHostColumns, type ColumnDef, type ColumnId, type ListPrefs, type TagRef } from '../../lib/columns'
+import { CARD_WIDTH_SAMPLE_CAP, COLUMN_BY_ID, cardWidthAfterSamples, cardWidthCommit, costUnitLabel, hasSavedWidth, layoutTableWidth, layoutWidths, loadedFitWidth, nextMeasuredCardWidth, PARENT_TITLE_WIDTH, releaseLabel, tagList, titleRoom, visibleColumns, withHostColumns, type ColumnDef, type ColumnId, type ListPrefs, type TagRef } from '../../lib/columns'
+import { beginTitlePress, claimTitleClick, openTitlePress, releaseTitlePress, type ListTitlePress } from '../../lib/listTitlePress'
 import { releaseCell, type NativeReleaseView } from '../../lib/releaseMembership'
 import { agentKey, ticketWorkers, withServerLead, type LiveAgent } from '../../lib/liveAgents'
 import { useLiveAgents } from '../../stores/liveAgents'
@@ -536,15 +537,14 @@ function measureWidth() {
 }
 // clientWidth during a viewport resize can still be the previous frame. One
 // such read lays the wide column set into the card that has already narrowed
-// and crushes Title (AEON-1470). A narrower content box is that frame; a wider
-// one is a stale sample, so the live card wins (AEON-1401). Two agreeing
-// frames then adopt the card, so a queued narrow sample cannot keep Updated
-// hidden after the card has grown, and one stale frame cannot undo the shrink.
-// One disagreeing pair is not a reason to keep the old width: later pairs are
-// read until one agrees. A later wider pair is kept only when the viewport
-// grew. A newer measure bumps cardFrame and cancels this read.
-function settleCardWidth(viewportGrew = false) {
+// and crushes the last column (AEON-1470), or keeps Updated hidden after the
+// card has grown. The content box is adopted at once. Later pairs replace a
+// stale agreeing pair (AEON-1419); a wider pair is kept only when the viewport
+// grew, so it cannot undo a shrink (AEON-1401). A newer measure bumps cardFrame
+// and cancels this read.
+function settleCardWidth(viewportGrew = false, before = width.value) {
   const frame = ++cardFrame
+  const origin = before
   const samples: (number | null)[] = []
   const take = () => {
     requestAnimationFrame(() => {
@@ -552,35 +552,41 @@ function settleCardWidth(viewportGrew = false) {
       samples.push(readCardWidth())
       if (samples.length % 2 === 1) { take(); return }
       const agreed = cardWidthAfterSamples(samples, width.value, viewportGrew)
-      if (agreed === null) {
+      const commit = cardWidthCommit(agreed, width.value, origin, viewportGrew, samples.length)
+      if (commit === null) {
         if (samples.length < CARD_WIDTH_SAMPLE_CAP) take()
         return
       }
-      width.value = agreed
+      width.value = commit
     })
   }
   take()
 }
 function applyCardSize(entries: ResizeObserverEntry[]) {
+  const before = width.value
   const live = readCardWidth()
   if (live === null) return
-  let observed = live
+  // contentRect is the size that fired the observer. clientWidth can still be
+  // the previous frame in either direction.
+  let box = live
   for (const entry of entries) {
-    const box = entry.contentRect?.width
-    if (typeof box === 'number' && Number.isFinite(box) && box > 0) observed = Math.min(observed, box)
+    const width = entry.contentRect?.width
+    if (typeof width === 'number' && Number.isFinite(width) && width > 0) box = width
   }
-  if (Math.abs(live - width.value) <= 0.5 && observed < live - 0.5) width.value = observed
-  else if (live > 0) width.value = live
-  settleCardWidth()
+  const next = Math.abs(box - before) > 0.5 ? box : live
+  const grew = next > before + 0.5
+  if (next > 0) width.value = next
+  settleCardWidth(grew, before)
 }
 let lastInner = window.innerWidth
 function measureSoon() {
   const inner = window.innerWidth
   const grew = inner > lastInner + 0.5
   lastInner = inner
+  const before = width.value
   const live = readCardWidth()
-  if (live !== null) width.value = nextMeasuredCardWidth(width.value, live, grew)
-  settleCardWidth(grew)
+  if (live !== null) width.value = nextMeasuredCardWidth(before, live, grew)
+  settleCardWidth(grew, before)
 }
 const phoneChange = () => { narrowPhone.value = phoneQuery.matches }
 const coarseChange = () => { coarse.value = coarseQuery.matches }
@@ -897,11 +903,42 @@ function longPress(event: Event, row: ListItem) {
   swallowClick = pointerDown && pressOrigin ? { rowId: row.id, pointerId: pressOrigin.pointerId } : null
   emit('select', row, 'toggle')
 }
+// One tab from a ctrl/cmd press. The row can move between press and release, and
+// the browser then drops the native tab (AEON-1327, AEON-1460). The press opens
+// the href it showed; the click cancels the native default so a landing click
+// does not open a second tab. Stop the row's newTab either way. Shift-click
+// stays the row's range selection. Middle click keeps the browser's own tab.
+let titlePress: ListTitlePress | null = null
+function titlePointerDown(event: PointerEvent) {
+  titlePress = null
+  const href = (event.currentTarget as HTMLAnchorElement | null)?.getAttribute('href')
+  const press = beginTitlePress(event, href)
+  if (!press) return
+  const target = event.currentTarget as (HTMLElement & { setPointerCapture?: (id: number) => void }) | null
+  try { target?.setPointerCapture?.(event.pointerId) } catch { /* a click that still lands opens the tab */ }
+  titlePress = press
+}
+function openPress(started: ListTitlePress | null) {
+  const href = openTitlePress(started)
+  if (href) window.open(href, '_blank', 'noopener')
+}
+function titlePointerUp(event: PointerEvent) {
+  const started = titlePress
+  if (!releaseTitlePress(started, event)) return
+  // A click that still lands may run before this microtask. Either one opens the tab.
+  queueMicrotask(() => openPress(started))
+}
 function linkClick(event: MouseEvent) {
-  // Shift-click is the row's range selection. Let it bubble; the row cancels the new window.
   if (event.shiftKey && !event.metaKey && !event.ctrlKey && event.button !== 1) return
-  // One native tab. Stop the row's newTab so it does not open a second window.
-  if (event.metaKey || event.ctrlKey || event.button === 1) { event.stopPropagation(); return }
+  if (event.metaKey || event.ctrlKey || event.button === 1) {
+    event.stopPropagation()
+    if (event.button === 1) return
+    const started = titlePress
+    const href = claimTitleClick(started, event)
+    if (event.detail > 0) titlePress = null
+    if (href) window.open(href, '_blank', 'noopener')
+    return
+  }
   event.preventDefault()
 }
 const selectableRows = (group: RowGroup) => group.rows.filter(row => props.rowSelectable?.(row) ?? true)
@@ -1262,7 +1299,7 @@ defineExpose({
                 <button v-else-if="entry.tree?.hasChildren" type="button" class="phone-fold" :aria-expanded="entry.tree.expanded" :aria-label="`${entry.tree.expanded ? 'Collapse' : 'Expand'} ${entry.row.key}`" @click.stop="emit('toggleRow', entry.row.id)"><AppIcon name="chevron-right" :size="14" /></button>
                 <span v-if="!entry.tree?.hasChildren || (selectable && selecting)" class="phone-status" :aria-label="statusMeta(entry.row.state).label" role="img" data-status-motion><StatusIcon :state="entry.row.state" :size="16" /></span>
               </td>
-              <td class="c-title phone-title" data-column-id="title"><a class="title-link phone-title-link" :href="href(entry.row)" tabindex="-1" @click="linkClick"><span v-clip-tip="entry.row.title" class="title-text phone-title-text"><template v-for="(part, i) in highlight(entry.row.title, query)" :key="i"><mark v-if="part.match">{{ part.text }}</mark><template v-else>{{ part.text }}</template></template></span></a><TicketWorkers v-if="assigneeWorkers(entry.row).length" class="title-workers" variant="cue" :workers="assigneeWorkers(entry.row)" :ticket-key="entry.row.key" :stale="liveStale" /></td>
+              <td class="c-title phone-title" data-column-id="title"><a class="title-link phone-title-link" :href="href(entry.row)" tabindex="-1" @pointerdown="titlePointerDown" @pointerup="titlePointerUp" @click="linkClick"><span v-clip-tip="entry.row.title" class="title-text phone-title-text"><template v-for="(part, i) in highlight(entry.row.title, query)" :key="i"><mark v-if="part.match">{{ part.text }}</mark><template v-else>{{ part.text }}</template></template></span></a><TicketWorkers v-if="assigneeWorkers(entry.row).length" class="title-workers" variant="cue" :workers="assigneeWorkers(entry.row)" :ticket-key="entry.row.key" :stale="liveStale" /></td>
               <td class="phone-meta"><span class="key">{{ entry.row.key }}</span><span class="phone-separator" aria-hidden="true">{{ '\u00a0·\u00a0' }}</span><span v-if="liveLabels?.has(entry.row.id)" class="live-label">{{ liveLabels.get(entry.row.id) }}</span><time v-else :datetime="entry.row.updated_at" :data-tip="absoluteTime(entry.row.updated_at)">{{ relativeTime(entry.row.updated_at, { now }).replace(/(\d)([mhd])\b/g, '$1\u00a0$2').replace(/(\d)\s+(?=\S)/g, '$1\u00a0') }}</time></td>
               <td class="phone-owner"><button type="button" class="assignee-btn phone-assignee" :disabled="!mayAssign(entry.row)" :aria-label="`Assignee: ${entry.row.assignee?.name ?? 'Unassigned'}. Change assignee of ${entry.row.key}`" aria-haspopup="menu" @click.stop="emit('assignee', entry.row, $event.currentTarget as HTMLElement)"><PersonAvatar v-if="entry.row.assignee" :id="entry.row.assignee.id" :name="entry.row.assignee.name" :size="24" /></button></td>
             </template>
@@ -1297,7 +1334,7 @@ defineExpose({
                 </span>
                 <span class="person-waiting" :data-tip="entry.row.person_waiting?.map(step => `Waiting for ${step.owner.name}: ${step.label}`).join('\n')" :aria-label="entry.row.person_waiting?.map(step => `Waiting for ${step.owner.name}: ${step.label}`).join('. ')"><AppIcon v-if="entry.row.person_waiting?.length" name="person-wait" :size="14" /></span>
                 <TicketTypeIcon :kind="entry.row.kind_slug" :level-name="workLabel(entry.row)" :level-icon="workIcon(entry.row)" :recurrence="entry.row.recurrence" />
-                <a class="title-link" :href="href(entry.row)" tabindex="-1" @click="linkClick"><span v-clip-tip="entry.row.title" class="title-text"><template v-for="(part, i) in highlight(entry.row.title, query)" :key="i"><mark v-if="part.match">{{ part.text }}</mark><template v-else>{{ part.text }}</template></template></span></a>
+                <a class="title-link" :href="href(entry.row)" tabindex="-1" @pointerdown="titlePointerDown" @pointerup="titlePointerUp" @click="linkClick"><span v-clip-tip="entry.row.title" class="title-text"><template v-for="(part, i) in highlight(entry.row.title, query)" :key="i"><mark v-if="part.match">{{ part.text }}</mark><template v-else>{{ part.text }}</template></template></span></a>
                 <span v-if="liveLabels?.has(entry.row.id)" class="live-label">{{ liveLabels.get(entry.row.id) }}</span>
                 <span v-if="childCount(entry)" class="child-count mono" :data-tip="plural(childCount(entry), 'child item')">{{ childCount(entry) }}</span>
                 <TicketWorkers v-if="!has('assignee') && assigneeWorkers(entry.row).length" class="title-workers" variant="cue" :workers="assigneeWorkers(entry.row)" :ticket-key="entry.row.key" :stale="liveStale" />

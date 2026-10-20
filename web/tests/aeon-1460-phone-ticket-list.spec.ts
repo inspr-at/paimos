@@ -330,6 +330,26 @@ test('AEON-1460 compact titles retain native links and keyboard full-text disclo
       await expect(page).toHaveURL(sourceURL)
     } },
   ] })
+  // The row can move between press and release, so the browser drops the native
+  // tab (AEON-1327). The press still opens the one tab the link showed.
+  await page.evaluate(() => {
+    document.addEventListener('pointerdown', event => {
+      const anchor = (event.target as Element | null)?.closest?.('a.title-link')
+      const row = anchor?.closest('tr')
+      if (row instanceof HTMLElement) row.style.transform = 'translateY(120px)'
+    }, true)
+  })
+  const moved = page.locator('#row-n-1 .title-link')
+  const stayed = page.url()
+  const [movedTab] = await Promise.all([
+    page.context().waitForEvent('page'),
+    moved.click({ modifiers: ['ControlOrMeta'] }),
+  ])
+  await movedTab.waitForLoadState('domcontentloaded')
+  expect(new URL(movedTab.url()).pathname).toBe('/p/PRJ-17/PHAROS-11')
+  expect(page.context().pages()).toHaveLength(2)
+  await movedTab.close()
+  await expect(page).toHaveURL(stayed)
 })
 
 test('AEON-1460 compact project-head disclosure works without changing the desktop preference', async ({ page }) => {
