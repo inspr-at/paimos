@@ -260,6 +260,7 @@ func readGrants(ctx context.Context, tx pgx.Tx, p tenant.Principal) (grants, err
           FROM role_bindings b JOIN roles r ON r.tenant_id=b.tenant_id AND r.id=b.role_id
           LEFT JOIN role_permissions rp ON rp.tenant_id=r.tenant_id AND rp.role_id=r.id
 		  WHERE b.tenant_id=$1::uuid AND b.principal_id=$2::uuid
+		    AND b.scope_type IN ('workspace','project')
 		  ORDER BY b.scope_type,b.scope_id,rp.permission`, p.TenantID, bindingID)
 	if err != nil {
 		return g, err

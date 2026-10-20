@@ -167,6 +167,29 @@ func TestDomainPolicyComposition(t *testing.T) {
 	})
 }
 
+// Risk: paired-computer inventory can be granted, dropped, or widened without
+// the domain oracle recording account.manage, so composition no longer proves
+// the route that lists ownership evidence.
+func TestPairedComputerInventoryRouteStaysAccountManage(t *testing.T) {
+	const pattern = "GET /api/agent-pairing/computers/inventory"
+	if got := RoutePermissions[pattern]; got != "account.manage" {
+		t.Fatalf("live inventory permission = %q, want account.manage", got)
+	}
+	raw, err := os.ReadFile("testdata/domains/agentpairing.json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var part struct {
+		Routes map[string]string `json:"routes"`
+	}
+	if err := json.Unmarshal(raw, &part); err != nil {
+		t.Fatal(err)
+	}
+	if got := part.Routes[pattern]; got != "account.manage" {
+		t.Fatalf("domain oracle inventory permission = %q, want account.manage", got)
+	}
+}
+
 func mergeBaseline[V any](t *testing.T, path string, target, part map[string]V) {
 	t.Helper()
 	for key, value := range part {
