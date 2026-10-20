@@ -5,7 +5,7 @@
 import { test, expect, type Locator, type Page } from '@playwright/test'
 import { mkdir, readFile, writeFile } from 'node:fs/promises'
 import { dirname } from 'node:path'
-import { fixtures, mockWork, watchErrors } from './work-fixtures'
+import { fixtures, mockWork, watchErrors, showProjectHead } from './work-fixtures'
 import { expectStableControls } from './helpers/stable'
 
 type Size = { width: number; height: number }
@@ -93,7 +93,9 @@ test('AEON-1460 compact ticket list keeps controls still and all actions reachab
         if (desktop) {
           // Captured on main 6db3aab5d with this exact fixture before product edits.
           const y = size.width === 1440 ? 163.25 : 199.25
-          const expected = [{ x: 0, y, width: size.width, height: 46 }, { x: 28, y, width: size.width - 56, height: 46 }, { x: 29, y: y + 47, width: size.width - 58, height: 34 }, { x: 29, y: y + 81, width: size.width - 58, height: 36 }]
+          // Linux reserves a scrollbar gutter; macOS uses overlay scrollbars.
+          const contentWidth = await page.locator('main').evaluate(el => el.clientWidth)
+          const expected = [{ x: 0, y, width: contentWidth, height: 46 }, { x: 28, y, width: contentWidth - 56, height: 46 }, { x: 29, y: y + 47, width: contentWidth - 58, height: 34 }, { x: 29, y: y + 81, width: contentWidth - 58, height: 36 }]
           const actual = await page.locator('.toolbar-wrap, .toolbar-wrap .toolbar, .tickets thead, tr.ticket-row').evaluateAll(items => items.slice(0, 4).map(el => { const r = el.getBoundingClientRect(); return { x: r.x, y: r.y, width: r.width, height: r.height } }))
           add('main toolbar, column head and row geometry ±1 px', actual, JSON.stringify(expected), actual.length === expected.length && actual.every((b, i) => delta(b, expected[i]!) <= 1), 'T8')
           await shot('T8')
@@ -272,4 +274,45 @@ test('AEON-1460 compact ticket list keeps controls still and all actions reachab
     await writeFile(info.outputPath('AEON-1460/runtime.md'), JSON.stringify({ seconds: Math.ceil((performance.now() - started) / 1000) }) + '\n')
     await info.attach('checks', { path, contentType: 'application/json' })
   }
+})
+
+// Regression on 94902251: the crumb's Show action changed a preference while
+// CSS kept the header hidden, and compact rows bypassed the title link/reader.
+test('AEON-1460 compact disclosures retain the project header, title link and outline actions', async ({ page }) => {
+  await page.setViewportSize({ width: 390, height: 844 })
+  const data = fixtures()
+  const title = 'Überprüfung der mandantenübergreifenden Berechtigungen und sämtlicher zuständiger Arbeitsbereiche'
+  data.nodes.find(node => node.id === 'n-1')!.title = title
+  await mockWork(page, data)
+  await page.goto('/p/PHAROS?group=none')
+  await expect(page.locator('#row-n-1 .title-text')).toHaveAttribute('data-tip', title)
+  await expect(page.locator('#row-n-1 .title-link')).toHaveAttribute('href', /PHAROS-11/)
+  const bar = toolbar(page), more = bar.getByRole('button', { name: 'More view actions' })
+  await expectStableControls({ controls: { toolbar: bar, more, row: page.locator('#row-n-1') }, interactions: [
+    { name: 'keyboard reads the clipped title', run: async () => {
+      const grid = page.getByRole('grid', { name: 'Tickets', exact: true })
+      await grid.focus()
+      for (let i = 0; i < 12 && await grid.getAttribute('aria-activedescendant') !== 'row-n-1'; i++) await grid.press('ArrowDown')
+      await expect(grid).toHaveAttribute('aria-activedescendant', 'row-n-1')
+      await expect(page.locator('.tooltip')).toHaveText(title)
+      await page.keyboard.press('Escape')
+    } },
+  ] })
+  await expect(page.locator('#project-header-fold')).toBeHidden()
+  const stored = await page.evaluate(() => localStorage.getItem('aeon:project-header:t1:11111111-1111-4111-8111-111111111111'))
+  await showProjectHead(page)
+  await expect(page.getByRole('heading', { name: 'Pharos', exact: true })).toBeVisible()
+  await expect(page.locator('section.lead')).toBeVisible()
+  await page.locator('.crumb-sheet').click()
+  const choice = page.getByRole('menuitemcheckbox', { name: 'Show the project head above the tickets', exact: true })
+  await expect(choice).toBeChecked()
+  await choice.click()
+  await expect(page.locator('#project-header-fold')).toBeHidden()
+  expect(await page.evaluate(() => localStorage.getItem('aeon:project-header:t1:11111111-1111-4111-8111-111111111111'))).toBe(stored)
+  await bar.getByRole('button', { name: /^View:/ }).click()
+  await page.getByRole('menuitemradio', { name: 'Outline', exact: true }).click()
+  const outline = page.getByRole('treegrid', { name: 'Ticket outline', exact: true })
+  await expect(outline.locator('.twisty').first()).toBeVisible()
+  await expect(outline.locator('.status-btn').first()).toBeVisible()
+  await expect(page.locator('.table-card')).not.toHaveClass(/phone-rows/)
 })

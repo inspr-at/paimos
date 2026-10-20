@@ -2,7 +2,7 @@
 // A small in-memory list API for the Projects and project list pages. It applies
 // the B1 query semantics (within, kind, state, priority, assignee, q, hide_closed,
 // sort, facets, cursor paging) so specs can assert on real behaviour.
-import type { Page, Route } from '@playwright/test'
+import { expect, type Page, type Route } from '@playwright/test'
 import { hideChoice, hiddenStates } from '../src/lib/hideStates'
 import { deriveAgentState, normalizeAgentState, STATE_PRIORITY } from '../src/lib/agentSignals.ts'
 import { benefitIssues, completedTicketState } from '../src/lib/ticketBenefits.ts'
@@ -973,4 +973,35 @@ export function watchErrors(page: Page) {
   page.on('pageerror', error => errors.push(error.message))
   page.on('console', message => { if (message.type() === 'error' && !/Failed to load resource/.test(message.text())) errors.push(message.text()) })
   return errors
+}
+
+// D11 moves the ticket list's header and secondary controls behind explicit
+// disclosures. Tests reach the same real actions as people, in either layout.
+export async function showProjectHead(page: Page) {
+  const fold = page.locator('#project-header-fold')
+  await expect(fold).toBeAttached()
+  if (await fold.isVisible()) return
+  await page.locator('.crumb-sheet').click()
+  const choice = page.getByRole('menuitemcheckbox', { name: 'Show the project head above the tickets', exact: true })
+  await expect(choice).not.toBeChecked()
+  await choice.click()
+  await expect(fold).toBeVisible()
+}
+export async function openListFilters(page: Page) {
+  const compact = await page.locator('.compact-ticket-toolbar').count()
+  await page.getByRole('button', { name: compact ? /^Filter(?: tickets|:)/ : 'Filters', exact: !compact }).click()
+  await expect(page.getByRole('dialog', { name: 'Filters', exact: true })).toBeVisible()
+}
+export async function openListDisplay(page: Page) {
+  if (await page.locator('.compact-ticket-toolbar').count()) {
+    await page.getByRole('button', { name: 'More view actions', exact: true }).click()
+    await page.getByRole('menuitem', { name: 'Display…', exact: true }).click()
+  } else await page.getByRole('button', { name: /^Display:/ }).click()
+  await expect(page.getByRole('dialog', { name: 'Display options', exact: true })).toBeVisible()
+}
+export async function startTicketSelection(page: Page) {
+  if (await page.locator('.compact-ticket-toolbar').count()) {
+    await page.getByRole('button', { name: 'More view actions', exact: true }).click()
+    await page.getByRole('menuitem', { name: 'Select tickets', exact: true }).click()
+  } else await page.getByRole('button', { name: 'Select', exact: true }).click()
 }
