@@ -513,25 +513,6 @@ export function verificationWarning(terms: VerificationTerms | null): string | n
   return expected ? null : 'These verification limits differ from 1 request per selected harness, 1 run at a time on that harness, and a 60 second maximum. Review the server values before connecting.'
 }
 
-function countNoun(count: number, singular: string, plural: string): string {
-  return `${count} ${count === 1 ? singular : plural}`
-}
-
-/** Renders the server's terms. The cap of 1 is per selected harness, not one run for the whole computer. */
-export function formatVerification(terms: VerificationTerms, now = Date.now()): string {
-  const policy = terms.policy === 'read_only' ? 'Read-only. ' : ''
-  const allowance = terms.unit === 'requests'
-    ? countNoun(terms.allowance, 'request', 'requests')
-    : `${terms.allowance} ${terms.unit}`
-  const parallel = terms.max_parallel_runs === 1
-    ? '1 run at a time on that harness'
-    : `at most ${terms.max_parallel_runs} runs at a time on that harness`
-  const runs = terms.runs_per_account === 1 && terms.max_parallel_runs === 1
-    ? parallel
-    : `${countNoun(terms.runs_per_account, 'run', 'runs')} on that harness, ${parallel}`
-  return `${policy}${allowance} per selected harness, ${runs}, at most ${terms.max_duration_seconds} seconds, until ${formatAllowanceMoment(terms.expires_at, now)}. No repository changes or privileged actions. This is an ${product()} allowance, not the vendor subscription.`
-}
-
 export interface HarnessVerificationBlock {
   harness: string
   reason: string
