@@ -5,6 +5,7 @@ import (
 	"context"
 	"errors"
 	"net/http"
+	"strconv"
 	"time"
 
 	"github.com/inspr-at/paimos/internal/agentaccounts"
@@ -16,6 +17,9 @@ import (
 )
 
 const maxLeadDemand = 200
+
+// One past the cap so a full page is distinguishable from an exhausted queue.
+const leadCandidateLimit = maxLeadDemand + 1
 
 type leadDemand struct {
 	project, run string
@@ -79,21 +83,39 @@ func requireLeadWriterFreeTx(ctx context.Context, tx pgx.Tx, run string) error {
 	return nil
 }
 
-// Queue is the only work source. Read at most 201 small candidate rows and
-// refuse before leaf, pending, writer or dependency work. Those predicates are
-// volatile per row; evaluating them to discover overflow exceeds the scheduling
-// deadline and must not authorize a turn from a partial snapshot. A complete
-// candidate set is then filtered. Dependency blockers, incomplete criteria and
-// changed or non-leaf work cannot win a turn. Preserve manual/target order
-// inside a project at actual pickup.
+// Queue is the only work source. Each read is one bounded page. The cap counts
+// rows that remain after the leaf, pending and writer filters, so ineligible
+// rows in a large owner queue do not refuse scheduling. More than maxLeadDemand
+// rows that pass those filters fails closed; a short page is the whole rest of
+// the queue, and a timed-out read authorizes nothing. Dependency blockers,
+// incomplete criteria and changed work still cannot win a turn. Preserve
+// manual/target order inside a project at actual pickup.
 func leadQueueDemand(ctx context.Context, tx pgx.Tx, owner string) ([]leadDemand, error) {
-	staged, nodes, err := leadCandidateSnapshot(ctx, tx, owner)
-	if err != nil || len(staged) == 0 {
-		return staged, err
-	}
-	eligible, err := leadEligibleDemand(ctx, tx, staged, nodes)
-	if err != nil {
-		return nil, err
+	eligible := []leadDemand{}
+	var cursorAt time.Time
+	cursorID := "00000000-0000-0000-0000-000000000000"
+	hasCursor := false
+	for {
+		staged, nodes, err := leadCandidateSnapshot(ctx, tx, owner, hasCursor, cursorAt, cursorID)
+		if err != nil {
+			return nil, err
+		}
+		if len(staged) == 0 {
+			break
+		}
+		page, err := leadEligibleDemand(ctx, tx, staged, nodes)
+		if err != nil {
+			return nil, err
+		}
+		eligible = append(eligible, page...)
+		if len(eligible) > maxLeadDemand {
+			return nil, workorders.Fail(409, "lead scheduling snapshot exceeds bound")
+		}
+		if len(staged) < leadCandidateLimit {
+			break
+		}
+		last := staged[len(staged)-1]
+		cursorAt, cursorID, hasCursor = last.at, last.run, true
 	}
 	demands := []leadDemand{}
 	for _, d := range eligible {
@@ -104,7 +126,7 @@ func leadQueueDemand(ctx context.Context, tx pgx.Tx, owner string) ([]leadDemand
 	return demands, nil
 }
 
-const leadCandidateSQL = `SELECT n.project_id::text,r.id::text,r.queue_at,
+var leadCandidateSQL = `SELECT n.project_id::text,r.id::text,r.queue_at,
  (r.queue_routed_at IS NOT NULL),CASE WHEN octet_length(n.fields::text)<=65536 THEN n.fields END,
  n.id::text
  FROM agent_runs r JOIN nodes n ON n.tenant_id=r.tenant_id AND n.id=r.queue_node_id
@@ -113,10 +135,11 @@ const leadCandidateSQL = `SELECT n.project_id::text,r.id::text,r.queue_at,
  WHERE l.owner_principal_id=$1 AND project.deleted_at IS NULL AND project.state NOT IN ('frozen','archived')
  AND r.status='queued' AND n.deleted_at IS NULL AND n.state='open'
  AND (r.queue_routed_at IS NULL OR (r.trace->'project_lead'->>'session_id'=l.session_id::text AND r.trace->'project_lead'->>'generation'=l.generation::text))
- ORDER BY r.queue_at,r.id LIMIT 201`
+ AND (NOT $2::bool OR r.queue_at > $3::timestamptz OR (r.queue_at = $3::timestamptz AND r.id > $4::uuid))
+ ORDER BY r.queue_at,r.id LIMIT ` + strconv.Itoa(leadCandidateLimit)
 
-func leadCandidateSnapshot(ctx context.Context, tx pgx.Tx, owner string) ([]leadDemand, []string, error) {
-	rows, err := tx.Query(ctx, leadCandidateSQL, owner)
+func leadCandidateSnapshot(ctx context.Context, tx pgx.Tx, owner string, hasCursor bool, cursorAt time.Time, cursorID string) ([]leadDemand, []string, error) {
+	rows, err := tx.Query(ctx, leadCandidateSQL, owner, hasCursor, cursorAt, cursorID)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -129,13 +152,10 @@ func leadCandidateSnapshot(ctx context.Context, tx pgx.Tx, owner string) ([]lead
 		if err = rows.Scan(&d.project, &d.run, &d.at, &d.routed, &d.fields, &node); err != nil {
 			return nil, nil, err
 		}
-		// Field overflow is reported for the row that carries it, including the
-		// row that would otherwise be the snapshot overflow.
+		// Field overflow fails closed for the row that carries it, before that
+		// page can authorize a turn.
 		if d.fields == nil {
 			return nil, nil, workorders.Fail(409, "lead scheduling fields exceed bound")
-		}
-		if len(staged) == maxLeadDemand {
-			return nil, nil, workorders.Fail(409, "lead scheduling snapshot exceeds bound")
 		}
 		staged = append(staged, d)
 		nodes = append(nodes, node)
@@ -146,9 +166,11 @@ func leadCandidateSnapshot(ctx context.Context, tx pgx.Tx, owner string) ([]lead
 	return staged, nodes, nil
 }
 
-// Leaf and pending widen visibility the way aeon_work_leaf and aeon_work_pending
-// do, once for the whole bounded set. Writer and dependency checks stay on the
-// caller's visibility: those predicates do not widen it.
+// Leaf and pending run once for the page. withSchedulingSystem sets only
+// aeon.system. visible_projects='*' comes from the surrounding ownerSchedule
+// savepoint; these queries do not widen visibility the way aeon_work_leaf and
+// aeon_work_pending do. Writer and dependency checks stay outside that system
+// setting and do not widen visibility either.
 func leadEligibleDemand(ctx context.Context, tx pgx.Tx, staged []leadDemand, nodeIDs []string) ([]leadDemand, error) {
 	leaf := map[string]bool{}
 	pending := map[string]bool{}

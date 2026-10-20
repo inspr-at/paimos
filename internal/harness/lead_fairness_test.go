@@ -342,6 +342,64 @@ func TestLeadSchedulingBoundAndDependencies(t *testing.T) {
 	}
 }
 
+// Ineligible rows in a large owner queue do not spend the cap. Two hundred
+// and one queued parents, each given a work child after the run exists, stay
+// ahead of one eligible leaf and must not refuse its turn.
+func TestLeadSchedulingCapSkipsNonLeafQueue(t *testing.T) {
+	f := projectLeadFixture(t, readyLeadChecks)
+	_, _, _ = fairWorking(t, f)
+	at := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
+	run := fairQueue(t, f, at)
+	f.tx(t, f.person, func(tx pgx.Tx) error {
+		_, err := tx.Exec(t.Context(), `WITH added AS (
+ INSERT INTO nodes(tenant_id,key,kind_id,title,parent_id,fields)
+ SELECT $1,'FILTER-'||i,k.id,'Filtered demand',$2,'{"estimate_hours":1,"acceptance_criteria":["B"]}'::jsonb
+ FROM generate_series(1,201) i CROSS JOIN node_kinds k WHERE k.slug='work' RETURNING id,key
+) INSERT INTO agent_runs(tenant_id,work_order_id,agent_principal_id,queue_node_id,queue_by_principal_id,queue_at,queue_security_review_required,trace)
+ SELECT r.tenant_id,r.work_order_id,r.agent_principal_id,added.id,r.queue_by_principal_id,timestamp '2025-12-01 00:00:00+00',false,'{}'::jsonb
+ FROM added CROSS JOIN agent_runs r WHERE r.id=$3`, f.person.TenantID, f.project, run)
+		return err
+	})
+	// A queued leaf cannot gain a work child. The runs are inserted while the
+	// parents are leaves; the child insert is the only statement with the
+	// trigger off, and the trigger is on again before this transaction commits.
+	f.tx(t, f.person, func(tx pgx.Tx) error {
+		if _, err := tx.Exec(t.Context(), `ALTER TABLE nodes DISABLE TRIGGER nodes_busy_work_child`); err != nil {
+			return err
+		}
+		if _, err := tx.Exec(t.Context(), `INSERT INTO nodes(tenant_id,key,kind_id,title,parent_id)
+ SELECT $1,'CHILD-'||i,k.id,'Filtered child',p.id
+ FROM generate_series(1,201) i
+ JOIN nodes p ON p.tenant_id=$1 AND p.key='FILTER-'||i
+ CROSS JOIN node_kinds k WHERE k.slug='work'`, f.person.TenantID); err != nil {
+			return err
+		}
+		_, err := tx.Exec(t.Context(), `ALTER TABLE nodes ENABLE TRIGGER nodes_busy_work_child`)
+		return err
+	})
+	var parents int
+	f.tx(t, f.person, func(tx pgx.Tx) error {
+		return tx.QueryRow(t.Context(), `SELECT count(*) FROM agent_runs r
+ JOIN nodes n ON n.tenant_id=r.tenant_id AND n.id=r.queue_node_id
+ WHERE r.status='queued' AND r.queue_at < $1
+ AND EXISTS(SELECT 1 FROM nodes c JOIN node_kinds ck ON ck.tenant_id=c.tenant_id AND ck.id=c.kind_id
+  WHERE c.parent_id=n.id AND c.deleted_at IS NULL AND ck.slug='work')`, at).Scan(&parents)
+	})
+	if parents != 201 {
+		t.Fatalf("non-leaf queue rows=%d", parents)
+	}
+	f.tx(t, f.person, func(tx pgx.Tx) error {
+		reason, err := harness.LeadDispatchTurnTx(t.Context(), tx, f.agent, f.project, run, readyLeadChecks)
+		if err != nil {
+			return err
+		}
+		if reason != "" {
+			t.Fatalf("ineligible queue rows refused the eligible leaf: %s", reason)
+		}
+		return nil
+	})
+}
+
 type leadSQLTrace struct {
 	sql []string
 }
