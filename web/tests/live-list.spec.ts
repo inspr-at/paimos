@@ -27,6 +27,14 @@ async function deleteInPanel(page: Page, key: string) {
   await page.getByRole('dialog', { name: `Delete ${key}?` }).getByRole('button', { name: 'Delete ticket' }).click()
   await expect(page).toHaveURL('/p/PHAROS/tickets')
 }
+// The heading can render before the project's permissions arrive, and an
+// early one-shot p is ignored while Priority is still disabled. Press it on
+// the enabled Priority control, outside any text field.
+async function pressPriority(page: Page) {
+  const priority = panel(page).getByRole('button', { name: /^Priority:/ })
+  await expect(priority).toBeEnabled()
+  await priority.press('p')
+}
 
 test('a ticket closed elsewhere dims in place, then leaves by itself when nothing is going on', async ({ browser }) => {
   const { a, b, errorsA, close } = await openBoth(browser, '/p/PHAROS/tickets')
@@ -116,7 +124,7 @@ test('bulk and inline changes that meet a newer version are conflicts with Revie
     live.hold('a')
     await b.goto('/p/PHAROS/PHAROS-12')
     await expect(panel(b).getByRole('heading', { name: 'Add an Oracle Cloud connector' })).toBeVisible()
-    await b.keyboard.press('p')
+    await pressPriority(b)
     await b.getByRole('menu', { name: 'Priority of PHAROS-12' }).getByRole('menuitemradio', { name: 'High' }).click()
     await expect(panel(b).getByRole('button', { name: /Priority: High/ })).toBeVisible()
 
@@ -157,7 +165,7 @@ test('a selected row keeps the version A saw: a bulk change meets the newer one 
     for (const id of ['n-2', 'n-4']) await a.locator(`#row-${id} .row-check`).check()
     await b.goto('/p/PHAROS/PHAROS-12')
     await expect(panel(b).getByRole('heading', { name: 'Add an Oracle Cloud connector' })).toBeVisible()
-    await b.keyboard.press('p')
+    await pressPriority(b)
     await b.getByRole('menu', { name: 'Priority of PHAROS-12' }).getByRole('menuitemradio', { name: 'High' }).click()
 
     // A: the selected row waits as changed, with the priority A saw.
@@ -186,12 +194,7 @@ test('the row under an open editor keeps its revision: saving meets the change a
 
     await b.goto('/p/PHAROS/PHAROS-12')
     await expect(panel(b).getByRole('heading', { name: 'Add an Oracle Cloud connector' })).toBeVisible()
-    // The heading can render before the project's permissions arrive. Bind
-    // the shortcut to B's enabled Priority control, outside any text field;
-    // an early one-shot key is ignored while that control is still disabled.
-    const priority = panel(b).getByRole('button', { name: /^Priority:/ })
-    await expect(priority).toBeEnabled()
-    await priority.press('p')
+    await pressPriority(b)
     await b.getByRole('menu', { name: 'Priority of PHAROS-12' }).getByRole('menuitemradio', { name: 'High' }).click()
     await expect(panel(b).getByRole('button', { name: /Priority: High/ })).toBeVisible()
 
