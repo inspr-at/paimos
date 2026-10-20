@@ -6,6 +6,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"path/filepath"
 	"reflect"
 	"slices"
 	"time"
@@ -168,6 +169,25 @@ func (a Authority) RequireNativeGrantTx(ctx context.Context, tx pgx.Tx, actor na
 	}
 	c.Policy.ExpiresAt = pinned.ExpiresAt
 	if c.Policy != pinned {
+		return refuse(nativecontract.ReasonPermissionRevoked)
+	}
+	return nil
+}
+
+// RequireLocalProfileTx is the final launch/input guard after the owning local
+// resolver has checked physical directory identity. Workspace IDs alone cannot
+// authorize a newly mapped root. This callback performs no filesystem I/O.
+func (a Authority) RequireLocalProfileTx(ctx context.Context, tx pgx.Tx, actor nativecontract.Actor, intent nativecontract.StartIntent, pinned nativecontract.Policy, profile nativecontract.LocalProfile, cwd string) error {
+	if err := a.RequireNativeGrantTx(ctx, tx, actor, intent, pinned); err != nil {
+		return err
+	}
+	c, err := a.CurrentTx(ctx, tx, actor, intent, "", SessionScope)
+	if err != nil {
+		return err
+	}
+	relative, err := filepath.Rel(c.WorkspaceRoot, cwd)
+	if err != nil || profile.AccountID != c.AccountID || profile.WorkspaceRoot != c.WorkspaceRoot ||
+		!filepath.IsAbs(cwd) || relative == ".." || len(relative) > 3 && relative[:3] == ".."+string(filepath.Separator) {
 		return refuse(nativecontract.ReasonPermissionRevoked)
 	}
 	return nil

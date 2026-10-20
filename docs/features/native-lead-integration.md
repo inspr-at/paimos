@@ -147,10 +147,10 @@ composition source, rather than permission to edit the granted helpers:
 
 | Boundary | Remaining work and safety requirement |
 | --- | --- |
-| Current native consent source; `internal/nativesessions/store/types.go`, `internal/agentaccounts/native_session.go`, `internal/nativequalification/policy.go` | The production implementation of current person-native/tool/settings/workspace/history consent is absent. Store `Authority` and `RequireNativeGrantTx` remain mandatory ports; stored intent policy is only a pin. Existing `agent_permission_grants` represents agent permission approvals, with no person-native policy/history/retention facts. The consent source, revocation rules and any owning contract/schema need an explicit scoped implementation before these ports can be installed. Approval/storage/schema changes are outside this write set; no consent or migration was invented. |
+| Current native consent source; `internal/nativesessions/consent`, `internal/nativesessions/store/types.go`, `internal/agentaccounts/native_session.go` | AEON-1346 implements `consent.Authority` for Store authorization and `RequireNativeGrantTx`. The exact `harness.control.native.session` approval anchors immutable facts in migration 1386; only a current person session owning the paired computer/account can approve. No approval, denial, revocation, stale revision, another person, changed policy or computer fail closed. The existing paired-start regression now uses actual approvals and the production authority. `RequireLocalProfileTx` additionally compares the resolved physical workspace root and cwd to consent; production launch/input composition must install that check. These ports are not enabled on a host. |
 | `internal/nativeintegration/pilot.go`, `cmd/aeon/serve.go` | Compose the real start Store with command/control, receipt, private daemon-proof, relay and final-drain authorities into C0 `Store`/`Services`. The start store alone lacks the complete command/report interface. The default-off constructor and the owned delivery component are present; production ports remain uninstalled. |
 | `internal/agentd/native_session.go`, `native_transport.go`, `adapters.go`, `claudeassets/bridge.mjs`, `cmd/aeon-agentd/paired_serve.go` | Install a qualified person-issued C0 Host/Launcher and exact native input/turn/event/final adapter. The existing core still uses normalized legacy chat relay callbacks; those cannot be borrowed by the issued daemon key for native final publication. SDK input correlation is retained, but no full C0 provider-event/current-final publisher is installed. Exact native evidence must not be inferred from token text. |
-| `internal/nativesessions/receipts/repository.go`, `final.go`, `internal/nativeintegration/pilot.go` | Supply production `ReceiptTx`/`ReadTx`/`FinalTx` implementations for current pairing, authoritative command/input/exit proof, exact drain grant and separately current retention consent. Tests provide bounded fake authorities; no permissive production replacement is provided. |
+| `internal/nativesessions/receipts/current.go`, `repository.go`, `final.go`, `internal/nativeintegration/pilot.go` | AEON-1346 implements production `CurrentAuthority` for `ReceiptTx`/`ReadTx`/`FinalTx`: original person/current grant, exact binding, issued pairing key, enrollment, generation, worker-lease digest, original operation metadata and exact provider input/turn/exit evidence. Migration 1387 adds immutable content-free operation metadata and non-renewable final-drain grants. Finals independently re-read a separate `harness.control.native.retention` approval. The real daemon proof exporter and command/drain registration callbacks still need composition; `WithRuntimeProof` is private in-memory authority, never a public-body substitute. |
 | `cmd/aeon/openapi_test.go` | The full fresh-checkout command suite needs its generated OpenAPI prerequisite prepared before tests; the file is outside this write set. Static generates/checks the bundle and passes, but the standalone command suite is not reported green. |
 | `internal/nativesessions/start/start.go`, `internal/agentd/native_after_exit.go`, `native_session.go`, `internal/nativeintegration/pilot.go` | Connect the existing pinned source-exit/one-writer mechanism to C0's resume/after-exit fields and a fresh current claim. The owning first-start helper still refuses resume/after-exit. This owning start helper is outside the current grant, and changing it must retain exact source identity and confirmed group exit. CLI serialization alone is not self-handover proof. |
 
@@ -160,15 +160,77 @@ exit delivery section and detach independence, **not** the missing production
 first-start Store/Host/Launcher or the complete P1a SDK/supervisor path. The full
 A5 start-to-exit smoke remains incomplete until those dependencies are composed.
 
+## AEON-1346 consent implementation and remaining composition
+
+The native scope names are `harness.control.native.session` and
+`harness.control.native.retention`, both refinements of the existing
+`harness.control` key ceiling. No permission or runtime-key ceiling is added.
+An agent proposes for itself through AEON-29. The server appends all choices to
+`rationale`, so the existing Desk/phone card shows the facts without a new UI or
+changing the pinned `Approval` response. The additive proposal schema is
+`NativeConsentApprovalProposal` in `api/areas/approvals.yaml`.
+
+Migration **1386** adds nullable `approval_requests.native_consent` and the
+RLS table `native_session_consents`. The facts columns are `computer_id`,
+`account_id`, `workspace_id`, `workspace_root`, `model_profile_id`, `tool_set`,
+`settings_profile`, `local_history`, `retain_finals`, `revision`,
+`maximum_runtime_seconds`, `maximum_turns` and `maximum_tokens`; the anchor and
+attribution columns are `tenant_id`, `grant_id`, `owner_person_id`,
+`agent_principal_id`, `project_id` and `created_at`. A grant trigger copies the
+immutable proposal only after a person-approved decision, in the same
+transaction as the grant and `approval.approved`; denial never creates facts.
+A second database guard refuses agent native decisions even under the existing
+owner-workstation exception. Facts are immutable; changing them requires a new
+approval ID. Current reads lock and re-read the live grant rather than trusting
+the intent's policy or revision.
+
+Migration **1387** is additionally needed because receipt projections cannot be
+their own command/publication authority. `native_session_operations` stores
+bounded, immutable original-operation metadata, with no input text.
+`native_session_drain_grants` pins the exact binding, original consent revision,
+separate retention approval, private chat target, deadline and final/byte caps.
+Issuing the same target/retention context returns the existing window. These
+expansions enable no runtime and retain no worker proof or final text.
+
+Remaining first-build work is **production composition**, not consent invention:
+install the real current workspace check, C0 Host/Launcher and daemon
+`StartLocal`, private receipt proof exporter, command/drain registration and
+exact provider final adapter; run the complete start-to-confirmed-exit A5 smoke
+with those ports. `NativeLocalStart` contains the original start request but no
+operation ID, while claim selects the persisted operation ID and the pending
+command contract excludes starts; an owning resolver must bridge this without
+impersonating the person or enlarging the issued daemon key. Explicit daemon
+CLI enablement also needs `cmd/aeon-agentd/main.go`, which owns the serve flag
+parser and rejects paired runtime overrides; that file is outside this brief's
+write set. No flag, environment switch, host restart or permissive fallback was
+introduced. Both existing production defaults remain off, and automatic
+LeadRuntime is unchanged.
+
+R0 additions in this round are exactly:
+
+- DSAR classification: `approval_requests.native_consent`,
+  `native_session_consents`, `native_session_operations`,
+  `native_session_drain_grants` in `internal/dsar/inventory.json`.
+- DSAR adapters: add `native_consent` to the existing `approval_requests` review
+  allowlist and add one adapter each for those three new tables in
+  `internal/dsar/adapter_inventory.json`.
+- ESSENTIAL Go rows:
+  `internal/approvals/TestNativeConsentRequiresCurrentPersonApproval` and
+  `internal/nativesessions/receipts/TestProductionReceiptAuthorityRechecksConsentAndExactEvidence`.
+  The existing paired-start test is strengthened in place. Existing native and
+  approvals source globs cover ownership; no permission label, built-in agent
+  exclusion, key-scope ceiling, new route, production fence-caller, web-tier or
+  shard row is added.
+
 ## Acceptance handoff
 
 | Item | Result |
 | --- | --- |
-| A1: C0 Host/Launcher, start Store, relay, receipts/final sink and attach wiring | PARTIAL. All Round 5 dependency helpers are fixed; the owned delivery component is implemented/proven. Current consent/receipt/drain authorities and complete production Store/Host/Launcher composition are absent. |
+| A1: C0 Host/Launcher, start Store, relay, receipts/final sink and attach wiring | PARTIAL. Current consent and receipt/drain transaction authorities are implemented in AEON-1346, alongside the prior owned delivery component. Complete production Store/Host/Launcher, private proof and command/drain issuance composition remain uninstalled; full start-to-exit evidence is still required. |
 | A2: person-invoked native path separate from automatic LeadRuntime | PARTIAL. The real paired claim keeps original-person authority separate; C0 CLI/local start selects the persisted person-issued intent. Production `StartLocal` and supervisor ports remain uninstalled; automatic LeadRuntime stays disabled. |
 | A3: native roots in legacy account/host admission; exact root context | PASS AT THE IMPLEMENTED BOUNDARIES. Fresh remote claim/root, full accounts, pairing and harness suites pass, including actual person capacity approval and exact issued-bearer authentication/control refusal. All four guard-removal controls fail their precise assertions. No live-pilot qualification is claimed. |
 | A4: default account, confined adapter and legacy CLI compatibility; inventories | PASS AT THE IMPLEMENTED BOUNDARIES. Full CLI, attach and daemon suites pass; the canonical manifest and guarded static checks pass. One own ESSENTIAL test row is added; no role/key ceiling, permission or schema changed. |
-| A5: fake start/input/exact turn/explicit final/interrupt/confirmed exit; detach survives | PARTIAL. The new registered-writer delivery smoke and disconnected-report negative control are proven remotely. Full production first-start and P1a SDK/supervisor composition remain incomplete. |
+| A5: fake start/input/exact turn/explicit final/interrupt/confirmed exit; detach survives | PARTIAL. The registered-writer delivery smoke and disconnected-report control retain their prior evidence. AEON-1346 adds a production receipt/final-authority regression and strengthens paired start with actual person consent; full production first-start and SDK/supervisor composition remain incomplete. |
 | A6: concrete disabled pilot for coordinator self-handover | PARTIAL. Default-off production mount and refusal test pass. C0 intent/exit-barrier serialization is concrete; current grant ports and C0 pinned after-exit launch composition are still required. No live handover or enablement. |
 
 Z1's validated person-only `terminal_viewer_url` remains in the C0 projection

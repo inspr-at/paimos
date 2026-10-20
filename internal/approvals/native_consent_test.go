@@ -117,6 +117,11 @@ func TestNativeConsentRequiresCurrentPersonApproval(t *testing.T) {
 	}
 
 	pending := propose(consent.SessionScope)
+	otherPerson := insertPrincipal(t, f.db.Admin, f.tenantA, tenant.Person, "other-native-person")
+	dbtest.BindRole(t, f.db, f.tenantA, otherPerson.ID, "admin")
+	if w := f.do(otherPerson, "", "POST", "/api/approvals/"+pending.ID+"/decision", `{"decision":"approved"}`); w.Code != 403 {
+		t.Fatalf("another person approved computer owner's consent: %d %s", w.Code, w.Body.String())
+	}
 	intent.PolicyID = pending.ID
 	if countFacts(pending.ID) != 0 {
 		t.Fatal("proposal created consent")
@@ -131,6 +136,35 @@ func TestNativeConsentRequiresCurrentPersonApproval(t *testing.T) {
 	var pe *pgconn.PgError
 	if !errors.As(err, &pe) || pe.Code != "P0001" || !strings.Contains(pe.Message, "only a person") {
 		t.Fatalf("DB agent decision: %v", err)
+	}
+	// Establish the old marked-agent exception with an ordinary approval first,
+	// then prove that the same DB authority still cannot decide native consent.
+	err = db.InTenant(dbtest.Seed(ctx), f.db.App, f.tenantA, func(tx pgx.Tx) error {
+		var markedKey string
+		if err := tx.QueryRow(ctx, `SELECT id::text FROM agent_keys WHERE tenant_id=$1 AND principal_id=$2 ORDER BY id LIMIT 1`, f.tenantA, f.agentB.ID).Scan(&markedKey); err != nil {
+			return err
+		}
+		request, computer, ordinary := uuid.NewString(), uuid.NewString(), uuid.NewString()
+		for _, q := range []struct {
+			sql  string
+			args []any
+		}{
+			{`INSERT INTO agent_pairing_requests(tenant_id,id,user_code,device_hash,runtime_hash,lifecycle_hash,details,request_digest,state,approved_by) VALUES($1,$2,'135792468',$3,$3,$3,'{}','marked-native-control','redeemed',$4)`, []any{f.tenantA, request, strings.Repeat("e", 64), f.personA.ID}},
+			{`INSERT INTO agent_pairing_computers(tenant_id,id,request_id,principal_id,key_id,daemon_id,lifecycle_hash,local_auth_public_key) VALUES($1,$2,$3,$4,$5,'marked-native-control',$6,$7)`, []any{f.tenantA, computer, request, f.agentB.ID, markedKey, strings.Repeat("e", 64), strings.Repeat("A", 87) + "="}},
+			{`UPDATE agent_keys SET owner_workstation=true,workstation_computer_id=$2,workstation_generation=1,scopes=array_append(scopes,'approvals.decide') WHERE id=$1`, []any{markedKey, computer}},
+			{`SELECT set_config('aeon.owner_workstation_key',$1,true)`, []any{markedKey}},
+			{`INSERT INTO approval_requests(tenant_id,id,proposed_by_principal_id,agent_principal_id,scope,resource_kind,resource_id,rationale,expires_at) VALUES($1,$2,$3,$3,'nodes.read','node',$4,'ordinary exception control',$5)`, []any{f.tenantA, ordinary, f.agentA.ID, project, now.Add(time.Hour)}},
+			{`INSERT INTO approval_decisions(tenant_id,request_id,decided_by_principal_id,decision) VALUES($1,$2,$3,'denied')`, []any{f.tenantA, ordinary, f.agentB.ID}},
+		} {
+			if _, err := tx.Exec(ctx, q.sql, q.args...); err != nil {
+				return err
+			}
+		}
+		_, err := tx.Exec(ctx, `INSERT INTO approval_decisions(tenant_id,request_id,decided_by_principal_id,decision) VALUES($1,$2,$3,'denied')`, f.tenantA, pending.ID, f.agentB.ID)
+		return err
+	})
+	if !errors.As(err, &pe) || pe.Code != "P0001" || !strings.Contains(pe.Message, "only a person may decide native consent") {
+		t.Fatalf("DB marked-agent native decision: %v", err)
 	}
 	if w := f.do(f.agentA, key, "POST", "/api/approvals/"+pending.ID+"/decision", `{"decision":"approved"}`); w.Code != 403 {
 		t.Fatalf("agent decision HTTP %d", w.Code)
@@ -175,7 +209,7 @@ func TestNativeConsentRequiresCurrentPersonApproval(t *testing.T) {
 	changed.GrantRevision++
 	wantReason(check(changed, intent, current.Policy), nativecontract.ReasonPermissionRevoked)
 	changed = actor
-	changed.PrincipalID = f.agentB.ID
+	changed.PrincipalID = otherPerson.ID
 	wantReason(check(changed, intent, current.Policy), nativecontract.ReasonPermissionRevoked)
 	otherComputer := intent
 	otherComputer.ComputerID = uuid.NewString()
@@ -183,6 +217,18 @@ func TestNativeConsentRequiresCurrentPersonApproval(t *testing.T) {
 	changedPolicy := current.Policy
 	changedPolicy.ToolPolicyDigest = strings.Repeat("f", 64)
 	wantReason(check(actor, intent, changedPolicy), nativecontract.ReasonPermissionRevoked)
+	checkProfile := func(root string) error {
+		return db.InTenant(tenant.WithPrincipal(ctx, f.personA), f.db.App, f.tenantA, func(tx pgx.Tx) error {
+			if err := db.LockCurrentTree(ctx, tx); err != nil {
+				return err
+			}
+			return authority.RequireLocalProfileTx(ctx, tx, actor, intent, current.Policy, nativecontract.LocalProfile{AccountID: account, WorkspaceRoot: root}, facts.WorkspaceRoot+"/child")
+		})
+	}
+	if err := checkProfile(facts.WorkspaceRoot); err != nil {
+		t.Fatal(err)
+	}
+	wantReason(checkProfile("/another/root"), nativecontract.ReasonPermissionRevoked)
 
 	retention := propose(consent.RetentionScope)
 	decide(retention, "approved")
