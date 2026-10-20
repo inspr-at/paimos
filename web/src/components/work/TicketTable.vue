@@ -615,12 +615,16 @@ let viewportShrunk = false
 function measureSoon() {
   const inner = window.innerWidth
   const grew = inner > lastInner + 0.5
+  // The paired visualViewport event reports the same width. Starting another
+  // sample window there cancels the one this resize already started, and the
+  // list clock never finishes the replacement (AEON-1594).
+  const changed = grew || inner < lastInner - 0.5
   viewportShrunk = pendingViewportShrink(inner, lastInner, viewportShrunk)
   lastInner = inner
   const before = width.value
   const live = readCardWidth()
   if (live !== null) width.value = nextMeasuredCardWidth(before, live, grew)
-  settleCardWidth(grew, before)
+  if (changed) settleCardWidth(grew, before)
 }
 const phoneChange = () => { narrowPhone.value = phoneQuery.matches }
 const coarseChange = () => { coarse.value = coarseQuery.matches }
