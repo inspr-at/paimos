@@ -11,41 +11,44 @@ import { fixtures, mockWork, watchErrors } from './work-fixtures'
 type Language = 'en' | 'de'
 const COMPUTER = '33333333-3333-4333-8333-333333333333'
 const DIGEST = 'ab'.repeat(32)
-const ACCOUNT = 'markus.barta@augmentoring.com'
+// Neutral fixtures: public sources name no operator host and no business domain.
+const ACCOUNT = 'ada@example.com'
+const CODEX_ACCOUNT = 'codex@example.com'
+const HOST = 'desk'
 const claude = { account_key: 'claude-1', harness: 'claude', label: ACCOUNT }
-const codex = { account_key: 'codex-1', harness: 'codex', label: 'codex@augmentoring.com' }
+const codex = { account_key: 'codex-1', harness: 'codex', label: CODEX_ACCOUNT }
 const verifiable = {
   claude: { supported: true, policy: 'no_tools', reason: '' },
   codex: { supported: false, policy: 'unavailable', reason: 'Codex verification is unavailable.' },
 }
 // An add-harness request for an already paired computer (existing_computer_id).
-const addOne = { existing_computer_id: COMPUTER, computer_name: 'mbp2607', requested_accounts: [claude], verification_capabilities: verifiable }
+const addOne = { existing_computer_id: COMPUTER, computer_name: HOST, requested_accounts: [claude], verification_capabilities: verifiable }
 const addTwo = { ...addOne, requested_accounts: [claude, codex] }
 
 const COPY = {
   en: {
-    addOne: `Add Claude Code (${ACCOUNT}) to mbp2607?`,
-    addTwo: 'Add Claude Code and Codex to mbp2607?',
+    addOne: `Add Claude Code (${ACCOUNT}) to ${HOST}?`,
+    addTwo: `Add Claude Code and Codex to ${HOST}?`,
     pair: 'Pair studio with INSPR?',
     factsOn: 'Verification on · Agents enabled after connecting · change in Details',
     factsOff: 'Verification off · Agents enabled after connecting · change in Details',
     role: 'Admins can start runs on this computer',
     add: 'Add', pairButton: 'Pair', deny: 'Deny',
-    expired: 'The request to add Claude Code to mbp2607 expired.',
-    expiredNext: 'Run aeon-agentd add-harness --harness claude on mbp2607 to ask again.',
+    expired: `The request to add Claude Code to ${HOST} expired.`,
+    expiredNext: `Run aeon-agentd add-harness --harness claude on ${HOST} to ask again.`,
     denied: 'Pairing studio with INSPR was denied.',
     deniedNext: "Run aeon-agentd pair --url 'https://aeon.example' on studio to ask again.",
   },
   de: {
-    addOne: `Claude Code (${ACCOUNT}) zu mbp2607 hinzufügen?`,
-    addTwo: 'Claude Code und Codex zu mbp2607 hinzufügen?',
+    addOne: `Claude Code (${ACCOUNT}) zu ${HOST} hinzufügen?`,
+    addTwo: `Claude Code und Codex zu ${HOST} hinzufügen?`,
     pair: 'studio mit INSPR koppeln?',
     factsOn: 'Prüfung an · Agents nach dem Verbinden aktiv · in Details änderbar',
     factsOff: 'Prüfung aus · Agents nach dem Verbinden aktiv · in Details änderbar',
     role: 'Admins können auf diesem Computer Läufe starten',
     add: 'Hinzufügen', pairButton: 'Koppeln', deny: 'Ablehnen',
-    expired: 'Die Anfrage, Claude Code zu mbp2607 hinzuzufügen, ist abgelaufen.',
-    expiredNext: 'Zum erneuten Anfragen aeon-agentd add-harness --harness claude auf mbp2607 ausführen.',
+    expired: `Die Anfrage, Claude Code zu ${HOST} hinzuzufügen, ist abgelaufen.`,
+    expiredNext: `Zum erneuten Anfragen aeon-agentd add-harness --harness claude auf ${HOST} ausführen.`,
     denied: 'Das Koppeln von studio mit INSPR wurde abgelehnt.',
     deniedNext: "Zum erneuten Anfragen aeon-agentd pair --url 'https://aeon.example' auf studio ausführen.",
   },
@@ -175,7 +178,7 @@ for (const [language, theme] of [['en', 'light'], ['de', 'light'], ['de', 'dark'
     const { calls, review } = await open(page, language, addOne, undefined, theme)
     await expect(review.locator('[data-review-title]')).toHaveText(copy.addOne)
     await expect(review.locator('[data-review-title] .acct')).toHaveText(`(${ACCOUNT})`)
-    await expect(review.locator('[data-review-title] .host')).toHaveText('mbp2607')
+    await expect(review.locator('[data-review-title] .host')).toHaveText(HOST)
     await expect(review.locator('[data-review-facts]')).toHaveText(copy.factsOn)
     await expect(review.locator('[data-review-role]')).toHaveText(copy.role)
     await expect(review.locator('details.more')).toHaveJSProperty('open', false)
@@ -210,7 +213,7 @@ test('AEON-1502 several harnesses 1280x800 en and de: one row per harness under 
     const copy = COPY[language]
     const { review } = await open(page, language, addTwo)
     await expect(review.locator('[data-review-title]')).toHaveText(copy.addTwo)
-    await expect(review.locator('.who li')).toHaveText([/Claude Code\s*markus\.barta@augmentoring\.com/, /Codex\s*codex@augmentoring\.com/])
+    await expect(review.locator('.who li')).toHaveText([/Claude Code\s*ada@example\.com/, /Codex\s*codex@example\.com/])
     const fit = await fitsWithoutScrolling(page, review)
     expect(fit.bottom).toBeLessThanOrEqual(fit.viewport)
     expect(await sentences(review)).toEqual([copy.factsOn, copy.role])

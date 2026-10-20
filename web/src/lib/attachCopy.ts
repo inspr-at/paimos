@@ -128,15 +128,16 @@ export function pairingCopy(language: DisplayLanguage, product: string) {
       ? 'Anmeldungen bei Anbietern und Projektdateien bleiben auf dem Computer; Verbindungsgeheimnisse bleiben aus dem Browser. Das Koppeln gibt keine Berechtigung zum Starten von Läufen; das entscheiden die Rollen pro Computer.'
       : 'Vendor sign-ins and project files stay on the computer; connection secrets stay out of the browser. Pairing grants no permission to start runs; roles on each computer decide.',
     where: de ? 'Wo die Konten arbeiten dürfen' : 'Where accounts may work',
-    whereNowhere: de ? 'Noch nirgends · vor der ersten Nutzung in Einstellungen › Konten erlauben' : 'Nowhere yet · allow in Settings › Accounts before first use',
+    // The place is spelled out. A text chevron would stand in for an icon.
+    whereNowhere: de ? 'Noch nirgends · vor der ersten Nutzung unter Konten in Einstellungen erlauben' : 'Nowhere yet · allow on Accounts in Settings before first use',
     // Only the first page of contexts was read when `partial`: the count is a lower bound.
     whereSome: (names: readonly string[], more: number, partial: boolean) => {
       const rest = more > 0 ? `${more}${partial ? '+' : ''} ${de ? 'weitere' : 'more'}` : partial ? (de ? 'weitere' : 'more') : ''
       const shown = rest ? [...names, rest] : names
-      return de ? `${list(shown)} · in Einstellungen › Konten änderbar` : `${list(shown)} · change in Settings › Accounts`
+      return de ? `${list(shown)} · unter Konten in Einstellungen änderbar` : `${list(shown)} · change on Accounts in Settings`
     },
-    whereRule: de ? 'Die Regel des Arbeitsbereichs entscheidet · Einstellungen › Konten' : 'The workspace rule decides · Settings › Accounts',
-    whereFailed: de ? 'Regel nicht lesbar; sie gilt trotzdem · nach dem Verbinden in Einstellungen › Konten prüfen' : 'The workspace rule could not be read; it still applies · check Settings › Accounts after connecting',
+    whereRule: de ? 'Die Regel des Arbeitsbereichs entscheidet · Konten in Einstellungen' : 'The workspace rule decides · Accounts in Settings',
+    whereFailed: de ? 'Regel nicht lesbar; sie gilt trotzdem · nach dem Verbinden unter Konten in Einstellungen prüfen' : 'The workspace rule could not be read; it still applies · check Accounts in Settings after connecting',
     whereReading: de ? 'Regel des Arbeitsbereichs wird gelesen…' : 'Reading the workspace rule…',
     expiredAdd: (harnesses: readonly string[], computer: string) => de ? `Die Anfrage, ${list(harnesses)} zu ${computer} hinzuzufügen, ist abgelaufen.` : `The request to add ${list(harnesses)} to ${computer} expired.`,
     expiredPair: (computer: string, workspace: string) => de ? `Die Anfrage, ${computer} mit ${workspace} zu koppeln, ist abgelaufen.` : `The request to pair ${computer} with ${workspace} expired.`,

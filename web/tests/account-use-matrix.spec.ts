@@ -509,7 +509,7 @@ test('the pairing review shows the rows the rule pre-fills', async ({ page }) =>
   await review.locator('details.more > summary').click()
   const preview = review.locator('[data-pairing-use]')
   await expect(preview.locator('dt')).toHaveText('Where accounts may work')
-  await expect(preview.locator('dd')).toHaveText('Default and Acme client work · change in Settings › Accounts')
+  await expect(preview.locator('dd')).toHaveText('Default and Acme client work · change on Accounts in Settings')
   expect(w.writes).toEqual([])
 })
 

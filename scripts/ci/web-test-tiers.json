@@ -16070,6 +16070,8 @@
     ,
     {"kind":"node","file":"tests/arrival.test.ts","name":"the hold is bounded: it ends after its window, when the target leaves, or when the page lets it go","tier":"ESSENTIAL"}
     ,
+    {"kind":"node","file":"tests/attach-copy.test.ts","name":"AEON-1502 where-lines name Accounts in Settings without a text chevron","tier":"ESSENTIAL"}
+    ,
     {"kind":"node","file":"tests/attach-copy.test.ts","name":"pairing and a session link stay separate in the app language for English and German profiles","tags":["delete-candidate"],"tier":"GATED-FULL"}
     ,
     {"kind":"node","file":"tests/attach-flow-scope.test.ts","name":"AttachApproval.vue continues only through synchronous identity callbacks","tier":"GATED-FULL"}
