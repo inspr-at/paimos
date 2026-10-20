@@ -82,7 +82,7 @@ export function pairingCopy(language: DisplayLanguage, product: string) {
     otherCode: de ? 'Anderen Code verwenden' : 'Use a different code',
     newComputer: de ? 'Als neuen Computer prüfen' : 'Review as a new computer',
     notSignedIn: de ? 'Nicht angemeldet' : 'Not signed in',
-    leftOut: de ? 'weggelassen' : 'left out',
+    accounts: (count: number) => de ? `${count} Konten` : `${count} accounts`,
     details: 'Details',
     workspace: de ? 'Arbeitsbereich' : 'Workspace',
     folder: de ? 'Ordner' : 'Folder',

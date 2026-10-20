@@ -437,12 +437,10 @@ function signedOut(view: PairingView | null, harness: string) {
   return !!view && (view.harness_details?.[harness]?.state === 'login_required' || view.harness_statuses?.[harness] === 'login_required')
 }
 
-/** The account a harness connects with: the selected ones, or the only one found. */
+/** The accounts the computer found for a harness: its login, or a count. It never follows Details choices, so nothing above them moves. */
 function accountName(harness: string) {
   const accounts = current.value?.requested_accounts.filter(account => account.harness === harness) ?? []
-  const chosen = accounts.filter(account => selected.value.includes(account.account_key)).map(account => account.label)
-  if (chosen.length) return chosen.join(', ')
-  return accounts.length === 1 ? accounts[0]!.label : ''
+  return accounts.length === 1 ? accounts[0]!.label : words.value.accounts(accounts.length)
 }
 
 function selectedKey(harness: string) {
@@ -647,7 +645,7 @@ function enrollmentDetail(enrollment: PairingView['enrollments'][number]) {
           <button type="button" class="btn sm ghost" :disabled="!!busy" @click="resetCode">{{ words.otherCode }}</button>
         </header>
         <ul v-if="addRequest && accountGroups.length > 1" class="who">
-          <li v-for="group in accountGroups" :key="group.harness"><HarnessMark :harness="group.harness" :size="16" /><span class="name">{{ harnessLabel(group.harness) }}</span><span class="acct">{{ accountName(group.harness) || words.leftOut }}</span></li>
+          <li v-for="group in accountGroups" :key="group.harness"><HarnessMark :harness="group.harness" :size="16" /><span class="name">{{ harnessLabel(group.harness) }}</span><span class="acct">{{ accountName(group.harness) }}</span></li>
         </ul>
         <ul v-else-if="!addRequest" class="who checklist">
           <li v-for="group in accountGroups" :key="group.harness" class="harness" :class="{ off: signedOut(current, group.harness) }">
@@ -655,7 +653,7 @@ function enrollmentDetail(enrollment: PairingView['enrollments'][number]) {
               <input type="checkbox" :checked="!!selectedKey(group.harness) && !signedOut(current, group.harness)" :disabled="signedOut(current, group.harness)" :aria-label="words.connectHarness(harnessLabel(group.harness))" @change="toggleHarness(group.harness, group.accounts, ($event.target as HTMLInputElement).checked)" />
               <HarnessMark :harness="group.harness" :size="16" />
               <span class="name">{{ harnessLabel(group.harness) }}</span>
-              <span class="acct">{{ signedOut(current, group.harness) ? words.notSignedIn : accountName(group.harness) || words.leftOut }}</span>
+              <span class="acct">{{ signedOut(current, group.harness) ? words.notSignedIn : accountName(group.harness) }}</span>
             </label>
           </li>
         </ul>
@@ -667,7 +665,7 @@ function enrollmentDetail(enrollment: PairingView['enrollments'][number]) {
         <div class="actions">
           <button ref="connectButton" class="btn primary go" type="button" :disabled="!!connectReason" :aria-describedby="connectReason || verificationChoice ? 'connect-reason' : undefined" @click="connect">{{ busy === 'approve' ? (addRequest ? words.adding : words.pairing) : addRequest ? words.add : words.pair }}</button>
           <button class="btn go" type="button" :disabled="!!denyReason" :aria-describedby="denyReason ? 'connect-reason' : undefined" @click="deny">{{ words.deny }}</button>
-          <p id="connect-reason" class="connect-reason" :class="{ quiet: !actionNote }" role="status">{{ actionNote }}</p>
+          <p id="connect-reason" class="connect-reason" role="status">{{ actionNote }}</p>
         </div>
 
         <details class="more" :open="detailsOpen" @toggle="detailsOpen = ($event.target as HTMLDetailsElement).open">
@@ -875,9 +873,9 @@ function enrollmentDetail(enrollment: PairingView['enrollments'][number]) {
 .limits { margin-top: 2px; color: var(--ink-3); font-size: 12.5px; }
 .verify .problem { margin: 6px 0 0; font-size: 13px; }
 .actions { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; margin-top: 20px; padding-top: 16px; border-top: 1px solid var(--line); }
-.connect-reason { flex-basis: 100%; margin: 0; color: var(--ink-2); font-size: 13px; }
-/* Empty, the live region stays in the page for screen readers but takes no room. */
-.connect-reason.quiet { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
+/* The status line keeps its slot when empty: a reason appears in place and never pushes Details under the pointer. */
+.connect-reason { flex-basis: 100%; min-height: calc(13px * 1.45); margin: 0; color: var(--ink-2); font-size: 13px; line-height: 1.45; }
+.ask .more { margin-top: 2px; }
 .go { min-height: 44px; padding: 0 18px; }
 .keep { display: flex; align-items: flex-start; gap: 8px; margin: 12px 0 0; color: var(--ink-3); font-size: 12.5px; line-height: 1.5; }
 .keep svg { flex-shrink: 0; margin-top: 2px; }
@@ -903,6 +901,8 @@ function enrollmentDetail(enrollment: PairingView['enrollments'][number]) {
   .card.ask { padding: 18px 16px 14px; }
   .ask-head { flex-direction: column; gap: 8px; }
   .ask-head .btn { margin: 0 0 0 -11px; }
+  /* The facts line wraps once on phones; its two lines stay reserved so toggles in Details never move Add and Deny. */
+  .facts-line { min-height: calc(2 * 1.45 * 13.5px); line-height: 1.45; }
   .rows { grid-template-columns: minmax(0, 1fr); }
   .rows :deep(dt) { padding-right: 0; }
   .rows :deep(dd) { padding-top: 0; border-top: 0; }

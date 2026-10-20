@@ -144,6 +144,25 @@ async function detailsHold(page: Page, review: Locator, primary: string) {
   })
   await guard.check(() => summary.click())
   await expect(review.locator('details.more')).toHaveJSProperty('open', true)
+  // Choices inside Details change the facts line in place; nothing above them moves.
+  const after = review.locator('#after-connecting')
+  await guard.check(() => after.selectOption('paused'))
+  await guard.check(() => after.selectOption('use'))
+  const verify = review.locator('.verify input[type=checkbox]')
+  if (await verify.isEnabled()) {
+    await guard.check(() => verify.uncheck())
+    await guard.check(() => verify.check())
+  }
+  // Leaving every harness out shows its reason in the reserved status line; nothing moves.
+  const reason = review.locator('#connect-reason')
+  const firstChoice = review.locator('.harness-row dd').first().locator('select, input[type=checkbox]').first()
+  if (await firstChoice.evaluate(el => el.tagName === 'SELECT') && await review.locator('.harness-row').count() === 1) {
+    const kept = await firstChoice.inputValue()
+    await guard.check(() => firstChoice.selectOption(''))
+    await expect(reason).not.toHaveText('')
+    await guard.check(() => firstChoice.selectOption(kept))
+    await expect(reason).toHaveText('')
+  }
   await guard.check(() => summary.click())
   await expect(review.locator('details.more')).toHaveJSProperty('open', false)
   guard.done()
