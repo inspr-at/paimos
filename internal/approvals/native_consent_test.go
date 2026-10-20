@@ -38,15 +38,19 @@ func TestNativeConsentRequiresCurrentPersonApproval(t *testing.T) {
 		t.Fatal(err)
 	}
 	if err := db.InTenant(dbtest.Seed(ctx), f.db.App, f.tenantA, func(tx pgx.Tx) error {
+		var pairKey string
+		if err := tx.QueryRow(ctx, `SELECT id::text FROM agent_keys WHERE tenant_id=$1 AND principal_id=$2 ORDER BY id LIMIT 1`, f.tenantA, f.agentA.ID).Scan(&pairKey); err != nil {
+			return err
+		}
 		for _, q := range []struct {
 			sql  string
 			args []any
 		}{
 			{`INSERT INTO model_profiles(tenant_id,id,slug,version,harness,family,model,effort,tier) VALUES($1,$2,'native-consent','1','claude','anthropic','fixture-model','high','strong')`, []any{f.tenantA, profile}},
 			{`INSERT INTO agent_pairing_requests(tenant_id,id,user_code,device_hash,runtime_hash,lifecycle_hash,details,request_digest,state,approved_by) VALUES($1,$2,'246813579',$3,$3,$3,'{}','native-consent','redeemed',$4)`, []any{f.tenantA, pairing, strings.Repeat("a", 64), f.personA.ID}},
-			{`INSERT INTO agent_pairing_computers(tenant_id,id,request_id,principal_id,daemon_id,lifecycle_hash) VALUES($1,$2,$3,$4,'consent-daemon',$5)`, []any{f.tenantA, computer, pairing, f.agentA.ID, strings.Repeat("a", 64)}},
+			{`INSERT INTO agent_pairing_computers(tenant_id,id,request_id,principal_id,key_id,daemon_id,lifecycle_hash) VALUES($1,$2,$3,$4,$6,'consent-daemon',$5)`, []any{f.tenantA, computer, pairing, f.agentA.ID, strings.Repeat("a", 64), pairKey}},
 			{`INSERT INTO agent_accounts(tenant_id,id,account_key,harness,daemon_id,registered_by_principal_id,label,owner_person_id,linked_at,link_revision) VALUES($1,$2,'native-consent','claude','consent-daemon',$3,'Consent',$4,$5,1)`, []any{f.tenantA, account, f.agentA.ID, f.personA.ID, now}},
-			{`INSERT INTO agent_pairing_enrollments(tenant_id,account_id,computer_id,request_id,model_profile_id,ongoing_approved_at) VALUES($1,$2,$3,$4,$5,$6)`, []any{f.tenantA, account, computer, pairing, profile, now}},
+			{`INSERT INTO agent_pairing_enrollments(tenant_id,account_id,computer_id,request_id,model_profile_id,ongoing_approved_at,verification_expires_at) VALUES($1,$2,$3,$4,$5,$6::timestamptz,$6::timestamptz+interval '1 hour')`, []any{f.tenantA, account, computer, pairing, profile, now}},
 		} {
 			if _, err := tx.Exec(ctx, q.sql, q.args...); err != nil {
 				return err

@@ -4,7 +4,6 @@ package store
 
 import (
 	"bytes"
-	"context"
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
@@ -125,9 +124,9 @@ func newPairedStartFixture(t *testing.T) (*startFixture, consent.Authority) {
 	})
 	a := consent.Authority{Capabilities: f.s.authority.(fixedAuthority).authorization.Capabilities, Now: func() time.Time { return f.now }}
 	secret := strings.Repeat("p", 64)
-	hash := sha256.Sum256([]byte(secret))
+	proposalHash := sha256.Sum256([]byte(secret))
 	f.seed(t, func(tx pgx.Tx) error {
-		return tx.QueryRow(t.Context(), `INSERT INTO agent_keys(tenant_id,principal_id,name,prefix,hash,scopes,created_by_principal_id) VALUES($1,$2,'native proposal','nativeproposal',$3,$4,$5) RETURNING id::text`, f.person.TenantID, proposer.ID, hex.EncodeToString(hash[:]), proposer.Scopes, f.person.ID).Scan(&proposer.KeyID)
+		return tx.QueryRow(t.Context(), `INSERT INTO agent_keys(tenant_id,principal_id,name,prefix,hash,scopes,created_by_principal_id) VALUES($1,$2,'native proposal','nativeproposal',$3,$4,$5) RETURNING id::text`, f.person.TenantID, proposer.ID, hex.EncodeToString(proposalHash[:]), proposer.Scopes, f.person.ID).Scan(&proposer.KeyID)
 	})
 	proposer.AuthKeyID = proposer.KeyID
 	approvals.New(f.d.App).Mount(mux)

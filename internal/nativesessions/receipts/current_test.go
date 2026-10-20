@@ -60,7 +60,7 @@ func TestProductionReceiptAuthorityRechecksConsentAndExactEvidence(t *testing.T)
 			args []any
 		}{
 			{`INSERT INTO agent_pairing_computers(tenant_id,id,request_id,principal_id,key_id,daemon_id,lifecycle_hash,ledger_generation) VALUES($1,$2,$3,$4,$5,$6,$7,$8)`, []any{tid, f.actor.ComputerID, request, f.agent.ID, f.agent.KeyID, f.actor.DaemonID, strings.Repeat("a", 64), ledger}},
-			{`INSERT INTO agent_accounts(tenant_id,id,account_key,harness,daemon_id,registered_by_principal_id,label,owner_person_id,linked_at,link_revision,last_daemon_generation) VALUES($1,$2,'receipt-native','claude',$3,$4,'Native',$5,$6,1,$7)`, []any{tid, "placeholder", f.actor.DaemonID, f.agent.ID, f.owner.ID, f.now, f.actor.DaemonGeneration}},
+			{`INSERT INTO agent_accounts(tenant_id,id,account_key,harness,daemon_id,registered_by_principal_id,label,owner_person_id,linked_at,link_revision,last_probe_at,last_probe_ok,last_daemon_generation) VALUES($1,$2,'receipt-native','claude',$3,$4,'Native',$5,$6,1,$6,true,$7)`, []any{tid, "placeholder", f.actor.DaemonID, f.agent.ID, f.owner.ID, f.now, f.actor.DaemonGeneration}},
 		} {
 			if q.args[1] == "placeholder" {
 				q.args[1] = uuid.NewString()
@@ -77,7 +77,7 @@ func TestProductionReceiptAuthorityRechecksConsentAndExactEvidence(t *testing.T)
 	if err := f.d.Admin.QueryRow(ctx, `SELECT id::text FROM agent_accounts WHERE tenant_id=$1 AND account_key='receipt-native'`, tid).Scan(&account); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := f.d.Admin.Exec(ctx, `INSERT INTO agent_pairing_enrollments(tenant_id,account_id,computer_id,request_id,model_profile_id,ongoing_approved_at) VALUES($1,$2,$3,$4,$5,$6)`, tid, account, f.actor.ComputerID, request, profile, f.now); err != nil {
+	if _, err := f.d.Admin.Exec(ctx, `INSERT INTO agent_pairing_enrollments(tenant_id,account_id,computer_id,request_id,model_profile_id,ongoing_approved_at,verification_expires_at) VALUES($1,$2,$3,$4,$5,$6::timestamptz,$6::timestamptz+interval '1 hour')`, tid, account, f.actor.ComputerID, request, profile, f.now); err != nil {
 		t.Fatal(err)
 	}
 	dbtest.BindRole(t, f.d, tid, proposer, "member")
