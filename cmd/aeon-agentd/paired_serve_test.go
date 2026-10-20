@@ -975,6 +975,13 @@ esac
 			if err != nil || p.Stage != "awaiting_approval" || created != 1 {
 				t.Fatalf("unchanged home rejected: %s %v", p.Stage, err)
 			}
+			// The CLI must rediscover H2 and resume this same approval when the
+			// daemon socket is absent; neither path may fall back to the default.
+			t.Setenv("PATH", owner)
+			var output bytes.Buffer
+			if err := setupCommand("add-harness", []string{"--state-root", e.Store.Path(), "--harness", harness, "--home", profile, "--once"}, &output); err != nil || !strings.Contains(output.String(), "awaiting_approval") || created != 1 {
+				t.Fatalf("CLI lost selected home or pending approval: %v %s", err, output.String())
+			}
 		})
 	}
 }

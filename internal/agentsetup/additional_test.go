@@ -256,7 +256,10 @@ func TestHarnessDiscoveryPinsExplicitPrivateHomes(t *testing.T) {
 				t.Fatal(err)
 			}
 			public := filepath.Join(d.Home, "public")
-			if err := os.Mkdir(public, 0755); err != nil {
+			if err := os.Mkdir(public, 0700); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.Chmod(public, 0755); err != nil {
 				t.Fatal(err)
 			}
 			for _, invalid := range []string{public, linked, "relative", filepath.Join(d.Home, "missing")} {

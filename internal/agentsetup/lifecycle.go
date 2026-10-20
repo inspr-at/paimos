@@ -603,14 +603,18 @@ func (e *Engine) AddHarness(ctx context.Context, candidates []Candidate) (Progre
 			}
 		}
 		for _, a := range s.View.Enrollments {
+			sameAccount := a.Label == c.Label
 			if a.State == "connected" && a.Harness == c.Harness && (c.Harness == "claude" || c.Harness == "codex") {
 				for _, local := range s.Candidates {
-					if local.Candidate.Key == a.AccountKey && strings.EqualFold(local.Identity, c.Identity) && local.Home != c.Home {
-						return e.progress(s), fmt.Errorf("this login is already enrolled from %s", local.Home)
+					if local.Candidate.Key == a.AccountKey && strings.EqualFold(local.Identity, c.Identity) {
+						if local.Home != c.Home {
+							return e.progress(s), fmt.Errorf("this login is already enrolled from %s", local.Home)
+						}
+						sameAccount = true
 					}
 				}
 			}
-			if a.State == "connected" && a.Harness == c.Harness && a.Label == c.Label {
+			if a.State == "connected" && a.Harness == c.Harness && sameAccount {
 				if len(candidates) == 1 && !s.Removed[a.AccountID] {
 					return e.renewPin(ctx, s, a, c)
 				}
