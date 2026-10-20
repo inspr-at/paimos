@@ -357,6 +357,9 @@ type learningDoctrine interface {
 }
 
 func NewWithDoctrine(pool *pgxpool.Pool, proposals *doctrine.Module) httpapi.Module {
+	if proposals == nil {
+		return New(pool)
+	}
 	return &module{pool: pool, doctrine: proposals}
 }
 func (m *module) proposeLearning(ctx context.Context, p tenant.Principal, publicID, nodeID, commentID string, comment bool, in doctrine.InboxInput, confirm bool) (any, error) {

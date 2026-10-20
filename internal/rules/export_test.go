@@ -53,6 +53,17 @@ func TestRulesExportAndAuthoringSwitch(t *testing.T) {
 	if bytes.Contains(first, []byte(hidden.ID)) || bytes.Contains(first, []byte(foreignSet.ID)) || bytes.Contains(first, []byte("Never export")) {
 		t.Fatal("export leaked private or foreign prose")
 	}
+	var auditRaw []byte
+	if err := w.d.Admin.QueryRow(t.Context(), `SELECT after FROM events WHERE tenant_id=$1 AND type='settings.rules_exported' ORDER BY id DESC LIMIT 1`, w.tid).Scan(&auditRaw); err != nil {
+		t.Fatal(err)
+	}
+	var audit map[string]any
+	if err := json.Unmarshal(auditRaw, &audit); err != nil {
+		t.Fatal(err)
+	}
+	if len(audit) != 2 || audit["layers"] != float64(3) || audit["sha256"] != exportSHA(strings.TrimSpace(string(first))) {
+		t.Fatalf("export audit is not the value-free count/digest receipt: %v", audit)
+	}
 	var bundle ExportBundle
 	if err := json.Unmarshal(first, &bundle); err != nil {
 		t.Fatal(err)

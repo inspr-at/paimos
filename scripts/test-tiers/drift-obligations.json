@@ -161,22 +161,22 @@
     {
       "kind": "browser",
       "file": "tests/accounts-quota-bar.spec.ts",
-      "name": "1440 dark \u203a accounts 1440 dark: Remove and End now leave \u201cAgents may use it\u201d and everything below in place"
+      "name": "1440 dark › accounts 1440 dark: Remove and End now leave “Agents may use it” and everything below in place"
     },
     {
       "kind": "browser",
       "file": "tests/accounts-quota-bar.spec.ts",
-      "name": "1440 light \u203a accounts 1440 light: Remove and End now leave \u201cAgents may use it\u201d and everything below in place"
+      "name": "1440 light › accounts 1440 light: Remove and End now leave “Agents may use it” and everything below in place"
     },
     {
       "kind": "browser",
       "file": "tests/accounts-quota-bar.spec.ts",
-      "name": "390 dark \u203a accounts 390 dark: Remove and End now leave \u201cAgents may use it\u201d and everything below in place"
+      "name": "390 dark › accounts 390 dark: Remove and End now leave “Agents may use it” and everything below in place"
     },
     {
       "kind": "browser",
       "file": "tests/accounts-quota-bar.spec.ts",
-      "name": "390 light \u203a accounts 390 light: Remove and End now leave \u201cAgents may use it\u201d and everything below in place"
+      "name": "390 light › accounts 390 light: Remove and End now leave “Agents may use it” and everything below in place"
     },
     {
       "kind": "browser",
@@ -331,7 +331,7 @@
     {
       "kind": "browser",
       "file": "tests/agent-rules-tldr.spec.ts",
-      "name": "the preview is an explanation \u2194 exact rule table with search, harness filter, layer budget and the exact file"
+      "name": "the preview is an explanation ↔ exact rule table with search, harness filter, layer budget and the exact file"
     },
     {
       "kind": "browser",
@@ -381,7 +381,7 @@
     {
       "kind": "browser",
       "file": "tests/agents-display.spec.ts",
-      "name": "another person\u2019s visible account never becomes your full account or your capacity"
+      "name": "another person’s visible account never becomes your full account or your capacity"
     },
     {
       "kind": "browser",
@@ -666,32 +666,32 @@
     {
       "kind": "browser",
       "file": "tests/decision-text.spec.ts",
-      "name": "reveal sizing 1024 coarse dark \u203a approval and held controls fit both labels with disjoint stable targets"
+      "name": "reveal sizing 1024 coarse dark › approval and held controls fit both labels with disjoint stable targets"
     },
     {
       "kind": "browser",
       "file": "tests/decision-text.spec.ts",
-      "name": "reveal sizing 1024 coarse light \u203a approval and held controls fit both labels with disjoint stable targets"
+      "name": "reveal sizing 1024 coarse light › approval and held controls fit both labels with disjoint stable targets"
     },
     {
       "kind": "browser",
       "file": "tests/decision-text.spec.ts",
-      "name": "reveal sizing 1440 fine dark \u203a approval and held controls fit both labels with disjoint stable targets"
+      "name": "reveal sizing 1440 fine dark › approval and held controls fit both labels with disjoint stable targets"
     },
     {
       "kind": "browser",
       "file": "tests/decision-text.spec.ts",
-      "name": "reveal sizing 1440 fine light \u203a approval and held controls fit both labels with disjoint stable targets"
+      "name": "reveal sizing 1440 fine light › approval and held controls fit both labels with disjoint stable targets"
     },
     {
       "kind": "browser",
       "file": "tests/decision-text.spec.ts",
-      "name": "reveal sizing 390 coarse dark \u203a approval and held controls fit both labels with disjoint stable targets"
+      "name": "reveal sizing 390 coarse dark › approval and held controls fit both labels with disjoint stable targets"
     },
     {
       "kind": "browser",
       "file": "tests/decision-text.spec.ts",
-      "name": "reveal sizing 390 coarse light \u203a approval and held controls fit both labels with disjoint stable targets"
+      "name": "reveal sizing 390 coarse light › approval and held controls fit both labels with disjoint stable targets"
     },
     {
       "kind": "browser",
@@ -736,12 +736,12 @@
     {
       "kind": "browser",
       "file": "tests/dialog-full-text.spec.ts",
-      "name": "390 dark \u203a touch full text before closing selection: epic"
+      "name": "390 dark › touch full text before closing selection: epic"
     },
     {
       "kind": "browser",
       "file": "tests/dialog-full-text.spec.ts",
-      "name": "390 light \u203a touch full text before closing selection: epic"
+      "name": "390 light › touch full text before closing selection: epic"
     },
     {
       "kind": "browser",
@@ -941,7 +941,7 @@
     {
       "kind": "browser",
       "file": "tests/footer-summary.spec.ts",
-      "name": "agents \u203a say how many there are and the one exception, and the click goes to it"
+      "name": "agents › say how many there are and the one exception, and the click goes to it"
     },
     {
       "kind": "browser",
@@ -986,32 +986,32 @@
     {
       "kind": "browser",
       "file": "tests/header-glimpse.spec.ts",
-      "name": "header shots dark \u203a keeps AA contrast at 1280"
+      "name": "header shots dark › keeps AA contrast at 1280"
     },
     {
       "kind": "browser",
       "file": "tests/header-glimpse.spec.ts",
-      "name": "header shots dark \u203a keeps AA contrast at 1600"
+      "name": "header shots dark › keeps AA contrast at 1600"
     },
     {
       "kind": "browser",
       "file": "tests/header-glimpse.spec.ts",
-      "name": "header shots dark \u203a keeps AA contrast at 390"
+      "name": "header shots dark › keeps AA contrast at 390"
     },
     {
       "kind": "browser",
       "file": "tests/header-glimpse.spec.ts",
-      "name": "header shots light \u203a keeps AA contrast at 1280"
+      "name": "header shots light › keeps AA contrast at 1280"
     },
     {
       "kind": "browser",
       "file": "tests/header-glimpse.spec.ts",
-      "name": "header shots light \u203a keeps AA contrast at 1600"
+      "name": "header shots light › keeps AA contrast at 1600"
     },
     {
       "kind": "browser",
       "file": "tests/header-glimpse.spec.ts",
-      "name": "header shots light \u203a keeps AA contrast at 390"
+      "name": "header shots light › keeps AA contrast at 390"
     },
     {
       "kind": "browser",
@@ -1031,37 +1031,37 @@
     {
       "kind": "browser",
       "file": "tests/hide-states.spec.ts",
-      "name": "shared view membership \u203a Graph and Outline use the chosen Hide membership"
+      "name": "shared view membership › Graph and Outline use the chosen Hide membership"
     },
     {
       "kind": "browser",
       "file": "tests/hide-states.spec.ts",
-      "name": "shared view membership \u203a default and Reset Graph Hide honour kind categories at 1024px dark"
+      "name": "shared view membership › default and Reset Graph Hide honour kind categories at 1024px dark"
     },
     {
       "kind": "browser",
       "file": "tests/hide-states.spec.ts",
-      "name": "shared view membership \u203a default and Reset Graph Hide honour kind categories at 1024px light"
+      "name": "shared view membership › default and Reset Graph Hide honour kind categories at 1024px light"
     },
     {
       "kind": "browser",
       "file": "tests/hide-states.spec.ts",
-      "name": "shared view membership \u203a default and Reset Graph Hide honour kind categories at 1440px dark"
+      "name": "shared view membership › default and Reset Graph Hide honour kind categories at 1440px dark"
     },
     {
       "kind": "browser",
       "file": "tests/hide-states.spec.ts",
-      "name": "shared view membership \u203a default and Reset Graph Hide honour kind categories at 1440px light"
+      "name": "shared view membership › default and Reset Graph Hide honour kind categories at 1440px light"
     },
     {
       "kind": "browser",
       "file": "tests/hide-states.spec.ts",
-      "name": "shared view membership \u203a default and Reset Graph Hide honour kind categories at 390px dark"
+      "name": "shared view membership › default and Reset Graph Hide honour kind categories at 390px dark"
     },
     {
       "kind": "browser",
       "file": "tests/hide-states.spec.ts",
-      "name": "shared view membership \u203a default and Reset Graph Hide honour kind categories at 390px light"
+      "name": "shared view membership › default and Reset Graph Hide honour kind categories at 390px light"
     },
     {
       "kind": "browser",
@@ -1116,22 +1116,22 @@
     {
       "kind": "browser",
       "file": "tests/live-agents-layout.spec.ts",
-      "name": "chip content at 260\u2013420px and list widths: dark, robot-1"
+      "name": "chip content at 260–420px and list widths: dark, robot-1"
     },
     {
       "kind": "browser",
       "file": "tests/live-agents-layout.spec.ts",
-      "name": "chip content at 260\u2013420px and list widths: dark, robot-5"
+      "name": "chip content at 260–420px and list widths: dark, robot-5"
     },
     {
       "kind": "browser",
       "file": "tests/live-agents-layout.spec.ts",
-      "name": "chip content at 260\u2013420px and list widths: light, robot-1"
+      "name": "chip content at 260–420px and list widths: light, robot-1"
     },
     {
       "kind": "browser",
       "file": "tests/live-agents-layout.spec.ts",
-      "name": "chip content at 260\u2013420px and list widths: light, robot-5"
+      "name": "chip content at 260–420px and list widths: light, robot-5"
     },
     {
       "kind": "browser",
@@ -1151,12 +1151,12 @@
     {
       "kind": "browser",
       "file": "tests/live-agents.spec.ts",
-      "name": "event evidence (no-preference) \u203a a new activity entry glints once; heartbeats, ordinary polls and remounts do not"
+      "name": "event evidence (no-preference) › a new activity entry glints once; heartbeats, ordinary polls and remounts do not"
     },
     {
       "kind": "browser",
       "file": "tests/live-agents.spec.ts",
-      "name": "event evidence (reduce) \u203a a new activity entry glints once; heartbeats, ordinary polls and remounts do not"
+      "name": "event evidence (reduce) › a new activity entry glints once; heartbeats, ordinary polls and remounts do not"
     },
     {
       "kind": "browser",
@@ -1171,7 +1171,7 @@
     {
       "kind": "browser",
       "file": "tests/live-agents.spec.ts",
-      "name": "motion \u203a only the activity ring moves continuously; the robot stays still on hover"
+      "name": "motion › only the activity ring moves continuously; the robot stays still on hover"
     },
     {
       "kind": "browser",
@@ -1226,7 +1226,7 @@
     {
       "kind": "browser",
       "file": "tests/live-list.spec.ts",
-      "name": "changes by the same person in another tab reach the list; the tab\u2019s own changes need no read"
+      "name": "changes by the same person in another tab reach the list; the tab’s own changes need no read"
     },
     {
       "kind": "browser",
@@ -1736,7 +1736,7 @@
     {
       "kind": "browser",
       "file": "tests/release-picker.spec.ts",
-      "name": "a replay after the project moved on names the tickets\u2019 release, not the later one"
+      "name": "a replay after the project moved on names the tickets’ release, not the later one"
     },
     {
       "kind": "browser",
@@ -1836,7 +1836,7 @@
     {
       "kind": "browser",
       "file": "tests/release-ticket-links.spec.ts",
-      "name": "the status menu offers the project\u2019s own states, as the project list does"
+      "name": "the status menu offers the project’s own states, as the project list does"
     },
     {
       "kind": "browser",
@@ -2056,22 +2056,22 @@
     {
       "kind": "browser",
       "file": "tests/stability.spec.ts",
-      "name": "at 1440px \u203a an open session holds still while runs and messages land"
+      "name": "at 1440px › an open session holds still while runs and messages land"
     },
     {
       "kind": "browser",
       "file": "tests/stability.spec.ts",
-      "name": "at 1440px \u203a the agents page holds still while its reads land"
+      "name": "at 1440px › the agents page holds still while its reads land"
     },
     {
       "kind": "browser",
       "file": "tests/stability.spec.ts",
-      "name": "at 390px \u203a an open session holds still while runs and messages land"
+      "name": "at 390px › an open session holds still while runs and messages land"
     },
     {
       "kind": "browser",
       "file": "tests/stability.spec.ts",
-      "name": "at 390px \u203a the agents page holds still while its reads land"
+      "name": "at 390px › the agents page holds still while its reads land"
     },
     {
       "kind": "browser",
@@ -2101,142 +2101,142 @@
     {
       "kind": "browser",
       "file": "tests/tap-targets.spec.ts",
-      "name": "1024px coarse dark comfortable \u203a ticket and tier controls keep their visuals, reach and position"
+      "name": "1024px coarse dark comfortable › ticket and tier controls keep their visuals, reach and position"
     },
     {
       "kind": "browser",
       "file": "tests/tap-targets.spec.ts",
-      "name": "1024px coarse dark compact \u203a ticket and tier controls keep their visuals, reach and position"
+      "name": "1024px coarse dark compact › ticket and tier controls keep their visuals, reach and position"
     },
     {
       "kind": "browser",
       "file": "tests/tap-targets.spec.ts",
-      "name": "1024px coarse light comfortable \u203a ticket and tier controls keep their visuals, reach and position"
+      "name": "1024px coarse light comfortable › ticket and tier controls keep their visuals, reach and position"
     },
     {
       "kind": "browser",
       "file": "tests/tap-targets.spec.ts",
-      "name": "1024px coarse light compact \u203a ticket and tier controls keep their visuals, reach and position"
+      "name": "1024px coarse light compact › ticket and tier controls keep their visuals, reach and position"
     },
     {
       "kind": "browser",
       "file": "tests/tap-targets.spec.ts",
-      "name": "1440px fine dark comfortable \u203a ticket and tier controls keep their visuals, reach and position"
+      "name": "1440px fine dark comfortable › ticket and tier controls keep their visuals, reach and position"
     },
     {
       "kind": "browser",
       "file": "tests/tap-targets.spec.ts",
-      "name": "1440px fine dark compact \u203a ticket and tier controls keep their visuals, reach and position"
+      "name": "1440px fine dark compact › ticket and tier controls keep their visuals, reach and position"
     },
     {
       "kind": "browser",
       "file": "tests/tap-targets.spec.ts",
-      "name": "1440px fine light comfortable \u203a ticket and tier controls keep their visuals, reach and position"
+      "name": "1440px fine light comfortable › ticket and tier controls keep their visuals, reach and position"
     },
     {
       "kind": "browser",
       "file": "tests/tap-targets.spec.ts",
-      "name": "1440px fine light compact \u203a ticket and tier controls keep their visuals, reach and position"
+      "name": "1440px fine light compact › ticket and tier controls keep their visuals, reach and position"
     },
     {
       "kind": "browser",
       "file": "tests/tap-targets.spec.ts",
-      "name": "390px fine dark comfortable \u203a ticket and tier controls keep their visuals, reach and position"
+      "name": "390px fine dark comfortable › ticket and tier controls keep their visuals, reach and position"
     },
     {
       "kind": "browser",
       "file": "tests/tap-targets.spec.ts",
-      "name": "390px fine dark compact \u203a ticket and tier controls keep their visuals, reach and position"
+      "name": "390px fine dark compact › ticket and tier controls keep their visuals, reach and position"
     },
     {
       "kind": "browser",
       "file": "tests/tap-targets.spec.ts",
-      "name": "390px fine light comfortable \u203a ticket and tier controls keep their visuals, reach and position"
+      "name": "390px fine light comfortable › ticket and tier controls keep their visuals, reach and position"
     },
     {
       "kind": "browser",
       "file": "tests/tap-targets.spec.ts",
-      "name": "390px fine light compact \u203a ticket and tier controls keep their visuals, reach and position"
+      "name": "390px fine light compact › ticket and tier controls keep their visuals, reach and position"
     },
     {
       "kind": "browser",
       "file": "tests/tap-targets.spec.ts",
-      "name": "700px fine dark comfortable \u203a ticket and tier controls keep their visuals, reach and position"
+      "name": "700px fine dark comfortable › ticket and tier controls keep their visuals, reach and position"
     },
     {
       "kind": "browser",
       "file": "tests/tap-targets.spec.ts",
-      "name": "700px fine dark compact \u203a ticket and tier controls keep their visuals, reach and position"
+      "name": "700px fine dark compact › ticket and tier controls keep their visuals, reach and position"
     },
     {
       "kind": "browser",
       "file": "tests/tap-targets.spec.ts",
-      "name": "700px fine light comfortable \u203a ticket and tier controls keep their visuals, reach and position"
+      "name": "700px fine light comfortable › ticket and tier controls keep their visuals, reach and position"
     },
     {
       "kind": "browser",
       "file": "tests/tap-targets.spec.ts",
-      "name": "700px fine light compact \u203a ticket and tier controls keep their visuals, reach and position"
+      "name": "700px fine light compact › ticket and tier controls keep their visuals, reach and position"
     },
     {
       "kind": "browser",
       "file": "tests/tap-targets.spec.ts",
-      "name": "720px fine dark comfortable \u203a ticket and tier controls keep their visuals, reach and position"
+      "name": "720px fine dark comfortable › ticket and tier controls keep their visuals, reach and position"
     },
     {
       "kind": "browser",
       "file": "tests/tap-targets.spec.ts",
-      "name": "720px fine dark compact \u203a ticket and tier controls keep their visuals, reach and position"
+      "name": "720px fine dark compact › ticket and tier controls keep their visuals, reach and position"
     },
     {
       "kind": "browser",
       "file": "tests/tap-targets.spec.ts",
-      "name": "720px fine light comfortable \u203a ticket and tier controls keep their visuals, reach and position"
+      "name": "720px fine light comfortable › ticket and tier controls keep their visuals, reach and position"
     },
     {
       "kind": "browser",
       "file": "tests/tap-targets.spec.ts",
-      "name": "720px fine light compact \u203a ticket and tier controls keep their visuals, reach and position"
+      "name": "720px fine light compact › ticket and tier controls keep their visuals, reach and position"
     },
     {
       "kind": "browser",
       "file": "tests/tap-targets.spec.ts",
-      "name": "768px coarse dark comfortable \u203a ticket and tier controls keep their visuals, reach and position"
+      "name": "768px coarse dark comfortable › ticket and tier controls keep their visuals, reach and position"
     },
     {
       "kind": "browser",
       "file": "tests/tap-targets.spec.ts",
-      "name": "768px coarse dark compact \u203a ticket and tier controls keep their visuals, reach and position"
+      "name": "768px coarse dark compact › ticket and tier controls keep their visuals, reach and position"
     },
     {
       "kind": "browser",
       "file": "tests/tap-targets.spec.ts",
-      "name": "768px coarse light comfortable \u203a ticket and tier controls keep their visuals, reach and position"
+      "name": "768px coarse light comfortable › ticket and tier controls keep their visuals, reach and position"
     },
     {
       "kind": "browser",
       "file": "tests/tap-targets.spec.ts",
-      "name": "768px coarse light compact \u203a ticket and tier controls keep their visuals, reach and position"
+      "name": "768px coarse light compact › ticket and tier controls keep their visuals, reach and position"
     },
     {
       "kind": "browser",
       "file": "tests/tap-targets.spec.ts",
-      "name": "768px fine dark comfortable \u203a ticket and tier controls keep their visuals, reach and position"
+      "name": "768px fine dark comfortable › ticket and tier controls keep their visuals, reach and position"
     },
     {
       "kind": "browser",
       "file": "tests/tap-targets.spec.ts",
-      "name": "768px fine dark compact \u203a ticket and tier controls keep their visuals, reach and position"
+      "name": "768px fine dark compact › ticket and tier controls keep their visuals, reach and position"
     },
     {
       "kind": "browser",
       "file": "tests/tap-targets.spec.ts",
-      "name": "768px fine light comfortable \u203a ticket and tier controls keep their visuals, reach and position"
+      "name": "768px fine light comfortable › ticket and tier controls keep their visuals, reach and position"
     },
     {
       "kind": "browser",
       "file": "tests/tap-targets.spec.ts",
-      "name": "768px fine light compact \u203a ticket and tier controls keep their visuals, reach and position"
+      "name": "768px fine light compact › ticket and tier controls keep their visuals, reach and position"
     },
     {
       "kind": "browser",
@@ -2336,27 +2336,27 @@
     {
       "kind": "browser",
       "file": "tests/wide.spec.ts",
-      "name": "back trail \u203a following links inside the panel builds a trail with Back and Alt+Left; list moves clear it"
+      "name": "back trail › following links inside the panel builds a trail with Back and Alt+Left; list moves clear it"
     },
     {
       "kind": "browser",
       "file": "tests/wide.spec.ts",
-      "name": "edit mode \u203a Edit (or e) edits title, text and properties together with one Save"
+      "name": "edit mode › Edit (or e) edits title, text and properties together with one Save"
     },
     {
       "kind": "browser",
       "file": "tests/wide.spec.ts",
-      "name": "wide lists \u203a columns grow with the width: Epic, Release, Tags and Created join from about 1800px"
+      "name": "wide lists › columns grow with the width: Epic, Release, Tags and Created join from about 1800px"
     },
     {
       "kind": "browser",
       "file": "tests/wide.spec.ts",
-      "name": "wide lists \u203a columns resize by dragging the header edge and fit their content on double-click"
+      "name": "wide lists › columns resize by dragging the header edge and fit their content on double-click"
     },
     {
       "kind": "browser",
       "file": "tests/wide.spec.ts",
-      "name": "wide lists \u203a the Display menu shows, hides and reorders columns, saved per project on the server"
+      "name": "wide lists › the Display menu shows, hides and reorders columns, saved per project on the server"
     },
     {
       "kind": "browser",

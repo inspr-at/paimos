@@ -341,6 +341,11 @@ func TestLearningDraftBecomesExplicitDoctrineAddition(t *testing.T) {
 	recorder := &recordingLearningDoctrine{}
 	f.handler = (&httpapi.Server{Pool: f.db.App, Modules: []httpapi.Module{&module{pool: f.db.App, doctrine: recorder}}}).Handler()
 	id := "15880000-0000-4000-8000-000000000009"
+	bad := call(t, f, f.a, "POST", "/api/knowledge/learnings/"+nodeLearningID(f.ticket)+"/draft", map[string]any{"doctrine": map[string]any{"request_id": id, "repository": "configured/private-doctrine", "path": "docs/AGENTS-DOMAIN-LEARNINGS.md", "section": "Learnings", "source": "Untrusted replacement text"}})
+	expect(t, bad, 400)
+	if recorder.input.RequestID != "" {
+		t.Fatal("replacement request text reached the proposal writer")
+	}
 	w := call(t, f, f.a, "POST", "/api/knowledge/learnings/"+nodeLearningID(f.ticket)+"/draft", map[string]any{"doctrine": map[string]any{"request_id": id, "repository": "configured/private-doctrine", "path": "docs/AGENTS-DOMAIN-LEARNINGS.md", "section": "Learnings"}})
 	expect(t, w, 200)
 	reply := decode[map[string]any](t, w)
