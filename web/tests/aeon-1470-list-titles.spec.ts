@@ -6,7 +6,7 @@
 // label. Phone rows stay as they were. Evidence: aeon1470-<width>-<theme>-<state>.png and aeon1470-checks.json (.md).
 import { test, expect, type Locator, type Page, type TestInfo } from '@playwright/test'
 import { writeFileSync } from 'node:fs'
-import { COLUMN_BY_ID, GIVE_WAY, RETURN_ROOM, type ColumnId } from '../src/lib/columns'
+import { CARD_WIDTH_SAMPLE_CAP, COLUMN_BY_ID, GIVE_WAY, RETURN_ROOM, type ColumnId } from '../src/lib/columns'
 import { SORT_LABELS } from '../src/lib/work'
 import { controlStability } from './control-stability'
 import { fixtures, liveAgent, mockWork, watchErrors, type Fixtures } from './work-fixtures'
@@ -111,19 +111,36 @@ type Box = { x: number; y: number; width: number; height: number }
 const boxOf = (locator: Locator) => locator.evaluate(el => { const r = el.getBoundingClientRect(); return { x: r.x, y: r.y, width: r.width, height: r.height } })
 const tableWidth = (page: Page) => page.locator('.table-card').evaluate(el => el.clientWidth)
 const shownIds = (page: Page) => grid(page).locator('thead th').evaluateAll(cells => cells.map(cell => cell.getAttribute('data-column-id') as ColumnId))
+// A growth is adopted only after two frames agree, and a disagreeing pair is retried up to the sample cap.
+// Read after that window. A set that never changes is still returned, and the assertion judges it.
+async function shownAfterCard(page: Page): Promise<ColumnId[]> {
+  for (let frame = 0; frame < CARD_WIDTH_SAMPLE_CAP + 4; frame++) {
+    await page.evaluate(() => new Promise<void>(resolve => requestAnimationFrame(() => resolve())))
+  }
+  let last = await shownIds(page)
+  for (let frame = 0; frame < 12; frame++) {
+    await page.evaluate(() => new Promise<void>(resolve => requestAnimationFrame(() => resolve())))
+    const next = await shownIds(page)
+    if (next.join() === last.join()) return next
+    last = next
+  }
+  return last
+}
 const headWidths = (page: Page) => grid(page).locator('thead th').evaluateAll(cells => Object.fromEntries(cells.map(cell => [cell.getAttribute('data-column-id'), cell.getBoundingClientRect().width])))
 // Sets the viewport so the table is exactly `target` px wide (the page gutter grows with the window). The resize
 // observer and the render it triggers land before the second frame.
 async function tableAt(page: Page, target: number) {
   let viewport = page.viewportSize()!.width + target - await tableWidth(page)
-  for (let step = 0; step < 4; step++) {
+  let actual = await tableWidth(page)
+  for (let step = 0; step < 8; step++) {
     await page.setViewportSize({ width: viewport, height: 900 })
     await settled(page)
-    const actual = await tableWidth(page)
+    actual = await tableWidth(page)
     if (actual === target) break
     viewport += target - actual
   }
-  return { viewport, actual: await tableWidth(page) }
+  expect(actual, `table is ${target}px`).toBe(target)
+  return { viewport, actual }
 }
 
 // Every assert lands in a checks file with its width, theme and locale (Tick's evidence, AEON-1470 §8).
@@ -204,19 +221,19 @@ test('AEON-1470 a column that left returns only with 16 px to spare: ±8 px arou
   const set = await shownIds(page)
   for (const step of [8, -8]) {
     await tableAt(page, width + step)
-    expect(await shownIds(page), `left out at ${width + step}`).toEqual(set)
+    expect(await shownAfterCard(page), `left out at ${width + step}`).toEqual(set)
     log.add({ assert: 'hysteresis keeps the set', state: `Updated left at ${width}; ${step > 0 ? '+' : ''}${step} px`, width: page.viewportSize()!.width, tableWidth: width + step, theme: 'light', value: set })
   }
   // It returns with RETURN_ROOM to spare above the width it needs (width + 1), then holds ±8 px around that threshold.
   const back = width + 1 + RETURN_ROOM
   await tableAt(page, back - 1)
-  expect(await shownIds(page)).not.toContain('updated')
+  expect(await shownAfterCard(page)).not.toContain('updated')
   await tableAt(page, back)
-  const returned = await shownIds(page)
+  const returned = await shownAfterCard(page)
   expect(returned).toContain('updated')
   for (const step of [-8, 8]) {
     await tableAt(page, back + step)
-    expect(await shownIds(page), `back at ${back + step}`).toEqual(returned)
+    expect(await shownAfterCard(page), `back at ${back + step}`).toEqual(returned)
     log.add({ assert: 'hysteresis keeps the set', state: `Updated back at ${back}; ${step > 0 ? '+' : ''}${step} px`, width: page.viewportSize()!.width, tableWidth: back + step, theme: 'light', value: returned })
   }
   log.save()

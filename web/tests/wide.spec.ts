@@ -213,6 +213,11 @@ test.describe('edit mode', () => {
     await page.goto('/p/PHAROS/PHAROS-12')
     const ws = panel(page)
     await expect(ws.getByRole('heading', { name: 'Add an Oracle Cloud connector' })).toBeVisible()
+    // e is ignored while a field or a floating layer has the keys. The panel holds focus, then one e opens edit.
+    await expect(page.locator('.floating')).toHaveCount(0)
+    await expect(page.locator('dialog[open]')).toHaveCount(0)
+    await ws.focus()
+    await expect(ws).toBeFocused()
     await page.keyboard.press('e')
     const form = ws.getByRole('form', { name: 'Edit PHAROS-12' })
     await form.getByLabel('Title').fill('Draft title')

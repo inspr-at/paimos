@@ -2,7 +2,7 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
-import { automaticColumns, COLUMN_BY_ID, GIVE_WAY, latchParentShare, layoutTableWidth, layoutWidths, loadedFitWidth, normalizeColumnIds, orderOf, PARENT_TITLE_WIDTH, parentColumnDefault, releaseLabel, RETURN_ROOM, savedColumnWidth, tagList, TITLE_MIN_TABLE, TITLE_TARGET, titleRoom, visibleColumns, widthOf, withHostColumns, type ColumnDef, type ColumnFit, type ColumnId, type ListPrefs } from '../src/lib/columns.ts'
+import { agreedFrameWidth, automaticColumns, CARD_WIDTH_SAMPLE_CAP, cardWidthAfterSamples, COLUMN_BY_ID, GIVE_WAY, latchParentShare, layoutTableWidth, layoutWidths, loadedFitWidth, normalizeColumnIds, orderOf, PARENT_TITLE_WIDTH, parentColumnDefault, releaseLabel, RETURN_ROOM, savedColumnWidth, tagList, TITLE_MIN_TABLE, TITLE_TARGET, titleRoom, visibleColumns, widthOf, withHostColumns, type ColumnDef, type ColumnFit, type ColumnId, type ListPrefs } from '../src/lib/columns.ts'
 import { groupRows, selectLoadedGroup, filtersFromQuery, filtersToQuery, type TicketRow } from '../src/lib/ticketList.ts'
 import { byPosition, positionBetween, positionOf, type Attachment } from '../src/lib/attachments.ts'
 
@@ -415,6 +415,29 @@ test('AEON-1470 the set depends only on width, chosen columns, minimums and sort
   const narrow = grid(721, ALL)
   const wider = grid(1000, ALL, { fit: { previous: narrow.dropped } })
   assert.ok(wider.dropped.length < narrow.dropped.length && narrow.dropped.slice(0, wider.dropped.length).join() === wider.dropped.join())
+})
+
+test('AEON-1569 a disagreeing frame pair cannot hide the wider card: later agreeing frames still adopt it', () => {
+  assert.equal(CARD_WIDTH_SAMPLE_CAP, 16)
+  assert.equal(agreedFrameWidth(760, 792), null)
+  assert.equal(agreedFrameWidth(null, 792), null)
+  assert.equal(agreedFrameWidth(792, null), null)
+  assert.equal(agreedFrameWidth(792, 0), null)
+  // mid is not required to be positive: only next <= 0 refuses.
+  assert.equal(agreedFrameWidth(0, 0.4), 0.4)
+  assert.equal(agreedFrameWidth(700, 700), 700)
+  assert.equal(agreedFrameWidth(700, 700.5), 700.5)
+  assert.equal(agreedFrameWidth(700, 700.6), null)
+  assert.equal(cardWidthAfterSamples([]), null)
+  assert.equal(cardWidthAfterSamples([792]), null)
+  assert.equal(cardWidthAfterSamples([760, 792]), null)
+  assert.equal(cardWidthAfterSamples([700, 700]), 700)
+  // The old settle inspected the first pair and gave up, which left Updated hidden after the card had grown.
+  assert.equal(cardWidthAfterSamples([760, 792, 792, 792]), 792)
+  assert.equal(cardWidthAfterSamples([760, 792, 791.4, 792]), null)
+  assert.equal(cardWidthAfterSamples([null, null, 792, 792]), 792)
+  // The first agreement wins. A later pair does not replace it.
+  assert.equal(cardWidthAfterSamples([700, 700, 800, 800]), 700)
 })
 
 // AEON-1470 (fix 7). Risk: Automatic's wide extras stepping aside outside the give-way, so the column the list is sorted

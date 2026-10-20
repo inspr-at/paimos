@@ -63,6 +63,24 @@ export const GIVE_WAY: ColumnId[] = ['updated', 'created', 'estimate', 'tokens',
 // A column that left comes back only with this much to spare, so the set does
 // not flap while a window is resized across its threshold.
 export const RETURN_ROOM = 16
+// settleCardWidth reads frames in pairs. One disagreeing pair is not the card
+// (AEON-1569); it keeps reading until a pair agrees or this many samples are in.
+export const CARD_WIDTH_SAMPLE_CAP = 16
+
+/** The width two frames agree on. The predicate matches the single-pair settle: a non-positive next frame, a null, or more than half a pixel apart is not agreement. */
+export function agreedFrameWidth(mid: number | null, next: number | null): number | null {
+  if (mid === null || next === null || next <= 0 || Math.abs(next - mid) > 0.5) return null
+  return next
+}
+
+/** The first agreeing pair. Pairs that disagree are skipped, so a later pair can still adopt the card. */
+export function cardWidthAfterSamples(samples: readonly (number | null)[]): number | null {
+  for (let i = 0; i + 1 < samples.length; i += 2) {
+    const width = agreedFrameWidth(samples[i] ?? null, samples[i + 1] ?? null)
+    if (width !== null) return width
+  }
+  return null
+}
 // Columns only wide tables add on their own.
 const WIDE_EXTRAS: ColumnId[] = ['suggested', 'list_cost', 'tokens', 'model', 'estimate', 'tags', 'release', 'created', 'assignee']
 // The text columns that take spare width on wide tables (their text gets room).

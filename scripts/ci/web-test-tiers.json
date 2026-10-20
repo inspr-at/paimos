@@ -16280,6 +16280,8 @@
     ,
     {"kind":"node","file":"tests/columns.test.ts","name":"AEON-1470: a docked table stays inside its card; from 721 px the never-leaving minimums may scroll","tier":"ESSENTIAL"}
     ,
+    {"kind":"node","file":"tests/columns.test.ts","name":"AEON-1569 a disagreeing frame pair cannot hide the wider card: later agreeing frames still adopt it","tier":"ESSENTIAL"}
+    ,
     {"kind":"node","file":"tests/columns.test.ts","name":"AEON-913: a loaded fit keeps the designed width until the value is wider","tier":"GATED-FULL"}
     ,
     {"kind":"node","file":"tests/columns.test.ts","name":"AEON-913: automatic fits give width back until Title keeps its minimum","tier":"GATED-FULL"}
