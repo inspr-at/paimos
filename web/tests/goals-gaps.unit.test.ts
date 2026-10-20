@@ -32,7 +32,7 @@ vi.mock('../src/lib/usePolledData', async importOriginal => {
   return { ...actual, usePoller: (run: () => Promise<unknown>) => ({ start(immediate = false) { if (immediate) void run() }, stop() {}, tick() {} }) }
 })
 
-import { agoText, doneToday, goalPercent, hoursLeftLine, hoursLeftText, noteByline } from '../src/lib/goals'
+import { agoText, doneToday, goalPercent, hoursLeftLine, hoursLeftText, noteByline, whenText } from '../src/lib/goals'
 import { openGoalsLive, type GoalsLiveSource, type GoalsLiveState } from '../src/lib/goalsLive'
 import { useSession } from '../src/stores/session'
 import { useGoalsPage } from '../src/components/goals/goalsPage'
@@ -267,15 +267,46 @@ describe('what the rows and the footer show', () => {
   })
 
   it('the footer says Live with the last ETA time, or Reconnecting with the last update, in one slot', async () => {
-    const now = Date.now(), set = now - 30 * 60_000, update = now - 4 * 60_000
+    // Local midday on a fixed date. Thirty minutes earlier stays the same local
+    // day, so whenText is the clock only. Using the real clock in the half hour
+    // after local midnight puts the ETA on yesterday, and whenText adds the weekday.
+    const midday = new Date(2026, 9, 17, 12, 0, 0, 0).getTime()
+    vi.useFakeTimers({ toFake: ['Date'] })
+    vi.setSystemTime(midday)
+    try {
+      const now = Date.now(), set = now - 30 * 60_000, update = now - 4 * 60_000
+      expect(now).toBe(midday)
+      expect(whenText(set, now)).toBe(clock(set))
+      expect(whenText(update, now)).toBe(clock(update))
+      const on = await html(GoalFreshness, { live: 'live', etaSetAt: set, updatedAt: update, now })
+      expect(on).toContain('data-live="1"')
+      expect(bare(on)).toMatch(new RegExp(`<b[^>]*>Live</b> · ETAs last set ${clock(set)}`))
+      expect(on).toMatch(/class="f-off" aria-hidden="true"/)
+      expect(on).not.toContain('aria-hidden="false"')
+      const off = await html(GoalFreshness, { live: 'reconnecting', etaSetAt: set, updatedAt: update, now })
+      expect(off).toContain('data-live="0"')
+      expect(bare(off)).toMatch(new RegExp(`<b[^>]*>Reconnecting</b> · last update ${clock(update)}`))
+      expect(off).toMatch(/class="f-live" aria-hidden="true"/)
+    } finally {
+      vi.useRealTimers()
+    }
+    // Regression: 00:10 UTC, ETA set thirty minutes earlier (23:40 UTC the day before).
+    // whenText in UTC carries the weekday; the footer calls whenText in the
+    // runtime zone, which may still be the same local day. Both must match.
+    const now = Date.parse('2026-10-18T00:10:00Z')
+    const set = now - 30 * 60_000, update = now - 4 * 60_000
+    const utcClock = (ms: number) => new Intl.DateTimeFormat('en-GB', { hour: '2-digit', minute: '2-digit', hourCycle: 'h23', timeZone: 'UTC' }).format(new Date(ms))
+    const etaUtc = whenText(set, now, 'UTC')
+    expect(etaUtc.endsWith(utcClock(set))).toBe(true)
+    expect(etaUtc).not.toBe(utcClock(set))
+    expect(whenText(update, now, 'UTC')).toBe(utcClock(update))
     const on = await html(GoalFreshness, { live: 'live', etaSetAt: set, updatedAt: update, now })
     expect(on).toContain('data-live="1"')
-    expect(bare(on)).toMatch(new RegExp(`<b[^>]*>Live</b> · ETAs last set ${clock(set)}`))
+    expect(bare(on)).toContain(`ETAs last set ${whenText(set, now)}`)
     expect(on).toMatch(/class="f-off" aria-hidden="true"/)
-    expect(on).not.toContain('aria-hidden="false"')
     const off = await html(GoalFreshness, { live: 'reconnecting', etaSetAt: set, updatedAt: update, now })
     expect(off).toContain('data-live="0"')
-    expect(bare(off)).toMatch(new RegExp(`<b[^>]*>Reconnecting</b> · last update ${clock(update)}`))
+    expect(bare(off)).toContain(`last update ${whenText(update, now)}`)
     expect(off).toMatch(/class="f-live" aria-hidden="true"/)
   })
 
