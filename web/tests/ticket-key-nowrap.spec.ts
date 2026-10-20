@@ -137,7 +137,10 @@ for (const width of [320, 360, 390, 1440]) {
       const longRow = rows(page).filter({ has: page.locator('.phone-meta .key', { hasText: /^PHAROS-14530$/ }) })
       const squeezed = await longRow.evaluate(tr => {
         const meta = tr.querySelector<HTMLElement>('.phone-meta')!, date = meta.querySelector<HTMLElement>('time')!
-        const needed = [...meta.children].reduce((sum, el) => sum + (el === date ? date.scrollWidth / 2 : el.getBoundingClientRect().width), 0)
+        // The date grows to fill the line, so its text, not its box, sets the squeeze.
+        const range = document.createRange()
+        range.selectNodeContents(date)
+        const needed = [...meta.children].reduce((sum, el) => sum + (el === date ? range.getBoundingClientRect().width / 2 : el.getBoundingClientRect().width), 0)
         return Math.floor(tr.closest('.table-card')!.getBoundingClientRect().width - (meta.clientWidth - needed))
       })
       await grid(page).evaluate((el, width) => { (el.closest('.table-card') as HTMLElement).style.width = `${width}px` }, Math.min(228, squeezed))
