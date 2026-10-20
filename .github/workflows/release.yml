@@ -674,6 +674,9 @@ jobs:
       attestations: read
       actions: read
     uses: ./.github/workflows/release-completion.yml
+    # Environment secrets (release-signing's APPLE_*) reach a reusable workflow only with secrets: inherit;
+    # without it they arrive empty and the team check fails closed (r137, AEON-1584; probe run 39487791686).
+    secrets: inherit
     with:
       tag: v${{ needs.image.outputs.version }}
       digest: ${{ needs.image.outputs.digest }}
