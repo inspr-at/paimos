@@ -1270,10 +1270,16 @@ func TestLeadPersonStartIgnoresUnroutedQueueRow(t *testing.T) {
 		t.Fatalf("person run was not claimed: %s", run.Status)
 	}
 	refuse(active)
+	// storeHandoff writes the whole worker_assignment object. jsonb_set does not
+	// create a missing parent, so a nested {worker_assignment,state} write leaves
+	// this starting run unchanged and the active sentence stays true.
 	f.tx(t, f.person, func(tx pgx.Tx) error {
-		_, err := tx.Exec(t.Context(), `UPDATE agent_runs SET trace=jsonb_set(trace,'{worker_assignment,state}','"launch_unknown"') WHERE id=$1`, run.ID)
+		_, err := tx.Exec(t.Context(), `UPDATE agent_runs SET trace=jsonb_set(coalesce(trace,'{}'::jsonb),'{worker_assignment}','{"state":"launch_unknown"}'::jsonb) WHERE id=$1`, run.ID)
 		return err
 	})
+	if f.count(t, f.person, `SELECT count(*) FROM agent_runs WHERE id=$1 AND status='starting' AND trace->'worker_assignment'->>'state'='launch_unknown'`, run.ID) != 1 {
+		t.Fatal("fixture did not keep a starting run at launch_unknown")
+	}
 	refuse(launch)
 	f.tx(t, f.person, func(tx pgx.Tx) error {
 		_, err := tx.Exec(t.Context(), `UPDATE agent_runs SET trace=trace-'worker_assignment' WHERE id=$1`, run.ID)
@@ -1288,6 +1294,9 @@ func TestLeadPersonStartIgnoresUnroutedQueueRow(t *testing.T) {
 		_, err := tx.Exec(t.Context(), `UPDATE agent_runs SET status='ownership_lost',trace='{"work_lifecycle_release":{"exit_unconfirmed":true}}' WHERE id=$1`, run.ID)
 		return err
 	})
+	if f.count(t, f.person, `SELECT count(*) FROM agent_runs WHERE id=$1 AND status='ownership_lost' AND trace->'work_lifecycle_release'->>'exit_unconfirmed'='true'`, run.ID) != 1 {
+		t.Fatal("fixture did not record an unconfirmed exit")
+	}
 	refuse(exit)
 }
 
