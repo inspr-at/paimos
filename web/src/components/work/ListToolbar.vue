@@ -288,7 +288,7 @@ function closeOverlays() { closeAttention(false); closeDisplay(false); phoneTool
 // window shows; with none in sight (a phone or tablet under an unfolded header) it opens as a
 // sheet, and closing it hands focus back to Filters.
 function openDisplay() {
-  displayOrigin.value = document.activeElement instanceof HTMLElement ? document.activeElement : null
+  displayOrigin.value = compactList.value && document.activeElement instanceof HTMLElement ? document.activeElement : null
   const button = props.collapsedHeader ? collapsedDisplayButton.value : displayButton.value
   displayAnchor.value = (button?.offsetParent ? button : null) ?? filtersButton.value ?? root.value ?? null
 }

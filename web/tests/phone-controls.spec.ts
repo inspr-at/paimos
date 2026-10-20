@@ -150,7 +150,7 @@ for (const width of [390, 768, 1024, 1440]) {
         // AEON-1559 keeps a Display button in sight, so closing returns there.
         // Filters receives focus only when that button is not in the page.
         const display = page.locator('#project-view-settings .display-btn')
-        const displayShown = await display.evaluate(el => el.offsetParent !== null).catch(() => false)
+        const displayShown = await display.isVisible()
         await expect(displayShown ? display : opener).toBeFocused()
       } else {
         await capture(page, `display-${width}-${theme}`)
