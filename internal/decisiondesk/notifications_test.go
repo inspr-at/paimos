@@ -490,8 +490,9 @@ func TestDeskPushRecipientsBurstAndGone(t *testing.T) {
 				t.Fatal("device fanout lost a device")
 			}
 			// A second committed hint for the same item still cannot send again.
+			// Append refuses an event with no snapshot; the hint carries only the id and revision.
 			if err := db.InTenant(db.AllProjects(t.Context(), "duplicate Desk event"), f.db.App, f.p.TenantID, func(tx pgx.Tx) error {
-				_, err := events.Append(t.Context(), tx, f.agent, events.Change{Type: "question.asked", NodeID: &q.ID})
+				_, err := events.Append(t.Context(), tx, f.agent, events.Change{Type: "question.asked", NodeID: &q.ID, After: map[string]any{"question_id": q.ID, "revision": q.Revision}})
 				return err
 			}); err != nil {
 				t.Fatal(err)
