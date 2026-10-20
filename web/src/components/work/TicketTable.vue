@@ -904,7 +904,7 @@ defineExpose({
 </script>
 
 <template>
-  <div ref="card" class="table-card" :data-columns-settled="columnsSettled ? '1' : '0'" :class="[density, { selectable, selecting, customised, 'phone-rows': phoneRows, overflowing: !phone && layoutWidth > width + 1 }]">
+  <div ref="card" class="table-card" :data-columns-settled="columnsSettled ? '1' : '0'" :class="[density, { selectable, selecting, customised: customised && !phoneRows, 'phone-rows': phoneRows, overflowing: !phone && layoutWidth > width + 1 }]">
     <table :style="!phone && layoutWidth > width ? { minWidth: `${layoutWidth}px` } : undefined" ref="grid" class="tickets" :class="{ outline: !!outline }" :role="outline ? 'treegrid' : 'grid'" :aria-label="label ?? (outline ? 'Ticket outline' : 'Tickets')" :aria-busy="loading" tabindex="0" :aria-activedescendant="cursorId ? `row-${cursorId}` : undefined" @focus="emit('gridFocus')">
       <colgroup>
         <col v-for="column in columns" :key="column.id" :class="column.cls" :style="colWidth(column.id) ? { width: `${colWidth(column.id)}px` } : undefined" />
@@ -1945,7 +1945,7 @@ button.release-chip:focus-visible { box-shadow: var(--focus-ring); }
   align-items: center; column-gap: 10px; row-gap: 2px; height: 56px;
   padding: 8px 0 9px 10px; border-bottom: 1px solid var(--line); background-image: none;
 }
-.phone-rows .ticket-row td { display: block !important; min-width: 0; padding: 0 !important; border: 0; background: none !important; box-shadow: none !important; }
+.phone-rows .ticket-row td { display: block !important; min-width: 0; height: auto; padding: 0 !important; border: 0; background: none !important; box-shadow: none !important; }
 .phone-rows .ticket-row td::before { display: none !important; }
 .phone-rows .ticket-row .phone-state { position: relative; grid-area: state; align-self: start; padding-top: 2px !important; }
 .phone-rows .ticket-row .phone-title { grid-area: title; contain: inline-size; overflow: visible; }
