@@ -465,19 +465,20 @@ test('AEON-1570 a growing card is adopted after a disagreeing frame pair, and a 
   assert.equal(observedCardWidth(1000, 760, 800, false), 1000)
   assert.equal(observedCardWidth(0, 760, 1000, true), 1000)
   // Window and visualViewport both fire for one resize. The second event reports
-  // the same width and must leave the shrink pending until the narrow card sample
-  // arrives (AEON-1470). A growth clears it. The old assignment `inner < last`
-  // dropped the hint on that follow-up, so the lagged clientWidth stayed.
+  // the same width and must leave the shrink pending until the card observer
+  // reads it (AEON-1470). A growth clears it. The observer then consumes the
+  // hint: leaving it set restarts the sampler on every later notification and
+  // the card epoch never sits still (AEON-1594).
   assert.equal(pendingViewportShrink(1024, 1440, false), true)
   assert.equal(pendingViewportShrink(1024, 1024, true), true)
   assert.equal(pendingViewportShrink(1024.4, 1024, true), true)
   assert.equal(pendingViewportShrink(1024, 1024, false), false)
   assert.equal(pendingViewportShrink(1440, 1024, true), false)
   const table = readFileSync(new URL('../src/components/work/TicketTable.vue', import.meta.url), 'utf8')
-  assert.match(table, /observedCardWidth\(live, box, before, viewportShrunk\)/)
+  assert.match(table, /observedCardWidth\(live, box, before, shrunk\)/)
   assert.match(table, /pendingViewportShrink\(inner, lastInner, viewportShrunk\)/)
-  assert.match(table, /if \(shrunk && Math\.abs\(live - viewportAnchor\) > 0\.5\) viewportShrunk = false/)
-  assert.doesNotMatch(table, /const shrunk = viewportShrunk\n {2}viewportShrunk = false/)
+  assert.match(table, /const shrunk = viewportShrunk\n  viewportShrunk = false/)
+  assert.doesNotMatch(table, /viewportAnchor/)
   assert.match(table, /if \(moved \|\| shrunk\) settleCardWidth\(grew, before\)/)
   // A wider live card is this resize when the window grew, and ignored when it shrank.
   assert.equal(nextMeasuredCardWidth(760, 792, true), 792)

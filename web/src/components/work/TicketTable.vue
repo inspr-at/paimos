@@ -585,10 +585,11 @@ function applyCardSize(entries: ResizeObserverEntry[]) {
   const before = width.value
   const live = readCardWidth()
   if (live === null) return
+  // Window and visualViewport both fire for one resize. The hint stays pending
+  // across that pair, then this delivery consumes it. Leaving it set restarts
+  // the sampler on every later notification and the card epoch never sits still.
   const shrunk = viewportShrunk
-  // The lag is over once client width has left the card this shrink started
-  // from. A wide delivery must not eat the hint before the narrow sample.
-  if (shrunk && Math.abs(live - viewportAnchor) > 0.5) viewportShrunk = false
+  viewportShrunk = false
   // The narrowest content box is the shrink hint. A wider one in the same
   // delivery is a queued sample and must not replace the live card.
   let box = 0
@@ -596,23 +597,20 @@ function applyCardSize(entries: ResizeObserverEntry[]) {
     const sample = entry.contentRect?.width
     if (typeof sample === 'number' && Number.isFinite(sample) && sample > 0) box = box === 0 ? sample : Math.min(box, sample)
   }
-  const next = observedCardWidth(live, box, before, viewportShrunk)
-  if (viewportShrunk && next < live - 0.5) viewportShrunk = false
+  const next = observedCardWidth(live, box, before, shrunk)
   const grew = next > before + 0.5
   const moved = Math.abs(next - before) > 0.5
   if (moved) width.value = next
   // An unchanged delivery must not restart the frame sampler. Restarting it
   // on every notification keeps a frame loop alive while the header paints.
   if (moved || shrunk) settleCardWidth(grew, before)
-  else if (!cardWidthSettled.value) finishCardSettle(cardFrame)
+  else if (!cardWidthSettled.value && cardFrame === 0) finishCardSettle(cardFrame)
 }
 let lastInner = window.innerWidth
 let viewportShrunk = false
-let viewportAnchor = 0
 function measureSoon() {
   const inner = window.innerWidth
   const grew = inner > lastInner + 0.5
-  if (inner < lastInner - 0.5) viewportAnchor = width.value
   viewportShrunk = pendingViewportShrink(inner, lastInner, viewportShrunk)
   lastInner = inner
   const before = width.value
