@@ -213,7 +213,7 @@ Verification at code commit `838d086bae`: guarded `remote-test.sh` with
 `internal/reportercontract/...` and `internal/dsar/...`. This includes the new
 consent and production receipt/final regressions, the strengthened paired-start
 negative cases, the prior delivery smoke and the existing default-off refusal.
-No native process or other model CLI was run. The historical removed-guard
+No vendor or other model CLI was run. The historical removed-guard
 snapshot evidence remains historical; no new guard-removal snapshots or live
 pilot qualification are claimed.
 
