@@ -33,14 +33,42 @@ for (const width of [320, 360, 390, 1440]) {
     await mockWork(page, data)
     await page.goto('/p/PHAROS')
     await expect(rows(page)).toHaveCount(5)
-    await expect(grid(page).locator('.c-key .key', { hasText: /^PHAROS-14530$/ })).toBeVisible()
+    const phone = width <= 719
+    await expect(grid(page).locator(phone ? '.phone-meta .key' : '.c-key .key', { hasText: /^PHAROS-14530$/ })).toBeVisible()
     for (const colorScheme of SCHEMES) {
       await page.emulateMedia({ colorScheme })
       await page.evaluate(() => document.fonts.ready)
       let priorityRows = 0
       for (const row of await rows(page).all()) {
-        const keyFit = await wholeKey(row.locator('.c-key .key'), 'tr')
+        const keyFit = await wholeKey(row.locator(phone ? '.phone-meta .key' : '.c-key .key'), 'tr')
         expect(keyFit, `${colorScheme} ${keyFit.why}`).toMatchObject({ lines: 1, clipped: false, inside: true })
+        if (phone) {
+          const fit = await row.evaluate(tr => {
+            const right = (selector: string) => tr.querySelector(selector)?.getBoundingClientRect().right ?? 0
+            const icon = tr.querySelector<HTMLElement>('.phone-state [role="img"]')
+            const glyph = icon?.querySelector('svg')?.getBoundingClientRect()
+            const rowBox = tr.getBoundingClientRect()
+            const date = tr.querySelector<HTMLElement>('.phone-meta time')
+            return {
+              title: right('.title-link'), icon: glyph?.right ?? 0, date: date?.getBoundingClientRect().right ?? 0,
+              card: rowBox.right - parseFloat(getComputedStyle(tr).paddingRight),
+              name: icon?.getAttribute('aria-label') ?? '',
+              iconInside: !!glyph && glyph.width >= 1 && glyph.left >= rowBox.left - .5 && glyph.right <= rowBox.right + .5 && glyph.top >= rowBox.top - .5 && glyph.bottom <= rowBox.bottom + .5,
+              dateWhole: !!date && date.scrollWidth <= date.clientWidth + 1,
+              why: `${tr.querySelector('.phone-meta .key')!.textContent}: ${[...tr.children].map(td => `${td.className.split(' ')[0]} ${Math.round(td.getBoundingClientRect().width)}`).join(', ')}; columns ${getComputedStyle(tr).gridTemplateColumns}`,
+            }
+          })
+          expect(fit.title, `the title gives way inside the card; ${fit.why}`).toBeLessThanOrEqual(fit.card + .5)
+          expect(fit.icon, `the status icon stays inside the card; ${fit.why}`).toBeLessThanOrEqual(fit.card + .5)
+          expect(fit.iconInside, `the status icon sits inside the row; ${fit.why}`).toBe(true)
+          // Phone rows keep the status as an icon. Its accessible name is the status word.
+          expect(fit.name, fit.why).not.toMatch(/^Status:/)
+          expect(fit.name.length, fit.why).toBeGreaterThan(1)
+          expect(fit.name, fit.why).not.toContain('…')
+          expect(fit.date, `the date stays inside the card; ${fit.why}`).toBeLessThanOrEqual(fit.card + .5)
+          expect(fit.dateWhole, `the date reads whole; ${fit.why}`).toBe(true)
+          continue
+        }
         const fit = await row.evaluate(tr => {
           const right = (selector: string) => tr.querySelector(selector)?.getBoundingClientRect().right ?? 0
           const label = tr.querySelector<HTMLElement>('.status-btn > span:not(.status-icon)')!
@@ -90,7 +118,7 @@ for (const width of [320, 360, 390, 1440]) {
           expect(fit.priority.gap, `${colorScheme} the priority icon keeps at least 6px from the date; ${fit.why}`).toBeGreaterThanOrEqual(6)
         }
       }
-      if (width === 320 || width === 360) expect(priorityRows, `${colorScheme}: both priority rows keep a slot beside the date`).toBeGreaterThanOrEqual(2)
+      if (!phone && (width === 320 || width === 360)) expect(priorityRows, `${colorScheme}: both priority rows keep a slot beside the date`).toBeGreaterThanOrEqual(2)
       // Nothing runs past the viewport, and the card keeps the page inset and its right border.
       const edge = await grid(page).evaluate(el => {
         const scroller = document.scrollingElement!
@@ -103,21 +131,22 @@ for (const width of [320, 360, 390, 1440]) {
 
     if (width === 320) {
       // Squeezed further, the date is next to give way. The key and the
-      // icon-only status chip stay whole, and nothing leaves the card.
+      // status icon stay whole, and nothing leaves the card.
       await grid(page).evaluate(el => { (el.closest('.table-card') as HTMLElement).style.width = '228px' })
       let datesGivingWay = 0
       for (const row of await rows(page).all()) {
-        const keyFit = await wholeKey(row.locator('.c-key .key'), 'tr')
+        const keyFit = await wholeKey(row.locator('.phone-meta .key'), 'tr')
         expect(keyFit, `squeezed ${keyFit.why}`).toMatchObject({ lines: 1, clipped: false, inside: true })
         const fit = await row.evaluate(tr => {
-          const chip = tr.querySelector<HTMLElement>('.status-btn')!, icon = chip.querySelector('.status-icon')!.getBoundingClientRect(), box = chip.getBoundingClientRect()
-          const date = tr.querySelector<HTMLElement>('.c-updated time')!
+          const icon = tr.querySelector<HTMLElement>('.phone-state [role="img"] svg')!.getBoundingClientRect()
+          const box = tr.querySelector<HTMLElement>('.phone-state')!.getBoundingClientRect()
+          const date = tr.querySelector<HTMLElement>('.phone-meta time')!
           return {
             card: tr.getBoundingClientRect().right - parseFloat(getComputedStyle(tr).paddingRight),
             date: date.getBoundingClientRect().right,
             dateWhole: date.scrollWidth <= date.clientWidth + 1,
-            chipWhole: icon.left >= box.left - .5 && icon.right <= box.right + .5,
-            why: `${tr.querySelector('.c-key .key')!.textContent}: columns ${getComputedStyle(tr).gridTemplateColumns}`,
+            chipWhole: icon.width >= 1 && icon.left >= box.left - .5 && icon.right <= box.right + .5,
+            why: `${tr.querySelector('.phone-meta .key')!.textContent}: columns ${getComputedStyle(tr).gridTemplateColumns}`,
           }
         })
         expect(fit.chipWhole, `squeezed: the status icon stays whole; ${fit.why}`).toBe(true)
@@ -129,7 +158,7 @@ for (const width of [320, 360, 390, 1440]) {
     }
 
     // By its own key: child rows name PHAROS-10 in their Parent cell too.
-    await rows(page).filter({ has: page.locator('.c-key .key', { hasText: /^PHAROS-10$/ }) }).locator('.title-link').click()
+    await rows(page).filter({ has: page.locator('.key', { hasText: /^PHAROS-10$/ }) }).locator('.title-link').click()
     const children = page.getByRole('complementary', { name: 'Ticket details' }).locator('.child-row')
     await expect(children).toHaveCount(2)
     await expect(children.locator('.key', { hasText: /^PHAROS-14530$/ })).toBeVisible()

@@ -83,7 +83,11 @@ for (const width of [390, 1024, 1440]) for (const mode of ['light', 'dark'] as c
     async function toggleMode() {
       // The phone ticket sheet covers the app header. Use its real Close
       // action before changing appearance, then reopen the same ticket.
-      if (width === 390) await page.locator('.ticket-ws').getByRole('button', { name: 'Close ticket details', exact: true }).click()
+      if (width === 390) {
+        await page.locator('.ticket-ws').getByRole('button', { name: 'Close ticket details', exact: true }).click()
+        await expect(page.locator('.ticket-ws.panel')).toHaveCount(0)
+        await expect(modeControl).toBeVisible()
+      }
       await modeControl.click()
       if (width === 390) {
         await page.getByRole('menuitem', { name: /Switch to .* theme/ }).click()

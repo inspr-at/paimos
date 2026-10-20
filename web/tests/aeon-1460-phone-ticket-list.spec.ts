@@ -61,8 +61,17 @@ test('AEON-1460 compact ticket list keeps controls still and all actions reachab
     { size: { width: 1440, height: 900 }, themes: ['light', 'dark'] },
   ]
   try {
-    for (const { size, themes } of matrix) for (const theme of themes) for (const locale of ['en-US', 'de-AT']) {
-      const context = await browser.newContext({ viewport: size, locale, colorScheme: theme, reducedMotion: 'reduce', hasTouch: size.width < 1000, isMobile: size.width < 1000 })
+    // Each size, theme and locale uses its own browser context, so several run at once.
+    // Every assertion is unchanged.
+    const passes: { size: Size; theme: Theme; locale: string }[] = []
+    for (const entry of matrix) for (const theme of entry.themes) for (const locale of ['en-US', 'de-AT']) passes.push({ size: entry.size, theme, locale })
+    let cursor = 0
+    const visit = async () => {
+      for (;;) {
+        const pass = passes[cursor++]
+        if (!pass) return
+        const { size, theme, locale } = pass
+        const context = await browser.newContext({ viewport: size, locale, colorScheme: theme, reducedMotion: 'reduce', hasTouch: size.width < 1000, isMobile: size.width < 1000 })
       const page = await context.newPage()
       page.setDefaultTimeout(10_000)
       const desktop = size.height > 500 && size.width >= 720
@@ -264,8 +273,10 @@ test('AEON-1460 compact ticket list keeps controls still and all actions reachab
         const overflow = await page.evaluate(() => document.documentElement.scrollWidth - innerWidth)
         add('no horizontal overflow', overflow, '0', overflow === 0)
         add('no browser errors', errors, '[]', errors.length === 0)
-      } finally { await context.close() }
+        } finally { await context.close() }
+      }
     }
+    await Promise.all(Array.from({ length: Math.min(4, passes.length) }, () => visit()))
   } finally {
     const path = info.outputPath('AEON-1460/checks.json')
     await mkdir(dirname(path), { recursive: true })
@@ -304,9 +315,11 @@ test('AEON-1460 compact titles retain native links and keyboard full-text disclo
       await page.keyboard.press('Escape')
     } },
     { name: 'a modified link click opens exactly one native tab', run: async () => {
-      const sourceURL = page.url(), popup = page.waitForEvent('popup')
-      await page.locator('#row-n-1 .title-link').click({ modifiers: [process.platform === 'darwin' ? 'Meta' : 'Control'] })
-      const tab = await popup
+      const sourceURL = page.url()
+      const [tab] = await Promise.all([
+        page.context().waitForEvent('page'),
+        page.locator('#row-n-1 .title-link').click({ modifiers: ['ControlOrMeta'] }),
+      ])
       await tab.waitForLoadState('domcontentloaded')
       expect(new URL(tab.url()).pathname).toBe('/p/PHAROS/PHAROS-11')
       expect(page.context().pages()).toHaveLength(2)

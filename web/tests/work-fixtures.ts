@@ -988,8 +988,11 @@ export async function showProjectHead(page: Page) {
   await expect(fold).toBeVisible()
 }
 export async function openListFilters(page: Page) {
-  const compact = await page.locator('.compact-ticket-toolbar').count()
-  await page.getByRole('button', { name: compact ? /^Filter(?: tickets|:)/ : 'Filters', exact: !compact }).click()
+  const compactBar = page.locator('.compact-ticket-toolbar')
+  const desktop = page.getByRole('button', { name: 'Filters', exact: true })
+  await expect(compactBar.or(desktop)).toBeVisible()
+  if (await compactBar.count()) await compactBar.getByRole('button', { name: /^Filter(?: tickets|:)/ }).click()
+  else await desktop.click()
   await expect(page.getByRole('dialog', { name: 'Filters', exact: true })).toBeVisible()
 }
 export async function openListDisplay(page: Page) {

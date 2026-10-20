@@ -843,7 +843,10 @@ function longPress(event: Event, row: ListItem) {
   emit('select', row, 'toggle')
 }
 function linkClick(event: MouseEvent) {
-  if (event.metaKey || event.ctrlKey || event.shiftKey || event.button === 1) { event.stopPropagation(); return } // one native tab, without the row's newTab action
+  // Shift-click is the row's range selection. Let it bubble; the row cancels the new window.
+  if (event.shiftKey && !event.metaKey && !event.ctrlKey && event.button !== 1) return
+  // One native tab. Stop the row's newTab so it does not open a second window.
+  if (event.metaKey || event.ctrlKey || event.button === 1) { event.stopPropagation(); return }
   event.preventDefault()
 }
 const selectableRows = (group: RowGroup) => group.rows.filter(row => props.rowSelectable?.(row) ?? true)
@@ -1202,9 +1205,9 @@ defineExpose({
               <td class="phone-state">
                 <button v-if="selectable && selecting" type="button" class="phone-check" role="checkbox" :aria-checked="!!selected?.has(entry.row.id)" :aria-label="`Select ${entry.row.key}`" :disabled="selectionDisabled || (rowSelectable ? !rowSelectable(entry.row) : false)" @click.stop="emit('select', entry.row, 'toggle')"><span class="mark"><AppIcon v-if="selected?.has(entry.row.id)" name="check" :size="13" /></span></button>
                 <button v-else-if="entry.tree?.hasChildren" type="button" class="phone-fold" :aria-expanded="entry.tree.expanded" :aria-label="`${entry.tree.expanded ? 'Collapse' : 'Expand'} ${entry.row.key}`" @click.stop="emit('toggleRow', entry.row.id)"><AppIcon name="chevron-right" :size="14" /></button>
-                <span v-else :aria-label="statusMeta(entry.row.state).label" role="img" data-status-motion><StatusIcon :state="entry.row.state" :size="16" /></span>
+                <span v-if="!entry.tree?.hasChildren || (selectable && selecting)" class="phone-status" :aria-label="statusMeta(entry.row.state).label" role="img" data-status-motion><StatusIcon :state="entry.row.state" :size="16" /></span>
               </td>
-              <td class="c-title phone-title" data-column-id="title"><a class="title-link phone-title-link" :href="href(entry.row)" tabindex="-1" @click="linkClick"><span v-clip-tip="entry.row.title" class="title-text phone-title-text"><template v-for="(part, i) in highlight(entry.row.title, query)" :key="i"><mark v-if="part.match">{{ part.text }}</mark><template v-else>{{ part.text }}</template></template></span></a></td>
+              <td class="c-title phone-title" data-column-id="title"><a class="title-link phone-title-link" :href="href(entry.row)" tabindex="-1" @click="linkClick"><span v-clip-tip="entry.row.title" class="title-text phone-title-text"><template v-for="(part, i) in highlight(entry.row.title, query)" :key="i"><mark v-if="part.match">{{ part.text }}</mark><template v-else>{{ part.text }}</template></template></span></a><TicketWorkers v-if="assigneeWorkers(entry.row).length" class="title-workers" variant="cue" :workers="assigneeWorkers(entry.row)" :ticket-key="entry.row.key" :stale="liveStale" /></td>
               <td class="phone-meta"><span class="key">{{ entry.row.key }}</span><span class="phone-separator" aria-hidden="true">{{ '\u00a0·\u00a0' }}</span><span v-if="liveLabels?.has(entry.row.id)" class="live-label">{{ liveLabels.get(entry.row.id) }}</span><time v-else :datetime="entry.row.updated_at" :data-tip="absoluteTime(entry.row.updated_at)">{{ relativeTime(entry.row.updated_at, { now }).replace(/(\d)([mhd])\b/g, '$1\u00a0$2').replace(/(\d)\s+(?=\S)/g, '$1\u00a0') }}</time></td>
               <td class="phone-owner"><button type="button" class="assignee-btn phone-assignee" :disabled="!mayAssign(entry.row)" :aria-label="`Assignee: ${entry.row.assignee?.name ?? 'Unassigned'}. Change assignee of ${entry.row.key}`" aria-haspopup="menu" @click.stop="emit('assignee', entry.row, $event.currentTarget as HTMLElement)"><PersonAvatar v-if="entry.row.assignee" :id="entry.row.assignee.id" :name="entry.row.assignee.name" :size="24" /></button></td>
             </template>
@@ -1969,18 +1972,23 @@ button.release-chip:focus-visible { box-shadow: var(--focus-ring); }
 .phone-rows .ticket-row td { display: block !important; min-width: 0; height: auto; padding: 0 !important; border: 0; background: none !important; box-shadow: none !important; }
 .phone-rows .ticket-row td::before { display: none !important; }
 .phone-rows .ticket-row .phone-state { position: relative; grid-area: state; align-self: start; height: 18px; padding-top: 2px !important; }
-.phone-rows .ticket-row .phone-title { grid-area: title; contain: inline-size; overflow: visible; }
-.phone-rows .phone-title-link { display: block; min-width: 0; color: var(--ink); font-size: 14.5px; line-height: 20px; }
+.phone-rows .ticket-row td.phone-title { display: flex !important; align-items: center; gap: 6px; grid-area: title; contain: inline-size; overflow: visible; }
+.phone-rows .phone-title-link { display: block; flex: 1 1 auto; min-width: 0; color: var(--ink); font-size: 14.5px; line-height: 20px; }
+.phone-rows .phone-title .title-workers { flex: 0 0 auto; }
 .phone-rows .phone-title-text { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; -webkit-line-clamp: unset; }
-.phone-rows .ticket-row .phone-meta { grid-area: meta; display: flex !important; align-items: center; white-space: nowrap; line-height: 16px; color: var(--ink-3); font-size: 11.5px; }
-.phone-meta .key { color: var(--teal-ink); font-size: 11.5px; line-height: 16px; }
-.phone-meta .live-label { height: 16px; padding: 0; background: transparent; border-radius: 0; box-shadow: none; font-size: 11.5px; line-height: 16px; }
-.phone-meta time { font-size: 11.5px; font-variant-numeric: tabular-nums; }
+.phone-rows .phone-status { display: inline-grid; width: 16px; height: 16px; }
+.phone-rows .ticket-row .phone-meta { grid-area: meta; display: flex !important; align-items: center; min-width: 0; white-space: nowrap; line-height: 16px; color: var(--ink-3); font-size: 11.5px; }
+.phone-meta .key { flex: none; color: var(--teal-ink); font-size: 11.5px; line-height: 16px; }
+.phone-meta .phone-separator { flex: none; }
+.phone-meta .live-label { height: 16px; min-width: 0; padding: 0; overflow: hidden; text-overflow: ellipsis; background: transparent; border-radius: 0; box-shadow: none; font-size: 11.5px; line-height: 16px; }
+.phone-meta time { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; font-size: 11.5px; font-variant-numeric: tabular-nums; }
 .phone-rows .ticket-row .phone-owner { grid-area: owner; align-self: center; }
 .phone-assignee { display: grid; place-items: center; width: 44px; height: 44px; margin: 0; border: 0; padding: 0; background: transparent; border-radius: 8px; }
 .phone-assignee:disabled { opacity: 1; }
 .phone-assignee:focus-visible, .phone-fold:focus-visible { box-shadow: var(--focus-ring); }
-.phone-rows .phone-check, .phone-fold { position: absolute; display: grid; place-items: center; left: -16px; top: -4px; width: 44px; height: 44px; padding: 0 0 0 4px; border: 0; background: transparent; color: var(--ink-2); }
+.phone-rows .phone-check, .phone-fold { position: absolute; z-index: 2; display: grid; place-items: center; left: -10px; top: -4px; width: 44px; height: 44px; padding: 0 0 0 4px; border: 0; background: transparent; color: var(--ink-2); }
+.phone-rows .outline-root-drop, .phone-rows .outline-root-drop td { display: block; min-height: 44px; }
+.phone-rows .outline-root-drop td { width: 100%; }
 .phone-fold[aria-expanded="true"] svg { transform: rotate(90deg); }
 .phone-rows .ticket-row.dimmed :is(.phone-title-link, .phone-meta, .phone-owner, .phone-state) { opacity: .5; }
 .phone-rows .ghost td { display: none !important; }
