@@ -8,6 +8,75 @@ report a 60-second bound from daemon start for each initial account, or from
 that account being added or unblocked by repin; refreshing unchanged accounts
 does not extend the wait. Capacity capture reports a 10-second bound.
 
+## Touch ID key creation and strategy (AEON-1504, slice a)
+
+A Secure Enclave key creation failure with OSStatus `-34018`
+(`errSecMissingEntitlement`) records `missing_entitlement` in the private pairing
+snapshot. Pairing still requests person approval in Aeon and completes after
+approval, without claiming a local Touch ID key. Both `pair` and `status` report:
+
+> Touch ID unavailable: this agentd build lacks the keychain entitlement (AEON-1504). Pairing again will not fix it; Aeon approval is used meanwhile.
+
+This cause suppresses the Touch ID upgrade command, including the `-touch-id`
+state-root suggestion. Genuine hardware/biometric unavailability retains its
+existing behavior. Other native creation failures retain their OSStatus and
+stop pairing. Older snapshots without the recorded cause retain their existing
+diagnostics; the new build cannot infer why an older pairing has no key. The
+CLI's existing confirmation-line prefix is retained by this slice.
+
+### Decision proposed for slice b; LEAD approval pending
+
+**Option (a): persistent Keychain key in a signed app bundle.** Keep the current
+Security.framework key and biometric access control. OPS must create and own an
+Apple Developer portal App ID and Developer ID provisioning profile for the
+existing signing team. The profile must authorize the chosen
+`keychain-access-groups` and application identifier, with matching code-signature
+entitlements (`com.apple.application-identifier` on macOS). Ship agentd in a
+signed, notarized `.app` with `Contents/embedded.provisionprofile`; installer and
+service wrappers must run its bundled executable. Apple documents these
+requirements in [TN3137](https://developer.apple.com/documentation/technotes/tn3137-on-mac-keychains)
+and [TN3125](https://developer.apple.com/documentation/technotes/tn3125-inside-code-signing-provisioning-profiles).
+
+The real-Mac smoke must run the shipped bundle through the installed user
+service path: create a uniquely tagged test SEP key, pin its public key, restart,
+sign a bound challenge after Touch ID, verify the signature, then delete that
+exact test key. Also test cancellation, biometric-set invalidation and a build
+without the profile. Residual risks are profile/signing lifecycle failures,
+wrapper or launchd paths escaping the bundle, and key access across upgrades.
+Existing signed-daemon checks must remain intact. This option depends on OPS's
+profile and the separately owned release pipeline work after PR #792.
+
+**Option (b): CryptoKit key with an agentd-owned sealed representation.** Create
+`SecureEnclave.P256.Signing.PrivateKey` with `biometryCurrentSet` and
+`privateKeyUsage` access control, and atomically store its `dataRepresentation`
+in private agentd-owned state, without adding a Keychain item. This needs no
+new portal App ID, provisioning profile or Keychain access-group entitlement;
+normal release signing, notarization and signed-daemon enforcement still apply.
+Apple describes the representation as an encrypted block restorable only by
+the same Secure Enclave in [Storing CryptoKit keys](https://developer.apple.com/documentation/cryptokit/storing-cryptokit-keys-in-the-keychain).
+Restoration uses [init(dataRepresentation:authenticationContext:)](https://developer.apple.com/documentation/cryptokit/secureenclave/p256/signing/privatekey/init(datarepresentation:authenticationcontext:)).
+
+The real-Mac smoke must use a release-equivalent signed binary without the
+Keychain entitlements: create a test key, save the sealed blob, restart agentd,
+restore it, sign a bound challenge after Touch ID and verify with the original
+public key. Cancellation, biometric-set changes, modified blobs and copying to
+another Mac must fail closed. Delete the test blob and prove agentd cannot
+restore its test key. Residual risks are the Swift/CryptoKit bridge and packaging,
+prompt behavior in the user service session, and loss, rollback or copying of
+the blob. A sealed blob is still a local signing capability: file ownership,
+permissions and identity checks must protect it from other same-user processes;
+it must never enter diagnostics or telemetry. Removing it is local cleanup,
+not proof that every copied blob was erased; server pin revocation remains the
+authority boundary.
+
+**Recommendation: option (b)**, subject to LEAD's decision and a successful
+real-Mac smoke before slice b ships. It avoids a new OPS provisioning dependency
+and bundle-path changes. Entitlement-free operation with this exact biometric
+policy is a smoke-test requirement, not a result proven by this diagnostics
+slice. Hosted CI has no SEP and cannot provide that proof. Neither key strategy,
+bundle nor release workflow is implemented here. The diagnostic is local only;
+server/web parity would need a later additive, allowlisted cause field.
+
 **Verify again (AEON-685).** An expired one-time verification is informational
 when that enrollment has a fresh successful probe; it does not revoke separately
 approved ongoing use. A sibling's readiness never qualifies it. The account row's

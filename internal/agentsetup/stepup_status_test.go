@@ -8,6 +8,21 @@ import (
 	"testing"
 )
 
+func TestTouchIDMissingEntitlementNeverOffersPairingUpgrade(t *testing.T) {
+	e := &Engine{Store: testStore(t)}
+	s := &snapshot{LocalAuthUnavailableReason: "missing_entitlement", Request: DeviceRequest{Details: Details{Platform: "darwin"}}}
+	want := "Touch ID unavailable: this agentd build lacks the keychain entitlement (AEON-1504). Pairing again will not fix it; Aeon approval is used meanwhile."
+	for _, computer := range []string{"", testComputer} {
+		for _, pinned := range []*bool{nil, new(bool)} {
+			s.View.ComputerID, s.View.LocalAuthPinned = computer, pinned
+			p := e.progress(s)
+			if p.TouchIDConfirmation != want || p.TouchIDUpgradeCommand != "" {
+				t.Fatal("missing entitlement hidden by absent computer/server pin, or re-pairing advised")
+			}
+		}
+	}
+}
+
 func TestTouchIDStatusNamesPinAndExactPairingUpgrade(t *testing.T) {
 	store := testStore(t)
 	e := &Engine{Store: store}
