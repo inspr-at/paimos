@@ -7131,8 +7131,8 @@
     "261020180411.0.0": {
       "release_channel": "stable",
       "release_sequence": 137,
-      "snapshot_sha256": "7124911d432e7635a091dd394e48b97ff6a5964a0e13fcb4bbb4250fe3bdd365",
-      "captured_at": "2026-10-20T18:04:17Z",
+      "snapshot_sha256": "2a3f8171db1e96930a849b5aff5eee9970d8c8edc5f9754f17ea9e65cc919986",
+      "captured_at": "2026-10-20T18:29:15Z",
       "release_revision": 1,
       "items": [
         {
@@ -7147,16 +7147,16 @@
           "key": "AEON-1166",
           "pill_en": "Dial follows Models",
           "pill_de": "Regler folgt Modellen",
-          "benefit_en": "When a harness hits its limit, work simply continues with the next model in your order instead of a separate switch.",
-          "benefit_de": "Erreicht ein Harness sein Limit, geht die Arbeit einfach mit dem nächsten Modell der Reihenfolge weiter statt über einen eigenen Schalter.",
+          "benefit_en": "When a harness is at its limit, automatic model selection moves on to the next model in your Models order. A harness picked by hand and the Wait setting still apply.",
+          "benefit_de": "Ist ein Harness ausgelastet, wählt die automatische Modellauswahl das nächste Modell der Reihenfolge. Ein fest gewähltes Harness und die Einstellung Warten gelten weiterhin.",
           "group": "features"
         },
         {
           "key": "AEON-1213",
           "pill_en": "Smooth split view",
           "pill_de": "Flüssige Teilansicht",
-          "benefit_en": "List and details share the screen smoothly at any width, with simple keys that work on German and English keyboards.",
-          "benefit_de": "Liste und Details teilen sich den Bildschirm flüssig bei jeder Breite, mit einfachen Tasten für deutsche und englische Tastaturen.",
+          "benefit_en": "On wide screens, list and details share adjustable space; on narrow screens, details open as a sheet. Letter shortcuts work on German and English keyboards.",
+          "benefit_de": "Auf breiten Bildschirmen teilen sich Liste und Details verstellbaren Platz; auf schmalen öffnen sich die Details als Sheet. Buchstabenkürzel funktionieren auf deutschen und englischen Tastaturen.",
           "group": "features"
         },
         {
@@ -7179,48 +7179,32 @@
           "key": "AEON-1317",
           "pill_en": "Clear ready and done",
           "pill_de": "Klare Bereit- und Fertig-Regeln",
-          "benefit_en": "Each project shows what a ticket needs before it is ready, in QA or done, and agents cannot skip a step.",
-          "benefit_de": "Jedes Projekt zeigt, was ein Ticket vor Bereit, QA oder Fertig braucht; Agenten können keinen Schritt überspringen.",
+          "benefit_en": "Projects show their entry checks for starting work, QA and Done. Agents must pass the checks that apply to the status they move to.",
+          "benefit_de": "Projekte zeigen ihre Eingangsprüfungen für Arbeitsbeginn, QA und Fertig. Agenten müssen die Prüfungen bestehen, die für den Zielstatus gelten.",
           "group": "features"
         },
         {
           "key": "AEON-1320",
-          "pill_en": "No refused webhooks",
-          "pill_de": "Keine abgelehnten Webhooks",
-          "benefit_en": "All GitHub check events are accepted, so no delivery shows as failed and no CI fact is lost.",
-          "benefit_de": "Alle GitHub-Check-Ereignisse werden angenommen; keine Zustellung scheitert, kein CI-Ergebnis geht verloren.",
-          "group": "features"
-        },
-        {
-          "key": "AEON-1336",
-          "pill_en": "Faster pull request checks",
-          "pill_de": "Schnellere PR-Prüfungen",
-          "benefit_en": "Pull requests are tested by real impact, so more run at once and merge sooner; main stays fully protected.",
-          "benefit_de": "Pull Requests werden nach echter Wirkung geprüft; mehr laufen gleichzeitig und werden früher gemergt; main bleibt voll geschützt.",
-          "group": "features"
-        },
-        {
-          "key": "AEON-1337",
-          "pill_en": "Faster pull request checks",
-          "pill_de": "Schnellere PR-Prüfungen",
-          "benefit_en": "Pull requests are tested by real impact, so more run at once and merge sooner; main stays fully protected.",
-          "benefit_de": "Pull Requests werden nach echter Wirkung geprüft; mehr laufen gleichzeitig und werden früher gemergt; main bleibt voll geschützt.",
+          "pill_en": "More webhook actions",
+          "pill_de": "Weitere Webhook-Aktionen",
+          "benefit_en": "Valid GitHub check actions are now acknowledged even when PAIMOS does not use them. Completed checks are processed as before.",
+          "benefit_de": "Gültige GitHub-Check-Aktionen werden jetzt auch ohne Verwendung bestätigt. Abgeschlossene Checks werden wie bisher verarbeitet.",
           "group": "features"
         },
         {
           "key": "AEON-1339",
           "pill_en": "Calmer Decision Desk",
           "pill_de": "Ruhigerer Decision Desk",
-          "benefit_en": "Question and approval rounds on the Decision Desk close by themselves after the last decision; lesson memos stay open so they can be undone.",
-          "benefit_de": "Frage- und Freigaberunden im Decision Desk schließen nach der letzten Entscheidung von selbst; Lehren bleiben zum Zurücknehmen offen.",
+          "benefit_en": "Decision rounds, lesson rounds included, close by themselves after the last decision; a lesson can still be undone for a moment.",
+          "benefit_de": "Entscheidungsrunden, auch Runden mit Lehren, schließen nach der letzten Entscheidung von selbst; eine Lehre lässt sich noch kurz zurücknehmen.",
           "group": "features"
         },
         {
           "key": "AEON-1354",
           "pill_en": "Leaner event log",
           "pill_de": "Schlankeres Ereignisprotokoll",
-          "benefit_en": "AEON's database stops growing by almost a gigabyte a week from machine heartbeats, so backups, releases and the server disk stay small and fast.",
-          "benefit_de": "Die AEON-Datenbank wächst nicht mehr fast ein Gigabyte pro Woche durch Maschinen-Heartbeats; Backups, Releases und die Server-Platte bleiben klein und schnell.",
+          "benefit_en": "Unchanged heartbeats no longer add audit rows, and eligible telemetry is pruned after 14 days, so the event log grows more slowly.",
+          "benefit_de": "Unveränderte Heartbeats erzeugen keine Audit-Einträge mehr, und geeignete Telemetrie wird nach 14 Tagen entfernt; das Ereignisprotokoll wächst dadurch langsamer.",
           "group": "features"
         },
         {
@@ -7237,14 +7221,6 @@
           "pill_de": "Klare Gruppensortierung",
           "benefit_en": "In grouped lists, the grouped-by column orders the groups and every other column sorts within them.",
           "benefit_de": "In gruppierten Listen ordnet die Gruppierungsspalte die Gruppen, alle anderen Spalten sortieren innerhalb der Gruppen.",
-          "group": "features"
-        },
-        {
-          "key": "AEON-1394",
-          "pill_en": "Proven before enforced",
-          "pill_de": "Erst bewiesen, dann erzwungen",
-          "benefit_en": "The switch to PAIMOS admission is proven in shadow before it enforces anything.",
-          "benefit_de": "Der Wechsel zur PAIMOS-Zulassung ist im Schattenbetrieb bewiesen, bevor er etwas erzwingt.",
           "group": "features"
         },
         {
@@ -7275,14 +7251,14 @@
           "key": "AEON-1405",
           "pill_en": "Deploys count as delivered",
           "pill_de": "Deployments gelten als geliefert",
-          "benefit_en": "A recorded deploy now moves the tickets it shipped to Delivered, not only a published release.",
-          "benefit_de": "Ein erfasstes Deployment setzt die damit ausgelieferten Tickets jetzt auf Geliefert, nicht nur eine veröffentlichte Version.",
+          "benefit_en": "A verified deploy record moves the eligible Done tickets it shipped to Delivered; tickets with an open human check stay where they are.",
+          "benefit_de": "Ein verifizierter Deployment-Eintrag setzt geeignete fertige Tickets, die damit ausgeliefert wurden, auf Geliefert; Tickets mit offener menschlicher Prüfung bleiben unverändert.",
           "group": "features"
         },
         {
           "key": "AEON-1414",
-          "pill_en": "Saving never blocked",
-          "pill_de": "Speichern nie blockiert",
+          "pill_en": "Lighter account reads",
+          "pill_de": "Leichtere Kontenabfragen",
           "benefit_en": "Looking at agent accounts no longer blocks anyone from saving tickets.",
           "benefit_de": "Das Ansehen von Agentenkonten blockiert niemanden mehr beim Speichern von Tickets.",
           "group": "fixes"
@@ -7316,7 +7292,7 @@
           "pill_en": "Goals view",
           "pill_de": "Neue Ziele-Ansicht",
           "benefit_en": "One calm page shows every goal across projects: what moves, what waits on you, and when it lands.",
-          "benefit_de": "Eine ruhige Seite zeigt alle Ziele über Projekte hinweg: was läuft, was auf dich wartet und wann es fertig wird.",
+          "benefit_de": "Eine ruhige Seite zeigt alle Ziele über Projekte hinweg: laufende Arbeit, offene Entscheidungen und gemeldete Zieltermine.",
           "group": "features"
         },
         {
@@ -7339,16 +7315,16 @@
           "key": "AEON-1467",
           "pill_en": "Desk shows tickets",
           "pill_de": "Desk zeigt Tickets",
-          "benefit_en": "Waiting-on-you items show the exact ticket they belong to, not just the project.",
-          "benefit_de": "Offene Fragen zeigen das genaue Ticket, zu dem sie gehören, nicht nur das Projekt.",
+          "benefit_en": "Questions linked to a ticket that can be read show its key next to the project.",
+          "benefit_de": "Mit einem lesbaren Ticket verknüpfte Fragen zeigen dessen Schlüssel zusätzlich zum Projekt.",
           "group": "features"
         },
         {
           "key": "AEON-1468",
           "pill_en": "Safer worker sign-in",
           "pill_de": "Sicherere Worker-Anmeldung",
-          "benefit_en": "The worker sign-in code now travels in a header that web proxies leave out of their logs.",
-          "benefit_de": "Der Anmeldecode der Worker steht nun in einem Header, den Web-Proxys nicht protokollieren.",
+          "benefit_en": "Workers now send their sign-in proof in the standard Authorization header.",
+          "benefit_de": "Worker senden ihren Anmeldenachweis jetzt im Standard-Header Authorization.",
           "group": "features"
         },
         {
@@ -7363,8 +7339,8 @@
           "key": "AEON-1471",
           "pill_en": "Faster agent writes",
           "pill_de": "Schnellere Agenten-Schreibzugriffe",
-          "benefit_en": "Agents that share one key no longer queue behind each other, so ppm stays responsive under load.",
-          "benefit_de": "Agenten mit demselben Schlüssel warten nicht mehr aufeinander, sodass ppm auch unter Last schnell reagiert.",
+          "benefit_en": "Agents sharing a key can handle more requests at the same time, so they wait less under load.",
+          "benefit_de": "Agenten mit demselben Schlüssel können mehr Anfragen gleichzeitig verarbeiten und warten unter Last weniger.",
           "group": "features"
         },
         {
@@ -7393,10 +7369,10 @@
         },
         {
           "key": "AEON-1478",
-          "pill_en": "Imported drafts expire",
-          "pill_de": "Importierte Entwürfe verfallen",
-          "benefit_en": "Projects created from a START import are deleted after 12 months without engagement, as the privacy notice promises.",
-          "benefit_de": "Aus einem START-Import angelegte Projekte werden nach 12 Monaten ohne Nutzung gelöscht, wie im Datenschutzhinweis versprochen.",
+          "pill_en": "START retention controls",
+          "pill_de": "Aufbewahrung für START-Importe",
+          "benefit_en": "Retention settings list projects from START imports that are at least 12 months old with no human use. Nothing is deleted until live mode is on and the safety checks pass.",
+          "benefit_de": "Die Aufbewahrungseinstellungen listen Projekte aus START-Importen, die mindestens 12 Monate alt und ohne Nutzung durch Personen sind. Gelöscht wird erst im Echtbetrieb und nach bestandenen Schutzprüfungen.",
           "group": "features"
         },
         {
@@ -7411,8 +7387,8 @@
           "key": "AEON-1481",
           "pill_en": "Releases mark work delivered",
           "pill_de": "Releases markieren Lieferungen",
-          "benefit_en": "Tickets in a published release move to Delivered, and to Accepted after one day without complaints.",
-          "benefit_de": "Tickets einer veröffentlichten Version wechseln zu Geliefert und nach einem Tag ohne Beanstandung zu Akzeptiert.",
+          "benefit_en": "With publication automation on, verified releases move eligible tickets to Delivered; acceptance follows the configured waiting period and any open checks.",
+          "benefit_de": "Bei eingeschalteter Veröffentlichungsautomatik setzen verifizierte Releases geeignete Tickets auf Geliefert; die Akzeptanz folgt der eingestellten Wartezeit und offenen Prüfungen.",
           "group": "fixes"
         },
         {
@@ -7427,8 +7403,8 @@
           "key": "AEON-1487",
           "pill_en": "Chat messages wait",
           "pill_de": "Chat-Nachrichten warten",
-          "benefit_en": "A chat message to an agent session waits until the session picks it up instead of failing.",
-          "benefit_de": "Eine Chat-Nachricht an eine Agentensitzung wartet, bis die Sitzung sie abholt, statt zu scheitern.",
+          "benefit_en": "Durable messages from people to an agent session now stay queued while the session has no listener; session end, explicit expiry and delivery failures still apply.",
+          "benefit_de": "Dauerhafte Nachrichten von Personen an eine Agentensitzung bleiben jetzt in der Warteschlange, solange niemand sie abholt; Sitzungsende, ausdrücklicher Ablauf und Zustellfehler gelten weiterhin.",
           "group": "fixes"
         },
         {
@@ -7444,23 +7420,23 @@
           "pill_en": "Goals replace In-flight",
           "pill_de": "Ziele ersetzen In-flight",
           "benefit_en": "The Goals view shows everything the separate progress page showed, including what waits on you.",
-          "benefit_de": "Die Zielansicht zeigt alles, was die separate Fortschrittsseite zeigte, auch was auf Sie wartet.",
+          "benefit_de": "Die Zielansicht zeigt alles, was die separate Fortschrittsseite zeigte, einschließlich offener Entscheidungen.",
           "group": "features"
         },
         {
           "key": "AEON-1497",
           "pill_en": "See quota burn ahead",
           "pill_de": "Kontingent-Verbrauch im Blick",
-          "benefit_en": "You see per account group how fast quota burns, when each subscription runs out or resets, and whether the pace wastes quota or will run dry.",
-          "benefit_de": "Pro Kontogruppe sieht man, wie schnell das Kontingent verbraucht wird, wann ein Abo leer ist oder zurückgesetzt wird und ob das Tempo Kontingent verschenkt oder zu früh aufbraucht.",
+          "benefit_en": "Where readings exist, account groups show measured quota use, reported resets and an estimate of whether the current pace will run out or leave quota unused.",
+          "benefit_de": "Bei vorhandenen Messwerten zeigen Kontogruppen den Verbrauch, gemeldete Rücksetzzeiten und eine Schätzung, ob das aktuelle Tempo das Kontingent aufbraucht oder ungenutzt lässt.",
           "group": "features"
         },
         {
           "key": "AEON-1499",
-          "pill_en": "Quota for every account",
-          "pill_de": "Kontingent für alle Konten",
-          "benefit_en": "Every enrolled Claude and Codex account shows how much quota is used and when it resets, even when it is not running.",
-          "benefit_de": "Jedes verbundene Claude- und Codex-Konto zeigt verbrauchtes Kontingent und Rücksetzzeit, auch ohne laufende Arbeit.",
+          "pill_en": "Quota between runs",
+          "pill_de": "Kontingent zwischen Läufen",
+          "benefit_en": "Claude and Codex quota measured earlier stays visible between runs where sharing allows; missing readings show as unknown.",
+          "benefit_de": "Früher gemessenes Claude- und Codex-Kontingent bleibt zwischen Läufen sichtbar, soweit die Freigabe es erlaubt; fehlende Messwerte erscheinen als unbekannt.",
           "group": "features"
         },
         {
@@ -7481,10 +7457,10 @@
         },
         {
           "key": "AEON-1515",
-          "pill_en": "CLI never hangs",
-          "pill_de": "CLI hängt nie",
-          "benefit_en": "Every CLI request now has a time limit and ends with a clear error instead of hanging.",
-          "benefit_de": "Jede CLI-Anfrage hat jetzt ein Zeitlimit und endet mit einer klaren Fehlermeldung, statt zu hängen.",
+          "pill_en": "CLI request deadlines",
+          "pill_de": "Zeitlimits für CLI-Anfragen",
+          "benefit_en": "Ordinary CLI requests time out after 30 seconds; streaming connections have connect and header deadlines and can be cancelled.",
+          "benefit_de": "Normale CLI-Anfragen enden nach 30 Sekunden; Streaming-Verbindungen haben Zeitlimits für Verbindungsaufbau und Antwort-Header und lassen sich abbrechen.",
           "group": "fixes"
         },
         {
@@ -7513,10 +7489,10 @@
         },
         {
           "key": "AEON-1528",
-          "pill_en": "Definitions fully German",
-          "pill_de": "Definitionen ganz auf Deutsch",
-          "benefit_en": "The definitions settings read entirely in German when German is chosen, with no English leftovers.",
-          "benefit_de": "Die Definitions-Einstellungen erscheinen bei deutscher Sprache vollständig auf Deutsch, ohne englische Reste.",
+          "pill_en": "German definition settings",
+          "pill_de": "Definitionseinstellungen auf Deutsch",
+          "benefit_en": "Built-in definition labels and help texts now follow the German language setting.",
+          "benefit_de": "Vorgegebene Beschriftungen und Hilfetexte der Definitionen folgen jetzt der deutschen Sprachauswahl.",
           "group": "features"
         },
         {
@@ -7561,10 +7537,10 @@
         },
         {
           "key": "AEON-490",
-          "pill_en": "Export and erase people",
-          "pill_de": "Personen exportieren und löschen",
-          "benefit_en": "You can export or erase everything held about one person, and set how long personal data is kept.",
-          "benefit_de": "Sie können alle Daten einer Person exportieren oder löschen und festlegen, wie lange personenbezogene Daten bleiben.",
+          "pill_en": "Privacy request toolkit",
+          "pill_de": "Werkzeuge für Datenschutzanfragen",
+          "benefit_en": "Workspace owners can collect a personal-data export and a dry-run erasure plan; manual review and additions are still needed.",
+          "benefit_de": "Workspace-Verantwortliche können einen Datenexport und einen Löschplan im Probelauf erstellen; manuelle Prüfung und Ergänzung bleiben nötig.",
           "group": "features"
         }
       ]
