@@ -47,10 +47,12 @@ test('extreme primary accents keep recurrence glyphs readable without moving con
   await page.route('**/api/me/theme', route => route.fulfill({ json: { theme, default_theme_id: 'default', selected_theme_id: theme.id, revision: 1, fallback_notice: null } }))
   await page.goto('/p/PHAROS?sort=key&group=none')
   await expect.poll(() => page.locator('#aeon-theme').textContent()).toContain('--primary: #000000;')
-  const icon = row(page).locator('.ticket-type-icon'), marker = icon.locator('.recurrence-dot'), glyph = marker.locator('svg')
   for (const width of [390, 1024, 1440]) for (const mode of ['dark', 'light'] as const) {
     await page.setViewportSize({ width, height: 1000 })
+    await page.goto(width === 390 ? '/p/PHAROS/PHAROS-11' : '/p/PHAROS?sort=key&group=none')
     await page.evaluate(mode => { document.documentElement.dataset.theme = mode }, mode)
+    const icon = width === 390 ? workspace(page).locator('.recurring-pill') : row(page).locator('.ticket-type-icon')
+    const marker = icon.locator(width === 390 ? '.recurring-pill-mark' : '.recurrence-dot'), glyph = marker.locator('svg')
     await expect(glyph).toBeVisible()
     const rendered = await glyph.evaluate(el => {
       const rgba = (value: string) => {
@@ -70,9 +72,9 @@ test('extreme primary accents keep recurrence glyphs readable without moving con
     expect(rendered.fill).toEqual(rendered.marker)
     expect(colourContrast(rendered.stroke.hex, rendered.fill.hex), `${width} ${mode}: recurrence glyph on its configured marker fill`).toBeGreaterThanOrEqual(3)
     await expectStableControls({
-      controls: { 'type slot': icon, 'recurrence marker': marker, 'ticket title': row(page).locator('.title-link'), 'clicked row': row(page) },
+      controls: width === 390 ? { 'recurring marker': marker, 'recurring link': icon, 'ticket key': workspace(page).getByRole('button', { name: 'Copy PHAROS-11', exact: true }) } : { 'type slot': icon, 'recurrence marker': marker, 'ticket title': row(page).locator('.title-link'), 'clicked row': row(page) },
       interactions: [{ name: 'hover marker', run: () => icon.hover() }, { name: 'keyboard focus marker', run: () => icon.focus() }],
-      scrollAreas: { list: page.locator('.table-card') },
+      scrollAreas: width === 390 ? { ticket: workspace(page) } : { list: page.locator('.table-card') },
     })
     await page.screenshot({ path: testInfo.outputPath(`recurrence-contrast-${width}-${mode}.png`) })
   }
@@ -167,6 +169,16 @@ for (const width of [390, 1024, 1440]) for (const theme of ['light', 'dark'] as 
     const { data, errors, recurrenceReads } = await setup(page, true, locale)
     const label = 'Routine · every Monday · #4'
     await page.goto('/p/PHAROS?sort=key&group=none')
+    if (width === 390) {
+      await expect(row(page).locator('.ticket-type-icon, .recurrence-dot')).toHaveCount(0)
+      const title = row(page).locator('.title-link'), status = row(page).locator('.phone-state')
+      expect((await row(page).boundingBox())!.height).toBe(56)
+      await expectStableControls({ controls: { title, status, row: row(page) }, interactions: [
+        { name: 'read compact title', run: () => title.hover() },
+        { name: 'routine removed while compact facts stay still', run: async () => { data.nodes.find(node => node.id === 'n-1')!.recurrence = undefined; await page.reload(); await expect(row(page).locator('.recurrence-dot')).toHaveCount(0) } },
+        { name: 'routine restored without growing compact row', run: async () => { data.nodes.find(node => node.id === 'n-1')!.recurrence = structuredClone(provenance); await page.reload(); expect((await row(page).boundingBox())!.height).toBe(56) } },
+      ] })
+    } else {
     await expect(row(page).getByRole('img', { name: label, exact: true })).toBeVisible()
     await expect(page.locator('#row-n-4 .recurrence-dot')).toHaveCount(0)
     for (const icon of await page.locator('.ticket-row .ticket-type-icon').all()) {
@@ -189,10 +201,12 @@ for (const width of [390, 1024, 1440]) for (const theme of ['light', 'dark'] as 
       ],
       scrollAreas: { list: page.locator('.table-card') },
     })
+    }
     expect(recurrenceReads).toEqual([])
     await page.goto('/p/PHAROS/PHAROS-11')
     const pill = workspace(page).getByRole('link', { name: label, exact: true })
     await expect(pill).toBeVisible()
+    expect((await pill.locator('.recurring-pill-mark').boundingBox())!.width).toBe(12)
     // Provenance links retain the compatible settings entry; #583's router
     // redirects the recurrence query into its canonical Routines section.
     await expect(pill).toHaveAttribute('href', `/p/PRJ-17/settings?recurrence=${id}`)

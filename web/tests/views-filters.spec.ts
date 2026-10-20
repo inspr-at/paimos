@@ -5,8 +5,9 @@
 import { test, expect, type Page } from '@playwright/test'
 import AxeBuilder from '@axe-core/playwright'
 import { controlStability } from './control-stability'
+import { expectStableControls } from './helpers/stable'
 import { mockTicketGraph, ticketGraphWorld } from './ticket-graph-fixtures'
-import { fixtures, me, mockView, mockWork, watchErrors, type Call, type Fixtures } from './work-fixtures'
+import { showProjectHead, fixtures, me, mockView, mockWork, watchErrors, type Call, type Fixtures } from './work-fixtures'
 
 test.beforeEach(async ({ page }) => { await page.clock.setSystemTime(new Date('2026-09-23T12:00:00Z')) })
 
@@ -550,6 +551,27 @@ for (const width of [390, 1024, 1440]) {
       await expect(rows(page).first()).toBeVisible()
       await page.evaluate(() => document.fonts.ready)
       expect(await page.locator('#main').evaluate(el => el.scrollWidth <= el.clientWidth + 1)).toBe(true)
+      if (width === 390) {
+        const view = toolbar(page).getByRole('button', { name: /^View:/ })
+        await expect(bar(page)).toBeHidden()
+        await expectStableControls({ controls: { toolbar: toolbar(page), view }, interactions: [{ name: 'attention and saved views use the compact menu without moving its trigger', run: async () => {
+          await view.click()
+          const menu = page.getByRole('menu', { name: 'Ticket views', exact: true })
+          const attention = menu.getByRole('menuitem', { name: 'Needs attention', exact: true }), saved = menu.getByRole('menuitemradio', { name: 'Meine offenen Aufgaben vor der nächsten Veröffentlichung', exact: true }), layout = menu.getByRole('menuitemradio', { name: 'List', exact: true })
+          await expect(attention).toHaveAttribute('href', '/tickets?view=needs-attention&project_id=p-pharos')
+          const bounds = (await attention.boundingBox())!
+          expect(bounds.height).toBeGreaterThanOrEqual(44); expect(bounds.width).toBeGreaterThanOrEqual(44)
+          expect(bounds.x).toBeGreaterThanOrEqual(0); expect(bounds.x + bounds.width).toBeLessThanOrEqual(width)
+          await expect(saved).toBeChecked()
+          const guard = await controlStability(page, { menu, attention, saved, layout })
+          await guard.check(async () => { await attention.focus(); await attention.hover() })
+          await guard.check(async () => { await saved.focus(); await expect(saved).toBeChecked() })
+          guard.done()
+          await page.screenshot({ path: testInfo.outputPath(`project-attention-${width}-${colorScheme}.png`), fullPage: true })
+          await attention.focus(); await page.keyboard.press('Escape'); await expect(menu).toHaveCount(0); await expect(view).toBeFocused()
+        } }] })
+      } else {
+        await showProjectHead(page)
       const attention = page.getByRole('link', { name: 'Needs attention', exact: true })
       await expect(attention).toHaveAttribute('href', '/tickets?view=needs-attention&project_id=p-pharos')
       const bounds = await attention.boundingBox()
@@ -568,7 +590,8 @@ for (const width of [390, 1024, 1440]) {
       await guard.check(async () => { await options.click(); await expect(page.getByRole('menuitem', { name: 'Rename' })).toBeVisible() })
       await guard.check(async () => { await page.keyboard.press('Escape'); await expect(options).toBeFocused() })
       guard.done()
-      await page.screenshot({ path: testInfo.outputPath(`project-attention-${width}-${colorScheme}.png`), fullPage: true })
+      await page.screenshot({ path: testInfo.outputPath(`project-attention-${width}-${colorScheme}.png`), fullPage: true })      }
+
     })
   }
 }
@@ -585,8 +608,10 @@ test.describe('coarse-pointer project attention link', () => {
       await page.goto('/p/PHAROS')
       await expect(rows(page).first()).toBeVisible()
       await page.evaluate(() => document.fonts.ready)
+      if (width === 390) await toolbar(page).getByRole('button', { name: /^View:/ }).click()
+      else await showProjectHead(page)
       expect(await page.evaluate(() => matchMedia('(pointer: coarse)').matches)).toBe(true)
-      const attention = page.getByRole('link', { name: 'Needs attention', exact: true })
+      const attention = page.getByRole(width === 390 ? 'menuitem' : 'link', { name: 'Needs attention', exact: true })
       const bounds = await attention.evaluate(el => {
         const rect = el.getBoundingClientRect(), hit = getComputedStyle(el, '::before')
         const width = parseFloat(hit.width) || rect.width, height = parseFloat(hit.height) || rect.height
@@ -598,7 +623,7 @@ test.describe('coarse-pointer project attention link', () => {
       expect(bounds.width, 'attention hit width').toBeGreaterThanOrEqual(44)
       expect(bounds.visualHeight, 'visible link retains its size').toBe(width === 390 ? 44 : 36)
       expect(bounds.edgesHit, 'all target edges activate the link').toBe(true)
-      const guard = await controlStability(page, { attention, sections: page.getByRole('tablist', { name: 'Project sections' }), tickets: page.getByRole('tab', { name: 'Tickets', exact: true }), views: bar(page) })
+      const guard = await controlStability(page, width === 390 ? { attention, menu: page.getByRole('menu', { name: 'Ticket views', exact: true }), view: toolbar(page).getByRole('button', { name: /^View:/ }) } : { attention, sections: page.getByRole('tablist', { name: 'Project sections' }), tickets: page.getByRole('tab', { name: 'Tickets', exact: true }), views: bar(page) })
       await guard.check(async () => { await attention.focus(); await attention.hover() })
       guard.done()
       await page.screenshot({ path: testInfo.outputPath(`project-attention-touch-${width}-${colorScheme}.png`), fullPage: true })

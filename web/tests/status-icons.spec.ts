@@ -3,7 +3,7 @@
 // status plays one short one-off per pointer entry or keyboard focus, and its base shape never blanks; nothing moves with
 // reduced motion, off-screen or in a hidden tab; nothing shifts.
 import { test, expect, type Page } from '@playwright/test'
-import { fixtures, mockWork, watchErrors } from './work-fixtures'
+import { fixtures, mockWork, watchErrors, showProjectHead } from './work-fixtures'
 import { controlStability } from './control-stability'
 import { statusFill } from '../src/lib/statusMotion'
 
@@ -29,7 +29,7 @@ const MENU_ORDER = ['new', 'backlog', 'open', 'blocked', 'progress', 'qa', 'done
 
 const grid = (page: Page) => page.getByRole('grid', { name: 'Tickets' })
 const row = (page: Page, key: string) => grid(page).locator('tr.ticket-row').filter({ has: page.locator('.key', { hasText: new RegExp(`^${key}$`) }) })
-const statusButton = (page: Page, key: string) => row(page, key).locator('.status-btn')
+const statusButton = (page: Page, key: string) => row(page, key).locator('.status-btn, .phone-state > [role="img"]')
 const groupCount = (page: Page, id: string) => page.getByRole('group', { name: 'Filter tickets by status', exact: true }).locator(`[data-group="${id}"] .group-count`)
 
 // Counts every one-off the app starts (Element.animate with the one-off id), so timing cannot fool a replay check.
@@ -90,20 +90,20 @@ for (const width of [1440, 960, 390]) for (const theme of ['light', 'dark']) {
     await instrument(page)
     await page.setViewportSize({ width, height: 900 })
     await mockWork(page, workData(theme))
-    await page.goto('/p/PHAROS')
+    await page.goto('/p/PHAROS'); await showProjectHead(page)
     await expect(row(page, 'PHAROS-11')).toBeVisible()
 
     // In progress is the HTML shape; it keeps the SVG icons' box, so labels line up in every row.
     await expect(statusButton(page, 'PHAROS-11').locator('span.status-icon.st-ip')).toHaveCount(1)
     await expect(statusButton(page, 'PHAROS-13').locator('svg.status-icon.st-qa')).toHaveCount(1)
-    const geometry = await grid(page).evaluate(table => [...table.querySelectorAll('tr.ticket-row:not(.ghost) .status-btn')].map(button => {
+    const geometry = await grid(page).evaluate(table => [...table.querySelectorAll('tr.ticket-row:not(.ghost) .status-btn, tr.ticket-row:not(.ghost) .phone-state > [role="img"]')].map(button => {
       const icon = button.querySelector('.status-icon')!
-      const iconBox = icon.getBoundingClientRect(), label = button.querySelector(':scope > span:not(.status-icon)')!.getBoundingClientRect(), box = button.getBoundingClientRect()
+      const iconBox = icon.getBoundingClientRect(), label = (button.closest('tr')!.querySelector('.phone-title-text') ?? button.querySelector(':scope > span:not(.status-icon)'))!.getBoundingClientRect(), box = button.getBoundingClientRect()
       return { tag: icon.tagName.toLowerCase(), width: iconBox.width, height: iconBox.height, iconLeft: iconBox.left - box.left, labelLeft: label.left - box.left, centre: iconBox.top + iconBox.height / 2 - (label.top + label.height / 2) }
     }))
     expect(geometry.map(item => item.tag)).toContain('span'); expect(geometry.map(item => item.tag)).toContain('svg')
     for (const item of geometry) {
-      expect(item.width).toBeCloseTo(14, 0); expect(item.height).toBeCloseTo(14, 0)
+      expect(item.width).toBeCloseTo(width === 390 ? 16 : 14, 0); expect(item.height).toBeCloseTo(width === 390 ? 16 : 14, 0)
       expect(Math.abs(item.iconLeft - geometry[0].iconLeft)).toBeLessThanOrEqual(.5)
       expect(Math.abs(item.labelLeft - geometry[0].labelLeft)).toBeLessThanOrEqual(.5)
       expect(Math.abs(item.centre)).toBeLessThanOrEqual(1)
@@ -117,14 +117,14 @@ for (const width of [1440, 960, 390]) for (const theme of ['light', 'dark']) {
     // One-offs on the table status and the header counts, measured against moving controls (±0.5 px).
     const guard = await controlStability(page, {
       progress: statusButton(page, 'PHAROS-11'), qa: statusButton(page, 'PHAROS-13'), new: statusButton(page, 'PHAROS-14'),
-      qaIcon: statusButton(page, 'PHAROS-13').locator('.status-icon'), qaLabel: statusButton(page, 'PHAROS-13').locator(':scope > span:not(.status-icon)'),
+      qaIcon: statusButton(page, 'PHAROS-13').locator('.status-icon'), qaLabel: width === 390 ? row(page, 'PHAROS-13').locator('.phone-title-text') : statusButton(page, 'PHAROS-13').locator(':scope > span:not(.status-icon)'),
       open: groupCount(page, 'open'), done: groupCount(page, 'done'),
     })
     let count = await oneOffs(page)
     await guard.check(() => statusButton(page, 'PHAROS-13').hover({ position: { x: 4, y: 4 } }))
     expectOneOff(await oneOffsSince(page, count), 'qa')
     count = await oneOffs(page)
-    await guard.check(() => statusButton(page, 'PHAROS-13').hover({ position: { x: 20, y: 6 } }))
+    await guard.check(() => statusButton(page, 'PHAROS-13').hover({ position: { x: width === 390 ? 14 : 20, y: 6 } }))
     expect(await oneOffsSince(page, count), 'moving inside does not replay').toEqual([])
     await guard.check(() => row(page, 'PHAROS-13').locator('.key').hover())
     await guard.check(() => statusButton(page, 'PHAROS-13').hover())

@@ -436,6 +436,14 @@ async function attachmentId(file: File) { return (await attachments.upload(file)
 function openAttachment(id: string) { lightbox.value?.open(id) }
 
 const root = ref<HTMLElement>()
+// A native capture listener, not @click.capture: a Vue invoker on the root stamps
+// the event first, and handlers attached in the same instant (Close, links) would
+// skip it. The root element changes with the mode, so the listener follows it.
+watch(root, (element, previous) => {
+  previous?.removeEventListener('click', rememberClick, true)
+  element?.addEventListener('click', rememberClick, true)
+})
+onBeforeUnmount(() => root.value?.removeEventListener('click', rememberClick, true))
 const scroller = ref<HTMLElement>()
 const title = ref<InstanceType<typeof InlineTitle>>()
 const descSection = ref<InstanceType<typeof MarkdownSection>>()
@@ -637,7 +645,7 @@ defineExpose({
 <template>
   <component
     :is="mode === 'panel' ? 'aside' : 'article'" ref="root" class="ticket-ws" :class="[mode, { 'has-context': contextColumn && !editing, editing }]" aria-label="Ticket details" tabindex="-1"
-    @click.capture="rememberClick" @dragenter="dragEnter" @dragover="dragOverRoot" @dragleave="dragLeaveRoot" @drop="dropFiles" @paste="pasteFiles" @keydown="queueKey"
+    @dragenter="dragEnter" @dragover="dragOverRoot" @dragleave="dragLeaveRoot" @drop="dropFiles" @paste="pasteFiles" @keydown="queueKey"
   >
     <TicketHeaderBar
       ref="header"
@@ -747,7 +755,9 @@ defineExpose({
           <p v-if="item.kind_slug !== 'epic'" class="meta">Suggested release <SuggestedReleaseCell :row="item" :project-id="project.id" :now="now" :description-id="`drawer-suggested-${item.id}`" /></p>
           <RecurrenceProvenance v-if="item.recurrence" :key="item.id" :node-id="item.id" :recurrence="item.recurrence" @loaded="originLoaded" />
           <HumanCheck :item="item" :editable="editable" :save="saveHumanCheck" :names="names" />
-          <p v-if="eta" class="meta ws-eta"><span>Progress and ETA</span><EtaCell :eta="eta" :now="now" align="start" labelled :connection-stale="etaConnectionStale" /></p>
+          <!-- Phone rows carry no ETA (AEON-1460), so the ticket keeps the list's quiet missing-ETA hint,
+               also for a working session that reported neither a time nor a percent. -->
+          <p v-if="eta || item.eta?.has_working_session" class="meta ws-eta"><span>Progress and ETA</span><EtaCell :eta="eta" :now="now" align="start" labelled :missing="!!item.eta?.has_working_session" :connection-stale="etaConnectionStale" /></p>
           <p class="meta" :class="{ 'only-narrow': mode === 'full' }">
             Updated <time :datetime="item.updated_at" :data-tip="absoluteTime(item.updated_at)">{{ relativeTime(item.updated_at, { now, long: true }) }}</time>
             · Created <time :datetime="item.created_at" :data-tip="absoluteTime(item.created_at)">{{ relativeTime(item.created_at, { now, long: true }) }}</time>

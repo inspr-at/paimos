@@ -156,6 +156,49 @@ for (const { width, coarse } of [
       expect(await page.evaluate(() => matchMedia('(pointer: coarse)').matches)).toBe(coarse)
       const table = page.getByRole('treegrid', { name: 'Ticket outline' })
       const row = table.locator('tr.ticket-row').filter({ has: page.locator('.key', { hasText: /^PHAROS-10$/ }) })
+      if (width < 720) {
+        const twisty = row.locator('.phone-fold'), title = row.locator('.title-link')
+        await expect(row.locator('.status-btn, .c-prio, .c-estimate')).toHaveCount(0)
+        expect((await row.boundingBox())!.height).toBe(56)
+        const reach = async (control: Locator) => {
+          await control.scrollIntoViewIfNeeded()
+          const b = (await control.boundingBox())!
+          expect(b.width).toBeGreaterThanOrEqual(44); expect(b.height).toBeGreaterThanOrEqual(44)
+          const own = await control.evaluate(el => {
+            const r = el.getBoundingClientRect(), x = r.x + r.width / 2, y = r.y + r.height / 2
+            return [[-21.99, 0], [21.99, 0], [0, -21.99], [0, 21.99]].map(([dx, dy]) => el.contains(document.elementFromPoint(x + dx!, y + dy!)))
+          })
+          expect(own).toEqual([true, true, true, true])
+        }
+        await reach(twisty)
+        await expectStableControls({ controls: { row, twisty, title }, interactions: [
+          { name: 'expand compact parent at its target edge', run: async () => { await edgeClick(page, twisty, true, true); await expect(twisty).toHaveAttribute('aria-expanded', 'true'); await expect(table.locator('#row-n-2')).toBeVisible() } },
+          { name: 'collapse compact parent at its target edge', run: async () => { await edgeClick(page, twisty, true, true); await expect(twisty).toHaveAttribute('aria-expanded', 'false') } },
+        ] })
+        await twisty.click()
+        const nested = table.locator('#row-n-2 .phone-fold')
+        await reach(nested)
+        // Keep both consecutive-row targets and every status-edge assertion,
+        // now through the ticket's status action as required by D11.
+        const first = table.locator('#row-n-1'), second = table.locator('#row-n-2')
+        await expect(first).toBeVisible(); await expect(second).toBeVisible()
+        expect(await first.evaluate(el => el.nextElementSibling?.id)).toBe('row-n-2')
+        for (const [ticket, key] of [[row, 'PHAROS-10'], [first, 'PHAROS-11'], [second, 'PHAROS-12']] as const) {
+          await expect(ticket.locator('.status-btn')).toHaveCount(0)
+          await ticket.locator('.title-link').click()
+          const details = page.getByRole('complementary', { name: 'Ticket details' })
+          const status = details.getByRole('button', { name: /^Status:/ })
+          await expectReach(status, true)
+          const menu = page.getByRole(key === 'PHAROS-10' ? 'dialog' : 'menu', { name: `Status of ${key}`, exact: true })
+          await expectStableControls({ controls: { status, close: details.getByRole('button', { name: 'Close ticket details', exact: true }) }, interactions: [[-21, 0], [21, 0], [0, -21], [0, 21]].map(([dx, dy]) => ({ name: `${key} ticket status edge ${dx},${dy}`, run: async () => {
+            const r = (await status.boundingBox())!
+            await page.mouse.click(r.x + r.width / 2 + dx!, r.y + r.height / 2 + dy!)
+            await expect(menu).toBeVisible(); await page.keyboard.press('Escape'); await expect(menu).toHaveCount(0)
+          } })) })
+          await details.getByRole('button', { name: 'Close ticket details', exact: true }).click()
+        }
+        await capture(page, `tickets-${width}-fine-${theme}-${density}-compact`)
+      } else {
       const twisty = row.locator('.twisty'), status = row.locator('.status-btn')
       await expect(twisty).toBeVisible()
       await expect(page.locator('.table-card')).toHaveClass(new RegExp(density))
@@ -273,6 +316,7 @@ for (const { width, coarse } of [
       }
       await capture(page, `tickets-${width}-${coarse ? 'coarse' : 'fine'}-${theme}-${density}-consecutive`)
       expect(await page.evaluate(() => document.documentElement.scrollWidth - innerWidth)).toBeLessThanOrEqual(1)
+      }
 
       await page.goto('/agents')
       const session = page.locator(`[data-row="s:${sessionId}"]`)

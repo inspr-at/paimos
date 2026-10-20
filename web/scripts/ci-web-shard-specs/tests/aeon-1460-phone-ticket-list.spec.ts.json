@@ -1,0 +1,25 @@
+{
+  "group": "remaining-ui",
+  "nightlyTiming": {
+    "basis": "Hosted CI run 39398940852 (web-shard 14, 8f10b169b): matrix 38.410s, titles 2.710s, project head 3.295s, Outline 2.124s, status 1.396s; 47.935s for the complete file.",
+    "runner": "github-hosted",
+    "seconds": 48,
+    "selectedTests": 5,
+    "sourceCommit": "8f10b169bb8717069f7cf95df7ed769a5d4c9d5c"
+  },
+  "spec": {
+    "file": "tests/aeon-1460-phone-ticket-list.spec.ts",
+    "listedTests": 5,
+    "tierTiming": {
+      "caseSeconds": {
+        "max": 3.295,
+        "median": 2.417,
+        "min": 1.396
+      },
+      "seconds": 12,
+      "selectedTests": 4
+    },
+    "weightSeconds": 48,
+    "weightSource": "hosted-CI-39398940852: four gated regression cases measured 9.525s, scheduled at 12s; the NIGHTLY matrix measured 38.410s"
+  }
+}

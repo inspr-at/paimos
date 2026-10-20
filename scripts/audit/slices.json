@@ -501,7 +501,8 @@
         "web/src/lib/ticketListSwitch.ts",
         "web/tests/view-switch.unit.test.ts",
         "web/tests/view-switch.spec.ts",
-        "web/tests/definitions-p3.spec.ts"
+        "web/tests/definitions-p3.spec.ts",
+        "web/src/components/work/PhoneTicketToolbar.vue"
       ],
       "exclude": [
         "web/src/views/**",

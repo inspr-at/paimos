@@ -6,7 +6,7 @@ import { expect, test, type Page } from '@playwright/test'
 import AxeBuilder from '@axe-core/playwright'
 import { expectStableControls } from './helpers/stable'
 import { toggleProjectHead } from './helpers/compact'
-import { fixtures, me, mockWork, watchErrors } from './work-fixtures'
+import { fixtures, me, mockWork, openListFilters, showProjectHead, watchErrors } from './work-fixtures'
 import { mockEffectivePermissions } from './authz-fixtures'
 import { readyGaps } from '../src/lib/workQueue'
 import type { QueueWireEntry } from '../src/lib/workQueue'
@@ -14,7 +14,13 @@ import type { EntryBlock, EntryCheck } from '../src/lib/entryChecks'
 const shots = process.env.WORK_QUEUE_SHOTS ?? '../.agent-shots/queue'
 const now = '2026-10-01T18:00:00Z'
 const agent = '33333333-3333-4333-8333-333333333333', account = '44444444-4444-4444-8444-444444444444', profile = '55555555-5555-4555-8555-555555555555'
-const row = (page: Page, key: string) => page.locator('tr.ticket-row:not(.ghost)').filter({ has: page.getByRole('button', { name: `Copy ${key}`, exact: true }) })
+// Resizing to a phone applies the compact list asynchronously; disclose its head only once it has.
+async function showPhoneHead(page: Page) {
+  await expect(page.locator('.project-page')).toHaveClass(/compact-list/)
+  await showProjectHead(page)
+}
+// D11 (AEON-1460): compact phone rows name their key in the metadata line instead of a copy button.
+const row = (page: Page, key: string) => page.locator('tr.ticket-row:not(.ghost)').filter({ has: page.getByRole('button', { name: `Copy ${key}`, exact: true }).or(page.locator('.phone-meta .key', { hasText: new RegExp(`^${key}$`) })) })
 async function world(page: Page, options: { viewer?: boolean; missing?: boolean; offset?: number; relationBlocker?: boolean; failRead?: boolean; noStart?: boolean; stale?: boolean; staleMissing?: boolean; longTitle?: boolean; assigned?: boolean; live?: boolean } = {}) {
   mkdirSync(shots, { recursive: true })
   const data = fixtures()
@@ -199,6 +205,8 @@ for (const theme of ['light', 'dark']) for (const width of [390, 1024, 1440]) {
     data.nodes.find(node => node.id === 'n-4')!.title = 'Veröffentlichung vorbereiten und die Ergebnisse der automatischen Prüfungen vollständig dokumentieren'
     await page.setViewportSize({ width, height: 1000 })
     await page.evaluate(value => { document.documentElement.dataset.theme = value }, theme)
+    // D11 (AEON-1460): a phone list starts with its project head in the crumb sheet.
+    if (width === 390) await showPhoneHead(page)
     const opener = page.getByRole('button', { name: /queued\. Open the work queue/ })
     await opener.click()
     const panel = page.getByRole('dialog', { name: 'Work queue', exact: true })
@@ -385,6 +393,36 @@ for (const theme of ['light', 'dark']) for (const width of [390, 1024, 1440]) {
     }] } }))
     await page.route('**/api/queue?*', route => route.fulfill({ json: { items: [], manual_order: false, capacity: { queued_hours: 0, parallel_runs: 1, work_hours: 0, warning: false } } }))
     await page.goto('/p/PHAROS?sort=key&closed=1')
+    if (width === 390) {
+      // D11 (AEON-1460): compact rows carry no planning columns; each ticket keeps its suggested release.
+      const ticket = page.getByRole('complementary', { name: 'Ticket details' }), close = ticket.getByRole('button', { name: 'Close ticket details', exact: true })
+      const open = async (key: string) => { await row(page, key).locator('.title-link').click(); await expect(ticket.getByRole('button', { name: `Copy ${key}`, exact: true })).toBeVisible(); return ticket.locator('.plan-rel') }
+      await expect(row(page, 'PHAROS-15')).toBeVisible()
+      await expect(page.locator('.tickets .ticket-row .c-suggested')).toHaveCount(0)
+      const parentSuggestion = await open('PHAROS-15')
+      await expect(parentSuggestion).toHaveText('—')
+      await expect(parentSuggestion).toHaveAccessibleDescription('Releases are suggested for leaf work; a parent’s leaves can span releases')
+      await expect(parentSuggestion).toHaveClass(/empty/)
+      await expectStableControls({ controls: { 'parent suggestion': parentSuggestion, close }, scrollAreas: { ticket }, interactions: [
+        { name: 'read parent release eligibility', run: async () => { await parentSuggestion.hover(); await expect(parentSuggestion).toHaveAttribute('data-tip', /leaves can span releases/) } },
+      ] })
+      await close.click()
+      const done = await open('PHAROS-13')
+      await expect(done).toHaveText('~Next release')
+      await expectStableControls({ controls: { 'leaf suggestion': done, close }, scrollAreas: { ticket }, interactions: [
+        { name: 'read leaf prediction', run: async () => { await done.hover(); await expect(done).toHaveAccessibleDescription(/Done; ships with the next release/) } },
+      ] })
+      await close.click()
+      const shipped = await open('PHAROS-16')
+      await expect(shipped).toContainText('Cloud City')
+      await expect(shipped).toHaveClass(/shipped/)
+      await close.click()
+      await expect(ticket).toHaveCount(0)
+      await page.screenshot({ path: `test-results/aeon-648-int-fix23/release-suggestions-${width}-${theme}.png`, fullPage: true })
+      expect(calls.filter(call => call.method !== 'GET')).toEqual([])
+      expect(errors).toEqual([])
+      return
+    }
     const parent = row(page, 'PHAROS-15'), parentSuggestion = parent.locator('.c-suggested .plan-rel')
     const done = row(page, 'PHAROS-13').locator('.c-suggested .plan-rel')
     const shipped = row(page, 'PHAROS-16').locator('.c-suggested .plan-rel')
@@ -439,6 +477,8 @@ test('phone header retains the queue when the activity timestamp folds', async (
     await page.addStyleTag({ content: '@media (max-width:600px) { .header-activity { display:none } .project-page[class*="header-"] .head-flex { display:grid; grid-template-columns:minmax(0,1fr) auto; grid-template-areas:"title progress" "stats stats" "description description" } }' })
   }
   await page.setViewportSize({ width: 390, height: 844 })
+  // D11 (AEON-1460): a phone list starts with its project head in the crumb sheet.
+  await showPhoneHead(page)
   const activity = page.locator('.header-activity')
   await expect(activity.locator(':scope > span')).toBeHidden()
   const opener = activity.getByRole('button', { name: /queued\. Open the work queue/ })
@@ -480,6 +520,8 @@ test('approved queue surfaces in light/dark and narrow layouts, with accessible 
     await expect(page.getByRole('complementary', { name: 'Ticket details' })).toHaveCount(0)
     await expect(page).toHaveURL(/\/p\/PHAROS\/tickets(?:\?|$)/)
     await page.setViewportSize({ width: 390, height: 844 })
+    // D11 (AEON-1460): a phone list starts with its project head in the crumb sheet.
+    await showPhoneHead(page)
     await expect(page.locator('html')).toHaveJSProperty('scrollWidth', 390)
     const opener = page.getByRole('button', { name: /queued\. Open the work queue/ })
     const queue = page.getByRole('dialog', { name: 'Work queue', exact: true })
@@ -503,7 +545,7 @@ test('approved queue surfaces in light/dark and narrow layouts, with accessible 
     if (await fold.count()) {
       for (const density of ['Comfortable', 'Compact']) {
         // AEON-1188: header density lives in the Display menu, linked from the Filters sheet.
-        await page.getByRole('button', { name: 'Filters', exact: true }).click()
+        await openListFilters(page)
         await page.getByRole('dialog', { name: 'Filters', exact: true }).getByRole('button', { name: 'Display settings…', exact: true }).click()
         const sheet = page.getByRole('dialog', { name: 'Display options', exact: true })
         const group = sheet.getByRole('radiogroup', { name: 'Project header density', exact: true })
@@ -645,12 +687,14 @@ test('stale progress hints and ticket actions stay still in both themes at phone
       await page.evaluate(value => { document.documentElement.dataset.theme = value }, theme)
       for (const dismiss of await page.locator('.toast-close').all()) await dismiss.click()
       const title = ticket.locator('.title-text')
+      // D11 (AEON-1460): compact phone rows keep progress hints and queue actions in the ticket.
+      const compactRow = width === 390
       // The reserved person-waiting slot must leave a real title target in a
       // narrow saved layout, including a long name beside its parent chip.
-      const geometry = await ticket.locator('.c-title .title-cell').evaluate(cell => [...cell.children].map(child => ({ class: child.className, width: child.getBoundingClientRect().width })))
+      const geometry = await ticket.locator(compactRow ? '.c-title.phone-title' : '.c-title .title-cell').evaluate(cell => [...cell.children].map(child => ({ class: child.className, width: child.getBoundingClientRect().width })))
       await expect(title, `${width}px ${theme}: ${JSON.stringify(geometry)}`).toBeVisible()
-      await expectStableControls({ controls: { title, ticket, copy: ticket.getByRole('button', { name: 'Copy PHAROS-12', exact: true }) }, interactions: [
-        { name: 'hover stale ticket', run: async () => { await ticket.hover(); await expect(ticket.locator('.stale-hint.shown')).toHaveCount(1) } },
+      await expectStableControls({ controls: { title, ticket, key: compactRow ? ticket.locator('.phone-meta .key') : ticket.getByRole('button', { name: 'Copy PHAROS-12', exact: true }) }, interactions: [
+        { name: 'hover stale ticket', run: async () => { await ticket.hover(); await expect(ticket.locator(compactRow ? '.stale-hint, .q-btn' : '.stale-hint.shown')).toHaveCount(compactRow ? 0 : 1) } },
       ] })
       await page.screenshot({ path: testInfo.outputPath(`aeon-682-list-${width}-${theme}.png`) })
       await title.click()

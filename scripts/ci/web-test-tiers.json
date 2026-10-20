@@ -6306,6 +6306,16 @@
     ,
     {"kind":"browser","file":"tests/aeon-1459-compact-chrome.spec.ts","name":"AEON-1459 agents 844x501 light: a saved open dial opens beside its row","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
+    {"kind":"browser","file":"tests/aeon-1460-phone-ticket-list.spec.ts","name":"AEON-1460 choosing Outline retains its expand and status actions on phones","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/aeon-1460-phone-ticket-list.spec.ts","name":"AEON-1460 compact project-head disclosure works without changing the desktop preference","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/aeon-1460-phone-ticket-list.spec.ts","name":"AEON-1460 compact rows retain the keyboard status action without a row status button","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/aeon-1460-phone-ticket-list.spec.ts","name":"AEON-1460 compact ticket list keeps controls still and all actions reachable; desktop stays unchanged","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/aeon-1460-phone-ticket-list.spec.ts","name":"AEON-1460 compact titles retain native links and keyboard full-text disclosure","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
     {"kind":"browser","file":"tests/aeon-1470-list-titles.spec.ts","name":"AEON-1470 Columns rows hold still while hidden notes come and go","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
     {"kind":"browser","file":"tests/aeon-1470-list-titles.spec.ts","name":"AEON-1470 Parent cell shows the kind icon and key, adds the title from 200 px, and has no chip","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
@@ -11904,11 +11914,11 @@
     ,
     {"kind":"browser","file":"tests/phone-controls.spec.ts","name":"fix3: phone regressions › column reorder controls have separate 44px touch targets at 720px","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
-    {"kind":"browser","file":"tests/phone-controls.spec.ts","name":"fix3: phone regressions › customized selection keeps only two tracks with populated both","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    {"kind":"browser","file":"tests/phone-controls.spec.ts","name":"fix3: phone regressions › compact selection keeps essentials with populated both","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
-    {"kind":"browser","file":"tests/phone-controls.spec.ts","name":"fix3: phone regressions › customized selection keeps only two tracks with populated estimate","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    {"kind":"browser","file":"tests/phone-controls.spec.ts","name":"fix3: phone regressions › compact selection keeps essentials with populated estimate","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
-    {"kind":"browser","file":"tests/phone-controls.spec.ts","name":"fix3: phone regressions › customized selection keeps only two tracks with populated progress","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    {"kind":"browser","file":"tests/phone-controls.spec.ts","name":"fix3: phone regressions › compact selection keeps essentials with populated progress","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
     {"kind":"browser","file":"tests/phone-controls.spec.ts","name":"fix3: phone regressions › last ticket clears the measured nine-action toolbar without an updates chip","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
@@ -16691,6 +16701,8 @@
     {"kind":"node","file":"tests/lead.test.ts","name":"the workspace word reads lower case mid-sentence, keeps acronyms and pluralises","tier":"ESSENTIAL"}
     ,
     {"kind":"node","file":"tests/lead.test.ts","name":"unreadable gates mean WAIT, never a start","tier":"ESSENTIAL"}
+    ,
+    {"kind":"node","file":"tests/list-views.test.ts","name":"AEON-1460 CSV preserves quoted multiline titles and neutralizes spreadsheet formulas","tier":"ESSENTIAL"}
     ,
     {"kind":"node","file":"tests/list-views.test.ts","name":"a saved view is the list state with a name; order of values is no change","tier":"GATED-FULL"}
     ,

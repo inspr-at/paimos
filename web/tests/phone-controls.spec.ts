@@ -58,11 +58,13 @@ for (const width of [390, 768, 1024, 1440]) {
       await page.goto('/p/PHAROS?sort=title')
       await expect(rows(page)).toHaveCount(5)
       const sheet = width <= 900
-      const opener = page.getByRole('button', { name: sheet ? 'Filters' : 'Display: Display', exact: true })
+      const compact = width < 720
+      const opener = page.getByRole('button', { name: compact ? 'More view actions' : sheet ? 'Filters' : 'Display: Display', exact: true })
       await expect(opener).toBeVisible()
       await opener.click()
       // AEON-1188: the Filters sheet keeps filtering and links to the one Display menu, here a sheet.
-      if (sheet) await page.getByRole('dialog', { name: 'Filters', exact: true }).getByRole('button', { name: 'Display settings…', exact: true }).click()
+      if (compact) await page.getByRole('menuitem', { name: 'Display…', exact: true }).click()
+      else if (sheet) await page.getByRole('dialog', { name: 'Filters', exact: true }).getByRole('button', { name: 'Display settings…', exact: true }).click()
       const dialog = page.getByRole('dialog', { name: 'Display options', exact: true })
       const scroll = sheet ? dialog.locator('.menu-body') : dialog
       const pinned = sheet ? { frame: dialog, header: dialog.locator('header'), done: dialog.locator('footer button') } : {}
@@ -152,7 +154,7 @@ for (const width of [390, 768, 1024, 1440]) {
         // AEON-1559 keeps a Display button in sight, so closing returns there.
         // Filters receives focus only when that button is not in the page.
         const display = page.locator('#project-view-settings .display-btn')
-        const displayShown = await display.evaluate(el => el.offsetParent !== null).catch(() => false)
+        const displayShown = await display.isVisible()
         await expect(displayShown ? display : opener).toBeFocused()
       } else {
         await capture(page, `display-${width}-${theme}`)
@@ -204,77 +206,45 @@ for (const width of [390, 768, 1024, 1440]) {
   }
 }
 
+// AEON-1460 / Tick D11 replaces the approved metadata cards: desktop choices
+// still persist, but the phone always scans the same essential facts. Keep
+// the historical case title: the immutable CI replay corpus pins its identity.
 test('phone cards render saved column visibility and order at 390px', async ({ page }) => {
   await page.setViewportSize({ width: 390, height: 900 })
   const data = germanWorld('light')
-  const costUnit = 'Mandantenübergreifende Berechtigungsverwaltung und Qualitätssicherung'
-  data.nodes.find(n => n.id === 'n-1')!.fields.cost_unit = costUnit
+  data.nodes.find(n => n.id === 'n-1')!.fields.cost_unit = 'Mandantenübergreifende Berechtigungsverwaltung'
   await mockWork(page, data)
   await page.goto('/p/PHAROS')
-  await expect(rows(page)).toHaveCount(5)
   const card = page.locator('#row-n-1')
-  await expect(card.locator('.c-cost')).toHaveCount(0)
-  const opener = page.getByRole('button', { name: 'Filters', exact: true })
   const sheet = page.getByRole('dialog', { name: 'Display options', exact: true })
   const columns = sheet.getByRole('list', { name: 'Columns', exact: true })
-  // AEON-1188: columns live in the Display menu, reached through the Filters sheet's link.
-  const openDisplay = async () => { await opener.click(); await page.getByRole('dialog', { name: 'Filters', exact: true }).getByRole('button', { name: 'Display settings…', exact: true }).click(); await expect(sheet).toBeVisible() }
+  const openDisplay = async () => {
+    await page.getByRole('button', { name: 'More view actions', exact: true }).click()
+    await page.getByRole('menuitem', { name: 'Display…', exact: true }).click()
+    await expect(sheet).toBeVisible()
+  }
+  await expect(card).toBeVisible()
+  const before = (await card.boundingBox())!
   await openDisplay()
   const cost = columns.getByRole('checkbox', { name: 'Cost unit', exact: true })
   await expectStableControls({ controls: { sheet, done: sheet.locator('footer button'), columns, cost }, scrollAreas: { body: sheet.locator('.menu-body') }, interactions: [
-    { name: 'show Cost unit on cards', run: async () => { await cost.check(); await expect(card.locator('.c-cost')).toContainText(costUnit) } },
+    { name: 'save Cost unit for desktop without adding phone metadata', run: async () => { await cost.check(); await expect(cost).toBeChecked(); await expect(card.locator('.c-cost')).toHaveCount(0) } },
   ] })
   await sheet.locator('footer button').click()
-  await inFrame(card.locator('.c-cost'), card)
-  await expect(card.locator('.c-cost')).toContainText(costUnit)
   await page.reload()
-  await expect(card.locator('.c-cost')).toBeVisible()
-  await expect(card.locator('.c-cost')).toContainText(costUnit)
+  await expect(card).toBeVisible()
+  await expect(card.locator('.c-cost, .c-prio, .c-estimate, .c-progress, .status-btn')).toHaveCount(0)
+  await expect(card.locator('.phone-assignee')).toBeVisible()
+  expect((await card.boundingBox())!.height).toBe(56)
   await openDisplay()
-  for (const checkbox of await columns.getByRole('checkbox').all()) {
-    if (await checkbox.isEnabled()) await checkbox.uncheck()
-  }
+  await expect(cost).toBeChecked()
   await sheet.locator('footer button').click()
-  // Selection is a fixed independent control; saved visibility still leaves
-  // exactly Key and Title as data columns.
-  await expect(card.locator('td')).toHaveCount(3)
-  await expect(card.locator('td:not(.c-check)')).toHaveCount(2)
-  await expect(card.locator('.c-check')).toHaveAttribute('aria-hidden', 'true')
-  await expect(card.locator('.c-check [role=checkbox]')).toHaveAttribute('aria-label', 'Select PHAROS-11')
-  await expect(card.locator('.c-check [role=checkbox]')).toHaveAttribute('aria-checked', 'false')
-  await expect(card.locator('.c-check [role=checkbox]')).toHaveAttribute('tabindex', '-1')
-  await expect(card.locator('.c-key')).toContainText('PHAROS-11')
-  await expect(card.locator('.c-title')).toContainText(data.nodes.find(n => n.id === 'n-1')!.title)
-  await openDisplay()
-  await columns.getByRole('checkbox', { name: 'Assignee', exact: true }).check()
-  await columns.getByRole('checkbox', { name: 'Cost unit', exact: true }).check()
-  const costRow = columns.locator('[data-column-row="cost"]')
-  await costRow.focus()
-  await page.keyboard.press('Alt+ArrowUp')
-  await page.keyboard.press('Alt+ArrowUp')
-  await page.keyboard.press('Alt+ArrowUp')
-  await page.keyboard.press('Alt+ArrowUp')
-  await sheet.locator('footer button').click()
-  await inFrame(card.locator('.c-assignee'), card)
-  await inFrame(card.locator('.c-cost'), card)
-  await expect(card.locator('.c-assignee .person-name')).toContainText(data.people[0]!.name)
-  const costBox = (await card.locator('.c-cost').boundingBox())!
-  const assigneeBox = (await card.locator('.c-assignee').boundingBox())!
-  expect(costBox.y + costBox.height).toBeLessThanOrEqual(assigneeBox.y + .5)
-  expect(await page.locator('.table-card').evaluate(el => el.scrollWidth - el.clientWidth)).toBeLessThanOrEqual(1)
-  for (const width of [390, 1024, 1440]) {
-    await page.setViewportSize({ width, height: 900 })
-    for (const theme of ['light', 'dark']) {
-      await page.evaluate(theme => { document.documentElement.dataset.theme = theme }, theme)
-      await capture(page, `columns-custom-${width}-${theme}`)
-    }
-  }
+  await page.setViewportSize({ width: 1440, height: 900 })
+  await expect(card.locator('.c-cost')).toContainText('Mandantenübergreifende Berechtigungsverwaltung')
   await page.setViewportSize({ width: 390, height: 900 })
-  await openDisplay()
-  await sheet.getByRole('button', { name: 'Automatic', exact: true }).click()
-  await sheet.locator('footer button').click()
-  await expect(card.locator('.c-cost, .c-assignee')).toHaveCount(0)
-  await expect(card.locator('.c-status')).toBeVisible()
+  await expect(card.locator('.c-cost')).toHaveCount(0)
+  expect((await card.boundingBox())!.height).toBe(before.height)
+  expect(await page.locator('.table-card').evaluate(el => el.scrollWidth - el.clientWidth)).toBeLessThanOrEqual(1)
 })
 
 for (const width of [390, 768]) {
@@ -287,7 +257,8 @@ for (const width of [390, 768]) {
     await page.goto('/p/PHAROS')
     await expect(rows(page)).toHaveCount(2)
     if (width <= 720) {
-      await page.getByRole('button', { name: 'Select', exact: true }).click()
+      await page.getByRole('button', { name: 'More view actions', exact: true }).click()
+      await page.getByRole('menuitem', { name: 'Select tickets', exact: true }).click()
       await page.getByRole('checkbox', { name: 'Select PHAROS-11', exact: true }).click()
     } else {
       await rows(page).first().hover()
@@ -337,7 +308,8 @@ test.describe('fix3: phone regressions', () => {
     })
     await page.goto('/p/PHAROS')
     await expect(rows(page)).toHaveCount(25)
-    await page.getByRole('button', { name: 'Select', exact: true }).click()
+    await page.getByRole('button', { name: 'More view actions', exact: true }).click()
+    await page.getByRole('menuitem', { name: 'Select tickets', exact: true }).click()
     await page.getByRole('checkbox', { name: 'Select PHAROS-11', exact: true }).click()
     const dock = page.getByRole('toolbar', { name: '1 selected ticket', exact: true })
     await expect(dock.getByRole('button')).toHaveCount(9)
@@ -391,7 +363,7 @@ test.describe('fix3: phone regressions', () => {
       const data = germanWorld('light')
       await mockWork(page, data)
       await page.goto('/p/PHAROS')
-      await page.getByRole('button', { name: 'Filters', exact: true }).tap()
+      await page.getByRole('button', { name: width < 720 ? 'Filter tickets' : 'Filters', exact: true }).tap()
       expect(await page.evaluate(() => matchMedia('(pointer: coarse)').matches)).toBe(true)
       await page.getByRole('dialog', { name: 'Filters', exact: true }).getByRole('button', { name: 'Display settings…', exact: true }).tap()
       const sheet = page.getByRole('dialog', { name: 'Display options', exact: true }), columns = sheet.getByRole('list', { name: 'Columns', exact: true })
@@ -413,7 +385,7 @@ test.describe('fix3: phone regressions', () => {
   }
 
   for (const populated of ['estimate', 'progress', 'both']) {
-    test(`customized selection keeps only two tracks with populated ${populated}`, async ({ page }) => {
+    test(`compact selection keeps essentials with populated ${populated}`, async ({ page }) => {
       await page.setViewportSize({ width: 390, height: 900 })
       const data = germanWorld('light'), node = data.nodes.find(n => n.id === 'n-1')!
       node.fields.estimate_hours = populated === 'progress' ? undefined : 4
@@ -422,20 +394,21 @@ test.describe('fix3: phone regressions', () => {
       await mockWork(page, data)
       await page.goto('/p/PHAROS')
       const card = page.locator('#row-n-1')
-      if (populated !== 'progress') await expect(card.locator('.c-estimate .mono')).toContainText('4')
-      if (populated !== 'estimate') await expect(card.locator('.progress-read')).toBeVisible()
-      await page.getByRole('button', { name: 'Select', exact: true }).tap()
+      await expect(card.locator('.c-estimate, .progress-read')).toHaveCount(0)
+      await page.getByRole('button', { name: 'More view actions', exact: true }).tap()
+      await page.getByRole('menuitem', { name: 'Select tickets', exact: true }).tap()
       await card.getByRole('checkbox', { name: 'Select PHAROS-11', exact: true }).tap()
-      const check = card.locator('.c-check'), title = card.locator('.c-title')
+      const check = card.locator('.phone-state'), title = card.locator('.c-title')
       await expectStableControls({ controls: { card, check, title }, scrollAreas: { table: page.locator('.table-card') }, interactions: [
         { name: 'toggle the selected card', run: async () => { await check.getByRole('checkbox').tap(); await expect(check.getByRole('checkbox')).toHaveAttribute('aria-checked', 'false') } },
         { name: 'select the card again', run: async () => { await check.getByRole('checkbox').tap(); await expect(check.getByRole('checkbox')).toHaveAttribute('aria-checked', 'true') } },
       ] })
       const layout = await card.evaluate(el => ({ tracks: getComputedStyle(el).gridTemplateColumns.split(' ').length, areas: getComputedStyle(el).gridTemplateAreas }))
-      expect(layout, 'customized cards must not inherit automatic named grid tracks').toEqual({ tracks: 2, areas: 'none' })
+      expect(layout.tracks, 'compact rows have status, title and the reserved avatar slot').toBe(3)
+      expect((await card.boundingBox())!.height).toBe(56)
       for (const cell of await card.locator('td').all()) await inFrame(cell, card)
       const cardBox = (await card.boundingBox())!, titleBox = (await title.boundingBox())!
-      expect(titleBox.x + titleBox.width).toBeGreaterThanOrEqual(cardBox.x + cardBox.width - 15)
+      expect(titleBox.x + titleBox.width).toBeLessThanOrEqual(cardBox.x + cardBox.width - 44)
       for (const width of [390, 1024, 1440]) {
         await page.setViewportSize({ width, height: 900 })
         for (const theme of ['light', 'dark']) {

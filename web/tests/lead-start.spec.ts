@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: AGPL-3.0-only
+import { showProjectHead } from './work-fixtures'
 // AEON-1038: real rendered launch-off controls, cancellable waits and stable actions.
 import { expect, test } from '@playwright/test'
 import { expectStableControls } from './helpers/stable'
@@ -18,7 +19,7 @@ for (const width of [390, 1024, 1440]) for (const look of ['light', 'dark'] as c
     }
     await page.setViewportSize({ width, height: width === 390 ? 844 : 1000 })
     let mocked = await mockLeadFlow(page, { lead: 'none', launchEnabled: false, longText: true, leadName })
-    await page.goto('/p/PHAROS')
+    await page.goto('/p/PHAROS'); await showProjectHead(page)
     await page.evaluate(theme => { document.documentElement.dataset.theme = theme }, look)
     const card = page.locator('section.lead'), start = card.locator('[data-act="main"]'), fold = card.locator('[data-act="fold"]')
     await expect(start).toHaveAttribute('aria-disabled', 'true')
@@ -65,7 +66,7 @@ for (const width of [390, 1024, 1440]) for (const look of ['light', 'dark'] as c
     await page.unrouteAll({ behavior: 'wait' })
     mocked = await mockLeadFlow(page, { lead: 'none', launchEnabled: true, leadName })
     mocked.state.settings.automatic_launch_enabled = false
-    await page.goto('/p/PHAROS')
+    await page.goto('/p/PHAROS'); await showProjectHead(page)
     await start.click()
     const sheet = page.getByRole('dialog', { name: `Start ${leadName.toLowerCase()} for PHAROS` }), sheetStart = sheet.locator('[data-act="start"]'), cancel = sheet.locator('[data-act="cancel"]'), change = sheet.locator('[data-act="host"]')
     await expect(sheetStart).toHaveAttribute('aria-disabled', 'true')
@@ -86,7 +87,7 @@ for (const width of [390, 1024, 1440]) for (const look of ['light', 'dark'] as c
 
     await page.unrouteAll({ behavior: 'wait' })
     mocked = await mockLeadFlow(page, { lead: 'paused', processActive: false, launchEnabled: false, leadName })
-    await page.goto('/p/PHAROS')
+    await page.goto('/p/PHAROS'); await showProjectHead(page)
     await expect(start).toHaveAttribute('aria-disabled', 'true')
     await card.getByRole('button', { name: /PHAROS .*: open details/ }).click()
     const panel = page.getByRole('complementary', { name: 'Session details' }), resume = page.getByRole('menuitem', { name: /^Resume/ }), close = panel.getByRole('button', { name: 'Close session details' })
@@ -107,7 +108,7 @@ for (const width of [390, 1024, 1440]) for (const look of ['light', 'dark'] as c
 test('AEON-1038: old waiting starts remain cancellable; actual failures and pickup timeout are distinct', async ({ page }) => {
   const { state } = await mockLeadFlow(page, { lead: 'waiting_for_room', launchEnabled: false, decisions: false })
   state.leads['p-pharos'] = { project_id: 'p-pharos', revision: 1, generation: 0, session_id: null, state: 'waiting_for_room', reason: 'start_checks_unavailable', process_active: false, automatic_launch_enabled: false }
-  await page.goto('/p/PHAROS')
+  await page.goto('/p/PHAROS'); await showProjectHead(page)
   const card = page.locator('section.lead'), action = card.locator('[data-act="main"]')
   await expect(card).toContainText('Requested · waiting for a runtime')
   await expect(card).toContainText(OFF)
@@ -117,11 +118,11 @@ test('AEON-1038: old waiting starts remain cancellable; actual failures and pick
   expect(state.calls.find(c => c.method === 'POST' && c.path.endsWith('/lead/pause'))?.body).toEqual({ expected_revision: 1, generation: 0 })
   await expect(card).toContainText('Paused before it started')
   state.leads['p-pharos'] = { ...state.leads['p-pharos']!, state: 'waiting_for_room', reason: 'host_unavailable', revision: 3 }
-  await page.reload()
+  await page.reload(); await showProjectHead(page)
   await expect(card).toContainText('host load can’t be read')
   await expect(card).not.toContainText('waiting for a runtime')
   state.leads['p-pharos'] = { ...state.leads['p-pharos']!, reason: 'runtime_pickup_timeout', automatic_launch_enabled: true }
-  await page.reload()
+  await page.reload(); await showProjectHead(page)
   await expect(card).toContainText('Nothing picked this up')
   await expect(action).toHaveText('Cancel start')
 })

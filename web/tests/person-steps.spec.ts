@@ -91,15 +91,24 @@ test('AEON-1318 owner controls and person-waiting views stay stable', async ({ b
       await page.goto('/p/PHAROS?sort=key&closed=1')
       await page.evaluate(value => document.documentElement.dataset.theme = value, theme)
       const row = page.locator('tr.ticket-row').filter({ hasText: manualNode.key })
+      let rows
+      if (width === 390) {
+        await expect(row.locator('.person-waiting')).toHaveCount(0)
+        rows = await controlStability(page, { row, title: row.locator('.title-text'), status: row.locator('.phone-state'), otherRow: page.locator('tr.ticket-row').filter({ hasText: humanNode.key }) })
+        await rows.check(() => row.locator('.phone-state').hover())
+        await rows.check(async () => { state.checked = true; waiting(); await page.reload(); await expect(row.locator('.person-waiting')).toHaveCount(0) })
+        await rows.check(async () => { state.checked = false; waiting(); await page.reload(); await expect(row.locator('.person-waiting')).toHaveCount(0) })
+      } else {
       await expect(row.locator('.person-waiting svg')).toBeVisible()
       await expect(row.locator('.person-waiting')).toHaveAttribute('data-tip', `Waiting for ${me.name}: ${longLabel}`)
       await settledColumns(page)
       // Fix8 intentionally reclaims an empty phone waiting slot. Row bounds
       // and actions stay fixed; only phone title content uses that freed room.
-      const rows = await controlStability(page, { row, ...(width === 390 ? {} : { title: row.locator('.title-text') }), status: row.getByRole('button', { name: /^Status:/ }), otherRow: page.locator('tr.ticket-row').filter({ hasText: humanNode.key }) })
+      rows = await controlStability(page, { row, ...(width === 390 ? {} : { title: row.locator('.title-text') }), status: row.getByRole('button', { name: /^Status:/ }), otherRow: page.locator('tr.ticket-row').filter({ hasText: humanNode.key }) })
       await rows.check(() => row.locator('.person-waiting').hover())
       await rows.check(async () => { state.checked = true; waiting(); await page.reload(); await expect(row.locator('.person-waiting svg')).toHaveCount(0); await settledColumns(page) })
-      await rows.check(async () => { state.checked = false; waiting(); await page.reload(); await expect(row.locator('.person-waiting svg')).toBeVisible(); await settledColumns(page) })
+      await rows.check(async () => { state.checked = false; waiting(); await page.reload(); await expect(row.locator('.person-waiting svg')).toBeVisible(); await settledColumns(page) })      }
+
       rows.done()
       await page.evaluate(value => document.documentElement.dataset.theme = value, theme)
       await page.screenshot({ path: testInfo.outputPath(`AEON-1318-list-${width}-${theme}.png`) })
@@ -143,6 +152,19 @@ test('AEON-1318 FIX8 phone titles share their kind line and retain main row heig
       data.nodes.splice(0, data.nodes.length, manualNode, humanNode)
       await page.goto('/p/PHAROS?sort=key&closed=1')
       const row = page.locator('tr.ticket-row').filter({ hasText: manualNode.key }), plain = page.locator('tr.ticket-row').filter({ hasText: humanNode.key })
+      if (width === 390) {
+        await expect(row.locator('.person-waiting, .ticket-type-icon, .status-btn')).toHaveCount(0)
+        await expect(plain.locator('.person-waiting, .ticket-type-icon, .status-btn')).toHaveCount(0)
+        const guard = await controlStability(page, { row, plain, status: row.locator('.phone-state'), title: row.locator('.title-text'), plainTitle: plain.locator('.title-text') })
+        await guard.check(() => row.locator('.phone-state').hover())
+        await guard.check(() => plain.locator('.title-link').hover()); guard.done()
+        for (const target of [row, plain]) {
+          expect((await target.boundingBox())!.height).toBe(56)
+          const status = (await target.locator('.phone-state').boundingBox())!, title = (await target.locator('.title-text').boundingBox())!
+          expect(Math.abs(status.y - title.y)).toBeLessThanOrEqual(2)
+          expect(title.height).toBe(20)
+        }
+      } else {
       await expect(row.locator('.person-waiting svg')).toBeVisible()
       await expect(plain.locator('.person-waiting svg')).toHaveCount(0)
       const guard = await controlStability(page, { row, plain, kind: row.locator('.ticket-type-icon'), title: row.locator('.title-link'), status: row.getByRole('button', { name: /^Status:/ }), plainTitle: plain.locator('.title-link') })
@@ -169,6 +191,7 @@ test('AEON-1318 FIX8 phone titles share their kind line and retain main row heig
         expect(main.row).toBeGreaterThan(0); expect(main.title).toBeGreaterThan(0)
         expect(Math.abs(plainBox!.height - main.row), 'non-waiting row keeps main height').toBeLessThanOrEqual(.5)
         expect(Math.abs(titleBox!.width - main.title), 'non-waiting title keeps main room').toBeLessThanOrEqual(.5)
+      }
       }
       await page.screenshot({ path: testInfo.outputPath(`AEON-1318-fix8-title-${width}-${theme}.png`) })
     } finally { await context.close() }

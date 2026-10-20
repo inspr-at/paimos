@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import { test, expect, type Locator, type Page, type TestInfo } from '@playwright/test'
-import { fixtures, mockWork, watchErrors } from './work-fixtures'
+import { fixtures, mockWork, watchErrors, openTicketStatus } from './work-fixtures'
 import { accessWorld, mockAccess, COORDINATOR, DEPLOYER, ME } from './access-fixtures'
 import { mockStartAgent } from './start-agent-fixtures'
 import { crmData, mockCRM, HOFER } from './crm-fixtures'
@@ -188,7 +188,7 @@ for (const width of WIDTHS) for (const theme of ['light', 'dark'] as const) {
 
     // Done gate: M.
     const row = page.locator('tr.ticket-row').filter({ has: page.locator('.key', { hasText: /^PHAROS-11$/ }) })
-    await row.getByRole('button', { name: /Change status of PHAROS-11/ }).click()
+    await openTicketStatus(page, 'PHAROS-11')
     await page.getByRole('menuitemradio', { name: 'Done' }).click()
     const gate = dialog(page, "Before it's done: what does the user gain?")
     const pill = gate.locator('textarea, input.field').first()

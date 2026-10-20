@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import { test, expect, type Page } from '@playwright/test'
 import { mkdir } from 'node:fs/promises'
-import { fixtures, mockWork, watchErrors } from './work-fixtures'
+import { fixtures, mockWork, watchErrors, openListFilters } from './work-fixtures'
 import { mockBusiness, businessData } from './business-fixtures'
 import { mockSettings, settingsData } from './settings-fixtures'
 import { controlStability } from './control-stability'
@@ -114,7 +114,7 @@ for (const width of sizes) for (const theme of ['light', 'dark']) {
     await page.goto('/p/PHAROS/tickets?shape=leaf&depth=2&closed=1')
     await expect(page).toHaveURL(/shape=leaf/)
     if (width <= 720) {
-      await page.getByRole('button', { name: 'Filters', exact: true }).click()
+      await openListFilters(page)
       const sheet = page.getByRole('dialog', { name: 'Filters', exact: true })
       const choices = sheet.locator('.sheet-section').filter({ has: page.getByText('Parents / Leaves', { exact: true }) })
       const leaves = choices.getByRole('checkbox', { name: /Leaves/ })
@@ -133,7 +133,10 @@ for (const width of sizes) for (const theme of ['light', 'dark']) {
     await page.goto('/p/PHAROS/tickets?view=graph&closed=1')
     await expect(page.getByText(/leaves.*parents.*links/).first()).toBeVisible()
     const graphSearch = page.getByRole('searchbox', { name: 'Search tickets in this project' })
-    const graphGuard = await controlStability(page, { graphSearch, selectors: page.getByRole('tablist', { name: 'Ticket views' }) })
+    // Phones keep search behind its toolbar button and the layouts in the view control (AEON-1460).
+    if (width <= 720) await page.locator('.compact-ticket-toolbar').getByRole('button', { name: 'Search tickets', exact: true }).click()
+    const layouts = width <= 720 ? page.getByRole('button', { name: /^View: .+\. Change the view$/ }) : page.getByRole('tablist', { name: 'Ticket views' })
+    const graphGuard = await controlStability(page, { graphSearch, selectors: layouts })
     await graphGuard.check(() => graphSearch.fill('connector'))
     await expect(page.getByText(/^0 leaves · 1 parent · 0 links$/).first()).toBeVisible()
     await graphGuard.check(() => graphSearch.fill('')); graphGuard.done()

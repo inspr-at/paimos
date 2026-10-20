@@ -278,6 +278,13 @@ export function filtersToQuery(filters: ListFilters): Record<string, string> {
 }
 export const EMPTY_FILTERS: ListFilters = filtersFromQuery({})
 
+// Spreadsheet applications interpret formula prefixes even in quoted CSV cells.
+export function ticketCSV(rows: readonly ListItem[]): string {
+  const cell = (value: string) => `"${(/^[\s]*[=+@-]|^[\t\r\n]/.test(value) ? `'${value}` : value).replace(/"/g, '""')}"`
+  return [['Key', 'Title', 'Status', 'Assignee', 'Updated'], ...rows.map(row => [row.key, row.title, statusMeta(row.state).label, row.assignee?.name ?? '', row.updated_at])]
+    .map(row => row.map(cell).join(',')).join('\r\n') + '\r\n'
+}
+
 export function activeDimensions(filters: ListFilters): Dimension[] {
   return DIMENSION_KEYS.filter(key => filters[key].length > 0)
 }

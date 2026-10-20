@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: AGPL-3.0-only
+import { showProjectHead } from './work-fixtures'
 // AEON-1027: the project page's "No lead" card folds to one line, keeps Start lead, is remembered
 // per person and project, sits one card gap above the section bar, and folds by height alone.
 import { expect, test, type Locator, type Page } from '@playwright/test'
@@ -23,7 +24,7 @@ async function box(locator: Locator) {
 async function open(page: Page, width: number, options: Parameters<typeof mockLeadFlow>[1] = {}, route = 'PHAROS') {
   await page.setViewportSize({ width, height: width < 600 ? 844 : 1000 })
   const mocked = await mockLeadFlow(page, { lead: 'none', queue: [], ...options })
-  await page.goto(`/p/${route}`)
+  await page.goto(`/p/${route}`); await showProjectHead(page)
   await expect(card(page).getByRole('heading', { name: `No lead in ${route}` })).toBeVisible()
   return mocked
 }
@@ -74,16 +75,16 @@ test('the fold is remembered for this person and project, and a lead clears it',
   await folded(page)
   await expect.poll(() => data.preferences[KEY]).toEqual({ collapsed: ['p-pharos'] })
   // A reload and a visit from another page open it folded at once: no open card first.
-  await page.reload()
+  await page.reload(); await showProjectHead(page)
   await expect(card(page).getByRole('heading', { name: 'No lead in PHAROS' })).toBeVisible()
   await expect(fold(page)).toHaveAttribute('aria-expanded', 'false')
   await expect(details(page)).toBeHidden()
   // Another project keeps its own card open.
-  await page.goto('/p/AEON')
+  await page.goto('/p/AEON'); await showProjectHead(page)
   await expect(card(page).getByRole('heading', { name: 'No lead in AEON' })).toBeVisible()
   await expect(fold(page)).toHaveAttribute('aria-expanded', 'true')
   await expect(details(page)).toBeVisible()
-  await page.goto('/p/PHAROS')
+  await page.goto('/p/PHAROS'); await showProjectHead(page)
   await expect(fold(page)).toHaveAttribute('aria-expanded', 'false')
   // Starting a lead from the folded card replaces it; the project forgets the fold.
   await start(page).click()
@@ -98,7 +99,7 @@ test('the fold is remembered for this person and project, and a lead clears it',
   await expect.poll(() => data.preferences[KEY]).toEqual({ collapsed: [] })
   // The lead ends (the project has none again): the card is open, as it was never folded.
   state.leads['p-pharos'] = { project_id: 'p-pharos', revision: 0, generation: 0, session_id: null, state: 'none', reason: '', process_active: false }
-  await page.reload()
+  await page.reload(); await showProjectHead(page)
   await expect(fold(page)).toHaveAttribute('aria-expanded', 'true')
   await expect(details(page)).toBeVisible()
 })

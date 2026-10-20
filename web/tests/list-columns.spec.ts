@@ -119,9 +119,23 @@ for (const width of [1600, 390] as const) {
       await page.setViewportSize({ width, height: width === 390 ? 844 : 900 })
       await page.goto('/p/PHAROS?sort=assignee')
       await expect(page.locator('html')).toHaveAttribute('data-theme', theme)
-      await expect(row(page, 'PHAROS-11').locator('.progress-read .pct')).toHaveText('45%')
-      await expect(row(page, 'PHAROS-11').locator('.eta-cell .when')).toBeVisible()
-      await expect(row(page, 'PHAROS-13').locator('.eta-cell')).toHaveClass(/stale/)
+      if (width === 390) {
+        await expect(row(page, 'PHAROS-11').locator('.progress-read, .eta-cell')).toHaveCount(0)
+        await row(page, 'PHAROS-11').locator('.title-link').click()
+        const details = page.getByRole('complementary', { name: 'Ticket details' })
+        const eta = details.locator('.ws-eta')
+        await expect(eta.locator('.pct')).toHaveText('45%')
+        await expect(eta.locator('.eta-cell .when')).toBeVisible()
+        // The phone ticket sheet covers the list. Close it as a person would before opening the next row.
+        await details.getByRole('button', { name: 'Close ticket details', exact: true }).click()
+        await expect(details).toHaveCount(0)
+        await row(page, 'PHAROS-13').locator('.title-link').click()
+        await expect(details.locator('.ws-eta .eta-cell')).toHaveClass(/stale/)
+      } else {
+        await expect(row(page, 'PHAROS-11').locator('.progress-read .pct')).toHaveText('45%')
+        await expect(row(page, 'PHAROS-11').locator('.eta-cell .when')).toBeVisible()
+        await expect(row(page, 'PHAROS-13').locator('.eta-cell')).toHaveClass(/stale/)
+      }
       const overflow = await page.evaluate(() => document.documentElement.scrollWidth <= document.documentElement.clientWidth + 1)
       expect(overflow).toBe(true)
       await page.screenshot({ path: testInfo.outputPath(`list-columns__${width}__${theme}.png`) })

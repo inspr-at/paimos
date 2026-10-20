@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import { test, expect, type Page, type Locator } from '@playwright/test'
 import { writeFile } from 'node:fs/promises'
-import { fixtures, mockView, mockWork } from './work-fixtures'
+import { fixtures, mockView, mockWork, openListFilters } from './work-fixtures'
 import { mockTicketGraph, ticketGraphWorld } from './ticket-graph-fixtures'
 import { expectStableControls } from './helpers/stable'
 
@@ -33,7 +33,7 @@ async function setup(page: Page, width = 1440, theme = 'light') {
   return { data, queries }
 }
 async function open(page: Page, width: number) {
-  if (width === 390) await page.getByRole('button', { name: 'Filters', exact: true }).click()
+  if (width === 390) await openListFilters(page)
   else await gear(page).click()
   const panel = chooser(page, width)
   await expect(panel.getByRole('heading', { name: 'What Hide hides', exact: true })).toBeVisible()
@@ -442,17 +442,36 @@ test('AEON-1559 non-teleported toolbar retains its 800 px container swap', async
 
 for (const theme of ['light', 'dark']) test(`AEON-1559 phone and standard viewport evidence in ${theme}`, async ({ page }, testInfo) => {
   await setup(page, theme)
-  for (const width of [1440, 1024, 390]) {
-    await page.setViewportSize({ width, height: 1000 })
+  // 700 is a navigation row width: the row's narrowest form, where Display carries the Hide switch.
+  for (const width of [1440, 1024, 700, 390]) {
+    if (width === 700) await fitRow(page, width)
+    else await page.setViewportSize({ width, height: 1000 })
     await settle(page)
-    await expect(settings(page)).toBeVisible()
-    const overflow = await navigation(page).evaluate(el => ({ extra: el.scrollWidth - el.clientWidth, width: el.clientWidth, children: [...el.children].map(child => ({ name: child.className, x: child.getBoundingClientRect().x - el.getBoundingClientRect().x, width: child.getBoundingClientRect().width, scroll: child.scrollWidth, css: getComputedStyle(child).cssText })) }))
-    expect(overflow.extra, JSON.stringify(overflow)).toBeLessThanOrEqual(1)
     if (width === 390) {
-      expect(await step(page)).toBe(4)
-      await settings(page).locator('.display-btn').click()
-      await expect(page.locator('.menu-switch input')).toBeVisible()
+      // AEON-1460: phones get the one-line compact toolbar instead of the navigation
+      // row's controls; Hide done and Display live in its More menu.
+      const bar = page.locator('.compact-ticket-toolbar')
+      await expect(bar).toBeVisible()
+      await expect(settings(page)).toHaveCount(0)
+      expect(await bar.evaluate(el => el.scrollWidth - el.clientWidth)).toBeLessThanOrEqual(1)
+      expect(await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth)).toBeLessThanOrEqual(1)
+      await bar.getByRole('button', { name: 'More view actions', exact: true }).click()
+      const hideDone = page.getByRole('menuitemcheckbox', { name: 'Hide done', exact: true })
+      await expect(hideDone).toHaveAttribute('aria-checked', 'true')
+      await expect(page.getByRole('menuitem', { name: 'Display…', exact: true })).toBeVisible()
       await page.keyboard.press('Escape')
+      await expect(hideDone).toHaveCount(0)
+    } else {
+      await expect(settings(page)).toBeVisible()
+      const overflow = await navigation(page).evaluate(el => ({ extra: el.scrollWidth - el.clientWidth, width: el.clientWidth, children: [...el.children].map(child => ({ name: child.className, x: child.getBoundingClientRect().x - el.getBoundingClientRect().x, width: child.getBoundingClientRect().width, scroll: child.scrollWidth, css: getComputedStyle(child).cssText })) }))
+      expect(overflow.extra, JSON.stringify(overflow)).toBeLessThanOrEqual(1)
+      if (width === 700) {
+        expect(page.viewportSize()!.width, 'the navigation row, not the compact phone toolbar').toBeGreaterThanOrEqual(720)
+        expect(await step(page)).toBe(4)
+        await settings(page).locator('.display-btn').click()
+        await expect(page.locator('.menu-switch input')).toBeVisible()
+        await page.keyboard.press('Escape')
+      }
     }
     await page.screenshot({ path: testInfo.outputPath(`aeon1559-viewport-${width}-${theme}.png`) })
   }

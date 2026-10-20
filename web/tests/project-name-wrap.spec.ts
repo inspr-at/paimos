@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import { test, expect, type Page } from '@playwright/test'
-import { fixtures, me, mockWork } from './work-fixtures'
+import { fixtures, me, mockWork, showProjectHead } from './work-fixtures'
 import { headerStorageKey } from '../src/lib/projectHeader'
 
 const NAME = 'Operations Infrastructure Platform'
@@ -191,7 +191,7 @@ for (const width of WIDTHS) for (const theme of ['light', 'dark'] as const) {
       await page.addInitScript(({ key, density: next }) => {
         localStorage.setItem(key, JSON.stringify({ density: next, roomy: next }))
       }, { key: headerStorageKey('t1', me.id), density })
-      await page.goto('/p/PHAROS/tickets')
+      await page.goto('/p/PHAROS/tickets'); await showProjectHead(page)
       await expect(page.locator('.project-page')).toHaveClass(new RegExp(`header-${density}`))
       const title = page.locator('#project-title')
       await expect(title).toHaveText(NAME)

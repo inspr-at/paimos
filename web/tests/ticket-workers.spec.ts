@@ -212,13 +212,15 @@ test('the compact worker name stays fully visible and clear of Copy', async ({ p
     })).toBe(true)
     await sample.hover()
     const nameBox = await name.boundingBox()
-    // Hidden on a phone (display: none), so it is not a role until the row is wide enough to hover.
+    // Compact phone rows have no row actions (AEON-1460), so Copy is not shown until the row is wide enough to hover.
     const copy = sample.locator('.row-actions .q-btn')
-    const copyBox = await copy.boundingBox()
     expect(nameBox).toBeTruthy()
     if (width === 390) {
-      expect(copyBox).toBeNull()
-    } else if (nameBox && copyBox) {
+      await expect(copy).toBeHidden()
+      continue
+    }
+    const copyBox = await copy.boundingBox()
+    if (nameBox && copyBox) {
       const overlapsY = nameBox.y < copyBox.y + copyBox.height && copyBox.y < nameBox.y + nameBox.height
       const gap = copyBox.x - (nameBox.x + nameBox.width)
       expect(overlapsY).toBe(true)

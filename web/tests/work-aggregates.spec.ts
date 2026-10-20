@@ -52,19 +52,32 @@ for (const theme of ['light', 'dark']) for (const width of [390, 1024, 1440]) {
     await page.goto('/p/PHAROS?sort=estimate')
     const row = page.locator('tr.ticket-row:not(.ghost)').filter({ has: page.locator('.key', { hasText: /^PHAROS-11$/ }) })
     const estimate = row.locator('.c-estimate .mono')
+    const title = row.locator('.title-text')
+    if (width === 390) {
+      await expect(row.locator('.c-estimate, .progress-read, .eta-cell')).toHaveCount(0)
+      await expect(row.locator('.phone-meta time')).toBeVisible()
+      expect((await row.boundingBox())!.height).toBe(56)
+      await expectStableControls({ controls: { row, title }, interactions: [{ name: 'read the compact parent title', run: () => title.hover() }] })
+      await title.click()
+    } else {
     await expect(estimate).toHaveText(/~32h leaves.*~40h planned/)
     await expect(estimate).toHaveAttribute('data-tip', /6 of 9 leaves estimated/)
     await expect(row.locator('.progress-read')).toHaveAccessibleName(/63% done.*6 of 9 leaves estimated/)
     await expect(row.locator('.eta-cell')).toHaveAttribute('data-tip', /Partial ETA/)
-    const title = row.locator('.title-text')
     await expectStableControls({ controls: { 'parent row': row, 'open parent': title }, scrollAreas: { document: page.locator('html') }, interactions: [{ name: 'read leaf coverage', run: async () => { await estimate.hover(); await expect(estimate).toHaveAttribute('data-tip', /6 of 9 leaves/); await page.mouse.move(0, 0) } }] })
     await page.screenshot({ path: `test-results/aeon-651-wn/list-${width}-${theme}.png`, fullPage: true })
     await title.click()
+    }
     const panel = page.getByRole('complementary', { name: 'Ticket details' })
     const control = panel.getByRole('button', { name: 'Parent estimate: ~32h from leaves · ~40h planned. Edit planned estimate' })
     await expect(control).toBeVisible()
     // Drawer resize may compress the list: estimate text must stay in its cell.
-    const cellFit = await estimate.evaluate(el => { const a=el.getBoundingClientRect(), c=el.closest('td')!.getBoundingClientRect(); return a.left>=c.left && a.right<=c.right })
+    await expect(panel.locator('.estimate-coverage')).toHaveText('6 of 9 leaves estimated')
+    await expect(control).toHaveAttribute('data-tip', /6 of 9 leaves estimated/)
+    await expect(panel.locator('.eta-cell')).toHaveAttribute('data-tip', /Partial ETA/)
+    const cellFit = width === 390
+      ? await control.evaluate(el => el.scrollWidth <= el.clientWidth + 1)
+      : await estimate.evaluate(el => { const a=el.getBoundingClientRect(), c=el.closest('td')!.getBoundingClientRect(); return a.left>=c.left && a.right<=c.right })
     expect(cellFit).toBe(true)
     await expectStableControls({ controls: { 'parent plan': control }, scrollAreas: { panel }, interactions: [{ name: 'read parent estimate', run: async () => { await control.hover(); await expect(control).toHaveAttribute('data-tip', /kept separately/); await page.mouse.move(0, 0) } }] })
     await page.screenshot({ path: `test-results/aeon-651-wn/parent-${width}-${theme}.png`, fullPage: true })
@@ -160,6 +173,14 @@ for (const scenario of [
     const eta = row.locator('.eta-cell')
     const progress = row.locator('.progress-read')
     const label = new RegExp(`100% progress; work remains, estimate stale since .*; ${scenario.estimated} of 2 leaves estimated`)
+    const title = row.locator('.title-text')
+    if (width === 390) {
+      await expect(row.locator('.c-estimate, .progress-read, .eta-cell')).toHaveCount(0)
+      await expect(row.locator('.phone-meta time')).toBeVisible()
+      expect((await row.boundingBox())!.height).toBe(56)
+      await expectStableControls({ controls: { row, title }, interactions: [{ name: 'read the compact unfinished parent', run: () => title.hover() }] })
+      await title.click()
+    } else {
     await expect(progress.locator('.pct')).toHaveText('100%')
     await expect(progress).toHaveAccessibleName(label)
     await expect(progress).toHaveAttribute('data-tip', label)
@@ -168,7 +189,6 @@ for (const scenario of [
     await expect(eta).toHaveClass(/stale/)
     await expect(eta).toHaveAttribute('data-tip', /work remains/)
     await expect(eta).not.toHaveAttribute('data-tip', /100% done/)
-    const title = row.locator('.title-text')
     await expectStableControls({ controls: { 'parent row': row, 'open parent': title, 'parent progress': progress }, scrollAreas: { document: page.locator('html') }, interactions: [{ name: 'read unfinished Progress', run: async () => {
       await progress.hover()
       await expect(progress).toHaveAttribute('data-tip', label)
@@ -181,11 +201,13 @@ for (const scenario of [
     } }] })
     await page.screenshot({ path: `test-results/aeon-651-fix7/${scenario.name.replaceAll(' ', '-')}-list-${width}-${theme}.png`, fullPage: true })
     await title.click()
+    }
     const panel = page.getByRole('complementary', { name: 'Ticket details' })
     const plan = panel.getByRole('button', { name: /^Parent estimate:/ })
     await expect(plan).toBeVisible()
     await expect(panel.locator('.eta-cell .shown')).toHaveText(`~2 h${scenario.partial ? ' · partial' : ''}`)
     await expect(panel.locator('.eta-cell')).toHaveAttribute('data-tip', /work remains/)
+    await expect(panel.locator('.eta-cell')).not.toHaveAttribute('data-tip', /100% done/)
     const controls = { 'parent plan': plan, 'more actions': panel.getByRole('button', { name: 'More actions', exact: true }) }
     await expectStableControls({ controls, scrollAreas: { panel }, interactions: [{ name: 'read parent plan', run: async () => {
       await plan.hover()
@@ -197,7 +219,8 @@ for (const scenario of [
       await page.evaluate(() => (window as unknown as { disconnectAggregateStream: () => void }).disconnectAggregateStream())
       await expect(panel.locator('.eta-cell .shown')).toHaveText(/^Last /)
       await expect(panel.locator('.eta-cell')).toHaveAttribute('data-tip', /Showing the last successful update/)
-      await expect(eta.locator('.shown')).toHaveText(await panel.locator('.eta-cell .shown').innerText())
+      if (width === 390) await expect(row.locator('.eta-cell')).toHaveCount(0)
+      else await expect(eta.locator('.shown')).toHaveText(await panel.locator('.eta-cell .shown').innerText())
     } }] })
     expect(errors).toEqual([])
   })

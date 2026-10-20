@@ -4,7 +4,7 @@
 // failed or other scope's figures shown as this one's), popups that let the page show through or clip their text, and
 // controls that move when figures land, while counting, on hover or when Hide closed changes.
 import { test, expect, type Locator, type Page } from '@playwright/test'
-import { fixtures, mockWork, watchErrors } from './work-fixtures'
+import { fixtures, mockWork, watchErrors, showProjectHead } from './work-fixtures'
 import { controlStability } from './control-stability'
 import { viewFigures, wholeFigures } from './work-figures-fixture'
 import type { ProjectFigures } from '../src/lib/api'
@@ -61,7 +61,7 @@ async function open(page: Page, options: { width?: number; theme?: string; marks
   await mockWork(page, data)
   await page.route('**/api/queue?*', route => route.fulfill({ json: { items: [], manual_order: false, capacity: { queued_hours: 0, parallel_runs: 0, work_hours: 0, warning: false } } }))
   const figures = await serveFigures(page, options)
-  await page.goto('/p/PHAROS')
+  await page.goto('/p/PHAROS'); await showProjectHead(page)
   await expect(page.getByRole('grid', { name: 'Tickets' }).locator('tr.ticket-row:not(.ghost)').first()).toBeVisible()
   if (options.comfortable && width > 600) await density(page, 'Comfortable').click()
   await expect(bar(page)).toHaveAttribute('aria-busy', 'false')

@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 
 import { computed, ref, shallowRef, watch } from 'vue'
-import { type SavedView } from '../../lib/api'
+import { listNodes, type ListItem, type SavedView } from '../../lib/api'
 import { hideLabel } from '../../lib/hideStates'
 import { latchParentShare, PINNED } from '../../lib/columns'
 import { copyName, duplicateView, loadViews, removeView, renameView, saveNewView, saveViewState, shareView, viewsOf } from '../../lib/savedViews'
@@ -9,7 +9,7 @@ import { SAVED_VIEW } from '../../lib/viewSwitch'
 import { savedViewId } from '../../lib/ticketListSwitch'
 import { bareProjectEntry, type ProjectSection } from '../../components/work/projectNavigation'
 import { toast } from '../../lib/toast'
-import { apiParams, filtersFromView, filtersToQuery, hasFilters, sameListState, suggestName, type ListFilters } from '../../lib/ticketList'
+import { apiParams, clearedFilters, filtersFromView, filtersToQuery, hasFilters, sameListState, suggestName, ticketCSV, type ListFilters } from '../../lib/ticketList'
 import { scopeOwner } from '../../lib/identityScope'
 import { useViewFigures } from '../../lib/useViewFigures'
 import { useGroupFigures } from '../../lib/useGroupFigures'
@@ -228,6 +228,48 @@ export function useProjectViews(state: ProjectState, data: ReturnType<typeof use
     const url = new URL(hrefFor(view.id), window.location.origin).toString()
     navigator.clipboard.writeText(url).then(() => toast(`Copied the link to “${view.name}”`), () => toast('The link could not be copied', { tone: 'error' }))
   }
+  function openPhonePreset(preset: string) {
+    const day = (date: Date) => `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`
+    const today = new Date(), since = new Date(today)
+    since.setDate(since.getDate() - 13)
+    update({ ...clearedFilters(), view: null, showClosed: preset === 'done', hideStates: undefined,
+      ...(preset === 'mine' ? { assignee: [me.value?.id ?? 'me', 'none'] } : {}),
+      ...(preset === 'qa' ? { status: ['qa'] } : {}),
+      ...(preset === 'done' ? { status: ['done'], statusScope: 'done', date: { field: 'updated', preset: null, from: day(since), to: day(today) }, sort: [{ field: 'updated_at', desc: true }] } : {}),
+    })
+  }
+  function copyListLink() {
+    const url = window.location.href
+    navigator.clipboard.writeText(url).then(() => toast('Link copied'), () => toast('The link could not be copied', { tone: 'error' }))
+  }
+  const exporting = ref(false)
+  async function exportListCSV() {
+    if (exporting.value || !projectId.value) return
+    const id = projectId.value, person = scopeOwner(session.identity), query = JSON.stringify(apiParams(id, filters.value))
+    const snapshot = filters.value, filename = `${project.value?.routeKey ?? 'tickets'}.csv`
+    const current = () => projectId.value === id && scopeOwner(session.identity) === person && JSON.stringify(apiParams(id, filters.value)) === query
+    exporting.value = true
+    try {
+      const rows: ListItem[] = [], cursors = new Set<string>()
+      let cursor: string | undefined
+      const signal = AbortSignal.timeout(30_000)
+      do {
+        const page = await listNodes(apiParams(id, snapshot, { limit: 200, cursor }), { signal })
+        if (!current()) return
+        if (rows.length + page.items.length > 5000) throw new Error('The export is too large. Narrow the list and try again.')
+        rows.push(...page.items)
+        cursor = page.next_cursor ?? undefined
+        if (cursor && (rows.length >= 5000 || cursors.has(cursor))) throw new Error('The export is too large. Narrow the list and try again.')
+        if (cursor) cursors.add(cursor)
+      } while (cursor)
+      const url = URL.createObjectURL(new Blob(['\ufeff', ticketCSV(rows)], { type: 'text/csv;charset=utf-8' }))
+      const link = document.createElement('a')
+      link.href = url; link.download = filename; link.click()
+      URL.revokeObjectURL(url)
+      toast(`Exported ${rows.length}\u00a0tickets`)
+    } catch (e) { if (current()) toast(`CSV was not exported: ${problem(e)}`, { tone: 'error' }) }
+    finally { exporting.value = false }
+  }
   async function remove(view: SavedView) {
     const id = projectId.value
     if (!id) return
@@ -238,5 +280,5 @@ export function useProjectViews(state: ProjectState, data: ReturnType<typeof use
     } catch (e) { toast(`The view was not deleted: ${problem(e)}`, { tone: 'error' }) }
   }
 
-  return { views, activeView, viewDirty, canSaveView, showViewBar, defaultViewId, hrefFor, openView, figuresBusy, figuresFailed, figuresNarrowed, retryFigures, workHead, workBarSlots, workHideLabel, columnFigures, groupFigures, parentDefault, savePanel, saveBusy, saveError, viewBar, startSave, startRename, closeSave, submitSave, saveActive, duplicate, setDefaultView, share, copyViewLink, remove }
+  return { views, activeView, viewDirty, canSaveView, showViewBar, defaultViewId, hrefFor, openView, openPhonePreset, copyListLink, exportListCSV, figuresBusy, figuresFailed, figuresNarrowed, retryFigures, workHead, workBarSlots, workHideLabel, columnFigures, groupFigures, parentDefault, savePanel, saveBusy, saveError, viewBar, startSave, startRename, closeSave, submitSave, saveActive, duplicate, setDefaultView, share, copyViewLink, remove }
 }

@@ -86,6 +86,7 @@ it('a phone selection hold suppresses only its own row and pointer click', () =>
     const props = reactive({ selectable: true, rowsById: new Map([[a.id, a], [b.id, b]]), selected: new Set<string>(), groups: [], sort: [], collapsed: new Set(), now: 0 })
     const view = setupSource('components/work/TicketTable.vue', props, {
       '../../lib/displayLanguage': {}, '../../directives/clipTip': {}, '../../lib/estimates': {},
+      '../../lib/chrome': { compactChrome: () => ({ value: true }) },
       '../../lib/columns': { COLUMN_BY_ID: new Map(), visibleColumns: () => ({ columns: [], customised: false, dropped: [] }), withHostColumns: () => [], releaseLabel: () => '', tagList: () => [] },
       '../../lib/releaseMembership': {}, '../../lib/liveAgents': { ticketWorkers: () => new Map() },
       '../../stores/liveAgents': { useLiveAgents: () => ({ forProject: () => [] }) },

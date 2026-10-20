@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import { expect, test, type Page } from '@playwright/test'
-import { fixtures, mockWork, watchErrors } from './work-fixtures'
+import { fixtures, mockWork, watchErrors, showProjectHead } from './work-fixtures'
 import { expectStableControls } from './helpers/stable'
 import type { FloatingList } from './helpers/floating-lists'
 
@@ -13,7 +13,7 @@ async function openList(page: Page, kind: FloatingList, theme: 'light' | 'dark')
   epic.title = `${name} 1`
   data.nodes.push(...Array.from({ length: 16 }, (_, index) => ({ ...epic, id: `extra-epic-${index}`, key: `PHAROS-${index + 100}`, title: `${name} ${index + 1}`, state: 'open' })))
   await mockWork(page, data)
-  await page.goto('/p/PHAROS')
+  await page.goto('/p/PHAROS'); await showProjectHead(page)
   await expect(page.getByRole('heading', { name: 'Pharos', exact: true })).toBeVisible()
   await page.keyboard.press('ArrowRight')
   await page.evaluate(async kind => {

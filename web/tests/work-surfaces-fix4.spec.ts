@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import { expect, test } from '@playwright/test'
-import { fixtures, mockWork, watchErrors } from './work-fixtures'
+import { expectTicketRowState, fixtures, mockWork, watchErrors, openTicketStatus } from './work-fixtures'
 import { controlStability } from './control-stability'
 
 const benefits = {
@@ -21,8 +21,7 @@ for (const width of [390, 1024, 1440]) for (const theme of ['light', 'dark']) {
     ]
     const errors = watchErrors(page), calls = await mockWork(page, data, { admin: true, entryChecks: true })
     await page.goto('/p/PHAROS/tickets?closed=1&sort=key')
-    const row = page.getByRole('grid', { name: 'Tickets' }).locator('#row-first')
-    await row.getByRole('button', { name: /Change status of PHAROS-1/ }).click()
+    await openTicketStatus(page, 'PHAROS-1')
     await expect(page.getByRole('menuitemradio', { name: /^Done/ })).toContainText('0 of 1')
     await page.getByRole('menuitemradio', { name: /^Done/ }).click()
     const dialog = page.getByRole('dialog', { name: 'PHAROS-1: Done checks' })
@@ -59,7 +58,7 @@ for (const width of [390, 1024, 1440]) for (const theme of ['light', 'dark']) {
     expect(firstPatch[0].body).toEqual({ fields: { priority: 'high', ...benefits, hide_from_release_notes: true } })
     expect(firstPatch[1].body).toEqual({ state: 'done' })
     expect(firstPatch[1].headers['if-unmodified-since']).not.toBe(template.updated_at)
-    await expect(row.locator('.status-btn')).toHaveText('Done')
+    await expectTicketRowState(page, 'PHAROS-1', 'Done')
 
     await page.goto('/p/PHAROS/PHAROS-2?closed=1')
     const workspace = page.getByRole('complementary', { name: 'Ticket details' })

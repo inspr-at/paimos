@@ -17,7 +17,8 @@ test('on a phone, select two tickets, open Add to release, then cancel', async (
   await expect(row(page, 'PHAROS-12')).toBeVisible()
   await expect(page.getByRole('checkbox', { name: 'Select PHAROS-12' })).toBeHidden()
 
-  await page.getByRole('button', { name: 'Select', exact: true }).click()
+  await page.getByRole('button', { name: 'More view actions', exact: true }).click()
+  await page.getByRole('menuitem', { name: 'Select tickets', exact: true }).click()
   const mark = row(page, 'PHAROS-12').getByRole('checkbox', { name: 'Select PHAROS-12' })
   await expect(mark).toBeVisible()
   const markBox = (await mark.boundingBox())!
@@ -27,7 +28,7 @@ test('on a phone, select two tickets, open Add to release, then cancel', async (
   await row(page, 'PHAROS-12').click()
   await row(page, 'PHAROS-14').click()
   await expect(page).toHaveURL(/\/p\/PHAROS\/tickets$/)
-  await expect(page.locator('.phone-pick-status')).toContainText('2 selected')
+  await expect(bulkBar(page)).toHaveAttribute('aria-label', '2 selected tickets')
   await expect(bulkBar(page)).toContainText('2')
   const barBox = (await bulkBar(page).boundingBox())!
   expect(barBox.x).toBeGreaterThanOrEqual(0)
@@ -44,9 +45,11 @@ test('on a phone, select two tickets, open Add to release, then cancel', async (
 
   await page.keyboard.press('Escape')
   await expect(dialog).toBeHidden()
-  await page.getByRole('button', { name: 'Cancel' }).click()
+  await bulkBar(page).getByRole('button', { name: 'Clear the selection', exact: true }).click()
   await expect(bulkBar(page)).toHaveCount(0)
-  await expect(page.getByRole('button', { name: 'Select', exact: true })).toBeVisible()
+  await page.getByRole('button', { name: 'More view actions', exact: true }).click()
+  await expect(page.getByRole('menuitem', { name: 'Select tickets', exact: true })).toBeVisible()
+  await page.keyboard.press('Escape')
   await expect(page.getByRole('checkbox', { name: 'Select PHAROS-12' })).toBeHidden()
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true)
 })
@@ -58,6 +61,6 @@ test('a long press on a phone card selects it and shows the round check', async 
   await expect(row(page, 'PHAROS-11')).toBeVisible()
   await row(page, 'PHAROS-11').dispatchEvent('contextmenu')
   await expect(row(page, 'PHAROS-11').getByRole('checkbox', { name: 'Select PHAROS-11' })).toBeChecked()
-  await expect(page.locator('.phone-pick-status')).toContainText('1 selected')
+  await expect(bulkBar(page)).toHaveAttribute('aria-label', '1 selected ticket')
   await expect(page).toHaveURL(/\/p\/PHAROS\/tickets$/)
 })

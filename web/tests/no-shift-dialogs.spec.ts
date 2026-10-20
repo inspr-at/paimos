@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import { test, expect, type Page } from '@playwright/test'
-import { fixtures, mockWork } from './work-fixtures'
+import { fixtures, mockWork, openListDisplay, openTicketStatus, showProjectHead } from './work-fixtures'
 
 import { expectStableControls } from './helpers/stable'
 
@@ -11,6 +11,8 @@ async function mountShell(page: Page, kind: Shell, width: number, above = false)
   await page.setViewportSize({ width, height: 1000 })
   await mockWork(page, fixtures(), { admin: true })
   await page.goto('/p/PHAROS')
+  await expect(page.locator('tr.ticket-row').first()).toBeVisible()
+  if (width <= 719) await showProjectHead(page)
   await expect(page.getByRole('heading', { name: 'Pharos', exact: true })).toBeVisible()
   await page.evaluate(async ({ kind, phone, above }) => {
     const path = '/tests/helpers/no-shift-shells.ts'
@@ -111,7 +113,7 @@ for (const width of [1440, 390]) {
     await page.setViewportSize({ width, height: 1000 })
     await mockWork(page, fixtures())
     await page.goto('/p/PHAROS')
-    await page.getByRole('button', { name: /Change status of PHAROS-11/ }).click()
+    await openTicketStatus(page, 'PHAROS-11')
     await page.getByRole('menuitemradio', { name: 'Done', exact: true }).click()
     const dialog = page.locator('.gate[open]')
     await expect(dialog).toBeVisible()
@@ -151,7 +153,7 @@ for (const width of [1440, 1024]) {
     // Exercise wider text metrics and a classic scrollbar even on macOS, whose
     // default overlay scrollbar and system font leave more room than Linux CI.
     if (constrained) await page.addStyleTag({ content: '.display-panel { font-family: var(--mono); } .floating { scrollbar-gutter: stable; } .floating::-webkit-scrollbar { width: 15px; height: 15px; }' })
-    await page.getByRole('button', { name: /^Display:/ }).click()
+    await openListDisplay(page)
     const dialog = page.getByRole('dialog', { name: 'Display options', exact: true })
     const groups = dialog.getByRole('radiogroup', { name: 'Group by' })
     await expectStableControls({

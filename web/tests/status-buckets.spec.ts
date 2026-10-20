@@ -2,7 +2,7 @@
 // AEON-302: project cards and the project header show open, blocked and unknown
 // work in the open count, at a phone width and on a wide screen.
 import { test, expect, type Page } from '@playwright/test'
-import { fixtures, mockWork, type MockNode } from './work-fixtures'
+import { fixtures, mockWork, showProjectHead, type MockNode } from './work-fixtures'
 
 test.beforeEach(async ({ page }) => { await page.clock.setSystemTime(new Date('2026-09-23T12:00:00Z')) })
 
@@ -53,7 +53,7 @@ test('card and header count open, blocked and unknown work at 390 and 1600', asy
     await noHorizontalScroll(page)
     await page.screenshot({ path: test.info().outputPath(`card-${width}.png`), fullPage: false })
 
-    await page.goto('/p/BUCKET')
+    await page.goto('/p/BUCKET'); await showProjectHead(page)
     const stats = page.locator('.head-stats')
     await expect(stats).toHaveAttribute('aria-label', '5 open, 3 in progress, 2 done of 12')
     await expect(stats.getByRole('button', { name: 'Filter open tickets: 5', exact: true })).toBeVisible()
