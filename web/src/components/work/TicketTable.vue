@@ -5,7 +5,7 @@ import { vClipTip } from '../../directives/clipTip'
 import { formatEstimate, estimateDisplay } from '../../lib/estimates'
 import { computed, getCurrentInstance, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import type { ListItem } from '../../lib/api'
-import { CARD_WIDTH_SAMPLE_CAP, COLUMN_BY_ID, cardWidthAfterSamples, cardWidthCommit, costUnitLabel, hasSavedWidth, layoutTableWidth, layoutWidths, loadedFitWidth, nextMeasuredCardWidth, observedCardWidth, PARENT_TITLE_WIDTH, releaseLabel, tagList, titleRoom, visibleColumns, withHostColumns, type ColumnDef, type ColumnId, type ListPrefs, type TagRef } from '../../lib/columns'
+import { CARD_WIDTH_SAMPLE_CAP, COLUMN_BY_ID, cardWidthAfterSamples, cardWidthCommit, costUnitLabel, hasSavedWidth, layoutTableWidth, layoutWidths, loadedFitWidth, nextMeasuredCardWidth, observedCardWidth, pendingViewportShrink, PARENT_TITLE_WIDTH, releaseLabel, tagList, titleRoom, visibleColumns, withHostColumns, type ColumnDef, type ColumnId, type ListPrefs, type TagRef } from '../../lib/columns'
 import { beginTitlePress, claimTitleClick, openTitlePress, releaseTitlePress, type ListTitlePress } from '../../lib/listTitlePress'
 import { releaseCell, type NativeReleaseView } from '../../lib/releaseMembership'
 import { agentKey, ticketWorkers, withServerLead, type LiveAgent } from '../../lib/liveAgents'
@@ -567,7 +567,9 @@ function applyCardSize(entries: ResizeObserverEntry[]) {
   const live = readCardWidth()
   if (live === null) return
   const shrunk = viewportShrunk
-  viewportShrunk = false
+  // The lag is over once client width has left the card this shrink started
+  // from. A wide delivery must not eat the hint before the narrow sample.
+  if (shrunk && Math.abs(live - viewportAnchor) > 0.5) viewportShrunk = false
   // The narrowest content box is the shrink hint. A wider one in the same
   // delivery is a queued sample and must not replace the live card.
   let box = 0
@@ -575,7 +577,8 @@ function applyCardSize(entries: ResizeObserverEntry[]) {
     const sample = entry.contentRect?.width
     if (typeof sample === 'number' && Number.isFinite(sample) && sample > 0) box = box === 0 ? sample : Math.min(box, sample)
   }
-  const next = observedCardWidth(live, box, before, shrunk)
+  const next = observedCardWidth(live, box, before, viewportShrunk)
+  if (viewportShrunk && next < live - 0.5) viewportShrunk = false
   const grew = next > before + 0.5
   const moved = Math.abs(next - before) > 0.5
   if (moved) width.value = next
@@ -585,10 +588,12 @@ function applyCardSize(entries: ResizeObserverEntry[]) {
 }
 let lastInner = window.innerWidth
 let viewportShrunk = false
+let viewportAnchor = 0
 function measureSoon() {
   const inner = window.innerWidth
   const grew = inner > lastInner + 0.5
-  viewportShrunk = inner < lastInner - 0.5
+  if (inner < lastInner - 0.5) viewportAnchor = width.value
+  viewportShrunk = pendingViewportShrink(inner, lastInner, viewportShrunk)
   lastInner = inner
   const before = width.value
   const live = readCardWidth()

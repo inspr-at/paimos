@@ -80,6 +80,13 @@ export function observedCardWidth(live: number, box: number, before: number, vie
   return live
 }
 
+/** A shrink stays pending when a second viewport event reports the same width. Window and visualViewport both fire for one resize; the second must not drop the shrink before the card's narrow sample arrives. A growth clears it. */
+export function pendingViewportShrink(inner: number, last: number, pending: boolean): boolean {
+  if (inner < last - 0.5) return true
+  if (inner > last + 0.5) return false
+  return pending
+}
+
 /** The card width a resize sample should lay columns out in. A narrower live card is this frame. A wider one is the card when the viewport grew, and the previous frame when it shrank (AEON-1401). */
 export function nextMeasuredCardWidth(current: number, live: number, viewportGrew: boolean): number {
   if (!(live > 0)) return current

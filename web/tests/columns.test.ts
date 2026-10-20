@@ -2,7 +2,7 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
-import { agreedFrameWidth, automaticColumns, CARD_WIDTH_SAMPLE_CAP, cardWidthAfterSamples, cardWidthCommit, COLUMN_BY_ID, GIVE_WAY, latchParentShare, layoutTableWidth, layoutWidths, loadedFitWidth, nextMeasuredCardWidth, normalizeColumnIds, observedCardWidth, orderOf, PARENT_TITLE_WIDTH, parentColumnDefault, releaseLabel, RETURN_ROOM, savedColumnWidth, tagList, TITLE_MIN_TABLE, TITLE_TARGET, titleRoom, visibleColumns, widthOf, withHostColumns, type ColumnDef, type ColumnFit, type ColumnId, type ListPrefs } from '../src/lib/columns.ts'
+import { agreedFrameWidth, automaticColumns, CARD_WIDTH_SAMPLE_CAP, cardWidthAfterSamples, cardWidthCommit, COLUMN_BY_ID, GIVE_WAY, latchParentShare, layoutTableWidth, layoutWidths, loadedFitWidth, nextMeasuredCardWidth, normalizeColumnIds, observedCardWidth, orderOf, PARENT_TITLE_WIDTH, parentColumnDefault, pendingViewportShrink, releaseLabel, RETURN_ROOM, savedColumnWidth, tagList, TITLE_MIN_TABLE, TITLE_TARGET, titleRoom, visibleColumns, widthOf, withHostColumns, type ColumnDef, type ColumnFit, type ColumnId, type ListPrefs } from '../src/lib/columns.ts'
 import { groupRows, selectLoadedGroup, filtersFromQuery, filtersToQuery, type TicketRow } from '../src/lib/ticketList.ts'
 import { byPosition, positionBetween, positionOf, type Attachment } from '../src/lib/attachments.ts'
 
@@ -464,8 +464,20 @@ test('AEON-1570 a growing card is adopted after a disagreeing frame pair, and a 
   assert.equal(observedCardWidth(760, 760, 1200, true), 760)
   assert.equal(observedCardWidth(1000, 760, 800, false), 1000)
   assert.equal(observedCardWidth(0, 760, 1000, true), 1000)
+  // Window and visualViewport both fire for one resize. The second event reports
+  // the same width and must leave the shrink pending until the narrow card sample
+  // arrives (AEON-1470). A growth clears it. The old assignment `inner < last`
+  // dropped the hint on that follow-up, so the lagged clientWidth stayed.
+  assert.equal(pendingViewportShrink(1024, 1440, false), true)
+  assert.equal(pendingViewportShrink(1024, 1024, true), true)
+  assert.equal(pendingViewportShrink(1024.4, 1024, true), true)
+  assert.equal(pendingViewportShrink(1024, 1024, false), false)
+  assert.equal(pendingViewportShrink(1440, 1024, true), false)
   const table = readFileSync(new URL('../src/components/work/TicketTable.vue', import.meta.url), 'utf8')
-  assert.match(table, /observedCardWidth\(live, box, before, shrunk\)/)
+  assert.match(table, /observedCardWidth\(live, box, before, viewportShrunk\)/)
+  assert.match(table, /pendingViewportShrink\(inner, lastInner, viewportShrunk\)/)
+  assert.match(table, /if \(shrunk && Math\.abs\(live - viewportAnchor\) > 0\.5\) viewportShrunk = false/)
+  assert.doesNotMatch(table, /const shrunk = viewportShrunk\n {2}viewportShrunk = false/)
   assert.match(table, /if \(moved \|\| shrunk\) settleCardWidth\(grew, before\)/)
   // A wider live card is this resize when the window grew, and ignored when it shrank.
   assert.equal(nextMeasuredCardWidth(760, 792, true), 792)
