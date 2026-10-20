@@ -233,6 +233,7 @@ function routeRecords(): Router {
     './lib/brand': { setPageTitle() {} }, './stores/projects': {},
     './stores/session': { useSession: () => ({ identity: { principal: { kind: 'person' } }, refresh: async () => {} }) },
     './stores/workVocabulary': { useWorkVocabulary: () => ({ load: async () => {} }) },
+    './stores/statusNames': { useStatusNames: () => ({ load: async () => {} }) },
     './lib/api': { sessionEnded: {} }, './lib/authz': {}, './lib/toast': {}, './lib/confirm': { settleConfirm },
     './lib/attachLink': { hasAttachFragment: () => false, announceAttachCode() {} }, './lib/importDraft': { carriesDraft: () => false }, './lib/identityScope': {}, './lib/signInReturn': { takeSignInReturn: () => '/' },
     './lib/knowledge': {}, './components/work/projectNavigation': {}, './lib/ticketPeek': {},

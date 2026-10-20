@@ -1702,7 +1702,7 @@ func (m *Module) heartbeat(r *http.Request, tx pgx.Tx, p tenant.Principal) (resu
 	if err = recordCurrentActivity(ctx, tx, p, s); err != nil {
 		return nil, err
 	}
-	if err = record(ctx, tx, p, s, "heartbeat", before, s); err != nil {
+	if err = recordHeartbeat(ctx, tx, p, before, s); err != nil {
 		return nil, err
 	}
 	if isolated {

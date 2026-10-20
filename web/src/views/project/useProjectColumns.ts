@@ -22,14 +22,16 @@ export function useProjectColumns(state: ProjectState, data: ReturnType<typeof u
     const rest = orderOf(listPrefs.value).filter(id => !PINNED.includes(id) && !cols.includes(id))
     return { ...(listPrefs.value ?? {}), order: [...PINNED, ...cols, ...rest], visible: cols }
   })
-  const tableLayout = ref<{ visible: ColumnId[]; customised: boolean }>({ visible: [], customised: false })
+  // hidden: chosen columns this width leaves out (AEON-1470); Columns keeps them ticked with a note.
+  const tableLayout = ref<{ visible: ColumnId[]; customised: boolean; hidden?: ColumnId[] }>({ visible: [], customised: false, hidden: [] })
   // Cost is offered only to people who may see usage (harness.read).
   const usageVisible = computed(() => can('harness.read', projectId.value ?? undefined))
   const toolbarColumns = computed(() => {
-    const columns = pickerColumns(tablePrefs.value, tableLayout.value.visible, usageVisible.value)
+    const hidden = tableLayout.value.hidden ?? []
+    const columns = pickerColumns(tablePrefs.value, [...tableLayout.value.visible, ...hidden], usageVisible.value)
     const notes = columns.visible.includes('list_cost') && !planningPresent([...rowsById.value.values()]).list_cost
       ? { list_cost: 'Nothing reported in this list yet; cells show —' } : {}
-    return { ...columns, notes }
+    return { ...columns, notes, hidden: hidden.filter(id => columns.visible.includes(id)) }
   })
   // In a saved view the columns belong to the view (they become part of the list's
   // state); on the plain list they are the person's own for this project.

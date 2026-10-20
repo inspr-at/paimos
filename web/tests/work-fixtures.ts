@@ -143,7 +143,13 @@ export function fixtures(options: MockOptions = {}) {
   const people: { id: string; name: string; has_avatar?: boolean }[] = [{ ...me }, { ...mira }]
   // Agents working right now (AEON-184): GET /api/harness-sessions/live items.
   const live: LiveAgentMock[] = []
-  return { projects, nodes, people, activity, relations, attachments, preferences, events, views, batches, live, counter: { next: 100 } }
+  // AEON-1401: the workspace's status names (GET/PUT /api/settings/status-names).
+  const statusNames: { revision: number; names: Record<string, { en?: string; de?: string }> } = { revision: 0, names: {} }
+  return {
+    projects, nodes, people, activity, relations, attachments, preferences, events, views, batches, live, statusNames, counter: { next: 100 },
+    // A spec may reshape one figures answer, e.g. counts beyond what the fixture's rows can hold (AEON-1470).
+    figuresHook: null as ((figures: ReturnType<typeof mockFigures>, query: URLSearchParams) => void) | null,
+  }
 }
 // A 1x1 PNG for every attachment variant.
 export const PNG = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==', 'base64')
@@ -333,6 +339,8 @@ export async function mockWork(page: Page, data: Fixtures, options: MockOptions 
       holdOpen() { automaticOpen = false },
       open() { automaticOpen = true; streams.forEach(stream => stream.open()) },
       active() { return streams.filter(stream => !stream.closed).map(stream => ({ id: stream.id, opened: stream.opened })) },
+      // A named event on every open stream, as the server sends it (AEON-1401 live renames).
+      emit(type: string, data: string, id: number) { streams.filter(stream => !stream.closed && stream.opened).forEach(stream => stream.dispatchEvent(new MessageEvent(type, { data, lastEventId: String(id) }))) },
     } })
   })
   const calls: Call[] = []
@@ -577,6 +585,14 @@ export async function mockWork(page: Page, data: Fixtures, options: MockOptions 
     if (path === '/api/me/permissions') return route.fulfill({ json: mockEffectivePermissions(options.readOnly ? 'viewer' : options.admin ? 'admin' : 'member', query.get('project_id') ?? undefined) })
     if (path === '/api/me') return route.fulfill({ json: { principal: { id: me.id, name: me.name, kind: options.principalKind ?? 'person', roles: options.readOnly ? ['viewer'] : options.admin ? ['admin'] : ['member'] }, tenant: { id: 't1', name: 'INSPR Studio' } } })
     if (path === '/api/settings/work-vocabulary') return route.fulfill({ json: { revision: 0, leaf: { name: '', icon: '' }, levels: [] } })
+    if (path === '/api/settings/status-names') {
+      if (method === 'PUT') {
+        const input = body as { revision: number; names: Record<string, { en?: string; de?: string }> }
+        if (input.revision !== data.statusNames.revision) return route.fulfill({ status: 409, json: { error: 'status names changed; reload before saving' } })
+        Object.assign(data.statusNames, { revision: data.statusNames.revision + 1, names: input.names })
+      }
+      return route.fulfill({ json: data.statusNames })
+    }
     if (path === '/api/kinds') return route.fulfill({ json: { items: ['work', 'epic', 'ticket', 'task', 'project'].map(slug => ({ id: `k-${slug}`, slug, label: slug[0].toUpperCase() + slug.slice(1), short_prefix: slug.slice(0, 3).toUpperCase(), icon: slug, allowed_child_kinds: null, field_schema: {} })) } })
     // Relations (U27): the server's refusals, in its words, for the picker to show.
     if (path === '/api/relations' && method === 'POST') {
@@ -705,7 +721,9 @@ export async function mockWork(page: Page, data: Fixtures, options: MockOptions 
       const within = new URLSearchParams(query)
       if (!within.get('within')) within.set('within', figuresFor[1])
       if (!within.get('kind')) within.set('kind', 'work,ticket,task,epic')
-      return route.fulfill({ json: mockFigures(data, figuresFor[1], matching(within, false), within, bucketOf) })
+      const figures = mockFigures(data, figuresFor[1], matching(within, false), within, bucketOf)
+      data.figuresHook?.(figures, within)
+      return route.fulfill({ json: figures })
     }
     if (path === '/api/nodes' && method === 'GET') {
       const kinds = listParam(query, 'kind')
@@ -910,9 +928,13 @@ function mockFigures(data: Fixtures, project: string, rows: MockNode[], query: U
   const keys = rows.map(n => n.key).sort((a, b) => Number(a.split('-').pop()) - Number(b.split('-').pop()))
   const work = leaves.filter(n => !closed(n))
   const narrowed = FILTER_PARAMS.some(name => (query.get(name) ?? '').trim() !== '')
+  // Open rows are every non-closed work row, parents included. A direct parent counts only when that node exists and is not the project.
+  const byId = new Map(data.nodes.map(n => [n.id, n]))
+  const openRows = rows.filter(n => !closed(n))
+  const openWithParent = openRows.filter(n => { const parent = n.parent_id ? byId.get(n.parent_id) : undefined; return !!parent && parent.kind_slug !== 'project' }).length
   return {
     view_key: [...query].filter(([name]) => FILTER_PARAMS.includes(name)).map(([name, value]) => `${name}=${value}`).sort().join('&'), computed_at: new Date().toISOString(),
-    scope: { kind: narrowed ? 'this_view' : 'whole_project', rows: rows.length, parents: rows.length - leaves.length, leaves: leaves.length, project_leaves: data.nodes.filter(n => n.project === project && isLeaf(n)).length, closed: leaves.filter(closed).length },
+    scope: { kind: narrowed ? 'this_view' : 'whole_project', rows: rows.length, parents: rows.length - leaves.length, leaves: leaves.length, project_leaves: data.nodes.filter(n => n.project === project && isLeaf(n)).length, closed: leaves.filter(closed).length, open_rows: openRows.length, open_with_parent: openWithParent },
     marks_releases: marks, total_hours: total, approximate: total > 0, without_estimate: without, open_estimated_leaves: openEstimated, groups,
     columns: {
       key: { ...all, parents: rows.length - leaves.length, leaves: leaves.length, first_key: keys[0], last_key: keys[keys.length - 1] },
@@ -920,6 +942,8 @@ function mockFigures(data: Fixtures, project: string, rows: MockNode[], query: U
       priority: counted(n => typeof n.fields.priority === 'string' ? n.fields.priority : ''),
       assignee: { ...counted(n => personName(data, n.fields.assignee), 3), values: counted(n => personName(data, n.fields.assignee), 3).values.map(v => ({ ...v, kind: 'person' })) },
       epic: counted(n => epicAbove(n, data)?.key ?? '', 2),
+      // The direct parent other than the project, as the Parent column shows it.
+      parent: counted(n => { const up = n.parent_id ? byId.get(n.parent_id) : undefined; return up && up.kind_slug !== 'project' ? up.key : '' }, 2),
       release: counted(release, 2),
       suggested_release: counted(n => labelOf(n.fields.suggested_release), 2),
       tag: counted(n => tagNames(n)[0]?.name ?? '', 5),

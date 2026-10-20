@@ -336,6 +336,8 @@
     ,
     "internal/rulesimport:TestCodeExamplesNeverBecomeRules"
     ,
+    "internal/statusnames:TestDisplayFallsBackPerLocale"
+    ,
     "internal/themes:TestAgentAppearanceAPIRoundTripAndBounds"
     ,
     "internal/themes:TestAppearanceMigrationKeepsCanonicalAppearanceWhileLinkedAndAliasesAfterUnlink"
@@ -816,6 +818,8 @@
     ,
     {"kind":"go","package":"internal/agentaccounts","name":"TestFactOnlyReportsExhaustTheDailyShare","tier":"ESSENTIAL"}
     ,
+    {"kind":"go","package":"internal/agentaccounts","name":"TestFactWindowPacingOpensAtReading","tier":"ESSENTIAL"}
+    ,
     {"kind":"go","package":"internal/agentaccounts","name":"TestFiveHourFirstReadingNearUTCMidnightStaysEligible","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/agentaccounts","name":"TestFix2KnownKeyCapKeepsTotalBalanceUnknown","tier":"GATED-FULL"}
@@ -927,6 +931,8 @@
     {"kind":"go","package":"internal/agentaccounts","name":"TestPoolConfirmationDoesNotSilentlyIncludeSpare","tier":"GATED-FULL"}
     ,
     {"kind":"go","package":"internal/agentaccounts","name":"TestProbeBatchIndependentObservationsAndRevocation","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/agentaccounts","name":"TestProbeEventsOnlyForVisibleStateChanges","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/agentaccounts","name":"TestProjectDailySnapshotCapsContract","tier":"ESSENTIAL"}
     ,
@@ -5054,6 +5060,8 @@
     ,
     {"kind":"go","package":"internal/cli","name":"TestIssueSuggestionConfirmationDropsOnlyRequestedStamps","tier":"GATED-FULL"}
     ,
+    {"kind":"go","package":"internal/cli","name":"TestIssueTextUsesStatusNamesAndJSONStaysCanonical","tier":"ESSENTIAL"}
+    ,
     {"kind":"go","package":"internal/cli","name":"TestIssueUpdateRefusesKindChange","tier":"GATED-FULL"}
     ,
     {"kind":"go","package":"internal/cli","name":"TestIssueUpdateRefusesMissingRevision","tier":"GATED-FULL"}
@@ -5922,6 +5930,12 @@
     ,
     {"kind":"go","package":"internal/db","name":"TestTagKindMigrationSeedsMissingAndPreservesCustomTenants","tier":"ESSENTIAL"}
     ,
+    {"kind":"go","package":"internal/db","name":"TestTelemetryRetentionCandidateScanTakesNoRowLock","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/db","name":"TestTelemetryRetentionMigrationRoleCanInstallPruneFlag","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/db","name":"TestTelemetryRetentionSitesShareOnePruneRule","tier":"ESSENTIAL"}
+    ,
     {"kind":"go","package":"internal/db","name":"TestTenantGuardRefreshesVisibilityAfterRevocation","tier":"NIGHTLY"}
     ,
     {"kind":"go","package":"internal/db","name":"TestTicketBenefitMigrationPreservesHistoryAndCustomSchema","tier":"GATED-FULL"}
@@ -6566,6 +6580,8 @@
     ,
     {"kind":"go","package":"internal/events","name":"TestGoalsSubscriptionUsesOutcomeVisibility","tier":"ESSENTIAL"}
     ,
+    {"kind":"go","package":"internal/events","name":"TestHeartbeatFreshnessNotifyCommitWithoutEvent","tier":"ESSENTIAL"}
+    ,
     {"kind":"go","package":"internal/events","name":"TestImportParentChangeHintInHistoryAndStream","tier":"GATED-FULL"}
     ,
     {"kind":"go","package":"internal/events","name":"TestImportParentChangeSummarizesMembershipWithoutRevisionChange","tier":"GATED-FULL"}
@@ -6617,6 +6633,16 @@
     {"kind":"go","package":"internal/events","name":"TestSubscriptionTopicProjectAndReferenceCeilings","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/events","name":"TestSummarizeNodeChanges","tags":["delete-candidate"],"tier":"GATED-FULL"}
+    ,
+    {"kind":"go","package":"internal/events","name":"TestTelemetryRetentionBatchedScopedAndIdempotent","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/events","name":"TestTelemetryRetentionPruneFlagDoesNotLeak","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/events","name":"TestTelemetryRetentionPrunesOnlyQuietHeartbeats","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/events","name":"TestTelemetryRetentionSkipsUndoAndKeepsAppendOnlyGuard","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/events","name":"TestTelemetryRetentionStartsImmediatelyAndRunsDaily","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/events","name":"TestUUIDAndIDValidation","tier":"GATED-FULL"}
     ,
@@ -6715,6 +6741,8 @@
     {"kind":"go","package":"internal/goals","name":"TestGoalSeriesBulkUndoAndProjectSnapshots","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/goals","name":"TestGoalSeriesChangedKeysWithoutPercentageChange","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/goals","name":"TestGoalSeriesKeepsOldWorkingPeriodThroughTelemetryRetention","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/goals","name":"TestGoalSeriesPlannerAndMoveTimeline","tier":"ESSENTIAL"}
     ,
@@ -6844,6 +6872,8 @@
     ,
     {"kind":"go","package":"internal/harness","name":"TestHarnessSessionMessagesNeverMoveToAnotherGeneration","tier":"GATED-FULL"}
     ,
+    {"kind":"go","package":"internal/harness","name":"TestHeartbeatAttachedOwnershipAuditedOnce","tier":"ESSENTIAL"}
+    ,
     {"kind":"go","package":"internal/harness","name":"TestHeartbeatCommitDiffValidationAndStorage","tier":"NIGHTLY"}
     ,
     {"kind":"go","package":"internal/harness","name":"TestHeartbeatEstimateWarningMatrix","tier":"GATED-FULL"}
@@ -6853,6 +6883,10 @@
     {"kind":"go","package":"internal/harness","name":"TestHeartbeatLabelAndMetadataHistory","tier":"GATED-FULL"}
     ,
     {"kind":"go","package":"internal/harness","name":"TestHeartbeatModelSwitchRequiresGenerationLease","tier":"GATED-FULL"}
+    ,
+    {"kind":"go","package":"internal/harness","name":"TestHeartbeatOwnershipAndCapabilitiesWriteEvents","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/harness","name":"TestHeartbeatQuietTicksUpdateRowAndSSEWithoutEvents","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/harness","name":"TestHeartbeatWarningSQLFailureDoesNotRollbackAcceptedBeat","tier":"GATED-FULL"}
     ,
@@ -8954,6 +8988,8 @@
     ,
     {"kind":"go","package":"internal/nodes","name":"TestStatusHelpLiveLimitsAndProjectOverrides","tags":["delete-candidate"],"tier":"GATED-FULL"}
     ,
+    {"kind":"go","package":"internal/nodes","name":"TestStatusNamesRoundTripKeepCanonicalStates","tier":"ESSENTIAL"}
+    ,
     {"kind":"go","package":"internal/nodes","name":"TestTagAssignmentMutationIsAtomicAndTenantScoped","tier":"GATED-FULL"}
     ,
     {"kind":"go","package":"internal/nodes","name":"TestTagMutationRollsBackAfterEventFailure","tier":"ESSENTIAL"}
@@ -10835,6 +10871,10 @@
     {"kind":"go","package":"internal/statusautopilot","name":"TestUpgradeSuggestsWithoutTicketMutationsUntilOwnerConfirms","tier":"GATED-FULL"}
     ,
     {"kind":"go","package":"internal/statusautopilot","name":"TestWorkspaceActivityPagingAndCurrentUndoAuthority","tier":"GATED-FULL"}
+    ,
+    {"kind":"go","package":"internal/statusnames","name":"TestDisplayFallsBackPerLocale","tier":"NIGHTLY"}
+    ,
+    {"kind":"go","package":"internal/statusnames","name":"TestNormalizeRefusesAmbiguousNamesPerLocale","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/stepup/server","name":"TestStepupApprovalRechecksAuthorityAfterFenceWait","tier":"ESSENTIAL"}
     ,

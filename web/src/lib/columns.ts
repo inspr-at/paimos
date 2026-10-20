@@ -1,17 +1,20 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // Ticket list columns: which show at a given table width, in which order and how
-// wide. Without a saved choice the table fills its width: narrow tables drop
-// columns, wide ones (from ~1500px of table, about an 1800px screen) add Assignee,
-// Epic, Release and Tags (when some row has them), Estimate and Created. A saved
-// choice fixes order and visibility; narrow desktop tables scroll to keep it.
+// wide. Without a saved choice the table fills its width: wide ones (from ~1500px
+// of table, about an 1800px screen) add Assignee, Parent (when enough open
+// tickets have one), Release and Tags (when some row has them), Estimate and
+// Created. A saved choice fixes order and which columns are chosen. Title keeps
+// its minimum at every desktop width (AEON-1470): widths beside it give way
+// first, then whole columns, least essential first.
 // On wide tables Title stops at ~960px and the spare width goes to the
 // text columns, so the metadata stays near the title. Free of Vue for unit tests.
 // Planning columns join Automatic when populated. Saved ticks always draw,
-// including empty cells. Legacy Paid choices map to Cost (AEON-511).
+// including empty cells. Legacy Paid choices map to Cost (AEON-511). Legacy Epic
+// choices map to Parent (AEON-1470).
 import type { SortField } from './work.ts'
 import { PLANNING_COLUMNS } from './planning.ts'
 
-export type ColumnId = 'key' | 'title' | 'status' | 'priority' | 'assignee' | 'epic' | 'release' | 'tags' | 'cost' | 'estimate' | 'model' | 'suggested' | 'tokens' | 'list_cost' | 'paid' | 'created' | 'updated' | 'progress' | 'eta'
+export type ColumnId = 'key' | 'title' | 'status' | 'priority' | 'assignee' | 'parent' | 'release' | 'tags' | 'cost' | 'estimate' | 'model' | 'suggested' | 'tokens' | 'list_cost' | 'paid' | 'created' | 'updated' | 'progress' | 'eta'
 export interface ColumnDef<Id extends string = string> { id: Id; label: string; sort: SortField | null; width: number; min: number; max: number; end?: boolean }
 // defaultView: the saved view this person opens the project with.
 export interface ListPrefs { order?: ColumnId[]; visible?: ColumnId[]; widths?: Partial<Record<string, number>>; defaultView?: string | null }
@@ -22,7 +25,7 @@ export const COLUMNS: ColumnDef<ColumnId>[] = [
   { id: 'status', label: 'Status', sort: 'state', width: 138, min: 84, max: 260 },
   { id: 'priority', label: 'Priority', sort: 'priority', width: 112, min: 72, max: 200 },
   { id: 'assignee', label: 'Assignee', sort: 'assignee', width: 156, min: 96, max: 320 },
-  { id: 'epic', label: 'Epic', sort: null, width: 220, min: 110, max: 480 },
+  { id: 'parent', label: 'Parent', sort: null, width: 160, min: 96, max: 360 },
   { id: 'release', label: 'Release', sort: null, width: 132, min: 84, max: 260 },
   { id: 'tags', label: 'Tags', sort: null, width: 180, min: 96, max: 420 },
   { id: 'cost', label: 'Cost unit', sort: null, width: 150, min: 96, max: 320 },
@@ -47,20 +50,32 @@ export const WIDE_TABLE = 1500
 export const TITLE_TARGET = 960
 // Automatic wide columns keep Title at least this wide; otherwise they step aside.
 const TITLE_ROOM = 420
+// Title's minimum holds from this table width (AEON-1470). A narrower desktop
+// table, with a docked panel beside it, stays inside its card instead.
+export const TITLE_MIN_TABLE = 721
+// Parent shows its title beside the key from this column width (AEON-1470).
+export const PARENT_TITLE_WIDTH = 200
 const PHONE: ColumnId[] = ['key', 'title', 'status', 'priority', 'updated']
-// The order columns leave in when space runs out: the least essential first.
-const DROP_ORDER: ColumnId[] = ['suggested', 'list_cost', 'tokens', 'model', 'eta', 'progress', 'estimate', 'cost', 'tags', 'release', 'created', 'epic', 'assignee', 'updated', 'priority', 'status']
+// The order whole columns leave in when even their minimum widths leave Title
+// under its own (AEON-1470): the least essential first. Key, Title, Status and
+// Priority never leave.
+export const GIVE_WAY: ColumnId[] = ['updated', 'created', 'estimate', 'tokens', 'list_cost', 'paid', 'suggested', 'model', 'eta', 'progress', 'tags', 'cost', 'release', 'parent', 'assignee']
+// A column that left comes back only with this much to spare, so the set does
+// not flap while a window is resized across its threshold.
+export const RETURN_ROOM = 16
 // Columns only wide tables add on their own.
-const WIDE_EXTRAS: ColumnId[] = ['suggested', 'list_cost', 'tokens', 'model', 'estimate', 'tags', 'release', 'created', 'epic', 'assignee']
+const WIDE_EXTRAS: ColumnId[] = ['suggested', 'list_cost', 'tokens', 'model', 'estimate', 'tags', 'release', 'created', 'assignee']
 // The text columns that take spare width on wide tables (their text gets room).
-const GROWS: ColumnId[] = ['epic', 'tags', 'assignee', 'release', 'cost']
+const GROWS: ColumnId[] = ['parent', 'tags', 'assignee', 'release', 'cost']
 // Which optional values any loaded row has. `workers` is live ticket work with
 // no stored assignee; it earns the Assignee column the same way a person does.
-export interface Present { suggested?: boolean; assigned?: boolean; workers?: boolean; estimate?: boolean; release?: boolean; tags?: boolean; progress?: boolean; eta?: boolean; model?: boolean; tokens?: boolean; list_cost?: boolean; paid?: boolean }
+// `parent` is the caller's once-per-load decision (at least 30% of open tickets
+// have a direct parent). It is not inferred from the loaded page.
+export interface Present { suggested?: boolean; assigned?: boolean; workers?: boolean; parent?: boolean; estimate?: boolean; release?: boolean; tags?: boolean; progress?: boolean; eta?: boolean; model?: boolean; tokens?: boolean; list_cost?: boolean; paid?: boolean }
 
 /** Normalize saved preferences, shared links and saved views without mutating them. */
 export function normalizeColumnIds(ids: readonly unknown[]): ColumnId[] {
-  return [...new Set(ids.map(id => id === 'paid' ? 'list_cost' : id).filter((id): id is ColumnId => typeof id === 'string' && COLUMN_BY_ID.has(id as ColumnId)))]
+  return [...new Set(ids.map(id => id === 'paid' ? 'list_cost' : id === 'epic' ? 'parent' : id).filter((id): id is ColumnId => typeof id === 'string' && COLUMN_BY_ID.has(id as ColumnId)))]
 }
 /** Ticks represent the saved choice, even when the table is a phone card. */
 export function pickerColumns(prefs: ListPrefs | null | undefined, drawn: ColumnId[], costAllowed: boolean) {
@@ -74,34 +89,98 @@ export function orderOf(prefs: ListPrefs | null | undefined): ColumnId[] {
   return [...PINNED, ...new Set(valid), ...rest]
 }
 
-// Wide tables add Assignee, Epic and Created, and Release, Tags, Estimate and the
-// planning columns when some row has one; narrower ones show Assignee when
-// someone is assigned or a live worker is on a loaded ticket.
+// Wide tables add Assignee and Created, and Parent when the caller says enough
+// open tickets have one, and Release, Tags, Estimate and the planning columns
+// when some row has one. Narrower ones show Assignee when someone is assigned
+// or a live worker is on a loaded ticket, and Parent on that same signal, after
+// Assignee when it is there and after Priority otherwise.
 export function automaticColumns(tableWidth: number, present: Present = {}): ColumnId[] {
   const out: ColumnId[] = ['key', 'title', 'status', 'priority']
+  const parent: ColumnId[] = present.parent ? ['parent'] : []
   if (tableWidth >= WIDE_TABLE) {
     const optional: ColumnId[] = [...(present.release ? ['release' as const] : []), ...(present.tags ? ['tags' as const] : []), ...(present.estimate ? ['estimate' as const] : []),
       ...PLANNING_COLUMNS.filter(id => present[id]), ...(present.suggested ? ['suggested' as const] : [])]
-    const wide: ColumnId[] = [...out, 'assignee', 'epic', ...optional, 'created', 'updated']
+    const wide: ColumnId[] = [...out, 'assignee', ...parent, ...optional, 'created', 'updated']
     if (present.progress) wide.push('progress')
     if (present.eta) wide.push('eta')
     return wide
   }
   if (tableWidth > 900 && (present.assigned || present.workers)) out.push('assignee')
+  out.push(...parent)
   if (tableWidth > 740) out.push('updated')
   if (present.progress) out.push('progress')
   if (present.eta) out.push('eta')
   return out
 }
 
-export function widthOf(id: string, prefs: ListPrefs | null | undefined, definitions: ReadonlyMap<string, ColumnDef> = COLUMN_BY_ID): number {
-  const def = definitions.get(id)!
-  const saved = prefs?.widths?.[id] ?? (id === 'list_cost' ? prefs?.widths?.paid : undefined)
-  return typeof saved === 'number' && Number.isFinite(saved) ? Math.max(def.min, Math.min(def.max, Math.round(saved))) : def.width
+// A saved width, including a legacy id. A direct id wins over Paid or Epic.
+export function savedColumnWidth(id: string, prefs: ListPrefs | null | undefined): number | undefined {
+  const widths = prefs?.widths
+  if (!widths) return undefined
+  const raw = widths[id] ?? (id === 'list_cost' ? widths.paid : id === 'parent' ? widths.epic : undefined)
+  return typeof raw === 'number' && Number.isFinite(raw) ? raw : undefined
+}
+export function hasSavedWidth(id: string, prefs: ListPrefs | null | undefined): boolean {
+  return savedColumnWidth(id, prefs) !== undefined
 }
 
-// The columns to show, in order. `customised` is true when a saved choice applies.
-export function visibleColumns(tableWidth: number, options: { phone: boolean; present?: Present; prefs?: ListPrefs | null; costAllowed?: boolean }): { columns: ColumnDef<ColumnId>[]; customised: boolean } {
+export function widthOf(id: string, prefs: ListPrefs | null | undefined, definitions: ReadonlyMap<string, ColumnDef> = COLUMN_BY_ID): number {
+  const def = definitions.get(id)!
+  const saved = savedColumnWidth(id, prefs)
+  return saved !== undefined ? Math.max(def.min, Math.min(def.max, Math.round(saved))) : def.width
+}
+
+// What the give-way measures besides the column definitions. mins: a host's own
+// minimum for a column (the ticket grid's first-cell slots, Title's extras);
+// reserve: the minimum width of host columns, which never leave; sorted: the
+// list's sort fields; previous: the columns this table left out last time.
+export interface ColumnFit { mins?: Partial<Record<string, number>>; reserve?: number; sorted?: readonly string[]; previous?: readonly string[] }
+
+// How many of `candidates` leave, first ones first: the fewest whose leaving lets
+// `need` (shrinking by each one's `size`) fit `room`. Ones that left last time
+// stay out until they fit with RETURN_ROOM to spare.
+function leaving(candidates: ColumnId[], need: number, size: (id: ColumnId) => number, room: number, previous: ReadonlySet<string>): number {
+  const left = [need]
+  for (const id of candidates) left.push(left[left.length - 1] - size(id))
+  const fewest = (width: number) => { const k = left.findIndex(total => total <= width); return k === -1 ? candidates.length : k }
+  const before = candidates.findIndex(id => !previous.has(id))
+  return Math.min(Math.max(before === -1 ? candidates.length : before, fewest(room)), fewest(room - RETURN_ROOM))
+}
+
+// One give-way for every chosen column (AEON-1470). In Automatic, the columns a
+// wide table adds on its own (`automatic`: their designed widths) step aside
+// first, in WIDE_EXTRAS order, while Title would get less than TITLE_ROOM beside
+// them. Then whole columns leave, in GIVE_WAY order, only while the rest do not
+// fit even at their minimum widths beside Title's minimum. Widths alone never
+// decide it (they give way first, in layoutWidths), so hover, live updates, more
+// rows or a folded group cannot change the set. A column the list is sorted by
+// stays in both steps; the next one leaves instead. Every column that leaves is
+// in `dropped`, and returns with RETURN_ROOM to spare.
+export function giveWay(ids: ColumnId[], tableWidth: number, fit: ColumnFit = {}, automatic?: (id: ColumnId) => number): { ids: ColumnId[]; dropped: ColumnId[] } {
+  if (!(tableWidth > 0)) return { ids, dropped: [] }
+  const min = (id: ColumnId) => fit.mins?.[id] ?? COLUMN_BY_ID.get(id)!.min
+  const sorted = new Set(fit.sorted ?? [])
+  const keeps = (id: ColumnId) => { const sort = COLUMN_BY_ID.get(id)?.sort; return (!!sort && sorted.has(sort)) || (id === 'list_cost' && sorted.has('paid')) }
+  const previous = new Set(fit.previous ?? [])
+  const dropped: ColumnId[] = []
+  let shown = ids
+  const leave = (candidates: ColumnId[], k: number) => {
+    dropped.push(...candidates.slice(0, k))
+    shown = shown.filter(id => !dropped.includes(id))
+  }
+  if (automatic) {
+    const designed = (id: ColumnId) => id === 'title' ? TITLE_ROOM : Math.max(automatic(id), min(id))
+    const extras = WIDE_EXTRAS.filter(id => shown.includes(id) && !keeps(id))
+    leave(extras, leaving(extras, shown.reduce((sum, id) => sum + designed(id), fit.reserve ?? 0), designed, tableWidth, previous))
+  }
+  const candidates = GIVE_WAY.filter(id => shown.includes(id) && !keeps(id))
+  leave(candidates, leaving(candidates, shown.reduce((sum, id) => sum + min(id), fit.reserve ?? 0), min, tableWidth, previous))
+  return { ids: shown, dropped }
+}
+
+// The columns to show, in order. `customised` is true when a saved choice applies;
+// `dropped` names chosen columns this width leaves out (Display keeps them ticked).
+export function visibleColumns(tableWidth: number, options: { phone: boolean; present?: Present; prefs?: ListPrefs | null; costAllowed?: boolean; hideParent?: boolean; fit?: ColumnFit }): { columns: ColumnDef<ColumnId>[]; customised: boolean; dropped: ColumnId[] } {
   if (options.phone && !options.prefs?.visible) {
     // Automatic phone cards keep their compact set. Saved choices below apply
     // to cards too; their optional cells grow downward instead of scrolling.
@@ -109,26 +188,23 @@ export function visibleColumns(tableWidth: number, options: { phone: boolean; pr
     if (options.present?.progress) phone.push('progress')
     if (options.present?.eta) phone.push('eta')
     if (options.present?.estimate) phone.push('estimate')
-    return { columns: phone.map(id => COLUMN_BY_ID.get(id)!), customised: false }
+    return { columns: phone.map(id => COLUMN_BY_ID.get(id)!), customised: false, dropped: [] }
   }
   const prefs = options.prefs
   const customised = !!prefs?.visible
   const chosen = customised ? new Set<ColumnId>([...PINNED, ...normalizeColumnIds(prefs!.visible!)]) : new Set(automaticColumns(tableWidth, options.present))
   if (options.costAllowed === false) chosen.delete('list_cost')
-  let ids = orderOf(prefs).filter(id => chosen.has(id))
-  const total = (title: number) => ids.reduce((sum, id) => sum + (id === 'title' ? title : widthOf(id, prefs)), 0)
-  // Columns a wide table adds on its own leave first when Title would get cramped.
-  if (!customised) for (const id of WIDE_EXTRAS) {
-    if (total(TITLE_ROOM) <= tableWidth || tableWidth <= 0) break
-    ids = ids.filter(x => x !== id)
-  }
-  // Whatever does not fit beside a readable title steps aside, least essential first.
-  const title = COLUMN_BY_ID.get('title')!.min
-  if (!customised) for (const id of DROP_ORDER) {
-    if (total(title) <= tableWidth || tableWidth <= 0) break
-    ids = ids.filter(x => x !== id)
-  }
-  return { columns: ids.map(id => COLUMN_BY_ID.get(id)!), customised }
+  // Phones never draw Parent. Grouping by parent and the outline already show
+  // it as the structure, so the column leaves before layout, saved ticks included.
+  // That hide is not a width drop: the other columns stay as they were.
+  if (options.phone || options.hideParent) chosen.delete('parent')
+  const ids = orderOf(prefs).filter(id => chosen.has(id))
+  // Phone cards grow downward; desktop columns give way beside Title, the
+  // automatic wide extras first on wide tables only. Narrower automatic sets
+  // shrink their widths before hiding a column beside Title's minimum.
+  const automatic = !customised && tableWidth >= WIDE_TABLE ? (id: ColumnId) => widthOf(id, prefs) : undefined
+  const fit = options.phone ? { ids, dropped: [] } : giveWay(ids, tableWidth, options.fit, automatic)
+  return { columns: fit.ids.map(id => COLUMN_BY_ID.get(id)!), customised, dropped: fit.dropped }
 }
 
 const sumWidths = (widths: Partial<Record<string, number>>) => Object.values(widths).reduce<number>((sum, w) => sum + (w ?? 0), 0)
@@ -150,10 +226,10 @@ function besideTitle(ids: string[]): string[] {
   return [...after, ...before].filter(id => id !== 'title')
 }
 function sizedWidth(id: string, prefs: ListPrefs | null | undefined, live: Partial<Record<string, number>>): boolean {
-  return live[id] !== undefined || Number.isFinite(prefs?.widths?.[id])
+  return live[id] !== undefined || hasSavedWidth(id, prefs)
 }
-// Move flexible columns by `amount` px, never past min or max. Sized columns stay:
-// a width the person set is not spent to satisfy Title.
+// Move flexible columns by `amount` px, never past min or max, the column beside
+// Title first.
 function shiftColumns(ids: string[], out: Partial<Record<string, number>>, amount: number, dir: 'grow' | 'shrink', flexible: (id: string) => boolean, definitions: ReadonlyMap<string, ColumnDef>) {
   let left = Math.max(0, Math.round(amount))
   for (const id of besideTitle(ids)) {
@@ -164,6 +240,23 @@ function shiftColumns(ids: string[], out: Partial<Record<string, number>>, amoun
     left -= Math.abs(next - current)
     out[id] = next
   }
+}
+
+// Title never goes under its minimum while the columns beside it can give way
+// (AEON-1470): widths nobody set shrink first, the column beside Title first;
+// then saved or dragged widths shrink in proportion to their room above their
+// own minimum. The saved values stay as they are; only this layout narrows them.
+function keepTitleMin(ids: string[], out: Partial<Record<string, number>>, tableWidth: number, sized: (id: string) => boolean, definitions: ReadonlyMap<string, ColumnDef>) {
+  if (!(tableWidth > 0)) return
+  const room = tableWidth - definitions.get('title')!.min
+  if (sumWidths(out) - room > 0.5) shiftColumns(ids, out, sumWidths(out) - room, 'shrink', id => !sized(id), definitions)
+  const over = sumWidths(out) - room
+  if (over <= 0.5) return
+  const slack = ids.filter(id => id !== 'title' && sized(id)).map(id => [id, Math.max(0, out[id]! - definitions.get(id)!.min)] as const)
+  const total = slack.reduce((sum, [, value]) => sum + value, 0)
+  if (total <= 0) return
+  const share = Math.min(1, over / total)
+  for (const [id, value] of slack) out[id] = out[id]! - value * share
 }
 
 // How wide Title can be while every other column stays inside its min and max.
@@ -188,15 +281,14 @@ export function titleRoom(ids: string[], tableWidth: number, prefs?: ListPrefs |
 
 // Widths for every visible column except Title (which takes the rest). Without a
 // saved title width, Title aims for TITLE_TARGET and spare width beyond that widens
-// Epic, Tags, Assignee and Release (not ones the person sized) up to their maximum,
+// Parent, Tags, Assignee and Release (not ones the person sized) up to their maximum,
 // in proportion to their normal width. What is still left goes back to Title.
-// A content fit that would leave Title under its minimum shrinks, nearest column
-// first, and never moves a saved or dragged width.
+// Whatever would leave Title under its minimum gives way in keepTitleMin.
 // A width the person gives Title is kept: the unsized columns beside it grow or
 // shrink, the next column first, and stop at their own min and max.
 export function layoutWidths(ids: string[], tableWidth: number, prefs?: ListPrefs | null, live: Partial<Record<string, number>> = {}, definitions: ReadonlyMap<string, ColumnDef> = COLUMN_BY_ID, automatic: Partial<Record<string, number>> = {}): Partial<Record<string, number>> {
   const out: Partial<Record<string, number>> = {}
-  for (const id of ids) if (id !== 'title') out[id] = live[id] ?? (Number.isFinite(prefs?.widths?.[id]) ? widthOf(id, prefs, definitions) : automatic[id] ?? widthOf(id, prefs, definitions))
+  for (const id of ids) if (id !== 'title') out[id] = live[id] ?? (hasSavedWidth(id, prefs) ? widthOf(id, prefs, definitions) : automatic[id] ?? widthOf(id, prefs, definitions))
   const sized = (id: string) => sizedWidth(id, prefs, live)
   if (sized('title')) {
     const target = live.title ?? widthOf('title', prefs, definitions)
@@ -204,24 +296,28 @@ export function layoutWidths(ids: string[], tableWidth: number, prefs?: ListPref
     const flexible = (id: string) => !sized(id)
     if (spare < -0.5) shiftColumns(ids, out, -spare, 'shrink', flexible, definitions)
     else if (spare > 0.5) shiftColumns(ids, out, spare, 'grow', flexible, definitions)
+    keepTitleMin(ids, out, tableWidth, sized, definitions)
     for (const id of Object.keys(out) as string[]) out[id] = Math.floor(out[id]!)
     return out
   }
-  const titleMin = definitions.get('title')!.min
-  // A content fit replaces the default visibleColumns budgeted beside Title.
-  // On a table that stays at the card width, give an unsized Title its minimum
-  // back from those fits, nearest column first. A saved or dragged width stays,
-  // and a fit that already leaves Title at least its minimum stays steady.
-  if (tableWidth > 0) {
-    const overflow = sumWidths(out) - (tableWidth - titleMin)
-    if (overflow > 0.5) shiftColumns(ids, out, overflow, 'shrink', id => !sized(id) && automatic[id] !== undefined, definitions)
-  }
+  // A content fit replaces the default width budgeted beside Title. A fit that
+  // would leave Title under its minimum gives width back first.
+  keepTitleMin(ids, out, tableWidth, sized, definitions)
   const titleTarget = TITLE_TARGET
   let spare = tableWidth - sumWidths(out) - titleTarget
-  // Loaded-content fits stay at the width just chosen, including a shrink that
-  // keeps Title at its minimum. An explicit Title resize may still move these
-  // unsaved widths, while the person's saved widths remain fixed.
-  const growing = GROWS.filter(id => ids.includes(id) && !sized(id) && automatic[id] === undefined)
+  // Spare beyond the target widens unsized text columns from the width they
+  // already have, including a content fit: a fit is the start, not a ceiling
+  // (AEON-1470). A saved or dragged width stays fixed. What is still left goes
+  // back to Title.
+  const growing = GROWS.filter(id => ids.includes(id) && !sized(id))
+  // Parent's title appears from PARENT_TITLE_WIDTH. Parent takes that step first
+  // when it uses at most half the spare (a 2800px screen at design widths);
+  // otherwise it shares in proportion like the others (a 2560px one).
+  const step = growing.includes('parent') ? PARENT_TITLE_WIDTH - out.parent! : 0
+  if (step > 0 && spare >= 2 * step) {
+    out.parent = PARENT_TITLE_WIDTH
+    spare -= step
+  }
   while (spare >= 1 && growing.length) {
     const weight = growing.reduce((sum, id) => sum + definitions.get(id)!.width, 0)
     let used = 0
@@ -237,6 +333,29 @@ export function layoutWidths(ids: string[], tableWidth: number, prefs?: ListPref
   }
   for (const id of Object.keys(out) as string[]) out[id] = Math.floor(out[id]!)
   return out
+}
+
+// The width the columns lay out in: the card's. Only when even the minimums of
+// the columns that never leave do not fit (a long key, host columns) does a
+// table of at least TITLE_MIN_TABLE px grow past its card and scroll, so Title
+// keeps its minimum. A narrower one, with a docked panel beside it, stays inside
+// its card and Title gives way instead, so the list never slides under the
+// panel (AEON-1470). Phone cards always take the card's width.
+export function layoutTableWidth(cardWidth: number, minimums: number, phone = false): number {
+  return phone || cardWidth < TITLE_MIN_TABLE ? cardWidth : Math.max(cardWidth, minimums)
+}
+
+// At least 30% of the open rows have a direct parent. Exactly 30% is on.
+export function parentColumnDefault(open: number, withParent: number): boolean {
+  if (!(open > 0) || !Number.isFinite(open) || !Number.isFinite(withParent)) return false
+  return withParent * 10 >= open * 3
+}
+// The first complete reading sticks for this load. Missing numbers do not latch,
+// and a later reading never replaces the first (AEON-1470).
+export function latchParentShare(previous: boolean | null, open?: number | null, withParent?: number | null): boolean | null {
+  if (previous !== null) return previous
+  if (typeof open !== 'number' || typeof withParent !== 'number' || !Number.isFinite(open) || !Number.isFinite(withParent)) return null
+  return parentColumnDefault(open, withParent)
 }
 
 // The release label and tags classic imports keep in the ticket's fields.

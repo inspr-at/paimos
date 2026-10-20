@@ -115,7 +115,7 @@ func fillFigureColumns(out *projectFigures, rows []figureRow, costVisible bool, 
 	// Accumulate all values before taking top N. The tail is represented by
 	// Others; missing values have their own count and never enter that tail.
 	counts := map[string]map[string]*figureValue{}
-	for _, name := range []string{"status", "priority", "assignee", "epic", "release", "suggested_release", "tag", "cost_unit", "model", "estimate", "tokens", "eta_ready", "progress", "key", "created_at", "updated_at"} {
+	for _, name := range []string{"status", "priority", "assignee", "epic", "parent", "release", "suggested_release", "tag", "cost_unit", "model", "estimate", "tokens", "eta_ready", "progress", "key", "created_at", "updated_at"} {
 		out.Columns[name] = &columnFigure{}
 		counts[name] = map[string]*figureValue{}
 	}
@@ -187,6 +187,14 @@ func fillFigureColumns(out *projectFigures, rows []figureRow, costVisible bool, 
 		if open && !row.item.UpdatedAt.After(now.AddDate(0, 0, -7)) {
 			staleUpdated++
 		}
+		// Open here is hide-closed's sense: not Cancelled or Archived, parents included.
+		// The direct parent counts only when it exists and is not the project.
+		if row.bucket != "cancelled" && row.bucket != "archived" {
+			out.Scope.OpenRows++
+			if row.parentKind != "" && row.parentKind != "project" {
+				out.Scope.OpenWithParent++
+			}
+		}
 		if !row.leaf {
 			continue
 		}
@@ -242,6 +250,12 @@ func fillFigureColumns(out *projectFigures, rows []figureRow, costVisible bool, 
 		add("priority", figureLabel(row.labels["priority"]), row, nil, nil)
 		add("assignee", row.assignee, row, nil, nil)
 		add("epic", row.ep, row, nil, nil)
+		// Parent is the direct parent the list's Parent column shows; the project itself is no parent.
+		parent := ""
+		if row.parentKind != "project" {
+			parent = row.parentKey
+		}
+		add("parent", parent, row, nil, nil)
 		add("release", figureLabel(row.labels["release"]), row, nil, nil)
 		add("suggested_release", figureLabel(row.labels["suggested_release"]), row, nil, nil)
 		tags, _ := row.labels["tags"].([]any)
@@ -367,7 +381,7 @@ func fillFigureColumns(out *projectFigures, rows []figureRow, costVisible bool, 
 		switch name {
 		case "assignee", "model", "cost_unit":
 			top = 3
-		case "epic", "release", "suggested_release":
+		case "epic", "parent", "release", "suggested_release":
 			top = 2
 		case "tag":
 			top = 5

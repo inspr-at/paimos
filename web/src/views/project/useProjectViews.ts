@@ -3,7 +3,7 @@
 import { computed, ref, shallowRef, watch } from 'vue'
 import { type SavedView } from '../../lib/api'
 import { hideLabel } from '../../lib/hideStates'
-import { PINNED } from '../../lib/columns'
+import { latchParentShare, PINNED } from '../../lib/columns'
 import { copyName, duplicateView, loadViews, removeView, renameView, saveNewView, saveViewState, shareView, viewsOf } from '../../lib/savedViews'
 import { SAVED_VIEW } from '../../lib/viewSwitch'
 import { savedViewId } from '../../lib/ticketListSwitch'
@@ -111,6 +111,17 @@ export function useProjectViews(state: ProjectState, data: ReturnType<typeof use
   const workBarSlots = shallowRef<WorkSlots | null>(null)
   watch(projectId, () => { workBarSlots.value = null })
   watch(wholeFigures, value => { if (value && !workBarSlots.value) workBarSlots.value = workSlots(workHeader(value)) }, { immediate: true })
+  // Parent's automatic column is decided once per project load, from the whole
+  // project's open rows (AEON-1470). A later recount never flips it. A project
+  // change starts again; a payload without the counts does not latch.
+  const parentLatch = shallowRef<{ id: string; share: boolean | null }>({ id: '', share: null })
+  watch(wholeFigures, value => {
+    const id = projectId.value ?? ''
+    const previous = parentLatch.value.id === id ? parentLatch.value.share : null
+    const share = latchParentShare(previous, value?.scope.open_rows, value?.scope.open_with_parent)
+    if (parentLatch.value.id !== id || parentLatch.value.share !== share) parentLatch.value = { id, share }
+  }, { immediate: true })
+  const parentDefault = computed(() => parentLatch.value.id === (projectId.value ?? '') && parentLatch.value.share === true)
   const hideOn = computed(() => ticketsHeader.value && !filters.value.showClosed)
   const workHideLabel = computed(() => hideOn.value ? hideLabel(filters.value.hideStates) : null)
   // Group summaries (AEON-1388): each group's figures from the same function, once the list and the header have painted.
@@ -227,5 +238,5 @@ export function useProjectViews(state: ProjectState, data: ReturnType<typeof use
     } catch (e) { toast(`The view was not deleted: ${problem(e)}`, { tone: 'error' }) }
   }
 
-  return { views, activeView, viewDirty, canSaveView, showViewBar, defaultViewId, hrefFor, openView, figuresBusy, figuresFailed, figuresNarrowed, retryFigures, workHead, workBarSlots, workHideLabel, columnFigures, groupFigures, savePanel, saveBusy, saveError, viewBar, startSave, startRename, closeSave, submitSave, saveActive, duplicate, setDefaultView, share, copyViewLink, remove }
+  return { views, activeView, viewDirty, canSaveView, showViewBar, defaultViewId, hrefFor, openView, figuresBusy, figuresFailed, figuresNarrowed, retryFigures, workHead, workBarSlots, workHideLabel, columnFigures, groupFigures, parentDefault, savePanel, saveBusy, saveError, viewBar, startSave, startRename, closeSave, submitSave, saveActive, duplicate, setDefaultView, share, copyViewLink, remove }
 }

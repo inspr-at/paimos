@@ -68,6 +68,15 @@ test('ticket workers and ETA follow stop, registration, heartbeat and reconnect 
   await hint('harness.heartbeat', 43)
   await expect(row.locator('.eta-cell')).toContainText('~10 min')
   await expect(row.locator('.progress-read')).toHaveAttribute('aria-label', '40% done')
+  // A quiet heartbeat (AEON-1354) is an id-less frame naming no ticket. After
+  // its batch window the list reads the ETA of the rows it shows again.
+  ticket.eta = { has_working_session: true, eta_ready_at: new Date(at + 600_000).toISOString(), progress_pct: 55 }
+  await page.evaluate(() => {
+    const streams = (window as unknown as { aeon514Streams: { readyState: number; dispatchEvent(event: Event): void }[] }).aeon514Streams
+    for (const stream of streams.filter(stream => stream.readyState !== 2)) stream.dispatchEvent(new MessageEvent('harness.heartbeat', { data: '{}' }))
+  })
+  await page.clock.runFor(10_000)
+  await expect(row.locator('.progress-read')).toHaveAttribute('aria-label', '55% done')
 
   // The stop occurred while the connection was away: no stop hint is delivered.
   data.live.splice(0)

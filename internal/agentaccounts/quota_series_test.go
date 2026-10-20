@@ -60,6 +60,11 @@ func TestIdleQuotaProbeHourlyRoundTrip(t *testing.T) {
 	eventsBefore := scalar(t, f.admin, `SELECT count(*) FROM events WHERE type='account.probed'`)
 	first := report(now, 10, 20)
 	post(first, now)
+	// AEON-1354 retains the initial readiness transition, then suppresses ticks.
+	if n := scalar(t, f.admin, `SELECT count(*) FROM events WHERE type='account.probed'`); n != eventsBefore+1 {
+		t.Fatalf("initial readiness transition appended %d events", n-eventsBefore)
+	}
+	eventsBefore++
 	post(first, now) // Idempotent delivery.
 	second := report(now.Add(5*time.Minute), 15, 25)
 	post(second, now.Add(5*time.Minute))

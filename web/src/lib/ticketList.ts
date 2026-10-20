@@ -13,6 +13,7 @@ import { compareModelSort, planningSortValue } from './planning.ts'
 import type { Facets, ListItem, ListQuery, WorkCountBucket } from './api.ts'
 import { normalizeColumnIds, PINNED, type ColumnId } from './columns.ts'
 import { DEFAULT_SORT, PRIORITIES, kindLabel, normaliseState, parseSort, priorityLabel, serializeSort, statusMeta, statusOptions, type SortField, type SortKey } from './work.ts'
+import { statusName } from './statusNames.ts'
 import { workLevel, type WorkVocabulary } from './workVocabulary.ts'
 
 export type Dimension = 'status' | 'priority' | 'assignee' | 'type' | 'tag' | 'epic' | 'cost' | 'release' | 'human_check' | 'shape' | 'depth'
@@ -531,7 +532,7 @@ export function valueLabel(dimension: Dimension, value: string, context: OptionC
   if (value === 'none' && DIMENSION_BY_KEY.get(dimension)!.none) return DIMENSION_BY_KEY.get(dimension)!.none
   switch (dimension) {
     case 'human_check': return value === 'pending' ? 'Waiting for a person' : value === 'mine' ? 'Waiting for you' : 'Not waiting'
-    case 'status': return value === 'queued' ? 'Queued' : statusMeta(value).label
+    case 'status': return value === 'queued' ? statusName('queued') : statusMeta(value).label
     case 'priority': return priorityLabel(value)
     case 'shape': return value === 'parent' ? 'Parents' : 'Leaves'
     case 'depth': return `Level ${value}`

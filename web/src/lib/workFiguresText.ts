@@ -5,6 +5,7 @@
 import type { DisplayLanguage } from './displayLanguage'
 import type { DeliveryLanguage } from './delivery'
 import type { GateId } from './workFigures'
+import { renamedStatus, type StatusNameKey } from './statusNames.ts'
 
 export interface WorkFiguresText {
   wholeProject: string; thisView: string; ofTickets: string; total: string; workByHours: string; about: string
@@ -26,7 +27,7 @@ export interface WorkFiguresText {
     median: string; average: string; withoutEstimate: string; countAsZero: string
     measured: string; estimated: string; ticket: string; tickets: string
     range: string; today: string; medianAge: string; staleCreated: string; medianSinceUpdate: string; staleUpdated: string
-    noEpic: string; noRelease: string; none: string; untagged: string; noCostUnit: string; noModel: string
+    noParent: string; noRelease: string; none: string; untagged: string; noCostUnit: string; noModel: string
   }
 }
 
@@ -54,7 +55,7 @@ const EN: WorkFiguresText = {
     median: 'Median', average: 'Average', withoutEstimate: 'Without estimate', countAsZero: 'count as 0h',
     measured: 'Measured', estimated: 'Estimated', ticket: 'ticket', tickets: 'tickets',
     range: 'Range', today: 'today', medianAge: 'Median age', staleCreated: 'Open, created 14d+ ago', medianSinceUpdate: 'Median since update', staleUpdated: 'Open, untouched 7d+',
-    noEpic: 'No epic', noRelease: 'No release', none: 'None', untagged: 'Untagged', noCostUnit: 'No cost unit', noModel: 'No model',
+    noParent: 'No parent', noRelease: 'No release', none: 'None', untagged: 'Untagged', noCostUnit: 'No cost unit', noModel: 'No model',
   },
 }
 
@@ -82,12 +83,25 @@ const DE: WorkFiguresText = {
     median: 'Median', average: 'Durchschnitt', withoutEstimate: 'Ohne Schätzung', countAsZero: 'zählen als 0h',
     measured: 'Gemessen', estimated: 'Geschätzt', ticket: 'Ticket', tickets: 'Tickets',
     range: 'Zeitraum', today: 'heute', medianAge: 'Medianes Alter', staleCreated: 'Offen, vor 14T+ erstellt', medianSinceUpdate: 'Median seit Änderung', staleUpdated: 'Offen, 7T+ unverändert',
-    noEpic: 'Kein Epic', noRelease: 'Kein Release', none: 'Keine', untagged: 'Ohne Label', noCostUnit: 'Keine Kostenstelle', noModel: 'Kein Modell',
+    noParent: 'Kein Parent', noRelease: 'Kein Release', none: 'Keine', untagged: 'Ohne Label', noCostUnit: 'Keine Kostenstelle', noModel: 'Kein Modell',
   },
 }
 
 export function workFiguresText(language: DisplayLanguage = 'en'): WorkFiguresText {
-  return language === 'de' ? DE : EN
+  const base = language === 'de' ? DE : EN
+  return { ...base, groups: namedGroups(base.groups, language) }
+}
+// The buckets named after a status read as the workspace names it (AEON-1401).
+// Getters, so a text object made once still follows a live rename.
+function namedGroups(groups: WorkFiguresText['groups'], language: DisplayLanguage): WorkFiguresText['groups'] {
+  const named = (key: StatusNameKey) => renamedStatus(key, language)
+  return {
+    get completed() { return groups.completed },
+    get inProgress() { return named('in_progress') || groups.inProgress },
+    get open() { return named('open') || groups.open },
+    get done() { return named('done') || groups.done },
+    get doneNotLive() { const done = named('done'); return done ? `${done}, ${language === 'de' ? 'nicht live' : 'not live'}` : groups.doneNotLive },
+  }
 }
 
 // Fills {name} placeholders; unknown names stay as they are.

@@ -67,9 +67,11 @@ test('the list asks for open work in the project and shows every column', async 
   await expect(rows(page).locator('.c-prio')).toHaveText(['High', 'Medium', 'Low', '—', 'High'])
   await expect(row(page, 'PHAROS-11').locator('.c-assignee')).toHaveText('MBMarkus Barta')
   await expect(row(page, 'PHAROS-14').locator('.c-assignee')).toHaveText('—')
-  await expect(row(page, 'PHAROS-11').locator('.parent-chip')).toContainText('Guarded multi-cloud provisioning')
-  await expect(row(page, 'PHAROS-13').locator('.parent-chip')).toHaveText('PHAROS-12')
-  await expect(row(page, 'PHAROS-14').locator('.parent-chip')).toHaveCount(0)
+  await expect(page.locator('.parent-chip')).toHaveCount(0)
+  await expect(page.getByRole('columnheader', { name: 'Parent', exact: true })).toBeVisible()
+  await expect(row(page, 'PHAROS-11').locator('.c-parent .parent-key')).toHaveText('PHAROS-10')
+  await expect(row(page, 'PHAROS-13').locator('.c-parent .parent-key')).toHaveText('PHAROS-12')
+  await expect(row(page, 'PHAROS-14').locator('.c-parent .parent-cell')).toHaveCount(0)
   await expect(row(page, 'PHAROS-11').locator('time')).toHaveText('1h ago')
   // The count lives in the footer (footer-summary.spec.ts); the toolbar no longer repeats it.
   await expect(page.getByRole('toolbar').getByText('5 tickets')).toHaveCount(0)
@@ -382,7 +384,8 @@ test('the Assignee column appears only when someone in the result is assigned', 
   await page.goto('/p/PHAROS?status=new')
   await expect(rows(page)).toHaveCount(1)
   await expect(page.getByRole('columnheader', { name: 'Assignee' })).toHaveCount(0)
-  await expect(rows(page).first().locator('td')).toHaveCount(5)
+  // Parent stays: the 30% default is the whole project, not this unassigned filter.
+  await expect(rows(page).first().locator('td')).toHaveCount(6)
 })
 
 test('project header shows the project summary counts, cancelled work out of scope', async ({ page }) => {

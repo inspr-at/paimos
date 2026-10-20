@@ -9,6 +9,7 @@ import { KNOWLEDGE_VIEWS, PROJECT_SECTIONS, bareProjectEntry, projectSection, ti
 import { filtersFromView } from '../src/lib/ticketList'
 import { useViewSwitch, viewKey } from '../src/lib/viewSwitch'
 import { savedViewId, useTicketListSwitch } from '../src/lib/ticketListSwitch'
+import { latchParentShare } from '../src/lib/columns'
 import { bindProjectRef } from '../src/views/project/context'
 import { flush } from './record-source'
 
@@ -143,7 +144,7 @@ it('filters keep a separate query for each section and preserve routed ticket id
 
 it('saved views reject a save response after the person changes', async () => {
   const { state, data } = fixture(), pending = Promise.withResolvers<unknown>(), toast = vi.fn()
-  const create = owner('useProjectViews', { viewsOf: () => ({ items: [], loaded: true }), PINNED: [],
+  const create = owner('useProjectViews', { viewsOf: () => ({ items: [], loaded: true }), PINNED: [], latchParentShare,
     useViewFigures: () => ({ figures: ref(null), whole: ref(null), busy: ref(false), failed: ref(false), narrowed: ref(false), retry: vi.fn() }),
     useGroupFigures: () => ({ groupFigures: ref(new Map()) }),
     saveViewState: () => pending.promise, hasFilters, scopeOwner: () => '', toast,
@@ -281,7 +282,7 @@ function opening() {
     if (location.query) state.route.query = location.query
   })
   const create = owner('useProjectViews', {
-    viewsOf: () => ({ items: [], loaded: true }), PINNED: [], bareProjectEntry, loadViews, apiParams: () => ({}),
+    viewsOf: () => ({ items: [], loaded: true }), PINNED: [], latchParentShare, bareProjectEntry, loadViews, apiParams: () => ({}),
     useViewFigures: () => ({ figures: ref(null), whole: ref(null), busy: ref(false), failed: ref(false), narrowed: ref(false), retry: vi.fn() }),
     useGroupFigures: () => ({ groupFigures: ref(new Map()) }),
     hasFilters, scopeOwner: () => '', toast: vi.fn(),

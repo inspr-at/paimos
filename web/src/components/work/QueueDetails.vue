@@ -2,13 +2,14 @@
 <script setup lang="ts">
 import type { QueuedTicket } from '../../lib/workQueue'
 import { absoluteTime } from '../../lib/work'
+import { statusName } from '../../lib/statusNames'
 import AppIcon from '../AppIcon.vue'
 import QueueModel from './QueueModel.vue'
 defineProps<{ entry: QueuedTicket; manual?: boolean }>()
 </script>
 <template>
   <div class="queue-details">
-    <p class="hc-head" :class="{ wait: entry.waiting_reason }"><AppIcon :name="entry.waiting_reason ? 'clock' : 'queue'" :size="14" /><span>{{ entry.waiting_reason ? 'Waiting' : 'Queued' }} · #{{ entry.position }}</span></p>
+    <p class="hc-head" :class="{ wait: entry.waiting_reason }"><AppIcon :name="entry.waiting_reason ? 'clock' : 'queue'" :size="14" /><span>{{ entry.waiting_reason ? 'Waiting' : statusName('queued') }} · #{{ entry.position }}</span></p>
     <p v-if="entry.waiting_reason" class="hc-reason">{{ entry.waiting_reason }}</p>
     <dl class="hc-grid">
       <dt>Queued</dt><dd>by <span :class="{ 'by-agent': entry.by.kind === 'agent' }">{{ entry.by.name }}</span> · {{ absoluteTime(entry.at) }}</dd>
