@@ -6,7 +6,7 @@
   },
   "spec": {
     "file": "tests/agent-rules.spec.ts",
-    "listedTests": 14,
+    "listedTests": 15,
     "tierTiming": {
       "caseSeconds": {
         "max": 3.989,

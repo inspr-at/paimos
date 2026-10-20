@@ -2012,6 +2012,17 @@
     {
       "classification": "metadata",
       "columns": {
+        "tenant_id": "metadata",
+        "db_authoring": "metadata"
+      },
+      "locator": {
+        "tenant_column": "tenant_id"
+      },
+      "table": "rule_budget_settings"
+    },
+    {
+      "classification": "metadata",
+      "columns": {
         "names": "metadata",
         "revision": "metadata",
         "tenant_id": "metadata",

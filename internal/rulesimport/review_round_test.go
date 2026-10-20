@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -399,4 +400,24 @@ func serveDraft(t *testing.T, current *DraftSet, puts *int) *client.Client {
 	}))
 	t.Cleanup(srv.Close)
 	return client.New(srv.URL, "synthetic-test-token")
+}
+
+// Risk: an unchanged import must still refuse when database prose is retired.
+func TestImportApplyRefusesDisabledAuthoring(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "AGENTS.md")
+	if err := os.WriteFile(path, []byte("## Git\n- Keep commits small.\n"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	proposal := mustBuild(t, Request{Context: ContextProject, Files: []string{path}})
+	mapped, err := MapDraft(proposal)
+	if err != nil {
+		t.Fatal(err)
+	}
+	disabled := false
+	current := &DraftSet{DBAuthoring: &disabled, ID: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa", Name: "Imported", Revision: 4, Scope: DraftScope{Layer: LayerProject}, Rules: mapped}
+	puts := 0
+	_, err = ApplyDraft(t.Context(), serveDraft(t, current, &puts), proposal, Target{SetID: current.ID, Revision: current.Revision})
+	if err == nil || !strings.Contains(err.Error(), "rules_db_authoring_disabled") || puts != 0 {
+		t.Fatalf("wrong refusal err=%v writes=%d", err, puts)
+	}
 }

@@ -6916,6 +6916,8 @@
     ,
     {"kind":"browser","file":"tests/agent-rules.spec.ts","name":"axe: agent rules","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
+    {"kind":"browser","file":"tests/agent-rules.spec.ts","name":"database authoring off preserves reads and offers doctrine proposals","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    ,
     {"kind":"browser","file":"tests/agent-rules.spec.ts","name":"layout holds at 1600 and 390 in light and dark","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
     {"kind":"browser","file":"tests/agent-rules.spec.ts","name":"loaded-file comparison shows counts, hides rule text, and fits at 390","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}

@@ -13,8 +13,12 @@ import (
 	"testing"
 
 	"github.com/inspr-at/paimos/internal/dbtest"
+	"github.com/inspr-at/paimos/internal/events"
+	"github.com/inspr-at/paimos/internal/httpapi"
 	"github.com/inspr-at/paimos/internal/rules"
+	"github.com/inspr-at/paimos/internal/rules/doctrine"
 	"github.com/inspr-at/paimos/internal/tenant"
+	"github.com/jackc/pgx/v5"
 )
 
 func TestLearningDraftTenantBeforeAdvisory(t *testing.T) {
@@ -298,4 +302,56 @@ func adminCount(t *testing.T, f fixture, query string) int {
 		t.Fatal(err)
 	}
 	return n
+}
+
+// Risk: the legacy learning action must not write around the shared switch.
+func TestLearningDraftRefusesDisabledAuthoring(t *testing.T) {
+	f := setup(t)
+	h := rulesHandler(f)
+	setFields(t, f, f.ticket, map[string]any{"tags": []any{"process-learning"}})
+	layer := rulesLayer(t, h, f.a, rules.Scope{Layer: "person", OwnerID: f.a.ID})
+	set := rulesSet(t, h, f.a, layer.ID, "Learning draft")
+	dbtest.BindRole(t, f.db, f.a.TenantID, f.a.ID, "admin")
+	rulesCall(t, h, f.a, "PUT", "/api/rules/authoring", map[string]bool{"db_authoring": false}, 200)
+	w := call(t, f, f.a, "POST", "/api/knowledge/learnings/"+nodeLearningID(f.ticket)+"/draft", map[string]any{"layer_id": layer.ID, "set_id": set.ID})
+	expect(t, w, 409)
+	if code := decode[map[string]any](t, w)["code"]; code != rules.DBAuthoringDisabled {
+		t.Fatalf("wrong refusal %v", code)
+	}
+	if got := rulesGet(t, h, f.a, set.ID); len(got.Rules) != 0 {
+		t.Fatal("disabled learning wrote a database rule")
+	}
+}
+
+type recordingLearningDoctrine struct{ input doctrine.InboxInput }
+
+func (d *recordingLearningDoctrine) RecordLearningDraftTx(ctx context.Context, tx pgx.Tx, p tenant.Principal, in doctrine.InboxInput) (string, []events.Change, error) {
+	d.input = in
+	return in.RequestID, []events.Change{{Type: "doctrine.inbox_proposed", After: map[string]string{"proposal_id": in.RequestID}}}, nil
+}
+
+// Risk: a learning proposal must use the reviewed learning, not request prose,
+// and must never guess the repository or write a database rule draft.
+func TestLearningDraftBecomesExplicitDoctrineAddition(t *testing.T) {
+	f := setup(t)
+	h := rulesHandler(f)
+	setFields(t, f, f.ticket, map[string]any{"tags": []any{"process-learning"}})
+	dbtest.BindRole(t, f.db, f.a.TenantID, f.a.ID, "admin")
+	rulesCall(t, h, f.a, "PUT", "/api/rules/authoring", map[string]bool{"db_authoring": false}, 200)
+	recorder := &recordingLearningDoctrine{}
+	f.handler = (&httpapi.Server{Pool: f.db.App, Modules: []httpapi.Module{&module{pool: f.db.App, doctrine: recorder}}}).Handler()
+	id := "15880000-0000-4000-8000-000000000009"
+	w := call(t, f, f.a, "POST", "/api/knowledge/learnings/"+nodeLearningID(f.ticket)+"/draft", map[string]any{"doctrine": map[string]any{"request_id": id, "repository": "configured/private-doctrine", "path": "docs/AGENTS-DOMAIN-LEARNINGS.md", "section": "Learnings"}})
+	expect(t, w, 200)
+	reply := decode[map[string]any](t, w)
+	if reply["decision"] != "proposed" || reply["proposal_id"] != id {
+		t.Fatalf("wrong proposal response %+v", reply)
+	}
+	in := recorder.input
+	if in.Operation != "add" || in.RuleKey != "learn.n."+f.ticket || in.Repository != "configured/private-doctrine" || strings.Contains(in.Source, "Untrusted replacement text") || !strings.Contains(in.Source, "Rotate the fleet keys") {
+		t.Fatalf("wrong learning addition %+v", in)
+	}
+	if adminCount(t, f, `SELECT count(*) FROM nodes WHERE tenant_id=$1 AND rule_resource IS NOT NULL`) != 0 {
+		t.Fatal("proposal wrote a database rule")
+	}
 }

@@ -7,7 +7,9 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"github.com/inspr-at/paimos/internal/rulesimport"
 	"io"
+	"path"
 	"regexp"
 	"strings"
 	"unicode"
@@ -58,6 +60,8 @@ var credentialLeaks = regexp.MustCompile(credentialPattern())
 var digestPattern = regexp.MustCompile(`^[0-9a-f]{64}$`)
 
 type ProposalInput struct {
+	Operation string `json:"operation,omitempty"`
+	Section   string `json:"section,omitempty"`
 	RequestID string `json:"request_id"`
 	SourceID  string `json:"source_id"`
 	Path      string `json:"path"`
@@ -72,7 +76,16 @@ type ProposalInput struct {
 }
 
 func (in ProposalInput) validate() error {
-	if !workorders.UUID(in.RequestID) || strings.ToLower(in.RequestID) != in.RequestID || !workorders.UUID(in.SourceID) || strings.ToLower(in.SourceID) != in.SourceID || !digestPattern.MatchString(in.RuleSHA) || len(in.Path) > 300 || len(in.RuleKey) > 200 || in.RuleKey == "" {
+	if in.Operation != "" && in.Operation != "edit" && in.Operation != "add" {
+		return fail(400, "invalid_request", "operation must be edit or add")
+	}
+	if in.Operation != "add" && in.Section != "" {
+		return fail(400, "invalid_request", "section is only used by add proposals")
+	}
+	if in.Operation == "add" && (in.RuleSHA != "" || !regexp.MustCompile(`^[a-z][a-z0-9._-]{0,95}$`).MatchString(in.RuleKey) || strings.TrimSpace(in.Section) == "" || len(in.Section) > 200 || strings.ContainsAny(in.Section, "\r\n\x00#<>")) {
+		return fail(400, "invalid_request", "An addition needs a new explicit rule key and a section, with no existing rule digest.")
+	}
+	if !workorders.UUID(in.RequestID) || strings.ToLower(in.RequestID) != in.RequestID || !workorders.UUID(in.SourceID) || strings.ToLower(in.SourceID) != in.SourceID || (in.Operation != "add" && !digestPattern.MatchString(in.RuleSHA)) || len(in.Path) > 300 || len(in.RuleKey) > 200 || in.RuleKey == "" {
 		return fail(400, "invalid_request", "Name the source, rule digest and a canonical request UUID.")
 	}
 	if !utf8.ValidString(in.Source+in.Explanation) || strings.ContainsAny(in.Source+in.Explanation, "\x00") || strings.TrimSpace(in.Source) == "" || len(in.Source) > 8000 || strings.TrimSpace(in.Explanation) == "" || len(in.Explanation) > 2000 {
@@ -188,6 +201,9 @@ func (m *Module) editRule(s Source, files []File, in ProposalInput) (map[string]
 
 // editRuleViews is editRule that also returns the rule before and after.
 func (m *Module) editRuleViews(s Source, files []File, in ProposalInput) (map[string]string, RuleView, RuleView, error) {
+	if in.Operation == "add" {
+		return m.addRuleViews(s, files, in)
+	}
 	var target FileView
 	for _, v := range Render(s.Repository, s.Commit, s.Visibility == "private", files) {
 		if v.Path == in.Path {
@@ -288,4 +304,125 @@ func (m *Module) editRuleViews(s Source, files []File, in ProposalInput) (map[st
 		return nil, RuleView{}, RuleView{}, err
 	}
 	return map[string]string{in.Path: content, SidecarPath(in.Path): string(encoded)}, old, next, nil
+}
+
+// addRuleViews uses the same parser, sidecar, guards and publication path as an
+// edit. Existing prose stays byte-for-byte intact; a new file must be selected
+// by this source's configured roots and indexed as a doctrine file.
+func (m *Module) addRuleViews(s Source, files []File, in ProposalInput) (map[string]string, RuleView, RuleView, error) {
+	refuse := func(code, message string) (map[string]string, RuleView, RuleView, error) {
+		return nil, RuleView{}, RuleView{}, fail(409, code, message)
+	}
+	if !m.writableSource(s) {
+		return nil, RuleView{}, RuleView{}, fail(422, "unsupported_repository", "Only the deployment-configured doctrine repositories accept proposals; their visibility must match.")
+	}
+	if path.Clean(in.Path) != in.Path || !strings.HasSuffix(in.Path, ".md") || rulesimport.Prohibited(in.Path) != nil || !rulesimport.Classifies(in.Path) || !selects(s.Paths, in.Path) {
+		return nil, RuleView{}, RuleView{}, fail(422, "unsupported_path", "Add rules only under the source's configured doctrine roots.")
+	}
+	var target FileView
+	var original, side []byte
+	for _, v := range Render(s.Repository, s.Commit, s.Visibility == "private", files) {
+		if v.Path == in.Path {
+			target = v
+		}
+	}
+	for _, f := range files {
+		if f.Path == in.Path {
+			original = f.Content
+		}
+		if f.Path == SidecarPath(in.Path) {
+			side = f.Content
+		}
+	}
+	if target.Problem != "" {
+		return refuse("stale_rule", "Fix the indexed file before adding a rule.")
+	}
+	for _, r := range target.Rules {
+		if r.Key == in.RuleKey {
+			return refuse("rule_exists", "This rule key already exists in the file.")
+		}
+	}
+	addition := strings.TrimRight(strings.ReplaceAll(strings.ReplaceAll(in.Source, "\r\n", "\n"), "\r", "\n"), "\n") + "\n"
+	if !strings.Contains(addition, "<!-- aeon-rule:") {
+		addition = "<!-- aeon-rule: " + in.RuleKey + " -->\n" + addition
+	}
+	ending := "\n"
+	if strings.Contains(string(original), "\r\n") {
+		ending = "\r\n"
+		addition = strings.ReplaceAll(addition, "\n", ending)
+	}
+	content := ""
+	if target.Path == "" {
+		content = "# Rules\n\n## " + in.Section + "\n\n" + addition
+	} else {
+		end := -1
+		for _, r := range target.Rules {
+			if r.Set == in.Section {
+				end = r.EndLine
+			}
+		}
+		if end < 0 {
+			return refuse("stale_rule", "Choose an existing indexed section for the addition.")
+		}
+		lines := rawLines(original)
+		content = strings.Join(lines[:end], "") + ending + addition + ending + strings.Join(lines[end:], "")
+	}
+	if len(content) > rulesimport.MaxFileBytes {
+		return nil, RuleView{}, RuleView{}, fail(400, "invalid_request", "The new file exceeds 256 KiB.")
+	}
+	rendered := Render(s.Repository, s.Commit, s.Visibility == "private", []File{{Path: in.Path, Content: []byte(content)}})
+	if len(rendered) != 1 || rendered[0].Problem != "" || len(rendered[0].Rules) != len(target.Rules)+1 {
+		return nil, RuleView{}, RuleView{}, fail(400, "invalid_request", "Add exactly one rule without changing existing sections.")
+	}
+	var next RuleView
+	previous := map[string]string{}
+	for _, r := range target.Rules {
+		if _, ok := previous[r.Key]; ok {
+			return refuse("ambiguous_rule", "Fix duplicate rule keys in git first.")
+		}
+		previous[r.Key] = r.Source
+	}
+	for _, r := range rendered[0].Rules {
+		if r.Key == in.RuleKey {
+			next = r
+			continue
+		}
+		if old, ok := previous[r.Key]; !ok || old != r.Source {
+			return nil, RuleView{}, RuleView{}, fail(400, "invalid_request", "An addition cannot change another rule.")
+		}
+		delete(previous, r.Key)
+	}
+	if next.Key == "" || len(previous) != 0 || (target.Path != "" && next.Set != in.Section) {
+		return nil, RuleView{}, RuleView{}, fail(400, "invalid_request", "Keep the new rule's explicit marker and target section.")
+	}
+	sc := sidecarFile{}
+	if len(side) > 0 {
+		d := yaml.NewDecoder(bytes.NewReader(side))
+		d.KnownFields(true)
+		var extra any
+		if d.Decode(&sc) != nil || d.Decode(&extra) != io.EOF || target.Sidecar == nil || target.Sidecar.Problem != "" {
+			return refuse("invalid_sidecar", "Fix the existing TL;DR sidecar before adding a rule.")
+		}
+	}
+	if sc.Rules == nil {
+		sc.Rules = map[string]sidecarText{}
+	}
+	if _, ok := sc.Rules[next.Key]; ok {
+		return refuse("ambiguous_rule", "The sidecar already reserves this rule key.")
+	}
+	sc.Rules[next.Key] = sidecarText{EN: strings.TrimSpace(in.TLDR.EN), DE: strings.TrimSpace(in.TLDR.DE), Basis: textBasis(next.Text)}
+	encoded, err := yaml.Marshal(sc)
+	if err != nil {
+		return nil, RuleView{}, RuleView{}, err
+	}
+	if len(encoded) > MaxSidecarBytes {
+		return nil, RuleView{}, RuleView{}, fail(400, "invalid_request", "The TL;DR sidecar exceeds its size limit.")
+	}
+	if err = m.guardPublic(s.Repository, in.RuleKey, in.Path, in.Section, in.Source, in.TLDR.EN, in.TLDR.DE, in.Explanation); err != nil {
+		return nil, RuleView{}, RuleView{}, err
+	}
+	if err = guardCredentials(content, string(encoded), in.Path); err != nil {
+		return nil, RuleView{}, RuleView{}, err
+	}
+	return map[string]string{in.Path: content, SidecarPath(in.Path): string(encoded)}, RuleView{}, next, nil
 }

@@ -126,6 +126,9 @@ func (rt *runtime) rulesTLDRCommand(connect func() (*client.Client, error)) *Com
 			if err != nil {
 				return rt.fail(err, api.Token)
 			}
+			if apply && set.DBAuthoring != nil && !*set.DBAuthoring {
+				return fmt.Errorf("%s: %s", rules.DBAuthoringDisabled, rules.DBAuthoringMessage)
+			}
 			if set.Revision != n {
 				return fmt.Errorf("the draft is at revision %d, not %d; review it and run again with --revision %d", set.Revision, n, set.Revision)
 			}
