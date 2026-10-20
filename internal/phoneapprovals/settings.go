@@ -31,7 +31,7 @@ type item struct {
 	ID           string    `json:"id"`
 	Created      time.Time `json:"created_at"`
 	EndpointHash string    `json:"endpoint_hash,omitempty"`
-	DeskEnabled  bool      `json:"desk_enabled"`
+	DeskEnabled  *bool     `json:"desk_enabled,omitempty"`
 }
 
 func preference(ctx context.Context, tx pgx.Tx, person string) (Preferences, error) {
@@ -58,7 +58,7 @@ func (m *Module) settings(w http.ResponseWriter, r *http.Request) {
 		for _, entry := range []struct {
 			query string
 			dst   *[]item
-		}{{`SELECT id::text,created_at,'',false FROM phone_passkeys WHERE person_id=$1 AND revoked_at IS NULL ORDER BY created_at LIMIT 8`, &keys}, {`SELECT id::text,created_at,endpoint_hash,coalesce(desk_enabled,false) FROM phone_push_subscriptions WHERE person_id=$1 AND revoked_at IS NULL ORDER BY created_at LIMIT 8`, &subs}} {
+		}{{`SELECT id::text,created_at,'',NULL::boolean FROM phone_passkeys WHERE person_id=$1 AND revoked_at IS NULL ORDER BY created_at LIMIT 8`, &keys}, {`SELECT id::text,created_at,endpoint_hash,coalesce(desk_enabled,false) FROM phone_push_subscriptions WHERE person_id=$1 AND revoked_at IS NULL ORDER BY created_at LIMIT 8`, &subs}} {
 			rows, err := tx.Query(r.Context(), entry.query, p.ID)
 			if err != nil {
 				return err
@@ -307,7 +307,7 @@ func (m *Module) subscribe(w http.ResponseWriter, r *http.Request) {
 		if err != nil {
 			return err
 		}
-		return audit(r.Context(), tx, p, "phone_approval.subscribed", map[string]string{"subscription_id": out.ID})
+		return audit(r.Context(), tx, p, "phone_approval.subscribed", map[string]any{"subscription_id": out.ID, "desk_enabled": out.DeskEnabled})
 	})
 	respond(w, out, err)
 }

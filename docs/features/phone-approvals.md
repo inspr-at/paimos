@@ -45,6 +45,10 @@ events remain in the tenant event log under its existing retention policy.
 
 ## Decision Desk browser notices
 
+The server adapter requires `phoneMod.DeskPush = decisiondesk.PushSource{}`
+after constructing the phone module and before starting its worker in
+`cmd/aeon/serve.go`. This assignment keeps the existing dependency graph acyclic.
+
 Desk notices reuse the configured VAPID keypair, encrypted subscription vault,
 push-provider allowlist and service worker. Each browser subscription has an
 independent `desk_enabled` flag, off by default. A phone passkey is not required:

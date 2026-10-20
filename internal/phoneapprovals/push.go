@@ -488,73 +488,67 @@ func (m *Module) dispatchDeskPerson(ctx context.Context, p tenant.Principal) err
 }
 
 func (m *Module) deliverDesk(ctx context.Context, batch deskBatch) error {
-	success := true
-	sent := false
-	summarised := len(batch.items) >= 3
-	for _, d := range batch.devices {
-		var payload []byte
-		valid := false
+	type outcome struct{ sent, failed, summarised bool }
+	results := make([]outcome, len(batch.items))
+	var deliveryErr error
+	for _, device := range batch.devices {
+		var encrypted []byte
+		var payloads [][]byte
+		var indices []int
 		err := db.InTenant(ctx, m.pool, batch.p.TenantID, func(tx pgx.Tx) error {
-			var active bool
-			if err := tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM phone_push_subscriptions s JOIN principals p ON p.tenant_id=s.tenant_id AND p.id=s.person_id WHERE s.id=$1 AND s.person_id=$2 AND s.desk_enabled AND s.revoked_at IS NULL AND p.kind='person' AND p.status='active' AND p.linked_to IS NULL)`, d.subscription, d.person).Scan(&active); err != nil || !active {
+			// Load the current device keys as well as its opt-in: refreshing a browser
+			// subscription between claim and transport must not use stale ciphertext.
+			err := tx.QueryRow(ctx, `SELECT s.subscription FROM phone_push_subscriptions s JOIN principals p ON p.tenant_id=s.tenant_id AND p.id=s.person_id WHERE s.id=$1 AND s.person_id=$2 AND s.desk_enabled AND s.revoked_at IS NULL AND p.kind='person' AND p.status='active' AND p.linked_to IS NULL`, device.subscription, device.person).Scan(&encrypted)
+			if errors.Is(err, pgx.ErrNoRows) {
+				return nil
+			}
+			if err != nil {
 				return err
 			}
-			for _, item := range batch.items {
-				b, ok, err := m.DeskPush.PayloadTx(ctx, tx, batch.p, item.Kind, item.ID, item.Revision)
+			for i, item := range batch.items {
+				payload, ok, err := m.DeskPush.PayloadTx(ctx, tx, batch.p, item.Kind, item.ID, item.Revision)
 				if err != nil {
 					return err
 				}
-				if !ok {
-					return nil
+				if ok {
+					indices = append(indices, i)
+					payloads = append(payloads, payload)
 				}
-				payload = b
 			}
-			valid = true
 			return nil
 		})
 		if err != nil {
-			success = false
-			continue
-		}
-		if !valid {
-			continue
-		}
-		b, err := open(m.vault, d.encrypted, subscriptionAAD(d.tenant, d.person))
-		if err != nil {
-			success = false
-			continue
-		}
-		var sub webpush.Subscription
-		if json.Unmarshal(b, &sub) != nil || !validSubscription(sub) {
-			success = false
-			continue
-		}
-		payloads := [][]byte{payload}
-		if summarised {
-			payload, _ = json.Marshal(map[string]string{"title": fmt.Sprintf("%d decisions waiting", len(batch.items)), "body": "Open Decision Desk to review.", "tag": "desk-summary", "url": "/decision-desk"})
-			payloads = [][]byte{payload}
-		} else {
-			// Two items still get one notification apiece, on every opted-in device.
-			payloads = nil
-			err = db.InTenant(ctx, m.pool, batch.p.TenantID, func(tx pgx.Tx) error {
-				for _, item := range batch.items {
-					b, ok, err := m.DeskPush.PayloadTx(ctx, tx, batch.p, item.Kind, item.ID, item.Revision)
-					if err != nil {
-						return err
-					}
-					if !ok {
-						return errors.New("desk source changed")
-					}
-					payloads = append(payloads, b)
-				}
-				return nil
-			})
-			if err != nil {
-				success = false
-				continue
+			deliveryErr = errors.Join(deliveryErr, err)
+			for i := range results {
+				results[i].failed = true
 			}
+			continue
 		}
-		for _, payload := range payloads {
+		if len(indices) == 0 {
+			continue
+		}
+		raw, err := open(m.vault, encrypted, subscriptionAAD(device.tenant, device.person))
+		var sub webpush.Subscription
+		if err == nil {
+			err = json.Unmarshal(raw, &sub)
+		}
+		if err != nil || !validSubscription(sub) {
+			deliveryErr = errors.Join(deliveryErr, errors.New("desk push subscription unavailable"))
+			for _, i := range indices {
+				results[i].failed = true
+			}
+			continue
+		}
+		summary := len(indices) >= 3
+		if summary {
+			payload, _ := json.Marshal(map[string]string{"title": fmt.Sprintf("%d decisions waiting", len(indices)), "body": "Open Decision Desk to review.", "tag": "desk-summary", "url": "/decision-desk"})
+			payloads = [][]byte{payload}
+		}
+		for n, payload := range payloads {
+			affected := indices
+			if !summary {
+				affected = indices[n : n+1]
+			}
 			sendCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
 			response, sendErr := m.send(sendCtx, payload, &sub, m.vapid)
 			status := 0
@@ -566,40 +560,62 @@ func (m *Module) deliverDesk(ctx context.Context, batch deskBatch) error {
 				}
 			}
 			cancel()
-			if sendErr != nil || status < 200 || status >= 300 {
-				success = false
-			} else {
-				sent = true
+			success := sendErr == nil && status >= 200 && status < 300
+			if !success {
+				deliveryErr = errors.Join(deliveryErr, fmt.Errorf("desk push delivery failed (HTTP %d)", status))
+			}
+			for j, i := range affected {
+				if success {
+					results[i].sent = true
+					if summary && j > 0 {
+						results[i].summarised = true
+					}
+				} else {
+					results[i].failed = true
+				}
 			}
 			if status == http.StatusGone || status == http.StatusNotFound {
-				if err = db.InTenant(ctx, m.pool, batch.p.TenantID, func(tx pgx.Tx) error { return revokeExpiredSubscription(ctx, tx, batch.p, d.subscription) }); err != nil {
-					return err
+				// A dead device cannot receive any remaining item in this batch.
+				for _, i := range indices {
+					results[i].failed = true
+				}
+				if err = db.InTenant(ctx, m.pool, batch.p.TenantID, func(tx pgx.Tx) error { return revokeExpiredSubscription(ctx, tx, batch.p, device.subscription) }); err != nil {
+					deliveryErr = errors.Join(deliveryErr, err)
 				}
 				break
 			}
 		}
 	}
-	return db.InTenant(ctx, m.pool, batch.p.TenantID, func(tx pgx.Tx) error {
+	err := db.InTenant(ctx, m.pool, batch.p.TenantID, func(tx pgx.Tx) error {
+		sent, failed, summaries := 0, 0, 0
 		for i, item := range batch.items {
 			state := "skipped"
-			if !success {
+			if results[i].failed {
 				state = "failed"
-			} else if sent {
+				failed++
+			} else if results[i].sent {
 				state = "sent"
-				if summarised && i > 0 {
+				if results[i].summarised {
 					state = "summarised"
 				}
+			}
+			if results[i].sent {
+				sent++
+			}
+			if results[i].summarised {
+				summaries++
 			}
 			if err := m.DeskPush.FinishTx(ctx, tx, batch.p, item.Kind, item.ID, item.Revision, state); err != nil {
 				return err
 			}
 		}
-		// Claim/source locks are finished before taking the event counter.
-		if sent && success {
-			return audit(ctx, tx, batch.p, "decision_desk.notified", map[string]any{"count": len(batch.items), "summary": summarised})
+		// All claim writes precede the event counter. Partial delivery is explicit.
+		if sent > 0 {
+			return audit(ctx, tx, batch.p, "decision_desk.notified", map[string]any{"count": sent, "failed_count": failed, "summary": summaries > 0})
 		}
 		return nil
 	})
+	return errors.Join(deliveryErr, err)
 }
 
 // Dispatch runs one bounded recovery scan using the same durable claims as Run.

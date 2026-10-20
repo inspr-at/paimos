@@ -192,6 +192,32 @@ func TestHeldRequestCanonicalizationDoesNotRepeatNotice(t *testing.T) {
 	if before.Items[0].Title != "Human request · "+projectKey {
 		t.Fatalf("held request label lost project: %q", before.Items[0].Title)
 	}
+	// A second person can manage this source, but a browser notice still
+	// belongs only to the held message's actual recipient.
+	err := db.InTenant(db.AllProjects(t.Context(), "held browser recipient fixture"), f.d.App, f.person.TenantID, func(tx pgx.Tx) error {
+		allowed, err := CurrentTx(t.Context(), tx, f.reader, before.Items[0])
+		if err != nil {
+			return err
+		}
+		if !allowed {
+			t.Fatal("other-person control lacks decision authority")
+		}
+		_, own, err := BrowserCurrentTx(t.Context(), tx, f.person, before.Items[0])
+		if err != nil {
+			return err
+		}
+		_, other, err := BrowserCurrentTx(t.Context(), tx, f.reader, before.Items[0])
+		if err != nil {
+			return err
+		}
+		if !own || other {
+			t.Fatalf("held recipient routing: own=%t other=%t", own, other)
+		}
+		return nil
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
 	if won, err := f.claim(t, f.person, before.Items[0]); err != nil || !won {
 		t.Fatal("initial held notice missing", err)
 	}
@@ -279,6 +305,19 @@ func TestDeskPayloadBoundsFirstLine(t *testing.T) {
 	}
 	if len(fields) != 4 || fields["body"] != strings.Repeat("<", 240)+" · "+strings.Repeat("界", 26) {
 		t.Fatalf("wrong bounded body: %q", fields["body"])
+	}
+	for _, separator := range []string{"\r", "\n", "\u0085", "\u2028", "\u2029"} {
+		item.Title = "Visible" + separator + "private second line"
+		b, err = Payload(item, "P")
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err = json.Unmarshal(b, &fields); err != nil {
+			t.Fatal(err)
+		}
+		if fields["body"] != "Visible · P" {
+			t.Fatalf("second line escaped: %q", fields["body"])
+		}
 	}
 }
 
@@ -386,9 +425,19 @@ func TestDeskPushRecipientsBurstAndGone(t *testing.T) {
 			q := f.deskQuestion(t, project, ticket, "First question line\nprivate second line")
 			now := q.CreatedAt.Add(59 * time.Second)
 			f.m.WithDeskClock(func() time.Time { return now })
+			expectFailure := false
 			dispatch := func() {
 				t.Helper()
-				if err := f.m.Dispatch(t.Context()); err != nil {
+				err := f.m.Dispatch(t.Context())
+				if expectFailure {
+					code := "410"
+					if scenario == "failed" {
+						code = "503"
+					}
+					if err == nil || !strings.Contains(err.Error(), "desk push delivery failed (HTTP "+code+")") {
+						t.Fatalf("wrong transport failure: %v", err)
+					}
+				} else if err != nil {
 					t.Fatal(err)
 				}
 			}
@@ -398,9 +447,9 @@ func TestDeskPushRecipientsBurstAndGone(t *testing.T) {
 			}
 			count := 1
 			if scenario == "burst" {
-				f.deskQuestion(t, project, ticket, "Second question")
+				f.deskQuestion(t, project, ticket, "Second question", q.CreatedAt.Add(10*time.Second))
 				dispatch()
-				f.deskQuestion(t, project, ticket, "Third question")
+				f.deskQuestion(t, project, ticket, "Third question", q.CreatedAt.Add(20*time.Second))
 				dispatch()
 				if len(pushes) != 0 {
 					t.Fatal("separate event scans escaped burst buffering")
@@ -408,7 +457,9 @@ func TestDeskPushRecipientsBurstAndGone(t *testing.T) {
 				count = 3
 			}
 			now = q.CreatedAt.Add(61 * time.Second)
+			expectFailure = scenario == "gone" || scenario == "failed"
 			dispatch()
+			expectFailure = false
 			if len(pushes) != 2 {
 				t.Fatalf("got %d pushes, want one per opted-in device", len(pushes))
 			}
@@ -497,7 +548,7 @@ func (f *deskPushFixture) deskProject(t *testing.T) (string, string) {
 	return project, ticket
 }
 
-func (f *deskPushFixture) deskQuestion(t *testing.T, project, ticket, line string) questions.Question {
+func (f *deskPushFixture) deskQuestion(t *testing.T, project, ticket, line string, at ...time.Time) questions.Question {
 	t.Helper()
 	var request string
 	if err := f.db.Admin.QueryRow(t.Context(), `SELECT gen_random_uuid()::text`).Scan(&request); err != nil {
@@ -509,6 +560,20 @@ func (f *deskPushFixture) deskQuestion(t *testing.T, project, ticket, line strin
 	var q questions.Question
 	if err := json.Unmarshal(response.Body.Bytes(), &q); err != nil {
 		t.Fatal(err)
+	}
+	if len(at) > 0 {
+		// All burst timestamps derive from the first source's database clock.
+		err := db.InTenant(dbtest.Seed(t.Context()), f.db.App, f.p.TenantID, func(tx pgx.Tx) error {
+			if _, err := tx.Exec(t.Context(), `SELECT set_config('aeon.desk_write','on',true)`); err != nil {
+				return err
+			}
+			_, err := tx.Exec(t.Context(), `UPDATE desk_questions SET created_at=$2 WHERE node_id=$1`, q.ID, at[0])
+			return err
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		q.CreatedAt = at[0]
 	}
 	return q
 }

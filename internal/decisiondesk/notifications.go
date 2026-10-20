@@ -259,8 +259,10 @@ func Payload(item Item, projectKey string) ([]byte, error) {
 		return nil, errors.New("invalid desk pointer")
 	}
 	prefix := map[string]string{"question": "q:", "approval": "a:", "action_request": "m:"}[item.Kind]
-	line, _, _ := strings.Cut(item.Title, "\n")
-	line, _, _ = strings.Cut(line, "\r")
+	line := item.Title
+	if end := strings.IndexFunc(line, func(r rune) bool { return r == '\n' || r == '\r' || r == '\u0085' || r == '\u2028' || r == '\u2029' }); end >= 0 {
+		line = line[:end]
+	}
 	// Truncate bytes at UTF-8 boundaries; JSON escaping also has a hard bound.
 	bounded := func(s string, n int) string {
 		var b strings.Builder

@@ -34,7 +34,7 @@ test('push exposes no request context or approval actions and never caches respo
 test('malformed and foreign notification paths remain on the same origin', async () => {
   for (const url of ['https://attacker.example/approve', '//attacker.example', `/phone-approvals/approval/${id}?approve=true`, `/phone-approvals/stepup/${id}?approve=true`, '/api/approvals/decision', '/phone-approvals/approval/invalid', 'https://attacker.example/decision-desk?item=' + id, '/decision-desk?item=invalid', '/decision-desk?item=q:' + id + '&approve=true']) {
     let pending: Promise<unknown> | undefined
-  const w = worker()
+    const w = worker()
     w.handlers.get('push')!({ data: { json: () => ({ url }) }, waitUntil: () => {} })
     assert.equal((w.notices[0].options.data as { path: string }).path, '/agents')
     w.handlers.get('notificationclick')!({ notification: { data: { path: url }, close: () => {} }, waitUntil: (p: Promise<unknown>) => { pending = p } })
@@ -46,6 +46,10 @@ test('malformed and foreign notification paths remain on the same origin', async
 // Risk: Desk deep links expose unrelated fields or open another tab instead of
 // focusing the existing authenticated app. Phone routes retain their own copy.
 test('Desk push accepts bounded copy and focuses an existing PAIMOS tab', async () => {
+  const foreign = worker()
+  foreign.handlers.get('push')!({ data: { json: () => ({ url: `https://attacker.example/decision-desk?item=q:${id}`, title: 'PAIMOS · Decision waiting', body: 'private foreign copy' }) }, waitUntil: () => {} })
+  assert.equal((foreign.notices[0].options.data as { path: string }).path, '/agents')
+  assert.equal(JSON.stringify(foreign.notices).includes('private foreign copy'), false)
   for (const prefix of ['', 'q:', 'a:', 'm:']) {
     const path = `/decision-desk?item=${prefix}${id}`
     const navigated: string[] = []
@@ -68,4 +72,8 @@ test('Desk push accepts bounded copy and focuses an existing PAIMOS tab', async 
   assert.equal(w.notices[0].title, '3 decisions waiting')
   assert.equal((w.notices[0].options.body as string).length, 400)
   assert.equal(w.notices[0].options.tag, 'desk-summary')
+  let pending: Promise<unknown> | undefined
+  w.handlers.get('notificationclick')!({ notification: { data: w.notices[0].options.data, close: () => {} }, waitUntil: (p: Promise<unknown>) => { pending = p } })
+  await pending
+  assert.deepEqual(w.opened, ['https://aeon.example/decision-desk'])
 })

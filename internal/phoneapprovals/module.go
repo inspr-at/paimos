@@ -42,9 +42,9 @@ import (
 // source identities cross this boundary; private content is read at delivery.
 type DeskPushSource interface {
 	NoticesTx(context.Context, pgx.Tx, tenant.Principal, func(kind, id string, revision int64, created time.Time)) error
-	ClaimTx(context.Context, pgx.Tx, tenant.Principal, string, string, int64) (bool, error)
-	PayloadTx(context.Context, pgx.Tx, tenant.Principal, string, string, int64) ([]byte, bool, error)
-	FinishTx(context.Context, pgx.Tx, tenant.Principal, string, string, int64, string) error
+	ClaimTx(ctx context.Context, tx pgx.Tx, p tenant.Principal, kind, id string, revision int64) (bool, error)
+	PayloadTx(ctx context.Context, tx pgx.Tx, p tenant.Principal, kind, id string, revision int64) ([]byte, bool, error)
+	FinishTx(ctx context.Context, tx pgx.Tx, p tenant.Principal, kind, id string, revision int64, state string) error
 }
 
 type Module struct {
