@@ -245,8 +245,9 @@ func load(ctx context.Context, tx pgx.Tx, id string, lock bool) (Run, error) {
 var ErrActingPersonBinding = errors.New("acting person binding refused")
 
 // SetActingPersonTx is the write-once seam for server admission writers. The
-// caller owns the transaction, holds its tenant/access fence and has rechecked
-// current launch authority before calling, before appending any events. This
+// caller owns the transaction, holds tenant/tree and work-order fences in
+// admission lock order, and has rechecked launch authority with RequireTx in
+// this transaction before calling, before appending any events. This
 // helper grants no admission authority and is not exposed as an API operation.
 func SetActingPersonTx(ctx context.Context, tx pgx.Tx, tenantID, runID, personID string) error {
 	var current *string

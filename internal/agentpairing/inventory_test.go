@@ -65,6 +65,26 @@ func TestComputerInventoryReportsEvidenceWithoutAssigningOwner(t *testing.T) {
 	keys(computer, "computer_id", "computer_name", "state", "owner", "approved_by", "workstation_owners", "enrollments", "enrollments_truncated")
 	keys(computer["workstation_owners"].([]any)[0], "person_id", "created_by_principal_id")
 	keys(computer["enrollments"].([]any)[0], "account_id", "state", "owner_person_id", "approved_by")
+	second := f.propose("codex")
+	f.approve(second, "connect_only")
+	f.redeem(second)
+	seen := map[string]bool{}
+	pagePath := path + "?limit=1"
+	for {
+		var page agentpairing.ComputerInventory
+		decodeResult(t, f.call("GET", pagePath, nil, true, "", 200), &page)
+		if len(page.Computers) != 1 || seen[page.Computers[0].ComputerID] {
+			t.Fatal("inventory page repeated or omitted a computer")
+		}
+		seen[page.Computers[0].ComputerID] = true
+		if page.NextCursor == nil {
+			break
+		}
+		pagePath = path + "?limit=1&cursor=" + *page.NextCursor
+	}
+	if len(seen) != 2 {
+		t.Fatal("inventory pagination silently truncated computers")
+	}
 	for _, query := range []string{"?limit=0", "?limit=101", "?cursor=invalid"} {
 		f.call("GET", path+query, nil, true, "", 400)
 	}
