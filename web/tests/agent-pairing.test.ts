@@ -219,21 +219,17 @@ test('verification stays on the server terms and is selected by default', () => 
   const terms = view().verification!
   assert.equal(verificationWarning(terms), null)
   const until = formatAllowanceMoment(terms.expires_at, now)
-  const text = pairingCopy('en', 'PAIMOS').limits(terms, until).join('\n')
-  assert.match(text, /1 request per harness/)
-  assert.match(text, /1 run at a time/)
-  assert.match(text, /60 seconds max/)
-  assert.doesNotMatch(text, /1 requests/)
-  assert.doesNotMatch(text, /One at a time/)
-  assert.equal(text.includes('2026-09-27T20:30:00'), false)
-  assert.match(text, new RegExp(until.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')))
-  assert.match(text, /Read-only/)
-  assert.match(text, /No repository changes or privileged actions/)
-  assert.match(text, /separate from the vendor subscription/)
+  const line = (language: 'en' | 'de', seconds: number, moment: string) => language === 'de'
+    ? [`Nur lesend · 1 Anfrage pro Harness · 1 Lauf gleichzeitig · max. ${seconds} Sekunden · bis ${moment}`, 'Keine Änderungen am Repository und keine privilegierten Aktionen', 'PAIMOS-Kontingent, getrennt vom Anbieter-Abo']
+    : [`Read-only · 1 request per harness · 1 run at a time · ${seconds} seconds max · until ${moment}`, 'No repository changes or privileged actions', 'PAIMOS allowance, separate from the vendor subscription']
+  const rendered = pairingCopy('en', 'PAIMOS').limits(terms, until)
+  assert.deepEqual(rendered, line('en', 60, until))
+  assert.deepEqual(pairingCopy('de', 'PAIMOS').limits(terms, until), line('de', 60, until))
+  assert.equal(rendered.join('\n').includes('2026-09-27T20:30:00'), false)
   const mocked = { ...terms, max_duration_seconds: 900, expires_at: '2026-09-27T19:15:00Z' }
-  const mockedText = pairingCopy('en', 'PAIMOS').limits(mocked, formatAllowanceMoment(mocked.expires_at, now)).join('\n')
-  assert.match(mockedText, /900 seconds max/)
-  assert.doesNotMatch(mockedText, /60 seconds/)
+  const mockedUntil = formatAllowanceMoment(mocked.expires_at, now)
+  assert.deepEqual(pairingCopy('en', 'PAIMOS').limits(mocked, mockedUntil), line('en', 900, mockedUntil))
+  assert.deepEqual(pairingCopy('de', 'PAIMOS').limits(mocked, mockedUntil), line('de', 900, mockedUntil))
   assert.ok(verificationWarning(mocked))
 })
 
