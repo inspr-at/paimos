@@ -31,6 +31,8 @@ CREATE TABLE native_session_drain_grants (
     maximum_bytes bigint,
     PRIMARY KEY (tenant_id,grant_id)
 );
+CREATE UNIQUE INDEX native_session_drain_context ON native_session_drain_grants
+    (tenant_id,owned_session_id,retention_grant_id,conversation_id,role_id);
 ALTER TABLE native_session_operations ENABLE ROW LEVEL SECURITY;
 ALTER TABLE native_session_operations FORCE ROW LEVEL SECURITY;
 CREATE POLICY native_session_operations_tenant ON native_session_operations

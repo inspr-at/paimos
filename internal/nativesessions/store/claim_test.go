@@ -19,6 +19,7 @@ import (
 
 	"github.com/inspr-at/paimos/internal/agentaccounts"
 	"github.com/inspr-at/paimos/internal/agentpairing"
+	"github.com/inspr-at/paimos/internal/approvals"
 	"github.com/inspr-at/paimos/internal/auth"
 	"github.com/inspr-at/paimos/internal/authz"
 	"github.com/inspr-at/paimos/internal/db"
@@ -28,46 +29,15 @@ import (
 	"github.com/inspr-at/paimos/internal/nativeadmission"
 	"github.com/inspr-at/paimos/internal/nativecontract"
 	"github.com/inspr-at/paimos/internal/nativeintegration"
+	"github.com/inspr-at/paimos/internal/nativesessions/consent"
 	"github.com/inspr-at/paimos/internal/tenant"
 	"github.com/jackc/pgx/v5"
 )
 
-// This fake native-grant registry is deliberately separate from role/key
-// grants. Both adapters read its CURRENT state in the supplied transaction.
-type pairedGrantAuthority struct{ Authorization }
-
-func (a pairedGrantAuthority) AuthorizeTx(ctx context.Context, tx pgx.Tx, actor nativecontract.Actor, project string, intent nativecontract.StartIntent) (Authorization, error) {
-	var revision int64
-	var revoked bool
-	err := tx.QueryRow(ctx, `SELECT revision,revoked FROM fixture_native_grants
- WHERE tenant_id=$1 AND id=$2 AND actor_id=$3`, actor.TenantID, a.Policy.GrantID, actor.PrincipalID).Scan(&revision, &revoked)
-	if err != nil {
-		return Authorization{}, err
-	}
-	if revoked {
-		return Authorization{}, fail(403, nativecontract.ReasonPermissionRevoked)
-	}
-	if revision != a.Policy.GrantRevision || actor.GrantID != "" && (actor.GrantID != a.Policy.GrantID || actor.GrantRevision != revision) ||
-		project != a.ProjectID || intent.ModelProfileID != a.Launch.ModelProfileID {
-		return Authorization{}, fail(403, nativecontract.ReasonIdentityMismatch)
-	}
-	return a.Authorization, nil
-}
-
-func (a pairedGrantAuthority) RequireNativeGrantTx(ctx context.Context, tx pgx.Tx, actor nativecontract.Actor, intent nativecontract.StartIntent, pinned nativecontract.Policy) error {
-	current, err := a.AuthorizeTx(ctx, tx, actor, a.ProjectID, intent)
-	if err != nil {
-		return err
-	}
-	if actor.OwnerPersonID != current.OwnerPersonID || !samePolicy(current.Policy, pinned) {
-		return fail(403, nativecontract.ReasonIdentityMismatch)
-	}
-	return nil
-}
-
-func newPairedStartFixture(t *testing.T) (*startFixture, pairedGrantAuthority) {
+func newPairedStartFixture(t *testing.T) (*startFixture, consent.Authority) {
 	t.Helper()
 	f := newStartFixture(t)
+	proposer := f.agent
 	mux := http.NewServeMux()
 	agentpairing.New(f.d.App, "https://native.test", "").Mount(mux)
 	agentaccounts.New(f.d.App).Mount(mux)
@@ -153,17 +123,36 @@ func newPairedStartFixture(t *testing.T) (*startFixture, pairedGrantAuthority) {
  ON CONFLICT DO NOTHING`, f.intent.AccountID)
 		return err
 	})
-	a := pairedGrantAuthority{f.s.authority.(fixedAuthority).authorization}
+	a := consent.Authority{Capabilities: f.s.authority.(fixedAuthority).authorization.Capabilities, Now: func() time.Time { return f.now }}
+	secret := strings.Repeat("p", 64)
+	hash := sha256.Sum256([]byte(secret))
 	f.seed(t, func(tx pgx.Tx) error {
-		if _, err := tx.Exec(t.Context(), `CREATE TABLE fixture_native_grants(tenant_id uuid,id uuid,actor_id uuid,revision bigint,revoked boolean);
- ALTER TABLE fixture_native_grants ENABLE ROW LEVEL SECURITY;
- ALTER TABLE fixture_native_grants FORCE ROW LEVEL SECURITY;
- CREATE POLICY fixture_native_grants_tenant ON fixture_native_grants USING(tenant_id=NULLIF(current_setting('aeon.tenant_id',true),'')::uuid)`); err != nil {
-			return err
-		}
-		_, err := tx.Exec(t.Context(), `INSERT INTO fixture_native_grants VALUES($1,$2,$3,$4,false)`, f.person.TenantID, a.Policy.GrantID, f.person.ID, a.Policy.GrantRevision)
-		return err
+		return tx.QueryRow(t.Context(), `INSERT INTO agent_keys(tenant_id,principal_id,name,prefix,hash,scopes,created_by_principal_id) VALUES($1,$2,'native proposal','nativeproposal',$3,$4,$5) RETURNING id::text`, f.person.TenantID, proposer.ID, hex.EncodeToString(hash[:]), proposer.Scopes, f.person.ID).Scan(&proposer.KeyID)
 	})
+	proposer.AuthKeyID = proposer.KeyID
+	approvals.New(f.d.App).Mount(mux)
+	facts := consent.Facts{ComputerID: f.intent.ComputerID, AccountID: f.intent.AccountID, WorkspaceID: f.intent.WorkspaceID, WorkspaceRoot: "/fixture/native", ModelProfileID: f.intent.ModelProfileID, ToolSet: []string{}, SettingsProfile: consent.SettingsProfile, LocalHistory: "vendor_native", Revision: 1, MaximumRuntimeSeconds: 3600, MaximumTurns: 100, MaximumTokens: 10000}
+	proposalRaw, _ := json.Marshal(map[string]any{"scope": consent.SessionScope, "resource_kind": "node", "resource_id": f.project, "rationale": "Native coordinator with explicit local history", "expires_at": f.now.Add(time.Hour), "native_consent": facts})
+	r := httptest.NewRequest("POST", "/api/approvals", bytes.NewReader(proposalRaw)).WithContext(tenant.WithPrincipal(t.Context(), proposer))
+	r.Header.Set("Content-Type", "application/json")
+	r.Header.Set("Authorization", "Bearer aeon_nativeproposal_"+secret)
+	w := httptest.NewRecorder()
+	mux.ServeHTTP(w, r)
+	if w.Code != http.StatusCreated {
+		t.Fatalf("native approval proposal: %d %s", w.Code, w.Body.String())
+	}
+	var proposed approvals.Approval
+	if err := json.Unmarshal(w.Body.Bytes(), &proposed); err != nil {
+		t.Fatal(err)
+	}
+	r = httptest.NewRequest("POST", "/api/approvals/"+proposed.ID+"/decision", strings.NewReader(`{"decision":"approved"}`)).WithContext(f.personCtx(t))
+	r.Header.Set("Content-Type", "application/json")
+	w = httptest.NewRecorder()
+	mux.ServeHTTP(w, r)
+	if w.Code != http.StatusOK {
+		t.Fatalf("native person decision: %d %s", w.Code, w.Body.String())
+	}
+	f.intent.PolicyID = proposed.ID
 	f.s.authority = a
 	return f, a
 }
@@ -328,7 +317,7 @@ func TestPairedNativeStartAndRevalidationKeepSeparateAuthorities(t *testing.T) {
 					_, err := tx.Exec(ctx, `UPDATE role_bindings SET role_id=$2 WHERE principal_id=$1`, f.person.ID, role)
 					return err
 				case "native_grant":
-					_, err := tx.Exec(ctx, `UPDATE fixture_native_grants SET revoked=true WHERE tenant_id=$1 AND id=$2`, f.person.TenantID, authority.Policy.GrantID)
+					_, err := tx.Exec(ctx, `UPDATE agent_permission_grants SET revoked_at=clock_timestamp() WHERE tenant_id=$1 AND approval_request_id=$2`, f.person.TenantID, f.intent.PolicyID)
 					return err
 				case "pairing":
 					_, err := tx.Exec(ctx, `UPDATE agent_pairing_enrollments SET state='revoked' WHERE account_id=$1`, f.intent.AccountID)
@@ -378,5 +367,5 @@ func TestPairedNativeStartAndRevalidationKeepSeparateAuthorities(t *testing.T) {
 	}
 }
 
-var _ Authority = pairedGrantAuthority{}
-var _ agentaccounts.NativeSessionAuthority = pairedGrantAuthority{}
+var _ Authority = consent.Authority{}
+var _ agentaccounts.NativeSessionAuthority = consent.Authority{}

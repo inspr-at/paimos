@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/inspr-at/paimos/internal/nativecontract"
+	"github.com/inspr-at/paimos/internal/nativesessions/consent"
 	"github.com/inspr-at/paimos/internal/tenant"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -24,14 +25,9 @@ type Authority interface {
 	AuthorizeTx(context.Context, pgx.Tx, nativecontract.Actor, string, nativecontract.StartIntent) (Authorization, error)
 }
 
-type Authorization struct {
-	ProjectID, OwnerPersonID string
-	PersonInvoked            bool
-	Policy                   nativecontract.Policy
-	Launch                   nativecontract.LaunchConfig
-	Capabilities             nativecontract.Capabilities
-	RunID                    *string // existing leaf run; always nil for a coordinator
-}
+type Authorization = consent.Authorization
+
+var _ Authority = consent.Authority{}
 
 // PendingStart is content-free local preflight context. Identifiers grant no
 // authority. Observer pins the owner-only local ledger reservation and fresh

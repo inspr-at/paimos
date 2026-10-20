@@ -12,7 +12,6 @@ import (
 
 	"github.com/inspr-at/paimos/internal/modelprefs"
 	"github.com/inspr-at/paimos/internal/nativecontract"
-	"github.com/inspr-at/paimos/internal/nativesessions/store"
 	"github.com/jackc/pgx/v5"
 )
 
@@ -29,6 +28,17 @@ type Current struct {
 	GrantID, OwnerPersonID, AgentPrincipalID, ProjectID string
 	Policy                                              nativecontract.Policy
 	IssuedAt                                            time.Time
+}
+
+// Authorization is the native start authority result. Store aliases this
+// value so the consent source does not depend on its transport/persistence.
+type Authorization struct {
+	ProjectID, OwnerPersonID string
+	PersonInvoked            bool
+	Policy                   nativecontract.Policy
+	Launch                   nativecontract.LaunchConfig
+	Capabilities             nativecontract.Capabilities
+	RunID                    *string
 }
 
 func refuse(reason nativecontract.Reason) error {
@@ -128,19 +138,19 @@ func (a Authority) CurrentTx(ctx context.Context, tx pgx.Tx, actor nativecontrac
 	return out, nil
 }
 
-func (a Authority) AuthorizeTx(ctx context.Context, tx pgx.Tx, actor nativecontract.Actor, project string, intent nativecontract.StartIntent) (store.Authorization, error) {
+func (a Authority) AuthorizeTx(ctx context.Context, tx pgx.Tx, actor nativecontract.Actor, project string, intent nativecontract.StartIntent) (Authorization, error) {
 	c, err := a.CurrentTx(ctx, tx, actor, intent, project, SessionScope)
 	if err != nil {
-		return store.Authorization{}, err
+		return Authorization{}, err
 	}
 	var launch nativecontract.LaunchConfig
 	var effort string
 	if err = tx.QueryRow(ctx, `SELECT model,effort FROM model_profiles WHERE tenant_id=$1 AND id=$2 AND enabled AND harness=$3`, actor.TenantID, intent.ModelProfileID, intent.Harness).Scan(&launch.Model, &effort); err != nil {
-		return store.Authorization{}, err
+		return Authorization{}, err
 	}
 	launch.ModelProfileID, launch.Effort, launch.ServiceTier = intent.ModelProfileID, &effort, "default"
 	launch.ToolPolicyDigest, launch.SettingsPolicyDigest = c.Policy.ToolPolicyDigest, c.Policy.SettingsPolicyDigest
-	return store.Authorization{ProjectID: c.ProjectID, OwnerPersonID: c.OwnerPersonID, PersonInvoked: actor.PrincipalKind == "person", Policy: c.Policy, Launch: launch, Capabilities: a.Capabilities}, nil
+	return Authorization{ProjectID: c.ProjectID, OwnerPersonID: c.OwnerPersonID, PersonInvoked: actor.PrincipalKind == "person", Policy: c.Policy, Launch: launch, Capabilities: a.Capabilities}, nil
 }
 
 func (a Authority) RequireNativeGrantTx(ctx context.Context, tx pgx.Tx, actor nativecontract.Actor, intent nativecontract.StartIntent, pinned nativecontract.Policy) error {
@@ -180,5 +190,3 @@ func (a Authority) RequireRetentionTx(ctx context.Context, tx pgx.Tx, actor nati
 	}
 	return c, nil
 }
-
-var _ store.Authority = Authority{}

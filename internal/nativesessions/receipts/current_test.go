@@ -43,7 +43,7 @@ func TestProductionReceiptAuthorityRechecksConsentAndExactEvidence(t *testing.T)
 		}{
 			{`INSERT INTO principals(tenant_id,id,kind,name) VALUES($1,$2,'agent','native proposer')`, []any{tid, proposer}},
 			{`INSERT INTO model_profiles(tenant_id,id,slug,version,harness,family,model,effort,tier) VALUES($1,$2,'receipt-native','1','claude','anthropic','fixture-model','high','strong')`, []any{tid, profile}},
-			{`INSERT INTO agent_pairing_requests(tenant_id,id,user_code,device_hash,runtime_hash,lifecycle_hash,details,request_digest,state,approved_by) VALUES($1,$2,'receipt-native',$3,$3,$3,'{}','receipt-native','redeemed',$4)`, []any{tid, request, strings.Repeat("a", 64), f.owner.ID}},
+			{`INSERT INTO agent_pairing_requests(tenant_id,id,user_code,device_hash,runtime_hash,lifecycle_hash,details,request_digest,state,approved_by) VALUES($1,$2,'246813579',$3,$3,$3,'{}','receipt-native','redeemed',$4)`, []any{tid, request, strings.Repeat("a", 64), f.owner.ID}},
 			{`INSERT INTO agent_keys(tenant_id,principal_id,name,prefix,hash,scopes,created_by_principal_id) VALUES($1,$2,'native worker','native_worker',$3,$4,$5) RETURNING id::text`, []any{tid, f.agent.ID, strings.Repeat("b", 64), f.agent.Scopes, f.owner.ID}},
 		} {
 			if strings.Contains(q.sql, "RETURNING") {
@@ -193,8 +193,10 @@ func TestProductionReceiptAuthorityRechecksConsentAndExactEvidence(t *testing.T)
 		t.Fatalf("production final: %+v %v", stored, err)
 	}
 	call(f.owner, "/api/approvals/"+retention+"/revoke", nil)
-	_, err = f.repo.Persist(finalCtx, f.actor, f.final)
-	if err == nil {
-		t.Fatal("withdrawn retention survived final retry")
+	withheld := f.final
+	withheld.FinalID = uuid.NewString()
+	rejected, err := f.repo.Persist(finalCtx, f.actor, withheld)
+	if err != nil || rejected.State != "rejected" || rejected.Reason == nil || *rejected.Reason != nativecontract.ReasonPermissionRevoked {
+		t.Fatalf("withdrawn retention did not refuse final drain: %+v %v", rejected, err)
 	}
 }

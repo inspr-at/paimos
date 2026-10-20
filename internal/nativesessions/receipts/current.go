@@ -54,6 +54,14 @@ var _ Authority = CurrentAuthority{}
 
 func currentFailure(reason nativecontract.Reason) error { return nativereceipts.Fail(reason) }
 
+func currentError(err error) error {
+	var refusal *nativecontract.ValidationError
+	if errors.As(err, &refusal) {
+		return currentFailure(refusal.Reason)
+	}
+	return err
+}
+
 func (a CurrentAuthority) pairedTx(ctx context.Context, tx pgx.Tx, daemon nativecontract.DaemonActor, b nativecontract.Binding, session consent.Session, draining bool) (tenant.Principal, RuntimeProof, error) {
 	p, ok := tenant.PrincipalFrom(ctx)
 	proof, hasProof := ctx.Value(runtimeProofKey{}).(RuntimeProof)
@@ -101,7 +109,7 @@ func (a CurrentAuthority) ReceiptTx(ctx context.Context, tx pgx.Tx, daemon nativ
 	b := *in.Binding
 	s, err := a.Consent.SessionTx(ctx, tx, b)
 	if err != nil {
-		return out, err
+		return out, currentError(err)
 	}
 	_, proof, err := a.pairedTx(ctx, tx, daemon, b, s, in.State == "exit_confirmed")
 	if err != nil {
@@ -156,7 +164,7 @@ func (a CurrentAuthority) ReadTx(ctx context.Context, tx pgx.Tx, actor nativecon
 	}
 	s, err := a.Consent.SessionTx(ctx, tx, b)
 	if err != nil {
-		return err
+		return currentError(err)
 	}
 	if p.Kind != tenant.Person || p.ID != s.Original.ID {
 		return currentFailure(nativecontract.ReasonPermissionRevoked)
@@ -169,7 +177,7 @@ func (a CurrentAuthority) FinalTx(ctx context.Context, tx pgx.Tx, daemon nativec
 	b := in.ExpectedBinding
 	s, err := a.Consent.SessionTx(ctx, tx, b)
 	if err != nil {
-		return out, err
+		return out, currentError(err)
 	}
 	out.Sender, _, err = a.pairedTx(ctx, tx, daemon, b, s, true)
 	if err != nil {
@@ -193,7 +201,7 @@ func (a CurrentAuthority) FinalTx(ctx context.Context, tx pgx.Tx, daemon nativec
 		return out, currentFailure(nativecontract.ReasonPermissionRevoked)
 	}
 	if _, err = a.Consent.RequireRetentionTx(ctx, tx, s.Actor, s.Intent, s.Current, retention); err != nil {
-		return out, err
+		return out, currentError(err)
 	}
 	out.Grant.GrantID, out.Grant.ConversationRef = in.DrainGrantID, out.ConversationRef
 	out.CurrentBinding = b
@@ -210,9 +218,16 @@ func (a CurrentAuthority) RegisterOperationTx(ctx context.Context, tx pgx.Tx, in
 		in.Receipt.State != "accepted" || in.Receipt.SourceSequence != "0" || in.Receipt.Reason != nil {
 		return currentFailure(nativecontract.ReasonInvalidInput)
 	}
-	s, err := a.Consent.SessionTx(ctx, tx, *in.Receipt.Binding)
+	v, err := nativecontract.NewValidator()
 	if err != nil {
 		return err
+	}
+	if err = nativereceipts.Validate(v, "NativeReceipt", in.Receipt); err != nil {
+		return err
+	}
+	s, err := a.Consent.SessionTx(ctx, tx, *in.Receipt.Binding)
+	if err != nil {
+		return currentError(err)
 	}
 	p, ok := tenant.PrincipalFrom(ctx)
 	if !ok || p.Kind != tenant.Person || p.TenantID != s.Original.TenantID || p.ID != s.Original.ID || in.ActorID != p.ID ||
@@ -221,6 +236,9 @@ func (a CurrentAuthority) RegisterOperationTx(ctx context.Context, tx pgx.Tx, in
 	}
 	if in.Receipt.Operation != "input" && in.Receipt.Operation != "interrupt" && in.Receipt.Operation != "stop" {
 		return currentFailure(nativecontract.ReasonUnsupported)
+	}
+	if in.Receipt.Operation == "input" && in.Receipt.InputID == nil || !nativereceipts.ValidDigest(in.ProcessIdentityDigest) {
+		return currentFailure(nativecontract.ReasonInvalidInput)
 	}
 	if len(in.Reports) != 0 || in.ReportOffset != 0 || in.ReportAttempts != 0 {
 		return currentFailure(nativecontract.ReasonInvalidInput)
@@ -231,6 +249,13 @@ func (a CurrentAuthority) RegisterOperationTx(ctx context.Context, tx pgx.Tx, in
 		return err
 	}
 	if len(raw) > 16384 {
+		return currentFailure(nativecontract.ReasonBufferFull)
+	}
+	var count int
+	if err = tx.QueryRow(ctx, `SELECT count(*) FROM (SELECT 1 FROM native_session_operations WHERE tenant_id=$1 AND owned_session_id=$2 AND operation_id<>$3 LIMIT 513) x`, p.TenantID, in.Receipt.Binding.OwnedSessionID, in.Receipt.OperationID).Scan(&count); err != nil {
+		return err
+	}
+	if count >= nativereceipts.MaxReceipts {
 		return currentFailure(nativecontract.ReasonBufferFull)
 	}
 	_, err = tx.Exec(ctx, `INSERT INTO native_session_operations(tenant_id,operation_id,owned_session_id,project_id,owner_person_id,intent,created_at) VALUES($1,$2,$3,$4,$5,$6,clock_timestamp()) ON CONFLICT DO NOTHING`, p.TenantID, in.Receipt.OperationID, in.Receipt.Binding.OwnedSessionID, in.Receipt.Binding.ProjectID, s.OwnerPersonID, raw)
@@ -258,7 +283,7 @@ func (a CurrentAuthority) IssueDrainTx(ctx context.Context, tx pgx.Tx, b nativec
 	var out nativecontract.FinalDrainGrant
 	s, err := a.Consent.SessionTx(ctx, tx, b)
 	if err != nil {
-		return out, err
+		return out, currentError(err)
 	}
 	var now time.Time
 	if a.Consent.Now != nil {
@@ -272,7 +297,7 @@ func (a CurrentAuthority) IssueDrainTx(ctx context.Context, tx pgx.Tx, b nativec
 	}
 	retention, err := a.Consent.RequireRetentionTx(ctx, tx, s.Actor, s.Intent, s.Current, retentionID)
 	if err != nil {
-		return out, err
+		return out, currentError(err)
 	}
 	var exact bool
 	err = tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM chat_session_contexts c JOIN chat_threads t ON t.tenant_id=c.tenant_id AND t.role_id=c.role_id AND t.project_id=c.project_id AND t.person_id=c.owner_person_id WHERE c.tenant_id=$1 AND c.session_id=$2 AND c.owner_person_id=$3 AND c.project_id=$4 AND t.id=$5 AND c.role_id=$6 AND t.archived_at IS NULL)`, b.TenantID, b.HarnessSessionID, s.OwnerPersonID, b.ProjectID, conversation, role).Scan(&exact)
@@ -290,6 +315,17 @@ func (a CurrentAuthority) IssueDrainTx(ctx context.Context, tx pgx.Tx, b nativec
 	}
 	if !now.Before(expiry) {
 		return out, currentFailure(nativecontract.ReasonPublicationGrantExpired)
+	}
+	var prior []byte
+	err = tx.QueryRow(ctx, `SELECT grant_id::text,binding,conversation_ref,expires_at,maximum_finals,maximum_bytes FROM native_session_drain_grants WHERE tenant_id=$1 AND owned_session_id=$2 AND retention_grant_id=$3 AND conversation_id=$4 AND role_id=$5`, b.TenantID, b.OwnedSessionID, retentionID, conversation, role).Scan(&out.GrantID, &prior, &out.ConversationRef, &out.ExpiresAt, &out.MaximumFinals, &out.MaximumBytes)
+	if err == nil {
+		if len(prior) > 4096 || json.Unmarshal(prior, &out.Binding) != nil || !out.Binding.Equal(b) || !now.Before(out.ExpiresAt) {
+			return nativecontract.FinalDrainGrant{}, currentFailure(nativecontract.ReasonPublicationGrantExpired)
+		}
+		return out, nil
+	}
+	if !errors.Is(err, pgx.ErrNoRows) {
+		return out, err
 	}
 	out = nativecontract.FinalDrainGrant{GrantID: uuid.NewString(), Binding: b, ConversationRef: s.View.ConversationRef, ExpiresAt: expiry, MaximumFinals: nativereceipts.MaxFinals, MaximumBytes: nativereceipts.MaxFinalBytes}
 	raw, _ := json.Marshal(b)
