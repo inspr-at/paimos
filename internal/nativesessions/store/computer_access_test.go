@@ -36,8 +36,8 @@ func TestComputerStartNativeClaimRechecksAfterObservation(t *testing.T) {
 				}{
 					{`INSERT INTO principals(tenant_id,id,kind,name) VALUES($1,$2,'person','Run person')`, []any{f.person.TenantID, person}},
 					{`INSERT INTO role_bindings(tenant_id,principal_id,role_id,scope_type,computer_id) SELECT $1,$2,id,'computer',$3 FROM roles WHERE key='admin'`, []any{f.person.TenantID, person, f.intent.ComputerID}},
-					{`INSERT INTO nodes(tenant_id,id,key,kind_id,title,parent_id) SELECT $1,$2,'NS-COMP-1',id,'Computer work',$3 FROM node_kinds WHERE slug='work'`, []any{f.person.TenantID, leaf, f.project}},
-					{`INSERT INTO nodes(tenant_id,id,key,kind_id,title,parent_id) SELECT $1,$2,'NS-COMP-2',id,'Computer order',$3 FROM node_kinds WHERE slug='work_order'`, []any{f.person.TenantID, order, leaf}},
+					{`INSERT INTO nodes(tenant_id,id,key,kind_id,title,parent_id) SELECT $1,$2,'NS-2',id,'Computer work',$3 FROM node_kinds WHERE slug='work'`, []any{f.person.TenantID, leaf, f.project}},
+					{`INSERT INTO nodes(tenant_id,id,key,kind_id,title,parent_id) SELECT $1,$2,'NS-3',id,'Computer order',$3 FROM node_kinds WHERE slug='work_order'`, []any{f.person.TenantID, order, leaf}},
 					{`INSERT INTO work_orders(tenant_id,node_id,requested_by_principal_id,status) VALUES($1,$2,$3,'ready')`, []any{f.person.TenantID, order, f.person.ID}},
 					{`INSERT INTO agent_runs(tenant_id,id,work_order_id,agent_principal_id,model_profile_id,account_id) VALUES($1,$2,$3,$4,$5,$6)`, []any{f.person.TenantID, run, order, f.agent.ID, f.intent.ModelProfileID, f.intent.AccountID}},
 					{`INSERT INTO harness_sessions(tenant_id,id,project_id,agent_principal_id,harness,host,management,role,ref_digest,lease_digest,owner_principal_id) VALUES($1,$2,$3,$4,'claude','local','unmanaged','coordinator',$5,$6,$7)`, []any{f.person.TenantID, parent, f.project, f.agent.ID, ref[:], lease[:], f.person.ID}},
