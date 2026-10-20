@@ -1,13 +1,13 @@
 {
   "group": "remaining-ui",
   "nightlyTiming": {
-    "seconds": 30,
+    "seconds": 35,
     "selectedTests": 1
   },
   "spec": {
     "file": "tests/aeon-1460-phone-ticket-list.spec.ts",
     "listedTests": 1,
-    "weightSeconds": 30,
-    "weightSource": "remote-one-worker-AEON-1460-28.3s-plus-margin"
+    "weightSeconds": 35,
+    "weightSource": "remote-one-worker-AEON-1460-serial-runtime-plus-margin"
   }
 }
