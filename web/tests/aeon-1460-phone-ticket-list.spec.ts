@@ -240,6 +240,12 @@ test('AEON-1460 compact ticket list keeps controls still and all actions reachab
           await expect(page.locator('#row-n-1')).toBeVisible()
         }
         }
+        if (size.width === 390 && theme === 'dark') {
+          await more.click(); await page.getByRole('menuitemcheckbox', { name: 'Hide done', exact: true }).click()
+          await expect(page.locator('#row-n-5')).toBeAttached()
+          await shot('T7')
+          await more.click(); await page.getByRole('menuitemcheckbox', { name: 'Hide done', exact: true }).click()
+        }
         // A non-structural live change: sort stays Key and the ticket remains open.
         await main.evaluate(el => { el.scrollTop = 0 })
         const row = page.locator('#row-n-1'), before = await box(row)
