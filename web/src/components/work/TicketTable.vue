@@ -1971,7 +1971,7 @@ button.release-chip:focus-visible { box-shadow: var(--focus-ring); }
 }
 .phone-rows .ticket-row td { display: block !important; min-width: 0; height: auto; padding: 0 !important; border: 0; background: none !important; box-shadow: none !important; }
 .phone-rows .ticket-row td::before { display: none !important; }
-.phone-rows .ticket-row .phone-state { position: relative; grid-area: state; align-self: start; padding-top: 2px !important; }
+.phone-rows .ticket-row .phone-state { position: relative; grid-area: state; align-self: start; height: 18px; padding-top: 2px !important; }
 .phone-rows .ticket-row .phone-title { grid-area: title; contain: inline-size; overflow: visible; }
 .phone-title-link { display: block; min-width: 0; color: var(--ink); font-size: 14.5px; line-height: 20px; }
 .phone-title-text { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
@@ -1985,6 +1985,10 @@ button.release-chip:focus-visible { box-shadow: var(--focus-ring); }
 .phone-rows .phone-check, .phone-fold { position: absolute; display: grid; place-items: center; left: -13px; top: -4px; width: 44px; height: 44px; padding: 0; border: 0; background: transparent; color: var(--ink-2); }
 .phone-fold[aria-expanded="true"] svg { transform: rotate(90deg); }
 .phone-rows .ticket-row.dimmed :is(.phone-title-link, .phone-meta, .phone-owner, .phone-state) { opacity: .5; }
+.phone-rows .ghost td { display: none !important; }
+.phone-rows .ghost td.c-title { display: block !important; grid-area: title; }
+.phone-rows .ghost td.c-key { display: block !important; grid-area: meta; }
+.phone-rows .ghost .cell { height: 16px; }
 @media (min-width: 720px) and (max-height: 500px) {
   .table-card.phone-rows .tickets .ticket-row {
     grid-template-columns: 18px max-content minmax(0, 1fr) 44px 12ch; grid-template-rows: 43px;
@@ -1995,7 +1999,8 @@ button.release-chip:focus-visible { box-shadow: var(--focus-ring); }
   .phone-meta .key { grid-area: key; font-size: 12px; }
   .phone-meta .phone-separator { display: none; }
   .phone-meta time { grid-area: when; min-width: 0; overflow: hidden; text-overflow: ellipsis; font-size: 12px; text-align: right; }
-  .phone-rows .phone-check, .phone-fold { top: -14px; }
+  .phone-rows .phone-check, .phone-fold { top: -13px; }
+  .phone-rows .ghost td.c-key { grid-area: key; }
   .phone-rows .list-foot.end.phone-only { display: none; }
 }
 .ticket-row.fit-row { position: absolute; visibility: hidden; pointer-events: none; inline-size: max-content; }
