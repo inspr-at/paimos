@@ -156,7 +156,7 @@ test('assembly Dockerfile only copies prebuilt production artifacts into the fro
   assert.match(runtime, /\/etc\/aeon-chromium-apk/);
   assert.doesNotMatch(runtime, /apk add[^\n]*\bchromium(?!=)/);
   const pins = parseRuntimeApkPins(runtime);
-  assert.deepEqual(pins, { chromium: ['155.0.8059.39-r0', '152.0.7977.82-r0'], tini: '0.19.0-r3' });
+  assert.deepEqual(pins, { chromium: ['155.0.8059.84-r0', '155.0.8059.39-r0', '152.0.7977.82-r0'], tini: '0.19.0-r3' });
 });
 
 test('AEON-1450 runtime APK allow-list rejects empty, floating, duplicate and oldest-first pins', () => {
