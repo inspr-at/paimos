@@ -566,6 +566,37 @@ func (f *startRunExitFixture) continuation(repository RoutineRepository) *owned 
 	return prior
 }
 
+func (f *startRunExitFixture) fixContinuation(repository RoutineRepository, findings bool) {
+	f.t.Helper()
+	g, err := routineGrant(f.run)
+	if err != nil {
+		f.t.Fatal(err)
+	}
+	g.Lineage = &agentsetup.RoutineLineage{Role: "fix", PreviousRunID: f.run.RetryOfRunID, ReviewOrderID: g.LaunchID,
+		Repository: "example/routine", BaseSHA: strings.Repeat("a", 40), HeadSHA: repository.BaseCommit, PolicyDigest: strings.Repeat("a", 64)}
+	f.grant(*g)
+	if findings {
+		var trace map[string]json.RawMessage
+		if err := json.Unmarshal(f.run.Trace, &trace); err != nil {
+			f.t.Fatal(err)
+		}
+		trace["routine_fix_findings"] = json.RawMessage(`[{"file":"fixture.go","message":"fixture finding"}]`)
+		f.run.Trace, err = json.Marshal(trace)
+		if err != nil {
+			f.t.Fatal(err)
+		}
+	}
+	f.budget()
+}
+
+func TestStartRunFixFindingsExit(t *testing.T) {
+	f, repository := newStartRunRoutineExitFixture(t)
+	f.continuation(repository)
+	f.fixContinuation(repository, false)
+	f.api.server = f.run
+	f.assert(f.s.StartRun(f.ctx, f.run), startRunExitWant{err: ErrRoutineUnavailable, resources: 1, checkouts: 1})
+}
+
 // Risk: a continuation can lose its stopped-process/checkout proof while
 // registration is in flight. Preserve the current refusal and leaked owners.
 func TestStartRunContinuationExits(t *testing.T) {
@@ -575,19 +606,23 @@ func TestStartRunContinuationExits(t *testing.T) {
 		message string
 	}{
 		{"prior_exit_proof_changed", func(_ *startRunExitFixture, prior *owned) { prior.record.ExitObserved = false }, ErrProcessesUnconfirmed.Error()},
-		{"retained_checkout_identity_changed", func(_ *startRunExitFixture, prior *owned) { prior.record.RoutineWorkspace.ID = strings.Repeat("a", 64) }, ErrProcessesUnconfirmed.Error()},
-		{"capacity_handoff_revalidation", func(_ *startRunExitFixture, prior *owned) { prior.record.State = "completed" }, ErrProcessesUnconfirmed.Error()},
+		{"retained_checkout_identity_changed", func(f *startRunExitFixture, _ *owned) {
+			f.s.runs[f.run.ID].record.RoutineWorkspace.ID = strings.Repeat("a", 64)
+		}, ErrProcessesUnconfirmed.Error()},
+		{"capacity_handoff_revalidation", func(_ *startRunExitFixture, prior *owned) { prior.record.State = "completed" }, "capacity handoff waits for the original workspace, branch and stopped process"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			f, repository := newStartRunRoutineExitFixture(t)
 			prior := f.continuation(repository)
-			f.tools("fixture-local-capability")
+			if tc.name == "capacity_handoff_revalidation" {
+				f.fixContinuation(repository, true)
+			}
 			f.api.onTier = func() { tc.mutate(f, prior) }
 			f.api.server = f.run
 			err := f.s.StartRun(f.ctx, f.run)
 			// AEON-1419 s2: single cleanup owner.
 			f.assert(err, startRunExitWant{message: tc.message, routes: 1, claims: 1, reports: 1, registrations: 1,
-				state: "failed", launch: launchPrepared, resources: 1, checkouts: 1, chat: "closed", tools: "open"})
+				state: "failed", launch: launchPrepared, resources: 1, checkouts: 1, chat: "closed"})
 		})
 	}
 }
@@ -617,6 +652,9 @@ func TestStartRunLaunchHandoff(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			f := newStartRunExitFixture(t)
 			f.s.heartbeatInterval = time.Hour
+			ctx, cancel := context.WithTimeout(f.ctx, 10*time.Second)
+			defer cancel()
+			f.ctx = ctx
 			f.tools("fixture-local-capability")
 			finish := make(chan struct{})
 			var once sync.Once

@@ -2134,6 +2134,8 @@
     ,
     {"kind":"go","package":"internal/agentd","name":"TestStartRunExits","tier":"ESSENTIAL"}
     ,
+    {"kind":"go","package":"internal/agentd","name":"TestStartRunFixFindingsExit","tier":"ESSENTIAL"}
+    ,
     {"kind":"go","package":"internal/agentd","name":"TestStartRunLaunchHandoff","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/agentd","name":"TestStartRunRoutineExits","tier":"ESSENTIAL"}
