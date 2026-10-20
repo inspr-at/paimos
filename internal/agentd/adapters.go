@@ -119,7 +119,7 @@ type CodexAdapter struct {
 }
 
 func NewCodexAdapter(path string, homes map[string]string) *CodexAdapter {
-	return &CodexAdapter{Path: path, Homes: homes}
+	return &CodexAdapter{Path: path, Homes: homes, idleUsage: loadCodexCapacityPin(productionCapacityPins())}
 }
 func (a *CodexAdapter) SetExpectedEmails(emails map[string]string) { a.Emails = emails }
 func (*CodexAdapter) Name() string                                 { return Codex }

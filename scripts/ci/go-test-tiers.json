@@ -1392,6 +1392,8 @@
     ,
     {"kind":"go","package":"internal/agentd","name":"TestCapacityOutboxReplacesMissingBuckets","tier":"GATED-FULL"}
     ,
+    {"kind":"go","package":"internal/agentd","name":"TestCapacityPinsRejectUnqualifiedExecutables","tier":"ESSENTIAL"}
+    ,
     {"kind":"go","package":"internal/agentd","name":"TestCaptureDoesNotHoldDispatchBudget","tier":"GATED-FULL"}
     ,
     {"kind":"go","package":"internal/agentd","name":"TestCatalogCaptureLoopDoesNotHoldDispatchOrHealthPolling","tier":"ESSENTIAL"}
@@ -1530,7 +1532,7 @@
     ,
     {"kind":"go","package":"internal/agentd","name":"TestCodexIdleTimeoutCompletesCleanly","tier":"GATED-FULL"}
     ,
-    {"kind":"go","package":"internal/agentd","name":"TestCodexIdleUsesPinnedNodeAndOnlyFourMethods","tier":"GATED-FULL"}
+    {"kind":"go","package":"internal/agentd","name":"TestCodexIdleUsesPinnedNativeAndOnlyFourMethods","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/agentd","name":"TestCodexLaunchReceivesExactRulesAndProjectDocAllowance","tier":"GATED-FULL"}
     ,
@@ -1720,7 +1722,7 @@
     ,
     {"kind":"go","package":"internal/agentd","name":"TestIdleChildDelayedCleanupNeverSignalsReleasedIdentity","tier":"GATED-FULL"}
     ,
-    {"kind":"go","package":"internal/agentd","name":"TestIdleCodexCaptureUsesPinnedInterpreter","tier":"GATED-FULL"}
+    {"kind":"go","package":"internal/agentd","name":"TestIdleCodexCaptureUsesSeparatePinnedExecutable","tier":"GATED-FULL"}
     ,
     {"kind":"go","package":"internal/agentd","name":"TestIdleInboxHeartbeatLatency","tier":"GATED-FULL"}
     ,
@@ -1939,6 +1941,8 @@
     {"kind":"go","package":"internal/agentd","name":"TestProbeStatusRejectsDuplicateKeys","tier":"GATED-FULL"}
     ,
     {"kind":"go","package":"internal/agentd","name":"TestProbeStatusSeparatesSignOutFromUnavailable","tier":"GATED-FULL"}
+    ,
+    {"kind":"go","package":"internal/agentd","name":"TestProductionCapacityPinsKeepUnsupportedResults","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/agentd","name":"TestQuotaFingerprintStableSeparatedAndPrivate","tier":"GATED-FULL"}
     ,
