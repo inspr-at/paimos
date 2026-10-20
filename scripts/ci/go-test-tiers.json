@@ -1532,7 +1532,7 @@
     ,
     {"kind":"go","package":"internal/agentd","name":"TestCodexIdleTimeoutCompletesCleanly","tier":"GATED-FULL"}
     ,
-    {"kind":"go","package":"internal/agentd","name":"TestCodexIdleUsesPinnedNativeAndOnlyFourMethods","tier":"GATED-FULL"}
+    {"kind":"go","package":"internal/agentd","name":"TestCodexIdleUsesPinnedNativeAndOnlyFourMethods","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/agentd","name":"TestCodexLaunchReceivesExactRulesAndProjectDocAllowance","tier":"GATED-FULL"}
     ,

@@ -77,7 +77,8 @@ func assertNativeCapacityLaunch(t *testing.T, home, path string) {
 		t.Fatal(err)
 	}
 	wantArgs := []string{path, "app-server", "--listen", "stdio://"}
-	wantEnv := capacityEnvironment("CODEX_HOME", home, path)
+	wantEnv := []string{"HOME=" + home, "CODEX_HOME=" + home,
+		"PATH=" + filepath.Dir(path) + string(filepath.ListSeparator) + "/usr/bin:/bin", "LANG=C", "LC_ALL=C"}
 	sort.Strings(got.Env)
 	sort.Strings(wantEnv)
 	if !reflect.DeepEqual(got.Args, wantArgs) || !reflect.DeepEqual(got.Env, wantEnv) {
