@@ -120,6 +120,8 @@ test('AEON-1460 compact ticket list keeps controls still and all actions reachab
         add('avatar slots identical for assigned and unassigned', [a.x, u.x, a.width, u.width], 'same x; 44 px targets', a.x === u.x && a.width === 44 && u.width === 44)
         const avatar = await box(assigned.locator('.avatar'))
         add('avatar 24 px; unassigned slot empty', { avatar, unassigned: await unassigned.textContent() }, '24×24; no glyph', avatar.width === 24 && avatar.height === 24 && !(await unassigned.textContent())?.trim())
+        const whenText = await page.locator('#row-n-1 time').textContent()
+        add('when joins numbers and units with NBSP', whenText, 'number NBSP unit', /\d\u00a0[a-z]/.test(whenText ?? ''))
         add('count placement', await bar.locator('.phone-count').isVisible(), landscape ? 'toolbar' : 'list end', (await bar.locator('.phone-count').isVisible()) === landscape)
         if (!landscape) add('list-end count copy uses NBSP', await page.locator('.list-foot.end').textContent(), 'N NBSP tickets', /^\d+\u00a0tickets$/.test((await page.locator('.list-foot.end').textContent()) ?? ''))
         add('no saved-view strip or separate select row on compact', await page.locator('.project-navigation, .phone-pick').evaluateAll(items => items.filter(el => el.checkVisibility()).length), '0 visible', (await page.locator('.project-navigation, .phone-pick').evaluateAll(items => items.filter(el => el.checkVisibility()).length)) === 0)
