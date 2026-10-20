@@ -141,23 +141,25 @@ test('AEON-1401 lists, the status menu, the ticket header, Desk and activity rea
     data.nodes.find(node => node.id === 'n-4')!.state = 'open'
     const { context, page, calls } = await open(browser, testInfo, width, theme, data)
     try {
-      // A viewport resize can precede the card's ResizeObserver delivery. Give
-      // it the preceding wide sample explicitly, without relying on CI speed.
+      // Hold the card's delivery, then replay its preceding wide sample after
+      // the viewport events. This establishes the order without relying on CI speed.
       await page.addInitScript(() => {
-        const state = { holding: false, held: 0, width: 0 }
+        const state = { holding: false, held: 0, width: 0, deliver: null as (() => void) | null }
         Object.assign(window, { aeon1401CardResize: state })
         const Observer = window.ResizeObserver
         window.ResizeObserver = class extends Observer {
           constructor(callback: ResizeObserverCallback) {
             super((entries, observer) => {
-              const delivered = entries.map(entry => {
+              const delivered = entries.filter(entry => {
                 if (state.holding && entry.target.classList.contains('table-card')) {
                   state.held++
-                  return new Proxy(entry, { get(target, key) {
+                  const stale = new Proxy(entry, { get(target, key) {
                     return key === 'contentRect' ? new DOMRect(0, 0, state.width, entry.contentRect.height) : Reflect.get(target, key, target)
                   } })
+                  state.deliver = () => callback([stale], observer)
+                  return false
                 }
-                return entry
+                return true
               })
               if (delivered.length) callback(delivered, observer)
             })
@@ -196,6 +198,11 @@ test('AEON-1401 lists, the status menu, the ticket header, Desk and activity rea
         await page.setViewportSize({ width: 1024, height: 900 })
         await page.evaluate(() => new Promise<void>(resolve => requestAnimationFrame(() => requestAnimationFrame(() => resolve()))))
         expect(await page.evaluate(() => (window as unknown as { aeon1401CardResize: { held: number } }).aeon1401CardResize.held)).toBeGreaterThan(0)
+        await page.evaluate(() => {
+          const deliver = (window as unknown as { aeon1401CardResize: { deliver: (() => void) | null } }).aeon1401CardResize.deliver
+          if (!deliver) throw new Error('No card resize delivery was held')
+          deliver()
+        })
         await expect(grid.locator('thead th.c-parent')).toBeVisible()
         expect((await grid.locator('thead th.c-title').boundingBox())!.width).toBeGreaterThanOrEqual(240)
         await shot(page, testInfo, 1024, theme, 'N3-parent-resize')
