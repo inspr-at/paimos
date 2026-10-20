@@ -39,7 +39,7 @@ func TestPersonIdentityScopeShapesAndGrantIsolation(t *testing.T) {
 		if err := tx.QueryRow(ctx, `SELECT id::text FROM roles WHERE tenant_id=$1 AND key='member'`, tid).Scan(&role); err != nil {
 			return err
 		}
-		if err := tx.QueryRow(ctx, `INSERT INTO nodes(tenant_id,kind_id,key,title) SELECT $1,id,'SCOPE','Scope project' FROM node_kinds WHERE tenant_id=$1 AND slug='project' RETURNING id::text`, tid).Scan(&project); err != nil {
+		if err := tx.QueryRow(ctx, `INSERT INTO nodes(tenant_id,kind_id,key,title) SELECT $1,id,aeon_next_node_key($1,short_prefix),'Scope project' FROM node_kinds WHERE tenant_id=$1 AND slug='project' RETURNING id::text`, tid).Scan(&project); err != nil {
 			return err
 		}
 		if err := tx.QueryRow(ctx, `INSERT INTO agent_keys(tenant_id,principal_id,name,prefix,hash) VALUES($1,$2,'Scope key','scope-fixture','not-a-credential') RETURNING id::text`, tid, agent).Scan(&key); err != nil {
