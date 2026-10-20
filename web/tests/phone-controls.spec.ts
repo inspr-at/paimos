@@ -87,7 +87,7 @@ for (const width of [390, 768, 1024, 1440]) {
       })
       const columns = dialog.getByRole('list', { name: 'Columns', exact: true })
       const checkbox = columns.getByRole('checkbox', { name: 'Cost unit', exact: true })
-      const columnRow = columns.locator('.row').filter({ has: page.getByRole('checkbox', { name: 'Cost unit', exact: true }) })
+      const columnRow = columns.locator('.row:has(input[data-column-row="cost"])')
       await expectStableControls({
         controls: { ...pinned, columns, columnRow, checkbox }, scrollAreas: { body: scroll },
         interactions: [{ name: 'show Cost unit', run: async () => {
@@ -102,7 +102,7 @@ for (const width of [390, 768, 1024, 1440]) {
       await expect.poll(() => data.preferences['list:p-pharos']?.visible).toBeUndefined()
       if (sheet) {
         const cost = columns.getByRole('checkbox', { name: 'Cost', exact: true })
-        const costRow = columns.locator('.row').filter({ has: page.getByRole('checkbox', { name: 'Cost', exact: true }) })
+        const costRow = columns.locator('.row:has(input[data-column-row="list_cost"])')
         await expectStableControls({ controls: { ...pinned, columns, cost, costRow, notes: dialog.locator('.columns .notes') }, scrollAreas: { body: scroll }, interactions: [
           { name: 'show Cost with empty-column explanation', run: async () => { await cost.check(); await expect(dialog.locator('.columns .notes')).toContainText('Nothing reported in this list yet') } },
           { name: 'hide Cost and its explanation', run: async () => { await cost.uncheck(); await expect(dialog.locator('.columns .notes')).toBeEmpty() } },

@@ -6,7 +6,6 @@ import { test, expect, type Locator, type Page } from '@playwright/test'
 import { mkdir, readFile, writeFile } from 'node:fs/promises'
 import { dirname } from 'node:path'
 import { fixtures, mockWork, watchErrors } from './work-fixtures'
-import { liveServer } from './live-server'
 import { expectStableControls } from './helpers/stable'
 
 type Size = { width: number; height: number }
@@ -85,9 +84,7 @@ test('AEON-1460 compact ticket list keeps controls still and all actions reachab
           example.title = locale === 'de-AT' ? 'Überprüfung der mandantenübergreifenden Berechtigungsverwaltung mit außergewöhnlich langen Bezeichnungen' : 'A long ticket title that remains readable by opening the whole row and never grows the list row'
           data.preferences['list:p-pharos'] = { visible: ['status', 'priority', 'assignee', 'tags', 'estimate', 'progress', 'updated'] }
         }
-        await mockWork(page, data, { nativeEvents: !desktop })
-        const live = liveServer(data)
-        await live.install(page, name)
+        await mockWork(page, data)
         await page.goto(desktop ? '/p/PHAROS?group=none' : '/p/PHAROS?group=none&sort=key')
         await expect(rows(page).first()).toBeVisible()
         await page.evaluate(() => document.fonts.ready)
@@ -251,7 +248,7 @@ test('AEON-1460 compact ticket list keeps controls still and all actions reachab
         const row = page.locator('#row-n-1'), before = await box(row)
         const node = data.nodes.find(node => node.id === 'n-1')!
         node.state = 'blocked'; node.updated_at = new Date(NOW + 1000).toISOString()
-        await live.delivered(page, live.eventFor(node.id))
+        await page.evaluate(({ id, revision }) => (window as unknown as { fixtureQuietStreams: { emit: (type: string, data: string, id: number) => void } }).fixtureQuietStreams.emit('node.updated', JSON.stringify({ id: 501, type: 'node.updated', actor_principal_id: '99999999-9999-4999-8999-999999999999', node_changes: [{ id, project_id: 'p-pharos', change: 'updated', fields: ['state'], revision }] }), 501), { id: node.id, revision: node.updated_at })
         await expect(row.locator('.phone-state [role="img"]')).toHaveAttribute('aria-label', 'Blocked')
         add('row movementPx on live status change', delta(before, await box(row)), '0', delta(before, await box(row)) === 0, 'T7')
         await row.locator('time').click()
