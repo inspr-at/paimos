@@ -3,6 +3,7 @@ package agentpairing
 
 import (
 	"context"
+	"errors"
 	"net/http"
 	"strconv"
 	"time"
@@ -63,6 +64,9 @@ func (m *Module) inventory(w http.ResponseWriter, r *http.Request, p tenant.Prin
 	out := ComputerInventory{Computers: []ComputerEvidence{}}
 	err := db.InTenant(ctx, m.pool, p.TenantID, func(tx pgx.Tx) error {
 		if err := authz.RequireTx(ctx, tx, p, "account.manage", authz.Scope{}); err != nil {
+			if errors.Is(err, authz.ErrForbidden) {
+				return fail(403, "forbidden", "signed-in person permission required")
+			}
 			return err
 		}
 		rows, err := tx.Query(ctx, `SELECT c.id::text,left(coalesce(nullif(c.display_name,''),q.details->>'computer_name',''),200),c.state,q.approved_by::text

@@ -77,6 +77,7 @@ func TestComputerInventoryReportsEvidenceWithoutAssigningOwner(t *testing.T) {
 	if len(empty.Computers) != 0 {
 		t.Fatal("inventory crossed tenant boundary")
 	}
+	dbtest.BindRole(t, f.db, f.tenantID, other, "owner")
 	dbtest.BindRole(t, f.db, f.tenantID, f.person, "member")
 	f.call("GET", path, nil, true, "", 403)
 }
