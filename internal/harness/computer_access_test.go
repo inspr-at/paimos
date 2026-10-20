@@ -55,12 +55,20 @@ func TestComputerStartLeadRuntimeRechecksRunPerson(t *testing.T) {
 		return nil
 	})
 	path := "/api/projects/" + f.project + "/lead-runtime/claim"
-	expect(t, v.runtimeCall(t, path, pickup), 200)
+	// This synthetic replay is not a computer runtime resource grant. Preserve
+	// that outer ceiling, then exercise the real scoped-key handler transaction
+	// through the same seam as the existing lead-runtime replay tests.
+	outer := v.runtimeCall(t, path, pickup)
+	expect(t, outer, 403)
+	if !strings.Contains(outer.Body.String(), "outside this computer's runtime authority") {
+		t.Fatal("synthetic replay escaped or failed a different runtime boundary")
+	}
+	expect(t, f.call(f.agent, "POST", path, pickup, ""), 200)
 	f.tx(t, f.person, func(tx pgx.Tx) error {
 		_, err := tx.Exec(t.Context(), `DELETE FROM role_bindings WHERE principal_id=$1 AND scope_type='computer'`, person)
 		return err
 	})
-	w := v.runtimeCall(t, path, pickup)
+	w := f.call(f.agent, "POST", path, pickup, "")
 	expect(t, w, 403)
 	if !strings.Contains(w.Body.String(), authz.ErrForbidden.Error()) {
 		t.Fatalf("lead runtime refused for another reason: %s", w.Body.String())
