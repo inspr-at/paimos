@@ -143,6 +143,7 @@ const open = ref<{ dimension: Dimension; anchor: HTMLElement } | null>(null)
 const dateAnchor = ref<HTMLElement | null>(null)
 const menuAnchor = ref<HTMLElement | null>(null)
 const displayAnchor = ref<HTMLElement | null>(null)
+const displayOrigin = ref<HTMLElement | null>(null)
 const displayButton = ref<HTMLButtonElement>()
 const collapsedDisplayButton = ref<HTMLButtonElement>()
 const filtersButton = ref<HTMLButtonElement>()
@@ -258,8 +259,9 @@ function filterKey(event: KeyboardEvent, clear: () => void) {
   }
 }
 function closeDisplay(restore: boolean) {
-  const anchor = displayAnchor.value
+  const anchor = displayOrigin.value ?? displayAnchor.value
   displayAnchor.value = null
+  displayOrigin.value = null
   if (restore) anchor?.focus()
 }
 // The gear in the collapsed menu: Hide's choices open where the Display button is, once the menu has closed.
@@ -285,6 +287,7 @@ function closeOverlays() { closeAttention(false); closeDisplay(false); phoneTool
 // window shows; with none in sight (a phone or tablet under an unfolded header) it opens as a
 // sheet, and closing it hands focus back to Filters.
 function openDisplay() {
+  displayOrigin.value = document.activeElement instanceof HTMLElement ? document.activeElement : null
   const button = props.collapsedHeader ? collapsedDisplayButton.value : displayButton.value
   displayAnchor.value = (button?.offsetParent ? button : null) ?? filtersButton.value ?? root.value ?? null
 }

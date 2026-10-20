@@ -49,6 +49,7 @@ async function targets(page: Page) {
 // the same JSON through remote-spec's artifact collector; JSON remains a CI artifact.
 test('AEON-1460 compact ticket list keeps controls still and all actions reachable; desktop stays unchanged', async ({ browser }, info) => {
   test.setTimeout(360_000)
+  const started = performance.now()
   const checks: Check[] = []
   const matrix: { size: Size; themes: Theme[] }[] = [
     { size: { width: 390, height: 664 }, themes: ['light', 'dark'] },
@@ -135,7 +136,8 @@ test('AEON-1460 compact ticket list keeps controls still and all actions reachab
         add('four distinct scroll offsets', samples, 'four different offsets', new Set(samples.map(s => s.offset)).size === 4, 'T2')
         if (size.width !== 320) add('fully visible rows at each of four offsets', samples, `each ≥ ${landscape ? size.width === 932 ? 6 : 5 : 9}`, samples.every(s => s.rows >= (landscape ? size.width === 932 ? 6 : 5 : 9)), 'T2')
         add('toolbar sticks while reading', samples, landscape ? 'y = 0' : 'y = 44', samples.every(s => s.toolbarY === (landscape ? 0 : 44)), 'T2')
-        add('toolbar pixel check with rows behind', await opaque(page), 'same pixels with rows shown and hidden', await opaque(page), 'T2')
+        const opaquePixels = await opaque(page)
+        add('toolbar pixel check with rows behind', opaquePixels, 'same pixels with rows shown and hidden', opaquePixels, 'T2')
         await shot('T2')
         await main.evaluate(el => { el.scrollTop = 0 })
         await settle(page)
@@ -213,6 +215,7 @@ test('AEON-1460 compact ticket list keeps controls still and all actions reachab
           await view.click(); await page.getByRole('menuitemradio', { name: 'Mobile follow-up', exact: true }).click()
           await expect(view).toContainText('Mobile follow-up')
           await view.click(); await page.getByRole('menuitemradio', { name: 'All open', exact: true }).click()
+          await expect(page).toHaveURL(url => !url.searchParams.has('v'))
           await page.evaluate(() => Object.defineProperty(navigator, 'clipboard', { configurable: true, value: { writeText: async (value: string) => { Object.assign(window, { aeon1460Copied: value }) } } }))
           const link = page.url()
           await more.click(); await page.getByRole('menuitem', { name: 'Copy link', exact: true }).click()
@@ -264,6 +267,7 @@ test('AEON-1460 compact ticket list keeps controls still and all actions reachab
     const json = JSON.stringify(checks, null, 2) + '\n'
     await writeFile(path, json)
     await writeFile(info.outputPath('AEON-1460/checks.md'), json)
+    await writeFile(info.outputPath('AEON-1460/runtime.md'), JSON.stringify({ seconds: Math.ceil((performance.now() - started) / 1000) }) + '\n')
     await info.attach('checks', { path, contentType: 'application/json' })
   }
 })

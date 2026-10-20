@@ -65293,7 +65293,7 @@
         "kind": "browser",
         "file": "web/tests/phone-controls.spec.ts",
         "line": 197,
-        "name": "phone cards render saved column visibility and order at 390px",
+        "name": "phone rows keep essentials while saved desktop columns persist",
         "firstError": "Error: expect(locator).toHaveCount(expected) failed"
       },
       "classification": "UNCLASSIFIED",
@@ -65315,10 +65315,10 @@
         "candidateOnly": true
       },
       "attributionNote": "Latest change to the failing test/owner is a candidate only; introducing source change is not proven.",
-      "expectedFailureKey": "browser:tests/phone-controls.spec.ts:phone cards render saved column visibility and order at 390px",
+      "expectedFailureKey": "browser:tests/phone-controls.spec.ts:phone rows keep essentials while saved desktop columns persist",
       "historicalClassification": [
         {
-          "key": "browser:tests/phone-controls.spec.ts:phone cards render saved column visibility and order at 390px",
+          "key": "browser:tests/phone-controls.spec.ts:phone rows keep essentials while saved desktop columns persist",
           "tier": "NIGHTLY",
           "config": "playwright.ui.config.ts",
           "project": ""
@@ -82426,7 +82426,7 @@
         "kind": "browser",
         "file": "web/tests/phone-controls.spec.ts",
         "line": 197,
-        "name": "phone cards render saved column visibility and order at 390px",
+        "name": "phone rows keep essentials while saved desktop columns persist",
         "firstError": "Error: expect(locator).toHaveCount(expected) failed"
       },
       "classification": "UNCLASSIFIED",
@@ -82448,10 +82448,10 @@
         "candidateOnly": true
       },
       "attributionNote": "Latest change to the failing test/owner is a candidate only; introducing source change is not proven.",
-      "expectedFailureKey": "browser:tests/phone-controls.spec.ts:phone cards render saved column visibility and order at 390px",
+      "expectedFailureKey": "browser:tests/phone-controls.spec.ts:phone rows keep essentials while saved desktop columns persist",
       "historicalClassification": [
         {
-          "key": "browser:tests/phone-controls.spec.ts:phone cards render saved column visibility and order at 390px",
+          "key": "browser:tests/phone-controls.spec.ts:phone rows keep essentials while saved desktop columns persist",
           "tier": "NIGHTLY",
           "config": "playwright.ui.config.ts",
           "project": ""
@@ -240275,7 +240275,7 @@
       "id": "NR-0448",
       "runId": "37743779928",
       "attempt": 1,
-      "expectedFailureKey": "browser:tests/phone-controls.spec.ts:phone cards render saved column visibility and order at 390px",
+      "expectedFailureKey": "browser:tests/phone-controls.spec.ts:phone rows keep essentials while saved desktop columns persist",
       "paths": [
         "README.md",
         "web/src/components/work/AttachmentLightbox.vue",
@@ -247678,7 +247678,7 @@
       "id": "NR-0636",
       "runId": "37899183578",
       "attempt": 1,
-      "expectedFailureKey": "browser:tests/phone-controls.spec.ts:phone cards render saved column visibility and order at 390px",
+      "expectedFailureKey": "browser:tests/phone-controls.spec.ts:phone rows keep essentials while saved desktop columns persist",
       "paths": [
         "README.md",
         "web/src/components/work/AttachmentLightbox.vue",
