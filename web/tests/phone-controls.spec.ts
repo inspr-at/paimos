@@ -88,7 +88,7 @@ for (const width of [390, 768, 1024, 1440]) {
       const columns = dialog.getByRole('list', { name: 'Columns', exact: true })
       // The row stays reachable when its name also carries "hidden at this width".
       const checkbox = dialog.locator('input[data-column-row="cost"]')
-      const columnRow = dialog.locator('li.row').filter({ has: checkbox })
+      const columnRow = columns.locator('.row:has(input[data-column-row="cost"])')
       await checkbox.scrollIntoViewIfNeeded()
       await expect(checkbox).toHaveAccessibleName(/^Cost unit\b/)
       await expectStableControls({
