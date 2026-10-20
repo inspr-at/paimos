@@ -302,6 +302,16 @@ test('AEON-1460 compact titles retain native links and keyboard full-text disclo
       await expect(page.locator('.tooltip')).toHaveText(title)
       await page.keyboard.press('Escape')
     } },
+    { name: 'a modified link click opens exactly one native tab', run: async () => {
+      const popup = page.waitForEvent('popup')
+      await page.locator('#row-n-1 .title-link').click({ modifiers: [process.platform === 'darwin' ? 'Meta' : 'Control'] })
+      const tab = await popup
+      await tab.waitForLoadState('domcontentloaded')
+      expect(new URL(tab.url()).pathname).toBe('/p/PHAROS/PHAROS-11')
+      expect(page.context().pages()).toHaveLength(2)
+      await tab.close()
+      await expect(page).toHaveURL('/p/PHAROS/tickets?group=none')
+    } },
   ] })
 })
 

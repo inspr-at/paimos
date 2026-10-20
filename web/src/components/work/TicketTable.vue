@@ -846,7 +846,7 @@ function longPress(event: Event, row: ListItem) {
   emit('select', row, 'toggle')
 }
 function linkClick(event: MouseEvent) {
-  if (event.metaKey || event.ctrlKey || event.shiftKey || event.button === 1) return // let the browser open a tab
+  if (event.metaKey || event.ctrlKey || event.shiftKey || event.button === 1) { event.stopPropagation(); return } // one native tab, without the row's newTab action
   event.preventDefault()
 }
 const selectableRows = (group: RowGroup) => group.rows.filter(row => props.rowSelectable?.(row) ?? true)
@@ -1208,7 +1208,7 @@ defineExpose({
                 <span v-else :aria-label="statusMeta(entry.row.state).label" role="img" data-status-motion><StatusIcon :state="entry.row.state" :size="16" /></span>
               </td>
               <td class="c-title phone-title" data-column-id="title"><a class="title-link phone-title-link" :href="href(entry.row)" tabindex="-1" @click="linkClick"><span v-clip-tip="entry.row.title" class="title-text phone-title-text"><template v-for="(part, i) in highlight(entry.row.title, query)" :key="i"><mark v-if="part.match">{{ part.text }}</mark><template v-else>{{ part.text }}</template></template></span></a></td>
-              <td class="phone-meta"><span class="key">{{ entry.row.key }}</span><span class="phone-separator" aria-hidden="true">{{ '\u00a0·\u00a0' }}</span><time :datetime="entry.row.updated_at" :data-tip="absoluteTime(entry.row.updated_at)">{{ relativeTime(entry.row.updated_at, { now }).replace(/(\d)([mhd])\b/g, '$1\u00a0$2').replace(/(\d)\s+(?=\S)/g, '$1\u00a0') }}</time></td>
+              <td class="phone-meta"><span class="key">{{ entry.row.key }}</span><span class="phone-separator" aria-hidden="true">{{ '\u00a0·\u00a0' }}</span><span v-if="liveLabels?.has(entry.row.id)" class="live-label">{{ liveLabels.get(entry.row.id) }}</span><time v-else :datetime="entry.row.updated_at" :data-tip="absoluteTime(entry.row.updated_at)">{{ relativeTime(entry.row.updated_at, { now }).replace(/(\d)([mhd])\b/g, '$1\u00a0$2').replace(/(\d)\s+(?=\S)/g, '$1\u00a0') }}</time></td>
               <td class="phone-owner"><button type="button" class="assignee-btn phone-assignee" :disabled="!mayAssign(entry.row)" :aria-label="`Assignee: ${entry.row.assignee?.name ?? 'Unassigned'}. Change assignee of ${entry.row.key}`" aria-haspopup="menu" @click.stop="emit('assignee', entry.row, $event.currentTarget as HTMLElement)"><PersonAvatar v-if="entry.row.assignee" :id="entry.row.assignee.id" :name="entry.row.assignee.name" :size="24" /></button></td>
             </template>
             <template v-else>
@@ -1977,6 +1977,7 @@ button.release-chip:focus-visible { box-shadow: var(--focus-ring); }
 .phone-rows .phone-title-text { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; -webkit-line-clamp: unset; }
 .phone-rows .ticket-row .phone-meta { grid-area: meta; display: flex !important; align-items: center; white-space: nowrap; line-height: 16px; color: var(--ink-3); font-size: 11.5px; }
 .phone-meta .key { color: var(--teal-ink); font-size: 11.5px; line-height: 16px; }
+.phone-meta .live-label { height: 16px; padding: 0; background: transparent; border-radius: 0; box-shadow: none; font-size: 11.5px; line-height: 16px; }
 .phone-meta time { font-size: 11.5px; font-variant-numeric: tabular-nums; }
 .phone-rows .ticket-row .phone-owner { grid-area: owner; align-self: center; }
 .phone-assignee { display: grid; place-items: center; width: 44px; height: 44px; margin: 0; border: 0; padding: 0; background: transparent; border-radius: 8px; }
@@ -1998,7 +1999,7 @@ button.release-chip:focus-visible { box-shadow: var(--focus-ring); }
   .phone-rows .ticket-row .phone-meta { display: contents !important; }
   .phone-meta .key { grid-area: key; font-size: 12px; }
   .phone-meta .phone-separator { display: none; }
-  .phone-meta time { grid-area: when; min-width: 0; overflow: hidden; text-overflow: ellipsis; font-size: 12px; text-align: right; }
+  .phone-meta time, .phone-meta .live-label { grid-area: when; min-width: 0; overflow: hidden; text-overflow: ellipsis; font-size: 12px; text-align: right; }
   .phone-rows .phone-check, .phone-fold { top: -13px; }
   .phone-rows .ghost td.c-key { grid-area: key; }
   .phone-rows .list-foot.end.phone-only { display: none; }

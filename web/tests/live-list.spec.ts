@@ -9,6 +9,7 @@ import { expect, test, type Page } from '@playwright/test'
 import { mkdirSync } from 'node:fs'
 import { openBoth, openOne } from './live-server'
 import { me, startTicketSelection } from './work-fixtures'
+import { expectStableControls } from './helpers/stable'
 
 const shots = process.env.LIVE_SHOTS_DIR
 const panel = (page: Page) => page.getByRole('complementary', { name: 'Ticket details' })
@@ -335,16 +336,21 @@ test('on a phone the marked row, the pill and the deleted selection fit 390 px',
     try {
       await startTicketSelection(a)
       for (const key of ['PHAROS-11', 'PHAROS-14']) await a.getByRole('checkbox', { name: `Select ${key}` }).click()
-      await deleteInPanel(b, 'PHAROS-14')
-      const row = a.locator('#row-n-4')
-      await expect(row.locator('.live-label')).toHaveText('Deleted')
-      await expect(a.locator('.phone-pick-status')).toContainText(/2 selected\s*·\s*1 deleted\s*·\s*Cancel/)
+      const row = a.locator('#row-n-4'), bulk = bulkBar(a)
+      await expectStableControls({ controls: { row, title: row.locator('.title-link'), clear: bulk.getByRole('button', { name: 'Clear the selection', exact: true }), status: bulk.getByRole('button', { name: 'Status', exact: true }) }, interactions: [
+        { name: 'remote deletion keeps the row and selection actions still', run: async () => {
+          await deleteInPanel(b, 'PHAROS-14')
+          await expect(row.locator('.live-label')).toHaveText('Deleted')
+          await expect(bulk).toHaveAccessibleName('2 selected tickets')
+          await expect(bulk.locator('.gone')).toHaveText('1 selected ticket was deleted')
+        } },
+      ] })
       await expect(a.getByRole('button', { name: '1 update · Show' })).toBeVisible()
       expect(await a.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true)
       if (shots) { mkdirSync(shots, { recursive: true }); await a.screenshot({ path: `${shots}/list-phone-deleted__390__${colorScheme}.png` }) }
       await a.getByRole('button', { name: '1 update · Show' }).click()
       await expect(row).toHaveCount(0)
-      await expect(a.locator('.phone-pick-status')).toContainText('1 selected')
+      await expect(bulk).toHaveAccessibleName('1 selected ticket')
       expect(errorsA).toEqual([])
     } finally { await close() }
   }
