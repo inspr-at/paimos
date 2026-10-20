@@ -2540,6 +2540,8 @@
     ,
     {"kind":"go","package":"internal/agentpairing","name":"TestComputerReportsItsInstallMethod","tier":"GATED-FULL"}
     ,
+    {"kind":"go","package":"internal/agentpairing","name":"TestComputerStartAccessUsesPersonRoleBindingsAndAuditsChanges","tier":"ESSENTIAL"}
+    ,
     {"kind":"go","package":"internal/agentpairing","name":"TestConsentProofVersionUpgradeKeepsPairingKeyAndRejectsV1","tier":"GATED-FULL"}
     ,
     {"kind":"go","package":"internal/agentpairing","name":"TestCoordinatorScopeSetStaysNarrow","tier":"GATED-FULL"}
@@ -2837,6 +2839,8 @@
     {"kind":"go","package":"internal/agentruns","name":"TestClaimReleasesObsoleteSiblingLedgerAfterMigration","tier":"GATED-FULL"}
     ,
     {"kind":"go","package":"internal/agentruns","name":"TestClaimSharedQuotaWindowKeepsDoorOwnership","tier":"GATED-FULL"}
+    ,
+    {"kind":"go","package":"internal/agentruns","name":"TestComputerStartCreationAndClaimUseCurrentPersonGrant","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/agentruns","name":"TestConcurrentTelemetrySerializesBudgetAndReplay","tier":"GATED-FULL"}
     ,
@@ -4077,6 +4081,8 @@
     {"kind":"go","package":"internal/authz","name":"TestBuiltinAgentExclusionsDefinition","tier":"GATED-FULL"}
     ,
     {"kind":"go","package":"internal/authz","name":"TestClassicInviteLinking","tier":"GATED-FULL"}
+    ,
+    {"kind":"go","package":"internal/authz","name":"TestComputerStartPermissionIsPersonOnlyAndScopeLimited","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/authz","name":"TestCoordinatorKeyRecognition","tier":"GATED-FULL"}
     ,

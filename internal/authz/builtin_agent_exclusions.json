@@ -17,6 +17,7 @@
     "engine.read",
     "events.subscribe",
     "recurrences.manage",
-    "reviewpolicy.manage"
+    "reviewpolicy.manage",
+    "run.start_on_computer"
   ]
 }

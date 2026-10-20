@@ -415,6 +415,11 @@ func createRun(r *http.Request, tx pgx.Tx, p tenant.Principal, deferred *[]func(
 	if p.Kind == tenant.Agent && in.Agent != p.ID {
 		return nil, workorders.Fail(403, "agents may create only their own runs")
 	}
+	if p.Kind == tenant.Person {
+		if err := authz.RequireComputerStartForPersonTx(ctx, tx, p, in.Agent); err != nil {
+			return nil, err
+		}
+	}
 	if o.Assignee != nil && *o.Assignee != in.Agent {
 		return nil, workorders.Fail(409, "run agent must match order assignee")
 	}
@@ -687,6 +692,9 @@ func (m *module) claim(r *http.Request, tx pgx.Tx, p tenant.Principal) (any, err
 		return nil, err
 	}
 	if err = claimPermission(ctx, tx, p, v); err != nil {
+		return nil, err
+	}
+	if err = authz.RequireRunStartOnComputerTx(ctx, tx, p, v.ID); err != nil {
 		return nil, err
 	}
 	admission := workorders.BuildAdmission{Candidate: o.BuildDelivery}
