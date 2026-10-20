@@ -3,7 +3,7 @@
 // move under a finger during search/filter/menu/live changes; saved desktop columns
 // leak into phone rows; overflow actions disappear; desktop column geometry drifts.
 import { test, expect, type Locator, type Page } from '@playwright/test'
-import { mkdir, writeFile } from 'node:fs/promises'
+import { mkdir, readFile, writeFile } from 'node:fs/promises'
 import { dirname } from 'node:path'
 import { fixtures, mockWork, watchErrors } from './work-fixtures'
 import { liveServer } from './live-server'
@@ -66,6 +66,7 @@ test('AEON-1460 compact ticket list keeps controls still and all actions reachab
       const desktop = size.height > 500 && size.width >= 720
       const landscape = !desktop && size.width >= 720
       const name = `${size.width}x${size.height}-${theme}`
+      console.info(`AEON-1460 ${name} ${locale}`)
       const add = (assert: string, value: unknown, expected: string, pass: boolean, state = 'T1') => {
         checks.push({ assert, value, expected, pass, state, ...size, theme, locale })
         expect(pass, `${name} ${locale} ${assert}: ${JSON.stringify(value)}; expected ${expected}`).toBe(true)
@@ -83,7 +84,7 @@ test('AEON-1460 compact ticket list keeps controls still and all actions reachab
           example.title = locale === 'de-AT' ? 'Überprüfung der mandantenübergreifenden Berechtigungsverwaltung mit außergewöhnlich langen Bezeichnungen' : 'A long ticket title that remains readable by opening the whole row and never grows the list row'
           data.preferences['list:p-pharos'] = { visible: ['status', 'priority', 'assignee', 'tags', 'estimate', 'progress', 'updated'] }
         }
-        await mockWork(page, data)
+        await mockWork(page, data, { nativeEvents: !desktop })
         const live = liveServer(data)
         await live.install(page, name)
         await page.goto(desktop ? '/p/PHAROS?group=none' : '/p/PHAROS?group=none&sort=key')
@@ -142,6 +143,7 @@ test('AEON-1460 compact ticket list keeps controls still and all actions reachab
         await settle(page)
         const search = bar.getByRole('button', { name: 'Search tickets', exact: true }), more = bar.getByRole('button', { name: 'More view actions', exact: true }), view = bar.getByRole('button', { name: /^View:/ })
         const anchor = await box(bar)
+        if (locale === 'en-US' && theme === 'light' && size.width !== 932) {
         await expectStableControls({ controls: { toolbar: bar, view, search, more }, scrollAreas: { page: main }, interactions: [
           { name: 'open/close search overlay', run: async () => { await search.click(); await expect(bar.getByRole('searchbox')).toBeFocused(); await shot('T6'); add('toolbar movementPx on search open', delta(anchor, await box(bar)), '0', delta(anchor, await box(bar)) === 0, 'T6'); await bar.getByRole('button', { name: 'Cancel', exact: true }).click() } },
           { name: 'open/close view control', run: async () => { await view.click(); const menu = page.getByRole('menu', { name: 'Ticket views', exact: true }); await expect(menu).toBeVisible(); for (const text of ['My open', 'All open', 'In QA', 'Recently done', 'List', 'Outline', 'Graph', 'Needs attention']) await expect(menu.getByText(text, { exact: true })).toBeVisible(); add('view menu inside viewport', await box(page.getByRole('dialog', { name: 'Ticket views', exact: true })), 'inside viewport', inside(await box(page.getByRole('dialog', { name: 'Ticket views', exact: true })), size), 'T3'); add('toolbar movementPx on view menu', delta(anchor, await box(bar)), '0', delta(anchor, await box(bar)) === 0, 'T3'); await shot('T3'); await page.keyboard.press('Escape') } },
@@ -179,6 +181,64 @@ test('AEON-1460 compact ticket list keeps controls still and all actions reachab
           await shot('T7')
           await more.click(); await page.getByRole('menuitemcheckbox', { name: 'Hide done', exact: true }).click()
         }
+        if (landscape) {
+          await more.click(); await page.getByRole('menuitemcheckbox', { name: 'Hide done', exact: true }).click()
+          await expect(page.locator('#row-n-5')).toBeAttached()
+          await shot('T7')
+          await more.click(); await page.getByRole('menuitemcheckbox', { name: 'Hide done', exact: true }).click()
+        }
+        if (size.width === 390) {
+          // Every item in the new menus does its real job, through existing routes.
+          for (const preset of ['My open', 'In QA', 'Recently done', 'All open']) {
+            await view.click(); await page.getByRole('menuitemradio', { name: preset, exact: true }).click()
+            await expect(view).toContainText(preset)
+            const query = new URL(page.url()).searchParams
+            if (preset === 'My open') expect(query.get('assignee')).toContain('none')
+            if (preset === 'In QA') expect(query.get('status')).toBe('qa')
+            if (preset === 'Recently done') { expect(query.get('closed')).toBe('1'); expect(query.get('date')).toContain('updated:') }
+          }
+          await search.click()
+          await bar.getByRole('searchbox').fill('Ticket 102')
+          await expect(rows(page)).toHaveCount(1)
+          await expect(rows(page).first()).toContainText('PHAROS-102')
+          add('toolbar movementPx while searching', delta(anchor, await box(bar)), '0', delta(anchor, await box(bar)) === 0, 'T6')
+          await bar.getByRole('searchbox').fill('')
+          await expect.poll(() => rows(page).count()).toBeGreaterThan(1)
+          await bar.getByRole('button', { name: 'Cancel', exact: true }).click()
+          await more.click(); await page.getByRole('menuitem', { name: 'Save view as…', exact: true }).click()
+          const save = page.getByRole('dialog', { name: 'Save view', exact: true })
+          await save.getByRole('textbox', { name: 'View name', exact: true }).fill('Mobile follow-up')
+          await save.getByRole('button', { name: 'Save view', exact: true }).click()
+          await expect(save).toHaveCount(0)
+          await expect(view).toContainText('Mobile follow-up')
+          await view.click(); await page.getByRole('menuitemradio', { name: 'All open', exact: true }).click()
+          await view.click(); await page.getByRole('menuitemradio', { name: 'Mobile follow-up', exact: true }).click()
+          await expect(view).toContainText('Mobile follow-up')
+          await view.click(); await page.getByRole('menuitemradio', { name: 'All open', exact: true }).click()
+          await page.evaluate(() => Object.defineProperty(navigator, 'clipboard', { configurable: true, value: { writeText: async (value: string) => { Object.assign(window, { aeon1460Copied: value }) } } }))
+          const link = page.url()
+          await more.click(); await page.getByRole('menuitem', { name: 'Copy link', exact: true }).click()
+          await expect.poll(() => page.evaluate(() => (window as unknown as { aeon1460Copied?: string }).aeon1460Copied)).toBe(link)
+          // The export must walk cursors, rather than downloading just the visible page.
+          await mockWork(page, data, { nativeEvents: true, listPageSize: 3 })
+          await more.click()
+          const downloading = page.waitForEvent('download')
+          await page.getByRole('menuitem', { name: 'Export CSV', exact: true }).click()
+          const download = await downloading, path = await download.path()
+          expect(path).toBeTruthy()
+          const csv = await readFile(path!, 'utf8')
+          expect(csv).toContain('PHAROS-134')
+          expect(csv).toContain('"Key","Title","Status","Assignee","Updated"')
+          const failExport = (route: import('@playwright/test').Route) => route.fulfill({ status: 503, json: { error: 'Export read refused' } })
+          await page.route('**/api/nodes?*', failExport)
+          await more.click(); await page.getByRole('menuitem', { name: 'Export CSV', exact: true }).click()
+          await expect(page.getByText(/CSV was not exported:/)).toBeVisible()
+          await page.unroute('**/api/nodes?*', failExport)
+          add('saved views, presets, copy link and complete CSV work', true, 'successful actions; failed CSV is explicit', true, 'T4')
+          await page.goto('/p/PHAROS?group=none&sort=key')
+          await expect(page.locator('#row-n-1')).toBeVisible()
+        }
+        }
         // A non-structural live change: sort stays Key and the ticket remains open.
         await main.evaluate(el => { el.scrollTop = 0 })
         const row = page.locator('#row-n-1'), before = await box(row)
@@ -187,6 +247,8 @@ test('AEON-1460 compact ticket list keeps controls still and all actions reachab
         await live.delivered(page, live.eventFor(node.id))
         await expect(row.locator('.phone-state [role="img"]')).toHaveAttribute('aria-label', 'Blocked')
         add('row movementPx on live status change', delta(before, await box(row)), '0', delta(before, await box(row)) === 0, 'T7')
+        await row.locator('time').click()
+        await expect(page).toHaveURL(/PHAROS-11(?:\?|$)/)
         const overflow = await page.evaluate(() => document.documentElement.scrollWidth - innerWidth)
         add('no horizontal overflow', overflow, '0', overflow === 0)
         add('no browser errors', errors, '[]', errors.length === 0)

@@ -9,7 +9,7 @@ import FloatingPanel from './FloatingPanel.vue'
 
 const props = defineProps<{
   filters: ListFilters; query: string; view: TicketView; views: SavedView[]; total: number | null
-  selectable: boolean; picking: boolean; createLabel: string; attentionHref: string
+  selectable: boolean; picking: boolean; createLabel: string; attentionHref: string; principalId: string | null
 }>()
 const emit = defineEmits<{
   search: [value: string]; filter: []; create: []; layout: [value: string]; savedView: [id: string]
@@ -22,7 +22,7 @@ const menu = ref<{ kind: 'views' | 'more'; anchor: HTMLElement } | null>(null)
 const activeView = computed(() => props.views.find(view => view.id === props.filters.view))
 const preset = computed(() => props.filters.statusScope === 'done' && props.filters.date ? 'done'
   : props.filters.status.length === 1 && props.filters.status[0] === 'qa' ? 'qa'
-    : props.filters.assignee.length ? 'mine' : 'all')
+    : props.principalId && props.filters.assignee.includes(props.principalId) && props.filters.assignee.includes('none') && props.filters.assignee.length === 2 ? 'mine' : 'all')
 const presets = [{ id: 'mine', label: 'My open' }, { id: 'all', label: 'All open' }, { id: 'qa', label: 'In QA' }, { id: 'done', label: 'Recently done' }]
 const name = computed(() => activeView.value?.name ?? presets.find(item => item.id === preset.value)!.label)
 const filterCount = computed(() => (['status', 'priority', 'assignee', 'type', 'tag', 'epic', 'cost', 'release', 'human_check', 'shape', 'depth'] as const)
@@ -64,7 +64,7 @@ function menuKeys(event: KeyboardEvent) {
   const next = event.key === 'Home' ? 0 : event.key === 'End' ? items.length - 1 : (index + (event.key === 'ArrowDown' ? 1 : -1) + items.length) % items.length
   event.preventDefault(); event.stopPropagation(); items[next]?.focus()
 }
-watch(() => props.attentionHref, () => { close(); searching.value = false })
+watch(() => [props.attentionHref, props.principalId], () => { close(); searching.value = false })
 defineExpose({ focusSearch, closeOverlays: () => { close(); searching.value = false } })
 </script>
 

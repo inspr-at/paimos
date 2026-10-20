@@ -54,6 +54,7 @@ const props = defineProps<{
   selectable?: boolean
   picking?: boolean
   attentionHref?: string
+  principalId?: string | null
   // The project header is collapsed: Display moves into the toolbar and carries what the header hid.
   collapsedHeader?: boolean
   attention?: { owner: string; filters: AttentionFilters; group: AttentionGrouping; facets: { projects: AttentionFacet[]; assignees: AttentionFacet[] }; truncated: boolean; locale: string }
@@ -292,7 +293,7 @@ defineExpose({ focusSearch, openFilterMenu, openDisplay, input, closeOverlays })
 
 <template>
   <div ref="root" class="toolbar" :class="{ stuck, graph, attention: !!attention, knowledge: view === 'knowledge', 'compact-ticket-toolbar': compactList }" role="toolbar" :aria-label="attention ? attentionWord('List controls', 'Listensteuerung') : view === 'knowledge' ? 'Knowledge controls' : 'Ticket list controls'">
-    <PhoneTicketToolbar v-if="compactList" ref="phoneTools" :filters="filters" :query="draft" :view="view as TicketView" :views="savedViews ?? []" :total="total" :selectable="!!selectable" :picking="!!picking" :create-label="createLabel" :attention-href="attentionHref ?? '/tickets?view=needs-attention'"
+    <PhoneTicketToolbar v-if="compactList" ref="phoneTools" :filters="filters" :query="draft" :view="view as TicketView" :views="savedViews ?? []" :total="total" :selectable="!!selectable" :picking="!!picking" :create-label="createLabel" :attention-href="attentionHref ?? '/tickets?view=needs-attention'" :principal-id="principalId ?? null"
       @search="value => draft = value" @filter="emit('openSheet')" @create="emit('create')" @layout="value => emit('view', value)" @saved-view="id => emit('savedView', id)" @preset="id => emit('preset', id)"
       @display="anchor => displayAnchor = anchor" @show-closed="value => emit('showClosed', value)" @select="emit('selectTickets')" @save="anchor => emit('saveView', anchor)" @copy="emit('copyLink')" @export="emit('exportCSV')" />
     <template v-else>

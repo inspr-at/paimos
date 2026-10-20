@@ -297,7 +297,7 @@ test.describe('fix3: phone regressions', () => {
     await page.goto('/p/PHAROS')
     await expect(rows(page)).toHaveCount(25)
     await page.getByRole('button', { name: 'More view actions', exact: true }).click()
-      await page.getByRole('menuitem', { name: 'Select tickets', exact: true }).click()
+    await page.getByRole('menuitem', { name: 'Select tickets', exact: true }).click()
     await page.getByRole('checkbox', { name: 'Select PHAROS-11', exact: true }).click()
     const dock = page.getByRole('toolbar', { name: '1 selected ticket', exact: true })
     await expect(dock.getByRole('button')).toHaveCount(9)

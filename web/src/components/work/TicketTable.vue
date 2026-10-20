@@ -1207,7 +1207,7 @@ defineExpose({
                 <button v-else-if="entry.tree?.hasChildren" type="button" class="phone-fold" :aria-expanded="entry.tree.expanded" :aria-label="`${entry.tree.expanded ? 'Collapse' : 'Expand'} ${entry.row.key}`" @click.stop="emit('toggleRow', entry.row.id)"><AppIcon name="chevron-right" :size="14" /></button>
                 <span v-else :aria-label="statusMeta(entry.row.state).label" role="img"><StatusIcon :state="entry.row.state" :size="16" /></span>
               </td>
-              <td class="c-title phone-title" data-column-id="title"><span class="phone-title-link"><span v-clip-tip="entry.row.title" class="phone-title-text"><template v-for="(part, i) in highlight(entry.row.title, query)" :key="i"><mark v-if="part.match">{{ part.text }}</mark><template v-else>{{ part.text }}</template></template></span></span></td>
+              <td class="c-title phone-title" data-column-id="title"><span class="phone-title-link"><span v-clip-tip="entry.row.title" class="phone-title-text" tabindex="-1"><template v-for="(part, i) in highlight(entry.row.title, query)" :key="i"><mark v-if="part.match">{{ part.text }}</mark><template v-else>{{ part.text }}</template></template></span></span></td>
               <td class="phone-meta"><span class="key">{{ entry.row.key }}</span><span class="phone-separator" aria-hidden="true">{{ '\u00a0·\u00a0' }}</span><time :datetime="entry.row.updated_at" :data-tip="absoluteTime(entry.row.updated_at)">{{ relativeTime(entry.row.updated_at, { now }).replace(/(\d)\s+(?=\S)/g, '$1\u00a0') }}</time></td>
               <td class="phone-owner"><button type="button" class="phone-assignee" :disabled="!mayAssign(entry.row)" :aria-label="`Assignee: ${entry.row.assignee?.name ?? 'Unassigned'}. Change assignee of ${entry.row.key}`" aria-haspopup="menu" @click.stop="emit('assignee', entry.row, $event.currentTarget as HTMLElement)"><PersonAvatar v-if="entry.row.assignee" :id="entry.row.assignee.id" :name="entry.row.assignee.name" :size="24" /></button></td>
             </template>
@@ -1987,14 +1987,14 @@ button.release-chip:focus-visible { box-shadow: var(--focus-ring); }
 .phone-rows .ticket-row.dimmed :is(.phone-title-link, .phone-meta, .phone-owner, .phone-state) { opacity: .5; }
 @media (min-width: 720px) and (max-height: 500px) {
   .table-card.phone-rows .tickets .ticket-row {
-    grid-template-columns: 18px max-content minmax(0, 1fr) 44px max-content; grid-template-rows: 43px;
+    grid-template-columns: 18px max-content minmax(0, 1fr) 44px 12ch; grid-template-rows: 43px;
     grid-template-areas: "state key title owner when"; height: 44px; padding: 0 10px; column-gap: 10px;
   }
   .phone-rows .ticket-row .phone-state { align-self: center; padding-top: 0 !important; }
   .phone-rows .ticket-row .phone-meta { display: contents !important; }
   .phone-meta .key { grid-area: key; font-size: 12px; }
   .phone-meta .phone-separator { display: none; }
-  .phone-meta time { grid-area: when; font-size: 12px; text-align: right; }
+  .phone-meta time { grid-area: when; min-width: 0; overflow: hidden; text-overflow: ellipsis; font-size: 12px; text-align: right; }
   .phone-rows .phone-check, .phone-fold { top: -14px; }
   .phone-rows .list-foot.end.phone-only { display: none; }
 }
