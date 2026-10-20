@@ -151,7 +151,13 @@ func (a Authority) RequireNativeGrantTx(ctx context.Context, tx pgx.Tx, actor na
 	if err != nil {
 		return err
 	}
-	if !reflect.DeepEqual(c.Policy, pinned) {
+	// JSON/SQL round trips may use a different Location value for the same
+	// instant; the expiry instant, rather than its Go representation, is the pin.
+	if !c.Policy.ExpiresAt.Equal(pinned.ExpiresAt) {
+		return refuse(nativecontract.ReasonPermissionRevoked)
+	}
+	c.Policy.ExpiresAt = pinned.ExpiresAt
+	if c.Policy != pinned {
 		return refuse(nativecontract.ReasonPermissionRevoked)
 	}
 	return nil

@@ -1447,6 +1447,32 @@
     {
       "classification": "personal",
       "columns": {
+        "actor_grant_id": "metadata",
+        "actor_grant_revision": "metadata",
+        "binding": "personal",
+        "conversation_id": "metadata",
+        "conversation_ref": "personal",
+        "expires_at": "personal",
+        "grant_id": "metadata",
+        "issued_at": "personal",
+        "maximum_bytes": "metadata",
+        "maximum_finals": "metadata",
+        "owned_session_id": "metadata",
+        "owner_person_id": "personal",
+        "project_id": "metadata",
+        "retention_grant_id": "metadata",
+        "role_id": "metadata",
+        "tenant_id": "metadata"
+      },
+      "locator": {
+        "person_column": "owner_person_id",
+        "tenant_column": "tenant_id"
+      },
+      "table": "native_session_drain_grants"
+    },
+    {
+      "classification": "personal",
+      "columns": {
         "binding": "metadata",
         "conversation_id": "metadata",
         "created_at": "personal",
@@ -1533,6 +1559,23 @@
         "tenant_column": "tenant_id"
       },
       "table": "native_session_interactions"
+    },
+    {
+      "classification": "personal",
+      "columns": {
+        "created_at": "personal",
+        "intent": "personal",
+        "operation_id": "metadata",
+        "owned_session_id": "metadata",
+        "owner_person_id": "personal",
+        "project_id": "metadata",
+        "tenant_id": "metadata"
+      },
+      "locator": {
+        "person_column": "owner_person_id",
+        "tenant_column": "tenant_id"
+      },
+      "table": "native_session_operations"
     },
     {
       "classification": "personal",

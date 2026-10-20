@@ -3,6 +3,22 @@
 -- native_consent NULL. No old permission, request or grant is reinterpreted.
 ALTER TABLE approval_requests ADD COLUMN native_consent jsonb;
 
+-- The existing owner-workstation exception is intentionally unavailable for
+-- native consent, including denied decisions. A native consent is a person act.
+CREATE FUNCTION aeon_native_consent_person_decision() RETURNS trigger LANGUAGE plpgsql AS $$
+BEGIN
+    IF EXISTS (SELECT 1 FROM approval_requests r WHERE r.tenant_id=NEW.tenant_id
+        AND r.id=NEW.request_id AND r.scope IN ('harness.control.native.session','harness.control.native.retention'))
+       AND NOT EXISTS (SELECT 1 FROM principals p WHERE p.tenant_id=NEW.tenant_id
+        AND p.id=NEW.decided_by_principal_id AND p.kind='person' AND p.status='active') THEN
+        RAISE EXCEPTION 'only a person may decide native consent';
+    END IF;
+    RETURN NEW;
+END;
+$$;
+CREATE TRIGGER native_consent_person_decision BEFORE INSERT ON approval_decisions
+    FOR EACH ROW EXECUTE FUNCTION aeon_native_consent_person_decision();
+
 CREATE TABLE native_session_consents (
     tenant_id uuid,
     grant_id uuid,
