@@ -46,8 +46,9 @@ async function close(page: Page, width: number) {
 }
 for (const width of [390, 1024, 1440]) for (const theme of ['light', 'dark']) {
   test(`Hide choices and stable controls at ${width}px ${theme}`, async ({ page }) => {
-    // CI Chromium finishes the same samples in 28.9–29.5s. The 30s default
-    // expires during reload, before the persisted-filter checks. 60s still bounds a hang.
+    // CI's 30s budget expired during reload on four viewport/theme pairs,
+    // before the persisted-filter checks. One baseline covers every status
+    // toggle. 60s still bounds a hang.
     test.setTimeout(60_000)
     const errors: string[] = []; page.on('pageerror', error => errors.push(error.message))
     const { queries } = await setup(page, width, theme)
