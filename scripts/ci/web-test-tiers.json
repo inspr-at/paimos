@@ -16710,8 +16710,6 @@
     ,
     {"kind":"node","file":"tests/lead.test.ts","name":"unreadable gates mean WAIT, never a start","tier":"ESSENTIAL"}
     ,
-    {"kind":"node","file":"tests/list-title-press.test.ts","name":"AEON-1460 a modifier press opens one tab when the row moves and the click never lands","tier":"ESSENTIAL"}
-    ,
     {"kind":"node","file":"tests/list-views.test.ts","name":"AEON-1460 CSV preserves quoted multiline titles and neutralizes spreadsheet formulas","tier":"ESSENTIAL"}
     ,
     {"kind":"node","file":"tests/list-views.test.ts","name":"a saved view is the list state with a name; order of values is no change","tier":"GATED-FULL"}

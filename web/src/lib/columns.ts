@@ -73,20 +73,6 @@ export function agreedFrameWidth(mid: number | null, next: number | null): numbe
   return next
 }
 
-/** The card width to lay out from one observer delivery. `live` is the card's client width and `box` is the narrowest positive content box in that delivery. A narrower box is this frame only while the viewport shrank and the live read is still the previous width (AEON-1470). A box that disagrees after the live card has moved, or while the viewport did not shrink, is a queued delivery: a stale narrow one must not hide a column (AEON-1532) and a stale wide one must not crush Title (AEON-1401). */
-export function observedCardWidth(live: number, box: number, before: number, viewportShrunk: boolean): number {
-  if (!(live > 0)) return before
-  if (box > 0 && box < live - 0.5 && viewportShrunk && Math.abs(live - before) <= 0.5) return box
-  return live
-}
-
-/** A shrink stays pending when a second viewport event reports the same width. Window and visualViewport both fire for one resize; the second must not drop the shrink before the card's narrow sample arrives. A growth clears it. */
-export function pendingViewportShrink(inner: number, last: number, pending: boolean): boolean {
-  if (inner < last - 0.5) return true
-  if (inner > last + 0.5) return false
-  return pending
-}
-
 /** The card width a resize sample should lay columns out in. A narrower live card is this frame. A wider one is the card when the viewport grew, and the previous frame when it shrank (AEON-1401). */
 export function nextMeasuredCardWidth(current: number, live: number, viewportGrew: boolean): number {
   if (!(live > 0)) return current
@@ -94,28 +80,15 @@ export function nextMeasuredCardWidth(current: number, live: number, viewportGre
   return current
 }
 
-/** The latest agreeing pair that is safe to adopt. A stale first pair is the paint the resize left; the later agreement is the card (AEON-1419). The first pair still replaces a stale narrow box when nothing later agrees (AEON-1532). A later pair that is wider is adopted only when the viewport grew, so one disagreeing pair cannot keep a column hidden (AEON-1570) and a stale wide pair cannot undo a shrink (AEON-1401). A newest sample that has left that width means the card is still moving. */
+/** The first agreeing pair that is safe to adopt. The first pair replaces a stale narrow content box with the live card (AEON-1532). A later pair that is wider is adopted only when the viewport grew, so one disagreeing pair cannot keep a column hidden (AEON-1570) and a stale wide pair cannot undo a shrink (AEON-1401). */
 export function cardWidthAfterSamples(samples: readonly (number | null)[], current: number, viewportGrew: boolean): number | null {
-  let chosen: number | null = null
   for (let i = 0; i + 1 < samples.length; i += 2) {
     const width = agreedFrameWidth(samples[i] ?? null, samples[i + 1] ?? null)
     if (width === null) continue
     if (i > 0 && !viewportGrew && width > current + 0.5) continue
-    chosen = width
+    return width
   }
-  if (chosen === null) return null
-  const newest = samples[samples.length - 1]
-  if (newest === null || Math.abs(newest - chosen) > 0.5) return null
-  return chosen
-}
-
-/** The width to put on screen, or null while another pair should be read. An agreement that is still the width this resize started from is the previous paint. A wider agreement while the viewport did not grow is that previous paint once a narrower card is already on screen. At the sample cap the last allowed agreement stands, and a card that has already left the start width never returns to it. */
-export function cardWidthCommit(agreed: number | null, onScreen: number, before: number, viewportGrew: boolean, sampleCount: number): number | null {
-  if (agreed === null) return null
-  if (!viewportGrew && agreed > onScreen + 0.5) return null
-  if (Math.abs(agreed - before) <= 0.5 && Math.abs(onScreen - before) > 0.5) return null
-  if (sampleCount < CARD_WIDTH_SAMPLE_CAP && Math.abs(agreed - before) <= 0.5) return null
-  return agreed
+  return null
 }
 
 /** Adopt `agreed` only when it still belongs to the card on screen. On a shrink, a pair wider than the card now is the previous frame: taking it lays the wide columns into the narrow card and a later column measures 0 (AEON-1594). A pair that matches the live card, or any pair while the viewport grew, still replaces a stale narrow box (AEON-1532). */

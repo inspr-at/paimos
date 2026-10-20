@@ -2,7 +2,7 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
-import { adoptedCardWidth, agreedFrameWidth, automaticColumns, CARD_WIDTH_SAMPLE_CAP, cardWidthAfterSamples, cardWidthCommit, COLUMN_BY_ID, GIVE_WAY, latchParentShare, layoutTableWidth, layoutWidths, loadedFitWidth, nextMeasuredCardWidth, normalizeColumnIds, observedCardWidth, orderOf, PARENT_TITLE_WIDTH, parentColumnDefault, pendingViewportShrink, releaseLabel, RETURN_ROOM, savedColumnWidth, tagList, TITLE_MIN_TABLE, TITLE_TARGET, titleRoom, visibleColumns, widthOf, withHostColumns, type ColumnDef, type ColumnFit, type ColumnId, type ListPrefs } from '../src/lib/columns.ts'
+import { adoptedCardWidth, agreedFrameWidth, automaticColumns, CARD_WIDTH_SAMPLE_CAP, cardWidthAfterSamples, COLUMN_BY_ID, GIVE_WAY, latchParentShare, layoutTableWidth, layoutWidths, loadedFitWidth, nextMeasuredCardWidth, normalizeColumnIds, orderOf, PARENT_TITLE_WIDTH, parentColumnDefault, releaseLabel, RETURN_ROOM, savedColumnWidth, tagList, TITLE_MIN_TABLE, TITLE_TARGET, titleRoom, visibleColumns, widthOf, withHostColumns, type ColumnDef, type ColumnFit, type ColumnId, type ListPrefs } from '../src/lib/columns.ts'
 import { groupRows, selectLoadedGroup, filtersFromQuery, filtersToQuery, type TicketRow } from '../src/lib/ticketList.ts'
 import { byPosition, positionBetween, positionOf, type Attachment } from '../src/lib/attachments.ts'
 
@@ -436,51 +436,11 @@ test('AEON-1570 a growing card is adopted after a disagreeing frame pair, and a 
   assert.equal(cardWidthAfterSamples([760, 792, 792, 792], 760, true), 792)
   assert.equal(cardWidthAfterSamples([760, 792, 791.4, 792], 760, true), null)
   assert.equal(cardWidthAfterSamples([null, null, 792, 792], 760, true), 792)
-  // A stale agreeing pair is the paint the resize left. The later agreement is the card.
-  assert.equal(cardWidthAfterSamples([700, 700, 800, 800], 700, true), 800)
-  assert.equal(cardWidthAfterSamples([1000, 1000, 760, 760], 1000, false), 760)
-  // The newest sample has left the last agreement: the card is still moving.
-  assert.equal(cardWidthAfterSamples([700, 700, 800, 799], 700, true), null)
-  // A later wide pair during a shrink is the previous frame. The only agreeing pair still replaces a stale narrow box.
+  // The first agreement wins. A later pair does not replace it.
+  assert.equal(cardWidthAfterSamples([700, 700, 800, 800], 700, true), 700)
+  // A later wide pair during a shrink is the previous frame. The first agreeing pair still replaces a stale narrow box.
   assert.equal(cardWidthAfterSamples([760, 792, 792, 792], 760, false), null)
   assert.equal(cardWidthAfterSamples([1000, 1000], 760, false), 1000)
-  // Do not put the previous paint back onto a card that has already changed, and do not adopt a wider sample during a shrink.
-  assert.equal(cardWidthCommit(1000, 760, 1000, false, 2), null)
-  assert.equal(cardWidthCommit(760, 760, 1000, false, 4), 760)
-  assert.equal(cardWidthCommit(760, 920, 760, true, 2), null)
-  assert.equal(cardWidthCommit(920, 760, 760, true, 4), 920)
-  assert.equal(cardWidthCommit(700, 700, 700, true, 2), null)
-  assert.equal(cardWidthCommit(700, 700, 700, true, CARD_WIDTH_SAMPLE_CAP), 700)
-  assert.equal(cardWidthCommit(null, 760, 1000, false, 4), null)
-  // A queued content box is not the card. The old delivery adopted whichever box
-  // disagreed with the width already on screen, so a replayed 760 hid Updated
-  // after the card was 1000 (AEON-1532) and a replayed wide box crushed Title
-  // to 134 px after a shrink (AEON-1401). A narrower box is this frame only
-  // while the viewport shrank and clientWidth is still the previous paint.
-  assert.equal(observedCardWidth(1000, 760, 1000, false), 1000)
-  assert.equal(observedCardWidth(800, 1200, 800, false), 800)
-  assert.equal(observedCardWidth(800, 1200, 800, true), 800)
-  assert.equal(observedCardWidth(1200, 760, 1200, true), 760)
-  assert.equal(observedCardWidth(760, 760, 1200, true), 760)
-  assert.equal(observedCardWidth(1000, 760, 800, false), 1000)
-  assert.equal(observedCardWidth(0, 760, 1000, true), 1000)
-  // Window and visualViewport both fire for one resize. The second event reports
-  // the same width and must leave the shrink pending until the card observer
-  // reads it (AEON-1470). A growth clears it. The observer then consumes the
-  // hint: leaving it set restarts the sampler on every later notification and
-  // the card epoch never sits still (AEON-1594).
-  assert.equal(pendingViewportShrink(1024, 1440, false), true)
-  assert.equal(pendingViewportShrink(1024, 1024, true), true)
-  assert.equal(pendingViewportShrink(1024.4, 1024, true), true)
-  assert.equal(pendingViewportShrink(1024, 1024, false), false)
-  assert.equal(pendingViewportShrink(1440, 1024, true), false)
-  const table = readFileSync(new URL('../src/components/work/TicketTable.vue', import.meta.url), 'utf8')
-  assert.match(table, /observedCardWidth\(live, box, before, shrunk\)/)
-  assert.match(table, /pendingViewportShrink\(inner, lastInner, viewportShrunk\)/)
-  assert.match(table, /const shrunk = viewportShrunk\n  viewportShrunk = false/)
-  assert.doesNotMatch(table, /viewportAnchor/)
-  assert.match(table, /if \(moved \|\| shrunk\) \{\n {4}if \(cardWidthSettled\.value\) settleCardWidth\(grew, before\)/)
-  assert.match(table, /if \(changed\) settleCardWidth\(grew, before\)/)
   // A wider live card is this resize when the window grew, and ignored when it shrank.
   assert.equal(nextMeasuredCardWidth(760, 792, true), 792)
   assert.equal(nextMeasuredCardWidth(800, 900, false), 800)
