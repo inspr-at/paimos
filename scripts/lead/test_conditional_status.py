@@ -185,6 +185,24 @@ echo builder-started > "$S/builder"
         (self.root / "qa/dispatch-marks/slug").write_text("unreadable\n")
         self.assertTrue(guards.stopped_on_purpose(self.root, "slug", "slug.md"))
 
+    def test_qa_transition_is_conditional_and_keeps_terminal_siblings(self):
+        calls = []
+        def run(command, timeout):
+            calls.append(command)
+            self.assertEqual(timeout, 30)
+            return response
+        for response, expected in (
+            ((0, '{"status":"qa"}'), True),
+            ((1, '{"code":"status_mismatch","current_state":"cancelled"}'), False),
+            ((1, '{"code":"status_mismatch","current_state":"done"}'), True),
+            ((1, '{"code":"entry_checks_failed"}'), False),
+            ((1, 'unreadable'), False),
+            ((0, '{}'), False),
+        ):
+            with self.subTest(response=response):
+                self.assertEqual(guards.advance_qa(self.root, "AEON-9001", run)[0], expected)
+                self.assertEqual(calls[-1][-2:], ["--if-status", "in_progress,qa"])
+
 
 def patched_sources(root):
     """Apply exact diff hunks in memory; refuse drift instead of guessing."""
@@ -207,6 +225,10 @@ def patched_sources(root):
             index += 1
             while index < len(lines) and not lines[index].startswith(("@@ ", "--- a/")):
                 line = lines[index]
+                # Git accepts an empty context line for a blank source line.
+                # This keeps the tracked patch free of trailing whitespace.
+                if line == "\n":
+                    line = " \n"
                 if line[0] in " -":
                     if cursor >= len(original) or original[cursor] != line[1:]:
                         raise ValueError(f"harness drift: {name}:{cursor+1}")
@@ -324,6 +346,29 @@ def integration_tests(sources):
             # when the ticket stayed open. This is a recorded stub, never git.
             self.assertTrue(self.slug in st["precheck"] or self.effects)
             self.assertTrue(st["gated_runs"])
+
+        def test_delivery_cancel_during_qa_write_never_arms_enqueue(self):
+            head = "abcdef0123456789abcdef0123456789abcdef0123"
+            (self.root / "qa/gate-review.md").write_text(f"(head {head})")
+            calls = []
+            def run(command, cwd=None, timeout=600):
+                text = command if isinstance(command, str) else " ".join(command)
+                if isinstance(command, list) and command[1:3] == ["issue", "update"]:
+                    calls.append(command)
+                    self.state = "cancelled"  # after the read, before the atomic write
+                    return 1, '{"code":"status_mismatch","current_state":"cancelled"}'
+                if "rev-parse HEAD" in text:
+                    return 0, head
+                if "pr list" in text:
+                    return 0, "1"
+                return self.run_effect(command, cwd, timeout)
+            self.ns["sh"] = run
+            self.assertFalse(self.ap.ship(self.slug, self.key, "review", {}))
+            self.assertEqual(len(calls), 1)
+            self.assertEqual(calls[0][-2:], ["--if-status", "in_progress,qa"])
+            self.assertEqual(self.state, "cancelled")
+            self.assertEqual(len(self.effects), 1)  # push happened before the cancel
+            self.assertIn("git push", self.effects[0])
 
     return Integration
 

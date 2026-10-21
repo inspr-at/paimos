@@ -68,7 +68,9 @@ Autopilot first-build and follow-up paths, precheck requests, CI-first pushes an
 green-CI gates honour stop records and current cancellation. Unreadable tracker
 status retains pending work for retry. Stop records belong to the dispatched
 brief and epoch; older records do not suppress a later dispatch. Checks repeat
-after GitHub/CI reads before push or gate. These external actions cannot share
+after GitHub/CI reads before push or gate. The delivery QA write also uses a
+precondition; failure defers enqueue, and completed sibling tickets keep their
+terminal status. These external actions cannot share
 the API transaction; the atomic guarantee applies to the ticket status claim.
 
 Run the stateful stub scenarios with the real integration patch applied only in
@@ -78,7 +80,8 @@ memory; tracker, push, builder and gate effects stay stubbed:
 python3 scripts/lead/test_conditional_status.py --harness-source /Users/markus/.aeon/lead/aeon
 ```
 
-The two Go regression tests are registered as ESSENTIAL. The API test proves the
+The API and CLI regression tests and the LEAD helper suite are registered as
+ESSENTIAL. The API test proves the
 cancel/start overlap by observing PostgreSQL's lock wait, then checks the 409,
 unchanged fields, audit count, permission/tenant boundary and revision behavior.
 The CLI test checks conditional payloads, structured errors, no retry, validation

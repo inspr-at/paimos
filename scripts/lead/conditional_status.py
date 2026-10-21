@@ -98,3 +98,24 @@ def delivery_blocked(root, slug, key, run, brief=None):
     if state == "cancelled":
         return "stopped", "ticket is cancelled"
     return None
+
+
+def advance_qa(root, key, run):
+    """Conditionally advance active work; never reopen a cancelled/terminal item.
+
+    A completed sibling package may still ship, retaining its terminal state.
+    Any other refusal/unknown result defers delivery before enqueue is armed.
+    """
+    try:
+        rc, raw = run([str(Path(root) / "pm"), "issue", "update", key, "--json",
+                       "--status", "qa", "--if-status", "in_progress,qa"], timeout=30)
+        if len(raw) > MAX_RECORD_BYTES:
+            raise ValueError("unreadable QA result")
+        result = json.loads(raw)
+        if rc == 0 and result.get("status") == "qa":
+            return True, "QA"
+        if rc != 0 and result.get("code") == "status_mismatch" and result.get("current_state") in ("done", "delivered", "accepted", "archived"):
+            return True, result["current_state"] + " (kept)"
+    except (OSError, ValueError, KeyError, TypeError, AttributeError, TimeoutError, subprocess.TimeoutExpired):
+        pass
+    return False, "conditional QA update refused or unreadable"

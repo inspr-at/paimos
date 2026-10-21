@@ -5,12 +5,12 @@
  """
  import calendar, datetime, json, os, re, subprocess, time, glob
 +import conditional_status
- 
+
  S = '/Users/markus/.aeon/lead/aeon'
  W = '/Users/markus/Code/aeon-worktrees'
 @@ -173,16 +174,11 @@
- 
- 
+
+
  def stopped_on_purpose(slug, brief):
 -    """pause-workers.sh TERM/KILL records 'slug<TAB>brief<TAB>epoch' in qa/stopped-runs.txt. A killed run writes no exit line, so
 -    last_exit() returns an OLDER run's exit. The run being judged is the slug's latest start in start-queue.nohup.log (UTC, seconds);
@@ -27,13 +27,13 @@
 +
 +def delivery_blocked(slug, key, brief=None):
 +    return conditional_status.delivery_blocked(S, slug, key, sh, brief)
- 
- 
+
+
  def capacity_only(slug):
 @@ -317,8 +313,11 @@
      rc, out = sh(f"gh pr view {pr} --repo {R} --json mergeable --jq .mergeable")
      return rc == 0 and out.strip() == 'CONFLICTING'
- 
+
 -def precheck_push(slug, key):
 +def precheck_push(slug, key, brief=None):
      """Push the round's head and open/reuse the PR, held (PRECHECK). Returns (state, pr, head_or_reason)."""
@@ -54,15 +54,15 @@
      if rc != 0:
          return ('error', '', 'push failed: ' + out[-160:])
 @@ -365,7 +367,8 @@
- 
- 
+
+
  def register_precheck(st, slug, key, label):
 -    st.setdefault('precheck', {})[slug] = {'key': key, 'label': label, 'state': 'push', 'since': time.time()}
 +    mark = conditional_status.dispatch_mark(S, slug)
 +    st.setdefault('precheck', {})[slug] = {'key': key, 'label': label, 'state': 'push', 'since': time.time(), 'brief': mark[1] if mark else None}
      log(f'{slug}: {label} finished → CI-first: push + PR now, gate after green CI')
- 
- 
+
+
 @@ -449,6 +452,10 @@
      if why:
          log(f'ESCALATE precheck request refused ({slug or "unparsable"}): {why}', esc=True)
@@ -73,7 +73,7 @@
 +        return (None, '') if block[0] == 'retry' else ('refused', slug)
      register_precheck(st, slug, key, 'LEAD decision (precheck request)')
      return 'taken', slug
- 
+
 @@ -461,10 +468,16 @@
          queued = ''
      for slug, e in list(pc.items()):
@@ -132,7 +132,26 @@
      rc, out = sh(push, cwd=wt)
      if rc != 0:
          log(f'ESCALATE {slug}: push failed: {out[-200:]}', esc=True)
-@@ -782,6 +805,10 @@
+@@ -668,9 +691,16 @@
+     if not pr:
+         log(f'ESCALATE {slug}: no PR could be opened', esc=True)
+         return True
++    qa_ok, qa_note = conditional_status.advance_qa(S, key, sh)
++    if not qa_ok:
++        log(f'{slug}: {qa_note}; enqueue deferred')
++        return False
++    block = delivery_blocked(slug, key)
++    if block:
++        log(f'{slug}: delivery deferred/stopped: {block[1]}')
++        return block[0] == 'stopped'
+     subprocess.Popen([f'{S}/arm-enqueue.sh', str(pr), head, f'autopilot ship {slug}'])  # AEON-1342: the one enqueue path
+-    sh(f'{S}/pm issue update {key} --status qa')
+-    log(f'{slug}: gate {rev} ok → pushed {head[:8]}, PR #{pr}, enqueue armed, {key} → QA')
++    log(f'{slug}: gate {rev} ok → pushed {head[:8]}, PR #{pr}, enqueue armed, {key}: {qa_note}')
+     followup(slug, key, rev)
+     return True
+
+@@ -782,6 +812,10 @@
          brief = parts[3]
          if EXCLUDE.match(slug) or re.match(r'^aeon-(633|596-p6|292-ui|665|64[89]-wn|65[0-5]-wn)', slug) or '-fix' in brief or '-mm' in brief or re.search(r'-(tick|mk)\d+\.md$', brief):
              continue  # NOSHIP slugs that are NOT chain.py families still get their first gate (716 sat ungated 4 h, 2026-10-06); shipping stays manual
@@ -143,7 +162,7 @@
          ex = last_exit(slug)
          runkey = f'{slug}|{brief}|{ex}|first'
          if not ex or runkey in st['gated_runs'] or running(slug):
-@@ -807,6 +834,8 @@
+@@ -807,6 +841,8 @@
              st['gated_runs'].append(runkey)
              log(f'ESCALATE {slug}: first build ({brief}) ended unfinished at pct {uf[0]} → not gated; LEAD decides. Note: {uf[1]}', esc=True)
              continue
@@ -152,7 +171,7 @@
          if ci_first():
              st['gated_runs'].append(runkey)
              register_precheck(st, slug, parts[1], f'first build ({brief})')
-@@ -819,6 +848,10 @@
+@@ -819,6 +855,10 @@
          # (P1 -integ and P3 -mm2 sat ungated as HELD). Plain -mm.md stays with mm-autopush; -evidence-* rounds add evidence only.
          if EXCLUDE.match(slug) or not re.search(r'-(fix\d*|tick\d+|mk\d+|integ|mm\d+|mm-final)\.md$', brief):
              continue
@@ -163,7 +182,7 @@
          ex = last_exit(slug)
          runkey = f'{slug}|{brief}|{ex}'
          if not ex or runkey in st['gated_runs'] or running(slug):
-@@ -840,6 +873,8 @@
+@@ -840,6 +880,8 @@
          if uf:
              st['gated_runs'].append(runkey)
              log(f'ESCALATE {slug}: round ({brief}) ended unfinished at pct {uf[0]} → not gated; LEAD decides. Note: {uf[1]}', esc=True)
@@ -172,7 +191,7 @@
              continue
          if ci_first():
              st['gated_runs'].append(runkey)
-@@ -871,6 +906,12 @@
+@@ -871,6 +913,12 @@
              continue
          if newest_review_for(slug) != name:  # an older verdict; a newer one supersedes it
              st['seen_reviews'].append(name)
@@ -187,7 +206,7 @@
              queue_fix(slug, key, name, st)
 --- a/dispatch.sh
 +++ b/dispatch.sh
-@@ -5,10 +5,18 @@
+@@ -5,6 +5,7 @@
  set -uo pipefail
  KEY=$1 SLUG=$2 BASE=$3 H=$4 MODEL=$5 EFFORT=$6 MAXMIN=$7 BRIEF=$8 GATE=${9:-cross-family}
  S=/Users/markus/.aeon/lead/aeon
@@ -195,18 +214,21 @@
  W=/Users/markus/Code/aeon-worktrees
  cd /Users/markus/Code/aeon || exit 1
  # Hard guard (audit 2026-10-04): never two workers on one slug/branch, whoever queued it.
- /Users/markus/.aeon/lead/aeon/worker-running.sh "$SLUG" && { echo "refusing: a worker for $SLUG is already running"; exit 3; }
+@@ -14,6 +15,13 @@
+ FAMS2=$(grep -E "Z start $SLUG " "$W/$SLUG.log" 2>/dev/null | awk '{print $4}' | grep -xE 'codex|claude|grok' | sort -u | tr '\n' ' ')
+ if [ "$(echo $FAMS2 | wc -w | tr -d ' ')" -ge 2 ] && ! case " $FAMS2 " in *" $H "*) true;; *) false;; esac; then
+   echo "refusing: two-family rule (authors $FAMS2, would add $H)"; exit 3
++fi
 +# AEON-1345: unreadable status defers before refinement/field reads.
 +if STATUS=$(ticket_startable "$KEY"); then :; else
 +  RC=$?
 +  if [ "$RC" = 3 ]; then echo "refusing: ticket status unreadable: $KEY; defer";
 +  else echo "refusing: $KEY is cancelled"; fi
 +  exit "$RC"
-+fi
+ fi
  # Refinement gate (LEAD 2026-10-12 23:20, Markus: "before starting work — do refinement for each ticket … then refine it if it makes
  # sense, or cancel it. finally you decide WHEN"): a FIRST build (brief = <slug>.md) starts only when the ticket carries a comment
- # starting with "Refinement (LEAD" (vision fit, Tick alignment for UI, triage verdict, timing). Fix/mm/evidence rounds are exempt.
-@@ -87,8 +95,11 @@
+@@ -93,8 +101,11 @@
  M=$(mktemp "$S/marker.XXXXXX")
  printf 'I work on this — session: %s (assigned at launch; see /agents); role: builder (%s %s %s); coordinator: aeon-lead-claude (Aeon session %s); started: %s. Branch work/%s from %s. Gate: %s.\n' \
    "$SLUG" "$H" "$MODEL" "$EFFORT" "$(cat "$HOME/.aeon/sessions/LEAD-current/session.id" 2>/dev/null || echo unknown)" "$(date -u +%FT%TZ)" "$SLUG" "$BASE" "$GATE" > "$M"
@@ -222,12 +244,12 @@
  mkdir -p "$S/qa/dispatch-marks" && DM=$(mktemp "$S/qa/dispatch-marks/.$SLUG.XXXXXX") && \
 --- a/start-queue.sh
 +++ b/start-queue.sh
-@@ -183,7 +183,7 @@
+@@ -213,7 +213,7 @@
    # watchdog 2026-10-05: dispatch runs under a 300 s alarm (a hung start stalled the queue ~50 min); a killed start lands in REFUSED + ESCALATE.
    # audit 2026-10-04: a slug that already has a running worker is deferred to the end of the queue, never started twice
    # LEAD 2026-10-19 (review 122820): a busy hold lock while dispatch adds a UI hold is transient too → defer, never drop
--  case "$OUT" in *"refusing: a worker"*|*"refusing: plan gate"*|*"refusing: hold lock busy"*)
-+  case "$OUT" in *"refusing: a worker"*|*"refusing: plan gate"*|*"refusing: hold lock busy"*|*"refusing: ticket status unreadable"*|*"refusing: ticket claim deferred"*)
+-  case "$OUT" in *"refusing: a worker"*|*"refusing: plan gate"*|*"refusing: hold lock busy"*|*"refusing: two-family rule"*)
++  case "$OUT" in *"refusing: a worker"*|*"refusing: plan gate"*|*"refusing: hold lock busy"*|*"refusing: two-family rule"*|*"refusing: ticket status unreadable"*|*"refusing: ticket claim deferred"*)
        # One locked rotation preserves the pending item even if acquiring the
        # lock times out. Never remove it before a second, fallible append.
        HARNESS_S="$S" "$SELF" --queue-rotate "$line" || exit

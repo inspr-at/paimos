@@ -2,14 +2,28 @@
 package cli
 
 import (
+	"context"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"os/exec"
 	"path/filepath"
 	"reflect"
 	"strings"
 	"testing"
+	"time"
 )
+
+// Keep the shipped LEAD helpers on the PR's ESSENTIAL lane as well as the
+// coordinator's in-memory integration run. All tracker/builder effects are stubs.
+func TestLeadConditionalStatusGuards(t *testing.T) {
+	ctx, cancel := context.WithTimeout(t.Context(), 30*time.Second)
+	defer cancel()
+	out, err := exec.CommandContext(ctx, "python3", "../../scripts/lead/test_conditional_status.py").CombinedOutput()
+	if err != nil {
+		t.Fatalf("LEAD cancellation scenarios: %v\n%s", err, out)
+	}
+}
 
 // Risk: the CLI drops the precondition, retries unconditionally, or reports a
 // cancelled start as successful. The stub cancels after the lookup snapshot.

@@ -5184,6 +5184,8 @@
     ,
     {"kind":"go","package":"internal/cli","name":"TestLeadCLIContractAndProofPrivacy","tier":"ESSENTIAL"}
     ,
+    {"kind":"go","package":"internal/cli","name":"TestLeadConditionalStatusGuards","tier":"ESSENTIAL"}
+    ,
     {"kind":"go","package":"internal/cli","name":"TestLeadDecisionCLIReadAndRecord","tier":"GATED-FULL"}
     ,
     {"kind":"go","package":"internal/cli","name":"TestLeadDecisionCLIRejectsUnboundedAndPrivateEvidence","tier":"GATED-FULL"}
