@@ -84,7 +84,7 @@ const noOutcome = async (page: Page, where: string) => expect(await page.locator
 const goalRow = (page: Page, id: string) => page.locator(`.goal[data-goal-id="${id}"]`)
 async function newGoalEntry(page: Page, phone: boolean): Promise<Locator> {
   if (!phone) return page.locator('.new-goal')
-  await page.locator('.more-btn').click()
+  await page.locator('.projects-toolbar .more-btn').click()
   return page.getByRole('menuitem', { name: 'New goal' })
 }
 
@@ -103,7 +103,7 @@ for (const [width, height] of [[1440, 900], [1024, 800], [390, 844]] as const) {
 
       // movementPx 0: the toolbar and the rows stay where they are while the sheet opens and closes.
       const controls: Record<string, Locator> = { search: page.locator('.project-search'), display: page.locator('.display-btn'), row: goalRow(page, 'g-agent').locator('.goal-row') }
-      if (phone) controls.more = page.locator('.more-btn')
+      if (phone) controls.more = page.locator('.projects-toolbar .more-btn')
       else { controls.newGoal = page.locator('.new-goal'); controls.view = page.locator('.view-seg') }
       const guard = await controlStability(page, controls)
       const sheet = page.locator('dialog.project-settings-sheet')

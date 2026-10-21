@@ -8,6 +8,7 @@
 import { computed, ref } from 'vue'
 import { APIError } from '../../lib/api'
 import { createGoal, landsDay, updateGoal, type Goal } from '../../lib/goals'
+import { targetDateText } from '../../lib/importDraft'
 import { useIdentityScope } from '../../lib/useIdentityScope'
 import type { Project } from '../../stores/projects'
 import KeyCap from '../KeyCap.vue'
@@ -30,10 +31,8 @@ const busy = ref(false), error = ref('')
 // A place the person cannot write anymore (or a goal elsewhere) is still named while editing.
 const editedPlace = computed(() => editing?.projects.find(badge => badge.id === editing.project_id))
 const valid = computed(() => !!title.value.trim() && title.value.trim().length <= 300 && !!place.value && !busy.value)
-const dateText = (value: string) => {
-  const [y, m, d] = value.split('-').map(Number)
-  return y && m && d ? new Date(y, m - 1, d).toLocaleDateString('en', { weekday: 'short', day: 'numeric', month: 'short', year: 'numeric' }) : value
-}
+// The same day text as the New project sheet (one app language: English).
+const dateText = (value: string) => targetDateText('en', value)
 
 function submit() {
   if (!valid.value) return
