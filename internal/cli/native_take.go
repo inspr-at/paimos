@@ -25,12 +25,13 @@ import (
 // I2 mounts this additive node in cmdSession(). It never changes the existing
 // session-start attribution or the aeon attach ISSUE FILE attachment commands.
 func (rt *runtime) cmdSessionTake() *Command {
-	var project, socket, state string
+	var project, socket, state, personSession string
 	var handBack bool
 	return &Command{Name: "take", Short: "Take exclusive local control of a qualified native TUI", Use: "session take OWNED_ID --project KEY [--hand-back]", minArgs: 1, maxArgs: 1,
 		Long: "A qualified TUI replaces the structured writer only after verified exit. Esc belongs to the TUI. Ctrl+] then d detaches; Ctrl+] then r hands back. EOF and signals leave the owned PTY running without a controller. --hand-back explicitly returns an already taken session.",
 		addFlags: func(fs *flagSet) {
 			fs.string(&project, "project", 0, "project key or UUID (required)")
+			fs.string(&personSession, "session-cookie-file", 0, "existing person session cookie file; API keys are refused")
 			fs.string(&socket, "socket", 0, "protected owner agentd socket")
 			fs.string(&state, "setup-root", 0, "private pairing state root")
 			fs.bool(&handBack, "hand-back", 0, "explicitly return a taken session after verified PTY exit")
@@ -60,6 +61,10 @@ func (rt *runtime) cmdSessionTake() *Command {
 			defer cancel()
 			readCtx, finish := context.WithTimeout(ctx, nativecontract.LocalOperationSeconds*time.Second)
 			defer finish()
+			proof, person, err := rt.nativePersonSession(readCtx, personSession)
+			if err != nil {
+				return err
+			}
 			projectID, err := rt.projectIdentityCtx(readCtx, project)
 			if err != nil {
 				return err
@@ -68,7 +73,7 @@ func (rt *runtime) cmdSessionTake() *Command {
 				ctx, done := context.WithTimeout(ctx, nativecontract.LocalOperationSeconds*time.Second)
 				defer done()
 				var raw json.RawMessage
-				if err := rt.doCtx(ctx, http.MethodGet, "/api/projects/"+projectID+"/native-sessions/"+args[0], nil, &raw); err != nil {
+				if err := rt.personClient.DoWithHeaders(ctx, http.MethodGet, "/api/projects/"+projectID+"/native-sessions/"+args[0], nil, &raw, map[string]string{nativeattach.LocalPersonHeader: nativeattach.LocalPersonVersion}); err != nil {
 					return nativecontract.SessionView{}, err
 				}
 				v, err := nativecontract.NewValidator()
@@ -79,7 +84,7 @@ func (rt *runtime) cmdSessionTake() *Command {
 					return nativecontract.SessionView{}, errors.New("invalid owned session projection")
 				}
 				var view nativecontract.SessionView
-				if json.Unmarshal(raw, &view) != nil || view.CurrentBinding == nil || view.OwnedSessionID != args[0] || view.CurrentBinding.ProjectID != projectID {
+				if json.Unmarshal(raw, &view) != nil || view.CurrentBinding == nil || view.OwnedSessionID != args[0] || view.CurrentBinding.ProjectID != projectID || view.CurrentBinding.TenantID != person.Tenant.ID {
 					return view, errors.New("owned session projection identity mismatch")
 				}
 				return view, nil
@@ -93,11 +98,11 @@ func (rt *runtime) cmdSessionTake() *Command {
 			}
 			if socket == "" {
 				if state == "" {
-					inst, err := rt.resolve()
+					root, err := rt.nativePairingRoot()
 					if err != nil {
 						return err
 					}
-					state = inst.AgentdStateRoot
+					state = root
 					if state == "" {
 						home, err := os.UserHomeDir()
 						if err != nil {
@@ -115,7 +120,7 @@ func (rt *runtime) cmdSessionTake() *Command {
 				}
 				socket = local.Socket
 			}
-			wire, err := nativepty.NewSocketWire(socket)
+			wire, err := nativepty.NewSocketWire(socket, proof)
 			if err != nil {
 				return err
 			}

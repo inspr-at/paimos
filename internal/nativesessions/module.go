@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/inspr-at/paimos/internal/httpapi"
+	"github.com/inspr-at/paimos/internal/nativeattach"
 	"github.com/inspr-at/paimos/internal/nativecontract"
 	"github.com/inspr-at/paimos/internal/nativereceipts"
 	"github.com/inspr-at/paimos/internal/nativesessions/stream"
@@ -109,7 +110,7 @@ func (m *Module) serve(w http.ResponseWriter, r *http.Request, route nativecontr
 	}
 	// The same person-only boundaries apply before either enabled or disabled
 	// handlers inspect bodies or look up targets.
-	if p.Kind == tenant.Agent && personOnly(r) {
+	if personOnly(r) && (p.Kind != tenant.Person || p.KeyID != "" || p.AuthKeyID != "" || p.KeyCreatorID != "") {
 		writeReason(w, http.StatusForbidden, nativecontract.ReasonWrongPrincipal)
 		return
 	}
@@ -129,6 +130,13 @@ func (m *Module) serve(w http.ResponseWriter, r *http.Request, route nativecontr
 	defer cancel()
 	actor := nativecontract.Actor{TenantID: p.TenantID, PrincipalID: p.ID, PrincipalKind: string(p.Kind), KeyCeiling: p.Scopes}
 	ctx = context.WithValue(ctx, projectKey{}, r.PathValue("projectId"))
+	if len(r.Header.Values(nativeattach.LocalPersonHeader)) == 1 && r.Header.Get(nativeattach.LocalPersonHeader) == nativeattach.LocalPersonVersion && p.Kind == tenant.Person && p.KeyID == "" && p.AuthKeyID == "" && p.KeyCreatorID == "" && r.Header.Get("Authorization") == "" {
+		if len(r.Header.Get(nativecontract.ControlHeader)) > 4096 || len(r.Header.Values(nativecontract.ControlHeader)) > 1 {
+			nativeError(w, invalid(nativecontract.ReasonBufferFull))
+			return
+		}
+		ctx = nativeattach.WithLocalPersonProjection(ctx, r.Header.Get(nativecontract.ControlHeader))
+	}
 	r = r.WithContext(ctx)
 	var daemon nativecontract.DaemonActor
 	if r.PathValue("projectId") == "" && route.OperationID != "endNativeSessionControl" {
@@ -174,15 +182,15 @@ func (m *Module) serve(w http.ResponseWriter, r *http.Request, route nativecontr
 	// mutating stores and native-context lookups. Agent keys never receive URLs.
 	switch value := result.(type) {
 	case nativecontract.SessionView:
-		result = nativecontract.PersonProjection(value, actor.PrincipalKind, true)
+		result = nativecontract.PersonProjection(value, actor.PrincipalKind, !nativeattach.LocalPersonProjection(ctx))
 	case nativecontract.OperationResult:
 		if value.Session != nil {
-			view := nativecontract.PersonProjection(*value.Session, actor.PrincipalKind, true)
+			view := nativecontract.PersonProjection(*value.Session, actor.PrincipalKind, !nativeattach.LocalPersonProjection(ctx))
 			value.Session = &view
 		}
 		result = value
 	case nativecontract.AttachResult:
-		value.Snapshot = nativecontract.PersonProjection(value.Snapshot, actor.PrincipalKind, true)
+		value.Snapshot = nativecontract.PersonProjection(value.Snapshot, actor.PrincipalKind, !nativeattach.LocalPersonProjection(ctx))
 		result = value
 	}
 	if err = m.validateResponse(route.ResponseSchema, result); err != nil {
@@ -351,7 +359,7 @@ func (m *Module) read(w http.ResponseWriter, r *http.Request, route nativecontra
 		return nil, err
 	}
 	if route.OperationID == "getNativeSession" {
-		return nativecontract.PersonProjection(view, actor.PrincipalKind, true), nil
+		return nativecontract.PersonProjection(view, actor.PrincipalKind, !nativeattach.LocalPersonProjection(ctx)), nil
 	}
 	if view.CurrentBinding == nil {
 		return nil, invalid(nativecontract.ReasonWrongGeneration)

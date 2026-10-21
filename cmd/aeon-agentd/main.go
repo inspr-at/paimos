@@ -25,8 +25,11 @@ import (
 	"github.com/inspr-at/paimos/internal/agentdwire"
 	"github.com/inspr-at/paimos/internal/agentsetup"
 	"github.com/inspr-at/paimos/internal/harnesslaunch"
+	"github.com/inspr-at/paimos/internal/nativeattach"
+	"github.com/inspr-at/paimos/internal/nativecontract"
 	"github.com/inspr-at/paimos/internal/nativeintegration"
 	"github.com/inspr-at/paimos/internal/nativeprofiles"
+	"github.com/inspr-at/paimos/internal/nativestream"
 	"github.com/inspr-at/paimos/internal/version"
 )
 
@@ -470,5 +473,15 @@ func pairedNativeSessions(ctx context.Context, remote *agentd.Remote, c agentset
 	if !ok {
 		return nil
 	}
-	return agentd.NativeProduction(remote, c.ComputerID, profiles.owner, profiles.resolver, nativeintegration.Capabilities())
+	config := agentd.NativeProduction(remote, c.ComputerID, profiles.owner, profiles.resolver, nativeintegration.Capabilities())
+	bridge, err := nativeattach.NewPersonBridge(c.Origin, c.TenantID, config.Host)
+	if err != nil {
+		return nil
+	}
+	projector, err := nativestream.NewProjector(nativestream.ExportPolicy{Text: func(_ context.Context, _ nativecontract.Binding, text string) (string, error) { return text, nil }})
+	if err != nil {
+		return nil
+	}
+	config.Host, config.LocalAuthority, config.Projector = bridge, bridge, projector
+	return config
 }

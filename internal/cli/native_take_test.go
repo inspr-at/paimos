@@ -50,6 +50,8 @@ func TestNativeTakeRejectsForeignProjectionBeforeSocket(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		switch r.URL.Path {
+		case "/api/me":
+			_ = json.NewEncoder(w).Encode(client.Me{Principal: client.Principal{ID: view.OwnerPersonID, TenantID: view.CurrentBinding.TenantID, Kind: "person"}, Tenant: client.Tenant{ID: view.CurrentBinding.TenantID}})
 		case "/api/projects/lookup":
 			_ = json.NewEncoder(w).Encode(map[string]string{"id": project})
 		case "/api/projects/" + project + "/native-sessions/" + wanted:
@@ -65,7 +67,7 @@ func TestNativeTakeRejectsForeignProjectionBeforeSocket(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer input.Close()
-	rt := &runtime{stdin: input, stdout: &bytes.Buffer{}, stderr: &bytes.Buffer{}, personClient: client.New(server.URL, testKey)}
+	rt := &runtime{stdin: input, stdout: &bytes.Buffer{}, stderr: &bytes.Buffer{}, personClient: client.NewSession(server.URL, strings.Repeat("e", 64))}
 	cmd := rt.cmdSessionTake()
 	pos, err := rt.parse(cmd, []string{wanted, "--project", "AEON", "--hand-back", "--socket", "/must-not-open"})
 	if err == nil {

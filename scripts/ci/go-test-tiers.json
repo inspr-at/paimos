@@ -5248,6 +5248,8 @@
     ,
     {"kind":"go","package":"internal/cli","name":"TestNativeAttachRejectsMismatchedProjection","tier":"NIGHTLY"}
     ,
+    {"kind":"go","package":"internal/cli","name":"TestNativeCommandsRequireIndependentPersonSession","tier":"ESSENTIAL"}
+    ,
     {"kind":"go","package":"internal/cli","name":"TestNativeRoleRecipesRequireSeparateAuthority","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/cli","name":"TestNativeSessionCLIStartsOnlyThroughOwningDaemon","reason":"AEON-1261: native coordinator authority, writer ownership and exact delivery receipts","tier":"ESSENTIAL"}
@@ -8575,6 +8577,8 @@
     {"kind":"go","package":"internal/nativeattach","name":"TestComposerReceiptsAndEscapeLeaveSessionRunning","tier":"NIGHTLY"}
     ,
     {"kind":"go","package":"internal/nativeattach","name":"TestFakeSocketDetachViewerAndStaleBinding","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/nativeattach","name":"TestNativePersonBootstrapAttachTakeHandBack","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/nativeattach","name":"TestStreamRejectsSuccessorBeforeRendering","tier":"NIGHTLY"}
     ,

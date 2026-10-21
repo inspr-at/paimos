@@ -65,6 +65,7 @@ import (
 	"github.com/inspr-at/paimos/internal/inbox"
 	"github.com/inspr-at/paimos/internal/modelprefs"
 	"github.com/inspr-at/paimos/internal/modelregistry"
+	"github.com/inspr-at/paimos/internal/nativeattach"
 	"github.com/inspr-at/paimos/internal/nativecontract"
 	"github.com/inspr-at/paimos/internal/nativesessions/consent"
 	"github.com/inspr-at/paimos/internal/nativesessions/interaction"
@@ -182,7 +183,7 @@ func (s *nativeSessionStore) AuthenticateViewer(r *http.Request) (nativecontract
 }
 
 func (s *nativeSessionStore) Attach(ctx context.Context, actor nativecontract.Actor, in nativecontract.AttachIntent) (nativecontract.AttachResult, error) {
-	if in.Mode == "control" {
+	if in.Mode == "control" && !nativeattach.LocalPersonProjection(ctx) {
 		// Controller acquisition must wait for the private capability transport
 		// and final command-write fence; an unusable lease is not a successful attach.
 		return nativecontract.AttachResult{}, nativestream.Refuse(nativecontract.ReasonQualificationMissing)
@@ -199,11 +200,11 @@ func (s *nativeSessionStore) Attach(ctx context.Context, actor nativecontract.Ac
 }
 
 func (s *nativeSessionStore) Renew(ctx context.Context, actor nativecontract.Actor, in nativecontract.AttachRenew) (nativecontract.AttachResult, error) {
-	if in.ControllerEpoch != nil {
+	if in.ControllerEpoch != nil && !nativeattach.LocalPersonProjection(ctx) {
 		// Public renewal has no private capability transport seam in C0 yet.
 		return nativecontract.AttachResult{}, nativestream.Refuse(nativecontract.ReasonGrantMissing)
 	}
-	result, err := s.controls.Renew(ctx, actor, in, "")
+	result, err := s.controls.Renew(ctx, actor, in, nativeattach.LocalControlCapability(ctx))
 	if err != nil {
 		return result, err
 	}
@@ -281,15 +282,22 @@ func (s *nativeSessionStore) project(ctx context.Context, actor nativecontract.A
 			view.Quota = nil
 			view.Capabilities.TerminalView, view.Capabilities.Expert = false, false
 		}
-		// Public v1 is read-only for native terminal handoff.
-		view.Capabilities.Take, view.Capabilities.TakeSupported = false, false
+		// CLI projection retains only currently qualified take capability. The
+		// presentation selector grants no mutation or terminal-export authority.
+		if !nativeattach.LocalPersonProjection(ctx) {
+			view.Capabilities.Take, view.Capabilities.TakeSupported = false, false
+		} else {
+			view.Capabilities.Take = view.Capabilities.Take && s.authority.consent.Capabilities.Take
+			view.Capabilities.TakeSupported = view.Capabilities.TakeSupported && s.authority.consent.Capabilities.TakeSupported
+		}
 		// This composition has no qualified owner watch-export adapter. A
 		// stored capability or URL cannot substitute for that current authority.
 		view.Capabilities.Expert, view.Capabilities.TerminalView = false, false
 		view.TerminalViewerURL = nil
 		view.Capabilities.ChatSupported = view.Capabilities.ChatSupported && s.authority.consent.Capabilities.ChatSupported
 		view.Capabilities.Input = view.Capabilities.Input && view.Capabilities.ChatSupported
-		if _, err := s.authority.SessionTx(ctx, tx, *view.CurrentBinding); err != nil {
+		current, err := s.authority.SessionTx(ctx, tx, *view.CurrentBinding)
+		if err != nil {
 			var validation *nativecontract.ValidationError
 			var denied *nativestream.Failure
 			if !errors.As(err, &validation) && !errors.As(err, &denied) {
@@ -298,6 +306,9 @@ func (s *nativeSessionStore) project(ctx context.Context, actor nativecontract.A
 			view.Capabilities = nativecontract.Capabilities{Steer: "unsupported", Quota: "unsupported", QualificationDigest: view.Capabilities.QualificationDigest}
 			view.TerminalViewerURL = nil
 			view.Quota = nil
+		} else if nativeattach.LocalPersonProjection(ctx) {
+			view.Capabilities.Take = current.View.Capabilities.Take && s.authority.consent.Capabilities.Take
+			view.Capabilities.TakeSupported = current.View.Capabilities.TakeSupported && s.authority.consent.Capabilities.TakeSupported
 		}
 		return nil
 	})

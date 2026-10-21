@@ -185,7 +185,7 @@ paths:
               schema:
                 $ref: "#/components/schemas/NativeError"
   /projects/{projectId}/native-sessions/{ownedSessionId}:
-    parameters: [{"name": "projectId", "in": "path", "required": true, "schema": {"type": "string", "format": "uuid"}}, {"name": "ownedSessionId", "in": "path", "required": true, "schema": {"type": "string", "format": "uuid"}}]
+    parameters: [{"name": "projectId", "in": "path", "required": true, "schema": {"type": "string", "format": "uuid"}}, {"name": "ownedSessionId", "in": "path", "required": true, "schema": {"type": "string", "format": "uuid"}}, {"name": "X-Aeon-Native-Local-Person", "in": "header", "required": false, "description": "Selects the local CLI projection for an authenticated person session; conveys no authority and does not enable unqualified native capabilities.", "schema": {"type": "string", "enum": ["1"]}}]
     get:
       operationId: "getNativeSession"
       description: "C0 mounts an authenticated disabled handler returning feature_disabled/503 with zero database or native side effects. Enabled behavior is reserved for qualified I1/I2 wiring. Authority: harness.read and current target visibility; redact account/private facts for other readers"
@@ -1242,7 +1242,7 @@ paths:
               schema:
                 $ref: "#/components/schemas/NativeError"
   /projects/{projectId}/native-sessions/{ownedSessionId}/attach:
-    parameters: [{"name": "projectId", "in": "path", "required": true, "schema": {"type": "string", "format": "uuid"}}, {"name": "ownedSessionId", "in": "path", "required": true, "schema": {"type": "string", "format": "uuid"}}]
+    parameters: [{"name": "projectId", "in": "path", "required": true, "schema": {"type": "string", "format": "uuid"}}, {"name": "ownedSessionId", "in": "path", "required": true, "schema": {"type": "string", "format": "uuid"}}, {"name": "X-Aeon-Native-Local-Person", "in": "header", "required": false, "description": "Selects the local CLI projection for an authenticated person session; conveys no authority and does not enable unqualified native capabilities.", "schema": {"type": "string", "enum": ["1"]}}]
     post:
       operationId: "nativeAttach"
       description: "C0 mounts an authenticated disabled handler returning feature_disabled/503 with zero database or native side effects. Enabled behavior is reserved for qualified I1/I2 wiring. Authority: person harness.read; expert/terminal also harness.watch + owner opt-in; control also harness.control"
@@ -1424,7 +1424,7 @@ paths:
               schema:
                 $ref: "#/components/schemas/NativeError"
   /projects/{projectId}/native-sessions/{ownedSessionId}/attach/renew:
-    parameters: [{"name": "projectId", "in": "path", "required": true, "schema": {"type": "string", "format": "uuid"}}, {"name": "ownedSessionId", "in": "path", "required": true, "schema": {"type": "string", "format": "uuid"}}]
+    parameters: [{"name": "projectId", "in": "path", "required": true, "schema": {"type": "string", "format": "uuid"}}, {"name": "ownedSessionId", "in": "path", "required": true, "schema": {"type": "string", "format": "uuid"}}, {"name": "X-Aeon-Native-Local-Person", "in": "header", "required": false, "description": "Selects the local CLI projection for an authenticated person session; conveys no authority and does not enable unqualified native capabilities.", "schema": {"type": "string", "enum": ["1"]}}, {"name": "X-Aeon-Attach-Capability", "in": "header", "required": false, "description": "Existing controller capability, required for a local person control renewal; never accepted as person identity.", "schema": {"type": "string", "minLength": 1, "maxLength": 4096}}]
     post:
       operationId: "nativeAttachRenew"
       description: "C0 mounts an authenticated disabled handler returning feature_disabled/503 with zero database or native side effects. Enabled behavior is reserved for qualified I1/I2 wiring. Authority: same scoped viewer/controller, current permissions"
