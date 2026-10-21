@@ -205,3 +205,7 @@ People set goals and say which work serves them without ever naming an outcome.
   (it needs sight of every outcome) and returns the `goal.deleted` event;
   `POST /events/{eventId}/undo` restores the goal and the same outcomes while the
   goal is still deleted. Linked work items are never changed.
+- **Rights** (Tick spec v1.1): rename, unlink and delete need `nodes.write` on the
+  goal, checked inside the write; a viewer and an API key without that scope get 403,
+  and nothing changes or is appended. Every change is an event whose actor is the
+  person (or key) who made it, so history can say who renamed, unlinked or deleted.

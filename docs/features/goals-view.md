@@ -167,3 +167,21 @@ the first row behind ⋯. Without that right the button is absent.
   the sheet filled in; **Delete goal** offers Undo ("Goal deleted") and never touches
   the linked tickets. Releases and epics offer none of these.
 - The word "outcome" never reaches people.
+
+### The goal's ⋯ (Tick spec v1.1, part a)
+
+The ⋯ groups what a person can do with a goal: change the goal (**Rename**, **Edit
+goal**), work (**Link work…**), for me (Expand or Collapse, progress over time, Copy
+link) and state (**Delete goal**, in danger ink). People who may not edit the goal see
+only the "for me" group. On phones the ⋯ sits under the goal's Lands and opens as the
+shared bottom sheet.
+
+- **Rename** (F2 on a focused goal row): the name becomes a text field over the same
+  box, so neither the row nor its controls move. Enter saves ("Goal renamed", with
+  Undo), Esc cancels, an empty name is refused in the field ("A goal needs a name").
+  Leaving the field keeps a changed name.
+- **Link work…** (L on a focused goal row) opens the ticket picker as above.
+- **Delete goal** (Del, or the Mac delete key, on a focused goal row) asks nothing:
+  the toast's Undo restores the goal with its links, name and Lands; focus moves on
+  to the next goal. Linked tickets are never touched.
+- The keys do nothing for people who may not edit the goal, and never while typing.
