@@ -329,14 +329,14 @@ delay browser fan-out. Unit shard 1 also runs shard-policy regressions and
 browser-runner safety once. Spec-only PRs retain one unit job with the existing
 unit command; docs-only PRs skip all three web job families. Dependency and Chromium
 caches are keyed by the lockfile hash and resolved Playwright version; each of
-17 hosted `web-shard` jobs restores that runtime and installs only Chromium's
+18 hosted `web-shard` jobs restores that runtime and installs only Chromium's
 system libraries. The shard command is `npm --prefix web run ci:web:shard --
 i/12` for exact-spec inspection; full-lane execution uses
-`scripts/test-tiers/cli.mjs run web --shard i/17` with zero retries. Traces and
+`scripts/test-tiers/cli.mjs run web --shard i/18` with zero retries. Traces and
 screenshots are retained in `web-shard-i-evidence` for seven days. The required
 check remains exactly `web`: its unconditional aggregate rejects failed,
 cancelled or skipped setup, unit shards or browser shards in the full lane.
-All four unit measurements and seventeen browser measurements feed the tier report;
+All four unit measurements and eighteen browser measurements feed the tier report;
 nightly retains its existing once-only `web-unit` evidence. Skipped Actions jobs
 with zero timestamps report absent duration; executed jobs with invalid timestamps
 still fail accounting. Spec-only reports explicitly use `untiered` coverage and
@@ -363,7 +363,7 @@ entire planned shard matrix; tier accounting consumes every shard measurement
 and rejects missing or interrupted evidence. The main ruleset requires only
 aggregate checks (`go`, `web`, `release-check`, `e2e`, `migration-compat`), so
 individual nightly shard names are not required-check identities. PR and
-merge-group layouts remain seventeen shards packed from `tierTiming` weights,
+merge-group layouts remain eighteen shards packed from `tierTiming` weights,
 inside the fifteen-minute planner budget. The twenty-minute job cap stays the
 hang guard.
 
