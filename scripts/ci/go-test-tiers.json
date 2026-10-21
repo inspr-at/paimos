@@ -3510,6 +3510,8 @@
     ,
     {"kind":"go","package":"internal/agentsetup","name":"TestVersionProbeSurvivesDeletedProcessDirectory","tier":"GATED-FULL"}
     ,
+    {"kind":"go","package":"internal/agentverification","name":"TestReleaseQualificationPackagesHaveNoTestImportCycle","tier":"ESSENTIAL"}
+    ,
     {"kind":"go","package":"internal/aithema/host","name":"TestCallbackAuthenticationFailureDoesNotRetry","tier":"GATED-FULL"}
     ,
     {"kind":"go","package":"internal/aithema/host","name":"TestCallbackPermanentFailureBoundAndLeaseRecovery","tier":"GATED-FULL"}
@@ -9683,6 +9685,8 @@
     {"kind":"go","package":"internal/questions","name":"TestQuestionLifecycleAndIsolation","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/questions","name":"TestQuestionListRejectsInvalidOrderAndCursor","tier":"GATED-FULL"}
+    ,
+    {"kind":"go","package":"internal/questions","name":"TestQuestionNodeRoutesStayOutsideTheQuestionsPackage","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/questions","name":"TestQuestionPermissionFilteredPageAndRollback","tier":"GATED-FULL"}
     ,
