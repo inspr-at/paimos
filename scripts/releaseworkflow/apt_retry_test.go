@@ -17,3 +17,14 @@ func TestRootAptTimeoutReapsBeforeRetry(t *testing.T) {
 		t.Fatalf("apt retry regression: %v\n%s", err, out)
 	}
 }
+
+// AEON-1064: exercise real test-worker interruption and parent death; the
+// fixture-only regression uses Node helpers and never launches a browser.
+func TestInterruptedFixturesLeaveNoProcesses(t *testing.T) {
+	cmd := exec.Command("node", "--test", "scripts/fixture-lifecycle.test.mjs")
+	cmd.Dir = root(t)
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("fixture lifecycle regression: %v\n%s", err, out)
+	}
+}

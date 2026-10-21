@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import { writeFileSync } from 'node:fs'
 import { runOwnedCommand } from '../../playwright-safe.mjs'
+import { boundFixture } from '../fixture-lifecycle.mjs'
+boundFixture()
 const [mode, lockPath, ready, pidFile, output] = process.argv.slice(2)
 try {
   const result = await runOwnedCommand(process.execPath, [new URL('./owned-child.mjs', import.meta.url).pathname, mode, ready, pidFile], { lockPath, graceMs: 500 })

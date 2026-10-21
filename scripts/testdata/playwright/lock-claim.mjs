@@ -1,6 +1,9 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import { writeFileSync } from 'node:fs'
 import { acquireLock } from '../../playwright-lock.mjs'
+import { boundFixture } from '../fixture-lifecycle.mjs'
+
+boundFixture()
 
 const [path, ready] = process.argv.slice(2)
 try {
