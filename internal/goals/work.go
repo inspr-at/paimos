@@ -372,9 +372,11 @@ func deleteTx(ctx context.Context, tx pgx.Tx, p tenant.Principal, identity strin
 	if len(outcomes) != all {
 		return out, authz.ErrForbidden
 	}
-	ids := append([]string{goal.ID}, outcomes...)
-	if _, err := tx.Exec(ctx, `UPDATE nodes SET deleted_at=clock_timestamp(),updated_at=clock_timestamp() WHERE id=ANY($1::uuid[]) AND deleted_at IS NULL`, ids); err != nil {
-		return out, err
+	// Children first: a node with live children cannot be deleted.
+	for _, ids := range [][]string{outcomes, {goal.ID}} {
+		if _, err := tx.Exec(ctx, `UPDATE nodes SET deleted_at=clock_timestamp(),updated_at=clock_timestamp() WHERE id=ANY($1::uuid[]) AND deleted_at IS NULL`, ids); err != nil {
+			return out, err
+		}
 	}
 	snapshot := deletedGoal{ID: goal.ID, Key: goal.Key, Title: goal.Title, ProjectID: goal.Project, OutcomeIDs: outcomes}
 	e, err := events.Append(ctx, tx, p, events.Change{NodeID: &goal.ID, Type: "goal.deleted", Before: snapshot})
@@ -420,14 +422,16 @@ func undoDelete(ctx context.Context, tx pgx.Tx, p tenant.Principal, e events.Eve
 			return events.Change{}, events.ErrConflict
 		}
 	}
-	ids := append([]string{before.ID}, before.OutcomeIDs...)
-	sort.Strings(ids)
-	tag, err := tx.Exec(ctx, `UPDATE nodes SET deleted_at=NULL,updated_at=clock_timestamp() WHERE id=ANY($1::uuid[]) AND deleted_at IS NOT NULL`, ids)
-	if err != nil {
-		return events.Change{}, events.ErrConflict
-	}
-	if tag.RowsAffected() != int64(len(ids)) {
-		return events.Change{}, events.ErrConflict
+	// The goal first, then the outcomes under it.
+	outcomes := slices.Sorted(slices.Values(before.OutcomeIDs))
+	for _, ids := range [][]string{{before.ID}, outcomes} {
+		if len(ids) == 0 {
+			continue
+		}
+		tag, err := tx.Exec(ctx, `UPDATE nodes SET deleted_at=NULL,updated_at=clock_timestamp() WHERE id=ANY($1::uuid[]) AND deleted_at IS NOT NULL`, ids)
+		if err != nil || tag.RowsAffected() != int64(len(ids)) {
+			return events.Change{}, events.ErrConflict
+		}
 	}
 	return events.Change{NodeID: &before.ID, Type: "goal.restored", After: before}, nil
 }
