@@ -146,3 +146,24 @@ response):
 
 `--dry-run` validates and prints the request without writing. Item refs come from
 `aeon goal get KEY`.
+
+## New goal and Link work (AEON-1618)
+
+Tick spec v1, decided by Markus on 2026-10-21. For people who may create a node in a
+project (or in the workspace), **New goal** ends the Goals toolbar; on phones it is
+the first row behind ⋯. Without that right the button is absent.
+
+- **The sheet** (the New project pattern): Title ("What should be true when this is
+  done?"), Where (a project the person may write, or Whole workspace for people who
+  may write the workspace; fixed while editing) and an optional Lands day, read as
+  the end of that day. Create goal closes the sheet, the new goal opens where the
+  sort puts it, its **Link work** has focus and the toast says "Goal created".
+- **Link work** sits at the bottom of an opened goal and in its ⋯. It opens the
+  ticket picker in its multi-select mode: search tickets and epics (a project goal
+  searches its project), mark several, "Link {n}" (⌘↵ or Ctrl+↵). The toast says
+  "{n} linked" with Undo. Linked items show as the goal's own items; progress,
+  Moving · Queued · Done and Lands roll up as for every item.
+- **Unlink from goal** is in a linked item's ⋯, with Undo. **Edit goal** reopens
+  the sheet filled in; **Delete goal** offers Undo ("Goal deleted") and never touches
+  the linked tickets. Releases and epics offer none of these.
+- The word "outcome" never reaches people.
