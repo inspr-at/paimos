@@ -4,6 +4,8 @@ import test from 'node:test'
 import './openapi-sort.test.mjs'
 // AEON-837: the same entry runs the tracked-bytecode regressions.
 import './check-tracked-bytecode.test.mjs'
+// AEON-1605: the same entry runs the backend readiness regressions.
+import './ci/stack-ready.test.mjs'
 import assert from 'node:assert/strict'
 import { readFileSync, mkdtempSync, mkdirSync, writeFileSync, existsSync, realpathSync, rmSync, chmodSync, watchFile, unwatchFile } from 'node:fs'
 import { join, resolve } from 'node:path'
