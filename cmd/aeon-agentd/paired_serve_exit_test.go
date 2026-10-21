@@ -43,14 +43,40 @@ func TestDispatchDeniedServeNamesReasonAndExit(t *testing.T) {
 			if !errors.As(err, &denied) {
 				t.Fatalf("permitted=false did not deny: %v", err)
 			}
+			// A field unit is never rewritten. launchd restarts every non-zero
+			// status, and an installed systemd unit has Restart=on-failure
+			// without SuccessExitStatus, so a supervised denial must exit 0.
+			// Foreground stays 78. c139dc9b exited 78 for a systemd parent.
 			for _, parent := range []struct {
 				name string
 				code int
-			}{{"systemd", dispatchDeniedExitCode}, {"zsh", dispatchDeniedExitCode}, {"launchd", 0}, {"/sbin/launchd", 0}} {
+			}{
+				{"systemd", 0},
+				{"/usr/lib/systemd/systemd", 0},
+				{"zsh", dispatchDeniedExitCode},
+				{"launchd", 0},
+				{"/sbin/launchd", 0},
+			} {
 				var stderr bytes.Buffer
-				code, ok := writeDispatchDenial(&stderr, err, parent.name)
+				code, ok := writeDispatchDenial(&stderr, err, dispatchSupervisor(parent.name, ""))
 				if !ok || code != parent.code || stderr.String() != tc.line+"\n" || strings.Contains(stderr.String(), secret) || strings.Count(stderr.String(), "\n") != 1 {
 					t.Fatalf("parent %s: code %d ok %v line %q", parent.name, code, ok, stderr.String())
+				}
+			}
+			for _, row := range []struct {
+				invocation string
+				code       int
+			}{
+				{"0123456789abcdef0123456789abcdef", 0},
+				{"", dispatchDeniedExitCode},
+				{"not-systemd", dispatchDeniedExitCode},
+			} {
+				supervisor := dispatchSupervisor("zsh", row.invocation)
+				var stderr bytes.Buffer
+				code, ok := writeDispatchDenial(&stderr, err, supervisor)
+				leaked := row.invocation != "" && strings.Contains(stderr.String(), row.invocation)
+				if !ok || code != row.code || stderr.String() != tc.line+"\n" || strings.Contains(stderr.String(), secret) || leaked {
+					t.Fatalf("invocation %q supervisor %s: code %d ok %v line %q", row.invocation, supervisor, code, ok, stderr.String())
 				}
 			}
 		})
@@ -77,14 +103,17 @@ func TestDispatchDeniedServeNamesReasonAndExit(t *testing.T) {
 			if strings.Contains(text, secret) {
 				t.Fatal("unit contained a secret")
 			}
+			if strings.Contains(text, "SuccessExitStatus") || strings.Contains(text, "AEON-1596") || strings.Contains(text, "<!--") {
+				t.Fatal("unit text drifted; an existing receipt would conflict")
+			}
 			if platform.OS == "darwin" {
-				if !strings.Contains(text, "<key>SuccessfulExit</key><false/>") || !strings.Contains(text, "exit 78 means dispatch is not permitted") || !strings.Contains(text, "exits 0") {
-					t.Fatal("launchd keepalive contract missing")
+				if !strings.Contains(text, "</array><key>StandardOutPath</key>") || !strings.HasSuffix(text, `<key>RunAtLoad</key><true/><key>KeepAlive</key><dict><key>SuccessfulExit</key><false/></dict><key>Umask</key><integer>63</integer></dict></plist>`) || !strings.Contains(text, "stderr.log</string><key>RunAtLoad</key>") {
+					t.Fatal("launchd unit no longer matches installed receipts")
 				}
 				continue
 			}
-			if !strings.Contains(text, "Restart=on-failure") || !strings.Contains(text, "SuccessExitStatus=78") || !strings.Contains(text, "exit 78 means dispatch is not permitted") {
-				t.Fatal("systemd denial status missing")
+			if !strings.Contains(text, "[Unit]\nDescription=Aeon paired computer\n[Service]\nType=simple\n") || !strings.Contains(text, "\nRestart=on-failure\nUMask=0077\nKillMode=none\nTimeoutStopSec=infinity\n[Install]\nWantedBy=default.target\n") {
+				t.Fatal("systemd unit no longer matches installed receipts")
 			}
 		}
 	})

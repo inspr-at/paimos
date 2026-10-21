@@ -112,10 +112,7 @@ func (m ServiceManager) definitionLogs(root string, logs bool) ([]byte, error) {
 			b.WriteString("<key>StandardOutPath</key><string>" + xmlText(filepath.Join(logDir, "stdout.log")) + "</string><key>StandardErrorPath</key><string>" + xmlText(filepath.Join(logDir, "stderr.log")) + "</string>")
 		}
 		// Successful intentional shutdown is not an invitation to restart.
-		// Exit 78 means dispatch is not permitted after SyncFences (AEON-1596).
-		// SuccessfulExit false restarts every non-zero status, and launchd
-		// cannot exempt one code, so a launchd parent exits 0 after the line.
-		b.WriteString(`<!-- AEON-1596: exit 78 means dispatch is not permitted; a launchd parent exits 0 so this KeepAlive does not restart it --><key>RunAtLoad</key><true/><key>KeepAlive</key><dict><key>SuccessfulExit</key><false/></dict><key>Umask</key><integer>63</integer></dict></plist>`)
+		b.WriteString(`<key>RunAtLoad</key><true/><key>KeepAlive</key><dict><key>SuccessfulExit</key><false/></dict><key>Umask</key><integer>63</integer></dict></plist>`)
 		return []byte(b.String()), nil
 	}
 	quoted := []string{}
@@ -128,9 +125,7 @@ func (m ServiceManager) definitionLogs(root string, logs bool) ([]byte, error) {
 	}
 	// KillMode=none keeps systemd from signaling model process groups. Helper
 	// removal is gated by observed idle, and SIGTERM itself only begins drain.
-	// Exit 78 is the intentional dispatch denial. SuccessExitStatus keeps
-	// Restart=on-failure from respawning it; every other failure still restarts.
-	return []byte("[Unit]\nDescription=Aeon paired computer\n# AEON-1596: exit 78 means dispatch is not permitted and must not respawn.\n[Service]\nType=simple\nExecStart=" + strings.Join(quoted, " ") + "\nRestart=on-failure\nSuccessExitStatus=78\nUMask=0077\nKillMode=none\nTimeoutStopSec=infinity\n[Install]\nWantedBy=default.target\n"), nil
+	return []byte("[Unit]\nDescription=Aeon paired computer\n[Service]\nType=simple\nExecStart=" + strings.Join(quoted, " ") + "\nRestart=on-failure\nUMask=0077\nKillMode=none\nTimeoutStopSec=infinity\n[Install]\nWantedBy=default.target\n"), nil
 }
 
 func (m ServiceManager) runner() Executor {

@@ -183,9 +183,9 @@ func servePairedContext(ctx context.Context, root string, capacityInterval time.
 		if denial == "" {
 			return errors.New("dispatch denial unavailable")
 		}
-		// Fail closed. The helper still owns cleanup. The status is 78, except
-		// a launchd parent exits 0 so KeepAlive does not hot-loop. See
-		// dispatchDeniedExitCode.
+		// Fail closed. The helper still owns cleanup. Foreground exits 78.
+		// A launchd or systemd supervisor exits 0 so the installed unit does
+		// not hot-loop. See dispatchDeniedExitCode.
 		return &dispatchDeniedError{reason: denial}
 	}
 	c, key, err := agentsetup.ReadRuntime(root)
@@ -748,17 +748,45 @@ func installMethod() string {
 // after SyncFences when dispatch is not permitted. It is neither a crash (1)
 // nor a clean stop (0).
 //
-// systemd Restart=on-failure does not restart it: the unit sets
-// SuccessExitStatus=78. launchd KeepAlive SuccessfulExit=false restarts every
-// non-zero status and cannot exempt one code, so a serve whose parent is
-// launchd exits 0 after the same stderr line. That is the status the shipped
-// plist does not restart. Foreground and systemd runs exit 78.
+// Installed units are not rewritten. launchd KeepAlive SuccessfulExit=false
+// restarts every non-zero status and cannot exempt one code. A field systemd
+// unit has Restart=on-failure and no SuccessExitStatus, so 78 would respawn.
+// A launchd parent, a systemd parent, or a process carrying systemd's
+// INVOCATION_ID therefore exits 0 after the same stderr line. Foreground
+// runs exit 78.
 const dispatchDeniedExitCode = 78
 
 type dispatchDeniedError struct{ reason string }
 
 func (e *dispatchDeniedError) Error() string {
 	return "agentd serve: dispatch not permitted: " + e.reason
+}
+
+// dispatchSupervisor is the parent name denialStatus should see.
+// invocationID is systemd's INVOCATION_ID. A 32-character hex value means
+// this process was started by a unit. The value is never logged.
+func dispatchSupervisor(parent, invocationID string) string {
+	base := filepath.Base(strings.TrimSpace(parent))
+	if base == "launchd" {
+		return parent
+	}
+	if systemdInvocation(invocationID) || base == "systemd" {
+		return "systemd"
+	}
+	return parent
+}
+
+func systemdInvocation(id string) bool {
+	id = strings.TrimSpace(id)
+	if len(id) != 32 {
+		return false
+	}
+	for _, c := range id {
+		if (c < '0' || c > '9') && (c < 'a' || c > 'f') {
+			return false
+		}
+	}
+	return true
 }
 
 // denialStatus maps a dispatch denial to the process status for this parent.
@@ -769,7 +797,10 @@ func denialStatus(err error, parent string) (code int, line string, ok bool) {
 		return 0, "", false
 	}
 	code = dispatchDeniedExitCode
-	if filepath.Base(strings.TrimSpace(parent)) == "launchd" {
+	// Supervised exits are 0 so the unit already on disk does not restart.
+	// Foreground, including a shell whose name is not a service manager, stays 78.
+	base := filepath.Base(strings.TrimSpace(parent))
+	if base == "launchd" || base == "systemd" {
 		code = 0
 	}
 	return code, denied.Error(), true
@@ -784,17 +815,45 @@ func writeDispatchDenial(stderr io.Writer, err error, parent string) (int, bool)
 	return code, true
 }
 
-// launchdParentName reports the parent command name. It is empty when the
-// parent is not launchd or the name cannot be read. The name is not logged.
-func launchdParentName(ppid int) string {
-	if runtime.GOOS != "darwin" || ppid <= 0 {
+// denialParent is the supervisor name for a dispatch denial, or empty for a
+// foreground process. launchd is detected for every run error, as before.
+// systemd is detected only after the error is a denial: INVOCATION_ID, or on
+// linux the parent command. The invocation id and the command are not logged.
+func denialParent(ppid int, err error) string {
+	if name := launchdParentName(ppid); name != "" {
+		return name
+	}
+	var denied *dispatchDeniedError
+	if !errors.As(err, &denied) {
+		return ""
+	}
+	invocation := os.Getenv("INVOCATION_ID")
+	observed := ""
+	if !systemdInvocation(invocation) && runtime.GOOS == "linux" {
+		observed = parentComm(ppid)
+	}
+	return dispatchSupervisor(observed, invocation)
+}
+
+// parentComm is the parent command name only, never its arguments or environment.
+func parentComm(ppid int) string {
+	if ppid <= 0 {
 		return ""
 	}
 	out, err := exec.Command("/bin/ps", "-o", "comm=", "-p", strconv.Itoa(ppid)).Output()
 	if err != nil || len(out) == 0 || len(out) > 256 {
 		return ""
 	}
-	name := strings.TrimSpace(string(out))
+	return strings.TrimSpace(string(out))
+}
+
+// launchdParentName reports the parent command name. It is empty when the
+// parent is not launchd or the name cannot be read. The name is not logged.
+func launchdParentName(ppid int) string {
+	if runtime.GOOS != "darwin" || ppid <= 0 {
+		return ""
+	}
+	name := parentComm(ppid)
 	if filepath.Base(name) != "launchd" {
 		return ""
 	}

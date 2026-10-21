@@ -3252,6 +3252,8 @@
     ,
     {"kind":"go","package":"internal/agentsetup","name":"TestInstallMethodNegotiatesAndSurvivesServerDowngrade","tier":"GATED-FULL"}
     ,
+    {"kind":"go","package":"internal/agentsetup","name":"TestInstalledServiceUnitMatchesReceipt","tier":"ESSENTIAL"}
+    ,
     {"kind":"go","package":"internal/agentsetup","name":"TestLaunchdPrivateDiagnosticPaths","tier":"GATED-FULL"}
     ,
     {"kind":"go","package":"internal/agentsetup","name":"TestLedgerServerNegotiationAndEnrollmentClient","tier":"ESSENTIAL"}

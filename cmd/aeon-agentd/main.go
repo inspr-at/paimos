@@ -47,7 +47,7 @@ func main() {
 	if err := run(os.Args[1:], os.Stdout); err != nil {
 		// A dispatch denial is one stderr line and its own status. serve does
 		// not also log it. Every other serve failure was logged before return.
-		if code, ok := writeDispatchDenial(os.Stderr, err, launchdParentName(os.Getppid())); ok {
+		if code, ok := writeDispatchDenial(os.Stderr, err, denialParent(os.Getppid(), err)); ok {
 			os.Exit(code)
 		}
 		if len(os.Args) < 2 || os.Args[1] != "serve" {
