@@ -129,6 +129,8 @@ test('pi pairing names the local provider, shows its SVG and connects without ve
   await page.getByRole('button', { name: 'Look up code' }).click()
   const review = page.getByRole('region', { name: 'Pairing review' })
   await expect(review.getByLabel('Connect Pi')).toBeChecked()
+  // AEON-1502: the account, verification and limits sit behind Details.
+  await review.locator('details.more > summary').click()
   await expect(review.getByLabel('Account for Pi').locator('option:checked')).toHaveText('pi / anthropic (local profile)')
   await expect(review.locator('.harness .mark svg path')).toHaveCount(3)
   await expect(review.getByRole('checkbox', { name: 'Verify selected harnesses' })).toBeDisabled()
@@ -139,12 +141,12 @@ test('pi pairing names the local provider, shows its SVG and connects without ve
     for (const theme of ['light', 'dark'] as const) for (const width of [1600, 390]) {
       await page.setViewportSize({ width, height: width === 390 ? 844 : 1000 })
       await page.emulateMedia({ colorScheme: theme })
-      await page.getByRole('button', { name: 'Connect your machine', exact: true }).scrollIntoViewIfNeeded()
+      await page.getByRole('button', { name: 'Pair', exact: true }).scrollIntoViewIfNeeded()
       await expect.poll(() => page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true)
       await page.screenshot({ path: join(process.env.PI_PAIRING_SHOTS, `pi-pairing__${width}__${theme}.png`), fullPage: true })
     }
   }
-  await page.getByRole('button', { name: 'Connect your machine', exact: true }).click()
+  await page.getByRole('button', { name: 'Pair', exact: true }).click()
   await expect.poll(() => calls.find(call => call.path.endsWith('/approve'))?.body).toEqual({
     request_digest: 'ab'.repeat(32), verification: 'connect_only', selected_account_keys: ['pi-1'],
   })
@@ -164,12 +166,13 @@ test('a qualified helper removes Connect only without a harness-name special cas
   await page.getByLabel('Pairing code').fill('123-456-789')
   await page.getByRole('button', { name: 'Look up code' }).click()
   const review = page.getByRole('region', { name: 'Pairing review' })
+  await review.locator('details.more > summary').click()
   await expect(review.getByRole('checkbox', { name: 'Verify selected harnesses' })).toBeChecked()
   await expect(review.getByRole('button', { name: 'Connect only', exact: true })).toHaveCount(0)
   await expect(review.locator('.harness-note')).toHaveCount(0)
-  await expect(page.getByRole('button', { name: 'Connect your machine', exact: true })).toBeEnabled()
+  await expect(page.getByRole('button', { name: 'Pair', exact: true })).toBeEnabled()
   expect(calls.some(call => call.path.endsWith('/approve'))).toBe(false)
-  await page.getByRole('button', { name: 'Connect your machine', exact: true }).click()
+  await page.getByRole('button', { name: 'Pair', exact: true }).click()
   await expect.poll(() => calls.find(call => call.path.endsWith('/approve'))?.body).toEqual({
     request_digest: 'ab'.repeat(32),
     verification: 'one_per_harness',
@@ -210,9 +213,11 @@ test('a person reviews real accounts, can leave a harness out, and does not trea
   await page.getByLabel('Pairing code').fill('123-456-789')
   await page.getByRole('button', { name: 'Look up code' }).click()
   const review = page.getByRole('region', { name: 'Pairing review' })
-  await expect(review.getByRole('heading', { name: 'Review this computer' })).toBeVisible()
+  // AEON-1502: one sentence names the computer and the workspace; the rest is behind Details.
+  await expect(review.getByRole('heading', { name: 'Pair studio with INSPR?' })).toBeVisible()
   await expect(review.getByText('studio', { exact: true })).toBeVisible()
-  await expect(review.getByText('INSPR', { exact: true })).toBeVisible()
+  await review.locator('details.more > summary').click()
+  await expect(review.getByText('INSPR · macOS · arm64', { exact: true })).toBeVisible()
   await expect(review.getByText('/Users/markus/work', { exact: true })).toBeVisible()
   await expect(review.getByLabel('Account for Cursor')).toHaveValue('cursor-1')
   await expect(review.getByLabel('Account for Cursor').locator('option:checked')).toHaveText('Cursor work')
@@ -234,12 +239,12 @@ test('a person reviews real accounts, can leave a harness out, and does not trea
   await page.getByRole('checkbox', { name: 'Connect Cursor' }).uncheck()
   await expect(review.getByText('Codex can’t be verified.')).toBeVisible()
   await expect(verify).toBeDisabled()
-  await expect(page.getByRole('radio', { name: /Let agents use these accounts/ })).toBeChecked()
+  await expect(page.getByLabel('After connecting')).toHaveValue('use')
   await expect(page.getByRole('spinbutton', { name: 'Requests', exact: true })).toHaveCount(0)
   await expect(page.getByText('Set ongoing limits')).toHaveCount(0)
-  await page.getByRole('radio', { name: /Keep agents paused/ }).check()
+  await page.getByLabel('After connecting').selectOption('paused')
 
-  await page.getByRole('button', { name: 'Connect your machine', exact: true }).click()
+  await page.getByRole('button', { name: 'Pair', exact: true }).click()
   await expect(page.getByRole('heading', { name: 'Setting up' })).toBeVisible()
   await expect(page.getByText('The computer reported that setup finished, and a recent probe succeeded.')).toHaveCount(0)
   const approval = calls.find(call => call.path.endsWith('/approve'))
@@ -287,8 +292,8 @@ test('add harness is labeled from the request, and an agent cannot approve', asy
   await page.goto('/agents/register-agent')
   await page.getByLabel('Pairing code').fill('111-222-333')
   await page.getByRole('button', { name: 'Look up code' }).click()
-  await expect(page.getByRole('heading', { name: 'Add a harness' })).toBeVisible()
-  await expect(page.getByRole('button', { name: 'Add harness', exact: true })).toBeDisabled()
+  await expect(page.getByRole('heading', { name: 'Add Cursor and Codex to studio?' })).toBeVisible()
+  await expect(page.getByRole('button', { name: 'Add', exact: true })).toBeDisabled()
   await expect(page.getByText('Only a signed-in person who can manage accounts can connect or deny this computer.')).toBeVisible()
 })
 
@@ -367,8 +372,9 @@ async function approveFixture(page: Page) {
   await page.goto('/agents/register-agent')
   await page.getByLabel('Pairing code').fill('123-456-789')
   await page.getByRole('button', { name: 'Look up code' }).click()
-  await page.getByRole('radio', { name: /Keep agents paused/ }).check()
-  await page.getByRole('button', { name: 'Connect your machine', exact: true }).click()
+  await page.getByRole('region', { name: 'Pairing review' }).locator('details.more > summary').click()
+  await page.getByLabel('After connecting').selectOption('paused')
+  await page.getByRole('button', { name: 'Pair', exact: true }).click()
   const review = page.getByRole('region', { name: 'Pairing review' })
   await expect(review.getByRole('heading', { name: 'Setting up', exact: true })).toBeVisible()
   return review
