@@ -435,3 +435,28 @@ func (e *nativeOwned) proofFor(r *nativecontract.Receipt) (nativecontract.Native
 	}
 	return e.transport.Identity(), ev, e.exit
 }
+
+func (t *nativeC0Transport) ObserveExit(ctx context.Context) (nativecontract.ExitEvidence, error) {
+	t.mu.Lock()
+	p := t.process
+	t.mu.Unlock()
+	if p == nil || !p.ProcessExited() {
+		return nativecontract.ExitEvidence{}, ErrProcessesUnconfirmed
+	}
+	return t.Wait(ctx)
+}
+func (t *nativeObservedTransport) ObserveExit(ctx context.Context) (nativecontract.ExitEvidence, error) {
+	observer, ok := t.NativeTransport.(interface {
+		ObserveExit(context.Context) (nativecontract.ExitEvidence, error)
+	})
+	if !ok {
+		return nativecontract.ExitEvidence{}, ErrProcessesUnconfirmed
+	}
+	x, err := observer.ObserveExit(ctx)
+	if err == nil {
+		t.owner.mu.Lock()
+		t.owner.exit = &x
+		t.owner.mu.Unlock()
+	}
+	return x, err
+}

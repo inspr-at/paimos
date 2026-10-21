@@ -14,6 +14,7 @@ import (
 	"path/filepath"
 	"reflect"
 	"slices"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -1078,6 +1079,9 @@ func (h *NativeHost) Poll(ctx context.Context) error {
 		if _, err := e.journal.FlushReports(ctx, *e.grant.ExpectedBinding, 100, e); err != nil {
 			return err
 		}
+		if err := e.reconcileExit(ctx); err != nil {
+			return err
+		}
 		if err := e.flushEvents(ctx); err != nil {
 			return err
 		}
@@ -1106,6 +1110,49 @@ func (h *NativeHost) Poll(ctx context.Context) error {
 	}
 	return nil
 }
+
+// Reconcile only an exact retained stop and the owning provider's exit
+// observer. A failed close is never retried as a second native write.
+func (e *nativeOwned) reconcileExit(ctx context.Context) error {
+	page, err := e.journal.Page(*e.grant.ExpectedBinding, "", 100)
+	if err != nil {
+		return err
+	}
+	if page.Truncated {
+		return nativeRefusal(nativecontract.ReasonBufferFull)
+	}
+	for _, r := range page.Items {
+		if r.Operation != "stop" || r.State != "uncertain" && r.State != "write_started" && r.State != "exit_confirmed" {
+			continue
+		}
+		observer, ok := e.transport.(interface {
+			ObserveExit(context.Context) (nativecontract.ExitEvidence, error)
+		})
+		if !ok {
+			continue
+		}
+		x, err := observer.ObserveExit(ctx)
+		if errors.Is(err, ErrProcessesUnconfirmed) {
+			continue
+		}
+		if err != nil {
+			return err
+		}
+		seq, err := strconv.ParseUint(r.SourceSequence, 10, 64)
+		if err != nil {
+			return err
+		}
+		if r.State != "exit_confirmed" {
+			seq++
+		}
+		_, err = e.delivery.ConfirmExit(ctx, r.OperationID, seq, x)
+		if err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
 func (e *nativeOwned) execute(ctx context.Context, item nativecontract.PendingCommand) (nativecontract.OperationResult, error) {
 	e.opMu.Lock()
 	defer e.opMu.Unlock()

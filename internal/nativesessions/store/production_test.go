@@ -45,6 +45,13 @@ func (s compositionStore) Claim(ctx context.Context, d nativecontract.DaemonActo
 	}
 	return out, err
 }
+func (s compositionStore) Report(ctx context.Context, d nativecontract.DaemonActor, in nativecontract.Receipt) (nativecontract.OperationResult, error) {
+	out, err := s.Store.Report(ctx, d, in)
+	if err != nil {
+		s.t.Logf("receipt refusal: %T %v", err, err)
+	}
+	return out, err
+}
 func (s compositionStore) DaemonRequest(r *http.Request) (context.Context, nativecontract.DaemonActor, error) {
 	ctx, d, err := s.Store.DaemonRequest(r)
 	p, _ := tenant.PrincipalFrom(r.Context())
