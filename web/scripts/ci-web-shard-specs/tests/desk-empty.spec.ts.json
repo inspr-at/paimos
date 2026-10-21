@@ -7,6 +7,15 @@
   "spec": {
     "file": "tests/desk-empty.spec.ts",
     "listedTests": 15,
+    "tierTiming": {
+      "caseSeconds": {
+        "max": 8.954,
+        "median": 5.682,
+        "min": 1.831
+      },
+      "seconds": 84.425,
+      "selectedTests": 15
+    },
     "weightSeconds": 33.292684,
     "weightSource": "unmeasured-test-rate"
   }

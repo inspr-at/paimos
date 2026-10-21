@@ -8,11 +8,11 @@
     "file": "tests/work-surfaces-fix2.spec.ts",
     "tierTiming": {
       "caseSeconds": {
-        "max": 3.889,
-        "median": 2.745,
-        "min": 1.745
+        "max": 7.752,
+        "median": 4.271,
+        "min": 2.535
       },
-      "seconds": 33.512,
+      "seconds": 56.127,
       "selectedTests": 12
     },
     "weightSeconds": 60

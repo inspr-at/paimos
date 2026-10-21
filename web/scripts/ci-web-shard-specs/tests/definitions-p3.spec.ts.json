@@ -10,6 +10,15 @@
   "spec": {
     "file": "tests/definitions-p3.spec.ts",
     "listedTests": 6,
+    "tierTiming": {
+      "caseSeconds": {
+        "max": 59.814,
+        "median": 25.599,
+        "min": 3.251
+      },
+      "seconds": 167.952,
+      "selectedTests": 6
+    },
     "weightSeconds": 48.288,
     "weightSource": "AEON-1528: guarded mbp2606 single-worker complete file, 6 passed in 47.9s (supervisor wall 48.288s), source 16c44fcc4"
   }

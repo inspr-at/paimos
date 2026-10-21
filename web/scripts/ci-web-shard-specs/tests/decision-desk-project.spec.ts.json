@@ -9,14 +9,14 @@
     "listedTests": 14,
     "tierTiming": {
       "caseSeconds": {
-        "max": 4.992,
-        "median": 3.126,
-        "min": 0.43
+        "max": 6.193,
+        "median": 5.041,
+        "min": 0.685
       },
-      "seconds": 42.455,
+      "seconds": 69.253,
       "selectedTests": 14
     },
     "weightSeconds": 40,
-    "weightSource": "AEON-1057 project and refresh regressions; conservative initial estimate"
+    "weightSource": "hosted-CI-39565819178"
   }
 }
