@@ -295,14 +295,14 @@ function assign(error: unknown, fallback: string) {
           <span class="glyph"><AppIcon name="monitor" :size="16" /></span>
           <div class="identity-text">
             <p v-clip-tip class="name">{{ computer.computer_name }}</p>
-            <p class="meta">
+            <p class="meta location">
               <span class="where">{{ platformCaption(computer.platform, computer.arch) }}</span>
               <template v-if="computer.workspace_path">
                 <span class="sep" aria-hidden="true">·</span>
                 <span class="path" :data-tip="computer.workspace_path"><span class="path-head">{{ pathParts(computer.workspace_path).head }}</span><span class="path-tail">{{ pathParts(computer.workspace_path).tail }}</span></span>
               </template>
             </p>
-            <p class="meta">{{ touchIDConfirmation(computer) }}</p>
+            <p class="meta confirmation">{{ touchIDConfirmation(computer) }}</p>
             <p v-if="agentUpdateAdvice(computer)" class="agent-update" role="status">{{ agentUpdateAdvice(computer) }}</p>
           </div>
         </div>
@@ -415,7 +415,8 @@ function assign(error: unknown, fallback: string) {
 .agent-update { margin-top: 4px; color: var(--ink-2); font-size: 12px; line-height: 1.45; overflow-wrap: anywhere; }
 .glyph { display: grid; place-items: center; flex: none; width: 32px; height: 32px; border-radius: 9px; background: var(--surface-sunken); color: var(--ink-2); }
 .name { color: var(--ink); font-weight: 650; overflow-wrap: anywhere; }
-.identity .meta { display: flex; align-items: baseline; min-width: 0; max-width: 100%; overflow: hidden; font-size: 12px; color: var(--ink-3); white-space: nowrap; }
+.identity .meta { min-width: 0; max-width: 100%; font-size: 12px; color: var(--ink-3); overflow-wrap: anywhere; }
+.location { display: flex; align-items: baseline; overflow: hidden; white-space: nowrap; }
 .where, .sep { flex: none; }
 .sep { padding: 0 .35em; }
 .path { display: flex; min-width: 0; flex: 1 1 auto; }
@@ -477,13 +478,17 @@ function assign(error: unknown, fallback: string) {
   .computers { padding: 4px 4px 6px; }
   .revoked-name { display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; white-space: normal; overflow-wrap: anywhere; line-height: 18px; }
   .sheet { display: none; }
-  .computer { grid-template-columns: minmax(0, 1fr) auto; grid-template-areas: "id actions" "harness actions" "status actions"; row-gap: 4px; }
-  .computer.has-reports { grid-template-areas: "id actions" "harness harness" "status status"; }
+  .computer { grid-template-columns: minmax(0, 1fr) auto; grid-template-areas: "id actions" "harness harness" "status status"; align-items: start; row-gap: 4px; }
   .identity { grid-area: id; }
+  .location { flex-wrap: wrap; overflow: visible; white-space: normal; }
+  .location .sep { display: none; }
+  .path { display: block; flex-basis: 100%; }
+  .path-head { overflow: visible; white-space: normal; }
+  .path-tail { white-space: normal; }
   .harness-line { grid-area: harness; padding-left: 42px; }
   .status { grid-area: status; padding-left: 42px; }
   .last-active { display: none; }
-  .actions { grid-area: actions; align-self: center; }
+  .actions { grid-area: actions; align-self: start; }
   .detail { padding-left: 0; }
 }
 </style>

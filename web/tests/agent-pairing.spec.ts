@@ -5,6 +5,7 @@ import { mkdirSync } from 'node:fs'
 import { join } from 'node:path'
 import { fixtures, me, mockWork, watchErrors } from './work-fixtures'
 import { HOMEBREW_COMMAND, NIX_PAIR_COMMAND, SETUP_COMMAND, mockAnonymousGuide, mockFormulaGuide, mockPairing, pairingEnrollment, pairingGuide, pairingView } from './agent-pairing-fixtures'
+import { controlStability } from './control-stability'
 
 test('Homebrew offers two commands and removal after draining', async ({ page, context }) => {
   await context.grantPermissions(['clipboard-read', 'clipboard-write'])
@@ -506,4 +507,53 @@ test('Agents links to Connect your machine', async ({ page }) => {
   await page.keyboard.press('Escape')
   await page.setViewportSize({ width: 390, height: 844 })
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true)
+})
+
+// Risk: the connected card can fit the viewport while hiding the end of a path
+// or Touch ID instruction inside a row. Longer names must not move its actions
+// when Details opens; browser region must preserve the English app language.
+test.describe('AEON-1611 connected computer readability', () => {
+  test.use({ locale: 'de-AT' })
+  for (const width of [390, 1024, 1440]) for (const theme of ['light', 'dark'] as const) {
+    test(`AEON-1611 connected rows show whole instructions and stable actions at ${width}px ${theme}`, async ({ page }, info) => {
+      await page.setViewportSize({ width, height: 1100 })
+      await page.emulateMedia({ colorScheme: theme })
+      await mockWork(page, fixtures())
+      const computerName = 'Entwicklungsrechner für die Arbeitsbereichsverwaltung'
+      const workspacePath = '/home/team/Arbeitsbereichsverwaltung/Projektunterlagen-und-Freigaben'
+      await mockPairing(page, {}, { computer_name: computerName, workspace_path: workspacePath })
+      await page.goto('/agents/register-agent')
+      const card = page.getByRole('region', { name: 'Connected computers' })
+      const row = card.locator('.computer')
+      await expect(row).toHaveCount(1)
+      await expect(row.locator('.name')).toHaveText(computerName)
+      await expect(row.locator('.path')).toHaveText(workspacePath)
+      await expect(row.locator('.confirmation')).toHaveText('Touch ID confirmation: pairing readiness unknown — run aeon-agentd status on this computer.')
+      await expect(card.locator(':scope > .muted')).toHaveText('Pairing connects the computer to AEON. Link each running session separately to its ticket.')
+
+      const assertReadable = async () => {
+        const targets = width === 390 ? '.confirmation, .location, .path, .path-head, .path-tail, .harness-line, .status' : '.confirmation'
+        const clipped = await row.locator(targets).evaluateAll(elements => elements.filter(element => {
+          const bounds = element.getBoundingClientRect()
+          const range = document.createRange()
+          range.selectNodeContents(element)
+          return [...range.getClientRects()].some(rect => rect.left < bounds.left - 1 || rect.right > bounds.right + 1 || rect.top < bounds.top - 1 || rect.bottom > bounds.bottom + 1)
+        }).map(element => element.className))
+        expect(clipped, 'row text must fit its visible bounds').toEqual([])
+      }
+      await assertReadable()
+      const details = row.locator('.details-toggle')
+      const guard = await controlStability(page, {
+        refresh: card.getByRole('button', { name: 'Refresh computers' }),
+        add: card.getByRole('link', { name: 'Add computer', exact: true }),
+        disconnect: row.getByRole('button', { name: 'Disconnect', exact: true }),
+        details,
+      })
+      await guard.check(async () => { await details.click(); await expect(row.locator('.detail')).toBeVisible() })
+      await assertReadable()
+      await guard.check(async () => { await row.getByRole('button', { name: `Hide details for ${computerName}` }).click(); await expect(row.locator('.detail')).toHaveCount(0) })
+      guard.done()
+      await card.screenshot({ path: info.outputPath(`connected-computers-${width}-${theme}.png`), animations: 'disabled' })
+    })
+  }
 })

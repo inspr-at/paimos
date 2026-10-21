@@ -6636,6 +6636,18 @@
     ,
     {"kind":"browser","file":"tests/agent-names.spec.ts","name":"the saved word names the lead on the project band","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
+    {"kind":"browser","file":"tests/agent-pairing.spec.ts","name":"AEON-1611 connected computer readability › AEON-1611 connected rows show whole instructions and stable actions at 1024px dark","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/agent-pairing.spec.ts","name":"AEON-1611 connected computer readability › AEON-1611 connected rows show whole instructions and stable actions at 1024px light","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/agent-pairing.spec.ts","name":"AEON-1611 connected computer readability › AEON-1611 connected rows show whole instructions and stable actions at 1440px dark","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/agent-pairing.spec.ts","name":"AEON-1611 connected computer readability › AEON-1611 connected rows show whole instructions and stable actions at 1440px light","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/agent-pairing.spec.ts","name":"AEON-1611 connected computer readability › AEON-1611 connected rows show whole instructions and stable actions at 390px dark","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/agent-pairing.spec.ts","name":"AEON-1611 connected computer readability › AEON-1611 connected rows show whole instructions and stable actions at 390px light","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
     {"kind":"browser","file":"tests/agent-pairing.spec.ts","name":"Agents links to Connect your machine","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
     {"kind":"browser","file":"tests/agent-pairing.spec.ts","name":"Homebrew offers two commands and removal after draining","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
