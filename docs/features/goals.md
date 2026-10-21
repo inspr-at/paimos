@@ -3,8 +3,11 @@
 # Goals API
 
 AEON-1456 adds project and workspace goals, with outcomes stored as ordinary
-child nodes. Existing release nodes can also be read and updated as goals;
-release membership and release publication are separate concerns. No sample
+child nodes. Existing release nodes can also be read and updated as goals.
+The list keeps every goal. It keeps a release only while
+`journey_releases.released_at` is unset and the release has a live outcome;
+totals, paging and quiet projects use that set. Reading a release by key is
+unchanged. Release membership and release publication stay separate. No sample
 data is created. The tenant goal/outcome kinds are restored lazily on an
 authorized create or fresh update, including a release's first outcome.
 

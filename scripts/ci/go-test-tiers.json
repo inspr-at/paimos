@@ -190,6 +190,8 @@
     ,
     "internal/nodes:TestHideStatesBoundsAndNormalisation"
     ,
+    "internal/nodes:TestList6000VisibilityNightlyAbsoluteBudget"
+    ,
     "internal/nodes:TestNodeRecurrenceBounds"
     ,
     "internal/nodes:TestNodeRecurrenceProvenance"
@@ -6824,6 +6826,8 @@
     ,
     {"kind":"go","package":"internal/goals","name":"TestGoalListFiltersTotalsAndMoveHistory","tier":"ESSENTIAL"}
     ,
+    {"kind":"go","package":"internal/goals","name":"TestGoalListOmitsEmptyAndShippedReleases","tier":"ESSENTIAL"}
+    ,
     {"kind":"go","package":"internal/goals","name":"TestGoalListPageWideProjection","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/goals","name":"TestGoalListViewFiltersAndOrdering","tier":"ESSENTIAL"}
@@ -8891,6 +8895,8 @@
     {"kind":"go","package":"internal/nodes","name":"TestList6000Performance","lane":"timing","tier":"GATED-FULL"}
     ,
     {"kind":"go","package":"internal/nodes","name":"TestList6000PerformanceWithStaleKindStatistics","lane":"timing","tier":"GATED-FULL"}
+    ,
+    {"kind":"go","package":"internal/nodes","name":"TestList6000VisibilityNightlyAbsoluteBudget","lane":"timing","tier":"NIGHTLY"}
     ,
     {"kind":"go","package":"internal/nodes","name":"TestList6000WithProjectVisibility","lane":"timing","tier":"GATED-FULL"}
     ,
