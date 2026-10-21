@@ -1308,15 +1308,23 @@ test('AEON-1453 sixteen full web shards stay over the budget',()=>{
   assert.equal(full.projections.reduce((sum,bin)=>sum+bin.cases,0),gate.length)
 })
 
-test('AEON-1603 nineteen shards keep main under 860s and the next gated spec under the 900s guard',()=>{
+test('AEON-1603 nineteen shards keep main incl. AEON-1502 under 860s and seventeen over the 900s guard',()=>{
   // AEON-1619: hosted shard 8 is heavier than the eighteen-bin plan. Seventeen
   // still overflows the 900s budget. Eighteen fits that budget and misses the
-  // 860s target. Nineteen keeps main and AEON-1502's two additions (the
-  // approve-harness spec at its registered unmeasured rate, ~20s, and one more
-  // account-use-matrix case) at or under 860s. The 900s budget and 120s
-  // overhead are unchanged. Do not pin the live projected seconds (AEON-1483).
+  // 860s target. Nineteen keeps the live catalogue, including AEON-1502's
+  // approve-harness spec and the extra account-use-matrix case, at or under
+  // 860s. The 900s budget and 120s overhead are unchanged. Do not pin the live
+  // projected seconds (AEON-1483).
   const policy=loadWebPolicy()
   const gate=fullGateTests(replayRows).filter(row=>row.kind==='browser')
+  const matrix='tests/account-use-matrix.spec.ts'
+  const harness='tests/aeon-1502-approve-harness.spec.ts'
+  const matrixCase='the pairing review never claims nowhere from a partial read of contexts'
+  const harnessRows=gate.filter(row=>row.file===harness)
+  assert.equal(harnessRows.length,9)
+  assert.ok(harnessRows.every(row=>row.tier==='ESSENTIAL'),harness)
+  assert.equal(gate.find(row=>row.file===matrix&&row.name===matrixCase)?.tier,'ESSENTIAL')
+  assert.ok(policy.groups.some(group=>group.specs?.some(spec=>spec.file===harness)),`${harness} has a shard weight`)
   const full=webShardPlan(gate,policy,{mode:'full'})
   assert.equal(fullWebShardCount,19)
   assert.equal(full.timeoutSeconds,1200)
@@ -1325,51 +1333,20 @@ test('AEON-1603 nineteen shards keep main under 860s and the next gated spec und
   assert.equal(full.headroom,0.25)
   assert.deepEqual(full.shards,fullWebShards)
   assertWebShardBudget(full)
-  assert.ok(full.projectedMaxSeconds<=860,`origin/main busiest shard ${full.projectedMaxSeconds.toFixed(3)}s`)
+  assert.ok(full.projectedMaxSeconds<=860,`main incl. AEON-1502 busiest shard ${full.projectedMaxSeconds.toFixed(3)}s`)
+  for(const bin of full.projections) assert.ok(bin.seconds<=full.budgetSeconds,`shard ${bin.shard} predicts ${bin.seconds}s`)
+  assert.equal(full.projections.reduce((sum,bin)=>sum+bin.cases,0),gate.length)
   const eighteen=webShardPlan(gate,policy,{mode:'full',maximum:18})
   assert.equal(eighteen.shards.length,18)
   assert.equal(eighteen.fitsBudget,true)
   assert.ok(eighteen.projectedMaxSeconds>860,`eighteen-shard main must miss 860s, got ${eighteen.projectedMaxSeconds.toFixed(3)}s`)
-  const narrowMain=webShardPlan(gate,policy,{mode:'full',maximum:17})
-  assert.equal(narrowMain.shards.length,17)
-  assert.equal(narrowMain.fitsBudget,false)
-  assert.throws(()=>assertWebShardBudget(narrowMain),/over the 900s budget/)
-  const matrix='tests/account-use-matrix.spec.ts'
-  const harness='tests/aeon-1502-approve-harness.spec.ts'
-  const matrixCase='the pairing review never claims nowhere from a partial read of contexts'
-  const extra=[]
-  if(!gate.some(row=>row.file===matrix&&row.name===matrixCase)) extra.push({kind:'browser',file:matrix,name:matrixCase,tier:'ESSENTIAL'})
-  if(!gate.some(row=>row.file===harness)) extra.push({kind:'browser',file:harness,name:'AEON-1502 approve harness',tier:'ESSENTIAL'})
-  const copied=structuredClone(policy)
-  if(!copied.groups.some(group=>group.specs?.some(spec=>spec.file===harness))) {
-    const group=copied.groups.find(item=>item.specs?.some(spec=>spec.file===matrix))
-    assert.ok(group,matrix)
-    group.specs.push({file:harness,weightSeconds:19.97561,weightSource:'unmeasured-test-rate'})
-  }
-  const added=[...gate,...extra]
-  const base=tierWeights(policy,gate)
-  const next=tierWeights(copied,added)
-  const delta=next[harness]+next[matrix]-base[matrix]
-  assert.ok(delta>22&&delta<22.2,`AEON-1502 addition ${delta.toFixed(3)}s`)
-  const narrow=webShardPlan(added,copied,{mode:'full',maximum:17})
+  const narrow=webShardPlan(gate,policy,{mode:'full',maximum:17})
   assert.equal(narrow.shards.length,17)
   assert.equal(narrow.budgetSeconds,900)
   assert.equal(narrow.overheadSeconds,120)
+  assert.equal(narrow.headroom,0.25)
   assert.equal(narrow.fitsBudget,false)
   assert.throws(()=>assertWebShardBudget(narrow),/over the 900s budget/)
-  const eighteenAdded=webShardPlan(added,copied,{mode:'full',maximum:18})
-  assert.equal(eighteenAdded.shards.length,18)
-  assert.equal(eighteenAdded.fitsBudget,true)
-  assert.ok(eighteenAdded.projectedMaxSeconds>860,`eighteen-shard augmented catalogue must miss 860s, got ${eighteenAdded.projectedMaxSeconds.toFixed(3)}s`)
-  const wide=webShardPlan(added,copied,{mode:'full'})
-  assert.equal(wide.shards.length,19)
-  assert.equal(wide.timeoutSeconds,1200)
-  assert.equal(wide.budgetSeconds,900)
-  assert.equal(wide.overheadSeconds,120)
-  assertWebShardBudget(wide)
-  assert.ok(wide.projectedMaxSeconds<=860,`augmented busiest shard ${wide.projectedMaxSeconds.toFixed(3)}s`)
-  for(const bin of wide.projections) assert.ok(bin.seconds<=wide.budgetSeconds,`shard ${bin.shard} predicts ${bin.seconds}s`)
-  assert.equal(wide.projections.reduce((sum,bin)=>sum+bin.cases,0),added.length)
 })
 
 const assignWebShards=(rows,policy,plan)=>{

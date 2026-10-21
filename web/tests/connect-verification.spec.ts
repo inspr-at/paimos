@@ -36,27 +36,32 @@ async function captureReview(page: Page, state: string) {
   }
 }
 
+// AEON-1502: the explicit choice is made in Details (verification off, or the harnesses left out); no third button.
 test('mixed harnesses keep Connect enabled and offer an explicit verification choice', async ({ page }) => {
   await mockWork(page, fixtures())
   const calls = await mockPairing(page, mixed)
   await openReview(page)
   await captureReview(page, 'mixed')
   const review = page.getByRole('region', { name: 'Pairing review' })
-  // AEON-1160 / #552 uses the canonical harness label in verification copy.
-  await expect(review.locator('.verify .sub')).toHaveText('Claude Code can be verified. Codex and Cursor can’t be verified.')
-  await expect(review.getByRole('checkbox', { name: 'Verify selected harnesses' })).toBeChecked()
-  const connect = review.getByRole('button', { name: 'Connect your machine', exact: true })
+  await expect(review.locator('[data-review-facts]')).toHaveText('Verification on · Agents enabled after connecting · change in Details')
+  const connect = review.getByRole('button', { name: 'Pair', exact: true })
   await expect(connect).toBeEnabled()
   await connect.click()
-  const choice = review.getByRole('group', { name: 'Verification choice' })
-  await expect(choice.getByRole('status')).toHaveText('Codex and Cursor can’t be verified — connect without verification, or leave them out.')
-  await expect(choice.getByRole('button', { name: 'Connect without verification', exact: true })).toBeEnabled()
-  await expect(choice.getByRole('button', { name: 'Connect without verification', exact: true })).toBeFocused()
-  await expect(choice.getByRole('button', { name: 'Leave them out', exact: true })).toBeEnabled()
+  const verify = review.getByRole('checkbox', { name: 'Verify selected harnesses' })
+  await expect(review.locator('details.more')).toHaveJSProperty('open', true)
+  await expect(review.locator('.actions').getByRole('status')).toHaveText('Codex and Cursor can’t be verified. Turn verification off, or leave them out, in Details.')
+  await expect(connect).toHaveAccessibleDescription('Codex and Cursor can’t be verified. Turn verification off, or leave them out, in Details.')
+  await expect(verify).toBeFocused()
+  await expect(verify).toBeChecked()
+  // AEON-1160 / #552 uses the canonical harness label in verification copy.
+  await expect(review.locator('.verify .sub')).toHaveText('Claude Code can be verified. Codex and Cursor can’t be verified.')
+  await expect(review.getByRole('button', { name: /without verification|Leave them out/ })).toHaveCount(0)
   expect(calls.filter(call => call.path.endsWith('/approve'))).toEqual([])
   await captureReview(page, 'choice')
-  await review.getByRole('radio', { name: /Keep agents paused/ }).check()
-  await choice.getByRole('button', { name: 'Connect without verification', exact: true }).click()
+  await review.getByLabel('After connecting').selectOption('paused')
+  await verify.uncheck()
+  await expect(review.locator('.actions').getByRole('status')).toHaveText('')
+  await connect.click()
   await expect.poll(() => calls.find(call => call.path.endsWith('/approve'))?.body).toEqual({
     request_digest: 'ab'.repeat(32), verification: 'connect_only',
     selected_account_keys: ['claude-1', 'codex-1', 'cursor-1'],
@@ -67,17 +72,16 @@ test('leaving unverifiable harnesses out preserves verification and requires Con
   await mockWork(page, fixtures())
   const calls = await mockPairing(page, mixed)
   await openReview(page)
-  const connect = page.getByRole('button', { name: 'Connect your machine', exact: true })
+  const connect = page.getByRole('button', { name: 'Pair', exact: true })
   await connect.click()
-  await page.getByRole('button', { name: 'Leave them out', exact: true }).click()
+  for (const name of ['Codex', 'Cursor']) await page.getByRole('checkbox', { name: `Connect ${name}`, exact: true }).uncheck()
   await expect(page.getByRole('checkbox', { name: 'Connect Claude Code', exact: true })).toBeChecked()
   for (const name of ['Codex', 'Cursor']) await expect(page.getByRole('checkbox', { name: `Connect ${name}`, exact: true })).not.toBeChecked()
   await expect(page.getByRole('checkbox', { name: 'Verify selected harnesses' })).toBeChecked()
   await expect(page.locator('.verify .sub').first()).toHaveText('Claude Code will be verified.')
-  await expect(page.getByRole('group', { name: 'Verification choice' })).toHaveCount(0)
-  await expect(connect).toBeFocused()
+  await expect(page.locator('.actions').getByRole('status')).toHaveText('')
   expect(calls.filter(call => call.path.endsWith('/approve'))).toEqual([])
-  await page.getByRole('radio', { name: /Keep agents paused/ }).check()
+  await page.getByLabel('After connecting').selectOption('paused')
   await connect.click()
   await expect.poll(() => calls.find(call => call.path.endsWith('/approve'))?.body).toEqual({
     request_digest: 'ab'.repeat(32), verification: 'one_per_harness', selected_account_keys: ['claude-1'],
@@ -88,10 +92,11 @@ test('changing the selection clears a pending verification choice', async ({ pag
   await mockWork(page, fixtures())
   await mockPairing(page, mixed)
   await openReview(page)
-  await page.getByRole('button', { name: 'Connect your machine', exact: true }).click()
+  await page.getByRole('button', { name: 'Pair', exact: true }).click()
+  await expect(page.locator('.actions').getByRole('status')).not.toHaveText('')
   await page.getByRole('checkbox', { name: 'Verify selected harnesses' }).uncheck()
-  await expect(page.getByRole('group', { name: 'Verification choice' })).toHaveCount(0)
-  await expect(page.getByRole('button', { name: 'Connect your machine', exact: true })).toBeEnabled()
+  await expect(page.locator('.actions').getByRole('status')).toHaveText('')
+  await expect(page.getByRole('button', { name: 'Pair', exact: true })).toBeEnabled()
 })
 
 test('no selected harness gives a visible reason at Connect', async ({ page }) => {
@@ -99,7 +104,7 @@ test('no selected harness gives a visible reason at Connect', async ({ page }) =
   await mockPairing(page)
   await openReview(page)
   for (const name of ['Codex', 'Cursor']) await page.getByRole('checkbox', { name: `Connect ${name}`, exact: true }).uncheck()
-  const connect = page.getByRole('button', { name: 'Connect your machine', exact: true })
+  const connect = page.getByRole('button', { name: 'Pair', exact: true })
   await expect(connect).toBeDisabled()
   await expect(connect).toHaveAccessibleDescription('Choose at least one harness.')
   await expect(page.locator('.actions').getByRole('status')).toHaveText('Choose at least one harness.')
@@ -120,7 +125,7 @@ for (const kind of ['agent', 'reader']) test(`${kind} sees the permission reason
   } }))
   await openReview(page)
   const reason = 'Only a signed-in person who can manage accounts can connect or deny this computer.'
-  const connect = page.getByRole('button', { name: 'Connect your machine', exact: true })
+  const connect = page.getByRole('button', { name: 'Pair', exact: true })
   await expect(connect).toBeDisabled()
   await expect(connect).toHaveAccessibleDescription(reason)
   await expect(page.locator('.actions').getByRole('status')).toHaveText(reason)
@@ -131,7 +136,7 @@ test('a mismatched computer has a reason at Connect and a working recovery', asy
   await mockWork(page, fixtures())
   await mockPairing(page)
   await openReview(page, '?computer=33333333-3333-4333-8333-333333333333')
-  const connect = page.getByRole('button', { name: 'Connect your machine', exact: true })
+  const connect = page.getByRole('button', { name: 'Pair', exact: true })
   const reason = 'Use the matching code, or review this as a new computer.'
   await expect(connect).toBeDisabled()
   await expect(connect).toHaveAccessibleDescription(reason)
@@ -148,9 +153,9 @@ test('an in-flight connection has a visible reason and sends only one approval',
   const pending = new Promise<void>(resolve => { finish = resolve })
   await page.route('**/api/agent-pairing/requests/*/approve', async route => { await pending; await route.fallback() })
   await openReview(page)
-  await page.getByRole('button', { name: 'Connect your machine', exact: true }).click()
+  await page.getByRole('button', { name: 'Pair', exact: true }).click()
   try {
-    const connect = page.getByRole('button', { name: 'Connecting…', exact: true })
+    const connect = page.getByRole('button', { name: 'Pairing…', exact: true })
     await expect(connect).toBeDisabled()
     await expect(connect).toHaveAccessibleDescription('Connecting this computer…')
     await expect(page.locator('.actions').getByRole('status')).toHaveText('Connecting this computer…')

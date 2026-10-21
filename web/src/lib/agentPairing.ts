@@ -477,15 +477,6 @@ export function platformCaption(platform: string, arch: string): string {
   return arch ? `${os} · ${arch}` : os
 }
 
-export function formatAllowanceMoment(iso: string, now = Date.now()): string {
-  const time = Date.parse(iso)
-  if (!Number.isFinite(time)) return iso
-  const date = new Date(time)
-  const sameDay = new Date(now).toDateString() === date.toDateString()
-  const clock = date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
-  return sameDay ? clock : date.toLocaleString([], { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })
-}
-
 export function lastActiveLabel(iso: string | null | undefined, now = Date.now()): string {
   if (!iso) return 'Not reported'
   const time = Date.parse(iso)
@@ -511,25 +502,6 @@ export function verificationWarning(terms: VerificationTerms | null): string | n
   const expected = terms.allowance === 1 && terms.unit === 'requests' && terms.runs_per_account === 1
     && terms.max_parallel_runs === 1 && terms.max_duration_seconds === 60
   return expected ? null : 'These verification limits differ from 1 request per selected harness, 1 run at a time on that harness, and a 60 second maximum. Review the server values before connecting.'
-}
-
-function countNoun(count: number, singular: string, plural: string): string {
-  return `${count} ${count === 1 ? singular : plural}`
-}
-
-/** Renders the server's terms. The cap of 1 is per selected harness, not one run for the whole computer. */
-export function formatVerification(terms: VerificationTerms, now = Date.now()): string {
-  const policy = terms.policy === 'read_only' ? 'Read-only. ' : ''
-  const allowance = terms.unit === 'requests'
-    ? countNoun(terms.allowance, 'request', 'requests')
-    : `${terms.allowance} ${terms.unit}`
-  const parallel = terms.max_parallel_runs === 1
-    ? '1 run at a time on that harness'
-    : `at most ${terms.max_parallel_runs} runs at a time on that harness`
-  const runs = terms.runs_per_account === 1 && terms.max_parallel_runs === 1
-    ? parallel
-    : `${countNoun(terms.runs_per_account, 'run', 'runs')} on that harness, ${parallel}`
-  return `${policy}${allowance} per selected harness, ${runs}, at most ${terms.max_duration_seconds} seconds, until ${formatAllowanceMoment(terms.expires_at, now)}. No repository changes or privileged actions. This is an ${product()} allowance, not the vendor subscription.`
 }
 
 export interface HarnessVerificationBlock {
