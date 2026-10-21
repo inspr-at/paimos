@@ -41,7 +41,7 @@ func TestPrepareRunContentUsesOnlyItsServerCapability(t *testing.T) {
 		}
 		if strings.Contains(r.URL.Path, "/harness-sessions/") {
 			parts := strings.Split(r.URL.Path, "/")
-			id := strings.TrimPrefix(parts[4], "session-")
+			id := strings.TrimPrefix(parts[5], "session-")
 			if proofs[id] == "" || r.Header.Get(db.RunCapabilityHeader) != proofs[id] {
 				t.Error("session call crossed run proofs")
 			}
