@@ -1,7 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-only
-import { test, expect } from '@playwright/test'
+import { test, expect, type Page } from '@playwright/test'
 import { domAudit, installLayoutShiftAudit, armLayoutShiftAudit, readLayoutShiftAudit, expectedMockConsole, decorativeVersionContrast } from './ui-audit-rules'
-import { fixtures, mockWork } from './work-fixtures'
 
 test.use({ viewport: { width: 390, height: 700 } })
 
@@ -89,24 +88,100 @@ test('known fixture responses and decorative labelled versions are filtered prec
   expect(decorativeVersionContrast('.yy[aria-hidden="true"]', 'aria-required-attr', true)).toBe(false)
 })
 
+// Wait for the browser to report this particular movement, rather than guessing
+// how many milliseconds layout and PerformanceObserver delivery will take.
+async function moveAuditControl(page: Page, top: number): Promise<number> {
+  return page.evaluate(top => new Promise<number>(resolve => {
+    const control = document.querySelector<HTMLElement>('.audit-control')!
+    const observer = new PerformanceObserver(list => {
+      const entries = (list.getEntries() as (PerformanceEntry & { value: number; hadRecentInput: boolean; sources?: { node?: Node }[] })[])
+        .filter(entry => !entry.hadRecentInput && entry.sources?.some(source => source.node === control))
+      if (!entries.length) return
+      observer.disconnect()
+      resolve(entries.reduce((score, entry) => score + entry.value, 0))
+    })
+    observer.observe({ type: 'layout-shift' })
+    control.style.top = `${top}px`
+  }), top)
+}
+
 test('layout shift audit arms after navigation and resets startup movement', async ({ page }) => {
+  // A live app's load event and fonts.ready do not await API-driven rendering.
+  // This rule test owns its document; route/state audits cover app rendering.
+  await page.route('**/audit-layout-shift', route => route.fulfill({
+    contentType: 'text/html',
+    body: '<!doctype html><style>body { margin: 0; padding: 40px; } .audit-control { position: relative; top: 0; width: 280px; height: 44px; }</style><button class="audit-control">Audit control</button>',
+  }))
   await page.addInitScript(installLayoutShiftAudit)
-  await page.goto('/')
-  // Fonts and the first painted frame are startup movement. Arm only once they
-  // have settled, so a late observer delivery cannot look like a shift after the reset.
-  await page.evaluate(async () => {
-    await document.fonts.ready
-    await new Promise<void>(resolve => requestAnimationFrame(() => requestAnimationFrame(() => resolve())))
-  })
-  await page.evaluate(() => { (window as unknown as { auditShift: number }).auditShift = 0.5 })
+  for (let navigation = 0; navigation < 20; navigation++) {
+    await page.goto('/audit-layout-shift')
+    await page.evaluate(async () => {
+      await new Promise<void>(resolve => requestAnimationFrame(() => requestAnimationFrame(() => resolve())))
+    })
+    expect(await moveAuditControl(page, 10), 'the fixture must produce real startup movement').toBeGreaterThan(0)
+    await page.evaluate(() => {
+      const audit = window as unknown as { auditShift: number; auditShiftSources: string[] }
+      audit.auditShift = 0.5
+      audit.auditShiftSources = ['previous measurement']
+    })
+    await page.evaluate(armLayoutShiftAudit)
+    const armed = await page.evaluate(() => {
+      const audit = window as unknown as { auditShift: number; auditShiftArmed: boolean; auditShiftSources: string[] }
+      return { score: audit.auditShift, armed: audit.auditShiftArmed, sources: audit.auditShiftSources }
+    })
+    expect(armed.sources, armed.sources.join(' | ')).toEqual([])
+    expect(armed.score).toBe(0)
+    expect(armed.armed).toBe(true)
+    expect(await page.evaluate(readLayoutShiftAudit)).toEqual({ score: 0, sources: [] })
+    expect(await page.evaluate(() => (window as unknown as { auditShiftArmed: boolean }).auditShiftArmed)).toBe(false)
+  }
+  // A real two-pixel shift after arm must survive, however small its score.
   await page.evaluate(armLayoutShiftAudit)
-  const armed = await page.evaluate(() => {
-    const audit = window as unknown as { auditShift: number; auditShiftArmed: boolean; auditShiftSources: string[] }
-    return { score: audit.auditShift, armed: audit.auditShiftArmed, sources: audit.auditShiftSources }
+  const score = await moveAuditControl(page, 12)
+  const shifted = await page.evaluate(readLayoutShiftAudit)
+  expect(score).toBeGreaterThan(0)
+  expect(shifted.score, shifted.sources.join(' | ')).toBe(score)
+  expect(shifted.sources).toHaveLength(1)
+  expect(shifted.sources[0]).toContain('audit-control')
+})
+
+test('layout shift audit filters delayed entries by start time without rounding away small shifts', async ({ page }) => {
+  type Entry = { startTime: number; value: number; hadRecentInput: boolean }
+  type Audit = { auditShift: number; auditShiftArmed: boolean; auditShiftSources: string[]; auditShiftSince: number; deliver: (entries: Entry[]) => void; observed: PerformanceObserverInit }
+  await page.evaluate(() => {
+    const audit = window as unknown as Audit
+    // Delivery is an explicit barrier: startup entries arrive only after arm.
+    window.PerformanceObserver = class {
+      constructor(callback: (list: { getEntries: () => Entry[] }) => void) {
+        audit.deliver = entries => callback({ getEntries: () => entries })
+      }
+      observe(options: PerformanceObserverInit) { audit.observed = options }
+    } as unknown as typeof PerformanceObserver
   })
-  expect(armed.sources, armed.sources.join(' | ')).toEqual([])
-  expect(armed.score).toBe(0)
-  expect(armed.armed).toBe(true)
-  expect(await page.evaluate(readLayoutShiftAudit)).toEqual({ score: 0, sources: [] })
-  expect(await page.evaluate(() => (window as unknown as { auditShiftArmed: boolean }).auditShiftArmed)).toBe(false)
+  await page.evaluate(installLayoutShiftAudit)
+  expect(await page.evaluate(() => (window as unknown as Audit).observed)).toEqual({ type: 'layout-shift', buffered: true })
+  await page.evaluate(armLayoutShiftAudit)
+  await page.evaluate(() => {
+    const audit = window as unknown as Audit
+    audit.deliver([
+      { startTime: audit.auditShiftSince - 1, value: 0.00029219, hadRecentInput: false },
+      { startTime: audit.auditShiftSince + 1, value: 0.5, hadRecentInput: true },
+    ])
+  })
+  expect(await page.evaluate(() => {
+    const audit = window as unknown as Audit
+    return { score: audit.auditShift, sources: audit.auditShiftSources }
+  })).toEqual({ score: 0, sources: [] })
+  await page.evaluate(() => {
+    const audit = window as unknown as Audit
+    audit.deliver([{ startTime: audit.auditShiftSince, value: 0.00029219, hadRecentInput: false }])
+  })
+  const shifted = await page.evaluate(readLayoutShiftAudit)
+  expect(shifted.score).toBe(0.00029219)
+  expect(shifted.sources).toHaveLength(1)
+  await page.evaluate(() => {
+    const audit = window as unknown as Audit
+    audit.deliver([{ startTime: audit.auditShiftSince + 1, value: 0.5, hadRecentInput: false }])
+  })
+  expect(await page.evaluate(readLayoutShiftAudit)).toEqual(shifted)
 })
