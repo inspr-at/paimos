@@ -316,19 +316,14 @@ func TestPersonCeiling(t *testing.T) {
 			if err != nil || got.KeyPersonID != person {
 				t.Fatalf("positive %+v %v", got, err)
 			}
+			// The lookup widens for the session read, then re-enters this
+			// principal before it returns. The setting itself must be the cap.
 			vis := setting(t, ctx, tx)
 			if vis == "*" || !strings.Contains(vis, projectM) || strings.Contains(vis, projectL) || !nodeVisible(t, ctx, tx, projectM) || nodeVisible(t, ctx, tx, projectL) || nodeVisible(t, ctx, tx, knowledge) {
 				t.Fatalf("positive visibility %s", vis)
 			}
 		})
 		inCeiling(t, d, hiddenP, func(tx pgx.Tx) {
-			got, err := db.WorkerRunPrincipalTx(ctx, tx, hiddenP, "lease-hidden")
-			if err != nil || got.KeyPersonID != inactive {
-				t.Fatalf("hidden %+v %v", got, err)
-			}
-			if vis := setting(t, ctx, tx); vis != "" || nodeVisible(t, ctx, tx, projectM) {
-				t.Fatalf("hidden visibility %s", vis)
-			}
 			unknown, err := db.WorkerRunPrincipalTx(ctx, tx, hiddenP, "lease-unknown")
 			if err != nil || unknown.KeyPersonID != "" {
 				t.Fatalf("unknown %+v %v", unknown, err)
@@ -336,6 +331,14 @@ func TestPersonCeiling(t *testing.T) {
 			vis := setting(t, ctx, tx)
 			if vis == "*" || !strings.Contains(vis, projectM) || strings.Contains(vis, projectL) {
 				t.Fatalf("unknown lease left %s", vis)
+			}
+			got, err := db.WorkerRunPrincipalTx(ctx, tx, hiddenP, "lease-hidden")
+			if err != nil || got.KeyPersonID != inactive {
+				t.Fatalf("hidden %+v %v", got, err)
+			}
+			vis = setting(t, ctx, tx)
+			if vis != "" || nodeVisible(t, ctx, tx, projectM) {
+				t.Fatalf("hidden visibility %s", vis)
 			}
 		})
 		err := db.InTenant(tenant.WithPrincipal(ctx, legacyP), d.App, tid, func(tx pgx.Tx) error {

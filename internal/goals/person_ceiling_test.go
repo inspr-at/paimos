@@ -22,6 +22,9 @@ func TestPersonCeilingGoals(t *testing.T) {
 	d, agent, projectM, projectL := seedGoalCeiling(t)
 	ctx := tenant.WithPrincipal(t.Context(), agent)
 	err := db.InTenant(ctx, d.App, agent.TenantID, func(tx pgx.Tx) error {
+		if _, err := tx.Exec(ctx, `SELECT set_config('aeon.visible_projects','*',true)`); err != nil {
+			return err
+		}
 		if err := lockWrite(ctx, tx, agent); err != nil {
 			return err
 		}

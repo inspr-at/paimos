@@ -3,6 +3,7 @@
 package dsar
 
 import (
+	"strings"
 	"testing"
 
 	"github.com/jackc/pgx/v5"
@@ -17,6 +18,9 @@ import (
 func TestPersonCeilingDSAR(t *testing.T) {
 	d, person, operator, projectM, projectL, knowledge := seedSubjectCeiling(t, "person-ceiling-dsar")
 	ctx := tenant.WithPrincipal(t.Context(), operator)
+	if _, err := Collect(ctx, d.App, Options{Tenant: "person-ceiling-dsar", ActorID: person, Person: person}); err == nil || !strings.Contains(err.Error(), "actor must be the calling person") {
+		t.Fatalf("agent caller: %v", err)
+	}
 	err := db.InTenant(ctx, d.App, operator.TenantID, func(tx pgx.Tx) error {
 		if err := enterSubjectVisibility(ctx, tx, operator.TenantID, person); err != nil {
 			return err
