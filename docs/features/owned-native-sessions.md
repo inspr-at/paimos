@@ -24,7 +24,8 @@ The owning host serializes transitions with input/stop and dispatch. It
 journals the transition before closing its actual predecessor handle, verifies
 root and group exit, and obtains a fresh server epoch/harness/worker lease
 before opening the successor. The original account root, quota holds,
-physical profile revision and runtime deadline are preserved. Every uncertain
+physical profile revision and runtime deadline are preserved. Additive native
+transition records use major 2, minor 1 and retain the legacy process fence. Every uncertain
 close or fork retains occupancy. Accepted metadata is never replayed as native
 input after restart. The private successor-proof header rotates existing
 session proof; it is not a new operator credential or permission.
@@ -46,8 +47,9 @@ structured input → take → read-only live terminal → confirmed hand-back �
 fresh epoch → manual recovery. It checks stale take/hand-back/recovery requests,
 exact recovery replay, audit counts and the held account root. A second case
 proves an unconfirmed predecessor is neither closed twice nor replaced and
-keeps its reservation. Injected clocks and observation channels establish the
-scenario. The scenario exposed concurrent journal flushers; poll retries now
+keeps its reservation. A separately authorized owner stop still reaches the
+retained handle through polling. Injected clocks and observation channels
+establish the scenario. The scenario exposed concurrent journal flushers; poll retries now
 share the provider event fence, without weakening the journal's single-flusher
 check. Recovery also retains the account profile's revision separately from
 the runtime binding revision.
@@ -91,17 +93,41 @@ audit globs cover the added source/test files. No new migration, table,
 permission, public schema, route or browser identity is added.
 
 Validation: both control scenarios passed remotely on `199f78fb0`; the full
-native-session packages (including store/interaction/receipts/stream) and
-nativeintegration passed on `b0921df84`. The ownership audit passed all 33
-checks, and canonical manifest/diff checks passed. The full requested Go run
-is recorded in `.agent-status.json`; unchanged agentd/CLI executable fixtures
-remain red on the agm2 fallback, including missing `/bin/true` and `/bin/sleep`
-and probe/version/provenance fixtures. No tests are skipped or loosened.
+native-session packages (including store/interaction/receipts/stream),
+nativeintegration, agentaccounts, reportercontract and harness passed on
+`b0921df84`. The targeted store/stream/agentd checks passed with `-race -count=1`
+on `311ee33dd` (5.324/4.463/24.791 seconds). After adding the failed-switch owner
+stop, the affected store and agentd cases passed again with `-race -count=1`
+on `30cdc2e48` (11.281/24.355 seconds). The ownership audit passed all 33 checks;
+canonical manifest/diff checks passed. The final major-2/minor-1 state-marker,
+integrated control/recovery and schema-migration follow-up passed on
+`5e790bee9` (store 2.581 seconds; agentd 0.028 seconds). The final handoff changes
+documentation only; its HEAD is recorded in `.agent-status.json`.
+
+The full requested Go run remains red in unchanged agm2 executable fixtures:
+`TestACPLauncherProbeFailureCauses`,
+`TestAttachLinuxExitedProcessIsKernelConfirmed`,
+`TestCodexSeparateHomesBindQuotaAndIdentityToEachProfile`,
+`TestClaudeBillingProbeRespectsEmailFence`,
+`TestClaudeRotatedLoginsKeepOnlyTheirOwnEnrollmentReady`,
+`TestProbeStatusSeparatesSignOutFromUnavailable`,
+`TestProbeStatusRejectsDuplicateKeys`, `TestProbeStatusOutputCap`,
+`TestClaudeSeparateHomesKeepBothLoginsReadyAndFenceOnlyTheChangedHome` and
+`TestClaudeIdleCapabilityExactBinary`. CLI failures are
+`TestRunHeartbeatLiveOwnerKeepsBeating`,
+`TestRunHeartbeatLiveOwnerAgainstDatabase`,
+`TestHarnessVersionProbeIsBoundedAndOptional` and
+`TestRulesCompareCLIReportsBlockerAndRefusesUnsafeIO`. Missing `/bin/true` and
+`/bin/sleep` are explicit failures; probe/version/provenance cases also fail.
+No affected assertion is skipped or loosened to make that run pass.
+
 Browser and static wrappers returned exit 3 because mbp2606 is unavailable/not
-GREEN under its host protocol; they are incomplete. No browser evidence was
-produced, and no heavy local suite replaces those refusals. This partial
-build is neither completed acceptance nor release qualification. No origin
-push, merge, deployment, model CLI or review gate is run by this worker.
+GREEN under its host protocol. They are incomplete, with no browser evidence
+produced and no heavy local suite replacing a refusal. The targeted state-marker
+follow-up initially returned exit 3 because agm2's joint capacity cap was full,
+then passed on the next guarded attempt.
+This partial build is neither completed acceptance nor release qualification.
+No origin push, merge, deployment, model CLI or review gate is run by this worker.
 
 ## Existing panel behavior
 
