@@ -443,7 +443,8 @@ defineExpose({ open })
       </template>
 
       <template v-else>
-        <div class="launch-body run-result" data-result tabindex="-1" role="status">
+        <div class="launch-body">
+        <div class="run-result" data-result tabindex="-1" role="status">
           <span class="result-icon"><AppIcon :name="managed ? 'check' : 'clock'" :size="24" /></span>
           <p class="eyebrow">{{ reused ? 'Existing run' : 'Run created' }}</p>
           <h3>{{ sessionConnected ? 'Managed session connected' : state?.label }}</h3>
@@ -473,6 +474,7 @@ defineExpose({ open })
         </div>
         <button v-if="mayRunNow && run.status === 'queued' && run.wait?.run_now_allowed" type="button" class="btn" :disabled="busy" @click="overrideQueued">Run now once</button>
         <p v-if="checkError" class="error" role="alert">{{ checkError }}</p>
+        </div>
         <footer class="result-footer"><button type="button" class="btn ghost" :disabled="checking" @click="refresh"><AppIcon name="refresh" :size="14" />Refresh status</button><button type="button" class="btn" :disabled="busy" @click="close">Close</button><RouterLink class="btn primary" :to="managed ? `/agents/${managed.id}` : '/agents'" @click="close">{{ managed ? 'Open session' : 'Go to Agents' }}<AppIcon name="arrow" :size="15" /></RouterLink></footer>
       </template>
     </form>

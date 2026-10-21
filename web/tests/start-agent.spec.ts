@@ -6,6 +6,7 @@ import { sessionListReads } from './agents-fixtures'
 import { mockStartAgent } from './start-agent-fixtures'
 import { expectStableControls } from './helpers/stable'
 import { me } from './work-fixtures'
+import type { QueueWireEntry } from '../src/lib/workQueue'
 
 const dialog = (page: Page) => page.getByRole('dialog', { name: 'Start agent', exact: true })
 const newAgent = (page: Page) => page.getByRole('button', { name: 'New: start a lead, attach a session or connect a machine', exact: true })
@@ -303,12 +304,18 @@ for (const theme of ['light', 'dark'] as const) for (const width of [390, 1024, 
       project_id: 'p-pharos', revision: 4, generation: 1, session_id: null, state: 'paused', reason: 'admission_not_configured', process_active: false, automatic_launch_enabled: false,
     } }))
     const queuePosts: unknown[] = []
+    const queueItems: QueueWireEntry[] = []
     let refuse = true
     await page.route('**/api/queue**', async route => {
-      if (route.request().method() === 'GET') return route.fulfill({ json: { items: [], manual_order: false, capacity: { queued_hours: 0, parallel_runs: 0, work_hours: null, warning: false } } })
+      if (route.request().method() === 'GET') return route.fulfill({ json: { items: queueItems, manual_order: false, capacity: { queued_hours: queueItems.length * 2, parallel_runs: 0, work_hours: null, warning: false } } })
       queuePosts.push(route.request().postDataJSON())
       if (refuse) return route.fulfill({ status: 503, json: { error: 'The lead queue is unavailable. Try again.' } })
-      return route.fulfill({ json: { node_id: 'n-1', key: 'PHAROS-11', queued: { run_id: 'lead-demand', target_agent_id: null } } })
+      const entry: QueueWireEntry = {
+        node_id: 'n-1', project_id: 'p-pharos', key: 'PHAROS-11', title: 'Agentensteuerung', state: 'open', priority: 'high', estimate_hours: 2,
+        queued: { run_id: 'lead-demand', position: 1, by: { ...me, kind: 'person' }, at: new Date().toISOString(), target_agent_id: null, expected_agent_id: null, model_profile_id: null, expected_start_at: null, waiting: true, wait_reason: 'Automatic launch is not enabled' },
+      }
+      queueItems.push(entry)
+      return route.fulfill({ json: entry })
     })
     await open(page)
     const sheet = dialog(page), actions = sheet.locator('footer'), primary = actions.locator('button[type="submit"]')
@@ -350,6 +357,8 @@ for (const theme of ['light', 'dark'] as const) for (const width of [390, 1024, 
       ],
     })
     expect(queuePosts).toEqual([{ node_id: 'n-1' }, { node_id: 'n-1' }])
+    expect(queueItems).toHaveLength(1)
+    expect(queueItems[0]?.queued.target_agent_id).toBeNull()
     expect(mock.calls.filter(call => call.method !== 'GET' && (call.path.startsWith('/api/work-orders') || call.path === '/api/agent-accounts/pins'))).toEqual([])
     await sheet.screenshot({ path: info.outputPath(`AEON-1508-queued-${width}-${theme}.png`) })
   })
