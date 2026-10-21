@@ -3,9 +3,12 @@
 package consent
 
 import (
+	"bytes"
 	"context"
+	"crypto/sha256"
 	"encoding/json"
 	"errors"
+	"time"
 
 	"github.com/inspr-at/paimos/internal/authz"
 	"github.com/inspr-at/paimos/internal/nativecontract"
@@ -23,6 +26,42 @@ type Session struct {
 	// the pinned policy and no consent facts: the exact owner's stop of the
 	// exact binding may proceed, never input, launch, reads or finals.
 	StopOnly bool
+}
+
+// ControllerTx checks the exact current person lease under the caller's final
+// access fence. A public controller epoch is a selector, never a person proof.
+// The authenticated transport and its permission check remain mandatory.
+func (a Authority) ControllerTx(ctx context.Context, tx pgx.Tx, s Session, p tenant.Principal, epoch string) error {
+	if p.Kind != tenant.Person || p.KeyID != "" || p.AuthKeyID != "" || p.KeyCreatorID != "" || p.TenantID != s.Actor.TenantID {
+		return refuse(nativecontract.ReasonWrongPrincipal)
+	}
+	if s.View.CurrentBinding == nil || epoch == "" {
+		return refuse(nativecontract.ReasonControllerExpired)
+	}
+	if err := authz.RequireTx(ctx, tx, p, "harness.control", authz.Scope{ProjectID: s.View.CurrentBinding.ProjectID}); err != nil {
+		return refuse(nativecontract.ReasonPermissionRevoked)
+	}
+	var actor, currentEpoch string
+	var binding []byte
+	var expires time.Time
+	err := tx.QueryRow(ctx, `SELECT actor_person_id::text,epoch::text,binding_digest,expires_at
+ FROM native_session_controllers WHERE tenant_id=$1 AND owned_session_id=$2 FOR NO KEY UPDATE`, p.TenantID, s.View.OwnedSessionID).Scan(&actor, &currentEpoch, &binding, &expires)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return refuse(nativecontract.ReasonControllerExpired)
+	}
+	if err != nil {
+		return err
+	}
+	now, err := a.currentTime(ctx, tx)
+	if err != nil {
+		return err
+	}
+	raw, _ := json.Marshal(*s.View.CurrentBinding)
+	sum := sha256.Sum256(raw)
+	if actor != p.ID || currentEpoch != epoch || !bytes.Equal(binding, sum[:]) || !now.Before(expires) || s.View.Controller == nil || s.View.Controller.ActorID != p.ID || s.View.Controller.Epoch != epoch {
+		return refuse(nativecontract.ReasonControllerExpired)
+	}
+	return nil
 }
 
 // SessionTx revalidates the persisted original person and the exact immutable

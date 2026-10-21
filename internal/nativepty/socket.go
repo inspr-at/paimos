@@ -18,18 +18,27 @@ import (
 	"time"
 
 	"github.com/inspr-at/paimos/internal/agentsetup"
+	"github.com/inspr-at/paimos/internal/nativeattach"
 	"github.com/inspr-at/paimos/internal/nativecontract"
 	"github.com/inspr-at/paimos/internal/nativestream"
 )
 
 type socketWire struct {
+	person    *nativeattach.PersonProof
 	socket    string
 	client    *http.Client
 	transport *http.Transport
 	validator *nativecontract.Validator
 }
 
-func NewSocketWire(socket string) (TakeWire, error) {
+func NewSocketWire(socket string, person ...*nativeattach.PersonProof) (TakeWire, error) {
+	if len(person) > 1 {
+		return nil, refuse(nativecontract.ReasonInvalidInput)
+	}
+	var proof *nativeattach.PersonProof
+	if len(person) == 1 {
+		proof = person[0]
+	}
 	if !filepath.IsAbs(socket) || filepath.Clean(socket) != socket || agentsetup.CheckSocket(socket) != nil {
 		return nil, errors.New("protected owner socket unavailable")
 	}
@@ -43,7 +52,7 @@ func NewSocketWire(socket string) (TakeWire, error) {
 		}
 		return (&net.Dialer{Timeout: 5 * time.Second}).DialContext(ctx, "unix", socket)
 	}}
-	return &socketWire{socket: socket, transport: t, validator: v, client: &http.Client{Transport: t, CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}}, nil
+	return &socketWire{person: proof, socket: socket, transport: t, validator: v, client: &http.Client{Transport: t, CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}}, nil
 }
 func (w *socketWire) Close() { w.transport.CloseIdleConnections() }
 func localPath(b nativecontract.Binding, method string) string {
@@ -70,6 +79,7 @@ func (w *socketWire) request(ctx context.Context, method, path string, body []by
 	}
 	r.Header.Set("Authorization", "Bearer "+string(proof))
 	r.Header.Set(nativecontract.LocalProtocolHeader, nativecontract.LocalProtocol)
+	w.person.Authorize(r)
 	r.Header.Set("Content-Type", "application/json")
 	r.Header.Set(nativecontract.ViewerHeader, viewer)
 	r.Header.Set(nativecontract.ControlHeader, capability)
@@ -140,7 +150,7 @@ func (w *socketWire) Watch(ctx context.Context, view nativecontract.SessionView,
 		return refuse(nativecontract.ReasonWrongGeneration)
 	}
 	b := cloneBinding(*view.CurrentBinding)
-	q := url.Values{"view": {"terminal"}, "expected_runtime_epoch": {b.RuntimeEpoch}, "expected_harness_session_id": {b.HarnessSessionID}, "expected_binding_revision": {strconv.FormatInt(b.BindingRevision, 10)}}
+	q := url.Values{"generation": {strconv.FormatInt(view.Generation, 10)}, "view": {"terminal"}, "expected_runtime_epoch": {b.RuntimeEpoch}, "expected_harness_session_id": {b.HarnessSessionID}, "expected_binding_revision": {strconv.FormatInt(b.BindingRevision, 10)}}
 	ctx, cancel := context.WithTimeout(ctx, (nativecontract.StreamRotationSeconds+5)*time.Second)
 	defer cancel()
 	res, err := w.request(ctx, http.MethodGet, localPath(b, "stream")+"?"+q.Encode(), nil, viewer, "")

@@ -24,7 +24,7 @@ import (
 	"github.com/jackc/pgx/v5"
 )
 
-type testAuthority struct{ revoked, protected atomic.Bool }
+type testAuthority struct{ revoked, protected, claimDenied atomic.Bool }
 
 func (a *testAuthority) AuthorizeRequestTx(context.Context, pgx.Tx, tenant.Principal, nativecontract.Approval) (bool, error) {
 	if a.revoked.Load() {
@@ -33,7 +33,10 @@ func (a *testAuthority) AuthorizeRequestTx(context.Context, pgx.Tx, tenant.Princ
 	return a.protected.Load(), nil
 }
 
-func (a *testAuthority) AuthorizeTx(context.Context, pgx.Tx, tenant.Principal, nativecontract.Binding, string) error {
+func (a *testAuthority) AuthorizeTx(_ context.Context, _ pgx.Tx, _ tenant.Principal, _ nativecontract.Binding, action string) error {
+	if action == "control_claim" && a.claimDenied.Load() {
+		return fault(403, nativecontract.ReasonWrongPrincipal)
+	}
 	if a.revoked.Load() {
 		return fault(403, nativecontract.ReasonPermissionRevoked)
 	}
@@ -136,6 +139,17 @@ func expectFailure(t *testing.T, err error, status int, reason nativecontract.Re
 // controller. Observe the actual competing DB lock; deadlines only bound hangs.
 func TestControllerEpochFencesConcurrentAttach(t *testing.T) {
 	f := newFixture(t)
+	// A readable session and harness.control do not replace the integrating
+	// owner's/project-admin rule in the final controller-write transaction.
+	f.authority.claimDenied.Store(true)
+	_, denied := f.s.Attach(f.ctx(t, f.person), actor(f.person), f.attach("control"))
+	expectFailure(t, denied, 403, nativecontract.ReasonWrongPrincipal)
+	readOnly, err := f.s.Attach(f.ctx(t, f.person), actor(f.person), f.attach("view"))
+	if err != nil || readOnly.Controller != nil || readOnly.ControlCapability != nil {
+		t.Fatalf("denied control changed a read-only viewer: %v", err)
+	}
+	f.authority.claimDenied.Store(false)
+
 	pool, barrier, ctx := dbtest.BarrierPool(t, f.d.App, func(q string) bool { return strings.Contains(q, "FROM native_session_controllers WHERE") })
 	f.s.pool = pool
 	t.Cleanup(barrier.Release)

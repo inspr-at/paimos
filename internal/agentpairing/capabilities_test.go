@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-only
-package agentpairing
+
+package agentpairing_test
 
 import (
 	"runtime"
@@ -7,10 +8,11 @@ import (
 	"testing"
 
 	"github.com/inspr-at/paimos/internal/agentd"
+	"github.com/inspr-at/paimos/internal/agentpairing"
 )
 
 func TestVerificationAdvertisementMatchesLocalAdapters(t *testing.T) {
-	capabilities := verificationCapabilities(runtime.GOOS, runtime.GOARCH)
+	capabilities := agentpairing.VerificationCapabilitiesForTest(runtime.GOOS, runtime.GOARCH)
 	for _, adapter := range []agentd.Adapter{
 		agentd.NewCodexAdapter("/unused", nil), agentd.NewCursorAdapter("/unused", nil),
 		agentd.NewClaudeAdapter("/unused", "/unused", "/unused", nil), agentd.NewGrokAdapter(), agentd.NewPiAdapter("/unused", nil),
@@ -26,7 +28,7 @@ func TestVerificationAdvertisementMatchesLocalAdapters(t *testing.T) {
 func TestUnqualifiedVerificationNeverAdvertisedAsDispatchTarget(t *testing.T) {
 	for _, platform := range []string{"", "darwin", "linux"} {
 		for _, arch := range []string{"", "arm64", "amd64"} {
-			caps := verificationCapabilities(platform, arch)
+			caps := agentpairing.VerificationCapabilitiesForTest(platform, arch)
 			for _, harness := range []string{"codex", "cursor", "pi"} {
 				c := caps[harness]
 				if c.Supported || c.Policy != "unavailable" || c.Reason == "" || strings.ContainsAny(c.Reason, "\r\n") {
@@ -35,7 +37,7 @@ func TestUnqualifiedVerificationNeverAdvertisedAsDispatchTarget(t *testing.T) {
 			}
 		}
 	}
-	for _, target := range VerificationTargets() {
+	for _, target := range agentpairing.VerificationTargets() {
 		if strings.HasSuffix(target, "/codex") || strings.HasSuffix(target, "/cursor") || strings.HasSuffix(target, "/pi") {
 			t.Fatalf("unqualified dispatch target: %s", target)
 		}

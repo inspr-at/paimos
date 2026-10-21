@@ -22,6 +22,7 @@ import (
 )
 
 type socketWire struct {
+	person    *PersonProof
 	socket    string
 	http      *http.Client
 	transport *http.Transport
@@ -65,6 +66,7 @@ func (w *socketWire) request(ctx context.Context, method, path string, body []by
 	}
 	r.Header.Set("Authorization", "Bearer "+string(proof))
 	r.Header.Set(nativecontract.LocalProtocolHeader, nativecontract.LocalProtocol)
+	w.person.Authorize(r)
 	r.Header.Set("Content-Type", "application/json")
 	if method == http.MethodGet {
 		r.Header.Set("Accept", "text/event-stream, application/json")

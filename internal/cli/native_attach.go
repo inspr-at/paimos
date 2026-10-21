@@ -16,6 +16,7 @@ import (
 
 	"github.com/inspr-at/paimos/internal/agentdwire"
 	"github.com/inspr-at/paimos/internal/agentsetup"
+	"github.com/inspr-at/paimos/internal/client"
 	"github.com/inspr-at/paimos/internal/nativeattach"
 	"github.com/inspr-at/paimos/internal/nativecontract"
 )
@@ -24,14 +25,15 @@ import (
 // to cmdSession().subs in compat_cmds.go after the core CLI handoff; this slice
 // does not mutate that reserved file or the legacy attachment command tree.
 func (rt *runtime) cmdSessionAttach() *Command {
-	var project, socket, state, mode string
+	var project, socket, state, mode, personSession string
 	var control bool
 	return &Command{
 		Name: "attach", Short: "View an owned native session, with optional exclusive control",
-		Use: "session attach OWNED_ID --project KEY [--control]", minArgs: 1, maxArgs: 1,
-		Long: "Viewing is read-only. --control requests one exclusive controller lease. Esc leaves input, then detaches; i interrupts only outside input. EOF and signals detach the viewer without stopping the session. Submit uses " + nativeattach.SubmitLabel(goruntime.GOOS) + " with a compatible terminal, or Esc then s.",
+		Use: "session attach OWNED_ID --project KEY --session-cookie-file FILE [--control]", minArgs: 1, maxArgs: 1,
+		Long: "An existing person session supplied by --session-cookie-file is required; agent keys are refused. Viewing is read-only. --control requests one exclusive controller lease. Esc leaves input, then detaches; i interrupts only outside input. EOF and signals detach the viewer without stopping the session. Submit uses " + nativeattach.SubmitLabel(goruntime.GOOS) + " with a compatible terminal, or Esc then s.",
 		addFlags: func(fs *flagSet) {
 			fs.string(&project, "project", 0, "project key or UUID (required)")
+			fs.string(&personSession, "session-cookie-file", 0, "existing person session cookie file; API keys are refused")
 			fs.string(&socket, "socket", 0, "protected owner agentd socket")
 			fs.string(&state, "setup-root", 0, "private pairing state root")
 			fs.string(&mode, "input-mode", 0, "now (default) or after_turn")
@@ -68,12 +70,16 @@ func (rt *runtime) cmdSessionAttach() *Command {
 			defer signal.Stop(resizes)
 			readCtx, finish := context.WithTimeout(ctx, nativecontract.LocalOperationSeconds*time.Second)
 			defer finish()
+			proof, person, err := rt.nativePersonSession(readCtx, personSession)
+			if err != nil {
+				return err
+			}
 			projectID, err := rt.projectIdentityCtx(readCtx, project)
 			if err != nil {
 				return err
 			}
 			var raw json.RawMessage
-			if err = rt.doCtx(readCtx, http.MethodGet, "/api/projects/"+projectID+"/native-sessions/"+args[0], nil, &raw); err != nil {
+			if err = rt.doHeadersCtx(readCtx, http.MethodGet, "/api/projects/"+projectID+"/native-sessions/"+args[0], nil, &raw, map[string]string{nativeattach.LocalPersonHeader: nativeattach.LocalPersonVersion}); err != nil {
 				return err
 			}
 			validator, err := nativecontract.NewValidator()
@@ -87,16 +93,16 @@ func (rt *runtime) cmdSessionAttach() *Command {
 			if err = json.Unmarshal(raw, &snapshot); err != nil {
 				return errors.New("invalid owned session projection")
 			}
-			if snapshot.OwnedSessionID != args[0] || snapshot.CurrentBinding == nil || snapshot.CurrentBinding.ProjectID != projectID {
+			if snapshot.OwnedSessionID != args[0] || snapshot.CurrentBinding == nil || snapshot.CurrentBinding.ProjectID != projectID || snapshot.CurrentBinding.TenantID != person.Tenant.ID {
 				return errors.New("owned session projection identity mismatch")
 			}
 			if socket == "" {
 				if state == "" {
-					inst, err := rt.resolve()
+					root, err := rt.nativePairingRoot()
 					if err != nil {
 						return err
 					}
-					state = inst.AgentdStateRoot
+					state = root
 					if state == "" {
 						home, err := os.UserHomeDir()
 						if err != nil {
@@ -114,11 +120,59 @@ func (rt *runtime) cmdSessionAttach() *Command {
 				}
 				socket = local.Socket
 			}
-			session, err := nativeattach.Open(ctx, socket, nativeattach.Options{Snapshot: snapshot, Control: control})
+			session, err := nativeattach.Open(ctx, socket, nativeattach.Options{Snapshot: snapshot, Control: control, PersonProof: proof})
 			if err != nil {
 				return err
 			}
 			return nativeattach.Run(ctx, session, terminal, nativeattach.RunOptions{Platform: goruntime.GOOS, InputMode: mode, Resizes: resizes})
 		},
 	}
+}
+
+// Person authentication is explicit and never resolves or falls back to an
+// agent key. /api/me is independent of the machine's protected socket bearer.
+func (rt *runtime) nativePersonSession(ctx context.Context, path string) (*nativeattach.PersonProof, client.Me, error) {
+	var empty client.Me
+	if rt.agentName != "" || rt.sessionID != "" {
+		return nil, empty, usagef("native attach/take cannot use agent attribution")
+	}
+	if path != "" {
+		if err := rt.usePersonSession(path); err != nil {
+			return nil, empty, err
+		}
+	}
+	if rt.personClient == nil {
+		return nil, empty, usagef("--session-cookie-file is required for native attach/take")
+	}
+	proof, err := nativeattach.NewPersonProof(rt.personClient)
+	if err != nil {
+		return nil, empty, err
+	}
+	me, err := rt.personClient.Me(ctx)
+	if err != nil {
+		return nil, empty, errors.New("person session could not be verified")
+	}
+	if me.Principal.Kind != "person" || me.OwnerWorkstation || !validUUID(me.Principal.ID) || !validUUID(me.Tenant.ID) || me.Principal.TenantID != me.Tenant.ID {
+		return nil, empty, errors.New("native attach/take requires a verified person; agents and API keys are refused")
+	}
+	return proof, me, nil
+}
+
+func (rt *runtime) nativePairingRoot() (string, error) {
+	if _, _, _, ok := rt.envNames(); ok {
+		return "", nil
+	}
+	path, err := rt.configFile()
+	if err != nil {
+		return "", err
+	}
+	cfg, err := readPersonConfig(path)
+	if err != nil {
+		return "", err
+	}
+	_, inst, err := pickInstance(cfg, rt.instance)
+	if err != nil {
+		return "", err
+	}
+	return inst.AgentdStateRoot, nil
 }
