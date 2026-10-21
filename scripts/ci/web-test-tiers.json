@@ -6426,6 +6426,22 @@
     ,
     {"kind":"browser","file":"tests/aeon-1535-desk-phone.spec.ts","name":"touch › AEON-1535 P3: O, A, R and D and a tap choose the right row, and choosing moves nothing","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
+    {"kind":"browser","file":"tests/aeon-1604-edit-key.spec.ts","name":"AEON-1604: a reader who presses e before permissions load gets no editor","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/aeon-1604-edit-key.spec.ts","name":"AEON-1604: c is spent when the person enters and leaves a field before permissions load","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/aeon-1604-edit-key.spec.ts","name":"AEON-1604: c pressed before project permissions load focuses the comment box once they arrive","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/aeon-1604-edit-key.spec.ts","name":"AEON-1604: e is spent by a refreshed denial that lands after the request it waited on, so a later grant opens nothing","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/aeon-1604-edit-key.spec.ts","name":"AEON-1604: e is spent when a dialog opens and closes before permissions load","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/aeon-1604-edit-key.spec.ts","name":"AEON-1604: e pressed before project permissions load opens the editor once they arrive","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/aeon-1604-edit-key.spec.ts","name":"AEON-1604: e pressed while the ticket loads opens the editor when the ticket arrives after its permissions","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/aeon-1604-edit-key.spec.ts","name":"AEON-1604: e remembered for one ticket does not edit the ticket opened next","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
     {"kind":"browser","file":"tests/aeon-1632-desk-links-peek.spec.ts","name":"AEON-1632: Desk ticket links open the peek and Esc returns to the same item 1440 dark","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
     {"kind":"browser","file":"tests/aeon-1632-desk-links-peek.spec.ts","name":"AEON-1632: Desk ticket links open the peek and Esc returns to the same item 1440 light","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
@@ -9489,6 +9505,18 @@
     {"kind":"browser","file":"tests/goals-view.spec.ts","name":"the ETA popover says who set it and what it was, where the pace lands it, right-aligned and flipping above; passed ETAs are gold","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
     {"kind":"browser","file":"tests/goals-view.spec.ts","name":"the bar opens a stepped chart in place; one global range; the signal row and its stall rule; nothing moves","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/goals-waiting-instances.spec.ts","name":"a person who is not the owner never reads a sibling and sees no instance tags","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/goals-waiting-instances.spec.ts","name":"an unreadable sibling is one quiet line in the same slot; Try again reads it in place","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/goals-waiting-instances.spec.ts","name":"the owner sees this instance first, then the sibling, with tags, askers and Coming at 1440","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/goals-waiting-instances.spec.ts","name":"the owner sees this instance first, then the sibling, with tags, askers and Coming at 390","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/goals-waiting-instances.spec.ts","name":"two sibling lines keep the goals controls still when a refresh fails and recovers","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/goals-waiting-instances.spec.ts","name":"unknown coverage is not an empty desk","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
     {"kind":"browser","file":"tests/graph-canvas.spec.ts","name":"a glimpse renderer takes its host size when its engine loads after the first resize pass","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
@@ -15036,6 +15064,8 @@
     ,
     {"kind":"browser","file":"tests/ticket-workers.spec.ts","name":"the compact worker name stays fully visible and clear of Copy","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
     ,
+    {"kind":"browser","file":"tests/title-divider.spec.ts","name":"a saved title wider than its room gives way to a narrower window, and its divider moves from the width shown","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
     {"kind":"browser","file":"tests/title-divider.spec.ts","name":"arrow keys resize the focused title divider and aria-valuenow follows","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
     {"kind":"browser","file":"tests/title-divider.spec.ts","name":"double-clicking the title divider resets it to automatic","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
@@ -16627,6 +16657,8 @@
     {"kind":"node","file":"tests/header-glimpse.test.ts","name":"a ready graph has eight tickets and at least one link","tags":["delete-candidate"],"tier":"GATED-FULL"}
     ,
     {"kind":"node","file":"tests/header-glimpse.test.ts","name":"a stale wide media query cannot keep the header glimpse once the layout is below 1280","tier":"ESSENTIAL"}
+    ,
+    {"kind":"node","file":"tests/header-glimpse.test.ts","name":"collapsing the header zeroes the glimpse column, not the project page","tier":"ESSENTIAL"}
     ,
     {"kind":"node","file":"tests/header-glimpse.test.ts","name":"hover controls drop to the compact size when the labelled row cannot fit","tier":"GATED-FULL"}
     ,
@@ -18298,6 +18330,8 @@
     ,
     {"kind":"vitest","file":"tests/decision-desk-cutover.unit.test.ts","name":"AEON-1477 shows the hint after two failures and escalates strictly after sixty seconds or at five failures","tier":"ESSENTIAL"}
     ,
+    {"kind":"vitest","file":"tests/decision-desk-cutover.unit.test.ts","name":"AEON-1622 a decided lesson replaces the unconfirmed open row of a projection read before the decision","tier":"ESSENTIAL"}
+    ,
     {"kind":"vitest","file":"tests/decision-desk-cutover.unit.test.ts","name":"connection chores preserve consent scope, exact expiry and readable history","tier":"ESSENTIAL"}
     ,
     {"kind":"vitest","file":"tests/decision-desk-cutover.unit.test.ts","name":"drops a previous person read even if transport ignores abort, and resets the count synchronously","tier":"ESSENTIAL"}
@@ -18623,6 +18657,18 @@
     {"kind":"vitest","file":"tests/delivery-ui.unit.test.ts","name":"reviewer rules stay through a project switch and never land for another person","tier":"GATED-FULL"}
     ,
     {"kind":"vitest","file":"tests/delivery-ui.unit.test.ts","name":"the paused step and configured check progress are shown without inventing a completed step","tier":"ESSENTIAL"}
+    ,
+    {"kind":"vitest","file":"tests/desk-elsewhere.unit.test.ts","name":"parseSummary > keeps first lines and resolves links inside the sibling only","tier":"ESSENTIAL"}
+    ,
+    {"kind":"vitest","file":"tests/desk-elsewhere.unit.test.ts","name":"parseSummary > refuses another instance, bad counts and unbounded lists","tier":"ESSENTIAL"}
+    ,
+    {"kind":"vitest","file":"tests/desk-elsewhere.unit.test.ts","name":"readSibling > rejects a sibling body over 64000 bytes even when Content-Length is smaller","tier":"ESSENTIAL"}
+    ,
+    {"kind":"vitest","file":"tests/desk-elsewhere.unit.test.ts","name":"useDeskElsewhere > keeps a failed instance list unknown and reads it again on refresh","tier":"ESSENTIAL"}
+    ,
+    {"kind":"vitest","file":"tests/desk-elsewhere.unit.test.ts","name":"useDeskElsewhere > keeps the shown line count when a later sibling refresh fails","tier":"ESSENTIAL"}
+    ,
+    {"kind":"vitest","file":"tests/desk-elsewhere.unit.test.ts","name":"useDeskElsewhere > treats a confirmed empty sibling list as known","tier":"ESSENTIAL"}
     ,
     {"kind":"vitest","file":"tests/desk-empty-state.unit.test.ts","name":"Decision Desk empty state > chooses reading, all clear, a silent source or the scope line, and nothing while rows are listed","tier":"ESSENTIAL"}
     ,

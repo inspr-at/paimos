@@ -199,6 +199,8 @@ func serveWithPool(ctx context.Context, cfg config.Config, ln net.Listener, pool
 		closeListener()
 		return err
 	}
+	// AEON-1495: the owner's sibling instances read this instance's summary.
+	authMod.SetDeskPeekOrigins(cfg.Instances.Origins())
 	// The host-wide signer is owned by the bootstrap tenant for forced RLS.
 	// Reuse the existing host session-key file with a separate vault derivation.
 	// HTTP-only dev hosts publish 503 until an HTTPS issuer is configured.
@@ -484,6 +486,7 @@ func serveWithPool(ctx context.Context, cfg config.Config, ln net.Listener, pool
 		Brand:                   &productBrand,
 		PublicURL:               cfg.PublicURL,
 		AttachmentSandboxOrigin: attachmentsMod.Sandbox.Origin(),
+		SiblingOrigins:          cfg.Instances.Origins(),
 		// AEON-430: the footer names the running release from /api/version.
 		Codename: historyMod.CodenameOf,
 		Web:      webFS,
@@ -538,7 +541,7 @@ func serveWithPool(ctx context.Context, cfg config.Config, ln net.Listener, pool
 			phoneMod,
 			stepupMod,
 			questionsMod,
-			decisiondesk.New(pool),
+			decisiondesk.New(pool).WithInstances(cfg.Instances, authMod),
 			modelMod,
 			agentaccounts.New(pool),
 			accountuse.New(pool),

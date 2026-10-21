@@ -12,6 +12,7 @@ import (
 	"strconv"
 	"time"
 
+	"github.com/inspr-at/paimos/internal/config"
 	"github.com/inspr-at/paimos/internal/db"
 	"github.com/inspr-at/paimos/internal/httpapi"
 	"github.com/inspr-at/paimos/internal/knowledge"
@@ -34,6 +35,7 @@ var ErrCoverage = errors.New("desk project coverage exceeds 1000 projects")
 type Item struct {
 	DefinitionChange *DefinitionChangeItem  `json:"definition_change,omitempty"`
 	PersonStep       *workorders.PersonStep `json:"person_step,omitempty"`
+	AskedBy          *AskedBy               `json:"asked_by,omitempty"`
 	ID               string                 `json:"id"`
 	Kind             string                 `json:"kind"`
 	ProjectID        string                 `json:"project_id,omitempty"`
@@ -85,6 +87,8 @@ type Page struct {
 	HasMore    bool      `json:"has_more"`
 	NextCursor string    `json:"next_cursor,omitempty"`
 	AsOf       time.Time `json:"as_of"`
+	// Upcoming is filled by the HTTP read only (AEON-1495).
+	Upcoming []UpcomingStep `json:"upcoming,omitempty"`
 }
 
 type cursor struct {
@@ -97,6 +101,8 @@ type cursor struct {
 type Module struct {
 	pool           *pgxpool.Pool
 	routineRuntime recurrences.ExecutionRuntimeReader
+	instances      config.Instances
+	peek           PeekIssuer
 }
 
 func New(pool *pgxpool.Pool) *Module { return &Module{pool: pool} }
@@ -108,6 +114,8 @@ func (m *Module) WithRoutineExecutionRuntime(reader recurrences.ExecutionRuntime
 
 func (m *Module) Mount(mux *http.ServeMux) {
 	mux.HandleFunc("GET /api/decision-desk/projection", m.projection)
+	mux.HandleFunc("GET /api/decision-desk/instances", m.listInstances)
+	mux.HandleFunc("GET /api/decision-desk/owner-summary", m.ownerSummary)
 }
 
 func (m *Module) projection(w http.ResponseWriter, r *http.Request) {
@@ -188,7 +196,13 @@ func (m *Module) Read(ctx context.Context, p tenant.Principal, limit int, after 
 			return err
 		}
 		var err error
-		page, err = ReadTx(ctx, tx, p, limit, after, m.routineRuntime)
+		if page, err = ReadTx(ctx, tx, p, limit, after, m.routineRuntime); err != nil {
+			return err
+		}
+		if err = askersTx(ctx, tx, p.TenantID, page.Items); err != nil {
+			return err
+		}
+		page.Upcoming, err = upcomingTx(ctx, tx, p)
 		return err
 	})
 	return page, err

@@ -57,6 +57,9 @@ type Server struct {
 	// AttachmentSandboxOrigin is validated by attachments.NewSandbox. Only
 	// application documents may embed it; public portal policy stays unchanged.
 	AttachmentSandboxOrigin string
+	// SiblingOrigins are the owner's sibling instances (AEON-1495). Application
+	// documents may connect to them; empty keeps connect-src same-origin.
+	SiblingOrigins []string
 
 	// serving is set when the process is in http.Server.Serve.
 	// draining is set on SIGTERM before Shutdown. Readiness is serving and
@@ -149,7 +152,7 @@ func (s *Server) build() {
 	root.Handle("/from-classic/api/", commonMiddleware(http.HandlerFunc(s.handleClassicAPIGone)))
 	// Exact files only. A /portal/ subtree would take the Vue catalog page off the SPA.
 	// The catalog and roadmap HTML patterns are the public declarations for those pages.
-	view := attachmentViewPolicy(s.AttachmentSandboxOrigin, spaHandler(s.Web, s.brand()))
+	view := siblingViewPolicy(s.SiblingOrigins, attachmentViewPolicy(s.AttachmentSandboxOrigin, spaHandler(s.Web, s.brand())))
 	if s.AithemaOrigin != "" {
 		view = aithemaViewPolicy(s.AithemaOrigin, view)
 	}

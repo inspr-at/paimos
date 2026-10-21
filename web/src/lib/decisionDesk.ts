@@ -159,13 +159,18 @@ export function submitModifier(event: Pick<KeyboardEvent, 'metaKey' | 'ctrlKey' 
 export interface DeskProjectionItem {
   definition_change?: {project_key: string; pending_count: number}
   person_step?: PersonStep
+  /** The source principal: a question's first asker or an approval's agent (AEON-1495). */
+  asked_by?: { id: string; name: string }
   id: string; kind: 'question' | 'approval' | 'action_request' | 'doctrine' | 'tier_request' | 'key_trim' | 'stepup' | 'account_matrix' | 'lesson' | 'routine_consent' | 'definition_change'; project_id?: string; ticket_key?: string | null
   revision: number; title: string; created_at: string; expires_at?: string; held: boolean; can_decide?: boolean; href: string; source: string
 }
 export interface DeskProjection {
   items: DeskProjectionItem[]; counts: { open: number; held: number; chores: number; lessons?: Record<string, number> }
   has_more: boolean; next_cursor?: string; as_of: string
+  /** Person steps the reader owns that are not due yet, newest first (AEON-1495, Coming). */
+  upcoming?: DeskUpcomingStep[]
 }
+export interface DeskUpcomingStep { node_id: string; check_id: string; project_id: string; ticket_key: string; label: string }
 
 export function deskItemID(item: Pick<DeskProjectionItem, 'kind' | 'id'>): string {
   const prefix = { question: 'q', approval: 'a', action_request: 'm', doctrine: 'r', tier_request: 't', key_trim: 'k', stepup: 's', account_matrix: 'u', routine_consent: 'c', lesson: 'l', definition_change: 'd' }[item.kind]
@@ -299,12 +304,16 @@ export function deskRefreshNotice(failures: number, failedSince: number | null, 
 // A decided lesson leaves the pending projection. Keep the row and the learning
 // this visit already confirmed, so Undo re-checks that same record. Omitting
 // the learning makes the decision look unauthorized the moment the list refreshes.
+// A projection read before the decision still lists the lesson as open while its
+// source no longer offers it; that placeholder row gives way to the decision (AEON-1622).
 export function retainDecidedLessons(previous: readonly DeskItem[], nextItems: DeskItem[], lessons: Map<string, MethodLearning>) {
-  const present = new Set(nextItems.map(item => item.id))
+  const present = new Map(nextItems.map((item, index) => [item.id, index]))
   for (const item of previous) {
-    if (item.kind !== 'lesson' || !item.decided || present.has(item.id)) continue
-    nextItems.push(item)
-    present.add(item.id)
+    if (item.kind !== 'lesson' || !item.decided) continue
+    const at = present.get(item.id), listed = at === undefined ? undefined : nextItems[at]
+    if (listed && (listed.decided || lessons.has(item.id))) continue
+    if (at === undefined) { present.set(item.id, nextItems.length); nextItems.push(item) }
+    else nextItems[at] = item
     const learning = item.lesson?.learning
     if (learning && !lessons.has(item.id)) lessons.set(item.id, learning)
   }
