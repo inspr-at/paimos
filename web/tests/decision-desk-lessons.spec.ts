@@ -208,6 +208,7 @@ test('AEON-1331 failed decisions and Undo keep the lesson honest', async ({ page
     })
   }
   await test.step('AEON-1396 the toast still undoes the lesson after the round returned to the preview', () => lessonUndoAfterReturn(page))
+  await test.step('AEON-1622 a Desk read that began before the decision leaves the toast its Undo', () => staleReadKeepsUndo(page))
 })
 test('AEON-1331 replaced proposal refuses the frozen lesson', async ({ page }) => {
   const { state } = await mockLessons(page); await openLesson(page); state.revision++
@@ -362,4 +363,48 @@ async function lessonUndoAfterReturn(page: Page) {
   expect(state.calls.map(call => call.path.split('/').at(-1))).toEqual(['accept', 'undo']); expect(state.decided).toBe(false)
   // The header's Desk reads the restored lesson again.
   await expect(place).toHaveAttribute('aria-label', 'Decision Desk, 1 open')
+}
+
+// AEON-1622 risk: a Desk read that began before a lesson was decided lands after the decision, puts the
+// lesson back as open, and the toast's Undo then refuses ("no longer available to undo"). Gates hold that
+// read's last source, the lesson's Knowledge target, and the decision's own projection read. A source
+// that did not answer keeps Try again on the page; it is enabled only while no Desk read runs.
+function gate() { let open = () => {}; const opened = new Promise<void>(resolve => { open = resolve }); return { opened, open } }
+async function staleReadKeepsUndo(page: Page) {
+  await page.clock.resume(); await page.unrouteAll({ behavior: 'ignoreErrors' })
+  await page.setViewportSize({ width: 1440, height: 1000 })
+  const { state } = await mockLessons(page)
+  await page.route('**/api/stepup-requests*', route => route.fulfill({ status: 503, json: { error: 'Unavailable' } }))
+  let target: { arrived: ReturnType<typeof gate>; release: ReturnType<typeof gate> } | undefined
+  let projection: typeof target
+  await page.route('**/api/knowledge/k-aeon-deploy*', async route => {
+    const held = target; target = undefined
+    if (held) { held.arrived.open(); await held.release.opened }
+    await route.fallback()
+  })
+  await page.route('**/api/decision-desk/projection*', async route => {
+    const held = projection; projection = undefined
+    if (held) { held.arrived.open(); await held.release.opened }
+    await route.fallback()
+  })
+  await openLesson(page)
+  const retry = page.locator('.source-warnings .src-error').filter({ hasText: 'Some step-up approvals couldn’t be loaded' }).getByRole('button', { name: 'Try again' })
+  await expect(retry).toBeEnabled()
+  // The read begins while the lesson is still open: its learnings read lists it, its target read is held.
+  await pause(page)
+  const read = target = { arrived: gate(), release: gate() }
+  await page.evaluate(() => window.dispatchEvent(new Event('focus'))); await read.arrived.opened
+  await expect(retry).toBeDisabled()
+  const after = projection = { arrived: gate(), release: gate() }
+  await page.getByTestId('desk-decide').click(); await expect(allDecidedUndo(page)).toBeVisible()
+  await after.arrived.opened; expect(state.decided).toBe(true)
+  // The held read ends after the decision, while the projection still lists the lesson.
+  read.release.open(); await expect(retry).toBeEnabled()
+  after.release.open(); await expect(retry).toBeEnabled()
+  await expect(page.getByTestId('desk-tab-open')).toHaveText(/Open\s*0$/)
+  const toast = await roundEnd(page, 'Added to the changelog.')
+  await toast.getByRole('button', { name: 'Undo', exact: true }).click()
+  await expect(page.getByTestId(`desk-row-l:${id}`)).toBeVisible(); expect(state.decided).toBe(false)
+  await expect(page.locator('.toast').filter({ hasText: 'This lesson decision is no longer available to undo.' })).toHaveCount(0)
+  expect(state.calls.map(call => call.path.split('/').at(-1))).toEqual(['accept', 'undo'])
 }
