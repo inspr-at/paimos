@@ -1,5 +1,83 @@
 # Owned session panel
 
+## AEON-1291 core wiring: partial build
+
+The command tree now includes `aeon session attach OWNED_ID --project KEY`,
+`aeon session take OWNED_ID --project KEY` and the identical
+`aeon attach --session OWNED_ID --project KEY` alias. Take's existing
+`--hand-back` option is registered too. Attachment uploads with
+`aeon attach ISSUE FILE`, attachment subcommands and attribution
+`aeon session start` retain their existing meanings. Registration does not
+qualify the daemon's still-unconnected native attach/take transport.
+
+With the existing default-off `serve --native-sessions` option, the harness
+adapter wraps AEON-1593's production store and relay. It adds public read-only
+attach, renewal, detach and current viewer authentication. Control attaches
+remain unavailable until the private capability transport and final command
+write fence can be connected. Native input retains the server's chat-disabled
+gate. No launcher, provider enrollment, tool ceiling or host setting changes.
+
+Viewer delivery holds the existing tenant/tree/pairing fence while checking
+the original person's current native consent, exact runtime binding, enrolled
+computer/account/key, composition digest, actor-bound viewer and bounded lease.
+Both replay and stream admission enforce the current audience. Terminal and
+Expert are limited to the run's person and workspace Owner/Admin; a project
+Admin alone does not confer export access. Separate watch permission and a
+qualified explicit owner export consent are also required. The released
+composition supplies no such export-consent adapter, so those exports remain
+unavailable. The policy tests use an explicit fake qualified export.
+
+The take-authority predicate permits the run's person and project Admins,
+including workspace Owner/Admin, and refuses agents and API keys. This build
+uses that predicate for existing controller authority checks; it does not
+implement a successful take or hand-back, and emits no fictitious audit entry.
+The panel uses the server's capabilities when offering Terminal. A `taken`
+runtime status by itself cannot make that tab appear.
+
+Shared live snapshots omit terminal URLs and account quota, and live relay
+pages/streams omit account-quota frames. The separately authorized session
+read retains owner-only quota; workspace administration alone does not expose
+it. Replay writes and stream writes have explicit deadlines. No progress/ETA
+source exists in the owned native process/receipt/heartbeat seam: the existing
+daemon heartbeat carries activity/doing, but has no owned-session progress or
+ETA value to forward. No new estimate or progress mechanism is introduced.
+
+**Incomplete acceptance:** an integrated input → take → terminal → confirmed
+hand-back → fresh epoch → recovery scenario cannot yet run. The production
+store's command selector currently supports only input, interrupt and stop;
+its ready receipt pins one runtime digest. It has no successful successor
+epoch commit for take/return/resume. The current consent authority explicitly
+admits only the person-invoked coordinator with a null run ID. Completing
+those paths needs coordinated ownership of
+`internal/nativesessions/store/{commands,production,claim}.go` and
+`internal/nativesessions/consent/session.go`, which this brief excludes.
+The daemon's native attach/take/read/recovery methods and local person-proof
+binding also remain to be connected after those server seams exist. Existing
+AEON-1593 account/profile/quota/start-to-exit composition is retained.
+
+R0 additions in this build are the ESSENTIAL Go rows
+`internal/harness::TestNativeSessionCommandAliasesPreserveLegacyHelp`,
+`internal/harness::TestNativeSessionWiringKeepsChatDisabled` and
+`internal/nativesessions/stream::TestCurrentViewerAuthorityScopesEveryDelivery`,
+plus the `agentpairing.Lock` caller entries `harness/module.go` and
+`nativesessions/stream/current.go`. The existing `internal/native*/**` audit
+ownership covers the two added stream files. No migration, permission,
+contract-schema or browser-test-identity row is added. The existing browser
+case gains the withheld-capability regression and six viewport/theme captures;
+it keeps its name, tier and timeout. This is wiring of the existing panel;
+the later takeover/Expert UI still needs its approved Opus design and Tick check.
+
+Validation so far: targeted command/authority/fence checks passed remotely.
+The affected-package run on `30c451bfa` passed nativeintegration,
+agentaccounts, reportercontract, harness and stream. Agentd and CLI failed
+on the agm2 fallback: `/bin/true` and `/bin/sleep` are absent, with additional
+probe/version/provenance fixture failures. These tests were not changed or
+skipped. Browser and static runs returned exit 3: mbp2606 was not GREEN.
+Final follow-up validation is recorded in `.agent-status.json`; this partial
+build must not be treated as completed acceptance or a release qualification.
+
+## Existing panel behavior
+
 The session panel has one menu: Details, Chat, Events and, when advertised at
 opening, Terminal. A project's bound lead has Lead first. Existing links and
 saved choices using `session`, `overview` or `messages` remain readable.

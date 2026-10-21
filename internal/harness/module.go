@@ -63,6 +63,7 @@ import (
 	"github.com/inspr-at/paimos/internal/hookbinding"
 	"github.com/inspr-at/paimos/internal/httpapi"
 	"github.com/inspr-at/paimos/internal/inbox"
+	"github.com/inspr-at/paimos/internal/modelprefs"
 	"github.com/inspr-at/paimos/internal/modelregistry"
 	"github.com/inspr-at/paimos/internal/nativecontract"
 	"github.com/inspr-at/paimos/internal/nativesessions/consent"
@@ -103,7 +104,6 @@ func NativeSessionServices(pool *pgxpool.Pool, services nativecontract.Services,
 }
 
 type nativeSessionAuthority struct{ consent consent.Authority }
-type nativeControlKey struct{}
 
 func (a nativeSessionAuthority) SessionTx(ctx context.Context, tx pgx.Tx, b nativecontract.Binding) (consent.Session, error) {
 	s, err := a.consent.SessionTx(ctx, tx, b)
@@ -150,8 +150,7 @@ func (a nativeSessionAuthority) AuthorizeTx(ctx context.Context, tx pgx.Tx, p te
 		// the released composition. Native control approval cannot replace it.
 		return nativestream.Refuse(nativecontract.ReasonGrantMissing)
 	}
-	control, _ := ctx.Value(nativeControlKey{}).(bool)
-	if control || action == "control_claim" || action == "control_end" {
+	if action == "control_claim" || action == "control_end" {
 		return stream.TakeAuthorityTx(ctx, tx, p, s.OwnerPersonID, b.ProjectID)
 	}
 	return nil
@@ -184,7 +183,9 @@ func (s *nativeSessionStore) AuthenticateViewer(r *http.Request) (nativecontract
 
 func (s *nativeSessionStore) Attach(ctx context.Context, actor nativecontract.Actor, in nativecontract.AttachIntent) (nativecontract.AttachResult, error) {
 	if in.Mode == "control" {
-		ctx = context.WithValue(ctx, nativeControlKey{}, true)
+		// Controller acquisition must wait for the private capability transport
+		// and final command-write fence; an unusable lease is not a successful attach.
+		return nativecontract.AttachResult{}, nativestream.Refuse(nativecontract.ReasonQualificationMissing)
 	}
 	result, err := s.controls.Attach(ctx, actor, in)
 	if err != nil {
@@ -260,6 +261,13 @@ func (s *nativeSessionStore) project(ctx context.Context, actor nativecontract.A
 		}
 		if err := authz.RequireTx(ctx, tx, p, "harness.read", authz.Scope{ProjectID: project}); err != nil {
 			return err
+		}
+		person, err := modelprefs.CanonicalPerson(ctx, tx, p.ID)
+		if err != nil {
+			return err
+		}
+		if p.Kind != tenant.Person || person == nil || *person != view.OwnerPersonID {
+			view.Quota = nil
 		}
 		visible := stream.VisibilityTx(ctx, tx, p, view.OwnerPersonID, project, "terminal")
 		if visible != nil {

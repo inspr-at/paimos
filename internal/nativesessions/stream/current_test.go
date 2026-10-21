@@ -33,6 +33,10 @@ type viewerRuntime struct {
 	refusal nativecontract.Reason
 }
 
+type viewerPageRecorder struct{ *httptest.ResponseRecorder }
+
+func (*viewerPageRecorder) SetWriteDeadline(time.Time) error { return nil }
+
 func (v *viewerRuntime) SessionTx(context.Context, pgx.Tx, nativecontract.Binding) (consent.Session, error) {
 	if v.refusal != "" {
 		return consent.Session{}, nativestream.Refuse(v.refusal)
@@ -114,6 +118,10 @@ func TestCurrentViewerAuthorityScopesEveryDelivery(t *testing.T) {
 	snapshot.CurrentBinding = &b
 	snapshot.OwnedSessionID = b.OwnedSessionID
 	snapshot.OwnerPersonID = people["owner"].ID
+	terminalURL := "https://terminal.example.ts.net/run"
+	snapshot.TerminalViewerURL = &terminalURL
+	used := 10.0
+	snapshot.Quota = &nativecontract.Quota{AccountID: uuid.NewString(), ProfileBindingRevision: 1, Source: "claude_stream", Scope: "account", State: "known", UsedPercent: &used, ObservedAt: time.Now(), FreshUntil: time.Now().Add(time.Minute)}
 	runtime := &viewerRuntime{session: consent.Session{Current: consent.Current{OwnerPersonID: snapshot.OwnerPersonID}, View: snapshot}}
 	consentID := uuid.NewString()
 	a, err := NewCurrentReadAuthority(d.App, runtime, snapshot.Capabilities.QualificationDigest, viewerExport{b, consentID})
@@ -175,7 +183,7 @@ func TestCurrentViewerAuthorityScopesEveryDelivery(t *testing.T) {
 			t.Run(name+"/"+view, func(t *testing.T) {
 				p := people[name]
 				id := viewer(p, view)
-				w := httptest.NewRecorder()
+				w := &viewerPageRecorder{httptest.NewRecorder()}
 				mux.ServeHTTP(w, request(p, view, id, "events"))
 				allowed := name == "owner" || name == "workspace-admin"
 				if allowed && w.Code != 200 {
@@ -188,7 +196,7 @@ func TestCurrentViewerAuthorityScopesEveryDelivery(t *testing.T) {
 					t.Fatalf("wrong visibility refusal: %d %s", w.Code, w.Body.String())
 				}
 				if !allowed {
-					w = httptest.NewRecorder()
+					w = &viewerPageRecorder{httptest.NewRecorder()}
 					mux.ServeHTTP(w, request(p, view, id, "stream"))
 					if w.Code != 403 {
 						t.Fatalf("SSE bypassed visibility: %d %s", w.Code, w.Body.String())
@@ -200,13 +208,35 @@ func TestCurrentViewerAuthorityScopesEveryDelivery(t *testing.T) {
 	// A regular member retains the structured status/event path.
 	member := people["member"]
 	memberID := viewer(member, "structured")
-	w := httptest.NewRecorder()
+	w := &viewerPageRecorder{httptest.NewRecorder()}
 	mux.ServeHTTP(w, request(member, "structured", memberID, "events"))
 	if w.Code != 200 {
 		t.Fatalf("member structured read refused: %d %s", w.Code, w.Body.String())
 	}
 	if strings.Contains(w.Body.String(), "qualified terminal") || strings.Contains(w.Body.String(), "qualified expert") || strings.Contains(w.Body.String(), `"kind":"terminal"`) {
 		t.Fatal("member structured response leaked a sensitive frame")
+	}
+	memberReq := request(member, "structured", memberID, "stream")
+	memberReq.SetPathValue("projectId", project)
+	memberReq.SetPathValue("ownedSessionId", b.OwnedSessionID)
+	_, memberGrant, err := a.AuthenticateViewer(memberReq)
+	if err != nil {
+		t.Fatal(err)
+	}
+	sub, err := relay.SubscribeView(memberReq.Context(), b, memberGrant)
+	if err != nil {
+		t.Fatal(err)
+	}
+	initial := requireEvent(t, sub, "snapshot")
+	if err = sub.Close(); err != nil {
+		t.Fatal(err)
+	}
+	var initialView nativecontract.SessionView
+	if err = json.Unmarshal(initial.Payload, &initialView); err != nil {
+		t.Fatal(err)
+	}
+	if initialView.TerminalViewerURL != nil || initialView.Quota != nil || initialView.Capabilities.TerminalView || initialView.Capabilities.Expert {
+		t.Fatalf("member snapshot leaked private projection: %s", initial.Payload)
 	}
 	// A project admin can take but cannot export; ordinary members cannot take.
 	for _, name := range []string{"owner", "workspace-admin", "project-admin", "member", "agent"} {

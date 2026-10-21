@@ -26,8 +26,8 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
-// CurrentSessions rechecks the persisted original actor and immutable consent
-// pins in the caller's transaction. Production supplies consent.Authority.
+// CurrentSessions rechecks the persisted original actor, immutable consent
+// pins and enrolled runtime in the caller's transaction.
 type CurrentSessions interface {
 	SessionTx(context.Context, pgx.Tx, nativecontract.Binding) (consent.Session, error)
 }
@@ -167,7 +167,7 @@ func (a *CurrentReadAuthority) AuthenticateViewer(r *http.Request) (nativecontra
 		return empty, Viewer{}, nativestream.Refuse(nativecontract.ReasonWrongPrincipal)
 	}
 	ids := r.Header.Values(nativecontract.ViewerHeader)
-	if len(ids) != 1 || !workorders.UUID(ids[0]) || len(r.URL.RawQuery) > 2048 {
+	if len(ids) != 1 || len(ids[0]) != 36 || !workorders.UUID(ids[0]) || len(r.URL.RawQuery) > 2048 {
 		return empty, Viewer{}, nativestream.Refuse(nativecontract.ReasonGrantMissing)
 	}
 	query := r.URL.Query()
@@ -239,7 +239,18 @@ func (a *CurrentReadAuthority) AuthenticateViewer(r *http.Request) (nativecontra
 			if s.View.Generation != generation || !a.now().Before(lease.deadline) {
 				return nativestream.Refuse(nativecontract.ReasonWrongGeneration)
 			}
-			return deliver(nativecontract.ValidationContext{Binding: &b, OwnedSessionID: b.OwnedSessionID, PrincipalKind: "person", Generation: generation, View: view, Mode: s.View.Mode, State: s.View.State, Capabilities: &s.View.Capabilities, Web: true})
+			caps := s.View.Capabilities
+			if a.watch == nil {
+				caps.Expert, caps.TerminalView = false, false
+			}
+			if err := VisibilityTx(ctx, tx, p, s.OwnerPersonID, b.ProjectID, "terminal"); err != nil {
+				var denied *nativecontract.ValidationError
+				if !errors.As(err, &denied) {
+					return err
+				}
+				caps.Expert, caps.TerminalView = false, false
+			}
+			return deliver(nativecontract.ValidationContext{Binding: &b, OwnedSessionID: b.OwnedSessionID, PrincipalKind: "person", Generation: generation, View: view, Mode: s.View.Mode, State: s.View.State, Capabilities: &caps, Web: true})
 		})
 	}
 	if err = fence(r.Context(), func(nativecontract.ValidationContext) error { return nil }); err != nil {
