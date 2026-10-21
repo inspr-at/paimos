@@ -3,7 +3,8 @@
 // ticket leaves the Desk item so the chosen answer and the typed P.S. are lost. Every link kind (Re key, the
 // ticket line's key and Open, Related, the outcome effect's ticket and criterion) opens the ticket as a peek
 // over the memo; Esc returns to the same item with its answer as it was, and nothing in the memo moved.
-// A ticket this workspace cannot open stays plain and says why.
+// Esc while one of the ticket's menus is open closes that menu and leaves the ticket up; the next Esc
+// returns to the same memo and draft. A ticket this workspace cannot open stays plain and says why.
 import { expect, test, type Locator, type Page } from '@playwright/test'
 import type { Question } from '../src/lib/decisionDeskApi'
 import { mockEffectivePermissions } from './authz-fixtures'
@@ -138,6 +139,40 @@ for (const width of [1440, 390]) for (const theme of ['light', 'dark'] as const)
     await page.screenshot({ path: testInfo.outputPath(`aeon1632-decided-${width}-${theme}.png`) })
   })
 }
+
+test('AEON-1632: Escape closes an open peek menu before the ticket and keeps the memo draft', async ({ page }) => {
+  await page.setViewportSize({ width: 1440, height: 1000 })
+  await mockDesk(page, 'light')
+  await page.goto('/decision-desk?item=q:question-1')
+  await expect(page.getByTestId('desk-paper').getByRole('heading', { level: 2 })).toHaveText(OPEN)
+  await page.getByTestId('choice-1').click()
+  const note = page.getByRole('textbox', { name: 'P.S. for the agent' })
+  await note.fill(PS)
+  await note.press('Enter')
+  const address = page.url()
+  await page.getByTestId('desk-ticket-open').click()
+  const peek = page.getByTestId('desk-peek')
+  await expect(peek).toContainText('AEON-1')
+  await expect(peek).toContainText('Aeon foundation')
+  const status = peek.getByRole('button', { name: /Status:/ })
+  await expect(status).toBeEnabled()
+  await status.click()
+  const menu = page.getByRole('menu', { name: 'Status of AEON-1' })
+  await expect(menu).toBeVisible()
+  await page.keyboard.press('Escape')
+  await expect(menu).toHaveCount(0)
+  await expect(peek).toBeVisible()
+  await expect(peek).toContainText('Aeon foundation')
+  await expect(page.getByTestId('choice-1')).toHaveAttribute('aria-checked', 'true')
+  await expect(note).toHaveValue(PS)
+  await page.keyboard.press('Escape')
+  await expect(peek).toHaveCount(0)
+  expect(page.url()).toBe(address)
+  await expect(page.getByTestId('desk-paper').getByRole('heading', { level: 2 })).toHaveText(OPEN)
+  await expect(page.getByTestId('choice-1')).toHaveAttribute('aria-checked', 'true')
+  await expect(page.getByTestId('choice-0')).toHaveAttribute('aria-checked', 'false')
+  await expect(note).toHaveValue(PS)
+})
 
 test('AEON-1632: the peek opens the ticket’s full page at its canonical address', async ({ page }) => {
   await page.setViewportSize({ width: 1440, height: 1000 })
