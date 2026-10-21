@@ -757,6 +757,9 @@ func (m *module) claim(r *http.Request, tx pgx.Tx, p tenant.Principal) (any, err
 	if v.ReadOnlyReview && r.Header.Get(reviewgate.PolicyHeader) != reviewgate.Policy {
 		return nil, workorders.Fail(409, "review-capable daemon policy required")
 	}
+	if err := agentpairing.RequireLedgerWork(ctx, tx, p, r.Header.Get(agentpairing.LedgerGenerationHeader)); err != nil {
+		return nil, err
+	}
 	if err = workqueue.RequireRunPersonTx(ctx, tx, p, v.ID); err != nil {
 		return nil, err
 	}
@@ -782,9 +785,7 @@ func (m *module) claim(r *http.Request, tx pgx.Tx, p tenant.Principal) (any, err
 	if err = m.validateRoutinePickup(ctx, tx, p, v, o, in.Routine, in.Daemon, in.Generation); err != nil {
 		return nil, err
 	}
-	if err := agentpairing.RequireLedgerWork(ctx, tx, p, r.Header.Get(agentpairing.LedgerGenerationHeader)); err != nil {
-		return nil, err
-	}
+
 	if in.Refusal != "" {
 		if len(in.Reservations) != 0 {
 			return nil, workorders.Fail(400, "refusal must not claim reservations")

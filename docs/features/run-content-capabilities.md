@@ -2,7 +2,9 @@
 
 # Run content capabilities
 
-A paired computer's API credential is transport authority. Its run poll, run
+An ordinary paired computer's API credential is transport authority. Existing
+person-approved workstation designations retain their separate live-key, signer
+and confirmation checks. Its run poll, run
 list and run detail expose an explicit metadata projection: identifiers,
 execution mode, model/account selection, lifecycle, revisions and accounting.
 They do not select or return trace, recovery handover, display labels or
@@ -47,7 +49,9 @@ metadata operation and does not require content authority. Pairing and API-key p
 separate rollout concerns.
 
 The exact owned stop/yield/confirm-exit/control-completion safety routes retain
-their private worker-lease checks without a content capability. Bare paired
+their private worker-lease checks without a content capability. The server also
+rechecks a claimed managed run or an active daemon attachment; a lease on a
+person-created direct registration does not establish daemon ownership. Bare paired
 transport on those routes always uses the metadata-only projection. Revoked
 person access or an obsolete content capability cannot prevent the owning
 daemon from requesting or confirming a stop; handovers, steer text and other
