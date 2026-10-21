@@ -532,6 +532,7 @@ test.describe('AEON-1611 connected computer readability', () => {
       const path = row.locator('.path')
       await expect(name).toHaveText(computerName)
       await expect(name).toHaveCSS('overflow-wrap', 'break-word')
+      await expect(path).toBeVisible()
       await expect(path).toHaveText(workspacePath)
       await expect(path).toHaveAttribute('title', workspacePath)
       await expect(path).toHaveCSS('text-overflow', 'ellipsis')
@@ -541,6 +542,7 @@ test.describe('AEON-1611 connected computer readability', () => {
         expect(await path.evaluate(element => element.clientHeight <= 2 * parseFloat(getComputedStyle(element).lineHeight))).toBe(true)
       } else {
         await expect(path).toHaveCSS('white-space', 'nowrap')
+        expect(await path.evaluate(element => element.clientHeight <= parseFloat(getComputedStyle(element).lineHeight) + 1)), 'desktop path must occupy one line').toBe(true)
         if (width === 1440) expect(await path.evaluate(element => element.scrollWidth > element.clientWidth), 'desktop path must visibly truncate with an end ellipsis').toBe(true)
       }
       await expect(row.locator('.confirmation')).toHaveText('Touch ID confirmation: pairing readiness unknown — run aeon-agentd status on this computer.')
@@ -592,6 +594,8 @@ test.describe('AEON-1611 connected computer readability', () => {
       await guard.check(async () => { await details.click(); await expect(row.locator('.detail')).toBeVisible() })
       await assertReadable()
       await guard.check(async () => { await row.getByRole('button', { name: `Hide details for ${computerName}` }).click(); await expect(row.locator('.detail')).toHaveCount(0) })
+      await page.mouse.move(0, 0)
+      await details.blur()
       await card.screenshot({ path: info.outputPath(`connected-computers-${width}-${theme}.png`), animations: 'disabled' })
       const beforeStatus = await row.boundingBox()
       await guard.check(async () => {

@@ -418,6 +418,7 @@ function assign(error: unknown, fallback: string) {
 .where, .sep { flex: none; }
 .sep { padding: 0 .35em; }
 .path { display: block; min-width: 0; flex: 1 1 auto; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; overflow-wrap: break-word; }
+.path wbr { display: none; }
 .harness-line, .status { display: flex; align-items: center; gap: 6px; min-width: 0; color: var(--ink); font-size: 13px; white-space: nowrap; }
 .harness-line.reported { display: grid; gap: 10px; }
 .harness-report { display: flex; align-items: flex-start; gap: 6px; min-width: 0; }
@@ -489,6 +490,7 @@ function assign(error: unknown, fallback: string) {
   .computer { grid-template-areas: "id id" "harness harness" "status status" "actions actions"; }
   .identity { align-items: flex-start; }
   .path { display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; white-space: normal; }
+  .path wbr { display: inline; }
   .actions > button { min-width: 44px; min-height: 44px; }
 }
 </style>
