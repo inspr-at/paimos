@@ -194,7 +194,7 @@ export const useBusiness = defineStore('business', () => {
       .sort((a, b) => b.effective_from.localeCompare(a.effective_from))[0] ?? null
   }
   const currencies = computed(() => [...new Set(costUnits.value.flatMap(unit => unit.rates.map(rate => rate.currency)))].sort())
-  // Cost units usable today for a unit and currency (live, not cancelled, with a rate).
+  // Live choices with a matching rate, plus unresolved units kept visible for retry.
   function usable(unit: Unit | null, currency: string | null, day?: string) {
     return costUnits.value.filter(entry => !['cancelled', 'archived', 'done'].includes(entry.node.state)
       && (!!entry.ratesError || entry.rates.some(rate => (!unit || rate.unit === unit) && (!currency || rate.currency === currency) && rate.effective_from <= (day ?? new Date().toISOString().slice(0, 10)) && (!rate.effective_until || rate.effective_until > (day ?? new Date().toISOString().slice(0, 10))))))
