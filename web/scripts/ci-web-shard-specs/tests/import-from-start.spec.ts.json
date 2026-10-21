@@ -7,7 +7,16 @@
   "spec": {
     "file": "tests/import-from-start.spec.ts",
     "listedTests": 8,
-    "weightSeconds": 60,
-    "weightSource": "unmeasured-estimate"
+    "tierTiming": {
+      "caseSeconds": {
+        "max": 7.888,
+        "median": 4.363,
+        "min": 3.525
+      },
+      "seconds": 41.858,
+      "selectedTests": 8
+    },
+    "weightSeconds": 41.858,
+    "weightSource": "hosted-CI-39565819178"
   }
 }

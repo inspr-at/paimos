@@ -7,7 +7,16 @@
   "spec": {
     "file": "tests/aeon-1401-status-names.spec.ts",
     "listedTests": 4,
-    "weightSeconds": 8.878049,
-    "weightSource": "unmeasured-test-rate"
+    "tierTiming": {
+      "caseSeconds": {
+        "max": 19.013,
+        "median": 9.386,
+        "min": 3.343
+      },
+      "seconds": 33.096,
+      "selectedTests": 3
+    },
+    "weightSeconds": 33.096,
+    "weightSource": "hosted-CI-39565819178"
   }
 }
