@@ -48,7 +48,7 @@ function hiddenDescriptionClipped(element: HTMLElement): boolean {
   // Same containment as .description-measure: a 0×0 clip box, not an absolute
   // nowrap line. overflow:hidden on a fixed box does not keep that line out of
   // the document's scroll width.
-  host.style.cssText = 'position:fixed;inset:0 auto auto 0;width:0;height:0;overflow:clip;contain:strict;clip-path:inset(50%);visibility:hidden;pointer-events:none;'
+  host.style.cssText = 'position:fixed;inset:0 auto auto 0;width:0;height:0;overflow:clip;contain:paint;clip-path:inset(50%);visibility:hidden;pointer-events:none;'
   const probe = document.createElement('p')
   probe.textContent = element.textContent ?? ''
   probe.style.boxSizing = 'border-box'
