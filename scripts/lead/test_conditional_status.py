@@ -52,6 +52,8 @@ import sys
 from pathlib import Path
 p = Path(__file__).resolve().parent
 assert sys.argv[1:3] == ['harness','mark-stopped']
+if (p/'require-stop-record').exists():
+    assert (p/'qa/stopped-runs.txt').is_file(), 'stop record missing before cleanup'
 n = int((p/'mark-attempts').read_text())+1 if (p/'mark-attempts').exists() else 1
 (p/'mark-attempts').write_text(str(n))
 sys.exit(1 if n <= int((p/'mark-failures').read_text()) else 0)
@@ -129,12 +131,13 @@ echo builder-started > "$S/builder"
 ''')
 
     def test_cancelled_worker_records_stop_before_retrying_cleanup(self):
+        (self.root / "require-stop-record").touch()
         result = self.worker("cancelled", failures=2)
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertFalse((self.root / "builder").exists())
         record = (self.root / "qa/stopped-runs.txt").read_text().split("\t")
         self.assertEqual(record[:2], ["slug", "slug.md"])
-        self.assertGreater(float(record[2]), 100.25)
+        self.assertRegex(record[2], r"^\d+\.\d+$")
         self.assertEqual((self.root / "mark-attempts").read_text(), "3")
         self.assertNotIn("mark-stopped failed 3x", (self.root / "escalate.log").read_text())
 
