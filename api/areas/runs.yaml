@@ -75,8 +75,8 @@ paths:
               additionalProperties: false
               required: [daemon_id, daemon_generation]
               properties:
-                daemon_id: {type: string, maxLength: 200}
-                daemon_generation: {type: string, maxLength: 200}
+                daemon_id: {type: string, maxLength: 128}
+                daemon_generation: {type: string, maxLength: 128}
       responses:
         '200':
           description: "Ephemeral run credential; never persist or pass to a harness child"

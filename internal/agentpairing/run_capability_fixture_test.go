@@ -20,7 +20,7 @@ func (f *fixture) requestContentProof(method, path string, body []byte, key stri
 	}
 	var runID string
 	switch {
-	case path == "/api/agent-accounts/route", len(parts) == 4 && parts[1] == "projects" && parts[3] == "harness-sessions" && method == "POST":
+	case len(parts) == 4 && parts[1] == "projects" && parts[3] == "harness-sessions" && method == "POST":
 		var in struct {
 			RunID string `json:"run_id"`
 		}

@@ -28,7 +28,7 @@ func transportMetadataRoute(r *http.Request) bool {
 		"PUT /api/runs/{runId}/daemon-wait", "POST /api/runs/{runId}/telemetry", "POST /api/runs/{runId}/capability", "POST /api/runs/{runId}/claim",
 		"GET /api/agent-pairing/self", "POST /api/agent-pairing/self/disconnect", "POST /api/agent-pairing/self/capacity", "POST /api/agent-pairing/self/ledger",
 		"POST /api/agent-pairing/account-link", "POST /api/agent-pairing/attach",
-		"GET /api/agent-accounts", "GET /api/agent-accounts/use", "GET /api/agent-accounts/capacity/next",
+		"GET /api/agent-accounts", "GET /api/agent-accounts/use", "GET /api/agent-accounts/capacity/next", "POST /api/agent-accounts/route",
 		"POST /api/agent-accounts/{accountId}/probe", "POST /api/agent-accounts/probes",
 		"GET /api/agent-accounts/{accountId}/readings", "POST /api/agent-accounts/{accountId}/readings",
 		"GET /api/agent-accounts/{accountId}/quota-series", "GET /api/agent-accounts/{accountId}/statusline",
@@ -80,7 +80,7 @@ func (m *Module) runContentBoundary(r *http.Request, p tenant.Principal) (*http.
 			return err
 		}
 		current, err := db.RunCapabilityPrincipalTx(ctx, tx, p, token)
-		if err != nil || current.KeyPersonID != p.KeyPersonID || current.RunComputerID != p.TransportComputerID {
+		if err != nil || current.KeyPersonID != p.KeyPersonID || current.RunComputerID != p.TransportComputerID || current.RunProjectID != p.RunProjectID || current.RunWorkOrderID != p.RunWorkOrderID || current.RunGeneration != p.RunGeneration {
 			return authz.ErrForbidden
 		}
 		// Access is live, including for reads after an external wait. The

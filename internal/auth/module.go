@@ -273,6 +273,9 @@ func (m *Module) authenticateAndAuthorize(next http.Handler) http.Handler {
 			// and the exact route permission are checked inside the tenant.
 			ctx := authz.BindPool(r.Context(), m.pool)
 			scope := projectScope(r)
+			if p.RunID != "" {
+				scope = authz.Scope{ProjectID: p.RunProjectID}
+			} // server-verified run target, never a caller header
 			permissionErr := authz.RequirePattern(ctx, r.Pattern, scope)
 			if kind == credAgent && workerlease.SafetyRoute(r) && workerlease.Read(r) != "" && hasScope(p.Scopes, "harness.worker") && errors.Is(permissionErr, authz.ErrForbidden) {
 				// Only these exact control handlers may recover metadata safety
