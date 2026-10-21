@@ -221,8 +221,8 @@ test('verification stays on the server terms and is selected by default', () => 
   const until = (language: 'en' | 'de', iso: string) => deadlineMoment(iso, language, now)
   // A number and its unit are joined by a no-break space (AEON-1502 Tick round 1).
   const line = (language: 'en' | 'de', seconds: number, moment: string) => language === 'de'
-    ? [`Nur lesend · 1\u00a0Anfrage pro Harness · 1\u00a0Lauf gleichzeitig · max.\u00a0${seconds}\u00a0Sekunden · bis\u00a0${moment}`, 'Keine Änderungen am Repository und keine privilegierten Aktionen', 'PAIMOS-Kontingent, getrennt vom Anbieter-Abo']
-    : [`Read-only · 1\u00a0request per harness · 1\u00a0run at a time · ${seconds}\u00a0seconds max · until\u00a0${moment}`, 'No repository changes or privileged actions', 'PAIMOS allowance, separate from the vendor subscription']
+    ? [`Nur lesend\u00a0· 1\u00a0Anfrage pro Harness\u00a0· 1\u00a0Lauf gleichzeitig\u00a0· max.\u00a0${seconds}\u00a0Sekunden\u00a0· bis\u00a0${moment}`, 'Keine Änderungen am Repository und keine privilegierten Aktionen', 'PAIMOS-Kontingent, getrennt vom Anbieter-Abo']
+    : [`Read-only\u00a0· 1\u00a0request per harness\u00a0· 1\u00a0run at a time\u00a0· ${seconds}\u00a0seconds max\u00a0· until\u00a0${moment}`, 'No repository changes or privileged actions', 'PAIMOS allowance, separate from the vendor subscription']
   const rendered = pairingCopy('en', 'PAIMOS').limits(terms, until('en', terms.expires_at))
   assert.deepEqual(rendered, line('en', 60, until('en', terms.expires_at)))
   assert.deepEqual(pairingCopy('de', 'PAIMOS').limits(terms, until('de', terms.expires_at)), line('de', 60, until('de', terms.expires_at)))

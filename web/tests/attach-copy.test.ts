@@ -90,8 +90,10 @@ test('AEON-1502 a number and its unit never break apart on the card', () => {
   for (const pair of ['max.\u00a060\u00a0Sekunden', '1\u00a0Anfrage', '1\u00a0Lauf', 'bis\u00a020:30']) assert.ok(deLine!.includes(pair), pair)
   for (const pair of ['60\u00a0seconds', '1\u00a0request', '1\u00a0run', 'until\u00a08:30\u00a0PM']) assert.ok(enLine!.includes(pair), pair)
   const many = { ...terms, allowance: 3, runs_per_account: 2, max_parallel_runs: 2 }
-  assert.ok(de.limits(many, '20:30')[0]!.includes('3\u00a0Anfragen pro Harness · 2\u00a0Läufe'))
-  assert.ok(en.limits(many, '20:30')[0]!.includes('3\u00a0requests per harness · 2\u00a0runs'))
+  assert.ok(de.limits(many, '20:30')[0]!.includes('3\u00a0Anfragen pro Harness\u00a0· 2\u00a0Läufe'))
+  assert.ok(en.limits(many, '20:30')[0]!.includes('3\u00a0requests per harness\u00a0· 2\u00a0runs'))
+  // The separator stays with the item before it: a wrapped line never starts with "·".
+  for (const line of [deLine!, enLine!]) assert.doesNotMatch(line, / ·/)
   for (const sentence of [de.limitsDiffer, en.limitsDiffer]) assert.doesNotMatch(sentence, /\d (Anfrage|Lauf|Sekunden|request|run|second)/)
   assert.equal(de.accounts(2), '2\u00a0Konten')
   assert.equal(en.accounts(2), '2\u00a0accounts')

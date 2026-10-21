@@ -36,7 +36,7 @@ export function attachCopy(product: string, locale = typeof navigator === 'undef
 
 export type TitlePart = { text: string; kind: 'text' | 'harness' | 'account' | 'computer' | 'workspace' | 'command' }
 
-// A number and its unit never break apart (Tick round 1): "60 seconds", "1 Anfrage".
+// A number and its unit never break apart (Tick round 1): "60 seconds", "1 Anfrage". A wrapped line never starts with "·".
 const NB = '\u00a0'
 
 /** The language's own clock (Tick round 1): German reads 24 h ("20:30"), never AM/PM. A browser region of the same
@@ -129,7 +129,7 @@ export function pairingCopy(language: DisplayLanguage, product: string) {
         ? de ? `1${NB}Lauf gleichzeitig` : `1${NB}run at a time`
         : de ? `${terms.runs_per_account}${NB}Läufe, höchstens ${terms.max_parallel_runs} gleichzeitig` : `${terms.runs_per_account}${NB}runs, at most ${terms.max_parallel_runs} at a time`
       return [
-        [terms.policy === 'read_only' ? (de ? 'Nur lesend' : 'Read-only') : '', allowance, runs, de ? `max.${NB}${terms.max_duration_seconds}${NB}Sekunden` : `${terms.max_duration_seconds}${NB}seconds max`, de ? `bis${NB}${until}` : `until${NB}${until}`].filter(Boolean).join(' · '),
+        [terms.policy === 'read_only' ? (de ? 'Nur lesend' : 'Read-only') : '', allowance, runs, de ? `max.${NB}${terms.max_duration_seconds}${NB}Sekunden` : `${terms.max_duration_seconds}${NB}seconds max`, de ? `bis${NB}${until}` : `until${NB}${until}`].filter(Boolean).join(`${NB}· `),
         de ? 'Keine Änderungen am Repository und keine privilegierten Aktionen' : 'No repository changes or privileged actions',
         de ? `${product}-Kontingent, getrennt vom Anbieter-Abo` : `${product} allowance, separate from the vendor subscription`,
       ]
