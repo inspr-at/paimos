@@ -224,8 +224,8 @@ func TestOwnedNativeControlConfirmsExitAndRejectsStaleEpoch(t *testing.T) {
 	if pty.writes != 0 || pty.resizes != 0 || pty.closes != 0 {
 		t.Fatal("viewer performed native I/O")
 	}
-	if _, err = c.config.Host.Take(t.Context(), take); err == nil {
-		t.Fatal("old take was replayed")
+	if _, err = c.config.Host.Take(t.Context(), take); !errors.Is(err, agentd.ErrNotOwned) {
+		t.Fatal("old take did not refuse the retired binding", err)
 	}
 	hand := attach(takenBinding)
 	back := nativecontract.ReturnIntent{RequestID: guuid.NewString(), ExpectedBinding: takenBinding, ControllerEpoch: hand.Controller.Epoch, ExpectedRevision: hand.Snapshot.Revision, ExpiresAt: f.now.Add(20 * time.Second)}
@@ -245,9 +245,8 @@ func TestOwnedNativeControlConfirmsExitAndRejectsStaleEpoch(t *testing.T) {
 	if fresh.RuntimeEpoch == takenBinding.RuntimeEpoch || fresh.HarnessSessionID == takenBinding.HarnessSessionID || pty.closes != 1 {
 		t.Fatal("hand-back skipped exit/fresh epoch")
 	}
-	if _, err = f.s.Mutate(f.personCtx(t), f.actor, nativecontract.Command{Kind: "return", Return: &back}); err == nil {
-		t.Fatal("stale decision accepted")
-	}
+	_, err = f.s.Mutate(f.personCtx(t), f.actor, nativecontract.Command{Kind: "return", Return: &back})
+	assertNativeReason(t, err, nativecontract.ReasonWrongGeneration)
 	var audit, roots int
 	if err = f.d.Admin.QueryRow(t.Context(), `SELECT count(*) FROM events WHERE tenant_id=$1 AND type='native_session.mode_changed'`, f.person.TenantID).Scan(&audit); err != nil || audit != 2 {
 		t.Fatal("take and hand-back must each emit one audit line", audit, err)
@@ -286,9 +285,8 @@ func TestOwnedNativeControlConfirmsExitAndRejectsStaleEpoch(t *testing.T) {
 	}
 	stale := resume
 	stale.RequestID = guuid.NewString()
-	if _, err = f.s.Mutate(f.personCtx(t), f.actor, nativecontract.Command{Kind: "resume", Resume: &stale}); err == nil {
-		t.Fatal("stale recovery decision accepted")
-	}
+	_, err = f.s.Mutate(f.personCtx(t), f.actor, nativecontract.Command{Kind: "resume", Resume: &stale})
+	assertNativeReason(t, err, nativecontract.ReasonWrongGeneration)
 	var recoveryAudit int
 	if err = f.d.Admin.QueryRow(t.Context(), `SELECT count(*) FROM events WHERE tenant_id=$1 AND type='native_session.recovered'`, f.person.TenantID).Scan(&recoveryAudit); err != nil || recoveryAudit != 1 {
 		t.Fatal("recovery audit", recoveryAudit, err)
@@ -341,9 +339,8 @@ func TestOwnedNativeControlRetainsUnconfirmedWriter(t *testing.T) {
 	if _, err = c.config.Host.Take(t.Context(), in); !errors.Is(err, agentd.ErrProcessesUnconfirmed) {
 		t.Fatalf("unconfirmed group exit: %v", err)
 	}
-	if _, err = c.config.Host.Take(t.Context(), in); err == nil {
-		t.Fatal("uncertain native close was replayed")
-	}
+	_, err = c.config.Host.Take(t.Context(), in)
+	assertNativeReason(t, err, nativecontract.ReasonOwnershipUnconfirmed)
 	if c.provider.closes != 1 || pty.opens != 0 {
 		t.Fatal("an uncertain switch repeated a close or opened a successor", c.provider.closes, pty.opens)
 	}
