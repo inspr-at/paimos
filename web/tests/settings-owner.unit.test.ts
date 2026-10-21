@@ -223,8 +223,6 @@ it('a target rendered after the old deadline arrives once and releases its obser
   Object.assign(document, { getElementById: () => null })
   route.params.section = 'theme'; route.hash = '#colours'
   mount(); await flush()
-  expect(observers).toHaveLength(1)
-  expect(observers[0]!.observe).toHaveBeenCalledExactlyOnceWith(document.body, { childList: true, subtree: true, attributes: true, attributeFilter: ['id'] })
   await vi.advanceTimersByTimeAsync(3500)
   mutate()
   expect(target.scrollIntoView).not.toHaveBeenCalled()
@@ -233,6 +231,8 @@ it('a target rendered after the old deadline arrives once and releases its obser
   expect(target.scrollIntoView).toHaveBeenCalledExactlyOnceWith({ block: 'start', behavior: 'auto' })
   expect(target.focus).toHaveBeenCalledExactlyOnceWith({ preventScroll: true })
   expect(classes.has('arrived')).toBe(true)
+  expect(observers).toHaveLength(1)
+  expect(observers[0]!.observe).toHaveBeenCalledExactlyOnceWith(document.body, { childList: true, subtree: true, attributes: true, attributeFilter: ['id'] })
   expect(observers[0]!.active).toBe(false)
   mutate()
   expect(target.scrollIntoView).toHaveBeenCalledTimes(1)

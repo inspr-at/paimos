@@ -108,7 +108,14 @@ test('AEON-1366: a late Colours deep link scrolls, rings and holds without movin
     await expect.poll(() => heading.evaluate(el => el.getBoundingClientRect().top)).toBeCloseTo(top, 0)
   })
   guard.done()
-  await page.screenshot({ path: testInfo.outputPath('late-colours-390.png') })
+  await page.locator('#themes').evaluate(el => el.style.removeProperty('padding-bottom'))
+  await page.clock.resume()
+  for (const width of [390, 1024, 1440]) for (const mode of ['light', 'dark']) {
+    await page.setViewportSize({ width, height: 950 })
+    await page.evaluate(value => { document.documentElement.dataset.theme = value }, mode)
+    await heading.scrollIntoViewIfNeeded()
+    await page.screenshot({ path: testInfo.outputPath(`late-colours-${width}-${mode}.png`), animations: 'disabled' })
+  }
 })
 async function colour(page: Page, label: string, hex: string, screenshot?: string) {
   await page.getByRole('button', { name: label, exact: true }).click()

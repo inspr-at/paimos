@@ -6,7 +6,7 @@
   },
   "spec": {
     "file": "tests/theme-settings.spec.ts",
-    "listedTests": 46,
+    "listedTests": 50,
     "tierTiming": {
       "caseSeconds": {
         "max": 9.618,

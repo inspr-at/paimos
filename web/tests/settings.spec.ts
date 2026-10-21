@@ -324,9 +324,8 @@ test('old workspace bookmarks redirect during section and hash changes inside Se
   await setup(page)
   await page.goto('/settings/personal')
   // Bookmark arrival deliberately scrolls to its card and rings it. The card
-  // renders only once its data is in. The arrival watcher observes it, and
-  // the ring is the barrier: only
-  // after it shows has the scroll happened, and resetting afterwards compares
+  // renders only once its data is in. The arrival watcher observes it; the ring
+  // is the barrier: only after it shows has the scroll happened. Resetting then compares
   // the sticky controls at the same scroll position (a reset before the scroll
   // let the scroll land between reset and measurement; CI saw navigation.y
   // off by 192 px, AEON-724 PR #299).
