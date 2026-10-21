@@ -21,7 +21,7 @@ func TestRootAptTimeoutReapsBeforeRetry(t *testing.T) {
 // AEON-1064: exercise real test-worker interruption and parent death; the
 // fixture-only regression uses Node helpers and never launches a browser.
 func TestInterruptedFixturesLeaveNoProcesses(t *testing.T) {
-	cmd := exec.Command("node", "--test", "scripts/fixture-lifecycle.test.mjs")
+	cmd := exec.Command("node", "--test", "--test-concurrency=1", "--test-name-pattern=AEON-1064|stale|recovery|owned descendants|reused journal|detached", "scripts/fixture-lifecycle.test.mjs", "scripts/playwright-safe.test.mjs")
 	cmd.Dir = root(t)
 	out, err := cmd.CombinedOutput()
 	if err != nil {

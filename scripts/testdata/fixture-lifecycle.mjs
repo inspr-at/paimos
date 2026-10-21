@@ -54,6 +54,9 @@ export function fixtureOwner() {
       const directory = mkdtempSync(join(tmpdir(), 'aeon-fixture-')), log = join(directory, 'groups')
       appendFileSync(log, '')
       const env = { ...(options.env ?? process.env), AEON_FIXTURE_GROUP_LOG: log }
+      // A nested --test invocation must start its own runner, rather than
+      // inheriting the current worker's internal node:test context.
+      delete env.NODE_TEST_CONTEXT
       env.NODE_OPTIONS = `${env.NODE_OPTIONS ?? ''} --import=${new URL('./fixture-lifecycle.mjs', import.meta.url).href}`
       const child = childProcess.spawn(command, args, { ...options, env, detached: true })
       const entry = { directory, tracker: trackGroups(log) }
