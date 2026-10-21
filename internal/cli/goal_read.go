@@ -36,7 +36,7 @@ func (rt *runtime) cmdGoalHistory() *Command {
 func (rt *runtime) cmdGoalList() *Command {
 	var project, group, search, state, sortBy, dir, cursor, limit string
 	var hideDone bool
-	return &Command{Name: "list", Short: "List visible goals with totals and project badges", Use: "goal list [--project KEY] [--group UUID|none] [--q TEXT] [--sort eta|name|progress|project|moving|queued|done] [--json]", maxArgs: 0,
+	return &Command{Name: "list", Short: "List goals, and releases only while unshipped and with an outcome, with totals and project badges", Use: "goal list [--project KEY] [--group UUID|none] [--q TEXT] [--sort eta|name|progress|project|moving|queued|done] [--json]", maxArgs: 0,
 		addFlags: func(fs *flagSet) {
 			fs.string(&project, "project", 0, "home or contributing project")
 			fs.string(&group, "group", 0, "project group UUID or none")

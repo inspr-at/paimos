@@ -270,6 +270,117 @@ func TestGoalListViewFiltersAndOrdering(t *testing.T) {
 	}
 }
 
+// Risk: an empty or shipped release stays in the Goals list, or dropping it
+// leaves totals, quiet project keys or a later page counting the hidden row.
+// Shipped is journey_releases.released_at (released and superseded).
+func TestGoalListOmitsEmptyAndShippedReleases(t *testing.T) {
+	f := writerFixture(t)
+	var live, shipped, superseded, empty, deletedOnly string
+	err := db.InTenant(dbtest.Seed(t.Context()), f.db.App, f.writer.TenantID, func(tx pgx.Tx) error {
+		type releaseRow struct {
+			key, projectKey, state, outcome string
+			shipped                         bool
+			id                              *string
+		}
+		rows := []releaseRow{
+			{key: "REL-LIVE", projectKey: "LIVE", state: "building", outcome: "live", id: &live},
+			{key: "REL-SHIP", projectKey: "SHIP", state: "released", shipped: true, outcome: "live", id: &shipped},
+			{key: "REL-SUPER", projectKey: "SUPER", state: "superseded", shipped: true, outcome: "live", id: &superseded},
+			{key: "REL-EMPTY", projectKey: "EMPTY", state: "planning", id: &empty},
+			{key: "REL-GONE", projectKey: "GONE", state: "planning", outcome: "deleted", id: &deletedOnly},
+		}
+		for i, row := range rows {
+			project := fixtureNode(t, tx, f.writer.TenantID, "project", "PRJ-"+row.projectKey, "", map[string]any{"project_key": row.projectKey})
+			id := fixtureNode(t, tx, f.writer.TenantID, "release", row.key, project, nil)
+			*row.id = id
+			if _, err := tx.Exec(t.Context(), `INSERT INTO journey_projects(tenant_id,project_node_id) VALUES($1,$2)`, f.writer.TenantID, project); err != nil {
+				return err
+			}
+			var released any
+			if row.shipped {
+				released = apiClock
+			}
+			if _, err := tx.Exec(t.Context(), `INSERT INTO journey_releases(tenant_id,release_node_id,project_node_id,number,state,released_at) VALUES($1,$2,$3,$4,$5,$6)`, f.writer.TenantID, id, project, i+1, row.state, released); err != nil {
+				return err
+			}
+			if row.outcome == "" {
+				continue
+			}
+			outcome := fixtureNode(t, tx, f.writer.TenantID, OutcomeKind, row.key+"-O", id, map[string]any{"outcome_ref": "part", "state_set": "moving"})
+			if row.outcome == "deleted" {
+				if _, err := tx.Exec(t.Context(), `UPDATE nodes SET deleted_at=$2 WHERE id=$1`, outcome, apiClock); err != nil {
+					return err
+				}
+			}
+		}
+		return nil
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	f.reader = f.writer
+	m := &module{f.db.App, func() time.Time { return apiClock }}
+	all := listResult(t, f, m, "?sort=eta&dir=asc")
+	ids := map[string]GoalView{}
+	var sum StateCounts
+	for _, g := range all.Items {
+		ids[g.ID] = g
+		if g.States == nil {
+			t.Fatalf("listed goal %s has no states", g.Key)
+		}
+		sum.Moving += g.States.Moving
+		sum.Queued += g.States.Queued
+		sum.Paused += g.States.Paused
+		sum.Done += g.States.Done
+	}
+	if _, ok := ids[f.emptyGoal]; !ok || ids[f.emptyGoal].Kind != GoalKind {
+		t.Fatal("empty goal hidden")
+	}
+	shown, ok := ids[live]
+	if !ok || shown.Kind != "release" || shown.States == nil || shown.States.Moving != 1 || !slices.ContainsFunc(shown.Projects, func(b ProjectBadge) bool { return b.Key == "LIVE" }) {
+		t.Fatalf("unshipped release with an outcome: %+v", shown)
+	}
+	for _, hidden := range []string{shipped, superseded, empty, deletedOnly} {
+		if _, ok := ids[hidden]; ok {
+			t.Fatalf("hidden release listed: %s", hidden)
+		}
+	}
+	if sum != all.Totals || all.TotalsPartial {
+		t.Fatalf("totals %+v partial %v, shown %+v", all.Totals, all.TotalsPartial, sum)
+	}
+	for _, key := range []string{"SHIP", "SUPER", "EMPTY", "GONE"} {
+		if !slices.Contains(all.QuietProjects.Keys, key) {
+			t.Fatalf("quiet projects lost %s: %v", key, all.QuietProjects.Keys)
+		}
+	}
+	if slices.Contains(all.QuietProjects.Keys, "LIVE") {
+		t.Fatalf("shown release project marked quiet: %v", all.QuietProjects.Keys)
+	}
+	paged := []string{}
+	cursor := ""
+	for page := 0; page <= len(all.Items); page++ {
+		out := listResult(t, f, m, "?sort=eta&dir=asc&limit=1&cursor="+cursor)
+		if out.Totals != all.Totals || !reflect.DeepEqual(out.QuietProjects, all.QuietProjects) {
+			t.Fatalf("page %d changed totals or badges", page)
+		}
+		if len(out.Items) == 0 {
+			t.Fatalf("page %d empty before the filtered list ended", page)
+		}
+		paged = append(paged, out.Items[0].ID)
+		cursor = out.NextCursor
+		if cursor == "" {
+			break
+		}
+	}
+	want := []string{}
+	for _, g := range all.Items {
+		want = append(want, g.ID)
+	}
+	if cursor != "" || !reflect.DeepEqual(paged, want) {
+		t.Fatalf("pages %v want %v cursor %q", paged, want, cursor)
+	}
+}
+
 type listQueryCounter struct {
 	count   atomic.Int32
 	maxRows atomic.Int64
