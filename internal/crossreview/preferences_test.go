@@ -188,6 +188,7 @@ func TestReviewStarterPersonAndOperatorKeyCompatibility(t *testing.T) {
 					return tx.QueryRow(t.Context(), `INSERT INTO agent_runs(tenant_id,work_order_id,agent_principal_id,model_profile_id,requested_model,status)
     SELECT $1,$2,$3,p.id,p.model,'completed' FROM model_profiles p WHERE p.family='openai' AND p.version='test-version' RETURNING id::text`, f.person.TenantID, order.NodeID, f.agent.ID).Scan(&source)
 				})
+				f.bindRunPerson(t, source)
 				in.AuthorRunID = &source
 			}
 			var review Review

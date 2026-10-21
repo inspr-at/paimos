@@ -214,6 +214,7 @@ func (e *Executor) ContinueTx(ctx context.Context, tx pgx.Tx, tid, id string) (b
 		if err != nil {
 			return err
 		}
+		var personRefusal *workqueue.PersonAdmissionError
 		result, err := e.advance(ctx, step, tid, r, c)
 		if err != nil {
 			if rollbackErr := step.Rollback(ctx); rollbackErr != nil {
@@ -223,6 +224,8 @@ func (e *Executor) ContinueTx(ctx context.Context, tx pgx.Tx, tid, id string) (b
 			var pairing *agentpairing.Error
 			var use *accountuse.Error
 			switch {
+			case errors.As(err, &personRefusal):
+				result = map[string]any{"wait_reason": personRefusal.Code}
 			case errors.As(err, &refusal) && refusal.Status == 409:
 				result = map[string]any{"wait_reason": refusal.Message}
 				if refusal.Message == "routine_review_proof_unavailable" || refusal.Message == "review_policy_changed" || refusal.Message == "review_head_changed" || refusal.Message == "fix_review_changed" {
@@ -254,6 +257,12 @@ func (e *Executor) ContinueTx(ctx context.Context, tx pgx.Tx, tid, id string) (b
 			return err
 		}
 		_, err = tx.Exec(ctx, `UPDATE routine_effect_outbox SET state=$2,result=$3,reconcile_after=clock_timestamp()+interval '30 seconds',updated_at=clock_timestamp() WHERE id=$1`, id, next, encoded)
+		if err != nil {
+			return err
+		}
+		if personRefusal != nil {
+			_, err = events.Append(ctx, tx, tenant.Principal{TenantID: tid, ID: r.owner, Kind: tenant.Person}, events.Change{NodeID: &r.project, Type: "run.admission_refused", After: map[string]string{"reason": personRefusal.Code, "source_rule": "routine_continuation", "run_id": c.AgentRunID}})
+		}
 		return err
 	})
 	return advanced, err

@@ -74,7 +74,7 @@ func TestRunPersonStartPathSourcesAndUnresolvedRefusal(t *testing.T) {
 			args []any
 		}{
 			{`INSERT INTO nodes(tenant_id,id,kind_id,key,title) SELECT $1,$2,id,'PERSON-1','Person sources' FROM node_kinds WHERE tenant_id=$1 AND slug='project'`, []any{f.person.TenantID, project}},
-			{`INSERT INTO recurrences(tenant_id,id,project_id,parent_id,template,trigger,created_by_principal_id,definition_scope) VALUES($1,$2,$3,$3,'{}','{"kind":"event"}',$4,'project')`, []any{f.person.TenantID, recurrence, project, f.person.ID}},
+			{`INSERT INTO recurrences(tenant_id,id,project_id,parent_id,template,trigger,created_by_principal_id) VALUES($1,$2,$3,$3,'{}','{"kind":"event"}',$4)`, []any{f.person.TenantID, recurrence, project, f.person.ID}},
 			{`INSERT INTO recurrence_definitions(tenant_id,recurrence_id,scope_type,scope_project_id,owner_principal_id,output_project_id,output_parent_id) VALUES($1,$2,'project',$3,$4,$3,$3)`, []any{f.person.TenantID, recurrence, project, f.person.ID}},
 			{`INSERT INTO project_leads(tenant_id,project_id,owner_principal_id,state) VALUES($1,$2,$3,'waiting_for_room')`, []any{f.person.TenantID, project, f.person.ID}},
 			{`INSERT INTO native_session_intents(tenant_id,id,owner_person_id,project_id) VALUES($1,$2,$3,$4)`, []any{f.person.TenantID, intent, f.person.ID, project}},

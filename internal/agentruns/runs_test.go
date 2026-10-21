@@ -46,7 +46,7 @@ func setup(t *testing.T) *fixture {
 	f := &fixture{d: dbtest.Open(t), mux: http.NewServeMux()}
 	tid := uuid()
 	f.person = tenant.Principal{ID: uuid(), TenantID: tid, Kind: tenant.Person}
-	f.agent = tenant.Principal{ID: uuid(), TenantID: tid, Kind: tenant.Agent}
+	f.agent = tenant.Principal{ID: uuid(), TenantID: tid, Kind: tenant.Agent, Scopes: []string{"work_orders.read", "work_orders.write", "run.read", "run.create", "run.claim", "run.telemetry"}}
 	f.other = tenant.Principal{ID: uuid(), TenantID: tid, Kind: tenant.Agent}
 	f.foreign = tenant.Principal{ID: uuid(), TenantID: uuid(), Kind: tenant.Person}
 	for _, p := range []tenant.Principal{f.person, f.foreign} {
@@ -172,7 +172,7 @@ func (f *fixture) pairedRunComputer(t *testing.T) (string, string) {
 		}
 		computer, request = uuid(), uuid()
 		fingerprint := strings.ReplaceAll(uuid()+uuid(), "-", "")
-		if _, err := tx.Exec(t.Context(), `INSERT INTO agent_pairing_requests(tenant_id,id,user_code,device_hash,runtime_hash,lifecycle_hash,details,request_digest,state,approved_by) VALUES($1,$2,'123456789',$3,$3,$3,'{}',$3,'redeemed',$4)`, f.person.TenantID, request, fingerprint, f.person.ID); err != nil {
+		if _, err := tx.Exec(t.Context(), `INSERT INTO agent_pairing_requests(tenant_id,id,user_code,device_hash,runtime_hash,lifecycle_hash,details,request_digest,state,approved_by) VALUES($1,$2,'123456789',$3,$3,$3,'{"platform":"darwin","arch":"arm64"}',$3,'redeemed',$4)`, f.person.TenantID, request, fingerprint, f.person.ID); err != nil {
 			return err
 		}
 		if _, err := tx.Exec(t.Context(), `INSERT INTO agent_pairing_computers(tenant_id,id,request_id,principal_id,key_id,daemon_id,lifecycle_hash) SELECT $1,$2,$3,$4,id,'daemon-test',$5 FROM agent_keys WHERE principal_id=$4 ORDER BY created_at LIMIT 1`, f.person.TenantID, computer, request, f.agent.ID, fingerprint); err != nil {

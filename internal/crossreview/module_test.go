@@ -38,6 +38,13 @@ type fixture struct {
 	ticket, profile, account, token string
 }
 
+func (f *fixture) bindRunPerson(t *testing.T, run string) {
+	t.Helper()
+	f.tx(t, func(tx pgx.Tx) error {
+		return agentruns.SetActingPersonTx(t.Context(), tx, f.person.TenantID, run, f.person.ID)
+	})
+}
+
 func (f *fixture) tx(t *testing.T, fn func(pgx.Tx) error) {
 	t.Helper()
 	if err := db.InTenant(dbtest.Seed(t.Context()), f.d.App, f.person.TenantID, fn); err != nil {
