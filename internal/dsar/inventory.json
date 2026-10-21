@@ -178,7 +178,14 @@
       "columns": {
         "routine_launch_id": "metadata",
         "trace": "personal",
-        "acting_person_id": "personal"
+        "acting_person_id": "personal",
+        "content_capability_digest": "secret",
+        "content_capability_person_id": "personal",
+        "content_capability_computer_id": "metadata",
+        "content_capability_account_id": "metadata",
+        "content_capability_daemon_id": "metadata",
+        "content_capability_generation": "metadata",
+        "content_capability_expires_at": "metadata"
       },
       "locator": {
         "tenant_column": "tenant_id"

@@ -21,6 +21,7 @@ import (
 	"github.com/inspr-at/paimos/internal/agentactivity"
 	"github.com/inspr-at/paimos/internal/agentsetup"
 	"github.com/inspr-at/paimos/internal/client"
+	"github.com/inspr-at/paimos/internal/db"
 	"github.com/inspr-at/paimos/internal/deploytarget"
 	"github.com/inspr-at/paimos/internal/modelreport"
 	"github.com/inspr-at/paimos/internal/ownedprocess"
@@ -33,6 +34,8 @@ import (
 // Remote uses a scoped agent key through AEON's public HTTP contract.
 // NewRemote callers should pin the base URL to HTTPS or a trusted loopback.
 type Remote struct {
+	runCapabilities      map[string]string
+	sessionRuns          map[string]string
 	activityModes        map[string]string
 	Client               *client.Client
 	mu                   sync.RWMutex
@@ -53,7 +56,12 @@ type Remote struct {
 func NewRemote(baseURL, token string) *Remote {
 	c := client.New(baseURL, token)
 	c.HTTP.CheckRedirect = func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }
-	return &Remote{Client: c}
+	r := &Remote{Client: c}
+	c.HTTP.Transport = capabilityTransport{remote: r, base: c.HTTP.Transport}
+	if c.HTTP.Transport.(capabilityTransport).base == nil {
+		c.HTTP.Transport = capabilityTransport{remote: r, base: http.DefaultTransport}
+	}
+	return r
 }
 
 // runCredential derives a local capability without exposing the daemon key to
@@ -182,7 +190,7 @@ func (r *Remote) Identity(ctx context.Context) (string, string, error) {
 
 func (r *Remote) Queued(ctx context.Context) ([]Run, error) {
 	var runs []Run
-	err := r.Client.DoWithHeaders(ctx, "GET", "/api/runs/queued?limit=100", nil, &runs, r.ledgerHeaders(map[string]string{reviewgate.PolicyHeader: reviewgate.Policy}))
+	err := r.Client.DoWithHeaders(ctx, "GET", "/api/runs/queued?limit=100", nil, &runs, r.ledgerHeaders(map[string]string{reviewgate.PolicyHeader: reviewgate.Policy, db.RunCapabilityPolicyHeader: db.RunCapabilityPolicy}))
 	return runs, err
 }
 
@@ -279,6 +287,7 @@ func (r *Remote) RegisterHarness(ctx context.Context, s HarnessSession, agentID,
 	if s.ReasoningEffort != "" {
 		body["reasoning_effort"] = s.ReasoningEffort
 	}
+	ctx = r.RunContext(ctx, runID)
 	err := r.Client.Do(ctx, "POST", "/api/projects/"+url.PathEscape(s.ProjectID)+"/harness-sessions", body, &result)
 	if err != nil {
 		return HarnessSession{}, err
@@ -286,6 +295,12 @@ func (r *Remote) RegisterHarness(ctx context.Context, s HarnessSession, agentID,
 	if result.ID == "" || result.ProjectID != s.ProjectID {
 		return HarnessSession{}, errors.New("harness registration binding mismatch")
 	}
+	r.mu.Lock()
+	if r.sessionRuns == nil {
+		r.sessionRuns = map[string]string{}
+	}
+	r.sessionRuns[result.ID] = runID
+	r.mu.Unlock()
 	result.Lease = s.Lease
 	result.Harness = harness
 	return result, nil
@@ -298,6 +313,9 @@ func (r *Remote) harnessWorker(ctx context.Context, s HarnessSession, suffix str
 	}
 	err := r.Client.DoWithHeaders(ctx, "POST", harnessPath(s)+suffix, body, dest, headers)
 	var status *client.StatusError
+	if errors.As(err, &status) && status.Status == http.StatusForbidden && (suffix == "/yield" || suffix == "/stop" || suffix == "/confirm-exit" || strings.HasSuffix(suffix, "/complete")) {
+		err = r.Client.DoWithHeaders(context.WithValue(ctx, runCapabilityContextKey{}, ""), "POST", harnessPath(s)+suffix, body, dest, headers)
+	}
 	if errors.As(err, &status) && status.Status == 410 && status.Message == "harness generation archived" {
 		return ErrHarnessArchived
 	}

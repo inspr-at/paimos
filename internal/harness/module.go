@@ -1145,6 +1145,9 @@ func (m *Module) registerBeforeEvents(r *http.Request, tx pgx.Tx, p tenant.Princ
 	if agentKind != "agent" {
 		return nil, workorders.Fail(400, "agent principal required")
 	}
+	if p.RunID != "" && (in.RunID == nil || *in.RunID != p.RunID) {
+		return nil, workorders.Fail(403, "run capability target mismatch")
+	}
 	if in.RunID != nil {
 		var agentID, orderID string
 		err = tx.QueryRow(ctx, `SELECT agent_principal_id::text,work_order_id::text FROM agent_runs WHERE id=$1`, *in.RunID).Scan(&agentID, &orderID)

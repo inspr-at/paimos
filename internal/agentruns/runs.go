@@ -34,6 +34,8 @@ import (
 )
 
 type Run struct {
+	RunCapabilityRequired     bool    `json:"run_capability_required,omitempty"`
+	UpgradeReason             string  `json:"upgrade_reason,omitempty"`
 	ActingPersonID            *string `json:"acting_person_id"`
 	RoutineLaunchID           *string `json:"routine_launch_id,omitempty"`
 	ReservationsSettled       *bool   `json:"reservations_settled,omitempty"`
@@ -149,6 +151,7 @@ func (m *module) Mount(mux *http.ServeMux) {
 		{"POST /api/runs/{runId}/capacity-override", "run.create", false, 200, m.runNow},
 		{"POST /api/runs/{runId}/cancel", "run.create", false, 200, m.cancel},
 		{"POST /api/runs/{runId}/claim", "run.claim", true, 200, m.claim},
+		{"POST /api/runs/{runId}/capability", "run.read", true, 200, m.capability},
 	} {
 		mux.HandleFunc(route.pattern, workorders.Endpoint(m.pool, route.scope, route.agent, route.status, func(r *http.Request, tx pgx.Tx, p tenant.Principal) (any, error) {
 			var lockErr error
@@ -171,7 +174,7 @@ func (m *module) Mount(mux *http.ServeMux) {
 				}
 			}
 			v, err := workqueue.PersonAdmissionTx(r.Context(), tx, p, route.pattern, func(step pgx.Tx) (any, error) { return route.fn(r, step, p) })
-			return v, pairingRunError(err)
+			return transportResult(r, p, v), pairingRunError(err)
 		}))
 	}
 	mux.HandleFunc("POST /api/runs/{runId}/telemetry", workorders.EndpointPrepared(m.pool, "run.telemetry", true, 200,
@@ -181,7 +184,7 @@ func (m *module) Mount(mux *http.ServeMux) {
 		},
 		func(r *http.Request, tx pgx.Tx, p tenant.Principal) (any, error) {
 			out, err := m.telemetry(r, tx, p)
-			return out, pairingRunError(err)
+			return transportResult(r, p, out), pairingRunError(err)
 		}))
 }
 
@@ -288,7 +291,7 @@ func lockRun(ctx context.Context, tx pgx.Tx, id string) (Run, workorders.Order, 
 	return r, o, err
 }
 func (m *module) get(r *http.Request, tx pgx.Tx, p tenant.Principal) (any, error) {
-	v, err := load(r.Context(), tx, r.PathValue("runId"), false)
+	v, err := scan(tx.QueryRow(r.Context(), `SELECT `+readColumns(p)+` FROM agent_runs WHERE id=$1`, r.PathValue("runId")))
 	if err != nil {
 		return nil, err
 	}
@@ -330,7 +333,7 @@ func (m *module) queued(r *http.Request, tx pgx.Tx, p tenant.Principal) (any, er
 	if err != nil {
 		return nil, err
 	}
-	rows, err := tx.Query(r.Context(), `SELECT `+columns+` FROM agent_runs WHERE agent_principal_id=$1 AND status='queued'
+	rows, err := tx.Query(r.Context(), `SELECT `+readColumns(p)+` FROM agent_runs WHERE agent_principal_id=$1 AND status='queued'
 
  AND $5::bool
  AND (NOT EXISTS(SELECT 1 FROM agent_pairing_computers WHERE principal_id=$1) OR EXISTS(
@@ -701,6 +704,13 @@ func releaseObsoleteClaim(ctx context.Context, tx pgx.Tx, p tenant.Principal, v 
 }
 
 func (m *module) claim(r *http.Request, tx pgx.Tx, p tenant.Principal) (any, error) {
+	paired, err := agentpairing.PairedPrincipal(r.Context(), tx, p.ID)
+	if err != nil {
+		return nil, err
+	}
+	if paired && p.RunID != r.PathValue("runId") {
+		return nil, workorders.Fail(403, "run_capability_upgrade_required")
+	}
 	var in struct {
 		Daemon       string                    `json:"daemon_id"`
 		Generation   string                    `json:"daemon_generation"`

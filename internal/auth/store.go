@@ -503,6 +503,9 @@ func (m *Module) authenticateAgent(ctx context.Context, prefix, secret string) (
 			p.KeyPersonID = *personID
 		}
 		p.AuthKeyID = keyID
+		if err := tx.QueryRow(ctx, `SELECT coalesce((SELECT id::text FROM agent_pairing_computers WHERE tenant_id=$1 AND principal_id=$2),'')`, tenantID, principalID).Scan(&p.TransportComputerID); err != nil {
+			return err
+		}
 		if creatorID != nil {
 			p.KeyCreatorID = *creatorID
 		}

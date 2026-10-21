@@ -142,7 +142,7 @@ func ActingPersonID(ctx context.Context, p tenant.Principal) any {
 // It reads no owner/issuer fallback: null remains legacy until S1-07. Conflicting
 // key and run bindings fail closed instead of replacing the key's ceiling.
 func RunPrincipalTx(ctx context.Context, tx pgx.Tx, p tenant.Principal, runID string) (tenant.Principal, error) {
-	if p.Kind != tenant.Agent || !uuidLike(runID) {
+	if p.Kind != tenant.Agent || !uuidLike(runID) || p.RunID != "" && p.RunID != runID {
 		return p, errors.New("invalid run principal")
 	}
 	var person *string

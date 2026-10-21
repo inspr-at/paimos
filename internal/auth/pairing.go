@@ -123,7 +123,7 @@ func (m *Module) pairingBoundary(r *http.Request, p tenant.Principal) error {
 			if r.Method == "GET" {
 				return nil
 			}
-			if r.Method == "POST" && len(parts) == 4 && (parts[3] == "claim" || parts[3] == "telemetry") {
+			if r.Method == "POST" && len(parts) == 4 && (parts[3] == "claim" || parts[3] == "telemetry" || parts[3] == "capability") {
 				return nil
 			}
 		case "work-orders":
