@@ -13,6 +13,38 @@ import (
 	"testing"
 )
 
+// Risk: an unresolved author's person borrows the review requester's identity,
+// or a rolled-back review also loses its refusal audit.
+func TestReviewUnresolvedRunPersonCommitsOnlyRefusal(t *testing.T) {
+	f := newFixture(t)
+	var order workorders.Order
+	f.call(t, f.person, "POST", "/api/work-orders", map[string]any{"title": "Unbound author", "parent_id": f.ticket, "assignee_principal_id": f.agent.ID, "criteria": []string{"Pass"}}, 201, &order)
+	var source string
+	f.tx(t, func(tx pgx.Tx) error {
+		return tx.QueryRow(t.Context(), `INSERT INTO agent_runs(tenant_id,work_order_id,agent_principal_id,model_profile_id,requested_model,status)
+ SELECT $1,$2,$3,p.id,p.model,'completed' FROM model_profiles p WHERE p.family='openai' AND p.version='test-version' RETURNING id::text`, f.person.TenantID, order.NodeID, f.agent.ID).Scan(&source)
+	})
+	in := f.input()
+	in.AuthorRunID = &source
+	var failure map[string]any
+	f.call(t, f.person, "POST", "/api/nodes/"+f.ticket+"/reviews", in, 409, &failure)
+	if failure["code"] != "run_person_unresolved" {
+		t.Fatalf("wrong refusal: %v", failure)
+	}
+	f.tx(t, func(tx pgx.Tx) error {
+		var audits, partial int
+		if err := tx.QueryRow(t.Context(), `SELECT
+ (SELECT count(*) FROM events WHERE type='run.admission_refused' AND actor_principal_id=$1 AND after='{"reason":"run_person_unresolved","source_rule":"review"}'::jsonb),
+ (SELECT count(*) FROM work_order_reviews)+(SELECT count(*) FROM work_orders WHERE kind='review')+(SELECT count(*) FROM agent_runs WHERE id<>$2::uuid)`, f.person.ID, source).Scan(&audits, &partial); err != nil {
+			return err
+		}
+		if audits != 1 || partial != 0 {
+			t.Fatalf("refusal audit=%d partial review resources=%d", audits, partial)
+		}
+		return nil
+	})
+}
+
 func TestReviewStoresLoosenedResidencyLockTrace(t *testing.T) {
 	f := newFixture(t)
 	project := testID()

@@ -2996,6 +2996,8 @@
     ,
     {"kind":"go","package":"internal/agentruns","name":"TestRoutinePreparationPreservesAuthorityCriteriaAndPickup","tier":"GATED-FULL"}
     ,
+    {"kind":"go","package":"internal/agentruns","name":"TestRoutineUnresolvedRunPersonManualAndSchedulerAudits","tier":"ESSENTIAL"}
+    ,
     {"kind":"go","package":"internal/agentruns","name":"TestRunActingPersonIsExplicitAndWriteOnce","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/agentruns","name":"TestRunAndQueueAccountContextChecks","tier":"ESSENTIAL"}
@@ -5875,6 +5877,8 @@
     {"kind":"go","package":"internal/crossreview","name":"TestReviewStarterPersonAndOperatorKeyCompatibility","tier":"GATED-FULL"}
     ,
     {"kind":"go","package":"internal/crossreview","name":"TestReviewStoresLoosenedResidencyLockTrace","tier":"GATED-FULL"}
+    ,
+    {"kind":"go","package":"internal/crossreview","name":"TestReviewUnresolvedRunPersonCommitsOnlyRefusal","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/crossreview","name":"TestStaleBindingPostsErrorAndRetriesUntilRecorded","tier":"GATED-FULL"}
     ,
