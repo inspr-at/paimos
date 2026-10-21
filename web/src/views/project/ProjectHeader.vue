@@ -27,12 +27,54 @@ const descriptionProbe = ref<HTMLElement>()
 const descriptionNeedsPanel = ref(false)
 const descriptionFull = ref<HTMLElement>()
 const descriptionRoom = ref(0)
+// Compact chrome keeps the project head in the crumb sheet, so the description
+// has no client box and isClipped stays false. More must still exist for a line
+// that would clip once the sheet opens. The probe is removed before paint.
+function hiddenDescriptionClipped(element: HTMLElement): boolean {
+  const page = element.closest<HTMLElement>('.project-page')
+  const text = getComputedStyle(element)
+  const pageStyle = page ? getComputedStyle(page) : null
+  const pad = pageStyle ? (parseFloat(pageStyle.paddingLeft) || 0) + (parseFloat(pageStyle.paddingRight) || 0) : 0
+  const width = Math.max(1, (page?.clientWidth || document.documentElement.clientWidth) - pad)
+  const comfortable = page?.classList.contains('header-comfortable') ?? false
+  const oneLine = window.innerWidth <= 600 && !comfortable
+  const clamp = oneLine ? 'none' : (window.innerWidth <= 720 || comfortable ? '2' : (text.getPropertyValue('-webkit-line-clamp') || 'none'))
+  const clamped = clamp !== '' && clamp !== 'none' && clamp !== '0'
+  const host = document.createElement('div')
+  host.setAttribute('aria-hidden', 'true')
+  host.style.cssText = 'position:fixed;inset:0 auto auto 0;width:0;height:0;overflow:hidden;visibility:hidden;pointer-events:none;'
+  const probe = document.createElement('p')
+  probe.textContent = element.textContent ?? ''
+  probe.style.position = 'absolute'
+  probe.style.boxSizing = 'border-box'
+  probe.style.width = `${width}px`
+  probe.style.margin = '0'
+  probe.style.overflow = 'hidden'
+  probe.style.fontFamily = text.fontFamily
+  probe.style.fontSize = text.fontSize
+  probe.style.fontWeight = text.fontWeight
+  probe.style.fontStyle = text.fontStyle
+  probe.style.lineHeight = text.lineHeight
+  probe.style.letterSpacing = text.letterSpacing
+  probe.style.whiteSpace = oneLine ? 'nowrap' : (clamped ? 'normal' : text.whiteSpace)
+  probe.style.overflowWrap = text.overflowWrap
+  probe.style.wordBreak = text.wordBreak
+  probe.style.display = clamped ? '-webkit-box' : 'block'
+  if (clamped) {
+    probe.style.setProperty('-webkit-line-clamp', clamp)
+    probe.style.setProperty('-webkit-box-orient', 'vertical')
+  }
+  host.appendChild(probe)
+  document.body.appendChild(host)
+  try { return isClipped(probe) } finally { host.remove() }
+}
 // Description disclosure owns its measurement; full text may exceed the
 // viewport, so it belongs in a focusable scroll region rather than a tooltip.
 watch([descriptionText, descriptionProbe, () => project.value?.description], ([element, probe], _, onCleanup) => {
   if (!element) return
   const measure = () => {
-    descriptionClipped.value = isClipped(element)
+    const hidden = element.clientWidth <= 0 || element.clientHeight <= 0
+    descriptionClipped.value = hidden ? hiddenDescriptionClipped(element) : isClipped(element)
     const rect = element.getBoundingClientRect()
     const room = Math.max(rect.top - 16, innerHeight - rect.bottom - 16)
     descriptionNeedsPanel.value = innerWidth <= 720 || matchMedia('(pointer: coarse)').matches || (probe?.offsetHeight ?? 0) > room

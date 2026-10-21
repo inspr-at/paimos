@@ -478,6 +478,7 @@ watch(() => props.selectable, () => {
 })
 watch(() => [props.loading, phone.value, props.projectId, [...props.rowsById.keys()].join(','), ids.value.join(','), props.outline], fitLoaded, { flush: 'post' })
 const dragWidths = ref<Partial<Record<string, number>>>({})
+let resizing: { id: string; startX: number; startWidth: number } | null = null
 // Every column but Title has a col width; Title takes the rest (about 960px at most
 // on wide tables, where the spare width widens the text columns instead). Dragging
 // Title's edge gives it a width of its own. The columns beside it move within their
@@ -489,6 +490,32 @@ const minTotal = computed(() => columns.value.reduce((sum, column) => sum + colu
 const layoutWidth = computed(() => layoutTableWidth(width.value, minTotal.value, phone.value))
 const widths = computed(() => layoutWidths(ids.value, layoutWidth.value, props.prefs, dragWidths.value, definitions.value, autoWidths.value))
 function colWidth(id: string) { return id === 'title' ? null : widths.value[id] ?? null }
+// A dragged or saved Title is its own column width. As the only unsized column,
+// a fixed table hands it whatever slack or deficit is left, so the header moves
+// against the pointer while the stored width is already the one a reload paints.
+const pinnedTitle = computed(() => {
+  const live = dragWidths.value.title
+  if (typeof live === 'number' && Number.isFinite(live)) return Math.round(live)
+  const saved = props.prefs?.widths?.title
+  return typeof saved === 'number' && Number.isFinite(saved) ? Math.round(saved) : null
+})
+const pinnedTableWidth = computed(() => {
+  const title = pinnedTitle.value
+  if (title === null || phone.value) return null
+  return title + Object.values(widths.value).reduce<number>((sum, w) => sum + (w ?? 0), 0)
+})
+const tableOverflows = computed(() => !phone.value && ((pinnedTableWidth.value ?? 0) > width.value + 1 || layoutWidth.value > width.value + 1))
+function columnStyle(id: string) {
+  if (phone.value && id === 'title') return undefined
+  const value = id === 'title' ? pinnedTitle.value : colWidth(id)
+  return value ? { width: `${value}px` } : undefined
+}
+const tableStyle = computed(() => {
+  if (phone.value) return undefined
+  const pinned = pinnedTableWidth.value
+  if (pinned !== null) return { width: `${pinned}px`, minWidth: `${pinned}px` }
+  return layoutWidth.value > width.value ? { minWidth: `${layoutWidth.value}px` } : undefined
+})
 function nativeRelease(row: ListItem) {
   return releaseCell(props.nativeReleases?.get(row.id))
 }
@@ -575,6 +602,7 @@ function settleCardWidth(viewportGrew = false) {
   const take = () => {
     requestAnimationFrame(() => {
       if (frame !== cardFrame || !columnsAlive) return
+      if (resizing) { finishCardSettle(frame); return }
       samples.push(readCardWidth())
       if (samples.length % 2 === 1) { take(); return }
       const live = readCardWidth()
@@ -600,6 +628,9 @@ function settleCardWidth(viewportGrew = false) {
   take()
 }
 function applyCardSize(entries: ResizeObserverEntry[]) {
+  // A column drag can report a narrower card. That width would stick (AEON-1401)
+  // and squeeze Title, which is the flexible remainder, by more than the drag.
+  if (resizing) return
   const live = readCardWidth()
   if (live === null) return
   let observed = live
@@ -672,7 +703,6 @@ onBeforeUnmount(() => {
   sizer?.disconnect()
 })
 // ---------- Column widths: drag a header edge; double-click fits, or resets Title ----------
-let resizing: { id: string; startX: number; startWidth: number } | null = null
 // Two presses within 350ms on the same edge fit the column (pointerdown's
 // preventDefault keeps the browser from reporting dblclick reliably). Title
 // returns to automatic instead of fitting its content.
@@ -700,6 +730,9 @@ function resizeEnd() {
   const id = resizing.id
   const start = resizing.startWidth
   resizing = null
+  // The drag is not a viewport shrink. A wider card read is the card.
+  const liveCard = readCardWidth()
+  if (liveCard !== null && liveCard > width.value + 0.5) width.value = liveCard
   const value = dragWidths.value[id]
   // A click on Title's edge, without a drag, leaves it automatic.
   if (value === undefined || (id === 'title' && Math.abs(value - start) < 1)) {
@@ -1042,10 +1075,10 @@ defineExpose({
 </script>
 
 <template>
-  <div ref="card" class="table-card" :data-columns-settled="columnsSettled ? '1' : '0'" :data-card-width-settled="cardWidthSettled ? '1' : '0'" :data-card-epoch="cardEpoch" :class="[density, { selectable, selecting, customised: customised && !phoneRows, 'phone-rows': phoneRows, overflowing: !phone && layoutWidth > width + 1 }]">
-    <table :style="!phone && layoutWidth > width ? { minWidth: `${layoutWidth}px` } : undefined" ref="grid" class="tickets" :class="{ outline: !!outline }" :role="outline ? 'treegrid' : 'grid'" :aria-label="label ?? (outline ? 'Ticket outline' : 'Tickets')" :aria-busy="loading" tabindex="0" :aria-activedescendant="cursorId ? `row-${cursorId}` : undefined" @focus="emit('gridFocus')">
+  <div ref="card" class="table-card" :data-columns-settled="columnsSettled ? '1' : '0'" :data-card-width-settled="cardWidthSettled ? '1' : '0'" :data-card-epoch="cardEpoch" :class="[density, { selectable, selecting, customised: customised && !phoneRows, 'phone-rows': phoneRows, overflowing: tableOverflows }]">
+    <table :style="tableStyle" ref="grid" class="tickets" :class="{ outline: !!outline }" :role="outline ? 'treegrid' : 'grid'" :aria-label="label ?? (outline ? 'Ticket outline' : 'Tickets')" :aria-busy="loading" tabindex="0" :aria-activedescendant="cursorId ? `row-${cursorId}` : undefined" @focus="emit('gridFocus')">
       <colgroup>
-        <col v-for="column in columns" :key="column.id" :class="column.cls" :style="colWidth(column.id) ? { width: `${colWidth(column.id)}px` } : undefined" />
+        <col v-for="column in columns" :key="column.id" :class="column.cls" :style="columnStyle(column.id)" />
       </colgroup>
       <thead>
         <tr>
