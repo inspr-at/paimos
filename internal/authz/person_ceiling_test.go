@@ -42,7 +42,7 @@ func TestPersonCeiling(t *testing.T) {
 	dbtest.BindRole(t, d, tid, wide, "member")
 	dbtest.BindRole(t, d, tid, legacy, "member")
 	dbtest.BindRole(t, d, tid, crossed, "member")
-	var projectM, projectL, knowledge, runPerson, runNull, runInactive, runAgent string
+	var projectM, projectL, knowledge, runPerson, runNull, runInactive, runAgent, runLimited string
 	err := db.InTenant(dbtest.Seed(ctx), d.App, tid, func(tx pgx.Tx) error {
 		node := func(slug, title, parent string) (string, error) {
 			var id string
@@ -96,6 +96,9 @@ func TestPersonCeiling(t *testing.T) {
 		if runAgent, err = run(legacy, orderM, wide); err != nil {
 			return err
 		}
+		if runLimited, err = run(legacy, orderM, limited); err != nil {
+			return err
+		}
 		session := func(project, agent, lease, runID string, nonce string) error {
 			sum := sha256.Sum256([]byte("aeon.harness.lease\x00" + lease))
 			ref := sha256.Sum256([]byte(lease + "\x00" + project + "\x00" + nonce))
@@ -115,7 +118,22 @@ func TestPersonCeiling(t *testing.T) {
 		if err = session(projectM, legacy, "lease-ambiguous", "", "c"); err != nil {
 			return err
 		}
-		return session(projectL, legacy, "lease-ambiguous", "", "d")
+		if err = session(projectL, legacy, "lease-ambiguous", "", "d"); err != nil {
+			return err
+		}
+		// The agent registers sessions itself, so an unbound or person-free
+		// sibling on the same lease must not shed the bound run's person.
+		for _, row := range []struct{ project, run, nonce string }{
+			{projectL, runPerson, "e"}, {projectM, "", "f"}, {projectL, runNull, "g"},
+		} {
+			if err = session(row.project, legacy, "lease-shared", row.run, row.nonce); err != nil {
+				return err
+			}
+		}
+		if err = session(projectL, legacy, "lease-split", runPerson, "h"); err != nil {
+			return err
+		}
+		return session(projectM, legacy, "lease-split", runLimited, "i")
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -348,6 +366,26 @@ func TestPersonCeiling(t *testing.T) {
 			}
 			if vis := setting(t, ctx, tx); vis != "*" {
 				t.Fatalf("ambiguous lease left %s", vis)
+			}
+		})
+		inCeiling(t, d, legacyP, func(tx pgx.Tx) {
+			got, err := db.WorkerRunPrincipalTx(ctx, tx, legacyP, "lease-shared")
+			if err != nil || got.KeyPersonID != person {
+				t.Fatalf("shared %+v %v", got, err)
+			}
+			vis := setting(t, ctx, tx)
+			if vis == "*" || !strings.Contains(vis, projectM) || strings.Contains(vis, projectL) || !nodeVisible(t, ctx, tx, projectM) || nodeVisible(t, ctx, tx, projectL) || nodeVisible(t, ctx, tx, knowledge) {
+				t.Fatalf("shared visibility %s", vis)
+			}
+		})
+		inCeiling(t, d, legacyP, func(tx pgx.Tx) {
+			if got, err := db.WorkerRunPrincipalTx(ctx, tx, legacyP, "lease-split"); err == nil || !strings.Contains(err.Error(), "ambiguous run person") {
+				t.Fatalf("split %+v %v", got, err)
+			}
+			conflict := legacyP
+			conflict.KeyPersonID = limited
+			if got, err := db.WorkerRunPrincipalTx(ctx, tx, conflict, "lease-shared"); err == nil || !strings.Contains(err.Error(), "conflicting run person") {
+				t.Fatalf("shared conflict %+v %v", got, err)
 			}
 		})
 	})

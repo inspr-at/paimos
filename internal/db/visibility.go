@@ -145,6 +145,12 @@ func RunPrincipalTx(ctx context.Context, tx pgx.Tx, p tenant.Principal, runID st
 	if err != nil {
 		return p, err
 	}
+	return applyRunPerson(p, person)
+}
+
+// applyRunPerson narrows p to its run's acting person. A key bound to another
+// person fails instead of trading its ceiling for the run's.
+func applyRunPerson(p tenant.Principal, person *string) (tenant.Principal, error) {
 	if person != nil {
 		if p.KeyPersonID != "" && p.KeyPersonID != *person {
 			return p, errors.New("conflicting run person")
@@ -155,8 +161,10 @@ func RunPrincipalTx(ctx context.Context, tx pgx.Tx, p tenant.Principal, runID st
 }
 
 // WorkerRunPrincipalTx resolves the existing harness worker lease to its run.
-// Unknown or shared leases retain the legacy principal; endpoint-specific
-// proof checks still reject them. Only one live session supplies a person.
+// Several live sessions can share one lease, so the person comes from every
+// one of them: none keeps the legacy principal (unknown leases, unbound scouts),
+// one narrows through the run conflict check, and two different persons fail
+// the request. Endpoint-specific proof checks still reject unproven leases.
 //
 // Project row security would hide a session outside the key's current ceiling,
 // and a miss must not keep that wider ceiling. The lookup widens visibility
@@ -171,30 +179,32 @@ func WorkerRunPrincipalTx(ctx context.Context, tx pgx.Tx, p tenant.Principal, le
 		return p, err
 	}
 	sum := sha256.Sum256([]byte("aeon.harness.lease\x00" + lease))
-	rows, err := tx.Query(ctx, `SELECT run_id::text FROM harness_sessions WHERE tenant_id=$1::uuid AND agent_principal_id=$2::uuid AND lease_digest=$3 AND archived_at IS NULL LIMIT 2`, p.TenantID, p.ID, sum[:])
+	// An unbound session sharing the lease must not hide its sibling's person:
+	// the agent registers sessions itself and could add one to shed the ceiling.
+	rows, err := tx.Query(ctx, `SELECT DISTINCT r.acting_person_id::text FROM harness_sessions s JOIN agent_runs r ON r.tenant_id=s.tenant_id AND r.id=s.run_id AND r.agent_principal_id=s.agent_principal_id WHERE s.tenant_id=$1::uuid AND s.agent_principal_id=$2::uuid AND s.lease_digest=$3 AND s.archived_at IS NULL AND r.acting_person_id IS NOT NULL LIMIT 2`, p.TenantID, p.ID, sum[:])
 	if err != nil {
 		return p, err
 	}
-	var runs []*string
+	var persons []string
 	for rows.Next() {
-		var run *string
-		if err := rows.Scan(&run); err != nil {
+		var person string
+		if err := rows.Scan(&person); err != nil {
 			rows.Close()
 			return p, err
 		}
-		runs = append(runs, run)
+		persons = append(persons, person)
 	}
 	err = rows.Err()
 	rows.Close()
 	if err != nil {
 		return p, err
 	}
-	// Several live sessions can share one lease. The endpoint still proves the
-	// lease against its own session. This lookup must not guess a person, and
-	// it must not fail the request: an unresolved lease stays the legacy key.
+	if len(persons) > 1 {
+		return p, errors.New("ambiguous run person")
+	}
 	next := p
-	if len(runs) == 1 && runs[0] != nil {
-		next, err = RunPrincipalTx(ctx, tx, p, *runs[0])
+	if len(persons) == 1 {
+		next, err = applyRunPerson(p, &persons[0])
 		if err != nil {
 			return p, err
 		}
