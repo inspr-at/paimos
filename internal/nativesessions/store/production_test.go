@@ -185,7 +185,7 @@ func TestProductionCompositionStartsDeliversAndConfirmsExit(t *testing.T) {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = supervisor.Close(context.Background()) })
-	if err = supervisor.EnableLedger(t.Context(), agentd.LedgerConfig{Root: root, Path: filepath.Join(root, "ledger"), Label: "composition", Origin: "https://native.test"}); err != nil {
+	if err = supervisor.EnableLedger(t.Context(), agentd.LedgerConfig{Root: root, Path: filepath.Join(root, "ledger"), Label: "cm.aeon.agentd.composition", Origin: "https://native.test"}); err != nil {
 		t.Fatal(err)
 	}
 	f.daemon.DaemonGeneration = supervisor.Generation()

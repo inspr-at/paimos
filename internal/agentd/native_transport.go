@@ -149,6 +149,27 @@ func (t *nativeC0Transport) beforeInput(ctx context.Context, id, digest string) 
 	if active.OperationID == "" {
 		return nativeRefusal(nativecontract.ReasonGrantMissing)
 	}
+	if active.Command == nil {
+		return nativeRefusal(nativecontract.ReasonGrantMissing)
+	}
+	switch active.Command.Kind {
+	case "input":
+		var in nativecontract.Input
+		if json.Unmarshal(active.Command.Params, &in) != nil || id != in.InputID || digest != nativeDigest(in.Text) {
+			return nativeRefusal(nativecontract.ReasonIdentityMismatch)
+		}
+	case "interrupt":
+		var in nativecontract.Interrupt
+		if json.Unmarshal(active.Command.Params, &in) != nil || id != in.RequestID || digest != nativeDigest("interrupt") {
+			return nativeRefusal(nativecontract.ReasonIdentityMismatch)
+		}
+	case "stop":
+		if id != "native-stop" || digest != nativeDigest("stop") {
+			return nativeRefusal(nativecontract.ReasonIdentityMismatch)
+		}
+	default:
+		return ErrUnsupported
+	}
 	r, err := t.owner.journal.Get(t.spec.Binding, active.OperationID)
 	if err != nil || r.State != "write_started" {
 		return nativeRefusal(nativecontract.ReasonInputOutcomeUnconfirmed)

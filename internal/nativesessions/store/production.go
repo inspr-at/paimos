@@ -233,39 +233,5 @@ func productionProject(ctx context.Context) context.Context {
 	return ctx
 }
 
-func (s *Store) PublishRequest(ctx context.Context, d nativecontract.DaemonActor, in nativecontract.Publish) (nativecontract.OperationResult, error) {
-	var out nativecontract.OperationResult
-	if s.production == nil {
-		return out, fail(503, nativecontract.ReasonQualificationMissing)
-	}
-	if len(in.Events) > 64 {
-		return out, fail(413, nativecontract.ReasonBufferFull)
-	}
-	if err := s.validate("NativePublish", in); err != nil {
-		return out, err
-	}
-	err := s.production.relay.Publish(ctx, in, func(ctx context.Context, send func(nativecontract.ValidationContext) error) error {
-		return s.runtimeTx(ctx, d, in.ExpectedBinding, false, func(ctx context.Context, tx pgx.Tx, session consent.Session, proof receipts.RuntimeProof) error {
-			if proof.Identity.RuntimeEpoch != in.ExpectedBinding.RuntimeEpoch || !nativereceipts.ValidDigest(proof.Identity.ProcessIdentityDigest) {
-				return fail(403, nativecontract.ReasonOwnershipUnconfirmed)
-			}
-			s.mu.Lock()
-			digest := s.runtimes[in.ExpectedBinding.OwnedSessionID]
-			s.mu.Unlock()
-			if digest != proof.Identity.ProcessIdentityDigest {
-				return fail(409, nativecontract.ReasonOwnershipUnconfirmed)
-			}
-			if in.Snapshot != nil {
-				return fail(403, nativecontract.ReasonPermissionRevoked)
-			}
-			if err := s.production.relay.Register(session.View); err != nil {
-				return err
-			}
-			return send(nativecontract.ValidationContext{Private: true, PrincipalKind: "agent", Binding: &in.ExpectedBinding, Generation: session.View.Generation, View: "structured"})
-		})
-	})
-	return out, err
-}
-
 var _ nativecontract.Store = (*Store)(nil)
 var _ nativecontract.FinalSink = (*Store)(nil)

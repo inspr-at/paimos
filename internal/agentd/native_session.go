@@ -603,13 +603,14 @@ type NativeHost struct {
 	entries  map[string]*nativeOwned
 }
 type nativeOwned struct {
-	released     chan struct{}
-	releaseOnce  sync.Once
-	ownership    *ownedprocess.Identity
-	cancel       context.CancelFunc
-	observations map[string]nativecontract.NativeEvidence
-	exit         *nativecontract.ExitEvidence
-	drains       map[string]nativecontract.FinalDrainGrant
+	claimDeadline time.Time
+	released      chan struct{}
+	releaseOnce   sync.Once
+	ownership     *ownedprocess.Identity
+	cancel        context.CancelFunc
+	observations  map[string]nativecontract.NativeEvidence
+	exit          *nativecontract.ExitEvidence
+	drains        map[string]nativecontract.FinalDrainGrant
 
 	host              *NativeHost
 	local             nativecontract.LocalStart
@@ -687,10 +688,17 @@ func (h *NativeHost) Start(ctx context.Context, local nativecontract.LocalStart)
 	if count >= 32 {
 		return out, nativeRefusal(nativecontract.ReasonHostFull)
 	}
+	enrolled := false
 	for _, a := range s.accounts {
+		if a.ID == local.Intent.AccountID {
+			enrolled = true
+		}
 		if a.ID == local.Intent.AccountID && (a.Harness != Claude || a.Key != local.AccountKey) {
 			return out, nativeRefusal(nativecontract.ReasonIdentityMismatch)
 		}
+	}
+	if !enrolled {
+		return out, nativeRefusal(nativecontract.ReasonQualificationMissing)
 	}
 	record := "lead-runtime-" + local.Intent.RequestID + ".json"
 	if _, err = s.state.Read(record, 16384); err == nil {
@@ -725,6 +733,7 @@ func (h *NativeHost) Start(ctx context.Context, local nativecontract.LocalStart)
 		return out, errors.Join(err, s.ledger.Release(s.ledgerBinding.Member.ID, s.ledgerBinding.Generation, group))
 	}
 	g := e.grant
+	e.claimDeadline = now.Add(time.Duration(g.AuthorizationTTLMS) * time.Millisecond)
 	if !g.LaunchAuthorized || g.ExpectedBinding == nil || g.CommandActor == nil || !reflect.DeepEqual(g.Intent, local.Intent) || g.ExpectedBinding.DaemonID != s.daemonID || g.ExpectedBinding.DaemonGeneration != s.generation || g.CommandActor.TenantID != s.tenantID {
 		return out, nativeRefusal(nativecontract.ReasonIdentityMismatch)
 	}
@@ -913,8 +922,17 @@ func (e *nativeOwned) require(ctx context.Context) error {
 	t, active := e.transport, e.active
 	e.mu.Unlock()
 	if t == nil {
-		var out nativecontract.ClaimResult
-		return e.call(ctx, "POST", "/api/agentd/native-sessions/claim", e.claim, &out)
+		if !e.host.s.capacityNow().Before(e.claimDeadline) {
+			return nativeRefusal(nativecontract.ReasonGrantExpired)
+		}
+		var current nativecontract.ClaimResult
+		if err := e.call(ctx, "POST", "/api/agentd/native-sessions/claim", e.claim, &current); err != nil {
+			return err
+		}
+		if !current.LaunchAuthorized || current.ExpectedBinding == nil || !current.ExpectedBinding.Equal(*e.grant.ExpectedBinding) || !reflect.DeepEqual(current.LaunchConfig, e.grant.LaunchConfig) || current.Policy.GrantID != e.grant.Policy.GrantID || current.AuthorizationTTLMS <= 0 {
+			return nativeRefusal(nativecontract.ReasonIdentityMismatch)
+		}
+		return nil
 	}
 	profile, err := e.host.profiles.Resolve(ctx, nativecontract.ProfileRequest{TenantID: e.host.s.tenantID, OwnerPersonID: e.grant.CommandActor.OwnerPersonID, AccountID: e.local.Intent.AccountID, AccountKey: e.local.AccountKey, WorkspaceID: e.local.Intent.WorkspaceID, Harness: Claude, Policy: e.grant.Policy, BindingRevision: e.grant.ExpectedBinding.BindingRevision})
 	if err != nil {
