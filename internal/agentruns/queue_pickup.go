@@ -5,7 +5,6 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	"fmt"
 	"net/http"
 	"strconv"
 	"time"
@@ -601,7 +600,6 @@ func RouteRoutineQueueTx(ctx context.Context, tx pgx.Tx, p tenant.Principal, run
 		return out, workorders.Fail(409, "routing_scan_partial")
 	}
 	out.WaitReason = "no_qualified_route"
-	var routeNotes []string
 	for _, candidate := range candidates {
 		// An unattended wait cannot occupy a slot or advance a turn.
 		host, err := agentpairing.UnattendedForPrincipal(ctx, tx, candidate.Agent)
@@ -610,7 +608,6 @@ func RouteRoutineQueueTx(ctx context.Context, tx pgx.Tx, p tenant.Principal, run
 		}
 		if host.Status != "ready" {
 			out.WaitReason = host.Reason
-			routeNotes = append(routeNotes, host.Status+":"+host.Reason)
 			continue
 		}
 		picked, err := queueTryRouteWith(ctx, tx, p, t, v, candidate, placement, lead, finish, opts.Probe)
@@ -630,33 +627,6 @@ func RouteRoutineQueueTx(ctx context.Context, tx pgx.Tx, p tenant.Principal, run
 			out.WaitReason = ""
 			return out, nil
 		}
-		routeNotes = append(routeNotes, "unpicked")
-	}
-	if out.WaitReason == "no_qualified_route" {
-		var vis, principals, system, capable, tenantID string
-		_ = tx.QueryRow(ctx, `SELECT current_setting('aeon.visible_projects',true), current_setting('aeon.principal_ids',true), current_setting('aeon.system',true), current_setting('aeon.account_use_capable',true), current_setting('aeon.tenant_id',true)`).Scan(&vis, &principals, &system, &capable, &tenantID)
-		health, herr := agentaccounts.HarnessHealthAt(ctx, tx, time.Now().UTC(), *t.ProjectID)
-		var acctID, ownerID, profileID string
-		_ = tx.QueryRow(ctx, `SELECT id::text, coalesce(owner_person_id::text,'') FROM agent_accounts WHERE harness='codex' ORDER BY id LIMIT 1`).Scan(&acctID, &ownerID)
-		_ = tx.QueryRow(ctx, `SELECT id::text FROM model_profiles WHERE harness='codex' AND model='fixture-model' ORDER BY id LIMIT 1`).Scan(&profileID)
-		ids, qerr := agentaccounts.QualifyingAccountIDs(ctx, tx, profileID, "codex", *t.ProjectID, "any", time.Now().UTC())
-		dailyMsg := "skipped"
-		if ownerID != "" {
-			sp, sperr := tx.Begin(ctx)
-			if sperr != nil {
-				dailyMsg = "begin " + sperr.Error()
-			} else {
-				snap, rerr := agentaccounts.ReadDailyPolicyTx(ctx, sp, tenantID, ownerID, time.Now().UTC())
-				_ = sp.Rollback(ctx)
-				if rerr != nil {
-					dailyMsg = "read " + rerr.Error()
-				} else {
-					dailyMsg = fmt.Sprintf("state=%+v", snap.DailyState["codex"])
-				}
-			}
-		}
-		reader, hasReader := tenant.PrincipalFrom(ctx)
-		return out, fmt.Errorf("debug no_qualified_route candidates=%d vis=%q principals=%q system=%q capable=%q health=%+v herr=%v notes=%v ids=%v qerr=%v acct=%s owner=%s profile=%s daily=%s reader=%t:%+v placement=%s", len(candidates), vis, principals, system, capable, health, herr, routeNotes, ids, qerr, acctID, ownerID, profileID, dailyMsg, hasReader, reader, string(placement))
 	}
 	return out, nil
 }
