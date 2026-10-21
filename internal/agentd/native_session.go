@@ -69,7 +69,8 @@ type NativeLeadPlan struct {
 	AccountKey, Workspace, Host string
 }
 
-// All callbacks are mandatory; nil is the released, disabled configuration.
+// Nil keeps the released default disabled. The legacy callbacks below are
+// mandatory for the P1a path; NativeProduction binds C0 independently.
 // This is the P1b/I1 integration port, not a person-consent or admission bypass.
 // Authorize reserves the server root before return. Revalidate fences current
 // rights immediately before fork/input. ReportExit settles only observed exits.
@@ -647,6 +648,9 @@ func nativeRefusal(reason nativecontract.Reason) error {
 }
 
 func (h *NativeHost) Start(ctx context.Context, local nativecontract.LocalStart) (nativecontract.OperationResult, error) {
+	// Startup only. Cancelling this context does not close the accepted lifetime.
+	ctx, cancel := context.WithTimeout(ctx, nativecontract.LocalOperationSeconds*time.Second)
+	defer cancel()
 	var out nativecontract.OperationResult
 	if h.s == nil || h.remote == nil || h.profiles == nil || !uuidPattern.MatchString(h.owner) || h.s.ledger == nil || h.caps.QualificationDigest == "" {
 		return out, nativeRefusal(nativecontract.ReasonQualificationMissing)
@@ -1070,6 +1074,8 @@ func (e *nativeOwned) release(ctx context.Context, b nativecontract.Binding, x n
 	return nil
 }
 func (h *NativeHost) Poll(ctx context.Context) error {
+	ctx, cancel := context.WithTimeout(ctx, nativecontract.LocalOperationSeconds*time.Second)
+	defer cancel()
 	h.mu.Lock()
 	entries := make([]*nativeOwned, 0, len(h.entries))
 	for _, e := range h.entries {
