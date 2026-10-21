@@ -21,6 +21,9 @@
 // state): Rename in place (F2), Link work… (L), Delete goal (Del) with Undo and no
 // confirm. People who may not edit a goal see only the "for me" group, and its
 // keys do nothing for them. On phones the ⋯ opens as the shared bottom sheet.
+// AEON-1614: a goal's ⋯ offers Hide for me (or Unhide), with an Undo toast; hidden goals,
+// when shown, are muted rows. Waiting on you follows Display › Show, decided with the
+// person's preferences before the grid paints. Empty states point to Display.
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useRoute } from 'vue-router'
 import { useIdentityScope } from '../../lib/useIdentityScope'
@@ -39,14 +42,14 @@ import { onAction } from '../../lib/shortcuts'
 import { toast } from '../../lib/toast'
 import { plural } from '../../lib/work'
 import { undoEvent } from '../../lib/api'
-import { deleteGoal, linkGoalWork, STATE_FILTERS, unlinkGoalWork, updateGoal, type Goal, type GoalOutcome, type GoalSort } from '../../lib/goals'
+import { deleteGoal, hideCopy, linkGoalWork, STATE_FILTERS, unlinkGoalWork, updateGoal, type Goal, type GoalOutcome, type GoalSort } from '../../lib/goals'
 import type { LiveAgent } from '../../lib/liveAgents'
 import type { RowAction } from '../../lib/rowActions'
 import type { RelatedTicket } from '../../lib/useTicket'
 import { useProjects } from '../../stores/projects'
 
 const props = defineProps<{ page: GoalsPage; term: string; now: number; hiddenGroups: boolean }>()
-const emit = defineEmits<{ clear: [] }>()
+const emit = defineEmits<{ clear: []; display: [] }>()
 const session = useSession()
 const scope = useIdentityScope()
 const live = useLiveAgents()
@@ -58,6 +61,10 @@ const person = computed(() => session.identity?.principal.kind === 'person')
 const epics = computed(() => props.page.group?.value === 'epics')
 // A partial page (older callers, server-render fixtures) has no replacing flag.
 const replacing = computed(() => props.page.replacing?.value === true)
+// The grid paints once the person's Goals preferences are known, so Waiting on you is
+// there from the first frame or not at all (older callers without the flag paint at once).
+const framed = computed(() => props.page.prefsSettled?.value !== false)
+const showWaiting = computed(() => props.page.showWaiting?.value !== false)
 const noun = computed(() => epics.value ? 'epic' : 'goal')
 const goals = computed(() => props.page.goals.value)
 const loaded = computed(() => props.page.loaded.value)
@@ -120,7 +127,12 @@ const menuItems = computed<RowAction[]>(() => {
   const copy: RowAction = { id: 'copy', label: 'Copy link', icon: 'link', group: 3 }
   // Epics have no recorded progress over time to chart.
   if (goal.kind === 'epic') return [fold, copy]
-  const forMe = [fold, { id: 'chart', label: props.page.charts.has(goal.id) ? 'Hide progress over time' : 'Show progress over time', icon: 'trending-up', group: 3, reason: goal.expansion !== 'full' ? 'This goal is too large to chart.' : undefined }, copy] satisfies RowAction[]
+  const chart: RowAction = { id: 'chart', label: props.page.charts.has(goal.id) ? 'Hide progress over time' : 'Show progress over time', icon: 'trending-up', group: 3, reason: goal.expansion !== 'full' ? 'This goal is too large to chart.' : undefined }
+  // Hide for me: only people, only goals and releases (AEON-1614); it joins the "for me" group.
+  const hide: RowAction[] = !props.page.canHide?.value ? [] : [goal.hidden
+    ? { id: 'unhide', label: hideCopy.unhide, icon: 'eye', group: 3, busy: props.page.hiding.has(goal.id) }
+    : { id: 'hide', label: hideCopy.hide, icon: 'eye-off', group: 3, busy: props.page.hiding.has(goal.id) }]
+  const forMe = [fold, chart, copy, ...hide] satisfies RowAction[]
   if (!canEdit(goal)) return forMe
   return [
     { id: 'rename', label: 'Rename', icon: 'edit', group: 1, keys: 'F2' }, { id: 'edit', label: 'Edit goal', icon: 'sliders', group: 1 },
@@ -141,6 +153,8 @@ async function menuAction(action: string) {
   else if (action === 'link') openPicker(goal, at.anchor)
   else if (action === 'edit') props.page.openSheet(goal)
   else if (action === 'delete') void remove(goal)
+  else if (action === 'hide') void props.page.hide(goal)
+  else if (action === 'unhide') void props.page.unhide(goal)
   else if (action === 'fold') props.page.toggle(goal.id)
   else if (action === 'chart') props.page.toggleChart(goal.id)
   else if (action === 'copy') {
@@ -309,14 +323,21 @@ onBeforeUnmount(() => { window.removeEventListener('keydown', searchKey, true); 
 const quiet = computed(() => props.page.list.value?.quiet_projects ?? { count: 0, keys: [] })
 const more = computed(() => props.page.list.value?.next_cursor)
 const everyDone = computed(() => props.page.hideDone.value && props.page.counts.value.all > 0)
+// Everything left is a goal the person hid for themselves (AEON-1614).
+const allHidden = computed(() => !epics.value && !(props.page.showHidden?.value ?? true) && (props.page.hiddenCount?.value ?? 0) > 0)
 const emptyTitle = computed(() => props.term.trim() ? `No ${noun.value} matches “${props.term.trim()}”` : props.hiddenGroups ? `All ${noun.value}s are in hidden groups` : filtering.value ? 'Nothing here'
-  : everyDone.value && !props.page.totalsPartial.value ? `Every ${noun.value} is done` : epics.value ? 'No open epics in these projects.' : 'No goals yet')
+  : allHidden.value ? hideCopy.allHidden
+    : everyDone.value && !props.page.totalsPartial.value ? `Every ${noun.value} is done` : epics.value ? 'No open epics in these projects.' : 'No goals yet')
 // E4 (Tick's spec): no open epics says only that, without examples.
 const emptyText = computed(() => props.term.trim() ? 'Check the spelling, or search by project or ticket key.'
   : props.hiddenGroups ? 'Show a group from the chips above.'
     : filtering.value ? `No ${noun.value} has items in this state. Try another state.`
-      : everyDone.value ? `Done ${noun.value}s are hidden. Show them with Hide done (H).`
+      : allHidden.value || everyDone.value ? ''
         : epics.value ? '' : 'Goals appear here once agents or people set them up for a project or the workspace.')
+// The Show sentences end in a link that opens Display (Tick spec §4).
+const displayHint = computed(() => props.term.trim() || props.hiddenGroups || filtering.value ? null
+  : allHidden.value ? { lead: hideCopy.allHiddenHow, tail: '.' }
+    : everyDone.value ? { lead: `${epics.value ? 'Done epics are hidden.' : hideCopy.doneHidden} ${hideCopy.doneHiddenHow}`, tail: ' (H).' } : null)
 const canClear = computed(() => filtering.value)
 </script>
 
@@ -332,8 +353,9 @@ const canClear = computed(() => filtering.value)
       <p v-if="loaded && page.totalsPartial.value" class="partial-line" role="status">Counts omit oversized {{ noun }}s.</p>
       <div ref="grid" class="goal-grid" :data-items="wideItems ? 'wide' : 'stacked'">
         <GoalStatusNote v-if="loaded && page.statusNote.value" :note="page.statusNote.value" :now="now" />
-        <GoalWaiting v-if="person" :goals="goals" />
-        <template v-if="!loaded">
+        <GoalWaiting v-if="person && framed && showWaiting" :goals="goals" />
+        <template v-if="!loaded && !framed" />
+        <template v-else-if="!loaded">
           <ul class="sk-list" role="status" :aria-label="`Loading ${noun}s`">
             <li v-for="n in 6" :key="n" class="sk-row"><span class="skeleton" /><span class="ln"><span class="skeleton" /><span class="skeleton" /></span><span class="skeleton" /><span class="skeleton" /></li>
           </ul>
@@ -377,6 +399,7 @@ const canClear = computed(() => filtering.value)
         <AppIcon :name="hiddenGroups ? 'folder' : epics ? 'epic' : 'target'" :size="20" />
         <h2>{{ emptyTitle }}</h2>
         <p v-if="emptyText">{{ emptyText }}</p>
+        <p v-if="displayHint" class="display-hint">{{ displayHint.lead }} <button type="button" class="link-btn" aria-haspopup="dialog" @click="emit('display')">{{ hideCopy.display }}</button>{{ displayHint.tail }}</p>
         <button v-if="canClear" class="btn" type="button" @click="emit('clear')">Clear filter</button>
       </div>
       <p v-if="loaded && more" class="more-line">
@@ -441,6 +464,9 @@ const canClear = computed(() => filtering.value)
 .state h2 { color: var(--ink); font-size: 17px; }
 .state p { font-size: 13.5px; }
 .state .btn { margin-top: 10px; }
+.link-btn { display: inline; padding: 0; border: 0; background: transparent; color: var(--teal-ink); font: inherit; font-weight: 600; text-decoration: underline; text-underline-offset: 3px; cursor: pointer; }
+.link-btn:focus-visible { outline: none; border-radius: 3px; box-shadow: var(--focus-ring); }
+@media (max-width: 760px), (pointer: coarse) { .link-btn { display: inline-flex; align-items: center; min-height: 44px; } }
 .sk-list { display: grid; grid-column: 1 / -1; margin: 0; padding: 8px 0 20px; list-style: none; }
 .sk-row { display: grid; grid-template-columns: 62px minmax(0, 1fr) 190px 110px; align-items: center; gap: 18px; min-height: 60px; }
 .sk-row .skeleton:first-child { height: 20px; border-radius: 6px; }

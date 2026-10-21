@@ -46,6 +46,9 @@ type Module struct {
 	// only when it has handled the request. Ordinary sessions/keys keep their
 	// existing path; no protected route becomes public.
 	Delegated func(http.ResponseWriter, *http.Request, http.Handler) bool
+	// deskPeekOrigins are the sibling origins whose owner-summary reads may
+	// carry the peek cookie (AEON-1495, desk_peek.go).
+	deskPeekOrigins []string
 
 	mu        sync.Mutex
 	provider  *oidc.Provider
@@ -159,7 +162,7 @@ func (m *Module) authenticateAndAuthorize(next http.Handler) http.Handler {
 		case credStale:
 			// Public responses can be cached. A Set-Cookie there would store
 			// the session clear next to the page. Auth handlers clear their own.
-			if !publicRequest(r) {
+			if !publicRequest(r) && !m.deskPeekOnly(r) {
 				m.clearSessionCookie(w)
 			}
 		case credSession:
@@ -173,7 +176,7 @@ func (m *Module) authenticateAndAuthorize(next http.Handler) http.Handler {
 			r = r.WithContext(tenant.WithPrincipal(r.Context(), p))
 		case credAgent:
 			httpapi.MarkAuthentication(r)
-			if lease := workerlease.Read(r); lease != "" {
+			if lease := workerlease.Read(r); lease != "" && !workerlease.SafetyRoute(r) {
 				ctx := tenant.WithPrincipal(r.Context(), p)
 				err := db.InTenant(ctx, m.pool, p.TenantID, func(tx pgx.Tx) error {
 					var err error
@@ -266,6 +269,12 @@ func (m *Module) authenticateAndAuthorize(next http.Handler) http.Handler {
 			ctx := authz.BindPool(r.Context(), m.pool)
 			scope := projectScope(r)
 			permissionErr := authz.RequirePattern(ctx, r.Pattern, scope)
+			if kind == credAgent && workerlease.SafetyRoute(r) && workerlease.Read(r) != "" && hasScope(p.Scopes, "harness.worker") && errors.Is(permissionErr, authz.ErrForbidden) {
+				// Only these exact control handlers may recover metadata safety
+				// authority. They recheck the current key and exact target lease
+				// inside the final transaction; no content permission is granted.
+				permissionErr = nil
+			}
 			// The workspace binding decides first; it is the whole answer for
 			// every workspace member. A caller without it may still act through
 			// a project binding, in the project the route targets (ADR-003 P2).
@@ -944,6 +953,10 @@ func (m *Module) authenticate(r *http.Request) (tenant.Principal, credKind, erro
 		return p, credAgent, nil
 	}
 	c, err := r.Cookie(sessionCookieName)
+	if err != nil && m.deskPeekRequest(r) {
+		// A sibling's cross-site summary read carries only the peek copy.
+		c, err = r.Cookie(deskPeekCookieName)
+	}
 	if err != nil {
 		return tenant.Principal{}, credNone, nil
 	}

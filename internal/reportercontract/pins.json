@@ -700,7 +700,7 @@
   },
   "goals": {
     "version": "goals/1.7",
-    "sha256": "46cc9c12d7dabe83e3983770f6cab4b4c1d681f9ae80595ae76433b84de49904",
+    "sha256": "f02dbdd72228005fb513fe4ef9df720a63386117f925d48973c97e1101ce9142",
     "shape": {
       "DELETE /goals/{goalId} 200": {
         "additionalProperties": false,
@@ -831,6 +831,10 @@
             "minimum": 1,
             "type": "integer"
           },
+          "hidden_count": {
+            "minimum": 0,
+            "type": "integer"
+          },
           "items": {
             "items": {
               "properties": {
@@ -929,6 +933,9 @@
                     "by"
                   ],
                   "type": "object"
+                },
+                "hidden": {
+                  "type": "boolean"
                 },
                 "id": {
                   "format": "uuid",
@@ -1621,6 +1628,9 @@
               "by"
             ],
             "type": "object"
+          },
+          "hidden": {
+            "type": "boolean"
           },
           "id": {
             "format": "uuid",

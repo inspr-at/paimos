@@ -55,6 +55,28 @@ paths:
         '403': {$ref: '#/components/responses/Error'}
         '422': {description: Decision Desk coverage exceeds 1000 projects, content: {application/json: {schema: {$ref: '#/components/schemas/Error'}}}}
         '500': {$ref: '#/components/responses/Error'}
+  /decision-desk/instances:
+    get:
+      operationId: decisionDeskInstances
+      security: [{session: []}]
+      description: "AEON-1495. Signed-in browser person only (no agent keys). Names this instance's tag and, for the workspace owner only, the deployment-configured sibling instances whose Desk the owner's browser may read with the owner's own session there. For the owner it also refreshes the owner's summary cookie, a copy of the current session scoped to /api/decision-desk/owner-summary (SameSite=None, HttpOnly, Secure); for anyone else it clears that cookie. Nothing is stored about a sibling."
+      responses:
+        '200': {description: "This instance and the owner's siblings", content: {application/json: {schema: {$ref: '#/components/schemas/DecisionDeskInstances'}}}}
+        '401': {$ref: '#/components/responses/Error'}
+        '403': {$ref: '#/components/responses/Error'}
+        '500': {$ref: '#/components/responses/Error'}
+  /decision-desk/owner-summary:
+    get:
+      operationId: decisionDeskOwnerSummary
+      security: [{session: []}]
+      description: "AEON-1495. The workspace owner's own first Desk lines, read from a sibling instance's page in the owner's browser. Workspace owner only, browser session only, GET only; agent keys are refused. A sibling's cross-site read authenticates with the owner's summary cookie only for this route and only from a configured sibling origin, which alone receives Access-Control-Allow-Origin with credentials. At most five lines in Desk order (held first), first lines only (project key, title, asker name, held, app link); no context, findings, options or answers. Plus open and held counts and the first upcoming person step. 404 when this instance has no siblings."
+      responses:
+        '200': {description: "The owner's summary", content: {application/json: {schema: {$ref: '#/components/schemas/DecisionDeskOwnerSummary'}}}}
+        '401': {$ref: '#/components/responses/Error'}
+        '403': {$ref: '#/components/responses/Error'}
+        '404': {$ref: '#/components/responses/Error'}
+        '422': {description: "Decision Desk coverage exceeds its bounds", content: {application/json: {schema: {$ref: '#/components/schemas/Error'}}}}
+        '500': {$ref: '#/components/responses/Error'}
 components:
   schemas:
     DecisionDeskItem:
@@ -74,6 +96,7 @@ components:
         href: {type: string, description: App review link to the exact source}
         source: {type: string, description: Authorized app route or API link to the exact source}
         person_step: {$ref: '#/components/schemas/PersonStep'}
+        asked_by: {$ref: '#/components/schemas/DecisionDeskAsker'}
         definition_change:
           type: object
           required: [project_key, pending_count]
@@ -95,4 +118,58 @@ components:
             lessons: {type: object, maxProperties: 1000, additionalProperties: {type: integer, minimum: 0}, description: "Prepared lesson totals keyed by authorized project UUID, independent of the loaded projection page."}
         has_more: {type: boolean}
         next_cursor: {type: string}
+        as_of: {type: string, format: date-time}
+        upcoming: {type: array, maxItems: 5, description: "AEON-1495. Person steps the reader owns that are not due yet (human checks on work before Done), newest first; omitted when there are none.", items: {$ref: '#/components/schemas/DecisionDeskUpcomingStep'}}
+    DecisionDeskAsker:
+      type: object
+      description: "AEON-1495. The source principal: a question's first asker or an approval's asking agent."
+      required: [id, name]
+      properties:
+        id: {type: string, format: uuid}
+        name: {type: string}
+    DecisionDeskUpcomingStep:
+      type: object
+      required: [node_id, check_id, project_id, ticket_key, label]
+      properties:
+        node_id: {type: string, format: uuid}
+        check_id: {type: string, description: "human for the human check."}
+        project_id: {type: string, format: uuid}
+        ticket_key: {type: string}
+        label: {type: string, maxLength: 200}
+    DecisionDeskSibling:
+      type: object
+      required: [tag, origin]
+      properties:
+        tag: {type: string, pattern: '^[a-z][a-z0-9-]{0,15}$'}
+        origin: {type: string, description: "Exact scheme://host[:port] origin of the sibling instance."}
+    DecisionDeskInstances:
+      type: object
+      required: [here, siblings]
+      properties:
+        here: {type: string, description: "This instance's tag; empty when none is configured."}
+        siblings: {type: array, maxItems: 4, items: {$ref: '#/components/schemas/DecisionDeskSibling'}, description: "Empty unless the reader is the workspace owner."}
+    DecisionDeskOwnerSummaryItem:
+      type: object
+      required: [id, kind, title, held, href]
+      properties:
+        id: {type: string, format: uuid}
+        kind: {type: string}
+        project_key: {type: string}
+        title: {type: string, maxLength: 200}
+        asked_by: {type: string}
+        held: {type: boolean}
+        href: {type: string, description: "App path on the answering instance, starting with a single slash."}
+    DecisionDeskOwnerSummary:
+      type: object
+      required: [instance, items, counts, as_of]
+      properties:
+        instance: {type: string}
+        items: {type: array, maxItems: 5, items: {$ref: '#/components/schemas/DecisionDeskOwnerSummaryItem'}}
+        counts:
+          type: object
+          required: [open, held]
+          properties:
+            open: {type: integer, minimum: 0}
+            held: {type: integer, minimum: 0}
+        upcoming: {$ref: '#/components/schemas/DecisionDeskUpcomingStep'}
         as_of: {type: string, format: date-time}

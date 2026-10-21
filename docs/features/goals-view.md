@@ -35,8 +35,10 @@ default, and `?view=goals` once.
   read the whole workspace see it. Phones keep the byline for the expanded note.
 - **Waiting on you** lists the person's live Decision Desk items from the same
   projection as the header badge: the count, at most three first lines
-  (project key · question · goal, or the project when the question is not attached
-  to a goal) and Open Desk. Nothing waiting is one quiet line.
+  (key · question · asked by · Open) and Open Desk. Nothing waiting is one quiet line.
+  Coming names the person's next upcoming step. For the workspace owner the band also
+  shows the questions waiting on sibling instances (AEON-1495, see
+  `goals-waiting-instances.md`).
 - **Column header.** PROJECT · GOAL · MOVING · QUEUED · DONE · PROGRESS · LANDS. The
   labels are the sort controls; LANDS (ETA, soonest first) is the default and a second
   click turns any order around. The server sorts and filters.
@@ -102,9 +104,7 @@ default, and `?view=goals` once.
   each of its tickets, with a 44 px target, so an item without an agent still opens
   its work. The same ⋯ menu says when the counts omit oversized goals.
 
-Without goals the view says so; it never shows examples. The Coming line of the design
-has no data source in Aeon yet and is not shown; Waiting on you across instances is
-AEON-1495. An item's PR state has no data source yet either, so the agent note is its
+Without goals the view says so; it never shows examples. An item's PR state has no data source yet either, so the agent note is its
 only live line.
 
 ## Reading
@@ -177,8 +177,8 @@ the first row behind ⋯. Without that right the button is absent.
 
 The ⋯ groups what a person can do with a goal: change the goal (**Rename**, **Edit
 goal**), work (**Link work…**), for me (Expand or Collapse, progress over time, Copy
-link) and state (**Delete goal**, in danger ink). People who may not edit the goal see
-only the "for me" group. On phones the ⋯ sits under the goal's Lands and opens as the
+link and, for people, Hide for me or Unhide, AEON-1614) and state (**Delete goal**, in
+danger ink). People who may not edit the goal see only the "for me" group. On phones the ⋯ sits under the goal's Lands and opens as the
 shared bottom sheet.
 
 - **Rename** (F2 on a focused goal row): the name becomes a text field over the same

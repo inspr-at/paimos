@@ -60,7 +60,46 @@ test('the title width is still applied after a reload', async ({ page }) => {
   await expect.poll(async () => Math.round((await titleHeader(page).boundingBox())!.width)).toBeLessThan(saved + 8)
 })
 
-test('arrow keys resize the focused title divider and aria-valuenow follows', async ({ page }) => {
+test('a saved title wider than its room gives way to a narrower window, and its divider moves from the width shown', async ({ page }) => {
+  await page.setViewportSize({ width: 1440, height: 900 })
+  const data = fixtures()
+  data.preferences['list:p-pharos'] = { widths: { title: 700 } }
+  await mockWork(page, data)
+  await page.goto('/p/PHAROS')
+  await expect(rows(page)).toHaveCount(5)
+  const handle = titleHandle(page)
+  const shown = async () => Math.round((await titleHeader(page).boundingBox())!.width)
+  const reported = async () => Number(await handle.getAttribute('aria-valuenow'))
+  await expect.poll(shown).toBeGreaterThan(700 - 8)
+  await expect.poll(shown).toBeLessThan(700 + 8)
+  // 1000 px leaves Title less than 700 beside the other columns' minimums.
+  await page.setViewportSize({ width: 1000, height: 900 })
+  await expect.poll(shown).toBeLessThan(700 - 40)
+  await expect.poll(async () => Math.abs(await shown() - await reported())).toBeLessThanOrEqual(2)
+  const overhang = () => page.locator('.table-card').evaluate(card => card.querySelector('table.tickets')!.getBoundingClientRect().right - card.getBoundingClientRect().right)
+  expect(await overhang()).toBeLessThanOrEqual(0.5)
+  // ArrowRight at the edge of that room keeps Title where it is and the saved width as it was.
+  const bounded = await shown()
+  const boundedNow = await reported()
+  await handle.focus()
+  await page.keyboard.press('ArrowRight')
+  await expect.poll(reported).toBeGreaterThanOrEqual(boundedNow)
+  expect(await shown()).toBeGreaterThanOrEqual(bounded - 1)
+  expect(savedTitle(data)).toBe(700)
+  // A drag to the right starts from the width shown, so it cannot narrow Title either.
+  await dragTitle(page, 60)
+  expect(await shown()).toBeGreaterThanOrEqual(bounded - 1)
+  expect(await overhang()).toBeLessThanOrEqual(0.5)
+  expect(savedTitle(data)).toBe(700)
+  // The wider window has the room again, and the saved width comes back.
+  await page.setViewportSize({ width: 1440, height: 900 })
+  await expect.poll(shown).toBeGreaterThan(700 - 8)
+  await expect.poll(shown).toBeLessThan(700 + 8)
+  await expect.poll(async () => Math.abs(await shown() - await reported())).toBeLessThanOrEqual(2)
+})
+
+test('arrow keys resize the focused title divider and aria-valuenow follows'
+, async ({ page }) => {
   await openList(page)
   const handle = titleHandle(page)
   await handle.focus()

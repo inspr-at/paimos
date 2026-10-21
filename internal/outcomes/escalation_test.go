@@ -503,10 +503,30 @@ func setupEscalationRetry(t *testing.T) escalationRetryFixture {
 		if _, err := tx.Exec(t.Context(), `INSERT INTO work_orders(tenant_id,node_id,requested_by_principal_id,status,max_cost_micros) VALUES($1,$2,$3,'ready',10000000)`, p.TenantID, order, p.ID); err != nil {
 			return err
 		}
-		if err := tx.QueryRow(t.Context(), `INSERT INTO agent_runs(tenant_id,work_order_id,agent_principal_id,model_profile_id,status,requested_model,started_at,ended_at) VALUES($1,$2,$3,$4,'failed','gpt-6.1-sol',now()-interval '1 minute',now()) RETURNING id::text`, p.TenantID, order, runner, sol).Scan(&run); err != nil {
+		// Recovery inherits only the person already recorded on this run.
+		if err := tx.QueryRow(t.Context(), `INSERT INTO agent_runs(tenant_id,work_order_id,agent_principal_id,model_profile_id,status,requested_model,started_at,ended_at,acting_person_id) VALUES($1,$2,$3,$4,'failed','gpt-6.1-sol',now()-interval '1 minute',now(),$5) RETURNING id::text`, p.TenantID, order, runner, sol, p.ID).Scan(&run); err != nil {
 			return err
 		}
 		if err := tx.QueryRow(t.Context(), `INSERT INTO harness_sessions(tenant_id,project_id,agent_principal_id,run_id,ticket_node_id,work_order_id,harness,host,management,role,work_shape,ref_digest,lease_digest,phase,stopped_at,stop_reason,model,reasoning_effort,model_profile_id) VALUES($1,$2,$3,$4,$5,$6,'codex','fixture','managed','worker','ship',decode(repeat('01',32),'hex'),decode(repeat('02',32),'hex'),'stopped',now(),'lost_contact','gpt-6.1-sol','high',$7) RETURNING id::text`, p.TenantID, project, runner, run, ticket, order, sol).Scan(&session); err != nil {
+			return err
+		}
+		// The bound person can start only on the runner's paired computer.
+		// Workspace admin already carries that grant; the computer row is the
+		// missing claim target. No enrollment, so the manual account stays mutable.
+		keySum := sha256.Sum256([]byte("retry-key:" + runner))
+		computerSum := sha256.Sum256([]byte("retry-computer:" + runner))
+		fingerprint := hex.EncodeToString(computerSum[:])
+		if _, err := tx.Exec(t.Context(), `INSERT INTO agent_keys(tenant_id,principal_id,name,prefix,hash,scopes,created_by_principal_id) VALUES($1,$2,'retry claim',$3,$4,ARRAY['run.claim'],$5)`, p.TenantID, runner, "retrysetup"+hex.EncodeToString(keySum[:8]), hex.EncodeToString(keySum[:]), p.ID); err != nil {
+			return err
+		}
+		if _, err := tx.Exec(t.Context(), `WITH req AS (
+			INSERT INTO agent_pairing_requests(tenant_id,id,user_code,device_hash,runtime_hash,lifecycle_hash,details,request_digest,state,approved_by)
+			VALUES($1,gen_random_uuid(),'159200004',$2,$2,$2,'{"platform":"darwin","arch":"arm64"}'::jsonb,$2,'redeemed',$3)
+			RETURNING id
+		)
+		INSERT INTO agent_pairing_computers(tenant_id,id,request_id,principal_id,key_id,daemon_id,lifecycle_hash)
+		SELECT $1,gen_random_uuid(),req.id,$4,k.id,'retry-runner',$2 FROM req
+		JOIN LATERAL (SELECT id FROM agent_keys WHERE tenant_id=$1 AND principal_id=$4 ORDER BY created_at LIMIT 1) k ON true`, p.TenantID, fingerprint, p.ID, runner); err != nil {
 			return err
 		}
 		state := escalation.State{EpisodeID: ticket, Status: "stuck", Reason: "failed_fix_rounds", Revision: 1, MaxAttempts: 2, MaxCost: escalation.MaxCostMicros}
@@ -535,6 +555,9 @@ func TestEscalationRetryFreezesReservedPlacement(t *testing.T) {
 	var run agentruns.Run
 	if err := json.Unmarshal(w.Body.Bytes(), &run); err != nil {
 		t.Fatal(err)
+	}
+	if run.ActingPersonID == nil || *run.ActingPersonID != f.p.ID {
+		t.Fatal("retry lost the person recorded on the original run")
 	}
 	var trace struct {
 		Placement modelregistry.WorkPlacement `json:"work_placement"`

@@ -15,7 +15,44 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"strings"
 )
+
+// Resolve the native alias before argument validation, keeping the legacy
+// upload node's two positional arguments and subcommands unchanged. Flag
+// values and everything after -- are data, never alias selectors.
+func (rt *runtime) sessionAttachAlias(legacy *Command, args []string) (*Command, []string, error) {
+	native := rt.cmdSessionAttach()
+	flags := &flagSet{}
+	rt.bindGlobals(flags)
+	native.addFlags(flags)
+	alias := -1
+	for i := 0; i < len(args); i++ {
+		if args[i] == "--" {
+			break
+		}
+		if args[i] == "--session" {
+			if alias >= 0 {
+				return legacy, nil, usagef("--session may be specified only once")
+			}
+			alias = i
+			continue
+		}
+		if !strings.HasPrefix(args[i], "-") || args[i] == "-" {
+			continue
+		}
+		name, _, hasValue, _ := splitFlag(args[i])
+		if f := flags.lookup(name); f != nil && f.kind != flagBool && !hasValue {
+			i++
+		}
+	}
+	if alias < 0 {
+		return legacy, args, nil
+	}
+	forward := append([]string{}, args[:alias]...)
+	forward = append(forward, args[alias+1:]...)
+	return native, forward, nil
+}
 
 type attachmentView struct {
 	ID          string `json:"id"`

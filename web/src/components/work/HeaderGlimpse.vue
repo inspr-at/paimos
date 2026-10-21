@@ -33,7 +33,7 @@ const compact = ref(false), spotLabel = ref('none')
 const shown = ref(0), truncated = ref(false)
 const canvas = ref<{ setPaused: (value: boolean) => void } | null>(null)
 const allowed = computed(() => headerGlimpseAllowed({ enabled: props.enabled, reduced: reduced.value, wide: wide.value, tickets: props.ticketCount }))
-let request: AbortController | undefined, idleId = 0, seeing: IntersectionObserver | undefined, sizing: ResizeObserver | undefined, mounted = false, changes: MutationObserver | undefined, measureFrame = 0, sizingPaused = false
+let request: AbortController | undefined, idleId = 0, seeing: IntersectionObserver | undefined, sizing: ResizeObserver | undefined, mounted = false, changes: MutationObserver | undefined, foldWatch: MutationObserver | undefined, measureFrame = 0, sizingPaused = false
 let scrollRoot: HTMLElement | undefined
 
 function controlBox(compactMode: boolean) {
@@ -146,6 +146,12 @@ function backdropOutOfView() {
   const el = column.value
   const root = document.getElementById('main')
   if (!el || !(root instanceof HTMLElement)) return false
+  // Collapsed density hides the fold. The absolute column can keep a box after
+  // the fold's own border box is already empty, which is still occlusion.
+  const page = el.closest('.project-page')
+  if (page?.classList.contains('header-collapsed')) return true
+  const fold = document.getElementById('project-header-fold')
+  if (fold && getComputedStyle(fold).display === 'none') return true
   const box = el.getBoundingClientRect(), view = root.getBoundingClientRect()
   if (box.width <= 0 || box.height <= 0) return true
   const overlapW = Math.min(box.right, view.right) - Math.max(box.left, view.left)
@@ -222,7 +228,7 @@ function attachSizing() {
   }
 }
 function watchHeader() {
-  seeing?.disconnect(); sizing?.disconnect(); changes?.disconnect(); detachScroll()
+  seeing?.disconnect(); sizing?.disconnect(); changes?.disconnect(); foldWatch?.disconnect(); detachScroll()
   const header = column.value?.closest('header'), page = header?.closest('.project-page')
   if (!header || !page) return
   const root = document.getElementById('main')
@@ -240,6 +246,12 @@ function watchHeader() {
     }
   })
   changes.observe(page, { subtree: true, childList: true, characterData: true })
+  // Density writes a class on the page and display on the fold. Neither is a
+  // child or character change, so the observer above stays silent.
+  foldWatch = new MutationObserver(() => { scheduleMeasure(); syncOcclusion() })
+  foldWatch.observe(page, { attributes: true, attributeFilter: ['class'] })
+  const fold = document.getElementById('project-header-fold')
+  if (fold) foldWatch.observe(fold, { attributes: true, attributeFilter: ['style'] })
   measureRegion()
   syncOcclusion()
 }
@@ -305,6 +317,7 @@ onBeforeUnmount(() => {
   detachScroll()
   sizing?.disconnect()
   changes?.disconnect()
+  foldWatch?.disconnect()
   cancelAnimationFrame(measureFrame)
   cancelAnimationFrame(viewportFrame)
   cancelAnimationFrame(paintSample)
@@ -340,6 +353,14 @@ onBeforeUnmount(() => {
 :global(.project-head:has(.glimpse-col)) { position: relative; }
 :global(.head-flex.with-glimpse:has(.glimpse-col)) { display: flex; align-items: flex-end; }
 .glimpse-col { position: absolute; left: 0; right: 0; overflow: hidden; pointer-events: none; }
+/* The fold can be hidden with an empty border box while this absolute column
+   still stretches across the page. Both axes have to be empty (AEON-1622).
+   The page class and the column stay in one :global(). A descendant written
+   outside it is dropped, and these declarations then set the project page to 0×0. */
+:global(.project-page.header-collapsed .glimpse-col) {
+  width: 0 !important; height: 0 !important; min-width: 0 !important; min-height: 0 !important;
+  right: auto !important; overflow: hidden !important;
+}
 .glimpse-col[data-measured="false"] { visibility: hidden; }
 .glimpse-canvas {
   position: absolute; inset: 0; opacity: .35; pointer-events: none;

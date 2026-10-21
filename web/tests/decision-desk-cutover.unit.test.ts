@@ -184,6 +184,31 @@ it('AEON-1477 keeps a decided lesson learning so Undo can re-check it after the 
   expect(decisionPermission(decided, sources, () => true)).toBe(true)
 })
 
+// AEON-1622 risk: a projection read before a lesson was decided still lists it as open. Its row, which the
+// learnings source no longer confirms, replaced the decided lesson, so the next read dropped it with its Undo.
+it('AEON-1622 a decided lesson replaces the unconfirmed open row of a projection read before the decision', () => {
+  const learning: MethodLearning = {
+    id: 'n-lesson', source: 'ticket', node_id: 'lesson', key: 'AEON-1', title: 'Recovery failed during release', text: 'The recovery check was missing.', href: '/p/AEON/AEON-1', author: null, at: '2026-10-14T08:00:00Z',
+    recommendation: { decision: 'accept', lesson: 'Rehearse recovery before releasing.', knowledge_id: 'k-aeon-deploy', by: { id: 'scout', name: 'Scout' }, at: '2026-10-14T08:30:00Z', event_id: 700, prepared: true, stale: false, target_missing: false },
+  }
+  const decided: DeskItem = {
+    id: 'l:lesson', kind: 'lesson', title: 'Rehearse recovery before releasing.', projectId: 'p-aeon', projectName: 'Paimos Aeon', context: '', findings: '', meanwhile: '', destination: 'Changelog',
+    choices: [], why: '', outcome: 'once', suggestion: 'Accept or Dismiss the prepared lesson.', revision: 700, createdAt: learning.at, held: false, decided: true, undoEvent: 800, lesson: { learning, outdated: false },
+  }
+  const before: DeskItem = { ...decided, id: 'l:before', decided: false, undoEvent: undefined }, after: DeskItem = { ...before, id: 'l:after' }
+  // loadDesk's row for a listed source it could not confirm: open, without its learning.
+  const placeholder: DeskItem = { ...decided, decided: false, undoEvent: undefined, lesson: undefined, unavailable: 'Source details are unavailable or changed. Close and Retry before deciding.' }
+  const next = [before, placeholder, after], lessons = new Map([[before.id, learning], [after.id, learning]])
+  retainDecidedLessons([before, decided, after], next, lessons)
+  expect(next).toEqual([before, decided, after])
+  expect(lessons.get(decided.id)).toBe(learning)
+  // The source offers the lesson again, as after an Undo elsewhere: the read keeps its open row.
+  const offered: DeskItem = { ...placeholder, unavailable: undefined, lesson: { learning, outdated: false } }
+  const reread = [offered]
+  retainDecidedLessons([decided], reread, new Map([[decided.id, learning]]))
+  expect(reread).toEqual([offered])
+})
+
 it('AEON-1477 shows the hint after two failures and escalates strictly after sixty seconds or at five failures', () => {
   const good = Date.parse('2026-10-17T13:58:00Z'), since = good + 1000
   expect(deskRefreshNotice(1, since, good, since + 90_000)).toBeNull()

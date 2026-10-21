@@ -65,6 +65,9 @@ func (s *Store) Attach(ctx context.Context, a nativecontract.Actor, in nativecon
 			if err := require(ctx, tx, p, in.ExpectedBinding, "harness.control"); err != nil {
 				return err
 			}
+			if err := s.authority.AuthorizeTx(ctx, tx, p, in.ExpectedBinding, "control_claim"); err != nil {
+				return err
+			}
 		}
 		if err := s.refresh(ctx, tx, l); err != nil {
 			return err

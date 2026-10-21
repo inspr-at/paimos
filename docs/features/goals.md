@@ -221,3 +221,39 @@ People set goals and say which work serves them without ever naming an outcome.
   a key without that ceiling gets 403 before the handler. A viewer and an API key
   without `nodes.write` get 403, and nothing changes or is appended. Every change is an event whose actor is the
   person (or key) who made it, so history can say who renamed, unlinked or deleted.
+
+## Hide for me (AEON-1614)
+
+A person can hide a goal or release from their own Goals view; nobody else's
+view changes. The choice lives on the server, so it follows the person to every
+browser and device, and it stays until they unhide the goal, whatever the
+goal's state.
+
+- `PUT` / `DELETE /api/me/goals/{goalId}/hidden` hide and unhide. Only a
+  signed-in person acting for themselves may call them; agents and API keys get
+  403. The goal must be one the person can read (nodes.read in its project,
+  rechecked in the write). Both are idempotent and report `changed`.
+- `GET /api/goals` leaves hidden goals out by default (`hidden=exclude`);
+  `hidden=include` returns them with `hidden: true`. `hidden_count` counts the
+  person's hidden goals among those the project/group filters match and the
+  person can read, whatever the search, state, hide-done or hidden filter. A goal
+  the person can no longer read drops out of the count.
+- The state chips keep counting hidden goals, as they keep counting done goals
+  while Done goals is off: hiding changes the list, never the counts.
+- Storage is `hidden_goals` (migration 1420): one row per person and goal, with
+  tenant RLS plus a policy that admits only the row's own person (an agent in the
+  caller set matches nothing). DSAR may read and erase; deleting a goal for good
+  drops its rows.
+- Web: a goal's ⋯ menu offers Hide for me (Unhide on a hidden goal) with an Undo
+  toast; phones offer it at the end of the opened goal. Display › Show holds Done
+  goals (H), Hidden goals ({n}) and Waiting on you, saved with the person's Goals
+  preferences; the phone ⋯ Goal display menu carries the same rows. Hidden goals,
+  when shown, are muted rows marked Hidden. Waiting on you off removes the band
+  from the Goals view (decided before the grid paints); the header's Decision
+  Desk count stays. Epics cannot be hidden in this version.
+- The Goals toolbar has a Waiting on you toggle (the person-clock icon) just left
+  of the view controls. It is the same setting as Display › Show › Waiting on you,
+  pressed while the band shows, and it carries the count of open Desk items (the
+  header's count) whenever something is open, also while the band is hidden. The
+  count sits on the icon's corner, so it never moves the toolbar. Phones keep the
+  ⋯ row, which reads "Waiting on you · N".

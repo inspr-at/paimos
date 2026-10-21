@@ -25,8 +25,11 @@ import (
 	"github.com/inspr-at/paimos/internal/agentdwire"
 	"github.com/inspr-at/paimos/internal/agentsetup"
 	"github.com/inspr-at/paimos/internal/harnesslaunch"
+	"github.com/inspr-at/paimos/internal/nativeattach"
+	"github.com/inspr-at/paimos/internal/nativecontract"
 	"github.com/inspr-at/paimos/internal/nativeintegration"
 	"github.com/inspr-at/paimos/internal/nativeprofiles"
+	"github.com/inspr-at/paimos/internal/nativestream"
 	"github.com/inspr-at/paimos/internal/version"
 )
 
@@ -45,7 +48,11 @@ type registry struct {
 
 func main() {
 	if err := run(os.Args[1:], os.Stdout); err != nil {
-		// serve logs its failure before returning, including startup failures.
+		// A dispatch denial is one stderr line and its own status. serve does
+		// not also log it. Every other serve failure was logged before return.
+		if code, ok := writeDispatchDenial(os.Stderr, err, denialParent(os.Getppid(), err)); ok {
+			os.Exit(code)
+		}
 		if len(os.Args) < 2 || os.Args[1] != "serve" {
 			fmt.Fprintln(os.Stderr, err)
 		}
@@ -93,7 +100,8 @@ func privateFile(path string, maximum int64) ([]byte, error) {
 
 func serve(args []string) (resultErr error) {
 	defer func() {
-		if resultErr != nil {
+		var denied *dispatchDeniedError
+		if resultErr != nil && !errors.As(resultErr, &denied) {
 			slog.Error("agentd serve failed", "error", resultErr)
 		}
 	}()
@@ -470,5 +478,22 @@ func pairedNativeSessions(ctx context.Context, remote *agentd.Remote, c agentset
 	if !ok {
 		return nil
 	}
-	return agentd.NativeProduction(remote, c.ComputerID, profiles.owner, profiles.resolver, nativeintegration.Capabilities())
+	config := agentd.NativeProduction(remote, c.ComputerID, profiles.owner, profiles.resolver, nativeintegration.Capabilities())
+	bridge, err := nativeattach.NewPersonBridge(c.Origin, c.TenantID, config.Host)
+	if err != nil {
+		return nil
+	}
+	projector, err := nativestream.NewProjector(nativestream.ExportPolicy{Text: func(_ context.Context, _ nativecontract.Binding, text string) (string, error) { return text, nil }})
+	if err != nil {
+		return nil
+	}
+	config.Host, config.LocalAuthority, config.Projector = bridge, bridge, projector
+	bind := config.Bind
+	config.Bind = func(s *agentd.Supervisor) {
+		if bind != nil {
+			bind(s)
+		}
+		bridge.BindLocal(s)
+	}
+	return config
 }

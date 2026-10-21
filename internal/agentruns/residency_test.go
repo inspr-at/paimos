@@ -119,6 +119,12 @@ func TestRunCreationStampsStarterAndRejectsDisallowedAccount(t *testing.T) {
 			want := f.person.ID
 			if strings.Contains(kind, "key") {
 				requester = f.agent
+				// Person identity is explicit; issuer provenance still controls preferences.
+				requester.KeyPersonID = f.person.ID
+				f.tx(t, f.person, func(tx pgx.Tx) error {
+					_, err := tx.Exec(t.Context(), `UPDATE agent_keys SET person_id=$2 WHERE principal_id=$1`, f.agent.ID, f.person.ID)
+					return err
+				})
 				if kind == "creator-key" {
 					requester.KeyCreatorID = f.person.ID
 					f.tx(t, f.person, func(tx pgx.Tx) error {
