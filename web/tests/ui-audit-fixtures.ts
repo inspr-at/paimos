@@ -35,10 +35,11 @@ const signedOut: Scenario['act'] = async page => { await expect(page.getByLabel(
 const visible = (selector: string): Scenario['act'] => async page => { await expect(page.locator(selector).first()).toBeVisible() }
 // U22's state on the compact chrome (AEON-1460, D11 §3): no saved-view strip, so the open view control
 // with the changed saved view checked is the state audited there (Tick's v1.1 ruling for AEON-1615).
+// The menu also checks the layout (List), so the saved view is named.
 const savedViews: Scenario['act'] = async page => {
   if (!isCompact(page)) return visible('.view-bar .changes .save')(page)
   await page.locator('.compact-ticket-toolbar .phone-view').click()
-  await expect(page.getByRole('menu', { name: 'Ticket views' }).getByRole('menuitemradio', { checked: true })).toBeVisible()
+  await expect(page.getByRole('menu', { name: 'Ticket views' }).getByRole('menuitemradio', { name: 'High priority', exact: true, checked: true })).toBeVisible()
 }
 const listContent = (text: string): Scenario['act'] => async page => { await expect(page.getByText(text, { exact: false }).first()).toBeVisible() }
 const inspectorTab = (name: string): Scenario['act'] => async page => {
