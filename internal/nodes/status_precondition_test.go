@@ -117,6 +117,9 @@ func TestConditionalStatusPreservesConcurrentCancel(t *testing.T) {
 		t.Fatal(err)
 	}
 	w := dbtest.Await(t, ctx, result)
+	if w.Code != 409 {
+		t.Fatalf("cancel overwritten or wrong refusal: %d %s", w.Code, w.Body.String())
+	}
 	var failure errorBody
 	if err := json.Unmarshal(w.Body.Bytes(), &failure); err != nil {
 		t.Fatal(err)
