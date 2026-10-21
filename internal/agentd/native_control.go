@@ -105,6 +105,8 @@ func sameNativePolicy(a, b nativecontract.Policy) bool {
 // All server calls finish before provider I/O; no database lock spans a close
 // or launch. Every ambiguous phase remains journalled and keeps occupancy.
 func (e *nativeOwned) switchRuntime(ctx context.Context, g nativecontract.ClaimResult) (out nativecontract.OperationResult, err error) {
+	ctx, cancel := context.WithTimeout(ctx, nativecontract.LocalOperationSeconds*time.Second)
+	defer cancel()
 	h, s := e.host, e.host.s
 	if h.config.Terminal == nil || h.config.Qualification == nil {
 		return out, nativeRefusal(nativecontract.ReasonQualificationMissing)

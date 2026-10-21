@@ -352,4 +352,20 @@ func TestOwnedNativeControlRetainsUnconfirmedWriter(t *testing.T) {
 	if err = f.d.Admin.QueryRow(t.Context(), `SELECT count(*) FROM native_session_roots WHERE owned_session_id=$1 AND runtime_epoch=$2 AND released_at IS NULL`, b.OwnedSessionID, b.RuntimeEpoch).Scan(&roots); err != nil || roots != 1 {
 		t.Fatal("uncertain writer lost occupancy", roots, err)
 	}
+	// The failed transition must not prevent a separately authorized owner
+	// stop from reaching the retained handle through normal daemon polling.
+	c.provider.mu.Lock()
+	c.provider.confirmed = true
+	c.provider.mu.Unlock()
+	stop := nativecontract.Stop{RequestID: guuid.NewString(), ExpectedBinding: b, Kind: "graceful", ExpectedProcessIdentityDigest: c.provider.Identity().ProcessIdentityDigest, ExpiresAt: f.now.Add(20 * time.Second)}
+	if _, err = f.s.Mutate(f.personCtx(t), f.actor, nativecontract.Command{Kind: "stop", Stop: &stop}); err != nil {
+		t.Fatal("authorize stop after failed take", err)
+	}
+	if err = c.config.Poll(t.Context()); err != nil {
+		t.Fatal("poll owner stop after failed take", err)
+	}
+	current, err = f.s.Read(f.personCtx(t), f.actor, b)
+	if err != nil || current.State != "stopped" {
+		t.Fatal("owner stop did not settle the retained writer", err)
+	}
 }

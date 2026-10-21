@@ -1303,11 +1303,11 @@ func (h *NativeHost) Poll(ctx context.Context) error {
 // longer retries reports, events, finals or new input (their outcomes could not
 // be reported), but it still reconciles its exit and executes the person's stop.
 func (e *nativeOwned) poll(ctx context.Context) error {
-	e.opMu.Lock()
-	defer e.opMu.Unlock()
-	if e.transition != nil {
-		return nativeRefusal(nativecontract.ReasonOwnershipUnconfirmed)
+	if err := e.opMu.LockContext(ctx); err != nil {
+		return err
 	}
+	defer e.opMu.Unlock()
+	transitioning := e.transition != nil
 	e.mu.Lock()
 	live := e.transport != nil && e.delivery != nil && !e.exited
 	e.mu.Unlock()
@@ -1316,7 +1316,7 @@ func (e *nativeOwned) poll(ctx context.Context) error {
 	}
 	b := *e.grant.ExpectedBinding
 	var errs []error
-	if e.faulted() == nil {
+	if !transitioning && e.faulted() == nil {
 		// The provider event loop flushes reports under eventMu too. The
 		// journal permits one flusher; an HTTP completion is earlier than its
 		// durable local report-offset update and cannot serve as that fence.
@@ -1327,8 +1327,10 @@ func (e *nativeOwned) poll(ctx context.Context) error {
 			errs = append(errs, e.fault(err))
 		}
 	}
-	if err := e.reconcileExit(ctx); err != nil {
-		errs = append(errs, err)
+	if !transitioning {
+		if err := e.reconcileExit(ctx); err != nil {
+			errs = append(errs, err)
+		}
 	}
 	e.mu.Lock()
 	exited := e.exited
@@ -1336,12 +1338,12 @@ func (e *nativeOwned) poll(ctx context.Context) error {
 	if exited {
 		return errors.Join(errs...)
 	}
-	if e.faulted() == nil {
+	if !transitioning && e.faulted() == nil {
 		if err := e.flushEvents(ctx); err != nil {
 			errs = append(errs, e.fault(err))
 		}
 	}
-	if e.faulted() == nil {
+	if !transitioning && e.faulted() == nil {
 		for _, f := range e.journal.FinalStatuses() {
 			if f.State == "pending" {
 				if _, err := e.journal.RetryFinal(ctx, f.FinalID, e); err != nil {
@@ -1354,7 +1356,9 @@ func (e *nativeOwned) poll(ctx context.Context) error {
 	if err := e.call(ctx, "GET", "/api/agentd/native-sessions/commands?limit=50", nil, &page); err != nil {
 		return errors.Join(append(errs, err)...)
 	}
-	stopOnly := e.faulted() != nil
+	// A failed switch retains its exact handle. A new explicit owner stop
+	// remains deliverable; it never retries the old takeover/hand-back write.
+	stopOnly := transitioning || e.faulted() != nil
 	for _, item := range page.Items {
 		if !item.ExpectedBinding.Equal(b) {
 			errs = append(errs, nativeRefusal(nativecontract.ReasonIdentityMismatch))
@@ -1432,7 +1436,9 @@ func (e *nativeOwned) reconcileExit(ctx context.Context) error {
 }
 
 func (e *nativeOwned) execute(ctx context.Context, item nativecontract.PendingCommand) (nativecontract.OperationResult, error) {
-	e.opMu.Lock()
+	if err := e.opMu.LockContext(ctx); err != nil {
+		return nativecontract.OperationResult{}, err
+	}
 	defer e.opMu.Unlock()
 	return e.executeLocked(ctx, item)
 }
@@ -1611,6 +1617,8 @@ func (e *nativeOwned) flushEvents(ctx context.Context) error {
 // Local commands select an already person-authorized pending command; daemon
 // socket possession never creates a person command or expands its key ceiling.
 func (h *NativeHost) localCommand(ctx context.Context, b nativecontract.Binding, request, kind string, value any) (nativecontract.OperationResult, error) {
+	ctx, cancel := context.WithTimeout(ctx, nativecontract.LocalOperationSeconds*time.Second)
+	defer cancel()
 	schema := map[string]string{"input": "NativeInput", "interrupt": "NativeInterrupt", "stop": "NativeStop", "take": "NativeTakeIntent", "return": "NativeReturnIntent"}[kind]
 	if schema == "" {
 		return nativecontract.OperationResult{}, ErrUnsupported
