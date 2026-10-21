@@ -13,6 +13,7 @@ import (
 	"unicode/utf8"
 
 	"github.com/inspr-at/paimos/internal/authz"
+	"github.com/inspr-at/paimos/internal/db"
 	"github.com/inspr-at/paimos/internal/tenant"
 	"github.com/inspr-at/paimos/internal/workorders"
 	"github.com/inspr-at/paimos/internal/workstate"
@@ -270,6 +271,13 @@ func (m *Module) consumeSource(ctx context.Context, tx pgx.Tx, actor tenant.Prin
 	return err
 }
 
+// enterOwnerCeiling installs the recurrence owner's own project ceiling. The
+// service caller is not a key or a run, so both key-creator and acting-person
+// arguments stay null. sourceContext restores service visibility afterwards.
+func enterOwnerCeiling(ctx context.Context, tx pgx.Tx, tenantID, ownerID string) error {
+	return db.EnterPrincipal(ctx, tx, tenantID, ownerID, nil, nil)
+}
+
 // The service discovers only event IDs and times. Payload inspection then uses the
 // definition owner's CURRENT RLS and permission bindings in this same locked
 // transaction, including event-reference visibility. Restore service visibility
@@ -289,7 +297,7 @@ func sourceContext(ctx context.Context, tx pgx.Tx, tenantID string, r Recurrence
 	if err := tx.QueryRow(ctx, `SELECT kind FROM principals WHERE id=$1 AND status='active'`, owner.ID).Scan(&owner.Kind); err != nil {
 		return nil, "", err
 	}
-	if _, err := tx.Exec(ctx, `SELECT aeon_enter_principal($1::uuid,$2::uuid,NULL::uuid)`, tenantID, owner.ID); err != nil {
+	if err := enterOwnerCeiling(ctx, tx, tenantID, owner.ID); err != nil {
 		return nil, "", err
 	}
 	var source *EventContext

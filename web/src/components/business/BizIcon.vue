@@ -3,9 +3,9 @@
 import type { IconName } from '../AppIcon.vue'
 // Business glyphs in the same set as AppIcon: 16×16 grid, stroke 1.8, round caps
 // and joins, currentColor. Any other name is drawn by AppIcon itself.
-export type BizGlyph = 'briefcase' | 'document' | 'building' | 'tag' | 'grip' | 'print' | 'download' | 'calendar' | 'lock' | 'seal' | 'history' | 'mail' | 'globe' | 'phone' | 'star' | 'pin' | 'plug' | 'note'
+export type BizGlyph = 'briefcase' | 'document' | 'building' | 'tag' | 'grip' | 'print' | 'download' | 'calendar' | 'lock' | 'seal' | 'history' | 'mail' | 'globe' | 'phone' | 'star' | 'pin' | 'plug' | 'note' | 'bell'
 export type BizIconName = IconName | BizGlyph
-const GLYPHS = new Set<string>(['briefcase', 'document', 'building', 'tag', 'grip', 'print', 'download', 'calendar', 'lock', 'seal', 'history', 'mail', 'globe', 'phone', 'star', 'pin', 'plug', 'note'])
+const GLYPHS = new Set<string>(['briefcase', 'document', 'building', 'tag', 'grip', 'print', 'download', 'calendar', 'lock', 'seal', 'history', 'mail', 'globe', 'phone', 'star', 'pin', 'plug', 'note', 'bell'])
 </script>
 <script setup lang="ts">
 import AppIcon from '../AppIcon.vue'
@@ -31,6 +31,7 @@ withDefaults(defineProps<{ name: BizIconName; size?: number }>(), { size: 16 })
     <template v-else-if="name === 'pin'"><path d="M8 14.2s4.6-4.1 4.6-7.8a4.6 4.6 0 0 0-9.2 0c0 3.7 4.6 7.8 4.6 7.8Z" /><circle cx="8" cy="6.4" r="1.7" /></template>
     <template v-else-if="name === 'plug'"><path d="M5.6 1.8v3M10.4 1.8v3M3.6 4.8h8.8v2.6a4.4 4.4 0 0 1-8.8 0ZM8 11.8v2.4" /></template>
     <template v-else-if="name === 'note'"><path d="M3.4 1.8h9.2c.6 0 1 .4 1 1v6.6l-4.2 4.8H3.4c-.6 0-1-.4-1-1V2.8c0-.6.4-1 1-1Z" /><path d="M9.4 14.2V10.4c0-.6.4-1 1-1h3.2M5.2 5.4h5.6M5.2 8h3.2" /></template>
+    <template v-else-if="name === 'bell'"><path d="M3.4 11.6h9.2l-1.2-1.6V6.6a3.4 3.4 0 0 0-6.8 0V10Z" /><path d="M6.4 13.8a1.7 1.7 0 0 0 3.2 0" /></template>
     <path v-else d="M3.4 2.2h2.4l1.2 3-1.6 1a7.4 7.4 0 0 0 4.4 4.4l1-1.6 3 1.2v2.4c0 .7-.6 1.2-1.3 1.2A11.4 11.4 0 0 1 2.2 3.5c0-.7.5-1.3 1.2-1.3Z" />
   </svg>
   <AppIcon v-else :name="name as IconName" :size="size" />

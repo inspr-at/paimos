@@ -104,6 +104,9 @@ jobs:
       PREFLIGHT_SHA: ${{ inputs.sha }}
       PREFLIGHT_GROUP: ${{ matrix.group }}
       PREFLIGHT_RUNNER_CLASS: ${{ needs.preflight-route.outputs.runner_class }}
+      # The groups run the mocked UI and performance tiers; no paimos serve.
+      # The controller passes this to the tier runner unchanged.
+      AEON_REQUIRE_BACKEND: 'off'
     steps:
       - name: Checkout reviewed preflight controller
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7

@@ -1026,6 +1026,18 @@ func (a *ClaudeAdapter) startBridge(ctx context.Context, r StartRequest, observe
 		if err := native.check(ctx); err != nil {
 			return nil, err
 		}
+		if c0, ok := ctx.Value(nativeC0Key{}).(*nativeC0Launch); ok {
+			if c0.spec.Profile.Binary.Path != resolved.ClaudePath || c0.spec.Profile.SDK.Path != resolved.SDKPath {
+				return nil, ErrNativeUnqualified
+			}
+			if err := verifyNativePin(c0.spec.Profile.Binary); err != nil {
+				return nil, err
+			}
+			if err := verifyNativePin(c0.spec.Profile.SDK); err != nil {
+				return nil, err
+			}
+			environment = append([]string{}, c0.spec.Profile.Environment...)
+		}
 	}
 	p, err := launchWire(resolved.NodePath, []string{filepath.Join(dir, "bridge.mjs"), resolved.SDKPath, resolved.ClaudePath, r.Workspace}, r.Workspace, environment, "bridge", observe)
 	if err != nil {
@@ -1039,6 +1051,9 @@ func (a *ClaudeAdapter) startBridge(ctx context.Context, r StartRequest, observe
 	capacitySeen := false
 	capacityParser := capacity.Parser{}
 	p.setOnEvent(func(raw json.RawMessage) {
+		if c0, ok := ctx.Value(nativeC0Key{}).(*nativeC0Launch); ok && native != nil {
+			c0.observe(raw)
+		}
 		var frame struct {
 			Answer          string             `json:"answer"`
 			Kind            string             `json:"kind"`
@@ -1214,6 +1229,11 @@ func (a *ClaudeAdapter) startBridge(ctx context.Context, r StartRequest, observe
 	if native != nil {
 		frame["profile"] = "native"
 		frame["native_grant"] = native.bridgeGrant()
+		if c0, ok := ctx.Value(nativeC0Key{}).(*nativeC0Launch); ok {
+			frame["max_turns"] = c0.spec.Policy.MaximumTurns
+			frame["max_tokens"] = c0.spec.Policy.MaximumTokens
+			frame["native_c0"] = true
+		}
 		if native.Resume != "" {
 			frame["resume"] = native.Resume
 		}

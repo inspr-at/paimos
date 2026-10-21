@@ -80,6 +80,8 @@ jobs:
         working-directory: web
         env:
           PLAYWRIGHT_JSON_OUTPUT_FILE: test-results/full-ui-results.json
+          # Mocked UI inventory. The performance partition does not use the readiness setup.
+          AEON_REQUIRE_BACKEND: 'off'
         run: >-
           npx playwright test -c ${{ matrix.config }}
           --shard=${{ matrix.partition }} --workers=1 --retries=0 --forbid-only

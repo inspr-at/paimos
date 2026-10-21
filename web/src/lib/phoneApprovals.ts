@@ -6,7 +6,7 @@ import type { AttachReview } from './attachWatch.ts'
 export interface PhonePreferences {
   enabled: boolean; time_zone: string; quiet_start: number; quiet_end: number; escalation_minutes: number
 }
-export interface PhoneItem { id: string; created_at: string; endpoint_hash?: string }
+export interface PhoneItem { id: string; created_at: string; endpoint_hash?: string; desk_enabled?: boolean }
 export interface PhoneSettings {
   available: boolean; push_available: boolean; vapid_public_key: string
   preferences: PhonePreferences; passkeys: PhoneItem[]; subscriptions: PhoneItem[]
@@ -52,6 +52,45 @@ export async function deviceSubscriptionHash(): Promise<string> {
   if (!subscription) return ''
   const hash = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(JSON.stringify(subscription.endpoint)))
   return Array.from(new Uint8Array(hash), byte => byte.toString(16).padStart(2, '0')).join('')
+}
+export function deskPushBrowser() {
+  const ios = /iPad|iPhone|iPod/.test(navigator.userAgent) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1)
+  return {
+    supported: 'Notification' in window && 'PushManager' in window && 'serviceWorker' in navigator,
+    homeScreenRequired: ios && !(navigator as Navigator & { standalone?: boolean }).standalone && !window.matchMedia('(display-mode: standalone)').matches,
+    permission: 'Notification' in window ? Notification.permission : 'default' as NotificationPermission,
+  }
+}
+export function deskOfferDismissed(): boolean {
+  try { return localStorage.getItem('aeon.desk-push.dismissed') === '1' } catch { return false }
+}
+export function dismissDeskOffer() {
+  try { localStorage.setItem('aeon.desk-push.dismissed', '1') } catch { /* Storage can be disabled. */ }
+}
+export function deskOfferEligible(settings: PhoneSettings, hash: string, browser = deskPushBrowser(), dismissed = deskOfferDismissed()) {
+  return settings.push_available && browser.supported && !browser.homeScreenRequired && browser.permission !== 'denied'
+    && !dismissed && !settings.subscriptions.some(sub => sub.endpoint_hash === hash && sub.desk_enabled)
+}
+// Permission is obtained by the caller synchronously in its click handler.
+// Turning Desk off retains the browser subscription and phone channel.
+export async function setDeskSubscription(enabled: boolean, publicKey: string, permission: Promise<NotificationPermission> | undefined, signal: AbortSignal) {
+  signal.throwIfAborted()
+  if (enabled && await permission !== 'granted') throw new Error('desk-permission')
+  signal.throwIfAborted()
+  const registration = enabled
+    ? await navigator.serviceWorker.register('/phone-approvals-sw.js', { scope: '/' })
+    : await navigator.serviceWorker.getRegistration('/')
+  signal.throwIfAborted()
+  if (enabled) { await navigator.serviceWorker.ready; signal.throwIfAborted() }
+  let subscription = await registration?.pushManager.getSubscription()
+  signal.throwIfAborted()
+  if (!subscription && enabled && registration) {
+    subscription = await registration.pushManager.subscribe({ userVisibleOnly: true, applicationServerKey: decodeBytes(publicKey) })
+  }
+  signal.throwIfAborted()
+  if (!subscription) throw new Error('desk-subscription')
+  const { endpoint, keys } = subscription.toJSON()
+  return phoneRequest<PhoneItem>('/me/phone-approvals/subscriptions', 'POST', { endpoint, keys, desk_enabled: enabled }, signal)
 }
 export const reviewPath = (kind: PhoneKind, id: string) => `/phone-approvals/${kind}/${encodeURIComponent(id)}`
 export function decodeBytes(value: string): ArrayBuffer {

@@ -803,6 +803,33 @@ func normalizeAEON933InstallBounds(t *testing.T, id string, job map[string]any) 
 	}
 }
 
+// AEON-1605: mocked browser shards opt out of the backend wait, and e2e
+// requires it through the bounded readiness waiter. Prove both exact additions
+// before projecting onto the accepted-CI pin.
+func normalizeAEON1605BackendReadiness(t *testing.T, id string, job map[string]any) {
+	t.Helper()
+	mode := map[string]string{"web-shard": "off", "e2e-run": "required"}[id]
+	if mode == "" {
+		return
+	}
+	env := treeMap(job["env"])
+	if env["AEON_REQUIRE_BACKEND"] != mode {
+		t.Fatalf("AEON-1605: %s must set AEON_REQUIRE_BACKEND=%s", id, mode)
+	}
+	delete(env, "AEON_REQUIRE_BACKEND")
+	if id != "e2e-run" {
+		return
+	}
+	step := reuseStep(t, job, "Start server and run smoke")
+	run, _ := step["run"].(string)
+	const bounded = "if ! node scripts/ci/stack-ready.mjs \"$BASE_URL/api/health\"; then\n"
+	const historical = "ready=0\nfor _ in $(seq 1 30); do\n  if curl -sf \"$BASE_URL/api/health\" >/dev/null; then\n    ready=1\n    break\n  fi\n  sleep 1\ndone\nif [ \"$ready\" -ne 1 ]; then\n"
+	if strings.Count(run, bounded) != 1 || strings.Contains(run, "curl") {
+		t.Fatalf("AEON-1605: e2e must wait for backend health with the bounded waiter:\n%s", run)
+	}
+	step["run"] = strings.Replace(run, bounded, historical, 1)
+}
+
 func restoreBoundedShellInstall(t *testing.T, step map[string]any) {
 	t.Helper()
 	run, _ := step["run"].(string)
@@ -1158,6 +1185,7 @@ func TestFullFallbackPreservesPinnedMainJobs(t *testing.T) {
 				}
 			}
 			normalizeAEON933InstallBounds(t, id, j)
+			normalizeAEON1605BackendReadiness(t, id, j)
 			if id != "web-setup" { // Already proved and projected by normalizeParallelWebSetup.
 				normalizeAEON1018Classification(t, id, j)
 			}

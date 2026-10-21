@@ -4,6 +4,7 @@ import { browserPolicy, headlessChromium } from './playwright.policy.ts'
 
 export default defineConfig({
   ...browserPolicy(process.env),
+  globalSetup: '../scripts/ci/e2e-stack-setup.mjs',
   testDir: './e2e',
   use: {
     ...headlessChromium,

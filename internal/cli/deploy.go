@@ -15,7 +15,7 @@ func (rt *runtime) cmdDeploy() *Command {
 	var project, environment, sha, version string
 	return &Command{Name: "deploy", Short: "Record verified live deployments", Use: "deploy record --project PROJECT --env ENV --sha SHA [--version VERSION]", subs: []*Command{
 		{Name: "record", Short: "Record a completed live check and deliver merged tickets", Use: "deploy record --project PROJECT --env ENV --sha SHA [--version VERSION]", maxArgs: 0,
-			Long: "Run after OPS has verified the deployment live. Requires releases.deploy for the project. Uses the linked delivery repository and verified commit ancestry; never deploys or approves a release. Retries for the same project, environment and full SHA return the original confirmation. Human checks and ticket states that cannot advance are reported without changing them.",
+			Long: "Run after OPS has verified the deployment live. Requires releases.deploy for the project. An agent key also needs the releases.deploy scope, granted by a person and absent from new keys. Uses the linked delivery repository and verified commit ancestry; never deploys or approves a release. Retries for the same project, environment and full SHA return the original confirmation. Human checks and ticket states that cannot advance are reported without changing them.",
 			addFlags: func(fs *flagSet) {
 				fs.string(&project, "project", 0, "project key or UUID")
 				fs.string(&environment, "env", 0, "deployment environment or destination")

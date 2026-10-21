@@ -14,6 +14,7 @@ import (
 
 	"github.com/inspr-at/paimos/internal/httpapi"
 	"github.com/inspr-at/paimos/internal/nativecontract"
+	"github.com/inspr-at/paimos/internal/nativereceipts"
 	"github.com/inspr-at/paimos/internal/nativesessions/stream"
 	"github.com/inspr-at/paimos/internal/nativestream"
 	"github.com/inspr-at/paimos/internal/reportercontract"
@@ -370,6 +371,10 @@ func (m *Module) validateResponse(schema string, result any) error {
 }
 
 func nativeError(w http.ResponseWriter, err error) {
+	var receiptError *nativereceipts.Error
+	if errors.As(err, &receiptError) {
+		err = &nativecontract.ValidationError{Reason: receiptError.Reason, Path: "$"}
+	}
 	status, reason := http.StatusServiceUnavailable, nativecontract.ReasonNativeFailure
 	var invalid *nativecontract.ValidationError
 	var large *http.MaxBytesError

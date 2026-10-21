@@ -205,7 +205,7 @@ func servePairedContext(ctx context.Context, root string, capacityInterval time.
 	}
 	defer logStore.Close()
 	diagnostic := verificationLog(logStore)
-	s, err := agentd.NewSupervisor(ctx, agentd.Config{VerificationDiagnostic: diagnostic, StepUps: stepUps, CapacityInterval: capacityInterval, API: remote, StateRoot: state, DaemonID: c.DaemonID, Workspace: c.Workspace, Accounts: accounts, Adapters: adapters, EstimatedUnits: map[string]int64{"requests": 1},
+	s, err := agentd.NewSupervisor(ctx, agentd.Config{NativeSessions: pairedNativeSessions(ctx, remote, c), VerificationDiagnostic: diagnostic, StepUps: stepUps, CapacityInterval: capacityInterval, API: remote, StateRoot: state, DaemonID: c.DaemonID, Workspace: c.Workspace, Accounts: accounts, Adapters: adapters, EstimatedUnits: map[string]int64{"requests": 1},
 		PollDiagnostic: func(reason string) {
 			slog.Warn("agentd polling diagnostic", "reason", reason)
 			diagnostic("", "", "poll_blocked", reason)

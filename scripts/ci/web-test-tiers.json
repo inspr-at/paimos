@@ -6368,6 +6368,20 @@
     ,
     {"kind":"browser","file":"tests/aeon-1473-desk-tab.spec.ts","name":"AEON-1473: reduced motion changes only the number, visible or in the background","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
+    {"kind":"browser","file":"tests/aeon-1474-desk-push-ui.spec.ts","name":"AEON-1474 Desk dismissal persists and an enabled browser gets no offer","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/aeon-1474-desk-push-ui.spec.ts","name":"AEON-1474 Settings and Desk remain still with EN and DE copy at phone tablet and desktop widths in both themes","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/aeon-1474-desk-push-ui.spec.ts","name":"AEON-1474 Settings prompts only on click and independently enables disables and removes Desk devices","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/aeon-1474-desk-push-ui.spec.ts","name":"AEON-1474 a browser that already allows notifications shows the Desk without waiting for the offer read","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/aeon-1474-desk-push-ui.spec.ts","name":"AEON-1474 rejected writes and refused prompts keep the previous state in place and never announce success","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/aeon-1474-desk-push-ui.spec.ts","name":"AEON-1474 the Desk decides its offer before the tabs show, without a band or a late offer","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/aeon-1474-desk-push-ui.spec.ts","name":"AEON-1474 unavailable blocked unsupported and iOS states never prompt or expose a dead iPhone switch","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
     {"kind":"browser","file":"tests/aeon-1502-approve-harness.spec.ts","name":"AEON-1502 a harness that is not signed in shows disabled and is never checked","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
     {"kind":"browser","file":"tests/aeon-1502-approve-harness.spec.ts","name":"AEON-1502 add one harness 1280x800 de dark: one sentence, Add or Deny, today's payload","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
@@ -18601,6 +18615,14 @@
     {"kind":"vitest","file":"tests/desk-empty-state.unit.test.ts","name":"Decision Desk empty state > keeps the empty desk incomplete when session discovery fails, until a successful retry","tier":"ESSENTIAL"}
     ,
     {"kind":"vitest","file":"tests/desk-empty-state.unit.test.ts","name":"Decision Desk empty state > names the source that did not answer, so an empty read is never all clear","tier":"ESSENTIAL"}
+    ,
+    {"kind":"vitest","file":"tests/desk-notifications.unit.test.ts","name":"Denied permission and an identity abort between browser work and POST cannot persist a Desk subscription","tier":"ESSENTIAL"}
+    ,
+    {"kind":"vitest","file":"tests/desk-notifications.unit.test.ts","name":"Desk off posts an explicit flag without prompting registering unsubscribing or touching phone preferences","tier":"ESSENTIAL"}
+    ,
+    {"kind":"vitest","file":"tests/desk-notifications.unit.test.ts","name":"Desk offer requires every eligibility condition and tolerates unavailable browser storage","tier":"ESSENTIAL"}
+    ,
+    {"kind":"vitest","file":"tests/desk-notifications.unit.test.ts","name":"iPhone and iPad require the Home Screen while standalone and desktop browsers remain eligible","tier":"ESSENTIAL"}
     ,
     {"kind":"vitest","file":"tests/display-home.unit.test.ts","name":"only the Display menu mounts the display editors","tier":"ESSENTIAL"}
     ,

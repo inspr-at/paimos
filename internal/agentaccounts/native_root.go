@@ -323,14 +323,66 @@ func ReserveNativeRootTx(ctx context.Context, tx pgx.Tx, in NativeAdmission, ses
 	return &id, err
 }
 
+// AbandonNativeRootTx settles a verified no-fork abandonment in the caller's
+// fenced transaction: the root never reached a provider, so it consumed
+// nothing. It releases the occupancy, returns exactly the window holds it
+// reserved and leaves period-usage estimates, like an unstarted cancelled run.
+// Only the owning lifecycle service, after verifying no fork, may call it.
+func AbandonNativeRootTx(ctx context.Context, tx pgx.Tx, account, session, epoch string, at time.Time) error {
+	// The account row serialises this unwind with admission's reservation.
+	if _, err := tx.Exec(ctx, `SELECT 1 FROM agent_accounts WHERE id=$1 FOR NO KEY UPDATE`, account); err != nil {
+		return err
+	}
+	var raw []byte
+	err := tx.QueryRow(ctx, `UPDATE native_session_roots SET released_at=$4,hold_state='abandoned'
+ WHERE owned_session_id=$1 AND runtime_epoch=$2 AND account_id=$3 AND released_at IS NULL AND run_id IS NULL
+ RETURNING coalesce(budget_holds,'[]'::jsonb)`, session, epoch, account, at).Scan(&raw)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return nativeDenial(nativecontract.ReasonOwnershipUnconfirmed)
+	}
+	if err != nil {
+		return err
+	}
+	var holds []nativeBudgetHold
+	if len(raw) > 1<<20 || json.Unmarshal(raw, &holds) != nil || len(holds) > 4096 {
+		return nativeDenial(nativecontract.ReasonIdentityMismatch)
+	}
+	units := map[string]int64{}
+	ids := make([]string, 0, len(holds))
+	for _, h := range holds {
+		if h.ReservedUnits < 1 {
+			return nativeDenial(nativecontract.ReasonIdentityMismatch)
+		}
+		if _, ok := units[h.WindowID]; !ok {
+			ids = append(ids, h.WindowID)
+		}
+		units[h.WindowID] += h.ReservedUnits
+	}
+	// Windows are locked in ID order, as at reservation. A hold may sit on a
+	// shared login's window and is returned like its own; the CHECK on
+	// reserved refuses any unwind below zero instead of inventing headroom.
+	slices.Sort(ids)
+	for _, id := range ids {
+		tag, err := tx.Exec(ctx, `UPDATE account_allowance_windows SET reserved=reserved-$2 WHERE id=$1`, id, units[id])
+		if err != nil {
+			return err
+		}
+		if tag.RowsAffected() != 1 {
+			return nativeDenial(nativecontract.ReasonIdentityMismatch)
+		}
+	}
+	return nil
+}
+
 // nativeLimitHeldTx makes native roots visible to the existing worker/router
 // and account projections too. Active roots retain their saved estimate across
 // periods; without native telemetry a confirmed exit retains the overlapping
 // period's estimate. A fresh vendor reading can reconcile an exited percent
-// hold, exactly as for legacy blind runs. Workers never enter this sum.
+// hold, exactly as for legacy blind runs. Workers never enter this sum, nor
+// does a verified no-fork abandonment, which never reached a provider.
 const capacityNativeHeldSQL = `SELECT coalesce(sum(coalesce((r.account_limit_estimates->>$5)::bigint,$6)),0)::float8
  FROM native_session_roots r WHERE r.account_id=$1 AND r.run_id IS NULL AND r.owned_session_id::text<>$2
- AND (r.released_at IS NULL OR
+ AND r.hold_state IS DISTINCT FROM 'abandoned' AND (r.released_at IS NULL OR
  ($5='runs' AND r.created_at>=$3 AND r.created_at<=$4) OR
  ($5<>'runs' AND r.created_at<=$4 AND r.released_at>=$3 AND
  ($5<>'percent' OR NOT EXISTS(SELECT 1 FROM account_capacity_readings c

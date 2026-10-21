@@ -20,6 +20,20 @@ type ReportSink interface {
 // journaled, reconstructed or reinjected. Only one flusher per Store is allowed
 // by the supervisor; a mismatched ack never advances the durable report offset.
 func (s *Store) FlushReports(ctx context.Context, b nativecontract.Binding, limit int, sink ReportSink) (int, error) {
+	return s.flush(ctx, b, "", limit, sink)
+}
+
+// FlushOperationReports flushes only one operation's reports, in order. An
+// owner whose other reports are refused for good uses it for a stop, so the
+// exit receipt that settles the process is not held behind them.
+func (s *Store) FlushOperationReports(ctx context.Context, b nativecontract.Binding, operationID string, limit int, sink ReportSink) (int, error) {
+	if operationID == "" {
+		return 0, Fail(nativecontract.ReasonInvalidInput)
+	}
+	return s.flush(ctx, b, operationID, limit, sink)
+}
+
+func (s *Store) flush(ctx context.Context, b nativecontract.Binding, operationID string, limit int, sink ReportSink) (int, error) {
 	if limit < 1 || limit > 100 || sink == nil {
 		return 0, Fail(nativecontract.ReasonInvalidInput)
 	}
@@ -34,7 +48,7 @@ func (s *Store) FlushReports(ctx context.Context, b nativecontract.Binding, limi
 		}
 		i := -1
 		for j, in := range s.entries {
-			if in.Receipt.Binding.Equal(b) && in.ReportOffset < len(in.Reports) {
+			if in.Receipt.Binding.Equal(b) && (operationID == "" || in.Receipt.OperationID == operationID) && in.ReportOffset < len(in.Reports) {
 				i = j
 				break
 			}
