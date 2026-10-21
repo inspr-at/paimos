@@ -145,6 +145,21 @@ describe('account catalog contract', () => {
     expect(view.status.detail).toContain('no allowance headroom')
     expect(view.status.detail).toContain('does not switch to another')
     expect(allowanceWindowLabel(window(5))).not.toContain('secret')
+
+    const inactive = catalog([account({ state: 'unavailable', last_probe_ok: false, available: false, unavailable_reasons: ['state', 'probe'], wait: { code: 'sign_in', run_now_allowed: false } })])
+    inactive.hosts[0].harnesses[0].harness = 'claude'
+    const login = presented(inactive).view
+    for (const text of [login.accounts[0].label, login.notes.account, login.status.label]) {
+      expect(text).toContain('Inactive login; switch to this account or sign in on the computer to use it')
+      expect(text).not.toContain('Settings')
+    }
+    expect(login.profileId).toBe(profileA)
+    expect(login.status.detail).toContain('can queue')
+    inactive.hosts[0].harnesses[0].accounts[0].wait = { code: 'state', run_now_allowed: false }
+    expect(presented(inactive).view.status.label).toContain('Paused in Settings / Accounts')
+    inactive.hosts[0].harnesses[0].harness = 'codex'
+    inactive.hosts[0].harnesses[0].accounts[0].wait = { code: 'sign_in', run_now_allowed: false }
+    expect(presented(inactive).view.status.label).toBe('Sign in again on the computer')
   })
 
   it('reads the ticket work type and does not guess an author family', () => {

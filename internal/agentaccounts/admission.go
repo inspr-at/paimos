@@ -53,7 +53,9 @@ func admissionInputs(ctx context.Context, tx pgx.Tx, a Account, all []Window, no
 			return nil, wait, err
 		}
 	}
-	if a.State != "available" {
+	// A deliberate pause wins over a probe failure. An unavailable login can
+	// still explain a confirmed sign-out before falling back to generic state.
+	if a.State != "available" && a.State != "unavailable" {
 		return nil, waitFor("state"), nil
 	}
 	if a.LastProbeOK != nil && !*a.LastProbeOK {
@@ -66,7 +68,13 @@ func admissionInputs(ctx context.Context, tx pgx.Tx, a Account, all []Window, no
 		if failure == "auth_failed" {
 			return nil, waitFor("sign_in"), nil
 		}
+		if a.State != "available" {
+			return nil, waitFor("state"), nil
+		}
 		return nil, waitFor("offline"), nil
+	}
+	if a.State != "available" {
+		return nil, waitFor("state"), nil
 	}
 	if !probeFresh(a, now) {
 		return nil, waitFor("offline"), nil
