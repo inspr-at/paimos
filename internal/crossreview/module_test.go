@@ -408,12 +408,22 @@ func TestCompletedBuilderAutomaticallyRequestsIndependentReview(t *testing.T) {
 				return tx.QueryRow(t.Context(), `INSERT INTO agent_runs(tenant_id,work_order_id,agent_principal_id,model_profile_id,requested_model,status,account_id,daemon_id,daemon_generation,started_at)
        SELECT $1,$2,$3,p.id,p.model,'running',$4,'review-daemon','review-generation',clock_timestamp() FROM model_profiles p WHERE p.family='openai' AND p.version='test-version' RETURNING id::text`, f.person.TenantID, order.NodeID, f.agent.ID, f.account).Scan(&source)
 			})
+			f.tx(t, func(tx pgx.Tx) error {
+				return agentruns.SetActingPersonTx(t.Context(), tx, f.person.TenantID, source, f.person.ID)
+			})
 			report := agentruns.Telemetry{Sequence: 1, Kind: "finished", Status: "completed", ReviewRange: &reviewgate.CommitRange{Repository: "example/review-fixture", BaseSHA: strings.Repeat("a", 40), HeadSHA: strings.Repeat("b", 40)}}
 			f.call(t, f.agent, "POST", "/api/runs/"+source+"/telemetry", report, 200, nil)
 			var rows []Review
 			f.call(t, f.person, "GET", "/api/nodes/"+f.ticket+"/reviews", nil, 200, &rows)
 			if len(rows) != 1 || rows[0].AuthorRunID == nil || *rows[0].AuthorRunID != source || rows[0].AuthorFamily != "openai" || rows[0].RunID == nil {
 				t.Fatal("builder completion did not queue the exact independent review")
+			}
+			var reviewPerson string
+			f.tx(t, func(tx pgx.Tx) error {
+				return tx.QueryRow(t.Context(), `SELECT acting_person_id::text FROM agent_runs WHERE id=$1`, *rows[0].RunID).Scan(&reviewPerson)
+			})
+			if reviewPerson != f.person.ID {
+				t.Fatal("review did not inherit its producing run's person")
 			}
 			created := rows[0]
 			if created.TicketID != f.ticket || created.RequestID != source || created.Repository != report.ReviewRange.Repository || created.BaseSHA != report.ReviewRange.BaseSHA || created.HeadSHA != report.ReviewRange.HeadSHA || created.Status != "queued" || created.GateOpen || created.ReviewerFamily == nil || *created.ReviewerFamily != "anthropic" {

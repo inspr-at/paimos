@@ -3006,6 +3006,10 @@
     ,
     {"kind":"go","package":"internal/agentruns","name":"TestRunNowIsPersonOnlyAuditedAndRunScoped","tier":"GATED-FULL"}
     ,
+    {"kind":"go","package":"internal/agentruns","name":"TestRunPersonRecoveryAndChildInheritServerRun","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/agentruns","name":"TestRunPersonStartPathSourcesAndUnresolvedRefusal","tier":"ESSENTIAL"}
+    ,
     {"kind":"go","package":"internal/agentruns","name":"TestRunRowVersionGrowsInTheTransactionThatChangesTheRow","tier":"GATED-FULL"}
     ,
     {"kind":"go","package":"internal/agentruns","name":"TestRunStoresCachedAndReasoningTokens","tier":"GATED-FULL"}

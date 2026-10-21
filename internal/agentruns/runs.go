@@ -469,6 +469,13 @@ func createRun(r *http.Request, tx pgx.Tx, p tenant.Principal, deferred *[]func(
 	if err := tx.QueryRow(ctx, `SELECT parent_id::text,project_id::text FROM nodes WHERE id=$1`, o.NodeID).Scan(&ticket, &project); err != nil {
 		return nil, err
 	}
+	projectID := ""
+	if project != nil {
+		projectID = *project
+	}
+	if err := authz.RequireTx(ctx, tx, p, "run.create", authz.Scope{ProjectID: projectID}); err != nil {
+		return nil, err
+	}
 	// The caller holds the tenant/tree fence and order lock through insertion.
 	// Explicit person starts keep every existing permission and daemon check;
 	// agent keys must still use the lead's dispatch path.

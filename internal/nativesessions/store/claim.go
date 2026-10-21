@@ -192,9 +192,9 @@ func (s *Store) Claim(ctx context.Context, daemon nativecontract.DaemonActor, in
 				}
 			}
 		}
-		owner, err := workqueue.ResolveRunPersonTx(ctx, tx, p, "native_intent", r.OperationID)
-		if err != nil {
-			return err
+		owner := r.OwnerPersonID
+		if !workorders.UUID(owner) {
+			return &workqueue.PersonAdmissionError{Code: "run_person_unresolved"}
 		}
 		if owner != grant.OwnerPersonID {
 			return fail(409, nativecontract.ReasonIdentityMismatch)

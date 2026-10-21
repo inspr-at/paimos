@@ -104,12 +104,12 @@ func EnqueueSystem(ctx context.Context, tx pgx.Tx, p tenant.Principal, nodeID st
 	if err != nil {
 		return nil, err
 	}
-	binding, err := SetActingPersonTx(ctx, tx, p.TenantID, runID, person, "routine")
+	personBinding, err := SetActingPersonTx(ctx, tx, p.TenantID, runID, person, "routine")
 	if err != nil {
 		return nil, err
 	}
-	if binding != nil {
-		changes = append(changes, *binding)
+	if personBinding != nil {
+		changes = append(changes, *personBinding)
 	}
 	if err := tx.QueryRow(ctx, `SELECT to_jsonb(agent_runs)-'tenant_id' FROM agent_runs WHERE id=$1`, runID).Scan(&run); err != nil {
 		return nil, err

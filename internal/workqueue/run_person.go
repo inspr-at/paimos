@@ -132,6 +132,16 @@ func RequireRunPersonTx(ctx context.Context, tx pgx.Tx, daemon tenant.Principal,
 	if person == nil {
 		return nil
 	}
+	if daemon.KeyPersonID != "" && daemon.KeyPersonID != *person {
+		return &PersonAdmissionError{Code: "permission_revoked"}
+	}
+	var canonical bool
+	if err := tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM principals WHERE tenant_id=$1 AND id=$2 AND kind='person' AND status='active' AND linked_to IS NULL)`, daemon.TenantID, *person).Scan(&canonical); err != nil {
+		return err
+	}
+	if !canonical {
+		return &PersonAdmissionError{Code: "permission_revoked"}
+	}
 	projectID := ""
 	if project != nil {
 		projectID = *project
