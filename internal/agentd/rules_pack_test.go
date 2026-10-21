@@ -212,7 +212,21 @@ func testPinnedSupervisor(t *testing.T) (*Supervisor, *packStartAPI, *fakeProces
 	base := &fakeAPI{run: Run{ID: "run", WorkOrderID: c.TaskID, AgentPrincipalID: c.AgentID, ModelProfileID: "profile", Status: "queued"}, profile: Profile{ID: "profile", Harness: Codex, Model: "model", Effort: "high"}}
 	api := &packStartAPI{managedRulesFixture: &managedRulesFixture{fakeAPI: base, bundle: m}, context: c}
 	process := &fakeProcess{stopped: make(chan struct{})}
-	s, err := NewSupervisor(context.Background(), Config{API: api, StateRoot: t.TempDir(), DaemonID: "daemon", Workspace: r.dir, Adapters: []Adapter{&fakeAdapter{proc: process}}, EstimatedUnits: map[string]int64{"requests": 1}, Accounts: []EnrolledAccount{{ID: "account", Key: "local", Harness: Codex}}})
+	// Go's TempDir child is 0777 before umask, so CI's 0022 umask leaves it
+	// 0755. The state root must be a private 0700 directory or OpenStore refuses it.
+	root, err := filepath.EvalSymlinks(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	state := filepath.Join(root, "state")
+	if err = os.Mkdir(state, 0700); err != nil {
+		t.Fatal(err)
+	}
+	workspace, err := filepath.EvalSymlinks(r.dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	s, err := NewSupervisor(context.Background(), Config{API: api, StateRoot: state, DaemonID: "daemon", Workspace: workspace, Adapters: []Adapter{&fakeAdapter{proc: process}}, EstimatedUnits: map[string]int64{"requests": 1}, Accounts: []EnrolledAccount{{ID: "account", Key: "local", Harness: Codex}}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -252,5 +266,18 @@ func TestPinnedRulesWithoutCheckoutRequirePin(t *testing.T) {
 	}
 	if _, err = s.prepareClaudeRules(t.Context(), entry, api.run, Profile{Harness: Claude}, preparedRun{workspace: workspace}, &prompt, nil); !errors.Is(err, ErrRulesRepository) {
 		t.Fatal("invalid repository silently dropped delta", err)
+	}
+}
+
+// Risk: labelling the pairing probe changes the exact instruction the adapter
+// and the model are bound to, while skipping the pack would launch without the floor.
+func TestPinnedRulesVerificationProbeKeepsImmutableTask(t *testing.T) {
+	s, api, _ := testPinnedSupervisor(t)
+	entry := &owned{harness: HarnessSession{ProjectID: api.context.ProjectID}}
+	prompt := VerificationTask
+	run := Run{WorkOrderID: api.context.TaskID, Purpose: VerificationPurpose, VerificationTask: VerificationTask}
+	body, err := s.prepareClaudeRules(t.Context(), entry, run, Profile{Harness: Claude}, preparedRun{workspace: t.TempDir()}, &prompt, nil)
+	if err != nil || prompt != VerificationTask || !strings.HasPrefix(body, hardSafetyFloor) || !strings.Contains(body, "Company rules.") || strings.Contains(body, "author: coordinator") {
+		t.Fatal("verification probe changed its task or dropped the floor", err)
 	}
 }

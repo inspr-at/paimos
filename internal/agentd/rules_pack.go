@@ -188,7 +188,12 @@ func (s *Supervisor) prepareClaudeRules(ctx context.Context, entry *owned, run R
 	if err != nil {
 		return "", err
 	}
-	*prompt = labelledTask(*prompt)
+	// Pairing verification is an immutable probe. Relabelling it would change
+	// the exact task the adapter and the model are bound to. Coordinator tasks
+	// still get the author boundary.
+	if *prompt != VerificationTask {
+		*prompt = labelledTask(*prompt)
+	}
 	return body, nil
 }
 

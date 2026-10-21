@@ -1958,6 +1958,8 @@
     ,
     {"kind":"go","package":"internal/agentd","name":"TestPinnedRulesTaskAndMessageAuthorLabels","tier":"ESSENTIAL"}
     ,
+    {"kind":"go","package":"internal/agentd","name":"TestPinnedRulesVerificationProbeKeepsImmutableTask","tier":"ESSENTIAL"}
+    ,
     {"kind":"go","package":"internal/agentd","name":"TestPinnedRulesWithoutCheckoutRequirePin","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/agentd","name":"TestPollContextErrorCausesDoNotConsumePendingProbe","tier":"GATED-FULL"}
