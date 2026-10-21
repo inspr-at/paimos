@@ -36,12 +36,12 @@ test('fixture worker interrupted by its owning test', { timeout: 30000 }, async 
       if (phase === 'recovery') {
         const exited = new Promise(resolve => child.once('exit', resolve))
         child.kill('SIGKILL'); await exited
-        const reaper = fixtures.spawn(process.execPath, args('normal'), { stdio: 'ignore' })
-        await until(() => {
-          if (!existsSync(`${lock}.guard`)) return false
-          const entries = readdirSync(`${lock}.guard`)
-          return entries.length === 1 && JSON.parse(readFileSync(join(`${lock}.guard`, entries[0]), 'utf8')).pid === reaper.pid
-        })
+        const barrier = join(directory, 'recovering')
+        const reaper = fixtures.spawn(process.execPath, args('normal'), { stdio: 'ignore', env: { ...process.env, AEON_FIXTURE_RECOVERY_BARRIER: barrier } })
+        await until(() => existsSync(barrier))
+        const entries = readdirSync(`${lock}.guard`)
+        assert.equal(entries.length, 1)
+        assert.equal(JSON.parse(readFileSync(join(`${lock}.guard`, entries[0]), 'utf8')).pid, reaper.pid)
       }
       writeFileSync(join(directory, 'ready'), JSON.stringify({ ...worker, groups: fixtures.snapshot() }))
     }

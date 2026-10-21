@@ -12,12 +12,12 @@ function stubBin(state) {
     writeFileSync(path, body)
     chmodSync(path, 0o755)
   }
-  write('sudo', `#!/bin/bash
+  write('sudo', `#!/usr/bin/env bash
 [[ "\${1:-}" == "--" ]] && shift
 export AEON_AS_ROOT=1
 exec "$@"
 `)
-  write('timeout', `#!/bin/bash
+  write('timeout', `#!/usr/bin/env bash
 state=\${AEON_STUB_STATE:?}
 while [[ "\${1:-}" == --* ]]; do
   if [[ "\$1" == "--kill-after" ]]; then shift 2; else shift; fi
@@ -45,7 +45,7 @@ for _ in 1 2 3 4 5 6 7 8 9 10; do
 done
 exit 124
 `)
-  const hold = `#!/bin/bash
+  const hold = `#!/usr/bin/env bash
 state=\${AEON_STUB_STATE:?}
 printf '%s\\n' "\$*" >> "\$state/calls"
 if [[ -f "\$state/lock" ]]; then
@@ -93,7 +93,7 @@ export function aptFixture({ mode, shells = false }) {
   writeFileSync(join(state, 'calls'), '')
   const bin = stubBin(state)
   if (shells) {
-    for (const name of ['fish', 'zsh']) writeFileSync(join(bin, name), '#!/bin/bash\nexit 0\n', { mode: 0o755 })
+    for (const name of ['fish', 'zsh']) writeFileSync(join(bin, name), '#!/usr/bin/env bash\nexit 0\n', { mode: 0o755 })
   }
   return { state, env: {
     // The stubs stay first; Node's ownership preload also needs ps on Nix.
