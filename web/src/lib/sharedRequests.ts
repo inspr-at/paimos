@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
-import { onReset } from './position'
-import { watchStreamHealth } from './streamHealth'
-import { usePoller } from './usePolledData'
+import { onReset } from './position.ts'
+import { watchStreamHealth } from './streamHealth.ts'
+import { usePoller } from './usePolledData.ts'
 
 export const RECONCILE_MS = 120_000
 export const REFRESH_BATCH_MS = 400

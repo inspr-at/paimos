@@ -159,3 +159,41 @@ test('R2 failures retain HTTP status and tolerate non-JSON error bodies', async 
   globalThis.fetch = async () => new Response('Unavailable', { status: 502 })
   await assert.rejects(getRun('run-1'), /Request failed \(502\)/)
 })
+
+// Risk: agents.ts now shares this transport; an unresolved transitive import
+// prevents native Node unit tests and the CI catalogue from loading it at all.
+test('AEON-1117 native Node consumers share the browser event transport', async () => {
+  const { subscribeBrowserEvents } = await import('../src/lib/sharedRequests.ts')
+  const original = Object.getOwnPropertyDescriptor(globalThis, 'EventSource')
+  const sources: Source[] = []
+  class Source extends EventTarget {
+    closed = false
+    constructor(url: string) {
+      super()
+      assert.equal(url, '/api/events/stream?after=latest')
+      sources.push(this)
+    }
+    close() { this.closed = true }
+  }
+  Object.defineProperty(globalThis, 'EventSource', { configurable: true, value: Source })
+  const first: string[] = [], second: string[] = []
+  const stopFirst = subscribeBrowserEvents(['queue.added'], type => first.push(type!))
+  const stopSecond = subscribeBrowserEvents(['queue.added'], type => second.push(type!))
+  try {
+    assert.equal(sources.length, 1)
+    sources[0]!.dispatchEvent(new Event('queue.added'))
+    assert.deepEqual(first, ['queue.added'])
+    assert.deepEqual(second, ['queue.added'])
+    stopFirst()
+    assert.equal(sources[0]!.closed, false)
+    sources[0]!.dispatchEvent(new Event('queue.added'))
+    assert.deepEqual(first, ['queue.added'])
+    assert.deepEqual(second, ['queue.added', 'queue.added'])
+    stopSecond()
+    assert.equal(sources[0]!.closed, true)
+  } finally {
+    stopFirst(); stopSecond()
+    if (original) Object.defineProperty(globalThis, 'EventSource', original)
+    else Reflect.deleteProperty(globalThis, 'EventSource')
+  }
+})

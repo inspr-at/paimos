@@ -16064,6 +16064,8 @@
     ,
     {"kind":"node","file":"tests/agents-cleanup.test.ts","name":"a revoked or never-confirmed computer can be removed by a person who manages accounts","tier":"GATED-FULL"}
     ,
+    {"kind":"node","file":"tests/api.test.ts","name":"AEON-1117 native Node consumers share the browser event transport","tier":"ESSENTIAL"}
+    ,
     {"kind":"node","file":"tests/api.test.ts","name":"API requests use same-origin credentials, no cache and a timeout signal","tier":"ESSENTIAL"}
     ,
     {"kind":"node","file":"tests/api.test.ts","name":"R1 mutations send JSON, tolerate 204, and surface API failures","tier":"ESSENTIAL"}
