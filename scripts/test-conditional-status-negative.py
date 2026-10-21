@@ -3,7 +3,7 @@
 """Go -exec wrapper proving the concurrent-cancel regression detects no CAS.
 
 Run only through the approved remote-test.sh runner, for internal/nodes:
-  -exec 'python3 ../../scripts/test-conditional-status-negative.py'
+  -exec=../../scripts/test-conditional-status-negative.py
   -run '^TestConditionalStatusPreservesConcurrentCancel$' ./internal/nodes
 Only an owned temporary overlay is changed. No negative-control commit exists.
 """
