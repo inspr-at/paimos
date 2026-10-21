@@ -3628,6 +3628,8 @@
     ,
     {"kind":"go","package":"internal/approvals","name":"TestLiveGrantRejectsBadIDs","tier":"GATED-FULL"}
     ,
+    {"kind":"go","package":"internal/approvals","name":"TestNativeConsentRequiresCurrentPersonApproval","tier":"ESSENTIAL"}
+    ,
     {"kind":"go","package":"internal/approvals","name":"TestOptionalDeployTargetRoundTrip","tier":"GATED-FULL"}
     ,
     {"kind":"go","package":"internal/approvals","name":"TestProjectScopedApprovalNames","tier":"GATED-FULL"}
@@ -8649,6 +8651,8 @@
     {"kind":"go","package":"internal/nativesessions/receipts","name":"TestFinalDrainRevocationWinsBeforeFinalWrite","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/nativesessions/receipts","name":"TestNativePilotDeliveryPersistsFinalAndKeepsHoldThroughDetach","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/nativesessions/receipts","name":"TestProductionReceiptAuthorityRechecksConsentAndExactEvidence","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/nativesessions/receipts","name":"TestReceiptProjectionRejectsQueueAsDeliveryAndScopesPages","tier":"ESSENTIAL"}
     ,
