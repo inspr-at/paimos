@@ -4,7 +4,6 @@ package nodes
 import (
 	"context"
 	"encoding/json"
-	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -92,13 +91,11 @@ func TestConditionalStatusPreservesConcurrentCancel(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer pool.Close()
+	defer func() { unblock(); cancel(); pool.Close() }()
 	mux := http.NewServeMux()
 	New(pool, nil).Mount(mux)
 	r := httptest.NewRequest("PATCH", path, strings.NewReader(`{"state":"in_progress","expected_states":["open","qa"],"title":"Must not change","fields":{"priority":"low"}}`))
 	r = r.WithContext(tenant.WithPrincipal(ctx, p))
-	// A stale revision must not hide the more specific status conflict.
-	r.Header.Set("If-Unmodified-Since", n.UpdatedAt.Format(time.RFC3339Nano))
 	result := make(chan *httptest.ResponseRecorder, 1)
 	go func() {
 		w := httptest.NewRecorder()
@@ -134,6 +131,15 @@ func TestConditionalStatusPreservesConcurrentCancel(t *testing.T) {
 	if updates != 3 { // successful start, reopen, cancel; no rejected PATCH event
 		t.Fatalf("conditional refusal appended an event: %d", updates)
 	}
+	// A stale revision must not hide the more specific status conflict.
+	r = httptest.NewRequest("PATCH", path, strings.NewReader(`{"state":"in_progress","expected_states":["open","qa"]}`))
+	r = r.WithContext(tenant.WithPrincipal(t.Context(), p))
+	r.Header.Set("If-Unmodified-Since", n.UpdatedAt.Format(time.RFC3339Nano))
+	w = httptest.NewRecorder()
+	mux.ServeHTTP(w, r)
+	if w.Code != 409 || !strings.Contains(w.Body.String(), `"current_state":"cancelled"`) {
+		t.Fatalf("revision hid status conflict: %d %s", w.Code, w.Body.String())
+	}
 	// Even a matching status cannot bypass the independent revision check.
 	r = httptest.NewRequest("PATCH", path, strings.NewReader(`{"state":"open","expected_states":["cancelled"]}`))
 	r = r.WithContext(tenant.WithPrincipal(t.Context(), p))
@@ -157,6 +163,6 @@ func TestConditionalStatusPreservesConcurrentCancel(t *testing.T) {
 	// Existing clients can still intentionally reopen without the precondition.
 	code, body = call(t, &p, "PATCH", path, `{"state":"open"}`)
 	if got := decode[nodeJSON](t, code, body, 200); got.State != "open" {
-		t.Fatal(fmt.Sprintf("unconditional behavior changed: %+v", got))
+		t.Fatalf("unconditional behavior changed: %+v", got)
 	}
 }

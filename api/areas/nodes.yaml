@@ -990,6 +990,8 @@ components:
     NodePatch:
       type: object
       minProperties: 1
+      dependentRequired:
+        expected_states: [state]
       properties:
         expected_states:
           type: array

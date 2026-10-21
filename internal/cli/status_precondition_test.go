@@ -22,6 +22,8 @@ func TestIssueConditionalStatusCarriesPreconditionAndConflict(t *testing.T) {
 		switch {
 		case r.Method == "GET" && r.URL.Path == "/api/node-keys/MEM-1":
 			_, _ = w.Write([]byte(`{"id":"` + transcriptEntryID + `","key":"MEM-1","kind_id":"work-kind","title":"Start me","state":"open","fields":{},"updated_at":"2026-10-21T00:00:00Z"}`))
+		case r.Method == "GET" && r.URL.Path == "/api/nodes" && r.URL.Query().Get("q") == "MEM-1":
+			_, _ = w.Write([]byte(`{"items":[{"id":"` + transcriptEntryID + `","key":"MEM-1","kind_id":"work-kind","title":"Start me","state":"open","fields":{},"updated_at":"2026-10-21T00:00:00Z"}]}`))
 		case r.Method == "GET" && r.URL.Path == "/api/kinds":
 			_, _ = w.Write([]byte(`{"items":[{"id":"work-kind","slug":"work"}]}`))
 		case r.Method == "PATCH" && r.URL.Path == "/api/nodes/"+transcriptEntryID:

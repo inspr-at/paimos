@@ -502,7 +502,7 @@ func patchExpectedStates(raw map[string]json.RawMessage) ([]string, error) {
 	}
 	var states []string
 	// Bound the encoded list as well as its decoded values before allocation.
-	if len(v) > 32*(128*6+4) || json.Unmarshal(v, &states) != nil || len(states) == 0 || len(states) > 32 {
+	if len(v) > 32*(128*12+16) || json.Unmarshal(v, &states) != nil || len(states) == 0 || len(states) > 32 {
 		return nil, badRequest("expected_states must contain 1 to 32 nonblank states of at most 128 characters")
 	}
 	for _, state := range states {
