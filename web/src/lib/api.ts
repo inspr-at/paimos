@@ -75,21 +75,23 @@ const pause = (ms: number, signal?: AbortSignal) => new Promise<void>((resolve, 
 // Public reads can use this without adding cookies or weakening their referrer policy.
 export async function resilientFetch(url: string, init: RequestInit = {}, timeoutMs = 10_000) {
   const method = init.method ?? 'GET'
+  // timeoutMs <= 0 is a leaving write: no AbortSignal.timeout, so unload cannot cancel it.
+  const bounded = timeoutMs > 0
   const invocationStarted = Date.now()
-  const gapLimit = Math.max(30_000, timeoutMs + 5_000)
+  const gapLimit = Math.max(30_000, (bounded ? timeoutMs : 10_000) + 5_000)
   for (let attempt = 0; ; attempt++) {
     if (Date.now() - invocationStarted > gapLimit) throw new StaleRequestError('Request crossed a long timer gap')
     const started = Date.now()
-    const timeout = AbortSignal.timeout(timeoutMs)
-    const signal = init.signal ? AbortSignal.any([init.signal, timeout]) : timeout
+    const timeout = bounded ? AbortSignal.timeout(timeoutMs) : undefined
+    const signal = timeout ? (init.signal ? AbortSignal.any([init.signal, timeout]) : timeout) : init.signal
     try {
-      const response = await fetch(url, { ...init, signal })
+      const response = await fetch(url, signal ? { ...init, signal } : init)
       if (Date.now() - started > gapLimit) throw new StaleRequestError('Request crossed a long timer gap')
       return response
     } catch (error) {
       if (Date.now() - started > gapLimit) throw new StaleRequestError('Request crossed a long timer gap')
       if (init.signal?.aborted) throw error
-      const failure = new RequestFailure(timeout.aborted ? 'timeout' : 'network', timeoutMs)
+      const failure = new RequestFailure(timeout?.aborted ? 'timeout' : 'network', bounded ? timeoutMs : 10_000)
       if (!retryable(method, failure) || attempt >= 2 || error instanceof StaleRequestError) {
         throw error instanceof StaleRequestError ? error : failure
       }

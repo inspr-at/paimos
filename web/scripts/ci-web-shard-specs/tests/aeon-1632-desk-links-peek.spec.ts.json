@@ -1,0 +1,13 @@
+{
+  "group": "remaining-ui",
+  "nightlyTiming": {
+    "seconds": 10,
+    "selectedTests": 5
+  },
+  "spec": {
+    "file": "tests/aeon-1632-desk-links-peek.spec.ts",
+    "listedTests": 6,
+    "weightSeconds": 11.097561,
+    "weightSource": "unmeasured-test-rate"
+  }
+}
