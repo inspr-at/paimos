@@ -33,6 +33,27 @@ import (
 	"github.com/jackc/pgx/v5"
 )
 
+type compositionStore struct {
+	*Store
+	t *testing.T
+}
+
+func (s compositionStore) Claim(ctx context.Context, d nativecontract.DaemonActor, in nativecontract.Claim) (nativecontract.ClaimResult, error) {
+	out, err := s.Store.Claim(ctx, d, in)
+	if err != nil {
+		s.t.Logf("claim refusal: %T %v", err, err)
+	}
+	return out, err
+}
+func (s compositionStore) DaemonRequest(r *http.Request) (context.Context, nativecontract.DaemonActor, error) {
+	ctx, d, err := s.Store.DaemonRequest(r)
+	p, _ := tenant.PrincipalFrom(r.Context())
+	if err != nil || ctx == nil || d.PrincipalID != p.ID || d.TenantID != p.TenantID || d.PrincipalKind != string(p.Kind) {
+		s.t.Logf("daemon request identity mismatch: %v", err)
+	}
+	return ctx, d, err
+}
+
 type compositionAPI struct {
 	agentd.API
 	f      *startFixture
@@ -142,7 +163,7 @@ func TestProductionCompositionStartsDeliversAndConfirmsExit(t *testing.T) {
 	f.s.authority = a
 	f.s.observer = PrivateObserver{}
 	f.s.BindProduction(a, repo, relay)
-	module, err := nativesessions.New(nativecontract.Services{Store: f.s, Frames: relay, Finals: f.s, Qualified: true})
+	module, err := nativesessions.New(nativecontract.Services{Store: compositionStore{f.s, t}, Frames: relay, Finals: f.s, Qualified: true})
 	if err != nil {
 		t.Fatal(err)
 	}
