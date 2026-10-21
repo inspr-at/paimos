@@ -192,7 +192,7 @@ function projectControls(page: Page, width: number): Record<string, Locator> {
       tabs: page.getByRole('tablist', { name: 'Project sections' }),
       view: bar.getByRole('button', { name: /^View: / }), search: bar.getByRole('button', { name: 'Search tickets', exact: true }),
       filter: bar.getByRole('button', { name: /^Filter(?: tickets|:)/ }), add: page.getByRole('button', { name: 'New ticket', exact: true }),
-      more: bar.getByRole('button', { name: 'More view actions', exact: true }),
+      overflow: bar.getByRole('button', { name: 'More view actions', exact: true }),
     }
   }
   return {
