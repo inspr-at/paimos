@@ -18,6 +18,7 @@ from pathlib import Path
 import re
 import shlex
 import subprocess
+import sys
 import tempfile
 import time
 import types
@@ -302,6 +303,15 @@ def integration_tests(sources):
             self.assertIn("claim_ticket", sources["dispatch.sh"])
             self.assertNotIn('issue update "$KEY" --status in_progress', sources["dispatch.sh"])
             self.assertIn('"refusing: ticket status unreadable"', sources["start-queue.sh"])
+
+        def test_patch_loads_adjacent_helper_when_imported_by_installer_tests(self):
+            # harness-install loads candidates with spec_from_file_location,
+            # without adding the candidate directory to sys.path.
+            namespace = {"__name__": "aeon1345_autopilot_test", "__file__": str(CODE / "autopilot.py")}
+            before = list(sys.path)
+            exec(compile(sources["autopilot.py"], "patched-autopilot", "exec"), namespace)
+            self.assertEqual(sys.path, before)
+            self.assertTrue(callable(namespace["conditional_status"].advance_qa))
 
         def test_ci_push_checks_cancel_after_github_reads(self):
             self.cancel_on = "gh pr list"

@@ -1,14 +1,17 @@
 --- a/autopilot.py
 +++ b/autopilot.py
-@@ -12,6 +12,7 @@
+@@ -12,6 +12,10 @@
  Excluded slugs (LEAD handles by hand): see EXCLUDE.
  """
  import calendar, datetime, json, os, re, subprocess, time, glob
-+import conditional_status
++import importlib.util
++_conditional_spec = importlib.util.spec_from_file_location("aeon_conditional_status", os.path.join(os.path.dirname(__file__), "conditional_status.py"))
++conditional_status = importlib.util.module_from_spec(_conditional_spec)
++_conditional_spec.loader.exec_module(conditional_status)
 
  S = '/Users/markus/.aeon/lead/aeon'
  W = '/Users/markus/Code/aeon-worktrees'
-@@ -173,16 +174,11 @@
+@@ -173,16 +177,11 @@
 
 
  def stopped_on_purpose(slug, brief):
@@ -30,7 +33,7 @@
 
 
  def capacity_only(slug):
-@@ -317,8 +313,11 @@
+@@ -317,8 +316,11 @@
      rc, out = sh(f"gh pr view {pr} --repo {R} --json mergeable --jq .mergeable")
      return rc == 0 and out.strip() == 'CONFLICTING'
 
@@ -43,7 +46,7 @@
      wt = f'{W}/{slug}'
      if os.path.exists(S + '/PAUSE-ENQUEUE'):
          return ('retry', '', 'PAUSE-ENQUEUE')
-@@ -338,6 +337,9 @@
+@@ -338,6 +340,9 @@
          rc, qn = sh("gh api graphql -f query='{repository(owner:\"inspr-at\",name:\"paimos\"){mergeQueue(branch:\"main\"){entries(first:50){nodes{pullRequest{number}}}}}}' --jq '.data.repository.mergeQueue.entries.nodes[].pullRequest.number'")
          if qp.strip() in qn.split():
              return ('error', '', f'PR #{qp.strip()} is in the merge queue; a new round cannot be pushed onto it')
@@ -53,7 +56,7 @@
      rc, out = sh(f'git push -q origin HEAD:work/{slug}', cwd=wt)
      if rc != 0:
          return ('error', '', 'push failed: ' + out[-160:])
-@@ -365,7 +367,8 @@
+@@ -365,7 +370,8 @@
 
 
  def register_precheck(st, slug, key, label):
@@ -63,7 +66,7 @@
      log(f'{slug}: {label} finished → CI-first: push + PR now, gate after green CI')
 
 
-@@ -449,6 +452,10 @@
+@@ -449,6 +455,10 @@
      if why:
          log(f'ESCALATE precheck request refused ({slug or "unparsable"}): {why}', esc=True)
          return 'refused', slug
@@ -74,7 +77,7 @@
      register_precheck(st, slug, key, 'LEAD decision (precheck request)')
      return 'taken', slug
 
-@@ -461,10 +468,16 @@
+@@ -461,10 +471,16 @@
          queued = ''
      for slug, e in list(pc.items()):
          key = e['key']
@@ -92,7 +95,7 @@
              if state == 'pushed':
                  e.update(state='ci', pr=pr, head=info, since=time.time())
                  log(f'{slug}: CI-first: pushed {info[:8]} to PR #{pr} (held PRECHECK); the gate waits for green CI')
-@@ -472,7 +485,7 @@
+@@ -472,7 +488,7 @@
                  if e['state'] != 'mm':
                      log(f'{slug}: CI-first: {info} → merge round queued; precheck resumes after it')
                  e['state'] = 'mm'
@@ -101,7 +104,7 @@
                  del pc[slug]
                  log(f'ESCALATE {slug}: CI-first precheck stopped: {info}', esc=True)
              elif state == 'retry' and e.get('waiting') != info:
-@@ -516,6 +529,8 @@
+@@ -516,6 +532,8 @@
                  sh(f'{S}/ci-fix.sh {e["pr"]} {key} {slug} >> {S}/qa/redsweep.log 2>&1')
                  log(f'{slug}: CI-first: PR #{e["pr"]} red on {e["head"][:8]} → ci-fix (no gate on a red head)')
              continue  # a fix round re-registers; a rerun turns green here; an escalation waits for LEAD
@@ -110,7 +113,7 @@
          prev = newest_review_for(slug)
          if prev:
              n = 1 + max([int(m.group(1)) for gl in glob.glob(f'{S}/qa/*-ap*') for m in [re.search(r'-ap(\d+)\.', os.path.basename(gl))] if m] or [0])
-@@ -566,6 +581,10 @@
+@@ -566,6 +584,10 @@
      if st is None:
          log(f'ESCALATE {slug}: ship needs coordinator state for safe precheck ownership; no push', esc=True)
          return False
@@ -121,7 +124,7 @@
      wt = f'{W}/{slug}'
      if os.path.exists(S + '/PAUSE-ENQUEUE'):
          log(f'{slug}: gate {rev} ok, but PAUSE-ENQUEUE is set → push deferred (retry next loop)')
-@@ -642,6 +661,10 @@
+@@ -642,6 +664,10 @@
          log(f'{slug}: CI slots full, ship retried next tick')
          return
      push = f'git push -q origin {gated}:refs/heads/work/{slug}' if ci else f'git push -q origin HEAD:work/{slug}'
@@ -132,7 +135,7 @@
      rc, out = sh(push, cwd=wt)
      if rc != 0:
          log(f'ESCALATE {slug}: push failed: {out[-200:]}', esc=True)
-@@ -668,9 +691,16 @@
+@@ -668,9 +694,16 @@
      if not pr:
          log(f'ESCALATE {slug}: no PR could be opened', esc=True)
          return True
@@ -151,7 +154,7 @@
      followup(slug, key, rev)
      return True
 
-@@ -782,6 +812,10 @@
+@@ -782,6 +815,10 @@
          brief = parts[3]
          if EXCLUDE.match(slug) or re.match(r'^aeon-(633|596-p6|292-ui|665|64[89]-wn|65[0-5]-wn)', slug) or '-fix' in brief or '-mm' in brief or re.search(r'-(tick|mk)\d+\.md$', brief):
              continue  # NOSHIP slugs that are NOT chain.py families still get their first gate (716 sat ungated 4 h, 2026-10-06); shipping stays manual
@@ -162,7 +165,7 @@
          ex = last_exit(slug)
          runkey = f'{slug}|{brief}|{ex}|first'
          if not ex or runkey in st['gated_runs'] or running(slug):
-@@ -807,6 +841,8 @@
+@@ -807,6 +844,8 @@
              st['gated_runs'].append(runkey)
              log(f'ESCALATE {slug}: first build ({brief}) ended unfinished at pct {uf[0]} → not gated; LEAD decides. Note: {uf[1]}', esc=True)
              continue
@@ -171,7 +174,7 @@
          if ci_first():
              st['gated_runs'].append(runkey)
              register_precheck(st, slug, parts[1], f'first build ({brief})')
-@@ -819,6 +855,10 @@
+@@ -819,6 +858,10 @@
          # (P1 -integ and P3 -mm2 sat ungated as HELD). Plain -mm.md stays with mm-autopush; -evidence-* rounds add evidence only.
          if EXCLUDE.match(slug) or not re.search(r'-(fix\d*|tick\d+|mk\d+|integ|mm\d+|mm-final)\.md$', brief):
              continue
@@ -182,7 +185,7 @@
          ex = last_exit(slug)
          runkey = f'{slug}|{brief}|{ex}'
          if not ex or runkey in st['gated_runs'] or running(slug):
-@@ -840,6 +880,8 @@
+@@ -840,6 +883,8 @@
          if uf:
              st['gated_runs'].append(runkey)
              log(f'ESCALATE {slug}: round ({brief}) ended unfinished at pct {uf[0]} → not gated; LEAD decides. Note: {uf[1]}', esc=True)
@@ -191,7 +194,7 @@
              continue
          if ci_first():
              st['gated_runs'].append(runkey)
-@@ -871,6 +913,12 @@
+@@ -871,6 +916,12 @@
              continue
          if newest_review_for(slug) != name:  # an older verdict; a newer one supersedes it
              st['seen_reviews'].append(name)
