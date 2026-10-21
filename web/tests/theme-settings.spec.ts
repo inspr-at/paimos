@@ -3,6 +3,7 @@ import { test, expect, type Page, type Locator } from '@playwright/test'
 import { mkdir } from 'node:fs/promises'
 import { fixtures, mockWork, me, watchErrors } from './work-fixtures'
 import { expectStableControls } from './helpers/stable'
+import { controlStability } from './control-stability'
 import type { ActiveTheme, ThemeRecord } from '../src/lib/themes'
 import { CARD_COLOURS, colourContrast } from '../src/lib/themeEngine'
 import { mockDecisionDesk, sampleQuestion } from './decision-desk-fixtures'
@@ -66,6 +67,49 @@ async function setupPaged(page: Page, options: { admin?: boolean; fail?: number 
 const card = (page: Page) => page.locator('#colours')
 const sections = (page: Page) => page.getByRole('navigation', { name: 'Settings sections' })
 const bar = (page: Page) => page.getByRole('region', { name: 'Unsaved theme changes' })
+// Risk: a bookmarked card rendered by a slow response is never reached, or
+// subsequent content pushes it away before the arrival hold has started.
+test('AEON-1366: a late Colours deep link scrolls, rings and holds without moving navigation', async ({ page }, testInfo) => {
+  await setup(page)
+  await page.setViewportSize({ width: 390, height: 950 })
+  await page.clock.install()
+  let release!: () => void, requested!: () => void
+  const response = new Promise<void>(resolve => { release = resolve })
+  const request = new Promise<void>(resolve => { requested = resolve })
+  await page.route(/\/api\/themes(?:\?|$)/, async route => { requested(); await response; await route.fallback() })
+  await page.goto('/settings/theme#colours')
+  await request
+  const links = page.getByRole('navigation', { name: 'Theme cards' })
+  await expect(page.locator('#themes')).toBeVisible()
+  await expect(card(page)).toHaveCount(0)
+  await page.clock.pauseAt(await page.evaluate(() => Date.now() + 100))
+  await page.clock.runFor(3500)
+  await expect(card(page)).toHaveCount(0)
+  const guard = await controlStability(page, {
+    themes: links.getByRole('link', { name: 'Themes', exact: true }),
+    colours: links.getByRole('link', { name: 'Colours', exact: true }),
+    agents: links.getByRole('link', { name: 'Agents', exact: true }),
+    create: page.getByRole('button', { name: 'New theme', exact: true }),
+  })
+  const heading = card(page).getByRole('heading', { name: 'Colours', exact: true })
+  await guard.check(async () => {
+    release()
+    await expect(card(page)).toHaveClass(/arrived/)
+    await expect(heading).toBeInViewport()
+    expect(await page.locator('main').evaluate(el => el.scrollTop)).toBeGreaterThan(0)
+  })
+  const top = await heading.evaluate(el => el.getBoundingClientRect().top)
+  await guard.check(async () => {
+    // A second layout change happens after the old three-second window. The
+    // hold starts when the card is found and still corrects this real resize.
+    await page.clock.runFor(500)
+    await page.locator('#themes').evaluate(el => { el.style.paddingBottom = '200px' })
+    await page.clock.runFor(32)
+    await expect.poll(() => heading.evaluate(el => el.getBoundingClientRect().top)).toBeCloseTo(top, 0)
+  })
+  guard.done()
+  await page.screenshot({ path: testInfo.outputPath('late-colours-390.png') })
+})
 async function colour(page: Page, label: string, hex: string, screenshot?: string) {
   await page.getByRole('button', { name: label, exact: true }).click()
   if (screenshot) await page.screenshot({ path: screenshot })

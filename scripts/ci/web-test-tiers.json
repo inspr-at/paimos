@@ -14724,6 +14724,8 @@
     ,
     {"kind":"browser","file":"tests/theme-control-geometry.spec.ts","name":"the shared switch centres its knob on any track and the agents label keeps a 44px hit target","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
     ,
+    {"kind":"browser","file":"tests/theme-settings.spec.ts","name":"AEON-1366: a late Colours deep link scrolls, rings and holds without moving navigation","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
     {"kind":"browser","file":"tests/theme-settings.spec.ts","name":"Load more is disabled while the current theme is unavailable and works again after Reload (1024 dark)","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
     {"kind":"browser","file":"tests/theme-settings.spec.ts","name":"Load more is disabled while the current theme is unavailable and works again after Reload (1024 light)","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
@@ -20664,6 +20666,8 @@
     ,
     {"kind":"vitest","file":"tests/settings-owner.unit.test.ts","name":"a section opened in the same frame also keeps its draft on expiry","tags":[],"tier":"GATED-FULL"}
     ,
+    {"kind":"vitest","file":"tests/settings-owner.unit.test.ts","name":"a target rendered after the old deadline arrives once and releases its observer and timers","tier":"ESSENTIAL"}
+    ,
     {"kind":"vitest","file":"tests/settings-owner.unit.test.ts","name":"access retains the same child, draft and one-time link on expiry, with writes inert","tags":[],"tier":"GATED-FULL"}
     ,
     {"kind":"vitest","file":"tests/settings-owner.unit.test.ts","name":"an incoming owner clears frozen Access before fresh permissions arrive","tags":[],"tier":"GATED-FULL"}
@@ -20673,6 +20677,8 @@
     {"kind":"vitest","file":"tests/settings-owner.unit.test.ts","name":"legacy #estimates highlights its consolidated field until the arrival expires","tier":"GATED-FULL"}
     ,
     {"kind":"vitest","file":"tests/settings-owner.unit.test.ts","name":"legacy #silent-sessions highlights its consolidated field until the arrival expires","tier":"GATED-FULL"}
+    ,
+    {"kind":"vitest","file":"tests/settings-owner.unit.test.ts","name":"pending arrivals yield to input, route changes, unmount and the five-second bound","tier":"ESSENTIAL"}
     ,
     {"kind":"vitest","file":"tests/settings-owner.unit.test.ts","name":"personal retains the same child, draft and one-time link on expiry, with writes inert","tags":[],"tier":"GATED-FULL"}
     ,

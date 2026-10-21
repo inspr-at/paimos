@@ -130,21 +130,44 @@ watch(current, async () => {
 }, { flush: 'post' })
 watch(sections, () => closePicker())
 onMounted(() => { document.addEventListener('pointerdown', outside); window.addEventListener('resize', resize) })
-onBeforeUnmount(() => { document.removeEventListener('pointerdown', outside); window.removeEventListener('resize', resize); clearTimeout(arrival); letGo(); disposed = true; accountsNeeds.value = null })
+onBeforeUnmount(() => { document.removeEventListener('pointerdown', outside); window.removeEventListener('resize', resize); disposed = true; accountsNeeds.value = null })
 let disposed = false
 
 // A deep link scrolls to its target once the section has rendered it, and holds
 // it there while data that arrives later grows the content above (AEON-1365).
-let arrival: ReturnType<typeof setTimeout> | undefined
-let letGo = () => {}
-watch(() => [current.value, route.hash] as const, async ([section, hash]) => {
-  letGo()
+// Slow sections get a bounded wait, surrendered as soon as the person acts.
+const ARRIVAL_WAIT_MS = 5000
+const ARRIVAL_INPUT = ['wheel', 'touchstart', 'pointerdown', 'keydown'] as const
+watch(() => [current.value, route.hash, route.fullPath, mountedOwner.value] as const, async ([, hash], _, onCleanup) => {
   if (!hash) return
-  for (let tries = 0; tries < 20; tries++) {
-    await nextTick()
-    if (disposed || current.value !== section || route.hash !== hash) return
-    const target = document.getElementById(decodeURIComponent(hash.slice(1)))
+  let id: string
+  try { id = decodeURIComponent(hash.slice(1)) } catch { return }
+  let cancelled = false
+  let observer: MutationObserver | undefined
+  let deadline: ReturnType<typeof setTimeout> | undefined
+  let arrival: ReturnType<typeof setTimeout> | undefined
+  let highlight: HTMLElement | undefined
+  let letGo = () => {}
+  const stopWaiting = () => {
+    observer?.disconnect()
+    clearTimeout(deadline)
+    for (const type of ARRIVAL_INPUT) window.removeEventListener(type, cancel, { capture: true })
+  }
+  const cancel = () => {
+    cancelled = true
+    stopWaiting()
+    letGo()
+    clearTimeout(arrival)
+    highlight?.classList.remove('arrived')
+  }
+  onCleanup(cancel)
+  for (const type of ARRIVAL_INPUT) window.addEventListener(type, cancel, { capture: true, passive: true })
+  deadline = setTimeout(cancel, ARRIVAL_WAIT_MS)
+  const find = () => {
+    if (cancelled) return false
+    const target = document.getElementById(id)
     if (target) {
+      stopWaiting()
       letGo = arrive(arrivalPage(target, window.matchMedia('(prefers-reduced-motion: reduce)').matches ? 'auto' : 'smooth'))
       // A target that takes focus (tabindex) gets it, unless the person is already in a
       // control: the next Tab then continues inside it ("Rule in Policies", AEON-1165).
@@ -152,14 +175,17 @@ watch(() => [current.value, route.hash] as const, async ([section, hash]) => {
       if (target.hasAttribute('tabindex') && (!active || active === document.body || active.id === 'main')) target.focus({ preventScroll: true })
       // Legacy bookmarks can now point to a field inside a consolidated card.
       // Keep wrapper links ringing their card, and ring field links themselves.
-      const highlight = target.classList.contains('settings-card') ? target : target.querySelector<HTMLElement>('.settings-card, .setup') ?? target
+      highlight = target.classList.contains('settings-card') ? target : target.querySelector<HTMLElement>('.settings-card, .setup') ?? target
       highlight.classList.add('arrived')
-      clearTimeout(arrival)
-      arrival = setTimeout(() => highlight.classList.remove('arrived'), 1800)
-      return
+      arrival = setTimeout(() => highlight?.classList.remove('arrived'), 1800)
+      return true
     }
-    await new Promise(resolve => setTimeout(resolve, 50))
+    return false
   }
+  await nextTick()
+  if (cancelled || find()) return
+  observer = new MutationObserver(find)
+  observer.observe(document.getElementById('main') ?? document.body, { childList: true, subtree: true, attributes: true, attributeFilter: ['id'] })
 }, { immediate: true })
 </script>
 
