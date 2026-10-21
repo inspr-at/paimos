@@ -184,7 +184,7 @@
         "content_capability_digest": "secret",
         "content_capability_person_id": "personal",
         "content_capability_computer_id": "metadata",
-        "content_capability_account_id": "metadata",
+        "content_capability_account_id": "personal",
         "content_capability_daemon_id": "metadata",
         "content_capability_generation": "metadata",
         "content_capability_expires_at": "metadata",
