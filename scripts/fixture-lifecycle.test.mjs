@@ -13,9 +13,9 @@ import { groupProcesses, trackGroups } from './playwright-processes.mjs'
 
 const fixtures = fixtureOwner()
 afterEach(() => fixtures.cleanup())
-async function until(check) {
+async function until(check, describe = () => '') {
   const deadline = Date.now() + 15000
-  while (!check()) { assert.ok(Date.now() < deadline, 'fixture cleanup timed out'); await pause(10) }
+  while (!check()) { assert.ok(Date.now() < deadline, `fixture cleanup timed out ${describe()}`); await pause(10) }
 }
 
 test('AEON-1064: interrupted fixture runners leave no owned processes in 20 random interrupt rounds', { timeout: 120000 }, async () => {
@@ -72,7 +72,11 @@ test('AEON-1064: interrupted fixture runners leave no owned processes in 20 rand
       else assert.notEqual(code, 0, `${phase} ${signal} must report an interrupted test`)
       if (signal === 'failure') assert.match(output, /Intentional fixture failure/)
       if (signal === 'timeout') assert.match(output, /timed out/)
-      await until(() => ready.groups.every(row => groupProcesses(row.pid).length === 0))
+      await until(() => ready.groups.every(row => groupProcesses(row.pid).length === 0), () => JSON.stringify({ phase, signal,
+        remaining: ready.groups.flatMap(row => groupProcesses(row.pid)).map(row => ({ ...row,
+          state: process.platform === 'linux' ? readFileSync(`/proc/${row.pid}/stat`, 'utf8').split(') ')[1]?.split(' ')[0] : undefined,
+        })),
+      }))
       process.kill(sentinel.pid, 0)
     } finally {
       tracker?.signal('SIGKILL')

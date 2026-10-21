@@ -43,7 +43,8 @@ export function fixtureOwner() {
       // Re-read after stopping the roots to include a concurrent spawn that
       // published while the first snapshot was being signalled.
       failures.push(...entry.tracker.signal('SIGKILL'))
-      if (entry.tracker.snapshot().unverified.length) failures.push(new Error('Unverified fixture group retained'))
+      const state = entry.tracker.snapshot()
+      if (state.unverified.length) failures.push(new Error(`Unverified fixture groups retained: ${state.unverified.join(',')}`))
       errors.push(...failures)
       if (!failures.length) { owned.delete(entry); rmSync(entry.directory, { recursive: true, force: true }) }
     }
