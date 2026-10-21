@@ -1,5 +1,9 @@
 {
   "group": "remaining-ui",
+  "nightlyTiming": {
+    "seconds": 6.658537,
+    "selectedTests": 3
+  },
   "spec": {
     "file": "tests/aeon-1604-edit-key.spec.ts",
     "listedTests": 3,
