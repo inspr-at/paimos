@@ -94,6 +94,12 @@ func (rt *runtime) execute(args []string) error {
 	if err != nil {
 		return usagef("%s", err.Error())
 	}
+	if cmd == root.child("attach") {
+		cmd, cmdArgs, err = rt.sessionAttachAlias(cmd, cmdArgs)
+		if err != nil {
+			return err
+		}
+	}
 	pos, err := rt.parse(cmd, cmdArgs)
 	if err != nil {
 		return usagef("%s", err.Error())

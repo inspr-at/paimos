@@ -190,6 +190,8 @@
     ,
     "internal/nodes:TestHideStatesBoundsAndNormalisation"
     ,
+    "internal/nodes:TestList6000VisibilityNightlyAbsoluteBudget"
+    ,
     "internal/nodes:TestNodeRecurrenceBounds"
     ,
     "internal/nodes:TestNodeRecurrenceProvenance"
@@ -483,6 +485,8 @@
     {"kind":"go","package":"cmd/aeon-agentd","name":"TestDisconnectPollStopsForOnceTerminalErrorAndCancellation","tier":"GATED-FULL"}
     ,
     {"kind":"go","package":"cmd/aeon-agentd","name":"TestDisconnectPollsReconciliationUntilDrained","tier":"GATED-FULL"}
+    ,
+    {"kind":"go","package":"cmd/aeon-agentd","name":"TestDispatchDeniedServeNamesReasonAndExit","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"cmd/aeon-agentd","name":"TestHarnessHomeFlagRejectsAmbiguousOrUnsafeSelection","tier":"ESSENTIAL"}
     ,
@@ -1872,6 +1876,8 @@
     ,
     {"kind":"go","package":"internal/agentd","name":"TestNativeLeadSchemaMigrationPreservesEvidenceAndRefusesUnknownVersion","reason":"AEON-1261: native coordinator authority, writer ownership and exact delivery receipts","tier":"ESSENTIAL"}
     ,
+    {"kind":"go","package":"internal/agentd","name":"TestNativeLocalSocketRequiresIndependentPersonProof","tier":"ESSENTIAL"}
+    ,
     {"kind":"go","package":"internal/agentd","name":"TestNativeManagedStartWaitsForExitAndRelaysFinalWithReceipts","reason":"AEON-1261: native coordinator authority, writer ownership and exact delivery receipts","tier":"GATED-FULL"}
     ,
     {"kind":"go","package":"internal/agentd","name":"TestNativeStartSocketRequiresProtocolAndQualifiedIntent","reason":"AEON-1261: native coordinator authority, writer ownership and exact delivery receipts","tier":"ESSENTIAL"}
@@ -3248,6 +3254,8 @@
     ,
     {"kind":"go","package":"internal/agentsetup","name":"TestInstallMethodNegotiatesAndSurvivesServerDowngrade","tier":"GATED-FULL"}
     ,
+    {"kind":"go","package":"internal/agentsetup","name":"TestInstalledServiceUnitMatchesReceipt","tier":"ESSENTIAL"}
+    ,
     {"kind":"go","package":"internal/agentsetup","name":"TestLaunchdPrivateDiagnosticPaths","tier":"GATED-FULL"}
     ,
     {"kind":"go","package":"internal/agentsetup","name":"TestLedgerServerNegotiationAndEnrollmentClient","tier":"ESSENTIAL"}
@@ -3505,6 +3513,8 @@
     {"kind":"go","package":"internal/agentsetup","name":"TestVerificationApprovalURLUsesExistingAccountWithoutMutation","tier":"NIGHTLY"}
     ,
     {"kind":"go","package":"internal/agentsetup","name":"TestVersionProbeSurvivesDeletedProcessDirectory","tier":"GATED-FULL"}
+    ,
+    {"kind":"go","package":"internal/agentverification","name":"TestReleaseQualificationPackagesHaveNoTestImportCycle","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/aithema/host","name":"TestCallbackAuthenticationFailureDoesNotRetry","tier":"GATED-FULL"}
     ,
@@ -3851,6 +3861,8 @@
     {"kind":"go","package":"internal/auth","name":"TestFullAccessLiveCatalogAndBoundaries","tier":"GATED-FULL"}
     ,
     {"kind":"go","package":"internal/auth","name":"TestFullAccessModelsV2SimpleRead","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/auth","name":"TestGoalAgentKeyCeiling","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/auth","name":"TestHarnessProbeRoutesThroughPairedRuntimeMiddleware","tier":"ESSENTIAL"}
     ,
@@ -5243,6 +5255,8 @@
     {"kind":"go","package":"internal/cli","name":"TestNativeAttachCommandValidation","tier":"NIGHTLY"}
     ,
     {"kind":"go","package":"internal/cli","name":"TestNativeAttachRejectsMismatchedProjection","tier":"NIGHTLY"}
+    ,
+    {"kind":"go","package":"internal/cli","name":"TestNativeCommandsRequireIndependentPersonSession","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/cli","name":"TestNativeRoleRecipesRequireSeparateAuthority","tier":"ESSENTIAL"}
     ,
@@ -6822,6 +6836,8 @@
     ,
     {"kind":"go","package":"internal/goals","name":"TestGoalListFiltersTotalsAndMoveHistory","tier":"ESSENTIAL"}
     ,
+    {"kind":"go","package":"internal/goals","name":"TestGoalListOmitsEmptyAndShippedReleases","tier":"ESSENTIAL"}
+    ,
     {"kind":"go","package":"internal/goals","name":"TestGoalListPageWideProjection","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/goals","name":"TestGoalListViewFiltersAndOrdering","tier":"ESSENTIAL"}
@@ -7159,6 +7175,10 @@
     {"kind":"go","package":"internal/harness","name":"TestModelPricesThroughProductionAuth","tier":"GATED-FULL"}
     ,
     {"kind":"go","package":"internal/harness","name":"TestModelReportsRequireWorkerLeaseAndStayInHarness","tier":"GATED-FULL"}
+    ,
+    {"kind":"go","package":"internal/harness","name":"TestNativeSessionCommandAliasesPreserveLegacyHelp","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/harness","name":"TestNativeSessionWiringKeepsChatDisabled","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/harness","name":"TestObservedProfileCannotBeRequestedUntilPersonAcceptance","tier":"GATED-FULL"}
     ,
@@ -8566,6 +8586,8 @@
     ,
     {"kind":"go","package":"internal/nativeattach","name":"TestFakeSocketDetachViewerAndStaleBinding","tier":"ESSENTIAL"}
     ,
+    {"kind":"go","package":"internal/nativeattach","name":"TestNativePersonBootstrapAttachTakeHandBack","tier":"ESSENTIAL"}
+    ,
     {"kind":"go","package":"internal/nativeattach","name":"TestStreamRejectsSuccessorBeforeRendering","tier":"NIGHTLY"}
     ,
     {"kind":"go","package":"internal/nativeattach","name":"TestStreamResumesRotationWithoutLosingControl","tier":"ESSENTIAL"}
@@ -8629,6 +8651,8 @@
     {"kind":"go","package":"internal/nativeproviders/pi","name":"TestPiQualificationMatrix","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/nativeproviders/pi","name":"TestPiRefusesUnprovedNativeActions","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/nativepty","name":"TestNativePTYSocketCarriesPersonAndGeneration","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/nativepty","name":"TestNativeTakeClientAcknowledgementAndHandBack","reason":"AEON-1288: exclusive owned TUI transitions, current local control and bounded honest PTY I/O","tier":"ESSENTIAL"}
     ,
@@ -8748,6 +8772,10 @@
     ,
     {"kind":"go","package":"internal/nativesessions/store","name":"TestNativeSessionDSARInventoryMatchesSchema","tier":"ESSENTIAL"}
     ,
+    {"kind":"go","package":"internal/nativesessions/store","name":"TestOwnedNativeControlConfirmsExitAndRejectsStaleEpoch","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/nativesessions/store","name":"TestOwnedNativeControlRetainsUnconfirmedWriter","tier":"ESSENTIAL"}
+    ,
     {"kind":"go","package":"internal/nativesessions/store","name":"TestPairedNativeStartAndRevalidationKeepSeparateAuthorities","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/nativesessions/store","name":"TestProductionCompositionAbandonedStartReturnsItsQuota","tier":"ESSENTIAL"}
@@ -8767,6 +8795,8 @@
     {"kind":"go","package":"internal/nativesessions/store","name":"TestTerminalViewerURLStrictAllowlist","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/nativesessions/store","name":"TestWorkerStartRequiresLeafAndKeepsExistingRun","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/nativesessions/stream","name":"TestCurrentViewerAuthorityScopesEveryDelivery","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/nativesessions/stream","name":"TestLiveGapClosesAndBindingReplacementRefusesOldView","tier":"NIGHTLY"}
     ,
@@ -8889,6 +8919,8 @@
     {"kind":"go","package":"internal/nodes","name":"TestList6000Performance","lane":"timing","tier":"GATED-FULL"}
     ,
     {"kind":"go","package":"internal/nodes","name":"TestList6000PerformanceWithStaleKindStatistics","lane":"timing","tier":"GATED-FULL"}
+    ,
+    {"kind":"go","package":"internal/nodes","name":"TestList6000VisibilityNightlyAbsoluteBudget","lane":"timing","tier":"NIGHTLY"}
     ,
     {"kind":"go","package":"internal/nodes","name":"TestList6000WithProjectVisibility","lane":"timing","tier":"GATED-FULL"}
     ,
@@ -9659,6 +9691,8 @@
     {"kind":"go","package":"internal/questions","name":"TestQuestionLifecycleAndIsolation","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/questions","name":"TestQuestionListRejectsInvalidOrderAndCursor","tier":"GATED-FULL"}
+    ,
+    {"kind":"go","package":"internal/questions","name":"TestQuestionNodeRoutesStayOutsideTheQuestionsPackage","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/questions","name":"TestQuestionPermissionFilteredPageAndRollback","tier":"GATED-FULL"}
     ,

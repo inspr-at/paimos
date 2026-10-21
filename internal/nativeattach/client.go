@@ -31,9 +31,10 @@ func (realClock) After(d time.Duration) <-chan time.Time { return time.After(d) 
 // Options uses an authorized server projection, never a caller-invented binding.
 // Server/socket authorization is still required for every request.
 type Options struct {
-	Snapshot nativecontract.SessionView
-	Control  bool
-	Clock    nativecontract.Clock
+	Snapshot    nativecontract.SessionView
+	PersonProof *PersonProof
+	Control     bool
+	Clock       nativecontract.Clock
 }
 
 // Session has one foreground owner. Stream reads use an immutable copy of the
@@ -78,6 +79,7 @@ func Open(ctx context.Context, socket string, opts Options) (*Session, error) {
 	if err != nil {
 		return nil, err
 	}
+	wire.person = opts.PersonProof
 	clock := opts.Clock
 	if clock == nil {
 		clock = realClock{}

@@ -252,6 +252,13 @@ func (m *Module) authenticateAndAuthorize(next http.Handler) http.Handler {
 				}
 				return
 			}
+			// Goal routes stay on nodes.read and nodes.write, so RequirePattern
+			// cannot see this ceiling. Check it only for these two scopes.
+			// Every other route keeps role-before-key order.
+			if (scope == "goals.read" || scope == "goals.write") && !agentHasScope(p.Scopes, scope) {
+				authz.WriteForbidden(w, authz.MissingKeyScope(scope))
+				return
+			}
 		}
 		if (kind == credSession || kind == credAgent) && protectedRequest(r) {
 			// SEC4's route table remains the outer agent allowlist. The binding
@@ -812,6 +819,21 @@ func coreAgentScope(r *http.Request) (string, bool) {
 		return "account.manage", true
 	case "stage-handoffs":
 		return "stage.<op>", true
+	case "goals":
+		// Outer key-scope ceiling only. Handlers still recheck nodes.read or
+		// nodes.write. A person grants the scope; new keys do not receive it.
+		id := ""
+		if len(parts) > 1 {
+			id = parts[1]
+		}
+		switch {
+		case read && (len(parts) == 1 || len(parts) == 2 && id != "" || len(parts) == 3 && id != "" && (parts[2] == "history" || parts[2] == "series")):
+			return "goals.read", true
+		case r.Method == http.MethodPost && len(parts) == 1:
+			return "goals.write", true
+		case (r.Method == http.MethodPatch || r.Method == http.MethodPut) && len(parts) == 2 && id != "":
+			return "goals.write", true
+		}
 	case "outcomes":
 		if len(parts) == 2 && parts[1] == "measurement" && read {
 			return "outcome.read", true
