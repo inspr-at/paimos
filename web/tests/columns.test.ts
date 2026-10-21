@@ -2,7 +2,7 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
-import { adoptedCardWidth, agreedFrameWidth, automaticColumns, CARD_WIDTH_SAMPLE_CAP, cardWidthAfterSamples, COLUMN_BY_ID, GIVE_WAY, latchParentShare, layoutTableWidth, layoutWidths, loadedFitWidth, nextMeasuredCardWidth, normalizeColumnIds, orderOf, PARENT_TITLE_WIDTH, parentColumnDefault, releaseLabel, RETURN_ROOM, savedColumnWidth, tagList, TITLE_MIN_TABLE, TITLE_TARGET, titleRoom, visibleColumns, widthOf, withHostColumns, type ColumnDef, type ColumnFit, type ColumnId, type ListPrefs } from '../src/lib/columns.ts'
+import { adoptedCardWidth, agreedFrameWidth, automaticColumns, CARD_WIDTH_SAMPLE_CAP, cardWidthAfterSamples, cardWidthOnViewportResize, COLUMN_BY_ID, GIVE_WAY, latchParentShare, layoutTableWidth, layoutWidths, loadedFitWidth, nextMeasuredCardWidth, normalizeColumnIds, orderOf, PARENT_TITLE_WIDTH, parentColumnDefault, releaseLabel, resizeSampleWidth, RETURN_ROOM, savedColumnWidth, tagList, TITLE_MIN_TABLE, TITLE_TARGET, titleRoom, visibleColumns, widthOf, withHostColumns, type ColumnDef, type ColumnFit, type ColumnId, type ListPrefs } from '../src/lib/columns.ts'
 import { groupRows, selectLoadedGroup, filtersFromQuery, filtersToQuery, type TicketRow } from '../src/lib/ticketList.ts'
 import { byPosition, positionBetween, positionOf, type Attachment } from '../src/lib/attachments.ts'
 
@@ -447,6 +447,78 @@ test('AEON-1570 a growing card is adopted after a disagreeing frame pair, and a 
   assert.equal(nextMeasuredCardWidth(800, 780, false), 780)
   assert.equal(nextMeasuredCardWidth(800, 780, true), 780)
   assert.equal(nextMeasuredCardWidth(800, 0, true), 800)
+})
+
+// AEON-1600. Risk: a shrink whose content box is still the previous frame keeps the wide column widths.
+// Title has no col width, so a 903 px card still wearing the 788 px design set measures 115 (CI on 8c375702).
+test('AEON-1600 a shrink lays out at the viewport delta while the content box is still the previous frame', () => {
+  const shown = ['key', 'title', 'status', 'priority', 'assignee', 'parent', 'updated']
+  const wide = 1300
+  const card = 903
+  const worn = Object.values(layoutWidths(shown, wide)).reduce((sum, width) => sum + (width ?? 0), 0)
+  assert.equal(worn, 788)
+  assert.equal(card - worn, 115)
+  assert.equal(nextMeasuredCardWidth(wide, wide, false), wide)
+  assert.equal(cardWidthOnViewportResize(wide, wide, card - wide), card)
+  assert.equal(cardWidthOnViewportResize(wide, card, card - wide), card)
+  assert.equal(cardWidthOnViewportResize(wide, card + 6, card - wide), card + 6)
+  const fitted = Object.values(layoutWidths(shown, card)).reduce((sum, width) => sum + (width ?? 0), 0)
+  assert.ok(card - fitted >= 240, `title ${card - fitted}`)
+  assert.equal(cardWidthOnViewportResize(card, card, wide - card), card)
+  assert.equal(cardWidthOnViewportResize(card, wide, wide - card), wide)
+  assert.equal(cardWidthOnViewportResize(wide, null, card - wide), card)
+  assert.equal(cardWidthOnViewportResize(0, null, -10), 0)
+  // The frame pair that still shows the wide card must not replace the delta.
+  assert.equal(resizeSampleWidth(wide, card), null)
+  assert.equal(resizeSampleWidth(card, card), card)
+  assert.equal(resizeSampleWidth(card - 6, card), card - 6)
+  // A gutter swing can leave the shrunk box 40 px above the viewport delta.
+  assert.equal(resizeSampleWidth(card + 48, card), card + 48)
+  assert.equal(resizeSampleWidth(card + 49, card), null)
+  assert.equal(resizeSampleWidth(wide, null), wide)
+  assert.equal(resizeSampleWidth(null, card), null)
+  assert.equal(resizeSampleWidth(0, card), null)
+})
+
+// AEON-1600 fix 3. Risk: the viewport delta is kept after the content box has moved somewhere else.
+// The default ticket dock crosses its 1800px panel breakpoint from 1800 to 1790 and the card grows
+// from about 862 to 1032. A host cap can hold the card above the delta, or keep the pre-resize width.
+// On 890af450 the estimate 852 rejects the stable 1032 samples and Updated stays hidden.
+test('AEON-1600 a dock breakpoint and a capped host supersede the provisional shrink', () => {
+  const before = 862
+  const grown = 1032
+  const provisional = cardWidthOnViewportResize(before, before, -10)
+  assert.equal(provisional, 852)
+  // The box has already grown. The delta must not replace that measurement.
+  assert.equal(cardWidthOnViewportResize(before, grown, -10), grown)
+  const agreed = adoptedCardWidth(cardWidthAfterSamples([grown, grown], provisional, false), grown, false)
+  assert.equal(agreed, grown)
+  assert.equal(resizeSampleWidth(agreed, provisional, before), grown)
+  // The pre-resize frame is still rejected while samples remain. A true shrink keeps the delta.
+  assert.equal(resizeSampleWidth(before, provisional, before), null)
+  assert.equal(resizeSampleWidth(1300, 903, 1300), null)
+  assert.equal(resizeSampleWidth(903, 903, 1300), 903)
+  // Grid minimums: key slots 108, Title's waiting slot 264, plus Parent, Progress and ETA.
+  // Their sum is 876, so the provisional 852 drops Updated and the measured 1032 keeps it.
+  const present = { assigned: true, parent: true, progress: true, eta: true }
+  const fit = { mins: { key: 108, title: 264 } }
+  const columnsAt = (width: number) => visibleColumns(width, { phone: false, present, fit }).columns.map(column => column.id)
+  assert.equal(columnsAt(provisional).includes('updated'), false)
+  assert.equal(columnsAt(grown).includes('updated'), true)
+  // A capped host shrinks the card by less than the viewport. 1200 − 400 predicts 800; the box lands at 1032.
+  const cappedBefore = 1200
+  const cappedEstimate = cardWidthOnViewportResize(cappedBefore, cappedBefore, -400)
+  assert.equal(cappedEstimate, 800)
+  assert.equal(resizeSampleWidth(grown, cappedEstimate, cappedBefore), grown)
+  assert.equal(columnsAt(cappedEstimate).includes('updated'), false)
+  // The host holds the pre-resize width for the whole sample window. That measurement replaces the estimate.
+  const held = 1032
+  const heldEstimate = cardWidthOnViewportResize(held, held, -200)
+  assert.equal(heldEstimate, 832)
+  assert.equal(resizeSampleWidth(held, heldEstimate, held), null)
+  assert.equal(resizeSampleWidth(held, heldEstimate, held, true), held)
+  assert.equal(columnsAt(heldEstimate).includes('updated'), false)
+  assert.equal(columnsAt(held).includes('updated'), true)
 })
 
 // AEON-1594. Risk: the first agreeing pair of a shrink is the previous wide frame. Adopting it lays that

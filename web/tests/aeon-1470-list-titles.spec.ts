@@ -622,9 +622,12 @@ test('AEON-1470 Parent cell shows the kind icon and key, adds the title from 200
   expect(paint.background === 'transparent' || paint.background === 'rgba(0, 0, 0, 0)').toBe(true)
   expect((await page.locator('thead th.c-title').boundingBox())!.width).toBeGreaterThanOrEqual(240)
 
+  const wideEpoch = await page.locator('.table-card').getAttribute('data-card-epoch')
   await page.setViewportSize({ width: 1024, height: 900 })
-  // The resize observer and the render it triggers land before the second frame.
-  await settled(page)
+  // The spec clock stubs requestAnimationFrame, so two frames are not this resize's paint.
+  // A read in that gap sees the previous column widths inside the narrower card (Title at 115px).
+  // The card epoch is the layout those pixels belong to.
+  await columnsLaidOut(page, wideEpoch)
   await expect(parentHeader(page)).toBeVisible()
   await expect(page.locator('.parent-chip')).toHaveCount(0)
   expect((await page.locator('thead th.c-title').boundingBox())!.width).toBeGreaterThanOrEqual(240)
