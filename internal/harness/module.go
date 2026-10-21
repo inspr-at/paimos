@@ -1168,13 +1168,33 @@ func (m *Module) registerBeforeEvents(r *http.Request, tx pgx.Tx, p tenant.Princ
 		return nil, err
 	}
 	var owner *string
-	ownerID := p.KeyCreatorID
+	ownerID := ""
+	if in.RunID == nil && in.ParentID == nil {
+		ownerID = p.KeyCreatorID
+	}
 	if p.Kind == tenant.Person {
 		ownerID = p.ID
 	}
 	if ownerID != "" {
 		if err = tx.QueryRow(ctx, `SELECT coalesce(linked_to,id)::text FROM principals WHERE id=$1 AND kind='person'`, ownerID).Scan(&owner); err != nil && !errors.Is(err, pgx.ErrNoRows) {
 			return nil, err
+		}
+	}
+	if in.RunID != nil {
+		if err := tx.QueryRow(ctx, `SELECT acting_person_id::text FROM agent_runs WHERE tenant_id=$1 AND id=$2`, p.TenantID, *in.RunID).Scan(&owner); err != nil {
+			return nil, err
+		}
+	}
+	if in.ParentID != nil {
+		var parentPerson *string
+		if err := tx.QueryRow(ctx, `SELECT r.acting_person_id::text FROM harness_sessions s LEFT JOIN agent_runs r ON r.tenant_id=s.tenant_id AND r.id=s.run_id WHERE s.tenant_id=$1 AND s.id=$2 AND s.project_id=$3`, p.TenantID, *in.ParentID, projectID).Scan(&parentPerson); err != nil {
+			return nil, err
+		}
+		if parentPerson != nil {
+			if owner != nil && *owner != *parentPerson {
+				return nil, workorders.Fail(409, "run_person_conflict")
+			}
+			owner = parentPerson
 		}
 	}
 	var expired *Session

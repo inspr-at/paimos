@@ -544,7 +544,7 @@ func (e *Executor) fix(ctx context.Context, tx pgx.Tx, owner tenant.Principal, r
 	if err != nil {
 		return nil, err
 	}
-	run, err := agentruns.QueueRoutineFixTx(ctx, tx, owner, r.id, previous, route.Profile.ID, account, trace)
+	run, err := agentruns.QueueRoutineFixTx(ctx, tx, owner, r.id, previous, route.Profile.ID, account, trace, pending)
 	if err != nil {
 		return nil, err
 	}

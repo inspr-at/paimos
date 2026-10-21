@@ -76,6 +76,16 @@ func EnqueueSystem(ctx context.Context, tx pgx.Tx, p tenant.Principal, nodeID st
 	if !inert {
 		return nil, fmt.Errorf("queue holder identity conflicts")
 	}
+	// The occurrence's saved recurrence identifies its owner, independently
+	// of the service principal executing the schedule.
+	var recurrence string
+	if err := tx.QueryRow(ctx, `SELECT fields->>'recurrence_id' FROM nodes WHERE id=$1`, nodeID).Scan(&recurrence); err != nil {
+		return nil, err
+	}
+	person, err := ResolveRunPersonTx(ctx, tx, p, "routine", recurrence)
+	if err != nil {
+		return nil, err
+	}
 	order, changes, err := workorders.CreateDeferred(ctx, tx, p, workorders.CreateInput{Title: title, Body: body, Parent: &nodeID, Criteria: Criteria(Fields(fields)), BuildDelivery: admission.ContinuedBinding()})
 	if err != nil {
 		return nil, err
@@ -88,9 +98,20 @@ func EnqueueSystem(ctx context.Context, tx pgx.Tx, p tenant.Principal, nodeID st
 		return nil, err
 	}
 	var run json.RawMessage
+	var runID string
 	err = tx.QueryRow(ctx, `INSERT INTO agent_runs(tenant_id,work_order_id,agent_principal_id,queue_node_id,queue_by_principal_id,queue_at,queue_rank,queue_security_review_required)
- VALUES($1,$2,$1,$3,$4,clock_timestamp(),$5,$6) RETURNING to_jsonb(agent_runs)-'tenant_id'`, p.TenantID, order.NodeID, nodeID, p.ID, rank, ready.SecurityReviewRequired).Scan(&run)
+ VALUES($1,$2,$1,$3,$4,clock_timestamp(),$5,$6) RETURNING id::text,to_jsonb(agent_runs)-'tenant_id'`, p.TenantID, order.NodeID, nodeID, p.ID, rank, ready.SecurityReviewRequired).Scan(&runID, &run)
 	if err != nil {
+		return nil, err
+	}
+	binding, err := SetActingPersonTx(ctx, tx, p.TenantID, runID, person, "routine")
+	if err != nil {
+		return nil, err
+	}
+	if binding != nil {
+		changes = append(changes, *binding)
+	}
+	if err := tx.QueryRow(ctx, `SELECT to_jsonb(agent_runs)-'tenant_id' FROM agent_runs WHERE id=$1`, runID).Scan(&run); err != nil {
 		return nil, err
 	}
 	before := node

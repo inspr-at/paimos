@@ -16,8 +16,8 @@ import (
 func TestRunActingPersonIsExplicitAndWriteOnce(t *testing.T) {
 	f := setup(t)
 	run := f.run(t, f.order(t, nil))
-	if run.ActingPersonID != nil {
-		t.Fatal("new run inferred an acting person")
+	if run.ActingPersonID == nil || *run.ActingPersonID != f.person.ID {
+		t.Fatal("personal start lost the signed-in person")
 	}
 	var otherPerson string
 	f.tx(t, f.person, func(tx pgx.Tx) error {

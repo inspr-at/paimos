@@ -7,7 +7,6 @@ import (
 	"testing"
 
 	"github.com/inspr-at/paimos/internal/agentruns"
-	"github.com/inspr-at/paimos/internal/authz"
 	"github.com/inspr-at/paimos/internal/dbtest"
 	"github.com/jackc/pgx/v5"
 )
@@ -35,8 +34,8 @@ func TestComputerStartCreationAndClaimUseCurrentPersonGrant(t *testing.T) {
 	o := f.order(t, nil)
 	// Owner's Go template supplies start permission for A and B.
 	adminRun := f.run(t, o)
-	if adminRun.ActingPersonID != nil {
-		t.Fatal("computer permission inferred an acting person")
+	if adminRun.ActingPersonID == nil || *adminRun.ActingPersonID != f.person.ID {
+		t.Fatal("personal start lost its person")
 	}
 	otherOrder := f.order(t, nil)
 	f.tx(t, f.person, func(tx pgx.Tx) error {
@@ -90,7 +89,7 @@ func TestComputerStartCreationAndClaimUseCurrentPersonGrant(t *testing.T) {
 				t.Fatal(err)
 			}
 			w := f.request(f.agent, "POST", "/api/runs/"+run.ID+"/claim", string(raw), f.token)
-			if w.Code != status || status == 403 && !strings.Contains(w.Body.String(), authz.ErrForbidden.Error()) {
+			if w.Code != status || status == 403 && !strings.Contains(w.Body.String(), "permission_revoked") {
 				t.Fatalf("%s claim: %d %s", mode, w.Code, w.Body.String())
 			}
 		})
