@@ -18566,6 +18566,14 @@
     ,
     {"kind":"vitest","file":"tests/desk-empty-state.unit.test.ts","name":"Decision Desk empty state > names the source that did not answer, so an empty read is never all clear","tier":"ESSENTIAL"}
     ,
+    {"kind":"vitest","file":"tests/desk-notifications.unit.test.ts","name":"Denied permission and an identity abort between browser work and POST cannot persist a Desk subscription","tier":"ESSENTIAL"}
+    ,
+    {"kind":"vitest","file":"tests/desk-notifications.unit.test.ts","name":"Desk off posts an explicit flag without prompting registering unsubscribing or touching phone preferences","tier":"ESSENTIAL"}
+    ,
+    {"kind":"vitest","file":"tests/desk-notifications.unit.test.ts","name":"Desk offer requires every eligibility condition and tolerates unavailable browser storage","tier":"ESSENTIAL"}
+    ,
+    {"kind":"vitest","file":"tests/desk-notifications.unit.test.ts","name":"iPhone and iPad require the Home Screen while standalone and desktop browsers remain eligible","tier":"ESSENTIAL"}
+    ,
     {"kind":"vitest","file":"tests/display-home.unit.test.ts","name":"only the Display menu mounts the display editors","tier":"ESSENTIAL"}
     ,
     {"kind":"vitest","file":"tests/display-home.unit.test.ts","name":"the Filters sheet filters and links to the Display menu instead of holding display settings","tier":"ESSENTIAL"}

@@ -1,0 +1,9 @@
+{
+  "group": "remaining-ui",
+  "spec": {
+    "file": "tests/aeon-1474-desk-push-ui.spec.ts",
+    "listedTests": 5,
+    "weightSeconds": 11.097561,
+    "weightSource": "unmeasured-test-rate"
+  }
+}
