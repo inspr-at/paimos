@@ -812,6 +812,11 @@ export async function createGraphRenderer(host: HTMLElement, dimension: GraphDim
   function tick(now: number) {
     if (disposed) return
     frame = requestAnimationFrame(tick)
+    // A collapsed header keeps this canvas mounted with no box. Drawing it
+    // still runs a software-GL frame on the main thread and can outlast the
+    // test waiting to read that empty box. visibility:hidden still has client
+    // rects, so it keeps drawing. Pin frames call renderFrame directly.
+    if (glimpse && (!host.isConnected || host.getClientRects().length === 0)) return
     renderFrame(now)
   }
   if (import.meta.env.MODE === 'test') {
