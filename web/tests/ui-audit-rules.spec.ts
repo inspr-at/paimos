@@ -108,6 +108,11 @@ async function moveAuditControl(page: Page, top: number): Promise<number> {
 test('layout shift audit arms after navigation and resets startup movement', async ({ page }) => {
   // A live app's load event and fonts.ready do not await API-driven rendering.
   // This rule test owns its document; route/state audits cover app rendering.
+  const apiRequests: string[] = []
+  page.on('request', request => {
+    const path = new URL(request.url()).pathname
+    if (path.startsWith('/api/') && apiRequests.length < 10) apiRequests.push(path)
+  })
   await page.route('**/audit-layout-shift', route => route.fulfill({
     contentType: 'text/html',
     body: '<!doctype html><style>body { margin: 0; padding: 40px; } .audit-control { position: relative; top: 0; width: 280px; height: 44px; }</style><button class="audit-control">Audit control</button>',
@@ -143,6 +148,7 @@ test('layout shift audit arms after navigation and resets startup movement', asy
   expect(shifted.score, shifted.sources.join(' | ')).toBe(score)
   expect(shifted.sources).toHaveLength(1)
   expect(shifted.sources[0]).toContain('audit-control')
+  expect(apiRequests, 'the audit rule test must not depend on a running backend').toEqual([])
 })
 
 test('layout shift audit filters delayed entries by start time without rounding away small shifts', async ({ page }) => {
