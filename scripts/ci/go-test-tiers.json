@@ -1944,6 +1944,16 @@
     ,
     {"kind":"go","package":"internal/agentd","name":"TestPiVerificationBlocksBeforeAnyVendorProcess","tier":"GATED-FULL"}
     ,
+    {"kind":"go","package":"internal/agentd","name":"TestPinnedRulesLaunchRefusesBeforeAdapter","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/agentd","name":"TestPinnedRulesPackGoldenFloorAndDatabaseLayers","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/agentd","name":"TestPinnedRulesPackMeasuredSizeAndRefusalCodes","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/agentd","name":"TestPinnedRulesReviewAndVerificationUseTrustedBase","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/agentd","name":"TestPinnedRulesTaskAndMessageAuthorLabels","tier":"ESSENTIAL"}
+    ,
     {"kind":"go","package":"internal/agentd","name":"TestPollContextErrorCausesDoNotConsumePendingProbe","tier":"GATED-FULL"}
     ,
     {"kind":"go","package":"internal/agentd","name":"TestPollDiagnosticRemindersEveryFifteenMinutes","tier":"GATED-FULL"}
@@ -7150,6 +7160,8 @@
     ,
     {"kind":"go","package":"internal/harness","name":"TestManagedForceStopHumanConfirmationAndGenerationFences","tier":"GATED-FULL"}
     ,
+    {"kind":"go","package":"internal/harness","name":"TestManagedPinnedContextRefusesMissingAndOversizedPins","tier":"ESSENTIAL"}
+    ,
     {"kind":"go","package":"internal/harness","name":"TestManagedRegistrationCopiesDispatchPlacementAfterPreferencesChange","tier":"GATED-FULL"}
     ,
     {"kind":"go","package":"internal/harness","name":"TestManagedRulesRespectRequestAndRegisteredCeilings","tier":"GATED-FULL"}
@@ -10325,6 +10337,8 @@
     {"kind":"go","package":"internal/rules","name":"TestImportedPackDetailsStayOutsideSessionBudget","tier":"GATED-FULL"}
     ,
     {"kind":"go","package":"internal/rules","name":"TestLostAcknowledgementOfOtherWritesIsUnknown","tier":"GATED-FULL"}
+    ,
+    {"kind":"go","package":"internal/rules","name":"TestManagedPinnedFilesKeepDatabaseLayers","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/rules","name":"TestMarkStaleKeepsBundleAndRejectsTamper","tier":"GATED-FULL"}
     ,

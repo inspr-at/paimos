@@ -155,3 +155,38 @@ existing refusals. Unconfigured repositories remain `unsupported_repository`;
 paths outside configured roots return `unsupported_path`. Agents submit to
 `POST /api/rules/doctrine/inbox`; only a person sends a waiting proposal to git.
 The existing independent gate, approval, merge and release path is unchanged.
+
+## Pinned instructions for managed Claude runs (AEON-1589)
+
+Claude work-order runs request `pinned_files: true` from their lease-bound
+managed-context endpoint. The server rechecks host grants for the tenant's
+pinned public and private sources and returns their exact cached Markdown
+bytes, with blob hashes and commit identities. Public-main observations and
+TL;DR sidecars are not instruction sources. An absent or incomplete pin refuses
+the run with `rules_pin_missing`; inaccessible sources retain
+`doctrine_unavailable`. Legacy requests retain their existing response.
+
+Agentd assembles the embedded 2,003-byte hard-safety floor, public doctrine
+files, private doctrine files, the repository's committed `AGENTS.md`, then the
+published database rule layers. Files sort by repository and path within each
+visibility. JSON-labelled `--- AEON RULE FILE ... ---` headers and
+`--- END AEON RULE FILE ---` footers delimit each file without trimming its
+content. A byte-identical floor block is hash-deduplicated. The embedded floor's
+SHA-256 is `3d1c0e8f22e2261bc7d2fa7caef924cbe34dd01bba567abf5e891ebb7724e913`.
+
+The assembled pack is capped at 128,000 UTF-8 bytes, with at most 64 pinned
+files and 64,000 bytes per file or repository delta. Overflow refuses launch
+with `rules_pack_too_large`; database publication budgets still apply. The
+existing migration 1042 already permits 512,000-byte served manifests. Managed
+assembly does not truncate database rules. The database authoring switch is
+unchanged, and project, person and role rules remain delivered.
+
+Review and verification runs with a repository binding read `AGENTS.md` from
+its trusted `BaseSHA`, using sealed Git objects rather than the reviewed head
+or working tree. Verification probes without a repository binding have no
+repository delta and still require the doctrine pin and floor. Missing or
+invalid repository evidence returns `rules_repository_unavailable`. Claude's
+native setting sources remain empty. The coordinator task and relayed chat,
+inbox and steering messages carry distinct author labels; a message never
+becomes the task. Existing receipts describe the received database block;
+complete assembled-pack delivery evidence belongs to D2.

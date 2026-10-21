@@ -6,8 +6,10 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"path"
 	"slices"
 	"strings"
+	"unicode/utf8"
 
 	"github.com/jackc/pgx/v5"
 )
@@ -35,17 +37,52 @@ type Indexed struct {
 type Catalog struct {
 	Releases []Release
 	Rules    []Indexed
+	// ManagedFiles replaces pointers only for the opt-in agentd envelope.
+	ManagedFiles bool
+	Files        []PinnedFile
+}
+
+const ManagedPackMaxBytes = 128000
+const ManagedFileMaxBytes = 64000
+const ManagedMaxFiles = 64
+
+// PinnedFile contains exact cache bytes, authorized for this request's tenant.
+type PinnedFile struct {
+	Repository string `json:"repository"`
+	Commit     string `json:"commit"`
+	Path       string `json:"path"`
+	Visibility string `json:"visibility"`
+	BlobSHA    string `json:"blob_sha"`
+	Content    string `json:"content"`
+}
+
+var ErrPinMissing = errors.New("rules_pin_missing")
+var ErrPackTooLarge = errors.New("rules_pack_too_large")
+
+// LoadPinnedCatalog applies the same host grant checks as legacy delivery,
+// then reads only the current pin. Public-main observations are never prose.
+func LoadPinnedCatalog(ctx context.Context, tx pgx.Tx) (Catalog, error) {
+	return loadCatalog(ctx, tx, true)
 }
 
 // LoadCatalog reads the pinned sources and the rules indexed at those commits.
 // A source that is not indexed yet still contributes its pin.
 func LoadCatalog(ctx context.Context, tx pgx.Tx) (Catalog, error) {
+	return loadCatalog(ctx, tx, false)
+}
+
+func loadCatalog(ctx context.Context, tx pgx.Tx, pinned bool) (Catalog, error) {
 	sources, err := listSources(ctx, tx)
 	if err != nil {
 		return Catalog{}, err
 	}
-	cat := Catalog{Releases: make([]Release, 0, len(sources)), Rules: []Indexed{}}
+	cat := Catalog{Releases: make([]Release, 0, len(sources)), Rules: []Indexed{}, ManagedFiles: pinned}
+	if pinned && len(sources) == 0 {
+		return Catalog{}, ErrPinMissing
+	}
+	totalBytes, totalFiles := 0, 0
 	for _, s := range sources {
+		expectedFiles := 0
 		stale := false
 		if s.CredentialRef != "" {
 			var tenantID string
@@ -67,12 +104,47 @@ func LoadCatalog(ctx context.Context, tx pgx.Tx) (Catalog, error) {
 			}
 		}
 		cat.Releases = append(cat.Releases, Release{Repository: s.Repository, Ref: s.Ref, Commit: s.Commit, Stale: stale})
+		if pinned {
+			if s.IndexedAt == nil || !shaPattern.MatchString(s.Commit) {
+				return Catalog{}, ErrPinMissing
+			}
+			var count, size, largest int
+			if err := tx.QueryRow(ctx, `SELECT count(*),coalesce(sum(octet_length(content)),0),coalesce(max(octet_length(content)),0) FROM doctrine_cache WHERE source_id=$1 AND commit_sha=$2 AND path LIKE '%.md'`, s.ID, s.Commit).Scan(&count, &size, &largest); err != nil {
+				return Catalog{}, err
+			}
+			if count == 0 {
+				return Catalog{}, ErrPinMissing
+			}
+			expectedFiles = count
+			totalFiles += count
+			totalBytes += size
+			if totalFiles > ManagedMaxFiles || totalBytes > ManagedPackMaxBytes || largest > ManagedFileMaxBytes {
+				return Catalog{}, ErrPackTooLarge
+			}
+		}
 		if s.IndexedAt == nil {
 			continue
 		}
-		files, err := cachedFiles(ctx, tx, s)
+		files, err := cachedFilesForDelivery(ctx, tx, s, pinned)
 		if err != nil {
 			return Catalog{}, err
+		}
+		if pinned && len(files) != expectedFiles {
+			return Catalog{}, ErrPinMissing
+		}
+		if pinned {
+			for _, pattern := range s.Paths {
+				matched := false
+				for _, file := range files {
+					if ok, _ := path.Match(pattern, file.Path); ok {
+						matched = true
+						break
+					}
+				}
+				if !matched {
+					return Catalog{}, ErrPinMissing
+				}
+			}
 		}
 		for _, file := range Render(s.Repository, s.Commit, s.Visibility == "private", files) {
 			for _, rule := range file.Rules {
@@ -82,9 +154,32 @@ func LoadCatalog(ctx context.Context, tx pgx.Tx) (Catalog, error) {
 				cat.Rules = append(cat.Rules, Indexed{Identity: rule.Identity, Key: rule.Key, Text: rule.Text})
 			}
 		}
+		if pinned {
+			for _, f := range files {
+				if !strings.HasSuffix(f.Path, ".md") {
+					continue
+				}
+				if !utf8.Valid(f.Content) || BlobSHA(f.Content) != f.BlobSHA {
+					return Catalog{}, ErrPinMissing
+				}
+				cat.Files = append(cat.Files, PinnedFile{Repository: s.Repository, Commit: s.Commit, Path: f.Path, Visibility: s.Visibility, BlobSHA: f.BlobSHA, Content: string(f.Content)})
+			}
+		}
 	}
 	slices.SortFunc(cat.Releases, func(a, b Release) int { return strings.Compare(a.Repository, b.Repository) })
 	slices.SortFunc(cat.Rules, func(a, b Indexed) int { return strings.Compare(a.Identity, b.Identity) })
+	slices.SortFunc(cat.Files, func(a, b PinnedFile) int {
+		if a.Visibility != b.Visibility {
+			if a.Visibility == "public" {
+				return -1
+			}
+			return 1
+		}
+		if d := strings.Compare(a.Repository, b.Repository); d != 0 {
+			return d
+		}
+		return strings.Compare(a.Path, b.Path)
+	})
 	return cat, nil
 }
 

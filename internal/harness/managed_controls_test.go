@@ -261,3 +261,52 @@ func TestManagedControlsRefuseUnmanagedAndUnknownPolicy(t *testing.T) {
 	body["advertised_capabilities"] = []string{"managed_control_v1"}
 	expect(t, f.call(f.person, "POST", base, body, ""), 400)
 }
+
+// Risk: an opted-in daemon must fail closed before launching with a missing,
+// partial or oversized pin; legacy requests keep their existing semantics.
+func TestManagedPinnedContextRefusesMissingAndOversizedPins(t *testing.T) {
+	f := fixture(t)
+	order, run := stateRun(t, f, f.project, "running", "MPC-10")
+	f.agent.KeyCreatorID = f.person.ID
+	lease := "pinned-context-lease-0000000000000000001"
+	base := "/api/projects/" + f.project + "/harness-sessions"
+	w := f.call(f.person, "POST", base, map[string]any{"agent_principal_id": f.agent.ID, "harness": "claude", "host": "fixture", "harness_session_ref": "pinned-context-ref-000000000000001", "worker_lease": lease, "management_mode": "managed", "role": "worker", "run_id": run, "work_order_id": order, "ticket_node_id": order, "work_shape": "ship"}, "")
+	expect(t, w, 201)
+	endpoint := base + "/" + decode(t, w)["id"].(string) + "/managed-context"
+	request := func(status int, code string) {
+		t.Helper()
+		w = f.call(f.agent, "POST", endpoint, map[string]bool{"pinned_files": true}, lease)
+		expect(t, w, status)
+		if code != "" && decode(t, w)["code"] != code {
+			t.Fatalf("wrong refusal: %s", w.Body.String())
+		}
+	}
+	request(409, "rules_pin_missing")
+	var source string
+	commit := strings.Repeat("a", 40)
+	f.tx(t, f.person, func(tx pgx.Tx) error {
+		return tx.QueryRow(t.Context(), `INSERT INTO doctrine_sources(tenant_id,repository,visibility,commit_sha,paths) VALUES($1,'fixture/company','public',$2,ARRAY['docs/KERNEL.md']) RETURNING id::text`, f.person.TenantID, commit).Scan(&source)
+	})
+	request(409, "rules_pin_missing")
+	content := []byte(strings.Repeat("R", 27603))
+	f.tx(t, f.person, func(tx pgx.Tx) error {
+		if _, err := tx.Exec(t.Context(), `INSERT INTO doctrine_cache(tenant_id,source_id,commit_sha,path,blob_sha,content) VALUES($1,$2,$3,'docs/KERNEL.md',$4,$5)`, f.person.TenantID, source, commit, doctrine.BlobSHA(content), content); err != nil {
+			return err
+		}
+		_, err := tx.Exec(t.Context(), `UPDATE doctrine_sources SET indexed_at=clock_timestamp() WHERE id=$1`, source)
+		return err
+	})
+	request(200, "")
+	var got rules.Merged
+	if err := json.Unmarshal(w.Body.Bytes(), &got); err != nil {
+		t.Fatal(err)
+	}
+	if len(got.PinnedFiles) != 1 || got.PinnedFiles[0].Content != string(content) {
+		t.Fatal("measured pin not delivered")
+	}
+	f.tx(t, f.person, func(tx pgx.Tx) error {
+		_, err := tx.Exec(t.Context(), `UPDATE doctrine_cache SET content=$2,blob_sha=$3 WHERE source_id=$1`, source, []byte(strings.Repeat("R", 64001)), doctrine.BlobSHA([]byte(strings.Repeat("R", 64001))))
+		return err
+	})
+	request(422, "rules_pack_too_large")
+}

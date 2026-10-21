@@ -362,19 +362,28 @@ paths:
       - {$ref: '#/components/parameters/LegacyWorkerLease'}
     post:
       parameters:
-        - {name: X-Aeon-Max-Session-File-Bytes, in: header, schema: {type: integer, minimum: 2000, maximum: 512000}, description: "Omission means 12000. Delivery also respects the registered maximum; whole-rule compatibility cut with note, never dropping locked rules."}
+        - {name: X-Aeon-Max-Session-File-Bytes, in: header, schema: {type: integer, minimum: 2000, maximum: 512000}, description: "Legacy omission means 12000 and respects registration. Opt-in pinned_files delivery defaults to 128000 bytes and refuses overflow without a compatibility cut; each pinned file is at most 64000 bytes."}
       operationId: managedHarnessContext
       description: Bound managed worker only. ADR-004 rules merge for this exact tenant/project/key creator/agent/task; delivered in ephemeral context. No repository writes. A receipt proves received bytes, not model obedience. No caller-selectable context or broader rules access.
       requestBody:
         required: true
         content:
           application/json:
-            schema: {type: object, additionalProperties: false}
+            schema:
+              type: object
+              additionalProperties: false
+              properties:
+                pinned_files: {type: boolean, default: false, description: "Claude agentd opt-in: return tenant-authorized pin bytes alongside every database rule layer; missing pins refuse launch."}
       responses:
         "503": {"description":"Doctrine catalog unavailable (doctrine_unavailable); check the source credential grant and server configuration","content":{"application/json":{"schema":{"$ref":"#/components/schemas/RuleError"}}}}
-        '200': {description: ADR-004 merged rules envelope}
+        '200':
+          description: "Merged database rules, with pinned_files for opt-in Claude assembly. Agentd prepends its floor and inserts AGENTS.md from the run commit (trusted BaseSHA for reviews) before the database block."
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ManagedRulesEnvelope'}
         '403': {description: Invalid worker lease or owner}
-        '409': {description: Managed run required}
+        '409': {description: "Managed run required or rules_pin_missing; no model starts.", content: {application/json: {schema: {$ref: '#/components/schemas/RuleError'}}}}
+        '422': {description: "rules_pack_too_large; no model starts.", content: {application/json: {schema: {$ref: '#/components/schemas/RuleError'}}}}
   /projects/{projectId}/harness-sessions/{sessionId}/managed-controls:
     parameters:
       - {name: projectId, in: path, required: true, schema: {type: string, format: uuid}}
@@ -967,6 +976,21 @@ components:
   headers:
     HarnessSessionContract: {description: "Harness status and heartbeat response contract; version 2 adds Gemini, OpenCode, media and terminal to the closed harness enum. Version 3 adds projection_unavailable to the closed warning code enum for isolated heartbeat receipts. Version 3.1 adds an optional value-free inbox binding refusal code. Version 3.2 adds the public parallel reason and initiating principal. Version 3.3 adds delivery continuation admission metadata.", schema: {type: string, enum: ['harness-session/3.3']}}
   schemas:
+    ManagedRulesEnvelope:
+      allOf:
+        - {$ref: '#/components/schemas/MergedRules'}
+      description: "Legacy MergedRules fields are unchanged; pinned_files is added only on explicit opt-in. The body hash and receipt describe the database block; full delivery evidence follows in D2."
+    ManagedPinnedRuleFile:
+      type: object
+      additionalProperties: false
+      required: [repository, commit, path, visibility, blob_sha, content]
+      properties:
+        repository: {type: string, maxLength: 141}
+        commit: {type: string, pattern: '^[0-9a-f]{40}$'}
+        path: {type: string, maxLength: 300}
+        visibility: {type: string, enum: [public, private]}
+        blob_sha: {type: string, pattern: '^[0-9a-f]{40}$'}
+        content: {type: string, maxLength: 64000, description: "Exact UTF-8 bytes from the pinned doctrine cache; bounded to 64000 bytes before reading."}
     InboxBindingError:
       type: [string, 'null']
       enum: [instance_mismatch, principal_mismatch, worker_proof_rejected, hook_cli_mismatch, hook_instance_mismatch, hook_unavailable, hook_index_mismatch, daemon_unavailable, process_unverified, harness_identity_mismatch, generation_mismatch, pairing_unavailable, daemon_refused, null]
@@ -1210,6 +1234,7 @@ components:
       description: 'One control claimed by yield. expires_in_ms is the only authorization lifetime a worker may use. expires_at is audit metadata.'
       required: [id, session_id, kind, state, sequence, created_at, expires_in_ms]
       properties:
+        author_principal_id: {type: string, format: uuid, description: "Authenticated requester of a relayed steering message; agentd labels it as a message, never the task."}
         expected_generation: {type: string, format: uuid}
         request_payload:
           type: object

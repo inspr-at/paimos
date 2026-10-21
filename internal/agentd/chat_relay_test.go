@@ -965,7 +965,7 @@ func TestSupervisorDeliversMaximumEscapedChatInput(t *testing.T) {
 		MessageID string `json:"message_id"`
 		Body      string `json:"body"`
 	}
-	if !ok || !strings.HasPrefix(header, "Aeon chat:") || len(text) <= 64<<10 || json.Unmarshal([]byte(frame), &got) != nil || got.MessageID != "m1" || got.Body != in.Message.Body {
+	if !ok || !strings.HasPrefix(header, "Aeon relayed message") || len(text) <= 64<<10 || json.Unmarshal([]byte(frame), &got) != nil || got.MessageID != "m1" || got.Body != in.Message.Body {
 		t.Fatalf("input changed in transport (%d bytes)", len(text))
 	}
 	running := chatState("running")
