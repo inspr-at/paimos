@@ -18618,6 +18618,12 @@
     ,
     {"kind":"vitest","file":"tests/desk-empty-state.unit.test.ts","name":"Decision Desk empty state > names the source that did not answer, so an empty read is never all clear","tier":"ESSENTIAL"}
     ,
+    {"kind":"vitest","file":"tests/desk-empty-state.unit.test.ts","name":"Decision Desk empty state > never calls the desk clear when the desk, its questions or its approvals did not answer, or the badge counts items","tier":"ESSENTIAL"}
+    ,
+    {"kind":"vitest","file":"tests/desk-empty-state.unit.test.ts","name":"Decision Desk empty state > retries a failed desk 3, 10 and 30 s apart, one at a time, then hands over to the normal refresh","tier":"ESSENTIAL"}
+    ,
+    {"kind":"vitest","file":"tests/desk-empty-state.unit.test.ts","name":"Decision Desk empty state > says the count the badge knows, in English and impersonal German","tier":"ESSENTIAL"}
+    ,
     {"kind":"vitest","file":"tests/desk-notifications.unit.test.ts","name":"Denied permission and an identity abort between browser work and POST cannot persist a Desk subscription","tier":"ESSENTIAL"}
     ,
     {"kind":"vitest","file":"tests/desk-notifications.unit.test.ts","name":"Desk off posts an explicit flag without prompting registering unsubscribing or touching phone preferences","tier":"ESSENTIAL"}
