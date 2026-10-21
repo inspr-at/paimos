@@ -389,6 +389,7 @@ func (e *Engine) connectionProgress(ctx context.Context, s *snapshot) Progress {
 	v := s.View
 	p := e.progress(s)
 	p.AccountingState = v.AccountingState
+	p.AccountLogins = accountLoginHomes(s, nil)
 
 	if e.Local != nil {
 		local, err := e.Local.Status(ctx, "")
@@ -400,7 +401,7 @@ func (e *Engine) connectionProgress(ctx context.Context, s *snapshot) Progress {
 			accountReport := local.AccountStatuses != nil
 			local = enrollmentReadiness(v, local)
 			p.AccountStatuses = local.AccountStatuses
-			p.AccountLogins = local.AccountLogins
+			p.AccountLogins = accountLoginHomes(s, local.AccountLogins)
 			p.HarnessDetails, p.HarnessStatuses = local.HarnessDetails, local.HarnessStatuses
 			p.BlockedAccounts = append([]BlockedAccount(nil), local.BlockedAccounts...)
 			// A Claude hold keeps its own stage: repin is a Claude-only flow.
@@ -602,7 +603,18 @@ func (e *Engine) AddHarness(ctx context.Context, candidates []Candidate) (Progre
 			}
 		}
 		for _, a := range s.View.Enrollments {
-			if a.State == "connected" && a.Harness == c.Harness && a.Label == c.Label {
+			sameAccount := a.Label == c.Label
+			if a.State == "connected" && a.Harness == c.Harness && (c.Harness == "claude" || c.Harness == "codex") {
+				for _, local := range s.Candidates {
+					if local.Candidate.Key == a.AccountKey && strings.EqualFold(local.Identity, c.Identity) {
+						if local.Home != c.Home {
+							return e.progress(s), fmt.Errorf("this login is already enrolled from %s", local.Home)
+						}
+						sameAccount = true
+					}
+				}
+			}
+			if a.State == "connected" && a.Harness == c.Harness && sameAccount {
 				if len(candidates) == 1 && !s.Removed[a.AccountID] {
 					return e.renewPin(ctx, s, a, c)
 				}
@@ -650,6 +662,28 @@ func (e *Engine) AddHarness(ctx context.Context, candidates []Candidate) (Progre
 		return Progress{}, err
 	}
 	return e.Step(ctx)
+}
+
+// Home is a local binding even when the daemon has no current identity result.
+// Do not infer an active login or approval from a saved enrollment alone.
+func accountLoginHomes(s *snapshot, live map[string]AccountLogin) map[string]AccountLogin {
+	result := make(map[string]AccountLogin, len(live))
+	for id, login := range live {
+		result[id] = login
+	}
+	for _, account := range s.View.Enrollments {
+		if account.Harness != "claude" && account.Harness != "codex" {
+			continue
+		}
+		for _, local := range s.Candidates {
+			if local.Candidate.Key == account.AccountKey && local.Candidate.Harness == account.Harness {
+				login := result[account.AccountID]
+				login.Home = local.Home
+				result[account.AccountID] = login
+			}
+		}
+	}
+	return result
 }
 
 func matchesPendingLogin(s *snapshot, candidates []Candidate) bool {
