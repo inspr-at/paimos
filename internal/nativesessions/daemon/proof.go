@@ -25,6 +25,7 @@ type exit nativecontract.ExitEvidence
 // Proof is private to the authenticated paired connection. Identities and
 // observations are rechecked against SQL; possession never grants control.
 type Proof struct {
+	WorkspaceRoot string                     `json:"workspace_root,omitempty"`
 	DaemonID      string                     `json:"daemon_id"`
 	Generation    string                     `json:"generation"`
 	Ledger        string                     `json:"ledger"`

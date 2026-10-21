@@ -366,7 +366,7 @@ func currentDaemon(ctx context.Context, tx pgx.Tx, d nativecontract.DaemonActor,
 func rDaemonKey(ctx context.Context) string { p, _ := tenant.PrincipalFrom(ctx); return p.KeyID }
 
 func claimResult(r pendingRecord, in nativecontract.Claim, expires, now time.Time) nativecontract.ClaimResult {
-	return nativecontract.ClaimResult{OperationID: r.OperationID, OwnedSessionID: r.OwnedSessionID, Intent: r.Intent, Policy: r.policy, ExpectedBinding: r.view.CurrentBinding, ExpiresAt: expires, ClaimKind: in.ClaimKind, LaunchAuthorized: true, LaunchConfig: r.launch, AuthorizationTTLMS: max(1, expires.Sub(now).Milliseconds())}
+	return nativecontract.ClaimResult{OperationID: r.OperationID, OwnedSessionID: r.OwnedSessionID, Intent: r.Intent, Policy: r.policy, ExpectedBinding: r.view.CurrentBinding, ExpiresAt: expires, ClaimKind: in.ClaimKind, LaunchAuthorized: true, LaunchConfig: r.launch, AuthorizationTTLMS: max(1, expires.Sub(now).Milliseconds()), CommandActor: &nativecontract.CommandActor{TenantID: r.actor.Principal.TenantID, PrincipalID: r.actor.Principal.ID, OwnerPersonID: r.OwnerPersonID, GrantID: r.actor.GrantID, GrantRevision: r.actor.GrantRevision}}
 }
 
 func rootID(ctx context.Context, tx pgx.Tx, out *nativecontract.ClaimResult) error {

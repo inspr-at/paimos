@@ -25,6 +25,8 @@ import (
 	"github.com/inspr-at/paimos/internal/agentdwire"
 	"github.com/inspr-at/paimos/internal/agentsetup"
 	"github.com/inspr-at/paimos/internal/harnesslaunch"
+	"github.com/inspr-at/paimos/internal/nativeintegration"
+	"github.com/inspr-at/paimos/internal/nativeprofiles"
 	"github.com/inspr-at/paimos/internal/version"
 )
 
@@ -102,6 +104,10 @@ func serve(args []string) (resultErr error) {
 	var capacityInterval time.Duration
 	f.DurationVar(&capacityInterval, "capacity-interval", 5*time.Minute, "minimum interval between idle quota captures")
 	var setupRoot string
+	var nativeEnabled bool
+	var nativeProfiles string
+	f.BoolVar(&nativeEnabled, "native-sessions", false, "enable person-consented native sessions on this paired daemon")
+	f.StringVar(&nativeProfiles, "native-sessions-profile", "", "private qualified native profile configuration; required with --native-sessions")
 	var codexIdleTimeout time.Duration
 	f.DurationVar(&codexIdleTimeout, "codex-idle-timeout", 10*time.Minute, "complete a clean idle Codex run after this wake window")
 	f.StringVar(&setupRoot, "setup-root", "", "private approved pairing state")
@@ -128,14 +134,32 @@ func serve(args []string) (resultErr error) {
 	if setupRoot != "" {
 		allowedFlags := true
 		f.Visit(func(v *flag.Flag) {
-			if v.Name != "setup-root" && v.Name != "capacity-interval" {
+			if v.Name != "setup-root" && v.Name != "capacity-interval" && v.Name != "native-sessions" && v.Name != "native-sessions-profile" {
 				allowedFlags = false
 			}
 		})
 		if !allowedFlags || len(f.Args()) != 0 {
 			return errors.New("paired serve does not accept runtime overrides")
 		}
+		if nativeEnabled {
+			if nativeProfiles == "" {
+				return errors.New("--native-sessions requires --native-sessions-profile")
+			}
+			profiles, err := loadNativeProfiles(nativeProfiles)
+			if err != nil {
+				return err
+			}
+			ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
+			defer stop()
+			return servePairedContext(context.WithValue(ctx, nativeProfilesKey{}, profiles), setupRoot, capacityInterval)
+		}
+		if nativeProfiles != "" {
+			return errors.New("--native-sessions-profile requires --native-sessions")
+		}
 		return servePaired(setupRoot, capacityInterval)
+	}
+	if nativeEnabled || nativeProfiles != "" {
+		return errors.New("native sessions require approved paired serve with --setup-root")
 	}
 	if len(f.Args()) != 0 || agentd.ValidateBaseURL(base) != nil {
 		return errors.New("invalid AEON URL or arguments")
@@ -399,4 +423,37 @@ func control(args []string, out io.Writer) error {
 		return err
 	}
 	return json.NewEncoder(out).Encode(receipt)
+}
+
+type nativeProfilesKey struct{}
+
+// Native profile configuration is operator-owned metadata for existing
+// enrollments, not a vendor credential or a source of server consent.
+func loadNativeProfiles(path string) (*nativeprofiles.Resolver, error) {
+	if !filepath.IsAbs(path) {
+		return nil, errors.New("native profile path must be absolute")
+	}
+	store, err := agentsetup.OpenStoreReadOnly(filepath.Dir(path))
+	if err != nil {
+		return nil, err
+	}
+	defer store.Close()
+	raw, err := store.Read(filepath.Base(path), 65536)
+	if err != nil {
+		return nil, err
+	}
+	var c nativeprofiles.Config
+	d := json.NewDecoder(strings.NewReader(string(raw)))
+	d.DisallowUnknownFields()
+	if d.Decode(&c) != nil || d.Decode(&struct{}{}) != io.EOF {
+		return nil, errors.New("invalid native profile configuration")
+	}
+	return nativeprofiles.New(c)
+}
+func pairedNativeSessions(ctx context.Context, remote *agentd.Remote, c agentsetup.RuntimeConfig) *agentd.NativeSessionConfig {
+	profiles, ok := ctx.Value(nativeProfilesKey{}).(*nativeprofiles.Resolver)
+	if !ok {
+		return nil
+	}
+	return agentd.NativeProduction(remote, c.ComputerID, profiles, nativeintegration.Capabilities())
 }

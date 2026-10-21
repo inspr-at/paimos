@@ -5,9 +5,15 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"github.com/google/uuid"
+	"github.com/inspr-at/paimos/internal/nativeintegration/delivery"
+	"github.com/inspr-at/paimos/internal/nativereceipts"
+	"github.com/inspr-at/paimos/internal/nativesessions/daemon"
 	"os"
 	"path/filepath"
+	"reflect"
 	"slices"
+	"strings"
 	"sync"
 	"time"
 
@@ -66,6 +72,12 @@ type NativeLeadPlan struct {
 // Authorize reserves the server root before return. Revalidate fences current
 // rights immediately before fork/input. ReportExit settles only observed exits.
 type NativeSessionConfig struct {
+	Bind     func(*Supervisor)
+	Poll     func(context.Context) error
+	Close    func(context.Context) error
+	Host     nativecontract.Host
+	Launcher nativecontract.Launcher
+
 	// StartLocal resolves the exact persisted PERSON-issued C0 intent and
 	// revalidates its original actor/current grant before using the owning
 	// supervisor. Socket possession and wire selectors grant no authority.
@@ -503,6 +515,11 @@ func (s *Supervisor) abandonNativeLocked(entry *nativeLeadEntry) error {
 // Poll services only in-memory owners; a saved PID never becomes launch or
 // signaling authority. API failure and idle turn completion retain occupancy.
 func (s *Supervisor) PollNativeSessions(ctx context.Context) error {
+	if s.native != nil && s.native.config != nil && s.native.config.Poll != nil {
+		if err := s.native.config.Poll(ctx); err != nil {
+			return err
+		}
+	}
 	if s.native == nil || !nativeConfigReady(s.native.config) {
 		return nil
 	}
@@ -564,3 +581,652 @@ func (s *Supervisor) PollNativeSessions(ctx context.Context) error {
 	}
 	return nil
 }
+
+// NativeProduction installs C0 on the owning supervisor. Profiles must come
+// from separately qualified existing enrollments; the option creates none.
+func NativeProduction(remote *Remote, computer string, profiles nativecontract.ProfileResolver, caps nativecontract.Capabilities) *NativeSessionConfig {
+	h := &NativeHost{remote: remote, computer: computer, profiles: profiles, caps: caps, entries: map[string]*nativeOwned{}}
+	c := &NativeSessionConfig{StartLocal: h.Start, Poll: h.Poll, Close: h.Close, Host: h, Launcher: h}
+	c.Bind = func(s *Supervisor) { h.s = s }
+	return c
+}
+
+type NativeHost struct {
+	s        *Supervisor
+	remote   *Remote
+	computer string
+	profiles nativecontract.ProfileResolver
+	caps     nativecontract.Capabilities
+	mu       sync.Mutex
+	entries  map[string]*nativeOwned
+}
+type nativeOwned struct {
+	host              *NativeHost
+	local             nativecontract.LocalStart
+	claim             nativecontract.Claim
+	grant             nativecontract.ClaimResult
+	profile           nativecontract.LocalProfile
+	proof             daemon.Proof
+	group             string
+	journal           *nativereceipts.Store
+	delivery          *delivery.Delivery
+	transport         *nativeC0Transport
+	active            nativecontract.ClaimResult
+	operations        map[string]string // input ID -> operation ID, bounded by journal
+	mu                sync.Mutex
+	opMu              sync.Mutex
+	attempted, exited bool
+	lastError         error
+}
+
+type nativeC0Key struct{}
+type nativeC0Launch struct {
+	spec    nativecontract.LaunchSpec
+	observe func(json.RawMessage)
+}
+
+func nativeRefusal(reason nativecontract.Reason) error {
+	return &nativecontract.ValidationError{Reason: reason, Path: "$"}
+}
+
+func (h *NativeHost) Start(ctx context.Context, local nativecontract.LocalStart) (nativecontract.OperationResult, error) {
+	var out nativecontract.OperationResult
+	if h.s == nil || h.remote == nil || h.profiles == nil || h.s.ledger == nil || h.caps.QualificationDigest == "" {
+		return out, nativeRefusal(nativecontract.ReasonQualificationMissing)
+	}
+	v, err := nativecontract.NewValidator()
+	if err != nil {
+		return out, err
+	}
+	if err = nativereceipts.Validate(v, "NativeLocalStart", local); err != nil {
+		return out, err
+	}
+	if local.Intent.ComputerID != h.computer || local.Intent.Harness != Claude || local.Intent.Role != "coordinator" {
+		return out, nativeRefusal(nativecontract.ReasonWrongPrincipal)
+	}
+	// Resume/handover requires an exact retained source writer; never adopt an
+	// arbitrary saved PID or let the old first-start DTO bypass C0's barrier.
+	if local.AfterExit != nil || local.NativeResumeRef != nil || local.Intent.ResumeFromOwnedSessionID != nil {
+		return out, nativeRefusal(nativecontract.ReasonUnsupported)
+	}
+	s := h.s
+	if err = s.dispatchMu.LockContext(ctx); err != nil {
+		return out, err
+	}
+	defer s.dispatchMu.Unlock()
+	if !s.dispatchAllowed(local.Intent.AccountID) || !s.accountAvailable(local.Intent.AccountID) {
+		return out, ErrDraining
+	}
+	h.mu.Lock()
+	existing := h.entries[local.Intent.RequestID]
+	count := len(h.entries)
+	h.mu.Unlock()
+	if existing != nil {
+		if !reflect.DeepEqual(existing.local, local) {
+			return out, nativeRefusal(nativecontract.ReasonIdentityMismatch)
+		}
+		existing.mu.Lock()
+		grant := existing.grant
+		ready := existing.transport != nil
+		existing.mu.Unlock()
+		if !ready {
+			return out, nativeRefusal(nativecontract.ReasonOwnershipUnconfirmed)
+		}
+		return existing.ready(ctx, grant)
+	}
+	if count >= 32 {
+		return out, nativeRefusal(nativecontract.ReasonHostFull)
+	}
+	for _, a := range s.accounts {
+		if a.ID == local.Intent.AccountID && (a.Harness != Claude || a.Key != local.AccountKey) {
+			return out, nativeRefusal(nativecontract.ReasonIdentityMismatch)
+		}
+	}
+	record := "native-c0-" + local.Intent.RequestID + ".json"
+	if _, err = s.state.Read(record, 16384); err == nil {
+		return out, nativeRefusal(nativecontract.ReasonOwnershipUnconfirmed)
+	} else if !errors.Is(err, os.ErrNotExist) {
+		return out, err
+	}
+	group, err := agentsetup.LedgerID()
+	if err != nil {
+		return out, err
+	}
+	candidates, err := s.ledger.Acquire(s.ledgerBinding.Member.ID, s.ledgerBinding.Generation, group, s.ledgerCandidates([]string{local.Intent.AccountID}, s.ledgerBinding.Generation))
+	if err != nil {
+		return out, err
+	}
+	if len(candidates) != 1 || candidates[0].AccountID != local.Intent.AccountID {
+		return out, nativeRefusal(nativecontract.ReasonOwnershipUnconfirmed)
+	}
+	ref, err := randomID()
+	if err != nil {
+		return out, err
+	}
+	lease, err := randomID()
+	if err != nil {
+		return out, err
+	}
+	request, err := randomID()
+	if err != nil {
+		return out, err
+	}
+	reservation, err := randomID()
+	if err != nil {
+		return out, err
+	}
+	now := s.capacityNow()
+	e := &nativeOwned{host: h, local: local, group: group, operations: map[string]string{}, proof: daemon.Proof{DaemonID: s.daemonID, Generation: s.generation, Ledger: s.ledgerBinding.Generation, Capability: h.caps.QualificationDigest, WorkerLease: lease, SessionRef: ref, ReservationID: reservation, ObservedAt: now, ExpiresAt: now.Add(20 * time.Second), LocalStart: &local}}
+	e.claim = nativecontract.Claim{RequestID: request, OperationID: local.Intent.RequestID, DaemonID: s.daemonID, DaemonGeneration: s.generation, LedgerGeneration: s.ledgerBinding.Generation, CapabilityDigest: h.caps.QualificationDigest, ExpectedRevision: 1, ClaimKind: "start"}
+	if err = e.call(ctx, "POST", "/api/native-sessions/claim", e.claim, &e.grant); err != nil {
+		return out, errors.Join(err, s.ledger.Release(s.ledgerBinding.Member.ID, s.ledgerBinding.Generation, group))
+	}
+	g := e.grant
+	if !g.LaunchAuthorized || g.ExpectedBinding == nil || g.CommandActor == nil || !reflect.DeepEqual(g.Intent, local.Intent) || g.ExpectedBinding.DaemonID != s.daemonID || g.ExpectedBinding.DaemonGeneration != s.generation || g.CommandActor.TenantID != s.tenantID {
+		return out, nativeRefusal(nativecontract.ReasonIdentityMismatch)
+	}
+	b := *g.ExpectedBinding
+	profile, err := h.profiles.Resolve(ctx, nativecontract.ProfileRequest{TenantID: s.tenantID, OwnerPersonID: g.CommandActor.OwnerPersonID, AccountID: local.Intent.AccountID, AccountKey: local.AccountKey, WorkspaceID: local.Intent.WorkspaceID, Harness: Claude, Policy: g.Policy, BindingRevision: b.BindingRevision})
+	if err != nil {
+		return out, err
+	}
+	if profile.AccountID != local.Intent.AccountID || profile.ProfileBindingRevision != b.BindingRevision || !nativeWithin(profile.WorkspaceRoot, local.Cwd) {
+		return out, nativeRefusal(nativecontract.ReasonIdentityMismatch)
+	}
+	e.profile = profile
+	e.proof.WorkspaceRoot = profile.WorkspaceRoot
+	journal, err := nativereceipts.Open(filepath.Join(s.state.Path(), "native-c0-"+b.OwnedSessionID), s.capacityNow)
+	if err != nil {
+		return out, err
+	}
+	e.journal = journal
+	h.mu.Lock()
+	h.entries[local.Intent.RequestID] = e
+	h.mu.Unlock()
+	if err = e.save("reserved"); err != nil {
+		return out, err
+	}
+	if err = s.ledger.Claimed(s.ledgerBinding.Member.ID, s.ledgerBinding.Generation, group, s.ledgerLogin(local.Intent.AccountID, s.ledgerBinding.Generation)); err != nil {
+		return out, err
+	}
+	spec := nativecontract.LaunchSpec{Binding: b, Profile: profile, Policy: g.Policy, Cwd: local.Cwd, Mode: "structured", OwnedWriterID: b.RuntimeEpoch, Options: g.LaunchConfig, Lifetime: s.lifetime}
+	process, err := h.Open(ctx, spec)
+	if err != nil {
+		return out, err
+	}
+	t := process.(*nativeC0Transport)
+	e.mu.Lock()
+	e.transport = t
+	e.mu.Unlock()
+	d, err := delivery.New(delivery.DeliveryOptions{Binding: b, Journal: journal, Transport: t, Authority: e, Reports: e, Finals: e, Now: s.capacityNow, Retention: e.retention, Release: e.release})
+	if err != nil {
+		return out, err
+	}
+	e.delivery = d
+	out, err = e.ready(ctx, g)
+	if err != nil {
+		return out, err
+	}
+	go e.events(s.lifetime)
+	return out, nil
+}
+func nativeWithin(root, cwd string) bool {
+	physical, err := filepath.EvalSymlinks(cwd)
+	if err != nil || physical != cwd {
+		return false
+	}
+	rel, err := filepath.Rel(root, cwd)
+	return err == nil && rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator))
+}
+
+// Open is reachable only for an already claimed, exact in-memory start. The
+// possible-fork marker precedes the adapter and survives every uncertain error.
+func (h *NativeHost) Open(ctx context.Context, spec nativecontract.LaunchSpec) (nativecontract.NativeTransport, error) {
+	h.mu.Lock()
+	var e *nativeOwned
+	for _, candidate := range h.entries {
+		if candidate.grant.ExpectedBinding != nil && candidate.grant.ExpectedBinding.Equal(spec.Binding) {
+			e = candidate
+			break
+		}
+	}
+	h.mu.Unlock()
+	if e == nil || e.attempted || !reflect.DeepEqual(e.profile, spec.Profile) || spec.Cwd != e.local.Cwd {
+		return nil, nativeRefusal(nativecontract.ReasonOwnershipUnconfirmed)
+	}
+	adapter, ok := h.s.adapters[Claude].(*ClaudeAdapter)
+	if !ok {
+		return nil, nativeRefusal(nativecontract.ReasonQualificationMissing)
+	}
+	if spec.Policy.LocalHistory != "vendor_native" {
+		return nil, nativeRefusal(nativecontract.ReasonQualificationMissing)
+	}
+	t := newNativeC0Transport(e, spec, h.caps)
+	grant := e.grant
+	effort := ""
+	if grant.LaunchConfig.Effort != nil {
+		effort = *grant.LaunchConfig.Effort
+	}
+	policyDigest, _ := nativereceipts.Digest(spec.Policy)
+	n := &NativeLeadSpec{Grant: NativeLeadGrant{TenantID: spec.Binding.TenantID, PrincipalID: h.s.principalID, OwnerID: grant.CommandActor.OwnerPersonID, ProjectID: spec.Binding.ProjectID, AccountID: spec.Profile.AccountID, SessionID: spec.Binding.HarnessSessionID, DaemonID: h.s.daemonID, Generation: h.s.generation, PolicyDigest: policyDigest, AccountHomeDigest: nativeDigest(spec.Profile.AccountHome), WorkspaceDigest: nativeDigest(spec.Cwd), Revision: spec.Policy.GrantRevision, ExpiresAt: spec.Policy.ExpiresAt, HistoryApproved: true, AllowedTools: []string{}}, Prompt: "Wait for the person's next instruction. No tool use is authorized by this initialization.", Model: grant.LaunchConfig.Model, Effort: effort, Require: e.require, BeforeInput: t.beforeInput, Observe: func(AdapterEvent) {}, Now: h.s.capacityNow}
+	if err = e.require(ctx); err != nil {
+		return nil, err
+	}
+	if err = e.save("possible_fork"); err != nil {
+		return nil, err
+	}
+	e.attempted = true
+	if err = h.s.ledger.Launching(h.s.ledgerBinding.Member.ID, h.s.ledgerBinding.Generation, e.group); err != nil {
+		return nil, err
+	}
+	launch := &nativeC0Launch{spec: spec, observe: t.observe}
+	process, err := adapter.StartLead(context.WithValue(ctx, nativeC0Key{}, launch), LeadStartRequest{Native: n, Session: HarnessSession{ID: spec.Binding.HarnessSessionID, ProjectID: spec.Binding.ProjectID, Harness: Claude, Lease: e.proof.WorkerLease}, AccountKey: e.local.AccountKey, Workspace: spec.Cwd, Lifetime: spec.Lifetime})
+	if err != nil {
+		return nil, errors.Join(err, nativeRefusal(nativecontract.ReasonOwnershipUnconfirmed))
+	}
+	p, ok := process.(*nativeClaudeLead)
+	if !ok {
+		return nil, nativeRefusal(nativecontract.ReasonOwnershipUnconfirmed)
+	}
+	identity, err := p.Ownership()
+	if err != nil {
+		return nil, err
+	}
+	raw, _ := json.Marshal(identity)
+	t.mu.Lock()
+	t.process = p
+	t.identity.Provider = Claude
+	t.identity.RuntimeEpoch = spec.Binding.RuntimeEpoch
+	t.identity.PID = identity.RootPID
+	t.identity.StartedAt = identity.StartedAt
+	t.identity.ProcessIdentityDigest = nativeDigest(string(raw))
+	t.mu.Unlock()
+	if t.Identity().NativeSessionRef == "" {
+		return nil, nativeRefusal(nativecontract.ReasonOwnershipUnconfirmed)
+	}
+	if err = h.s.ledger.Running(h.s.ledgerBinding.Member.ID, h.s.ledgerBinding.Generation, e.group, identity.RootPID, identity.StartedAt); err != nil {
+		return nil, err
+	}
+	return t, nil
+}
+func (e *nativeOwned) save(state string) error {
+	record := struct {
+		Version int                     `json:"version"`
+		Binding *nativecontract.Binding `json:"binding"`
+		Group   string                  `json:"group"`
+		State   string                  `json:"state"`
+	}{1, e.grant.ExpectedBinding, e.group, state}
+	raw, err := json.Marshal(record)
+	if err != nil {
+		return err
+	}
+	return e.host.s.state.Write("native-c0-"+e.local.Intent.RequestID+".json", raw, false)
+}
+func (e *nativeOwned) call(ctx context.Context, method, path string, body, dest any) error {
+	e.mu.Lock()
+	proof := e.proof
+	t := e.transport
+	e.mu.Unlock()
+	if t != nil {
+		i, ev, x := t.proofFor(nil)
+		proof.SetRuntime(i, ev, x)
+	}
+	header, err := daemon.Encode(proof)
+	if err != nil {
+		return err
+	}
+	return e.host.remote.Client.DoWithHeaders(ctx, method, path, body, dest, map[string]string{daemon.ProofHeader: header})
+}
+func (e *nativeOwned) ready(ctx context.Context, g nativecontract.ClaimResult) (nativecontract.OperationResult, error) {
+	r := nativecontract.Receipt{RequestID: g.Intent.RequestID, OperationID: g.OperationID, Binding: g.ExpectedBinding, Operation: "start", State: "applied", SourceSequence: "0", UpdatedAt: e.host.s.capacityNow().UTC()}
+	var out nativecontract.OperationResult
+	err := e.call(ctx, "POST", "/api/native-sessions/receipts", r, &out)
+	return out, err
+}
+func (e *nativeOwned) require(ctx context.Context) error {
+	e.mu.Lock()
+	t, active := e.transport, e.active
+	e.mu.Unlock()
+	if t == nil {
+		var out nativecontract.ClaimResult
+		return e.call(ctx, "POST", "/api/native-sessions/claim", e.claim, &out)
+	}
+	profile, err := e.host.profiles.Resolve(ctx, nativecontract.ProfileRequest{TenantID: e.host.s.tenantID, OwnerPersonID: e.grant.CommandActor.OwnerPersonID, AccountID: e.local.Intent.AccountID, AccountKey: e.local.AccountKey, WorkspaceID: e.local.Intent.WorkspaceID, Harness: Claude, Policy: e.grant.Policy, BindingRevision: e.grant.ExpectedBinding.BindingRevision})
+	if err != nil {
+		return err
+	}
+	if !reflect.DeepEqual(profile, e.profile) {
+		return nativeRefusal(nativecontract.ReasonIdentityMismatch)
+	}
+	if active.OperationID != "" {
+		claim := nativecontract.Claim{RequestID: uuid.NewString(), OperationID: active.OperationID, DaemonID: e.host.s.daemonID, DaemonGeneration: e.host.s.generation, LedgerGeneration: e.host.s.ledgerBinding.Generation, CapabilityDigest: e.host.caps.QualificationDigest, ExpectedRevision: e.grant.ExpectedBinding.BindingRevision, ClaimKind: "command"}
+		var current nativecontract.ClaimResult
+		if err = e.call(ctx, "POST", "/api/native-sessions/claim", claim, &current); err != nil {
+			return err
+		}
+		if current.ExpectedBinding == nil || !current.ExpectedBinding.Equal(*e.grant.ExpectedBinding) || !reflect.DeepEqual(current.Command, active.Command) || current.CommandActor == nil || current.CommandActor.PrincipalID != e.grant.CommandActor.PrincipalID {
+			return nativeRefusal(nativecontract.ReasonIdentityMismatch)
+		}
+		return nil
+	}
+	_, err = e.ready(ctx, e.grant)
+	return err
+}
+func (e *nativeOwned) RequireWrite(ctx context.Context, b nativecontract.Binding, in nativereceipts.Intent) error {
+	e.mu.Lock()
+	active := e.active
+	e.mu.Unlock()
+	if !b.Equal(*e.grant.ExpectedBinding) || active.OperationID != in.Receipt.OperationID || active.CommandActor == nil || active.CommandActor.PrincipalID != in.ActorID || active.Command == nil {
+		return nativeRefusal(nativecontract.ReasonGrantMissing)
+	}
+	var value any
+	switch active.Command.Kind {
+	case "input":
+		var v nativecontract.Input
+		if json.Unmarshal(active.Command.Params, &v) != nil {
+			return ErrScope
+		}
+		value = v
+	case "interrupt":
+		var v nativecontract.Interrupt
+		if json.Unmarshal(active.Command.Params, &v) != nil {
+			return ErrScope
+		}
+		value = v
+	case "stop":
+		var v nativecontract.Stop
+		if json.Unmarshal(active.Command.Params, &v) != nil {
+			return ErrScope
+		}
+		value = v
+	default:
+		return ErrUnsupported
+	}
+	digest, err := nativereceipts.Digest(value)
+	if err != nil || digest != in.PayloadSHA256 {
+		return nativeRefusal(nativecontract.ReasonIdentityMismatch)
+	}
+	return e.require(ctx)
+}
+func (e *nativeOwned) Report(ctx context.Context, r nativecontract.Receipt) (nativecontract.Receipt, error) {
+	e.mu.Lock()
+	proof := e.proof
+	t := e.transport
+	e.mu.Unlock()
+	if t == nil {
+		return r, ErrNotOwned
+	}
+	i, ev, x := t.proofFor(&r)
+	proof.SetRuntime(i, ev, x)
+	header, err := daemon.Encode(proof)
+	if err != nil {
+		return r, err
+	}
+	var out nativecontract.OperationResult
+	err = e.host.remote.Client.DoWithHeaders(ctx, "POST", "/api/native-sessions/receipts", r, &out, map[string]string{daemon.ProofHeader: header})
+	return out.Receipt, err
+}
+func (e *nativeOwned) Persist(ctx context.Context, f nativecontract.FinalDelivery) (nativecontract.FinalReceipt, error) {
+	var out nativecontract.FinalReceipt
+	err := e.call(ctx, "POST", "/api/native-sessions/finals", f, &out)
+	return out, err
+}
+func (e *nativeOwned) retention(ctx context.Context, f nativecontract.FinalPublish) (nativecontract.FinalDrainGrant, nativereceipts.RetentionApproval, error) {
+	e.mu.Lock()
+	grant := e.active.FinalDrainGrant
+	e.mu.Unlock()
+	if grant == nil || grant.GrantID != f.DrainGrantID || !e.host.s.capacityNow().Before(grant.ExpiresAt) {
+		return nativecontract.FinalDrainGrant{}, nativereceipts.RetentionApproval{}, nativeRefusal(nativecontract.ReasonRetentionUnapproved)
+	}
+	if err := e.require(ctx); err != nil {
+		return *grant, nativereceipts.RetentionApproval{}, err
+	}
+	return *grant, nativereceipts.RetentionApproval{Approved: true, OwnerPersonID: e.grant.CommandActor.OwnerPersonID, Until: grant.ExpiresAt}, nil
+}
+func (e *nativeOwned) release(ctx context.Context, b nativecontract.Binding, x nativecontract.ExitEvidence) error {
+	if !x.RootExited || !x.GroupAbsent || x.ProcessIdentityDigest != e.transport.Identity().ProcessIdentityDigest {
+		return nativeRefusal(nativecontract.ReasonOwnershipUnconfirmed)
+	}
+	if err := e.save("exit_confirmed"); err != nil {
+		return err
+	}
+	s := e.host.s
+	if err := s.ledger.Release(s.ledgerBinding.Member.ID, s.ledgerBinding.Generation, e.group); err != nil {
+		return err
+	}
+	e.mu.Lock()
+	e.exited = true
+	e.mu.Unlock()
+	return nil
+}
+func (h *NativeHost) Poll(ctx context.Context) error {
+	h.mu.Lock()
+	entries := make([]*nativeOwned, 0, len(h.entries))
+	for _, e := range h.entries {
+		entries = append(entries, e)
+	}
+	h.mu.Unlock()
+	for _, e := range entries {
+		e.mu.Lock()
+		live := e.transport != nil && e.delivery != nil && !e.exited
+		last := e.lastError
+		e.mu.Unlock()
+		if !live {
+			continue
+		}
+		if last != nil {
+			return last
+		}
+		if _, err := e.journal.FlushReports(ctx, *e.grant.ExpectedBinding, 100, e); err != nil {
+			return err
+		}
+		for _, f := range e.journal.FinalStatuses() {
+			if f.State == "pending" {
+				if _, err := e.journal.RetryFinal(ctx, f.FinalID, e); err != nil {
+					return err
+				}
+			}
+		}
+		var page nativecontract.PendingCommandPage
+		if err := e.call(ctx, "GET", "/api/native-sessions/commands?limit=50", nil, &page); err != nil {
+			return err
+		}
+		for _, item := range page.Items {
+			if !item.ExpectedBinding.Equal(*e.grant.ExpectedBinding) {
+				return nativeRefusal(nativecontract.ReasonIdentityMismatch)
+			}
+			if _, err := e.journal.Get(item.ExpectedBinding, item.OperationID); err == nil {
+				continue
+			}
+			if _, err := e.execute(ctx, item); err != nil {
+				return err
+			}
+		}
+	}
+	return nil
+}
+func (e *nativeOwned) execute(ctx context.Context, item nativecontract.PendingCommand) (nativecontract.OperationResult, error) {
+	e.opMu.Lock()
+	defer e.opMu.Unlock()
+	var out nativecontract.OperationResult
+	claim := nativecontract.Claim{RequestID: uuid.NewString(), OperationID: item.OperationID, DaemonID: e.host.s.daemonID, DaemonGeneration: e.host.s.generation, LedgerGeneration: e.host.s.ledgerBinding.Generation, CapabilityDigest: e.host.caps.QualificationDigest, ExpectedRevision: item.ExpectedBinding.BindingRevision, ClaimKind: "command"}
+	var g nativecontract.ClaimResult
+	if err := e.call(ctx, "POST", "/api/native-sessions/claim", claim, &g); err != nil {
+		return out, err
+	}
+	if g.ExpectedBinding == nil || !g.ExpectedBinding.Equal(item.ExpectedBinding) || g.Command == nil || g.CommandActor == nil || g.Command.Kind != item.Kind {
+		return out, nativeRefusal(nativecontract.ReasonIdentityMismatch)
+	}
+	e.mu.Lock()
+	e.active = g
+	e.mu.Unlock()
+	actor := g.CommandActor.PrincipalID
+	var r nativecontract.Receipt
+	var err error
+	switch g.Command.Kind {
+	case "input":
+		var in nativecontract.Input
+		if json.Unmarshal(g.Command.Params, &in) != nil {
+			return out, ErrScope
+		}
+		e.mu.Lock()
+		if len(e.operations) >= 128 {
+			e.mu.Unlock()
+			return out, nativeRefusal(nativecontract.ReasonBufferFull)
+		}
+		e.operations[in.InputID] = item.OperationID
+		e.mu.Unlock()
+		r, err = e.delivery.Send(ctx, actor, item.OperationID, in)
+	case "interrupt":
+		var in nativecontract.Interrupt
+		if json.Unmarshal(g.Command.Params, &in) != nil {
+			return out, ErrScope
+		}
+		r, err = e.delivery.Interrupt(ctx, actor, item.OperationID, in)
+	case "stop":
+		var in nativecontract.Stop
+		if json.Unmarshal(g.Command.Params, &in) != nil {
+			return out, ErrScope
+		}
+		r, err = e.delivery.Close(ctx, actor, item.OperationID, in, e.transport.nextSequence())
+	default:
+		err = ErrUnsupported
+	}
+	out.Receipt = r
+	return out, err
+}
+func (e *nativeOwned) events(ctx context.Context) {
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case event, ok := <-e.transport.Events():
+			if !ok {
+				return
+			}
+			e.mu.Lock()
+			operation := ""
+			if event.Receipt != nil && event.Receipt.InputID != nil {
+				operation = e.operations[*event.Receipt.InputID]
+			}
+			if event.Final != nil {
+				operation = e.operations[event.Final.InputID]
+			}
+			grant := e.active.FinalDrainGrant
+			e.mu.Unlock()
+			if operation == "" {
+				continue
+			}
+			var err error
+			if event.Receipt != nil {
+				ev := e.transport.evidenceFor(*event.Receipt)
+				_, err = e.delivery.Observe(ctx, operation, event.Identity, ev)
+			}
+			if event.Final != nil && grant != nil {
+				f := *event.Final
+				f.DrainGrantID = grant.GrantID
+				_, err = e.delivery.Final(ctx, operation, f)
+			}
+			if err != nil {
+				e.mu.Lock()
+				e.lastError = err
+				e.mu.Unlock()
+				return
+			}
+		}
+	}
+}
+
+// Local commands select an already person-authorized pending command; daemon
+// socket possession never creates a person command or expands its key ceiling.
+func (h *NativeHost) localCommand(ctx context.Context, b nativecontract.Binding, request, kind string, value any) (nativecontract.OperationResult, error) {
+	h.mu.Lock()
+	var e *nativeOwned
+	for _, candidate := range h.entries {
+		if candidate.grant.ExpectedBinding != nil && candidate.grant.ExpectedBinding.Equal(b) {
+			e = candidate
+			break
+		}
+	}
+	h.mu.Unlock()
+	if e == nil {
+		return nativecontract.OperationResult{}, ErrNotOwned
+	}
+	var page nativecontract.PendingCommandPage
+	if err := e.call(ctx, "GET", "/api/native-sessions/commands?limit=50", nil, &page); err != nil {
+		return nativecontract.OperationResult{}, err
+	}
+	for _, item := range page.Items {
+		if item.RequestID == request && item.Kind == kind {
+			return e.execute(ctx, item)
+		}
+	}
+	return nativecontract.OperationResult{}, nativeRefusal(nativecontract.ReasonGrantMissing)
+}
+func (h *NativeHost) Input(ctx context.Context, in nativecontract.Input) (nativecontract.OperationResult, error) {
+	return h.localCommand(ctx, in.ExpectedBinding, in.RequestID, "input", in)
+}
+func (h *NativeHost) Interrupt(ctx context.Context, in nativecontract.Interrupt) (nativecontract.OperationResult, error) {
+	return h.localCommand(ctx, in.ExpectedBinding, in.RequestID, "interrupt", in)
+}
+func (h *NativeHost) Stop(ctx context.Context, in nativecontract.Stop) (nativecontract.OperationResult, error) {
+	return h.localCommand(ctx, in.ExpectedBinding, in.RequestID, "stop", in)
+}
+func (h *NativeHost) Close(ctx context.Context) error {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	for _, e := range h.entries {
+		e.mu.Lock()
+		live := e.transport != nil && !e.exited
+		e.mu.Unlock()
+		if live {
+			return ErrProcessesUnconfirmed
+		}
+	}
+	return nil
+}
+func (h *NativeHost) Resume(context.Context, nativecontract.ResumeIntent) (nativecontract.OperationResult, error) {
+	return nativecontract.OperationResult{}, ErrUnsupported
+}
+func (h *NativeHost) Attach(context.Context, nativecontract.AttachIntent) (nativecontract.AttachResult, error) {
+	return nativecontract.AttachResult{}, ErrUnsupported
+}
+func (h *NativeHost) Renew(context.Context, nativecontract.AttachRenew) (nativecontract.AttachResult, error) {
+	return nativecontract.AttachResult{}, ErrUnsupported
+}
+func (h *NativeHost) Detach(context.Context, nativecontract.Detach) (nativecontract.OperationResult, error) {
+	return nativecontract.OperationResult{}, ErrUnsupported
+}
+func (h *NativeHost) Take(context.Context, nativecontract.TakeIntent) (nativecontract.OperationResult, error) {
+	return nativecontract.OperationResult{}, ErrUnsupported
+}
+func (h *NativeHost) Return(context.Context, nativecontract.ReturnIntent) (nativecontract.OperationResult, error) {
+	return nativecontract.OperationResult{}, ErrUnsupported
+}
+func (h *NativeHost) PTYInput(context.Context, nativecontract.PTYInput) (nativecontract.OperationResult, error) {
+	return nativecontract.OperationResult{}, ErrUnsupported
+}
+func (h *NativeHost) Resize(context.Context, nativecontract.Resize) (nativecontract.OperationResult, error) {
+	return nativecontract.OperationResult{}, ErrUnsupported
+}
+func (h *NativeHost) Decide(context.Context, nativecontract.ApprovalDecision) (nativecontract.OperationResult, error) {
+	return nativecontract.OperationResult{}, ErrUnsupported
+}
+func (h *NativeHost) EndControl(context.Context, nativecontract.EndControl) (nativecontract.OperationResult, error) {
+	return nativecontract.OperationResult{}, ErrUnsupported
+}
+func (h *NativeHost) EventsPage(context.Context, nativecontract.Binding, nativecontract.EventQuery) (nativecontract.EventPage, error) {
+	return nativecontract.EventPage{}, ErrUnsupported
+}
+func (h *NativeHost) Snapshot(context.Context, nativecontract.Binding) (nativecontract.SessionView, error) {
+	return nativecontract.SessionView{}, ErrUnsupported
+}
+func (h *NativeHost) Receipts(context.Context, nativecontract.Binding, nativecontract.PageQuery) (nativecontract.ReceiptPage, error) {
+	return nativecontract.ReceiptPage{}, ErrUnsupported
+}
+func (h *NativeHost) Subscribe(context.Context, nativecontract.Binding, nativecontract.StreamQuery) (nativecontract.Subscription, error) {
+	return nil, ErrUnsupported
+}
+
+var _ nativecontract.Host = (*NativeHost)(nil)
+var _ nativecontract.Launcher = (*NativeHost)(nil)

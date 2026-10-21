@@ -209,6 +209,15 @@ func (s *Store) runtimeTx(ctx context.Context, d nativecontract.DaemonActor, b n
 		if err != nil {
 			return err
 		}
+		if local, ok := ctx.Value(proofKey{}).(daemon.Proof); ok && local.LocalStart != nil {
+			if !reflect.DeepEqual(local.LocalStart.Intent, session.Intent) {
+				return fail(403, nativecontract.ReasonIdentityMismatch)
+			}
+			if err := s.production.consent.RequireLocalProfileTx(ctx, tx, session.Actor, session.Intent, session.Policy, nativecontract.LocalProfile{AccountID: session.Intent.AccountID, WorkspaceRoot: local.WorkspaceRoot}, local.LocalStart.Cwd); err != nil {
+				return err
+			}
+		}
+
 		if err := authz.RequireTx(ctx, tx, p, "harness.worker", authz.Scope{ProjectID: b.ProjectID}); err != nil {
 			return fail(403, nativecontract.ReasonPermissionRevoked)
 		}

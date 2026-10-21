@@ -461,6 +461,9 @@ func NewSupervisor(ctx context.Context, c Config) (*Supervisor, error) {
 	if c.NativeSessions != nil {
 		copy := *c.NativeSessions
 		s.native.config = &copy
+		if copy.Bind != nil {
+			copy.Bind(s)
+		}
 	}
 	if c.RoutineWorkspaces != nil {
 		if len(c.RoutineWorkspaces.Repositories) > 64 {
@@ -2874,6 +2877,11 @@ func (s *Supervisor) controlInbox(ctx context.Context, req ControlRequest, fromR
 // Close fences future dispatch but never signals a child. The caller must
 // keep the supervisor/service alive and retry after observed process exit.
 func (s *Supervisor) Close(ctx context.Context) error {
+	if s.native != nil && s.native.config != nil && s.native.config.Close != nil {
+		if err := s.native.config.Close(ctx); err != nil {
+			return err
+		}
+	}
 	s.dispatchMu.Lock()
 	defer s.dispatchMu.Unlock()
 	if s.leads != nil {
