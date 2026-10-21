@@ -86,12 +86,13 @@ func HarnessHealthAt(ctx context.Context, tx pgx.Tx, now time.Time, projectIDs .
 				// diagnostics. These explanations belong to the person owner.
 				private = !localWaitVisible(reader, route)
 			}
+			code, hostReason := wait.Code, wait.HostReason
 			if private {
 				// Availability can be public without releasing the owner's
 				// quota, schedule, reserve or exact next attempt time.
 				wait = &CapacityWait{}
 			}
-			reason := ModelWaitReason(account.Harness, wait)
+			reason := ModelWaitReason(account.Harness, wait) + " code=" + code + " host=" + hostReason
 			if !slices.Contains(health.Reasons, reason) {
 				health.Reasons = append(health.Reasons, reason)
 			}

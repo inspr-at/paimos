@@ -635,7 +635,8 @@ func RouteRoutineQueueTx(ctx context.Context, tx pgx.Tx, p tenant.Principal, run
 	if out.WaitReason == "no_qualified_route" {
 		var vis string
 		_ = tx.QueryRow(ctx, `SELECT current_setting('aeon.visible_projects',true)`).Scan(&vis)
-		return out, fmt.Errorf("debug no_qualified_route candidates=%d vis=%q notes=%v placement=%s", len(candidates), vis, routeNotes, string(placement))
+		health, herr := agentaccounts.HarnessHealthAt(ctx, tx, time.Now().UTC(), *t.ProjectID)
+		return out, fmt.Errorf("debug no_qualified_route candidates=%d vis=%q health=%+v herr=%v notes=%v placement=%s", len(candidates), vis, health, herr, routeNotes, string(placement))
 	}
 	return out, nil
 }
