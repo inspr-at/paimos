@@ -115,6 +115,15 @@ export function glimpseOrbDelta(color: string, background: string, canvasOpacity
   return Math.max(...node.map((channel, i) => Math.abs(channel - ground[i]) * alpha))
 }
 
+// A collapsed header keeps the canvas mounted with an empty measured box.
+// The frame may trust only that measurement: reading client rects inside the
+// animation callback drops the visual-viewport and document-element deliveries
+// that still have to clear a painted glimpse (AEON-1337, AEON-1414).
+// visibility:hidden keeps a positive box, so those frames still paint.
+export function glimpseFramePaints(connected: boolean, width: number, height: number): boolean {
+  return connected && width > 0 && height > 0
+}
+
 // A link is drawn only when both complete orbs fit inside the padded view.
 export function glimpsePointInside(x: number, y: number, radius: number, width: number, height: number): boolean {
   return Number.isFinite(x) && Number.isFinite(y) && x - radius >= 8 && y - radius >= 8 && x + radius <= width - 8 && y + radius <= height - 8
@@ -189,6 +198,10 @@ export async function createGraphRenderer(host: HTMLElement, dimension: GraphDim
   let settleTimer: ReturnType<typeof setTimeout> | undefined, pickTimer: ReturnType<typeof setTimeout> | undefined
   let cameraTaken = false, fitOnSettle = true
   let glimpseLaidOut = false
+  // Starts empty so the frames scheduled before the first measurement do not
+  // paint a window-sized software-GL scene. resize() records the host box.
+  let glimpseBoxWidth = 0, glimpseBoxHeight = 0
+  let glimpseBoxWatch: ResizeObserver | undefined
   // The product never publishes simulation stop. A canvas-centre click therefore
   // races the layout, and it misses whenever the bubble is not the centre.
   // Test builds publish read-only canvas positions, data-settled and data-hovered.
@@ -812,12 +825,23 @@ export async function createGraphRenderer(host: HTMLElement, dimension: GraphDim
   function tick(now: number) {
     if (disposed) return
     frame = requestAnimationFrame(tick)
-    // A collapsed header keeps this canvas mounted with no box. Drawing it
-    // still runs a software-GL frame on the main thread and can outlast the
-    // test waiting to read that empty box. visibility:hidden still has client
-    // rects, so it keeps drawing. Pin frames call renderFrame directly.
-    if (glimpse && (!host.isConnected || host.getClientRects().length === 0)) return
+    // Pin frames call renderFrame directly, so a pinned orbit still paints
+    // while this clock waits for a measured box.
+    if (glimpse && !glimpseFramePaints(host.isConnected, glimpseBoxWidth, glimpseBoxHeight)) return
     renderFrame(now)
+  }
+  if (glimpse && typeof ResizeObserver === 'function') {
+    // The observer reports the border box, including 0×0 under display:none.
+    // The frame then reads only these numbers, never the live layout.
+    glimpseBoxWatch = new ResizeObserver(entries => {
+      for (const entry of entries) {
+        if (entry.target !== host) continue
+        const box = entry.borderBoxSize?.[0]
+        glimpseBoxWidth = box?.inlineSize ?? entry.contentRect.width
+        glimpseBoxHeight = box?.blockSize ?? entry.contentRect.height
+      }
+    })
+    glimpseBoxWatch.observe(host)
   }
   if (import.meta.env.MODE === 'test') {
     type GlimpsePinWindow = Window & { __aeonGlimpsePin?: { frames?: number }; __aeonReleaseGlimpsePin?: () => void }
@@ -1010,6 +1034,9 @@ export async function createGraphRenderer(host: HTMLElement, dimension: GraphDim
     },
     resize(width, height) {
       const changed = graph.width() !== width || graph.height() !== height
+      // Keep the host's measured box, including 0×0. The library canvas stays
+      // at least 1px, which is not evidence that the header still has a box.
+      if (glimpse) { glimpseBoxWidth = width; glimpseBoxHeight = height }
       graph.width(Math.max(1, width)).height(Math.max(1, height)); cancelAnimationFrame(fitFrame)
       // The library empties its hit bitmap on a resize, and a one-pixel change can
       // keep the rounded projection. Ask for a fresh paint rather than trust it.
@@ -1026,6 +1053,7 @@ export async function createGraphRenderer(host: HTMLElement, dimension: GraphDim
       if (disposed) return
       disposed = true
       if (import.meta.env.MODE === 'test') glimpsePin?.dispose()
+      glimpseBoxWatch?.disconnect()
       cancelAnimationFrame(frame); cancelAnimationFrame(paintFrame); cancelAnimationFrame(fitFrame); clearTimeout(settleTimer); clearTimeout(pickTimer); nodeTargets.clear(); nodeLayer?.remove()
       host.removeEventListener('dblclick', doubleClick); host.removeEventListener('pointerdown', pointerDown); host.removeEventListener('wheel', interact)
       window.removeEventListener('pointermove', pointerMove); window.removeEventListener('pointerup', pointerUp); window.removeEventListener('pointercancel', pointerUp)
