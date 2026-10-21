@@ -1,7 +1,7 @@
 # Goals: Waiting on you across instances (AEON-1495)
 
 The owner of several PAIMOS instances (for example `ppm`, personal and INSPR, and
-`pma`, Augmentoring) sees every question that waits for them in one band on Goals,
+`pma`, the business context) sees every question that waits for them in one band on Goals,
 read-only, with a link into each instance's Desk. Design truth: Tick's approved
 `aeon-1494-goals-inflight-gaps-approved.html`, decision 2 (attached to AEON-1494).
 
@@ -36,7 +36,7 @@ read-only, with a link into each instance's Desk. Design truth: Tick's approved
 there. No server ever talks to another instance, and no key, token or secret is added.
 
 1. Deployment configuration names the instances: `AEON_INSTANCE_TAG=ppm` and
-   `AEON_SIBLING_INSTANCES=pma=https://pm.augmentoring.com` (exact HTTPS origins, at
+   `AEON_SIBLING_INSTANCES=pma=https://pm.example.com` (exact HTTPS origins, at
    most four). No tenant or request can add a sibling. Without it the feature is off.
 2. `GET /api/decision-desk/instances` names this instance and, for the workspace owner
    only, its siblings.
@@ -62,7 +62,7 @@ there. No server ever talks to another instance, and no key, token or secret is 
    Chromium with third-party cookies off) never send the copy, so the sibling shows its
    quiet "couldn't be read" line. That is the honest result, not an error.
 
-**Trust contexts.** ppm (personal and INSPR) and pma (Augmentoring) stay separate:
+**Trust contexts.** ppm (personal and INSPR) and pma (business) stay separate:
 neither server reads, stores or logs the other's data, and no credential moves between
 them. The two are joined only on the owner's screen, from the owner's own sessions,
 and only in memory for the open tab. Agents and keys never learn that a sibling exists.
