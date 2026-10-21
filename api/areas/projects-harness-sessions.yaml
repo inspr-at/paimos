@@ -174,7 +174,7 @@ paths:
       responses:
         '200': {description: Confirmed closed generation, content: {application/json: {schema: {anyOf: [{$ref: '#/components/schemas/HarnessSession'}, {$ref: '#/components/schemas/HarnessSafetySession'}]}}}}
         '400': {description: Invalid exit reason}
-        '403': {description: Exact worker proof and current harness.worker authority required}
+        '403': {description: "Exact worker proof and live harness.worker transport key required"}
         '409': {description: Generation is active or exit confirmation conflicts}
   /projects/{projectId}/harness-sessions/{sessionId}/controls/force-stop:
     parameters:
@@ -210,7 +210,7 @@ paths:
     post:
       operationId: completeHarnessControl
       security: *auth
-      description: Exact session agent and private generation lease required. Session requests may complete directly from pending or claimed; owned process controls still require claimed. Exact completion replay is idempotent. An expired request returns its terminal rejected outcome with request_expired reason and cannot be applied.
+      description: "Exact session agent and private generation lease required. Session requests may complete directly from pending or claimed; owned process controls still require claimed. Exact completion replay is idempotent. An expired request returns its terminal rejected outcome with request_expired reason and cannot be applied. After run-person revocation, only stop controls with bounded outcome codes can complete; the response and audit carry metadata only."
       requestBody:
         required: true
         content:
