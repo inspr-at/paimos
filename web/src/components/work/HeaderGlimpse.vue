@@ -354,8 +354,10 @@ onBeforeUnmount(() => {
 :global(.head-flex.with-glimpse:has(.glimpse-col)) { display: flex; align-items: flex-end; }
 .glimpse-col { position: absolute; left: 0; right: 0; overflow: hidden; pointer-events: none; }
 /* The fold can be hidden with an empty border box while this absolute column
-   still stretches across the page. Both axes have to be empty (AEON-1622). */
-:global(.project-page.header-collapsed) .glimpse-col {
+   still stretches across the page. Both axes have to be empty (AEON-1622).
+   The page class and the column stay in one :global(). A descendant written
+   outside it is dropped, and these declarations then set the project page to 0×0. */
+:global(.project-page.header-collapsed .glimpse-col) {
   width: 0 !important; height: 0 !important; min-width: 0 !important; min-height: 0 !important;
   right: auto !important; overflow: hidden !important;
 }
