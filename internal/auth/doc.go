@@ -51,6 +51,11 @@
 //	  an outer ceiling. A person grants it on the existing key-scope path;
 //	  the grant is audited, and new keys do not receive it. The handler
 //	  rechecks the project permission, linked repository and ancestry.
+//	/api/goals: goals.read for list, get, history, series, epics and the
+//	  status note; goals.write for create, update, item note and status-note
+//	  writes, including PUT. The key scope is only an outer ceiling. A person
+//	  grants it on the existing key-scope path; the grant is audited, and new
+//	  keys do not receive it. Handlers still recheck nodes.read or nodes.write.
 //	/api/approvals: approvals.read for list, approvals.request for proposal;
 //	  decisions and revocations have no agent mapping.
 //	/api/inbox, /api/projects/{id}/messages|message-targets|message-deliveries:

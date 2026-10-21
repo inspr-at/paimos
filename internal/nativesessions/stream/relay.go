@@ -118,6 +118,25 @@ func cloneSnapshot(snapshot nativecontract.SessionView) nativecontract.SessionVi
 	return clone
 }
 
+// Live snapshots are shared between viewers. Account quota and terminal URLs
+// belong to the separately authorized session read, never to the shared ring
+// or an already-queued stream snapshot. Capabilities use the current audience.
+func liveSnapshot(event nativecontract.StreamEvent, access nativecontract.ValidationContext) (nativecontract.StreamEvent, error) {
+	if event.Kind != "snapshot" {
+		return event, nil
+	}
+	var snapshot nativecontract.SessionView
+	if err := json.Unmarshal(event.Payload, &snapshot); err != nil {
+		return event, nativestream.Refuse(nativecontract.ReasonInvalidInput)
+	}
+	snapshot.TerminalViewerURL, snapshot.Quota = nil, nil
+	if access.Capabilities != nil {
+		snapshot.Capabilities = *access.Capabilities
+	}
+	event.Payload, _ = json.Marshal(snapshot)
+	return event, nil
+}
+
 func (r *Relay) find(binding nativecontract.Binding) (*liveSession, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
@@ -192,6 +211,10 @@ func (r *Relay) Publish(ctx context.Context, request nativecontract.Publish, fen
 type Viewer struct {
 	Query nativecontract.StreamQuery
 	Fence nativestream.Fence
+	// Set only by HTTPHandler, whose ServeEvents holds this same fence through
+	// the actual response write. Queueing must not wait under that fence or a
+	// replay producer can deadlock its consumer's previous-frame delivery.
+	egressFenced bool
 }
 
 type viewerKey struct{}
@@ -244,6 +267,10 @@ func (r *Relay) SubscribeView(ctx context.Context, binding nativecontract.Bindin
 		payload, _ := json.Marshal(snapshot)
 		seq := strconv.FormatUint(position, 10)
 		initial = nativecontract.StreamEvent{Binding: binding, Generation: viewer.Query.Generation, Sequence: seq, Seq: seq, Source: "native", Kind: "snapshot", Payload: payload, ObservedAt: r.clock.Now(), DroppedFrames: "0"}
+		initial, err = liveSnapshot(initial, access)
+		if err != nil {
+			return err
+		}
 		initial, err = r.projector.Sanitize(ctx, initial, access)
 		return err
 	})
@@ -282,24 +309,43 @@ func (r *Relay) follow(ctx context.Context, sub *subscription, session *liveSess
 		r.viewers--
 		r.mu.Unlock()
 	}()
+	queue := func(clean nativecontract.StreamEvent) error {
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-r.clock.After(nativecontract.StreamWriteDeadlineSeconds * time.Second):
+			return nativestream.Refuse(nativecontract.ReasonBufferFull)
+		case sub.events <- clean:
+			return nil
+		}
+	}
 	send := func(event nativecontract.StreamEvent) error {
-		return viewer.Fence(ctx, func(access nativecontract.ValidationContext) error {
+		var pending nativecontract.StreamEvent
+		err := viewer.Fence(ctx, func(access nativecontract.ValidationContext) error {
 			if access.Private || access.View != viewer.Query.View {
 				return nativestream.Refuse(nativecontract.ReasonIdentityMismatch)
 			}
-			clean, err := r.projector.Sanitize(ctx, event, access)
+			clean, err := liveSnapshot(event, access)
 			if err != nil {
 				return err
 			}
-			select {
-			case <-ctx.Done():
-				return ctx.Err()
-			case <-r.clock.After(nativecontract.StreamWriteDeadlineSeconds * time.Second):
-				return nativestream.Refuse(nativecontract.ReasonBufferFull)
-			case sub.events <- clean:
+			clean, err = r.projector.Sanitize(ctx, clean, access)
+			if err != nil {
+				return err
+			}
+			if viewer.egressFenced {
+				pending = clean
 				return nil
 			}
+			return queue(clean)
 		})
+		if err != nil {
+			return err
+		}
+		if viewer.egressFenced {
+			return queue(pending)
+		}
+		return nil
 	}
 	if err := send(initial); err != nil {
 		return
@@ -308,7 +354,7 @@ func (r *Relay) follow(ctx context.Context, sub *subscription, session *liveSess
 		event, next, wake, closed := session.buffer.ReadAfter(position)
 		if event.Kind != "" {
 			position = next
-			if !nativestream.Allows(viewer.Query.View, event.Kind) {
+			if event.Kind == "quota" || !nativestream.Allows(viewer.Query.View, event.Kind) {
 				continue
 			}
 			if err := send(event); err != nil {
@@ -341,12 +387,16 @@ func (r *Relay) Page(ctx context.Context, binding nativecontract.Binding, query 
 		if err != nil {
 			return err
 		}
-		result, err = session.buffer.Page(query, func(kind string) bool { return nativestream.Allows(viewer.Query.View, kind) })
+		result, err = session.buffer.Page(query, func(kind string) bool { return kind != "quota" && nativestream.Allows(viewer.Query.View, kind) })
 		if err != nil {
 			return err
 		}
 		for i, event := range result.Items {
-			clean, err := r.projector.Sanitize(ctx, event, access)
+			clean, err := liveSnapshot(event, access)
+			if err != nil {
+				return err
+			}
+			clean, err = r.projector.Sanitize(ctx, clean, access)
 			if err != nil {
 				return err
 			}

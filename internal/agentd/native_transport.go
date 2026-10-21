@@ -28,6 +28,45 @@ type NativeStartEnvelope struct {
 	Params          NativeSessionStartRequest `json:"params"`
 }
 
+// The existing protected socket proves local process provenance only. The
+// supplied person authority must independently verify the actual person and
+// current server intent/view/controller; the paired agent is never that person.
+type nativeSocketAuthority struct {
+	authority nativestream.LocalAuthority
+	authorize func(*http.Request) bool
+}
+
+func (a *nativeSocketAuthority) Authenticate(r *http.Request) (nativecontract.Actor, error) {
+	if !a.authorize(r) {
+		return nativecontract.Actor{}, nativeRefusal(nativecontract.ReasonGrantMissing)
+	}
+	peer, ok := r.Context().Value(attachPeerKey{}).(attachObservation)
+	if !ok || peer.UID != os.Getuid() {
+		return nativecontract.Actor{}, nativeRefusal(nativecontract.ReasonWrongPrincipal)
+	}
+	current, err := observeAttachProcess(peer.PID)
+	if err != nil || !sameAttachProcessIdentity(peer, current) {
+		return nativecontract.Actor{}, nativeRefusal(nativecontract.ReasonWrongPrincipal)
+	}
+	actor, err := a.authority.Authenticate(r)
+	if err != nil {
+		return actor, err
+	}
+	if actor.PrincipalKind != "person" || !uuidPattern.MatchString(actor.PrincipalID) || !uuidPattern.MatchString(actor.TenantID) || len(actor.KeyCeiling) > 0 {
+		return nativecontract.Actor{}, nativeRefusal(nativecontract.ReasonWrongPrincipal)
+	}
+	query := r.URL.Query()
+	request := nativestream.LocalRequest{Method: "stream", OwnedSessionID: r.PathValue("ownedSessionId"), ViewerID: r.Header.Get(nativecontract.ViewerHeader), Query: query, View: query.Get("view")}
+	if request.View == "" {
+		request.View = "structured"
+	}
+	*r = *r.WithContext(context.WithValue(r.Context(), nativeLocalRequestKey{}, nativeLocalRequest{request: request, actor: actor}))
+	return actor, nil
+}
+func (a *nativeSocketAuthority) WithAccess(ctx context.Context, actor nativecontract.Actor, r nativestream.LocalRequest, deliver func(nativecontract.ValidationContext) error) error {
+	return a.authority.WithAccess(ctx, actor, r, deliver)
+}
+
 func serveNativeStart(s *Supervisor, authorize func(*http.Request) bool) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		nativestream.Headers(w)
@@ -169,6 +208,13 @@ func (t *nativeC0Transport) beforeInput(ctx context.Context, id, digest string) 
 		if id != "native-stop" || digest != nativeDigest("stop") {
 			return nativeRefusal(nativecontract.ReasonIdentityMismatch)
 		}
+	case "take", "return":
+		// A current person-authorized switch may close this exact predecessor;
+		// it cannot send provider input or reuse the old command on a successor.
+		if id != "native-stop" || digest != nativeDigest("stop") {
+			return nativeRefusal(nativecontract.ReasonIdentityMismatch)
+		}
+		return t.owner.require(ctx)
 	default:
 		return ErrUnsupported
 	}

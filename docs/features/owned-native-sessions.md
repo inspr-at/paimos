@@ -1,5 +1,131 @@
 # Owned session panel
 
+## AEON-1291 core wiring: continuation 1, partial delivery
+
+The command tree retains `aeon session attach OWNED_ID --project KEY`,
+`aeon session take OWNED_ID --project KEY [--hand-back]` and the equivalent
+`aeon attach --session OWNED_ID --project KEY` alias. Legacy attachment uploads,
+attachment subcommands and attribution `aeon session start` retain their meanings.
+Native capabilities remain unavailable until their actual runtime, consent,
+person transport and provider qualification are present; registration alone
+cannot enable them.
+
+The continuation adds server take/return commands and explicit person-continue
+resume admission. The final transaction rechecks the original native consent,
+current person permissions, exact binding/revision and, for take/return, the
+current controller. The run's person and project administrators may take; agents
+and API keys are refused. Terminal/Expert visibility is separately limited to
+the run's person and workspace Owner/Admin, with current watch permission and
+an independently qualified explicit owner export consent. A project-admin
+role alone cannot expose those streams. The released composition still
+supplies no qualified export-consent adapter, so its exports remain closed.
+
+The owning host serializes transitions with input/stop and dispatch. It
+journals the transition before closing its actual predecessor handle, verifies
+root and group exit, and obtains a fresh server epoch/harness/worker lease
+before opening the successor. The original account root, quota holds,
+physical profile revision and runtime deadline are preserved. Additive native
+transition records use major 2, minor 1 and retain the legacy process fence. Every uncertain
+close or fork retains occupancy. Accepted metadata is never replayed as native
+input after restart. The private successor-proof header rotates existing
+session proof; it is not a new operator credential or permission.
+
+Actual readiness emits one `native_session.mode_changed` audit line per take
+or hand-back, attributed to the requesting person. Manual recovery uses the
+existing P5 `nativerecovery` coordinator, its bounded decision journal, the
+canonical dual-record ownership reader and the shared ledger. It requires an
+existing person-issued resume intent, retained owner handle, independently
+observed absence, unchanged history/profile and fresh admission. It does not
+adopt saved PIDs or reconstruct input/approval bodies. Unreconciled effects and
+automatic restart remain unavailable. A completed recovery replay returns its
+prior result without another fork. Local acknowledgements remain bound to the
+request's old epoch; attaching to the successor is an explicit refresh.
+
+`TestOwnedNativeControlConfirmsExitAndRejectsStaleEpoch` runs real SQL
+consent/command/claim/receipt transactions around fake owned providers:
+structured input → take → read-only live terminal → confirmed hand-back →
+fresh epoch → manual recovery. It checks stale take/hand-back/recovery requests,
+exact recovery replay, audit counts and the held account root. A second case
+proves an unconfirmed predecessor is neither closed twice nor replaced and
+keeps its reservation. A separately authorized owner stop still reaches the
+retained handle through polling. Injected clocks and observation channels
+establish the scenario. The scenario exposed concurrent journal flushers; poll retries now
+share the provider event fence, without weakening the journal's single-flusher
+check. Recovery also retains the account profile's revision separately from
+the runtime binding revision.
+
+**Remaining acceptance:** AEON-1626 now installs an independent local person
+verifier and explicit CLI person-session transport; see
+[Local native person authentication](local-native-person-proof.md). Socket
+bearer, current kernel peer and configured-instance person verification remain
+independent. Server interaction grants and core claims remain the mutation
+authority; mode-change audit events are not duplicated. The production host
+still lacks qualified local PTY input/resize, stream/read and export-consent
+integration. Its qualification flags remain closed. Interactive attach/take
+acceptance therefore remains incomplete; the new fake-host socket scenario
+proves the person/control bootstrap, not provider or terminal qualification.
+
+Native input retains the explicit chat-disabled gate. Shared live snapshots
+omit terminal URLs and account quota; quota remains owner-only on separately
+authorized reads. Replay and stream writes retain deadlines and per-delivery
+access checks. No owned-session progress/ETA source exists in the native
+process/receipt/heartbeat seam; the activity/doing heartbeat has no such values.
+No new estimate mechanism, launcher, routine tool ceiling, provider enrollment
+or host enablement is added. The later takeover/Expert UI still needs its
+approved Opus design and Tick check.
+
+R0 additions retained from round 1 are ESSENTIAL
+`internal/harness:TestNativeSessionCommandAliasesPreserveLegacyHelp`,
+`internal/harness:TestNativeSessionWiringKeepsChatDisabled`,
+`internal/nativesessions/stream:TestCurrentViewerAuthorityScopesEveryDelivery`
+and the `agentpairing.Lock` caller entries `harness/module.go` and
+`nativesessions/stream/current.go`. Continuation 1 adds ESSENTIAL
+`internal/nativesessions/store:TestOwnedNativeControlConfirmsExitAndRejectsStaleEpoch`,
+`internal/nativesessions/store:TestOwnedNativeControlRetainsUnconfirmedWriter`
+and `internal/agentd:TestNativeLocalSocketRequiresIndependentPersonProof`.
+The canonical manifest classifier/formatter wrote only those rows. Existing
+audit globs cover the added source/test files. No new migration, table,
+permission, public schema, route or browser identity is added.
+
+Validation: both control scenarios passed remotely on `199f78fb0`; the full
+native-session packages (including store/interaction/receipts/stream),
+nativeintegration, agentaccounts, reportercontract and harness passed on
+`b0921df84`. The targeted store/stream/agentd checks passed with `-race -count=1`
+on `311ee33dd` (5.324/4.463/24.791 seconds). After adding the failed-switch owner
+stop, the affected store and agentd cases passed again with `-race -count=1`
+on `30cdc2e48` (11.281/24.355 seconds). The ownership audit passed all 33 checks;
+canonical manifest/diff checks passed. The final major-2/minor-1 state-marker,
+integrated control/recovery and schema-migration follow-up passed on
+`5e790bee9` (store 2.581 seconds; agentd 0.028 seconds). The final handoff changes
+documentation only; its HEAD is recorded in `.agent-status.json`.
+
+The full requested Go run remains red in unchanged executable fixtures on the secondary remote test lane:
+`TestACPLauncherProbeFailureCauses`,
+`TestAttachLinuxExitedProcessIsKernelConfirmed`,
+`TestCodexSeparateHomesBindQuotaAndIdentityToEachProfile`,
+`TestClaudeBillingProbeRespectsEmailFence`,
+`TestClaudeRotatedLoginsKeepOnlyTheirOwnEnrollmentReady`,
+`TestProbeStatusSeparatesSignOutFromUnavailable`,
+`TestProbeStatusRejectsDuplicateKeys`, `TestProbeStatusOutputCap`,
+`TestClaudeSeparateHomesKeepBothLoginsReadyAndFenceOnlyTheChangedHome` and
+`TestClaudeIdleCapabilityExactBinary`. CLI failures are
+`TestRunHeartbeatLiveOwnerKeepsBeating`,
+`TestRunHeartbeatLiveOwnerAgainstDatabase`,
+`TestHarnessVersionProbeIsBoundedAndOptional` and
+`TestRulesCompareCLIReportsBlockerAndRefusesUnsafeIO`. Missing `/bin/true` and
+`/bin/sleep` are explicit failures; probe/version/provenance cases also fail.
+No affected assertion is skipped or loosened to make that run pass.
+
+Browser and static wrappers returned exit 3 because the primary remote test host was unavailable/not
+GREEN under its host protocol. They are incomplete, with no browser evidence
+produced and no heavy local suite replacing a refusal. The targeted state-marker
+follow-up initially returned exit 3 because the secondary lane's joint capacity cap was full,
+then passed on the next guarded attempt.
+This partial build is neither completed acceptance nor release qualification.
+No origin push, merge, deployment, model CLI or review gate is run by this worker.
+
+## Existing panel behavior
+
 The session panel has one menu: Details, Chat, Events and, when advertised at
 opening, Terminal. A project's bound lead has Lead first. Existing links and
 saved choices using `session`, `overview` or `messages` remain readable.

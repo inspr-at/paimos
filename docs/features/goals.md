@@ -25,7 +25,12 @@ The contract is authored in `api/areas/goals.yaml` and served with
 - `GET` and `PATCH /api/goals/status-note` for the workspace status note
   (AEON-1494).
 
-Writes require `nodes.write` in each affected goal's current scope. A required
+Writes require `nodes.write` in each affected goal's current scope. An agent
+key also needs `goals.read` or `goals.write` as an outer key-scope ceiling. A
+person grants that scope on the existing key-scope path; the grant is audited
+as `agent_key.scopes_changed`, and new keys do not receive either scope.
+Viewer and guest roles do not receive `goals.read`. Handlers still recheck
+`nodes.read` or `nodes.write`. A required
 `Idempotency-Key` binds the tenant, actor, method, immutable target and canonical
 body. Replays recheck current authority and retain their original response,
 `read_through`, `generation` and `changed`. Another target or body conflicts. Relative ETA clock bounds apply to fresh

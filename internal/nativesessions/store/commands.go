@@ -18,6 +18,7 @@ import (
 	"github.com/inspr-at/paimos/internal/nativesessions/consent"
 	"github.com/inspr-at/paimos/internal/nativesessions/daemon"
 	"github.com/inspr-at/paimos/internal/nativesessions/receipts"
+	"github.com/inspr-at/paimos/internal/nativesessions/stream"
 	"github.com/inspr-at/paimos/internal/tenant"
 	"github.com/inspr-at/paimos/internal/workorders"
 	"github.com/jackc/pgx/v5"
@@ -26,10 +27,13 @@ import (
 // Only the bounded live queue holds command content. SQL retains immutable
 // metadata/digests. A restart cannot replay a possible native write from disk.
 type queuedCommand struct {
-	done    bool
-	intent  nativereceipts.Intent
-	command nativecontract.DaemonCommand
-	drain   *nativecontract.FinalDrainGrant
+	done           bool
+	intent         nativereceipts.Intent
+	command        nativecontract.DaemonCommand
+	drain          *nativecontract.FinalDrainGrant
+	actor          tenant.Principal
+	successor      *nativecontract.ClaimResult
+	successorProof daemon.Proof
 }
 
 func commandValue(c nativecontract.Command) (nativecontract.Binding, string, string, time.Time, any, error) {
@@ -44,6 +48,12 @@ func commandValue(c nativecontract.Command) (nativecontract.Binding, string, str
 		b, request, schema, expires, value = c.Interrupt.ExpectedBinding, c.Interrupt.RequestID, "NativeInterrupt", c.Interrupt.ExpiresAt, *c.Interrupt
 	case c.Kind == "stop" && c.Stop != nil:
 		b, request, schema, expires, value = c.Stop.ExpectedBinding, c.Stop.RequestID, "NativeStop", c.Stop.ExpiresAt, *c.Stop
+	case c.Kind == "take" && c.Take != nil:
+		b, request, schema, expires, value = c.Take.ExpectedBinding, c.Take.RequestID, "NativeTakeIntent", c.Take.ExpiresAt, *c.Take
+	case c.Kind == "return" && c.Return != nil:
+		b, request, schema, expires, value = c.Return.ExpectedBinding, c.Return.RequestID, "NativeReturnIntent", c.Return.ExpiresAt, *c.Return
+	case c.Kind == "resume" && c.Resume != nil:
+		b, request, schema, value = c.Resume.ExpectedBinding, c.Resume.RequestID, "NativeResumeIntent", *c.Resume
 	default:
 		return b, "", "", expires, nil, fail(400, nativecontract.ReasonUnsupported)
 	}
@@ -58,7 +68,13 @@ func (s *Store) Mutate(ctx context.Context, a nativecontract.Actor, c nativecont
 	if err != nil {
 		return out, err
 	}
+	if c.Kind == "resume" {
+		expires = s.now().Add(20 * time.Second)
+	}
 	if c.Input != nil && len(c.Input.Text) > nativecontract.InputUTF8Bytes || c.Interrupt != nil && len(c.Interrupt.ExpectedTurnRef) > 128 || c.Stop != nil && len(c.Stop.ExpectedProcessIdentityDigest) > 64 {
+		return out, fail(413, nativecontract.ReasonBufferFull)
+	}
+	if c.Take != nil && len(c.Take.ControllerEpoch) > 36 || c.Return != nil && len(c.Return.ControllerEpoch) > 36 || c.Resume != nil && (len(c.Resume.PolicyID) > 36 || len(c.Resume.Reason) > 32) {
 		return out, fail(413, nativecontract.ReasonBufferFull)
 	}
 	for _, id := range []string{b.TenantID, b.ProjectID, b.OwnedSessionID, b.HarnessSessionID, b.RuntimeEpoch, request} {
@@ -83,7 +99,7 @@ func (s *Store) Mutate(ctx context.Context, a nativecontract.Actor, c nativecont
 	if err != nil {
 		return out, err
 	}
-	if p.Kind != tenant.Person || p.KeyID != "" || p.AuthKeyID != "" {
+	if p.Kind != tenant.Person || p.KeyID != "" || p.AuthKeyID != "" || p.KeyCreatorID != "" {
 		return out, fail(403, nativecontract.ReasonWrongPrincipal)
 	}
 	digest, err := nativereceipts.Digest(value)
@@ -123,14 +139,22 @@ func (s *Store) Mutate(ctx context.Context, a nativecontract.Actor, c nativecont
 		if err != nil {
 			return err
 		}
-		if p.ID != session.Original.ID || p.TenantID != b.TenantID {
+		control := c.Kind == "take" || c.Kind == "return" || c.Kind == "resume"
+		if p.TenantID != b.TenantID || !control && p.ID != session.Original.ID {
 			return fail(403, nativecontract.ReasonWrongPrincipal)
 		}
 		if err = authz.RequireTx(ctx, tx, p, "harness.control", authz.Scope{ProjectID: b.ProjectID}); err != nil {
 			return fail(403, nativecontract.ReasonPermissionRevoked)
 		}
-		if session.View.State != "running" && session.View.State != "idle" {
+		if control {
+			if err = s.controlTx(ctx, tx, session, p, c); err != nil {
+				return err
+			}
+		} else if session.View.State != "running" && session.View.State != "idle" {
 			return fail(409, nativecontract.ReasonOwnershipUnconfirmed)
+		}
+		if c.Kind == "resume" && session.Policy.ExpiresAt.Before(expires) {
+			expires = session.Policy.ExpiresAt
 		}
 		if !s.now().Before(expires) || expires.After(session.Policy.ExpiresAt) {
 			return fail(403, nativecontract.ReasonGrantExpired)
@@ -160,12 +184,29 @@ func (s *Store) Mutate(ctx context.Context, a nativecontract.Actor, c nativecont
 		} else {
 			return err
 		}
-		if err = s.production.authority.RegisterOperationTx(ctx, tx, queued.intent); err != nil {
+		queued.actor = p
+		if control {
+			raw, err := json.Marshal(queued.intent)
+			if err != nil {
+				return err
+			}
+			var count int
+			if err = tx.QueryRow(ctx, `SELECT count(*) FROM (SELECT 1 FROM native_session_operations WHERE tenant_id=$1 AND owned_session_id=$2 AND operation_id<>$3 LIMIT 513) x`, p.TenantID, b.OwnedSessionID, queued.intent.Receipt.OperationID).Scan(&count); err != nil {
+				return err
+			}
+			if count >= nativereceipts.MaxReceipts {
+				return fail(429, nativecontract.ReasonBufferFull)
+			}
+			if _, err = tx.Exec(ctx, `INSERT INTO native_session_operations(tenant_id,operation_id,owned_session_id,project_id,owner_person_id,intent,created_at)
+ VALUES($1,$2,$3,$4,$5,$6,$7) ON CONFLICT DO NOTHING`, p.TenantID, queued.intent.Receipt.OperationID, b.OwnedSessionID, b.ProjectID, session.OwnerPersonID, raw, s.now()); err != nil {
+				return err
+			}
+		} else if err = s.production.authority.RegisterOperationTx(ctx, tx, queued.intent); err != nil {
 			return err
 		}
 		// An existing separate person-bound chat context and retention decision are
 		// required for final publication. Absence never invents a target or approval.
-		if session.RetainFinals {
+		if session.RetainFinals && !control {
 			var retention, conversation, role string
 			err = tx.QueryRow(ctx, `SELECT c.grant_id::text,t.id::text,context.role_id::text FROM native_session_consents c JOIN agent_permission_grants g ON g.tenant_id=c.tenant_id AND g.approval_request_id=c.grant_id JOIN chat_session_contexts context ON context.tenant_id=c.tenant_id AND context.session_id=$2 AND context.owner_person_id=c.owner_person_id JOIN chat_threads t ON t.tenant_id=context.tenant_id AND t.role_id=context.role_id AND t.project_id=context.project_id AND t.person_id=context.owner_person_id WHERE c.tenant_id=$1 AND c.project_id=$3 AND c.owner_person_id=$4 AND g.scope=$5 AND g.revoked_at IS NULL AND g.valid_until>$6 AND t.archived_at IS NULL ORDER BY c.created_at DESC,c.grant_id LIMIT 1`, p.TenantID, b.HarnessSessionID, b.ProjectID, session.OwnerPersonID, consent.RetentionScope, s.now()).Scan(&retention, &conversation, &role)
 			if err != nil {
@@ -206,9 +247,83 @@ func (s *Store) Mutate(ctx context.Context, a nativecontract.Actor, c nativecont
 		return nil
 	})
 	if err == nil {
+		if previous, exists := s.commands[queued.intent.Receipt.OperationID]; exists {
+			queued = previous // Never lose an admitted successor on a duplicate intent.
+		}
 		s.commands[queued.intent.Receipt.OperationID] = queued
 	}
 	return out, err
+}
+
+func (s *Store) controlTx(ctx context.Context, tx pgx.Tx, session consent.Session, p tenant.Principal, c nativecontract.Command) error {
+	b := *session.View.CurrentBinding
+	if err := stream.TakeAuthorityTx(ctx, tx, p, session.OwnerPersonID, b.ProjectID); err != nil {
+		return err
+	}
+	var epoch string
+	var revision int64
+	switch c.Kind {
+	case "take":
+		if c.Take == nil {
+			return fail(400, nativecontract.ReasonInvalidInput)
+		}
+		epoch, revision = c.Take.ControllerEpoch, c.Take.ExpectedRevision
+		if !s.production.consent.Capabilities.Take || !s.production.consent.Capabilities.TakeSupported || !session.View.Capabilities.Take || !session.View.Capabilities.TakeSupported {
+			return fail(503, nativecontract.ReasonQualificationMissing)
+		}
+		if session.View.Mode != "structured" || session.View.State != "running" && session.View.State != "idle" && session.View.State != "requires_action" {
+			return fail(409, nativecontract.ReasonOwnershipUnconfirmed)
+		}
+	case "return":
+		if c.Return == nil {
+			return fail(400, nativecontract.ReasonInvalidInput)
+		}
+		epoch, revision = c.Return.ControllerEpoch, c.Return.ExpectedRevision
+		if session.View.Mode != "terminal" || session.View.State != "taken" {
+			return fail(409, nativecontract.ReasonOwnershipUnconfirmed)
+		}
+	case "resume":
+		if c.Resume == nil || c.Resume.Reason != "person_continue" || c.Resume.PolicyID != session.Policy.GrantID || p.ID != session.Original.ID {
+			return fail(403, nativecontract.ReasonGrantMissing)
+		}
+		if session.View.Mode != "structured" || session.View.State != "running" && session.View.State != "idle" && session.View.State != "recovering" {
+			return fail(409, nativecontract.ReasonOwnershipUnconfirmed)
+		}
+		if c.Resume.ExpectedRevision != session.View.Revision {
+			return fail(409, nativecontract.ReasonStaleRevision)
+		}
+		return nil
+	default:
+		return fail(400, nativecontract.ReasonUnsupported)
+	}
+	if revision != session.View.Revision {
+		return fail(409, nativecontract.ReasonStaleRevision)
+	}
+	return s.production.consent.ControllerTx(ctx, tx, session, p, epoch)
+}
+
+func queuedControl(c queuedCommand) (nativecontract.Command, error) {
+	out := nativecontract.Command{Kind: c.command.Kind}
+	switch out.Kind {
+	case "take":
+		out.Take = new(nativecontract.TakeIntent)
+		if err := json.Unmarshal(c.command.Params, out.Take); err != nil {
+			return out, err
+		}
+	case "return":
+		out.Return = new(nativecontract.ReturnIntent)
+		if err := json.Unmarshal(c.command.Params, out.Return); err != nil {
+			return out, err
+		}
+	case "resume":
+		out.Resume = new(nativecontract.ResumeIntent)
+		if err := json.Unmarshal(c.command.Params, out.Resume); err != nil {
+			return out, err
+		}
+	default:
+		return out, fail(400, nativecontract.ReasonUnsupported)
+	}
+	return out, nil
 }
 
 func (s *Store) Commands(ctx context.Context, d nativecontract.DaemonActor, q nativecontract.PageQuery) (nativecontract.PendingCommandPage, error) {
@@ -232,7 +347,7 @@ func (s *Store) Commands(ctx context.Context, d nativecontract.DaemonActor, q na
 	private, _ := ctx.Value(proofKey{}).(daemon.Proof)
 	identity, _, _ := private.Runtime()
 	for _, c := range items {
-		if c.done {
+		if c.done || c.successor != nil || c.command.Kind == "resume" {
 			continue
 		}
 		if identity.RuntimeEpoch != "" && c.intent.Receipt.Binding.RuntimeEpoch != identity.RuntimeEpoch {
@@ -255,6 +370,18 @@ func (s *Store) Commands(ctx context.Context, d nativecontract.DaemonActor, q na
 		}
 		if withdrawn && r.Operation != "stop" {
 			continue
+		}
+		if r.Operation == "take" || r.Operation == "return" {
+			command, err := queuedControl(c)
+			if err != nil {
+				return out, err
+			}
+			err = s.runtimeTx(ctx, d, b, false, func(ctx context.Context, tx pgx.Tx, session consent.Session, _ receipts.RuntimeProof) error {
+				return s.controlTx(ctx, tx, session, c.actor, command)
+			})
+			if err != nil {
+				return out, err
+			}
 		}
 		if len(out.Items) == q.Limit {
 			out.Truncated = true
@@ -284,6 +411,17 @@ func (s *Store) claimCommand(ctx context.Context, d nativecontract.DaemonActor, 
 		if in.DaemonID != d.DaemonID || in.DaemonGeneration != d.DaemonGeneration || in.LedgerGeneration != d.LedgerGeneration || in.CapabilityDigest != d.CapabilityDigest || in.ExpectedRevision != b.BindingRevision || proof.Identity.ProcessIdentityDigest != c.intent.ProcessIdentityDigest || proof.Identity.RuntimeEpoch != b.RuntimeEpoch {
 			return fail(409, nativecontract.ReasonIdentityMismatch)
 		}
+		actor := session.Original
+		if c.command.Kind == "take" || c.command.Kind == "return" {
+			command, err := queuedControl(c)
+			if err != nil {
+				return err
+			}
+			if err = s.controlTx(ctx, tx, session, c.actor, command); err != nil {
+				return err
+			}
+			actor = c.actor
+		}
 		now := s.now()
 		until := now.Add(20 * time.Second)
 		if c.intent.ExpiresAt.Before(until) {
@@ -292,7 +430,7 @@ func (s *Store) claimCommand(ctx context.Context, d nativecontract.DaemonActor, 
 		if !now.Before(until) {
 			return fail(403, nativecontract.ReasonGrantExpired)
 		}
-		out = nativecontract.ClaimResult{OperationID: in.OperationID, OwnedSessionID: b.OwnedSessionID, Intent: session.Intent, Policy: session.Policy, ExpectedBinding: &b, ExpiresAt: until, FinalDrainGrant: c.drain, ClaimKind: "command", Command: &c.command, CommandActor: &nativecontract.CommandActor{TenantID: b.TenantID, PrincipalID: session.Original.ID, OwnerPersonID: session.OwnerPersonID, GrantID: session.GrantID, GrantRevision: session.Revision}, AuthorizationTTLMS: until.Sub(now).Milliseconds()}
+		out = nativecontract.ClaimResult{OperationID: in.OperationID, OwnedSessionID: b.OwnedSessionID, Intent: session.Intent, Policy: session.Policy, ExpectedBinding: &b, ExpiresAt: until, FinalDrainGrant: c.drain, ClaimKind: "command", Command: &c.command, CommandActor: &nativecontract.CommandActor{TenantID: b.TenantID, PrincipalID: actor.ID, OwnerPersonID: session.OwnerPersonID, GrantID: session.GrantID, GrantRevision: session.Revision}, AuthorizationTTLMS: until.Sub(now).Milliseconds()}
 		var launch []byte
 		if err := tx.QueryRow(ctx, `SELECT launch_config FROM native_session_intents WHERE owned_session_id=$1`, b.OwnedSessionID).Scan(&launch); err != nil {
 			return err
@@ -311,6 +449,9 @@ func (s *Store) Report(ctx context.Context, d nativecontract.DaemonActor, in nat
 	}
 	if err := s.validate("NativeReceipt", in); err != nil {
 		return nativecontract.OperationResult{}, err
+	}
+	if in.Operation == "take" || in.Operation == "return" || in.Operation == "resume" {
+		return s.reportSuccessor(ctx, d, in)
 	}
 	if in.Operation == "start" && in.State == "rejected" {
 		return s.reportAbandoned(ctx, d, in)

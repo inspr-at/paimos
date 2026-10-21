@@ -57,12 +57,20 @@ import (
 	"github.com/inspr-at/paimos/internal/agentactivity"
 	"github.com/inspr-at/paimos/internal/agentpairing"
 	"github.com/inspr-at/paimos/internal/authz"
+	"github.com/inspr-at/paimos/internal/db"
 	"github.com/inspr-at/paimos/internal/deskdelivery"
 	"github.com/inspr-at/paimos/internal/goals"
 	"github.com/inspr-at/paimos/internal/hookbinding"
 	"github.com/inspr-at/paimos/internal/httpapi"
 	"github.com/inspr-at/paimos/internal/inbox"
+	"github.com/inspr-at/paimos/internal/modelprefs"
 	"github.com/inspr-at/paimos/internal/modelregistry"
+	"github.com/inspr-at/paimos/internal/nativeattach"
+	"github.com/inspr-at/paimos/internal/nativecontract"
+	"github.com/inspr-at/paimos/internal/nativesessions/consent"
+	"github.com/inspr-at/paimos/internal/nativesessions/interaction"
+	"github.com/inspr-at/paimos/internal/nativesessions/stream"
+	"github.com/inspr-at/paimos/internal/nativestream"
 	"github.com/inspr-at/paimos/internal/ownedprocess"
 	"github.com/inspr-at/paimos/internal/plugins"
 	"github.com/inspr-at/paimos/internal/reportercontract"
@@ -74,6 +82,258 @@ import (
 	"github.com/inspr-at/paimos/internal/workorders"
 	"github.com/inspr-at/paimos/internal/workqueue"
 )
+
+// NativeSessionServices extends the existing composition with fenced public
+// viewers. It retains its store, launcher, receipt sink and relay; constructing
+// it qualifies no provider, watch export or native terminal.
+func NativeSessionServices(pool *pgxpool.Pool, services nativecontract.Services, caps nativecontract.Capabilities) (nativecontract.Services, error) {
+	base, ok := services.Store.(nativeSessionBase)
+	if pool == nil || !services.Qualified || !ok {
+		return services, nativestream.Refuse(nativecontract.ReasonQualificationMissing)
+	}
+	authority := nativeSessionAuthority{consent: consent.Authority{Capabilities: caps}}
+	read, err := stream.NewCurrentReadAuthority(pool, authority, caps.QualificationDigest, nil)
+	if err != nil {
+		return services, err
+	}
+	controls, err := interaction.New(pool, interaction.Options{Authority: authority})
+	if err != nil {
+		return services, err
+	}
+	services.Store = &nativeSessionStore{nativeSessionBase: base, pool: pool, authority: authority, controls: controls, read: read}
+	return services, nil
+}
+
+type nativeSessionAuthority struct{ consent consent.Authority }
+
+func (a nativeSessionAuthority) SessionTx(ctx context.Context, tx pgx.Tx, b nativecontract.Binding) (consent.Session, error) {
+	s, err := a.consent.SessionTx(ctx, tx, b)
+	if err != nil {
+		return s, err
+	}
+	if s.View.Capabilities.QualificationDigest != a.consent.Capabilities.QualificationDigest {
+		return s, nativestream.Refuse(nativecontract.ReasonQualificationMissing)
+	}
+	var live bool
+	err = tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM native_session_bindings b
+ JOIN harness_sessions h ON h.tenant_id=b.tenant_id AND h.id=b.current_harness_session_id AND h.agent_principal_id=b.paired_principal_id
+ JOIN agent_pairing_computers c ON c.tenant_id=b.tenant_id AND c.id=b.computer_id AND c.principal_id=b.paired_principal_id
+ JOIN agent_pairing_requests q ON q.tenant_id=c.tenant_id AND q.id=c.request_id
+ JOIN agent_pairing_enrollments e ON e.tenant_id=c.tenant_id AND e.computer_id=c.id AND e.account_id=b.account_id
+ JOIN agent_accounts account ON account.tenant_id=e.tenant_id AND account.id=e.account_id
+ JOIN agent_keys k ON k.tenant_id=c.tenant_id AND k.id=c.key_id AND k.principal_id=c.principal_id
+ WHERE b.tenant_id=$1 AND b.id=$2 AND b.current_harness_session_id=$3 AND b.runtime_epoch=$4
+ AND h.stopped_at IS NULL AND h.archived_at IS NULL AND c.state='connected' AND q.state='redeemed'
+ AND c.daemon_id=b.daemon_id AND account.last_daemon_generation=b.daemon_generation AND c.ledger_generation=b.ledger_generation
+ AND e.state='connected' AND e.ongoing_approved_at IS NOT NULL AND account.archived_at IS NULL
+ AND k.revoked_at IS NULL AND (k.expires_at IS NULL OR k.expires_at>clock_timestamp()))`, b.TenantID, b.OwnedSessionID, b.HarnessSessionID, b.RuntimeEpoch).Scan(&live)
+	if err != nil {
+		return s, err
+	}
+	if !live {
+		return s, nativestream.Refuse(nativecontract.ReasonOwnershipUnconfirmed)
+	}
+	s.View.Capabilities.ChatSupported = s.View.Capabilities.ChatSupported && a.consent.Capabilities.ChatSupported
+	s.View.Capabilities.Input = s.View.Capabilities.Input && s.View.Capabilities.ChatSupported
+	return s, nil
+}
+
+func (a nativeSessionAuthority) AuthorizeTx(ctx context.Context, tx pgx.Tx, p tenant.Principal, b nativecontract.Binding, action string) error {
+	s, err := a.SessionTx(ctx, tx, b)
+	if err != nil {
+		return err
+	}
+	if err = stream.VisibilityTx(ctx, tx, p, s.OwnerPersonID, b.ProjectID, "structured"); err != nil {
+		return err
+	}
+	if strings.HasPrefix(action, "consent:") || action == "attach:terminal" || action == "attach:expert" {
+		// No separately qualified watch-export consent adapter is supplied by
+		// the released composition. Native control approval cannot replace it.
+		return nativestream.Refuse(nativecontract.ReasonGrantMissing)
+	}
+	if action == "control_claim" || action == "control_end" {
+		return stream.TakeAuthorityTx(ctx, tx, p, s.OwnerPersonID, b.ProjectID)
+	}
+	return nil
+}
+
+func (nativeSessionAuthority) AuthorizeRequestTx(context.Context, pgx.Tx, tenant.Principal, nativecontract.Approval) (bool, error) {
+	return false, nativestream.Refuse(nativecontract.ReasonQualificationMissing)
+}
+
+// Embed the production store so daemon proof, commands, receipts and final
+// semantics remain exactly the existing implementation's responsibility.
+type nativeSessionStore struct {
+	nativeSessionBase
+	pool      *pgxpool.Pool
+	authority nativeSessionAuthority
+	controls  *interaction.Store
+	read      *stream.CurrentReadAuthority
+}
+
+type nativeSessionBase interface {
+	nativecontract.Store
+	View(context.Context, nativecontract.Actor, string, string) (nativecontract.SessionView, error)
+	ByHarness(context.Context, nativecontract.Actor, string, string) (nativecontract.SessionView, error)
+	DaemonRequest(*http.Request) (context.Context, nativecontract.DaemonActor, error)
+}
+
+func (s *nativeSessionStore) AuthenticateViewer(r *http.Request) (nativecontract.Binding, stream.Viewer, error) {
+	return s.read.AuthenticateViewer(r)
+}
+
+func (s *nativeSessionStore) Attach(ctx context.Context, actor nativecontract.Actor, in nativecontract.AttachIntent) (nativecontract.AttachResult, error) {
+	if in.Mode == "control" && !nativeattach.LocalPersonProjection(ctx) {
+		// Controller acquisition must wait for the private capability transport
+		// and final command-write fence; an unusable lease is not a successful attach.
+		return nativecontract.AttachResult{}, nativestream.Refuse(nativecontract.ReasonQualificationMissing)
+	}
+	result, err := s.controls.Attach(ctx, actor, in)
+	if err != nil {
+		return result, err
+	}
+	if err = s.read.Remember(actor, in.View, result); err != nil {
+		return nativecontract.AttachResult{}, err
+	}
+	result.Snapshot, err = s.project(ctx, actor, result.Snapshot)
+	return result, err
+}
+
+func (s *nativeSessionStore) Renew(ctx context.Context, actor nativecontract.Actor, in nativecontract.AttachRenew) (nativecontract.AttachResult, error) {
+	if in.ControllerEpoch != nil && !nativeattach.LocalPersonProjection(ctx) {
+		// Public renewal has no private capability transport seam in C0 yet.
+		return nativecontract.AttachResult{}, nativestream.Refuse(nativecontract.ReasonGrantMissing)
+	}
+	result, err := s.controls.Renew(ctx, actor, in, nativeattach.LocalControlCapability(ctx))
+	if err != nil {
+		return result, err
+	}
+	if err = s.read.Remember(actor, "structured", result); err != nil {
+		return nativecontract.AttachResult{}, err
+	}
+	result.Snapshot, err = s.project(ctx, actor, result.Snapshot)
+	return result, err
+}
+
+func (s *nativeSessionStore) View(ctx context.Context, a nativecontract.Actor, project, id string) (nativecontract.SessionView, error) {
+	view, err := s.nativeSessionBase.View(ctx, a, project, id)
+	if err != nil {
+		return view, err
+	}
+	return s.project(ctx, a, view)
+}
+
+func (s *nativeSessionStore) ByHarness(ctx context.Context, a nativecontract.Actor, project, id string) (nativecontract.SessionView, error) {
+	view, err := s.nativeSessionBase.ByHarness(ctx, a, project, id)
+	if err != nil {
+		return view, err
+	}
+	return s.project(ctx, a, view)
+}
+
+func (s *nativeSessionStore) Read(ctx context.Context, a nativecontract.Actor, b nativecontract.Binding) (nativecontract.SessionView, error) {
+	view, err := s.nativeSessionBase.Read(ctx, a, b)
+	if err != nil {
+		return view, err
+	}
+	return s.project(ctx, a, view)
+}
+
+func (s *nativeSessionStore) project(ctx context.Context, actor nativecontract.Actor, view nativecontract.SessionView) (nativecontract.SessionView, error) {
+	p, ok := tenant.PrincipalFrom(ctx)
+	if !ok || p.ID != actor.PrincipalID || p.TenantID != actor.TenantID || string(p.Kind) != actor.PrincipalKind {
+		return nativecontract.SessionView{}, nativestream.Refuse(nativecontract.ReasonWrongPrincipal)
+	}
+	ctx, cancel := context.WithTimeout(ctx, 3*time.Second)
+	defer cancel()
+	err := db.InTenant(ctx, s.pool, p.TenantID, func(tx pgx.Tx) error {
+		if err := agentpairing.Lock(ctx, tx); err != nil {
+			return err
+		}
+		project := ""
+		if view.CurrentBinding != nil {
+			project = view.CurrentBinding.ProjectID
+		}
+		if project == "" {
+			// Starts without a runtime advertise no native controls or exports.
+			view.Capabilities = nativecontract.Capabilities{Steer: "unsupported", Quota: "unsupported", QualificationDigest: view.Capabilities.QualificationDigest}
+			view.TerminalViewerURL = nil
+			view.Quota = nil
+			return nil
+		}
+		if err := authz.RequireTx(ctx, tx, p, "harness.read", authz.Scope{ProjectID: project}); err != nil {
+			return err
+		}
+		person, err := modelprefs.CanonicalPerson(ctx, tx, p.ID)
+		if err != nil {
+			return err
+		}
+		if p.Kind != tenant.Person || person == nil || *person != view.OwnerPersonID {
+			view.Quota = nil
+		}
+		visible := stream.VisibilityTx(ctx, tx, p, view.OwnerPersonID, project, "terminal")
+		if visible != nil {
+			var validation *nativecontract.ValidationError
+			var denied *nativestream.Failure
+			if !errors.As(visible, &denied) && !errors.As(visible, &validation) {
+				return visible
+			}
+			view.TerminalViewerURL = nil
+			view.Quota = nil
+			view.Capabilities.TerminalView, view.Capabilities.Expert = false, false
+		}
+		// Take is restored below only from the current qualified local projection.
+		view.Capabilities.Take, view.Capabilities.TakeSupported = false, false
+		// This composition has no qualified owner watch-export adapter. A
+		// stored capability or URL cannot substitute for that current authority.
+		view.Capabilities.Expert, view.Capabilities.TerminalView = false, false
+		view.TerminalViewerURL = nil
+		view.Capabilities.ChatSupported = view.Capabilities.ChatSupported && s.authority.consent.Capabilities.ChatSupported
+		view.Capabilities.Input = view.Capabilities.Input && view.Capabilities.ChatSupported
+		current, err := s.authority.SessionTx(ctx, tx, *view.CurrentBinding)
+		if err != nil {
+			var validation *nativecontract.ValidationError
+			var denied *nativestream.Failure
+			if !errors.As(err, &validation) && !errors.As(err, &denied) {
+				return err
+			}
+			view.Capabilities = nativecontract.Capabilities{Steer: "unsupported", Quota: "unsupported", QualificationDigest: view.Capabilities.QualificationDigest}
+			view.TerminalViewerURL = nil
+			view.Quota = nil
+		} else if nativeattach.LocalPersonProjection(ctx) {
+			view.Capabilities.Take = current.View.Capabilities.Take && s.authority.consent.Capabilities.Take
+			view.Capabilities.TakeSupported = current.View.Capabilities.TakeSupported && s.authority.consent.Capabilities.TakeSupported
+		}
+		return nil
+	})
+	return view, err
+}
+
+func (s *nativeSessionStore) Mutate(ctx context.Context, actor nativecontract.Actor, c nativecontract.Command) (nativecontract.OperationResult, error) {
+	if c.Kind == "input" && !s.authority.consent.Capabilities.ChatSupported {
+		return nativecontract.OperationResult{}, nativestream.Refuse(nativecontract.ReasonFeatureDisabled)
+	}
+	var err error
+	var binding nativecontract.Binding
+	var request string
+	switch {
+	case c.Kind == "detach" && c.Detach != nil:
+		binding, request = c.Detach.ExpectedBinding, c.Detach.RequestID
+		err = s.controls.Detach(ctx, actor, *c.Detach)
+		if err == nil {
+			s.read.Forget(actor.TenantID, c.Detach.ViewerID)
+		}
+	case c.Kind == "control_end" && c.EndControl != nil:
+		binding, request = c.EndControl.ExpectedBinding, c.EndControl.RequestID
+		err = s.controls.EndControl(ctx, actor, *c.EndControl)
+	default:
+		return s.nativeSessionBase.Mutate(ctx, actor, c)
+	}
+	if err != nil {
+		return nativecontract.OperationResult{}, err
+	}
+	return nativecontract.OperationResult{Receipt: nativecontract.Receipt{RequestID: request, OperationID: request, Binding: &binding, Operation: c.Kind, State: "applied", SourceSequence: "0", UpdatedAt: time.Now().UTC()}}, nil
+}
 
 type Module struct {
 	heartbeatIsolation func(context.Context, pgx.Tx, string) (bool, error)

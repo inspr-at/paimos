@@ -16,7 +16,11 @@ import (
 	"github.com/inspr-at/paimos/internal/authz"
 	"github.com/inspr-at/paimos/internal/db"
 	"github.com/inspr-at/paimos/internal/nativecontract"
+	"github.com/inspr-at/paimos/internal/nativereceipts"
+	"github.com/inspr-at/paimos/internal/nativesessions/consent"
 	privateDaemon "github.com/inspr-at/paimos/internal/nativesessions/daemon"
+	"github.com/inspr-at/paimos/internal/nativesessions/receipts"
+	"github.com/inspr-at/paimos/internal/nativesessions/stream"
 	"github.com/inspr-at/paimos/internal/tenant"
 	"github.com/inspr-at/paimos/internal/workorders"
 	"github.com/jackc/pgx/v5"
@@ -83,6 +87,9 @@ func (s *Store) Claim(ctx context.Context, daemon nativecontract.DaemonActor, in
 	}
 	if s.production != nil && in.ClaimKind == "command" {
 		return s.claimCommand(ctx, daemon, in)
+	}
+	if s.production != nil && in.ClaimKind == "resume" {
+		return s.claimSuccessor(ctx, daemon, in)
 	}
 	if s.production != nil && in.ClaimKind == "start" {
 		var err error
@@ -394,4 +401,212 @@ func rootID(ctx context.Context, tx pgx.Tx, out *nativecontract.ClaimResult) err
 	}
 	out.RootReservationID = &id
 	return nil
+}
+
+// claimSuccessor exchanges one already person-authorized transition for a fresh
+// epoch only after the owning daemon proves the exact predecessor's group exit.
+// The existing root and its aggregate budget remain held across the switch.
+// No native I/O occurs in this transaction. A server restart loses the live
+// command and refuses it; persisted metadata cannot grant another fork.
+func (s *Store) claimSuccessor(ctx context.Context, d nativecontract.DaemonActor, in nativecontract.Claim) (nativecontract.ClaimResult, error) {
+	var out nativecontract.ClaimResult
+	s.commandMu.Lock()
+	defer s.commandMu.Unlock()
+	c, ok := s.commands[in.OperationID]
+	if !ok {
+		proof, _ := ctx.Value(proofKey{}).(privateDaemon.Proof)
+		identity, _, _ := proof.Runtime()
+		for operation, candidate := range s.commands {
+			if candidate.command.Kind == "resume" && candidate.intent.Receipt.RequestID == in.OperationID && candidate.intent.Receipt.Binding != nil && candidate.intent.Receipt.Binding.TenantID == d.TenantID && candidate.intent.Receipt.Binding.RuntimeEpoch == identity.RuntimeEpoch {
+				in.OperationID = operation
+				c, ok = candidate, true
+				break
+			}
+		}
+	}
+	if !ok || c.done || c.intent.Receipt.Binding == nil {
+		return out, fail(403, nativecontract.ReasonGrantMissing)
+	}
+	command, err := queuedControl(c)
+	if err != nil {
+		return out, err
+	}
+	b := *c.intent.Receipt.Binding
+	next, ok := ctx.Value(successorProofKey{}).(privateDaemon.Proof)
+	if !ok || in.ExpectedRevision != b.BindingRevision || in.DaemonID != d.DaemonID || in.DaemonGeneration != d.DaemonGeneration || in.LedgerGeneration != d.LedgerGeneration || in.CapabilityDigest != d.CapabilityDigest {
+		return out, fail(403, nativecontract.ReasonGrantMissing)
+	}
+	now := s.now()
+	if !now.Before(c.intent.ExpiresAt) || !now.Before(next.ExpiresAt) || next.ObservedAt.After(now) || now.Sub(next.ObservedAt) > 20*time.Second {
+		return out, fail(403, nativecontract.ReasonGrantExpired)
+	}
+	if c.successor != nil {
+		if !reflect.DeepEqual(next, c.successorProof) || !now.Before(c.successor.ExpiresAt) {
+			return out, fail(409, nativecontract.ReasonIdentityMismatch)
+		}
+		// Lost admission reply: only this exact successor lease can reread it.
+		ctx = receipts.WithRuntimeProof(ctx, receipts.RuntimeProof{WorkerLease: next.WorkerLease})
+		err = s.runtimeTx(ctx, d, *c.successor.ExpectedBinding, false, func(ctx context.Context, tx pgx.Tx, session consent.Session, _ receipts.RuntimeProof) error {
+			if session.View.State != "starting" {
+				return fail(409, nativecontract.ReasonStaleRevision)
+			}
+			return stream.TakeAuthorityTx(ctx, tx, c.actor, session.OwnerPersonID, b.ProjectID)
+		})
+		out = *c.successor
+		out.AuthorizationTTLMS = max(0, out.ExpiresAt.Sub(now).Milliseconds())
+		return out, err
+	}
+	err = s.runtimeTx(ctx, d, b, true, func(ctx context.Context, tx pgx.Tx, session consent.Session, proof receipts.RuntimeProof) error {
+		if err := s.controlTx(ctx, tx, session, c.actor, command); err != nil {
+			return err
+		}
+		i, x := proof.Identity, proof.Exit
+		if i.RuntimeEpoch != b.RuntimeEpoch || i.ProcessIdentityDigest != c.intent.ProcessIdentityDigest || x == nil || !x.RootExited || !x.GroupAbsent || x.ProcessIdentityDigest != i.ProcessIdentityDigest || x.ObservedAt.IsZero() || x.ObservedAt.After(now) || now.Sub(x.ObservedAt) > 20*time.Second {
+			return fail(409, nativecontract.ReasonOwnershipUnconfirmed)
+		}
+		var operation string
+		if err := tx.QueryRow(ctx, `SELECT id::text FROM native_session_intents WHERE owned_session_id=$1`, b.OwnedSessionID).Scan(&operation); err != nil {
+			return err
+		}
+		r, err := loadPending(ctx, tx, operation, true)
+		if err != nil {
+			return err
+		}
+		if err = currentDaemon(ctx, tx, d, r); err != nil {
+			return err
+		}
+		epoch, err := uuid()
+		if err != nil {
+			return err
+		}
+		harness, err := uuid()
+		if err != nil {
+			return err
+		}
+		fresh := b
+		fresh.RuntimeEpoch, fresh.HarnessSessionID = epoch, harness
+		fresh.BindingRevision++
+		if fresh.BindingRevision > 9007199254740991 || session.View.Generation >= 9007199254740991 || session.View.Revision >= 9007199254740990 {
+			return fail(409, nativecontract.ReasonStaleRevision)
+		}
+		ref, lease := sha256.Sum256([]byte(next.SessionRef)), sha256.Sum256([]byte(next.WorkerLease))
+		_, err = tx.Exec(ctx, `INSERT INTO harness_sessions(tenant_id,id,project_id,agent_principal_id,run_id,ticket_node_id,work_order_id,parent_id,harness,host,management,role,work_shape,capabilities,ref_digest,lease_digest,owner_principal_id,model_profile_id,model,reasoning_effort,started_by_principal_id)
+ SELECT tenant_id,$2,project_id,agent_principal_id,run_id,ticket_node_id,work_order_id,parent_id,harness,host,management,role,work_shape,capabilities,$3,$4,owner_principal_id,model_profile_id,model,reasoning_effort,started_by_principal_id FROM harness_sessions WHERE tenant_id=$1 AND id=$5`, b.TenantID, harness, ref[:], lease[:], b.HarnessSessionID)
+		if err != nil {
+			return err
+		}
+		if _, err = tx.Exec(ctx, `UPDATE harness_sessions SET phase='stopped',stopped_at=$2,stop_reason='stopped' WHERE id=$1`, b.HarnessSessionID, x.ObservedAt); err != nil {
+			return err
+		}
+		var root string
+		err = tx.QueryRow(ctx, `UPDATE native_session_roots SET runtime_epoch=$3 WHERE owned_session_id=$1 AND runtime_epoch=$2 AND released_at IS NULL AND run_id IS NULL RETURNING id::text`, b.OwnedSessionID, b.RuntimeEpoch, epoch).Scan(&root)
+		if errors.Is(err, pgx.ErrNoRows) {
+			return fail(409, nativecontract.ReasonOwnershipUnconfirmed)
+		}
+		if err != nil {
+			return err
+		}
+		view := session.View
+		view.CurrentBinding = &fresh
+		view.Revision++
+		view.Generation++
+		view.State = "starting"
+		view.Mode = "structured"
+		if command.Kind == "take" {
+			view.Mode = "terminal"
+		}
+		view.Controller = nil
+		view.TerminalViewerURL = nil
+		raw, _ := json.Marshal(view)
+		if _, err = tx.Exec(ctx, `UPDATE native_session_bindings SET current_harness_session_id=$2,runtime_epoch=$3,binding_revision=$4,view=$5,terminal_viewer_url=NULL WHERE id=$1`, b.OwnedSessionID, harness, epoch, fresh.BindingRevision, raw); err != nil {
+			return err
+		}
+		if _, err = tx.Exec(ctx, `UPDATE native_session_controllers SET expires_at=$2 WHERE owned_session_id=$1`, b.OwnedSessionID, now); err != nil {
+			return err
+		}
+		if _, err = tx.Exec(ctx, `UPDATE native_session_viewers SET detached_at=coalesce(detached_at,$2) WHERE owned_session_id=$1`, b.OwnedSessionID, now); err != nil {
+			return err
+		}
+		expires := now.Add(20 * time.Second)
+		for _, until := range []time.Time{c.intent.ExpiresAt, next.ExpiresAt, session.Policy.ExpiresAt} {
+			if until.Before(expires) {
+				expires = until
+			}
+		}
+		out = nativecontract.ClaimResult{OperationID: in.OperationID, OwnedSessionID: b.OwnedSessionID, Intent: session.Intent, Policy: session.Policy, ExpectedBinding: &fresh, ExpiresAt: expires, ClaimKind: "resume", LaunchAuthorized: true, LaunchConfig: r.launch, AuthorizationTTLMS: expires.Sub(now).Milliseconds(), RootReservationID: &root}
+		if err = s.validate("NativeClaimResult", out); err != nil {
+			return err
+		}
+		p, _ := tenant.PrincipalFrom(ctx)
+		return appendEvent(ctx, tx, p, "native_session.receipt_changed", b.ProjectID, in.OperationID, c.intent.Receipt.RequestID, view)
+	})
+	if err == nil {
+		c.successor = &out
+		c.successorProof = next
+		s.commands[in.OperationID] = c
+	}
+	return out, err
+}
+
+// reportSuccessor records actual owned runtime readiness, then emits exactly
+// one mode-change audit line attributed to the person who requested the switch.
+func (s *Store) reportSuccessor(ctx context.Context, d nativecontract.DaemonActor, in nativecontract.Receipt) (nativecontract.OperationResult, error) {
+	var out nativecontract.OperationResult
+	if in.Binding == nil || in.State != "applied" || in.SourceSequence != "0" || in.InputID != nil || in.TurnRef != nil || in.Reason != nil {
+		return out, fail(400, nativecontract.ReasonInvalidInput)
+	}
+	s.commandMu.Lock()
+	defer s.commandMu.Unlock()
+	c, ok := s.commands[in.OperationID]
+	if !ok || c.successor == nil || c.successor.ExpectedBinding == nil || !c.successor.ExpectedBinding.Equal(*in.Binding) || c.intent.Receipt.RequestID != in.RequestID || c.intent.Receipt.Operation != in.Operation {
+		return out, fail(409, nativecontract.ReasonIdentityMismatch)
+	}
+	err := s.runtimeTx(ctx, d, *in.Binding, false, func(ctx context.Context, tx pgx.Tx, session consent.Session, proof receipts.RuntimeProof) error {
+		if err := stream.TakeAuthorityTx(ctx, tx, c.actor, session.OwnerPersonID, in.Binding.ProjectID); err != nil {
+			return err
+		}
+		i := proof.Identity
+		if i.RuntimeEpoch != in.Binding.RuntimeEpoch || i.PID <= 1 || i.StartedAt.IsZero() || i.StartedAt.After(s.now()) || !nativereceipts.ValidDigest(i.ProcessIdentityDigest) || i.ProcessIdentityDigest == c.intent.ProcessIdentityDigest || i.NativeSessionRef == "" {
+			return fail(409, nativecontract.ReasonOwnershipUnconfirmed)
+		}
+		view := session.View
+		out = nativecontract.OperationResult{Receipt: in, Session: &view}
+		if c.done {
+			return nil
+		}
+		if !s.now().Before(c.successor.ExpiresAt) || view.State != "starting" {
+			return fail(409, nativecontract.ReasonStaleRevision)
+		}
+		view.State = "idle"
+		if in.Operation == "take" {
+			view.State = "taken"
+		}
+		view.Revision++
+		raw, _ := json.Marshal(view)
+		if _, err := tx.Exec(ctx, `UPDATE native_session_bindings SET view=$2 WHERE id=$1`, in.Binding.OwnedSessionID, raw); err != nil {
+			return err
+		}
+		out.Session = &view
+		kind := "native_session.mode_changed"
+		if in.Operation == "resume" {
+			kind = "native_session.recovered"
+		}
+		return appendEvent(ctx, tx, c.actor, kind, in.Binding.ProjectID, in.OperationID, in.RequestID, view)
+	})
+	if err == nil {
+		s.mu.Lock()
+		s.runtimes[in.Binding.OwnedSessionID] = ctxRuntimeIdentity(ctx)
+		s.mu.Unlock()
+		c.done = true
+		c.command.Params = nil
+		s.commands[in.OperationID] = c
+		err = s.production.relay.Register(*out.Session)
+	}
+	return out, err
+}
+
+func ctxRuntimeIdentity(ctx context.Context) string {
+	proof, _ := ctx.Value(proofKey{}).(privateDaemon.Proof)
+	i, _, _ := proof.Runtime()
+	return i.ProcessIdentityDigest
 }

@@ -37,7 +37,8 @@ const noticeDe = computed(() => displayLanguage(profile.profile?.locale) === 'de
 const noticeText = (en: string, de: string) => noticeDe.value ? de : en
 const noticeWords = computed(() => ({
   offer: noticeText('Get a browser notification when a decision waits', 'Browser-Benachrichtigung erhalten, wenn eine Entscheidung wartet'),
-  failed: noticeText('Notifications could not be turned on. Check the browser permission.', 'Benachrichtigungen konnten nicht eingeschaltet werden. Browser-Berechtigung prüfen.'),
+  // The offer is the longer sentence in both languages, so the shared slot keeps Turn on beside it (AEON-1617).
+  failed: noticeText('Notifications could not be turned on.', 'Benachrichtigungen konnten nicht eingeschaltet werden.'),
 }))
 const noticeSettings = ref<PhoneSettings | null>(null), noticeHash = ref(''), noticeDismissed = ref(deskOfferDismissed())
 const noticeBusy = ref(false), noticeOn = ref(false), noticeError = ref(false), noticeBrowser = ref(deskPushBrowser())
@@ -655,7 +656,7 @@ onBeforeUnmount(() => { alive = false; generation++; ticketTurn++; stopAccess();
         <div class="head-note desk-notice" data-testid="desk-notice">
           <!-- Once shown, the offer keeps its wrapping geometry through dismissal, success and later reads. -->
           <div v-if="noticeHeld" class="notice-offer" :class="{ reserved: !offerShown }" :aria-hidden="!offerShown || undefined" :inert="!offerShown || undefined">
-            <!-- The offer and its failure share one slot sized to the longer sentence, so a failure moves nothing. -->
+            <!-- The offer is the longer sentence and sizes the shared slot, so a shorter failure moves nothing. -->
             <span class="notice-sentence">
               <span class="notice-size" aria-hidden="true">{{ noticeWords.offer }}</span>
               <span class="notice-size" aria-hidden="true">{{ noticeWords.failed }}</span>

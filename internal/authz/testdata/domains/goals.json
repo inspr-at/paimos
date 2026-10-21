@@ -25,5 +25,45 @@
   "project_decided": {
     "PATCH /api/goals/{goalId}": true,
     "POST /api/goals": true
-  }
+  },
+  "builtin_roles": {
+    "admin": [
+      "goals.read",
+      "goals.write"
+    ],
+    "member": [
+      "goals.read",
+      "goals.write"
+    ],
+    "owner": [
+      "goals.read",
+      "goals.write"
+    ]
+  },
+  "registry": [
+    {
+      "agent_grantable": true,
+      "description": "Read goals",
+      "grantable_at": [
+        "workspace",
+        "project"
+      ],
+      "group": "Goals",
+      "key": "goals.read",
+      "owner_workstation_grantable": true,
+      "risk": "low"
+    },
+    {
+      "agent_grantable": true,
+      "description": "Write goals",
+      "grantable_at": [
+        "workspace",
+        "project"
+      ],
+      "group": "Goals",
+      "key": "goals.write",
+      "owner_workstation_grantable": true,
+      "risk": "medium"
+    }
+  ]
 }
