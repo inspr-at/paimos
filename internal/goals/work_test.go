@@ -13,6 +13,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/inspr-at/paimos/internal/authz"
 	"github.com/inspr-at/paimos/internal/db"
 	"github.com/inspr-at/paimos/internal/dbtest"
 	"github.com/inspr-at/paimos/internal/events"
@@ -389,9 +390,17 @@ func TestGoalPeopleRenameUnlinkDeleteRights(t *testing.T) {
 	if r := call(member, "GET", path, ""); r.Code != 404 {
 		t.Fatalf("deleted goal read %d", r.Code)
 	}
+	// The route's project scope resolves as the auth middleware does, so a
+	// project member may undo the delete although the goal is deleted.
+	const undoRoute = "POST /api/events/{eventId}/undo"
+	undoPath := fmt.Sprintf("/api/events/%d/undo", *deleted.EventID)
+	scope, ok, err := authz.ResolveRouteScope(tenant.WithPrincipal(ctx, member), f.db.App, undoRoute, undoPath)
+	if err != nil || !ok || scope.ProjectID != f.project {
+		t.Fatalf("undo route scope %+v ok=%v: %v", scope, ok, err)
+	}
 	undo := http.NewServeMux()
 	events.New(f.db.App, events.WithUndoHandlers(UndoHandlers())).Mount(undo)
-	req := httptest.NewRequest("POST", fmt.Sprintf("/api/events/%d/undo", *deleted.EventID), nil).WithContext(tenant.WithPrincipal(ctx, member))
+	req := httptest.NewRequest("POST", undoPath, nil).WithContext(authz.WithRouteScope(tenant.WithPrincipal(ctx, member), scope))
 	rec := httptest.NewRecorder()
 	undo.ServeHTTP(rec, req)
 	if rec.Code != 201 {
