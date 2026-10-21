@@ -48,12 +48,7 @@ async function setup(page: Page, width = 1440, theme = 'light', extraDoing = 0) 
   await page.route('**/api/queue?*', route => route.fulfill({ json: { items: [], manual_order: false, capacity: { queued_hours: 0, parallel_runs: 0, work_hours: 0, warning: false } } }))
   await page.goto('/p/PHAROS')
   await expect(row(page, 'PHAROS-11')).toBeVisible()
-  // D11 (AEON-1460): a phone list starts with its project head in the crumb sheet; disclose it
-  // once the compact list applies.
-  if (width < 720) {
-    await expect(page.locator('.project-page')).toHaveClass(/compact-list/)
-    await showProjectHead(page)
-  }
+  if (width < 720) await showProjectHead(page)
   return { data, summaryRequests: () => summaryRequests }
 }
 

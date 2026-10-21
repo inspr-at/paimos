@@ -3,7 +3,6 @@
 
 import ListToolbar from '../../components/work/ListToolbar.vue'
 import HeaderNavMenu from '../../components/work/HeaderNavMenu.vue'
-import { compactChrome } from '../../lib/chrome'
 import { toRefs } from 'vue'
 import type { Project } from '../../stores/projects'
 import { bindProjectRef, useProjectPageContext } from './context'
@@ -13,7 +12,6 @@ const { startCreate, toolbarColumns, saveColumns, resetColumns, list, outline, s
 const bindStickMark = bindProjectRef(stickMark)
 const bindToolbar = bindProjectRef(toolbar)
 const bindToolbarWrap = bindProjectRef(toolbarWrap)
-const compact = compactChrome()
 const page = useProjectPageContext()
 </script>
 
@@ -43,7 +41,7 @@ const page = useProjectPageContext()
     />
       </template>
     </ListToolbar>
-    <div v-if="!compact && selectable && (sequence.length || picking)" class="phone-pick" :class="{ on: picking }">
+    <div v-if="selectable && (sequence.length || picking)" class="phone-pick" :class="{ on: picking }">
       <p v-if="picking" class="phone-pick-status">
     <span aria-live="polite"><b class="mono">{{ selected.size.toLocaleString('en-GB') }}</b> selected</span>
     <template v-if="selectedDeleted.length"><span class="dot" aria-hidden="true">·</span><span class="gone">{{ selectedDeleted.length.toLocaleString('en-GB') }} deleted</span></template>

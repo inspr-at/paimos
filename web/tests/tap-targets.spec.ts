@@ -157,13 +157,14 @@ for (const { width, coarse } of [
       const table = page.getByRole('treegrid', { name: 'Ticket outline' })
       const row = table.locator('tr.ticket-row').filter({ has: page.locator('.key', { hasText: /^PHAROS-10$/ }) })
       if (width < 720) {
-        const twisty = row.locator('.phone-fold'), title = row.locator('.title-link')
-        await expect(row.locator('.status-btn, .c-prio, .c-estimate')).toHaveCount(0)
-        expect((await row.boundingBox())!.height).toBe(56)
+        const twisty = row.locator('.twisty'), title = row.locator('.title-link')
         const reach = async (control: Locator) => {
-          await control.scrollIntoViewIfNeeded()
+          // The arrow's box is 36px; its 44px reach is the ring around it. IfNeeded
+          // only guarantees the box, so a nested arrow at the viewport edge
+          // leaves the bottom sample off-screen.
+          await control.evaluate(el => el.scrollIntoView({ block: 'center', inline: 'nearest' }))
           const b = (await control.boundingBox())!
-          expect(b.width).toBeGreaterThanOrEqual(44); expect(b.height).toBeGreaterThanOrEqual(44)
+          expect(b.width).toBe(36); expect(b.height).toBe(36)
           const own = await control.evaluate(el => {
             const r = el.getBoundingClientRect(), x = r.x + r.width / 2, y = r.y + r.height / 2
             return [[-21.99, 0], [21.99, 0], [0, -21.99], [0, 21.99]].map(([dx, dy]) => el.contains(document.elementFromPoint(x + dx!, y + dy!)))
@@ -176,7 +177,7 @@ for (const { width, coarse } of [
           { name: 'collapse compact parent at its target edge', run: async () => { await edgeClick(page, twisty, true, true); await expect(twisty).toHaveAttribute('aria-expanded', 'false') } },
         ] })
         await twisty.click()
-        const nested = table.locator('#row-n-2 .phone-fold')
+        const nested = table.locator('#row-n-2 .twisty')
         await reach(nested)
         // Keep both consecutive-row targets and every status-edge assertion,
         // now through the ticket's status action as required by D11.
@@ -184,7 +185,6 @@ for (const { width, coarse } of [
         await expect(first).toBeVisible(); await expect(second).toBeVisible()
         expect(await first.evaluate(el => el.nextElementSibling?.id)).toBe('row-n-2')
         for (const [ticket, key] of [[row, 'PHAROS-10'], [first, 'PHAROS-11'], [second, 'PHAROS-12']] as const) {
-          await expect(ticket.locator('.status-btn')).toHaveCount(0)
           await ticket.locator('.title-link').click()
           const details = page.getByRole('complementary', { name: 'Ticket details' })
           const status = details.getByRole('button', { name: /^Status:/ })

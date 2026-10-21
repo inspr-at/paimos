@@ -17,8 +17,7 @@ test('on a phone, select two tickets, open Add to release, then cancel', async (
   await expect(row(page, 'PHAROS-12')).toBeVisible()
   await expect(page.getByRole('checkbox', { name: 'Select PHAROS-12' })).toBeHidden()
 
-  await page.getByRole('button', { name: 'More view actions', exact: true }).click()
-  await page.getByRole('menuitem', { name: 'Select tickets', exact: true }).click()
+  await page.getByRole('button', { name: 'Select', exact: true }).click()
   const mark = row(page, 'PHAROS-12').getByRole('checkbox', { name: 'Select PHAROS-12' })
   await expect(mark).toBeVisible()
   const markBox = (await mark.boundingBox())!
@@ -47,9 +46,7 @@ test('on a phone, select two tickets, open Add to release, then cancel', async (
   await expect(dialog).toBeHidden()
   await bulkBar(page).getByRole('button', { name: 'Clear the selection', exact: true }).click()
   await expect(bulkBar(page)).toHaveCount(0)
-  await page.getByRole('button', { name: 'More view actions', exact: true }).click()
-  await expect(page.getByRole('menuitem', { name: 'Select tickets', exact: true })).toBeVisible()
-  await page.keyboard.press('Escape')
+  await expect(page.getByRole('button', { name: 'Select', exact: true })).toBeVisible()
   await expect(page.getByRole('checkbox', { name: 'Select PHAROS-12' })).toBeHidden()
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true)
 })

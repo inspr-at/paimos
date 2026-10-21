@@ -69,11 +69,10 @@ test('the ETA column shows fresh, overdue and stale estimates under its header a
   await header.getByRole('button', { name: 'ETA' }).click()
   await expect.poll(() => sorts.some(sort => sort.split(',').includes('eta_ready'))).toBe(true)
 
-  // D11 keeps the list's update time; estimates stay readable in the ticket.
+  // The phone card keeps the fresher of ETA and Updated in the date slot.
   await page.setViewportSize({ width: 390, height: 844 })
-  await expect(row(page, 'PHAROS-11').locator('.c-eta, .c-updated')).toHaveCount(0)
-  await expect(row(page, 'PHAROS-11').locator('.phone-meta time')).toBeVisible()
-  await expect(row(page, 'PHAROS-14').locator('.phone-meta time')).toBeVisible()
+  await expect(row(page, 'PHAROS-11').locator('.c-eta .eta-cell, .c-updated time').first()).toBeVisible()
+  await expect(row(page, 'PHAROS-14').locator('.c-eta .eta-cell, .c-updated time').first()).toBeVisible()
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= document.documentElement.clientWidth)).toBe(true)
   for (const width of [390, 1024, 1440]) for (const theme of ['light', 'dark'] as const) {
     await page.setViewportSize({ width, height: 1000 })
@@ -86,7 +85,6 @@ test('the ETA column shows fresh, overdue and stale estimates under its header a
         'PHAROS-13': /^Estimate from \d{2}:\d{2} by Cleo is 3\d min old\nReady at \d{2}:\d{2}/,
       }
       for (const key of ['PHAROS-11', 'PHAROS-12', 'PHAROS-13']) {
-        await expect(row(page, key).locator('.eta-cell')).toHaveCount(0)
         await row(page, key).locator('.title-link').click()
         const panel = page.getByRole('complementary', { name: 'Ticket details' })
         const eta = panel.locator('.eta-cell'), label = eta.locator('.shown')
@@ -270,30 +268,11 @@ for (const theme of ['light', 'dark'] as const) for (const width of [1600, 390])
     data.nodes.find(node => node.key === 'PHAROS-13')!.eta = { has_working_session: true, progress_pct: 0 }
     await mockWork(page, data, { admin: true })
     await page.goto('/p/PHAROS')
-    if (width === 390) {
-      // Compact rows carry no ETA (AEON-1460); the ticket keeps the same quiet hint, including for a
-      // working session that reported neither a time nor a percent (PHAROS-14).
-      for (const key of ['PHAROS-14', 'PHAROS-13']) {
-        await expect(row(page, key).locator('.eta-cell, .c-estimate')).toHaveCount(0)
-        await row(page, key).locator('.title-link').click()
-        const ticket = page.getByRole('complementary', { name: 'Ticket details' })
-        const eta = ticket.locator('.ws-eta .eta-cell'), close = ticket.getByRole('button', { name: 'Close ticket details', exact: true })
-        await expect(eta).toHaveText(key === 'PHAROS-14' ? 'no ETA' : /0%\s*no ETA/)
-        await expect(eta).not.toHaveClass(/overdue|stale|done/)
-        await expect(eta).toHaveAttribute('data-tip', key === 'PHAROS-14' ? 'No ETA reported for this working session' : /0% done\nNo ETA reported/)
-        if (key === 'PHAROS-13') await expect(eta.locator('.sr-only')).toContainText('No ETA reported')
-        await expectStableControls({ controls: { eta, close }, scrollAreas: { ticket }, interactions: [
-          { name: 'read the missing-ETA hint', run: async () => { await eta.hover(); await expect(eta).toHaveAttribute('data-tip', /No ETA reported/) } },
-        ] })
-        await close.click()
-      }
-    } else {
     await expect(row(page, 'PHAROS-14').locator('.eta-cell')).toHaveText('no ETA')
     await expect(row(page, 'PHAROS-13').locator('.eta-cell')).toHaveText(/0%\s*no ETA/)
     await expect(row(page, 'PHAROS-13').locator('.eta-cell')).toHaveAttribute('data-tip', /0% done\nNo ETA reported/)
     await expect(row(page, 'PHAROS-13').locator('.eta-cell .sr-only')).toContainText('No ETA reported')
     if (width === 1600) await expect(row(page, 'PHAROS-14').locator('.c-estimate .empty')).toHaveAttribute('data-tip', 'No estimate yet')
-    }
     expect(await page.evaluate(() => document.documentElement.scrollWidth <= document.documentElement.clientWidth)).toBe(true)
     const shots = process.env.AEON_443_SHOTS
     if (shots) { mkdirSync(shots, { recursive: true }); await page.screenshot({ path: join(shots, `tickets-${width}-${theme}.png`), fullPage: true }) }

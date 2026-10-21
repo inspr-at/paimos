@@ -222,22 +222,13 @@ for (const theme of ['light', 'dark'] as const) for (const width of [1600, 390])
       }
     }
     await sections(page).getByRole('tab', { name: 'Tickets', exact: true }).click()
-    if (width === 390) {
-      const views = page.getByRole('button', { name: /^View:/ })
-      await views.focus(); await views.press('Enter')
-      const choice = page.getByRole('menuitemradio', { name: 'Outline', exact: true })
-      await choice.focus(); await choice.press('Enter')
-      await expect(page).toHaveURL('/p/PHAROS/tickets?view=outline')
-      await expect(views).toHaveAttribute('aria-expanded', 'false')
-      await views.focus()
-    } else {
+    // Ticket views stay a tablist on the phone (AEON-1615). ArrowRight moves List to Outline;
+    // Enter must not invoke the list's open-ticket shortcut.
     await ticketViews(page).getByRole('tab', { name: 'List', exact: true }).focus()
     await page.keyboard.press('ArrowRight')
     await expect(page).toHaveURL('/p/PHAROS/tickets?view=outline')
     await expect(ticketViews(page).getByRole('tab', { name: 'Outline', exact: true })).toBeFocused()
-    }
-    await page.keyboard.press('Enter') // Must not invoke the list's open-ticket shortcut.
+    await page.keyboard.press('Enter')
     await expect(panel(page)).toHaveCount(0)
-    if (width === 390) { await expect(page.getByRole('menu', { name: 'Ticket views', exact: true })).toBeVisible(); await page.keyboard.press('Escape') }
   })
 }

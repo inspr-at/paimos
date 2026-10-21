@@ -83,13 +83,11 @@ for (const width of [390, 1024, 1440]) for (const theme of ['light', 'dark'] as 
     await page.screenshot({ path: resolve(shots, `parent-split-releases-${width}-${theme}.png`), animations: 'disabled' })
     await page.goto('/p/PHAROS?cols=key,title,release')
     const row = page.locator('tr.ticket-row').filter({ has: page.locator('.key', { hasText: /^PHAROS-12$/ }) })
-    // Compact rows disclose release membership in the ticket itself.
-    if (width === 390) { await expect(row.locator('.c-release')).toHaveCount(0); await row.locator('.title-link').click() }
-    const cellRelease = width === 390 ? panel.getByRole('button', { name: /Release: Ships in 2 releases/ }) : row.getByRole('button', { name: /Ships in 2 releases.*Change release/ })
+    const cellRelease = row.getByRole('button', { name: /Ships in 2 releases.*Change release/ })
     await expect(cellRelease).toBeVisible()
     await expectStableControls({
-      controls: { cellRelease, ...(width === 390 ? { key: panel.getByRole('button', { name: 'Copy PHAROS-12', exact: true }) } : { row }) },
-      scrollAreas: width === 390 ? { panel } : { row },
+      controls: { cellRelease, row },
+      scrollAreas: { row },
       interactions: [{ name: 'list release picker', run: async () => {
         await cellRelease.click()
         await expect(page.getByRole('listbox', { name: 'Releases' })).toBeVisible()

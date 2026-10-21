@@ -169,16 +169,6 @@ for (const width of [390, 1024, 1440]) for (const theme of ['light', 'dark'] as 
     const { data, errors, recurrenceReads } = await setup(page, true, locale)
     const label = 'Routine · every Monday · #4'
     await page.goto('/p/PHAROS?sort=key&group=none')
-    if (width === 390) {
-      await expect(row(page).locator('.ticket-type-icon, .recurrence-dot')).toHaveCount(0)
-      const title = row(page).locator('.title-link'), status = row(page).locator('.phone-state')
-      expect((await row(page).boundingBox())!.height).toBe(56)
-      await expectStableControls({ controls: { title, status, row: row(page) }, interactions: [
-        { name: 'read compact title', run: () => title.hover() },
-        { name: 'routine removed while compact facts stay still', run: async () => { data.nodes.find(node => node.id === 'n-1')!.recurrence = undefined; await page.reload(); await expect(row(page).locator('.recurrence-dot')).toHaveCount(0) } },
-        { name: 'routine restored without growing compact row', run: async () => { data.nodes.find(node => node.id === 'n-1')!.recurrence = structuredClone(provenance); await page.reload(); expect((await row(page).boundingBox())!.height).toBe(56) } },
-      ] })
-    } else {
     await expect(row(page).getByRole('img', { name: label, exact: true })).toBeVisible()
     await expect(page.locator('#row-n-4 .recurrence-dot')).toHaveCount(0)
     for (const icon of await page.locator('.ticket-row .ticket-type-icon').all()) {
@@ -201,7 +191,6 @@ for (const width of [390, 1024, 1440]) for (const theme of ['light', 'dark'] as 
       ],
       scrollAreas: { list: page.locator('.table-card') },
     })
-    }
     expect(recurrenceReads).toEqual([])
     await page.goto('/p/PHAROS/PHAROS-11')
     const pill = workspace(page).getByRole('link', { name: label, exact: true })

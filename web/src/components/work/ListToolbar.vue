@@ -24,9 +24,7 @@ import type { ColumnId } from '../../lib/columns'
 import { workNoun } from '../../lib/workVocabulary'
 import { useWorkVocabulary } from '../../stores/workVocabulary'
 import { ATTENTION_KINDS, type AttentionFacet, type AttentionFilters, type AttentionGrouping } from '../../lib/attention'
-import { compactChrome } from '../../lib/chrome'
 import type { SavedView } from '../../lib/api'
-import PhoneTicketToolbar from './PhoneTicketToolbar.vue'
 
 const vocabulary = useWorkVocabulary()
 const createLabel = computed(() => `New ${workNoun(vocabulary.leaf.name)}`)
@@ -92,10 +90,6 @@ const emit = defineEmits<{
   copyLink: []
   exportCSV: []
 }>()
-const compact = compactChrome()
-const compactList = computed(() => compact.value && props.projectHeader && props.view !== 'knowledge' && !props.attention)
-const phoneTools = ref<InstanceType<typeof PhoneTicketToolbar>>()
-
 const draft = ref(props.filters.q)
 const root = ref<HTMLElement>()
 const settings = ref<HTMLElement>()
@@ -272,8 +266,8 @@ function closeDate(restore: boolean) {
   dateAnchor.value = null
   if (restore) anchor?.focus()
 }
-function focusSearch() { if (compactList.value) { void phoneTools.value?.focusSearch(); return }; input.value?.focus(); input.value?.select() }
-function openFilterMenu() { if (compactList.value) emit('openSheet'); else if (filterButton.value && filterButton.value.offsetParent) { open.value = null; menuAnchor.value = filterButton.value } else emit('openSheet') }
+function focusSearch() { input.value?.focus(); input.value?.select() }
+function openFilterMenu() { if (filterButton.value && filterButton.value.offsetParent) { open.value = null; menuAnchor.value = filterButton.value } else emit('openSheet') }
 function clearSearch() { draft.value = ''; emit('search', ''); input.value?.focus() }
 function searchKey(event: KeyboardEvent) {
   if (event.key === 'Escape') {
@@ -283,24 +277,20 @@ function searchKey(event: KeyboardEvent) {
     else input.value?.blur()
   }
 }
-function closeOverlays() { closeAttention(false); closeDisplay(false); phoneTools.value?.closeOverlays() }
+function closeOverlays() { closeAttention(false); closeDisplay(false) }
 // The filter sheet's "Display settings…" (AEON-1188). Display opens under the Display button the
 // window shows; with none in sight (a phone or tablet under an unfolded header) it opens as a
 // sheet, and closing it hands focus back to Filters.
 function openDisplay() {
-  displayOrigin.value = compactList.value && document.activeElement instanceof HTMLElement ? document.activeElement : null
+  displayOrigin.value = null
   const button = props.collapsedHeader ? collapsedDisplayButton.value : displayButton.value
   displayAnchor.value = (button?.offsetParent ? button : null) ?? filtersButton.value ?? root.value ?? null
 }
-defineExpose({ focusSearch, openFilterMenu, openDisplay, input: computed(() => compactList.value ? phoneTools.value?.input : input.value), closeOverlays })
+defineExpose({ focusSearch, openFilterMenu, openDisplay, input: computed(() => input.value), closeOverlays })
 </script>
 
 <template>
-  <div ref="root" class="toolbar" :class="{ stuck, graph, attention: !!attention, knowledge: view === 'knowledge', 'compact-ticket-toolbar': compactList }" role="toolbar" :aria-label="attention ? attentionWord('List controls', 'Listensteuerung') : view === 'knowledge' ? 'Knowledge controls' : 'Ticket list controls'">
-    <PhoneTicketToolbar v-if="compactList" ref="phoneTools" :filters="filters" :query="draft" :view="view as TicketView" :views="savedViews ?? []" :total="total" :selectable="!!selectable" :picking="!!picking" :create-label="createLabel" :attention-href="attentionHref ?? '/tickets?view=needs-attention'" :principal-id="principalId ?? null"
-      @search="value => draft = value" @filter="emit('openSheet')" @create="emit('create')" @layout="value => emit('view', value)" @saved-view="id => emit('savedView', id)" @preset="id => emit('preset', id)"
-      @display="anchor => displayAnchor = anchor" @show-closed="value => emit('showClosed', value)" @select="emit('selectTickets')" @save="anchor => emit('saveView', anchor)" @copy="emit('copyLink')" @export="emit('exportCSV')" />
-    <template v-else>
+  <div ref="root" class="toolbar" :class="{ stuck, graph, attention: !!attention, knowledge: view === 'knowledge' }" role="toolbar" :aria-label="attention ? attentionWord('List controls', 'Listensteuerung') : view === 'knowledge' ? 'Knowledge controls' : 'Ticket list controls'">
     <ViewSwitch v-if="!attention" class="view-switch"
       :options="view === 'knowledge' ? KNOWLEDGE_VIEWS : TICKET_VIEWS"
       :selected="view === 'knowledge' ? knowledgeView ?? 'entries' : view"
@@ -390,7 +380,6 @@ defineExpose({ focusSearch, openFilterMenu, openDisplay, input: computed(() => c
     </template>
     <!-- The Knowledge tab teleports its own controls here (KnowledgeTab.vue). -->
     <div v-else id="knowledge-controls" class="knowledge-controls" />
-    </template>
 
     <FloatingPanel v-if="attention && attentionMenu" :anchor="attentionMenu.anchor" :label="`${attentionFacets.find(facet => facet.field === attentionMenu!.field)!.label} filter`" @close="closeAttention">
       <div class="attention-menu" role="menu" :aria-label="`${attentionFacets.find(facet => facet.field === attentionMenu!.field)!.label} filter`" @keydown="attentionMenuKeys">
@@ -409,7 +398,7 @@ defineExpose({ focusSearch, openFilterMenu, openDisplay, input: computed(() => c
     </FloatingPanel>
     <FloatingPanel
       v-if="displayAnchor" :anchor="displayAnchor" :width="collapsedMenu ? menuPanelWidth(menuColumns) : 320" :tallest="collapsedMenu || displaySheet ? 4000 : 760" align="end" label="Display options"
-      :cycle="collapsedMenu || displaySheet" :sheet="displaySheet" :full-sheet="!!compactList" @close="closeDisplay"
+      :cycle="collapsedMenu || displaySheet" :sheet="displaySheet" @close="closeDisplay"
     >
       <DisplayMenu :plain="!collapsedMenu" :anchor="displayAnchor" :sheet="displaySheet" @columns="count => menuColumns = count" @done="closeDisplay(true)">
         <template #nav><slot name="header-nav" :anchor="displayAnchor!" :close="closeDisplay" /></template>

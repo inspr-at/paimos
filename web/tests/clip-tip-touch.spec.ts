@@ -143,7 +143,7 @@ for (const width of [390, 1024, 1440]) for (const theme of ['light', 'dark'] as 
       await page.clock.install()
       const cdp = await page.context().newCDPSession(page)
       try {
-        await expectStableControls({ controls: { row, name, ...(width === 390 ? { assignee: row.locator('.phone-assignee') } : { copy: row.getByRole('button', { name: 'Copy PHAROS-11' }) }) }, interactions: [
+        await expectStableControls({ controls: { row, name, copy: row.getByRole('button', { name: 'Copy PHAROS-11' }) }, interactions: [
           { name: 'clipped-name hold owns disclosure before the table selection threshold', run: async () => {
             await pauseForGesture(page)
             const box = (await name.boundingBox())!

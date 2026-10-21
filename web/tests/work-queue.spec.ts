@@ -16,7 +16,6 @@ const now = '2026-10-01T18:00:00Z'
 const agent = '33333333-3333-4333-8333-333333333333', account = '44444444-4444-4444-8444-444444444444', profile = '55555555-5555-4555-8555-555555555555'
 // Resizing to a phone applies the compact list asynchronously; disclose its head only once it has.
 async function showPhoneHead(page: Page) {
-  await expect(page.locator('.project-page')).toHaveClass(/compact-list/)
   await showProjectHead(page)
 }
 // D11 (AEON-1460): compact phone rows name their key in the metadata line instead of a copy button.
@@ -688,7 +687,7 @@ test('stale progress hints and ticket actions stay still in both themes at phone
       for (const dismiss of await page.locator('.toast-close').all()) await dismiss.click()
       const title = ticket.locator('.title-text')
       // D11 (AEON-1460): compact phone rows keep progress hints and queue actions in the ticket.
-      const compactRow = width === 390
+      const compactRow = false
       // The reserved person-waiting slot must leave a real title target in a
       // narrow saved layout, including a long name beside its parent chip.
       const geometry = await ticket.locator(compactRow ? '.c-title.phone-title' : '.c-title .title-cell').evaluate(cell => [...cell.children].map(child => ({ class: child.className, width: child.getBoundingClientRect().width })))

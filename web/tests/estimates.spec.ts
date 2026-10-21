@@ -55,12 +55,15 @@ for (const theme of ['light', 'dark']) for (const width of [1600, 390]) {
     }
     if (width === 390) {
       const card = row(page, 'PHAROS-11')
-      // D11 keeps estimates in the ticket even when desktop columns are saved.
-      await expect(card.locator('.c-estimate, .c-updated')).toHaveCount(0)
-      await expect(card.locator('.phone-meta time')).toBeVisible()
-      expect((await card.boundingBox())!.height).toBe(56)
+      // Automatic phone cards keep the key above the title. Estimate stays off
+      // that card until a saved column set asks for it.
+      await expect(card.locator('.c-key .key')).toBeVisible()
+      const keyBox = (await card.locator('.c-key').boundingBox())!
+      const titleBox = (await card.locator('.c-title').boundingBox())!
+      expect(titleBox.y).toBeGreaterThan(keyBox.y + keyBox.height - 1)
+      await expect(card.locator('.c-estimate .mono')).toHaveText('~2h est.')
       await automaticPhoneColumns(page)
-      await expect(card.locator('.c-estimate')).toHaveCount(0)
+      await expect(card.locator('.c-estimate .mono')).toHaveText('~2h est.')
       await expect(card.locator('.title-text')).toBeVisible()
     }
     await fits(page); await shot(page, `list-${width}-${theme}`)

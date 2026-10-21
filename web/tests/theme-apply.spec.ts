@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: AGPL-3.0-only
-import { test, expect, type Page } from '@playwright/test'
+import { test, expect, type Locator, type Page } from '@playwright/test'
 import { mkdirSync } from 'node:fs'
 import { fixtures, mockWork, watchErrors, liveAgent, me } from './work-fixtures'
 import { expectStableControls } from './helpers/stable'
@@ -37,8 +37,8 @@ async function apply(page: Page, theme: ThemeValues) {
 async function modeChoice(page: Page, choice: 'light' | 'dark') {
   await page.evaluate(async choice => { const path = '/src/lib/theme.ts'; (await import(/* @vite-ignore */ path)).setTheme(choice, false) }, choice)
 }
-async function markerColours(page: Page) {
-  return page.locator('#row-n-1 .recurrence-dot, .ticket-ws .recurring-pill-mark').evaluate(el => ({ fill: getComputedStyle(el).backgroundColor, ink: getComputedStyle(el).color, width: el.getBoundingClientRect().width }))
+async function markerColours(marker: Locator) {
+  return marker.evaluate(el => ({ fill: getComputedStyle(el).backgroundColor, ink: getComputedStyle(el).color, width: el.getBoundingClientRect().width }))
 }
 const cssRgb = (hex: string) => `rgb(${[1, 3, 5].map(i => parseInt(hex.slice(i, i + 2), 16)).join(', ')})`
 
@@ -78,7 +78,10 @@ for (const width of [390, 1024, 1440]) for (const mode of ['light', 'dark'] as c
       await mockAgents(page, agentData({ me: me.id, projects: { pharos: 'p-pharos', aeon: 'p-aeon', pai: 'p-frozen' }, tickets: { fleet: 'n-1', restore: 'n-2', web: 'n-a1', release: 'n-5', approvals: 'n-6' }, nodes: Object.fromEntries([...data.projects.map(p => [p.id, { key: p.key, title: p.title }]), ...data.nodes.map(n => [n.id, { key: n.key, title: n.title }])]) }))
     }
     await page.goto(width === 390 ? '/p/PHAROS/PHAROS-11' : '/p/PHAROS?sort=key&group=none')
-    const row = width === 390 ? page.locator('.ticket-ws .panel-bar') : page.locator('#row-n-1'), marker = page.locator('#row-n-1 .recurrence-dot, .ticket-ws .recurring-pill-mark')
+    const row = width === 390 ? page.locator('.ticket-ws .panel-bar') : page.locator('#row-n-1')
+    // The open phone ticket keeps the list mounted, so the row dot and the
+    // workspace pill are both in the document. Measure the pill on the sheet.
+    const marker = page.locator(width === 390 ? '.ticket-ws .recurring-pill-mark' : '#row-n-1 .recurrence-dot')
     const modeControl = width === 390 ? page.getByRole('button', { name: /^Account for/ }) : page.getByRole('button', { name: /Switch to .* theme/ })
     async function toggleMode() {
       // The phone ticket sheet covers the app header. Use its real Close
@@ -92,10 +95,9 @@ for (const width of [390, 1024, 1440]) for (const mode of ['light', 'dark'] as c
       if (width === 390) {
         await page.getByRole('menuitem', { name: /Switch to .* theme/ }).click()
         await page.keyboard.press('Escape')
-        // The whole compact row opens its ticket. Tap its key line: under this spec's
-        // fixed clock Vue runs only the first handler a click reaches, and on the
-        // title that is the link's own (the row's opener runs on a real clock).
-        await page.locator('#row-n-1 .phone-meta').click()
+        // The key is a copy button and the title link swallows the row open
+        // on this spec's fixed clock. Priority is neither, so the card opens.
+        await page.locator('#row-n-1 .c-prio').click()
         await expect(page.locator('.ticket-ws .recurring-pill-mark')).toBeVisible()
       }
     }
@@ -108,7 +110,7 @@ for (const width of [390, 1024, 1440]) for (const mode of ['light', 'dark'] as c
         chosen.recurring_marker = { source, custom: '#8547b0' }
         await apply(page, chosen)
         const expected = source === 'primary' ? primary : source === 'secondary' ? (isDark ? chosen.secondary.dark! : chosen.secondary.light) : source === 'neutral' ? (isDark ? '#8aa3a2' : '#7c8c8d') : isDark ? deriveDark('#8547b0') : '#8547b0'
-        const colour = await markerColours(page)
+        const colour = await markerColours(marker)
         expect(colour).toEqual({ fill: cssRgb(expected), ink: cssRgb(inkOn(expected)), width: 12 })
       } })),
     })
@@ -131,7 +133,7 @@ for (const width of [390, 1024, 1440]) for (const mode of ['light', 'dark'] as c
     await page.screenshot({ path: shotPath(`list-${width}-${mode}.png`) })
     await page.reload()
     await expect(marker).toBeVisible()
-    expect((await markerColours(page)).width).toBe(12)
+    expect((await markerColours(marker)).width).toBe(12)
     // The header pill inherits the marker choice too, including the heavier glyph.
     await page.goto('/p/PHAROS/PHAROS-11')
     const pill = page.locator('.ticket-ws .recurring-pill')

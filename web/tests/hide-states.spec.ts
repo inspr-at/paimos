@@ -448,19 +448,20 @@ for (const theme of ['light', 'dark']) test(`AEON-1559 phone and standard viewpo
     else await page.setViewportSize({ width, height: 1000 })
     await settle(page)
     if (width === 390) {
-      // AEON-1460: phones get the one-line compact toolbar instead of the navigation
-      // row's controls; Hide done and Display live in its More menu.
-      const bar = page.locator('.compact-ticket-toolbar')
-      await expect(bar).toBeVisible()
-      await expect(settings(page)).toHaveCount(0)
+      const bar = page.getByRole('toolbar', { name: 'Ticket list controls' })
+      await expect(page.locator('.compact-ticket-toolbar')).toHaveCount(0)
+      // The navigation row keeps Display; AEON-1188 returns focus to it. Hide
+      // and the Display link also live in the Filters sheet below.
+      await expect(page.locator('#project-view-settings .display-btn')).toBeVisible()
       expect(await bar.evaluate(el => el.scrollWidth - el.clientWidth)).toBeLessThanOrEqual(1)
       expect(await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth)).toBeLessThanOrEqual(1)
-      await bar.getByRole('button', { name: 'More view actions', exact: true }).click()
-      const hideDone = page.getByRole('menuitemcheckbox', { name: 'Hide done', exact: true })
-      await expect(hideDone).toHaveAttribute('aria-checked', 'true')
-      await expect(page.getByRole('menuitem', { name: 'Display…', exact: true })).toBeVisible()
+      await bar.getByRole('button', { name: 'Filters', exact: true }).click()
+      const sheet = page.getByRole('dialog', { name: 'Filters', exact: true })
+      const hideDone = sheet.getByRole('checkbox', { name: /Hide/ })
+      await expect(hideDone).toBeChecked()
+      await expect(sheet.getByRole('button', { name: 'Display settings…', exact: true })).toBeVisible()
       await page.keyboard.press('Escape')
-      await expect(hideDone).toHaveCount(0)
+      await expect(sheet).toHaveCount(0)
     } else {
       await expect(settings(page)).toBeVisible()
       const overflow = await navigation(page).evaluate(el => ({ extra: el.scrollWidth - el.clientWidth, width: el.clientWidth, children: [...el.children].map(child => ({ name: child.className, x: child.getBoundingClientRect().x - el.getBoundingClientRect().x, width: child.getBoundingClientRect().width, scroll: child.scrollWidth, css: getComputedStyle(child).cssText })) }))

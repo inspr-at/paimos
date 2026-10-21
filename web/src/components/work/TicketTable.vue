@@ -1986,7 +1986,7 @@ button.release-chip:focus-visible { box-shadow: var(--focus-ring); }
   .tree-row .title-cell { position: relative; padding-left: 0; }
   /* Centre the shared hit area on the arrow; desktop indentation is already
      represented by the card's padding, so it must not offset the phone arrow. */
-  .twisty { position: relative; inset: auto; flex: none; width: 36px; height: 36px; margin: 4px; }
+  .twisty { position: relative; inset: auto; z-index: 1; flex: none; width: 36px; height: 36px; margin: 4px; }
   .twisty-spacer { display: block; flex-shrink: 0; width: 44px; }
   .tree-row .tree { display: contents; }
   /* The arrow slot (44), type marker (22) and two gaps (16) share one line.
