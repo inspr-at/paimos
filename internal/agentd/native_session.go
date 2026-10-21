@@ -1089,6 +1089,12 @@ func (h *NativeHost) Poll(ctx context.Context) error {
 		if err := e.reconcileExit(ctx); err != nil {
 			return err
 		}
+		e.mu.Lock()
+		exited := e.exited
+		e.mu.Unlock()
+		if exited {
+			continue
+		}
 		if err := e.flushEvents(ctx); err != nil {
 			return err
 		}

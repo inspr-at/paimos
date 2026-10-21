@@ -12,6 +12,7 @@ import (
 	"github.com/inspr-at/paimos/internal/agentpairing"
 	"github.com/inspr-at/paimos/internal/authz"
 	"github.com/inspr-at/paimos/internal/db"
+	"github.com/inspr-at/paimos/internal/events"
 	"github.com/inspr-at/paimos/internal/nativecontract"
 	"github.com/inspr-at/paimos/internal/nativereceipts"
 	"github.com/inspr-at/paimos/internal/nativesessions/consent"
@@ -25,6 +26,7 @@ import (
 // Only the bounded live queue holds command content. SQL retains immutable
 // metadata/digests. A restart cannot replay a possible native write from disk.
 type queuedCommand struct {
+	done    bool
 	intent  nativereceipts.Intent
 	command nativecontract.DaemonCommand
 	drain   *nativecontract.FinalDrainGrant
@@ -85,6 +87,11 @@ func (s *Store) Mutate(ctx context.Context, a nativecontract.Actor, c nativecont
 	}
 	s.commandMu.Lock()
 	defer s.commandMu.Unlock()
+	for id, c := range s.commands {
+		if c.done && (c.drain == nil || !s.now().Before(c.drain.ExpiresAt)) {
+			delete(s.commands, id)
+		}
+	}
 	if len(s.commands) >= 1024 {
 		return out, fail(429, nativecontract.ReasonBufferFull)
 	}
@@ -114,6 +121,7 @@ func (s *Store) Mutate(ctx context.Context, a nativecontract.Actor, c nativecont
 		if c.Stop != nil && c.Stop.ExpectedProcessIdentityDigest != process {
 			return fail(409, nativecontract.ReasonOwnershipUnconfirmed)
 		}
+		created := false
 		var prior []byte
 		err = tx.QueryRow(ctx, `SELECT intent FROM native_session_operations WHERE tenant_id=$1 AND owned_session_id=$2 AND intent->'receipt'->>'request_id'=$3 LIMIT 1`, p.TenantID, b.OwnedSessionID, request).Scan(&prior)
 		if err == nil {
@@ -121,6 +129,7 @@ func (s *Store) Mutate(ctx context.Context, a nativecontract.Actor, c nativecont
 				return fail(409, nativecontract.ReasonIdentityMismatch)
 			}
 		} else if errors.Is(err, pgx.ErrNoRows) {
+			created = true
 			operation, err := uuid()
 			if err != nil {
 				return err
@@ -152,7 +161,31 @@ func (s *Store) Mutate(ctx context.Context, a nativecontract.Actor, c nativecont
 			queued.drain = &grant
 		}
 		queued.command = nativecontract.DaemonCommand{Kind: c.Kind, Params: raw}
-		out = nativecontract.OperationResult{Receipt: queued.intent.Receipt, Session: &session.View}
+		response := queued.intent.Receipt
+		if !created {
+			var saved []byte
+			err := tx.QueryRow(ctx, `SELECT receipt FROM native_session_receipts WHERE tenant_id=$1 AND operation_id=$2`, p.TenantID, response.OperationID).Scan(&saved)
+			if err == nil {
+				if len(saved) > nativecontract.ReceiptBytes || json.Unmarshal(saved, &response) != nil {
+					return fail(409, nativecontract.ReasonIdentityMismatch)
+				}
+				switch response.State {
+				case "turn_completed", "applied", "exit_confirmed", "rejected", "expired":
+					queued.done = true
+					queued.command.Params = nil
+				}
+			}
+			if err != nil && !errors.Is(err, pgx.ErrNoRows) {
+				return err
+			}
+		}
+		out = nativecontract.OperationResult{Receipt: response, Session: &session.View}
+		if created {
+			operation := queued.intent.Receipt.OperationID
+			payload := nativecontract.AuditEvent{ProjectID: b.ProjectID, OwnedSessionID: b.OwnedSessionID, HarnessSessionID: &b.HarnessSessionID, RuntimeEpoch: &b.RuntimeEpoch, Revision: session.View.Revision, RequestID: request, State: "accepted", OperationID: &operation}
+			_, err = events.Append(ctx, tx, p, events.Change{NodeID: &b.ProjectID, Type: "native_session.receipt_changed", After: payload})
+			return err
+		}
 		return nil
 	})
 	if err == nil {
@@ -182,6 +215,9 @@ func (s *Store) Commands(ctx context.Context, d nativecontract.DaemonActor, q na
 	private, _ := ctx.Value(proofKey{}).(daemon.Proof)
 	identity, _, _ := private.Runtime()
 	for _, c := range items {
+		if c.done {
+			continue
+		}
 		if identity.RuntimeEpoch != "" && c.intent.Receipt.Binding.RuntimeEpoch != identity.RuntimeEpoch {
 			continue
 		}
@@ -210,7 +246,7 @@ func (s *Store) claimCommand(ctx context.Context, d nativecontract.DaemonActor, 
 	s.commandMu.Lock()
 	c, ok := s.commands[in.OperationID]
 	s.commandMu.Unlock()
-	if !ok || c.intent.Receipt.Binding == nil {
+	if !ok || c.done || c.intent.Receipt.Binding == nil {
 		return out, fail(403, nativecontract.ReasonGrantMissing)
 	}
 	b := *c.intent.Receipt.Binding
@@ -250,6 +286,15 @@ func (s *Store) Report(ctx context.Context, d nativecontract.DaemonActor, in nat
 		return s.reportStarted(ctx, d, in)
 	}
 	out, err := s.production.receipts.Report(ctx, d, in)
+	if err == nil && (in.State == "turn_completed" || in.State == "applied" || in.State == "exit_confirmed") {
+		s.commandMu.Lock()
+		if c, ok := s.commands[in.OperationID]; ok {
+			c.done = true
+			c.command.Params = nil
+			s.commands[in.OperationID] = c
+		}
+		s.commandMu.Unlock()
+	}
 	if err == nil && in.State == "exit_confirmed" && in.Binding != nil {
 		b := *in.Binding
 		err = s.runtimeTx(ctx, d, b, true, func(ctx context.Context, tx pgx.Tx, session consent.Session, proof receipts.RuntimeProof) error {
@@ -271,11 +316,17 @@ func (s *Store) Report(ctx context.Context, d nativecontract.DaemonActor, in nat
 			if _, err := tx.Exec(ctx, `UPDATE harness_sessions SET phase='stopped',stopped_at=coalesce(stopped_at,$2),stop_reason=coalesce(stop_reason,'completed') WHERE id=$1`, b.HarnessSessionID, proof.Exit.ObservedAt); err != nil {
 				return err
 			}
+			if session.View.State == "stopped" {
+				return nil
+			}
 			session.View.State = "stopped"
 			session.View.Revision++
 			raw, _ := json.Marshal(session.View)
-			_, err := tx.Exec(ctx, `UPDATE native_session_bindings SET view=$2 WHERE id=$1`, b.OwnedSessionID, raw)
-			return err
+			if _, err := tx.Exec(ctx, `UPDATE native_session_bindings SET view=$2 WHERE id=$1`, b.OwnedSessionID, raw); err != nil {
+				return err
+			}
+			p, _ := tenant.PrincipalFrom(ctx)
+			return appendEvent(ctx, tx, p, "native_session.stopped", b.ProjectID, in.OperationID, in.RequestID, session.View)
 		})
 	}
 	return out, err

@@ -150,6 +150,8 @@ func (s *Store) reportStarted(ctx context.Context, d nativecontract.DaemonActor,
 		return out, fail(400, nativecontract.ReasonUnsupported)
 	}
 	b := *in.Binding
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	var digest string
 	err := s.runtimeTx(ctx, d, b, false, func(ctx context.Context, tx pgx.Tx, session consent.Session, proof receipts.RuntimeProof) error {
 		var operation, request string
@@ -161,14 +163,13 @@ func (s *Store) reportStarted(ctx context.Context, d nativecontract.DaemonActor,
 			return fail(403, nativecontract.ReasonOwnershipUnconfirmed)
 		}
 		digest = i.ProcessIdentityDigest
-		s.mu.Lock()
 		prior := s.runtimes[b.OwnedSessionID]
-		s.mu.Unlock()
 		if prior != "" && prior != digest {
 			return fail(409, nativecontract.ReasonOwnershipUnconfirmed)
 		}
 		view := session.View
-		if view.State == "starting" {
+		changed := view.State == "starting"
+		if changed {
 			view.State = "running"
 			view.Revision++
 			raw, _ := json.Marshal(view)
@@ -180,12 +181,14 @@ func (s *Store) reportStarted(ctx context.Context, d nativecontract.DaemonActor,
 			return fail(409, nativecontract.ReasonOwnershipUnconfirmed)
 		}
 		out = nativecontract.OperationResult{Receipt: in, Session: &view}
+		if changed {
+			p, _ := tenant.PrincipalFrom(ctx)
+			return appendEvent(ctx, tx, p, "native_session.receipt_changed", b.ProjectID, in.OperationID, in.RequestID, view)
+		}
 		return nil
 	})
 	if err == nil {
-		s.mu.Lock()
 		s.runtimes[b.OwnedSessionID] = digest
-		s.mu.Unlock()
 		err = s.production.relay.Register(*out.Session)
 	}
 	return out, err

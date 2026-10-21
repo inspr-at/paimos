@@ -23,6 +23,7 @@ import (
 	"github.com/inspr-at/paimos/internal/approvals"
 	"github.com/inspr-at/paimos/internal/chat"
 	"github.com/inspr-at/paimos/internal/nativecontract"
+	"github.com/inspr-at/paimos/internal/nativereceipts"
 	"github.com/inspr-at/paimos/internal/nativesessions"
 	"github.com/inspr-at/paimos/internal/nativesessions/consent"
 	"github.com/inspr-at/paimos/internal/nativesessions/receipts"
@@ -35,7 +36,8 @@ import (
 
 type compositionStore struct {
 	*Store
-	t *testing.T
+	t       *testing.T
+	denials chan error
 }
 
 func (s compositionStore) Claim(ctx context.Context, d nativecontract.DaemonActor, in nativecontract.Claim) (nativecontract.ClaimResult, error) {
@@ -49,6 +51,12 @@ func (s compositionStore) Report(ctx context.Context, d nativecontract.DaemonAct
 	out, err := s.Store.Report(ctx, d, in)
 	if err != nil {
 		s.t.Logf("receipt refusal: %T %v", err, err)
+		if s.denials != nil {
+			select {
+			case s.denials <- err:
+			default:
+			}
+		}
 	}
 	return out, err
 }
@@ -88,18 +96,24 @@ func (p compositionProfiles) Resolve(_ context.Context, q nativecontract.Profile
 }
 
 type compositionProvider struct {
-	mu       sync.Mutex
-	identity nativecontract.NativeIdentity
-	binding  nativecontract.Binding
-	events   chan nativecontract.ProviderEvent
-	input    nativecontract.Input
-	closed   bool
-	now      time.Time
+	mu        sync.Mutex
+	identity  nativecontract.NativeIdentity
+	binding   nativecontract.Binding
+	events    chan nativecontract.ProviderEvent
+	input     nativecontract.Input
+	closed    bool
+	sequence  uint64
+	confirmed bool
+	closes    int
+	now       time.Time
 }
 
 func (p *compositionProvider) Open(_ context.Context, s nativecontract.LaunchSpec) (nativecontract.NativeTransport, error) {
 	p.binding = s.Binding
 	p.identity = nativecontract.NativeIdentity{Provider: "claude", NativeSessionRef: guuid.NewString(), RuntimeEpoch: s.Binding.RuntimeEpoch, PID: 12345, StartedAt: p.now, ProcessIdentityDigest: strings.Repeat("f", 64)}
+	if s.ResumeRef != "" {
+		p.identity.NativeSessionRef = s.ResumeRef
+	}
 	return p, nil
 }
 func (p *compositionProvider) Ownership() (ownedprocess.Identity, error) {
@@ -109,10 +123,14 @@ func (p *compositionProvider) Send(_ context.Context, in nativecontract.Input) (
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	p.input = in
-	return nativecontract.NativeEvidence{Stage: "write_acknowledged", InputID: in.InputID, RequestID: in.RequestID, SourceSequence: 1, ObservedAt: p.now}, nil
+	p.sequence++
+	return nativecontract.NativeEvidence{Stage: "write_acknowledged", InputID: in.InputID, RequestID: in.RequestID, SourceSequence: p.sequence, ObservedAt: p.now}, nil
 }
 func (p *compositionProvider) Interrupt(_ context.Context, in nativecontract.Interrupt) (nativecontract.NativeEvidence, error) {
-	return nativecontract.NativeEvidence{Stage: "applied", RequestID: in.RequestID, TurnRef: in.ExpectedTurnRef, SourceSequence: 4, ObservedAt: p.now}, nil
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	p.sequence++
+	return nativecontract.NativeEvidence{Stage: "applied", RequestID: in.RequestID, TurnRef: in.ExpectedTurnRef, SourceSequence: p.sequence, ObservedAt: p.now}, nil
 }
 func (*compositionProvider) Decide(context.Context, nativecontract.ApprovalDecision) (nativecontract.NativeEvidence, error) {
 	return nativecontract.NativeEvidence{}, errors.New("not qualified")
@@ -120,11 +138,21 @@ func (*compositionProvider) Decide(context.Context, nativecontract.ApprovalDecis
 func (p *compositionProvider) Close(context.Context) (nativecontract.ExitEvidence, error) {
 	p.mu.Lock()
 	p.closed = true
+	p.closes++
+	confirmed := p.confirmed
 	p.mu.Unlock()
+	return nativecontract.ExitEvidence{ProcessIdentityDigest: p.identity.ProcessIdentityDigest, RootExited: true, GroupAbsent: confirmed, ObservedAt: p.now}, nil
+}
+func (p *compositionProvider) ObserveExit(context.Context) (nativecontract.ExitEvidence, error) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	if !p.confirmed {
+		return nativecontract.ExitEvidence{}, agentd.ErrProcessesUnconfirmed
+	}
 	return nativecontract.ExitEvidence{ProcessIdentityDigest: p.identity.ProcessIdentityDigest, RootExited: true, GroupAbsent: true, ObservedAt: p.now}, nil
 }
 func (p *compositionProvider) Wait(ctx context.Context) (nativecontract.ExitEvidence, error) {
-	return p.Close(ctx)
+	return p.ObserveExit(ctx)
 }
 func (p *compositionProvider) Capabilities() nativecontract.Capabilities {
 	return nativecontract.Capabilities{Steer: "unsupported", Quota: "unsupported"}
@@ -134,6 +162,7 @@ func (p *compositionProvider) Events() <-chan nativecontract.ProviderEvent { ret
 func (p *compositionProvider) turn(state, turn string, seq uint64) {
 	p.mu.Lock()
 	in := p.input
+	p.sequence = seq
 	p.mu.Unlock()
 	p.events <- nativecontract.ProviderEvent{Identity: p.identity, SourceSequence: seq, Receipt: &nativecontract.Receipt{RequestID: in.RequestID, InputID: &in.InputID, TurnRef: &turn, State: state}}
 }
@@ -170,7 +199,8 @@ func TestProductionCompositionStartsDeliversAndConfirmsExit(t *testing.T) {
 	f.s.authority = a
 	f.s.observer = PrivateObserver{}
 	f.s.BindProduction(a, repo, relay)
-	module, err := nativesessions.New(nativecontract.Services{Store: compositionStore{f.s, t}, Frames: relay, Finals: f.s, Qualified: true})
+	denials := make(chan error, 8)
+	module, err := nativesessions.New(nativecontract.Services{Store: compositionStore{Store: f.s, t: t, denials: denials}, Frames: relay, Finals: f.s, Qualified: true})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -178,7 +208,7 @@ func TestProductionCompositionStartsDeliversAndConfirmsExit(t *testing.T) {
 	module.Mount(mux)
 	chatModule.Mount(mux)
 	approvals.New(f.d.App).Mount(mux)
-	finalDone, turnDone := make(chan struct{}, 2), make(chan struct{}, 2)
+	finalDone, turnDone, turnStarted := make(chan struct{}, 2), make(chan struct{}, 2), make(chan struct{}, 4)
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		raw := []byte(nil)
 		if r.Body != nil {
@@ -200,6 +230,9 @@ func TestProductionCompositionStartsDeliversAndConfirmsExit(t *testing.T) {
 		if r.URL.Path == "/api/agentd/native-sessions/receipts" {
 			var v nativecontract.Receipt
 			_ = json.Unmarshal(raw, &v)
+			if v.State == "turn_started" {
+				turnStarted <- struct{}{}
+			}
 			if v.State == "turn_completed" {
 				turnDone <- struct{}{}
 			}
@@ -300,6 +333,11 @@ func TestProductionCompositionStartsDeliversAndConfirmsExit(t *testing.T) {
 	}
 	turn := guuid.NewString()
 	provider.turn("turn_started", turn, 2)
+	select {
+	case <-turnStarted:
+	case <-time.After(10 * time.Second):
+		t.Fatal("exact turn did not start")
+	}
 	// Receipt completion and final are separate explicit observations.
 	provider.turn("turn_completed", turn, 3)
 	select {
@@ -318,6 +356,35 @@ func TestProductionCompositionStartsDeliversAndConfirmsExit(t *testing.T) {
 	if err = f.d.Admin.QueryRow(t.Context(), `SELECT count(*) FROM native_session_finals WHERE tenant_id=$1 AND final_id=$2 AND state='persisted'`, f.person.TenantID, final.FinalID).Scan(&count); err != nil || count != 1 {
 		t.Fatal("final was not persisted", count, err)
 	}
+	replayed, err := f.s.Mutate(f.personCtx(t), f.actor, nativecontract.Command{Kind: "input", Input: &in})
+	if err != nil || replayed.Receipt.State != "turn_completed" {
+		t.Fatal("completed retry did not preserve outcome", replayed, err)
+	}
+	hold := in
+	hold.RequestID = guuid.NewString()
+	hold.InputID = guuid.NewString()
+	hold.Text = "hold for an exact interrupt"
+	if _, err = f.s.Mutate(f.personCtx(t), f.actor, nativecontract.Command{Kind: "input", Input: &hold}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err = config.Host.Input(t.Context(), hold); err != nil {
+		t.Fatal(err)
+	}
+	heldTurn := guuid.NewString()
+	provider.turn("turn_started", heldTurn, 5)
+	select {
+	case <-turnStarted:
+	case <-time.After(10 * time.Second):
+		t.Fatal("interrupt turn did not start")
+	}
+	interrupt := nativecontract.Interrupt{RequestID: guuid.NewString(), ExpectedBinding: b, ExpectedTurnRef: heldTurn, ExpiresAt: f.now.Add(time.Minute)}
+	if _, err = f.s.Mutate(f.personCtx(t), f.actor, nativecontract.Command{Kind: "interrupt", Interrupt: &interrupt}); err != nil {
+		t.Fatal(err)
+	}
+	interrupted, err := config.Host.Interrupt(t.Context(), interrupt)
+	if err != nil || interrupted.Receipt.State != "applied" {
+		t.Fatal("exact interrupt", interrupted, err)
+	}
 	if _, err = config.Host.Detach(t.Context(), nativecontract.Detach{RequestID: guuid.NewString(), ExpectedBinding: b, ViewerID: guuid.NewString()}); err == nil {
 		t.Fatal("attach is not installed by this slice")
 	}
@@ -329,12 +396,77 @@ func TestProductionCompositionStartsDeliversAndConfirmsExit(t *testing.T) {
 		t.Fatal("queue stop", err)
 	}
 	stopped, err := config.Host.Stop(t.Context(), stop)
-	if err != nil || stopped.Receipt.State != "exit_confirmed" {
-		t.Fatal("stop", stopped, err)
+	if err == nil || stopped.Receipt.State != "uncertain" {
+		t.Fatal("unconfirmed group exit reported success", stopped, err)
 	}
 	var held bool
+	if err = f.d.Admin.QueryRow(t.Context(), `SELECT released_at IS NULL FROM native_session_roots WHERE owned_session_id=$1`, b.OwnedSessionID).Scan(&held); err != nil || !held {
+		t.Fatal("uncertain exit released root", held, err)
+	}
+	provider.mu.Lock()
+	provider.confirmed = true
+	provider.mu.Unlock()
+	if err = config.Poll(t.Context()); err != nil {
+		t.Fatal("exit reconciliation", err)
+	}
+	if provider.closes != 1 {
+		t.Fatal("exit reconciliation repeated native close")
+	}
+
 	if err = f.d.Admin.QueryRow(t.Context(), `SELECT released_at IS NULL FROM native_session_roots WHERE owned_session_id=$1`, b.OwnedSessionID).Scan(&held); err != nil || held {
 		t.Fatal("confirmed root still held", held, err)
+	}
+	// A fresh PERSON intent and exact retained source permit one successor.
+	successorIntent := f.intent
+	successorIntent.RequestID = guuid.NewString()
+	successorIntent.ResumeFromOwnedSessionID = &b.OwnedSessionID
+	if _, err = f.s.Start(f.personCtx(t), f.actor, successorIntent); err != nil {
+		t.Fatal("successor intent", err)
+	}
+	successor := &compositionProvider{now: f.now, events: make(chan nativecontract.ProviderEvent, 16)}
+	config.Launcher = successor
+	resume := provider.identity.NativeSessionRef
+	local := nativecontract.LocalStart{Intent: successorIntent, Cwd: root, AccountKey: "real-own-account", NativeResumeRef: &resume, AfterExit: &nativecontract.ExitBarrier{PID: int64(provider.identity.PID), ProcessStartedAt: provider.identity.StartedAt, ProcessIdentityDigest: provider.identity.ProcessIdentityDigest, Deadline: f.now.Add(time.Minute)}}
+	next, err := config.Host.Start(t.Context(), local)
+	if err != nil || next.Session == nil || next.Session.State != "running" {
+		t.Fatal("retained-source handover", next, err)
+	}
+	nextBinding := *next.Session.CurrentBinding
+	personCall("/api/chat-threads/"+thread.ID+"/binding", chat.BindingWrite{SessionID: nextBinding.HarnessSessionID, ExpectedEpoch: thread.Role.BindingEpoch}, &thread)
+	active := hold
+	active.ExpectedBinding = nextBinding
+	active.RequestID = guuid.NewString()
+	active.InputID = guuid.NewString()
+	if _, err = f.s.Mutate(f.personCtx(t), f.actor, nativecontract.Command{Kind: "input", Input: &active}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err = config.Host.Input(t.Context(), active); err != nil {
+		t.Fatal(err)
+	}
+	personCall("/api/approvals/"+f.intent.PolicyID+"/revoke", nil, nil)
+	denied := active
+	denied.RequestID = guuid.NewString()
+	denied.InputID = guuid.NewString()
+	if _, err = f.s.Mutate(f.personCtx(t), f.actor, nativecontract.Command{Kind: "input", Input: &denied}); err == nil {
+		t.Fatal("withdrawn consent accepted next input")
+	} else {
+		var v *nativecontract.ValidationError
+		if !errors.As(err, &v) || v.Reason != nativecontract.ReasonPermissionRevoked {
+			t.Fatal("wrong consent refusal", err)
+		}
+	}
+	successor.turn("turn_started", guuid.NewString(), 2)
+	select {
+	case err := <-denials:
+		var v *nativereceipts.Error
+		if !errors.As(err, &v) || v.Reason != nativecontract.ReasonPermissionRevoked {
+			t.Fatal("wrong receipt refusal", err)
+		}
+	case <-time.After(10 * time.Second):
+		t.Fatal("withdrawn consent accepted receipt")
+	}
+	if err = f.d.Admin.QueryRow(t.Context(), `SELECT released_at IS NULL FROM native_session_roots WHERE owned_session_id=$1`, nextBinding.OwnedSessionID).Scan(&held); err != nil || !held {
+		t.Fatal("withdrawal erased native ownership", held, err)
 	}
 	if queued.Receipt.State != "accepted" {
 		t.Fatal("queue claimed native delivery")
