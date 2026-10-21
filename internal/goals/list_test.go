@@ -283,14 +283,14 @@ func TestGoalListOmitsEmptyAndShippedReleases(t *testing.T) {
 			id                              *string
 		}
 		rows := []releaseRow{
-			{key: "REL-LIVE", projectKey: "LIVE", state: "building", outcome: "live", id: &live},
-			{key: "REL-SHIP", projectKey: "SHIP", state: "released", shipped: true, outcome: "live", id: &shipped},
-			{key: "REL-SUPER", projectKey: "SUPER", state: "superseded", shipped: true, outcome: "live", id: &superseded},
-			{key: "REL-EMPTY", projectKey: "EMPTY", state: "planning", id: &empty},
-			{key: "REL-GONE", projectKey: "GONE", state: "planning", outcome: "deleted", id: &deletedOnly},
+			{key: "REL-11", projectKey: "LIVE", state: "building", outcome: "live", id: &live},
+			{key: "REL-12", projectKey: "SHIP", state: "released", shipped: true, outcome: "live", id: &shipped},
+			{key: "REL-13", projectKey: "SUPER", state: "superseded", shipped: true, outcome: "live", id: &superseded},
+			{key: "REL-14", projectKey: "EMPTY", state: "planning", id: &empty},
+			{key: "REL-15", projectKey: "GONE", state: "planning", outcome: "deleted", id: &deletedOnly},
 		}
 		for i, row := range rows {
-			project := fixtureNode(t, tx, f.writer.TenantID, "project", "PRJ-"+row.projectKey, "", map[string]any{"project_key": row.projectKey})
+			project := fixtureNode(t, tx, f.writer.TenantID, "project", fmt.Sprintf("PRJ-%d", 11+i), "", map[string]any{"project_key": row.projectKey})
 			id := fixtureNode(t, tx, f.writer.TenantID, "release", row.key, project, nil)
 			*row.id = id
 			if _, err := tx.Exec(t.Context(), `INSERT INTO journey_projects(tenant_id,project_node_id) VALUES($1,$2)`, f.writer.TenantID, project); err != nil {
@@ -306,7 +306,7 @@ func TestGoalListOmitsEmptyAndShippedReleases(t *testing.T) {
 			if row.outcome == "" {
 				continue
 			}
-			outcome := fixtureNode(t, tx, f.writer.TenantID, OutcomeKind, row.key+"-O", id, map[string]any{"outcome_ref": "part", "state_set": "moving"})
+			outcome := fixtureNode(t, tx, f.writer.TenantID, OutcomeKind, fmt.Sprintf("OUT-%d", 11+i), id, map[string]any{"outcome_ref": "part", "state_set": "moving"})
 			if row.outcome == "deleted" {
 				if _, err := tx.Exec(t.Context(), `UPDATE nodes SET deleted_at=$2 WHERE id=$1`, outcome, apiClock); err != nil {
 					return err
