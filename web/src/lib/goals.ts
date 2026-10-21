@@ -44,6 +44,8 @@ export interface Goal {
   progress?: GoalProgress; eta?: GoalETA; passed?: boolean; states?: GoalCounts; done?: boolean
   stall?: { stalled: boolean; since: string }
   handed_over?: { outcome_id: string; label: string; detail: string; at: string; by: string }
+  // AEON-1614: the person hid this goal for themselves (only on lists read with hidden=include).
+  hidden?: boolean
   read_through: number; generation: number
 }
 // The workspace status note (AEON-1494): one paragraph agents write for the workspace.
@@ -52,6 +54,8 @@ export interface GoalList {
   items: Goal[]; totals: GoalCounts; totals_partial: boolean; quiet_projects: { count: number; keys: string[] }
   next_cursor?: string; truncated: boolean; read_through: number; generation: number
   status_note?: GoalStatusNote; eta_last_set_at?: string
+  // AEON-1614: the goals the person hid among these projects, whatever the filters (Goals only).
+  hidden_count?: number
 }
 export interface GoalSeries { range: GoalRange; expansion: 'full' | 'too_large'; points?: (RatePoint & { basis: string; keys: string[] })[]; read_through: number; generation: number }
 export interface GoalEvent { id: number; actor_principal_id: string; node_id: string; type: string; before?: unknown; after?: unknown; at: string }
@@ -70,13 +74,14 @@ async function read<T>(path: string, signal?: AbortSignal): Promise<T> {
   }
   return response.json() as Promise<T>
 }
-export interface GoalQuery { q?: string; state?: GoalState | null; hideDone?: boolean; sort: GoalSort; dir: 'asc' | 'desc'; cursor?: string; limit?: number }
+export interface GoalQuery { q?: string; state?: GoalState | null; hideDone?: boolean; showHidden?: boolean; sort: GoalSort; dir: 'asc' | 'desc'; cursor?: string; limit?: number }
 export function goalQuery(query: GoalQuery): string {
   const params = new URLSearchParams()
   const q = query.q?.trim()
   if (q) params.set('q', q.slice(0, 200))
   if (query.state) params.set('state', query.state)
   if (query.hideDone) params.set('hide_done', 'true')
+  if (query.showHidden) params.set('hidden', 'include')
   params.set('sort', query.sort)
   params.set('dir', query.dir)
   params.set('limit', String(query.limit ?? 100))
@@ -92,6 +97,34 @@ export const listGoals = (query: GoalQuery, signal?: AbortSignal, group: GoalGro
 export const goalSeries = (id: string, range: GoalRange, signal?: AbortSignal) => read<GoalSeries>(`/goals/${encodeURIComponent(id)}/series?range=${range}`, signal)
 export const goalHistory = (id: string, outcome?: string, signal?: AbortSignal) =>
   read<{ items: GoalEvent[]; next_cursor?: string }>(`/goals/${encodeURIComponent(id)}/history?limit=20${outcome ? `&outcome=${encodeURIComponent(outcome)}` : ''}`, signal)
+
+// ---------- Hide for me (AEON-1614) ----------
+// A person hides a goal or release from their own view; nobody else's changes.
+// The server keeps the choice, so it follows the person to every device.
+async function setHidden(id: string, hidden: boolean): Promise<{ goal_id: string; hidden: boolean; changed: boolean }> {
+  const response = await api(`/me/goals/${encodeURIComponent(id)}/hidden`, { method: hidden ? 'PUT' : 'DELETE' })
+  if (!response.ok) {
+    const body = await response.json().catch(() => ({})) as { error?: string; message?: string }
+    throw new APIError(response.status, body.error ?? body.message ?? `The goal could not be ${hidden ? 'hidden' : 'shown again'} (${response.status}).`, body)
+  }
+  return response.json()
+}
+export const hideGoal = (id: string) => setHidden(id, true)
+export const unhideGoal = (id: string) => setHidden(id, false)
+// The app shows English (one language, AEON-1610 catalog to come); German stays as catalog input, impersonal.
+export const HIDE_COPY = {
+  en: {
+    hide: 'Hide for me', unhide: 'Unhide', hidden: 'Hidden', toast: 'Goal hidden', undo: 'Undo',
+    show: 'Show', doneGoals: 'Done goals', hiddenGoals: (n: number) => `Hidden goals (${n})`, hiddenTip: 'Only hidden in your view', waiting: 'Waiting on you',
+    allHidden: 'All goals here are hidden for you.', allHiddenHow: 'Show them in', doneHidden: 'Done goals are hidden.', doneHiddenHow: 'Show them in', display: 'Display',
+  },
+  de: {
+    hide: 'Für mich ausblenden', unhide: 'Wieder einblenden', hidden: 'Ausgeblendet', toast: 'Ziel ausgeblendet', undo: 'Rückgängig',
+    show: 'Anzeigen', doneGoals: 'Erledigte Ziele', hiddenGoals: (n: number) => `Ausgeblendete Ziele (${n})`, hiddenTip: 'Nur in der eigenen Ansicht ausgeblendet', waiting: 'Offene Entscheidungen',
+    allHidden: 'Alle Ziele hier sind ausgeblendet.', allHiddenHow: 'Einblenden über', doneHidden: 'Erledigte Ziele sind ausgeblendet.', doneHiddenHow: 'Einblenden über', display: 'Anzeige',
+  },
+} as const
+export const hideCopy = HIDE_COPY.en
 
 // When a goal was created never changes: read once per goal and kept for the visit.
 const created = new Map<string, Promise<number | null>>()

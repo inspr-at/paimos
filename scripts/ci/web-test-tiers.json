@@ -9448,6 +9448,14 @@
     ,
     {"kind":"browser","file":"tests/goals-gaps.spec.ts","name":"900: items nest under their goal at the step icons' x, labels run from the key to the ETA in at most two lines with the badge in the meta line; goal names wrap to two lines; opening and a live update move nothing","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
+    {"kind":"browser","file":"tests/goals-hide.spec.ts","name":"1440 dark: Hide for me, Undo, Display › Show (Done goals, Hidden goals, Waiting on you), Unhide","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/goals-hide.spec.ts","name":"1440 light: Hide for me, Undo, Display › Show (Done goals, Hidden goals, Waiting on you), Unhide","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/goals-hide.spec.ts","name":"1440 light: Waiting on you off leaves no band, keeps the header Desk count, and stays off from the first paint","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/goals-hide.spec.ts","name":"390 light: the ⋯ Goal display menu has the three Show rows; the opened goal hides and Undo restores","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
     {"kind":"browser","file":"tests/goals-view.spec.ts","name":"1024 dark: essentials stay, nothing overflows, axe is clean","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
     {"kind":"browser","file":"tests/goals-view.spec.ts","name":"1024 light: essentials stay, nothing overflows, axe is clean","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}

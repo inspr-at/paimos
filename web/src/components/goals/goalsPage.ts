@@ -13,12 +13,17 @@
 // choose and changes nothing. Their first read waits for those preferences, so a
 // remembered group never shows the other list first. A switch replaces the rows;
 // the frame (status note, header) stays, and a read for the other group never lands.
+// AEON-1614: Hide for me. A person hides a goal from their own view (the server keeps
+// it); Display › Show has Done goals (H), Hidden goals ({n}) and Waiting on you, all
+// saved with the Goals preferences. Hidden goals count in the state chips as hidden
+// done goals do. A hide or Undo is bound to the person and goal it was asked for.
 import { computed, onScopeDispose, reactive, ref, shallowRef, watch, type Ref } from 'vue'
 import { useSession } from '../../stores/session'
 import { scopeOwner } from '../../lib/identityScope'
 import { usePreference } from '../../lib/preferences'
 import { usePoller } from '../../lib/usePolledData'
-import { goalCreatedAt, goalMatches, goalSeries, isGoalGroup, itemMatches, listGoals, SORT_DIR, type Goal, type GoalCounts, type GoalGroup, type GoalList, type GoalSeries, type GoalSort, type StateFilter } from '../../lib/goals'
+import { toast } from '../../lib/toast'
+import { goalCreatedAt, goalMatches, goalSeries, hideCopy, hideGoal, isGoalGroup, itemMatches, listGoals, unhideGoal, SORT_DIR, type Goal, type GoalCounts, type GoalGroup, type GoalList, type GoalSeries, type GoalSort, type StateFilter } from '../../lib/goals'
 import { isGoalRange, type GoalRange } from '../../lib/goalRate'
 import { EPIC_STREAM_EVENTS, GOAL_STREAM_EVENTS, openGoalsLive, type GoalsLiveState } from '../../lib/goalsLive'
 
@@ -31,7 +36,7 @@ const SERIES_PARALLEL = 3
 // window, and never more than one in flight, so a busy stream cannot starve the list.
 const LIVE_SETTLE_MS = 400
 
-type GoalsPrefs = { range?: string; hideDone?: boolean; group?: string }
+type GoalsPrefs = { range?: string; hideDone?: boolean; group?: string; showHidden?: boolean; showWaiting?: boolean }
 export interface SeriesEntry { state: 'reading' | 'ready' | 'failed' | 'too_large'; series?: GoalSeries; createdAt: number | null; at: number; sign: string }
 
 // shown: the project groups the person hides take their goals with them.
@@ -46,7 +51,9 @@ export function useGoalsPage(options: { term: Ref<string>; active: () => boolean
     settledFor.value = ''
     if (who) void prefs.ready.then(() => { if (owner.value === who) settledFor.value = who })
   }, { immediate: true })
-  const settled = computed(() => !options.groups || (!!owner.value && settledFor.value === owner.value))
+  // The person's Goals preferences are known: the Waiting on you band is decided before it paints.
+  const prefsSettled = computed(() => !!owner.value && settledFor.value === owner.value)
+  const settled = computed(() => !options.groups || prefsSettled.value)
 
   // ---------- Group: Goals or Epics (AEON-1395) ----------
   const linkedGroup = computed<GoalGroup | null>(() => { const value = options.groups?.link?.(); return isGoalGroup(value) ? value : null })
@@ -66,6 +73,13 @@ export function useGoalsPage(options: { term: Ref<string>; active: () => boolean
   // Hide done is on until the person turns it off; the choice is theirs on every device.
   const hideDone = computed(() => prefs.value.value?.hideDone ?? true)
   function setHideDone(value: boolean) { void prefs.save({ ...(prefs.value.value ?? {}), hideDone: value }, 0) }
+  // Display › Show: goals the person hid stay out until they show them; Waiting on you is on until turned off.
+  const showHidden = computed(() => prefs.value.value?.showHidden ?? false)
+  function setShowHidden(value: boolean) { void prefs.save({ ...(prefs.value.value ?? {}), showHidden: value }, 0) }
+  const showWaiting = computed(() => prefs.value.value?.showWaiting ?? true)
+  function setShowWaiting(value: boolean) { void prefs.save({ ...(prefs.value.value ?? {}), showWaiting: value }, 0) }
+  // Only a person hides goals for themselves; agents and keys cannot.
+  const canHide = computed(() => session.identity?.principal.kind === 'person')
   // One range for every chart, the one used last (the ViewSwitch rule).
   const range = computed<GoalRange>(() => isGoalRange(prefs.value.value?.range) ? prefs.value.value!.range as GoalRange : '24h')
   function setRange(value: GoalRange) { if (value !== range.value) void prefs.save({ ...(prefs.value.value ?? {}), range: value }, 0) }
@@ -89,7 +103,8 @@ export function useGoalsPage(options: { term: Ref<string>; active: () => boolean
   // leave "Show more" disabled, and must not append onto the list that replaced it.
   let pageToken = 0
   let controller: AbortController | undefined
-  const query = () => ({ group: group.value, q: options.term.value, state: filter.value === 'all' ? null : filter.value, hideDone: hideDone.value, sort: sort.value, dir: dir.value })
+  // Epics are never hidden (v1), so only the Goals list asks for hidden goals.
+  const query = () => ({ group: group.value, q: options.term.value, state: filter.value === 'all' ? null : filter.value, hideDone: hideDone.value, showHidden: group.value === 'goals' && showHidden.value, sort: sort.value, dir: dir.value })
   function retirePagination() { pageToken++; loadingMore.value = false }
   function read(): Promise<void> {
     if (!owner.value || !options.active() || !settled.value) { replacing.value = false; return Promise.resolve() }
@@ -130,7 +145,7 @@ export function useGoalsPage(options: { term: Ref<string>; active: () => boolean
   }
   let settle: ReturnType<typeof setTimeout> | undefined
   watch(options.term, () => { clearTimeout(settle); settle = setTimeout(() => { void read() }, SEARCH_SETTLE_MS) })
-  watch([filter, sort, dir, hideDone], () => { clearTimeout(settle); void read() })
+  watch([filter, sort, dir, hideDone, showHidden], () => { clearTimeout(settle); void read() })
   // Another group is another list: the rows are replaced, the frame (status note, header) stays.
   watch(group, () => {
     turn++; controller?.abort(); retirePagination(); clearTimeout(settle)
@@ -239,6 +254,57 @@ export function useGoalsPage(options: { term: Ref<string>; active: () => boolean
     }
   }
 
+  // ---------- Hide for me (AEON-1614) ----------
+  // {n} in Display › Show: the person's hidden goals in these projects, whatever the filters.
+  const hiddenCount = computed(() => list.value?.hidden_count ?? 0)
+  const hiding = reactive(new Set<string>())
+  const failure = (cause: unknown, fallback: string) => cause instanceof Error && cause.message ? cause.message : fallback
+  // Shows the server's answer at once: with hidden goals off the row leaves (its place is
+  // kept for Undo), with them on it stays and turns muted. A fresh read follows.
+  function placeHidden(id: string, hidden: boolean): number {
+    const shown = list.value
+    if (!shown) return -1
+    const index = shown.items.findIndex(goal => goal.id === id)
+    const count = Math.max(0, (shown.hidden_count ?? 0) + (hidden ? 1 : -1))
+    if (index !== -1 && (!hidden || showHidden.value)) {
+      list.value = { ...shown, hidden_count: count, items: shown.items.map(goal => goal.id === id ? { ...goal, hidden } : goal) }
+    } else if (index !== -1) {
+      list.value = { ...shown, hidden_count: count, items: shown.items.filter(goal => goal.id !== id) }
+    } else {
+      list.value = { ...shown, hidden_count: count }
+    }
+    return index
+  }
+  async function setHidden(goal: Goal, hidden: boolean, at = -1) {
+    const who = owner.value, id = goal.id
+    if (!who || !canHide.value || hiding.has(id)) return
+    hiding.add(id)
+    try {
+      await (hidden ? hideGoal(id) : unhideGoal(id))
+    } catch (cause) {
+      if (who === owner.value) toast(failure(cause, hidden ? 'The goal could not be hidden.' : 'The goal could not be shown again.'), { tone: 'error' })
+      return
+    } finally { hiding.delete(id) }
+    // An answer for another person never reaches this screen.
+    if (who !== owner.value) return
+    if (hidden) {
+      const index = placeHidden(id, true)
+      toast(hideCopy.toast, { key: `goal-hidden:${id}`, action: { label: hideCopy.undo, run: () => { if (who === owner.value) void setHidden(goal, false, index) } } })
+    } else {
+      const shown = list.value
+      placeHidden(id, false)
+      // Undo puts the goal back where it was, before the fresh read confirms the order.
+      if (shown && at !== -1 && !shown.items.some(item => item.id === id) && list.value) {
+        const items = [...list.value.items]
+        items.splice(Math.min(at, items.length), 0, { ...goal, hidden: false })
+        list.value = { ...list.value, items }
+      }
+    }
+    void read()
+  }
+  const hide = (goal: Goal) => setHidden(goal, true)
+  const unhide = (goal: Goal) => setHidden(goal, false)
+
   // ---------- Counts ----------
   const totals = computed<GoalCounts>(() => list.value?.totals ?? { moving: 0, queued: 0, paused: 0, done: 0 })
   const totalsPartial = computed(() => list.value?.totals_partial === true)
@@ -258,7 +324,8 @@ export function useGoalsPage(options: { term: Ref<string>; active: () => boolean
 
   return {
     group, setGroup,
-    filter, sort, dir, hideDone, setHideDone, range, setRange, setSort, list, goals, hiddenByGroups, error, reading, replacing, loaded, loadingMore, loadMore, read,
+    filter, sort, dir, hideDone, setHideDone, showHidden, setShowHidden, showWaiting, setShowWaiting, prefsSettled,
+    canHide, hiddenCount, hiding, hide, unhide, range, setRange, setSort, list, goals, hiddenByGroups, error, reading, replacing, loaded, loadingMore, loadMore, read,
     live, updatedAt, statusNote, etaLastSetAt,
     open, charts, folds, isOpen, allOpen, toggle, toggleAll, toggleFold, toggleChart, searchOpens, want, seriesFor, counts, totals, totalsPartial, stop,
   }

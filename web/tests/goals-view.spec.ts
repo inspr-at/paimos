@@ -190,9 +190,10 @@ test('Goals is the third segment; the filter and group chips stay put; chips cou
   expect(counts).toEqual([21, 3, 10, 1, 7])
   expect(counts[0]).toBe(counts.slice(1).reduce((a, b) => a + b, 0))
   await expect(page.locator('.goal-list .goal')).toHaveCount(4)
-  const hide = page.getByRole('button', { name: 'Hide done' }), expand = page.locator('.expand-btn')
-  await expect(hide).toHaveAttribute('aria-pressed', 'true')
-  const guard = await controlStability(page, { filter, hide, expand, all: chips.getByRole('radio', { name: /^All/ }), views: page.locator('.view-seg'), display: page.locator('.display-btn') })
+  // AEON-1614: Done goals moved from a toolbar button into Display › Show; H still toggles it.
+  const expand = page.locator('.expand-btn')
+  await expect(page.locator('.goals-chips .toggle-btn')).toHaveCount(0)
+  const guard = await controlStability(page, { filter, expand, all: chips.getByRole('radio', { name: /^All/ }), views: page.locator('.view-seg'), display: page.locator('.display-btn') })
   await guard.check(async () => { await page.keyboard.press('h'); await expect(page.locator('.goal-list .goal')).toHaveCount(5) })
   expect(await chips.getByRole('radio').evaluateAll(buttons => buttons.map(b => Number(b.querySelector('.n')?.textContent)))).toEqual(counts)
   expect(listCalls.at(-1)?.get('hide_done')).toBeNull()
