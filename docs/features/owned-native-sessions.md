@@ -99,7 +99,7 @@ integrated control/recovery and schema-migration follow-up passed on
 `5e790bee9` (store 2.581 seconds; agentd 0.028 seconds). The final handoff changes
 documentation only; its HEAD is recorded in `.agent-status.json`.
 
-The full requested Go run remains red in unchanged agm2 executable fixtures:
+The full requested Go run remains red in unchanged executable fixtures on the secondary remote test lane:
 `TestACPLauncherProbeFailureCauses`,
 `TestAttachLinuxExitedProcessIsKernelConfirmed`,
 `TestCodexSeparateHomesBindQuotaAndIdentityToEachProfile`,
@@ -116,10 +116,10 @@ The full requested Go run remains red in unchanged agm2 executable fixtures:
 `/bin/sleep` are explicit failures; probe/version/provenance cases also fail.
 No affected assertion is skipped or loosened to make that run pass.
 
-Browser and static wrappers returned exit 3 because mbp2606 is unavailable/not
+Browser and static wrappers returned exit 3 because the primary remote test host was unavailable/not
 GREEN under its host protocol. They are incomplete, with no browser evidence
 produced and no heavy local suite replacing a refusal. The targeted state-marker
-follow-up initially returned exit 3 because agm2's joint capacity cap was full,
+follow-up initially returned exit 3 because the secondary lane's joint capacity cap was full,
 then passed on the next guarded attempt.
 This partial build is neither completed acceptance nor release qualification.
 No origin push, merge, deployment, model CLI or review gate is run by this worker.
