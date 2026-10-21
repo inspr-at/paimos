@@ -66,7 +66,10 @@ def stopped_on_purpose(root, slug, brief=None):
         else:
             try:
                 with (Path(root) / "start-queue.nohup.log").open() as source:
-                    starts = [line.split()[0] for line in source if re.match(rf"^\S+Z start {re.escape(slug)} ", line)]
+                    history = source.read(MAX_RECORD_BYTES + 1)
+                if len(history) > MAX_RECORD_BYTES:
+                    return True
+                starts = [line.split()[0] for line in history.splitlines() if re.match(rf"^\S+Z start {re.escape(slug)} ", line)]
                 epoch = calendar.timegm(time.strptime(starts[-1][:20], "%Y-%m-%dT%H:%M:%SZ"))
             except (OSError, UnicodeError, ValueError, IndexError):
                 return True

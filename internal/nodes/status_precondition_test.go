@@ -94,7 +94,13 @@ func TestConditionalStatusPreservesConcurrentCancel(t *testing.T) {
 	defer func() { unblock(); cancel(); pool.Close() }()
 	mux := http.NewServeMux()
 	New(pool, nil).Mount(mux)
-	r := httptest.NewRequest("PATCH", path, strings.NewReader(`{"state":"in_progress","expected_states":["open","qa"],"title":"Must not change","fields":{"priority":"low"}}`))
+	attemptFields := estimateFieldsOf(t, n)
+	attemptFields["priority"] = "low"
+	patch, err := json.Marshal(map[string]any{"state": "in_progress", "expected_states": []string{"open", "qa"}, "title": "Must not change", "fields": attemptFields})
+	if err != nil {
+		t.Fatal(err)
+	}
+	r := httptest.NewRequest("PATCH", path, strings.NewReader(string(patch)))
 	r = r.WithContext(tenant.WithPrincipal(ctx, p))
 	result := make(chan *httptest.ResponseRecorder, 1)
 	go func() {
