@@ -46,6 +46,9 @@ type Module struct {
 	// only when it has handled the request. Ordinary sessions/keys keep their
 	// existing path; no protected route becomes public.
 	Delegated func(http.ResponseWriter, *http.Request, http.Handler) bool
+	// deskPeekOrigins are the sibling origins whose owner-summary reads may
+	// carry the peek cookie (AEON-1495, desk_peek.go).
+	deskPeekOrigins []string
 
 	mu        sync.Mutex
 	provider  *oidc.Provider
@@ -159,7 +162,7 @@ func (m *Module) authenticateAndAuthorize(next http.Handler) http.Handler {
 		case credStale:
 			// Public responses can be cached. A Set-Cookie there would store
 			// the session clear next to the page. Auth handlers clear their own.
-			if !publicRequest(r) {
+			if !publicRequest(r) && !m.deskPeekOnly(r) {
 				m.clearSessionCookie(w)
 			}
 		case credSession:
@@ -173,7 +176,7 @@ func (m *Module) authenticateAndAuthorize(next http.Handler) http.Handler {
 			r = r.WithContext(tenant.WithPrincipal(r.Context(), p))
 		case credAgent:
 			httpapi.MarkAuthentication(r)
-			if lease := workerlease.Read(r); lease != "" {
+			if lease := workerlease.Read(r); lease != "" && !workerlease.SafetyRoute(r) {
 				ctx := tenant.WithPrincipal(r.Context(), p)
 				err := db.InTenant(ctx, m.pool, p.TenantID, func(tx pgx.Tx) error {
 					var err error
@@ -252,6 +255,13 @@ func (m *Module) authenticateAndAuthorize(next http.Handler) http.Handler {
 				}
 				return
 			}
+			// Goal routes stay on nodes.read and nodes.write, so RequirePattern
+			// cannot see this ceiling. Check it only for these two scopes.
+			// Every other route keeps role-before-key order.
+			if (scope == "goals.read" || scope == "goals.write") && !agentHasScope(p.Scopes, scope) {
+				authz.WriteForbidden(w, authz.MissingKeyScope(scope))
+				return
+			}
 		}
 		if (kind == credSession || kind == credAgent) && protectedRequest(r) {
 			// SEC4's route table remains the outer agent allowlist. The binding
@@ -259,6 +269,12 @@ func (m *Module) authenticateAndAuthorize(next http.Handler) http.Handler {
 			ctx := authz.BindPool(r.Context(), m.pool)
 			scope := projectScope(r)
 			permissionErr := authz.RequirePattern(ctx, r.Pattern, scope)
+			if kind == credAgent && workerlease.SafetyRoute(r) && workerlease.Read(r) != "" && hasScope(p.Scopes, "harness.worker") && errors.Is(permissionErr, authz.ErrForbidden) {
+				// Only these exact control handlers may recover metadata safety
+				// authority. They recheck the current key and exact target lease
+				// inside the final transaction; no content permission is granted.
+				permissionErr = nil
+			}
 			// The workspace binding decides first; it is the whole answer for
 			// every workspace member. A caller without it may still act through
 			// a project binding, in the project the route targets (ADR-003 P2).
@@ -812,6 +828,21 @@ func coreAgentScope(r *http.Request) (string, bool) {
 		return "account.manage", true
 	case "stage-handoffs":
 		return "stage.<op>", true
+	case "goals":
+		// Outer key-scope ceiling only. Handlers still recheck nodes.read or
+		// nodes.write. A person grants the scope; new keys do not receive it.
+		id := ""
+		if len(parts) > 1 {
+			id = parts[1]
+		}
+		switch {
+		case read && (len(parts) == 1 || len(parts) == 2 && id != "" || len(parts) == 3 && id != "" && (parts[2] == "history" || parts[2] == "series")):
+			return "goals.read", true
+		case r.Method == http.MethodPost && len(parts) == 1:
+			return "goals.write", true
+		case (r.Method == http.MethodPatch || r.Method == http.MethodPut) && len(parts) == 2 && id != "":
+			return "goals.write", true
+		}
 	case "outcomes":
 		if len(parts) == 2 && parts[1] == "measurement" && read {
 			return "outcome.read", true
@@ -915,6 +946,10 @@ func (m *Module) authenticate(r *http.Request) (tenant.Principal, credKind, erro
 		return p, credAgent, nil
 	}
 	c, err := r.Cookie(sessionCookieName)
+	if err != nil && m.deskPeekRequest(r) {
+		// A sibling's cross-site summary read carries only the peek copy.
+		c, err = r.Cookie(deskPeekCookieName)
+	}
 	if err != nil {
 		return tenant.Principal{}, credNone, nil
 	}

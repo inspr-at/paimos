@@ -198,7 +198,7 @@ func (m *Module) handleCallback(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	m.clearOIDCCookie(w)
-	m.setSessionCookie(w, token)
+	m.replaceSessionCookie(w, token)
 	w.Header().Set("Cache-Control", "no-store")
 	http.Redirect(w, r, m.homeURL(), http.StatusFound)
 }
@@ -213,6 +213,9 @@ func (m *Module) handleLogout(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	m.clearSessionCookie(w)
+	// The summary copy is not sent here: its path is the summary route. Clear
+	// it on every logout, including after the session cookie was replaced.
+	m.clearDeskPeek(w)
 	w.Header().Set("Cache-Control", "no-store")
 	w.WriteHeader(http.StatusNoContent)
 }
@@ -297,7 +300,7 @@ func (m *Module) handleDevLogin(w http.ResponseWriter, r *http.Request) {
 		internalFailure(w, r, "dev_login_session", err)
 		return
 	}
-	m.setSessionCookie(w, token)
+	m.replaceSessionCookie(w, token)
 	view, err := m.loadMe(r.Context(), principal)
 	if err != nil {
 		internalFailure(w, r, "dev_login_view", err)

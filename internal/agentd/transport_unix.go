@@ -22,6 +22,7 @@ import (
 	"github.com/inspr-at/paimos/internal/hookbinding"
 	"github.com/inspr-at/paimos/internal/hooknote"
 	"github.com/inspr-at/paimos/internal/httpapi"
+	"github.com/inspr-at/paimos/internal/nativestream"
 )
 
 // LocalServer exposes fenced local control through an owner-only Unix socket.
@@ -133,6 +134,18 @@ func ServeLocal(s *Supervisor, socket string, attachments ...*AttachManager) (_ 
 	hooks := hooknote.NewServer()
 	mux := http.NewServeMux()
 	mux.HandleFunc("POST /v1/native-sessions/start", serveNativeStart(s, func(r *http.Request) bool { return authorized(r, token) }))
+	if s.native != nil && s.native.config != nil {
+		c := s.native.config
+		if c.Host != nil && c.LocalAuthority != nil && c.Projector != nil {
+			adapter, err := nativestream.NewLocalAdapter(c.Host, &nativeSocketAuthority{authority: c.LocalAuthority, authorize: func(r *http.Request) bool { return authorized(r, token) }}, c.Projector, nil)
+			if err != nil {
+				return nil, err
+			}
+			nativeMux := http.NewServeMux()
+			adapter.Mount(nativeMux)
+			mux.Handle("/v1/native-sessions/", nativeMux)
+		}
+	}
 	mux.Handle("POST /v1/inbox-hook", hooks)
 	mux.HandleFunc("POST /v1/setup", func(w http.ResponseWriter, r *http.Request) {
 		if !authorized(r, token) {

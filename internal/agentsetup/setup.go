@@ -907,6 +907,39 @@ func (e *Engine) DispatchPermitted() (bool, error) {
 	return !s.DisconnectAll && !s.ComputerCleaned && s.View.ComputerState == "connected", nil
 }
 
+// DispatchDenial names the first reason DispatchPermitted is false.
+// The phrase is safe to print: DisconnectAll, ComputerCleaned, or a short
+// computer-state token. Anything else in the state is replaced and no
+// snapshot field is copied through.
+func (e *Engine) DispatchDenial() (string, error) {
+	s, err := e.load()
+	if err != nil {
+		return "", err
+	}
+	switch {
+	case s.DisconnectAll:
+		return "DisconnectAll", nil
+	case s.ComputerCleaned:
+		return "ComputerCleaned", nil
+	case s.View.ComputerState != "connected":
+		return "computer state not connected (" + safeComputerState(s.View.ComputerState) + ")", nil
+	default:
+		return "", errors.New("dispatch denial unavailable")
+	}
+}
+
+func safeComputerState(state string) string {
+	if len(state) < 1 || len(state) > 32 {
+		return "unavailable"
+	}
+	for _, r := range state {
+		if (r < 'a' || r > 'z') && (r < '0' || r > '9') && r != '_' && r != '-' {
+			return "unavailable"
+		}
+	}
+	return state
+}
+
 func sameChoices(a, b []Candidate) bool {
 	if len(a) != len(b) {
 		return false

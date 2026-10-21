@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"net/url"
 	"strconv"
+	"time"
 
 	"github.com/inspr-at/paimos/internal/nativecontract"
 	"github.com/inspr-at/paimos/internal/nativestream"
@@ -55,6 +56,7 @@ func (h *HTTPHandler) Stream(w http.ResponseWriter, r *http.Request) {
 		after = last
 	}
 	viewer.Query.After = after
+	viewer.egressFenced = true
 	sub, err := h.relay.SubscribeView(r.Context(), binding, viewer)
 	if err != nil {
 		nativestream.WriteError(w, err)
@@ -96,6 +98,11 @@ func (h *HTTPHandler) LivePage(w http.ResponseWriter, r *http.Request) {
 		if err := h.relay.validator.ValidateBoundJSON("NativeEventPage", data, access); err != nil {
 			return err
 		}
+		controller := http.NewResponseController(w)
+		if err := controller.SetWriteDeadline(time.Now().Add(nativecontract.StreamWriteDeadlineSeconds * time.Second)); err != nil {
+			return nativestream.Refuse(nativecontract.ReasonQualificationMissing)
+		}
+		defer controller.SetWriteDeadline(time.Time{})
 		w.Header().Set("Content-Type", "application/json")
 		_, err = w.Write(append(data, '\n'))
 		return err

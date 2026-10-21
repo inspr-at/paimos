@@ -19,6 +19,7 @@ import (
 	"github.com/inspr-at/paimos/internal/ownedprocess"
 	"github.com/inspr-at/paimos/internal/tenant"
 	"github.com/inspr-at/paimos/internal/workorders"
+	"github.com/inspr-at/paimos/internal/workqueue"
 	"github.com/jackc/pgx/v5"
 )
 
@@ -321,7 +322,7 @@ func (m *Module) claimLeadRuntime(r *http.Request, tx pgx.Tx, p tenant.Principal
 		if err = authz.RequireTx(ctx, tx, p, "run.claim", authz.Scope{ProjectID: in.Demand.ProjectID}); err != nil {
 			return nil, err
 		}
-		if err = authz.RequireRunStartOnComputerTx(ctx, tx, p, saved.Launch.Grant.AgentRunID); err != nil {
+		if err = workqueue.RequireRunPersonTx(ctx, tx, p, saved.Launch.Grant.AgentRunID); err != nil {
 			return nil, err
 		}
 		// Recovery returns immutable evidence even after expiry/revocation. It
@@ -363,7 +364,21 @@ func (m *Module) claimLeadRuntime(r *http.Request, tx pgx.Tx, p tenant.Principal
 	if err = m.validateLeadLaunch(ctx, tx, p, in, launch); err != nil {
 		return nil, err
 	}
-	if err = authz.RequireRunStartOnComputerTx(ctx, tx, p, launch.Grant.AgentRunID); err != nil {
+	person, err := workqueue.ResolveRunPersonTx(ctx, tx, p, "lead", in.Demand.ProjectID)
+	if err != nil {
+		return nil, err
+	}
+	change, err := workqueue.SetActingPersonTx(ctx, tx, p.TenantID, launch.Grant.AgentRunID, person, "lead")
+	if err != nil {
+		return nil, err
+	}
+	if change != nil {
+		batch := ctx.Value(controlEventKey{}).(*controlEventBatch)
+		if err := batch.addEvent(p, *change.NodeID, change.Type, change.Before, change.After); err != nil {
+			return nil, err
+		}
+	}
+	if err = workqueue.RequireRunPersonTx(ctx, tx, p, launch.Grant.AgentRunID); err != nil {
 		return nil, err
 	}
 	candidate := Session{ProjectID: launch.Grant.ProjectID, AgentPrincipalID: p.ID, OwnerPrincipalID: &launch.Grant.OwnerID, RunID: &launch.Grant.AgentRunID, Harness: launch.Harness, Role: "coordinator"}

@@ -9,9 +9,12 @@ import (
 	"net/http"
 	"time"
 
+	"github.com/jackc/pgx/v5"
+
 	"github.com/inspr-at/paimos/internal/agentruns"
 	"github.com/inspr-at/paimos/internal/auth"
 	"github.com/inspr-at/paimos/internal/capacity"
+	"github.com/inspr-at/paimos/internal/db"
 	"github.com/inspr-at/paimos/internal/modelregistry"
 	"github.com/inspr-at/paimos/internal/tenant"
 	"github.com/inspr-at/paimos/internal/workerlease"
@@ -264,6 +267,12 @@ func (s *seeder) completedWork(work demoWork, profile modelregistry.Profile) err
 	if len(ids) == 0 {
 		return fmt.Errorf("route reserved nothing")
 	}
+	// The run is bound to the operator. Claim admits that person only on the
+	// desk's paired computer; register the computer after the manual account
+	// so registration stays the unpaired demo path.
+	if err := s.pairClaimComputer(work.agent); err != nil {
+		return fmt.Errorf("claim computer: %w", err)
+	}
 	if err := s.api.do(work.agent, work.key, http.MethodPost, "/api/runs/"+run.ID+"/claim", map[string]any{
 		"daemon_id": daemonID, "daemon_generation": generation, "reservation_ids": ids,
 	}, http.StatusOK, nil, nil); err != nil {
@@ -360,6 +369,57 @@ func (s *seeder) completedWork(work demoWork, profile modelregistry.Profile) err
 		}
 	}
 	return nil
+}
+
+// pairClaimComputer records the desk that claims this agent's person-bound
+// runs. The operator's workspace admin role already includes start-on-computer.
+// The computer is inserted after the manual account: a paired principal cannot
+// register that account through the ordinary handler.
+func (s *seeder) pairClaimComputer(agent tenant.Principal) error {
+	sum := sha256.Sum256([]byte("aeon.demo.claim-computer\x00" + agent.ID))
+	fingerprint := hex.EncodeToString(sum[:])
+	code, daemon, ok := demoClaimDesk(agent.Name)
+	if !ok {
+		return fmt.Errorf("no claim desk for %s", agent.Name)
+	}
+	return db.InTenant(tenant.WithPrincipal(s.ctx, s.admin), s.pool, s.tenantID, func(tx pgx.Tx) error {
+		var present bool
+		if err := tx.QueryRow(s.ctx, `SELECT EXISTS(SELECT 1 FROM agent_pairing_computers WHERE principal_id=$1)`, agent.ID).Scan(&present); err != nil {
+			return err
+		}
+		if present {
+			return nil
+		}
+		tag, err := tx.Exec(s.ctx, `WITH req AS (
+			INSERT INTO agent_pairing_requests(tenant_id,id,user_code,device_hash,runtime_hash,lifecycle_hash,details,request_digest,state,approved_by)
+			VALUES($1,gen_random_uuid(),$2,$3,$3,$3,'{"platform":"darwin","arch":"arm64"}'::jsonb,$3,'redeemed',$4)
+			RETURNING id
+		)
+		INSERT INTO agent_pairing_computers(tenant_id,id,request_id,principal_id,key_id,daemon_id,lifecycle_hash)
+		SELECT $1,gen_random_uuid(),req.id,$5,k.id,$6,$3 FROM req
+		JOIN LATERAL (SELECT id FROM agent_keys WHERE tenant_id=$1 AND principal_id=$5 ORDER BY created_at LIMIT 1) k ON true`,
+			s.tenantID, code, fingerprint, s.admin.ID, agent.ID, daemon)
+		if err != nil {
+			return err
+		}
+		if tag.RowsAffected() != 1 {
+			return fmt.Errorf("claim computer for %s was not recorded", agent.Name)
+		}
+		return nil
+	})
+}
+
+func demoClaimDesk(name string) (code, daemon string, ok bool) {
+	switch name {
+	case "Lumen Scribe":
+		return "159200001", "demo-desk-lumen-scribe", true
+	case "Harbor Clerk":
+		return "159200002", "demo-desk-harbor-clerk", true
+	case "Glass Scout":
+		return "159200003", "demo-desk-glass-scout", true
+	default:
+		return "", "", false
+	}
 }
 
 func (s *seeder) showcaseApproval(work demoWork) error {

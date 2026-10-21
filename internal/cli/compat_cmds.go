@@ -185,9 +185,9 @@ func (rt *runtime) resolveModelForTicket(role, author, harness, ticket string) e
 func (rt *runtime) cmdSession() *Command {
 	return &Command{
 		Name:  "session",
-		Short: "Agent attribution sessions",
-		Use:   "session <start>",
-		subs:  []*Command{rt.cmdSessionStart()},
+		Short: "Attribution and owned native sessions",
+		Use:   "session <start|attach|take>",
+		subs:  []*Command{rt.cmdSessionStart(), rt.cmdSessionAttach(), rt.cmdSessionTake()},
 	}
 }
 

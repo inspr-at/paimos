@@ -4,8 +4,9 @@ import { expect, test } from '@playwright/test'
 import { LEAD_SESSION } from './lead-flow-fixtures'
 import { me } from './work-fixtures'
 import { WORKER, binding, setup, refresh } from './native-session-program-fixtures'
+import { controlStability } from './control-stability'
 
-test('AEON-1309: fake-host mode changes stay read-only, preserve the menu and reject stale context', async ({ page }) => {
+test('AEON-1309: fake-host mode changes stay read-only, preserve the menu and reject stale context', async ({ page }, info) => {
   await page.setViewportSize({ width: 1440, height: 900 })
   const { state, worker, errors } = await setup(page)
   await page.goto(`/agents/${WORKER}`)
@@ -69,5 +70,30 @@ test('AEON-1309: fake-host mode changes stay read-only, preserve the menu and re
   await expect(overlay).toHaveAttribute('data-layout', 'side')
   await page.keyboard.press('Escape')
   await expect(overlay).toHaveCount(0)
+  // AEON-1291 / GUI-35 #39: the server has withheld terminal/export
+  // capabilities from this reader. A taken runtime is status, never permission.
+  state.native = { ...state.native, owner_person_id: 'another-person', state: 'taken', mode: 'terminal',
+    terminal_viewer_url: null, controller: null, capabilities: { ...state.native.capabilities,
+      take: false, take_supported: false, terminal_view: false, expert: false } }
+  await page.goto(`/agents/${WORKER}`)
+  await expect(panel.getByRole('tab', { name: 'Terminal', exact: true })).toHaveCount(0)
+  await expect(panel.getByRole('tab', { name: 'Chat', exact: true })).toBeVisible()
+  for (const width of [390, 1024, 1440]) for (const theme of ['light', 'dark'] as const) {
+    await page.setViewportSize({ width, height: 900 })
+    await page.evaluate(async choice => { const { setTheme } = await import('/src/lib/theme.ts'); setTheme(choice, false) }, theme)
+    const controls = { chat: panel.getByRole('tab', { name: 'Chat', exact: true }),
+      details: panel.getByRole('tab', { name: 'Details', exact: true }), menu: panel.getByRole('tablist'),
+      more: panel.getByRole('button', { name: 'More session actions' }), close: panel.getByRole('button', { name: 'Close session details' }) }
+    const stable = await controlStability(page, controls)
+    await stable.check(async () => {
+      await controls.chat.click()
+      await expect(controls.chat).toHaveAttribute('aria-selected', 'true')
+      await expect(panel.getByRole('tab', { name: 'Terminal', exact: true })).toHaveCount(0)
+    })
+    await stable.check(async () => { await controls.details.click(); await expect(controls.details).toHaveAttribute('aria-selected', 'true') })
+    stable.done()
+    await page.screenshot({ path: info.outputPath(`AEON-1291-${width}-${theme}-member-status-chat.png`) })
+  }
+  expect(state.calls.filter(call => /\/(take|return|input|stop|resize)$/.test(call.path))).toEqual([])
   expect(errors).toEqual([])
 })

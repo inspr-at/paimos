@@ -1,13 +1,15 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // AEON-1406 risk: an empty Open tab says "Nothing waits for you" while a source
 // did not answer, so a person stops looking while something is waiting.
+// AEON-1631 risk: the badge counts two items while a failed desk read shows the
+// all-clear art, and nothing reads the desk again until the next refresh.
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { readFileSync } from 'node:fs'
-import { deskEmptyState, deskUnansweredLine, type DeskProjection } from '../src/lib/decisionDesk'
+import { DESK_RETRY_MS, deskAutoRetry, deskEmptyState, deskFailedWords, deskUnansweredLine, type DeskProjection, type DeskRetryPhase } from '../src/lib/decisionDesk'
 import { loadDesk, nativeTierAdapter, tierSessionsFromRefresh } from '../src/lib/decisionDeskApi'
 import type { HarnessSession } from '../src/lib/agents'
 
-afterEach(() => vi.unstubAllGlobals())
+afterEach(() => { vi.unstubAllGlobals(); vi.useRealTimers() })
 
 const empty: DeskProjection = { items: [], counts: { open: 0, held: 0, chores: 0 }, has_more: false, as_of: '2026-10-16T08:00:00Z' }
 // Every source answers with an empty page unless the test names a failing one.
@@ -32,15 +34,91 @@ describe('Decision Desk empty state', () => {
     expect(deskEmptyState({ ...base, reading: true })).toBe('reading')
     expect(deskEmptyState({ ...base, reading: true, scoped: true })).toBe('reading')
     expect(deskEmptyState(base)).toBe('clear')
-    expect(deskEmptyState({ ...base, unanswered: ['approvals'] })).toBe('incomplete')
+    // Design B stays for the minor sources only.
+    expect(deskEmptyState({ ...base, unanswered: ['tiers'] })).toBe('incomplete')
+    expect(deskEmptyState({ ...base, unanswered: ['projects', 'lessons'] })).toBe('incomplete')
     // A failure only the warning text names still blocks "all clear".
     expect(deskEmptyState({ ...base, failed: true })).toBe('incomplete')
-    expect(deskEmptyState({ ...base, scoped: true, unanswered: ['approvals'] })).toBe('scoped')
+    expect(deskEmptyState({ ...base, scoped: true, unanswered: ['tiers'] })).toBe('scoped')
     expect(deskEmptyState({ ...base, open: 1, unanswered: ['approvals'] })).toBeNull()
     expect(deskUnansweredLine(['approvals'])).toBe('Approvals didn’t answer, so this may be incomplete')
     expect(deskUnansweredLine(['approvals', 'stepups'])).toBe('Some sources didn’t answer, so this may be incomplete')
     expect(deskUnansweredLine(['approvals', 'desk'])).toBe('The desk didn’t answer, so this may be incomplete')
     expect(deskUnansweredLine([])).toBe('Some sources didn’t answer, so this may be incomplete')
+  })
+
+  it('never calls the desk clear when the desk, its questions or its approvals did not answer, or the badge counts items', () => {
+    const base = { reading: false, open: 0, scoped: false, unanswered: [], failed: false }
+    for (const source of ['desk', 'questions', 'approvals'] as const) {
+      expect(deskEmptyState({ ...base, unanswered: [source] }), source).toBe('failed')
+      expect(deskEmptyState({ ...base, unanswered: ['tiers', source], failed: true }), `${source} with a minor one`).toBe('failed')
+      // A narrowed view cannot say nothing waits in it either.
+      expect(deskEmptyState({ ...base, scoped: true, unanswered: [source] }), `${source} scoped`).toBe('failed')
+    }
+    // Badge two, list empty, every source answered: still not clear, and while a read runs it is reading.
+    expect(deskEmptyState({ ...base, waiting: 2 })).toBe('failed')
+    expect(deskEmptyState({ ...base, waiting: 2, checking: true })).toBe('reading')
+    expect(deskEmptyState({ ...base, waiting: 2, unanswered: ['lessons'] })).toBe('failed')
+    expect(deskEmptyState({ ...base, waiting: 0 })).toBe('clear')
+    expect(deskEmptyState({ ...base, waiting: null })).toBe('clear')
+    // The badge counts the whole desk; a narrowed view keeps its own line.
+    expect(deskEmptyState({ ...base, scoped: true, waiting: 2 })).toBe('scoped')
+    expect(deskEmptyState({ ...base, open: 2, waiting: 2, unanswered: ['desk'] })).toBeNull()
+  })
+
+  it('says the count the badge knows, in English and impersonal German', () => {
+    expect(deskFailedWords(2).sentence).toBe('2 items are waiting, but the list couldn’t be loaded.')
+    expect(deskFailedWords(1).sentence).toBe('1 item is waiting, but the list couldn’t be loaded.')
+    expect(deskFailedWords(null).sentence).toBe('The desk couldn’t be loaded.')
+    expect(deskFailedWords(0).sentence).toBe('The desk couldn’t be loaded.')
+    expect(deskFailedWords(2, true).sentence).toBe('2 Einträge warten, aber die Liste konnte nicht geladen werden.')
+    expect(deskFailedWords(1, true).sentence).toBe('1 Eintrag wartet, aber die Liste konnte nicht geladen werden.')
+    expect(deskFailedWords(undefined, true).sentence).toBe('Der Desk konnte nicht geladen werden.')
+    const en = deskFailedWords(2), de = deskFailedWords(2, true)
+    expect([en.retrying, en.exhausted, en.retry, en.stale('19:47')]).toEqual(['Retrying automatically', 'Still not loading. Your items are safe; try again later.', 'Try again', 'Showing the list from 19:47'])
+    expect([de.retrying, de.exhausted, de.retry, de.stale('19:47')]).toEqual(['Wird automatisch erneut versucht', 'Lädt weiterhin nicht. Die Einträge bleiben erhalten; später erneut versuchen.', 'Erneut versuchen', 'Liste von 19:47'])
+  })
+
+  // Risk: retries stack (one per failure or poll) or never stop; a navigation leaves one running.
+  it('retries a failed desk 3, 10 and 30 s apart, one at a time, then hands over to the normal refresh', async () => {
+    vi.useFakeTimers()
+    expect(DESK_RETRY_MS).toEqual([3_000, 10_000, 30_000])
+    let failing = true, reads = 0
+    const phases: DeskRetryPhase[] = []
+    const retry = deskAutoRetry(async () => { reads++ }, () => failing, phase => phases.push(phase))
+    retry.start()
+    // A second failure while one retry waits schedules nothing more.
+    retry.start()
+    expect(phases.at(-1)).toBe('retrying')
+    await vi.advanceTimersByTimeAsync(2_999); expect(reads).toBe(0)
+    await vi.advanceTimersByTimeAsync(1); expect(reads).toBe(1)
+    await vi.advanceTimersByTimeAsync(9_999); expect(reads).toBe(1)
+    await vi.advanceTimersByTimeAsync(1); expect(reads).toBe(2)
+    await vi.advanceTimersByTimeAsync(29_999); expect(reads).toBe(2)
+    await vi.advanceTimersByTimeAsync(1); expect(reads).toBe(3)
+    expect(phases.at(-1)).toBe('exhausted')
+    expect(retry.pending()).toBe(false)
+    await vi.advanceTimersByTimeAsync(600_000); expect(reads).toBe(3)
+
+    // A person's Try again starts the schedule over; a good read ends it.
+    retry.start()
+    await vi.advanceTimersByTimeAsync(3_000); expect(reads).toBe(4)
+    failing = false
+    await vi.advanceTimersByTimeAsync(10_000); expect(reads).toBe(5)
+    expect(phases.at(-1)).toBe('idle')
+    expect(retry.pending()).toBe(false)
+
+    // Leaving the desk cancels the waiting retry, and a read already under way schedules nothing after it.
+    failing = true
+    retry.start(); retry.stop()
+    await vi.advanceTimersByTimeAsync(60_000); expect(reads).toBe(5)
+    let release!: () => void
+    const slow = deskAutoRetry(() => { reads++; return new Promise<void>(resolve => { release = resolve }) }, () => failing, () => {})
+    slow.start()
+    await vi.advanceTimersByTimeAsync(3_000); expect(reads).toBe(6)
+    slow.stop(); release()
+    await vi.advanceTimersByTimeAsync(60_000); expect(reads).toBe(6)
+    expect(slow.pending()).toBe(false)
   })
 
   it('names the source that did not answer, so an empty read is never all clear', async () => {
@@ -53,8 +131,15 @@ describe('Decision Desk empty state', () => {
     const silent = await loadDesk(undefined, {}, {}, empty)
     expect(silent.items.filter(item => !item.decided)).toEqual([])
     expect(silent.unanswered).toEqual(['approvals'])
-    expect(choose(silent)).toBe('incomplete')
+    expect(choose(silent)).toBe('failed')
     expect(deskUnansweredLine(silent.unanswered!)).toBe('Approvals didn’t answer, so this may be incomplete')
+
+    // A minor source keeps design B: the picture with a quiet line.
+    sources(['/api/key-trim-proposals'])
+    const trims = await loadDesk(undefined, {}, {}, empty)
+    expect(trims.unanswered).toEqual(['keyTrims'])
+    expect(choose(trims)).toBe('incomplete')
+    expect(deskUnansweredLine(trims.unanswered!)).toBe('Key trims didn’t answer, so this may be incomplete')
 
     // The false empty AEON-1406 closes: the canonical desk counts two open rows but lists none.
     // Its warning is no source failure by text, so only the source flag keeps this from "all clear".
@@ -63,12 +148,13 @@ describe('Decision Desk empty state', () => {
     expect(partial.items).toEqual([])
     expect(partial.warnings).toContain('The canonical desk is partial or changed while reading. Retry for current coverage.')
     expect(partial.unanswered).toEqual(['desk'])
-    expect(choose(partial)).toBe('incomplete')
+    expect(choose(partial)).toBe('failed')
+    expect(choose(partial, { waiting: 2 })).toBe('failed')
 
     sources()
     const missing = await loadDesk(undefined, {}, {}, null)
     expect(missing.unanswered).toEqual(['desk'])
-    expect(choose(missing)).toBe('incomplete')
+    expect(choose(missing)).toBe('failed')
   })
 
   // Risk: refreshSessions answers {ok:false} and the desk still returns the empty

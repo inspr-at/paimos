@@ -159,13 +159,18 @@ export function submitModifier(event: Pick<KeyboardEvent, 'metaKey' | 'ctrlKey' 
 export interface DeskProjectionItem {
   definition_change?: {project_key: string; pending_count: number}
   person_step?: PersonStep
+  /** The source principal: a question's first asker or an approval's agent (AEON-1495). */
+  asked_by?: { id: string; name: string }
   id: string; kind: 'question' | 'approval' | 'action_request' | 'doctrine' | 'tier_request' | 'key_trim' | 'stepup' | 'account_matrix' | 'lesson' | 'routine_consent' | 'definition_change'; project_id?: string; ticket_key?: string | null
   revision: number; title: string; created_at: string; expires_at?: string; held: boolean; can_decide?: boolean; href: string; source: string
 }
 export interface DeskProjection {
   items: DeskProjectionItem[]; counts: { open: number; held: number; chores: number; lessons?: Record<string, number> }
   has_more: boolean; next_cursor?: string; as_of: string
+  /** Person steps the reader owns that are not due yet, newest first (AEON-1495, Coming). */
+  upcoming?: DeskUpcomingStep[]
 }
+export interface DeskUpcomingStep { node_id: string; check_id: string; project_id: string; ticket_key: string; label: string }
 
 export function deskItemID(item: Pick<DeskProjectionItem, 'kind' | 'id'>): string {
   const prefix = { question: 'q', approval: 'a', action_request: 'm', doctrine: 'r', tier_request: 't', key_trim: 'k', stepup: 's', account_matrix: 'u', routine_consent: 'c', lesson: 'l', definition_change: 'd' }[item.kind]
@@ -225,19 +230,65 @@ export function deskSourceLines(warnings: readonly string[], linkMissing = false
 export type DeskSource = 'desk' | 'projects' | 'questions' | 'approvals' | 'rules' | 'actions' | 'keyTrims' | 'stepups' | 'tiers' | 'lessons'
 const SOURCE_NAMES: Record<DeskSource, string> = { desk: 'The desk', projects: 'Projects', questions: 'Questions', approvals: 'Approvals', rules: 'Rule changes',
   actions: 'Action requests', keyTrims: 'Key trims', stepups: 'Step-up approvals', tiers: 'Tier requests', lessons: 'Lessons' }
-export type DeskEmptyState = 'reading' | 'clear' | 'incomplete' | 'scoped'
-/** The Open tab with nothing to show: reading (D), all clear (A), a source
- * did not answer (B) or a narrowed view (C). Null while rows are listed. */
-export function deskEmptyState(desk: { reading: boolean; open: number; scoped: boolean; unanswered: readonly DeskSource[]; failed: boolean }): DeskEmptyState | null {
+export type DeskEmptyState = 'reading' | 'clear' | 'incomplete' | 'scoped' | 'failed'
+// AEON-1631: the desk itself, its questions and its approvals carry the open list. When one of them did
+// not answer, an empty list proves nothing; design B (all clear and a quiet line) stays for the minor
+// sources: project names, lessons, tiers and the other side reads.
+const MAJOR_SOURCES: ReadonlySet<DeskSource> = new Set(['desk', 'questions', 'approvals'])
+const deskMajorSilent = (unanswered: readonly DeskSource[]) => unanswered.some(source => MAJOR_SOURCES.has(source))
+/** The Open tab with nothing to show: reading (D), all clear (A), a minor source did not answer (B),
+ * a narrowed view (C), or a desk that could not be loaded. Null while rows are listed. `waiting` is
+ * the count the badge shows; `checking` is a read under way that may still fill the list. */
+export function deskEmptyState(desk: { reading: boolean; open: number; scoped: boolean; unanswered: readonly DeskSource[]; failed: boolean; waiting?: number | null; checking?: boolean }): DeskEmptyState | null {
   if (desk.reading) return 'reading'
   if (desk.open > 0) return null
+  if (deskMajorSilent(desk.unanswered)) return 'failed'
   if (desk.scoped) return 'scoped'
+  // The badge counts what waits: beside an empty list it is a read that has not landed, never all clear.
+  if ((desk.waiting ?? 0) > 0) return desk.checking ? 'reading' : 'failed'
   return desk.unanswered.length || desk.failed ? 'incomplete' : 'clear'
 }
 export function deskUnansweredLine(unanswered: readonly DeskSource[]): string {
   const named = [...new Set(unanswered)]
   const who = named.includes('desk') ? SOURCE_NAMES.desk : named.length === 1 ? SOURCE_NAMES[named[0]!] : 'Some sources'
   return `${who} didn’t answer, so this may be incomplete`
+}
+/** Tick's failed-desk copy (AEON-1631): the count the badge knows, else the desk alone. German is impersonal. */
+export function deskFailedWords(waiting: number | null | undefined, de = false) {
+  const n = waiting && waiting > 0 ? waiting : 0
+  const sentence = de
+    ? n === 1 ? '1 Eintrag wartet, aber die Liste konnte nicht geladen werden.' : n ? `${n} Einträge warten, aber die Liste konnte nicht geladen werden.` : 'Der Desk konnte nicht geladen werden.'
+    : n === 1 ? '1 item is waiting, but the list couldn’t be loaded.' : n ? `${n} items are waiting, but the list couldn’t be loaded.` : 'The desk couldn’t be loaded.'
+  return de
+    ? { sentence, retrying: 'Wird automatisch erneut versucht', exhausted: 'Lädt weiterhin nicht. Die Einträge bleiben erhalten; später erneut versuchen.', retry: 'Erneut versuchen', stale: (time: string) => `Liste von ${time}` }
+    : { sentence, retrying: 'Retrying automatically', exhausted: 'Still not loading. Your items are safe; try again later.', retry: 'Try again', stale: (time: string) => `Showing the list from ${time}` }
+}
+
+// AEON-1631: a failed desk read is retried on its own, 3, 10 and 30 s apart; then the normal refresh takes over.
+export const DESK_RETRY_MS: readonly number[] = [3_000, 10_000, 30_000]
+export type DeskRetryPhase = 'idle' | 'retrying' | 'exhausted'
+/** One pending retry at most. `failing` is read after every retry; `stop` cancels the pending one (navigation, a person's own Try again). */
+export function deskAutoRetry(run: () => Promise<unknown>, failing: () => boolean, phase: (value: DeskRetryPhase) => void, delays: readonly number[] = DESK_RETRY_MS) {
+  let timer: ReturnType<typeof setTimeout> | undefined, step = 0, turn = 0
+  function stop() { clearTimeout(timer); timer = undefined; turn++ }
+  function next() {
+    stop()
+    const delay = delays[step]
+    if (delay === undefined) { phase('exhausted'); return }
+    step++; phase('retrying')
+    const mine = turn
+    timer = setTimeout(async () => {
+      timer = undefined
+      try { await run() } catch { /* failing() reads the outcome */ }
+      if (mine !== turn) return
+      if (failing()) next()
+      else reset()
+    }, delay)
+  }
+  function reset() { stop(); step = 0; phase('idle') }
+  /** The desk failed (again): schedule from the first step. Nothing is scheduled while it answers. */
+  function start() { reset(); if (failing()) next() }
+  return { start, reset, stop, pending: () => timer !== undefined }
 }
 
 // Cancellation discards a read; it says nothing about the desk's availability.
@@ -253,12 +304,16 @@ export function deskRefreshNotice(failures: number, failedSince: number | null, 
 // A decided lesson leaves the pending projection. Keep the row and the learning
 // this visit already confirmed, so Undo re-checks that same record. Omitting
 // the learning makes the decision look unauthorized the moment the list refreshes.
+// A projection read before the decision still lists the lesson as open while its
+// source no longer offers it; that placeholder row gives way to the decision (AEON-1622).
 export function retainDecidedLessons(previous: readonly DeskItem[], nextItems: DeskItem[], lessons: Map<string, MethodLearning>) {
-  const present = new Set(nextItems.map(item => item.id))
+  const present = new Map(nextItems.map((item, index) => [item.id, index]))
   for (const item of previous) {
-    if (item.kind !== 'lesson' || !item.decided || present.has(item.id)) continue
-    nextItems.push(item)
-    present.add(item.id)
+    if (item.kind !== 'lesson' || !item.decided) continue
+    const at = present.get(item.id), listed = at === undefined ? undefined : nextItems[at]
+    if (listed && (listed.decided || lessons.has(item.id))) continue
+    if (at === undefined) { present.set(item.id, nextItems.length); nextItems.push(item) }
+    else nextItems[at] = item
     const learning = item.lesson?.learning
     if (learning && !lessons.has(item.id)) lessons.set(item.id, learning)
   }

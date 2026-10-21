@@ -890,6 +890,21 @@ with `slog`, including the logical file or operation and its path. It never logs
 file contents. Missing files retain `errors.Is(err, os.ErrNotExist)` semantics;
 ownership, symlink, mode and executable checks remain enforced.
 
+When preflight finishes and dispatch is not permitted, serve writes one stderr
+line and does not also log it: `agentd serve: dispatch not permitted: DisconnectAll`,
+`ComputerCleaned`, or `computer state not connected (<state>)`. The state token
+is a short lowercase label; any other value is `unavailable`. The line has no
+paths or secrets. A foreground process exits 78, distinct from a crash (1) and
+from a clean stop (0).
+
+Installed service units are left unchanged, so an existing receipt still
+matches. launchd `KeepAlive` `SuccessfulExit=false` restarts every non-zero
+status and cannot exempt 78. A field systemd unit has `Restart=on-failure`
+and no `SuccessExitStatus`, so 78 would respawn. A process whose parent is
+launchd or systemd, or whose environment carries systemd `INVOCATION_ID`
+(32 lowercase hex digits), exits 0 after the same line. Those supervisors
+do not restart that exit. A foreground run still exits 78.
+
 A plain macOS `go build` (even with `CGO_ENABLED=1` and the release version
 ldflag) does **not** select the Keychain backend. That backend requires
 `-tags aeon_enclave`. After a signed daemon has migrated a pairing, an ordinary

@@ -233,6 +233,44 @@ func attachmentViewPolicy(origin string, next http.Handler) http.Handler {
 	})
 }
 
+// siblingViewPolicy lets application documents read the owner's sibling
+// instances (AEON-1495): their exact origins join connect-src. Portal documents
+// and every other directive stay unchanged. Origins come from validated
+// deployment configuration (config.ParseInstances).
+func siblingViewPolicy(origins []string, next http.Handler) http.Handler {
+	allowed := make([]string, 0, len(origins))
+	for _, origin := range origins {
+		u, err := url.Parse(origin)
+		if err == nil && (u.Scheme == "https" || u.Scheme == "http") && u.Host != "" && u.User == nil && u.Path == "" && u.RawQuery == "" && u.Fragment == "" && !strings.ContainsAny(origin, " ;,\r\n\t'") {
+			allowed = append(allowed, origin)
+		}
+	}
+	if len(allowed) == 0 {
+		return next
+	}
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/portal" && !strings.HasPrefix(r.URL.Path, "/portal/") {
+			policy := strings.Split(w.Header().Get("Content-Security-Policy"), ";")
+			out, connect := make([]string, 0, len(policy)+1), false
+			for _, directive := range policy {
+				directive = strings.TrimSpace(directive)
+				if directive == "" {
+					continue
+				}
+				if directive == "connect-src" || strings.HasPrefix(directive, "connect-src ") {
+					directive, connect = directive+" "+strings.Join(allowed, " "), true
+				}
+				out = append(out, directive)
+			}
+			if !connect {
+				out = append(out, "connect-src 'self' "+strings.Join(allowed, " "))
+			}
+			w.Header().Set("Content-Security-Policy", strings.Join(out, "; "))
+		}
+		next.ServeHTTP(w, r)
+	})
+}
+
 func requestIDMiddleware(next http.Handler) http.Handler {
 	return requestIDMiddlewareWithMetrics(next, &TransportMetrics{})
 }

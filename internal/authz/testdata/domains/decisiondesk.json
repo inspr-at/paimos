@@ -1,6 +1,8 @@
 {
   "_license": "SPDX-License-Identifier: AGPL-3.0-only",
   "routes": {
+    "GET /api/decision-desk/instances": "profile.read|settings.manage",
+    "GET /api/decision-desk/owner-summary": "profile.read|settings.manage",
     "GET /api/decision-desk/projection": "profile.read|settings.manage"
   }
 }
