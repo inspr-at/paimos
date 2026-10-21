@@ -115,6 +115,12 @@ it('AEON-1417: 200 units use at most six rate reads and a rejected unit remains 
   expect(store.costUnitsError).toBe('')
   expect(store.costUnit('cu-0')?.ratesError).toBeUndefined()
   expect(store.rateOn('cu-0', 'hour', 'EUR', '2026-10-21')?.bill_amount).toBe('90')
+  rates.mockImplementation(async id => { if (id === 'cu-0') throw new Error('refresh failed'); return [hourlyRate(id)] })
+  await store.loadCostUnits(true)
+  expect(store.costUnit('cu-0')?.rates).toEqual([])
+  expect(store.costUnit('cu-0')?.ratesError).toBe('refresh failed')
+  expect(store.usable('hour', 'EUR', '2026-10-21').map(unit => unit.node.id)).toContain('cu-0')
+  expect(store.rateOn('cu-1', 'hour', 'EUR', '2026-10-21')?.bill_amount).toBe('90')
 })
 
 it('AEON-1417: changing the rate-cache owner retires pending reads and stops queued requests', async () => {

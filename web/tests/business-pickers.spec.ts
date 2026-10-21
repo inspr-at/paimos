@@ -65,10 +65,12 @@ test('AEON-1417: rejected rates remain in the hours picker and retry keeps contr
     checks.push({ view: 'hours', width, theme, partialVisible: true, retryRecovered: true, controlsStable: true })
 
     rejected = true
-    await page.goto('/business/rates')
+    await page.getByRole('navigation', { name: 'Business', exact: true }).getByRole('link', { name: 'Rates', exact: true }).click()
     await page.evaluate(theme => { document.documentElement.dataset.theme = theme }, theme)
     await expect(page.getByRole('status').filter({ hasText: 'Some rates could not be loaded' })).toBeVisible()
     await expect(page.getByText('Rates could not be loaded. Retry below.')).toBeVisible()
+    await expect(page.getByRole('table', { name: 'Rates of Entwicklung und langfristige technische Betreuung', exact: true })).toHaveCount(0)
+    await expect(page.getByRole('table', { name: 'Rates of Design', exact: true })).toBeVisible()
     const ratesStability = await controlStability(page, {
       search: page.getByRole('searchbox', { name: 'Find a cost unit' }),
       create: page.getByRole('button', { name: 'New cost unit', exact: true }),
