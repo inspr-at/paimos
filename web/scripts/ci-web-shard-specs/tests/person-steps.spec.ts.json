@@ -10,6 +10,15 @@
   "spec": {
     "file": "tests/person-steps.spec.ts",
     "listedTests": 5,
+    "tierTiming": {
+      "caseSeconds": {
+        "max": 62.997,
+        "median": 22.401,
+        "min": 14.678
+      },
+      "seconds": 162.662,
+      "selectedTests": 5
+    },
     "weightSeconds": 39.557,
     "weightSource": "AEON-1318 fix8: guarded mbp2606 single-worker complete file, 5 passed in 39.3s (supervisor wall 39.557s), source c839b3bd7"
   }

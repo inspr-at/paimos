@@ -1301,17 +1301,18 @@ test('AEON-1453 sixteen full web shards stay over the budget',()=>{
   assert.throws(()=>assertWebShardBudget(sixteen),{name:'Error',
     message:`Web shard ${worst.shard} predicts ${worst.seconds.toFixed(1)}s, over the ${sixteen.budgetSeconds}s budget`})
   const full=webShardPlan(gate,policy,{mode:'full'})
-  assert.equal(fullWebShardCount,19)
+  assert.equal(fullWebShardCount,20)
   assert.deepEqual(full.shards,fullWebShards)
   assertWebShardBudget(full)
   for(const bin of full.projections) assert.ok(bin.seconds<=full.budgetSeconds,`shard ${bin.shard} predicts ${bin.seconds}s`)
   assert.equal(full.projections.reduce((sum,bin)=>sum+bin.cases,0),gate.length)
 })
 
-test('AEON-1603 nineteen shards keep main incl. AEON-1502 under 860s and seventeen over the 900s guard',()=>{
-  // AEON-1619: hosted shard 8 is heavier than the eighteen-bin plan. Seventeen
-  // still overflows the 900s budget. Eighteen fits that budget and misses the
-  // 860s target. Nineteen keeps the live catalogue, including AEON-1502's
+test('AEON-1603 twenty shards keep main incl. AEON-1502 under 860s and eighteen over the 900s guard',()=>{
+  // AEON-1619: hosted shards 2, 13 and 14 are heavier than the nineteen-bin
+  // plan once their specs use run 39574698693 launch-wall shares. Nineteen
+  // fits the 900s budget and misses the 860s target. Eighteen overflows that
+  // budget. Twenty keeps the live catalogue, including AEON-1502's
   // approve-harness spec and the extra account-use-matrix case, at or under
   // 860s. The 900s budget and 120s overhead are unchanged. Do not pin the live
   // projected seconds (AEON-1483).
@@ -1326,7 +1327,7 @@ test('AEON-1603 nineteen shards keep main incl. AEON-1502 under 860s and sevente
   assert.equal(gate.find(row=>row.file===matrix&&row.name===matrixCase)?.tier,'ESSENTIAL')
   assert.ok(policy.groups.some(group=>group.specs?.some(spec=>spec.file===harness)),`${harness} has a shard weight`)
   const full=webShardPlan(gate,policy,{mode:'full'})
-  assert.equal(fullWebShardCount,19)
+  assert.equal(fullWebShardCount,20)
   assert.equal(full.timeoutSeconds,1200)
   assert.equal(full.budgetSeconds,900)
   assert.equal(full.overheadSeconds,120)
@@ -1336,17 +1337,93 @@ test('AEON-1603 nineteen shards keep main incl. AEON-1502 under 860s and sevente
   assert.ok(full.projectedMaxSeconds<=860,`main incl. AEON-1502 busiest shard ${full.projectedMaxSeconds.toFixed(3)}s`)
   for(const bin of full.projections) assert.ok(bin.seconds<=full.budgetSeconds,`shard ${bin.shard} predicts ${bin.seconds}s`)
   assert.equal(full.projections.reduce((sum,bin)=>sum+bin.cases,0),gate.length)
-  const eighteen=webShardPlan(gate,policy,{mode:'full',maximum:18})
-  assert.equal(eighteen.shards.length,18)
-  assert.equal(eighteen.fitsBudget,true)
-  assert.ok(eighteen.projectedMaxSeconds>860,`eighteen-shard main must miss 860s, got ${eighteen.projectedMaxSeconds.toFixed(3)}s`)
-  const narrow=webShardPlan(gate,policy,{mode:'full',maximum:17})
-  assert.equal(narrow.shards.length,17)
+  const nineteen=webShardPlan(gate,policy,{mode:'full',maximum:19})
+  assert.equal(nineteen.shards.length,19)
+  assert.equal(nineteen.fitsBudget,true)
+  assert.ok(nineteen.projectedMaxSeconds>860,`nineteen-shard main must miss 860s, got ${nineteen.projectedMaxSeconds.toFixed(3)}s`)
+  const narrow=webShardPlan(gate,policy,{mode:'full',maximum:18})
+  assert.equal(narrow.shards.length,18)
   assert.equal(narrow.budgetSeconds,900)
   assert.equal(narrow.overheadSeconds,120)
   assert.equal(narrow.headroom,0.25)
   assert.equal(narrow.fitsBudget,false)
   assert.throws(()=>assertWebShardBudget(narrow),/over the 900s budget/)
+})
+
+test('AEON-1619 hosted shards 2, 13 and 14 keep launch-wall timings from run 39574698693',()=>{
+  // These seconds are the launch wall apportioned by Playwright case duration.
+  // They fail on 1921a279, where lead-panel is still 424.754s and the other
+  // shard-2 specs still use weightSeconds or a scaled older selectedTests.
+  // person-steps and definitions-p3 keep their pinned weightSeconds. The
+  // twelve-shard prior reads that pin; the full gate reads tierTiming.
+  const measured={
+    'tests/aeon-1071-chat-live.spec.ts':[54.676,16],
+    'tests/aeon-1209-agents-head.spec.ts':[160.104,22],
+    'tests/aeon-1210-agents-tree.spec.ts':[37.205,7],
+    'tests/aeon-1212-lead-panel.spec.ts':[488.71,56],
+    'tests/aeon-1339-desk-polish.spec.ts':[121.083,5],
+    'tests/aeon-1470-list-titles.spec.ts':[95.551,15],
+    'tests/aeon-1474-desk-push-ui.spec.ts':[92.62,7],
+    'tests/aeon-1535-desk-phone.spec.ts':[22.137,4],
+    'tests/aeon-908-polish.spec.ts':[30.233,4],
+    'tests/attachments.spec.ts':[14.633,2],
+    'tests/crm.spec.ts':[6.849,2],
+    'tests/definitions-p3.spec.ts':[167.952,6],
+    'tests/delivery-ui.spec.ts':[92.614,17],
+    'tests/desk-empty.spec.ts':[84.425,15],
+    'tests/dialog-full-text.spec.ts':[10.205,2],
+    'tests/eta-column.spec.ts':[104.439,14],
+    'tests/goals-epics.spec.ts':[30.065,10],
+    'tests/lead-adoption.spec.ts':[91.504,10],
+    'tests/list-columns.spec.ts':[17.662,6],
+    'tests/native-expert-terminal.spec.ts':[4.357,3],
+    'tests/native-session-program-390.spec.ts':[37.262,2],
+    'tests/nav.spec.ts':[37.343,9],
+    'tests/performance.spec.ts':[67.22,2],
+    'tests/person-steps.spec.ts':[162.662,5],
+    'tests/profile-editor.spec.ts':[4.267,1],
+    'tests/quote-collaboration.spec.ts':[3.627,1],
+    'tests/relations.spec.ts':[58.658,7],
+    'tests/session-messages.spec.ts':[13.797,3],
+    'tests/session-recovery.spec.ts':[57.935,15],
+    'tests/session-removal.spec.ts':[32.535,8],
+    'tests/session-requests.spec.ts':[20.52,5],
+    'tests/settings-account-parts.spec.ts':[15.897,2],
+    'tests/settings-accounts.spec.ts':[18.644,6],
+    'tests/settings.spec.ts':[173.491,26],
+    'tests/theme-control-geometry.spec.ts':[0.967,2],
+    'tests/ticket-benefits.spec.ts':[21.116,8],
+    'tests/views-filters.spec.ts':[162.076,32],
+    'tests/wide.spec.ts':[32.176,8],
+    'tests/work-aggregates.spec.ts':[167.776,29],
+    'tests/work-figures.spec.ts':[74.009,13],
+    'tests/work-kinds.spec.ts':[6.412,2],
+    'tests/work-surfaces-fix2.spec.ts':[56.127,12],
+  }
+  const readRecord=file=>JSON.parse(readFileSync(new URL(`../../web/scripts/ci-web-shard-specs/${file}.json`,import.meta.url)))
+  for(const [file,[seconds,selectedTests]] of Object.entries(measured)) {
+    const spec=readRecord(file).spec
+    assert.equal(spec.tierTiming?.seconds,seconds,file)
+    assert.equal(spec.tierTiming?.selectedTests,selectedTests,file)
+  }
+  const person=readRecord('tests/person-steps.spec.ts')
+  assert.equal(person.spec.weightSeconds,39.557)
+  assert.equal(person.nightlyTiming.seconds,39.557)
+  assert.equal(person.spec.weightSource,'AEON-1318 fix8: guarded mbp2606 single-worker complete file, 5 passed in 39.3s (supervisor wall 39.557s), source c839b3bd7')
+  const definitions=readRecord('tests/definitions-p3.spec.ts')
+  assert.equal(definitions.spec.weightSeconds,48.288)
+  assert.equal(definitions.nightlyTiming.seconds,48.288)
+  assert.equal(definitions.spec.weightSource,'AEON-1528: guarded mbp2606 single-worker complete file, 6 passed in 47.9s (supervisor wall 48.288s), source 16c44fcc4')
+  const requests=readRecord('tests/session-requests.spec.ts').spec
+  assert.equal(requests.weightSeconds,22.94)
+  assert.equal(requests.weightSource,'hosted-CI-39565819178')
+  const policy=loadWebPolicy()
+  const gate=fullGateTests(replayRows).filter(row=>row.kind==='browser')
+  const weights=tierWeights(policy,gate)
+  assert.ok(weights['tests/aeon-1212-lead-panel.spec.ts']>=468,'lead-panel must cover the hosted case sum')
+  for(const file of ['tests/aeon-1212-lead-panel.spec.ts','tests/person-steps.spec.ts','tests/definitions-p3.spec.ts','tests/eta-column.spec.ts','tests/aeon-1470-list-titles.spec.ts','tests/aeon-1474-desk-push-ui.spec.ts','tests/desk-empty.spec.ts','tests/performance.spec.ts']) {
+    assert.equal(weights[file],measured[file][0],file)
+  }
 })
 
 const assignWebShards=(rows,policy,plan)=>{
@@ -1688,7 +1765,7 @@ test('offline replay CLI prints every real PR with selected counts, effective la
     assert.ok(['full','essential','static'].includes(row.new))
     assert.equal(row.newCases,Object.values(row.newKinds).reduce((sum,n)=>sum+n,0))
     assert.ok(row.new==='full'||row.newCases<=row.oldCases,`PR ${row.number} narrowed selection must not grow`)
-    assert.equal(row.newJobs,row.lane==='spec-only'?12:row.new==='static'?16:row.new==='essential'?24:44)
+    assert.equal(row.newJobs,row.lane==='spec-only'?12:row.new==='static'?16:row.new==='essential'?24:45)
   }
 })
 

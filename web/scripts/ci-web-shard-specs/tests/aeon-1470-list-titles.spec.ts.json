@@ -7,6 +7,15 @@
   "spec": {
     "file": "tests/aeon-1470-list-titles.spec.ts",
     "listedTests": 17,
+    "tierTiming": {
+      "caseSeconds": {
+        "max": 19.057,
+        "median": 4.462,
+        "min": 2.314
+      },
+      "seconds": 95.551,
+      "selectedTests": 15
+    },
     "weightSeconds": 22.195122,
     "weightSource": "unmeasured-test-rate"
   }

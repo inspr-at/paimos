@@ -9,12 +9,12 @@
     "listedTests": 26,
     "tierTiming": {
       "caseSeconds": {
-        "max": 23.207,
-        "median": 1.836,
-        "min": 1.203
+        "max": 22.248,
+        "median": 2.085,
+        "min": 1.256
       },
-      "seconds": 171.614,
-      "selectedTests": 25
+      "seconds": 173.491,
+      "selectedTests": 26
     },
     "weightSeconds": 32.564102381,
     "weightSource": "status-autopilot-ui-2"

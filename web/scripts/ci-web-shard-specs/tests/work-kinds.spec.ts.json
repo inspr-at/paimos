@@ -9,12 +9,12 @@
     "listedTests": 22,
     "tierTiming": {
       "caseSeconds": {
-        "max": 3.874,
-        "median": 1.36,
-        "min": 1.049
+        "max": 4.633,
+        "median": 3.061,
+        "min": 1.488
       },
-      "seconds": 41.152,
-      "selectedTests": 23
+      "seconds": 6.412,
+      "selectedTests": 2
     },
     "weightSeconds": 22.1,
     "weightSource": "AEON-997 fix2 local Chromium: 22 cases, one worker, wall 22.1 s"
