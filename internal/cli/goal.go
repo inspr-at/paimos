@@ -15,8 +15,10 @@ import (
 	"github.com/inspr-at/paimos/internal/goals"
 )
 
+const goalAgentScopeHelp = "An agent key also needs goals.read for reads or goals.write for writes. A person grants that scope on the audited key-scope path, and new keys do not receive it. Handlers still recheck nodes.read or nodes.write."
+
 func (rt *runtime) cmdGoal() *Command {
-	return &Command{Name: "goal", Short: "Goals and outcomes", Use: "goal <create|update|note|list|get|history|series>", subs: []*Command{rt.cmdGoalCreate(), rt.cmdGoalUpdate(), rt.cmdGoalNote(), rt.cmdGoalList(), rt.cmdGoalGet(), rt.cmdGoalHistory(), rt.cmdGoalSeries()}}
+	return &Command{Name: "goal", Short: "Goals and outcomes", Use: "goal <create|update|note|list|get|history|series>", Long: goalAgentScopeHelp, subs: []*Command{rt.cmdGoalCreate(), rt.cmdGoalUpdate(), rt.cmdGoalNote(), rt.cmdGoalList(), rt.cmdGoalGet(), rt.cmdGoalHistory(), rt.cmdGoalSeries()}}
 }
 func (rt *runtime) goalWrite(method, path, key string, body any, dry bool) error {
 	clean, err := goals.CleanIdempotencyKey(key)
@@ -35,7 +37,7 @@ func (rt *runtime) goalWrite(method, path, key string, body any, dry bool) error
 func (rt *runtime) cmdGoalCreate() *Command {
 	var project, key string
 	var workspace, dry bool
-	return &Command{Name: "create", Short: "Create a project or workspace goal", Use: "goal create TITLE --project KEY|--workspace --idempotency-key KEY [--dry-run]", minArgs: 1, maxArgs: 1,
+	return &Command{Name: "create", Short: "Create a project or workspace goal", Use: "goal create TITLE --project KEY|--workspace --idempotency-key KEY [--dry-run]", Long: goalAgentScopeHelp, minArgs: 1, maxArgs: 1,
 		addFlags: func(fs *flagSet) {
 			fs.string(&project, "project", 0, "project key or UUID")
 			fs.bool(&workspace, "workspace", 0, "workspace goal")
@@ -66,7 +68,7 @@ func (rt *runtime) cmdGoalCreate() *Command {
 func (rt *runtime) cmdGoalUpdate() *Command {
 	var file, key, etaText, etaAt, progress, watermark string
 	var dry bool
-	return &Command{Name: "update", Short: "Atomically update ETA, steps, progress and outcome refs", Use: "goal update KEY --idempotency-key KEY [--file PATH|- | --eta TEXT --eta-at RFC3339 --progress 0..100|clear] [--if-read-through N] [--dry-run]", minArgs: 1, maxArgs: 1,
+	return &Command{Name: "update", Short: "Atomically update ETA, steps, progress and outcome refs", Use: "goal update KEY --idempotency-key KEY [--file PATH|- | --eta TEXT --eta-at RFC3339 --progress 0..100|clear] [--if-read-through N] [--dry-run]", Long: goalAgentScopeHelp, minArgs: 1, maxArgs: 1,
 		addFlags: func(fs *flagSet) {
 			fs.string(&file, "file", 0, "bounded update JSON file or - for stdin")
 			fs.string(&key, "idempotency-key", 0, "stable receipt key; reuse the same key and body on retry")
