@@ -143,7 +143,14 @@ func (a *pairingVerificationAdapter) Start(_ context.Context, r agentd.StartRequ
 		r.Run.Purpose != agentd.VerificationPurpose || r.Run.VerificationTask != agentd.VerificationTask ||
 		r.Run.MaxDurationSeconds == nil || *r.Run.MaxDurationSeconds != 60 || r.Run.VerificationPolicy != "read_only" ||
 		r.Run.RepositoryMutationAllowed == nil || *r.Run.RepositoryMutationAllowed || r.Tools != nil || r.Prompt != agentd.VerificationTask {
-		return nil, errors.New("synthetic adapter rejected incomplete or changed verification binding")
+		var changed []string
+		actualValue, expectedValue := reflect.ValueOf(r.Run), reflect.ValueOf(want)
+		for i := 0; i < actualValue.NumField(); i++ {
+			if !reflect.DeepEqual(actualValue.Field(i).Interface(), expectedValue.Field(i).Interface()) {
+				changed = append(changed, actualValue.Type().Field(i).Name)
+			}
+		}
+		return nil, fmt.Errorf("synthetic adapter rejected incomplete or changed verification binding (changed run fields: %s)", strings.Join(changed, ", "))
 	}
 	rel, err := filepath.Rel(a.workspace, r.Workspace)
 	if err != nil || !filepath.IsAbs(r.Workspace) || rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
