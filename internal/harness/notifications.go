@@ -155,6 +155,12 @@ func (m *Module) notificationHint(r *http.Request, p tenant.Principal, after *in
 	through := int64(0)
 	relevant := false
 	err := db.InTenant(ctx, m.pool, p.TenantID, func(tx pgx.Tx) error {
+		// Bound the batch BEFORE checking authority. A revocation can commit
+		// after those checks; its newer events must wait for a fresh check,
+		// rather than enter this batch through a later statement snapshot.
+		if err := tx.QueryRow(ctx, `SELECT coalesce((SELECT last_id FROM event_counters WHERE tenant_id=$1),0)`, p.TenantID).Scan(&through); err != nil {
+			return err
+		}
 		// Revalidate the exact bearer, not just the principal cached at connection.
 		if _, err := workorders.CurrentKeyPrincipal(r, tx, p, "harness.worker"); err != nil {
 			return err
@@ -178,25 +184,21 @@ func (m *Module) notificationHint(r *http.Request, p tenant.Principal, after *in
 		if s.Management != "managed" {
 			return workorders.Fail(409, "managed worker required")
 		}
-		if after == nil {
-			return tx.QueryRow(ctx, `SELECT coalesce((SELECT last_id FROM event_counters WHERE tenant_id=$1),0)`, p.TenantID).Scan(&through)
+		if after == nil || *after == through {
+			return nil
 		}
-		// Capture the boundary and test relevance in one statement snapshot.
 		// The payload only wakes this read: it cannot advance the position,
 		// select a session, or stand in for the current bearer/proof checks.
 		// Principal inbox events can be hidden from project event readers. Read
 		// only this worker's recipient rows, just as drain does, by the committed
 		// sent-event ID; never broaden its event-history or inbox permissions.
-		return tx.QueryRow(ctx, `WITH notification_boundary AS (
-   SELECT coalesce((SELECT last_id FROM event_counters WHERE tenant_id=$1),0) AS id
-  ) SELECT b.id,
-   EXISTS(SELECT 1 FROM events e WHERE e.tenant_id=$1 AND e.id>$2 AND e.id<=b.id
+		return tx.QueryRow(ctx, `SELECT
+   EXISTS(SELECT 1 FROM events e WHERE e.tenant_id=$1 AND e.id>$2 AND e.id<=$3
     AND e.type IN ('harness.control_requested','harness.pause_requested','harness.pause_interrupt_requested','harness.pause_stop_requested','harness.pause_level_changed','harness.resume_requested','harness.tier_requested')
-    AND e.node_id=$3::uuid AND (e.after->>'session_id'=$4 OR e.after->>'id'=$4 OR e.after->'session'->>'id'=$4))
-   OR EXISTS(SELECT 1 FROM inbox_messages m WHERE m.tenant_id=$1 AND m.sent_event_id>$2 AND m.sent_event_id<=b.id
-    AND m.content_mode='durable' AND m.chat_thread_id IS NULL AND m.recipient_principal_id=$5::uuid
-    AND (m.recipient_session_id IS NULL OR m.recipient_session_id=$4::uuid))
-   FROM notification_boundary b`, p.TenantID, *after, s.ProjectID, s.ID, s.AgentPrincipalID).Scan(&through, &relevant)
+    AND e.node_id=$4::uuid AND (e.after->>'session_id'=$5 OR e.after->>'id'=$5 OR e.after->'session'->>'id'=$5))
+   OR EXISTS(SELECT 1 FROM inbox_messages m WHERE m.tenant_id=$1 AND m.sent_event_id>$2 AND m.sent_event_id<=$3
+    AND m.content_mode='durable' AND m.chat_thread_id IS NULL AND m.recipient_principal_id=$6::uuid
+    AND (m.recipient_session_id IS NULL OR m.recipient_session_id=$5::uuid))`, p.TenantID, *after, through, s.ProjectID, s.ID, s.AgentPrincipalID).Scan(&relevant)
 	})
 	return through, relevant, err
 }

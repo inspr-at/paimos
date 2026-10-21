@@ -111,7 +111,7 @@ type notificationRangeTrace struct {
 }
 
 func (tr *notificationRangeTrace) TraceQueryStart(ctx context.Context, _ *pgx.Conn, data pgx.TraceQueryStartData) context.Context {
-	if strings.Contains(data.SQL, "WITH notification_boundary") && tr.reads.Add(1) == 1 {
+	if strings.Contains(data.SQL, "EXISTS(SELECT 1 FROM events e WHERE e.tenant_id=$1 AND e.id>$2") && tr.reads.Add(1) == 1 {
 		close(tr.started)
 		select {
 		case <-tr.release:
@@ -123,9 +123,19 @@ func (tr *notificationRangeTrace) TraceQueryStart(ctx context.Context, _ *pgx.Co
 func (*notificationRangeTrace) TraceQueryEnd(context.Context, *pgx.Conn, pgx.TraceQueryEndData) {}
 
 // Risk: another session's heartbeat burst fans out into one authority/data
-// transaction per event, or coalescing loses a real control. Hold the first
-// range read while the fast observer proves the whole burst reached fan-out.
+// transaction per event, or coalescing loses a real control or includes an
+// event committed with revocation after the batch's authority check. Hold the
+// first range read while the fast observer proves the burst reached fan-out.
 func TestHarnessNotificationBurstReadsOneDurableRange(t *testing.T) {
+	for _, mode := range []string{"coalesce", "revoked_after_authorization"} {
+		t.Run(mode, func(t *testing.T) {
+			checkHarnessNotificationBurst(t, mode == "revoked_after_authorization")
+		})
+	}
+}
+
+func checkHarnessNotificationBurst(t *testing.T, revokeAfterCheck bool) {
+	t.Helper()
 	f := fixture(t)
 	lease := "notification-burst-lease-00000000000000001"
 	base := "/api/projects/" + f.project + "/harness-sessions"
@@ -210,6 +220,32 @@ func TestHarnessNotificationBurstReadsOneDurableRange(t *testing.T) {
 	for range 40 {
 		appendHint("harness.heartbeat", otherSession)
 	}
+	revokeAndHint := func() {
+		t.Helper()
+		f.tx(t, f.person, func(tx pgx.Tx) error {
+			if _, err := tx.Exec(ctx, `UPDATE agent_keys SET revoked_at=clock_timestamp() WHERE id=$1`, f.agent.AuthKeyID); err != nil {
+				return err
+			}
+			_, err := events.Append(ctx, tx, f.person, events.Change{NodeID: &f.project, Type: "harness.control_requested", After: map[string]any{"session_id": id}})
+			return err
+		})
+		if n, err := observer.WaitForNotification(ctx); err != nil || db.IsResync(n) {
+			t.Fatalf("fast observer missed revocation commit: %v %v", n, err)
+		}
+	}
+	if revokeAfterCheck {
+		// The first key/proof check has finished, but its data statement has
+		// not started. The new control and revocation commit together here.
+		revokeAndHint()
+		release()
+		if wake() || scanner.Err() != nil {
+			t.Fatalf("post-check revocation event escaped the batch boundary: %v", scanner.Err())
+		}
+		if reads := trace.reads.Load(); reads != 1 {
+			t.Fatalf("revoked stream read another batch: %d", reads)
+		}
+		return
+	}
 	appendHint("harness.control_requested", id)
 	release()
 	if !wake() {
@@ -217,13 +253,7 @@ func TestHarnessNotificationBurstReadsOneDurableRange(t *testing.T) {
 	}
 	// The last old hint can be represented by an overflow resync. It may
 	// cause one more authorized read/wake, never one per old event.
-	f.tx(t, f.person, func(tx pgx.Tx) error {
-		if _, err := tx.Exec(ctx, `UPDATE agent_keys SET revoked_at=clock_timestamp() WHERE id=$1`, f.agent.AuthKeyID); err != nil {
-			return err
-		}
-		_, err := events.Append(ctx, tx, f.person, events.Change{NodeID: &f.project, Type: "harness.control_requested", After: map[string]any{"session_id": id}})
-		return err
-	})
+	revokeAndHint()
 	for wake() {
 	}
 	if scanner.Err() != nil {
