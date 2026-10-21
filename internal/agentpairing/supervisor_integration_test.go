@@ -133,12 +133,14 @@ func (a *pairingVerificationAdapter) Probe(_ context.Context, key string) bool {
 }
 func (a *pairingVerificationAdapter) Start(_ context.Context, r agentd.StartRequest, observe func(agentd.AdapterEvent)) (agentd.Process, error) {
 	// Independently enforce the strict adapter boundary. Preparation replaces
-	// transport negotiation with authorized content, and routing fills AccountID;
-	// every immutable verification term must remain identical.
+	// transport negotiation with authorized content and fresh accounting. Routing
+	// fills AccountID; every immutable verification term must remain identical.
 	want := a.queued
 	want.AccountID = a.account
 	want.RunCapabilityRequired = false
 	want.UpgradeReason = ""
+	unsettled := false
+	want.ReservationsSettled = &unsettled
 	if r.Run.AccountID == "" || !reflect.DeepEqual(r.Run, want) || r.AccountKey != a.key ||
 		r.Run.Purpose != agentd.VerificationPurpose || r.Run.VerificationTask != agentd.VerificationTask ||
 		r.Run.MaxDurationSeconds == nil || *r.Run.MaxDurationSeconds != 60 || r.Run.VerificationPolicy != "read_only" ||
