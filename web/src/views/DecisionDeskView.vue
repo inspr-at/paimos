@@ -116,7 +116,7 @@ let capabilityGeneration = 0
 let currentRead: DeskRead | undefined
 let hydratedProjection: DeskProjection | undefined, hydration: Promise<void> | undefined
 const lastGoodAt = ref<number | null>(null), hydrationFailures = ref(0), hydrationFailedSince = ref<number | null>(null)
-// AEON-1631: good rows kept from this visit while a later read missed a major source, and the automatic retries' phase.
+// AEON-1631: good rows kept from this visit while a later read missed the canonical desk, and the automatic retries' phase.
 const stale = ref(false), retryPhase = ref<DeskRetryPhase>('idle')
 const linkError = ref(''), revoked = ref(new Set<string>()), settledSteps = ref(new Set<string>()), pendingSteps = ref(new Set<string>())
 const ruleEdit = ref<{ item: DeskItem; draft: DoctrineInboxItem; source: DoctrineSource; file: DoctrineFile; rule: DoctrineRule; owner: string }>()
