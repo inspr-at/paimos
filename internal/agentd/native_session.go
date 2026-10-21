@@ -965,6 +965,7 @@ func (e *nativeOwned) save(state string) error {
 	request := NativeSessionStartRequest{RequestID: e.local.Intent.RequestID, ProjectID: e.grant.ExpectedBinding.ProjectID, Profile: "native", Role: "coordinator", Harness: Claude, Cwd: e.local.Cwd}
 	record := leadRecord{Version: leadRecordSchemaVersion, Pickup: agentsetup.LeadPickup{Demand: agentsetup.LeadDemand{ID: e.local.Intent.RequestID, ProjectID: e.grant.ExpectedBinding.ProjectID, OwnerID: e.owner.OwnerPersonID}, DaemonID: e.host.s.daemonID, DaemonGeneration: e.host.s.generation, LedgerGeneration: e.host.s.ledgerBinding.Generation, AccountID: e.local.Intent.AccountID}, Group: e.group, Attempted: e.attempted, Ownership: e.ownership, Native: &nativeLeadRecord{Request: request, SessionID: e.grant.ExpectedBinding.HarnessSessionID}}
 	if e.transition != nil {
+		record.MinorVersion = 1 // Additive transition metadata within native major 2.
 		record.Native.Transition = &e.transition.record
 	}
 	if state == "exit_confirmed" {
