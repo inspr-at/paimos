@@ -197,3 +197,46 @@ test('AEON-1117 native Node consumers share the browser event transport', async 
     else Reflect.deleteProperty(globalThis, 'EventSource')
   }
 })
+
+// Risk: opening the shared stream invalidates the first read, then a batched
+// retry leaves the page without its initial snapshot until the timer advances.
+test('AEON-1117 a stream opening immediately replaces an invalidated initial read', async t => {
+  const { createSharedRequests } = await import('../src/lib/sharedRequests.ts')
+  const originals = new Map(['EventSource', 'document', 'window', 'navigator'].map(name => [name, Object.getOwnPropertyDescriptor(globalThis, name)]))
+  const sources: Source[] = []
+  class Source extends EventTarget {
+    onopen: (() => void) | null = null
+    constructor() { super(); sources.push(this) }
+    close() {}
+  }
+  for (const [name, value] of Object.entries({ EventSource: Source, document: Object.assign(new EventTarget(), { visibilityState: 'visible' }), window: new EventTarget(), navigator: { onLine: true } })) {
+    Object.defineProperty(globalThis, name, { configurable: true, value })
+  }
+  t.mock.timers.enable({ apis: ['setTimeout', 'setInterval'] })
+  let release!: () => void, started!: () => void
+  const held = new Promise<void>(resolve => { release = resolve })
+  const began = new Promise<void>(resolve => { started = resolve })
+  let generation = 0, reads = 0
+  const kept: number[] = []
+  const shared = createSharedRequests(async () => {
+    const turn = generation, value = ++reads
+    if (value === 1) { started(); await held }
+    if (turn === generation) kept.push(value)
+  }, { events: ['queue.added'], invalidate: () => { generation++ } })
+  try {
+    shared.watch('project')
+    await began
+    sources[0]!.onopen!()
+    release()
+    // Drain the read and its catch-up without advancing the injected timers.
+    await new Promise<void>(resolve => setImmediate(resolve))
+    assert.equal(reads, 2)
+    assert.deepEqual(kept, [2])
+  } finally {
+    release(); shared.stop()
+    for (const [name, descriptor] of originals) {
+      if (descriptor) Object.defineProperty(globalThis, name, descriptor)
+      else Reflect.deleteProperty(globalThis, name)
+    }
+  }
+})

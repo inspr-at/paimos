@@ -83,6 +83,13 @@ export function createSharedRequests(read: (key: string) => Promise<unknown> | v
     for (const [key, entry] of entries) {
       if (type && !ACCESS_EVENTS.includes(type) && options.relevant && !options.relevant(key, type, data)) continue
       options.invalidate(key)
+      // Opening/recovering a transport fences the initial read too. Reconcile
+      // immediately so that read cannot leave the first snapshot behind a timer.
+      if (!type) {
+        clearTimeout(entry.timer); entry.timer = undefined
+        entry.poller.tick(true)
+        continue
+      }
       // A fixed window cannot be postponed indefinitely by a busy stream.
       entry.timer ??= setTimeout(() => { entry.timer = undefined; entry.poller.tick(true) }, REFRESH_BATCH_MS)
     }
