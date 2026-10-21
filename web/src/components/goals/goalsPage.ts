@@ -13,8 +13,13 @@
 // choose and changes nothing. Their first read waits for those preferences, so a
 // remembered group never shows the other list first. A switch replaces the rows;
 // the frame (status note, header) stays, and a read for the other group never lands.
+// AEON-1618: people create, edit and delete goals and link work to them; the page
+// holds the New goal / Edit goal sheet (the toolbar opens it, GoalsView draws it)
+// and who may do so, by the rule for creating a node in that project.
 import { computed, onScopeDispose, reactive, ref, shallowRef, watch, type Ref } from 'vue'
 import { useSession } from '../../stores/session'
+import { useProjects } from '../../stores/projects'
+import { can } from '../../lib/authz'
 import { scopeOwner } from '../../lib/identityScope'
 import { usePreference } from '../../lib/preferences'
 import { usePoller } from '../../lib/usePolledData'
@@ -245,8 +250,21 @@ export function useGoalsPage(options: { term: Ref<string>; active: () => boolean
   const counts = computed<Record<StateFilter, number>>(() => ({ all: totals.value.moving + totals.value.queued + totals.value.paused + totals.value.done, ...totals.value }))
   const loaded = computed(() => list.value !== null)
 
+  // ---------- People's writes (AEON-1618) ----------
+  const projects = useProjects()
+  const workspaceWrite = computed(() => can('nodes.write'))
+  // Where a person may create a goal: the projects they may write, and the workspace.
+  const writableProjects = computed(() => projects.projects.filter(project => !project.archived && (workspaceWrite.value || can('nodes.write', project.id))))
+  const canCreate = computed(() => group.value === 'goals' && (workspaceWrite.value || writableProjects.value.length > 0))
+  // Releases and epics are edited where they live; a goal by the rule for its project.
+  const canEdit = (goal: Goal) => goal.kind === 'goal' && can('nodes.write', goal.project_id ?? undefined)
+  const sheet = shallowRef<{ goal: Goal | null } | null>(null)
+  function openSheet(goal: Goal | null = null) { sheet.value = { goal } }
+  function closeSheet() { sheet.value = null }
+
   // Another person or workspace starts from nothing: no list, no open goals, no series.
   watch(owner, () => {
+    sheet.value = null
     turn++; controller?.abort(); retireSeries(); retirePagination()
     list.value = null; error.value = ''; reading.value = false; replacing.value = false; updatedAt.value = null
     open.clear(); charts.clear(); folds.clear(); series.clear(); filter.value = 'all'; chosenGroup.value = null
@@ -261,6 +279,7 @@ export function useGoalsPage(options: { term: Ref<string>; active: () => boolean
     filter, sort, dir, hideDone, setHideDone, range, setRange, setSort, list, goals, hiddenByGroups, error, reading, replacing, loaded, loadingMore, loadMore, read,
     live, updatedAt, statusNote, etaLastSetAt,
     open, charts, folds, isOpen, allOpen, toggle, toggleAll, toggleFold, toggleChart, searchOpens, want, seriesFor, counts, totals, totalsPartial, stop,
+    workspaceWrite, writableProjects, canCreate, canEdit, sheet, openSheet, closeSheet,
   }
 }
 export type GoalsPage = ReturnType<typeof useGoalsPage>

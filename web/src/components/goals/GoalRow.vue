@@ -12,6 +12,8 @@
 // AEON-1395: an epic uses the same anatomy with the epic icon; its progress is the
 // computed leaf-hours bar (no chart, no pen), "what's missing" lists its failing
 // entry checks, and its counts and folds keep their words together (NBSP).
+// AEON-1618: for people who may edit the goal, its opened panel ends in a "Link
+// work" text button, and each linked item has its own ⋯ (Unlink from goal).
 import { computed } from 'vue'
 import { RouterLink } from 'vue-router'
 import AppIcon from '../AppIcon.vue'
@@ -25,8 +27,9 @@ import { doneToday, hoursLeftLine, hoursLeftText, itemGroups, itemMatches, nbsp,
 import { averageRate, projectionText } from '../../lib/goalRate'
 import type { LiveAgent } from '../../lib/liveAgents'
 
-const props = defineProps<{ goal: Goal; page: GoalsPage; now: number; agents: ReadonlyMap<string, LiveAgent>; term: string; menuOpen: boolean; wideItems?: boolean }>()
-const emit = defineEmits<{ menu: [anchor: HTMLElement] }>()
+const props = defineProps<{ goal: Goal; page: GoalsPage; now: number; agents: ReadonlyMap<string, LiveAgent>; term: string; menuOpen: boolean; wideItems?: boolean; editable?: boolean; itemMenu?: string | null }>()
+const emit = defineEmits<{ menu: [anchor: HTMLElement]; itemMenu: [item: GoalOutcome, anchor: HTMLElement]; link: [anchor: HTMLElement] }>()
+const linkable = computed(() => !!props.editable && props.goal.kind === 'goal')
 
 const open = computed(() => props.page.isOpen(props.goal))
 // A goal the server could not expand has no state counts. Zero would say the work is empty.
@@ -121,23 +124,26 @@ const deskLink = computed(() => props.goal.waits.question_ids[0] ? { path: '/dec
         </div>
         <p v-if="goal.expansion !== 'full'" class="too-large">This goal has too many items to list here.</p>
         <ul class="items">
-          <GoalItem v-for="item in [...groups.moving, ...queuedFirst]" :key="item.id" :item="item" :goal-id="goal.id" :agents="agentsOf(item.session_ids)" :project="project" :now="now" :wide="wideItems" :epic="epic" />
+          <GoalItem v-for="item in [...groups.moving, ...queuedFirst]" :key="item.id" :item="item" :goal-id="goal.id" :agents="agentsOf(item.session_ids)" :project="project" :now="now" :wide="wideItems" :epic="epic" :editable="editable" :menu-open="itemMenu === item.id" @menu="anchor => emit('itemMenu', item, anchor)" />
           <li v-if="queuedMore" class="fold-line">
             <button type="button" class="fold-btn" :aria-expanded="!!folds.queued" data-nav @click="page.toggleFold(goal.id, 'queued')">
               <span class="f-ic"><AppIcon name="chevron-right" :size="12" /></span><b>{{ queuedMore }}</b>{{ sp }}more{{ sp }}queued<span class="act"><span :class="{ off: folds.queued }">·{{ sp }}show</span><span :class="{ off: !folds.queued }">·{{ sp }}hide</span></span>
             </button>
           </li>
           <!-- Opening a fold shows its items below it, so the fold line never moves. -->
-          <GoalItem v-for="item in queuedRest" :key="item.id" :item="item" :goal-id="goal.id" :agents="agentsOf(item.session_ids)" :project="project" :now="now" :wide="wideItems" :epic="epic" />
-          <GoalItem v-for="item in groups.paused" :key="item.id" :item="item" :goal-id="goal.id" :agents="agentsOf(item.session_ids)" :project="project" :now="now" :wide="wideItems" :epic="epic" />
+          <GoalItem v-for="item in queuedRest" :key="item.id" :item="item" :goal-id="goal.id" :agents="agentsOf(item.session_ids)" :project="project" :now="now" :wide="wideItems" :epic="epic" :editable="editable" :menu-open="itemMenu === item.id" @menu="anchor => emit('itemMenu', item, anchor)" />
+          <GoalItem v-for="item in groups.paused" :key="item.id" :item="item" :goal-id="goal.id" :agents="agentsOf(item.session_ids)" :project="project" :now="now" :wide="wideItems" :epic="epic" :editable="editable" :menu-open="itemMenu === item.id" @menu="anchor => emit('itemMenu', item, anchor)" />
           <li v-if="groups.done.length && !filtering" class="fold-line">
             <button type="button" class="fold-btn" :aria-expanded="!!folds.done" data-nav @click="page.toggleFold(goal.id, 'done')">
               <span class="f-ic"><AppIcon name="chevron-right" :size="12" /></span><b>{{ groups.done.length }}</b>{{ sp }}done<span v-if="today" class="today">·{{ sp }}{{ today }}{{ sp }}today</span><span class="act"><span :class="{ off: folds.done }">·{{ sp }}show</span><span :class="{ off: !folds.done }">·{{ sp }}hide</span></span>
             </button>
           </li>
-          <GoalItem v-for="item in doneShown" :key="item.id" :item="item" :goal-id="goal.id" :agents="[]" :project="project" :now="now" :wide="wideItems" :epic="epic" />
+          <GoalItem v-for="item in doneShown" :key="item.id" :item="item" :goal-id="goal.id" :agents="[]" :project="project" :now="now" :wide="wideItems" :epic="epic" :editable="editable" :menu-open="itemMenu === item.id" @menu="anchor => emit('itemMenu', item, anchor)" />
           <GoalItem v-for="item in groups.handed" :key="item.id" :item="item" :goal-id="goal.id" :agents="[]" :project="project" :now="now" :wide="wideItems" :detail="handedDetail(item)" />
         </ul>
+        <div v-if="linkable" class="link-line">
+          <button type="button" class="link-work" data-nav @click="emit('link', $event.currentTarget as HTMLElement)"><span class="f-ic"><AppIcon name="plus" :size="12" /></span>Link work</button>
+        </div>
       </template>
     </div>
   </li>
@@ -215,6 +221,12 @@ const deskLink = computed(() => props.goal.waits.question_ids[0] ? { path: '/dec
 .fold-btn .act > .off { visibility: hidden; }
 .fold-btn:hover { background: var(--row-hover); color: var(--ink-2); }
 .fold-btn .f-ic svg { transition: transform .15s ease; }
+/* Link work: a text button under the items, its icon in their icon slot. */
+.link-line { display: grid; grid-template-columns: subgrid; grid-column: 1 / -1; }
+.link-work { grid-column: 3 / -3; justify-self: start; display: inline-flex; align-items: center; gap: 6px; height: 30px; padding: 0 9px 0 6px; margin-left: -6px; border: 0; border-radius: 8px; background: transparent; color: var(--teal-ink); font-size: 12.5px; font-weight: 600; }
+.link-work .f-ic { flex: none; display: inline-grid; place-items: center; width: 20px; margin-right: 2px; }
+.link-work:hover { background: var(--row-hover); }
+.link-work:focus-visible { outline: none; box-shadow: var(--focus-ring); }
 .fold-btn[aria-expanded="true"] .f-ic svg { transform: rotate(90deg); }
 
 /* Tablet and small laptops: the badge keeps only its faces; below 1200 the counts step aside. */
@@ -242,8 +254,8 @@ const deskLink = computed(() => props.goal.waits.question_ids[0] ? { path: '/dec
   .steps-head, .steps ol { display: none; }
   .phone-next { display: block; margin: 0; padding: 0 0 6px; font-size: 13.5px; line-height: 1.4; color: var(--ink-2); }
   .phone-next .lbl { color: var(--ink-3); }
-  .fold-btn { grid-column: 2 / -1; height: 44px; margin-left: -4px; font-size: 13px; }
-  .fold-btn .f-ic { width: auto; margin-right: 0; }
+  .fold-btn, .link-work { grid-column: 2 / -1; height: 44px; margin-left: -4px; font-size: 13px; }
+  .fold-btn .f-ic, .link-work .f-ic { width: auto; margin-right: 0; }
 }
 /* Touch: the agent chips keep their look and get a 44 px hit area. */
 @media (max-width: 760px), (pointer: coarse) {

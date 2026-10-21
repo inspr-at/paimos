@@ -13,11 +13,17 @@
 // their key and label at least 280 px; otherwise the label runs to the ETA.
 // AEON-1395: Group › Epics shows the open epics in the same grid and anatomy; the
 // GOAL/EPIC header label swaps inside one box, so a switch moves no header cell.
+// AEON-1618 (Tick spec v1): people create goals (New goal sheet), link work with
+// the ticket picker, unlink it from an item's ⋯, and edit or delete a goal from its
+// ⋯; each write offers Undo in its toast. The implicit outcome holding the links is
+// never named: linked work shows as the goal's own items.
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useRoute } from 'vue-router'
 import AppIcon from '../AppIcon.vue'
 import RowMenu from '../business/RowMenu.vue'
+import RelationPicker, { type PickMode } from '../work/RelationPicker.vue'
 import GoalRow from './GoalRow.vue'
+import GoalSheet from './GoalSheet.vue'
 import GoalWaiting from './GoalWaiting.vue'
 import GoalStatusNote from './GoalStatusNote.vue'
 import GoalFreshness from './GoalFreshness.vue'
@@ -27,9 +33,12 @@ import { useLiveAgents } from '../../stores/liveAgents'
 import { onAction } from '../../lib/shortcuts'
 import { toast } from '../../lib/toast'
 import { plural } from '../../lib/work'
-import { STATE_FILTERS, type Goal, type GoalSort } from '../../lib/goals'
+import { undoEvent } from '../../lib/api'
+import { deleteGoal, linkGoalWork, STATE_FILTERS, unlinkGoalWork, type Goal, type GoalOutcome, type GoalSort } from '../../lib/goals'
 import type { LiveAgent } from '../../lib/liveAgents'
 import type { RowAction } from '../../lib/rowActions'
+import type { RelatedTicket } from '../../lib/useTicket'
+import { useProjects } from '../../stores/projects'
 
 const props = defineProps<{ page: GoalsPage; term: string; now: number; hiddenGroups: boolean }>()
 const emit = defineEmits<{ clear: [] }>()
@@ -92,30 +101,101 @@ const headLabel = (key: GoalSort) => key === 'name' && epics.value ? 'Epic' : he
 const allOpen = computed(() => props.page.allOpen.value)
 
 // ---------- Row menu ----------
-const menu = ref<{ goal: Goal; anchor: HTMLElement } | null>(null)
+// A goal's ⋯, or a linked item's ⋯ (item set): Unlink from goal.
+const menu = ref<{ goal: Goal; item?: GoalOutcome; anchor: HTMLElement } | null>(null)
+// Older callers and fixtures pass a page without people's writes.
+const canEdit = (goal: Goal) => props.page.canEdit?.(goal) === true
 const menuItems = computed<RowAction[]>(() => {
   const goal = menu.value?.goal
   if (!goal) return []
+  if (menu.value?.item) return [{ id: 'unlink', label: 'Unlink from goal', icon: 'close', group: 1 }]
   const open = props.page.isOpen(goal)
   const fold: RowAction = { id: 'fold', label: open ? 'Collapse' : 'Expand', icon: open ? 'collapse' : 'expand', group: 1 }
   const copy: RowAction = { id: 'copy', label: 'Copy link', icon: 'link', group: 2 }
   // Epics have no recorded progress over time to chart.
   if (goal.kind === 'epic') return [fold, copy]
-  return [fold, { id: 'chart', label: props.page.charts.has(goal.id) ? 'Hide progress over time' : 'Show progress over time', icon: 'trending-up', group: 1, reason: goal.expansion !== 'full' ? 'This goal is too large to chart.' : undefined }, copy]
+  const people: RowAction[] = canEdit(goal) ? [
+    { id: 'link', label: 'Link work', icon: 'plus', group: 3 }, { id: 'edit', label: 'Edit goal', icon: 'edit', group: 3 },
+    { id: 'delete', label: 'Delete goal', icon: 'trash', group: 4, danger: true },
+  ] : []
+  return [fold, { id: 'chart', label: props.page.charts.has(goal.id) ? 'Hide progress over time' : 'Show progress over time', icon: 'trending-up', group: 1, reason: goal.expansion !== 'full' ? 'This goal is too large to chart.' : undefined }, copy, ...people]
 })
-function openMenu(goal: Goal, anchor: HTMLElement) { menu.value = menu.value?.goal.id === goal.id ? null : { goal, anchor } }
+function openMenu(goal: Goal, anchor: HTMLElement, item?: GoalOutcome) { menu.value = menu.value?.goal.id === goal.id && menu.value.item?.id === item?.id ? null : { goal, item, anchor } }
 function closeMenu(restore: boolean) { const at = menu.value; menu.value = null; if (restore) at?.anchor.focus() }
 async function menuAction(action: string) {
-  const goal = menu.value?.goal
+  const at = menu.value
+  const goal = at?.goal
   menu.value = null
-  if (!goal) return
-  if (action === 'fold') props.page.toggle(goal.id)
+  if (!goal || !at) return
+  if (action === 'unlink' && at.item) void unlink(goal, at.item)
+  else if (action === 'link') openPicker(goal, at.anchor)
+  else if (action === 'edit') props.page.openSheet(goal)
+  else if (action === 'delete') void remove(goal)
+  else if (action === 'fold') props.page.toggle(goal.id)
   else if (action === 'chart') props.page.toggleChart(goal.id)
   else if (action === 'copy') {
     try { await navigator.clipboard.writeText(new URL(`/?view=goals${goal.kind === 'epic' ? '&group=epics' : ''}&goal=${encodeURIComponent(goal.key)}`, location.origin).href); toast(`Copied the link to ${goal.title}`) }
     catch { toast('The link could not be copied.', { tone: 'error' }) }
   }
 }
+
+// ---------- People's writes (AEON-1618) ----------
+// Each write is bound to the goal it acted on; Undo writes the inverse for that goal.
+// The toast drops its Undo when the person changes (toast owner epoch).
+const projects = useProjects()
+const failure = (cause: unknown, fallback: string) => toast(cause instanceof Error ? cause.message : fallback, { tone: 'error' })
+const picker = ref<{ goal: Goal; anchor: HTMLElement } | null>(null)
+function openPicker(goal: Goal, anchor: HTMLElement) { picker.value = { goal, anchor } }
+function closePicker(restore: boolean) { const at = picker.value; picker.value = null; if (restore && at?.anchor.isConnected) at.anchor.focus() }
+const pickMode = computed<PickMode | null>(() => {
+  const goal = picker.value?.goal
+  if (!goal) return null
+  const linked = (goal.items ?? []).filter(item => item.linked).flatMap(item => item.keys)
+  const home = goal.project_id ? projects.byId(goal.project_id)?.routeKey ?? goal.projects.find(badge => badge.id === goal.project_id)?.key ?? null : null
+  return { label: 'Link work', linked, onlyProject: home, within: goal.project_id, submit: picked => link(goal, picked) }
+})
+async function link(goal: Goal, picked: RelatedTicket[]): Promise<string | null> {
+  const id = goal.id
+  try {
+    const result = await linkGoalWork(id, picked.map(item => item.id))
+    const added = picked.map(item => item.id).filter(item => result.node_ids.includes(item))
+    void props.page.read()
+    toast(`${added.length} linked`, { action: { label: 'Undo', run: () => { void unlinkGoalWork(id, added).then(() => props.page.read(), cause => failure(cause, 'The link could not be undone.')) } } })
+    return null
+  } catch (cause) {
+    return cause instanceof Error ? cause.message : 'The work could not be linked.'
+  }
+}
+async function unlink(goal: Goal, item: GoalOutcome) {
+  const id = goal.id, node = item.id
+  try {
+    await unlinkGoalWork(id, [node])
+    void props.page.read()
+    toast(`${item.keys[0] ?? item.label} unlinked`, { action: { label: 'Undo', run: () => { void linkGoalWork(id, [node]).then(() => props.page.read(), cause => failure(cause, 'The link could not be restored.')) } } })
+  } catch (cause) { failure(cause, 'The work could not be unlinked.') }
+}
+async function remove(goal: Goal) {
+  try {
+    const result = await deleteGoal(goal.id)
+    void props.page.read()
+    const event = result.event_id
+    toast('Goal deleted', event ? { action: { label: 'Undo', run: () => { void undoEvent(event).then(() => props.page.read(), cause => failure(cause, 'The goal could not be restored.')) } } } : {})
+  } catch (cause) { failure(cause, 'The goal could not be deleted.') }
+}
+// After New goal: the row appears where the sort puts it, opens, and Link work has focus.
+async function created(id: string) {
+  props.page.closeSheet()
+  toast('Goal created')
+  await props.page.read()
+  props.page.toggle(id, true)
+  await nextTick()
+  root.value?.querySelector<HTMLElement>(`[data-goal-id="${CSS.escape(id)}"] .link-work`)?.focus()
+}
+function saved() { props.page.closeSheet(); void props.page.read() }
+const sheetPreferred = computed(() => {
+  const only = props.page.writableProjects?.value ?? []
+  return only.length === 1 ? only[0]!.id : null
+})
 
 // ---------- Arriving from a link ----------
 // ?goal=KEY opens that goal, brings it into view and marks it until the next press.
@@ -221,7 +301,8 @@ const canClear = computed(() => filtering.value)
           <ul v-else class="goal-list" :aria-busy="page.reading.value">
             <GoalRow
               v-for="goal in goals" :key="goal.id" :class="{ arrived: arrived === goal.id }" :goal="goal" :page="page" :now="now" :agents="agents" :term="term"
-              :menu-open="menu?.goal.id === goal.id" :wide-items="wideItems" @menu="anchor => openMenu(goal, anchor)"
+              :menu-open="menu?.goal.id === goal.id && !menu.item" :item-menu="menu?.goal.id === goal.id ? menu.item?.id ?? null : null" :wide-items="wideItems" :editable="canEdit(goal)"
+              @menu="anchor => openMenu(goal, anchor)" @item-menu="(item, anchor) => openMenu(goal, anchor, item)" @link="anchor => openPicker(goal, anchor)"
             />
           </ul>
         </template>
@@ -245,7 +326,15 @@ const canClear = computed(() => filtering.value)
         <GoalFreshness :live="page.live.value" :eta-set-at="page.etaLastSetAt.value" :updated-at="page.updatedAt.value" :now="now" />
       </div>
     </template>
-    <RowMenu v-if="menu" :anchor="menu.anchor" :items="menuItems" :label="`${menu.goal.kind === 'epic' ? 'Epic' : 'Goal'} ${menu.goal.title}`" @select="menuAction" @close="closeMenu" />
+    <RowMenu v-if="menu" :anchor="menu.anchor" :items="menuItems" :label="menu.item ? `${menu.item.keys[0] ?? menu.item.label} in ${menu.goal.title}` : `${menu.goal.kind === 'epic' ? 'Epic' : 'Goal'} ${menu.goal.title}`" @select="menuAction" @close="closeMenu" />
+    <RelationPicker
+      v-if="picker && pickMode" :anchor="picker.anchor" :subject="picker.goal.title" :self-id="picker.goal.id" :project-key="pickMode.onlyProject ?? ''"
+      :related="[]" :picking="pickMode" @close="closePicker"
+    />
+    <GoalSheet
+      v-if="page.sheet?.value" :goal="page.sheet.value.goal" :projects="page.writableProjects.value" :workspace="page.workspaceWrite.value" :preferred="sheetPreferred"
+      @close="page.closeSheet()" @created="created" @saved="saved"
+    />
   </div>
 </template>
 

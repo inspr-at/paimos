@@ -16,6 +16,8 @@
 // AEON-1395 (an epic's item, a direct child): its keys are its own and its children's
 // ("+N" counts all of them), and with no agent note its live line is its latest
 // unmerged pull request ("#762 · In queue").
+// AEON-1618: a linked item (work a person linked) has its own ⋯ in the goal's last
+// column for people who may edit the goal; it has no ETA history of its own.
 import { computed } from 'vue'
 import { RouterLink } from 'vue-router'
 import AppIcon from '../AppIcon.vue'
@@ -27,7 +29,9 @@ import { nbsp, noteByline, STATE_LABEL, ticketHref, type GoalOutcome } from '../
 import { stateLabel } from '../../lib/delivery'
 import type { LiveAgent } from '../../lib/liveAgents'
 
-const props = defineProps<{ item: GoalOutcome; goalId: string; agents: LiveAgent[]; project: { title: string; routeKey: string }; now: number; detail?: string; wide?: boolean; epic?: boolean }>()
+const props = defineProps<{ item: GoalOutcome; goalId: string; agents: LiveAgent[]; project: { title: string; routeKey: string }; now: number; detail?: string; wide?: boolean; epic?: boolean; editable?: boolean; menuOpen?: boolean }>()
+const emit = defineEmits<{ menu: [anchor: HTMLElement] }>()
+const menu = computed(() => !!props.editable && !!props.item.linked)
 const done = computed(() => props.item.state === 'done' || props.item.handed_over)
 const note = computed(() => props.item.note.trim())
 // The pull request line stands in for a note that is not there.
@@ -50,7 +54,7 @@ const side = computed(() => !!props.wide && !props.item.handed_over && (!!note.v
 </script>
 
 <template>
-  <li class="item" :class="{ 'is-done': done, handed: item.handed_over, wide, 'has-side': side }" tabindex="-1" data-nav>
+  <li class="item" :class="{ 'is-done': done, handed: item.handed_over, wide, 'has-side': side, 'has-menu': menu }" tabindex="-1" data-nav :data-linked="item.linked ? 1 : undefined">
     <div v-if="item.handed_over" class="i-head">
       <span class="i-state" data-tip="Handed over"><AppIcon name="person-check" :size="15" /><span class="sr-only">Handed over</span></span>
       <span class="i-keys" />
@@ -83,7 +87,11 @@ const side = computed(() => !!props.wide && !props.item.handed_over && (!!note.v
       <nav v-if="item.keys.length" class="phone-tickets" :aria-label="`Tickets for ${item.label}`">
         <RouterLink v-for="key in item.keys" :key="key" :to="ticketHref(key)">{{ key }}</RouterLink>
       </nav>
-      <GoalEta class="i-eta" :goal-id="goalId" :outcome-id="item.id" :eta="item.eta" :passed="item.passed" :done="done" :now="now" :history="!epic" />
+      <GoalEta class="i-eta" :goal-id="goalId" :outcome-id="item.id" :eta="item.eta" :passed="item.passed" :done="done" :now="now" :history="!epic && !item.linked" />
+      <button
+        v-if="menu" type="button" class="icon-btn flat sm i-more" aria-haspopup="menu" :aria-expanded="!!menuOpen" :aria-label="`Actions for ${item.keys[0] ?? item.label}`"
+        @click="emit('menu', $event.currentTarget as HTMLElement)"
+      ><AppIcon name="more" :size="14" /></button>
     </template>
   </li>
 </template>
@@ -107,6 +115,10 @@ const side = computed(() => !!props.wide && !props.item.handed_over && (!!note.v
 .item > .i-eta { grid-column: -3 / -2; grid-row: 1; justify-self: end; margin: 0 -4px; padding: 0 4px; line-height: 20px; }
 .item > .i-eta.passed { line-height: 1.35; padding-top: 1px; padding-bottom: 1px; }
 .phone-tickets { display: none; }
+/* A linked item's ⋯ sits in the goal row's ⋯ column; like the goal's, it shows on hover or focus. */
+.item > .i-more { grid-column: -2 / -1; grid-row: 1; justify-self: end; align-self: start; margin-top: -4px; opacity: 0; }
+.item:hover > .i-more, .item:focus-within > .i-more, .i-more[aria-expanded="true"] { opacity: 1; }
+@media (hover: none) { .item > .i-more { opacity: 1; } }
 /* C · The label runs from the key to the ETA and wraps to two lines at most; the rest is its tip. */
 .i-label { display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; overflow: hidden; font-size: 13.5px; font-weight: 500; line-height: 20px; color: var(--ink); text-wrap: pretty; overflow-wrap: anywhere; }
 .is-done .i-label { color: var(--ink-2); font-weight: 400; }
@@ -163,6 +175,9 @@ const side = computed(() => !!props.wide && !props.item.handed_over && (!!note.v
   .i-badge { grid-column: 2 / -1; grid-row: 3; justify-self: start; margin-top: 4px; }
   .i-meta .i-badge :deep(.live-chip) { min-height: 28px; }
   .phone-tickets { display: flex; flex-wrap: wrap; align-items: center; grid-column: 2 / -1; grid-row: 4; gap: 0 2px; margin-top: 2px; }
+  .item.has-menu { grid-template-columns: 44px auto minmax(0, 1fr) 44px; }
+  .item.has-menu .i-label { grid-column: 2 / -2; }
+  .item > .i-more { grid-column: 4; grid-row: 1 / 3; width: 44px; height: 44px; margin: -8px 0 0; }
   .phone-tickets a { display: inline-flex; align-items: center; min-height: 44px; min-width: 44px; padding: 0 8px; border-radius: 8px; color: var(--ink-2); font-size: 13px; font-weight: 500; text-decoration: none; }
   .phone-tickets a:hover { color: var(--teal-ink); text-decoration: underline; text-underline-offset: 2px; }
   .phone-tickets a:focus-visible { outline: none; box-shadow: var(--focus-ring); }

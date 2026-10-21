@@ -4,7 +4,9 @@
 // state chips All · Moving · Queued · Paused · Done (keys 1–5) counting items over
 // every visible goal, so they add up and Hide done never changes them; Hide done (H);
 // and Expand all / Collapse all (E), both labels reserved in one box. On phones the
-// same controls live behind ⋯ (the `more` part).
+// same controls live behind ⋯ (the `more` part). AEON-1618: New goal ends the
+// toolbar for people who may set one (absent otherwise); on phones it is the
+// first row behind ⋯.
 import { computed, ref } from 'vue'
 import AppIcon from '../AppIcon.vue'
 import FloatingPanel from '../work/FloatingPanel.vue'
@@ -25,6 +27,9 @@ const countLabel = (state: StateFilter) => `${label(state)}, ${counts.value[stat
 const moreAnchor = ref<HTMLElement | null>(null)
 function closeMore(restore: boolean) { const anchor = moreAnchor.value; moreAnchor.value = null; if (restore) anchor?.focus() }
 function pick(state: StateFilter) { props.page.filter.value = state; closeMore(true) }
+// Older callers and fixtures pass a page without people's writes.
+const canCreate = computed(() => props.page.canCreate?.value === true)
+function newGoal() { moreAnchor.value = null; props.page.openSheet?.() }
 </script>
 
 <template>
@@ -46,6 +51,7 @@ function pick(state: StateFilter) { props.page.filter.value = state; closeMore(t
       <AppIcon :name="allOpen ? 'collapse-all' : 'expand-all'" :size="14" />
       <span class="lbl"><span :class="{ off: allOpen }">Expand all</span><span :class="{ off: !allOpen }">Collapse all</span></span>
     </button>
+    <button v-if="canCreate" type="button" class="btn sm new-goal" @click="newGoal"><AppIcon name="plus" :size="14" /><span>New goal</span></button>
   </template>
   <template v-else>
     <button
@@ -54,6 +60,10 @@ function pick(state: StateFilter) { props.page.filter.value = state; closeMore(t
     ><AppIcon name="more" :size="16" /></button>
     <FloatingPanel v-if="moreAnchor" :anchor="moreAnchor" :width="300" align="end" label="Goal display" @close="closeMore">
       <div class="more-menu" role="menu" aria-label="Goal display">
+        <template v-if="canCreate">
+          <button type="button" role="menuitem" class="menu-item" @click="newGoal"><AppIcon name="plus" :size="14" /><span>New goal</span></button>
+          <div class="menu-sep" />
+        </template>
         <p v-if="partial" class="partial-note" role="status">Counts omit oversized {{ noun }}.</p>
         <button v-for="state in STATE_FILTERS" :key="state" type="button" role="menuitemradio" class="menu-item" :aria-checked="page.filter.value === state" @click="pick(state)">
           <AppIcon v-if="state === 'all'" name="layers" :size="14" /><GoalStateIcon v-else :state="state" />
@@ -86,6 +96,7 @@ function pick(state: StateFilter) { props.page.filter.value = state; closeMore(t
 .toggle-btn { flex: none; }
 .toggle-btn[aria-pressed="true"] { background: var(--seg-on); color: var(--teal-ink); box-shadow: 0 0 0 1px var(--chip-teal-line); }
 .btn.sm.expand-btn { flex: none; gap: 4px; padding: 0 9px; color: var(--ink-2); }
+.btn.sm.new-goal { flex: none; gap: 5px; padding: 0 10px 0 8px; white-space: nowrap; }
 /* Both labels share one box, so the button never changes width. */
 .lbl { display: inline-grid; }
 .lbl > span { grid-area: 1 / 1; }
@@ -93,7 +104,7 @@ function pick(state: StateFilter) { props.page.filter.value = state; closeMore(t
 .more-btn { display: none; width: 44px; height: 44px; }
 /* Phones: state chips, Hide done and Expand all live behind ⋯ (and the 44 px Expand all row). */
 @media (max-width: 760px) {
-  .chips-sep, .state-seg, .toggle-btn, .expand-btn { display: none; }
+  .chips-sep, .state-seg, .toggle-btn, .expand-btn, .new-goal { display: none; }
   .more-btn { display: inline-grid; place-items: center; }
 }
 .more-menu { display: grid; padding: 6px; }
