@@ -8896,14 +8896,6 @@
     ,
     {"kind":"browser","file":"tests/desk-empty.spec.ts","name":"AEON-1477 refresh failures keep the items and hint geometry 390 light","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
-    {"kind":"browser","file":"tests/desk-empty.spec.ts","name":"AEON-1631 a desk that did not answer never looks clear and fills itself 1440 dark","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
-    ,
-    {"kind":"browser","file":"tests/desk-empty.spec.ts","name":"AEON-1631 a desk that did not answer never looks clear and fills itself 1440 light","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
-    ,
-    {"kind":"browser","file":"tests/desk-empty.spec.ts","name":"AEON-1631 a desk that did not answer never looks clear and fills itself 390 dark","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
-    ,
-    {"kind":"browser","file":"tests/desk-empty.spec.ts","name":"AEON-1631 a desk that did not answer never looks clear and fills itself 390 light","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
-    ,
     {"kind":"browser","file":"tests/desk-empty.spec.ts","name":"touch › AEON-1477 on touch Try again shows with the hint on a 44 px target","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
     {"kind":"browser","file":"tests/developer-settings.spec.ts","name":"retired Flow bookmarks open tickets and saved opt-ins cannot revive it","config":"playwright.ui.config.ts","project":"","tags":[],"tier":"GATED-FULL"}
