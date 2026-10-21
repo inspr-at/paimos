@@ -3,7 +3,7 @@
   "exceptions": [
     {
       "file": "1410_node_grants.sql",
-      "sha256": "854eecba6c4ea7d98180de0e54c3701013279cf58f908c3a617ea29615b0e845",
+      "sha256": "a46f7152072e06edcad7ef45f52d9419d236de0fa7b6ff308c00eadc921b52c9",
       "ticket": "AEON-1582",
       "reason": "Additive individual-node read visibility through the existing principal entry signatures. Replacements preserve project visibility, account-use admission, canonical principal IDs and creator/person ceilings; ALTER POLICY widens only USING and retains the original WITH CHECK. No tables, columns, constraints or data change. CREATE OR REPLACE and ALTER POLICY are outside the expand-safe allowlist. This exact-byte draft remains subject to coordinator migration review and previous-binary compatibility before merge or release; it grants no release approval."
     }
