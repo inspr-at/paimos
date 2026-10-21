@@ -69,7 +69,11 @@ const results = computed<TicketResult[]>(() => {
   return found.filter(result => result.key !== props.subject && (!only || result.projectKey === only)).slice(0, 8)
 })
 // Tickets already linked this way are shown, marked, and not linked twice.
+// A one-to-one link disables its row; Enter still states the refusal.
+// Pick mode leaves the row enabled: choosing it states the same refusal and
+// does not mark it again. aria-disabled would make that click unreachable.
 const linkedKeys = computed(() => props.picking ? new Set(props.picking.linked) : new Set(props.related.filter(entry => entry.label === choice.value.label && entry.node).map(entry => entry.node!.key)))
+const linkedQuiet = (key: string) => !multi.value && linkedKeys.value.has(key)
 watch(results, () => { if (active.value >= results.value.length) active.value = 0 })
 
 async function search() {
@@ -220,7 +224,7 @@ let lastChoice = 'relates'
           <div v-for="(result, index) in results" :key="result.id" class="option-row" role="presentation">
             <div
               :id="`relation-option-${index}`" role="option" class="option" :data-active="index === active || undefined"
-              :aria-selected="multi ? pickedKeys.has(result.key) : index === active" :aria-disabled="linkedKeys.has(result.key) || undefined"
+              :aria-selected="multi ? pickedKeys.has(result.key) : index === active" :aria-disabled="linkedQuiet(result.key) || undefined"
               :tabindex="index === active ? 0 : -1" @keydown.enter.prevent="choose(result)"
               @pointermove="active = index" @click="choose(result)"
             >

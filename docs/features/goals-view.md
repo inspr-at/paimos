@@ -161,10 +161,12 @@ the first row behind ⋯. Without that right the button is absent.
   and shown, before it opens with **Link work** focused. The toast says "Goal created".
 - **Link work** sits at the bottom of an opened goal and in its ⋯. It opens the
   ticket picker in its multi-select mode: search tickets and epics (a project goal
-  searches its project), mark several, "Link {n}" (⌘↵ or Ctrl+↵). On a desktop the
-  button stays above the results and a refusal. On a phone the results scroll and
-  the button stays pinned. The toast says "{n} linked" and Undo removes only the
-  ids this call added; a link that changes nothing has no Undo. Linked items show as the goal's own items; progress,
+  searches its project), mark several, "Link {n}" (⌘↵ or Ctrl+↵). A ticket already
+  on the goal stays marked; choosing it says so and does not change Link {n}.
+  On a desktop the button stays above the results and a refusal. On a phone the
+  results scroll and the button stays pinned. The toast says "{n} linked" and Undo
+  removes only the ids this call added; a link that changes nothing has no Undo.
+  Linked items show as the goal's own items; progress,
   Moving · Queued · Done and Lands roll up as for every item.
 - **Unlink from goal** is in a linked item's ⋯, with Undo. **Edit goal** reopens
   the sheet filled in; **Delete goal** offers Undo ("Goal deleted") and never touches

@@ -336,6 +336,9 @@ async function createGoal(page: Page, phone = false) {
 }
 
 test('Link stays put across search results and a refusal, on a desktop and a phone', async ({ page }) => {
+  // Desktop and phone in one case. The timeout only bounds a hang; 30s was the
+  // whole budget once a disabled row made the refusal click wait forever.
+  test.setTimeout(60_000)
   for (const [width, height] of [[1440, 900], [390, 844]] as const) {
     await page.setViewportSize({ width, height })
     const w = world()
@@ -367,12 +370,17 @@ test('Link stays put across search results and a refusal, on a desktop and a pho
     const again = page.locator('.picker.multi')
     await expect(again).toBeVisible()
     await again.locator('input').fill('PHAROS-11')
-    await expect(again.locator('.option', { hasText: 'PHAROS-11' })).toBeVisible()
+    const linked = again.locator('.option', { hasText: 'PHAROS-11' })
+    await expect(linked).toBeVisible()
+    // Pick mode keeps the row enabled so a click can say it is already linked.
+    // aria-disabled would leave this click waiting until the test times out.
+    await expect(linked).not.toHaveAttribute('aria-disabled', 'true')
     const held = await controlStability(page, { link: again.getByRole('button', { name: 'Link 0' }) })
     await held.check(async () => {
-      await again.locator('.option', { hasText: 'PHAROS-11' }).click()
-      await expect(again.locator('.refusal')).toBeVisible()
+      await linked.click()
+      await expect(again.locator('.refusal')).toContainText('PHAROS-11 is already linked to this goal.')
     })
+    expect(w.writes.filter(write => write.path.endsWith('/work'))).toHaveLength(1)
     held.done()
     await page.keyboard.press('Escape')
   }
