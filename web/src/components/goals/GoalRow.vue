@@ -303,7 +303,7 @@ const deskLink = computed(() => props.goal.waits.question_ids[0] ? { path: '/dec
   .goal-row > .goal-eta { grid-column: 3; grid-row: 1; align-self: start; margin: -4px -6px; padding: 4px 6px; }
   .goal-row > :deep(.goal-progress) { grid-column: 2 / 3; grid-row: 2; align-self: start; }
   /* The goal's ⋯ under its Lands: a 44 px target that overhangs the progress line, not the next row. */
-  .goal-row > .row-more { grid-column: 3; grid-row: 2; align-self: center; justify-self: end; width: 44px; height: 44px; margin: -14px -10px -14px 0; opacity: 1; }
+  .goal-row > .row-more { grid-column: 3; grid-row: 2; align-self: center; justify-self: end; width: 44px; height: 44px; margin: -14px -8px -14px 0; opacity: 1; }
   .goal-row::before { inset: 3px -6px; }
   .goal[data-open="1"]::after { inset: 3px -6px 4px -6px; }
   .goal-body { padding: 0 0 8px; }
