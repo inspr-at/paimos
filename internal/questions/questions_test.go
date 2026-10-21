@@ -24,7 +24,6 @@ import (
 	"github.com/inspr-at/paimos/internal/dbtest"
 	"github.com/inspr-at/paimos/internal/httpapi"
 	"github.com/inspr-at/paimos/internal/knowledge"
-	"github.com/inspr-at/paimos/internal/nodes"
 	"github.com/inspr-at/paimos/internal/tenant"
 	"github.com/jackc/pgx/v5"
 )
@@ -106,7 +105,10 @@ func newFixture(t *testing.T) *fixture {
 	f.m = New(f.d.App)
 	f.mux = http.NewServeMux()
 	f.m.Mount(f.mux)
-	nodes.New(f.d.App, nodes.SQLWriter{}).Mount(f.mux)
+	if NodeRouteMount == nil {
+		t.Fatal("node routes were not installed")
+	}
+	NodeRouteMount(f.d.App, f.mux)
 	knowledge.New(f.d.App).Mount(f.mux)
 	am, err := auth.New(auth.Config{Env: "dev", SessionKey: bytes.Repeat([]byte{3}, 32)}, f.d.App)
 	if err != nil {

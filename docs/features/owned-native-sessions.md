@@ -54,21 +54,16 @@ share the provider event fence, without weakening the journal's single-flusher
 check. Recovery also retains the account profile's revision separately from
 the runtime binding revision.
 
-**Remaining acceptance:** the production local attach/person-proof bridge is
-not implemented. `ServeLocal` can mount the existing native adapter only when
-an independent `LocalAuthority` and projector are installed. Its wrapper
-requires the protected bearer, current kernel peer and a verified person; it
-never derives that person from the paired agent or socket possession. The
-negative socket test proves those independent boundaries. The released
-composition installs no such person verifier. Native attach/renew/detach,
-PTY input/resize and local viewer grants remain unavailable. The existing
-CLI transports carry the socket proof and viewer/controller selectors; they
-have no separately verified person bootstrap, and the shared public projection
-suppresses take capability for CLI reads too. Completing that bridge requires
-coordinated changes to `internal/cli/native_attach.go`,
-`internal/cli/native_take.go`, the native attach/take transports and public
-projection/identity integration, beyond this continuation's granted write set.
-No person authority, watch consent or qualification is invented to bypass it.
+**Remaining acceptance:** AEON-1626 now installs an independent local person
+verifier and explicit CLI person-session transport; see
+[Local native person authentication](local-native-person-proof.md). Socket
+bearer, current kernel peer and configured-instance person verification remain
+independent. Server interaction grants and core claims remain the mutation
+authority; mode-change audit events are not duplicated. The production host
+still lacks qualified local PTY input/resize, stream/read and export-consent
+integration. Its qualification flags remain closed. Interactive attach/take
+acceptance therefore remains incomplete; the new fake-host socket scenario
+proves the person/control bootstrap, not provider or terminal qualification.
 
 Native input retains the explicit chat-disabled gate. Shared live snapshots
 omit terminal URLs and account quota; quota remains owner-only on separately
