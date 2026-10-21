@@ -20,6 +20,12 @@ it('AEON-1632: no web source builds a /work/<id> link', () => {
   scan(new URL('../src/', import.meta.url))
   // The scan reached the sources it guards.
   expect(scanned).toBeGreaterThan(100)
-  expect(readFileSync(new URL('../src/components/agents/DecisionDeskMemo.vue', import.meta.url), 'utf8')).toContain('<TicketPeekLink')
+  const memo = readFileSync(new URL('../src/components/agents/DecisionDeskMemo.vue', import.meta.url), 'utf8')
+  expect(memo).toContain('<TicketPeekLink')
   expect(hits).toEqual([])
+  // The Open tip names the new-tab modifier in words. A command glyph there
+  // fails text-glyphs (CI on d1c71583, DecisionDeskMemo.vue:930).
+  const open = memo.split('\n').find(line => line.includes('data-testid="desk-ticket-open"'))
+  expect(open).toContain("${mac ? 'Command' : 'Ctrl'}-click for a new tab")
+  expect(open).not.toMatch(/\u2318/u)
 })
