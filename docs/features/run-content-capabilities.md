@@ -66,3 +66,20 @@ person, computer and generation, historical unbound runs, metadata-only legacy
 reads, Prepare request order, per-run tools, inherited environment scrubbing and
 paired stop/yield after person revocation. Migration 1414 is an additive nullable
 expansion; capability digests are classified as secrets in the DSAR inventory.
+
+## Validation handoff
+
+The focused capability, Prepare/tools/chat/SSE, child environment and paired
+revocation safety regressions pass. The real HTTP supervisor verification test
+also passes with the authoritative unsettled-accounting field returned during
+Prepare. Twelve full affected packages passed, including authentication,
+authorization, runs/accounts, harnesses, database/DSAR and reporter contracts.
+The redirect regression fails when capability redirect protection is removed
+and passes with it restored.
+
+Full daemon, pairing and daemon-command suites on the secondary Linux runner
+still encounter the AEON-1627 shell/executable fixture limitations, including
+missing zsh, `/bin/bash` and `/bin/true`. The final static pre-filter passed
+42 checks; `test-tiers` and `web-shard-spec-tests` timed out. An earlier snapshot
+passed all 44 checks. Final hosted validation remains pending; these failures
+were not skipped or reported as green.
