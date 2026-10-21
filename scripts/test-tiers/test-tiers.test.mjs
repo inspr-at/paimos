@@ -2610,20 +2610,37 @@ test('committed allowlists preserve classifications, helpers and reviewed AEON-5
   assert.ok([...go.tests,...web.tests].filter(row=>row.tags?.includes('delete-candidate')).every(row=>row.tier==='GATED-FULL'||row.tier==='NIGHTLY'))
 })
 
-// The 6000-node visibility list compares wall-clock time with a fixed budget.
-// Parallel shard load made the fastest of three requests 1.46s against the
-// 600ms CI limit. It belongs with the other list budgets, on the timing lane.
-test('AEON-1405 visibility list budget runs on the timing lane and keeps its CI limit',()=>{
+// The 6000-node visibility list used to compare wall-clock time with a fixed
+// 600ms budget. Parallel shard load, then loaded hosted runners, made the
+// fastest sample 1.37s–8.66s on PRs that never touch node listing (AEON-1405,
+// AEON-1601). The PR timing lane keeps a same-run ratio plus a hard ceiling.
+// The strict 600ms budget stays on the timing lane as NIGHTLY, so
+// `run go --full --timing` skips it and `run go --all --timing` runs it.
+test('AEON-1601 visibility list ratio stays on the timing lane and the 600ms budget is nightly',()=>{
   const manifest=JSON.parse(readFileSync(new URL('../ci/go-test-tiers.json',import.meta.url)))
   const name='TestList6000WithProjectVisibility'
+  const nightlyName='TestList6000VisibilityNightlyAbsoluteBudget'
   const row=manifest.tests.find(row=>row.package==='internal/nodes'&&row.name===name)
+  const nightly=manifest.tests.find(row=>row.package==='internal/nodes'&&row.name===nightlyName)
   assert.equal(row?.tier,'GATED-FULL')
   assert.equal(row?.lane,'timing')
+  assert.equal(nightly?.tier,'NIGHTLY')
+  assert.equal(nightly?.lane,'timing')
+  assert.equal(manifest.postGateCases.includes(`internal/nodes:${nightlyName}`),true)
   const parallel=manifest.tests.filter(row=>row.kind==='go'&&row.lane!=='timing')
   const timing=manifest.tests.filter(row=>row.kind==='go'&&row.lane==='timing')
   assert.equal(parallel.some(row=>row.package==='internal/nodes'&&row.name===name),false)
+  assert.equal(parallel.some(row=>row.package==='internal/nodes'&&row.name===nightlyName),false)
   assert.equal(timing.filter(row=>row.package==='internal/nodes'&&row.name===name).length,1)
+  assert.equal(timing.filter(row=>row.package==='internal/nodes'&&row.name===nightlyName).length,1)
+  const full=select(manifest.tests,{event:'pull_request',forceFull:true}).tests
+  assert.equal(full.some(row=>row.name===name),true)
+  assert.equal(full.some(row=>row.name===nightlyName),false)
+  const catalogue=select(manifest.tests,{event:'schedule'}).tests
+  assert.equal(catalogue.some(row=>row.name===nightlyName&&row.lane==='timing'),true)
   const source=readFileSync(new URL('../../internal/nodes/visibility_perf_test.go',import.meta.url),'utf8')
+  assert.match(source,/visibilityListRatio = 12/)
+  assert.match(source,/visibilityListCeiling = 15 \* time\.Second/)
   assert.match(source,/limit = 600 \* time\.Millisecond/)
   assert.match(source,/if fastest >= limit \{/)
 })
