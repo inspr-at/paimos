@@ -69,16 +69,21 @@ SQL transition test separately proves its existing audit/ownership semantics.
 ## Validation
 
 The guarded runner refused the primary host as YELLOW and used its approved
-secondary test lane.
-The protected-socket scenario passed on `81c2e3443`; targeted race checks of
-that scenario, the native CLI commands, the unchanged independent-person
-socket anchor and both SQL control scenarios passed on `5c5e2323f`.
-The full native attach, PTY, interaction and public-module packages passed
-with `-race -count=1` on `90f3e77fe`. This includes the PTY socket's person,
-viewer and generation regression. Removing just the independent person-cookie
-forwarding on the isolated negative-control branch (`4a49b5d8a`) made the
-protected-socket scenario fail at its initial attach with `grant_missing`.
-That negative change is absent from the work branch.
+secondary test lane. The final full native attach and PTY packages passed with
+`-race -count=1` on `5744d213c`, including proof-value redaction, current local
+daemon/generation fencing and PTY person/viewer/generation correlation.
+The full interaction, public module and reporter-contract packages passed with
+`-race -count=1` on `0a346f921`. After enforcing login-session provenance,
+targeted race checks passed on `ff79fed35` for the socket bootstrap, native CLI
+commands, unchanged independent-person socket anchor, final controller-admission
+SQL barrier test, both core SQL control scenarios and native command-composition
+regressions. These cover seven packages; the public module also compiled in
+that filtered run, with no selected cases.
+
+Removing just the independent person-cookie forwarding on the isolated
+negative-control branch (`4a49b5d8a`) made the protected-socket scenario fail
+at its initial attach with `grant_missing`. That negative change is absent
+from the work branch.
 
 The full harness and reporter-contract packages passed on `e34a75bd2`; the
 latter's response-schema pins remain unchanged. The full CLI run was red in
