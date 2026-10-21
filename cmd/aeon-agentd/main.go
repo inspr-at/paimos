@@ -429,7 +429,12 @@ type nativeProfilesKey struct{}
 
 // Native profile configuration is operator-owned metadata for existing
 // enrollments, not a vendor credential or a source of server consent.
-func loadNativeProfiles(path string) (*nativeprofiles.Resolver, error) {
+type nativeConfiguredProfiles struct {
+	resolver *nativeprofiles.Resolver
+	owner    string
+}
+
+func loadNativeProfiles(path string) (*nativeConfiguredProfiles, error) {
 	if !filepath.IsAbs(path) {
 		return nil, errors.New("native profile path must be absolute")
 	}
@@ -448,12 +453,22 @@ func loadNativeProfiles(path string) (*nativeprofiles.Resolver, error) {
 	if d.Decode(&c) != nil || d.Decode(&struct{}{}) != io.EOF {
 		return nil, errors.New("invalid native profile configuration")
 	}
-	return nativeprofiles.New(c)
+	resolver, err := nativeprofiles.New(c)
+	if err != nil {
+		return nil, err
+	}
+	owner := c.Accounts[0].OwnerPersonID
+	for _, account := range c.Accounts {
+		if account.OwnerPersonID != owner {
+			return nil, errors.New("native profiles must share the paired owner")
+		}
+	}
+	return &nativeConfiguredProfiles{resolver: resolver, owner: owner}, nil
 }
 func pairedNativeSessions(ctx context.Context, remote *agentd.Remote, c agentsetup.RuntimeConfig) *agentd.NativeSessionConfig {
-	profiles, ok := ctx.Value(nativeProfilesKey{}).(*nativeprofiles.Resolver)
+	profiles, ok := ctx.Value(nativeProfilesKey{}).(*nativeConfiguredProfiles)
 	if !ok {
 		return nil
 	}
-	return agentd.NativeProduction(remote, c.ComputerID, profiles, nativeintegration.Capabilities())
+	return agentd.NativeProduction(remote, c.ComputerID, profiles.owner, profiles.resolver, nativeintegration.Capabilities())
 }

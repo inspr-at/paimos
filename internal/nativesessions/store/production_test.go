@@ -200,7 +200,7 @@ func TestProductionCompositionStartsDeliversAndConfirmsExit(t *testing.T) {
 	}))
 	defer server.Close()
 	remote := agentd.NewRemote(server.URL, "fixture-runtime")
-	config := agentd.NativeProduction(remote, f.intent.ComputerID, compositionProfiles{f.intent.AccountID, root}, a.Capabilities)
+	config := agentd.NativeProduction(remote, f.intent.ComputerID, f.person.ID, compositionProfiles{f.intent.AccountID, root}, a.Capabilities)
 	provider := &compositionProvider{now: f.now, events: make(chan nativecontract.ProviderEvent, 16)}
 	config.Launcher = provider
 	api := &compositionAPI{f: f}
